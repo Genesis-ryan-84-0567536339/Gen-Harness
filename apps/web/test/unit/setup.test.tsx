@@ -16,7 +16,8 @@ import {
   validatePin,
   validatePinConfirm,
 } from '../../src/setup/validation';
-import { isReachable, mergeSteps } from '../../src/setup/stepState';
+import { isAvailable, isReachable, mergeSteps } from '../../src/setup/stepState';
+import { missingRequiredSteps } from '../../src/setup/phase2Model';
 import { SetupPage } from '../../src/setup/SetupPage';
 import { queryClient } from '../../src/lib/queryClient';
 
@@ -103,6 +104,26 @@ describe('step state', () => {
     expect(isReachable(1, s)).toBe(true);
     expect(isReachable(3, s)).toBe(true);
     expect(isReachable(4, s)).toBe(false);
+  });
+
+  it('phase 2: steps 4–7 and 12 are available; 8–11 are passable to reach 12', () => {
+    const s = stateAt(8, [1, 2, 3, 4, 5, 6, 7]);
+    s.steps.forEach((x) => (x.available = [1, 2, 3, 4, 5, 6, 7, 12].includes(x.n)));
+    const merged = mergeSteps(s);
+    expect(merged.filter((m) => m.available).map((m) => m.n)).toEqual([1, 2, 3, 4, 5, 6, 7, 12]);
+    expect(isAvailable(8, s)).toBe(false);
+    expect(isReachable(12, s)).toBe(true);
+    // A built step that is not settled blocks what comes after it.
+    const at5 = stateAt(5, [1, 2, 3, 4]);
+    expect(isReachable(5, at5)).toBe(true);
+    expect(isReachable(6, at5)).toBe(false);
+    expect(isReachable(12, at5)).toBe(false);
+  });
+
+  it('missingRequiredSteps lists what blocks PUT /setup/steps/12', () => {
+    const s = stateAt(12, [1, 2, 3, 4, 5, 6, 7], [10, 11]);
+    expect(missingRequiredSteps(s).map((m) => m.n)).toEqual([8, 9]);
+    expect(missingRequiredSteps(stateAt(12, [1, 2, 3, 4, 5, 6, 7, 8, 9], [10, 11]))).toEqual([]);
   });
 });
 
@@ -221,12 +242,14 @@ describe('<SetupPage>', () => {
       if (url.endsWith('/setup/steps/10/skip') && init.method === 'POST') {
         state = stateAt(11, [1, 2, 3, 4, 5, 6, 7, 8, 9], [10]);
       }
-      return json(200, state);
+      if (url.includes('/setup/')) return json(200, state);
+      return json(404, { status: 404, code: 'NOT_FOUND', title: 'Không tồn tại' });
     });
     renderSetup();
     await screen.findByRole('heading', { name: 'Bước 10' });
     expect(screen.getByText('Sắp có')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Tiếp tục/ })).toBeDisabled();
+    // Phase 2: steps not built yet are passable ("Sắp có"), so the owner can reach Hoàn tất.
+    expect(screen.getByRole('button', { name: /Tiếp tục/ })).toBeEnabled();
     await user.click(screen.getByRole('button', { name: 'Bỏ qua' }));
     expect(await screen.findByRole('heading', { name: 'Bước 11' })).toBeInTheDocument();
     expect(screen.getByText('bỏ qua')).toBeInTheDocument();
@@ -234,6 +257,51 @@ describe('<SetupPage>', () => {
     queryClient.setQueryData(['setup', 'state'], stateAt(12, [1, 2, 3, 4, 5, 6, 7, 8, 9, 11], [10]));
     expect(await screen.findByRole('heading', { name: 'Bước 12' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Bỏ qua' })).not.toBeInTheDocument();
+  });
+
+  it('step 12: explains the missing required steps and shows the 409 STEP_INCOMPLETE message inline', async () => {
+    const user = userEvent.setup();
+    const state = stateAt(12, [1, 2, 3, 4, 5, 6, 7], [10, 11]);
+    state.steps[7].status = 'todo';
+    const put = vi.fn();
+    mockFetch((url, init) => {
+      if (url.endsWith('/setup/steps/12') && init.method === 'PUT') {
+        put();
+        return json(409, { status: 409, code: 'STEP_INCOMPLETE', title: 'Còn bước bắt buộc chưa xong: 8, 9' });
+      }
+      if (url.includes('/setup/first-run')) return json(200, { raw_collected: 1244, classifying: 250, clean: 812, lowconf: 31, discarded: 120, run: null });
+      if (url.includes('/setup/')) return json(200, state);
+      return json(200, []);
+    });
+    renderSetup();
+    expect(await screen.findByText('Còn bước bắt buộc chưa xong: 8, 9')).toBeInTheDocument();
+    expect(await screen.findByText('1.244')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Mở Tổng quan điều hành/ }));
+    await waitFor(() => expect(put).toHaveBeenCalled());
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Còn bước bắt buộc chưa xong: 8, 9');
+  });
+
+  it('step 5: 409 STEP_INCOMPLETE shows the server message, not a generic conflict', async () => {
+    const user = userEvent.setup();
+    const state = stateAt(5, [1, 2, 3, 4]);
+    mockFetch((url, init) => {
+      if (url.endsWith('/setup/steps/5') && init.method === 'PUT') {
+        return json(409, { status: 409, code: 'STEP_INCOMPLETE', title: 'Cần kết nối ít nhất một kênh (quét mã QR) trước khi tiếp tục' });
+      }
+      if (url.includes('/channels')) {
+        return json(200, [
+          { type: 'zalo', name: 'Zalo', installed: true, id: 'c1', state: 'active', account_label: 'iPhone', started_at: null, groups_listening: 0, outbound_queued: 0, last_heartbeat_at: null, stats: null, qr: null },
+        ]);
+      }
+      if (url.includes('/setup/')) return json(200, state);
+      return json(200, []);
+    });
+    renderSetup();
+    const next = await screen.findByRole('button', { name: /Tiếp tục/ });
+    await waitFor(() => expect(next).toBeEnabled());
+    await user.click(next);
+    expect(await screen.findByText('Cần kết nối ít nhất một kênh (quét mã QR) trước khi tiếp tục')).toBeInTheDocument();
   });
 
   it('shows an error state with Thử lại when the state cannot load', async () => {

@@ -115,8 +115,13 @@ async function csrf(request: APIRequestContext): Promise<string> {
   return state.cookies.find((c) => c.name === 'gh_csrf')?.value ?? '';
 }
 
-export async function resetMock(request: APIRequestContext, setup: 'fresh' | 'finished' = 'finished') {
-  const res = await request.post('/api/v1/__mock/reset', { data: { setup } });
+/** Rebuild the mock. The live simulation is off unless asked for, so screens are deterministic. */
+export async function resetMock(
+  request: APIRequestContext,
+  setup: 'fresh' | 'finished' = 'finished',
+  opts: { simulate?: boolean; allowFinish?: boolean } = {},
+) {
+  const res = await request.post('/api/v1/__mock/reset', { data: { setup, simulate: false, ...opts } });
   if (!res.ok()) throw new Error(`mock reset failed: ${res.status()}`);
 }
 
@@ -129,10 +134,31 @@ export async function setUiPrefs(page: Page, prefs: { sidebarMode?: 'full' | 'ra
 
 /** Log in through the API (sets gh_session in the page's context). */
 export async function loginAsOwner(page: Page): Promise<void> {
+  await loginAs(page, OWNER.email);
+}
+
+export const AUDITOR = { email: 'auditor@genesis.local', pin: '975310' };
+
+export async function loginAs(page: Page, email: string, password = OWNER.password): Promise<void> {
   const token = await csrf(page.request);
   const res = await page.request.post('/api/v1/auth/login', {
-    data: { email: OWNER.email, password: OWNER.password },
+    data: { email, password },
     headers: { 'X-CSRF-Token': token },
   });
   if (!res.ok()) throw new Error(`login failed: ${res.status()} ${await res.text()}`);
+}
+
+/** POST a test hook on the mock (`/api/v1/__mock/{name}`). */
+export async function mockHook(request: APIRequestContext, name: 'emit' | 'raw' | 'scan' | 'simulate' | 'bridge', data: unknown = {}) {
+  const res = await request.post(`/api/v1/__mock/${name}`, { data });
+  if (res.status() >= 400) throw new Error(`mock hook ${name} failed: ${res.status()}`);
+  return res;
+}
+
+/** Authenticated JSON call through the page's cookies (CSRF handled). */
+export async function apiCall(page: Page, method: 'GET' | 'POST' | 'PUT' | 'PATCH', path: string, data?: unknown) {
+  const token = await csrf(page.request);
+  const res = await page.request.fetch(`/api/v1${path}`, { method, data, headers: { 'X-CSRF-Token': token } });
+  if (!res.ok()) throw new Error(`${method} ${path} failed: ${res.status()} ${await res.text()}`);
+  return res.status() === 204 ? null : res.json();
 }
