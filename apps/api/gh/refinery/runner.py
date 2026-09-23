@@ -221,7 +221,7 @@ class Refinery:
         async with self.sm() as db:
             await db.execute(text("""
                 UPDATE refinery.runs SET finished_at = now(), input_count = :i, clean_count = :c, lowconf_count = :l,
-                       noise_count = :n, error_count = :e, processed = :p, status = :s, error = :err
+                       noise_count = :n, error_count = :e, processed = :p, status = :s, error = COALESCE(:err, error)
                 WHERE id = :id"""),
                 {"i": st.total, "c": st.clean, "l": st.lowconf, "n": st.noise, "e": st.errors, "p": st.processed,
                  "s": st.status if st.status != "running" else "done", "err": st.error, "id": run_id})
