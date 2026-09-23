@@ -358,6 +358,11 @@ class Ingest:
             await db.commit()
         for type, data in out:
             await realtime.publish(self.redis, type, data, org_id=self.org_id)
+        if any(t == "channel.status" for t, _ in out):
+            from gh.shell.routes import publish_header
+
+            async with self.sm() as db:
+                await publish_header(db, self.redis, self.org_id)
 
     async def on_directory(self, event: Any) -> None:
         if event.type != "groups":

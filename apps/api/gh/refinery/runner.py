@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from gh import realtime
 from gh.chassis.bus import CLEAN_READY, EventBus
-from gh.data.common import live_person, raw_code
+from gh.data.common import iso, live_person, raw_code
 from gh.memory import notebook
 from gh.providers.router import ModelRouter, ModelUnavailable, raise_alert
 from gh.refinery import extract, scoring
@@ -60,6 +60,12 @@ class Ev:
     ref: str = ""
     outcome: Outcome | None = None
     sets: dict[str, Any] = field(default_factory=dict)
+
+
+def run_out(r: Any) -> dict[str, Any]:
+    return {"id": str(r.id), "trigger": r.trigger, "started_at": iso(r.started_at), "finished_at": iso(r.finished_at),
+            "input_count": r.input_count, "clean_count": r.clean_count, "lowconf_count": r.lowconf_count,
+            "noise_count": r.noise_count, "error_count": r.error_count, "status": r.status, "error": r.error}
 
 
 @dataclass
@@ -133,8 +139,12 @@ class Refinery:
         self.sm, self.redis, self.router, self.bus = sm, redis, router, bus
 
     async def _progress(self, org_id: uuid.UUID, st: RunStats, final: bool = False) -> None:
-        await realtime.publish(self.redis, "refinery.run" if final else "refinery.progress", st.progress(),
-                               org_id=org_id)
+        await realtime.publish(self.redis, "refinery.progress", st.progress(), org_id=org_id)
+        if final:
+            # Bản ghi lượt chạy (cùng hình dạng GET /refinery/runs) cho danh sách lượt gần nhất.
+            async with self.sm() as db:
+                row = (await db.execute(text("SELECT * FROM refinery.runs WHERE id = :i"), {"i": st.run_id})).one()
+            await realtime.publish(self.redis, "refinery.run", run_out(row), org_id=org_id)
 
     # ─── nhận lô ─────────────────────────────────────────────────────────────
 

@@ -179,3 +179,23 @@ async def test_fast_path_and_manual_queue(app, db, redis) -> None:  # type: igno
     [manual] = await sch.tick(wait=True)
     assert manual.run_id == rid and manual.total == 1
     assert await states(db, org) == {"clean": 2}
+
+
+async def test_ws_events_match_contract(app, db, redis, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from gh import realtime
+
+    sent: list[tuple[str, dict]] = []  # type: ignore[type-arg]
+
+    async def capture(_redis, type, data, *, org_id=None):  # type: ignore[no-untyped-def]
+        sent.append((type, data))
+    monkeypatch.setattr(realtime, "publish", capture)
+    org = await setup_org(db)
+    sm = sessionmaker()
+    await put(sm, org, msg(BUY), msg("ok cả nhà"))
+    st = await Refinery(sm, redis, by_text()).run(org, "manual")  # type: ignore[arg-type]
+    progress = [d for t, d in sent if t == "refinery.progress"]
+    assert progress[-1]["status"] == "done" and progress[-1]["processed"] == 2
+    [run] = [d for t, d in sent if t == "refinery.run"]      # bản ghi lượt chạy, cùng hình dạng GET /refinery/runs
+    assert run["id"] == str(st.run_id) and run["started_at"] and run["clean_count"] == 1 and run["status"] == "done"
+    states_ev = [d for t, d in sent if t == "raw.state"]
+    assert {d["state"] for d in states_ev} == {"clean", "discarded"}
