@@ -35,12 +35,28 @@ async def header_payload(db: AsyncSession, org_id: Any) -> dict[str, Any]:
     groups = (await db.execute(text("""
         SELECT count(*) FROM core.groups WHERE org_id = :o AND listen_mode IN ('tagged_only','silent','proactive')"""),
         {"o": org_id})).scalar_one()
-    settings = (await db.execute(text("SELECT settings FROM core.organizations WHERE id = :o"),
-                                 {"o": org_id})).scalar_one() or {}
-    # Độ tin cậy dữ liệu: spec chưa định nghĩa công thức → để trống, chờ Owner chốt.
+    org = (await db.execute(text("SELECT settings, timezone FROM core.organizations WHERE id = :o"),
+                            {"o": org_id})).one()
+    settings = org.settings or {}
     return {"channels_live": channels_live, "groups_listening": groups,
             "autonomy_level": int(settings.get("autonomy_level", policy.DEFAULT_AUTONOMY)),
-            "data_confidence": None}
+            "data_confidence": await data_confidence_today(db, org_id, org.timezone)}
+
+
+async def data_confidence_today(db: AsyncSession, org_id: Any, tz: str | None) -> float | None:
+    """Owner chốt 24/09/2026: tin sàng lọc hôm nay vào thẳng Kho sạch ÷ (sạch + tin cậy thấp), không tính nhiễu.
+
+    "Hôm nay" theo múi giờ của tổ chức. Chưa sàng lọc tin nào hôm nay → None (header hiện "—").
+    """
+    r = (await db.execute(text("""
+        SELECT count(*) FILTER (WHERE state = 'clean') AS clean,
+               count(*) FILTER (WHERE state = 'lowconf') AS lowconf
+        FROM refinery.event_state
+        WHERE org_id = :o AND state IN ('clean', 'lowconf')
+          AND updated_at >= date_trunc('day', now() AT TIME ZONE :tz) AT TIME ZONE :tz"""),
+        {"o": org_id, "tz": tz or "Asia/Ho_Chi_Minh"})).one()
+    total = r.clean + r.lowconf
+    return round(r.clean / total, 4) if total else None
 
 
 async def publish_header(db: AsyncSession, redis: Any, org_id: Any) -> None:

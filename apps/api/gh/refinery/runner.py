@@ -141,10 +141,15 @@ class Refinery:
     async def _progress(self, org_id: uuid.UUID, st: RunStats, final: bool = False) -> None:
         await realtime.publish(self.redis, "refinery.progress", st.progress(), org_id=org_id)
         if final:
+            from gh.shell.routes import header_payload  # tránh import vòng khi nạp worker
+
             # Bản ghi lượt chạy (cùng hình dạng GET /refinery/runs) cho danh sách lượt gần nhất.
             async with self.sm() as db:
                 row = (await db.execute(text("SELECT * FROM refinery.runs WHERE id = :i"), {"i": st.run_id})).one()
+                header = await header_payload(db, org_id)
             await realtime.publish(self.redis, "refinery.run", run_out(row), org_id=org_id)
+            # Độ tin cậy dữ liệu hôm nay trên header đổi sau mỗi lượt.
+            await realtime.publish(self.redis, "header", header, org_id=org_id)
 
     # ─── nhận lô ─────────────────────────────────────────────────────────────
 

@@ -199,3 +199,27 @@ async def test_ws_events_match_contract(app, db, redis, monkeypatch) -> None:  #
     assert run["id"] == str(st.run_id) and run["started_at"] and run["clean_count"] == 1 and run["status"] == "done"
     states_ev = [d for t, d in sent if t == "raw.state"]
     assert {d["state"] for d in states_ev} == {"clean", "discarded"}
+    [header] = [d for t, d in sent if t == "header"]         # độ tin cậy hôm nay: 1 sạch, 0 thấp, nhiễu không tính
+    assert header["data_confidence"] == 1.0
+
+
+async def test_header_data_confidence_is_clean_over_clean_plus_lowconf_today(app, db, redis, owner_api) -> None:  # type: ignore[no-untyped-def]
+    c = owner_api
+    org = await setup_org(db)
+    sm = sessionmaker()
+    assert (await c.get("/header")).json()["data_confidence"] is None    # chưa sàng lọc gì hôm nay
+    await put(sm, org, msg(BUY), msg(BUY + " gấp"), msg(BUY + " nhé"), msg(BUY + " ạ"), msg("ok cả nhà"))
+
+    def reply(m):  # type: ignore[no-untyped-def]
+        refs = sorted(refs_in(m))
+        body = texts_in(m)
+        units = [unit(r, conf=0.3 if i == 0 else 0.9) for i, r in enumerate(x for x in refs if "container" in body[x])]
+        return {"units": units, "noise": [r for r in refs if "container" not in body[r]]}
+    await Refinery(sm, redis, FakeRouter(reply)).run(org, "manual")  # type: ignore[arg-type]
+    assert await states(db, org) == {"clean": 3, "lowconf": 1, "discarded": 1}
+    assert (await c.get("/header")).json()["data_confidence"] == 0.75
+    # Tin sàng lọc từ hôm qua (theo múi giờ tổ chức) không tính.
+    await db.execute(text("""UPDATE refinery.event_state SET updated_at = now() - interval '2 days'
+                             WHERE org_id = :o AND state = 'lowconf'"""), {"o": org})
+    await db.commit()
+    assert (await c.get("/header")).json()["data_confidence"] == 1.0

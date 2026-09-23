@@ -153,6 +153,6 @@ Cùng cookie phiên (gửi qua proxy). Server đẩy `{"type": "…", "data": {�
 | `refinery.progress`, `refinery.run` | `data.read` | xem trên |
 | `channel.qr`, `channel.status` | `system.read` | xem trên |
 | `cli.login` | `system.manage` | xem trên |
-| `header` | mọi người | `{channels_live, groups_listening, autonomy_level, data_confidence}` |
+| `header` | mọi người | `{channels_live, groups_listening, autonomy_level, data_confidence}` `data_confidence` (Owner chốt 24/09): số tin sàng lọc hôm nay (múi giờ tổ chức) vào thẳng Kho sạch ÷ (sạch + tin cậy thấp), không tính nhiễu; dạng 0–1, `null` khi hôm nay chưa sàng lọc tin nào. Gửi lại sau mỗi lượt sàng lọc. Cũng trả ở `GET /header`. |
 
 Đóng với mã `4401` nếu chưa đăng nhập, `4428` nếu chưa thiết lập.
