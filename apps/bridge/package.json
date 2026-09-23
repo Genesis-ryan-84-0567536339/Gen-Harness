@@ -1,0 +1,16 @@
+{
+  "name": "@gen/bridge",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Bridge kênh Zalo/WhatsApp → event bus (gh.bridge.*). Giai đoạn 1: khung, health, heartbeat.",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "redis": "^4.7.0"
+  },
+  "engines": { "node": ">=20" }
+}
