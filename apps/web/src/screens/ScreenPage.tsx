@@ -28,18 +28,21 @@ export function ScreenPage({ screenKey }: { screenKey: string }) {
     document.title = `${meta.title} · Gen-Harness`;
   }, [meta.title]);
 
-  const title = <ScreenTitle title={meta.title} description={meta.description} maxWidth={meta.descMaxWidth} />;
+  // Thiết kế không vẽ dòng tiêu đề cho overview, workbench, profile (header đã mang tiêu đề) → giữ nguyên như vậy.
+  const title = meta.designTitleRow ? (
+    <ScreenTitle title={meta.title} description={meta.description} maxWidth={meta.descMaxWidth} />
+  ) : null;
 
   if (nav.isPending) {
     return (
       <div className="screen" aria-busy="true">
-        <div className="screen-title-row">
+        {meta.designTitleRow && <div className="screen-title-row">
           <div className="screen-title-block" style={{ maxWidth: meta.descMaxWidth }}>
             <Skeleton width={220} height={20} />
             <Skeleton width="80%" height={12} style={{ marginTop: 9 }} />
             <Skeleton width="55%" height={12} style={{ marginTop: 6 }} />
           </div>
-        </div>
+        </div>}
         <Card padded={false}>
           <div className="gh-state">
             <Skeleton width={34} height={34} radius={8} />

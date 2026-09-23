@@ -28,8 +28,7 @@ export interface ScreenMeta {
   /**
    * Whether the design draws a screen-title row for this screen. overview,
    * workbench and profile have none in the design (the header carries the
-   * title); phase 1 still shows one built from TITLES so every placeholder is
-   * labelled.
+   * title), so the app draws none there either.
    */
   designTitleRow: boolean;
   /** Phosphor icon class from the design NAV. */
