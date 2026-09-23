@@ -1,0 +1,26 @@
+# Cổng duy nhất ra ngoài: 8443 (HTTPS, chứng chỉ nội bộ). api/web/db/redis chỉ nằm trong mạng compose.
+{
+	auto_https disable_redirects
+}
+
+{$GH_SITE_ADDRESS:localhost}:8443 {
+	tls internal
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "same-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		Content-Security-Policy "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' wss:; frame-ancestors 'none'"
+		-Server
+	}
+
+	handle /api/* {
+		reverse_proxy api:8000
+	}
+	handle {
+		reverse_proxy web:8080
+	}
+}
