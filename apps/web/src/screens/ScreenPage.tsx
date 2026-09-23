@@ -1,8 +1,22 @@
-import { useEffect } from 'react';
+import { useEffect, type ComponentType } from 'react';
 import { SCREEN_BY_KEY } from '@gen-harness/contracts';
 import { Card, EmptyState, ErrorState, Skeleton } from '@gen-harness/ui';
 import { useNavigation } from '../lib/queries';
 import { screenKeys } from '../shell/navModel';
+import { CleanScreen } from './data/CleanScreen';
+import { IdentityScreen } from './data/IdentityScreen';
+import { RawScreen } from './data/RawScreen';
+import { RulesScreen } from './data/RulesScreen';
+import { SystemScreen } from './system/SystemScreen';
+
+/** Screens built so far (phase 2). Every other key keeps the phase-1 placeholder. */
+const BUILT: Record<string, ComponentType> = {
+  raw: RawScreen,
+  rules: RulesScreen,
+  clean: CleanScreen,
+  identity: IdentityScreen,
+  system: SystemScreen,
+};
 
 /** Screen-title row: title 20px/500 + description 12.5px neutral-400 (docs/01 "Quy ước chung"). */
 export function ScreenTitle({ title, description, maxWidth }: { title: string; description: string; maxWidth: number }) {
@@ -17,8 +31,9 @@ export function ScreenTitle({ title, description, maxWidth }: { title: string; d
 }
 
 /**
- * Phase 1: every screen shows its title row and a placeholder card — no fake
- * data. A screen the role cannot see (absent from GET /navigation) says so.
+ * Built screens render from the registry; the rest show their title row and a
+ * placeholder card — no fake data. A screen the role cannot see (absent from
+ * GET /navigation) says so.
  */
 export function ScreenPage({ screenKey }: { screenKey: string }) {
   const meta = SCREEN_BY_KEY[screenKey];
@@ -68,6 +83,8 @@ export function ScreenPage({ screenKey }: { screenKey: string }) {
   }
 
   const allowed = screenKeys(nav.data).has(screenKey);
+  const Built = BUILT[screenKey];
+  if (Built && allowed) return <Built />;
   return (
     <div className="screen">
       {title}

@@ -3,6 +3,7 @@ import { Outlet, useMatches } from 'react-router-dom';
 import { DOMAINS, SCREEN_BY_KEY, type DomainId } from '@gen-harness/contracts';
 import { useActiveScreenKey, type RouteHandle } from './routeHandles';
 import { useNavigation } from '../lib/queries';
+import { useRealtime } from '../lib/realtime';
 import { useUiStore } from '../lib/uiStore';
 import { Header, type Crumbs } from './Header';
 import { findActive } from './navModel';
@@ -36,6 +37,7 @@ export function AppShell() {
   const mode = useUiStore((s) => s.sidebarMode);
   const activeKey = useActiveScreenKey();
   const crumbs = useCrumbs(activeKey);
+  useRealtime();
   return (
     <div className="app" data-sidebar={mode}>
       <a className="skip-link" href="#main">

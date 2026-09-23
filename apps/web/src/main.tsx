@@ -11,6 +11,8 @@ import '@gen-harness/ui/styles.css';
 import './styles/global.css';
 import './styles/shell.css';
 import './styles/setup.css';
+import './styles/data.css';
+import './styles/system.css';
 import { queryClient } from './lib/queryClient';
 import { createAppRouter } from './router';
 

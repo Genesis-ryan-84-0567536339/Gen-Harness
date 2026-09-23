@@ -4,7 +4,7 @@ import react from '@vitejs/plugin-react';
 
 const API_TARGET = process.env.GH_API_TARGET ?? 'http://localhost:8000';
 
-/** `vite --mode mock` serves a tiny in-memory phase-1 API instead of proxying. */
+/** `vite --mode mock` serves an in-memory API (phase 1 + 2, with `/api/v1/ws`) instead of proxying. */
 function mockApi(): Plugin {
   return {
     name: 'gh-mock-api',
@@ -12,6 +12,10 @@ function mockApi(): Plugin {
       const { createMockApi } = await import('./test/mock-api');
       const mock = createMockApi({ setup: process.env.MOCK_SETUP === 'fresh' ? 'fresh' : 'finished' });
       server.middlewares.use(mock.middleware);
+      // Realtime: answer `/api/v1/ws` upgrades; Vite's own HMR socket is left alone.
+      server.httpServer?.on('upgrade', (req, socket) => {
+        mock.upgrade(req, socket);
+      });
     },
   };
 }
@@ -24,8 +28,9 @@ export default defineConfig(({ mode }) => ({
       mode === 'mock'
         ? undefined
         : {
+            // Realtime socket first: same origin + cookie, forwarded as a WebSocket.
+            '/api/v1/ws': { target: API_TARGET, ws: true, changeOrigin: false },
             '/api': { target: API_TARGET, changeOrigin: false },
-            '/ws': { target: API_TARGET.replace(/^http/, 'ws'), ws: true },
           },
   },
   build: {
