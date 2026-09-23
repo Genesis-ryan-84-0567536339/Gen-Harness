@@ -11,11 +11,13 @@ async def test_list_plugins_shows_chassis(owner_api) -> None:  # type: ignore[no
     pkgs = [p["package"] for p in items]
     assert pkgs[:2] == ["@gen/chassis-kernel", "@gen/chassis-bus"]
     assert {p["package"] for p in items} >= {"@gen/chassis-store", "@gen/chassis-policy", "@gen/chassis-auth"}
-    assert all(p["origin"] == "core" and not p["removable"] and not p["can_disable"] for p in items)
+    assert all(p["origin"] == "core" and not p["removable"] for p in items)
+    assert all(not p["can_disable"] for p in items if p["package"].startswith("@gen/chassis-"))
+    assert {p["package"] for p in items if p["can_disable"]} == {"@gen/channel-zalo", "@gen/channel-whatsapp"}
     assert all(p["health"] == "healthy" and p["breaker"]["state"] == "closed" for p in items)
     nav = (await api.get("/navigation")).json()
     plug = [n for n in nav[1]["groups"] if n["key"] == "plugins"][0]
-    assert plug["badge"] == {"value": "5", "tone": "ok"}
+    assert plug["badge"] == {"value": str(len(items)), "tone": "ok"}
 
 
 async def test_chassis_plugin_locked(owner_api, db) -> None:  # type: ignore[no-untyped-def]
@@ -32,7 +34,7 @@ async def test_chassis_plugin_locked(owner_api, db) -> None:  # type: ignore[no-
                                   "WHERE action LIKE 'plugin.%' ORDER BY at"))).all()
     assert [(r.action, r.result) for r in rows] == [("plugin.uninstall", "blocked"), ("plugin.disable", "blocked"),
                                                     ("plugin.uninstall", "blocked")]
-    assert (await db.execute(text("SELECT count(*) FROM ops.plugins"))).scalar() == 5
+    assert (await db.execute(text("SELECT count(*) FROM ops.plugins"))).scalar() == 9
 
 
 async def test_every_successful_write_is_logged(owner_api, db) -> None:  # type: ignore[no-untyped-def]

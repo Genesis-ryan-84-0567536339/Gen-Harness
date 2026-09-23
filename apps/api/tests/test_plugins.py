@@ -41,7 +41,11 @@ def test_chassis_manifests_load_in_dependency_order() -> None:
     order = [m.package for m in dependency_order(read_manifests(ROOT))]
     assert order[0] == "@gen/chassis-kernel"
     assert order.index("@gen/chassis-bus") < order.index("@gen/chassis-store") < order.index("@gen/chassis-auth")
-    assert all(not m.removable and not m.can_disable for m in read_manifests(ROOT))
+    manifests = read_manifests(ROOT)
+    assert all(not m.removable and not m.can_disable for m in manifests if m.package.startswith("@gen/chassis-"))
+    # Kênh tắt được (Owner quyết), nhưng không gỡ được vì là plugin lõi.
+    assert all(not m.removable for m in manifests)
+    assert order.index("@gen/intel-core") < order.index("@gen/channel-zalo")
 
 
 def test_dependency_errors() -> None:

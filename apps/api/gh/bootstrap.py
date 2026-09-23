@@ -72,7 +72,8 @@ async def bootstrap(db: AsyncSession, *, manifests: list[Manifest] | None = None
 
     await _permissions(db, org_id)
     await _boundaries(db, org_id)
-    await _chassis_plugins(db, manifests if manifests is not None else read_manifests(plugins_root()))
+    await _core_plugins(db, manifests if manifests is not None else read_manifests(plugins_root()))
+    await _data_layer(db, org_id)
     token, finished = await _setup_state(db, org_id)
     return BootstrapResult(org_id=org_id, setup_token=token, setup_finished=finished)
 
@@ -113,25 +114,47 @@ async def _boundaries(db: AsyncSession, org_id: uuid.UUID) -> None:
                                      WHERE org_id = :o AND code = :c"""), {"o": org_id, "c": b.code, "e": b.enabled})
 
 
-async def _chassis_plugins(db: AsyncSession, manifests: list[Manifest]) -> None:
+async def _core_plugins(db: AsyncSession, manifests: list[Manifest]) -> None:
+    """Plugin dựng sẵn trong repo (origin=core). Plugin không cho tắt luôn bật; plugin tắt được giữ lựa chọn Owner."""
     for m in manifests:
-        if m.layer != "chassis":
-            continue
         await db.execute(text("""
             INSERT INTO ops.plugins (package, name, layer, origin, version, is_enabled, load_order, sandbox,
                                      permissions, signature_ok, manifest)
             VALUES (:pkg, :name, :layer, 'core', :ver, true, :lo, CAST(:sb AS jsonb), :perms, true,
                     CAST(:mf AS jsonb))
             ON CONFLICT (package) DO UPDATE SET name = EXCLUDED.name, version = EXCLUDED.version,
-                origin = 'core', is_enabled = true, load_order = EXCLUDED.load_order, sandbox = EXCLUDED.sandbox,
+                origin = 'core', is_enabled = CASE WHEN :cd THEN ops.plugins.is_enabled ELSE true END,
+                load_order = EXCLUDED.load_order, sandbox = EXCLUDED.sandbox,
                 manifest = EXCLUDED.manifest"""),
             {"pkg": m.package, "name": m.name, "layer": m.layer, "ver": m.version, "lo": m.load_order,
-             "sb": m.sandbox.model_dump_json(), "perms": m.permissions, "mf": m.model_dump_json()})
+             "sb": m.sandbox.model_dump_json(), "perms": m.permissions, "mf": m.model_dump_json(),
+             "cd": m.can_disable})
         pid = (await db.execute(text("SELECT id FROM ops.plugins WHERE package = :p"), {"p": m.package})).scalar_one()
         await db.execute(text("DELETE FROM ops.plugin_dependencies WHERE plugin_id = :i"), {"i": pid})
         for dep, spec in m.dependencies.items():
             await db.execute(text("""INSERT INTO ops.plugin_dependencies (plugin_id, depends_on, version_range)
                                      VALUES (:i, :d, :s)"""), {"i": pid, "d": dep, "s": spec})
+
+
+# Kênh có sẵn (thiết kế: 4 thẻ). Telegram là plugin trong chợ — chưa cài thì không có dòng kênh.
+CHANNELS = (("zalo", "Zalo", ["receive", "send"]), ("whatsapp", "WhatsApp", ["receive", "send"]),
+            ("linkedin", "LinkedIn", ["identity_only"]))
+
+
+async def _data_layer(db: AsyncSession, org_id: uuid.UUID) -> None:
+    from gh.refinery.presets import DEFAULT_WEIGHTS
+
+    for type_, name, caps in CHANNELS:
+        await db.execute(text("""INSERT INTO core.channels (org_id, type, name, capabilities) VALUES (:o, :t, :n, :c)
+                                 ON CONFLICT (org_id, type, name) DO NOTHING"""),
+                         {"o": org_id, "t": type_, "n": name, "c": caps})
+    await db.execute(text("INSERT INTO refinery.schedule (org_id) VALUES (:o) ON CONFLICT DO NOTHING"), {"o": org_id})
+    has_weights = (await db.execute(text("SELECT 1 FROM refinery.scoring_weights WHERE org_id = :o LIMIT 1"),
+                                    {"o": org_id})).scalar()
+    if not has_weights:
+        for dim, pct in DEFAULT_WEIGHTS:
+            await db.execute(text("""INSERT INTO refinery.scoring_weights (org_id, dimension, weight, valid_from)
+                                     VALUES (:o, :d, :w, '2000-01-01')"""), {"o": org_id, "d": dim, "w": pct / 100})
 
 
 async def _setup_state(db: AsyncSession, org_id: uuid.UUID) -> tuple[str | None, bool]:
