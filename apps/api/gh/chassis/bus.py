@@ -27,6 +27,7 @@ SCHEMA_VERSION = 1
 # Stream chuẩn của hệ thống.
 BRIDGE_INBOUND = "gh.bridge.inbound"
 BRIDGE_OUTBOUND = "gh.bridge.outbound"
+BRIDGE_CONTROL = "gh.bridge.control"
 BRIDGE_STATUS = "gh.bridge.status"
 BRIDGE_DIRECTORY = "gh.bridge.directory"
 CLEAN_READY = "gh.clean.ready"

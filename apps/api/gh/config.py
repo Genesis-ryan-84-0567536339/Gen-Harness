@@ -17,6 +17,12 @@ class Settings(BaseSettings):
     master_key: str = ""
     master_key_file: str = ""       # Docker secret (vd. /run/secrets/gh_master_key) — ưu tiên hơn biến môi trường
     setup_token: str = ""
+    # Khoá bridge (32 byte base64): ký permit gửi tin và mã hoá phiên kênh khi truyền (docs/api/bridge-protocol.md)
+    bridge_key: str = ""
+    bridge_key_file: str = ""
+    # Thư mục cấu hình của Antigravity CLI (tệp OAuth token); worker ghi hồ sơ đang hoạt động vào đây
+    cli_home: str = "~/.gemini/antigravity-cli"
+    cli_binary: str = "agy"
 
     session_ttl_hours: int = 12
     pin_session_minutes: int = 30

@@ -77,10 +77,48 @@ def decrypt(blob: bytes, associated: bytes = b"") -> bytes:
     return AESGCM(dek).decrypt(nonce_d, ct, associated)
 
 
+_dev_bridge_key: bytes | None = None
+
+
+def bridge_key() -> bytes:
+    """Khoá chung với bridge — tách khỏi khoá master để bridge không bao giờ giữ khoá master."""
+    global _dev_bridge_key
+    s = get_settings()
+    raw = s.bridge_key
+    if s.bridge_key_file:
+        with open(s.bridge_key_file, encoding="utf-8") as f:
+            raw = f.read().strip()
+    if raw:
+        key = base64.b64decode(raw)
+        if len(key) != 32:
+            raise ValueError("GH_BRIDGE_KEY phải là 32 byte base64")
+        return key
+    if s.is_production:
+        raise RuntimeError("Thiếu GH_BRIDGE_KEY ở production")
+    if _dev_bridge_key is None:
+        _dev_bridge_key = os.urandom(32)
+    return _dev_bridge_key
+
+
+def _bridge_subkey(purpose: bytes) -> bytes:
+    return hashlib.sha256(bridge_key() + purpose).digest()
+
+
 def hmac_sign(message: bytes) -> bytes:
-    key = hashlib.sha256(master_key() + b"permit").digest()
-    return hmac.new(key, message, hashlib.sha256).digest()
+    """Chữ ký permit (bridge kiểm bằng cùng khoá con)."""
+    return hmac.new(_bridge_subkey(b"permit"), message, hashlib.sha256).digest()
 
 
 def hmac_verify(message: bytes, signature: bytes) -> bool:
     return hmac.compare_digest(hmac_sign(message), signature)
+
+
+def transport_encrypt(plaintext: bytes, aad: str) -> str:
+    nonce = os.urandom(12)
+    ct = AESGCM(_bridge_subkey(b"transport")).encrypt(nonce, plaintext, aad.encode())
+    return base64.b64encode(nonce + ct).decode()
+
+
+def transport_decrypt(blob: str, aad: str) -> bytes:
+    raw = base64.b64decode(blob)
+    return AESGCM(_bridge_subkey(b"transport")).decrypt(raw[:12], raw[12:], aad.encode())
