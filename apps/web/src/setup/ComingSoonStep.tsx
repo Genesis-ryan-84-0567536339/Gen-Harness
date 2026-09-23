@@ -12,7 +12,11 @@ export interface ComingSoonStepProps {
   formError?: string | null;
 }
 
-/** Steps 4–12 in phase 1: title + description from docs/handoff/06, "Sắp có". */
+/**
+ * Steps the web has not built yet (phase 2: 8–11): title + description from
+ * docs/handoff/06, "Sắp có". They are passable — "Tiếp tục" moves on so the
+ * owner can reach Hoàn tất; each is completed later in its Console screen.
+ */
 export function ComingSoonStep({ meta, status, onBack, onSkip, skipping, onNext, formError }: ComingSoonStepProps) {
   const settled = status === 'done' || status === 'skipped';
   return (
@@ -20,7 +24,7 @@ export function ComingSoonStep({ meta, status, onBack, onSkip, skipping, onNext,
       n={meta.n}
       title={meta.title}
       description={meta.content}
-      canContinue={settled}
+      canContinue
       onContinue={onNext}
       onBack={onBack}
       onSkip={!meta.required && !settled ? onSkip : undefined}
@@ -33,7 +37,7 @@ export function ComingSoonStep({ meta, status, onBack, onSkip, skipping, onNext,
         description={
           settled
             ? `Bước này đã ${status === 'skipped' ? 'được bỏ qua' : 'hoàn tất'}. Chỉnh lại được sau ở màn tương ứng của Console.`
-            : 'Bước này được dựng ở giai đoạn sau của Gen-Harness.'
+            : 'Bước này được dựng ở giai đoạn sau của Gen-Harness. Bấm Tiếp tục để sang bước kế — làm lại được ở màn tương ứng khi có.'
         }
       />
       <div className="setup-when">

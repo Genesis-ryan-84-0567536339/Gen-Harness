@@ -19,6 +19,8 @@ export interface StepProps {
 export function describeError(e: unknown): string {
   if (e instanceof ApiError) {
     if (e.status === 0) return 'Không kết nối được máy chủ. Kiểm tra dịch vụ api rồi thử lại.';
+    // Phase 2: a step whose precondition fails says what is missing, in Vietnamese — show it as is.
+    if (e.code === 'STEP_INCOMPLETE' || e.code === 'STEP_ORDER') return e.message;
     if (e.status === 409) return 'Thiết lập đã hoàn tất hoặc bước này không còn sửa được ở đây.';
     if (e.status === 422) return 'Kiểm tra lại các trường được đánh dấu.';
     return e.message;

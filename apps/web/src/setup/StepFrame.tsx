@@ -17,6 +17,9 @@ export interface StepFrameProps {
   formError?: string | null;
   formRef?: RefObject<HTMLFormElement>;
   continueLabel?: string;
+  continueIcon?: string;
+  /** Render children without the surface card (steps made of their own cards). */
+  bare?: boolean;
 }
 
 /** Right pane of the wizard: title, description, surface card, action bar. */
@@ -34,6 +37,8 @@ export function StepFrame({
   formError,
   formRef,
   continueLabel = 'Tiếp tục',
+  continueIcon = 'ph ph-arrow-right',
+  bare,
 }: StepFrameProps) {
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -47,7 +52,7 @@ export function StepFrame({
         </h1>
         <p className="screen-desc">{description}</p>
       </div>
-      <div className="gh-card setup-card">{children}</div>
+      {bare ? <div className="setup-bare">{children}</div> : <div className="gh-card setup-card">{children}</div>}
       <div className="setup-error" role="alert" aria-live="assertive">
         {formError}
       </div>
@@ -61,7 +66,7 @@ export function StepFrame({
             Bỏ qua
           </Button>
         ) : null}
-        <Button variant="primary" type="submit" disabled={!canContinue} loading={busy} iconRight="ph ph-arrow-right">
+        <Button variant="primary" type="submit" disabled={!canContinue} loading={busy} iconRight={continueIcon}>
           {continueLabel}
         </Button>
       </div>

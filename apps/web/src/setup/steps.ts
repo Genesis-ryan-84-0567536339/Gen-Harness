@@ -8,7 +8,7 @@ export interface StepMeta {
   content: string;
   /** Hoàn thành khi (completion condition). */
   doneWhen: string;
-  /** Implemented in phase 1. */
+  /** Implemented in the web (phase 1: 1–3, phase 2: 4–7 and 12). */
   built: boolean;
 }
 
@@ -29,22 +29,22 @@ export const SETUP_STEPS: StepMeta[] = [
     doneWhen: 'Lưu',
   },
   {
-    n: 4, key: 'brain', title: 'Bộ não AI', required: true, built: false,
-    content: 'Chọn nguồn core agent: Antigravity CLI (đăng nhập bằng mã thiết bị) và/hoặc khoá API (Gemini, DeepSeek, tương thích OpenAI). Mỗi khoá có nút Kiểm tra gọi thử một lượt, hiện độ trễ và model khả dụng. Sắp thứ tự chuỗi chuyển hướng.',
+    n: 4, key: 'brain', title: 'Bộ não AI', required: true, built: true,
+    content: 'Chọn nguồn core agent: Antigravity CLI (đăng nhập Google rồi dán mã xác thực) và/hoặc khoá API (Gemini, DeepSeek, tương thích OpenAI). Mỗi khoá có nút Kiểm tra gọi thử một lượt, hiện độ trễ và model khả dụng. Sắp thứ tự chuỗi chuyển hướng.',
     doneWhen: 'Ít nhất một provider kiểm tra OK',
   },
   {
-    n: 5, key: 'channels', title: 'Kết nối kênh', required: true, built: false,
+    n: 5, key: 'channels', title: 'Kết nối kênh', required: true, built: true,
     content: 'Thẻ từng kênh. Zalo/WhatsApp: tạo mã QR, đếm ngược 60 giây tự làm mới, chờ quét → đã quét → đồng bộ danh sách nhóm. Cảnh báo rủi ro tài khoản cá nhân trước khi hiện QR. Telegram và kênh khác: cài plugin từ chợ.',
     doneWhen: 'Ít nhất một kênh đang hoạt động',
   },
   {
-    n: 6, key: 'groups', title: 'Chọn nhóm lắng nghe', required: true, built: false,
+    n: 6, key: 'groups', title: 'Chọn nhóm lắng nghe', required: true, built: true,
     content: 'Bảng nhóm vừa đồng bộ. Mỗi nhóm chọn chế độ: Không nghe · Chỉ khi được tag · Nghe im lặng · Chủ động bắt tín hiệu, và phạm vi xem. Mặc định Không nghe cho mọi nhóm — Sếp bật từng nhóm.',
     doneWhen: 'Ít nhất một nhóm được bật',
   },
   {
-    n: 7, key: 'refinery', title: 'Sàng lọc dữ liệu', required: true, built: false,
+    n: 7, key: 'refinery', title: 'Sàng lọc dữ liệu', required: true, built: true,
     content: 'Chu kỳ thời gian, ngưỡng số lượng và ngưỡng tin cậy vào kho sạch. Chọn bộ quy tắc khởi đầu theo ngành, xem trước điều kiện và đầu ra. Bảng trọng số chấm điểm tổng 100%.',
     doneWhen: 'Lưu',
   },
@@ -69,7 +69,7 @@ export const SETUP_STEPS: StepMeta[] = [
     doneWhen: 'Bỏ qua được (có cảnh báo)',
   },
   {
-    n: 12, key: 'finish', title: 'Hoàn tất', required: true, built: false,
+    n: 12, key: 'finish', title: 'Hoàn tất', required: true, built: true,
     content: 'Tóm tắt những gì đã bật. Tiến độ lần sàng lọc đầu tiên theo thời gian thực: bản ghi thô đã gom · đang phân loại · đã vào kho sạch. Nút Mở Tổng quan điều hành.',
     doneWhen: 'Bấm nút',
   },
@@ -80,6 +80,11 @@ export const STEP_DESCRIPTIONS: Record<number, string> = {
   1: 'Mã thiết lập chứng minh Sếp là người vừa chạy trình cài trên máy này. Chọn ngôn ngữ và cách bắt đầu.',
   2: 'Tài khoản Owner thấy toàn cảnh. Mật khẩu để đăng nhập, mã PIN để xác nhận thao tác nhạy cảm.',
   3: 'Thông tin tổ chức và cách agent xưng hô với Sếp trong mọi tin nhắn.',
+  4: 'Core agent cần ít nhất một nguồn model: tài khoản Antigravity CLI hoặc khoá API. Kiểm tra từng nguồn rồi sắp thứ tự chuyển hướng khi một nguồn cạn hạn mức.',
+  5: 'Kết nối ít nhất một kênh để bridge bắt đầu gom tin. Zalo và WhatsApp đăng nhập bằng mã QR trên điện thoại của Sếp.',
+  6: 'Mọi nhóm vừa đồng bộ đều ở chế độ Không nghe. Sếp bật từng nhóm muốn agent lắng nghe và chọn ai được xem dữ liệu của nhóm.',
+  7: 'Khi nào core agent sàng lọc kho thô, bộ quy tắc khởi đầu, và trọng số chấm điểm. Chỉnh lại được sau ở Quy tắc sàng lọc.',
+  12: 'Mọi thứ đã sẵn sàng. Lần sàng lọc đầu tiên đang chạy — theo dõi ngay tại đây rồi mở Tổng quan điều hành.',
 };
 
 /** When the PIN is asked for — design `pinRules` (Điều khiển hệ thống › Mã PIN). */

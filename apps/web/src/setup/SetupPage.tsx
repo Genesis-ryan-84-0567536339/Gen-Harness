@@ -6,17 +6,33 @@ import { ErrorState, Icon, Skeleton } from '@gen-harness/ui';
 import { api } from '../lib/api';
 import { qk } from '../lib/queries';
 import { queryClient } from '../lib/queryClient';
+import { useRealtime } from '../lib/realtime';
 import { useUrlState } from '../lib/uiStore';
 import { Logo } from '../shell/Logo';
 import { ComingSoonStep } from './ComingSoonStep';
 import { Step1Welcome } from './Step1Welcome';
 import { Step2Owner } from './Step2Owner';
 import { Step3Org } from './Step3Org';
+import { Step4Brain } from './Step4Brain';
+import { Step5Channels } from './Step5Channels';
+import { Step6Groups } from './Step6Groups';
+import { Step7Refinery } from './Step7Refinery';
+import { Step12Finish } from './Step12Finish';
 import { SETUP_STEPS, STEP_DESCRIPTIONS } from './steps';
 import { isReachable, mergeSteps } from './stepState';
+import type { StepProps } from './types';
 import { describeError } from './types';
 
 const TOKEN_KEY = 'gh_setup_token';
+
+/** Phase-2 steps (docs/api/phase-2.md "Trình thiết lập bước 4–7, 12"). */
+const BUILT_STEPS: Record<number, (p: StepProps) => JSX.Element> = {
+  4: Step4Brain,
+  5: Step5Channels,
+  6: Step6Groups,
+  7: Step7Refinery,
+  12: Step12Finish,
+};
 
 function readStoredToken(): string {
   try {
@@ -43,6 +59,8 @@ export function SetupPage() {
   const formRef = useRef<HTMLFormElement>(null);
 
   const state = useQuery({ queryKey: qk.setupState, queryFn: ({ signal }) => api.setup.state(signal) });
+  // Live QR / CLI login / first-run progress once the owner is signed in (after step 3).
+  useRealtime(!!state.data && !state.data.finished && state.data.current_step >= 4);
 
   useEffect(() => {
     document.title = 'Thiết lập Owner · Gen-Harness';
@@ -181,6 +199,11 @@ export function SetupPage() {
             <Step2Owner {...common} />
           ) : view === 3 ? (
             <Step3Org {...common} />
+          ) : current.available && BUILT_STEPS[view] ? (
+            (() => {
+              const Step = BUILT_STEPS[view];
+              return <Step {...common} />;
+            })()
           ) : (
             <ComingSoonStep
               meta={current}
