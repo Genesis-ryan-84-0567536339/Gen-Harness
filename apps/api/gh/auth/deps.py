@@ -6,7 +6,7 @@ from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gh.auth import rbac, service
-from gh.db import get_db
+from gh.db import DB
 from gh.errors import ApiError, forbidden, pin_required, unauthenticated
 
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
@@ -19,7 +19,7 @@ def client_ip(request: Request) -> str | None:
     return request.client.host if request.client else None
 
 
-async def optional_user(request: Request, db: AsyncSession = Depends(get_db)) -> service.CurrentUser | None:
+async def optional_user(request: Request, db: AsyncSession = DB) -> service.CurrentUser | None:
     token = request.cookies.get(service.SESSION_COOKIE)
     if not token:
         return None

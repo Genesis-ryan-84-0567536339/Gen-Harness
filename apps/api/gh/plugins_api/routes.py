@@ -11,7 +11,7 @@ from gh.auth import rbac, service
 from gh.auth.deps import require, require_pin
 from gh.chassis import actionlog
 from gh.chassis.plugins import PluginError, PluginManager
-from gh.db import get_db
+from gh.db import DB
 from gh.errors import ApiError, conflict, not_found
 
 router = APIRouter(prefix="/plugins", tags=["plugins"])
@@ -33,7 +33,7 @@ def _plugin_error(e: PluginError) -> ApiError:
 
 @router.get("")
 async def list_plugins(request: Request, user: service.CurrentUser = Depends(require("system.read", rbac.ALL)),
-                       db: AsyncSession = Depends(get_db)) -> list[dict[str, Any]]:
+                       db: AsyncSession = DB) -> list[dict[str, Any]]:
     live = {r["package"]: r for r in _manager(request).reports()}
     rows = (await db.execute(text("""
         SELECT p.package, p.name, p.layer, p.origin, p.version, p.is_enabled, p.load_order, p.sandbox,
@@ -62,7 +62,7 @@ async def list_plugins(request: Request, user: service.CurrentUser = Depends(req
 async def toggle(package: str, body: ToggleIn, request: Request,
                  _: service.CurrentUser = Depends(require("system.manage", rbac.ALL)),
                  user: service.CurrentUser = Depends(require_pin("plugin.toggle")),
-                 db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+                 db: AsyncSession = DB) -> dict[str, Any]:
     pm = _manager(request)
     try:
         lp = await (pm.enable(package) if body.enabled else pm.disable(package))
@@ -84,7 +84,7 @@ async def toggle(package: str, body: ToggleIn, request: Request,
 async def uninstall(package: str, request: Request, response: Response,
                     _: service.CurrentUser = Depends(require("system.manage", rbac.ALL)),
                     user: service.CurrentUser = Depends(require_pin("plugin.uninstall")),
-                    db: AsyncSession = Depends(get_db)) -> Response:
+                    db: AsyncSession = DB) -> Response:
     pm = _manager(request)
     try:
         name = pm.get(package).manifest.name

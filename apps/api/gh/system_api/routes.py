@@ -17,10 +17,11 @@ from gh.chassis import actionlog
 from gh.chassis.bus import BRIDGE_CONTROL
 from gh.data.common import CHANNEL_NAME, LISTENING_MODES, iso, org_settings
 from gh.data.ingest import sync_listen_sets, uptime_pct
-from gh.db import get_db
+from gh.db import DB
 from gh.errors import ApiError, conflict, field_errors, not_found
 from gh.providers import cli as climod
 from gh.providers.router import KEY_AAD, cooldown_key, quota_key
+from gh.shell.routes import publish_header
 
 router = APIRouter(tags=["system"])
 READ = require("system.read")
@@ -88,7 +89,7 @@ async def channel_card(db: AsyncSession, redis: Any, org_id: uuid.UUID, type_: s
 
 @router.get("/channels")
 async def channels(request: Request, user: service.CurrentUser = Depends(READ),
-                   db: AsyncSession = Depends(get_db)) -> list[dict[str, Any]]:
+                   db: AsyncSession = DB) -> list[dict[str, Any]]:
     return [await channel_card(db, request.app.state.redis, user.org_id, t) for t in CHANNEL_TYPES]
 
 
@@ -110,7 +111,7 @@ async def _qr_channel(db: AsyncSession, org_id: uuid.UUID, type_: str) -> Any:
 @router.post("/channels/{type_}/login", status_code=202)
 async def channel_login(type_: str, body: LoginIn, request: Request, user: service.CurrentUser = Depends(MANAGE),
                         _pin: Any = Depends(require_pin("channel.login")),
-                        db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+                        db: AsyncSession = DB) -> dict[str, Any]:
     ch = await _qr_channel(db, user.org_id, type_)
     if not body.accept_risk:
         raise field_errors({"accept_risk": "Cần xác nhận đã đọc cảnh báo rủi ro tài khoản cá nhân"})
@@ -140,7 +141,7 @@ async def channel_login(type_: str, body: LoginIn, request: Request, user: servi
 @router.post("/channels/{type_}/logout", status_code=204)
 async def channel_logout(type_: str, request: Request, user: service.CurrentUser = Depends(MANAGE),
                          _pin: Any = Depends(require_pin("channel.logout")),
-                         db: AsyncSession = Depends(get_db)) -> Response:
+                         db: AsyncSession = DB) -> Response:
     ch = await _qr_channel(db, user.org_id, type_)
     rows = (await db.execute(text("""
         UPDATE core.channel_sessions SET state = 'logged_out', ended_at = now(), credential_enc = NULL
@@ -168,7 +169,7 @@ class ChannelPatch(BaseModel):
 @router.patch("/channels/{type_}")
 async def channel_patch(type_: str, body: ChannelPatch, request: Request, user: service.CurrentUser = Depends(MANAGE),
                         _pin: Any = Depends(require_pin("policy.change")),
-                        db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+                        db: AsyncSession = DB) -> dict[str, Any]:
     await _qr_channel(db, user.org_id, type_)
     await db.execute(text("""
         UPDATE core.organizations SET settings = jsonb_set(
@@ -198,7 +199,7 @@ FROM core.groups g JOIN core.channels c ON c.id = g.channel_id
 
 @router.get("/channels/{type_}/groups")
 async def channel_groups(type_: str, user: service.CurrentUser = Depends(READ),
-                         db: AsyncSession = Depends(get_db)) -> list[dict[str, Any]]:
+                         db: AsyncSession = DB) -> list[dict[str, Any]]:
     rows = (await db.execute(text(GROUP_SELECT + " WHERE c.org_id = :o AND c.type = :t ORDER BY g.name"),
                              {"o": user.org_id, "t": type_})).all()
     return [_group_out(r) for r in rows]
@@ -225,13 +226,14 @@ async def update_group(db: AsyncSession, redis: Any, user: service.CurrentUser, 
                                detail={"from": {k: getattr(cur, k) for k in changes}, "to": changes}, ip=user.ip)
         if "listen_mode" in changes:
             await sync_listen_sets(db, redis, user.org_id)
+            await publish_header(db, redis, user.org_id)
     r = (await db.execute(text(GROUP_SELECT + " WHERE g.id = :i"), {"i": gid})).one()
     return _group_out(r)
 
 
 @router.patch("/groups/{gid}")
 async def patch_group(gid: uuid.UUID, body: GroupPatch, request: Request, user: service.CurrentUser = Depends(MANAGE),
-                      db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+                      db: AsyncSession = DB) -> dict[str, Any]:
     return await update_group(db, request.app.state.redis, user, gid, body)
 
 
@@ -318,13 +320,13 @@ async def _one_provider(db: AsyncSession, redis: Any, org_id: uuid.UUID, pid: uu
 
 @router.get("/providers")
 async def providers(request: Request, user: service.CurrentUser = Depends(READ),
-                    db: AsyncSession = Depends(get_db)) -> list[dict[str, Any]]:
+                    db: AsyncSession = DB) -> list[dict[str, Any]]:
     return await provider_payloads(db, request.app.state.redis, user.org_id)
 
 
 @router.post("/providers", status_code=201)
 async def create_provider(body: ProviderIn, request: Request, user: service.CurrentUser = Depends(MANAGE),
-                          db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+                          db: AsyncSession = DB) -> dict[str, Any]:
     if body.kind == "openai_compat" and not body.endpoint:
         raise field_errors({"endpoint": "Cần endpoint cho API tương thích OpenAI"})
     if body.kind != "antigravity_cli" and not body.keys:
@@ -353,7 +355,7 @@ async def create_provider(body: ProviderIn, request: Request, user: service.Curr
 
 @router.patch("/providers/{pid}")
 async def patch_provider(pid: uuid.UUID, body: ProviderPatch, request: Request,
-                         user: service.CurrentUser = Depends(MANAGE), db: AsyncSession = Depends(get_db)
+                         user: service.CurrentUser = Depends(MANAGE), db: AsyncSession = DB
                          ) -> dict[str, Any]:
     p = await _provider(db, user.org_id, pid)
     if body.enabled is not None:
@@ -374,7 +376,7 @@ async def patch_provider(pid: uuid.UUID, body: ProviderPatch, request: Request,
 
 @router.post("/providers/{pid}/keys", status_code=201)
 async def add_key(pid: uuid.UUID, body: KeyIn, request: Request, user: service.CurrentUser = Depends(MANAGE),
-                  db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+                  db: AsyncSession = DB) -> dict[str, Any]:
     p = await _provider(db, user.org_id, pid)
     if p.kind == "antigravity_cli":
         raise conflict("CLI_NO_KEYS", "Antigravity CLI dùng phiên đăng nhập, không dùng khoá API")
@@ -388,7 +390,7 @@ async def add_key(pid: uuid.UUID, body: KeyIn, request: Request, user: service.C
 
 @router.delete("/providers/{pid}/keys/{kid}", status_code=204)
 async def delete_key(pid: uuid.UUID, kid: uuid.UUID, user: service.CurrentUser = Depends(MANAGE),
-                     db: AsyncSession = Depends(get_db)) -> Response:
+                     db: AsyncSession = DB) -> Response:
     p = await _provider(db, user.org_id, pid)
     row = (await db.execute(text("DELETE FROM agent.provider_keys WHERE id = :k AND provider_id = :p RETURNING label"),
                             {"k": kid, "p": pid})).one_or_none()
@@ -402,7 +404,7 @@ async def delete_key(pid: uuid.UUID, kid: uuid.UUID, user: service.CurrentUser =
 
 @router.post("/providers/{pid}/models", status_code=201)
 async def add_model(pid: uuid.UUID, body: ModelIn, request: Request, user: service.CurrentUser = Depends(MANAGE),
-                    db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+                    db: AsyncSession = DB) -> dict[str, Any]:
     p = await _provider(db, user.org_id, pid)
     await db.execute(text("""
         INSERT INTO agent.models (provider_id, model_name, daily_quota, rate_limit_per_min) VALUES (:p, :m, :q, :r)
@@ -416,7 +418,7 @@ async def add_model(pid: uuid.UUID, body: ModelIn, request: Request, user: servi
 
 @router.post("/providers/{pid}/test")
 async def test_provider(pid: uuid.UUID, request: Request, user: service.CurrentUser = Depends(MANAGE),
-                        db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+                        db: AsyncSession = DB) -> dict[str, Any]:
     p = await _provider(db, user.org_id, pid)
     await db.commit()
     result: dict[str, Any] = await request.app.state.model_router.test_provider(pid)
@@ -428,7 +430,7 @@ async def test_provider(pid: uuid.UUID, request: Request, user: service.CurrentU
 
 @router.get("/providers/credentials")
 async def credentials(request: Request, user: service.CurrentUser = Depends(READ),
-                      db: AsyncSession = Depends(get_db)) -> list[dict[str, Any]]:
+                      db: AsyncSession = DB) -> list[dict[str, Any]]:
     """Dòng thẻ "Khoá & phiên" (thiết kế `creds`): khoá API theo nhà cung cấp + khoá phiên QR theo kênh."""
     out: list[dict[str, Any]] = []
     for p in await provider_payloads(db, request.app.state.redis, user.org_id):
@@ -470,13 +472,13 @@ class CodeIn(BaseModel):
 
 @router.get("/cli/profiles")
 async def cli_profiles(user: service.CurrentUser = Depends(READ),
-                       db: AsyncSession = Depends(get_db)) -> list[dict[str, Any]]:
+                       db: AsyncSession = DB) -> list[dict[str, Any]]:
     return await climod.profiles(db, user.org_id)
 
 
 @router.post("/cli/login", status_code=202)
 async def cli_login(request: Request, user: service.CurrentUser = Depends(MANAGE),
-                    db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+                    db: AsyncSession = DB) -> dict[str, Any]:
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                            action="cli.login_started", target_type="cli", ip=user.ip)
     await db.commit()
@@ -505,7 +507,7 @@ async def cli_cancel(login_id: str, request: Request, user: service.CurrentUser 
 @router.post("/cli/profiles/{profile_id}/activate")
 async def cli_activate(profile_id: uuid.UUID, user: service.CurrentUser = Depends(MANAGE),
                        _pin: Any = Depends(require_pin("cli.switch_account")),
-                       db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+                       db: AsyncSession = DB) -> dict[str, Any]:
     out = await climod.activate(db, user.org_id, profile_id)
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                            action="cli.account_switched", target_type="cli_profile", target_id=out["id"],
@@ -516,7 +518,7 @@ async def cli_activate(profile_id: uuid.UUID, user: service.CurrentUser = Depend
 @router.delete("/cli/profiles/{profile_id}", status_code=204)
 async def cli_delete(profile_id: uuid.UUID, user: service.CurrentUser = Depends(MANAGE),
                      _pin: Any = Depends(require_pin("cli.switch_account")),
-                     db: AsyncSession = Depends(get_db)) -> Response:
+                     db: AsyncSession = DB) -> Response:
     out = await climod.delete_profile(db, user.org_id, profile_id)
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                            action="cli.profile_deleted", target_type="cli_profile", target_id=str(profile_id),

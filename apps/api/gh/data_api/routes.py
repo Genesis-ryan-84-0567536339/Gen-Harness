@@ -27,7 +27,7 @@ from gh.data.common import (
     ref,
     since_cutoff,
 )
-from gh.db import get_db
+from gh.db import DB
 from gh.errors import ApiError, conflict, field_errors, not_found
 from gh.identity import service as identity
 from gh.memory import notebook
@@ -35,7 +35,7 @@ from gh.providers.router import ModelUnavailable
 from gh.refinery import extract, scoring
 from gh.refinery.presets import DEFAULT_WEIGHTS
 from gh.refinery.rules import KINDS, EventCtx, apply_outputs, evaluate, validate
-from gh.refinery.runner import AGENT_KEY, event_types, load_rules, load_schedule
+from gh.refinery.runner import AGENT_KEY, event_types, load_rules, load_schedule, run_out
 from gh.refinery.scheduler import next_run
 
 router = APIRouter(tags=["data"])
@@ -66,7 +66,7 @@ def _uuid(v: str | None, field: str) -> uuid.UUID | None:
 # ─── Dải pipeline ───────────────────────────────────────────────────────────
 
 @router.get("/data/pipeline")
-async def pipeline(user: service.CurrentUser = Depends(READ), db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+async def pipeline(user: service.CurrentUser = Depends(READ), db: AsyncSession = DB) -> dict[str, Any]:
     o = user.org_id
     r = (await db.execute(text("""
         SELECT
@@ -119,7 +119,7 @@ async def raw_list(request: Request, cursor: str | None = None, limit: int = Que
                    state: Literal["pending", "processing", "clean", "lowconf", "discarded", "error"] | None = None,
                    since: str | None = "24h", label: str | None = None,
                    min_confidence: float | None = Query(None, ge=0, le=1),
-                   user: service.CurrentUser = Depends(READ), db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+                   user: service.CurrentUser = Depends(READ), db: AsyncSession = DB) -> dict[str, Any]:
     where, params = _raw_filters(channel, group_id, state, since, label, min_confidence)
     params["o"] = user.org_id
     total = (await db.execute(text(f"""
@@ -143,7 +143,7 @@ async def raw_list(request: Request, cursor: str | None = None, limit: int = Que
 @router.get("/raw/by-group")
 async def raw_by_group(since: str | None = "24h", limit: int = Query(7, ge=1, le=50),
                        user: service.CurrentUser = Depends(READ),
-                       db: AsyncSession = Depends(get_db)) -> list[dict[str, Any]]:
+                       db: AsyncSession = DB) -> list[dict[str, Any]]:
     cut = since_cutoff(since) or datetime(1970, 1, 1, tzinfo=UTC)
     rows = (await db.execute(text("""
         SELECT g.id, g.code, g.name, count(*) AS n FROM raw.events e JOIN core.groups g ON g.id = e.group_id
@@ -157,7 +157,7 @@ async def raw_export(channel: Literal["zalo", "whatsapp", "telegram"] | None = N
                      state: str | None = None, since: str | None = "24h", label: str | None = None,
                      min_confidence: float | None = Query(None, ge=0, le=1),
                      user: service.CurrentUser = Depends(MANAGE), _pin: Any = Depends(require_pin("data.export")),
-                     db: AsyncSession = Depends(get_db)) -> Response:
+                     db: AsyncSession = DB) -> Response:
     where, params = _raw_filters(channel, group_id, state, since, label, min_confidence)
     rows = (await db.execute(text(RAW_SELECT + where + " ORDER BY e.seq DESC LIMIT 100000"),
                              {**params, "o": user.org_id})).all()
@@ -181,7 +181,7 @@ async def raw_export(channel: Literal["zalo", "whatsapp", "telegram"] | None = N
 
 @router.get("/raw/{event_id}")
 async def raw_detail(event_id: uuid.UUID, user: service.CurrentUser = Depends(READ),
-                     db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+                     db: AsyncSession = DB) -> dict[str, Any]:
     r = await fetch_raw(db, event_id)
     if r is None or (await db.execute(text("SELECT org_id FROM raw.events WHERE id = :i"),
                                       {"i": event_id})).scalar() != user.org_id:
@@ -209,13 +209,13 @@ class ScheduleIn(BaseModel):
 
 @router.get("/refinery/schedule")
 async def get_schedule(request: Request, user: service.CurrentUser = Depends(READ),
-                       db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+                       db: AsyncSession = DB) -> dict[str, Any]:
     return await next_run(db, request.app.state.redis, user.org_id)
 
 
 @router.put("/refinery/schedule")
 async def put_schedule(body: ScheduleIn, request: Request, user: service.CurrentUser = Depends(MANAGE),
-                       db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+                       db: AsyncSession = DB) -> dict[str, Any]:
     await save_schedule(db, user.org_id, body)
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                            action="refinery.schedule_changed", target_type="refinery", detail=body.model_dump(),
@@ -234,7 +234,7 @@ async def save_schedule(db: AsyncSession, org_id: uuid.UUID, body: ScheduleIn) -
 
 
 @router.post("/refinery/run", status_code=202)
-async def run_now(user: service.CurrentUser = Depends(MANAGE), db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+async def run_now(user: service.CurrentUser = Depends(MANAGE), db: AsyncSession = DB) -> dict[str, Any]:
     await db.execute(text("SELECT pg_advisory_xact_lock(hashtext('refinery.manual:' || :o))"),
                      {"o": str(user.org_id)})
     busy = (await db.execute(text("""SELECT 1 FROM refinery.runs WHERE org_id = :o AND trigger = 'manual'
@@ -251,15 +251,12 @@ async def run_now(user: service.CurrentUser = Depends(MANAGE), db: AsyncSession 
     return {"run_id": str(run_id)}
 
 
-def _run_out(r: Any) -> dict[str, Any]:
-    return {"id": str(r.id), "trigger": r.trigger, "started_at": iso(r.started_at), "finished_at": iso(r.finished_at),
-            "input_count": r.input_count, "clean_count": r.clean_count, "lowconf_count": r.lowconf_count,
-            "noise_count": r.noise_count, "error_count": r.error_count, "status": r.status, "error": r.error}
+_run_out = run_out
 
 
 @router.get("/refinery/runs")
 async def runs(limit: int = Query(5, ge=1, le=100), user: service.CurrentUser = Depends(READ),
-               db: AsyncSession = Depends(get_db)) -> list[dict[str, Any]]:
+               db: AsyncSession = DB) -> list[dict[str, Any]]:
     rows = (await db.execute(text("""SELECT * FROM refinery.runs WHERE org_id = :o
                                      ORDER BY started_at DESC LIMIT :n"""), {"o": user.org_id, "n": limit})).all()
     return [_run_out(r) for r in rows]
@@ -342,13 +339,13 @@ async def _version(db: AsyncSession, rule_id: uuid.UUID, version: int, body: Rul
 
 @router.get("/rules")
 async def list_rules(user: service.CurrentUser = Depends(READ),
-                     db: AsyncSession = Depends(get_db)) -> list[dict[str, Any]]:
+                     db: AsyncSession = DB) -> list[dict[str, Any]]:
     return await rule_payloads(db, user.org_id)
 
 
 @router.post("/rules", status_code=201)
 async def post_rule(body: RuleIn, user: service.CurrentUser = Depends(MANAGE),
-                    db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+                    db: AsyncSession = DB) -> dict[str, Any]:
     _check_rule(body)
     rule_id = await create_rule(db, user.org_id, body, user.id)
     out = await _one_rule(db, user.org_id, rule_id)
@@ -359,7 +356,7 @@ async def post_rule(body: RuleIn, user: service.CurrentUser = Depends(MANAGE),
 
 @router.put("/rules/weights")
 async def put_weights(body: list[dict[str, Any]], user: service.CurrentUser = Depends(MANAGE),
-                      db: AsyncSession = Depends(get_db)) -> list[dict[str, Any]]:
+                      db: AsyncSession = DB) -> list[dict[str, Any]]:
     await save_weights(db, user.org_id, body)
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                            action="rule.weights_changed", target_type="scoring_weights",
@@ -393,7 +390,7 @@ async def weights_payload(db: AsyncSession, org_id: uuid.UUID) -> list[dict[str,
 
 @router.get("/rules/weights")
 async def get_weights(user: service.CurrentUser = Depends(READ),
-                      db: AsyncSession = Depends(get_db)) -> list[dict[str, Any]]:
+                      db: AsyncSession = DB) -> list[dict[str, Any]]:
     return await weights_payload(db, user.org_id)
 
 
@@ -406,7 +403,7 @@ class RuleTestIn(BaseModel):
 
 @router.post("/rules/test")
 async def test_rule(body: RuleTestIn, request: Request, user: service.CurrentUser = Depends(READ),
-                    db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+                    db: AsyncSession = DB) -> dict[str, Any]:
     """Thử quy tắc trên một tin — không ghi gì vào kho (chỉ lượt gọi model được tính hạn mức)."""
     if body.raw_event_id:
         r = await fetch_raw(db, body.raw_event_id)
@@ -493,7 +490,7 @@ class TestBatchIn(BaseModel):
 
 @router.post("/rules/test-batch")
 async def test_batch(body: TestBatchIn, user: service.CurrentUser = Depends(READ),
-                     db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+                     db: AsyncSession = DB) -> dict[str, Any]:
     """Chạy thử bộ quy tắc hiện tại trên n tin gần nhất — chỉ bước tất định, không gọi model, không ghi."""
     rules = await load_rules(db, user.org_id)
     rows = (await db.execute(text("""SELECT body_text, kind FROM raw.events WHERE org_id = :o
@@ -516,7 +513,7 @@ async def test_batch(body: TestBatchIn, user: service.CurrentUser = Depends(READ
 
 @router.get("/rules/{rule_id}/versions")
 async def rule_versions(rule_id: uuid.UUID, user: service.CurrentUser = Depends(READ),
-                        db: AsyncSession = Depends(get_db)) -> list[dict[str, Any]]:
+                        db: AsyncSession = DB) -> list[dict[str, Any]]:
     await _one_rule(db, user.org_id, rule_id)
     rows = (await db.execute(text("""
         SELECT v.version, v.conditions, v.outputs, v.threshold, v.prompt_hint, v.created_at, u.display_name
@@ -529,7 +526,7 @@ async def rule_versions(rule_id: uuid.UUID, user: service.CurrentUser = Depends(
 
 @router.put("/rules/{rule_id}")
 async def put_rule(rule_id: uuid.UUID, body: RuleIn, user: service.CurrentUser = Depends(MANAGE),
-                   db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+                   db: AsyncSession = DB) -> dict[str, Any]:
     _check_rule(body)
     cur = (await db.execute(text("""SELECT current_version FROM refinery.rules WHERE id = :i AND org_id = :o
                                     FOR UPDATE"""), {"i": rule_id, "o": user.org_id})).scalar_one_or_none()
@@ -547,7 +544,7 @@ async def put_rule(rule_id: uuid.UUID, body: RuleIn, user: service.CurrentUser =
 
 @router.patch("/rules/{rule_id}")
 async def patch_rule(rule_id: uuid.UUID, body: RulePatch, user: service.CurrentUser = Depends(MANAGE),
-                     db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+                     db: AsyncSession = DB) -> dict[str, Any]:
     n = (await db.execute(text("""UPDATE refinery.rules SET is_enabled = :e, updated_at = now()
                                   WHERE id = :i AND org_id = :o"""),
                           {"e": body.enabled, "i": rule_id, "o": user.org_id})).rowcount  # type: ignore[attr-defined]
@@ -578,7 +575,7 @@ LEFT JOIN refinery.runs r ON r.id = m.run_id
 @router.get("/clean")
 async def clean_list(cursor: str | None = None, limit: int = Query(50, ge=1, le=200), group_id: str | None = None,
                      person_id: str | None = None, since: str | None = "7d",
-                     user: service.CurrentUser = Depends(READ), db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+                     user: service.CurrentUser = Depends(READ), db: AsyncSession = DB) -> dict[str, Any]:
     where = ["m.org_id = :o", "m.superseded_by IS NULL"]
     params: dict[str, Any] = {"o": user.org_id}
     if (gid := _uuid(group_id, "group_id")) is not None:
@@ -613,7 +610,7 @@ async def clean_list(cursor: str | None = None, limit: int = Query(50, ge=1, le=
 
 @router.get("/clean/agent-params")
 async def agent_params(group_id: str | None = None, person_id: str | None = None,
-                       user: service.CurrentUser = Depends(READ), db: AsyncSession = Depends(get_db)
+                       user: service.CurrentUser = Depends(READ), db: AsyncSession = DB
                        ) -> list[dict[str, Any]]:
     """Tham số agent đọc khi trực (thiết kế `agentParams`) — số thật từ kho sạch và sổ tay."""
     gid, pid = _uuid(group_id, "group_id"), _uuid(person_id, "person_id")
@@ -650,7 +647,7 @@ async def agent_params(group_id: str | None = None, person_id: str | None = None
 
 @router.get("/clean/{unit_id}/evidence")
 async def clean_evidence(unit_id: uuid.UUID, user: service.CurrentUser = Depends(READ),
-                         db: AsyncSession = Depends(get_db)) -> list[dict[str, Any]]:
+                         db: AsyncSession = DB) -> list[dict[str, Any]]:
     rows = (await db.execute(text("""
         SELECT x.raw_event_id, x.quote FROM clean.evidence x JOIN clean.meaning_units m ON m.id = x.meaning_unit_id
         WHERE x.meaning_unit_id = :u AND m.org_id = :o"""), {"u": unit_id, "o": user.org_id})).all()
@@ -715,13 +712,13 @@ NB_WRITE = require("profile.write")
 
 @router.get("/notebooks/{type_}/{sid}")
 async def get_notebook(type_: Literal["person", "group"], sid: uuid.UUID, user: service.CurrentUser = Depends(NB_READ),
-                       db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+                       db: AsyncSession = DB) -> dict[str, Any]:
     return await notebook_payload(db, user.org_id, type_, sid)
 
 
 @router.post("/notebooks/{type_}/{sid}/entries", status_code=201)
 async def add_entry(type_: Literal["person", "group"], sid: uuid.UUID, body: EntryIn,
-                    user: service.CurrentUser = Depends(NB_WRITE), db: AsyncSession = Depends(get_db)
+                    user: service.CurrentUser = Depends(NB_WRITE), db: AsyncSession = DB
                     ) -> dict[str, Any]:
     if body.section not in notebook.SECTIONS:
         raise field_errors({"section": "Mục không hợp lệ"})
@@ -746,7 +743,7 @@ async def _entry(db: AsyncSession, org_id: uuid.UUID, type_: str, sid: uuid.UUID
 
 @router.patch("/notebooks/{type_}/{sid}/entries/{eid}")
 async def patch_entry(type_: Literal["person", "group"], sid: uuid.UUID, eid: uuid.UUID, body: EntryPatch,
-                      user: service.CurrentUser = Depends(NB_WRITE), db: AsyncSession = Depends(get_db)
+                      user: service.CurrentUser = Depends(NB_WRITE), db: AsyncSession = DB
                       ) -> dict[str, Any]:
     e = await _entry(db, user.org_id, type_, sid, eid)
     new_id = eid
@@ -772,7 +769,7 @@ async def patch_entry(type_: Literal["person", "group"], sid: uuid.UUID, eid: uu
 
 @router.delete("/notebooks/{type_}/{sid}/entries/{eid}", status_code=204)
 async def delete_entry(type_: Literal["person", "group"], sid: uuid.UUID, eid: uuid.UUID,
-                       user: service.CurrentUser = Depends(NB_WRITE), db: AsyncSession = Depends(get_db)) -> Response:
+                       user: service.CurrentUser = Depends(NB_WRITE), db: AsyncSession = DB) -> Response:
     e = await _entry(db, user.org_id, type_, sid, eid)
     await db.execute(text("UPDATE memory.entries SET archived_at = now() WHERE id = :e"), {"e": eid})
     await notebook.recount(db, e.notebook_id)
@@ -784,7 +781,7 @@ async def delete_entry(type_: Literal["person", "group"], sid: uuid.UUID, eid: u
 
 @router.post("/notebooks/{type_}/{sid}/compact")
 async def compact_now(type_: Literal["person", "group"], sid: uuid.UUID, user: service.CurrentUser = Depends(NB_WRITE),
-                      db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+                      db: AsyncSession = DB) -> dict[str, Any]:
     await _subject(db, user.org_id, type_, sid)
     nb = await notebook.ensure(db, user.org_id, type_, sid)
     info = await notebook.compact(db, nb.id, reason="manual")
@@ -796,7 +793,7 @@ async def compact_now(type_: Literal["person", "group"], sid: uuid.UUID, user: s
 
 @router.get("/notebooks/{type_}/{sid}/compactions")
 async def compactions(type_: Literal["person", "group"], sid: uuid.UUID, user: service.CurrentUser = Depends(NB_READ),
-                      db: AsyncSession = Depends(get_db)) -> list[dict[str, Any]]:
+                      db: AsyncSession = DB) -> list[dict[str, Any]]:
     await _subject(db, user.org_id, type_, sid)
     rows = (await db.execute(text("""
         SELECT c.compaction_no, c.at, c.tokens_before, c.tokens_after, cardinality(c.archived_entries) AS n, c.summary
@@ -816,20 +813,20 @@ class SplitIn(BaseModel):
 
 @router.get("/identity/stats")
 async def identity_stats(user: service.CurrentUser = Depends(READ),
-                         db: AsyncSession = Depends(get_db)) -> dict[str, int]:
+                         db: AsyncSession = DB) -> dict[str, int]:
     return await identity.stats(db, user.org_id)
 
 
 @router.get("/identity/candidates")
 async def identity_candidates(status: Literal["pending", "merged", "rejected"] = "pending",
                               user: service.CurrentUser = Depends(READ),
-                              db: AsyncSession = Depends(get_db)) -> list[dict[str, Any]]:
+                              db: AsyncSession = DB) -> list[dict[str, Any]]:
     return await identity.candidates(db, user.org_id, status)
 
 
 @router.get("/identity/candidates/{cid}/evidence")
 async def identity_evidence(cid: uuid.UUID, user: service.CurrentUser = Depends(READ),
-                            db: AsyncSession = Depends(get_db)) -> list[dict[str, Any]]:
+                            db: AsyncSession = DB) -> list[dict[str, Any]]:
     out = await identity.evidence(db, user.org_id, cid)
     for item in out:
         item["raw"]["text"] = _mask(item["raw"]["text"], user)
@@ -839,7 +836,7 @@ async def identity_evidence(cid: uuid.UUID, user: service.CurrentUser = Depends(
 @router.post("/identity/candidates/{cid}/merge")
 async def identity_merge(cid: uuid.UUID, user: service.CurrentUser = Depends(MANAGE),
                          _pin: Any = Depends(require_pin("identity.merge")),
-                         db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+                         db: AsyncSession = DB) -> dict[str, Any]:
     out = await identity.merge(db, user.org_id, cid, user.id)
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                            action="identity.merged", target_type="person", target_id=out["person"]["code"],
@@ -851,7 +848,7 @@ async def identity_merge(cid: uuid.UUID, user: service.CurrentUser = Depends(MAN
 
 @router.post("/identity/candidates/{cid}/reject")
 async def identity_reject(cid: uuid.UUID, user: service.CurrentUser = Depends(MANAGE),
-                          db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+                          db: AsyncSession = DB) -> dict[str, Any]:
     n = (await db.execute(text("""UPDATE core.identity_merge_candidates SET status = 'rejected', decided_by = :u,
                                   decided_at = now() WHERE id = :i AND org_id = :o AND status = 'pending'"""),
                           {"u": user.id, "i": cid, "o": user.org_id})).rowcount  # type: ignore[attr-defined]
@@ -866,7 +863,7 @@ async def identity_reject(cid: uuid.UUID, user: service.CurrentUser = Depends(MA
 @router.post("/identity/split")
 async def identity_split(body: SplitIn, user: service.CurrentUser = Depends(MANAGE),
                          _pin: Any = Depends(require_pin("identity.merge")),
-                         db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+                         db: AsyncSession = DB) -> dict[str, Any]:
     out = await identity.split(db, user.org_id, body.person_id, body.identity_ids, user.id)
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                            action="identity.split", target_type="person", target_id=out["from"]["code"],
@@ -878,14 +875,14 @@ async def identity_split(body: SplitIn, user: service.CurrentUser = Depends(MANA
 
 @router.get("/identity/history")
 async def identity_history(user: service.CurrentUser = Depends(READ),
-                           db: AsyncSession = Depends(get_db)) -> list[dict[str, Any]]:
+                           db: AsyncSession = DB) -> list[dict[str, Any]]:
     return await identity.history(db, user.org_id)
 
 
 @router.post("/identity/history/{log_id}/revert")
 async def identity_revert(log_id: uuid.UUID, user: service.CurrentUser = Depends(MANAGE),
                           _pin: Any = Depends(require_pin("identity.merge")),
-                          db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+                          db: AsyncSession = DB) -> dict[str, Any]:
     out = await identity.revert(db, user.org_id, log_id, user.id)
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                            action="identity.reverted", target_type="identity_log", target_id=str(log_id),

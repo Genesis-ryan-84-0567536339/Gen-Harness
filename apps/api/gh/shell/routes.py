@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gh.auth import service
 from gh.auth.deps import current_user
 from gh.chassis import policy
-from gh.db import get_db, sessionmaker
+from gh.db import DB, sessionmaker
 from gh.errors import JsonResponse
 from gh.shell import navigation
 
@@ -24,24 +24,36 @@ async def _badges(db: AsyncSession, user: service.CurrentUser) -> dict[str, int 
 
 @router.get("/navigation")
 async def get_navigation(user: service.CurrentUser = Depends(current_user),
-                         db: AsyncSession = Depends(get_db)) -> list[dict[str, Any]]:
+                         db: AsyncSession = DB) -> list[dict[str, Any]]:
     return navigation.build(user.permissions, await _badges(db, user))
+
+
+async def header_payload(db: AsyncSession, org_id: Any) -> dict[str, Any]:
+    channels_live = (await db.execute(text("""
+        SELECT count(DISTINCT c.id) FROM core.channels c JOIN core.channel_sessions s ON s.channel_id = c.id
+        WHERE c.org_id = :o AND s.state = 'active' AND s.ended_at IS NULL"""), {"o": org_id})).scalar_one()
+    groups = (await db.execute(text("""
+        SELECT count(*) FROM core.groups WHERE org_id = :o AND listen_mode IN ('tagged_only','silent','proactive')"""),
+        {"o": org_id})).scalar_one()
+    settings = (await db.execute(text("SELECT settings FROM core.organizations WHERE id = :o"),
+                                 {"o": org_id})).scalar_one() or {}
+    # Độ tin cậy dữ liệu: spec chưa định nghĩa công thức → để trống, chờ Owner chốt.
+    return {"channels_live": channels_live, "groups_listening": groups,
+            "autonomy_level": int(settings.get("autonomy_level", policy.DEFAULT_AUTONOMY)),
+            "data_confidence": None}
+
+
+async def publish_header(db: AsyncSession, redis: Any, org_id: Any) -> None:
+    """Đẩy số kênh/nhóm mới lên thanh đầu trang của mọi Console đang mở."""
+    from gh import realtime
+
+    await realtime.publish(redis, "header", await header_payload(db, org_id), org_id=org_id)
 
 
 @router.get("/header")
 async def get_header(user: service.CurrentUser = Depends(current_user),
-                     db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
-    channels_live = (await db.execute(text("""
-        SELECT count(DISTINCT c.id) FROM core.channels c JOIN core.channel_sessions s ON s.channel_id = c.id
-        WHERE c.org_id = :o AND s.state = 'active' AND s.ended_at IS NULL"""), {"o": user.org_id})).scalar_one()
-    groups = (await db.execute(text("""
-        SELECT count(*) FROM core.groups WHERE org_id = :o AND listen_mode IN ('tagged_only','silent','proactive')"""),
-        {"o": user.org_id})).scalar_one()
-    settings = (await db.execute(text("SELECT settings FROM core.organizations WHERE id = :o"),
-                                 {"o": user.org_id})).scalar_one() or {}
-    return {"channels_live": channels_live, "groups_listening": groups,
-            "autonomy_level": int(settings.get("autonomy_level", policy.DEFAULT_AUTONOMY)),
-            "data_confidence": None}
+                     db: AsyncSession = DB) -> dict[str, Any]:
+    return await header_payload(db, user.org_id)
 
 
 @router.get("/health")

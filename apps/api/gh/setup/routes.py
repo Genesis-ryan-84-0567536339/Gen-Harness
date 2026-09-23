@@ -18,7 +18,7 @@ from gh.auth.routes import set_session_cookies
 from gh.chassis import actionlog
 from gh.crypto import hash_secret, token_digest
 from gh.data_api.routes import RuleIn, ScheduleIn, create_rule, save_schedule, save_weights
-from gh.db import get_db
+from gh.db import DB
 from gh.errors import ApiError, conflict, field_errors, forbidden, unauthenticated
 from gh.refinery import presets
 from gh.refinery.runner import load_schedule
@@ -131,12 +131,12 @@ def _owner_of(row: Any, user: service.CurrentUser | None) -> service.CurrentUser
 
 
 @router.get("/state")
-async def get_state(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+async def get_state(db: AsyncSession = DB) -> dict[str, Any]:
     return state_payload(await _row(db))
 
 
 @router.put("/steps/1")
-async def step1(body: Step1In, request: Request, db: AsyncSession = Depends(get_db),
+async def step1(body: Step1In, request: Request, db: AsyncSession = DB,
                 user: service.CurrentUser | None = Depends(optional_user)) -> dict[str, Any]:
     row = await _row(db)
     _not_finished(row)
@@ -159,7 +159,7 @@ async def step1(body: Step1In, request: Request, db: AsyncSession = Depends(get_
 
 @router.put("/steps/2")
 async def step2(body: Step2In, request: Request, response: Response,
-                db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+                db: AsyncSession = DB) -> dict[str, Any]:
     row = await _row(db)
     _not_finished(row)
     completed = dict(row.completed or {})
@@ -208,7 +208,7 @@ async def step2(body: Step2In, request: Request, response: Response,
 
 
 @router.put("/steps/3")
-async def step3(body: Step3In, request: Request, db: AsyncSession = Depends(get_db),
+async def step3(body: Step3In, request: Request, db: AsyncSession = DB,
                 user: service.CurrentUser | None = Depends(optional_user)) -> dict[str, Any]:
     row = await _row(db)
     _not_finished(row)
@@ -248,7 +248,7 @@ async def step3(body: Step3In, request: Request, db: AsyncSession = Depends(get_
 
 
 @router.post("/steps/{n}/skip")
-async def skip(n: int, request: Request, db: AsyncSession = Depends(get_db),
+async def skip(n: int, request: Request, db: AsyncSession = DB,
                user: service.CurrentUser | None = Depends(optional_user)) -> dict[str, Any]:
     row = await _row(db)
     _not_finished(row)
@@ -320,7 +320,7 @@ async def _owner_step(db: AsyncSession, user: service.CurrentUser | None) -> tup
 
 
 @router.put("/steps/4")
-async def step4(body: Step4In, request: Request, db: AsyncSession = Depends(get_db),
+async def step4(body: Step4In, request: Request, db: AsyncSession = DB,
                 user: service.CurrentUser | None = Depends(optional_user)) -> dict[str, Any]:
     """Bộ não AI: thứ tự ưu tiên chuyển dự phòng. Cần ít nhất một nhà cung cấp đã gọi thử thành công."""
     row, owner = await _owner_step(db, user)
@@ -342,7 +342,7 @@ async def step4(body: Step4In, request: Request, db: AsyncSession = Depends(get_
 
 
 @router.put("/steps/5")
-async def step5(request: Request, db: AsyncSession = Depends(get_db),
+async def step5(request: Request, db: AsyncSession = DB,
                 user: service.CurrentUser | None = Depends(optional_user)) -> dict[str, Any]:
     """Kết nối kênh: cần ít nhất một kênh đang hoạt động (quét QR xong)."""
     row, owner = await _owner_step(db, user)
@@ -355,7 +355,7 @@ async def step5(request: Request, db: AsyncSession = Depends(get_db),
 
 
 @router.put("/steps/6")
-async def step6(body: Step6In, request: Request, db: AsyncSession = Depends(get_db),
+async def step6(body: Step6In, request: Request, db: AsyncSession = DB,
                 user: service.CurrentUser | None = Depends(optional_user)) -> dict[str, Any]:
     """Chọn nhóm lắng nghe: lưu chế độ từng nhóm; cần ít nhất một nhóm khác \"tắt\"."""
     row, owner = await _owner_step(db, user)
@@ -371,7 +371,7 @@ async def step6(body: Step6In, request: Request, db: AsyncSession = Depends(get_
 
 
 @router.get("/rule-presets")
-async def rule_presets(db: AsyncSession = Depends(get_db),
+async def rule_presets(db: AsyncSession = DB,
                        user: service.CurrentUser | None = Depends(optional_user)) -> list[dict[str, Any]]:
     _owner_of(await _row(db), user)
     return [{k: p[k] for k in ("code", "name", "kind", "threshold", "enabled", "conditions", "outputs",
@@ -379,7 +379,7 @@ async def rule_presets(db: AsyncSession = Depends(get_db),
 
 
 @router.put("/steps/7")
-async def step7(body: Step7In, request: Request, db: AsyncSession = Depends(get_db),
+async def step7(body: Step7In, request: Request, db: AsyncSession = DB,
                 user: service.CurrentUser | None = Depends(optional_user)) -> dict[str, Any]:
     """Sàng lọc: lịch chạy (chu kỳ HOẶC ngưỡng), bộ quy tắc khởi đầu, trọng số chấm điểm."""
     row, owner = await _owner_step(db, user)
@@ -410,7 +410,7 @@ async def step7(body: Step7In, request: Request, db: AsyncSession = Depends(get_
 
 
 @router.get("/first-run")
-async def first_run(db: AsyncSession = Depends(get_db),
+async def first_run(db: AsyncSession = DB,
                     user: service.CurrentUser | None = Depends(optional_user)) -> dict[str, Any]:
     """Số liệu lượt sàng lọc đầu tiên cho bước 12 (cập nhật trực tiếp qua WS `refinery.progress`)."""
     row = await _row(db)
@@ -438,7 +438,7 @@ async def first_run(db: AsyncSession = Depends(get_db),
 
 
 @router.put("/steps/12")
-async def step12(request: Request, db: AsyncSession = Depends(get_db),
+async def step12(request: Request, db: AsyncSession = DB,
                  user: service.CurrentUser | None = Depends(optional_user)) -> dict[str, Any]:
     """Hoàn tất: chỉ khi mọi bước bắt buộc đã xong. Bước chưa có ở giai đoạn này → báo rõ bước nào còn thiếu."""
     row, owner = await _owner_step(db, user)

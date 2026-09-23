@@ -12,7 +12,7 @@ from gh.auth import service
 from gh.auth.deps import client_ip, current_user, require_pin
 from gh.chassis import actionlog
 from gh.config import get_settings
-from gh.db import get_db
+from gh.db import DB
 from gh.errors import ApiError, field_errors
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -64,7 +64,7 @@ def _iso(dt: datetime | None) -> str | None:
 
 @router.post("/login")
 async def login(body: LoginIn, request: Request, response: Response,
-                db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+                db: AsyncSession = DB) -> dict[str, Any]:
     found = await service.login(db, body.email, body.password)
     ip = client_ip(request)
     if found is None:
@@ -86,7 +86,7 @@ async def login(body: LoginIn, request: Request, response: Response,
 
 @router.post("/logout", status_code=204)
 async def logout(response: Response, user: service.CurrentUser = Depends(current_user),
-                 db: AsyncSession = Depends(get_db)) -> Response:
+                 db: AsyncSession = DB) -> Response:
     await service.revoke_session(db, user.session_id)
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                            action="auth.logout", ip=user.ip)
@@ -97,13 +97,13 @@ async def logout(response: Response, user: service.CurrentUser = Depends(current
 
 @router.get("/me")
 async def me(user: service.CurrentUser = Depends(current_user),
-             db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+             db: AsyncSession = DB) -> dict[str, Any]:
     return await me_payload(db, user)
 
 
 @router.post("/pin/verify")
 async def pin_verify(body: PinIn, user: service.CurrentUser = Depends(current_user),
-                     db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+                     db: AsyncSession = DB) -> dict[str, Any]:
     result = await service.verify_pin(db, user, body.pin)
     if result.ok:
         return {"pin_verified_until": _iso(result.pin_verified_until)}
@@ -117,7 +117,7 @@ async def pin_verify(body: PinIn, user: service.CurrentUser = Depends(current_us
 @router.put("/pin", status_code=204)
 async def pin_change(body: PinChangeIn, response: Response,
                      user: service.CurrentUser = Depends(require_pin("pin.change")),
-                     db: AsyncSession = Depends(get_db)) -> Response:
+                     db: AsyncSession = DB) -> Response:
     if not service.valid_pin(body.new_pin):
         raise field_errors({"new_pin": "PIN gồm đúng 6 chữ số"})
     check = await service.verify_pin(db, user, body.current_pin)

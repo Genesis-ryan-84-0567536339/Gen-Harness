@@ -2,6 +2,7 @@
 
 from collections.abc import AsyncIterator
 
+from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
 from gh.config import get_settings
@@ -32,7 +33,11 @@ async def dispose_engine() -> None:
 
 
 async def get_db() -> AsyncIterator[AsyncSession]:
-    """Dependency FastAPI: một transaction cho mỗi request, commit khi thành công."""
+    """Dependency FastAPI: một transaction cho mỗi request, commit khi thành công.
+
+    Luôn khai báo `DB`: commit xong rồi mới gửi phản hồi, để request kế tiếp
+    của client (vd. thử lại sau khi nhập PIN) đọc được dữ liệu vừa ghi.
+    """
     async with sessionmaker()() as session:
         try:
             yield session
@@ -40,3 +45,7 @@ async def get_db() -> AsyncIterator[AsyncSession]:
         except BaseException:
             await session.rollback()
             raise
+
+
+# Mặc định của FastAPI chạy phần sau `yield` SAU khi đã gửi phản hồi → client có thể đọc trước khi commit.
+DB = Depends(get_db, scope="function")

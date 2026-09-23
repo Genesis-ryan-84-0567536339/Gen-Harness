@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gh.auth import rbac, service
 from gh.auth.deps import require
 from gh.chassis import actionlog
-from gh.db import get_db
+from gh.db import DB
 from gh.errors import ApiError
 
 router = APIRouter(prefix="/audit", tags=["audit"])
@@ -41,7 +41,7 @@ async def _team_actor_ids(db: AsyncSession, user: service.CurrentUser) -> list[s
 async def list_audit(cursor: str | None = None, limit: int = Query(50, ge=1, le=200),
                      actor_type: str | None = None, action: str | None = None,
                      user: service.CurrentUser = Depends(require("audit.read")),
-                     db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+                     db: AsyncSession = DB) -> dict[str, Any]:
     where = ["a.org_id = :o"]
     params: dict[str, Any] = {"o": user.org_id, "lim": limit + 1}
     if user.permissions.get("audit.read") == rbac.TEAM:
@@ -77,7 +77,7 @@ async def list_audit(cursor: str | None = None, limit: int = Query(50, ge=1, le=
 
 @router.get("/verify")
 async def verify(user: service.CurrentUser = Depends(require("audit.read", rbac.ALL)),
-                 db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+                 db: AsyncSession = DB) -> dict[str, Any]:
     report = await actionlog.verify_chain(db, user.org_id)
     return {"ok": report.ok, "checked": report.checked,
             "broken_at": str(report.broken_at) if report.broken_at else None}
