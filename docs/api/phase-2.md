@@ -30,7 +30,7 @@ Quyền: màn dữ liệu cần `data.read`; ghi (quy tắc, lịch, chạy ngay
   Nhãn trạng thái (web): pending "Chờ chu kỳ tới", processing "Đang phân loại", clean "Đã vào kho sạch", lowconf "Tin cậy thấp", discarded "Loại — nhiễu", error "Lỗi xử lý".
 - `GET /raw/{id}` → dòng trên + `"payload": {…nguyên văn từ bridge}`, `"meaning_units": [{"id","event_type","conclusion"}]`.
 - `GET /raw/by-group?since=24h&limit=7` → `[{"group": {"id","code","name"}, "n": 812}]` (sắp giảm dần).
-- `GET /raw/export?…cùng bộ lọc…` 🔒 (`data.export_delete`) → `text/csv; charset=utf-8`.
+- `GET /raw/export?…cùng bộ lọc…` (`data.manage`) 🔒 PIN `data.export` → `text/csv; charset=utf-8` (có BOM để Excel đọc đúng tiếng Việt).
 - WebSocket: sự kiện `raw.new` (cùng hình dạng một item) và `raw.state` `{"id", "state", "label", "confidence"}`.
 
 ## Sàng lọc (`refinery`)
@@ -42,7 +42,7 @@ Quyền: màn dữ liệu cần `data.read`; ghi (quy tắc, lịch, chạy ngay
   ```
 - `PUT /refinery/schedule` (`data.manage`) cùng 4 trường cấu hình → như trên. Ràng buộc: interval 60–86400, threshold 1–100000, batch 1–2000, min_confidence 0–1.
 - `POST /refinery/run` (`data.manage`) → `202 {"run_id": "uuid"}`; `409 REFINERY_BUSY` nếu đang có lượt thủ công chạy.
-- `GET /refinery/runs?limit=5` → `[{"id","trigger":"schedule|threshold|manual|fast","started_at","finished_at","input_count","clean_count","lowconf_count","noise_count","error_count","status":"running|done|failed"}]`.
+- `GET /refinery/runs?limit=5` → `[{"id","trigger":"schedule|threshold|manual|fast","started_at","finished_at","input_count","clean_count","lowconf_count","noise_count","error_count","status":"queued|running|done|failed","error"}]`. `POST /refinery/run` tạo lượt `queued` (worker nhận ngay); đang có lượt thủ công chưa xong → `409 REFINERY_BUSY`.
 - WebSocket `refinery.progress` `{"run_id","processed","total","clean","lowconf","noise","errors","status"}`.
 
 ## Quy tắc sàng lọc (`rules`)
@@ -112,7 +112,9 @@ Loại điều kiện: `keyword_any {values}`, `keyword_all {values}`, `regex {p
   ```
   Luôn trả đủ 4 thẻ theo thiết kế: Zalo, WhatsApp, Telegram (`not_installed` nếu chưa có plugin kênh), LinkedIn (`identity_only`).
 - `POST /channels/{type}/login` 🔒 `channel.login` `{"account_label"?, "accept_risk": true}` → `202 {"session_id"}`; QR tới qua WS `channel.qr` `{"type","session_id","image","expires_at"}`, trạng thái qua `channel.status` `{"type","state","account_label","scanned"}`. Thiếu `accept_risk` → `422` (phải hiện cảnh báo rủi ro tài khoản cá nhân trước).
-- `POST /channels/{type}/logout` 🔒 `channel.logout` → 204.
+- `POST /channels/{type}/logout` 🔒 `channel.logout` → 204. Zalo không có đăng xuất phía máy chủ: hệ thống xoá phiên đã lưu; Owner nên gỡ thiết bị trong ứng dụng Zalo.
+- `PATCH /channels/{type}` 🔒 `policy.change` `{"listen_direct": true|false}` → thẻ kênh. Bật/tắt nghe tin nhắn 1-1 (mặc định tắt).
+- Bridge chưa chạy → `POST /channels/{type}/login` trả `503 BRIDGE_OFFLINE`.
 - `GET /channels/{type}/groups` → `[{"id","code","name","members":24,"kind":"internal|market|partner|customer|private","listen_mode":"off|tagged_only|silent|proactive|paused","view_scope":"owner|manager|all_members"}]`.
 - `PATCH /groups/{id}` (`system.manage`) `{listen_mode?, view_scope?, kind?}` → nhóm. Nhóm mới luôn `off` (khoá cứng).
 
@@ -120,12 +122,13 @@ Loại điều kiện: `keyword_any {values}`, `keyword_all {values}`, `regex {p
 
 - `GET /providers` → `[{"id","kind":"antigravity_cli|gemini|deepseek|openai_compat","name","endpoint","failover_rank","enabled","auth_state":"ok|expiring|expired|error|unconfigured","keys":[{"id","label":"GEM-KEY-01","last4":"x9Qa","enabled":true,"cooldown_until":null,"quota_left_pct":82}],"models":[{"id","model_name","daily_quota","used_today"}]}]`.
 - `POST /providers` (`system.manage`) `{kind, name, endpoint?, keys: ["sk-…"], models?: ["gemini-2.5-flash"]}` → provider (khoá chỉ trả `last4`).
+- `POST /providers/{id}/models` `{model_name, daily_quota?, rate_limit_per_min?}` → provider.
 - `POST /providers/{id}/keys` `{secret}`; `DELETE /providers/{id}/keys/{kid}`; `PATCH /providers/{id}` `{enabled?, failover_rank?}`.
 - `POST /providers/{id}/test` → `{"ok": true, "latency_ms": 812, "models": ["gemini-2.5-flash", …], "error": null}` (gọi thử 1 lượt).
 - `GET /providers/credentials` → dòng thẻ "Khoá & phiên" của tab Kênh: `[{"icon","name","meta","state":"ok|warn|bad","state_label"}]`.
 - Antigravity CLI:
   - `GET /cli/profiles` → `[{"id","email","plan_label","active":true,"expires_at","state":"ok|expiring|expired"}]`.
-  - `POST /cli/login` (`system.manage`) → `202 {"login_id"}`; tiến trình qua WS `cli.login` `{"login_id","status":"waiting_user|done|failed","url","code","message","profile"?}`.
+  - `POST /cli/login` (`system.manage`) → `202 {"login_id"}`; tiến trình qua WS `cli.login` `{"login_id","status":"starting|waiting_code|verifying|done|failed","url","message","profile"?}`. Owner mở `url`, đăng nhập Google, dán mã: `POST /cli/login/{id}/code` `{"code"}` → 202. Huỷ: `POST /cli/login/{id}/cancel` → 204.
   - `POST /cli/profiles/{id}/activate` 🔒 `cli.switch_account` → hồ sơ. `DELETE /cli/profiles/{id}` 🔒.
 
 ## Trình thiết lập bước 4–7, 12
@@ -136,6 +139,8 @@ Loại điều kiện: `keyword_any {values}`, `keyword_all {values}`, `regex {p
 - `PUT /setup/steps/7` `{"interval_seconds","count_threshold","min_confidence","rule_codes":["R-01",…],"weights":[{"dimension","value"}]}` → state.
 - `GET /setup/rule-presets` → bộ quy tắc khởi đầu R-01…R-06 (cùng hình dạng quy tắc, `enabled` gợi ý).
 - `GET /setup/first-run` → `{"raw_collected": 1244, "classifying": 250, "clean": 812, "lowconf": 31, "discarded": 120, "run": {…}|null}`; realtime qua WS `refinery.progress`.
+- `PUT /setup/steps/12` → hoàn tất khi mọi bước bắt buộc đã xong; ở giai đoạn 2 bước 8–9 chưa có nên trả `409 STEP_INCOMPLETE` nêu rõ bước còn thiếu.
+- Bước 4–7, 12 cần Owner và bước 1–3 đã xong (`409 STEP_ORDER`).
 - `available` của bước 4–7, 12 thành `true`.
 
 ## WebSocket `/ws`
