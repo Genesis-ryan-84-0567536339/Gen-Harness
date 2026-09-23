@@ -74,6 +74,8 @@ async def test_navigation_filtered_by_role(owner_api, client, db, role: str) -> 
     nav = (await api.get("/navigation")).json()
     assert screens(nav) == EXPECTED[role]
     assert "people" not in screens(nav) or role == "owner"
+    if role == "owner":
+        assert [d["count"] for d in nav] == [11, 9]      # đúng "11 màn" / "9 màn" của thiết kế
 
 
 @pytest.mark.parametrize("role,audit,verify,plugins", [

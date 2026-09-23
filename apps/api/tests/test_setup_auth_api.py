@@ -9,6 +9,7 @@ async def test_console_blocked_until_setup(client) -> None:  # type: ignore[no-u
     api = Api(client)
     r = await api.get("/navigation")
     assert r.status_code == 428 and r.json()["code"] == "SETUP_REQUIRED"
+    assert (await api.get("/auth/me")).status_code == 428      # web đi thẳng tới /setup, không qua /login
     r = await api.get("/setup/state")
     assert r.status_code == 200
     s = r.json()

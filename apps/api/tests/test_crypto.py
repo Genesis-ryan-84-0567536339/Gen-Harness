@@ -2,6 +2,7 @@ import base64
 import os
 
 import pytest
+from cryptography.exceptions import InvalidTag
 
 from gh import crypto
 from gh.config import get_settings
@@ -21,10 +22,10 @@ def test_envelope_encryption_roundtrip_and_tamper(key_file) -> None:  # type: ig
     blob = crypto.encrypt("khoá API bí mật".encode(), b"agent.provider_keys:1")
     assert blob.startswith(b"GH1") and "bí mật".encode() not in blob
     assert crypto.decrypt(blob, b"agent.provider_keys:1").decode() == "khoá API bí mật"
-    with pytest.raises(Exception):
+    with pytest.raises(InvalidTag):
         crypto.decrypt(blob, b"agent.provider_keys:2")          # sai ngữ cảnh
     tampered = blob[:-1] + bytes([blob[-1] ^ 1])
-    with pytest.raises(Exception):
+    with pytest.raises(InvalidTag):
         crypto.decrypt(tampered, b"agent.provider_keys:1")
 
 

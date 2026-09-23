@@ -88,8 +88,9 @@ def _filter(node: dict[str, Any], perms: Mapping[str, str], badges: Mapping[str,
             "children": children}
 
 
-def _count(nodes: list[dict[str, Any]]) -> int:
-    return sum((1 if n["key"] else 0) + _count(n["children"]) for n in nodes)
+def _count(groups: list[dict[str, Any]]) -> int:
+    # Cách đếm của thiết kế ("11 màn", "9 màn"): mỗi mục cấp 1 tính số con nếu có con, không thì tính 1.
+    return sum(len(g["children"]) if g["children"] else 1 for g in groups)
 
 
 def build(perms: Mapping[str, str], badges: Mapping[str, int | None] | None = None) -> list[dict[str, Any]]:

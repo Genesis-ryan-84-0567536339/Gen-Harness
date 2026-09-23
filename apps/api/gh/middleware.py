@@ -12,7 +12,8 @@ from gh.errors import ApiError, _body
 log = logging.getLogger("gh.http")
 
 API_PREFIX = "/api/v1"
-SETUP_EXEMPT = ("/setup", "/auth", "/health", "/ready", "/docs", "/openapi.json")
+# /auth/me KHÔNG được miễn: trước khi thiết lập xong, câu trả lời đúng là 428 (đi tới /setup), không phải 401.
+SETUP_EXEMPT = ("/setup", "/auth/login", "/auth/logout", "/auth/pin", "/health", "/ready", "/docs", "/openapi.json")
 WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 
