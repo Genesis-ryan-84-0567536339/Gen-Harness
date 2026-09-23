@@ -7,9 +7,10 @@ API = apps/api
 secrets:
 	@mkdir -p secrets
 	@test -f secrets/gh_master_key || python3 -c "import os,base64;print(base64.b64encode(os.urandom(32)).decode())" > secrets/gh_master_key
-	@chmod 600 secrets/gh_master_key
+	@test -f secrets/gh_bridge_key || python3 -c "import os,base64;print(base64.b64encode(os.urandom(32)).decode())" > secrets/gh_bridge_key
+	@chmod 600 secrets/gh_master_key secrets/gh_bridge_key
 	@test -f .env || cp .env.example .env
-	@echo "Đã có secrets/gh_master_key và .env — nhớ đổi mật khẩu trong .env"
+	@echo "Đã có secrets/gh_master_key, secrets/gh_bridge_key và .env — nhớ đổi mật khẩu trong .env"
 
 up: secrets
 	$(COMPOSE) up -d --build

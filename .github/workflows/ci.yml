@@ -67,4 +67,6 @@ jobs:
         run: |
           cp .env.example .env && mkdir -p secrets
           python3 -c "import os,base64;print(base64.b64encode(os.urandom(32)).decode())" > secrets/gh_master_key
+          python3 -c "import os,base64;print(base64.b64encode(os.urandom(32)).decode())" > secrets/gh_bridge_key
+          docker run --rm --entrypoint agy gh-api --version
           docker compose -f deploy/compose.yaml --env-file .env config -q

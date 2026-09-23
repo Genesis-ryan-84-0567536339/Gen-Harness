@@ -8,6 +8,7 @@ x-app-env: &app-env
   GH_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-gh}:${POSTGRES_PASSWORD:?đặt POSTGRES_PASSWORD trong .env}@db:5432/${POSTGRES_DB:-gen_harness}
   GH_REDIS_URL: redis://redis:6379/0
   GH_MASTER_KEY_FILE: /run/secrets/gh_master_key
+  GH_BRIDGE_KEY_FILE: /run/secrets/gh_bridge_key
   GH_SETUP_TOKEN: ${GH_SETUP_TOKEN:-}
 
 services:
@@ -46,7 +47,9 @@ services:
     build: { context: .., dockerfile: deploy/images/api.Dockerfile }
     restart: unless-stopped
     environment: *app-env
-    secrets: [gh_master_key]
+    secrets: [gh_master_key, gh_bridge_key]
+    volumes:
+      - agy_state:/var/lib/gh/agy
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
@@ -56,7 +59,9 @@ services:
     command: ["arq", "gh.worker.WorkerSettings"]
     restart: unless-stopped
     environment: *app-env
-    secrets: [gh_master_key]
+    secrets: [gh_master_key, gh_bridge_key]
+    volumes:
+      - agy_state:/var/lib/gh/agy
     healthcheck:
       test: ["CMD", "arq", "--check", "gh.worker.WorkerSettings"]
       interval: 30s
@@ -71,8 +76,9 @@ services:
     restart: unless-stopped
     environment:
       GH_REDIS_URL: redis://redis:6379/0
-    volumes:
-      - bridge_sessions:/app/sessions
+      GH_BRIDGE_KEY_FILE: /run/secrets/gh_bridge_key
+    # Bridge chỉ nhận khoá bridge (ký permit, mã hoá phiên khi truyền) — không bao giờ nhận khoá master.
+    secrets: [gh_bridge_key]
     depends_on:
       redis: { condition: service_healthy }
 
@@ -121,10 +127,12 @@ services:
 secrets:
   gh_master_key:
     file: ../secrets/gh_master_key
+  gh_bridge_key:
+    file: ../secrets/gh_bridge_key
 
 volumes:
   caddy_data:
   pg_data:
   redis_data:
   object_data:
-  bridge_sessions:
+  agy_state:
