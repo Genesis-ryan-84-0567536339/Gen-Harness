@@ -248,7 +248,7 @@ Mật khẩu argon2id (≥12 ký tự), TOTP tuỳ chọn. Phiên là token ng�
 - Sai 5 lần → khoá Console 15 phút và báo Owner qua kênh riêng (Zalo của Sếp). Đây là thông báo bảo mật của hệ thống tới chính tài khoản Owner, không phải hành động của agent. Mọi lần nhập, kể cả sai, vào Action Log.
 
 ### 8.3 RBAC
-- Vai trò: Owner · Manager · Operator · Agent nhân viên · Auditor. Trong code vai trò người là `staff_agent` để không nhầm với Agent Identity (bot).
+- Vai trò: Owner · Manager · Operator · Agent nhân viên · Auditor. Trong code vai trò người là `agent_staff` để không nhầm với Agent Identity (bot).
 - Ma trận thiết kế (`permCols` × `permRows`): 7 cột Tổng quan · Hàng đợi · Hồ sơ khách · Đánh giá nhân sự · Cơ hội · Hành động · Nhật ký; ô ✓ toàn quyền / – có giới hạn / ✕ không. Lưu ở `core.role_permissions(scope = all | team | assigned | none)`. Ý nghĩa cụ thể của "có giới hạn" cho từng ô được định nghĩa ở PLAN §1.5 và test hoá.
 - Hai tầng, đều ở backend, **ở tầng service** (không chỉ route):
   1. quyền chức năng — `require(permission)`;
