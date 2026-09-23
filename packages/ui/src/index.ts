@@ -17,3 +17,5 @@ export { PinInput, type PinInputProps, type PinInputHandle } from './PinInput';
 export { PinDialog, type PinDialogProps, type PinVerifyResult } from './PinDialog';
 export { toneColor, toneTint, type Tone } from './tone';
 export { cx } from './cx';
+export { Dialog, type DialogProps } from './Dialog';
+export { FilterSelect, type FilterOption, type FilterSelectProps } from './FilterSelect';

@@ -81,6 +81,8 @@ export interface components {
       title: string;
       required: boolean;
       status: components['schemas']['SetupStepStatus'];
+      /** Phase 2: steps 4–7 and 12 report `available: true`; later steps may be absent/false. */
+      available?: boolean;
     };
     SetupState: {
       finished: boolean;

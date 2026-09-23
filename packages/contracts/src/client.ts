@@ -16,6 +16,8 @@ export interface RequestOptions {
   skipAuthRedirect?: boolean;
   /** Do not redirect to /setup on 428 (the setup wizard itself). */
   skipSetupRedirect?: boolean;
+  /** `text` returns the body as a string (CSV export). Default `json`. */
+  responseType?: 'json' | 'text';
 }
 
 export interface ApiClientConfig {
@@ -115,7 +117,9 @@ export function createApiClient(config: ApiClientConfig = {}): ApiClient {
     let pinPrompts = 0;
 
     for (;;) {
-      const headers: Record<string, string> = { Accept: 'application/json' };
+      const headers: Record<string, string> = {
+        Accept: options.responseType === 'text' ? 'text/csv, text/plain, */*' : 'application/json',
+      };
       if (options.body !== undefined) headers['Content-Type'] = 'application/json';
       if (isWrite) {
         const csrf = getCsrf();
@@ -140,6 +144,7 @@ export function createApiClient(config: ApiClientConfig = {}): ApiClient {
       if (res.ok) {
         if (res.status === 204 || method === 'HEAD') return undefined as T;
         const text = await res.text();
+        if (options.responseType === 'text') return text as T;
         return (text ? JSON.parse(text) : undefined) as T;
       }
 
