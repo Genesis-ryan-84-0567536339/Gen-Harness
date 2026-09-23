@@ -2,7 +2,6 @@
 
 import csv
 import io
-import re
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
@@ -22,6 +21,7 @@ from gh.data.common import (
     RAW_SELECT,
     fetch_raw,
     iso,
+    mask_text,
     raw_code,
     raw_item,
     ref,
@@ -42,19 +42,8 @@ router = APIRouter(tags=["data"])
 READ = require("data.read")
 MANAGE = require("data.manage")
 
-# Khoá cứng 8: ẩn dữ liệu nhạy cảm khỏi vai trò dưới Owner (số tài khoản / thẻ / giấy tờ, số điện thoại đầy đủ).
-_RE_LONGNUM = re.compile(r"(?<!\d)(\d[\d .-]{7,22}\d)(?!\d)")
-
-
 def _mask(text_: str | None, user: service.CurrentUser) -> str | None:
-    if text_ is None or user.role_code == rbac.OWNER:
-        return text_
-
-    def sub(m: re.Match[str]) -> str:
-        digits = re.sub(r"\D", "", m.group(1))
-        return m.group(1) if len(digits) < 8 else "•" * (len(digits) - 3) + digits[-3:]
-
-    return _RE_LONGNUM.sub(sub, text_)
+    return mask_text(text_, user.role_code == rbac.OWNER)
 
 
 def _raw_out(r: Any, user: service.CurrentUser, *, with_payload: bool = False) -> dict[str, Any]:

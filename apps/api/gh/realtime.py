@@ -34,6 +34,19 @@ EVENT_PERMISSION: dict[str, str | None] = {
     "header": None,
 }
 
+# Sự kiện mang nội dung tin nhắn: vai trò dưới Owner nhận bản đã che số dài (khoá cứng 8).
+MASKED_EVENTS = {"raw.new"}
+
+
+def mask_event(msg: dict[str, Any]) -> dict[str, Any]:
+    from gh.data.common import mask_text
+
+    data = dict(msg.get("data") or {})
+    if isinstance(data.get("text"), str):
+        data["text"] = mask_text(data["text"], False)
+    data.pop("payload", None)
+    return {**msg, "data": data}
+
 
 async def publish(redis: Redis, type: str, data: dict[str, Any], *, org_id: Any = None) -> None:
     msg = {"type": type, "data": data, "at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
@@ -84,13 +97,19 @@ class Hub:
     async def dispatch(self, msg: dict[str, Any]) -> None:
         org = msg.pop("org_id", None)
         text = orjson.dumps(msg).decode()
+        masked: str | None = None
         for ws, user in list(self.clients.items()):
             if org and str(user.org_id) != org:
                 continue
             if not allowed(user.permissions, msg["type"]):
                 continue
+            out = text
+            if msg["type"] in MASKED_EVENTS and user.role_code != rbac.OWNER:
+                if masked is None:
+                    masked = orjson.dumps(mask_event(msg)).decode()
+                out = masked
             try:
-                await ws.send_text(text)
+                await ws.send_text(out)
             except Exception:  # noqa: BLE001 — client đã rời
                 self.clients.pop(ws, None)
 

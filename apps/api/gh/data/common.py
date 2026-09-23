@@ -98,3 +98,18 @@ async def live_person(db: AsyncSession, person_id: uuid.UUID) -> uuid.UUID:
             return person_id
         person_id, seen = nxt, seen + 1
     return person_id
+
+
+# Khoá cứng 8: ẩn dữ liệu nhạy cảm khỏi vai trò dưới Owner (số tài khoản / thẻ / giấy tờ, số điện thoại đầy đủ).
+_RE_LONGNUM = re.compile(r"(?<!\d)(\d[\d .-]{7,22}\d)(?!\d)")
+
+
+def mask_text(text_: str | None, is_owner: bool) -> str | None:
+    if text_ is None or is_owner:
+        return text_
+
+    def sub(m: re.Match[str]) -> str:
+        digits = re.sub(r"\D", "", m.group(1))
+        return m.group(1) if len(digits) < 8 else "•" * (len(digits) - 3) + digits[-3:]
+
+    return _RE_LONGNUM.sub(sub, text_)
