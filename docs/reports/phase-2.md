@@ -2,11 +2,11 @@
 
 Nhánh `claude/project-thread-bnesk5` · PR nháp #1 · 24/09/2026
 
-## Cần Bạn quyết
+## Bạn đã quyết (24/09/2026)
 
-1. **Nghe tin nhắn 1-1 (tin riêng):** hiện mặc định **tắt**. Chỉ tin trong nhóm Bạn đã bật mới vào Kho thô. Owner bật riêng từng kênh bằng công tắc "Nghe tin nhắn 1-1", có hỏi PIN. Bạn muốn giữ mặc định tắt hay bật sẵn?
-2. **Độ tin cậy dữ liệu trên header** (thiết kế ghi "78%", "Độ tin cậy dữ liệu hôm nay"): spec không có công thức nên đang hiện "—". Đề xuất: tỉ lệ tin đã sàng lọc hôm nay vào thẳng Kho sạch, trên tổng số tin đã sàng lọc hôm nay (không tính tin nhiễu). Bạn đồng ý dùng công thức này không?
-3. **Icon logo** (còn từ giai đoạn 1): vẫn để trống như thiết kế.
+1. **Nghe tin nhắn 1-1:** giữ mặc định **tắt**. Owner bật riêng từng kênh bằng công tắc "Nghe tin nhắn 1-1", có hỏi PIN.
+2. **Độ tin cậy dữ liệu trên header:** số tin sàng lọc hôm nay vào thẳng Kho sạch ÷ (sạch + tin cậy thấp), không tính tin nhiễu, theo múi giờ của tổ chức. Chưa sàng lọc tin nào trong ngày thì hiện "—". Header cập nhật sau mỗi lượt sàng lọc.
+3. **Icon logo:** đầu heo vui vẻ, nét vẽ cùng phong cách Phosphor, dùng cho ô logo và favicon.
 
 ## Đã xong
 
