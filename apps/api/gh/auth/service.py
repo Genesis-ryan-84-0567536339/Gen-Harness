@@ -26,6 +26,7 @@ PIN_OPERATIONS: dict[str, str] = {
     "roles.change": "Đổi quyền",
     "secret.reveal": "Xem khoá API",
     "identity.merge": "Gộp / tách danh tính",
+    "data.export": "Xuất dữ liệu thô",
     "draft.decide": "Duyệt / huỷ bản nháp",
     "mcp.expose": "Mở tool MCP",
     "policy.change": "Đổi mức tự trị, ngưỡng tiền, ranh giới",
