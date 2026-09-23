@@ -1,0 +1,16 @@
+node_modules/
+dist/
+build/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+coverage/
+playwright-report/
+test-results/
+.env
+*.local
+secrets/
+.DS_Store
