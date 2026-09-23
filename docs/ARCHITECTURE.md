@@ -1,6 +1,6 @@
 # Gen-Harness — Kiến trúc hệ thống
 
-**Tài liệu:** ARCHITECTURE.md · **Phiên bản:** 0.2 (chờ duyệt cùng PLAN.md) · **Ngày:** 23/09/2026
+**Tài liệu:** ARCHITECTURE.md · **Phiên bản:** 1.0 (duyệt 23/09/2026, kèm quyết định Q1–Q7 trong PLAN.md) · **Ngày:** 23/09/2026
 
 ## 0. Nguồn sự thật và thứ tự ưu tiên
 
@@ -13,7 +13,7 @@
 
 Trong repo, gói bàn giao được xếp lại: `spec/` → `docs/`, `design/` → `docs/design/`, `docs/01–07` và `db/schema.sql` → `docs/handoff/` (đường dẫn trong `docs/handoff/README.md` là đường dẫn gốc của gói).
 
-Tài liệu này **không chép lại** `docs/handoff/`; nó chốt các quyết định kiến trúc, lấp chỗ trống, và ghi rõ **chỗ lệch** so với handoff kèm lý do (§14). Câu hỏi chưa chốt nằm ở `docs/PLAN.md` §Câu hỏi.
+Tài liệu này **không chép lại** `docs/handoff/`; nó chốt các quyết định kiến trúc, lấp chỗ trống, và ghi rõ **chỗ lệch** so với handoff kèm lý do (§14). Quyết định của chủ dự án nằm ở `docs/PLAN.md` §Quyết định.
 
 Tên cũ Heo-Harness và persona "Bé Heo" không được dùng ở bất kỳ đâu trong mã, cấu hình hay dữ liệu, trừ mẫu agent hoài niệm "Bé Heo" **tắt mặc định** mà spec E13 và thiết kế (`agentTemplates`) giữ lại như một template tuỳ chọn.
 
@@ -117,6 +117,7 @@ Luật cứng:
 - Chạy lại quy tắc không xoá kết luận cũ: bản mới trỏ qua `superseded_by`.
 
 ### 4.1 Bridge
+- Zalo (quyết định Q7): Owner quét QR do hệ thống sinh bằng **tài khoản Zalo thật**; bridge giữ phiên đăng nhập (mã hoá, `core.channel_sessions.credential_enc`), tự đăng nhập lại bằng phiên đã lưu khi khởi động, hết hạn mới xin QR mới, rồi bắt tin như `heo-harness/bridge/bot.js` (`zca-js` `loginQR`, `listener.on('message')`). WhatsApp tương tự với Baileys. Cảnh báo rủi ro khoá tài khoản cá nhân hiện trước QR.
 - Mỗi tài khoản kênh là một phiên (`core.channel_sessions`: `pending_qr → active → expired | logged_out | error`). QR sinh trong bridge, đẩy qua `gh.bridge.status` → api → WebSocket → Console (khối QR 88px ở Điều khiển hệ thống, 240px ở trình thiết lập), đếm ngược 60s tự làm mới. Không in QR ra terminal hay ghi file như repo cũ.
 - Tin vào/ra được đóng gói *envelope* `{channel, session_id, external_msg_id, external_group_id|null, sender_external_id, occurred_at, kind, body_text, payload (nguyên văn từ thư viện)}` rồi `XADD gh.bridge.inbound`. Bridge **không** gọi LLM, **không** quyết định trả lời (khác `bot.js` cũ tự gọi `/api/chat`).
 - Gửi đi chỉ nhận từ `gh.bridge.outbound` và chỉ thực hiện khi lệnh mang **permit** hợp lệ (§7.3). Tin đã gửi quay lại `gh.bridge.inbound` như tin `outbound` → cũng vào kho thô và được sàng lọc (handoff 03).
@@ -129,6 +130,7 @@ Consumer `ingest` (trong api) đọc `gh.bridge.inbound`, trong **một transact
 
 ### 4.3 Core agent sàng lọc (refinery) — chu kỳ HOẶC ngưỡng
 - Cấu hình `refinery.schedule`: `interval_seconds` (mặc định 900), `count_threshold` (500), `batch_size` (250), `min_confidence` (0,60) — khớp `triggerConfig` của thiết kế. Chạy khi **điều kiện nào tới trước**.
+- **Đường nhanh** (quyết định Q3): tin tag agent và tin 1-1 được sàng lọc ngay khi tới, một lô 1 bản ghi, cùng quy tắc, cùng `SKIP LOCKED` → agent trực kênh trả lời không phải chờ chu kỳ.
 - Kích hoạt: cron arq kiểm chu kỳ; listener `LISTEN raw_ingested` đếm `pending` và enqueue khi đạt ngưỡng; nút "Chạy ngay" (manual); "Thử quy tắc" (test, không ghi).
 - Lấy lô: `SELECT … FROM refinery.event_state WHERE state='pending' … FOR UPDATE SKIP LOCKED LIMIT batch_size` → nhiều worker song song an toàn, không trùng, không sót. Mỗi lượt ghi `refinery.runs`.
 - Pipeline một lô:
@@ -212,11 +214,26 @@ Hành động **bắt buộc dừng ở Bàn làm việc** (`biz.action_drafts`,
 - `amount_vnd > approval_threshold_vnd` (mặc định 50.000.000 ₫, `ops.policy_boundaries`);
 - `personnel_related`: đánh giá/quyết định về nhân viên, ứng viên, học viên.
 
-Cờ gắn ở **registry loại hành động** do chassis quản, không do LLM tự khai → model không tự hạ cờ, không tự cấp quyền. Cách áp luật này ở mức 5–6 với tin nhắn trả lời trong nhóm: xem PLAN Câu hỏi Q2.
+Cờ gắn ở **registry loại hành động** do chassis quản, không do LLM tự khai → model không tự hạ cờ, không tự cấp quyền. Luật này áp ở **mọi** mức tự trị (quyết định Q2): mức 5–6 chỉ tự làm việc nội bộ (tạo việc, nhắc, ghi chú, gắn nhãn, ghi sổ tay); mọi tin gửi ra ngoài đều chờ duyệt. Ngưỡng tiền do Owner đặt.
 
 ### 7.3 Luồng
 `requested` → policy → `auto` (cấp permit, thực thi) | `held` (vào Bàn làm việc) | `blocked`.
 Bàn làm việc: Duyệt và gửi · Sửa rồi gửi · Huỷ → `approved | edited | rejected` → executor thực thi với permit → `sent | failed`. Permit: dùng một lần, hạn 5 phút, ký HMAC gồm `draft_id + hash(body) + channel/tool`; bridge và MCP executor kiểm trước khi làm. Duyệt/huỷ đòi PIN nếu phiên PIN hết hạn. Tất cả vào Action Log.
+
+### 7.4 Giới hạn mặc định (quyết định của chủ dự án)
+**Mặc định mở hết, trừ quyền nguy hiểm nghiêm trọng.** Mọi giới hạn khác là cài đặt Owner tự bật/tắt (PIN + log).
+
+Khoá cứng, không tắt được bằng cài đặt:
+1. Chỉ lắng nghe nhóm Owner đã bật (`listen_authorized_only`).
+2. Hệ thống không tự ra quyết định nhân sự.
+3. Gửi ra ngoài, vượt ngưỡng tiền, liên quan nhân sự → chờ duyệt (ngưỡng tiền Owner đặt).
+4. MCP: tool ghi qua duyệt; agent chỉ gọi tool Owner đã mở.
+5. Kho thô và Action Log chỉ INSERT.
+6. PIN cho thao tác nhạy cảm; bí mật mã hoá.
+7. Điểm số, cảnh báo nhân sự phải có chứng cứ.
+8. Ẩn dữ liệu nhạy cảm (số tài khoản, sức khoẻ, đời tư) khỏi vai trò dưới Owner.
+
+Còn lại mặc định **mở** khi cài mới (ví dụ: quan sát nhóm thị trường bên ngoài, cho máy chủ MCP gọi ra mạng ngoài, giới hạn tốc độ, hạn mức model, giới hạn tài nguyên plugin) và Owner đổi được trong Điều khiển hệ thống. Riêng chế độ "Dùng dữ liệu mẫu" nạp đúng trạng thái như thiết kế để màn hình khớp.
 
 ---
 
@@ -236,7 +253,7 @@ Mật khẩu argon2id (≥12 ký tự), TOTP tuỳ chọn. Phiên là token ng�
 - Hai tầng, đều ở backend, **ở tầng service** (không chỉ route):
   1. quyền chức năng — `require(permission)`;
   2. phạm vi dữ liệu — mọi truy vấn qua `ScopeFilter(user)`: Manager = team mình; Operator = hàng đợi được giao; Agent nhân viên = khách được phân; Auditor = đọc, không có quyền ghi nào.
-- Đánh giá nhân sự: khoá mức Owner (yêu cầu của dự án, chip "Dữ liệu khoá ở cấp Owner", guard MCP "Dữ liệu nhân sự chỉ ở mức Owner"). Ma trận thiết kế lại ghi Manager/Auditor "có giới hạn" ở cột này → PLAN Câu hỏi Q4. Mọi lần xem vào Action Log.
+- Đánh giá nhân sự: khoá mức Owner (yêu cầu của dự án, chip "Dữ liệu khoá ở cấp Owner", guard MCP "Dữ liệu nhân sự chỉ ở mức Owner"). Mặc định (quyết định Q4): chỉ Owner thấy nội dung; Auditor thấy nhật ký ai đã xem; Manager không thấy. Owner có thể tự cấp thêm cho vai trò khác trong Quyền hạn (PIN + log). Mọi lần xem vào Action Log.
 - Ranh giới "Ẩn dữ liệu nhạy cảm khỏi mọi vai trò dưới Owner" áp ở serializer (trường được gắn nhãn nhạy cảm bị che).
 - Row-Level Security Postgres bật ở giai đoạn hoàn thiện như lớp phòng thủ thứ hai (handoff 03).
 
@@ -275,7 +292,12 @@ Mã hoá phong bì AES-256-GCM cho khoá API, phiên kênh, TOTP, auth MCP (`byt
 - **Xoay vòng khoá**: `agent.provider_keys.rotation_order`; chọn khoá còn hạn mức, không trong cooldown. 429/hết hạn mức → cooldown khoá đó, sang khoá kế.
 - **Hạn mức theo model**: `agent.models.daily_quota`, `rate_limit_per_min`; bộ đếm nóng ở Redis, chốt vào `agent.model_calls` (phân vùng tháng) → `analytics.mv_model_usage_daily`.
 - **Chuỗi chuyển hướng** (`failoverRules` thiết kế): hết hạn mức → nhà cung cấp kế tiếp; ngắt mạch → giữ nguyên hội thoại, thử lại sau 60s; hết chuỗi → xếp hàng và báo Sếp qua hàng đợi; còn < 20% hạn mức → cảnh báo.
-- **Antigravity CLI**: binary chạy trong container `worker`; mỗi tài khoản một thư mục cấu hình trong volume. Đăng nhập bằng luồng OAuth/mã thiết bị của CLI, hiện trên Console (trình thiết lập bước 4, Điều khiển hệ thống › Kênh & đăng nhập). "Đổi tài khoản" = đăng nhập hồ sơ mới rồi chuyển hồ sơ hoạt động, cần PIN, vào log. Nguồn binary và luồng đăng nhập cần xác nhận → PLAN Câu hỏi Q6.
+- **Antigravity CLI** (quyết định Q6: bản cài chính hãng, đăng nhập/đổi tài khoản như heo-harness):
+  - Image `worker` cài **binary `agy` chính hãng** của Google lúc build (nguồn tải + checksum ghim trong Dockerfile), không đóng gói lại.
+  - Như heo-harness: CLI lưu phiên đăng nhập ở tệp OAuth `~/.gemini/antigravity-cli/antigravity-oauth-token`; email tài khoản đọc từ `id_token` trong tệp đó; đăng xuất = xoá tệp.
+  - **Đăng nhập**: Console bấm Đăng nhập → worker chạy luồng đăng nhập của chính CLI trong container, chuyển link/mã xác thực lên Console qua WebSocket; xong thì tệp token được đọc, **mã hoá** và lưu vào `agent.cli_profiles` (email, gói, hạn).
+  - **Đổi tài khoản**: nhiều hồ sơ trong `agent.cli_profiles`, một hồ sơ hoạt động; chuyển hồ sơ = ghi tệp token của hồ sơ đó vào thư mục cấu hình CLI trong volume rồi khởi động lại phiên CLI. Cần PIN, vào Action Log.
+  - Hết hạn/lỗi → provider `expired`, chuỗi chuyển hướng sang khoá API kế tiếp.
 
 ---
 
@@ -360,6 +382,6 @@ REST JSON `/api/v1`, OpenAPI tự sinh; phân trang con trỏ `?cursor=&limit=`;
 |---|---|---|---|
 | D1 | Bridge `INSERT` thẳng `raw.events` (03, 04) | Bridge đẩy vào event bus `gh.bridge.inbound`, consumer `ingest` INSERT | Yêu cầu của dự án ghi rõ "đẩy sự kiện vào kho thô qua event bus". Thêm lợi ích: bridge không cần quyền DB (ít quyền nhất), tin được đệm trong stream khi DB tạm chết. Kho thô vẫn là điểm lưu bền đầu tiên, nguyên trạng. |
 | D2 | Không nêu bảng cảnh báo, quyết định agent, permit, hồ sơ CLI, phân công | Thêm theo §12 | Spec E9, E13 ("agent nào đã nói gì, nhân danh gì"), R5, R10, H2 cần chúng. |
-| D3 | 6 giai đoạn (có trình cài `genh`, trình thiết lập Owner 12 bước) | Gộp vào kế hoạch 5 + 1 giai đoạn của PLAN.md | Tin nhắn giao việc của dự án có 5 giai đoạn, không nhắc trình cài. PLAN đề xuất cách gộp và hỏi xác nhận (Q1). |
+| D3 | 6 giai đoạn (có trình cài `genh`, trình thiết lập Owner 12 bước) | Gộp vào kế hoạch 5 + 1 giai đoạn của PLAN.md | Tin nhắn giao việc của dự án có 5 giai đoạn, không nhắc trình cài. Chủ dự án đã duyệt cách gộp (Q1). |
 
 Không có chỗ lệch nào về giao diện.

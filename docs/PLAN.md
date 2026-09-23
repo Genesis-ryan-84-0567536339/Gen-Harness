@@ -1,6 +1,6 @@
 # Gen-Harness — Kế hoạch thi công
 
-**Tài liệu:** PLAN.md · **Phiên bản:** 0.2 · **Trạng thái:** CHỜ DUYỆT. Không viết code giai đoạn 1 trước khi được duyệt.
+**Tài liệu:** PLAN.md · **Phiên bản:** 1.0 · **Trạng thái:** ĐÃ DUYỆT 23/09/2026 kèm quyết định Q1–Q7 (mục Quyết định).
 Kiến trúc: `docs/ARCHITECTURE.md`. Giao diện: `docs/design/`. Đặc tả kỹ thuật đi kèm thiết kế: `docs/handoff/`.
 
 ---
@@ -83,7 +83,7 @@ Nền chung trước: `explain` (điểm → đơn vị ý nghĩa → trích d�
 | 3.11 | Đánh giá con người (`people`) + Phản biện (spec I) | M | Khoá mức Owner; xem vào log; sửa điểm tay giữ lịch sử; không hành động kỷ luật tự động |
 | 3.12 | Chất lượng chăm sóc (`care`) | M | Lưới phản hồi theo khung giờ (<15 / 15–60 / >60 phút), lỗi chăm sóc lặp, kịch bản thắng/mất |
 | 3.13 | Trình thiết lập **bước 8–9** (agent đầu tiên + thử trò chuyện; tự trị & ranh giới) | S | |
-| 3.14 | 3 màn còn thiếu so với spec G1 (Việc & Nhắc hẹn, Tài liệu, Deal & Vụ việc) | L | **Chờ Q5** |
+| 3.14 | Việc & Nhắc hẹn (`tasks`), Tài liệu (`documents`), Deal & Vụ việc (`deals`) — spec G1, dựng theo `handoff/01` | L | Hạn quá đỏ, lời hứa sắp đến hạn; ACL tài liệu; trạng thái deal/vụ việc và người xử lý |
 
 ---
 
@@ -114,39 +114,38 @@ Nền chung trước: `explain` (điểm → đơn vị ý nghĩa → trích d�
 
 ---
 
-## Giai đoạn 6 — Trình cài một lệnh (L) — theo `handoff/05-installer.md`, chờ Q1
+## Giai đoạn 6 — Trình cài một lệnh (L) — theo `handoff/05-installer.md`
 
 `install.sh` / `install.ps1` + binary Go `genh` (Bubble Tea): kiểm tra máy, tự cung cấp container runtime (Docker rootless / Colima / WSL2), tải image có % theo byte thật, sinh bí mật, migrate, health, mở `/setup?token=`; lệnh `status, open, logs, update, backup, restore, doctor, reset-setup, stop, start, uninstall`; phát hành GitHub Releases + GHCR đa kiến trúc + checksums + cosign; ma trận CI Ubuntu/Debian/Fedora/macOS/Windows.
 
 ---
 
-## Định nghĩa "có giới hạn" trong ma trận quyền (đề xuất, cần duyệt cùng PLAN)
+## Quyết định của chủ dự án (23/09/2026)
 
-Thiết kế chỉ ghi ✓ / – / ✕. Em đề xuất nghĩa cụ thể của "–" như sau:
-
-| Cột | Vai trò có "–" | Nghĩa đề xuất |
+| # | Chủ đề | Quyết định |
 |---|---|---|
-| Tổng quan | Operator | Chỉ khối Hàng đợi và KPI thuộc hàng đợi được giao; không có Sức khoẻ hệ thống, Chất lượng dữ liệu |
-| Hàng đợi | Agent nhân viên, Auditor | Agent: chỉ item về khách được phân. Auditor: xem, không hành động |
-| Hồ sơ khách | Agent nhân viên, Auditor | Agent: chỉ khách được phân. Auditor: xem, dữ liệu nhạy cảm bị che |
-| Đánh giá nhân sự | Manager, Auditor | **Chờ Q4** |
+| Q1 | Giai đoạn | 6 giai đoạn như trên: trình thiết lập Owner làm dần qua GĐ 1–4, trình cài `genh` là GĐ 6. |
+| Q2 | Tự trị 5–6 và gửi tin | Mọi tin/hành động ghi ra ngoài đều dừng ở Bàn làm việc chờ duyệt, ở mọi mức. Mức 5–6 chỉ tự làm việc nội bộ (tạo việc, nhắc, ghi chú, gắn nhãn, ghi sổ tay). |
+| Q3 | Tin tag agent | Có đường nhanh: tin tag agent và tin 1-1 được sàng lọc ngay khi tới, cùng quy tắc, vẫn một chiều Kho thô → Kho sạch. |
+| Q4 | Đánh giá nhân sự | Mặc định chỉ Owner thấy nội dung; Auditor thấy nhật ký ai đã xem; Manager không thấy. Owner có thể tự cấp thêm cho vai trò khác trong Quyền hạn (cần PIN, ghi log). |
+| Q5 | 3 màn còn thiếu | Dựng luôn trong GĐ 3: **Việc & Nhắc hẹn** (Hàng đợi & Hành động), **Tài liệu** (cạnh Nhóm & Con người), **Deal & Vụ việc** (Cơ hội & Thị trường), cùng ngôn ngữ thiết kế. |
+| Q6 | Antigravity CLI | Dùng bản cài chính hãng; đăng nhập và đổi tài khoản theo cách heo-harness làm (xem ARCHITECTURE §11). |
+| Q7 | Zalo | Owner đăng nhập bằng cách quét QR do hệ thống sinh, bằng tài khoản Zalo thật; bridge giữ phiên và bắt tin như heo-harness (`zca-js`). Vẫn hiện cảnh báo rủi ro trước QR. |
+| — | Mặc định giới hạn | **Mặc định mở hết, trừ các quyền nguy hiểm nghiêm trọng.** Mọi giới hạn còn lại là tuỳ chọn Owner tự bật/tắt trong cài đặt. Danh sách khoá cứng ở ARCHITECTURE §7.4. |
+
+## Định nghĩa "có giới hạn" trong ma trận quyền
+
+Ma trận của thiết kế là giá trị khởi tạo; Owner sửa được từng ô trong Điều khiển hệ thống › Quyền hạn (PIN + log). Nghĩa của ô "–":
+
+| Cột | Vai trò có "–" | Nghĩa |
+|---|---|---|
+| Tổng quan | Operator | Khối Hàng đợi và KPI thuộc hàng đợi được giao |
+| Hàng đợi | Agent nhân viên, Auditor | Agent: item về khách được phân. Auditor: xem, không hành động |
+| Hồ sơ khách | Agent nhân viên, Auditor | Agent: khách được phân. Auditor: xem |
+| Đánh giá nhân sự | Manager, Auditor | Theo Q4: Manager không thấy, Auditor chỉ thấy nhật ký truy cập, cho tới khi Owner cấp thêm |
 | Cơ hội | Agent nhân viên, Auditor | Agent: cơ hội của khách được phân. Auditor: xem |
-| Hành động | Operator, Agent nhân viên | Được soạn nháp và thực hiện việc tự trị cho phép trong phạm vi mình; **không** duyệt bản nháp đang bị giữ (chỉ Owner và Manager trong team mới duyệt) |
-| Nhật ký | Manager | Nhật ký hành động của người và agent thuộc team mình |
-
----
-
-## Câu hỏi cần anh trả lời
-
-| # | Câu hỏi | Em làm tạm theo |
-|---|---|---|
-| Q1 | Gói thiết kế có 6 giai đoạn (thêm trình cài Go `genh` và trình thiết lập Owner 12 bước); tin nhắn giao việc có 5 giai đoạn, chạy bằng `docker compose up`. Anh đồng ý cách gộp trên không: trình thiết lập làm dần qua GĐ 1–4, trình cài `genh` là **GĐ 6** sau cùng? | Theo cách gộp này |
-| Q2 | Luật cứng nói mọi hành động **ghi ra ngoài** phải chờ duyệt, nhưng luồng trong thiết kế cho agent **tự gửi** khi đủ mức tự trị (mức 5 "tự làm việc thấp rủi ro", mức 6 "whitelist"). Tin trả lời thường trong nhóm ở mức 5–6 có được tự gửi không? | Luật cứng thắng: mọi tin gửi ra đều chờ duyệt, mức 5–6 chỉ tự làm việc nội bộ (tạo việc, nhắc, ghi chú, gắn nhãn) |
-| Q3 | Agent trực kênh chỉ đọc kho sạch, mà sàng lọc chạy 15 phút/lần hoặc đủ 500 bản ghi → tin **tag agent** có thể chờ tới 15 phút mới được trả lời. Cho **đường nhanh** không: tin tag agent và tin 1-1 được sàng lọc ngay (vẫn đúng quy tắc, vẫn một chiều)? | Có đường nhanh |
-| Q4 | Đánh giá nhân sự: anh nói "khoá mức Owner", màn People Review cũng ghi vậy, nhưng ma trận quyền trong thiết kế cho Manager và Auditor "có giới hạn" ở cột này. Manager/Auditor được thấy gì? | Chỉ Owner thấy nội dung; Auditor chỉ thấy nhật ký ai đã xem; Manager không thấy |
-| Q5 | `handoff/01` đề xuất dựng thêm 3 màn spec G1 chưa có trong thiết kế: **Việc & Nhắc hẹn** (dưới Hàng đợi & Hành động), **Tài liệu** (cạnh Nhóm & Con người), **Deal & Vụ việc** (dưới Cơ hội & Thị trường). Dựng không, và vị trí đó đúng không? | Chưa dựng, để cuối GĐ 3 chờ anh trả lời |
-| Q6 | Antigravity CLI chạy trong container Linux: lấy binary ở đâu, và CLI có luồng đăng nhập bằng mã thiết bị không (thiết kế bước 4 giả định có)? | Làm provider + giao diện hồ sơ; phần gọi CLI thật làm sau khi có hướng dẫn; khoá Gemini/DeepSeek chạy độc lập |
-| Q7 | Zalo cá nhân qua `zca-js` là API **không chính thức**, có rủi ro Zalo khoá tài khoản. Anh chấp nhận dùng như repo cũ không? | Dùng, có cảnh báo trước khi hiện QR và trong README |
+| Hành động | Operator, Agent nhân viên | Soạn nháp và làm việc tự trị cho phép trong phạm vi mình; không duyệt bản nháp đang bị giữ (Owner và Manager trong team duyệt) |
+| Nhật ký | Manager | Nhật ký của người và agent thuộc team mình |
 
 ---
 
