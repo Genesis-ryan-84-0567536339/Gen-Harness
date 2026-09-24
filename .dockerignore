@@ -11,4 +11,3 @@
 .env
 secrets
 docs/design
-!docs/design/seed-data.json
