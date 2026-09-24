@@ -1,4 +1,5 @@
-"""/setup — trình thiết lập Owner 12 bước (docs/handoff/06). Giai đoạn 1: bước 1–3; giai đoạn 2: bước 4–7, 12."""
+"""/setup — trình thiết lập Owner 12 bước (docs/handoff/06). Giai đoạn 1: bước 1–3; giai đoạn 2: bước 4–7, 12;
+giai đoạn 3: bước 8–9 (agent đầu tiên + thử trò chuyện; tự trị & ranh giới — docs/api/phase-3-people.md)."""
 
 import hmac
 import json
@@ -15,7 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gh.auth import rbac, service
 from gh.auth.deps import client_ip, optional_user
 from gh.auth.routes import set_session_cookies
-from gh.chassis import actionlog
+from gh.biz.people.routes import try_chat
+from gh.chassis import actionlog, policy
 from gh.crypto import hash_secret, token_digest
 from gh.data_api.routes import RuleIn, ScheduleIn, create_rule, save_schedule, save_weights
 from gh.db import DB
@@ -41,7 +43,19 @@ STEPS: tuple[tuple[int, str, str, bool, int], ...] = (
     (11, "backup", "Sao lưu", False, 4),
     (12, "finish", "Hoàn tất", True, 2),
 )
-CURRENT_PHASE = 2
+CURRENT_PHASE = 3
+# Khoá cứng — ARCHITECTURE §7.4, không tắt được bằng cài đặt. Chỉ hiển thị lại ở bước 9 để Owner xác nhận đã đọc
+# (`ack_boundaries`) — trang Quyền hạn đầy đủ để BẬT/TẮT các giới hạn *tuỳ chọn* khác thuộc giai đoạn 4.
+HARD_BOUNDARIES = (
+    "Chỉ lắng nghe nhóm Owner đã bật",
+    "Hệ thống không tự ra quyết định nhân sự",
+    "Gửi ra ngoài, vượt ngưỡng tiền, liên quan nhân sự → luôn chờ duyệt ở Bàn làm việc",
+    "MCP: tool ghi qua duyệt; agent chỉ gọi tool Owner đã mở",
+    "Kho thô và Nhật ký hành động chỉ được ghi thêm, không sửa/xoá",
+    "PIN cho thao tác nhạy cảm; bí mật được mã hoá",
+    "Điểm số và cảnh báo nhân sự phải có chứng cứ",
+    "Ẩn dữ liệu nhạy cảm (số tài khoản, sức khoẻ, đời tư) khỏi vai trò dưới Owner",
+)
 CONSOLE_STEPS = ("1", "2", "3")    # xong 3 bước này thì Console mở (các bước sau làm tiếp được)
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 CURRENCIES = ("VND", "USD", "EUR", "JPY", "SGD", "THB", "CNY", "KRW")
@@ -319,6 +333,18 @@ async def _owner_step(db: AsyncSession, user: service.CurrentUser | None) -> tup
     return row, owner
 
 
+async def _owner_step_after(db: AsyncSession, user: service.CurrentUser | None,
+                            *needs: int) -> tuple[Any, service.CurrentUser]:
+    """Như `_owner_step`, cộng thêm yêu cầu các bước `needs` đã `done` — cùng cách `step4` đòi hỏi bước 1–3 xong
+    (qua `console_ready`), dùng cho bước 8 (đòi 4–7) và bước 9 (đòi 4–7 cộng 8)."""
+    row, owner = await _owner_step(db, user)
+    done = (row.completed or {}).get("steps", {})
+    missing = [n for n in needs if done.get(str(n)) != "done"]
+    if missing:
+        raise incomplete("Cần hoàn thành bước " + ", ".join(str(n) for n in missing) + " trước")
+    return row, owner
+
+
 @router.put("/steps/4")
 async def step4(body: Step4In, request: Request, db: AsyncSession = DB,
                 user: service.CurrentUser | None = Depends(optional_user)) -> dict[str, Any]:
@@ -407,6 +433,74 @@ async def step7(body: Step7In, request: Request, db: AsyncSession = DB,
     return await _mark_done(db, request, row, owner, 7,
                             {"interval_seconds": body.interval_seconds, "count_threshold": body.count_threshold,
                              "min_confidence": body.min_confidence, "rule_codes": body.rule_codes})
+
+
+# ─── Bước 8–9 (giai đoạn 3) ─────────────────────────────────────────────────
+
+class Step8In(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    role_desc: str = Field(min_length=1, max_length=500)
+    voice: str = Field(default="Thân thiện, chuyên nghiệp, xưng hô lịch sự", max_length=200)
+    speak_when: str = Field(default="Khi được hỏi trực tiếp hoặc có việc cần báo", max_length=500)
+    template: str | None = Field(default=None, max_length=40)
+    try_message: str = Field(min_length=1, max_length=1000)
+
+
+@router.put("/steps/8")
+async def step8(body: Step8In, request: Request, db: AsyncSession = DB,
+                user: service.CurrentUser | None = Depends(optional_user)) -> dict[str, Any]:
+    """Agent đầu tiên (tối thiểu để trình thiết lập đi hết được — quản lý Agent đầy đủ là GĐ 4 mục 4.1): tạo
+    `agent.identities` (mức tự trị khởi tạo theo mặc định chung, đặt lại chính xác 3 hay 4 ở bước 9) rồi thử trò
+    chuyện một lượt qua `ModelRouter` (`gh.biz.people.routes.try_chat`) — KHÔNG lưu vào hội thoại thật, chỉ để
+    Owner nghe thử giọng agent. Model chưa gọi được (chưa cấu hình xong ở bước 4, hoặc lỗi tạm thời) không được
+    chặn việc tạo agent — trả `try_reply: null` kèm lý do, Owner thử lại ngay ở đây hoặc ở màn Agent Identity."""
+    row, owner = await _owner_step_after(db, user, 4, 5, 6, 7)
+    name, role_desc, voice, speak_when = (body.name.strip(), body.role_desc.strip(), body.voice.strip(),
+                                          body.speak_when.strip())
+    agent_id = (await db.execute(text("""
+        INSERT INTO agent.identities (org_id, name, role_desc, template, addressing, voice, speak_when,
+                                      autonomy_level)
+        VALUES (:o, :n, :rd, :tpl, '{}'::jsonb, :v, :sw, :al) RETURNING id"""),
+        {"o": row.org_id, "n": name, "rd": role_desc, "tpl": body.template, "v": voice, "sw": speak_when,
+         "al": policy.DEFAULT_AUTONOMY})).scalar_one()
+    try_reply, try_error = None, None
+    try:
+        try_reply = await try_chat(request.app.state, row.org_id, agent_id, name=name, role_desc=role_desc,
+                                   voice=voice, message=body.try_message)
+    except ApiError as e:
+        try_error = e.detail
+    state = await _mark_done(db, request, row, owner, 8, {"agent_id": str(agent_id), "name": name})
+    state["agent"] = {"id": str(agent_id), "name": name, "try_reply": try_reply, "try_error": try_error}
+    return state
+
+
+class Step9In(BaseModel):
+    autonomy_level: Literal[3, 4] = policy.DEFAULT_AUTONOMY  # type: ignore[assignment]
+    ack_boundaries: bool = False
+
+
+@router.put("/steps/9")
+async def step9(body: Step9In, request: Request, db: AsyncSession = DB,
+                user: service.CurrentUser | None = Depends(optional_user)) -> dict[str, Any]:
+    """Tự trị & ranh giới: đặt mức tự trị (3 hoặc 4 — spec H1 cho phép cả hai, mặc định 4) cho agent vừa tạo ở
+    bước 8, và bắt Owner xác nhận đã đọc danh sách ranh giới khoá cứng (`HARD_BOUNDARIES`, ARCHITECTURE §7.4).
+    Các ranh giới đó **không tắt được** ở đây hay bất cứ đâu trong hệ thống — xác nhận chỉ để Owner biết trước
+    khi vào Console, không phải một cài đặt."""
+    row, owner = await _owner_step_after(db, user, 4, 5, 6, 7, 8)
+    if not body.ack_boundaries:
+        raise field_errors({"ack_boundaries": "Cần xác nhận đã đọc ranh giới khoá cứng trước khi tiếp tục"})
+    agent = (await db.execute(text("SELECT id, name FROM agent.identities WHERE org_id = :o "
+                                   "ORDER BY created_at DESC LIMIT 1"), {"o": row.org_id})).one_or_none()
+    if agent is None:
+        raise incomplete("Chưa có agent nào — hoàn thành bước 8 trước")
+    await db.execute(text("UPDATE agent.identities SET autonomy_level = :a, updated_at = now() WHERE id = :i"),
+                     {"a": body.autonomy_level, "i": agent.id})
+    state = await _mark_done(db, request, row, owner, 9,
+                             {"agent_id": str(agent.id), "autonomy_level": body.autonomy_level,
+                              "hard_boundaries": list(HARD_BOUNDARIES)})
+    state["agent"] = {"id": str(agent.id), "name": agent.name, "autonomy_level": body.autonomy_level}
+    state["hard_boundaries"] = list(HARD_BOUNDARIES)
+    return state
 
 
 @router.get("/first-run")
