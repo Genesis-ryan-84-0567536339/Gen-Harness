@@ -22,7 +22,7 @@ const design: DesignScreen[] = JSON.parse(
 
 describe('screen registry', () => {
   it('matches docs/design/screens.json key for key', () => {
-    expect(SCREENS.map((s) => s.key)).toEqual(design.map((d) => d.key));
+    expect(SCREENS.filter((s) => !s.extra).map((s) => s.key)).toEqual(design.map((d) => d.key));
     for (const d of design) {
       const s = SCREENS.find((x) => x.key === d.key)!;
       expect(s.name).toBe(d.name);
@@ -42,12 +42,12 @@ describe('screen registry', () => {
         if (r.children) walk(r.children, r.id ? [...depth, r.id] : depth);
       });
     walk(routes, []);
-    expect(paths).toHaveLength(21);
+    expect(paths).toHaveLength(24); // 21 màn thiết kế + 3 màn spec bổ sung (tasks, documents, deals)
     expect(paths).toContain('domain:business > group:Hàng đợi & Hành động > inbox');
     expect(paths).toContain('domain:business > graph');
     expect(paths).toContain('domain:business > group:Bản đồ quan hệ > profile');
     expect(paths).toContain('domain:tech > system');
-    expect(buildScreenTree().map((d) => d.entries.length)).toEqual([6, 4]);
+    expect(buildScreenTree().map((d) => d.entries.length)).toEqual([7, 4]); // + Tài liệu (cấp 1, spec bổ sung)
   });
 });
 

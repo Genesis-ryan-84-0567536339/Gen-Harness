@@ -25,8 +25,8 @@ describe('navModel', () => {
     expect(findActive(NAV, 'nope')).toBeNull();
   });
 
-  it('lists every screen key in the tree (21)', () => {
-    expect(screenKeys(NAV).size).toBe(21);
+  it('lists every screen key in the tree (21 design + 3 spec extras)', () => {
+    expect(screenKeys(NAV).size).toBe(24);
   });
 
   it('auto-expands the group that contains the active screen', () => {
@@ -102,7 +102,7 @@ describe('<Sidebar>', () => {
     const nav = screen.getByRole('navigation', { name: 'Danh mục màn hình' });
     expect(within(nav).getByText('Kinh doanh')).toBeInTheDocument();
     expect(within(nav).getByText('Kỹ thuật · Backend')).toBeInTheDocument();
-    expect(within(nav).getByText('12 màn')).toBeInTheDocument();
+    expect(within(nav).getByText('15 màn')).toBeInTheDocument();
     const overview = within(nav).getByRole('link', { name: /Tổng quan điều hành/ });
     expect(overview).toHaveAttribute('aria-current', 'page');
     expect(within(overview).getByText('9')).toBeInTheDocument();
