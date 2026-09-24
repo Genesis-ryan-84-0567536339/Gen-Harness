@@ -255,3 +255,14 @@ async def test_translate_and_regenerate_use_model_router(world, owner_api: Api, 
     app.state.model_router = FakeRouter(down=True)
     r = await owner_api.send("POST", f"/drafts/{d['id']}/translate", {"lang": "en"})
     assert r.status_code == 503 and r.json()["code"] == "MODEL_UNAVAILABLE"
+
+
+async def test_note_side_action_defaults_to_a_valid_notebook_section(world, db) -> None:  # type: ignore[no-untyped-def]
+    await drafts._execute_internal(db, world["org"], None, "note.write", "Khách thích gọi buổi sáng",
+                                   ("person", world["person"]), None)
+    await db.commit()
+    row = (await db.execute(text("""SELECT e.section FROM memory.entries e
+                                    JOIN memory.notebooks n ON n.id = e.notebook_id
+                                    WHERE n.subject_id = :p AND e.body = :b"""),
+                            {"p": world["person"], "b": "Khách thích gọi buổi sáng"})).one()
+    assert row.section == "rolling_context"

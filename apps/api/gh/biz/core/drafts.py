@@ -190,7 +190,7 @@ async def _execute_internal(db: AsyncSession, org_id: uuid.UUID, draft_id: uuid.
     elif action_key == "note.write" and subject and subject[0] in ("person", "group"):
         from gh.memory import notebook
 
-        await notebook.append(db, org_id, subject[0], subject[1], params.get("section", "context"), label,
+        await notebook.append(db, org_id, subject[0], subject[1], params.get("section", "rolling_context"), label,
                               refs=[{"type": "draft", "id": str(draft_id)}] if draft_id else [],
                               author="user" if user_id else "agent")
 
