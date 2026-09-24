@@ -40,7 +40,7 @@ async def startup(ctx: dict[str, Any]) -> None:
         await db.commit()
     s = get_settings()
     ctx["redis_bus"] = Redis.from_url(s.redis_url)
-    ctx["plugins"] = await build_plugin_manager(EventBus(ctx["redis_bus"], s.stream_maxlen))
+    ctx["plugins"] = await build_plugin_manager(EventBus(ctx["redis_bus"], s.stream_maxlen), ctx["redis_bus"])
     ctx["plugins"].start_control_listener()
     sm = sessionmaker()
     bus = EventBus(ctx["redis_bus"], s.stream_maxlen)

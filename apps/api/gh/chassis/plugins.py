@@ -163,6 +163,7 @@ class LoadedPlugin:
 
 StateStore = Callable[[str, dict[str, Any]], Awaitable[None]]
 BreakerSink = Callable[[str, str, str | None], Coroutine[Any, Any, None]]
+LogSink = Callable[[str, str, str], Coroutine[Any, Any, None]]
 
 
 def read_manifests(root: Path) -> list[Manifest]:
@@ -207,10 +208,12 @@ def _outer_timeout(m: Manifest) -> float:
 
 class PluginManager:
     def __init__(self, bus: busmod.EventBus | None = None, *, persist: StateStore | None = None,
-                 breaker_sink: BreakerSink | None = None, instance_id: str | None = None):
+                 breaker_sink: BreakerSink | None = None, log_sink: LogSink | None = None,
+                 instance_id: str | None = None):
         self.bus = bus
         self.persist = persist
         self.breaker_sink = breaker_sink
+        self.log_sink = log_sink
         self.instance_id = instance_id or f"{socket.gethostname()}-{os.getpid()}"
         self.plugins: dict[str, LoadedPlugin] = {}
         self._control_task: asyncio.Task[None] | None = None
@@ -246,6 +249,8 @@ class PluginManager:
             lp.logs.append((level, message))
             del lp.logs[:-200]
         log.info("[%s] %s %s", package, level, message)
+        if self.log_sink:
+            asyncio.get_running_loop().create_task(self.log_sink(package, level, message))
 
     def _instantiate(self, lp: LoadedPlugin) -> Any:
         m = lp.manifest
