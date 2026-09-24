@@ -15,6 +15,7 @@ from redis.asyncio import Redis
 from sqlalchemy import text
 
 from gh import __version__, biz, realtime
+from gh.agents_api.routes import router as agents_router
 from gh.audit.routes import router as audit_router
 from gh.auth.routes import router as auth_router
 from gh.bootstrap import bootstrap
@@ -124,6 +125,9 @@ def create_app(*, with_lifespan: bool = True) -> FastAPI:
         app.include_router(r, prefix="/api/v1")
     for r in biz.routers():
         app.include_router(r, prefix="/api/v1")
+    # agents_router SAU biz.routers(): "/agents/{agent_id}" (một đoạn biến) không được đứng trước
+    # "/agents/decisions" (literal, gh.biz.core.routes) — Starlette so khớp theo thứ tự đăng ký.
+    app.include_router(agents_router, prefix="/api/v1")
     app.include_router(realtime.router, prefix="/api/v1")
     # Thứ tự: middleware thêm sau bọc ngoài cùng.
     app.add_middleware(ActionLogGuard)

@@ -33,6 +33,7 @@ PIN_OPERATIONS: dict[str, str] = {
     "data.export_delete": "Xuất / xoá dữ liệu",
     "people_review.read": "Xem dữ liệu đánh giá nhân sự",
     "pin.change": "Đổi mã PIN",
+    "agent.manage": "Tạo / tắt / nhân bản danh tính agent",
 }
 
 
