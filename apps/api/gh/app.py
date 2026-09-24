@@ -26,6 +26,7 @@ from gh.data.ingest import Ingest
 from gh.data_api.routes import router as data_router
 from gh.db import dispose_engine, sessionmaker
 from gh.errors import ApiError, JsonResponse, api_error_handler, validation_error_handler
+from gh.mcp_api.routes import router as mcp_router
 from gh.middleware import ActionLogGuard, SetupGate
 from gh.plugins_api.routes import router as plugins_router
 from gh.providers import cli as climod
@@ -55,10 +56,35 @@ async def _breaker_sink(package: str, state: str, reason: str | None) -> None:
         await db.commit()
 
 
-async def build_plugin_manager(bus: EventBus | None) -> PluginManager:
-    pm = PluginManager(bus, persist=_persist_plugin, breaker_sink=_breaker_sink)
+def _plugin_log_sink(redis: Redis) -> Any:
+    """Bền vững hoá dòng log plugin (`ops.plugin_logs`, PLAN 4.4) + đẩy LIVE qua WebSocket (`gh.realtime`)."""
+
+    async def sink(package: str, level: str, message: str) -> None:
+        msg = message[:2000]
+        async with sessionmaker()() as db:
+            pid = (await db.execute(text("SELECT id FROM ops.plugins WHERE package = :p"), {"p": package})
+                  ).scalar_one_or_none()
+            if pid is None:
+                return
+            await db.execute(text("INSERT INTO ops.plugin_logs (plugin_id, level, message) VALUES (:i, :l, :m)"),
+                             {"i": pid, "l": level, "m": msg})
+            await db.commit()
+        with contextlib.suppress(Exception):
+            await realtime.publish(redis, "plugin.log", {"package": package, "level": level, "message": msg})
+
+    return sink
+
+
+async def build_plugin_manager(bus: EventBus | None, redis: Redis) -> PluginManager:
+    pm = PluginManager(bus, persist=_persist_plugin, breaker_sink=_breaker_sink,
+                       log_sink=_plugin_log_sink(redis))
     async with sessionmaker()() as db:
-        rows = (await db.execute(text("SELECT origin, is_enabled, manifest, settings FROM ops.plugins"))).all()
+        # permissions_status = 'pending' (nạp từ tệp chưa duyệt quyền, PLAN 4.4) KHÔNG được nạp ở đây — tránh
+        # instantiate + on_load() một manifest do người dùng tải lên (mã lạ không kiểm soát) chỉ vì nó nằm
+        # trong CSDL; xem docstring `gh.plugins_api.routes.install_local`.
+        rows = (await db.execute(text(
+            "SELECT origin, is_enabled, manifest, settings FROM ops.plugins WHERE permissions_status = 'approved'"))
+               ).all()
     for r in rows:
         try:
             pm.register(Manifest.model_validate(r.manifest), origin=r.origin, enabled=r.is_enabled,
@@ -89,7 +115,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.console_ready = None
     app.state.redis = Redis.from_url(s.redis_url, decode_responses=False)
     app.state.bus = EventBus(app.state.redis, s.stream_maxlen)
-    app.state.plugins = await build_plugin_manager(app.state.bus)
+    # Transport HTTP tiêm được cho McpClient (gh.chassis.mcp_client) — None = httpx thật; test thay bằng
+    # httpx.MockTransport trên chính app.state sau khi app dựng xong (cùng cách gh.providers.router làm).
+    app.state.mcp_transport = None
+    app.state.plugins = await build_plugin_manager(app.state.bus, app.state.redis)
     app.state.plugins.start_control_listener()
     sm = sessionmaker()
     app.state.ws_hub = realtime.Hub(app.state.redis)
@@ -121,7 +150,8 @@ def create_app(*, with_lifespan: bool = True) -> FastAPI:
                   openapi_url="/api/v1/openapi.json")
     app.add_exception_handler(ApiError, api_error_handler)
     app.add_exception_handler(RequestValidationError, validation_error_handler)
-    for r in (auth_router, setup_router, shell_router, audit_router, plugins_router, data_router, system_router):
+    for r in (auth_router, setup_router, shell_router, audit_router, plugins_router, mcp_router, data_router,
+             system_router):
         app.include_router(r, prefix="/api/v1")
     for r in biz.routers():
         app.include_router(r, prefix="/api/v1")
