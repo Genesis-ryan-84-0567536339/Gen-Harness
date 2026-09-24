@@ -155,6 +155,13 @@ export async function mockHook(request: APIRequestContext, name: 'emit' | 'raw' 
   return res;
 }
 
+/** POST a phase-3 cluster hook on the mock (`/api/v1/__mock/p3/{cluster}/{hook}` → `hooks[hook](data)`). */
+export async function p3Hook(request: APIRequestContext, cluster: string, hook: string, data: unknown = {}) {
+  const res = await request.post(`/api/v1/__mock/p3/${cluster}/${hook}`, { data });
+  if (res.status() >= 400) throw new Error(`mock hook p3/${cluster}/${hook} failed: ${res.status()}`);
+  return res.json().catch(() => null);
+}
+
 /** Authenticated JSON call through the page's cookies (CSRF handled). */
 export async function apiCall(page: Page, method: 'GET' | 'POST' | 'PUT' | 'PATCH', path: string, data?: unknown) {
   const token = await csrf(page.request);

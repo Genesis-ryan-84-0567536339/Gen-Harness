@@ -560,6 +560,7 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
  *   /api/v1/__mock/scan     {"type":"zalo"} simulates the phone scanning the QR
  *   /api/v1/__mock/simulate {"on":bool} toggles the background simulation
  *   /api/v1/__mock/bridge   {"online":bool} makes channel login answer 503 BRIDGE_OFFLINE
+ *   /api/v1/__mock/p3/{cụm}/{hook}  body → `phase3[cụm].hooks[hook](body)`; trả JSON kết quả (404 nếu không có)
  */
 export function createMockApi(opts: MockOptions = {}) {
   const clients = new Set<MockSocket>();
@@ -600,6 +601,13 @@ export function createMockApi(opts: MockOptions = {}) {
   };
 
   const middleware = async (req: IncomingMessage, res: ServerResponse, next: Next) => {
+    const p3 = /^\/api\/v1\/__mock\/p3\/(\w+)\/(\w+)/.exec(req.url ?? '');
+    if (p3 && req.method === 'POST') {
+      const body = await readJson(req);
+      const fn = (current.phase3 as unknown as Record<string, { hooks: Record<string, (b: unknown) => unknown> }>)[p3[1]]?.hooks[p3[2]];
+      if (!fn) return done(res, 404);
+      return done(res, 200, fn(body) ?? null);
+    }
     const hook = /^\/api\/v1\/__mock\/(\w+)/.exec(req.url ?? '');
     if (hook && req.method === 'POST') {
       const body = await readJson(req);
