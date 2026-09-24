@@ -1,5 +1,7 @@
 """/setup — trình thiết lập Owner 12 bước (docs/handoff/06). Giai đoạn 1: bước 1–3; giai đoạn 2: bước 4–7, 12;
-giai đoạn 3: bước 8–9 (agent đầu tiên + thử trò chuyện; tự trị & ranh giới — docs/api/phase-3-people.md)."""
+giai đoạn 3: bước 8–9 (agent đầu tiên + thử trò chuyện; tự trị & ranh giới — docs/api/phase-3-people.md);
+giai đoạn 4: bước 10–11 (mời đội ngũ — tài khoản + mật khẩu tạm, chưa có SMTP thật; cấu hình LỊCH/ĐÍCH sao lưu —
+chạy pg_dump/MinIO thật thuộc GĐ 5 mục 5.6, PLAN.md)."""
 
 import hmac
 import json
@@ -18,7 +20,7 @@ from gh.auth.deps import client_ip, optional_user
 from gh.auth.routes import set_session_cookies
 from gh.biz.people.routes import try_chat
 from gh.chassis import actionlog, policy
-from gh.crypto import hash_secret, token_digest
+from gh.crypto import hash_secret, new_token, token_digest
 from gh.data_api.routes import RuleIn, ScheduleIn, create_rule, save_schedule, save_weights
 from gh.db import DB
 from gh.errors import ApiError, conflict, field_errors, forbidden, unauthenticated
@@ -43,7 +45,7 @@ STEPS: tuple[tuple[int, str, str, bool, int], ...] = (
     (11, "backup", "Sao lưu", False, 4),
     (12, "finish", "Hoàn tất", True, 2),
 )
-CURRENT_PHASE = 3
+CURRENT_PHASE = 4
 # Khoá cứng — ARCHITECTURE §7.4, không tắt được bằng cài đặt. Chỉ hiển thị lại ở bước 9 để Owner xác nhận đã đọc
 # (`ack_boundaries`) — trang Quyền hạn đầy đủ để BẬT/TẮT các giới hạn *tuỳ chọn* khác thuộc giai đoạn 4.
 HARD_BOUNDARIES = (
@@ -500,6 +502,91 @@ async def step9(body: Step9In, request: Request, db: AsyncSession = DB,
                               "hard_boundaries": list(HARD_BOUNDARIES)})
     state["agent"] = {"id": str(agent.id), "name": agent.name, "autonomy_level": body.autonomy_level}
     state["hard_boundaries"] = list(HARD_BOUNDARIES)
+    return state
+
+
+# ─── Bước 10–11 (giai đoạn 4) ────────────────────────────────────────────────
+
+class Step10Invite(BaseModel):
+    display_name: str = Field(min_length=1, max_length=120)
+    email: str = Field(max_length=320)
+    role: Literal["manager", "operator", "agent_staff", "auditor"]
+
+
+class Step10In(BaseModel):
+    invites: list[Step10Invite] = Field(default_factory=list, max_length=50)
+
+
+@router.put("/steps/10")
+async def step10(body: Step10In, request: Request, db: AsyncSession = DB,
+                 user: service.CurrentUser | None = Depends(optional_user)) -> dict[str, Any]:
+    """Mời đội ngũ: bước tuỳ chọn, tạo tài khoản + mật khẩu tạm cho từng người (chưa có SMTP thật gửi lời mời —
+    mật khẩu tạm trả thẳng về đây để Owner tự gửi qua kênh riêng). Danh sách rỗng vẫn đánh dấu xong được (Owner
+    có thể mời sau ở màn Quyền hạn); gọi `POST /setup/steps/10/skip` nếu muốn bỏ qua hẳn."""
+    row, owner = await _owner_step(db, user)
+    errors: dict[str, str] = {}
+    seen: set[str] = set()
+    created: list[dict[str, Any]] = []
+    for idx, inv in enumerate(body.invites):
+        email, name = inv.email.strip().lower(), inv.display_name.strip()
+        if not EMAIL_RE.match(email):
+            errors[f"invites.{idx}.email"] = "Email chưa đúng định dạng"
+        elif email in seen:
+            errors[f"invites.{idx}.email"] = "Email bị lặp trong danh sách"
+        elif (await db.execute(text("SELECT 1 FROM core.users WHERE org_id = :o AND email = :e"),
+                               {"o": row.org_id, "e": email})).scalar():
+            errors[f"invites.{idx}.email"] = "Email đã có tài khoản"
+        if not name:
+            errors[f"invites.{idx}.display_name"] = "Nhập tên hiển thị"
+        if f"invites.{idx}.email" in errors or f"invites.{idx}.display_name" in errors:
+            continue
+        seen.add(email)
+        temp_password = new_token(10)
+        uid = (await db.execute(text("""INSERT INTO core.users (org_id, email, display_name, password_hash)
+                                        VALUES (:o, :e, :n, :p) RETURNING id"""),
+                                {"o": row.org_id, "e": email, "n": name,
+                                 "p": hash_secret(temp_password)})).scalar_one()
+        role_id = (await db.execute(text("SELECT id FROM core.roles WHERE org_id = :o AND code = :r"),
+                                    {"o": row.org_id, "r": inv.role})).scalar_one()
+        await db.execute(text("INSERT INTO core.user_roles (user_id, role_id) VALUES (:u, :r)"),
+                         {"u": uid, "r": role_id})
+        await actionlog.record(db, org_id=row.org_id, actor_type="user", actor_id=owner.actor_id,
+                               action="setup.member_invited", target_type="user", target_id=str(uid),
+                               target_label=name, detail={"role": inv.role}, ip=client_ip(request))
+        created.append({"id": str(uid), "display_name": name, "email": email, "role": inv.role,
+                        "temp_password": temp_password})
+    if errors:
+        raise field_errors(errors)
+    state = await _mark_done(db, request, row, owner, 10, {"invited": len(created)})
+    state["invited"] = created
+    return state
+
+
+TIME_HHMM_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+
+
+class Step11In(BaseModel):
+    frequency: Literal["daily", "weekly", "monthly"] = "daily"
+    time_of_day: str = Field(default="02:00", max_length=5)
+    retention_count: int = Field(default=7, ge=1, le=365)
+    destination: Literal["local", "s3", "minio"] = "local"
+
+
+@router.put("/steps/11")
+async def step11(body: Step11In, request: Request, db: AsyncSession = DB,
+                 user: service.CurrentUser | None = Depends(optional_user)) -> dict[str, Any]:
+    """Sao lưu: bước tuỳ chọn, chỉ lưu LỊCH và ĐÍCH sao lưu (`core.organizations.settings->'backup'`) — chạy
+    `pg_dump` + MinIO thật, mã hoá, vòng 7 ngày/4 tuần/12 tháng là việc của GĐ 5 mục 5.6 (`docs/PLAN.md`),
+    không làm ở trình thiết lập."""
+    row, owner = await _owner_step(db, user)
+    if not TIME_HHMM_RE.match(body.time_of_day):
+        raise field_errors({"time_of_day": "Giờ chạy sao lưu dạng HH:MM (00:00–23:59)"})
+    cfg = {"frequency": body.frequency, "time_of_day": body.time_of_day, "retention_count": body.retention_count,
+           "destination": body.destination}
+    await db.execute(text("UPDATE core.organizations SET settings = settings || CAST(:s AS jsonb) WHERE id = :o"),
+                     {"s": json.dumps({"backup": cfg}), "o": row.org_id})
+    state = await _mark_done(db, request, row, owner, 11, cfg)
+    state["backup"] = cfg
     return state
 
 
