@@ -170,3 +170,86 @@ test.describe('cụm Hàng đợi & Hành động', () => {
     await expect(okRow).not.toHaveClass(/tk-row--overdue/);
   });
 });
+
+test.describe('cụm Quan hệ & Đối tượng', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await resetMock(page.request, 'finished');
+    await loginAsOwner(page);
+  });
+
+  test('Nhóm & Con người: lọc theo độ nhiệt, bật/tắt BOT cho một người', async ({ page }) => {
+    await page.goto('/directory');
+    await expect(page.locator('.gh-card', { hasText: 'Vận hành Genesis — Quý 4' })).toBeVisible();
+    await expect(page.getByText('Chỉ khi được tag').first()).toBeVisible();
+
+    await page.getByRole('tab', { name: 'Con người' }).click();
+    await expect(page).toHaveURL(/dt=people/);
+    await expect(page.getByText('Nguyễn Văn Bảo')).toBeVisible();
+    await expect(page.getByText('Trịnh Mỹ Duyên')).toBeVisible();
+
+    await page.getByRole('group', { name: 'Độ nhiệt' }).getByRole('button', { name: 'Lạnh' }).click();
+    await expect(page).toHaveURL(/heat=cold/);
+    await expect(page.getByText('Đặng Hữu Trí')).toBeVisible();
+    await expect(page.getByText('Nguyễn Văn Bảo')).toHaveCount(0);
+
+    const row = page.locator('tr', { hasText: 'Đặng Hữu Trí' });
+    await expect(row.getByText('Chưa gán')).toBeVisible();
+    await row.getByRole('button', { name: 'Đổi' }).click();
+    const dlg = page.getByRole('dialog', { name: 'Thiết lập BOT + tự trị' });
+    await expect(dlg).toBeVisible();
+    await dlg.getByText('Key Account junior').click();
+    await dlg.getByRole('button', { name: 'Lưu' }).click();
+    await expect(dlg).toBeHidden();
+    await expect(row.getByText('Key Account junior')).toBeVisible();
+  });
+
+  test('Hồ sơ sống: xem 5 điểm và "Vì sao hệ thống nghĩ vậy"', async ({ page }) => {
+    await page.goto('/profile?id=p-bao');
+    await expect(page.getByText('Nguyễn Văn Bảo', { exact: true })).toBeVisible();
+    await expect(page.getByText('Zalo', { exact: false }).first()).toBeVisible();
+    const heatScore = page.locator('.pf-score', { hasText: 'Độ nóng' });
+    await expect(heatScore).toContainText('87');
+    await expect(page.getByText('Anh Bảo thích nói chuyện thẳng', { exact: false })).toBeVisible();
+
+    await heatScore.getByRole('button', { name: /Vì sao/ }).click();
+    const evidence = page.getByRole('dialog', { name: /Nguyễn Văn Bảo/ });
+    await expect(evidence).toBeVisible();
+    await expect(evidence).toContainText('87/100');
+    await expect(evidence.locator('.gh-dialog__actions').getByRole('button', { name: 'Đóng' })).toBeVisible();
+  });
+
+  test('Sổ tay nhận thức: ghim một mục, nén ngay, xem lịch sử nén', async ({ page }) => {
+    await page.goto('/notebook');
+    await expect(page.locator('.nb-detail__name')).toHaveText('Nguyễn Văn Bảo');
+    const line = page.locator('.nb-line', { hasText: 'Đang so sánh giá với Minh Long' });
+    await expect(line).toBeVisible();
+    const pinBtn = line.getByRole('button', { name: 'Ghim mục này' });
+    await pinBtn.click();
+    await expect(line.getByRole('button', { name: 'Bỏ ghim mục này' })).toBeVisible();
+
+    await expect(page.getByText('Lần 14', { exact: false })).toBeVisible();
+    await page.getByRole('button', { name: 'Nén ngay' }).click();
+    await expect(page.getByText('Nén lần thứ 15', { exact: false })).toBeVisible();
+    await expect(page.getByText('Lần 15', { exact: false })).toBeVisible();
+  });
+
+  test('Tài liệu: tải lên một tệp mới rồi xem lại trong danh sách', async ({ page }) => {
+    await page.goto('/documents');
+    await expect(page.getByText('BaoGia_ThanhPhat_Q4.docx')).toBeVisible();
+
+    await page.getByRole('button', { name: 'Tải tài liệu lên' }).click();
+    const dlg = page.getByRole('dialog', { name: 'Tải tài liệu lên' });
+    await dlg.getByLabel('Tiêu đề').fill('Biên bản nghiệm thu tháng 9');
+    await dlg.locator('#doc-file').setInputFiles({ name: 'nghiem-thu.txt', mimeType: 'text/plain', buffer: Buffer.from('nội dung mẫu') });
+    await dlg.getByRole('button', { name: 'Tải lên' }).click();
+    await expect(dlg).toBeHidden();
+    await expect(page.getByText('Biên bản nghiệm thu tháng 9')).toBeVisible();
+
+    await page.getByText('Biên bản nghiệm thu tháng 9').click();
+    const detail = page.getByRole('dialog', { name: 'Biên bản nghiệm thu tháng 9' });
+    await expect(detail).toBeVisible();
+    await expect(detail.getByText('role:owner')).toBeVisible();
+    await expect(detail.getByRole('link', { name: /Xem \/ tải xuống/ })).toHaveAttribute('href', /\/documents\/.+\/content/);
+  });
+});

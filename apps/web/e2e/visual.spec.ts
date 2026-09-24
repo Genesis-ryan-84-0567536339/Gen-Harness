@@ -50,6 +50,48 @@ const SCENARIOS: Scenario[] = [
     design: { clicks: ['Hàng đợi & Hành động', 'Bàn làm việc'] },
     sidebar: 'full',
   },
+  {
+    name: 'directory-1440',
+    viewport: { width: 1440, height: 900 },
+    appPath: '/directory',
+    design: { clicks: ['Nhóm & Con người'] },
+    sidebar: 'full',
+  },
+  {
+    name: 'directory-1280',
+    viewport: { width: 1280, height: 800 },
+    appPath: '/directory',
+    design: { clicks: ['Nhóm & Con người'] },
+    sidebar: 'full',
+  },
+  {
+    name: 'profile-1440',
+    viewport: { width: 1440, height: 900 },
+    appPath: '/profile?id=p-bao',
+    design: { clicks: ['Bản đồ quan hệ', 'Hồ sơ sống'] },
+    sidebar: 'full',
+  },
+  {
+    name: 'profile-1280',
+    viewport: { width: 1280, height: 800 },
+    appPath: '/profile?id=p-bao',
+    design: { clicks: ['Bản đồ quan hệ', 'Hồ sơ sống'] },
+    sidebar: 'full',
+  },
+  {
+    name: 'notebook-1440',
+    viewport: { width: 1440, height: 900 },
+    appPath: '/notebook',
+    design: { clicks: ['Bản đồ quan hệ', 'Sổ tay nhận thức'] },
+    sidebar: 'full',
+  },
+  {
+    name: 'notebook-1280',
+    viewport: { width: 1280, height: 800 },
+    appPath: '/notebook',
+    design: { clicks: ['Bản đồ quan hệ', 'Sổ tay nhận thức'] },
+    sidebar: 'full',
+  },
   { name: 'rail-1280', viewport: { width: 1280, height: 800 }, appPath: '/overview', design: { sidebarMode: 'rail' }, sidebar: 'rail' },
 ];
 const HEADER = 58;
