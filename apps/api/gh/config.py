@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     cookie_secure: bool = True
 
     stream_maxlen: int = Field(default=100_000, description="Độ dài tối đa mỗi Redis Stream (xấp xỉ)")
+    # Kho tệp cho Tài liệu (biz.documents): chưa có client MinIO nối dây ở giai đoạn 1/2 (xem gh/chassis/objects.py
+    # — quyết định tự đưa ra ở cụm relations). Mặc định đĩa cục bộ ngoài thư mục repo (thư mục tạm hệ thống).
+    objects_dir: str = Field(default="")
 
     @property
     def is_production(self) -> bool:
