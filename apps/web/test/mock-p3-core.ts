@@ -43,7 +43,7 @@ export const BAO = {
   type: 'customer' as const,
   org_name: 'Công ty in Thành Phát',
 };
-const GROUP_TP = {
+export const GROUP_TP = {
   id: 'g-thanhphat',
   code: 'GRP-ZL-0114',
   name: 'Đối tác in ấn Thành Phát',
