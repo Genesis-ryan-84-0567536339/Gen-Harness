@@ -1,4 +1,10 @@
 import type { ApiClient } from './client';
+import { coreEndpoints } from './p3-core';
+import { queueEndpoints } from './p3-queue';
+import { relationsEndpoints } from './p3-relations';
+import { graphEndpoints } from './p3-graph';
+import { marketEndpoints } from './p3-market';
+import { peopleEndpoints } from './p3-people';
 import type {
   AuditPage,
   AuditVerify,
@@ -63,7 +69,7 @@ import type {
 type Q = Record<string, string | number | boolean | null | undefined>;
 const enc = encodeURIComponent;
 
-/** Typed endpoints — phase 1 (docs/api/phase-1.md) and phase 2 (docs/api/phase-2.md). */
+/** Typed endpoints — phase 1, 2 (docs/api/phase-1.md, phase-2.md) and phase 3 (docs/api/phase-3*.md, one factory per cluster). */
 export function createEndpoints(client: ApiClient) {
   const r = client.request;
   return {
@@ -224,6 +230,12 @@ export function createEndpoints(client: ApiClient) {
         r<Plugin>(`/plugins/${encodeURIComponent(pkg)}/toggle`, { method: 'PATCH', body: { enabled } }),
       remove: (pkg: string) => r<void>(`/plugins/${encodeURIComponent(pkg)}`, { method: 'DELETE' }),
     },
+    ...coreEndpoints(r),
+    queue: queueEndpoints(r),
+    relations: relationsEndpoints(r),
+    graph: graphEndpoints(r),
+    market: marketEndpoints(r),
+    people: peopleEndpoints(r),
   };
 }
 

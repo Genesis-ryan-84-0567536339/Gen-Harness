@@ -28,7 +28,7 @@ Tên và nội dung trả cho vai trò dưới Owner đi qua bộ che dữ liệ
 
 ## Phạm vi dữ liệu (ScopeFilter)
 
-Mọi truy vấn màn kinh doanh lọc theo phạm vi của người gọi cho quyền tương ứng (`gh/biz/scope.py`):
+Mọi truy vấn màn kinh doanh lọc theo phạm vi của người gọi cho quyền tương ứng (`gh/biz/core/scope.py`):
 
 | Phạm vi | Người (`core.persons`) thấy được | Nhóm |
 |---|---|---|
@@ -100,11 +100,11 @@ Loại (`kind`): `message` "Tin nhắn" · `quotation` "Báo giá" · `contract`
 - Quyết định lại một bản nháp đã quyết → `409 DRAFT_DECIDED`. Mọi thao tác vào Action Log (`draft.approved|edited|rejected|sent|failed`, kèm mức tự trị).
 - WebSocket: `draft.new` (item danh sách) và `draft.updated` `{"id", "status", "send_result"}`.
 
-Tạo bản nháp từ mã khác: `gh.biz.drafts.create_draft(...)` (xem docstring). Người tạo bản nháp bằng tay dùng `POST /drafts` (`action.draft`) `{"kind", "title", "text", "target": {"channel", "thread_type", "group_id"|"person_id"}, "amount_vnd"?, "subject": {"type": "person|group", "id"}?, "sources"?: [...]}` → `201` bản nháp `pending`.
+Tạo bản nháp từ mã khác: `gh.biz.core.drafts.create_draft(...)` (xem docstring). Người tạo bản nháp bằng tay dùng `POST /drafts` (`action.draft`) `{"kind", "title", "text", "target": {"channel", "thread_type", "group_id"|"person_id"}, "amount_vnd"?, "subject": {"type": "person|group", "id"}?, "sources"?: [...]}` → `201` bản nháp `pending`.
 
 ## Agent trực kênh
 
-Khi sàng lọc ghi xong đơn vị ý nghĩa (`gh.clean.ready`), worker chạy các **hook sau sàng lọc** đã đăng ký (`gh/intel/`), mỗi hook cách ly lỗi riêng. Agent trực kênh là một hook: với mỗi đơn vị trong phạm vi của một agent đang bật (`agent.channel_scopes`), dựng ngữ cảnh (ID nhóm, ID người, dữ liệu sạch liên quan, lịch sử tương quan, sổ tay), hỏi model quyết định `silent | note | suggest | draft | send`, qua policy, rồi ghi `agent.decisions` (kèm ID ngữ cảnh đã dùng) và Action Log. `send` luôn thành bản nháp chờ duyệt (quyết định Q2).
+Khi sàng lọc ghi xong đơn vị ý nghĩa (`gh.clean.ready`), worker chạy các **hook sau sàng lọc** đã đăng ký (`HOOKS` trong `gh/biz/<cụm>/jobs.py`, xem `gh/biz/hooks.py`), mỗi hook một consumer group riêng nên lỗi được cách ly. Agent trực kênh là một hook: với mỗi đơn vị trong phạm vi của một agent đang bật (`agent.channel_scopes`), dựng ngữ cảnh (ID nhóm, ID người, dữ liệu sạch liên quan, lịch sử tương quan, sổ tay), hỏi model quyết định `silent | note | suggest | draft | send`, qua policy, rồi ghi `agent.decisions` (kèm ID ngữ cảnh đã dùng) và Action Log. `send` luôn thành bản nháp chờ duyệt (quyết định Q2).
 
 - `GET /agents/decisions?agent_id=&decision=&cursor&limit=50` (`system.read` hoặc `action.approve`) →
   `{"items": [{"id", "at", "agent": AgentRef, "decision": "draft", "rationale": "…", "trigger": EvidenceRef, "context_refs": [EvidenceRef], "draft": {"id", "code"} | null}], …}` — nguồn cho "Agent đã nói gì, nhân danh gì" (giai đoạn 4) và khối nguồn của Bàn làm việc.

@@ -38,6 +38,19 @@ const MAX_DIFF_RATIO = Number(process.env.VISUAL_MAX_DIFF ?? 0.015);
 
 const outDir = join(resultsDir, 'visual');
 
+/** Màn spec bổ sung (quyết định Q5) không có trong thiết kế: ẩn khỏi danh mục khi so ảnh. */
+const EXTRA_SCREENS = ['tasks', 'documents', 'deals'];
+
+/** Tô đen cùng một vùng ở cả hai ảnh (logo đầu heo thay radar theo yêu cầu 24/09/2026). */
+function blank(png: PNG, box: { x: number; y: number; width: number; height: number }) {
+  for (let y = Math.floor(box.y); y < Math.ceil(box.y + box.height); y++)
+    for (let x = Math.floor(box.x); x < Math.ceil(box.x + box.width); x++) {
+      const i = (y * png.width + x) * 4;
+      png.data[i] = png.data[i + 1] = png.data[i + 2] = 0;
+      png.data[i + 3] = 255;
+    }
+}
+
 function crop(png: PNG, x: number, y: number, w: number, h: number): PNG {
   const out = new PNG({ width: w, height: h });
   PNG.bitblt(png, out, x, y, w, h, 0, 0);
@@ -76,8 +89,11 @@ for (const sc of SCENARIOS) {
     await expect(appPage.getByText('tự trị 4')).toBeVisible();
     await expect(appPage.locator('.sb-avatar')).toHaveText('CL');
     await expect(appPage.locator('.sb-nav .sb-item').first()).toBeVisible();
+    await appPage.addStyleTag({ content: EXTRA_SCREENS.map((k) => `[data-screen="${k}"]`).join(',') + '{display:none !important}' });
     await settle(appPage);
     const app = await shot(appPage, `app-${sc.name}.png`);
+    const logo = await appPage.locator('.sb-logo__tile').boundingBox();
+    if (logo) for (const png of [design, app]) blank(png, logo);
 
     const side = sc.sidebar === 'full' ? 244 : 60;
     const regions = {
