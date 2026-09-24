@@ -14,7 +14,7 @@ async def test_console_blocked_until_setup(client) -> None:  # type: ignore[no-u
     assert r.status_code == 200
     s = r.json()
     assert s["current_step"] == 1 and not s["finished"] and len(s["steps"]) == 12
-    assert [st["n"] for st in s["steps"] if st["available"]] == [1, 2, 3, 4, 5, 6, 7, 8, 9, 12]
+    assert [st["n"] for st in s["steps"] if st["available"]] == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     assert (await api.get("/health")).json() == {"status": "ok"}
 
 
