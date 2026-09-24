@@ -1,7 +1,8 @@
 """Test chạy trên PostgreSQL 16 + Redis thật (không mock DB).
 
 Biến môi trường: GH_TEST_PG (mặc định postgresql://postgres:postgres@localhost:5432), GH_TEST_REDIS
-(mặc định redis://localhost:6379/15). Một CSDL mẫu được migrate một lần; mỗi test cần DB sạch nhận một bản sao.
+(mặc định redis://localhost:6379/15), GH_TEST_TEMPLATE (tên CSDL mẫu, mặc định gh_test_template). Chạy song song
+nhiều bộ test trên cùng máy: mỗi bộ đặt GH_TEST_TEMPLATE và số db Redis riêng. Một CSDL mẫu được migrate một lần; mỗi test cần DB sạch nhận một bản sao.
 """
 
 import asyncio
@@ -20,7 +21,7 @@ from redis.asyncio import Redis
 API_DIR = Path(__file__).resolve().parents[1]
 PG = os.environ.get("GH_TEST_PG", "postgresql://postgres:postgres@localhost:5432")
 REDIS_URL = os.environ.get("GH_TEST_REDIS", "redis://localhost:6379/15")
-TEMPLATE = "gh_test_template"
+TEMPLATE = os.environ.get("GH_TEST_TEMPLATE", "gh_test_template")
 
 os.environ.setdefault("GH_ENV", "test")
 os.environ["GH_COOKIE_SECURE"] = "false"
@@ -57,7 +58,7 @@ def _use_db(name: str) -> None:
 async def fresh_db(template_db: str) -> AsyncIterator[str]:
     from gh import db as dbmod
 
-    name = f"gh_test_{uuid.uuid4().hex[:10]}"
+    name = f"{TEMPLATE}_{uuid.uuid4().hex[:10]}"
     await asyncio.to_thread(_admin, f"CREATE DATABASE {name} TEMPLATE {template_db}")
     _use_db(name)
     await dbmod.dispose_engine()
