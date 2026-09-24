@@ -89,6 +89,7 @@ const MATRIX: Record<string, [string, string, string, string, string]> = {
 const SCREEN_PERMISSION: Record<string, string[]> = {
   overview: ['overview.read'], inbox: ['queue.read'], workbench: ['action.draft', 'action.approve'],
   directory: ['profile.read'], graph: ['profile.read'], profile: ['profile.read'], notebook: ['profile.read'],
+  documents: ['profile.read'],
   opportunity: ['opportunity.read'], supply: ['opportunity.read'], search: ['opportunity.read'],
   people: ['people_review.read'], care: ['care.read'],
   raw: ['data.read'], rules: ['data.read'], clean: ['data.read'], identity: ['data.read'],
