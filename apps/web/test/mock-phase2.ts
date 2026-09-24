@@ -90,6 +90,8 @@ export interface P2Ctx {
   userLabel: string;
   /** Owner sees raw text unmasked (khoá cứng 8). */
   owner: boolean;
+  /** Mã vai trò (`owner|manager|operator|agent_staff|auditor`) — cụm `people` cần role thật cho nhánh Q4, generic `perms` không đủ (Auditor có `people_review.read = none` trong ma trận chung nhưng vẫn phải nhận 200 nhánh `log`). */
+  role: string;
 }
 
 /** gh/data/common.py mask_text: long digit runs (phones, accounts) keep only the last 3 digits. */

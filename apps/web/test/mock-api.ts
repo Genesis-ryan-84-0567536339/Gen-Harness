@@ -5,6 +5,7 @@
  *   owner@genesis.local / matkhau-rat-dai-2026, PIN 246810    (role owner)
  *   operator@genesis.local / matkhau-rat-dai-2026, PIN 135790 (role operator, fewer screens)
  *   auditor@genesis.local / matkhau-rat-dai-2026, PIN 975310  (role auditor, read-only)
+ *   manager@genesis.local / matkhau-rat-dai-2026, PIN 864202  (role manager, team scope)
  *   setup token: GH-SETUP-7Q4K-2M9X
  *
  * MOCK_SETUP=fresh starts at step 1; MOCK_LATENCY=<ms> delays every response;
@@ -102,7 +103,12 @@ export function permissionsOf(role: RoleCode): Record<string, string> {
 }
 function hiddenScreens(role: RoleCode): Set<string> {
   const perms = permissionsOf(role);
-  return new Set(Object.entries(SCREEN_PERMISSION).filter(([, need]) => !need.some((p) => perms[p] !== 'none')).map(([k]) => k));
+  const hidden = new Set(Object.entries(SCREEN_PERMISSION).filter(([, need]) => !need.some((p) => perms[p] !== 'none')).map(([k]) => k));
+  // Q4 (docs/PLAN.md): Auditor VẪN thấy màn "Đánh giá con người" trong danh mục (nhánh log — nhật ký ai đã
+  // xem), dù phạm vi chung `people_review.read` của Auditor là 'none' như Manager. Đây là ngoại lệ nội dung
+  // (che điểm/chứng cứ ở tầng route), không phải ẩn hẳn màn như Manager — khác `care` (Q4 không nói tới `care`).
+  if (role === 'auditor') hidden.delete('people');
+  return hidden;
 }
 /** Which realtime events a connection may receive (docs/api/phase-2.md § WebSocket). */
 const EVENT_PERMISSION: Array<[string, string | null]> = [
@@ -196,13 +202,15 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
   /** Giai đoạn 3: mỗi cụm màn một mock riêng (test/mock-p3-*.ts), hỏi lần lượt sau phase 2. */
   const p3Core = createP3Core({ fresh: opts.setup === 'fresh', emit: broadcast });
   const phase3 = {
+    // people trước core: `GET /explain/review/{id}` cần gác cổng riêng theo Q4 (Auditor không vào được chuỗi
+    // chứng cứ) — core.handle() nuốt mọi `/explain/{kind}/{id}` không phân biệt kind nên phải chặn trước nó.
+    people: createP3People({ fresh: opts.setup === 'fresh', emit: broadcast }),
     core: p3Core,
     queue: createP3Queue({ fresh: opts.setup === 'fresh', emit: broadcast }),
     relations: createP3Relations({ fresh: opts.setup === 'fresh', emit: broadcast }),
     graph: createP3Graph({ fresh: opts.setup === 'fresh', emit: broadcast }),
     // market "Giới thiệu hai bên" tạo bản nháp thật qua core.hooks.push — cùng cơ chế create_draft dùng chung ở backend.
     market: createP3Market({ fresh: opts.setup === 'fresh', emit: broadcast, pushDraft: p3Core.hooks.push as (d: unknown) => unknown }),
-    people: createP3People({ fresh: opts.setup === 'fresh', emit: broadcast }),
   };
   const audit: AuditRow[] = [];
   const record = (user: User | undefined, action: string, result = 'ok', detail: unknown = null) =>
@@ -265,6 +273,17 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
       display_name: 'Anh Minh Kiểm',
       role: { code: 'auditor', name: 'Auditor · kiểm toán' },
       hidden: hiddenScreens('auditor'),
+    });
+    // Q4 (docs/PLAN.md): cần một tài khoản Manager thật để e2e xác nhận nhánh "Manager không thấy" của
+    // Đánh giá con người (trước đây chỉ owner/operator/auditor được seed, chưa cụm nào cần Manager tới giờ).
+    users.push({
+      id: randomUUID(),
+      email: 'manager@genesis.local',
+      password: MOCK_OWNER.password,
+      pin: '864202',
+      display_name: 'Chị Hồng Quản',
+      role: { code: 'manager', name: 'Manager · quản lý team' },
+      hidden: hiddenScreens('manager'),
     });
   }
 
@@ -545,6 +564,7 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
       needPin,
       userLabel: user.display_name,
       owner: user.role.code === 'owner',
+      role: user.role.code,
     };
     if (phase2.handle(ctx)) return;
     for (const m of Object.values(phase3)) if (m.handle(ctx)) return;
