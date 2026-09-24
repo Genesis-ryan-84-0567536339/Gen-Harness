@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
-import { loginAsOwner, OWNER, resetMock, resultsDir, SETUP_TOKEN } from './support';
+import { AUDITOR, loginAs, loginAsOwner, MANAGER, OWNER, resetMock, resultsDir, SETUP_TOKEN } from './support';
 
 const shots = join(resultsDir, 'visual');
 
@@ -430,5 +430,126 @@ test.describe('cụm Cơ hội & Thị trường', () => {
     await caseRow.getByRole('button', { name: 'Đang xử lý' }).click();
     await casePatch;
     await expect(caseRow.getByRole('button', { name: 'Đang xử lý' })).toHaveAttribute('aria-pressed', 'true');
+  });
+});
+
+test.describe('cụm Con người & Chất lượng', () => {
+  test.beforeEach(async ({ page, request }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await resetMock(request, 'finished');
+  });
+
+  async function enterOwnerPin(page: import('@playwright/test').Page) {
+    const dlg = page.getByRole('dialog', { name: 'Mã PIN xác nhận thao tác' });
+    await expect(dlg).toBeVisible();
+    await page.getByLabel('Mã PIN — chữ số 1/6').click();
+    await page.keyboard.type(OWNER.pin);
+    await expect(dlg).toBeHidden();
+  }
+
+  test('Q4: Owner thấy đủ, Auditor chỉ thấy nhật ký ai đã xem, Manager bị chặn cả danh mục lẫn API', async ({ page }) => {
+    // Owner — nhánh full: đòi PIN, thấy điểm/tín hiệu/khuyến nghị/nút "Vì sao"/"Sửa điểm tay".
+    await loginAsOwner(page);
+    await page.goto('/people');
+    await enterOwnerPin(page);
+    await expect(page.getByRole('heading', { name: 'Đánh giá con người', level: 2 })).toBeVisible();
+    const tuRowOwner = page.locator('.ppl-row', { hasText: 'Phạm Anh Tú' });
+    await expect(tuRowOwner).toBeVisible();
+    await expect(tuRowOwner.getByText('54')).toBeVisible();
+    await expect(tuRowOwner.getByRole('button', { name: 'Sửa điểm tay' })).toBeVisible();
+    await expect(tuRowOwner.getByRole('button', { name: /Xem chứng cứ/ })).toBeVisible();
+
+    // Auditor — nhánh log: màn vẫn vào được (còn trong danh mục), CHỈ "đã có đánh giá" + nhật ký ai đã xem.
+    await loginAs(page, AUDITOR.email);
+    await page.goto('/people');
+    await expect(page.getByRole('link', { name: /Đánh giá con người/ })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Đánh giá con người', level: 2 })).toBeVisible();
+    await expect(page.getByText('Đã có đánh giá').first()).toBeVisible();
+    await expect(page.getByText('54', { exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Sửa điểm tay' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /Xem chứng cứ/ })).toHaveCount(0);
+    const tuRowAuditor = page.locator('.ppl-row--log', { hasText: 'Phạm Anh Tú' });
+    await tuRowAuditor.getByRole('button', { name: 'Xem nhật ký ai đã xem' }).click();
+    const logDlg = page.getByRole('dialog');
+    await expect(logDlg.getByText('Nhật ký ai đã xem')).toBeVisible();
+    await expect(logDlg.getByText('people_review.audit_viewed').first()).toBeVisible();
+    await page.locator('.gh-dialog__actions').getByRole('button', { name: 'Đóng' }).click();
+
+    // Manager — mặc định không thấy (Q4): ẩn khỏi danh mục, vào thẳng URL vẫn 403 → EmptyState, không crash.
+    // `loginAs` chỉ đổi cookie phiên qua API — điều hướng (goto) để app tải lại danh mục/nav theo vai trò mới.
+    await loginAs(page, MANAGER.email);
+    await page.goto('/people');
+    await expect(page.getByText('Vai trò của bạn không có quyền xem màn này')).toBeVisible();
+    await expect(page.getByRole('link', { name: /Đánh giá con người/ })).toHaveCount(0);
+  });
+
+  test('sửa điểm tay giữ lịch sử (Owner)', async ({ page }) => {
+    await loginAsOwner(page);
+    await page.goto('/people');
+    await enterOwnerPin(page);
+
+    const tuRow = page.locator('.ppl-row', { hasText: 'Phạm Anh Tú' });
+    await tuRow.getByRole('button', { name: 'Sửa điểm tay' }).click();
+    const dlg = page.getByRole('dialog');
+    await expect(dlg.getByText('tự động (rules+model)')).toBeVisible();
+
+    await dlg.getByLabel('Điểm mới (0–100)').fill('70');
+    await dlg.getByPlaceholder('Bắt buộc — ghi rõ vì sao sửa điểm').fill('Xem lại, khách im lặng chờ duyệt ngân sách.');
+    const patch = page.waitForResponse((r) => r.url().includes('/people/reviews/') && r.request().method() === 'PATCH');
+    await dlg.getByRole('button', { name: 'Lưu điểm mới' }).click();
+    const res = await patch;
+    expect(res.ok()).toBe(true);
+    const body = res.request().postDataJSON() as { score: number; reason: string; evidence: unknown[] };
+    expect(body.score).toBe(70);
+    expect(body.evidence.length).toBeGreaterThan(0);
+
+    await expect(dlg.getByText('Lịch sử điểm', { exact: false })).toBeVisible();
+    await expect(dlg.locator('.ppl-row__label', { hasText: 'sửa tay' }).first()).toBeVisible();
+    await page.locator('.gh-dialog__actions').getByRole('button', { name: 'Đóng' }).click();
+    await expect(tuRow.getByText('70')).toBeVisible(); // danh sách tự cập nhật qua invalidate query.
+  });
+
+  test('mở phản biện và giải quyết — không tự đổi điểm (khoá cứng 2)', async ({ page }) => {
+    await loginAsOwner(page);
+    await page.goto('/people');
+    await enterOwnerPin(page);
+
+    const tuRow = page.locator('.ppl-row', { hasText: 'Phạm Anh Tú' });
+    await tuRow.getByRole('button', { name: 'Sửa điểm tay' }).click();
+    const dlg = page.getByRole('dialog');
+    await expect(dlg.getByText(/khách chủ động im lặng/)).toBeVisible();
+    await expect(dlg.getByText('đang mở')).toBeVisible();
+
+    await dlg.getByPlaceholder('Ghi lý do xử lý').fill('Đồng ý, không trừ điểm lần này.');
+    const resolve = page.waitForResponse((r) => r.url().includes('/disputes/') && r.request().method() === 'PATCH');
+    await dlg.getByRole('button', { name: 'Chấp nhận' }).click();
+    await resolve;
+    await expect(dlg.getByText('đã chấp nhận')).toBeVisible();
+    // Giải quyết phản biện chỉ ghi trạng thái bằng chữ — không tự sửa điểm.
+    await expect(dlg.locator('.ppl-detail-score')).toContainText('54');
+
+    // Mở phản biện mới trên cùng đánh giá.
+    await dlg.getByPlaceholder('Mở phản biện mới — nêu rõ điểm không đồng ý').fill('Xin xem lại một lần nữa.');
+    const create = page.waitForResponse((r) => r.url().includes('/disputes') && r.request().method() === 'POST');
+    await dlg.getByRole('button', { name: 'Mở phản biện' }).click();
+    const createRes = await create;
+    expect(createRes.ok()).toBe(true);
+    await expect(dlg.getByText('Xin xem lại một lần nữa.')).toBeVisible();
+  });
+
+  test('Chất lượng chăm sóc: lưới phản hồi, lỗi lặp lại, kịch bản thắng/mất đúng seed', async ({ page }) => {
+    await loginAsOwner(page);
+    await page.goto('/care');
+    await expect(page.getByRole('heading', { name: 'Chất lượng chăm sóc', level: 2 })).toBeVisible();
+
+    await expect(page.locator('.care-grid-row', { hasText: 'Phạm Anh Tú' })).toBeVisible();
+    await expect(page.locator('.care-issue-row', { hasText: 'Phạm Anh Tú' })).toContainText('Hứa rồi quên');
+    await expect(page.locator('.care-issue-row', { hasText: 'Nguyễn Thị Ngọc' })).toContainText('Khách bị bỏ rơi');
+
+    const wonScn = page.locator('.care-scn-row', { hasText: 'DEA-0201' });
+    await expect(wonScn).toContainText('Thắng');
+    await wonScn.getByRole('link', { name: /xem deal/ }).click();
+    await expect(page).toHaveURL(/\/deals$/);
+    await expect(page.getByRole('heading', { name: 'Deal & Vụ việc', level: 2 })).toBeVisible();
   });
 });

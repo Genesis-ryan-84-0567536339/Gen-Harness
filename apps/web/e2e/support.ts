@@ -138,6 +138,7 @@ export async function loginAsOwner(page: Page): Promise<void> {
 }
 
 export const AUDITOR = { email: 'auditor@genesis.local', pin: '975310' };
+export const MANAGER = { email: 'manager@genesis.local', pin: '864202' };
 
 export async function loginAs(page: Page, email: string, password = OWNER.password): Promise<void> {
   const token = await csrf(page.request);
