@@ -295,6 +295,9 @@ async def handle_status(db: AsyncSession, redis: Redis, bus: EventBus, org_id: u
                                target_type="draft", target_id=str(p.get("draft_id") or ""),
                                result="ok" if p.get("ok") else "failed",
                                detail={"error": p.get("error"), "external_msg_id": p.get("external_msg_id")})
+        from gh.biz.core import drafts  # bản nháp của Bàn làm việc: sent / failed
+
+        await drafts.on_send_result(db, org_id, p, redis)
     return out
 
 

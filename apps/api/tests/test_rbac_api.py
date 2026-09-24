@@ -47,16 +47,18 @@ def screens(nav: list[dict]) -> set[str]:  # type: ignore[type-arg]
     return out
 
 
+BIZ_EXTRA = {"tasks", "documents", "deals"}
 EXPECTED = {
     "owner": set(navigation.all_screen_keys()),
-    "manager": {"overview", "inbox", "workbench", "tasks", "documents", "deals", "directory", "graph", "profile", "notebook", "opportunity",
-                "supply", "search", "system"},
-    "operator": {"overview", "inbox", "workbench", "tasks", "documents", "deals", "directory", "graph", "profile", "notebook", "opportunity",
-                 "supply", "search"},
-    "agent_staff": {"inbox", "workbench", "tasks", "documents", "deals", "directory", "graph", "profile", "notebook", "opportunity", "supply",
-                    "search"},
-    "auditor": {"overview", "inbox", "tasks", "documents", "deals", "directory", "graph", "profile", "notebook", "opportunity", "supply", "search",
-                "raw", "rules", "clean", "identity", "agents", "api", "mcp", "plugins", "system"},
+    "manager": BIZ_EXTRA | {"overview", "inbox", "workbench", "directory", "graph", "profile", "notebook",
+                            "opportunity", "supply", "search", "system"},
+    "operator": BIZ_EXTRA | {"overview", "inbox", "workbench", "directory", "graph", "profile", "notebook",
+                             "opportunity", "supply", "search"},
+    "agent_staff": BIZ_EXTRA | {"inbox", "workbench", "directory", "graph", "profile", "notebook", "opportunity",
+                                "supply", "search"},
+    "auditor": BIZ_EXTRA | {"overview", "inbox", "directory", "graph", "profile", "notebook", "opportunity", "supply",
+                            "search", "raw", "rules", "clean", "identity", "agents", "api", "mcp", "plugins",
+                            "system"},
 }
 
 

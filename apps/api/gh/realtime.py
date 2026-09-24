@@ -38,6 +38,19 @@ EVENT_PERMISSION: dict[str, str | None] = {
 MASKED_EVENTS = {"raw.new"}
 
 
+def register_event(type: str, permission: str | None, *, masked: bool = False) -> None:
+    """Các cụm màn giai đoạn 3 khai báo sự kiện WS của mình (gọi lúc import routes). Loại chưa khai báo bị bỏ."""
+    if type in EVENT_PERMISSION and EVENT_PERMISSION[type] != permission:
+        raise ValueError(f"Sự kiện {type} đã khai báo với quyền khác")
+    EVENT_PERMISSION[type] = permission
+    if masked:
+        MASKED_EVENTS.add(type)
+
+
+register_event("draft.new", "action.approve")
+register_event("draft.updated", "action.approve")
+
+
 def mask_event(msg: dict[str, Any]) -> dict[str, Any]:
     from gh.data.common import mask_text
 

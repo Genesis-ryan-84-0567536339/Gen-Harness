@@ -53,7 +53,7 @@ Cơ hội, bản nháp, cảnh báo, việc, tài liệu đi theo người/nhóm
                         "channel": "zalo", "sender": PersonRef | null}]}],
  "history": [{"value": 72.0, "computed_at": "…", "method": "rules+model", "by": UserRef | null}]}
 ```
-- `units` là chuỗi điểm → đơn vị ý nghĩa → trích dẫn → bản ghi thô (tối đa 20 đơn vị, mới nhất trước). Mỗi trích dẫn mở được nguyên văn bằng `GET /raw/{raw_id}` (giai đoạn 2; màn kinh doanh gọi được bằng quyền đọc của màn, không cần `data.read`, chỉ cho bản ghi nằm trong chuỗi chứng cứ của đối tượng trong phạm vi).
+- `units` là chuỗi điểm → đơn vị ý nghĩa → trích dẫn → bản ghi thô (tối đa 20 đơn vị, mới nhất trước). Mỗi trích dẫn mở được nguyên văn bằng `GET /explain/raw/{raw_id}` (cùng hình dạng item của `GET /raw/{id}` giai đoạn 2; gọi được bằng quyền đọc màn kinh doanh, không cần `data.read`, chỉ cho bản ghi nằm trong chuỗi chứng cứ của một đơn vị trong phạm vi, ngoài phạm vi → 404; người không phải Owner thấy nội dung đã che số điện thoại/tài khoản). `GET /raw/{id}` vẫn chỉ dành cho màn kỹ thuật.
 - `history` chỉ có với `score` (tối đa 30 snapshot, mới nhất trước).
 - Không có chứng cứ → `units: []` và `statement` ghi rõ "Chưa có chứng cứ"; web không hiện điểm như một kết luận.
 
