@@ -67,7 +67,8 @@ NAV: list[dict[str, Any]] = [
 
 # Màn có badge trong thiết kế. Mỗi giai đoạn đăng ký nguồn số thật cho màn của mình.
 BadgeSource = Callable[[Any], Awaitable[int | None]]
-BADGE_SCREENS = ("overview", "inbox", "workbench", "tasks", "opportunity", "supply", "raw", "identity", "mcp", "plugins")
+BADGE_SCREENS = ("overview", "inbox", "workbench", "tasks", "opportunity", "supply", "raw", "identity", "mcp",
+                 "plugins")
 
 
 def format_badge(n: int | None) -> str | None:

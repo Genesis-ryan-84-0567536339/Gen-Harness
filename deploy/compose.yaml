@@ -36,7 +36,7 @@ services:
 
   migrate:
     build: { context: .., dockerfile: deploy/images/api.Dockerfile }
-    command: ["alembic", "upgrade", "head"]
+    command: ["alembic", "upgrade", "heads"]
     environment: *app-env
     secrets: [gh_master_key]
     depends_on:

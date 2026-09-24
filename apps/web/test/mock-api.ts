@@ -15,6 +15,12 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { randomUUID } from 'node:crypto';
 import { createPhase2, maskText, type P2Ctx } from './mock-phase2';
+import { createMock as createP3Core } from './mock-p3-core';
+import { createMock as createP3Queue } from './mock-p3-queue';
+import { createMock as createP3Relations } from './mock-p3-relations';
+import { createMock as createP3Graph } from './mock-p3-graph';
+import { createMock as createP3Market } from './mock-p3-market';
+import { createMock as createP3People } from './mock-p3-people';
 import { acceptWebSocket, type MockSocket } from './mock-ws';
 import { buildScreenTree, SCREEN_BY_KEY } from '../../../packages/contracts/src/screens';
 import type { NavDomain, NavItem, SetupState } from '../../../packages/contracts/src/schema';
@@ -186,6 +192,15 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     simulate: opts.simulate ?? process.env.MOCK_SIMULATE !== '0',
     emit: broadcast,
   });
+  /** Giai đoạn 3: mỗi cụm màn một mock riêng (test/mock-p3-*.ts), hỏi lần lượt sau phase 2. */
+  const phase3 = {
+    core: createP3Core({ fresh: opts.setup === 'fresh', emit: broadcast }),
+    queue: createP3Queue({ fresh: opts.setup === 'fresh', emit: broadcast }),
+    relations: createP3Relations({ fresh: opts.setup === 'fresh', emit: broadcast }),
+    graph: createP3Graph({ fresh: opts.setup === 'fresh', emit: broadcast }),
+    market: createP3Market({ fresh: opts.setup === 'fresh', emit: broadcast }),
+    people: createP3People({ fresh: opts.setup === 'fresh', emit: broadcast }),
+  };
   const audit: AuditRow[] = [];
   const record = (user: User | undefined, action: string, result = 'ok', detail: unknown = null) =>
     audit.unshift({
@@ -529,11 +544,12 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
       owner: user.role.code === 'owner',
     };
     if (phase2.handle(ctx)) return;
+    for (const m of Object.values(phase3)) if (m.handle(ctx)) return;
 
     return problem(res, 404, 'NOT_FOUND', 'Không tồn tại');
   };
 
-  return { middleware, setup, users, sessions, phase2, sessionUser };
+  return { middleware, setup, users, sessions, phase2, phase3, sessionUser };
 }
 
 /**
@@ -590,6 +606,7 @@ export function createMockApi(opts: MockOptions = {}) {
       switch (hook[1]) {
         case 'reset':
           current.phase2.dispose();
+          for (const m of Object.values(current.phase3)) m.dispose();
           for (const ws of clients) ws.close(4401, 'reset');
           clients.clear();
           current = createMockState({ ...opts, ...(body as MockOptions) }, broadcast);

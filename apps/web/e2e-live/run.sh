@@ -15,7 +15,7 @@ cleanup() { for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null || true; done; }
 trap cleanup EXIT
 psql "$PG/postgres" -qc "DROP DATABASE IF EXISTS gh_live WITH (FORCE)" -c "CREATE DATABASE gh_live"
 redis-cli -n 3 flushdb >/dev/null
-(cd "$API" && .venv/bin/alembic upgrade head >/dev/null)
+(cd "$API" && .venv/bin/alembic upgrade heads >/dev/null)
 python3 "$HERE/fake_llm.py" > "$OUT/llm.log" 2>&1 & PIDS+=($!)
 (cd "$API" && exec .venv/bin/uvicorn gh.main:app --port 8000) > "$OUT/api.log" 2>&1 & PIDS+=($!)
 (cd "$API" && exec .venv/bin/arq gh.worker.WorkerSettings) > "$OUT/worker.log" 2>&1 & PIDS+=($!)

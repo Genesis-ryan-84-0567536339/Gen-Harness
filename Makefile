@@ -29,7 +29,7 @@ ps:
 	$(COMPOSE) ps
 
 migrate:
-	cd $(API) && .venv/bin/alembic upgrade head
+	cd $(API) && .venv/bin/alembic upgrade heads
 
 api-dev:
 	cd $(API) && GH_COOKIE_SECURE=false .venv/bin/uvicorn gh.main:app --reload --port 8000

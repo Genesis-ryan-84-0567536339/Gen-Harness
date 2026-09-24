@@ -43,7 +43,7 @@ def template_db() -> str:
     _admin(f"DROP DATABASE IF EXISTS {TEMPLATE} WITH (FORCE)")
     _admin(f"CREATE DATABASE {TEMPLATE}")
     env = {**os.environ, "GH_DATABASE_URL": _async_url(TEMPLATE)}
-    subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"], cwd=API_DIR, env=env, check=True)
+    subprocess.run([sys.executable, "-m", "alembic", "upgrade", "heads"], cwd=API_DIR, env=env, check=True)
     return TEMPLATE
 
 

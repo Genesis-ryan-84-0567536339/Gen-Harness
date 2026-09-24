@@ -14,7 +14,7 @@ from fastapi.exceptions import RequestValidationError
 from redis.asyncio import Redis
 from sqlalchemy import text
 
-from gh import __version__, realtime
+from gh import __version__, biz, realtime
 from gh.audit.routes import router as audit_router
 from gh.auth.routes import router as auth_router
 from gh.bootstrap import bootstrap
@@ -121,6 +121,8 @@ def create_app(*, with_lifespan: bool = True) -> FastAPI:
     app.add_exception_handler(ApiError, api_error_handler)
     app.add_exception_handler(RequestValidationError, validation_error_handler)
     for r in (auth_router, setup_router, shell_router, audit_router, plugins_router, data_router, system_router):
+        app.include_router(r, prefix="/api/v1")
+    for r in biz.routers():
         app.include_router(r, prefix="/api/v1")
     app.include_router(realtime.router, prefix="/api/v1")
     # Thứ tự: middleware thêm sau bọc ngoài cùng.

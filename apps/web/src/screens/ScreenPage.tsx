@@ -8,14 +8,26 @@ import { IdentityScreen } from './data/IdentityScreen';
 import { RawScreen } from './data/RawScreen';
 import { RulesScreen } from './data/RulesScreen';
 import { SystemScreen } from './system/SystemScreen';
+import { SCREENS as P3_CORE } from './core';
+import { SCREENS as P3_QUEUE } from './queue';
+import { SCREENS as P3_RELATIONS } from './relations';
+import { SCREENS as P3_GRAPH } from './graph';
+import { SCREENS as P3_MARKET } from './market';
+import { SCREENS as P3_PEOPLE } from './people';
 
-/** Screens built so far (phase 2). Every other key keeps the phase-1 placeholder. */
+/** Screens built so far (phase 2, then each phase-3 cluster registers its own). Every other key keeps the placeholder. */
 const BUILT: Record<string, ComponentType> = {
   raw: RawScreen,
   rules: RulesScreen,
   clean: CleanScreen,
   identity: IdentityScreen,
   system: SystemScreen,
+  ...P3_CORE,
+  ...P3_QUEUE,
+  ...P3_RELATIONS,
+  ...P3_GRAPH,
+  ...P3_MARKET,
+  ...P3_PEOPLE,
 };
 
 /** Screen-title row: title 20px/500 + description 12.5px neutral-400 (docs/01 "Quy ước chung"). */

@@ -240,8 +240,23 @@ function patchRawRows(qc: QueryClient, fn: (row: RawItem) => RawItem): RawItem |
   return previous;
 }
 
+/**
+ * Giai đoạn 3: mỗi cụm màn đăng ký xử lý sự kiện của mình (vd. `draft.new`) từ `src/screens/<cụm>/index.ts`,
+ * không phải sửa switch dưới đây. Sự kiện không có trong RealtimeEventMap đi qua đây.
+ */
+type ExtraHandler = (qc: QueryClient, data: unknown) => void;
+const extraHandlers = new Map<string, ExtraHandler[]>();
+
+export function onRealtimeEvent(type: string, fn: ExtraHandler): () => void {
+  const list = extraHandlers.get(type) ?? [];
+  list.push(fn);
+  extraHandlers.set(type, list);
+  return () => extraHandlers.set(type, (extraHandlers.get(type) ?? []).filter((f) => f !== fn));
+}
+
 /** Apply one server frame to the cached queries. Pure w.r.t. the given client. */
 export function applyEvent(qc: QueryClient, e: RealtimeEvent): void {
+  for (const fn of extraHandlers.get(e.type) ?? []) fn(qc, e.data);
   switch (e.type) {
     case 'raw.new': {
       const item = e.data;
