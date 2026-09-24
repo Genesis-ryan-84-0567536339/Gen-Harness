@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
-import { OWNER, resetMock, resultsDir, SETUP_TOKEN } from './support';
+import { loginAsOwner, OWNER, resetMock, resultsDir, SETUP_TOKEN } from './support';
 
 const shots = join(resultsDir, 'visual');
 
@@ -23,7 +23,7 @@ test.describe('auth', () => {
     await expect(page).toHaveURL(/\/inbox$/);
     await expect(page.getByRole('heading', { name: 'Hộp thư ý nghĩa', level: 2 })).toBeVisible();
     await expect(page.locator('.hd-group')).toHaveText('Hàng đợi & Hành động');
-    await expect(page.getByText('Màn hình này được dựng ở giai đoạn sau')).toBeVisible();
+    await expect(page.getByRole('tab', { name: /Tất cả/ })).toBeVisible();
 
     await page.getByRole('button', { name: /Anh Cơ La/ }).click();
     await page.getByRole('menuitem', { name: 'Đăng xuất' }).click();
@@ -103,5 +103,70 @@ test.describe('owner setup', () => {
     await page.reload();
     await expect(page.getByRole('heading', { name: 'Bộ não AI' })).toBeVisible();
     await page.screenshot({ path: join(shots, 'setup-step4-1440.png') });
+  });
+});
+
+test.describe('cụm Hàng đợi & Hành động', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await resetMock(page.request, 'finished');
+    await loginAsOwner(page);
+  });
+
+  test('Tổng quan: KPI và hàng đợi hiện đúng dữ liệu mẫu, mỗi ô KPI dẫn tới màn đã lọc', async ({ page }) => {
+    await page.goto('/overview');
+    const channelsKpi = page.getByText('Kênh sống').locator('..').locator('..');
+    await expect(channelsKpi).toContainText('4');
+    await expect(page.getByText('Tỉ lệ chờ duyệt')).toBeVisible();
+    await expect(page.locator('.ov-queue-row', { hasText: 'OPP-1842' })).toBeVisible();
+    await expect(page.locator('.ov-spot-row', { hasText: 'Nguyễn Văn Bảo' })).toBeVisible();
+
+    const pendingKpi = page.getByText('Tỉ lệ chờ duyệt').locator('..').locator('..');
+    await pendingKpi.click();
+    await expect(page).toHaveURL(/\/workbench\?status=pending/);
+  });
+
+  test('Hộp thư: tab lọc đúng số đếm; giao người khác; im lặng có chủ đích', async ({ page }) => {
+    await page.goto('/inbox');
+    const allTab = page.getByRole('tab', { name: /Tất cả/ });
+    await expect(allTab).toBeVisible();
+    const totalText = await allTab.locator('.gh-tab__count').textContent();
+    const total = Number(totalText);
+    expect(total).toBeGreaterThan(0);
+
+    const alertTab = page.getByRole('tab', { name: /Cảnh báo/ });
+    const alertCount = Number(await alertTab.locator('.gh-tab__count').textContent());
+    await alertTab.click();
+    await expect(page).toHaveURL(/tab=alert/);
+    await expect(page.locator('.ib-card')).toHaveCount(alertCount);
+    await expect(page.locator('.ib-card').first()).toContainText('CẢNH BÁO');
+
+    // Giao cho người khác.
+    const card = page.locator('.ib-card').first();
+    await card.getByRole('button', { name: 'Giao cho người khác' }).click();
+    const assignDlg = page.getByRole('dialog', { name: 'Giao cho người khác' });
+    await expect(assignDlg).toBeVisible();
+    await assignDlg.getByText('Chị Lan Phạm').click();
+    await expect(assignDlg).toBeHidden();
+
+    // Im lặng có chủ đích: mục biến mất khỏi hàng đợi.
+    const cardTitle = (await card.locator('.ib-card__title').textContent())!.trim();
+    await card.getByRole('button', { name: 'Im lặng có chủ đích' }).click();
+    const silenceDlg = page.getByRole('dialog', { name: 'Im lặng có chủ đích' });
+    await expect(silenceDlg).toBeVisible();
+    await silenceDlg.getByRole('button', { name: 'Im lặng mục này' }).click();
+    await expect(silenceDlg).toBeHidden();
+    await expect(page.locator('.ib-card', { hasText: cardTitle })).toHaveCount(0);
+    await expect(alertTab.locator('.gh-tab__count')).toHaveText(String(alertCount - 1));
+  });
+
+  test('Việc & Nhắc hẹn: việc quá hạn tô đỏ', async ({ page }) => {
+    await page.goto('/tasks');
+    const overdueRow = page.locator('.tk-row', { hasText: 'TSK-0410' });
+    await expect(overdueRow).toBeVisible();
+    await expect(overdueRow).toHaveClass(/tk-row--overdue/);
+    await expect(overdueRow).toContainText('hạn');
+    const okRow = page.locator('.tk-row', { hasText: 'TSK-0412' });
+    await expect(okRow).not.toHaveClass(/tk-row--overdue/);
   });
 });
