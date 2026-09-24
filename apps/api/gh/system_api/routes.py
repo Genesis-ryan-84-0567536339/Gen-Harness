@@ -1,17 +1,20 @@
 """Điều khiển hệ thống › Kênh & đăng nhập; nhà cung cấp model, khoá; hồ sơ Antigravity CLI (docs/api/phase-2.md)."""
 
+import csv
+import io
 import uuid
 from datetime import UTC, datetime
 from typing import Any, Literal
 
 import orjson
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gh import crypto, realtime
-from gh.auth import service
+from gh.audit.routes import export_rows, query_log
+from gh.auth import rbac, service
 from gh.auth.deps import require, require_pin
 from gh.chassis import actionlog
 from gh.chassis.bus import BRIDGE_CONTROL
@@ -26,6 +29,9 @@ from gh.shell.routes import publish_header
 router = APIRouter(tags=["system"])
 READ = require("system.read")
 MANAGE = require("system.manage")
+ROLES_MANAGE = require("roles.manage")
+AUDIT_READ = require("audit.read")
+DATA_MANAGE = require("data.manage")
 
 CHANNEL_TYPES = ("zalo", "whatsapp", "telegram", "linkedin")
 QR_CHANNELS = ("zalo", "whatsapp")
@@ -353,6 +359,31 @@ async def create_provider(body: ProviderIn, request: Request, user: service.Curr
     return await _one_provider(db, request.app.state.redis, user.org_id, pid)
 
 
+class ChainIn(BaseModel):
+    provider_ids: list[uuid.UUID] = Field(min_length=1, max_length=50)
+
+
+@router.patch("/providers/chain")
+async def patch_chain(body: ChainIn, request: Request, user: service.CurrentUser = Depends(MANAGE),
+                      db: AsyncSession = DB) -> list[dict[str, Any]]:
+    """Kéo-thả sắp lại toàn bộ chuỗi chuyển hướng một lượt (thiết kế `[providers]`) — khác `PATCH /providers/{id}`
+    vốn chỉ đổi một ô; ở đây backend chỉ nhận thứ tự mới và ghi lại `failover_rank` theo đúng thứ tự đó.
+
+    ĐĂNG KÝ TRƯỚC `PATCH /providers/{pid}` bên dưới — nếu không, Starlette so khớp `/providers/chain` vào mẫu
+    `/providers/{pid}` (nhánh có sẵn từ giai đoạn 1/2) và "chain" bị parse nhầm thành UUID (422)."""
+    ids = list(dict.fromkeys(body.provider_ids))
+    have = set((await db.execute(text("SELECT id FROM agent.providers WHERE org_id = :o"),
+                                 {"o": user.org_id})).scalars().all())
+    if set(ids) != have:
+        raise field_errors({"provider_ids": "Cần đúng và đủ danh sách nhà cung cấp hiện có, không thiếu không thừa"})
+    for rank, pid in enumerate(ids, start=1):
+        await db.execute(text("UPDATE agent.providers SET failover_rank = :r WHERE id = :i"), {"r": rank, "i": pid})
+    await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
+                           action="provider.chain_reordered", target_type="provider",
+                           detail={"order": [str(i) for i in ids]}, ip=user.ip)
+    return await provider_payloads(db, request.app.state.redis, user.org_id)
+
+
 @router.patch("/providers/{pid}")
 async def patch_provider(pid: uuid.UUID, body: ProviderPatch, request: Request,
                          user: service.CurrentUser = Depends(MANAGE), db: AsyncSession = DB
@@ -524,6 +555,327 @@ async def cli_delete(profile_id: uuid.UUID, user: service.CurrentUser = Depends(
                            action="cli.profile_deleted", target_type="cli_profile", target_id=str(profile_id),
                            target_label=out["email"], detail={"was_active": out["was_active"]}, ip=user.ip)
     return Response(status_code=204)
+
+
+# ─── Bộ não AI: chuỗi chuyển hướng + quy tắc ────────────────────────────────
+
+# Quy tắc chuyển hướng (ARCHITECTURE §11, thiết kế `failoverRules`) — cố định trong `gh.providers.router`, không
+# có tham số nào Owner chỉnh được ở đây nên chỉ có GET (đọc để hiển thị, không PATCH).
+FAILOVER_RULES: tuple[dict[str, str], ...] = (
+    {"key": "hết hạn mức", "value": "chuyển xuống nhà cung cấp kế tiếp trong chuỗi"},
+    {"key": "ngắt mạch", "value": "giữ nguyên hội thoại, thử lại sau 60 giây"},
+    {"key": "hết chuỗi", "value": "xếp hàng và báo Sếp qua hàng đợi cần xử lý"},
+    {"key": "ngưỡng cảnh báo", "value": "còn dưới 20% hạn mức trên bất kỳ model nào"},
+)
+
+
+@router.get("/failover-rules")
+async def failover_rules(user: service.CurrentUser = Depends(READ)) -> list[dict[str, str]]:
+    return list(FAILOVER_RULES)
+
+
+# ─── Quyền hạn: ma trận, nhóm lắng nghe, ranh giới ──────────────────────────
+
+# 7 cột của ma trận thiết kế (`permCols`) → các quyền (`core.permissions`) thuộc cột đó. `data.*`/`system.*`/
+# `roles.manage` nằm NGOÀI ma trận thiết kế (rbac.py) nên không sửa được qua đây — chỉ Owner có, không cấu hình.
+PERMISSION_COLUMNS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("overview", "Tổng quan", ("overview.read",)),
+    ("queue", "Hàng đợi", ("queue.read", "queue.act")),
+    ("profile", "Hồ sơ khách", ("profile.read", "profile.write")),
+    ("people_review", "Đánh giá nhân sự", ("people_review.read", "people_review.write", "care.read")),
+    ("opportunity", "Cơ hội", ("opportunity.read", "opportunity.write")),
+    ("action", "Hành động", ("action.draft", "action.approve")),
+    ("audit", "Nhật ký", ("audit.read",)),
+)
+EDITABLE_PERMISSIONS = frozenset(c for _, _, codes in PERMISSION_COLUMNS for c in codes)
+
+
+@router.get("/permissions")
+async def get_permissions(user: service.CurrentUser = Depends(READ), db: AsyncSession = DB) -> dict[str, Any]:
+    rows = (await db.execute(text("""
+        SELECT r.code AS role_code, rp.permission_code, rp.scope FROM core.role_permissions rp
+        JOIN core.roles r ON r.id = rp.role_id WHERE r.org_id = :o"""), {"o": user.org_id})).all()
+    by_role: dict[str, dict[str, str]] = {}
+    for r in rows:
+        by_role.setdefault(r.role_code, {})[r.permission_code] = r.scope
+    roles_out = [{"code": rd.code, "name": rd.name, "meta": rd.meta,
+                 "permissions": {c: by_role.get(rd.code, {}).get(c, rbac.NONE) for c in EDITABLE_PERMISSIONS}}
+                for rd in rbac.ROLES]
+    return {"columns": [{"key": k, "label": lbl, "permissions": list(codes)} for k, lbl, codes in PERMISSION_COLUMNS],
+            "roles": roles_out}
+
+
+class PermissionPatch(BaseModel):
+    role: Literal["owner", "manager", "operator", "agent_staff", "auditor"]
+    permission: str = Field(max_length=60)
+    scope: Literal["all", "team", "assigned", "none"]
+
+
+@router.patch("/permissions")
+async def patch_permissions(body: PermissionPatch, user: service.CurrentUser = Depends(ROLES_MANAGE),
+                            _pin: Any = Depends(require_pin("roles.change")),
+                            db: AsyncSession = DB) -> dict[str, Any]:
+    """Owner sửa từng ô của ma trận (PIN + log, ARCHITECTURE §7.4/§8.3). Hai bất biến không sửa được qua API —
+    `gh.bootstrap._permissions` đặt lại nếu có ai chỉnh thẳng DB, ở đây từ chối thẳng (422):
+    Owner luôn `all` mọi cột; Auditor không bao giờ có quyền ghi (`rbac.WRITE_PERMISSIONS`)."""
+    if body.permission not in EDITABLE_PERMISSIONS:
+        raise field_errors({"permission": "Quyền này không nằm trong ma trận sửa được ở Quyền hạn"})
+    if body.role == rbac.OWNER and body.scope != rbac.ALL:
+        raise field_errors({"scope": "Owner luôn toàn quyền ở mọi cột — khoá cứng, không sửa được"})
+    if body.role == rbac.AUDITOR and body.permission in rbac.WRITE_PERMISSIONS and body.scope != rbac.NONE:
+        raise field_errors({"scope": "Auditor không bao giờ có quyền ghi — khoá cứng, không sửa được"})
+    row = (await db.execute(text("""
+        SELECT rp.scope, r.id AS role_id FROM core.role_permissions rp JOIN core.roles r ON r.id = rp.role_id
+        WHERE r.org_id = :o AND r.code = :role AND rp.permission_code = :perm"""),
+        {"o": user.org_id, "role": body.role, "perm": body.permission})).one_or_none()
+    if row is None:
+        raise not_found("Ô ma trận")
+    await db.execute(text("""UPDATE core.role_permissions SET scope = :s
+                             WHERE role_id = :rid AND permission_code = :perm"""),
+                     {"s": body.scope, "rid": row.role_id, "perm": body.permission})
+    await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
+                           action="permission.changed", target_type="role", target_id=body.role,
+                           target_label=body.permission, detail={"permission": body.permission,
+                                                                  "from": row.scope, "to": body.scope}, ip=user.ip)
+    return await get_permissions(user, db)
+
+
+@router.get("/listening-groups")
+async def listening_groups(user: service.CurrentUser = Depends(READ), db: AsyncSession = DB) -> list[dict[str, Any]]:
+    """Nhóm đang lắng nghe (khoá cứng #1 `listen_authorized_only` — chỉ nhóm Owner đã bật mới vào đây)."""
+    rows = (await db.execute(text(GROUP_SELECT + " WHERE c.org_id = :o AND g.listen_mode <> 'off' ORDER BY g.name"),
+                             {"o": user.org_id})).all()
+    return [_group_out(r) for r in rows]
+
+
+# Nhãn tiếng Việt cho `ops.policy_boundaries.code` (ARCHITECTURE §7.4 + PLAN Q "Mặc định giới hạn"); 6/8 khoá cứng
+# có mặt ở đây dưới dạng `is_locked=true` — 2 khoá còn lại (#5 kho thô/nhật ký chỉ-INSERT, #6 PIN+mã hoá bí mật)
+# là bất biến ở tầng DB/code, không phải công tắc nên không có dòng `ops.policy_boundaries` tương ứng.
+BOUNDARY_LABELS: dict[str, str] = {
+    "listen_authorized_only": "Chỉ lắng nghe nhóm Owner đã bật",
+    "disclose_staff_observation": "Công khai nội bộ khi dùng để đánh giá nhân sự",
+    "hide_sensitive_below_owner": "Ẩn dữ liệu nhạy cảm khỏi vai trò dưới Owner",
+    "personnel_alert_requires_evidence": "Điểm số, cảnh báo nhân sự phải có chứng cứ",
+    "observe_external_market": "Quan sát nhóm thị trường bên ngoài",
+    "auto_personnel_decisions": "Hệ thống tự ra quyết định nhân sự",
+    "approval_gate": "Gửi ra ngoài / vượt ngưỡng tiền / liên quan nhân sự luôn chờ duyệt",
+    "mcp_write_requires_approval": "Tool MCP loại ghi qua duyệt trước khi chạy",
+}
+
+
+@router.get("/boundaries")
+async def get_boundaries(user: service.CurrentUser = Depends(READ), db: AsyncSession = DB) -> list[dict[str, Any]]:
+    rows = (await db.execute(text("""SELECT code, is_enabled, is_locked, params FROM ops.policy_boundaries
+                                     WHERE org_id = :o ORDER BY code"""), {"o": user.org_id})).all()
+    return [{"code": r.code, "label": BOUNDARY_LABELS.get(r.code, r.code), "enabled": r.is_enabled,
+             "locked": r.is_locked, "params": r.params} for r in rows]
+
+
+class BoundaryPatch(BaseModel):
+    enabled: bool | None = None
+    params: dict[str, Any] | None = None
+
+
+@router.patch("/boundaries/{code}")
+async def patch_boundary(code: str, body: BoundaryPatch, user: service.CurrentUser = Depends(MANAGE),
+                         _pin: Any = Depends(require_pin("policy.change")), db: AsyncSession = DB
+                         ) -> dict[str, Any]:
+    """Ranh giới có trách nhiệm (PIN + log). Khoá cứng (`is_locked`) không tắt/bật được (422) dù có PIN đúng —
+    `params` (ví dụ `approval_threshold_vnd`) sửa được ngay cả khi ranh giới đó bị khoá bật, vì bản thân việc
+    CÓ chờ duyệt là bất biến, còn NGƯỠNG là do Owner đặt (ARCHITECTURE §7.2)."""
+    row = (await db.execute(text("""SELECT is_enabled, is_locked, params FROM ops.policy_boundaries
+                                    WHERE org_id = :o AND code = :c"""), {"o": user.org_id, "c": code})).one_or_none()
+    if row is None:
+        raise not_found("Ranh giới")
+    if body.enabled is not None and body.enabled != row.is_enabled and row.is_locked:
+        raise field_errors({"enabled": "Ranh giới này là khoá cứng — không tắt/bật được (ARCHITECTURE §7.4)"})
+    if code == "approval_gate" and body.params and "approval_threshold_vnd" in body.params:
+        v = body.params["approval_threshold_vnd"]
+        if not isinstance(v, int) or isinstance(v, bool) or v < 0:
+            raise field_errors({"params.approval_threshold_vnd": "Ngưỡng tiền phải là số nguyên không âm"})
+    sets: list[str] = []
+    params: dict[str, Any] = {"o": user.org_id, "c": code}
+    if body.enabled is not None:
+        sets.append("is_enabled = :e")
+        params["e"] = body.enabled
+    if body.params is not None:
+        sets.append("params = params || CAST(:p AS jsonb)")
+        params["p"] = orjson.dumps(body.params).decode()
+    if sets:
+        await db.execute(text(f"UPDATE ops.policy_boundaries SET {', '.join(sets)} WHERE org_id = :o AND code = :c"),
+                         params)  # noqa: S608 — sets chỉ gồm hằng cố định ở trên
+    new = (await db.execute(text("""SELECT is_enabled, is_locked, params FROM ops.policy_boundaries
+                                    WHERE org_id = :o AND code = :c"""), {"o": user.org_id, "c": code})).one()
+    await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
+                           action="boundary.changed", target_type="boundary", target_id=code,
+                           target_label=BOUNDARY_LABELS.get(code, code),
+                           detail={"from": {"enabled": row.is_enabled, "params": row.params},
+                                   "to": {"enabled": new.is_enabled, "params": new.params}}, ip=user.ip)
+    return {"code": code, "label": BOUNDARY_LABELS.get(code, code), "enabled": new.is_enabled,
+            "locked": new.is_locked, "params": new.params}
+
+
+# ─── Nhật ký ─────────────────────────────────────────────────────────────────
+
+@router.get("/audit-log")
+async def system_audit_log(cursor: str | None = None, limit: int = Query(50, ge=1, le=200),
+                           actor_type: str | None = None, action: str | None = None,
+                           target_type: str | None = None, target_id: str | None = None,
+                           since: datetime | None = None, until: datetime | None = None,
+                           user: service.CurrentUser = Depends(AUDIT_READ), db: AsyncSession = DB
+                           ) -> dict[str, Any]:
+    """Cùng đường đọc với `/audit` (`gh.audit.routes.query_log`) — chỉ thêm chỗ vào tab Nhật ký của Điều khiển
+    hệ thống, thêm lọc theo đối tượng/thời gian mà `[auditLog]` cần."""
+    return await query_log(db, user, cursor=cursor, limit=limit, actor_type=actor_type, action=action,
+                           target_type=target_type, target_id=target_id, since=since, until=until)
+
+
+@router.get("/audit-log/export")
+async def system_audit_log_export(actor_type: str | None = None, action: str | None = None,
+                                  target_type: str | None = None, target_id: str | None = None,
+                                  since: datetime | None = None, until: datetime | None = None,
+                                  user: service.CurrentUser = Depends(DATA_MANAGE),
+                                  _pin: Any = Depends(require_pin("data.export")), db: AsyncSession = DB
+                                  ) -> Response:
+    """Xuất CSV nhật ký — cùng khuôn với `POST /raw/export` (`gh.data_api.routes.raw_export`): quyền quản lý dữ
+    liệu + PIN, ghi lại chính lượt xuất vào Action Log."""
+    rows = await export_rows(db, user, actor_type=actor_type, action=action, target_type=target_type,
+                             target_id=target_id, since=since, until=until)
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["at", "actor_type", "actor_id", "actor_label", "action", "target_type", "target_id", "target_label",
+                "autonomy_level", "result"])
+    for it in rows:
+        w.writerow([it["at"], it["actor_type"], it["actor_id"], it["actor_label"], it["action"], it["target_type"],
+                    it["target_id"], it["target_label"], it["autonomy_level"], it["result"]])
+    await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
+                           action="audit_log.exported", target_type="audit_log",
+                           detail={"rows": len(rows), "filters": {"actor_type": actor_type, "action": action,
+                                                                  "target_type": target_type, "target_id": target_id}},
+                           ip=user.ip)
+    name = f"nhat-ky-{datetime.now(UTC):%Y%m%d-%H%M}.csv"
+    return Response("﻿" + buf.getvalue(), media_type="text/csv; charset=utf-8",
+                    headers={"content-disposition": f'attachment; filename="{name}"'})
+
+
+# ─── Dữ liệu & lưu trữ (spec I) ──────────────────────────────────────────────
+
+# Tập dữ liệu Owner đặt được hạn lưu (`ops.retention_policies`, thiết kế 01-ui-screens §system bổ sung).
+RETENTION_DATASETS = ("raw.events", "clean.meaning_units", "ops.action_log", "memory.entries", "agent.model_calls")
+
+
+@router.get("/retention-policies")
+async def get_retention(user: service.CurrentUser = Depends(READ), db: AsyncSession = DB) -> list[dict[str, Any]]:
+    rows = (await db.execute(text("""SELECT dataset, keep_days, anonymize_after_days FROM ops.retention_policies
+                                     WHERE org_id = :o"""), {"o": user.org_id})).all()
+    by_ds = {r.dataset: r for r in rows}
+    return [{"dataset": d, "keep_days": by_ds[d].keep_days if d in by_ds else None,
+             "anonymize_after_days": by_ds[d].anonymize_after_days if d in by_ds else None}
+            for d in RETENTION_DATASETS]
+
+
+class RetentionIn(BaseModel):
+    dataset: Literal["raw.events", "clean.meaning_units", "ops.action_log", "memory.entries", "agent.model_calls"]
+    keep_days: int | None = Field(default=None, ge=1, le=3650)
+    anonymize_after_days: int | None = Field(default=None, ge=1, le=3650)
+
+
+@router.patch("/retention-policies")
+async def patch_retention(body: RetentionIn, user: service.CurrentUser = Depends(MANAGE),
+                          _pin: Any = Depends(require_pin("policy.change")), db: AsyncSession = DB
+                          ) -> list[dict[str, Any]]:
+    await db.execute(text("""
+        INSERT INTO ops.retention_policies (org_id, dataset, keep_days, anonymize_after_days)
+        VALUES (:o, :d, :k, :a)
+        ON CONFLICT (org_id, dataset) DO UPDATE SET keep_days = :k, anonymize_after_days = :a"""),
+        {"o": user.org_id, "d": body.dataset, "k": body.keep_days, "a": body.anonymize_after_days})
+    await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
+                           action="retention_policy.changed", target_type="retention_policy",
+                           target_id=body.dataset, detail=body.model_dump(), ip=user.ip)
+    return await get_retention(user, db)
+
+
+async def _person_row(db: AsyncSession, org_id: uuid.UUID, person_id: uuid.UUID) -> Any:
+    r = (await db.execute(text("SELECT id, code, display_name, attrs FROM core.persons WHERE id = :i AND org_id = :o"),
+                          {"i": person_id, "o": org_id})).one_or_none()
+    if r is None:
+        raise not_found("Người")
+    return r
+
+
+async def _export_person_bundle(db: AsyncSession, person: Any) -> dict[str, Any]:
+    identities = (await db.execute(text("""
+        SELECT c.type AS channel, ci.external_id, ci.handle, ci.phone_e164, ci.first_seen_at
+        FROM core.person_identities ci JOIN core.channels c ON c.id = ci.channel_id
+        WHERE ci.person_id = :p"""), {"p": person.id})).all()
+    scores = (await db.execute(text("""SELECT dimension, value, trend, updated_at FROM clean.current_scores
+                                       WHERE subject_type = 'person' AND subject_id = :p"""),
+                               {"p": person.id})).all()
+    notes = (await db.execute(text("""
+        SELECT e.section, e.body, e.author, e.created_at FROM memory.entries e
+        JOIN memory.notebooks n ON n.id = e.notebook_id
+        WHERE n.subject_type = 'person' AND n.subject_id = :p AND e.archived_at IS NULL
+        ORDER BY e.created_at"""), {"p": person.id})).all()
+    return {"person": {"id": str(person.id), "code": person.code, "display_name": person.display_name,
+                       "attrs": person.attrs},
+            "identities": [{"channel": i.channel, "external_id": i.external_id, "handle": i.handle,
+                            "phone_e164": i.phone_e164, "first_seen_at": iso(i.first_seen_at)} for i in identities],
+            "scores": [{"dimension": s.dimension, "value": float(s.value), "trend": s.trend,
+                       "updated_at": iso(s.updated_at)} for s in scores],
+            "notebook": [{"section": n.section, "body": n.body, "author": n.author, "created_at": iso(n.created_at)}
+                        for n in notes]}
+
+
+class DataRequestIn(BaseModel):
+    kind: Literal["export", "erase", "restrict"]
+
+
+@router.post("/persons/{person_id}/data-requests", status_code=201)
+async def create_data_request(person_id: uuid.UUID, body: DataRequestIn, user: service.CurrentUser = Depends(MANAGE),
+                              _pin: Any = Depends(require_pin("data.export_delete")), db: AsyncSession = DB
+                              ) -> dict[str, Any]:
+    """Yêu cầu xuất / xoá / giới hạn dữ liệu một người (spec I, `ops.data_requests`). `erase` xoá/ẩn danh dữ liệu
+    suy ra (điểm số, sổ tay, số điện thoại/handle) — KHÔNG đụng `raw.events` (khoá cứng #5, chỉ-INSERT); tin thô
+    vẫn còn nhưng người đã ẩn danh, không còn định danh được ngược từ Console."""
+    person = await _person_row(db, user.org_id, person_id)
+    req_id = (await db.execute(text("""INSERT INTO ops.data_requests (org_id, person_id, kind, status)
+                                       VALUES (:o, :p, :k, 'open') RETURNING id"""),
+                               {"o": user.org_id, "p": person_id, "k": body.kind})).scalar_one()
+    result: dict[str, Any]
+    if body.kind == "export":
+        result = await _export_person_bundle(db, person)
+    elif body.kind == "erase":
+        await db.execute(text("""UPDATE core.persons SET display_name = 'Người dùng đã xoá', attrs = '{}'::jsonb,
+                                 deleted_at = now() WHERE id = :i"""), {"i": person_id})
+        await db.execute(text("""UPDATE core.person_identities SET handle = NULL, phone_e164 = NULL
+                                 WHERE person_id = :i"""), {"i": person_id})
+        await db.execute(text("DELETE FROM clean.current_scores WHERE subject_type = 'person' AND subject_id = :i"),
+                         {"i": person_id})
+        await db.execute(text("""DELETE FROM memory.entries WHERE notebook_id IN
+                                 (SELECT id FROM memory.notebooks
+                                   WHERE subject_type = 'person' AND subject_id = :i)"""), {"i": person_id})
+        result = {"erased": True}
+    else:
+        await db.execute(text("""UPDATE core.persons SET attrs = attrs || '{"data_restricted": true}'::jsonb
+                                 WHERE id = :i"""), {"i": person_id})
+        result = {"restricted": True}
+    await db.execute(text("UPDATE ops.data_requests SET status = 'completed', completed_at = now() WHERE id = :i"),
+                     {"i": req_id})
+    await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
+                           action=f"person_data.{body.kind}", target_type="person", target_id=person.code,
+                           target_label=person.display_name, detail={"request_id": str(req_id)}, ip=user.ip)
+    return {"id": str(req_id), "kind": body.kind, "status": "completed", "result": result}
+
+
+@router.get("/persons/{person_id}/data-requests")
+async def list_data_requests(person_id: uuid.UUID, user: service.CurrentUser = Depends(READ), db: AsyncSession = DB
+                             ) -> list[dict[str, Any]]:
+    await _person_row(db, user.org_id, person_id)
+    rows = (await db.execute(text("""SELECT id, kind, status, requested_at, completed_at FROM ops.data_requests
+                                     WHERE org_id = :o AND person_id = :p ORDER BY requested_at DESC"""),
+                             {"o": user.org_id, "p": person_id})).all()
+    return [{"id": str(r.id), "kind": r.kind, "status": r.status, "requested_at": iso(r.requested_at),
+             "completed_at": iso(r.completed_at)} for r in rows]
 
 
 __all__ = ["router", "channel_card", "update_group", "GroupPatch", "provider_payloads", "LISTEN_MODES", "VIEW_SCOPES",
