@@ -106,6 +106,48 @@ const SCENARIOS: Scenario[] = [
     design: { clicks: ['Bản đồ quan hệ'] },
     sidebar: 'full',
   },
+  {
+    name: 'opportunity-1440',
+    viewport: { width: 1440, height: 900 },
+    appPath: '/opportunity',
+    design: { clicks: ['Cơ hội & Thị trường', 'Bảng cơ hội'] },
+    sidebar: 'full',
+  },
+  {
+    name: 'opportunity-1280',
+    viewport: { width: 1280, height: 800 },
+    appPath: '/opportunity',
+    design: { clicks: ['Cơ hội & Thị trường', 'Bảng cơ hội'] },
+    sidebar: 'full',
+  },
+  {
+    name: 'supply-1440',
+    viewport: { width: 1440, height: 900 },
+    appPath: '/supply',
+    design: { clicks: ['Cơ hội & Thị trường', 'Cung ↔ Cầu'] },
+    sidebar: 'full',
+  },
+  {
+    name: 'supply-1280',
+    viewport: { width: 1280, height: 800 },
+    appPath: '/supply',
+    design: { clicks: ['Cơ hội & Thị trường', 'Cung ↔ Cầu'] },
+    sidebar: 'full',
+  },
+  {
+    name: 'search-1440',
+    viewport: { width: 1440, height: 900 },
+    appPath: '/search',
+    design: { clicks: ['Cơ hội & Thị trường', 'Kho hội thoại'] },
+    sidebar: 'full',
+  },
+  {
+    name: 'search-1280',
+    viewport: { width: 1280, height: 800 },
+    appPath: '/search',
+    design: { clicks: ['Cơ hội & Thị trường', 'Kho hội thoại'] },
+    sidebar: 'full',
+  },
   { name: 'rail-1280', viewport: { width: 1280, height: 800 }, appPath: '/overview', design: { sidebarMode: 'rail' }, sidebar: 'rail' },
 ];
 const HEADER = 58;

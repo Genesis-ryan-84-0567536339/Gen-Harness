@@ -328,3 +328,107 @@ test.describe('cụm Bản đồ quan hệ', () => {
     await expect(page.getByText(/Đã dựng lại/)).toBeVisible();
   });
 });
+
+test.describe('cụm Cơ hội & Thị trường', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await resetMock(page.request, 'finished');
+    await loginAsOwner(page);
+  });
+
+  test('Bảng cơ hội: kéo thả đổi giai đoạn, tổng pipeline của cột cập nhật', async ({ page }) => {
+    await page.goto('/opportunity');
+    await expect(page.getByRole('heading', { name: 'Bảng cơ hội', level: 2 })).toBeVisible();
+    const rawCol = page.locator('.opp-col[data-stage="raw_signal"]');
+    const validatedCol = page.locator('.opp-col[data-stage="validated"]');
+    await expect(rawCol.locator('.opp-card', { hasText: 'OPP-1851' })).toBeVisible();
+    const rawCountBefore = Number(await rawCol.locator('.opp-col__count').textContent());
+    const validatedCountBefore = Number(await validatedCol.locator('.opp-col__count').textContent());
+
+    const patch = page.waitForResponse((r) => r.url().includes('/opportunities/') && r.url().includes('/stage') && r.request().method() === 'PATCH');
+    await rawCol.locator('.opp-card', { hasText: 'OPP-1851' }).dragTo(validatedCol.locator('.opp-col__drop'));
+    const res = await patch;
+    expect(res.ok()).toBe(true);
+    expect(res.request().postDataJSON()).toEqual({ to_stage: 'validated' });
+
+    await expect(validatedCol.locator('.opp-card', { hasText: 'OPP-1851' })).toBeVisible();
+    await expect(rawCol.locator('.opp-card', { hasText: 'OPP-1851' })).toHaveCount(0);
+    await expect.poll(async () => Number(await rawCol.locator('.opp-col__count').textContent())).toBe(rawCountBefore - 1);
+    await expect.poll(async () => Number(await validatedCol.locator('.opp-col__count').textContent())).toBe(validatedCountBefore + 1);
+  });
+
+  test('Bảng cơ hội: thay thế bàn phím "Chuyển sang giai đoạn…" cho kéo thả', async ({ page }) => {
+    await page.goto('/opportunity');
+    const card = page.locator('.opp-card', { hasText: 'OPP-1849' });
+    await card.getByRole('button', { name: /Chuyển giai đoạn cho OPP-1849/ }).click();
+    const dlg = page.getByRole('dialog', { name: 'Chuyển sang giai đoạn…' });
+    await expect(dlg).toBeVisible();
+    await dlg.getByText('Đã ráp khớp', { exact: true }).click();
+    await expect(dlg).toBeHidden();
+    await expect(page.locator('.opp-col[data-stage="matched"] .opp-card', { hasText: 'OPP-1849' })).toBeVisible();
+  });
+
+  test('Cung ↔ Cầu: xem lý do ghép, Giới thiệu hai bên tạo bản nháp và mở ở Bàn làm việc', async ({ page }) => {
+    await page.goto('/supply');
+    await expect(page.getByRole('heading', { name: 'Cung ↔ Cầu', level: 2 })).toBeVisible();
+    const matchRow = page.locator('.sup-match', { hasText: '3 cont ván MDF E1 17mm' });
+    await expect(matchRow).toBeVisible();
+    await expect(matchRow.getByText(/Cùng mặt hàng.*\+50/)).toBeVisible();
+    await expect(matchRow.getByText('khớp 94')).toBeVisible();
+
+    const introduce = page.waitForResponse((r) => r.url().includes('/matches/') && r.url().includes('/introduce') && r.request().method() === 'POST');
+    await matchRow.getByRole('button', { name: 'Giới thiệu hai bên' }).click();
+    const res = await introduce;
+    expect(res.ok()).toBe(true);
+    const body = (await res.json()) as { draft: { id: string } };
+    expect(body.draft.id).toBeTruthy();
+
+    await expect(page).toHaveURL(new RegExp(`/workbench\\?id=${body.draft.id}`));
+  });
+
+  test('Kho hội thoại: tìm đúng người qua facet, hành động hàng loạt', async ({ page }) => {
+    await page.goto('/search');
+    await expect(page.getByRole('heading', { name: 'Kho hội thoại', level: 2 })).toBeVisible();
+    await expect(page.getByText('Trần Văn Hậu')).toBeVisible();
+    await expect(page.getByText('Trịnh Mỹ Duyên')).toBeVisible();
+
+    await page.getByRole('button', { name: /Đã im lặng/ }).click();
+    await expect(page).toHaveURL(/et=WentSilent/);
+    await expect(page.getByText('Trịnh Mỹ Duyên')).toBeVisible();
+    await expect(page.getByText('Trần Văn Hậu')).toHaveCount(0);
+    await page.getByRole('button', { name: /Đã im lặng/ }).click(); // bỏ lọc lại
+
+    await page.getByLabel('Chọn Trần Văn Hậu').check();
+    await page.getByLabel('Chọn Đặng Hữu Trí').check();
+    await page.getByRole('button', { name: /Hành động hàng loạt \(2\)/ }).click();
+    const dlg = page.getByRole('dialog', { name: 'Hành động hàng loạt' });
+    await dlg.getByText('Giao việc theo dõi').click();
+    await dlg.getByLabel('Nội dung việc cần theo dõi').fill('Theo dõi lại trong tuần');
+    const bulk = page.waitForResponse((r) => r.url().includes('/search/bulk') && r.request().method() === 'POST');
+    await dlg.getByRole('button', { name: /Áp dụng cho 2 người/ }).click();
+    const res = await bulk;
+    expect(res.ok()).toBe(true);
+    expect(res.request().postDataJSON()).toMatchObject({ action: 'task', text: 'Theo dõi lại trong tuần' });
+    await expect(dlg).toBeHidden();
+  });
+
+  test('Deal & Vụ việc: đổi trạng thái deal và vụ việc', async ({ page }) => {
+    await page.goto('/deals');
+    await expect(page.getByRole('heading', { name: 'Deal & Vụ việc', level: 2 })).toBeVisible();
+    const dealRow = page.locator('tr', { hasText: 'DEA-0092' });
+    await expect(dealRow).toBeVisible();
+    const dealPatch = page.waitForResponse((r) => r.url().includes('/deals/') && r.request().method() === 'PATCH');
+    await dealRow.getByRole('button', { name: 'Đã chốt' }).click();
+    await dealPatch;
+    await expect(dealRow.getByRole('button', { name: 'Đã chốt' })).toHaveAttribute('aria-pressed', 'true');
+
+    await page.getByRole('tab', { name: 'Vụ việc' }).click();
+    await expect(page).toHaveURL(/dtab=cases/);
+    const caseRow = page.locator('tr', { hasText: 'CAS-0017' });
+    await expect(caseRow).toBeVisible();
+    const casePatch = page.waitForResponse((r) => r.url().includes('/cases/') && r.request().method() === 'PATCH');
+    await caseRow.getByRole('button', { name: 'Đang xử lý' }).click();
+    await casePatch;
+    await expect(caseRow.getByRole('button', { name: 'Đang xử lý' })).toHaveAttribute('aria-pressed', 'true');
+  });
+});
