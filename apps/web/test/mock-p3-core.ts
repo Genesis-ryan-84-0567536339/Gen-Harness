@@ -390,6 +390,12 @@ export function createMock(opts: P3Options) {
         drafts = rows;
       },
       drafts: () => drafts,
+      /** Cụm khác (vd market "Giới thiệu hai bên") tạo bản nháp qua đây — cùng cơ chế `create_draft` dùng chung ở backend. */
+      push: (d: DraftDetail) => {
+        drafts = [d, ...drafts];
+        opts.emit('draft.new', listItem(d));
+        return d;
+      },
     } as Record<string, (...args: never[]) => unknown>,
     dispose: () => timers.forEach(clearTimeout),
   };

@@ -194,12 +194,14 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     emit: broadcast,
   });
   /** Giai đoạn 3: mỗi cụm màn một mock riêng (test/mock-p3-*.ts), hỏi lần lượt sau phase 2. */
+  const p3Core = createP3Core({ fresh: opts.setup === 'fresh', emit: broadcast });
   const phase3 = {
-    core: createP3Core({ fresh: opts.setup === 'fresh', emit: broadcast }),
+    core: p3Core,
     queue: createP3Queue({ fresh: opts.setup === 'fresh', emit: broadcast }),
     relations: createP3Relations({ fresh: opts.setup === 'fresh', emit: broadcast }),
     graph: createP3Graph({ fresh: opts.setup === 'fresh', emit: broadcast }),
-    market: createP3Market({ fresh: opts.setup === 'fresh', emit: broadcast }),
+    // market "Giới thiệu hai bên" tạo bản nháp thật qua core.hooks.push — cùng cơ chế create_draft dùng chung ở backend.
+    market: createP3Market({ fresh: opts.setup === 'fresh', emit: broadcast, pushDraft: p3Core.hooks.push as (d: unknown) => unknown }),
     people: createP3People({ fresh: opts.setup === 'fresh', emit: broadcast }),
   };
   const audit: AuditRow[] = [];
