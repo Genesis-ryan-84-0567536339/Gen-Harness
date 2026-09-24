@@ -92,6 +92,20 @@ const SCENARIOS: Scenario[] = [
     design: { clicks: ['Bản đồ quan hệ', 'Sổ tay nhận thức'] },
     sidebar: 'full',
   },
+  {
+    name: 'graph-1440',
+    viewport: { width: 1440, height: 900 },
+    appPath: '/graph',
+    design: { clicks: ['Bản đồ quan hệ'] },
+    sidebar: 'full',
+  },
+  {
+    name: 'graph-1280',
+    viewport: { width: 1280, height: 800 },
+    appPath: '/graph',
+    design: { clicks: ['Bản đồ quan hệ'] },
+    sidebar: 'full',
+  },
   { name: 'rail-1280', viewport: { width: 1280, height: 800 }, appPath: '/overview', design: { sidebarMode: 'rail' }, sidebar: 'rail' },
 ];
 const HEADER = 58;

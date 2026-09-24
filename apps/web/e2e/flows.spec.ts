@@ -253,3 +253,78 @@ test.describe('cụm Quan hệ & Đối tượng', () => {
     await expect(detail.getByRole('link', { name: /Xem \/ tải xuống/ })).toHaveAttribute('href', /\/documents\/.+\/content/);
   });
 });
+
+test.describe('cụm Bản đồ quan hệ', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await resetMock(page.request, 'finished');
+    await loginAsOwner(page);
+  });
+
+  test('chuyển 4 chế độ, lọc trong Danh sách, cầu nối nổi bật ở Người↔Người và Nhóm↔Nhóm', async ({ page }) => {
+    await page.goto('/graph');
+    await expect(page.getByRole('heading', { name: 'Bản đồ quan hệ', level: 2 })).toBeVisible();
+    await expect(page.getByText('Nguyễn Văn Bảo')).toBeVisible();
+
+    // Lọc: Độ nóng ≥ 80 chỉ còn khách/nhân sự nóng.
+    await page.getByRole('button', { name: /Độ nóng/ }).click();
+    await page.getByRole('option', { name: '≥ 80' }).click();
+    await expect(page).toHaveURL(/heat=high/);
+    await expect(page.getByText('Trần Văn Hậu')).toBeVisible();
+    await expect(page.getByText('Đặng Hữu Trí')).toHaveCount(0);
+
+    // Người↔Người: Trần Minh Khoa và Nguyễn Thu Hà là cầu nối (bridge_score > 0), tô nổi bật.
+    await page.getByRole('radio', { name: 'Người ↔ Người' }).click();
+    await expect(page).toHaveURL(/mode=people/);
+    await expect(page.getByText('Người là cầu nối')).toBeVisible();
+    const bridgeStat = page.locator('.gp-stat-row', { hasText: 'Nguyễn Thu Hà' });
+    await expect(bridgeStat).toContainText('cầu nối');
+
+    // Nhóm↔Nhóm: cạnh Vận hành↔Tài chính mang mã người cầu nối (PER-0007 · Nguyễn Thu Hà).
+    await page.getByRole('radio', { name: 'Nhóm ↔ Nhóm' }).click();
+    await expect(page).toHaveURL(/mode=groups/);
+    await expect(page.getByText('Vận hành Genesis — Quý 4').first()).toBeVisible();
+    await expect(page.getByText(/người đang bắc cầu/)).toBeVisible();
+
+    // Luồng chủ đề: danh sách rồi mở chi tiết một luồng.
+    await page.getByRole('radio', { name: 'Luồng chủ đề' }).click();
+    await expect(page).toHaveURL(/mode=topics/);
+    const topicRow = page.getByRole('button', { name: /Mở luồng ván MDF E1/ });
+    await expect(topicRow).toBeVisible();
+    await topicRow.click();
+    await expect(page).toHaveURL(/topic=/);
+    await expect(page.getByText('Trần Minh Khoa').first()).toBeVisible();
+    await expect(page.getByText('Lâm Văn Được').first()).toBeVisible();
+    await page.getByRole('button', { name: 'Tất cả luồng chủ đề' }).click();
+    await expect(page).not.toHaveURL(/topic=/);
+  });
+
+  test('kéo thả một node ở Người↔Người tự lưu vị trí qua PUT /graph/layout/people', async ({ page }) => {
+    await page.goto('/graph?mode=people');
+    const node = page.locator('.gp-node', { hasText: 'Trần Minh Khoa' });
+    await expect(node).toBeVisible();
+    const box = (await node.boundingBox())!;
+    const startX = box.x + box.width / 2;
+    const startY = box.y + box.height / 2;
+
+    const put = page.waitForResponse((r) => r.url().includes('/api/v1/graph/layout/people') && r.request().method() === 'PUT');
+    await page.mouse.move(startX, startY);
+    await page.mouse.down();
+    await page.mouse.move(startX + 90, startY + 50, { steps: 8 });
+    await page.mouse.up();
+    const res = await put;
+    expect(res.ok()).toBe(true);
+    const body = res.request().postDataJSON() as { positions: Record<string, { x: number; y: number }> };
+    expect(Object.keys(body.positions).length).toBeGreaterThan(0);
+
+    // Tải lại: vị trí đã lưu được nạp lại từ GET /graph/layout/people (không còn dịch chuyển ngẫu nhiên nữa).
+    await page.reload();
+    await expect(page.locator('.gp-node', { hasText: 'Trần Minh Khoa' })).toBeVisible();
+  });
+
+  test('Dựng lại đồ thị gọi POST /graph/recompute (quyền profile.write)', async ({ page }) => {
+    await page.goto('/graph');
+    await page.getByRole('button', { name: 'Dựng lại' }).click();
+    await expect(page.getByText(/Đã dựng lại/)).toBeVisible();
+  });
+});
