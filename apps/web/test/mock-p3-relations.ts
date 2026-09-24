@@ -28,6 +28,8 @@ export interface P3Options {
 
 const ago = (min: number) => new Date(Date.now() - min * 60_000).toISOString();
 const has = (ctx: P2Ctx, perm: string) => !!ctx.perms[perm] && ctx.perms[perm] !== 'none';
+/** `btoa`/`atob` chỉ hỗ trợ Latin1 — dùng Buffer (UTF-8 an toàn) cho nội dung tài liệu mẫu tiếng Việt. */
+const b64 = (text: string) => Buffer.from(text, 'utf8').toString('base64');
 
 // ─── Nhóm & Con người ────────────────────────────────────────────────────────
 const CHANNELS: DirChannel[] = [
@@ -313,21 +315,21 @@ export function createMock(opts: P3Options) {
           mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', bytes: 84_200,
           owner: BAO, source: 'agent', created_by: 'Agent Trợ lý thương mại', created_at: ago(60 * 24 * 3), updated_at: ago(60 * 24 * 3),
           acl: [{ principal: 'role:owner', can_read: true, can_write: true }],
-          content: btoa('BaoGia_ThanhPhat_Q4 — nội dung mẫu'),
+          content: b64('BaoGia_ThanhPhat_Q4 — nội dung mẫu'),
         },
         {
           id: 'doc-2', title: 'HopDong_ThanhPhat_ban_sua.docx', description: 'Hợp đồng bản sửa khách gửi lại',
           mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', bytes: 112_400,
           owner: BAO, source: 'channel', created_by: null, created_at: ago(18), updated_at: ago(18),
           acl: [{ principal: 'role:owner', can_read: true, can_write: true }, { principal: 'role:manager', can_read: true, can_write: false }],
-          content: btoa('HopDong_ThanhPhat_ban_sua — nội dung mẫu'),
+          content: b64('HopDong_ThanhPhat_ban_sua — nội dung mẫu'),
         },
         {
           id: 'doc-3', title: 'DonHang_BaoBi_T8.xlsx', description: 'Đơn hàng bao bì tháng 8, đã ghi vào ERP',
           mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', bytes: 42_100,
           owner: GROUP_TP, source: 'tay', created_by: 'Anh Cơ La (Ryan)', created_at: ago(60 * 24 * 30), updated_at: ago(60 * 24 * 30),
           acl: [{ principal: 'role:owner', can_read: true, can_write: true }],
-          content: btoa('DonHang_BaoBi_T8 — nội dung mẫu'),
+          content: b64('DonHang_BaoBi_T8 — nội dung mẫu'),
         },
       ];
 
@@ -345,10 +347,10 @@ export function createMock(opts: P3Options) {
     return people.find((p) => p.id === id) ?? null;
   }
 
-  function nbListLabel(state: NbState): NbSubject {
+  function nbListLabel(id: string, state: NbState): NbSubject {
     const active = state.entries;
     return {
-      id: state.code, code: state.code, name: state.name, entries: active.length,
+      id, code: state.code, name: state.name, entries: active.length,
       token_used: active.reduce((s, e) => s + estimateTokens(e.body), 0),
       token_budget: state.tokenBudget,
       updated_at: active.length ? active.map((e) => e.created_at).sort().at(-1)! : ago(0),
@@ -476,7 +478,9 @@ export function createMock(opts: P3Options) {
       if (!has(ctx, 'profile.read')) return problem(403, 'FORBIDDEN', 'Vai trò không có quyền này');
       if (seg[1] === 'subjects' && seg.length === 2 && m === 'GET') {
         const type = (url.searchParams.get('type') ?? 'person') as 'person' | 'group';
-        const rows = [...notebooks.entries()].filter(([k]) => k.startsWith(`${type}:`)).map(([, s]) => nbListLabel(s));
+        const rows = [...notebooks.entries()]
+          .filter(([k]) => k.startsWith(`${type}:`))
+          .map(([k, s]) => nbListLabel(k.slice(type.length + 1), s));
         rows.sort((a, b) => (a.updated_at < b.updated_at ? 1 : -1));
         return reply(200, { items: rows, next_cursor: null });
       }
@@ -592,7 +596,7 @@ export function createMock(opts: P3Options) {
       }
       if (seg.length === 3 && seg[2] === 'content' && m === 'GET') {
         if (!doc) return problem(404, 'NOT_FOUND', 'Tài liệu không tồn tại hoặc ngoài phạm vi của bạn');
-        const bytes = atob(doc.content);
+        const bytes = Buffer.from(doc.content, 'base64').toString('utf8');
         return text(200, doc.mime, bytes, doc.title);
       }
       if (seg.length === 2 && m === 'PATCH') {
