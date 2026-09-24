@@ -15,7 +15,7 @@ from gh.auth.deps import current_user, require, require_pin
 from gh.biz.core import drafts, explain
 from gh.biz.core.scope import Scope, ensure_group, ensure_person, not_found, scope_for
 from gh.chassis import actionlog
-from gh.data.common import iso, mask_text
+from gh.data.common import iso, mask_text, parse_cursor
 from gh.db import DB
 from gh.errors import ApiError, forbidden
 from gh.providers.clients import Message
@@ -129,9 +129,9 @@ async def list_drafts(status: Literal["pending", "decided", "all"] = "pending", 
     if kind:
         conds.append("d.kind = :k")
     if cursor:
-        conds.append("d.created_at < CAST(:c AS timestamptz)")
+        conds.append("d.created_at < :c")
     sql_where = " AND ".join(conds)
-    base = {"o": user.org_id, "k": kind, "c": cursor, **params}
+    base = {"o": user.org_id, "k": kind, "c": parse_cursor(cursor), **params}
     total = (await db.execute(text(f"SELECT count(*) FROM biz.action_drafts d WHERE {sql_where}"),  # noqa: S608
                               base)).scalar_one()
     rows = (await db.execute(text(drafts._SELECT + f" WHERE {sql_where} ORDER BY d.created_at DESC LIMIT :n"),  # noqa: S608
@@ -388,9 +388,9 @@ async def agent_decisions(agent_id: uuid.UUID | None = None, decision: str | Non
     if decision:
         conds.append("d.decision = :k")
     if cursor:
-        conds.append("d.at < CAST(:c AS timestamptz)")
+        conds.append("d.at < :c")
     where = " AND ".join(conds)
-    params = {"o": user.org_id, "a": agent_id, "k": decision, "c": cursor}
+    params = {"o": user.org_id, "a": agent_id, "k": decision, "c": parse_cursor(cursor)}
     total = (await db.execute(text(f"SELECT count(*) FROM agent.decisions d WHERE {where}"), params)).scalar_one()  # noqa: S608
     rows = (await db.execute(text(f"""
         SELECT d.*, a.name AS agent_name, ad.code AS draft_code FROM agent.decisions d

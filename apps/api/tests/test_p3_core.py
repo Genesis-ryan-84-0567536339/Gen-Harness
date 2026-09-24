@@ -125,6 +125,19 @@ async def _outbound(redis) -> list[dict]:  # type: ignore[no-untyped-def, type-a
     return [{"type": f[b"type"].decode(), **orjson.loads(f[b"payload"])} for _, f in rows]
 
 
+async def test_drafts_cursor_pagination_reaches_second_page(world, owner_api: Api) -> None:  # type: ignore[no-untyped-def]
+    """`created_at < :c` với `:c` lấy từ `next_cursor` của trang trước — asyncpg từ chối bind chuỗi ISO trực
+    tiếp vào một cột `timestamptz` nếu không ép kiểu ở Python trước (`gh.data.common.parse_cursor`)."""
+    for i in range(3):
+        r = await owner_api.send("POST", "/drafts", {"kind": "message", "title": f"D{i}", "text": "nội dung"})
+        assert r.status_code == 201, r.text
+    page1 = (await owner_api.get("/drafts?limit=2")).json()
+    assert len(page1["items"]) == 2 and page1["total"] == 3 and page1["next_cursor"]
+    page2 = (await owner_api.get(f"/drafts?limit=2&cursor={page1['next_cursor']}")).json()
+    assert len(page2["items"]) == 1 and page2["next_cursor"] is None
+    assert {i["id"] for i in page1["items"]} != {i["id"] for i in page2["items"]}
+
+
 async def test_draft_approve_needs_pin_then_sends_with_single_use_permit(world, owner_api: Api, db, redis, app) -> None:  # type: ignore[no-untyped-def]
     text_ = "Dạ em gửi anh báo giá 3 container thép cuộn ạ."
     r = await owner_api.send("POST", "/drafts", {

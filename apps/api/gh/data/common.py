@@ -19,6 +19,13 @@ def iso(dt: datetime | None) -> str | None:
     return dt.astimezone(UTC).isoformat().replace("+00:00", "Z") if dt else None
 
 
+def parse_cursor(cursor: str | None) -> datetime | None:
+    """Con trỏ phân trang kiểu `created_at < :c`: asyncpg suy ra kiểu tham số từ `CAST(:c AS timestamptz)` và từ
+    chối bind một `str` ở đó (khác `psycopg`, vẫn chấp nhận) — luôn ép sang `datetime` trước khi bind, để SQL chỉ
+    cần so sánh `:c` trực tiếp, không cần `CAST`."""
+    return datetime.fromisoformat(cursor.replace("Z", "+00:00")) if cursor else None
+
+
 def since_cutoff(since: str | None) -> datetime | None:
     if not since or since == "all":
         return None
