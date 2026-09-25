@@ -206,13 +206,30 @@ test('luồng 4–8: cơ hội thật, agent soạn & Sếp duyệt & gửi th�
   await expect(exploderRow).toBeVisible();
   await expect(exploderRow).toContainText('Đóng');
 
-  runPy(process.env.EXPLODE_SCRIPT!, ['5']);
-  // Màn Plugin không tự làm mới (không polling) — đợi worker/api xử lý xong 5 sự kiện lỗi thật qua API trước,
-  // rồi mới tải lại trang một lần để hiện đúng trạng thái (tránh chờ suông trên một DOM không tự cập nhật).
-  await expect.poll(async () => {
-    const plugins = (await call(page, 'GET', '/plugins')) as Array<{ package: string; breaker: { state: string } }>;
-    return plugins.find((p) => p.package === '@e2e/exploder')?.breaker.state;
-  }, { timeout: 30_000, message: 'chờ breaker @e2e/exploder mở' }).toBe('open');
+  // "@e2e/exploder" chạy trong CẢ HAI tiến trình api và worker (build_plugin_manager nạp mọi plugin 'approved'
+  // ở cả hai nơi), và cả hai đọc cùng MỘT nhóm tiêu thụ Redis ("@e2e/exploder", xem PluginManager._consume) trên
+  // stream "e2e.plugin.explode" → 5 sự kiện lỗi bị CHIA ngẫu nhiên giữa hai tiến trình thay vì cả hai đều thấy
+  // đủ cả 5 (đã xác nhận thật ở lần chạy trước: worker nhận 4 lỗi tự mở breaker của NÓ, api chỉ nhận 1 lỗi nên
+  // breaker của riêng api — chính là cái `GET /plugins` trả về, vì route đọc `request.app.state.plugins` của
+  // tiến trình đang phục vụ HTTP — vẫn "closed"). Breaker là trạng thái TRONG TIẾN TRÌNH, không đồng bộ giữa
+  // api/worker, nên phép chờ đúng không phải "bơm N lỗi rồi đợi" mà là bơm liên tục theo đợt nhỏ tới khi CHÍNH
+  // breaker của tiến trình api (auto ngưỡng 3 lỗi/120s) tự mở — vẫn trong cùng cửa sổ 120s của breaker đó.
+  const deadline = Date.now() + 90_000;
+  let breakerOpen = false;
+  while (!breakerOpen) {
+    runPy(process.env.EXPLODE_SCRIPT!, ['5']);
+    try {
+      await expect.poll(async () => {
+        const plugins = (await call(page, 'GET', '/plugins')) as Array<{ package: string; breaker: { state: string } }>;
+        return plugins.find((p) => p.package === '@e2e/exploder')?.breaker.state;
+      }, { timeout: 8_000 }).toBe('open');
+      breakerOpen = true;
+    } catch (e) {
+      if (Date.now() > deadline) throw new Error(`chờ breaker @e2e/exploder mở: đã bơm nhiều đợt trong 90s, vẫn closed (${e})`);
+    }
+  }
+  // Màn Plugin không tự làm mới (không polling) — đã xác nhận qua API rằng breaker của tiến trình api đã mở,
+  // giờ mới tải lại trang một lần để hiện đúng trạng thái (tránh chờ suông trên một DOM không tự cập nhật).
   await page.reload();
   await page.getByRole('tab', { name: /Plugin cài thêm/ }).click();
   await expect(exploderRow).toContainText('Mở — đã cách ly');
@@ -257,7 +274,7 @@ test('luồng 4–8: cơ hội thật, agent soạn & Sếp duyệt & gửi th�
   await testDlg.getByLabel('Gọi nhân danh agent').selectOption(agentKey);
   await testDlg.getByRole('button', { name: 'Gọi tool' }).click();
   await expect(testDlg.getByText(/Bị chặn/)).toBeVisible();
-  await testDlg.getByRole('button', { name: 'Đóng' }).click();
+  await testDlg.locator('.gh-dialog__actions').getByRole('button', { name: 'Đóng' }).click();
   await expect(page.locator('.mcp-log tr[data-outcome="blocked"]').first()).toContainText('update_crm');
 
   // Mở + cấp list_customer (đọc) cho agent → gọi thử → OK, gọi ra máy chủ MCP giả thật.
@@ -274,7 +291,7 @@ test('luồng 4–8: cơ hội thật, agent soạn & Sếp duyệt & gửi th�
   await testDlg.getByLabel('Gọi nhân danh agent').selectOption(agentKey);
   await testDlg.getByRole('button', { name: 'Gọi tool' }).click();
   await expect(testDlg.getByText(/Kết quả giả cho list_customer/)).toBeVisible({ timeout: 10_000 });
-  await testDlg.getByRole('button', { name: 'Đóng' }).click();
+  await testDlg.locator('.gh-dialog__actions').getByRole('button', { name: 'Đóng' }).click();
   await expect(page.locator('.mcp-log tr[data-outcome="ok"]').first()).toContainText('list_customer');
   await shot(page, '23-mcp-read-ok');
 
@@ -292,7 +309,7 @@ test('luồng 4–8: cơ hội thật, agent soạn & Sếp duyệt & gửi th�
   await testDlg.getByLabel('Gọi nhân danh agent').selectOption(agentKey);
   await testDlg.getByRole('button', { name: 'Gọi tool' }).click();
   await expect(testDlg.getByText(/Chờ duyệt ở Bàn làm việc/)).toBeVisible({ timeout: 10_000 });
-  await testDlg.getByRole('button', { name: 'Đóng' }).click();
+  await testDlg.locator('.gh-dialog__actions').getByRole('button', { name: 'Đóng' }).click();
   await expect(page.locator('.mcp-log tr[data-outcome="held_for_approval"]').first()).toContainText('update_crm');
   await shot(page, '24-mcp-write-held');
 
