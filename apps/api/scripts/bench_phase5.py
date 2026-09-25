@@ -72,17 +72,23 @@ async def bulk_insert_events(dsn: str, org_id: uuid.UUID, channel_id: uuid.UUID,
     conn = await asyncpg.connect(dsn)
     try:
         t0 = time.monotonic()
+        # Rải mốc thời gian trên ~730 ngày (khớp chính sách lưu trữ thật: "kho thô giữ 24 tháng trong DB",
+        # docs/handoff/03-database.md) thay vì nhồi toàn bộ N dòng vào đúng cửa sổ "24 giờ qua" — không tổ chức
+        # thật nào nhận N dòng/ngày; nhồi vậy làm bộ lọc "hôm nay"/"theo giờ" của Tổng quan phải gộp toàn bộ N
+        # dòng mỗi lần, không phải lỗi chỉ mục mà là dữ liệu benchmark phi thực tế. An toàn với phân vùng: dòng
+        # ngoài các tháng đã tạo sẵn (p_premake=>3, không tạo lùi quá khứ) rơi vào `raw.events_default`
+        # (pg_partman tạo default partition mặc định) — không lỗi thiếu phân vùng. occurred_at = received_at
+        # trừ độ trễ ingest ngẫu nhiên nhỏ (0-5 phút), đúng quan hệ hai cột trong đời thật.
         await conn.execute(
             """INSERT INTO raw.events (org_id, received_at, occurred_at, channel_id, external_msg_id, kind,
                                        body_text, payload, content_hash)
-               SELECT $1::uuid,
-                      now() - (random() * interval '24 hours'),
-                      now() - (random() * interval '24 hours'),
+               SELECT $1::uuid, r, r - (random() * interval '5 minutes'),
                       $2::uuid, 'bench-' || gs::text, 'text',
                       'Nội dung benchmark số ' || gs::text,
                       jsonb_build_object('n', gs, 'bench', true),
                       digest('bench-' || gs::text, 'sha256')
-               FROM generate_series(1, $3) AS gs""",
+               FROM generate_series(1, $3) AS gs,
+                    LATERAL (SELECT now() - (random() * interval '730 days') AS r) t""",
             org_id, channel_id, n)
         return time.monotonic() - t0
     finally:
@@ -101,23 +107,56 @@ async def percentiles(latencies_ms: list[float]) -> dict[str, float]:
     return {"p50": pct(0.50), "p95": pct(0.95), "p99": pct(0.99), "avg": mean(s), "n": len(s)}
 
 
-async def bench_overview(env: dict[str, str], n_requests: int = 60) -> dict[str, float]:
+async def bootstrap_org(env: dict[str, str]) -> tuple[uuid.UUID, uuid.UUID]:
+    """Dựng tổ chức + owner + kênh THẬT qua đúng luồng trình thiết lập (không viết thẳng SQL cho phần này —
+    org/role/permission/channel phải khớp bootstrap thật). Trả (org_id, channel_id kênh zalo)."""
     os.environ.update(env)
     from gh.config import get_settings
     get_settings.cache_clear()
-    os.environ["GH_SETUP_TOKEN"] = "bench-setup-token"
+    os.environ["GH_SETUP_TOKEN"] = "test-setup-token"  # trùng token do_setup() (tests/conftest.py) đã dùng sẵn
+    from sqlalchemy import text
+
+    from gh.app import create_app
+    from gh.db import dispose_engine
+
+    app = create_app()
+    async with app.router.lifespan_context(app):
+        import httpx
+
+        from tests.conftest import Api, do_setup
+
+        transport = httpx.ASGITransport(app=app)  # type: ignore[arg-type]
+        async with httpx.AsyncClient(transport=transport, base_url="http://bench") as client:
+            api = Api(client)
+            await do_setup(api)
+            from gh.db import sessionmaker
+            async with sessionmaker()() as db:
+                org = (await db.execute(text(
+                    "SELECT id FROM core.organizations ORDER BY created_at LIMIT 1"))).scalar_one()
+                ch = (await db.execute(text(
+                    "SELECT id FROM core.channels WHERE org_id = :o AND type = 'zalo'"), {"o": org})).scalar_one()
+    await dispose_engine()
+    return org, ch
+
+
+async def bench_overview(env: dict[str, str], n_requests: int = 60) -> dict[str, float]:
+    """Đăng nhập (tổ chức/owner đã dựng ở bootstrap_org) rồi đo GET /overview qua ĐÚNG đường API thật."""
+    os.environ.update(env)
+    from gh.config import get_settings
+    get_settings.cache_clear()
     from gh.app import create_app
 
     app = create_app()
     async with app.router.lifespan_context(app):
         import httpx
 
-        from tests.conftest import OWNER, Api, do_setup
+        from tests.conftest import OWNER, Api
 
         transport = httpx.ASGITransport(app=app)  # type: ignore[arg-type]
         async with httpx.AsyncClient(transport=transport, base_url="http://bench") as client:
             api = Api(client)
-            await do_setup(api)
+            r = await api.send("POST", "/auth/login", {"email": OWNER["email"], "password": OWNER["password"]})
+            assert r.status_code == 200, r.text
             # khởi động (JIT các câu lệnh chuẩn bị, cache kế hoạch…) — không tính vào số đo
             for _ in range(3):
                 r = await api.get("/overview")
@@ -129,21 +168,6 @@ async def bench_overview(env: dict[str, str], n_requests: int = 60) -> dict[str,
                 latencies.append((time.perf_counter() - t0) * 1000)
                 assert r.status_code == 200, r.text
     return await percentiles(latencies)
-
-
-async def get_org_and_channel(env: dict[str, str]) -> tuple[uuid.UUID, uuid.UUID]:
-    os.environ.update(env)
-    from gh.config import get_settings
-    get_settings.cache_clear()
-    from sqlalchemy import text
-
-    from gh.db import dispose_engine, sessionmaker
-    async with sessionmaker()() as db:
-        org = (await db.execute(text("SELECT id FROM core.organizations ORDER BY created_at LIMIT 1"))).scalar_one()
-        ch = (await db.execute(text("SELECT id FROM core.channels WHERE org_id = :o AND type = 'zalo'"),
-                               {"o": org})).scalar_one()
-    await dispose_engine()
-    return org, ch
 
 
 async def bench_refinery(env: dict[str, str], n_messages: int = 3000) -> dict[str, float]:
@@ -171,7 +195,9 @@ async def bench_refinery(env: dict[str, str], n_messages: int = 3000) -> dict[st
     ingest_s = time.monotonic() - t_ingest0
 
     t0 = time.monotonic()
-    st = await Refinery(sm, redis, by_text()).run(org, "manual")  # type: ignore[arg-type]
+    # limit=n_messages: một lượt chạy xử lý TOÀN BỘ lô (mặc định Refinery.run() chỉ nhận đúng batch_size của
+    # lịch chạy, vd. 250 tin/lượt) — mục tiêu ở đây là đo thông lượng thật trên "vài nghìn tin" như PLAN yêu cầu.
+    st = await Refinery(sm, redis, by_text()).run(org, "manual", limit=n_messages)  # type: ignore[arg-type]
     run_s = time.monotonic() - t0
     await redis.aclose()
     await dispose_engine()
@@ -189,7 +215,7 @@ async def main() -> None:
     results: dict[str, object] = {}
     env = setup_db()
     try:
-        org, channel = await get_org_and_channel(env)
+        org, channel = await bootstrap_org(env)
 
         if not args.skip_10m:
             print(f"[bench] chèn {args.n:,} dòng raw.events…")
