@@ -37,10 +37,15 @@ jobs:
   # XÁC những gì install.sh (asset="genh-${os}-${arch}") và install.ps1
   # ($asset = "genh-windows-${arch}.exe") mong đợi — đọc kỹ 2 script đó
   # trước khi đổi bảng dưới đây.
+  #
+  # Phụ thuộc job pin-compose (không chỉ meta) vì bước "Ghim compose.yaml đã
+  # publish vào binary" bên dưới cần deploy/compose.release.yaml — build-genh
+  # PHẢI chạy SAU khi ảnh đã build+push xong và digest đã biết, nếu không
+  # binary sẽ nhúng compose.yaml cũ (build: cục bộ) thay vì bản đã ghim.
   build-genh:
     name: build genh (${{ matrix.goos }}/${{ matrix.goarch }})
     runs-on: ubuntu-latest
-    needs: meta
+    needs: [meta, pin-compose]
     strategy:
       fail-fast: false
       matrix:
@@ -65,6 +70,19 @@ jobs:
             asset: genh-windows-arm64.exe
     steps:
       - uses: actions/checkout@v4
+
+      - name: Tải compose.release.yaml (đã ghim digest ở job pin-compose)
+        uses: actions/download-artifact@v4
+        with:
+          name: compose-release
+          path: pinned
+
+      - name: Ghim compose.yaml đã publish vào binary (go:embed)
+        run: |
+          set -euo pipefail
+          cp pinned/compose.release.yaml apps/genh/internal/compose/embedded_compose.yaml
+          echo "đã ghi đè embedded_compose.yaml bằng compose.release.yaml (digest thật):"
+          grep '^\s*image:' apps/genh/internal/compose/embedded_compose.yaml || true
 
       - uses: actions/setup-go@v5
         with:
@@ -163,15 +181,12 @@ jobs:
   # Sinh deploy/compose.release.yaml với "image: ...@sha256:<digest thật>"
   # thay cho "build:" của web/migrate/api/worker/bridge/db.
   #
-  # GIỚI HẠN THÀNH THẬT (xem docs/handoff/05-installer.md mục "Phát hành" +
-  # đầu deploy/scripts/pin-compose-images.sh): apps/genh/internal/compose
-  # (Locate/SearchCandidates) hiện CHƯA có cơ chế go:embed để nhúng
-  # compose.yaml vào chính binary genh — nó chỉ dò trên đĩa. Thêm go:embed
-  # thật thuộc apps/genh/internal/compose, NGOÀI phạm vi cho phép của
-  # workflow này (không được sửa apps/genh/internal/). Vì vậy
-  # compose.release.yaml ở đây CHỈ được đính vào GitHub Release như một
-  # artifact riêng (job release bên dưới) — CHƯA tự động được genh install
-  # dùng. Đây là việc còn thiếu, để lại cho phiên sửa apps/genh/internal.
+  # Job build-genh (chạy SAU job này — xem needs) copy file này đè lên
+  # apps/genh/internal/compose/embedded_compose.yaml rồi mới `go build`, nhờ
+  # go:embed (apps/genh/internal/compose/embed.go) mà binary genh phát hành
+  # thật sự MANG THEO đúng compose.yaml đã ghim digest — Locate() rơi về
+  # dùng bản nhúng này khi máy Owner không có checkout repo nào. File cũng
+  # được đính kèm GitHub Release riêng (job release) để tiện xem/tải tay.
   pin-compose:
     name: sinh compose.yaml phát hành (ghim digest)
     runs-on: ubuntu-latest

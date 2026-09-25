@@ -17,15 +17,14 @@
 # dump lại YAML) để giữ nguyên comment, anchor (&app-env, *app-env), thụt lề
 # của compose.yaml gốc — một trình dump YAML tổng quát sẽ làm mất các thứ đó.
 #
-# GHI CHÚ QUAN TRỌNG (đọc kỹ trước khi coi đây là "đã nhúng vào genh"):
-# apps/genh/internal/compose/locate.go (Locate/SearchCandidates) hiện CHỈ dò
-# deploy/compose.yaml TRÊN ĐĨA (installDir/cwd/thư mục chứa binary) — CHƯA có
-# cơ chế go:embed nào để nhúng compose.yaml vào chính binary genh. File
-# deploy/compose.release.yaml mà script này sinh ra vì vậy KHÔNG tự động
-# được genh dùng khi cài đặt thật; nó chỉ được đính kèm vào GitHub Release
-# như một artifact riêng (xem release.yml, job release). Thêm go:embed thật
-# sự thuộc apps/genh/internal/compose — nằm NGOÀI phạm vi của phiên phát
-# hành CI này (không được sửa apps/genh/internal/).
+# NHÚNG VÀO BINARY: apps/genh/internal/compose/embed.go nhúng sẵn
+# apps/genh/internal/compose/embedded_compose.yaml qua go:embed — Locate()
+# rơi về ghi tệp đó ra <installDir>/deploy/compose.yaml khi không tìm thấy
+# compose.yaml nào trên đĩa (trường hợp thật: genh chạy độc lập, không có
+# checkout repo). Vì vậy job build-genh (release.yml) PHẢI copy
+# deploy/compose.release.yaml mà script này sinh ra ĐÈ LÊN
+# apps/genh/internal/compose/embedded_compose.yaml TRƯỚC KHI `go build` —
+# xem release.yml, job build-genh phụ thuộc job pin-compose.
 set -euo pipefail
 
 usage() {

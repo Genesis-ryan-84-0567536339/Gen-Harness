@@ -99,7 +99,56 @@ func TestLocate_NotFound(t *testing.T) {
 	if err := os.Chdir(dir); err != nil {
 		t.Fatalf("Chdir: %v", err)
 	}
-	if _, err := Locate(filepath.Join(dir, "khong-ton-tai")); err == nil {
-		t.Fatal("muốn lỗi khi không tìm thấy compose.yaml ở đâu cả")
+	// installDir RỖNG: không có nơi nào để rơi về ghi bản nhúng sẵn — vẫn
+	// phải lỗi rõ ràng như trước.
+	if _, err := Locate(""); err == nil {
+		t.Fatal("muốn lỗi khi không tìm thấy compose.yaml ở đâu cả và installDir rỗng")
+	}
+}
+
+func TestLocate_FallsBackToEmbeddedComposeUnderInstallDir(t *testing.T) {
+	t.Setenv(EnvOverrideVar, "")
+	cwdDir := t.TempDir() // KHÔNG chứa deploy/compose.yaml nào, tách biệt installDir
+	oldWd, _ := os.Getwd()
+	defer os.Chdir(oldWd)
+	if err := os.Chdir(cwdDir); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+
+	installDir := t.TempDir()
+	want := filepath.Join(installDir, "deploy", "compose.yaml")
+
+	got, err := Locate(installDir)
+	if err != nil {
+		t.Fatalf("Locate: %v (muốn rơi về ghi bản nhúng sẵn dưới installDir)", err)
+	}
+	if got != want {
+		t.Errorf("Locate = %q, muốn %q", got, want)
+	}
+
+	data, err := os.ReadFile(want)
+	if err != nil {
+		t.Fatalf("đọc lại tệp vừa ghi: %v", err)
+	}
+	if len(data) == 0 {
+		t.Error("compose.yaml nhúng sẵn ghi ra rỗng")
+	}
+
+	// Gọi lại lần hai: idempotent, không lỗi, không đổi nội dung, và không
+	// đè lên một compose.yaml Owner đã tự sửa.
+	custom := []byte("# tuỳ chỉnh của Owner\nservices: {}\n")
+	if err := os.WriteFile(want, custom, 0o644); err != nil {
+		t.Fatalf("ghi đè tuỳ chỉnh: %v", err)
+	}
+	got2, err := Locate(installDir)
+	if err != nil {
+		t.Fatalf("Locate lần 2: %v", err)
+	}
+	if got2 != want {
+		t.Errorf("Locate lần 2 = %q, muốn %q", got2, want)
+	}
+	data2, _ := os.ReadFile(want)
+	if string(data2) != string(custom) {
+		t.Error("Locate lần 2 đã đè lên compose.yaml Owner tự tuỳ chỉnh — phải giữ nguyên")
 	}
 }
