@@ -5,6 +5,8 @@ import { relationsEndpoints } from './p3-relations';
 import { graphEndpoints } from './p3-graph';
 import { marketEndpoints } from './p3-market';
 import { peopleEndpoints } from './p3-people';
+import { agentsEndpoints } from './p4-agents';
+import { agentModelEndpoints } from './p4-api';
 import type {
   AuditPage,
   AuditVerify,
@@ -204,6 +206,8 @@ export function createEndpoints(client: ApiClient) {
       removeKey: (id: string, kid: string) => r<void>(`/providers/${enc(id)}/keys/${enc(kid)}`, { method: 'DELETE' }),
       update: (id: string, body: { enabled?: boolean; failover_rank?: number }) =>
         r<Provider>(`/providers/${enc(id)}`, { method: 'PATCH', body }),
+      /** Kéo-thả sắp lại toàn bộ chuỗi chuyển hướng một lượt (PLAN 4.2) — khác `update` vốn chỉ đổi một ô. */
+      chain: (providerIds: string[]) => r<Provider[]>('/providers/chain', { method: 'PATCH', body: { provider_ids: providerIds } }),
       test: (id: string) => r<ProviderTestResult>(`/providers/${enc(id)}/test`, { method: 'POST' }),
       addModel: (id: string, body: { model_name: string; daily_quota?: number; rate_limit_per_min?: number }) =>
         r<Provider>(`/providers/${enc(id)}/models`, { method: 'POST', body }),
@@ -236,6 +240,8 @@ export function createEndpoints(client: ApiClient) {
     graph: graphEndpoints(r),
     market: marketEndpoints(r),
     people: peopleEndpoints(r),
+    ...agentsEndpoints(r),
+    ...agentModelEndpoints(r),
   };
 }
 
