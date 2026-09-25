@@ -155,6 +155,7 @@ export function createMock(opts: P4McpOptions) {
         }
         discovered.add(server.id);
         server.health = 'healthy';
+        opts.emit('mcp.server_health', { server_id: server.id, health: server.health });
         return reply(200, { tools: found });
       }
     }

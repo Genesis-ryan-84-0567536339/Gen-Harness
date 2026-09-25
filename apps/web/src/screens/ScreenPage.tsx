@@ -16,6 +16,8 @@ import { SCREENS as P3_MARKET } from './market';
 import { SCREENS as P3_PEOPLE } from './people';
 import { SCREENS as P4_AGENTS } from './agents';
 import { SCREENS as P4_API } from './api';
+import { SCREENS as P4_MCP } from './mcp';
+import { SCREENS as P4_PLUGINS } from './plugins';
 
 /** Screens built so far (phase 2, then each phase-3 cluster registers its own). Every other key keeps the placeholder. */
 const BUILT: Record<string, ComponentType> = {
@@ -32,6 +34,8 @@ const BUILT: Record<string, ComponentType> = {
   ...P3_PEOPLE,
   ...P4_AGENTS,
   ...P4_API,
+  ...P4_MCP,
+  ...P4_PLUGINS,
 };
 
 /** Screen-title row: title 20px/500 + description 12.5px neutral-400 (docs/01 "Quy ước chung"). */
