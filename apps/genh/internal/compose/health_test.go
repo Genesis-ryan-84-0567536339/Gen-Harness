@@ -81,9 +81,9 @@ func TestAllHealthy(t *testing.T) {
 }
 
 func TestWaitHealthy_SucceedsAfterFewPolls(t *testing.T) {
-	origInterval := pollInterval
-	pollInterval = time.Millisecond
-	defer func() { pollInterval = origInterval }()
+	origInterval := PollInterval
+	PollInterval = time.Millisecond
+	defer func() { PollInterval = origInterval }()
 
 	fr := &fake.Runner{}
 	fr.Responses = []fake.Response{
@@ -112,9 +112,9 @@ func TestWaitHealthy_SucceedsAfterFewPolls(t *testing.T) {
 }
 
 func TestWaitHealthy_TimesOut(t *testing.T) {
-	origInterval := pollInterval
-	pollInterval = time.Millisecond
-	defer func() { pollInterval = origInterval }()
+	origInterval := PollInterval
+	PollInterval = time.Millisecond
+	defer func() { PollInterval = origInterval }()
 
 	fr := &fake.Runner{Responses: []fake.Response{
 		{
@@ -130,9 +130,9 @@ func TestWaitHealthy_TimesOut(t *testing.T) {
 }
 
 func TestWaitHealthy_RespectsContextCancel(t *testing.T) {
-	origInterval := pollInterval
-	pollInterval = time.Second // đủ dài để đảm bảo context Done() thắng trước, không phải deadline logic
-	defer func() { pollInterval = origInterval }()
+	origInterval := PollInterval
+	PollInterval = time.Second // đủ dài để đảm bảo context Done() thắng trước, không phải deadline logic
+	defer func() { PollInterval = origInterval }()
 
 	fr := &fake.Runner{Responses: []fake.Response{
 		{

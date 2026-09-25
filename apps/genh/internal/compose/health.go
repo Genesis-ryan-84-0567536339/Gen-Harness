@@ -102,11 +102,12 @@ func AllHealthy(statuses []ContainerStatus, services []string) (ok bool, detail 
 	return ok, detail
 }
 
-// pollInterval là khoảng nghỉ giữa hai lần gọi `docker compose ps` khi chờ
+// PollInterval là khoảng nghỉ giữa hai lần gọi `docker compose ps` khi chờ
 // healthy — đủ nhanh để TUI cảm giác mượt, không dồn dập gọi CLI vô ích.
-// Không phải const để test rút ngắn được (WaitHealthy test không nên mất
-// nhiều giây thật cho mỗi lần lặp).
-var pollInterval = 2 * time.Second
+// Biến (không phải const) và XUẤT RA để test của package này lẫn
+// internal/install (Bước 5/7 dùng WaitHealthy) rút ngắn được khi test —
+// không nên mất giây thật cho mỗi lần lặp trong test.
+var PollInterval = 2 * time.Second
 
 // WaitHealthy gọi `docker compose ps --format json` lặp lại cho tới khi mọi
 // service trong services đều healthy (AllHealthy), hoặc hết timeout.
@@ -138,7 +139,7 @@ func WaitHealthy(ctx context.Context, r dockercli.Runner, composePath string, en
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(pollInterval):
+		case <-time.After(PollInterval):
 		}
 	}
 }
