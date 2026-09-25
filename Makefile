@@ -2,7 +2,8 @@
 COMPOSE = docker compose -f deploy/compose.yaml --env-file .env
 API = apps/api
 
-.PHONY: secrets up down logs logs-token ps api-dev api-test api-lint web-test bridge-test test migrate
+.PHONY: secrets up down logs logs-token ps api-dev api-test api-lint web-test bridge-test test migrate \
+        seed-demo seed-demo-clean
 
 secrets:
 	@mkdir -p secrets
@@ -47,3 +48,12 @@ bridge-test:
 	npm run -w apps/bridge test
 
 test: api-lint api-test bridge-test web-test
+
+# PLAN §5.1 — dữ liệu mẫu đi qua đúng luồng raw → refinery → clean (gh/seed_demo.py). Idempotent: chạy lại
+# không tạo trùng. seed-demo-clean xoá mọi kết luận/đối tượng đã sinh (không đụng raw.events — xem docstring
+# đầu gh/seed_demo.py).
+seed-demo:
+	cd $(API) && .venv/bin/python -m gh.seed_demo seed
+
+seed-demo-clean:
+	cd $(API) && .venv/bin/python -m gh.seed_demo clear
