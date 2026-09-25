@@ -59,13 +59,25 @@ async def api_error_handler(_: Request, exc: Exception) -> JsonResponse:
 async def db_error_handler(_: Request, exc: Exception) -> JsonResponse:
     """Giai đoạn 5.4: mất kết nối CSDL giữa chừng → lỗi rõ ràng (503), không phải 500 không rõ nguyên nhân.
 
-    `DBAPIError` gói mọi lỗi tầng driver (asyncpg), gồm mất kết nối/ngắt kết nối khi Postgres dừng. Tiến
-    trình API không sập: đây là một exception handler bình thường của FastAPI, chỉ request đang chạy nhận lỗi.
-    `pool_pre_ping=True` (gh/db.py) khiến các request SAU đó tự dò lại kết nối khi Postgres khởi động lại,
-    không cần khởi động lại tiến trình app."""
+    `DBAPIError` gói mọi lỗi tầng driver (asyncpg) xảy ra SAU KHI đã có kết nối (vd. mất kết nối giữa lúc chạy
+    câu lệnh). Tiến trình API không sập: đây là một exception handler bình thường của FastAPI, chỉ request
+    đang chạy nhận lỗi. `pool_pre_ping=True` (gh/db.py) khiến các request SAU đó tự dò lại kết nối khi Postgres
+    khởi động lại, không cần khởi động lại tiến trình app."""
     return JsonResponse(_body(503, "DB_UNAVAILABLE",
                               "Mất kết nối cơ sở dữ liệu, hệ thống đang tự kết nối lại — hãy thử lại sau ít giây",
                               str(exc)[:200] if isinstance(exc, DBAPIError) else None, {}),
+                         status_code=503, media_type="application/problem+json")
+
+
+async def infra_error_handler(_: Request, exc: Exception) -> JsonResponse:
+    """Giai đoạn 5.4: lỗi kết nối hạ tầng (Postgres/Redis) khi CHƯA có kết nối (vd. `ConnectionRefusedError` lúc
+    Postgres/Redis đang tắt hẳn) không được asyncpg/redis-py/SQLAlchemy bọc thành `DBAPIError` — chỉ lỗi xảy ra
+    SAU khi đã kết nối mới được bọc vậy. `OSError` (cha của `ConnectionRefusedError`, `ConnectionResetError`,
+    `BrokenPipeError`, `TimeoutError`) là lớp chung nhất bắt được mọi trường hợp này, để không lọt ra ngoài
+    thành 500 không rõ nguyên nhân — Starlette đối chiếu theo MRO nên bắt cả các lớp con."""
+    return JsonResponse(_body(503, "SERVICE_UNAVAILABLE",
+                              "Mất kết nối tới dịch vụ hạ tầng (CSDL/Redis), hệ thống đang tự kết nối lại — "
+                              "hãy thử lại sau ít giây", str(exc)[:200], {}),
                          status_code=503, media_type="application/problem+json")
 
 

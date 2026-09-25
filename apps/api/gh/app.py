@@ -26,7 +26,14 @@ from gh.config import get_settings
 from gh.data.ingest import Ingest
 from gh.data_api.routes import router as data_router
 from gh.db import dispose_engine, sessionmaker
-from gh.errors import ApiError, JsonResponse, api_error_handler, db_error_handler, validation_error_handler
+from gh.errors import (
+    ApiError,
+    JsonResponse,
+    api_error_handler,
+    db_error_handler,
+    infra_error_handler,
+    validation_error_handler,
+)
 from gh.mcp_api.routes import router as mcp_router
 from gh.middleware import ActionLogGuard, SetupGate
 from gh.plugins_api.routes import router as plugins_router
@@ -172,6 +179,7 @@ def create_app(*, with_lifespan: bool = True) -> FastAPI:
     app.add_exception_handler(ApiError, api_error_handler)
     app.add_exception_handler(RequestValidationError, validation_error_handler)
     app.add_exception_handler(DBAPIError, db_error_handler)
+    app.add_exception_handler(OSError, infra_error_handler)
     for r in (auth_router, setup_router, shell_router, audit_router, plugins_router, mcp_router, data_router,
              system_router):
         app.include_router(r, prefix="/api/v1")
