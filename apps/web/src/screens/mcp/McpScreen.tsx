@@ -7,7 +7,7 @@ import { errorText } from '../../lib/errorText';
 import { useCan } from '../../lib/permissions';
 import { toast } from '../../lib/toast';
 import { CardError, InlineError, Panel, ScreenHead, SkeletonLines, StateChip } from '../common';
-import { ACCESS_LABEL, N5, OK, OUTCOME_LABEL, TRANSPORT_LABEL, WARN, fmtLatency, healthLabel, healthTone, outcomeTone } from './mcpModel';
+import { ACCESS_LABEL, N5, OK, OUTCOME_LABEL, TRANSPORT_LABEL, WARN, fmtLatency, healthLabel, healthTone, mcpErrorText, outcomeTone } from './mcpModel';
 import {
   useCallTool,
   useCreateServer,
@@ -248,7 +248,7 @@ function ToolRow({ tool: t, canManage, onTest }: { tool: McpTool; canManage: boo
   const expose = useExposeTool();
   return (
     <tr data-tool={t.name} data-exposed={t.is_exposed ? '' : undefined}>
-      <td className="mono">{t.name}</td>
+      <td className="mcp-tool-table__name mono">{t.name}</td>
       <td>
         <StateChip color={t.access === 'write' ? WARN : N5}>{ACCESS_LABEL[t.access]}</StateChip>
       </td>
@@ -481,7 +481,7 @@ function TestCallDialog({ tool, agents, onClose }: { tool: McpTool; agents: { ke
           <textarea id="mcp-test-args" className="gh-input mono" rows={3} value={argsText} onChange={(e) => setArgsText(e.target.value)} spellCheck={false} />
         </div>
         {argsError ? <InlineError>{argsError}</InlineError> : null}
-        {call.isError ? <InlineError>{errorText(call.error)}</InlineError> : null}
+        {call.isError ? <InlineError>{mcpErrorText(call.error)}</InlineError> : null}
         {call.isSuccess ? (
           <div className="mcp-test-result" data-outcome={call.data.outcome}>
             <StateChip color={outcomeTone(call.data.outcome)} dot>

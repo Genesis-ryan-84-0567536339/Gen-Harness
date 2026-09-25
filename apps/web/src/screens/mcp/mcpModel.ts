@@ -1,5 +1,6 @@
 /** Presentation logic for MCP Hub — cùng khuôn `apiModel.ts`/`pluginsModel.ts`. */
-import type { McpCallOutcome, McpTool, McpTransport } from '@gen-harness/contracts';
+import { ApiError, type McpCallOutcome, type McpTool, type McpTransport } from '@gen-harness/contracts';
+import { errorText } from '../../lib/errorText';
 
 export const OK = 'var(--color-ok)';
 export const WARN = 'var(--color-warn)';
@@ -46,4 +47,15 @@ export function outcomeTone(o: McpCallOutcome): string {
 
 export function fmtLatency(ms: number | null): string {
   return ms == null ? '—' : ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
+}
+
+/**
+ * `errorText()` dùng chung đổi MỌI lỗi 403 thành "Vai trò của bạn không có quyền làm thao tác này" — đúng cho
+ * hầu hết màn (thiếu quyền RBAC) nhưng SAI cho lượt gọi tool MCP bị chặn (khoá cứng #4 cũng trả 403, kèm lý do
+ * cụ thể ở `detail`, vd "Bị chặn: tool chưa được Owner mở" — đây là thông tin nghiệp vụ phải hiện đúng, không
+ * phải lỗi phân quyền). Mã lỗi `MCP_*` giữ nguyên message gốc; còn lại rơi về `errorText()` như thường.
+ */
+export function mcpErrorText(e: unknown): string {
+  if (e instanceof ApiError && e.code.startsWith('MCP_')) return e.message;
+  return errorText(e);
 }

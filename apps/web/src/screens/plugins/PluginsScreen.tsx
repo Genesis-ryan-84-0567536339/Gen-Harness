@@ -168,7 +168,8 @@ function PluginRow({ p, all, canManage, onLogs }: { p: PluginItem; all: PluginIt
           <div className="plg-toggle-cell">
             <Switch
               checked={p.enabled}
-              disabled={!!blockDisable || busy}
+              locked={!!blockDisable}
+              disabled={busy}
               label={`${p.enabled ? 'Tắt' : 'Bật'} ${p.name}`}
               onChange={(v) => toggle.mutate({ pkg: p.package, enabled: v }, { onError: (e) => toast(errorText(e), 'bad') })}
             />
@@ -302,8 +303,12 @@ function InstallLocalDialog({ onClose }: { onClose: () => void }) {
     const file = e.target.files?.[0];
     if (!file) return;
     setFileName(file.name);
-    const buf = await file.arrayBuffer();
-    setCodeSha(await sha256Hex(buf));
+    try {
+      const buf = await file.arrayBuffer();
+      setCodeSha(await sha256Hex(buf));
+    } catch {
+      toast('Không tính được sha256 từ tệp này — nhập tay ở ô bên dưới', 'warn');
+    }
   }
 
   function submit() {
