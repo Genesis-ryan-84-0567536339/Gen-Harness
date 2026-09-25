@@ -235,6 +235,34 @@ const SCENARIOS: Scenario[] = [
     design: { clicks: ['Agent & Model', 'API & Model'] },
     sidebar: 'full',
   },
+  {
+    name: 'mcp-1440',
+    viewport: { width: 1440, height: 900 },
+    appPath: '/mcp',
+    design: { clicks: ['Agent & Model', 'MCP Hub'] },
+    sidebar: 'full',
+  },
+  {
+    name: 'mcp-1280',
+    viewport: { width: 1280, height: 800 },
+    appPath: '/mcp',
+    design: { clicks: ['Agent & Model', 'MCP Hub'] },
+    sidebar: 'full',
+  },
+  {
+    name: 'plugins-1440',
+    viewport: { width: 1440, height: 900 },
+    appPath: '/plugins',
+    design: { clicks: ['Plugin & Tiện ích'] },
+    sidebar: 'full',
+  },
+  {
+    name: 'plugins-1280',
+    viewport: { width: 1280, height: 800 },
+    appPath: '/plugins',
+    design: { clicks: ['Plugin & Tiện ích'] },
+    sidebar: 'full',
+  },
   { name: 'rail-1280', viewport: { width: 1280, height: 800 }, appPath: '/overview', design: { sidebarMode: 'rail' }, sidebar: 'rail' },
 ];
 const HEADER = 58;
