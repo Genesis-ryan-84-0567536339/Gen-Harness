@@ -3,6 +3,7 @@
 from collections.abc import Awaitable, Callable
 
 from fastapi import Depends, Request
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gh.auth import rbac, service
@@ -26,6 +27,10 @@ async def optional_user(request: Request, db: AsyncSession = DB) -> service.Curr
     user = await service.load_session(db, token)
     if user is None:
         return None
+    # Giai đoạn 5.5 (RLS, ARCHITECTURE §8.3): đặt biến phiên cho phần còn lại của transaction request này,
+    # để các policy `org_isolation` (migration 0012) lọc đúng org_id. set_config(..., true) = SET LOCAL:
+    # chỉ sống trong transaction hiện tại, không rò sang connection khác khi trả về pool.
+    await db.execute(text("SELECT set_config('app.org_id', :org, true)"), {"org": str(user.org_id)})
     user.ip = client_ip(request)
     if request.method not in SAFE_METHODS:
         header = request.headers.get("x-csrf-token", "")
