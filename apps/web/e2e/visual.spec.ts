@@ -21,6 +21,13 @@ interface Scenario {
   afterGoto?: (page: Page) => Promise<void>;
   /** Ngưỡng riêng, thay `MAX_DIFF_RATIO` — xem ghi chú cạnh `people-1440` bên dưới. */
   maxDiffRatio?: number;
+  /**
+   * Selector của phần tử kết thúc vùng nội dung chính muốn so thêm (mép dưới của nó, + biên nhỏ, là đáy vùng
+   * crop). Khi có, so thêm vùng "content" (dưới header, từ mép sidebar tới hết trang) bằng diff chịu lệch ±1px
+   * (xem `shiftTolerantDiff`), cùng kỹ thuật đã dùng ở `phase2.spec.ts` cho raw/rules/clean/identity/system.
+   * Không đặt cho màn có nội dung đổi theo thời gian/độ trễ mạng (đồ thị động, socket) — dễ tạo test không ổn định.
+   */
+  contentUntil?: string;
 }
 
 /** Đánh giá con người đòi phiên PIN cho mọi lượt đọc (Q4, docs/PLAN.md) — nhập PIN trước khi chụp, không thì hộp
@@ -37,14 +44,15 @@ async function ownerPinIfNeeded(page: Page): Promise<void> {
 }
 
 const SCENARIOS: Scenario[] = [
-  { name: 'overview-1440', viewport: { width: 1440, height: 900 }, appPath: '/overview', design: {}, sidebar: 'full' },
-  { name: 'overview-1280', viewport: { width: 1280, height: 800 }, appPath: '/overview', design: {}, sidebar: 'full' },
+  { name: 'overview-1440', viewport: { width: 1440, height: 900 }, appPath: '/overview', design: {}, sidebar: 'full', contentUntil: '.ov-kpi-row' },
+  { name: 'overview-1280', viewport: { width: 1280, height: 800 }, appPath: '/overview', design: {}, sidebar: 'full', contentUntil: '.ov-kpi-row' },
   {
     name: 'inbox-1440',
     viewport: { width: 1440, height: 900 },
     appPath: '/inbox',
     design: { clicks: ['Hàng đợi & Hành động', 'Hộp thư ý nghĩa'] },
     sidebar: 'full',
+    contentUntil: '.ib-card >> nth=0',
   },
   {
     name: 'inbox-1280',
@@ -52,6 +60,7 @@ const SCENARIOS: Scenario[] = [
     appPath: '/inbox',
     design: { clicks: ['Hàng đợi & Hành động', 'Hộp thư ý nghĩa'] },
     sidebar: 'full',
+    contentUntil: '.ib-card >> nth=0',
   },
   {
     name: 'workbench-1440',
@@ -207,6 +216,66 @@ const SCENARIOS: Scenario[] = [
     design: { clicks: ['Con người & Chất lượng', 'Chất lượng chăm sóc'] },
     sidebar: 'full',
   },
+  // 4 màn "Tầng dữ liệu" còn thiếu khỏi 21 màn gốc (docs/design/screens.json) — trước phase 5.2 chỉ có
+  // so sánh nội dung riêng (bounded diff) ở phase2.spec.ts, chưa có trong SCENARIOS sidebar+header này.
+  {
+    name: 'raw-1440',
+    viewport: { width: 1440, height: 900 },
+    appPath: '/raw',
+    design: { clicks: ['Tầng dữ liệu', 'Kho dữ liệu thô'] },
+    sidebar: 'full',
+    contentUntil: '.screen-desc',
+  },
+  {
+    name: 'raw-1280',
+    viewport: { width: 1280, height: 800 },
+    appPath: '/raw',
+    design: { clicks: ['Tầng dữ liệu', 'Kho dữ liệu thô'] },
+    sidebar: 'full',
+    contentUntil: '.screen-desc',
+  },
+  {
+    name: 'rules-1440',
+    viewport: { width: 1440, height: 900 },
+    appPath: '/rules',
+    design: { clicks: ['Tầng dữ liệu', 'Quy tắc sàng lọc'] },
+    sidebar: 'full',
+  },
+  {
+    name: 'rules-1280',
+    viewport: { width: 1280, height: 800 },
+    appPath: '/rules',
+    design: { clicks: ['Tầng dữ liệu', 'Quy tắc sàng lọc'] },
+    sidebar: 'full',
+  },
+  {
+    name: 'clean-1440',
+    viewport: { width: 1440, height: 900 },
+    appPath: '/clean',
+    design: { clicks: ['Tầng dữ liệu', 'Kho sạch SSOT'] },
+    sidebar: 'full',
+  },
+  {
+    name: 'clean-1280',
+    viewport: { width: 1280, height: 800 },
+    appPath: '/clean',
+    design: { clicks: ['Tầng dữ liệu', 'Kho sạch SSOT'] },
+    sidebar: 'full',
+  },
+  {
+    name: 'identity-1440',
+    viewport: { width: 1440, height: 900 },
+    appPath: '/identity',
+    design: { clicks: ['Tầng dữ liệu', 'Hợp nhất danh tính'] },
+    sidebar: 'full',
+  },
+  {
+    name: 'identity-1280',
+    viewport: { width: 1280, height: 800 },
+    appPath: '/identity',
+    design: { clicks: ['Tầng dữ liệu', 'Hợp nhất danh tính'] },
+    sidebar: 'full',
+  },
   {
     name: 'agents-1440',
     viewport: { width: 1440, height: 900 },
@@ -312,6 +381,38 @@ function compare(name: string, a: PNG, b: PNG) {
   return { diffPixels: n, ratio: Number((n / (a.width * a.height)).toFixed(5)) };
 }
 
+/**
+ * Cùng kỹ thuật với `phase2.spec.ts`: Chromium bo tròn text/viền dưới điểm ảnh khác nhau chút ít giữa hai
+ * document (thiết kế và app tự host font khác nhau), nên coi một pixel khác nhau là "khác thật" chỉ khi không
+ * pixel liền kề (±1px) nào của B đủ gần màu của A. `pixelmatch` đã tô đỏ (255,0,0) các pixel khác nhau ở `diff`.
+ */
+function shiftTolerantDiff(a: PNG, b: PNG, diff: PNG): number {
+  const close = (i: number, j: number) =>
+    Math.abs(a.data[i] - b.data[j]) + Math.abs(a.data[i + 1] - b.data[j + 1]) + Math.abs(a.data[i + 2] - b.data[j + 2]) <= 48;
+  let n = 0;
+  for (let y = 0; y < a.height; y++) {
+    for (let x = 0; x < a.width; x++) {
+      const i = (y * a.width + x) * 4;
+      if (!(diff.data[i] === 255 && diff.data[i + 1] === 0 && diff.data[i + 2] === 0)) continue;
+      let ok = false;
+      for (let dy = -1; dy <= 1 && !ok; dy++) {
+        for (let dx = -1; dx <= 1 && !ok; dx++) {
+          const yy = y + dy;
+          const xx = x + dx;
+          if (yy < 0 || xx < 0 || yy >= a.height || xx >= a.width) continue;
+          ok = close(i, (yy * a.width + xx) * 4);
+        }
+      }
+      if (!ok) n++;
+    }
+  }
+  return n;
+}
+
+/** Ngưỡng cho vùng nội dung chính (dưới header) — nới hơn sidebar/header vì nội dung có dữ liệu mẫu/số liệu
+ *  động do mock sinh, không tĩnh như khung điều hướng. */
+const CONTENT_MAX_DIFF_RATIO = Number(process.env.VISUAL_CONTENT_MAX_DIFF ?? 0.05);
+
 async function shot(page: Page, file: string): Promise<PNG> {
   const buf = await page.screenshot({ path: join(outDir, file), animations: 'disabled', caret: 'hide' });
   return PNG.sync.read(buf);
@@ -357,7 +458,29 @@ for (const sc of SCENARIOS) {
       writeFileSync(join(outDir, `${sc.name}-${region}-app.png`), PNG.sync.write(b));
       report[region] = compare(`${sc.name}-${region}`, a, b);
     }
-    writeFileSync(join(outDir, `report-${sc.name}.json`), JSON.stringify(report, null, 2));
+    // Vùng "content" (nếu có) dùng diff chịu lệch ±1px + ngưỡng riêng nới hơn — không lẫn vào `report` sidebar/
+    // header phía trên (ngưỡng khác nhau) để không so sai ngưỡng ở vòng lặp expect.soft bên dưới.
+    let contentResult: { diffPixels: number; ratio: number; pixelmatchRaw: number } | undefined;
+    if (sc.contentUntil) {
+      const box = await appPage.locator(sc.contentUntil).first().boundingBox();
+      const bottom = Math.min(vp.height, Math.ceil((box?.y ?? HEADER) + (box?.height ?? 0)) + 4);
+      const [x, y, w, h] = [side, HEADER, vp.width - side, Math.max(1, bottom - HEADER)];
+      const a = crop(design, x, y, w, h);
+      const b = crop(app, x, y, w, h);
+      const diff = new PNG({ width: w, height: h });
+      const n = pixelmatch(a.data, b.data, diff.data, w, h, { threshold: 0.1, includeAA: false });
+      writeFileSync(join(outDir, `${sc.name}-content-design.png`), PNG.sync.write(a));
+      writeFileSync(join(outDir, `${sc.name}-content-app.png`), PNG.sync.write(b));
+      writeFileSync(join(outDir, `${sc.name}-content-diff.png`), PNG.sync.write(diff));
+      const tolerant = shiftTolerantDiff(a, b, diff);
+      const ratio = Number((tolerant / (w * h)).toFixed(5));
+      contentResult = { diffPixels: tolerant, ratio, pixelmatchRaw: n };
+      console.log(`visual ${sc.name} content: pixelmatch=${n} shiftTolerant=${tolerant} ratio=${ratio}`);
+      // expect.soft (không chặn CI): nội dung phụ thuộc dữ liệu mock/độ trễ vẽ lại, không ổn định tuyệt đối
+      // như sidebar/header tĩnh — xem docs/reports/phase-5-visual.md để biết số đo thật và quyết định ngưỡng.
+      expect.soft(ratio, `${sc.name} content differs in ${tolerant} px`).toBeLessThanOrEqual(CONTENT_MAX_DIFF_RATIO);
+    }
+    writeFileSync(join(outDir, `report-${sc.name}.json`), JSON.stringify({ ...report, content: contentResult }, null, 2));
     console.log(`visual ${sc.name}: ${JSON.stringify(report)}`);
     for (const [k, r] of Object.entries(report)) {
       expect.soft(r.ratio, `${sc.name} ${k} differs in ${r.diffPixels} px`).toBeLessThanOrEqual(sc.maxDiffRatio ?? MAX_DIFF_RATIO);
