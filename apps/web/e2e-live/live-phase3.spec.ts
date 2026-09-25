@@ -283,8 +283,13 @@ test('luồng 4–8: cơ hội thật, agent soạn & Sếp duyệt & gửi th�
   await maybeEnterOwnerPin(page);
   await expect(readRow.getByLabel('Đóng tool list_customer')).toHaveAttribute('aria-checked', 'true');
   const grantReadReq = page.waitForResponse((r) => r.url().includes('/grants') && r.request().method() === 'POST');
-  await page.getByLabel(`Cấp list_customer cho ${agent.name}`).check();
+  // `.check()` tự xác minh `checked` NGAY sau click — checkbox này là controlled (checked={t.grants.includes(…)})
+  // không cập nhật lạc quan, đợi mutation POST /grants xong mới thấy checked thật, nên `.check()` báo "did not
+  // change its state" dù thao tác đúng. Dùng `.click()` thuần rồi tự đợi POST + trạng thái checked thật sau đó.
+  const grantReadBox = page.getByLabel(`Cấp list_customer cho ${agent.name}`);
+  await grantReadBox.click();
   await grantReadReq;
+  await expect(grantReadBox).toBeChecked({ timeout: 10_000 });
 
   await readRow.getByRole('button', { name: 'Gọi thử' }).click();
   testDlg = page.getByRole('dialog', { name: 'Gọi thử list_customer' });
@@ -301,8 +306,10 @@ test('luồng 4–8: cơ hội thật, agent soạn & Sếp duyệt & gửi th�
   await maybeEnterOwnerPin(page);
   await expect(writeRow.getByLabel('Đóng tool update_crm')).toHaveAttribute('aria-checked', 'true');
   const grantWriteReq = page.waitForResponse((r) => r.url().includes('/grants') && r.request().method() === 'POST');
-  await page.getByLabel(`Cấp update_crm cho ${agent.name}`).check();
+  const grantWriteBox = page.getByLabel(`Cấp update_crm cho ${agent.name}`);
+  await grantWriteBox.click();
   await grantWriteReq;
+  await expect(grantWriteBox).toBeChecked({ timeout: 10_000 });
 
   await writeRow.getByRole('button', { name: 'Gọi thử' }).click();
   testDlg = page.getByRole('dialog', { name: 'Gọi thử update_crm' });
