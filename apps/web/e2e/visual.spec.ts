@@ -207,6 +207,34 @@ const SCENARIOS: Scenario[] = [
     design: { clicks: ['Con người & Chất lượng', 'Chất lượng chăm sóc'] },
     sidebar: 'full',
   },
+  {
+    name: 'agents-1440',
+    viewport: { width: 1440, height: 900 },
+    appPath: '/agents',
+    design: { clicks: ['Agent & Model', 'Danh tính Agent'] },
+    sidebar: 'full',
+  },
+  {
+    name: 'agents-1280',
+    viewport: { width: 1280, height: 800 },
+    appPath: '/agents',
+    design: { clicks: ['Agent & Model', 'Danh tính Agent'] },
+    sidebar: 'full',
+  },
+  {
+    name: 'api-1440',
+    viewport: { width: 1440, height: 900 },
+    appPath: '/api',
+    design: { clicks: ['Agent & Model', 'API & Model'] },
+    sidebar: 'full',
+  },
+  {
+    name: 'api-1280',
+    viewport: { width: 1280, height: 800 },
+    appPath: '/api',
+    design: { clicks: ['Agent & Model', 'API & Model'] },
+    sidebar: 'full',
+  },
   { name: 'rail-1280', viewport: { width: 1280, height: 800 }, appPath: '/overview', design: { sidebarMode: 'rail' }, sidebar: 'rail' },
 ];
 const HEADER = 58;

@@ -553,3 +553,95 @@ test.describe('cụm Con người & Chất lượng', () => {
     await expect(page.getByRole('heading', { name: 'Deal & Vụ việc', level: 2 })).toBeVisible();
   });
 });
+
+test.describe('giai đoạn 4: Agent + API & Model', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await resetMock(page.request, 'finished');
+    await loginAsOwner(page);
+  });
+
+  async function enterOwnerPin(page: import('@playwright/test').Page) {
+    const dlg = page.getByRole('dialog', { name: 'Mã PIN xác nhận thao tác' });
+    await expect(dlg).toBeVisible();
+    await page.getByLabel('Mã PIN — chữ số 1/6').click();
+    await page.keyboard.type(OWNER.pin);
+    await expect(dlg).toBeHidden();
+  }
+
+  test('tạo, nhân bản và tắt agent; xem "agent đã nói gì"', async ({ page }) => {
+    await page.goto('/agents');
+    await expect(page.getByRole('heading', { name: 'Danh tính Agent', level: 2 })).toBeVisible();
+    const tlsCard = page.getByRole('listitem', { name: 'Trợ lý thương mại', exact: true });
+    await expect(tlsCard).toBeVisible();
+    await expect(tlsCard).toContainText('tự trị 4');
+
+    // Bé Heo — mẫu tắt mặc định (spec E13) — vẫn liệt kê, chỉ mờ đi.
+    const mascotCard = page.locator('.ag-card', { hasText: 'Bé Heo' });
+    await expect(mascotCard).toHaveAttribute('data-off', '');
+
+    // "Agent đã nói gì, nhân danh gì" — GET /agents/decisions.
+    await expect(page.locator('.ag-log-row', { hasText: 'Trợ lý thương mại' }).first()).toContainText('Soạn nháp');
+
+    // Tạo agent mới — cần PIN (agent.manage). Phiên PIN có hiệu lực 30 phút (mock, cùng khuôn backend) nên
+    // chỉ lần thao tác nhạy cảm ĐẦU TIÊN trong bài test mới hiện hộp thoại — các lượt sau trong cùng phiên
+    // không hỏi lại, giống hệt hành vi thật.
+    await page.getByRole('button', { name: 'Tạo agent mới' }).click();
+    const createDlg = page.getByRole('dialog', { name: 'Tạo agent mới' });
+    await createDlg.getByLabel('Tên hiển thị').fill('Trợ lý kho vận');
+    await createDlg.getByLabel('Vai trò').fill('Theo dõi tồn kho và điều phối giao nhận.');
+    await createDlg.getByLabel('Giọng / persona').fill('Gọn gàng, đúng việc');
+    await createDlg.getByLabel('Khi nào được nói').fill('Khi có yêu cầu giao nhận mới');
+    await createDlg.getByRole('button', { name: 'Tạo agent' }).click();
+    await enterOwnerPin(page);
+    await expect(createDlg).toBeHidden();
+    await expect(page.locator('.ag-card', { hasText: 'Trợ lý kho vận' })).toBeVisible();
+
+    // Nhân bản — bản sao tạo ở trạng thái tắt. Phiên PIN vẫn còn hiệu lực từ bước trên nên không hỏi lại.
+    await page.getByRole('button', { name: 'Nhân bản' }).click();
+    const cloneDlg = page.getByRole('dialog', { name: 'Nhân bản agent' });
+    await cloneDlg.getByLabel('Nhân bản từ').selectOption({ label: 'Trợ lý thương mại' });
+    await cloneDlg.getByLabel('Tên agent mới').fill('Trợ lý thương mại (bản sao)');
+    await cloneDlg.getByRole('button', { name: 'Nhân bản' }).click();
+    await expect(cloneDlg).toBeHidden();
+    const cloneCard = page.locator('.ag-card', { hasText: 'Trợ lý thương mại (bản sao)' });
+    await expect(cloneCard).toBeVisible();
+    await expect(cloneCard).toHaveAttribute('data-off', '');
+
+    // Tắt agent gốc — cũng trong cùng phiên PIN.
+    await tlsCard.getByLabel('Tắt agent Trợ lý thương mại').click();
+    await expect(tlsCard).toHaveAttribute('data-off', '');
+  });
+
+  test('API & Model: thêm khoá, kiểm tra kết nối, kéo-thả (thay bằng nút) chuỗi ưu tiên', async ({ page }) => {
+    await page.goto('/api');
+    await expect(page.getByRole('heading', { name: 'API & Model', level: 2 })).toBeVisible();
+    const geminiCard = page.locator('.apm-provider', { hasText: 'Gemini API' });
+    await expect(geminiCard).toBeVisible();
+    await expect(geminiCard).toContainText('GEM-KEY-01');
+
+    // Thêm khoá — không cần PIN (khớp `add_key` ở gh.system_api.routes, chỉ cần system.manage).
+    await geminiCard.getByRole('button', { name: 'Thêm khoá' }).click();
+    const keyDlg = page.getByRole('dialog', { name: /Thêm khoá cho Gemini API/ });
+    await keyDlg.getByLabel('Khoá API mới').fill('sk-test-khoa-moi-88221');
+    await keyDlg.getByRole('button', { name: 'Thêm khoá' }).click();
+    await expect(keyDlg).toBeHidden();
+    await expect(geminiCard).toContainText('GEM-KEY-02');
+
+    // Kiểm tra kết nối một nhà cung cấp.
+    await geminiCard.getByRole('button', { name: 'Kiểm tra kết nối' }).click();
+    await expect(geminiCard.locator('.apm-test-result')).toContainText('Kết nối được');
+
+    // Gán model cho từng agent — bảng đọc từ agent.bindings.
+    await expect(page.locator('.apm-table')).toContainText('Sàng lọc & suy luận chính');
+
+    // Chuỗi ưu tiên — kéo-thả có thay thế bàn phím: nút lên/xuống gọi PATCH /providers/chain.
+    const chain = page.locator('.apm-chain-list');
+    await expect(chain.locator('.apm-chain-row').nth(0)).toContainText('Antigravity Brain');
+    await expect(chain.locator('.apm-chain-row').nth(2)).toContainText('DeepSeek API');
+    const chainReq = page.waitForResponse((r) => r.url().includes('/providers/chain') && r.request().method() === 'PATCH');
+    await page.getByRole('button', { name: 'Đưa DeepSeek API lên trước' }).click();
+    await chainReq;
+    await expect(chain.locator('.apm-chain-row').nth(1)).toContainText('DeepSeek API');
+  });
+});
