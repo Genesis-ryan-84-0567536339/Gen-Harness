@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "claude/**"]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: --health-cmd "redis-cli ping" --health-interval 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: PostgreSQL 16 + pgvector + pg_partman (cùng image với compose)
+        run: |
+          docker build -f deploy/images/db.Dockerfile -t gh-db .
+          docker run -d --name db -p 5432:5432 -e POSTGRES_PASSWORD=postgres gh-db
+          for i in $(seq 1 30); do docker exec db pg_isready -U postgres && break; sleep 2; done
+      - uses: astral-sh/setup-uv@v6
+        with: { python-version: "3.11" }
+      - name: Cài phụ thuộc
+        working-directory: apps/api
+        run: uv venv .venv && uv pip install --python .venv/bin/python -e ".[dev]"
+      - name: Lint + typecheck
+        working-directory: apps/api
+        run: .venv/bin/ruff check gh tests && .venv/bin/mypy gh
+      - name: Test (Postgres + Redis thật)
+        working-directory: apps/api
+        env:
+          GH_TEST_PG: postgresql://postgres:postgres@localhost:5432
+          GH_TEST_REDIS: redis://localhost:6379/15
+        run: .venv/bin/pytest -q
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22", cache: npm }
+      - run: npm ci
+      - run: npm run -w apps/web lint
+      - run: npm run -w apps/web typecheck
+      - run: npm run -w apps/web test
+      - run: npm run -w apps/web build
+      - run: npm run -w apps/bridge test
+
+  images:
+    runs-on: ubuntu-latest
+    needs: [api, web]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image api/worker, bridge, web, db
+        run: |
+          docker build -f deploy/images/api.Dockerfile -t gh-api .
+          docker build -f deploy/images/bridge.Dockerfile -t gh-bridge .
+          docker build -f apps/web/Dockerfile -t gh-web .
+          docker build -f deploy/images/db.Dockerfile -t gh-db .
+      - name: Kiểm tra compose
+        run: |
+          cp .env.example .env && mkdir -p secrets
+          python3 -c "import os,base64;print(base64.b64encode(os.urandom(32)).decode())" > secrets/gh_master_key
+          python3 -c "import os,base64;print(base64.b64encode(os.urandom(32)).decode())" > secrets/gh_bridge_key
+          docker run --rm --entrypoint agy gh-api --version
+          docker compose -f deploy/compose.yaml --env-file .env config -q
