@@ -119,18 +119,31 @@ func (s dataStep) Run(ctx context.Context, env *Env, rep Reporter) error {
 	return nil
 }
 
+// secretsResult đọc Env.Secrets (đặt ở Bước 4, type-assert về
+// secretgen.Result) — dùng chung cho mọi Step từ Bước 5 trở đi cần đọc bí
+// mật đã sinh (Bước 5 chỉ cần env overlay qua secretsEnvOverlay; Bước 6 cần
+// cả Bundle.MasterKey để ghi tệp Docker secret gh_master_key — xem
+// ensureComposeSecretFiles trong steps_migrate.go).
+func secretsResult(env *Env) (secretgen.Result, error) {
+	if env == nil || env.Secrets == nil {
+		return secretgen.Result{}, fmt.Errorf("Env.Secrets rỗng — Bước 4 (Sinh bí mật) chưa chạy")
+	}
+	res, ok := env.Secrets.(secretgen.Result)
+	if !ok {
+		return secretgen.Result{}, fmt.Errorf("Env.Secrets có kiểu %T không mong đợi (muốn secretgen.Result)", env.Secrets)
+	}
+	return res, nil
+}
+
 // secretsEnvOverlay đọc Env.Secrets (đặt ở Bước 4) và dựng các biến môi
 // trường compose.yaml cần để dựng dữ liệu — POSTGRES_PASSWORD/
 // MINIO_ROOT_PASSWORD là bắt buộc (compose.yaml dùng
 // ${VAR:?đặt VAR trong .env}), không có sẽ khiến `docker compose up` tự
 // thất bại ngay với thông điệp rõ ràng từ chính Compose.
 func secretsEnvOverlay(env *Env) ([]string, error) {
-	if env == nil || env.Secrets == nil {
-		return nil, fmt.Errorf("Env.Secrets rỗng — Bước 4 (Sinh bí mật) chưa chạy")
-	}
-	res, ok := env.Secrets.(secretgen.Result)
-	if !ok {
-		return nil, fmt.Errorf("Env.Secrets có kiểu %T không mong đợi (muốn secretgen.Result)", env.Secrets)
+	res, err := secretsResult(env)
+	if err != nil {
+		return nil, err
 	}
 	return []string{
 		"POSTGRES_PASSWORD=" + res.Bundle.DBPassword,

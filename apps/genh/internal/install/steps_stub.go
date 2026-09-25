@@ -29,8 +29,8 @@ func (s stubStep) Run(ctx context.Context, env *Env, rep Reporter) error {
 }
 
 // Registry trả về 8 Step theo đúng thứ tự StepID trong bảng trọng số của
-// docs/handoff/05-installer.md. Bước 1, 2, 3, 4 và 5 là cài đặt thật; các
-// bước còn lại vẫn là stubStep, thay dần trong các commit tiếp theo.
+// docs/handoff/05-installer.md. Bước 1-6 là cài đặt thật; Bước 7 và 8 vẫn là
+// stubStep, thay dần trong các commit tiếp theo.
 func Registry() []Step {
 	return []Step{
 		machineCheckStep{},
@@ -38,7 +38,7 @@ func Registry() []Step {
 		pullStep{},
 		secretsStep{},
 		dataStep{},
-		stubStep{id: StepMigrate, name: "Tạo cấu trúc dữ liệu"},
+		migrateStep{},
 		stubStep{id: StepStartServices, name: "Khởi động dịch vụ"},
 		stubStep{id: StepFinalize, name: "Hoàn tất"},
 	}
