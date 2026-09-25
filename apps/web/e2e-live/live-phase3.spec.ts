@@ -207,9 +207,15 @@ test('luồng 4–8: cơ hội thật, agent soạn & Sếp duyệt & gửi th�
   await expect(exploderRow).toContainText('Đóng');
 
   runPy(process.env.EXPLODE_SCRIPT!, ['5']);
+  // Màn Plugin không tự làm mới (không polling) — đợi worker/api xử lý xong 5 sự kiện lỗi thật qua API trước,
+  // rồi mới tải lại trang một lần để hiện đúng trạng thái (tránh chờ suông trên một DOM không tự cập nhật).
+  await expect.poll(async () => {
+    const plugins = (await call(page, 'GET', '/plugins')) as Array<{ package: string; breaker: { state: string } }>;
+    return plugins.find((p) => p.package === '@e2e/exploder')?.breaker.state;
+  }, { timeout: 30_000, message: 'chờ breaker @e2e/exploder mở' }).toBe('open');
   await page.reload();
   await page.getByRole('tab', { name: /Plugin cài thêm/ }).click();
-  await expect(exploderRow).toContainText('Mở — đã cách ly', { timeout: 20_000 });
+  await expect(exploderRow).toContainText('Mở — đã cách ly');
   await shot(page, '21-plugin-breaker-open');
 
   // Hệ thống chính vẫn chạy: một hành động nghiệp vụ bình thường vẫn thành công trong lúc breaker của
