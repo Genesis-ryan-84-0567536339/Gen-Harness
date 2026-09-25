@@ -68,6 +68,9 @@ export interface MockOptions {
   simulate?: boolean;
   /** Let `PUT /setup/steps/12` finish without steps 8–9 (the real API refuses in phase 2). */
   allowFinish?: boolean;
+  /** Test-only (e2e giai đoạn 4.6): đánh dấu sẵn các bước 1..n-1 là 'done', `current_step = n`, tạo và đăng
+   * nhập sẵn tài khoản Owner — để test thẳng bước 10/11 mà không phải đi lại QR/CLI/refinery từ đầu. */
+  startAtStep?: number;
 }
 
 // RBAC as apps/api gh/auth/rbac.py seeds it: Owner, Manager, Operator, Agent NV, Auditor.
@@ -327,8 +330,18 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     org: { name: 'Genesis Trading', timezone: 'Asia/Ho_Chi_Minh', currency: 'VND' },
     addressing: { self: 'Anh', bot_calls_me: 'Sếp' },
   };
-  if (opts.setup !== 'fresh') {
+  if (opts.startAtStep && opts.startAtStep > 1) {
+    const n = Math.min(12, Math.max(2, opts.startAtStep));
+    setup.finished = false;
+    setup.current_step = n;
+    setup.steps.forEach((s) => {
+      s.status = s.n < n ? 'done' : s.n === n ? 'doing' : 'todo';
+    });
+  }
+  if (opts.setup !== 'fresh' || opts.startAtStep) {
     addOwner();
+  }
+  if (opts.setup !== 'fresh') {
     users.push({
       id: randomUUID(),
       email: 'operator@genesis.local',

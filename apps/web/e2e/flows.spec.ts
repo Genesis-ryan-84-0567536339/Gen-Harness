@@ -728,3 +728,119 @@ test.describe('giai đoạn 4: MCP Hub + Plugin', () => {
     await expect(page.locator('tr[data-package="@ext/vi-du"]')).toBeVisible();
   });
 });
+
+test.describe('giai đoạn 4.5/4.6: Điều khiển hệ thống', () => {
+  async function enterOwnerPin(page: import('@playwright/test').Page) {
+    const dlg = page.getByRole('dialog', { name: 'Mã PIN xác nhận thao tác' });
+    await expect(dlg).toBeVisible();
+    await page.getByLabel('Mã PIN — chữ số 1/6').click();
+    await page.keyboard.type(OWNER.pin);
+    await expect(dlg).toBeHidden();
+  }
+
+  test.describe('trong Console (setup đã xong)', () => {
+    test.beforeEach(async ({ page }) => {
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await resetMock(page.request, 'finished');
+      await loginAsOwner(page);
+    });
+
+    test('Quyền hạn: ma trận khoá cứng Owner/Auditor không sửa được; sửa ô Manager cần PIN và giữ nguyên sau tải lại', async ({ page }) => {
+      await page.goto('/system?tab=roles');
+      await expect(page.getByText('Ma trận quyền theo vai trò')).toBeVisible();
+
+      // Owner: khoá cứng — ô là icon, không có <select> để bấm sửa (không phải cho bấm rồi báo lỗi).
+      const ownerRow = page.locator('tr', { has: page.getByText('Owner — Sếp') });
+      await expect(ownerRow.locator('select')).toHaveCount(0);
+      await expect(ownerRow.locator('[data-locked]').first()).toBeVisible();
+
+      // Auditor: cột "Hành động" (quyền ghi) khoá cứng — không có select cho ô này dù các cột đọc khác sửa được.
+      const auditorRow = page.locator('tr', { has: page.getByText('Auditor', { exact: true }) });
+      await expect(auditorRow.getByLabel('Auditor · Hành động')).toHaveCount(0);
+      await expect(auditorRow.getByLabel('Auditor · Nhật ký')).toHaveCount(1);
+
+      // Manager: sửa cột "Hành động" — cần mã PIN, ghi vào nhật ký, giữ nguyên sau khi tải lại trang.
+      const managerCell = page.getByLabel('Manager · Hành động');
+      await expect(managerCell).toHaveValue('team');
+      await managerCell.selectOption('none');
+      await enterOwnerPin(page);
+      await expect(managerCell).toHaveValue('none');
+      await page.reload();
+      await expect(page.getByLabel('Manager · Hành động')).toHaveValue('none');
+    });
+
+    test('Ranh giới có trách nhiệm: khoá cứng không bật/tắt được; 2 khoá không có công tắc hiện tĩnh', async ({ page }) => {
+      await page.goto('/system?tab=roles');
+      await expect(page.getByText('Ranh giới có trách nhiệm')).toBeVisible();
+      const lockedRow = page.locator('.boundary-row', { hasText: 'Chỉ lắng nghe nhóm Owner đã bật' });
+      await expect(lockedRow.getByRole('switch')).toHaveAttribute('aria-disabled', 'true');
+      await expect(page.getByText('Không có công tắc', { exact: true })).toHaveCount(2);
+    });
+
+    test('Nhật ký: tìm theo tên/hành động rồi Xuất CSV (cần PIN) tải đúng tệp', async ({ page }) => {
+      await page.goto('/system?tab=log');
+      await expect(page.getByText('Nhật ký hành động')).toBeVisible();
+      await expect(page.getByText('Trợ lý thương mại')).toBeVisible();
+
+      await page.getByLabel('Tìm trong nhật ký').fill('Policy Engine');
+      await expect(page.getByText('Trợ lý thương mại')).toHaveCount(0);
+      await expect(page.getByText('action.blocked')).toBeVisible();
+      await page.getByLabel('Tìm trong nhật ký').fill('');
+
+      const downloadPromise = page.waitForEvent('download');
+      await page.getByRole('button', { name: /Xuất CSV/ }).click();
+      await enterOwnerPin(page);
+      const download = await downloadPromise;
+      expect(download.suggestedFilename()).toMatch(/^nhat-ky-.*\.csv$/);
+    });
+
+    test('Dữ liệu & lưu trữ: sửa hạn lưu, rồi xuất và xoá dữ liệu một người (cần PIN, ghi nhật ký)', async ({ page }) => {
+      await page.goto('/system?tab=storage');
+      await expect(page.getByText('Hạn lưu dữ liệu')).toBeVisible();
+
+      const rawRow = page.locator('tr', { has: page.getByText('Kho thô') });
+      await rawRow.getByRole('button', { name: 'Sửa' }).click();
+      await rawRow.getByLabel(/Giữ trong \(ngày\)/).fill('180');
+      await rawRow.getByRole('button', { name: 'Lưu' }).click();
+      await enterOwnerPin(page);
+      await expect(rawRow.getByText('180 ngày')).toBeVisible();
+
+      await page.getByLabel('Tìm người (tên hoặc mã)').fill('Bảo');
+      await page.getByLabel('Người', { exact: true }).selectOption('p-bao');
+      await page.getByRole('button', { name: 'Xuất dữ liệu' }).click();
+      // Phiên PIN vừa mở ở lượt sửa hạn lưu vẫn còn hiệu lực — không hỏi PIN lại lần này.
+      await expect(page.getByText('Đã tạo gói xuất dữ liệu')).toBeVisible();
+      await expect(page.getByText('Xuất dữ liệu').last()).toBeVisible(); // dòng lịch sử vừa ghi
+
+      await page.getByRole('button', { name: 'Xoá dữ liệu' }).click();
+      await expect(page.getByText('Đã xoá dữ liệu suy ra của người này')).toBeVisible();
+    });
+  });
+
+  test('Trình thiết lập bước 10–11: mời đội ngũ (mật khẩu tạm) rồi cấu hình sao lưu, tới Hoàn tất', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await resetMock(page.request, 'fresh', { startAtStep: 10 });
+    await loginAsOwner(page);
+    await page.goto('/setup');
+
+    await expect(page.getByRole('heading', { name: 'Mời đội ngũ' })).toBeVisible();
+    await expect(page.getByText('Bước 10/12')).toBeVisible();
+    await page.getByRole('button', { name: 'Thêm người' }).click();
+    await page.getByLabel('Tên hiển thị').fill('Chị Hồng Quản');
+    await page.getByLabel('Email').fill('hong@genesis.vn');
+    await page.getByLabel('Vai trò').selectOption('manager');
+    await page.getByRole('button', { name: /Tiếp tục/ }).click();
+
+    await expect(page.getByText('Đã tạo 1 tài khoản')).toBeVisible();
+    await expect(page.getByText('hong@genesis.vn')).toBeVisible();
+    await page.getByRole('button', { name: /Đã lưu, sang bước sau/ }).click();
+
+    await expect(page.getByRole('heading', { name: 'Sao lưu' })).toBeVisible();
+    await expect(page.getByLabel('Giờ chạy (HH:MM)')).toHaveValue('02:00');
+    await page.getByRole('button', { name: /Tiếp tục/ }).click();
+
+    await expect(page.getByRole('heading', { name: 'Hoàn tất' })).toBeVisible();
+    await page.getByRole('button', { name: /Mở Tổng quan điều hành/ }).click();
+    await expect(page).toHaveURL(/\/overview$/);
+  });
+});

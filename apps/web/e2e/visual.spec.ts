@@ -263,6 +263,20 @@ const SCENARIOS: Scenario[] = [
     design: { clicks: ['Plugin & Tiện ích'] },
     sidebar: 'full',
   },
+  {
+    name: 'system-1440',
+    viewport: { width: 1440, height: 900 },
+    appPath: '/system',
+    design: { clicks: ['Điều khiển hệ thống'] },
+    sidebar: 'full',
+  },
+  {
+    name: 'system-1280',
+    viewport: { width: 1280, height: 800 },
+    appPath: '/system',
+    design: { clicks: ['Điều khiển hệ thống'] },
+    sidebar: 'full',
+  },
   { name: 'rail-1280', viewport: { width: 1280, height: 800 }, appPath: '/overview', design: { sidebarMode: 'rail' }, sidebar: 'rail' },
 ];
 const HEADER = 58;

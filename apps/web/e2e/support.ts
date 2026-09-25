@@ -119,7 +119,7 @@ async function csrf(request: APIRequestContext): Promise<string> {
 export async function resetMock(
   request: APIRequestContext,
   setup: 'fresh' | 'finished' = 'finished',
-  opts: { simulate?: boolean; allowFinish?: boolean } = {},
+  opts: { simulate?: boolean; allowFinish?: boolean; startAtStep?: number } = {},
 ) {
   const res = await request.post('/api/v1/__mock/reset', { data: { setup, simulate: false, ...opts } });
   if (!res.ok()) throw new Error(`mock reset failed: ${res.status()}`);
