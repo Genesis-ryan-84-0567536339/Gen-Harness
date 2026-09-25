@@ -3,7 +3,7 @@ COMPOSE = docker compose -f deploy/compose.yaml --env-file .env
 API = apps/api
 
 .PHONY: secrets up down logs logs-token ps api-dev api-test api-lint web-test bridge-test test migrate \
-        seed-demo seed-demo-clean
+        seed-demo seed-demo-clean backup backup-list restore
 
 secrets:
 	@mkdir -p secrets
@@ -57,3 +57,14 @@ seed-demo:
 
 seed-demo-clean:
 	cd $(API) && .venv/bin/python -m gh.seed_demo clear
+
+# PLAN §5.6 — pg_dump mã hoá qua ObjectStore, vòng đời 7 ngày/4 tuần/12 tháng (gh/backup.py)
+backup:
+	cd $(API) && .venv/bin/python -m gh.backup run
+
+backup-list:
+	cd $(API) && .venv/bin/python -m gh.backup list
+
+# vd: make restore BACKUP=backups/20260101T020000Z-abcd1234.pgcustom.enc
+restore:
+	cd $(API) && .venv/bin/python -m gh.backup restore --key $(BACKUP)

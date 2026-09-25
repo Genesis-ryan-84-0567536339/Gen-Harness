@@ -17,6 +17,7 @@ from sqlalchemy import text
 
 from gh import biz
 from gh.app import build_plugin_manager, configure_logging
+from gh.backup import JOBS as BACKUP_JOBS
 from gh.biz.hooks import start_hooks
 from gh.bootstrap import bootstrap
 from gh.chassis import actionlog
@@ -124,7 +125,7 @@ async def compact_notebooks(ctx: dict[str, Any]) -> int:
     return n
 
 
-_BIZ_JOBS = biz.jobs()
+_BIZ_JOBS = [*biz.jobs(), *BACKUP_JOBS]  # PLAN §5.6 — gh.backup.scheduled_backup_scan cùng mẫu CronJob
 
 
 class WorkerSettings:
