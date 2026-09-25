@@ -2,8 +2,8 @@
 
 Biến môi trường: GH_TEST_PG (mặc định postgresql://postgres:postgres@localhost:5432), GH_TEST_REDIS
 (mặc định redis://localhost:6379/15), GH_TEST_TEMPLATE (tên CSDL mẫu, mặc định gh_test_template). Chạy song song
-nhiều bộ test trên cùng máy: mỗi bộ đặt GH_TEST_TEMPLATE và số db Redis riêng. Một CSDL mẫu được migrate
-một lần; mỗi test cần DB sạch nhận một bản sao.
+nhiều bộ test trên cùng máy: mỗi bộ đặt GH_TEST_TEMPLATE và số db Redis riêng. Một CSDL mẫu được migrate một
+lần; mỗi test cần DB sạch nhận một bản sao.
 """
 
 import asyncio
