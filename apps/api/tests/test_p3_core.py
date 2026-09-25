@@ -4,6 +4,7 @@
 import base64
 import hashlib
 import json
+import uuid
 
 import orjson
 import pytest
@@ -225,6 +226,53 @@ async def test_send_fails_cleanly_without_active_session_or_target(world, owner_
     r = await owner_api.send("POST", f"/drafts/{d['id']}/approve", {})
     assert r.json()["status"] == "failed" and r.json()["send_result"]["error"] == "SESSION_NOT_ACTIVE"
     assert await _outbound(redis) == []
+
+
+async def test_bridge_dropping_mid_send_expires_the_permit_instead_of_hanging(world, owner_api: Api, db,  # type: ignore[no-untyped-def]
+                                                                               redis, app) -> None:
+    """Giai đoạn 5.4: bridge rớt kết nối SAU khi nhận lệnh gửi (permit đã cấp, tin đã lên BRIDGE_OUTBOUND) nhưng
+    TRƯỚC khi báo `send.result` — mô phỏng thật, không mock quyết định. Bản nháp không được phép kẹt "approved"
+    (trông như đang chờ) mãi mãi: quét permit hết hạn (`expire_stale_permits`) phải chuyển nó sang `failed` rõ
+    ràng, ghi Action Log, và không đụng tới các bản nháp permit còn hạn."""
+    await owner_api.send("POST", "/auth/pin/verify", {"pin": OWNER["pin"]})
+    target = {"channel": "zalo", "thread_type": "group", "group_id": str(world["group"])}
+    stuck = (await owner_api.send("POST", "/drafts", {"kind": "message", "title": "Kẹt", "text": "Đang gửi dở",
+                                                       "target": target})).json()
+    fresh = (await owner_api.send("POST", "/drafts", {"kind": "message", "title": "Còn hạn", "text": "Chưa hết hạn",
+                                                       "target": target})).json()
+    assert (await owner_api.send("POST", f"/drafts/{stuck['id']}/approve", {})).json()["status"] == "approved"
+    assert (await owner_api.send("POST", f"/drafts/{fresh['id']}/approve", {})).json()["status"] == "approved"
+    assert len(await _outbound(redis)) == 2                 # tin đã lên hàng đợi bridge — bridge rớt SAU đây
+
+    # Bridge không bao giờ gọi lại `send.result` cho "stuck" (mất kết nối giữa chừng). Mô phỏng hết hạn permit
+    # (PERMIT_TTL_S = 300s) bằng cách lùi mốc hết hạn về quá khứ thay vì chờ thật.
+    await db.execute(text("UPDATE biz.action_drafts SET permit_expires_at = now() - interval '1 second' "
+                          "WHERE id = :i"), {"i": stuck["id"]})
+    await db.commit()
+
+    expired = await drafts.expire_stale_permits(db, redis)
+    await db.commit()
+    assert expired == [uuid.UUID(stuck["id"])]
+
+    got_stuck = (await owner_api.get(f"/drafts/{stuck['id']}")).json()
+    assert got_stuck["status"] == "failed" and got_stuck["send_result"]["error"] == "PERMIT_EXPIRED"
+    got_fresh = (await owner_api.get(f"/drafts/{fresh['id']}")).json()
+    assert got_fresh["status"] == "approved"                 # còn hạn: không đụng tới, có thể vẫn đang gửi thật
+    log = (await db.execute(text("SELECT action, result FROM ops.action_log WHERE target_id = :i ORDER BY at"),
+                            {"i": stuck["id"]})).all()
+    assert ("draft.failed", "failed") in [(row.action, row.result) for row in log]
+
+    # Bridge (hoặc thao tác thủ công) gửi lại `send.result` trễ cho tin đã bị đánh hết hạn: KHÔNG được ghi đè —
+    # `on_send_result` chỉ áp dụng khi status còn 'approved'/'edited' và permit_used_at IS NULL.
+    stuck_send = next(s for s in await _outbound(redis) if _claims(s["permit"])["draft_id"] == stuck["id"])
+    claims = _claims(stuck_send["permit"])
+    result = {"session_id": stuck_send["session_id"], "nonce": claims["nonce"], "draft_id": stuck["id"],
+              "channel": "zalo", "ok": True, "external_msg_id": "zmsg-trễ"}
+    async with sessionmaker()() as s:
+        await handle_status(s, redis, app.state.bus, world["org"], "send.result", result)
+        await s.commit()
+    still_failed = (await owner_api.get(f"/drafts/{stuck['id']}")).json()
+    assert still_failed["status"] == "failed"                # không bị đè lại thành "sent" trễ
 
 
 async def test_internal_reminder_draft_creates_task_on_approve(world, owner_api: Api, db) -> None:  # type: ignore[no-untyped-def]

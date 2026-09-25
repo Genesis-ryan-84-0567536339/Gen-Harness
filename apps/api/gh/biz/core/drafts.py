@@ -296,6 +296,33 @@ async def _dispatch_send(db: AsyncSession, bus: EventBus | None, r: Any, body_te
     return None
 
 
+async def expire_stale_permits(db: AsyncSession, redis: Redis | None = None) -> list[uuid.UUID]:
+    """Giai đoạn 5.4 (chịu lỗi, spec M7): bridge rớt giữa chừng khi đang gửi (mất kết nối trước khi gửi lại
+    `send.result` cho `on_send_result`) từng khiến bản nháp kẹt ở `approved`/`edited` MÃI MÃI — không rõ đã gửi
+    hay chưa, không thấy trong hàng đợi lỗi. Quét định kỳ (xem `gh.app._permit_sweep_loop`): permit dùng một
+    lần đã hết hạn (`permit_expires_at < now()`) mà chưa được dùng (`permit_used_at IS NULL`) → đánh dấu
+    `failed` rõ ràng với lý do `PERMIT_EXPIRED`, vào Action Log, đẩy WS để Owner thấy và có thể tạo bản nháp
+    gửi lại. Không có bản ghi nào bị xoá hay mất — chỉ chuyển từ "không rõ" sang "lỗi, cần gửi lại"."""
+    rows = (await db.execute(text("""
+        UPDATE biz.action_drafts SET status = :failed, send_result = CAST(:r AS jsonb), updated_at = now()
+        WHERE status IN (:approved, :edited) AND permit_used_at IS NULL
+          AND permit_expires_at IS NOT NULL AND permit_expires_at < now()
+        RETURNING id, org_id, code, title, autonomy_level"""),
+        {"failed": FAILED, "approved": APPROVED, "edited": EDITED,
+         "r": orjson.dumps({"ok": False, "error": "PERMIT_EXPIRED",
+                            "at": datetime.now(UTC).isoformat()}).decode()})).all()
+    for row in rows:
+        await actionlog.record(db, org_id=row.org_id, actor_type="system", actor_id="system:drafts",
+                               action="draft.failed", target_type="draft", target_id=str(row.id),
+                               target_label=f"{row.code} · {row.title}", autonomy_level=row.autonomy_level,
+                               result="failed", detail={"error": "PERMIT_EXPIRED"})
+        if redis is not None:
+            await realtime.publish(redis, "draft.updated",
+                                   {"id": str(row.id), "status": FAILED,
+                                    "send_result": {"ok": False, "error": "PERMIT_EXPIRED"}}, org_id=row.org_id)
+    return [row.id for row in rows]
+
+
 async def on_send_result(db: AsyncSession, org_id: uuid.UUID, payload: dict[str, Any],
                          redis: Redis | None = None) -> None:
     """`send.result` từ bridge → trạng thái `sent` / `failed` của bản nháp (dùng một lần: chỉ lần đầu có tác dụng)."""

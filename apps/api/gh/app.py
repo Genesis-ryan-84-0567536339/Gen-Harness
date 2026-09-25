@@ -96,6 +96,25 @@ async def build_plugin_manager(bus: EventBus | None, redis: Redis) -> PluginMana
     return pm
 
 
+async def _permit_sweep_loop(sm: Any, redis: Redis, stop: asyncio.Event, interval_s: float = 15.0) -> None:
+    """Giai đoạn 5.4: quét định kỳ permit gửi tin đã hết hạn mà bridge chưa báo kết quả (rớt giữa chừng) —
+    xem `gh.biz.core.drafts.expire_stale_permits`. Vòng lặp không được chết vì một lượt lỗi (DB/Redis tạm mất
+    kết nối): log rồi thử lại sau `interval_s`, giống các consumer khác (`EventBus.run`)."""
+    from gh.biz.core import drafts as core_drafts
+
+    while not stop.is_set():
+        try:
+            async with sm() as db:
+                await core_drafts.expire_stale_permits(db, redis)
+                await db.commit()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 — vòng quét không được chết vì một lượt lỗi
+            log.error("quét permit hết hạn lỗi: %s", exc)
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(stop.wait(), timeout=interval_s)
+
+
 def start_ingest(app: FastAPI, stop: asyncio.Event) -> list[asyncio.Task[None]]:
     """Consumer luồng từ bridge: tin nhắn vào Kho thô, trạng thái phiên kênh, danh bạ nhóm."""
     ingest = Ingest(app.state.bus, app.state.redis, app.state.org_id, sessionmaker())
@@ -130,6 +149,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await climod.restore_active(sm)
     stop = asyncio.Event()
     consumers = start_ingest(app, stop)
+    consumers.append(asyncio.create_task(_permit_sweep_loop(sm, app.state.redis, stop), name="permit-sweep"))
     log.info("Gen-Harness API %s sẵn sàng", __version__)
     try:
         yield
