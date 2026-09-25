@@ -16,7 +16,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { randomUUID } from 'node:crypto';
 import type { AgentIdentity } from '@gen-harness/contracts';
-import { createPhase2, maskText, type P2Ctx } from './mock-phase2';
+import { createPhase2, maskText, seedRows, type P2Ctx } from './mock-phase2';
 import { createMock as createP3Core } from './mock-p3-core';
 import { createMock as createP3Queue } from './mock-p3-queue';
 import { createMock as createP3Relations } from './mock-p3-relations';
@@ -27,6 +27,7 @@ import { createMock as createP4Agents } from './mock-p4-agents';
 import { createMock as createP4Api } from './mock-p4-api';
 import { createMock as createP4Mcp } from './mock-p4-mcp';
 import { createMock as createP4Plugins } from './mock-p4-plugins';
+import { createMock as createP4System } from './mock-p4-system';
 import { acceptWebSocket, type MockSocket } from './mock-ws';
 import { buildScreenTree, SCREEN_BY_KEY } from '../../../packages/contracts/src/screens';
 import type { NavDomain, NavItem, SetupState } from '../../../packages/contracts/src/schema';
@@ -70,9 +71,12 @@ export interface MockOptions {
 }
 
 // RBAC as apps/api gh/auth/rbac.py seeds it: Owner, Manager, Operator, Agent NV, Auditor.
-type RoleCode = 'owner' | 'manager' | 'operator' | 'agent_staff' | 'auditor';
-const ROLE_ORDER: RoleCode[] = ['owner', 'manager', 'operator', 'agent_staff', 'auditor'];
-const MATRIX: Record<string, [string, string, string, string, string]> = {
+export type RoleCode = 'owner' | 'manager' | 'operator' | 'agent_staff' | 'auditor';
+export const ROLE_ORDER: RoleCode[] = ['owner', 'manager', 'operator', 'agent_staff', 'auditor'];
+/** Nguồn dữ liệu duy nhất cho `Me.permissions` VÀ `GET/PATCH /permissions` (PLAN 4.5) — `mock-p4-system.ts`
+ * sửa thẳng object này (không copy) để đổi ma trận ở màn Quyền hạn cũng đổi luôn năng lực thật của vai trò,
+ * giống hệt cách `role_permissions` là một bảng duy nhất ở backend thật. */
+export const MATRIX: Record<string, [string, string, string, string, string]> = {
   'overview.read': ['all', 'team', 'assigned', 'none', 'all'],
   'queue.read': ['all', 'team', 'all', 'assigned', 'all'],
   'queue.act': ['all', 'team', 'all', 'assigned', 'none'],
@@ -177,8 +181,8 @@ const STEP_DEFS: Array<[string, string, boolean, boolean]> = [
   ['refinery', 'Sàng lọc dữ liệu', true, true],
   ['agent', 'Agent đầu tiên', true, false],
   ['autonomy', 'Tự trị & ranh giới', true, false],
-  ['team', 'Mời đội ngũ', false, false],
-  ['backup', 'Sao lưu', false, false],
+  ['team', 'Mời đội ngũ', false, true],
+  ['backup', 'Sao lưu', false, true],
   ['finish', 'Hoàn tất', true, true],
 ];
 
@@ -197,6 +201,37 @@ interface AuditRow {
   detail: unknown;
 }
 
+/** Số mức tự trị trong nhãn thiết kế ("mức 4" → 4), hoặc null khi không phải hành động của agent. */
+const AUTONOMY_RE = /mức\s+(\d)/;
+const RESULT_TONE: Record<string, string> = { g: 'ok', w: 'held', b: 'blocked' };
+
+/** Nạp `docs/design/seed-data.json` `auditLog` (10 dòng) vào mảng `audit` dùng chung — cho tab Nhật ký của
+ * Điều khiển hệ thống có gì đó để xem/xuất CSV ngay cả trước khi có sự kiện PIN thật nào (`record()` unshift
+ * lên trên, nên sự kiện thật luôn mới hơn các dòng seed này). */
+function seedAuditLog(audit: AuditRow[], fresh: boolean) {
+  if (fresh) return;
+  const rows = seedRows('auditLog');
+  rows.forEach((row, i) => {
+    const who = String(row.who ?? 'Hệ thống');
+    const bot = row.bot === true;
+    const autonomyMatch = AUTONOMY_RE.exec(String(row.level ?? ''));
+    audit.push({
+      id: randomUUID(),
+      at: new Date(Date.now() - (i + 1) * 7 * 60_000).toISOString(),
+      actor_type: bot ? 'agent' : who === 'Hệ thống' || who === 'Policy Engine' ? 'system' : 'user',
+      actor_id: null,
+      actor_label: who,
+      action: String(row.action ?? ''),
+      target_type: null,
+      target_id: null,
+      target_label: row.target != null ? String(row.target) : null,
+      autonomy_level: autonomyMatch ? Number(autonomyMatch[1]) : null,
+      result: RESULT_TONE[String(row.tone ?? '')] ?? 'ok',
+      detail: null,
+    });
+  });
+}
+
 function createMockState(opts: MockOptions = {}, broadcast: (type: string, data: unknown) => void = () => {}) {
   const latency = opts.latencyMs ?? Number(process.env.MOCK_LATENCY ?? 0);
   /** Test-only: let step 12 finish although 8–9 (not built in phase 2) are missing. */
@@ -206,9 +241,14 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     simulate: opts.simulate ?? process.env.MOCK_SIMULATE !== '0',
     emit: broadcast,
   });
+  /** Dùng chung với `/audit` VÀ `/audit-log` (`system.handle`) — khai báo trước `phase3` để truyền tham chiếu. */
+  const audit: AuditRow[] = [];
+  seedAuditLog(audit, opts.setup === 'fresh');
+
   /** Giai đoạn 3: mỗi cụm màn một mock riêng (test/mock-p3-*.ts), hỏi lần lượt sau phase 2. */
   const p3Core = createP3Core({ fresh: opts.setup === 'fresh', emit: broadcast });
   const p4Agents = createP4Agents({ fresh: opts.setup === 'fresh', emit: broadcast, getChannels: phase2.hooks.channels });
+  const p3Relations = createP3Relations({ fresh: opts.setup === 'fresh', emit: broadcast });
   const phase3 = {
     // agents TRƯỚC core: `GET /agents/decisions` cần trả dữ liệu thật ("agent đã nói gì") — core.handle() có
     // một stub rỗng cho cùng đường (chưa màn nào dùng tới trước giai đoạn 4) nên phải chặn trước nó.
@@ -218,7 +258,7 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     people: createP3People({ fresh: opts.setup === 'fresh', emit: broadcast }),
     core: p3Core,
     queue: createP3Queue({ fresh: opts.setup === 'fresh', emit: broadcast }),
-    relations: createP3Relations({ fresh: opts.setup === 'fresh', emit: broadcast }),
+    relations: p3Relations,
     graph: createP3Graph({ fresh: opts.setup === 'fresh', emit: broadcast }),
     // market "Giới thiệu hai bên" tạo bản nháp thật qua core.hooks.push — cùng cơ chế create_draft dùng chung ở backend.
     market: createP3Market({ fresh: opts.setup === 'fresh', emit: broadcast, pushDraft: p3Core.hooks.push as (d: unknown) => unknown }),
@@ -236,8 +276,16 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     }),
     // Plugin & Tiện ích (PLAN 4.4).
     plugins: createP4Plugins({ fresh: opts.setup === 'fresh', emit: broadcast }),
+    // Điều khiển hệ thống — Bộ não AI đã có mock đủ ở phase2/api; đây chỉ Quyền hạn/Nhật ký/Dữ liệu (PLAN 4.5/4.6).
+    system: createP4System({
+      fresh: opts.setup === 'fresh', emit: broadcast,
+      getGroups: phase2.hooks.groups as Parameters<typeof createP4System>[0]['getGroups'],
+      matrix: MATRIX,
+      roleOrder: ROLE_ORDER,
+      auditLog: audit,
+      getPersons: p3Relations.hooks.people as Parameters<typeof createP4System>[0]['getPersons'],
+    }),
   };
-  const audit: AuditRow[] = [];
   const record = (user: User | undefined, action: string, result = 'ok', detail: unknown = null) =>
     audit.unshift({
       id: randomUUID(),
@@ -474,6 +522,24 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
             setup.current_step = 12;
           } else advance(n, 'done');
           return reply(200, stateView());
+        }
+        if (n === 10 || n === 11) {
+          // Như `_owner_step` thật (khác `_owner_step_after` của bước 8–9): không đòi các bước trước phải xong.
+          if (!user) return problem(res, 401, 'UNAUTHENTICATED', 'Chưa đăng nhập');
+          if (n === 10) {
+            const r = phase3.system.step10(body, new Set(users.map((u) => u.email)));
+            if (!r.ok) return problem(res, r.status, r.code, r.title, r.extra ?? {});
+            for (const inv of r.value.invited) {
+              const roleName = { manager: 'Manager · quản lý team', operator: 'Operator · vận hành', agent_staff: 'Agent nhân viên', auditor: 'Auditor · kiểm toán' }[inv.role] ?? inv.role;
+              users.push({ id: inv.id, email: inv.email, password: inv.temp_password, pin: '000000', display_name: inv.display_name, role: { code: inv.role as RoleCode, name: roleName }, hidden: hiddenScreens(inv.role as RoleCode) });
+            }
+            advance(10, 'done');
+            return reply(200, { ...stateView(), invited: r.value.invited });
+          }
+          const r = phase3.system.step11(body);
+          if (!r.ok) return problem(res, r.status, r.code, r.title, r.extra ?? {});
+          advance(11, 'done');
+          return reply(200, { ...stateView(), backup: r.value.backup });
         }
         return problem(res, 409, 'CONFLICT', 'Bước này làm ở giai đoạn sau');
       }

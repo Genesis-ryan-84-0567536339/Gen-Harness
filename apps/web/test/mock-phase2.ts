@@ -59,7 +59,8 @@ function loadSeed(): Record<string, SeedRow[]> {
   return {};
 }
 const SEED = loadSeed();
-const seedRows = (k: string): SeedRow[] => (Array.isArray(SEED[k]) ? SEED[k] : []);
+/** Dòng thô của một mảng seed theo khoá (`docs/design/seed-data.json`) — dùng lại ở `mock-api.ts` cho `auditLog`. */
+export const seedRows = (k: string): SeedRow[] => (Array.isArray(SEED[k]) ? SEED[k] : []);
 /** "1.244" → 1244, "0,94" → 0.94, "99,9%" → 99.9 */
 const num = (s: unknown): number => Number(String(s ?? '').replace(/[%\s]/g, '').replace(/\./g, '').replace(',', '.'));
 
@@ -1417,6 +1418,8 @@ export function createPhase2(opts: Phase2Options) {
       providers: () => providers,
       /** PLAN 4.1 — cho `mock-p4-agents.ts` suy ra `channel_type` từ `channel_id` khi lưu phạm vi nghe. */
       channels: () => channels,
+      /** PLAN 4.5 — cho `mock-p4-system.ts` đọc `/listening-groups` trên chính mảng dùng chung này. */
+      groups: () => groups,
     },
     dispose: () => {
       setSimulation(false);

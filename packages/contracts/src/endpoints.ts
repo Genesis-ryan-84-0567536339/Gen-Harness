@@ -9,6 +9,8 @@ import { agentsEndpoints } from './p4-agents';
 import { agentModelEndpoints } from './p4-api';
 import { mcpEndpoints } from './p4-mcp';
 import { pluginsEndpoints } from './p4-plugins';
+import { systemEndpoints } from './p4-system';
+import type { Step10Body, Step11Body, Step10Invited, BackupConfig } from './p4-system';
 import type {
   AuditPage,
   AuditVerify,
@@ -115,6 +117,12 @@ export function createEndpoints(client: ApiClient) {
         r<SetupState>('/setup/steps/6', { method: 'PUT', body, skipSetupRedirect: true }),
       step7: (body: SetupStep7Body) =>
         r<SetupState>('/setup/steps/7', { method: 'PUT', body, skipSetupRedirect: true }),
+      /** Bước 10 "Mời đội ngũ" (tuỳ chọn, GĐ 4.6) — trả kèm `invited` (mật khẩu tạm, chưa có SMTP thật). */
+      step10: (body: Step10Body) =>
+        r<SetupState & { invited: Step10Invited[] }>('/setup/steps/10', { method: 'PUT', body, skipSetupRedirect: true }),
+      /** Bước 11 "Sao lưu" (tuỳ chọn, GĐ 4.6) — chỉ lưu LỊCH/ĐÍCH, trả kèm `backup`. */
+      step11: (body: Step11Body) =>
+        r<SetupState & { backup: BackupConfig }>('/setup/steps/11', { method: 'PUT', body, skipSetupRedirect: true }),
       /** Bước 12 "Hoàn tất": bấm nút → PUT như mọi bước khác (phase-1 convention). */
       step12: () => r<SetupState>('/setup/steps/12', { method: 'PUT', body: {}, skipSetupRedirect: true }),
       rulePresets: (signal?: AbortSignal) => r<Rule[]>('/setup/rule-presets', { signal, skipSetupRedirect: true }),
@@ -239,6 +247,7 @@ export function createEndpoints(client: ApiClient) {
     ...agentModelEndpoints(r),
     ...mcpEndpoints(r),
     ...pluginsEndpoints(r),
+    ...systemEndpoints(r),
   };
 }
 

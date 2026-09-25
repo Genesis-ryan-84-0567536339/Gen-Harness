@@ -131,4 +131,107 @@
 .profile-row { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--color-divider); }
 .profile-row:last-child { border-bottom: none; }
 
+/* ── giai đoạn 4.5: Bộ não AI / Quyền hạn / Nhật ký / Dữ liệu & lưu trữ ───── */
+.sys-tabs-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.sys-grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 16px; align-items: start; }
+
+/* Bộ não AI */
+.brain-quota-wrap { width: 100%; overflow-x: auto; }
+.brain-quota { width: 100%; min-width: 720px; border-collapse: collapse; }
+.brain-quota th { text-align: left; font-size: 9.5px; font-weight: 600; letter-spacing: .13em; text-transform: uppercase; color: var(--color-neutral-500); padding: 9px 16px; }
+.brain-quota td { padding: 10px 16px; font-size: 11.5px; color: var(--color-neutral-400); border-top: 1px solid var(--color-divider); }
+.brain-quota__bar { display: flex; align-items: center; gap: 10px; }
+.brain-quota__track { flex: 1; height: 5px; border-radius: 3px; background: var(--color-divider); overflow: hidden; display: block; }
+.brain-quota__fill { display: block; height: 5px; opacity: .85; }
+.brain-quota__used { flex: none; width: 108px; text-align: right; font-size: 10.5px; }
+.brain-quota__state { font-size: 10.5px; padding: 2px 8px; border-radius: 999px; white-space: nowrap; border: 1px solid currentColor; }
+.brain-chain { padding: 8px 0 12px; }
+.brain-chain-list { display: flex; flex-direction: column; list-style: none; margin: 0; padding: 0; }
+.brain-chain-row { display: flex; align-items: center; gap: 12px; padding: 10px 16px; }
+.brain-chain-row__rank { width: 20px; flex: none; text-align: center; font-size: 11px; color: var(--color-neutral-500); }
+.brain-chain-row__name { font-size: 12.5px; font-weight: 500; color: var(--color-text); }
+.brain-chain-row__model { font-size: 10.5px; color: var(--color-neutral-500); margin-top: 2px; }
+.brain-chain-row__state { flex: none; font-size: 11px; }
+.brain-rules { padding: 6px 0 10px; }
+.brain-rule-row { display: flex; align-items: baseline; gap: 12px; padding: 8px 16px; }
+.brain-rule-row__key { width: 122px; flex: none; font-size: 10.5px; color: var(--color-neutral-500); }
+.brain-rule-row__val { flex: 1; min-width: 0; font-size: 11.5px; color: var(--color-neutral-300); text-wrap: pretty; }
+
+/* Quyền hạn: ma trận */
+.roles-matrix-wrap { padding: 12px 16px 15px; display: flex; flex-direction: column; gap: 10px; }
+.roles-legend { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.roles-legend__item { display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--color-neutral-400); }
+.roles-matrix { width: 100%; min-width: 760px; border-collapse: collapse; }
+.roles-matrix th { text-align: left; font-size: 9.5px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--color-neutral-500); padding: 9px 8px; }
+.roles-matrix th:first-child { padding-left: 0; }
+.roles-matrix__col { text-align: center; width: 116px; }
+.roles-matrix td { padding: 10px 8px; border-top: 1px solid var(--color-divider); }
+.roles-matrix td:first-child { padding-left: 0; }
+.roles-matrix__role { font-size: 12.5px; color: var(--color-text); }
+.roles-matrix__meta { font-size: 10.5px; color: var(--color-neutral-500); margin-top: 2px; }
+.roles-matrix__cell { text-align: center; }
+.roles-matrix__cell[data-locked] { opacity: .75; }
+.roles-matrix__select {
+  height: 24px; padding: 0 20px 0 6px; font: inherit; font-size: 10.5px; color: var(--color-text);
+  background: var(--color-bg); border: 1px solid var(--color-neutral-800); border-radius: var(--radius-sm); max-width: 128px;
+}
+.roles-matrix__select:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+.roles-matrix__select:disabled { opacity: .6; }
+
+/* Quyền hạn: nhóm đang lắng nghe */
+.roles-groups-wrap { width: 100%; overflow-x: auto; }
+.roles-groups { width: 100%; min-width: 460px; border-collapse: collapse; }
+.roles-groups th { text-align: left; font-size: 9.5px; font-weight: 600; letter-spacing: .13em; text-transform: uppercase; color: var(--color-neutral-500); padding: 9px 16px; }
+.roles-groups td { padding: 10px 16px; border-top: 1px solid var(--color-divider); vertical-align: top; }
+.roles-groups__name { font-size: 12px; color: var(--color-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+.roles-groups__meta { font-size: 10px; color: var(--color-neutral-500); margin-top: 2px; }
+.roles-groups__mode, .roles-groups__scope { font-size: 10.5px; padding: 2px 8px; border-radius: 999px; white-space: nowrap; border: 1px solid var(--color-neutral-800); color: var(--color-neutral-300); }
+
+/* Quyền hạn: ranh giới có trách nhiệm */
+.roles-boundaries { padding: 6px 0 10px; display: flex; flex-direction: column; }
+.boundary-row { display: flex; align-items: flex-start; gap: 12px; padding: 10px 16px; }
+.boundary-row[data-static] { opacity: .85; }
+.boundary-row__label { font-size: 11.5px; color: var(--color-text); }
+.boundary-row__hint { font-size: 10.5px; color: var(--color-neutral-500); margin-top: 2px; text-wrap: pretty; }
+.boundary-row__threshold { margin-top: 8px; max-width: 220px; }
+.boundary-row__state { flex: none; font-size: 10.5px; white-space: nowrap; margin-top: 2px; }
+
+/* Nhật ký */
+.sys-log { display: flex; flex-direction: column; }
+.sys-log__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 12px 16px; border-bottom: 1px solid var(--color-divider); }
+.sys-log__tools { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.sys-log__search {
+  display: flex; align-items: center; gap: 7px; height: 30px; padding: 0 11px; border: 1px solid var(--color-neutral-800);
+  border-radius: var(--radius-md); background: var(--color-bg); width: 214px; max-width: 100%;
+}
+.sys-log__search-input { flex: 1; min-width: 0; background: none; border: none; font: inherit; font-size: 11.5px; color: var(--color-text); }
+.sys-log__search-input:focus { outline: none; }
+.sys-log__search-input::placeholder { color: var(--color-neutral-500); }
+.sys-log__actor {
+  height: 30px; padding: 0 24px 0 10px; font: inherit; font-size: 11.5px; color: var(--color-text);
+  background: var(--color-bg); border: 1px solid var(--color-neutral-800); border-radius: var(--radius-md);
+}
+.sys-log__table { width: 100%; min-width: 920px; border-collapse: collapse; }
+.sys-log__table th { text-align: left; font-size: 9.5px; font-weight: 600; letter-spacing: .13em; text-transform: uppercase; color: var(--color-neutral-500); padding: 9px 16px; }
+.sys-log__table td { padding: 10px 16px; font-size: 11.5px; color: var(--color-neutral-400); border-top: 1px solid var(--color-divider); }
+.sys-log__time { color: var(--color-neutral-400); white-space: nowrap; }
+.sys-log__action { color: var(--color-neutral-300); }
+.sys-log__target { color: var(--color-neutral-400); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sys-log__result { font-size: 10.5px; padding: 2px 8px; border-radius: 999px; white-space: nowrap; border: 1px solid currentColor; }
+
+/* Dữ liệu & lưu trữ */
+.retention-wrap { width: 100%; overflow-x: auto; }
+.retention-table { width: 100%; min-width: 620px; border-collapse: collapse; }
+.retention-table th { text-align: left; font-size: 9.5px; font-weight: 600; letter-spacing: .13em; text-transform: uppercase; color: var(--color-neutral-500); padding: 9px 16px; }
+.retention-table td { padding: 10px 16px; font-size: 11.5px; color: var(--color-neutral-400); border-top: 1px solid var(--color-divider); vertical-align: top; }
+.retention-table__name { font-size: 12px; color: var(--color-text); }
+.retention-table__code { font-size: 10px; color: var(--color-neutral-500); margin-top: 2px; }
+.retention-table__actions { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.data-request { padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+.data-request__picker { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+.data-request__actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.data-request__history { border-top: 1px solid var(--color-divider); padding-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.data-request__history-title { font-size: 11px; font-weight: 500; color: var(--color-text); }
+.data-request__row { display: flex; align-items: center; gap: 9px; font-size: 11.5px; color: var(--color-neutral-300); padding: 4px 0; }
+
 .spin { animation: gh-spin 0.9s linear infinite; }
