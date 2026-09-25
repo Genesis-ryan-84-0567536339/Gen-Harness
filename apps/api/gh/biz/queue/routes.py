@@ -350,8 +350,8 @@ async def _data_quality(db: AsyncSession, org_id: uuid.UUID) -> dict[str, Any]:
     events = (await db.execute(text("""
         SELECT count(*) AS total,
                count(*) FILTER (WHERE sender_identity_id IS NULL AND group_id IS NULL) AS unassigned
-        FROM raw.events e JOIN core.channels c ON c.id = e.channel_id
-        WHERE c.org_id = :o AND e.occurred_at > now() - interval '7 days'"""), {"o": org_id})).one()
+        FROM raw.events e
+        WHERE e.org_id = :o AND e.occurred_at > now() - interval '7 days'"""), {"o": org_id})).one()
 
     def pct(n: int, d: int) -> float:
         return round(n / d * 100, 1) if d else 0.0
@@ -363,8 +363,8 @@ async def _data_quality(db: AsyncSession, org_id: uuid.UUID) -> dict[str, Any]:
 async def _hourly(db: AsyncSession, org_id: uuid.UUID) -> list[dict[str, Any]]:
     rows = (await db.execute(text("""
         SELECT date_trunc('hour', e.occurred_at) AS h, count(*) AS n
-        FROM raw.events e JOIN core.channels c ON c.id = e.channel_id
-        WHERE c.org_id = :o AND e.occurred_at > now() - interval '24 hours' GROUP BY 1 ORDER BY 1"""),
+        FROM raw.events e
+        WHERE e.org_id = :o AND e.occurred_at > now() - interval '24 hours' GROUP BY 1 ORDER BY 1"""),
         {"o": org_id})).all()
     return [{"hour": iso(r.h), "count": r.n} for r in rows]
 
@@ -379,8 +379,11 @@ async def overview(user: service.CurrentUser = Depends(require("overview.read"))
         WHERE c.org_id = :o AND s.state = 'active' AND s.ended_at IS NULL"""), {"o": org})).scalar_one()
     groups_listening = (await db.execute(text("""SELECT count(*) FROM core.groups
         WHERE org_id = :o AND listen_mode NOT IN ('off', 'paused')"""), {"o": org})).scalar_one()
-    events_today = (await db.execute(text("""SELECT count(*) FROM raw.events e JOIN core.channels c
-        ON c.id = e.channel_id WHERE c.org_id = :o AND e.occurred_at > now() - interval '24 hours'"""),
+    # Giai đoạn 5.5 (benchmark 10 triệu raw.events, p95 < 150ms): lọc trực tiếp e.org_id (cột đã có sẵn, ghi ở
+    # gh/data/ingest.py lúc chèn) thay vì JOIN core.channels — org_id của event LUÔN bằng org_id của kênh, nên
+    # kết quả giống hệt, nhưng dùng được chỉ mục (org_id, occurred_at DESC) (migration 0013) mà không cần JOIN.
+    events_today = (await db.execute(text(
+        "SELECT count(*) FROM raw.events e WHERE e.org_id = :o AND e.occurred_at > now() - interval '24 hours'"),
         {"o": org})).scalar_one()
     health = await _health(db, org)
     latency = (await db.execute(text("""SELECT avg(extract(epoch FROM finished_at - started_at)) FROM (
