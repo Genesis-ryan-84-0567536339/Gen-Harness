@@ -15,6 +15,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { randomUUID } from 'node:crypto';
+import type { AgentIdentity } from '@gen-harness/contracts';
 import { createPhase2, maskText, type P2Ctx } from './mock-phase2';
 import { createMock as createP3Core } from './mock-p3-core';
 import { createMock as createP3Queue } from './mock-p3-queue';
@@ -22,6 +23,8 @@ import { createMock as createP3Relations } from './mock-p3-relations';
 import { createMock as createP3Graph } from './mock-p3-graph';
 import { createMock as createP3Market } from './mock-p3-market';
 import { createMock as createP3People } from './mock-p3-people';
+import { createMock as createP4Agents } from './mock-p4-agents';
+import { createMock as createP4Api } from './mock-p4-api';
 import { acceptWebSocket, type MockSocket } from './mock-ws';
 import { buildScreenTree, SCREEN_BY_KEY } from '../../../packages/contracts/src/screens';
 import type { NavDomain, NavItem, SetupState } from '../../../packages/contracts/src/schema';
@@ -201,7 +204,11 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
   });
   /** Giai đoạn 3: mỗi cụm màn một mock riêng (test/mock-p3-*.ts), hỏi lần lượt sau phase 2. */
   const p3Core = createP3Core({ fresh: opts.setup === 'fresh', emit: broadcast });
+  const p4Agents = createP4Agents({ fresh: opts.setup === 'fresh', emit: broadcast, getChannels: phase2.hooks.channels });
   const phase3 = {
+    // agents TRƯỚC core: `GET /agents/decisions` cần trả dữ liệu thật ("agent đã nói gì") — core.handle() có
+    // một stub rỗng cho cùng đường (chưa màn nào dùng tới trước giai đoạn 4) nên phải chặn trước nó.
+    agents: p4Agents,
     // people trước core: `GET /explain/review/{id}` cần gác cổng riêng theo Q4 (Auditor không vào được chuỗi
     // chứng cứ) — core.handle() nuốt mọi `/explain/{kind}/{id}` không phân biệt kind nên phải chặn trước nó.
     people: createP3People({ fresh: opts.setup === 'fresh', emit: broadcast }),
@@ -211,6 +218,12 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     graph: createP3Graph({ fresh: opts.setup === 'fresh', emit: broadcast }),
     // market "Giới thiệu hai bên" tạo bản nháp thật qua core.hooks.push — cùng cơ chế create_draft dùng chung ở backend.
     market: createP3Market({ fresh: opts.setup === 'fresh', emit: broadcast, pushDraft: p3Core.hooks.push as (d: unknown) => unknown }),
+    // api & model (PLAN 4.2): bindings cần biết danh sách agent (p4Agents) + model theo provider (phase2 dùng chung).
+    api: createP4Api({
+      fresh: opts.setup === 'fresh', emit: broadcast,
+      getAgents: p4Agents.hooks.list as () => AgentIdentity[],
+      getProviders: phase2.hooks.providers as Parameters<typeof createP4Api>[0]['getProviders'],
+    }),
   };
   const audit: AuditRow[] = [];
   const record = (user: User | undefined, action: string, result = 'ok', detail: unknown = null) =>
