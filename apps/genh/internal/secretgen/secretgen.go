@@ -131,6 +131,56 @@ func fillMissing(b *mutableBundle) error {
 	return nil
 }
 
+// Load đọc bí mật đã sinh tại dir mà KHÔNG sinh mới bất kỳ trường nào còn
+// thiếu (khác Ensure) — dùng cho các lệnh vận hành (genh status/open/…,
+// internal/ops) chỉ cần ĐỌC LẠI bí mật của một bản cài đã có, không nên tự
+// tạo bí mật mới nếu máy chưa từng chạy `genh install`. Trả lỗi rõ ràng nếu
+// chưa có secrets.json tại dir.
+func Load(dir string) (Bundle, error) {
+	b, existed, err := loadBundle(dir)
+	if err != nil {
+		return Bundle{}, err
+	}
+	if !existed {
+		return Bundle{}, fmt.Errorf("chưa có bí mật tại %s — chạy `genh install` trước", dir)
+	}
+	return b.Bundle, nil
+}
+
+// RegenerateSetupToken sinh một mã thiết lập MỚI cho bundle đã có tại dir
+// (dùng cho `genh reset-setup`), làm mã cũ hết hiệu lực ngay — trả về mã mới.
+//
+// LƯU Ý về CreatedAt: trường Bundle.CreatedAt hiện chỉ có một ý nghĩa duy
+// nhất trong toàn bộ codebase (xem cmd/genh/main.go buildFinishInfo): tính
+// hạn 24 giờ của CHÍNH mã thiết lập (CodeExpiresIn = CreatedAt + 24h). Không
+// có nơi nào khác đọc CreatedAt như "tuổi của bundle bí mật nói chung" (tất
+// cả các bí mật khác — MasterKey, DBPassword… — không có hạn dùng). Vì vậy
+// việc RegenerateSetupToken cập nhật lại CreatedAt = now là ĐÚNG với ý nghĩa
+// duy nhất mà trường này đang mang, không cần thêm trường
+// SetupTokenCreatedAt riêng (sẽ chỉ là một alias không cần thiết của
+// CreatedAt cho tới khi có một ý nghĩa THỨ HAI thật sự cần tách ra).
+func RegenerateSetupToken(dir string) (string, error) {
+	b, existed, err := loadBundle(dir)
+	if err != nil {
+		return "", fmt.Errorf("đọc bí mật hiện có: %w", err)
+	}
+	if !existed {
+		return "", fmt.Errorf("chưa có bí mật tại %s — chạy `genh install` trước", dir)
+	}
+
+	newToken, err := randomSetupCode()
+	if err != nil {
+		return "", fmt.Errorf("sinh mã thiết lập mới: %w", err)
+	}
+	b.SetupToken = newToken
+	b.CreatedAt = time.Now().UTC()
+
+	if err := saveBundle(dir, b.Bundle); err != nil {
+		return "", fmt.Errorf("ghi bí mật: %w", err)
+	}
+	return newToken, nil
+}
+
 func loadBundle(dir string) (mutableBundle, bool, error) {
 	path := filepath.Join(dir, secretsFileName)
 	data, err := os.ReadFile(path)

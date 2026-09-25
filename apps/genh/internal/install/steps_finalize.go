@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/browseropen"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/compose"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/dockercli"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/machine"
@@ -351,120 +352,15 @@ func trustCAWindows(ctx context.Context, certPath string) error {
 	return nil
 }
 
-// openBrowserOS khởi chạy trình duyệt hệ thống vào setupURL và KHÔNG chờ nó
-// thoát (trình duyệt là tiến trình chạy lâu, chờ Wait() ở đây sẽ treo
-// `genh install` cho tới khi Owner đóng cửa sổ) — chỉ trả lỗi nếu không khởi
-// chạy được tiến trình (binary không có, ví dụ máy không có desktop).
-func openBrowserOS(setupURL string) error {
-	name, args, err := browserCommand(setupURL)
-	if err != nil {
-		return err
-	}
-	cmd := exec.Command(name, args...)
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	go func() { _ = cmd.Wait() }() // reap tiến trình con trong nền, không chặn Run
-	return nil
-}
-
-func browserCommand(setupURL string) (name string, args []string, err error) {
-	switch runtime.GOOS {
-	case "linux":
-		return "xdg-open", []string{setupURL}, nil
-	case "darwin":
-		return "open", []string{setupURL}, nil
-	case "windows":
-		return "rundll32", []string{"url.dll,FileProtocolHandler", setupURL}, nil
-	default:
-		return "", nil, fmt.Errorf("chưa hỗ trợ tự mở trình duyệt trên %s", runtime.GOOS)
-	}
-}
+// openBrowserOS khởi chạy trình duyệt hệ thống vào setupURL — cài đặt thật
+// nằm ở internal/browseropen (dùng chung với các lệnh vận hành `genh open`/
+// `genh uninstall`, xem internal/ops), giữ tên/signature này để các test
+// tiêm giả (trustCA/openBrowser/createShortcut) trong steps_finalize_test.go
+// không phải đổi.
+func openBrowserOS(setupURL string) error { return browseropen.Open(setupURL) }
 
 // createShortcutOS tạo một lối tắt desktop trỏ vào setupURL, trả về đường
 // dẫn tệp đã ghi. KHÔNG cần Env.AutoApprove — tạo một tệp trong thư mục
-// riêng của user không cần quyền rộng.
-func createShortcutOS(setupURL string) (string, error) {
-	switch runtime.GOOS {
-	case "linux":
-		return createShortcutLinux(setupURL)
-	case "darwin":
-		return createShortcutDarwin(setupURL)
-	case "windows":
-		return createShortcutWindows(setupURL)
-	default:
-		return "", fmt.Errorf("chưa hỗ trợ tạo lối tắt trên %s", runtime.GOOS)
-	}
-}
-
-// createShortcutLinux ghi một tệp .desktop vào
-// ~/.local/share/applications — chuẩn XDG Desktop Entry, được hầu hết môi
-// trường desktop Linux (GNOME, KDE, XFCE…) tự nhận vào trình đơn ứng dụng mà
-// không cần đăng ký gì thêm.
-func createShortcutLinux(setupURL string) (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("không xác định được thư mục home: %w", err)
-	}
-	dir := filepath.Join(home, ".local", "share", "applications")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", fmt.Errorf("tạo thư mục %s: %w", dir, err)
-	}
-	path := filepath.Join(dir, "gen-harness.desktop")
-	content := "[Desktop Entry]\n" +
-		"Type=Application\n" +
-		"Name=Gen-Harness\n" +
-		"Comment=Mở trình thiết lập Gen-Harness\n" +
-		"Exec=xdg-open " + setupURL + "\n" +
-		"Icon=utilities-terminal\n" +
-		"Terminal=false\n" +
-		"Categories=Utility;\n"
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		return "", fmt.Errorf("ghi %s: %w", path, err)
-	}
-	return path, nil
-}
-
-// createShortcutDarwin tạo một script .command có quyền thực thi trong
-// ~/Applications — double-click trong Finder mở Terminal chạy `open <url>`.
-// Cách đơn giản nhất khả thi mà không cần dựng .app bundle/AppleScript.
-func createShortcutDarwin(setupURL string) (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("không xác định được thư mục home: %w", err)
-	}
-	dir := filepath.Join(home, "Applications")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", fmt.Errorf("tạo thư mục %s: %w", dir, err)
-	}
-	path := filepath.Join(dir, "Gen-Harness.command")
-	content := "#!/bin/sh\nopen \"" + setupURL + "\"\n"
-	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
-		return "", fmt.Errorf("ghi %s: %w", path, err)
-	}
-	return path, nil
-}
-
-// createShortcutWindows ghi một Internet Shortcut (.url) vào Start Menu
-// Programs của user — định dạng text đơn giản, KHÔNG cần COM/admin như
-// .lnk thật.
-func createShortcutWindows(setupURL string) (string, error) {
-	appData := os.Getenv("APPDATA")
-	if appData == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("không xác định được %%APPDATA%% lẫn thư mục home: %w", err)
-		}
-		appData = filepath.Join(home, "AppData", "Roaming")
-	}
-	dir := filepath.Join(appData, "Microsoft", "Windows", "Start Menu", "Programs")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", fmt.Errorf("tạo thư mục %s: %w", dir, err)
-	}
-	path := filepath.Join(dir, "Gen-Harness.url")
-	content := "[InternetShortcut]\r\nURL=" + setupURL + "\r\n"
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		return "", fmt.Errorf("ghi %s: %w", path, err)
-	}
-	return path, nil
-}
+// riêng của user không cần quyền rộng. Cài đặt thật nằm ở
+// internal/browseropen — xem ghi chú openBrowserOS.
+func createShortcutOS(setupURL string) (string, error) { return browseropen.CreateShortcut(setupURL) }
