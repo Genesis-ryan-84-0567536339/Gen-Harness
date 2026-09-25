@@ -18,6 +18,8 @@ import './styles/p3-relations.css';
 import './styles/p3-graph.css';
 import './styles/p3-market.css';
 import './styles/p3-people.css';
+import './styles/p4-agents.css';
+import './styles/p4-api.css';
 import './styles/system.css';
 import { queryClient } from './lib/queryClient';
 import { createAppRouter } from './router';
