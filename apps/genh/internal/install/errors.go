@@ -15,4 +15,31 @@ const (
 	ErrCodeNetworkUnreachable  = "GH-E005"
 
 	ErrCodeSecretsWriteFailed = "GH-E010"
+
+	// 2x — Bước 2 (Chuẩn bị container runtime).
+	ErrCodeRuntimeUnsupportedOS      = "GH-E020" // GOOS không nằm trong 3 nền tảng có tự cài runtime
+	ErrCodeRuntimeDownloadFailed     = "GH-E021" // tải Docker Engine tĩnh/Colima/Lima/rootfs WSL thất bại
+	ErrCodeRuntimeChecksumMismatch   = "GH-E022" // SHA-256 không khớp — dừng, không chạy binary
+	ErrCodeRuntimeServiceStartFailed = "GH-E023" // systemd user service / colima start / wsl --import thất bại
+	ErrCodeRuntimeNeedsApproval      = "GH-E024" // cần Owner đồng ý (--yes) trước khi tự cài runtime/sudo/UAC
+
+	// 3x — Bước 3 (Tải image).
+	ErrCodePullFailed = "GH-E030" // một hoặc nhiều image tải thất bại
+
+	// 5x — Bước 5 (Khởi động dữ liệu).
+	ErrCodeComposeNotFound = "GH-E050" // không tìm thấy deploy/compose.yaml
+	ErrCodeComposeUpFailed = "GH-E051" // `docker compose up -d` thất bại
+	ErrCodeDataNotHealthy  = "GH-E052" // db/redis/objects không healthy trước khi hết thời gian chờ
+	ErrCodeComposeParse    = "GH-E053" // không đọc/parse được compose.yaml
+
+	// 6x — Bước 6 (Tạo cấu trúc dữ liệu / migration).
+	ErrCodeMigrateFailed = "GH-E060" // `alembic upgrade heads` thất bại trong container api
+
+	// 7x — Bước 7 (Khởi động dịch vụ).
+	ErrCodeServicesUpFailed = "GH-E070" // `docker compose up -d` cho api/worker/bridge/web/proxy thất bại
+	ErrCodeServiceNotReady  = "GH-E071" // /api/v1/ready không trả 200 trước khi hết thời gian chờ
+
+	// 8x — Bước 8 (Hoàn tất).
+	ErrCodeTrustCAFailed  = "GH-E080" // không cài được CA vào kho tin cậy hệ điều hành
+	ErrCodeShortcutFailed = "GH-E081" // không tạo được lối tắt desktop/.app/Start Menu
 )

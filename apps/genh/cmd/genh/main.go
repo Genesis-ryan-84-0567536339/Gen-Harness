@@ -61,7 +61,7 @@ func printUsage(w *os.File) {
 	fmt.Fprint(w, `genh — trình cài đặt/vận hành một lệnh của Gen-Harness
 
 Cách dùng:
-  genh install [--port N] [--install-dir DIR]   cài đặt, hoặc tiếp tục bản dở
+  genh install [--port N] [--install-dir DIR] [--yes]   cài đặt, hoặc tiếp tục bản dở
   genh version                                   in phiên bản
   genh help                                      in hướng dẫn này
 
@@ -77,6 +77,7 @@ func runInstall(args []string) int {
 	fs := flag.NewFlagSet("install", flag.ContinueOnError)
 	port := fs.Int("port", machine.DefaultPort, "cổng HTTPS cho proxy")
 	installDir := fs.String("install-dir", "", "thư mục cài đặt (mặc định ~/.gen-harness)")
+	yes := fs.Bool("yes", false, "đồng ý trước cho các thao tác hệ thống rộng (sudo cho Docker rootless, UAC cho WSL2, tin cậy CA nội bộ)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -91,7 +92,7 @@ func runInstall(args []string) int {
 		dir = d
 	}
 
-	env := &install.Env{InstallDir: dir, Port: *port}
+	env := &install.Env{InstallDir: dir, Port: *port, AutoApprove: *yes}
 	runner := install.NewRunner(env, install.Registry())
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)

@@ -144,11 +144,27 @@ type Env struct {
 	InstallDir string
 
 	// Port là cổng HTTPS cho proxy, mặc định 8443 (machine.DefaultPort).
+	// Bước 7 dùng lại đúng giá trị này để kiểm /api/v1/ready qua đúng cổng
+	// Owner đã chọn.
 	Port int
 
 	// Secrets là kết quả Bước 4 sau khi chạy xong (nil trước đó) — các bước
-	// 5 trở đi (chưa cài đặt thật trong phần A) sẽ đọc từ đây.
+	// 5 trở đi đọc từ đây (type-assert về secretgen.Result).
 	Secrets any
+
+	// AutoApprove ứng với cờ `genh install --yes`: cho phép các bước cần
+	// thay đổi hệ thống rộng mà bình thường phải hỏi trước — Bước 2 (cài
+	// Docker rootless cần sudo cho newuidmap, hoặc bật WSL2 cần UAC) và
+	// Bước 8 (tin cậy CA nội bộ vào kho hệ điều hành) — tự thực hiện thay
+	// vì dừng lại chờ Owner tự chạy lệnh. false là mặc định an toàn: các
+	// bước đó vẫn CHẠY (tải, giải nén, chuẩn bị) nhưng dừng trước thao tác
+	// cần quyền rộng, báo rõ lệnh Owner tự chạy hoặc chạy lại kèm --yes.
+	AutoApprove bool
+
+	// ComposePath, nếu khác rỗng, ghi đè việc tự dò deploy/compose.yaml
+	// (xem internal/compose.Locate) — dùng khi test hoặc khi Owner cài đặt
+	// từ một bản sao repo không theo cấu trúc mặc định.
+	ComposePath string
 }
 
 // Step là đơn vị công việc của một trong 8 bước cài đặt. Mỗi Step biết
