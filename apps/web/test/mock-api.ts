@@ -25,6 +25,8 @@ import { createMock as createP3Market } from './mock-p3-market';
 import { createMock as createP3People } from './mock-p3-people';
 import { createMock as createP4Agents } from './mock-p4-agents';
 import { createMock as createP4Api } from './mock-p4-api';
+import { createMock as createP4Mcp } from './mock-p4-mcp';
+import { createMock as createP4Plugins } from './mock-p4-plugins';
 import { acceptWebSocket, type MockSocket } from './mock-ws';
 import { buildScreenTree, SCREEN_BY_KEY } from '../../../packages/contracts/src/screens';
 import type { NavDomain, NavItem, SetupState } from '../../../packages/contracts/src/schema';
@@ -119,6 +121,8 @@ const EVENT_PERMISSION: Array<[string, string | null]> = [
   ['refinery.', 'data.read'],
   ['channel.', 'system.read'],
   ['cli.', 'system.manage'],
+  ['mcp.', 'system.read'],
+  ['plugin.', 'system.read'],
   ['header', null],
 ];
 
@@ -224,6 +228,14 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
       getAgents: p4Agents.hooks.list as () => AgentIdentity[],
       getProviders: phase2.hooks.providers as Parameters<typeof createP4Api>[0]['getProviders'],
     }),
+    // MCP Hub (PLAN 4.3): tool ghi tạo bản nháp qua p3Core.hooks.push — cùng cơ chế create_draft dùng chung.
+    mcp: createP4Mcp({
+      fresh: opts.setup === 'fresh', emit: broadcast,
+      getAgents: p4Agents.hooks.list as () => AgentIdentity[],
+      pushDraft: p3Core.hooks.push as (d: Record<string, unknown>) => unknown,
+    }),
+    // Plugin & Tiện ích (PLAN 4.4).
+    plugins: createP4Plugins({ fresh: opts.setup === 'fresh', emit: broadcast }),
   };
   const audit: AuditRow[] = [];
   const record = (user: User | undefined, action: string, result = 'ok', detail: unknown = null) =>
@@ -302,10 +314,6 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
 
   const sessions = new Map<string, { userId: string; pinUntil: number | null }>();
   const pinFails = new Map<string, { count: number; lockedUntil: number | null }>();
-  const plugins = [
-    { package: '@gen/chassis-store', name: 'Store · SSOT', layer: 'chassis', origin: 'core', enabled: true },
-    { package: '@gen/channel-zalo', name: 'Kênh Zalo', layer: 'channel', origin: 'marketplace', enabled: true },
-  ];
 
   const stateView = (): SetupState => ({ finished: setup.finished, current_step: setup.current_step, steps: setup.steps });
   const advance = (n: number, status: 'done' | 'skipped') => {
@@ -534,15 +542,6 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     if (path === '/navigation' && method === 'GET') return reply(200, buildNavigation(user.hidden, opts.badges ?? true));
     if (path === '/header' && method === 'GET') {
       return reply(200, { channels_live: 4, groups_listening: 42, autonomy_level: 4, data_confidence: 0.78 });
-    }
-    if (path === '/plugins' && method === 'GET') return reply(200, plugins);
-    const toggle = /^\/plugins\/(.+)\/toggle$/.exec(path);
-    if (toggle && method === 'PATCH') {
-      if (needPin()) return problem(res, 423, 'PIN_REQUIRED', 'Cần phiên PIN');
-      const p = plugins.find((x) => x.package === decodeURIComponent(toggle[1]));
-      if (!p) return problem(res, 404, 'NOT_FOUND', 'Không tồn tại');
-      p.enabled = Boolean(body.enabled);
-      return reply(200, p);
     }
     if (path === '/audit' && method === 'GET') {
       if (permissionsOf(user.role.code)['audit.read'] === 'none') return problem(res, 403, 'FORBIDDEN', 'Vai trò không có quyền này');

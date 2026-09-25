@@ -12,3 +12,5 @@ export * from './p3-market';
 export * from './p3-people';
 export * from './p4-agents';
 export * from './p4-api';
+export * from './p4-mcp';
+export * from './p4-plugins';

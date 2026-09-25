@@ -7,6 +7,8 @@ import { marketEndpoints } from './p3-market';
 import { peopleEndpoints } from './p3-people';
 import { agentsEndpoints } from './p4-agents';
 import { agentModelEndpoints } from './p4-api';
+import { mcpEndpoints } from './p4-mcp';
+import { pluginsEndpoints } from './p4-plugins';
 import type {
   AuditPage,
   AuditVerify,
@@ -14,7 +16,6 @@ import type {
   Health,
   Me,
   NavDomain,
-  Plugin,
   Ready,
   SetupState,
   SetupStep1Body,
@@ -228,12 +229,6 @@ export function createEndpoints(client: ApiClient) {
         r<AuditPage>('/audit', { query: q }),
       verify: () => r<AuditVerify>('/audit/verify'),
     },
-    plugins: {
-      list: () => r<Plugin[]>('/plugins'),
-      toggle: (pkg: string, enabled: boolean) =>
-        r<Plugin>(`/plugins/${encodeURIComponent(pkg)}/toggle`, { method: 'PATCH', body: { enabled } }),
-      remove: (pkg: string) => r<void>(`/plugins/${encodeURIComponent(pkg)}`, { method: 'DELETE' }),
-    },
     ...coreEndpoints(r),
     queue: queueEndpoints(r),
     relations: relationsEndpoints(r),
@@ -242,6 +237,8 @@ export function createEndpoints(client: ApiClient) {
     people: peopleEndpoints(r),
     ...agentsEndpoints(r),
     ...agentModelEndpoints(r),
+    ...mcpEndpoints(r),
+    ...pluginsEndpoints(r),
   };
 }
 
