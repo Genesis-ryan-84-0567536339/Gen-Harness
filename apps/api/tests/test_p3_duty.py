@@ -16,9 +16,11 @@ from gh.biz.hooks import HookCtx, context_from
 from gh.chassis.bus import BRIDGE_OUTBOUND, CLEAN_READY, Deferred, EventBus
 from gh.db import sessionmaker
 from gh.providers.clients import Message
+from gh.providers.router import ModelRouter
 from gh.refinery.runner import Refinery
 from tests.conftest import Api
 from tests.phase2 import FakeRouter, install_presets, listen, msg, org_id, put
+from tests.test_model_router import provider, transport
 from tests.test_refinery import BUY, by_text
 
 REPLY = "Dạ em chào anh/chị, em gửi báo giá 3 container thép cuộn trong hôm nay ạ."
@@ -329,6 +331,46 @@ async def test_model_down_keeps_event_pending_then_decides(w, db, redis) -> None
     assert (await redis.xpending(CLEAN_READY, "hook:duty"))["pending"] == 0
     [d] = await decisions(db, a)
     assert d.decision == "draft" and d.draft_id is not None
+
+
+async def test_all_real_providers_failing_leaves_unit_pending_and_releases_claim(w, db, redis) -> None:  # type: ignore[no-untyped-def]
+    """Giai đoạn 5.4: chuỗi chuyển hướng THẬT (không FakeRouter) — mọi nhà cung cấp đều lỗi 500 liên tiếp.
+
+    Kỳ vọng: không mất tin (message vẫn PEL, chưa ack), không có quyết định/bản nháp rác, khoá claim được
+    giải phóng (lượt sau retry được, không kẹt "pending" mãi), và Sếp được báo qua biz.alerts."""
+    a = await make_agent(db, w)
+    [u] = await refine(w, redis, msg(BUY))
+    org = w["org"]
+    await provider(db, org, "alpha", 1, ["sk-alpha-aaaa"])
+    await provider(db, org, "beta", 2, ["sk-beta-bbbb"])
+    down = transport(lambda host, key: (500, {"error": "provider lỗi"}))
+    router = ModelRouter(w["sm"], redis, transport=down)
+    bus = EventBus(redis)
+    await bus.publish(CLEAN_READY, "meaning_units", {"ids": [str(u)]}, actor="agent:core.refinery", org_id=org)
+
+    async def run(ev):  # type: ignore[no-untyped-def]
+        await duty_hook(context_from(ev, sm=w["sm"], redis=redis, bus=bus, router=router))
+
+    assert await bus.process_once(CLEAN_READY, "hook:duty", "w1", run, block_ms=None, own_pending=True) == 0
+    assert await decisions(db) == [] and await agent_drafts(db) == []
+    assert (await redis.xpending(CLEAN_READY, "hook:duty"))["pending"] == 1
+    assert not [k async for k in redis.scan_iter("gh:duty:claim:*")]        # khoá không kẹt lại
+    assert (await db.execute(text(
+        "SELECT count(*) FROM biz.alerts WHERE alert_type = 'model_chain_exhausted'"))).scalar() == 1
+    # Lượt sau, một nhà cung cấp hồi phục → xử lý bình thường, tin cũ không mất.
+    ok = transport(lambda host, key: (200, {"choices": [{"message": {"content":
+                   '{"decision":"silent","outcome":"resolved","rationale":"ok"}'}}],
+                   "usage": {"prompt_tokens": 5, "completion_tokens": 3}}) if host == "beta.test"
+                   else (500, {"error": "vẫn lỗi"}))
+    router2 = ModelRouter(w["sm"], redis, transport=ok)
+
+    async def run2(ev):  # type: ignore[no-untyped-def]
+        await duty_hook(context_from(ev, sm=w["sm"], redis=redis, bus=bus, router=router2))
+
+    assert await bus.process_once(CLEAN_READY, "hook:duty", "w1", run2, block_ms=None, own_pending=True) == 1
+    assert (await redis.xpending(CLEAN_READY, "hook:duty"))["pending"] == 0
+    [d] = await decisions(db, a)
+    assert d.decision == "silent"
 
 
 async def test_sweep_picks_up_units_the_hook_missed(w, db, redis) -> None:  # type: ignore[no-untyped-def]
