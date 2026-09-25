@@ -690,7 +690,6 @@ test.describe('giai đoạn 4: MCP Hub + Plugin', () => {
     const testDlg = page.getByRole('dialog', { name: 'Gọi thử event.list' });
     await testDlg.getByRole('button', { name: 'Gọi tool' }).click();
     await expect(testDlg.getByText('Bị chặn: tool chưa được Owner mở')).toBeVisible();
-    await testDlg.getByRole('button', { name: 'Đóng' }).click();
     await expect(page.locator('.mcp-log tr[data-outcome="blocked"]').first()).toContainText('event.list');
   });
 
@@ -719,8 +718,8 @@ test.describe('giai đoạn 4: MCP Hub + Plugin', () => {
     const installDlg = page.getByRole('dialog', { name: 'Nạp plugin từ tệp' });
     await installDlg.locator('#plg-file').setInputFiles({ name: 'plugin.js', mimeType: 'application/javascript', buffer: Buffer.from('console.log("plugin ví dụ")') });
     await expect(installDlg.getByLabel(/sha256 mã nguồn/)).toHaveValue(/^[0-9a-f]{64}$/);
-    await expect(installDlg.getByText('read:clean')).toBeVisible();
-    await expect(installDlg.getByText('write:notes')).toBeVisible();
+    await expect(installDlg.locator('.plg-perm-chip', { hasText: 'read:clean' })).toBeVisible();
+    await expect(installDlg.locator('.plg-perm-chip', { hasText: 'write:notes' })).toBeVisible();
     await installDlg.getByLabel(/Chữ ký/).fill('chu-ky-hop-le-e2e-base64');
     await installDlg.getByRole('button', { name: 'Nạp plugin' }).click();
     await enterOwnerPin(page);
