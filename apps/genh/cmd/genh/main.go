@@ -1,11 +1,12 @@
 // Lệnh genh — trình cài đặt/vận hành một-lệnh của Gen-Harness, theo
 // docs/handoff/05-installer.md.
 //
-// Phần A (phiên này) nối được toàn bộ khung: `genh install` chạy thật Bước 1
-// (Kiểm tra máy) và Bước 4 (Sinh bí mật & cấu hình), hiển thị qua TUI khi có
-// TTY hoặc chế độ dòng khi không có (CI, pipe). Bước 2/3/5/6/7/8 và các lệnh
-// vận hành (status/logs/update/backup/…) CHƯA có trong bản này — xem
-// internal/install.Registry để biết chỗ cắm vào ở phiên sau.
+// `genh install` chạy thật cả 8 bước cài đặt (Kiểm tra máy … Hoàn tất — xem
+// internal/install.Registry), hiển thị qua TUI khi có TTY hoặc chế độ dòng
+// khi không có (CI, pipe), và kết thúc bằng màn "Hoàn tất" thật (URL/mã
+// thiết lập/trạng thái mở trình duyệt lấy từ Bước 4 và Bước 8). Các lệnh vận
+// hành (status/logs/update/backup/restore/doctor/reset-setup/stop/start/
+// uninstall) CHƯA có trong bản này.
 package main
 
 import (
@@ -14,6 +15,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -21,6 +23,7 @@ import (
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/config"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/install"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/machine"
+	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/secretgen"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/tui"
 )
 
@@ -65,11 +68,12 @@ Cách dùng:
   genh version                                   in phiên bản
   genh help                                      in hướng dẫn này
 
-Trạng thái bản này: Bước 1 (Kiểm tra máy) và Bước 4 (Sinh bí mật & cấu
-hình) đã chạy thật. Bước 2/3/5/6/7/8 (runtime, tải image, khởi động dữ
-liệu, migration, khởi động dịch vụ, hoàn tất) và các lệnh vận hành
-(status/logs/update/backup/restore/doctor/reset-setup/stop/start/
-uninstall) sẽ có ở phiên sau — xem docs/handoff/05-installer.md.
+Trạng thái bản này: cả 8 bước cài đặt (kiểm tra máy, container runtime,
+tải image, sinh bí mật, khởi động dữ liệu, migration, khởi động dịch vụ,
+hoàn tất) đã chạy thật và idempotent — chạy lại genh install sau khi bị
+ngắt sẽ tiếp tục từ bước dở. Các lệnh vận hành (status/logs/update/backup/
+restore/doctor/reset-setup/stop/start/uninstall) chưa có trong bản này —
+xem docs/handoff/05-installer.md.
 `)
 }
 
@@ -100,9 +104,9 @@ func runInstall(args []string) int {
 
 	var runErr error
 	if tui.IsTerminal(os.Stdout) {
-		runErr = runInteractive(ctx, runner, dir)
+		runErr = runInteractive(ctx, runner, env)
 	} else {
-		runErr = runLineMode(ctx, runner, dir)
+		runErr = runLineMode(ctx, runner, env)
 	}
 
 	printSummary(runner.Snapshot(), runErr)
@@ -119,20 +123,28 @@ type programObserver struct{ p *tea.Program }
 
 func (o programObserver) Observe(s install.Snapshot) { o.p.Send(tui.SnapshotMsg(s)) }
 
-func runInteractive(ctx context.Context, runner *install.Runner, dir string) error {
+func runInteractive(ctx context.Context, runner *install.Runner, env *install.Env) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	renderer := lipgloss.NewRenderer(os.Stdout)
 	styles := tui.NewStyles(renderer, tui.ColorEnabled(renderer))
-	model := tui.NewModel(styles, version, dir)
+	model := tui.NewModel(styles, version, env.InstallDir)
 
 	p := tea.NewProgram(model, tea.WithAltScreen())
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- runner.Run(ctx, programObserver{p: p})
-		p.Send(tui.DoneMsg{})
+		runErr := runner.Run(ctx, programObserver{p: p})
+		errCh <- runErr
+		if runErr == nil {
+			// Cài đặt xong thật: chuyển Model sang màn "Hoàn tất" (mockup cuối
+			// docs/handoff/05-installer.md) thay vì thoát ngay — Owner tự bấm q
+			// khi đã xem/copy xong URL và mã thiết lập.
+			p.Send(tui.FinishMsg(buildFinishInfo(env, runner)))
+		} else {
+			p.Send(tui.DoneMsg{Err: runErr})
+		}
 	}()
 
 	finalModel, progErr := p.Run()
@@ -150,29 +162,51 @@ func runInteractive(ctx context.Context, runner *install.Runner, dir string) err
 	return runErr
 }
 
-func runLineMode(ctx context.Context, runner *install.Runner, dir string) error {
+func runLineMode(ctx context.Context, runner *install.Runner, env *install.Env) error {
 	lr := tui.NewLineRenderer(os.Stdout)
 	err := runner.Run(ctx, lr)
+	if err == nil {
+		lr.Finish(buildFinishInfo(env, runner))
+		return nil
+	}
 	if se, ok := err.(*install.StepError); ok {
 		lr.FinishError(se)
 	}
 	return err
 }
 
+// buildFinishInfo dựng tui.FinishInfo từ dữ liệu THẬT sau khi runner.Run()
+// trả về thành công: thời lượng từ chính Runner, URL/mã thiết lập từ bí mật
+// Bước 4 (env.Secrets, còn sống vì env là cùng một *install.Env đã truyền
+// vào NewRunner), và BrowserOpened từ kết quả Bước 8 (đã tự mở trình duyệt
+// đúng một lần — xem finalizeStep trong internal/install).
+func buildFinishInfo(env *install.Env, runner *install.Runner) tui.FinishInfo {
+	info := tui.FinishInfo{Duration: runner.Snapshot().Elapsed}
+
+	res, ok := env.Secrets.(secretgen.Result)
+	if !ok {
+		return info
+	}
+
+	info.SetupURL = install.SetupURL(env, res.Bundle.SetupToken)
+	info.SetupCode = res.Bundle.SetupToken
+	if !res.Bundle.CreatedAt.IsZero() {
+		info.CodeExpiresIn = time.Until(res.Bundle.CreatedAt.Add(24 * time.Hour))
+	}
+	info.BrowserOpened = env.BrowserOpened
+	return info
+}
+
 func printSummary(snap install.Snapshot, runErr error) {
 	fmt.Println()
 	fmt.Printf("Tổng tiến độ: %.0f%%\n", snap.OverallPct)
 
-	hasStub := false
 	for _, s := range snap.Steps {
 		fmt.Printf("  %-8s %s", statusLabel(s.Status), s.Name)
 		if s.Detail != "" {
 			fmt.Printf(" — %s", s.Detail)
 		}
 		fmt.Println()
-		if s.Status == install.StatusWarn && s.ID != install.StepMachineCheck {
-			hasStub = true
-		}
 	}
 
 	if runErr != nil {
@@ -188,16 +222,6 @@ func printSummary(snap install.Snapshot, runErr error) {
 		} else {
 			fmt.Printf("Lỗi: %v\n", runErr)
 		}
-		return
-	}
-
-	if hasStub {
-		fmt.Println()
-		fmt.Println("Ghi chú: các bước 2/3/5/6/7/8 (runtime, tải image, khởi động dữ liệu,")
-		fmt.Println("migration, khởi động dịch vụ, hoàn tất) chưa được triển khai trong bản")
-		fmt.Println("này nên genh CHƯA thật sự dựng được Gen-Harness. Bước 1 và 4 đã chạy")
-		fmt.Println("thật và idempotent — chạy lại genh install sau khi các bước còn lại")
-		fmt.Println("được thêm sẽ tiếp tục từ đây.")
 	}
 }
 
