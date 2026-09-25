@@ -43,9 +43,11 @@ from gh.biz.people.jobs import period_for, recompute_people_reviews_org
 from gh.biz.queue.jobs import early_warning_scan
 from gh.config import get_settings
 from gh.data.ingest import ingest_message
+from gh.data_api.routes import RuleIn, create_rule
 from gh.db import sessionmaker
 from gh.providers.clients import Message
 from gh.providers.router import Routed
+from gh.refinery import presets
 from gh.refinery.runner import Refinery
 
 log = logging.getLogger("gh.seed_demo")
@@ -248,10 +250,10 @@ def _care_messages(period_mid: datetime) -> list[Msg]:
     (`gh.biz.people.jobs.period_for`) — nuôi lưới phản hồi thật cho `recompute_people_reviews_org`
     (khớp reviewRows: Thu Hà trả lời chậm ~84 phút, Mai trả lời nhanh)."""
     return [
-        Msg(19, "lan", "Bên em vẫn chưa nhận được biên bản đối chiếu công nợ tháng 8, chị kiểm tra giúp em với",
+        Msg(19, "duoc", "Bên em vẫn chưa nhận được biên bản đối chiếu công nợ tháng 8, chị kiểm tra giúp em với",
             group="tai_chinh", when=timedelta(0), anchor="period",
             unit={"event_type": "AskedStatus", "side": None, "confidence": 0.8,
-                  "conclusion": "An Khang hỏi lại biên bản đối chiếu công nợ tháng 8.", "entities": {},
+                  "conclusion": "Kho ván Bình Dương hỏi lại biên bản đối chiếu công nợ tháng 8.", "entities": {},
                   "rules": {}, "signals": {}}),
         Msg(20, "ha", "Chị kiểm tra rồi gửi lại em nhé, xin lỗi vì phản hồi trễ", group="tai_chinh",
             direction="outbound", when=timedelta(minutes=84), anchor="period"),
@@ -266,7 +268,13 @@ def _care_messages(period_mid: datetime) -> list[Msg]:
 
 
 def all_messages(period_mid: datetime) -> list[Msg]:
-    return MARKET + COMPLAINT + INTERNAL + COLD_CHAIN + CANDIDATE + _care_messages(period_mid)
+    msgs = MARKET + COMPLAINT + INTERNAL + COLD_CHAIN + CANDIDATE + _care_messages(period_mid)
+    for m in msgs:
+        if m.group and PEOPLE_BY_KEY[m.sender].channel != GROUPS_BY_KEY[m.group].channel:
+            # Một nhóm chỉ tồn tại trên một kênh — người gửi khác kênh sẽ vô tình tạo thêm một dòng nhóm trùng
+            # tên trên kênh kia (khoá duy nhất của core.groups là (channel_id, external_id), không phải tên).
+            raise AssertionError(f"tin #{m.n}: kênh của {m.sender} khác kênh của nhóm {m.group}")
+    return msgs
 
 
 # ═══ SeedRouter — vai trò FakeRouter (tests/phase2.py) cho môi trường seed, không gọi LLM thật ═══════════════
@@ -313,10 +321,15 @@ async def _channel_id(db: AsyncSession, org_id: uuid.UUID, type_: str) -> uuid.U
 
 async def _ensure_group(db: AsyncSession, org_id: uuid.UUID, g: Group) -> None:
     """Nhóm mới luôn 'Không nghe' (khoá cứng) — bơm một tin dò để hệ thống thật tạo dòng nhóm, rồi Owner (ở đây
-    là script seed, đứng vai Owner) bật lắng nghe đúng như UI thật làm."""
-    await ingest_message(db, org_id, {"channel": g.channel, "external_group_id": _gext(g.key),
-                                      "group_name": g.name, "external_msg_id": f"{NS}-probe-{g.key}",
-                                      "sender_external_id": f"{NS}-probe", "body_text": "probe"})
+    là script seed, đứng vai Owner) bật lắng nghe đúng như UI thật làm. Chỉ dò một lần: nếu nhóm đã có (lần
+    seed trước), tin dò với cùng `external_msg_id` sẽ không còn bị `listen_mode='off'` chặn nữa và sẽ lọt vào
+    kho thô thành một bản ghi 'probe' rác mới mỗi lần chạy — không idempotent."""
+    exists = (await db.execute(text("SELECT 1 FROM core.groups WHERE org_id = :o AND external_id = :x"),
+                               {"o": org_id, "x": _gext(g.key)})).scalar_one_or_none()
+    if exists is None:
+        await ingest_message(db, org_id, {"channel": g.channel, "external_group_id": _gext(g.key),
+                                          "group_name": g.name, "external_msg_id": f"{NS}-probe-{g.key}",
+                                          "sender_external_id": f"{NS}-probe", "body_text": "probe"})
     await db.execute(text("UPDATE core.groups SET listen_mode = :m WHERE org_id = :o AND external_id = :x"),
                      {"m": g.mode, "o": org_id, "x": _gext(g.key)})
 
@@ -412,6 +425,20 @@ async def _ensure_agents_and_providers(db: AsyncSession, org_id: uuid.UUID) -> N
 
 # ═══ Điều phối chính ═════════════════════════════════════════════════════════
 
+async def _ensure_rules(db: AsyncSession, org_id: uuid.UUID) -> None:
+    """Bật đúng bộ quy tắc khởi đầu R-01…R-06 — cùng hàm thật bước 7 của trình thiết lập gọi
+    (`gh.data_api.routes.create_rule`), không tự `INSERT` tay vào `refinery.rules`. Tổ chức seed không đi qua
+    trình thiết lập nên bảng này trống nếu không làm bước này — không có nó thì bước 1 (quy tắc tất định) và
+    quy tắc do model gợi ý (`u.rules`) đều vô tác dụng."""
+    existing = {r for r in (await db.execute(text("SELECT code FROM refinery.rules WHERE org_id = :o"),
+                                             {"o": org_id})).scalars().all()}
+    for p in presets.PRESETS:
+        if p["code"] not in existing:
+            rin = RuleIn(name=p["name"], kind=p["kind"], conditions=p["conditions"], outputs=p["outputs"],
+                        threshold=p["threshold"], prompt_hint=p.get("prompt_hint"))
+            await create_rule(db, org_id, rin, None, code=p["code"], enabled=True)
+
+
 async def _org_id(db: AsyncSession) -> uuid.UUID:
     return (await db.execute(text("SELECT id FROM core.organizations ORDER BY created_at LIMIT 1"))).scalar_one()
 
@@ -421,6 +448,10 @@ async def seed_demo(sm: async_sessionmaker[AsyncSession], redis: Redis) -> dict[
         result = await bootstrap_mod.bootstrap(db)
         await db.commit()
     org_id = result.org_id
+
+    async with sm() as db:
+        await _ensure_rules(db, org_id)
+        await db.commit()
 
     ps, _pe = period_for(datetime.now(UTC).date())
     period_mid = datetime.combine(ps, time(10, 0), tzinfo=UTC) + timedelta(days=2)
@@ -504,11 +535,13 @@ async def clear_demo(sm: async_sessionmaker[AsyncSession], redis: Redis) -> dict
         await db.execute(text("""DELETE FROM biz.people_reviews
                                  WHERE org_id = :o AND person_id = ANY(CAST(:p AS uuid[]))"""),
                          {"o": org_id, "p": person_ids})
-        await db.execute(text("DELETE FROM memory.entries WHERE org_id = :o AND subject_id = ANY(CAST(:s AS uuid[]))"),
-                         {"o": org_id, "s": subject_ids})
-        await db.execute(text("""DELETE FROM clean.current_scores
+        # memory.entries không có org_id/subject_id riêng — xoá memory.notebooks (khoá theo subject) là đủ,
+        # entries của nó tự mất theo (ON DELETE CASCADE).
+        await db.execute(text("""DELETE FROM memory.notebooks
                                  WHERE org_id = :o AND subject_id = ANY(CAST(:s AS uuid[]))"""),
                          {"o": org_id, "s": subject_ids})
+        await db.execute(text("DELETE FROM clean.current_scores WHERE subject_id = ANY(CAST(:s AS uuid[]))"),
+                         {"s": subject_ids})
         await db.execute(text("""DELETE FROM clean.score_snapshots
                                  WHERE org_id = :o AND subject_id = ANY(CAST(:s AS uuid[]))"""),
                          {"o": org_id, "s": subject_ids})
