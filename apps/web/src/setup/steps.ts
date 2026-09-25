@@ -59,12 +59,12 @@ export const SETUP_STEPS: StepMeta[] = [
     doneWhen: 'Lưu',
   },
   {
-    n: 10, key: 'team', title: 'Mời đội ngũ', required: false, built: false,
+    n: 10, key: 'team', title: 'Mời đội ngũ', required: false, built: true,
     content: 'Thêm email và vai trò (Manager, Operator, Agent nhân viên, Auditor), xem trước ma trận quyền của vai trò đã chọn. Sinh liên kết mời.',
     doneWhen: 'Bỏ qua được',
   },
   {
-    n: 11, key: 'backup', title: 'Sao lưu', required: false, built: false,
+    n: 11, key: 'backup', title: 'Sao lưu', required: false, built: true,
     content: 'Lịch sao lưu (mặc định hằng ngày 02:00), nơi lưu (trong máy hoặc S3-compatible), giữ bao lâu. Nút Sao lưu thử ngay với tiến độ %.',
     doneWhen: 'Bỏ qua được (có cảnh báo)',
   },
@@ -84,6 +84,8 @@ export const STEP_DESCRIPTIONS: Record<number, string> = {
   5: 'Kết nối ít nhất một kênh để bridge bắt đầu gom tin. Zalo và WhatsApp đăng nhập bằng mã QR trên điện thoại của Sếp.',
   6: 'Mọi nhóm vừa đồng bộ đều ở chế độ Không nghe. Sếp bật từng nhóm muốn agent lắng nghe và chọn ai được xem dữ liệu của nhóm.',
   7: 'Khi nào core agent sàng lọc kho thô, bộ quy tắc khởi đầu, và trọng số chấm điểm. Chỉnh lại được sau ở Quy tắc sàng lọc.',
+  10: 'Tuỳ chọn — mời sau ở Điều khiển hệ thống › Quyền hạn cũng được. Chưa có SMTP thật: mật khẩu tạm hiện thẳng ở đây, Sếp tự gửi qua kênh riêng.',
+  11: 'Tuỳ chọn — chỉ lưu lịch và đích sao lưu. Chạy sao lưu thật, mã hoá và luân chuyển bản cũ là việc của trình cài đặt xong.',
   12: 'Mọi thứ đã sẵn sàng. Lần sàng lọc đầu tiên đang chạy — theo dõi ngay tại đây rồi mở Tổng quan điều hành.',
 };
 

@@ -14,6 +14,10 @@ export interface StepProps {
   /** Move on without saving (step already done). */
   onNext: () => void;
   formRef: RefObject<HTMLFormElement>;
+  /** Bước tuỳ chọn (10–11): `POST /setup/steps/{n}/skip`, cùng cơ chế `ComingSoonStep` dùng. */
+  onSkip?: () => void;
+  skipping?: boolean;
+  skipError?: string | null;
 }
 
 export function describeError(e: unknown): string {

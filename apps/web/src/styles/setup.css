@@ -167,4 +167,18 @@
   .summary { grid-template-columns: minmax(0, 1fr); }
 }
 .prov-model { display: flex; align-items: center; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
+
+/* ── Bước 10: Mời đội ngũ ─────────────────────────────────────────────────── */
+.invite-rows { display: flex; flex-direction: column; gap: 10px; }
+.invite-row { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1.5fr) minmax(0, 1.1fr) auto; gap: 10px; align-items: end; }
+.invite-row__remove { align-self: end; }
+@media (max-width: 720px) { .invite-row { grid-template-columns: minmax(0, 1fr); } }
+.invite-result-list { display: flex; flex-direction: column; gap: 8px; }
+.invite-result-row {
+  display: flex; align-items: center; gap: 11px; padding: 10px 12px; border-radius: var(--radius-sm);
+  border: 1px solid var(--color-neutral-800); background: var(--color-bg);
+}
+.invite-result-row__name { font-size: 12px; color: var(--color-text); }
+.invite-result-row__email { font-size: 10.5px; color: var(--color-neutral-500); margin-top: 2px; }
+.invite-result-row__pw { flex: none; font-size: 12px; color: var(--color-accent-300); }
 .prov-model__err { font-size: 11px; color: var(--color-bad); }

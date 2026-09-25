@@ -235,7 +235,7 @@ describe('<SetupPage>', () => {
     expect(screen.getByText('yêu cầu PIN khi')).toBeInTheDocument();
   });
 
-  it('optional steps can be skipped via POST /setup/steps/{n}/skip; required ones cannot', async () => {
+  it('optional steps (10–11, phase 4.6) can be skipped via POST /setup/steps/{n}/skip; required ones cannot', async () => {
     const user = userEvent.setup();
     let state = stateAt(10, [1, 2, 3, 4, 5, 6, 7, 8, 9]);
     mockFetch((url, init) => {
@@ -247,16 +247,46 @@ describe('<SetupPage>', () => {
     });
     renderSetup();
     await screen.findByRole('heading', { name: 'Bước 10' });
-    expect(screen.getByText('Sắp có')).toBeInTheDocument();
-    // Phase 2: steps not built yet are passable ("Sắp có"), so the owner can reach Hoàn tất.
+    // Bước 10 "Mời đội ngũ" đã có form thật (giai đoạn 4.6) — bỏ trống danh sách vẫn Tiếp tục được.
+    expect(screen.getByText('Chưa mời ai')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Tiếp tục/ })).toBeEnabled();
     await user.click(screen.getByRole('button', { name: 'Bỏ qua' }));
     expect(await screen.findByRole('heading', { name: 'Bước 11' })).toBeInTheDocument();
-    expect(screen.getByText('bỏ qua')).toBeInTheDocument();
+    // Bước 11 "Sao lưu" có form thật, mặc định hằng ngày 02:00 — vẫn bỏ qua được.
+    expect(screen.getByLabelText('Giờ chạy (HH:MM)')).toHaveValue('02:00');
+    expect(screen.getByRole('button', { name: 'Bỏ qua' })).toBeInTheDocument();
     // Bước 12 is required: no skip button
     queryClient.setQueryData(['setup', 'state'], stateAt(12, [1, 2, 3, 4, 5, 6, 7, 8, 9, 11], [10]));
     expect(await screen.findByRole('heading', { name: 'Bước 12' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Bỏ qua' })).not.toBeInTheDocument();
+  });
+
+  it('bước 10: thêm người mời gửi đủ display_name/email/role, hiện mật khẩu tạm rồi mới sang bước 11', async () => {
+    const user = userEvent.setup();
+    const state = stateAt(10, [1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    let putBody: unknown = null;
+    mockFetch((url, init) => {
+      if (url.endsWith('/setup/steps/10') && init.method === 'PUT') {
+        putBody = JSON.parse(String(init.body));
+        // Backend thật đã đánh dấu xong và sang bước 11 ngay trong response này — trang chỉ giữ lại màn tóm
+        // tắt mật khẩu tạm cho tới khi Sếp bấm "Đã lưu, sang bước sau".
+        return json(200, { ...stateAt(11, [1, 2, 3, 4, 5, 6, 7, 8, 9], [10]), invited: [{ id: 'u1', display_name: 'Chị Hồng Quản', email: 'hong@genesis.vn', role: 'manager', temp_password: 'tmp-abc123' }] });
+      }
+      if (url.includes('/setup/')) return json(200, state);
+      return json(404, { status: 404, code: 'NOT_FOUND', title: 'Không tồn tại' });
+    });
+    renderSetup();
+    await screen.findByRole('heading', { name: 'Bước 10' });
+    await user.click(screen.getByRole('button', { name: 'Thêm người' }));
+    await user.type(screen.getByLabelText('Tên hiển thị'), 'Chị Hồng Quản');
+    await user.type(screen.getByLabelText('Email'), 'hong@genesis.vn');
+    await user.click(screen.getByRole('button', { name: /Tiếp tục/ }));
+
+    expect(await screen.findByText('tmp-abc123')).toBeInTheDocument();
+    expect(putBody).toEqual({ invites: [{ display_name: 'Chị Hồng Quản', email: 'hong@genesis.vn', role: 'operator' }] });
+
+    await user.click(screen.getByRole('button', { name: /Đã lưu, sang bước sau/ }));
+    expect(await screen.findByRole('heading', { name: 'Bước 11' })).toBeInTheDocument();
   });
 
   it('step 12: explains the missing required steps and shows the 409 STEP_INCOMPLETE message inline', async () => {
