@@ -347,12 +347,33 @@ test('setup steps 4–7 and 12 against the mock', async ({ page }) => {
   await expect(next).toBeEnabled();
   await next.click();
 
-  // Bước 8–11 are "Sắp có" and passable.
-  for (const title of ['Agent đầu tiên', 'Tự trị & ranh giới', 'Mời đội ngũ', 'Sao lưu']) {
+  // Bước 8–9 (giai đoạn 3, chưa dựng ở web) vẫn "Sắp có" và bấm qua được.
+  for (const title of ['Agent đầu tiên', 'Tự trị & ranh giới']) {
     await expect(page.getByRole('heading', { name: title })).toBeVisible();
     await expect(page.getByText('Sắp có')).toBeVisible();
     await next.click();
   }
+
+  // Bước 10–11 (giai đoạn 4.6, đã dựng thật): lưu bằng giá trị mặc định (danh sách mời rỗng vẫn hợp lệ, lịch
+  // sao lưu mặc định hằng ngày 02:00 vẫn hợp lệ). PUT thật tính lại `current_step` về bước sớm nhất CHƯA
+  // xong (8–9 vẫn "Sắp có", chưa dựng ở web) nên trang tự quay lại đó — dùng thanh bước bên trái để xem tiếp
+  // bước kế mà không cần 8–9 xong trước (`isReachable`: bước không sẵn có không chặn, bước đã lưu/bỏ qua
+  // cũng không chặn). Luồng điền/thấy mật khẩu tạm thật của bước 10 có test riêng ở
+  // flows.spec.ts "Trình thiết lập bước 10–11".
+  await expect(page.getByRole('heading', { name: 'Mời đội ngũ' })).toBeVisible();
+  await expect(page.getByText('Sắp có')).toHaveCount(0);
+  await next.click();
+  await expect(page.getByRole('heading', { name: 'Agent đầu tiên' })).toBeVisible();
+  await expect(page.getByText('Bước 8/12')).toBeVisible();
+
+  await page.locator('.setup-steps__item', { hasText: 'Sao lưu' }).click();
+  await expect(page.getByRole('heading', { name: 'Sao lưu' })).toBeVisible();
+  await expect(page.getByText('Sắp có')).toHaveCount(0);
+  await expect(page.getByLabel('Giờ chạy (HH:MM)')).toHaveValue('02:00');
+  await next.click();
+  await expect(page.getByRole('heading', { name: 'Agent đầu tiên' })).toBeVisible();
+
+  await page.locator('.setup-steps__item', { hasText: 'Hoàn tất' }).click();
 
   // Bước 12 — first run live; finishing is refused while 8–9 are missing.
   await expect(page.getByRole('heading', { name: 'Hoàn tất' })).toBeVisible();

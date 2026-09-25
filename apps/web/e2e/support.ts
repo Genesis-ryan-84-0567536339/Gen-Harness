@@ -119,7 +119,7 @@ async function csrf(request: APIRequestContext): Promise<string> {
 export async function resetMock(
   request: APIRequestContext,
   setup: 'fresh' | 'finished' = 'finished',
-  opts: { simulate?: boolean; allowFinish?: boolean } = {},
+  opts: { simulate?: boolean; allowFinish?: boolean; startAtStep?: number } = {},
 ) {
   const res = await request.post('/api/v1/__mock/reset', { data: { setup, simulate: false, ...opts } });
   if (!res.ok()) throw new Error(`mock reset failed: ${res.status()}`);
@@ -138,6 +138,7 @@ export async function loginAsOwner(page: Page): Promise<void> {
 }
 
 export const AUDITOR = { email: 'auditor@genesis.local', pin: '975310' };
+export const MANAGER = { email: 'manager@genesis.local', pin: '864202' };
 
 export async function loginAs(page: Page, email: string, password = OWNER.password): Promise<void> {
   const token = await csrf(page.request);
@@ -153,6 +154,13 @@ export async function mockHook(request: APIRequestContext, name: 'emit' | 'raw' 
   const res = await request.post(`/api/v1/__mock/${name}`, { data });
   if (res.status() >= 400) throw new Error(`mock hook ${name} failed: ${res.status()}`);
   return res;
+}
+
+/** POST a phase-3 cluster hook on the mock (`/api/v1/__mock/p3/{cluster}/{hook}` → `hooks[hook](data)`). */
+export async function p3Hook(request: APIRequestContext, cluster: string, hook: string, data: unknown = {}) {
+  const res = await request.post(`/api/v1/__mock/p3/${cluster}/${hook}`, { data });
+  if (res.status() >= 400) throw new Error(`mock hook p3/${cluster}/${hook} failed: ${res.status()}`);
+  return res.json().catch(() => null);
 }
 
 /** Authenticated JSON call through the page's cookies (CSRF handled). */

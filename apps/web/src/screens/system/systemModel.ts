@@ -4,6 +4,7 @@
  * `creds` and CLI card. Colours are token variables.
  */
 import type {
+  Boundary,
   Channel,
   ChannelState,
   CliLoginStatus,
@@ -11,10 +12,11 @@ import type {
   Credential,
   GroupKind,
   ListenMode,
+  PermScope,
   ViewScope,
 } from '@gen-harness/contracts';
 import { countWord, fmtHM, fmtInt, fmtLatency, fmtPct, fmtRemaining, fmtSessionAge } from '../../lib/format';
-import { ACC3, BAD, N3, N4, N8, OK, TXT, WARN, channelIcon, channelTone } from '../data/dataModel';
+import { ACC3, BAD, N3, N4, N5, N8, OK, TXT, WARN, channelIcon, channelTone } from '../data/dataModel';
 
 export const CHANNEL_STATE: Record<ChannelState, { label: string; tone: string }> = {
   active: { label: 'Đang kết nối', tone: OK },
@@ -196,3 +198,73 @@ export const CLI_LOGIN_TEXT: Record<CliLoginStatus, string> = {
 };
 
 export { N3 };
+
+// ── Quyền hạn: ma trận (PLAN 4.5, thiết kế `permCols`/`permRows`) ───────────
+export const SCOPE_CELL: Record<PermScope, { icon: string; tone: string; title: string }> = {
+  all: { icon: 'ph-fill ph-check-circle', tone: OK, title: 'Toàn quyền' },
+  team: { icon: 'ph ph-minus-circle', tone: WARN, title: 'Có giới hạn — theo team' },
+  assigned: { icon: 'ph ph-minus-circle', tone: WARN, title: 'Có giới hạn — khách được phân' },
+  none: { icon: 'ph ph-x', tone: N5, title: 'Không có quyền' },
+};
+
+export const SCOPE_OPTIONS: Array<{ value: PermScope; label: string }> = [
+  { value: 'all', label: 'Toàn quyền' },
+  { value: 'team', label: 'Có giới hạn — team' },
+  { value: 'assigned', label: 'Có giới hạn — được phân' },
+  { value: 'none', label: 'Không có quyền' },
+];
+
+/** Owner luôn `all` mọi cột; Auditor không bao giờ có quyền ghi — khoá cứng ARCHITECTURE §7.4/§8.3, ô ma
+ * trận tương ứng bị khoá (disabled), không phải cho bấm rồi báo lỗi. */
+const WRITE_PERMISSIONS = new Set(['queue.act', 'profile.write', 'people_review.write', 'opportunity.write', 'action.draft', 'action.approve']);
+export function cellLocked(role: string, permission: string): boolean {
+  if (role === 'owner') return true;
+  if (role === 'auditor' && WRITE_PERMISSIONS.has(permission)) return true;
+  return false;
+}
+
+// ── Quyền hạn: ranh giới có trách nhiệm ──────────────────────────────────────
+export const BOUNDARY_ICON: Record<string, string> = {
+  listen_authorized_only: 'ph ph-shield-check',
+  disclose_staff_observation: 'ph ph-eye',
+  hide_sensitive_below_owner: 'ph ph-eye-slash',
+  personnel_alert_requires_evidence: 'ph ph-quotes',
+  observe_external_market: 'ph ph-globe-hemisphere-east',
+  auto_personnel_decisions: 'ph ph-prohibit',
+  approval_gate: 'ph ph-gavel',
+  mcp_write_requires_approval: 'ph ph-plugs-connected',
+};
+
+export function boundaryTone(b: Pick<Boundary, 'enabled' | 'locked'>): string {
+  if (!b.enabled) return b.locked ? BAD : N5;
+  return OK;
+}
+
+// ── Nhật ký hệ thống ──────────────────────────────────────────────────────────
+export const AUDIT_RESULT: Record<string, { label: string; tone: string }> = {
+  ok: { label: 'Thành công', tone: OK },
+  held: { label: 'Chờ duyệt', tone: WARN },
+  blocked: { label: 'Đã chặn', tone: BAD },
+  failed: { label: 'Thất bại', tone: BAD },
+};
+export function auditResultView(result: string): { label: string; tone: string } {
+  return AUDIT_RESULT[result] ?? { label: result, tone: N4 };
+}
+export function auditActorTone(actorType: string): string {
+  return actorType === 'agent' ? ACC3 : actorType === 'system' ? N4 : N3;
+}
+
+// ── Dữ liệu & lưu trữ (spec I) ───────────────────────────────────────────────
+export const RETENTION_LABEL: Record<string, string> = {
+  'raw.events': 'Kho thô — tin nhắn nguyên bản',
+  'clean.meaning_units': 'Kho sạch — đơn vị ý nghĩa',
+  'ops.action_log': 'Nhật ký hành động',
+  'memory.entries': 'Sổ tay nhận thức',
+  'agent.model_calls': 'Lượt gọi model',
+};
+
+export const DATA_REQUEST_KIND: Record<string, { label: string; icon: string; tone: string }> = {
+  export: { label: 'Xuất dữ liệu', icon: 'ph ph-download-simple', tone: N3 },
+  erase: { label: 'Xoá dữ liệu', icon: 'ph ph-trash', tone: BAD },
+  restrict: { label: 'Giới hạn dùng', icon: 'ph ph-lock-simple', tone: WARN },
+};

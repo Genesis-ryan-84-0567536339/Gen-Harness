@@ -1,12 +1,22 @@
-"""Bridge giả: heartbeat, trả QR rồi 'đã quét' rồi active khi nhận session.login; gửi danh bạ nhóm; nhận lệnh 'send' từ file."""
-import asyncio, base64, json, os, sys, time
+"""Bridge giả: heartbeat, trả QR rồi 'đã quét' rồi active khi nhận session.login; gửi danh bạ nhóm; nhận lệnh
+'send' từ file; giai đoạn 5.3 (luồng 5): nghe `gh.bridge.outbound` — bản nháp Owner đã duyệt gửi permit sang
+đây, bridge giả "gửi" (ghi log, không gọi mạng thật ra ngoài) rồi báo `send.result` để Bàn làm việc chuyển
+trạng thái `sent` — đúng vòng permit dùng một lần của `gh.biz.core.drafts`."""
+import asyncio, base64, json, os, sys, time, uuid
 sys.path.insert(0, os.environ.get("GH_API_DIR", os.path.join(os.path.dirname(__file__), "../../api")))
 from redis.asyncio import Redis
-from gh.chassis.bus import EventBus, BRIDGE_CONTROL, BRIDGE_STATUS, BRIDGE_DIRECTORY, BRIDGE_INBOUND
+from gh.chassis.bus import EventBus, BRIDGE_CONTROL, BRIDGE_STATUS, BRIDGE_DIRECTORY, BRIDGE_INBOUND, BRIDGE_OUTBOUND
 from gh import crypto
 
 ORG = os.environ["ORG"]
+OUT = os.environ.get("LIVE_OUT", ".")
 QR = "data:image/svg+xml;base64," + base64.b64encode(b'<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><rect width="200" height="200" fill="#fff"/><rect x="20" y="20" width="60" height="60"/><rect x="120" y="20" width="60" height="60"/><rect x="20" y="120" width="60" height="60"/></svg>').decode()
+
+
+def _b64url_decode(s: str) -> bytes:
+    pad = "=" * (-len(s) % 4)
+    return base64.urlsafe_b64decode(s + pad)
+
 
 async def main():
     r = Redis.from_url(os.environ["GH_REDIS_URL"]); bus = EventBus(r, 10000)
@@ -34,7 +44,20 @@ async def main():
                 {"external_id": "u-tung", "name": "Trần Văn Tùng"}]},
             {"external_id": "g-noibo", "name": "Nội bộ kinh doanh", "member_count": 9},
             {"external_id": "g-dt", "name": "Đối tác vận tải", "member_count": 31}]}, actor="bridge", org_id=ORG)
+    async def on_outbound(ev):
+        """`message.send`: permit = base64url(JSON claims) "." base64url(chữ ký) — bridge giả không cần kiểm
+        chữ ký (đó là việc của server trước khi tin tới đây), chỉ đọc claims để trả kết quả đúng draft_id."""
+        p = ev.payload
+        if ev.type != "message.send": return
+        claims = json.loads(_b64url_decode(p["permit"].split(".", 1)[0]))
+        with open(os.path.join(OUT, "bridge_sent.log"), "a") as f:
+            f.write(json.dumps({"channel": p["channel"], "thread_id": p["thread_id"], "text": p["text"],
+                                "draft_id": claims["draft_id"]}, ensure_ascii=False) + "\n")
+        await bus.publish(BRIDGE_STATUS, "send.result",
+                          {"session_id": p["session_id"], "draft_id": claims["draft_id"], "ok": True,
+                           "external_msg_id": f"fake-out-{uuid.uuid4().hex[:8]}"}, actor="bridge", org_id=ORG)
     stop = asyncio.Event()
-    await bus.run(BRIDGE_CONTROL, "fakebridge", "fb-1", on_control, stop)
+    await asyncio.gather(bus.run(BRIDGE_CONTROL, "fakebridge", "fb-1", on_control, stop),
+                         bus.run(BRIDGE_OUTBOUND, "fakebridge-out", "fb-out-1", on_outbound, stop))
 
 asyncio.run(main())

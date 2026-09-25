@@ -28,8 +28,10 @@ NAV: list[dict[str, Any]] = [
          _g("Hàng đợi & Hành động", "ph ph-tray", [
              _s("inbox", "ph ph-tray", "Hộp thư ý nghĩa", "Inbox of Meaning", WARN),
              _s("workbench", "ph ph-pen-nib", "Bàn làm việc", "Workbench — soạn & duyệt", WARN),
+             _s("tasks", "ph ph-check-square", "Việc & Nhắc hẹn", "Tasks & Reminders", BAD),   # spec G1, PLAN Q5
          ]),
          _s("directory", "ph ph-address-book", "Nhóm & Con người", "Groups by channel · people filters"),
+         _s("documents", "ph ph-files", "Tài liệu", "Documents"),                               # spec G1, PLAN Q5
          _s("graph", "ph ph-graph", "Bản đồ quan hệ", "Relationship Map", children=[
              _s("profile", "ph ph-identification-card", "Hồ sơ sống", "Living Profile — bấm một node để mở"),
              _s("notebook", "ph ph-notebook", "Sổ tay nhận thức", "Assistant notebook per ID"),
@@ -38,6 +40,7 @@ NAV: list[dict[str, Any]] = [
              _s("opportunity", "ph ph-target", "Bảng cơ hội", "Opportunity Board", OK),
              _s("supply", "ph ph-arrows-left-right", "Cung ↔ Cầu", "Supply & Demand", OK),
              _s("search", "ph ph-brain", "Kho hội thoại", "Knowledge & Search"),
+             _s("deals", "ph ph-handshake", "Deal & Vụ việc", "Deals & Cases"),                 # spec G1, PLAN Q5
          ]),
          _g("Con người & Chất lượng", "ph ph-users-three", [
              _s("people", "ph ph-users-three", "Đánh giá con người", "People Review"),
@@ -64,7 +67,8 @@ NAV: list[dict[str, Any]] = [
 
 # Màn có badge trong thiết kế. Mỗi giai đoạn đăng ký nguồn số thật cho màn của mình.
 BadgeSource = Callable[[Any], Awaitable[int | None]]
-BADGE_SCREENS = ("overview", "inbox", "workbench", "opportunity", "supply", "raw", "identity", "mcp", "plugins")
+BADGE_SCREENS = ("overview", "inbox", "workbench", "tasks", "opportunity", "supply", "raw", "identity", "mcp",
+                 "plugins")
 
 
 def format_badge(n: int | None) -> str | None:

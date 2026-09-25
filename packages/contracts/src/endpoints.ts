@@ -1,4 +1,16 @@
 import type { ApiClient } from './client';
+import { coreEndpoints } from './p3-core';
+import { queueEndpoints } from './p3-queue';
+import { relationsEndpoints } from './p3-relations';
+import { graphEndpoints } from './p3-graph';
+import { marketEndpoints } from './p3-market';
+import { peopleEndpoints } from './p3-people';
+import { agentsEndpoints } from './p4-agents';
+import { agentModelEndpoints } from './p4-api';
+import { mcpEndpoints } from './p4-mcp';
+import { pluginsEndpoints } from './p4-plugins';
+import { systemEndpoints } from './p4-system';
+import type { Step10Body, Step11Body, Step10Invited, BackupConfig } from './p4-system';
 import type {
   AuditPage,
   AuditVerify,
@@ -6,7 +18,6 @@ import type {
   Health,
   Me,
   NavDomain,
-  Plugin,
   Ready,
   SetupState,
   SetupStep1Body,
@@ -63,7 +74,7 @@ import type {
 type Q = Record<string, string | number | boolean | null | undefined>;
 const enc = encodeURIComponent;
 
-/** Typed endpoints — phase 1 (docs/api/phase-1.md) and phase 2 (docs/api/phase-2.md). */
+/** Typed endpoints — phase 1, 2 (docs/api/phase-1.md, phase-2.md) and phase 3 (docs/api/phase-3*.md, one factory per cluster). */
 export function createEndpoints(client: ApiClient) {
   const r = client.request;
   return {
@@ -106,6 +117,12 @@ export function createEndpoints(client: ApiClient) {
         r<SetupState>('/setup/steps/6', { method: 'PUT', body, skipSetupRedirect: true }),
       step7: (body: SetupStep7Body) =>
         r<SetupState>('/setup/steps/7', { method: 'PUT', body, skipSetupRedirect: true }),
+      /** Bước 10 "Mời đội ngũ" (tuỳ chọn, GĐ 4.6) — trả kèm `invited` (mật khẩu tạm, chưa có SMTP thật). */
+      step10: (body: Step10Body) =>
+        r<SetupState & { invited: Step10Invited[] }>('/setup/steps/10', { method: 'PUT', body, skipSetupRedirect: true }),
+      /** Bước 11 "Sao lưu" (tuỳ chọn, GĐ 4.6) — chỉ lưu LỊCH/ĐÍCH, trả kèm `backup`. */
+      step11: (body: Step11Body) =>
+        r<SetupState & { backup: BackupConfig }>('/setup/steps/11', { method: 'PUT', body, skipSetupRedirect: true }),
       /** Bước 12 "Hoàn tất": bấm nút → PUT như mọi bước khác (phase-1 convention). */
       step12: () => r<SetupState>('/setup/steps/12', { method: 'PUT', body: {}, skipSetupRedirect: true }),
       rulePresets: (signal?: AbortSignal) => r<Rule[]>('/setup/rule-presets', { signal, skipSetupRedirect: true }),
@@ -198,6 +215,8 @@ export function createEndpoints(client: ApiClient) {
       removeKey: (id: string, kid: string) => r<void>(`/providers/${enc(id)}/keys/${enc(kid)}`, { method: 'DELETE' }),
       update: (id: string, body: { enabled?: boolean; failover_rank?: number }) =>
         r<Provider>(`/providers/${enc(id)}`, { method: 'PATCH', body }),
+      /** Kéo-thả sắp lại toàn bộ chuỗi chuyển hướng một lượt (PLAN 4.2) — khác `update` vốn chỉ đổi một ô. */
+      chain: (providerIds: string[]) => r<Provider[]>('/providers/chain', { method: 'PATCH', body: { provider_ids: providerIds } }),
       test: (id: string) => r<ProviderTestResult>(`/providers/${enc(id)}/test`, { method: 'POST' }),
       addModel: (id: string, body: { model_name: string; daily_quota?: number; rate_limit_per_min?: number }) =>
         r<Provider>(`/providers/${enc(id)}/models`, { method: 'POST', body }),
@@ -218,12 +237,17 @@ export function createEndpoints(client: ApiClient) {
         r<AuditPage>('/audit', { query: q }),
       verify: () => r<AuditVerify>('/audit/verify'),
     },
-    plugins: {
-      list: () => r<Plugin[]>('/plugins'),
-      toggle: (pkg: string, enabled: boolean) =>
-        r<Plugin>(`/plugins/${encodeURIComponent(pkg)}/toggle`, { method: 'PATCH', body: { enabled } }),
-      remove: (pkg: string) => r<void>(`/plugins/${encodeURIComponent(pkg)}`, { method: 'DELETE' }),
-    },
+    ...coreEndpoints(r),
+    queue: queueEndpoints(r),
+    relations: relationsEndpoints(r),
+    graph: graphEndpoints(r),
+    market: marketEndpoints(r),
+    people: peopleEndpoints(r),
+    ...agentsEndpoints(r),
+    ...agentModelEndpoints(r),
+    ...mcpEndpoints(r),
+    ...pluginsEndpoints(r),
+    ...systemEndpoints(r),
   };
 }
 

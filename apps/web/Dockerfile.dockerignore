@@ -11,5 +11,6 @@ apps/bridge
 db
 deploy
 docs
+!docs/design/seed-data.json
 installer
 plugins

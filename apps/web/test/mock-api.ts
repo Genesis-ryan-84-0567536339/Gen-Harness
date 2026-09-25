@@ -5,6 +5,7 @@
  *   owner@genesis.local / matkhau-rat-dai-2026, PIN 246810    (role owner)
  *   operator@genesis.local / matkhau-rat-dai-2026, PIN 135790 (role operator, fewer screens)
  *   auditor@genesis.local / matkhau-rat-dai-2026, PIN 975310  (role auditor, read-only)
+ *   manager@genesis.local / matkhau-rat-dai-2026, PIN 864202  (role manager, team scope)
  *   setup token: GH-SETUP-7Q4K-2M9X
  *
  * MOCK_SETUP=fresh starts at step 1; MOCK_LATENCY=<ms> delays every response;
@@ -14,7 +15,19 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { randomUUID } from 'node:crypto';
-import { createPhase2, maskText, type P2Ctx } from './mock-phase2';
+import type { AgentIdentity } from '@gen-harness/contracts';
+import { createPhase2, maskText, seedRows, type P2Ctx } from './mock-phase2';
+import { createMock as createP3Core } from './mock-p3-core';
+import { createMock as createP3Queue } from './mock-p3-queue';
+import { createMock as createP3Relations } from './mock-p3-relations';
+import { createMock as createP3Graph } from './mock-p3-graph';
+import { createMock as createP3Market } from './mock-p3-market';
+import { createMock as createP3People } from './mock-p3-people';
+import { createMock as createP4Agents } from './mock-p4-agents';
+import { createMock as createP4Api } from './mock-p4-api';
+import { createMock as createP4Mcp } from './mock-p4-mcp';
+import { createMock as createP4Plugins } from './mock-p4-plugins';
+import { createMock as createP4System } from './mock-p4-system';
 import { acceptWebSocket, type MockSocket } from './mock-ws';
 import { buildScreenTree, SCREEN_BY_KEY } from '../../../packages/contracts/src/screens';
 import type { NavDomain, NavItem, SetupState } from '../../../packages/contracts/src/schema';
@@ -55,12 +68,18 @@ export interface MockOptions {
   simulate?: boolean;
   /** Let `PUT /setup/steps/12` finish without steps 8–9 (the real API refuses in phase 2). */
   allowFinish?: boolean;
+  /** Test-only (e2e giai đoạn 4.6): đánh dấu sẵn các bước 1..n-1 là 'done', `current_step = n`, tạo và đăng
+   * nhập sẵn tài khoản Owner — để test thẳng bước 10/11 mà không phải đi lại QR/CLI/refinery từ đầu. */
+  startAtStep?: number;
 }
 
 // RBAC as apps/api gh/auth/rbac.py seeds it: Owner, Manager, Operator, Agent NV, Auditor.
-type RoleCode = 'owner' | 'manager' | 'operator' | 'agent_staff' | 'auditor';
-const ROLE_ORDER: RoleCode[] = ['owner', 'manager', 'operator', 'agent_staff', 'auditor'];
-const MATRIX: Record<string, [string, string, string, string, string]> = {
+export type RoleCode = 'owner' | 'manager' | 'operator' | 'agent_staff' | 'auditor';
+export const ROLE_ORDER: RoleCode[] = ['owner', 'manager', 'operator', 'agent_staff', 'auditor'];
+/** Nguồn dữ liệu duy nhất cho `Me.permissions` VÀ `GET/PATCH /permissions` (PLAN 4.5) — `mock-p4-system.ts`
+ * sửa thẳng object này (không copy) để đổi ma trận ở màn Quyền hạn cũng đổi luôn năng lực thật của vai trò,
+ * giống hệt cách `role_permissions` là một bảng duy nhất ở backend thật. */
+export const MATRIX: Record<string, [string, string, string, string, string]> = {
   'overview.read': ['all', 'team', 'assigned', 'none', 'all'],
   'queue.read': ['all', 'team', 'all', 'assigned', 'all'],
   'queue.act': ['all', 'team', 'all', 'assigned', 'none'],
@@ -83,6 +102,7 @@ const MATRIX: Record<string, [string, string, string, string, string]> = {
 const SCREEN_PERMISSION: Record<string, string[]> = {
   overview: ['overview.read'], inbox: ['queue.read'], workbench: ['action.draft', 'action.approve'],
   directory: ['profile.read'], graph: ['profile.read'], profile: ['profile.read'], notebook: ['profile.read'],
+  documents: ['profile.read'],
   opportunity: ['opportunity.read'], supply: ['opportunity.read'], search: ['opportunity.read'],
   people: ['people_review.read'], care: ['care.read'],
   raw: ['data.read'], rules: ['data.read'], clean: ['data.read'], identity: ['data.read'],
@@ -95,7 +115,12 @@ export function permissionsOf(role: RoleCode): Record<string, string> {
 }
 function hiddenScreens(role: RoleCode): Set<string> {
   const perms = permissionsOf(role);
-  return new Set(Object.entries(SCREEN_PERMISSION).filter(([, need]) => !need.some((p) => perms[p] !== 'none')).map(([k]) => k));
+  const hidden = new Set(Object.entries(SCREEN_PERMISSION).filter(([, need]) => !need.some((p) => perms[p] !== 'none')).map(([k]) => k));
+  // Q4 (docs/PLAN.md): Auditor VẪN thấy màn "Đánh giá con người" trong danh mục (nhánh log — nhật ký ai đã
+  // xem), dù phạm vi chung `people_review.read` của Auditor là 'none' như Manager. Đây là ngoại lệ nội dung
+  // (che điểm/chứng cứ ở tầng route), không phải ẩn hẳn màn như Manager — khác `care` (Q4 không nói tới `care`).
+  if (role === 'auditor') hidden.delete('people');
+  return hidden;
 }
 /** Which realtime events a connection may receive (docs/api/phase-2.md § WebSocket). */
 const EVENT_PERMISSION: Array<[string, string | null]> = [
@@ -103,6 +128,8 @@ const EVENT_PERMISSION: Array<[string, string | null]> = [
   ['refinery.', 'data.read'],
   ['channel.', 'system.read'],
   ['cli.', 'system.manage'],
+  ['mcp.', 'system.read'],
+  ['plugin.', 'system.read'],
   ['header', null],
 ];
 
@@ -157,8 +184,8 @@ const STEP_DEFS: Array<[string, string, boolean, boolean]> = [
   ['refinery', 'Sàng lọc dữ liệu', true, true],
   ['agent', 'Agent đầu tiên', true, false],
   ['autonomy', 'Tự trị & ranh giới', true, false],
-  ['team', 'Mời đội ngũ', false, false],
-  ['backup', 'Sao lưu', false, false],
+  ['team', 'Mời đội ngũ', false, true],
+  ['backup', 'Sao lưu', false, true],
   ['finish', 'Hoàn tất', true, true],
 ];
 
@@ -177,6 +204,37 @@ interface AuditRow {
   detail: unknown;
 }
 
+/** Số mức tự trị trong nhãn thiết kế ("mức 4" → 4), hoặc null khi không phải hành động của agent. */
+const AUTONOMY_RE = /mức\s+(\d)/;
+const RESULT_TONE: Record<string, string> = { g: 'ok', w: 'held', b: 'blocked' };
+
+/** Nạp `docs/design/seed-data.json` `auditLog` (10 dòng) vào mảng `audit` dùng chung — cho tab Nhật ký của
+ * Điều khiển hệ thống có gì đó để xem/xuất CSV ngay cả trước khi có sự kiện PIN thật nào (`record()` unshift
+ * lên trên, nên sự kiện thật luôn mới hơn các dòng seed này). */
+function seedAuditLog(audit: AuditRow[], fresh: boolean) {
+  if (fresh) return;
+  const rows = seedRows('auditLog');
+  rows.forEach((row, i) => {
+    const who = String(row.who ?? 'Hệ thống');
+    const bot = row.bot === true;
+    const autonomyMatch = AUTONOMY_RE.exec(String(row.level ?? ''));
+    audit.push({
+      id: randomUUID(),
+      at: new Date(Date.now() - (i + 1) * 7 * 60_000).toISOString(),
+      actor_type: bot ? 'agent' : who === 'Hệ thống' || who === 'Policy Engine' ? 'system' : 'user',
+      actor_id: null,
+      actor_label: who,
+      action: String(row.action ?? ''),
+      target_type: null,
+      target_id: null,
+      target_label: row.target != null ? String(row.target) : null,
+      autonomy_level: autonomyMatch ? Number(autonomyMatch[1]) : null,
+      result: RESULT_TONE[String(row.tone ?? '')] ?? 'ok',
+      detail: null,
+    });
+  });
+}
+
 function createMockState(opts: MockOptions = {}, broadcast: (type: string, data: unknown) => void = () => {}) {
   const latency = opts.latencyMs ?? Number(process.env.MOCK_LATENCY ?? 0);
   /** Test-only: let step 12 finish although 8–9 (not built in phase 2) are missing. */
@@ -186,7 +244,51 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     simulate: opts.simulate ?? process.env.MOCK_SIMULATE !== '0',
     emit: broadcast,
   });
+  /** Dùng chung với `/audit` VÀ `/audit-log` (`system.handle`) — khai báo trước `phase3` để truyền tham chiếu. */
   const audit: AuditRow[] = [];
+  seedAuditLog(audit, opts.setup === 'fresh');
+
+  /** Giai đoạn 3: mỗi cụm màn một mock riêng (test/mock-p3-*.ts), hỏi lần lượt sau phase 2. */
+  const p3Core = createP3Core({ fresh: opts.setup === 'fresh', emit: broadcast });
+  const p4Agents = createP4Agents({ fresh: opts.setup === 'fresh', emit: broadcast, getChannels: phase2.hooks.channels });
+  const p3Relations = createP3Relations({ fresh: opts.setup === 'fresh', emit: broadcast });
+  const phase3 = {
+    // agents TRƯỚC core: `GET /agents/decisions` cần trả dữ liệu thật ("agent đã nói gì") — core.handle() có
+    // một stub rỗng cho cùng đường (chưa màn nào dùng tới trước giai đoạn 4) nên phải chặn trước nó.
+    agents: p4Agents,
+    // people trước core: `GET /explain/review/{id}` cần gác cổng riêng theo Q4 (Auditor không vào được chuỗi
+    // chứng cứ) — core.handle() nuốt mọi `/explain/{kind}/{id}` không phân biệt kind nên phải chặn trước nó.
+    people: createP3People({ fresh: opts.setup === 'fresh', emit: broadcast }),
+    core: p3Core,
+    queue: createP3Queue({ fresh: opts.setup === 'fresh', emit: broadcast }),
+    relations: p3Relations,
+    graph: createP3Graph({ fresh: opts.setup === 'fresh', emit: broadcast }),
+    // market "Giới thiệu hai bên" tạo bản nháp thật qua core.hooks.push — cùng cơ chế create_draft dùng chung ở backend.
+    market: createP3Market({ fresh: opts.setup === 'fresh', emit: broadcast, pushDraft: p3Core.hooks.push as (d: unknown) => unknown }),
+    // api & model (PLAN 4.2): bindings cần biết danh sách agent (p4Agents) + model theo provider (phase2 dùng chung).
+    api: createP4Api({
+      fresh: opts.setup === 'fresh', emit: broadcast,
+      getAgents: p4Agents.hooks.list as () => AgentIdentity[],
+      getProviders: phase2.hooks.providers as Parameters<typeof createP4Api>[0]['getProviders'],
+    }),
+    // MCP Hub (PLAN 4.3): tool ghi tạo bản nháp qua p3Core.hooks.push — cùng cơ chế create_draft dùng chung.
+    mcp: createP4Mcp({
+      fresh: opts.setup === 'fresh', emit: broadcast,
+      getAgents: p4Agents.hooks.list as () => AgentIdentity[],
+      pushDraft: p3Core.hooks.push as (d: Record<string, unknown>) => unknown,
+    }),
+    // Plugin & Tiện ích (PLAN 4.4).
+    plugins: createP4Plugins({ fresh: opts.setup === 'fresh', emit: broadcast }),
+    // Điều khiển hệ thống — Bộ não AI đã có mock đủ ở phase2/api; đây chỉ Quyền hạn/Nhật ký/Dữ liệu (PLAN 4.5/4.6).
+    system: createP4System({
+      fresh: opts.setup === 'fresh', emit: broadcast,
+      getGroups: phase2.hooks.groups as Parameters<typeof createP4System>[0]['getGroups'],
+      matrix: MATRIX,
+      roleOrder: ROLE_ORDER,
+      auditLog: audit,
+      getPersons: p3Relations.hooks.people as Parameters<typeof createP4System>[0]['getPersons'],
+    }),
+  };
   const record = (user: User | undefined, action: string, result = 'ok', detail: unknown = null) =>
     audit.unshift({
       id: randomUUID(),
@@ -228,8 +330,18 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     org: { name: 'Genesis Trading', timezone: 'Asia/Ho_Chi_Minh', currency: 'VND' },
     addressing: { self: 'Anh', bot_calls_me: 'Sếp' },
   };
-  if (opts.setup !== 'fresh') {
+  if (opts.startAtStep && opts.startAtStep > 1) {
+    const n = Math.min(12, Math.max(2, opts.startAtStep));
+    setup.finished = false;
+    setup.current_step = n;
+    setup.steps.forEach((s) => {
+      s.status = s.n < n ? 'done' : s.n === n ? 'doing' : 'todo';
+    });
+  }
+  if (opts.setup !== 'fresh' || opts.startAtStep) {
     addOwner();
+  }
+  if (opts.setup !== 'fresh') {
     users.push({
       id: randomUUID(),
       email: 'operator@genesis.local',
@@ -248,14 +360,21 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
       role: { code: 'auditor', name: 'Auditor · kiểm toán' },
       hidden: hiddenScreens('auditor'),
     });
+    // Q4 (docs/PLAN.md): cần một tài khoản Manager thật để e2e xác nhận nhánh "Manager không thấy" của
+    // Đánh giá con người (trước đây chỉ owner/operator/auditor được seed, chưa cụm nào cần Manager tới giờ).
+    users.push({
+      id: randomUUID(),
+      email: 'manager@genesis.local',
+      password: MOCK_OWNER.password,
+      pin: '864202',
+      display_name: 'Chị Hồng Quản',
+      role: { code: 'manager', name: 'Manager · quản lý team' },
+      hidden: hiddenScreens('manager'),
+    });
   }
 
   const sessions = new Map<string, { userId: string; pinUntil: number | null }>();
   const pinFails = new Map<string, { count: number; lockedUntil: number | null }>();
-  const plugins = [
-    { package: '@gen/chassis-store', name: 'Store · SSOT', layer: 'chassis', origin: 'core', enabled: true },
-    { package: '@gen/channel-zalo', name: 'Kênh Zalo', layer: 'channel', origin: 'marketplace', enabled: true },
-  ];
 
   const stateView = (): SetupState => ({ finished: setup.finished, current_step: setup.current_step, steps: setup.steps });
   const advance = (n: number, status: 'done' | 'skipped') => {
@@ -417,6 +536,24 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
           } else advance(n, 'done');
           return reply(200, stateView());
         }
+        if (n === 10 || n === 11) {
+          // Như `_owner_step` thật (khác `_owner_step_after` của bước 8–9): không đòi các bước trước phải xong.
+          if (!user) return problem(res, 401, 'UNAUTHENTICATED', 'Chưa đăng nhập');
+          if (n === 10) {
+            const r = phase3.system.step10(body, new Set(users.map((u) => u.email)));
+            if (!r.ok) return problem(res, r.status, r.code, r.title, r.extra ?? {});
+            for (const inv of r.value.invited) {
+              const roleName = { manager: 'Manager · quản lý team', operator: 'Operator · vận hành', agent_staff: 'Agent nhân viên', auditor: 'Auditor · kiểm toán' }[inv.role] ?? inv.role;
+              users.push({ id: inv.id, email: inv.email, password: inv.temp_password, pin: '000000', display_name: inv.display_name, role: { code: inv.role as RoleCode, name: roleName }, hidden: hiddenScreens(inv.role as RoleCode) });
+            }
+            advance(10, 'done');
+            return reply(200, { ...stateView(), invited: r.value.invited });
+          }
+          const r = phase3.system.step11(body);
+          if (!r.ok) return problem(res, r.status, r.code, r.title, r.extra ?? {});
+          advance(11, 'done');
+          return reply(200, { ...stateView(), backup: r.value.backup });
+        }
         return problem(res, 409, 'CONFLICT', 'Bước này làm ở giai đoạn sau');
       }
       return problem(res, 404, 'NOT_FOUND', 'Không tồn tại');
@@ -485,15 +622,6 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     if (path === '/header' && method === 'GET') {
       return reply(200, { channels_live: 4, groups_listening: 42, autonomy_level: 4, data_confidence: 0.78 });
     }
-    if (path === '/plugins' && method === 'GET') return reply(200, plugins);
-    const toggle = /^\/plugins\/(.+)\/toggle$/.exec(path);
-    if (toggle && method === 'PATCH') {
-      if (needPin()) return problem(res, 423, 'PIN_REQUIRED', 'Cần phiên PIN');
-      const p = plugins.find((x) => x.package === decodeURIComponent(toggle[1]));
-      if (!p) return problem(res, 404, 'NOT_FOUND', 'Không tồn tại');
-      p.enabled = Boolean(body.enabled);
-      return reply(200, p);
-    }
     if (path === '/audit' && method === 'GET') {
       if (permissionsOf(user.role.code)['audit.read'] === 'none') return problem(res, 403, 'FORBIDDEN', 'Vai trò không có quyền này');
       const prefix = url.searchParams.get('action') ?? '';
@@ -527,13 +655,15 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
       needPin,
       userLabel: user.display_name,
       owner: user.role.code === 'owner',
+      role: user.role.code,
     };
     if (phase2.handle(ctx)) return;
+    for (const m of Object.values(phase3)) if (m.handle(ctx)) return;
 
     return problem(res, 404, 'NOT_FOUND', 'Không tồn tại');
   };
 
-  return { middleware, setup, users, sessions, phase2, sessionUser };
+  return { middleware, setup, users, sessions, phase2, phase3, sessionUser };
 }
 
 /**
@@ -544,6 +674,7 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
  *   /api/v1/__mock/scan     {"type":"zalo"} simulates the phone scanning the QR
  *   /api/v1/__mock/simulate {"on":bool} toggles the background simulation
  *   /api/v1/__mock/bridge   {"online":bool} makes channel login answer 503 BRIDGE_OFFLINE
+ *   /api/v1/__mock/p3/{cụm}/{hook}  body → `phase3[cụm].hooks[hook](body)`; trả JSON kết quả (404 nếu không có)
  */
 export function createMockApi(opts: MockOptions = {}) {
   const clients = new Set<MockSocket>();
@@ -584,12 +715,20 @@ export function createMockApi(opts: MockOptions = {}) {
   };
 
   const middleware = async (req: IncomingMessage, res: ServerResponse, next: Next) => {
+    const p3 = /^\/api\/v1\/__mock\/p3\/(\w+)\/(\w+)/.exec(req.url ?? '');
+    if (p3 && req.method === 'POST') {
+      const body = await readJson(req);
+      const fn = (current.phase3 as unknown as Record<string, { hooks: Record<string, (b: unknown) => unknown> }>)[p3[1]]?.hooks[p3[2]];
+      if (!fn) return done(res, 404);
+      return done(res, 200, fn(body) ?? null);
+    }
     const hook = /^\/api\/v1\/__mock\/(\w+)/.exec(req.url ?? '');
     if (hook && req.method === 'POST') {
       const body = await readJson(req);
       switch (hook[1]) {
         case 'reset':
           current.phase2.dispose();
+          for (const m of Object.values(current.phase3)) m.dispose();
           for (const ws of clients) ws.close(4401, 'reset');
           clients.clear();
           current = createMockState({ ...opts, ...(body as MockOptions) }, broadcast);

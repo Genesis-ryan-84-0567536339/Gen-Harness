@@ -47,16 +47,18 @@ def screens(nav: list[dict]) -> set[str]:  # type: ignore[type-arg]
     return out
 
 
+BIZ_EXTRA = {"tasks", "documents", "deals"}
 EXPECTED = {
     "owner": set(navigation.all_screen_keys()),
-    "manager": {"overview", "inbox", "workbench", "directory", "graph", "profile", "notebook", "opportunity",
-                "supply", "search", "system"},
-    "operator": {"overview", "inbox", "workbench", "directory", "graph", "profile", "notebook", "opportunity",
-                 "supply", "search"},
-    "agent_staff": {"inbox", "workbench", "directory", "graph", "profile", "notebook", "opportunity", "supply",
-                    "search"},
-    "auditor": {"overview", "inbox", "directory", "graph", "profile", "notebook", "opportunity", "supply", "search",
-                "raw", "rules", "clean", "identity", "agents", "api", "mcp", "plugins", "system"},
+    "manager": BIZ_EXTRA | {"overview", "inbox", "workbench", "directory", "graph", "profile", "notebook",
+                            "opportunity", "supply", "search", "system"},
+    "operator": BIZ_EXTRA | {"overview", "inbox", "workbench", "directory", "graph", "profile", "notebook",
+                             "opportunity", "supply", "search"},
+    "agent_staff": BIZ_EXTRA | {"inbox", "workbench", "directory", "graph", "profile", "notebook", "opportunity",
+                                "supply", "search"},
+    "auditor": BIZ_EXTRA | {"overview", "inbox", "directory", "graph", "profile", "notebook", "opportunity", "supply",
+                            "search", "raw", "rules", "clean", "identity", "agents", "api", "mcp", "plugins",
+                            "system"},
 }
 
 
@@ -75,7 +77,7 @@ async def test_navigation_filtered_by_role(owner_api, client, db, role: str) -> 
     assert screens(nav) == EXPECTED[role]
     assert "people" not in screens(nav) or role == "owner"
     if role == "owner":
-        assert [d["count"] for d in nav] == [11, 9]      # đúng "11 màn" / "9 màn" của thiết kế
+        assert [d["count"] for d in nav] == [14, 9]      # "11 màn" / "9 màn" của thiết kế + 3 màn spec bổ sung
 
 
 @pytest.mark.parametrize("role,audit,verify,plugins", [

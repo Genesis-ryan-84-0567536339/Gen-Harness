@@ -3,8 +3,10 @@
 - Giai đoạn 1: kiểm chuỗi Action Log hằng đêm, bảo trì phân vùng pg_partman.
 - Giai đoạn 2: bộ kích hoạt sàng lọc (chu kỳ / ngưỡng / đường nhanh / chạy ngay), dò trùng định danh
   mỗi 10 phút, nén sổ tay hằng ngày.
+- Giai đoạn 3: hook sau sàng lọc và việc định kỳ của từng cụm màn (`gh.biz.*.jobs`), tự đăng ký.
 """
 
+import asyncio
 import logging
 from typing import Any
 
@@ -13,7 +15,10 @@ from arq.connections import RedisSettings
 from redis.asyncio import Redis
 from sqlalchemy import text
 
+from gh import biz
 from gh.app import build_plugin_manager, configure_logging
+from gh.backup import JOBS as BACKUP_JOBS
+from gh.biz.hooks import start_hooks
 from gh.bootstrap import bootstrap
 from gh.chassis import actionlog
 from gh.chassis.bus import EventBus
@@ -36,7 +41,7 @@ async def startup(ctx: dict[str, Any]) -> None:
         await db.commit()
     s = get_settings()
     ctx["redis_bus"] = Redis.from_url(s.redis_url)
-    ctx["plugins"] = await build_plugin_manager(EventBus(ctx["redis_bus"], s.stream_maxlen))
+    ctx["plugins"] = await build_plugin_manager(EventBus(ctx["redis_bus"], s.stream_maxlen), ctx["redis_bus"])
     ctx["plugins"].start_control_listener()
     sm = sessionmaker()
     bus = EventBus(ctx["redis_bus"], s.stream_maxlen)
@@ -44,13 +49,21 @@ async def startup(ctx: dict[str, Any]) -> None:
         await climod.restore_active(sm)
     except Exception as exc:  # noqa: BLE001 — thiếu phiên CLI không chặn worker
         log.warning("Không khôi phục được phiên CLI: %s", exc)
-    ctx["scheduler"] = Scheduler(sm, ctx["redis_bus"], Refinery(sm, ctx["redis_bus"], ModelRouter(sm, ctx["redis_bus"]),
-                                                               bus))
+    router = ModelRouter(sm, ctx["redis_bus"])
+    ctx["model_router"] = router
+    ctx["scheduler"] = Scheduler(sm, ctx["redis_bus"], Refinery(sm, ctx["redis_bus"], router, bus))
     await ctx["scheduler"].start()
+    ctx["hooks_stop"] = asyncio.Event()
+    ctx["hooks"] = start_hooks(biz.hooks(), sm=sm, redis=ctx["redis_bus"], bus=bus, router=router,
+                               stop=ctx["hooks_stop"])
     log.info("Worker sẵn sàng")
 
 
 async def shutdown(ctx: dict[str, Any]) -> None:
+    ctx["hooks_stop"].set()
+    for t in ctx["hooks"]:
+        t.cancel()
+    await asyncio.gather(*ctx["hooks"], return_exceptions=True)
     await ctx["scheduler"].stop()
     await ctx["plugins"].shutdown()
     await ctx["redis_bus"].aclose()
@@ -112,17 +125,22 @@ async def compact_notebooks(ctx: dict[str, Any]) -> int:
     return n
 
 
+_BIZ_JOBS = [*biz.jobs(), *BACKUP_JOBS]  # PLAN §5.6 — gh.backup.scheduled_backup_scan cùng mẫu CronJob
+
+
 class WorkerSettings:
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
     on_startup = startup
     on_shutdown = shutdown
-    functions = [verify_action_log, partition_maintenance, detect_identities, compact_notebooks]
+    functions = [verify_action_log, partition_maintenance, detect_identities, compact_notebooks,
+                 *(fn for fn, _ in _BIZ_JOBS)]
     health_check_interval = 30
     cron_jobs = [
         cron(verify_action_log, hour={2}, minute={30}),        # 02:30 hằng đêm
         cron(partition_maintenance, minute={5}),                # mỗi giờ
         cron(detect_identities, minute=set(range(0, 60, 10))),  # mỗi 10 phút
         cron(compact_notebooks, hour={3}, minute={15}),         # 03:15 hằng ngày
+        *(cron(fn, **kw) for fn, kw in _BIZ_JOBS),  # type: ignore[arg-type]
     ]
 
 

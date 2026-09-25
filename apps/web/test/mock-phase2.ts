@@ -59,7 +59,8 @@ function loadSeed(): Record<string, SeedRow[]> {
   return {};
 }
 const SEED = loadSeed();
-const seedRows = (k: string): SeedRow[] => (Array.isArray(SEED[k]) ? SEED[k] : []);
+/** Dòng thô của một mảng seed theo khoá (`docs/design/seed-data.json`) — dùng lại ở `mock-api.ts` cho `auditLog`. */
+export const seedRows = (k: string): SeedRow[] => (Array.isArray(SEED[k]) ? SEED[k] : []);
 /** "1.244" → 1244, "0,94" → 0.94, "99,9%" → 99.9 */
 const num = (s: unknown): number => Number(String(s ?? '').replace(/[%\s]/g, '').replace(/\./g, '').replace(',', '.'));
 
@@ -90,6 +91,8 @@ export interface P2Ctx {
   userLabel: string;
   /** Owner sees raw text unmasked (khoá cứng 8). */
   owner: boolean;
+  /** Mã vai trò (`owner|manager|operator|agent_staff|auditor`) — cụm `people` cần role thật cho nhánh Q4, generic `perms` không đủ (Auditor có `people_review.read = none` trong ma trận chung nhưng vẫn phải nhận 200 nhánh `log`). */
+  role: string;
 }
 
 /** gh/data/common.py mask_text: long digit runs (phones, accounts) keep only the last 3 digits. */
@@ -1171,6 +1174,10 @@ export function createPhase2(opts: Phase2Options) {
 
     // providers
     if (seg[0] === 'providers') {
+      // PLAN 4.2 (`gh.system_api.routes.patch_chain`): kéo-thả sắp lại toàn bộ chuỗi một lượt — xử lý ở
+      // `mock-p4-api.ts` (phase3) vì màn đó cần trả lại đúng hình `Provider[]` sau khi đổi `failover_rank`
+      // trên CHÍNH mảng `providers` dùng chung này (`hooks.providers()` bên dưới), không phải một bản sao.
+      if (seg[1] === 'chain') return false;
       if (!need('system.read')) return true;
       if (seg[1] === 'credentials' && m === 'GET') return reply(200, credentials());
       if (seg.length === 1 && m === 'GET') return reply(200, [...providers].sort((a, b) => a.failover_rank - b.failover_rank));
@@ -1407,6 +1414,12 @@ export function createPhase2(opts: Phase2Options) {
         const c = channelOf(type);
         if (c) c.state = state;
       },
+      /** PLAN 4.2 — cho `mock-p4-api.ts` đọc/sắp lại chuỗi chuyển hướng trên chính mảng dùng chung này. */
+      providers: () => providers,
+      /** PLAN 4.1 — cho `mock-p4-agents.ts` suy ra `channel_type` từ `channel_id` khi lưu phạm vi nghe. */
+      channels: () => channels,
+      /** PLAN 4.5 — cho `mock-p4-system.ts` đọc `/listening-groups` trên chính mảng dùng chung này. */
+      groups: () => groups,
     },
     dispose: () => {
       setSimulation(false);

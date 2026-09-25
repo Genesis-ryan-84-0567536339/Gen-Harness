@@ -142,7 +142,7 @@ function Group({ g, wide, activeKey }: { g: NavItem; wide: boolean; activeKey: s
   }
 
   return (
-    <div className="sb-group">
+    <div className="sb-group" data-screen={g.key ?? undefined}>
       {wide ? (
         el
       ) : (
@@ -158,6 +158,7 @@ function Group({ g, wide, activeKey }: { g: NavItem; wide: boolean; activeKey: s
                 key={c.key}
                 to={`/${c.key}`}
                 className="sb-child"
+                data-screen={c.key}
                 data-on={c.key === activeKey || undefined}
                 aria-current={c.key === activeKey ? 'page' : undefined}
                 title={itemTitle(c)}

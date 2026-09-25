@@ -20,6 +20,8 @@ RUN if [ -f package-lock.json ]; then \
     fi
 COPY packages/ packages/
 COPY apps/web/ apps/web/
+# vite.config gói kèm mock (test/mock-*.ts), mock đọc dữ liệu mẫu của thiết kế.
+COPY docs/design/seed-data.json docs/design/seed-data.json
 RUN npm run build --workspace @gen-harness/web
 
 # ── serve ──────────────────────────────────────────────────────────────────

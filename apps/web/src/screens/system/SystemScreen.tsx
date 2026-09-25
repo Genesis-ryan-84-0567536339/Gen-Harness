@@ -4,37 +4,24 @@ import { useChannels } from '../../lib/dataQueries';
 import { useCan } from '../../lib/permissions';
 import { useUrlState } from '../../lib/uiStore';
 import { CardError, ScreenHead, SkeletonLines } from '../common';
+import { BrainTab } from './BrainTab';
 import { ChannelCard } from './ChannelCard';
 import { CliCard } from './CliCard';
+import { LogTab } from './LogTab';
 import { PinCard } from './PinCard';
+import { RolesTab } from './RolesTab';
+import { StorageTab } from './StorageTab';
 
-type SysTab = 'channels' | 'brain' | 'roles' | 'log';
+type SysTab = 'channels' | 'brain' | 'roles' | 'log' | 'storage';
 
-/** Design `sysTabs` — counts are the design's static labels. */
+/** Design `sysTabs` (4 tab) + `storage` (PLAN 4.5, spec I — thêm ngoài thiết kế gốc). */
 const TABS: Array<{ key: SysTab; label: string; count: string }> = [
   { key: 'channels', label: 'Kênh & đăng nhập', count: 'QR · PIN' },
   { key: 'brain', label: 'Bộ não AI', count: '6 model' },
   { key: 'roles', label: 'Quyền hạn', count: '5 vai trò' },
   { key: 'log', label: 'Nhật ký', count: '30 ngày' },
+  { key: 'storage', label: 'Dữ liệu & lưu trữ', count: 'spec I' },
 ];
-
-const PLACEHOLDER: Record<Exclude<SysTab, 'channels'>, { icon: string; title: string; description: string }> = {
-  brain: {
-    icon: 'ph ph-brain',
-    title: 'Bộ não AI — sắp có',
-    description: 'Hạn mức theo model, chuỗi chuyển hướng và khoá API có màn cấu hình đầy đủ ở giai đoạn sau. Tài khoản CLI và khoá hiện ở tab Kênh & đăng nhập.',
-  },
-  roles: {
-    icon: 'ph ph-shield-check',
-    title: 'Quyền hạn — sắp có',
-    description: 'Ma trận quyền theo vai trò và lời mời người dùng được dựng ở giai đoạn sau.',
-  },
-  log: {
-    icon: 'ph ph-list-checks',
-    title: 'Nhật ký — sắp có',
-    description: 'Nhật ký hành động 30 ngày với kiểm chuỗi băm được dựng ở giai đoạn sau.',
-  },
-};
 
 export function SystemScreen() {
   const meta = SCREEN_BY_KEY.system;
@@ -47,10 +34,14 @@ export function SystemScreen() {
       <div role="tabpanel" id={`sys-panel-${current}`} aria-labelledby={`sys-${current}`} className="sys-tabs-panel">
         {current === 'channels' ? (
           <ChannelsTab />
+        ) : current === 'brain' ? (
+          <BrainTab />
+        ) : current === 'roles' ? (
+          <RolesTab />
+        ) : current === 'log' ? (
+          <LogTab />
         ) : (
-          <div className="gh-card">
-            <EmptyState {...PLACEHOLDER[current]} />
-          </div>
+          <StorageTab />
         )}
       </div>
     </div>

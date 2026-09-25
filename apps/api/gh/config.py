@@ -31,6 +31,12 @@ class Settings(BaseSettings):
     cookie_secure: bool = True
 
     stream_maxlen: int = Field(default=100_000, description="Độ dài tối đa mỗi Redis Stream (xấp xỉ)")
+    # Khoá công khai ed25519 (base64, 32 byte) tin cậy để kiểm chữ ký plugin nạp từ tệp (ARCHITECTURE §6.4),
+    # phân tách bởi dấu phẩy. Trống ở dev/test — plugin nào cũng bị đánh signature_ok=false (không tự ý coi là hợp lệ).
+    plugin_trusted_signing_keys: str = ""
+    # Kho tệp cho Tài liệu (biz.documents): chưa có client MinIO nối dây ở giai đoạn 1/2 (xem gh/chassis/objects.py
+    # — quyết định tự đưa ra ở cụm relations). Mặc định đĩa cục bộ ngoài thư mục repo (thư mục tạm hệ thống).
+    objects_dir: str = Field(default="")
 
     @property
     def is_production(self) -> bool:

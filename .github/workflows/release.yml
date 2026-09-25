@@ -1,0 +1,338 @@
+name: Release
+
+# Chỉ chạy khi có tag v* — KHÔNG chạy trên push nhánh thường, để không vô
+# tình publish image lên GHCR / tạo GitHub Release mỗi lần push code (xem
+# docs/handoff/05-installer.md mục "Phát hành").
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  # ── meta ─────────────────────────────────────────────────────────────────
+  # Nguồn duy nhất cho owner viết thường (GHCR bắt buộc tên ảnh chữ thường —
+  # github.repository_owner có thể có chữ hoa) và phiên bản (tag).
+  meta:
+    runs-on: ubuntu-latest
+    outputs:
+      owner_lower: ${{ steps.vars.outputs.owner_lower }}
+      version: ${{ steps.vars.outputs.version }}
+    steps:
+      - id: vars
+        run: |
+          echo "owner_lower=$(printf '%s' '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >>"$GITHUB_OUTPUT"
+          echo "version=${{ github.ref_name }}" >>"$GITHUB_OUTPUT"
+
+  # ── build-genh ───────────────────────────────────────────────────────────
+  # 6 nền tảng đúng docs/handoff/05-installer.md. Tên file PHẢI khớp CHÍNH
+  # XÁC những gì install.sh (asset="genh-${os}-${arch}") và install.ps1
+  # ($asset = "genh-windows-${arch}.exe") mong đợi — đọc kỹ 2 script đó
+  # trước khi đổi bảng dưới đây.
+  #
+  # Phụ thuộc job pin-compose (không chỉ meta) vì bước "Ghim compose.yaml đã
+  # publish vào binary" bên dưới cần deploy/compose.release.yaml — build-genh
+  # PHẢI chạy SAU khi ảnh đã build+push xong và digest đã biết, nếu không
+  # binary sẽ nhúng compose.yaml cũ (build: cục bộ) thay vì bản đã ghim.
+  build-genh:
+    name: build genh (${{ matrix.goos }}/${{ matrix.goarch }})
+    runs-on: ubuntu-latest
+    needs: [meta, pin-compose]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            asset: genh-linux-amd64
+          - goos: linux
+            goarch: arm64
+            asset: genh-linux-arm64
+          - goos: darwin
+            goarch: amd64
+            asset: genh-darwin-amd64
+          - goos: darwin
+            goarch: arm64
+            asset: genh-darwin-arm64
+          - goos: windows
+            goarch: amd64
+            asset: genh-windows-amd64.exe
+          - goos: windows
+            goarch: arm64
+            asset: genh-windows-arm64.exe
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tải compose.release.yaml (đã ghim digest ở job pin-compose)
+        uses: actions/download-artifact@v4
+        with:
+          name: compose-release
+          path: pinned
+
+      - name: Ghim compose.yaml đã publish vào binary (go:embed)
+        run: |
+          set -euo pipefail
+          cp pinned/compose.release.yaml apps/genh/internal/compose/embedded_compose.yaml
+          echo "đã ghi đè embedded_compose.yaml bằng compose.release.yaml (digest thật):"
+          grep '^\s*image:' apps/genh/internal/compose/embedded_compose.yaml || true
+
+      - uses: actions/setup-go@v5
+        with:
+          # Đúng phiên bản Go trong apps/genh/go.mod (go 1.24.0) — không tự
+          # chọn version khác.
+          go-version: "1.24.0"
+
+      - name: Build genh
+        working-directory: apps/genh
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ github.workspace }}/dist"
+          # ldflags đúng như comment trong apps/genh/cmd/genh/main.go:
+          #   go build -ldflags "-X main.version=v2.2.0"
+          # (-s -w chỉ để giảm kích thước binary phát hành, không đổi hành vi)
+          go build -trimpath -ldflags "-s -w -X main.version=${{ needs.meta.outputs.version }}" \
+            -o "${{ github.workspace }}/dist/${{ matrix.asset }}" ./cmd/genh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: genh-bin-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/${{ matrix.asset }}
+          if-no-files-found: error
+          retention-days: 14
+
+  # ── build-images ─────────────────────────────────────────────────────────
+  # Chỉ 4 ảnh cần build+push: api (dùng CHUNG cho api/migrate/worker — cả 3
+  # service này build từ CÙNG deploy/images/api.Dockerfile, xem
+  # deploy/compose.yaml — không build trùng), web, bridge, db. proxy/redis/
+  # objects ĐÃ có "image:" cố định sẵn (caddy:2-alpine, redis:7-alpine,
+  # minio/minio:latest) nên không cần build ở đây — Bước 3 của genh pull
+  # thẳng từ Docker Hub.
+  build-images:
+    name: build+push ảnh ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    needs: meta
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: api
+            dockerfile: deploy/images/api.Dockerfile
+          - service: web
+            dockerfile: apps/web/Dockerfile
+          - service: bridge
+            dockerfile: deploy/images/bridge.Dockerfile
+          - service: db
+            dockerfile: deploy/images/db.Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build + push (linux/amd64, linux/arm64)
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          # context: repo GỐC — deploy/compose.yaml dùng "context: .." vì
+          # bản thân nó nằm trong deploy/; ở đây build từ repo root nên
+          # context là "." (checkout đã đặt ta ở gốc repo).
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ needs.meta.outputs.owner_lower }}/gen-harness-${{ matrix.service }}:${{ needs.meta.outputs.version }}
+            ${{ env.REGISTRY }}/${{ needs.meta.outputs.owner_lower }}/gen-harness-${{ matrix.service }}:latest
+
+      - name: Lưu digest để job pin-compose ghim vào compose.release.yaml
+        run: |
+          mkdir -p digest-out
+          printf '%s' "${{ steps.build.outputs.digest }}" >"digest-out/${{ matrix.service }}.digest"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: image-digest-${{ matrix.service }}
+          path: digest-out/${{ matrix.service }}.digest
+          retention-days: 14
+
+  # ── pin-compose ──────────────────────────────────────────────────────────
+  # Sinh deploy/compose.release.yaml với "image: ...@sha256:<digest thật>"
+  # thay cho "build:" của web/migrate/api/worker/bridge/db.
+  #
+  # Job build-genh (chạy SAU job này — xem needs) copy file này đè lên
+  # apps/genh/internal/compose/embedded_compose.yaml rồi mới `go build`, nhờ
+  # go:embed (apps/genh/internal/compose/embed.go) mà binary genh phát hành
+  # thật sự MANG THEO đúng compose.yaml đã ghim digest — Locate() rơi về
+  # dùng bản nhúng này khi máy Owner không có checkout repo nào. File cũng
+  # được đính kèm GitHub Release riêng (job release) để tiện xem/tải tay.
+  pin-compose:
+    name: sinh compose.yaml phát hành (ghim digest)
+    runs-on: ubuntu-latest
+    needs: [meta, build-images]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: image-digest-*
+          path: digests
+          merge-multiple: true
+
+      - name: Ghim digest vào compose.yaml
+        run: |
+          set -euo pipefail
+          OWNER="${{ needs.meta.outputs.owner_lower }}"
+          api_digest=$(cat digests/api.digest)
+          web_digest=$(cat digests/web.digest)
+          bridge_digest=$(cat digests/bridge.digest)
+          db_digest=$(cat digests/db.digest)
+          chmod +x deploy/scripts/pin-compose-images.sh
+          deploy/scripts/pin-compose-images.sh deploy/compose.yaml deploy/compose.release.yaml \
+            --api "${{ env.REGISTRY }}/${OWNER}/gen-harness-api@${api_digest}" \
+            --web "${{ env.REGISTRY }}/${OWNER}/gen-harness-web@${web_digest}" \
+            --bridge "${{ env.REGISTRY }}/${OWNER}/gen-harness-bridge@${bridge_digest}" \
+            --db "${{ env.REGISTRY }}/${OWNER}/gen-harness-db@${db_digest}"
+
+      - name: Kiểm compose.release.yaml là YAML hợp lệ
+        run: python3 -c "import yaml,sys; d=yaml.safe_load(open('deploy/compose.release.yaml')); assert 'services' in d; print('ok:', sorted(d['services']))"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compose-release
+          path: deploy/compose.release.yaml
+          retention-days: 90
+
+  # ── wsl-rootfs ───────────────────────────────────────────────────────────
+  # docs/handoff/05-installer.md (bảng container runtime, cột Windows/Không
+  # có): "nhập bản phân phối tối giản gen-harness (rootfs Alpine đóng gói
+  # kèm bản phát hành) chứa Docker Engine".
+  #
+  # THÀNH THẬT: job này chỉ tải rootfs Alpine CHÍNH THỨC, KHÔNG custom —
+  # phần "đóng gói kèm Docker Engine + service khởi động sẵn bên trong rootfs
+  # đó, kiểm thử `wsl --import` thật trên Windows" là việc phức tạp (cần
+  # chroot/binfmt, đóng gói docker tĩnh + openrc, và kiểm thử trên Windows
+  # thật — không khả thi để làm CHẮC CHẮN ĐÚNG trong phiên này). Đây là việc
+  # CÒN THIẾU — xem TODO dưới. Không bịa bước đóng gói Docker giả.
+  wsl-rootfs:
+    name: rootfs WSL (Alpine chính thức — chưa đóng gói Docker Engine)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Tải Alpine minirootfs chính thức (x86_64, aarch64)
+        run: |
+          set -euo pipefail
+          ALPINE_BRANCH="v3.20"
+          ALPINE_VERSION="3.20.3"
+          mkdir -p wsl-out
+          for pair in "x86_64:amd64" "aarch64:arm64"; do
+            alpine_arch="${pair%%:*}"
+            out_arch="${pair##*:}"
+            url="https://dl-cdn.alpinelinux.org/alpine/${ALPINE_BRANCH}/releases/${alpine_arch}/alpine-minirootfs-${ALPINE_VERSION}-${alpine_arch}.tar.gz"
+            echo "tải ${url}"
+            curl -fsSL -o "wsl-out/gen-harness-wsl-rootfs-${out_arch}.tar.gz" "$url"
+          done
+          # TODO (ngoài phạm vi phiên này — xem báo cáo bàn giao): đóng gói
+          # Docker Engine tĩnh + init/openrc + `wsl.conf` vào rootfs này rồi
+          # kiểm thử `wsl --import gen-harness <đích> gen-harness-wsl-rootfs-amd64.tar.gz`
+          # thật trên Windows trước khi coi đây là "bản phân phối gen-harness"
+          # theo đúng mô tả trong docs/handoff/05-installer.md. Hiện tại đây
+          # CHỈ là Alpine minirootfs nguyên bản, chưa có gì của Gen-Harness.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wsl-rootfs
+          path: wsl-out/*
+          retention-days: 90
+        continue-on-error: true
+
+  # ── release ──────────────────────────────────────────────────────────────
+  # checksums.txt + ký cosign keyless (OIDC, cần id-token: write) + tạo
+  # GitHub Release đính kèm mọi artifact.
+  release:
+    name: checksums + cosign + GitHub Release
+    runs-on: ubuntu-latest
+    needs: [build-genh, pin-compose, wsl-rootfs]
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tải 6 binary genh
+        uses: actions/download-artifact@v4
+        with:
+          pattern: genh-bin-*
+          path: dist
+          merge-multiple: true
+
+      - name: sha256sum -> checksums.txt
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          ls -la
+          sha256sum genh-* >checksums.txt
+          cat checksums.txt
+
+      - uses: sigstore/cosign-installer@v3
+
+      - name: Ký cosign keyless (OIDC GitHub Actions) cho từng binary
+        working-directory: dist
+        env:
+          COSIGN_YES: "true"
+        run: |
+          set -euo pipefail
+          for f in genh-*; do
+            cosign sign-blob --yes \
+              --output-signature "${f}.sig" \
+              --output-certificate "${f}.pem" \
+              "$f"
+          done
+
+      - name: Tải compose.release.yaml (nếu job pin-compose sinh được)
+        uses: actions/download-artifact@v4
+        with:
+          name: compose-release
+          path: dist
+        continue-on-error: true
+
+      - name: Tải rootfs WSL (best-effort — xem TODO ở job wsl-rootfs)
+        uses: actions/download-artifact@v4
+        with:
+          name: wsl-rootfs
+          path: dist
+        continue-on-error: true
+
+      - name: Đính kèm install.sh / install.ps1 nguyên trạng
+        run: cp install.sh install.ps1 dist/
+
+      - name: Danh sách file đính kèm Release
+        run: ls -la dist
+
+      - name: Tạo GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Gen-Harness ${{ github.ref_name }}
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: dist/*

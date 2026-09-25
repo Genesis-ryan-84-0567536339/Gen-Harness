@@ -1,6 +1,8 @@
 import type { HeaderStatus } from '@gen-harness/contracts';
 import { Icon, IconButton, Pill, Skeleton, Tooltip } from '@gen-harness/ui';
+import { useNavigate } from 'react-router-dom';
 import { useHeaderStatus } from '../lib/queries';
+import { SavedViewsButton } from '../screens/core/SavedViews';
 import { useUiStore } from '../lib/uiStore';
 import { autonomyTooltip, confidencePercent } from './headerModel';
 
@@ -17,6 +19,7 @@ export interface Crumbs {
 export function Header({ crumbs }: { crumbs: Crumbs | null }) {
   const showEnglish = useUiStore((s) => s.showEnglish);
   const status = useHeaderStatus();
+  const navigate = useNavigate();
   const hasSub = !!crumbs && showEnglish && !crumbs.group && !!crumbs.subtitle;
 
   return (
@@ -57,8 +60,8 @@ export function Header({ crumbs }: { crumbs: Crumbs | null }) {
         ) : (
           <StatusPills s={status.data} />
         )}
-        <IconButton icon="ph ph-bookmark-simple" label="Góc nhìn đã lưu" variant="secondary" />
-        <IconButton icon="ph ph-magnifying-glass" label="Tìm theo ý định" variant="primary" />
+        <SavedViewsButton />
+        <IconButton icon="ph ph-magnifying-glass" label="Tìm theo ý định" variant="primary" onClick={() => navigate('/search')} />
       </div>
     </header>
   );

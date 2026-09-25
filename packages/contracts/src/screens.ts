@@ -33,6 +33,11 @@ export interface ScreenMeta {
   designTitleRow: boolean;
   /** Phosphor icon class from the design NAV. */
   icon: string;
+  /**
+   * Screen the spec requires but the design lacks (docs/handoff/01 "Màn còn thiếu", PLAN Q5):
+   * built in the same design language, absent from docs/design/screens.json.
+   */
+  extra?: boolean;
 }
 
 export interface DomainMeta {
@@ -77,11 +82,25 @@ export const SCREENS: ScreenMeta[] = [
     description: 'Workbench · soạn, duyệt, hành động', descMaxWidth: 700, designTitleRow: false,
   },
   {
+    key: 'tasks', domain: 'business', parent: 'Hàng đợi & Hành động', icon: 'ph ph-check-square', extra: true,
+    name: 'Việc & Nhắc hẹn', en: 'Tasks & Reminders',
+    title: 'Việc & Nhắc hẹn', subtitle: 'Tasks & Reminders · việc đến hạn và lời hứa',
+    description: 'Việc sinh ra từ lời hứa trong hội thoại, từ bản nháp đã duyệt hoặc do Sếp tạo tay. Việc quá hạn tô đỏ, lời hứa sắp đến hạn được nhắc trước để không ai bị bỏ quên.',
+    descMaxWidth: 700, designTitleRow: true,
+  },
+  {
     key: 'directory', domain: 'business', parent: null, icon: 'ph ph-address-book',
     name: 'Nhóm & Con người', en: 'Groups by channel · people filters',
     title: 'Nhóm & Con người', subtitle: 'Danh sách nhóm theo kênh và con người có bộ lọc',
     description: 'Danh sách nhóm tách theo từng kênh, và danh sách con người lọc được theo mức liên quan với Sếp, độ nhiệt, giá trị và mức ưu tiên — từ đó gán agent trực tương ứng.',
     descMaxWidth: 760, designTitleRow: true,
+  },
+  {
+    key: 'documents', domain: 'business', parent: null, icon: 'ph ph-files', extra: true,
+    name: 'Tài liệu', en: 'Documents',
+    title: 'Tài liệu', subtitle: 'Documents · báo giá, hợp đồng, tệp đã trao đổi',
+    description: 'Báo giá, hợp đồng, biên bản và tệp đã trao đổi trên các kênh, gắn về nhóm và người sở hữu. Ai được xem tài liệu nào do quyền truy cập của từng tài liệu quyết định.',
+    descMaxWidth: 700, designTitleRow: true,
   },
   {
     key: 'graph', domain: 'business', parent: null, icon: 'ph ph-graph',
@@ -122,6 +141,13 @@ export const SCREENS: ScreenMeta[] = [
     name: 'Kho hội thoại', en: 'Knowledge & Search',
     title: 'Kho hội thoại', subtitle: 'Knowledge & Search · tìm mẫu, không chỉ tìm câu',
     description: 'Tìm theo ý định, người, ngành hàng, khoảng giá, thời gian và thái độ — không chỉ theo chữ. Mục đích là tìm ra mẫu, không chỉ tìm ra câu.',
+    descMaxWidth: 700, designTitleRow: true,
+  },
+  {
+    key: 'deals', domain: 'business', parent: 'Cơ hội & Thị trường', icon: 'ph ph-handshake', extra: true,
+    name: 'Deal & Vụ việc', en: 'Deals & Cases',
+    title: 'Deal & Vụ việc', subtitle: 'Deals & Cases · đã chốt và đang xử lý',
+    description: 'Deal đã chốt từ bảng cơ hội và các vụ việc cần xử lý như khiếu nại, cảnh báo giao hàng hay thanh toán, kèm trạng thái và người đang xử lý.',
     descMaxWidth: 700, designTitleRow: true,
   },
   {
@@ -207,7 +233,7 @@ export const SCREEN_BY_KEY: Record<string, ScreenMeta> = Object.fromEntries(SCRE
 
 /** Level-1 order of the design NAV, per domain. Group entries are parent names. */
 export const NAV_ORDER: Record<DomainId, string[]> = {
-  business: ['overview', 'Hàng đợi & Hành động', 'directory', 'graph', 'Cơ hội & Thị trường', 'Con người & Chất lượng'],
+  business: ['overview', 'Hàng đợi & Hành động', 'directory', 'documents', 'graph', 'Cơ hội & Thị trường', 'Con người & Chất lượng'],
   tech: ['Tầng dữ liệu', 'Agent & Model', 'plugins', 'system'],
 };
 

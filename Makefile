@@ -2,7 +2,8 @@
 COMPOSE = docker compose -f deploy/compose.yaml --env-file .env
 API = apps/api
 
-.PHONY: secrets up down logs logs-token ps api-dev api-test api-lint web-test bridge-test test migrate
+.PHONY: secrets up down logs logs-token ps api-dev api-test api-lint web-test bridge-test test migrate \
+        seed-demo seed-demo-clean backup backup-list restore
 
 secrets:
 	@mkdir -p secrets
@@ -29,7 +30,7 @@ ps:
 	$(COMPOSE) ps
 
 migrate:
-	cd $(API) && .venv/bin/alembic upgrade head
+	cd $(API) && .venv/bin/alembic upgrade heads
 
 api-dev:
 	cd $(API) && GH_COOKIE_SECURE=false .venv/bin/uvicorn gh.main:app --reload --port 8000
@@ -47,3 +48,23 @@ bridge-test:
 	npm run -w apps/bridge test
 
 test: api-lint api-test bridge-test web-test
+
+# PLAN §5.1 — dữ liệu mẫu đi qua đúng luồng raw → refinery → clean (gh/seed_demo.py). Idempotent: chạy lại
+# không tạo trùng. seed-demo-clean xoá mọi kết luận/đối tượng đã sinh (không đụng raw.events — xem docstring
+# đầu gh/seed_demo.py).
+seed-demo:
+	cd $(API) && .venv/bin/python -m gh.seed_demo seed
+
+seed-demo-clean:
+	cd $(API) && .venv/bin/python -m gh.seed_demo clear
+
+# PLAN §5.6 — pg_dump mã hoá qua ObjectStore, vòng đời 7 ngày/4 tuần/12 tháng (gh/backup.py)
+backup:
+	cd $(API) && .venv/bin/python -m gh.backup run
+
+backup-list:
+	cd $(API) && .venv/bin/python -m gh.backup list
+
+# vd: make restore BACKUP=backups/20260101T020000Z-abcd1234.pgcustom.enc
+restore:
+	cd $(API) && .venv/bin/python -m gh.backup restore --key $(BACKUP)
