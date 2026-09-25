@@ -4,10 +4,7 @@
 // Progress qua Reporter, và internal/tui (hoặc chế độ dòng không TTY) chịu
 // trách nhiệm hiển thị.
 //
-// Chỉ Bước 1 (Kiểm tra máy) và Bước 4 (Sinh bí mật & cấu hình) được cài đặt
-// thật trong phần này. Các bước 2, 3, 5, 6, 7, 8 hiện là stubUnimplemented
-// (xem steps_stub.go) — phiên sau thay từng cái bằng một Step thật, cắm vào
-// đúng vị trí trong Registry() mà không phải đụng tới runner hay TUI.
+// Cả 8 bước đều được cài đặt thật — xem Registry() trong registry.go.
 package install
 
 import (
@@ -165,12 +162,17 @@ type Env struct {
 	// (xem internal/compose.Locate) — dùng khi test hoặc khi Owner cài đặt
 	// từ một bản sao repo không theo cấu trúc mặc định.
 	ComposePath string
+
+	// BrowserOpened được Bước 8 (Hoàn tất) đặt true nếu nó tự mở được trình
+	// duyệt vào trình thiết lập Owner. cmd/genh đọc lại trường này sau khi
+	// Runner.Run() trả về để điền tui.FinishInfo.BrowserOpened — cách này
+	// tránh phải mở trình duyệt lần thứ hai từ main.go (Bước 8 đã mở đúng
+	// một lần, main.go chỉ cần biết kết quả).
+	BrowserOpened bool
 }
 
 // Step là đơn vị công việc của một trong 8 bước cài đặt. Mỗi Step biết
-// StepID/tên hiển thị/trọng số của chính nó, và cách chạy — phiên sau chỉ
-// cần viết một kiểu cài đặt Step mới cho bước 2/3/5/6/7/8 rồi thay vào
-// Registry(), không cần đụng runner hay TUI.
+// StepID/tên hiển thị/trọng số của chính nó, và cách chạy.
 type Step interface {
 	// ID trả về StepID cố định của bước này.
 	ID() StepID
