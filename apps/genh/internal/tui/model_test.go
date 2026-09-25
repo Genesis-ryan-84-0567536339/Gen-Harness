@@ -194,6 +194,30 @@ func TestUpdate_KeyL_TogglesLogVisible(t *testing.T) {
 	}
 }
 
+func TestUpdate_KeyQ_SetsCancelled(t *testing.T) {
+	m := NewModel(noColorStyles(), "v2.2.0", "~/.gen-harness")
+	next, _ := m.Update(keyMsg('q'))
+	nm := next.(Model)
+	if !nm.Cancelled {
+		t.Error("nhấn q phải đặt Cancelled=true (để huỷ ctx Runner)")
+	}
+}
+
+func TestUpdate_DoneMsg_QuitsWithoutCancelled(t *testing.T) {
+	m := NewModel(noColorStyles(), "v2.2.0", "~/.gen-harness")
+	next, cmd := m.Update(DoneMsg{Err: nil})
+	nm := next.(Model)
+	if !nm.Quitting {
+		t.Error("DoneMsg phải đặt Quitting=true")
+	}
+	if nm.Cancelled {
+		t.Error("DoneMsg (Runner tự xong) không phải là Owner huỷ, Cancelled phải là false")
+	}
+	if cmd == nil {
+		t.Error("DoneMsg phải trả về tea.Quit (cmd khác nil)")
+	}
+}
+
 func TestUpdate_SnapshotMsg_UpdatesSnapshot(t *testing.T) {
 	m := NewModel(noColorStyles(), "v2.2.0", "~/.gen-harness")
 	snap := sampleSnapshot()

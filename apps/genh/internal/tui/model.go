@@ -54,6 +54,12 @@ type Model struct {
 	Finished   *FinishInfo
 	LogVisible bool
 	Quitting   bool
+	// Cancelled phân biệt "q" (Owner chủ động huỷ an toàn) với việc chương
+	// trình tự thoát sau khi Runner xong (DoneMsg) — cả hai đều đặt
+	// Quitting=true, nhưng chỉ Cancelled mới cần cmd/genh huỷ ctx của
+	// Runner (dừng container đã tạo, giữ image đã tải, theo đúng mục "q
+	// huỷ an toàn" trong tài liệu).
+	Cancelled bool
 
 	styles     Styles
 	spinnerIdx int
@@ -73,6 +79,12 @@ type SnapshotMsg install.Snapshot
 // FinishMsg báo cài đặt đã xong, chuyển Model sang màn "Hoàn tất".
 type FinishMsg FinishInfo
 
+// DoneMsg báo Runner.Run đã trả về (thành công hay lỗi, mà không phải một
+// màn "Hoàn tất" đẹp — ví dụ khi còn bước chưa triển khai). Model chỉ thoát
+// vòng lặp tương tác; cmd/genh in tóm tắt/hướng dẫn tiếp theo ra terminal
+// sau khi chương trình Bubble Tea kết thúc.
+type DoneMsg struct{ Err error }
+
 type tickMsg time.Time
 
 func tickCmd() tea.Cmd {
@@ -87,10 +99,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "q", "ctrl+c":
 			m.Quitting = true
+			m.Cancelled = true
 			return m, tea.Quit
 		case "l":
 			m.LogVisible = !m.LogVisible
 		}
+	case DoneMsg:
+		m.Quitting = true
+		return m, tea.Quit
 	case tickMsg:
 		m.spinnerIdx = (m.spinnerIdx + 1) % len(spinnerFrames)
 		return m, tickCmd()
