@@ -254,3 +254,9 @@ Release THẬT trên GitHub, repo `Genesis-ryan-84-0567536339/Gen-Harness`):
   proxy môi trường viết chặn, mục này ghi rõ lỗi mạng gặp phải thay vì bịa kết quả; test `httptest` ở
   `selfupdate_test.go` đã phủ đúng luồng "tải thật + kiểm checksum + thay binary" bằng server giả cho trường
   hợp không tới được `github.com` thật từ môi trường này).
+
+## v0.1.6 — lỗi phát hiện nhờ e2e cài thật (27/09/2026)
+Lần đầu cài thật toàn bộ bằng Docker (workflow `e2e-install`) lộ 2 lỗi có từ trước, unit test không bắt được:
+- 🔴 `httpx` chỉ nằm trong nhóm dev của `apps/api/pyproject.toml` → ảnh api/worker thiếu thư viện, chết ngay khi import (`ModuleNotFoundError`). Chuyển vào dependencies chính.
+- 🔴 Docker secret dạng file giữ quyền host: `secrets/gh_*_key` 0600 → container (USER gh/node) không đọc được (`EACCES`). Nay tệp 0644 trong thư mục `secrets/` 0700; genh chmod lại cả bản cài cũ.
+- e2e chế độ PR build ảnh từ code của PR (`GENH_COMPOSE_FILE` → `deploy/compose.yaml`) để lỗi trong ảnh lộ trước khi phát hành.

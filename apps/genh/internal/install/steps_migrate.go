@@ -241,8 +241,25 @@ func ensureComposeSecretFiles(composePath string, res secretgen.Result) error {
 	if _, err := ensureRandomSecretFile(filepath.Join(secretsDir, "gh_bridge_key")); err != nil {
 		return err
 	}
+	// Docker secret dạng file là bind mount GIỮ NGUYÊN quyền trên host: tệp
+	// 0600 thuộc user host thì tiến trình trong container (USER gh / node,
+	// uid khác) không đọc được → api/worker/bridge chết ngay lúc khởi động
+	// (EACCES — phát hiện ở e2e cài thật). Bảo vệ nằm ở thư mục secrets/
+	// 0700 (user khác trên host không vào được); tệp bên trong để 0644 cho
+	// container đọc. Chmod cả tệp cũ để sửa luôn bản cài đã có.
+	if err := os.Chmod(secretsDir, 0o700); err != nil {
+		return fmt.Errorf("đặt quyền %s: %w", secretsDir, err)
+	}
+	for _, name := range []string{"gh_master_key", "gh_bridge_key"} {
+		if err := os.Chmod(filepath.Join(secretsDir, name), secretFilePerm); err != nil {
+			return fmt.Errorf("đặt quyền %s: %w", name, err)
+		}
+	}
 	return nil
 }
+
+// secretFilePerm: xem giải thích trong ensureComposeSecretFiles.
+const secretFilePerm = 0o644
 
 // writeSecretFileIfMissing ghi content vào path chỉ khi path CHƯA tồn tại —
 // không bao giờ ghi đè một bí mật đang được container khác dùng.
@@ -255,7 +272,7 @@ func writeSecretFileIfMissing(path, content string) error {
 	if strings.TrimSpace(content) == "" {
 		return fmt.Errorf("%s: nội dung bí mật rỗng (Bước 4 chưa sinh xong?)", filepath.Base(path))
 	}
-	return writeFileAtomicPerm(path, []byte(content), 0o600)
+	return writeFileAtomicPerm(path, []byte(content), secretFilePerm)
 }
 
 // ensureRandomSecretFile đọc lại path nếu đã có (idempotent), hoặc sinh 32
@@ -272,7 +289,7 @@ func ensureRandomSecretFile(path string) (string, error) {
 		return "", fmt.Errorf("sinh khoá ngẫu nhiên cho %s: %w", filepath.Base(path), err)
 	}
 	key := base64.StdEncoding.EncodeToString(buf)
-	if err := writeFileAtomicPerm(path, []byte(key), 0o600); err != nil {
+	if err := writeFileAtomicPerm(path, []byte(key), secretFilePerm); err != nil {
 		return "", err
 	}
 	return key, nil

@@ -102,6 +102,13 @@ jobs:
           fi
           echo "mode=$mode" >>"$GITHUB_OUTPUT"
           echo "chế độ: $mode"
+          if [ "$mode" = "pr" ]; then
+            # Chế độ pr kiểm CODE của PR, kể cả ảnh api/worker/web/bridge/db:
+            # trỏ genh vào deploy/compose.yaml của checkout (build: cục bộ)
+            # thay vì ảnh đã publish — nếu không, lỗi trong ảnh (vd thiếu thư
+            # viện Python) chỉ lộ ra SAU khi đã phát hành.
+            echo "GENH_COMPOSE_FILE=$GITHUB_WORKSPACE/deploy/compose.yaml" >>"$GITHUB_ENV"
+          fi
 
           # Tag của bản phát hành ĐÃ publish sẵn (dùng để lấy compose.release
           # ở chế độ pr, hoặc để cài đặt ở chế độ release) — luôn là bản MỚI
