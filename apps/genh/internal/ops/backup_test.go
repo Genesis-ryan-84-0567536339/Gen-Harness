@@ -126,3 +126,42 @@ func TestRunRestore_ContainerCommandFails_ReturnsOpError(t *testing.T) {
 		t.Errorf("Code = %q, muốn %q", opErr.Code, ErrCodeRestoreFailed)
 	}
 }
+
+// Máy cài dở (api chưa từng chạy): `exec` báo "is not running" → backup phải
+// chạy lại bằng container tạm `run --rm --no-deps` thay vì chặn `genh update`.
+func TestRunBackup_APINotRunning_FallsBackToOneOffContainer(t *testing.T) {
+	composePath := testComposePath(t, "")
+	env := testEnv(t, composePath)
+
+	fr := &fake.Runner{Responses: []fake.Response{
+		{Match: fake.MatchArgsContain("exec", "-T", "api", "python", "-m", "gh.backup", "run"), Err: errors.New(`exit status 1 — service "api" is not running`)},
+		{Match: fake.MatchArgsContain("run", "--rm", "--no-deps", "-T", "api", "python", "-m", "gh.backup", "run"), Lines: []string{fakeBackupLogLine}},
+	}}
+
+	var out strings.Builder
+	if err := RunBackup(context.Background(), env, "", fr, &out); err != nil {
+		t.Fatalf("RunBackup: %v", err)
+	}
+	if !strings.Contains(out.String(), "backups/20260925T120000Z-abcd1234.pgcustom.enc") {
+		t.Errorf("output phải chứa khoá backup, được %q", out.String())
+	}
+	if len(fr.Calls) != 2 {
+		t.Errorf("muốn 2 lệnh (exec rồi run), được %d", len(fr.Calls))
+	}
+}
+
+// Lỗi khác "not running" (vd db hỏng) không được chạy lại bằng container tạm.
+func TestRunBackup_OtherError_NoOneOffRetry(t *testing.T) {
+	composePath := testComposePath(t, "")
+	env := testEnv(t, composePath)
+
+	fr := &fake.Runner{Responses: []fake.Response{
+		{Match: fake.MatchArgsContain("exec", "-T", "api"), Err: errors.New("db down")},
+	}}
+	if err := RunBackup(context.Background(), env, "", fr, &strings.Builder{}); err == nil {
+		t.Fatal("muốn lỗi")
+	}
+	if len(fr.Calls) != 1 {
+		t.Errorf("muốn đúng 1 lệnh, được %d", len(fr.Calls))
+	}
+}

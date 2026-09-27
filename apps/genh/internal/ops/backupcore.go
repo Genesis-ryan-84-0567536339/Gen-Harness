@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"strings"
 
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/compose"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/dockercli"
@@ -42,11 +43,18 @@ asyncio.run(_m())`
 // backup` (backup.go) và `genh update` (update.go — rollback cần đúng khoá
 // backup vừa tạo TRƯỚC khi đụng gì).
 func runBackupInContainer(ctx context.Context, runner dockercli.Runner, composePath string, envOverlay []string, dir string) (string, error) {
-	args := compose.BaseArgs(composePath, "exec", "-T", backupServiceName, "python", "-m", "gh.backup", "run")
 	var lines []string
-	if err := runner.Stream(ctx, dockercli.Cmd{Name: "docker", Args: args, Env: envOverlay, Dir: dir}, func(line string) {
-		lines = append(lines, line)
-	}); err != nil {
+	stream := func(args []string) error {
+		lines = nil
+		return runner.Stream(ctx, dockercli.Cmd{Name: "docker", Args: args, Env: envOverlay, Dir: dir}, func(line string) {
+			lines = append(lines, line)
+		})
+	}
+	err := stream(apiCommandArgs(composePath, false, "python", "-m", "gh.backup", "run"))
+	if isServiceNotRunning(err) {
+		err = stream(apiCommandArgs(composePath, true, "python", "-m", "gh.backup", "run"))
+	}
+	if err != nil {
 		return "", err
 	}
 	key := findBackupKey(lines)
@@ -69,7 +77,32 @@ func findBackupKey(lines []string) string {
 // container api — dùng chung giữa `genh restore` (backup.go) và rollback tự
 // động của `genh update` (update.go).
 func restoreInContainer(ctx context.Context, runner dockercli.Runner, composePath string, envOverlay []string, dir, key string) error {
-	args := compose.BaseArgs(composePath, "exec", "-T", backupServiceName, "python", "-m", "gh.backup", "restore", "--key", key)
-	_, err := runner.Output(ctx, dockercli.Cmd{Name: "docker", Args: args, Env: envOverlay, Dir: dir})
+	run := func(oneOff bool) error {
+		args := apiCommandArgs(composePath, oneOff, "python", "-m", "gh.backup", "restore", "--key", key)
+		_, err := runner.Output(ctx, dockercli.Cmd{Name: "docker", Args: args, Env: envOverlay, Dir: dir})
+		return err
+	}
+	err := run(false)
+	if isServiceNotRunning(err) {
+		err = run(true)
+	}
 	return err
+}
+
+// apiCommandArgs dựng lệnh chạy cmd trong service api: `exec` vào container
+// đang sống, hoặc (oneOff) `run --rm --no-deps` một container tạm cùng cấu
+// hình (env, secrets, volume) khi api KHÔNG chạy — ví dụ máy cài lỗi dở dang
+// (proxy/api chưa lên) mà Owner chạy `genh update` để sửa: backup trước khi
+// cập nhật vẫn phải làm được, chỉ cần db sống.
+func apiCommandArgs(composePath string, oneOff bool, cmd ...string) []string {
+	if oneOff {
+		return compose.BaseArgs(composePath, append([]string{"run", "--rm", "--no-deps", "-T", backupServiceName}, cmd...)...)
+	}
+	return compose.BaseArgs(composePath, append([]string{"exec", "-T", backupServiceName}, cmd...)...)
+}
+
+// isServiceNotRunning nhận ra lỗi `docker compose exec` khi container api
+// không chạy ("service \"api\" is not running").
+func isServiceNotRunning(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "is not running")
 }
