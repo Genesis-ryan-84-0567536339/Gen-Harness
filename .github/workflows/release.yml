@@ -251,6 +251,8 @@ jobs:
   build-images:
     name: build+push ảnh ${{ matrix.service }}
     runs-on: ubuntu-latest
+    # Chặn treo vô hạn (mặc định GitHub là 6 giờ): build bình thường < 10 phút.
+    timeout-minutes: 30
     needs: meta
     if: needs.meta.outputs.skip != 'true'
     concurrency:
