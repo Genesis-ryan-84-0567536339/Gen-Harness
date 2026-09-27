@@ -370,3 +370,27 @@ async def test_backup_restore_round_trip_preserves_seed_demo_data(app, db, redis
         assert after_alert[0] == "P1" and after_alert[2] == "Nguyễn Văn Bảo"
     finally:
         _admin(f"DROP DATABASE IF EXISTS {target} WITH (FORCE)")
+
+
+async def test_restore_overwrite_partitioned_tables_in_place(tmp_path, scratch_db) -> None:  # type: ignore[no-untyped-def]
+    """Hồi quy e2e cài thật: phục hồi ĐÈ lên chính CSDL đang có bảng phân vùng (như `genh import` / rollback của
+    `genh update`). `pg_restore --clean` trên CSDL đó lỗi hàng loạt "cannot drop inherited constraint" — nay
+    `restore_backup` tạo lại CSDL rỗng trước (gh.backup.recreate_database)."""
+    with _connect(scratch_db) as c:
+        c.execute("CREATE TABLE ev (id bigint, at date NOT NULL, v text, PRIMARY KEY (id, at)) PARTITION BY RANGE (at)")
+        c.execute("CREATE TABLE ev_2026_09 PARTITION OF ev FOR VALUES FROM ('2026-09-01') TO ('2026-10-01')")
+        c.execute("CREATE TABLE ev_default PARTITION OF ev DEFAULT")
+        c.execute("INSERT INTO ev VALUES (1, '2026-09-15', 'truoc-backup'), (2, '2027-01-01', 'mac-dinh')")
+
+    store = LocalObjectStore(root=str(tmp_path / "objects"))
+    src_url = f"{PG}/{scratch_db}"
+    entry = await run_backup(database_url=src_url, store=store)
+
+    with _connect(scratch_db) as c:  # thay đổi SAU backup — phải biến mất sau khi phục hồi
+        c.execute("INSERT INTO ev VALUES (3, '2026-09-20', 'sau-backup')")
+
+    await restore_backup(entry.key, database_url=src_url, store=store)
+
+    with _connect(scratch_db) as c:
+        rows = c.execute("SELECT v FROM ev ORDER BY id").fetchall()
+    assert [r[0] for r in rows] == ["truoc-backup", "mac-dinh"]
