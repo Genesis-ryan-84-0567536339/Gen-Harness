@@ -121,6 +121,16 @@ CSDL trống → đối chiếu từng dòng): `docs/reports/phase-5-backup.md`.
 đích): `genh export --to <file>` / `genh import <file> [--yes]` — xem `docs/handoff/05-installer.md` và
 `docs/reports/HANDOFF-v0.1.1.md`.
 
+**⚠️ Cảnh báo — khoá chỉ nằm trên máy này**: `GH_MASTER_KEY` (mã hoá bí mật ứng dụng) và, nếu có cấu hình,
+`GH_BACKUP_KEY` (mã hoá riêng cho backup — xem `docs/reports/HANDOFF-v0.1.2.md`) chỉ tồn tại trên máy đang
+chạy, không tự sao lưu ra ngoài. Máy hỏng/ổ đĩa hỏng **mà không có bản sao khoá ở nơi khác** → mọi bản backup
+tại chỗ (kể cả trong `gh_objects`) đều **không giải mã lại được**, coi như mất hoàn toàn.
+
+Tự bảo vệ: định kỳ chạy `genh export --to <file>` ra một ổ đĩa/máy KHÁC (USB, máy khác, kho lưu trữ ngoài) —
+gói `.ghbundle` mang theo cả khoá master (và khoá bridge nếu có), tự bảo vệ bằng mật khẩu riêng (`GH_BUNDLE_
+PASSWORD`, argon2id + AES-256-GCM), không phụ thuộc khoá đang cấu hình trên máy nguồn. Giữ mật khẩu gói này
+một nơi khác, an toàn (không cùng chỗ với gói) — mất mật khẩu gói cũng coi như mất gói.
+
 ## Phát triển
 
 Monorepo npm workspaces + một app Python riêng:

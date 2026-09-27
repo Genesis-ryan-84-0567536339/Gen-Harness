@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     # Khoá bridge (32 byte base64): ký permit gửi tin và mã hoá phiên kênh khi truyền (docs/api/bridge-protocol.md)
     bridge_key: str = ""
     bridge_key_file: str = ""
+    # Khoá RIÊNG cho backup CSDL (32 byte, dạng HEX 64 ký tự — khác `master_key` vốn là base64, xem hợp đồng
+    # với genh ở docs/reports/HANDOFF-v0.1.2.md): backup MỚI mã hoá bằng khoá này khi có cấu hình, tách biệt
+    # với bí mật ứng dụng (`master_key`) — mất một khoá không kéo theo mất khoá kia. Trống ⇒ giữ hành vi cũ
+    # (mã hoá backup bằng `master_key`, xem `gh/backup.py::_backup_encryption_key`).
+    backup_key: str = ""
     # Thư mục cấu hình của Antigravity CLI (tệp OAuth token); worker ghi hồ sơ đang hoạt động vào đây
     cli_home: str = "~/.gemini/antigravity-cli"
     cli_binary: str = "agy"
