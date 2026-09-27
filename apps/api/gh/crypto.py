@@ -57,23 +57,30 @@ def master_key() -> bytes:
     return _dev_master_key
 
 
-def encrypt(plaintext: bytes, associated: bytes = b"") -> bytes:
+def encrypt(plaintext: bytes, associated: bytes = b"", *, key: bytes | None = None) -> bytes:
     """Mã hoá phong bì: khoá dữ liệu ngẫu nhiên mã hoá nội dung, khoá master mã hoá khoá dữ liệu.
 
     Định dạng: b"GH1" | nonce_k(12) | enc_dek(48) | nonce_d(12) | ciphertext
+
+    `key`: khoá master tường minh (32 byte) thay cho `master_key()` của cấu hình hiện hành — chỉ dùng khi
+    `gh.bundle` cần mã hoá lại bí mật bằng khoá master của MÁY KHÁC (nhập gói hồ sơ vào máy mới), mọi lời gọi
+    khác trong hệ thống đều bỏ trống để dùng đúng khoá master đang cấu hình.
     """
+    mk = key if key is not None else master_key()
     dek = AESGCM.generate_key(bit_length=256)
     nonce_k, nonce_d = os.urandom(12), os.urandom(12)
-    enc_dek = AESGCM(master_key()).encrypt(nonce_k, dek, b"dek")
+    enc_dek = AESGCM(mk).encrypt(nonce_k, dek, b"dek")
     ct = AESGCM(dek).encrypt(nonce_d, plaintext, associated)
     return b"GH1" + nonce_k + enc_dek + nonce_d + ct
 
 
-def decrypt(blob: bytes, associated: bytes = b"") -> bytes:
+def decrypt(blob: bytes, associated: bytes = b"", *, key: bytes | None = None) -> bytes:
+    """`key`: xem docstring `encrypt` — dùng để giải mã bằng khoá master CŨ đi kèm trong gói hồ sơ."""
     if blob[:3] != b"GH1":
         raise ValueError("Định dạng bí mật không hợp lệ")
+    mk = key if key is not None else master_key()
     nonce_k, enc_dek, nonce_d, ct = blob[3:15], blob[15:63], blob[63:75], blob[75:]
-    dek = AESGCM(master_key()).decrypt(nonce_k, enc_dek, b"dek")
+    dek = AESGCM(mk).decrypt(nonce_k, enc_dek, b"dek")
     return AESGCM(dek).decrypt(nonce_d, ct, associated)
 
 
