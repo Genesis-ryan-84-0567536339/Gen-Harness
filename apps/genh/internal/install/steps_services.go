@@ -42,7 +42,10 @@ const defaultReadyPollInterval = 2 * time.Second
 type servicesStep struct {
 	// runner cho phép tiêm dockercli.Runner giả khi test — nil dùng ExecRunner thật.
 	runner dockercli.Runner
-	// locate cho phép tiêm compose.Locate giả khi test — nil dùng compose.Locate.
+	// locate cho phép tiêm compose.LocateAndSync giả khi test — nil dùng
+	// compose.LocateAndSync (genh install CÓ trách nhiệm đồng bộ compose.yaml
+	// nhúng, khác Locate thường dùng ở internal/ops — xem doc-comment
+	// compose.LocateAndSync).
 	locate func(installDir string) (string, error)
 	// client cho phép tiêm *http.Client giả (ví dụ trỏ vào httptest.Server)
 	// khi test — nil dùng client TLS mặc định (xem lý do InsecureSkipVerify
@@ -62,7 +65,7 @@ func (s servicesStep) Run(ctx context.Context, env *Env, rep Reporter) error {
 	}
 	locate := s.locate
 	if locate == nil {
-		locate = compose.Locate
+		locate = compose.LocateAndSync
 	}
 	timeout := s.timeout
 	if timeout <= 0 {

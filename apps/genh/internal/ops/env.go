@@ -25,6 +25,13 @@ type Env struct {
 	// locate cho phép tiêm compose.Locate giả khi test — nil dùng
 	// compose.Locate.
 	locate func(installDir string) (string, error)
+
+	// locateSync cho phép tiêm compose.LocateAndSync giả khi test — nil dùng
+	// locate (nếu đã tiêm, để test khỏi phải tiêm cả hai) rồi compose.
+	// LocateAndSync (sản xuất thật). Chỉ LocatePathSync (dùng bởi `genh
+	// update`, xem update.go) dùng trường này — mọi lệnh vận hành khác dùng
+	// LocatePath/locate (KHÔNG đồng bộ, xem compose.Locate và mục #3 v0.1.2).
+	locateSync func(installDir string) (string, error)
 }
 
 // ResolveInstallDir trả về InstallDir đã cấu hình, hoặc config.DefaultRoot()
@@ -69,11 +76,47 @@ func (e *Env) LocatePath() (string, error) {
 	return path, nil
 }
 
-// LoadSecrets đọc lại bí mật đã sinh ở Bước 4 (KHÔNG sinh mới — xem
-// secretgen.Load) hoặc trả OpError rõ ràng "chưa cài" nếu thư mục cấu hình
-// chưa có bí mật nào.
+// LocatePathSync tìm deploy/compose.yaml thật NHƯ LocatePath, nhưng qua
+// compose.LocateAndSync — TỰ ĐỒNG BỘ lại compose.yaml GENH QUẢN LÝ với bản
+// nhúng của binary genh đang chạy nếu lệch (giữ bản cũ ở compose.yaml.bak).
+// CHỈ `genh update` gọi hàm này (xem update.go) — mọi lệnh vận hành khác
+// dùng LocatePath (không đồng bộ, chỉ nhắc — xem docs/reports/
+// HANDOFF-v0.1.1.md mục "Lỗi cần sửa" #3 của v0.1.2).
+func (e *Env) LocatePathSync() (string, error) {
+	locate := e.locateSync
+	if locate == nil {
+		locate = e.locate // test thường chỉ tiêm locate — dùng lại cho khỏi phải tiêm hai lần
+	}
+	if locate == nil {
+		locate = compose.LocateAndSync
+	}
+	path, err := locate(e.InstallDir)
+	if err != nil {
+		return "", &OpError{
+			Code: ErrCodeComposeNotFound,
+			What: "Không tìm thấy deploy/compose.yaml",
+			Why:  err.Error(),
+			Next: "Đặt biến GENH_COMPOSE_FILE trỏ tới compose.yaml, hoặc chạy `genh install` trước.",
+			Err:  err,
+		}
+	}
+	return path, nil
+}
+
+// LoadSecrets đọc lại bí mật đã sinh ở Bước 4, TỰ BỔ SUNG (và ghi lại ngay)
+// bất kỳ trường nào còn thiếu so với phiên bản genh hiện tại (secretgen.
+// LoadFillingMissing, tái dùng đúng logic fillMissing của secretgen.Ensure) —
+// KHÔNG tự "cài" (sinh secrets.json từ đầu) nếu thư mục cấu hình chưa có bí
+// mật nào, trả OpError "chưa cài" trong trường hợp đó.
+//
+// SỬA LỖI (docs/reports/HANDOFF-v0.1.1.md mục "Lỗi cần sửa" #1 của v0.1.2):
+// trước đây gọi secretgen.Load (chỉ đọc, không bổ sung) — một bản cài từ
+// v0.1.0 nâng cấp genh lên v0.1.1/v0.1.2 có secrets.json thiếu
+// app_db_password (trường mới từ v0.1.1) → EnvOverlay truyền
+// GH_APP_DB_PASSWORD rỗng → MỌI lệnh `docker compose` lỗi ngay ở
+// ${GH_APP_DB_PASSWORD:?...} trong compose.yaml, kể cả `genh status`.
 func (e *Env) LoadSecrets() (secretgen.Bundle, error) {
-	b, err := secretgen.Load(e.ConfigDir())
+	b, err := secretgen.LoadFillingMissing(e.ConfigDir())
 	if err != nil {
 		return secretgen.Bundle{}, &OpError{
 			Code: ErrCodeNotInstalled,
@@ -102,6 +145,11 @@ func EnvOverlay(b secretgen.Bundle) []string {
 		"POSTGRES_PASSWORD=" + b.DBPassword,
 		"GH_APP_DB_PASSWORD=" + b.AppDBPassword,
 		"GH_SETUP_TOKEN=" + b.SetupToken,
+		// GH_BACKUP_KEY: khoá mã hoá backup (secretgen.Bundle.BackupKey, hex
+		// 64 ký tự) — deploy/compose.yaml đọc qua ${GH_BACKUP_KEY:-} trong
+		// x-app-env, agent Python (apps/api/gh/backup.py) dùng để mã hoá bytes
+		// backup, độc lập với GH_MASTER_KEY.
+		"GH_BACKUP_KEY=" + b.BackupKey,
 	}
 	return append(env, pgtune.DetectAndCompute().EnvPairs()...)
 }
