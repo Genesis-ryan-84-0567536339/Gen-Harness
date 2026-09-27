@@ -4,7 +4,11 @@
 # Serves the static bundle on :8080 (nginx-unprivileged, non-root) with SPA fallback.
 
 # ── build ──────────────────────────────────────────────────────────────────
-FROM node:22-alpine AS build
+# --platform=$BUILDPLATFORM: bundle tĩnh (HTML/JS/CSS) giống hệt nhau trên mọi
+# kiến trúc, nên build một lần trên kiến trúc máy build (amd64) thay vì chạy
+# npm/vite dưới QEMU arm64 — bước đó từng treo job Release (v0.1.1, v0.1.6).
+# Chỉ tầng nginx phía dưới là theo TARGETPLATFORM (chỉ COPY, không RUN).
+FROM --platform=$BUILDPLATFORM node:22-alpine AS build
 WORKDIR /repo
 ENV CI=1 NPM_CONFIG_UPDATE_NOTIFIER=false NPM_CONFIG_FUND=false
 # manifests first for layer caching

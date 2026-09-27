@@ -264,3 +264,10 @@ Lần đầu cài thật toàn bộ bằng Docker (workflow `e2e-install`) lộ 
 - 🔴 Ảnh api không có `pg_dump`/`pg_restore` → `genh backup`/`update`/`export`/`import` và backup định kỳ đều chết (`FileNotFoundError: 'pg_dump'`). Cài `postgresql-client-16` từ apt.postgresql.org (cùng major với server).
 - 🔴 genh sinh khoá master dạng hex (64 ký tự) nhưng `gh.crypto.master_key` chỉ nhận base64 → mọi thao tác mã hoá/giải mã trên bản cài bằng genh (backup, lưu API key…) lỗi "GH_MASTER_KEY phải là 32 byte base64". `gh.crypto.decode_key` nay nhận cả hex lẫn base64 (không đổi khoá của bản cài cũ).
 - 🔴 `pg_restore --clean` đè lên CSDL có bảng phân vùng (pg_partman) lỗi hàng loạt "cannot drop inherited constraint" → `genh import` và rollback của `genh update` hỏng. Nay `gh.backup.recreate_database` xoá/tạo lại CSDL rỗng (`DROP DATABASE … WITH (FORCE)`) rồi mới `pg_restore` (dùng chung cho backup restore và bundle import). Test hồi quy `test_restore_overwrite_partitioned_tables_in_place`.
+
+## v0.1.7 — Release không còn treo ở ảnh web
+
+- Release v0.1.6 kẹt ở job "build+push ảnh web" hơn 25 phút (giống v0.1.1): `npm ci` + `vite build` chạy dưới QEMU arm64.
+- `apps/web/Dockerfile`: tầng build đổi thành `FROM --platform=$BUILDPLATFORM`. Bundle tĩnh giống nhau trên mọi kiến trúc nên chỉ build 1 lần (native amd64); tầng nginx arm64 chỉ COPY.
+- `release.yml`: `timeout-minutes: 30` cho build-images (mặc định 6 giờ).
+- Run v0.1.6 bị huỷ; tag v0.1.6 chưa từng được tạo nên v0.1.7 là bản phát hành kế tiếp của v0.1.5.
