@@ -29,7 +29,7 @@ services:
     environment:
       GH_SITE_ADDRESS: ${GH_SITE_ADDRESS:-localhost}
     volumes:
-      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./proxy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
     depends_on:
       api: { condition: service_healthy }

@@ -26,3 +26,13 @@ import _ "embed"
 //
 //go:embed embedded_compose.yaml
 var embeddedComposeYAML []byte
+
+// embeddedCaddyfile là bản sao deploy/proxy/Caddyfile — compose.yaml bind-mount
+// "./proxy/Caddyfile" (tương đối với thư mục chứa compose.yaml), nên khi genh
+// ghi compose.yaml nhúng ra "<installDir>/deploy/" nó PHẢI ghi kèm tệp này.
+// Thiếu tệp, Docker tự tạo một THƯ MỤC rỗng cùng tên rồi proxy không khởi
+// động được ("not a directory") — lỗi e2e chế độ release v0.1.7 bắt được.
+// TestEmbeddedCaddyfileMatchesRepo giữ bản sao này khớp với deploy/.
+//
+//go:embed embedded_Caddyfile
+var embeddedCaddyfile []byte

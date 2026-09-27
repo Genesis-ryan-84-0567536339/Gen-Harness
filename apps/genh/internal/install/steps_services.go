@@ -192,7 +192,7 @@ func (s servicesStep) Run(ctx context.Context, env *Env, rep Reporter) error {
 
 // newInsecureReadyClient dựng http.Client cho việc thăm dò readyPath.
 //
-// LƯU Ý vì sao InsecureSkipVerify: deploy/caddy/Caddyfile dùng chỉ thị `tls
+// LƯU Ý vì sao InsecureSkipVerify: deploy/proxy/Caddyfile dùng chỉ thị `tls
 // internal` — Caddy TỰ quản lý một CA nội bộ RIÊNG (sinh và giữ trong volume
 // caddy_data lúc container proxy khởi động lần đầu), KHÁC với CA mà
 // secretgen.EnsureCA sinh ở Bước 4 (secretgen.Result.CACertPEM). Hai CA này
