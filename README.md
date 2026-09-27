@@ -151,6 +151,12 @@ genh update
 `docs/handoff/05-installer.md` mục "Lệnh vận hành"). `genh install` chỉ dùng cho máy **chưa cài lần nào**, hoặc
 lần cài trước **thật sự chưa xong** (thêm cờ `--force` nếu cần cố tình cài lại một máy đã cài).
 
+## Phát hành
+
+Phát hành = tăng `VERSION` (ở gốc repo) trong PR, merge vào main — GitHub Actions (`release.yml`) tự build, tự
+tạo GitHub Release và tag tương ứng, không cần ai tạo tag/release tay. Chi tiết: `docs/handoff/05-installer.md`
+mục "Phát hành".
+
 ## Phát triển
 
 Monorepo npm workspaces + một app Python riêng:

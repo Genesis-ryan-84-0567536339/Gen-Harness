@@ -137,8 +137,21 @@ Mọi bước **idempotent**: chạy lại `genh install` sau lỗi tiếp tục
 
 ## Phát hành
 
+**Từ v0.1.4: phát hành = tăng `VERSION` trong PR, merge vào main.** Không còn bước tay nào khác (không tự tạo tag, không tự bấm "Draft a release" trên web) — agent code không tạo được tag qua proxy, nên `.github/workflows/release.yml` (job `meta`) đọc thẳng tệp `VERSION` ở gốc repo mỗi lần có push vào `main`:
+- Nếu tag ứng với version đó **chưa tồn tại** trên remote → chạy toàn bộ pipeline phát hành (build 6 nền tảng, build+push image, sinh Release, tự tạo tag `vX.Y.Z` trỏ đúng commit vừa merge).
+- Nếu tag **đã tồn tại** (PR merge không đổi `VERSION`) → job `meta` trả `skip=true`, mọi job khác bỏ qua — không publish lại, không tạo Release trùng.
+- Tag do workflow tự tạo (`softprops/action-gh-release`, ký bằng `GITHUB_TOKEN`) sẽ **không** tự kích hoạt lại `release.yml` — đúng ý, tránh chạy 2 lần vì chính tag mình vừa tạo.
+- Đẩy tag `v*` bằng tay (hiếm dùng, vd. khôi phục sau sự cố) vẫn hoạt động như trước — job `meta` nhận version từ tag đó thay vì đọc `VERSION`.
+- CI (`ci.yml`, job `version`) kiểm định dạng `VERSION` (`vMAJOR.MINOR.PATCH[-PRERELEASE]`) ngay từ PR, không đợi tới lúc chạy trên main mới phát hiện sai.
 - GitHub Actions: build `genh` cho 6 nền tảng, build + push image đa kiến trúc (`linux/amd64`, `linux/arm64`) lên GHCR, sinh `checksums.txt`, ký bằng cosign keyless, đính `install.sh`, `install.ps1`, rootfs WSL vào Release.
 - Image gắn tag theo phiên bản; `compose.yaml` nhúng trong `genh` ghim đúng digest của bản phát hành đó.
+- Job `verify-docker-pins` tải lại 4 tệp Docker Engine tĩnh đã ghim SHA-256 trong `apps/genh/internal/runtime/bootstrap_linux.go` (xem mục "Docker Engine tĩnh trên Linux" bên dưới) và so sha256 mỗi lần release — fail sớm nếu Docker thay nội dung tệp mà không đổi tên.
+
+## Docker Engine tĩnh trên Linux (bootstrap tự cài)
+
+`apps/genh/internal/runtime/bootstrap_linux.go` tự tải Docker Engine tĩnh (`docker-<version>.tgz` + `docker-rootless-extras-<version>.tgz`) từ `download.docker.com` khi máy Linux chưa có Docker hợp lệ. Docker **không** phát hành tệp `SHA256SUMS` trong thư mục `linux/static/stable/<arch>/` (đã xác minh: trả 404, thư mục chỉ có các `*.tgz`) — nên thay vì tải tệp checksum đó (bug GH-E021, khiến `genh install` luôn lỗi trên máy Linux sạch), SHA-256 của từng gói/kiến trúc được **ghim cứng** trong biến `dockerStaticChecksums`.
+
+Cập nhật khi nâng `dockerStaticVersion`: tải cả 4 tệp (2 kiến trúc × 2 gói) từ `https://download.docker.com/linux/static/stable/<arch>/`, tính `sha256sum`, dán vào bảng — rồi để job `verify-docker-pins` (release.yml) xác nhận lại trên CI.
 
 ## Kiểm thử trình cài
 

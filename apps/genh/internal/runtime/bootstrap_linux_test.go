@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -35,6 +36,54 @@ func TestStaticDownloadURL(t *testing.T) {
 	}
 }
 
+// TestPinnedChecksum_KnownVersion kiểm bảng dockerStaticChecksums thật (bản
+// dockerStaticVersion hiện hành) có đủ checksum cho cả 2 kiến trúc release
+// hỗ trợ và cả 2 gói (chính + rootless-extras) — hỏng bảng này là hỏng cài
+// đặt Docker thật trên máy Owner, không cách nào test bằng server giả bù
+// được.
+func TestPinnedChecksum_KnownVersion(t *testing.T) {
+	for _, goarch := range []string{"amd64", "arm64"} {
+		for _, name := range []string{
+			fmt.Sprintf("docker-%s.tgz", dockerStaticVersion),
+			fmt.Sprintf("docker-rootless-extras-%s.tgz", dockerStaticVersion),
+		} {
+			got, err := PinnedChecksum(goarch, name)
+			if err != nil {
+				t.Errorf("PinnedChecksum(%q, %q): %v", goarch, name, err)
+				continue
+			}
+			if len(got) != 64 {
+				t.Errorf("PinnedChecksum(%q, %q) = %q, muốn chuỗi hex sha256 dài 64", goarch, name, got)
+			}
+		}
+	}
+}
+
+func TestPinnedChecksum_UnknownFails(t *testing.T) {
+	if _, err := PinnedChecksum("amd64", "docker-0.0.0.tgz"); err == nil {
+		t.Error("muốn lỗi rõ ràng khi không có checksum ghim cho version lạ, thay vì âm thầm bỏ qua kiểm chứng")
+	}
+	if _, err := PinnedChecksum("riscv64", fmt.Sprintf("docker-%s.tgz", dockerStaticVersion)); err == nil {
+		t.Error("muốn lỗi rõ ràng khi không có checksum ghim cho kiến trúc lạ")
+	}
+}
+
+// withPinnedChecksums ghi đè tạm bảng checksum toàn cục cho một version+arch
+// giả (dùng httptest.Server + tarball giả trong bộ nhớ), trả hàm khôi phục
+// bảng thật — để các test Bootstrap dưới đây không phụ thuộc mạng thật lẫn
+// không phải sửa binary docker thật vào git.
+func withPinnedChecksums(t *testing.T, arch, version string, checksums map[string]string) {
+	t.Helper()
+	old := dockerStaticChecksums
+	merged := map[string]map[string]string{}
+	for k, v := range old {
+		merged[k] = v
+	}
+	merged[arch] = checksums
+	dockerStaticChecksums = merged
+	t.Cleanup(func() { dockerStaticChecksums = old })
+}
+
 // fakeTarGz trả về nội dung .tar.gz hợp lệ, tối giản (chỉ đủ để
 // ExtractTarGz chạy qua, không cần binary docker thật).
 func fakeTarGz(t *testing.T) []byte {
@@ -47,7 +96,10 @@ func fakeTarGz(t *testing.T) []byte {
 }
 
 // newBootstrapTestServer dựng một httptest.Server đóng vai download.docker.com:
-// phục vụ đúng 2 tarball (chính + rootless-extras) và một SHA256SUMS khớp.
+// phục vụ đúng 2 tarball (chính + rootless-extras), và ghi đè tạm
+// dockerStaticChecksums (qua withPinnedChecksums) để khớp nội dung tarball
+// giả — không tải SHA256SUMS nữa (tệp đó không tồn tại thật, xem comment ở
+// dockerStaticChecksums trong bootstrap_linux.go).
 func newBootstrapTestServer(t *testing.T) (*httptest.Server, string) {
 	t.Helper()
 	tarball := fakeTarGz(t)
@@ -56,12 +108,13 @@ func newBootstrapTestServer(t *testing.T) (*httptest.Server, string) {
 
 	mainName := "docker-27.3.1.tgz"
 	extrasName := "docker-rootless-extras-27.3.1.tgz"
-	checksums := sumHex + "  " + mainName + "\n" + sumHex + "  " + extrasName + "\n"
+
+	withPinnedChecksums(t, "x86_64", "27.3.1", map[string]string{
+		mainName:   sumHex,
+		extrasName: sumHex,
+	})
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/linux/static/stable/x86_64/SHA256SUMS", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(checksums))
-	})
 	mux.HandleFunc("/linux/static/stable/x86_64/"+mainName, func(w http.ResponseWriter, r *http.Request) {
 		w.Write(tarball)
 	})
@@ -140,10 +193,11 @@ func TestBootstrap_Idempotent_SkipsRedownloadOnSecondRun(t *testing.T) {
 }
 
 func TestBootstrap_ChecksumMismatch_Fails(t *testing.T) {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/linux/static/stable/x86_64/SHA256SUMS", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("0000000000000000000000000000000000000000000000000000000000000000  docker-27.3.1.tgz\n"))
+	withPinnedChecksums(t, "x86_64", "27.3.1", map[string]string{
+		"docker-27.3.1.tgz": "0000000000000000000000000000000000000000000000000000000000000000",
 	})
+
+	mux := http.NewServeMux()
 	mux.HandleFunc("/linux/static/stable/x86_64/docker-27.3.1.tgz", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("noi dung khong khop checksum"))
 	})
