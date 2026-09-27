@@ -261,3 +261,4 @@ Lần đầu cài thật toàn bộ bằng Docker (workflow `e2e-install`) lộ 
 - 🔴 Docker secret dạng file giữ quyền host: `secrets/gh_*_key` 0600 → container (USER gh/node) không đọc được (`EACCES`). Nay tệp 0644 trong thư mục `secrets/` 0700; genh chmod lại cả bản cài cũ.
 - e2e chế độ PR build ảnh từ code của PR (`GENH_COMPOSE_FILE` → `deploy/compose.yaml`) để lỗi trong ảnh lộ trước khi phát hành.
 - 🔴 genh gọi proxy bằng `https://127.0.0.1:<port>` — Caddy site `localhost:8443` + `tls internal` không có chứng chỉ cho yêu cầu không SNI → bước "chờ /api/v1/ready" của `genh install`/`update`/`status` không bao giờ thành công dù api healthy. Nay gọi `https://localhost:<port>` (`ops.ProxyHost`).
+- 🔴 Ảnh api không có `pg_dump`/`pg_restore` → `genh backup`/`update`/`export`/`import` và backup định kỳ đều chết (`FileNotFoundError: 'pg_dump'`). Cài `postgresql-client-16` từ apt.postgresql.org (cùng major với server).
