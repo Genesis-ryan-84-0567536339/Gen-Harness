@@ -71,6 +71,10 @@ func run(args []string) int {
 		return runStart(args[1:])
 	case "uninstall":
 		return runUninstall(args[1:])
+	case "export":
+		return runExport(args[1:])
+	case "import":
+		return runImport(args[1:])
 	case "version", "-v", "--version":
 		fmt.Println("genh " + version)
 		return 0
@@ -105,6 +109,10 @@ Lệnh vận hành (cờ chung mọi lệnh dưới đây: --port N, --install-d
   genh stop                              dừng toàn bộ dịch vụ (giữ dữ liệu)
   genh start                             khởi động lại toàn bộ dịch vụ
   genh uninstall [--keep-data]           gỡ container/volume/lối tắt/PATH (hỏi xác nhận)
+  genh export --to <file>                xuất gói hồ sơ .ghbundle (hỏi mật khẩu ẩn 2 lần,
+                                          hoặc biến GH_BUNDLE_PASSWORD cho script/test)
+  genh import <file> [--yes]             nhập gói .ghbundle — GHI ĐÈ dữ liệu hiện tại (hỏi
+                                          xác nhận trừ --yes), tự backup an toàn trước
 
   genh version                                   in phiên bản
   genh help                                      in hướng dẫn này
@@ -345,6 +353,53 @@ func runUninstall(args []string) int {
 	}
 	opts := ops.UninstallOptions{KeepData: *keepData}
 	if err := ops.RunUninstall(context.Background(), env, opts, nil, os.Stdin, os.Stdout); err != nil {
+		reportOpErr(err)
+		return 1
+	}
+	return 0
+}
+
+func runExport(args []string) int {
+	fs, port, installDir := opsFlagSet("export")
+	to := fs.String("to", "", "đường dẫn tệp .ghbundle sẽ ghi ra (bắt buộc)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *to == "" {
+		_, _ = fmt.Fprintln(os.Stderr, "genh: cách dùng: genh export --to <file>")
+		return 2
+	}
+	env, ok := resolveOpsEnv(*port, *installDir)
+	if !ok {
+		return 1
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	if err := ops.RunExport(ctx, env, *to, ops.ExportDeps{}, os.Stdout); err != nil {
+		reportOpErr(err)
+		return 1
+	}
+	return 0
+}
+
+func runImport(args []string) int {
+	fs, port, installDir := opsFlagSet("import")
+	yes := fs.Bool("yes", false, "bỏ qua hỏi xác nhận GHI ĐÈ dữ liệu hiện tại")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 1 {
+		_, _ = fmt.Fprintln(os.Stderr, "genh: cách dùng: genh import <file> [--yes]")
+		return 2
+	}
+	env, ok := resolveOpsEnv(*port, *installDir)
+	if !ok {
+		return 1
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	opts := ops.ImportOptions{AutoApprove: *yes}
+	if err := ops.RunImport(ctx, env, fs.Arg(0), opts, ops.ImportDeps{}, os.Stdin, os.Stdout); err != nil {
 		reportOpErr(err)
 		return 1
 	}

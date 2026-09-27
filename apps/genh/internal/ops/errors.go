@@ -51,6 +51,23 @@ const (
 	// 99x — genh uninstall.
 	ErrCodeUninstallCancelled = "GH-E990"
 	ErrCodeUninstallFailed    = "GH-E991"
+
+	// A0x — genh export (xem docs mục "Gói hồ sơ .ghbundle" — hợp đồng với
+	// `python -m gh.bundle export`, phía Python là việc của một agent khác,
+	// đây chỉ là phía Go gọi vào nó qua docker compose exec).
+	ErrCodeExportPasswordMismatch = "GH-EA00" // 2 lần gõ mật khẩu không khớp, hoặc mật khẩu < 12 ký tự
+	ErrCodeExportFailed           = "GH-EA01" // `python -m gh.bundle export` thoát khác 0 (mã 1) hoặc lỗi tiến trình
+	ErrCodeExportWriteFailed      = "GH-EA02" // ghi tệp tạm/rename ra --to thất bại
+
+	// A1x — genh import (xem cùng mục trên).
+	ErrCodeImportNotBundle       = "GH-EA10" // tệp không tồn tại, hoặc không bắt đầu bằng "GHBUNDLE1\n"
+	ErrCodeImportCancelled       = "GH-EA11" // huỷ xác nhận GHI ĐÈ (không có --yes)
+	ErrCodeImportPasswordInvalid = "GH-EA12" // mật khẩu < 12 ký tự
+	ErrCodeImportBackupFailed    = "GH-EA13" // backup an toàn trước khi import thất bại — DỪNG LẠI, chưa đụng gì
+	ErrCodeImportWrongPassword   = "GH-EA14" // `python -m gh.bundle import` thoát mã 2: sai mật khẩu hoặc gói hỏng
+	ErrCodeImportIncompatible    = "GH-EA15" // `python -m gh.bundle import` thoát mã 3: gói không tương thích
+	ErrCodeImportFailed          = "GH-EA16" // `python -m gh.bundle import` thoát mã 1 hoặc lỗi tiến trình khác
+	ErrCodeImportRestartFailed   = "GH-EA17" // import xong nhưng `docker compose restart api worker` hoặc healthcheck thất bại
 )
 
 // OpError là lỗi có cấu trúc cho các lệnh vận hành, theo đúng tinh thần

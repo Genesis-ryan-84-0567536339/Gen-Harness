@@ -54,6 +54,36 @@ type Runner interface {
 	// sót dòng nào). Trả lỗi nếu lệnh thoát khác 0 (sau khi đã gọi hết
 	// onLine cho các dòng đã in được).
 	Stream(ctx context.Context, cmd Cmd, onLine func(line string)) error
+
+	// RunIO chạy lệnh nối THẲNG stdin/stdout với stdin/stdout do bên gọi đưa
+	// vào — KHÔNG gom qua bufio.Scanner/dòng như Output/Stream, dùng khi cần
+	// truyền/nhận bytes thô hai chiều mà không được phép gom hết vào RAM
+	// (ví dụ pipe một tệp gói .ghbundle vào/ra tiến trình `python -m
+	// gh.bundle export|import`, xem internal/ops/bundle.go) VÀ cần phân biệt
+	// mã thoát cụ thể thay vì chỉ biết "lỗi hay không" (hợp đồng gh.bundle:
+	// 0 ok/1 lỗi khác/2 sai mật khẩu-gói hỏng/3 không tương thích).
+	//
+	// stdin có thể nil (không có gì để ghi vào stdin tiến trình con). Khi
+	// tiến trình CHẠY XONG nhưng thoát khác 0, lỗi trả về là *ExitError (dùng
+	// errors.As để lấy Code) — khi tiến trình không khởi chạy được (ví dụ
+	// không thấy "docker" trên PATH), lỗi trả về là lỗi thường, KHÔNG phải
+	// *ExitError.
+	RunIO(ctx context.Context, cmd Cmd, stdin io.Reader, stdout io.Writer) error
+}
+
+// ExitError bọc mã thoát khác 0 của một tiến trình chạy qua RunIO — Stderr
+// là phần đuôi stderr đã gộp (để thông báo lỗi có ngữ cảnh, giống Output),
+// Code là mã thoát thật của tiến trình con.
+type ExitError struct {
+	Code   int
+	Stderr string
+}
+
+func (e *ExitError) Error() string {
+	if e.Stderr == "" {
+		return fmt.Sprintf("thoát mã %d", e.Code)
+	}
+	return fmt.Sprintf("thoát mã %d: %s", e.Code, e.Stderr)
 }
 
 // ExecRunner là Runner thật, gọi os/exec — dùng trong genh khi chạy thật.
@@ -131,6 +161,54 @@ func (r ExecRunner) Stream(ctx context.Context, cmd Cmd, onLine func(line string
 		return fmt.Errorf("%s %v: %w — %s", cmd.Name, cmd.Args, err, tail)
 	}
 	return nil
+}
+
+func (r ExecRunner) RunIO(ctx context.Context, cmd Cmd, stdin io.Reader, stdout io.Writer) error {
+	c := r.buildCmd(ctx, cmd)
+	c.Stdin = stdin
+	c.Stdout = stdout
+
+	stderr, err := c.StderrPipe()
+	if err != nil {
+		return fmt.Errorf("%s %v: mở stderr: %w", cmd.Name, cmd.Args, err)
+	}
+
+	if err := c.Start(); err != nil {
+		return fmt.Errorf("%s %v: khởi chạy: %w", cmd.Name, cmd.Args, err)
+	}
+
+	var mu sync.Mutex
+	var errLines []string
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		scanner := bufio.NewScanner(stderr)
+		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+		for scanner.Scan() {
+			mu.Lock()
+			errLines = append(errLines, scanner.Text())
+			if len(errLines) > 40 {
+				errLines = errLines[len(errLines)-40:]
+			}
+			mu.Unlock()
+		}
+	}()
+
+	waitErr := c.Wait()
+	<-done
+
+	if waitErr == nil {
+		return nil
+	}
+	mu.Lock()
+	tail := joinTail(errLines, 2000)
+	mu.Unlock()
+
+	var exitErr *exec.ExitError
+	if errors.As(waitErr, &exitErr) {
+		return &ExitError{Code: exitErr.ExitCode(), Stderr: tail}
+	}
+	return fmt.Errorf("%s %v: %w — %s", cmd.Name, cmd.Args, waitErr, tail)
 }
 
 func trimTail(b []byte, max int) string {
