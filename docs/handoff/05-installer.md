@@ -129,6 +129,7 @@ Mọi bước **idempotent**: chạy lại `genh install` sau lỗi tiếp tục
 | `genh logs [dịch vụ] [-f]` | Log gọn, có màu theo mức |
 | `genh update [--channel stable\|beta]` | Tải bản mới, backup tự động, migrate, khởi động lại theo thứ tự; lỗi → tự rollback |
 | `genh backup [--to path]` / `genh restore <file>` | Chạy trong container |
+| `genh export --to <file>` / `genh import <file> [--yes]` | Gói hồ sơ Owner `.ghbundle` (CSDL + object + bí mật, mã hoá) — chuyển sang máy khác (v0.1.1 §1b/2b, `docs/reports/HANDOFF-v0.1.1.md`) |
 | `genh doctor` | Chẩn đoán: runtime, cổng, chứng chỉ, dung lượng, đồng hồ, kết nối kênh — xuất báo cáo zip để gửi hỗ trợ |
 | `genh reset-setup` | Sinh mã thiết lập mới (cần xác nhận) |
 | `genh stop` / `genh start` | |

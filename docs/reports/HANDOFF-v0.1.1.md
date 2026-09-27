@@ -1,6 +1,6 @@
 # Bàn giao v0.1.1 — sửa lưu trữ, hồ sơ Owner, CSDL, RLS
 
-Trạng thái: **đang làm** trên nhánh `claude/admiring-goodall-6dmk8k` (khởi từ `main` sau PR #3 / tag v0.1.0).
+Trạng thái: **đã xong, chờ PR** trên nhánh `claude/admiring-goodall-6dmk8k` (khởi từ `main` sau PR #3 / tag v0.1.0).
 Phiên trước hết quota giữa chừng; code 4 subagent của phiên đó nằm trong worktree cục bộ nên đã mất — làm lại theo kế hoạch dưới.
 
 ## Lỗi cần sửa (đã kiểm trên code v0.1.0)
@@ -40,3 +40,59 @@ Phiên trước hết quota giữa chừng; code 4 subagent của phiên đó n�
 1. `git fetch && git checkout claude/admiring-goodall-6dmk8k`, đọc file này + `git log`.
 2. Mỗi mục đã xong sẽ có commit riêng `feat(v0.1.1/<mã>)`. Làm tiếp mục chưa có commit.
 3. Khi đủ 4 mục: chạy `make test`, `cd apps/genh && go test ./...`, mở PR vào `main` cho v0.1.1.
+
+## Kiểm tra tích hợp (trên bản đã gộp 4 mục)
+
+Chạy trên môi trường Postgres 16 (pgvector + pg_partman) + Redis thật, venv `apps/api/.venv` mới cài
+(`pip install -e ".[dev]"`), Go 1.24.
+
+- `apps/api`: `ruff check gh tests` sạch, `mypy gh` sạch (96 tệp nguồn). `pytest -q` mặc định:
+  **899 passed**. `GH_TEST_APP_ROLE=1 pytest -q` (Makefile `api-test-app-role`, role `gh_app` không
+  superuser/không BYPASSRLS): ban đầu **2 failed / 897 passed**
+  (`test_export_import_round_trip_two_master_keys_and_objects`,
+  `test_import_same_master_key_skips_reencryption` trong `tests/test_bundle.py`) — **đã sửa** (xem dưới),
+  chạy lại: **899 passed**.
+- **Lỗi tìm thấy (test, không phải bug sản phẩm) và đã sửa**: `tests/test_bundle.py::_use_database` chỉ
+  `setenv("GH_DATABASE_URL", …)` mà không xoá `GH_ADMIN_DATABASE_URL` — dưới `GH_TEST_APP_ROLE=1`,
+  biến này đã được `conftest.py::_use_db` đặt trỏ về `fresh_db` (CSDL nguồn, đã có sẵn schema/dữ liệu/phân
+  vùng pg_partman) từ trước. Vì `effective_admin_database_url` (`gh/config.py`) chỉ rơi về
+  `GH_DATABASE_URL` khi `GH_ADMIN_DATABASE_URL` **rỗng**, hai bài test gọi `bundle._import` tưởng đang
+  restore vào CSDL đích mới (`target_db`, trống) nhưng thực ra `pg_restore --clean` chạy nhầm vào chính
+  `fresh_db` — gây lỗi `cannot drop inherited constraint … (partition pg_partman)`. Đã thêm
+  `monkeypatch.delenv("GH_ADMIN_DATABASE_URL", raising=False)` vào `_use_database` để admin URL rơi đúng
+  theo CSDL đích mới, giống cách `conftest.py::_use_db` tự làm ở chế độ mặc định.
+- `apps/genh`: `gofmt -l .` ban đầu báo 2 tệp lệch định dạng do gộp nhánh
+  (`internal/install/steps_finalize_test.go`, `internal/install/steps_migrate_test.go`) — **đã chạy
+  `gofmt -w`** để sửa (chỉ đổi khoảng trắng căn cột struct literal + xoá dòng trống thừa cuối tệp, không
+  đổi logic). `go vet ./...` sạch. `go test ./...` **tất cả PASS** (12 gói, kể cả sau gofmt).
+- **Soát chéo hợp đồng** `deploy/compose.yaml` ↔ Python/Go: `GH_ADMIN_DATABASE_URL` có ở `api`/`worker`
+  (superuser); `migrate` không cần khai riêng vì `GH_DATABASE_URL` của nó ĐÃ là superuser và
+  `effective_admin_database_url` rơi về đúng giá trị đó khi rỗng (`migrations/env.py::sync_url` xác nhận).
+  `GH_APP_DB_PASSWORD` truyền tới `migrate`/`api`/`worker` đúng tên. `GH_OBJECTS_DIR` gắn `api`+`worker`
+  qua volume `gh_objects`. Không còn dịch vụ MinIO trong `compose.yaml`; grep `minio` toàn repo chỉ còn ở
+  báo cáo/tài liệu lịch sử (`docs/reports/phase-*.md`, `docs/handoff/*`, `docs/ARCHITECTURE.md`, `docs/PLAN.md`)
+  và ở tuỳ chọn UI backup `destination: 'local'|'s3'|'minio'` (`Step11Backup.tsx`, `gh/setup/routes.py`) —
+  tuỳ chọn đó chỉ LƯU CẤU HÌNH, chưa từng nối dây MinIO thật kể cả trước v0.1.1, không phải hồi quy của
+  đợt gộp này nên không sửa ở đây. `internal/compose/embedded_compose.yaml` **giống hệt**
+  `deploy/compose.yaml` (diff rỗng). `genh export`/`genh import` (`apps/genh/internal/ops/bundle.go`) gọi
+  đúng `python -m gh.bundle export --out -` / `import --in -` qua `docker compose exec -T`, mật khẩu qua
+  env `GH_BUNDLE_PASSWORD` (không qua argv), mã thoát `0/1/2/3` khớp `gh/bundle.py` (case 2 → sai mật
+  khẩu/gói hỏng, case 3 → không tương thích, khác → lỗi chung). Overlay env của genh
+  (`internal/ops/env.go`, `internal/pgtune/pgtune.go`) truyền đúng tên `GH_APP_DB_PASSWORD`/`GH_PG_SHARED_BUFFERS`/
+  `GH_PG_EFFECTIVE_CACHE_SIZE`/`GH_PG_WORK_MEM`/`GH_PG_MAINTENANCE_WORK_MEM` mà `compose.yaml` đọc.
+- **Thử tích hợp thật (không cần Docker)**: migrate một CSDL nguồn thật (`alembic upgrade heads`), chèn một
+  bí mật thật (`agent.mcp_servers.auth_enc`, mã hoá bằng khoá master A) → `python -m gh.bundle export --out
+  /tmp/x.ghbundle` (CLI thật, không qua test) → `cat x.ghbundle | python -m gh.bundle import --in -` (qua
+  **stdin** thật) vào một CSDL đích **trống hoàn toàn** khác, khoá master B khác hẳn khoá A → bí mật đọc
+  lại đúng bằng khoá B (`crypto.decrypt` với khoá A giờ thất bại — đã mã hoá lại thật). Thử lại với
+  `GH_BUNDLE_PASSWORD` sai → mã thoát đúng **`2`**, log đúng thông báo "Sai … hoặc gói đã bị sửa/hỏng".
+  `docker compose -f deploy/compose.yaml config` với `.env` giả (`POSTGRES_PASSWORD`/`GH_APP_DB_PASSWORD`
+  giả) chạy sạch, in đúng `GH_DATABASE_URL`/`GH_ADMIN_DATABASE_URL` theo vai trò từng service.
+- **Tài liệu**: `README.md` — bỏ MinIO khỏi yêu cầu hệ thống/bảng dịch vụ (còn 8 dịch vụ, không phải 9),
+  sửa tên biến `.env` mẫu (`MINIO_ROOT_PASSWORD` không còn tồn tại → `GH_APP_DB_PASSWORD`), thêm ghi chú
+  `genh export`/`genh import` ở mục Sao lưu/khôi phục. `docs/handoff/05-installer.md` — thêm dòng
+  `genh export --to <file>` / `genh import <file> [--yes]` vào bảng "Lệnh vận hành" (trước đó không liệt
+  kê hai lệnh mới của v0.1.1/2b).
+
+**Việc còn lại**: mở PR vào `main`. Không tìm thấy bug sản phẩm nào (mọi lỗi phát hiện đều ở test/tài liệu
+gộp nhánh); `gh.bundle` export/import hoạt động đúng hợp đồng trên dữ liệu thật kể cả không qua Docker.

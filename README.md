@@ -9,7 +9,7 @@ kế hoạch thi công theo giai đoạn: `docs/PLAN.md`.
 ## Yêu cầu hệ thống
 
 - Docker Engine + Docker Compose v2 (`docker compose`, không phải `docker-compose` cũ).
-- ~4 GB RAM rảnh, vài GB đĩa trống (Postgres, Redis, MinIO, ảnh container).
+- ~4 GB RAM rảnh, vài GB đĩa trống (Postgres, Redis, ảnh container).
 - Một máy Linux/macOS (hoặc WSL2 trên Windows) có thể mở cổng ra ngoài để chạy `caddy` (mặc định `:8443`).
 - Để đăng nhập kênh thật (giai đoạn thiết lập): điện thoại đã cài Zalo/WhatsApp, quét được mã QR.
 
@@ -24,14 +24,14 @@ git clone <repo-này> Gen-Harness && cd Gen-Harness
 
 # 1) Sinh khoá bí mật (secrets/gh_master_key, secrets/gh_bridge_key — KHÔNG commit) + tạo .env từ .env.example
 make secrets
-# → mở .env, đổi POSTGRES_PASSWORD và MINIO_ROOT_PASSWORD (mặc định chỉ dùng được cho máy cá nhân/dev)
+# → mở .env, đổi POSTGRES_PASSWORD và GH_APP_DB_PASSWORD (mặc định chỉ dùng được cho máy cá nhân/dev)
 
 # 2) Dựng và khởi động toàn bộ hệ thống
 make up
 # tương đương: docker compose -f deploy/compose.yaml --env-file .env up -d --build
 ```
 
-`make up` kéo lên 9 dịch vụ (`deploy/compose.yaml`):
+`make up` kéo lên 8 dịch vụ (`deploy/compose.yaml`):
 
 | Dịch vụ | Vai trò |
 |---|---|
@@ -43,7 +43,9 @@ make up
 | `bridge` | Kết nối kênh nhắn tin thật (Zalo/WhatsApp qua QR), chỉ giữ khoá bridge, không bao giờ có khoá master |
 | `db` | Postgres 16 (pgvector, pg_partman) |
 | `redis` | Redis Streams (hàng đợi sự kiện) + cache |
-| `objects` | MinIO (S3-compatible) — lưu Tài liệu và bản sao lưu |
+
+Tài liệu và bản sao lưu lưu trên đĩa qua volume Docker `gh_objects` (`GH_OBJECTS_DIR`, gắn vào `api` + `worker`
+— xem `docs/reports/HANDOFF-v0.1.1.md`), không còn dịch vụ MinIO riêng như bản trước v0.1.1.
 
 Xem tiến trình dựng và log:
 
@@ -100,9 +102,9 @@ công việc khác** — nên dùng một số/tài khoản riêng cho việc n�
 ## Sao lưu / khôi phục
 
 Hệ thống tự sao lưu định kỳ theo lịch cấu hình ở bước 11 (worker quét cấu hình mỗi 15 phút): `pg_dump` toàn bộ
-CSDL, **mã hoá** bằng đúng cơ chế mã hoá bí mật của hệ thống, lưu vào kho đối tượng (`objects`/MinIO qua
-`docker compose`). Vòng đời: giữ **7 bản hằng ngày + 4 bản hằng tuần + 12 bản hằng tháng gần nhất**, tự dọn bản
-thừa sau mỗi lần chạy.
+CSDL, **mã hoá** bằng đúng cơ chế mã hoá bí mật của hệ thống, lưu vào kho đối tượng đĩa cục bộ (volume
+`gh_objects`, `GH_OBJECTS_DIR`). Vòng đời: giữ **7 bản hằng ngày + 4 bản hằng tuần + 12 bản hằng tháng gần
+nhất**, tự dọn bản thừa sau mỗi lần chạy.
 
 Lệnh thủ công (chạy trong container `api`/`worker`, hoặc từ máy dev qua `make`):
 
@@ -114,6 +116,10 @@ make restore BACKUP=<khoá-bản-backup>   # khôi phục một bản (mặc đ�
 
 Chi tiết cơ chế, thuật toán vòng đời, và kết quả kiểm round-trip thật (sao lưu dữ liệu thật → khôi phục vào
 CSDL trống → đối chiếu từng dòng): `docs/reports/phase-5-backup.md`.
+
+Để **chuyển toàn bộ hồ sơ Owner sang máy khác** (CSDL + object + bí mật, mã hoá lại bằng khoá master của máy
+đích): `genh export --to <file>` / `genh import <file> [--yes]` — xem `docs/handoff/05-installer.md` và
+`docs/reports/HANDOFF-v0.1.1.md`.
 
 ## Phát triển
 
