@@ -56,7 +56,7 @@ Compose luôn dùng **bản compose plugin do `genh` mang theo**, không phụ t
 | 5 | Khởi động dữ liệu | 8% | `db`, `redis`, `objects` → chờ healthy |
 | 6 | Tạo cấu trúc dữ liệu | 9% | Chạy migration trong container `api` (tiến độ theo số migration) |
 | 7 | Khởi động dịch vụ | 6% | `api`, `worker`, `bridge`, `web`, `proxy` → chờ `/api/ready` |
-| 8 | Hoàn tất | 4% | Tin cậy CA (hỏi), tạo lối tắt, mở trình duyệt `https://localhost:8443/setup?token=…` |
+| 8 | Hoàn tất | 4% | Tin cậy CA (hỏi), tạo lối tắt, mở trình duyệt `https://localhost:8443/setup?token=…`, **v0.1.5:** bật `genh auto-update` (tắt bằng `--no-auto-update` lúc cài — xem README mục "Nâng cấp") |
 
 ## Giao diện TUI
 
@@ -127,7 +127,8 @@ Mọi bước **idempotent**: chạy lại `genh install` sau lỗi tiếp tục
 | `genh status` | Bảng dịch vụ + healthy + phiên bản + dung lượng dữ liệu |
 | `genh open` | Mở Console |
 | `genh logs [dịch vụ] [-f]` | Log gọn, có màu theo mức |
-| `genh update [--channel stable\|beta]` | Tải bản mới, backup tự động, migrate, khởi động lại theo thứ tự; lỗi → tự rollback |
+| `genh update [--channel stable\|beta] [--yes] [--quiet] [--no-self-update]` | **v0.1.5:** tự hỏi bản `genh` mới nhất trên GitHub Releases (`/repos/<owner>/<repo>/releases/latest`), kiểm SHA-256, thay binary rồi RE-EXEC bằng code mới (`internal/selfupdate`), rồi mới backup tự động, migrate, khởi động lại theo thứ tự; lỗi ở bất kỳ bước nào → tự rollback. `--yes`/không có TTY: không hỏi gì (hiện tại `RunUpdate` vốn không hỏi gì, cờ này dành cho lịch tự động + tương lai). `--quiet`: chỉ in dòng quan trọng. `--no-self-update`: chỉ nâng cấp dịch vụ, không đụng binary |
+| `genh auto-update enable\|disable\|status` | **v0.1.5:** bật/tắt/kiểm lịch tự chạy `genh update --yes --quiet` mỗi đêm ~03:00 giờ máy (`internal/autoupdate`) — systemd `--user` timer (fallback crontab) trên Linux, LaunchAgent trên macOS, Task Scheduler trên Windows. `genh install` tự bật mặc định (tắt bằng `--no-auto-update`) |
 | `genh backup [--to path]` / `genh restore <file>` | Chạy trong container |
 | `genh export --to <file>` / `genh import <file> [--yes]` | Gói hồ sơ Owner `.ghbundle` (CSDL + object + bí mật, mã hoá) — chuyển sang máy khác (v0.1.1 §1b/2b, `docs/reports/HANDOFF-v0.1.1.md`) |
 | `genh doctor` | Chẩn đoán: runtime, cổng, chứng chỉ, dung lượng, đồng hồ, kết nối kênh — xuất báo cáo zip để gửi hỗ trợ |

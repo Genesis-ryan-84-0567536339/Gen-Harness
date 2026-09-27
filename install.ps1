@@ -36,9 +36,7 @@ function Fail {
 }
 
 function Get-Arch {
-    # ARM64 báo qua PROCESSOR_ARCHITECTURE trên Windows 11 ARM; mọi trường
-    # hợp khác (AMD64, x86 chạy dưới WOW64…) coi là amd64 — genh không phát
-    # hành bản 32-bit.
+    # ARM64 bao qua PROCESSOR_ARCHITECTURE tren Windows 11 ARM; con lai (amd64/WOW64) -> amd64.
     $arch = $env:PROCESSOR_ARCHITECTURE
     if ($env:PROCESSOR_ARCHITEW6432) {
         $arch = $env:PROCESSOR_ARCHITEW6432
@@ -129,12 +127,14 @@ function Main {
 
         Write-Log "da cai vao $finalPath - mo cua so PowerShell moi de PATH co hieu luc lau dai."
 
-        # Muc #1 v0.1.3 (docs/reports/HANDOFF-v0.1.1.md): may DA CAI thi KHONG
-        # chay "genh install" nua (se dung lai container, bo qua backup).
+        # May DA CAI (co secrets.json): CHAY LUON "genh update" thay vi "genh
+        # install" (se dung lai container, bo qua backup) - an toan tu v0.1.5
+        # vi genh update TU CO backup + rollback va TU tai ban genh moi nhat
+        # (internal/selfupdate); "genh auto-update" lo viec chay dinh ky.
         if (Test-Path -Path $SecretsFile -PathType Leaf) {
-            Write-Log "may nay da cai Gen-Harness tu truoc - CHI vua cap nhat genh, CHUA dung gi toi dich vu dang chay."
-            Write-Log "chay 'genh update' de nang cap an toan, hoac 'genh install' neu lan cai truoc chua xong han."
-            $exitCode = 0
+            Write-Log "may nay da cai Gen-Harness tu truoc - dang chay 'genh update' de nang cap dich vu len dung ban moi..."
+            & $finalPath update
+            $exitCode = $LASTEXITCODE
         }
         else {
             & $finalPath install

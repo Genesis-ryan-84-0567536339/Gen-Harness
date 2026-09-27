@@ -133,23 +133,30 @@ một nơi khác, an toàn (không cùng chỗ với gói) — mất mật khẩ
 
 ## Nâng cấp
 
-Máy đã cài bằng `install.sh`/`install.ps1` (xem `docs/handoff/05-installer.md`): chạy lại **đúng một dòng
-lệnh cài** đã dùng lần đầu để lấy binary `genh` mới:
-
-```bash
-curl -fsSL https://github.com/Genesis-ryan-84-0567536339/Gen-Harness/releases/latest/download/install.sh | sh
-```
-
-(Windows: `irm .../install.ps1 | iex`.) Từ v0.1.3, script tự phát hiện máy **đã cài** và **không** chạy lại
-`genh install` (tránh dựng lại container/mất dữ liệu) — chỉ cập nhật binary rồi dừng lại. Chạy tiếp:
+**Từ v0.1.5: tự động mỗi đêm — không phải làm gì.** `genh install` tự bật lịch "tự cập nhật" (systemd
+timer/crontab trên Linux, LaunchAgent trên macOS, Task Scheduler trên Windows), chạy `genh update --yes
+--quiet` lúc ~03:00 giờ máy: tự hỏi bản `genh` mới nhất trên GitHub Releases, kiểm SHA-256, thay binary, RỒI
+mới backup + migrate + khởi động lại dịch vụ — tự rollback nếu bất kỳ bước nào lỗi. Muốn có bản mới **ngay**,
+không đợi tới đêm, chạy tay:
 
 ```bash
 genh update
 ```
 
-để nâng cấp dịch vụ thật (tự backup trước, migrate, khởi động lại, tự rollback nếu bất kỳ bước nào lỗi — xem
-`docs/handoff/05-installer.md` mục "Lệnh vận hành"). `genh install` chỉ dùng cho máy **chưa cài lần nào**, hoặc
-lần cài trước **thật sự chưa xong** (thêm cờ `--force` nếu cần cố tình cài lại một máy đã cài).
+Kiểm/tắt lịch tự động: `genh auto-update status` / `genh auto-update disable` (bật lại: `genh auto-update
+enable`, hoặc thêm `--no-auto-update` lúc `genh install` để không bật ngay từ đầu). Chi tiết cơ chế từng hệ
+điều hành: `docs/handoff/05-installer.md` mục "Lệnh vận hành".
+
+Máy cài từ trước v0.1.3 (chưa có `genh update` tự thay binary) vẫn chạy lại được **đúng một dòng lệnh cài**
+đã dùng lần đầu — từ v0.1.5, script này (`install.sh`/`install.ps1`) tự phát hiện máy **đã cài** rồi CHẠY LUÔN
+`genh update` (không chỉ in hướng dẫn như trước), an toàn vì `genh update` đã tự có backup + rollback:
+
+```bash
+curl -fsSL https://github.com/Genesis-ryan-84-0567536339/Gen-Harness/releases/latest/download/install.sh | sh
+```
+
+(Windows: `irm .../install.ps1 | iex`.) `genh install` chỉ dùng cho máy **chưa cài lần nào**, hoặc lần cài
+trước **thật sự chưa xong** (thêm cờ `--force` nếu cần cố tình cài lại một máy đã cài).
 
 ## Phát hành
 

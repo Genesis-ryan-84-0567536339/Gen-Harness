@@ -126,17 +126,22 @@ main() {
 
 	# SỬA LỖI (docs/reports/HANDOFF-v0.1.1.md mục "Lỗi cần sửa" #1 của
 	# v0.1.3): trước đây luôn `exec genh install` — trên máy ĐÃ CÀI TỪ TRƯỚC
-	# (Owner chạy lại đúng dòng lệnh này chỉ để lấy binary genh mới, ví dụ vì
-	# `genh update` của bản cũ không tự tải binary), `genh install` KHÔNG
-	# phát hiện được máy đã cài, sẽ dựng lại container và BỎ QUA backup + di
-	# trú dữ liệu mà chỉ `genh update` mới có → mất dữ liệu/tài liệu. Từ đây:
-	# máy chưa từng cài (chưa có secrets.json) mới exec install như cũ; máy
-	# đã cài chỉ dừng lại ở đây, KHÔNG đụng gì tới dịch vụ đang chạy.
+	# (Owner chạy lại đúng dòng lệnh này chỉ để lấy binary genh mới), `genh
+	# install` KHÔNG phát hiện được máy đã cài, sẽ dựng lại container và BỎ
+	# QUA backup + di trú dữ liệu mà chỉ `genh update` mới có → mất dữ
+	# liệu/tài liệu. Từ đây: máy chưa từng cài (chưa có secrets.json) exec
+	# install như cũ.
+	#
+	# v0.1.5: máy ĐÃ CÀI giờ CHẠY LUÔN `genh update` (thay vì chỉ in hướng
+	# dẫn rồi dừng như v0.1.3/v0.1.4) — an toàn để tự động hoá vì `genh
+	# update` TỰ CÓ backup + rollback nếu bất kỳ bước nào lỗi (xem
+	# internal/ops.RunUpdate), và từ v0.1.5 chính `genh update` cũng TỰ tải
+	# bản genh mới nhất (internal/selfupdate) trước khi đụng dịch vụ — nên
+	# Owner không cần tự chạy lại lệnh này định kỳ nữa, `genh auto-update`
+	# (bật mặc định lúc cài) đã lo việc đó mỗi đêm.
 	if [ -f "$SECRETS_FILE" ]; then
-		log "genh: máy này đã cài Gen-Harness từ trước — CHỈ vừa cập nhật genh lên bản mới, CHƯA đụng gì tới dịch vụ đang chạy."
-		log "genh: chạy 'genh update' để nâng cấp dịch vụ lên đúng bản mới (có backup tự động + rollback nếu lỗi)."
-		log "genh: nếu lần cài trước CHƯA XONG hẳn (hiếm), chạy 'genh install' để tiếp tục đúng bước còn dở."
-		exit 0
+		log "genh: máy này đã cài Gen-Harness từ trước — đang chạy 'genh update' để nâng cấp dịch vụ lên đúng bản mới…"
+		exec "${BIN_DIR}/genh" update
 	fi
 
 	exec "${BIN_DIR}/genh" install

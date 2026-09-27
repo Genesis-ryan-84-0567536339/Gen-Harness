@@ -12,22 +12,36 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"os/signal"
+	"path/filepath"
+	"runtime"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/autoupdate"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/config"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/dockercli"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/install"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/machine"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/ops"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/secretgen"
+	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/selfupdate"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/tui"
+)
+
+// selfupdateOwner/selfupdateRepo là repo GitHub genh tự hỏi bản mới nhất —
+// cùng REPO dùng bởi install.sh/install.ps1 (docs/handoff/05-installer.md).
+const (
+	selfupdateOwner = "Genesis-ryan-84-0567536339"
+	selfupdateRepo  = "Gen-Harness"
 )
 
 // version được ghi đè lúc build phát hành thật qua:
@@ -58,6 +72,8 @@ func run(args []string) int {
 		return runLogs(args[1:])
 	case "update":
 		return runUpdate(args[1:])
+	case "auto-update":
+		return runAutoUpdate(args[1:])
 	case "backup":
 		return runBackup(args[1:])
 	case "restore":
@@ -100,8 +116,18 @@ Lệnh vận hành (cờ chung mọi lệnh dưới đây: --port N, --install-d
   genh status                            bảng dịch vụ + healthy + phiên bản + dung lượng
   genh open                              mở Console trong trình duyệt
   genh logs [dịch vụ...] [-f]            log gọn (tail 200), -f để theo dõi liên tục
-  genh update [--channel stable|beta]    tải bản mới, backup tự động, migrate, khởi động
-                                          lại theo thứ tự; lỗi ở bất kỳ bước nào → tự rollback
+  genh update [--channel stable|beta] [--yes] [--quiet] [--no-self-update]
+                                          tự tải genh mới nhất (kiểm checksum, re-exec bằng
+                                          code mới) rồi mới backup tự động, migrate, khởi động
+                                          lại theo thứ tự; lỗi ở bất kỳ bước nào → tự rollback.
+                                          --yes/không có TTY: không hỏi gì · --quiet: chỉ in
+                                          dòng quan trọng · --no-self-update: chỉ nâng cấp
+                                          dịch vụ, không đụng binary genh
+  genh auto-update enable|disable|status tự chạy "genh update --yes --quiet" mỗi đêm ~03:00
+                                          (systemd timer/crontab, LaunchAgent, hoặc Task
+                                          Scheduler tuỳ hệ điều hành) — mặc định đã BẬT sau
+                                          "genh install" (tắt bằng --no-auto-update lúc cài,
+                                          hoặc "genh auto-update disable" sau đó)
   genh backup [--to path]                sao lưu vào ObjectStore nội bộ (--to: copy thêm ra host)
   genh restore <khoá>                    khôi phục một bản backup theo khoá (xem giới hạn trong
                                           báo cáo lệnh: chưa hỗ trợ file host tuỳ ý)
@@ -216,21 +242,168 @@ func runLogs(args []string) int {
 func runUpdate(args []string) int {
 	fs, port, installDir := opsFlagSet("update")
 	channel := fs.String("channel", "stable", "kênh cập nhật: stable hoặc beta")
+	yes := fs.Bool("yes", false, "chạy không tương tác — dùng cho lịch tự động (genh auto-update); KHÔNG hỏi gì kể cả khi có TTY")
+	quiet := fs.Bool("quiet", false, "chỉ in các dòng quan trọng (có bản mới/lỗi/xong) — bỏ log tiến độ từng bước")
+	noSelfUpdate := fs.Bool("no-self-update", false, "bỏ qua tự cập nhật BINARY genh — chỉ chạy phần nâng cấp dịch vụ (backup/pull/migrate/restart) bằng bản genh hiện tại")
+	selfUpdated := fs.Bool("self-updated", false, "cờ NỘI BỘ: tiến trình này vừa được re-exec ngay sau khi tự thay binary — KHÔNG dùng tay, chỉ genh tự đặt cho chính nó")
 	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	// --yes hiện KHÔNG đổi hành vi (RunUpdate không hỏi gì, kể cả có TTY —
+	// đã rà soát internal/ops/update.go: không có prompt nào). Vẫn nhận cờ
+	// này (không lỗi "cờ lạ") vì `genh auto-update`/tài liệu đều gọi kèm nó,
+	// và để dành chỗ nếu sau này RunUpdate thêm bước cần xác nhận.
+	_ = yes
+
+	env, ok := resolveOpsEnv(*port, *installDir)
+	if !ok {
+		return 1
+	}
+
+	// Tự cập nhật BINARY genh TRƯỚC KHI đụng gì tới dịch vụ — xem
+	// internal/selfupdate. Bỏ qua nếu: --no-self-update, HOẶC tiến trình
+	// này đã là kết quả của một lần tự cập nhật (--self-updated, tránh lặp
+	// vô hạn tự-tải-tự-re-exec nếu có gì đó luôn báo "mới hơn" sai).
+	if !*noSelfUpdate && !*selfUpdated {
+		if code, ok := trySelfUpdateAndReExec(args, *quiet); ok {
+			return code
+		}
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	out := io.Writer(os.Stdout)
+	if *quiet {
+		out = io.Discard
+	}
+	opts := ops.UpdateOptions{Channel: *channel}
+	if err := ops.RunUpdate(ctx, env, opts, ops.UpdateDeps{}, out); err != nil {
+		reportOpErr(err)
+		return 1
+	}
+	if *quiet {
+		fmt.Println("genh: cập nhật xong.")
+	}
+	return 0
+}
+
+// trySelfUpdateAndReExec chạy internal/selfupdate.Run; nếu binary vừa được
+// thay trên đĩa, RE-EXEC chính nó (cùng đường dẫn, giờ đã là bản MỚI) với
+// đúng args gốc + "--self-updated", CHỜ tiến trình con chạy hết phần còn lại
+// của `genh update` rồi trả (mã thoát của con, true). Trả (0, false) nếu
+// không tự cập nhật gì (đã mới nhất/bản dev/lỗi mạng) — caller tiếp tục chạy
+// phần nâng cấp dịch vụ bằng CHÍNH tiến trình hiện tại, không re-exec.
+//
+// Lý do BẮT BUỘC phải re-exec thay vì tự chạy tiếp trong cùng tiến trình:
+// tiến trình đang chạy đã nạp SẴN code + compose.yaml nhúng của bản CŨ vào
+// bộ nhớ — chỉ thay tệp trên đĩa không đổi gì tiến trình đang chạy đang
+// dùng. Phần đồng bộ compose.yaml (ops.RunUpdate, bước 1.5) PHẢI chạy bằng
+// code MỚI để lấy đúng compose.yaml nhúng của bản mới.
+func trySelfUpdateAndReExec(originalArgs []string, quiet bool) (exitCode int, reExeced bool) {
+	execPath, err := os.Executable()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "genh: không tự cập nhật binary được (không xác định được đường dẫn của chính nó): %v — tiếp tục với bản hiện tại.\n", err)
+		return 0, false
+	}
+	execPath, _ = filepath.Abs(execPath)
+
+	res, err := selfupdate.Run(context.Background(), selfupdate.Options{
+		Owner: selfupdateOwner, Repo: selfupdateRepo,
+		CurrentVersion: version,
+		GOOS:           runtime.GOOS, GOARCH: runtime.GOARCH,
+		ExecutablePath: execPath,
+		Out:            os.Stdout,
+		Quiet:          quiet,
+	})
+	if err != nil {
+		// Tải/kiểm checksum/thay binary thất bại: KHÔNG chặn `genh update`
+		// — báo rõ rồi tiếp tục nâng cấp dịch vụ bằng binary hiện tại.
+		fmt.Fprintf(os.Stderr, "genh: tự cập nhật binary thất bại (%v) — tiếp tục nâng cấp dịch vụ với bản genh hiện tại.\n", err)
+		return 0, false
+	}
+	if !res.Updated {
+		return 0, false
+	}
+
+	newArgs := append(append([]string{}, originalArgs...), "--self-updated")
+	child := exec.Command(execPath, append([]string{"update"}, newArgs...)...)
+	child.Stdin = os.Stdin
+	child.Stdout = os.Stdout
+	child.Stderr = os.Stderr
+	if err := child.Run(); err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return exitErr.ExitCode(), true
+		}
+		fmt.Fprintf(os.Stderr, "genh: chạy lại genh %s sau tự cập nhật thất bại: %v\n", res.To, err)
+		return 1, true
+	}
+	return 0, true
+}
+
+func runAutoUpdate(args []string) int {
+	if len(args) == 0 {
+		_, _ = fmt.Fprintln(os.Stderr, "genh: cách dùng: genh auto-update enable|disable|status")
+		return 2
+	}
+	fs, port, installDir := opsFlagSet("auto-update " + args[0])
+	if err := fs.Parse(args[1:]); err != nil {
 		return 2
 	}
 	env, ok := resolveOpsEnv(*port, *installDir)
 	if !ok {
 		return 1
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
-	opts := ops.UpdateOptions{Channel: *channel}
-	if err := ops.RunUpdate(ctx, env, opts, ops.UpdateDeps{}, os.Stdout); err != nil {
-		reportOpErr(err)
+
+	execPath, err := os.Executable()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "genh: không xác định được đường dẫn của chính genh: %v\n", err)
 		return 1
 	}
-	return 0
+	execPath, _ = filepath.Abs(execPath)
+	logFile := filepath.Join(config.New(env.InstallDir).LogsDir(), "auto-update.log")
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	deps := autoupdate.Deps{GenhPath: execPath, LogFile: logFile}
+
+	switch args[0] {
+	case "enable":
+		if err := os.MkdirAll(filepath.Dir(logFile), 0o755); err != nil {
+			fmt.Fprintf(os.Stderr, "genh: không tạo được thư mục log: %v\n", err)
+			return 1
+		}
+		msg, err := autoupdate.Enable(ctx, deps)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "genh: bật tự cập nhật hằng đêm thất bại: %v\n", err)
+			return 1
+		}
+		fmt.Println(msg)
+		return 0
+	case "disable":
+		msg, err := autoupdate.Disable(ctx, deps)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "genh: tắt tự cập nhật hằng đêm thất bại: %v\n", err)
+			return 1
+		}
+		fmt.Println(msg)
+		return 0
+	case "status":
+		st, err := autoupdate.GetStatus(ctx, deps)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "genh: kiểm trạng thái tự cập nhật thất bại: %v\n", err)
+			return 1
+		}
+		state := "TẮT"
+		if st.Enabled {
+			state = "BẬT"
+		}
+		fmt.Printf("Tự cập nhật hằng đêm: %s\n  %s\n", state, st.Detail)
+		return 0
+	default:
+		_, _ = fmt.Fprintf(os.Stderr, "genh: lệnh con auto-update không rõ %q (dùng enable|disable|status)\n", args[0])
+		return 2
+	}
 }
 
 func runBackup(args []string) int {
@@ -414,6 +587,7 @@ func runInstall(args []string) int {
 	installDir := fs.String("install-dir", "", "thư mục cài đặt (mặc định ~/.gen-harness)")
 	yes := fs.Bool("yes", false, "đồng ý trước cho các thao tác hệ thống rộng (sudo cho Docker rootless, UAC cho WSL2, tin cậy CA nội bộ)")
 	force := fs.Bool("force", false, "bỏ qua kiểm tra máy đã cài — CHẠY LẠI cả 8 bước dù đã có bản cài hoàn chỉnh (dùng khi lần cài trước hỏng hẳn, cần dựng lại từ đầu; bình thường hãy dùng `genh update`)")
+	noAutoUpdate := fs.Bool("no-auto-update", false, "không tự bật lịch cập nhật hằng đêm (mặc định BẬT sau khi cài xong — xem `genh auto-update`)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -465,7 +639,45 @@ func runInstall(args []string) int {
 	if runErr != nil {
 		return 1
 	}
+
+	// Bước "Hoàn tất" của người cài đặt không rành code THẬT SỰ chỉ hoàn tất
+	// khi máy KHÔNG cần họ làm gì thêm để có bản mới sau này — nên bật lịch
+	// tự cập nhật hằng đêm ngay tại đây, mặc định, trừ khi có --no-auto-update.
+	// Bật lỗi CHỈ cảnh báo (fmt.Fprintln ra stderr), KHÔNG BAO GIỜ làm hỏng
+	// một lần cài đặt vừa xong thành công — Owner vẫn dùng được Gen-Harness
+	// bình thường, chỉ là phải tự chạy `genh update` tay hoặc `genh
+	// auto-update enable` lại sau.
+	if !*noAutoUpdate {
+		enableAutoUpdateAfterInstall(dir)
+	}
+
 	return 0
+}
+
+// enableAutoUpdateAfterInstall bật internal/autoupdate ngay sau khi cài xong
+// — xem ghi chú ở nơi gọi. In đúng MỘT dòng rõ ràng khi thành công (yêu cầu
+// của phiên v0.1.5), hoặc một dòng cảnh báo ngắn khi thất bại.
+func enableAutoUpdateAfterInstall(installDir string) {
+	execPath, err := os.Executable()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "genh: không bật được tự cập nhật hằng đêm (không xác định được đường dẫn genh): %v — chạy tay `genh auto-update enable` sau.\n", err)
+		return
+	}
+	execPath, _ = filepath.Abs(execPath)
+	logFile := filepath.Join(config.New(installDir).LogsDir(), "auto-update.log")
+	if err := os.MkdirAll(filepath.Dir(logFile), 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "genh: không bật được tự cập nhật hằng đêm (không tạo được thư mục log): %v — chạy tay `genh auto-update enable` sau.\n", err)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	msg, err := autoupdate.Enable(ctx, autoupdate.Deps{GenhPath: execPath, LogFile: logFile})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "genh: không bật được tự cập nhật hằng đêm tự động (%v) — chạy tay `genh auto-update enable`, hoặc bỏ qua nếu không cần.\n", err)
+		return
+	}
+	fmt.Println(msg)
 }
 
 // programObserver chuyển install.Snapshot thành tui.SnapshotMsg gửi vào
