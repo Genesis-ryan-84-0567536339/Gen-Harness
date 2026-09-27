@@ -39,7 +39,15 @@ func enableLinux(ctx context.Context, deps Deps) (string, error) {
 		if _, err := runner.Output(ctx, "systemctl", []string{"--user", "enable", "--now", TaskName + ".timer"}); err != nil {
 			return "", fmt.Errorf("systemctl --user enable --now: %w", err)
 		}
-		return "Đã bật tự cập nhật hằng đêm lúc ~03:00 (systemd --user timer) — tắt bằng `genh auto-update disable`", nil
+		msg := "Đã bật tự cập nhật hằng đêm lúc ~03:00 (systemd --user timer) — tắt bằng `genh auto-update disable`"
+		// Timer systemd --user chỉ chạy khi user đang có phiên đăng nhập, trừ
+		// khi bật "linger" — máy chủ chạy suốt đêm không ai đăng nhập sẽ
+		// không bao giờ tự cập nhật nếu thiếu bước này. Không bật được (polkit
+		// đòi mật khẩu, ví dụ qua SSH) chỉ cảnh báo, không coi là lỗi.
+		if _, err := runner.Output(ctx, "loginctl", []string{"enable-linger"}); err != nil {
+			msg += "\nCảnh báo: chưa bật được linger — timer chỉ chạy khi bạn đang đăng nhập. Chạy `sudo loginctl enable-linger $USER` một lần để tự cập nhật cả khi không đăng nhập."
+		}
+		return msg, nil
 	}
 
 	// Fallback crontab.
