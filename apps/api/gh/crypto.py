@@ -1,6 +1,7 @@
 """Băm mật khẩu/PIN (argon2id), token ngẫu nhiên, mã hoá phong bì AES-256-GCM cho bí mật."""
 
 import base64
+import binascii
 import hashlib
 import hmac
 import os
@@ -38,6 +39,30 @@ def token_digest(token: str) -> bytes:
     return hashlib.sha256(token.encode()).digest()
 
 
+def decode_key(raw: str) -> bytes:
+    """Giải mã khoá 32 byte dạng hex (64 ký tự — cách `genh` sinh ở
+    secretgen.randomHex) hoặc base64 (cách `make secrets` sinh cho dev).
+
+    Trước đây chỉ nhận base64 nên mọi bản cài bằng genh (khoá hex) hỏng ở lần
+    đầu mã hoá/giải mã (vd `genh backup`: "GH_MASTER_KEY phải là 32 byte
+    base64" — phát hiện ở e2e cài thật). Nhận cả hai để bản cài cũ không phải
+    đổi khoá (đổi khoá = mất mọi dữ liệu đã mã hoá).
+    """
+    raw = raw.strip()
+    if len(raw) == 64:
+        try:
+            return bytes.fromhex(raw)
+        except ValueError:
+            pass
+    try:
+        key = base64.b64decode(raw, validate=True)
+    except (ValueError, binascii.Error) as e:
+        raise ValueError("khoá phải là 32 byte dạng hex (64 ký tự) hoặc base64") from e
+    if len(key) != 32:
+        raise ValueError("khoá phải là 32 byte dạng hex (64 ký tự) hoặc base64")
+    return key
+
+
 def master_key() -> bytes:
     global _dev_master_key
     s = get_settings()
@@ -46,10 +71,7 @@ def master_key() -> bytes:
         with open(s.master_key_file, encoding="utf-8") as f:
             raw = f.read().strip()
     if raw:
-        key = base64.b64decode(raw)
-        if len(key) != 32:
-            raise ValueError("GH_MASTER_KEY phải là 32 byte base64")
-        return key
+        return decode_key(raw)
     if s.is_production:
         raise RuntimeError("Thiếu GH_MASTER_KEY ở production")
     if _dev_master_key is None:
@@ -96,10 +118,7 @@ def bridge_key() -> bytes:
         with open(s.bridge_key_file, encoding="utf-8") as f:
             raw = f.read().strip()
     if raw:
-        key = base64.b64decode(raw)
-        if len(key) != 32:
-            raise ValueError("GH_BRIDGE_KEY phải là 32 byte base64")
-        return key
+        return decode_key(raw)
     if s.is_production:
         raise RuntimeError("Thiếu GH_BRIDGE_KEY ở production")
     if _dev_bridge_key is None:
