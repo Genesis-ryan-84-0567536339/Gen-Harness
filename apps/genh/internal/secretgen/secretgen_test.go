@@ -158,6 +158,86 @@ func TestEnsure_UpgradesOldBundleMissingAppDBPassword(t *testing.T) {
 	}
 }
 
+// TestLoadFillingMissing_UpgradesV010SecretsWithoutRegeneratingCall tái hiện
+// đúng sự cố nâng cấp máy v0.1.0 → v0.1.2 (docs/reports/HANDOFF-v0.1.1.md,
+// mục "Lỗi cần sửa" #1 của v0.1.2): secrets.json kiểu v0.1.0 không có trường
+// app_db_password/backup_key (JSON chỉ có master_key/db_password/
+// setup_token/created_at) — LoadFillingMissing phải bổ sung cả hai trường
+// còn thiếu, GHI LẠI ngay xuống đĩa, và giữ nguyên các trường đã có.
+func TestLoadFillingMissing_UpgradesV010SecretsWithoutRegeneratingCall(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "config")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	// secrets.json kiểu v0.1.0 thật — JSON không hề có 2 khoá app_db_password/
+	// backup_key (khác việc lưu chuỗi rỗng: v0.1.0 chưa từng biết tới các
+	// trường này).
+	v010JSON := `{
+  "master_key": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "db_password": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "setup_token": "K7QF-2MXD-9PLA",
+  "created_at": "2026-01-01T00:00:00Z"
+}`
+	if err := os.WriteFile(filepath.Join(dir, secretsFileName), []byte(v010JSON), filePerm); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	b, err := LoadFillingMissing(dir)
+	if err != nil {
+		t.Fatalf("LoadFillingMissing: %v", err)
+	}
+	if b.AppDBPassword == "" {
+		t.Error("app_db_password vẫn rỗng sau LoadFillingMissing — genh update vẫn sẽ lỗi ${GH_APP_DB_PASSWORD:?...}")
+	}
+	if b.BackupKey == "" {
+		t.Error("backup_key vẫn rỗng sau LoadFillingMissing")
+	}
+	if b.MasterKey != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+		t.Error("master_key đã có không được đổi")
+	}
+	if b.DBPassword != "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" {
+		t.Error("db_password đã có không được đổi")
+	}
+	if b.SetupToken != "K7QF-2MXD-9PLA" {
+		t.Error("setup_token đã có không được đổi")
+	}
+
+	// Phải GHI LẠI xuống đĩa ngay lần gọi này — lần gọi sau (kể cả Load
+	// thường, không bổ sung) phải đọc lại đúng giá trị vừa sinh, không sinh
+	// lại giá trị khác.
+	reloaded, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load sau LoadFillingMissing: %v", err)
+	}
+	if reloaded.AppDBPassword != b.AppDBPassword || reloaded.BackupKey != b.BackupKey {
+		t.Error("giá trị vừa bổ sung phải được ghi xuống đĩa ngay, đọc lại phải khớp")
+	}
+
+	// Gọi lại LoadFillingMissing lần hai: không còn gì thiếu, phải trả đúng
+	// y hệt, không sinh lại giá trị khác.
+	again, err := LoadFillingMissing(dir)
+	if err != nil {
+		t.Fatalf("LoadFillingMissing (lần 2): %v", err)
+	}
+	if again.AppDBPassword != b.AppDBPassword || again.BackupKey != b.BackupKey {
+		t.Error("lần gọi thứ hai (không còn thiếu gì) không được sinh lại giá trị khác")
+	}
+}
+
+// TestLoadFillingMissing_ErrorsWhenNeverInstalled giữ đúng hợp đồng như Load:
+// không tự "cài" (không sinh secrets.json từ đầu) nếu máy chưa từng chạy
+// `genh install`.
+func TestLoadFillingMissing_ErrorsWhenNeverInstalled(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "config")
+	if _, err := LoadFillingMissing(dir); err == nil {
+		t.Fatal("muốn lỗi khi secrets.json chưa từng tồn tại")
+	}
+	if _, err := os.Stat(filepath.Join(dir, secretsFileName)); err == nil {
+		t.Error("LoadFillingMissing không được tự tạo secrets.json khi chưa cài")
+	}
+}
+
 func TestEnsure_FilePermissions(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("bit quyền POSIX (0600/0700) không áp dụng trên Windows")

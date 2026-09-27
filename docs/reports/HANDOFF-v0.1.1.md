@@ -96,3 +96,15 @@ Chạy trên môi trường Postgres 16 (pgvector + pg_partman) + Redis thật, 
 
 **Việc còn lại**: mở PR vào `main`. Không tìm thấy bug sản phẩm nào (mọi lỗi phát hiện đều ở test/tài liệu
 gộp nhánh); `gh.bundle` export/import hoạt động đúng hợp đồng trên dữ liệu thật kể cả không qua Docker.
+
+## v0.1.2 — sửa sau rà soát độc lập (27/09/2026)
+
+Rà soát bản v0.1.1 đã merge tìm ra (đã sửa trên nhánh `claude/admiring-goodall-6dmk8k`):
+- 🔴 `genh` trên máy cài v0.1.0 hỏng mọi lệnh vì `LoadSecrets` không bổ sung `app_db_password` → nay `secretgen.LoadFillingMissing`.
+- 🔴 Tài liệu/backup trong `/tmp/gh-objects` của container v0.1.0 mất khi update → `genh update` chép ra `<installDir>/data/migrate-objects-*` (gộp api + worker, gộp manifest backup) rồi nạp vào volume `gh_objects`; rollback cũng nạp lại trước khi restore.
+- 🟠 Mọi lệnh genh âm thầm ghi đè `compose.yaml` → chỉ `genh update`/install đồng bộ (giữ `.bak`, in cảnh báo).
+- 🟠 `genh import` chạy khi api/worker sống, không migrate → nay: chép backup an toàn ra host → stop api/worker → `run` import → `run migrate` → `up -d`; Python ngắt kết nối lạ + `lock_timeout`.
+- 🟡 Khoá backup riêng `GH_BACKUP_KEY` (backup cũ vẫn đọc bằng khoá master); UI bước 11 bỏ ô `retention_count` và đích MinIO; README hướng dẫn `genh export` định kỳ để sao lưu khoá.
+- Để sau: tách admin DB URL khỏi container api (service riêng cho backup/bảo trì).
+
+Chưa kiểm: chạy thật với Docker daemon (nâng cấp v0.1.0 → v0.1.2, export/import giữa 2 máy).

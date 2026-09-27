@@ -142,6 +142,12 @@ func fillMissing(b *mutableBundle) error {
 // internal/ops) chỉ cần ĐỌC LẠI bí mật của một bản cài đã có, không nên tự
 // tạo bí mật mới nếu máy chưa từng chạy `genh install`. Trả lỗi rõ ràng nếu
 // chưa có secrets.json tại dir.
+//
+// LƯU Ý: hàm này CỐ Ý không tự bổ sung trường thiếu — dùng LoadFillingMissing
+// khi cần hành vi đó (xem docs/reports/HANDOFF-v0.1.1.md mục "Lỗi cần sửa"
+// #1 của v0.1.2: một bản cài từ v0.1.0 nâng cấp genh lên có secrets.json
+// thiếu app_db_password/backup_key — ops.Env.LoadSecrets dùng
+// LoadFillingMissing, không dùng Load).
 func Load(dir string) (Bundle, error) {
 	b, existed, err := loadBundle(dir)
 	if err != nil {
@@ -149,6 +155,39 @@ func Load(dir string) (Bundle, error) {
 	}
 	if !existed {
 		return Bundle{}, fmt.Errorf("chưa có bí mật tại %s — chạy `genh install` trước", dir)
+	}
+	return b.Bundle, nil
+}
+
+// LoadFillingMissing đọc bí mật đã sinh tại dir NHƯ Load (trả cùng lỗi rõ
+// ràng nếu secrets.json chưa từng tồn tại — không tự "cài" một bản cài chưa
+// từng chạy `genh install`), nhưng nếu tệp ĐÃ có mà THIẾU một vài trường
+// (bản cài từ một phiên bản genh cũ hơn, trước khi trường đó tồn tại — ví dụ
+// AppDBPassword/BackupKey chỉ có từ v0.1.1), tự sinh bổ sung đúng những
+// trường còn thiếu (tái dùng fillMissing — cùng logic Ensure dùng ở Bước 4
+// cài đặt) và GHI LẠI secrets.json ngay, để các lần chạy sau không phải sinh
+// lại. Các trường đã có giữ nguyên giá trị cũ — không bao giờ sinh đè.
+//
+// Dùng ở ops.Env.LoadSecrets (mọi lệnh vận hành `genh ...` đọc bí mật qua
+// đây) — nếu không bổ sung, một bản cài v0.1.0 nâng cấp genh lên sẽ có
+// AppDBPassword rỗng mãi mãi, khiến MỌI lệnh `docker compose` báo lỗi ở
+// ${GH_APP_DB_PASSWORD:?...} (xem HANDOFF-v0.1.1.md).
+func LoadFillingMissing(dir string) (Bundle, error) {
+	b, existed, err := loadBundle(dir)
+	if err != nil {
+		return Bundle{}, err
+	}
+	if !existed {
+		return Bundle{}, fmt.Errorf("chưa có bí mật tại %s — chạy `genh install` trước", dir)
+	}
+
+	if err := fillMissing(&b); err != nil {
+		return Bundle{}, err
+	}
+	if b.dirty {
+		if err := saveBundle(dir, b.Bundle); err != nil {
+			return Bundle{}, fmt.Errorf("ghi bí mật đã bổ sung: %w", err)
+		}
 	}
 	return b.Bundle, nil
 }

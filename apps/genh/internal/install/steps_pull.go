@@ -23,7 +23,10 @@ var pullServiceOrder = []string{"db", "redis", "proxy", "api", "web", "bridge"}
 type pullStep struct {
 	// puller cho phép tiêm pull.Puller giả khi test — nil dùng pull.CLIPuller.
 	puller pull.Puller
-	// locate cho phép tiêm compose.Locate giả khi test — nil dùng compose.Locate.
+	// locate cho phép tiêm compose.LocateAndSync giả khi test — nil dùng
+	// compose.LocateAndSync (genh install CÓ trách nhiệm đồng bộ compose.yaml
+	// nhúng, khác Locate thường dùng ở internal/ops — xem doc-comment
+	// compose.LocateAndSync).
 	locate func(installDir string) (string, error)
 }
 
@@ -33,7 +36,7 @@ func (pullStep) Name() string { return "Tải image" }
 func (s pullStep) Run(ctx context.Context, env *Env, rep Reporter) error {
 	locate := s.locate
 	if locate == nil {
-		locate = compose.Locate
+		locate = compose.LocateAndSync
 	}
 	installDir := ""
 	if env != nil {

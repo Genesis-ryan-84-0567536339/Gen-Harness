@@ -203,6 +203,55 @@ async def test_export_import_round_trip_two_master_keys_and_objects(
         _admin(f"DROP DATABASE IF EXISTS {target_db} WITH (FORCE)")
 
 
+async def test_import_terminates_lingering_connection_to_target_db(  # type: ignore[no-untyped-def]
+    tmp_path, monkeypatch, fresh_db
+) -> None:
+    """HANDOFF-v0.1.2 mục 2: một kết nối `psycopg` khác (mô phỏng tiến trình cũ chưa dừng hẳn) vẫn mở tới CSDL
+    đích khi `_import` chạy — `pg_restore --clean` phải KHÔNG bị chặn/treo (kết nối lạ bị `_terminate_other_
+    connections` ngắt trước) và import vẫn thành công."""
+    key = _random_master_key()
+    _set_master_key(monkeypatch, key)
+    _use_objects_dir(monkeypatch, tmp_path / "objects")
+
+    org_id = uuid.uuid4()
+    async with dbmod.sessionmaker()() as db:
+        await db.execute(text("INSERT INTO core.organizations (id, name) VALUES (:i, 'Org Lingering')"),
+                         {"i": org_id})
+        await db.commit()
+
+    monkeypatch.setenv("GH_BUNDLE_PASSWORD", "mat-khau-goi-rat-dai-va-manh")
+    bundle_path = tmp_path / "x.ghbundle"
+    await bundle._export(str(bundle_path))
+
+    target_db = f"gh_bundle_lingering_{uuid.uuid4().hex[:10]}"
+    _admin(f"CREATE DATABASE {target_db}")
+    lingering = psycopg.connect(f"{PG}/{target_db}", autocommit=True)
+    try:
+        _use_database(monkeypatch, f"{PG.replace('postgresql://', 'postgresql+asyncpg://')}/{target_db}")
+        await dbmod.dispose_engine()
+
+        await bundle._import(str(bundle_path))  # không được treo/ném lỗi "đang được truy cập" dù `lingering` còn mở
+
+        async with dbmod.sessionmaker()() as db:
+            row = (await db.execute(text(
+                "SELECT name FROM core.organizations WHERE id = :i"), {"i": org_id})).scalar_one()
+        assert row == "Org Lingering"
+    finally:
+        try:
+            lingering.close()
+        except psycopg.Error:
+            pass
+        await dbmod.dispose_engine()
+        _admin(f"DROP DATABASE IF EXISTS {target_db} WITH (FORCE)")
+
+
+def test_terminate_other_connections_ignores_when_admin_db_unreachable(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Không kết nối được CSDL `postgres` để chạy `pg_terminate_backend` (vd. quyền hạn chế) → chỉ log cảnh
+    báo, không ném lỗi (chỉ là phòng thủ thêm — xem docstring `_terminate_other_connections`)."""
+    n = bundle._terminate_other_connections("postgresql://khong-ton-tai:sai@localhost:1/khong_ton_tai")
+    assert n == 0
+
+
 async def test_import_same_master_key_skips_reencryption(
     tmp_path, monkeypatch, fresh_db  # type: ignore[no-untyped-def]
 ) -> None:

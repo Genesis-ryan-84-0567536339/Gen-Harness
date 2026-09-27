@@ -29,8 +29,11 @@ Nội dung tar (sau khi giải mã lớp ngoài):
     keys.json       — khoá master CŨ (và khoá bridge nếu máy nguồn có cấu hình) để nhập giải mã lại
     objects/…       — toàn bộ `ObjectStore` TRỪ tiền tố `backups/` (bản backup GFS không thuộc hồ sơ di động)
 
-Nhập (`import`): giải mã → kiểm phiên bản/khả năng tương thích → `pg_restore --clean --if-exists` (xoá sạch
-CSDL đích trước, đúng ngữ nghĩa "nhập = thay thế hoàn toàn", giống `gh.backup.restore_backup`) → ghi lại object
+Nhập (`import`): giải mã → kiểm phiên bản/khả năng tương thích → NGẮT các kết nối khác đang mở tới CSDL đích
+(`_terminate_other_connections`, phòng thủ thêm — `genh import` đã tự dừng api/worker trước theo hợp đồng
+chung, đây chỉ đề phòng kết nối lạ khác) → `pg_restore --clean --if-exists` với `lock_timeout` đặt qua
+`PGOPTIONS` (thất bại rõ ràng thay vì treo vô hạn nếu vẫn còn khoá) (xoá sạch CSDL đích trước, đúng ngữ nghĩa
+"nhập = thay thế hoàn toàn", giống `gh.backup.restore_backup`) → ghi lại object
 → MÃ HOÁ LẠI mọi cột bí mật (đã bị `pg_restore` mang nguyên bản mã hoá bằng khoá master CŨ vào CSDL) bằng khoá
 master HIỆN HÀNH của máy đích, dùng đúng `associated data` từng loại (không đổi AAD nào — đổi AAD tương đương
 đổi bí mật, không giải mã lại được nữa). Khoá cũ == khoá hiện tại (nhập lại cùng máy, hoặc hai máy chia sẻ
@@ -57,6 +60,7 @@ import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import orjson
 import psycopg
@@ -84,6 +88,11 @@ ARGON2_HASH_LEN = 32                     # khoá AES-256
 
 MIN_PASSWORD_LEN = 12
 OBJECTS_EXCLUDE_PREFIX = "backups/"      # bản backup GFS không thuộc hồ sơ di động (xem docstring module)
+
+# Phòng thủ thêm trước `pg_restore --clean` (HANDOFF-v0.1.2 mục 2) — `genh import` đã tự DỪNG api/worker trước
+# khi gọi lệnh này (hợp đồng chung), nhưng vẫn đặt `lock_timeout` để KHÔNG treo vô hạn nếu còn một kết nối lạ
+# nào đó (vd. ai đó đang `psql` thủ công) giữ khoá trên bảng: thất bại rõ ràng (lỗi timeout) còn hơn treo mãi.
+RESTORE_LOCK_TIMEOUT_MS = 30_000
 
 # ─── các cột CSDL mã hoá bằng khoá master (`gh.crypto`) — rà theo mọi lời gọi `crypto.encrypt(...)` trong gh/ ──
 # (table, cột khoá chính, cột bí mật, associated data — PHẢI khớp y hệt AAD dùng ở nơi mã hoá gốc, xem cạnh mỗi
@@ -334,9 +343,10 @@ async def _import(inp: str) -> None:
         target_rev = _current_alembic_revision(libpq_url(admin_url))
         _check_revision_compatible(manifest.get("alembic_revision"), target_rev)
 
+        _terminate_other_connections(libpq_url(admin_url))
         log.info("pg_restore --clean --if-exists vào CSDL %s …", database_name(admin_url))
         await _run(["pg_restore", "--clean", "--if-exists", "--no-owner", "--dbname", libpq_url(admin_url),
-                   str(dump_path)])
+                   str(dump_path)], env={"PGOPTIONS": f"-c lock_timeout={RESTORE_LOCK_TIMEOUT_MS}"})
 
         store = get_object_store()
         objects_dir = extract_dir / "objects"
@@ -414,11 +424,39 @@ async def _reencrypt_secrets(old_master_key: bytes) -> None:
 
 # ─── tiến trình con thật (giống gh/backup.py) ─────────────────────────────────────────────────────────────────
 
-async def _run(cmd: list[str]) -> None:
-    proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+async def _run(cmd: list[str], *, env: dict[str, str] | None = None) -> None:
+    full_env = {**os.environ, **env} if env else None
+    proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                                                env=full_env)
     _out, err = await proc.communicate()
     if proc.returncode != 0:
         raise RuntimeError(f"{cmd[0]} thất bại (mã {proc.returncode}): {err.decode(errors='replace')[-4000:]}")
+
+
+# ─── ngắt kết nối khác tới CSDL đích trước `pg_restore --clean` (HANDOFF-v0.1.2 mục 2) ─────────────────────────
+
+def _terminate_other_connections(pg_url: str) -> int:
+    """Ngắt mọi kết nối KHÁC (không phải kết nối này) đang mở tới CSDL đích, qua `pg_terminate_backend` bằng
+    URL quản trị — phòng trường hợp còn tiến trình cũ giữ khoá khiến `pg_restore --clean` treo hoặc thất bại vì
+    "database is being accessed by other users". `genh import` đã tự dừng api/worker trước (hợp đồng chung),
+    đây chỉ là lớp phòng thủ thêm nên lỗi kết nối tới CSDL `postgres` để chạy truy vấn KHÔNG làm dừng import
+    (chỉ log cảnh báo, để `pg_restore` tự báo lỗi rõ ràng nếu thật sự còn kết nối giữ khoá)."""
+    parts = urlsplit(pg_url)
+    db_name = parts.path.lstrip("/")
+    admin_conn_url = urlunsplit(parts._replace(path="/postgres"))
+    try:
+        with psycopg.connect(admin_conn_url, autocommit=True) as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                "WHERE datname = %s AND pid <> pg_backend_pid()", (db_name,))
+            n = len(cur.fetchall())
+    except psycopg.Error as e:
+        log.warning("Không ngắt được kết nối khác tới CSDL đích %s trước khi phục hồi (bỏ qua, chỉ là phòng "
+                    "thủ thêm): %s", db_name, e)
+        return 0
+    if n:
+        log.info("Đã ngắt %d kết nối khác đang mở tới CSDL đích %s trước khi phục hồi", n, db_name)
+    return n
 
 
 # ─── CLI: `python -m gh.bundle export --out <path|-> | import --in <path|->` ───────────────────────────────

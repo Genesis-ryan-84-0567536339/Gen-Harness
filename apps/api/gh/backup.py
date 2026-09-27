@@ -3,6 +3,10 @@
 - `pg_dump` thật, định dạng tuỳ biến nén sẵn (`-Fc`) ra tệp tạm.
 - Mã hoá bằng đúng cơ chế phong bì AES-256-GCM của `gh.crypto` (giai đoạn 1 dùng cho bí mật) — không tự chế
   thuật toán mã hoá mới, chỉ đổi `associated data` để tách bối cảnh backup khỏi các bí mật khác.
+- Khoá mã hoá backup (HANDOFF-v0.1.2 mục 1): dùng `GH_BACKUP_KEY` (hex 64 ký tự = 32 byte) riêng cho backup
+  nếu có cấu hình — tách khỏi `GH_MASTER_KEY` (bí mật ứng dụng) để mất một khoá không kéo theo mất khoá kia.
+  Trống ⇒ giữ hành vi cũ (mã hoá bằng khoá master). Mỗi bản ghi rõ đã dùng khoá nào (`BackupEntry.key_id`:
+  `"backup"`|`"master"`) để giải mã đúng khoá lúc restore — không thử/sai. Xem `_backup_key()`.
 - Lưu qua `gh.chassis.objects.ObjectStore` (điểm nối MinIO thật thay sau — xem docstring của module đó): tái
   dùng đúng abstraction dựng ở giai đoạn 3 cho Tài liệu, không viết client MinIO riêng cho backup.
 - Vòng đời GFS (grandfather-father-son): giữ 7 bản gần nhất theo NGÀY + 4 bản theo TUẦN (ISO) + 12 bản theo
@@ -65,15 +69,19 @@ class BackupEntry:
     database: str
     size_bytes: int
     sha256: str
+    # Khoá nào đã mã hoá bản này: "backup" (GH_BACKUP_KEY, xem `_backup_key()`) hoặc "master" (GH_MASTER_KEY —
+    # hành vi cũ). Bản cũ ghi TRƯỚC khi có trường này không có khoá `key_id` trong JSON → `from_json` mặc định
+    # "master" (tương thích ngược: mọi bản đã tồn tại đều mã hoá bằng khoá master lúc chưa có khoá backup riêng).
+    key_id: str = "master"
 
     def to_json(self) -> dict[str, Any]:
         return {"key": self.key, "taken_at": self.taken_at.isoformat(), "database": self.database,
-                "size_bytes": self.size_bytes, "sha256": self.sha256}
+                "size_bytes": self.size_bytes, "sha256": self.sha256, "key_id": self.key_id}
 
     @staticmethod
     def from_json(d: dict[str, Any]) -> BackupEntry:
         return BackupEntry(key=d["key"], taken_at=datetime.fromisoformat(d["taken_at"]), database=d["database"],
-                           size_bytes=d["size_bytes"], sha256=d["sha256"])
+                           size_bytes=d["size_bytes"], sha256=d["sha256"], key_id=d.get("key_id", "master"))
 
 
 # ─── DSN: `database_url` là SQLAlchemy async (`postgresql+asyncpg://…`), pg_dump/pg_restore cần libpq thường ──
@@ -87,6 +95,24 @@ def libpq_url(database_url: str, *, database: str | None = None) -> str:
 
 def database_name(database_url: str) -> str:
     return urlsplit(libpq_url(database_url)).path.lstrip("/")
+
+
+# ─── khoá riêng cho backup (`GH_BACKUP_KEY`, hex 64 ký tự = 32 byte) — HANDOFF-v0.1.2 mục 1 ─────────────────
+# Tách khỏi `GH_MASTER_KEY` (bí mật ứng dụng, base64) để mất một khoá không kéo theo mất khoá kia. Rỗng ⇒ giữ
+# hành vi cũ: backup mã hoá bằng khoá master (xem `Settings.backup_key`, `crypto.encrypt`/`decrypt` tham số
+# `key=None` ⇒ dùng `crypto.master_key()`).
+
+def _backup_key() -> bytes | None:
+    raw = get_settings().backup_key
+    if not raw:
+        return None
+    try:
+        key = bytes.fromhex(raw)
+    except ValueError as e:
+        raise ValueError("GH_BACKUP_KEY phải là chuỗi hex (64 ký tự = 32 byte)") from e
+    if len(key) != 32:
+        raise ValueError("GH_BACKUP_KEY phải là 32 byte (64 ký tự hex)")
+    return key
 
 
 # ─── vòng đời GFS: thuật toán thuần, không đụng DB/đĩa ─────────────────────────────────────────────────────
@@ -184,11 +210,13 @@ async def run_backup(*, database_url: str | None = None, store: ObjectStore | No
         await _run(["pg_dump", "--format=custom", "--no-owner", "--file", str(dump_path), src])
         raw = dump_path.read_bytes()
 
-    enc = crypto.encrypt(raw, associated=BACKUP_AAD)
+    bkey = _backup_key()
+    key_id = "backup" if bkey is not None else "master"
+    enc = crypto.encrypt(raw, associated=BACKUP_AAD, key=bkey)
     key = f"backups/{taken_at.strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:8]}.pgcustom.enc"
     await store.put(key, enc)
     entry = BackupEntry(key=key, taken_at=taken_at, database=db_name, size_bytes=len(raw),
-                        sha256=content_hash(raw))
+                        sha256=content_hash(raw), key_id=key_id)
 
     entries = [*await _read_manifest(store), entry]
     await _write_manifest(store, entries)
@@ -227,7 +255,11 @@ async def restore_backup(key: str, *, database_url: str | None = None, target_da
     database_url = database_url or get_settings().effective_admin_database_url
     store = store or get_object_store()
     enc = await store.get(key)
-    raw = crypto.decrypt(enc, associated=BACKUP_AAD)
+    # Bản nào mã hoá bằng khoá nào ghi trong manifest (`key_id`) — bản cũ không có trường này ⇒ "master" (xem
+    # `BackupEntry.from_json`). Không tự đoán qua thử/sai (thử cả hai khoá) — đọc rõ ràng từ manifest.
+    entry = next((e for e in await _read_manifest(store) if e.key == key), None)
+    dkey = _backup_key() if (entry is not None and entry.key_id == "backup") else None
+    raw = crypto.decrypt(enc, associated=BACKUP_AAD, key=dkey)
     dest = libpq_url(database_url, database=target_database) if target_database else libpq_url(database_url)
 
     with tempfile.TemporaryDirectory(prefix="gh-restore-") as tmp:

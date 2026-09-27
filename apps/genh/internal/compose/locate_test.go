@@ -3,6 +3,7 @@ package compose
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -152,14 +153,18 @@ func TestLocate_FallsBackToEmbeddedComposeUnderInstallDir(t *testing.T) {
 	}
 }
 
-// TestLocate_SyncsManagedComposeWhenEmbeddedContentDiffers là test cho SỬA
-// LỖI chính của package này (xem docs/reports/HANDOFF-v0.1.1.md mục "Lỗi
-// cần sửa" #5): một bản genh MỚI HƠN (mang bản nhúng khác — mô phỏng bằng
-// cách tự ghi một nội dung "cũ" khác bản nhúng thật vào đúng vị trí genh
-// quản lý) phải TỰ ĐỒNG BỘ lại compose.yaml ở installDir về đúng bản nhúng
-// hiện tại của chính nó, giữ bản cũ lại ở compose.yaml.bak — KHÔNG được im
-// lặng giữ mãi bản cũ như hành vi trước khi sửa.
-func TestLocate_SyncsManagedComposeWhenEmbeddedContentDiffers(t *testing.T) {
+// TestLocateAndSync_SyncsManagedComposeWhenEmbeddedContentDiffers là test
+// cho SỬA LỖI chính của package này (xem docs/reports/HANDOFF-v0.1.1.md mục
+// "Lỗi cần sửa" #5): một bản genh MỚI HƠN (mang bản nhúng khác — mô phỏng
+// bằng cách tự ghi một nội dung "cũ" khác bản nhúng thật vào đúng vị trí
+// genh quản lý) phải TỰ ĐỒNG BỘ lại compose.yaml ở installDir về đúng bản
+// nhúng hiện tại của chính nó, giữ bản cũ lại ở compose.yaml.bak — KHÔNG
+// được im lặng giữ mãi bản cũ như hành vi trước khi sửa.
+//
+// Từ v0.1.2 (mục #3), hành vi ĐỒNG BỘ này chỉ còn ở LocateAndSync (dùng bởi
+// `genh update`/`genh install`) — xem TestLocate_OnlyWarnsWithoutSyncing bên
+// dưới cho hành vi mới của Locate (dùng bởi mọi lệnh vận hành khác).
+func TestLocateAndSync_SyncsManagedComposeWhenEmbeddedContentDiffers(t *testing.T) {
 	t.Setenv(EnvOverrideVar, "")
 	cwdDir := t.TempDir()
 	oldWd, _ := os.Getwd()
@@ -180,12 +185,12 @@ func TestLocate_SyncsManagedComposeWhenEmbeddedContentDiffers(t *testing.T) {
 		t.Fatalf("WriteFile bản cũ: %v", err)
 	}
 
-	got, err := Locate(installDir)
+	got, err := LocateAndSync(installDir)
 	if err != nil {
-		t.Fatalf("Locate: %v", err)
+		t.Fatalf("LocateAndSync: %v", err)
 	}
 	if got != managedPath {
-		t.Errorf("Locate = %q, muốn %q", got, managedPath)
+		t.Errorf("LocateAndSync = %q, muốn %q", got, managedPath)
 	}
 
 	newContent, err := os.ReadFile(managedPath)
@@ -206,11 +211,78 @@ func TestLocate_SyncsManagedComposeWhenEmbeddedContentDiffers(t *testing.T) {
 
 	// Gọi lại lần ba: đã khớp bản nhúng, không đổi gì thêm, không ghi lại
 	// .bak (giữ nguyên .bak của lần đồng bộ trước, không mất thông tin).
-	if _, err := Locate(installDir); err != nil {
-		t.Fatalf("Locate lần 3: %v", err)
+	if _, err := LocateAndSync(installDir); err != nil {
+		t.Fatalf("LocateAndSync lần 3: %v", err)
 	}
 	bak2, _ := os.ReadFile(managedPath + ".bak")
 	if string(bak2) != string(oldContent) {
-		t.Error("Locate lần 3 (đã khớp bản nhúng) không được đổi .bak")
+		t.Error("LocateAndSync lần 3 (đã khớp bản nhúng) không được đổi .bak")
+	}
+}
+
+// TestLocate_OnlyWarnsWithoutSyncing là test cho SỬA LỖI mục #3 của v0.1.2
+// (docs/reports/HANDOFF-v0.1.1.md phiên bàn giao tiếp theo): Locate (dùng
+// bởi mọi lệnh vận hành TRỪ `genh update`/`genh install`) KHÔNG được tự ghi
+// đè compose.yaml của Owner nữa dù phát hiện lệch bản nhúng — chỉ in một
+// dòng nhắc chạy `genh update`.
+func TestLocate_OnlyWarnsWithoutSyncing(t *testing.T) {
+	t.Setenv(EnvOverrideVar, "")
+	cwdDir := t.TempDir()
+	oldWd, _ := os.Getwd()
+	defer os.Chdir(oldWd)
+	if err := os.Chdir(cwdDir); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+
+	installDir := t.TempDir()
+	deployDir := filepath.Join(installDir, "deploy")
+	if err := os.MkdirAll(deployDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	managedPath := filepath.Join(deployDir, "compose.yaml")
+
+	oldContent := []byte("# compose.yaml Owner tự sửa tay\nservices: {}\n")
+	if err := os.WriteFile(managedPath, oldContent, 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	var notice strings.Builder
+	oldNoticeWriter := NoticeWriter
+	NoticeWriter = &notice
+	defer func() { NoticeWriter = oldNoticeWriter }()
+
+	got, err := Locate(installDir)
+	if err != nil {
+		t.Fatalf("Locate: %v", err)
+	}
+	if got != managedPath {
+		t.Errorf("Locate = %q, muốn %q", got, managedPath)
+	}
+
+	after, err := os.ReadFile(managedPath)
+	if err != nil {
+		t.Fatalf("đọc lại: %v", err)
+	}
+	if string(after) != string(oldContent) {
+		t.Error("Locate (không đồng bộ) KHÔNG được đổi nội dung compose.yaml của Owner")
+	}
+	if _, err := os.Stat(managedPath + ".bak"); err == nil {
+		t.Error("Locate (không đồng bộ) không được tạo .bak")
+	}
+	if notice.Len() == 0 {
+		t.Error("Locate phải in dòng nhắc khi phát hiện compose.yaml lệch bản nhúng")
+	}
+
+	// Gọi lại lần hai: vẫn chỉ nhắc, vẫn không đụng tệp.
+	notice.Reset()
+	if _, err := Locate(installDir); err != nil {
+		t.Fatalf("Locate lần 2: %v", err)
+	}
+	after2, _ := os.ReadFile(managedPath)
+	if string(after2) != string(oldContent) {
+		t.Error("Locate lần 2 vẫn không được đổi nội dung")
+	}
+	if notice.Len() == 0 {
+		t.Error("Locate lần 2 vẫn phải nhắc (vẫn còn lệch)")
 	}
 }

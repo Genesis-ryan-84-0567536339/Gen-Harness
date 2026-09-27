@@ -9,18 +9,27 @@ Hai lớp kiểm:
    người) khớp `docs/design/seed-data.json` qua `gh.seed_demo`.
 """
 
+import os
 import uuid
 from datetime import UTC, datetime, timedelta
 
 import psycopg
 import pytest
+from cryptography.exceptions import InvalidTag
 from sqlalchemy import text
 
-from gh.backup import BackupEntry, is_due, list_backups, restore_backup, run_backup, select_retained
+from gh import crypto
+from gh.backup import BackupEntry, _backup_key, is_due, list_backups, restore_backup, run_backup, select_retained
 from gh.chassis.objects import LocalObjectStore
+from gh.config import get_settings
 from gh.db import sessionmaker
 from gh.seed_demo import seed_demo
 from tests.conftest import PG
+
+
+def _set_backup_key(monkeypatch, hex_key: str) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("GH_BACKUP_KEY", hex_key)
+    get_settings.cache_clear()
 
 # ═══ vòng đời GFS (thuần) ═══════════════════════════════════════════════════════
 
@@ -122,6 +131,120 @@ def test_is_due_monthly_same_month_not_due() -> None:
 def test_is_due_monthly_previous_month_due() -> None:
     cfg = {"frequency": "monthly", "time_of_day": "02:00"}
     assert is_due(cfg, last_at=NOW.replace(month=5), now=NOW) is True
+
+
+# ═══ khoá backup riêng (`GH_BACKUP_KEY`, HANDOFF-v0.1.2 mục 1) ═════════════════════
+
+def test_backup_key_unset_returns_none() -> None:
+    get_settings.cache_clear()
+    assert _backup_key() is None
+
+
+def test_backup_key_valid_hex_returns_32_bytes(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    hex_key = os.urandom(32).hex()
+    _set_backup_key(monkeypatch, hex_key)
+    key = _backup_key()
+    assert key == bytes.fromhex(hex_key)
+    assert len(key) == 32  # type: ignore[arg-type]
+
+
+def test_backup_key_wrong_length_raises(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    _set_backup_key(monkeypatch, os.urandom(16).hex())  # 16 byte, không phải 32
+    with pytest.raises(ValueError, match="32 byte"):
+        _backup_key()
+
+
+def test_backup_key_not_hex_raises(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    _set_backup_key(monkeypatch, "khong-phai-hex" * 5)
+    with pytest.raises(ValueError, match="hex"):
+        _backup_key()
+
+
+def test_backup_entry_from_json_missing_key_id_defaults_master() -> None:
+    """Bản backup CŨ (ghi trước khi có trường `key_id`) không có khoá này trong JSON — tương thích ngược:
+    mặc định "master" (mọi bản cũ đều mã hoá bằng khoá master, vì chưa có khoá backup riêng lúc đó)."""
+    d = {"key": "backups/old.pgcustom.enc", "taken_at": "2026-01-01T02:00:00+00:00", "database": "gh",
+         "size_bytes": 10, "sha256": "x"}
+    entry = BackupEntry.from_json(d)
+    assert entry.key_id == "master"
+
+
+def test_backup_entry_to_json_roundtrip_keeps_key_id() -> None:
+    entry = BackupEntry(key="k", taken_at=datetime(2026, 1, 1, tzinfo=UTC), database="gh", size_bytes=1,
+                        sha256="x", key_id="backup")
+    assert BackupEntry.from_json(entry.to_json()).key_id == "backup"
+
+
+async def test_run_backup_without_backup_key_uses_master(tmp_path, scratch_db) -> None:  # type: ignore[no-untyped-def]
+    get_settings.cache_clear()
+    store = LocalObjectStore(root=str(tmp_path / "objects"))
+    entry = await run_backup(database_url=f"{PG}/{scratch_db}", store=store)
+    assert entry.key_id == "master"
+    enc = await store.get(entry.key)
+    # Giải mã trực tiếp bằng khoá master hiện hành (không key= riêng) phải thành công — đúng hành vi cũ.
+    assert crypto.decrypt(enc, associated=b"gh-backup-v1")[:4] == b"PGDM"
+
+
+async def test_run_backup_with_backup_key_uses_backup_key_and_restores(  # type: ignore[no-untyped-def]
+    tmp_path, monkeypatch, scratch_db
+) -> None:
+    """Có cấu hình `GH_BACKUP_KEY`: bản backup MỚI mã hoá bằng khoá đó (`key_id == "backup"`), giải mã bằng
+    khoá master hiện hành phải THẤT BẠI (đã đổi khoá thật), và `restore_backup` (tự tra `key_id` từ manifest)
+    vẫn khôi phục đúng."""
+    hex_key = os.urandom(32).hex()
+    _set_backup_key(monkeypatch, hex_key)
+    store = LocalObjectStore(root=str(tmp_path / "objects"))
+
+    with psycopg.connect(f"{PG}/{scratch_db}", autocommit=True) as c:
+        c.execute("CREATE TABLE IF NOT EXISTS t_bkey (id serial primary key, v text)")
+        c.execute("DELETE FROM t_bkey")
+        c.execute("INSERT INTO t_bkey (v) VALUES ('khoa-rieng')")
+
+    entry = await run_backup(database_url=f"{PG}/{scratch_db}", store=store)
+    assert entry.key_id == "backup"
+
+    enc = await store.get(entry.key)
+    with pytest.raises(InvalidTag):
+        crypto.decrypt(enc, associated=b"gh-backup-v1")  # khoá master hiện hành KHÔNG mở được bản này
+
+    target = f"gh_backup_bkey_target_{uuid.uuid4().hex[:10]}"
+    with psycopg.connect(f"{PG}/postgres", autocommit=True) as c:
+        c.execute(f"CREATE DATABASE {target}")
+    try:
+        await restore_backup(entry.key, database_url=f"{PG}/{scratch_db}", target_database=target, store=store)
+        with psycopg.connect(f"{PG}/{target}", autocommit=True) as c:
+            rows = c.execute("SELECT v FROM t_bkey").fetchall()
+        assert [r[0] for r in rows] == ["khoa-rieng"]
+    finally:
+        with psycopg.connect(f"{PG}/postgres", autocommit=True) as c:
+            c.execute(f"DROP DATABASE IF EXISTS {target} WITH (FORCE)")
+
+
+async def test_restore_old_entry_without_key_id_uses_master(tmp_path, scratch_db, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Mô phỏng bản backup ghi TRƯỚC v0.1.2 (không có `GH_BACKUP_KEY`, manifest không có `key_id`) — restore
+    vẫn phải dùng khoá master, không đòi hỏi `GH_BACKUP_KEY` dù biến này đang có cấu hình ở máy hiện tại."""
+    get_settings.cache_clear()  # đảm bảo không có GH_BACKUP_KEY lúc tạo bản backup "cũ" giả lập
+    store = LocalObjectStore(root=str(tmp_path / "objects"))
+    with psycopg.connect(f"{PG}/{scratch_db}", autocommit=True) as c:
+        c.execute("CREATE TABLE IF NOT EXISTS t_old (id serial primary key, v text)")
+        c.execute("DELETE FROM t_old")
+        c.execute("INSERT INTO t_old (v) VALUES ('cu-truoc-v012')")
+    entry = await run_backup(database_url=f"{PG}/{scratch_db}", store=store)
+    assert entry.key_id == "master"
+
+    # Giờ máy có cấu hình GH_BACKUP_KEY (nâng cấp lên v0.1.2) — bản CŨ vẫn phải giải mã đúng bằng khoá master.
+    _set_backup_key(monkeypatch, os.urandom(32).hex())
+    target = f"gh_backup_old_target_{uuid.uuid4().hex[:10]}"
+    with psycopg.connect(f"{PG}/postgres", autocommit=True) as c:
+        c.execute(f"CREATE DATABASE {target}")
+    try:
+        await restore_backup(entry.key, database_url=f"{PG}/{scratch_db}", target_database=target, store=store)
+        with psycopg.connect(f"{PG}/{target}", autocommit=True) as c:
+            rows = c.execute("SELECT v FROM t_old").fetchall()
+        assert [r[0] for r in rows] == ["cu-truoc-v012"]
+    finally:
+        with psycopg.connect(f"{PG}/postgres", autocommit=True) as c:
+            c.execute(f"DROP DATABASE IF EXISTS {target} WITH (FORCE)")
 
 
 # ═══ round-trip THẬT: pg_dump + mã hoá + ObjectStore + pg_restore ═══════════════

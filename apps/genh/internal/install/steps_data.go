@@ -40,7 +40,7 @@ func (s dataStep) Run(ctx context.Context, env *Env, rep Reporter) error {
 	}
 	locate := s.locate
 	if locate == nil {
-		locate = compose.Locate
+		locate = compose.LocateAndSync
 	}
 	timeout := s.timeout
 	if timeout <= 0 {

@@ -292,12 +292,40 @@ func validateBundleFile(path string) (*os.File, error) {
 	return f, nil
 }
 
-// RunImport khôi phục một gói .ghbundle: kiểm tệp hợp lệ, cảnh báo GHI ĐÈ +
-// hỏi xác nhận (trừ --yes), backup AN TOÀN vào ObjectStore nội bộ TRƯỚC khi
-// đụng gì (dùng lại runBackupInContainer — cùng logic `genh backup`/rollback
-// của `genh update`), rồi chạy `python -m gh.bundle import --in -` với chính
-// tệp làm stdin (không đọc vào RAM). Thành công → restart api/worker + đợi
-// healthy, giống hệt bước cuối của `genh update`.
+// RunImport khôi phục một gói .ghbundle. LUỒNG (SỬA LỖI mục #4/#5 của
+// v0.1.2, xem docs/reports/HANDOFF-v0.1.1.md): bản v0.1.1 chạy
+// `python -m gh.bundle import` qua `docker compose exec` vào container api
+// ĐANG SỐNG (api/worker vẫn chạy song song, có thể vừa đọc/ghi DB vừa bị
+// pg_restore --clean của gh.bundle xoá bảng ngay dưới chân — race thật) và
+// KHÔNG chạy lại migrate sau khi restore (gói .ghbundle có thể cũ hơn schema
+// hiện tại). Luồng mới:
+//
+//  1. Backup AN TOÀN vào ObjectStore nội bộ (như cũ, dùng lại
+//     runBackupInContainer) — NHƯNG chép NGAY bản đó ra host (giống `genh
+//     backup --to`, dùng lại getObjectBytesScript) trước khi đụng gì khác:
+//     nếu container api/worker sau này bị thay (ví dụ Owner tự docker compose
+//     down đâu đó giữa chừng), bản backup trong ObjectStore container CŨ
+//     không còn ý nghĩa để restore vào container MỚI — bản trên host luôn
+//     dùng lại được.
+//  2. `docker compose stop api worker` — dừng hẳn hai service này TRƯỚC khi
+//     đụng DB, tránh api/worker vừa đọc/ghi vừa bị pg_restore --clean xoá
+//     bảng ngay dưới chân.
+//  3. `docker compose run --rm --no-deps -T -e GH_BUNDLE_PASSWORD api
+//     python -m gh.bundle import --in -` (stdin = tệp gói) — CHẠY MỘT
+//     CONTAINER MỚI (`run`, không phải `exec` vào container đã dừng ở bước
+//  2. cùng image api, không phụ thuộc service khác đang chạy hay không
+//     (--no-deps).
+//  4. `docker compose run --rm --no-deps -T migrate` — chạy lại
+//     `alembic upgrade heads` NGAY sau restore (gói có thể ở schema cũ hơn
+//     bản genh hiện tại).
+//  5. `docker compose up -d` — khởi động lại toàn bộ, đợi healthy.
+//
+// LỖI GIỮA CHỪNG (sau khi bước 2 đã dừng api/worker): LUÔN cố
+// `docker compose up -d api worker` lại (đưa Owner về trạng thái ít nhất còn
+// chạy được, dù chưa chắc đã import xong) rồi báo lỗi kèm hướng dẫn khôi
+// phục từ bản backup an toàn ĐÃ CHÉP RA HOST ở bước 1. Mã thoát 2 (sai mật
+// khẩu/gói hỏng) và 3 (không tương thích) của `gh.bundle import` giữ nguyên
+// ánh xạ ErrCodeImportWrongPassword/ErrCodeImportIncompatible như trước.
 func RunImport(ctx context.Context, env *Env, path string, opts ImportOptions, deps ImportDeps, in io.Reader, out io.Writer) error {
 	runner := deps.Runner
 	if runner == nil {
@@ -350,7 +378,7 @@ func RunImport(ctx context.Context, env *Env, path string, opts ImportOptions, d
 	envOverlay := EnvOverlay(bundle)
 	dir := composeDir(composePath)
 
-	_, _ = fmt.Fprintln(out, "1/2 Backup an toàn trước khi import…")
+	_, _ = fmt.Fprintln(out, "1/4 Backup an toàn trước khi import…")
 	key, err := runBackupInContainer(ctx, runner, composePath, envOverlay, dir)
 	if err != nil {
 		return &OpError{
@@ -362,60 +390,99 @@ func RunImport(ctx context.Context, env *Env, path string, opts ImportOptions, d
 		}
 	}
 	_, _ = fmt.Fprintln(out, "     backup an toàn: "+key)
-	restoreHint := "`docker compose exec -T " + bundleServiceName + " python -m gh.backup restore --key " + key + "` rồi `docker compose up -d`"
 
-	_, _ = fmt.Fprintln(out, "2/2 Import gói…")
-	args := compose.BaseArgs(composePath, "exec", "-T", "-e", bundlePasswordEnv, bundleServiceName, "python", "-m", "gh.bundle", "import", "--in", "-")
+	safeBackupHostPath, err := copyBackupObjectToHost(ctx, runner, composePath, envOverlay, dir, key, env.InstallDir)
+	if err != nil {
+		return &OpError{
+			Code: ErrCodeImportBackupFailed,
+			What: "Backup an toàn (" + key + ") xong, nhưng chép ra host thất bại — DỪNG LẠI, chưa đụng gì khác",
+			Why:  err.Error(),
+			Next: "Bản backup vẫn còn TRONG container api hiện tại (khoá: " + key + "); kiểm dung lượng đĩa/quyền ghi ở " + env.InstallDir + "/data rồi thử lại `genh import " + path + "`.",
+			Err:  err,
+		}
+	}
+	_, _ = fmt.Fprintln(out, "     đã chép ra host: "+safeBackupHostPath)
+
+	restoreHint := fmt.Sprintf(
+		"khôi phục từ bản backup an toàn (khoá %s, đã chép ra host tại %s): dùng `docker compose exec -T %s python -m gh.backup restore --key %s` nếu container api còn dùng chung ObjectStore, hoặc chép %s vào container/volume mới rồi restore.",
+		key, safeBackupHostPath, bundleServiceName, key, safeBackupHostPath)
+
+	_, _ = fmt.Fprintln(out, "2/4 Dừng api/worker…")
+	stopArgs := compose.BaseArgs(composePath, "stop", "api", "worker")
+	if _, err := runner.Output(ctx, dockercli.Cmd{Name: "docker", Args: stopArgs, Env: envOverlay, Dir: dir}); err != nil {
+		return recoverImportAndWrap(ctx, runner, composePath, envOverlay, dir, out, &OpError{
+			Code: ErrCodeImportFailed,
+			What: "`docker compose stop api worker` trước khi import thất bại",
+			Why:  err.Error(),
+			Next: restoreHint,
+			Err:  err,
+		})
+	}
+
+	_, _ = fmt.Fprintln(out, "3/4 Import gói…")
+	importArgs := compose.BaseArgs(composePath, "run", "--rm", "--no-deps", "-T", "-e", bundlePasswordEnv, bundleServiceName, "python", "-m", "gh.bundle", "import", "--in", "-")
 	importEnv := append(append([]string{}, envOverlay...), bundlePasswordEnv+"="+password)
-	runErr := runner.RunIO(ctx, dockercli.Cmd{Name: "docker", Args: args, Env: importEnv, Dir: dir}, f, out)
+	runErr := runner.RunIO(ctx, dockercli.Cmd{Name: "docker", Args: importArgs, Env: importEnv, Dir: dir}, f, out)
 
 	if runErr != nil {
 		var exitErr *dockercli.ExitError
 		if errors.As(runErr, &exitErr) {
 			switch exitErr.Code {
 			case 2:
-				return &OpError{
+				return recoverImportAndWrap(ctx, runner, composePath, envOverlay, dir, out, &OpError{
 					Code: ErrCodeImportWrongPassword,
 					What: "Sai mật khẩu gói .ghbundle, hoặc gói bị hỏng",
 					Why:  runErr.Error(),
-					Next: "Kiểm đúng mật khẩu đã dùng lúc `genh export` và tệp gói còn nguyên vẹn. Dữ liệu hiện tại KHÔNG bị mất — backup an toàn " + key + " vẫn còn; khôi phục về trước import nếu cần: " + restoreHint + ".",
+					Next: "Kiểm đúng mật khẩu đã dùng lúc `genh export` và tệp gói còn nguyên vẹn. Dữ liệu hiện tại KHÔNG bị mất — " + restoreHint,
 					Err:  runErr,
-				}
+				})
 			case 3:
-				return &OpError{
+				return recoverImportAndWrap(ctx, runner, composePath, envOverlay, dir, out, &OpError{
 					Code: ErrCodeImportIncompatible,
 					What: "Gói .ghbundle không tương thích với phiên bản Gen-Harness hiện tại",
 					Why:  runErr.Error(),
-					Next: "Dùng bản genh/gh.bundle cùng phiên bản đã tạo gói này. Dữ liệu hiện tại KHÔNG bị mất — backup an toàn " + key + " vẫn còn; khôi phục về trước import nếu cần: " + restoreHint + ".",
+					Next: "Dùng bản genh/gh.bundle cùng phiên bản đã tạo gói này. Dữ liệu hiện tại KHÔNG bị mất — " + restoreHint,
 					Err:  runErr,
-				}
+				})
 			default:
-				return &OpError{
+				return recoverImportAndWrap(ctx, runner, composePath, envOverlay, dir, out, &OpError{
 					Code: ErrCodeImportFailed,
 					What: "`python -m gh.bundle import` thất bại",
 					Why:  runErr.Error(),
-					Next: "Xem log ở trên. Dữ liệu hiện tại KHÔNG bị mất — backup an toàn " + key + " vẫn còn; khôi phục về trước import nếu cần: " + restoreHint + ".",
+					Next: "Xem log ở trên. Dữ liệu hiện tại KHÔNG bị mất — " + restoreHint,
 					Err:  runErr,
-				}
+				})
 			}
 		}
-		return &OpError{
+		return recoverImportAndWrap(ctx, runner, composePath, envOverlay, dir, out, &OpError{
 			Code: ErrCodeImportFailed,
 			What: "Không chạy được `python -m gh.bundle import`",
 			Why:  runErr.Error(),
-			Next: "Kiểm Gen-Harness đang chạy (`genh status`). Dữ liệu hiện tại KHÔNG bị mất — backup an toàn " + key + " vẫn còn; khôi phục về trước import nếu cần: " + restoreHint + ".",
+			Next: "Kiểm Gen-Harness đang chạy (`genh status`). Dữ liệu hiện tại KHÔNG bị mất — " + restoreHint,
 			Err:  runErr,
-		}
+		})
 	}
 
-	_, _ = fmt.Fprintln(out, "     import xong, khởi động lại api/worker…")
-	restartArgs := compose.BaseArgs(composePath, "restart", "api", "worker")
-	if _, err := runner.Output(ctx, dockercli.Cmd{Name: "docker", Args: restartArgs, Env: envOverlay, Dir: dir}); err != nil {
+	_, _ = fmt.Fprintln(out, "     import xong, chạy lại migrate…")
+	migrateArgs := compose.BaseArgs(composePath, "run", "--rm", "--no-deps", "-T", "migrate")
+	if err := runner.Stream(ctx, dockercli.Cmd{Name: "docker", Args: migrateArgs, Env: envOverlay, Dir: dir}, func(string) {}); err != nil {
+		return recoverImportAndWrap(ctx, runner, composePath, envOverlay, dir, out, &OpError{
+			Code: ErrCodeImportFailed,
+			What: "Import xong nhưng `alembic upgrade heads` sau import thất bại",
+			Why:  err.Error(),
+			Next: "Xem `docker compose logs migrate`. Dữ liệu ĐÃ import (có thể ở schema chưa khớp bản genh hiện tại) — nếu cần quay lại: " + restoreHint,
+			Err:  err,
+		})
+	}
+
+	_, _ = fmt.Fprintln(out, "4/4 Khởi động lại dịch vụ…")
+	upArgs := compose.BaseArgs(composePath, "up", "-d")
+	if _, err := runner.Output(ctx, dockercli.Cmd{Name: "docker", Args: upArgs, Env: envOverlay, Dir: dir}); err != nil {
 		return &OpError{
 			Code: ErrCodeImportRestartFailed,
-			What: "Import xong nhưng `docker compose restart api worker` thất bại",
+			What: "Import xong nhưng `docker compose up -d` thất bại",
 			Why:  err.Error(),
-			Next: "Chạy tay `docker compose restart api worker` rồi kiểm `genh status`. Dữ liệu ĐÃ import — backup an toàn trước đó (" + key + ") vẫn còn nếu cần quay lại.",
+			Next: "Chạy tay `docker compose up -d` rồi kiểm `genh status`. Dữ liệu ĐÃ import — nếu cần quay lại: " + restoreHint,
 			Err:  err,
 		}
 	}
@@ -426,11 +493,56 @@ func RunImport(ctx context.Context, env *Env, path string, opts ImportOptions, d
 			Code: ErrCodeImportRestartFailed,
 			What: readyPath + " không trả 200 sau khi import + khởi động lại",
 			Why:  err.Error(),
-			Next: "Xem `docker compose logs api worker`. Dữ liệu ĐÃ import — backup an toàn trước đó (" + key + ") vẫn còn nếu cần quay lại.",
+			Next: "Xem `docker compose logs api worker`. Dữ liệu ĐÃ import — nếu cần quay lại: " + restoreHint,
 			Err:  err,
 		}
 	}
 
-	_, _ = fmt.Fprintln(out, "Import xong, dịch vụ đã sẵn sàng. (backup an toàn trước import: "+key+")")
+	_, _ = fmt.Fprintln(out, "Import xong, dịch vụ đã sẵn sàng. (backup an toàn trước import: "+key+", "+safeBackupHostPath+")")
 	return nil
+}
+
+// copyBackupObjectToHost đọc bytes ĐÃ MÃ HOÁ của một khoá backup (qua
+// getObjectBytesScript — cùng cách RunBackup dùng cho `genh backup --to`) và
+// ghi ra installDir/data/import-safety-<tên tệp trong khoá>, trả về đường
+// dẫn đã ghi. Dùng ở RunImport để bản backup AN TOÀN trước import không phụ
+// thuộc container api hiện tại còn sống hay ObjectStore hiện tại còn nguyên
+// vẹn hay không — xem doc-comment RunImport.
+func copyBackupObjectToHost(ctx context.Context, runner dockercli.Runner, composePath string, envOverlay []string, dir, key, installDir string) (string, error) {
+	scriptArgs := compose.BaseArgs(composePath, "exec", "-T", backupServiceName, "python", "-c", getObjectBytesScript, key)
+	data, err := runner.Output(ctx, dockercli.Cmd{Name: "docker", Args: scriptArgs, Env: envOverlay, Dir: dir})
+	if err != nil {
+		return "", err
+	}
+
+	destDir := filepath.Join(installDir, "data")
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		return "", err
+	}
+	destPath := filepath.Join(destDir, "import-safety-"+filepath.Base(key))
+	if err := os.WriteFile(destPath, data, 0o600); err != nil {
+		return "", err
+	}
+	return destPath, nil
+}
+
+// recoverImportAndWrap CỐ khởi động lại api/worker (`docker compose up -d
+// api worker` — best-effort, không phải lỗi chặn nếu thất bại, chỉ ghi chú
+// thêm vào Next) rồi trả lại đúng original (giữ nguyên Code/What/Why) —
+// dùng cho MỌI lỗi giữa chừng SAU KHI bước 2/4 đã dừng api/worker (xem
+// doc-comment RunImport mục "LỖI GIỮA CHỪNG").
+func recoverImportAndWrap(ctx context.Context, runner dockercli.Runner, composePath string, envOverlay []string, dir string, out io.Writer, original *OpError) error {
+	_, _ = fmt.Fprintf(out, "LỖI (%s) — đang cố khởi động lại api/worker…\n", original.Code)
+	upArgs := compose.BaseArgs(composePath, "up", "-d", "api", "worker")
+	_, upErr := runner.Output(ctx, dockercli.Cmd{Name: "docker", Args: upArgs, Env: envOverlay, Dir: dir})
+
+	next := original.Next
+	if upErr != nil {
+		_, _ = fmt.Fprintln(out, "     `docker compose up -d api worker` CŨNG thất bại — cần can thiệp tay ngay.")
+		next = "`docker compose up -d api worker` CŨNG thất bại (" + upErr.Error() + ") — cần can thiệp tay ngay. " + next
+	} else {
+		_, _ = fmt.Fprintln(out, "     đã khởi động lại api/worker.")
+	}
+
+	return &OpError{Code: original.Code, What: original.What, Why: original.Why, Next: next, Err: original.Err}
 }

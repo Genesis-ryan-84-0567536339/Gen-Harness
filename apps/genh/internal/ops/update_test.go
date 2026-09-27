@@ -322,6 +322,173 @@ func TestRunUpdate_InvalidChannel_ReturnsErrorBeforeAnyDockerCall(t *testing.T) 
 	}
 }
 
+// legacyObjectsHappyResponses là các Response bổ sung mô phỏng container
+// "api" (v0.1.0) có /tmp/gh-objects không rỗng, worker thì không — dùng
+// chung cho các test RunUpdate liên quan tới di trú dữ liệu (mục #2 v0.1.2).
+func legacyObjectsHappyResponses() []fake.Response {
+	return []fake.Response{
+		{Match: fake.MatchArgsContain("exec", "-T", "api", "sh", "-c"), Output: []byte("/tmp/gh-objects/docs/a.pdf")},
+		{Match: fake.MatchArgsContain("exec", "-T", "worker", "sh", "-c"), Output: []byte("")},
+		{Match: fake.MatchArgsContain("cp", "api:/tmp/gh-objects/."), Output: []byte("")},
+	}
+}
+
+func TestRunUpdate_LegacyObjectsFound_SeedsVolumeAfterHealthy(t *testing.T) {
+	composePath := testComposePath(t, updateTestComposeYAML)
+	env := testEnv(t, composePath)
+	_, port := listenReadyServer(t, true)
+	env.Port = port
+
+	fr := updateHappyFakeRunner()
+	fr.Responses = append(fr.Responses, legacyObjectsHappyResponses()...)
+	fr.Responses = append(fr.Responses, fake.Response{
+		Match: fake.MatchArgsContain("cp", "api:"+volumeObjectsDir), Output: []byte(""),
+	})
+	fr.Responses = append(fr.Responses, fake.Response{
+		Match: fake.MatchArgsContain("exec", "-u", "root", "-T", "api", "chown", "-R", "gh:gh", volumeObjectsDir), Output: []byte(""),
+	})
+
+	var out strings.Builder
+	if err := RunUpdate(context.Background(), env, UpdateOptions{}, fastUpdateDeps(fr), &out); err != nil {
+		t.Fatalf("RunUpdate: %v", err)
+	}
+	if !strings.Contains(out.String(), "đã di trú dữ liệu") {
+		t.Errorf("output phải xác nhận đã di trú, được %q", out.String())
+	}
+	if !strings.Contains(out.String(), "Chép dữ liệu đã di trú vào volume") {
+		t.Errorf("output phải xác nhận đã chép vào volume sau khi healthy, được %q", out.String())
+	}
+
+	seedCpDone, chownDone, seededBeforeUp := false, false, false
+	upSeen := false
+	for _, c := range fr.Calls {
+		joined := strings.Join(c.Cmd.Args, " ")
+		if strings.Contains(joined, "cp") && strings.Contains(joined, "api:"+volumeObjectsDir) {
+			seedCpDone = true
+			if !upSeen {
+				seededBeforeUp = true
+			}
+		}
+		if hasExactArgs(c.Cmd.Args, "up", "-d") {
+			upSeen = true
+		}
+		if strings.Contains(joined, "chown") {
+			chownDone = true
+		}
+	}
+	if !seedCpDone || !chownDone {
+		t.Errorf("phải chép + chown vào volume, Calls=%+v", fr.Calls)
+	}
+	if seededBeforeUp {
+		t.Error("chép vào volume PHẢI chạy SAU `docker compose up -d` (container mới đã mount volume), không phải trước")
+	}
+}
+
+func TestRunUpdate_ObjectsCaptureFails_StopsBeforePullNoRollback(t *testing.T) {
+	composePath := testComposePath(t, updateTestComposeYAML)
+	env := testEnv(t, composePath)
+
+	fr := &fake.Runner{Responses: []fake.Response{
+		{Match: fake.MatchArgsContain("exec", "-T", "api", "python", "-m", "gh.backup", "run"), Lines: []string{updateTestBackupLine}},
+		{Match: fake.MatchArgsContain("exec", "-T", "api", "sh", "-c"), Output: []byte("/tmp/gh-objects/docs/a.pdf")},
+		{Match: fake.MatchArgsContain("exec", "-T", "worker", "sh", "-c"), Output: []byte("")},
+		{Match: fake.MatchArgsContain("cp", "api:/tmp/gh-objects/."), Err: errors.New("container biến mất giữa chừng")},
+	}}
+
+	err := RunUpdate(context.Background(), env, UpdateOptions{}, fastUpdateDeps(fr), &strings.Builder{})
+	opErr, ok := err.(*OpError)
+	if !ok {
+		t.Fatalf("lỗi phải là *OpError, được %T (%v)", err, err)
+	}
+	if opErr.Code != ErrCodeUpdateObjectsMigrateFailed {
+		t.Errorf("Code = %q, muốn %q", opErr.Code, ErrCodeUpdateObjectsMigrateFailed)
+	}
+	for _, c := range fr.Calls {
+		joined := strings.Join(c.Cmd.Args, " ")
+		if strings.Contains(joined, "pull") || hasExactArgs(c.Cmd.Args, "up", "-d") {
+			t.Errorf("KHÔNG được pull/up khi di trú dữ liệu thất bại, Calls=%+v", fr.Calls)
+		}
+	}
+}
+
+func TestRunUpdate_SeedFailsAfterHealthy_ReportsErrorServiceStaysUpNoRollback(t *testing.T) {
+	composePath := testComposePath(t, updateTestComposeYAML)
+	env := testEnv(t, composePath)
+	_, port := listenReadyServer(t, true)
+	env.Port = port
+
+	fr := updateHappyFakeRunner()
+	fr.Responses = append(fr.Responses, legacyObjectsHappyResponses()...)
+	fr.Responses = append(fr.Responses, fake.Response{
+		Match: fake.MatchArgsContain("cp", "api:"+volumeObjectsDir), Err: errors.New("no such container"),
+	})
+
+	err := RunUpdate(context.Background(), env, UpdateOptions{}, fastUpdateDeps(fr), &strings.Builder{})
+	opErr, ok := err.(*OpError)
+	if !ok {
+		t.Fatalf("lỗi phải là *OpError, được %T (%v)", err, err)
+	}
+	if opErr.Code != ErrCodeUpdateObjectsMigrateFailed {
+		t.Errorf("Code = %q, muốn %q", opErr.Code, ErrCodeUpdateObjectsMigrateFailed)
+	}
+	if !strings.Contains(opErr.What, "sẵn sàng") {
+		t.Errorf("What phải nói rõ dịch vụ ĐÃ sẵn sàng (chỉ chép vào volume lỗi, không phải cả update) — được %q", opErr.What)
+	}
+	for _, c := range fr.Calls {
+		if strings.Contains(strings.Join(c.Cmd.Args, " "), "restore") {
+			t.Error("KHÔNG được rollback khi service đã healthy, chỉ bước chép vào volume thất bại")
+		}
+	}
+}
+
+func TestRunUpdate_RollbackAfterUpReSeedsVolumeBeforeRestore(t *testing.T) {
+	composePath := testComposePath(t, updateTestComposeYAML)
+	env := testEnv(t, composePath)
+	_, port := listenReadyServer(t, false) // luôn 503 -> waitReady thất bại -> rollback SAU khi up -d đã chạy
+	env.Port = port
+
+	fr := updateHappyFakeRunner()
+	fr.Responses = append(fr.Responses, legacyObjectsHappyResponses()...)
+	fr.Responses = append(fr.Responses, fake.Response{
+		Match: fake.MatchArgsContain("cp", "api:"+volumeObjectsDir), Output: []byte(""),
+	})
+	fr.Responses = append(fr.Responses, fake.Response{
+		Match: fake.MatchArgsContain("exec", "-u", "root", "-T", "api", "chown", "-R", "gh:gh", volumeObjectsDir), Output: []byte(""),
+	})
+	fr.Responses = append(fr.Responses, fake.Response{
+		Match: fake.MatchArgsContain("exec", "-T", "api", "python", "-m", "gh.backup", "restore", "--key"), Output: []byte(""),
+	})
+
+	err := RunUpdate(context.Background(), env, UpdateOptions{}, fastUpdateDeps(fr), &strings.Builder{})
+	opErr, ok := err.(*OpError)
+	if !ok {
+		t.Fatalf("lỗi phải là *OpError, được %T (%v)", err, err)
+	}
+	if opErr.Code != ErrCodeUpdateRolledBack {
+		t.Errorf("Code = %q, muốn %q", opErr.Code, ErrCodeUpdateRolledBack)
+	}
+
+	seedIdx, restoreIdx := -1, -1
+	for i, c := range fr.Calls {
+		joined := strings.Join(c.Cmd.Args, " ")
+		if seedIdx == -1 && strings.Contains(joined, "cp") && strings.Contains(joined, "api:"+volumeObjectsDir) {
+			seedIdx = i
+		}
+		if restoreIdx == -1 && strings.Contains(joined, "restore") {
+			restoreIdx = i
+		}
+	}
+	if seedIdx == -1 {
+		t.Fatalf("rollback phải chép lại dữ liệu di trú vào volume trước khi restore, Calls=%+v", fr.Calls)
+	}
+	if restoreIdx == -1 {
+		t.Fatalf("rollback phải gọi restore, Calls=%+v", fr.Calls)
+	}
+	if seedIdx > restoreIdx {
+		t.Errorf("chép vào volume (idx %d) phải chạy TRƯỚC restore (idx %d)", seedIdx, restoreIdx)
+	}
+}
+
 func TestResolveUpdateServices_SplitsPullableAndSkipped(t *testing.T) {
 	composePath := testComposePath(t, updateTestComposeYAML)
 	cf, err := compose.Load(composePath)

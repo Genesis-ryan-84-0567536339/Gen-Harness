@@ -17,10 +17,11 @@ type OpenDeps struct {
 // RunOpen mở Console (URL gốc, KHÔNG kèm token thiết lập — khác URL setup
 // của Bước 8) trong trình duyệt hệ thống.
 //
-// Cố ý KHÔNG gọi secretgen.Ensure (sẽ tự sinh bí mật mới nếu thiếu — sai với
-// "open" một bản cài chưa từng chạy `genh install`): kiểm thư mục cấu hình
-// có bí mật thật trước (env.LoadSecrets, dùng secretgen.Load — chỉ đọc,
-// không sinh), báo lỗi rõ ràng nếu chưa cài.
+// Cố ý KHÔNG tự "cài" (sẽ tự sinh cả bộ bí mật mới nếu secrets.json chưa
+// từng tồn tại — sai với "open" một bản cài chưa từng chạy `genh install`):
+// kiểm thư mục cấu hình có bí mật thật trước (env.LoadSecrets, dùng
+// secretgen.LoadFillingMissing — chỉ bổ sung TRƯỜNG THIẾU của một bộ bí mật
+// đã có, không sinh mới cả bộ), báo lỗi rõ ràng nếu chưa cài.
 func RunOpen(env *Env, deps OpenDeps, out io.Writer) error {
 	if _, err := env.LoadSecrets(); err != nil {
 		if opErr, ok := err.(*OpError); ok {

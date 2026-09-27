@@ -86,7 +86,12 @@ func RunUpdate(ctx context.Context, env *Env, opts UpdateOptions, deps UpdateDep
 		}
 	}
 
-	composePath, err := env.LocatePath()
+	// LocatePathSync (KHÔNG LocatePath): `genh update` là một trong hai lệnh
+	// (cùng `genh install`) có trách nhiệm đồng bộ compose.yaml GENH QUẢN LÝ
+	// với bản nhúng của chính binary genh đang chạy — xem compose.
+	// LocateAndSync và docs/reports/HANDOFF-v0.1.1.md mục "Lỗi cần sửa" #3
+	// của v0.1.2.
+	composePath, err := env.LocatePathSync()
 	if err != nil {
 		return err
 	}
@@ -101,7 +106,7 @@ func RunUpdate(ctx context.Context, env *Env, opts UpdateOptions, deps UpdateDep
 
 	// 1. Backup tự động TRƯỚC khi đụng gì — không có backup, không có gì để
 	// rollback về.
-	_, _ = fmt.Fprintln(out, "1/4 Backup tự động…")
+	_, _ = fmt.Fprintln(out, "1/5 Backup tự động…")
 	key, err := runBackupInContainer(ctx, runner, composePath, envOverlay, dir)
 	if err != nil {
 		return &OpError{
@@ -114,11 +119,32 @@ func RunUpdate(ctx context.Context, env *Env, opts UpdateOptions, deps UpdateDep
 	}
 	_, _ = fmt.Fprintln(out, "     backup: "+key)
 
-	// 2. Tải bản mới.
-	_, _ = fmt.Fprintln(out, "2/4 Tải bản mới…")
+	// 2. Di trú dữ liệu /tmp/gh-objects (v0.1.0, container KHÔNG có volume)
+	// sang volume gh_objects (v0.1.1+) NẾU máy này còn container cũ kiểu đó
+	// — xem migrateobjects.go và docs/reports/HANDOFF-v0.1.1.md mục "Lỗi cần
+	// sửa" #2 của v0.1.2. PHẢI chạy TRƯỚC pull/up (bước 4 tạo lại container,
+	// xoá luôn /tmp/gh-objects của container cũ) — objectsHostDir rỗng nếu
+	// không có gì để di trú (bản cài mới từ v0.1.1 trở lên).
+	_, _ = fmt.Fprintln(out, "2/5 Kiểm dữ liệu /tmp/gh-objects (bản cài cũ)…")
+	objectsHostDir, err := captureLegacyObjectsIfAny(ctx, runner, composePath, envOverlay, dir, env.InstallDir, out)
+	if err != nil {
+		return &OpError{
+			Code: ErrCodeUpdateObjectsMigrateFailed,
+			What: "Di trú dữ liệu /tmp/gh-objects (bản cài cũ) thất bại — DỪNG LẠI, chưa pull/tạo lại container",
+			Why:  err.Error(),
+			Next: "Xem lỗi ở trên rồi thử lại `genh update` — bản backup " + key + " vẫn còn.",
+			Err:  err,
+		}
+	}
+	if objectsHostDir == "" {
+		_, _ = fmt.Fprintln(out, "     không có gì để di trú.")
+	}
+
+	// 3. Tải bản mới.
+	_, _ = fmt.Fprintln(out, "3/5 Tải bản mới…")
 	cf, err := compose.Load(composePath)
 	if err != nil {
-		return rollbackAndWrap(ctx, runner, composePath, envOverlay, dir, key, out, &OpError{
+		return rollbackAndWrap(ctx, runner, composePath, envOverlay, dir, key, objectsHostDir, out, &OpError{
 			Code: ErrCodeUpdatePullFailed,
 			What: "Không đọc được compose.yaml để biết service nào có bản phát hành",
 			Why:  err.Error(),
@@ -133,7 +159,7 @@ func RunUpdate(ctx context.Context, env *Env, opts UpdateOptions, deps UpdateDep
 	if len(pullable) > 0 {
 		pullArgs := compose.BaseArgs(composePath, append([]string{"pull"}, pullable...)...)
 		if _, err := runner.Output(ctx, dockercli.Cmd{Name: "docker", Args: pullArgs, Env: envOverlay, Dir: dir}); err != nil {
-			return rollbackAndWrap(ctx, runner, composePath, envOverlay, dir, key, out, &OpError{
+			return rollbackAndWrap(ctx, runner, composePath, envOverlay, dir, key, objectsHostDir, out, &OpError{
 				Code: ErrCodeUpdatePullFailed,
 				What: "`docker compose pull` thất bại",
 				Why:  err.Error(),
@@ -146,11 +172,11 @@ func RunUpdate(ctx context.Context, env *Env, opts UpdateOptions, deps UpdateDep
 		_, _ = fmt.Fprintln(out, "     không có service nào có bản phát hành để pull.")
 	}
 
-	// 3. Migrate.
-	_, _ = fmt.Fprintln(out, "3/4 Tạo cấu trúc dữ liệu (migrate)…")
+	// 4. Migrate.
+	_, _ = fmt.Fprintln(out, "4/5 Tạo cấu trúc dữ liệu (migrate)…")
 	migrateArgs := compose.BaseArgs(composePath, "run", "--rm", "-T", "--no-deps", "migrate")
 	if err := runner.Stream(ctx, dockercli.Cmd{Name: "docker", Args: migrateArgs, Env: envOverlay, Dir: dir}, func(string) {}); err != nil {
-		return rollbackAndWrap(ctx, runner, composePath, envOverlay, dir, key, out, &OpError{
+		return rollbackAndWrap(ctx, runner, composePath, envOverlay, dir, key, objectsHostDir, out, &OpError{
 			Code: ErrCodeUpdateMigrateFailed,
 			What: "`alembic upgrade heads` thất bại trong container migrate",
 			Why:  err.Error(),
@@ -159,11 +185,11 @@ func RunUpdate(ctx context.Context, env *Env, opts UpdateOptions, deps UpdateDep
 		})
 	}
 
-	// 4. Khởi động lại theo thứ tự (Compose tự áp depends_on).
-	_, _ = fmt.Fprintln(out, "4/4 Khởi động lại dịch vụ…")
+	// 5. Khởi động lại theo thứ tự (Compose tự áp depends_on).
+	_, _ = fmt.Fprintln(out, "5/5 Khởi động lại dịch vụ…")
 	upArgs := compose.BaseArgs(composePath, "up", "-d")
 	if _, err := runner.Output(ctx, dockercli.Cmd{Name: "docker", Args: upArgs, Env: envOverlay, Dir: dir}); err != nil {
-		return rollbackAndWrap(ctx, runner, composePath, envOverlay, dir, key, out, &OpError{
+		return rollbackAndWrap(ctx, runner, composePath, envOverlay, dir, key, objectsHostDir, out, &OpError{
 			Code: ErrCodeUpdateRestartFailed,
 			What: "`docker compose up -d` sau khi cập nhật thất bại",
 			Why:  err.Error(),
@@ -174,13 +200,32 @@ func RunUpdate(ctx context.Context, env *Env, opts UpdateOptions, deps UpdateDep
 
 	readyURL := localURL(env.Port, readyPath)
 	if err := waitReady(ctx, client, readyURL, timeout, pollEvery); err != nil {
-		return rollbackAndWrap(ctx, runner, composePath, envOverlay, dir, key, out, &OpError{
+		return rollbackAndWrap(ctx, runner, composePath, envOverlay, dir, key, objectsHostDir, out, &OpError{
 			Code: ErrCodeUpdateNotReady,
 			What: readyPath + " không trả 200 sau khi cập nhật",
 			Why:  err.Error(),
 			Next: "Xem `docker compose logs` sau khi rollback xong.",
 			Err:  err,
 		})
+	}
+
+	// Container api MỚI (đã mount volume gh_objects) đã lên VÀ healthy — giờ
+	// mới chép dữ liệu đã di trú vào volume (chép sớm hơn là chép vào một
+	// container sắp bị "up -d" ở bước 5 thay thế, vô nghĩa). Giữ nguyên
+	// objectsHostDir trên đĩa dù bước này thành công hay không — Owner luôn
+	// còn bản THÔ để tự chép tay nếu cần.
+	if objectsHostDir != "" {
+		_, _ = fmt.Fprintln(out, "Chép dữ liệu đã di trú vào volume gh_objects…")
+		if err := seedObjectsVolume(ctx, runner, composePath, envOverlay, dir, objectsHostDir); err != nil {
+			return &OpError{
+				Code: ErrCodeUpdateObjectsMigrateFailed,
+				What: "Cập nhật xong, dịch vụ đã sẵn sàng, NHƯNG chép dữ liệu đã di trú vào volume gh_objects thất bại",
+				Why:  err.Error(),
+				Next: "Dữ liệu THÔ vẫn còn nguyên tại " + objectsHostDir + " — tự chạy `docker compose cp " + objectsHostDir + "/. api:" + volumeObjectsDir + "` rồi `docker compose exec -u root -T api chown -R gh:gh " + volumeObjectsDir + "`.",
+				Err:  err,
+			}
+		}
+		_, _ = fmt.Fprintln(out, "     xong: "+objectsHostDir+" -> api:"+volumeObjectsDir)
 	}
 
 	_, _ = fmt.Fprintln(out, "Cập nhật xong, dịch vụ đã sẵn sàng.")
@@ -213,8 +258,25 @@ func resolveUpdateServices(cf compose.File) (pullable, skipped []string) {
 // backup thất bại, khôi phục NGAY backup vừa tạo rồi khởi động lại dịch vụ,
 // và bọc lỗi gốc thành một OpError nói rõ rollback đã chạy (thành công hay
 // không) — không bao giờ để Owner ở trạng thái "không rõ máy đang thế nào".
-func rollbackAndWrap(ctx context.Context, runner dockercli.Runner, composePath string, envOverlay []string, dir, key string, out io.Writer, original *OpError) error {
+//
+// objectsHostDir (rỗng nếu không có gì di trú, xem captureLegacyObjectsIfAny
+// ở migrateobjects.go): nếu khác rỗng, TRƯỚC KHI gọi restoreInContainer,
+// chép lại đúng dữ liệu đó vào volume gh_objects — bản backup vừa tạo ở bước
+// 1/5 (mà restoreInContainer sắp khôi phục) nằm TRONG chính objectsHostDir
+// (đã gộp cùng dữ liệu cũ), và nếu rollback xảy ra SAU KHI `docker compose
+// up -d` (bước 5/5) đã thay container cũ bằng container mới (volume gh_objects
+// TRỐNG TRƠN, chưa kịp seedObjectsVolume — bước đó chỉ chạy sau khi
+// healthy), restore sẽ không tìm thấy khoá backup nếu không seed lại trước.
+// Seed lại LUÔN vô hại nếu container cũ vẫn còn nguyên (chưa qua "up -d") —
+// chỉ ghi đè bằng đúng dữ liệu đã có.
+func rollbackAndWrap(ctx context.Context, runner dockercli.Runner, composePath string, envOverlay []string, dir, key, objectsHostDir string, out io.Writer, original *OpError) error {
 	_, _ = fmt.Fprintf(out, "LỖI (%s) — đang tự động rollback về backup %s…\n", original.Code, key)
+
+	if objectsHostDir != "" {
+		if err := seedObjectsVolume(ctx, runner, composePath, envOverlay, dir, objectsHostDir); err != nil {
+			_, _ = fmt.Fprintf(out, "     (không chép lại được dữ liệu di trú vào volume trước khi khôi phục — %v; dữ liệu THÔ vẫn còn tại %s)\n", err, objectsHostDir)
+		}
+	}
 
 	restoreErr := restoreInContainer(ctx, runner, composePath, envOverlay, dir, key)
 	var restartErr error
