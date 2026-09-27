@@ -366,6 +366,15 @@ jobs:
           echo "skip=false" >>"$GITHUB_OUTPUT"
           echo "tag=${tags[1]}" >>"$GITHUB_OUTPUT"
           echo "bản trước: ${tags[1]} (mới nhất: ${tags[0]})"
+          # Các bản genh ≤ v0.1.7 cài từ binary phát hành KHÔNG ghi
+          # Caddyfile cạnh compose.yaml nhúng → proxy không lên (Docker
+          # tạo thư mục rỗng thay tệp). Với các bản đó, bước cài bản cũ được
+          # phép đỏ; bước `genh update` phía sau phải TỰ SỬA máy cài lỗi đó
+          # (đúng tình huống thật của Owner đã thử cài bản lỗi) rồi ready xanh.
+          case "${tags[1]}" in
+            v0.1.[0-7]) echo "broken_install=true" >>"$GITHUB_OUTPUT"; echo "bản trước thuộc nhóm cài lỗi Caddyfile — kiểm đường tự sửa khi update" ;;
+            *) echo "broken_install=false" >>"$GITHUB_OUTPUT" ;;
+          esac
 
       - name: Tải install.sh của bản trước (${{ steps.prev.outputs.tag }})
         if: steps.prev.outputs.skip == 'false'
@@ -377,6 +386,7 @@ jobs:
 
       - name: Cài sạch bản phát hành TRƯỚC ĐÓ bằng install.sh thật
         if: steps.prev.outputs.skip == 'false'
+        continue-on-error: ${{ steps.prev.outputs.broken_install == 'true' }}
         run: |
           set -euo pipefail
           # install.sh luôn tải "release/latest/download/…" (xem RELEASE_BASE
@@ -395,7 +405,7 @@ jobs:
           "$GEN_HARNESS_HOME/bin/genh" install --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes --no-auto-update
 
       - name: Chờ /api/v1/ready xanh (bản cũ, tối đa 5 phút)
-        if: steps.prev.outputs.skip == 'false'
+        if: steps.prev.outputs.skip == 'false' && steps.prev.outputs.broken_install != 'true'
         run: |
           set -euo pipefail
           deadline=$((SECONDS + 300))

@@ -271,3 +271,11 @@ Lần đầu cài thật toàn bộ bằng Docker (workflow `e2e-install`) lộ 
 - `apps/web/Dockerfile`: tầng build đổi thành `FROM --platform=$BUILDPLATFORM`. Bundle tĩnh giống nhau trên mọi kiến trúc nên chỉ build 1 lần (native amd64); tầng nginx arm64 chỉ COPY.
 - `release.yml`: `timeout-minutes: 30` cho build-images (mặc định 6 giờ).
 - Run v0.1.6 bị huỷ; tag v0.1.6 chưa từng được tạo nên v0.1.7 là bản phát hành kế tiếp của v0.1.5.
+
+## v0.1.8 — Cài từ bản phát hành: proxy không khởi động (thiếu Caddyfile)
+
+- E2E chế độ release (lần đầu chạy thật, trên v0.1.7) bắt được: genh chạy độc lập chỉ ghi `compose.yaml` nhúng ra `~/.gen-harness/deploy/`, KHÔNG ghi `caddy/Caddyfile` mà compose bind-mount. Docker tự tạo thư mục rỗng (thuộc root) thay tệp, proxy lỗi "not a directory". Mọi bản ≤ v0.1.7 cài từ binary đều dính; e2e chế độ PR không thấy vì dùng thẳng compose của repo.
+- Sửa: nhúng Caddyfile vào genh (`internal/compose/embedded_Caddyfile`, test giữ khớp `deploy/proxy/Caddyfile`), ghi kèm mỗi khi Locate/LocateAndSync trả về compose.yaml genh quản lý; install/update đồng bộ (giữ `.bak`).
+- Đổi `deploy/caddy/` → `deploy/proxy/` (mount `./proxy/Caddyfile`): thư mục `caddy/` thuộc root trên máy đã cài lỗi không xoá được bằng quyền user, đường mới né hẳn.
+- e2e job nâng cấp: nếu bản trước ≤ v0.1.7 thì cho phép bước cài bản cũ đỏ, và `genh update` phải tự sửa máy cài lỗi đó.
+- Còn mở: `install.sh` đặt binary theo `GEN_HARNESS_HOME` nhưng `genh install` (không cờ) vẫn dùng `~/.gen-harness`.

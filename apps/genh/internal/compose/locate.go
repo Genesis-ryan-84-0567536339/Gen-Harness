@@ -124,6 +124,9 @@ func locate(installDir string, sync bool) (string, error) {
 			continue
 		}
 		if managedPath != "" && c == managedPath {
+			if err := ensureCaddyfile(filepath.Dir(managedPath), sync); err != nil {
+				return "", err
+			}
 			if sync {
 				if err := syncEmbeddedCompose(managedPath); err != nil {
 					return "", fmt.Errorf("đồng bộ %s với bản nhúng mới: %w", managedPath, err)
@@ -138,6 +141,9 @@ func locate(installDir string, sync bool) (string, error) {
 
 	if managedPath != "" {
 		if path, err := writeEmbeddedCompose(managedPath); err == nil {
+			if err := ensureCaddyfile(filepath.Dir(managedPath), sync); err != nil {
+				return "", err
+			}
 			return path, nil
 		}
 		// Ghi thất bại (ví dụ không có quyền) — rơi xuống lỗi chung bên dưới,
@@ -205,6 +211,51 @@ func syncEmbeddedCompose(path string) error {
 
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, embeddedComposeYAML, 0o644); err != nil {
+		return fmt.Errorf("ghi %s: %w", tmp, err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return fmt.Errorf("đổi tên %s -> %s: %w", tmp, path, err)
+	}
+	return nil
+}
+
+// ensureCaddyfile đảm bảo "<deployDir>/proxy/Caddyfile" tồn tại cạnh
+// compose.yaml GENH QUẢN LÝ (xem embeddedCaddyfile). Thiếu tệp → ghi bản
+// nhúng. Chỗ đó là THƯ MỤC RỖNG (Docker tự tạo khi thiếu tệp) → xoá rồi ghi.
+// Bản ≤ v0.1.7 mount "./caddy/Caddyfile" và Docker đã tạo "caddy/" THUỘC ROOT
+// trên máy cài lỗi — genh không xoá được, nên từ v0.1.8 đổi sang "proxy/"
+// (đường mới, chưa từng bị Docker chiếm); "caddy/" cũ nằm yên vô hại. sync=true (install/update) và nội dung khác
+// bản nhúng → giữ bản cũ ở ".bak" rồi ghi đè, giống syncEmbeddedCompose.
+func ensureCaddyfile(deployDir string, sync bool) error {
+	path := filepath.Join(deployDir, "proxy", "Caddyfile")
+	info, err := os.Stat(path)
+	switch {
+	case err == nil && info.IsDir():
+		if err := os.Remove(path); err != nil {
+			return fmt.Errorf("%s là thư mục (Docker tự tạo ở lần cài lỗi trước) và không xoá được: %w — xoá tay rồi chạy lại", path, err)
+		}
+	case err == nil:
+		if !sync {
+			return nil
+		}
+		current, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("đọc %s: %w", path, err)
+		}
+		if bytes.Equal(current, embeddedCaddyfile) {
+			return nil
+		}
+		if err := os.WriteFile(path+".bak", current, 0o644); err != nil {
+			return fmt.Errorf("ghi bản sao lưu %s.bak: %w", path, err)
+		}
+	case !os.IsNotExist(err):
+		return fmt.Errorf("kiểm %s: %w", path, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("tạo thư mục %s: %w", filepath.Dir(path), err)
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, embeddedCaddyfile, 0o644); err != nil {
 		return fmt.Errorf("ghi %s: %w", tmp, err)
 	}
 	if err := os.Rename(tmp, path); err != nil {

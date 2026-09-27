@@ -19,7 +19,7 @@ import (
 
 // caddyRootCertPath là đường dẫn CA nội bộ mà Caddy tự sinh bên trong
 // container proxy khi Caddyfile dùng chỉ thị `tls internal` (xem
-// deploy/caddy/Caddyfile — không có "storage" tuỳ biến nào khác, nên Caddy
+// deploy/proxy/Caddyfile — không có "storage" tuỳ biến nào khác, nên Caddy
 // dùng thư mục dữ liệu mặc định).
 //
 // LƯU Ý — GIẢ ĐỊNH dựa trên hành vi mặc định của Caddy (CHƯA xác nhận bằng
