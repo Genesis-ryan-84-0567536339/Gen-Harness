@@ -90,9 +90,13 @@ services:
       GH_DATABASE_URL: postgresql+asyncpg://gh_app:${GH_APP_DB_PASSWORD:?đặt GH_APP_DB_PASSWORD trong .env}@db:5432/${POSTGRES_DB:-gen_harness}
       GH_ADMIN_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-gh}:${POSTGRES_PASSWORD:?đặt POSTGRES_PASSWORD trong .env}@db:5432/${POSTGRES_DB:-gen_harness}
     secrets: [gh_master_key, gh_bridge_key]
+    # nocopy + chờ api: volume mới tinh được Docker chép nội dung ảnh
+    # (/var/lib/gh/agy/.gemini/…, quyền gh) vào lần mount đầu. api và worker
+    # tạo cùng lúc thì cả hai cùng chép → "mkdir …: file exists" (e2e release
+    # v0.1.8). Chỉ api chép; worker mount sau, không chép.
     volumes:
-      - agy_state:/var/lib/gh/agy
-      - gh_objects:/var/lib/gh/objects
+      - { type: volume, source: agy_state, target: /var/lib/gh/agy, volume: { nocopy: true } }
+      - { type: volume, source: gh_objects, target: /var/lib/gh/objects, volume: { nocopy: true } }
     healthcheck:
       test: ["CMD", "arq", "--check", "gh.worker.WorkerSettings"]
       interval: 30s
@@ -101,6 +105,7 @@ services:
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
+      api: { condition: service_started }
 
   bridge:
     build: { context: .., dockerfile: deploy/images/bridge.Dockerfile }

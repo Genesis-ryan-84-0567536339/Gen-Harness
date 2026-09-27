@@ -366,13 +366,13 @@ jobs:
           echo "skip=false" >>"$GITHUB_OUTPUT"
           echo "tag=${tags[1]}" >>"$GITHUB_OUTPUT"
           echo "bản trước: ${tags[1]} (mới nhất: ${tags[0]})"
-          # Các bản genh ≤ v0.1.7 cài từ binary phát hành KHÔNG ghi
-          # Caddyfile cạnh compose.yaml nhúng → proxy không lên (Docker
+          # Các bản genh ≤ v0.1.8 cài từ binary phát hành KHÔNG ghi
+          # Caddyfile (≤v0.1.7) hoặc đụng nhau khi chép volume agy_state (≤v0.1.8) → không lên (Docker
           # tạo thư mục rỗng thay tệp). Với các bản đó, bước cài bản cũ được
           # phép đỏ; bước `genh update` phía sau phải TỰ SỬA máy cài lỗi đó
           # (đúng tình huống thật của Owner đã thử cài bản lỗi) rồi ready xanh.
           case "${tags[1]}" in
-            v0.1.[0-7]) echo "broken_install=true" >>"$GITHUB_OUTPUT"; echo "bản trước thuộc nhóm cài lỗi Caddyfile — kiểm đường tự sửa khi update" ;;
+            v0.1.[0-8]) echo "broken_install=true" >>"$GITHUB_OUTPUT"; echo "bản trước thuộc nhóm cài lỗi Caddyfile — kiểm đường tự sửa khi update" ;;
             *) echo "broken_install=false" >>"$GITHUB_OUTPUT" ;;
           esac
 
