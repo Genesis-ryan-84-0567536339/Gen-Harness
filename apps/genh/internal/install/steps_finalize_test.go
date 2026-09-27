@@ -41,8 +41,8 @@ func fakeExtractRunner(pem string, err error) *fake.Runner {
 }
 
 func noopTrustCA(context.Context, string) error { return nil }
-func noopOpenBrowser(string) error               { return nil }
-func noopCreateShortcut(string) (string, error)  { return "/tmp/fake-shortcut", nil }
+func noopOpenBrowser(string) error              { return nil }
+func noopCreateShortcut(string) (string, error) { return "/tmp/fake-shortcut", nil }
 
 func TestFinalizeStep_AutoApproveFalse_DoesNotCallTrustCA_AndSucceeds(t *testing.T) {
 	composePath := testComposePath(t)
@@ -231,10 +231,10 @@ func TestFinalizeStep_OpenBrowserFails_SetsBrowserOpenedFalse_NoError(t *testing
 	fr := fakeExtractRunner(fakeCAPEM, nil)
 
 	step := finalizeStep{
-		runner:      fr,
-		locate:      func(string) (string, error) { return composePath, nil },
-		trustCA:     noopTrustCA,
-		openBrowser: func(string) error { return errors.New("xdg-open: not found") },
+		runner:         fr,
+		locate:         func(string) (string, error) { return composePath, nil },
+		trustCA:        noopTrustCA,
+		openBrowser:    func(string) error { return errors.New("xdg-open: not found") },
 		createShortcut: noopCreateShortcut,
 	}
 

@@ -13,6 +13,14 @@ import (
 // probe_disk_*.go (build tag), vì cách đọc RAM/đĩa trống thật sự khác nhau
 // giữa Linux, macOS và Windows.
 
+// DetectRAM xuất ra probeRAM cho các gói khác (internal/ops, internal/install)
+// dùng lại đúng phép dò RAM thật của Bước 1 khi tính tham số tinh chỉnh
+// Postgres (xem internal/pgtune) — tách khỏi RunAll vì các gói đó không cần
+// (và không nên chạy lại) toàn bộ 6 kiểm tra máy, chỉ cần mỗi con số RAM.
+func DetectRAM() (uint64, error) {
+	return probeRAM()
+}
+
 // probePort dò cổng TCP có đang rảnh hay không bằng cách thử lắng nghe.
 // Không xác định được tên/PID tiến trình đang chiếm cổng bằng thư viện
 // chuẩn một cách cross-platform, nên chỉ báo "đang bị dùng" chung chung;

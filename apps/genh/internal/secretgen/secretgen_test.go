@@ -22,12 +22,11 @@ func TestEnsure_FirstRunGeneratesEverything(t *testing.T) {
 
 	b := res.Bundle
 	for name, v := range map[string]string{
-		"MasterKey":      b.MasterKey,
-		"DBPassword":     b.DBPassword,
-		"MinIOAccessKey": b.MinIOAccessKey,
-		"MinIOSecretKey": b.MinIOSecretKey,
-		"BackupKey":      b.BackupKey,
-		"SetupToken":     b.SetupToken,
+		"MasterKey":     b.MasterKey,
+		"DBPassword":    b.DBPassword,
+		"AppDBPassword": b.AppDBPassword,
+		"BackupKey":     b.BackupKey,
+		"SetupToken":    b.SetupToken,
 	} {
 		if v == "" {
 			t.Errorf("%s rỗng sau lần sinh đầu tiên", name)
@@ -116,6 +115,46 @@ func TestEnsure_FillsOnlyMissingFields(t *testing.T) {
 	}
 	if res.Bundle.SetupToken != first.Bundle.SetupToken {
 		t.Error("setup_token không được đổi khi chỉ backup_key bị thiếu")
+	}
+}
+
+// TestEnsure_UpgradesOldBundleMissingAppDBPassword mô phỏng đúng bản cài cũ
+// (secrets.json ghi trước khi có trường app_db_password/role gh_app):
+// Ensure phải tự sinh bổ sung, không lỗi/không đè các bí mật khác đã có.
+func TestEnsure_UpgradesOldBundleMissingAppDBPassword(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "config")
+
+	first, err := Ensure(dir)
+	if err != nil {
+		t.Fatalf("Ensure (1): %v", err)
+	}
+
+	old := first.Bundle
+	old.AppDBPassword = "" // secrets.json bản cũ không có trường này
+	if err := saveBundle(dir, old); err != nil {
+		t.Fatalf("saveBundle: %v", err)
+	}
+
+	res, err := Ensure(dir)
+	if err != nil {
+		t.Fatalf("Ensure (2): %v", err)
+	}
+	if !res.GeneratedNew {
+		t.Error("phải báo GeneratedNew=true vì app_db_password vừa được điền")
+	}
+	if res.Bundle.AppDBPassword == "" {
+		t.Error("app_db_password vẫn rỗng sau khi Ensure điền lại")
+	}
+	if res.Bundle.MasterKey != first.Bundle.MasterKey || res.Bundle.DBPassword != first.Bundle.DBPassword {
+		t.Error("các bí mật khác không được đổi khi chỉ app_db_password bị thiếu")
+	}
+
+	reloaded, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load sau khi nâng cấp: %v", err)
+	}
+	if reloaded.AppDBPassword != res.Bundle.AppDBPassword {
+		t.Error("app_db_password vừa sinh phải được ghi xuống đĩa, đọc lại phải khớp")
 	}
 }
 

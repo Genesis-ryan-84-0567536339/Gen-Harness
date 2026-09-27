@@ -134,12 +134,8 @@ func TestLocate_FallsBackToEmbeddedComposeUnderInstallDir(t *testing.T) {
 		t.Error("compose.yaml nhúng sẵn ghi ra rỗng")
 	}
 
-	// Gọi lại lần hai: idempotent, không lỗi, không đổi nội dung, và không
-	// đè lên một compose.yaml Owner đã tự sửa.
-	custom := []byte("# tuỳ chỉnh của Owner\nservices: {}\n")
-	if err := os.WriteFile(want, custom, 0o644); err != nil {
-		t.Fatalf("ghi đè tuỳ chỉnh: %v", err)
-	}
+	// Gọi lại lần hai NGAY, không đổi gì: idempotent, không lỗi, không đổi
+	// nội dung, không sinh .bak (nội dung đã khớp bản nhúng).
 	got2, err := Locate(installDir)
 	if err != nil {
 		t.Fatalf("Locate lần 2: %v", err)
@@ -148,7 +144,73 @@ func TestLocate_FallsBackToEmbeddedComposeUnderInstallDir(t *testing.T) {
 		t.Errorf("Locate lần 2 = %q, muốn %q", got2, want)
 	}
 	data2, _ := os.ReadFile(want)
-	if string(data2) != string(custom) {
-		t.Error("Locate lần 2 đã đè lên compose.yaml Owner tự tuỳ chỉnh — phải giữ nguyên")
+	if string(data2) != string(data) {
+		t.Error("Locate lần 2 (không đổi bản nhúng) không được đổi nội dung tệp")
+	}
+	if _, err := os.Stat(want + ".bak"); err == nil {
+		t.Error("Locate lần 2 (nội dung đã khớp) không được sinh .bak")
+	}
+}
+
+// TestLocate_SyncsManagedComposeWhenEmbeddedContentDiffers là test cho SỬA
+// LỖI chính của package này (xem docs/reports/HANDOFF-v0.1.1.md mục "Lỗi
+// cần sửa" #5): một bản genh MỚI HƠN (mang bản nhúng khác — mô phỏng bằng
+// cách tự ghi một nội dung "cũ" khác bản nhúng thật vào đúng vị trí genh
+// quản lý) phải TỰ ĐỒNG BỘ lại compose.yaml ở installDir về đúng bản nhúng
+// hiện tại của chính nó, giữ bản cũ lại ở compose.yaml.bak — KHÔNG được im
+// lặng giữ mãi bản cũ như hành vi trước khi sửa.
+func TestLocate_SyncsManagedComposeWhenEmbeddedContentDiffers(t *testing.T) {
+	t.Setenv(EnvOverrideVar, "")
+	cwdDir := t.TempDir()
+	oldWd, _ := os.Getwd()
+	defer os.Chdir(oldWd)
+	if err := os.Chdir(cwdDir); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+
+	installDir := t.TempDir()
+	deployDir := filepath.Join(installDir, "deploy")
+	if err := os.MkdirAll(deployDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	managedPath := filepath.Join(deployDir, "compose.yaml")
+
+	oldContent := []byte("# compose.yaml cũ (hoặc Owner tự sửa)\nservices: {}\n")
+	if err := os.WriteFile(managedPath, oldContent, 0o644); err != nil {
+		t.Fatalf("WriteFile bản cũ: %v", err)
+	}
+
+	got, err := Locate(installDir)
+	if err != nil {
+		t.Fatalf("Locate: %v", err)
+	}
+	if got != managedPath {
+		t.Errorf("Locate = %q, muốn %q", got, managedPath)
+	}
+
+	newContent, err := os.ReadFile(managedPath)
+	if err != nil {
+		t.Fatalf("đọc lại sau đồng bộ: %v", err)
+	}
+	if string(newContent) != string(embeddedComposeYAML) {
+		t.Error("compose.yaml phải được đồng bộ về đúng bản nhúng của binary hiện tại")
+	}
+
+	bak, err := os.ReadFile(managedPath + ".bak")
+	if err != nil {
+		t.Fatalf("phải giữ bản cũ ở compose.yaml.bak: %v", err)
+	}
+	if string(bak) != string(oldContent) {
+		t.Error("compose.yaml.bak phải đúng nội dung CŨ trước khi đồng bộ")
+	}
+
+	// Gọi lại lần ba: đã khớp bản nhúng, không đổi gì thêm, không ghi lại
+	// .bak (giữ nguyên .bak của lần đồng bộ trước, không mất thông tin).
+	if _, err := Locate(installDir); err != nil {
+		t.Fatalf("Locate lần 3: %v", err)
+	}
+	bak2, _ := os.ReadFile(managedPath + ".bak")
+	if string(bak2) != string(oldContent) {
+		t.Error("Locate lần 3 (đã khớp bản nhúng) không được đổi .bak")
 	}
 }

@@ -134,6 +134,17 @@ async def revoke_session(db: AsyncSession, session_id: uuid.UUID) -> None:
     await db.execute(text("UPDATE core.sessions SET revoked_at = now() WHERE id = :s"), {"s": session_id})
 
 
+async def purge_expired_sessions(db: AsyncSession, *, older_than_days: int) -> int:
+    """Xoá vĩnh viễn phiên đã HẾT HẠN hoặc BỊ THU HỒI quá `older_than_days` ngày (PLAN §5.6 lỗi 🟡 — dọn
+    core.sessions; job hằng giờ đăng ký ở gh/worker.py::expire_sessions). Chỉ xoá theo mốc thời gian đã qua
+    từ lâu (không phải mọi phiên hết hạn) để giữ lại vết gần đây phục vụ điều tra sự cố đăng nhập."""
+    cutoff = now() - timedelta(days=older_than_days)
+    result = await db.execute(text(
+        "DELETE FROM core.sessions WHERE (expires_at < :cutoff) OR (revoked_at IS NOT NULL AND revoked_at < :cutoff)"),
+        {"cutoff": cutoff})
+    return result.rowcount or 0  # type: ignore[attr-defined]
+
+
 # ─── PIN ────────────────────────────────────────────────────────────────────
 
 def valid_pin(pin: str) -> bool:

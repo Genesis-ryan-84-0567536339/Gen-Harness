@@ -15,18 +15,28 @@ from tests.phase2 import org_id
 
 
 async def _as_low_priv(db, table: str) -> None:  # type: ignore[no-untyped-def]
-    await db.execute(text("""DO $$ BEGIN
-        IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'gh_rls_test') THEN
-          CREATE ROLE gh_rls_test;
-        END IF;
-      END $$"""))
-    schema = table.split(".")[0]
-    await db.execute(text(f"GRANT USAGE ON SCHEMA {schema} TO gh_rls_test"))
-    await db.execute(text(f"GRANT SELECT, INSERT ON {table} TO gh_rls_test"))
-    # core.next_code() dùng để sinh mã công khai (PER-0042…) — cần quyền trên bảng đếm + hàm (SECURITY INVOKER).
-    await db.execute(text("GRANT USAGE ON SCHEMA core TO gh_rls_test"))
-    await db.execute(text("GRANT SELECT, INSERT, UPDATE ON core.code_sequences TO gh_rls_test"))
-    await db.execute(text("GRANT EXECUTE ON FUNCTION core.next_code(text, int) TO gh_rls_test"))
+    """Tạo/cấp quyền cho `gh_rls_test` bằng kết nối SUPERUSER riêng (`gh.db.admin_sessionmaker`) — CREATE ROLE
+    và GRANT (không WITH GRANT OPTION) cần superuser/chủ sở hữu, còn `db` (phiên của test) có thể đang kết
+    nối bằng `gh_app` (GH_TEST_APP_ROLE=1 — mục v0.1.1/1a) nên không tự CREATE ROLE/GRANT được. Cũng GRANT
+    thành viên `gh_rls_test` cho `gh_app` để `SET LOCAL ROLE gh_rls_test` bên dưới luôn hợp lệ dù `db` đang
+    login bằng vai trò nào."""
+    from gh.db import admin_sessionmaker
+
+    async with admin_sessionmaker()() as adm:
+        await adm.execute(text("""DO $$ BEGIN
+            IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'gh_rls_test') THEN
+              CREATE ROLE gh_rls_test;
+            END IF;
+          END $$"""))
+        schema = table.split(".")[0]
+        await adm.execute(text(f"GRANT USAGE ON SCHEMA {schema} TO gh_rls_test"))
+        await adm.execute(text(f"GRANT SELECT, INSERT ON {table} TO gh_rls_test"))
+        # core.next_code() dùng để sinh mã công khai (PER-0042…) — cần quyền trên bảng đếm + hàm (SECURITY INVOKER).
+        await adm.execute(text("GRANT USAGE ON SCHEMA core TO gh_rls_test"))
+        await adm.execute(text("GRANT SELECT, INSERT, UPDATE ON core.code_sequences TO gh_rls_test"))
+        await adm.execute(text("GRANT EXECUTE ON FUNCTION core.next_code(text, int) TO gh_rls_test"))
+        await adm.execute(text("GRANT gh_rls_test TO gh_app"))
+        await adm.commit()
     await db.execute(text("SET LOCAL ROLE gh_rls_test"))
 
 

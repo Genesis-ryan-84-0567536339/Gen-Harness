@@ -1,7 +1,9 @@
 package dockercli
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"runtime"
 	"strings"
 	"testing"
@@ -55,6 +57,37 @@ func TestExecRunner_Stream_NonZeroExit_ReturnsError(t *testing.T) {
 	err := r.Stream(context.Background(), shellCmd("echo x; exit 1"), func(string) {})
 	if err == nil {
 		t.Fatal("muốn lỗi khi lệnh thoát khác 0")
+	}
+}
+
+func TestExecRunner_RunIO_StreamsStdinToStdout(t *testing.T) {
+	r := ExecRunner{}
+	var out bytes.Buffer
+	err := r.RunIO(context.Background(), shellCmd("cat"), strings.NewReader("xin-chao"), &out)
+	if err != nil {
+		t.Fatalf("RunIO: %v", err)
+	}
+	if out.String() != "xin-chao" {
+		t.Errorf("stdout = %q, muốn %q", out.String(), "xin-chao")
+	}
+}
+
+func TestExecRunner_RunIO_NonZeroExit_ReturnsExitError(t *testing.T) {
+	r := ExecRunner{}
+	var out bytes.Buffer
+	err := r.RunIO(context.Background(), shellCmd("echo boom 1>&2; exit 2"), nil, &out)
+	if err == nil {
+		t.Fatal("muốn lỗi khi lệnh thoát khác 0")
+	}
+	var exitErr *ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("lỗi phải là *ExitError, được %T (%v)", err, err)
+	}
+	if exitErr.Code != 2 {
+		t.Errorf("Code = %d, muốn 2", exitErr.Code)
+	}
+	if !strings.Contains(exitErr.Stderr, "boom") {
+		t.Errorf("Stderr phải chứa %q, được %q", "boom", exitErr.Stderr)
 	}
 }
 

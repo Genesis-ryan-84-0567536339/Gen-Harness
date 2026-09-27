@@ -5,7 +5,10 @@ import _ "embed"
 // embeddedComposeYAML là compose.yaml nhúng sẵn vào chính binary genh, dùng
 // làm phương án cuối khi Locate không tìm thấy deploy/compose.yaml nào trên
 // đĩa (trường hợp thật: genh chạy độc lập trên máy Owner, không có checkout
-// repo Gen-Harness nào gần đó).
+// repo Gen-Harness nào gần đó) — VÀ để đồng bộ lại compose.yaml genh đã ghi
+// ra "<installDir>/deploy/compose.yaml" ở một lần cài/chạy trước, mỗi khi
+// một bản genh MỚI HƠN (mang theo bản nhúng khác) chạy lại Locate (xem
+// syncEmbeddedCompose trong locate.go).
 //
 // Ở một checkout dev/CI bình thường, Locate luôn tìm thấy compose.yaml thật
 // trên đĩa trước (xem SearchCandidates) nên nội dung nhúng ở đây không được

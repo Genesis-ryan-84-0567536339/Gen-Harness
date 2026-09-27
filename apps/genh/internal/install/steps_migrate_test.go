@@ -219,4 +219,3 @@ func TestMigrateProgressPercent_NeverReaches100(t *testing.T) {
 		}
 	}
 }
-

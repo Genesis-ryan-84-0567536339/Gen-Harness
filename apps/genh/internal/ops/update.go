@@ -13,10 +13,11 @@ import (
 )
 
 // updateServiceOrder là các service compose có thể "cập nhật" qua
-// `docker compose pull` — cùng danh sách 7 service của Bước 3 (internal/
-// install/steps_pull.go pullServiceOrder), viết lại ở đây vì đó là biến
-// không xuất của package khác.
-var updateServiceOrder = []string{"db", "redis", "objects", "proxy", "api", "web", "bridge"}
+// `docker compose pull` — cùng danh sách 6 service của Bước 3 (internal/
+// install/steps_pull.go pullServiceOrder, đã bỏ "objects" — MinIO không còn
+// trong compose.yaml), viết lại ở đây vì đó là biến không xuất của package
+// khác.
+var updateServiceOrder = []string{"db", "redis", "proxy", "api", "web", "bridge"}
 
 // UpdateOptions là các cờ đã phân tích của `genh update`.
 type UpdateOptions struct {
@@ -49,8 +50,8 @@ const defaultUpdatePollEvery = 2 * time.Second
 //
 // GIỚI HẠN: chưa có pipeline phát hành thật gắn image theo Channel (xem
 // UpdateOptions.Channel) — "tải bản mới" hiện chỉ là `docker compose pull`
-// cho các service ĐÃ có "image:" cố định trong compose.yaml (proxy/redis/
-// objects ở trạng thái repo hiện tại — xem resolveUpdateServices). Các
+// cho các service ĐÃ có "image:" cố định trong compose.yaml (proxy/redis ở
+// trạng thái repo hiện tại — xem resolveUpdateServices). Các
 // service dùng "build:" cục bộ (api/web/bridge/db) được báo RÕ RÀNG là
 // "chưa có bản phát hành để cập nhật qua genh update — cần build lại từ
 // nguồn", không âm thầm bỏ qua.
