@@ -8,8 +8,9 @@ import (
 )
 
 // secretsStep cài Bước 4 — Sinh bí mật & cấu hình (3%): khoá master, mật
-// khẩu DB, khoá MinIO, khoá backup, CA TLS nội bộ, mã thiết lập một lần.
-// Idempotent qua secretgen.Ensure: chạy lại không sinh lại bí mật đã có.
+// khẩu DB (superuser + role gh_app hạn quyền), khoá backup, CA TLS nội bộ,
+// mã thiết lập một lần. Idempotent qua secretgen.Ensure: chạy lại không sinh
+// lại bí mật đã có.
 type secretsStep struct{}
 
 func (secretsStep) ID() StepID   { return StepSecrets }

@@ -1,7 +1,7 @@
 // Package secretgen cài Bước 4 (Sinh bí mật & cấu hình) của trình cài genh:
-// khoá master, mật khẩu DB, khoá MinIO, khoá backup, CA TLS nội bộ, mã
-// thiết lập một lần — ghi vào thư mục cấu hình với quyền 0600/0700, và
-// idempotent: chạy lại không sinh lại bí mật đã có.
+// khoá master, mật khẩu DB (superuser + role gh_app hạn quyền), khoá backup,
+// CA TLS nội bộ, mã thiết lập một lần — ghi vào thư mục cấu hình với quyền
+// 0600/0700, và idempotent: chạy lại không sinh lại bí mật đã có.
 package secretgen
 
 import (
@@ -31,13 +31,20 @@ const (
 
 // Bundle là toàn bộ bí mật/cấu hình sinh ra ở Bước 4.
 type Bundle struct {
-	MasterKey      string    `json:"master_key"`
-	DBPassword     string    `json:"db_password"`
-	MinIOAccessKey string    `json:"minio_access_key"`
-	MinIOSecretKey string    `json:"minio_secret_key"`
-	BackupKey      string    `json:"backup_key"`
-	SetupToken     string    `json:"setup_token"`
-	CreatedAt      time.Time `json:"created_at"`
+	MasterKey  string `json:"master_key"`
+	DBPassword string `json:"db_password"`
+	// AppDBPassword là mật khẩu role `gh_app` — role hạn quyền (không
+	// superuser, không BYPASSRLS) mà api/worker dùng để RLS thật sự có hiệu
+	// lực (xem migration 0014, docs/reports/HANDOFF-v0.1.1.md mục "Hợp đồng
+	// chung"), KHÁC DBPassword ở trên (mật khẩu superuser `gh`, chỉ migrate/
+	// backup/bảo trì phân vùng dùng qua GH_ADMIN_DATABASE_URL). Bản cài cũ từ
+	// trước khi có trường này thiếu app_db_password trong secrets.json —
+	// fillMissing tự sinh + Ensure tự ghi lại lần chạy đầu tiên sau khi nâng
+	// cấp genh, không làm hỏng các trường khác đã có.
+	AppDBPassword string    `json:"app_db_password"`
+	BackupKey     string    `json:"backup_key"`
+	SetupToken    string    `json:"setup_token"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 // Result là kết quả của Ensure: bí mật đầy đủ, đường dẫn CA, và cờ cho biết
@@ -112,8 +119,7 @@ func fillMissing(b *mutableBundle) error {
 	}{
 		{&b.MasterKey, func() (string, error) { return randomHex(32) }},
 		{&b.DBPassword, func() (string, error) { return randomHex(24) }},
-		{&b.MinIOAccessKey, func() (string, error) { return randomAlnum(20) }},
-		{&b.MinIOSecretKey, func() (string, error) { return randomHex(32) }},
+		{&b.AppDBPassword, func() (string, error) { return randomHex(24) }},
 		{&b.BackupKey, func() (string, error) { return randomHex(32) }},
 		{&b.SetupToken, randomSetupCode},
 	}
@@ -225,20 +231,6 @@ func randomHex(nBytes int) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(buf), nil
-}
-
-const alnumAlphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-
-func randomAlnum(n int) (string, error) {
-	var sb strings.Builder
-	for i := 0; i < n; i++ {
-		idx, err := randIndex(len(alnumAlphabet))
-		if err != nil {
-			return "", err
-		}
-		sb.WriteByte(alnumAlphabet[idx])
-	}
-	return sb.String(), nil
 }
 
 // setupCodeAlphabet loại bỏ các ký tự dễ nhầm khi gõ tay (0/O, 1/I).

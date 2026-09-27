@@ -2,11 +2,17 @@
 # Chỉ proxy mở cổng ra ngoài (8443). Bí mật: khoá master nằm ở ./secrets/gh_master_key (Docker secret).
 name: gen-harness
 
+# GH_DATABASE_URL/GH_ADMIN_DATABASE_URL KHÔNG nằm ở đây — mỗi service cần
+# một vai trò DB khác nhau (xem docs/reports/HANDOFF-v0.1.1.md mục "Hợp đồng
+# chung"): api/worker dùng role gh_app hạn quyền (RLS mới có hiệu lực),
+# migrate dùng superuser (DDL + tạo/ALTER role gh_app) — mỗi service tự khai
+# hai biến này trong "environment:" của chính nó, đè lên anchor này qua
+# "<<: *app-env".
 x-app-env: &app-env
   GH_ENV: ${GH_ENV:-production}
   GH_PUBLIC_URL: ${GH_PUBLIC_URL:-https://localhost:8443}
-  GH_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-gh}:${POSTGRES_PASSWORD:?đặt POSTGRES_PASSWORD trong .env}@db:5432/${POSTGRES_DB:-gen_harness}
   GH_REDIS_URL: redis://redis:6379/0
+  GH_OBJECTS_DIR: /var/lib/gh/objects
   GH_MASTER_KEY_FILE: /run/secrets/gh_master_key
   GH_BRIDGE_KEY_FILE: /run/secrets/gh_bridge_key
   GH_SETUP_TOKEN: ${GH_SETUP_TOKEN:-}
@@ -37,7 +43,16 @@ services:
   migrate:
     build: { context: .., dockerfile: deploy/images/api.Dockerfile }
     command: ["alembic", "upgrade", "heads"]
-    environment: *app-env
+    environment:
+      <<: *app-env
+      # migrate CẦN quyền superuser để chạy DDL — KHÁC api/worker (đã đổi
+      # sang role gh_app hạn quyền, xem GH_DATABASE_URL của hai service đó
+      # bên dưới).
+      GH_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-gh}:${POSTGRES_PASSWORD:?đặt POSTGRES_PASSWORD trong .env}@db:5432/${POSTGRES_DB:-gen_harness}
+      # Mật khẩu role gh_app — migration 0014 tạo/ALTER role này bằng giá
+      # trị ở đây (thiếu thì migration tự tạo role NOLOGIN + cảnh báo, không
+      # lỗi — xem docs/reports/HANDOFF-v0.1.1.md).
+      GH_APP_DB_PASSWORD: ${GH_APP_DB_PASSWORD:?đặt GH_APP_DB_PASSWORD trong .env}
     secrets: [gh_master_key]
     depends_on:
       db: { condition: service_healthy }
@@ -46,10 +61,18 @@ services:
   api:
     build: { context: .., dockerfile: deploy/images/api.Dockerfile }
     restart: unless-stopped
-    environment: *app-env
+    environment:
+      <<: *app-env
+      # api/worker kết nối bằng role gh_app (không phải superuser, không
+      # BYPASSRLS) để RLS thật sự có hiệu lực — xem migration 0014.
+      GH_DATABASE_URL: postgresql+asyncpg://gh_app:${GH_APP_DB_PASSWORD:?đặt GH_APP_DB_PASSWORD trong .env}@db:5432/${POSTGRES_DB:-gen_harness}
+      # Superuser dự phòng cho backup/bảo trì phân vùng
+      # (Settings.admin_database_url) — rỗng thì code tự dùng GH_DATABASE_URL.
+      GH_ADMIN_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-gh}:${POSTGRES_PASSWORD:?đặt POSTGRES_PASSWORD trong .env}@db:5432/${POSTGRES_DB:-gen_harness}
     secrets: [gh_master_key, gh_bridge_key]
     volumes:
       - agy_state:/var/lib/gh/agy
+      - gh_objects:/var/lib/gh/objects
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
@@ -58,10 +81,14 @@ services:
     build: { context: .., dockerfile: deploy/images/api.Dockerfile }
     command: ["arq", "gh.worker.WorkerSettings"]
     restart: unless-stopped
-    environment: *app-env
+    environment:
+      <<: *app-env
+      GH_DATABASE_URL: postgresql+asyncpg://gh_app:${GH_APP_DB_PASSWORD:?đặt GH_APP_DB_PASSWORD trong .env}@db:5432/${POSTGRES_DB:-gen_harness}
+      GH_ADMIN_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-gh}:${POSTGRES_PASSWORD:?đặt POSTGRES_PASSWORD trong .env}@db:5432/${POSTGRES_DB:-gen_harness}
     secrets: [gh_master_key, gh_bridge_key]
     volumes:
       - agy_state:/var/lib/gh/agy
+      - gh_objects:/var/lib/gh/objects
     healthcheck:
       test: ["CMD", "arq", "--check", "gh.worker.WorkerSettings"]
       interval: 30s
@@ -89,6 +116,22 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-gh}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?đặt POSTGRES_PASSWORD trong .env}
       POSTGRES_DB: ${POSTGRES_DB:-gen_harness}
+    # Tinh chỉnh từ RAM máy (genh tính ở apps/genh/internal/pgtune, truyền
+    # qua GH_PG_* trong overlay môi trường khi gọi `docker compose`) — mặc
+    # định an toàn dưới đây dùng khi chạy `docker compose` tay, không qua
+    # genh (vd `make up`), hoặc trên máy chưa dò được RAM.
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - shared_buffers=${GH_PG_SHARED_BUFFERS:-256MB}
+      - -c
+      - effective_cache_size=${GH_PG_EFFECTIVE_CACHE_SIZE:-768MB}
+      - -c
+      - work_mem=${GH_PG_WORK_MEM:-4MB}
+      - -c
+      - maintenance_work_mem=${GH_PG_MAINTENANCE_WORK_MEM:-64MB}
     volumes:
       - pg_data:/var/lib/postgresql/data
     healthcheck:
@@ -109,21 +152,6 @@ services:
       timeout: 3s
       retries: 10
 
-  objects:
-    image: minio/minio:latest
-    restart: unless-stopped
-    command: ["server", "/data"]
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-gh}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?đặt MINIO_ROOT_PASSWORD trong .env}
-    volumes:
-      - object_data:/data
-    healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-
 secrets:
   gh_master_key:
     file: ../secrets/gh_master_key
@@ -134,5 +162,5 @@ volumes:
   caddy_data:
   pg_data:
   redis_data:
-  object_data:
+  gh_objects:
   agy_state:

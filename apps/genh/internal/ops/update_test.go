@@ -18,17 +18,15 @@ import (
 )
 
 // updateTestComposeYAML phản ánh đúng dạng thật của deploy/compose.yaml:
-// proxy/redis/objects có "image:" cố định (pull được), api/web/bridge/db
-// dùng "build:" cục bộ (KHÔNG pull được) — đúng resolveUpdateServices phải
-// tách hai nhóm này ra.
+// proxy/redis có "image:" cố định (pull được), api/web/bridge/db dùng
+// "build:" cục bộ (KHÔNG pull được) — đúng resolveUpdateServices phải tách
+// hai nhóm này ra.
 const updateTestComposeYAML = `name: gen-harness
 services:
   proxy:
     image: caddy:2-alpine
   redis:
     image: redis:7-alpine
-  objects:
-    image: minio/minio:latest
   api:
     build: { context: .. }
   web:
@@ -332,7 +330,7 @@ func TestResolveUpdateServices_SplitsPullableAndSkipped(t *testing.T) {
 	}
 	pullable, skipped := resolveUpdateServices(cf)
 
-	wantPullable := map[string]bool{"proxy": true, "redis": true, "objects": true}
+	wantPullable := map[string]bool{"proxy": true, "redis": true}
 	for _, p := range pullable {
 		if !wantPullable[p] {
 			t.Errorf("pullable chứa %q không mong đợi", p)

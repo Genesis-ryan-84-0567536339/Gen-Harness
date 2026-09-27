@@ -36,8 +36,8 @@ func TestDataStep_HappyPath_UpThenHealthy(t *testing.T) {
 		{
 			Match: fake.MatchArgsContain("ps", "--format", "json"),
 			OutputSeq: [][]byte{
-				[]byte(`[{"Service":"db","State":"running","Health":"starting"},{"Service":"redis","State":"running","Health":"healthy"},{"Service":"objects","State":"running","Health":"starting"}]`),
-				[]byte(`[{"Service":"db","State":"running","Health":"healthy"},{"Service":"redis","State":"running","Health":"healthy"},{"Service":"objects","State":"running","Health":"healthy"}]`),
+				[]byte(`[{"Service":"db","State":"running","Health":"starting"},{"Service":"redis","State":"running","Health":"healthy"}]`),
+				[]byte(`[{"Service":"db","State":"running","Health":"healthy"},{"Service":"redis","State":"running","Health":"healthy"}]`),
 			},
 		},
 	}}
@@ -59,7 +59,7 @@ func TestDataStep_HappyPath_UpThenHealthy(t *testing.T) {
 		t.Errorf("progress cuối = %+v, muốn StatusOK/100", last)
 	}
 
-	// Kiểm lệnh `up -d` mang đúng env POSTGRES_PASSWORD/MINIO_ROOT_PASSWORD.
+	// Kiểm lệnh `up -d` mang đúng env POSTGRES_PASSWORD/GH_APP_DB_PASSWORD.
 	var upCall *fake.Call
 	for i := range fr.Calls {
 		if strings.Contains(strings.Join(fr.Calls[i].Cmd.Args, " "), "up") {
@@ -136,8 +136,8 @@ func TestDataHealthPercent(t *testing.T) {
 	if got := dataHealthPercent(nil); got != 20 {
 		t.Errorf("dataHealthPercent(nil) = %v, muốn 20", got)
 	}
-	all3 := map[string]string{"db": "healthy", "redis": "healthy", "objects": "healthy"}
-	if got := dataHealthPercent(all3); got != 95 {
-		t.Errorf("dataHealthPercent(3/3 healthy) = %v, muốn 95 (chưa phải 100 — Run tự đặt 100 sau)", got)
+	all2 := map[string]string{"db": "healthy", "redis": "healthy"}
+	if got := dataHealthPercent(all2); got != 95 {
+		t.Errorf("dataHealthPercent(2/2 healthy) = %v, muốn 95 (chưa phải 100 — Run tự đặt 100 sau)", got)
 	}
 }

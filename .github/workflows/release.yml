@@ -115,10 +115,9 @@ jobs:
   # ── build-images ─────────────────────────────────────────────────────────
   # Chỉ 4 ảnh cần build+push: api (dùng CHUNG cho api/migrate/worker — cả 3
   # service này build từ CÙNG deploy/images/api.Dockerfile, xem
-  # deploy/compose.yaml — không build trùng), web, bridge, db. proxy/redis/
-  # objects ĐÃ có "image:" cố định sẵn (caddy:2-alpine, redis:7-alpine,
-  # minio/minio:latest) nên không cần build ở đây — Bước 3 của genh pull
-  # thẳng từ Docker Hub.
+  # deploy/compose.yaml — không build trùng), web, bridge, db. proxy/redis
+  # ĐÃ có "image:" cố định sẵn (caddy:2-alpine, redis:7-alpine) nên không cần
+  # build ở đây — Bước 3 của genh pull thẳng từ Docker Hub.
   build-images:
     name: build+push ảnh ${{ matrix.service }}
     runs-on: ubuntu-latest

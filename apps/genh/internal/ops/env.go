@@ -6,6 +6,7 @@ import (
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/compose"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/config"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/machine"
+	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/pgtune"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/secretgen"
 )
 
@@ -90,13 +91,19 @@ func (e *Env) LoadSecrets() (secretgen.Bundle, error) {
 // khoá ${VAR:?...} bắt buộc, trước khi chạy bất kỳ subcommand nào) — cùng
 // logic secretsEnvOverlay trong internal/install/steps_data.go, viết lại ở
 // đây vì đó là hàm không xuất của package khác.
+//
+// GH_PG_* (tinh chỉnh Postgres) được dò/tính lại mỗi lần gọi qua
+// pgtune.DetectAndCompute — rẻ (chỉ đọc /proc/meminfo hoặc tương đương, xem
+// internal/machine), và luôn phản ánh đúng RAM máy hiện tại (kể cả khi máy
+// được cấp thêm RAM giữa hai lần chạy genh) thay vì đông cứng giá trị đo ở
+// lần `genh install` đầu tiên.
 func EnvOverlay(b secretgen.Bundle) []string {
-	return []string{
+	env := []string{
 		"POSTGRES_PASSWORD=" + b.DBPassword,
-		"MINIO_ROOT_PASSWORD=" + b.MinIOSecretKey,
-		"MINIO_ROOT_USER=" + b.MinIOAccessKey,
+		"GH_APP_DB_PASSWORD=" + b.AppDBPassword,
 		"GH_SETUP_TOKEN=" + b.SetupToken,
 	}
+	return append(env, pgtune.DetectAndCompute().EnvPairs()...)
 }
 
 // composeDir trả về thư mục chứa composePath, dùng làm Dir cho dockercli.Cmd.

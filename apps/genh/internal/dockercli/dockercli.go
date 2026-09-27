@@ -27,8 +27,9 @@ type Cmd struct {
 	Name string   // thường là "docker"
 	Args []string // ví dụ {"compose", "-f", path, "up", "-d", "db"}
 	// Env là các biến môi trường THÊM vào (không thay hẳn os.Environ()) —
-	// dùng để truyền mật khẩu DB/MinIO sinh ở Bước 4 cho `docker compose`
-	// đọc qua ${POSTGRES_PASSWORD:?...} mà không phải ghi ra tệp .env.
+	// dùng để truyền mật khẩu DB (superuser + role gh_app) sinh ở Bước 4 cho
+	// `docker compose` đọc qua ${POSTGRES_PASSWORD:?...}/${GH_APP_DB_PASSWORD:?...}
+	// mà không phải ghi ra tệp .env.
 	Env []string
 	// Dir là thư mục làm việc của lệnh (thường là thư mục chứa compose.yaml,
 	// để các đường dẫn tương đối trong compose.yaml — ví dụ context: ..  —

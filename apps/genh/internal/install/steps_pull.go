@@ -10,10 +10,11 @@ import (
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/pull"
 )
 
-// pullServiceOrder là 7 service cần image theo đúng thứ tự liệt kê trong
-// docs/handoff/05-installer.md Bước 3 — thứ tự này cũng là thứ tự hiển thị
-// SubLines khi nhiều image đang tải cùng lúc.
-var pullServiceOrder = []string{"db", "redis", "objects", "proxy", "api", "web", "bridge"}
+// pullServiceOrder là 6 service cần image (đã bỏ "objects" — MinIO không
+// còn trong compose.yaml, xem docs/reports/HANDOFF-v0.1.1.md), theo đúng
+// thứ tự liệt kê trong docs/handoff/05-installer.md Bước 3 — thứ tự này
+// cũng là thứ tự hiển thị SubLines khi nhiều image đang tải cùng lúc.
+var pullServiceOrder = []string{"db", "redis", "proxy", "api", "web", "bridge"}
 
 // pullStep cài Bước 3 — Tải image (50%, trọng số lớn nhất): tải song song
 // image của 7 service compose.yaml có sẵn "image:" (build: cục bộ chưa có
@@ -142,7 +143,7 @@ func (s pullStep) Run(ctx context.Context, env *Env, rep Reporter) error {
 //
 // GIỚI HẠN: deploy/compose.yaml của repo hiện tại (giai đoạn dev, trước khi
 // có CI phát hành đa kiến trúc lên GHCR — xem docs/PLAN.md "Giai đoạn 6")
-// chỉ có "image:" cho proxy/redis/objects; api/web/bridge/db dùng "build:"
+// chỉ có "image:" cho proxy/redis; api/web/bridge/db dùng "build:"
 // cục bộ nên KHÔNG có gì để Bước 3 tải cho tới khi bản phát hành thật ghim
 // digest ảnh đã build sẵn vào compose.yaml (đúng như tài liệu mô tả).
 func resolveImages(cf compose.File) (images, skipped []string) {
