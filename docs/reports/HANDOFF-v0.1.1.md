@@ -286,3 +286,9 @@ Lần đầu cài thật toàn bộ bằng Docker (workflow `e2e-install`) lộ 
 - Sửa ở compose: worker mount hai volume đó với `nocopy: true` và `depends_on: api (service_started)`. Chỉ api chép; Docker chỉ chép khi volume còn rỗng nên thứ tự nào cũng đúng.
 - Kiểm cục bộ bằng ảnh thử có cùng cây thư mục: cấu hình cũ tái hiện lỗi (1/55 lượt), cấu hình mới 0/55 lượt, worker vẫn thấy dữ liệu.
 - Cùng bản: job nâng cấp cho thấy máy cài dở (api chưa từng chạy) thì `genh update` dừng ngay ở bước backup (`service "api" is not running`), nên Owner không tự sửa được bằng update. Backup/rollback giờ thử `exec` trước; nếu api không chạy thì dùng container tạm `compose run --rm --no-deps api …` (chỉ cần db sống).
+
+## v0.1.10 — genh dùng đúng GEN_HARNESS_HOME như install.sh
+
+- E2E release v0.1.9: cài sạch bằng install.sh XANH (48 giây, mọi dịch vụ healthy, `/ready` xanh), job nâng cấp v0.1.8 → v0.1.9 XANH (backup, update, dữ liệu giữ nguyên). Bước `genh status --install-dir $GEN_HARNESS_HOME` đỏ vì install.sh đặt binary theo `GEN_HARNESS_HOME` còn `genh install` cài dịch vụ vào `~/.gen-harness`.
+- Sửa: `config.DefaultRoot()` ưu tiên `$GEN_HARNESS_HOME` (khớp install.sh/install.ps1).
+- Còn mở: timer tự cập nhật (systemd/cron) chạy `genh update` không kèm `--install-dir`, nên ai đặt `GEN_HARNESS_HOME` tuỳ biến thì timer vẫn nhắm `~/.gen-harness`. Cài mặc định không bị.
