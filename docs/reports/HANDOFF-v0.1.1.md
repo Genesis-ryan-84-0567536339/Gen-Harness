@@ -279,3 +279,10 @@ Lần đầu cài thật toàn bộ bằng Docker (workflow `e2e-install`) lộ 
 - Đổi `deploy/caddy/` → `deploy/proxy/` (mount `./proxy/Caddyfile`): thư mục `caddy/` thuộc root trên máy đã cài lỗi không xoá được bằng quyền user, đường mới né hẳn.
 - e2e job nâng cấp: nếu bản trước ≤ v0.1.7 thì cho phép bước cài bản cũ đỏ, và `genh update` phải tự sửa máy cài lỗi đó.
 - Còn mở: `install.sh` đặt binary theo `GEN_HARNESS_HOME` nhưng `genh install` (không cờ) vẫn dùng `~/.gen-harness`.
+
+## v0.1.9 — api và worker đụng nhau khi chép volume lần đầu
+
+- E2E release v0.1.8 (cả job cài sạch lẫn job nâng cấp): `failed to mkdir …/gen-harness_agy_state/_data/.gemini/antigravity-cli: file exists`. api và worker cùng mount volume `agy_state` (và `gh_objects`); volume mới tinh thì Docker chép nội dung ảnh vào lúc tạo container, hai container tạo đồng thời cùng chép → đụng nhau. Ngẫu nhiên (v0.1.7 lọt qua).
+- Sửa ở compose: worker mount hai volume đó với `nocopy: true` và `depends_on: api (service_started)`. Chỉ api chép; Docker chỉ chép khi volume còn rỗng nên thứ tự nào cũng đúng.
+- Kiểm cục bộ bằng ảnh thử có cùng cây thư mục: cấu hình cũ tái hiện lỗi (1/55 lượt), cấu hình mới 0/55 lượt, worker vẫn thấy dữ liệu.
+- Cùng bản: job nâng cấp cho thấy máy cài dở (api chưa từng chạy) thì `genh update` dừng ngay ở bước backup (`service "api" is not running`), nên Owner không tự sửa được bằng update. Backup/rollback giờ thử `exec` trước; nếu api không chạy thì dùng container tạm `compose run --rm --no-deps api …` (chỉ cần db sống).
