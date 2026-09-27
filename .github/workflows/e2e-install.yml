@@ -66,6 +66,12 @@ jobs:
   e2e-install:
     name: cài đặt thật đầu-cuối (chế độ ${{ github.event_name == 'pull_request' && 'pr' || (github.event_name == 'push' && 'pr' || 'release') }})
     runs-on: ubuntu-24.04
+    # Chạy ngoài checkout repo: genh tìm compose.yaml theo cwd trước — trong repo
+    # nó sẽ dùng deploy/compose.yaml (build cục bộ) thay vì compose bản phát hành
+    # nhúng trong binary như máy người dùng thật.
+    defaults:
+      run:
+        working-directory: /tmp
     # workflow_run chỉ chạy tiếp nếu chính workflow Release đã THÀNH CÔNG —
     # Release fail/bị huỷ thì không có gì mới để kiểm.
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
@@ -131,13 +137,14 @@ jobs:
         if: steps.mode.outputs.mode == 'pr'
         run: |
           set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
           cp "${{ runner.temp }}/pinned/compose.release.yaml" apps/genh/internal/compose/embedded_compose.yaml
           echo "đã ghi đè embedded_compose.yaml bằng compose.release.yaml của ${{ steps.mode.outputs.tag }} (digest thật):"
           grep '^\s*image:' apps/genh/internal/compose/embedded_compose.yaml || true
 
       - name: (pr) Build genh từ mã nguồn đang xét
         if: steps.mode.outputs.mode == 'pr'
-        working-directory: apps/genh
+        working-directory: ${{ github.workspace }}/apps/genh
         env:
           CGO_ENABLED: "0"
         run: |
@@ -288,13 +295,11 @@ jobs:
         if: always()
         run: |
           set -euo pipefail
-          composeFile="$GEN_HARNESS_HOME/deploy/compose.yaml"
-          if [ -f "$composeFile" ]; then
-            docker compose -f "$composeFile" logs --tail 200 || true
-          else
-            echo "không thấy $composeFile (có thể genh uninstall đã dọn xong, hoặc cài đặt chưa tới bước dựng compose) — thử docker ps -a thay:"
-            docker ps -a || true
-          fi
+          docker ps -a || true
+          for c in $(docker ps -a --format '{{.Names}}' | grep '^gen-harness-' || true); do
+            echo "════ $c ════"
+            docker logs --tail 200 "$c" 2>&1 || true
+          done
 
       - name: (luôn) In log genh (~/.gen-harness/logs) để debug
         if: always()
@@ -321,6 +326,12 @@ jobs:
   e2e-upgrade:
     name: nâng cấp từ bản phát hành liền trước
     runs-on: ubuntu-24.04
+    # Chạy ngoài checkout repo: genh tìm compose.yaml theo cwd trước — trong repo
+    # nó sẽ dùng deploy/compose.yaml (build cục bộ) thay vì compose bản phát hành
+    # nhúng trong binary như máy người dùng thật.
+    defaults:
+      run:
+        working-directory: /tmp
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
     timeout-minutes: 30
     env:
@@ -430,9 +441,8 @@ jobs:
         if: always() && steps.prev.outputs.skip == 'false'
         run: |
           set -euo pipefail
-          composeFile="$GEN_HARNESS_HOME/deploy/compose.yaml"
-          if [ -f "$composeFile" ]; then
-            docker compose -f "$composeFile" logs --tail 200 || true
-          else
-            docker ps -a || true
-          fi
+          docker ps -a || true
+          for c in $(docker ps -a --format '{{.Names}}' | grep '^gen-harness-' || true); do
+            echo "════ $c ════"
+            docker logs --tail 200 "$c" 2>&1 || true
+          done
