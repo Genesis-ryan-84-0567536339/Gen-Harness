@@ -138,8 +138,7 @@ def _derive_key(password: str, *, salt: bytes, time_cost: int, memory_cost: int,
 # ─── DSN quản trị (pg_dump/pg_restore/đọc alembic_version) — superuser, xem HANDOFF §hợp đồng chung ────────
 
 def _admin_database_url() -> str:
-    s = get_settings()
-    return getattr(s, "admin_database_url", "") or s.database_url
+    return get_settings().effective_admin_database_url
 
 
 def _current_alembic_revision(pg_url: str) -> str | None:

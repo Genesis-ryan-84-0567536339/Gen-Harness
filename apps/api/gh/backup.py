@@ -171,7 +171,9 @@ async def _run(cmd: list[str]) -> None:
 
 async def run_backup(*, database_url: str | None = None, store: ObjectStore | None = None) -> BackupEntry:
     """`pg_dump -Fc` CSDL thật → mã hoá → lưu qua `ObjectStore` → dọn theo vòng đời GFS."""
-    database_url = database_url or get_settings().database_url
+    # Superuser (GH_ADMIN_DATABASE_URL): role ứng dụng gh_app không chắc SELECT được mọi bảng hệ thống mà
+    # pg_dump cần đọc (vd. large object, một số catalog) — dump/restore luôn qua vai trò quản trị.
+    database_url = database_url or get_settings().effective_admin_database_url
     store = store or get_object_store()
     src = libpq_url(database_url)
     db_name = database_name(database_url)
@@ -221,7 +223,8 @@ async def restore_backup(key: str, *, database_url: str | None = None, target_da
     `target_database`: tên CSDL khác CSDL đang cấu hình — dùng khi test round-trip để không đụng CSDL đang
     dùng (spec 5.6 yêu cầu rõ điều này).
     """
-    database_url = database_url or get_settings().database_url
+    # pg_restore --clean cần DROP/CREATE trên mọi object (quyền chủ sở hữu) → luôn qua superuser.
+    database_url = database_url or get_settings().effective_admin_database_url
     store = store or get_object_store()
     enc = await store.get(key)
     raw = crypto.decrypt(enc, associated=BACKUP_AAD)

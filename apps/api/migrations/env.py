@@ -7,7 +7,10 @@ from gh.config import get_settings
 
 
 def sync_url() -> str:
-    return get_settings().database_url.replace("+asyncpg", "+psycopg")
+    # Migrate cần DDL (tạo bảng/role/policy) → dùng URL superuser (GH_ADMIN_DATABASE_URL, rỗng ⇒
+    # GH_DATABASE_URL) chứ không phải role ứng dụng gh_app (migration 0014 GRANT quyền cho gh_app, nhưng
+    # gh_app không có quyền tạo bảng/role).
+    return get_settings().effective_admin_database_url.replace("+asyncpg", "+psycopg")
 
 
 def run_migrations_offline() -> None:

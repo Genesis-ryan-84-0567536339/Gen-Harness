@@ -12,9 +12,10 @@ class Settings(BaseSettings):
     env: str = "development"
     public_url: str = "https://localhost:8443"
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/gen_harness"
-    # CSDL kết nối bằng vai trò superuser — dùng cho migrate/backup/gói hồ sơ (gh.bundle)/bảo trì phân vùng
-    # (trình cài giai đoạn 6 ghi biến này khi tạo vai trò `gh_app` phi-superuser cho api/worker). Rỗng ⇒ dùng
-    # `database_url` (đúng hành vi hiện tại, một vai trò superuser duy nhất).
+    # URL kết nối superuser — dùng cho migrate, backup (pg_dump/pg_restore), bảo trì/tạo phân vùng theo tháng
+    # (partman.run_maintenance) và mọi DDL lúc chạy. Rỗng ⇒ dùng database_url (môi trường dev/test mặc định
+    # database_url đã là superuser). Ở triển khai thật, database_url trỏ role gh_app (không superuser, không
+    # BYPASSRLS — migration 0014); admin_database_url trỏ role superuser tạo ở trình cài (GH_ADMIN_DATABASE_URL).
     admin_database_url: str = ""
     redis_url: str = "redis://localhost:6379/0"
     # 32 byte base64. Trống ở môi trường dev/test → sinh tạm (không dùng cho production).
@@ -33,6 +34,9 @@ class Settings(BaseSettings):
     pin_max_attempts: int = 5
     pin_lock_minutes: int = 15
     cookie_secure: bool = True
+    # Dọn core.sessions (PLAN §5.6 lỗi 🟡): xoá vĩnh viễn phiên đã HẾT HẠN hoặc BỊ THU HỒI quá N ngày (job
+    # hằng giờ — gh/worker.py::expire_sessions). Phiên còn hiệu lực không bao giờ bị đụng tới dù N nhỏ.
+    session_purge_after_days: int = 30
 
     stream_maxlen: int = Field(default=100_000, description="Độ dài tối đa mỗi Redis Stream (xấp xỉ)")
     # Khoá công khai ed25519 (base64, 32 byte) tin cậy để kiểm chữ ký plugin nạp từ tệp (ARCHITECTURE §6.4),
@@ -45,6 +49,12 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.env == "production"
+
+    @property
+    def effective_admin_database_url(self) -> str:
+        """URL superuser dùng cho migrate/backup/bảo trì phân vùng — `admin_database_url` nếu có, không thì
+        dùng lại `database_url` (dev/test: một vai trò duy nhất đã là superuser)."""
+        return self.admin_database_url or self.database_url
 
 
 @lru_cache
