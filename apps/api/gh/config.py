@@ -12,6 +12,10 @@ class Settings(BaseSettings):
     env: str = "development"
     public_url: str = "https://localhost:8443"
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/gen_harness"
+    # CSDL kết nối bằng vai trò superuser — dùng cho migrate/backup/gói hồ sơ (gh.bundle)/bảo trì phân vùng
+    # (trình cài giai đoạn 6 ghi biến này khi tạo vai trò `gh_app` phi-superuser cho api/worker). Rỗng ⇒ dùng
+    # `database_url` (đúng hành vi hiện tại, một vai trò superuser duy nhất).
+    admin_database_url: str = ""
     redis_url: str = "redis://localhost:6379/0"
     # 32 byte base64. Trống ở môi trường dev/test → sinh tạm (không dùng cho production).
     master_key: str = ""
