@@ -1,0 +1,277 @@
+package autoupdate
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// fakeRunner ghi lại mọi lệnh được gọi, trả về output/lỗi định sẵn theo tên
+// lệnh — dùng cho mọi test dispatch dưới đây (KHÔNG bao giờ gọi
+// systemctl/launchctl/schtasks/crontab thật).
+type fakeRunner struct {
+	calls []call
+	// outputs ánh xạ "name args..." (nối bằng "|") -> output giả.
+	outputs map[string][]byte
+	// errs ánh xạ cùng khoá -> lỗi giả.
+	errs map[string]error
+}
+
+type call struct {
+	name string
+	args []string
+}
+
+func newFakeRunner() *fakeRunner {
+	return &fakeRunner{outputs: map[string][]byte{}, errs: map[string]error{}}
+}
+
+func (f *fakeRunner) key(name string, args []string) string {
+	return name + "|" + strings.Join(args, "|")
+}
+
+func (f *fakeRunner) Output(ctx context.Context, name string, args []string) ([]byte, error) {
+	f.calls = append(f.calls, call{name: name, args: args})
+	k := f.key(name, args)
+	return f.outputs[k], f.errs[k]
+}
+
+func (f *fakeRunner) calledWith(name string, argsContains ...string) bool {
+	for _, c := range f.calls {
+		if c.name != name {
+			continue
+		}
+		joined := strings.Join(c.args, " ")
+		ok := true
+		for _, want := range argsContains {
+			if !strings.Contains(joined, want) {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			return true
+		}
+	}
+	return false
+}
+
+func TestEnableLinux_UsesSystemdWhenAvailable(t *testing.T) {
+	home := t.TempDir()
+	runner := newFakeRunner()
+	// systemctl --user daemon-reload thành công -> systemd --user khả dụng.
+	deps := Deps{
+		Runner: runner, GenhPath: "/opt/genh/bin/genh", LogFile: "/opt/genh/logs/auto-update.log", HomeDir: home, GOOS: "linux",
+		LookPath: func(string) (string, error) { return "/usr/bin/systemctl", nil },
+	}
+
+	msg, err := Enable(context.Background(), deps)
+	if err != nil {
+		t.Fatalf("Enable: %v", err)
+	}
+	mustContain(t, msg, "03:00")
+
+	if !runner.calledWith("systemctl", "--user", "enable", "--now", TaskName+".timer") {
+		t.Fatalf("phải gọi systemctl --user enable --now, các lệnh đã gọi: %+v", runner.calls)
+	}
+	svc, err := os.ReadFile(filepath.Join(home, ".config", "systemd", "user", TaskName+".service"))
+	if err != nil {
+		t.Fatalf("phải ghi được service unit: %v", err)
+	}
+	mustContain(t, string(svc), "/opt/genh/bin/genh update --yes --quiet")
+
+	if _, err := os.Stat(filepath.Join(home, ".config", "systemd", "user", TaskName+".timer")); err != nil {
+		t.Fatalf("phải ghi được timer unit: %v", err)
+	}
+}
+
+func TestEnableLinux_FallsBackToCrontab_WhenNoSystemdUser(t *testing.T) {
+	home := t.TempDir()
+	runner := newFakeRunner()
+	runner.errs["systemctl|--user|daemon-reload"] = errCommandFailed
+	runner.outputs["crontab|-l"] = []byte("0 9 * * * some-other-job\n")
+
+	deps := Deps{
+		Runner: runner, GenhPath: "/opt/genh/bin/genh", LogFile: "/opt/genh/logs/auto-update.log", HomeDir: home, GOOS: "linux",
+		// LookPath thành công (systemctl "có" trên PATH) NHƯNG daemon-reload
+		// thất bại (giả session --user không hoạt động, kiểu container/WSL
+		// không có D-Bus) — vẫn phải rơi về crontab.
+		LookPath: func(string) (string, error) { return "/usr/bin/systemctl", nil },
+	}
+	msg, err := Enable(context.Background(), deps)
+	if err != nil {
+		t.Fatalf("Enable: %v", err)
+	}
+	mustContain(t, msg, "crontab")
+
+	if !runner.calledWith("crontab") {
+		t.Fatalf("phải gọi crontab để cài lịch, các lệnh đã gọi: %+v", runner.calls)
+	}
+	if runner.calledWith("systemctl", "enable") {
+		t.Fatalf("KHÔNG được gọi systemctl enable khi systemd --user không khả dụng")
+	}
+}
+
+func TestEnableLinux_FallsBackToCrontab_WhenNoSystemctlBinary(t *testing.T) {
+	home := t.TempDir()
+	runner := newFakeRunner()
+	runner.outputs["crontab|-l"] = []byte("")
+
+	deps := Deps{
+		Runner: runner, GenhPath: "genh", LogFile: "/tmp/log", HomeDir: home, GOOS: "linux",
+		LookPath: func(string) (string, error) { return "", os.ErrNotExist },
+	}
+	if _, err := Enable(context.Background(), deps); err != nil {
+		t.Fatalf("Enable: %v", err)
+	}
+	if runner.calledWith("systemctl") {
+		t.Fatalf("KHÔNG được gọi systemctl khi LookPath báo không có binary, các lệnh: %+v", runner.calls)
+	}
+	if !runner.calledWith("crontab") {
+		t.Fatalf("phải rơi về crontab")
+	}
+}
+
+func TestDisableLinux_RemovesUnitsAndCrontabLine(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, ".config", "systemd", "user")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, TaskName+".service"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, TaskName+".timer"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runner := newFakeRunner()
+	runner.outputs["crontab|-l"] = []byte(CrontabMarker + "\n0 3 * * * genh update --yes --quiet\n0 9 * * * keep-me\n")
+
+	deps := Deps{Runner: runner, GenhPath: "/opt/genh/bin/genh", LogFile: "/tmp/log", HomeDir: home, GOOS: "linux"}
+	if _, err := Disable(context.Background(), deps); err != nil {
+		t.Fatalf("Disable: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, TaskName+".service")); !os.IsNotExist(err) {
+		t.Fatalf("service unit phải bị xoá, err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, TaskName+".timer")); !os.IsNotExist(err) {
+		t.Fatalf("timer unit phải bị xoá, err=%v", err)
+	}
+	if !runner.calledWith("crontab", "-l") {
+		t.Fatalf("phải đọc crontab hiện tại để lọc dòng genh")
+	}
+}
+
+func TestStatusLinux_ReportsEnabled(t *testing.T) {
+	runner := newFakeRunner()
+	runner.outputs["systemctl|--user|is-enabled|"+TaskName+".timer"] = []byte("enabled\n")
+
+	st, err := GetStatus(context.Background(), Deps{Runner: runner, GOOS: "linux"})
+	if err != nil {
+		t.Fatalf("GetStatus: %v", err)
+	}
+	if !st.Enabled {
+		t.Fatalf("muốn Enabled=true, được %+v", st)
+	}
+}
+
+func TestStatusLinux_FallsBackToCrontabCheck(t *testing.T) {
+	runner := newFakeRunner()
+	runner.errs["systemctl|--user|is-enabled|"+TaskName+".timer"] = errCommandFailed
+	runner.outputs["crontab|-l"] = []byte(CrontabMarker + "\n0 3 * * * genh update --yes --quiet\n")
+
+	st, err := GetStatus(context.Background(), Deps{Runner: runner, GOOS: "linux"})
+	if err != nil {
+		t.Fatalf("GetStatus: %v", err)
+	}
+	if !st.Enabled {
+		t.Fatalf("muốn Enabled=true (thấy marker trong crontab), được %+v", st)
+	}
+}
+
+func TestEnableDarwin_WritesPlistAndLoads(t *testing.T) {
+	home := t.TempDir()
+	runner := newFakeRunner()
+	deps := Deps{Runner: runner, GenhPath: "/Users/o/.gen-harness/bin/genh", LogFile: "/Users/o/.gen-harness/logs/auto-update.log", HomeDir: home, GOOS: "darwin"}
+
+	if _, err := Enable(context.Background(), deps); err != nil {
+		t.Fatalf("Enable: %v", err)
+	}
+	if !runner.calledWith("launchctl", "load", "-w") {
+		t.Fatalf("phải gọi launchctl load -w, các lệnh: %+v", runner.calls)
+	}
+	plistPath := filepath.Join(home, "Library", "LaunchAgents", "com.gen-harness.update.plist")
+	data, err := os.ReadFile(plistPath)
+	if err != nil {
+		t.Fatalf("phải ghi được plist: %v", err)
+	}
+	mustContain(t, string(data), "/Users/o/.gen-harness/bin/genh")
+}
+
+func TestDisableDarwin_UnloadsAndRemovesPlist(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, "Library", "LaunchAgents")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	plistPath := filepath.Join(dir, "com.gen-harness.update.plist")
+	if err := os.WriteFile(plistPath, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runner := newFakeRunner()
+	deps := Deps{Runner: runner, HomeDir: home, GOOS: "darwin"}
+
+	if _, err := Disable(context.Background(), deps); err != nil {
+		t.Fatalf("Disable: %v", err)
+	}
+	if !runner.calledWith("launchctl", "unload") {
+		t.Fatalf("phải gọi launchctl unload")
+	}
+	if _, err := os.Stat(plistPath); !os.IsNotExist(err) {
+		t.Fatalf("plist phải bị xoá, err=%v", err)
+	}
+}
+
+func TestEnableWindows_CallsSchtasksCreate(t *testing.T) {
+	runner := newFakeRunner()
+	deps := Deps{Runner: runner, GenhPath: `C:\Users\o\genh.exe`, LogFile: `C:\Users\o\log.txt`, GOOS: "windows"}
+
+	if _, err := Enable(context.Background(), deps); err != nil {
+		t.Fatalf("Enable: %v", err)
+	}
+	if !runner.calledWith("schtasks", "/Create", "/TN", TaskName) {
+		t.Fatalf("phải gọi schtasks /Create, các lệnh: %+v", runner.calls)
+	}
+}
+
+func TestDisableWindows_CallsSchtasksDelete(t *testing.T) {
+	runner := newFakeRunner()
+	if _, err := Disable(context.Background(), Deps{Runner: runner, GOOS: "windows"}); err != nil {
+		t.Fatalf("Disable: %v", err)
+	}
+	if !runner.calledWith("schtasks", "/Delete", "/TN", TaskName) {
+		t.Fatalf("phải gọi schtasks /Delete, các lệnh: %+v", runner.calls)
+	}
+}
+
+func TestStatusWindows_NotCreated(t *testing.T) {
+	runner := newFakeRunner()
+	runner.errs["schtasks|/Query|/TN|"+TaskName+"|/FO|LIST"] = errCommandFailed
+
+	st, err := GetStatus(context.Background(), Deps{Runner: runner, GOOS: "windows"})
+	if err != nil {
+		t.Fatalf("GetStatus: %v", err)
+	}
+	if st.Enabled {
+		t.Fatalf("muốn Enabled=false khi chưa tạo task, được %+v", st)
+	}
+}
+
+var errCommandFailed = &fakeCmdError{"lệnh giả thất bại"}
+
+type fakeCmdError struct{ msg string }
+
+func (e *fakeCmdError) Error() string { return e.msg }
