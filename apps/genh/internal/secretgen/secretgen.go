@@ -137,6 +137,17 @@ func fillMissing(b *mutableBundle) error {
 	return nil
 }
 
+// Exists báo secrets.json đã tồn tại tại dir hay chưa — KHÔNG đọc/phân tích
+// nội dung (khác Load/LoadFillingMissing), chỉ dùng để hỏi nhanh "máy này đã
+// từng chạy xong Bước 4 (Sinh bí mật) chưa" mà không cần bí mật thật, ví dụ
+// `genh install` tự phát hiện máy đã cài (xem internal/install.
+// DetectExistingInstall, docs/reports/HANDOFF-v0.1.1.md mục "Lỗi cần sửa" #2
+// của v0.1.3).
+func Exists(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, secretsFileName))
+	return err == nil
+}
+
 // Load đọc bí mật đã sinh tại dir mà KHÔNG sinh mới bất kỳ trường nào còn
 // thiếu (khác Ensure) — dùng cho các lệnh vận hành (genh status/open/…,
 // internal/ops) chỉ cần ĐỌC LẠI bí mật của một bản cài đã có, không nên tự

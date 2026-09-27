@@ -22,6 +22,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/config"
+	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/dockercli"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/install"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/machine"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/ops"
@@ -92,7 +93,8 @@ func printUsage(w *os.File) {
 	_, _ = fmt.Fprint(w, `genh — trình cài đặt/vận hành một lệnh của Gen-Harness
 
 Cách dùng:
-  genh install [--port N] [--install-dir DIR] [--yes]   cài đặt, hoặc tiếp tục bản dở
+  genh install [--port N] [--install-dir DIR] [--yes] [--force]   cài đặt, hoặc tiếp tục bản dở
+                                          (máy đã cài xong -> dừng, gợi ý genh update; --force để cố tình cài lại)
 
 Lệnh vận hành (cờ chung mọi lệnh dưới đây: --port N, --install-dir DIR):
   genh status                            bảng dịch vụ + healthy + phiên bản + dung lượng
@@ -411,6 +413,7 @@ func runInstall(args []string) int {
 	port := fs.Int("port", machine.DefaultPort, "cổng HTTPS cho proxy")
 	installDir := fs.String("install-dir", "", "thư mục cài đặt (mặc định ~/.gen-harness)")
 	yes := fs.Bool("yes", false, "đồng ý trước cho các thao tác hệ thống rộng (sudo cho Docker rootless, UAC cho WSL2, tin cậy CA nội bộ)")
+	force := fs.Bool("force", false, "bỏ qua kiểm tra máy đã cài — CHẠY LẠI cả 8 bước dù đã có bản cài hoàn chỉnh (dùng khi lần cài trước hỏng hẳn, cần dựng lại từ đầu; bình thường hãy dùng `genh update`)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -423,6 +426,25 @@ func runInstall(args []string) int {
 			return 1
 		}
 		dir = d
+	}
+
+	// SỬA LỖI (docs/reports/HANDOFF-v0.1.1.md mục "Lỗi cần sửa" #2 của
+	// v0.1.3): `genh install` trên một máy ĐÃ CÀI HOÀN CHỈNH sẽ chạy lại cả 8
+	// Bước, dựng lại container VÀ BỎ QUA backup/di trú dữ liệu mà chỉ `genh
+	// update` mới có — dừng SỚM ở đây, trước khi đụng gì, trừ khi Owner đã tự
+	// xác nhận bằng --force.
+	if !*force && install.DetectExistingInstall(context.Background(), dockercli.ExecRunner{}, dir) {
+		se := &install.StepError{
+			Code: install.ErrCodeAlreadyInstalled,
+			What: "Gen-Harness ĐÃ CÀI XONG tại " + dir + " — DỪNG LẠI, chưa đụng gì",
+			Why:  "phát hiện secrets.json và container \"api\" đã tồn tại — chạy lại `genh install` sẽ dựng lại container, BỎ QUA backup tự động + di trú dữ liệu mà chỉ `genh update` mới làm.",
+			Next: "Chạy `genh update` để nâng cấp an toàn (có backup + rollback tự động). Nếu lần cài trước thật sự CHƯA XONG (Owner biết rõ), chạy lại kèm `genh install --force`.",
+		}
+		fmt.Println()
+		fmt.Printf("Lỗi %s: %s\n", se.Code, se.What)
+		fmt.Printf("  vì sao: %s\n", se.Why)
+		fmt.Printf("  làm gì tiếp: %s\n", se.Next)
+		return 1
 	}
 
 	env := &install.Env{InstallDir: dir, Port: *port, AutoApprove: *yes}

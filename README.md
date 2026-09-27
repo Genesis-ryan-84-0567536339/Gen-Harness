@@ -131,6 +131,26 @@ gói `.ghbundle` mang theo cả khoá master (và khoá bridge nếu có), tự 
 PASSWORD`, argon2id + AES-256-GCM), không phụ thuộc khoá đang cấu hình trên máy nguồn. Giữ mật khẩu gói này
 một nơi khác, an toàn (không cùng chỗ với gói) — mất mật khẩu gói cũng coi như mất gói.
 
+## Nâng cấp
+
+Máy đã cài bằng `install.sh`/`install.ps1` (xem `docs/handoff/05-installer.md`): chạy lại **đúng một dòng
+lệnh cài** đã dùng lần đầu để lấy binary `genh` mới:
+
+```bash
+curl -fsSL https://github.com/Genesis-ryan-84-0567536339/Gen-Harness/releases/latest/download/install.sh | sh
+```
+
+(Windows: `irm .../install.ps1 | iex`.) Từ v0.1.3, script tự phát hiện máy **đã cài** và **không** chạy lại
+`genh install` (tránh dựng lại container/mất dữ liệu) — chỉ cập nhật binary rồi dừng lại. Chạy tiếp:
+
+```bash
+genh update
+```
+
+để nâng cấp dịch vụ thật (tự backup trước, migrate, khởi động lại, tự rollback nếu bất kỳ bước nào lỗi — xem
+`docs/handoff/05-installer.md` mục "Lệnh vận hành"). `genh install` chỉ dùng cho máy **chưa cài lần nào**, hoặc
+lần cài trước **thật sự chưa xong** (thêm cờ `--force` nếu cần cố tình cài lại một máy đã cài).
+
 ## Phát triển
 
 Monorepo npm workspaces + một app Python riêng:
