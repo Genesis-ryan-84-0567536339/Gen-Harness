@@ -42,7 +42,13 @@ def _use_objects_dir(monkeypatch, path) -> None:  # type: ignore[no-untyped-def]
 
 
 def _use_database(monkeypatch, async_url: str) -> None:  # type: ignore[no-untyped-def]
+    # Xoá GH_ADMIN_DATABASE_URL còn sót lại từ fixture `fresh_db` (chạy dưới GH_TEST_APP_ROLE=1 — xem
+    # conftest.py::_use_db) trỏ về CSDL nguồn cũ: nếu không, `effective_admin_database_url` (gh/config.py)
+    # sẽ KHÔNG rơi về GH_DATABASE_URL mới mà dùng thẳng admin URL cũ — khiến pg_restore --clean chạy nhầm
+    # vào CSDL nguồn (đã có sẵn schema/dữ liệu/phân vùng) thay vì CSDL đích của bài test, gây lỗi
+    # "cannot drop inherited constraint" từ các bảng phân vùng pg_partman.
     monkeypatch.setenv("GH_DATABASE_URL", async_url)
+    monkeypatch.delenv("GH_ADMIN_DATABASE_URL", raising=False)
     get_settings.cache_clear()
 
 
