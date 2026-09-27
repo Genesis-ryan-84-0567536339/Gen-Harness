@@ -16,11 +16,10 @@ import (
 // UninstallOptions là các cờ đã phân tích của `genh uninstall`.
 type UninstallOptions struct {
 	KeepData bool // --keep-data: KHÔNG xoá volume dữ liệu
-	// AutoApprove bỏ qua hỏi xác nhận — KHÔNG có cờ CLI riêng theo tài liệu
-	// gốc (tài liệu chỉ nói "hỏi trước khi xoá dữ liệu", không nói cờ bỏ
-	// qua), nên cmd/genh KHÔNG đăng ký cờ --yes cho uninstall — trường này
-	// tồn tại chỉ để test gọi RunUninstall trực tiếp không phải mô phỏng
-	// stdin cho từng test case. Luôn false khi gọi từ CLI thật.
+	// AutoApprove bỏ qua hỏi xác nhận — ứng với cờ CLI `genh uninstall --yes`
+	// (thêm ở phiên e2e-install, cần cho kịch bản không tương tác: CI, script
+	// tự động gỡ cài). Test gọi RunUninstall trực tiếp cũng dùng trường này để
+	// không phải mô phỏng stdin cho từng test case.
 	AutoApprove bool
 }
 
