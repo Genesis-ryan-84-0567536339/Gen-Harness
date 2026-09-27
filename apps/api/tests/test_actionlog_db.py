@@ -26,11 +26,16 @@ async def test_chain_verifies_and_detects_tampering(db) -> None:  # type: ignore
     assert report.ok and report.checked == 5
 
     target = (await db.execute(text("SELECT id FROM ops.action_log WHERE action = 'test.2'"))).scalar_one()
-    # Mô phỏng kẻ có quyền superuser tắt trigger để sửa ngầm.
-    await db.execute(text("ALTER TABLE ops.action_log DISABLE TRIGGER USER"))
-    await db.execute(text("UPDATE ops.action_log SET detail = '{\"i\": 99}' WHERE id = :i"), {"i": target})
-    await db.execute(text("ALTER TABLE ops.action_log ENABLE TRIGGER USER"))
-    await db.commit()
+    # Mô phỏng kẻ có quyền superuser tắt trigger để sửa ngầm — ALTER TABLE ... DISABLE TRIGGER cần quyền chủ
+    # bảng/superuser, `db` (role `gh_app` khi GH_TEST_APP_ROLE=1 — mục v0.1.1/1a) không có, nên phải qua
+    # admin_sessionmaker() thật (đúng vai trò kẻ tấn công giả định trong kịch bản này).
+    from gh.db import admin_sessionmaker
+
+    async with admin_sessionmaker()() as adm:
+        await adm.execute(text("ALTER TABLE ops.action_log DISABLE TRIGGER USER"))
+        await adm.execute(text("UPDATE ops.action_log SET detail = '{\"i\": 99}' WHERE id = :i"), {"i": target})
+        await adm.execute(text("ALTER TABLE ops.action_log ENABLE TRIGGER USER"))
+        await adm.commit()
     report = await actionlog.verify_chain(db, org)
     assert not report.ok
     assert report.broken_at == str(target)
@@ -65,7 +70,11 @@ async def test_action_log_is_insert_only(db, sql: str) -> None:  # type: ignore[
     org = await _org(db)
     await actionlog.record(db, org_id=org, actor_type="system", actor_id="system:t", action="a")
     await db.commit()
-    with pytest.raises(DBAPIError, match="append-only"):
+    # TRUNCATE: role ứng dụng gh_app (GH_TEST_APP_ROLE=1 — mục v0.1.1/1a) không có quyền TRUNCATE (chỉ cấp
+    # SELECT/INSERT/UPDATE/DELETE — migration 0014, cố ý không cấp TRUNCATE) nên bị chặn NGAY từ tầng quyền,
+    # trước khi chạm tới trigger append-only — một lớp phòng thủ nữa, không phải hồi quy.
+    match = "append-only" if sql != "TRUNCATE ops.action_log" else "append-only|permission denied"
+    with pytest.raises(DBAPIError, match=match):
         await db.execute(text(sql))
     await db.rollback()
 
@@ -87,7 +96,9 @@ async def test_raw_store_is_insert_only(db, sql: str) -> None:  # type: ignore[n
     vals = ", ".join(values.get(c.data_type, "'x'") for c in required)
     await db.execute(text(f"INSERT INTO raw.events ({names}) VALUES ({vals})"))
     await db.commit()
-    with pytest.raises(DBAPIError, match="append-only"):
+    # Xem chú thích ở test_action_log_is_insert_only: TRUNCATE bị chặn sớm hơn (thiếu quyền) khi chạy bằng gh_app.
+    match = "append-only" if sql != "TRUNCATE raw.events" else "append-only|permission denied"
+    with pytest.raises(DBAPIError, match=match):
         await db.execute(text(sql))
     await db.rollback()
 
@@ -136,10 +147,14 @@ async def test_nightly_verify_raises_owner_alert_on_break(owner_api, db) -> None
     await partition_maintenance({})
     ok = await verify_action_log({})
     assert all(v["ok"] for v in ok.values())
-    await db.execute(text("ALTER TABLE ops.action_log DISABLE TRIGGER USER"))
-    await db.execute(text("UPDATE ops.action_log SET action = 'sua.ngam' WHERE action = 'setup.owner_created'"))
-    await db.execute(text("ALTER TABLE ops.action_log ENABLE TRIGGER USER"))
-    await db.commit()
+    # Cùng lý do ở test_chain_verifies_and_detects_tampering: cần superuser để tắt trigger.
+    from gh.db import admin_sessionmaker
+
+    async with admin_sessionmaker()() as adm:
+        await adm.execute(text("ALTER TABLE ops.action_log DISABLE TRIGGER USER"))
+        await adm.execute(text("UPDATE ops.action_log SET action = 'sua.ngam' WHERE action = 'setup.owner_created'"))
+        await adm.execute(text("ALTER TABLE ops.action_log ENABLE TRIGGER USER"))
+        await adm.commit()
     bad = await verify_action_log({})
     assert not any(v["ok"] for v in bad.values())
     alert = (await db.execute(text("SELECT alert_type, priority, recipient_user_id, evidence FROM biz.alerts"))).one()

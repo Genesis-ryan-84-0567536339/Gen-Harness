@@ -9,6 +9,8 @@ from gh.config import get_settings
 
 _engine: AsyncEngine | None = None
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None
+_admin_engine: AsyncEngine | None = None
+_admin_sessionmaker: async_sessionmaker[AsyncSession] | None = None
 
 
 def get_engine() -> AsyncEngine:
@@ -25,11 +27,31 @@ def sessionmaker() -> async_sessionmaker[AsyncSession]:
     return _sessionmaker
 
 
+def get_admin_engine() -> AsyncEngine:
+    """Kết nối superuser (`GH_ADMIN_DATABASE_URL`, rỗng ⇒ `database_url`) — dùng cho DDL lúc chạy: bảo trì/tạo
+    phân vùng pg_partman (gh/worker.py::partition_maintenance), backup/restore (gh/backup.py). KHÔNG dùng cho
+    đường request HTTP thường (route/service dùng `sessionmaker()` như cũ, qua role `gh_app`)."""
+    global _admin_engine, _admin_sessionmaker
+    if _admin_engine is None:
+        _admin_engine = create_async_engine(get_settings().effective_admin_database_url, pool_pre_ping=True)
+        _admin_sessionmaker = async_sessionmaker(_admin_engine, expire_on_commit=False)
+    return _admin_engine
+
+
+def admin_sessionmaker() -> async_sessionmaker[AsyncSession]:
+    get_admin_engine()
+    assert _admin_sessionmaker is not None
+    return _admin_sessionmaker
+
+
 async def dispose_engine() -> None:
-    global _engine, _sessionmaker
+    global _engine, _sessionmaker, _admin_engine, _admin_sessionmaker
     if _engine is not None:
         await _engine.dispose()
+    if _admin_engine is not None:
+        await _admin_engine.dispose()
     _engine, _sessionmaker = None, None
+    _admin_engine, _admin_sessionmaker = None, None
 
 
 async def get_db() -> AsyncIterator[AsyncSession]:

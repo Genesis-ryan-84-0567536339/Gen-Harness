@@ -17,13 +17,14 @@ from sqlalchemy import text
 
 from gh import biz
 from gh.app import build_plugin_manager, configure_logging
+from gh.auth import service as auth_service
 from gh.backup import JOBS as BACKUP_JOBS
 from gh.biz.hooks import start_hooks
 from gh.bootstrap import bootstrap
 from gh.chassis import actionlog
 from gh.chassis.bus import EventBus
 from gh.config import get_settings
-from gh.db import dispose_engine, sessionmaker
+from gh.db import admin_sessionmaker, dispose_engine, sessionmaker
 from gh.identity import service as identity
 from gh.memory import notebook
 from gh.providers import cli as climod
@@ -98,7 +99,9 @@ async def verify_action_log(ctx: dict[str, Any]) -> dict[str, Any]:
 
 
 async def partition_maintenance(ctx: dict[str, Any]) -> None:
-    async with sessionmaker()() as db:
+    """`partman.run_maintenance()` tạo bảng phân vùng mới hằng tháng — là DDL, role `gh_app` (GH_DATABASE_URL,
+    không superuser) không có quyền tạo bảng nên job này luôn chạy qua `GH_ADMIN_DATABASE_URL`."""
+    async with admin_sessionmaker()() as db:
         await db.execute(text("SELECT partman.run_maintenance()"))
         await db.commit()
 
@@ -111,6 +114,16 @@ async def detect_identities(ctx: dict[str, Any]) -> dict[str, int]:
             out[str(org)] = await identity.detect(db, org)
         await db.commit()
     return out
+
+
+async def expire_sessions(ctx: dict[str, Any]) -> int:
+    """Dọn `core.sessions` (PLAN §5.6 lỗi 🟡): xoá vĩnh viễn phiên hết hạn/thu hồi quá
+    `GH_SESSION_PURGE_AFTER_DAYS` ngày (mặc định 30) — chạy hằng giờ."""
+    s = get_settings()
+    async with sessionmaker()() as db:
+        n = await auth_service.purge_expired_sessions(db, older_than_days=s.session_purge_after_days)
+        await db.commit()
+    return n
 
 
 async def compact_notebooks(ctx: dict[str, Any]) -> int:
@@ -132,7 +145,7 @@ class WorkerSettings:
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
     on_startup = startup
     on_shutdown = shutdown
-    functions = [verify_action_log, partition_maintenance, detect_identities, compact_notebooks,
+    functions = [verify_action_log, partition_maintenance, detect_identities, compact_notebooks, expire_sessions,
                  *(fn for fn, _ in _BIZ_JOBS)]
     health_check_interval = 30
     cron_jobs = [
@@ -140,6 +153,7 @@ class WorkerSettings:
         cron(partition_maintenance, minute={5}),                # mỗi giờ
         cron(detect_identities, minute=set(range(0, 60, 10))),  # mỗi 10 phút
         cron(compact_notebooks, hour={3}, minute={15}),         # 03:15 hằng ngày
+        cron(expire_sessions, minute={20}),                     # mỗi giờ — dọn core.sessions (0014_v011_db)
         *(cron(fn, **kw) for fn, kw in _BIZ_JOBS),  # type: ignore[arg-type]
     ]
 

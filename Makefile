@@ -2,8 +2,8 @@
 COMPOSE = docker compose -f deploy/compose.yaml --env-file .env
 API = apps/api
 
-.PHONY: secrets up down logs logs-token ps api-dev api-test api-lint web-test bridge-test test migrate \
-        seed-demo seed-demo-clean backup backup-list restore
+.PHONY: secrets up down logs logs-token ps api-dev api-test api-test-app-role api-lint web-test bridge-test \
+        test migrate seed-demo seed-demo-clean backup backup-list restore
 
 secrets:
 	@mkdir -p secrets
@@ -37,6 +37,11 @@ api-dev:
 
 api-test:
 	cd $(API) && .venv/bin/pytest -q
+
+# v0.1.1/1a — chạy toàn bộ test dưới role ứng dụng gh_app (không superuser, không BYPASSRLS — migration 0014)
+# thay vì postgres, để bắt sớm GRANT còn thiếu. Migrate vẫn dùng superuser (xem tests/conftest.py).
+api-test-app-role:
+	cd $(API) && GH_TEST_APP_ROLE=1 .venv/bin/pytest -q
 
 api-lint:
 	cd $(API) && .venv/bin/ruff check gh tests && .venv/bin/mypy gh
