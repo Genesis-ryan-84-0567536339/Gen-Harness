@@ -17,8 +17,6 @@ services:
     image: caddy:2-alpine
   redis:
     image: redis:7-alpine
-  objects:
-    image: minio/minio:latest
   db:
     build: { context: .. }
   api:
@@ -72,9 +70,6 @@ func TestPullStep_PullsOnlyServicesWithImage(t *testing.T) {
 		"redis:7-alpine": {
 			{Image: "redis:7-alpine", LayerID: "L1", Status: "Already exists"},
 		},
-		"minio/minio:latest": {
-			{Image: "minio/minio:latest", LayerID: "L1", Status: "Downloading", Current: 5, Total: 5},
-		},
 	}}
 
 	step := pullStep{puller: fp, locate: func(string) (string, error) { return composePath, nil }}
@@ -86,8 +81,8 @@ func TestPullStep_PullsOnlyServicesWithImage(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	if len(fp.called) != 3 {
-		t.Fatalf("số image được Pull = %d, muốn 3 (chỉ service có image:), gọi: %v", len(fp.called), fp.called)
+	if len(fp.called) != 2 {
+		t.Fatalf("số image được Pull = %d, muốn 2 (chỉ service có image:), gọi: %v", len(fp.called), fp.called)
 	}
 
 	last := progresses[len(progresses)-1]
@@ -147,8 +142,7 @@ func TestPullStep_OnePullFails_ReturnsStructuredErrorButOthersStillRan(t *testin
 
 	fp := &fakePuller{
 		events: map[string][]pull.Event{
-			"redis:7-alpine":     {{Image: "redis:7-alpine", LayerID: "L1", Status: "Already exists"}},
-			"minio/minio:latest": {{Image: "minio/minio:latest", LayerID: "L1", Status: "Already exists"}},
+			"redis:7-alpine": {{Image: "redis:7-alpine", LayerID: "L1", Status: "Already exists"}},
 		},
 		failWith: map[string]error{
 			"caddy:2-alpine": errors.New("pull access denied"),
@@ -165,7 +159,7 @@ func TestPullStep_OnePullFails_ReturnsStructuredErrorButOthersStillRan(t *testin
 	if se.Code != ErrCodePullFailed {
 		t.Errorf("Code = %q, muốn %q", se.Code, ErrCodePullFailed)
 	}
-	if len(fp.called) != 3 {
+	if len(fp.called) != 2 {
 		t.Errorf("mọi image vẫn phải được thử tải song song dù một cái lỗi, gọi: %v", fp.called)
 	}
 }

@@ -9,16 +9,17 @@ import (
 
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/compose"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/dockercli"
+	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/pgtune"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/secretgen"
 )
 
-// dataServices là 3 service Bước 5 khởi động và chờ healthy, đúng thứ tự
-// liệt kê trong docs/handoff/05-installer.md.
-var dataServices = []string{"db", "redis", "objects"}
+// dataServices là 2 service Bước 5 khởi động và chờ healthy (đã bỏ "objects"
+// — MinIO không còn trong compose.yaml, xem docs/reports/HANDOFF-v0.1.1.md).
+var dataServices = []string{"db", "redis"}
 
-// defaultDataTimeout là thời gian tối đa chờ db/redis/objects healthy —
-// compose.yaml khai healthcheck db tối đa 10×10s=100s, objects 5×15s=75s,
-// nên 3 phút dư dả cho cả trường hợp máy chậm/lần đầu khởi tạo dữ liệu.
+// defaultDataTimeout là thời gian tối đa chờ db/redis healthy — compose.yaml
+// khai healthcheck db tối đa 10×10s=100s, nên 3 phút dư dả cho cả trường hợp
+// máy chậm/lần đầu khởi tạo dữ liệu.
 const defaultDataTimeout = 3 * time.Minute
 
 // dataStep cài Bước 5 — Khởi động dữ liệu (8%): `docker compose up -d db
@@ -76,7 +77,7 @@ func (s dataStep) Run(ctx context.Context, env *Env, rep Reporter) error {
 		return se
 	}
 
-	rep.Report(Progress{Status: StatusRunning, Percent: 5, Detail: "khởi động db, redis, objects"})
+	rep.Report(Progress{Status: StatusRunning, Percent: 5, Detail: "khởi động db, redis"})
 
 	upArgs := compose.BaseArgs(composePath, append([]string{"up", "-d"}, dataServices...)...)
 	if _, err := runner.Output(ctx, dockercli.Cmd{
@@ -84,7 +85,7 @@ func (s dataStep) Run(ctx context.Context, env *Env, rep Reporter) error {
 	}); err != nil {
 		se := &StepError{
 			Code: ErrCodeComposeUpFailed,
-			What: "`docker compose up -d` cho db/redis/objects thất bại",
+			What: "`docker compose up -d` cho db/redis thất bại",
 			Why:  err.Error(),
 			Next: "Xem log ở trên rồi bấm r để thử lại — dữ liệu đã có không bị mất.",
 			Err:  err,
@@ -106,16 +107,16 @@ func (s dataStep) Run(ctx context.Context, env *Env, rep Reporter) error {
 	if waitErr != nil {
 		se := &StepError{
 			Code: ErrCodeDataNotHealthy,
-			What: "db/redis/objects chưa healthy trước khi hết thời gian chờ",
+			What: "db/redis chưa healthy trước khi hết thời gian chờ",
 			Why:  waitErr.Error(),
-			Next: "Xem `docker compose logs db redis objects` rồi bấm r để thử lại.",
+			Next: "Xem `docker compose logs db redis` rồi bấm r để thử lại.",
 			Err:  waitErr,
 		}
 		rep.Report(Progress{Status: StatusError, Percent: 100, Err: se})
 		return se
 	}
 
-	rep.Report(Progress{Status: StatusOK, Percent: 100, Detail: "db, redis, objects healthy"})
+	rep.Report(Progress{Status: StatusOK, Percent: 100, Detail: "db, redis healthy"})
 	return nil
 }
 
@@ -137,20 +138,22 @@ func secretsResult(env *Env) (secretgen.Result, error) {
 
 // secretsEnvOverlay đọc Env.Secrets (đặt ở Bước 4) và dựng các biến môi
 // trường compose.yaml cần để dựng dữ liệu — POSTGRES_PASSWORD/
-// MINIO_ROOT_PASSWORD là bắt buộc (compose.yaml dùng
+// GH_APP_DB_PASSWORD là bắt buộc (compose.yaml dùng
 // ${VAR:?đặt VAR trong .env}), không có sẽ khiến `docker compose up` tự
-// thất bại ngay với thông điệp rõ ràng từ chính Compose.
+// thất bại ngay với thông điệp rõ ràng từ chính Compose. GH_PG_* (tinh
+// chỉnh Postgres) được tính từ RAM đo được ở Bước 1 — cùng logic
+// ops.EnvOverlay, viết lại ở đây vì cùng lý do (khác package).
 func secretsEnvOverlay(env *Env) ([]string, error) {
 	res, err := secretsResult(env)
 	if err != nil {
 		return nil, err
 	}
-	return []string{
+	overlay := []string{
 		"POSTGRES_PASSWORD=" + res.Bundle.DBPassword,
-		"MINIO_ROOT_PASSWORD=" + res.Bundle.MinIOSecretKey,
-		"MINIO_ROOT_USER=" + res.Bundle.MinIOAccessKey,
+		"GH_APP_DB_PASSWORD=" + res.Bundle.AppDBPassword,
 		"GH_SETUP_TOKEN=" + res.Bundle.SetupToken,
-	}, nil
+	}
+	return append(overlay, pgtune.DetectAndCompute().EnvPairs()...), nil
 }
 
 // dataHealthPercent ánh xạ số service đã healthy trong detail thành %

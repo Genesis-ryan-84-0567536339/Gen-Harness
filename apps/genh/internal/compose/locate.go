@@ -1,6 +1,7 @@
 package compose
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -60,9 +61,20 @@ func ascendingCandidates(start string, maxUp int) []string {
 // rơi về ghi compose.yaml NHÚNG SẴN trong binary (embeddedComposeYAML, xem
 // embed.go) ra "<installDir>/deploy/compose.yaml" rồi trả về đường dẫn đó —
 // CHỈ khi installDir khác rỗng (không có installDir thì không biết ghi vào
-// đâu, giữ nguyên lỗi cũ) và CHỈ khi tệp đó CHƯA có sẵn (không đè một
-// compose.yaml Owner đã có, kể cả khi nó khác nội dung nhúng — idempotent,
-// giống các bước cài khác trong package install).
+// đâu, giữ nguyên lỗi cũ).
+//
+// ĐỒNG BỘ tệp GENH QUẢN LÝ (SỬA LỖI): candidate "<installDir>/deploy/
+// compose.yaml" khác mọi candidate khác ở chỗ CHÍNH genh đã ghi ra nó (lần
+// cài đầu, hoặc lần Locate trước đó của một bản genh cũ hơn) — không phải
+// một checkout repo Owner tự quản lý. Vì vậy, MỖI LẦN candidate này đã tồn
+// tại, Locate tự đối chiếu với bản nhúng CỦA CHÍNH BINARY ĐANG CHẠY và ghi
+// lại (giữ bản cũ ở "compose.yaml.bak") nếu khác — trước đây chỉ ghi khi
+// tệp CHƯA có, nên một Owner cài xong rồi tự nâng cấp genh (mang theo
+// compose.yaml nhúng mới hơn — image ghim digest mới, service mới…) không
+// bao giờ nhận được các thay đổi đó: `genh update` và mọi lệnh vận hành khác
+// vẫn dùng compose.yaml CŨ mãi mãi (xem docs/reports/HANDOFF-v0.1.1.md mục
+// "Lỗi cần sửa" #5). Mọi candidate KHÁC (biến môi trường override, checkout
+// repo dò được qua cwd/exeDir) KHÔNG bao giờ bị đụng vào — đúng như trước.
 func Locate(installDir string) (string, error) {
 	cwd, _ := os.Getwd()
 	exeDir := ""
@@ -70,14 +82,27 @@ func Locate(installDir string) (string, error) {
 		exeDir = filepath.Dir(exe)
 	}
 
-	for _, c := range SearchCandidates(installDir, cwd, exeDir) {
-		if info, err := os.Stat(c); err == nil && !info.IsDir() {
-			return c, nil
-		}
+	var managedPath string
+	if installDir != "" {
+		managedPath = filepath.Join(installDir, "deploy", "compose.yaml")
 	}
 
-	if installDir != "" {
-		if path, err := writeEmbeddedCompose(installDir); err == nil {
+	for _, c := range SearchCandidates(installDir, cwd, exeDir) {
+		info, err := os.Stat(c)
+		if err != nil || info.IsDir() {
+			continue
+		}
+		if managedPath != "" && c == managedPath {
+			if err := syncEmbeddedCompose(managedPath); err != nil {
+				return "", fmt.Errorf("đồng bộ %s với bản nhúng mới: %w", managedPath, err)
+			}
+			return managedPath, nil
+		}
+		return c, nil
+	}
+
+	if managedPath != "" {
+		if path, err := writeEmbeddedCompose(managedPath); err == nil {
 			return path, nil
 		}
 		// Ghi thất bại (ví dụ không có quyền) — rơi xuống lỗi chung bên dưới,
@@ -89,17 +114,11 @@ func Locate(installDir string) (string, error) {
 		EnvOverrideVar, installDir, EnvOverrideVar)
 }
 
-// writeEmbeddedCompose ghi compose.yaml nhúng sẵn ra
-// "<installDir>/deploy/compose.yaml" nếu tệp đó CHƯA tồn tại, rồi trả về
-// đường dẫn — an toàn gọi lại nhiều lần (idempotent), không đè tệp đã có.
-func writeEmbeddedCompose(installDir string) (string, error) {
-	deployDir := filepath.Join(installDir, "deploy")
-	path := filepath.Join(deployDir, "compose.yaml")
-
-	if info, err := os.Stat(path); err == nil && !info.IsDir() {
-		return path, nil
-	}
-
+// writeEmbeddedCompose ghi compose.yaml nhúng sẵn ra path (tạo thư mục cha
+// nếu cần) — chỉ gọi khi path CHƯA tồn tại (xem Locate); tệp ĐÃ tồn tại đi
+// qua syncEmbeddedCompose thay vì hàm này.
+func writeEmbeddedCompose(path string) (string, error) {
+	deployDir := filepath.Dir(path)
 	if err := os.MkdirAll(deployDir, 0o755); err != nil {
 		return "", fmt.Errorf("tạo thư mục %s: %w", deployDir, err)
 	}
@@ -111,4 +130,38 @@ func writeEmbeddedCompose(installDir string) (string, error) {
 		return "", fmt.Errorf("đổi tên %s -> %s: %w", tmp, path, err)
 	}
 	return path, nil
+}
+
+// syncEmbeddedCompose đồng bộ compose.yaml GENH QUẢN LÝ tại path với bản
+// nhúng của binary genh ĐANG CHẠY — gọi mỗi khi Locate thấy tệp đó đã có sẵn
+// (không chỉ lần ghi đầu, xem SỬA LỖI ở doc-comment của Locate). Không đổi
+// gì nếu nội dung đã khớp byte-for-byte (tránh ghi tệp không cần thiết mỗi
+// lần Locate chạy — trường hợp phổ biến nhất: genh không đổi phiên bản giữa
+// hai lần chạy). Nếu khác, giữ nguyên tệp cũ dưới path+".bak" (Owner có thể
+// đã tự sửa tay compose.yaml của mình — thêm service, đổi cổng…; genh không
+// cố phân biệt "tự sửa" với "phiên bản genh cũ để lại", chỉ đảm bảo không
+// mất trắng nội dung cũ) rồi ghi đè bằng bản nhúng mới, qua tệp tạm + rename
+// để không để lại compose.yaml nửa vời nếu tiến trình bị ngắt giữa chừng.
+func syncEmbeddedCompose(path string) error {
+	current, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("đọc %s: %w", path, err)
+	}
+	if bytes.Equal(current, embeddedComposeYAML) {
+		return nil
+	}
+
+	bakPath := path + ".bak"
+	if err := os.WriteFile(bakPath, current, 0o644); err != nil {
+		return fmt.Errorf("ghi bản sao lưu %s: %w", bakPath, err)
+	}
+
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, embeddedComposeYAML, 0o644); err != nil {
+		return fmt.Errorf("ghi %s: %w", tmp, err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return fmt.Errorf("đổi tên %s -> %s: %w", tmp, path, err)
+	}
+	return nil
 }

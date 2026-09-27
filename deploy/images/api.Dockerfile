@@ -28,8 +28,14 @@ COPY apps/api/alembic.ini ./
 COPY apps/api/migrations ./migrations
 COPY db/sql /app/db/sql
 COPY plugins /app/plugins
+# Tạo sẵn /var/lib/gh/objects (volume gh_objects của deploy/compose.yaml gắn
+# vào đây cho cả api và worker, GH_OBJECTS_DIR) trước khi chown -R: Docker
+# sao chép nội dung + QUYỀN của thư mục này từ image sang volume ở lần mount
+# đầu tiên, nên phải có sẵn ở đây với đúng chủ sở hữu gh:gh — nếu không,
+# volume sẽ được tạo với quyền root, tiến trình chạy dưới USER gh (dòng dưới)
+# sẽ không ghi được tài liệu/backup.
 RUN useradd --system --uid 10001 --home-dir /home/gh --create-home gh \
-    && mkdir -p /var/lib/gh/agy/.gemini/antigravity-cli && chown -R gh:gh /var/lib/gh
+    && mkdir -p /var/lib/gh/agy/.gemini/antigravity-cli /var/lib/gh/objects && chown -R gh:gh /var/lib/gh
 ENV GH_CLI_HOME=/var/lib/gh/agy/.gemini/antigravity-cli GH_CLI_BINARY=agy AGY_CLI_DISABLE_AUTO_UPDATE=1
 USER gh
 EXPOSE 8000
