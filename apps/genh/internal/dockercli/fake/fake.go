@@ -6,6 +6,7 @@ package fake
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
 	"sync"
 
@@ -16,6 +17,11 @@ import (
 // đã dùng (ví dụ compose có truyền đúng -f <path> hay không).
 type Call struct {
 	Cmd dockercli.Cmd
+	// Stdin là toàn bộ bytes RunIO đã đọc từ stdin được đưa vào (nil nếu lần
+	// gọi này không phải RunIO, hoặc RunIO gọi với stdin nil) — test dùng để
+	// kiểm nội dung thật đã truyền vào tiến trình con (ví dụ `genh import`
+	// phải đưa đúng bytes tệp .ghbundle vào stdin).
+	Stdin []byte
 }
 
 // Response định sẵn kết quả trả về cho một lệnh khớp Match.
@@ -34,6 +40,15 @@ type Response struct {
 	// `docker compose ps` báo "starting" vài lần rồi "healthy" (xem
 	// internal/compose.WaitHealthy).
 	OutputSeq [][]byte
+
+	// RunIOStdout, nếu khác nil, là bytes RunIO ghi ra Writer stdout được đưa
+	// vào (giả lập stdout của tiến trình con, ví dụ nội dung gói .ghbundle mà
+	// `python -m gh.bundle export` in ra).
+	RunIOStdout []byte
+	// ExitCode, khi khác 0, làm RunIO trả về *dockercli.ExitError{Code:
+	// ExitCode} thay vì Err — dùng để giả lập mã thoát cụ thể (2 sai mật
+	// khẩu/gói hỏng, 3 không tương thích, theo hợp đồng gh.bundle).
+	ExitCode int
 }
 
 // Runner là dockercli.Runner giả, phát Response đã định sẵn theo thứ tự
@@ -46,9 +61,13 @@ type Runner struct {
 }
 
 func (r *Runner) record(cmd dockercli.Cmd) {
+	r.recordCall(Call{Cmd: cmd})
+}
+
+func (r *Runner) recordCall(call Call) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.Calls = append(r.Calls, Call{Cmd: cmd})
+	r.Calls = append(r.Calls, call)
 }
 
 // match trả về response khớp đầu tiên cùng số lần nó ĐÃ khớp trước lần này
@@ -100,6 +119,36 @@ func (r *Runner) Stream(ctx context.Context, cmd dockercli.Cmd, onLine func(line
 		default:
 		}
 		onLine(l)
+	}
+	return resp.Err
+}
+
+// RunIO đọc hết stdin (nếu khác nil, ghi lại vào Call.Stdin để test kiểm
+// tra), ghi Response.RunIOStdout ra stdout được đưa vào, rồi trả về
+// *dockercli.ExitError{Code: Response.ExitCode} nếu ExitCode khác 0, hoặc
+// Response.Err nếu không.
+func (r *Runner) RunIO(ctx context.Context, cmd dockercli.Cmd, stdin io.Reader, stdout io.Writer) error {
+	var stdinData []byte
+	if stdin != nil {
+		var err error
+		stdinData, err = io.ReadAll(stdin)
+		if err != nil {
+			return fmt.Errorf("fake.Runner.RunIO: đọc stdin: %w", err)
+		}
+	}
+	r.recordCall(Call{Cmd: cmd, Stdin: stdinData})
+
+	resp, _, ok := r.match(cmd)
+	if !ok {
+		return fmt.Errorf("fake.Runner: không có Response khớp lệnh %s %v", cmd.Name, cmd.Args)
+	}
+	if len(resp.RunIOStdout) > 0 && stdout != nil {
+		if _, err := stdout.Write(resp.RunIOStdout); err != nil {
+			return fmt.Errorf("fake.Runner.RunIO: ghi stdout: %w", err)
+		}
+	}
+	if resp.ExitCode != 0 {
+		return &dockercli.ExitError{Code: resp.ExitCode}
 	}
 	return resp.Err
 }
