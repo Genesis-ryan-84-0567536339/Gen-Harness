@@ -22,7 +22,15 @@ func insecureLocalClient(timeout time.Duration) *http.Client {
 	}
 }
 
-// localURL dựng "https://127.0.0.1:<port><path>".
+// ProxyHost là tên máy genh dùng để gọi proxy Caddy trên chính máy này.
+// PHẢI là "localhost", không phải "127.0.0.1": Caddyfile khai site
+// `{$GH_SITE_ADDRESS:localhost}:8443` với `tls internal` — gọi bằng IP thì Go
+// không gửi SNI, Caddy không có chứng chỉ cho yêu cầu đó và từ chối bắt tay
+// TLS, Host cũng không khớp site (phát hiện ở e2e cài thật: /api/v1/ready
+// không bao giờ trả 200 dù api healthy).
+const ProxyHost = "localhost"
+
+// localURL dựng "https://localhost:<port><path>".
 func localURL(port int, path string) string {
-	return fmt.Sprintf("https://127.0.0.1:%d%s", ResolvePort(port), path)
+	return fmt.Sprintf("https://%s:%d%s", ProxyHost, ResolvePort(port), path)
 }
