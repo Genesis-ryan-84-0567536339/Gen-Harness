@@ -13,6 +13,11 @@ REPO="Genesis-ryan-84-0567536339/Gen-Harness"
 RELEASE_BASE="https://github.com/${REPO}/releases/latest/download"
 INSTALL_ROOT="${GEN_HARNESS_HOME:-$HOME/.gen-harness}"
 BIN_DIR="${INSTALL_ROOT}/bin"
+# SECRETS_FILE: đúng đường dẫn config.Paths.ConfigDir()/secrets.json mà
+# secretgen.Ensure ghi ở Bước 4 — có nghĩa máy này ĐÃ có một bản cài (xem
+# hàm main() dưới cùng và docs/reports/HANDOFF-v0.1.1.md mục "Lỗi cần sửa"
+# #1 của v0.1.3).
+SECRETS_FILE="${INSTALL_ROOT}/config/secrets.json"
 
 log() { printf '%s\n' "$*" >&2; }
 die() {
@@ -118,6 +123,22 @@ main() {
 	export PATH
 
 	log "genh: đã cài vào ${BIN_DIR}/genh — mở phiên shell mới để PATH có hiệu lực lâu dài."
+
+	# SỬA LỖI (docs/reports/HANDOFF-v0.1.1.md mục "Lỗi cần sửa" #1 của
+	# v0.1.3): trước đây luôn `exec genh install` — trên máy ĐÃ CÀI TỪ TRƯỚC
+	# (Owner chạy lại đúng dòng lệnh này chỉ để lấy binary genh mới, ví dụ vì
+	# `genh update` của bản cũ không tự tải binary), `genh install` KHÔNG
+	# phát hiện được máy đã cài, sẽ dựng lại container và BỎ QUA backup + di
+	# trú dữ liệu mà chỉ `genh update` mới có → mất dữ liệu/tài liệu. Từ đây:
+	# máy chưa từng cài (chưa có secrets.json) mới exec install như cũ; máy
+	# đã cài chỉ dừng lại ở đây, KHÔNG đụng gì tới dịch vụ đang chạy.
+	if [ -f "$SECRETS_FILE" ]; then
+		log "genh: máy này đã cài Gen-Harness từ trước — CHỈ vừa cập nhật genh lên bản mới, CHƯA đụng gì tới dịch vụ đang chạy."
+		log "genh: chạy 'genh update' để nâng cấp dịch vụ lên đúng bản mới (có backup tự động + rollback nếu lỗi)."
+		log "genh: nếu lần cài trước CHƯA XONG hẳn (hiếm), chạy 'genh install' để tiếp tục đúng bước còn dở."
+		exit 0
+	fi
+
 	exec "${BIN_DIR}/genh" install
 }
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -86,12 +87,18 @@ func RunUpdate(ctx context.Context, env *Env, opts UpdateOptions, deps UpdateDep
 		}
 	}
 
-	// LocatePathSync (KHÔNG LocatePath): `genh update` là một trong hai lệnh
-	// (cùng `genh install`) có trách nhiệm đồng bộ compose.yaml GENH QUẢN LÝ
-	// với bản nhúng của chính binary genh đang chạy — xem compose.
-	// LocateAndSync và docs/reports/HANDOFF-v0.1.1.md mục "Lỗi cần sửa" #3
-	// của v0.1.2.
-	composePath, err := env.LocatePathSync()
+	// LocatePath (KHÔNG LocatePathSync) ở ĐÂY: bước 1 (backup) PHẢI chạy với
+	// compose.yaml ĐANG THẬT SỰ có trên đĩa (bản mà container hiện tại — có
+	// thể là một phiên bản genh cũ hơn — được dựng lên), không phải bản vừa
+	// đồng bộ với binary genh mới. SỬA LỖI (docs/reports/HANDOFF-v0.1.1.md
+	// mục "Lỗi cần sửa" #3 của v0.1.2): bản trước gọi LocatePathSync ngay ở
+	// đây, TRƯỚC bước backup — nếu compose.yaml GENH QUẢN LÝ đã lệch bản
+	// nhúng (binary genh vừa được cài lại mới hơn bản đang chạy dịch vụ),
+	// compose.yaml bị ghi đè bằng bản MỚI trước khi backup, rồi nếu bước sau
+	// (pull/migrate/restart) lỗi, rollbackAndWrap khôi phục DỮ LIỆU cũ nhưng
+	// lại khởi động bằng compose.yaml MỚI — lệch nhau. Đồng bộ compose.yaml
+	// (xem bước 1.5 dưới) chỉ chạy SAU KHI backup đã thành công.
+	composePath, err := env.LocatePath()
 	if err != nil {
 		return err
 	}
@@ -104,8 +111,8 @@ func RunUpdate(ctx context.Context, env *Env, opts UpdateOptions, deps UpdateDep
 
 	_, _ = fmt.Fprintf(out, "Cập nhật Gen-Harness (kênh %s)\n", channel)
 
-	// 1. Backup tự động TRƯỚC khi đụng gì — không có backup, không có gì để
-	// rollback về.
+	// 1. Backup tự động TRƯỚC khi đụng gì (kể cả compose.yaml) — không có
+	// backup, không có gì để rollback về.
 	_, _ = fmt.Fprintln(out, "1/5 Backup tự động…")
 	key, err := runBackupInContainer(ctx, runner, composePath, envOverlay, dir)
 	if err != nil {
@@ -118,6 +125,31 @@ func RunUpdate(ctx context.Context, env *Env, opts UpdateOptions, deps UpdateDep
 		}
 	}
 	_, _ = fmt.Fprintln(out, "     backup: "+key)
+
+	// 1.5. Đồng bộ compose.yaml GENH QUẢN LÝ với bản nhúng của binary genh
+	// đang chạy CHỈ SAU KHI backup đã thành công — giữ bản cũ ở
+	// compose.yaml.bak (xem compose.LocateAndSync) để rollback (bên dưới)
+	// khôi phục lại đúng bản đó nếu cần. syncedPath PHẢI trùng composePath —
+	// khác đi nghĩa là compose.Locate/LocateAndSync tìm ra hai candidate khác
+	// nhau giữa hai lần gọi (không nên xảy ra, nhưng không âm thầm bỏ qua).
+	syncedPath, err := env.LocatePathSync()
+	if err != nil {
+		return &OpError{
+			Code: ErrCodeUpdateComposeSyncFailed,
+			What: "Đồng bộ compose.yaml với bản genh mới thất bại — backup " + key + " đã có, CHƯA đụng gì tới dịch vụ",
+			Why:  err.Error(),
+			Next: "Kiểm quyền ghi vào " + dir + " rồi thử lại `genh update` — dịch vụ vẫn đang chạy bình thường, không cần rollback.",
+			Err:  err,
+		}
+	}
+	if syncedPath != composePath {
+		return &OpError{
+			Code: ErrCodeUpdateComposeSyncFailed,
+			What: "Đồng bộ compose.yaml tìm ra một đường dẫn khác với lúc backup — DỪNG LẠI để không dùng nhầm compose.yaml",
+			Why:  fmt.Sprintf("backup dùng %s, đồng bộ trả về %s", composePath, syncedPath),
+			Next: "Đặt biến GENH_COMPOSE_FILE trỏ đúng một tệp compose.yaml rồi thử lại `genh update`.",
+		}
+	}
 
 	// 2. Di trú dữ liệu /tmp/gh-objects (v0.1.0, container KHÔNG có volume)
 	// sang volume gh_objects (v0.1.1+) NẾU máy này còn container cũ kiểu đó
@@ -185,9 +217,13 @@ func RunUpdate(ctx context.Context, env *Env, opts UpdateOptions, deps UpdateDep
 		})
 	}
 
-	// 5. Khởi động lại theo thứ tự (Compose tự áp depends_on).
+	// 5. Khởi động lại theo thứ tự (Compose tự áp depends_on). --remove-orphans
+	// dọn container của service KHÔNG CÒN trong compose.yaml hiện tại — cần
+	// cho máy cài từ v0.1.0 (còn container MinIO "objects" cũ) nâng cấp lên
+	// bản đã bỏ MinIO, xem docs/reports/HANDOFF-v0.1.1.md mục "Lỗi cần sửa"
+	// #5 của v0.1.2. Vô hại với máy đã ở bản mới (không có orphan để dọn).
 	_, _ = fmt.Fprintln(out, "5/5 Khởi động lại dịch vụ…")
-	upArgs := compose.BaseArgs(composePath, "up", "-d")
+	upArgs := compose.BaseArgs(composePath, "up", "-d", "--remove-orphans")
 	if _, err := runner.Output(ctx, dockercli.Cmd{Name: "docker", Args: upArgs, Env: envOverlay, Dir: dir}); err != nil {
 		return rollbackAndWrap(ctx, runner, composePath, envOverlay, dir, key, objectsHostDir, out, &OpError{
 			Code: ErrCodeUpdateRestartFailed,
@@ -269,8 +305,23 @@ func resolveUpdateServices(cf compose.File) (pullable, skipped []string) {
 // healthy), restore sẽ không tìm thấy khoá backup nếu không seed lại trước.
 // Seed lại LUÔN vô hại nếu container cũ vẫn còn nguyên (chưa qua "up -d") —
 // chỉ ghi đè bằng đúng dữ liệu đã có.
+//
+// KHÔI PHỤC compose.yaml (SỬA LỖI mục #3 v0.1.2): composePath đến đây có thể
+// đã được đồng bộ lên bản MỚI (bước 1.5 trong RunUpdate, chạy ngay sau backup
+// — mọi lỗi rollbackAndWrap xử lý đều xảy ra SAU bước đó). Dữ liệu vừa
+// restoreInContainer khôi phục lại là snapshot chụp DƯỚI compose.yaml CŨ
+// (bước 1/5, trước khi đồng bộ), nên trước khi restore + up lại, PHẢI khôi
+// phục compose.yaml về đúng bản CŨ đó (compose.yaml.bak, do
+// compose.LocateAndSync tự giữ lại — xem restoreComposeFromBackupIfAny) để
+// container khởi động lại khớp với đúng dữ liệu vừa restore, và
+// --remove-orphans (bên dưới) so khớp đúng compose.yaml CŨ (không xoá nhầm
+// service chỉ compose.yaml CŨ mới có, ví dụ MinIO "objects" của v0.1.0).
 func rollbackAndWrap(ctx context.Context, runner dockercli.Runner, composePath string, envOverlay []string, dir, key, objectsHostDir string, out io.Writer, original *OpError) error {
 	_, _ = fmt.Fprintf(out, "LỖI (%s) — đang tự động rollback về backup %s…\n", original.Code, key)
+
+	if err := restoreComposeFromBackupIfAny(composePath); err != nil {
+		_, _ = fmt.Fprintf(out, "     (không khôi phục được compose.yaml về bản trước khi đồng bộ — %v; rollback tiếp tục với compose.yaml hiện tại)\n", err)
+	}
 
 	if objectsHostDir != "" {
 		if err := seedObjectsVolume(ctx, runner, composePath, envOverlay, dir, objectsHostDir); err != nil {
@@ -280,7 +331,7 @@ func rollbackAndWrap(ctx context.Context, runner dockercli.Runner, composePath s
 
 	restoreErr := restoreInContainer(ctx, runner, composePath, envOverlay, dir, key)
 	var restartErr error
-	upArgs := compose.BaseArgs(composePath, "up", "-d")
+	upArgs := compose.BaseArgs(composePath, "up", "-d", "--remove-orphans")
 	if _, err := runner.Output(ctx, dockercli.Cmd{Name: "docker", Args: upArgs, Env: envOverlay, Dir: dir}); err != nil {
 		restartErr = err
 	}
@@ -318,6 +369,33 @@ func rollbackAndWrap(ctx context.Context, runner dockercli.Runner, composePath s
 		Next: next.String(),
 		Err:  original.Err,
 	}
+}
+
+// restoreComposeFromBackupIfAny khôi phục compose.yaml tại composePath về
+// đúng nội dung của composePath+".bak" (tệp compose.LocateAndSync/
+// syncEmbeddedCompose tự ghi TRƯỚC khi đồng bộ, giữ nguyên bản cũ — xem
+// internal/compose/locate.go) — dùng bởi rollbackAndWrap để đưa compose.yaml
+// về đúng bản đã dùng lúc backup TRƯỚC KHI restore dữ liệu + up lại (mục #3
+// v0.1.2). KHÔNG lỗi nếu không có .bak (đồng bộ ở bước 1.5 không đổi gì —
+// genh hiện tại cùng bản với lần cài/cập nhật trước, compose.yaml đã đúng
+// sẵn, không có gì để khôi phục).
+func restoreComposeFromBackupIfAny(composePath string) error {
+	bak := composePath + ".bak"
+	data, err := os.ReadFile(bak)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("đọc %s: %w", bak, err)
+	}
+	tmp := composePath + ".rollback-tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return fmt.Errorf("ghi %s: %w", tmp, err)
+	}
+	if err := os.Rename(tmp, composePath); err != nil {
+		return fmt.Errorf("đổi tên %s -> %s: %w", tmp, composePath, err)
+	}
+	return nil
 }
 
 // waitReady gọi GET url lặp lại cho tới khi nhận 200, hoặc hết timeout —

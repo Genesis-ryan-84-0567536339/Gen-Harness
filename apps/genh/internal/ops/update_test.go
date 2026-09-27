@@ -8,6 +8,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +17,7 @@ import (
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/compose"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/dockercli"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/dockercli/fake"
+	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/secretgen"
 )
 
 // updateTestComposeYAML phản ánh đúng dạng thật của deploy/compose.yaml:
@@ -486,6 +489,142 @@ func TestRunUpdate_RollbackAfterUpReSeedsVolumeBeforeRestore(t *testing.T) {
 	}
 	if seedIdx > restoreIdx {
 		t.Errorf("chép vào volume (idx %d) phải chạy TRƯỚC restore (idx %d)", seedIdx, restoreIdx)
+	}
+}
+
+// realComposeUpdateEnv dựng một *Env KHÔNG tiêm locate/locateSync giả — đi
+// thẳng qua compose.Locate/LocateAndSync THẬT (khác testEnv, dùng cho các
+// test ở trên chỉ cần fake.Runner, không cần compose.yaml GENH QUẢN LÝ được
+// đồng bộ/backup thật trên đĩa) — dùng để kiểm mục #3 v0.1.2 (thứ tự backup
+// trước khi đồng bộ compose.yaml, và rollback khôi phục đúng compose.yaml
+// cũ từ .bak).
+func realComposeUpdateEnv(t *testing.T, yaml string) (env *Env, composePath string) {
+	t.Helper()
+	// Compose.Locate/LocateAndSync đọc GENH_COMPOSE_FILE trước mọi candidate
+	// khác — đảm bảo biến này rỗng để không lỡ trỏ vào một compose.yaml khác
+	// ngoài ý muốn (ví dụ do máy chạy test đã có sẵn biến này).
+	t.Setenv(compose.EnvOverrideVar, "")
+
+	installDir := t.TempDir()
+	composePath = filepath.Join(installDir, "deploy", "compose.yaml")
+	if err := os.MkdirAll(filepath.Dir(composePath), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(composePath, []byte(yaml), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if _, err := secretgen.Ensure(filepath.Join(installDir, "config")); err != nil {
+		t.Fatalf("secretgen.Ensure: %v", err)
+	}
+	return &Env{InstallDir: installDir, Port: 18443}, composePath
+}
+
+// TestRunUpdate_BackupRunsBeforeComposeSync_ThenSyncsAndKeepsBak kiểm mục #3
+// v0.1.2: bước 1 (backup) phải chạy với ĐÚNG compose.yaml đang có trên đĩa
+// (bản cũ, TRƯỚC khi đồng bộ với bản nhúng của binary genh đang chạy) —
+// không phải bản vừa bị RunUpdate ghi đè trước khi backup, như hành vi lỗi
+// cũ (LocatePathSync gọi ngay đầu hàm). Sau khi cập nhật xong, compose.yaml
+// phải đã đồng bộ (khác nội dung cũ, vì updateTestComposeYAML chắc chắn khác
+// bản nhúng thật) và giữ bản cũ ở compose.yaml.bak.
+func TestRunUpdate_BackupRunsBeforeComposeSync_ThenSyncsAndKeepsBak(t *testing.T) {
+	env, composePath := realComposeUpdateEnv(t, updateTestComposeYAML)
+	_, port := listenReadyServer(t, true)
+	env.Port = port
+
+	var contentAtBackupTime string
+	fr := &fake.Runner{Responses: []fake.Response{
+		{
+			Match: func(cmd dockercli.Cmd) bool {
+				matched := fake.MatchArgsContain("exec", "-T", "api", "python", "-m", "gh.backup", "run")(cmd)
+				if matched {
+					data, err := os.ReadFile(composePath)
+					if err != nil {
+						t.Fatalf("đọc compose.yaml lúc backup: %v", err)
+					}
+					contentAtBackupTime = string(data)
+				}
+				return matched
+			},
+			Lines: []string{updateTestBackupLine},
+		},
+		{Match: fake.MatchArgsContain("pull"), Output: []byte("")},
+		{Match: fake.MatchArgsContain("run", "--rm", "-T", "--no-deps", "migrate"), Lines: []string{}},
+		{Match: fake.MatchArgsContain("up", "-d"), Output: []byte("")},
+	}}
+
+	var out strings.Builder
+	if err := RunUpdate(context.Background(), env, UpdateOptions{}, fastUpdateDeps(fr), &out); err != nil {
+		t.Fatalf("RunUpdate: %v", err)
+	}
+
+	if contentAtBackupTime != updateTestComposeYAML {
+		t.Errorf("backup phải chạy với compose.yaml CŨ (chưa đồng bộ), được:\n%s", contentAtBackupTime)
+	}
+
+	after, err := os.ReadFile(composePath)
+	if err != nil {
+		t.Fatalf("đọc compose.yaml sau khi cập nhật: %v", err)
+	}
+	if string(after) == updateTestComposeYAML {
+		t.Error("compose.yaml phải được đồng bộ với bản nhúng SAU KHI backup xong, nhưng vẫn còn nguyên bản cũ")
+	}
+
+	bak, err := os.ReadFile(composePath + ".bak")
+	if err != nil {
+		t.Fatalf("phải giữ bản cũ ở compose.yaml.bak sau khi đồng bộ: %v", err)
+	}
+	if string(bak) != updateTestComposeYAML {
+		t.Error("compose.yaml.bak phải đúng nội dung CŨ (bản đã dùng lúc backup)")
+	}
+}
+
+// TestRunUpdate_RollbackRestoresOldComposeBeforeUpAndRemovesOrphans kiểm mục
+// #3 + #5 v0.1.2: khi một bước SAU đồng bộ compose.yaml thất bại (ở đây:
+// dịch vụ không bao giờ sẵn sàng), rollback phải khôi phục compose.yaml về
+// ĐÚNG bản CŨ (từ .bak) TRƯỚC KHI restore dữ liệu + `up -d`, và lệnh `up -d`
+// của rollback phải có --remove-orphans (dọn container không còn trong
+// compose.yaml — nhưng vì compose.yaml lúc "up -d" rollback là bản CŨ, không
+// được xoá nhầm service chỉ bản CŨ mới có).
+func TestRunUpdate_RollbackRestoresOldComposeBeforeUpAndRemovesOrphans(t *testing.T) {
+	env, composePath := realComposeUpdateEnv(t, updateTestComposeYAML)
+	_, port := listenReadyServer(t, false) // luôn 503 -> rollback sau khi "up -d" chính đã chạy
+	env.Port = port
+
+	fr := updateHappyFakeRunner()
+	fr.Responses = append(fr.Responses, fake.Response{
+		Match: fake.MatchArgsContain("exec", "-T", "api", "python", "-m", "gh.backup", "restore", "--key"), Output: []byte(""),
+	})
+
+	err := RunUpdate(context.Background(), env, UpdateOptions{}, fastUpdateDeps(fr), &strings.Builder{})
+	opErr, ok := err.(*OpError)
+	if !ok {
+		t.Fatalf("lỗi phải là *OpError, được %T (%v)", err, err)
+	}
+	if opErr.Code != ErrCodeUpdateRolledBack {
+		t.Errorf("Code = %q, muốn %q", opErr.Code, ErrCodeUpdateRolledBack)
+	}
+
+	after, err := os.ReadFile(composePath)
+	if err != nil {
+		t.Fatalf("đọc compose.yaml sau rollback: %v", err)
+	}
+	if string(after) != updateTestComposeYAML {
+		t.Errorf("rollback phải khôi phục compose.yaml về đúng bản CŨ đã dùng lúc backup, được:\n%s", after)
+	}
+
+	var rollbackUpArgs []string
+	upCount := 0
+	for _, c := range fr.Calls {
+		if hasExactArgs(c.Cmd.Args, "up", "-d") {
+			upCount++
+			rollbackUpArgs = c.Cmd.Args // lần cuối cùng là của rollback (lần chính đã chạy trước đó)
+		}
+	}
+	if upCount < 2 {
+		t.Fatalf("phải có ít nhất 2 lần `up -d` (chính + rollback), được %d: %+v", upCount, fr.Calls)
+	}
+	if !hasExactArgs(rollbackUpArgs, "--remove-orphans") {
+		t.Errorf("`up -d` của rollback phải có --remove-orphans, được %v", rollbackUpArgs)
 	}
 }
 

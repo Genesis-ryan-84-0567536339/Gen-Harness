@@ -20,6 +20,9 @@ if (-not $InstallRoot) {
     $InstallRoot = Join-Path $env:LOCALAPPDATA 'GenHarness'
 }
 $BinDir = Join-Path $InstallRoot 'bin'
+# SecretsFile: dung config.Paths.ConfigDir()/secrets.json ma secretgen.Ensure
+# ghi o Buoc 4 - co nghia may nay DA co mot ban cai (xem Main() ben duoi).
+$SecretsFile = Join-Path (Join-Path $InstallRoot 'config') 'secrets.json'
 
 function Write-Log {
     param([string]$Message)
@@ -125,8 +128,18 @@ function Main {
         $env:Path = "$BinDir;$env:Path"
 
         Write-Log "da cai vao $finalPath - mo cua so PowerShell moi de PATH co hieu luc lau dai."
-        & $finalPath install
-        $exitCode = $LASTEXITCODE
+
+        # Muc #1 v0.1.3 (docs/reports/HANDOFF-v0.1.1.md): may DA CAI thi KHONG
+        # chay "genh install" nua (se dung lai container, bo qua backup).
+        if (Test-Path -Path $SecretsFile -PathType Leaf) {
+            Write-Log "may nay da cai Gen-Harness tu truoc - CHI vua cap nhat genh, CHUA dung gi toi dich vu dang chay."
+            Write-Log "chay 'genh update' de nang cap an toan, hoac 'genh install' neu lan cai truoc chua xong han."
+            $exitCode = 0
+        }
+        else {
+            & $finalPath install
+            $exitCode = $LASTEXITCODE
+        }
     }
     finally {
         Remove-Item -Path $tmpDir -Recurse -Force -ErrorAction SilentlyContinue

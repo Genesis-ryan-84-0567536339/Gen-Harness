@@ -33,6 +33,7 @@ const (
 	ErrCodeUpdateNotReady             = "GH-E944"
 	ErrCodeUpdateRolledBack           = "GH-E945" // một bước ở trên lỗi VÀ rollback đã tự chạy (thành công hoặc không)
 	ErrCodeUpdateObjectsMigrateFailed = "GH-E946" // di trú /tmp/gh-objects (bản cài cũ) -> volume gh_objects thất bại (xem migrateobjects.go)
+	ErrCodeUpdateComposeSyncFailed    = "GH-E947" // đồng bộ compose.yaml với bản genh mới thất bại SAU KHI backup đã xong — chưa đụng pull/migrate/restart
 
 	// 95x — genh backup / genh restore.
 	ErrCodeBackupFailed  = "GH-E950"

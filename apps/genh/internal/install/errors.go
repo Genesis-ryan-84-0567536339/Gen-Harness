@@ -16,6 +16,13 @@ const (
 
 	ErrCodeSecretsWriteFailed = "GH-E010"
 
+	// ErrCodeAlreadyInstalled: `genh install` tự phát hiện máy ĐÃ có một bản
+	// cài hoàn chỉnh (xem DetectExistingInstall trong detect.go) — dừng lại
+	// TRƯỚC KHI chạy bất kỳ Bước nào, trừ khi có cờ --force. Không thuộc dải
+	// nào ở trên (không phải lỗi CỦA một Bước cụ thể — xảy ra trước cả Bước
+	// 1) nhưng dùng chung dải 0xx vì cùng là kiểm tra trước khi cài.
+	ErrCodeAlreadyInstalled = "GH-E006"
+
 	// 2x — Bước 2 (Chuẩn bị container runtime).
 	ErrCodeRuntimeUnsupportedOS      = "GH-E020" // GOOS không nằm trong 3 nền tảng có tự cài runtime
 	ErrCodeRuntimeDownloadFailed     = "GH-E021" // tải Docker Engine tĩnh/Colima/Lima/rootfs WSL thất bại

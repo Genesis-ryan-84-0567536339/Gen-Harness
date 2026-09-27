@@ -150,6 +150,24 @@ func EnvOverlay(b secretgen.Bundle) []string {
 		// x-app-env, agent Python (apps/api/gh/backup.py) dùng để mã hoá bytes
 		// backup, độc lập với GH_MASTER_KEY.
 		"GH_BACKUP_KEY=" + b.BackupKey,
+		// MINIO_ROOT_USER/MINIO_ROOT_PASSWORD: MinIO đã BỊ BỎ khỏi
+		// compose.yaml từ v0.1.1 (xem docs/reports/HANDOFF-v0.1.1.md), và
+		// secretgen.Bundle không còn trường nào cho MinIO — nhưng compose.yaml
+		// CŨ (v0.1.0) còn nằm nguyên trên đĩa những máy CHƯA qua `genh
+		// update`/`genh install` mới (compose.yaml chỉ được ĐỒNG BỘ bởi hai
+		// lệnh đó, xem compose.LocateAndSync), và tệp đó có
+		// ${MINIO_ROOT_PASSWORD:?...} BẮT BUỘC. Compose CLI nội suy TOÀN BỘ
+		// tệp (kể cả service không được "up") trước khi chạy BẤT KỲ subcommand
+		// nào, nên thiếu biến này làm MỌI lệnh `docker compose` (kể cả `genh
+		// status`) lỗi ngay ở bước nội suy, dù MinIO không còn được dùng thật
+		// (SỬA LỖI docs/reports/HANDOFF-v0.1.1.md mục "Lỗi cần sửa" #4 của
+		// v0.1.3, đã tái hiện: "required variable MINIO_ROOT_PASSWORD is
+		// missing"). Giá trị dưới đây chỉ để COMPOSE CŨ NỘI SUY ĐƯỢC — không
+		// dịch vụ nào thật sự đọc chúng (compose.yaml MỚI không còn khai
+		// service MinIO), và giá trị không rỗng để khớp cú pháp ":?" (bắt buộc
+		// KHÁC RỖNG, không phải chỉ "đã đặt").
+		"MINIO_ROOT_USER=unused-minio-removed-v0.1.1",
+		"MINIO_ROOT_PASSWORD=unused-minio-removed-v0.1.1",
 	}
 	return append(env, pgtune.DetectAndCompute().EnvPairs()...)
 }
