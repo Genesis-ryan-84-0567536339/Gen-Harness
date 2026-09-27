@@ -10,6 +10,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ── version ──────────────────────────────────────────────────────────────
+  # Kiểm nhanh tệp VERSION ở gốc repo đúng định dạng — job meta của
+  # release.yml đọc CHÍNH tệp này để tự phát hành khi merge vào main (xem
+  # docs/handoff/05-installer.md mục "Phát hành"); VERSION sai định dạng
+  # phải fail ngay ở PR, không để tới lúc release.yml chạy trên main mới
+  # phát hiện.
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Kiểm VERSION đúng định dạng vMAJOR.MINOR.PATCH[-PRERELEASE]
+        run: |
+          set -euo pipefail
+          if [ ! -f VERSION ]; then
+            echo "::error::thiếu tệp VERSION ở gốc repo" >&2
+            exit 1
+          fi
+          version="$(tr -d '[:space:]' <VERSION)"
+          if ! printf '%s' "$version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
+            echo "::error::VERSION không đúng định dạng vMAJOR.MINOR.PATCH[-PRERELEASE]: '$version'" >&2
+            exit 1
+          fi
+          echo "VERSION hợp lệ: $version"
+
   api:
     runs-on: ubuntu-latest
     services:
