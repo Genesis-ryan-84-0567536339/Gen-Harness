@@ -14,10 +14,18 @@ type Paths struct {
 	Root string
 }
 
+// EnvRoot là biến môi trường chỉ định gốc cài đặt — install.sh/install.ps1
+// đặt binary genh theo biến này, nên genh cũng phải dùng đúng gốc đó.
+const EnvRoot = "GEN_HARNESS_HOME"
+
 // DefaultRoot trả về thư mục gốc cài đặt mặc định của genh:
+//   - $GEN_HARNESS_HOME nếu có đặt
 //   - Windows: %LOCALAPPDATA%\GenHarness
 //   - Linux/macOS: ~/.gen-harness
 func DefaultRoot() (string, error) {
+	if v := os.Getenv(EnvRoot); v != "" {
+		return v, nil
+	}
 	if runtime.GOOS == "windows" {
 		if v := os.Getenv("LOCALAPPDATA"); v != "" {
 			return filepath.Join(v, "GenHarness"), nil
