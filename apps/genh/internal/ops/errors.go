@@ -26,12 +26,13 @@ const (
 
 	// 94x — genh update (khung backup → pull → migrate → restart → healthcheck,
 	// rollback tự động khi bất kỳ bước nào lỗi).
-	ErrCodeUpdateBackupFailed  = "GH-E940"
-	ErrCodeUpdatePullFailed    = "GH-E941"
-	ErrCodeUpdateMigrateFailed = "GH-E942"
-	ErrCodeUpdateRestartFailed = "GH-E943"
-	ErrCodeUpdateNotReady      = "GH-E944"
-	ErrCodeUpdateRolledBack    = "GH-E945" // một bước ở trên lỗi VÀ rollback đã tự chạy (thành công hoặc không)
+	ErrCodeUpdateBackupFailed         = "GH-E940"
+	ErrCodeUpdatePullFailed           = "GH-E941"
+	ErrCodeUpdateMigrateFailed        = "GH-E942"
+	ErrCodeUpdateRestartFailed        = "GH-E943"
+	ErrCodeUpdateNotReady             = "GH-E944"
+	ErrCodeUpdateRolledBack           = "GH-E945" // một bước ở trên lỗi VÀ rollback đã tự chạy (thành công hoặc không)
+	ErrCodeUpdateObjectsMigrateFailed = "GH-E946" // di trú /tmp/gh-objects (bản cài cũ) -> volume gh_objects thất bại (xem migrateobjects.go)
 
 	// 95x — genh backup / genh restore.
 	ErrCodeBackupFailed  = "GH-E950"

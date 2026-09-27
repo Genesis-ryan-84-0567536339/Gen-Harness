@@ -3,9 +3,17 @@ package compose
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 )
+
+// NoticeWriter là nơi Locate (biến thể KHÔNG đồng bộ, xem doc-comment của
+// Locate/LocateAndSync bên dưới) in dòng nhắc một-dòng khi phát hiện
+// compose.yaml GENH QUẢN LÝ đã lệch bản nhúng của binary đang chạy — mặc
+// định os.Stderr, đổi được trong test để bắt output mà không cần ghi ra
+// stderr thật.
+var NoticeWriter io.Writer = os.Stderr
 
 // EnvOverrideVar cho phép chỉ thẳng đường dẫn compose.yaml, bỏ qua dò tìm —
 // dùng khi test hoặc khi Owner cài từ một bản sao repo không theo cấu trúc
@@ -56,26 +64,49 @@ func ascendingCandidates(start string, maxUp int) []string {
 }
 
 // Locate tìm deploy/compose.yaml thật trên máy theo thứ tự SearchCandidates,
-// trả về đường dẫn đầu tiên tồn tại. Nếu không tìm thấy ở đâu cả (trường hợp
-// thật: genh chạy độc lập trên máy Owner, không có checkout repo gần đó),
-// rơi về ghi compose.yaml NHÚNG SẴN trong binary (embeddedComposeYAML, xem
-// embed.go) ra "<installDir>/deploy/compose.yaml" rồi trả về đường dẫn đó —
-// CHỈ khi installDir khác rỗng (không có installDir thì không biết ghi vào
-// đâu, giữ nguyên lỗi cũ).
-//
-// ĐỒNG BỘ tệp GENH QUẢN LÝ (SỬA LỖI): candidate "<installDir>/deploy/
-// compose.yaml" khác mọi candidate khác ở chỗ CHÍNH genh đã ghi ra nó (lần
-// cài đầu, hoặc lần Locate trước đó của một bản genh cũ hơn) — không phải
-// một checkout repo Owner tự quản lý. Vì vậy, MỖI LẦN candidate này đã tồn
-// tại, Locate tự đối chiếu với bản nhúng CỦA CHÍNH BINARY ĐANG CHẠY và ghi
-// lại (giữ bản cũ ở "compose.yaml.bak") nếu khác — trước đây chỉ ghi khi
-// tệp CHƯA có, nên một Owner cài xong rồi tự nâng cấp genh (mang theo
-// compose.yaml nhúng mới hơn — image ghim digest mới, service mới…) không
-// bao giờ nhận được các thay đổi đó: `genh update` và mọi lệnh vận hành khác
-// vẫn dùng compose.yaml CŨ mãi mãi (xem docs/reports/HANDOFF-v0.1.1.md mục
-// "Lỗi cần sửa" #5). Mọi candidate KHÁC (biến môi trường override, checkout
-// repo dò được qua cwd/exeDir) KHÔNG bao giờ bị đụng vào — đúng như trước.
+// trả về đường dẫn đầu tiên tồn tại — dùng cho MỌI lệnh vận hành ĐỌC compose
+// (status/open/logs/backup/…). KHÔNG tự ghi đè compose.yaml GENH QUẢN LÝ nếu
+// đã lệch bản nhúng của binary đang chạy — xem SỬA LỖI ở doc-comment
+// LocateAndSync; ở đây chỉ in một dòng nhắc qua NoticeWriter nếu phát hiện
+// lệch, để Owner biết chạy `genh update`. Nếu không tìm thấy ở đâu cả
+// (trường hợp thật: genh chạy độc lập trên máy Owner, không có checkout repo
+// gần đó), rơi về ghi compose.yaml NHÚNG SẴN trong binary (embeddedComposeYAML,
+// xem embed.go) ra "<installDir>/deploy/compose.yaml" rồi trả về đường dẫn đó
+// — CHỈ khi installDir khác rỗng VÀ tệp đó CHƯA từng tồn tại (không phải
+// đồng bộ lại — đó là việc của LocateAndSync).
 func Locate(installDir string) (string, error) {
+	return locate(installDir, false)
+}
+
+// LocateAndSync là biến thể của Locate CHỈ dùng trong `genh update` (và
+// `genh install`, xem internal/install) — hai lệnh có TRÁCH NHIỆM đưa máy
+// lên đúng phiên bản mới, khác mọi lệnh vận hành khác (status/open/logs/
+// backup/doctor/…) chỉ ĐỌC trạng thái hiện có.
+//
+// ĐỒNG BỘ tệp GENH QUẢN LÝ (SỬA LỖI docs/reports/HANDOFF-v0.1.1.md mục "Lỗi
+// cần sửa" #5): candidate "<installDir>/deploy/compose.yaml" khác mọi
+// candidate khác ở chỗ CHÍNH genh đã ghi ra nó (lần cài đầu, hoặc lần chạy
+// trước của một bản genh cũ hơn) — không phải một checkout repo Owner tự
+// quản lý. Vì vậy, mỗi lần candidate này đã tồn tại, LocateAndSync tự đối
+// chiếu với bản nhúng CỦA CHÍNH BINARY ĐANG CHẠY và ghi lại (giữ bản cũ ở
+// "compose.yaml.bak") nếu khác.
+//
+// SỬA LỖI TIẾP (v0.1.2, mục #3): bản v0.1.1 gọi hành vi đồng bộ này từ
+// NGAY TRONG Locate — chạy ở MỌI lệnh `genh ...` (kể cả `genh status`/`genh
+// logs`/`genh backup`…, vì mọi lệnh đều LocatePath() để biết compose.yaml ở
+// đâu), nên bất kỳ lệnh vận hành nào cũng có thể ÂM THẦM ghi đè compose.yaml
+// của Owner (kể cả compose.yaml Owner đã tự sửa tay) ngoài ý muốn, chỉ vì
+// binary genh đang chạy mang một bản nhúng khác. Từ bản này, CHỈ
+// LocateAndSync (update/install) mới thật sự ghi; Locate (mọi lệnh khác)
+// chỉ in một dòng nhắc.
+func LocateAndSync(installDir string) (string, error) {
+	return locate(installDir, true)
+}
+
+// locate là phần thân dùng chung của Locate/LocateAndSync — sync=true đồng
+// bộ compose.yaml GENH QUẢN LÝ đã lệch bản nhúng (ghi lại + giữ .bak),
+// sync=false chỉ in một dòng nhắc qua NoticeWriter nếu lệch, không đụng tệp.
+func locate(installDir string, sync bool) (string, error) {
 	cwd, _ := os.Getwd()
 	exeDir := ""
 	if exe, err := os.Executable(); err == nil {
@@ -93,8 +124,12 @@ func Locate(installDir string) (string, error) {
 			continue
 		}
 		if managedPath != "" && c == managedPath {
-			if err := syncEmbeddedCompose(managedPath); err != nil {
-				return "", fmt.Errorf("đồng bộ %s với bản nhúng mới: %w", managedPath, err)
+			if sync {
+				if err := syncEmbeddedCompose(managedPath); err != nil {
+					return "", fmt.Errorf("đồng bộ %s với bản nhúng mới: %w", managedPath, err)
+				}
+			} else {
+				noticeIfDrifted(managedPath)
 			}
 			return managedPath, nil
 		}
@@ -112,6 +147,18 @@ func Locate(installDir string) (string, error) {
 	return "", fmt.Errorf(
 		"không tìm thấy deploy/compose.yaml (đã thử biến %s, %s/deploy/compose.yaml, dò lên từ thư mục hiện tại/thư mục chứa genh, và ghi bản nhúng sẵn) — đặt %s=/đường/dẫn/compose.yaml rồi chạy lại",
 		EnvOverrideVar, installDir, EnvOverrideVar)
+}
+
+// noticeIfDrifted in một dòng nhắc qua NoticeWriter nếu compose.yaml tại path
+// khác bản nhúng của binary đang chạy — im lặng bỏ qua lỗi đọc tệp (lỗi thật
+// nếu có sẽ lộ ra ngay sau đó khi lệnh gọi thật sự dùng compose.yaml).
+func noticeIfDrifted(path string) {
+	current, err := os.ReadFile(path)
+	if err != nil || bytes.Equal(current, embeddedComposeYAML) {
+		return
+	}
+	_, _ = fmt.Fprintf(NoticeWriter,
+		"Lưu ý: %s khác bản compose.yaml nhúng trong genh hiện tại — chạy `genh update` để đồng bộ.\n", path)
 }
 
 // writeEmbeddedCompose ghi compose.yaml nhúng sẵn ra path (tạo thư mục cha

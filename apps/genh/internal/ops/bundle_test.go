@@ -144,6 +144,21 @@ func bundleFile(t *testing.T, body string) string {
 
 const importTestBackupLine = "INFO:gh.backup:Backup mới: backups/20260925T110000Z-c0ffee12.pgcustom.enc (321 byte, CSDL gen_harness)"
 
+// importHappyFakeRunner dựng fake.Runner khớp đúng luồng MỚI của `genh
+// import` (mục #4/#5 v0.1.2 — xem doc-comment RunImport ở bundle.go):
+// backup -> chép ra host -> stop api/worker -> run import -> run migrate ->
+// up -d.
+func importHappyFakeRunner() *fake.Runner {
+	return &fake.Runner{Responses: []fake.Response{
+		{Match: fake.MatchArgsContain("exec", "-T", "api", "python", "-m", "gh.backup", "run"), Lines: []string{importTestBackupLine}},
+		{Match: fake.MatchArgsContain("exec", "-T", "api", "python", "-c"), Output: []byte("bytes-ma-hoa-gia")},
+		{Match: fake.MatchArgsContain("stop", "api", "worker"), Output: []byte("")},
+		{Match: fake.MatchArgsContain("gh.bundle", "import"), ExitCode: 0},
+		{Match: fake.MatchArgsContain("run", "--rm", "--no-deps", "-T", "migrate"), Lines: []string{}},
+		{Match: fake.MatchArgsContain("up", "-d"), Output: []byte("")},
+	}}
+}
+
 func TestRunImport_HappyPath_BacksUpThenImportsThenRestarts(t *testing.T) {
 	withBundlePassword(t, "mat-khau-du-dai-123")
 	composePath := testComposePath(t, "")
@@ -153,11 +168,7 @@ func TestRunImport_HappyPath_BacksUpThenImportsThenRestarts(t *testing.T) {
 	_, port := listenReadyServer(t, true)
 	env.Port = port
 
-	fr := &fake.Runner{Responses: []fake.Response{
-		{Match: fake.MatchArgsContain("exec", "-T", "api", "python", "-m", "gh.backup", "run"), Lines: []string{importTestBackupLine}},
-		{Match: fake.MatchArgsContain("gh.bundle", "import"), ExitCode: 0},
-		{Match: fake.MatchArgsContain("restart", "api", "worker"), Output: []byte("")},
-	}}
+	fr := importHappyFakeRunner()
 
 	var out strings.Builder
 	opts := ImportOptions{AutoApprove: true}
@@ -168,15 +179,54 @@ func TestRunImport_HappyPath_BacksUpThenImportsThenRestarts(t *testing.T) {
 	if !strings.Contains(out.String(), "backups/20260925T110000Z-c0ffee12.pgcustom.enc") {
 		t.Errorf("output phải nêu khoá backup an toàn, được %q", out.String())
 	}
+	if !strings.Contains(out.String(), "đã chép ra host") {
+		t.Errorf("output phải xác nhận đã chép backup an toàn ra host, được %q", out.String())
+	}
+
+	// Bản backup an toàn phải thật sự nằm trên host (installDir/data/...).
+	safetyFiles, _ := filepath.Glob(filepath.Join(env.InstallDir, "data", "import-safety-*"))
+	if len(safetyFiles) != 1 {
+		t.Fatalf("muốn đúng 1 tệp import-safety-* dưới installDir/data, được %v", safetyFiles)
+	}
+	if data, err := os.ReadFile(safetyFiles[0]); err != nil || string(data) != "bytes-ma-hoa-gia" {
+		t.Errorf("nội dung %s = %q, %v — muốn \"bytes-ma-hoa-gia\"", safetyFiles[0], data, err)
+	}
 
 	// Stdin của lệnh import phải đúng bytes tệp gói (đọc từ đầu, kể cả magic).
-	for _, c := range fr.Calls {
+	var sawStop, sawMigrate, sawUp bool
+	stopIdx, importIdx, migrateIdx, upIdx := -1, -1, -1, -1
+	for i, c := range fr.Calls {
 		if fake.MatchArgsContain("gh.bundle", "import")(c.Cmd) {
 			want := bundleMagic + "noi-dung-goi"
 			if string(c.Stdin) != want {
 				t.Errorf("stdin lệnh import = %q, muốn %q", c.Stdin, want)
 			}
+			importIdx = i
 		}
+		if hasExactArgs(c.Cmd.Args, "stop", "api", "worker") {
+			sawStop = true
+			stopIdx = i
+		}
+		if fake.MatchArgsContain("run", "--rm", "--no-deps", "-T", "migrate")(c.Cmd) {
+			sawMigrate = true
+			migrateIdx = i
+		}
+		if hasExactArgs(c.Cmd.Args, "up", "-d") {
+			sawUp = true
+			upIdx = i
+		}
+	}
+	if !sawStop {
+		t.Error("phải gọi `docker compose stop api worker` trước khi import (tránh api/worker vừa sống vừa bị pg_restore --clean xoá bảng)")
+	}
+	if !sawMigrate {
+		t.Error("phải chạy lại `alembic upgrade heads` (docker compose run migrate) NGAY sau import")
+	}
+	if !sawUp {
+		t.Error("phải `docker compose up -d` sau khi import + migrate")
+	}
+	if !(stopIdx < importIdx && importIdx < migrateIdx && migrateIdx < upIdx) {
+		t.Errorf("thứ tự lệnh sai: stop=%d import=%d migrate=%d up=%d, muốn tăng dần", stopIdx, importIdx, migrateIdx, upIdx)
 	}
 }
 
@@ -236,7 +286,10 @@ func TestRunImport_WrongPassword_ExitCode2_MapsToClearError(t *testing.T) {
 
 	fr := &fake.Runner{Responses: []fake.Response{
 		{Match: fake.MatchArgsContain("exec", "-T", "api", "python", "-m", "gh.backup", "run"), Lines: []string{importTestBackupLine}},
+		{Match: fake.MatchArgsContain("exec", "-T", "api", "python", "-c"), Output: []byte("bytes-ma-hoa-gia")},
+		{Match: fake.MatchArgsContain("stop", "api", "worker"), Output: []byte("")},
 		{Match: fake.MatchArgsContain("gh.bundle", "import"), ExitCode: 2},
+		{Match: fake.MatchArgsContain("up", "-d", "api", "worker"), Output: []byte("")},
 	}}
 
 	err := RunImport(context.Background(), env, bundlePath, ImportOptions{AutoApprove: true}, ImportDeps{Runner: fr}, strings.NewReader(""), &strings.Builder{})
@@ -250,6 +303,15 @@ func TestRunImport_WrongPassword_ExitCode2_MapsToClearError(t *testing.T) {
 	if !strings.Contains(opErr.Next, "backups/20260925T110000Z-c0ffee12.pgcustom.enc") {
 		t.Errorf("Next phải nhắc khôi phục từ backup an toàn, được %q", opErr.Next)
 	}
+	var sawRecoveryUp bool
+	for _, c := range fr.Calls {
+		if hasExactArgs(c.Cmd.Args, "up", "-d", "api", "worker") {
+			sawRecoveryUp = true
+		}
+	}
+	if !sawRecoveryUp {
+		t.Error("phải cố `docker compose up -d api worker` lại sau khi import lỗi (đã dừng ở bước 2/4)")
+	}
 }
 
 func TestRunImport_Incompatible_ExitCode3_MapsToClearError(t *testing.T) {
@@ -260,7 +322,10 @@ func TestRunImport_Incompatible_ExitCode3_MapsToClearError(t *testing.T) {
 
 	fr := &fake.Runner{Responses: []fake.Response{
 		{Match: fake.MatchArgsContain("exec", "-T", "api", "python", "-m", "gh.backup", "run"), Lines: []string{importTestBackupLine}},
+		{Match: fake.MatchArgsContain("exec", "-T", "api", "python", "-c"), Output: []byte("bytes-ma-hoa-gia")},
+		{Match: fake.MatchArgsContain("stop", "api", "worker"), Output: []byte("")},
 		{Match: fake.MatchArgsContain("gh.bundle", "import"), ExitCode: 3},
+		{Match: fake.MatchArgsContain("up", "-d", "api", "worker"), Output: []byte("")},
 	}}
 
 	err := RunImport(context.Background(), env, bundlePath, ImportOptions{AutoApprove: true}, ImportDeps{Runner: fr}, strings.NewReader(""), &strings.Builder{})
@@ -294,6 +359,75 @@ func TestRunImport_BackupFailsFirst_StopsBeforeTouchingAnything(t *testing.T) {
 	for _, c := range fr.Calls {
 		if fake.MatchArgsContain("gh.bundle", "import")(c.Cmd) {
 			t.Fatalf("KHÔNG được gọi gh.bundle import khi backup an toàn thất bại")
+		}
+	}
+}
+
+// TestRunImport_CopyBackupToHostFails_StopsBeforeStoppingContainers là test
+// cho mục #4/#5 v0.1.2: nếu chép bản backup an toàn ra host thất bại, PHẢI
+// dừng lại NGAY (chưa `docker compose stop api worker`, chưa đụng gì khác) —
+// bản backup trong ObjectStore container vẫn còn, nhưng KHÔNG có bản trên
+// host thì rollback không còn đáng tin nếu container sau đó bị thay.
+func TestRunImport_CopyBackupToHostFails_StopsBeforeStoppingContainers(t *testing.T) {
+	withBundlePassword(t, "mat-khau-du-dai-123")
+	composePath := testComposePath(t, "")
+	env := testEnv(t, composePath)
+	bundlePath := bundleFile(t, "x")
+
+	fr := &fake.Runner{Responses: []fake.Response{
+		{Match: fake.MatchArgsContain("exec", "-T", "api", "python", "-m", "gh.backup", "run"), Lines: []string{importTestBackupLine}},
+		{Match: fake.MatchArgsContain("exec", "-T", "api", "python", "-c"), Err: errors.New("container không phản hồi")},
+	}}
+
+	err := RunImport(context.Background(), env, bundlePath, ImportOptions{AutoApprove: true}, ImportDeps{Runner: fr}, strings.NewReader(""), &strings.Builder{})
+	opErr, ok := err.(*OpError)
+	if !ok {
+		t.Fatalf("lỗi phải là *OpError, được %T", err)
+	}
+	if opErr.Code != ErrCodeImportBackupFailed {
+		t.Errorf("Code = %q, muốn %q", opErr.Code, ErrCodeImportBackupFailed)
+	}
+	for _, c := range fr.Calls {
+		joined := strings.Join(c.Cmd.Args, " ")
+		if strings.Contains(joined, "stop") || strings.Contains(joined, "gh.bundle") {
+			t.Errorf("KHÔNG được stop container/import khi chép backup ra host đã thất bại, Calls=%+v", fr.Calls)
+		}
+	}
+}
+
+// TestRunImport_StopContainersFails_TriesRecoveryUpAndReportsBoth kiểm hành
+// vi "LỖI GIỮA CHỪNG" của RunImport: nếu `docker compose stop api worker`
+// thất bại, PHẢI cố `docker compose up -d api worker` lại NGAY, và nếu bước
+// cố gắng đó CŨNG thất bại, Next phải nói rõ CẢ HAI thất bại (không chỉ lỗi
+// gốc).
+func TestRunImport_StopContainersFails_TriesRecoveryUpAndReportsBoth(t *testing.T) {
+	withBundlePassword(t, "mat-khau-du-dai-123")
+	composePath := testComposePath(t, "")
+	env := testEnv(t, composePath)
+	bundlePath := bundleFile(t, "x")
+
+	fr := &fake.Runner{Responses: []fake.Response{
+		{Match: fake.MatchArgsContain("exec", "-T", "api", "python", "-m", "gh.backup", "run"), Lines: []string{importTestBackupLine}},
+		{Match: fake.MatchArgsContain("exec", "-T", "api", "python", "-c"), Output: []byte("bytes-ma-hoa-gia")},
+		{Match: fake.MatchArgsContain("stop", "api", "worker"), Err: errors.New("timeout dừng container")},
+		{Match: fake.MatchArgsContain("up", "-d", "api", "worker"), Err: errors.New("port đã bị chiếm")},
+	}}
+
+	var out strings.Builder
+	err := RunImport(context.Background(), env, bundlePath, ImportOptions{AutoApprove: true}, ImportDeps{Runner: fr}, strings.NewReader(""), &out)
+	opErr, ok := err.(*OpError)
+	if !ok {
+		t.Fatalf("lỗi phải là *OpError, được %T", err)
+	}
+	if !strings.Contains(opErr.Next, "CŨNG thất bại") {
+		t.Errorf("Next phải nói rõ cả nỗ lực khởi động lại CŨNG thất bại, được %q", opErr.Next)
+	}
+	if !strings.Contains(opErr.Next, "backups/20260925T110000Z-c0ffee12.pgcustom.enc") {
+		t.Errorf("Next vẫn phải nhắc khoá backup an toàn, được %q", opErr.Next)
+	}
+	for _, c := range fr.Calls {
+		if strings.Contains(strings.Join(c.Cmd.Args, " "), "gh.bundle") {
+			t.Error("KHÔNG được chạy gh.bundle import khi stop api/worker đã thất bại")
 		}
 	}
 }

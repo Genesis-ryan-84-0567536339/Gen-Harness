@@ -16,6 +16,10 @@ x-app-env: &app-env
   GH_MASTER_KEY_FILE: /run/secrets/gh_master_key
   GH_BRIDGE_KEY_FILE: /run/secrets/gh_bridge_key
   GH_SETUP_TOKEN: ${GH_SETUP_TOKEN:-}
+  # Khoá mã hoá riêng cho backup (khác GH_MASTER_KEY) — sinh ở Bước 4
+  # (secretgen.Bundle.BackupKey, hex 64 ký tự), agent Python (gh/backup.py)
+  # dùng để mã hoá bytes backup độc lập với khoá master của máy.
+  GH_BACKUP_KEY: ${GH_BACKUP_KEY:-}
 
 services:
   proxy:

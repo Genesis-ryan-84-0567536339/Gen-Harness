@@ -52,7 +52,10 @@ const caddyRootCertPath = "/data/caddy/pki/authorities/local/root.crt"
 type finalizeStep struct {
 	// runner cho phép tiêm dockercli.Runner giả khi test — nil dùng ExecRunner thật.
 	runner dockercli.Runner
-	// locate cho phép tiêm compose.Locate giả khi test — nil dùng compose.Locate.
+	// locate cho phép tiêm compose.LocateAndSync giả khi test — nil dùng
+	// compose.LocateAndSync (genh install CÓ trách nhiệm đồng bộ compose.yaml
+	// nhúng, khác Locate thường dùng ở internal/ops — xem doc-comment
+	// compose.LocateAndSync).
 	locate func(installDir string) (string, error)
 
 	// trustCA cho phép tiêm hàm giả khi test (tránh gọi sudo/security/certutil
@@ -76,7 +79,7 @@ func (s finalizeStep) Run(ctx context.Context, env *Env, rep Reporter) error {
 	}
 	locate := s.locate
 	if locate == nil {
-		locate = compose.Locate
+		locate = compose.LocateAndSync
 	}
 	trustCA := s.trustCA
 	if trustCA == nil {
