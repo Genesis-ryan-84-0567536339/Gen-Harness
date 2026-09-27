@@ -136,7 +136,7 @@ Lệnh vận hành (cờ chung mọi lệnh dưới đây: --port N, --install-d
   genh reset-setup [--yes]               sinh mã thiết lập mới (hỏi xác nhận trừ khi --yes)
   genh stop                              dừng toàn bộ dịch vụ (giữ dữ liệu)
   genh start                             khởi động lại toàn bộ dịch vụ
-  genh uninstall [--keep-data]           gỡ container/volume/lối tắt/PATH (hỏi xác nhận)
+  genh uninstall [--keep-data] [--yes]   gỡ container/volume/lối tắt/PATH (hỏi xác nhận trừ --yes)
   genh export --to <file>                xuất gói hồ sơ .ghbundle (hỏi mật khẩu ẩn 2 lần,
                                           hoặc biến GH_BUNDLE_PASSWORD cho script/test)
   genh import <file> [--yes]             nhập gói .ghbundle — GHI ĐÈ dữ liệu hiện tại (hỏi
@@ -519,6 +519,12 @@ func runStart(args []string) int {
 func runUninstall(args []string) int {
 	fs, port, installDir := opsFlagSet("uninstall")
 	keepData := fs.Bool("keep-data", false, "giữ lại dữ liệu (không xoá volume)")
+	// --yes: cần cho kịch bản không tương tác (CI e2e, script) — trước phiên
+	// này ops.UninstallOptions.AutoApprove chỉ dùng được từ test Go gọi thẳng
+	// RunUninstall, CLI không có cách bật (xem comment cũ ở
+	// internal/ops/uninstall.go). Đọc kỹ tài liệu (docs/handoff/05-installer.md
+	// mục "Lệnh vận hành") trước khi đổi mô tả cờ ở đó.
+	yes := fs.Bool("yes", false, "bỏ qua hỏi xác nhận (dùng cho script/CI không có TTY) — vẫn xoá dữ liệu như bình thường nếu không kèm --keep-data")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -526,7 +532,7 @@ func runUninstall(args []string) int {
 	if !ok {
 		return 1
 	}
-	opts := ops.UninstallOptions{KeepData: *keepData}
+	opts := ops.UninstallOptions{KeepData: *keepData, AutoApprove: *yes}
 	if err := ops.RunUninstall(context.Background(), env, opts, nil, os.Stdin, os.Stdout); err != nil {
 		reportOpErr(err)
 		return 1

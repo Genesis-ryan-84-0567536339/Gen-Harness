@@ -43,6 +43,8 @@ from typing import Any
 from urllib.parse import SplitResult, urlsplit, urlunsplit
 
 import orjson
+import psycopg
+from psycopg import sql
 from sqlalchemy import text
 
 from gh import crypto
@@ -95,6 +97,25 @@ def libpq_url(database_url: str, *, database: str | None = None) -> str:
 
 def database_name(database_url: str) -> str:
     return urlsplit(libpq_url(database_url)).path.lstrip("/")
+
+
+def recreate_database(pg_url: str) -> None:
+    """Xoá hẳn CSDL đích (ngắt mọi kết nối — `WITH (FORCE)`, Postgres 13+) rồi tạo lại RỖNG, trước `pg_restore`.
+
+    Vì sao không dùng `pg_restore --clean` trên CSDL đang có dữ liệu: các bảng phân vùng (pg_partman — raw.events,
+    ops.action_log, agent.model_calls…) làm `--clean` thử `DROP CONSTRAINT` trên từng phân vùng con trước bảng cha
+    → hàng chục lỗi "cannot drop inherited constraint" và pg_restore thoát ≠ 0 (phát hiện ở e2e cài thật:
+    `genh import`, và cả rollback của `genh update` vì dùng chung `restore_backup`). CSDL không có cấu hình cấp
+    database riêng (không `ALTER DATABASE … SET` trong migration) nên xoá/tạo lại không mất gì ngoài dữ liệu sẽ được
+    nạp lại; quyền của role `gh_app` trên schema/bảng nằm trong bản dump (GRANT) nên được khôi phục cùng.
+    """
+    parts = urlsplit(pg_url)
+    db_name = parts.path.lstrip("/")
+    maintenance_url = urlunsplit(parts._replace(path="/postgres"))
+    with psycopg.connect(maintenance_url, autocommit=True) as conn:
+        conn.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(db_name)))
+        conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(db_name)))
+    log.info("Đã tạo lại CSDL rỗng %s trước khi phục hồi", db_name)
 
 
 # ─── khoá riêng cho backup (`GH_BACKUP_KEY`, hex 64 ký tự = 32 byte) — HANDOFF-v0.1.2 mục 1 ─────────────────
@@ -246,12 +267,12 @@ async def prune(*, store: ObjectStore | None = None, entries: list[BackupEntry] 
 
 async def restore_backup(key: str, *, database_url: str | None = None, target_database: str | None = None,
                          store: ObjectStore | None = None) -> None:
-    """Giải mã bản backup `key`, `pg_restore --clean --if-exists` thật vào CSDL đích.
+    """Giải mã bản backup `key`, tạo lại CSDL đích rỗng (`recreate_database`) rồi `pg_restore` thật vào đó.
 
     `target_database`: tên CSDL khác CSDL đang cấu hình — dùng khi test round-trip để không đụng CSDL đang
     dùng (spec 5.6 yêu cầu rõ điều này).
     """
-    # pg_restore --clean cần DROP/CREATE trên mọi object (quyền chủ sở hữu) → luôn qua superuser.
+    # Xoá/tạo lại CSDL + pg_restore cần quyền superuser → luôn qua URL quản trị.
     database_url = database_url or get_settings().effective_admin_database_url
     store = store or get_object_store()
     enc = await store.get(key)
@@ -265,7 +286,8 @@ async def restore_backup(key: str, *, database_url: str | None = None, target_da
     with tempfile.TemporaryDirectory(prefix="gh-restore-") as tmp:
         dump_path = Path(tmp) / "dump.pgcustom"
         dump_path.write_bytes(raw)
-        await _run(["pg_restore", "--clean", "--if-exists", "--no-owner", "--dbname", dest, str(dump_path)])
+        await asyncio.to_thread(recreate_database, dest)
+        await _run(["pg_restore", "--no-owner", "--dbname", dest, str(dump_path)])
     log.info("Đã khôi phục %s vào %s", key, target_database or database_name(database_url))
 
 

@@ -1,0 +1,455 @@
+name: E2E cài đặt thật
+
+# Installer-matrix.yml chỉ smoke-test binary (genh version/help), KHÔNG cài
+# dịch vụ thật (deploy/compose.yaml build cục bộ, không có ảnh publish sẵn ở
+# nhánh thường — xem comment trong file đó). Workflow NÀY là lần kiểm THẬT
+# duy nhất: cài toàn bộ Gen-Harness bằng Docker trên runner ubuntu-24.04
+# (Docker có sẵn) — xem docs/handoff/05-installer.md mục "Kiểm thử trình
+# cài": "Mỗi ô: cài sạch → /api/ready xanh → genh update → genh uninstall".
+#
+# Ba cách kích hoạt, HAI chế độ:
+#   - workflow_run (workflow "Release" chạy xong, thành công) hoặc
+#     workflow_dispatch (input `tag` tuỳ chọn) → CHẾ ĐỘ "release": kiểm bằng
+#     install.sh + asset THẬT của bản phát hành (mặc định bản mới nhất, hoặc
+#     đúng tag Owner chỉ định).
+#   - pull_request/push đổi apps/genh/**, deploy/**, install.sh → CHẾ ĐỘ
+#     "pr": build genh TỪ SOURCE (đúng commit đang xét, bắt lỗi code genh
+#     sớm) nhưng NHÚNG deploy/compose.release.yaml của bản phát hành GẦN
+#     NHẤT (ảnh api/web/bridge/db ĐÃ publish lên GHCR) vào binary — giống hệt
+#     bước "Ghim compose.yaml đã publish vào binary" của release.yml (job
+#     build-genh) — để không phải tự build 4 ảnh docker đa kiến trúc trong
+#     CI này (image build/push đã có job riêng ở release.yml, kiểm lại ở đây
+#     là thừa và tốn nhiều phút chờ).
+#
+# THÀNH THẬT: bước "tạo dữ liệu mẫu" (mục 4 trong kế hoạch) chỉ gọi được
+# `POST /api/v1/setup/steps/1` (bước 1 của trình thiết lập 12 bước, xem
+# apps/api/gh/setup/routes.py — bước này là DUY NHẤT không cần tài khoản
+# Owner, chỉ cần setup_token) ở chế độ mode=sample — các bước 2 trở đi cần
+# tạo tài khoản Owner + PIN + tổ chức thật, kết nối kênh Zalo bằng QR (không
+# tự động hoá được trong CI, cần con người quét mã) nên KHÔNG làm ở đây, xem
+# ghi chú ngay tại bước đó bên dưới.
+on:
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag bản phát hành để kiểm (bỏ trống = bản mới nhất trên GitHub Releases)"
+        required: false
+        type: string
+  pull_request:
+    paths:
+      - "apps/genh/**"
+      - "deploy/**"
+      - "install.sh"
+  push:
+    branches: [main, "claude/**"]
+    paths:
+      - "apps/genh/**"
+      - "deploy/**"
+      - "install.sh"
+
+concurrency:
+  group: e2e-install-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ── e2e-install ──────────────────────────────────────────────────────────
+  # Luồng chính (mục 1-10 trong kế hoạch bàn giao): cài sạch, chờ ready,
+  # status, dữ liệu mẫu (best-effort), backup, export/import, update,
+  # auto-update enable/status/disable, uninstall — log docker compose luôn
+  # in ra dù bước nào lỗi (if: always()).
+  e2e-install:
+    name: cài đặt thật đầu-cuối (chế độ ${{ github.event_name == 'pull_request' && 'pr' || (github.event_name == 'push' && 'pr' || 'release') }})
+    runs-on: ubuntu-24.04
+    # Chạy ngoài checkout repo: genh tìm compose.yaml theo cwd trước — trong repo
+    # nó sẽ dùng deploy/compose.yaml (build cục bộ) thay vì compose bản phát hành
+    # nhúng trong binary như máy người dùng thật.
+    defaults:
+      run:
+        working-directory: /tmp
+    # workflow_run chỉ chạy tiếp nếu chính workflow Release đã THÀNH CÔNG —
+    # Release fail/bị huỷ thì không có gì mới để kiểm.
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    timeout-minutes: 45
+    env:
+      # GEN_HARNESS_HOME KHÔNG đặt bằng ${{ runner.temp }} ở đây — "runner"
+      # không nằm trong danh sách context cho phép ở `env:` cấp job (kiểm
+      # bằng actionlint, xem contexts#context-availability) — đặt qua
+      # $GITHUB_ENV ở bước đầu tiên bên dưới, đọc $RUNNER_TEMP (biến môi
+      # trường runner luôn có sẵn, tương đương giá trị của context đó).
+      GH_PORT: "8443"
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Lấy mã nguồn
+        uses: actions/checkout@v4
+
+      - name: Đặt GEN_HARNESS_HOME (thư mục cài đặt tạm của job này)
+        run: echo "GEN_HARNESS_HOME=$RUNNER_TEMP/gh" >>"$GITHUB_ENV"
+
+      - name: Xác định chế độ (release hay pr) và tag cần kiểm
+        id: mode
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ] || [ "${{ github.event_name }}" = "push" ]; then
+            mode="pr"
+          else
+            mode="release"
+          fi
+          echo "mode=$mode" >>"$GITHUB_OUTPUT"
+          echo "chế độ: $mode"
+          if [ "$mode" = "pr" ]; then
+            # Chế độ pr kiểm CODE của PR, kể cả ảnh api/worker/web/bridge/db:
+            # trỏ genh vào deploy/compose.yaml của checkout (build: cục bộ)
+            # thay vì ảnh đã publish — nếu không, lỗi trong ảnh (vd thiếu thư
+            # viện Python) chỉ lộ ra SAU khi đã phát hành.
+            echo "GENH_COMPOSE_FILE=$GITHUB_WORKSPACE/deploy/compose.yaml" >>"$GITHUB_ENV"
+          fi
+
+          # Tag của bản phát hành ĐÃ publish sẵn (dùng để lấy compose.release
+          # ở chế độ pr, hoặc để cài đặt ở chế độ release) — luôn là bản MỚI
+          # NHẤT trừ khi workflow_dispatch chỉ định `tag` cụ thể.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ inputs.tag }}" ]; then
+            tag="${{ inputs.tag }}"
+          else
+            tag="$(gh release list --repo "${{ github.repository }}" --limit 1 --json tagName -q '.[0].tagName')"
+          fi
+          if [ -z "$tag" ]; then
+            echo "::error::không tìm thấy bản phát hành nào trên GitHub Releases — cần chạy release.yml (merge PR tăng VERSION) trước khi workflow này kiểm được gì." >&2
+            exit 1
+          fi
+          echo "tag=$tag" >>"$GITHUB_OUTPUT"
+          echo "dùng bản phát hành: $tag"
+
+      # ── Chế độ "pr": build genh từ source, ghim compose.release.yaml đã
+      # publish của bản mới nhất (ảnh không build lại ở CI này) ──────────────
+      - name: (pr) Cài Go
+        if: steps.mode.outputs.mode == 'pr'
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.0"
+
+      - name: (pr) Tải deploy/compose.release.yaml của bản phát hành ${{ steps.mode.outputs.tag }}
+        if: steps.mode.outputs.mode == 'pr'
+        run: |
+          set -euo pipefail
+          gh release download "${{ steps.mode.outputs.tag }}" --repo "${{ github.repository }}" \
+            --pattern 'compose.release.yaml' --dir "${{ runner.temp }}/pinned" --clobber
+
+      - name: (pr) Ghim compose.yaml đã publish vào binary (giống bước cùng tên ở release.yml)
+        if: steps.mode.outputs.mode == 'pr'
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+          cp "${{ runner.temp }}/pinned/compose.release.yaml" apps/genh/internal/compose/embedded_compose.yaml
+          echo "đã ghi đè embedded_compose.yaml bằng compose.release.yaml của ${{ steps.mode.outputs.tag }} (digest thật):"
+          grep '^\s*image:' apps/genh/internal/compose/embedded_compose.yaml || true
+
+      - name: (pr) Build genh từ mã nguồn đang xét
+        if: steps.mode.outputs.mode == 'pr'
+        working-directory: ${{ github.workspace }}/apps/genh
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+          # KHÔNG gắn -ldflags -X main.version=... ở đây — giữ mặc định "dev"
+          # (xem cmd/genh/main.go, biến version) để internal/selfupdate CHỦ
+          # ĐỘNG bỏ qua tự cập nhật binary (current=="dev" ⇒ Skipped, xem
+          # apps/genh/internal/selfupdate/selfupdate.go dòng ~165) — build
+          # tuỳ ý một chuỗi version giả (vd "e2e-pr-<sha>") sẽ đi vào nhánh
+          # so sánh semver thật với bản mới nhất trên GitHub Releases, không
+          # phải điều `genh update --yes` ở bước "đã mới nhất → phải không
+          # lỗi" của chế độ pr muốn kiểm (chế độ pr kiểm CODE genh hiện tại,
+          # không kiểm cơ chế tự tải binary — cơ chế đó đã có test riêng ở
+          # apps/genh/internal/selfupdate và được chế độ "release" ở trên
+          # dùng thật với version thật của binary đã publish).
+          go build -trimpath -ldflags "-s -w" -o "${{ runner.temp }}/genh" ./cmd/genh
+          echo "GENH=${{ runner.temp }}/genh" >>"$GITHUB_ENV"
+
+      # ── Chế độ "release": tải install.sh + asset THẬT của đúng bản phát
+      # hành, chạy y hệt người dùng thật (curl … | sh) ─────────────────────
+      - name: (release) Tải install.sh của bản phát hành ${{ steps.mode.outputs.tag }}
+        if: steps.mode.outputs.mode == 'release'
+        run: |
+          set -euo pipefail
+          gh release download "${{ steps.mode.outputs.tag }}" --repo "${{ github.repository }}" \
+            --pattern 'install.sh' --dir "${{ runner.temp }}" --clobber
+          chmod +x "${{ runner.temp }}/install.sh"
+
+      - name: (release) Cài sạch bằng install.sh thật (curl … | sh, không tương tác)
+        if: steps.mode.outputs.mode == 'release'
+        run: |
+          set -euo pipefail
+          # install.sh (xem file gốc): phát hiện OS/kiến trúc, tải đúng
+          # asset genh-linux-amd64 + checksums.txt từ CHÍNH bản phát hành
+          # $GH_PORT? không — install.sh không nhận cờ, chỉ tải binary rồi tự
+          # `exec genh install` KHÔNG kèm cờ nào (máy sạch → không có
+          # secrets.json). Không cần TTY: genh install tự chuyển "chế độ
+          # dòng" khi stdout không phải terminal (xem tui.IsTerminal,
+          # apps/genh/cmd/genh/main.go hàm runInstall) — CI không có TTY nên
+          # đây CHÍNH LÀ phép kiểm "genh install có chế độ không TTY" mà kế
+          # hoạch bàn giao yêu cầu, không cần thêm cờ gì ở installer.sh.
+          # Docker Engine đã có sẵn ≥24 trên ubuntu-24.04 nên Bước 2 (runtime)
+          # tự bỏ qua (StatusSkipped) — không cần --yes cho sudo/UAC gì cả;
+          # thứ duy nhất bị ảnh hưởng là CA nội bộ không được tự tin cậy vào
+          # hệ điều hành (StatusWarn, không chặn cài đặt) — vì vậy các bước
+          # `curl` sau này đều dùng `-k`.
+          "${{ runner.temp }}/install.sh"
+          echo "GENH=${GEN_HARNESS_HOME}/bin/genh" >>"$GITHUB_ENV"
+
+      - name: In phiên bản genh vừa cài
+        run: "$GENH version"
+
+      # ── (pr) genh install trực tiếp bằng binary vừa build — install.sh
+      # không dùng ở chế độ này vì nó tải BẢN ĐÃ PUBLISH, không phải bản
+      # đang review ──────────────────────────────────────────────────────────
+      - name: (pr) Cài sạch không tương tác bằng genh build từ source
+        if: steps.mode.outputs.mode == 'pr'
+        run: |
+          set -euo pipefail
+          "$GENH" install --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes --no-auto-update
+
+      - name: Chờ /api/v1/ready xanh (tối đa 5 phút)
+        run: |
+          set -euo pipefail
+          deadline=$((SECONDS + 300))
+          until curl -k -fsS -o /tmp/ready.json "https://localhost:${GH_PORT}/api/v1/ready"; do
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::error::/api/v1/ready không xanh sau 5 phút" >&2
+              exit 1
+            fi
+            sleep 3
+          done
+          cat /tmp/ready.json
+          echo
+
+      - name: genh status (kiểm mọi dịch vụ healthy)
+        run: |
+          set -euo pipefail
+          "$GENH" status --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" | tee /tmp/genh-status.txt
+          # RunStatus (internal/ops/status.go) không tự fail khi có service
+          # không healthy (chỉ IN bảng) — kiểm tay ở đây: không được có
+          # "unhealthy" hay "exited"/"restarting" trong bảng docker compose ps.
+          if grep -Eiq 'unhealthy|exited|restarting' /tmp/genh-status.txt; then
+            echo "::error::genh status thấy dịch vụ không healthy — xem bảng ở trên" >&2
+            exit 1
+          fi
+
+      - name: Dữ liệu mẫu tối thiểu — best-effort, xem ghi chú đầu file
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          token="$(python3 -c "import json;print(json.load(open('${GEN_HARNESS_HOME}/config/secrets.json'))['setup_token'])")"
+          curl -k -fsS -X POST "https://localhost:${GH_PORT}/api/v1/setup/steps/1" \
+            -H 'Content-Type: application/json' \
+            -d "{\"token\":\"${token}\",\"language\":\"vi\",\"mode\":\"sample\"}" \
+            && echo "OK: bước 1/12 (mode=sample) đã gọi được — dữ liệu mẫu (nếu có) do backend tự sinh." \
+            || echo "BỎ QUA: bước 1/12 gọi lỗi hoặc backend chưa hỗ trợ tạo mẫu qua API — không chặn CI (xem ghi chú đầu workflow, các bước 2-12 cần tài khoản Owner + QR Zalo, không tự động hoá được)."
+
+      - name: genh backup
+        run: $GENH backup --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT"
+
+      - name: genh export → genh import (bọc lại chính bản export)
+        env:
+          GH_BUNDLE_PASSWORD: e2e-install-test-password-not-a-secret
+        run: |
+          set -euo pipefail
+          "$GENH" export --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --to "${{ runner.temp }}/p.ghbundle"
+          ls -la "${{ runner.temp }}/p.ghbundle"
+          # QUAN TRỌNG: mọi cờ (--install-dir/--port/--yes) PHẢI đứng TRƯỚC
+          # đường dẫn tệp — package "flag" của Go dừng phân tích cờ ở đối số
+          # KHÔNG-CỜ đầu tiên (xem cmd/genh/main.go hàm runImport, fs.NArg()
+          # != 1 sẽ báo lỗi cách dùng nếu đặt --yes sau đường dẫn tệp).
+          "$GENH" import --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes "${{ runner.temp }}/p.ghbundle"
+
+      - name: Chờ /api/v1/ready xanh lại sau import (tối đa 5 phút)
+        run: |
+          set -euo pipefail
+          deadline=$((SECONDS + 300))
+          until curl -k -fsS -o /dev/null "https://localhost:${GH_PORT}/api/v1/ready"; do
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::error::/api/v1/ready không xanh lại sau import" >&2
+              exit 1
+            fi
+            sleep 3
+          done
+
+      - name: genh update --yes (đã mới nhất → phải không lỗi)
+        run: $GENH update --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes
+
+      - name: genh auto-update enable → status → disable
+        run: |
+          set -euo pipefail
+          # Runner GitHub-hosted KHÔNG có `loginctl`/session người dùng thật
+          # (systemd --user có thể không chạy được, xem
+          # docs/handoff/05-installer.md mục "Docker Engine tĩnh trên Linux" và
+          # commit 1e21561 "bật loginctl linger") — internal/autoupdate tự rơi
+          # về crontab nếu systemd --user không hoạt động (xem
+          # internal/autoupdate/autoupdate.go); chỉ kiểm 3 lệnh chạy KHÔNG
+          # crash (exit 0), không ép buộc cơ chế cụ thể nào phải được dùng.
+          "$GENH" auto-update enable --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT"
+          "$GENH" auto-update status --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT"
+          "$GENH" auto-update disable --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT"
+
+      - name: genh uninstall --yes (không tương tác)
+        run: $GENH uninstall --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes
+
+      - name: (luôn) In log docker compose (tail 200) để debug
+        if: always()
+        run: |
+          set -euo pipefail
+          docker ps -a || true
+          for c in $(docker ps -a --format '{{.Names}}' | grep '^gen-harness-' || true); do
+            echo "════ $c ════"
+            docker logs --tail 200 "$c" 2>&1 || true
+          done
+
+      - name: (luôn) In log genh (~/.gen-harness/logs) để debug
+        if: always()
+        run: |
+          set -euo pipefail
+          if [ -d "$GEN_HARNESS_HOME/logs" ]; then
+            for f in "$GEN_HARNESS_HOME"/logs/*; do
+              echo "── $f ──"
+              tail -n 200 "$f" || true
+            done
+          else
+            echo "không thấy $GEN_HARNESS_HOME/logs"
+          fi
+
+  # ── e2e-upgrade ──────────────────────────────────────────────────────────
+  # Chỉ chạy ở chế độ workflow_run/workflow_dispatch (kiểm nâng cấp cần CÓ
+  # bản phát hành THẬT trước đó trên GitHub Releases — chế độ pr build từ
+  # source, không có "bản trước" để nâng cấp lên chính commit đang review).
+  # Kịch bản: cài bản phát hành LIỀN TRƯỚC (tag thứ 2 trong danh sách release,
+  # mới nhất → cũ dần) → genh update --yes (tự tải genh mới nhất qua
+  # internal/selfupdate rồi mới nâng cấp dịch vụ, xem cmd/genh/main.go hàm
+  # trySelfUpdateAndReExec — không cần bước tải genh riêng) → ready xanh →
+  # xác nhận dữ liệu/bí mật KHÔNG bị tạo lại (app_db_password không đổi).
+  e2e-upgrade:
+    name: nâng cấp từ bản phát hành liền trước
+    runs-on: ubuntu-24.04
+    # Chạy ngoài checkout repo: genh tìm compose.yaml theo cwd trước — trong repo
+    # nó sẽ dùng deploy/compose.yaml (build cục bộ) thay vì compose bản phát hành
+    # nhúng trong binary như máy người dùng thật.
+    defaults:
+      run:
+        working-directory: /tmp
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+    timeout-minutes: 30
+    env:
+      # Xem ghi chú tương tự ở job e2e-install — không dùng ${{ runner.temp }}
+      # trong `env:` cấp job.
+      GH_PORT: "8444"
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Lấy mã nguồn (chỉ cần cho tham chiếu, không build gì ở job này)
+        uses: actions/checkout@v4
+
+      - name: Đặt GEN_HARNESS_HOME (thư mục cài đặt tạm của job này)
+        run: echo "GEN_HARNESS_HOME=$RUNNER_TEMP/gh-upgrade" >>"$GITHUB_ENV"
+
+      - name: Tìm tag của bản phát hành LIỀN TRƯỚC bản mới nhất
+        id: prev
+        run: |
+          set -euo pipefail
+          mapfile -t tags < <(gh release list --repo "${{ github.repository }}" --limit 5 --json tagName -q '.[].tagName')
+          if [ "${#tags[@]}" -lt 2 ]; then
+            echo "skip=true" >>"$GITHUB_OUTPUT"
+            echo "chưa đủ 2 bản phát hành trên GitHub Releases (mới có ${#tags[@]}) — bỏ qua job này, không có gì để nâng cấp TỪ."
+            exit 0
+          fi
+          echo "skip=false" >>"$GITHUB_OUTPUT"
+          echo "tag=${tags[1]}" >>"$GITHUB_OUTPUT"
+          echo "bản trước: ${tags[1]} (mới nhất: ${tags[0]})"
+
+      - name: Tải install.sh của bản trước (${{ steps.prev.outputs.tag }})
+        if: steps.prev.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          gh release download "${{ steps.prev.outputs.tag }}" --repo "${{ github.repository }}" \
+            --pattern 'install.sh' --dir "${{ runner.temp }}" --clobber
+          chmod +x "${{ runner.temp }}/install.sh"
+
+      - name: Cài sạch bản phát hành TRƯỚC ĐÓ bằng install.sh thật
+        if: steps.prev.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          # install.sh luôn tải "release/latest/download/…" (xem RELEASE_BASE
+          # trong file gốc) — KHÔNG tự nhận một tag cụ thể. Để cài đúng bản
+          # LIỀN TRƯỚC, tự tải asset của đúng tag đó rồi làm y hệt phần thân
+          # install.sh (kiểm checksum, đặt vào bin/, thêm PATH) thay vì gọi
+          # thẳng install.sh (nó sẽ luôn ra bản mới nhất, không phải bản cũ
+          # cần cho phép thử nâng cấp).
+          mkdir -p "$GEN_HARNESS_HOME/bin"
+          gh release download "${{ steps.prev.outputs.tag }}" --repo "${{ github.repository }}" \
+            --pattern 'genh-linux-amd64' --pattern 'checksums.txt' --dir "${{ runner.temp }}/prev" --clobber
+          want="$(awk '$2=="genh-linux-amd64"||$2=="./genh-linux-amd64"{print $1}' "${{ runner.temp }}/prev/checksums.txt")"
+          got="$(sha256sum "${{ runner.temp }}/prev/genh-linux-amd64" | awk '{print $1}')"
+          [ -n "$want" ] && [ "$got" = "$want" ] || { echo "::error::sha256 của genh-linux-amd64 (${{ steps.prev.outputs.tag }}) không khớp checksums.txt" >&2; exit 1; }
+          install -m 0755 "${{ runner.temp }}/prev/genh-linux-amd64" "$GEN_HARNESS_HOME/bin/genh"
+          "$GEN_HARNESS_HOME/bin/genh" install --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes --no-auto-update
+
+      - name: Chờ /api/v1/ready xanh (bản cũ, tối đa 5 phút)
+        if: steps.prev.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          deadline=$((SECONDS + 300))
+          until curl -k -fsS -o /dev/null "https://localhost:${GH_PORT}/api/v1/ready"; do
+            [ "$SECONDS" -lt "$deadline" ] || { echo "::error::ready không xanh (bản cũ)" >&2; exit 1; }
+            sleep 3
+          done
+
+      - name: Ghi lại app_db_password TRƯỚC khi nâng cấp
+        if: steps.prev.outputs.skip == 'false'
+        id: before
+        run: |
+          set -euo pipefail
+          pw="$(python3 -c "import json;print(json.load(open('${GEN_HARNESS_HOME}/config/secrets.json'))['app_db_password'])")"
+          echo "::add-mask::$pw"
+          echo "pw=$pw" >>"$GITHUB_OUTPUT"
+
+      - name: genh update --yes (tự tải genh mới nhất rồi nâng cấp dịch vụ)
+        if: steps.prev.outputs.skip == 'false'
+        run: $GEN_HARNESS_HOME/bin/genh update --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes
+
+      - name: Chờ /api/v1/ready xanh lại sau nâng cấp (tối đa 5 phút)
+        if: steps.prev.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          deadline=$((SECONDS + 300))
+          until curl -k -fsS -o /dev/null "https://localhost:${GH_PORT}/api/v1/ready"; do
+            [ "$SECONDS" -lt "$deadline" ] || { echo "::error::ready không xanh sau update" >&2; exit 1; }
+            sleep 3
+          done
+
+      - name: Kiểm dữ liệu/bí mật KHÔNG bị tạo lại (app_db_password không đổi)
+        if: steps.prev.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          pw_after="$(python3 -c "import json;print(json.load(open('${GEN_HARNESS_HOME}/config/secrets.json'))['app_db_password'])")"
+          echo "::add-mask::$pw_after"
+          if [ "$pw_after" != "${{ steps.before.outputs.pw }}" ]; then
+            echo "::error::app_db_password đã ĐỔI sau genh update — bí mật/dữ liệu có vẻ bị tạo lại thay vì giữ nguyên." >&2
+            exit 1
+          fi
+          echo "OK: app_db_password giữ nguyên sau nâng cấp — bí mật/dữ liệu không bị tạo lại. genh version hiện tại:"
+          "$GEN_HARNESS_HOME/bin/genh" version --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT"
+
+      - name: genh uninstall --yes (dọn dẹp)
+        if: always() && steps.prev.outputs.skip == 'false'
+        run: $GEN_HARNESS_HOME/bin/genh uninstall --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes || true
+
+      - name: (luôn) In log docker compose (tail 200) để debug
+        if: always() && steps.prev.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          docker ps -a || true
+          for c in $(docker ps -a --format '{{.Names}}' | grep '^gen-harness-' || true); do
+            echo "════ $c ════"
+            docker logs --tail 200 "$c" 2>&1 || true
+          done

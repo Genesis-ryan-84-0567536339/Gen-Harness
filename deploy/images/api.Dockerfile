@@ -20,7 +20,18 @@ RUN set -eux; \
     echo "$sum  /tmp/agy.tgz" | sha256sum -c -; \
     tar -xzf /tmp/agy.tgz -C /usr/local/bin antigravity; \
     chmod 0755 /usr/local/bin/antigravity; ln -s /usr/local/bin/antigravity /usr/local/bin/agy; \
-    rm -f /tmp/agy.tgz; apt-get purge -y curl; apt-get autoremove -y; rm -rf /var/lib/apt/lists/*
+    rm -f /tmp/agy.tgz; \
+    # pg_dump/pg_restore cho gh.backup và gh.bundle (genh backup/update/export/import) — thiếu nó
+    # mọi luồng sao lưu chết với FileNotFoundError: 'pg_dump' (phát hiện ở e2e cài thật). Phải
+    # CÙNG major với server (db.Dockerfile: Postgres 16): lấy từ kho chính thức apt.postgresql.org
+    # vì bản trong kho Debian của ảnh python có thể cũ hơn server (pg_dump từ chối dump server mới hơn).
+    install -d /usr/share/postgresql-common/pgdg; \
+    curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc; \
+    . /etc/os-release; \
+    echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" > /etc/apt/sources.list.d/pgdg.list; \
+    apt-get update; apt-get install -y --no-install-recommends postgresql-client-16; \
+    pg_dump --version; \
+    apt-get purge -y curl; apt-get autoremove -y; rm -rf /var/lib/apt/lists/*
 COPY apps/api/pyproject.toml ./
 COPY apps/api/gh ./gh
 RUN pip install .

@@ -71,7 +71,7 @@ from sqlalchemy import text
 
 from gh import crypto
 from gh import db as dbmod
-from gh.backup import database_name, libpq_url
+from gh.backup import database_name, libpq_url, recreate_database
 from gh.chassis.objects import LocalObjectStore, ObjectStore, get_object_store
 from gh.config import get_settings
 
@@ -343,10 +343,11 @@ async def _import(inp: str) -> None:
         target_rev = _current_alembic_revision(libpq_url(admin_url))
         _check_revision_compatible(manifest.get("alembic_revision"), target_rev)
 
-        _terminate_other_connections(libpq_url(admin_url))
-        log.info("pg_restore --clean --if-exists vào CSDL %s …", database_name(admin_url))
-        await _run(["pg_restore", "--clean", "--if-exists", "--no-owner", "--dbname", libpq_url(admin_url),
-                   str(dump_path)], env={"PGOPTIONS": f"-c lock_timeout={RESTORE_LOCK_TIMEOUT_MS}"})
+        # Tạo lại CSDL rỗng (ngắt mọi kết nối khác bằng DROP … WITH (FORCE)) thay vì `pg_restore --clean` — xem
+        # gh.backup.recreate_database (bảng phân vùng làm --clean lỗi hàng loạt).
+        await asyncio.to_thread(recreate_database, libpq_url(admin_url))
+        log.info("pg_restore vào CSDL %s …", database_name(admin_url))
+        await _run(["pg_restore", "--no-owner", "--dbname", libpq_url(admin_url), str(dump_path)])
 
         store = get_object_store()
         objects_dir = extract_dir / "objects"

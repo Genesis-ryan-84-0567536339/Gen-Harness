@@ -41,7 +41,7 @@ func realDialTCP(address string, timeout time.Duration) error {
 
 func realDialTLS(address string, timeout time.Duration) (string, time.Time, error) {
 	dialer := &net.Dialer{Timeout: timeout}
-	conn, err := tls.DialWithDialer(dialer, "tcp", address, &tls.Config{InsecureSkipVerify: true}) //nolint:gosec // chỉ kiểm TLS phục vụ được, xem DoctorDeps.DialTLS
+	conn, err := tls.DialWithDialer(dialer, "tcp", address, &tls.Config{InsecureSkipVerify: true, ServerName: ProxyHost}) //nolint:gosec // chỉ kiểm TLS phục vụ được, xem DoctorDeps.DialTLS
 	if err != nil {
 		return "", time.Time{}, err
 	}

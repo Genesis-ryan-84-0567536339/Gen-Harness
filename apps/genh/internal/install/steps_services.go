@@ -165,7 +165,7 @@ func (s servicesStep) Run(ctx context.Context, env *Env, rep Reporter) error {
 	if port <= 0 {
 		port = machine.DefaultPort
 	}
-	url := fmt.Sprintf("https://127.0.0.1:%d%s", port, readyPath)
+	url := fmt.Sprintf("https://localhost:%d%s", port, readyPath) // "localhost" chứ không phải IP — xem ops.ProxyHost
 
 	waitErr := waitServiceReady(ctx, client, url, timeout, pollEvery, func(pct float64, attempt int) {
 		rep.Report(Progress{

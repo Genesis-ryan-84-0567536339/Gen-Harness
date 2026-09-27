@@ -9,7 +9,7 @@ secrets:
 	@mkdir -p secrets
 	@test -f secrets/gh_master_key || python3 -c "import os,base64;print(base64.b64encode(os.urandom(32)).decode())" > secrets/gh_master_key
 	@test -f secrets/gh_bridge_key || python3 -c "import os,base64;print(base64.b64encode(os.urandom(32)).decode())" > secrets/gh_bridge_key
-	@chmod 600 secrets/gh_master_key secrets/gh_bridge_key
+	@chmod 700 secrets && chmod 644 secrets/gh_master_key secrets/gh_bridge_key  # tệp 644 để container (user khác) đọc được, thư mục 700 chặn user khác trên host
 	@test -f .env || cp .env.example .env
 	@echo "Đã có secrets/gh_master_key, secrets/gh_bridge_key và .env — nhớ đổi mật khẩu trong .env"
 

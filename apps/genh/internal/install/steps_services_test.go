@@ -2,6 +2,7 @@ package install
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -34,6 +35,13 @@ func tlsReadyServer(t *testing.T, notReadyUntil int) (*httptest.Server, *int) {
 	return srv, &calls
 }
 
+// insecureClient giống client thật của servicesStep (InsecureSkipVerify, xem
+// steps_services.go): URL giờ gọi "localhost" chứ không phải 127.0.0.1, mà
+// chứng chỉ của httptest chỉ có SAN 127.0.0.1/::1/example.com.
+func insecureClient() *http.Client {
+	return &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}} //nolint:gosec // chỉ trong test
+}
+
 func portFromServerURL(t *testing.T, srv *httptest.Server) int {
 	t.Helper()
 	u, err := url.Parse(srv.URL)
@@ -58,7 +66,7 @@ func TestServicesStep_HappyPath_UpThenReady(t *testing.T) {
 	step := servicesStep{
 		runner:    fr,
 		locate:    func(string) (string, error) { return composePath, nil },
-		client:    srv.Client(),
+		client:    insecureClient(),
 		timeout:   time.Second,
 		pollEvery: time.Millisecond,
 	}
@@ -94,7 +102,7 @@ func TestServicesStep_ReadyAfterRetries(t *testing.T) {
 	step := servicesStep{
 		runner:    fr,
 		locate:    func(string) (string, error) { return composePath, nil },
-		client:    srv.Client(),
+		client:    insecureClient(),
 		timeout:   2 * time.Second,
 		pollEvery: 5 * time.Millisecond,
 	}
@@ -134,7 +142,7 @@ func TestServicesStep_ReadyTimeout_ReturnsStructuredError(t *testing.T) {
 	step := servicesStep{
 		runner:    fr,
 		locate:    func(string) (string, error) { return composePath, nil },
-		client:    srv.Client(),
+		client:    insecureClient(),
 		timeout:   50 * time.Millisecond,
 		pollEvery: 5 * time.Millisecond,
 	}
