@@ -417,7 +417,7 @@ jobs:
   release:
     name: checksums + cosign + GitHub Release
     runs-on: ubuntu-latest
-    needs: [meta, build-genh, pin-compose, wsl-rootfs]
+    needs: [meta, verify-docker-pins, build-genh, pin-compose, wsl-rootfs]
     if: needs.meta.outputs.skip != 'true'
     concurrency:
       group: release-${{ needs.meta.outputs.version }}-release
