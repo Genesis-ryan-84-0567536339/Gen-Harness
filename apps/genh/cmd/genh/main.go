@@ -27,6 +27,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/autoupdate"
+	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/compose"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/config"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/dockercli"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/hostlink"
@@ -734,6 +735,9 @@ func publishHostInfo(installDir string, port int) {
 		rp := autoupdate.RequestPaths{InstallDir: installDir, RequestDir: hostlink.RequestDirPath(installDir), RequestFile: hostlink.RequestPath(installDir)}
 		if port != machine.DefaultPort {
 			rp.Port = port
+		}
+		if v := os.Getenv(compose.EnvOverrideVar); v != "" {
+			rp.Env = append(rp.Env, compose.EnvOverrideVar+"="+v)
 		}
 		if u, err := autoupdate.EnsureRequestWatcher(ctx, autoupdate.Deps{GenhPath: execPath, LogFile: logFile}, rp); err == nil {
 			updater = u

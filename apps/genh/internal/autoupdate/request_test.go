@@ -28,8 +28,16 @@ func TestEnsureRequestWatcher_SystemdPathUnit(t *testing.T) {
 	mustContain(t, string(svc), "update --yes --quiet --if-requested")
 	mustContain(t, string(svc), "Environment=GEN_HARNESS_HOME=/home/u/.gen-harness")
 	// Cổng khác mặc định được truyền theo để bước kiểm /ready gọi đúng cổng.
-	mustContain(t, SystemdRequestServiceUnit("/g/genh", "/g/log", "/r", 9443), "--if-requested --port 9443")
-	mustContain(t, LaunchdRequestPlist("/g/genh", "/g/log", "/r", "/r/run/request", 9443), "<string>--port</string>")
+	rp := RequestPaths{InstallDir: "/r", RequestDir: "/r/run/request", RequestFile: "/r/run/request/update.json", Port: 9443,
+		Env: []string{"GENH_COMPOSE_FILE=/src/deploy/compose.yaml"}}
+	unit := SystemdRequestServiceUnit("/g/genh", "/g/log", rp)
+	mustContain(t, unit, "--if-requested --port 9443")
+	// Biến môi trường của phiên cài (compose ngoài thư mục genh) đi theo watcher.
+	mustContain(t, unit, "Environment=GENH_COMPOSE_FILE=/src/deploy/compose.yaml")
+	plist := LaunchdRequestPlist("/g/genh", "/g/log", rp)
+	mustContain(t, plist, "<string>--port</string>")
+	mustContain(t, plist, "<key>GENH_COMPOSE_FILE</key>")
+	mustContain(t, CrontabRequestLine("/g/genh", "/g/log", rp), "GENH_COMPOSE_FILE=/src/deploy/compose.yaml ")
 	if !runner.calledWith("systemctl", "--user", "enable", "--now", RequestTaskName+".path") {
 		t.Fatalf("phải enable --now path unit: %+v", runner.calls)
 	}
@@ -45,7 +53,7 @@ func TestEnsureRequestWatcher_CronFallbackKeepsNightlyLine(t *testing.T) {
 	if err != nil || got != UpdaterCron {
 		t.Fatalf("EnsureRequestWatcher = %q, %v", got, err)
 	}
-	line := CrontabRequestLine("/g/genh", "/g/log", testRP.InstallDir, testRP.RequestFile, 0)
+	line := CrontabRequestLine("/g/genh", "/g/log", testRP)
 	mustContain(t, line, "* * * * * [ -f "+testRP.RequestFile+" ] && GEN_HARNESS_HOME=")
 	mustContain(t, line, "--if-requested")
 	merged := mergeCrontabMarked(string(runner.outputs["crontab|-l"]), CrontabRequestMarker, line, false)

@@ -41,11 +41,12 @@ func updateRequestCmd(genhPath string, port int) string {
 
 // SystemdRequestServiceUnit: chạy `genh update --if-requested` một lần
 // (genh tự xoá tệp yêu cầu trước khi cập nhật nên path unit không kích lặp).
-func SystemdRequestServiceUnit(genhPath, logFile, installDir string, port int) string {
+func SystemdRequestServiceUnit(genhPath, logFile string, rp RequestPaths) string {
 	env := ""
-	if installDir != "" {
-		env = fmt.Sprintf("Environment=GEN_HARNESS_HOME=%s\n", quoteUnitArg(installDir))
+	for _, kv := range rp.env() {
+		env += fmt.Sprintf("Environment=%s\n", quoteUnitArg(kv))
 	}
+	port := rp.Port
 	return fmt.Sprintf(`[Unit]
 Description=Gen-Harness — cap nhat khi Owner bam "Cap nhat ngay" trong Console
 
@@ -72,13 +73,14 @@ WantedBy=default.target
 }
 
 // CrontabRequestLine: mỗi phút kiểm tệp yêu cầu, có thì cập nhật.
-func CrontabRequestLine(genhPath, logFile, installDir, requestPath string, port int) string {
+func CrontabRequestLine(genhPath, logFile string, rp RequestPaths) string {
 	env := ""
-	if installDir != "" {
-		env = "GEN_HARNESS_HOME=" + shellQuote(installDir) + " "
+	for _, kv := range rp.env() {
+		k, v, _ := strings.Cut(kv, "=")
+		env += k + "=" + shellQuote(v) + " "
 	}
 	return fmt.Sprintf("* * * * * [ -f %s ] && %s%s >> %s 2>&1",
-		shellQuote(requestPath), env, updateRequestCmd(genhPath, port), shellQuote(logFile))
+		shellQuote(rp.RequestFile), env, updateRequestCmd(genhPath, rp.Port), shellQuote(logFile))
 }
 
 func shellQuote(s string) string {
@@ -90,10 +92,14 @@ func shellQuote(s string) string {
 
 // LaunchdRequestPlist: QueueDirectories chạy job khi thư mục yêu cầu có tệp,
 // dừng khi genh đã xoá tệp.
-func LaunchdRequestPlist(genhPath, logFile, installDir, requestDir string, port int) string {
-	var argXML strings.Builder
-	for _, a := range requestArgs(port) {
+func LaunchdRequestPlist(genhPath, logFile string, rp RequestPaths) string {
+	var argXML, envXML strings.Builder
+	for _, a := range requestArgs(rp.Port) {
 		argXML.WriteString("\t\t<string>" + a + "</string>\n")
+	}
+	for _, kv := range rp.env() {
+		k, v, _ := strings.Cut(kv, "=")
+		envXML.WriteString("\t\t<key>" + k + "</key>\n\t\t<string>" + v + "</string>\n")
 	}
 	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -107,9 +113,7 @@ func LaunchdRequestPlist(genhPath, logFile, installDir, requestDir string, port 
 %s	</array>
 	<key>EnvironmentVariables</key>
 	<dict>
-		<key>GEN_HARNESS_HOME</key>
-		<string>%s</string>
-	</dict>
+%s	</dict>
 	<key>QueueDirectories</key>
 	<array>
 		<string>%s</string>
@@ -120,7 +124,7 @@ func LaunchdRequestPlist(genhPath, logFile, installDir, requestDir string, port 
 	<string>%s</string>
 </dict>
 </plist>
-`, genhPath, argXML.String(), installDir, requestDir, logFile, logFile)
+`, genhPath, argXML.String(), envXML.String(), rp.RequestDir, logFile, logFile)
 }
 
 // RequestPaths là đường dẫn hộp thư mà watcher cần biết.
@@ -130,6 +134,18 @@ type RequestPaths struct {
 	RequestFile string
 	// Port là cổng HTTPS của bản cài khi KHÁC mặc định (0 = mặc định).
 	Port int
+	// Env là biến môi trường "KEY=VALUE" cần mang theo (ví dụ GENH_COMPOSE_FILE
+	// khi bản cài dùng compose.yaml ngoài thư mục genh quản lý) — watcher chạy
+	// ngoài phiên shell của Owner nên không tự có các biến này.
+	Env []string
+}
+
+func (rp RequestPaths) env() []string {
+	out := []string{}
+	if rp.InstallDir != "" {
+		out = append(out, "GEN_HARNESS_HOME="+rp.InstallDir)
+	}
+	return append(out, rp.Env...)
 }
 
 // EnsureRequestWatcher cài (idempotent) watcher nhận yêu cầu "Cập nhật ngay"
@@ -153,7 +169,7 @@ func EnsureRequestWatcher(ctx context.Context, deps Deps, rp RequestPaths) (stri
 			}
 			svc := filepath.Join(dir, RequestTaskName+".service")
 			path := filepath.Join(dir, RequestTaskName+".path")
-			if err := os.WriteFile(svc, []byte(SystemdRequestServiceUnit(deps.GenhPath, deps.LogFile, rp.InstallDir, rp.Port)), 0o644); err != nil {
+			if err := os.WriteFile(svc, []byte(SystemdRequestServiceUnit(deps.GenhPath, deps.LogFile, rp)), 0o644); err != nil {
 				return "", fmt.Errorf("ghi %s: %w", svc, err)
 			}
 			if err := os.WriteFile(path, []byte(SystemdRequestPathUnit(rp.RequestFile)), 0o644); err != nil {
@@ -169,7 +185,7 @@ func EnsureRequestWatcher(ctx context.Context, deps Deps, rp RequestPaths) (stri
 		}
 		existing, _ := runner.Output(ctx, "crontab", []string{"-l"})
 		merged := mergeCrontabMarked(string(existing), CrontabRequestMarker,
-			CrontabRequestLine(deps.GenhPath, deps.LogFile, rp.InstallDir, rp.RequestFile, rp.Port), false)
+			CrontabRequestLine(deps.GenhPath, deps.LogFile, rp), false)
 		if err := installCrontab(ctx, runner, merged); err != nil {
 			return "", fmt.Errorf("cài crontab: %w", err)
 		}
@@ -181,7 +197,7 @@ func EnsureRequestWatcher(ctx context.Context, deps Deps, rp RequestPaths) (stri
 		}
 		path := filepath.Join(dir, "com.gen-harness.update-request.plist")
 		_, _ = runner.Output(ctx, "launchctl", []string{"unload", path})
-		if err := os.WriteFile(path, []byte(LaunchdRequestPlist(deps.GenhPath, deps.LogFile, rp.InstallDir, rp.RequestDir, rp.Port)), 0o644); err != nil {
+		if err := os.WriteFile(path, []byte(LaunchdRequestPlist(deps.GenhPath, deps.LogFile, rp)), 0o644); err != nil {
 			return "", fmt.Errorf("ghi %s: %w", path, err)
 		}
 		if _, err := runner.Output(ctx, "launchctl", []string{"load", "-w", path}); err != nil {
