@@ -13,7 +13,7 @@ import { StepFrame } from './StepFrame';
 import { describeError, type StepProps } from './types';
 
 /** Bước 6 — every synced group starts at "Không nghe"; the owner turns groups on one by one. */
-export function Step6Groups({ meta, description, onBack, onSaved, formRef }: StepProps) {
+export function Step6Groups({ meta, description, onBack, onSaved, formRef, onSkip, skipping, skipError }: StepProps) {
   const channels = useChannels();
   const types = (channels.data ?? []).filter((c) => c.state !== 'not_installed' && c.state !== 'identity_only').map((c) => c.type);
   const groupQueries = useQueries({
@@ -60,7 +60,9 @@ export function Step6Groups({ meta, description, onBack, onSaved, formRef }: Ste
       busy={busy}
       onContinue={() => void save()}
       onBack={onBack}
-      formError={formError}
+      onSkip={onSkip}
+      skipping={skipping}
+      formError={formError ?? skipError}
     >
       {pending ? (
         <SkeletonLines rows={5} />

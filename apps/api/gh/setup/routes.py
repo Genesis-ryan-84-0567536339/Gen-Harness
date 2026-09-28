@@ -36,11 +36,14 @@ STEPS: tuple[tuple[int, str, str, bool, int], ...] = (
     (2, "owner", "Tài khoản Owner", True, 1),
     (3, "org", "Tổ chức & xưng hô", True, 1),
     (4, "brain", "Bộ não AI", True, 2),
-    (5, "channels", "Kết nối kênh", True, 2),
-    (6, "groups", "Chọn nhóm lắng nghe", True, 2),
-    (7, "refinery", "Sàng lọc dữ liệu", True, 2),
-    (8, "agent", "Agent đầu tiên", True, 3),
-    (9, "autonomy", "Tự trị & ranh giới", True, 3),
+    # Chỉ 1–4 bắt buộc: có Owner + tổ chức + một bộ não AI là dùng được. 5–11 bỏ qua được và làm lại sau ở
+    # màn tương ứng của Console — bắt quét QR Zalo/WhatsApp hay dựng agent ngay khi cài làm Owner kẹt
+    # (bước 8–9 web chưa có form, trước đây khiến bước 12 không bao giờ hoàn tất được).
+    (5, "channels", "Kết nối kênh", False, 2),
+    (6, "groups", "Chọn nhóm lắng nghe", False, 2),
+    (7, "refinery", "Sàng lọc dữ liệu", False, 2),
+    (8, "agent", "Agent đầu tiên", False, 3),
+    (9, "autonomy", "Tự trị & ranh giới", False, 3),
     (10, "team", "Mời đội ngũ", False, 4),
     (11, "backup", "Sao lưu", False, 4),
     (12, "finish", "Hoàn tất", True, 2),

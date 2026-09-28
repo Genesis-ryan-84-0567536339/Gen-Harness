@@ -58,7 +58,7 @@ async def test_full_setup_then_me_and_state_resume(client, app) -> None:  # type
     assert [st["status"] for st in s["steps"][:4]] == ["done", "done", "done", "doing"]
     assert (await api.get("/navigation")).status_code == 200
     # Bỏ qua: chỉ bước không bắt buộc.
-    assert (await api.send("POST", "/setup/steps/5/skip")).json()["code"] == "STEP_REQUIRED"
+    assert (await api.send("POST", "/setup/steps/4/skip")).json()["code"] == "STEP_REQUIRED"
     r = await api.send("POST", "/setup/steps/11/skip")
     assert r.status_code == 200 and r.json()["steps"][10]["status"] == "skipped"
 

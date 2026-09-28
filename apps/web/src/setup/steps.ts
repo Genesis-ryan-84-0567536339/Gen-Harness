@@ -34,27 +34,27 @@ export const SETUP_STEPS: StepMeta[] = [
     doneWhen: 'Ít nhất một provider kiểm tra OK',
   },
   {
-    n: 5, key: 'channels', title: 'Kết nối kênh', required: true, built: true,
+    n: 5, key: 'channels', title: 'Kết nối kênh', required: false, built: true,
     content: 'Thẻ từng kênh. Zalo/WhatsApp: tạo mã QR, đếm ngược 60 giây tự làm mới, chờ quét → đã quét → đồng bộ danh sách nhóm. Cảnh báo rủi ro tài khoản cá nhân trước khi hiện QR. Telegram và kênh khác: cài plugin từ chợ.',
     doneWhen: 'Ít nhất một kênh đang hoạt động',
   },
   {
-    n: 6, key: 'groups', title: 'Chọn nhóm lắng nghe', required: true, built: true,
+    n: 6, key: 'groups', title: 'Chọn nhóm lắng nghe', required: false, built: true,
     content: 'Bảng nhóm vừa đồng bộ. Mỗi nhóm chọn chế độ: Không nghe · Chỉ khi được tag · Nghe im lặng · Chủ động bắt tín hiệu, và phạm vi xem. Mặc định Không nghe cho mọi nhóm — Sếp bật từng nhóm.',
     doneWhen: 'Ít nhất một nhóm được bật',
   },
   {
-    n: 7, key: 'refinery', title: 'Sàng lọc dữ liệu', required: true, built: true,
+    n: 7, key: 'refinery', title: 'Sàng lọc dữ liệu', required: false, built: true,
     content: 'Chu kỳ thời gian, ngưỡng số lượng và ngưỡng tin cậy vào kho sạch. Chọn bộ quy tắc khởi đầu theo ngành, xem trước điều kiện và đầu ra. Bảng trọng số chấm điểm tổng 100%.',
     doneWhen: 'Lưu',
   },
   {
-    n: 8, key: 'agent', title: 'Agent đầu tiên', required: true, built: false,
+    n: 8, key: 'agent', title: 'Agent đầu tiên', required: false, built: false,
     content: 'Chọn mẫu (Trợ lý thương mại, Key Account, Admin hậu cần, CSKH, Recruiter, Thư ký cá nhân) hoặc tạo trống. Sửa tên, xưng hô, giọng, được nói khi, cấm. Gán kênh/nhóm và thử trò chuyện ba lượt.',
     doneWhen: 'Agent được lưu, có ít nhất một phạm vi kênh',
   },
   {
-    n: 9, key: 'autonomy', title: 'Tự trị & ranh giới', required: true, built: false,
+    n: 9, key: 'autonomy', title: 'Tự trị & ranh giới', required: false, built: false,
     content: 'Thang tự trị 0–6, mặc định 4. Ngưỡng tiền phải duyệt (mặc định 50.000.000 ₫). Danh sách ranh giới có trách nhiệm; mục khoá hiện công tắc mờ kèm lý do không tắt được.',
     doneWhen: 'Lưu',
   },
