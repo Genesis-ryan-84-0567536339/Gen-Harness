@@ -38,6 +38,16 @@ type UpdateDeps struct {
 	Client    *http.Client
 	Timeout   time.Duration
 	PollEvery time.Duration
+	// ReTrustCA chạy sau khi cập nhật THÀNH CÔNG để tin cậy lại CA nội bộ của
+	// Caddy (Owner hết thấy "Not secure") — nil dùng retrustCASilently. Test
+	// tiêm hàm giả để không đụng kho chứng chỉ thật của máy chạy test.
+	ReTrustCA func(ctx context.Context, env *Env)
+}
+
+// retrustCASilently: best-effort, im lặng — lỗi gì cũng bỏ qua, không bao giờ
+// hỏi Owner (update có thể đang chạy nền qua watcher).
+func retrustCASilently(ctx context.Context, env *Env) {
+	_ = RunTrustCA(ctx, env, false, TrustCADeps{}, io.Discard)
 }
 
 const defaultUpdateReadyTimeout = 3 * time.Minute
@@ -263,6 +273,12 @@ func RunUpdate(ctx context.Context, env *Env, opts UpdateOptions, deps UpdateDep
 		}
 		_, _ = fmt.Fprintln(out, "     xong: "+objectsHostDir+" -> api:"+volumeObjectsDir)
 	}
+
+	reTrust := deps.ReTrustCA
+	if reTrust == nil {
+		reTrust = retrustCASilently
+	}
+	reTrust(ctx, env)
 
 	_, _ = fmt.Fprintln(out, "Cập nhật xong, dịch vụ đã sẵn sàng.")
 	return nil

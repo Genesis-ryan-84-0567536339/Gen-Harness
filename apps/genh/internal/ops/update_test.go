@@ -81,7 +81,8 @@ func listenReadyServer(t *testing.T, healthy bool) (srv *httptest.Server, port i
 }
 
 func fastUpdateDeps(runner dockercli.Runner) UpdateDeps {
-	return UpdateDeps{Runner: runner, Timeout: 200 * time.Millisecond, PollEvery: 5 * time.Millisecond}
+	return UpdateDeps{Runner: runner, Timeout: 200 * time.Millisecond, PollEvery: 5 * time.Millisecond,
+		ReTrustCA: func(context.Context, *Env) {}}
 }
 
 func TestRunUpdate_HappyPath_ReadySucceeds_NoRollback(t *testing.T) {
@@ -656,5 +657,31 @@ func TestResolveUpdateServices_SplitsPullableAndSkipped(t *testing.T) {
 	}
 	if len(wantSkipped) != 0 {
 		t.Errorf("thiếu trong skipped: %v", wantSkipped)
+	}
+}
+
+func TestRunUpdate_Success_ReTrustsCA_FailureDoesNot(t *testing.T) {
+	for _, healthy := range []bool{true, false} {
+		composePath := testComposePath(t, updateTestComposeYAML)
+		env := testEnv(t, composePath)
+		_, port := listenReadyServer(t, healthy)
+		env.Port = port
+
+		fr := updateHappyFakeRunner()
+		fr.Responses = append(fr.Responses, fake.Response{
+			Match: fake.MatchArgsContain("exec", "-T", "api", "python", "-m", "gh.backup", "restore", "--key"), Output: []byte(""),
+		})
+		deps := fastUpdateDeps(fr)
+		called := 0
+		deps.ReTrustCA = func(context.Context, *Env) { called++ }
+
+		_ = RunUpdate(context.Background(), env, UpdateOptions{Channel: "stable"}, deps, &strings.Builder{})
+		want := 0
+		if healthy {
+			want = 1
+		}
+		if called != want {
+			t.Errorf("healthy=%v: ReTrustCA gọi %d lần, muốn %d", healthy, called, want)
+		}
 	}
 }

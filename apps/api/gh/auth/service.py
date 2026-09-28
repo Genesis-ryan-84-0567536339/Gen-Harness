@@ -56,6 +56,9 @@ class CurrentUser:
     addressing: dict[str, Any]
     permissions: dict[str, str] = field(default_factory=dict)
     ip: str | None = None
+    session_expires_at: datetime | None = None
+    # True khi request này vừa gia hạn phiên (xem load_session) — middleware SessionCookieRenewal đặt lại cookie.
+    session_renewed: bool = False
 
     @property
     def actor_id(self) -> str:
@@ -98,7 +101,7 @@ async def login(db: AsyncSession, email: str, password: str) -> dict[str, Any] |
 
 async def load_session(db: AsyncSession, token: str) -> CurrentUser | None:
     row = (await db.execute(text("""
-        SELECT s.id AS sid, s.pin_verified_until, u.id, u.org_id, u.email, u.display_name, u.addressing,
+        SELECT s.id AS sid, s.pin_verified_until, s.expires_at, u.id, u.org_id, u.email, u.display_name, u.addressing,
                r.id AS role_id, r.code AS role_code, r.name AS role_name, ur.team_id
         FROM core.sessions s
         JOIN core.users u ON u.id = s.user_id
@@ -112,6 +115,14 @@ async def load_session(db: AsyncSession, token: str) -> CurrentUser | None:
     perms = {r.permission_code: r.scope for r in (await db.execute(text(
         "SELECT permission_code, scope FROM core.role_permissions WHERE role_id = :r"), {"r": row.role_id})).all()}
     pin_until = row.pin_verified_until
+    # Phiên đăng nhập trượt: còn dưới nửa TTL thì gia hạn thêm đủ một TTL tính từ bây giờ — Owner dùng đều đặn
+    # thì không bị đăng xuất; bỏ không quá TTL thì hết hạn như cũ. Phiên PIN tách riêng (bên dưới).
+    ttl = timedelta(hours=get_settings().session_ttl_hours)
+    expires_at, renewed = row.expires_at, False
+    if expires_at - now() < ttl / 2:
+        expires_at, renewed = now() + ttl, True
+        await db.execute(text("UPDATE core.sessions SET expires_at = :e, last_seen_at = now() WHERE id = :sid"),
+                         {"e": expires_at, "sid": row.sid})
     # Phiên PIN trượt: hết hạn sau 30 phút KHÔNG thao tác.
     if pin_until is not None and pin_until > now():
         new_until = now() + timedelta(minutes=get_settings().pin_session_minutes)
@@ -122,7 +133,7 @@ async def load_session(db: AsyncSession, token: str) -> CurrentUser | None:
     return CurrentUser(id=row.id, org_id=row.org_id, email=row.email, display_name=row.display_name,
                        role_code=row.role_code, role_name=row.role_name, role_id=row.role_id, team_id=row.team_id,
                        session_id=row.sid, pin_verified_until=pin_until, addressing=row.addressing or {},
-                       permissions=perms)
+                       permissions=perms, session_expires_at=expires_at, session_renewed=renewed)
 
 
 async def csrf_matches(db: AsyncSession, session_id: uuid.UUID, csrf: str) -> bool:

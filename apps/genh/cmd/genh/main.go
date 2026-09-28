@@ -5,7 +5,7 @@
 // internal/install.Registry), hiển thị qua TUI khi có TTY hoặc chế độ dòng
 // khi không có (CI, pipe), và kết thúc bằng màn "Hoàn tất" thật (URL/mã
 // thiết lập/trạng thái mở trình duyệt lấy từ Bước 4 và Bước 8). Các lệnh vận
-// hành (status/open/logs/update/backup/restore/doctor/reset-setup/stop/
+// hành (status/open/logs/update/backup/restore/doctor/reset-setup/reset-password/trust-ca/stop/
 // start/uninstall — xem internal/ops) cũng đã triển khai thật ở phiên này.
 package main
 
@@ -84,6 +84,10 @@ func run(args []string) int {
 		return runDoctor(args[1:])
 	case "reset-setup":
 		return runResetSetup(args[1:])
+	case "reset-password":
+		return runResetPassword(args[1:])
+	case "trust-ca":
+		return runTrustCA(args[1:])
 	case "stop":
 		return runStop(args[1:])
 	case "start":
@@ -136,6 +140,10 @@ Lệnh vận hành (cờ chung mọi lệnh dưới đây: --port N, --install-d
   genh doctor [--out report.zip]         chẩn đoán runtime/cổng/chứng chỉ/dung lượng/đồng hồ/
                                           kết nối kênh, xuất báo cáo zip
   genh reset-setup [--yes]               sinh mã thiết lập mới (hỏi xác nhận trừ khi --yes)
+  genh reset-password                    quên mật khẩu Owner: in email + mật khẩu tạm mới
+                                          (giữ nguyên dữ liệu, đăng xuất các phiên cũ)
+  genh trust-ca                          tin cậy lại CA nội bộ cho trình duyệt/hệ điều hành
+                                          (hết cảnh báo "Not secure"; genh update tự làm)
   genh stop                              dừng toàn bộ dịch vụ (giữ dữ liệu)
   genh start                             khởi động lại toàn bộ dịch vụ
   genh uninstall [--keep-data] [--yes]   gỡ container/volume/lối tắt/PATH (hỏi xác nhận trừ --yes)
@@ -504,6 +512,43 @@ func runResetSetup(args []string) int {
 	}
 	opts := ops.ResetSetupOptions{AutoApprove: *yes}
 	if err := ops.RunResetSetup(env, opts, bufio.NewReader(os.Stdin), os.Stdout); err != nil {
+		reportOpErr(err)
+		return 1
+	}
+	return 0
+}
+
+func runResetPassword(args []string) int {
+	fs, port, installDir := opsFlagSet("reset-password")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	env, ok := resolveOpsEnv(*port, *installDir)
+	if !ok {
+		return 1
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	if err := ops.RunResetPassword(ctx, env, nil, os.Stdout); err != nil {
+		reportOpErr(err)
+		return 1
+	}
+	return 0
+}
+
+func runTrustCA(args []string) int {
+	fs, port, installDir := opsFlagSet("trust-ca")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	env, ok := resolveOpsEnv(*port, *installDir)
+	if !ok {
+		return 1
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	// interactive: Owner đang ngồi trước máy — macOS/Windows được phép bật hộp thoại xác nhận.
+	if err := ops.RunTrustCA(ctx, env, true, ops.TrustCADeps{}, os.Stdout); err != nil {
 		reportOpErr(err)
 		return 1
 	}

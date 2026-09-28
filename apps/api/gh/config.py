@@ -39,7 +39,9 @@ class Settings(BaseSettings):
     release_repo: str = "Genesis-ryan-84-0567536339/Gen-Harness"
     cli_binary: str = "agy"
 
-    session_ttl_hours: int = 12
+    # Phiên đăng nhập 7 ngày, trượt (gia hạn khi còn dưới nửa — gh/auth/service.py::load_session): app tự host,
+    # một Owner, không nên bắt đăng nhập lại mỗi ngày.
+    session_ttl_hours: int = 168
     pin_session_minutes: int = 30
     pin_max_attempts: int = 5
     pin_lock_minutes: int = 15

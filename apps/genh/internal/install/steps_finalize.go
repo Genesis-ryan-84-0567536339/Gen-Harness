@@ -163,7 +163,7 @@ func (s finalizeStep) Run(ctx context.Context, env *Env, rep Reporter) error {
 	if installDir == "" {
 		installDir = filepath.Dir(filepath.Dir(composePath))
 	}
-	certPath := filepath.Join(installDir, "config", "caddy-root.crt")
+	certPath := CACertPath(installDir)
 	if err := os.MkdirAll(filepath.Dir(certPath), 0o700); err != nil {
 		se := &StepError{
 			Code: ErrCodeTrustCAFailed,
@@ -467,3 +467,48 @@ func openBrowserOS(setupURL string) error { return browseropen.Open(setupURL) }
 // riêng của user không cần quyền rộng. Cài đặt thật nằm ở
 // internal/browseropen — xem ghi chú openBrowserOS.
 func createShortcutOS(setupURL string) (string, error) { return browseropen.CreateShortcut(setupURL) }
+
+// ─── Dùng lại ngoài Bước 8 (`genh update` / `genh trust-ca`, xem internal/ops/trustca.go) ───
+
+// ErrTrustSkipped: bỏ qua kho tin cậy vì trên nền tảng này thao tác đó có thể
+// bật hộp thoại hỏi Owner (macOS keychain, Windows kho Root) — không được chạy
+// khi không có người ngồi trước máy (watcher cập nhật tự động).
+var ErrTrustSkipped = errors.New("bỏ qua — cần Owner xác nhận trên màn hình")
+
+// ErrBrowserTrustUnsupported xuất errBrowserTrustUnsupported cho package khác.
+var ErrBrowserTrustUnsupported = errBrowserTrustUnsupported
+
+// CACertPath là nơi Bước 8 ghi CA nội bộ của Caddy: <gốc cài đặt>/config/caddy-root.crt.
+func CACertPath(installDir string) string {
+	return filepath.Join(installDir, "config", "caddy-root.crt")
+}
+
+// ExtractCaddyRootCert đọc CA nội bộ của Caddy từ container proxy (xem extractCaddyRootCert).
+func ExtractCaddyRootCert(ctx context.Context, runner dockercli.Runner, composePath string, envOverlay []string) ([]byte, error) {
+	return extractCaddyRootCert(ctx, runner, composePath, envOverlay)
+}
+
+// WriteCACert ghi CA ra certPath (0600, ghi nguyên tử) — như Bước 8.
+func WriteCACert(certPath string, pem []byte) error {
+	if err := os.MkdirAll(filepath.Dir(certPath), 0o700); err != nil {
+		return err
+	}
+	return writeFileAtomicPerm(certPath, pem, 0o600)
+}
+
+// TrustBrowserOS tin cậy CA vào kho NSS của chính user (Chrome/Firefox trên
+// Linux) — không cần sudo, không bao giờ hỏi gì.
+func TrustBrowserOS(ctx context.Context, certPath string) error {
+	return trustBrowserOS(ctx, certPath)
+}
+
+// TrustSystemOS tin cậy CA vào kho hệ điều hành. Linux dùng `sudo -n` (không
+// có sudo cache thì thất bại ngay, không hỏi mật khẩu). macOS/Windows có thể
+// bật hộp thoại xác nhận, nên chỉ chạy khi interactive — ngược lại trả
+// ErrTrustSkipped.
+func TrustSystemOS(ctx context.Context, certPath string, interactive bool) error {
+	if runtime.GOOS != "linux" && !interactive {
+		return ErrTrustSkipped
+	}
+	return trustCAOS(ctx, certPath)
+}

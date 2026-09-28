@@ -82,3 +82,40 @@ class ActionLogGuard:
                     await db.commit()
             except Exception:  # noqa: BLE001
                 log.exception("Không ghi được Action Log cho %s %s", scope["method"], scope["path"])
+
+
+class SessionCookieRenewal:
+    """Phiên vừa được gia hạn trượt (gh/auth/deps.py đặt `state.session_renewed`) → đặt lại cookie phiên + CSRF
+    với hạn mới. Làm ở tầng ASGI để áp cho MỌI response, kể cả route trả Response trực tiếp."""
+
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+
+        async def _send(msg: Message) -> None:
+            if msg["type"] == "http.response.start":
+                expires = scope.get("state", {}).get("session_renewed")
+                if expires is not None:
+                    msg["headers"] = list(msg.get("headers", [])) + _renewed_cookie_headers(scope, expires)
+            await send(msg)
+
+        await self.app(scope, receive, _send)
+
+
+def _renewed_cookie_headers(scope: Scope, expires: Any) -> list[tuple[bytes, bytes]]:
+    from starlette.requests import Request
+    from starlette.responses import Response
+
+    from gh.auth import routes as auth_routes
+    from gh.auth import service
+
+    cookies = Request(scope).cookies
+    token, csrf = cookies.get(service.SESSION_COOKIE), cookies.get(service.CSRF_COOKIE)
+    if not token or not csrf:
+        return []
+    tmp = Response()
+    auth_routes.set_session_cookies(tmp, service.NewSession(token=token, csrf=csrf, expires_at=expires))
+    return [(k, v) for k, v in tmp.raw_headers if k == b"set-cookie"]

@@ -38,6 +38,8 @@ async def optional_user(request: Request, db: AsyncSession = DB) -> service.Curr
                 or not await service.csrf_matches(db, user.session_id, header):
             raise ApiError(403, "CSRF_INVALID", "Phiên không hợp lệ, hãy tải lại trang")
     request.state.user = user
+    if user.session_renewed and user.session_expires_at is not None:
+        request.state.session_renewed = user.session_expires_at
     return user
 
 
