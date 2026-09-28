@@ -84,7 +84,7 @@ const stateAt = (current: number, done: number[] = [], skipped: number[] = []): 
     n: i + 1,
     key: `s${i + 1}`,
     title: `Bước ${i + 1}`,
-    required: ![10, 11].includes(i + 1),
+    required: i + 1 <= 4 || i + 1 === 12,
     status: done.includes(i + 1) ? 'done' : skipped.includes(i + 1) ? 'skipped' : i + 1 === current ? 'doing' : 'todo',
   })),
 });
@@ -121,8 +121,10 @@ describe('step state', () => {
   });
 
   it('missingRequiredSteps lists what blocks PUT /setup/steps/12', () => {
-    const s = stateAt(12, [1, 2, 3, 4, 5, 6, 7], [10, 11]);
-    expect(missingRequiredSteps(s).map((m) => m.n)).toEqual([8, 9]);
+    // Chỉ 1–4 bắt buộc: thiếu bước 4 là bị chặn, còn 5–11 để sau không chặn hoàn tất.
+    const s = stateAt(12, [1, 2, 3], [5, 6, 7, 8, 9, 10, 11]);
+    expect(missingRequiredSteps(s).map((m) => m.n)).toEqual([4]);
+    expect(missingRequiredSteps(stateAt(12, [1, 2, 3, 4], [5, 6, 7, 8, 9, 10, 11]))).toEqual([]);
     expect(missingRequiredSteps(stateAt(12, [1, 2, 3, 4, 5, 6, 7, 8, 9], [10, 11]))).toEqual([]);
   });
 });
@@ -250,15 +252,15 @@ describe('<SetupPage>', () => {
     // Bước 10 "Mời đội ngũ" đã có form thật (giai đoạn 4.6) — bỏ trống danh sách vẫn Tiếp tục được.
     expect(screen.getByText('Chưa mời ai')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Tiếp tục/ })).toBeEnabled();
-    await user.click(screen.getByRole('button', { name: 'Bỏ qua' }));
+    await user.click(screen.getByRole('button', { name: 'Để sau' }));
     expect(await screen.findByRole('heading', { name: 'Bước 11' })).toBeInTheDocument();
     // Bước 11 "Sao lưu" có form thật, mặc định hằng ngày 02:00 — vẫn bỏ qua được.
     expect(screen.getByLabelText('Giờ chạy (HH:MM)')).toHaveValue('02:00');
-    expect(screen.getByRole('button', { name: 'Bỏ qua' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Để sau' })).toBeInTheDocument();
     // Bước 12 is required: no skip button
     queryClient.setQueryData(['setup', 'state'], stateAt(12, [1, 2, 3, 4, 5, 6, 7, 8, 9, 11], [10]));
     expect(await screen.findByRole('heading', { name: 'Bước 12' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Bỏ qua' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Để sau' })).not.toBeInTheDocument();
   });
 
   it('bước 10: thêm người mời gửi đủ display_name/email/role, hiện mật khẩu tạm rồi mới sang bước 11', async () => {
@@ -291,25 +293,25 @@ describe('<SetupPage>', () => {
 
   it('step 12: explains the missing required steps and shows the 409 STEP_INCOMPLETE message inline', async () => {
     const user = userEvent.setup();
-    const state = stateAt(12, [1, 2, 3, 4, 5, 6, 7], [10, 11]);
-    state.steps[7].status = 'todo';
+    const state = stateAt(12, [1, 2, 3], [5, 6, 7, 8, 9, 10, 11]);
+    state.steps[3].status = 'todo';
     const put = vi.fn();
     mockFetch((url, init) => {
       if (url.endsWith('/setup/steps/12') && init.method === 'PUT') {
         put();
-        return json(409, { status: 409, code: 'STEP_INCOMPLETE', title: 'Còn bước bắt buộc chưa xong: 8, 9' });
+        return json(409, { status: 409, code: 'STEP_INCOMPLETE', title: 'Còn bước bắt buộc chưa xong: 4' });
       }
       if (url.includes('/setup/first-run')) return json(200, { raw_collected: 1244, classifying: 250, clean: 812, lowconf: 31, discarded: 120, run: null });
       if (url.includes('/setup/')) return json(200, state);
       return json(200, []);
     });
     renderSetup();
-    expect(await screen.findByText('Còn bước bắt buộc chưa xong: 8, 9')).toBeInTheDocument();
+    expect(await screen.findByText('Còn bước bắt buộc chưa xong: 4')).toBeInTheDocument();
     expect(await screen.findByText('1.244')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /Mở Tổng quan điều hành/ }));
     await waitFor(() => expect(put).toHaveBeenCalled());
     const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent('Còn bước bắt buộc chưa xong: 8, 9');
+    expect(alert).toHaveTextContent('Còn bước bắt buộc chưa xong: 4');
   });
 
   it('step 5: 409 STEP_INCOMPLETE shows the server message, not a generic conflict', async () => {
@@ -340,5 +342,42 @@ describe('<SetupPage>', () => {
     renderSetup();
     expect(await screen.findByText('Không tải được trạng thái thiết lập', {}, { timeout: 4000 })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Thử lại/ })).toBeInTheDocument();
+  });
+
+  it('bước 8–9 có form thật: tạo agent, nghe thử trả lời, rồi chọn mức tự trị và xác nhận ranh giới', async () => {
+    const user = userEvent.setup();
+    let state = stateAt(8, [1, 2, 3, 4], [5, 6, 7]);
+    const calls: Array<{ url: string; body: unknown }> = [];
+    mockFetch((url, init) => {
+      const body = init.body ? JSON.parse(String(init.body)) : undefined;
+      if (url.endsWith('/setup/steps/8') && init.method === 'PUT') {
+        calls.push({ url, body });
+        state = stateAt(9, [1, 2, 3, 4, 8], [5, 6, 7]);
+        return json(200, { ...state, agent: { id: 'a1', name: body.name, try_reply: 'Chào Sếp, em là Thư ký.', try_error: null } });
+      }
+      if (url.endsWith('/setup/hard-boundaries')) return json(200, ['Chỉ lắng nghe nhóm Owner đã bật']);
+      if (url.endsWith('/setup/steps/9') && init.method === 'PUT') {
+        calls.push({ url, body });
+        state = stateAt(10, [1, 2, 3, 4, 8, 9], [5, 6, 7]);
+        return json(200, { ...state, hard_boundaries: [] });
+      }
+      if (url.includes('/setup/')) return json(200, state);
+      return json(404, { status: 404, code: 'NOT_FOUND', title: 'Không tồn tại' });
+    });
+    renderSetup();
+    await screen.findByRole('heading', { name: 'Bước 8' });
+    await user.selectOptions(screen.getByLabelText('Mẫu'), 'secretary');
+    expect(screen.getByLabelText('Tên agent')).toHaveValue('Thư ký');
+    await user.click(screen.getByRole('button', { name: /Tiếp tục/ }));
+    expect(await screen.findByText('Chào Sếp, em là Thư ký.')).toBeInTheDocument();
+    expect(calls[0].body).toMatchObject({ name: 'Thư ký', template: 'secretary' });
+    await user.click(screen.getByRole('button', { name: /Tiếp tục/ }));
+    await screen.findByRole('heading', { name: 'Bước 9' });
+    expect(await screen.findByText('Chỉ lắng nghe nhóm Owner đã bật')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Tiếp tục/ })).toBeDisabled();
+    await user.click(screen.getByLabelText('Tôi đã đọc các ranh giới trên'));
+    await user.click(screen.getByRole('button', { name: /Tiếp tục/ }));
+    await screen.findByRole('heading', { name: 'Bước 10' });
+    expect(calls[1].body).toEqual({ autonomy_level: 4, ack_boundaries: true });
   });
 });

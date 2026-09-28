@@ -154,6 +154,38 @@ export interface Step11Body {
 
 export type BackupConfig = Step11Body;
 
+// ── Trình thiết lập bước 8–9 + việc thiết lập tiếp ───────────────────────────
+
+export interface Step8Body {
+  name: string;
+  role_desc: string;
+  voice?: string;
+  speak_when?: string;
+  template?: string | null;
+  try_message: string;
+}
+
+export interface Step8Agent {
+  id: string;
+  name: string;
+  try_reply: string | null;
+  try_error: string | null;
+}
+
+export interface Step9Body {
+  autonomy_level: 3 | 4;
+  ack_boundaries: boolean;
+}
+
+/** `GET /setup/follow-up` — bước tuỳ chọn chưa xong trong trình thiết lập; `done` suy từ dữ liệu thật. */
+export interface SetupFollowUpItem {
+  n: number;
+  key: string;
+  title: string;
+  status: 'todo' | 'doing' | 'skipped';
+  done: boolean;
+}
+
 const enc = encodeURIComponent;
 
 /** `/permissions`, `/listening-groups`, `/boundaries*`, `/audit-log*`, `/retention-policies`, `/persons/{id}/data-requests`. */

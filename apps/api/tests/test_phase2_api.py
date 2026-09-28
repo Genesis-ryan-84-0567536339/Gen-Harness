@@ -191,3 +191,24 @@ def test_crypto_vectors_match_bridge(monkeypatch) -> None:  # type: ignore[no-un
         assert crypto.transport_decrypt(again, "zalo:x") == plain
     finally:
         get_settings.cache_clear()
+
+
+async def test_follow_up_lists_deferred_steps_and_detects_real_completion(owner_api, db) -> None:  # type: ignore[no-untyped-def]
+    """Bước "Để sau" hiện ở Tổng quan; làm xong ở Console (có dữ liệu thật) thì tự `done` — không bấm tay."""
+    api: Api = owner_api
+    org = await org_id(db)
+    for n in (5, 8, 11):
+        assert (await api.send("POST", f"/setup/steps/{n}/skip")).status_code == 200
+    items = {i["n"]: i for i in (await api.get("/setup/follow-up")).json()}
+    assert items[5]["status"] == "skipped" and not items[5]["done"]
+    assert not items[8]["done"] and not items[11]["done"]
+    ch = (await db.execute(text("SELECT id FROM core.channels WHERE org_id = :o AND type = 'zalo'"),
+                           {"o": org})).scalar()
+    await db.execute(text("""INSERT INTO core.channel_sessions (channel_id, org_id, account_label, state, started_at)
+                             VALUES (:c, :o, 'Zalo Sếp', 'active', now())"""), {"c": ch, "o": org})
+    await db.execute(text("""INSERT INTO agent.identities (org_id, name, role_desc, addressing, voice, speak_when,
+                             autonomy_level) VALUES (:o, 'Mai', 'CSKH', '{}'::jsonb, 'x', 'y', 4)"""), {"o": org})
+    await db.commit()
+    items = {i["n"]: i for i in (await api.get("/setup/follow-up")).json()}
+    assert items[5]["done"] and items[8]["done"] and items[9]["done"]
+    assert not items[11]["done"]

@@ -63,7 +63,7 @@ export function StepFrame({
         <span className="setup-actions__spacer" />
         {onSkip ? (
           <Button variant="secondary" onClick={onSkip} loading={skipping}>
-            Bỏ qua
+            Để sau
           </Button>
         ) : null}
         <Button variant="primary" type="submit" disabled={!canContinue} loading={busy} iconRight={continueIcon}>

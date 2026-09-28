@@ -10,7 +10,7 @@ import { agentModelEndpoints } from './p4-api';
 import { mcpEndpoints } from './p4-mcp';
 import { pluginsEndpoints } from './p4-plugins';
 import { systemEndpoints } from './p4-system';
-import type { Step10Body, Step11Body, Step10Invited, BackupConfig } from './p4-system';
+import type { Step10Body, Step11Body, Step10Invited, BackupConfig, Step8Body, Step8Agent, Step9Body, SetupFollowUpItem } from './p4-system';
 import type {
   AuditPage,
   AuditVerify,
@@ -117,6 +117,14 @@ export function createEndpoints(client: ApiClient) {
         r<SetupState>('/setup/steps/6', { method: 'PUT', body, skipSetupRedirect: true }),
       step7: (body: SetupStep7Body) =>
         r<SetupState>('/setup/steps/7', { method: 'PUT', body, skipSetupRedirect: true }),
+      /** Bước 8 "Agent đầu tiên" — tạo agent và thử trò chuyện một lượt (`try_reply` null kèm `try_error` khi model chưa gọi được). */
+      step8: (body: Step8Body) =>
+        r<SetupState & { agent: Step8Agent }>('/setup/steps/8', { method: 'PUT', body, skipSetupRedirect: true }),
+      /** Bước 9 "Tự trị & ranh giới" — mức 3 hoặc 4, bắt xác nhận đã đọc ranh giới khoá cứng. */
+      step9: (body: Step9Body) =>
+        r<SetupState & { hard_boundaries: string[] }>('/setup/steps/9', { method: 'PUT', body, skipSetupRedirect: true }),
+      hardBoundaries: (signal?: AbortSignal) => r<string[]>('/setup/hard-boundaries', { signal, skipSetupRedirect: true }),
+      followUp: (signal?: AbortSignal) => r<SetupFollowUpItem[]>('/setup/follow-up', { signal }),
       /** Bước 10 "Mời đội ngũ" (tuỳ chọn, GĐ 4.6) — trả kèm `invited` (mật khẩu tạm, chưa có SMTP thật). */
       step10: (body: Step10Body) =>
         r<SetupState & { invited: Step10Invited[] }>('/setup/steps/10', { method: 'PUT', body, skipSetupRedirect: true }),
