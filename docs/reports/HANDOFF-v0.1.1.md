@@ -308,3 +308,15 @@ Lần đầu cài thật toàn bộ bằng Docker (workflow `e2e-install`) lộ 
 - Sửa (`gh/providers/cli.py`): trả lời DA1/DA2/kitty/CPR như một xterm; đặt kích thước pty 1000 cột bằng TIOCSWINSZ; lấy link từ OSC 8 trước, rồi mới tới chữ.
 - Test `tests/test_cli_login.py` dùng CLI giả `tests/fixtures/fake_agy.py` mô phỏng đúng hai hành vi trên, đi hết luồng Console tới hồ sơ `done`. Test đỏ với code cũ, xanh với code mới. Chạy tay với agy thật: tới `waiting_code` và nhận link 704 ký tự.
 - Chưa kiểm được: bước dán mã xác thực thật (cần tài khoản Google). Test giả gửi mã + Enter giống code hiện có.
+
+## v0.1.13 — Cài xong trình duyệt không còn báo "Not secure"
+
+- Owner cài v0.1.11 bằng `curl … | sh` (không có `--yes`) nên Bước 8 không tin cậy CA nào. Chrome báo "Not secure", Owner phải tự chạy `certutil` + `update-ca-trust`.
+- Nguyên nhân:
+  - Chrome/Firefox trên Linux đọc kho NSS riêng của user (`~/.pki/nssdb`, hồ sơ Firefox), không đọc kho hệ thống.
+  - `trustCALinux` chỉ hỗ trợ Debian (`update-ca-certificates`) và chỉ chạy khi có `--yes`.
+- Sửa (`internal/install/steps_finalize.go`):
+  - `trustBrowserOS` luôn chạy, kể cả không `--yes`, vì chỉ ghi kho NSS của chính user (không cần sudo). Nó ghi vào `~/.pki/nssdb` (tạo mới nếu chưa có) và mọi hồ sơ Firefox, bằng `certutil`.
+  - Thiếu `certutil` thì chỉ cảnh báo kèm tên gói cần cài.
+  - `trustCALinux` giờ hỗ trợ cả Fedora/RHEL (`update-ca-trust`) và cài tệp với quyền 0644.
+- Chưa kiểm được `certutil` thật trong container này (không cài được gói); test `TestAddToNSSDB_RealCertutil` chạy khi máy có certutil.

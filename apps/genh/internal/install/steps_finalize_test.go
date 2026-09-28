@@ -2,12 +2,21 @@ package install
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"errors"
+	"math/big"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/dockercli/fake"
 )
@@ -40,9 +49,10 @@ func fakeExtractRunner(pem string, err error) *fake.Runner {
 	}}
 }
 
-func noopTrustCA(context.Context, string) error { return nil }
-func noopOpenBrowser(string) error              { return nil }
-func noopCreateShortcut(string) (string, error) { return "/tmp/fake-shortcut", nil }
+func noopTrustCA(context.Context, string) error      { return nil }
+func noopTrustBrowser(context.Context, string) error { return errBrowserTrustUnsupported }
+func noopOpenBrowser(string) error                   { return nil }
+func noopCreateShortcut(string) (string, error)      { return "/tmp/fake-shortcut", nil }
 
 func TestFinalizeStep_AutoApproveFalse_DoesNotCallTrustCA_AndSucceeds(t *testing.T) {
 	composePath := testComposePath(t)
@@ -56,6 +66,7 @@ func TestFinalizeStep_AutoApproveFalse_DoesNotCallTrustCA_AndSucceeds(t *testing
 			trustCACalled = true
 			return nil
 		},
+		trustBrowser:   noopTrustBrowser,
 		openBrowser:    noopOpenBrowser,
 		createShortcut: noopCreateShortcut,
 	}
@@ -111,6 +122,7 @@ func TestFinalizeStep_ExtractCAFails_ReturnsStructuredError(t *testing.T) {
 		runner:         fr,
 		locate:         func(string) (string, error) { return composePath, nil },
 		trustCA:        noopTrustCA,
+		trustBrowser:   noopTrustBrowser,
 		openBrowser:    noopOpenBrowser,
 		createShortcut: noopCreateShortcut,
 	}
@@ -133,6 +145,7 @@ func TestFinalizeStep_MissingSecrets_ReturnsStructuredError(t *testing.T) {
 		runner:         fr,
 		locate:         func(string) (string, error) { return composePath, nil },
 		trustCA:        noopTrustCA,
+		trustBrowser:   noopTrustBrowser,
 		openBrowser:    noopOpenBrowser,
 		createShortcut: noopCreateShortcut,
 	}
@@ -154,6 +167,7 @@ func TestFinalizeStep_ComposeNotFound_ReturnsStructuredError(t *testing.T) {
 	step := finalizeStep{
 		locate:         func(string) (string, error) { return "", errors.New("không thấy") },
 		trustCA:        noopTrustCA,
+		trustBrowser:   noopTrustBrowser,
 		openBrowser:    noopOpenBrowser,
 		createShortcut: noopCreateShortcut,
 	}
@@ -175,6 +189,7 @@ func TestFinalizeStep_AutoApproveTrue_TrustSucceeds_FinalStatusOK(t *testing.T) 
 		runner:         fr,
 		locate:         func(string) (string, error) { return composePath, nil },
 		trustCA:        noopTrustCA,
+		trustBrowser:   noopTrustBrowser,
 		openBrowser:    noopOpenBrowser,
 		createShortcut: noopCreateShortcut,
 	}
@@ -206,6 +221,7 @@ func TestFinalizeStep_AutoApproveTrue_TrustFails_IsWarnNotError(t *testing.T) {
 		trustCA: func(context.Context, string) error {
 			return errors.New("sudo: a password is required")
 		},
+		trustBrowser:   noopTrustBrowser,
 		openBrowser:    noopOpenBrowser,
 		createShortcut: noopCreateShortcut,
 	}
@@ -234,6 +250,7 @@ func TestFinalizeStep_OpenBrowserFails_SetsBrowserOpenedFalse_NoError(t *testing
 		runner:         fr,
 		locate:         func(string) (string, error) { return composePath, nil },
 		trustCA:        noopTrustCA,
+		trustBrowser:   noopTrustBrowser,
 		openBrowser:    func(string) error { return errors.New("xdg-open: not found") },
 		createShortcut: noopCreateShortcut,
 	}
@@ -262,10 +279,11 @@ func TestFinalizeStep_ShortcutFails_IsWarnNotError(t *testing.T) {
 	fr := fakeExtractRunner(fakeCAPEM, nil)
 
 	step := finalizeStep{
-		runner:      fr,
-		locate:      func(string) (string, error) { return composePath, nil },
-		trustCA:     noopTrustCA,
-		openBrowser: noopOpenBrowser,
+		runner:       fr,
+		locate:       func(string) (string, error) { return composePath, nil },
+		trustCA:      noopTrustCA,
+		trustBrowser: noopTrustBrowser,
+		openBrowser:  noopOpenBrowser,
 		createShortcut: func(string) (string, error) {
 			return "", errors.New("không ghi được tệp .desktop")
 		},
@@ -293,10 +311,11 @@ func TestFinalizeStep_CreateShortcut_Linux_WritesRealDesktopFile(t *testing.T) {
 	t.Setenv("HOME", fakeHome)
 
 	step := finalizeStep{
-		runner:      fr,
-		locate:      func(string) (string, error) { return composePath, nil },
-		trustCA:     noopTrustCA,
-		openBrowser: noopOpenBrowser,
+		runner:       fr,
+		locate:       func(string) (string, error) { return composePath, nil },
+		trustCA:      noopTrustCA,
+		trustBrowser: noopTrustBrowser,
+		openBrowser:  noopOpenBrowser,
 		// createShortcut để nil => dùng createShortcutOS thật.
 	}
 
@@ -336,4 +355,72 @@ func TestSetupURL_DefaultsPortWhenUnset(t *testing.T) {
 	if !strings.HasPrefix(got, "https://localhost:8443/setup?token=") {
 		t.Errorf("SetupURL phải dùng machine.DefaultPort khi Env.Port <= 0, được %q", got)
 	}
+}
+
+// Không có --yes vẫn phải tin cậy CA cho trình duyệt (kho NSS của user, không
+// cần sudo) — Owner cài bằng `curl … | sh` không bao giờ truyền --yes, và
+// trước đây luôn bị cảnh báo "Not secure" trên Chrome.
+func TestFinalizeStep_TrustsBrowserWithoutAutoApprove(t *testing.T) {
+	composePath := testComposePath(t)
+	called := false
+	step := finalizeStep{
+		runner:  fakeExtractRunner(fakeCAPEM, nil),
+		locate:  func(string) (string, error) { return composePath, nil },
+		trustCA: noopTrustCA,
+		trustBrowser: func(context.Context, string) error {
+			called = true
+			return nil
+		},
+		openBrowser:    noopOpenBrowser,
+		createShortcut: noopCreateShortcut,
+	}
+	env := finalizeTestEnv(t)
+	env.AutoApprove = false
+	var last Progress
+	if err := step.Run(context.Background(), env, ReporterFunc(func(p Progress) { last = p })); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !called {
+		t.Fatal("trustBrowser phải được gọi cả khi không có --yes")
+	}
+	if last.Status != StatusOK {
+		t.Errorf("Status cuối = %v, muốn OK khi trình duyệt đã tin cậy", last.Status)
+	}
+}
+
+// Chạy certutil thật (nếu máy có) trên một NSS db tạm: tạo db mới rồi thêm CA.
+func TestAddToNSSDB_RealCertutil(t *testing.T) {
+	if !lookPath("certutil") {
+		t.Skip("máy không có certutil")
+	}
+	dir := filepath.Join(t.TempDir(), "nssdb")
+	cert := filepath.Join(t.TempDir(), "ca.crt")
+	if err := os.WriteFile(cert, realCAPEM(t), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := addToNSSDB(context.Background(), dir, cert); err != nil {
+		t.Fatalf("addToNSSDB: %v", err)
+	}
+	out, err := exec.Command("certutil", "-d", "sql:"+dir, "-L").CombinedOutput()
+	if err != nil || !strings.Contains(string(out), "Gen-Harness local CA") {
+		t.Fatalf("CA không có trong db: %v\n%s", err, out)
+	}
+}
+
+func realCAPEM(t *testing.T) []byte {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "Gen-Harness test CA"},
+		NotBefore: time.Now(), NotAfter: time.Now().Add(time.Hour),
+		IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 }
