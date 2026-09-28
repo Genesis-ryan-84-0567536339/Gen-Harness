@@ -118,6 +118,15 @@ func locate(installDir string, sync bool) (string, error) {
 	var managedPath string
 	if installDir != "" {
 		managedPath = filepath.Join(installDir, "deploy", "compose.yaml")
+		// Hộp thư Console ↔ genh (bind mount của api, xem internal/hostlink) phải có
+		// TRƯỚC `up` — nếu không Docker tự tạo thư mục với chủ root và api không ghi
+		// được yêu cầu cập nhật. Đường dẫn đi qua biến môi trường (mọi lệnh docker
+		// compose của genh kế thừa os.Environ) để đúng cả khi compose.yaml nằm chỗ
+		// khác (GENH_COMPOSE_FILE, repo) — "../run" chỉ đúng với bản cài genh quản lý.
+		if err := hostlink.EnsureDir(installDir); err != nil {
+			return "", fmt.Errorf("tạo %s: %w", hostlink.Dir(installDir), err)
+		}
+		_ = os.Setenv(hostlink.EnvDir, hostlink.Dir(installDir))
 	}
 
 	for _, c := range SearchCandidates(installDir, cwd, exeDir) {
@@ -128,11 +137,6 @@ func locate(installDir string, sync bool) (string, error) {
 		if managedPath != "" && c == managedPath {
 			if err := ensureCaddyfile(filepath.Dir(managedPath), sync); err != nil {
 				return "", err
-			}
-			// Hộp thư Console ↔ genh (bind mount ../run của api) phải có TRƯỚC `up`,
-			// nếu không Docker tự tạo với chủ root và api không ghi được yêu cầu cập nhật.
-			if err := hostlink.EnsureDir(installDir); err != nil {
-				return "", fmt.Errorf("tạo %s: %w", hostlink.Dir(installDir), err)
 			}
 			if sync {
 				if err := syncEmbeddedCompose(managedPath); err != nil {
@@ -150,9 +154,6 @@ func locate(installDir string, sync bool) (string, error) {
 		if path, err := writeEmbeddedCompose(managedPath); err == nil {
 			if err := ensureCaddyfile(filepath.Dir(managedPath), sync); err != nil {
 				return "", err
-			}
-			if err := hostlink.EnsureDir(installDir); err != nil {
-				return "", fmt.Errorf("tạo %s: %w", hostlink.Dir(installDir), err)
 			}
 			return path, nil
 		}

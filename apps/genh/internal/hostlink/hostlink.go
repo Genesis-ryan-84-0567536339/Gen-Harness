@@ -22,6 +22,10 @@ import (
 	"time"
 )
 
+// EnvDir là biến môi trường genh đặt cho docker compose: đường dẫn hộp thư trên
+// máy chủ (compose.yaml: ${GH_HOST_LINK_DIR:-../run}:/var/lib/gh/host).
+const EnvDir = "GH_HOST_LINK_DIR"
+
 const (
 	InfoFile    = "genh.json"
 	RequestDir  = "request"
