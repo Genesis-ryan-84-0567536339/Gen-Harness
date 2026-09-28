@@ -150,7 +150,7 @@ export function SetupPage() {
     onSaved,
     onNext,
     formRef,
-    // Bước 10–11 (không bắt buộc) dùng chung nút "Bỏ qua" với ComingSoonStep; các bước khác bỏ qua field này.
+    // Bước 10–11 (không bắt buộc) dùng chung nút "Để sau" với ComingSoonStep; các bước khác bỏ qua field này.
     onSkip: !current.required && current.status !== 'done' && current.status !== 'skipped' ? () => void onSkip() : undefined,
     skipping,
     skipError,
@@ -245,7 +245,7 @@ function StatusMark({ status }: { status: SetupStepStatus }) {
         </span>
       );
     case 'skipped':
-      return <span className="setup-steps__mark setup-steps__mark--skipped">bỏ qua</span>;
+      return <span className="setup-steps__mark setup-steps__mark--skipped">để sau</span>;
     default:
       return (
         <span className="setup-steps__mark setup-steps__mark--todo" aria-label="chưa làm">

@@ -330,3 +330,13 @@ Lần đầu cài thật toàn bộ bằng Docker (workflow `e2e-install`) lộ 
   - `gh/setup/routes.py` `STEPS`: 5–9 → không bắt buộc (bỏ qua được, làm sau ở Console). Bắt buộc còn 1–4 và 12.
   - Web: `steps.ts` + mock; bước 5–7 có nút "Bỏ qua".
   - Test mới `test_setup_finishes_with_only_steps_1_to_4`.
+
+## v0.1.15 — "Để sau" thay cho "Bỏ qua": các bước chưa làm hiện ở Tổng quan
+
+- Owner góp ý: bước 5–11 phải được chuyển sang "thiết lập sau", không phải bỏ qua cho mất.
+- Web:
+  - Nút ở trình thiết lập đổi thành **"Để sau"**, dấu ở thanh bước cũng thành "để sau".
+  - Màn Tổng quan có thẻ **"Việc thiết lập tiếp"** (`screens/queue/SetupFollowUp.tsx`), liệt kê các bước `skipped`. Mỗi mục có nút "Làm ngay" tới màn Console tương ứng: kênh → `/system?tab=channels`, nhóm → `/directory`, quy tắc → `/rules`, agent/tự trị → `/agents`, đội ngũ → `/system?tab=roles`, sao lưu → `/system?tab=storage`.
+  - Nút "Đã xong" ẩn mục (localStorage của trình duyệt).
+  - Test `test/unit/setup-followup.test.tsx`.
+- Còn mở: trạng thái "đã xong" chưa tự suy từ dữ liệu thật (ví dụ kênh đã có phiên active) mà do Owner bấm. Có thể thêm API sau.

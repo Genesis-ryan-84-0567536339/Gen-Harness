@@ -36,7 +36,7 @@ export function ComingSoonStep({ meta, status, onBack, onSkip, skipping, onNext,
         title="Sắp có"
         description={
           settled
-            ? `Bước này đã ${status === 'skipped' ? 'được bỏ qua' : 'hoàn tất'}. Chỉnh lại được sau ở màn tương ứng của Console.`
+            ? `Bước này đã ${status === 'skipped' ? 'được để sau' : 'hoàn tất'}. Chỉnh lại được sau ở màn tương ứng của Console.`
             : 'Bước này được dựng ở giai đoạn sau của Gen-Harness. Bấm Tiếp tục để sang bước kế — làm lại được ở màn tương ứng khi có.'
         }
       />
@@ -44,7 +44,7 @@ export function ComingSoonStep({ meta, status, onBack, onSkip, skipping, onNext,
         <span className="setup-when__key">hoàn thành khi</span>
         <span className="setup-when__val">{meta.doneWhen}</span>
         <span className="setup-when__key">bắt buộc</span>
-        <span className="setup-when__val">{meta.required ? 'có' : 'không — bỏ qua được'}</span>
+        <span className="setup-when__val">{meta.required ? 'có' : 'không — để sau được'}</span>
       </div>
     </StepFrame>
   );

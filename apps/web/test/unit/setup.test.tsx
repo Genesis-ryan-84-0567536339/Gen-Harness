@@ -250,15 +250,15 @@ describe('<SetupPage>', () => {
     // Bước 10 "Mời đội ngũ" đã có form thật (giai đoạn 4.6) — bỏ trống danh sách vẫn Tiếp tục được.
     expect(screen.getByText('Chưa mời ai')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Tiếp tục/ })).toBeEnabled();
-    await user.click(screen.getByRole('button', { name: 'Bỏ qua' }));
+    await user.click(screen.getByRole('button', { name: 'Để sau' }));
     expect(await screen.findByRole('heading', { name: 'Bước 11' })).toBeInTheDocument();
     // Bước 11 "Sao lưu" có form thật, mặc định hằng ngày 02:00 — vẫn bỏ qua được.
     expect(screen.getByLabelText('Giờ chạy (HH:MM)')).toHaveValue('02:00');
-    expect(screen.getByRole('button', { name: 'Bỏ qua' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Để sau' })).toBeInTheDocument();
     // Bước 12 is required: no skip button
     queryClient.setQueryData(['setup', 'state'], stateAt(12, [1, 2, 3, 4, 5, 6, 7, 8, 9, 11], [10]));
     expect(await screen.findByRole('heading', { name: 'Bước 12' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Bỏ qua' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Để sau' })).not.toBeInTheDocument();
   });
 
   it('bước 10: thêm người mời gửi đủ display_name/email/role, hiện mật khẩu tạm rồi mới sang bước 11', async () => {
