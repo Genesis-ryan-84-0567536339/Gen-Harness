@@ -35,7 +35,7 @@ from gh.errors import (
     validation_error_handler,
 )
 from gh.mcp_api.routes import router as mcp_router
-from gh.middleware import ActionLogGuard, SetupGate
+from gh.middleware import ActionLogGuard, SessionCookieRenewal, SetupGate
 from gh.plugins_api.routes import router as plugins_router
 from gh.providers import cli as climod
 from gh.providers.router import ModelRouter
@@ -191,6 +191,7 @@ def create_app(*, with_lifespan: bool = True) -> FastAPI:
     app.include_router(agents_router, prefix="/api/v1")
     app.include_router(realtime.router, prefix="/api/v1")
     # Thứ tự: middleware thêm sau bọc ngoài cùng.
+    app.add_middleware(SessionCookieRenewal)
     app.add_middleware(ActionLogGuard)
     app.add_middleware(SetupGate)
     return app

@@ -399,3 +399,16 @@ Lần đầu cài thật toàn bộ bằng Docker (workflow `e2e-install`) lộ 
   - web: `test/unit/update.test.tsx`;
   - E2E cài thật: container api ghi yêu cầu, watcher phải chạy xong trong 7 phút.
 - **Bản cài cũ cần chạy `genh update` tay MỘT lần** để có watcher; từ đó về sau chỉ cần bấm nút.
+
+## v0.1.18 — Đăng nhập lại sau cập nhật
+
+- Owner báo sau khi cập nhật: Chrome lại hiện "Not secure", thẻ đăng nhập lệch trái, bị đăng xuất và quên mật khẩu Owner.
+- **Web**: `.login` căn giữa (`justify-content: center`); dưới form có dòng "Quên mật khẩu? Trên máy chủ chạy: `~/.gen-harness/bin/genh reset-password`".
+- **`genh reset-password`** (`internal/ops/resetpassword.go`) chạy `python -m gh.auth.reset_owner` trong container api (`exec`, api tắt thì `run --rm --no-deps`):
+  - đặt mật khẩu tạm (hoặc `--password-stdin`), băm bằng `hash_secret` như đăng nhập;
+  - thu hồi mọi phiên của Owner, gỡ khoá PIN, ghi Action Log `auth.password_reset` (actor `system`);
+  - genh in "Email đăng nhập / Mật khẩu tạm". Console chưa có chỗ đổi mật khẩu.
+  - Không có cơ chế khoá khi nhập sai mật khẩu (chỉ có khoá PIN).
+- **Phiên đăng nhập**: mặc định 7 ngày (`session_ttl_hours = 168`), trượt: còn dưới nửa TTL thì `load_session` gia hạn, middleware `SessionCookieRenewal` đặt lại cookie. Phiên PIN giữ nguyên.
+- **Tin cậy lại CA**: `genh update` thành công → `RunTrustCA` im lặng (kho NSS của user; kho hệ thống chỉ qua `sudo -n` trên Linux, không bao giờ hỏi). Lệnh mới `genh trust-ca` làm theo yêu cầu và in kết quả từng kho. `internal/install` xuất `TrustBrowserOS`/`TrustSystemOS`/`ExtractCaddyRootCert`/`CACertPath`.
+- Test: `tests/test_session_reset.py`; genh `resetpassword_test.go`, `trustca_test.go`, `TestRunUpdate_Success_ReTrustsCA_FailureDoesNot`; web `test/unit/login.test.tsx`.

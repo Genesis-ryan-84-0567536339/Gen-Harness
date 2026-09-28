@@ -70,6 +70,10 @@ const (
 	ErrCodeImportIncompatible    = "GH-EA15" // `python -m gh.bundle import` thoát mã 3: gói không tương thích
 	ErrCodeImportFailed          = "GH-EA16" // `python -m gh.bundle import` thoát mã 1 hoặc lỗi tiến trình khác
 	ErrCodeImportRestartFailed   = "GH-EA17" // import xong nhưng `docker compose restart api worker` hoặc healthcheck thất bại
+
+	// A2x — genh reset-password / genh trust-ca.
+	ErrCodeResetPasswordFailed = "GH-EA20" // `python -m gh.auth.reset_owner` lỗi hoặc output không đọc được
+	ErrCodeTrustCAFailed       = "GH-EA21" // không trích/ghi được CA nội bộ của Caddy
 )
 
 // OpError là lỗi có cấu trúc cho các lệnh vận hành, theo đúng tinh thần

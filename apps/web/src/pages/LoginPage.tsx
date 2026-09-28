@@ -9,6 +9,8 @@ import { validateEmail } from '../setup/validation';
 import { Logo } from '../shell/Logo';
 import { safeNext } from '../lib/safeNext';
 
+const RESET_PASSWORD_COMMAND = '~/.gen-harness/bin/genh reset-password';
+
 export function LoginPage() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
@@ -86,6 +88,9 @@ export function LoginPage() {
           <Button variant="primary" type="submit" block loading={busy} disabled={!canSubmit && !busy} iconRight="ph ph-arrow-right">
             Đăng nhập
           </Button>
+          <p className="login-card__help">
+            Quên mật khẩu? Trên máy chủ chạy: <code className="mono">{RESET_PASSWORD_COMMAND}</code>
+          </p>
         </div>
       </form>
     </div>
