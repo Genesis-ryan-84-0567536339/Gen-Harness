@@ -18,3 +18,6 @@ dump.rdb
 
 # worktree tạm của subagent Claude Code
 .claude/worktrees/
+
+# hộp thư Console ↔ genh khi chạy compose từ repo (genh tạo <gốc cài đặt>/run)
+/run/

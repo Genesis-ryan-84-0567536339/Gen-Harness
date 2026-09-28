@@ -6,6 +6,7 @@ import { fmtAgo, fmtDMClock, fmtDec, fmtInt, fmtPct } from '../../lib/format';
 import { CardError, Panel, SkeletonLines } from '../common';
 import { N5, OK, SPOTLIGHT_DIMENSION_LABEL, WARN, initialsOf, queueKindIcon, queueKindTone, QUEUE_ACTION_LABEL, QUEUE_KIND_LABEL } from './queueModel';
 import { useOverview } from './queries';
+import { UpdateCard } from '../../update/UpdateCard';
 import { SetupFollowUp } from './SetupFollowUp';
 
 const KPI_ICON: Record<string, string> = {
@@ -149,6 +150,7 @@ export function OverviewScreen() {
 
   return (
     <div className="screen">
+      <UpdateCard />
       <SetupFollowUp />
       <div className="ov-kpi-row">
         {row1.map((k) => (

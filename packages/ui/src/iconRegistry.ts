@@ -121,6 +121,7 @@ import {
 } from '@phosphor-icons/react';
 import {
   AddressBookIcon,
+  ArrowCircleUpIcon,
   ArrowClockwiseIcon,
   ArrowCounterClockwiseIcon,
   ArrowDownIcon,
@@ -223,6 +224,7 @@ export const ICONS: Record<string, PhosphorIcon> = {
   alarm: AlarmIcon,
   archive: ArchiveIcon,
   'arrow-bend-up-left': ArrowBendUpLeftIcon,
+  'arrow-circle-up': ArrowCircleUpIcon,
   'arrow-clockwise': ArrowClockwiseIcon,
   'arrow-counter-clockwise': ArrowCounterClockwiseIcon,
   'arrow-down': ArrowDownIcon,

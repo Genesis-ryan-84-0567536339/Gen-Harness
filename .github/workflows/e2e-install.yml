@@ -281,6 +281,34 @@ jobs:
       - name: genh update --yes (đã mới nhất → phải không lỗi)
         run: $GENH update --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes
 
+      - name: Nút "Cập nhật ngay" — api ghi yêu cầu, genh trên máy chủ tự nhận và cập nhật (tối đa 7 phút)
+        run: |
+          set -euo pipefail
+          run="$GEN_HARNESS_HOME/run"
+          cat "$run/genh.json"
+          python3 -c "import json,sys; i=json.load(open(sys.argv[1])); assert i['updater'], 'genh chưa cài watcher nhận yêu cầu: %s' % i" "$run/genh.json"
+          before="$(python3 -c "import json;print(json.load(open('$run/update-status.json')).get('started_at',''))" 2>/dev/null || true)"
+          api="$(docker ps --format '{{.Names}}' | grep -E '^gen-harness-api-[0-9]+$' | head -1)"
+          # Chính container api (uid 10001, khác người dùng máy chủ) ghi yêu cầu qua bind mount — đúng đường nút bấm
+          # trong Console đi (gh/system_api/update.py).
+          docker exec "$api" python -c "import json,datetime; open('/var/lib/gh/host/request/update.json','w').write(json.dumps({'requested_at': datetime.datetime.now(datetime.timezone.utc).isoformat()}))"
+          deadline=$((SECONDS + 420))
+          while :; do
+            st="$(python3 -c "import json;d=json.load(open('$run/update-status.json'));print(d.get('state',''), d.get('started_at',''))" 2>/dev/null || true)"
+            state="${st%% *}"; started="${st#* }"
+            if [ "$started" != "$before" ] && [ "$state" = done ] && [ ! -e "$run/request/update.json" ]; then break; fi
+            if [ "$started" != "$before" ] && [ "$state" = failed ]; then
+              cat "$run/update-status.json"; echo "::error::genh báo cập nhật lỗi" >&2; exit 1
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              ls -la "$run" "$run/request"; cat "$run/update-status.json" || true
+              echo "::error::watcher trên máy chủ không nhận yêu cầu cập nhật trong 7 phút" >&2; exit 1
+            fi
+            sleep 5
+          done
+          cat "$run/update-status.json"
+          until curl -k -fsS -o /dev/null "https://localhost:${GH_PORT}/api/v1/ready"; do sleep 3; done
+
       - name: genh auto-update enable → status → disable
         run: |
           set -euo pipefail

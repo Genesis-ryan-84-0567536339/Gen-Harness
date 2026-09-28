@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+
+	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/hostlink"
 )
 
 // NoticeWriter là nơi Locate (biến thể KHÔNG đồng bộ, xem doc-comment của
@@ -116,6 +118,15 @@ func locate(installDir string, sync bool) (string, error) {
 	var managedPath string
 	if installDir != "" {
 		managedPath = filepath.Join(installDir, "deploy", "compose.yaml")
+		// Hộp thư Console ↔ genh (bind mount của api, xem internal/hostlink) phải có
+		// TRƯỚC `up` — nếu không Docker tự tạo thư mục với chủ root và api không ghi
+		// được yêu cầu cập nhật. Đường dẫn đi qua biến môi trường (mọi lệnh docker
+		// compose của genh kế thừa os.Environ) để đúng cả khi compose.yaml nằm chỗ
+		// khác (GENH_COMPOSE_FILE, repo) — "../run" chỉ đúng với bản cài genh quản lý.
+		if err := hostlink.EnsureDir(installDir); err != nil {
+			return "", fmt.Errorf("tạo %s: %w", hostlink.Dir(installDir), err)
+		}
+		_ = os.Setenv(hostlink.EnvDir, hostlink.Dir(installDir))
 	}
 
 	for _, c := range SearchCandidates(installDir, cwd, exeDir) {

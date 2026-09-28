@@ -187,6 +187,29 @@ export interface SetupFollowUpItem {
   done: boolean;
 }
 
+/** `GET/POST /system/update` — nút "Cập nhật ngay" (genh trên máy chủ làm việc thật, xem gh/system_api/update.py). */
+export type SystemUpdateState = 'idle' | 'requested' | 'running' | 'done' | 'failed' | 'stalled';
+export interface SystemUpdate {
+  /** Phiên bản đang chạy (genh ghi vào hộp thư); null ở dev/test. */
+  current: string | null;
+  latest: string | null;
+  update_available: boolean;
+  /** Cơ chế nhận yêu cầu trên máy chủ (systemd/cron/launchd); null ⇒ Owner tự chạy lệnh một lần. */
+  updater: string | null;
+  /** Có hộp thư với máy chủ (cài bằng genh) hay không. */
+  linked: boolean;
+  can_request: boolean;
+  state: SystemUpdateState;
+  message: string | null;
+  from: string | null;
+  to: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  requested_at: string | null;
+  release_url: string | null;
+  release_notes: string | null;
+}
+
 const enc = encodeURIComponent;
 
 /** `/permissions`, `/listening-groups`, `/boundaries*`, `/audit-log*`, `/retention-policies`, `/persons/{id}/data-requests`. */
@@ -210,6 +233,10 @@ export function systemEndpoints(r: ApiClient['request']) {
     retentionPolicies: {
       list: (signal?: AbortSignal) => r<RetentionPolicy[]>('/retention-policies', { signal }),
       patch: (body: RetentionPatchBody) => r<RetentionPolicy[]>('/retention-policies', { method: 'PATCH', body }),
+    },
+    systemUpdate: {
+      get: (signal?: AbortSignal) => r<SystemUpdate>('/system/update', { signal }),
+      request: () => r<SystemUpdate>('/system/update', { method: 'POST' }),
     },
     personDataRequests: {
       create: (personId: string, kind: DataRequestKind) =>

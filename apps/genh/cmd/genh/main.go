@@ -27,8 +27,10 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/autoupdate"
+	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/compose"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/config"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/dockercli"
+	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/hostlink"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/install"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/machine"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/ops"
@@ -246,6 +248,7 @@ func runUpdate(args []string) int {
 	quiet := fs.Bool("quiet", false, "chỉ in các dòng quan trọng (có bản mới/lỗi/xong) — bỏ log tiến độ từng bước")
 	noSelfUpdate := fs.Bool("no-self-update", false, "bỏ qua tự cập nhật BINARY genh — chỉ chạy phần nâng cấp dịch vụ (backup/pull/migrate/restart) bằng bản genh hiện tại")
 	selfUpdated := fs.Bool("self-updated", false, "cờ NỘI BỘ: tiến trình này vừa được re-exec ngay sau khi tự thay binary — KHÔNG dùng tay, chỉ genh tự đặt cho chính nó")
+	ifRequested := fs.Bool("if-requested", false, "chỉ cập nhật nếu Owner vừa bấm \"Cập nhật ngay\" trong Console (watcher trên máy chủ gọi) — không có yêu cầu thì thoát ngay")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -260,12 +263,28 @@ func runUpdate(args []string) int {
 		return 1
 	}
 
+	// Hộp thư Console (internal/hostlink): tiến trình NGOÀI CÙNG (không phải bản
+	// re-exec sau tự cập nhật) xoá yêu cầu "Cập nhật ngay" TRƯỚC khi chạy — để
+	// watcher không kích lặp — rồi báo "running" cho Console hiện tiến trình.
+	if !*selfUpdated {
+		if *ifRequested && !hostlink.HasRequest(env.InstallDir) {
+			return 0
+		}
+		hostlink.ConsumeRequest(env.InstallDir)
+		_ = hostlink.Start(env.InstallDir, version)
+	}
+
 	// Tự cập nhật BINARY genh TRƯỚC KHI đụng gì tới dịch vụ — xem
 	// internal/selfupdate. Bỏ qua nếu: --no-self-update, HOẶC tiến trình
 	// này đã là kết quả của một lần tự cập nhật (--self-updated, tránh lặp
 	// vô hạn tự-tải-tự-re-exec nếu có gì đó luôn báo "mới hơn" sai).
 	if !*noSelfUpdate && !*selfUpdated {
 		if code, ok := trySelfUpdateAndReExec(args, *quiet); ok {
+			// Bản mới (tiến trình con) tự ghi kết quả; con chết giữa chừng thì
+			// trạng thái vẫn "running" — báo lỗi thay nó để Console không chờ mãi.
+			if st, err := hostlink.ReadStatus(env.InstallDir); code != 0 && err == nil && st.State == "running" {
+				_ = hostlink.Finish(env.InstallDir, "failed", "", "Cập nhật dừng giữa chừng — xem logs/auto-update.log")
+			}
 			return code
 		}
 	}
@@ -279,8 +298,15 @@ func runUpdate(args []string) int {
 	opts := ops.UpdateOptions{Channel: *channel}
 	if err := ops.RunUpdate(ctx, env, opts, ops.UpdateDeps{}, out); err != nil {
 		reportOpErr(err)
+		msg := err.Error()
+		if opErr, ok := err.(*ops.OpError); ok {
+			msg = opErr.What
+		}
+		_ = hostlink.Finish(env.InstallDir, "failed", version, msg)
 		return 1
 	}
+	_ = hostlink.Finish(env.InstallDir, "done", version, "")
+	publishHostInfo(env.InstallDir, env.Port)
 	if *quiet {
 		fmt.Println("genh: cập nhật xong.")
 	}
@@ -537,6 +563,13 @@ func runUninstall(args []string) int {
 		reportOpErr(err)
 		return 1
 	}
+	// Gỡ luôn lịch tự cập nhật hằng đêm + watcher "Cập nhật ngay" — không để lại
+	// dòng cron/unit systemd gọi một bản cài đã gỡ.
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	deps := autoupdate.Deps{}
+	autoupdate.DisableRequestWatcher(ctx, deps)
+	_, _ = autoupdate.Disable(ctx, deps)
 	return 0
 }
 
@@ -656,6 +689,7 @@ func runInstall(args []string) int {
 	if !*noAutoUpdate {
 		enableAutoUpdateAfterInstall(dir)
 	}
+	publishHostInfo(dir, *port)
 
 	return 0
 }
@@ -684,6 +718,32 @@ func enableAutoUpdateAfterInstall(installDir string) {
 		return
 	}
 	fmt.Println(msg)
+}
+
+// publishHostInfo cài (idempotent) watcher nhận yêu cầu "Cập nhật ngay" từ
+// Console rồi ghi phiên bản + cơ chế vào hộp thư (run/genh.json) cho Console
+// đọc. Lỗi chỉ làm nút trong Console hiện lệnh tay thay vì bấm được — không
+// bao giờ làm hỏng install/update vừa xong.
+func publishHostInfo(installDir string, port int) {
+	updater := ""
+	if execPath, err := os.Executable(); err == nil {
+		execPath, _ = filepath.Abs(execPath)
+		logFile := filepath.Join(config.New(installDir).LogsDir(), "auto-update.log")
+		_ = os.MkdirAll(filepath.Dir(logFile), 0o755)
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		rp := autoupdate.RequestPaths{InstallDir: installDir, RequestDir: hostlink.RequestDirPath(installDir), RequestFile: hostlink.RequestPath(installDir)}
+		if port != machine.DefaultPort {
+			rp.Port = port
+		}
+		if v := os.Getenv(compose.EnvOverrideVar); v != "" {
+			rp.Env = append(rp.Env, compose.EnvOverrideVar+"="+v)
+		}
+		if u, err := autoupdate.EnsureRequestWatcher(ctx, autoupdate.Deps{GenhPath: execPath, LogFile: logFile}, rp); err == nil {
+			updater = u
+		}
+	}
+	_ = hostlink.WriteInfo(installDir, version, updater)
 }
 
 // programObserver chuyển install.Snapshot thành tui.SnapshotMsg gửi vào

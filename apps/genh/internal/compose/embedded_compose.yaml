@@ -77,6 +77,9 @@ services:
     volumes:
       - agy_state:/var/lib/gh/agy
       - gh_objects:/var/lib/gh/objects
+      # Hộp thư Console ↔ genh trên máy chủ (<gốc cài đặt>/run, genh tạo sẵn 0777 và đặt
+      # GH_HOST_LINK_DIR): phiên bản đang chạy, yêu cầu "Cập nhật ngay", trạng thái cập nhật.
+      - ${GH_HOST_LINK_DIR:-../run}:/var/lib/gh/host
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
