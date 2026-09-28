@@ -77,6 +77,8 @@ export interface MockOptions {
   /** Test-only (e2e giai đoạn 4.6): đánh dấu sẵn các bước 1..n-1 là 'done', `current_step = n`, tạo và đăng
    * nhập sẵn tài khoản Owner — để test thẳng bước 10/11 mà không phải đi lại QR/CLI/refinery từ đầu. */
   startAtStep?: number;
+  /** `/system/update` báo có bản mới (thẻ "Có bản mới" ở Tổng quan). */
+  updateAvailable?: boolean;
 }
 
 // RBAC as apps/api gh/auth/rbac.py seeds it: Owner, Manager, Operator, Agent NV, Auditor.
@@ -245,6 +247,13 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
   const latency = opts.latencyMs ?? Number(process.env.MOCK_LATENCY ?? 0);
   /** Test-only: let step 12 finish although 8–9 (not built in phase 2) are missing. */
   const mockAllowFinish = opts.allowFinish ?? false;
+  /** `/system/update`: mặc định đã mới nhất (thẻ ẩn); `updateAvailable` bật thẻ "Có bản mới". */
+  const sysUpdate = {
+    current: 'v0.1.16', latest: opts.updateAvailable ? 'v0.1.17' : 'v0.1.16', updater: 'systemd', linked: true, can_request: true,
+    state: 'idle', message: null as string | null, from: null as string | null, to: null as string | null, started_at: null as string | null,
+    finished_at: null as string | null, requested_at: null as string | null,
+    release_url: 'https://github.com/Genesis-ryan-84-0567536339/Gen-Harness/releases', release_notes: '- Nút Cập nhật ngay trong Console',
+  };
   const phase2 = createPhase2({
     fresh: opts.setup === 'fresh',
     simulate: opts.simulate ?? process.env.MOCK_SIMULATE !== '0',
@@ -648,6 +657,22 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     }
 
     if (path === '/navigation' && method === 'GET') return reply(200, buildNavigation(user.hidden, opts.badges ?? true));
+    if (path === '/system/update') {
+      // Như gh/system_api/update.py: system.manage; mock mô phỏng genh trên máy chủ — mỗi lần hỏi tiến một bước
+      // requested → running → done (current = latest).
+      if ((permissionsOf(user.role.code)['system.manage'] ?? 'none') === 'none') return problem(res, 403, 'FORBIDDEN', 'Không có quyền');
+      const u = sysUpdate;
+      if (method === 'GET') {
+        if (u.state === 'requested') u.state = 'running';
+        else if (u.state === 'running') Object.assign(u, { state: 'done', current: u.latest, to: u.latest, finished_at: new Date().toISOString() });
+      } else if (method === 'POST') {
+        if (!u.can_request) return problem(res, 409, 'UPDATER_UNAVAILABLE', 'Máy chủ chưa bật nhận yêu cầu cập nhật từ Console');
+        if (u.state === 'requested' || u.state === 'running') return problem(res, 409, 'UPDATE_IN_PROGRESS', 'Đang cập nhật');
+        Object.assign(u, { state: 'requested', requested_at: new Date().toISOString() });
+        return reply(202, { ...u, update_available: u.latest !== u.current });
+      } else return problem(res, 405, 'METHOD_NOT_ALLOWED', 'Không hỗ trợ');
+      return reply(200, { ...u, update_available: u.latest !== u.current });
+    }
     if (path === '/header' && method === 'GET') {
       return reply(200, { channels_live: 4, groups_listening: 42, autonomy_level: 4, data_confidence: 0.78 });
     }

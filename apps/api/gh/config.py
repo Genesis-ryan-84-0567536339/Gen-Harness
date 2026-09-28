@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     backup_key: str = ""
     # Thư mục cấu hình của Antigravity CLI (tệp OAuth token); worker ghi hồ sơ đang hoạt động vào đây
     cli_home: str = "~/.gemini/antigravity-cli"
+    # Hộp thư với genh trên máy chủ (bind mount <gốc cài đặt>/run, xem apps/genh/internal/hostlink): phiên bản đang
+    # chạy, yêu cầu "Cập nhật ngay" từ Console, trạng thái cập nhật. Không có thư mục (dev/test) ⇒ nút cập nhật ẩn.
+    host_link_dir: str = "/var/lib/gh/host"
+    # Kho phát hành để hỏi bản mới nhất (GitHub Releases); rỗng ⇒ không kiểm bản mới.
+    release_repo: str = "Genesis-ryan-84-0567536339/Gen-Harness"
     cli_binary: str = "agy"
 
     session_ttl_hours: int = 12

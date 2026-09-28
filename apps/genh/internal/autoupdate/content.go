@@ -83,6 +83,12 @@ func CrontabLine(genhPath, logFile string, minute int) string {
 // auto-update trên máy trước đó CHỈ dùng crontab cho việc này thì không còn
 // gì để giữ).
 func MergeCrontab(existing, newLine string, removeOnly bool) string {
+	return mergeCrontabMarked(existing, CrontabMarker, newLine, removeOnly)
+}
+
+// mergeCrontabMarked là MergeCrontab cho một marker bất kỳ (dòng hằng đêm và
+// dòng watcher "Cập nhật ngay" dùng hai marker riêng, bật/tắt độc lập).
+func mergeCrontabMarked(existing, marker, newLine string, removeOnly bool) string {
 	lines := strings.Split(existing, "\n")
 	kept := make([]string, 0, len(lines))
 	for i := 0; i < len(lines); i++ {
@@ -90,7 +96,7 @@ func MergeCrontab(existing, newLine string, removeOnly bool) string {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		if strings.TrimSpace(line) == CrontabMarker {
+		if strings.TrimSpace(line) == marker {
 			// Bỏ marker VÀ dòng lệnh ngay sau nó (nếu có).
 			if i+1 < len(lines) {
 				i++
@@ -100,7 +106,7 @@ func MergeCrontab(existing, newLine string, removeOnly bool) string {
 		kept = append(kept, line)
 	}
 	if !removeOnly {
-		kept = append(kept, CrontabMarker, newLine)
+		kept = append(kept, marker, newLine)
 	}
 	if len(kept) == 0 {
 		return ""

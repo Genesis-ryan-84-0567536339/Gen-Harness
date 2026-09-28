@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+
+	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/hostlink"
 )
 
 // NoticeWriter là nơi Locate (biến thể KHÔNG đồng bộ, xem doc-comment của
@@ -127,6 +129,11 @@ func locate(installDir string, sync bool) (string, error) {
 			if err := ensureCaddyfile(filepath.Dir(managedPath), sync); err != nil {
 				return "", err
 			}
+			// Hộp thư Console ↔ genh (bind mount ../run của api) phải có TRƯỚC `up`,
+			// nếu không Docker tự tạo với chủ root và api không ghi được yêu cầu cập nhật.
+			if err := hostlink.EnsureDir(installDir); err != nil {
+				return "", fmt.Errorf("tạo %s: %w", hostlink.Dir(installDir), err)
+			}
 			if sync {
 				if err := syncEmbeddedCompose(managedPath); err != nil {
 					return "", fmt.Errorf("đồng bộ %s với bản nhúng mới: %w", managedPath, err)
@@ -143,6 +150,9 @@ func locate(installDir string, sync bool) (string, error) {
 		if path, err := writeEmbeddedCompose(managedPath); err == nil {
 			if err := ensureCaddyfile(filepath.Dir(managedPath), sync); err != nil {
 				return "", err
+			}
+			if err := hostlink.EnsureDir(installDir); err != nil {
+				return "", fmt.Errorf("tạo %s: %w", hostlink.Dir(installDir), err)
 			}
 			return path, nil
 		}
