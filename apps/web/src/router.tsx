@@ -3,6 +3,8 @@ import { buildScreenTree } from '@gen-harness/contracts';
 import { setNavigator } from './lib/navigation';
 import { UrlStateSync } from './lib/uiStore';
 import { LoginPage } from './pages/LoginPage';
+import { GuidePage } from './guide/GuidePage';
+import { GuideStepPage } from './guide/GuideStepPage';
 import { NotFoundScreen, ScreenPage } from './screens/ScreenPage';
 import { SetupPage } from './setup/SetupPage';
 import { AppShell } from './shell/AppShell';
@@ -59,6 +61,9 @@ export const routes: RouteObject[] = [
         children: [
           { index: true, element: <Navigate to="/overview" replace /> },
           ...buildConsoleRoutes(),
+          // Hướng dẫn kết nối từng bước (việc "Để sau" 5–11) — mở từ thẻ Việc thiết lập tiếp ở Tổng quan.
+          { path: 'guide', element: <GuidePage /> },
+          { path: 'guide/:n', element: <GuideStepPage /> },
           { path: '*', element: <NotFoundScreen /> },
         ],
       },

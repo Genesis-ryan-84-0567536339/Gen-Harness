@@ -329,9 +329,13 @@ async def _mark_done(db: AsyncSession, request: Request, row: Any, owner: servic
     return state_payload(await _save(db, row.org_id, completed, step))
 
 
-async def _owner_step(db: AsyncSession, user: service.CurrentUser | None) -> tuple[Any, service.CurrentUser]:
+async def _owner_step(db: AsyncSession, user: service.CurrentUser | None, *,
+                      after_finish: bool = False) -> tuple[Any, service.CurrentUser]:
+    """`after_finish=True` cho bước tuỳ chọn 5–11: Owner "Để sau" rồi làm tiếp từ trang Hướng dẫn kết nối ở
+    Console SAU khi đã bấm Hoàn tất — cùng form, cùng kiểm tra, chỉ không bị chặn bởi `SETUP_FINISHED`."""
     row = await _row(db)
-    _not_finished(row)
+    if not after_finish:
+        _not_finished(row)
     owner = _owner_of(row, user)
     if not await console_ready(db):
         raise conflict("STEP_ORDER", "Cần hoàn thành bước 1–3 trước")
@@ -339,11 +343,11 @@ async def _owner_step(db: AsyncSession, user: service.CurrentUser | None) -> tup
 
 
 async def _owner_step_after(db: AsyncSession, user: service.CurrentUser | None,
-                            *needs: int) -> tuple[Any, service.CurrentUser]:
+                            *needs: int, after_finish: bool = False) -> tuple[Any, service.CurrentUser]:
     """Như `_owner_step`, cộng thêm yêu cầu các bước `needs` đã `done` — cùng cách `step4` đòi hỏi bước 1–3 xong
     (qua `console_ready`), dùng cho bước 8 (đòi 4 — có bộ não AI để thử trò chuyện) và bước 9 (đòi 8). Bước 5–7
     tuỳ chọn nên không còn là điều kiện: agent tạo trước, gán kênh/nhóm sau ở Console."""
-    row, owner = await _owner_step(db, user)
+    row, owner = await _owner_step(db, user, after_finish=after_finish)
     done = (row.completed or {}).get("steps", {})
     missing = [n for n in needs if done.get(str(n)) != "done"]
     if missing:
@@ -377,7 +381,7 @@ async def step4(body: Step4In, request: Request, db: AsyncSession = DB,
 async def step5(request: Request, db: AsyncSession = DB,
                 user: service.CurrentUser | None = Depends(optional_user)) -> dict[str, Any]:
     """Kết nối kênh: cần ít nhất một kênh đang hoạt động (quét QR xong)."""
-    row, owner = await _owner_step(db, user)
+    row, owner = await _owner_step(db, user, after_finish=True)
     live = (await db.execute(text("""
         SELECT array_agg(DISTINCT c.type) FROM core.channel_sessions s JOIN core.channels c ON c.id = s.channel_id
         WHERE c.org_id = :o AND s.state = 'active' AND s.ended_at IS NULL"""), {"o": row.org_id})).scalar()
@@ -390,7 +394,7 @@ async def step5(request: Request, db: AsyncSession = DB,
 async def step6(body: Step6In, request: Request, db: AsyncSession = DB,
                 user: service.CurrentUser | None = Depends(optional_user)) -> dict[str, Any]:
     """Chọn nhóm lắng nghe: lưu chế độ từng nhóm; cần ít nhất một nhóm khác \"tắt\"."""
-    row, owner = await _owner_step(db, user)
+    row, owner = await _owner_step(db, user, after_finish=True)
     for g in body.groups:
         await update_group(db, request.app.state.redis, owner, g.id,
                            GroupPatch.model_validate(g.model_dump(exclude={"id"})))
@@ -414,7 +418,7 @@ async def rule_presets(db: AsyncSession = DB,
 async def step7(body: Step7In, request: Request, db: AsyncSession = DB,
                 user: service.CurrentUser | None = Depends(optional_user)) -> dict[str, Any]:
     """Sàng lọc: lịch chạy (chu kỳ HOẶC ngưỡng), bộ quy tắc khởi đầu, trọng số chấm điểm."""
-    row, owner = await _owner_step(db, user)
+    row, owner = await _owner_step(db, user, after_finish=True)
     known = {p["code"]: p for p in presets.PRESETS}
     unknown = [c for c in body.rule_codes if c not in known]
     if unknown:
@@ -460,7 +464,7 @@ async def step8(body: Step8In, request: Request, db: AsyncSession = DB,
     chuyện một lượt qua `ModelRouter` (`gh.biz.people.routes.try_chat`) — KHÔNG lưu vào hội thoại thật, chỉ để
     Owner nghe thử giọng agent. Model chưa gọi được (chưa cấu hình xong ở bước 4, hoặc lỗi tạm thời) không được
     chặn việc tạo agent — trả `try_reply: null` kèm lý do, Owner thử lại ngay ở đây hoặc ở màn Agent Identity."""
-    row, owner = await _owner_step_after(db, user, 4)
+    row, owner = await _owner_step_after(db, user, 4, after_finish=True)
     name, role_desc, voice, speak_when = (body.name.strip(), body.role_desc.strip(), body.voice.strip(),
                                           body.speak_when.strip())
     agent_id = (await db.execute(text("""
@@ -492,7 +496,7 @@ async def step9(body: Step9In, request: Request, db: AsyncSession = DB,
     bước 8, và bắt Owner xác nhận đã đọc danh sách ranh giới khoá cứng (`HARD_BOUNDARIES`, ARCHITECTURE §7.4).
     Các ranh giới đó **không tắt được** ở đây hay bất cứ đâu trong hệ thống — xác nhận chỉ để Owner biết trước
     khi vào Console, không phải một cài đặt."""
-    row, owner = await _owner_step_after(db, user, 8)
+    row, owner = await _owner_step(db, user, after_finish=True)
     if not body.ack_boundaries:
         raise field_errors({"ack_boundaries": "Cần xác nhận đã đọc ranh giới khoá cứng trước khi tiếp tục"})
     agent = (await db.execute(text("SELECT id, name FROM agent.identities WHERE org_id = :o "
@@ -526,8 +530,9 @@ async def step10(body: Step10In, request: Request, db: AsyncSession = DB,
                  user: service.CurrentUser | None = Depends(optional_user)) -> dict[str, Any]:
     """Mời đội ngũ: bước tuỳ chọn, tạo tài khoản + mật khẩu tạm cho từng người (chưa có SMTP thật gửi lời mời —
     mật khẩu tạm trả thẳng về đây để Owner tự gửi qua kênh riêng). Danh sách rỗng vẫn đánh dấu xong được (Owner
-    có thể mời sau ở màn Quyền hạn); gọi `POST /setup/steps/10/skip` nếu muốn bỏ qua hẳn."""
-    row, owner = await _owner_step(db, user)
+    có thể mời sau ở trang Hướng dẫn kết nối — bước này vẫn mở sau khi Hoàn tất); gọi
+    `POST /setup/steps/10/skip` nếu muốn bỏ qua hẳn."""
+    row, owner = await _owner_step(db, user, after_finish=True)
     errors: dict[str, str] = {}
     seen: set[str] = set()
     created: list[dict[str, Any]] = []
@@ -582,7 +587,7 @@ async def step11(body: Step11In, request: Request, db: AsyncSession = DB,
     """Sao lưu: bước tuỳ chọn, chỉ lưu LỊCH và ĐÍCH sao lưu (`core.organizations.settings->'backup'`) — chạy
     `pg_dump` + MinIO thật, mã hoá, vòng 7 ngày/4 tuần/12 tháng là việc của GĐ 5 mục 5.6 (`docs/PLAN.md`),
     không làm ở trình thiết lập."""
-    row, owner = await _owner_step(db, user)
+    row, owner = await _owner_step(db, user, after_finish=True)
     if not TIME_HHMM_RE.match(body.time_of_day):
         raise field_errors({"time_of_day": "Giờ chạy sao lưu dạng HH:MM (00:00–23:59)"})
     cfg = {"frequency": body.frequency, "time_of_day": body.time_of_day, "retention_count": body.retention_count,
@@ -620,16 +625,18 @@ async def hard_boundaries(db: AsyncSession = DB,
 @router.get("/follow-up")
 async def follow_up(db: AsyncSession = DB,
                     user: service.CurrentUser | None = Depends(optional_user)) -> list[dict[str, Any]]:
-    """Việc thiết lập tiếp (thẻ ở Tổng quan): các bước tuỳ chọn chưa `done` trong trình thiết lập, kèm `done`
-    tính từ dữ liệu thật — Owner làm ở Console thì mục tự xong, không phải bấm tay."""
+    """Việc thiết lập tiếp (thẻ ở Tổng quan + trang Hướng dẫn kết nối): MỌI bước tuỳ chọn 5–11, `done` khi đã xong
+    trong trình thiết lập HOẶC dữ liệu thật cho thấy đã làm ở Console — không phải bấm tay. Thẻ Tổng quan chỉ hiện
+    mục chưa xong; trang Hướng dẫn hiện đủ để thấy tiến độ."""
     row = await _row(db)
     _owner_of(row, user)
     status = (row.completed or {}).get("steps", {})
     out = []
     for n, key, title, required, _phase in STEPS:
-        if required or n not in FOLLOW_UP_SQL or status.get(str(n)) == "done":
+        if required or n not in FOLLOW_UP_SQL:
             continue
-        done = bool((await db.execute(text(FOLLOW_UP_SQL[n]), {"o": row.org_id})).scalar())
+        done = status.get(str(n)) == "done" or \
+            bool((await db.execute(text(FOLLOW_UP_SQL[n]), {"o": row.org_id})).scalar())
         out.append({"n": n, "key": key, "title": title, "status": status.get(str(n), "todo"), "done": done})
     return out
 
