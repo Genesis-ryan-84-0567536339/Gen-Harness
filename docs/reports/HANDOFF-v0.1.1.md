@@ -298,3 +298,13 @@ Lần đầu cài thật toàn bộ bằng Docker (workflow `e2e-install`) lộ 
 - v0.1.10 đã xanh toàn bộ E2E chế độ release. Owner cài thật trên Fedora (31 GB RAM, 17 GB trống) thì bị chặn ở bước 1: "cần tối thiểu 20 GB".
 - Đo thật trên ghcr: api 153 MB, bridge 130 MB, db 161 MB, web 22 MB (nén, amd64), cộng caddy và redis ≈ 0,5 GB nén, ≈ 1,5 GB giải nén.
 - Ngưỡng mới: dưới 5 GB thì chặn, dưới 10 GB thì cảnh báo (vẫn cài), từ 10 GB trở lên OK.
+
+## v0.1.12 — Đăng nhập Antigravity CLI trong Console không bao giờ ra link
+
+- Owner cài v0.1.11 thật trên Fedora, tới bước 4 "Bộ não AI" → "Quá 10 phút chưa hoàn tất đăng nhập".
+- Chạy đúng agy 1.2.9 (checksum ghim trong api.Dockerfile) trên pty, cùng env như `CliLogins._run`:
+  1. CLI là TUI: in `ESC[>c`, `ESC[c`, `ESC[?u` (hỏi terminal) rồi CHỜ trả lời, không vẽ gì. Không ai trả lời → treo mãi.
+  2. Khi được trả lời, menu "1. Google OAuth" hiện, chọn xong in link ~704 ký tự bị ngắt dòng. Regex cũ chỉ bắt dòng đầu → link cụt. Link đầy đủ nằm trong hyperlink OSC 8 ("Click here to authenticate").
+- Sửa (`gh/providers/cli.py`): trả lời DA1/DA2/kitty/CPR như một xterm; đặt kích thước pty 1000 cột bằng TIOCSWINSZ; lấy link từ OSC 8 trước, rồi mới tới chữ.
+- Test `tests/test_cli_login.py` dùng CLI giả `tests/fixtures/fake_agy.py` mô phỏng đúng hai hành vi trên, đi hết luồng Console tới hồ sơ `done`. Test đỏ với code cũ, xanh với code mới. Chạy tay với agy thật: tới `waiting_code` và nhận link 704 ký tự.
+- Chưa kiểm được: bước dán mã xác thực thật (cần tài khoản Google). Test giả gửi mã + Enter giống code hiện có.
