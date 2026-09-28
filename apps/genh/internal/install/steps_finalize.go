@@ -2,6 +2,7 @@ package install
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -61,6 +62,10 @@ type finalizeStep struct {
 	// trustCA cho phép tiêm hàm giả khi test (tránh gọi sudo/security/certutil
 	// thật) — nil dùng trustCAOS (thật, theo runtime.GOOS).
 	trustCA func(ctx context.Context, certPath string) error
+	// trustBrowser cho phép tiêm hàm giả khi test — nil dùng trustBrowserOS.
+	// Khác trustCA: chỉ ghi vào kho của CHÍNH user (NSS của Chrome/Firefox),
+	// không cần sudo, nên chạy cả khi không có --yes.
+	trustBrowser func(ctx context.Context, certPath string) error
 	// openBrowser cho phép tiêm hàm giả khi test (tránh gọi xdg-open/open/
 	// rundll32 thật) — nil dùng openBrowserOS.
 	openBrowser func(setupURL string) error
@@ -84,6 +89,10 @@ func (s finalizeStep) Run(ctx context.Context, env *Env, rep Reporter) error {
 	trustCA := s.trustCA
 	if trustCA == nil {
 		trustCA = trustCAOS
+	}
+	trustBrowser := s.trustBrowser
+	if trustBrowser == nil {
+		trustBrowser = trustBrowserOS
 	}
 	openBrowser := s.openBrowser
 	if openBrowser == nil {
@@ -180,12 +189,21 @@ func (s finalizeStep) Run(ctx context.Context, env *Env, rep Reporter) error {
 
 	rep.Report(Progress{Status: StatusRunning, Percent: 30, Detail: "tin cậy CA nội bộ vào hệ điều hành"})
 
+	// Trình duyệt (Chrome/Firefox trên Linux đọc kho NSS riêng của user) —
+	// không cần sudo nên luôn thử, kể cả khi không có --yes: đây là thứ
+	// quyết định Owner có thấy cảnh báo "Not secure" hay không.
+	browserTrustErr := trustBrowser(ctx, certPath)
+	browserTrusted := browserTrustErr == nil
+	if browserTrusted {
+		rep.Report(Progress{Status: StatusRunning, Percent: 40, Detail: "đã tin cậy CA nội bộ cho trình duyệt"})
+	}
+
 	autoApprove := env != nil && env.AutoApprove
 	caTrusted := false
 	var caDetail string
 	switch {
 	case !autoApprove:
-		caDetail = fmt.Sprintf("chưa tin cậy CA — chạy lại kèm --yes, hoặc tự cài %s vào kho tin cậy hệ điều hành", certPath)
+		caDetail = fmt.Sprintf("chưa tin cậy CA vào kho hệ điều hành — chạy lại kèm --yes, hoặc tự cài %s", certPath)
 	default:
 		if trustErr := trustCA(ctx, certPath); trustErr != nil {
 			caDetail = fmt.Sprintf("tin cậy CA tự động thất bại (%v) — tự cài %s vào kho tin cậy hệ điều hành", trustErr, certPath)
@@ -193,6 +211,9 @@ func (s finalizeStep) Run(ctx context.Context, env *Env, rep Reporter) error {
 			caTrusted = true
 			caDetail = "đã tin cậy CA nội bộ vào kho hệ điều hành"
 		}
+	}
+	if !browserTrusted && browserTrustErr != errBrowserTrustUnsupported {
+		caDetail += fmt.Sprintf(" · trình duyệt: %v", browserTrustErr)
 	}
 	rep.Report(Progress{Status: StatusRunning, Percent: 55, Detail: caDetail})
 
@@ -215,13 +236,13 @@ func (s finalizeStep) Run(ctx context.Context, env *Env, rep Reporter) error {
 	}
 
 	finalStatus := StatusOK
-	if !caTrusted || shortcutErr != nil || browserErr != nil {
+	if !(caTrusted || browserTrusted) || shortcutErr != nil || browserErr != nil {
 		finalStatus = StatusWarn
 	}
 
 	summary := fmt.Sprintf(
 		"CA: %s · lối tắt: %s · trình duyệt: %s",
-		caSummary(caTrusted, autoApprove),
+		caSummary(caTrusted, browserTrusted, autoApprove),
 		shortcutSummary(shortcutErr),
 		browserSummary(browserErr, setupURL),
 	)
@@ -230,10 +251,14 @@ func (s finalizeStep) Run(ctx context.Context, env *Env, rep Reporter) error {
 	return nil
 }
 
-func caSummary(trusted, autoApprove bool) string {
+func caSummary(trusted, browserTrusted, autoApprove bool) string {
 	switch {
+	case trusted && browserTrusted:
+		return "đã tin cậy (hệ điều hành + trình duyệt)"
 	case trusted:
 		return "đã tin cậy"
+	case browserTrusted:
+		return "trình duyệt đã tin cậy"
 	case autoApprove:
 		return "tự tin cậy thất bại, cần cài tay"
 	default:
@@ -313,17 +338,92 @@ func trustCAOS(ctx context.Context, certPath string) error {
 	}
 }
 
-// trustCALinux thử `update-ca-certificates` qua sudo không tương tác (-n):
-// nếu máy không có sudo cache sẵn (thường đúng trên CI/container), lệnh thất
-// bại NGAY thay vì treo chờ mật khẩu — đúng tinh thần "best-effort, không
-// chặn cài đặt" của Bước 8.
+// trustCALinux thêm CA vào kho hệ thống qua sudo không tương tác (-n): nếu
+// máy không có sudo cache sẵn (thường đúng trên CI/container), lệnh thất bại
+// NGAY thay vì treo chờ mật khẩu — đúng tinh thần "best-effort, không chặn
+// cài đặt" của Bước 8. Hỗ trợ cả họ Fedora/RHEL (update-ca-trust,
+// /etc/pki/ca-trust/source/anchors) lẫn Debian/Ubuntu (update-ca-certificates).
+// Quyền 0644: tệp gốc 0600 mà cp giữ nguyên quyền thì công cụ không chạy bằng
+// root sẽ không đọc được.
 func trustCALinux(ctx context.Context, certPath string) error {
-	const dest = "/usr/local/share/ca-certificates/gen-harness-ca.crt"
-	script := fmt.Sprintf("cp %q %q && update-ca-certificates", certPath, dest)
+	var script string
+	switch {
+	case lookPath("update-ca-trust"):
+		script = fmt.Sprintf("install -m 0644 %q /etc/pki/ca-trust/source/anchors/gen-harness-ca.crt && update-ca-trust", certPath)
+	case lookPath("update-ca-certificates"):
+		script = fmt.Sprintf("install -m 0644 %q /usr/local/share/ca-certificates/gen-harness-ca.crt && update-ca-certificates", certPath)
+	default:
+		return errors.New("không thấy update-ca-trust hay update-ca-certificates")
+	}
 	cmd := exec.CommandContext(ctx, "sudo", "-n", "sh", "-c", script)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("sudo update-ca-certificates: %w — %s", err, strings.TrimSpace(string(out)))
+		return fmt.Errorf("sudo %s: %w — %s", strings.Fields(script)[len(strings.Fields(script))-1], err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func lookPath(name string) bool {
+	_, err := exec.LookPath(name)
+	return err == nil
+}
+
+// errBrowserTrustUnsupported: nền tảng này không cần/không có kho riêng của
+// trình duyệt (macOS/Windows: trình duyệt đọc kho hệ điều hành của user).
+var errBrowserTrustUnsupported = errors.New("không áp dụng trên nền tảng này")
+
+// trustBrowserOS thêm CA vào kho NSS của CHÍNH user — Chrome/Chromium
+// (~/.pki/nssdb) và mọi hồ sơ Firefox (~/.mozilla/firefox/*/cert9.db) trên
+// Linux. Không cần sudo; cần lệnh certutil (gói nss-tools / libnss3-tools).
+func trustBrowserOS(ctx context.Context, certPath string) error {
+	if runtime.GOOS != "linux" {
+		return errBrowserTrustUnsupported
+	}
+	if !lookPath("certutil") {
+		return errors.New("thiếu lệnh certutil — cài gói nss-tools (Fedora) hoặc libnss3-tools (Ubuntu) rồi chạy `genh install` lại, hoặc bỏ qua cảnh báo trình duyệt")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	dbs := []string{filepath.Join(home, ".pki", "nssdb")}
+	if matches, _ := filepath.Glob(filepath.Join(home, ".mozilla", "firefox", "*", "cert9.db")); matches != nil {
+		for _, m := range matches {
+			dbs = append(dbs, filepath.Dir(m))
+		}
+	}
+	var firstErr error
+	added := 0
+	for _, db := range dbs {
+		if err := addToNSSDB(ctx, db, certPath); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		added++
+	}
+	if added == 0 {
+		return firstErr
+	}
+	return nil
+}
+
+func addToNSSDB(ctx context.Context, dir, certPath string) error {
+	if _, err := os.Stat(filepath.Join(dir, "cert9.db")); err != nil {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return err
+		}
+		if out, err := exec.CommandContext(ctx, "certutil", "-d", "sql:"+dir, "-N", "--empty-password").CombinedOutput(); err != nil {
+			return fmt.Errorf("certutil -N %s: %w — %s", dir, err, strings.TrimSpace(string(out)))
+		}
+	}
+	out, err := exec.CommandContext(ctx, "certutil", "-d", "sql:"+dir, "-A", "-t", "C,,",
+		"-n", "Gen-Harness local CA", "-i", certPath).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("certutil -A %s: %w — %s", dir, err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
