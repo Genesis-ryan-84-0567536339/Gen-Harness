@@ -115,6 +115,20 @@ async def test_setup_steps_4_to_7_and_finish(owner_api, db) -> None:  # type: ig
     r = await api.send("PUT", "/setup/steps/12", {})
     assert r.status_code == 200, r.text
     assert (await api.get("/setup/state")).json()["finished"]
+    # Sau Hoàn tất: bước "Để sau" vẫn làm tiếp được từ trang Hướng dẫn kết nối, bước bắt buộc/skip thì không.
+    items = {i["n"]: i for i in (await api.get("/setup/follow-up")).json()}
+    assert set(items) == set(range(5, 12)) and not items[11]["done"]
+    r = await api.send("PUT", "/setup/steps/11", {"frequency": "daily", "time_of_day": "03:00"})
+    assert r.status_code == 200, r.text
+    assert r.json()["finished"] and r.json()["backup"]["time_of_day"] == "03:00"
+    r = await api.send("PUT", "/setup/steps/10", {"invites": [{"display_name": "Lan", "email": "lan@example.com",
+                                                                "role": "operator"}]})
+    assert r.status_code == 200, r.text
+    assert r.json()["invited"][0]["temp_password"]
+    items = {i["n"]: i for i in (await api.get("/setup/follow-up")).json()}
+    assert items[10]["done"] and items[11]["done"]
+    assert (await api.send("POST", "/setup/steps/6/skip")).status_code == 409
+    assert (await api.send("PUT", "/setup/steps/12", {})).status_code == 409
 
 
 async def test_setup_finishes_with_only_steps_1_to_4(owner_api, db) -> None:  # type: ignore[no-untyped-def]
@@ -135,6 +149,20 @@ async def test_setup_finishes_with_only_steps_1_to_4(owner_api, db) -> None:  # 
     r = await api.send("PUT", "/setup/steps/12", {})
     assert r.status_code == 200, r.text
     assert (await api.get("/setup/state")).json()["finished"]
+    # Sau Hoàn tất: bước "Để sau" vẫn làm tiếp được từ trang Hướng dẫn kết nối, bước bắt buộc/skip thì không.
+    items = {i["n"]: i for i in (await api.get("/setup/follow-up")).json()}
+    assert set(items) == set(range(5, 12)) and not items[11]["done"]
+    r = await api.send("PUT", "/setup/steps/11", {"frequency": "daily", "time_of_day": "03:00"})
+    assert r.status_code == 200, r.text
+    assert r.json()["finished"] and r.json()["backup"]["time_of_day"] == "03:00"
+    r = await api.send("PUT", "/setup/steps/10", {"invites": [{"display_name": "Lan", "email": "lan@example.com",
+                                                                "role": "operator"}]})
+    assert r.status_code == 200, r.text
+    assert r.json()["invited"][0]["temp_password"]
+    items = {i["n"]: i for i in (await api.get("/setup/follow-up")).json()}
+    assert items[10]["done"] and items[11]["done"]
+    assert (await api.send("POST", "/setup/steps/6/skip")).status_code == 409
+    assert (await api.send("PUT", "/setup/steps/12", {})).status_code == 409
 
 
 async def test_refinery_run_now_queues_once(owner_api) -> None:  # type: ignore[no-untyped-def]

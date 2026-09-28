@@ -182,7 +182,8 @@ export interface SetupFollowUpItem {
   n: number;
   key: string;
   title: string;
-  status: 'todo' | 'doing' | 'skipped';
+  /** Trạng thái trong trình thiết lập; `done` bên dưới còn tính cả dữ liệu thật làm ở Console. */
+  status: 'todo' | 'doing' | 'skipped' | 'done';
   done: boolean;
 }
 

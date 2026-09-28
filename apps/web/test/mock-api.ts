@@ -490,11 +490,13 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
       if (path === '/setup/first-run' && method === 'GET') return reply(200, phase2.firstRunView());
       if (path === '/setup/hard-boundaries' && method === 'GET') return reply(200, MOCK_HARD_BOUNDARIES);
       if (path === '/setup/follow-up' && method === 'GET') {
-        // Như API thật: bước tuỳ chọn chưa `done`; `done` thật suy từ dữ liệu — mock coi như chưa làm.
-        return reply(200, setup.steps.filter((x) => !x.required && x.n >= 5 && x.n <= 11 && x.status !== 'done')
-          .map((x) => ({ n: x.n, key: x.key, title: x.title, status: x.status, done: false })));
+        // Như API thật: mọi bước tuỳ chọn 5–11; `done` = đã xong trong trình thiết lập (dữ liệu thật: mock bỏ qua).
+        return reply(200, setup.steps.filter((x) => !x.required && x.n >= 5 && x.n <= 11)
+          .map((x) => ({ n: x.n, key: x.key, title: x.title, status: x.status, done: x.status === 'done' })));
       }
-      if (setup.finished) return problem(res, 409, 'CONFLICT', 'Thiết lập đã hoàn tất');
+      // Như API thật: sau Hoàn tất vẫn lưu lại được bước tuỳ chọn 5–11 (trang Hướng dẫn kết nối), còn lại 409.
+      const optionalPut = /^\/setup\/steps\/([5-9]|1[01])$/.test(path) && method === 'PUT';
+      if (setup.finished && !optionalPut) return problem(res, 409, 'CONFLICT', 'Thiết lập đã hoàn tất');
       const skip = /^\/setup\/steps\/(\d+)\/skip$/.exec(path);
       if (skip && method === 'POST') {
         const n = Number(skip[1]);

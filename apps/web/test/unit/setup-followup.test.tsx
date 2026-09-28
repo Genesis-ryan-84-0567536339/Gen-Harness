@@ -22,17 +22,19 @@ function renderWith(items: SetupFollowUpItem[]) {
 }
 
 describe('Việc thiết lập tiếp (Tổng quan)', () => {
-  it('liệt kê bước chưa xong, mỗi bước có đường tới màn Console', () => {
+  it('liệt kê bước chưa xong, mỗi bước mở thẳng form làm việc đó, đầu thẻ dẫn tới hướng dẫn từng bước', () => {
     renderWith([item(5, false), item(8, false), item(11, false)]);
     expect(screen.getByText('Việc thiết lập tiếp')).toBeInTheDocument();
     const links = screen.getAllByRole('link', { name: /Làm ngay/ }).map((a) => a.getAttribute('href'));
-    expect(links).toEqual(['/system?tab=channels', '/agents', '/system?tab=storage']);
+    expect(links).toEqual(['/guide/5', '/guide/8', '/guide/11']);
+    expect(screen.getByRole('link', { name: /Hướng dẫn từng bước/ })).toHaveAttribute('href', '/guide');
+    expect(screen.getByText('Kết nối Zalo / WhatsApp')).toBeInTheDocument();
   });
 
   it('bước đã làm xong ở Console (done=true) tự biến mất', () => {
     renderWith([item(5, true), item(6, false)]);
-    expect(screen.queryByText('Bước 5')).not.toBeInTheDocument();
-    expect(screen.getByText('Bước 6')).toBeInTheDocument();
+    expect(screen.queryByText('Kết nối Zalo / WhatsApp')).not.toBeInTheDocument();
+    expect(screen.getByText('Chọn nhóm cho agent lắng nghe')).toBeInTheDocument();
   });
 
   it('không hiện gì khi mọi việc đã xong', () => {

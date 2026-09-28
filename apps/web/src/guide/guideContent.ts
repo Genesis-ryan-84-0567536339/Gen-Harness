@@ -1,0 +1,133 @@
+/**
+ * Hướng dẫn kết nối từng bước cho các việc tuỳ chọn 5–11 của trình thiết lập. Chữ viết cho Owner không rành kỹ
+ * thuật: vì sao cần, chuẩn bị gì, bấm gì theo đúng nhãn nút trên màn hình, và làm sao biết đã xong. Nút "Làm bước
+ * này" mở đúng form của trình thiết lập ngay trong Console (`/guide/:n`), kể cả sau khi đã bấm Hoàn tất.
+ */
+/** Khoá cache của `GET /setup/follow-up` — dùng chung cho thẻ Tổng quan và trang Hướng dẫn. */
+export const FOLLOW_UP_KEY = ['setup', 'follow-up'] as const;
+
+export interface GuideItem {
+  n: number;
+  title: string;
+  /** Một câu: làm việc này để được gì. */
+  why: string;
+  /** Cần chuẩn bị trước khi bắt đầu. */
+  prepare: string[];
+  /** Các bước bấm theo thứ tự, dùng đúng nhãn nút trên màn hình. */
+  steps: string[];
+  /** Dấu hiệu đã xong (hệ thống tự nhận ra, không cần bấm tay). */
+  doneWhen: string;
+  /** Làm ở màn Console đầy đủ (chỉnh chi tiết hơn form hướng dẫn). */
+  console: { label: string; to: string };
+  /** Việc nên làm trước (số bước). */
+  after?: number;
+}
+
+export const GUIDE: GuideItem[] = [
+  {
+    n: 5,
+    title: 'Kết nối Zalo / WhatsApp',
+    why: 'Để agent đọc được tin nhắn trong các nhóm chat của Sếp — không có kênh thì hệ thống chưa có dữ liệu để làm việc.',
+    prepare: ['Điện thoại đang đăng nhập Zalo hoặc WhatsApp của chính Sếp.', 'Máy tính và điện thoại đều có mạng.'],
+    steps: [
+      'Bấm "Làm bước này" bên dưới.',
+      'Ở thẻ Zalo (hoặc WhatsApp), bấm "Tạo mã QR".',
+      'Đọc cảnh báo, tích "Tôi hiểu rủi ro…" rồi bấm "Tôi hiểu, hiện mã QR".',
+      'Trên điện thoại: Zalo → biểu tượng quét QR (góc trên) · WhatsApp → Cài đặt → Thiết bị đã liên kết → Liên kết thiết bị. Quét mã trên màn hình.',
+      'Chờ thẻ chuyển sang "Đang kết nối" và đồng bộ xong danh sách nhóm (mã QR tự làm mới mỗi 60 giây nếu chưa kịp quét).',
+      'Bấm "Tiếp tục" để lưu.',
+    ],
+    doneWhen: 'Có ít nhất một kênh ở trạng thái Đang kết nối.',
+    console: { label: 'Điều khiển hệ thống › Kênh', to: '/system?tab=channels' },
+  },
+  {
+    n: 6,
+    title: 'Chọn nhóm cho agent lắng nghe',
+    why: 'Mọi nhóm mới đều ở chế độ Không nghe để bảo vệ riêng tư — Sếp chọn nhóm nào agent được nghe.',
+    prepare: ['Đã kết nối ít nhất một kênh (việc 05) và đồng bộ xong danh sách nhóm.'],
+    steps: [
+      'Bấm "Làm bước này".',
+      'Trong bảng nhóm, ở cột "Chế độ lắng nghe" của nhóm muốn theo dõi, chọn một chế độ: "Chỉ khi được tag" (an toàn nhất), "Lắng nghe im lặng" (ghi nhận, không trả lời) hoặc "Chủ động bắt tín hiệu".',
+      'Ở cột "Phạm vi xem", chọn ai được xem dữ liệu nhóm đó (mặc định "Chỉ Sếp").',
+      'Bấm "Tiếp tục".',
+    ],
+    doneWhen: 'Có ít nhất một nhóm không còn ở chế độ Không nghe.',
+    console: { label: 'Nhóm & Con người', to: '/directory' },
+    after: 5,
+  },
+  {
+    n: 7,
+    title: 'Bật sàng lọc dữ liệu',
+    why: 'Tin nhắn thô được lọc, phân loại và chấm điểm trước khi vào kho sạch — agent chỉ dùng dữ liệu đã lọc.',
+    prepare: ['Không cần chuẩn bị gì — để mặc định là dùng được ngay.'],
+    steps: [
+      'Bấm "Làm bước này".',
+      'Giữ mặc định "Chu kỳ thời gian" và "Ngưỡng số lượng" (lọc khi đủ thời gian hoặc đủ số tin, cái nào đến trước).',
+      'Ở "Bộ quy tắc khởi đầu", tích các quy tắc hợp với việc kinh doanh của Sếp (xem điều kiện và đầu ra ngay trên từng dòng).',
+      'Bấm "Tiếp tục".',
+    ],
+    doneWhen: 'Có ít nhất một quy tắc sàng lọc đang bật.',
+    console: { label: 'Quy tắc sàng lọc', to: '/rules' },
+  },
+  {
+    n: 8,
+    title: 'Tạo agent đầu tiên',
+    why: 'Agent là "nhân viên AI" làm việc thay Sếp trên các kênh — có tên, vai trò và giọng nói riêng.',
+    prepare: ['Bộ não AI đã chạy (bước 4 của trình thiết lập — đã xong nếu Sếp đang ở Console).'],
+    steps: [
+      'Bấm "Làm bước này".',
+      'Chọn một "Mẫu" (ví dụ Trợ lý thương mại, CSKH, Thư ký cá nhân) — tên và vai trò được điền sẵn.',
+      'Sửa "Tên agent" và "Vai trò — agent làm gì cho Sếp" nếu muốn.',
+      'Gõ một "Câu thử trò chuyện", ví dụ "Chào em, hôm nay có khách nào hỏi hàng không?".',
+      'Bấm "Tiếp tục" rồi đọc câu trả lời thử của agent; bấm "Tiếp tục" lần nữa để lưu.',
+    ],
+    doneWhen: 'Có ít nhất một agent.',
+    console: { label: 'Danh tính Agent', to: '/agents' },
+  },
+  {
+    n: 9,
+    title: 'Đặt mức tự trị cho agent',
+    why: 'Quyết định agent được tự làm tới đâu: chỉ gợi ý, hay soạn sẵn chờ Sếp duyệt rồi mới gửi.',
+    prepare: ['Đã có agent (việc 08).'],
+    steps: [
+      'Bấm "Làm bước này".',
+      'Ở "Mức tự trị", chọn 4 (agent soạn sẵn, Sếp duyệt rồi mới gửi — khuyên dùng) hoặc 3 (agent chỉ gợi ý).',
+      'Đọc danh sách "Ranh giới khoá cứng" — các việc agent không bao giờ được tự làm.',
+      'Tích "Tôi đã đọc các ranh giới trên" rồi bấm "Tiếp tục".',
+    ],
+    doneWhen: 'Agent đã có mức tự trị (tạo agent là có mức mặc định; bước này để Sếp chọn lại cho chắc).',
+    console: { label: 'Danh tính Agent', to: '/agents' },
+    after: 8,
+  },
+  {
+    n: 10,
+    title: 'Mời người trong đội',
+    why: 'Cho quản lý, nhân viên cùng dùng Console với quyền hạn riêng — mỗi người chỉ thấy phần được giao.',
+    prepare: ['Tên và email của từng người.'],
+    steps: [
+      'Bấm "Làm bước này".',
+      'Bấm "Thêm người", điền "Tên hiển thị", "Email" và chọn "Vai trò" (Manager, Operator, Agent nhân viên, Auditor).',
+      'Thêm đủ người rồi bấm "Tiếp tục".',
+      'Hệ thống hiện mật khẩu tạm của từng người — chép lại và tự gửi cho họ qua Zalo/email riêng (chưa có gửi thư tự động).',
+      'Bấm "Đã lưu, sang bước sau".',
+    ],
+    doneWhen: 'Có thêm ít nhất một tài khoản ngoài Sếp.',
+    console: { label: 'Điều khiển hệ thống › Quyền hạn', to: '/system?tab=roles' },
+  },
+  {
+    n: 11,
+    title: 'Đặt lịch sao lưu',
+    why: 'Máy hỏng hay lỡ tay xoá vẫn khôi phục được dữ liệu — bản sao lưu được mã hoá và giữ ngay trong máy.',
+    prepare: ['Chọn giờ máy thường rảnh (mặc định 02:00 sáng).'],
+    steps: [
+      'Bấm "Làm bước này".',
+      'Chọn "Tần suất" (khuyên dùng "Hằng ngày").',
+      'Nhập "Giờ chạy (HH:MM)", ví dụ 02:00.',
+      'Bấm "Tiếp tục".',
+    ],
+    doneWhen: 'Đã có lịch sao lưu.',
+    console: { label: 'Điều khiển hệ thống › Dữ liệu & lưu trữ', to: '/system?tab=storage' },
+  },
+];
+
+export const GUIDE_BY_N: Record<number, GuideItem> = Object.fromEntries(GUIDE.map((g) => [g.n, g]));
