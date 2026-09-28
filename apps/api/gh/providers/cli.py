@@ -10,10 +10,13 @@
 import asyncio
 import base64
 import contextlib
+import fcntl
 import logging
 import os
 import re
 import signal
+import struct
+import termios
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -41,6 +44,32 @@ _URL = re.compile(r"https://[^\s\"'<>]+")
 _PROMPT_YN = re.compile(r"\[(?:y/n|Y/n|y/N)\]|\((?:y/n|Y/n|y/N)\)", re.I)
 _PROMPT_ENTER = re.compile(r"(trust|accept|agree|continue|press enter|terms)", re.I)
 _MENU_OAUTH = re.compile(r"google\s+oauth|sign in with google|login with google", re.I)
+# Link đầy đủ nằm trong hyperlink OSC 8 ("Click here to authenticate"); bản chữ bị cắt xuống nhiều dòng.
+_OSC8_URL = re.compile(r"\x1b\]8;[^;\x07\x1b]*;(https://[^\x07\x1b]+)")
+# CLI (TUI) hỏi terminal rồi CHỜ trả lời trước khi vẽ gì — không trả lời thì treo mãi, không bao giờ in link.
+_TERM_REPLIES = (
+    (b"\x1b[>c", b"\x1b[>1;10;0c"),     # Secondary Device Attributes
+    (b"\x1b[>0c", b"\x1b[>1;10;0c"),
+    (b"\x1b[c", b"\x1b[?62;22c"),       # Primary Device Attributes
+    (b"\x1b[0c", b"\x1b[?62;22c"),
+    (b"\x1b[?u", b"\x1b[?0u"),          # kitty keyboard protocol
+    (b"\x1b[6n", b"\x1b[1;1R"),         # vị trí con trỏ
+)
+PTY_COLS, PTY_ROWS = 1000, 50
+
+
+def terminal_replies(chunk: bytes) -> bytes:
+    """Câu trả lời cho các truy vấn terminal có trong chunk (giả làm một xterm)."""
+    return b"".join(reply for query, reply in _TERM_REPLIES if query in chunk)
+
+
+def login_url(raw_text: str, plain_text: str) -> str | None:
+    """Ưu tiên link trong hyperlink OSC 8 (đầy đủ), rồi mới tới link trong chữ đã bỏ mã điều khiển."""
+    m = _OSC8_URL.search(raw_text)
+    if m:
+        return m.group(1)
+    m = _URL.search(plain_text)
+    return m.group(0).rstrip(".,)") if m else None
 
 
 def token_path() -> Path:
@@ -246,12 +275,16 @@ class CliLogins:
         path = token_path()
         before = path.stat().st_mtime if path.exists() else 0.0
         env = {**cli_env(get_settings().cli_home), "TERM": "xterm", "SSH_CONNECTION": "127.0.0.1 0 127.0.0.1 22",
-               "SSH_CLIENT": "127.0.0.1 0 22", "SSH_TTY": "/dev/pts/0", "COLUMNS": "200", "LINES": "50"}
+               "SSH_CLIENT": "127.0.0.1 0 22", "SSH_TTY": "/dev/pts/0", "COLUMNS": str(PTY_COLS),
+               "LINES": str(PTY_ROWS)}
         master, slave = pty.openpty()
+        with contextlib.suppress(OSError):
+            fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", PTY_ROWS, PTY_COLS, 0, 0))
         proc: asyncio.subprocess.Process | None = None
         loop = asyncio.get_running_loop()
         out: asyncio.Queue[bytes] = asyncio.Queue()
         buf = ""
+        raw = ""
         answered: set[str] = set()
         try:
             await self._emit(s)
@@ -287,14 +320,19 @@ class CliLogins:
                         continue
                     raise RuntimeError("CLI đã thoát trước khi đăng nhập xong: " + buf[-300:].strip())
                 if chunk:
-                    buf = (buf + _ANSI.sub("", chunk.decode(errors="replace")))[-8000:]
+                    reply = terminal_replies(chunk)
+                    if reply:
+                        os.write(master, reply)
+                    decoded = chunk.decode(errors="replace")
+                    raw = (raw + decoded)[-16000:]
+                    buf = (buf + _ANSI.sub("", decoded))[-8000:]
                     tail = buf[-600:]
                     if _MENU_OAUTH.search(tail) and "menu" not in answered and s.url is None:
                         answered.add("menu")
                         os.write(master, b"1\r")
-                    m = _URL.search(buf)
-                    if m and s.url is None:
-                        s.url = m.group(0).rstrip(".,)")
+                    url = login_url(raw, buf) if s.url is None else None
+                    if url:
+                        s.url = url
                         s.status = "waiting_code"
                         await self._emit(s)
                     if s.status == "verifying":
