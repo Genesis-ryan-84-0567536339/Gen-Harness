@@ -351,7 +351,7 @@ async def test_care_requires_permission(world, client, db) -> None:  # type: ign
 async def test_step8_and_step9_require_prior_steps_then_create_agent(owner_api: Api, db) -> None:  # type: ignore[no-untyped-def]
     r = await owner_api.send("PUT", "/setup/steps/8", {"name": "Trợ lý Mai", "role_desc": "Chăm sóc khách hàng",
                                                         "try_message": "Chào bạn"})
-    assert r.status_code == 409 and r.json()["code"] == "STEP_INCOMPLETE"   # chưa xong bước 4–7
+    assert r.status_code == 409 and r.json()["code"] == "STEP_INCOMPLETE"   # chưa xong bước 4 (bộ não AI)
 
     org = (await db.execute(text("SELECT id FROM core.organizations"))).scalar_one()
     done = {"steps": {"1": "done", "2": "done", "3": "done", "4": "done", "5": "done", "6": "done", "7": "done"}}

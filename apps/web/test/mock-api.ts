@@ -60,6 +60,12 @@ interface User {
   hidden: Set<string>;
 }
 
+const MOCK_HARD_BOUNDARIES = [
+  'Chỉ lắng nghe nhóm Owner đã bật',
+  'Hệ thống không tự ra quyết định nhân sự',
+  'Gửi ra ngoài, vượt ngưỡng tiền, liên quan nhân sự → luôn chờ duyệt ở Bàn làm việc',
+];
+
 export interface MockOptions {
   setup?: 'fresh' | 'finished';
   latencyMs?: number;
@@ -182,8 +188,8 @@ const STEP_DEFS: Array<[string, string, boolean, boolean]> = [
   ['channels', 'Kết nối kênh', false, true],
   ['groups', 'Chọn nhóm lắng nghe', false, true],
   ['refinery', 'Sàng lọc dữ liệu', false, true],
-  ['agent', 'Agent đầu tiên', false, false],
-  ['autonomy', 'Tự trị & ranh giới', false, false],
+  ['agent', 'Agent đầu tiên', false, true],
+  ['autonomy', 'Tự trị & ranh giới', false, true],
   ['team', 'Mời đội ngũ', false, true],
   ['backup', 'Sao lưu', false, true],
   ['finish', 'Hoàn tất', true, true],
@@ -482,6 +488,12 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     if (path.startsWith('/setup/')) {
       if (path === '/setup/rule-presets' && method === 'GET') return reply(200, phase2.rulePresets());
       if (path === '/setup/first-run' && method === 'GET') return reply(200, phase2.firstRunView());
+      if (path === '/setup/hard-boundaries' && method === 'GET') return reply(200, MOCK_HARD_BOUNDARIES);
+      if (path === '/setup/follow-up' && method === 'GET') {
+        // Như API thật: bước tuỳ chọn chưa `done`; `done` thật suy từ dữ liệu — mock coi như chưa làm.
+        return reply(200, setup.steps.filter((x) => !x.required && x.n >= 5 && x.n <= 11 && x.status !== 'done')
+          .map((x) => ({ n: x.n, key: x.key, title: x.title, status: x.status, done: false })));
+      }
       if (setup.finished) return problem(res, 409, 'CONFLICT', 'Thiết lập đã hoàn tất');
       const skip = /^\/setup\/steps\/(\d+)\/skip$/.exec(path);
       if (skip && method === 'POST') {
@@ -535,6 +547,21 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
             setup.current_step = 12;
           } else advance(n, 'done');
           return reply(200, stateView());
+        }
+        if (n === 8 || n === 9) {
+          if (!user) return problem(res, 401, 'UNAUTHENTICATED', 'Chưa đăng nhập');
+          if (n === 8) {
+            if (!String(body.name ?? '').trim() || !String(body.role_desc ?? '').trim()) {
+              return problem(res, 422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors: { name: 'Nhập tên agent' } });
+            }
+            advance(8, 'done');
+            const agent = { id: 'agent-setup-1', name: String(body.name), try_reply: `Chào Sếp, tôi là ${String(body.name)}.`, try_error: null };
+            return reply(200, { ...stateView(), agent });
+          }
+          if (setup.steps[7].status !== 'done') return problem(res, 409, 'STEP_INCOMPLETE', 'Cần hoàn thành bước 8 trước');
+          if (!body.ack_boundaries) return problem(res, 422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors: { ack_boundaries: 'Cần xác nhận đã đọc ranh giới' } });
+          advance(9, 'done');
+          return reply(200, { ...stateView(), hard_boundaries: MOCK_HARD_BOUNDARIES });
         }
         if (n === 10 || n === 11) {
           // Như `_owner_step` thật (khác `_owner_step_after` của bước 8–9): không đòi các bước trước phải xong.

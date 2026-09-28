@@ -1,57 +1,33 @@
-import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Icon } from '@gen-harness/ui';
 import { api } from '../../lib/api';
-import { qk } from '../../lib/queries';
 import { Panel } from '../common';
 
 /**
- * "Việc thiết lập tiếp": các bước Owner chọn "Để sau" ở trình thiết lập (5–11) không biến mất mà hiện ở đây,
- * mỗi mục dẫn thẳng tới màn Console làm tiếp được. "Đã xong" chỉ ẩn mục trên trình duyệt này.
+ * "Việc thiết lập tiếp": các bước Owner chọn "Để sau" ở trình thiết lập (5–11) hiện ở đây, mỗi mục dẫn thẳng tới
+ * màn Console làm tiếp được. Xong hay chưa do API suy từ dữ liệu thật (`GET /setup/follow-up`) — làm xong ở
+ * Console thì mục tự biến mất, không cần bấm tay.
  */
 const FOLLOW_UP: Record<number, { hint: string; to: string }> = {
   5: { hint: 'Quét QR Zalo/WhatsApp để agent nghe được tin nhắn.', to: '/system?tab=channels' },
   6: { hint: 'Bật từng nhóm cần nghe và chọn chế độ nghe.', to: '/directory' },
-  7: { hint: 'Chọn quy tắc sàng lọc và chu kỳ đưa dữ liệu vào kho sạch.', to: '/rules' },
+  7: { hint: 'Bật quy tắc sàng lọc để dữ liệu vào kho sạch.', to: '/rules' },
   8: { hint: 'Tạo agent đầu tiên từ mẫu có sẵn và gán kênh.', to: '/agents' },
-  9: { hint: 'Đặt mức tự trị và ngưỡng tiền phải duyệt.', to: '/agents' },
+  9: { hint: 'Đặt mức tự trị cho agent (trong form agent).', to: '/agents' },
   10: { hint: 'Mời người trong đội và gán vai trò.', to: '/system?tab=roles' },
   11: { hint: 'Đặt lịch sao lưu tự động.', to: '/system?tab=storage' },
 };
 
-const DISMISS_KEY = 'gh.setupFollowUp.dismissed';
-
-function loadDismissed(): number[] {
-  try {
-    const v = JSON.parse(localStorage.getItem(DISMISS_KEY) ?? '[]');
-    return Array.isArray(v) ? v.filter((n): n is number => typeof n === 'number') : [];
-  } catch {
-    return [];
-  }
-}
-
 export function SetupFollowUp() {
-  const state = useQuery({ queryKey: qk.setupState, queryFn: ({ signal }) => api.setup.state(signal) });
-  const [dismissed, setDismissed] = useState<number[]>(loadDismissed);
-  if (!state.data) return null;
-  const items = state.data.steps.filter((s) => s.status === 'skipped' && FOLLOW_UP[s.n] && !dismissed.includes(s.n));
+  const q = useQuery({ queryKey: ['setup', 'follow-up'], queryFn: ({ signal }) => api.setup.followUp(signal) });
+  const items = (q.data ?? []).filter((s) => !s.done && FOLLOW_UP[s.n]);
   if (items.length === 0) return null;
-
-  const dismiss = (n: number) => {
-    const next = [...dismissed, n];
-    setDismissed(next);
-    try {
-      localStorage.setItem(DISMISS_KEY, JSON.stringify(next));
-    } catch {
-      /* trình duyệt chặn lưu — mục chỉ ẩn trong phiên này */
-    }
-  };
 
   return (
     <Panel
       title="Việc thiết lập tiếp"
-      kicker={`${items.length} bước Sếp đã để sau ở trình thiết lập — làm khi sẵn sàng`}
+      kicker={`${items.length} việc Sếp đã để sau — làm khi sẵn sàng, xong sẽ tự biến mất`}
       label="Việc thiết lập tiếp"
       bodyClass="ov-followup"
     >
@@ -67,9 +43,6 @@ export function SetupFollowUp() {
               Làm ngay
               <Icon name="ph ph-arrow-right" size={12} />
             </Link>
-            <button type="button" className="gh-btn gh-btn--ghost btn-24" onClick={() => dismiss(s.n)}>
-              Đã xong
-            </button>
           </li>
         ))}
       </ul>

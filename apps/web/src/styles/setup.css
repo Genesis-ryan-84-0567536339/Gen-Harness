@@ -182,3 +182,11 @@
 .invite-result-row__email { font-size: 10.5px; color: var(--color-neutral-500); margin-top: 2px; }
 .invite-result-row__pw { flex: none; font-size: 12px; color: var(--color-accent-300); }
 .prov-model__err { font-size: 11px; color: var(--color-bad); }
+
+/* Bước 8 — câu trả lời thử của agent; bước 9 — ranh giới khoá cứng */
+.setup-try { margin-top: 8px; padding: 10px 12px; border: 1px solid var(--color-divider); border-radius: var(--radius-sm); }
+.setup-try__label { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--color-neutral-500); }
+.setup-try__reply { margin: 6px 0 0; font-size: 12.5px; line-height: 1.5; white-space: pre-wrap; }
+.setup-boundaries { list-style: none; margin: 6px 0 10px; padding: 0; display: grid; gap: 6px; font-size: 12px; }
+.setup-boundaries li { display: flex; gap: 6px; align-items: flex-start; }
+.setup-ack { display: flex; gap: 8px; align-items: center; font-size: 12.5px; cursor: pointer; }

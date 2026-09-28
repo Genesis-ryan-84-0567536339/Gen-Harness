@@ -17,6 +17,8 @@ import { Step4Brain } from './Step4Brain';
 import { Step5Channels } from './Step5Channels';
 import { Step6Groups } from './Step6Groups';
 import { Step7Refinery } from './Step7Refinery';
+import { Step8Agent } from './Step8Agent';
+import { Step9Autonomy } from './Step9Autonomy';
 import { Step10Team } from './Step10Team';
 import { Step11Backup } from './Step11Backup';
 import { Step12Finish } from './Step12Finish';
@@ -33,6 +35,8 @@ const BUILT_STEPS: Record<number, (p: StepProps) => JSX.Element> = {
   5: Step5Channels,
   6: Step6Groups,
   7: Step7Refinery,
+  8: Step8Agent,
+  9: Step9Autonomy,
   10: Step10Team,
   11: Step11Backup,
   12: Step12Finish,

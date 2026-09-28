@@ -88,8 +88,8 @@ export function Step12Finish({ meta, description, onBack, onSaved, formRef }: St
                 Còn bước bắt buộc chưa xong: {missing.map((m) => m.n).join(', ')}
               </div>
               <p className="risk-box__text">
-                {missing.map((m) => m.title).join(', ')} được dựng ở giai đoạn sau, nên hệ thống chưa cho hoàn tất thiết lập. Kênh, nhóm và
-                sàng lọc đã chạy — Sếp dùng được Console ngay và quay lại đây khi các bước đó có.{' '}
+                Cần xong {missing.map((m) => m.title).join(', ')} trước khi hoàn tất thiết lập. Các bước khác Sếp đã để sau sẽ hiện ở
+                "Việc thiết lập tiếp" trên Tổng quan.{' '}
                 <Link to="/overview">Vào Console</Link>
               </p>
             </div>

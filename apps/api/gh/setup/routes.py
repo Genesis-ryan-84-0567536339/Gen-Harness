@@ -341,7 +341,8 @@ async def _owner_step(db: AsyncSession, user: service.CurrentUser | None) -> tup
 async def _owner_step_after(db: AsyncSession, user: service.CurrentUser | None,
                             *needs: int) -> tuple[Any, service.CurrentUser]:
     """Như `_owner_step`, cộng thêm yêu cầu các bước `needs` đã `done` — cùng cách `step4` đòi hỏi bước 1–3 xong
-    (qua `console_ready`), dùng cho bước 8 (đòi 4–7) và bước 9 (đòi 4–7 cộng 8)."""
+    (qua `console_ready`), dùng cho bước 8 (đòi 4 — có bộ não AI để thử trò chuyện) và bước 9 (đòi 8). Bước 5–7
+    tuỳ chọn nên không còn là điều kiện: agent tạo trước, gán kênh/nhóm sau ở Console."""
     row, owner = await _owner_step(db, user)
     done = (row.completed or {}).get("steps", {})
     missing = [n for n in needs if done.get(str(n)) != "done"]
@@ -459,7 +460,7 @@ async def step8(body: Step8In, request: Request, db: AsyncSession = DB,
     chuyện một lượt qua `ModelRouter` (`gh.biz.people.routes.try_chat`) — KHÔNG lưu vào hội thoại thật, chỉ để
     Owner nghe thử giọng agent. Model chưa gọi được (chưa cấu hình xong ở bước 4, hoặc lỗi tạm thời) không được
     chặn việc tạo agent — trả `try_reply: null` kèm lý do, Owner thử lại ngay ở đây hoặc ở màn Agent Identity."""
-    row, owner = await _owner_step_after(db, user, 4, 5, 6, 7)
+    row, owner = await _owner_step_after(db, user, 4)
     name, role_desc, voice, speak_when = (body.name.strip(), body.role_desc.strip(), body.voice.strip(),
                                           body.speak_when.strip())
     agent_id = (await db.execute(text("""
@@ -491,7 +492,7 @@ async def step9(body: Step9In, request: Request, db: AsyncSession = DB,
     bước 8, và bắt Owner xác nhận đã đọc danh sách ranh giới khoá cứng (`HARD_BOUNDARIES`, ARCHITECTURE §7.4).
     Các ranh giới đó **không tắt được** ở đây hay bất cứ đâu trong hệ thống — xác nhận chỉ để Owner biết trước
     khi vào Console, không phải một cài đặt."""
-    row, owner = await _owner_step_after(db, user, 4, 5, 6, 7, 8)
+    row, owner = await _owner_step_after(db, user, 8)
     if not body.ack_boundaries:
         raise field_errors({"ack_boundaries": "Cần xác nhận đã đọc ranh giới khoá cứng trước khi tiếp tục"})
     agent = (await db.execute(text("SELECT id, name FROM agent.identities WHERE org_id = :o "
@@ -591,6 +592,46 @@ async def step11(body: Step11In, request: Request, db: AsyncSession = DB,
     state = await _mark_done(db, request, row, owner, 11, cfg)
     state["backup"] = cfg
     return state
+
+
+# Bước tuỳ chọn → màn Console làm tiếp (khớp FOLLOW_UP ở web). "done" suy từ DỮ LIỆU THẬT, không chỉ từ trạng thái
+# trình thiết lập: Owner để sau bước 5 rồi quét QR ở màn Kênh thì mục tự biến mất khỏi "Việc thiết lập tiếp".
+FOLLOW_UP_SQL: dict[int, str] = {
+    5: """SELECT EXISTS (SELECT 1 FROM core.channel_sessions s JOIN core.channels c ON c.id = s.channel_id
+                         WHERE c.org_id = :o AND s.state = 'active' AND s.ended_at IS NULL)""",
+    6: "SELECT EXISTS (SELECT 1 FROM core.groups WHERE org_id = :o AND listen_mode NOT IN ('off', 'paused'))",
+    7: "SELECT EXISTS (SELECT 1 FROM refinery.rules WHERE org_id = :o AND is_enabled)",
+    8: "SELECT EXISTS (SELECT 1 FROM agent.identities WHERE org_id = :o)",
+    # Mức tự trị đặt ngay trong form tạo/sửa agent ở Console → có agent là đã có mức tự trị.
+    9: "SELECT EXISTS (SELECT 1 FROM agent.identities WHERE org_id = :o)",
+    10: "SELECT (SELECT count(*) FROM core.users WHERE org_id = :o) > 1",
+    11: "SELECT (SELECT settings ? 'backup' FROM core.organizations WHERE id = :o)",
+}
+
+
+@router.get("/hard-boundaries")
+async def hard_boundaries(db: AsyncSession = DB,
+                          user: service.CurrentUser | None = Depends(optional_user)) -> list[str]:
+    """Danh sách ranh giới khoá cứng để bước 9 hiển thị TRƯỚC khi Owner xác nhận (một nguồn duy nhất với API)."""
+    _owner_of(await _row(db), user)
+    return list(HARD_BOUNDARIES)
+
+
+@router.get("/follow-up")
+async def follow_up(db: AsyncSession = DB,
+                    user: service.CurrentUser | None = Depends(optional_user)) -> list[dict[str, Any]]:
+    """Việc thiết lập tiếp (thẻ ở Tổng quan): các bước tuỳ chọn chưa `done` trong trình thiết lập, kèm `done`
+    tính từ dữ liệu thật — Owner làm ở Console thì mục tự xong, không phải bấm tay."""
+    row = await _row(db)
+    _owner_of(row, user)
+    status = (row.completed or {}).get("steps", {})
+    out = []
+    for n, key, title, required, _phase in STEPS:
+        if required or n not in FOLLOW_UP_SQL or status.get(str(n)) == "done":
+            continue
+        done = bool((await db.execute(text(FOLLOW_UP_SQL[n]), {"o": row.org_id})).scalar())
+        out.append({"n": n, "key": key, "title": title, "status": status.get(str(n), "todo"), "done": done})
+    return out
 
 
 @router.get("/first-run")

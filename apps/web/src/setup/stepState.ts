@@ -30,7 +30,7 @@ export function isAvailable(n: number, state: SetupState | undefined): boolean {
 /**
  * A step can be opened when it is settled, not beyond the server's current
  * step, or reached by passing only steps that are not available yet (phase 2:
- * 8–11 are "Sắp có" and passable so the owner can reach Hoàn tất).
+ * 5–11 are optional — "Để sau" moves on and they show in "Việc thiết lập tiếp" on Tổng quan).
  */
 export function isReachable(n: number, state: SetupState | undefined): boolean {
   if (!state) return n === 1;

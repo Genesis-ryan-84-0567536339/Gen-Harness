@@ -340,3 +340,10 @@ Lần đầu cài thật toàn bộ bằng Docker (workflow `e2e-install`) lộ 
   - Nút "Đã xong" ẩn mục (localStorage của trình duyệt).
   - Test `test/unit/setup-followup.test.tsx`.
 - Còn mở: trạng thái "đã xong" chưa tự suy từ dữ liệu thật (ví dụ kênh đã có phiên active) mà do Owner bấm. Có thể thêm API sau.
+- Cùng bản (Owner: "làm thêm cho hoàn chỉnh hết đi"):
+  - **Bước 8–9 có form thật** thay "Sắp có".
+    - `Step8Agent.tsx`: chọn mẫu, tên, vai trò, câu thử. Sau khi lưu hiện câu trả lời thử, hoặc lý do chưa thử được.
+    - `Step9Autonomy.tsx`: chọn mức 3/4, danh sách ranh giới khoá cứng từ `GET /setup/hard-boundaries`, ô xác nhận đã đọc.
+  - API bước 8 giờ chỉ cần bước 4 (trước đòi 4–7, mà 5–7 đã thành tuỳ chọn); bước 9 cần 8.
+  - **`GET /setup/follow-up`**: bước tuỳ chọn chưa `done` kèm `done` suy từ dữ liệu thật: phiên kênh active, nhóm đang nghe, quy tắc bật, có agent, có >1 người dùng, có lịch sao lưu. Thẻ "Việc thiết lập tiếp" dùng API này; làm xong ở Console thì mục tự biến mất, bỏ nút "Đã xong" + localStorage.
+  - Test: `test_follow_up_lists_deferred_steps_and_detects_real_completion`; web test luồng bước 8→9.
