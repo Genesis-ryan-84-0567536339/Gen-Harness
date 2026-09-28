@@ -45,19 +45,24 @@ type CheckResult struct {
 const (
 	minRAMBytes         uint64 = 4 * 1024 * 1024 * 1024
 	recommendedRAMBytes uint64 = 8 * 1024 * 1024 * 1024
-	minDiskBytes        uint64 = 20 * 1024 * 1024 * 1024
-	defaultPort                = 8443
-	maxClockDrift              = 5 * time.Minute
+	// Đo thật (v0.1.10, amd64): 6 image ≈ 0,5 GB nén, ≈ 1,5 GB sau giải nén;
+	// dữ liệu ban đầu vài chục MB. 5 GB đủ chỗ tải + giải nén + CSDL nhỏ;
+	// dưới 10 GB chỉ cảnh báo vì backup/dữ liệu sẽ lớn dần.
+	minDiskBytes         uint64 = 5 * 1024 * 1024 * 1024
+	recommendedDiskBytes uint64 = 10 * 1024 * 1024 * 1024
+	defaultPort                 = 8443
+	maxClockDrift               = 5 * time.Minute
 )
 
 // MinRAMBytes/RecommendedRAMBytes/MinDiskBytes/DefaultPort xuất ra để các
 // gói khác (install, tui) tham chiếu đúng ngưỡng khi hiển thị.
 const (
-	MinRAMBytes         = minRAMBytes
-	RecommendedRAMBytes = recommendedRAMBytes
-	MinDiskBytes        = minDiskBytes
-	DefaultPort         = defaultPort
-	MaxClockDrift       = maxClockDrift
+	MinRAMBytes          = minRAMBytes
+	RecommendedRAMBytes  = recommendedRAMBytes
+	MinDiskBytes         = minDiskBytes
+	RecommendedDiskBytes = recommendedDiskBytes
+	DefaultPort          = defaultPort
+	MaxClockDrift        = maxClockDrift
 )
 
 func gib(bytes uint64) float64 {
@@ -110,14 +115,19 @@ func CheckRAM(totalBytes uint64) CheckResult {
 }
 
 // CheckDisk đánh giá dung lượng đĩa trống tại thư mục cài đặt: BAD nếu dưới
-// 20 GB, ngược lại OK.
+// 5 GB, WARN nếu dưới 10 GB (khuyến nghị), OK nếu từ 10 GB trở lên.
 func CheckDisk(freeBytes uint64) CheckResult {
 	detail := fmt.Sprintf("%.0f GB trống", gib(freeBytes))
-	if freeBytes < minDiskBytes {
+	switch {
+	case freeBytes < minDiskBytes:
 		return CheckResult{Name: "Đĩa trống", Status: StatusFail,
 			Detail: detail + fmt.Sprintf(" (cần tối thiểu %.0f GB)", gib(minDiskBytes))}
+	case freeBytes < recommendedDiskBytes:
+		return CheckResult{Name: "Đĩa trống", Status: StatusWarn,
+			Detail: detail + fmt.Sprintf(" (khuyến nghị %.0f GB — dữ liệu và backup sẽ lớn dần)", gib(recommendedDiskBytes))}
+	default:
+		return CheckResult{Name: "Đĩa trống", Status: StatusOK, Detail: detail}
 	}
-	return CheckResult{Name: "Đĩa trống", Status: StatusOK, Detail: detail}
 }
 
 // CheckPort đánh giá cổng cần cho proxy (mặc định 8443): BAD nếu đang bị

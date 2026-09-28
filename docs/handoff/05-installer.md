@@ -49,7 +49,7 @@ Compose luôn dùng **bản compose plugin do `genh` mang theo**, không phụ t
 
 | # | Bước | Trọng số | Nội dung |
 |---|---|---|---|
-| 1 | Kiểm tra máy | 3% | OS, kiến trúc, RAM ≥ 4 GB (khuyến nghị 8), đĩa trống ≥ 20 GB, cổng 8443 rảnh, kết nối mạng, đồng hồ hệ thống |
+| 1 | Kiểm tra máy | 3% | OS, kiến trúc, RAM ≥ 4 GB (khuyến nghị 8), đĩa trống ≥ 5 GB (khuyến nghị 10), cổng 8443 rảnh, kết nối mạng, đồng hồ hệ thống |
 | 2 | Chuẩn bị container runtime | 17% | Như bảng trên. Bỏ qua (tính xong ngay) nếu đã có runtime hợp lệ |
 | 3 | Tải image | 50% | `db`, `redis`, `objects`, `proxy`, `api`, `web`, `bridge` — tải song song, hiển thị MB/s và thời gian còn lại |
 | 4 | Sinh bí mật & cấu hình | 3% | Khoá master, mật khẩu DB, khoá MinIO, khoá backup, CA TLS nội bộ, setup token một lần. Ghi `~/.gen-harness/config/` quyền 600 |
