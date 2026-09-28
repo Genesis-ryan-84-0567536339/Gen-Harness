@@ -292,3 +292,9 @@ Lần đầu cài thật toàn bộ bằng Docker (workflow `e2e-install`) lộ 
 - E2E release v0.1.9: cài sạch bằng install.sh XANH (48 giây, mọi dịch vụ healthy, `/ready` xanh), job nâng cấp v0.1.8 → v0.1.9 XANH (backup, update, dữ liệu giữ nguyên). Bước `genh status --install-dir $GEN_HARNESS_HOME` đỏ vì install.sh đặt binary theo `GEN_HARNESS_HOME` còn `genh install` cài dịch vụ vào `~/.gen-harness`.
 - Sửa: `config.DefaultRoot()` ưu tiên `$GEN_HARNESS_HOME` (khớp install.sh/install.ps1).
 - Còn mở: timer tự cập nhật (systemd/cron) chạy `genh update` không kèm `--install-dir`, nên ai đặt `GEN_HARNESS_HOME` tuỳ biến thì timer vẫn nhắm `~/.gen-harness`. Cài mặc định không bị.
+
+## v0.1.11 — Ngưỡng đĩa trống 20 GB quá cao
+
+- v0.1.10 đã xanh toàn bộ E2E chế độ release. Owner cài thật trên Fedora (31 GB RAM, 17 GB trống) thì bị chặn ở bước 1: "cần tối thiểu 20 GB".
+- Đo thật trên ghcr: api 153 MB, bridge 130 MB, db 161 MB, web 22 MB (nén, amd64), cộng caddy và redis ≈ 0,5 GB nén, ≈ 1,5 GB giải nén.
+- Ngưỡng mới: dưới 5 GB thì chặn, dưới 10 GB thì cảnh báo (vẫn cài), từ 10 GB trở lên OK.

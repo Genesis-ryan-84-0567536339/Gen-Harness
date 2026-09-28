@@ -51,14 +51,20 @@ func TestCheckRAM(t *testing.T) {
 }
 
 func TestCheckDisk(t *testing.T) {
-	if got := CheckDisk(10 * 1024 * 1024 * 1024).Status; got != StatusFail {
-		t.Errorf("10GB free: got %v, want fail", got)
+	const gb = 1024 * 1024 * 1024
+	cases := []struct {
+		free uint64
+		want Status
+	}{
+		{3 * gb, StatusFail},
+		{7 * gb, StatusWarn},
+		{17 * gb, StatusOK}, // máy Fedora thật của Owner: 17 GB trống bị chặn oan ở v0.1.10
+		{500 * gb, StatusOK},
 	}
-	if got := CheckDisk(20 * 1024 * 1024 * 1024).Status; got != StatusOK {
-		t.Errorf("20GB free: got %v, want ok", got)
-	}
-	if got := CheckDisk(500 * 1024 * 1024 * 1024).Status; got != StatusOK {
-		t.Errorf("500GB free: got %v, want ok", got)
+	for _, c := range cases {
+		if got := CheckDisk(c.free).Status; got != c.want {
+			t.Errorf("%d GB trống: got %v, want %v", c.free/gb, got, c.want)
+		}
 	}
 }
 
