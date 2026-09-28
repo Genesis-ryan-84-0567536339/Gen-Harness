@@ -109,11 +109,32 @@ async def test_setup_steps_4_to_7_and_finish(owner_api, db) -> None:  # type: ig
 
     fr = (await api.get("/setup/first-run")).json()
     assert set(fr) == {"raw_collected", "classifying", "clean", "lowconf", "discarded", "run"}
-    # Bước 8–9 thuộc giai đoạn 3 → chưa hoàn tất được, báo rõ bước còn thiếu.
-    r = await api.send("PUT", "/setup/steps/12", {})
-    assert r.status_code == 409 and "8, 9" in str(r.json())
     done = {s["n"]: s["status"] for s in (await api.get("/setup/state")).json()["steps"]}
     assert all(done[n] == "done" for n in (1, 2, 3, 4, 5, 6, 7))
+    # Bước 8–9 không bắt buộc (làm sau ở Console) → hoàn tất được ngay.
+    r = await api.send("PUT", "/setup/steps/12", {})
+    assert r.status_code == 200, r.text
+    assert (await api.get("/setup/state")).json()["finished"]
+
+
+async def test_setup_finishes_with_only_steps_1_to_4(owner_api, db) -> None:  # type: ignore[no-untyped-def]
+    """Owner chỉ cần 1–4 (Owner, tổ chức, bộ não AI): bỏ qua 5–11 rồi hoàn tất — không bắt quét QR hay dựng agent."""
+    api: Api = owner_api
+    r = await api.send("PUT", "/setup/steps/12", {})
+    assert r.status_code == 409 and "4" in str(r.json())
+    r = await api.send("POST", "/providers", {"kind": "gemini", "name": "Gemini", "keys": ["AIza-test-key-1234"],
+                                              "models": ["gemini-2.5-flash"]})
+    pid = r.json()["id"]
+    await db.execute(text("""UPDATE agent.providers SET auth_state = 'ok', last_test = '{"ok": true}' WHERE id = :i"""),
+                     {"i": pid})
+    await db.commit()
+    assert (await api.send("PUT", "/setup/steps/4", {"provider_ids": [pid]})).status_code == 200
+    for n in range(5, 12):
+        r = await api.send("POST", f"/setup/steps/{n}/skip")
+        assert r.status_code == 200, (n, r.text)
+    r = await api.send("PUT", "/setup/steps/12", {})
+    assert r.status_code == 200, r.text
+    assert (await api.get("/setup/state")).json()["finished"]
 
 
 async def test_refinery_run_now_queues_once(owner_api) -> None:  # type: ignore[no-untyped-def]

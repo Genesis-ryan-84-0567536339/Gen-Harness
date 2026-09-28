@@ -320,3 +320,13 @@ Lần đầu cài thật toàn bộ bằng Docker (workflow `e2e-install`) lộ 
   - Thiếu `certutil` thì chỉ cảnh báo kèm tên gói cần cài.
   - `trustCALinux` giờ hỗ trợ cả Fedora/RHEL (`update-ca-trust`) và cài tệp với quyền 0644.
 - Chưa kiểm được `certutil` thật trong container này (không cài được gói); test `TestAddToNSSDB_RealCertutil` chạy khi máy có certutil.
+
+## v0.1.14 — Trình thiết lập: chỉ bắt buộc bước 1–4, không còn kẹt ở bước 12
+
+- Owner làm tới bước 4 thì hỏi "sao còn nhiều bước vậy". Soát lại:
+  - Bước 5–9 bị đánh dấu bắt buộc. Bước 5–7 buộc quét QR Zalo/WhatsApp và bật nhóm ngay khi cài.
+  - Bước 8–9 web chưa có form (chỉ "Sắp có") nhưng API vẫn đòi `done` mới cho bước 12 hoàn tất. Hệ quả: **không Owner nào hoàn tất được thiết lập**; test cũ còn khẳng định hành vi này ("8, 9" còn thiếu).
+- Sửa:
+  - `gh/setup/routes.py` `STEPS`: 5–9 → không bắt buộc (bỏ qua được, làm sau ở Console). Bắt buộc còn 1–4 và 12.
+  - Web: `steps.ts` + mock; bước 5–7 có nút "Bỏ qua".
+  - Test mới `test_setup_finishes_with_only_steps_1_to_4`.

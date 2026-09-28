@@ -8,7 +8,7 @@ import { StepFrame } from './StepFrame';
 import { describeError, type StepProps } from './types';
 
 /** Bước 5 — same channel cards as Điều khiển hệ thống, QR at 240px, risk warning first. */
-export function Step5Channels({ meta, description, onBack, onSaved, formRef }: StepProps) {
+export function Step5Channels({ meta, description, onBack, onSaved, formRef, onSkip, skipping, skipError }: StepProps) {
   const channels = useChannels();
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -36,7 +36,9 @@ export function Step5Channels({ meta, description, onBack, onSaved, formRef }: S
       busy={busy}
       onContinue={() => void save()}
       onBack={onBack}
-      formError={formError}
+      onSkip={onSkip}
+      skipping={skipping}
+      formError={formError ?? skipError}
       bare
     >
       {channels.isPending ? (

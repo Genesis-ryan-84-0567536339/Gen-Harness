@@ -15,7 +15,7 @@ import { describeError, type StepProps } from './types';
 const kindTone = (k: string): Tone => (k === 'risk' ? 'bad' : k === 'competition' || k === 'hr' ? 'warn' : 'neutral');
 
 /** Bước 7 — schedule, starter rules R-01…R-06, scoring weights (sum 100%). */
-export function Step7Refinery({ meta, description, onBack, onSaved, formRef }: StepProps) {
+export function Step7Refinery({ meta, description, onBack, onSaved, formRef, onSkip, skipping, skipError }: StepProps) {
   const schedule = useSchedule();
   const presets = useQuery({ queryKey: qk2.rulePresets, queryFn: ({ signal }) => api.setup.rulePresets(signal) });
   const weightsQ = useWeights();
@@ -75,7 +75,9 @@ export function Step7Refinery({ meta, description, onBack, onSaved, formRef }: S
       busy={busy}
       onContinue={() => void save()}
       onBack={onBack}
-      formError={formError}
+      onSkip={onSkip}
+      skipping={skipping}
+      formError={formError ?? skipError}
     >
       <div className="setup-section">
         <div className="setup-section__title">Kích hoạt sàng lọc · cái nào đến trước</div>
