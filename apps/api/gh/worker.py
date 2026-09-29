@@ -27,6 +27,7 @@ from gh.chassis.bus import EventBus
 from gh.config import get_settings
 from gh.db import admin_sessionmaker, dispose_engine, sessionmaker
 from gh.gen import store as gen_store
+from gh.hub_link import service as hub_link
 from gh.identity import service as identity
 from gh.memory import notebook
 from gh.providers import cli as climod
@@ -148,6 +149,14 @@ async def purge_gen_conversations(ctx: dict[str, Any]) -> int:
     return n
 
 
+async def hub_token_expiry_scan(ctx: dict[str, Any]) -> int:
+    """v0.1.26 (Đợt D1): token Gen-hub còn ≤ 14 ngày → chuông cho Owner (một lần mỗi token)."""
+    async with sessionmaker()() as db:
+        n = await hub_link.expiry_scan(db, ctx.get("redis_bus"))
+        await db.commit()
+    return n
+
+
 _BIZ_JOBS = [*biz.jobs(), *BACKUP_JOBS]  # PLAN §5.6 — gh.backup.scheduled_backup_scan cùng mẫu CronJob
 
 
@@ -156,7 +165,7 @@ class WorkerSettings:
     on_startup = startup
     on_shutdown = shutdown
     functions = [verify_action_log, partition_maintenance, detect_identities, compact_notebooks, expire_sessions,
-                 purge_gen_conversations,
+                 purge_gen_conversations, hub_token_expiry_scan,
                  *(fn for fn, _ in _BIZ_JOBS), *BACKUP_FUNCTIONS]
     health_check_interval = 30
     cron_jobs = [
@@ -166,6 +175,7 @@ class WorkerSettings:
         cron(compact_notebooks, hour={3}, minute={15}),         # 03:15 hằng ngày
         cron(expire_sessions, minute={20}),                     # mỗi giờ — dọn core.sessions (0014_v011_db)
         cron(purge_gen_conversations, hour={3}, minute={40}),   # 03:40 hằng ngày — hạn lưu hội thoại Gen
+        cron(hub_token_expiry_scan, hour={1}, minute={50}),     # 01:50 UTC (08:50 giờ VN) — nhắc token Gen-hub
         *(cron(fn, **kw) for fn, kw in _BIZ_JOBS),  # type: ignore[arg-type]
     ]
 

@@ -19,6 +19,7 @@ v0.1.22: Đợt B1–B3 — quản lý người dùng, sửa thông tin công ty
 v0.1.23: Đợt B4–B7 — giao diện điện thoại, trang lỗi/404, chuông thông báo, sáng/tối.
 v0.1.24: Đợt A4 — Gen v2 bước 1: đề xuất thao tác có xác nhận (nháp tin, nhắc việc, gán người).
 v0.1.25: Đợt C1 — lọc đầu Hộp thư (trùng, rác, điểm) dùng Jev khi có, quy tắc khi không.
+v0.1.26: Đợt D1 (lát đầu) — Gen đọc Kho Ryan qua Gen-hub (chỉ đọc, chỉ Owner, che dữ liệu trước khi gửi model).
 
 ## Đợt A — Gen v1 (thiết kế: docs/design/gen-v1.md)
 - ✅ A1 Khung chat phải + Gen trả lời/tóm tắt (chỉ đọc), lưu hội thoại, Nhật ký hành động — v0.1.21.
@@ -42,6 +43,9 @@ v0.1.25: Đợt C1 — lọc đầu Hộp thư (trùng, rác, điểm) dùng Jev
   quy tắc; Hộp thư có huy hiệu + "Ẩn rác & trùng", thẻ cấu hình Owner — v0.1.25. (Còn: đo độ chính xác có nhãn người.)
 
 ## Đợt D — Phòng làm việc chung (repo Gen-hub, cần mở quyền repo cho phiên này)
-D1 Gen nối Kho/warroom/kanban của Gen-hub. D2 Jules worker trong gen-workplace (mỗi tài khoản có hạn mức riêng;
-kiểm điều khoản dùng nhiều tài khoản trước khi chạy song song 5 tài khoản). D3 Playwright cho agent vòng ngoài.
-Thiết kế: docs/design/gen-hub-link.md (lát đầu v0.1.26 — Gen đọc Kho qua Gen-hub, chỉ-đọc).
+- 🟡 D1 Gen nối Kho/warroom/kanban của Gen-hub — **một phần** v0.1.26: Gen đọc Kho (Owner, chỉ đọc, che dữ liệu, đệm 5 phút,
+  nhắc token trước 14 ngày; thẻ Gen-hub ở MCP Hub). Còn: đề xuất ghi kanban/warroom (v0.1.27), phương án B.
+- D2 Jules worker trong gen-workplace (mỗi tài khoản có hạn mức riêng; kiểm điều khoản dùng nhiều tài khoản trước khi chạy
+  song song 5 tài khoản). Boss chốt 29/09: 1 tài khoản, tối đa 5 việc/ngày — chưa làm.
+- D3 Playwright cho agent vòng ngoài.
+Thiết kế: docs/design/gen-hub-link.md (lát đầu v0.1.26 ✅ — Gen đọc Kho qua Gen-hub, chỉ-đọc).

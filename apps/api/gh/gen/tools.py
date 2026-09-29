@@ -1,5 +1,6 @@
 """Công cụ dữ liệu CHỈ ĐỌC của Gen (docs/design/gen-v1.md §3.4; v2 thêm task.list, staff.list;
-v0.1.25 thêm refinery.summary).
+v0.1.25 thêm refinery.summary; v0.1.26 thêm hub.kho_* — đọc Kho Ryan qua Gen-hub, chỉ Owner, đã che trước khi vào
+model).
 
 Mỗi tool là lớp bọc mỏng quanh một endpoint GET đã có, gọi NỘI BỘ (ASGI, không qua mạng) bằng chính cookie phiên
 của người đang hỏi → tái dùng nguyên RBAC, phạm vi dữ liệu và lớp che của endpoint; Gen không có quyền riêng, không
@@ -7,6 +8,7 @@ có truy vấn SQL riêng. Kết quả được cắt gọn (≤ 4 KB, ≤ 20 d�
 được ghi lại để validator chỉ cho phép làm sáng dòng có thật (chống model bịa id).
 """
 
+import re
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -35,6 +37,10 @@ class Tool:
     # Tham số nằm trong đường dẫn (vd {id}) — phải là UUID.
     path_args: tuple[str, ...] = ()
     default_query: dict[str, str] = field(default_factory=dict)
+    # Tham số đường dẫn KHÔNG phải UUID: tên → regex phải khớp (vd mã Kho VIEC-12).
+    path_patterns: dict[str, str] = field(default_factory=dict)
+    # Chỉ vai trò Owner (quyết định Boss: Gen đọc Kho chỉ cho Owner) — endpoint còn tự kiểm lại.
+    owner_only: bool = False
 
 
 TOOLS: dict[str, Tool] = {t.name: t for t in (
@@ -68,10 +74,21 @@ TOOLS: dict[str, Tool] = {t.name: t for t in (
     Tool("refinery.summary", "Lọc đầu Hộp thư (Jev/quy tắc): số mục đã lọc, trùng, rác, điểm thấp, chờ lọc, độ trễ và "
          "độ khớp của Jev; args.days ∈ 1|7|30", ("queue.read",), "/refinery/triage/summary",
          {"days": ("1", "7", "30")}),
+    Tool("hub.kho_summary", "Kho Ryan qua Gen-hub (chỉ đọc): tóm tắt đầu phiên — Phiên gần nhất, Việc đang mở, Quyết "
+         "định hiệu lực, Dự án trọng tâm; args.so_phien ∈ 1..5. Trích dẫn bằng mã (VIEC-/QD-/PHIEN-)",
+         ("system.manage",), "/hub/kho/summary", {"so_phien": ("1", "2", "3", "4", "5")}, owner_only=True),
+    Tool("hub.kho_search", "Tìm trong Kho Ryan theo từ khoá; args.q, args.bang (tuỳ chọn: Việc, Dự án, Phiên, Quyết "
+         "định, Bài học, Tri thức — Tri thức chỉ là bản sao từ GitHub)", ("system.manage",), "/hub/kho/search",
+         {"q": None, "bang": None}, owner_only=True),
+    Tool("hub.kho_get", "Một bản ghi Kho Ryan theo mã; args.ma (vd VIEC-12, QD-3, PHIEN-1)", ("system.manage",),
+         "/hub/kho/records/{ma}", path_args=("ma",), path_patterns={"ma": r"^[A-Za-z]{2,6}-\d{1,6}$"},
+         owner_only=True),
 )}
 
 
 def allowed(user: service.CurrentUser, tool: Tool) -> bool:
+    if tool.owner_only and user.role_code != rbac.OWNER:
+        return False
     return not tool.permissions or any(user.permissions.get(p, rbac.NONE) != rbac.NONE for p in tool.permissions)
 
 
@@ -132,10 +149,15 @@ def _build_request(tool: Tool, args: dict[str, Any]) -> tuple[str, dict[str, str
     path = tool.path
     for a in tool.path_args:
         v = str(args.get(a) or "")
-        try:
-            uuid.UUID(v)
-        except ValueError as e:
-            raise ToolError("BAD_ARGS", f"{a} phải là UUID") from e
+        if a in tool.path_patterns:
+            if not re.fullmatch(tool.path_patterns[a], v):
+                raise ToolError("BAD_ARGS", f"{a} không đúng dạng")
+            v = v.upper()
+        else:
+            try:
+                uuid.UUID(v)
+            except ValueError as e:
+                raise ToolError("BAD_ARGS", f"{a} phải là UUID") from e
         path = path.replace("{" + a + "}", v)
     query = dict(tool.default_query)
     for k, allowed_values in tool.query.items():
@@ -193,6 +215,9 @@ class ToolRunner:
                 if status == 404:
                     return self._fail("NOT_FOUND", "Không tìm thấy")
                 if status >= 400:
+                    # 409 có mã rõ (vd HUB_LINK_OFF, HUB_UNAVAILABLE) → báo đúng lý do cho model, không đoán.
+                    if isinstance(data, dict) and isinstance(data.get("code"), str) and status == 409:
+                        return self._fail(data["code"], str(data.get("title") or f"Lỗi {status}")[:200])
                     return self._fail("ERROR", f"Lỗi {status}")
         except ToolError as e:
             return self._fail(e.code, str(e))

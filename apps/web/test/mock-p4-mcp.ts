@@ -7,7 +7,7 @@
  * `/mcp/market` (những route đó chưa từng được cài, xem ghi chú đầu `packages/contracts/src/p4-mcp.ts`).
  */
 import { randomUUID } from 'node:crypto';
-import type { AgentIdentity, McpCall, McpCallOutcome, McpServer, McpTool } from '@gen-harness/contracts';
+import type { AgentIdentity, HubLink, McpCall, McpCallOutcome, McpServer, McpTool } from '@gen-harness/contracts';
 import type { P2Ctx } from './mock-phase2';
 
 export interface P4McpOptions {
@@ -63,6 +63,11 @@ export function createMock(opts: P4McpOptions) {
   let tools: MockTool[] = seed.tools;
   let calls: McpCall[] = opts.fresh ? [] : seedCalls();
   const discovered = new Set<string>(); // server_id đã khám phá lần nào chưa (để lộ HIDDEN_NEW_TOOL đúng một lần)
+  // v0.1.26 — liên kết Gen-hub (`gh/hub_link/routes.py`). Token chỉ ghi: không bao giờ nằm trong phản hồi.
+  let hubLink: HubLink = {
+    configured: false, enabled: false, status: 'off', server_id: null, endpoint: null, has_token: false,
+    allow_public_network: false, token_expires_at: null, days_left: null, last_ok_at: null, last_error: null, health: null,
+  };
 
   const has = (ctx: P2Ctx, perm: string) => !!ctx.perms[perm] && ctx.perms[perm] !== 'none';
   const pin = (ctx: P2Ctx, operation: string) => {
@@ -92,8 +97,37 @@ export function createMock(opts: P4McpOptions) {
     return item;
   }
 
+  function handleHub(ctx: P2Ctx): boolean {
+    const { method: m, path: p, body, reply, problem } = ctx;
+    if (p === '/hub/link' && m === 'GET') {
+      if (!has(ctx, 'system.read')) return problem(403, 'FORBIDDEN', 'Vai trò không có quyền này');
+      return reply(200, hubLink);
+    }
+    if ((p === '/hub/link' && m === 'PATCH') || (p === '/hub/link/test' && m === 'POST')) {
+      if (ctx.role !== 'owner') return problem(403, 'FORBIDDEN', 'Vai trò của bạn không có quyền thao tác này');
+      if (!pin(ctx, 'hub.link')) return true;
+      if (m === 'PATCH') {
+        const b = body as { endpoint?: string; token?: string; token_expires_at?: string | null; allow_public_network?: boolean; enabled?: boolean };
+        if (!hubLink.configured && (!b.endpoint || !b.token)) return problem(422, 'VALIDATION', 'Dữ liệu chưa hợp lệ', { errors: { endpoint: 'Cần địa chỉ Gen-hub và token cho lần nối đầu' } });
+        const relink = (b.endpoint !== undefined && b.endpoint !== hubLink.endpoint) || !!b.token;
+        hubLink = {
+          ...hubLink, configured: true, server_id: hubLink.server_id ?? 'mcp-genhub', endpoint: b.endpoint ?? hubLink.endpoint,
+          has_token: hubLink.has_token || !!b.token, allow_public_network: b.allow_public_network ?? hubLink.allow_public_network,
+          token_expires_at: 'token_expires_at' in b ? b.token_expires_at ?? null : hubLink.token_expires_at,
+        };
+        if (relink || b.enabled === false) hubLink = { ...hubLink, enabled: false, status: 'off' };
+        return reply(200, hubLink);
+      }
+      if (!hubLink.configured) return problem(409, 'HUB_LINK_NOT_CONFIGURED', 'Chưa nhập địa chỉ và token Gen-hub');
+      hubLink = { ...hubLink, enabled: true, status: 'ok', last_ok_at: new Date().toISOString(), last_error: null, health: 'healthy' };
+      return reply(200, { ok: true, error: null, latency_ms: 240, exposed_tools: ['mcp-58450__kho_tom_tat', 'mcp-58450__kho_search', 'mcp-58450__kho_find_by_id'], missing_tools: [], link: hubLink });
+    }
+    return false;
+  }
+
   function handle(ctx: P2Ctx): boolean {
     const { method: m, path: p, url, body, reply, problem } = ctx;
+    if (p.startsWith('/hub/')) return handleHub(ctx);
     if (!p.startsWith('/mcp/')) return false;
     const seg = p.split('/').filter(Boolean); // ['mcp', ...]
 

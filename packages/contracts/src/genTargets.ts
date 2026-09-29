@@ -95,6 +95,10 @@ export const GEN_TARGETS: GenTarget[] = [
   // ── API & Model ──
   { id: 'api.add_provider', screen: 'api', label: 'Nút "Thêm nhà cung cấp"', description: 'Thêm Gemini/DeepSeek/API tương thích OpenAI' },
   { id: 'api.bindings', screen: 'api', label: 'Gán model cho từng agent', description: 'Chọn model cho từng mục đích, gồm core.gen của Gen' },
+  // ── MCP Hub — Gen-hub (v0.1.26, Đợt D1: Gen đọc Kho Ryan, chỉ đọc, chỉ Owner) ──
+  { id: 'mcp.hub_link', screen: 'mcp', label: 'Thẻ "Gen-hub"', description: 'Nối Gen-hub để Gen đọc Kho Ryan (chỉ đọc, chỉ Sếp): địa chỉ, token, hạn token, trạng thái', permission: 'system.manage' },
+  { id: 'mcp.hub_link.token', screen: 'mcp', label: 'Ô "Token Gen-hub"', description: 'Dán token agent tạo trong Gen-hub (chỉ ghi — không bao giờ hiện lại)', permission: 'system.manage', sensitive: true },
+  { id: 'mcp.hub_link.test', screen: 'mcp', label: 'Nút "Kiểm tra" Gen-hub', description: 'Thử kết nối, mở đúng tool đọc Kho cho Gen rồi bật liên kết (cần PIN)', permission: 'system.manage' },
   // ── Tài khoản của tôi ──
   { id: 'account.profile', screen: 'account', label: 'Hồ sơ', description: 'Đổi tên hiển thị, email' },
   { id: 'account.password', screen: 'account', label: 'Đổi mật khẩu', description: 'Đặt mật khẩu mới', sensitive: true },

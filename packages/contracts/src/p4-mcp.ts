@@ -99,9 +99,48 @@ export type McpCallResult =
   | { outcome: 'ok'; result: unknown; call: McpCall }
   | { outcome: 'held_for_approval' | 'blocked'; draft: unknown; call: McpCall };
 
+/**
+ * v0.1.26 (Đợt D1) — liên kết Gen-hub để Gen đọc Kho Ryan (`apps/api/gh/hub_link/routes.py`). Token Gen-hub CHỈ GHI:
+ * API không bao giờ trả lại token (chỉ `has_token`). Liên kết tắt (`enabled=false`) tới khi Owner bấm "Kiểm tra" xanh.
+ */
+export type HubLinkStatus = 'off' | 'ok' | 'expiring' | 'expired' | 'error';
+
+export interface HubLink {
+  configured: boolean;
+  enabled: boolean;
+  status: HubLinkStatus;
+  server_id: string | null;
+  endpoint: string | null;
+  has_token: boolean;
+  allow_public_network: boolean;
+  token_expires_at: string | null;
+  days_left: number | null;
+  last_ok_at: string | null;
+  last_error: string | null;
+  health: string | null;
+}
+
+/** `PATCH /hub/link` — Owner + PIN `hub.link`. `enabled` chỉ nhận `false` (bật = bấm Kiểm tra). */
+export interface HubLinkPatchBody {
+  endpoint?: string;
+  token?: string;
+  token_expires_at?: string | null;
+  allow_public_network?: boolean;
+  enabled?: false;
+}
+
+export interface HubLinkTestResult {
+  ok: boolean;
+  error: string | null;
+  latency_ms: number;
+  exposed_tools: string[];
+  missing_tools: string[];
+  link: HubLink;
+}
+
 const enc = encodeURIComponent;
 
-/** `GET/POST /mcp/servers`, `/tools*`, `/calls` — không có route nào khác ngoài các route này. */
+/** `GET/POST /mcp/servers`, `/tools*`, `/calls` + `/hub/link*` (v0.1.26) — không có route nào khác ngoài các route này. */
 export function mcpEndpoints(r: ApiClient['request']) {
   return {
     mcp: {
@@ -124,6 +163,13 @@ export function mcpEndpoints(r: ApiClient['request']) {
       },
       calls: (q: { cursor?: string; limit?: number; outcome?: string } = {}, signal?: AbortSignal) =>
         r<McpCallPage>('/mcp/calls', { signal, query: q }),
+    },
+    hub: {
+      link: {
+        get: (signal?: AbortSignal) => r<HubLink>('/hub/link', { signal }),
+        update: (body: HubLinkPatchBody) => r<HubLink>('/hub/link', { method: 'PATCH', body }),
+        test: () => r<HubLinkTestResult>('/hub/link/test', { method: 'POST' }),
+      },
     },
   };
 }
