@@ -29,6 +29,7 @@ PIN_OPERATIONS: dict[str, str] = {
     "data.export": "Xuất dữ liệu thô",
     "draft.decide": "Duyệt / huỷ bản nháp",
     "mcp.expose": "Mở tool MCP",
+    "hub.link": "Nối Gen-hub (địa chỉ, token)",
     "policy.change": "Đổi mức tự trị, ngưỡng tiền, ranh giới",
     "data.export_delete": "Xuất / xoá dữ liệu",
     "people_review.read": "Xem dữ liệu đánh giá nhân sự",
