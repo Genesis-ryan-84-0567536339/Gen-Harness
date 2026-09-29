@@ -13,32 +13,30 @@ Không thuộc `gh/biz/*` — quyền theo vai trò hệ thống `system.read` /
 `gh.agents_api.routes` / `gh.plugins_api.routes` dùng.
 """
 
-import time
 import uuid
 from datetime import datetime
 from typing import Any
 
-import orjson
 from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gh import crypto, realtime
+from gh import realtime
 from gh.auth import rbac, service
 from gh.auth.deps import require, require_pin
-from gh.biz.core.drafts import create_draft, effective_level
 from gh.chassis import actionlog
-from gh.chassis.mcp_client import McpBlockedNetwork, McpClient, McpError, McpTransportUnsupported
+from gh.chassis.mcp_client import McpClient
 from gh.data.common import iso
 from gh.db import DB
-from gh.errors import ApiError, conflict, field_errors, not_found
+from gh.errors import field_errors
+from gh.mcp_api import invoke
 
 router = APIRouter(prefix="/mcp", tags=["mcp"])
 READ = require("system.read", rbac.ALL)
 MANAGE = require("system.manage", rbac.ALL)
 
-MCP_AAD = b"mcp_server_auth"
+MCP_AAD = invoke.MCP_AAD
 TRANSPORTS = ("stdio", "http+sse", "streamable_http")
 ACCESS_KINDS = ("read", "write")
 
@@ -81,19 +79,10 @@ def _server_out(r: Any) -> dict[str, Any]:
             "exposed_count": r.exposed_count}
 
 
-SERVER_SELECT = """
-SELECT s.*, (SELECT count(*) FROM agent.mcp_tools t WHERE t.server_id = s.id) AS tool_count,
-       (SELECT count(*) FROM agent.mcp_tools t WHERE t.server_id = s.id AND t.is_exposed) AS exposed_count
-FROM agent.mcp_servers s
-"""
+SERVER_SELECT = invoke.SERVER_SELECT
 
 
-async def _server(db: AsyncSession, org_id: uuid.UUID, server_id: uuid.UUID) -> Any:
-    r = (await db.execute(text(SERVER_SELECT + " WHERE s.id = :i AND s.org_id = :o"),
-                          {"i": server_id, "o": org_id})).one_or_none()
-    if r is None:
-        raise not_found("Máy chủ MCP")
-    return r
+_server = invoke.get_server
 
 
 @router.get("/servers")
@@ -107,7 +96,7 @@ async def list_servers(user: service.CurrentUser = Depends(READ), db: AsyncSessi
 async def create_server(body: ServerIn, user: service.CurrentUser = Depends(MANAGE),
                         db: AsyncSession = DB) -> dict[str, Any]:
     body.check()
-    auth_enc = crypto.encrypt(body.auth_token.encode(), MCP_AAD) if body.auth_token else None
+    auth_enc = invoke.encrypt_token(body.auth_token) if body.auth_token else None
     sid = (await db.execute(text("""
         INSERT INTO agent.mcp_servers (org_id, name, transport, endpoint, auth_enc, allow_public_network, note)
         VALUES (:o, :n, :t, :e, :a, :pub, :note) RETURNING id"""),
@@ -143,7 +132,7 @@ async def patch_server(server_id: uuid.UUID, body: ServerPatch, user: service.Cu
         changed["is_enabled"] = body.is_enabled
     if body.auth_token is not None:
         sets.append("auth_enc = :a")
-        params["a"] = crypto.encrypt(body.auth_token.encode(), MCP_AAD) if body.auth_token else None
+        params["a"] = invoke.encrypt_token(body.auth_token) if body.auth_token else None
         changed["auth_token"] = "(đã đổi)"
     if sets:
         await db.execute(text(f"UPDATE agent.mcp_servers SET {', '.join(sets)} WHERE id = :i"), params)  # noqa: S608
@@ -164,64 +153,20 @@ async def delete_server(server_id: uuid.UUID, user: service.CurrentUser = Depend
     return Response(status_code=204)
 
 
-async def _auth_token(db: AsyncSession, server_id: uuid.UUID) -> str | None:
-    blob = (await db.execute(text("SELECT auth_enc FROM agent.mcp_servers WHERE id = :i"),
-                             {"i": server_id})).scalar_one_or_none()
-    return crypto.decrypt(bytes(blob), MCP_AAD).decode() if blob is not None else None
-
-
-async def _set_health(db: AsyncSession, redis: Any, org_id: uuid.UUID, server_id: uuid.UUID, health: str) -> None:
-    await db.execute(text("UPDATE agent.mcp_servers SET health = :h WHERE id = :i"), {"h": health, "i": server_id})
-    if redis is not None:
-        await realtime.publish(redis, "mcp.server_health", {"server_id": str(server_id), "health": health},
-                               org_id=org_id)
-
-
 @router.post("/servers/{server_id}/discover")
 async def discover_tools(server_id: uuid.UUID, request: Request, user: service.CurrentUser = Depends(MANAGE),
                          db: AsyncSession = DB) -> dict[str, Any]:
     """Khám phá tool qua `tools/list`. Tool MỚI luôn vào với `is_exposed=false` (mặc định đóng, khoá cứng #4) —
     tool đã biết giữ nguyên trạng thái mở/đóng + phạm vi cấp hiện có, chỉ cập nhật mô tả/schema."""
     cur = await _server(db, user.org_id, server_id)
-    if not cur.is_enabled:
-        raise conflict("MCP_SERVER_DISABLED", "Máy chủ đang tắt")
-    try:
-        tools = await _client(request).list_tools(cur, await _auth_token(db, server_id))
-    except McpBlockedNetwork as e:
-        await _set_health(db, request.app.state.redis, user.org_id, server_id, "blocked")
-        await db.commit()
-        raise conflict("MCP_NETWORK_BLOCKED", str(e)) from e
-    except McpTransportUnsupported as e:
-        raise conflict("MCP_TRANSPORT_UNSUPPORTED", str(e)) from e
-    except McpError as e:
-        await _set_health(db, request.app.state.redis, user.org_id, server_id, "error")
-        await db.commit()
-        raise conflict("MCP_DISCOVER_FAILED", str(e)) from e
-    found = []
-    for t in tools:
-        row = (await db.execute(text("""
-            INSERT INTO agent.mcp_tools (server_id, name, access, schema)
-            VALUES (:s, :n, :a, CAST(:sc AS jsonb))
-            ON CONFLICT (server_id, name) DO UPDATE SET schema = EXCLUDED.schema
-            RETURNING id, access, is_exposed, (xmax = 0) AS is_new"""),
-            {"s": server_id, "n": t.name, "a": "read" if t.read_only else "write",
-             "sc": orjson.dumps(t.input_schema).decode()})).one()
-        found.append({"id": str(row.id), "name": t.name, "access": row.access, "is_exposed": row.is_exposed,
-                     "is_new": row.is_new})
-    await _set_health(db, request.app.state.redis, user.org_id, server_id, "healthy")
-    await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
-                           action="mcp.server_discovered", target_type="mcp_server", target_id=str(server_id),
-                           target_label=cur.name, detail={"tool_count": len(found),
-                           "new": sum(1 for f in found if f["is_new"])}, ip=user.ip)
+    found = await invoke.discover(db, request.app.state.redis, _client(request), org_id=user.org_id, server=cur,
+                                  actor=user)
     return {"tools": found}
 
 
 # ─── tool: liệt kê, đổi loại, mở/đóng, cấp quyền ──────────────────────────────
 
-TOOL_SELECT = """
-SELECT t.id, t.server_id, t.name, t.access, t.is_exposed, t.schema, s.name AS server_name, s.org_id
-FROM agent.mcp_tools t JOIN agent.mcp_servers s ON s.id = t.server_id
-"""
+TOOL_SELECT = invoke.TOOL_SELECT
 
 
 def _tool_out(r: Any, grants: list[str] | None = None) -> dict[str, Any]:
@@ -230,18 +175,8 @@ def _tool_out(r: Any, grants: list[str] | None = None) -> dict[str, Any]:
             "grants": grants if grants is not None else []}
 
 
-async def _tool(db: AsyncSession, org_id: uuid.UUID, tool_id: uuid.UUID) -> Any:
-    r = (await db.execute(text(TOOL_SELECT + " WHERE t.id = :i AND s.org_id = :o"),
-                          {"i": tool_id, "o": org_id})).one_or_none()
-    if r is None:
-        raise not_found("Tool MCP")
-    return r
-
-
-async def _grants_of(db: AsyncSession, tool_id: uuid.UUID) -> list[str]:
-    rows = (await db.execute(text("SELECT agent_key FROM agent.mcp_grants WHERE tool_id = :t ORDER BY agent_key"),
-                             {"t": tool_id})).scalars().all()
-    return list(rows)
+_tool = invoke.get_tool
+_grants_of = invoke.grants_of
 
 
 @router.get("/tools")
@@ -325,33 +260,6 @@ async def remove_grant(tool_id: uuid.UUID, agent_key: str, user: service.Current
 OUTCOMES = ("ok", "held_for_approval", "blocked", "error")
 
 
-async def _log_call(db: AsyncSession, redis: Any, *, org_id: uuid.UUID, tool_id: uuid.UUID, agent_key: str,
-                    args: dict[str, Any], outcome: str, result_summary: str, latency_ms: int,
-                    draft_id: uuid.UUID | None = None) -> dict[str, Any]:
-    row = (await db.execute(text("""
-        INSERT INTO agent.mcp_calls (org_id, tool_id, agent_key, args, result_summary, latency_ms, outcome,
-                                     draft_id)
-        VALUES (:o, :t, :a, CAST(:args AS jsonb), :rs, :lat, :out, :d)
-        RETURNING id, at"""),
-        {"o": org_id, "t": tool_id, "a": agent_key, "args": orjson.dumps(args).decode(), "rs": result_summary,
-         "lat": latency_ms, "out": outcome, "d": draft_id})).one()
-    item = {"id": str(row.id), "at": iso(row.at), "tool_id": str(tool_id), "agent_key": agent_key,
-           "outcome": outcome, "result_summary": result_summary, "latency_ms": latency_ms,
-           "draft_id": str(draft_id) if draft_id else None}
-    if redis is not None:
-        await realtime.publish(redis, "mcp.call", item, org_id=org_id)
-    return item
-
-
-def _agent_uuid(agent_key: str) -> uuid.UUID | None:
-    if agent_key.startswith("agent:"):
-        try:
-            return uuid.UUID(agent_key[len("agent:"):])
-        except ValueError:
-            return None
-    return None
-
-
 class CallIn(BaseModel):
     agent_key: str = Field(min_length=1, max_length=200)
     args: dict[str, Any] = Field(default_factory=dict)
@@ -368,76 +276,9 @@ async def call_tool(tool_id: uuid.UUID, body: CallIn, request: Request, user: se
     `agent.mcp_calls` và một dòng Action Log; không có đường nào bỏ qua log này.
     """
     t = await _tool(db, user.org_id, tool_id)
-    redis = request.app.state.redis
-    started = time.monotonic()
-
-    async def blocked(code: str, msg: str) -> ApiError:
-        """Ghi mcp_calls + Action Log rồi COMMIT trước khi trả lỗi — `DB` rollback toàn phiên khi route ném
-        ngoại lệ (`gh.db.get_db`), nên phải chốt ghi trước, giống `gh.plugins_api.routes` làm ở nhánh lỗi."""
-        item = await _log_call(db, redis, org_id=user.org_id, tool_id=tool_id, agent_key=body.agent_key,
-                               args=body.args, outcome="blocked", result_summary=msg,
-                               latency_ms=int((time.monotonic() - started) * 1000))
-        await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
-                               action="mcp.call_blocked", target_type="mcp_tool", target_id=str(tool_id),
-                               target_label=f"{t.server_name} · {t.name}", result="blocked",
-                               detail={"code": code, "reason": msg, "agent_key": body.agent_key}, ip=user.ip)
-        await db.commit()
-        return ApiError(403, code, "Bị chặn", msg, call=item)
-
-    server = await _server(db, user.org_id, t.server_id)
-    if not server.is_enabled:
-        raise await blocked("MCP_SERVER_DISABLED", "Bị chặn: máy chủ MCP đang tắt")
-    if not t.is_exposed:
-        raise await blocked("MCP_TOOL_NOT_EXPOSED", "Bị chặn: tool chưa được Owner mở")
-    grants = await _grants_of(db, tool_id)
-    if body.agent_key not in grants:
-        raise await blocked("MCP_TOOL_NOT_GRANTED", "Bị chặn: agent chưa được cấp tool này")
-
-    if t.access == "write":
-        draft = await create_draft(db, org_id=user.org_id, kind="mcp_write", title=f"Gọi tool {t.name}",
-                                   body_text=f"Gọi tool MCP ghi '{t.name}' trên máy chủ '{t.server_name}' với "
-                                   f"tham số {orjson.dumps(body.args).decode()}", action_key="mcp.write",
-                                   agent_id=_agent_uuid(body.agent_key),
-                                   sources=[{"label": t.server_name, "ref": {"type": "mcp_server",
-                                            "id": str(t.server_id)}}], redis=redis)
-        outcome = "held_for_approval" if draft["status"] == "pending" else "blocked"
-        summary = "Chờ duyệt ở Bàn làm việc" if outcome == "held_for_approval" else (draft["hold_reason"] or
-                  "Bị chặn bởi chính sách")
-        item = await _log_call(db, redis, org_id=user.org_id, tool_id=tool_id, agent_key=body.agent_key,
-                               args=body.args, outcome=outcome, result_summary=summary,
-                               latency_ms=int((time.monotonic() - started) * 1000), draft_id=draft["id"])
-        return {"outcome": outcome, "draft": draft, "call": item}
-
-    level = await effective_level(db, user.org_id, agent_id=_agent_uuid(body.agent_key))
-    if level <= 1:
-        raise await blocked("MCP_AUTONOMY_TOO_LOW", f"Bị chặn: mức tự trị hiện tại ({level}) không cho gọi tool")
-    try:
-        result = await _client(request).call_tool(server, t.name, body.args, await _auth_token(db, server.id))
-    except McpBlockedNetwork as e:
-        await _set_health(db, redis, user.org_id, server.id, "blocked")
-        raise await blocked("MCP_NETWORK_BLOCKED", str(e)) from e
-    except McpTransportUnsupported as e:
-        raise await blocked("MCP_TRANSPORT_UNSUPPORTED", str(e)) from e
-    except McpError as e:
-        await _set_health(db, redis, user.org_id, server.id, "error")
-        item = await _log_call(db, redis, org_id=user.org_id, tool_id=tool_id, agent_key=body.agent_key,
-                               args=body.args, outcome="error", result_summary=str(e)[:500],
-                               latency_ms=int((time.monotonic() - started) * 1000))
-        await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
-                               action="mcp.call_error", target_type="mcp_tool", target_id=str(tool_id),
-                               target_label=f"{t.server_name} · {t.name}", result="failed",
-                               detail={"error": str(e)[:500]}, ip=user.ip)
-        await db.commit()
-        raise conflict("MCP_CALL_FAILED", str(e)) from e
-    await _set_health(db, redis, user.org_id, server.id, "healthy")
-    summary = orjson.dumps(result).decode()[:500]
-    item = await _log_call(db, redis, org_id=user.org_id, tool_id=tool_id, agent_key=body.agent_key,
-                           args=body.args, outcome="ok", result_summary=summary,
-                           latency_ms=int((time.monotonic() - started) * 1000))
-    await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id, action="mcp.call_ok",
-                           target_type="mcp_tool", target_id=str(tool_id), target_label=f"{t.server_name} · {t.name}",
-                           detail={"agent_key": body.agent_key}, ip=user.ip)
-    return {"outcome": "ok", "result": result, "call": item}
+    # Máy chủ lỗi → `invoke.McpCallFailed` (409 MCP_CALL_FAILED, cùng mã/tiêu đề như trước khi tách lõi).
+    return await invoke.invoke_tool(db, request.app.state.redis, _client(request), org_id=user.org_id, tool=t,
+                                    agent_key=body.agent_key, args=body.args, actor=user)
 
 
 # ─── nhật ký LIVE ──────────────────────────────────────────────────────────────
