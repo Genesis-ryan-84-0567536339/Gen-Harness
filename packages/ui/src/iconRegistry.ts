@@ -38,6 +38,8 @@ import {
   CubeIcon,
   CubeTransparentIcon,
   CurrencyCircleDollarIcon,
+  CursorClickIcon,
+  LightningIcon,
   DotsThreeIcon,
   DotsThreeVerticalIcon,
   EnvelopeIcon,
@@ -75,6 +77,7 @@ import {
   NoteIcon,
   NotePencilIcon,
   PackageIcon,
+  PaperPlaneRightIcon,
   PaperclipIcon,
   PhoneIcon,
   PlusCircleIcon,
@@ -220,6 +223,7 @@ import {
  * keeps that vocabulary while rendering SVGs from @phosphor-icons/react.
  */
 export const ICONS: Record<string, PhosphorIcon> = {
+  lightning: LightningIcon,
   'address-book': AddressBookIcon,
   alarm: AlarmIcon,
   archive: ArchiveIcon,
@@ -289,6 +293,7 @@ export const ICONS: Record<string, PhosphorIcon> = {
   cube: CubeIcon,
   'cube-transparent': CubeTransparentIcon,
   'currency-circle-dollar': CurrencyCircleDollarIcon,
+  'cursor-click': CursorClickIcon,
   database: DatabaseIcon,
   'device-mobile': DeviceMobileIcon,
   'dots-six-vertical': DotsSixVerticalIcon,
@@ -355,6 +360,7 @@ export const ICONS: Record<string, PhosphorIcon> = {
   package: PackageIcon,
   'paper-plane-tilt': PaperPlaneTiltIcon,
   paperclip: PaperclipIcon,
+  'paper-plane-right': PaperPlaneRightIcon,
   password: PasswordIcon,
   'pen-nib': PenNibIcon,
   'pencil-simple': PencilSimpleIcon,

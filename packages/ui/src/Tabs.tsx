@@ -6,6 +6,8 @@ export interface TabItem<K extends string = string> {
   label: ReactNode;
   /** Mono count label after the text (design: "QR · PIN", "6 model"). */
   count?: ReactNode;
+  /** Gen v1: `data-gen-target` cho nút tab. */
+  genTarget?: string;
 }
 
 export interface TabsProps<K extends string = string> {
@@ -50,6 +52,7 @@ export function Tabs<K extends string>({ items, value, onChange, label, classNam
             aria-controls={`${idPrefix}-panel-${t.key}`}
             tabIndex={selected ? 0 : -1}
             className="gh-tab"
+            data-gen-target={t.genTarget}
             onClick={() => onChange(t.key)}
             onKeyDown={(e) => onKey(e, i)}
           >

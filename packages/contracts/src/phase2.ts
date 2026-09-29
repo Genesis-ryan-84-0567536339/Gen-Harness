@@ -1,3 +1,4 @@
+import type { GenDoneEvent, GenStepEvent } from './gen';
 /**
  * Phase-2 API types, hand-written from docs/api/phase-2.md (tầng dữ liệu,
  * kênh, bộ não AI, trình thiết lập 4–7 + 12, WebSocket). Numbers are raw —
@@ -440,7 +441,8 @@ export interface ChannelStatusEvent {
 }
 
 // ── AI brain ──────────────────────────────────────────────────────────────
-export type ProviderKind = 'antigravity_cli' | 'gemini' | 'deepseek' | 'openai_compat';
+/** `system_one` = Jev (TypeSafe System One, v0.1.21): bộ quyết định nhanh cho Gen — KHÔNG nằm trong chuỗi sinh chữ. */
+export type ProviderKind = 'antigravity_cli' | 'gemini' | 'deepseek' | 'openai_compat' | 'system_one';
 
 export interface ProviderKey {
   id: string;
@@ -556,6 +558,8 @@ export interface RealtimeEventMap {
   'channel.status': ChannelStatusEvent;
   'cli.login': CliLoginEvent;
   header: HeaderEvent;
+  'gen.step': GenStepEvent;
+  'gen.done': GenDoneEvent;
   pong: Record<string, never>;
 }
 

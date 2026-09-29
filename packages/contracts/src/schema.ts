@@ -39,6 +39,8 @@ export interface components {
       permissions: Record<string, 'all' | 'scoped' | 'none' | string>;
       /** v0.1.19: mật khẩu do hệ thống đặt (genh reset-password) — Console buộc đặt mật khẩu mới. */
       must_change_password?: boolean;
+      /** v0.1.21: tính năng bật cho người này (`gen` = khung chat Gen, cờ `gen.enabled`, v1 chỉ Owner). */
+      features?: { gen?: boolean };
     };
     LoginRequest: { email: string; password: string };
     PinVerifyRequest: { pin: string };
