@@ -15,6 +15,7 @@ Nguồn chuẩn tiến độ. Mỗi đợt = 1 PR = 1 bản phát hành, CI + E2
 v0.1.15–0.1.20: thiết lập "Để sau" + hướng dẫn từng bước, nút Cập nhật ngay, reset mật khẩu / tin cậy CA, phiên 7 ngày,
 Tài khoản của tôi + bắt buộc đổi mật khẩu tạm, sao lưu & khôi phục trên giao diện.
 v0.1.21: Gen v1 (A1–A3) — khung chat, dẫn đường trên UI, nguồn Jev; cờ `gen.enabled` (bật cho Owner).
+v0.1.22: Đợt B1–B3 — quản lý người dùng, sửa thông tin công ty, trang Trợ giúp.
 
 ## Đợt A — Gen v1 (thiết kế: docs/design/gen-v1.md)
 - ✅ A1 Khung chat phải + Gen trả lời/tóm tắt (chỉ đọc), lưu hội thoại, Nhật ký hành động — v0.1.21.
@@ -24,8 +25,10 @@ v0.1.21: Gen v1 (A1–A3) — khung chat, dẫn đường trên UI, nguồn Jev;
 - A4 Đề xuất thao tác; v2: điền form có xác nhận (nháp tin, nhắc việc, gán người).
 
 ## Đợt B — Cơ bản còn thiếu
-B1 quản lý người dùng · B2 sửa thông tin công ty · B3 Trợ giúp/Giới thiệu/phiên bản · B4 giao diện điện thoại ·
-B5 trang lỗi · B6 chuông thông báo · B7 sáng/tối.
+- ✅ B1 quản lý người dùng (mời, đổi vai trò, khoá/mở khoá, đặt lại mật khẩu) — v0.1.22.
+- ✅ B2 sửa thông tin công ty (Điều khiển hệ thống › Tổ chức) — v0.1.22.
+- ✅ B3 Trợ giúp/Giới thiệu/phiên bản (`/help`, Báo lỗi) — v0.1.22.
+- B4 giao diện điện thoại · B5 trang lỗi · B6 chuông thông báo · B7 sáng/tối.
 
 ## Đợt C — Hạ tầng dữ liệu
 C1 Sàng lọc dùng Jev làm lớp lọc đầu (rác, trùng, chấm điểm) + đo chi phí/độ chính xác.

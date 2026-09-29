@@ -11,6 +11,7 @@ export interface RouteHandle {
 }
 
 export const ACCOUNT_CRUMBS = { domain: 'TÀI KHOẢN', title: 'Tài khoản của tôi', subtitle: 'My account' };
+export const HELP_CRUMBS = { domain: 'TRỢ GIÚP', title: 'Trợ giúp', subtitle: 'Help & about' };
 
 export function useActiveScreenKey(): string | null {
   const matches = useMatches();

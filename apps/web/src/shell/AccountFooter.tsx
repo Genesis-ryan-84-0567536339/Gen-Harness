@@ -137,6 +137,18 @@ function AccountMenu({ email, onClose }: { email?: string; onClose: (refocus: bo
         role="menuitem"
         className="sb-menu__item"
         onClick={() => {
+          navigate('/help');
+          onClose(false);
+        }}
+      >
+        <Icon name="ph ph-question" size={15} />
+        Trợ giúp
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        className="sb-menu__item"
+        onClick={() => {
           toggleSidebar();
           onClose(true);
         }}

@@ -6,11 +6,12 @@ import { LoginPage } from './pages/LoginPage';
 import { AccountPage } from './account/AccountPage';
 import { ForcePasswordPage } from './account/ForcePasswordPage';
 import { GuidePage } from './guide/GuidePage';
+import { HelpPage } from './help/HelpPage';
 import { GuideStepPage } from './guide/GuideStepPage';
 import { NotFoundScreen, ScreenPage } from './screens/ScreenPage';
 import { SetupPage } from './setup/SetupPage';
 import { AppShell } from './shell/AppShell';
-import { ACCOUNT_CRUMBS, type RouteHandle } from './shell/routeHandles';
+import { ACCOUNT_CRUMBS, HELP_CRUMBS, type RouteHandle } from './shell/routeHandles';
 import { RootLayout } from './RootLayout';
 
 /**
@@ -70,6 +71,8 @@ export const routes: RouteObject[] = [
           { path: 'guide/:n', element: <GuideStepPage /> },
           // Tài khoản của tôi (v0.1.19) — mở từ khối tài khoản ở chân thanh bên.
           { path: 'account', handle: { page: ACCOUNT_CRUMBS } satisfies RouteHandle, element: <AccountPage /> },
+          // Trợ giúp / Giới thiệu (v0.1.22) — phiên bản, hỏi Gen, lệnh genh, Báo lỗi.
+          { path: 'help', handle: { page: HELP_CRUMBS } satisfies RouteHandle, element: <HelpPage /> },
           { path: '*', element: <NotFoundScreen /> },
         ],
       },

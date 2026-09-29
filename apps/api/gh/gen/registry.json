@@ -104,6 +104,10 @@
     "account": {
       "path": "/account",
       "title": "Tài khoản của tôi"
+    },
+    "help": {
+      "path": "/help",
+      "title": "Trợ giúp"
     }
   },
   "targets": [
@@ -192,6 +196,23 @@
       "screen": "system",
       "label": "Tab \"Bộ não AI\"",
       "description": "Chuyển sang tab nhà cung cấp model, hạn mức, Jev",
+      "dynamic": null,
+      "params": null
+    },
+    {
+      "id": "system.tab.users",
+      "screen": "system",
+      "label": "Tab \"Người dùng\"",
+      "description": "Chuyển sang tab mời người dùng, đổi vai trò, khoá tài khoản (chỉ Owner)",
+      "dynamic": null,
+      "params": null,
+      "permission": "roles.manage"
+    },
+    {
+      "id": "system.tab.org",
+      "screen": "system",
+      "label": "Tab \"Tổ chức\"",
+      "description": "Chuyển sang tab sửa tên tổ chức, múi giờ, tiền tệ, xưng hô",
       "dynamic": null,
       "params": null
     },
@@ -322,6 +343,63 @@
       "safe_message": "Đây là thao tác nhạy cảm — Sếp tự xem kỹ và tự quyết định, Gen không làm thay."
     },
     {
+      "id": "system.users.list",
+      "screen": "system",
+      "label": "Danh sách người dùng",
+      "description": "Tên, email, vai trò, trạng thái, lần đăng nhập gần nhất; nút đặt lại mật khẩu, khoá/mở khoá",
+      "dynamic": null,
+      "params": {
+        "tab": "users"
+      },
+      "permission": "roles.manage",
+      "sensitive": true,
+      "safe_message": "Đây là thao tác nhạy cảm — Sếp tự xem kỹ và tự quyết định, Gen không làm thay."
+    },
+    {
+      "id": "system.users.invite",
+      "screen": "system",
+      "label": "Nút \"Mời người dùng\"",
+      "description": "Tạo tài khoản mới với mật khẩu tạm (cần mã PIN)",
+      "dynamic": null,
+      "params": {
+        "tab": "users"
+      },
+      "permission": "roles.manage"
+    },
+    {
+      "id": "system.users.temp_password",
+      "screen": "system",
+      "label": "Mật khẩu tạm vừa tạo",
+      "description": "Hộp hiện mật khẩu tạm một lần sau khi mời / đặt lại mật khẩu",
+      "dynamic": null,
+      "params": {
+        "tab": "users"
+      },
+      "permission": "roles.manage",
+      "sensitive": true,
+      "safe_message": "Đây là thao tác nhạy cảm — Sếp tự xem kỹ và tự quyết định, Gen không làm thay."
+    },
+    {
+      "id": "system.org.form",
+      "screen": "system",
+      "label": "Thông tin tổ chức",
+      "description": "Tên tổ chức, múi giờ, tiền tệ, Sếp tự xưng là, Agent gọi Sếp là",
+      "dynamic": null,
+      "params": {
+        "tab": "org"
+      }
+    },
+    {
+      "id": "system.org.save",
+      "screen": "system",
+      "label": "Nút \"Lưu thông tin tổ chức\"",
+      "description": "Lưu thay đổi thông tin tổ chức và xưng hô",
+      "dynamic": null,
+      "params": {
+        "tab": "org"
+      }
+    },
+    {
       "id": "api.add_provider",
       "screen": "api",
       "label": "Nút \"Thêm nhà cung cấp\"",
@@ -374,6 +452,46 @@
       "params": null,
       "sensitive": true,
       "safe_message": "Đây là thao tác nhạy cảm — Sếp tự xem kỹ và tự quyết định, Gen không làm thay."
+    },
+    {
+      "id": "help.version",
+      "screen": "help",
+      "label": "Phiên bản đang chạy",
+      "description": "Phiên bản Gen-Harness, tổ chức, múi giờ, vai trò",
+      "dynamic": null,
+      "params": null
+    },
+    {
+      "id": "help.ask_gen",
+      "screen": "help",
+      "label": "Cách hỏi Gen",
+      "description": "Hướng dẫn mở khung Gen và câu hỏi mẫu",
+      "dynamic": null,
+      "params": null
+    },
+    {
+      "id": "help.guide",
+      "screen": "help",
+      "label": "Nút \"Mở Hướng dẫn kết nối\"",
+      "description": "Sang trang hướng dẫn các việc thiết lập để sau (Owner)",
+      "dynamic": null,
+      "params": null
+    },
+    {
+      "id": "help.genh",
+      "screen": "help",
+      "label": "Lệnh genh hay dùng",
+      "description": "genh update, reset-password, trust-ca, backup, status — chạy trên máy chủ",
+      "dynamic": null,
+      "params": null
+    },
+    {
+      "id": "help.report",
+      "screen": "help",
+      "label": "Nút \"Báo lỗi\"",
+      "description": "Chép thông tin chẩn đoán (phiên bản, trang, trình duyệt) để gửi người hỗ trợ",
+      "dynamic": null,
+      "params": null
     },
     {
       "id": "rules.add",

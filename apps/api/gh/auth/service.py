@@ -36,6 +36,7 @@ PIN_OPERATIONS: dict[str, str] = {
     "agent.manage": "Tạo / tắt / nhân bản danh tính agent",
     "backup.download": "Tải bản sao lưu",
     "backup.restore": "Khôi phục bản sao lưu",
+    "user.manage": "Mời / khoá / đặt lại mật khẩu người dùng",
 }
 
 
@@ -96,7 +97,8 @@ async def create_session(db: AsyncSession, user_id: uuid.UUID, *, ip: str | None
 async def login(db: AsyncSession, email: str, password: str) -> dict[str, Any] | None:
     row = (await db.execute(text("""
         SELECT id, org_id, password_hash FROM core.users
-        WHERE email = :e AND is_active AND deleted_at IS NULL"""), {"e": email.strip()})).one_or_none()
+        WHERE lower(email) = lower(:e) AND is_active AND deleted_at IS NULL"""),
+        {"e": email.strip().lower()})).one_or_none()
     if row is None or not verify_secret(row.password_hash, password):
         return None
     return {"id": row.id, "org_id": row.org_id}

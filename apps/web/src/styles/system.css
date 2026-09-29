@@ -259,3 +259,11 @@
 .bk-restore__title { font-weight: 600; color: var(--color-text); }
 .bk-cmd { padding: 8px 10px; border-radius: 6px; background: var(--color-neutral-900, rgba(0,0,0,.3)); color: var(--color-accent-300); overflow-x: auto; white-space: nowrap; font-size: 12px; }
 .bk-confirm { margin-top: 12px; }
+
+/* v0.1.22 — Người dùng (Đợt B1) + Tổ chức (Đợt B2) */
+.retention-wrap .users-table { min-width: 720px; }
+.users-table tr[data-inactive] .retention-table__name { color: var(--color-neutral-500); }
+.users-table__self { color: var(--color-neutral-500); font-size: 11px; }
+.users-table__role { font-size: 11.5px; color: var(--color-neutral-300); }
+.users-table__select { height: 27px; padding: 0 8px; font-size: 11.5px; max-width: 190px; }
+.org-form { padding: 14px 16px 16px; }

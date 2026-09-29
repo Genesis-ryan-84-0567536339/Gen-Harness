@@ -20,6 +20,7 @@ from gh.agents_api.routes import router as agents_router
 from gh.audit.routes import router as audit_router
 from gh.auth.account import router as account_router
 from gh.auth.routes import router as auth_router
+from gh.auth.users import router as users_router
 from gh.bootstrap import bootstrap
 from gh.chassis.bus import BRIDGE_DIRECTORY, BRIDGE_INBOUND, BRIDGE_STATUS, EventBus
 from gh.chassis.plugins import Manifest, PluginManager
@@ -44,6 +45,7 @@ from gh.providers.router import ModelRouter
 from gh.setup.routes import router as setup_router
 from gh.shell.routes import router as shell_router
 from gh.system_api.backups import router as backups_router
+from gh.system_api.org import router as org_router
 from gh.system_api.routes import router as system_router
 from gh.system_api.update import router as update_router
 
@@ -185,8 +187,8 @@ def create_app(*, with_lifespan: bool = True) -> FastAPI:
     app.add_exception_handler(RequestValidationError, validation_error_handler)
     app.add_exception_handler(DBAPIError, db_error_handler)
     app.add_exception_handler(OSError, infra_error_handler)
-    for r in (auth_router, account_router, setup_router, shell_router, audit_router, plugins_router, mcp_router,
-             data_router, system_router, update_router, backups_router, gen_router):
+    for r in (auth_router, account_router, users_router, setup_router, shell_router, audit_router, plugins_router,
+             mcp_router, data_router, system_router, update_router, backups_router, org_router, gen_router):
         app.include_router(r, prefix="/api/v1")
     for r in biz.routers():
         app.include_router(r, prefix="/api/v1")

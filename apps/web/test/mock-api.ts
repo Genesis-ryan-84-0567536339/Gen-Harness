@@ -63,6 +63,9 @@ interface User {
   /** v0.1.19: mật khẩu do hệ thống đặt (genh reset-password) → Console buộc đặt mật khẩu mới. */
   mustChange?: boolean;
   createdAt?: string;
+  /** v0.1.22: tài khoản bị khoá (Người dùng › Khoá) — không đăng nhập được. */
+  inactive?: boolean;
+  lastLoginAt?: string | null;
 }
 
 const MOCK_HARD_BOUNDARIES = [
@@ -718,7 +721,8 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
 
     // ── auth ──
     if (path === '/auth/login' && method === 'POST') {
-      const u = users.find((x) => x.email === body.email && x.password === body.password);
+      const u = users.find((x) => x.email === body.email && x.password === body.password && !x.inactive);
+      if (u) u.lastLoginAt = new Date().toISOString();
       if (!u) return problem(res, 401, 'INVALID_CREDENTIALS', 'Email hoặc mật khẩu không đúng');
       if (!setup.finished && setup.current_step < 3) return problem(res, 428, 'SETUP_REQUIRED', 'Chưa thiết lập xong');
       return reply(200, me(u, null), [login(u)]);
@@ -786,6 +790,100 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     if (user.mustChange) return problem(res, 403, 'PASSWORD_CHANGE_REQUIRED', 'Cần đặt mật khẩu mới trước khi tiếp tục');
 
     if (path === '/navigation' && method === 'GET') return reply(200, buildNavigation(user.hidden, opts.badges ?? true));
+    // v0.1.22 (Đợt B1–B3) — như gh/auth/users.py + gh/system_api/org.py.
+    if (path === '/system/about' && method === 'GET') {
+      return reply(200, { version: sysUpdate.current, org_name: setup.org.name, timezone: setup.org.timezone, role: user.role });
+    }
+    if (path === '/system/org') {
+      if ((permissionsOf(user.role.code)['system.read'] ?? 'none') === 'none') return problem(res, 403, 'FORBIDDEN', 'Không có quyền');
+      const view = () => ({ org_name: setup.org.name, timezone: setup.org.timezone, currency: setup.org.currency, self_name: setup.addressing.self,
+        bot_calls_me: setup.addressing.bot_calls_me, currencies: ['VND', 'USD', 'EUR', 'JPY', 'SGD', 'THB', 'CNY', 'KRW'], can_edit: user.role.code === 'owner' });
+      if (method === 'GET') return reply(200, view());
+      if (method === 'PATCH') {
+        if (user.role.code !== 'owner') return problem(res, 403, 'FORBIDDEN', 'Không có quyền');
+        const v = { org_name: String(body.org_name ?? '').trim(), timezone: String(body.timezone ?? '').trim(), currency: String(body.currency ?? '').trim().toUpperCase(),
+          self_name: String(body.self_name ?? '').trim(), bot_calls_me: String(body.bot_calls_me ?? '').trim() };
+        const errors: Record<string, string> = {};
+        if (!v.org_name) errors.org_name = 'Nhập tên tổ chức';
+        if (!/^[A-Za-z]+(\/[A-Za-z_+-]+)+$|^UTC$/.test(v.timezone)) errors.timezone = 'Múi giờ không hợp lệ';
+        if (!view().currencies.includes(v.currency)) errors.currency = 'Tiền tệ chưa hỗ trợ';
+        if (!v.self_name) errors.self_name = 'Nhập cách Sếp tự xưng';
+        if (!v.bot_calls_me) errors.bot_calls_me = 'Nhập cách agent gọi Sếp';
+        if (Object.keys(errors).length) return problem(res, 422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors });
+        setup.org = { name: v.org_name, timezone: v.timezone, currency: v.currency };
+        setup.addressing = { self: v.self_name, bot_calls_me: v.bot_calls_me };
+        record(user, 'org.updated');
+        return reply(200, view());
+      }
+    }
+    if (path === '/users' || path.startsWith('/users/')) {
+      if (user.role.code !== 'owner') return problem(res, 403, 'FORBIDDEN', 'Không có quyền');
+      const ROLE_NAME: Record<string, string> = { manager: 'Manager · quản lý team', operator: 'Operator · vận hành', agent_staff: 'Agent nhân viên', auditor: 'Auditor · kiểm toán' };
+      const out = (u: User) => ({ id: u.id, display_name: u.display_name, email: u.email, role: u.role, status: u.inactive ? 'inactive' : 'active',
+        must_change_password: u.mustChange ?? false, last_login_at: u.lastLoginAt ?? (u.mustChange ? null : '2026-09-28T01:10:00.000Z'),
+        created_at: u.createdAt ?? '2026-05-04T02:15:00.000Z', is_self: u.id === user.id });
+      const tempPw = () => randomUUID().replace(/-/g, '').slice(0, 14);
+      const revokeAll = (id: string) => {
+        for (const [k, s] of sessions) if (s.userId === id) sessions.delete(k);
+      };
+      if (path === '/users' && method === 'GET') {
+        const items = [...users].sort((a, b) => Number(!!a.inactive) - Number(!!b.inactive) || Number(b.role.code === 'owner') - Number(a.role.code === 'owner') || a.display_name.localeCompare(b.display_name, 'vi'));
+        return reply(200, { items: items.map(out), roles: ROLE_ORDER.map((c) => ({ code: c, name: c === 'owner' ? 'Owner — Sếp' : ROLE_NAME[c], meta: '', assignable: c !== 'owner' })) });
+      }
+      if (needPin()) return problem(res, 423, 'PIN_REQUIRED', 'Cần phiên PIN', { detail: { operation: 'user.manage' } });
+      if (path === '/users' && method === 'POST') {
+        const name = String(body.display_name ?? '').trim().replace(/\s+/g, ' ');
+        const email = String(body.email ?? '').trim().toLowerCase();
+        const role = String(body.role ?? '');
+        const errors: Record<string, string> = {};
+        if (!name) errors.display_name = 'Nhập tên hiển thị';
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.email = 'Email chưa đúng định dạng';
+        else if (users.some((u) => u.email === email)) errors.email = 'Email này đã có tài khoản';
+        if (!ROLE_NAME[role]) errors.role = 'Vai trò không hợp lệ';
+        if (Object.keys(errors).length) return problem(res, 422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors });
+        const pw = tempPw();
+        const u: User = { id: randomUUID(), email, password: pw, pin: '000000', display_name: name, role: { code: role as RoleCode, name: ROLE_NAME[role] },
+          hidden: hiddenScreens(role as RoleCode), mustChange: true, createdAt: new Date().toISOString(), lastLoginAt: null };
+        users.push(u);
+        record(user, 'user.invited', 'ok', { role });
+        return reply(201, { user: out(u), temp_password: pw });
+      }
+      const m = /^\/users\/([^/]+)\/(role|deactivate|reactivate|reset-password)$/.exec(path);
+      const target = m ? users.find((u) => u.id === m[1]) : undefined;
+      if (!m || !target) return problem(res, 404, 'NOT_FOUND', 'Không tìm thấy người dùng');
+      const op = m[2];
+      if (target.id === user.id && op !== 'reactivate') return problem(res, 409, 'SELF_CHANGE', 'Không đổi tài khoản của chính mình ở đây — dùng Tài khoản của tôi');
+      const lastOwner = () => target.role.code === 'owner' && !target.inactive && !users.some((u) => u.id !== target.id && u.role.code === 'owner' && !u.inactive);
+      if (op === 'role' && method === 'PATCH') {
+        const role = String(body.role ?? '');
+        if (!ROLE_NAME[role]) return problem(res, 422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors: { role: 'Vai trò không hợp lệ' } });
+        if (lastOwner()) return problem(res, 409, 'LAST_OWNER', 'Đây là Owner cuối cùng — tổ chức phải luôn có ít nhất một Owner');
+        const from = target.role.code;
+        target.role = { code: role as RoleCode, name: ROLE_NAME[role] };
+        target.hidden = hiddenScreens(role as RoleCode);
+        record(user, 'user.role_changed', 'ok', { from, to: role });
+        return reply(200, out(target));
+      }
+      if (method !== 'POST') return problem(res, 405, 'METHOD_NOT_ALLOWED', 'Sai phương thức');
+      if (op === 'deactivate') {
+        if (lastOwner()) return problem(res, 409, 'LAST_OWNER', 'Đây là Owner cuối cùng — tổ chức phải luôn có ít nhất một Owner');
+        target.inactive = true;
+        revokeAll(target.id);
+        record(user, 'user.deactivated');
+        return reply(200, out(target));
+      }
+      if (op === 'reactivate') {
+        target.inactive = false;
+        record(user, 'user.reactivated');
+        return reply(200, out(target));
+      }
+      const pw = tempPw();
+      target.password = pw;
+      target.mustChange = true;
+      revokeAll(target.id);
+      record(user, 'user.password_reset');
+      return reply(200, { user: out(target), temp_password: pw });
+    }
     if (path === '/system/update') {
       // Như gh/system_api/update.py: system.manage; mock mô phỏng genh trên máy chủ — mỗi lần hỏi tiến một bước
       // requested → running → done (current = latest).

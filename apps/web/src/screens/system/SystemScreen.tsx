@@ -8,17 +8,21 @@ import { BrainTab } from './BrainTab';
 import { ChannelCard } from './ChannelCard';
 import { CliCard } from './CliCard';
 import { LogTab } from './LogTab';
+import { OrgTab } from './OrgTab';
 import { PinCard } from './PinCard';
 import { RolesTab } from './RolesTab';
 import { StorageTab } from './StorageTab';
+import { UsersTab } from './UsersTab';
 
-type SysTab = 'channels' | 'brain' | 'roles' | 'log' | 'storage';
+type SysTab = 'channels' | 'brain' | 'roles' | 'users' | 'org' | 'log' | 'storage';
 
-/** Design `sysTabs` (4 tab) + `storage` (PLAN 4.5, spec I — thêm ngoài thiết kế gốc). */
+/** Design `sysTabs` (4 tab) + `storage` (PLAN 4.5, spec I) + `users`, `org` (v0.1.22, Đợt B1–B2) — thêm ngoài thiết kế gốc. */
 const TABS: Array<{ key: SysTab; label: string; count: string; genTarget?: string }> = [
   { key: 'channels', label: 'Kênh & đăng nhập', count: 'QR · PIN', genTarget: 'system.tab.channels' },
   { key: 'brain', label: 'Bộ não AI', count: '6 model', genTarget: 'system.tab.brain' },
   { key: 'roles', label: 'Quyền hạn', count: '5 vai trò' },
+  { key: 'users', label: 'Người dùng', count: 'mời · khoá', genTarget: 'system.tab.users' },
+  { key: 'org', label: 'Tổ chức', count: 'tên · múi giờ', genTarget: 'system.tab.org' },
   { key: 'log', label: 'Nhật ký', count: '30 ngày' },
   { key: 'storage', label: 'Dữ liệu & lưu trữ', count: 'spec I', genTarget: 'system.tab.storage' },
 ];
@@ -38,6 +42,10 @@ export function SystemScreen() {
           <BrainTab />
         ) : current === 'roles' ? (
           <RolesTab />
+        ) : current === 'users' ? (
+          <UsersTab />
+        ) : current === 'org' ? (
+          <OrgTab />
         ) : current === 'log' ? (
           <LogTab />
         ) : (
