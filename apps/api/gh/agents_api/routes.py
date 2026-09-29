@@ -139,6 +139,8 @@ CORE_AGENT_KEYS: dict[str, str] = {
     "core.intent": "Tách ý định / phân loại",
     "core.scoring": "Chấm điểm suy luận dài",
     "core.indexing": "Đánh chỉ mục / embedding",
+    # v0.1.21: Gen — trợ lý quản trị trong Console (gh.gen.engine.AGENT_KEY), dùng chuỗi Bộ não AI như mọi agent.
+    "core.gen": "Gen — trợ lý quản trị",
 }
 
 

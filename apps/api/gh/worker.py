@@ -26,6 +26,7 @@ from gh.chassis import actionlog
 from gh.chassis.bus import EventBus
 from gh.config import get_settings
 from gh.db import admin_sessionmaker, dispose_engine, sessionmaker
+from gh.gen import store as gen_store
 from gh.identity import service as identity
 from gh.memory import notebook
 from gh.providers import cli as climod
@@ -139,6 +140,14 @@ async def compact_notebooks(ctx: dict[str, Any]) -> int:
     return n
 
 
+async def purge_gen_conversations(ctx: dict[str, Any]) -> int:
+    """Gen v1 (§9.4): xoá hội thoại Gen quá hạn lưu (mặc định 90 ngày, `settings->'gen'->'retention_days'`)."""
+    async with sessionmaker()() as db:
+        n = await gen_store.purge_expired(db)
+        await db.commit()
+    return n
+
+
 _BIZ_JOBS = [*biz.jobs(), *BACKUP_JOBS]  # PLAN §5.6 — gh.backup.scheduled_backup_scan cùng mẫu CronJob
 
 
@@ -147,6 +156,7 @@ class WorkerSettings:
     on_startup = startup
     on_shutdown = shutdown
     functions = [verify_action_log, partition_maintenance, detect_identities, compact_notebooks, expire_sessions,
+                 purge_gen_conversations,
                  *(fn for fn, _ in _BIZ_JOBS), *BACKUP_FUNCTIONS]
     health_check_interval = 30
     cron_jobs = [
@@ -155,6 +165,7 @@ class WorkerSettings:
         cron(detect_identities, minute=set(range(0, 60, 10))),  # mỗi 10 phút
         cron(compact_notebooks, hour={3}, minute={15}),         # 03:15 hằng ngày
         cron(expire_sessions, minute={20}),                     # mỗi giờ — dọn core.sessions (0014_v011_db)
+        cron(purge_gen_conversations, hour={3}, minute={40}),   # 03:40 hằng ngày — hạn lưu hội thoại Gen
         *(cron(fn, **kw) for fn, kw in _BIZ_JOBS),  # type: ignore[arg-type]
     ]
 

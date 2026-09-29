@@ -1,0 +1,563 @@
+{
+  "_comment": "Sinh từ packages/contracts/src/genTargets.ts + apps/web/src/guide/guideContent.ts — KHÔNG sửa tay. GEN_WRITE=1 npx vitest run gen-targets",
+  "screens": {
+    "overview": {
+      "path": "/overview",
+      "title": "Tổng quan điều hành"
+    },
+    "inbox": {
+      "path": "/inbox",
+      "title": "Hộp thư ý nghĩa"
+    },
+    "workbench": {
+      "path": "/workbench",
+      "title": "Bàn làm việc"
+    },
+    "tasks": {
+      "path": "/tasks",
+      "title": "Việc & Nhắc hẹn"
+    },
+    "directory": {
+      "path": "/directory",
+      "title": "Nhóm & Con người"
+    },
+    "documents": {
+      "path": "/documents",
+      "title": "Tài liệu"
+    },
+    "graph": {
+      "path": "/graph",
+      "title": "Bản đồ quan hệ"
+    },
+    "profile": {
+      "path": "/profile",
+      "title": "Hồ sơ sống"
+    },
+    "notebook": {
+      "path": "/notebook",
+      "title": "Sổ tay nhận thức"
+    },
+    "opportunity": {
+      "path": "/opportunity",
+      "title": "Bảng cơ hội"
+    },
+    "supply": {
+      "path": "/supply",
+      "title": "Cung ↔ Cầu"
+    },
+    "search": {
+      "path": "/search",
+      "title": "Kho hội thoại"
+    },
+    "deals": {
+      "path": "/deals",
+      "title": "Deal & Vụ việc"
+    },
+    "people": {
+      "path": "/people",
+      "title": "Đánh giá con người"
+    },
+    "care": {
+      "path": "/care",
+      "title": "Chất lượng chăm sóc"
+    },
+    "raw": {
+      "path": "/raw",
+      "title": "Kho dữ liệu thô"
+    },
+    "rules": {
+      "path": "/rules",
+      "title": "Quy tắc sàng lọc"
+    },
+    "clean": {
+      "path": "/clean",
+      "title": "Kho sạch & Trí nhớ"
+    },
+    "identity": {
+      "path": "/identity",
+      "title": "Hợp nhất danh tính"
+    },
+    "agents": {
+      "path": "/agents",
+      "title": "Danh tính Agent"
+    },
+    "api": {
+      "path": "/api",
+      "title": "API & Model"
+    },
+    "mcp": {
+      "path": "/mcp",
+      "title": "MCP Hub"
+    },
+    "plugins": {
+      "path": "/plugins",
+      "title": "Plugin & Tiện ích"
+    },
+    "system": {
+      "path": "/system",
+      "title": "Điều khiển hệ thống"
+    },
+    "guide": {
+      "path": "/guide",
+      "title": "Hướng dẫn kết nối"
+    },
+    "account": {
+      "path": "/account",
+      "title": "Tài khoản của tôi"
+    }
+  },
+  "targets": [
+    {
+      "id": "overview.kpis",
+      "screen": "overview",
+      "label": "Hàng chỉ số chính",
+      "description": "Các ô số liệu đầu trang Tổng quan (cơ hội, cảnh báo, chờ duyệt…)",
+      "dynamic": null,
+      "params": null
+    },
+    {
+      "id": "overview.queue",
+      "screen": "overview",
+      "label": "Hàng đợi cần xử lý",
+      "description": "Khung liệt kê cơ hội, cảnh báo, bản nháp chờ duyệt, việc đến hạn",
+      "dynamic": null,
+      "params": null
+    },
+    {
+      "id": "overview.queue.row",
+      "screen": "overview",
+      "label": "Một dòng hàng đợi",
+      "description": "Một mục cụ thể trong Hàng đợi cần xử lý",
+      "dynamic": "row",
+      "params": null
+    },
+    {
+      "id": "overview.queue.open_inbox",
+      "screen": "overview",
+      "label": "Nút \"Mở hộp thư ý nghĩa\"",
+      "description": "Mở Hộp thư ý nghĩa để xem toàn bộ hàng đợi",
+      "dynamic": null,
+      "params": null
+    },
+    {
+      "id": "overview.spotlight",
+      "screen": "overview",
+      "label": "5 đối tượng đáng chú ý",
+      "description": "Năm người/khách nổi bật nhất hôm nay",
+      "dynamic": null,
+      "params": null
+    },
+    {
+      "id": "overview.health",
+      "screen": "overview",
+      "label": "Sức khoẻ hệ thống",
+      "description": "Tình trạng kênh và backlog sàng lọc",
+      "dynamic": null,
+      "params": null
+    },
+    {
+      "id": "guide.progress",
+      "screen": "guide",
+      "label": "Thanh tiến độ",
+      "description": "Bao nhiêu việc thiết lập đã xong",
+      "dynamic": null,
+      "params": null
+    },
+    {
+      "id": "guide.item",
+      "screen": "guide",
+      "label": "Một việc thiết lập",
+      "description": "Thẻ một việc thiết lập (theo số việc n)",
+      "dynamic": "row",
+      "params": null
+    },
+    {
+      "id": "guide.item.do",
+      "screen": "guide",
+      "label": "Nút \"Làm bước này\"",
+      "description": "Mở form làm việc thiết lập n",
+      "dynamic": "row",
+      "params": null
+    },
+    {
+      "id": "system.tab.channels",
+      "screen": "system",
+      "label": "Tab \"Kênh & đăng nhập\"",
+      "description": "Chuyển sang tab kênh Zalo/WhatsApp, PIN, CLI",
+      "dynamic": null,
+      "params": null
+    },
+    {
+      "id": "system.tab.brain",
+      "screen": "system",
+      "label": "Tab \"Bộ não AI\"",
+      "description": "Chuyển sang tab nhà cung cấp model, hạn mức, Jev",
+      "dynamic": null,
+      "params": null
+    },
+    {
+      "id": "system.tab.storage",
+      "screen": "system",
+      "label": "Tab \"Dữ liệu & lưu trữ\"",
+      "description": "Chuyển sang tab hạn lưu, sao lưu & khôi phục",
+      "dynamic": null,
+      "params": null
+    },
+    {
+      "id": "system.channels.list",
+      "screen": "system",
+      "label": "Danh sách kênh",
+      "description": "Thẻ các kênh Zalo/WhatsApp và nút tạo mã QR",
+      "dynamic": null,
+      "params": {
+        "tab": "channels"
+      }
+    },
+    {
+      "id": "system.channels.pin",
+      "screen": "system",
+      "label": "Thẻ mã PIN",
+      "description": "Đổi mã PIN, xem lịch sử nhập PIN",
+      "dynamic": null,
+      "params": {
+        "tab": "channels"
+      }
+    },
+    {
+      "id": "system.brain.quota",
+      "screen": "system",
+      "label": "Hạn mức theo model",
+      "description": "Bảng dùng trong ngày / còn lại của từng model",
+      "dynamic": null,
+      "params": {
+        "tab": "brain"
+      }
+    },
+    {
+      "id": "system.brain.chain",
+      "screen": "system",
+      "label": "Chuỗi chuyển hướng",
+      "description": "Thứ tự nhà cung cấp model khi một nơi lỗi",
+      "dynamic": null,
+      "params": {
+        "tab": "brain"
+      }
+    },
+    {
+      "id": "system.brain.open_api",
+      "screen": "system",
+      "label": "Nút \"Mở API & Model\"",
+      "description": "Sang màn thêm nhà cung cấp, khoá API, gán model",
+      "dynamic": null,
+      "params": {
+        "tab": "brain"
+      }
+    },
+    {
+      "id": "system.brain.jev",
+      "screen": "system",
+      "label": "Thẻ Jev (System One)",
+      "description": "Cấu hình nguồn model quyết định nhanh Jev",
+      "dynamic": null,
+      "params": {
+        "tab": "brain"
+      }
+    },
+    {
+      "id": "system.brain.jev.test",
+      "screen": "system",
+      "label": "Nút \"Kiểm tra\" Jev",
+      "description": "Gọi thử Jev để biết khoá và địa chỉ đúng chưa",
+      "dynamic": null,
+      "params": {
+        "tab": "brain"
+      }
+    },
+    {
+      "id": "system.storage.retention",
+      "screen": "system",
+      "label": "Hạn lưu dữ liệu",
+      "description": "Mỗi tập dữ liệu giữ bao lâu",
+      "dynamic": null,
+      "params": {
+        "tab": "storage"
+      }
+    },
+    {
+      "id": "system.backup.panel",
+      "screen": "system",
+      "label": "Sao lưu & khôi phục",
+      "description": "Danh sách bản sao lưu, tải về, khôi phục",
+      "dynamic": null,
+      "params": {
+        "tab": "storage"
+      }
+    },
+    {
+      "id": "system.backup.now",
+      "screen": "system",
+      "label": "Nút \"Sao lưu ngay\"",
+      "description": "Tạo bản sao lưu ngay lúc này",
+      "dynamic": null,
+      "params": {
+        "tab": "storage"
+      }
+    },
+    {
+      "id": "system.backup.schedule",
+      "screen": "system",
+      "label": "Lịch sao lưu tự động",
+      "description": "Đổi tần suất và giờ sao lưu tự động",
+      "dynamic": null,
+      "params": {
+        "tab": "storage"
+      }
+    },
+    {
+      "id": "api.add_provider",
+      "screen": "api",
+      "label": "Nút \"Thêm nhà cung cấp\"",
+      "description": "Thêm Gemini/DeepSeek/API tương thích OpenAI",
+      "dynamic": null,
+      "params": null
+    },
+    {
+      "id": "api.bindings",
+      "screen": "api",
+      "label": "Gán model cho từng agent",
+      "description": "Chọn model cho từng mục đích, gồm core.gen của Gen",
+      "dynamic": null,
+      "params": null
+    },
+    {
+      "id": "account.profile",
+      "screen": "account",
+      "label": "Hồ sơ",
+      "description": "Đổi tên hiển thị, email",
+      "dynamic": null,
+      "params": null
+    },
+    {
+      "id": "account.password",
+      "screen": "account",
+      "label": "Đổi mật khẩu",
+      "description": "Đặt mật khẩu mới",
+      "dynamic": null,
+      "params": null
+    },
+    {
+      "id": "account.pin",
+      "screen": "account",
+      "label": "Đổi mã PIN",
+      "description": "Đặt mã PIN 6 số mới",
+      "dynamic": null,
+      "params": null
+    },
+    {
+      "id": "account.sessions",
+      "screen": "account",
+      "label": "Phiên đăng nhập",
+      "description": "Thiết bị đang đăng nhập, đăng xuất thiết bị khác",
+      "dynamic": null,
+      "params": null
+    },
+    {
+      "id": "rules.add",
+      "screen": "rules",
+      "label": "Nút \"Thêm quy tắc\"",
+      "description": "Tạo quy tắc sàng lọc mới",
+      "dynamic": null,
+      "params": null
+    },
+    {
+      "id": "rules.batch",
+      "screen": "rules",
+      "label": "Nút \"Chạy thử trên 100 bản ghi\"",
+      "description": "Thử bộ quy tắc trên dữ liệu gần nhất",
+      "dynamic": null,
+      "params": null
+    },
+    {
+      "id": "rules.list",
+      "screen": "rules",
+      "label": "Danh sách quy tắc",
+      "description": "Các quy tắc sàng lọc đang có",
+      "dynamic": null,
+      "params": null
+    },
+    {
+      "id": "rules.weights",
+      "screen": "rules",
+      "label": "Trọng số chấm điểm",
+      "description": "Kéo thanh để đổi trọng số các chiều chấm điểm",
+      "dynamic": null,
+      "params": null
+    },
+    {
+      "id": "rules.tryone",
+      "screen": "rules",
+      "label": "Chạy thử một bản ghi",
+      "description": "Dán một tin để xem quy tắc nào khớp",
+      "dynamic": null,
+      "params": null
+    },
+    {
+      "id": "agents.add",
+      "screen": "agents",
+      "label": "Nút \"Tạo agent mới\"",
+      "description": "Tạo danh tính agent mới",
+      "dynamic": null,
+      "params": null
+    },
+    {
+      "id": "agents.clone",
+      "screen": "agents",
+      "label": "Nút \"Nhân bản\"",
+      "description": "Nhân bản một agent có sẵn",
+      "dynamic": null,
+      "params": null
+    },
+    {
+      "id": "agents.list",
+      "screen": "agents",
+      "label": "Danh sách agent",
+      "description": "Các agent đang có, mức tự trị, kênh",
+      "dynamic": null,
+      "params": null
+    },
+    {
+      "id": "agents.decisions",
+      "screen": "agents",
+      "label": "Agent đã nói gì",
+      "description": "Nhật ký quyết định của agent",
+      "dynamic": null,
+      "params": null
+    },
+    {
+      "id": "agents.templates",
+      "screen": "agents",
+      "label": "Mẫu có sẵn",
+      "description": "Mẫu agent tạo nhanh",
+      "dynamic": null,
+      "params": null
+    }
+  ],
+  "guide": [
+    {
+      "n": 5,
+      "title": "Kết nối Zalo / WhatsApp",
+      "why": "Để agent đọc được tin nhắn trong các nhóm chat của Sếp — không có kênh thì hệ thống chưa có dữ liệu để làm việc.",
+      "steps": [
+        "Bấm \"Làm bước này\" bên dưới.",
+        "Ở thẻ Zalo (hoặc WhatsApp), bấm \"Tạo mã QR\".",
+        "Đọc cảnh báo, tích \"Tôi hiểu rủi ro…\" rồi bấm \"Tôi hiểu, hiện mã QR\".",
+        "Trên điện thoại: Zalo → biểu tượng quét QR (góc trên) · WhatsApp → Cài đặt → Thiết bị đã liên kết → Liên kết thiết bị. Quét mã trên màn hình.",
+        "Chờ thẻ chuyển sang \"Đang kết nối\" và đồng bộ xong danh sách nhóm (mã QR tự làm mới mỗi 60 giây nếu chưa kịp quét).",
+        "Bấm \"Tiếp tục\" để lưu."
+      ],
+      "done_when": "Có ít nhất một kênh ở trạng thái Đang kết nối.",
+      "console": {
+        "label": "Điều khiển hệ thống › Kênh",
+        "to": "/system?tab=channels"
+      }
+    },
+    {
+      "n": 6,
+      "title": "Chọn nhóm cho agent lắng nghe",
+      "why": "Mọi nhóm mới đều ở chế độ Không nghe để bảo vệ riêng tư — Sếp chọn nhóm nào agent được nghe.",
+      "steps": [
+        "Bấm \"Làm bước này\".",
+        "Trong bảng nhóm, ở cột \"Chế độ lắng nghe\" của nhóm muốn theo dõi, chọn một chế độ: \"Chỉ khi được tag\" (an toàn nhất), \"Lắng nghe im lặng\" (ghi nhận, không trả lời) hoặc \"Chủ động bắt tín hiệu\".",
+        "Ở cột \"Phạm vi xem\", chọn ai được xem dữ liệu nhóm đó (mặc định \"Chỉ Sếp\").",
+        "Bấm \"Tiếp tục\"."
+      ],
+      "done_when": "Có ít nhất một nhóm không còn ở chế độ Không nghe.",
+      "console": {
+        "label": "Nhóm & Con người",
+        "to": "/directory"
+      }
+    },
+    {
+      "n": 7,
+      "title": "Bật sàng lọc dữ liệu",
+      "why": "Tin nhắn thô được lọc, phân loại và chấm điểm trước khi vào kho sạch — agent chỉ dùng dữ liệu đã lọc.",
+      "steps": [
+        "Bấm \"Làm bước này\".",
+        "Giữ mặc định \"Chu kỳ thời gian\" và \"Ngưỡng số lượng\" (lọc khi đủ thời gian hoặc đủ số tin, cái nào đến trước).",
+        "Ở \"Bộ quy tắc khởi đầu\", tích các quy tắc hợp với việc kinh doanh của Sếp (xem điều kiện và đầu ra ngay trên từng dòng).",
+        "Bấm \"Tiếp tục\"."
+      ],
+      "done_when": "Có ít nhất một quy tắc sàng lọc đang bật.",
+      "console": {
+        "label": "Quy tắc sàng lọc",
+        "to": "/rules"
+      }
+    },
+    {
+      "n": 8,
+      "title": "Tạo agent đầu tiên",
+      "why": "Agent là \"nhân viên AI\" làm việc thay Sếp trên các kênh — có tên, vai trò và giọng nói riêng.",
+      "steps": [
+        "Bấm \"Làm bước này\".",
+        "Chọn một \"Mẫu\" (ví dụ Trợ lý thương mại, CSKH, Thư ký cá nhân) — tên và vai trò được điền sẵn.",
+        "Sửa \"Tên agent\" và \"Vai trò — agent làm gì cho Sếp\" nếu muốn.",
+        "Gõ một \"Câu thử trò chuyện\", ví dụ \"Chào em, hôm nay có khách nào hỏi hàng không?\".",
+        "Bấm \"Tiếp tục\" rồi đọc câu trả lời thử của agent; bấm \"Tiếp tục\" lần nữa để lưu."
+      ],
+      "done_when": "Có ít nhất một agent.",
+      "console": {
+        "label": "Danh tính Agent",
+        "to": "/agents"
+      }
+    },
+    {
+      "n": 9,
+      "title": "Đặt mức tự trị cho agent",
+      "why": "Quyết định agent được tự làm tới đâu: chỉ gợi ý, hay soạn sẵn chờ Sếp duyệt rồi mới gửi.",
+      "steps": [
+        "Bấm \"Làm bước này\".",
+        "Ở \"Mức tự trị\", chọn 4 (agent soạn sẵn, Sếp duyệt rồi mới gửi — khuyên dùng) hoặc 3 (agent chỉ gợi ý).",
+        "Đọc danh sách \"Ranh giới khoá cứng\" — các việc agent không bao giờ được tự làm.",
+        "Tích \"Tôi đã đọc các ranh giới trên\" rồi bấm \"Tiếp tục\"."
+      ],
+      "done_when": "Agent đã có mức tự trị (tạo agent là có mức mặc định; bước này để Sếp chọn lại cho chắc).",
+      "console": {
+        "label": "Danh tính Agent",
+        "to": "/agents"
+      }
+    },
+    {
+      "n": 10,
+      "title": "Mời người trong đội",
+      "why": "Cho quản lý, nhân viên cùng dùng Console với quyền hạn riêng — mỗi người chỉ thấy phần được giao.",
+      "steps": [
+        "Bấm \"Làm bước này\".",
+        "Bấm \"Thêm người\", điền \"Tên hiển thị\", \"Email\" và chọn \"Vai trò\" (Manager, Operator, Agent nhân viên, Auditor).",
+        "Thêm đủ người rồi bấm \"Tiếp tục\".",
+        "Hệ thống hiện mật khẩu tạm của từng người — chép lại và tự gửi cho họ qua Zalo/email riêng (chưa có gửi thư tự động).",
+        "Bấm \"Đã lưu, sang bước sau\"."
+      ],
+      "done_when": "Có thêm ít nhất một tài khoản ngoài Sếp.",
+      "console": {
+        "label": "Điều khiển hệ thống › Quyền hạn",
+        "to": "/system?tab=roles"
+      }
+    },
+    {
+      "n": 11,
+      "title": "Đặt lịch sao lưu",
+      "why": "Máy hỏng hay lỡ tay xoá vẫn khôi phục được dữ liệu — bản sao lưu được mã hoá và giữ ngay trong máy.",
+      "steps": [
+        "Bấm \"Làm bước này\".",
+        "Chọn \"Tần suất\" (khuyên dùng \"Hằng ngày\").",
+        "Nhập \"Giờ chạy (HH:MM)\", ví dụ 02:00.",
+        "Bấm \"Tiếp tục\"."
+      ],
+      "done_when": "Đã có lịch sao lưu.",
+      "console": {
+        "label": "Điều khiển hệ thống › Dữ liệu & lưu trữ",
+        "to": "/system?tab=storage"
+      }
+    }
+  ]
+}

@@ -14,6 +14,7 @@ from gh.chassis import actionlog
 from gh.config import get_settings
 from gh.db import DB
 from gh.errors import ApiError, field_errors
+from gh.gen import store as gen_store
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -56,6 +57,8 @@ async def me_payload(db: AsyncSession, user: service.CurrentUser) -> dict[str, A
         "pin_verified_until": _iso(user.pin_verified_until),
         "permissions": user.permissions,
         "must_change_password": user.must_change_password,
+        # v0.1.21: tính năng theo người (Gen — cờ `gen.enabled`, v1 chỉ Owner; gh.gen.store).
+        "features": {"gen": gen_store.available(await gen_store.get_settings(db, user.org_id), user)},
     }
 
 

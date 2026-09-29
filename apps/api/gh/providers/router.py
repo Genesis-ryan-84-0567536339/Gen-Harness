@@ -118,7 +118,7 @@ class ModelRouter:
                                   {"o": org_id, "k": agent_key})).one_or_none()
         providers = (await db.execute(text("""
             SELECT id, kind, name, endpoint, auth_state FROM agent.providers
-            WHERE org_id = :o AND is_enabled AND kind <> 'embedding'
+            WHERE org_id = :o AND is_enabled AND kind NOT IN ('embedding', 'system_one')
             ORDER BY (id = :bp) DESC, failover_rank NULLS LAST, created_at"""),
             {"o": org_id, "bp": bound.provider_id if bound else None})).all()
         chain = []
@@ -315,6 +315,20 @@ class ModelRouter:
                     return None
         return None
 
+    async def _jev_ping(self, *, db_provider_id: uuid.UUID, endpoint: str | None, secret: str) -> str:
+        from gh.gen import jev
+
+        async with self.sm() as db:
+            model = (await db.execute(text("""SELECT model_name FROM agent.models WHERE provider_id = :p
+                                              AND is_enabled ORDER BY id LIMIT 1"""),
+                                      {"p": db_provider_id})).scalar_one_or_none()
+        client = jev.JevClient(endpoint, secret, model, transport=self.transport, timeout=10.0)
+        try:
+            await client.ping()
+        except jev.JevError as e:
+            raise ProviderError(f"Jev: {e}") from e
+        return str(client.model)
+
     async def test_provider(self, provider_id: uuid.UUID) -> dict[str, Any]:
         async with self.sm() as db:
             p = (await db.execute(text("SELECT id, kind, name, endpoint FROM agent.providers WHERE id = :i"),
@@ -328,7 +342,12 @@ class ModelRouter:
             if p.kind != "antigravity_cli" and key is None:
                 raise AuthFailed("Chưa có khoá API")
             secret = crypto.decrypt(bytes(key), KEY_AAD).decode() if key is not None else None
-            result["models"] = (await self._client(p, secret).list_models())[:50]
+            if p.kind == "system_one":
+                # Jev (gh.gen.jev): thử một lượt quyết định nhỏ thay vì liệt kê model.
+                result["models"] = [await self._jev_ping(db_provider_id=p.id, endpoint=p.endpoint,
+                                                         secret=secret or "")]
+            else:
+                result["models"] = (await self._client(p, secret).list_models())[:50]
             result["ok"] = True
         except Exception as e:  # noqa: BLE001 — trả lỗi cho Console, không ném
             result["error"] = str(e)[:300]

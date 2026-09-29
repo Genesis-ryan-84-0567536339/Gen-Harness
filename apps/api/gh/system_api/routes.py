@@ -22,6 +22,7 @@ from gh.data.common import CHANNEL_NAME, LISTENING_MODES, iso, org_settings
 from gh.data.ingest import sync_listen_sets, uptime_pct
 from gh.db import DB
 from gh.errors import ApiError, conflict, field_errors, not_found
+from gh.gen import jev
 from gh.providers import cli as climod
 from gh.providers.router import KEY_AAD, cooldown_key, quota_key
 from gh.shell.routes import publish_header
@@ -245,12 +246,13 @@ async def patch_group(gid: uuid.UUID, body: GroupPatch, request: Request, user: 
 
 # ─── Nhà cung cấp & khoá ───────────────────────────────────────────────────
 
-PROVIDER_KINDS = ("antigravity_cli", "gemini", "deepseek", "openai_compat")
-KEY_PREFIX = {"gemini": "GEM", "deepseek": "DS", "openai_compat": "API"}
+# `system_one` (v0.1.21) = Jev của TypeSafe — bộ quyết định nhanh cho Gen (gh.gen.jev), KHÔNG vào chuỗi sinh chữ.
+PROVIDER_KINDS = ("antigravity_cli", "gemini", "deepseek", "openai_compat", "system_one")
+KEY_PREFIX = {"gemini": "GEM", "deepseek": "DS", "openai_compat": "API", "system_one": "JEV"}
 
 
 class ProviderIn(BaseModel):
-    kind: Literal["antigravity_cli", "gemini", "deepseek", "openai_compat"]
+    kind: Literal["antigravity_cli", "gemini", "deepseek", "openai_compat", "system_one"]
     name: str = Field(min_length=1, max_length=80)
     endpoint: str | None = Field(default=None, max_length=300)
     keys: list[str] = Field(default_factory=list, max_length=20)
@@ -337,6 +339,11 @@ async def create_provider(body: ProviderIn, request: Request, user: service.Curr
         raise field_errors({"endpoint": "Cần endpoint cho API tương thích OpenAI"})
     if body.kind != "antigravity_cli" and not body.keys:
         raise field_errors({"keys": "Cần ít nhất một khoá API"})
+    if body.kind == "system_one":
+        body.endpoint = (body.endpoint or jev.DEFAULT_BASE_URL).rstrip("/")
+        if not body.endpoint.startswith("https://"):
+            raise field_errors({"endpoint": "Địa chỉ Jev phải bắt đầu bằng https://"})
+        body.models = body.models or [jev.DEFAULT_MODEL]
     if body.kind == "antigravity_cli":
         pid = await climod.cli_provider_id(db, user.org_id)
         await db.execute(text("UPDATE agent.providers SET name = :n WHERE id = :i"), {"n": body.name, "i": pid})
