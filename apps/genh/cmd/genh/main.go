@@ -21,6 +21,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -80,6 +81,8 @@ func run(args []string) int {
 		return runBackup(args[1:])
 	case "restore":
 		return runRestore(args[1:])
+	case "handle-requests":
+		return runHandleRequests(args[1:])
 	case "doctor":
 		return runDoctor(args[1:])
 	case "reset-setup":
@@ -135,8 +138,11 @@ Lệnh vận hành (cờ chung mọi lệnh dưới đây: --port N, --install-d
                                           "genh install" (tắt bằng --no-auto-update lúc cài,
                                           hoặc "genh auto-update disable" sau đó)
   genh backup [--to path]                sao lưu vào ObjectStore nội bộ (--to: copy thêm ra host)
-  genh restore <khoá>                    khôi phục một bản backup theo khoá (xem giới hạn trong
-                                          báo cáo lệnh: chưa hỗ trợ file host tuỳ ý)
+  genh restore <khoá>                    khôi phục một bản backup theo khoá: tự sao lưu an toàn,
+                                          dừng api/worker, khôi phục, migrate, khởi động lại
+                                          (lỗi → quay về bản an toàn; chưa nhận file host tuỳ ý)
+  genh handle-requests                   (watcher gọi) làm yêu cầu Console để lại trong hộp thư
+                                          run/request: update.json → cập nhật, restore.json → khôi phục
   genh doctor [--out report.zip]         chẩn đoán runtime/cổng/chứng chỉ/dung lượng/đồng hồ/
                                           kết nối kênh, xuất báo cáo zip
   genh reset-setup [--yes]               sinh mã thiết lập mới (hỏi xác nhận trừ khi --yes)
@@ -461,11 +467,12 @@ func runBackup(args []string) int {
 
 func runRestore(args []string) int {
 	fs, port, installDir := opsFlagSet("restore")
+	ifRequested := fs.Bool("if-requested", false, "khôi phục bản Owner vừa chọn trong Console (request/restore.json — watcher gọi); không có yêu cầu thì thoát ngay")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if fs.NArg() != 1 {
-		_, _ = fmt.Fprintln(os.Stderr, "genh: cách dùng: genh restore <khoá-backup>")
+	if !*ifRequested && fs.NArg() != 1 {
+		_, _ = fmt.Fprintln(os.Stderr, "genh: cách dùng: genh restore <khoá-backup>   (hoặc --if-requested)")
 		return 2
 	}
 	env, ok := resolveOpsEnv(*port, *installDir)
@@ -474,11 +481,51 @@ func runRestore(args []string) int {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	if err := ops.RunRestore(ctx, env, fs.Arg(0), nil, os.Stdout); err != nil {
+	if *ifRequested {
+		handled, err := ops.RunRestoreRequest(ctx, env, ops.RestoreDeps{}, os.Stdout)
+		if err != nil {
+			reportOpErr(err)
+			return 1
+		}
+		if handled {
+			fmt.Println("genh: khôi phục xong.")
+		}
+		return 0
+	}
+	if _, err := ops.RunRestore(ctx, env, fs.Arg(0), ops.RestoreDeps{}, os.Stdout); err != nil {
 		reportOpErr(err)
 		return 1
 	}
 	return 0
+}
+
+// runHandleRequests là lệnh watcher trên máy chủ gọi (internal/autoupdate):
+// đọc hộp thư run/request và chuyển sang đúng lệnh — cập nhật trước (tự sao
+// lưu), khôi phục sau. Hộp thư trống thì thoát ngay.
+func runHandleRequests(args []string) int {
+	fs, port, installDir := opsFlagSet("handle-requests")
+	quiet := fs.Bool("quiet", false, "chỉ in các dòng quan trọng")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	dir, err := ops.ResolveInstallDir(*installDir)
+	if err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "genh: không xác định được thư mục cài đặt: %v\n", err)
+		return 1
+	}
+	pass := []string{"--port", strconv.Itoa(*port), "--install-dir", dir}
+	switch hostlink.Pending(dir) {
+	case "update":
+		upd := []string{"--yes", "--if-requested"}
+		if *quiet {
+			upd = append(upd, "--quiet")
+		}
+		return runUpdate(append(upd, pass...))
+	case "restore":
+		return runRestore(append([]string{"--if-requested"}, pass...))
+	default:
+		return 0
+	}
 }
 
 func runDoctor(args []string) int {
@@ -777,7 +824,8 @@ func publishHostInfo(installDir string, port int) {
 		_ = os.MkdirAll(filepath.Dir(logFile), 0o755)
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
-		rp := autoupdate.RequestPaths{InstallDir: installDir, RequestDir: hostlink.RequestDirPath(installDir), RequestFile: hostlink.RequestPath(installDir)}
+		rp := autoupdate.RequestPaths{InstallDir: installDir, RequestDir: hostlink.RequestDirPath(installDir), RequestFile: hostlink.RequestPath(installDir),
+			RestoreFile: hostlink.RestoreRequestPath(installDir)}
 		if port != machine.DefaultPort {
 			rp.Port = port
 		}

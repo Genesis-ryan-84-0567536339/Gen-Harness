@@ -210,6 +210,55 @@ export interface SystemUpdate {
   release_notes: string | null;
 }
 
+/** `GET /system/backups` (v0.1.20, gh/system_api/backups.py) — Điều khiển hệ thống › Dữ liệu & lưu trữ. */
+export type BackupTrigger = 'manual' | 'scheduled' | 'pre-update' | 'pre-restore' | 'pre-import';
+export interface BackupItem {
+  /** Khoá ObjectStore, ví dụ `backups/20260928T020000Z-1a2b3c4d.pgcustom.enc`. */
+  key: string;
+  taken_at: string;
+  size_bytes: number;
+  /** Nguồn tạo; null với bản ghi trước v0.1.20. */
+  trigger: BackupTrigger | null;
+  encrypted: boolean;
+  key_id: 'backup' | 'master';
+}
+export type BackupJobState = 'queued' | 'running' | 'done' | 'failed' | 'stalled';
+export interface BackupJob {
+  id?: string;
+  state: BackupJobState;
+  requested_at?: string;
+  started_at?: string;
+  finished_at?: string;
+  key?: string;
+  message?: string | null;
+}
+export type RestoreState = 'idle' | 'requested' | 'running' | 'done' | 'failed' | 'stalled';
+export interface BackupRestoreStatus {
+  /** Máy chủ có watcher nhận yêu cầu khôi phục (genh ≥ v0.1.20). */
+  can_request: boolean;
+  state: RestoreState;
+  key: string | null;
+  /** Bản sao lưu an toàn genh chụp ngay trước khi khôi phục (đường lui). */
+  safety_key: string | null;
+  message: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  requested_at: string | null;
+}
+export interface BackupSchedule {
+  frequency: 'daily' | 'weekly' | 'monthly';
+  time_of_day: string;
+}
+export interface BackupsPage {
+  items: BackupItem[];
+  /** null ⇒ chưa đặt lịch (bỏ qua bước 11). */
+  schedule: BackupSchedule | null;
+  timezone: string;
+  retention: { daily: number; weekly: number; monthly: number; recent_hours: number };
+  job: BackupJob | null;
+  restore: BackupRestoreStatus;
+}
+
 const enc = encodeURIComponent;
 
 /** `/permissions`, `/listening-groups`, `/boundaries*`, `/audit-log*`, `/retention-policies`, `/persons/{id}/data-requests`. */
@@ -233,6 +282,15 @@ export function systemEndpoints(r: ApiClient['request']) {
     retentionPolicies: {
       list: (signal?: AbortSignal) => r<RetentionPolicy[]>('/retention-policies', { signal }),
       patch: (body: RetentionPatchBody) => r<RetentionPolicy[]>('/retention-policies', { method: 'PATCH', body }),
+    },
+    backups: {
+      list: (signal?: AbortSignal) => r<BackupsPage>('/system/backups', { signal }),
+      runNow: () => r<BackupsPage>('/system/backups', { method: 'POST' }),
+      /** Tệp ĐÃ MÃ HOÁ — chỉ Owner, cần PIN (`backup.download`). */
+      download: (key: string) => r<Blob>('/system/backups/download', { query: { key }, responseType: 'blob' }),
+      /** Chỉ Owner, cần PIN (`backup.restore`) + gõ đúng "KHÔI PHỤC". */
+      restore: (key: string, confirm: string) => r<BackupsPage>('/system/backups/restore', { method: 'POST', body: { key, confirm } }),
+      schedule: (body: BackupSchedule) => r<BackupsPage>('/system/backups/schedule', { method: 'PUT', body }),
     },
     systemUpdate: {
       get: (signal?: AbortSignal) => r<SystemUpdate>('/system/update', { signal }),

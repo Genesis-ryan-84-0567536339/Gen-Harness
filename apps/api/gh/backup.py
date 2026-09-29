@@ -26,6 +26,14 @@ nếu sau này cần cấu hình lịch backup tách khỏi tổ chức. `retent
 GFS này (spec 5.6 khoá cứng 7/4/12) — chỉ còn ý nghĩa hiển thị/tương thích ngược, ghi rõ trong báo cáo.
 
 CLI: `python -m gh.backup run|list|prune|restore` — `Makefile` bọc `make backup` / `make restore BACKUP=<khoá>`.
+
+v0.1.20 (Console › Dữ liệu & lưu trữ): mỗi bản ghi thêm `trigger` (nguồn: `manual` | `scheduled` | `pre-update` |
+`pre-restore` | `pre-import`; bản cũ không có ⇒ None). CLI `run` đọc nguồn từ biến môi trường `GH_BACKUP_TRIGGER`
+(genh truyền `-e`), KHÔNG qua cờ — `genh update` chạy backup trong container api CŨ, bản cũ gặp cờ lạ sẽ thoát lỗi.
+Nút "Sao lưu ngay" chạy qua worker arq (`backup_now`), tiến trình ghi ở Redis `JOB_KEY`; mọi lần chạy (kể cả lịch)
+giữ khoá Redis `LOCK_KEY` để hai bản không ghi đè danh mục của nhau. Vòng đời GFS luôn giữ thêm mọi bản trong
+`RECENT_KEEP_HOURS` giờ qua — không thì bấm "Sao lưu ngay" (hoặc bản an toàn trước khi khôi phục) sẽ xoá bản
+cùng ngày Owner vừa định khôi phục.
 """
 
 from __future__ import annotations
@@ -33,11 +41,12 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
 import tempfile
 import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import SplitResult, urlsplit, urlunsplit
@@ -62,6 +71,13 @@ WEEKLY_KEEP = 4
 MONTHLY_KEEP = 12
 
 DUE_WINDOW_MIN = 15  # dung sai quanh `time_of_day` cấu hình — job quét mỗi 15 phút (xem JOBS bên dưới)
+RECENT_KEEP_HOURS = 24  # bản trong 24 giờ qua luôn giữ (ngoài GFS) — xem docstring module
+
+TRIGGERS = ("manual", "scheduled", "pre-update", "pre-restore", "pre-import")
+TRIGGER_ENV = "GH_BACKUP_TRIGGER"
+LOCK_KEY = "gh:backup:lock"
+LOCK_SECONDS = 3600
+JOB_KEY = "gh:backup:job"
 
 
 @dataclass(frozen=True)
@@ -75,15 +91,18 @@ class BackupEntry:
     # hành vi cũ). Bản cũ ghi TRƯỚC khi có trường này không có khoá `key_id` trong JSON → `from_json` mặc định
     # "master" (tương thích ngược: mọi bản đã tồn tại đều mã hoá bằng khoá master lúc chưa có khoá backup riêng).
     key_id: str = "master"
+    # Nguồn tạo bản (TRIGGERS); bản ghi trước v0.1.20 không có ⇒ None.
+    trigger: str | None = None
 
     def to_json(self) -> dict[str, Any]:
         return {"key": self.key, "taken_at": self.taken_at.isoformat(), "database": self.database,
-                "size_bytes": self.size_bytes, "sha256": self.sha256, "key_id": self.key_id}
+                "size_bytes": self.size_bytes, "sha256": self.sha256, "key_id": self.key_id, "trigger": self.trigger}
 
     @staticmethod
     def from_json(d: dict[str, Any]) -> BackupEntry:
         return BackupEntry(key=d["key"], taken_at=datetime.fromisoformat(d["taken_at"]), database=d["database"],
-                           size_bytes=d["size_bytes"], sha256=d["sha256"], key_id=d.get("key_id", "master"))
+                           size_bytes=d["size_bytes"], sha256=d["sha256"], key_id=d.get("key_id", "master"),
+                           trigger=d.get("trigger"))
 
 
 # ─── DSN: `database_url` là SQLAlchemy async (`postgresql+asyncpg://…`), pg_dump/pg_restore cần libpq thường ──
@@ -216,8 +235,11 @@ async def _run(cmd: list[str]) -> None:
 
 # ─── backup / prune / restore ──────────────────────────────────────────────────────────────────────────────
 
-async def run_backup(*, database_url: str | None = None, store: ObjectStore | None = None) -> BackupEntry:
+async def run_backup(*, database_url: str | None = None, store: ObjectStore | None = None,
+                     trigger: str = "manual") -> BackupEntry:
     """`pg_dump -Fc` CSDL thật → mã hoá → lưu qua `ObjectStore` → dọn theo vòng đời GFS."""
+    if trigger not in TRIGGERS:
+        trigger = "manual"
     # Superuser (GH_ADMIN_DATABASE_URL): role ứng dụng gh_app không chắc SELECT được mọi bảng hệ thống mà
     # pg_dump cần đọc (vd. large object, một số catalog) — dump/restore luôn qua vai trò quản trị.
     database_url = database_url or get_settings().effective_admin_database_url
@@ -237,7 +259,7 @@ async def run_backup(*, database_url: str | None = None, store: ObjectStore | No
     key = f"backups/{taken_at.strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:8]}.pgcustom.enc"
     await store.put(key, enc)
     entry = BackupEntry(key=key, taken_at=taken_at, database=db_name, size_bytes=len(raw),
-                        sha256=content_hash(raw), key_id=key_id)
+                        sha256=content_hash(raw), key_id=key_id, trigger=trigger)
 
     entries = [*await _read_manifest(store), entry]
     await _write_manifest(store, entries)
@@ -252,6 +274,8 @@ async def prune(*, store: ObjectStore | None = None, entries: list[BackupEntry] 
     store = store or get_object_store()
     entries = entries if entries is not None else await _read_manifest(store)
     keep_keys = select_retained(entries, now=now)
+    recent = (now or datetime.now(UTC)) - timedelta(hours=RECENT_KEEP_HOURS)
+    keep_keys |= {e.key for e in entries if e.taken_at >= recent}
     kept, removed = [], []
     for e in entries:
         if e.key in keep_keys:
@@ -314,31 +338,77 @@ def is_due(cfg: dict[str, Any], *, last_at: datetime | None, now: datetime) -> b
     return last_at.date() < now.date()  # "daily" và giá trị lạ khác → mặc định hằng ngày
 
 
+async def _acquire_lock(redis: Any) -> bool:
+    return bool(await redis.set(LOCK_KEY, b"1", nx=True, ex=LOCK_SECONDS))
+
+
 async def scheduled_backup_scan(ctx: dict[str, Any]) -> dict[str, Any]:
     """Quét mỗi `DUE_WINDOW_MIN` phút (đăng ký ở `JOBS`): đọc `settings->'backup'` của tổ chức đầu tiên đã
-    cấu hình (xem lý do ở docstring đầu module), chạy `run_backup()` thật nếu đến giờ."""
+    cấu hình (xem lý do ở docstring đầu module), chạy `run_backup()` thật nếu đến giờ. Giờ chạy (`time_of_day`)
+    tính theo múi giờ của tổ chức (bước 3), không phải UTC."""
+    from zoneinfo import ZoneInfo
+
     from gh.db import sessionmaker
 
     sm = sessionmaker()
     async with sm() as db:
         row = (await db.execute(text("""
-            SELECT settings -> 'backup' AS cfg FROM core.organizations
+            SELECT settings -> 'backup' AS cfg, timezone FROM core.organizations
             WHERE settings ? 'backup' ORDER BY created_at LIMIT 1"""))).first()
     if row is None or not row.cfg:
         return {"skipped": "no_config"}
+    try:
+        tz: Any = ZoneInfo(row.timezone or "UTC")
+    except (ValueError, KeyError):
+        tz = UTC
 
     store = get_object_store()
     entries = await list_backups(store=store)
-    last_at = entries[0].taken_at if entries else None
-    now = datetime.now(UTC)
+    last_at = entries[0].taken_at.astimezone(tz) if entries else None
+    now = datetime.now(tz)
     if not is_due(row.cfg, last_at=last_at, now=now):
         return {"skipped": "not_due"}
-    entry = await run_backup(store=store)
+    redis = ctx.get("redis")
+    if redis is not None and not await _acquire_lock(redis):
+        return {"skipped": "locked"}
+    try:
+        entry = await run_backup(store=store, trigger="scheduled")
+    finally:
+        if redis is not None:
+            await redis.delete(LOCK_KEY)
+    return {"ran": entry.key}
+
+
+async def _set_job(redis: Any, **fields: Any) -> None:
+    raw = await redis.get(JOB_KEY)
+    cur = orjson.loads(raw) if raw else {}
+    await redis.set(JOB_KEY, orjson.dumps({**cur, **fields}), ex=7 * 24 * 3600)
+
+
+async def backup_now(ctx: dict[str, Any], trigger: str = "manual") -> dict[str, Any]:
+    """Nút "Sao lưu ngay" (gh/system_api/backups.py xếp hàng qua arq): chạy `run_backup()` và ghi tiến trình vào
+    Redis `JOB_KEY` (queued → running → done/failed) cho Console hỏi lại."""
+    redis = ctx["redis"]
+    if not await _acquire_lock(redis):
+        await _set_job(redis, state="failed", finished_at=datetime.now(UTC).isoformat(),
+                       message="Đang có một bản sao lưu khác chạy — thử lại sau ít phút")
+        return {"skipped": "locked"}
+    await _set_job(redis, state="running", started_at=datetime.now(UTC).isoformat(), message=None)
+    try:
+        entry = await run_backup(trigger=trigger)
+    except Exception as exc:  # noqa: BLE001 — báo lỗi cho Console, không nuốt im lặng
+        log.exception("Sao lưu ngay thất bại")
+        await _set_job(redis, state="failed", finished_at=datetime.now(UTC).isoformat(), message=str(exc)[-500:])
+        return {"failed": str(exc)[-500:]}
+    finally:
+        await redis.delete(LOCK_KEY)
+    await _set_job(redis, state="done", finished_at=datetime.now(UTC).isoformat(), key=entry.key)
     return {"ran": entry.key}
 
 
 HOOKS: list[Hook] = []
 JOBS: list[CronJob] = [(scheduled_backup_scan, {"minute": set(range(0, 60, DUE_WINDOW_MIN))})]
+FUNCTIONS = [backup_now]  # job xếp hàng theo yêu cầu (không theo lịch) — gh/worker.py đăng ký
 
 
 # ─── CLI: `python -m gh.backup …` (Makefile bọc `make backup` / `make restore BACKUP=<khoá>`) ──────────────
@@ -356,7 +426,7 @@ async def _main() -> None:
     args = parser.parse_args()
 
     if args.action == "run":
-        entry = await run_backup()
+        entry = await run_backup(trigger=os.environ.get(TRIGGER_ENV) or "manual")
         log.info("OK: %s", entry.to_json())
     elif args.action == "prune":
         removed = await prune()

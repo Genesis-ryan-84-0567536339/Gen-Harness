@@ -5,10 +5,13 @@
 //	  genh.json                  ← genh ghi: phiên bản đang chạy + cơ chế nhận yêu cầu
 //	  request/update.json        ← api ghi khi Owner bấm nút; genh xoá khi bắt đầu
 //	  update-status.json         ← genh ghi: running → done/failed (+ thông báo)
+//	  request/restore.json       ← api ghi khi Owner bấm "Khôi phục" (v0.1.20): {key}
+//	  restore-status.json        ← genh ghi: running → done/failed (+ bản an toàn)
 //
 // Bên máy chủ, một "watcher" (systemd path unit / crontab mỗi phút / launchd
-// QueueDirectories — xem internal/autoupdate) chạy `genh update --yes --quiet
-// --if-requested` khi thấy request/update.json (thư mục riêng để launchd
+// QueueDirectories — xem internal/autoupdate) chạy `genh handle-requests`
+// khi thấy request/update.json hoặc request/restore.json — genh tự chọn việc
+// (cập nhật trước, khôi phục sau) (thư mục riêng để launchd
 // QueueDirectories chỉ chạy khi thư mục này có tệp). Container api chạy dưới uid
 // khác người dùng máy chủ nên thư mục run để 0777: trong đó chỉ có ba tệp
 // trạng thái nhỏ, không có bí mật.
@@ -31,7 +34,14 @@ const (
 	RequestDir  = "request"
 	RequestFile = "update.json"
 	StatusFile  = "update-status.json"
+
+	RestoreRequestFile = "restore.json"
+	RestoreStatusFile  = "restore-status.json"
 )
+
+// Requests là các loại yêu cầu watcher hiện tại nhận (ghi vào genh.json để
+// Console biết nút nào bấm được — watcher cũ v0.1.19 chỉ nhận "update").
+var Requests = []string{"update", "restore"}
 
 // Dir là thư mục hộp thư dưới gốc cài đặt.
 func Dir(installDir string) string { return filepath.Join(installDir, "run") }
@@ -64,8 +74,10 @@ type Info struct {
 	Version string `json:"version"`
 	// Updater là cơ chế nhận yêu cầu từ Console: "systemd", "cron", "launchd"
 	// hoặc "" (chưa có — Console hiện lệnh để Owner tự chạy).
-	Updater   string `json:"updater"`
-	WrittenAt string `json:"written_at"`
+	Updater string `json:"updater"`
+	// Requests: loại yêu cầu watcher nhận (rỗng khi chưa có watcher).
+	Requests  []string `json:"requests,omitempty"`
+	WrittenAt string   `json:"written_at"`
 }
 
 // Status là nội dung update-status.json.
@@ -97,7 +109,11 @@ func WriteInfo(installDir, version, updater string) error {
 	if err := EnsureDir(installDir); err != nil {
 		return err
 	}
-	return writeJSON(filepath.Join(Dir(installDir), InfoFile), Info{Version: version, Updater: updater, WrittenAt: now()})
+	info := Info{Version: version, Updater: updater, WrittenAt: now()}
+	if updater != "" {
+		info.Requests = Requests
+	}
+	return writeJSON(filepath.Join(Dir(installDir), InfoFile), info)
 }
 
 // ReadInfo đọc genh.json (lỗi nếu chưa có).
@@ -150,4 +166,95 @@ func ReadStatus(installDir string) (Status, error) {
 		return s, err
 	}
 	return s, json.Unmarshal(b, &s)
+}
+
+// ─── Khôi phục từ Console (v0.1.20) ─────────────────────────────────────────
+
+// RestoreRequestPath là tệp yêu cầu khôi phục api ghi.
+func RestoreRequestPath(installDir string) string {
+	return filepath.Join(RequestDirPath(installDir), RestoreRequestFile)
+}
+
+// RestoreRequest là nội dung request/restore.json.
+type RestoreRequest struct {
+	ID          string `json:"id,omitempty"`
+	Key         string `json:"key"`
+	RequestedAt string `json:"requested_at,omitempty"`
+	By          string `json:"by,omitempty"`
+}
+
+// RestoreStatus là nội dung restore-status.json.
+type RestoreStatus struct {
+	State      string `json:"state"` // running | done | failed
+	Key        string `json:"key,omitempty"`
+	SafetyKey  string `json:"safety_key,omitempty"`
+	Message    string `json:"message,omitempty"`
+	StartedAt  string `json:"started_at,omitempty"`
+	FinishedAt string `json:"finished_at,omitempty"`
+}
+
+// HasRestoreRequest báo Console có đang yêu cầu khôi phục không.
+func HasRestoreRequest(installDir string) bool {
+	_, err := os.Stat(RestoreRequestPath(installDir))
+	return err == nil
+}
+
+// ConsumeRestoreRequest đọc rồi XOÁ yêu cầu khôi phục (xoá trước khi chạy để
+// watcher không kích lặp). Tệp hỏng vẫn bị xoá, trả lỗi.
+func ConsumeRestoreRequest(installDir string) (RestoreRequest, error) {
+	var r RestoreRequest
+	path := RestoreRequestPath(installDir)
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return r, err
+	}
+	_ = os.Remove(path)
+	if err := json.Unmarshal(b, &r); err != nil {
+		return r, err
+	}
+	if r.Key == "" {
+		return r, errors.New("yêu cầu khôi phục thiếu khoá bản sao lưu")
+	}
+	return r, nil
+}
+
+// StartRestore ghi trạng thái khôi phục "running".
+func StartRestore(installDir, key string) error {
+	if err := EnsureDir(installDir); err != nil {
+		return err
+	}
+	return writeJSON(filepath.Join(Dir(installDir), RestoreStatusFile), RestoreStatus{State: "running", Key: key, StartedAt: now()})
+}
+
+// FinishRestore ghi trạng thái khôi phục cuối (done/failed), giữ Key/StartedAt.
+func FinishRestore(installDir, state, safetyKey, message string) error {
+	if err := EnsureDir(installDir); err != nil {
+		return err
+	}
+	st, _ := ReadRestoreStatus(installDir)
+	st.State, st.SafetyKey, st.Message, st.FinishedAt = state, safetyKey, message, now()
+	return writeJSON(filepath.Join(Dir(installDir), RestoreStatusFile), st)
+}
+
+// ReadRestoreStatus đọc restore-status.json.
+func ReadRestoreStatus(installDir string) (RestoreStatus, error) {
+	var s RestoreStatus
+	b, err := os.ReadFile(filepath.Join(Dir(installDir), RestoreStatusFile))
+	if err != nil {
+		return s, err
+	}
+	return s, json.Unmarshal(b, &s)
+}
+
+// Pending cho biết watcher cần làm việc gì: "update" (ưu tiên — cập nhật đã
+// tự sao lưu trước), "restore", hoặc "" khi hộp thư trống.
+func Pending(installDir string) string {
+	switch {
+	case HasRequest(installDir):
+		return "update"
+	case HasRestoreRequest(installDir):
+		return "restore"
+	default:
+		return ""
+	}
 }

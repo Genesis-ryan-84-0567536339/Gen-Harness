@@ -25,6 +25,10 @@ const backupServiceName = "api"
 // dòng).
 var backupKeyRe = regexp.MustCompile(`backups/\S+\.enc`)
 
+// backupKeyStrictRe: khoá hợp lệ để khôi phục (yêu cầu từ Console đi qua tệp
+// trong hộp thư — không tin nội dung, chỉ nhận đúng dạng này).
+var backupKeyStrictRe = regexp.MustCompile(`^backups/[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}\.pgcustom\.enc$`)
+
 // getObjectBytesScript đọc thẳng bytes đã MÃ HOÁ của một khoá backup qua
 // đúng abstraction ObjectStore mà apps/api/gh/backup.py dùng (get_object_
 // store().get(key)) — không giả định biết trước đường dẫn đĩa thật của
@@ -38,11 +42,23 @@ async def _m():
     sys.stdout.buffer.write(data)
 asyncio.run(_m())`
 
+// Nguồn gốc bản backup (v0.1.20) — Console hiện cột "Nguồn" trong danh sách sao
+// lưu. Truyền qua biến môi trường GH_BACKUP_TRIGGER (`-e`), KHÔNG qua cờ CLI:
+// `genh update` chạy backup TRONG container api CŨ (trước khi tải bản mới),
+// bản cũ không biết cờ lạ sẽ thoát lỗi, còn biến môi trường lạ thì bỏ qua.
+const (
+	backupTriggerEnv        = "GH_BACKUP_TRIGGER"
+	BackupTriggerManual     = "manual"
+	BackupTriggerPreUpdate  = "pre-update"
+	BackupTriggerPreRestore = "pre-restore"
+	BackupTriggerPreImport  = "pre-import"
+)
+
 // runBackupInContainer chạy `python -m gh.backup run` trong container api và
 // trả về khoá backup vừa tạo (đọc từ dòng log) — logic dùng chung giữa `genh
 // backup` (backup.go) và `genh update` (update.go — rollback cần đúng khoá
-// backup vừa tạo TRƯỚC khi đụng gì).
-func runBackupInContainer(ctx context.Context, runner dockercli.Runner, composePath string, envOverlay []string, dir string) (string, error) {
+// backup vừa tạo TRƯỚC khi đụng gì). trigger ghi vào danh mục backup.
+func runBackupInContainer(ctx context.Context, runner dockercli.Runner, composePath string, envOverlay []string, dir, trigger string) (string, error) {
 	var lines []string
 	stream := func(args []string) error {
 		lines = nil
@@ -50,9 +66,10 @@ func runBackupInContainer(ctx context.Context, runner dockercli.Runner, composeP
 			lines = append(lines, line)
 		})
 	}
-	err := stream(apiCommandArgs(composePath, false, "python", "-m", "gh.backup", "run"))
+	cmd := []string{"-e", backupTriggerEnv + "=" + trigger, backupServiceName, "python", "-m", "gh.backup", "run"}
+	err := stream(compose.BaseArgs(composePath, append([]string{"exec", "-T"}, cmd...)...))
 	if isServiceNotRunning(err) {
-		err = stream(apiCommandArgs(composePath, true, "python", "-m", "gh.backup", "run"))
+		err = stream(compose.BaseArgs(composePath, append([]string{"run", "--rm", "--no-deps", "-T"}, cmd...)...))
 	}
 	if err != nil {
 		return "", err

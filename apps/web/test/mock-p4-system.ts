@@ -167,6 +167,63 @@ export function createMock(opts: P4SystemOptions) {
   const dataRequests = new Map<string, Array<{ id: string; kind: string; status: string; requested_at: string; completed_at: string | null }>>();
   const restrictedPersons = new Set<string>();
   const backup: BackupConfig = { frequency: 'daily', time_of_day: '02:00', retention_count: 7, destination: 'local' };
+  let backupConfigured = !opts.fresh;
+
+  // ── Sao lưu & khôi phục (v0.1.20, gh/system_api/backups.py) — mock mô phỏng worker + genh trên máy chủ: mỗi lần
+  // GET tiến một bước (job queued → running → done + thêm bản; restore requested → running → done).
+  const DAY = 24 * 3600 * 1000;
+  const backupKey = (t: number) => {
+    const iso = new Date(t).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+    return `backups/${iso}-${randomUUID().replace(/-/g, '').slice(0, 8)}.pgcustom.enc`;
+  };
+  type MockBackup = { key: string; taken_at: string; size_bytes: number; trigger: string | null; encrypted: true; key_id: 'backup' | 'master' };
+  const mkBackup = (t: number, trigger: string | null, size: number, keyId: 'backup' | 'master' = 'backup'): MockBackup => ({
+    key: backupKey(t), taken_at: new Date(t).toISOString(), size_bytes: size, trigger, encrypted: true, key_id: keyId,
+  });
+  const at2am = (daysAgo: number) => {
+    const d = new Date(Date.now() - daysAgo * DAY);
+    d.setUTCHours(19, 0, 0, 0); // 02:00 giờ Việt Nam
+    return d.getTime();
+  };
+  const backups: MockBackup[] = opts.fresh
+    ? []
+    : [
+        mkBackup(at2am(0), 'scheduled', 48_300_000),
+        mkBackup(at2am(1) + 5 * 3600 * 1000, 'pre-update', 47_900_000),
+        mkBackup(at2am(1), 'scheduled', 47_800_000),
+        mkBackup(at2am(2), 'manual', 46_100_000),
+        mkBackup(at2am(9), 'scheduled', 41_000_000),
+        mkBackup(at2am(40), null, 30_500_000, 'master'),
+      ];
+  let backupJob: Record<string, unknown> | null = null;
+  const restore = {
+    can_request: process.env.MOCK_RESTORE_UNAVAILABLE !== '1', state: 'idle', key: null as string | null, safety_key: null as string | null,
+    message: null as string | null, started_at: null as string | null, finished_at: null as string | null, requested_at: null as string | null,
+  };
+  function backupsPage() {
+    return {
+      items: [...backups].sort((a, b) => b.taken_at.localeCompare(a.taken_at)),
+      schedule: backupConfigured ? { frequency: backup.frequency, time_of_day: backup.time_of_day } : null,
+      timezone: 'Asia/Ho_Chi_Minh',
+      retention: { daily: 7, weekly: 4, monthly: 12, recent_hours: 24 },
+      job: backupJob,
+      restore: { ...restore },
+    };
+  }
+  function advanceBackups() {
+    if (backupJob?.state === 'queued') backupJob = { ...backupJob, state: 'running', started_at: new Date().toISOString() };
+    else if (backupJob?.state === 'running') {
+      const b = mkBackup(Date.now(), 'manual', 48_400_000);
+      backups.push(b);
+      backupJob = { ...backupJob, state: 'done', key: b.key, finished_at: new Date().toISOString() };
+    }
+    if (restore.state === 'requested') Object.assign(restore, { state: 'running', started_at: new Date().toISOString() });
+    else if (restore.state === 'running') {
+      const safety = mkBackup(Date.now(), 'pre-restore', 48_500_000);
+      backups.push(safety);
+      Object.assign(restore, { state: 'done', safety_key: safety.key, finished_at: new Date().toISOString() });
+    }
+  }
 
   function permissionsPage() {
     const roles = opts.roleOrder.map((code) => {
@@ -283,6 +340,49 @@ export function createMock(opts: P4SystemOptions) {
       return true;
     }
 
+    // ── Sao lưu & khôi phục (v0.1.20) ──
+    if (p.startsWith('/system/backups')) {
+      if (!has(ctx, 'system.manage')) return problem(403, 'FORBIDDEN', 'Vai trò không có quyền này');
+      if (p === '/system/backups' && m === 'GET') {
+        advanceBackups();
+        return reply(200, backupsPage());
+      }
+      if (p === '/system/backups' && m === 'POST') {
+        if (backupJob?.state === 'queued' || backupJob?.state === 'running') return problem(409, 'BACKUP_IN_PROGRESS', 'Đang sao lưu — chờ xong rồi thử lại');
+        backupJob = { id: randomUUID(), state: 'queued', requested_at: new Date().toISOString() };
+        return reply(202, backupsPage());
+      }
+      if (p === '/system/backups/schedule' && m === 'PUT') {
+        const b = body as { frequency?: string; time_of_day?: string };
+        if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(String(b.time_of_day ?? ''))) {
+          return problem(422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors: { time_of_day: 'Giờ chạy sao lưu dạng HH:MM (00:00–23:59)' } });
+        }
+        Object.assign(backup, { frequency: b.frequency, time_of_day: b.time_of_day });
+        backupConfigured = true;
+        return reply(200, backupsPage());
+      }
+      if (!ctx.owner) return problem(403, 'FORBIDDEN', 'Chỉ Owner');
+      if (p === '/system/backups/download' && m === 'GET') {
+        if (!pin(ctx, 'backup.download')) return true;
+        const item = backups.find((x) => x.key === q.get('key'));
+        if (!item) return problem(404, 'NOT_FOUND', 'Không tìm thấy bản sao lưu');
+        return ctx.text(200, 'application/octet-stream', `GHBACKUP-MOCK ${item.key}`, `gen-harness-${item.key.split('/').pop()}`);
+      }
+      if (p === '/system/backups/restore' && m === 'POST') {
+        if (!pin(ctx, 'backup.restore')) return true;
+        const b = body as { key?: string; confirm?: string };
+        if (String(b.confirm ?? '').trim() !== 'KHÔI PHỤC') {
+          return problem(422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors: { confirm: 'Gõ đúng "KHÔI PHỤC" để xác nhận' } });
+        }
+        if (!backups.some((x) => x.key === b.key)) return problem(404, 'NOT_FOUND', 'Không tìm thấy bản sao lưu');
+        if (!restore.can_request) return problem(409, 'RESTORE_UNAVAILABLE', 'Máy chủ chưa bật nhận yêu cầu khôi phục từ Console');
+        if (restore.state === 'requested' || restore.state === 'running') return problem(409, 'RESTORE_IN_PROGRESS', 'Đang khôi phục');
+        Object.assign(restore, { state: 'requested', key: b.key, requested_at: new Date().toISOString(), safety_key: null, message: null });
+        return reply(202, backupsPage());
+      }
+      return problem(404, 'NOT_FOUND', 'Không tìm thấy');
+    }
+
     // ── Dữ liệu & lưu trữ (spec I) ──
     if (p === '/retention-policies' && m === 'GET') {
       if (!has(ctx, 'system.read')) return problem(403, 'FORBIDDEN', 'Vai trò không có quyền này');
@@ -362,6 +462,7 @@ export function createMock(opts: P4SystemOptions) {
     const destination = ['local', 's3', 'minio'].includes(String(body.destination)) ? (body.destination as BackupConfig['destination']) : 'local';
     const retention_count = Math.min(365, Math.max(1, Math.round(Number(body.retention_count ?? 7)) || 7));
     Object.assign(backup, { frequency, time_of_day, retention_count, destination });
+    backupConfigured = true;
     return { ok: true, value: { backup: { ...backup } } };
   }
 

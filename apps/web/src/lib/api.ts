@@ -13,6 +13,12 @@ export const apiClient = createApiClient({
     queryClient.clear();
     navigateTo(`/login?next=${encodeURIComponent(here)}`, { replace: true });
   },
+  // v0.1.20: API chặn mọi route khi đang dùng mật khẩu tạm → về màn "Đặt mật khẩu mới".
+  onPasswordChangeRequired: () => {
+    if (window.location.pathname.startsWith('/change-password')) return;
+    void queryClient.invalidateQueries({ queryKey: ['auth', 'me'] });
+    navigateTo('/change-password', { replace: true });
+  },
   onSetupRequired: () => {
     if (window.location.pathname.startsWith('/setup')) return;
     navigateTo('/setup', { replace: true });
