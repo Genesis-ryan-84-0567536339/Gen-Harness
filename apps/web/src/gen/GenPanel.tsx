@@ -25,6 +25,9 @@ const TOOL_LABEL: Record<string, string> = {
   'task.list': 'việc & nhắc hẹn',
   'staff.list': 'danh sách người',
   'refinery.summary': 'lọc đầu Hộp thư',
+  'hub.kho_summary': 'Kho Ryan (Gen-hub)',
+  'hub.kho_search': 'Kho Ryan (Gen-hub)',
+  'hub.kho_get': 'Kho Ryan (Gen-hub)',
 };
 
 function targetLabel(id: string): string {

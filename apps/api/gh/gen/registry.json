@@ -470,6 +470,35 @@
       "params": null
     },
     {
+      "id": "mcp.hub_link",
+      "screen": "mcp",
+      "label": "Thẻ \"Gen-hub\"",
+      "description": "Nối Gen-hub để Gen đọc Kho Ryan (chỉ đọc, chỉ Sếp): địa chỉ, token, hạn token, trạng thái",
+      "dynamic": null,
+      "params": null,
+      "permission": "system.manage"
+    },
+    {
+      "id": "mcp.hub_link.token",
+      "screen": "mcp",
+      "label": "Ô \"Token Gen-hub\"",
+      "description": "Dán token agent tạo trong Gen-hub (chỉ ghi — không bao giờ hiện lại)",
+      "dynamic": null,
+      "params": null,
+      "permission": "system.manage",
+      "sensitive": true,
+      "safe_message": "Đây là thao tác nhạy cảm — Sếp tự xem kỹ và tự quyết định, Gen không làm thay."
+    },
+    {
+      "id": "mcp.hub_link.test",
+      "screen": "mcp",
+      "label": "Nút \"Kiểm tra\" Gen-hub",
+      "description": "Thử kết nối, mở đúng tool đọc Kho cho Gen rồi bật liên kết (cần PIN)",
+      "dynamic": null,
+      "params": null,
+      "permission": "system.manage"
+    },
+    {
       "id": "account.profile",
       "screen": "account",
       "label": "Hồ sơ",

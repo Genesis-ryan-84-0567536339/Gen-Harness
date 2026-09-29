@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { McpCall, McpCallBody, McpServer, McpServerCreateBody, McpServerPatchBody, McpTool } from '@gen-harness/contracts';
+import type { HubLink, HubLinkPatchBody, McpCall, McpCallBody, McpServer, McpServerCreateBody, McpServerPatchBody, McpTool } from '@gen-harness/contracts';
 import { api } from '../../lib/api';
 import { onRealtimeEvent } from '../../lib/realtime';
 
@@ -7,6 +7,7 @@ export const qkMcp = {
   servers: ['mcp', 'servers'] as const,
   tools: ['mcp', 'tools'] as const,
   calls: ['mcp', 'calls'] as const,
+  hubLink: ['hub', 'link'] as const,
 };
 
 export const useMcpServers = () => useQuery({ queryKey: qkMcp.servers, queryFn: ({ signal }) => api.mcp.servers.list(signal) });
@@ -91,6 +92,33 @@ export const useCallTool = () => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, body }: { id: string; body: McpCallBody }) => api.mcp.tools.call(id, body),
+    onSettled: () => void qc.invalidateQueries({ queryKey: qkMcp.calls }),
+  });
+};
+
+// ─── Gen-hub (v0.1.26) ────────────────────────────────────────────────────────
+export const useHubLink = () => useQuery({ queryKey: qkMcp.hubLink, queryFn: ({ signal }) => api.hub.link.get(signal) });
+
+export const useUpdateHubLink = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: HubLinkPatchBody) => api.hub.link.update(body),
+    onSuccess: (l) => {
+      qc.setQueryData<HubLink>(qkMcp.hubLink, l);
+      invalidateServers(qc);
+    },
+  });
+};
+
+export const useTestHubLink = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.hub.link.test(),
+    onSuccess: (r) => {
+      qc.setQueryData<HubLink>(qkMcp.hubLink, r.link);
+      invalidateServers(qc);
+      invalidateTools(qc);
+    },
     onSettled: () => void qc.invalidateQueries({ queryKey: qkMcp.calls }),
   });
 };
