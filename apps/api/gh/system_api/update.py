@@ -96,6 +96,12 @@ def _age_seconds(iso: str | None) -> float | None:
         return None
 
 
+def running_version() -> str | None:
+    """Phiên bản genh đã cài (genh.json) — None khi chạy bản phát triển không có hộp thư chung."""
+    v = (_read_json(_dir() / "genh.json") or {}).get("version")
+    return str(v) if v else None
+
+
 def _state() -> dict[str, Any]:
     d = _dir()
     info = _read_json(d / "genh.json") or {}

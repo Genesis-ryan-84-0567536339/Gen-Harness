@@ -226,19 +226,16 @@ async def step2(body: Step2In, request: Request, response: Response,
     return state_payload(await _save(db, row.org_id, completed, 3))
 
 
-@router.put("/steps/3")
-async def step3(body: Step3In, request: Request, db: AsyncSession = DB,
-                user: service.CurrentUser | None = Depends(optional_user)) -> dict[str, Any]:
-    row = await _row(db)
-    _not_finished(row)
-    owner = _owner_of(row, user)
+def validate_org(body: Step3In) -> tuple[str, str, str, str, str]:
+    """Kiểm + chuẩn hoá thông tin tổ chức & xưng hô (bước 3; dùng lại ở Điều khiển hệ thống › Tổ chức — v0.1.22).
+    Sai → 422 lỗi theo ô. Trả (tên tổ chức, múi giờ, tiền tệ, Sếp tự xưng, agent gọi Sếp)."""
     errors: dict[str, str] = {}
     org_name, self_name, bot_calls = body.org_name.strip(), body.self_name.strip(), body.bot_calls_me.strip()
-    currency = body.currency.strip().upper()
+    currency, tz = body.currency.strip().upper(), body.timezone.strip()
     if not org_name:
         errors["org_name"] = "Nhập tên tổ chức"
     try:
-        ZoneInfo(body.timezone)
+        ZoneInfo(tz)
     except (ZoneInfoNotFoundError, ValueError):
         errors["timezone"] = "Múi giờ không hợp lệ"
     if currency not in CURRENCIES:
@@ -249,14 +246,24 @@ async def step3(body: Step3In, request: Request, db: AsyncSession = DB,
         errors["bot_calls_me"] = "Nhập cách agent gọi Sếp"
     if errors:
         raise field_errors(errors)
+    return org_name, tz, currency, self_name, bot_calls
+
+
+@router.put("/steps/3")
+async def step3(body: Step3In, request: Request, db: AsyncSession = DB,
+                user: service.CurrentUser | None = Depends(optional_user)) -> dict[str, Any]:
+    row = await _row(db)
+    _not_finished(row)
+    owner = _owner_of(row, user)
+    org_name, tz, currency, self_name, bot_calls = validate_org(body)
     await db.execute(text("UPDATE core.organizations SET name = :n, timezone = :tz, currency = :c WHERE id = :o"),
-                     {"n": org_name, "tz": body.timezone, "c": currency, "o": row.org_id})
+                     {"n": org_name, "tz": tz, "c": currency, "o": row.org_id})
     await db.execute(text("UPDATE core.users SET addressing = addressing || CAST(:a AS jsonb) WHERE id = :u"),
                      {"a": json.dumps({"self": self_name, "bot_calls_me": bot_calls}), "u": owner.id})
     await actionlog.record(db, org_id=row.org_id, actor_type="user", actor_id=owner.actor_id,
                            action="setup.step_saved", target_type="setup_step", target_id="3",
                            target_label="Tổ chức & xưng hô",
-                           detail={"org_name": org_name, "timezone": body.timezone, "currency": currency},
+                           detail={"org_name": org_name, "timezone": tz, "currency": currency},
                            ip=client_ip(request))
     completed = dict(row.completed or {})
     done = dict(completed.get("steps", {}))

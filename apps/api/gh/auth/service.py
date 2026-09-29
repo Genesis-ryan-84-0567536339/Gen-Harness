@@ -36,6 +36,7 @@ PIN_OPERATIONS: dict[str, str] = {
     "agent.manage": "Tạo / tắt / nhân bản danh tính agent",
     "backup.download": "Tải bản sao lưu",
     "backup.restore": "Khôi phục bản sao lưu",
+    "user.manage": "Mời / khoá / đặt lại mật khẩu người dùng",
 }
 
 
