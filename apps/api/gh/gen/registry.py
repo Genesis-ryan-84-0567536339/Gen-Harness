@@ -18,6 +18,7 @@ REGISTRY_PATH = Path(__file__).with_name("registry.json")
 EXTRA_SCREEN_PERMISSION: dict[str, tuple[str, ...] | None] = {
     "guide": ("system.manage",),  # Hướng dẫn kết nối = việc thiết lập của Owner
     "account": None,  # ai đăng nhập cũng có "Tài khoản của tôi"
+    "help": None,  # Trợ giúp / Giới thiệu (v0.1.22) — mọi vai trò
 }
 
 

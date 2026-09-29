@@ -39,6 +39,7 @@ export interface GenScreen {
 const EXTRA_SCREENS: GenScreen[] = [
   { key: 'guide', path: '/guide', title: 'Hướng dẫn kết nối' },
   { key: 'account', path: '/account', title: 'Tài khoản của tôi' },
+  { key: 'help', path: '/help', title: 'Trợ giúp' },
 ];
 
 export const GEN_SCREENS: GenScreen[] = [
@@ -63,6 +64,8 @@ export const GEN_TARGETS: GenTarget[] = [
   // ── Điều khiển hệ thống ──
   { id: 'system.tab.channels', screen: 'system', label: 'Tab "Kênh & đăng nhập"', description: 'Chuyển sang tab kênh Zalo/WhatsApp, PIN, CLI' },
   { id: 'system.tab.brain', screen: 'system', label: 'Tab "Bộ não AI"', description: 'Chuyển sang tab nhà cung cấp model, hạn mức, Jev' },
+  { id: 'system.tab.users', screen: 'system', label: 'Tab "Người dùng"', description: 'Chuyển sang tab mời người dùng, đổi vai trò, khoá tài khoản (chỉ Owner)' },
+  { id: 'system.tab.org', screen: 'system', label: 'Tab "Tổ chức"', description: 'Chuyển sang tab sửa tên tổ chức, múi giờ, tiền tệ, xưng hô' },
   { id: 'system.tab.storage', screen: 'system', label: 'Tab "Dữ liệu & lưu trữ"', description: 'Chuyển sang tab hạn lưu, sao lưu & khôi phục' },
   { id: 'system.channels.list', screen: 'system', label: 'Danh sách kênh', description: 'Thẻ các kênh Zalo/WhatsApp và nút tạo mã QR', params: { tab: 'channels' } },
   { id: 'system.channels.pin', screen: 'system', label: 'Thẻ mã PIN', description: 'Đổi mã PIN, xem lịch sử nhập PIN', params: { tab: 'channels' }, sensitive: true },
@@ -75,6 +78,11 @@ export const GEN_TARGETS: GenTarget[] = [
   { id: 'system.backup.panel', screen: 'system', label: 'Sao lưu & khôi phục', description: 'Danh sách bản sao lưu, tải về, khôi phục', params: { tab: 'storage' }, sensitive: true },
   { id: 'system.backup.now', screen: 'system', label: 'Nút "Sao lưu ngay"', description: 'Tạo bản sao lưu ngay lúc này', params: { tab: 'storage' }, sensitive: true },
   { id: 'system.backup.schedule', screen: 'system', label: 'Lịch sao lưu tự động', description: 'Đổi tần suất và giờ sao lưu tự động', params: { tab: 'storage' }, sensitive: true },
+  { id: 'system.users.list', screen: 'system', label: 'Danh sách người dùng', description: 'Tên, email, vai trò, trạng thái, lần đăng nhập gần nhất; nút đặt lại mật khẩu, khoá/mở khoá', params: { tab: 'users' }, sensitive: true },
+  { id: 'system.users.invite', screen: 'system', label: 'Nút "Mời người dùng"', description: 'Tạo tài khoản mới với mật khẩu tạm (cần mã PIN)', params: { tab: 'users' } },
+  { id: 'system.users.temp_password', screen: 'system', label: 'Mật khẩu tạm vừa tạo', description: 'Hộp hiện mật khẩu tạm một lần sau khi mời / đặt lại mật khẩu', params: { tab: 'users' }, sensitive: true },
+  { id: 'system.org.form', screen: 'system', label: 'Thông tin tổ chức', description: 'Tên tổ chức, múi giờ, tiền tệ, Sếp tự xưng là, Agent gọi Sếp là', params: { tab: 'org' } },
+  { id: 'system.org.save', screen: 'system', label: 'Nút "Lưu thông tin tổ chức"', description: 'Lưu thay đổi thông tin tổ chức và xưng hô', params: { tab: 'org' } },
   // ── API & Model ──
   { id: 'api.add_provider', screen: 'api', label: 'Nút "Thêm nhà cung cấp"', description: 'Thêm Gemini/DeepSeek/API tương thích OpenAI' },
   { id: 'api.bindings', screen: 'api', label: 'Gán model cho từng agent', description: 'Chọn model cho từng mục đích, gồm core.gen của Gen' },
@@ -83,6 +91,12 @@ export const GEN_TARGETS: GenTarget[] = [
   { id: 'account.password', screen: 'account', label: 'Đổi mật khẩu', description: 'Đặt mật khẩu mới', sensitive: true },
   { id: 'account.pin', screen: 'account', label: 'Đổi mã PIN', description: 'Đặt mã PIN 6 số mới', sensitive: true },
   { id: 'account.sessions', screen: 'account', label: 'Phiên đăng nhập', description: 'Thiết bị đang đăng nhập, đăng xuất thiết bị khác', sensitive: true },
+  // ── Trợ giúp ──
+  { id: 'help.version', screen: 'help', label: 'Phiên bản đang chạy', description: 'Phiên bản Gen-Harness, tổ chức, múi giờ, vai trò' },
+  { id: 'help.ask_gen', screen: 'help', label: 'Cách hỏi Gen', description: 'Hướng dẫn mở khung Gen và câu hỏi mẫu' },
+  { id: 'help.guide', screen: 'help', label: 'Nút "Mở Hướng dẫn kết nối"', description: 'Sang trang hướng dẫn các việc thiết lập để sau (Owner)' },
+  { id: 'help.genh', screen: 'help', label: 'Lệnh genh hay dùng', description: 'genh update, reset-password, trust-ca, backup, status — chạy trên máy chủ' },
+  { id: 'help.report', screen: 'help', label: 'Nút "Báo lỗi"', description: 'Chép thông tin chẩn đoán (phiên bản, trang, trình duyệt) để gửi người hỗ trợ' },
   // ── Quy tắc sàng lọc ──
   { id: 'rules.add', screen: 'rules', label: 'Nút "Thêm quy tắc"', description: 'Tạo quy tắc sàng lọc mới' },
   { id: 'rules.batch', screen: 'rules', label: 'Nút "Chạy thử trên 100 bản ghi"', description: 'Thử bộ quy tắc trên dữ liệu gần nhất' },
