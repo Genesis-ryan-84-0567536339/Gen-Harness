@@ -25,7 +25,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gh import notifications
-from gh.auth import service
+from gh.auth import rbac, service
 from gh.chassis import actionlog
 from gh.chassis.mcp_client import McpClient
 from gh.data.common import iso, mask_text
@@ -165,8 +165,12 @@ def status_of(r: Any, now: datetime | None = None) -> str:
     return "ok"
 
 
-def link_out(r: Any) -> dict[str, Any]:
-    """Không bao giờ có token — chỉ `has_token`."""
+LAST_ERROR_HIDDEN = "Gen-hub đang lỗi — Owner xem chi tiết ở thẻ Gen-hub"
+
+
+def link_out(r: Any, *, owner: bool = True) -> dict[str, Any]:
+    """Không bao giờ có token — chỉ `has_token`. `last_error` (lỗi thô từ Gen-hub, đã lọc token) chỉ Owner thấy;
+    vai trò `system.read` khác (Kiểm toán) nhận một câu chung (v0.1.27)."""
     if r is None:
         return {"configured": False, "enabled": False, "status": "off", "server_id": None, "endpoint": None,
                 "has_token": False, "allow_public_network": False, "token_expires_at": None, "days_left": None,
@@ -178,7 +182,8 @@ def link_out(r: Any) -> dict[str, Any]:
             "status": status_of(r), "server_id": str(r.server_id) if r.server_id else None, "endpoint": r.endpoint,
             "has_token": bool(r.has_token), "allow_public_network": bool(r.allow_public_network),
             "token_expires_at": iso(r.token_expires_at), "days_left": days_left, "last_ok_at": iso(r.last_ok_at),
-            "last_error": r.last_error, "health": r.health}
+            "last_error": r.last_error if owner else (LAST_ERROR_HIDDEN if r.last_error else None),
+            "health": r.health}
 
 
 def cache_prefix(org_id: uuid.UUID) -> str:
@@ -238,7 +243,9 @@ def _classify(message: str) -> str:
 
 
 def client_for(transport: Any) -> McpClient:
-    return McpClient(transport=transport, timeout=CALL_TIMEOUT_S)
+    """Mọi lời gọi Gen-hub ghim DNS (v0.1.27): phân giải một lần, kiểm IP, kết nối thẳng IP đã kiểm — đóng cửa sổ
+    DNS rebinding giữa `endpoint_forbidden`/guard mạng và lúc kết nối thật."""
+    return McpClient(transport=transport, timeout=CALL_TIMEOUT_S, pin_dns=True)
 
 
 async def call_kho(db: AsyncSession, redis: Any, client: McpClient, *, user: service.CurrentUser, suffix: str,
@@ -283,6 +290,37 @@ async def call_kho(db: AsyncSession, redis: Any, client: McpClient, *, user: ser
         await redis.set(key, orjson.dumps(data), ex=CACHE_TTL_S)
     await _set_result(db, user.org_id, ok=True)
     return {"source": "Kho Ryan qua Gen-hub", "tool": suffix, "cached": False, "data": data}
+
+
+async def generic_call(db: AsyncSession, redis: Any, transport: Any, *, user: service.CurrentUser, tool: Any,
+                       agent_key: str, args: dict[str, Any]) -> dict[str, Any] | None:
+    """Route chung `POST /mcp/tools/{id}/call` gọi vào máy chủ của liên kết Gen-hub (v0.1.27): Kho chỉ Owner
+    (quyết định Boss #1) → vai trò khác bị chặn (403 `HUB_OWNER_ONLY`, có log); Owner thì đi đúng đường của liên
+    kết — ghim DNS, `mcp_calls` chỉ siêu dữ liệu, kết quả đã che. Trả None khi tool không thuộc Gen-hub."""
+    link = await load(db, user.org_id)
+    if link is None or link.server_id is None or link.server_id != tool.server_id:
+        return None
+    if user.role_code != rbac.OWNER:
+        msg = "Bị chặn: máy chủ Gen-hub (Kho Ryan) chỉ Owner được gọi"
+        item = await invoke.log_call(db, redis, org_id=user.org_id, tool_id=tool.id, agent_key=agent_key, args=args,
+                                     outcome="blocked", result_summary=msg, latency_ms=0)
+        await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
+                               action="mcp.call_blocked", target_type="mcp_tool", target_id=str(tool.id),
+                               target_label=f"{tool.server_name} · {tool.name}", result="blocked",
+                               detail={"code": "HUB_OWNER_ONLY", "reason": msg, "agent_key": agent_key}, ip=user.ip)
+        await db.commit()
+        raise ApiError(403, "HUB_OWNER_ONLY", "Bị chặn", msg, call=item)
+    label = suffix_of(tool.name) or tool.name
+    token = await invoke.auth_token(db, link.server_id)
+    try:
+        out = await invoke.invoke_tool(db, redis, client_for(transport), org_id=user.org_id, tool=tool,
+                                       agent_key=agent_key, args=args, actor=user,
+                                       summarize=lambda r: _summary(label, r))
+    except invoke.McpCallFailed as e:
+        raise invoke.McpCallFailed(e.cause, scrub(str(e.title), token)) from e
+    if out["outcome"] == "ok":
+        out["result"] = mask_for_model(out["result"], secrets=(token,) if token else ())
+    return out
 
 
 # ─── cấu hình + kiểm tra ──────────────────────────────────────────────────────

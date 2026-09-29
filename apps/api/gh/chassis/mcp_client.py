@@ -11,11 +11,12 @@ ARCHITECTURE §10): trước MỌI lời gọi mạng, `check_network_guard` ph�
 đang tắt. Áp dụng ở đây (không chỉ ở tầng route) để không có đường nào gọi thẳng bỏ qua guard.
 """
 
+import asyncio
 import ipaddress
 import socket
 from dataclasses import dataclass
 from typing import Any, Protocol
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 import httpx
 
@@ -68,6 +69,68 @@ def resolves_public(host: str) -> bool:
     return False
 
 
+def _is_public(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    return not (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast)
+
+
+def always_forbidden(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """Địa chỉ không bao giờ được gọi khi ghim DNS (siêu dữ liệu đám mây 169.254.x / fe80::, 0.0.0.0, multicast)."""
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    return bool(ip.is_link_local or ip.is_unspecified or ip.is_multicast)
+
+
+@dataclass(frozen=True)
+class PinnedTarget:
+    """Đích đã phân giải MỘT lần và đã kiểm: `url` trỏ thẳng IP, `host` giữ Host gốc, `sni` = tên máy cho TLS."""
+    url: str
+    host: str
+    sni: str | None
+    ip: str
+
+
+async def pin_endpoint(endpoint: str, allow_public_network: bool) -> PinnedTarget:
+    """Chống DNS rebinding (v0.1.27): phân giải host MỘT lần, kiểm TẤT CẢ IP (cấm link-local/0.0.0.0/multicast;
+    IP công cộng khi công tắc mạng công cộng tắt), rồi kết nối thẳng tới IP đã kiểm — không có lần phân giải thứ
+    hai giữa lúc kiểm và lúc kết nối. TLS vẫn xác thực chứng chỉ theo tên máy gốc (SNI + kiểm hostname)."""
+    u = urlparse(endpoint)
+    host = u.hostname
+    if not host or u.scheme not in ("http", "https"):
+        raise McpBlockedNetwork("Địa chỉ máy chủ MCP không hợp lệ")
+    port = u.port or (443 if u.scheme == "https" else 80)
+    literal = True
+    try:
+        ips: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = [ipaddress.ip_address(host)]
+    except ValueError:
+        literal = False
+        try:
+            infos = await asyncio.get_running_loop().getaddrinfo(host, port, type=socket.SOCK_STREAM)
+        except OSError as e:
+            raise McpError(f"mạng: không phân giải được {host}") from e
+        ips = []
+        for info in infos:
+            try:
+                ip = ipaddress.ip_address(str(info[4][0]).split("%", 1)[0])
+            except ValueError:
+                continue
+            if ip not in ips:
+                ips.append(ip)
+    if not ips:
+        raise McpError(f"mạng: không phân giải được {host}")
+    for ip in ips:
+        if always_forbidden(ip):
+            raise McpBlockedNetwork(f"Máy chủ MCP ({host}) phân giải ra vùng mạng bị cấm (link-local/siêu dữ liệu)")
+    if not allow_public_network and any(_is_public(ip) for ip in ips):
+        raise McpBlockedNetwork(
+            f"Máy chủ MCP ở mạng công cộng ({host}) — Owner chưa bật 'Cho phép máy chủ MCP ngoài mạng nội bộ'")
+    ip = ips[0]
+    ip_host = f"[{ip}]" if isinstance(ip, ipaddress.IPv6Address) else str(ip)
+    netloc = ip_host + (f":{u.port}" if u.port else "")
+    host_header = u.netloc.rsplit("@", 1)[-1]
+    sni = host if (u.scheme == "https" and not literal) else None
+    return PinnedTarget(url=urlunparse(u._replace(netloc=netloc)), host=host_header, sni=sni, ip=str(ip))
+
+
 def check_network_guard(endpoint: str, allow_public_network: bool) -> None:
     if allow_public_network:
         return
@@ -80,15 +143,27 @@ def check_network_guard(endpoint: str, allow_public_network: bool) -> None:
 class McpClient:
     """Transport HTTP tiêm được (`transport=httpx.MockTransport(...)` trong test), cùng cách gh.providers làm."""
 
-    def __init__(self, transport: httpx.AsyncBaseTransport | None = None, timeout: float = 20.0):
-        self._transport, self._timeout = transport, timeout
+    def __init__(self, transport: httpx.AsyncBaseTransport | None = None, timeout: float = 20.0,
+                 pin_dns: bool = False):
+        """`pin_dns=True` (liên kết Gen-hub, v0.1.27): phân giải một lần + kết nối thẳng IP đã kiểm (`pin_endpoint`),
+        bỏ qua proxy môi trường (proxy sẽ tự phân giải lại tên máy — mất tác dụng ghim)."""
+        self._transport, self._timeout, self._pin = transport, timeout, pin_dns
 
-    async def _rpc(self, endpoint: str, method: str, params: dict[str, Any],
+    async def _rpc(self, server: ServerLike, method: str, params: dict[str, Any],
                    headers: dict[str, str]) -> Any:
         body = {"jsonrpc": "2.0", "id": "gh-1", "method": method, "params": params}
+        url = server.endpoint
+        hdrs = {**headers, "content-type": "application/json"}
+        extensions: dict[str, Any] = {}
+        if self._pin:
+            target = await pin_endpoint(server.endpoint, server.allow_public_network)
+            url, hdrs["host"] = target.url, target.host
+            if target.sni:
+                extensions["sni_hostname"] = target.sni
         try:
-            async with httpx.AsyncClient(transport=self._transport, timeout=self._timeout) as c:
-                resp = await c.post(endpoint, json=body, headers={**headers, "content-type": "application/json"})
+            async with httpx.AsyncClient(transport=self._transport, timeout=self._timeout,
+                                         trust_env=not self._pin) as c:
+                resp = await c.post(url, json=body, headers=hdrs, extensions=extensions or None)
         except httpx.HTTPError as e:
             raise McpError(f"mạng: {e}") from e
         if resp.status_code >= 400:
@@ -108,11 +183,12 @@ class McpClient:
         if server.transport not in HTTP_TRANSPORTS:
             raise McpTransportUnsupported(
                 f"Transport '{server.transport}' chưa hỗ trợ gọi trực tiếp trong phạm vi này")
-        check_network_guard(server.endpoint, server.allow_public_network)
+        if not self._pin:  # ghim DNS: `pin_endpoint` kiểm ngay trong `_rpc` trên đúng IP sẽ kết nối
+            check_network_guard(server.endpoint, server.allow_public_network)
 
     async def list_tools(self, server: ServerLike, auth_token: str | None = None) -> list[ToolSpec]:
         self._check(server)
-        result = await self._rpc(server.endpoint, "tools/list", {}, self._headers(server, auth_token))
+        result = await self._rpc(server, "tools/list", {}, self._headers(server, auth_token))
         tools = (result or {}).get("tools", []) if isinstance(result, dict) else (result or [])
         out = []
         for t in tools:
@@ -124,10 +200,10 @@ class McpClient:
     async def call_tool(self, server: ServerLike, tool_name: str, args: dict[str, Any],
                         auth_token: str | None = None) -> dict[str, Any]:
         self._check(server)
-        result = await self._rpc(server.endpoint, "tools/call", {"name": tool_name, "arguments": args},
+        result = await self._rpc(server, "tools/call", {"name": tool_name, "arguments": args},
                                  self._headers(server, auth_token))
         return result if isinstance(result, dict) else {"result": result}
 
 
-__all__ = ["McpClient", "McpError", "McpBlockedNetwork", "McpTransportUnsupported", "ToolSpec",
-          "check_network_guard", "resolves_public"]
+__all__ = ["McpClient", "McpError", "McpBlockedNetwork", "McpTransportUnsupported", "PinnedTarget", "ToolSpec",
+           "always_forbidden", "check_network_guard", "pin_endpoint", "resolves_public"]

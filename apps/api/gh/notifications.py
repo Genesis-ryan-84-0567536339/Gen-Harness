@@ -74,6 +74,17 @@ def _queue_publish(db: AsyncSession, redis: Any, org_id: uuid.UUID, uid: uuid.UU
     pending.append((redis, org_id, uid, item))
 
 
+def pending_mark(db: AsyncSession) -> int:
+    """Số sự kiện WS đang chờ commit — dùng với `pending_reset` khi hoàn tác một savepoint có gọi `notify()`."""
+    return len(db.sync_session.info.get(_PENDING) or [])
+
+
+def pending_reset(db: AsyncSession, mark: int) -> None:
+    pending = db.sync_session.info.get(_PENDING)
+    if pending:
+        del pending[mark:]
+
+
 def _iso(dt: datetime | None) -> str | None:
     return dt.isoformat().replace("+00:00", "Z") if dt else None
 
@@ -110,6 +121,29 @@ async def notify(db: AsyncSession, org_id: uuid.UUID, user_ids: Iterable[uuid.UU
         if redis is not None:
             _queue_publish(db, redis, org_id, uid, item)
     return out
+
+
+# Hạn lưu (v0.1.27): đã đọc quá 30 ngày → xoá; mọi thông báo (kể cả chưa đọc) quá 90 ngày → xoá. Job worker
+# `purge_notifications` chạy hằng ngày, xoá theo lô để không giữ khoá lâu trên bảng.
+READ_RETENTION_DAYS = 30
+MAX_RETENTION_DAYS = 90
+PURGE_BATCH = 5000
+
+
+async def purge_old(db: AsyncSession, *, read_days: int = READ_RETENTION_DAYS,
+                    max_days: int = MAX_RETENTION_DAYS, batch: int = PURGE_BATCH) -> int:
+    """Xoá thông báo đã đọc tạo trước `read_days` ngày và mọi thông báo tạo trước `max_days` ngày. Bên gọi commit."""
+    total = 0
+    while True:
+        n = (await db.execute(text("""
+            DELETE FROM core.notifications WHERE id IN (
+              SELECT id FROM core.notifications
+              WHERE (read_at IS NOT NULL AND created_at < now() - make_interval(days => :r))
+                 OR created_at < now() - make_interval(days => :m)
+              LIMIT :n)"""), {"r": read_days, "m": max_days, "n": batch})).rowcount  # type: ignore[attr-defined]
+        total += int(n or 0)
+        if not n or n < batch:
+            return total
 
 
 async def _unread(db: AsyncSession, user: service.CurrentUser) -> int:

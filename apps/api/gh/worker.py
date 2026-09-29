@@ -15,7 +15,7 @@ from arq.connections import RedisSettings
 from redis.asyncio import Redis
 from sqlalchemy import text
 
-from gh import biz
+from gh import biz, notifications
 from gh.app import build_plugin_manager, configure_logging
 from gh.auth import service as auth_service
 from gh.backup import FUNCTIONS as BACKUP_FUNCTIONS
@@ -149,6 +149,14 @@ async def purge_gen_conversations(ctx: dict[str, Any]) -> int:
     return n
 
 
+async def purge_notifications(ctx: dict[str, Any]) -> int:
+    """v0.1.27: hạn lưu chuông thông báo — đã đọc > 30 ngày, mọi thông báo > 90 ngày (`gh.notifications.purge_old`)."""
+    async with sessionmaker()() as db:
+        n = await notifications.purge_old(db)
+        await db.commit()
+    return n
+
+
 async def hub_token_expiry_scan(ctx: dict[str, Any]) -> int:
     """v0.1.26 (Đợt D1): token Gen-hub còn ≤ 14 ngày → chuông cho Owner (một lần mỗi token)."""
     async with sessionmaker()() as db:
@@ -165,7 +173,7 @@ class WorkerSettings:
     on_startup = startup
     on_shutdown = shutdown
     functions = [verify_action_log, partition_maintenance, detect_identities, compact_notebooks, expire_sessions,
-                 purge_gen_conversations, hub_token_expiry_scan,
+                 purge_gen_conversations, purge_notifications, hub_token_expiry_scan,
                  *(fn for fn, _ in _BIZ_JOBS), *BACKUP_FUNCTIONS]
     health_check_interval = 30
     cron_jobs = [
@@ -175,6 +183,7 @@ class WorkerSettings:
         cron(compact_notebooks, hour={3}, minute={15}),         # 03:15 hằng ngày
         cron(expire_sessions, minute={20}),                     # mỗi giờ — dọn core.sessions (0014_v011_db)
         cron(purge_gen_conversations, hour={3}, minute={40}),   # 03:40 hằng ngày — hạn lưu hội thoại Gen
+        cron(purge_notifications, hour={3}, minute={45}),       # 03:45 hằng ngày — hạn lưu chuông thông báo
         cron(hub_token_expiry_scan, hour={1}, minute={50}),     # 01:50 UTC (08:50 giờ VN) — nhắc token Gen-hub
         *(cron(fn, **kw) for fn, kw in _BIZ_JOBS),  # type: ignore[arg-type]
     ]
