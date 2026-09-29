@@ -370,6 +370,11 @@ CREATE TABLE refinery.event_state (
 );
 CREATE INDEX ON refinery.event_state (org_id, state) WHERE state IN ('pending','lowconf');
 
+-- v0.1.25 (0019): lọc đầu Hộp thư — trùng / rác / điểm 0–100 mỗi mục (gh.refinery.triage). Xem db/sql/0019_v0125_triage.sql.
+-- refinery.item_marks (org_id, item_type, item_id PK, observed_at, subject_id, text_hash, simhash, text_len, norm_text,
+--   duplicate_of, duplicate_kind, is_spam, spam_reason, quality, reason, source, heuristic_quality, heuristic_spam,
+--   latency_ms, version, marked_at) — RLS org_isolation.
+
 -- ═══ CLEAN — kho sạch SSOT ═════════════════════════════════════════════════
 
 CREATE TABLE clean.meaning_units (
