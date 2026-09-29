@@ -679,7 +679,8 @@ việc/ngày — **chưa làm** ở bản này (chỉ giữ ghi chú trong thi�
     `GET /hub/kho/records/{ma}` (`^[A-Z]{2,6}-\d{1,6}$`) → `kho_find_by_id`. **Chỉ vai trò Owner** (403 với vai trò khác),
     `agent_key="core.gen"`, danh sách hậu tố cho phép **cố định trong code**. Kết quả `{source:"Kho Ryan qua Gen-hub", tool, cached,
     data}`. Mã lỗi: 409 `HUB_LINK_OFF`, `HUB_TOOL_MISSING`, `HUB_UNAVAILABLE` (401/403 → trạng thái `expired`; 429; mạng/timeout 10 s),
-    `HUB_TOOL_HELD` (Owner lỡ đổi tool sang loại ghi → bản nháp `mcp_write` chờ duyệt, không gọi ra ngoài).
+    `HUB_BLOCKED` (rào chắn MCP Hub chặn: tool bị đóng/chưa cấp, chặn mạng, mức tự trị), `HUB_TOOL_HELD` (Owner lỡ đổi tool
+    sang loại ghi → bản nháp `mcp_write` chờ duyệt, không gọi ra ngoài).
   - **Che trước khi sang model** (`mask_for_model`): cùng lớp `mask_text` như vai trò dưới Owner (số ≥ 8 chữ số — tài khoản/thẻ/SĐT,
     giữ nguyên ngày tháng) + email (`t•••@miền`) + khoá/token (`sk-…`, `ghp_…`, `Bearer …`, chuỗi ≥ 40 ký tự) + giá trị của khoá tên
     kiểu mật khẩu/token/api_key + chính token của liên kết. Áp cho phản hồi API, bản đệm Redis và `mcp_calls.result_summary`.
@@ -694,9 +695,9 @@ việc/ngày — **chưa làm** ở bản này (chỉ giữ ghi chú trong thi�
 - **Web**: MCP Hub có thẻ **"Gen-hub — Gen đọc Kho Ryan"** (`HubLinkCard`): trạng thái, địa chỉ, ô token **chỉ ghi** (password,
   xoá trắng sau lưu, không hiện lại), ngày hết hạn, công tắc mạng công cộng, **Lưu / Kiểm tra / Tắt**; vai trò khác chỉ xem trạng
   thái. Mock e2e `/hub/link*`.
-- **Test**: api `tests/test_hub_link.py` (17: tắt mặc định, PIN, token không lộ ở API/CSDL/Action Log/mcp_calls, kiểm tra chỉ mở
+- **Test**: api `tests/test_hub_link.py` (18: tắt mặc định, PIN, token không lộ ở API/CSDL/Action Log/mcp_calls, kiểm tra chỉ mở
   tool đọc theo hậu tố, tool lạ bị từ chối, che + đệm + xoá đệm, vai trò khác 403 + tool Gen FORBIDDEN, tool Gen đọc Kho, 401/429/
-  timeout, tool ghi → nháp, tắt, nhắc hạn token, RLS); chạy cả `GH_TEST_APP_ROLE=1`. Web `test/unit/hub-link.test.tsx`.
+  timeout, tool ghi → nháp, tool bị đóng → HUB_BLOCKED, tắt, nhắc hạn token, RLS); chạy cả `GH_TEST_APP_ROLE=1`. Web `test/unit/hub-link.test.tsx`.
 
 **Việc Boss làm trên Gen-hub (~3 phút, không sửa mã Gen-hub):**
 1. Gen-hub › **Agent & quyền** › tạo agent **`gen-harness-<tên công ty>`**, mô tả "Gen trong Gen-Harness — chỉ đọc Kho".

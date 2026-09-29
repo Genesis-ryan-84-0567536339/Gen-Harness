@@ -314,3 +314,15 @@ async def test_hub_links_rls_isolates_orgs(app: Any, db: Any, redis: Any) -> Non
     assert (await db.execute(text("SELECT org_id FROM agent.hub_links"))).scalars().all() == [org_a]
     with pytest.raises(Exception, match="row-level security|row_level_security"):
         await db.execute(text("INSERT INTO agent.hub_links (org_id) VALUES (:o)"), {"o": org_c})
+
+
+async def test_closed_tool_blocked_by_mcp_guard(owner_api: Api, fake_hub: FakeHub, db: Any) -> None:
+    await _linked(owner_api)
+    fake_hub.calls.clear()
+    tid = (await db.execute(text("SELECT id FROM agent.mcp_tools WHERE name = :n"),
+                            {"n": PREFIX + "kho_search"})).scalar_one()
+    assert (await owner_api.send("PATCH", f"/mcp/tools/{tid}/expose", {"is_exposed": False})).status_code == 200
+    r = await owner_api.get("/hub/kho/search", params={"q": "x"})
+    assert r.status_code == 409 and r.json()["code"] == "HUB_BLOCKED" and "chưa được Owner mở" in r.json()["detail"]
+    assert fake_hub.calls == []
+    assert "blocked" in await _db_text("SELECT outcome FROM agent.mcp_calls")

@@ -236,6 +236,12 @@ async def call_kho(db: AsyncSession, redis: Any, client: McpClient, *, user: ser
         await _set_result(db, user.org_id, ok=False, error=msg)
         await db.commit()
         raise conflict("HUB_UNAVAILABLE", "Chưa đọc được Kho lúc này", msg) from e
+    except ApiError as e:
+        # Bị chặn bởi guard MCP Hub (máy chủ tắt, tool đóng/chưa cấp, chặn mạng, mức tự trị) — log đã commit.
+        msg = scrub(str(e.detail or e.title), token)
+        await _set_result(db, user.org_id, ok=False, error=msg)
+        await db.commit()
+        raise conflict("HUB_BLOCKED", "Kho đang bị chặn bởi rào chắn MCP Hub", msg) from e
     if out["outcome"] != "ok":
         await db.commit()  # giữ bản nháp mcp_write + log trước khi báo lỗi (route ném → rollback)
         raise conflict("HUB_TOOL_HELD", "Tool đang ở loại ghi — đã tạo bản nháp chờ duyệt, không gọi ra ngoài")
