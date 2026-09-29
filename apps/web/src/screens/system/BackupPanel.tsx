@@ -102,6 +102,7 @@ export function BackupPanel() {
   return (
     <Panel
       title="Sao lưu & khôi phục"
+      genTarget="system.backup.panel"
       kicker={d ? `${scheduleText(d.schedule)} · mã hoá, lưu ngay trong máy chủ` : 'Bản sao lưu CSDL đã mã hoá'}
       label="Sao lưu & khôi phục"
       bodyClass="bk"
@@ -110,6 +111,7 @@ export function BackupPanel() {
           variant="primary"
           icon="ph ph-floppy-disk"
           className="btn-30"
+          data-gen-target="system.backup.now"
           loading={runNow.isPending || busyJob}
           disabled={!d || restoring}
           onClick={() => runNow.mutate()}
@@ -270,7 +272,7 @@ function ScheduleRow({ schedule, timezone }: { schedule: BackupSchedule | null; 
 
   if (!editing) {
     return (
-      <div className="bk-schedule">
+      <div className="bk-schedule" data-gen-target="system.backup.schedule">
         <Icon name="ph ph-calendar-check" size={14} />
         <span className="bk-schedule__text">
           Lịch tự động: <strong>{scheduleText(schedule)}</strong>

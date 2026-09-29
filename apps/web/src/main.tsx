@@ -24,6 +24,7 @@ import './styles/p4-mcp.css';
 import './styles/p4-plugins.css';
 import './styles/system.css';
 import './styles/account.css';
+import './styles/gen.css';
 import { queryClient } from './lib/queryClient';
 import { createAppRouter } from './router';
 

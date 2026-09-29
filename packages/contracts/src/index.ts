@@ -16,3 +16,5 @@ export * from './p4-mcp';
 export * from './p4-plugins';
 export * from './p4-system';
 export * from './account';
+export * from './gen';
+export * from './genTargets';

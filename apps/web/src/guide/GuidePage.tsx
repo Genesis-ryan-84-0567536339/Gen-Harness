@@ -40,7 +40,7 @@ export function GuidePage() {
         </div>
       ) : (
         <>
-          <div className="guide-progress" role="status">
+          <div className="guide-progress" role="status" data-gen-target="guide.progress">
             <div
               className="guide-progress__bar"
               role="progressbar"
@@ -68,7 +68,7 @@ export function GuidePage() {
 
 function GuideCard({ g, done, open, afterDone }: { g: GuideItem; done: boolean; open: boolean; afterDone: boolean }) {
   return (
-    <li className="guide-card gh-card" data-done={done || undefined}>
+    <li className="guide-card gh-card" data-done={done || undefined} data-gen-target={`guide.item:${g.n}`}>
       <details open={open}>
         <summary className="guide-card__head">
           <span className="guide-card__num mono">{String(g.n).padStart(2, '0')}</span>
@@ -105,7 +105,7 @@ function GuideCard({ g, done, open, afterDone }: { g: GuideItem; done: boolean; 
             <Icon name="ph ph-flag" size={13} /> <strong>Xong khi:</strong> {g.doneWhen}
           </p>
           <div className="guide-card__actions">
-            <Link to={`/guide/${g.n}`} className={`gh-btn ${done ? 'gh-btn--secondary' : 'gh-btn--primary'} btn-30`}>
+            <Link to={`/guide/${g.n}`} className={`gh-btn ${done ? 'gh-btn--secondary' : 'gh-btn--primary'} btn-30`} data-gen-target={`guide.item.do:${g.n}`}>
               {done ? 'Làm lại / chỉnh' : 'Làm bước này'}
               <Icon name="ph ph-arrow-right" size={13} />
             </Link>

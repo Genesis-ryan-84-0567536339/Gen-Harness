@@ -29,6 +29,7 @@ import { createMock as createP4Api } from './mock-p4-api';
 import { createMock as createP4Mcp } from './mock-p4-mcp';
 import { createMock as createP4Plugins } from './mock-p4-plugins';
 import { createMock as createP4System } from './mock-p4-system';
+import { createMock as createGen } from './mock-gen';
 import { acceptWebSocket, type MockSocket } from './mock-ws';
 import { buildScreenTree, SCREEN_BY_KEY } from '../../../packages/contracts/src/screens';
 import type { NavDomain, NavItem, SetupState } from '../../../packages/contracts/src/schema';
@@ -273,7 +274,11 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
   const p3Core = createP3Core({ fresh: opts.setup === 'fresh', emit: broadcast });
   const p4Agents = createP4Agents({ fresh: opts.setup === 'fresh', emit: broadcast, getChannels: phase2.hooks.channels });
   const p3Relations = createP3Relations({ fresh: opts.setup === 'fresh', emit: broadcast });
+  // v0.1.21 Gen: kịch bản cố định (test/mock-gen.ts); `features.gen` của /auth/me đọc cờ ở đây.
+  const genMock = createGen({ emit: broadcast });
+  const gen = { enabled: () => genMock.hooks.settings().enabled };
   const phase3 = {
+    gen: genMock,
     // agents TRƯỚC core: `GET /agents/decisions` cần trả dữ liệu thật ("agent đã nói gì") — core.handle() có
     // một stub rỗng cho cùng đường (chưa màn nào dùng tới trước giai đoạn 4) nên phải chặn trước nó.
     agents: p4Agents,
@@ -473,6 +478,8 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
       pin_verified_until: pinUntil && pinUntil > Date.now() ? new Date(pinUntil).toISOString() : null,
       permissions: permissionsOf(user.role.code),
       must_change_password: user.mustChange ?? false,
+      // v0.1.21: Gen (cờ gen.enabled) — như gh/gen/store.py: mặc định chỉ Owner.
+      features: { gen: user.role.code === 'owner' && gen.enabled() },
     };
   }
 

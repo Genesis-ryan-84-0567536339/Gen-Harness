@@ -17,7 +17,7 @@ export function PinCard() {
   const [changeOpen, setChangeOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   return (
-    <Panel title="Mã PIN xác nhận thao tác" kicker="6 chữ số · bảo vệ mọi thao tác nhạy cảm" label="Mã PIN xác nhận thao tác">
+    <Panel genTarget="system.channels.pin" title="Mã PIN xác nhận thao tác" kicker="6 chữ số · bảo vệ mọi thao tác nhạy cảm" label="Mã PIN xác nhận thao tác">
       <div className="pin-body">
         <div className="pin-digits" aria-label="Mã PIN đã đặt, 6 chữ số" role="img">
           {Array.from({ length: 6 }, (_, i) => (

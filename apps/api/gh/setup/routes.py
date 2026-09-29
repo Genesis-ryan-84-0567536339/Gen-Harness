@@ -368,7 +368,8 @@ async def step4(body: Step4In, request: Request, db: AsyncSession = DB,
         {"o": row.org_id, "ids": ids})).all()
     if len(found) != len(ids):
         raise field_errors({"provider_ids": "Có nhà cung cấp không tồn tại"})
-    ready = [p for p in found if (p.cli_ok if p.kind == "antigravity_cli" else p.tested and p.auth_state == "ok")]
+    ready = [p for p in found if p.kind != "system_one"  # Jev không sinh được văn bản
+             and (p.cli_ok if p.kind == "antigravity_cli" else p.tested and p.auth_state == "ok")]
     if not ready:
         raise incomplete("Cần ít nhất một nhà cung cấp đã gọi thử thành công, hoặc Antigravity CLI đã đăng nhập")
     for rank, pid in enumerate(ids, start=1):

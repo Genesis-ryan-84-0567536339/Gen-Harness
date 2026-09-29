@@ -15,12 +15,12 @@ import { StorageTab } from './StorageTab';
 type SysTab = 'channels' | 'brain' | 'roles' | 'log' | 'storage';
 
 /** Design `sysTabs` (4 tab) + `storage` (PLAN 4.5, spec I — thêm ngoài thiết kế gốc). */
-const TABS: Array<{ key: SysTab; label: string; count: string }> = [
-  { key: 'channels', label: 'Kênh & đăng nhập', count: 'QR · PIN' },
-  { key: 'brain', label: 'Bộ não AI', count: '6 model' },
+const TABS: Array<{ key: SysTab; label: string; count: string; genTarget?: string }> = [
+  { key: 'channels', label: 'Kênh & đăng nhập', count: 'QR · PIN', genTarget: 'system.tab.channels' },
+  { key: 'brain', label: 'Bộ não AI', count: '6 model', genTarget: 'system.tab.brain' },
   { key: 'roles', label: 'Quyền hạn', count: '5 vai trò' },
   { key: 'log', label: 'Nhật ký', count: '30 ngày' },
-  { key: 'storage', label: 'Dữ liệu & lưu trữ', count: 'spec I' },
+  { key: 'storage', label: 'Dữ liệu & lưu trữ', count: 'spec I', genTarget: 'system.tab.storage' },
 ];
 
 export function SystemScreen() {
@@ -75,7 +75,7 @@ function ChannelsTabBody() {
   const channels = useChannels();
   return (
     <div className="sys-grid">
-      <div className="ch-list" aria-label="Kênh" aria-busy={channels.isFetching || undefined}>
+      <div className="ch-list" aria-label="Kênh" aria-busy={channels.isFetching || undefined} data-gen-target="system.channels.list">
         {channels.isPending ? (
           Array.from({ length: 4 }, (_, i) => (
             <div className="ch-card" key={i} aria-hidden>

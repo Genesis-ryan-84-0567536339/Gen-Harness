@@ -56,7 +56,7 @@ export function AccountPage() {
       ) : (
         <div className="acct-grid">
           <ProfileCard account={q.data} />
-          <Card title="Đổi mật khẩu" kicker="Đổi xong, các thiết bị khác tự đăng xuất">
+          <Card data-gen-target="account.password" title="Đổi mật khẩu" kicker="Đổi xong, các thiết bị khác tự đăng xuất">
             <PasswordForm
               onDone={async (r) => {
                 toast(
@@ -117,7 +117,7 @@ function ProfileCard({ account }: { account: Account }) {
   };
 
   return (
-    <Card title="Hồ sơ" kicker={`${roleLine(account)} · tạo ngày ${fmtDM(account.created_at)}`}>
+    <Card data-gen-target="account.profile" title="Hồ sơ" kicker={`${roleLine(account)} · tạo ngày ${fmtDM(account.created_at)}`}>
       <form className="acct-form" onSubmit={submit} noValidate aria-label="Hồ sơ">
         <TextField
           label="Tên hiển thị"
@@ -197,7 +197,7 @@ function PinCard() {
   };
 
   return (
-    <Card title="Đổi mã PIN" kicker="PIN 6 số dùng cho thao tác nhạy cảm">
+    <Card data-gen-target="account.pin" title="Đổi mã PIN" kicker="PIN 6 số dùng cho thao tác nhạy cảm">
       <form className="acct-form" onSubmit={submit} noValidate aria-label="Đổi mã PIN">
         <TextField
           label="Mật khẩu hiện tại"
@@ -260,6 +260,7 @@ function SessionsCard({ sessions }: { sessions: AccountSession[] }) {
   return (
     <Card
       className="acct-sessions"
+      data-gen-target="account.sessions"
       title="Phiên đăng nhập"
       kicker={`${sessions.length} thiết bị đang đăng nhập`}
       actions={

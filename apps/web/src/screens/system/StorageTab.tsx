@@ -53,7 +53,7 @@ function RetentionPanel() {
   };
 
   return (
-    <Panel title="Hạn lưu dữ liệu" kicker="Mỗi tập dữ liệu một hạn — đổi cần mã PIN" label="Hạn lưu dữ liệu" bodyClass="retention-wrap">
+    <Panel genTarget="system.storage.retention" title="Hạn lưu dữ liệu" kicker="Mỗi tập dữ liệu một hạn — đổi cần mã PIN" label="Hạn lưu dữ liệu" bodyClass="retention-wrap">
       {q.isPending ? (
         <SkeletonLines rows={5} padding="10px 16px" />
       ) : q.isError ? (

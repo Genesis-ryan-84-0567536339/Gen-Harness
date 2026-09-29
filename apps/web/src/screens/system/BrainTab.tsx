@@ -6,6 +6,7 @@ import { fmtQuota } from '../api/apiModel';
 import { CardError, Panel, SkeletonLines } from '../common';
 import { N4, OK, WARN } from '../data/dataModel';
 import { CliCard } from './CliCard';
+import { JevCard } from './JevCard';
 import { useCan } from '../../lib/permissions';
 
 /**
@@ -18,18 +19,20 @@ export function BrainTab() {
   const canManage = useCan('system.manage');
   const providers = useProviders();
   const rules = useFailoverRules();
-  const sorted = [...(providers.data ?? [])].sort((a, b) => a.failover_rank - b.failover_rank);
+  // Jev (system_one) không nằm trong chuỗi sinh chữ — hiện riêng ở thẻ Jev.
+  const sorted = [...(providers.data ?? [])].filter((p) => p.kind !== 'system_one').sort((a, b) => a.failover_rank - b.failover_rank);
   const models = sorted.flatMap((p) => p.models.map((m) => ({ ...m, providerName: p.name, providerId: p.id, enabled: p.enabled })));
 
   return (
     <div className="sys-tabs-col">
       <Panel
         title="Hạn mức theo model"
+        genTarget="system.brain.quota"
         kicker="Model quota · core agent"
         label="Hạn mức theo model"
         bodyClass="brain-quota-wrap"
         aside={
-          <Link to="/api" className="gh-btn gh-btn--secondary btn-27">
+          <Link to="/api" className="gh-btn gh-btn--secondary btn-27" data-gen-target="system.brain.open_api">
             <Icon name="ph ph-arrow-square-out" size={13} />
             Mở API &amp; Model
           </Link>
@@ -86,7 +89,7 @@ export function BrainTab() {
       </Panel>
 
       <div className="sys-grid2">
-        <Panel title="Chuỗi chuyển hướng" kicker="Provider failover chain — sửa ở màn API & Model" label="Chuỗi chuyển hướng" bodyClass="brain-chain">
+        <Panel genTarget="system.brain.chain" title="Chuỗi chuyển hướng" kicker="Provider failover chain — sửa ở màn API & Model" label="Chuỗi chuyển hướng" bodyClass="brain-chain">
           {providers.isPending ? (
             <SkeletonLines rows={3} padding="10px 16px" />
           ) : providers.isError ? (
@@ -126,7 +129,10 @@ export function BrainTab() {
         </Panel>
       </div>
 
-      <CliCard canManage={canManage} showCredentials={false} />
+      <div className="sys-grid2">
+        <JevCard />
+        <CliCard canManage={canManage} showCredentials={false} />
+      </div>
     </div>
   );
 }

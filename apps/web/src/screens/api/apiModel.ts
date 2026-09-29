@@ -13,6 +13,7 @@ export const PROVIDER_ICON: Record<ProviderKind, string> = {
   gemini: 'ph ph-sparkle',
   deepseek: 'ph ph-brain',
   openai_compat: 'ph ph-plugs',
+  system_one: 'ph ph-lightning',
 };
 
 export const PROVIDER_KIND_LABEL: Record<ProviderKind, string> = {
@@ -20,6 +21,7 @@ export const PROVIDER_KIND_LABEL: Record<ProviderKind, string> = {
   gemini: 'Gemini API',
   deepseek: 'DeepSeek API',
   openai_compat: 'API tương thích OpenAI',
+  system_one: 'Jev (System One) · quyết định nhanh',
 };
 
 export const AUTH_STATE_LABEL: Record<Provider['auth_state'], string> = {

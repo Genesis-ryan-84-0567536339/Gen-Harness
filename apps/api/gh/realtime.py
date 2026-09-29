@@ -49,6 +49,10 @@ def register_event(type: str, permission: str | None, *, masked: bool = False) -
 
 register_event("draft.new", "action.approve")
 register_event("draft.updated", "action.approve")
+# Gen v1: bước trả lời của khung chat — luôn kèm `to_user` (chỉ người hỏi nhận), xem gh.gen.engine.
+PRIVATE_PREFIX = "gen."
+register_event("gen.step", None)
+register_event("gen.done", None)
 
 
 def mask_event(msg: dict[str, Any]) -> dict[str, Any]:
@@ -61,9 +65,11 @@ def mask_event(msg: dict[str, Any]) -> dict[str, Any]:
     return {**msg, "data": data}
 
 
-async def publish(redis: Redis, type: str, data: dict[str, Any], *, org_id: Any = None) -> None:
+async def publish(redis: Redis, type: str, data: dict[str, Any], *, org_id: Any = None,
+                  to_user: Any = None) -> None:
+    """`to_user` (v0.1.21, Gen): chỉ các kết nối của ĐÚNG người dùng đó nhận (khung chat Gen là riêng tư)."""
     msg = {"type": type, "data": data, "at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-           "org_id": str(org_id) if org_id else None}
+           "org_id": str(org_id) if org_id else None, "to_user": str(to_user) if to_user else None}
     await redis.publish(CHANNEL, orjson.dumps(msg, default=str))
 
 
@@ -109,10 +115,15 @@ class Hub:
 
     async def dispatch(self, msg: dict[str, Any]) -> None:
         org = msg.pop("org_id", None)
+        to_user = msg.pop("to_user", None)
+        if msg.get("type", "").startswith(PRIVATE_PREFIX) and not to_user:
+            return  # sự kiện riêng tư thiếu người nhận → bỏ, không phát cho cả tổ chức
         text = orjson.dumps(msg).decode()
         masked: str | None = None
         for ws, user in list(self.clients.items()):
             if org and str(user.org_id) != org:
+                continue
+            if to_user and str(user.id) != to_user:
                 continue
             if not allowed(user.permissions, msg["type"]):
                 continue

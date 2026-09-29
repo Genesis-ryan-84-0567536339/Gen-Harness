@@ -5,6 +5,7 @@ import { useHeaderStatus } from '../lib/queries';
 import { SavedViewsButton } from '../screens/core/SavedViews';
 import { useUiStore } from '../lib/uiStore';
 import { autonomyTooltip, confidencePercent } from './headerModel';
+import { GenToggle } from '../gen/GenToggle';
 
 export interface Crumbs {
   /** Domain chip, e.g. "KINH DOANH". */
@@ -61,6 +62,7 @@ export function Header({ crumbs }: { crumbs: Crumbs | null }) {
           <StatusPills s={status.data} />
         )}
         <SavedViewsButton />
+        <GenToggle />
         <IconButton icon="ph ph-magnifying-glass" label="Tìm theo ý định" variant="primary" onClick={() => navigate('/search')} />
       </div>
     </header>

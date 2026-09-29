@@ -1186,13 +1186,16 @@ export function createPhase2(opts: Phase2Options) {
         const keys = Array.isArray(body.keys) ? (body.keys as string[]) : [];
         if (!keys.length || keys.some((k) => String(k).length < 8)) return problem(422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors: { keys: 'Khoá API không hợp lệ' } });
         const kind = String(body.kind) as Provider['kind'];
-        const prefix = kind === 'gemini' ? 'GEM' : kind === 'deepseek' ? 'DS' : 'KEY';
+        const prefix = kind === 'gemini' ? 'GEM' : kind === 'deepseek' ? 'DS' : kind === 'system_one' ? 'JEV' : 'KEY';
+        // v0.1.21 Jev (system_one): như gh/system_api/routes.py — địa chỉ + model mặc định OpenRouter.
+        const endpoint = body.endpoint ? String(body.endpoint) : kind === 'system_one' ? 'https://openrouter.ai/api/v1' : null;
         const pv: Provider = {
-          id: randomUUID(), kind, name: String(body.name ?? kind), endpoint: body.endpoint ? String(body.endpoint) : null,
+          id: randomUUID(), kind, name: String(body.name ?? kind), endpoint,
           failover_rank: providers.length + 1, enabled: true, auth_state: 'unconfigured',
           keys: keys.map((k, i) => ({ id: randomUUID(), label: `${prefix}-KEY-0${i + 1}`, last4: String(k).slice(-4), enabled: true, cooldown_until: null, quota_left_pct: null })),
-          models: [],
+          models: kind === 'system_one' && Array.isArray(body.models) ? (body.models as string[]).map((n) => ({ id: randomUUID(), model_name: String(n), daily_quota: null, used_today: 0 })) : [],
         };
+        if (kind === 'system_one' && !pv.models.length) pv.models = [{ id: randomUUID(), model_name: 'typesafe/jev-1.13', daily_quota: null, used_today: 0 }];
         (pv as Provider & { _secret: string })._secret = keys[0];
         providers.push(pv);
         reply(201, stripSecret(pv));
@@ -1203,10 +1206,10 @@ export function createPhase2(opts: Phase2Options) {
       if (seg[2] === 'test' && m === 'POST') {
         const secret = (pv as Provider & { _secret?: string })._secret ?? '';
         const ok = !/bad|sai/i.test(secret);
-        const models = pv.kind === 'gemini' ? ['gemini-2.5-flash', 'gemini-2.5-flash-lite'] : pv.kind === 'deepseek' ? ['deepseek-chat', 'deepseek-reasoner'] : pv.kind === 'antigravity_cli' ? ['gemini-2.5-pro'] : ['gpt-4o-mini'];
+        const models = pv.kind === 'system_one' ? [pv.models[0]?.model_name ?? 'typesafe/jev-1.13'] : pv.kind === 'gemini' ? ['gemini-2.5-flash', 'gemini-2.5-flash-lite'] : pv.kind === 'deepseek' ? ['deepseek-chat', 'deepseek-reasoner'] : pv.kind === 'antigravity_cli' ? ['gemini-2.5-pro'] : ['gpt-4o-mini'];
         pv.auth_state = ok ? 'ok' : 'error';
         if (ok && !pv.models.length) pv.models = models.slice(0, 1).map((n) => ({ id: randomUUID(), model_name: n, daily_quota: null, used_today: 0 }));
-        reply(200, ok ? { ok: true, latency_ms: 812, models, error: null } : { ok: false, latency_ms: null, models: [], error: '401 — khoá không hợp lệ' });
+        reply(200, ok ? { ok: true, latency_ms: pv.kind === 'system_one' ? 164 : 812, models, error: null } : { ok: false, latency_ms: null, models: [], error: '401 — khoá không hợp lệ' });
         return true;
       }
       if (seg[2] === 'models' && m === 'POST') {
