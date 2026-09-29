@@ -8,7 +8,8 @@ khoá tư vấn theo tổ chức để hai lượt song song không dò trùng c
 
 Mỗi mục:
 1. **Trùng** — văn bản gốc (tin thô làm chứng cứ, không có thì kết luận) chuẩn hoá (thường, bỏ dấu, gộp khoảng trắng):
-   sha256 bằng nhau → `exact`; simhash 64 bit trên 3-gram ký tự lệch ≤ `NEAR_BITS` → `near`. Tin ngắn
+   sha256 bằng nhau → `exact`; độ giống Jaccard trên tập 3-gram ký tự ≥ `NEAR_JACCARD` → `near` (simhash 64 bit chỉ
+   dùng lọc thô `PREFILTER_BITS` — trên tin ngắn simhash dao động quá mạnh để tự quyết). Tin ngắn
    (< `BROADCAST_MIN_LEN`) chỉ tính trùng khi CÙNG người/nhóm — "giá bao nhiêu?" của hai khách khác nhau không phải
    bản trùng; tin dài giống nhau ở nhiều nhóm (tin rải) thì trùng dù khác người gửi. Mục gốc = mục xuất hiện trước.
 2. **Rác + điểm** — quy tắc tất định luôn chạy (đủ dùng khi chưa cấu hình model). Có Jev (`Decider.classify`, trần
@@ -43,8 +44,10 @@ CHUNK = 50
 MAX_ROUNDS = 20                 # ≤ 1000 mục / lượt job; phần còn lại lượt sau
 WINDOW_DAYS = 14                # cửa sổ dò trùng
 CANDIDATES_LIMIT = 3000
-NEAR_BITS = 3
-NEAR_MIN_LEN = 24               # simhash không tin được trên chuỗi quá ngắn
+PREFILTER_BITS = 28
+NEAR_JACCARD = 0.75
+NEAR_MIN_LEN = 24
+NORM_MAX = 600               # simhash không tin được trên chuỗi quá ngắn
 BROADCAST_MIN_LEN = 40
 JEV_TEXT_MAX = 800
 JEV_PARALLEL = 4
@@ -111,6 +114,15 @@ def simhash64(norm: str) -> int:
 
 def hamming(a: int, b: int) -> int:
     return ((a ^ b) & ((1 << 64) - 1)).bit_count()
+
+
+def trigrams(norm: str) -> frozenset[str]:
+    s = norm.replace(" ", "_")
+    return frozenset(s[i:i + 3] for i in range(max(1, len(s) - 2)))
+
+
+def jaccard(a: frozenset[str], b: frozenset[str]) -> float:
+    return len(a & b) / len(a | b) if a or b else 1.0
 
 
 # ─── quy tắc tất định ──────────────────────────────────────────────────────────
@@ -195,18 +207,27 @@ class Candidate:
     simhash: int
     text_len: int
     duplicate_of: uuid.UUID | None
+    norm: str = ""
+    _grams: frozenset[str] | None = None
 
     @property
     def root(self) -> uuid.UUID:
         return self.duplicate_of or self.item_id
 
+    @property
+    def grams(self) -> frozenset[str]:
+        if self._grams is None:
+            self._grams = trigrams(self.norm)
+        return self._grams
+
 
 def find_duplicate(cands: list[Candidate], *, item_id: uuid.UUID, observed_at: datetime,
-                   subject_id: uuid.UUID | None, h: bytes, sim: int, text_len: int) -> tuple[uuid.UUID | None,
-                                                                                               str | None]:
+                   subject_id: uuid.UUID | None, h: bytes, sim: int, text_len: int,
+                   norm: str = "") -> tuple[uuid.UUID | None, str | None]:
     """Mục gốc sớm nhất trùng với mục này (exact trước, near sau) — chỉ xét mục xuất hiện TRƯỚC nó."""
     if text_len == 0:
         return None, None
+    grams: frozenset[str] | None = None
     matches: list[tuple[int, datetime, uuid.UUID, str]] = []
     for c in cands:
         if c.item_id == item_id or (c.observed_at, str(c.item_id)) >= (observed_at, str(item_id)):
@@ -216,8 +237,13 @@ def find_duplicate(cands: list[Candidate], *, item_id: uuid.UUID, observed_at: d
             continue
         if c.text_hash == h:
             matches.append((0, c.observed_at, c.root, "exact"))
-        elif min(text_len, c.text_len) >= NEAR_MIN_LEN and hamming(c.simhash, sim) <= NEAR_BITS:
-            matches.append((1, c.observed_at, c.root, "near"))
+        elif (norm and c.norm and min(text_len, c.text_len) >= NEAR_MIN_LEN
+              and min(text_len, c.text_len) / max(text_len, c.text_len) >= NEAR_JACCARD
+              and hamming(c.simhash, sim) <= PREFILTER_BITS):
+            if grams is None:
+                grams = trigrams(norm)
+            if jaccard(grams, c.grams) >= NEAR_JACCARD:
+                matches.append((1, c.observed_at, c.root, "near"))
     if not matches:
         return None, None
     best = min(matches, key=lambda t: (t[0], t[1]))
@@ -278,11 +304,11 @@ LIMIT :n
 
 async def _candidates(db: AsyncSession, org_id: uuid.UUID, since: datetime) -> list[Candidate]:
     rows = (await db.execute(text("""
-        SELECT item_id, observed_at, subject_id, text_hash, simhash, text_len, duplicate_of
+        SELECT item_id, observed_at, subject_id, text_hash, simhash, text_len, duplicate_of, norm_text
         FROM refinery.item_marks WHERE org_id = :o AND item_type = 'unit' AND observed_at >= :s
         ORDER BY observed_at DESC LIMIT :n"""), {"o": org_id, "s": since, "n": CANDIDATES_LIMIT})).all()
     return [Candidate(r.item_id, r.observed_at, r.subject_id, bytes(r.text_hash), int(r.simhash), int(r.text_len),
-                      r.duplicate_of) for r in rows]
+                      r.duplicate_of, r.norm_text or "") for r in rows]
 
 
 async def _ask_jev(dec: decmod.Decider, items: list[_Item]) -> None:
@@ -350,16 +376,16 @@ async def mark_units(db: AsyncSession, org_id: uuid.UUID, unit_ids: list[uuid.UU
     cands = await _candidates(db, org_id, min(i.observed_at for i in items) - timedelta(days=WINDOW_DAYS))
     n = 0
     for it in items:
-        h, sim = text_hash(it.norm), simhash64(it.norm)
+        h, sim, norm = text_hash(it.norm), simhash64(it.norm), it.norm[:NORM_MAX]
         dup, kind = find_duplicate(cands, item_id=it.id, observed_at=it.observed_at, subject_id=it.subject_id,
-                                   h=h, sim=sim, text_len=len(it.norm))
+                                   h=h, sim=sim, text_len=len(it.norm), norm=norm)
         f = _final(it)
         assert it.heur is not None
         res = await db.execute(text("""
             INSERT INTO refinery.item_marks (org_id, item_type, item_id, observed_at, subject_id, text_hash, simhash,
-                                             text_len, duplicate_of, duplicate_kind, is_spam, spam_reason, quality,
+                                             text_len, norm_text, duplicate_of, duplicate_kind, is_spam, spam_reason, quality,
                                              reason, source, heuristic_quality, heuristic_spam, latency_ms, version)
-            VALUES (:o, 'unit', :i, :obs, :subj, :h, :sim, :len, :dup, :kind, :spam, :sr, :q, :r, :src, :hq, :hs,
+            VALUES (:o, 'unit', :i, :obs, :subj, :h, :sim, :len, :norm, :dup, :kind, :spam, :sr, :q, :r, :src, :hq, :hs,
                     :ms, :v)
             ON CONFLICT (item_type, item_id) DO UPDATE SET
               duplicate_of = EXCLUDED.duplicate_of, duplicate_kind = EXCLUDED.duplicate_kind,
@@ -367,14 +393,15 @@ async def mark_units(db: AsyncSession, org_id: uuid.UUID, unit_ids: list[uuid.UU
               reason = EXCLUDED.reason, source = EXCLUDED.source, heuristic_quality = EXCLUDED.heuristic_quality,
               heuristic_spam = EXCLUDED.heuristic_spam, latency_ms = EXCLUDED.latency_ms, version = EXCLUDED.version,
               text_hash = EXCLUDED.text_hash, simhash = EXCLUDED.simhash, text_len = EXCLUDED.text_len,
+              norm_text = EXCLUDED.norm_text,
               marked_at = now()
             WHERE refinery.item_marks.version < EXCLUDED.version"""),
             {"o": org_id, "i": it.id, "obs": it.observed_at, "subj": it.subject_id, "h": h, "sim": sim,
-             "len": len(it.norm), "dup": dup, "kind": kind, "spam": f["is_spam"], "sr": f["spam_reason"],
+             "len": len(it.norm), "norm": norm, "dup": dup, "kind": kind, "spam": f["is_spam"], "sr": f["spam_reason"],
              "q": f["quality"], "r": f["reason"], "src": f["source"], "hq": it.heur.quality,
              "hs": it.heur.spam, "ms": f["latency_ms"], "v": VERSION})
         n += res.rowcount or 0  # type: ignore[attr-defined]
-        cands.append(Candidate(it.id, it.observed_at, it.subject_id, h, sim, len(it.norm), dup))
+        cands.append(Candidate(it.id, it.observed_at, it.subject_id, h, sim, len(it.norm), dup, norm))
     return n
 
 

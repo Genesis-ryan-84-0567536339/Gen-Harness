@@ -9,8 +9,9 @@ CREATE TABLE IF NOT EXISTS refinery.item_marks (
   observed_at       timestamptz NOT NULL,
   subject_id        uuid,                                -- người/nhóm của mục (dò trùng tin ngắn cùng người)
   text_hash         bytea NOT NULL,                      -- sha256 văn bản đã chuẩn hoá → trùng y hệt
-  simhash           bigint NOT NULL,                     -- simhash 64 bit (3-gram ký tự) → gần trùng
+  simhash           bigint NOT NULL,                     -- simhash 64 bit (3-gram ký tự) — lọc thô trước khi so
   text_len          int NOT NULL,
+  norm_text         text NOT NULL DEFAULT '',            -- văn bản chuẩn hoá (≤ 600 ký tự) → Jaccard 3-gram = gần trùng
   duplicate_of      uuid,                                -- mục gốc (xuất hiện trước) khi là bản trùng
   duplicate_kind    text CHECK (duplicate_kind IN ('exact', 'near')),
   is_spam           boolean NOT NULL DEFAULT false,
