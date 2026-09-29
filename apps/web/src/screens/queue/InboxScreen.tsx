@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { InboxItem, InboxTab } from '@gen-harness/contracts';
-import { Button, Card, Dialog, EmptyState, FilterSelect, Skeleton, Tabs, TextField, type TabItem } from '@gen-harness/ui';
+import { Button, Card, Dialog, EmptyState, FilterSelect, Skeleton, Switch, Tabs, Tag, TextField, type TabItem } from '@gen-harness/ui';
 import { WhyButton } from '../core/Evidence';
 import { errorText } from '../../lib/errorText';
 import { fmtAgo } from '../../lib/format';
 import { useUrlState } from '../../lib/uiStore';
 import { CardError, InlineError, ScreenHead } from '../common';
-import { confidenceTone, itemTag, itemTagTone, priorityTone } from './queueModel';
+import { confidenceTone, itemTag, itemTagTone, priorityTone, triageBadges } from './queueModel';
 import { useInbox, useInboxAct, useInboxAssign, useInboxSilence } from './queries';
 
 const INTENT_OPTIONS = [
@@ -32,7 +32,9 @@ const TEAMMATES = [
 export function InboxScreen() {
   const [tab, setTab] = useUrlState<InboxTab>('tab', 'all');
   const [intent, setIntent] = useUrlState<string>('intent', '');
-  const q = useInbox(tab, intent);
+  const [hide, setHide] = useUrlState<'' | '1'>('hide', '');
+  const q = useInbox(tab, intent, hide === '1');
+  const triage = q.data?.triage;
   const [assignFor, setAssignFor] = useState<InboxItem | null>(null);
   const [silenceFor, setSilenceFor] = useState<InboxItem | null>(null);
 
@@ -54,9 +56,22 @@ export function InboxScreen() {
         description="Không phải tin nhắn thô. Mỗi dòng là một đơn vị ý nghĩa đã được cấu trúc: nguồn, đối tượng, điểm số, tóm tắt hai câu, hành động đề xuất và chứng cứ gốc."
         maxWidth={700}
         actions={
-          <FilterSelect label="Ý định" value={intent} onChange={setIntent} options={INTENT_OPTIONS} />
+          <>
+            {triage?.enabled ? (
+              <span className="ib-hide" data-gen-target="inbox.hide_junk">
+                <Switch checked={hide === '1'} onChange={(v) => setHide(v ? '1' : '')} label="Ẩn rác & trùng" />
+                <span aria-hidden>Ẩn rác &amp; trùng</span>
+              </span>
+            ) : null}
+            <FilterSelect label="Ý định" value={intent} onChange={setIntent} options={INTENT_OPTIONS} />
+          </>
         }
       />
+      {hide === '1' && triage?.enabled && triage.hidden > 0 ? (
+        <p className="ib-hidden-note" role="status">
+          Đã ẩn {triage.hidden} mục trùng, rác hoặc điểm dưới {triage.min_score}.
+        </p>
+      ) : null}
       <Tabs items={items} value={tab} onChange={setTab} label="Tab hộp thư" idPrefix="inbox-tab" />
 
       {q.isPending ? (
@@ -119,6 +134,13 @@ function InboxCard({ item, onAssign, onSilence }: { item: InboxItem; onAssign: (
           {itemTag(item)}
         </span>
         {item.code ? <span className="mono">{item.code}</span> : null}
+        {triageBadges(item.triage).map((b) => (
+          <span key={b.key} title={b.title}>
+            <Tag tone={b.tone} className="ib-card__triage">
+              {b.label}
+            </Tag>
+          </span>
+        ))}
         {item.group ? <span className="ib-card__meta">{item.group.name}</span> : null}
         <span className="ib-card__meta">{fmtAgo(item.created_at)}</span>
         <span style={{ flex: 1 }} />
