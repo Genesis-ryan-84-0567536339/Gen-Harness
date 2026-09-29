@@ -37,6 +37,8 @@ export interface components {
       addressing: components['schemas']['Addressing'];
       pin_verified_until: string | null;
       permissions: Record<string, 'all' | 'scoped' | 'none' | string>;
+      /** v0.1.19: mật khẩu do hệ thống đặt (genh reset-password) — Console buộc đặt mật khẩu mới. */
+      must_change_password?: boolean;
     };
     LoginRequest: { email: string; password: string };
     PinVerifyRequest: { pin: string };

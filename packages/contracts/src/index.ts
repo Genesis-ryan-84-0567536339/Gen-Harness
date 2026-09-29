@@ -15,3 +15,4 @@ export * from './p4-api';
 export * from './p4-mcp';
 export * from './p4-plugins';
 export * from './p4-system';
+export * from './account';

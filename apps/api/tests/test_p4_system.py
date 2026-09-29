@@ -330,6 +330,7 @@ async def test_setup_step10_invites_team_with_temp_password(owner_api) -> None: 
     r2 = await api.send("POST", "/auth/login", {"email": "hoa@example.vn",
                                                  "password": body["invited"][0]["temp_password"]})
     assert r2.status_code == 200, r2.text
+    assert (await api.get("/auth/me")).json()["must_change_password"] is True
 
 
 async def test_setup_step10_rejects_duplicate_email(owner_api) -> None:  # type: ignore[no-untyped-def]

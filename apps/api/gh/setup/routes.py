@@ -551,8 +551,9 @@ async def step10(body: Step10In, request: Request, db: AsyncSession = DB,
             continue
         seen.add(email)
         temp_password = new_token(10)
-        uid = (await db.execute(text("""INSERT INTO core.users (org_id, email, display_name, password_hash)
-                                        VALUES (:o, :e, :n, :p) RETURNING id"""),
+        uid = (await db.execute(text("""INSERT INTO core.users (org_id, email, display_name, password_hash,
+                                                                must_change_password)
+                                        VALUES (:o, :e, :n, :p, true) RETURNING id"""),
                                 {"o": row.org_id, "e": email, "n": name,
                                  "p": hash_secret(temp_password)})).scalar_one()
         role_id = (await db.execute(text("SELECT id FROM core.roles WHERE org_id = :o AND code = :r"),

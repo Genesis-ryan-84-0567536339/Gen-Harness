@@ -81,7 +81,7 @@ func RunResetPassword(ctx context.Context, env *Env, runner dockercli.Runner, ou
 	_, _ = fmt.Fprintln(out, "Đã đặt lại mật khẩu Owner (dữ liệu giữ nguyên, các phiên đăng nhập cũ đã bị đăng xuất).")
 	_, _ = fmt.Fprintln(out, "Email đăng nhập: "+res.Email)
 	_, _ = fmt.Fprintln(out, "Mật khẩu tạm: "+res.TempPassword)
-	_, _ = fmt.Fprintln(out, "Đăng nhập tại "+localURL(env.Port, "/login")+" rồi cất mật khẩu này ở nơi an toàn (Console chưa có chỗ đổi mật khẩu — cần đổi thì chạy lại lệnh này).")
+	_, _ = fmt.Fprintln(out, "Đăng nhập tại "+localURL(env.Port, "/login")+" — Console sẽ yêu cầu đặt mật khẩu mới ngay khi đăng nhập.")
 	return nil
 }
 

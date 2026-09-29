@@ -1,4 +1,5 @@
 import type { ApiClient } from './client';
+import { accountEndpoints } from './account';
 import { coreEndpoints } from './p3-core';
 import { queueEndpoints } from './p3-queue';
 import { relationsEndpoints } from './p3-relations';
@@ -256,6 +257,7 @@ export function createEndpoints(client: ApiClient) {
     ...mcpEndpoints(r),
     ...pluginsEndpoints(r),
     ...systemEndpoints(r),
+    ...accountEndpoints(r),
   };
 }
 
