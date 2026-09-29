@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gh import realtime
 from gh.biz.hooks import CronJob, Hook
 from gh.providers.router import raise_alert
+from gh.refinery import triage
 
 COOLING_DAYS = 14
 COOLING_MIN_UNITS = 2
@@ -237,6 +238,8 @@ async def task_reminder_scan(ctx: dict[str, Any]) -> int:
     return n
 
 
-HOOKS: list[Hook] = []
+# v0.1.25 (Đợt C1): lọc đầu Hộp thư — hook sau sàng lọc + quét vét mỗi 5 phút (gh.refinery.triage).
+HOOKS: list[Hook] = [*triage.HOOKS]
 JOBS: list[CronJob] = [(early_warning_scan, {"minute": set(range(3, 60, 15))}),
-                       (task_reminder_scan, {"minute": set(range(60))})]  # mỗi phút
+                       (task_reminder_scan, {"minute": set(range(60))}),  # mỗi phút
+                       *triage.JOBS]

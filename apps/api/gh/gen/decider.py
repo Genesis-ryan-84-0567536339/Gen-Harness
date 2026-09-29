@@ -4,6 +4,7 @@
   hạn. Có trần thời gian (~1,5 s); lỗi/chậm/độ tin cậy thấp → trả None = bên gọi đi đường LLM.
 - `LlmDecider`: mặc định khi chưa cấu hình Jev — không gọi thêm model nào, để planner LLM (`core.gen`) tự quyết
   (tránh cộng thêm một lượt gọi model vào độ trễ mỗi câu).
+- `classify` (v0.1.25, Đợt C1): lọc đầu Hộp thư (rác / chất lượng) — `gh.refinery.triage`; None → quy tắc tất định.
 """
 
 import asyncio
@@ -48,6 +49,8 @@ class Decider(Protocol):
 
     async def next_target(self, question: str, candidates: list[Target]) -> Decision | None: ...
 
+    async def classify(self, question: str, options: dict[str, str], context: str) -> Decision | None: ...
+
 
 class LlmDecider:
     name = "llm"
@@ -56,6 +59,9 @@ class LlmDecider:
         return None
 
     async def next_target(self, question: str, candidates: list[Target]) -> Decision | None:
+        return None
+
+    async def classify(self, question: str, options: dict[str, str], context: str) -> Decision | None:
         return None
 
 
@@ -91,6 +97,10 @@ class JevDecider:
             return None
         return await self._choose(question, {t.id: f"{t.label} — {t.description}" for t in static},
                                   "Chọn phần tử giao diện cần làm sáng để dẫn người dùng.")
+
+    async def classify(self, question: str, options: dict[str, str], context: str) -> Decision | None:
+        """Phân loại tự do (Đợt C1 — lọc đầu Hộp thư): khoá → nhãn; None = bên gọi tự rơi về quy tắc/LLM."""
+        return await self._choose(question, options, context)
 
 
 async def load_decider(db: AsyncSession, org_id: uuid.UUID, *,
