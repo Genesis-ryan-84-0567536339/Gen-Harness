@@ -11,6 +11,7 @@ Chống trùng: loại theo **trạng thái đang kéo dài** (khách lạnh, c�
 chứa đúng chứng cứ đó trong `evidence` (an toàn dù lượt quét chạy lại hay chồng lấn cửa sổ thời gian).
 """
 
+import logging
 import uuid
 from typing import Any
 
@@ -21,6 +22,8 @@ from gh import realtime
 from gh.biz.hooks import CronJob, Hook
 from gh.providers.router import raise_alert
 from gh.refinery import triage
+
+log = logging.getLogger("gh.biz.queue.jobs")
 
 COOLING_DAYS = 14
 COOLING_MIN_UNITS = 2
@@ -210,7 +213,7 @@ def _local(dt: Any, tz: str | None) -> str:
 async def due_reminders(db: AsyncSession, redis: Any = None) -> int:
     """Việc có `remind_at` đã tới, chưa nhắc, chưa xong → thông báo chuông cho người phụ trách (chưa giao ai → các
     Owner). Đánh dấu `reminded_at` cùng transaction (FOR UPDATE SKIP LOCKED: hai worker không nhắc trùng)."""
-    from gh.notifications import notify, owner_ids
+    from gh.notifications import notify, owner_ids, pending_mark, pending_reset
 
     rows = (await db.execute(text("""
         UPDATE biz.tasks t SET reminded_at = now()
@@ -221,12 +224,22 @@ async def due_reminders(db: AsyncSession, redis: Any = None) -> int:
         RETURNING t.id, t.org_id, t.code, t.title, t.priority, t.assignee_user_id, t.due_at,
                   (SELECT o.timezone FROM core.organizations o WHERE o.id = t.org_id) AS tz"""),
         {"n": REMINDER_BATCH})).all()
+    sent = 0
     for r in rows:
-        to = [r.assignee_user_id] if r.assignee_user_id else await owner_ids(db, r.org_id)
-        due = f" · hạn {_local(r.due_at, r.tz)}" if r.due_at else ""
-        await notify(db, r.org_id, to, kind="task.reminder", title=f"Nhắc việc: {r.title}",
-                     body=f"{r.code} · {r.priority}{due}", link="/tasks", redis=redis)
-    return len(rows)
+        # Mỗi dòng một savepoint (v0.1.27): một việc lỗi (dữ liệu hỏng, người nhận không còn…) không làm hỏng cả lô —
+        # các nhắc khác vẫn gửi; dòng lỗi vẫn giữ `reminded_at` để không lặp lỗi mỗi phút (ghi log để xem lại).
+        mark = pending_mark(db)
+        try:
+            async with db.begin_nested():
+                to = [r.assignee_user_id] if r.assignee_user_id else await owner_ids(db, r.org_id)
+                due = f" · hạn {_local(r.due_at, r.tz)}" if r.due_at else ""
+                await notify(db, r.org_id, to, kind="task.reminder", title=f"Nhắc việc: {r.title}",
+                             body=f"{r.code} · {r.priority}{due}", link="/tasks", redis=redis)
+            sent += 1
+        except Exception:  # noqa: BLE001 — cô lập lỗi từng dòng
+            pending_reset(db, mark)  # bỏ sự kiện WS của thông báo vừa bị hoàn tác
+            log.exception("Nhắc việc lỗi cho %s (%s) — bỏ qua, các nhắc khác vẫn gửi", r.code, r.id)
+    return sent
 
 
 async def task_reminder_scan(ctx: dict[str, Any]) -> int:

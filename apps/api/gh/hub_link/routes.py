@@ -31,7 +31,7 @@ def _client(request: Request) -> Any:
 
 @router.get("/link")
 async def get_link(user: service.CurrentUser = Depends(READ), db: AsyncSession = DB) -> dict[str, Any]:
-    return hub.link_out(await hub.load(db, user.org_id))
+    return hub.link_out(await hub.load(db, user.org_id), owner=user.role_code == rbac.OWNER)
 
 
 class LinkPatch(BaseModel):

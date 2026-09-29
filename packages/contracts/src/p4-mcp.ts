@@ -116,6 +116,7 @@ export interface HubLink {
   token_expires_at: string | null;
   days_left: number | null;
   last_ok_at: string | null;
+  /** Lỗi thô (đã lọc token) chỉ Owner thấy; vai trò khác nhận một câu chung (v0.1.27). */
   last_error: string | null;
   health: string | null;
 }

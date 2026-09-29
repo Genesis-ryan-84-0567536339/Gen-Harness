@@ -3,7 +3,8 @@
 - `GET /refinery/triage/settings` — ai đăng nhập cũng đọc được (Hộp thư cần biết có bật lọc và ngưỡng điểm).
 - `PATCH /refinery/triage/settings` — CHỈ Owner; ghi Action Log `refinery.triage_settings_changed`.
 - `GET /refinery/triage/summary` — số đếm (trùng/rác/điểm thấp/chờ lọc + Jev: số lượt, độ trễ, độ khớp quy tắc);
-  quyền `queue.read` — Gen đọc qua tool `refinery.summary`.
+  quyền `queue.read`, ĐẾM THEO PHẠM VI của người gọi (v0.1.27: `assigned`/`team` chỉ đếm mục mình thấy trong
+  Hộp thư; `all` = cả tổ chức) — Gen đọc qua tool `refinery.summary`.
 """
 
 from typing import Any
@@ -14,6 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gh.auth import service
 from gh.auth.deps import current_user, require, require_owner
+from gh.biz.core.scope import scope_for
+from gh.biz.queue import service as qsvc
 from gh.chassis import actionlog
 from gh.db import DB
 from gh.refinery import triage
@@ -50,4 +53,7 @@ async def patch_settings(body: TriageSettingsPatch, user: service.CurrentUser = 
 @router.get("/summary")
 async def get_summary(days: int = Query(7, ge=1, le=90), user: service.CurrentUser = Depends(require("queue.read")),
                       db: AsyncSession = DB) -> dict[str, Any]:
-    return await triage.summary(db, user.org_id, days)
+    # Tôn trọng phạm vi queue.read (v0.1.27): phạm vi hẹp chỉ đếm mục người gọi thấy được trong Hộp thư.
+    sc = await scope_for(db, user, "queue.read")
+    return await triage.summary(db, user.org_id, days, scope_sql=qsvc.item_scope_sql(sc, "i"),
+                               scope=sc.level)

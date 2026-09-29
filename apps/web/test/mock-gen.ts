@@ -8,6 +8,10 @@
  *   "jev" / "khoá" / "model"      → tour 3 bước: tab Bộ não AI → thẻ Jev → nút Kiểm tra
  *   "sao lưu" / "backup"          → mở Dữ liệu & lưu trữ, làm sáng nút "Sao lưu ngay"
  *   "nhắc"                         → v2 (A4): thẻ đề xuất "Tạo nhắc việc" (Xác nhận / Sửa / Huỷ)
+ *   "nháp"                         → v2 (A4): thẻ "Soạn nháp tin" CẦN PIN (xác nhận → 423 → hỏi PIN → gửi lại)
+ *
+ * Hook e2e (v0.1.27): `POST /api/v1/__mock/p3/gen/fireReminders` = worker `task_reminder_scan` tới giờ — mỗi
+ * nhắc việc đã xác nhận → chuông `task.reminder` cho các Owner (một lần).
  *   còn lại                        → lời chào + gợi ý
  */
 import { randomUUID } from 'node:crypto';
@@ -18,6 +22,8 @@ export interface MockGenOptions {
   emit: (type: string, data: unknown) => void;
   /** Khoảng cách giữa các bước (ms). */
   stepMs?: number;
+  /** Chuông cho mọi Owner (như `notifications.notify` + `owner_ids` ở API thật). */
+  notifyOwners?: (kind: string, title: string, body: string, link: string | null) => void;
 }
 
 interface Turn {
@@ -39,6 +45,22 @@ const OWNER_ID = 'u-owner';
 
 export function script(q: string): GenStep[] {
   const t = q.toLowerCase();
+  if (/nháp/.test(t)) {
+    const proposal: GenProposal = {
+      id: randomUUID(),
+      type: 'draft_message',
+      fields: { title: 'Báo giá ván MDF', text: 'Chào anh Bảo, bên em gửi báo giá ván MDF E1 17mm như anh hỏi ạ.' },
+      summary: 'Soạn nháp tin \u201cBáo giá ván MDF\u201d gửi anh Bảo — vào Bàn làm việc chờ duyệt, không gửi ngay.',
+      labels: { subject: 'Anh Bảo' },
+      target: 'workbench.drafts',
+      requires_pin: true,
+      status: 'pending',
+    };
+    return [
+      { kind: 'say', text: 'Dạ, em soạn sẵn nháp tin — Sếp xem rồi bấm Xác nhận (cần mã PIN) nhé.' },
+      { kind: 'proposal', proposal },
+    ];
+  }
   if (/nhắc/.test(t)) {
     const remind = new Date(Date.now() + 60 * 60 * 1000).toISOString();
     const proposal: GenProposal = {
@@ -109,6 +131,8 @@ export function createMock(opts: MockGenOptions) {
   const conversations = new Map<string, Conversation>();
   const turns = new Map<string, Turn>();
   const proposals = new Map<string, GenProposal>();
+  const reminders: Array<{ title: string; code: string; priority: string; fired: boolean }> = [];
+  let taskSeq = 998;
   const timers = new Set<ReturnType<typeof setTimeout>>();
 
   function run(turn: Turn, conv: Conversation, steps: GenStep[]) {
@@ -183,11 +207,20 @@ export function createMock(opts: MockGenOptions) {
       const pr = proposals.get(seg[2]);
       if (!pr) return problem(404, 'NOT_FOUND', 'Đề xuất (có thể đã hết hạn) không tồn tại hoặc nằm ngoài phạm vi của bạn');
       if (pr.status !== 'pending') return problem(409, 'GEN_PROPOSAL_DECIDED', 'Đề xuất này đã được xác nhận hoặc đã huỷ');
+      // Như API thật: thao tác nhạy cảm (nháp tin) → 423, web hỏi PIN rồi gửi lại.
+      if (seg[3] === 'confirm' && pr.requires_pin && ctx.needPin()) {
+        return problem(423, 'PIN_REQUIRED', 'Thao tác này cần nhập mã PIN', { detail: { operation: 'draft.create' } });
+      }
+      const code = pr.type === 'draft_message' ? 'ACT-0999' : `TSK-${String(++taskSeq).padStart(4, '0')}`;
+      const result = pr.type === 'draft_message' ? { type: 'draft' as const, id: randomUUID(), code, screen: 'workbench' } : { type: 'task' as const, id: randomUUID(), code, screen: 'tasks' };
       const next: GenProposal =
         seg[3] === 'cancel'
           ? { ...pr, status: 'cancelled' }
-          : ({ ...pr, fields: { ...pr.fields, ...((body.fields as object) ?? {}) }, status: 'confirmed', result: { type: 'task', id: randomUUID(), code: 'TSK-0999', screen: 'tasks' } } as GenProposal);
+          : ({ ...pr, fields: { ...pr.fields, ...((body.fields as object) ?? {}) }, status: 'confirmed', result } as GenProposal);
       proposals.set(pr.id, next);
+      if (next.status === 'confirmed' && next.type === 'reminder') {
+        reminders.push({ title: next.fields.title, code, priority: next.fields.priority ?? 'P2', fired: false });
+      }
       return reply(200, next);
     }
     return problem(404, 'NOT_FOUND', 'Không tồn tại');
@@ -195,7 +228,21 @@ export function createMock(opts: MockGenOptions) {
 
   return {
     handle,
-    hooks: { settings: () => settings, script: (b: unknown) => script(String((b as { text?: string })?.text ?? '')) },
+    hooks: {
+      settings: () => settings,
+      script: (b: unknown) => script(String((b as { text?: string })?.text ?? '')),
+      /** Worker nhắc việc tới giờ: chuông cho Owner, mỗi nhắc một lần. */
+      fireReminders: () => {
+        let n = 0;
+        for (const r of reminders) {
+          if (r.fired) continue;
+          r.fired = true;
+          n += 1;
+          opts.notifyOwners?.('task.reminder', `Nhắc việc: ${r.title}`, `${r.code} · ${r.priority}`, '/tasks');
+        }
+        return { fired: n };
+      },
+    },
     dispose: () => {
       for (const t of timers) clearTimeout(t);
       timers.clear();

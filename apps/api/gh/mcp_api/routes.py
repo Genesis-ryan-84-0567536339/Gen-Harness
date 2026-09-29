@@ -30,6 +30,7 @@ from gh.chassis.mcp_client import McpClient
 from gh.data.common import iso
 from gh.db import DB
 from gh.errors import field_errors
+from gh.hub_link import service as hub
 from gh.mcp_api import invoke
 
 router = APIRouter(prefix="/mcp", tags=["mcp"])
@@ -113,6 +114,7 @@ async def create_server(body: ServerIn, user: service.CurrentUser = Depends(MANA
 async def patch_server(server_id: uuid.UUID, body: ServerPatch, user: service.CurrentUser = Depends(MANAGE),
                        db: AsyncSession = DB) -> dict[str, Any]:
     cur = await _server(db, user.org_id, server_id)
+    await hub.guard_server_admin(db, user=user, server_id=server_id, action="update")
     sets: list[str] = []
     params: dict[str, Any] = {"i": server_id}
     changed: dict[str, Any] = {}
@@ -146,6 +148,7 @@ async def patch_server(server_id: uuid.UUID, body: ServerPatch, user: service.Cu
 async def delete_server(server_id: uuid.UUID, user: service.CurrentUser = Depends(MANAGE),
                         db: AsyncSession = DB) -> Response:
     cur = await _server(db, user.org_id, server_id)
+    await hub.guard_server_admin(db, user=user, server_id=server_id, action="delete")
     await db.execute(text("DELETE FROM agent.mcp_servers WHERE id = :i"), {"i": server_id})
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                            action="mcp.server_deleted", target_type="mcp_server", target_id=str(server_id),
@@ -159,7 +162,10 @@ async def discover_tools(server_id: uuid.UUID, request: Request, user: service.C
     """Khám phá tool qua `tools/list`. Tool MỚI luôn vào với `is_exposed=false` (mặc định đóng, khoá cứng #4) —
     tool đã biết giữ nguyên trạng thái mở/đóng + phạm vi cấp hiện có, chỉ cập nhật mô tả/schema."""
     cur = await _server(db, user.org_id, server_id)
-    found = await invoke.discover(db, request.app.state.redis, _client(request), org_id=user.org_id, server=cur,
+    # Máy chủ Gen-hub: chỉ Owner; đi client ghim DNS như mọi lời gọi Gen-hub khác (v0.1.27).
+    is_hub = await hub.guard_server_admin(db, user=user, server_id=server_id, action="discover")
+    client = hub.client_for(getattr(request.app.state, "mcp_transport", None)) if is_hub else _client(request)
+    found = await invoke.discover(db, request.app.state.redis, client, org_id=user.org_id, server=cur,
                                   actor=user)
     return {"tools": found}
 
@@ -276,6 +282,11 @@ async def call_tool(tool_id: uuid.UUID, body: CallIn, request: Request, user: se
     `agent.mcp_calls` và một dòng Action Log; không có đường nào bỏ qua log này.
     """
     t = await _tool(db, user.org_id, tool_id)
+    # Máy chủ của liên kết Gen-hub (Kho Ryan): chỉ Owner, ghim DNS, kết quả đã che (v0.1.27).
+    hub_out = await hub.generic_call(db, request.app.state.redis, getattr(request.app.state, "mcp_transport", None),
+                                     user=user, tool=t, agent_key=body.agent_key, args=body.args)
+    if hub_out is not None:
+        return hub_out
     # Máy chủ lỗi → `invoke.McpCallFailed` (409 MCP_CALL_FAILED, cùng mã/tiêu đề như trước khi tách lõi).
     return await invoke.invoke_tool(db, request.app.state.redis, _client(request), org_id=user.org_id, tool=t,
                                     agent_key=body.agent_key, args=body.args, actor=user)

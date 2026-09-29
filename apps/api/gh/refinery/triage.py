@@ -44,7 +44,10 @@ CHUNK = 50
 MAX_ROUNDS = 20                 # ≤ 1000 mục / lượt job; phần còn lại lượt sau
 WINDOW_DAYS = 14                # cửa sổ dò trùng
 SWEEP_DAYS = 14                 # quét vét chỉ xét mục gần đây: không lọc lại cả lịch sử (chi phí Jev + quét bảng lớn)
+# Trần số mục so trùng mỗi phần (v0.1.27 — xem "Trần 3000" dưới `_candidates`): 3000 mục MỚI NHẤT trong cửa sổ
+# [mục sớm nhất của phần − 14 ngày, mục muộn nhất của phần]. Trùng y hệt (sha256) KHÔNG bị trần này giới hạn.
 CANDIDATES_LIMIT = 3000
+EXACT_LIMIT = 500               # số mục trùng y hệt tối đa nạp thêm qua chỉ mục băm (mỗi phần 50 mục)
 PREFILTER_BITS = 28
 NEAR_JACCARD = 0.75
 NEAR_MIN_LEN = 24
@@ -303,11 +306,37 @@ LIMIT :n
 """
 
 
-async def _candidates(db: AsyncSession, org_id: uuid.UUID, since: datetime) -> list[Candidate]:
-    rows = (await db.execute(text("""
+async def _candidates(db: AsyncSession, org_id: uuid.UUID, since: datetime, until: datetime,
+                      hashes: list[bytes] | None = None) -> list[Candidate]:
+    """Mục đã đánh dấu có thể là bản gốc của các mục trong phần đang xét.
+
+    Trần 3000 (rà soát v0.1.27):
+    - Chỉ lấy mục trong [since, until] — `until` = mục MUỘN NHẤT của phần: mục xuất hiện sau đó không bao giờ là bản
+      gốc (`find_duplicate` chỉ xét mục TRƯỚC), nên không tốn chỗ trong trần khi quét vét mục cũ đến muộn.
+    - Truy vấn đi chỉ mục `item_marks_observed_idx (org_id, observed_at DESC)` (0019): quét ngược theo thời gian và
+      dừng ở 3000 dòng — chi phí cố định dù bảng lớn. So trùng gần là vòng Python 50 × 3000 (đã lọc thô bằng độ dài
+      + simhash trước Jaccard) ≈ vài chục ms mỗi phần.
+    - Vượt trần (tổ chức > 3000 mục trong ~14 ngày): trùng GẦN với mục cũ hơn 3000 mục gần nhất có thể bị bỏ sót
+      (chấp nhận — tin rải thường lặp lại trong vài giờ). Trùng Y HỆT thì không: nạp thêm theo `text_hash` qua chỉ mục
+      `item_marks_hash_idx (org_id, text_hash)` (tối đa `EXACT_LIMIT`), bất kể trần.
+    """
+    rows = list((await db.execute(text("""
         SELECT item_id, observed_at, subject_id, text_hash, simhash, text_len, duplicate_of, norm_text
-        FROM refinery.item_marks WHERE org_id = :o AND item_type = 'unit' AND observed_at >= :s
-        ORDER BY observed_at DESC LIMIT :n"""), {"o": org_id, "s": since, "n": CANDIDATES_LIMIT})).all()
+        FROM refinery.item_marks WHERE org_id = :o AND item_type = 'unit' AND observed_at >= :s AND observed_at <= :u
+        ORDER BY observed_at DESC LIMIT :n"""),
+        {"o": org_id, "s": since, "u": until, "n": CANDIDATES_LIMIT})).all())
+    if len(rows) >= CANDIDATES_LIMIT and hashes:
+        log.info("Lọc đầu: chạm trần %d mục so trùng (tổ chức %s) — bổ sung trùng y hệt theo băm", CANDIDATES_LIMIT,
+                 org_id)
+        seen = {r.item_id for r in rows}
+        extra = (await db.execute(text("""
+            SELECT item_id, observed_at, subject_id, text_hash, simhash, text_len, duplicate_of, norm_text
+            FROM refinery.item_marks
+            WHERE org_id = :o AND item_type = 'unit' AND text_hash = ANY(:hs) AND observed_at >= :s
+              AND observed_at <= :u
+            ORDER BY observed_at LIMIT :n"""),
+            {"o": org_id, "hs": list(dict.fromkeys(hashes)), "s": since, "u": until, "n": EXACT_LIMIT})).all()
+        rows += [r for r in extra if r.item_id not in seen]
     return [Candidate(r.item_id, r.observed_at, r.subject_id, bytes(r.text_hash), int(r.simhash), int(r.text_len),
                       r.duplicate_of, r.norm_text or "") for r in rows]
 
@@ -376,10 +405,12 @@ async def mark_units(db: AsyncSession, org_id: uuid.UUID, unit_ids: list[uuid.UU
         it.heur = heuristic(it.raw, event_type=it.event_type, confidence=it.confidence, entities=it.entities)
     if decider is not None and decider.name != "llm":
         await _ask_jev(decider, items)
-    cands = await _candidates(db, org_id, min(i.observed_at for i in items) - timedelta(days=WINDOW_DAYS))
+    hashes = [text_hash(it.norm) for it in items]
+    cands = await _candidates(db, org_id, min(i.observed_at for i in items) - timedelta(days=WINDOW_DAYS),
+                              max(i.observed_at for i in items), hashes)
     n = 0
-    for it in items:
-        h, sim, norm = text_hash(it.norm), simhash64(it.norm), it.norm[:NORM_MAX]
+    for it, h in zip(items, hashes, strict=True):
+        sim, norm = simhash64(it.norm), it.norm[:NORM_MAX]
         dup, kind = find_duplicate(cands, item_id=it.id, observed_at=it.observed_at, subject_id=it.subject_id,
                                    h=h, sim=sim, text_len=len(it.norm), norm=norm)
         f = _final(it)
@@ -428,8 +459,18 @@ async def run_org(sm: async_sessionmaker[AsyncSession], org_id: uuid.UUID,
     return total
 
 
-async def summary(db: AsyncSession, org_id: uuid.UUID, days: int = 7) -> dict[str, Any]:
+async def summary(db: AsyncSession, org_id: uuid.UUID, days: int = 7, *,
+                  scope_sql: tuple[str, dict[str, Any]] | None = None, scope: str = "all") -> dict[str, Any]:
+    """Số liệu lọc đầu `days` ngày. `scope_sql` = biểu thức phạm vi `queue.read` trên dòng `biz.inbox_items` bí danh
+    `i` (`gh.biz.queue.service.item_scope_sql`) — None/`TRUE` = cả tổ chức. Phạm vi hẹp (Nhân viên: `assigned`,
+    Quản lý: `team`) chỉ đếm mục mình thấy được trong Hộp thư (v0.1.27) — không lộ số liệu toàn tổ chức."""
     cfg = await get_settings(db, org_id)
+    where, sparams = scope_sql or ("TRUE", {})
+    scoped = where != "TRUE"
+    m_scope = (f" AND EXISTS (SELECT 1 FROM biz.inbox_items i WHERE i.org_id = :o AND i.item_type = 'unit'"
+               f" AND i.item_id = m.item_id AND {where})") if scoped else ""
+    mu_scope = (f" AND EXISTS (SELECT 1 FROM biz.inbox_items i WHERE i.org_id = :o AND i.item_type = 'unit'"
+                f" AND i.item_id = mu.id AND {where})") if scoped else ""
     r = (await db.execute(text("""
         SELECT count(*) AS total,
                count(*) FILTER (WHERE duplicate_of IS NOT NULL) AS duplicates,
@@ -442,17 +483,19 @@ async def summary(db: AsyncSession, org_id: uuid.UUID, days: int = 7) -> dict[st
                count(*) FILTER (WHERE source = 'jev') AS jev,
                round(avg(latency_ms) FILTER (WHERE source = 'jev')) AS jev_ms,
                count(*) FILTER (WHERE source = 'jev' AND is_spam = heuristic_spam) AS jev_agree
-        FROM refinery.item_marks
-        WHERE org_id = :o AND observed_at > now() - make_interval(days => :d)"""),
-        {"o": org_id, "d": days, "m": int(cfg["min_score"])})).one()
+        FROM refinery.item_marks m
+        WHERE m.org_id = :o AND m.observed_at > now() - make_interval(days => :d)""" + m_scope),
+        {"o": org_id, "d": days, "m": int(cfg["min_score"]), **sparams})).one()
     pending = (await db.execute(text("""
         SELECT count(*) FROM clean.meaning_units mu
         WHERE mu.org_id = :o AND mu.superseded_by IS NULL AND mu.observed_at > now() - make_interval(days => :d)
-          AND NOT EXISTS (SELECT 1 FROM refinery.item_marks m WHERE m.item_type = 'unit' AND m.item_id = mu.id)"""),
-        {"o": org_id, "d": min(days, SWEEP_DAYS)})).scalar_one()  # ngoài cửa sổ quét vét: không "chờ lọc"
+          AND NOT EXISTS (SELECT 1 FROM refinery.item_marks m WHERE m.item_type = 'unit' AND m.item_id = mu.id)"""
+        + mu_scope), {"o": org_id, "d": min(days, SWEEP_DAYS), **sparams})).scalar_one()
+    # (cửa sổ `pending` ≤ SWEEP_DAYS: mục ngoài cửa sổ quét vét không bao giờ được lọc → không tính "chờ lọc")
     jev = int(r.jev or 0)
     return {
-        "days": days, "enabled": bool(cfg["enabled"]), "min_score": int(cfg["min_score"]),
+        "days": days, "scope": scope if scoped else "all",
+        "enabled": bool(cfg["enabled"]), "min_score": int(cfg["min_score"]),
         "use_jev": bool(cfg["use_jev"]),
         "total": int(r.total or 0), "kept": int(r.kept or 0), "duplicates": int(r.duplicates or 0),
         "exact_duplicates": int(r.exact or 0), "near_duplicates": int(r.near or 0), "spam": int(r.spam or 0),
