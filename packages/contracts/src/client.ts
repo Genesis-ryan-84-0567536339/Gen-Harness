@@ -16,8 +16,8 @@ export interface RequestOptions {
   skipAuthRedirect?: boolean;
   /** Do not redirect to /setup on 428 (the setup wizard itself). */
   skipSetupRedirect?: boolean;
-  /** `text` returns the body as a string (CSV export). Default `json`. */
-  responseType?: 'json' | 'text';
+  /** `text` returns the body as a string (CSV export), `blob` as a Blob (file download). Default `json`. */
+  responseType?: 'json' | 'text' | 'blob';
 }
 
 export interface ApiClientConfig {
@@ -30,6 +30,8 @@ export interface ApiClientConfig {
   onUnauthenticated?: (error: ApiError) => void;
   /** 428 SETUP_REQUIRED: go to /setup. */
   onSetupRequired?: (error: ApiError) => void;
+  /** 403 PASSWORD_CHANGE_REQUIRED (temporary password): go to /change-password. */
+  onPasswordChangeRequired?: (error: ApiError) => void;
   /**
    * 423 PIN_REQUIRED: open the PIN dialog. Resolve once a PIN session is
    * established (the request is then retried); reject/`false` to cancel.
@@ -118,7 +120,12 @@ export function createApiClient(config: ApiClientConfig = {}): ApiClient {
 
     for (;;) {
       const headers: Record<string, string> = {
-        Accept: options.responseType === 'text' ? 'text/csv, text/plain, */*' : 'application/json',
+        Accept:
+          options.responseType === 'text'
+            ? 'text/csv, text/plain, */*'
+            : options.responseType === 'blob'
+              ? 'application/octet-stream, */*'
+              : 'application/json',
       };
       if (options.body !== undefined) headers['Content-Type'] = 'application/json';
       if (isWrite) {
@@ -143,6 +150,7 @@ export function createApiClient(config: ApiClientConfig = {}): ApiClient {
 
       if (res.ok) {
         if (res.status === 204 || method === 'HEAD') return undefined as T;
+        if (options.responseType === 'blob') return (await res.blob()) as T;
         const text = await res.text();
         if (options.responseType === 'text') return text as T;
         return (text ? JSON.parse(text) : undefined) as T;
@@ -164,6 +172,9 @@ export function createApiClient(config: ApiClientConfig = {}): ApiClient {
       }
       if (res.status === 401 && !options.skipAuthRedirect && !NON_SESSION_401.has(err.code)) {
         config.onUnauthenticated?.(err);
+      }
+      if (res.status === 403 && err.code === 'PASSWORD_CHANGE_REQUIRED') {
+        config.onPasswordChangeRequired?.(err);
       }
       if (res.status === 428 && !options.skipSetupRedirect) {
         config.onSetupRequired?.(err);

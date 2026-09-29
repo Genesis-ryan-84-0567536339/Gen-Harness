@@ -775,6 +775,9 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
       return reply(acct.status, acct.body);
     }
 
+    // v0.1.20: như gh/auth/deps.py current_user — mật khẩu tạm thì mọi route khác /auth/* và /account trả 403.
+    if (user.mustChange) return problem(res, 403, 'PASSWORD_CHANGE_REQUIRED', 'Cần đặt mật khẩu mới trước khi tiếp tục');
+
     if (path === '/navigation' && method === 'GET') return reply(200, buildNavigation(user.hidden, opts.badges ?? true));
     if (path === '/system/update') {
       // Như gh/system_api/update.py: system.manage; mock mô phỏng genh trên máy chủ — mỗi lần hỏi tiến một bước

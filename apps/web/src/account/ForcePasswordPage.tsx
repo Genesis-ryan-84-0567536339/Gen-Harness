@@ -9,8 +9,10 @@ import { Logo } from '../shell/Logo';
 import { PasswordForm } from './PasswordForm';
 
 /**
- * "Đặt mật khẩu mới" (`/change-password`, v0.1.19): mật khẩu hiện tại do hệ thống đặt (`genh reset-password`)
- * → `me.must_change_password`. AppShell chuyển mọi màn Console về đây cho tới khi đổi xong; vẫn đăng xuất được.
+ * "Đặt mật khẩu mới" (`/change-password`, v0.1.19): mật khẩu hiện tại là mật khẩu tạm (`genh reset-password` của
+ * Owner, hoặc mật khẩu tạm khi được mời vào nhóm) → `me.must_change_password`. AppShell chuyển mọi màn Console về
+ * đây, API trả 403 PASSWORD_CHANGE_REQUIRED cho tới khi đổi xong; vẫn đăng xuất được. Lời nhắc chung chung, không
+ * nhắc lệnh máy chủ (thành viên được mời không biết genh).
  */
 export function ForcePasswordPage() {
   const me = useMe();
@@ -47,9 +49,8 @@ export function ForcePasswordPage() {
               Đặt mật khẩu mới
             </h1>
             <p className="screen-desc">
-              {me.data ? `${me.data.addressing?.bot_calls_me || 'Sếp'} đang dùng mật khẩu tạm` : 'Tài khoản đang dùng mật khẩu tạm'} do
-              lệnh <code className="mono">genh reset-password</code> tạo. Đặt mật khẩu riêng để tiếp tục vào Console — các thiết bị
-              khác sẽ tự đăng xuất.
+              Tài khoản đang dùng mật khẩu tạm. Đặt mật khẩu riêng để tiếp tục vào Console — các thiết bị khác sẽ tự đăng
+              xuất.
             </p>
           </div>
           <PasswordForm

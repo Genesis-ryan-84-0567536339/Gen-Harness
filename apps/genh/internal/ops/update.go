@@ -124,7 +124,7 @@ func RunUpdate(ctx context.Context, env *Env, opts UpdateOptions, deps UpdateDep
 	// 1. Backup tự động TRƯỚC khi đụng gì (kể cả compose.yaml) — không có
 	// backup, không có gì để rollback về.
 	_, _ = fmt.Fprintln(out, "1/5 Backup tự động…")
-	key, err := runBackupInContainer(ctx, runner, composePath, envOverlay, dir)
+	key, err := runBackupInContainer(ctx, runner, composePath, envOverlay, dir, BackupTriggerPreUpdate)
 	if err != nil {
 		return &OpError{
 			Code: ErrCodeUpdateBackupFailed,

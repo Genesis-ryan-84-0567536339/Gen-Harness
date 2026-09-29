@@ -9,8 +9,9 @@ import (
 	"strings"
 )
 
-// RequestTaskName là tên watcher nhận yêu cầu "Cập nhật ngay" từ Console
-// (systemd <RequestTaskName>.path/.service, Label LaunchAgent).
+// RequestTaskName là tên watcher nhận yêu cầu từ Console — "Cập nhật ngay" và
+// (v0.1.20) "Khôi phục" (systemd <RequestTaskName>.path/.service, Label
+// LaunchAgent). Giữ nguyên tên cũ để cài lại ghi đè đúng unit của bản trước.
 const RequestTaskName = "gen-harness-update-request"
 
 // CrontabRequestMarker đánh dấu dòng cron mỗi phút của watcher (fallback khi
@@ -25,10 +26,12 @@ const (
 	UpdaterLaunchd = "launchd"
 )
 
-// requestArgs là đối số `genh update` của watcher; Port > 0 (bản cài không
-// dùng cổng mặc định) được truyền theo để bước kiểm /ready gọi đúng cổng.
+// requestArgs là đối số watcher: `genh handle-requests` tự chọn việc theo tệp
+// trong hộp thư (update.json → `genh update --if-requested`, restore.json →
+// `genh restore --if-requested`). Port > 0 (bản cài không dùng cổng mặc định)
+// được truyền theo để bước kiểm /ready gọi đúng cổng.
 func requestArgs(port int) []string {
-	args := []string{"update", "--yes", "--quiet", "--if-requested"}
+	args := []string{"handle-requests", "--quiet"}
 	if port > 0 {
 		args = append(args, "--port", strconv.Itoa(port))
 	}
@@ -39,8 +42,8 @@ func updateRequestCmd(genhPath string, port int) string {
 	return quoteUnitArg(genhPath) + " " + strings.Join(requestArgs(port), " ")
 }
 
-// SystemdRequestServiceUnit: chạy `genh update --if-requested` một lần
-// (genh tự xoá tệp yêu cầu trước khi cập nhật nên path unit không kích lặp).
+// SystemdRequestServiceUnit: chạy `genh handle-requests` một lần (genh tự xoá
+// tệp yêu cầu trước khi làm nên path unit không kích lặp).
 func SystemdRequestServiceUnit(genhPath, logFile string, rp RequestPaths) string {
 	env := ""
 	for _, kv := range rp.env() {
@@ -48,7 +51,7 @@ func SystemdRequestServiceUnit(genhPath, logFile string, rp RequestPaths) string
 	}
 	port := rp.Port
 	return fmt.Sprintf(`[Unit]
-Description=Gen-Harness — cap nhat khi Owner bam "Cap nhat ngay" trong Console
+Description=Gen-Harness — cap nhat/khoi phuc khi Owner bam nut trong Console
 
 [Service]
 Type=oneshot
@@ -58,29 +61,43 @@ StandardError=append:%s
 `, env, updateRequestCmd(genhPath, port), logFile, logFile)
 }
 
-// SystemdRequestPathUnit: kích service khi tệp yêu cầu xuất hiện.
-func SystemdRequestPathUnit(requestPath string) string {
+// SystemdRequestPathUnit: kích service khi MỘT trong các tệp yêu cầu xuất
+// hiện (nhiều dòng PathExists= là "hoặc").
+func SystemdRequestPathUnit(requestPaths ...string) string {
+	var exists strings.Builder
+	for _, p := range requestPaths {
+		if p != "" {
+			exists.WriteString("PathExists=" + p + "\n")
+		}
+	}
 	return fmt.Sprintf(`[Unit]
-Description=Gen-Harness — cho yeu cau cap nhat tu Console
+Description=Gen-Harness — cho yeu cau cap nhat/khoi phuc tu Console
 
 [Path]
-PathExists=%s
-Unit=%s.service
+%sUnit=%s.service
 
 [Install]
 WantedBy=default.target
-`, requestPath, RequestTaskName)
+`, exists.String(), RequestTaskName)
 }
 
-// CrontabRequestLine: mỗi phút kiểm tệp yêu cầu, có thì cập nhật.
+// CrontabRequestLine: mỗi phút kiểm các tệp yêu cầu, có tệp nào thì chạy.
 func CrontabRequestLine(genhPath, logFile string, rp RequestPaths) string {
 	env := ""
 	for _, kv := range rp.env() {
 		k, v, _ := strings.Cut(kv, "=")
 		env += k + "=" + shellQuote(v) + " "
 	}
-	return fmt.Sprintf("* * * * * [ -f %s ] && %s%s >> %s 2>&1",
-		shellQuote(rp.RequestFile), env, updateRequestCmd(genhPath, rp.Port), shellQuote(logFile))
+	tests := []string{}
+	for _, f := range rp.files() {
+		tests = append(tests, "[ -f "+shellQuote(f)+" ]")
+	}
+	cond := tests[0]
+	if len(tests) > 1 {
+		cond = "{ " + strings.Join(tests, " || ") + "; }"
+	}
+	return fmt.Sprintf("* * * * * %s && %s%s >> %s 2>&1",
+		cond, env, updateRequestCmd(genhPath, rp.Port), shellQuote(logFile))
 }
 
 func shellQuote(s string) string {
@@ -132,12 +149,22 @@ type RequestPaths struct {
 	InstallDir  string
 	RequestDir  string
 	RequestFile string
+	// RestoreFile là tệp yêu cầu khôi phục (v0.1.20; rỗng = chỉ nhận cập nhật).
+	RestoreFile string
 	// Port là cổng HTTPS của bản cài khi KHÁC mặc định (0 = mặc định).
 	Port int
 	// Env là biến môi trường "KEY=VALUE" cần mang theo (ví dụ GENH_COMPOSE_FILE
 	// khi bản cài dùng compose.yaml ngoài thư mục genh quản lý) — watcher chạy
 	// ngoài phiên shell của Owner nên không tự có các biến này.
 	Env []string
+}
+
+func (rp RequestPaths) files() []string {
+	out := []string{rp.RequestFile}
+	if rp.RestoreFile != "" {
+		out = append(out, rp.RestoreFile)
+	}
+	return out
 }
 
 func (rp RequestPaths) env() []string {
@@ -172,7 +199,7 @@ func EnsureRequestWatcher(ctx context.Context, deps Deps, rp RequestPaths) (stri
 			if err := os.WriteFile(svc, []byte(SystemdRequestServiceUnit(deps.GenhPath, deps.LogFile, rp)), 0o644); err != nil {
 				return "", fmt.Errorf("ghi %s: %w", svc, err)
 			}
-			if err := os.WriteFile(path, []byte(SystemdRequestPathUnit(rp.RequestFile)), 0o644); err != nil {
+			if err := os.WriteFile(path, []byte(SystemdRequestPathUnit(rp.files()...)), 0o644); err != nil {
 				return "", fmt.Errorf("ghi %s: %w", path, err)
 			}
 			if _, err := runner.Output(ctx, "systemctl", []string{"--user", "daemon-reload"}); err != nil {

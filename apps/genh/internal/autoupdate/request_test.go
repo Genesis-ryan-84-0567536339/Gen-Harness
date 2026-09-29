@@ -9,7 +9,8 @@ import (
 	"testing"
 )
 
-var testRP = RequestPaths{InstallDir: "/home/u/.gen-harness", RequestDir: "/home/u/.gen-harness/run/request", RequestFile: "/home/u/.gen-harness/run/request/update.json"}
+var testRP = RequestPaths{InstallDir: "/home/u/.gen-harness", RequestDir: "/home/u/.gen-harness/run/request", RequestFile: "/home/u/.gen-harness/run/request/update.json",
+	RestoreFile: "/home/u/.gen-harness/run/request/restore.json"}
 
 func TestEnsureRequestWatcher_SystemdPathUnit(t *testing.T) {
 	home := t.TempDir()
@@ -23,15 +24,16 @@ func TestEnsureRequestWatcher_SystemdPathUnit(t *testing.T) {
 	dir := filepath.Join(home, ".config", "systemd", "user")
 	path, _ := os.ReadFile(filepath.Join(dir, RequestTaskName+".path"))
 	mustContain(t, string(path), "PathExists="+testRP.RequestFile)
+	mustContain(t, string(path), "PathExists="+testRP.RestoreFile)
 	mustContain(t, string(path), "Unit="+RequestTaskName+".service")
 	svc, _ := os.ReadFile(filepath.Join(dir, RequestTaskName+".service"))
-	mustContain(t, string(svc), "update --yes --quiet --if-requested")
+	mustContain(t, string(svc), "handle-requests --quiet")
 	mustContain(t, string(svc), "Environment=GEN_HARNESS_HOME=/home/u/.gen-harness")
 	// Cổng khác mặc định được truyền theo để bước kiểm /ready gọi đúng cổng.
 	rp := RequestPaths{InstallDir: "/r", RequestDir: "/r/run/request", RequestFile: "/r/run/request/update.json", Port: 9443,
 		Env: []string{"GENH_COMPOSE_FILE=/src/deploy/compose.yaml"}}
 	unit := SystemdRequestServiceUnit("/g/genh", "/g/log", rp)
-	mustContain(t, unit, "--if-requested --port 9443")
+	mustContain(t, unit, "handle-requests --quiet --port 9443")
 	// Biến môi trường của phiên cài (compose ngoài thư mục genh) đi theo watcher.
 	mustContain(t, unit, "Environment=GENH_COMPOSE_FILE=/src/deploy/compose.yaml")
 	plist := LaunchdRequestPlist("/g/genh", "/g/log", rp)
@@ -54,15 +56,18 @@ func TestEnsureRequestWatcher_CronFallbackKeepsNightlyLine(t *testing.T) {
 		t.Fatalf("EnsureRequestWatcher = %q, %v", got, err)
 	}
 	line := CrontabRequestLine("/g/genh", "/g/log", testRP)
-	mustContain(t, line, "* * * * * [ -f "+testRP.RequestFile+" ] && GEN_HARNESS_HOME=")
-	mustContain(t, line, "--if-requested")
+	mustContain(t, line, "* * * * * { [ -f "+testRP.RequestFile+" ] || [ -f "+testRP.RestoreFile+" ]; } && GEN_HARNESS_HOME=")
+	mustContain(t, line, "handle-requests")
+	// Bản cài cũ không có RestoreFile: vẫn một điều kiện như trước.
+	old := CrontabRequestLine("/g/genh", "/g/log", RequestPaths{RequestFile: "/r/update.json"})
+	mustContain(t, old, "* * * * * [ -f /r/update.json ] && ")
 	merged := mergeCrontabMarked(string(runner.outputs["crontab|-l"]), CrontabRequestMarker, line, false)
-	for _, want := range []string{"backup.sh", CrontabMarker, CrontabRequestMarker, "--if-requested"} {
+	for _, want := range []string{"backup.sh", CrontabMarker, CrontabRequestMarker, "handle-requests"} {
 		mustContain(t, merged, want)
 	}
 	// Gỡ watcher không đụng dòng hằng đêm.
 	removed := mergeCrontabMarked(merged, CrontabRequestMarker, "", true)
-	if strings.Contains(removed, "--if-requested") || !strings.Contains(removed, CrontabMarker) {
+	if strings.Contains(removed, "handle-requests") || !strings.Contains(removed, CrontabMarker) {
 		t.Fatalf("gỡ watcher phải giữ dòng hằng đêm:\n%s", removed)
 	}
 }
@@ -78,7 +83,7 @@ func TestEnsureRequestWatcher_LaunchdQueueDirectory(t *testing.T) {
 	b, _ := os.ReadFile(filepath.Join(home, "Library", "LaunchAgents", "com.gen-harness.update-request.plist"))
 	mustContain(t, string(b), "<key>QueueDirectories</key>")
 	mustContain(t, string(b), testRP.RequestDir)
-	mustContain(t, string(b), "--if-requested")
+	mustContain(t, string(b), "<string>handle-requests</string>")
 }
 
 func TestEnsureRequestWatcher_WindowsUnsupported(t *testing.T) {

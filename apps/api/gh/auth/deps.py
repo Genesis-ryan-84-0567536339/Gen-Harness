@@ -43,9 +43,23 @@ async def optional_user(request: Request, db: AsyncSession = DB) -> service.Curr
     return user
 
 
-async def current_user(user: service.CurrentUser | None = Depends(optional_user)) -> service.CurrentUser:
+API_PREFIX = "/api/v1"
+
+
+def password_change_allowed(method: str, path: str) -> bool:
+    """Khi `must_change_password` (mật khẩu tạm từ `genh reset-password` hoặc lời mời thành viên): chỉ còn đăng
+    nhập/đăng xuất/`/auth/*`, xem hồ sơ (`GET /account`) và đổi mật khẩu (`POST /account/password`)."""
+    p = path.removeprefix(API_PREFIX)
+    return p.startswith("/auth/") or p == "/account/password" or (p == "/account" and method in SAFE_METHODS)
+
+
+async def current_user(request: Request,
+                       user: service.CurrentUser | None = Depends(optional_user)) -> service.CurrentUser:
     if user is None:
         raise unauthenticated()
+    # v0.1.20: chặn ở API (không chỉ web chuyển trang) — mọi route khác trả 403 PASSWORD_CHANGE_REQUIRED.
+    if user.must_change_password and not password_change_allowed(request.method, request.url.path):
+        raise ApiError(403, "PASSWORD_CHANGE_REQUIRED", "Cần đặt mật khẩu mới trước khi tiếp tục")
     return user
 
 

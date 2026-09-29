@@ -18,6 +18,7 @@ from sqlalchemy import text
 from gh import biz
 from gh.app import build_plugin_manager, configure_logging
 from gh.auth import service as auth_service
+from gh.backup import FUNCTIONS as BACKUP_FUNCTIONS
 from gh.backup import JOBS as BACKUP_JOBS
 from gh.biz.hooks import start_hooks
 from gh.bootstrap import bootstrap
@@ -146,7 +147,7 @@ class WorkerSettings:
     on_startup = startup
     on_shutdown = shutdown
     functions = [verify_action_log, partition_maintenance, detect_identities, compact_notebooks, expire_sessions,
-                 *(fn for fn, _ in _BIZ_JOBS)]
+                 *(fn for fn, _ in _BIZ_JOBS), *BACKUP_FUNCTIONS]
     health_check_interval = 30
     cron_jobs = [
         cron(verify_action_log, hour={2}, minute={30}),        # 02:30 hằng đêm

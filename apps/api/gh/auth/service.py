@@ -34,6 +34,8 @@ PIN_OPERATIONS: dict[str, str] = {
     "people_review.read": "Xem dữ liệu đánh giá nhân sự",
     "pin.change": "Đổi mã PIN",
     "agent.manage": "Tạo / tắt / nhân bản danh tính agent",
+    "backup.download": "Tải bản sao lưu",
+    "backup.restore": "Khôi phục bản sao lưu",
 }
 
 

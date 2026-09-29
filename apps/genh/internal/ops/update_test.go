@@ -111,6 +111,10 @@ func TestRunUpdate_HappyPath_ReadySucceeds_NoRollback(t *testing.T) {
 	if restoreCalls != 0 {
 		t.Errorf("KHÔNG được gọi restore khi cập nhật thành công, restoreCalls=%d", restoreCalls)
 	}
+	// Bản sao lưu trước cập nhật ghi nguồn "pre-update" (Console hiện cột Nguồn).
+	if !strings.Contains(strings.Join(fr.Calls[0].Cmd.Args, " "), "-e GH_BACKUP_TRIGGER=pre-update api python -m gh.backup run") {
+		t.Errorf("backup trước cập nhật phải mang GH_BACKUP_TRIGGER=pre-update: %v", fr.Calls[0].Cmd.Args)
+	}
 }
 
 func TestRunUpdate_ReadyNeverBecomesHealthy_TriggersRollback(t *testing.T) {

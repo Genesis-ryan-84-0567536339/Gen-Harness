@@ -379,7 +379,7 @@ func RunImport(ctx context.Context, env *Env, path string, opts ImportOptions, d
 	dir := composeDir(composePath)
 
 	_, _ = fmt.Fprintln(out, "1/4 Backup an toàn trước khi import…")
-	key, err := runBackupInContainer(ctx, runner, composePath, envOverlay, dir)
+	key, err := runBackupInContainer(ctx, runner, composePath, envOverlay, dir, BackupTriggerPreImport)
 	if err != nil {
 		return &OpError{
 			Code: ErrCodeImportBackupFailed,

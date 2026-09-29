@@ -7,10 +7,12 @@ import { useCan, useOrgTimezone } from '../../lib/permissions';
 import { errorText } from '../../lib/errorText';
 import { toast } from '../../lib/toast';
 import { CardError, InlineError, Panel, SkeletonLines } from '../common';
+import { BackupPanel } from './BackupPanel';
 import { DATA_REQUEST_KIND, RETENTION_LABEL } from './systemModel';
 import { useCreateDataRequest, usePatchRetention, usePersonDataRequests, useRetentionPolicies } from './queries';
 
-/** Dữ liệu & lưu trữ — spec I: hạn lưu theo tập dữ liệu, yêu cầu xuất/xoá/giới hạn dữ liệu một người (PLAN 4.5). */
+/** Dữ liệu & lưu trữ — sao lưu & khôi phục (v0.1.20); spec I: hạn lưu theo tập dữ liệu, yêu cầu xuất/xoá/giới hạn
+ * dữ liệu một người (PLAN 4.5). */
 export function StorageTab() {
   const canRead = useCan('system.read');
   if (!canRead) {
@@ -22,6 +24,7 @@ export function StorageTab() {
   }
   return (
     <div className="sys-tabs-col">
+      <BackupPanel />
       <RetentionPanel />
       <PersonDataRequestPanel />
     </div>

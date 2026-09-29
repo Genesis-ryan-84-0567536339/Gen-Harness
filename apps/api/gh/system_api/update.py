@@ -146,6 +146,10 @@ async def request_update(request: Request, db: AsyncSession = DB,
                        "Máy chủ chưa bật nhận yêu cầu cập nhật từ Console — chạy `genh update` một lần trên máy chủ")
     if s["state"] in ("requested", "running"):
         raise conflict("UPDATE_IN_PROGRESS", "Đang cập nhật — chờ xong rồi thử lại")
+    d = _dir()
+    restoring = (_read_json(d / "restore-status.json") or {}).get("state") == "running"
+    if restoring or (d / "request" / "restore.json").exists():
+        raise conflict("RESTORE_IN_PROGRESS", "Đang khôi phục dữ liệu — chờ xong rồi thử lại")
     req = {"id": str(uuid.uuid4()), "requested_at": datetime.now(UTC).isoformat(), "by": user.actor_id}
     target = _dir() / "request" / "update.json"
     tmp = target.with_suffix(".tmp")
