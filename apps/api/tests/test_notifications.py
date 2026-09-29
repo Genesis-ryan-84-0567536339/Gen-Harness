@@ -122,3 +122,32 @@ async def test_ws_notification_only_to_recipient() -> None:
     assert orjson.loads(wa.sent[0])["type"] == "notification.new"
     await hub.dispatch({"type": notifications.EVENT, "data": {}, "org_id": str(org), "to_user": None})
     assert len(wa.sent) == 1 and wb.sent == []  # thiếu người nhận → bỏ, không phát cả tổ chức
+
+
+class FakeRedis:
+    def __init__(self) -> None:
+        self.published: list[dict[str, Any]] = []
+
+    async def publish(self, channel: str, payload: bytes) -> None:
+        self.published.append(orjson.loads(payload))
+
+
+async def test_ws_publish_only_after_commit(owner_api: Api) -> None:
+    import asyncio
+
+    redis = FakeRedis()
+    async with admin_sessionmaker()() as db:
+        org = (await db.execute(text("SELECT id FROM core.organizations"))).scalar_one()
+        owners = await notifications.owner_ids(db, org)
+        await notifications.notify(db, org, owners, kind="backup.done", title="Rollback", redis=redis)
+        await db.rollback()
+        await asyncio.sleep(0.05)
+        assert redis.published == []  # rollback → không đẩy
+        await notifications.notify(db, org, owners, kind="backup.done", title="Commit", redis=redis)
+        await asyncio.sleep(0.05)
+        assert redis.published == []  # chưa commit → chưa đẩy
+        await db.commit()
+        await asyncio.sleep(0.05)
+    assert [m["data"]["title"] for m in redis.published] == ["Commit"]
+    assert redis.published[0]["to_user"] == str(owners[0])
+    assert [x["title"] for x in (await owner_api.get("/notifications")).json()["items"]] == ["Commit"]

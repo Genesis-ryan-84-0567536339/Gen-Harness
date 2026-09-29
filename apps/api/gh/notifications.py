@@ -5,7 +5,7 @@ Owner cũng không đọc thông báo của người khác). Ghi thông báo qua
 ra nó; sự kiện WebSocket `notification.new` chỉ gửi tới người nhận (`to_user`) để chuông cập nhật ngay.
 """
 
-import contextlib
+import asyncio
 import logging
 import uuid
 from collections.abc import Iterable
@@ -14,7 +14,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gh import realtime
@@ -31,6 +31,47 @@ EVENT = "notification.new"
 realtime.register_event(EVENT, None)
 
 MAX_TITLE, MAX_BODY, MAX_LINK = 160, 1000, 300
+_PENDING = "gh_pending_notifications"
+_tasks: set[asyncio.Task[None]] = set()
+
+
+async def _publish_all(redis: Any, items: list[tuple[uuid.UUID, uuid.UUID, dict[str, Any]]]) -> None:
+    for org_id, uid, item in items:
+        try:
+            await realtime.publish(redis, EVENT, item, org_id=org_id, to_user=uid)
+        except Exception:  # noqa: BLE001 — chuông vẫn thấy khi tải lại
+            log.warning("Không đẩy được notification.new", exc_info=True)
+
+
+def _after_commit(session: Any) -> None:
+    items = session.info.pop(_PENDING, None) or []
+    if not items:
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    by_redis: dict[int, tuple[Any, list[tuple[uuid.UUID, uuid.UUID, dict[str, Any]]]]] = {}
+    for r, o, u, it in items:
+        by_redis.setdefault(id(r), (r, []))[1].append((o, u, it))
+    for r, batch in by_redis.values():
+        task = loop.create_task(_publish_all(r, batch))
+        _tasks.add(task)
+        task.add_done_callback(_tasks.discard)
+
+
+def _after_rollback(session: Any) -> None:
+    session.info.pop(_PENDING, None)
+
+
+def _queue_publish(db: AsyncSession, redis: Any, org_id: uuid.UUID, uid: uuid.UUID, item: dict[str, Any]) -> None:
+    """Chỉ đẩy WS SAU KHI transaction commit (rollback → bỏ), để client không nhận thông báo chưa/không tồn tại."""
+    sync = db.sync_session
+    if not event.contains(sync, "after_commit", _after_commit):
+        event.listen(sync, "after_commit", _after_commit)
+        event.listen(sync, "after_rollback", _after_rollback)
+    pending: list[tuple[Any, uuid.UUID, uuid.UUID, dict[str, Any]]] = sync.info.setdefault(_PENDING, [])
+    pending.append((redis, org_id, uid, item))
 
 
 def _iso(dt: datetime | None) -> str | None:
@@ -54,8 +95,8 @@ async def owner_ids(db: AsyncSession, org_id: uuid.UUID) -> list[uuid.UUID]:
 
 async def notify(db: AsyncSession, org_id: uuid.UUID, user_ids: Iterable[uuid.UUID], *, kind: str, title: str,
                  body: str = "", link: str | None = None, redis: Any = None) -> list[dict[str, Any]]:
-    """Ghi một thông báo cho từng người nhận; có `redis` thì đẩy `notification.new` (lỗi đẩy không làm hỏng việc
-    chính — chuông vẫn thấy khi tải lại)."""
+    """Ghi một thông báo cho từng người nhận; có `redis` thì đẩy `notification.new` SAU KHI `db` commit (rollback
+    → không đẩy; lỗi đẩy không làm hỏng việc chính — chuông vẫn thấy khi tải lại)."""
     out: list[dict[str, Any]] = []
     for uid in dict.fromkeys(user_ids):
         row = (await db.execute(text("""
@@ -67,8 +108,7 @@ async def notify(db: AsyncSession, org_id: uuid.UUID, user_ids: Iterable[uuid.UU
         item = _out(row)
         out.append(item)
         if redis is not None:
-            with contextlib.suppress(Exception):
-                await realtime.publish(redis, EVENT, item, org_id=org_id, to_user=uid)
+            _queue_publish(db, redis, org_id, uid, item)
     return out
 
 
