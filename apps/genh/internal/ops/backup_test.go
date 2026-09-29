@@ -80,6 +80,7 @@ func restoreDeps(runner *fake.Runner) RestoreDeps {
 
 func restoreHappyRunner() *fake.Runner {
 	return &fake.Runner{Responses: []fake.Response{
+		{Match: fake.MatchArgsContain("gh.backup", "list"), Lines: []string{"2026-09-20T02:00:00+00:00  " + restoreTestKey + "  1 byte  CSDL=gh"}},
 		{Match: fake.MatchArgsContain("gh.backup", "run", "GH_BACKUP_TRIGGER=pre-restore"), Lines: []string{fakeBackupLogLine}},
 		{Match: fake.MatchArgsContain("stop", "api", "worker"), Output: []byte("")},
 		{Match: fake.MatchArgsContain("run", "--rm", "--no-deps", "-T", "api", "python", "-m", "gh.backup", "restore", "--key"), Output: []byte("")},
@@ -171,6 +172,7 @@ func TestRunRestore_InvalidKey_NoDockerCalls(t *testing.T) {
 func TestRunRestore_SafetyBackupFails_StopsBeforeTouchingAnything(t *testing.T) {
 	env := testEnv(t, testComposePath(t, ""))
 	fr := &fake.Runner{Responses: []fake.Response{
+		{Match: fake.MatchArgsContain("gh.backup", "list"), Lines: []string{restoreTestKey}},
 		{Match: fake.MatchArgsContain("gh.backup", "run", "GH_BACKUP_TRIGGER"), Err: errors.New("db down")},
 	}}
 	_, err := RunRestore(context.Background(), env, restoreTestKey, restoreDeps(fr), &strings.Builder{})
@@ -182,10 +184,47 @@ func TestRunRestore_SafetyBackupFails_StopsBeforeTouchingAnything(t *testing.T) 
 	}
 }
 
+// Khoá không có trong danh mục ⇒ lỗi rõ, không sao lưu/dừng gì.
+func TestRunRestore_KeyMissing_NothingDestructive(t *testing.T) {
+	env := testEnv(t, testComposePath(t, ""))
+	fr := &fake.Runner{Responses: []fake.Response{
+		{Match: fake.MatchArgsContain("gh.backup", "list"), Lines: []string{"2026-09-20T02:00:00+00:00  backups/20260101T000000Z-aaaaaaaa.pgcustom.enc  1 byte"}},
+	}}
+	_, err := RunRestore(context.Background(), env, restoreTestKey, restoreDeps(fr), &strings.Builder{})
+	opErr, ok := err.(*OpError)
+	if !ok || opErr.Code != ErrCodeRestoreFailed || !strings.Contains(opErr.What, "Không tìm thấy") {
+		t.Fatalf("err = %v", err)
+	}
+	if len(fr.Calls) != 1 {
+		t.Errorf("chỉ được chạy list, được %d lệnh", len(fr.Calls))
+	}
+}
+
+// Bản an toàn phải mang GH_BACKUP_KEEP=<khoá> để prune không xoá bản đang khôi phục.
+func TestRunRestore_SafetyBackupPinsRequestedKey(t *testing.T) {
+	env := testEnv(t, testComposePath(t, ""))
+	_, port := listenReadyServer(t, true)
+	env.Port = port
+	fr := restoreHappyRunner()
+	if _, err := RunRestore(context.Background(), env, restoreTestKey, restoreDeps(fr), &strings.Builder{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range fr.Calls {
+		if strings.Contains(strings.Join(c.Cmd.Args, " "), "gh.backup run") {
+			if !strings.Contains(strings.Join(c.Cmd.Args, " "), "-e GH_BACKUP_KEEP="+restoreTestKey) {
+				t.Errorf("thiếu -e GH_BACKUP_KEEP: %v", c.Cmd.Args)
+			}
+			return
+		}
+	}
+	t.Error("không thấy lệnh sao lưu an toàn")
+}
+
 // Restore lỗi giữa chừng → quay về bản an toàn rồi khởi động lại.
 func TestRunRestore_RestoreFails_RollsBackToSafetyAndRestarts(t *testing.T) {
 	env := testEnv(t, testComposePath(t, ""))
 	fr := &fake.Runner{Responses: []fake.Response{
+		{Match: fake.MatchArgsContain("gh.backup", "list"), Lines: []string{restoreTestKey}},
 		{Match: fake.MatchArgsContain("gh.backup", "run", "GH_BACKUP_TRIGGER"), Lines: []string{fakeBackupLogLine}},
 		{Match: fake.MatchArgsContain("stop", "api", "worker"), Output: []byte("")},
 		{Match: fake.MatchArgsContain("restore", "--key", restoreTestKey), Err: errors.New("khoá không tồn tại")},

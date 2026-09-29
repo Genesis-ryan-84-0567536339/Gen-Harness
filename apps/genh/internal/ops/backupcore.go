@@ -48,6 +48,7 @@ asyncio.run(_m())`
 // bản cũ không biết cờ lạ sẽ thoát lỗi, còn biến môi trường lạ thì bỏ qua.
 const (
 	backupTriggerEnv        = "GH_BACKUP_TRIGGER"
+	backupKeepEnv           = "GH_BACKUP_KEEP"
 	BackupTriggerManual     = "manual"
 	BackupTriggerPreUpdate  = "pre-update"
 	BackupTriggerPreRestore = "pre-restore"
@@ -58,7 +59,7 @@ const (
 // trả về khoá backup vừa tạo (đọc từ dòng log) — logic dùng chung giữa `genh
 // backup` (backup.go) và `genh update` (update.go — rollback cần đúng khoá
 // backup vừa tạo TRƯỚC khi đụng gì). trigger ghi vào danh mục backup.
-func runBackupInContainer(ctx context.Context, runner dockercli.Runner, composePath string, envOverlay []string, dir, trigger string) (string, error) {
+func runBackupInContainer(ctx context.Context, runner dockercli.Runner, composePath string, envOverlay []string, dir, trigger string, extraEnv ...string) (string, error) {
 	var lines []string
 	stream := func(args []string) error {
 		lines = nil
@@ -66,7 +67,11 @@ func runBackupInContainer(ctx context.Context, runner dockercli.Runner, composeP
 			lines = append(lines, line)
 		})
 	}
-	cmd := []string{"-e", backupTriggerEnv + "=" + trigger, backupServiceName, "python", "-m", "gh.backup", "run"}
+	cmd := []string{"-e", backupTriggerEnv + "=" + trigger}
+	for _, e := range extraEnv {
+		cmd = append(cmd, "-e", e)
+	}
+	cmd = append(cmd, backupServiceName, "python", "-m", "gh.backup", "run")
 	err := stream(compose.BaseArgs(composePath, append([]string{"exec", "-T"}, cmd...)...))
 	if isServiceNotRunning(err) {
 		err = stream(compose.BaseArgs(composePath, append([]string{"run", "--rm", "--no-deps", "-T"}, cmd...)...))
@@ -122,4 +127,39 @@ func apiCommandArgs(composePath string, oneOff bool, cmd ...string) []string {
 // không chạy ("service \"api\" is not running").
 func isServiceNotRunning(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "is not running")
+}
+
+// checkBackupExists chạy `python -m gh.backup list` trong api và báo lỗi rõ nếu
+// khoá không có trong danh mục — gọi TRƯỚC mọi thao tác phá huỷ.
+func checkBackupExists(ctx context.Context, runner dockercli.Runner, composePath string, envOverlay []string, dir, key string) error {
+	var lines []string
+	list := func(oneOff bool) error {
+		lines = nil
+		args := apiCommandArgs(composePath, oneOff, "python", "-m", "gh.backup", "list")
+		return runner.Stream(ctx, dockercli.Cmd{Name: "docker", Args: args, Env: envOverlay, Dir: dir}, func(l string) { lines = append(lines, l) })
+	}
+	err := list(false)
+	if isServiceNotRunning(err) {
+		err = list(true)
+	}
+	if err != nil {
+		return &OpError{
+			Code: ErrCodeRestoreFailed,
+			What: "Không đọc được danh sách bản sao lưu — DỪNG LẠI, chưa đụng gì",
+			Why:  err.Error(),
+			Next: "Kiểm `genh status` (db/api phải chạy) rồi thử lại.",
+			Err:  err,
+		}
+	}
+	for _, l := range lines {
+		if strings.Contains(l, key) {
+			return nil
+		}
+	}
+	return &OpError{
+		Code: ErrCodeRestoreFailed,
+		What: "Không tìm thấy bản sao lưu " + key + " — DỪNG LẠI, chưa đụng gì",
+		Why:  "khoá không có trong `python -m gh.backup list` (có thể đã bị dọn theo vòng đời)",
+		Next: "Chọn lại bản sao lưu trong Console (Điều khiển hệ thống › Dữ liệu & lưu trữ).",
+	}
 }

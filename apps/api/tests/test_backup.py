@@ -19,7 +19,7 @@ from cryptography.exceptions import InvalidTag
 from sqlalchemy import text
 
 from gh import crypto
-from gh.backup import BackupEntry, _backup_key, is_due, list_backups, restore_backup, run_backup, select_retained
+from gh.backup import BackupEntry, _backup_key, is_due, list_backups, prune, restore_backup, run_backup, select_retained
 from gh.chassis.objects import LocalObjectStore
 from gh.config import get_settings
 from gh.db import sessionmaker
@@ -394,3 +394,37 @@ async def test_restore_overwrite_partitioned_tables_in_place(tmp_path, scratch_d
     with _connect(scratch_db) as c:
         rows = c.execute("SELECT v FROM ev ORDER BY id").fetchall()
     assert [r[0] for r in rows] == ["truoc-backup", "mac-dinh"]
+
+
+# ═══ prune không xoá bản Owner chọn khôi phục ═══════════════════════════════════════════════════════════
+
+async def _seed_old_entries(store: LocalObjectStore) -> tuple[list[BackupEntry], str]:
+    from gh.backup import _write_manifest
+    now = datetime.now(UTC)
+    # 3 bản cùng một ngày rất xa: GFS chỉ giữ bản mới nhất trong ngày, bản cũ nhất sẽ bị prune xoá nếu không được ghim.
+    entries = [BackupEntry(key=f"backups/e{i}.enc", taken_at=now - timedelta(days=2000, hours=-i), database="gh",
+                           size_bytes=1, sha256="x") for i in range(3)]
+    for e in entries:
+        await store.put(e.key, b"x")
+    await _write_manifest(store, entries)
+    return entries, entries[0].key
+
+
+async def test_prune_never_deletes_key_in_gh_backup_keep(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    store = LocalObjectStore(root=str(tmp_path / "objects"))
+    entries, pinned = await _seed_old_entries(store)
+    monkeypatch.setenv("GH_BACKUP_KEEP", f"backups/other.enc, {pinned}")
+    removed = await prune(store=store, entries=entries)
+    assert pinned not in removed
+    monkeypatch.delenv("GH_BACKUP_KEEP")
+    assert pinned in await prune(store=store, entries=entries)  # đối chứng: không ghim thì bị xoá
+
+
+async def test_pre_restore_trigger_skips_prune(tmp_path, scratch_db, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    store = LocalObjectStore(root=str(tmp_path / "objects"))
+    _, old = await _seed_old_entries(store)
+    monkeypatch.delenv("GH_BACKUP_KEEP", raising=False)
+    await run_backup(database_url=f"{PG}/{scratch_db}", store=store, trigger="pre-restore")
+    assert old in [e.key for e in await list_backups(store=store)]
+    await run_backup(database_url=f"{PG}/{scratch_db}", store=store, trigger="manual")
+    assert old not in [e.key for e in await list_backups(store=store)]  # đối chứng: trigger khác vẫn prune

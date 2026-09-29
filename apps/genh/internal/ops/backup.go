@@ -174,8 +174,14 @@ func RunRestore(ctx context.Context, env *Env, key string, deps RestoreDeps, out
 		return docker(append([]string{"run", "--rm", "--no-deps", "-T", backupServiceName}, "python", "-m", "gh.backup", "restore", "--key", k)...)
 	}
 
+	// Kiểm khoá có thật TRƯỚC khi đụng gì (dừng api/worker, sao lưu an toàn).
+	if err := checkBackupExists(ctx, runner, composePath, envOverlay, dir, key); err != nil {
+		return "", err
+	}
+
 	_, _ = fmt.Fprintln(out, "1/4 Sao lưu an toàn trạng thái hiện tại…")
-	safety, err := runBackupInContainer(ctx, runner, composePath, envOverlay, dir, BackupTriggerPreRestore)
+	// GH_BACKUP_KEEP: bản an toàn không được dọn (prune) mất bản đang khôi phục; api cũ bỏ qua biến lạ.
+	safety, err := runBackupInContainer(ctx, runner, composePath, envOverlay, dir, BackupTriggerPreRestore, backupKeepEnv+"="+key)
 	if err != nil {
 		return "", &OpError{
 			Code: ErrCodeRestoreFailed,

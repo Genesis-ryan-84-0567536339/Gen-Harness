@@ -53,6 +53,7 @@ from urllib.parse import SplitResult, urlsplit, urlunsplit
 
 import orjson
 import psycopg
+from arq.worker import func
 from psycopg import sql
 from sqlalchemy import text
 
@@ -75,6 +76,7 @@ RECENT_KEEP_HOURS = 24  # bản trong 24 giờ qua luôn giữ (ngoài GFS) — 
 
 TRIGGERS = ("manual", "scheduled", "pre-update", "pre-restore", "pre-import")
 TRIGGER_ENV = "GH_BACKUP_TRIGGER"
+KEEP_ENV = "GH_BACKUP_KEEP"  # khoá (phẩy phân cách) prune không bao giờ xoá — genh restore ghim bản đang khôi phục
 LOCK_KEY = "gh:backup:lock"
 LOCK_SECONDS = 3600
 JOB_KEY = "gh:backup:job"
@@ -263,7 +265,8 @@ async def run_backup(*, database_url: str | None = None, store: ObjectStore | No
 
     entries = [*await _read_manifest(store), entry]
     await _write_manifest(store, entries)
-    await prune(store=store, entries=entries)
+    if trigger != "pre-restore":  # bản an toàn trước khôi phục không được dọn mất bản Owner vừa chọn
+        await prune(store=store, entries=entries)
     log.info("Backup mới: %s (%d byte, CSDL %s)", key, len(raw), db_name)
     return entry
 
@@ -276,6 +279,7 @@ async def prune(*, store: ObjectStore | None = None, entries: list[BackupEntry] 
     keep_keys = select_retained(entries, now=now)
     recent = (now or datetime.now(UTC)) - timedelta(hours=RECENT_KEEP_HOURS)
     keep_keys |= {e.key for e in entries if e.taken_at >= recent}
+    keep_keys |= {k.strip() for k in os.environ.get(KEEP_ENV, "").split(",") if k.strip()}
     kept, removed = [], []
     for e in entries:
         if e.key in keep_keys:
@@ -408,7 +412,7 @@ async def backup_now(ctx: dict[str, Any], trigger: str = "manual") -> dict[str, 
 
 HOOKS: list[Hook] = []
 JOBS: list[CronJob] = [(scheduled_backup_scan, {"minute": set(range(0, 60, DUE_WINDOW_MIN))})]
-FUNCTIONS = [backup_now]  # job xếp hàng theo yêu cầu (không theo lịch) — gh/worker.py đăng ký
+FUNCTIONS = [func(backup_now, timeout=3600)]  # job xếp hàng theo yêu cầu (không theo lịch) — gh/worker.py đăng ký
 
 
 # ─── CLI: `python -m gh.backup …` (Makefile bọc `make backup` / `make restore BACKUP=<khoá>`) ──────────────
