@@ -31,7 +31,7 @@ export function ApiScreen() {
   const [addingKeyFor, setAddingKeyFor] = useState<Provider | null>(null);
 
   const testAllConnections = async () => {
-    const list = (providers.data ?? []).filter((p) => p.kind !== 'antigravity_cli');
+    const list = (providers.data ?? []).filter((p) => p.kind !== 'antigravity_cli' && p.kind !== 'system_one');
     let ok = 0;
     for (const p of list) {
       try {
@@ -50,7 +50,7 @@ export function ApiScreen() {
         Kiểm tra kết nối
       </Button>
       {canManage ? (
-        <Button variant="primary" icon="ph ph-plus" className="btn-30" onClick={() => setAddingProvider(true)}>
+        <Button variant="primary" icon="ph ph-plus" className="btn-30" data-gen-target="api.add_provider" onClick={() => setAddingProvider(true)}>
           Thêm nhà cung cấp
         </Button>
       ) : null}
@@ -183,6 +183,7 @@ function BindingsPanel({ canManage }: { canManage: boolean }) {
   return (
     <Panel
       title="Gán model cho từng agent"
+      genTarget="api.bindings"
       kicker="Agent nào dùng model nào, với quy tắc nào"
       label="Gán model cho từng agent"
       bodyClass="apm-table-wrap"

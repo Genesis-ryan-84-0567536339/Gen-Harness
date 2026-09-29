@@ -1,0 +1,111 @@
+/* Gen v1 — khung chat phải + lớp phủ làm sáng (docs/design/gen-v1.md §3.1). */
+
+.app { --gen-w: 360px; }
+.app[data-gen='open'] { grid-template-columns: var(--sidebar-full) minmax(0, 1fr) var(--gen-w); }
+.app[data-gen='open'][data-sidebar='rail'] { grid-template-columns: var(--sidebar-rail) minmax(0, 1fr) var(--gen-w); }
+
+.gen-panel {
+  /* Trên lớp phủ làm sáng (z 900): Sếp vẫn đọc/hỏi tiếp khi Gen đang chỉ. */
+  position: sticky; top: 0; z-index: 901; height: 100vh; min-width: 0;
+  display: flex; flex-direction: column;
+  background: var(--rail-bg); border-left: 1px solid var(--color-divider);
+}
+.gen-panel__head {
+  display: flex; align-items: center; gap: 8px; padding: 12px 12px 11px 14px;
+  border-bottom: 1px solid var(--color-divider); min-height: var(--header-height);
+}
+.gen-panel__logo {
+  width: 26px; height: 26px; flex: none; border-radius: var(--radius-md);
+  border: 1px solid var(--color-accent); display: grid; place-items: center;
+  color: var(--color-accent); box-shadow: var(--glow-accent);
+}
+.gen-panel__titles { flex: 1; min-width: 0; }
+.gen-panel__title { font-weight: 600; font-size: 13.5px; }
+.gen-panel__sub { font-size: 11px; color: var(--color-neutral-400); }
+.gen-panel__list { flex: 1; overflow-y: auto; padding: 14px 14px 6px; display: flex; flex-direction: column; gap: 10px; }
+.gen-panel__input {
+  display: flex; align-items: flex-end; gap: 8px; padding: 10px 12px 12px;
+  border-top: 1px solid var(--color-divider);
+}
+.gen-panel__input textarea { flex: 1; resize: none; min-height: 40px; max-height: 140px; font: inherit; }
+
+.gen-empty { color: var(--color-neutral-300); font-size: 12.5px; display: flex; flex-direction: column; gap: 10px; }
+.gen-empty p { margin: 0; }
+
+.gen-msg { max-width: 100%; font-size: 12.8px; line-height: 1.5; display: flex; flex-direction: column; gap: 6px; }
+.gen-msg--user {
+  align-self: flex-end; max-width: 86%; padding: 7px 10px; border-radius: 10px 10px 2px 10px;
+  background: var(--color-surface); border: 1px solid var(--color-divider); white-space: pre-wrap;
+}
+.gen-msg--gen { align-self: stretch; align-items: flex-start; }
+.gen-msg__text { margin: 0; white-space: pre-wrap; color: var(--color-text); }
+
+.gen-chip {
+  display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px;
+  border-radius: var(--radius-pill); border: 1px solid var(--color-divider);
+  font-size: 11px; color: var(--color-neutral-400); background: transparent;
+}
+.gen-chip--btn { cursor: pointer; font: inherit; font-size: 11px; color: var(--color-accent-300); }
+.gen-chip--btn:hover { border-color: var(--color-accent); }
+.gen-chip--btn:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+.gen-suggest { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.gen-thinking { display: inline-flex; align-items: center; gap: 4px; color: var(--color-neutral-400); font-size: 11.5px; }
+.gen-thinking span {
+  width: 5px; height: 5px; border-radius: 50%; background: var(--color-accent-300);
+  animation: gen-blink 1.2s infinite ease-in-out;
+}
+.gen-thinking span:nth-child(2) { animation-delay: 0.15s; }
+.gen-thinking span:nth-child(3) { animation-delay: 0.3s; margin-right: 4px; }
+@keyframes gen-blink { 0%, 80%, 100% { opacity: 0.25; } 40% { opacity: 1; } }
+
+.hd-gen[aria-pressed='true'] { border-color: var(--color-accent); color: var(--color-accent); box-shadow: var(--glow-accent); }
+
+/* ── Lớp phủ làm sáng ── */
+.gen-spot { position: fixed; inset: 0; z-index: 900; pointer-events: none; }
+.gen-spot__dim { position: fixed; inset: 0; background: rgba(4, 6, 12, 0.45); }
+.gen-spot__ring {
+  position: fixed; border-radius: 10px;
+  box-shadow: 0 0 0 9999px rgba(4, 6, 12, 0.55), 0 0 0 2px var(--color-accent), 0 0 18px 4px var(--color-accent);
+  transition: top 0.18s ease, left 0.18s ease, width 0.18s ease, height 0.18s ease;
+  animation: gen-glow 1.6s ease-in-out infinite;
+}
+@keyframes gen-glow {
+  0%, 100% { box-shadow: 0 0 0 9999px rgba(4, 6, 12, 0.55), 0 0 0 2px var(--color-accent), 0 0 10px 2px var(--color-accent); }
+  50% { box-shadow: 0 0 0 9999px rgba(4, 6, 12, 0.55), 0 0 0 2px var(--color-accent), 0 0 22px 6px var(--color-accent); }
+}
+.gen-spot__bubble {
+  position: fixed; pointer-events: auto; padding: 10px 12px 11px;
+  background: var(--color-surface); border: 1px solid var(--color-accent); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg); font-size: 12.8px; line-height: 1.5;
+}
+.gen-spot__head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.gen-spot__who { display: inline-flex; align-items: center; gap: 4px; color: var(--color-accent-300); font-weight: 600; font-size: 11.5px; }
+.gen-spot__step { font-size: 11px; color: var(--color-neutral-400); }
+.gen-spot__close {
+  margin-left: auto; background: none; border: 0; color: var(--color-neutral-400); cursor: pointer; padding: 2px;
+  display: grid; place-items: center; border-radius: var(--radius-sm);
+}
+.gen-spot__close:hover { color: var(--color-text); }
+.gen-spot__msg { margin: 0; color: var(--color-text); }
+.gen-spot__actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 9px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .gen-spot__ring { animation: none; transition: none; }
+  .gen-thinking span { animation: none; opacity: 0.7; }
+}
+
+/* Điện thoại: khung Gen là tấm phủ toàn màn hình. */
+@media (max-width: 760px) {
+  .app[data-gen='open'], .app[data-gen='open'][data-sidebar='rail'] { grid-template-columns: var(--sidebar-rail) minmax(0, 1fr); }
+  .gen-panel { position: fixed; inset: 0; z-index: 800; width: 100%; height: 100dvh; border-left: 0; }
+}
+
+/* ── Thẻ Jev (Bộ não AI) ── */
+.jev-body { padding: 12px 16px 14px; display: flex; flex-direction: column; gap: 10px; }
+.jev-dl { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 5px 10px; margin: 0; font-size: 12.5px; }
+.jev-dl dt { color: var(--color-neutral-400); }
+.jev-dl dd { margin: 0; overflow-wrap: anywhere; }
+.jev-form { display: flex; flex-direction: column; gap: 10px; }
+.jev-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.jev-note { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--color-neutral-400); }

@@ -47,6 +47,7 @@ export function Panel({
   style,
   children,
   label,
+  genTarget,
 }: {
   title: ReactNode;
   kicker?: ReactNode;
@@ -56,9 +57,11 @@ export function Panel({
   style?: CSSProperties;
   children?: ReactNode;
   label?: string;
+  /** Gen v1: `data-gen-target` (id trong packages/contracts/src/genTargets.ts). */
+  genTarget?: string;
 }) {
   return (
-    <section className={cx('gh-card', className)} style={style} aria-label={label}>
+    <section className={cx('gh-card', className)} style={style} aria-label={label} data-gen-target={genTarget}>
       <div className="gh-card__header">
         <div style={{ minWidth: 0 }}>
           <div className="gh-card__title">{title}</div>

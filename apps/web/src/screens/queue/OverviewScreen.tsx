@@ -65,7 +65,7 @@ const QUEUE_HREF: Record<QueueWidgetItem['kind'], (i: QueueWidgetItem) => string
 
 function QueueRow({ item }: { item: QueueWidgetItem }) {
   return (
-    <div className="ov-queue-row">
+    <div className="ov-queue-row" data-gen-target={`overview.queue.row:${item.id}`}>
       <span className="ov-queue-row__tag" style={{ color: queueKindTone(item.kind), borderColor: queueKindTone(item.kind) }}>
         <Icon name={queueKindIcon(item.kind)} size={11} />
         {QUEUE_KIND_LABEL[item.kind]}
@@ -152,7 +152,7 @@ export function OverviewScreen() {
     <div className="screen">
       <UpdateCard />
       <SetupFollowUp />
-      <div className="ov-kpi-row">
+      <div className="ov-kpi-row" data-gen-target="overview.kpis">
         {row1.map((k) => (
           <KpiCard key={k.key} k={k} />
         ))}
@@ -168,12 +168,13 @@ export function OverviewScreen() {
           title="Hàng đợi cần xử lý"
           kicker="Cơ hội · cảnh báo · chờ duyệt · việc đến hạn — ưu tiên trước"
           aside={
-            <Link to="/inbox" className="gh-btn gh-btn--secondary btn-24">
+            <Link to="/inbox" className="gh-btn gh-btn--secondary btn-24" data-gen-target="overview.queue.open_inbox">
               Mở hộp thư ý nghĩa
               <Icon name="ph ph-arrow-right" size={12} />
             </Link>
           }
           bodyClass="ov-queue-list"
+          genTarget="overview.queue"
         >
           {d.queue.length === 0 ? (
             <EmptyState icon="ph ph-check-circle" title="Không có gì cần xử lý ngay" description="Hàng đợi đang trống — quay lại sau." />
@@ -183,7 +184,7 @@ export function OverviewScreen() {
         </Panel>
 
         <div className="ov-side-col">
-          <Panel title="5 đối tượng đáng chú ý nhất" kicker="Today's five" bodyClass="ov-spot-list">
+          <Panel title="5 đối tượng đáng chú ý nhất" kicker="Today's five" bodyClass="ov-spot-list" genTarget="overview.spotlight">
             {d.spotlight.length === 0 ? (
               <EmptyState icon="ph ph-user-focus" title="Chưa có đối tượng nổi bật" />
             ) : (
@@ -212,7 +213,7 @@ export function OverviewScreen() {
       </div>
 
       <div className="ov-bottom-grid">
-        <Panel title="Sức khoẻ hệ thống" kicker={`${fmtInt(d.health.plugins.healthy)} khoẻ · ${fmtInt(d.health.plugins.degraded)} suy giảm · ${fmtInt(d.health.plugins.isolated)} cách ly`}>
+        <Panel genTarget="overview.health" title="Sức khoẻ hệ thống" kicker={`${fmtInt(d.health.plugins.healthy)} khoẻ · ${fmtInt(d.health.plugins.degraded)} suy giảm · ${fmtInt(d.health.plugins.isolated)} cách ly`}>
           <div className="ov-health">
             {d.health.channels.map((c) => (
               <div className="ov-health__row" key={c.type}>

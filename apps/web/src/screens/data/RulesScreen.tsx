@@ -40,11 +40,11 @@ export function RulesScreen() {
 
   const actions = (
     <>
-      <Button variant="secondary" icon="ph ph-flask" className="btn-30" onClick={() => setBatchOpen(true)}>
+      <Button variant="secondary" icon="ph ph-flask" className="btn-30" data-gen-target="rules.batch" onClick={() => setBatchOpen(true)}>
         Chạy thử trên 100 bản ghi
       </Button>
       {canManage ? (
-        <Button variant="primary" icon="ph ph-plus" className="btn-30" onClick={() => setEditing({ rule: null })}>
+        <Button variant="primary" icon="ph ph-plus" className="btn-30" data-gen-target="rules.add" onClick={() => setEditing({ rule: null })}>
           Thêm quy tắc
         </Button>
       ) : null}
@@ -57,7 +57,7 @@ export function RulesScreen() {
       <div className="screen">
         <ScreenHead title={meta.title} description={meta.description} maxWidth={760} actions={actions} />
         <div className="rules-grid">
-          <div className="rule-list" aria-label="Danh sách quy tắc" aria-busy={rules.isFetching || undefined}>
+          <div className="rule-list" aria-label="Danh sách quy tắc" aria-busy={rules.isFetching || undefined} data-gen-target="rules.list">
             {rules.isPending ? (
               Array.from({ length: 4 }, (_, i) => <RuleCardSkeleton key={i} />)
             ) : rules.isError ? (
@@ -205,7 +205,7 @@ function WeightsCard({ canManage }: { canManage: boolean }) {
   };
 
   return (
-    <Panel title="Trọng số chấm điểm" kicker="Evaluation Fabric · dùng chung cho mọi đối tượng" label="Trọng số chấm điểm">
+    <Panel genTarget="rules.weights" title="Trọng số chấm điểm" kicker="Evaluation Fabric · dùng chung cho mọi đối tượng" label="Trọng số chấm điểm">
       {weights.isPending ? (
         <SkeletonLines rows={6} padding="13px 16px 15px" gap={11} />
       ) : weights.isError ? (
@@ -278,6 +278,7 @@ function TestCard() {
 
   return (
     <Panel
+      genTarget="rules.tryone"
       title="Chạy thử một bản ghi"
       kicker="Thô vào — sạch ra"
       label="Chạy thử một bản ghi"

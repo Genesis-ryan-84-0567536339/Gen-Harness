@@ -28,10 +28,10 @@ export function AgentsScreen() {
 
   const actions = canManage ? (
     <>
-      <Button variant="secondary" icon="ph ph-copy" className="btn-30" onClick={() => setCloning(true)} disabled={!agents.data?.length}>
+      <Button variant="secondary" icon="ph ph-copy" className="btn-30" data-gen-target="agents.clone" onClick={() => setCloning(true)} disabled={!agents.data?.length}>
         Nhân bản
       </Button>
-      <Button variant="primary" icon="ph ph-plus" className="btn-30" onClick={() => setEditing({ agent: null, template: null })}>
+      <Button variant="primary" icon="ph ph-plus" className="btn-30" data-gen-target="agents.add" onClick={() => setEditing({ agent: null, template: null })}>
         Tạo agent mới
       </Button>
     </>
@@ -41,7 +41,7 @@ export function AgentsScreen() {
     <div className="screen">
       <ScreenHead title={meta.title} description={meta.description} maxWidth={700} actions={actions} />
 
-      <div className="ag-grid" role="list" aria-label="Danh sách agent" aria-busy={agents.isFetching || undefined}>
+      <div className="ag-grid" role="list" aria-label="Danh sách agent" aria-busy={agents.isFetching || undefined} data-gen-target="agents.list">
         {agents.isPending ? (
           Array.from({ length: 3 }, (_, i) => <AgentCardSkeleton key={i} />)
         ) : agents.isError ? (
@@ -156,6 +156,7 @@ function DecisionsPanel() {
   const decisions = useAgentDecisions(undefined, undefined, full ? 50 : 8);
   return (
     <Panel
+      genTarget="agents.decisions"
       title="Agent đã nói gì, nhân danh gì"
       kicker="Mọi phát ngôn đều ghi lại danh tính đứng tên"
       aside={
@@ -190,7 +191,7 @@ function DecisionsPanel() {
 function TemplatesPanel({ canManage, onUseTemplate }: { canManage: boolean; onUseTemplate: (t: AgentTemplate) => void }) {
   const templates = useAgentTemplates();
   return (
-    <Panel title="Mẫu có sẵn" kicker="Template tùy chọn · không phải bản sắc hệ thống" bodyClass="ag-templates" label="Mẫu có sẵn">
+    <Panel genTarget="agents.templates" title="Mẫu có sẵn" kicker="Template tùy chọn · không phải bản sắc hệ thống" bodyClass="ag-templates" label="Mẫu có sẵn">
       {templates.isPending ? (
         <SkeletonLines rows={4} padding="8px 16px" />
       ) : templates.isError ? (
