@@ -21,6 +21,7 @@ export function SavedViewsButton() {
         icon="ph ph-bookmark-simple"
         label="Góc nhìn đã lưu"
         variant="secondary"
+        className="hd-saved"
         onClick={() => setOpen(true)}
         disabled={!screen}
       />

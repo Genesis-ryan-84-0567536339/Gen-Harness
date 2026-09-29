@@ -25,15 +25,21 @@ import './styles/p4-plugins.css';
 import './styles/system.css';
 import './styles/account.css';
 import './styles/gen.css';
+import './styles/notifications.css';
+import './styles/errors.css';
+import './styles/theme.css';
 import { queryClient } from './lib/queryClient';
 import { createAppRouter } from './router';
+import { ErrorBoundary } from './shell/ErrorPage';
 
 const router = createAppRouter();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
-    </QueryClientProvider>
+    <ErrorBoundary variant="page">
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>
+    </ErrorBoundary>
   </StrictMode>,
 );

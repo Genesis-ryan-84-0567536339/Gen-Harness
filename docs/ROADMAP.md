@@ -16,6 +16,7 @@ v0.1.15–0.1.20: thiết lập "Để sau" + hướng dẫn từng bước, nú
 Tài khoản của tôi + bắt buộc đổi mật khẩu tạm, sao lưu & khôi phục trên giao diện.
 v0.1.21: Gen v1 (A1–A3) — khung chat, dẫn đường trên UI, nguồn Jev; cờ `gen.enabled` (bật cho Owner).
 v0.1.22: Đợt B1–B3 — quản lý người dùng, sửa thông tin công ty, trang Trợ giúp.
+v0.1.23: Đợt B4–B7 — giao diện điện thoại, trang lỗi/404, chuông thông báo, sáng/tối.
 
 ## Đợt A — Gen v1 (thiết kế: docs/design/gen-v1.md)
 - ✅ A1 Khung chat phải + Gen trả lời/tóm tắt (chỉ đọc), lưu hội thoại, Nhật ký hành động — v0.1.21.
@@ -28,7 +29,10 @@ v0.1.22: Đợt B1–B3 — quản lý người dùng, sửa thông tin công ty
 - ✅ B1 quản lý người dùng (mời, đổi vai trò, khoá/mở khoá, đặt lại mật khẩu) — v0.1.22.
 - ✅ B2 sửa thông tin công ty (Điều khiển hệ thống › Tổ chức) — v0.1.22.
 - ✅ B3 Trợ giúp/Giới thiệu/phiên bản (`/help`, Báo lỗi) — v0.1.22.
-- B4 giao diện điện thoại · B5 trang lỗi · B6 chuông thông báo · B7 sáng/tối.
+- ✅ B4 giao diện điện thoại (ngăn kéo danh mục, Gen phủ toàn màn, 375px không cuộn ngang) — v0.1.23.
+- ✅ B5 trang lỗi (có mã lỗi) + trang 404 — v0.1.23.
+- ✅ B6 chuông thông báo (`/notifications`, cập nhật trực tiếp qua WebSocket) — v0.1.23.
+- ✅ B7 sáng/tối (mặc định theo hệ thống, nhớ theo từng người dùng) — v0.1.23.
 
 ## Đợt C — Hạ tầng dữ liệu
 C1 Sàng lọc dùng Jev làm lớp lọc đầu (rác, trùng, chấm điểm) + đo chi phí/độ chính xác.

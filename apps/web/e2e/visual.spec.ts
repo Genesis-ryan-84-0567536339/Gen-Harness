@@ -358,6 +358,27 @@ const outDir = join(resultsDir, 'visual');
 /** Màn spec bổ sung (quyết định Q5) không có trong thiết kế: ẩn khỏi danh mục khi so ảnh. */
 const EXTRA_SCREENS = ['tasks', 'documents', 'deals'];
 
+/**
+ * Nút header thêm SAU thiết kế gốc: Gen ✦ (v0.1.21), chuông thông báo + sáng/tối (v0.1.23, B6–B7). Thiết kế không vẽ
+ * chúng nên để nguyên thì header lệch vài chục px ở mọi màn (lỗi "Gen ✦" trước đây). Cách làm: TRƯỚC khi chụp, kiểm
+ * chúng thật sự hiện, nằm gọn trong header và không làm header cao hơn (không mất độ phủ); SAU đó mới ẩn đúng các nút
+ * này để so phần còn lại của header với thiết kế theo ngưỡng cũ.
+ */
+const EXTRA_HEADER_CONTROLS = ['.hd-gen', '.hd-bell-wrap', '.hd-theme'];
+
+async function checkExtraHeaderControls(page: Page, name: string): Promise<void> {
+  const header = await page.locator('header.hd').boundingBox();
+  expect(header, `${name}: header`).not.toBeNull();
+  expect.soft(Math.round(header!.height), `${name}: header vẫn cao ${HEADER}px`).toBe(HEADER);
+  for (const sel of EXTRA_HEADER_CONTROLS) {
+    const el = page.locator(`header.hd ${sel}`);
+    await expect(el, `${name}: ${sel} hiện trên header`).toBeVisible();
+    const b = (await el.boundingBox())!;
+    expect.soft(b.x >= header!.x && b.x + b.width <= header!.x + header!.width + 0.5, `${name}: ${sel} nằm trong header`).toBe(true);
+    expect.soft(b.y >= header!.y && b.y + b.height <= header!.y + header!.height + 0.5, `${name}: ${sel} không tràn dòng`).toBe(true);
+  }
+}
+
 /** Tô đen cùng một vùng ở cả hai ảnh (logo đầu heo thay radar theo yêu cầu 24/09/2026). */
 function blank(png: PNG, box: { x: number; y: number; width: number; height: number }) {
   for (let y = Math.floor(box.y); y < Math.ceil(box.y + box.height); y++)
@@ -436,10 +457,15 @@ for (const sc of SCENARIOS) {
     await loginAsOwner(appPage);
     await appPage.goto(sc.appPath);
     if (sc.afterGoto) await sc.afterGoto(appPage);
-    await expect(appPage.getByText('tự trị 4')).toBeVisible();
+    await expect(appPage.locator('header.hd').getByText('tự trị 4')).toBeVisible();
     await expect(appPage.locator('.sb-avatar')).toHaveText('CL');
     await expect(appPage.locator('.sb-nav .sb-item').first()).toBeVisible();
-    await appPage.addStyleTag({ content: EXTRA_SCREENS.map((k) => `[data-screen="${k}"]`).join(',') + '{display:none !important}' });
+    await checkExtraHeaderControls(appPage, sc.name);
+    await appPage.addStyleTag({
+      content:
+        [...EXTRA_SCREENS.map((k) => `[data-screen="${k}"]`), ...EXTRA_HEADER_CONTROLS.map((c) => `header.hd ${c}`)].join(',') +
+        '{display:none !important}',
+    });
     await settle(appPage);
     const app = await shot(appPage, `app-${sc.name}.png`);
     const logo = await appPage.locator('.sb-logo__tile').boundingBox();

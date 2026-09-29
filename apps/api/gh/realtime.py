@@ -50,7 +50,8 @@ def register_event(type: str, permission: str | None, *, masked: bool = False) -
 register_event("draft.new", "action.approve")
 register_event("draft.updated", "action.approve")
 # Gen v1: bước trả lời của khung chat — luôn kèm `to_user` (chỉ người hỏi nhận), xem gh.gen.engine.
-PRIVATE_PREFIX = "gen."
+# v0.1.23: thông báo chuông (`notification.new`, gh.notifications) cũng chỉ gửi đúng người nhận.
+PRIVATE_PREFIXES = ("gen.", "notification.")
 register_event("gen.step", None)
 register_event("gen.done", None)
 
@@ -116,7 +117,7 @@ class Hub:
     async def dispatch(self, msg: dict[str, Any]) -> None:
         org = msg.pop("org_id", None)
         to_user = msg.pop("to_user", None)
-        if msg.get("type", "").startswith(PRIVATE_PREFIX) and not to_user:
+        if msg.get("type", "").startswith(PRIVATE_PREFIXES) and not to_user:
             return  # sự kiện riêng tư thiếu người nhận → bỏ, không phát cho cả tổ chức
         text = orjson.dumps(msg).decode()
         masked: str | None = None

@@ -4,17 +4,21 @@ import type { NavDomain, NavItem } from '@gen-harness/contracts';
 import { ErrorState, Icon, Skeleton, Tooltip, toneColor, toneTint } from '@gen-harness/ui';
 import { useNavigation } from '../lib/queries';
 import { useUiStore } from '../lib/uiStore';
+import { useIsMobile } from '../lib/useMediaQuery';
 import { AccountFooter } from './AccountFooter';
 import { Logo } from './Logo';
 import { domainColor, groupAction, groupView, itemTitle } from './navModel';
 
 export function Sidebar({ activeKey }: { activeKey: string | null }) {
-  const mode = useUiStore((s) => s.sidebarMode);
+  const stored = useUiStore((s) => s.sidebarMode);
+  // B4: trên điện thoại thanh bên là ngăn kéo trượt ra — luôn hiện đủ tên mục.
+  const mobile = useIsMobile();
+  const mode = mobile ? 'full' : stored;
   const wide = mode === 'full';
   const nav = useNavigation();
 
   return (
-    <aside className="sb" data-mode={mode} aria-label="Thanh bên">
+    <aside className="sb" id="app-sidebar" data-mode={mode} aria-label="Thanh bên">
       <Logo wide={wide} />
       <div className="sb-rule" aria-hidden />
       <nav className="sb-nav" aria-label="Danh mục màn hình">

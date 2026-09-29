@@ -126,16 +126,3 @@ export function ScreenPage({ screenKey }: { screenKey: string }) {
     </div>
   );
 }
-
-export function NotFoundScreen() {
-  useEffect(() => {
-    document.title = 'Không tìm thấy · Gen-Harness';
-  }, []);
-  return (
-    <div className="screen">
-      <Card padded={false}>
-        <EmptyState icon="ph ph-warning-circle" title="Không tìm thấy màn hình" description="Đường dẫn này không thuộc Console. Chọn một màn ở thanh bên." />
-      </Card>
-    </div>
-  );
-}

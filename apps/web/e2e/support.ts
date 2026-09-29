@@ -150,7 +150,7 @@ export async function loginAs(page: Page, email: string, password = OWNER.passwo
 }
 
 /** POST a test hook on the mock (`/api/v1/__mock/{name}`). */
-export async function mockHook(request: APIRequestContext, name: 'emit' | 'raw' | 'scan' | 'simulate' | 'bridge', data: unknown = {}) {
+export async function mockHook(request: APIRequestContext, name: 'emit' | 'raw' | 'scan' | 'simulate' | 'bridge' | 'notify', data: unknown = {}) {
   const res = await request.post(`/api/v1/__mock/${name}`, { data });
   if (res.status() >= 400) throw new Error(`mock hook ${name} failed: ${res.status()}`);
   return res;

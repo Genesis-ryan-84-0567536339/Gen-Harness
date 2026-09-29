@@ -13,11 +13,12 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gh import notifications
 from gh.auth import rbac, service
 from gh.auth.account import EMAIL_RE
 from gh.auth.deps import require, require_pin
@@ -154,7 +155,7 @@ async def invite_user(body: InviteIn, me: service.CurrentUser = Depends(MANAGE),
 
 
 @router.patch("/{user_id}/role")
-async def change_role(user_id: uuid.UUID, body: RoleIn, me: service.CurrentUser = Depends(MANAGE),
+async def change_role(user_id: uuid.UUID, body: RoleIn, request: Request, me: service.CurrentUser = Depends(MANAGE),
                       _pin: Any = Depends(require_pin("roles.change")), db: AsyncSession = DB) -> dict[str, Any]:
     row = await _one(db, me, user_id)
     _not_self(me, row, "đổi vai trò")
@@ -166,6 +167,10 @@ async def change_role(user_id: uuid.UUID, body: RoleIn, me: service.CurrentUser 
                      {"u": row.id, "r": await _role_id(db, me.org_id, body.role)})
     await db.execute(text("UPDATE core.users SET updated_at = now() WHERE id = :u"), {"u": row.id})
     await _log(db, me, "user.role_changed", row, {"from": row.role_code, "to": body.role})
+    new_name = next((rd.name for rd in rbac.ROLES if rd.code == body.role), body.role)
+    await notifications.notify(db, me.org_id, [row.id], kind="user.role_changed", title="Vai trò của bạn đã đổi",
+                               body=f"{me.display_name} đã đổi vai trò của bạn thành {new_name}.", link="/account",
+                               redis=request.app.state.redis)
     return _out(await _one(db, me, user_id), me)
 
 
@@ -185,7 +190,7 @@ async def deactivate_user(user_id: uuid.UUID, me: service.CurrentUser = Depends(
 
 
 @router.post("/{user_id}/reactivate")
-async def reactivate_user(user_id: uuid.UUID, me: service.CurrentUser = Depends(MANAGE),
+async def reactivate_user(user_id: uuid.UUID, request: Request, me: service.CurrentUser = Depends(MANAGE),
                           _pin: Any = Depends(require_pin("user.manage")), db: AsyncSession = DB) -> dict[str, Any]:
     row = await _one(db, me, user_id)
     if row.is_active:
@@ -193,11 +198,13 @@ async def reactivate_user(user_id: uuid.UUID, me: service.CurrentUser = Depends(
     await db.execute(text("UPDATE core.users SET is_active = true, updated_at = now() WHERE id = :u"),
                      {"u": row.id})
     await _log(db, me, "user.reactivated", row)
+    await notifications.notify(db, me.org_id, [row.id], kind="user.reactivated", title="Tài khoản đã được mở khoá",
+                               body=f"{me.display_name} đã mở khoá tài khoản của bạn.", redis=request.app.state.redis)
     return _out(await _one(db, me, user_id), me)
 
 
 @router.post("/{user_id}/reset-password")
-async def reset_password(user_id: uuid.UUID, me: service.CurrentUser = Depends(MANAGE),
+async def reset_password(user_id: uuid.UUID, request: Request, me: service.CurrentUser = Depends(MANAGE),
                          _pin: Any = Depends(require_pin("user.manage")), db: AsyncSession = DB) -> dict[str, Any]:
     row = await _one(db, me, user_id)
     _not_self(me, row, "đặt lại mật khẩu")
@@ -206,4 +213,7 @@ async def reset_password(user_id: uuid.UUID, me: service.CurrentUser = Depends(M
                           "updated_at = now() WHERE id = :u"), {"h": hash_secret(temp_password), "u": row.id})
     revoked = await _revoke_all(db, row.id)
     await _log(db, me, "user.password_reset", row, {"sessions_revoked": revoked})
+    await notifications.notify(db, me.org_id, [row.id], kind="user.password_reset", title="Mật khẩu đã được đặt lại",
+                               body=f"{me.display_name} đã đặt lại mật khẩu của bạn. Nếu không phải bạn yêu cầu, "
+                                    "hãy báo Owner.", link="/account", redis=request.app.state.redis)
     return {"user": _out(await _one(db, me, user_id), me), "temp_password": temp_password}

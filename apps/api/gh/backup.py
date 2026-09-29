@@ -377,6 +377,9 @@ async def scheduled_backup_scan(ctx: dict[str, Any]) -> dict[str, Any]:
         return {"skipped": "locked"}
     try:
         entry = await run_backup(store=store, trigger="scheduled")
+    except Exception as exc:
+        await _notify_owners(redis, ok=False, message=f"Bản sao lưu theo lịch lỗi: {str(exc)[-260:]}")
+        raise
     finally:
         if redis is not None:
             await redis.delete(LOCK_KEY)
@@ -387,6 +390,26 @@ async def _set_job(redis: Any, **fields: Any) -> None:
     raw = await redis.get(JOB_KEY)
     cur = orjson.loads(raw) if raw else {}
     await redis.set(JOB_KEY, orjson.dumps({**cur, **fields}), ex=7 * 24 * 3600)
+
+
+async def _notify_owners(redis: Any, *, ok: bool, message: str) -> None:
+    """v0.1.23 (B6): báo kết quả sao lưu lên chuông thông báo của các Owner. Lỗi ở đây không được làm hỏng
+    kết quả sao lưu — chỉ ghi log."""
+    from gh import notifications
+    from gh.db import sessionmaker
+
+    try:
+        async with sessionmaker()() as db:
+            orgs = (await db.execute(text("SELECT id FROM core.organizations ORDER BY created_at"))).scalars().all()
+            for org in orgs:
+                await notifications.notify(
+                    db, org, await notifications.owner_ids(db, org),
+                    kind="backup.done" if ok else "backup.failed",
+                    title="Sao lưu đã xong" if ok else "Sao lưu thất bại",
+                    body=message, link="/system?tab=storage", redis=redis)
+            await db.commit()
+    except Exception:  # noqa: BLE001
+        log.exception("Không ghi được thông báo sao lưu")
 
 
 async def backup_now(ctx: dict[str, Any], trigger: str = "manual") -> dict[str, Any]:
@@ -403,10 +426,12 @@ async def backup_now(ctx: dict[str, Any], trigger: str = "manual") -> dict[str, 
     except Exception as exc:  # noqa: BLE001 — báo lỗi cho Console, không nuốt im lặng
         log.exception("Sao lưu ngay thất bại")
         await _set_job(redis, state="failed", finished_at=datetime.now(UTC).isoformat(), message=str(exc)[-500:])
+        await _notify_owners(redis, ok=False, message=str(exc)[-300:])
         return {"failed": str(exc)[-500:]}
     finally:
         await redis.delete(LOCK_KEY)
     await _set_job(redis, state="done", finished_at=datetime.now(UTC).isoformat(), key=entry.key)
+    await _notify_owners(redis, ok=True, message=f"Bản {entry.key} đã được lưu.")
     return {"ran": entry.key}
 
 

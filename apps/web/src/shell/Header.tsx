@@ -6,6 +6,8 @@ import { SavedViewsButton } from '../screens/core/SavedViews';
 import { useUiStore } from '../lib/uiStore';
 import { autonomyTooltip, confidencePercent } from './headerModel';
 import { GenToggle } from '../gen/GenToggle';
+import { NotificationBell } from './NotificationBell';
+import { ThemeToggle } from './ThemeToggle';
 
 export interface Crumbs {
   /** Domain chip, e.g. "KINH DOANH". */
@@ -21,11 +23,23 @@ export function Header({ crumbs }: { crumbs: Crumbs | null }) {
   const showEnglish = useUiStore((s) => s.showEnglish);
   const status = useHeaderStatus();
   const navigate = useNavigate();
+  const drawerOpen = useUiStore((s) => s.drawerOpen);
+  const setDrawerOpen = useUiStore((s) => s.setDrawerOpen);
   const hasSub = !!crumbs && showEnglish && !crumbs.group && !!crumbs.subtitle;
 
   return (
     <header className="hd">
       <div className="hd-left">
+        {/* B4: chỉ hiện trên điện thoại (shell.css) — mở ngăn kéo danh mục. */}
+        <IconButton
+          icon="ph ph-list"
+          label={drawerOpen ? 'Đóng danh mục' : 'Mở danh mục'}
+          tooltip={false}
+          className="hd-menu"
+          aria-controls="app-sidebar"
+          aria-expanded={drawerOpen}
+          onClick={() => setDrawerOpen(!drawerOpen)}
+        />
         {crumbs ? (
           <>
             <span className="hd-chip">{crumbs.domain}</span>
@@ -44,25 +58,30 @@ export function Header({ crumbs }: { crumbs: Crumbs | null }) {
         ) : null}
       </div>
       <div className="hd-right">
-        {status.isPending ? (
-          <>
-            <Skeleton width={118} height={28} radius={999} />
-            <Skeleton width={78} height={28} radius={999} />
-            <Skeleton width={62} height={28} radius={999} />
-          </>
-        ) : status.isError ? (
-          <Tooltip content="Không tải được trạng thái — bấm để thử lại">
-            <button type="button" className="hd-pill-btn" onClick={() => void status.refetch()}>
-              <Pill icon="ph ph-warning-circle" iconColor="var(--color-bad)">
-                mất trạng thái
-              </Pill>
-            </button>
-          </Tooltip>
-        ) : (
-          <StatusPills s={status.data} />
-        )}
+        {/* display: contents trên máy tính (bố cục y như thiết kế); ẩn trên điện thoại hẹp. */}
+        <div className="hd-status">
+          {status.isPending ? (
+            <>
+              <Skeleton width={118} height={28} radius={999} />
+              <Skeleton width={78} height={28} radius={999} />
+              <Skeleton width={62} height={28} radius={999} />
+            </>
+          ) : status.isError ? (
+            <Tooltip content="Không tải được trạng thái — bấm để thử lại">
+              <button type="button" className="hd-pill-btn" onClick={() => void status.refetch()}>
+                <Pill icon="ph ph-warning-circle" iconColor="var(--color-bad)">
+                  mất trạng thái
+                </Pill>
+              </button>
+            </Tooltip>
+          ) : (
+            <StatusPills s={status.data} />
+          )}
+        </div>
         <SavedViewsButton />
         <GenToggle />
+        <NotificationBell />
+        <ThemeToggle />
         <IconButton icon="ph ph-magnifying-glass" label="Tìm theo ý định" variant="primary" onClick={() => navigate('/search')} />
       </div>
     </header>

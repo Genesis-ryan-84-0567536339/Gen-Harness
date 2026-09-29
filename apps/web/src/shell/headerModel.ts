@@ -20,3 +20,8 @@ export function confidencePercent(v: number | null | undefined): number | null {
   if (v === null || v === undefined || Number.isNaN(v)) return null;
   return Math.round(v <= 1 ? v * 100 : v);
 }
+
+/** "9+" khi quá 9 — huy hiệu giữ gọn trong nút 32px. */
+export function badgeText(n: number): string {
+  return n > 9 ? '9+' : String(n);
+}

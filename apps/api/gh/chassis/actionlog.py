@@ -72,6 +72,15 @@ async def record(db: AsyncSession, *, org_id: uuid.UUID, actor_type: str, actor_
     return head.id
 
 
+def exempt() -> None:
+    """Request ghi KHÔNG phải một hành động nghiệp vụ (vd đánh dấu đã đọc thông báo của chính mình): báo
+    `ActionLogGuard` không ghi dòng `http.*` chung, tránh làm loãng Nhật ký. Chỉ dùng cho thay đổi riêng tư,
+    không ảnh hưởng dữ liệu người khác."""
+    marker = request_marker.get()
+    if marker is not None:
+        marker.append(uuid.UUID(int=0))
+
+
 @dataclass
 class ChainReport:
     ok: bool

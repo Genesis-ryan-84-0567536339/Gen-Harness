@@ -8,7 +8,8 @@ import { ForcePasswordPage } from './account/ForcePasswordPage';
 import { GuidePage } from './guide/GuidePage';
 import { HelpPage } from './help/HelpPage';
 import { GuideStepPage } from './guide/GuideStepPage';
-import { NotFoundScreen, ScreenPage } from './screens/ScreenPage';
+import { ScreenPage } from './screens/ScreenPage';
+import { NotFoundPage, RouteErrorPage } from './shell/ErrorPage';
 import { SetupPage } from './setup/SetupPage';
 import { AppShell } from './shell/AppShell';
 import { ACCOUNT_CRUMBS, HELP_CRUMBS, type RouteHandle } from './shell/routeHandles';
@@ -55,6 +56,8 @@ export const routes: RouteObject[] = [
         <RootLayout />
       </>
     ),
+    // B5: lỗi vẽ/tải trong route → trang lỗi có mã thay cho trang lỗi mặc định của react-router.
+    errorElement: <RouteErrorPage />,
     children: [
       { path: '/login', element: <LoginPage /> },
       { path: '/setup', element: <SetupPage /> },
@@ -73,7 +76,8 @@ export const routes: RouteObject[] = [
           { path: 'account', handle: { page: ACCOUNT_CRUMBS } satisfies RouteHandle, element: <AccountPage /> },
           // Trợ giúp / Giới thiệu (v0.1.22) — phiên bản, hỏi Gen, lệnh genh, Báo lỗi.
           { path: 'help', handle: { page: HELP_CRUMBS } satisfies RouteHandle, element: <HelpPage /> },
-          { path: '*', element: <NotFoundScreen /> },
+          // B5: trang 404 trong khung Console (thanh bên vẫn dùng được).
+          { path: '*', element: <NotFoundPage /> },
         ],
       },
     ],
