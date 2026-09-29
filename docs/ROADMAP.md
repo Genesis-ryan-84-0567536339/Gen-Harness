@@ -44,3 +44,4 @@ v0.1.25: Đợt C1 — lọc đầu Hộp thư (trùng, rác, điểm) dùng Jev
 ## Đợt D — Phòng làm việc chung (repo Gen-hub, cần mở quyền repo cho phiên này)
 D1 Gen nối Kho/warroom/kanban của Gen-hub. D2 Jules worker trong gen-workplace (mỗi tài khoản có hạn mức riêng;
 kiểm điều khoản dùng nhiều tài khoản trước khi chạy song song 5 tài khoản). D3 Playwright cho agent vòng ngoài.
+Thiết kế: docs/design/gen-hub-link.md (lát đầu v0.1.26 — Gen đọc Kho qua Gen-hub, chỉ-đọc).
