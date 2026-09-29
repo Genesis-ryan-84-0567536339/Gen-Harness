@@ -4,6 +4,7 @@ Gen chỉ đề xuất (bước `proposal`); ghi thật chỉ khi người dùng
 Action Log actor=user, via=gen. Nhắc việc đến giờ → thông báo chuông (job task_reminder_scan).
 """
 
+import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -272,3 +273,36 @@ async def test_past_reminder_rejected_and_proposal_limit(owner_api: Api, app: An
     assert [p["fields"]["title"] for p in _proposals(t)] == ["n0", "n1", "n2"]
     fb = router.calls[1][-1].content
     assert "giờ nhắc đã qua" in fb and "tối đa 3 đề xuất" in fb
+
+
+async def test_assign_inbox_item_shows_which_item(owner_api: Api, app: Any) -> None:
+    """Thẻ giao mục Hộp thư phải nêu đúng mục (mã + tiêu đề), không ghi chung chung."""
+    d = (await owner_api.send("POST", "/drafts", {"kind": "message", "title": "Báo giá gỗ thông",
+                                                 "text": "nội dung"})).json()
+    items = (await owner_api.get("/inbox", params={"tab": "all"})).json()["items"]
+    item = next(i for i in items if i["title"] == "Báo giá gỗ thông")
+    me = await _me(owner_api)
+    router = FakeRouter([
+        {"steps": [{"kind": "tool", "name": "queue.list", "args": {"tab": "all"}}]},
+        {"steps": [{"kind": "propose", "proposal": {"type": "assign", "fields": {
+            "item_type": "inbox", "item_id": item["id"], "user_id": me["id"]}}}]}])
+    ps = _proposals(await ask(owner_api, app, router, "giao mục này cho tôi", screen="inbox"))
+    assert len(ps) == 1, d
+    assert "Báo giá gỗ thông" in ps[0]["labels"]["item"] and "Báo giá gỗ thông" in ps[0]["summary"]
+
+
+async def test_confirm_does_not_block_on_session_row_lock(owner_api: Api, app: Any) -> None:
+    """Phiên sắp hết hạn → request ngoài UPDATE core.sessions (gia hạn phiên); lời gọi nội bộ cũng tải đúng phiên
+    đó. Nếu transaction ngoài còn mở (giữ khoá dòng) lúc gọi nội bộ thì hai bên chờ nhau tới hết timeout."""
+    router = FakeRouter([{"steps": [{"kind": "propose", "proposal": {"type": "reminder", "fields": {
+        "title": "Gọi lại", "remind_at": _soon(), "priority": "P2"}}}]}])
+    p = _proposals(await ask(owner_api, app, router, "Nhắc tôi gọi lại", screen="tasks"))[0]
+    me = await _me(owner_api)
+    async with admin_sessionmaker()() as db:
+        await db.execute(text("UPDATE core.sessions SET expires_at = now() + interval '1 minute' WHERE user_id = :u"),
+                         {"u": me["id"]})
+        await db.commit()
+    r = await asyncio.wait_for(owner_api.send("POST", f"/gen/proposals/{p['id']}/confirm", {}), 10)
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "confirmed"
+    assert len(await _log("gen.proposal_confirmed")) == 1

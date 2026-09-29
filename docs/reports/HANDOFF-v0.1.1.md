@@ -600,7 +600,10 @@ Thiết kế: `docs/design/gen-v1.md` §10. Gen **không tự ghi**; chỉ đề
     PIN nếu nhạy cảm (423), chống bấm trùng (khoá Redis 60 s; 409 `GEN_PROPOSAL_BUSY`; đã xử lý → 409 `GEN_PROPOSAL_DECIDED`;
     của người khác / hết hạn → 404). Thực hiện bằng **gọi nội bộ (ASGI) endpoint sẵn có** với phiên + CSRF của người bấm:
     `POST /drafts` (kind `message`, nhóm → đích gửi theo kênh của nhóm; luôn **chờ duyệt**), `POST /tasks`, `PATCH /tasks/{id}`,
-    `POST /inbox/{id}/assign`. Endpoint lỗi → trả nguyên mã lỗi, đề xuất vẫn chờ (thử lại được).
+    `POST /inbox/{id}/assign`. Endpoint lỗi → trả nguyên mã lỗi, đề xuất vẫn chờ (thử lại được). Trước lời gọi nội bộ,
+    request ngoài **commit** (không giữ khoá dòng `core.sessions` khi gia hạn phiên/trượt phiên PIN — tránh hai request chờ
+    nhau) rồi đặt lại `app.org_id` cho phần ghi còn lại; IP người bấm chuyển qua `x-forwarded-for`. Huỷ khi đang thực hiện → 409.
+    Thẻ giao mục Hộp thư ghi rõ mã + tiêu đề mục (theo phạm vi `queue.read`).
   - `POST /gen/proposals/{id}/cancel`.
   - Trạng thái đề xuất ghi lại vào tin trả lời đã lưu (`store.update_proposal_step`) — mở lại hội thoại không hiện lại nút.
 - **Action Log**: `gen.proposal_confirmed` / `gen.proposal_cancelled` — `actor_type="user"`, `detail.via="gen"`, `proposal_id`,

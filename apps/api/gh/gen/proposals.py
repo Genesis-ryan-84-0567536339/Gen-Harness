@@ -191,7 +191,18 @@ async def labels(db: AsyncSession, user: service.CurrentUser, ptype: str, fields
             raise ValueError("việc không tồn tại")
         out["item"] = f"{r.code} · {mask_text(r.title, owner)}"
     elif ptype == "assign":
-        out["item"] = "mục trong Hộp thư ý nghĩa"
+        # Hiện ĐÚNG mục sẽ bị giao (mã + tiêu đề, theo phạm vi queue.read của người hỏi) — không để thẻ mơ hồ.
+        from gh.biz.core.scope import scope_for
+        from gh.biz.queue.routes import _item_payload, _load_item
+        from gh.errors import ApiError
+
+        try:
+            r = await _load_item(db, user.org_id, await scope_for(db, user, "queue.read"),
+                                 uuid.UUID(fields["item_id"]))
+        except ApiError as e:
+            raise ValueError("mục trong Hộp thư ý nghĩa không tồn tại hoặc ngoài phạm vi") from e
+        item = _item_payload(r, owner=owner)
+        out["item"] = f"{item['code']} · {item['title']}" if item.get("code") else str(item["title"] or "")
     return out
 
 
@@ -291,13 +302,16 @@ async def plan_call(db: AsyncSession, user: service.CurrentUser, ptype: str, f: 
     return Call("POST", f"/inbox/{f['item_id']}/assign", {"user_id": f["user_id"]}, "inbox_item")
 
 
-async def call_as_user(app: Any, cookies: dict[str, str], csrf: str, call: Call) -> tuple[int, Any]:
-    """Gọi NỘI BỘ (ASGI) endpoint sẵn có bằng phiên + CSRF của chính người bấm — tái dùng nguyên RBAC/phạm vi."""
+async def call_as_user(app: Any, cookies: dict[str, str], csrf: str, call: Call,
+                       ip: str | None = None) -> tuple[int, Any]:
+    """Gọi NỘI BỘ (ASGI) endpoint sẵn có bằng phiên + CSRF của chính người bấm — tái dùng nguyên RBAC/phạm vi.
+    Người gọi PHẢI đã đóng transaction của request ngoài (xem routes.confirm_proposal)."""
+    headers = {"x-csrf-token": csrf} | ({"x-forwarded-for": ip} if ip else {})  # Action Log giữ IP thật
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://gen.internal", cookies=cookies,
                                  timeout=30.0) as c:
         r = await c.request(call.method, f"/api/v1{call.path}", json=call.body,
-                            headers={"x-csrf-token": csrf})
+                            headers=headers)
     try:
         body = r.json()
     except ValueError:

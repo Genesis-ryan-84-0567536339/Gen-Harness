@@ -279,8 +279,14 @@ async def confirm_proposal(pid: uuid.UUID, request: Request, body: ConfirmIn | N
         raise conflict("GEN_PROPOSAL_BUSY", "Đề xuất đang được thực hiện")
     try:
         call = await proposals.plan_call(db, user, ptype, fields)
+        # Đóng transaction của request ngoài TRƯỚC khi gọi nội bộ: request ngoài có thể đang giữ khoá dòng
+        # core.sessions (gia hạn phiên / trượt phiên PIN trong load_session) mà request nội bộ cũng UPDATE → hai bên
+        # chờ nhau (Postgres không thấy vòng chờ qua ứng dụng). Commit cũng trả connection về pool trong lúc chờ.
+        await db.commit()
         status, res = await proposals.call_as_user(request.app, dict(request.cookies),
-                                                   request.headers.get("x-csrf-token", ""), call)
+                                                   request.headers.get("x-csrf-token", ""), call, ip=user.ip)
+        # Transaction mới cho phần ghi còn lại → đặt lại biến RLS (set_config(..., true) chỉ sống trong 1 transaction).
+        await db.execute(text("SELECT set_config('app.org_id', :o, true)"), {"o": str(user.org_id)})
     except BaseException:
         await redis.delete(proposals.claim_key(pid))
         raise
@@ -313,6 +319,8 @@ async def confirm_proposal(pid: uuid.UUID, request: Request, body: ConfirmIn | N
 async def cancel_proposal(pid: uuid.UUID, request: Request, user: service.CurrentUser = Depends(gen_user),
                           db: AsyncSession = DB) -> dict[str, Any]:
     p = await _owned_proposal(request, user, pid)
+    if await request.app.state.redis.exists(proposals.claim_key(pid)):
+        raise conflict("GEN_PROPOSAL_BUSY", "Đề xuất đang được thực hiện")
     p["status"] = "cancelled"
     await proposals.save(request.app.state.redis, p)
     await store.update_proposal_step(db, uuid.UUID(p["conversation_id"]), uuid.UUID(p["turn_id"]), p["id"],
