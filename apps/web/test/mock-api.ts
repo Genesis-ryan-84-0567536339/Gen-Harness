@@ -278,7 +278,12 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
   const p4Agents = createP4Agents({ fresh: opts.setup === 'fresh', emit: broadcast, getChannels: phase2.hooks.channels });
   const p3Relations = createP3Relations({ fresh: opts.setup === 'fresh', emit: broadcast });
   // v0.1.21 Gen: kịch bản cố định (test/mock-gen.ts); `features.gen` của /auth/me đọc cờ ở đây.
-  const genMock = createGen({ emit: broadcast });
+  const genMock = createGen({
+    emit: broadcast,
+    notifyOwners: (kind, title, body, link) => {
+      for (const u of users.filter((x) => x.role.code === 'owner')) notify(u.id, kind, title, body, link);
+    },
+  });
   const gen = { enabled: () => genMock.hooks.settings().enabled };
   const phase3 = {
     gen: genMock,
