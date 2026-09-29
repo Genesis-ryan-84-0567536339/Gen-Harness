@@ -55,6 +55,8 @@ async def patch_link(body: LinkPatch, request: Request, _m: service.CurrentUser 
             errors["endpoint"] = "Địa chỉ phải dạng https://<máy chủ Gen-hub>/mcp"
         elif u.scheme == "http" and body.allow_public_network:
             errors["endpoint"] = "Gen-hub ở mạng công cộng phải dùng https://"
+        elif hub.endpoint_forbidden(endpoint):
+            errors["endpoint"] = hub.ENDPOINT_FORBIDDEN_MSG
     token = body.token.strip() if body.token is not None else None
     if body.token is not None and (not token or len(token) < 8):
         errors["token"] = "Token quá ngắn — dán đúng token agent tạo trong Gen-hub"

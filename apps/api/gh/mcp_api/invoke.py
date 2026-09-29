@@ -109,9 +109,14 @@ def agent_uuid(agent_key: str) -> uuid.UUID | None:
 class McpCallFailed(ApiError):
     """Máy chủ trả lỗi / mạng lỗi khi gọi tool đọc (409 `MCP_CALL_FAILED`); `cause` giữ lỗi gốc cho bên gọi."""
 
-    def __init__(self, cause: McpError):
-        super().__init__(409, "MCP_CALL_FAILED", str(cause))
+    def __init__(self, cause: McpError, message: str | None = None):
+        super().__init__(409, "MCP_CALL_FAILED", message if message is not None else str(cause))
         self.cause = cause
+
+
+def redact(message: str, token: str | None) -> str:
+    """Máy chủ ngoài có thể lặp lại header Authorization trong thân lỗi — xoá token trước khi log / trả / phát WS."""
+    return message.replace(token, "[đã che]") if token else message
 
 
 def _default_summary(result: Any) -> str:
@@ -167,23 +172,25 @@ async def invoke_tool(db: AsyncSession, redis: Any, client: McpClient, *, org_id
     level = await effective_level(db, org_id, agent_id=agent_uuid(agent_key))
     if level <= 1:
         raise await blocked("MCP_AUTONOMY_TOO_LOW", f"Bị chặn: mức tự trị hiện tại ({level}) không cho gọi tool")
+    token = await auth_token(db, server.id)
     try:
-        result = await client.call_tool(server, t.name, args, await auth_token(db, server.id))
+        result = await client.call_tool(server, t.name, args, token)
     except McpBlockedNetwork as e:
         await set_health(db, redis, org_id, server.id, "blocked")
         raise await blocked("MCP_NETWORK_BLOCKED", str(e)) from e
     except McpTransportUnsupported as e:
         raise await blocked("MCP_TRANSPORT_UNSUPPORTED", str(e)) from e
     except McpError as e:
+        err = redact(str(e), token)
         await set_health(db, redis, org_id, server.id, "error")
         await log_call(db, redis, org_id=org_id, tool_id=tool_id, agent_key=agent_key, args=args, outcome="error",
-                       result_summary=str(e)[:500], latency_ms=elapsed())
+                       result_summary=err[:500], latency_ms=elapsed())
         await actionlog.record(db, org_id=org_id, actor_type="user", actor_id=actor.actor_id,
                                action="mcp.call_error", target_type="mcp_tool", target_id=str(tool_id),
                                target_label=f"{t.server_name} · {t.name}", result="failed",
-                               detail={"error": str(e)[:500]}, ip=actor.ip)
+                               detail={"error": err[:500]}, ip=actor.ip)
         await db.commit()
-        raise McpCallFailed(e) from e
+        raise McpCallFailed(e, err) from e
     await set_health(db, redis, org_id, server.id, "healthy")
     item = await log_call(db, redis, org_id=org_id, tool_id=tool_id, agent_key=agent_key, args=args, outcome="ok",
                           result_summary=summarize(result), latency_ms=elapsed())
@@ -199,8 +206,9 @@ async def discover(db: AsyncSession, redis: Any, client: McpClient, *, org_id: u
     tool đã biết giữ nguyên trạng thái mở/đóng + phạm vi cấp hiện có, chỉ cập nhật mô tả/schema."""
     if not server.is_enabled:
         raise conflict("MCP_SERVER_DISABLED", "Máy chủ đang tắt")
+    token = await auth_token(db, server.id)
     try:
-        tools = await client.list_tools(server, await auth_token(db, server.id))
+        tools = await client.list_tools(server, token)
     except McpBlockedNetwork as e:
         await set_health(db, redis, org_id, server.id, "blocked")
         await db.commit()
@@ -210,7 +218,7 @@ async def discover(db: AsyncSession, redis: Any, client: McpClient, *, org_id: u
     except McpError as e:
         await set_health(db, redis, org_id, server.id, "error")
         await db.commit()
-        raise conflict("MCP_DISCOVER_FAILED", str(e)) from e
+        raise conflict("MCP_DISCOVER_FAILED", redact(str(e), token)) from e
     found = []
     for t in tools:
         row = (await db.execute(text("""
@@ -231,4 +239,4 @@ async def discover(db: AsyncSession, redis: Any, client: McpClient, *, org_id: u
 
 
 __all__ = ["MCP_AAD", "McpCallFailed", "agent_uuid", "auth_token", "discover", "encrypt_token", "get_server",
-           "get_tool", "grants_of", "invoke_tool", "log_call", "set_health"]
+           "get_tool", "grants_of", "invoke_tool", "log_call", "redact", "set_health"]

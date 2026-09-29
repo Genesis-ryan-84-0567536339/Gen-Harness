@@ -48,6 +48,9 @@ class FakeHub:
             return httpx.Response(401, json={"error": "unauthorized"})
         if self.mode == "429":
             return httpx.Response(429, json={"error": "rate limited"})
+        if self.mode == "echo" and body["method"] == "tools/call":
+            # Máy chủ ác ý / lỗi lặp lại header trong thân lỗi.
+            return httpx.Response(500, text=f"boom authorization={req.headers.get('authorization')}")
         if body["method"] == "tools/list":
             ro = {"readOnlyHint": True}
             return httpx.Response(200, json={"jsonrpc": "2.0", "id": body["id"], "result": {"tools": [
@@ -326,3 +329,31 @@ async def test_closed_tool_blocked_by_mcp_guard(owner_api: Api, fake_hub: FakeHu
     assert r.status_code == 409 and r.json()["code"] == "HUB_BLOCKED" and "chưa được Owner mở" in r.json()["detail"]
     assert fake_hub.calls == []
     assert "blocked" in await _db_text("SELECT outcome FROM agent.mcp_calls")
+
+
+# ─── review: SSRF siêu dữ liệu, token lặp trong thân lỗi, mcp_calls không chứa nội dung Kho ─────
+
+async def test_metadata_endpoint_rejected(owner_api: Api, fake_hub: FakeHub) -> None:
+    await _pin(owner_api)
+    for ep in ("http://169.254.169.254/latest/meta-data", "http://0.0.0.0:9911/mcp", "http://[fe80::1]/mcp"):
+        r = await owner_api.send("PATCH", "/hub/link", {"endpoint": ep, "token": TOKEN})
+        assert r.status_code == 422, (ep, r.text)
+    assert hub.endpoint_forbidden(ENDPOINT) is False
+
+
+async def test_error_echoing_token_is_redacted(owner_api: Api, fake_hub: FakeHub) -> None:
+    await _linked(owner_api)
+    fake_hub.mode = "echo"
+    r = await owner_api.get("/hub/kho/search?q=zz")
+    assert r.status_code == 409 and TOKEN not in r.text
+    for sql in ("SELECT * FROM ops.action_log", "SELECT * FROM agent.mcp_calls", "SELECT * FROM agent.hub_links"):
+        assert TOKEN not in await _db_text(sql), sql
+    for path in ("/hub/link", "/mcp/calls", "/audit?limit=100"):
+        assert TOKEN not in (await owner_api.get(path)).text, path
+
+
+async def test_mcp_calls_summary_has_no_kho_content(owner_api: Api, fake_hub: FakeHub) -> None:
+    await _linked(owner_api)
+    assert (await owner_api.get("/hub/kho/summary")).status_code == 200
+    rows = await _db_text("SELECT result_summary FROM agent.mcp_calls WHERE outcome = 'ok'")
+    assert "VIEC-3" not in rows and "Tuấn" not in rows and "nội dung không lưu" in rows

@@ -11,11 +11,14 @@
 """
 
 import hashlib
+import ipaddress
 import re
+import socket
 import time
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from urllib.parse import urlparse
 
 import orjson
 from sqlalchemy import text
@@ -89,6 +92,38 @@ def mask_for_model(data: Any, *, secrets: tuple[str, ...] = ()) -> Any:
                 out[key] = mask_for_model(v, secrets=secrets)
         return out
     return data
+
+
+def endpoint_forbidden(endpoint: str) -> bool:
+    """Chống SSRF tới dịch vụ siêu dữ liệu đám mây / địa chỉ đặc biệt: host phân giải ra link-local (169.254.x,
+    fe80::), unspecified (0.0.0.0) hay multicast → cấm, bất kể công tắc mạng công cộng. LAN/loopback vẫn theo guard
+    MCP Hub sẵn có (Gen-hub có thể chạy cùng mạng nội bộ)."""
+    host = urlparse(endpoint).hostname
+    if not host:
+        return True
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except OSError:
+        return False  # không phân giải được → guard mạng MCP Hub xử lý (coi là công cộng → chặn khi công tắc tắt)
+    for info in infos:
+        try:
+            ip = ipaddress.ip_address(str(info[4][0]).split("%", 1)[0])
+        except ValueError:
+            continue
+        if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+            ip = ip.ipv4_mapped
+        if ip.is_link_local or ip.is_unspecified or ip.is_multicast:
+            return True
+    return False
+
+
+ENDPOINT_FORBIDDEN_MSG = "Địa chỉ Gen-hub trỏ tới vùng mạng bị cấm (link-local/siêu dữ liệu đám mây)"
+
+
+def _summary(suffix: str, result: Any) -> str:
+    """`mcp_calls.result_summary` + sự kiện WS `mcp.call` đi tới cả vai trò `system.read` — Kho chỉ cho Owner
+    (quyết định Boss #1) nên KHÔNG lưu nội dung, chỉ siêu dữ liệu."""
+    return f"Đọc Kho ({suffix}) — {len(orjson.dumps(result))} byte, nội dung không lưu"
 
 
 def scrub(message: str, token: str | None) -> str:
@@ -222,15 +257,13 @@ async def call_kho(db: AsyncSession, redis: Any, client: McpClient, *, user: ser
     tool = await find_tool(db, user.org_id, link.server_id, suffix)
     if tool is None:
         raise conflict("HUB_TOOL_MISSING", f"Gen-hub chưa cấp tool {suffix} — bấm Kiểm tra ở thẻ Gen-hub")
+    if endpoint_forbidden(link.endpoint or ""):
+        raise conflict("HUB_BLOCKED", "Kho đang bị chặn bởi rào chắn MCP Hub", ENDPOINT_FORBIDDEN_MSG)
     token = await invoke.auth_token(db, link.server_id)
     secrets = (token,) if token else ()
-
-    def summarize(result: Any) -> str:
-        return orjson.dumps(mask_for_model(result, secrets=secrets)).decode()[:500]
-
     try:
         out = await invoke.invoke_tool(db, redis, client, org_id=user.org_id, tool=tool, agent_key=AGENT_KEY,
-                                       args=args, actor=user, summarize=summarize)
+                                       args=args, actor=user, summarize=lambda r: _summary(suffix, r))
     except invoke.McpCallFailed as e:
         msg = scrub(_classify(str(e.cause)), token)
         await _set_result(db, user.org_id, ok=False, error=msg)
@@ -342,6 +375,8 @@ async def test_link(db: AsyncSession, redis: Any, client: McpClient, *, user: se
                 "exposed_tools": [], "missing_tools": list(extra.get("missing_tools", [])),
                 "link": link_out(await load(db, user.org_id))}
 
+    if endpoint_forbidden(server.endpoint or ""):
+        return await fail(ENDPOINT_FORBIDDEN_MSG)
     try:
         found = await invoke.discover(db, redis, client, org_id=user.org_id, server=server, actor=user)
     except ApiError as e:
@@ -380,8 +415,7 @@ async def test_link(db: AsyncSession, redis: Any, client: McpClient, *, user: se
     tool = await find_tool(db, user.org_id, link.server_id, "kho_tom_tat")
     try:
         await invoke.invoke_tool(db, redis, client, org_id=user.org_id, tool=tool, agent_key=AGENT_KEY, args={},
-                                 actor=user, summarize=lambda r: orjson.dumps(
-                                     mask_for_model(r, secrets=(token,) if token else ())).decode()[:500])
+                                 actor=user, summarize=lambda r: _summary("kho_tom_tat", r))
     except invoke.McpCallFailed as e:
         return await fail(_classify(str(e.cause)), missing_tools=missing)
     except ApiError as e:
