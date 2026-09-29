@@ -383,8 +383,9 @@ async def mark_units(db: AsyncSession, org_id: uuid.UUID, unit_ids: list[uuid.UU
         assert it.heur is not None
         res = await db.execute(text("""
             INSERT INTO refinery.item_marks (org_id, item_type, item_id, observed_at, subject_id, text_hash, simhash,
-                                             text_len, norm_text, duplicate_of, duplicate_kind, is_spam, spam_reason, quality,
-                                             reason, source, heuristic_quality, heuristic_spam, latency_ms, version)
+                                             text_len, norm_text, duplicate_of, duplicate_kind, is_spam, spam_reason,
+                                             quality, reason, source, heuristic_quality, heuristic_spam, latency_ms,
+                                             version)
             VALUES (:o, 'unit', :i, :obs, :subj, :h, :sim, :len, :norm, :dup, :kind, :spam, :sr, :q, :r, :src, :hq, :hs,
                     :ms, :v)
             ON CONFLICT (item_type, item_id) DO UPDATE SET

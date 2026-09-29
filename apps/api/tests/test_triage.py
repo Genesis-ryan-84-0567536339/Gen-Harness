@@ -63,7 +63,8 @@ def test_find_duplicate_rules() -> None:
     assert triage.find_duplicate([cand(long_n, p1)], subject_id=p2, h=triage.text_hash(long_n),
                                  sim=triage.simhash64(long_n), text_len=len(long_n), **kw) == (first, "exact")
     assert triage.find_duplicate([cand(long_n, p1)], subject_id=p2, h=triage.text_hash(near_n),
-                                 sim=triage.simhash64(near_n), text_len=len(near_n), norm=near_n, **kw) == (first, "near")
+                                 sim=triage.simhash64(near_n), text_len=len(near_n), norm=near_n,
+                                 **kw) == (first, "near")
     # tin ngắn: chỉ trùng khi cùng người
     assert triage.find_duplicate([cand(short_n, p1)], subject_id=p2, h=triage.text_hash(short_n),
                                  sim=triage.simhash64(short_n), text_len=len(short_n), **kw) == (None, None)
