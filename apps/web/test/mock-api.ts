@@ -694,7 +694,7 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
             if (!r.ok) return problem(res, r.status, r.code, r.title, r.extra ?? {});
             for (const inv of r.value.invited) {
               const roleName = { manager: 'Manager · quản lý team', operator: 'Operator · vận hành', agent_staff: 'Agent nhân viên', auditor: 'Auditor · kiểm toán' }[inv.role] ?? inv.role;
-              users.push({ id: inv.id, email: inv.email, password: inv.temp_password, pin: '000000', display_name: inv.display_name, role: { code: inv.role as RoleCode, name: roleName }, hidden: hiddenScreens(inv.role as RoleCode) });
+              users.push({ id: inv.id, email: inv.email, password: inv.temp_password, pin: '000000', display_name: inv.display_name, role: { code: inv.role as RoleCode, name: roleName }, hidden: hiddenScreens(inv.role as RoleCode), mustChange: true });
             }
             advance(10, 'done');
             return reply(200, { ...stateView(), invited: r.value.invited });
