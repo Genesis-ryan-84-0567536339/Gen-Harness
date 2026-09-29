@@ -82,12 +82,52 @@ export interface InboxItem {
   alert_type: string | null;
   alert_type_label: string | null;
   suggested_action: string | null;
+  /** Dấu lọc đầu (v0.1.25, Đợt C1) — null/thiếu khi mục chưa được lọc hoặc tổ chức tắt lọc đầu. */
+  triage?: InboxTriage | null;
+}
+/** Kết quả lọc đầu một mục: trùng (exact|near, trỏ mục gốc), rác, điểm chất lượng 0–100 + lý do ngắn. */
+export interface InboxTriage {
+  duplicate_of: string | null;
+  duplicate_kind: 'exact' | 'near' | null;
+  spam: boolean;
+  spam_reason: string | null;
+  score: number;
+  /** `score` dưới ngưỡng `min_score` của tổ chức. */
+  low_score: boolean;
+  reason: string;
+  source: 'heuristic' | 'jev';
 }
 export interface InboxPage {
   items: InboxItem[];
   next_cursor: string | null;
   total: number;
   counts: Record<InboxTab, number>;
+  /** v0.1.25 — trạng thái lọc đầu; `hidden` = số mục bị ẩn khi `hide_junk=true`. */
+  triage?: { enabled: boolean; min_score: number | null; hidden: number };
+}
+
+// ─── Lọc đầu Hộp thư (v0.1.25, Đợt C1 — `/refinery/triage/*`) ─────────────────
+export interface TriageSettings {
+  enabled: boolean;
+  /** Ngưỡng điểm 0–100: dưới ngưỡng = "điểm thấp", bị ẩn khi bật "Ẩn rác & trùng". */
+  min_score: number;
+  use_jev: boolean;
+}
+export interface TriageSummary {
+  days: number;
+  enabled: boolean;
+  min_score: number;
+  use_jev: boolean;
+  total: number;
+  kept: number;
+  duplicates: number;
+  exact_duplicates: number;
+  near_duplicates: number;
+  spam: number;
+  low_score: number;
+  pending: number;
+  avg_quality: number | null;
+  jev: { count: number; heuristic_count: number; avg_latency_ms: number | null; spam_agreement: number | null };
 }
 export interface InboxDetail extends InboxItem {
   units: ExplainUnit[];
@@ -171,9 +211,16 @@ const enc = encodeURIComponent;
 export function queueEndpoints(r: ApiClient['request']) {
   return {
     overview: (signal?: AbortSignal) => r<Overview>('/overview', { signal }),
+    triage: {
+      settings: (signal?: AbortSignal) => r<TriageSettings>('/refinery/triage/settings', { signal }),
+      setSettings: (body: Partial<TriageSettings>) =>
+        r<TriageSettings>('/refinery/triage/settings', { method: 'PATCH', body }),
+      summary: (days = 7, signal?: AbortSignal) =>
+        r<TriageSummary>('/refinery/triage/summary', { query: { days }, signal }),
+    },
     inbox: {
       list: (
-        q: { tab?: InboxTab; intent?: string; cursor?: string; limit?: number } = {},
+        q: { tab?: InboxTab; intent?: string; cursor?: string; limit?: number; hide_junk?: boolean } = {},
         signal?: AbortSignal,
       ) => r<InboxPage>('/inbox', { query: q as Q, signal }),
       get: (id: string, signal?: AbortSignal) => r<InboxDetail>(`/inbox/${enc(id)}`, { signal }),

@@ -21,7 +21,8 @@ export type DataToolName =
   | 'guide.list'
   | 'screens.list'
   | 'task.list'
-  | 'staff.list';
+  | 'staff.list'
+  | 'refinery.summary';
 
 export type UiAction =
   | { type: 'navigate'; screen: string; params?: Record<string, string> }

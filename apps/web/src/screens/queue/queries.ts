@@ -1,16 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { InboxTab, TaskCreateBody, TaskPatchBody, TaskPriority, TaskStatus } from '@gen-harness/contracts';
+import type { InboxTab, TriageSettings, TaskCreateBody, TaskPatchBody, TaskPriority, TaskStatus } from '@gen-harness/contracts';
 import { api } from '../../lib/api';
 import { onRealtimeEvent } from '../../lib/realtime';
 
 /** Khoá truy vấn của cụm Hàng đợi & Hành động. */
 export const qkQueue = {
   overview: ['queue', 'overview'] as const,
-  inbox: (tab: InboxTab, intent?: string) => ['queue', 'inbox', tab, intent ?? ''] as const,
+  inbox: (tab: InboxTab, intent?: string, hideJunk = false) => ['queue', 'inbox', tab, intent ?? '', hideJunk] as const,
   inboxItem: (id: string) => ['queue', 'inbox', 'one', id] as const,
   tasks: (q: Record<string, string | boolean | undefined>) => ['queue', 'tasks', JSON.stringify(q)] as const,
   task: (id: string) => ['queue', 'tasks', 'one', id] as const,
   promises: (status: string) => ['queue', 'promises', status] as const,
+  triageSettings: ['queue', 'triage', 'settings'] as const,
+  triageSummary: (days: number) => ['queue', 'triage', 'summary', days] as const,
 };
 
 export const useOverview = () =>
@@ -19,11 +21,35 @@ export const useOverview = () =>
     queryFn: ({ signal }) => api.queue.overview(signal),
   });
 
-export const useInbox = (tab: InboxTab, intent?: string) =>
+export const useInbox = (tab: InboxTab, intent?: string, hideJunk = false) =>
   useQuery({
-    queryKey: qkQueue.inbox(tab, intent),
-    queryFn: ({ signal }) => api.queue.inbox.list({ tab, intent: intent || undefined }, signal),
+    queryKey: qkQueue.inbox(tab, intent, hideJunk),
+    queryFn: ({ signal }) =>
+      api.queue.inbox.list({ tab, intent: intent || undefined, hide_junk: hideJunk || undefined }, signal),
   });
+
+/** Lọc đầu Hộp thư (v0.1.25) — cấu hình đọc được cho mọi người; chỉ Owner sửa (server kiểm). */
+export const useTriageSettings = () =>
+  useQuery({ queryKey: qkQueue.triageSettings, queryFn: ({ signal }) => api.queue.triage.settings(signal) });
+
+export const useTriageSummary = (days = 7, enabled = true) =>
+  useQuery({
+    queryKey: qkQueue.triageSummary(days),
+    queryFn: ({ signal }) => api.queue.triage.summary(days, signal),
+    enabled,
+  });
+
+export const useSetTriageSettings = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Partial<TriageSettings>) => api.queue.triage.setSettings(body),
+    onSuccess: (data) => {
+      qc.setQueryData(qkQueue.triageSettings, data);
+      void qc.invalidateQueries({ queryKey: ['queue', 'triage', 'summary'] });
+      void qc.invalidateQueries({ queryKey: ['queue', 'inbox'] });
+    },
+  });
+};
 
 export const useInboxItem = (id: string | null) =>
   useQuery({

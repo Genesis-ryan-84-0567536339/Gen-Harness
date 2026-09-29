@@ -12,10 +12,10 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 DATA_TOOL_NAMES = ("overview.summary", "queue.list", "draft.list", "draft.get", "profile.search", "profile.get",
                    "opportunity.list", "people.care", "audit.list", "system.health", "guide.list", "screens.list",
-                   "task.list", "staff.list")
+                   "task.list", "staff.list", "refinery.summary")
 DataToolName = Literal["overview.summary", "queue.list", "draft.list", "draft.get", "profile.search", "profile.get",
                        "opportunity.list", "people.care", "audit.list", "system.health", "guide.list", "screens.list",
-                       "task.list", "staff.list"]
+                       "task.list", "staff.list", "refinery.summary"]
 
 
 class _M(BaseModel):

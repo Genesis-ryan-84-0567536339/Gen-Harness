@@ -18,6 +18,7 @@ v0.1.21: Gen v1 (A1–A3) — khung chat, dẫn đường trên UI, nguồn Jev;
 v0.1.22: Đợt B1–B3 — quản lý người dùng, sửa thông tin công ty, trang Trợ giúp.
 v0.1.23: Đợt B4–B7 — giao diện điện thoại, trang lỗi/404, chuông thông báo, sáng/tối.
 v0.1.24: Đợt A4 — Gen v2 bước 1: đề xuất thao tác có xác nhận (nháp tin, nhắc việc, gán người).
+v0.1.25: Đợt C1 — lọc đầu Hộp thư (trùng, rác, điểm) dùng Jev khi có, quy tắc khi không.
 
 ## Đợt A — Gen v1 (thiết kế: docs/design/gen-v1.md)
 - ✅ A1 Khung chat phải + Gen trả lời/tóm tắt (chỉ đọc), lưu hội thoại, Nhật ký hành động — v0.1.21.
@@ -37,7 +38,8 @@ v0.1.24: Đợt A4 — Gen v2 bước 1: đề xuất thao tác có xác nhận 
 - ✅ B7 sáng/tối (mặc định theo hệ thống, nhớ theo từng người dùng) — v0.1.23.
 
 ## Đợt C — Hạ tầng dữ liệu
-C1 Sàng lọc dùng Jev làm lớp lọc đầu (rác, trùng, chấm điểm) + đo chi phí/độ chính xác.
+- ✅ C1 Sàng lọc dùng Jev làm lớp lọc đầu (rác, trùng, chấm điểm 0–100) + đo chi phí (độ trễ, số lượt Jev) và độ khớp với
+  quy tắc; Hộp thư có huy hiệu + "Ẩn rác & trùng", thẻ cấu hình Owner — v0.1.25. (Còn: đo độ chính xác có nhãn người.)
 
 ## Đợt D — Phòng làm việc chung (repo Gen-hub, cần mở quyền repo cho phiên này)
 D1 Gen nối Kho/warroom/kanban của Gen-hub. D2 Jules worker trong gen-workplace (mỗi tài khoản có hạn mức riêng;

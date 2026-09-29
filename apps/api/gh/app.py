@@ -43,6 +43,7 @@ from gh.notifications import router as notifications_router
 from gh.plugins_api.routes import router as plugins_router
 from gh.providers import cli as climod
 from gh.providers.router import ModelRouter
+from gh.refinery.triage_routes import router as triage_router
 from gh.setup.routes import router as setup_router
 from gh.shell.routes import router as shell_router
 from gh.system_api.backups import router as backups_router
@@ -190,7 +191,7 @@ def create_app(*, with_lifespan: bool = True) -> FastAPI:
     app.add_exception_handler(OSError, infra_error_handler)
     for r in (auth_router, account_router, users_router, setup_router, shell_router, audit_router, plugins_router,
              mcp_router, data_router, system_router, update_router, backups_router, org_router, gen_router,
-             notifications_router):
+             notifications_router, triage_router):
         app.include_router(r, prefix="/api/v1")
     for r in biz.routers():
         app.include_router(r, prefix="/api/v1")

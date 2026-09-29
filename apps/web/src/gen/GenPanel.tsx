@@ -24,6 +24,7 @@ const TOOL_LABEL: Record<string, string> = {
   'screens.list': 'danh mục màn',
   'task.list': 'việc & nhắc hẹn',
   'staff.list': 'danh sách người',
+  'refinery.summary': 'lọc đầu Hộp thư',
 };
 
 function targetLabel(id: string): string {
