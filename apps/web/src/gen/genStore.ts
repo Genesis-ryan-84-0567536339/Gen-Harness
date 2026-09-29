@@ -4,7 +4,7 @@
  */
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
-import type { GenStep, TourStep } from '@gen-harness/contracts';
+import type { GenProposal, GenStep, TourStep } from '@gen-harness/contracts';
 
 export interface GenChatMessage {
   id: string;
@@ -80,4 +80,14 @@ export function mergeStep(turnId: string, seq: number, step: GenStep): boolean {
     }),
   }));
   return fresh;
+}
+
+/** Gen v2: cập nhật thẻ đề xuất (đã xác nhận / đã huỷ + kết quả) ở mọi tin đang hiện. */
+export function patchProposal(next: GenProposal): void {
+  useGenStore.setState((s) => ({
+    messages: s.messages.map((m) => {
+      if (!m.steps.some((st) => st?.kind === 'proposal' && st.proposal.id === next.id)) return m;
+      return { ...m, steps: m.steps.map((st) => (st?.kind === 'proposal' && st.proposal.id === next.id ? { kind: 'proposal' as const, proposal: next } : st)) };
+    }),
+  }));
 }

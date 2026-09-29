@@ -4,9 +4,10 @@ import { Icon, IconButton } from '@gen-harness/ui';
 import { useMe } from '../lib/queries';
 import { executeUiAction } from './director';
 import { sendQuestion } from './genClient';
+import { ProposalCard } from './ProposalCard';
 import { useGenStore, type GenChatMessage } from './genStore';
 
-const EXAMPLES = ['Hôm nay có gì cần tôi xử lý?', 'Chỉ tôi cách thêm khoá Jev', 'Sao lưu dữ liệu ở đâu?'];
+const EXAMPLES = ['Hôm nay có gì cần tôi xử lý?', 'Nhắc tôi gọi lại khách lúc 3 giờ chiều', 'Chỉ tôi cách thêm khoá Jev'];
 
 const TOOL_LABEL: Record<string, string> = {
   'overview.summary': 'Tổng quan',
@@ -21,6 +22,8 @@ const TOOL_LABEL: Record<string, string> = {
   'system.health': 'sức khoẻ hệ thống',
   'guide.list': 'hướng dẫn kết nối',
   'screens.list': 'danh mục màn',
+  'task.list': 'việc & nhắc hẹn',
+  'staff.list': 'danh sách người',
 };
 
 function targetLabel(id: string): string {
@@ -53,6 +56,7 @@ function Step({ step, turnId }: { step: GenStep; turnId?: string }) {
         <Icon name={step.action.type === 'navigate' ? 'ph ph-arrow-square-out' : 'ph ph-cursor-click'} size={11} /> {actionLabel(step.action)}
       </button>
     );
+  if (step.kind === 'proposal') return <ProposalCard proposal={step.proposal} />;
   if (step.kind === 'suggest')
     return (
       <div className="gen-suggest">
@@ -87,7 +91,8 @@ function Message({ m }: { m: GenChatMessage }) {
 
 /**
  * Khung chat Gen bên phải (docs/design/gen-v1.md §3.1). Bật/tắt bằng nút ở Header; trên điện thoại là tấm phủ toàn
- * màn hình. v1 chỉ đọc + dẫn đường: câu trả lời, "đang nghĩ", chip hành động (bấm để chỉ lại), thẻ đề xuất.
+ * màn hình. Câu trả lời, "đang nghĩ", chip hành động (bấm để chỉ lại), gợi ý; v2 (A4): thẻ đề xuất thao tác có
+ * Xác nhận / Sửa / Huỷ (ProposalCard) — Gen không tự ghi gì.
  */
 export function GenPanel({ userId }: { userId: string }) {
   const messages = useGenStore((s) => s.messages);
@@ -130,7 +135,7 @@ export function GenPanel({ userId }: { userId: string }) {
         </span>
         <div className="gen-panel__titles">
           <div className="gen-panel__title">Gen</div>
-          <div className="gen-panel__sub">Trợ lý quản trị · chỉ đọc &amp; dẫn đường</div>
+          <div className="gen-panel__sub">Trợ lý quản trị · dẫn đường &amp; đề xuất có xác nhận</div>
         </div>
         <IconButton icon="ph ph-plus" label="Hội thoại mới" onClick={reset} disabled={busy} />
         <IconButton icon="ph ph-x" label="Đóng khung Gen" onClick={() => setOpen(userId, false)} />
@@ -139,7 +144,8 @@ export function GenPanel({ userId }: { userId: string }) {
         {messages.length === 0 ? (
           <div className="gen-empty">
             <p>
-              Chào {addr}, em là Gen. {addr} hỏi về tình hình hôm nay, hoặc nhờ em chỉ chỗ bấm trên màn hình nhé.
+              Chào {addr}, em là Gen. {addr} hỏi về tình hình hôm nay, nhờ em chỉ chỗ bấm, hoặc nhờ em soạn nháp tin, đặt
+              nhắc việc, giao người — em chỉ đề xuất, {addr} xác nhận thì em mới làm.
             </p>
             <div className="gen-suggest">
               {EXAMPLES.map((q) => (

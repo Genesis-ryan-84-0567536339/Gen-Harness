@@ -83,6 +83,26 @@ async def list_messages(db: AsyncSession, cid: uuid.UUID, limit: int = 200,
             for r in reversed(rows)]
 
 
+async def update_proposal_step(db: AsyncSession, cid: uuid.UUID, turn_id: uuid.UUID, pid: str,
+                               patch: dict[str, Any]) -> None:
+    """Gen v2: ghi trạng thái đề xuất (đã xác nhận / đã huỷ + kết quả) vào tin trả lời đã lưu — mở lại hội thoại
+    thì thẻ hiện đúng trạng thái, không hiện lại nút Xác nhận."""
+    rows = (await db.execute(text("""SELECT id, content FROM agent.gen_messages
+                                     WHERE conversation_id = :c AND turn_id = :t AND role = 'assistant'"""),
+                             {"c": cid, "t": turn_id})).all()
+    for r in rows:
+        content = dict(r.content or {})
+        changed = False
+        for st in content.get("steps") or []:
+            p = st.get("proposal") if isinstance(st, dict) and st.get("kind") == "proposal" else None
+            if isinstance(p, dict) and p.get("id") == pid:
+                p.update(patch)
+                changed = True
+        if changed:
+            await db.execute(text("UPDATE agent.gen_messages SET content = CAST(:x AS jsonb) WHERE id = :i"),
+                             {"x": orjson.dumps(content).decode(), "i": r.id})
+
+
 async def delete_conversation(db: AsyncSession, cid: uuid.UUID) -> None:
     await db.execute(text("DELETE FROM agent.gen_conversations WHERE id = :c"), {"c": cid})
 

@@ -211,3 +211,26 @@ Rủi ro chính: model bịa id/trang (chặn bằng validator + registry); giao
 4. Lưu hội thoại **90 ngày**.
 5. v2 "làm thay" ưu tiên: **duyệt/nháp tin gửi đi → tạo nhắc việc → gán người phụ trách**.
 6. **Jev (System One)** là một *nguồn model* mới (OpenRouter `typesafe/jev-*` hoặc TypeSafe API), không phải một vai: Gen dùng làm bộ quyết định nhanh (ý định, bước UI kế tiếp); Sàng lọc dùng làm lớp lọc đầu (rác, trùng, chấm điểm). Lỗi/chậm → rơi về model lớn.
+
+## 10. v2 bước 1 — Đề xuất thao tác có xác nhận (A4, v0.1.24)
+
+Thứ tự theo §9.5: **nháp tin gửi đi → nhắc việc → gán người phụ trách**. Gen vẫn **không tự ghi**.
+
+- **Model** trả bước `{"kind":"propose","proposal":{"type":"draft_message|reminder|assign","fields":{…}}}`
+  (envelope có kiểu, `extra="forbid"` — `gh/gen/envelope.py`). Mọi id (đối tượng, việc, mục hộp thư, người được giao)
+  phải vừa xuất hiện trong kết quả tool của **chính lượt đó** (tool mới `task.list`, `staff.list` → `GET /gen/assignees`).
+- **Server** (`gh/gen/proposals.py`) kiểm: quyền của loại (`action.draft` / `queue.act`) + mục tiêu registry gắn với đề xuất
+  (`workbench.drafts` nhạy cảm, `tasks.new` cần `queue.act`, `tasks.row:<id>`, `inbox.row:<id>`) → màn được xem, quyền riêng
+  của mục tiêu, cờ `sensitive` ⇒ `requires_pin`. Tóm tắt trên thẻ do **hệ thống** viết từ trường đã kiểm (không dùng lời
+  model). Đề xuất lưu Redis 24 giờ; tối đa 3 đề xuất/lượt; nhắc việc giờ đã qua → chặn.
+- **Web** hiện thẻ (`ProposalCard`): tóm tắt + trường điền sẵn, **Xác nhận / Sửa / Huỷ**. Sửa chỉ các trường cho phép
+  (`GEN_PROPOSAL_EDITABLE`); id đối tượng/việc bị khoá.
+- **Xác nhận** → `POST /gen/proposals/{id}/confirm {fields}`: kiểm lại tất cả (cờ Gen + vai trò như v1, quyền, PIN nếu
+  nhạy cảm → 423 và client tự hỏi PIN), rồi gọi **nội bộ** endpoint sẵn có bằng phiên + CSRF của người bấm:
+  `POST /drafts` (bản nháp **chờ duyệt**, chưa gửi), `POST /tasks` (có `remind_at`), `PATCH /tasks/{id}`,
+  `POST /inbox/{id}/assign`. Endpoint từ chối → lỗi trả nguyên, đề xuất vẫn chờ. **Huỷ** → `/cancel`.
+- **Action Log**: `gen.propose` (actor agent/gen, on_behalf_of), `gen.proposal_confirmed` / `gen.proposal_cancelled`
+  (actor_type **user**, `detail.via = "gen"`, endpoint, có sửa hay không); bị chặn/thất bại ghi `result=blocked|failed`.
+- **Nhắc việc đến giờ**: không thêm hệ thống mới — `biz.tasks.remind_at` (có sẵn) + cột `reminded_at` (migration 0018);
+  job `task_reminder_scan` mỗi phút gửi thông báo chuông (`core.notifications`, 0017) cho người phụ trách (chưa giao → Owner).
+

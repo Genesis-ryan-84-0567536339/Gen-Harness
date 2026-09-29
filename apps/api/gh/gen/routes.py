@@ -15,12 +15,12 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gh.auth import service
+from gh.auth import rbac, service
 from gh.auth.deps import current_user, require_owner
 from gh.chassis import actionlog
 from gh.db import DB, sessionmaker
-from gh.errors import ApiError, field_errors, not_found
-from gh.gen import engine, store
+from gh.errors import ApiError, conflict, field_errors, forbidden, not_found, pin_required
+from gh.gen import engine, proposals, store
 
 router = APIRouter(prefix="/gen", tags=["gen"])
 
@@ -203,3 +203,122 @@ async def ack(turn_id: uuid.UUID, body: AckIn, request: Request, user: service.C
                            detail={"on_behalf_of": str(user.id), "conversation_id": state["conversation_id"],
                                    "turn_id": str(turn_id), "step": body.step, "outcome": body.outcome}, ip=user.ip)
     return Response(status_code=204)
+
+
+# ── Gen v2 (A4): đề xuất thao tác có xác nhận — gh.gen.proposals ──
+
+@router.get("/assignees")
+async def assignees(user: service.CurrentUser = Depends(gen_user), db: AsyncSession = DB) -> dict[str, Any]:
+    """Người có thể được giao việc (tên + vai trò, KHÔNG email) — cho tool `staff.list` và ô chọn trên thẻ đề xuất."""
+    if user.permissions.get("queue.act", rbac.NONE) == rbac.NONE:
+        raise forbidden("queue.act")
+    rows = (await db.execute(text("""
+        SELECT u.id, u.display_name, r.name AS role_name FROM core.users u
+        LEFT JOIN core.user_roles ur ON ur.user_id = u.id LEFT JOIN core.roles r ON r.id = ur.role_id
+        WHERE u.org_id = :o AND u.is_active AND u.deleted_at IS NULL
+        ORDER BY lower(u.display_name) LIMIT 200"""), {"o": user.org_id})).all()
+    return {"items": [{"id": str(r.id), "name": r.display_name, "role": r.role_name, "me": r.id == user.id}
+                      for r in rows]}
+
+
+async def _owned_proposal(request: Request, user: service.CurrentUser, pid: uuid.UUID) -> dict[str, Any]:
+    p = await proposals.load(request.app.state.redis, pid)
+    if p is None or p.get("user_id") != str(user.id) or p.get("org_id") != str(user.org_id):
+        raise not_found("Đề xuất (có thể đã hết hạn)")
+    if p.get("status") != "pending":
+        raise conflict("GEN_PROPOSAL_DECIDED", "Đề xuất này đã được xác nhận hoặc đã huỷ")
+    return p
+
+
+async def _log_apart(user: service.CurrentUser, action: str, result: str, p: dict[str, Any],
+                     **detail: Any) -> None:
+    """Ghi Action Log ở transaction riêng — request đang lỗi (rollback) vẫn để lại dấu vết bị chặn/thất bại."""
+    async with sessionmaker()() as s:
+        await s.execute(text("SELECT set_config('app.org_id', :o, true)"), {"o": str(user.org_id)})
+        await actionlog.record(s, org_id=user.org_id, actor_type="user", actor_id=user.actor_id, action=action,
+                               target_type="gen_proposal", target_id=p["id"], result=result,
+                               detail={"via": "gen", "proposal_id": p["id"], "type": p["type"],
+                                       "turn_id": p["turn_id"], **detail}, ip=user.ip)
+        await s.commit()
+
+
+class ConfirmIn(BaseModel):
+    """Các trường người dùng đã sửa trên thẻ (bỏ trống = giữ nguyên như Gen đề xuất)."""
+    fields: dict[str, Any] = Field(default_factory=dict)
+
+
+@router.post("/proposals/{pid}/confirm")
+async def confirm_proposal(pid: uuid.UUID, request: Request, body: ConfirmIn | None = None,
+                           user: service.CurrentUser = Depends(gen_user), db: AsyncSession = DB) -> dict[str, Any]:
+    body = body or ConfirmIn()
+    redis = request.app.state.redis
+    p = await _owned_proposal(request, user, pid)
+    ptype: str = p["type"]
+    spec = proposals.SPECS[ptype]
+    locked = {k for k, v in body.fields.items() if k not in spec.editable and p["fields"].get(k) != v}
+    if locked:
+        raise field_errors({k: "Không sửa được trường này" for k in sorted(locked)})
+    merged = {**p["fields"], **{k: v for k, v in body.fields.items() if k in spec.editable}}
+    tz = await proposals.org_tz(db, user.org_id)
+    try:
+        fields = proposals.normalize(ptype, merged, tz)
+    except ValueError as e:
+        raise field_errors({"fields": str(e)}) from e
+    target = proposals.target_of(ptype, fields)
+    err = proposals.permission_error(user.permissions, ptype, target)
+    if err:
+        await _log_apart(user, "gen.proposal_confirmed", "blocked", p, reason=err)
+        raise forbidden(err)
+    if proposals.requires_pin(target) and not user.pin_active():
+        raise pin_required()
+    try:
+        lab = await proposals.labels(db, user, ptype, fields)
+    except ValueError as e:
+        raise field_errors({"fields": str(e)}) from e
+    if not await redis.set(proposals.claim_key(pid), "1", nx=True, ex=proposals.CLAIM_TTL_S):
+        raise conflict("GEN_PROPOSAL_BUSY", "Đề xuất đang được thực hiện")
+    try:
+        call = await proposals.plan_call(db, user, ptype, fields)
+        status, res = await proposals.call_as_user(request.app, dict(request.cookies),
+                                                   request.headers.get("x-csrf-token", ""), call)
+    except BaseException:
+        await redis.delete(proposals.claim_key(pid))
+        raise
+    if status >= 400:
+        await redis.delete(proposals.claim_key(pid))
+        err_body = res if isinstance(res, dict) else {}
+        await _log_apart(user, "gen.proposal_confirmed", "blocked" if status in (403, 404, 423) else "failed", p,
+                         endpoint=f"{call.method} {call.path}", status=status, code=err_body.get("code"))
+        extra = {"errors": err_body["errors"]} if isinstance(err_body.get("errors"), dict) else {}
+        raise ApiError(status, str(err_body.get("code") or "GEN_PROPOSAL_FAILED"),
+                       str(err_body.get("title") or "Không thực hiện được đề xuất"), err_body.get("detail"), **extra)
+    result = proposals.result_of(call, fields, res)
+    edited = fields != p["fields"]
+    patch = {"status": "confirmed", "fields": fields, "labels": lab,
+             "summary": proposals.summary(ptype, fields, lab, tz), "result": result}
+    p.update(patch)
+    await proposals.save(redis, p)
+    await store.update_proposal_step(db, uuid.UUID(p["conversation_id"]), uuid.UUID(p["turn_id"]), p["id"], patch)
+    await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
+                           action="gen.proposal_confirmed", target_type=result["type"], target_id=result.get("id"),
+                           target_label=str(fields.get("title") or lab.get("item") or "")[:200] or None,
+                           detail={"via": "gen", "proposal_id": p["id"], "type": ptype, "turn_id": p["turn_id"],
+                                   "conversation_id": p["conversation_id"], "edited": edited,
+                                   "endpoint": f"{call.method} {call.path}", "fields_digest": engine.digest(fields)},
+                           ip=user.ip)
+    return proposals.public(p)
+
+
+@router.post("/proposals/{pid}/cancel")
+async def cancel_proposal(pid: uuid.UUID, request: Request, user: service.CurrentUser = Depends(gen_user),
+                          db: AsyncSession = DB) -> dict[str, Any]:
+    p = await _owned_proposal(request, user, pid)
+    p["status"] = "cancelled"
+    await proposals.save(request.app.state.redis, p)
+    await store.update_proposal_step(db, uuid.UUID(p["conversation_id"]), uuid.UUID(p["turn_id"]), p["id"],
+                                     {"status": "cancelled"})
+    await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
+                           action="gen.proposal_cancelled", target_type="gen_proposal", target_id=p["id"],
+                           detail={"via": "gen", "proposal_id": p["id"], "type": p["type"], "turn_id": p["turn_id"],
+                                   "conversation_id": p["conversation_id"]}, ip=user.ip)
+    return proposals.public(p)

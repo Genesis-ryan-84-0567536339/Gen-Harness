@@ -43,7 +43,7 @@ export function TasksScreen() {
         description="Việc sinh ra từ lời hứa trong hội thoại, từ bản nháp đã duyệt hoặc do Sếp tạo tay. Việc quá hạn tô đỏ, lời hứa sắp đến hạn được nhắc trước để không ai bị bỏ quên."
         maxWidth={700}
         actions={
-          <Button variant="primary" icon="ph ph-plus" onClick={() => setAdding(true)}>
+          <Button variant="primary" icon="ph ph-plus" data-gen-target="tasks.new" onClick={() => setAdding(true)}>
             Tạo việc mới
           </Button>
         }
@@ -93,7 +93,7 @@ export function TasksScreen() {
 
 function TaskRow({ t, onToggleStatus, busy }: { t: Task; onToggleStatus: () => void; busy: boolean }) {
   return (
-    <div className={cx('tk-row', t.overdue && 'tk-row--overdue')}>
+    <div className={cx('tk-row', t.overdue && 'tk-row--overdue')} data-gen-target={`tasks.row:${t.id}`}>
       <button type="button" className="tk-row__status" style={{ color: taskStatusTone(t.status) }} onClick={onToggleStatus} disabled={busy} aria-label={`Đổi trạng thái ${t.code}`}>
         <Icon name={t.status === 'done' ? 'ph-fill ph-check-circle' : t.status === 'cancelled' ? 'ph ph-x-circle' : 'ph ph-circle'} size={16} />
       </button>

@@ -85,6 +85,11 @@ export const GEN_TARGETS: GenTarget[] = [
   { id: 'system.users.temp_password', screen: 'system', label: 'Mật khẩu tạm vừa tạo', description: 'Hộp hiện mật khẩu tạm một lần sau khi mời / đặt lại mật khẩu', params: { tab: 'users' }, sensitive: true, permission: 'roles.manage' },
   { id: 'system.org.form', screen: 'system', label: 'Thông tin tổ chức', description: 'Tên tổ chức, múi giờ, tiền tệ, Sếp tự xưng là, Agent gọi Sếp là', params: { tab: 'org' } },
   { id: 'system.org.save', screen: 'system', label: 'Nút "Lưu thông tin tổ chức"', description: 'Lưu thay đổi thông tin tổ chức và xưng hô', params: { tab: 'org' } },
+  // ── Việc & Nhắc hẹn / Hộp thư / Bàn làm việc (Gen v2 — A4: đề xuất có xác nhận gắn với các mục tiêu này) ──
+  { id: 'tasks.new', screen: 'tasks', label: 'Nút "Tạo việc mới"', description: 'Tạo việc hoặc nhắc hẹn mới (tiêu đề, ưu tiên, hạn)', permission: 'queue.act' },
+  { id: 'tasks.row', screen: 'tasks', label: 'Một dòng việc', description: 'Một việc cụ thể trong Danh sách việc (theo id việc)', dynamic: 'row' },
+  { id: 'inbox.row', screen: 'inbox', label: 'Một mục hộp thư', description: 'Một thẻ trong Hộp thư ý nghĩa (theo id mục)', dynamic: 'row' },
+  { id: 'workbench.drafts', screen: 'workbench', label: 'Bản nháp chờ duyệt', description: 'Danh sách bản nháp tin gửi đi đang chờ Sếp duyệt', permission: 'action.draft', sensitive: true },
   // ── API & Model ──
   { id: 'api.add_provider', screen: 'api', label: 'Nút "Thêm nhà cung cấp"', description: 'Thêm Gemini/DeepSeek/API tương thích OpenAI' },
   { id: 'api.bindings', screen: 'api', label: 'Gán model cho từng agent', description: 'Chọn model cho từng mục đích, gồm core.gen của Gen' },

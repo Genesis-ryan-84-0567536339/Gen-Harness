@@ -110,7 +110,7 @@ function InboxCard({ item, onAssign, onSilence }: { item: InboxItem; onAssign: (
   };
 
   return (
-    <article className="ib-card" aria-label={item.title}>
+    <article className="ib-card" aria-label={item.title} data-gen-target={`inbox.row:${item.id}`}>
       <div className="ib-card__head">
         <span className="ib-card__prio" style={{ color: priorityTone(item.priority) }}>
           {item.priority}

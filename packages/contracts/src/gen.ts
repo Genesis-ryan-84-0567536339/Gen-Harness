@@ -19,7 +19,9 @@ export type DataToolName =
   | 'audit.list'
   | 'system.health'
   | 'guide.list'
-  | 'screens.list';
+  | 'screens.list'
+  | 'task.list'
+  | 'staff.list';
 
 export type UiAction =
   | { type: 'navigate'; screen: string; params?: Record<string, string> }
@@ -38,11 +40,88 @@ export interface Suggestion {
   action: UiAction;
 }
 
+/**
+ * Gen v2 (A4) — đề xuất thao tác có xác nhận. Gen KHÔNG tự ghi: server kiểm đề xuất của model (quyền, mục tiêu
+ * registry, id phải vừa thấy trong kết quả tool) rồi gửi thẻ này; chỉ khi người dùng bấm Xác nhận, web gọi
+ * `POST /gen/proposals/{id}/confirm` và server thực hiện nhân danh người đó qua endpoint sẵn có (Action Log
+ * actor=user, via=gen). `requires_pin` = mục tiêu registry nhạy cảm → API trả 423, client tự hỏi PIN rồi gửi lại.
+ */
+export type GenProposalType = 'draft_message' | 'reminder' | 'assign';
+export type GenProposalStatus = 'pending' | 'confirmed' | 'cancelled';
+
+export interface GenSubjectRef {
+  type: 'person' | 'group';
+  id: string;
+}
+
+export interface DraftMessageFields {
+  title: string;
+  text: string;
+  subject?: GenSubjectRef | null;
+}
+
+export interface ReminderFields {
+  title: string;
+  /** ISO 8601 (UTC, hậu tố Z). */
+  remind_at: string;
+  due_at?: string | null;
+  priority: 'P1' | 'P2' | 'P3';
+  assignee_user_id?: string | null;
+  subject?: GenSubjectRef | null;
+}
+
+export interface AssignFields {
+  item_type: 'task' | 'inbox';
+  item_id: string;
+  user_id: string;
+}
+
+export interface GenProposalResult {
+  type: 'draft' | 'task' | 'inbox_item';
+  id: string | null;
+  code?: string | null;
+  /** Màn xem kết quả (khoá GEN_SCREENS). */
+  screen: string;
+}
+
+interface GenProposalBase {
+  id: string;
+  /** Tóm tắt do HỆ THỐNG viết từ các trường đã kiểm (không phải lời model). */
+  summary: string;
+  /** Nhãn hiển thị: `user` (người được giao), `item` (việc/mục), `subject` (đối tượng). */
+  labels: Record<string, string>;
+  /** Mục tiêu registry gắn với đề xuất (quyền + cờ nhạy cảm lấy từ đây). */
+  target: string;
+  requires_pin: boolean;
+  status: GenProposalStatus;
+  result?: GenProposalResult;
+}
+
+export type GenProposal =
+  | (GenProposalBase & { type: 'draft_message'; fields: DraftMessageFields })
+  | (GenProposalBase & { type: 'reminder'; fields: ReminderFields })
+  | (GenProposalBase & { type: 'assign'; fields: AssignFields });
+
+/** Trường người dùng được sửa trên thẻ trước khi xác nhận (còn lại giữ nguyên như lúc đề xuất). */
+export const GEN_PROPOSAL_EDITABLE: Record<GenProposalType, readonly string[]> = {
+  draft_message: ['title', 'text'],
+  reminder: ['title', 'remind_at', 'due_at', 'priority', 'assignee_user_id'],
+  assign: ['user_id'],
+};
+
+export interface GenAssignee {
+  id: string;
+  name: string;
+  role: string | null;
+  me: boolean;
+}
+
 export type GenStep =
   | { kind: 'say'; text: string }
   | { kind: 'tool'; name: DataToolName; args: Record<string, unknown> }
   | { kind: 'ui'; action: UiAction }
   | { kind: 'suggest'; items: Suggestion[] }
+  | { kind: 'proposal'; proposal: GenProposal }
   | { kind: 'done' };
 
 /** Bước server đẩy xuống web (đã kiểm). `tool` chỉ báo tên — kết quả không gửi về trình duyệt. */
@@ -125,6 +204,10 @@ export function genEndpoints(r: ApiClient['request']) {
       turn: (id: string, signal?: AbortSignal) => r<GenTurn>(`/gen/turns/${encodeURIComponent(id)}`, { signal }),
       ack: (id: string, body: { step: number; outcome: TourOutcome }) =>
         r<void>(`/gen/turns/${encodeURIComponent(id)}/ack`, { method: 'POST', body }),
+      assignees: (signal?: AbortSignal) => r<{ items: GenAssignee[] }>('/gen/assignees', { signal }),
+      confirmProposal: (id: string, fields: Record<string, unknown> = {}) =>
+        r<GenProposal>(`/gen/proposals/${encodeURIComponent(id)}/confirm`, { method: 'POST', body: { fields } }),
+      cancelProposal: (id: string) => r<GenProposal>(`/gen/proposals/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
     },
   };
 }

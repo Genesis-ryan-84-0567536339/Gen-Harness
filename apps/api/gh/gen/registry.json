@@ -400,6 +400,42 @@
       }
     },
     {
+      "id": "tasks.new",
+      "screen": "tasks",
+      "label": "Nút \"Tạo việc mới\"",
+      "description": "Tạo việc hoặc nhắc hẹn mới (tiêu đề, ưu tiên, hạn)",
+      "dynamic": null,
+      "params": null,
+      "permission": "queue.act"
+    },
+    {
+      "id": "tasks.row",
+      "screen": "tasks",
+      "label": "Một dòng việc",
+      "description": "Một việc cụ thể trong Danh sách việc (theo id việc)",
+      "dynamic": "row",
+      "params": null
+    },
+    {
+      "id": "inbox.row",
+      "screen": "inbox",
+      "label": "Một mục hộp thư",
+      "description": "Một thẻ trong Hộp thư ý nghĩa (theo id mục)",
+      "dynamic": "row",
+      "params": null
+    },
+    {
+      "id": "workbench.drafts",
+      "screen": "workbench",
+      "label": "Bản nháp chờ duyệt",
+      "description": "Danh sách bản nháp tin gửi đi đang chờ Sếp duyệt",
+      "dynamic": null,
+      "params": null,
+      "permission": "action.draft",
+      "sensitive": true,
+      "safe_message": "Đây là thao tác nhạy cảm — Sếp tự xem kỹ và tự quyết định, Gen không làm thay."
+    },
+    {
       "id": "api.add_provider",
       "screen": "api",
       "label": "Nút \"Thêm nhà cung cấp\"",

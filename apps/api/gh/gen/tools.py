@@ -1,4 +1,4 @@
-"""Công cụ dữ liệu CHỈ ĐỌC của Gen (docs/design/gen-v1.md §3.4).
+"""Công cụ dữ liệu CHỈ ĐỌC của Gen (docs/design/gen-v1.md §3.4; v2 thêm task.list, staff.list).
 
 Mỗi tool là lớp bọc mỏng quanh một endpoint GET đã có, gọi NỘI BỘ (ASGI, không qua mạng) bằng chính cookie phiên
 của người đang hỏi → tái dùng nguyên RBAC, phạm vi dữ liệu và lớp che của endpoint; Gen không có quyền riêng, không
@@ -60,6 +60,10 @@ TOOLS: dict[str, Tool] = {t.name: t for t in (
     Tool("system.health", "Tình trạng CSDL, Redis, kho tệp, bridge kênh", ("system.read",), "/ready"),
     Tool("guide.list", "Các việc thiết lập tuỳ chọn 5–11: vì sao cần, các bước, đã xong chưa", ("system.manage",)),
     Tool("screens.list", "Các màn Sếp được xem (khoá + tên) — dùng khi cần mở màn", ()),
+    Tool("task.list", "Việc & nhắc hẹn; args.status ∈ todo|doing|done|cancelled (id việc dùng cho đề xuất gán người)",
+         ("queue.read",), "/tasks", {"status": ("todo", "doing", "done", "cancelled")}, default_query={"limit": "20"}),
+    Tool("staff.list", "Người trong tổ chức có thể giao việc (id, tên, vai trò) — dùng trước khi đề xuất gán người",
+         ("queue.act",), "/gen/assignees"),
 )}
 
 

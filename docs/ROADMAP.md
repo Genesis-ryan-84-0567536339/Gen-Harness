@@ -17,13 +17,15 @@ Tài khoản của tôi + bắt buộc đổi mật khẩu tạm, sao lưu & kh�
 v0.1.21: Gen v1 (A1–A3) — khung chat, dẫn đường trên UI, nguồn Jev; cờ `gen.enabled` (bật cho Owner).
 v0.1.22: Đợt B1–B3 — quản lý người dùng, sửa thông tin công ty, trang Trợ giúp.
 v0.1.23: Đợt B4–B7 — giao diện điện thoại, trang lỗi/404, chuông thông báo, sáng/tối.
+v0.1.24: Đợt A4 — Gen v2 bước 1: đề xuất thao tác có xác nhận (nháp tin, nhắc việc, gán người).
 
 ## Đợt A — Gen v1 (thiết kế: docs/design/gen-v1.md)
 - ✅ A1 Khung chat phải + Gen trả lời/tóm tắt (chỉ đọc), lưu hội thoại, Nhật ký hành động — v0.1.21.
 - ✅ A2 Giao thức hành động UI: mở trang, khoanh sáng (`data-gen-target`), dẫn từng bước — v0.1.21.
 - ✅ A3 Nguồn model Jev (OpenRouter) + Gen dùng Jev cho quyết định nhanh, rơi về LLM khi lỗi — v0.1.21
   (schema `/v1/systemone` còn là giả định, xem HANDOFF v0.1.21).
-- A4 Đề xuất thao tác; v2: điền form có xác nhận (nháp tin, nhắc việc, gán người).
+- ✅ A4 Gen v2 bước 1 — đề xuất thao tác có xác nhận (nháp tin → nhắc việc → gán người; Xác nhận/Sửa/Huỷ, PIN khi nhạy cảm,
+  Action Log via=gen; nhắc việc đến giờ → chuông) — v0.1.24.
 
 ## Đợt B — Cơ bản còn thiếu
 - ✅ B1 quản lý người dùng (mời, đổi vai trò, khoá/mở khoá, đặt lại mật khẩu) — v0.1.22.
