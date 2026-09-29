@@ -152,8 +152,7 @@ async def purge_gen_conversations(ctx: dict[str, Any]) -> int:
 async def purge_notifications(ctx: dict[str, Any]) -> int:
     """v0.1.27: hạn lưu chuông thông báo — đã đọc > 30 ngày, mọi thông báo > 90 ngày (`gh.notifications.purge_old`)."""
     async with sessionmaker()() as db:
-        n = await notifications.purge_old(db)
-        await db.commit()
+        n = await notifications.purge_old(db, commit_each=True)
     return n
 
 

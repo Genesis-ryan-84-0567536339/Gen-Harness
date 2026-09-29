@@ -244,3 +244,82 @@ async def test_reminder_bad_row_does_not_block_batch(owner_api: Api, monkeypatch
     titles = {i["title"] for i in items if i["kind"] == "task.reminder"}
     assert titles == {"Nhắc việc: Việc A", "Nhắc việc: Việc C"}
     assert orjson.dumps(items).decode().count("Hỏng") == 0
+
+
+# ─── rà soát PR #30 ───────────────────────────────────────────────────────────
+
+async def test_pin_mapped_ipv4_and_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    # `::ffff:8.8.8.8` là IP công cộng (Python 3.11 coi IPv4-mapped là "private") → vẫn bị công tắc chặn.
+    with pytest.raises(McpBlockedNetwork, match="mạng công cộng"):
+        await pin_endpoint("http://[::ffff:8.8.8.8]/mcp", False)
+    _fake_resolver(monkeypatch, [["::ffff:93.184.216.34"]])
+    with pytest.raises(McpBlockedNetwork, match="mạng công cộng"):
+        await pin_endpoint("https://hub.genos.top/mcp", False)
+    with pytest.raises(McpBlockedNetwork):
+        await pin_endpoint("http://hub.noi-bo.vn:99999/mcp", True)
+    # IP đầu (vd AAAA trên máy không có IPv6) không kết nối được → thử IP kế đã kiểm, không phân giải lại.
+    asked = _fake_resolver(monkeypatch, [["2606:4700::1", "104.16.0.1"]])
+    seen: list[str] = []
+
+    def handle(req: httpx.Request) -> httpx.Response:
+        seen.append(req.url.host)
+        if req.url.host == "2606:4700::1":
+            raise httpx.ConnectError("no route", request=req)
+        assert req.headers["host"] == "hub.genos.top" and req.extensions.get("sni_hostname") == "hub.genos.top"
+        return httpx.Response(200, json={"jsonrpc": "2.0", "id": "gh-1", "result": {"ok": True}})
+
+    client = McpClient(transport=httpx.MockTransport(handle), pin_dns=True)
+    assert await client.call_tool(_Server("https://hub.genos.top/mcp", True), "t", {}, TOKEN) == {"ok": True}
+    assert seen == ["2606:4700::1", "104.16.0.1"] and len(asked) == 1
+
+
+async def test_generic_server_routes_cannot_touch_hub_server(owner_api: Api, hub_fake: FakeHub,
+                                                             client: httpx.AsyncClient, db: Any) -> None:
+    """Vai trò tuỳ biến có system.manage không được đổi endpoint / khám phá / xoá máy chủ Gen-hub (đổi endpoint rồi
+    khám phá = gửi token Kho tới nơi khác)."""
+    await _linked(owner_api)
+    sid = (await owner_api.get("/hub/link")).json()["server_id"]
+    await _set_scope(db, "auditor", "system.manage", "all")
+    await db.commit()
+    auditor = await login_as(client, db, "auditor")
+    try:
+        r = await auditor.send("PATCH", f"/mcp/servers/{sid}", {"endpoint": "https://evil.example/mcp"})
+        assert r.status_code == 403 and r.json()["code"] == "HUB_OWNER_ONLY", r.text
+        assert (await auditor.send("POST", f"/mcp/servers/{sid}/discover", {})).status_code == 403
+        assert (await auditor.send("DELETE", f"/mcp/servers/{sid}")).status_code == 403
+    finally:
+        await auditor.c.aclose()
+    assert (await owner_api.get("/hub/link")).json()["endpoint"] != "https://evil.example/mcp"
+    n = (await db.execute(text("SELECT count(*) FROM ops.action_log WHERE action = 'mcp.server_blocked'"))).scalar()
+    assert n == 3
+    r = await owner_api.send("POST", f"/mcp/servers/{sid}/discover", {})
+    assert r.status_code == 200, r.text
+
+
+async def test_reminder_ws_events_only_after_outer_commit(owner_api: Api, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Savepoint RELEASE bắn after_commit (SQLAlchemy 2) — không được đẩy WS trước khi transaction ngoài commit; dòng
+    lỗi phía sau không được xoá sự kiện của dòng trước đã thành công."""
+    me = await _me(owner_api)
+    for title in ("Việc A", "Hỏng dữ liệu", "Việc C"):
+        await owner_api.send("POST", "/tasks", {"title": title, "assignee_user_id": me["id"], "remind_at": _soon(-5)})
+    real = notifications.notify
+    pushed: list[str] = []
+
+    async def fake_publish(redis: Any, batch: Any) -> None:
+        pushed.extend(it["title"] for _, _, it in batch)
+
+    async def flaky(db: Any, org: Any, to: Any, **kw: Any) -> Any:
+        if "Hỏng" in kw["title"]:
+            await db.execute(text("SELECT 1 / 0"))
+        return await real(db, org, to, **kw)
+
+    monkeypatch.setattr(notifications, "notify", flaky)
+    monkeypatch.setattr(notifications, "_publish_all", fake_publish)
+    async with sessionmaker()() as db:
+        assert await due_reminders(db, redis=object()) == 2
+        await asyncio.sleep(0)
+        assert pushed == []  # chưa commit → chưa đẩy
+        await db.commit()
+    for _ in range(5):
+        await asyncio.sleep(0)
+    assert sorted(pushed) == ["Nhắc việc: Việc A", "Nhắc việc: Việc C"]

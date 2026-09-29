@@ -292,6 +292,29 @@ async def call_kho(db: AsyncSession, redis: Any, client: McpClient, *, user: ser
     return {"source": "Kho Ryan qua Gen-hub", "tool": suffix, "cached": False, "data": data}
 
 
+async def is_hub_server(db: AsyncSession, org_id: uuid.UUID, server_id: uuid.UUID) -> bool:
+    link = await load(db, org_id)
+    return link is not None and link.server_id is not None and link.server_id == server_id
+
+
+async def guard_server_admin(db: AsyncSession, *, user: service.CurrentUser, server_id: uuid.UUID,
+                             action: str) -> bool:
+    """Route chung sửa/xoá/khám phá máy chủ MCP (`system.manage` — vai trò tuỳ biến có thể có) KHÔNG được đụng máy
+    chủ của liên kết Gen-hub nếu không phải Owner: đổi `endpoint` rồi khám phá/gọi = gửi token Kho tới nơi khác.
+    Trả True khi đó là máy chủ Gen-hub (bên gọi dùng client ghim DNS)."""
+    if not await is_hub_server(db, user.org_id, server_id):
+        return False
+    if user.role_code != rbac.OWNER:
+        msg = "Bị chặn: máy chủ Gen-hub (Kho Ryan) chỉ Owner được quản lý"
+        await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
+                               action="mcp.server_blocked", target_type="mcp_server", target_id=str(server_id),
+                               target_label=SERVER_NAME, result="blocked",
+                               detail={"code": "HUB_OWNER_ONLY", "reason": msg, "op": action}, ip=user.ip)
+        await db.commit()
+        raise ApiError(403, "HUB_OWNER_ONLY", "Bị chặn", msg)
+    return True
+
+
 async def generic_call(db: AsyncSession, redis: Any, transport: Any, *, user: service.CurrentUser, tool: Any,
                        agent_key: str, args: dict[str, Any]) -> dict[str, Any] | None:
     """Route chung `POST /mcp/tools/{id}/call` gọi vào máy chủ của liên kết Gen-hub (v0.1.27): Kho chỉ Owner

@@ -73,6 +73,14 @@ def _is_public(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     return not (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast)
 
 
+def _unmap(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
+    """`::ffff:a.b.c.d` → `a.b.c.d`: Python 3.11 coi mọi IPv4-mapped là "private" — không chuẩn hoá thì
+    `[::ffff:8.8.8.8]` lọt qua công tắc mạng công cộng."""
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        return ip.ipv4_mapped
+    return ip
+
+
 def always_forbidden(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     """Địa chỉ không bao giờ được gọi khi ghim DNS (siêu dữ liệu đám mây 169.254.x / fe80::, 0.0.0.0, multicast)."""
     if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
@@ -87,6 +95,7 @@ class PinnedTarget:
     host: str
     sni: str | None
     ip: str
+    fallbacks: tuple[str, ...] = ()
 
 
 async def pin_endpoint(endpoint: str, allow_public_network: bool) -> PinnedTarget:
@@ -97,10 +106,13 @@ async def pin_endpoint(endpoint: str, allow_public_network: bool) -> PinnedTarge
     host = u.hostname
     if not host or u.scheme not in ("http", "https"):
         raise McpBlockedNetwork("Địa chỉ máy chủ MCP không hợp lệ")
-    port = u.port or (443 if u.scheme == "https" else 80)
+    try:
+        port = u.port or (443 if u.scheme == "https" else 80)
+    except ValueError as e:  # cổng ngoài 0–65535
+        raise McpBlockedNetwork("Địa chỉ máy chủ MCP không hợp lệ") from e
     literal = True
     try:
-        ips: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = [ipaddress.ip_address(host)]
+        ips: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = [_unmap(ipaddress.ip_address(host))]
     except ValueError:
         literal = False
         try:
@@ -110,7 +122,7 @@ async def pin_endpoint(endpoint: str, allow_public_network: bool) -> PinnedTarge
         ips = []
         for info in infos:
             try:
-                ip = ipaddress.ip_address(str(info[4][0]).split("%", 1)[0])
+                ip = _unmap(ipaddress.ip_address(str(info[4][0]).split("%", 1)[0]))
             except ValueError:
                 continue
             if ip not in ips:
@@ -123,12 +135,17 @@ async def pin_endpoint(endpoint: str, allow_public_network: bool) -> PinnedTarge
     if not allow_public_network and any(_is_public(ip) for ip in ips):
         raise McpBlockedNetwork(
             f"Máy chủ MCP ở mạng công cộng ({host}) — Owner chưa bật 'Cho phép máy chủ MCP ngoài mạng nội bộ'")
-    ip = ips[0]
-    ip_host = f"[{ip}]" if isinstance(ip, ipaddress.IPv6Address) else str(ip)
-    netloc = ip_host + (f":{u.port}" if u.port else "")
     host_header = u.netloc.rsplit("@", 1)[-1]
     sni = host if (u.scheme == "https" and not literal) else None
-    return PinnedTarget(url=urlunparse(u._replace(netloc=netloc)), host=host_header, sni=sni, ip=str(ip))
+
+    def url_for(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> str:
+        ip_host = f"[{ip}]" if isinstance(ip, ipaddress.IPv6Address) else str(ip)
+        return urlunparse(u._replace(netloc=ip_host + (f":{u.port}" if u.port else "")))
+
+    # `fallbacks`: các IP còn lại (ĐÃ kiểm cùng lượt) — thử lần lượt khi IP đầu không kết nối được (vd bản ghi AAAA
+    # của Cloudflare trên máy không có IPv6), như trình kết nối "happy eyeballs" bình thường.
+    return PinnedTarget(url=url_for(ips[0]), host=host_header, sni=sni, ip=str(ips[0]),
+                        fallbacks=tuple(url_for(ip) for ip in ips[1:]))
 
 
 def check_network_guard(endpoint: str, allow_public_network: bool) -> None:
@@ -155,15 +172,23 @@ class McpClient:
         url = server.endpoint
         hdrs = {**headers, "content-type": "application/json"}
         extensions: dict[str, Any] = {}
+        urls = [url]
         if self._pin:
             target = await pin_endpoint(server.endpoint, server.allow_public_network)
-            url, hdrs["host"] = target.url, target.host
+            urls, hdrs["host"] = [target.url, *target.fallbacks], target.host
             if target.sni:
                 extensions["sni_hostname"] = target.sni
         try:
+            # Không bao giờ tự theo chuyển hướng (httpx mặc định) — đích mới chưa qua kiểm IP.
             async with httpx.AsyncClient(transport=self._transport, timeout=self._timeout,
-                                         trust_env=not self._pin) as c:
-                resp = await c.post(url, json=body, headers=hdrs, extensions=extensions or None)
+                                         trust_env=not self._pin, follow_redirects=False) as c:
+                for i, u in enumerate(urls):
+                    try:
+                        resp = await c.post(u, json=body, headers=hdrs, extensions=extensions or None)
+                        break
+                    except httpx.ConnectError:
+                        if i == len(urls) - 1:
+                            raise
         except httpx.HTTPError as e:
             raise McpError(f"mạng: {e}") from e
         if resp.status_code >= 400:

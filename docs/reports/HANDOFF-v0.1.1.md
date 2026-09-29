@@ -751,5 +751,15 @@ không thêm tích hợp ngoài (Jules / Playwright cho agent vẫn ngoài phạ
   → mã việc → tới giờ nhắc → chuông WS + mở `/tasks`; Huỷ; nháp tin cần PIN (hỏi PIN → tự gửi lại) + bỏ hộp PIN thì vẫn chờ;
   Hộp thư huy hiệu Trùng/Rác/Điểm + tooltip + "Ẩn rác & trùng" (`?hide=1`, nhớ sau tải lại); thẻ Gen-hub (token ô password,
   Lưu cần PIN, không hiện lại, token không có trong DOM/phản hồi `/hub/*`, Kiểm tra → Đang nối, Tắt) + Kiểm toán chỉ xem.
+- **Rà soát trước merge (PR #30)**:
+  - route chung `PATCH/DELETE /mcp/servers/{id}` + `POST …/discover` trên máy chủ Gen-hub: vai trò khác Owner (kể cả tuỳ
+    biến có `system.manage`) → 403 `HUB_OWNER_ONLY` + Action Log `mcp.server_blocked` (trước đây đổi được `endpoint` rồi
+    khám phá = gửi token Kho tới nơi khác); Owner khám phá máy chủ Gen-hub qua client ghim DNS (`hub_link.guard_server_admin`).
+  - ghim DNS: IPv4-mapped (`::ffff:a.b.c.d`) chuẩn hoá về IPv4 trước khi xét công cộng (Python 3.11 coi là "private");
+    IP đầu không kết nối được (vd AAAA trên máy không IPv6) → thử lần lượt các IP còn lại đã kiểm; không theo chuyển hướng;
+    cổng sai → chặn.
+  - chuông: SQLAlchemy 2 bắn `after_commit`/`after_rollback` cả khi RELEASE/ROLLBACK savepoint → sự kiện WS bị đẩy trước
+    khi transaction ngoài commit và một dòng lỗi xoá sự kiện của các dòng trước; nay bỏ qua khi còn trong transaction lồng,
+    `pending_mark/reset` dùng ảnh chụp. `purge_notifications` commit sau mỗi lô.
 - Chưa làm: ngắt mạch 60 s riêng cho Gen-hub, Gen đề xuất ghi Gen-hub (kanban/warroom), phương án B, Jules/Playwright worker.
 

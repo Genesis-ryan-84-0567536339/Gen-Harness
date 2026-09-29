@@ -44,6 +44,10 @@ async def _publish_all(redis: Any, items: list[tuple[uuid.UUID, uuid.UUID, dict[
 
 
 def _after_commit(session: Any) -> None:
+    # SQLAlchemy 2 bắn `after_commit` cả khi RELEASE một savepoint (`begin_nested`) — lúc đó transaction ngoài chưa
+    # commit, chưa được đẩy (v0.1.27: nhắc việc mỗi dòng một savepoint).
+    if session.in_nested_transaction():
+        return
     items = session.info.pop(_PENDING, None) or []
     if not items:
         return
@@ -61,6 +65,8 @@ def _after_commit(session: Any) -> None:
 
 
 def _after_rollback(session: Any) -> None:
+    if session.in_nested_transaction():  # hoàn tác savepoint: bên gọi tự bỏ phần của mình (`pending_reset`)
+        return
     session.info.pop(_PENDING, None)
 
 
@@ -74,15 +80,18 @@ def _queue_publish(db: AsyncSession, redis: Any, org_id: uuid.UUID, uid: uuid.UU
     pending.append((redis, org_id, uid, item))
 
 
-def pending_mark(db: AsyncSession) -> int:
-    """Số sự kiện WS đang chờ commit — dùng với `pending_reset` khi hoàn tác một savepoint có gọi `notify()`."""
-    return len(db.sync_session.info.get(_PENDING) or [])
+def pending_mark(db: AsyncSession) -> list[Any]:
+    """Ảnh chụp các sự kiện WS đang chờ commit — dùng với `pending_reset` khi hoàn tác một savepoint có gọi
+    `notify()` (hoàn tác savepoint không xoá hàng chờ — xem `_after_rollback`)."""
+    return list(db.sync_session.info.get(_PENDING) or [])
 
 
-def pending_reset(db: AsyncSession, mark: int) -> None:
-    pending = db.sync_session.info.get(_PENDING)
-    if pending:
-        del pending[mark:]
+def pending_reset(db: AsyncSession, mark: list[Any]) -> None:
+    info = db.sync_session.info
+    if mark:
+        info[_PENDING] = list(mark)
+    else:
+        info.pop(_PENDING, None)
 
 
 def _iso(dt: datetime | None) -> str | None:
@@ -131,8 +140,9 @@ PURGE_BATCH = 5000
 
 
 async def purge_old(db: AsyncSession, *, read_days: int = READ_RETENTION_DAYS,
-                    max_days: int = MAX_RETENTION_DAYS, batch: int = PURGE_BATCH) -> int:
-    """Xoá thông báo đã đọc tạo trước `read_days` ngày và mọi thông báo tạo trước `max_days` ngày. Bên gọi commit."""
+                    max_days: int = MAX_RETENTION_DAYS, batch: int = PURGE_BATCH, commit_each: bool = False) -> int:
+    """Xoá thông báo đã đọc tạo trước `read_days` ngày và mọi thông báo tạo trước `max_days` ngày. Bên gọi commit;
+    `commit_each=True` (job worker) commit sau MỖI lô — khoá dòng không bị giữ tới hết cả lượt xoá."""
     total = 0
     while True:
         n = (await db.execute(text("""
@@ -142,6 +152,8 @@ async def purge_old(db: AsyncSession, *, read_days: int = READ_RETENTION_DAYS,
                  OR created_at < now() - make_interval(days => :m)
               LIMIT :n)"""), {"r": read_days, "m": max_days, "n": batch})).rowcount  # type: ignore[attr-defined]
         total += int(n or 0)
+        if commit_each:
+            await db.commit()
         if not n or n < batch:
             return total
 
