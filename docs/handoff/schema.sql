@@ -813,6 +813,10 @@ CREATE TABLE agent.mcp_calls (
 ) PARTITION BY RANGE (at);
 SELECT partman.create_parent('agent.mcp_calls', 'at', '1 month', p_premake => 3);
 
+-- v0.1.26 (0020): liên kết Gen-hub — Gen đọc Kho Ryan (gh.hub_link). Token ở agent.mcp_servers.auth_enc (mã hoá), không ở đây.
+-- agent.hub_links (org_id PK → core.organizations, server_id → agent.mcp_servers ON DELETE SET NULL, enabled DEFAULT false,
+--   token_expires_at, expiry_notified_at, last_ok_at, last_error, updated_by, updated_at) — RLS org_isolation.
+
 -- ═══ OPS — plugin, breaker, nhật ký, chính sách ════════════════════════════
 
 CREATE TABLE ops.plugins (

@@ -159,6 +159,10 @@ Mỗi tổ chức (org) trong Gen-Harness có **token riêng** và agent riêng 
 
 ## 5. Câu hỏi cho Boss (kèm mặc định đề xuất)
 
+> **Boss đã chốt 29/09/2026**: (1) Có — chỉ Owner, chỉ đọc; (2) Có — gửi model đám mây, **có che** như gen-v1 §9.2;
+> (4) 1 tài khoản Jules, tối đa 5 việc/ngày — **chưa làm** (giữ ghi chú). Lát đầu v0.1.26 đã làm (HANDOFF v0.1.26).
+> Khác thiết kế ban đầu: thẻ Gen-hub nhận thẳng địa chỉ + token (tự tạo máy chủ MCP "Gen-hub"), không phải chọn máy chủ có sẵn.
+
 1. **Gen đọc Kho** có được bật cho Owner ngay ở v0.1.26? — *Mặc định: Có, chỉ Owner, chỉ đọc.*
 2. Nội dung Kho có được gửi sang **model đám mây** (Gemini/API) khi Gen trả lời? — *Mặc định: Có, cùng chuỗi model và lớp che như gen-v1 §9.2.*
 3. Gen có được **đề xuất ghi** vào Gen-hub (tạo thẻ kanban, đăng warroom — luôn chờ Boss bấm)? — *Mặc định: Để v0.1.27, sau khi đọc chạy ổn 1 tuần.*
