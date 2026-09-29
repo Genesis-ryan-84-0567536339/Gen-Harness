@@ -100,8 +100,8 @@ async def notify(db: AsyncSession, org_id: uuid.UUID, user_ids: Iterable[uuid.UU
     out: list[dict[str, Any]] = []
     for uid in dict.fromkeys(user_ids):
         row = (await db.execute(text("""
-            INSERT INTO core.notifications (org_id, user_id, kind, title, body, link)
-            VALUES (:o, :u, :k, :t, :b, :l)
+            INSERT INTO core.notifications (org_id, user_id, kind, title, body, link, created_at)
+            VALUES (:o, :u, :k, :t, :b, :l, clock_timestamp())
             RETURNING id, kind, title, body, link, created_at, read_at"""),
             {"o": org_id, "u": uid, "k": kind, "t": title[:MAX_TITLE], "b": body[:MAX_BODY],
              "l": (link or None) and link[:MAX_LINK]})).one()
