@@ -1,4 +1,4 @@
-# Gen-Harness — Lộ trình tổng thể (cập nhật 29/09/2026)
+# Gen-Harness — Lộ trình tổng thể (cập nhật 30/09/2026)
 
 Nguồn chuẩn tiến độ. Mỗi đợt = 1 PR = 1 bản phát hành, CI + E2E cài thật xanh mới phát hành.
 
@@ -20,6 +20,8 @@ v0.1.23: Đợt B4–B7 — giao diện điện thoại, trang lỗi/404, chuôn
 v0.1.24: Đợt A4 — Gen v2 bước 1: đề xuất thao tác có xác nhận (nháp tin, nhắc việc, gán người).
 v0.1.25: Đợt C1 — lọc đầu Hộp thư (trùng, rác, điểm) dùng Jev khi có, quy tắc khi không.
 v0.1.26: Đợt D1 (lát đầu) — Gen đọc Kho Ryan qua Gen-hub (chỉ đọc, chỉ Owner, che dữ liệu trước khi gửi model).
+v0.1.27: gia cố & phủ test — ghim DNS cho Gen-hub, lỗi Gen-hub chỉ Owner thấy, route MCP chung không lộ Kho, số liệu lọc đầu
+theo phạm vi, rà trần so trùng, hạn lưu chuông 30/90 ngày, nhắc việc chịu lỗi từng dòng; e2e thẻ đề xuất/lọc đầu/Gen-hub/chuông.
 
 ## Đợt A — Gen v1 (thiết kế: docs/design/gen-v1.md)
 - ✅ A1 Khung chat phải + Gen trả lời/tóm tắt (chỉ đọc), lưu hội thoại, Nhật ký hành động — v0.1.21.
@@ -41,10 +43,12 @@ v0.1.26: Đợt D1 (lát đầu) — Gen đọc Kho Ryan qua Gen-hub (chỉ đ�
 ## Đợt C — Hạ tầng dữ liệu
 - ✅ C1 Sàng lọc dùng Jev làm lớp lọc đầu (rác, trùng, chấm điểm 0–100) + đo chi phí (độ trễ, số lượt Jev) và độ khớp với
   quy tắc; Hộp thư có huy hiệu + "Ẩn rác & trùng", thẻ cấu hình Owner — v0.1.25. (Còn: đo độ chính xác có nhãn người.)
+  v0.1.27: số liệu theo phạm vi `queue.read`; trần 3000 mục so trùng đã rà (trùng y hệt không bị trần bỏ sót).
 
 ## Đợt D — Phòng làm việc chung (repo Gen-hub, cần mở quyền repo cho phiên này)
 - 🟡 D1 Gen nối Kho/warroom/kanban của Gen-hub — **một phần** v0.1.26: Gen đọc Kho (Owner, chỉ đọc, che dữ liệu, đệm 5 phút,
-  nhắc token trước 14 ngày; thẻ Gen-hub ở MCP Hub). Còn: đề xuất ghi kanban/warroom (v0.1.27), phương án B.
+  nhắc token trước 14 ngày; thẻ Gen-hub ở MCP Hub); v0.1.27 gia cố (ghim DNS, lỗi chỉ Owner, route MCP chung chỉ Owner).
+  Còn: đề xuất ghi kanban/warroom (bản sau), phương án B.
 - D2 Jules worker trong gen-workplace (mỗi tài khoản có hạn mức riêng; kiểm điều khoản dùng nhiều tài khoản trước khi chạy
   song song 5 tài khoản). Boss chốt 29/09: 1 tài khoản, tối đa 5 việc/ngày — chưa làm.
 - D3 Playwright cho agent vòng ngoài.
