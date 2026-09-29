@@ -1,5 +1,5 @@
-"""v0.1.27 — gia cố sau review: ghim DNS cho Gen-hub, `last_error` chỉ Owner, `/mcp/tools/{id}/call` không lộ Kho,
-số liệu lọc đầu theo phạm vi `queue.read`, trần so trùng 3000, hạn lưu chuông thông báo, nhắc việc chịu lỗi từng dòng."""
+"""v0.1.27 — gia cố sau review: ghim DNS cho Gen-hub, `last_error` chỉ Owner, `/mcp/tools/{id}/call` không lộ
+Kho, số liệu lọc đầu theo phạm vi `queue.read`, trần so trùng 3000, hạn lưu chuông, nhắc việc chịu lỗi từng dòng."""
 
 import asyncio
 import socket
@@ -22,9 +22,16 @@ from tests.conftest import Api
 from tests.phase2 import org_id
 from tests.test_actionlog_db import _set_scope
 from tests.test_gen_proposals import _me, _soon
-from tests.test_hub_link import PREFIX, TOKEN, FakeHub, _linked, fake_hub  # noqa: F401 — fixture
+from tests.test_hub_link import PREFIX, TOKEN, FakeHub, _linked
 from tests.test_rbac_api import login_as
 from tests.test_triage import LONG, _person, _unit
+
+
+@pytest.fixture
+def hub_fake(app: Any) -> FakeHub:
+    h = FakeHub()
+    app.state.mcp_transport = h.transport()
+    return h
 
 
 class _Server:
@@ -96,10 +103,10 @@ async def test_pinned_client_connects_to_checked_ip_not_rebound(monkeypatch: pyt
 
 # ─── 1b: last_error chỉ Owner ─────────────────────────────────────────────────
 
-async def test_last_error_owner_only(owner_api: Api, fake_hub: FakeHub, client: httpx.AsyncClient,
+async def test_last_error_owner_only(owner_api: Api, hub_fake: FakeHub, client: httpx.AsyncClient,
                                      db: Any) -> None:
     await _linked(owner_api)
-    fake_hub.mode = "429"
+    hub_fake.mode = "429"
     assert (await owner_api.get("/hub/kho/search", params={"q": "x"})).status_code == 409
     own = (await owner_api.get("/hub/link")).json()
     assert own["last_error"].startswith("429") and own["status"] == "error"
@@ -107,7 +114,7 @@ async def test_last_error_owner_only(owner_api: Api, fake_hub: FakeHub, client: 
     try:
         other = (await auditor.get("/hub/link")).json()
         assert other["status"] == "error" and other["last_error"] == hub.LAST_ERROR_HIDDEN
-        fake_hub.mode = "ok"
+        hub_fake.mode = "ok"
         assert (await owner_api.get("/hub/kho/search", params={"q": "y"})).status_code == 200
         assert (await auditor.get("/hub/link")).json()["last_error"] is None
     finally:
@@ -116,19 +123,19 @@ async def test_last_error_owner_only(owner_api: Api, fake_hub: FakeHub, client: 
 
 # ─── 1d: route MCP chung không lộ Kho ─────────────────────────────────────────
 
-async def test_generic_call_on_hub_server_owner_only_and_masked(owner_api: Api, fake_hub: FakeHub,
+async def test_generic_call_on_hub_server_owner_only_and_masked(owner_api: Api, hub_fake: FakeHub,
                                                                 client: httpx.AsyncClient, db: Any) -> None:
     await _linked(owner_api)
     tid = (await db.execute(text("SELECT id FROM agent.mcp_tools WHERE name = :n"),
                             {"n": PREFIX + "kho_tom_tat"})).scalar_one()
-    fake_hub.calls.clear()
+    hub_fake.calls.clear()
     r = await owner_api.send("POST", f"/mcp/tools/{tid}/call", {"agent_key": "core.gen", "args": {}})
     assert r.status_code == 200, r.text
     body = r.text
     for leaked in ("0912 345 678", "tuan.nguyen@example.com", "sk-abcdefghij", "190312345678901", TOKEN):
         assert leaked not in body, leaked
     assert "VIEC-3" in body and "nội dung không lưu" in r.json()["call"]["result_summary"]
-    assert fake_hub.calls == [PREFIX + "kho_tom_tat"]
+    assert hub_fake.calls == [PREFIX + "kho_tom_tat"]
     # Vai trò khác có system.manage (tuỳ biến) vẫn không gọi được máy chủ Gen-hub qua route chung.
     await _set_scope(db, "auditor", "system.manage", "all")
     await db.commit()
@@ -139,7 +146,7 @@ async def test_generic_call_on_hub_server_owner_only_and_masked(owner_api: Api, 
         assert "VIEC-3" not in r.text
     finally:
         await auditor.c.aclose()
-    assert fake_hub.calls == [PREFIX + "kho_tom_tat"]
+    assert hub_fake.calls == [PREFIX + "kho_tom_tat"]
     rows = (await db.execute(text("SELECT outcome, result_summary FROM agent.mcp_calls ORDER BY at"))).all()
     assert rows[-1].outcome == "blocked" and "chỉ Owner" in rows[-1].result_summary
     assert all("VIEC-3" not in (x.result_summary or "") for x in rows)
