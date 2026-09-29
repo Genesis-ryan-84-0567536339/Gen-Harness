@@ -43,6 +43,7 @@ MIN_SCORE_RANGE = (0, 100)
 CHUNK = 50
 MAX_ROUNDS = 20                 # ≤ 1000 mục / lượt job; phần còn lại lượt sau
 WINDOW_DAYS = 14                # cửa sổ dò trùng
+SWEEP_DAYS = 14                 # quét vét chỉ xét mục gần đây: không lọc lại cả lịch sử (chi phí Jev + quét bảng lớn)
 CANDIDATES_LIMIT = 3000
 PREFILTER_BITS = 28
 NEAR_JACCARD = 0.75
@@ -356,8 +357,10 @@ async def mark_units(db: AsyncSession, org_id: uuid.UUID, unit_ids: list[uuid.UU
                      decider: decmod.Decider | None = None, limit: int = CHUNK) -> int:
     """Đánh dấu tối đa `limit` đơn vị ý nghĩa chưa có dấu (idempotent). Bên gọi commit."""
     await db.execute(text("SELECT pg_advisory_xact_lock(hashtext('triage:' || :o))"), {"o": str(org_id)})
-    ids_sql = "AND mu.id = ANY(:ids)" if unit_ids is not None else ""
-    params: dict[str, Any] = {"o": org_id, "v": VERSION, "n": limit}
+    # Hook: đúng các mục vừa sinh. Quét vét: chỉ cửa sổ gần đây (dùng chỉ mục (org_id, observed_at) của 0003).
+    ids_sql = ("AND mu.id = ANY(:ids)" if unit_ids is not None
+               else "AND mu.observed_at >= now() - make_interval(days => :w)")
+    params: dict[str, Any] = {"o": org_id, "v": VERSION, "n": limit, "w": SWEEP_DAYS}
     if unit_ids is not None:
         if not unit_ids:
             return 0
@@ -446,7 +449,7 @@ async def summary(db: AsyncSession, org_id: uuid.UUID, days: int = 7) -> dict[st
         SELECT count(*) FROM clean.meaning_units mu
         WHERE mu.org_id = :o AND mu.superseded_by IS NULL AND mu.observed_at > now() - make_interval(days => :d)
           AND NOT EXISTS (SELECT 1 FROM refinery.item_marks m WHERE m.item_type = 'unit' AND m.item_id = mu.id)"""),
-        {"o": org_id, "d": days})).scalar_one()
+        {"o": org_id, "d": min(days, SWEEP_DAYS)})).scalar_one()  # ngoài cửa sổ quét vét: không "chờ lọc"
     jev = int(r.jev or 0)
     return {
         "days": days, "enabled": bool(cfg["enabled"]), "min_score": int(cfg["min_score"]),
