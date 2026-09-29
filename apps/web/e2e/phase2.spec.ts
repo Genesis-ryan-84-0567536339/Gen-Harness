@@ -347,39 +347,36 @@ test('setup steps 4–7 and 12 against the mock', async ({ page }) => {
   await expect(next).toBeEnabled();
   await next.click();
 
-  // Bước 8–9 (giai đoạn 3, chưa dựng ở web) vẫn "Sắp có" và bấm qua được.
-  for (const title of ['Agent đầu tiên', 'Tự trị & ranh giới']) {
-    await expect(page.getByRole('heading', { name: title })).toBeVisible();
-    await expect(page.getByText('Sắp có')).toBeVisible();
-    await next.click();
-  }
+  // Bước 8–9 đã có form thật (v0.1.15: 5–11 là tuỳ chọn, "Để sau" bỏ qua được). Form 8 hiện đủ ô nhưng
+  // "Tiếp tục" chỉ bật khi đã nhập tên + vai trò; ở đây để sau cả hai (luồng tạo agent có test riêng).
+  const skip = page.getByRole('button', { name: 'Để sau', exact: true });
+  await expect(page.getByRole('heading', { name: 'Agent đầu tiên' })).toBeVisible();
+  await expect(page.getByLabel('Tên agent')).toBeVisible();
+  await expect(next).toBeDisabled();
+  await skip.click();
+  await expect(page.getByRole('heading', { name: 'Tự trị & ranh giới' })).toBeVisible();
+  await expect(next).toBeDisabled(); // cần tick "Tôi đã đọc các ranh giới trên"
+  await skip.click();
 
-  // Bước 10–11 (giai đoạn 4.6, đã dựng thật): lưu bằng giá trị mặc định (danh sách mời rỗng vẫn hợp lệ, lịch
-  // sao lưu mặc định hằng ngày 02:00 vẫn hợp lệ). PUT thật tính lại `current_step` về bước sớm nhất CHƯA
-  // xong (8–9 vẫn "Sắp có", chưa dựng ở web) nên trang tự quay lại đó — dùng thanh bước bên trái để xem tiếp
-  // bước kế mà không cần 8–9 xong trước (`isReachable`: bước không sẵn có không chặn, bước đã lưu/bỏ qua
-  // cũng không chặn). Luồng điền/thấy mật khẩu tạm thật của bước 10 có test riêng ở
-  // flows.spec.ts "Trình thiết lập bước 10–11".
+  // Bước 10–11: lưu bằng giá trị mặc định (danh sách mời rỗng vẫn hợp lệ, lịch sao lưu mặc định hằng ngày
+  // 02:00 vẫn hợp lệ) — 8–9 đã "để sau" nên không kéo trang quay lại. Luồng điền/thấy mật khẩu tạm thật của
+  // bước 10 có test riêng ở flows.spec.ts "Trình thiết lập bước 10–11".
   await expect(page.getByRole('heading', { name: 'Mời đội ngũ' })).toBeVisible();
   await expect(page.getByText('Sắp có')).toHaveCount(0);
   await next.click();
-  await expect(page.getByRole('heading', { name: 'Agent đầu tiên' })).toBeVisible();
-  await expect(page.getByText('Bước 8/12')).toBeVisible();
-
-  await page.locator('.setup-steps__item', { hasText: 'Sao lưu' }).click();
   await expect(page.getByRole('heading', { name: 'Sao lưu' })).toBeVisible();
-  await expect(page.getByText('Sắp có')).toHaveCount(0);
   await expect(page.getByLabel('Giờ chạy (HH:MM)')).toHaveValue('02:00');
   await next.click();
-  await expect(page.getByRole('heading', { name: 'Agent đầu tiên' })).toBeVisible();
 
-  await page.locator('.setup-steps__item', { hasText: 'Hoàn tất' }).click();
-
-  // Bước 12 — first run live; finishing is refused while 8–9 are missing.
+  // Bước 12 — lần sàng lọc đầu chạy trực tiếp; 1–4 (bắt buộc) đã xong nên không còn cảnh báo chặn Hoàn tất.
   await expect(page.getByRole('heading', { name: 'Hoàn tất' })).toBeVisible();
-  await expect(page.getByText('Còn bước bắt buộc chưa xong: 8, 9').first()).toBeVisible();
+  await expect(page.getByText('Bước 12/12')).toBeVisible();
+  await expect(page.getByText(/Còn bước bắt buộc chưa xong/)).toHaveCount(0);
   await expect(page.getByText('Lần sàng lọc đầu tiên đã xong.')).toBeVisible({ timeout: 15_000 });
   await page.screenshot({ path: join(outDir, 'setup-step12-1440.png'), fullPage: true });
   await page.getByRole('button', { name: /Mở Tổng quan điều hành/ }).click();
-  await expect(page.getByRole('alert')).toContainText('Còn bước bắt buộc chưa xong: 8, 9');
+  await expect(page).toHaveURL(/\/overview/);
+  const state = await apiCall(page, 'GET', '/setup/state');
+  expect(state.finished).toBe(true);
+  expect(state.steps.filter((s: { status: string }) => s.status === 'skipped').map((s: { n: number }) => s.n)).toEqual([8, 9]);
 });
