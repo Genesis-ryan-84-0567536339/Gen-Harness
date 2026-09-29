@@ -115,6 +115,8 @@ export interface TriageSettings {
 }
 export interface TriageSummary {
   days: number;
+  /** v0.1.27: phạm vi `queue.read` của người gọi — `all` = cả tổ chức; `team`/`assigned` chỉ đếm mục mình thấy. */
+  scope?: 'all' | 'team' | 'assigned';
   enabled: boolean;
   min_score: number;
   use_jev: boolean;

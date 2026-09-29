@@ -101,6 +101,8 @@ export function createMock(opts: P4McpOptions) {
     const { method: m, path: p, body, reply, problem } = ctx;
     if (p === '/hub/link' && m === 'GET') {
       if (!has(ctx, 'system.read')) return problem(403, 'FORBIDDEN', 'Vai trò không có quyền này');
+      // v0.1.27: lỗi thô chỉ Owner thấy (như `link_out(owner=…)` ở API).
+      if (ctx.role !== 'owner' && hubLink.last_error) return reply(200, { ...hubLink, last_error: 'Gen-hub đang lỗi — Owner xem chi tiết ở thẻ Gen-hub' });
       return reply(200, hubLink);
     }
     if ((p === '/hub/link' && m === 'PATCH') || (p === '/hub/link/test' && m === 'POST')) {

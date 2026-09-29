@@ -17,6 +17,8 @@ const KIND_ICON: Record<string, string> = {
   'user.reactivated': 'ph ph-lock-open',
   'backup.done': 'ph ph-database',
   'backup.failed': 'ph ph-warning-circle',
+  'task.reminder': 'ph ph-alarm',
+  'hub.token_expiring': 'ph ph-key',
 };
 
 /**

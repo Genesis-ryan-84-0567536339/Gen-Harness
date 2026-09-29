@@ -306,7 +306,7 @@ export function createMock(opts: P3Options) {
     if (p === '/refinery/triage/summary' && m === 'GET') {
       const marked = items.filter((i) => i.triage);
       return reply(200, {
-        days: 7, ...triage, total: marked.length, kept: marked.filter((i) => !isJunk(i)).length,
+        days: 7, scope: 'all', ...triage, total: marked.length, kept: marked.filter((i) => !isJunk(i)).length,
         duplicates: marked.filter((i) => i.triage?.duplicate_of).length, exact_duplicates: 0,
         near_duplicates: marked.filter((i) => i.triage?.duplicate_kind === 'near').length,
         spam: marked.filter((i) => i.triage?.spam).length, low_score: 0, pending: 0, avg_quality: 48,
