@@ -22,7 +22,12 @@ export interface GenTarget {
   dynamic?: 'row';
   /** Tham số URL cần có để phần tử hiện ra (vd `{ tab: 'brain' }`). */
   params?: Record<string, string>;
+  /** Mục tiêu nhạy cảm (huỷ dữ liệu / bảo mật): server thay lời model bằng `GEN_SAFE_MESSAGE` cố định. */
+  sensitive?: boolean;
 }
+
+/** Lời nhắn cố định khi làm sáng mục tiêu nhạy cảm — chống prompt injection qua lời model. */
+export const GEN_SAFE_MESSAGE = 'Đây là thao tác nhạy cảm — Sếp tự xem kỹ và tự quyết định, Gen không làm thay.';
 
 export interface GenScreen {
   key: string;
@@ -60,24 +65,24 @@ export const GEN_TARGETS: GenTarget[] = [
   { id: 'system.tab.brain', screen: 'system', label: 'Tab "Bộ não AI"', description: 'Chuyển sang tab nhà cung cấp model, hạn mức, Jev' },
   { id: 'system.tab.storage', screen: 'system', label: 'Tab "Dữ liệu & lưu trữ"', description: 'Chuyển sang tab hạn lưu, sao lưu & khôi phục' },
   { id: 'system.channels.list', screen: 'system', label: 'Danh sách kênh', description: 'Thẻ các kênh Zalo/WhatsApp và nút tạo mã QR', params: { tab: 'channels' } },
-  { id: 'system.channels.pin', screen: 'system', label: 'Thẻ mã PIN', description: 'Đổi mã PIN, xem lịch sử nhập PIN', params: { tab: 'channels' } },
+  { id: 'system.channels.pin', screen: 'system', label: 'Thẻ mã PIN', description: 'Đổi mã PIN, xem lịch sử nhập PIN', params: { tab: 'channels' }, sensitive: true },
   { id: 'system.brain.quota', screen: 'system', label: 'Hạn mức theo model', description: 'Bảng dùng trong ngày / còn lại của từng model', params: { tab: 'brain' } },
   { id: 'system.brain.chain', screen: 'system', label: 'Chuỗi chuyển hướng', description: 'Thứ tự nhà cung cấp model khi một nơi lỗi', params: { tab: 'brain' } },
   { id: 'system.brain.open_api', screen: 'system', label: 'Nút "Mở API & Model"', description: 'Sang màn thêm nhà cung cấp, khoá API, gán model', params: { tab: 'brain' } },
   { id: 'system.brain.jev', screen: 'system', label: 'Thẻ Jev (System One)', description: 'Cấu hình nguồn model quyết định nhanh Jev', params: { tab: 'brain' } },
   { id: 'system.brain.jev.test', screen: 'system', label: 'Nút "Kiểm tra" Jev', description: 'Gọi thử Jev để biết khoá và địa chỉ đúng chưa', params: { tab: 'brain' } },
   { id: 'system.storage.retention', screen: 'system', label: 'Hạn lưu dữ liệu', description: 'Mỗi tập dữ liệu giữ bao lâu', params: { tab: 'storage' } },
-  { id: 'system.backup.panel', screen: 'system', label: 'Sao lưu & khôi phục', description: 'Danh sách bản sao lưu, tải về, khôi phục', params: { tab: 'storage' } },
-  { id: 'system.backup.now', screen: 'system', label: 'Nút "Sao lưu ngay"', description: 'Tạo bản sao lưu ngay lúc này', params: { tab: 'storage' } },
-  { id: 'system.backup.schedule', screen: 'system', label: 'Lịch sao lưu tự động', description: 'Đổi tần suất và giờ sao lưu tự động', params: { tab: 'storage' } },
+  { id: 'system.backup.panel', screen: 'system', label: 'Sao lưu & khôi phục', description: 'Danh sách bản sao lưu, tải về, khôi phục', params: { tab: 'storage' }, sensitive: true },
+  { id: 'system.backup.now', screen: 'system', label: 'Nút "Sao lưu ngay"', description: 'Tạo bản sao lưu ngay lúc này', params: { tab: 'storage' }, sensitive: true },
+  { id: 'system.backup.schedule', screen: 'system', label: 'Lịch sao lưu tự động', description: 'Đổi tần suất và giờ sao lưu tự động', params: { tab: 'storage' }, sensitive: true },
   // ── API & Model ──
   { id: 'api.add_provider', screen: 'api', label: 'Nút "Thêm nhà cung cấp"', description: 'Thêm Gemini/DeepSeek/API tương thích OpenAI' },
   { id: 'api.bindings', screen: 'api', label: 'Gán model cho từng agent', description: 'Chọn model cho từng mục đích, gồm core.gen của Gen' },
   // ── Tài khoản của tôi ──
   { id: 'account.profile', screen: 'account', label: 'Hồ sơ', description: 'Đổi tên hiển thị, email' },
-  { id: 'account.password', screen: 'account', label: 'Đổi mật khẩu', description: 'Đặt mật khẩu mới' },
-  { id: 'account.pin', screen: 'account', label: 'Đổi mã PIN', description: 'Đặt mã PIN 6 số mới' },
-  { id: 'account.sessions', screen: 'account', label: 'Phiên đăng nhập', description: 'Thiết bị đang đăng nhập, đăng xuất thiết bị khác' },
+  { id: 'account.password', screen: 'account', label: 'Đổi mật khẩu', description: 'Đặt mật khẩu mới', sensitive: true },
+  { id: 'account.pin', screen: 'account', label: 'Đổi mã PIN', description: 'Đặt mã PIN 6 số mới', sensitive: true },
+  { id: 'account.sessions', screen: 'account', label: 'Phiên đăng nhập', description: 'Thiết bị đang đăng nhập, đăng xuất thiết bị khác', sensitive: true },
   // ── Quy tắc sàng lọc ──
   { id: 'rules.add', screen: 'rules', label: 'Nút "Thêm quy tắc"', description: 'Tạo quy tắc sàng lọc mới' },
   { id: 'rules.batch', screen: 'rules', label: 'Nút "Chạy thử trên 100 bản ghi"', description: 'Thử bộ quy tắc trên dữ liệu gần nhất' },

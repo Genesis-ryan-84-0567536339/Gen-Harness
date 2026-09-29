@@ -221,7 +221,9 @@
       "dynamic": null,
       "params": {
         "tab": "channels"
-      }
+      },
+      "sensitive": true,
+      "safe_message": "Đây là thao tác nhạy cảm — Sếp tự xem kỹ và tự quyết định, Gen không làm thay."
     },
     {
       "id": "system.brain.quota",
@@ -291,7 +293,9 @@
       "dynamic": null,
       "params": {
         "tab": "storage"
-      }
+      },
+      "sensitive": true,
+      "safe_message": "Đây là thao tác nhạy cảm — Sếp tự xem kỹ và tự quyết định, Gen không làm thay."
     },
     {
       "id": "system.backup.now",
@@ -301,7 +305,9 @@
       "dynamic": null,
       "params": {
         "tab": "storage"
-      }
+      },
+      "sensitive": true,
+      "safe_message": "Đây là thao tác nhạy cảm — Sếp tự xem kỹ và tự quyết định, Gen không làm thay."
     },
     {
       "id": "system.backup.schedule",
@@ -311,7 +317,9 @@
       "dynamic": null,
       "params": {
         "tab": "storage"
-      }
+      },
+      "sensitive": true,
+      "safe_message": "Đây là thao tác nhạy cảm — Sếp tự xem kỹ và tự quyết định, Gen không làm thay."
     },
     {
       "id": "api.add_provider",
@@ -343,7 +351,9 @@
       "label": "Đổi mật khẩu",
       "description": "Đặt mật khẩu mới",
       "dynamic": null,
-      "params": null
+      "params": null,
+      "sensitive": true,
+      "safe_message": "Đây là thao tác nhạy cảm — Sếp tự xem kỹ và tự quyết định, Gen không làm thay."
     },
     {
       "id": "account.pin",
@@ -351,7 +361,9 @@
       "label": "Đổi mã PIN",
       "description": "Đặt mã PIN 6 số mới",
       "dynamic": null,
-      "params": null
+      "params": null,
+      "sensitive": true,
+      "safe_message": "Đây là thao tác nhạy cảm — Sếp tự xem kỹ và tự quyết định, Gen không làm thay."
     },
     {
       "id": "account.sessions",
@@ -359,7 +371,9 @@
       "label": "Phiên đăng nhập",
       "description": "Thiết bị đang đăng nhập, đăng xuất thiết bị khác",
       "dynamic": null,
-      "params": null
+      "params": null,
+      "sensitive": true,
+      "safe_message": "Đây là thao tác nhạy cảm — Sếp tự xem kỹ và tự quyết định, Gen không làm thay."
     },
     {
       "id": "rules.add",

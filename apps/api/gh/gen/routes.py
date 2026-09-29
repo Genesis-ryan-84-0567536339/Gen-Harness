@@ -6,10 +6,11 @@ thay SSE ghi ở docs/reports/HANDOFF-v0.1.1.md mục v0.1.21.
 
 import asyncio
 import uuid
+from datetime import datetime
 from typing import Any, Literal
 
 import orjson
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -73,11 +74,11 @@ async def conversations(user: service.CurrentUser = Depends(gen_user),
 
 
 @router.get("/conversations/{cid}/messages")
-async def messages(cid: uuid.UUID, user: service.CurrentUser = Depends(gen_user),
-                   db: AsyncSession = DB) -> list[dict[str, Any]]:
+async def messages(cid: uuid.UUID, before: datetime | None = None, limit: int = Query(200, ge=1, le=500),
+                   user: service.CurrentUser = Depends(gen_user), db: AsyncSession = DB) -> list[dict[str, Any]]:
     if not await store.owned(db, user, cid):
         raise not_found("Hội thoại")
-    return await store.list_messages(db, cid)
+    return await store.list_messages(db, cid, limit, before)
 
 
 @router.delete("/conversations/{cid}", status_code=204)
@@ -104,6 +105,9 @@ class TurnIn(BaseModel):
     context: TurnContextIn = Field(default_factory=TurnContextIn)
 
 
+RATE_WINDOW_S, RATE_MAX_TURNS = 300, 20
+
+
 def _tasks(app: Any) -> set[asyncio.Task[None]]:
     if not hasattr(app.state, "gen_tasks"):
         app.state.gen_tasks = set()
@@ -117,6 +121,25 @@ async def create_turn(body: TurnIn, request: Request, user: service.CurrentUser 
     q = body.text.strip()
     if not q:
         raise field_errors({"text": "Nhập câu hỏi"})
+    redis = request.app.state.redis
+    rate_key = f"gen:rate:{user.id}"
+    n = await redis.incr(rate_key)
+    if n == 1:
+        await redis.expire(rate_key, RATE_WINDOW_S)
+    if n > RATE_MAX_TURNS:
+        raise ApiError(429, "GEN_RATE_LIMITED", "Hỏi hơi nhanh — đợi vài phút rồi hỏi tiếp")
+    lock_key = engine.lock_key(user.id)
+    if not await redis.set(lock_key, "1", nx=True, ex=engine.LOCK_TTL_S):
+        raise ApiError(409, "GEN_BUSY", "Gen đang trả lời câu trước — đợi xong rồi hỏi tiếp")
+    try:
+        return await _start_turn(body, q, request, user, db, lock_key)
+    except BaseException:
+        await redis.delete(lock_key)
+        raise
+
+
+async def _start_turn(body: TurnIn, q: str, request: Request, user: service.CurrentUser, db: AsyncSession,
+                      lock_key: str) -> dict[str, Any]:
     if body.conversation_id is not None:
         if not await store.owned(db, user, body.conversation_id):
             raise not_found("Hội thoại")

@@ -3,7 +3,7 @@
  * song song hỏi `GET /gen/turns/{id}` mỗi 1,2 s tới khi xong — WS rớt thì câu trả lời vẫn tới. Hai nguồn ghép theo
  * `seq`, bước `ui` chỉ thực thi MỘT lần và tuần tự (mở trang xong mới làm sáng).
  */
-import type { GenDoneEvent, GenStep, GenStepEvent, GenTurn } from '@gen-harness/contracts';
+import { ApiError, type GenDoneEvent, GenStep, GenStepEvent, GenTurn } from '@gen-harness/contracts';
 import { api } from '../lib/api';
 import { errorText } from '../lib/errorText';
 import { onRealtimeEvent } from '../lib/realtime';
@@ -82,7 +82,12 @@ export async function sendQuestion(text: string): Promise<void> {
     early.delete(res.turn_id);
     void poll(res.turn_id);
   } catch (e) {
-    const msg = errorText(e);
+    const msg =
+      e instanceof ApiError && e.status === 409
+        ? 'Gen đang trả lời câu trước — đợi xong rồi hỏi tiếp nhé.'
+        : e instanceof ApiError && e.status === 429
+          ? 'Hỏi hơi nhanh rồi — đợi vài phút rồi hỏi tiếp nhé.'
+          : errorText(e);
     useGenStore.setState((s) => ({
       busy: false,
       messages: [...s.messages, { id: `e-${localId}`, role: 'assistant', status: 'failed', steps: [{ kind: 'say', text: msg || 'Không gửi được câu hỏi — thử lại sau.' }] }],

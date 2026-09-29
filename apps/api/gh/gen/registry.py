@@ -29,6 +29,8 @@ class Target:
     description: str
     dynamic: str | None
     params: dict[str, str] | None
+    sensitive: bool = False
+    safe_message: str = ""
 
 
 @dataclass(frozen=True)
@@ -42,7 +44,9 @@ class Registry:
 def load() -> Registry:
     raw = json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
     targets = {t["id"]: Target(id=t["id"], screen=t["screen"], label=t["label"], description=t["description"],
-                               dynamic=t.get("dynamic"), params=t.get("params")) for t in raw["targets"]}
+                               dynamic=t.get("dynamic"), params=t.get("params"),
+                               sensitive=bool(t.get("sensitive")), safe_message=t.get("safe_message") or "")
+               for t in raw["targets"]}
     return Registry(screens=raw["screens"], targets=targets, guide=raw["guide"])
 
 

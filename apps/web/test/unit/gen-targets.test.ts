@@ -8,7 +8,7 @@
 import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { GEN_SCREENS, GEN_TARGETS, resolveTarget } from '@gen-harness/contracts';
+import { GEN_SAFE_MESSAGE, GEN_SCREENS, GEN_TARGETS, resolveTarget } from '@gen-harness/contracts';
 import { GUIDE } from '../../src/guide/guideContent';
 
 const SRC = resolve(__dirname, '../../src');
@@ -39,7 +39,7 @@ function exportRegistry() {
   return {
     _comment: 'Sinh từ packages/contracts/src/genTargets.ts + apps/web/src/guide/guideContent.ts — KHÔNG sửa tay. GEN_WRITE=1 npx vitest run gen-targets',
     screens: Object.fromEntries(GEN_SCREENS.map((s) => [s.key, { path: s.path, title: s.title }])),
-    targets: GEN_TARGETS.map((t) => ({ id: t.id, screen: t.screen, label: t.label, description: t.description, dynamic: t.dynamic ?? null, params: t.params ?? null })),
+    targets: GEN_TARGETS.map((t) => ({ id: t.id, screen: t.screen, label: t.label, description: t.description, dynamic: t.dynamic ?? null, params: t.params ?? null, ...(t.sensitive ? { sensitive: true, safe_message: GEN_SAFE_MESSAGE } : {}) })),
     guide: GUIDE.map((g) => ({ n: g.n, title: g.title, why: g.why, steps: g.steps, done_when: g.doneWhen, console: g.console })),
   };
 }
@@ -64,6 +64,13 @@ describe('gen targets registry', () => {
     expect(resolveTarget('overview.queue.row')).toBeNull();
     expect(resolveTarget('system.brain.jev:1')).toBeNull();
     expect(resolveTarget('made.up')).toBeNull();
+  });
+
+  it('backup / PIN / password / sessions targets are sensitive', () => {
+    const sens = new Set(GEN_TARGETS.filter((t) => t.sensitive).map((t) => t.id));
+    for (const id of ['system.backup.panel', 'system.backup.now', 'system.backup.schedule', 'system.channels.pin', 'account.password', 'account.pin', 'account.sessions']) {
+      expect(sens.has(id), id).toBe(true);
+    }
   });
 
   it('apps/api/gh/gen/registry.json matches the TS export', () => {

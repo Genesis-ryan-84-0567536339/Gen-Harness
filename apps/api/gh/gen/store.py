@@ -5,6 +5,7 @@ Mặc định (quyết định §9.1, §9.4): bật, chỉ vai trò Owner, giữ
 """
 
 import uuid
+from datetime import datetime
 from typing import Any
 
 import orjson
@@ -70,12 +71,16 @@ async def add_message(db: AsyncSession, org_id: uuid.UUID, cid: uuid.UUID, role:
     await db.execute(text("UPDATE agent.gen_conversations SET last_at = now() WHERE id = :c"), {"c": cid})
 
 
-async def list_messages(db: AsyncSession, cid: uuid.UUID, limit: int = 200) -> list[dict[str, Any]]:
+async def list_messages(db: AsyncSession, cid: uuid.UUID, limit: int = 200,
+                        before: datetime | None = None) -> list[dict[str, Any]]:
+    """`limit` tin MỚI NHẤT (cũ → mới). `before` = mốc created_at để lấy trang cũ hơn."""
     rows = (await db.execute(text("""SELECT id, turn_id, role, content, created_at FROM agent.gen_messages
-                                     WHERE conversation_id = :c ORDER BY created_at, id LIMIT :l"""),
-                             {"c": cid, "l": limit})).all()
+                                     WHERE conversation_id = :c AND (CAST(:b AS timestamptz) IS NULL OR created_at < :b)
+                                     ORDER BY created_at DESC, id DESC LIMIT :l"""),
+                             {"c": cid, "l": limit, "b": before})).all()
     return [{"id": str(r.id), "turn_id": str(r.turn_id) if r.turn_id else None, "role": r.role,
-             "content": r.content, "created_at": r.created_at.isoformat().replace("+00:00", "Z")} for r in rows]
+             "content": r.content, "created_at": r.created_at.isoformat().replace("+00:00", "Z")}
+            for r in reversed(rows)]
 
 
 async def delete_conversation(db: AsyncSession, cid: uuid.UUID) -> None:
