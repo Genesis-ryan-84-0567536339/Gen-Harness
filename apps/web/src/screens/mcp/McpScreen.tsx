@@ -7,6 +7,7 @@ import { errorText } from '../../lib/errorText';
 import { useCan } from '../../lib/permissions';
 import { toast } from '../../lib/toast';
 import { CardError, InlineError, Panel, ScreenHead, SkeletonLines, StateChip } from '../common';
+import { HubLinkCard } from './HubLinkCard';
 import { ACCESS_LABEL, N5, OK, OUTCOME_LABEL, TRANSPORT_LABEL, WARN, fmtLatency, healthLabel, healthTone, mcpErrorText, outcomeTone } from './mcpModel';
 import {
   useCallTool,
@@ -94,6 +95,8 @@ export function McpScreen() {
           locked={false}
         />
       </Panel>
+
+      <HubLinkCard />
 
       <Panel title="Máy chủ MCP" bodyClass="mcp-servers" label="Danh sách máy chủ MCP">
         {servers.isPending ? (

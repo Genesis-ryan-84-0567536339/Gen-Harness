@@ -1,5 +1,5 @@
 /** Presentation logic for MCP Hub — cùng khuôn `apiModel.ts`/`pluginsModel.ts`. */
-import { ApiError, type McpCallOutcome, type McpTool, type McpTransport } from '@gen-harness/contracts';
+import { ApiError, type HubLinkStatus, type McpCallOutcome, type McpTool, type McpTransport } from '@gen-harness/contracts';
 import { errorText } from '../../lib/errorText';
 
 export const OK = 'var(--color-ok)';
@@ -58,4 +58,31 @@ export function fmtLatency(ms: number | null): string {
 export function mcpErrorText(e: unknown): string {
   if (e instanceof ApiError && e.code.startsWith('MCP_')) return e.message;
   return errorText(e);
+}
+
+/** Thẻ Gen-hub (v0.1.26) — trạng thái liên kết. */
+export const HUB_STATUS_LABEL: Record<HubLinkStatus, string> = {
+  off: 'Đang tắt',
+  ok: 'Đang nối',
+  expiring: 'Token sắp hết hạn',
+  expired: 'Token hết hạn',
+  error: 'Lỗi kết nối',
+};
+
+export function hubStatusTone(s: HubLinkStatus): string {
+  if (s === 'ok') return OK;
+  if (s === 'expiring') return WARN;
+  if (s === 'expired' || s === 'error') return BAD;
+  return N5;
+}
+
+/** `YYYY-MM-DD` (ô ngày) → ISO cuối ngày giờ VN; rỗng → null. */
+export function expiryToIso(day: string): string | null {
+  return day ? `${day}T23:59:00+07:00` : null;
+}
+
+export function isoToDay(iso: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? '' : new Date(d.getTime() + 7 * 3600_000).toISOString().slice(0, 10);
 }

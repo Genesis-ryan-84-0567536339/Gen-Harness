@@ -22,7 +22,10 @@ export type DataToolName =
   | 'screens.list'
   | 'task.list'
   | 'staff.list'
-  | 'refinery.summary';
+  | 'refinery.summary'
+  | 'hub.kho_summary'
+  | 'hub.kho_search'
+  | 'hub.kho_get';
 
 export type UiAction =
   | { type: 'navigate'; screen: string; params?: Record<string, string> }

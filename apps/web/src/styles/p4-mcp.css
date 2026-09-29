@@ -46,3 +46,8 @@
 .mcp-log__detail { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .mcp-test-result { display: flex; align-items: center; gap: 8px; padding: 9px 11px; border: 1px solid var(--color-divider); border-radius: var(--radius-sm); font-size: 11.5px; color: var(--color-neutral-300); }
+
+/* v0.1.26 — thẻ Gen-hub (Gen đọc Kho Ryan). Dùng lại .jev-dl/.jev-form/.jev-actions của gen.css. */
+.hub-link { padding: 12px 16px 14px; display: flex; flex-direction: column; gap: 10px; }
+.hub-link .jev-dl { grid-template-columns: 150px minmax(0, 1fr); }
+@media (max-width: 480px) { .hub-link .jev-dl { grid-template-columns: 110px minmax(0, 1fr); } }
