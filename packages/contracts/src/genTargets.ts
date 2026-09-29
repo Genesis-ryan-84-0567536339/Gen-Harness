@@ -76,6 +76,7 @@ export const GEN_TARGETS: GenTarget[] = [
   { id: 'system.brain.open_api', screen: 'system', label: 'Nút "Mở API & Model"', description: 'Sang màn thêm nhà cung cấp, khoá API, gán model', params: { tab: 'brain' } },
   { id: 'system.brain.jev', screen: 'system', label: 'Thẻ Jev (System One)', description: 'Cấu hình nguồn model quyết định nhanh Jev', params: { tab: 'brain' } },
   { id: 'system.brain.jev.test', screen: 'system', label: 'Nút "Kiểm tra" Jev', description: 'Gọi thử Jev để biết khoá và địa chỉ đúng chưa', params: { tab: 'brain' } },
+  { id: 'system.brain.triage', screen: 'system', label: 'Thẻ "Lọc đầu Hộp thư"', description: 'Bật/tắt lọc trùng & rác, ngưỡng điểm chất lượng, dùng Jev để chấm (chỉ Owner sửa)', params: { tab: 'brain' } },
   { id: 'system.storage.retention', screen: 'system', label: 'Hạn lưu dữ liệu', description: 'Mỗi tập dữ liệu giữ bao lâu', params: { tab: 'storage' } },
   { id: 'system.backup.panel', screen: 'system', label: 'Sao lưu & khôi phục', description: 'Danh sách bản sao lưu, tải về, khôi phục', params: { tab: 'storage' }, sensitive: true },
   { id: 'system.backup.now', screen: 'system', label: 'Nút "Sao lưu ngay"', description: 'Tạo bản sao lưu ngay lúc này', params: { tab: 'storage' }, sensitive: true },
@@ -88,6 +89,7 @@ export const GEN_TARGETS: GenTarget[] = [
   // ── Việc & Nhắc hẹn / Hộp thư / Bàn làm việc (Gen v2 — A4: đề xuất có xác nhận gắn với các mục tiêu này) ──
   { id: 'tasks.new', screen: 'tasks', label: 'Nút "Tạo việc mới"', description: 'Tạo việc hoặc nhắc hẹn mới (tiêu đề, ưu tiên, hạn)', permission: 'queue.act' },
   { id: 'tasks.row', screen: 'tasks', label: 'Một dòng việc', description: 'Một việc cụ thể trong Danh sách việc (theo id việc)', dynamic: 'row' },
+  { id: 'inbox.hide_junk', screen: 'inbox', label: 'Bộ lọc "Ẩn rác & trùng"', description: 'Ẩn các mục trùng, rác hoặc điểm dưới ngưỡng khỏi Hộp thư' },
   { id: 'inbox.row', screen: 'inbox', label: 'Một mục hộp thư', description: 'Một thẻ trong Hộp thư ý nghĩa (theo id mục)', dynamic: 'row' },
   { id: 'workbench.drafts', screen: 'workbench', label: 'Bản nháp chờ duyệt', description: 'Danh sách bản nháp tin gửi đi đang chờ Sếp duyệt', permission: 'action.draft', sensitive: true },
   // ── API & Model ──

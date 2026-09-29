@@ -1,4 +1,5 @@
-"""Công cụ dữ liệu CHỈ ĐỌC của Gen (docs/design/gen-v1.md §3.4; v2 thêm task.list, staff.list).
+"""Công cụ dữ liệu CHỈ ĐỌC của Gen (docs/design/gen-v1.md §3.4; v2 thêm task.list, staff.list;
+v0.1.25 thêm refinery.summary).
 
 Mỗi tool là lớp bọc mỏng quanh một endpoint GET đã có, gọi NỘI BỘ (ASGI, không qua mạng) bằng chính cookie phiên
 của người đang hỏi → tái dùng nguyên RBAC, phạm vi dữ liệu và lớp che của endpoint; Gen không có quyền riêng, không
@@ -64,6 +65,9 @@ TOOLS: dict[str, Tool] = {t.name: t for t in (
          ("queue.read",), "/tasks", {"status": ("todo", "doing", "done", "cancelled")}, default_query={"limit": "20"}),
     Tool("staff.list", "Người trong tổ chức có thể giao việc (id, tên, vai trò) — dùng trước khi đề xuất gán người",
          ("queue.act",), "/gen/assignees"),
+    Tool("refinery.summary", "Lọc đầu Hộp thư (Jev/quy tắc): số mục đã lọc, trùng, rác, điểm thấp, chờ lọc, độ trễ và "
+         "độ khớp của Jev; args.days ∈ 1|7|30", ("queue.read",), "/refinery/triage/summary",
+         {"days": ("1", "7", "30")}),
 )}
 
 

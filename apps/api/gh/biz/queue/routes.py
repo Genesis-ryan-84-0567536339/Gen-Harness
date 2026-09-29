@@ -24,12 +24,15 @@ from gh.chassis import actionlog
 from gh.data.common import iso, mask_text
 from gh.db import DB
 from gh.errors import ApiError
+from gh.refinery import triage
 
 router = APIRouter(tags=["queue"])
 
 realtime.register_event("alert.new", "queue.read")
 
 OPP_EVENTS = list(qsvc.OPPORTUNITY_EVENTS)
+# "Ẩn rác & trùng" (v0.1.25): bản trùng, rác, hoặc điểm lọc đầu dưới ngưỡng của tổ chức (:minq).
+JUNK_SQL = "COALESCE(t_spam OR t_dup IS NOT NULL OR t_quality < :minq, false)"
 REPLY_EVENTS = list(qsvc.REPLY_EVENTS)
 
 
@@ -43,6 +46,8 @@ WITH items AS (
          g.code AS g_code, g.name AS g_name, gc.type AS g_channel,
          d.kind AS draft_kind, d.status AS draft_status, d.agent_id AS draft_agent_id, ag.name AS draft_agent_name,
          a.alert_type, a.suggested_action, a.status AS alert_status,
+         m.item_id AS t_marked, m.duplicate_of AS t_dup, m.duplicate_kind AS t_dup_kind, m.is_spam AS t_spam,
+         m.spam_reason AS t_spam_reason, m.quality AS t_quality, m.reason AS t_reason, m.source AS t_source,
          CASE WHEN i.item_type = 'alert' THEN 'alert'
               WHEN i.item_type = 'draft' THEN 'approval'
               WHEN p.person_type = 'candidate' THEN 'candidate'
@@ -56,12 +61,22 @@ WITH items AS (
   LEFT JOIN biz.action_drafts d ON i.item_type = 'draft' AND d.id = i.item_id
   LEFT JOIN agent.identities ag ON ag.id = d.agent_id
   LEFT JOIN biz.alerts a ON i.item_type = 'alert' AND a.id = i.item_id
+  LEFT JOIN refinery.item_marks m ON m.item_type = i.item_type AND m.item_id = i.item_id
   WHERE i.org_id = :o AND {scope} AND {silence}
 )
 """
 
 
-def _item_payload(r: Any, *, owner: bool) -> dict[str, Any]:
+def _triage_payload(r: Any, min_score: int | None) -> dict[str, Any] | None:
+    """Dấu lọc đầu (v0.1.25, gh.refinery.triage) — None khi mục chưa được lọc hoặc tổ chức tắt lọc đầu."""
+    if min_score is None or getattr(r, "t_marked", None) is None:
+        return None
+    return {"duplicate_of": str(r.t_dup) if r.t_dup else None, "duplicate_kind": r.t_dup_kind,
+            "spam": bool(r.t_spam), "spam_reason": r.t_spam_reason, "score": int(r.t_quality),
+            "low_score": int(r.t_quality) < min_score, "reason": r.t_reason, "source": r.t_source}
+
+
+def _item_payload(r: Any, *, owner: bool, min_score: int | None = None) -> dict[str, Any]:
     subject = qsvc.subject_ref(r)
     tab = r.tab if r.tab != "other" else ("reply" if r.item_type == "unit" else "all")
     label = qsvc.EVENT_LABELS.get(r.title, r.title) if r.item_type == "unit" else r.title
@@ -78,20 +93,25 @@ def _item_payload(r: Any, *, owner: bool) -> dict[str, Any]:
         "alert_type_label": qsvc.ALERT_TYPE_LABELS.get(getattr(r, "alert_type", None) or "",
                                                         getattr(r, "alert_type", None)),
         "suggested_action": mask_text(getattr(r, "suggested_action", None), owner),
+        "triage": _triage_payload(r, min_score),
     }
 
 
 @router.get("/inbox")
 async def list_inbox(tab: Literal["all", "opportunity", "alert", "approval", "reply", "candidate"] = "all",
-                     intent: str | None = None, cursor: str | None = None,
+                     intent: str | None = None, cursor: str | None = None, hide_junk: bool = False,
                      limit: int = Query(50, ge=1, le=200), user: service.CurrentUser = Depends(current_user),
                      db: AsyncSession = DB) -> dict[str, Any]:
     sc = await scope_for(db, user, "queue.read")
     where, params = qsvc.item_scope_sql(sc, "i")
-    base = {"o": user.org_id, "opp": OPP_EVENTS, "reply": REPLY_EVENTS, **params}
+    tcfg = await triage.get_settings(db, user.org_id)
+    min_score = int(tcfg["min_score"]) if tcfg["enabled"] else None
+    hide = hide_junk and min_score is not None
+    base = {"o": user.org_id, "opp": OPP_EVENTS, "reply": REPLY_EVENTS, "minq": min_score or 0, **params}
+    junk_sql = f"NOT ({JUNK_SQL})" if hide else "TRUE"
     counts_rows = (await db.execute(
         text(_ITEMS_CTE.format(scope=where, silence=qsvc.not_silenced_sql("i")) +
-             " SELECT tab, count(*) AS cnt FROM items GROUP BY tab"), base)).all()  # noqa: S608
+             f" SELECT tab, count(*) AS cnt FROM items WHERE {junk_sql} GROUP BY tab"), base)).all()  # noqa: S608
     counts = {t: 0 for t in qsvc.TABS}
     for row in counts_rows:
         t = row.tab if row.tab != "other" else "reply"
@@ -104,15 +124,23 @@ async def list_inbox(tab: Literal["all", "opportunity", "alert", "approval", "re
         conds.append("title = :intent")
     if cursor:
         conds.append("created_at < :c")
+    if hide:
+        conds.append(junk_sql)
     where_page = (" AND " + " AND ".join(conds)) if conds else ""
     rows = (await db.execute(
         text(_ITEMS_CTE.format(scope=where, silence=qsvc.not_silenced_sql("i")) +
              f" SELECT * FROM items WHERE TRUE{where_page} ORDER BY created_at DESC LIMIT :n"),  # noqa: S608
         {**base, "tab": tab, "intent": intent, "c": qsvc.when(cursor), "n": limit + 1})).all()
     owner = user.role_code == rbac.OWNER
-    items = [_item_payload(r, owner=owner) for r in rows[:limit]]
+    items = [_item_payload(r, owner=owner, min_score=min_score) for r in rows[:limit]]
+    hidden = 0
+    if hide:
+        hidden = (await db.execute(
+            text(_ITEMS_CTE.format(scope=where, silence=qsvc.not_silenced_sql("i")) +
+                 f" SELECT count(*) FROM items WHERE {JUNK_SQL}"), base)).scalar_one()  # noqa: S608
     return {"items": items, "next_cursor": iso(rows[limit - 1].created_at) if len(rows) > limit else None,
-            "total": counts["all"], "counts": counts}
+            "total": counts["all"], "counts": counts,
+            "triage": {"enabled": min_score is not None, "min_score": min_score, "hidden": int(hidden)}}
 
 
 async def _load_item(db: AsyncSession, org_id: uuid.UUID, sc: Scope, item_id: uuid.UUID) -> Any:
@@ -131,7 +159,8 @@ async def get_inbox_item(item_id: uuid.UUID, user: service.CurrentUser = Depends
     sc = await scope_for(db, user, "queue.read")
     r = await _load_item(db, user.org_id, sc, item_id)
     owner = user.role_code == rbac.OWNER
-    payload = _item_payload(r, owner=owner)
+    tcfg = await triage.get_settings(db, user.org_id)
+    payload = _item_payload(r, owner=owner, min_score=int(tcfg["min_score"]) if tcfg["enabled"] else None)
     if r.item_type == "unit":
         payload["units"] = await explain.units_payload(db, [item_id], is_owner=owner)
     elif r.item_type == "alert":

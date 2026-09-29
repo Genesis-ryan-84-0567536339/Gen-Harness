@@ -297,6 +297,16 @@
       }
     },
     {
+      "id": "system.brain.triage",
+      "screen": "system",
+      "label": "Thẻ \"Lọc đầu Hộp thư\"",
+      "description": "Bật/tắt lọc trùng & rác, ngưỡng điểm chất lượng, dùng Jev để chấm (chỉ Owner sửa)",
+      "dynamic": null,
+      "params": {
+        "tab": "brain"
+      }
+    },
+    {
       "id": "system.storage.retention",
       "screen": "system",
       "label": "Hạn lưu dữ liệu",
@@ -414,6 +424,14 @@
       "label": "Một dòng việc",
       "description": "Một việc cụ thể trong Danh sách việc (theo id việc)",
       "dynamic": "row",
+      "params": null
+    },
+    {
+      "id": "inbox.hide_junk",
+      "screen": "inbox",
+      "label": "Bộ lọc \"Ẩn rác & trùng\"",
+      "description": "Ẩn các mục trùng, rác hoặc điểm dưới ngưỡng khỏi Hộp thư",
+      "dynamic": null,
       "params": null
     },
     {

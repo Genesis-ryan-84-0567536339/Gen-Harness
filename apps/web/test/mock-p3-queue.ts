@@ -47,6 +47,7 @@ function seedInboxItems(): InboxRow[] {
       priority: 'P1', created_at: ago(18), score: 0.91, confidence_band: 'cao',
       subject: GROUP_GO, group: GROUP_GO, agent: null,
       alert_type: null, alert_type_label: null, suggested_action: 'Nhận và ráp khớp nhà cung cấp',
+      triage: { duplicate_of: null, duplicate_kind: null, spam: false, spam_reason: null, score: 88, low_score: false, reason: 'độ tin 0.91 · có product, qty · cơ hội bán hàng', source: 'heuristic' },
     },
     {
       id: 'iq-alert-1', code: 'ALR-0233', item_type: 'alert', tab: 'alert',
@@ -101,6 +102,7 @@ function seedInboxItems(): InboxRow[] {
       priority: 'P3', created_at: ago(210), score: 0.58, confidence_band: 'trung bình',
       subject: GROUP_GO, group: GROUP_GO, agent: null,
       alert_type: null, alert_type_label: null, suggested_action: 'Đối chiếu với nhà cung cấp hiện tại',
+      triage: { duplicate_of: 'iq-opp-1', duplicate_kind: 'near', spam: true, spam_reason: 'có đường link; từ ngữ quảng cáo (khuyen mai)', score: 8, low_score: true, reason: 'Rác: có đường link; từ ngữ quảng cáo (khuyen mai)', source: 'heuristic' },
     },
     {
       id: 'draft-ACT-0234', code: 'ACT-0234', item_type: 'draft', tab: 'approval',
@@ -254,6 +256,8 @@ export function createMock(opts: P3Options) {
   let promises: PromiseItem[] = opts.fresh ? [] : seedPromises();
   const silenced = new Map<string, { reason: string | null; until: string | null }>();
   const has = (ctx: P2Ctx, perm: string) => !!ctx.perms[perm] && ctx.perms[perm] !== 'none';
+  const triage = { enabled: true, min_score: 30, use_jev: true };
+  const isJunk = (r: InboxRow) => !!r.triage && (r.triage.spam || !!r.triage.duplicate_of || r.triage.score < triage.min_score);
 
   registerExplain('task', (id) => {
     const t = tasks.find((x) => x.id === id);
@@ -291,14 +295,35 @@ export function createMock(opts: P3Options) {
       return reply(200, overviewPayload(items, activeSilenced(), tasks));
     }
 
+    if (p === '/refinery/triage/settings') {
+      if (m === 'GET') return reply(200, triage);
+      if (m === 'PATCH') {
+        if (ctx.role !== 'owner') return problem(403, 'FORBIDDEN', 'Chỉ Owner');
+        Object.assign(triage, body);
+        return reply(200, triage);
+      }
+    }
+    if (p === '/refinery/triage/summary' && m === 'GET') {
+      const marked = items.filter((i) => i.triage);
+      return reply(200, {
+        days: 7, ...triage, total: marked.length, kept: marked.filter((i) => !isJunk(i)).length,
+        duplicates: marked.filter((i) => i.triage?.duplicate_of).length, exact_duplicates: 0,
+        near_duplicates: marked.filter((i) => i.triage?.duplicate_kind === 'near').length,
+        spam: marked.filter((i) => i.triage?.spam).length, low_score: 0, pending: 0, avg_quality: 48,
+        jev: { count: 0, heuristic_count: marked.length, avg_latency_ms: null, spam_agreement: null },
+      });
+    }
+
     if (seg[0] === 'inbox') {
       if (!has(ctx, 'queue.read')) return problem(403, 'FORBIDDEN', 'Vai trò không có quyền này');
       const visible = items.filter((i) => !activeSilenced().has(i.id));
       if (seg.length === 1 && m === 'GET') {
         const tab = (url.searchParams.get('tab') ?? 'all') as InboxTab;
         const intent = url.searchParams.get('intent');
-        const cnt = counts(visible);
-        let rows = visible;
+        const hide = triage.enabled && url.searchParams.get('hide_junk') === 'true';
+        const base = hide ? visible.filter((r) => !isJunk(r)) : visible;
+        const cnt = counts(base);
+        let rows = base;
         if (tab !== 'all') rows = rows.filter((r) => r.tab === tab);
         if (intent) rows = rows.filter((r) => r.item_type === 'unit' && r.title === intent);
         return reply(200, {
@@ -306,6 +331,7 @@ export function createMock(opts: P3Options) {
           next_cursor: null,
           total: cnt.all,
           counts: cnt,
+          triage: { enabled: triage.enabled, min_score: triage.enabled ? triage.min_score : null, hidden: visible.length - base.length },
         });
       }
       const row = visible.find((i) => i.id === seg[1]);

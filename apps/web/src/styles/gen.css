@@ -136,3 +136,4 @@
 .jev-form { display: flex; flex-direction: column; gap: 10px; }
 .jev-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .jev-note { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--color-neutral-400); }
+.triage-row { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }

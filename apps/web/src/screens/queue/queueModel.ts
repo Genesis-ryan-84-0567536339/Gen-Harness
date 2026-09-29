@@ -1,5 +1,5 @@
 /** Presentation helpers dùng chung cho 4 màn của cụm Hàng đợi & Hành động. */
-import type { InboxItemType, InboxTab, QueueWidgetKind, TaskPriority, TaskStatus } from '@gen-harness/contracts';
+import type { InboxItemType, InboxTab, InboxTriage, QueueWidgetKind, TaskPriority, TaskStatus } from '@gen-harness/contracts';
 
 export const OK = 'var(--color-ok)';
 export const WARN = 'var(--color-warn)';
@@ -108,3 +108,32 @@ export const SPOTLIGHT_DIMENSION_LABEL: Record<string, string> = {
   heat: 'Độ nóng',
   churn_risk: 'Rủi ro mất khách',
 };
+
+/** Huy hiệu lọc đầu (v0.1.25) trên thẻ Hộp thư: Trùng / Rác / điểm chất lượng (kèm lý do ở title). */
+export interface TriageBadge {
+  key: 'dup' | 'spam' | 'score';
+  label: string;
+  tone: 'ok' | 'warn' | 'bad' | 'neutral';
+  title: string;
+}
+export function triageBadges(t: InboxTriage | null | undefined): TriageBadge[] {
+  if (!t) return [];
+  const out: TriageBadge[] = [];
+  if (t.duplicate_of) {
+    out.push({
+      key: 'dup',
+      label: 'Trùng',
+      tone: 'warn',
+      title: t.duplicate_kind === 'near' ? 'Gần trùng với một mục trước đó' : 'Trùng y hệt một mục trước đó',
+    });
+  }
+  if (t.spam) out.push({ key: 'spam', label: 'Rác', tone: 'bad', title: t.spam_reason ?? 'Nghi rác / quảng cáo' });
+  const via = t.source === 'jev' ? 'Jev + quy tắc' : 'quy tắc';
+  out.push({
+    key: 'score',
+    label: `Điểm ${t.score}`,
+    tone: t.spam || t.low_score ? 'neutral' : t.score >= 70 ? 'ok' : 'warn',
+    title: `${t.reason} (${via})`,
+  });
+  return out;
+}
