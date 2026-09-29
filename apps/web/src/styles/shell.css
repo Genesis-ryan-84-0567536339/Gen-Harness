@@ -177,3 +177,48 @@
 .screen-title-block { min-width: 0; }
 .screen-title { font-size: var(--font-size-screen-title); font-weight: 500; letter-spacing: -0.01em; line-height: inherit; color: var(--color-text); }
 .screen-desc { font-size: var(--font-size-screen-desc); color: var(--color-neutral-400); margin-top: 5px; text-wrap: pretty; }
+
+/* ── v0.1.23 (B4) — header phụ + điện thoại ─────────────────────────────── */
+/* Trên máy tính hai phần tử này không đổi bố cục thiết kế: nhóm trạng thái "tan" vào .hd-right, nút danh mục ẩn. */
+.hd-status { display: contents; }
+.hd-left .hd-menu { display: none; }
+.sb-backdrop { display: none; }
+
+@media (max-width: 760px) {
+  .app, .app[data-sidebar='rail'] { grid-template-columns: minmax(0, 1fr); }
+  /* Thanh bên thành ngăn kéo trượt từ trái; đóng thì ẩn khỏi Tab (visibility). */
+  .sb {
+    position: fixed; left: 0; top: 0; z-index: 850;
+    width: min(86vw, var(--sidebar-full)); height: 100dvh;
+    transform: translateX(-100%); visibility: hidden;
+    transition: transform 0.2s ease, visibility 0s linear 0.2s;
+    box-shadow: var(--shadow-lg);
+  }
+  .app[data-drawer='open'] .sb { transform: none; visibility: visible; transition: transform 0.2s ease; }
+  .sb-backdrop { display: block; position: fixed; inset: 0; z-index: 840; background: rgba(4, 6, 12, 0.5); }
+  .sb-item { height: 40px; }
+  .sb-child { height: 36px; }
+
+  .hd { padding: 8px 12px; column-gap: 8px; flex-wrap: nowrap; }
+  .hd-left { gap: 6px; margin-right: 0; }
+  .hd-left .hd-menu { display: inline-flex; flex: none; height: 30px; width: 32px; }
+  /* Icon đặt display bằng style nội tuyến → cần !important để ẩn mũi tên breadcrumb. */
+  .hd-chip, .hd-group, .hd-caret, .hd-sub { display: none !important; }
+  .hd-titles { min-width: 0; }
+  .hd-right { gap: 6px; }
+  .content { padding: 14px 12px; }
+  /* Dải tab dài (Hộp thư, Điều khiển hệ thống …) cuộn ngang TRONG dải, không đẩy cả trang. */
+  .gh-tabs { overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
+  .gh-tabs::-webkit-scrollbar { display: none; }
+  .gh-tab { flex: none; }
+}
+
+@media (max-width: 600px) {
+  /* Ba viên trạng thái không đủ chỗ — số liệu chi tiết vẫn ở Tổng quan. */
+  .hd-status { display: none; }
+}
+
+@media (max-width: 400px) {
+  /* 375px: nhường chỗ cho tiêu đề. */
+  .hd-right .hd-saved { display: none; }
+}

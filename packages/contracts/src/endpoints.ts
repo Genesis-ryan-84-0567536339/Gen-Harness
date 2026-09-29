@@ -2,6 +2,7 @@ import type { ApiClient } from './client';
 import { accountEndpoints } from './account';
 import { usersEndpoints } from './users';
 import { genEndpoints } from './gen';
+import { notificationsEndpoints } from './notifications';
 import { coreEndpoints } from './p3-core';
 import { queueEndpoints } from './p3-queue';
 import { relationsEndpoints } from './p3-relations';
@@ -262,6 +263,7 @@ export function createEndpoints(client: ApiClient) {
     ...accountEndpoints(r),
     ...usersEndpoints(r),
     ...genEndpoints(r),
+    ...notificationsEndpoints(r),
   };
 }
 

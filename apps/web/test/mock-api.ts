@@ -253,7 +253,7 @@ function seedAuditLog(audit: AuditRow[], fresh: boolean) {
   });
 }
 
-function createMockState(opts: MockOptions = {}, broadcast: (type: string, data: unknown) => void = () => {}) {
+function createMockState(opts: MockOptions = {}, broadcast: (type: string, data: unknown, toUser?: string) => void = () => {}) {
   const latency = opts.latencyMs ?? Number(process.env.MOCK_LATENCY ?? 0);
   /** Test-only: let step 12 finish although 8–9 (not built in phase 2) are missing. */
   const mockAllowFinish = opts.allowFinish ?? false;
@@ -317,6 +317,32 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
       auditLog: audit,
       getPersons: p3Relations.hooks.people as Parameters<typeof createP4System>[0]['getPersons'],
     }),
+  };
+  // v0.1.23 (B6) — chuông thông báo, như gh/notifications.py: mỗi người một danh sách, WS chỉ tới người nhận.
+  interface MockNotification { id: string; kind: string; title: string; body: string; link: string | null; created_at: string; read: boolean }
+  const notifications = new Map<string, MockNotification[]>();
+  const notifsOf = (userId: string): MockNotification[] => {
+    let list = notifications.get(userId);
+    if (!list) {
+      list = [];
+      notifications.set(userId, list);
+      // Dữ liệu mẫu cho Owner của bản đã thiết lập: một chưa đọc, một đã đọc.
+      const u = users.find((x) => x.id === userId);
+      if (u?.role.code === 'owner' && opts.setup !== 'fresh') {
+        const ago = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
+        list.push(
+          { id: randomUUID(), kind: 'backup.done', title: 'Sao lưu đã xong', body: 'Bản sao lưu hằng ngày đã được lưu.', link: '/system?tab=storage', created_at: ago(35), read: false },
+          { id: randomUUID(), kind: 'user.reactivated', title: 'Chào mừng tới Gen-Harness', body: 'Thiết lập đã xong — thông báo mới sẽ hiện ở chuông này.', link: null, created_at: ago(60 * 26), read: true },
+        );
+      }
+    }
+    return list;
+  };
+  const notify = (userId: string, kind: string, title: string, body = '', link: string | null = null) => {
+    const item: MockNotification = { id: randomUUID(), kind, title, body, link, created_at: new Date().toISOString(), read: false };
+    notifsOf(userId).unshift(item);
+    broadcast('notification.new', item, userId);
+    return item;
   };
   const record = (user: User | undefined, action: string, result = 'ok', detail: unknown = null) =>
     audit.unshift({
@@ -862,6 +888,7 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
         target.role = { code: role as RoleCode, name: ROLE_NAME[role] };
         target.hidden = hiddenScreens(role as RoleCode);
         record(user, 'user.role_changed', 'ok', { from, to: role });
+        notify(target.id, 'user.role_changed', 'Vai trò của bạn đã đổi', `${user.display_name} đã đổi vai trò của bạn thành ${target.role.name}.`, '/account');
         return reply(200, out(target));
       }
       if (method !== 'POST') return problem(res, 405, 'METHOD_NOT_ALLOWED', 'Sai phương thức');
@@ -875,6 +902,7 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
       if (op === 'reactivate') {
         target.inactive = false;
         record(user, 'user.reactivated');
+        notify(target.id, 'user.reactivated', 'Tài khoản đã được mở khoá', `${user.display_name} đã mở khoá tài khoản của bạn.`);
         return reply(200, out(target));
       }
       const pw = tempPw();
@@ -882,6 +910,7 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
       target.mustChange = true;
       revokeAll(target.id);
       record(user, 'user.password_reset');
+      notify(target.id, 'user.password_reset', 'Mật khẩu đã được đặt lại', `${user.display_name} đã đặt lại mật khẩu của bạn.`, '/account');
       return reply(200, { user: out(target), temp_password: pw });
     }
     if (path === '/system/update') {
@@ -899,6 +928,17 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
         return reply(202, { ...u, update_available: u.latest !== u.current });
       } else return problem(res, 405, 'METHOD_NOT_ALLOWED', 'Không hỗ trợ');
       return reply(200, { ...u, update_available: u.latest !== u.current });
+    }
+    if (path === '/notifications' && method === 'GET') {
+      const limit = Math.min(100, Math.max(1, Number(url.searchParams.get('limit') ?? 20)));
+      const list = notifsOf(user.id);
+      return reply(200, { items: list.slice(0, limit), unread: list.filter((n) => !n.read).length });
+    }
+    if (path === '/notifications/read' && method === 'POST') {
+      const ids = Array.isArray(body.ids) ? (body.ids as string[]) : null;
+      const list = notifsOf(user.id);
+      for (const n of list) if (!ids || !ids.length || ids.includes(n.id)) n.read = true;
+      return reply(200, { unread: list.filter((n) => !n.read).length });
     }
     if (path === '/header' && method === 'GET') {
       return reply(200, { channels_live: 4, groups_listening: 42, autonomy_level: 4, data_confidence: 0.78 });
@@ -944,13 +984,14 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     return problem(res, 404, 'NOT_FOUND', 'Không tồn tại');
   };
 
-  return { middleware, setup, users, sessions, phase2, phase3, sessionUser };
+  return { middleware, setup, users, sessions, phase2, phase3, sessionUser, notify };
 }
 
 /**
  * Mock API with test-only hooks (all POST, JSON body):
  *   /api/v1/__mock/reset    {"setup":"fresh"|"finished","simulate":bool,"allowFinish":bool} rebuilds the state
  *   /api/v1/__mock/emit     {"type","data"} broadcasts one realtime frame
+ *   /api/v1/__mock/notify   {"title","body","link","kind"} gives every Owner one notification (notification.new)
  *   /api/v1/__mock/raw      {} pushes one simulated raw message (raw.new → raw.state)
  *   /api/v1/__mock/scan     {"type":"zalo"} simulates the phone scanning the QR
  *   /api/v1/__mock/simulate {"on":bool} toggles the background simulation
@@ -965,12 +1006,14 @@ export function createMockApi(opts: MockOptions = {}) {
     if (!rule) return true;
     return rule[1] === null || (!!perms[rule[1]] && perms[rule[1]] !== 'none');
   };
-  const broadcast = (type: string, data: unknown) => {
+  const broadcast = (type: string, data: unknown, toUser?: string) => {
     const at = new Date().toISOString();
     const frame = JSON.stringify({ type, data, at });
     let masked: string | null = null;
     for (const ws of clients) {
       if (!ws.open || !allowed(ws, type)) continue;
+      // Như gh/realtime.py `to_user`: sự kiện riêng (thông báo) chỉ tới đúng người.
+      if (toUser && ws.meta.userId !== toUser) continue;
       // As the API (gh/realtime.py): raw.new text is masked for roles below Owner.
       if (type === 'raw.new' && ws.meta.role !== 'owner') {
         const d = data as { text?: string | null };
@@ -1017,6 +1060,14 @@ export function createMockApi(opts: MockOptions = {}) {
         case 'emit':
           broadcast(String(body.type), body.data);
           return done(res);
+        case 'notify': {
+          // {"title","body"?,"link"?,"kind"?} → thông báo cho mọi Owner (như sao lưu xong ở API thật).
+          const owners = current.users.filter((u) => u.role.code === 'owner');
+          const items = owners.map((u) =>
+            current.notify(u.id, String(body.kind ?? 'backup.done'), String(body.title ?? 'Thông báo'), String(body.body ?? ''), (body.link as string | undefined) ?? null),
+          );
+          return done(res, 200, items);
+        }
         case 'raw':
           return done(res, 200, current.phase2.hooks.pushRaw());
         case 'scan':
@@ -1064,6 +1115,7 @@ export function createMockApi(opts: MockOptions = {}) {
     }
     ws.meta.perms = permissionsOf(auth.user.role.code);
     ws.meta.role = auth.user.role.code;
+    ws.meta.userId = auth.user.id;
     clients.add(ws);
     return true;
   };

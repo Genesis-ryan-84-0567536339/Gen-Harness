@@ -1,4 +1,5 @@
 import type { GenDoneEvent, GenStepEvent } from './gen';
+import type { NotificationItem } from './notifications';
 /**
  * Phase-2 API types, hand-written from docs/api/phase-2.md (tầng dữ liệu,
  * kênh, bộ não AI, trình thiết lập 4–7 + 12, WebSocket). Numbers are raw —
@@ -560,6 +561,8 @@ export interface RealtimeEventMap {
   header: HeaderEvent;
   'gen.step': GenStepEvent;
   'gen.done': GenDoneEvent;
+  /** v0.1.23 (B6): chỉ người nhận nhận được. */
+  'notification.new': NotificationItem;
   pong: Record<string, never>;
 }
 

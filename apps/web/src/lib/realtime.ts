@@ -7,6 +7,7 @@ import {
   type CursorPage,
   type FirstRun,
   type HeaderStatus,
+  type NotificationsPage,
   type Pipeline,
   type RawItem,
   type RawQuery,
@@ -353,6 +354,17 @@ export function applyEvent(qc: QueryClient, e: RealtimeEvent): void {
     }
     case 'header': {
       qc.setQueryData<HeaderStatus>(qk.header, e.data);
+      return;
+    }
+    case 'notification.new': {
+      const item = e.data;
+      qc.setQueryData<NotificationsPage>(qk.notifications, (old) => {
+        if (!old) return old;
+        if (old.items.some((n) => n.id === item.id)) return old;
+        return { items: [item, ...old.items].slice(0, 20), unread: old.unread + (item.read ? 0 : 1) };
+      });
+      // Chưa có danh sách trong bộ đệm (chuông chưa tải) → tải lần tới sẽ có.
+      if (!qc.getQueryData(qk.notifications)) void qc.invalidateQueries({ queryKey: qk.notifications });
       return;
     }
     default:

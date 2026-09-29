@@ -4,6 +4,8 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
 export type SidebarMode = 'full' | 'rail';
+/** v0.1.23 (B7): `system` = theo cài đặt sáng/tối của máy. */
+export type ThemePref = 'system' | 'light' | 'dark';
 
 interface UiPrefs {
   /** Design prop `sidebarMode` — 244px full / 60px icon rail. */
@@ -12,10 +14,18 @@ interface UiPrefs {
   showEnglish: boolean;
   /** Explicit open/closed state per nav group (by group name); absent = auto. */
   navOpen: Record<string, boolean>;
+  /** Lựa chọn giao diện gần nhất trên trình duyệt này (dùng cả trước khi đăng nhập — public/theme-init.js). */
+  theme: ThemePref;
+  /** Lựa chọn giao diện theo từng người dùng (id) — hai người dùng chung máy không đè lựa chọn của nhau. */
+  themeByUser: Record<string, ThemePref>;
+  /** Ngăn kéo điều hướng trên điện thoại (B4) — không lưu. */
+  drawerOpen: boolean;
   setSidebarMode: (m: SidebarMode) => void;
   toggleSidebarMode: () => void;
   setShowEnglish: (v: boolean) => void;
   setNavOpen: (group: string, open: boolean) => void;
+  setTheme: (theme: ThemePref, userId?: string | null) => void;
+  setDrawerOpen: (open: boolean) => void;
 }
 
 const safeStorage = createJSONStorage<Partial<UiPrefs>>(() => {
@@ -38,15 +48,27 @@ export const useUiStore = create<UiPrefs>()(
       sidebarMode: 'full',
       showEnglish: true,
       navOpen: {},
+      theme: 'system',
+      themeByUser: {},
+      drawerOpen: false,
       setSidebarMode: (sidebarMode) => set({ sidebarMode }),
       toggleSidebarMode: () => set((s) => ({ sidebarMode: s.sidebarMode === 'full' ? 'rail' : 'full' })),
       setShowEnglish: (showEnglish) => set({ showEnglish }),
       setNavOpen: (group, open) => set((s) => ({ navOpen: { ...s.navOpen, [group]: open } })),
+      setTheme: (theme, userId) =>
+        set((s) => ({ theme, themeByUser: userId ? { ...s.themeByUser, [userId]: theme } : s.themeByUser })),
+      setDrawerOpen: (drawerOpen) => set({ drawerOpen }),
     }),
     {
       name: 'gh-ui',
       storage: safeStorage,
-      partialize: (s) => ({ sidebarMode: s.sidebarMode, showEnglish: s.showEnglish, navOpen: s.navOpen }),
+      partialize: (s) => ({
+        sidebarMode: s.sidebarMode,
+        showEnglish: s.showEnglish,
+        navOpen: s.navOpen,
+        theme: s.theme,
+        themeByUser: s.themeByUser,
+      }),
     },
   ),
 );
