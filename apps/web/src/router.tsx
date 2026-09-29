@@ -3,12 +3,14 @@ import { buildScreenTree } from '@gen-harness/contracts';
 import { setNavigator } from './lib/navigation';
 import { UrlStateSync } from './lib/uiStore';
 import { LoginPage } from './pages/LoginPage';
+import { AccountPage } from './account/AccountPage';
+import { ForcePasswordPage } from './account/ForcePasswordPage';
 import { GuidePage } from './guide/GuidePage';
 import { GuideStepPage } from './guide/GuideStepPage';
 import { NotFoundScreen, ScreenPage } from './screens/ScreenPage';
 import { SetupPage } from './setup/SetupPage';
 import { AppShell } from './shell/AppShell';
-import type { RouteHandle } from './shell/routeHandles';
+import { ACCOUNT_CRUMBS, type RouteHandle } from './shell/routeHandles';
 import { RootLayout } from './RootLayout';
 
 /**
@@ -55,6 +57,8 @@ export const routes: RouteObject[] = [
     children: [
       { path: '/login', element: <LoginPage /> },
       { path: '/setup', element: <SetupPage /> },
+      // v0.1.19: mật khẩu tạm sau `genh reset-password` — AppShell chuyển mọi màn Console về đây tới khi đổi xong.
+      { path: '/change-password', element: <ForcePasswordPage /> },
       {
         path: '/',
         element: <AppShell />,
@@ -64,6 +68,8 @@ export const routes: RouteObject[] = [
           // Hướng dẫn kết nối từng bước (việc "Để sau" 5–11) — mở từ thẻ Việc thiết lập tiếp ở Tổng quan.
           { path: 'guide', element: <GuidePage /> },
           { path: 'guide/:n', element: <GuideStepPage /> },
+          // Tài khoản của tôi (v0.1.19) — mở từ khối tài khoản ở chân thanh bên.
+          { path: 'account', handle: { page: ACCOUNT_CRUMBS } satisfies RouteHandle, element: <AccountPage /> },
           { path: '*', element: <NotFoundScreen /> },
         ],
       },

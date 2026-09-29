@@ -412,3 +412,19 @@ Lần đầu cài thật toàn bộ bằng Docker (workflow `e2e-install`) lộ 
 - **Phiên đăng nhập**: mặc định 7 ngày (`session_ttl_hours = 168`), trượt: còn dưới nửa TTL thì `load_session` gia hạn, middleware `SessionCookieRenewal` đặt lại cookie. Phiên PIN giữ nguyên.
 - **Tin cậy lại CA**: `genh update` thành công → `RunTrustCA` im lặng (kho NSS của user; kho hệ thống chỉ qua `sudo -n` trên Linux, không bao giờ hỏi). Lệnh mới `genh trust-ca` làm theo yêu cầu và in kết quả từng kho. `internal/install` xuất `TrustBrowserOS`/`TrustSystemOS`/`ExtractCaddyRootCert`/`CACertPath`.
 - Test: `tests/test_session_reset.py`; genh `resetpassword_test.go`, `trustca_test.go`, `TestRunUpdate_Success_ReTrustsCA_FailureDoesNot`; web `test/unit/login.test.tsx`.
+
+## v0.1.19 — Tài khoản của tôi
+
+- Owner báo Console thiếu các chức năng tài khoản cơ bản (đổi tên, email, mật khẩu, PIN, xem/đăng xuất thiết bị).
+- **API** `gh/auth/account.py` (mọi vai trò, chỉ tài khoản của chính mình; mọi thay đổi ghi Action Log `account.*`):
+  - `GET /account` → hồ sơ + `has_pin` + `must_change_password` + các phiên còn hiệu lực (`ip`, `user_agent`, `last_seen_at`, `current`).
+  - `PATCH /account {display_name?, email?, current_password?}` — đổi email cần mật khẩu hiện tại, kiểm định dạng + trùng trong tổ chức.
+  - `POST /account/password` — ≥12 ký tự, khác mật khẩu cũ; thu hồi mọi phiên KHÁC; tắt `must_change_password`.
+  - `POST /account/pin {current_password, new_pin, new_pin_confirm}` — chỉ tài khoản có PIN (Owner), không thì 409 `NO_PIN`.
+  - `POST /account/sessions/revoke-others`, `DELETE /account/sessions/{id}` (phiên đang dùng → 409 `CURRENT_SESSION`).
+  - Sai mật khẩu hiện tại → 422 `errors.current_password` (không phải 401, để Console không hiểu là mất phiên) + nhật ký `account.password_check_failed` (result `failed`).
+- **Migration 0015** (`db/sql/0015_v0119_account.sql`): `core.users.must_change_password boolean NOT NULL DEFAULT false`.
+- **Buộc đổi mật khẩu**: `gh.auth.reset_owner` (genh reset-password) bật cờ; `/auth/me` trả `must_change_password`. Web: AppShell chuyển mọi màn Console về `/change-password` ("Đặt mật khẩu mới": mật khẩu tạm + mới + nhập lại, vẫn Đăng xuất được) tới khi đổi xong. genh in "Console sẽ yêu cầu đặt mật khẩu mới ngay khi đăng nhập".
+- **Web** `/account` "Tài khoản của tôi" (mở từ menu khối tài khoản ở chân thanh bên → "Tài khoản của tôi"): Hồ sơ, Đổi mật khẩu, Đổi mã PIN (Owner), Phiên đăng nhập (+ "Đăng xuất các thiết bị khác"). Lỗi theo ô, toast, trạng thái đang tải; lưu tên → invalidate `me` nên thanh bên đổi ngay.
+- Hợp đồng `packages/contracts/src/account.ts`; mock `test/mock-api.ts` (Owner có sẵn 2 phiên thiết bị khác; `MOCK_MUST_CHANGE=1` hoặc reset `{mustChangePassword: true}` để xem màn buộc đổi).
+- Test: api `tests/test_account.py`; web `test/unit/account.test.tsx`.

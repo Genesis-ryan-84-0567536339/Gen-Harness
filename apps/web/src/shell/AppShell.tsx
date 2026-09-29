@@ -1,8 +1,8 @@
 import { useMemo } from 'react';
-import { Outlet, useMatches } from 'react-router-dom';
+import { Navigate, Outlet, useMatches } from 'react-router-dom';
 import { DOMAINS, SCREEN_BY_KEY, type DomainId } from '@gen-harness/contracts';
 import { useActiveScreenKey, type RouteHandle } from './routeHandles';
-import { useNavigation } from '../lib/queries';
+import { useMe, useNavigation } from '../lib/queries';
 import { useRealtime } from '../lib/realtime';
 import { useUiStore } from '../lib/uiStore';
 import { Header, type Crumbs } from './Header';
@@ -13,7 +13,10 @@ function useCrumbs(activeKey: string | null): Crumbs | null {
   const matches = useMatches();
   const nav = useNavigation();
   return useMemo(() => {
-    if (!activeKey) return null;
+    if (!activeKey) {
+      const page = [...matches].reverse().map((m) => (m.handle as RouteHandle | undefined)?.page).find(Boolean);
+      return page ? { domain: page.domain, group: null, title: page.title, subtitle: page.subtitle } : null;
+    }
     const meta = SCREEN_BY_KEY[activeKey];
     let domainId: DomainId | undefined;
     let group: string | null = null;
@@ -37,7 +40,10 @@ export function AppShell() {
   const mode = useUiStore((s) => s.sidebarMode);
   const activeKey = useActiveScreenKey();
   const crumbs = useCrumbs(activeKey);
+  const me = useMe();
   useRealtime();
+  // v0.1.19: mật khẩu tạm (genh reset-password) → mọi màn Console chuyển về "Đặt mật khẩu mới".
+  if (me.data?.must_change_password) return <Navigate to="/change-password" replace />;
   return (
     <div className="app" data-sidebar={mode}>
       <a className="skip-link" href="#main">

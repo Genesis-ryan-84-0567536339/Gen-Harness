@@ -43,7 +43,9 @@ describe('screen registry', () => {
       });
     walk(routes, []);
     // 21 màn thiết kế + 3 màn spec bổ sung (tasks, documents, deals) + Hướng dẫn kết nối (guide, guide/:n)
-    expect(paths).toHaveLength(26);
+    // + Tài khoản của tôi (account, v0.1.19)
+    expect(paths).toHaveLength(27);
+    expect(paths).toContain('account');
     expect(paths).toContain('guide');
     expect(paths).toContain('guide/:n');
     expect(paths).toContain('domain:business > group:Hàng đợi & Hành động > inbox');

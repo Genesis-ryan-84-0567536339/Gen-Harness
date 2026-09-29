@@ -55,6 +55,7 @@ async def me_payload(db: AsyncSession, user: service.CurrentUser) -> dict[str, A
         "addressing": user.addressing,
         "pin_verified_until": _iso(user.pin_verified_until),
         "permissions": user.permissions,
+        "must_change_password": user.must_change_password,
     }
 
 

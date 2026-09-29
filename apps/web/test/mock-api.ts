@@ -9,7 +9,8 @@
  *   setup token: GH-SETUP-7Q4K-2M9X
  *
  * MOCK_SETUP=fresh starts at step 1; MOCK_LATENCY=<ms> delays every response;
- * MOCK_SIMULATE=0 turns off the live raw-message simulation.
+ * MOCK_SIMULATE=0 turns off the live raw-message simulation; MOCK_MUST_CHANGE=1 makes the Owner
+ * face the forced "Đặt mật khẩu mới" screen (as after `genh reset-password`).
  * `/api/v1/ws` is served by `upgrade()` (see vite.config.ts).
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -58,6 +59,9 @@ interface User {
   display_name: string;
   role: { code: RoleCode; name: string };
   hidden: Set<string>;
+  /** v0.1.19: mật khẩu do hệ thống đặt (genh reset-password) → Console buộc đặt mật khẩu mới. */
+  mustChange?: boolean;
+  createdAt?: string;
 }
 
 const MOCK_HARD_BOUNDARIES = [
@@ -79,6 +83,8 @@ export interface MockOptions {
   startAtStep?: number;
   /** `/system/update` báo có bản mới (thẻ "Có bản mới" ở Tổng quan). */
   updateAvailable?: boolean;
+  /** v0.1.19: Owner vừa được genh reset-password → `must_change_password` (MOCK_MUST_CHANGE=1). */
+  mustChangePassword?: boolean;
 }
 
 // RBAC as apps/api gh/auth/rbac.py seeds it: Owner, Manager, Operator, Agent NV, Auditor.
@@ -329,6 +335,8 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
       display_name: name,
       role: { code: 'owner', name: 'Owner — Sếp' },
       hidden: hiddenScreens('owner'),
+      mustChange: opts.mustChangePassword ?? false,
+      createdAt: '2026-05-04T02:15:00.000Z',
     });
 
   const setup: SetupState & { org: { name: string; timezone: string; currency: string }; addressing: { self: string; bot_calls_me: string } } = {
@@ -388,7 +396,14 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     });
   }
 
-  const sessions = new Map<string, { userId: string; pinUntil: number | null }>();
+  interface MockSession { userId: string; pinUntil: number | null; createdAt: string; lastSeenAt: string; ip: string | null; ua: string | null }
+  const sessions = new Map<string, MockSession>();
+  if (opts.setup !== 'fresh' && users[0]) {
+    // Owner có sẵn 2 phiên ở thiết bị khác — màn "Tài khoản của tôi" có gì để xem / đăng xuất.
+    const ago = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
+    sessions.set(randomUUID(), { userId: users[0].id, pinUntil: null, createdAt: ago(3 * 24 * 60), lastSeenAt: ago(95), ip: '113.161.42.7', ua: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 Mobile Safari/604.1' });
+    sessions.set(randomUUID(), { userId: users[0].id, pinUntil: null, createdAt: ago(9 * 24 * 60), lastSeenAt: ago(2 * 24 * 60), ip: '14.232.18.90', ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140.0 Safari/537.36' });
+  }
   const pinFails = new Map<string, { count: number; lockedUntil: number | null }>();
 
   const stateView = (): SetupState => ({ finished: setup.finished, current_step: setup.current_step, steps: setup.steps });
@@ -457,7 +472,103 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
       addressing: setup.addressing,
       pin_verified_until: pinUntil && pinUntil > Date.now() ? new Date(pinUntil).toISOString() : null,
       permissions: permissionsOf(user.role.code),
+      must_change_password: user.mustChange ?? false,
     };
+  }
+
+  type AcctResult = { status: number; body?: unknown; code?: string; title?: string; extra?: Record<string, unknown> };
+  const invalid = (errors: Record<string, string>): AcctResult => ({ status: 422, code: 'VALIDATION', title: 'Dữ liệu chưa hợp lệ', extra: { errors } });
+  const WRONG_PW = 'Mật khẩu hiện tại không đúng';
+  function accountView(user: User, sid: string) {
+    const mine = [...sessions.entries()].filter(([, s]) => s.userId === user.id)
+      .map(([id, s]) => ({ id, created_at: s.createdAt, last_seen_at: s.lastSeenAt, ip: s.ip, user_agent: s.ua,
+        expires_at: new Date(Date.now() + 7 * 24 * 3600_000).toISOString(), current: id === sid }))
+      .sort((a, b) => Number(b.current) - Number(a.current) || b.last_seen_at.localeCompare(a.last_seen_at));
+    return { display_name: user.display_name, email: user.email, role: user.role, created_at: user.createdAt ?? '2026-05-04T02:15:00.000Z',
+      must_change_password: user.mustChange ?? false, has_pin: user.role.code === 'owner', sessions: mine };
+  }
+  /** Như gh/auth/account.py (v0.1.19) — "Tài khoản của tôi". */
+  function accountRoute(user: User, sid: string, method: string, path: string, body: Record<string, unknown>): AcctResult {
+    const revokeOthers = () => {
+      let n = 0;
+      for (const [id, s] of sessions) {
+        if (s.userId === user.id && id !== sid) {
+          sessions.delete(id);
+          n += 1;
+        }
+      }
+      return n;
+    };
+    if (path === '/account' && method === 'GET') return { status: 200, body: accountView(user, sid) };
+    if (path === '/account' && method === 'PATCH') {
+      const errors: Record<string, string> = {};
+      let name: string | null = null;
+      let email: string | null = null;
+      if (typeof body.display_name === 'string') {
+        name = body.display_name.split(/\s+/).filter(Boolean).join(' ');
+        if (!name) errors.display_name = 'Tên hiển thị không được để trống';
+        else if (name.length > 100) errors.display_name = 'Tên hiển thị tối đa 100 ký tự';
+      }
+      if (typeof body.email === 'string') {
+        email = body.email.trim().toLowerCase();
+        if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) errors.email = 'Email chưa đúng định dạng';
+        else if (email === user.email) email = null;
+        else if (users.some((u) => u.id !== user.id && u.email === email)) errors.email = 'Email này đã có tài khoản khác dùng';
+        else if (!body.current_password) errors.current_password = 'Nhập mật khẩu hiện tại để đổi email';
+      }
+      if (Object.keys(errors).length) return invalid(errors);
+      if (email && body.current_password !== user.password) {
+        record(user, 'account.password_check_failed', 'failed');
+        return invalid({ current_password: WRONG_PW });
+      }
+      if (name) user.display_name = name;
+      if (email) user.email = email;
+      record(user, 'account.profile_updated');
+      return { status: 200, body: accountView(user, sid) };
+    }
+    if (path === '/account/password' && method === 'POST') {
+      const next = String(body.new_password ?? '');
+      if (next.length < 12) return invalid({ new_password: 'Mật khẩu mới cần ít nhất 12 ký tự' });
+      if (body.current_password !== user.password) {
+        record(user, 'account.password_check_failed', 'failed');
+        return invalid({ current_password: WRONG_PW });
+      }
+      if (next === user.password) return invalid({ new_password: 'Mật khẩu mới phải khác mật khẩu hiện tại' });
+      user.password = next;
+      user.mustChange = false;
+      const n = revokeOthers();
+      record(user, 'account.password_changed');
+      return { status: 200, body: { sessions_revoked: n } };
+    }
+    if (path === '/account/pin' && method === 'POST') {
+      if (user.role.code !== 'owner') return { status: 409, code: 'NO_PIN', title: 'Tài khoản này không dùng mã PIN' };
+      const pin = String(body.new_pin ?? '');
+      if (!/^\d{6}$/.test(pin)) return invalid({ new_pin: 'PIN gồm đúng 6 chữ số' });
+      if (body.new_pin_confirm !== pin) return invalid({ new_pin_confirm: 'Hai lần nhập PIN chưa khớp' });
+      if (body.current_password !== user.password) {
+        record(user, 'account.password_check_failed', 'failed');
+        return invalid({ current_password: WRONG_PW });
+      }
+      user.pin = pin;
+      record(user, 'account.pin_changed');
+      return { status: 204 };
+    }
+    if (path === '/account/sessions/revoke-others' && method === 'POST') {
+      const n = revokeOthers();
+      record(user, 'account.sessions_revoked');
+      return { status: 200, body: { sessions_revoked: n } };
+    }
+    const one = /^\/account\/sessions\/([^/]+)$/.exec(path);
+    if (one && method === 'DELETE') {
+      const id = decodeURIComponent(one[1]);
+      if (id === sid) return { status: 409, code: 'CURRENT_SESSION', title: 'Đây là phiên đang dùng — hãy bấm Đăng xuất' };
+      const s = sessions.get(id);
+      if (!s || s.userId !== user.id) return { status: 404, code: 'NOT_FOUND', title: 'Phiên đăng nhập không tồn tại' };
+      sessions.delete(id);
+      record(user, 'account.session_revoked');
+      return { status: 204 };
+    }
+    return { status: 404, code: 'NOT_FOUND', title: 'Không tồn tại' };
   }
 
   const middleware = async (req: IncomingMessage, res: ServerResponse, next: Next) => {
@@ -485,7 +596,8 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     const user = session ? users.find((u) => u.id === session.userId) : undefined;
     const login = (u: User) => {
       const id = randomUUID();
-      sessions.set(id, { userId: u.id, pinUntil: null });
+      const now = new Date().toISOString();
+      sessions.set(id, { userId: u.id, pinUntil: null, createdAt: now, lastSeenAt: now, ip: '127.0.0.1', ua: String(req.headers['user-agent'] ?? '') || null });
       return `gh_session=${id}; Path=/; HttpOnly; SameSite=Strict`;
     };
     const body = method === 'GET' ? {} : await readBody(req);
@@ -654,6 +766,13 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
       user.pin = String(body.new_pin);
       record(user, 'auth.pin_changed');
       return reply(204);
+    }
+
+    if (path === '/account' || path.startsWith('/account/')) {
+      const acct = accountRoute(user, sid!, method, path, body);
+      if (acct.status === 204) return reply(204);
+      if (acct.status >= 400) return problem(res, acct.status, acct.code!, acct.title!, acct.extra ?? {});
+      return reply(acct.status, acct.body);
     }
 
     if (path === '/navigation' && method === 'GET') return reply(200, buildNavigation(user.hidden, opts.badges ?? true));

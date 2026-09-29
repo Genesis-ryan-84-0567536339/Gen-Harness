@@ -5,6 +5,7 @@ Chạy trong container api (`docker compose exec -T api …`), KHÔNG đụng d�
   - đặt mật khẩu tạm mới (tự sinh, hoặc đọc 1 dòng từ stdin với `--password-stdin`), băm bằng đúng hàm
     đăng nhập dùng (gh.crypto.hash_secret);
   - thu hồi mọi phiên đang mở của Owner, gỡ khoá PIN (nếu đang bị khoá do nhập sai);
+  - bật cờ must_change_password (v0.1.19) — Console buộc đặt mật khẩu mới ngay lần đăng nhập kế tiếp;
   - ghi Action Log (actor_type "system");
   - in JSON {"email", "temp_password"} ra stdout.
 
@@ -51,7 +52,8 @@ async def reset_owner_password(db: AsyncSession, password: str | None = None) ->
         raise NoOwnerError
     temp = password if password is not None else new_token(12)
     await db.execute(text("""
-        UPDATE core.users SET password_hash = :h, is_active = true, pin_failed = 0, pin_locked_until = NULL
+        UPDATE core.users SET password_hash = :h, is_active = true, pin_failed = 0, pin_locked_until = NULL,
+            must_change_password = true, updated_at = now()
         WHERE id = :u"""), {"h": hash_secret(temp), "u": row.id})
     revoked = (await db.execute(text(
         "UPDATE core.sessions SET revoked_at = now() WHERE user_id = :u AND revoked_at IS NULL"),

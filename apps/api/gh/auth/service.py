@@ -57,6 +57,7 @@ class CurrentUser:
     permissions: dict[str, str] = field(default_factory=dict)
     ip: str | None = None
     session_expires_at: datetime | None = None
+    must_change_password: bool = False
     # True khi request này vừa gia hạn phiên (xem load_session) — middleware SessionCookieRenewal đặt lại cookie.
     session_renewed: bool = False
 
@@ -102,6 +103,7 @@ async def login(db: AsyncSession, email: str, password: str) -> dict[str, Any] |
 async def load_session(db: AsyncSession, token: str) -> CurrentUser | None:
     row = (await db.execute(text("""
         SELECT s.id AS sid, s.pin_verified_until, s.expires_at, u.id, u.org_id, u.email, u.display_name, u.addressing,
+               u.must_change_password,
                r.id AS role_id, r.code AS role_code, r.name AS role_name, ur.team_id
         FROM core.sessions s
         JOIN core.users u ON u.id = s.user_id
@@ -133,7 +135,8 @@ async def load_session(db: AsyncSession, token: str) -> CurrentUser | None:
     return CurrentUser(id=row.id, org_id=row.org_id, email=row.email, display_name=row.display_name,
                        role_code=row.role_code, role_name=row.role_name, role_id=row.role_id, team_id=row.team_id,
                        session_id=row.sid, pin_verified_until=pin_until, addressing=row.addressing or {},
-                       permissions=perms, session_expires_at=expires_at, session_renewed=renewed)
+                       permissions=perms, session_expires_at=expires_at, session_renewed=renewed,
+                       must_change_password=bool(row.must_change_password))
 
 
 async def csrf_matches(db: AsyncSession, session_id: uuid.UUID, csrf: str) -> bool:

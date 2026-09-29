@@ -6,7 +6,11 @@ export interface RouteHandle {
   domain?: DomainId;
   group?: string;
   screen?: string;
+  /** Trang ngoài danh mục màn (vd. Tài khoản của tôi) — breadcrumb cố định. */
+  page?: { domain: string; title: string; subtitle: string };
 }
+
+export const ACCOUNT_CRUMBS = { domain: 'TÀI KHOẢN', title: 'Tài khoản của tôi', subtitle: 'My account' };
 
 export function useActiveScreenKey(): string | null {
   const matches = useMatches();
