@@ -14,11 +14,13 @@ Nguồn chuẩn tiến độ. Mỗi đợt = 1 PR = 1 bản phát hành, CI + E2
 ## Đã xong
 v0.1.15–0.1.20: thiết lập "Để sau" + hướng dẫn từng bước, nút Cập nhật ngay, reset mật khẩu / tin cậy CA, phiên 7 ngày,
 Tài khoản của tôi + bắt buộc đổi mật khẩu tạm, sao lưu & khôi phục trên giao diện.
+v0.1.21: Gen v1 (A1–A3) — khung chat, dẫn đường trên UI, nguồn Jev; cờ `gen.enabled` (bật cho Owner).
 
 ## Đợt A — Gen v1 (thiết kế: docs/design/gen-v1.md)
-- A1 Khung chat phải + Gen trả lời/tóm tắt (chỉ đọc), lưu hội thoại, Nhật ký hành động.
-- A2 Giao thức hành động UI: mở trang, khoanh sáng (`data-gen-target`), dẫn từng bước.
-- A3 Nguồn model Jev (OpenRouter) + Gen dùng Jev cho quyết định nhanh, rơi về LLM khi lỗi.
+- ✅ A1 Khung chat phải + Gen trả lời/tóm tắt (chỉ đọc), lưu hội thoại, Nhật ký hành động — v0.1.21.
+- ✅ A2 Giao thức hành động UI: mở trang, khoanh sáng (`data-gen-target`), dẫn từng bước — v0.1.21.
+- ✅ A3 Nguồn model Jev (OpenRouter) + Gen dùng Jev cho quyết định nhanh, rơi về LLM khi lỗi — v0.1.21
+  (schema `/v1/systemone` còn là giả định, xem HANDOFF v0.1.21).
 - A4 Đề xuất thao tác; v2: điền form có xác nhận (nháp tin, nhắc việc, gán người).
 
 ## Đợt B — Cơ bản còn thiếu
