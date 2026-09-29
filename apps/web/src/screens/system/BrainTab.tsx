@@ -7,6 +7,7 @@ import { CardError, Panel, SkeletonLines } from '../common';
 import { N4, OK, WARN } from '../data/dataModel';
 import { CliCard } from './CliCard';
 import { JevCard } from './JevCard';
+import { TriageCard } from './TriageCard';
 import { useCan } from '../../lib/permissions';
 
 /**
@@ -132,6 +133,10 @@ export function BrainTab() {
       <div className="sys-grid2">
         <JevCard />
         <CliCard canManage={canManage} showCredentials={false} />
+      </div>
+
+      <div className="sys-grid2">
+        <TriageCard />
       </div>
     </div>
   );
