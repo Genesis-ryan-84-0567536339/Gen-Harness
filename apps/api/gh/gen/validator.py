@@ -10,6 +10,7 @@ Không đạt → bỏ action (caller ghi Action Log `result="blocked"` và báo
 
 from dataclasses import dataclass
 
+from gh.auth import rbac
 from gh.gen import envelope, registry
 
 PARAM_KEYS = {"tab", "id", "q", "filter", "status"}
@@ -46,6 +47,8 @@ class Validator:
         err = self._screen(t.screen)
         if err:
             return err
+        if t.permission and self.permissions.get(t.permission, rbac.NONE) == rbac.NONE:
+            return f"người hỏi không có quyền '{t.permission}' để chỉ vào '{target}'"
         _, row = registry.split_target(target)
         if row is not None and row not in self.seen_ids:
             return f"id dòng '{row}' không có trong kết quả tool của lượt này"

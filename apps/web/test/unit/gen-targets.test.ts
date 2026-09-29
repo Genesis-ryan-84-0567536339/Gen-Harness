@@ -39,7 +39,7 @@ function exportRegistry() {
   return {
     _comment: 'Sinh từ packages/contracts/src/genTargets.ts + apps/web/src/guide/guideContent.ts — KHÔNG sửa tay. GEN_WRITE=1 npx vitest run gen-targets',
     screens: Object.fromEntries(GEN_SCREENS.map((s) => [s.key, { path: s.path, title: s.title }])),
-    targets: GEN_TARGETS.map((t) => ({ id: t.id, screen: t.screen, label: t.label, description: t.description, dynamic: t.dynamic ?? null, params: t.params ?? null, ...(t.sensitive ? { sensitive: true, safe_message: GEN_SAFE_MESSAGE } : {}) })),
+    targets: GEN_TARGETS.map((t) => ({ id: t.id, screen: t.screen, label: t.label, description: t.description, dynamic: t.dynamic ?? null, params: t.params ?? null, ...(t.permission ? { permission: t.permission } : {}), ...(t.sensitive ? { sensitive: true, safe_message: GEN_SAFE_MESSAGE } : {}) })),
     guide: GUIDE.map((g) => ({ n: g.n, title: g.title, why: g.why, steps: g.steps, done_when: g.doneWhen, console: g.console })),
   };
 }
@@ -71,6 +71,12 @@ describe('gen targets registry', () => {
     for (const id of ['system.backup.panel', 'system.backup.now', 'system.backup.schedule', 'system.channels.pin', 'account.password', 'account.pin', 'account.sessions']) {
       expect(sens.has(id), id).toBe(true);
     }
+  });
+
+  it('user-management targets require roles.manage', () => {
+    const users = GEN_TARGETS.filter((t) => t.id === 'system.tab.users' || t.id.startsWith('system.users.'));
+    expect(users.length).toBeGreaterThan(0);
+    for (const t of users) expect(t.permission, t.id).toBe('roles.manage');
   });
 
   it('apps/api/gh/gen/registry.json matches the TS export', () => {

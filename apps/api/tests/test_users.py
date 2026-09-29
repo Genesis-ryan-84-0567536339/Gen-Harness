@@ -74,6 +74,15 @@ async def test_list_and_invite_needs_pin_and_logs(owner_api: Api, app: object) -
     assert {u["email"]: u["last_login_at"] is not None for u in items}["lan@example.vn"] is True
 
 
+async def test_invited_user_logs_in_with_mixed_case_email(owner_api: Api, app: object) -> None:
+    await _pin(owner_api)
+    out = await _invite(owner_api, "mixed.case@example.vn")
+    pw = out["temp_password"]  # type: ignore[index]
+    c, _api, r = await _login(app, "  Mixed.CASE@Example.vn ", pw)  # type: ignore[arg-type]
+    await c.aclose()
+    assert r.status_code == 200, r.text
+
+
 async def test_member_cannot_manage_users(owner_api: Api, app: object) -> None:
     await _pin(owner_api)
     out = await _invite(owner_api, role="manager")

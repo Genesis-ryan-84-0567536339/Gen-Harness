@@ -81,6 +81,12 @@ async def _guard_last_owner(db: AsyncSession, me: service.CurrentUser, row: Any)
     """Người này là Owner đang hoạt động cuối cùng → từ chối (tổ chức không bao giờ mất Owner)."""
     if row.role_code != rbac.OWNER or not row.is_active:
         return
+    # Khoá các dòng Owner đang hoạt động để hai thao tác song song không cùng thấy "còn Owner khác".
+    await db.execute(text("""
+        SELECT u.id FROM core.users u JOIN core.user_roles ur ON ur.user_id = u.id
+        JOIN core.roles r ON r.id = ur.role_id
+        WHERE u.org_id = :o AND r.code = 'owner' AND u.is_active AND u.deleted_at IS NULL
+        ORDER BY u.id FOR UPDATE OF u"""), {"o": me.org_id})
     others = (await db.execute(text("""
         SELECT count(*) FROM core.users u JOIN core.user_roles ur ON ur.user_id = u.id
         JOIN core.roles r ON r.id = ur.role_id

@@ -205,7 +205,8 @@
       "label": "Tab \"Người dùng\"",
       "description": "Chuyển sang tab mời người dùng, đổi vai trò, khoá tài khoản (chỉ Owner)",
       "dynamic": null,
-      "params": null
+      "params": null,
+      "permission": "roles.manage"
     },
     {
       "id": "system.tab.org",
@@ -350,6 +351,7 @@
       "params": {
         "tab": "users"
       },
+      "permission": "roles.manage",
       "sensitive": true,
       "safe_message": "Đây là thao tác nhạy cảm — Sếp tự xem kỹ và tự quyết định, Gen không làm thay."
     },
@@ -361,7 +363,8 @@
       "dynamic": null,
       "params": {
         "tab": "users"
-      }
+      },
+      "permission": "roles.manage"
     },
     {
       "id": "system.users.temp_password",
@@ -372,6 +375,7 @@
       "params": {
         "tab": "users"
       },
+      "permission": "roles.manage",
       "sensitive": true,
       "safe_message": "Đây là thao tác nhạy cảm — Sếp tự xem kỹ và tự quyết định, Gen không làm thay."
     },

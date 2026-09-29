@@ -158,6 +158,19 @@ def test_validator_rules() -> None:
     assert op.check(envelope.Navigate(type="navigate", screen="account")).ok
 
 
+def test_validator_blocks_users_targets_without_roles_manage() -> None:
+    mgr = dict(rbac.DEFAULT_MATRIX[rbac.MANAGER])
+    mgr["system.read"] = "all"  # thấy màn Hệ thống nhưng không có roles.manage
+    assert mgr.get("roles.manage", rbac.NONE) == rbac.NONE
+    v = Validator(mgr, set(), "system")
+    for tid in ("system.tab.users", "system.users.list", "system.users.invite"):
+        r = v.check(envelope.Highlight(type="highlight", target=tid, message="m"))
+        assert not r.ok and "roles.manage" in (r.reason or ""), tid
+    assert v.check(envelope.Highlight(type="highlight", target="system.brain.jev", message="m")).ok
+    ov = Validator(dict(rbac.DEFAULT_MATRIX[rbac.OWNER]), set(), "system")
+    assert ov.check(envelope.Highlight(type="highlight", target="system.users.list", message="m")).ok
+
+
 def test_envelope_parse_and_compact() -> None:
     assert len(envelope.parse('```json\n{"steps":[{"kind":"say","text":"a"}]}\n```').steps) == 1
     assert len(envelope.parse('{"kind":"done"}').steps) == 1

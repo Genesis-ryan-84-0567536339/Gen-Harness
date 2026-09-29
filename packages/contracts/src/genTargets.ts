@@ -24,6 +24,8 @@ export interface GenTarget {
   params?: Record<string, string>;
   /** Mục tiêu nhạy cảm (huỷ dữ liệu / bảo mật): server thay lời model bằng `GEN_SAFE_MESSAGE` cố định. */
   sensitive?: boolean;
+  /** Quyền cần có (vd `roles.manage`) để Gen được chỉ vào mục tiêu này; server validator từ chối nếu thiếu. */
+  permission?: string;
 }
 
 /** Lời nhắn cố định khi làm sáng mục tiêu nhạy cảm — chống prompt injection qua lời model. */
@@ -64,7 +66,7 @@ export const GEN_TARGETS: GenTarget[] = [
   // ── Điều khiển hệ thống ──
   { id: 'system.tab.channels', screen: 'system', label: 'Tab "Kênh & đăng nhập"', description: 'Chuyển sang tab kênh Zalo/WhatsApp, PIN, CLI' },
   { id: 'system.tab.brain', screen: 'system', label: 'Tab "Bộ não AI"', description: 'Chuyển sang tab nhà cung cấp model, hạn mức, Jev' },
-  { id: 'system.tab.users', screen: 'system', label: 'Tab "Người dùng"', description: 'Chuyển sang tab mời người dùng, đổi vai trò, khoá tài khoản (chỉ Owner)' },
+  { id: 'system.tab.users', screen: 'system', label: 'Tab "Người dùng"', description: 'Chuyển sang tab mời người dùng, đổi vai trò, khoá tài khoản (chỉ Owner)', permission: 'roles.manage' },
   { id: 'system.tab.org', screen: 'system', label: 'Tab "Tổ chức"', description: 'Chuyển sang tab sửa tên tổ chức, múi giờ, tiền tệ, xưng hô' },
   { id: 'system.tab.storage', screen: 'system', label: 'Tab "Dữ liệu & lưu trữ"', description: 'Chuyển sang tab hạn lưu, sao lưu & khôi phục' },
   { id: 'system.channels.list', screen: 'system', label: 'Danh sách kênh', description: 'Thẻ các kênh Zalo/WhatsApp và nút tạo mã QR', params: { tab: 'channels' } },
@@ -78,9 +80,9 @@ export const GEN_TARGETS: GenTarget[] = [
   { id: 'system.backup.panel', screen: 'system', label: 'Sao lưu & khôi phục', description: 'Danh sách bản sao lưu, tải về, khôi phục', params: { tab: 'storage' }, sensitive: true },
   { id: 'system.backup.now', screen: 'system', label: 'Nút "Sao lưu ngay"', description: 'Tạo bản sao lưu ngay lúc này', params: { tab: 'storage' }, sensitive: true },
   { id: 'system.backup.schedule', screen: 'system', label: 'Lịch sao lưu tự động', description: 'Đổi tần suất và giờ sao lưu tự động', params: { tab: 'storage' }, sensitive: true },
-  { id: 'system.users.list', screen: 'system', label: 'Danh sách người dùng', description: 'Tên, email, vai trò, trạng thái, lần đăng nhập gần nhất; nút đặt lại mật khẩu, khoá/mở khoá', params: { tab: 'users' }, sensitive: true },
-  { id: 'system.users.invite', screen: 'system', label: 'Nút "Mời người dùng"', description: 'Tạo tài khoản mới với mật khẩu tạm (cần mã PIN)', params: { tab: 'users' } },
-  { id: 'system.users.temp_password', screen: 'system', label: 'Mật khẩu tạm vừa tạo', description: 'Hộp hiện mật khẩu tạm một lần sau khi mời / đặt lại mật khẩu', params: { tab: 'users' }, sensitive: true },
+  { id: 'system.users.list', screen: 'system', label: 'Danh sách người dùng', description: 'Tên, email, vai trò, trạng thái, lần đăng nhập gần nhất; nút đặt lại mật khẩu, khoá/mở khoá', params: { tab: 'users' }, sensitive: true, permission: 'roles.manage' },
+  { id: 'system.users.invite', screen: 'system', label: 'Nút "Mời người dùng"', description: 'Tạo tài khoản mới với mật khẩu tạm (cần mã PIN)', params: { tab: 'users' }, permission: 'roles.manage' },
+  { id: 'system.users.temp_password', screen: 'system', label: 'Mật khẩu tạm vừa tạo', description: 'Hộp hiện mật khẩu tạm một lần sau khi mời / đặt lại mật khẩu', params: { tab: 'users' }, sensitive: true, permission: 'roles.manage' },
   { id: 'system.org.form', screen: 'system', label: 'Thông tin tổ chức', description: 'Tên tổ chức, múi giờ, tiền tệ, Sếp tự xưng là, Agent gọi Sếp là', params: { tab: 'org' } },
   { id: 'system.org.save', screen: 'system', label: 'Nút "Lưu thông tin tổ chức"', description: 'Lưu thay đổi thông tin tổ chức và xưng hô', params: { tab: 'org' } },
   // ── API & Model ──
