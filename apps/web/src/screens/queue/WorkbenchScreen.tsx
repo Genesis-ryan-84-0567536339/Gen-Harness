@@ -43,6 +43,7 @@ export function WorkbenchScreen() {
           title="Chờ Sếp duyệt"
           kicker={list.data ? `${fmtInt(list.data.total)} bản nháp · tự trị mức 4` : 'Đang tải…'}
           bodyClass="wb-list"
+          genTarget="workbench.drafts"
         >
           {list.isPending ? (
             <SkeletonLines rows={5} padding="12px 16px" />

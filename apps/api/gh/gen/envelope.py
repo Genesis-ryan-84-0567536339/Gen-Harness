@@ -4,15 +4,18 @@ Model trả MỘT khối JSON `{"steps": [GenStep, …]}`. Sai schema (`extra="f
 "Gen chưa hiểu" và không thực thi gì.
 """
 
+from datetime import datetime
 from typing import Annotated, Any, Literal
 
 import orjson
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 DATA_TOOL_NAMES = ("overview.summary", "queue.list", "draft.list", "draft.get", "profile.search", "profile.get",
-                   "opportunity.list", "people.care", "audit.list", "system.health", "guide.list", "screens.list")
+                   "opportunity.list", "people.care", "audit.list", "system.health", "guide.list", "screens.list",
+                   "task.list", "staff.list")
 DataToolName = Literal["overview.summary", "queue.list", "draft.list", "draft.get", "profile.search", "profile.get",
-                       "opportunity.list", "people.care", "audit.list", "system.health", "guide.list", "screens.list"]
+                       "opportunity.list", "people.care", "audit.list", "system.health", "guide.list", "screens.list",
+                       "task.list", "staff.list"]
 
 
 class _M(BaseModel):
@@ -76,7 +79,62 @@ class Done(_M):
     kind: Literal["done"]
 
 
-GenStep = Annotated[Say | ToolCall | Ui | Suggest | Done, Field(discriminator="kind")]
+# ── Gen v2 (A4): đề xuất thao tác có xác nhận. Model chỉ ĐỀ XUẤT (điền sẵn form); server kiểm + làm giàu thành bước
+# `{"kind": "proposal", "proposal": {...}}` gửi xuống web; chỉ khi người dùng bấm Xác nhận, web mới gọi
+# `POST /gen/proposals/{id}/confirm` và server thực hiện NHÂN DANH người đó qua endpoint sẵn có (gh.gen.proposals).
+
+class SubjectRef(_M):
+    type: Literal["person", "group"]
+    id: str = Field(min_length=1, max_length=64)
+
+
+class DraftMessageFields(_M):
+    title: str = Field(min_length=1, max_length=200)
+    text: str = Field(min_length=1, max_length=4000)
+    subject: SubjectRef | None = None
+
+
+class ReminderFields(_M):
+    title: str = Field(min_length=1, max_length=200)
+    remind_at: datetime
+    due_at: datetime | None = None
+    priority: Literal["P1", "P2", "P3"] = "P3"
+    assignee_user_id: str | None = Field(default=None, max_length=64)
+    subject: SubjectRef | None = None
+
+
+class AssignFields(_M):
+    item_type: Literal["task", "inbox"]
+    item_id: str = Field(min_length=1, max_length=64)
+    user_id: str = Field(min_length=1, max_length=64)
+
+
+class ProposeDraft(_M):
+    type: Literal["draft_message"]
+    fields: DraftMessageFields
+
+
+class ProposeReminder(_M):
+    type: Literal["reminder"]
+    fields: ReminderFields
+
+
+class ProposeAssign(_M):
+    type: Literal["assign"]
+    fields: AssignFields
+
+
+ProposalIn = Annotated[ProposeDraft | ProposeReminder | ProposeAssign, Field(discriminator="type")]
+PROPOSAL_FIELDS: dict[str, type[_M]] = {"draft_message": DraftMessageFields, "reminder": ReminderFields,
+                                        "assign": AssignFields}
+
+
+class Propose(_M):
+    kind: Literal["propose"]
+    proposal: ProposalIn
+
+
+GenStep = Annotated[Say | ToolCall | Ui | Suggest | Propose | Done, Field(discriminator="kind")]
 
 
 class Envelope(_M):

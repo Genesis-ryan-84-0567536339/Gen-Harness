@@ -592,12 +592,14 @@ CREATE TABLE biz.tasks (
   subject_type text, subject_id uuid,
   due_at       timestamptz,
   remind_at    timestamptz,
+  reminded_at  timestamptz,                     -- v0.1.24 (0018): đã nhắc theo mốc remind_at (task_reminder_scan)
   source       text,                            -- promise | draft | manual
   created_at   timestamptz NOT NULL DEFAULT now(),
   completed_at timestamptz,
   UNIQUE (org_id, code)
 );
 CREATE INDEX ON biz.tasks (org_id, status, due_at);
+CREATE INDEX tasks_due_reminder_idx ON biz.tasks (remind_at) WHERE remind_at IS NOT NULL AND reminded_at IS NULL;
 
 -- Tài liệu: quyền theo nhóm & cá nhân
 CREATE TABLE biz.documents (

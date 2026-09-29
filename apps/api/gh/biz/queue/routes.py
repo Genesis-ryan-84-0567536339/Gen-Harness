@@ -655,6 +655,7 @@ async def patch_task(task_id: uuid.UUID, body: TaskPatch, user: service.CurrentU
         params["due"] = qsvc.when(body.due_at)
     if body.remind_at is not None:
         fields.append("remind_at = :remind")
+        fields.append("reminded_at = NULL")  # mốc nhắc mới → nhắc lại (task_reminder_scan)
         params["remind"] = qsvc.when(body.remind_at)
     if fields:
         await db.execute(text(f"UPDATE biz.tasks SET {', '.join(fields)} WHERE id = :i"), params)  # noqa: S608

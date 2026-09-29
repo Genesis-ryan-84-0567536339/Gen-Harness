@@ -7,10 +7,11 @@
  *   "gấp" / "xử lý" / "hôm nay"   → tra Tổng quan, mở Tổng quan, làm sáng Hàng đợi, đề xuất
  *   "jev" / "khoá" / "model"      → tour 3 bước: tab Bộ não AI → thẻ Jev → nút Kiểm tra
  *   "sao lưu" / "backup"          → mở Dữ liệu & lưu trữ, làm sáng nút "Sao lưu ngay"
+ *   "nhắc"                         → v2 (A4): thẻ đề xuất "Tạo nhắc việc" (Xác nhận / Sửa / Huỷ)
  *   còn lại                        → lời chào + gợi ý
  */
 import { randomUUID } from 'node:crypto';
-import type { GenStep } from '../../../packages/contracts/src/gen';
+import type { GenProposal, GenStep } from '../../../packages/contracts/src/gen';
 import type { P2Ctx } from './mock-phase2';
 
 export interface MockGenOptions {
@@ -34,8 +35,27 @@ interface Conversation {
   messages: Array<{ id: string; role: 'user' | 'assistant'; turn_id: string | null; content: { text?: string; steps?: GenStep[] }; created_at: string }>;
 }
 
+const OWNER_ID = 'u-owner';
+
 export function script(q: string): GenStep[] {
   const t = q.toLowerCase();
+  if (/nhắc/.test(t)) {
+    const remind = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    const proposal: GenProposal = {
+      id: randomUUID(),
+      type: 'reminder',
+      fields: { title: 'Gọi lại khách', remind_at: remind, due_at: null, priority: 'P2', assignee_user_id: OWNER_ID },
+      summary: 'Tạo nhắc việc \u201cGọi lại khách\u201d (P2), nhắc sau 1 giờ nữa, giao cho Sếp.',
+      labels: { user: 'Sếp' },
+      target: 'tasks.new',
+      requires_pin: false,
+      status: 'pending',
+    };
+    return [
+      { kind: 'say', text: 'Dạ, em đề xuất tạo nhắc việc — Sếp xem, sửa nếu cần rồi bấm Xác nhận nhé.' },
+      { kind: 'proposal', proposal },
+    ];
+  }
   if (/jev|khoá|khóa|model/.test(t)) {
     return [
       { kind: 'say', text: 'Dạ, em dẫn Sếp 3 bước để thêm nguồn Jev cho Gen — Sếp bấm "Tiếp" sau mỗi bước.' },
@@ -88,12 +108,14 @@ export function createMock(opts: MockGenOptions) {
   const settings = { enabled: true, roles: ['owner'], retention_days: 90 };
   const conversations = new Map<string, Conversation>();
   const turns = new Map<string, Turn>();
+  const proposals = new Map<string, GenProposal>();
   const timers = new Set<ReturnType<typeof setTimeout>>();
 
   function run(turn: Turn, conv: Conversation, steps: GenStep[]) {
     steps.forEach((step, i) => {
       const t = setTimeout(() => {
         timers.delete(t);
+        if (step.kind === 'proposal') proposals.set(step.proposal.id, step.proposal);
         const ev = { turn_id: turn.turn_id, conversation_id: turn.conversation_id, seq: i, step };
         turn.steps.push(ev);
         opts.emit('gen.step', ev);
@@ -154,6 +176,20 @@ export function createMock(opts: MockGenOptions) {
       return t ? reply(200, t) : problem(404, 'NOT_FOUND', 'Không tồn tại');
     }
     if (seg[1] === 'turns' && seg[3] === 'ack' && m === 'POST') return reply(204);
+    if (seg[1] === 'assignees' && m === 'GET') {
+      return reply(200, { items: [{ id: OWNER_ID, name: 'Sếp', role: 'Owner — Sếp', me: true }, { id: 'u-lan', name: 'Chị Lan', role: 'Vận hành', me: false }] });
+    }
+    if (seg[1] === 'proposals' && m === 'POST' && (seg[3] === 'confirm' || seg[3] === 'cancel')) {
+      const pr = proposals.get(seg[2]);
+      if (!pr) return problem(404, 'NOT_FOUND', 'Đề xuất (có thể đã hết hạn) không tồn tại hoặc nằm ngoài phạm vi của bạn');
+      if (pr.status !== 'pending') return problem(409, 'GEN_PROPOSAL_DECIDED', 'Đề xuất này đã được xác nhận hoặc đã huỷ');
+      const next: GenProposal =
+        seg[3] === 'cancel'
+          ? { ...pr, status: 'cancelled' }
+          : ({ ...pr, fields: { ...pr.fields, ...((body.fields as object) ?? {}) }, status: 'confirmed', result: { type: 'task', id: randomUUID(), code: 'TSK-0999', screen: 'tasks' } } as GenProposal);
+      proposals.set(pr.id, next);
+      return reply(200, next);
+    }
     return problem(404, 'NOT_FOUND', 'Không tồn tại');
   }
 

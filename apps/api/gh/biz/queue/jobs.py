@@ -191,5 +191,52 @@ async def early_warning_scan(ctx: dict[str, Any]) -> dict[str, int]:
     return out
 
 
+# ─── nhắc việc đến giờ (v0.1.24 — Đợt A4, Gen v2) ─────────────────────────────
+
+REMINDER_BATCH = 200
+
+
+def _local(dt: Any, tz: str | None) -> str:
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+    try:
+        zone = ZoneInfo(tz or "Asia/Ho_Chi_Minh")
+    except (ZoneInfoNotFoundError, ValueError):
+        zone = ZoneInfo("UTC")
+    return str(dt.astimezone(zone).strftime("%H:%M %d/%m/%Y"))
+
+
+async def due_reminders(db: AsyncSession, redis: Any = None) -> int:
+    """Việc có `remind_at` đã tới, chưa nhắc, chưa xong → thông báo chuông cho người phụ trách (chưa giao ai → các
+    Owner). Đánh dấu `reminded_at` cùng transaction (FOR UPDATE SKIP LOCKED: hai worker không nhắc trùng)."""
+    from gh.notifications import notify, owner_ids
+
+    rows = (await db.execute(text("""
+        UPDATE biz.tasks t SET reminded_at = now()
+        WHERE t.id IN (SELECT id FROM biz.tasks
+                       WHERE remind_at IS NOT NULL AND remind_at <= now() AND reminded_at IS NULL
+                         AND status NOT IN ('done', 'cancelled')
+                       ORDER BY remind_at LIMIT :n FOR UPDATE SKIP LOCKED)
+        RETURNING t.id, t.org_id, t.code, t.title, t.priority, t.assignee_user_id, t.due_at,
+                  (SELECT o.timezone FROM core.organizations o WHERE o.id = t.org_id) AS tz"""),
+        {"n": REMINDER_BATCH})).all()
+    for r in rows:
+        to = [r.assignee_user_id] if r.assignee_user_id else await owner_ids(db, r.org_id)
+        due = f" · hạn {_local(r.due_at, r.tz)}" if r.due_at else ""
+        await notify(db, r.org_id, to, kind="task.reminder", title=f"Nhắc việc: {r.title}",
+                     body=f"{r.code} · {r.priority}{due}", link="/tasks", redis=redis)
+    return len(rows)
+
+
+async def task_reminder_scan(ctx: dict[str, Any]) -> int:
+    from gh.db import sessionmaker
+
+    async with sessionmaker()() as db:
+        n = await due_reminders(db, ctx.get("redis_bus"))
+        await db.commit()
+    return n
+
+
 HOOKS: list[Hook] = []
-JOBS: list[CronJob] = [(early_warning_scan, {"minute": set(range(3, 60, 15))})]
+JOBS: list[CronJob] = [(early_warning_scan, {"minute": set(range(3, 60, 15))}),
+                       (task_reminder_scan, {"minute": set(range(60))})]  # mỗi phút
