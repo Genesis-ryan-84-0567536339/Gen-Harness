@@ -1,8 +1,9 @@
 """Vòng chính của browser-worker: `python -m ghb.worker`.
 
-Chỉ nói với Redis: đọc việc đã ký (`gh:browser:jobs`, nhóm `browser`), kiểm chữ ký + hạn + nonce một lần, khoá
-1 việc / tài khoản (`gh:browser:lock:<id>`), tối đa `GH_BROWSER_MAX_JOBS` việc song song, nhịp tim
-`gh:browser:heartbeat`, nghe lệnh điều khiển đã ký (`halt` đóng mọi trình duyệt ngay, `cancel` một việc). Không CSDL, không khoá master, không gọi model.
+Chỉ nói với Redis: đọc việc đã ký (`gh:browser:jobs`, nhóm `browser`), kiểm chữ ký + hạn + nonce
+một lần, khoá 1 việc / tài khoản (`gh:browser:lock:<id>`), tối đa `GH_BROWSER_MAX_JOBS` việc song
+song, nhịp tim `gh:browser:heartbeat`, nghe lệnh điều khiển đã ký (`halt` đóng mọi trình duyệt ngay,
+`cancel` một việc). Không CSDL, không khoá master, không gọi model.
 """
 
 import asyncio
