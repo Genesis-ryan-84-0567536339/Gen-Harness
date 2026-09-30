@@ -26,6 +26,7 @@ import './styles/system.css';
 import './styles/account.css';
 import './styles/gen.css';
 import './styles/notifications.css';
+import './styles/social.css';
 import './styles/errors.css';
 import './styles/theme.css';
 import { queryClient } from './lib/queryClient';

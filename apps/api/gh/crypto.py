@@ -157,3 +157,24 @@ def transport_encrypt(plaintext: bytes, aad: str) -> str:
 def transport_decrypt(blob: str, aad: str) -> bytes:
     raw = base64.b64decode(blob)
     return AESGCM(_bridge_subkey(b"transport")).decrypt(raw[:12], raw[12:], aad.encode())
+
+
+_dev_browser_key: bytes | None = None
+
+
+def browser_key() -> bytes:
+    """Khoá chung với browser-worker (v0.1.29) — tách khỏi khoá master và khoá bridge: worker trình duyệt chỉ giữ khoá
+    này, không bao giờ giữ khoá master (giải mã phiên đã lưu) hay khoá bridge (ký permit gửi tin Zalo/WhatsApp)."""
+    global _dev_browser_key
+    s = get_settings()
+    raw = s.browser_key
+    if s.browser_key_file:
+        with open(s.browser_key_file, encoding="utf-8") as f:
+            raw = f.read().strip()
+    if raw:
+        return decode_key(raw)
+    if s.is_production:
+        raise RuntimeError("Thiếu GH_BROWSER_KEY ở production")
+    if _dev_browser_key is None:
+        _dev_browser_key = os.urandom(32)
+    return _dev_browser_key

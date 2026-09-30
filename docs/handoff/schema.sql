@@ -813,6 +813,10 @@ CREATE TABLE agent.mcp_calls (
 ) PARTITION BY RANGE (at);
 SELECT partman.create_parent('agent.mcp_calls', 'at', '1 month', p_premake => 3);
 
+-- v0.1.29 (0021): mạng xã hội — core.social_accounts (platform, mode, label, status pending_login|active|needs_login|paused|
+--   revoked, state_enc bytea = phiên mã hoá khoá master, risk_accepted_by/at/version, schedule jsonb tắt mặc định,
+--   daily_read_limit ≤ 6, fail_streak, last_read_at…) + agent.browser_jobs (kind login|health|read, status, via gen|user|
+--   schedule, result jsonb — xoá khi gỡ tài khoản). RLS org_isolation cả hai. Xem db/sql/0021_v0129_social.sql.
 -- v0.1.26 (0020): liên kết Gen-hub — Gen đọc Kho Ryan (gh.hub_link). Token ở agent.mcp_servers.auth_enc (mã hoá), không ở đây.
 -- agent.hub_links (org_id PK → core.organizations, server_id → agent.mcp_servers ON DELETE SET NULL, enabled DEFAULT false,
 --   token_expires_at, expiry_notified_at, last_ok_at, last_error, updated_by, updated_at) — RLS org_isolation.

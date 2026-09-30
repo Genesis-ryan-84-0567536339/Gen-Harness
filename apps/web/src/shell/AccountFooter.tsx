@@ -68,6 +68,7 @@ export function AccountFooter({ wide }: { wide: boolean }) {
       {open ? (
         <AccountMenu
           email={me.data?.email}
+          isOwner={me.data?.role?.code === 'owner'}
           onClose={(refocus) => {
             setOpen(false);
             if (refocus) trigger.current?.focus();
@@ -78,7 +79,7 @@ export function AccountFooter({ wide }: { wide: boolean }) {
   );
 }
 
-function AccountMenu({ email, onClose }: { email?: string; onClose: (refocus: boolean) => void }) {
+function AccountMenu({ email, isOwner, onClose }: { email?: string; isOwner?: boolean; onClose: (refocus: boolean) => void }) {
   const mode = useUiStore((s) => s.sidebarMode);
   const toggleSidebar = useUiStore((s) => s.toggleSidebarMode);
   const showEnglish = useUiStore((s) => s.showEnglish);
@@ -132,6 +133,20 @@ function AccountMenu({ email, onClose }: { email?: string; onClose: (refocus: bo
         <Icon name="ph ph-user-circle" size={15} />
         Tài khoản của tôi
       </button>
+      {isOwner ? (
+        <button
+          type="button"
+          role="menuitem"
+          className="sb-menu__item"
+          onClick={() => {
+            navigate('/social');
+            onClose(false);
+          }}
+        >
+          <Icon name="ph ph-facebook-logo" size={15} />
+          Tài khoản mạng xã hội
+        </button>
+      ) : null}
       <button
         type="button"
         role="menuitem"

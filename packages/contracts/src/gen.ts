@@ -25,7 +25,9 @@ export type DataToolName =
   | 'refinery.summary'
   | 'hub.kho_summary'
   | 'hub.kho_search'
-  | 'hub.kho_get';
+  | 'hub.kho_get'
+  | 'social.accounts'
+  | 'social.read';
 
 export type UiAction =
   | { type: 'navigate'; screen: string; params?: Record<string, string> }

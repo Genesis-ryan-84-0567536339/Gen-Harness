@@ -88,7 +88,7 @@ func TestMigrateStep_HappyPath_ReportsAppliedMigrations(t *testing.T) {
 
 	// Phải ghi ra tệp Docker secret gh_master_key/gh_bridge_key cạnh deploy/.
 	secretsDir := filepath.Join(filepath.Dir(composePath), "..", "secrets")
-	for _, name := range []string{"gh_master_key", "gh_bridge_key"} {
+	for _, name := range []string{"gh_master_key", "gh_bridge_key", "gh_browser_key"} {
 		if _, err := os.Stat(filepath.Join(secretsDir, name)); err != nil {
 			t.Errorf("thiếu tệp secret %s: %v", name, err)
 		}

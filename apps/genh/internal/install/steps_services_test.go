@@ -60,7 +60,7 @@ func TestServicesStep_HappyPath_UpThenReady(t *testing.T) {
 	srv, _ := tlsReadyServer(t, 0)
 
 	fr := &fake.Runner{Responses: []fake.Response{
-		{Match: fake.MatchArgsContain("up", "-d", "api", "worker", "bridge", "web", "proxy"), Output: []byte("")},
+		{Match: fake.MatchArgsContain("up", "-d", "api", "worker", "bridge", "browser-egress", "browser", "web", "proxy"), Output: []byte("")},
 	}}
 
 	step := servicesStep{

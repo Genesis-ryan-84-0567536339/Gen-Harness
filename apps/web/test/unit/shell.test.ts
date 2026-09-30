@@ -43,8 +43,8 @@ describe('screen registry', () => {
       });
     walk(routes, []);
     // 21 màn thiết kế + 3 màn spec bổ sung (tasks, documents, deals) + Hướng dẫn kết nối (guide, guide/:n)
-    // + Tài khoản của tôi (account, v0.1.19) + Trợ giúp (help, v0.1.22)
-    expect(paths).toHaveLength(28);
+    // + Tài khoản của tôi (account, v0.1.19) + Trợ giúp (help, v0.1.22) + Tài khoản mạng xã hội (social, v0.1.29)
+    expect(paths).toHaveLength(29);
     expect(paths).toContain('account');
     expect(paths).toContain('help');
     expect(paths).toContain('guide');

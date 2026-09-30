@@ -34,6 +34,7 @@ from gh.providers import cli as climod
 from gh.providers.router import ModelRouter
 from gh.refinery.runner import Refinery
 from gh.refinery.scheduler import Scheduler
+from gh.social import service as social
 
 log = logging.getLogger("gh.worker")
 
@@ -164,6 +165,14 @@ async def hub_token_expiry_scan(ctx: dict[str, Any]) -> int:
     return n
 
 
+async def social_schedule(ctx: dict[str, Any]) -> int:
+    """v0.1.29: lịch đọc mạng xã hội (TẮT mặc định; Owner bật từng tài khoản, vd 08:00/17:00) — mỗi phút."""
+    async with sessionmaker()() as db:
+        n = await social.schedule_tick(db, ctx["redis_bus"])
+        await db.commit()
+    return n
+
+
 _BIZ_JOBS = [*biz.jobs(), *BACKUP_JOBS]  # PLAN §5.6 — gh.backup.scheduled_backup_scan cùng mẫu CronJob
 
 
@@ -172,7 +181,7 @@ class WorkerSettings:
     on_startup = startup
     on_shutdown = shutdown
     functions = [verify_action_log, partition_maintenance, detect_identities, compact_notebooks, expire_sessions,
-                 purge_gen_conversations, purge_notifications, hub_token_expiry_scan,
+                 purge_gen_conversations, purge_notifications, hub_token_expiry_scan, social_schedule,
                  *(fn for fn, _ in _BIZ_JOBS), *BACKUP_FUNCTIONS]
     health_check_interval = 30
     cron_jobs = [
@@ -184,6 +193,7 @@ class WorkerSettings:
         cron(purge_gen_conversations, hour={3}, minute={40}),   # 03:40 hằng ngày — hạn lưu hội thoại Gen
         cron(purge_notifications, hour={3}, minute={45}),       # 03:45 hằng ngày — hạn lưu chuông thông báo
         cron(hub_token_expiry_scan, hour={1}, minute={50}),     # 01:50 UTC (08:50 giờ VN) — nhắc token Gen-hub
+        cron(social_schedule, minute=set(range(60))),           # mỗi phút — lịch đọc mạng xã hội (tắt mặc định)
         *(cron(fn, **kw) for fn, kw in _BIZ_JOBS),  # type: ignore[arg-type]
     ]
 

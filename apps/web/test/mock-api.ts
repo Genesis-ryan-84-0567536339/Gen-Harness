@@ -27,6 +27,7 @@ import { createMock as createP3People } from './mock-p3-people';
 import { createMock as createP4Agents } from './mock-p4-agents';
 import { createMock as createP4Api } from './mock-p4-api';
 import { createMock as createP4Mcp } from './mock-p4-mcp';
+import { createMock as createSocial } from './mock-social';
 import { createMock as createP4Plugins } from './mock-p4-plugins';
 import { createMock as createP4System } from './mock-p4-system';
 import { createMock as createGen } from './mock-gen';
@@ -142,6 +143,7 @@ function hiddenScreens(role: RoleCode): Set<string> {
 }
 /** Which realtime events a connection may receive (docs/api/phase-2.md § WebSocket). */
 const EVENT_PERMISSION: Array<[string, string | null]> = [
+  ['social.', 'system.manage'],
   ['raw.', 'data.read'],
   ['refinery.', 'data.read'],
   ['channel.', 'system.read'],
@@ -196,7 +198,7 @@ const STEP_DEFS: Array<[string, string, boolean, boolean]> = [
   ['welcome', 'Chào mừng', true, true],
   ['owner', 'Tài khoản Owner', true, true],
   ['org', 'Tổ chức & xưng hô', true, true],
-  ['brain', 'Bộ não AI', true, true],
+  ['brain', 'Bộ não AI', false, true], // v0.1.29: "Để sau" được (hộp cảnh báo + dải "Chưa có model")
   ['channels', 'Kết nối kênh', false, true],
   ['groups', 'Chọn nhóm lắng nghe', false, true],
   ['refinery', 'Sàng lọc dữ liệu', false, true],
@@ -287,6 +289,8 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
   const gen = { enabled: () => genMock.hooks.settings().enabled };
   const phase3 = {
     gen: genMock,
+    // v0.1.29 — Tài khoản mạng xã hội (chỉ Owner, chỉ đọc).
+    social: createSocial({ fresh: opts.setup === 'fresh', emit: broadcast }),
     // agents TRƯỚC core: `GET /agents/decisions` cần trả dữ liệu thật ("agent đã nói gì") — core.handle() có
     // một stub rỗng cho cùng đường (chưa màn nào dùng tới trước giai đoạn 4) nên phải chặn trước nó.
     agents: p4Agents,
@@ -653,12 +657,14 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
       if (path === '/setup/hard-boundaries' && method === 'GET') return reply(200, MOCK_HARD_BOUNDARIES);
       if (path === '/setup/follow-up' && method === 'GET') {
         // Như API thật: mọi bước tuỳ chọn 5–11; `done` = đã xong trong trình thiết lập (dữ liệu thật: mock bỏ qua).
-        return reply(200, setup.steps.filter((x) => !x.required && x.n >= 5 && x.n <= 11)
+        // v0.1.29: bước 4 cũng có ("Chưa có model") — xong theo dữ liệu thật: có nguồn dùng được đang có model.
+        const hasModel = phase2.hooks.providers().some((p) => p.enabled && p.kind !== 'system_one' && p.auth_state === 'ok' && p.models.length > 0);
+        return reply(200, setup.steps.filter((x) => !x.required && x.n >= 4 && x.n <= 11)
           .map((x) => ({ n: x.n, key: x.key, title: x.title, status: x.status,
-            done: x.status === 'done' || (x.n === 11 && phase3.system.backupConfigured()) || (x.n === 7 && phase2.hooks.rulesEnabled()) })));
+            done: x.n === 4 ? hasModel : x.status === 'done' || (x.n === 11 && phase3.system.backupConfigured()) || (x.n === 7 && phase2.hooks.rulesEnabled()) })));
       }
-      // Như API thật: sau Hoàn tất vẫn lưu lại được bước tuỳ chọn 5–11 (trang Hướng dẫn kết nối), còn lại 409.
-      const optionalPut = /^\/setup\/steps\/([5-9]|1[01])$/.test(path) && method === 'PUT';
+      // Như API thật: sau Hoàn tất vẫn lưu lại được bước tuỳ chọn 4–11 (trang Hướng dẫn kết nối), còn lại 409.
+      const optionalPut = /^\/setup\/steps\/([4-9]|1[01])$/.test(path) && method === 'PUT';
       if (setup.finished && !optionalPut) return problem(res, 409, 'CONFLICT', 'Thiết lập đã hoàn tất');
       const skip = /^\/setup\/steps\/(\d+)\/skip$/.exec(path);
       if (skip && method === 'POST') {
@@ -1098,6 +1104,16 @@ export function createMockApi(opts: MockOptions = {}) {
   /** HTTP upgrade handler for `/api/v1/ws` (other paths are left alone, e.g. Vite HMR). */
   const upgrade = (req: IncomingMessage, socket: Duplex) => {
     const url = new URL(req.url ?? '/', 'http://mock.local');
+    // v0.1.29 — cửa sổ đăng nhập mạng xã hội (khung hình + chuột/phím), như `WS /social/login/{ticket}`.
+    const live = /^\/api\/v1\/social\/login\/([^/]+)$/.exec(url.pathname);
+    if (live) {
+      const state = current;
+      const auth = state.sessionUser(req);
+      const ticket = decodeURIComponent(live[1]);
+      const ws = acceptWebSocket(req, socket, (conn, text) => state.phase3.social.liveInput(ticket, conn, text), () => undefined);
+      if (ws) state.phase3.social.liveSocket(ticket, ws, auth?.user.role.code === 'owner');
+      return true;
+    }
     if (url.pathname !== '/api/v1/ws') return false;
     const state = current;
     const auth = state.sessionUser(req);

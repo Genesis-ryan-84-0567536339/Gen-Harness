@@ -19,6 +19,8 @@ const KIND_ICON: Record<string, string> = {
   'backup.failed': 'ph ph-warning-circle',
   'task.reminder': 'ph ph-alarm',
   'hub.token_expiring': 'ph ph-key',
+  'social.read': 'ph ph-facebook-logo',
+  'social.paused': 'ph ph-shield-warning',
 };
 
 /**
