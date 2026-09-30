@@ -257,11 +257,15 @@ async def delete_profile(db: AsyncSession, org_id: uuid.UUID, profile_id: uuid.U
     return {"email": row.email, "was_active": row.is_active}
 
 
-async def restore_active(sm: async_sessionmaker[AsyncSession]) -> None:
+async def restore_active(sm: async_sessionmaker[AsyncSession], *, owns_logins: bool = True) -> None:
     """Khi khởi động: tệp phiên trong volume trống mà có hồ sơ hoạt động → ghi lại tệp.
 
-    Còn bản "gửi tạm" (api chết giữa lúc thêm tài khoản) thì trả nó về trước — đó là tài khoản đang dùng."""
+    Còn bản "gửi tạm" (api chết giữa lúc thêm tài khoản) thì api trả nó về trước — đó là tài khoản đang dùng. Worker
+    (`owns_logins=False`) không đụng tới khi còn bản gửi tạm: có thể api đang chạy một phiên đăng nhập, ghi tệp lúc đó
+    sẽ bị nhận nhầm là tài khoản mới."""
     if not token_path().exists():
+        if not owns_logins and backup_path().exists():
+            return
         with contextlib.suppress(OSError):
             unpark_token()
     if token_path().exists():

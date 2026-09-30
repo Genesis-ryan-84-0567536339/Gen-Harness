@@ -167,3 +167,14 @@ def test_unpark_restores_token_left_by_interrupted_login(tmp_path, monkeypatch) 
     assert climod.token_path().read_bytes() == b'{"access_token":"x"}'
     assert not climod.backup_path().exists()
     get_settings.cache_clear()
+
+
+async def test_worker_restart_does_not_touch_a_parked_token(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("GH_CLI_HOME", str(tmp_path))
+    from gh.config import get_settings
+
+    get_settings.cache_clear()
+    climod.backup_path().write_bytes(b'{"access_token":"x"}')
+    await climod.restore_active(None, owns_logins=False)  # type: ignore[arg-type]
+    assert not climod.token_path().exists() and climod.backup_path().exists()
+    get_settings.cache_clear()
