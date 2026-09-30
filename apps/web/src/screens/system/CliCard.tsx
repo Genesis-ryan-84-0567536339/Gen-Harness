@@ -111,7 +111,7 @@ export function CliCard({ canManage, showCredentials = true }: { canManage: bool
       <div className="gh-card__header">
         <div style={{ minWidth: 0 }}>
           <div className="gh-card__title">Tài khoản Antigravity CLI</div>
-          <div className="gh-card__kicker">Core agent account</div>
+          <div className="gh-card__kicker">Tài khoản Google dùng cho AI</div>
         </div>
         {profiles.data ? (
           <StateChip color={chip.tone} border={chip.tone === 'var(--color-neutral-400)' ? 'var(--color-neutral-800)' : chip.tone} size="md" dot>
@@ -146,7 +146,7 @@ export function CliCard({ canManage, showCredentials = true }: { canManage: bool
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div className="cli-email">Chưa có tài khoản CLI</div>
-              <div className="cli-meta">Đăng nhập Google để core agent dùng Antigravity CLI</div>
+              <div className="cli-meta">Đăng nhập Google để hệ thống dùng AI qua Antigravity CLI</div>
             </div>
             {canManage && !login.active ? (
               <Button variant="primary" className="btn-28" icon="ph ph-sign-out" onClick={() => login.start.mutate()} loading={login.start.isPending}>
@@ -215,7 +215,7 @@ function ProfilesDialog({
       queryClient.setQueryData<CliProfile[]>(qk2.cliProfiles, (old) => old?.map((x) => ({ ...x, active: x.id === p.id })));
       void queryClient.invalidateQueries({ queryKey: qk2.cliProfiles });
       void queryClient.invalidateQueries({ queryKey: qk2.credentials });
-      toast(`Core agent dùng ${p.email}`);
+      toast(`Hệ thống dùng tài khoản ${p.email}`);
     },
   });
   const remove = useMutation({

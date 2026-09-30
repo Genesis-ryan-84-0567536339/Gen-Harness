@@ -182,8 +182,8 @@ const KPI_ROW2: KpiSeed[] = [
   { key: 'time_to_contact', label: 'Tín hiệu → tiếp cận (trung vị)', value: 18.4, unit: 'phút', screen: 'opportunity' },
   { key: 'quotations_sent', label: 'Báo giá đã gửi (30 ngày)', value: 24, unit: null, screen: 'workbench', filters: { kind: 'quotation' } },
   { key: 'opportunity_claim_rate', label: 'Tỉ lệ cơ hội được nhận', value: 71.4, unit: '%', screen: 'opportunity', filters: { owner: 'none' } },
-  { key: 'chassis_latency', label: 'Độ trễ xử lý chassis', value: 1.2, unit: 'giây', screen: 'rules' },
-  { key: 'active_profiles', label: 'Hồ sơ active (30 ngày)', value: 214, unit: null, screen: 'directory' },
+  { key: 'chassis_latency', label: 'Độ trễ xử lý của hệ thống', value: 1.2, unit: 'giây', screen: 'rules' },
+  { key: 'active_profiles', label: 'Hồ sơ hoạt động (30 ngày)', value: 214, unit: null, screen: 'directory' },
 ];
 
 function overviewPayload(items: InboxRow[], silenced: Set<string>, tasks: Task[]): Overview {

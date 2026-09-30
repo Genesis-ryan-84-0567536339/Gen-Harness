@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import { EmptyState, Icon } from '@gen-harness/ui';
 import { useProviders } from '../../lib/dataQueries';
 import { useFailoverRules } from '../api/queries';
-import { fmtQuota } from '../api/apiModel';
+import { fmtQuota, providerStatus } from '../api/apiModel';
 import { CardError, Panel, SkeletonLines } from '../common';
 import { N4, OK, WARN } from '../data/dataModel';
 import { CliCard } from './CliCard';
@@ -29,7 +29,7 @@ export function BrainTab() {
       <Panel
         title="Hạn mức theo model"
         genTarget="system.brain.quota"
-        kicker="Model quota · core agent"
+        kicker="Mức dùng trong ngày của từng model"
         label="Hạn mức theo model"
         bodyClass="brain-quota-wrap"
         aside={
@@ -90,7 +90,7 @@ export function BrainTab() {
       </Panel>
 
       <div className="sys-grid2">
-        <Panel genTarget="system.brain.chain" title="Chuỗi chuyển hướng" kicker="Provider failover chain — sửa ở màn API & Model" label="Chuỗi chuyển hướng" bodyClass="brain-chain">
+        <Panel genTarget="system.brain.chain" title="Chuỗi chuyển hướng" kicker="Thứ tự dùng nguồn — sửa ở màn API & Model" label="Chuỗi chuyển hướng" bodyClass="brain-chain">
           {providers.isPending ? (
             <SkeletonLines rows={3} padding="10px 16px" />
           ) : providers.isError ? (
@@ -106,15 +106,15 @@ export function BrainTab() {
                     <div className="brain-chain-row__name">{p.name}</div>
                     <div className="mono brain-chain-row__model">{p.models[0]?.model_name ?? '—'}</div>
                   </div>
-                  <span className="brain-chain-row__state" style={{ color: p.enabled && p.auth_state === 'ok' ? OK : N4 }}>
-                    {p.enabled ? (p.auth_state === 'ok' ? 'Đang phục vụ' : 'Chờ kết nối') : 'Đã tắt'}
+                  <span className="brain-chain-row__state" style={{ color: providerStatus(p).tone }}>
+                    {providerStatus(p).label}
                   </span>
                 </li>
               ))}
             </ol>
           )}
         </Panel>
-        <Panel title="Quy tắc chuyển hướng" kicker="Failover rules — cố định" label="Quy tắc chuyển hướng" bodyClass="brain-rules">
+        <Panel title="Quy tắc chuyển hướng" kicker="Cố định, không cần chỉnh" label="Quy tắc chuyển hướng" bodyClass="brain-rules">
           {rules.isPending ? (
             <SkeletonLines rows={4} padding="8px 16px" />
           ) : rules.isError ? (

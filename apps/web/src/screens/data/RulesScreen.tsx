@@ -71,7 +71,7 @@ export function RulesScreen() {
                   title="Chưa có quy tắc sàng lọc nào"
                   description={
                     canManage
-                      ? 'Thêm quy tắc đầu tiên để core agent biết gán nhãn gì cho dữ liệu thô.'
+                      ? 'Thêm quy tắc đầu tiên để hệ thống biết gán nhãn gì cho dữ liệu thô.'
                       : 'Chủ sở hữu chưa định nghĩa quy tắc nào.'
                   }
                 />
@@ -205,7 +205,7 @@ function WeightsCard({ canManage }: { canManage: boolean }) {
   };
 
   return (
-    <Panel genTarget="rules.weights" title="Trọng số chấm điểm" kicker="Evaluation Fabric · dùng chung cho mọi đối tượng" label="Trọng số chấm điểm">
+    <Panel genTarget="rules.weights" title="Trọng số chấm điểm" kicker="Dùng chung cho mọi đối tượng" label="Trọng số chấm điểm">
       {weights.isPending ? (
         <SkeletonLines rows={6} padding="13px 16px 15px" gap={11} />
       ) : weights.isError ? (
@@ -300,7 +300,7 @@ function TestCard() {
               className="test-text"
               rows={2}
               value={shownText ? (text === null ? `"${shownText}"` : shownText) : ''}
-              placeholder="Dán một tin nhắn để xem core agent sẽ gán nhãn gì…"
+              placeholder="Dán một tin nhắn để xem hệ thống sẽ gán nhãn gì…"
               onFocus={() => {
                 if (text === null) setText(shownText);
               }}

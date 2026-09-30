@@ -5,8 +5,8 @@ import { useProviders } from '../../lib/dataQueries';
 import { errorText } from '../../lib/errorText';
 import { useCan } from '../../lib/permissions';
 import { useCreateProvider, useTestProvider } from '../api/queries';
-import { AUTH_STATE_LABEL, providerTone } from '../api/apiModel';
-import { InlineError, Panel, SkeletonLines } from '../common';
+import { providerStatus } from '../api/apiModel';
+import { FriendlyErrorText, InlineError, Panel, SkeletonLines } from '../common';
 
 const JEV_BASE_URLS = [
   { value: 'https://openrouter.ai/api/v1', label: 'OpenRouter — openrouter.ai/api/v1' },
@@ -28,7 +28,7 @@ export function JevCard() {
   return (
     <Panel
       title="Jev — quyết định nhanh cho Gen"
-      kicker="TypeSafe System One · qua OpenRouter hoặc TypeSafe API"
+      kicker="Giúp Gen chọn việc nhanh và rẻ hơn — không bắt buộc"
       label="Jev — quyết định nhanh cho Gen"
       genTarget="system.brain.jev"
       bodyClass="jev-body"
@@ -50,7 +50,8 @@ type TestMutation = ReturnType<typeof useTestProvider>;
 
 function JevStatus({ p, test }: { p: Provider; test: TestMutation }) {
   const result = test.data && test.variables === p.id ? test.data : null;
-  const tone = providerTone(p);
+  const status = providerStatus(p);
+  const tone = status.tone;
   return (
     <>
       <dl className="jev-dl">
@@ -61,7 +62,7 @@ function JevStatus({ p, test }: { p: Provider; test: TestMutation }) {
         <dt>Khoá</dt>
         <dd className="mono">{p.keys.length ? p.keys.map((k) => `${k.label} ····${k.last4}`).join(' · ') : 'chưa có khoá'}</dd>
         <dt>Trạng thái</dt>
-        <dd style={{ color: tone }}>{p.enabled ? AUTH_STATE_LABEL[p.auth_state] : 'Đã tắt'}</dd>
+        <dd style={{ color: tone }}>{status.label}</dd>
       </dl>
       <div className="jev-actions">
         <Button variant="secondary" className="btn-27" icon="ph ph-pulse" data-gen-target="system.brain.jev.test" loading={test.isPending} onClick={() => test.mutate(p.id)}>
@@ -73,7 +74,7 @@ function JevStatus({ p, test }: { p: Provider; test: TestMutation }) {
       </div>
       {result ? (
         <div className={result.ok ? 'apm-test-result apm-test-result--ok' : 'apm-test-result apm-test-result--bad'} role="status">
-          {result.ok ? `Jev trả lời được · ${result.latency_ms} ms` : result.error}
+          {result.ok ? `Jev trả lời được · ${result.latency_ms} ms` : <FriendlyErrorText raw={result.error} />}
         </div>
       ) : null}
       {test.isError ? <InlineError>{errorText(test.error)}</InlineError> : null}

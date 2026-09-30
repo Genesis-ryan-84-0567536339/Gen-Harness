@@ -215,5 +215,6 @@
 
 /* ── Lọc đầu Hộp thư (v0.1.25) ─────────────────────────────────────────────── */
 .ib-hide { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--color-neutral-400); white-space: nowrap; }
+.ib-hide__text { cursor: pointer; user-select: none; }
 .ib-hidden-note { margin: 0 0 8px; font-size: 11.5px; color: var(--color-neutral-500); }
 .ib-card__triage { cursor: help; }

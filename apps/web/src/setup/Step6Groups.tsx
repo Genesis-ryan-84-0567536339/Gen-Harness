@@ -78,7 +78,7 @@ export function Step6Groups({ meta, description, onBack, onSaved, formRef, onSki
         <EmptyState
           icon="ph ph-users-three"
           title="Chưa có nhóm nào được đồng bộ"
-          description="Quay lại bước Kết nối kênh và chờ bridge đồng bộ danh sách nhóm sau khi quét mã."
+          description="Quay lại bước Kết nối kênh và chờ hệ thống đồng bộ danh sách nhóm sau khi quét mã."
         />
       ) : (
         <>

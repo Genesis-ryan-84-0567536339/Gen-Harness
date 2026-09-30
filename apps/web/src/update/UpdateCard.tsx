@@ -6,7 +6,8 @@ import { api } from '../lib/api';
 import { errorText } from '../lib/errorText';
 import { queryClient } from '../lib/queryClient';
 import { Panel } from '../screens/common';
-import { UPDATE_COMMAND, UPDATE_KEY, updateView } from './updateModel';
+import { toast } from '../lib/toast';
+import { UPDATED_FLAG, UPDATE_COMMAND, UPDATE_KEY, readableNotes, updateView } from './updateModel';
 
 /**
  * Thẻ "Có bản mới" ở Tổng quan: bấm "Cập nhật ngay" để genh trên máy chủ tự sao lưu → tải bản mới → khởi động lại
@@ -38,12 +39,31 @@ export function UpdateCard() {
 
   const view = updateView(q.data, { waitingFor, offline: !!waitingFor && q.isError });
 
+  const currentVersion = q.data?.current;
   useEffect(() => {
     if (view.kind === 'finished' && waitingFor && !reloaded.current) {
       reloaded.current = true;
+      try {
+        window.sessionStorage.setItem(UPDATED_FLAG, currentVersion ?? waitingFor);
+      } catch {
+        /* chế độ riêng tư: bỏ qua thông báo sau tải lại */
+      }
       window.setTimeout(() => window.location.reload(), 1500);
     }
-  }, [view.kind, waitingFor]);
+  }, [view.kind, waitingFor, currentVersion]);
+
+  // v0.1.28 (UX V11): sau khi tự tải lại — báo rõ đã lên bản nào (một lần).
+  useEffect(() => {
+    try {
+      const v = window.sessionStorage.getItem(UPDATED_FLAG);
+      if (v) {
+        window.sessionStorage.removeItem(UPDATED_FLAG);
+        toast(`Đã cập nhật lên ${v}.`);
+      }
+    } catch {
+      /* không có sessionStorage */
+    }
+  }, []);
 
   if (view.kind === 'hidden') return null;
   // Không phải Owner/quản trị (403) hay api chưa có tính năng này: im lặng.
@@ -91,7 +111,7 @@ export function UpdateCard() {
       {view.kind === 'available' && d?.release_notes ? (
         <details className="upd-notes">
           <summary>Có gì mới trong {d.latest}</summary>
-          <pre>{d.release_notes}</pre>
+          <pre>{readableNotes(d.release_notes)}</pre>
         </details>
       ) : null}
       {request.isError ? <p className="upd-error">{errorText(request.error)}</p> : null}

@@ -187,8 +187,8 @@ const RULES: Array<Omit<Rule, 'id' | 'version' | 'updated_at' | 'kind_label' | '
       { type: 'is_question', label: 'câu hỏi trực tiếp' },
     ],
     outputs: [
-      { set: 'intent', value: 'AskedPrice', label: 'intent = AskedPrice' },
-      { set: 'side', value: 'demand', label: 'side = CẦU' },
+      { set: 'intent', value: 'AskedPrice', label: 'ý định: hỏi giá' },
+      { set: 'side', value: 'demand', label: 'phía mua (cầu)' },
       { add: 'heat', value: 30, label: 'độ nóng += 30' },
     ],
     prompt_hint: 'Người nói cần mua / hỏi giá một mặt hàng cụ thể.',
@@ -200,8 +200,8 @@ const RULES: Array<Omit<Rule, 'id' | 'version' | 'updated_at' | 'kind_label' | '
       { type: 'has_entity', entity: 'product', label: 'nêu mặt hàng cụ thể' },
     ],
     outputs: [
-      { set: 'intent', value: 'OfferedSupply', label: 'intent = OfferedSupply' },
-      { set: 'side', value: 'supply', label: 'side = CUNG' },
+      { set: 'intent', value: 'OfferedSupply', label: 'ý định: chào bán' },
+      { set: 'side', value: 'supply', label: 'phía bán (cung)' },
       { add: 'potential', value: 20, label: 'vào danh sách cần bán' },
     ],
     prompt_hint: 'Người nói đang chào bán / có sẵn hàng.',
@@ -214,9 +214,9 @@ const RULES: Array<Omit<Rule, 'id' | 'version' | 'updated_at' | 'kind_label' | '
       { type: 'keyword_any', values: ['chỗ khác', 'bên khác', 'nhà cung cấp khác'], label: 'nêu phương án thay thế' },
     ],
     outputs: [
-      { set: 'intent', value: 'Complained', label: 'intent = Complained' },
-      { add: 'churn_risk', value: 40, label: 'rủi ro churn += 40' },
-      { alert: 'P1', label: 'đẩy cảnh báo P1' },
+      { set: 'intent', value: 'Complained', label: 'ý định: than phiền' },
+      { add: 'churn_risk', value: 40, label: 'nguy cơ mất khách +40' },
+      { alert: 'P1', label: 'báo ngay cho Sếp (ưu tiên cao)' },
     ],
     prompt_hint: 'Khách phàn nàn, bực bội hoặc doạ chuyển sang nhà cung cấp khác.',
   },
@@ -227,8 +227,8 @@ const RULES: Array<Omit<Rule, 'id' | 'version' | 'updated_at' | 'kind_label' | '
       { type: 'regex', pattern: '(rẻ|thấp|cao|tốt) hơn|\\d+\\s?%|so với|chào giá|điều khoản|bảo hành', label: 'kèm so sánh giá hoặc điều khoản' },
     ],
     outputs: [
-      { set: 'intent', value: 'MentionsCompetitor', label: 'event = MentionsCompetitor' },
-      { add: 'churn_risk', value: 15, label: 'rủi ro += 15' },
+      { set: 'intent', value: 'MentionsCompetitor', label: 'sự kiện: nhắc tới đối thủ' },
+      { add: 'churn_risk', value: 15, label: 'nguy cơ mất khách +15' },
     ],
     prompt_hint: 'Có nhắc tới đối thủ và so sánh giá / điều khoản.',
   },
@@ -252,7 +252,7 @@ const RULES: Array<Omit<Rule, 'id' | 'version' | 'updated_at' | 'kind_label' | '
       { type: 'regex', pattern: '^\\s*(chào|xin chào|ok|dạ|vâng|cảm ơn)[\\s!.,]*$', label: 'chào hỏi thuần' },
     ],
     outputs: [
-      { set: 'label', value: 'Noise', label: 'label = Noise' },
+      { set: 'label', value: 'Noise', label: 'đánh dấu là tin nhiễu' },
       { discard: true, label: 'không ghi vào kho sạch' },
     ],
     prompt_hint: null,
@@ -1208,9 +1208,20 @@ export function createPhase2(opts: Phase2Options) {
         const ok = !/bad|sai/i.test(secret);
         const models = pv.kind === 'system_one' ? [pv.models[0]?.model_name ?? 'typesafe/jev-1.13'] : pv.kind === 'gemini' ? ['gemini-2.5-flash', 'gemini-2.5-flash-lite'] : pv.kind === 'deepseek' ? ['deepseek-chat', 'deepseek-reasoner'] : pv.kind === 'antigravity_cli' ? ['gemini-2.5-pro'] : ['gpt-4o-mini'];
         pv.auth_state = ok ? 'ok' : 'error';
-        if (ok && !pv.models.length) pv.models = models.slice(0, 1).map((n) => ({ id: randomUUID(), model_name: n, daily_quota: null, used_today: 0 }));
-        reply(200, ok ? { ok: true, latency_ms: pv.kind === 'system_one' ? 164 : 812, models, error: null } : { ok: false, latency_ms: null, models: [], error: '401 — khoá không hợp lệ' });
+        // Như máy chủ thật (v0.1.28): gọi thử KHÔNG tự thêm model — lưu `last_test`; bước 4 tự lấy model đầu tiên
+        // khi Owner chưa bấm "Dùng model này". Jev (system_one) có model mặc định từ lúc tạo.
+        const result = ok
+          ? { ok: true, latency_ms: pv.kind === 'system_one' ? 164 : 812, models, error: null }
+          : { ok: false, latency_ms: null, models: [], error: /endpoint|127\.0\.0\.1|localhost/i.test(pv.endpoint ?? '') ? 'mạng: All connection attempts failed' : 'HTTP 401: API key not valid' };
+        pv.last_test = { ...result, at: iso(Date.now()) };
+        reply(200, result);
         return true;
+      }
+      if (seg.length === 2 && m === 'DELETE') {
+        if (!need('system.manage')) return true;
+        if (pv.kind === 'antigravity_cli') return problem(409, 'CLI_PROVIDER', 'Antigravity CLI gỡ bằng cách xoá tài khoản ở thẻ Tài khoản Antigravity CLI');
+        providers.splice(providers.indexOf(pv), 1);
+        return reply(204);
       }
       if (seg[2] === 'models' && m === 'POST') {
         if (!need('system.manage')) return true;
@@ -1346,8 +1357,18 @@ export function createPhase2(opts: Phase2Options) {
       const okIds = ids.filter((id) => providers.find((p) => p.id === id)?.auth_state === 'ok');
       const cliOk = cliProfiles.some((p) => p.active && p.state !== 'expired');
       if (!okIds.length && !cliOk) return { status: 409, code: 'STEP_INCOMPLETE', title: 'Cần ít nhất một nhà cung cấp đã gọi thử thành công, hoặc Antigravity CLI đã đăng nhập' };
-      ids.forEach((id, i) => {
+      // v0.1.28 (UX C1): như `gh.setup.routes.step4` — nguồn OK chưa có model thì lấy model đầu tiên khi gọi thử;
+      // không nguồn nào có model → chưa cho qua.
+      for (const id of ids) {
         const p = providers.find((x) => x.id === id);
+        const first = p?.last_test?.ok ? p.last_test.models.find((x) => !/embed/i.test(x)) : undefined;
+        if (p && !p.models.length && first) p.models.push({ id: randomUUID(), model_name: first, daily_quota: null, used_today: 0 });
+      }
+      if (!ids.some((id) => (providers.find((x) => x.id === id)?.models.length ?? 0) > 0)) {
+        return { status: 409, code: 'STEP_INCOMPLETE', title: 'Chưa có model nào để dùng — bấm "Kiểm tra" ở một nguồn rồi chọn "Dùng model này"' };
+      }
+      const rest = [...providers].sort((a, b) => a.failover_rank - b.failover_rank).filter((p) => !ids.includes(p.id));
+      [...ids.map((id) => providers.find((x) => x.id === id)!), ...rest].forEach((p, i) => {
         if (p) p.failover_rank = i + 1;
       });
       return { ok: true };
@@ -1400,13 +1421,20 @@ export function createPhase2(opts: Phase2Options) {
     };
   };
 
+  /** v0.1.28 (UX N3): "Để sau" ở bước 7 = nạp bộ quy tắc khởi đầu khi chưa có quy tắc nào. */
+  function seedDefaultRules(): void {
+    if (!rules.length) RULES.forEach((r) => addRule(r));
+  }
+
   return {
     handle,
     setupStep,
+    seedDefaultRules,
     rulePresets,
     firstRunView,
     /** Test hooks. */
     hooks: {
+      rulesEnabled: () => rules.some((r) => r.enabled),
       pushRaw,
       scan,
       setSimulation,

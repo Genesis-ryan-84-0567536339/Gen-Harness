@@ -131,7 +131,8 @@ export function triageBadges(t: InboxTriage | null | undefined): TriageBadge[] {
   const via = t.source === 'jev' ? 'Jev + quy tắc' : 'quy tắc';
   out.push({
     key: 'score',
-    label: `Điểm ${t.score}`,
+    // v0.1.28 (UX V8): "Lọc đầu" (điểm chất lượng tin 0–100) — khác "Độ ưu tiên" bên phải thẻ.
+    label: `Lọc đầu ${t.score}`,
     tone: t.spam || t.low_score ? 'neutral' : t.score >= 70 ? 'ok' : 'warn',
     title: `${t.reason} (${via})`,
   });

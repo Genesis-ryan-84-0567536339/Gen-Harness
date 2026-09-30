@@ -10,7 +10,7 @@ export type ThemePref = 'system' | 'light' | 'dark';
 interface UiPrefs {
   /** Design prop `sidebarMode` — 244px full / 60px icon rail. */
   sidebarMode: SidebarMode;
-  /** Design prop `showEnglish` — English subtitle under parent-level titles. */
+  /** Design prop `showEnglish` — English subtitle under parent-level titles. v0.1.28 (UX N5): mặc định TẮT. */
   showEnglish: boolean;
   /** Explicit open/closed state per nav group (by group name); absent = auto. */
   navOpen: Record<string, boolean>;
@@ -46,7 +46,7 @@ export const useUiStore = create<UiPrefs>()(
   persist(
     (set) => ({
       sidebarMode: 'full',
-      showEnglish: true,
+      showEnglish: false,
       navOpen: {},
       theme: 'system',
       themeByUser: {},
@@ -62,6 +62,13 @@ export const useUiStore = create<UiPrefs>()(
     {
       name: 'gh-ui',
       storage: safeStorage,
+      // v1 (v0.1.28): phụ đề tiếng Anh chuyển sang mặc định tắt — tắt một lần cho trình duyệt đã lưu bản cũ (true
+      // là mặc định cũ, không phải lựa chọn có chủ đích); người dùng bật lại ở menu tài khoản thì được giữ.
+      version: 1,
+      migrate: (persisted, version) => {
+        const s = (persisted ?? {}) as Partial<UiPrefs>;
+        return version < 1 ? { ...s, showEnglish: false } : s;
+      },
       partialize: (s) => ({
         sidebarMode: s.sidebarMode,
         showEnglish: s.showEnglish,

@@ -224,7 +224,7 @@ export const SCREENS: ScreenMeta[] = [
     key: 'system', domain: 'tech', parent: null, icon: 'ph ph-sliders-horizontal',
     name: 'Điều khiển hệ thống', en: 'System Control — kênh, quyền, nhật ký',
     title: 'Điều khiển hệ thống', subtitle: 'System Control · kênh, quyền hạn, nhật ký',
-    description: 'Góc kỹ thuật của Console: kênh và đăng nhập, bộ não AI, quyền hạn và nhật ký. Plugin có màn riêng. Chủ doanh nghiệp không bị bắt đầu từ đây.',
+    description: 'Góc kỹ thuật của Console: kênh và đăng nhập, bộ não AI, quyền hạn và nhật ký. Plugin có màn riêng. Việc hằng ngày không cần vào đây.',
     descMaxWidth: 700, designTitleRow: true,
   },
 ];

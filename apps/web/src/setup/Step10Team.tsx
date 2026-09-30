@@ -6,10 +6,10 @@ import { describeError, type StepProps } from './types';
 
 type InviteRole = 'manager' | 'operator' | 'agent_staff' | 'auditor';
 const ROLE_OPTIONS: Array<{ value: InviteRole; label: string }> = [
-  { value: 'manager', label: 'Manager · quản lý team' },
-  { value: 'operator', label: 'Operator · vận hành' },
-  { value: 'agent_staff', label: 'Agent nhân viên' },
-  { value: 'auditor', label: 'Auditor · kiểm toán' },
+  { value: 'manager', label: 'Quản lý — thấy team mình' },
+  { value: 'operator', label: 'Vận hành — xử lý hàng đợi việc' },
+  { value: 'agent_staff', label: 'Nhân viên phụ trách — chỉ khách được phân' },
+  { value: 'auditor', label: 'Kiểm soát — chỉ xem' },
 ];
 
 interface Row {
@@ -79,7 +79,7 @@ export function Step10Team({ meta, description, onBack, onSaved, formRef, onSkip
       >
         <div className="setup-section">
           <div className="setup-section__title">Đã tạo {invited.length} tài khoản — chưa gửi thư mời thật</div>
-          <p className="muted-note">Chưa nối SMTP thật ở giai đoạn này: mật khẩu tạm hiện thẳng dưới đây, Sếp tự gửi qua kênh riêng (Zalo, email cá nhân…) rồi đổi lại ở lần đăng nhập đầu.</p>
+          <p className="muted-note">Hệ thống chưa tự gửi email mời: mật khẩu tạm hiện ngay dưới đây, Sếp tự gửi qua kênh riêng (Zalo, email cá nhân…) rồi đổi lại ở lần đăng nhập đầu.</p>
           <div className="invite-result-list">
             {invited.map((inv) => (
               <div className="invite-result-row" key={inv.id}>

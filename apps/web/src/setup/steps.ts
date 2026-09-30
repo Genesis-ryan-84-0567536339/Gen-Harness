@@ -30,7 +30,7 @@ export const SETUP_STEPS: StepMeta[] = [
   },
   {
     n: 4, key: 'brain', title: 'Bộ não AI', required: true, built: true,
-    content: 'Chọn nguồn core agent: Antigravity CLI (đăng nhập Google rồi dán mã xác thực) và/hoặc khoá API (Gemini, DeepSeek, tương thích OpenAI). Mỗi khoá có nút Kiểm tra gọi thử một lượt, hiện độ trễ và model khả dụng. Sắp thứ tự chuỗi chuyển hướng.',
+    content: 'Chọn nguồn AI cho hệ thống: Antigravity CLI (đăng nhập Google rồi dán mã xác thực) và/hoặc khoá API (Gemini, DeepSeek, tương thích OpenAI). Mỗi khoá có nút Kiểm tra gọi thử một lượt, hiện độ trễ và model khả dụng. Sắp thứ tự chuỗi chuyển hướng.',
     doneWhen: 'Ít nhất một provider kiểm tra OK',
   },
   {
@@ -50,7 +50,7 @@ export const SETUP_STEPS: StepMeta[] = [
   },
   {
     n: 8, key: 'agent', title: 'Agent đầu tiên', required: false, built: true,
-    content: 'Chọn mẫu (Trợ lý thương mại, Key Account, Admin hậu cần, CSKH, Recruiter, Thư ký cá nhân) hoặc tạo trống. Sửa tên, xưng hô, giọng, được nói khi, cấm. Gán kênh/nhóm và thử trò chuyện ba lượt.',
+    content: 'Chọn mẫu (Trợ lý thương mại, Khách hàng lớn, Hậu cần, Chăm sóc khách hàng, Tuyển dụng, Thư ký cá nhân) hoặc tạo trống. Sửa tên, xưng hô, giọng, được nói khi, cấm. Gán kênh/nhóm và thử trò chuyện ba lượt.',
     doneWhen: 'Agent được lưu, có ít nhất một phạm vi kênh · hoặc Để sau (hiện ở "Việc thiết lập tiếp" trên Tổng quan)',
   },
   {
@@ -60,7 +60,7 @@ export const SETUP_STEPS: StepMeta[] = [
   },
   {
     n: 10, key: 'team', title: 'Mời đội ngũ', required: false, built: true,
-    content: 'Thêm email và vai trò (Manager, Operator, Agent nhân viên, Auditor), xem trước ma trận quyền của vai trò đã chọn. Sinh liên kết mời.',
+    content: 'Thêm email và vai trò (Quản lý, Vận hành, Nhân viên phụ trách, Kiểm soát), xem trước ma trận quyền của vai trò đã chọn. Sinh liên kết mời.',
     doneWhen: 'Để sau được — hiện ở "Việc thiết lập tiếp" trên Tổng quan',
   },
   {
@@ -80,21 +80,23 @@ export const STEP_DESCRIPTIONS: Record<number, string> = {
   1: 'Mã thiết lập chứng minh Sếp là người vừa chạy trình cài trên máy này. Chọn ngôn ngữ và cách bắt đầu.',
   2: 'Tài khoản Owner thấy toàn cảnh. Mật khẩu để đăng nhập, mã PIN để xác nhận thao tác nhạy cảm.',
   3: 'Thông tin tổ chức và cách agent xưng hô với Sếp trong mọi tin nhắn.',
-  4: 'Core agent cần ít nhất một nguồn model: tài khoản Antigravity CLI hoặc khoá API. Kiểm tra từng nguồn rồi sắp thứ tự chuyển hướng khi một nguồn cạn hạn mức.',
-  5: 'Kết nối ít nhất một kênh để bridge bắt đầu gom tin. Zalo và WhatsApp đăng nhập bằng mã QR trên điện thoại của Sếp.',
+  4: 'Hệ thống cần ít nhất một nguồn AI để đọc và hiểu tin nhắn: đăng nhập tài khoản Google (Antigravity CLI) hoặc dán khoá API. Bấm Kiểm tra, chọn model, rồi xếp thứ tự dùng khi một nguồn hết hạn mức.',
+  5: 'Kết nối ít nhất một kênh để hệ thống bắt đầu gom tin. Zalo và WhatsApp đăng nhập bằng mã QR trên điện thoại của Sếp.',
   6: 'Mọi nhóm vừa đồng bộ đều ở chế độ Không nghe. Sếp bật từng nhóm muốn agent lắng nghe và chọn ai được xem dữ liệu của nhóm.',
-  7: 'Khi nào core agent sàng lọc kho thô, bộ quy tắc khởi đầu, và trọng số chấm điểm. Chỉnh lại được sau ở Quy tắc sàng lọc.',
-  10: 'Tuỳ chọn — để sau thì mời lại ở Tổng quan › Hướng dẫn từng bước. Chưa có SMTP thật: mật khẩu tạm hiện thẳng ở đây, Sếp tự gửi qua kênh riêng.',
-  11: 'Tuỳ chọn — chỉ lưu lịch và đích sao lưu. Chạy sao lưu thật, mã hoá và luân chuyển bản cũ là việc của trình cài đặt xong.',
-  12: 'Mọi thứ đã sẵn sàng. Lần sàng lọc đầu tiên đang chạy — theo dõi ngay tại đây rồi mở Tổng quan điều hành.',
+  7: 'Bao lâu hệ thống lọc tin một lần, những loại tin cần bắt, và cách chấm điểm. Bấm Để sau thì dùng sẵn bộ quy tắc khởi đầu — chỉnh lại được ở Quy tắc sàng lọc.',
+  8: 'Tạo trợ lý AI đầu tiên: chọn một mẫu hoặc tự đặt tên, vai trò và giọng nói, rồi nhắn thử một câu để nghe trợ lý trả lời.',
+  9: 'Chọn mức trợ lý được tự làm. Những giới hạn bên dưới luôn bật để bảo vệ Sếp và nhân viên — không ai tắt được.',
+  10: 'Tuỳ chọn — để sau thì mời ở Điều khiển hệ thống › Người dùng. Hệ thống chưa tự gửi email mời: mật khẩu tạm hiện ngay ở đây, Sếp tự gửi qua Zalo hoặc email cá nhân.',
+  11: 'Chọn giờ hệ thống tự sao lưu mỗi ngày. Bấm Để sau thì hệ thống vẫn tự sao lưu hằng ngày lúc 02:00, giữ 7 bản gần nhất.',
+  12: 'Kiểm tra lại những gì đã bật. Việc còn thiếu có liên kết để làm tiếp — làm ngay hoặc sau ở Tổng quan.',
 };
 
 /** When the PIN is asked for — design `pinRules` (Điều khiển hệ thống › Mã PIN). */
 export const PIN_RULES: Array<[string, string]> = [
   ['yêu cầu PIN khi', 'đăng xuất kênh, đổi tài khoản CLI, cài plugin, đổi quyền'],
   ['hết hạn phiên PIN', 'sau 30 phút không thao tác'],
-  ['nhập sai 5 lần', 'khoá Console 15 phút và báo qua Zalo của Sếp'],
-  ['ghi nhật ký', 'mọi lần nhập, kể cả sai, đều vào Action Log'],
+  ['nhập sai 5 lần', 'khoá Console 15 phút và báo qua kênh chat khi đã kết nối'],
+  ['ghi nhật ký', 'mọi lần nhập, kể cả sai, đều vào Nhật ký hành động'],
 ];
 
 export const TIMEZONES = [
@@ -112,4 +114,10 @@ export const CURRENCIES = [
   { value: 'VND', label: 'VND — Đồng Việt Nam (₫)' },
   { value: 'USD', label: 'USD — Đô la Mỹ ($)' },
   { value: 'EUR', label: 'EUR — Euro (€)' },
+  // v0.1.28 (UX V13): đủ 8 loại máy chủ nhận (gh.setup.routes.CURRENCIES) — bước 3 và tab Tổ chức dùng chung danh sách.
+  { value: 'JPY', label: 'JPY — Yên Nhật (¥)' },
+  { value: 'SGD', label: 'SGD — Đô la Singapore (S$)' },
+  { value: 'THB', label: 'THB — Baht Thái (฿)' },
+  { value: 'CNY', label: 'CNY — Nhân dân tệ (¥)' },
+  { value: 'KRW', label: 'KRW — Won Hàn Quốc (₩)' },
 ];

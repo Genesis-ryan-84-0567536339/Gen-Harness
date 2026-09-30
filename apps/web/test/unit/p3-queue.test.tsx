@@ -48,7 +48,7 @@ const OVERVIEW: Overview = {
   kpis: [
     { key: 'channels_live', label: 'Kênh sống', value: 4, unit: null, row: 1, status: 'ok', sublabel: null, pct: null, filter: { screen: 'system', filters: {} } },
     { key: 'pending_ratio', label: 'Tỉ lệ chờ duyệt', value: 42.9, unit: '%', row: 1, status: 'ok', sublabel: null, pct: null, filter: { screen: 'workbench', filters: { status: 'pending' } } },
-    { key: 'active_profiles', label: 'Hồ sơ active (30 ngày)', value: 214, unit: null, row: 2, status: 'ok', sublabel: null, pct: null, filter: { screen: 'directory', filters: {} } },
+    { key: 'active_profiles', label: 'Hồ sơ hoạt động (30 ngày)', value: 214, unit: null, row: 2, status: 'ok', sublabel: null, pct: null, filter: { screen: 'directory', filters: {} } },
   ],
   queue: [{ kind: 'opportunity', id: 'u1', code: 'OPP-1842', title: 'Xưởng gỗ Bình Dương cần 3 container ván MDF', priority: 'P1', at: '2026-09-24T02:00:00Z', due_at: null }],
   spotlight: [{ person: { id: 'p1', code: 'PER-0042', name: 'Nguyễn Văn Bảo', type: 'customer', org_name: null }, dimension: 'churn_risk', value: 87, at: '2026-09-24T02:00:00Z' }],

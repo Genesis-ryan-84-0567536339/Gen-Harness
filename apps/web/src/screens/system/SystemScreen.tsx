@@ -16,15 +16,16 @@ import { UsersTab } from './UsersTab';
 
 type SysTab = 'channels' | 'brain' | 'roles' | 'users' | 'org' | 'log' | 'storage';
 
-/** Design `sysTabs` (4 tab) + `storage` (PLAN 4.5, spec I) + `users`, `org` (v0.1.22, Đợt B1–B2) — thêm ngoài thiết kế gốc. */
+/** Design `sysTabs` (4 tab) + `storage` (PLAN 4.5, spec I) + `users`, `org` (v0.1.22, Đợt B1–B2) — thêm ngoài thiết kế gốc.
+ * v0.1.28 (UX N6/V6/V9): chữ phụ ngắn, viết cho người dùng — bỏ mã đặc tả ("spec I") và số model cố định ("6 model"). */
 const TABS: Array<{ key: SysTab; label: string; count: string; genTarget?: string }> = [
   { key: 'channels', label: 'Kênh & đăng nhập', count: 'QR · PIN', genTarget: 'system.tab.channels' },
-  { key: 'brain', label: 'Bộ não AI', count: '6 model', genTarget: 'system.tab.brain' },
-  { key: 'roles', label: 'Quyền hạn', count: '5 vai trò' },
+  { key: 'brain', label: 'Bộ não AI', count: 'model · khoá', genTarget: 'system.tab.brain' },
+  { key: 'roles', label: 'Quyền hạn', count: 'vai trò' },
   { key: 'users', label: 'Người dùng', count: 'mời · khoá', genTarget: 'system.tab.users' },
-  { key: 'org', label: 'Tổ chức', count: 'tên · múi giờ', genTarget: 'system.tab.org' },
+  { key: 'org', label: 'Tổ chức', count: 'tên · giờ', genTarget: 'system.tab.org' },
   { key: 'log', label: 'Nhật ký', count: '30 ngày' },
-  { key: 'storage', label: 'Dữ liệu & lưu trữ', count: 'spec I', genTarget: 'system.tab.storage' },
+  { key: 'storage', label: 'Dữ liệu & lưu trữ', count: 'sao lưu', genTarget: 'system.tab.storage' },
 ];
 
 export function SystemScreen() {

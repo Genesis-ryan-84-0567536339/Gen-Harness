@@ -129,7 +129,7 @@ export function pipelineCards(p: Pipeline, screen: DataScreen): PipelineCard[] {
     },
     {
       step: 3,
-      name: 'Core agent sàng lọc',
+      name: 'Trợ lý sàng lọc',
       icon: 'ph ph-funnel',
       value: minutesValue(p.interval_seconds),
       unit: 'phút / chu kỳ',

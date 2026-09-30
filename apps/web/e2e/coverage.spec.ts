@@ -114,11 +114,11 @@ test.describe('Hộp thư — lọc đầu (trùng, rác, điểm)', () => {
     await page.goto('/inbox');
     const junk = page.getByRole('article', { name: 'Chào bán' });
     await expect(junk).toBeVisible();
-    for (const label of ['Trùng', 'Rác', 'Điểm 8']) await expect(junk.getByText(label, { exact: true })).toBeVisible();
+    for (const label of ['Nghi rác', 'Trùng', 'Rác', 'Lọc đầu 8']) await expect(junk.getByText(label, { exact: true })).toBeVisible();
     await expect(junk.locator('span[title="Gần trùng với một mục trước đó"]')).toHaveCount(1);
     await expect(junk.locator('span[title^="có đường link"]')).toHaveCount(1);
     const good = page.getByRole('article', { name: 'Hỏi giá' });
-    await expect(good.getByText('Điểm 88', { exact: true })).toBeVisible();
+    await expect(good.getByText('Lọc đầu 88', { exact: true })).toBeVisible();
     await expect(good.getByText('Rác', { exact: true })).toHaveCount(0);
 
     const toggle = page.getByRole('switch', { name: 'Ẩn rác & trùng' });
