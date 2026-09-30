@@ -33,7 +33,8 @@ rủi ro từng tài khoản, Owner tự đăng nhập trong cửa sổ trình d
 báo + danh sách hội thoại Facebook cá nhân và tóm tắt, lịch đọc (tắt mặc định), Dừng tất cả, giới hạn tốc độ.
 v0.1.30 (hotfix): màn /guide/8 "Agent đầu tiên" sập (React error #31 `{reasons}`) khi không model nào chạy được — lỗi
 MODEL_UNAVAILABLE đúng khuôn chung (`detail` là chữ, `reasons` cấp ngoài), web không bao giờ vẽ đối tượng lỗi thô, trạng thái
-"Chọn model" tại chỗ; lối vào cố định "Hướng dẫn thiết lập" (thanh bên + menu tài khoản, Owner), thẻ "Việc thiết lập tiếp" có "Ẩn".
+"Chọn model" tại chỗ; lối vào cố định "Hướng dẫn thiết lập" (thanh bên + menu tài khoản, Owner), thẻ "Việc thiết lập tiếp" có "Ẩn";
+mục "Cập nhật phần mềm" cố định (Hệ thống + Trợ giúp) có "Kiểm tra bản mới", đệm bản mới nhất 1 giờ → 10 phút.
 
 ## Đợt A — Gen v1 (thiết kế: docs/design/gen-v1.md)
 - ✅ A1 Khung chat phải + Gen trả lời/tóm tắt (chỉ đọc), lưu hội thoại, Nhật ký hành động — v0.1.21.

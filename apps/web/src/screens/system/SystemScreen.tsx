@@ -25,7 +25,7 @@ const TABS: Array<{ key: SysTab; label: string; count: string; genTarget?: strin
   { key: 'users', label: 'Người dùng', count: 'mời · khoá', genTarget: 'system.tab.users' },
   { key: 'org', label: 'Tổ chức', count: 'tên · giờ', genTarget: 'system.tab.org' },
   { key: 'log', label: 'Nhật ký', count: '30 ngày' },
-  { key: 'storage', label: 'Dữ liệu & lưu trữ', count: 'sao lưu', genTarget: 'system.tab.storage' },
+  { key: 'storage', label: 'Dữ liệu & lưu trữ', count: 'sao lưu · cập nhật', genTarget: 'system.tab.storage' },
 ];
 
 export function SystemScreen() {

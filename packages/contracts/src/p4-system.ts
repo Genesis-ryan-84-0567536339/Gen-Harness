@@ -212,6 +212,10 @@ export interface SystemUpdate {
   requested_at: string | null;
   release_url: string | null;
   release_notes: string | null;
+  /** v0.1.30: lần hỏi GitHub gần nhất thành công (ISO); null = chưa hỏi được. */
+  checked_at?: string | null;
+  /** v0.1.30: `POST /system/update/check` bị giới hạn (≤ 1 lần / 30 giây) — trả kết quả đang đệm. */
+  throttled?: boolean;
 }
 
 /** `GET /system/backups` (v0.1.20, gh/system_api/backups.py) — Điều khiển hệ thống › Dữ liệu & lưu trữ. */
@@ -299,6 +303,8 @@ export function systemEndpoints(r: ApiClient['request']) {
     systemUpdate: {
       get: (signal?: AbortSignal) => r<SystemUpdate>('/system/update', { signal }),
       request: () => r<SystemUpdate>('/system/update', { method: 'POST' }),
+      /** v0.1.30: "Kiểm tra bản mới" — hỏi GitHub ngay, bỏ qua bộ đệm (≤ 1 lần / 30 giây). */
+      check: () => r<SystemUpdate>('/system/update/check', { method: 'POST' }),
     },
     personDataRequests: {
       create: (personId: string, kind: DataRequestKind) =>

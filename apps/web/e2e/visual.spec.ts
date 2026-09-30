@@ -356,7 +356,8 @@ const MAX_DIFF_RATIO = Number(process.env.VISUAL_MAX_DIFF ?? 0.015);
 const outDir = join(resultsDir, 'visual');
 
 /** Màn spec bổ sung (quyết định Q5) không có trong thiết kế: ẩn khỏi danh mục khi so ảnh. */
-const EXTRA_SCREENS = ['tasks', 'documents', 'deals'];
+// v0.1.30: 'guide' = mục "Hướng dẫn thiết lập" (Owner) dưới Điều khiển hệ thống — thiết kế gốc không có.
+const EXTRA_SCREENS = ['tasks', 'documents', 'deals', 'guide'];
 
 /**
  * Nút header thêm SAU thiết kế gốc: Gen ✦ (v0.1.21), chuông thông báo + sáng/tối (v0.1.23, B6–B7). Thiết kế không vẽ

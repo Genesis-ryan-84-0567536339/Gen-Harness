@@ -937,6 +937,14 @@ hoá — hệ thống chỉ giảm (đọc ít, dừng ngay khi có cảnh báo)
   / lịch sao lưu mặc định → tính là xong). Sửa: mục cố định **Hướng dẫn thiết lập** ở thanh bên (ngay dưới Điều khiển hệ
   thống) + menu tài khoản (cạnh Trợ giúp), chỉ Owner; thẻ vẫn hiện cả khi số liệu Tổng quan lỗi; nút **Ẩn** chỉ ẩn cho đúng
   người bấm (localStorage theo user id), có bước dở MỚI thì hiện lại; thẻ chỉ gọi API khi là Owner.
-- **Test**: api `tests/test_hotfix_v0130.py` (3); web `test/unit/hotfix-v0130.test.tsx` (7 — tái hiện /guide/8 với
-  `try_error={reasons}`), `setup-followup.test.tsx` (+2), `nav.test.tsx` (+3); e2e mock `e2e/hotfix-v0130.spec.ts` (3:
-  /guide/8 khuôn cũ, Đánh giá con người 503 MODEL_UNAVAILABLE, lối vào Hướng dẫn thiết lập).
+- **"Mất nút update"** (Boss ở v0.1.28, v0.1.29 đã phát hành nhưng Tổng quan không có thẻ): `gh/system_api/update.py`
+  đệm bản mới nhất 3600 s và thẻ Tổng quan chỉ hiện khi biết có bản mới. Sửa: đệm còn **600 s** (`checked_at` kèm theo);
+  `POST /system/update/check` (system.manage) hỏi GitHub ngay, bỏ qua bộ đệm, tối đa 1 lần / 30 giây (bấm dồn → trả bản
+  đệm + `throttled: true`), GitHub lỗi thì giữ bản đệm cũ. Web: mục **Cập nhật phần mềm** cố định (đang dùng, bản mới nhất,
+  kiểm tra lúc, nút **Kiểm tra bản mới**, **Cập nhật ngay** khi có bản mới) ở Điều khiển hệ thống › Dữ liệu & lưu trữ và
+  trang Trợ giúp (`UpdateCard always`); thẻ Tổng quan giữ nguyên hành vi.
+- **Test**: api `tests/test_hotfix_v0130.py` (4 — thêm kiểm tra cập nhật: bỏ đệm, giới hạn, giữ bản đệm, 403); web
+  `test/unit/hotfix-v0130.test.tsx` (7 — tái hiện /guide/8 với `try_error={reasons}`), `setup-followup.test.tsx` (+2),
+  `nav.test.tsx` (+3), `update.test.tsx` (+1); e2e mock `e2e/hotfix-v0130.spec.ts` (4: /guide/8 khuôn cũ, Đánh giá con
+  người 503 MODEL_UNAVAILABLE, Cập nhật phần mềm ở Trợ giúp/Hệ thống, lối vào Hướng dẫn thiết lập); `visual.spec.ts` ẩn
+  mục `guide` (ngoài thiết kế gốc) khi so ảnh.

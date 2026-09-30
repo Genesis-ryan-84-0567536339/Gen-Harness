@@ -50,6 +50,17 @@ test.describe('Hotfix v0.1.30 — không có model AI', () => {
     await expect(page.getByRole('link', { name: /Chọn model/ })).toHaveAttribute('href', '/guide/4');
   });
 
+  test('mục "Cập nhật phần mềm" cố định ở Trợ giúp + Điều khiển hệ thống, "Kiểm tra bản mới" chạy được', async ({ page }) => {
+    await page.goto('/help');
+    const section = page.getByTestId('update-section');
+    await expect(section).toContainText('v0.1.16');
+    await expect(page.getByText('Đang dùng bản mới nhất')).toBeVisible();
+    await page.getByRole('button', { name: /Kiểm tra bản mới/ }).click();
+    await expect(page.getByText(/Đang dùng bản mới nhất \(v0.1.16\)/)).toBeVisible();
+    await page.goto('/system?tab=storage');
+    await expect(page.getByTestId('update-section')).toBeVisible();
+  });
+
   test('lối vào cố định "Hướng dẫn thiết lập": thanh bên + menu tài khoản', async ({ page }) => {
     await page.goto('/overview');
     const nav = page.getByRole('navigation', { name: 'Danh mục màn hình' });

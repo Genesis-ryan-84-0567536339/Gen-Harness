@@ -91,3 +91,51 @@ describe('<UpdateCard>', () => {
     expect(container).toBeEmptyDOMElement();
   });
 });
+
+describe('v0.1.30 — mục "Cập nhật phần mềm" cố định', () => {
+  beforeEach(() => {
+    queryClient.clear();
+    vi.unstubAllGlobals();
+  });
+
+  it('đã mới nhất: thẻ Tổng quan ẩn, mục cố định vẫn hiện; "Kiểm tra bản mới" gọi POST /system/update/check và hiện nút cập nhật', async () => {
+    const user = userEvent.setup();
+    const calls: string[] = [];
+    let latest = 'v0.1.16';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+        const u = String(url);
+        calls.push(`${init?.method ?? 'GET'} ${u.replace(/^.*\/api\/v1/, '')}`);
+        if (u.endsWith('/system/update/check')) latest = 'v0.1.17';
+        const body = { ...base, latest, update_available: latest !== base.current, checked_at: '2026-09-28T10:00:00Z', throttled: false };
+        return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }),
+    );
+    const overview = render(
+      <QueryClientProvider client={queryClient}>
+        <UpdateCard />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(calls).toContain('GET /system/update'));
+    await new Promise((r) => setTimeout(r, 30));
+    expect(overview.container).toBeEmptyDOMElement();
+    overview.unmount();
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <UpdateCard always />
+      </QueryClientProvider>,
+    );
+    const section = await screen.findByTestId('update-section');
+    expect(screen.getByText('Cập nhật phần mềm')).toBeInTheDocument();
+    expect(screen.getByText('Đang dùng bản mới nhất')).toBeInTheDocument();
+    expect(section).toHaveTextContent('v0.1.16');
+    expect(screen.queryByRole('button', { name: /Cập nhật ngay/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Kiểm tra bản mới/ }));
+    await waitFor(() => expect(calls).toContain('POST /system/update/check'));
+    expect(await screen.findByText('Có bản mới v0.1.17')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Cập nhật ngay/ })).toBeInTheDocument();
+  });
+});
+

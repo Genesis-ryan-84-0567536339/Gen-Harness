@@ -10,6 +10,8 @@ from sqlalchemy import text
 from gh.errors import MODEL_UNAVAILABLE_HINT, _body, model_unavailable
 from tests.conftest import Api
 from tests.phase2 import FakeRouter, org_id
+from tests.test_rbac_api import login_as
+from tests.test_system_update import link  # noqa: F401 — fixture dùng chung (hộp thư genh giả + GitHub giả)
 
 
 def test_model_unavailable_body_has_code_message_and_top_level_reasons() -> None:
@@ -48,3 +50,47 @@ async def test_step8_try_error_is_string_with_code_and_reasons(owner_api: Api, d
     assert isinstance(agent["try_error"], str) and agent["try_error"] == MODEL_UNAVAILABLE_HINT
     assert agent["try_error_code"] == "MODEL_UNAVAILABLE"
     assert agent["try_reasons"] == ["gemini: 429", "deepseek: đang ngắt mạch"]
+
+
+# ── "mất nút update": bộ đệm 10 phút + POST /system/update/check ────────────────────────────────────────────────
+
+async def test_update_check_bypasses_cache_and_is_rate_limited(owner_api: Api, client, db, link, redis,  # type: ignore[no-untyped-def]  # noqa: F811
+                                                               monkeypatch) -> None:
+    from gh.system_api import update as upd
+
+    assert upd.LATEST_CACHE_SECONDS <= 600
+    await redis.delete(upd.LATEST_CACHE_KEY, upd.CHECK_LOCK_KEY)
+    r = (await owner_api.get("/system/update")).json()
+    assert r["latest"] == "v0.1.17" and r["checked_at"]
+    assert 0 < await redis.ttl(upd.LATEST_CACHE_KEY) <= 600
+
+    # GitHub phát hành bản mới trong lúc bộ đệm còn hạn: GET vẫn trả bản đệm, "Kiểm tra bản mới" thấy ngay.
+    async def newer(repo: str) -> dict[str, str | None]:
+        return {"tag": "v0.1.18", "url": "https://example/v0.1.18", "published_at": None, "notes": ""}
+
+    monkeypatch.setattr(upd, "fetch_latest", newer)
+    assert (await owner_api.get("/system/update")).json()["latest"] == "v0.1.17"
+    r = await owner_api.send("POST", "/system/update/check")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["latest"] == "v0.1.18" and body["update_available"] and body["throttled"] is False
+
+    # Bấm dồn trong 30 giây: không hỏi GitHub lại, trả bản đệm + throttled.
+    async def boom(repo: str) -> None:
+        raise AssertionError("không được hỏi GitHub khi đang giới hạn")
+
+    monkeypatch.setattr(upd, "fetch_latest", boom)
+    again = (await owner_api.send("POST", "/system/update/check")).json()
+    assert again["throttled"] is True and again["latest"] == "v0.1.18"
+
+    # Hỏi GitHub lỗi khi bắt buộc: giữ bản đệm cũ, không mất nút cập nhật.
+    async def down(repo: str) -> None:
+        return None
+
+    monkeypatch.setattr(upd, "fetch_latest", down)
+    await redis.delete(upd.CHECK_LOCK_KEY)
+    kept = (await owner_api.send("POST", "/system/update/check")).json()
+    assert kept["latest"] == "v0.1.18" and kept["update_available"]
+
+    auditor = await login_as(client, db, "auditor")
+    assert (await auditor.send("POST", "/system/update/check")).status_code == 403
