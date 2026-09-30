@@ -914,7 +914,9 @@ hoá — hệ thống chỉ giảm (đọc ít, dừng ngay khi có cảnh báo)
 - **Để lại**: ghi có xác nhận (v0.1.30 — đề xuất Gen + PIN + permit, `gh/social/permit.py`); Trang FB / IG chuyên nghiệp qua
   API; nền tảng khác; ảnh chụp/trace mỗi việc (thiết kế §3.3); Jev phân loại từng tin.
 
-### v0.1.30 — Sửa "đổi tài khoản Google (Antigravity CLI) không hoạt động"
+## v0.1.30 — Sửa nóng (hiển thị lỗi web; đổi tài khoản Google của Antigravity CLI)
+
+### Đổi tài khoản Google (Antigravity CLI) không hoạt động
 
 - **Nguyên nhân gốc**: (1) "Thêm tài khoản" khi đang đăng nhập: `agy` thấy tệp phiên nên vào thẳng chat, KHÔNG in link
   đăng nhập; khi làm mới token nó ghi lại tệp → Console tưởng "đăng nhập xong" và lưu lại CHÍNH tài khoản cũ (hoặc treo
