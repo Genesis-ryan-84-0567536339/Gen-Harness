@@ -492,6 +492,24 @@ jobs:
             sleep 3
           done
 
+      # v0.1.29: compose mới mount Docker secret gh_browser_key (genh cũ không sinh) — genh mới (tự cập nhật rồi
+      # re-exec) phải tự sinh khoá trước `docker compose up`, và browser/browser-egress phải chạy sau nâng cấp.
+      - name: Kiểm khoá gh_browser_key + dịch vụ browser sau nâng cấp (nếu compose có browser)
+        if: steps.prev.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          if ! grep -q '^  browser-egress:' "$GEN_HARNESS_HOME/deploy/compose.yaml"; then
+            echo "compose.yaml bản này chưa có browser — bỏ qua."; exit 0
+          fi
+          test -s "$GEN_HARNESS_HOME/secrets/gh_browser_key" || { echo "::error::thiếu secrets/gh_browser_key sau genh update" >&2; exit 1; }
+          "$GEN_HARNESS_HOME/bin/genh" status --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" | tee /tmp/genh-status-upg.txt
+          for svc in browser browser-egress; do
+            awk -v s="$svc" '$1==s && $2=="running"{f=1} END{exit !f}' /tmp/genh-status-upg.txt || { echo "::error::dịch vụ $svc không chạy sau nâng cấp" >&2; exit 1; }
+          done
+          if grep -Eiq 'unhealthy|exited|restarting' /tmp/genh-status-upg.txt; then
+            echo "::error::có dịch vụ không healthy sau nâng cấp" >&2; exit 1
+          fi
+
       - name: Kiểm dữ liệu/bí mật KHÔNG bị tạo lại (app_db_password không đổi)
         if: steps.prev.outputs.skip == 'false'
         run: |

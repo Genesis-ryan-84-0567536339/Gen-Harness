@@ -136,7 +136,8 @@ class Runner:
             if cancel.is_set():
                 await self.publish(job, "halted")
             else:
-                log.warning("việc %s lỗi: %s %s", job.get("id"), type(e).__name__, str(e)[:300])
+                # Chỉ dòng đầu (bỏ "Call log" của Playwright — có thể chứa URL kèm tham số phiên).
+                log.warning("việc %s lỗi: %s %s", job.get("id"), type(e).__name__, str(e).split("\n", 1)[0][:200])
                 code = "SELECTOR" if type(e).__name__ == "TimeoutError" else "ERROR"
                 await self.publish(job, "login.failed" if job.get("kind") == "login" else "failed", {"code": code})
         finally:

@@ -126,6 +126,24 @@ async def test_one_job_per_account_and_halt(redis: Redis) -> None:
     assert hb["version"] and "running" in hb
 
 
+async def test_idle_closes_browser_only_when_no_job_running(redis: Redis) -> None:
+    closed: list[float] = []
+
+    async def close() -> None:
+        closed.append(time.monotonic())
+
+    fr = FakeRunner(redis, block=True)
+    w = Worker(cfg(), redis, fr, idle_close=close, idle_close_s=0.0)  # type: ignore[arg-type]
+    t = asyncio.create_task(w.execute(job("read", {})))
+    await asyncio.sleep(0.2)
+    assert await w.maybe_close_idle() is False and not closed                  # đang có việc → giữ trình duyệt
+    w.on_control(orjson.dumps(protocol.sign(KEY, protocol.P_CONTROL, {"type": "halt", "ts": 1})))
+    await asyncio.wait_for(t, timeout=5)
+    assert await w.maybe_close_idle() is True and len(closed) == 1            # rảnh → đóng Chromium
+    w2 = Worker(cfg(), redis, fr, idle_close=close)  # type: ignore[arg-type]
+    assert await w2.maybe_close_idle() is False                                # chưa rảnh đủ lâu
+
+
 async def test_run_loop_consumes_signed_jobs(redis: Redis) -> None:
     fr = FakeRunner(redis)
     w = Worker(cfg(), redis, fr)  # type: ignore[arg-type]

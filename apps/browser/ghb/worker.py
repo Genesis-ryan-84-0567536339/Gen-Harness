@@ -11,6 +11,7 @@ import contextlib
 import logging
 import signal
 import time
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -25,13 +26,25 @@ from ghb.runner import Runner
 log = logging.getLogger("ghb.worker")
 JOBS_GROUP = "browser"
 LOCK_EXTRA_S = 120
+# Rảnh quá lâu thì đóng hẳn Chromium (mở lại khi có việc) — tính năng không dùng thì không giữ trình duyệt trong RAM.
+IDLE_CLOSE_S = 300
 
 
 class Worker:
-    def __init__(self, cfg: Config, redis: Redis, runner: Runner):
+    def __init__(self, cfg: Config, redis: Redis, runner: Runner, *,
+                 idle_close: Callable[[], Awaitable[None]] | None = None, idle_close_s: float = IDLE_CLOSE_S):
         self.cfg, self.redis, self.runner = cfg, redis, runner
         self.running: dict[str, tuple[asyncio.Task[None], asyncio.Event]] = {}
         self.sem = asyncio.Semaphore(cfg.max_jobs)
+        self.idle_close, self.idle_close_s = idle_close, idle_close_s
+        self.last_active = time.monotonic()
+
+    async def maybe_close_idle(self) -> bool:
+        """Không có việc nào chạy và đã rảnh ≥ idle_close_s → đóng Chromium (BrowserHolder tự mở lại khi có việc)."""
+        if self.idle_close is None or self.running or time.monotonic() - self.last_active < self.idle_close_s:
+            return False
+        await self.idle_close()
+        return True
 
     async def heartbeat_once(self) -> None:
         await self.redis.set(protocol.HEARTBEAT_KEY, orjson.dumps({
@@ -41,6 +54,8 @@ class Worker:
         while not stop.is_set():
             with contextlib.suppress(Exception):
                 await self.heartbeat_once()
+            with contextlib.suppress(Exception):
+                await self.maybe_close_idle()
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(stop.wait(), timeout=15)
 
@@ -114,6 +129,7 @@ class Worker:
             await self.runner.run(env, cancel)
         finally:
             self.running.pop(job_id, None)
+            self.last_active = time.monotonic()
             with contextlib.suppress(Exception):
                 if await self.redis.get(lock) == job_id.encode():
                     await self.redis.delete(lock)
@@ -175,6 +191,15 @@ class BrowserHolder:
         self._browser: Any = None
         self._lock = asyncio.Lock()
 
+    async def close_browser(self) -> None:
+        """Đóng Chromium khi rảnh (giữ Playwright driver nhỏ); lần `get()` sau tự mở lại."""
+        async with self._lock:
+            if self._browser is not None:
+                with contextlib.suppress(Exception):
+                    await self._browser.close()
+                self._browser = None
+                log.info("đóng Chromium (rảnh)")
+
     async def get(self) -> Any:
         async with self._lock:
             if self._browser is not None and self._browser.is_connected():
@@ -183,7 +208,11 @@ class BrowserHolder:
 
             if self._pw is None:
                 self._pw = await async_playwright().start()
-            launch: dict[str, Any] = {"headless": self.cfg.headless, "args": ["--disable-dev-shm-usage"]}
+            # WebRTC chỉ đi qua proxy (không mở UDP thẳng ra mạng nội bộ `browser` / lộ IP) — mọi lưu lượng qua egress.
+            launch: dict[str, Any] = {"headless": self.cfg.headless,
+                                      "args": ["--disable-dev-shm-usage",
+                                               "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+                                               "--webrtc-ip-handling-policy=disable_non_proxied_udp"]}
             if self.cfg.proxy:
                 launch["proxy"] = {"server": self.cfg.proxy}
             self._browser = await self._pw.chromium.launch(**launch)
@@ -203,7 +232,7 @@ async def main() -> None:
     cfg = load()
     redis = Redis.from_url(cfg.redis_url)
     holder = BrowserHolder(cfg)
-    worker = Worker(cfg, redis, Runner(cfg, redis, holder.get))
+    worker = Worker(cfg, redis, Runner(cfg, redis, holder.get), idle_close=holder.close_browser)
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
