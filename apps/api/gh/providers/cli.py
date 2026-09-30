@@ -5,6 +5,10 @@
   Console → ghi vào terminal. Xong khi tệp phiên xuất hiện; tệp được mã hoá và lưu vào agent.cli_profiles.
 - Đổi tài khoản (như heo-harness): ghi tệp phiên của hồ sơ được chọn vào thư mục cấu hình CLI (volume chung
   api/worker). Trước khi đổi, tệp hiện tại được lưu lại vào hồ sơ cũ (CLI có thể đã làm mới token).
+- Thêm tài khoản khi ĐANG đăng nhập (v0.1.30): CLI thấy tệp phiên thì vào thẳng chat, không bao giờ in link đăng
+  nhập (và còn ghi lại tệp khi làm mới token → trước đây Console tưởng "xong" với chính tài khoản cũ). Vì vậy trước
+  khi chạy CLI, tệp phiên hiện tại được "gửi tạm" sang `<tệp>.before-login`; đăng nhập xong thì bỏ bản gửi tạm,
+  lỗi/huỷ/quá giờ thì trả bản gửi tạm về chỗ cũ (tài khoản đang dùng không đổi).
 """
 
 import asyncio
@@ -77,6 +81,35 @@ def token_path() -> Path:
     return cli_home_dir(get_settings().cli_home) / TOKEN_FILE
 
 
+PARK_SUFFIX = ".before-login"
+
+
+def backup_path() -> Path:
+    path = token_path()
+    return path.with_name(path.name + PARK_SUFFIX)
+
+
+def park_token() -> None:
+    """Gửi tạm tệp phiên đang dùng để CLI khởi động ở trạng thái CHƯA đăng nhập (mới hiện link đăng nhập)."""
+    path = token_path()
+    if path.exists():
+        path.replace(backup_path())
+
+
+def unpark_token() -> bool:
+    """Trả tệp phiên đã gửi tạm về chỗ cũ (đăng nhập lỗi/huỷ, hoặc api chết giữa chừng). True nếu có trả."""
+    bak = backup_path()
+    if not bak.exists():
+        return False
+    bak.replace(token_path())
+    return True
+
+
+def drop_parked_token() -> None:
+    with contextlib.suppress(FileNotFoundError):
+        backup_path().unlink()
+
+
 def _claims(id_token: str | None) -> dict[str, Any]:
     if not id_token or id_token.count(".") < 2:
         return {}
@@ -87,6 +120,16 @@ def _claims(id_token: str | None) -> dict[str, Any]:
     except (ValueError, orjson.JSONDecodeError):
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def file_email(raw: bytes) -> str | None:
+    """Email trong id_token của tệp phiên (không gọi mạng); None nếu không đọc được."""
+    try:
+        data = orjson.loads(raw)
+    except orjson.JSONDecodeError:
+        return None
+    email = _claims(data.get("id_token")).get("email") if isinstance(data, dict) else None
+    return email if isinstance(email, str) else None
 
 
 async def token_identity(raw: bytes, transport: httpx.AsyncBaseTransport | None = None) -> dict[str, Any]:
@@ -159,27 +202,41 @@ async def save_current_back(db: AsyncSession, org_id: uuid.UUID) -> None:
     path = token_path()
     if not path.exists():
         return
+    raw = path.read_bytes()
+    email = file_email(raw)
+    # Tệp của tài khoản KHÁC (id_token ghi rõ email khác) thì không ghi đè lên hồ sơ đang hoạt động.
     await db.execute(text("""UPDATE agent.cli_profiles SET token_enc = :t, updated_at = now()
-                             WHERE org_id = :o AND is_active"""),
-                     {"t": crypto.encrypt(path.read_bytes(), CLI_AAD), "o": org_id})
+                             WHERE org_id = :o AND is_active AND (CAST(:e AS text) IS NULL OR email IS NULL
+                                                                  OR email = CAST(:e AS citext))"""),
+                     {"t": crypto.encrypt(raw, CLI_AAD), "o": org_id, "e": email})
 
 
 async def activate(db: AsyncSession, org_id: uuid.UUID, profile_id: uuid.UUID) -> dict[str, Any]:
-    row = (await db.execute(text("""SELECT id, provider_id, email, token_enc FROM agent.cli_profiles
+    from gh.errors import conflict, not_found
+
+    row = (await db.execute(text("""SELECT id, provider_id, email, token_enc, expires_at FROM agent.cli_profiles
                                     WHERE id = :i AND org_id = :o"""), {"i": profile_id, "o": org_id})).one_or_none()
     if row is None:
-        from gh.errors import not_found
-
-        raise not_found("Hồ sơ CLI")
+        raise not_found("Tài khoản Google của CLI")
+    if row.token_enc is None:
+        # Trước đây: chỉ đổi cờ trong CSDL, tệp phiên giữ nguyên → UI báo "đã đổi" mà AI vẫn chạy tài khoản cũ.
+        raise conflict("CLI_PROFILE_NO_SESSION",
+                       "Tài khoản này chưa có phiên đăng nhập đã lưu — bấm “Thêm tài khoản Google” để đăng nhập lại")
+    try:
+        token = crypto.decrypt(bytes(row.token_enc), CLI_AAD)
+    except Exception as exc:  # noqa: BLE001 — khoá master đổi / dữ liệu hỏng
+        raise conflict("CLI_PROFILE_NO_SESSION",
+                       "Không mở được phiên đã lưu của tài khoản này — hãy đăng nhập lại tài khoản đó") from exc
     await save_current_back(db, org_id)
     await db.execute(text("UPDATE agent.cli_profiles SET is_active = false WHERE provider_id = :p AND is_active"),
                      {"p": row.provider_id})
     await db.execute(text("UPDATE agent.cli_profiles SET is_active = true, updated_at = now() WHERE id = :i"),
                      {"i": row.id})
-    await db.execute(text("""UPDATE agent.providers SET account_label = :e, auth_state = 'ok' WHERE id = :p"""),
-                     {"e": row.email, "p": row.provider_id})
-    if row.token_enc is not None:
-        write_token_file(crypto.decrypt(bytes(row.token_enc), CLI_AAD))
+    await db.execute(text("""UPDATE agent.providers SET account_label = :e, auth_state = 'ok', auth_expires_at = :x
+                             WHERE id = :p"""),
+                     {"e": row.email, "x": row.expires_at, "p": row.provider_id})
+    # Worker gọi `agy -p` mới cho MỖI lượt, đọc tệp này từ volume chung → lượt kế tiếp dùng tài khoản vừa chọn.
+    write_token_file(token)
     return {"id": str(row.id), "email": row.email}
 
 
@@ -201,7 +258,12 @@ async def delete_profile(db: AsyncSession, org_id: uuid.UUID, profile_id: uuid.U
 
 
 async def restore_active(sm: async_sessionmaker[AsyncSession]) -> None:
-    """Khi khởi động: tệp phiên trong volume trống mà có hồ sơ hoạt động → ghi lại tệp."""
+    """Khi khởi động: tệp phiên trong volume trống mà có hồ sơ hoạt động → ghi lại tệp.
+
+    Còn bản "gửi tạm" (api chết giữa lúc thêm tài khoản) thì trả nó về trước — đó là tài khoản đang dùng."""
+    if not token_path().exists():
+        with contextlib.suppress(OSError):
+            unpark_token()
     if token_path().exists():
         return
     async with sm() as db:
@@ -225,6 +287,11 @@ class LoginSession:
     code: asyncio.Queue[str] = field(default_factory=asyncio.Queue)
     task: asyncio.Task[None] | None = None
     pid: int | None = None
+    profile: dict[str, Any] | None = None
+
+    def public(self) -> dict[str, Any]:
+        return {"login_id": self.id, "status": self.status, "url": self.url, "message": self.message,
+                "profile": self.profile}
 
 
 class CliLogins:
@@ -245,13 +312,22 @@ class CliLogins:
         async with self.sm() as db:
             await save_current_back(db, org_id)
             await db.commit()
-        for s in list(self.sessions.values()):
-            if s.org_id == org_id and s.status in ("starting", "waiting_code", "verifying"):
-                self.cancel(s.id)
+        old = [s for s in self.sessions.values()
+               if s.org_id == org_id and s.task is not None and not s.task.done()]
+        for s in old:
+            self.cancel(s.id)
+        # Chờ phiên cũ dọn xong (trả tệp phiên gửi tạm) rồi mới mở phiên mới, tránh hai phiên giẫm lên tệp.
+        for s in old:
+            with contextlib.suppress(BaseException):
+                await asyncio.wait_for(asyncio.shield(s.task), 10)  # type: ignore[arg-type]
         s = LoginSession(str(uuid.uuid4()), org_id, user_id)
         self.sessions[s.id] = s
         s.task = asyncio.create_task(self._run(s), name=f"cli-login-{s.id}")
         return s
+
+    def busy(self, org_id: uuid.UUID) -> bool:
+        """Có phiên đăng nhập đang chạy (tệp phiên đang để trống cho CLI) — không đổi tài khoản lúc này."""
+        return any(s.org_id == org_id and s.task is not None and not s.task.done() for s in self.sessions.values())
 
     def get(self, login_id: str, org_id: uuid.UUID) -> LoginSession | None:
         s = self.sessions.get(login_id)
@@ -274,6 +350,8 @@ class CliLogins:
 
         started = time.time()
         path = token_path()
+        # CLI đang đăng nhập sẵn sẽ không in link → gửi tạm tệp phiên (đã lưu vào hồ sơ ở start()).
+        park_token()
         before = path.stat().st_mtime if path.exists() else 0.0
         env = {**cli_env(get_settings().cli_home), "TERM": "xterm", "SSH_CONNECTION": "127.0.0.1 0 127.0.0.1 22",
                "SSH_CLIENT": "127.0.0.1 0 22", "SSH_TTY": "/dev/pts/0", "COLUMNS": str(PTY_COLS),
@@ -375,8 +453,15 @@ class CliLogins:
             if proc is not None and proc.returncode is None:
                 with contextlib.suppress(ProcessLookupError):
                     os.killpg(proc.pid, signal.SIGTERM)
-                with contextlib.suppress(Exception):
+                with contextlib.suppress(BaseException):
                     await asyncio.wait_for(proc.wait(), 5)
+            # Sau khi CLI đã tắt (không còn ghi tệp): xong → bỏ bản gửi tạm; lỗi/huỷ → trả tài khoản cũ về.
+            with contextlib.suppress(OSError):
+                if s.status == "done":
+                    drop_parked_token()
+                elif not unpark_token() and path.exists() and path.stat().st_mtime > before:
+                    # Chưa có tài khoản nào: bỏ tệp dở dang CLI để lại, để không thành "đã đăng nhập" giả.
+                    path.unlink()
 
     async def _finish(self, s: LoginSession, raw: bytes) -> None:
         ident = await token_identity(raw, self.transport)
@@ -411,7 +496,8 @@ class CliLogins:
             await db.commit()
             profs = await profiles(db, s.org_id)
         s.status, s.message = "done", None
-        await self._emit(s, profile=next((p for p in profs if p["id"] == str(profile_id)), None))
+        s.profile = next((p for p in profs if p["id"] == str(profile_id)), None)
+        await self._emit(s, profile=s.profile)
 
     async def _log(self, s: LoginSession, result: str, detail: dict[str, Any]) -> None:
         with contextlib.suppress(Exception):

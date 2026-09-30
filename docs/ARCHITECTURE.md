@@ -296,7 +296,8 @@ Mã hoá phong bì AES-256-GCM cho khoá API, phiên kênh, TOTP, auth MCP (`byt
   - Image `worker` cài **binary `agy` chính hãng** của Google lúc build (nguồn tải + checksum ghim trong Dockerfile), không đóng gói lại.
   - Như heo-harness: CLI lưu phiên đăng nhập ở tệp OAuth `~/.gemini/antigravity-cli/antigravity-oauth-token`; email tài khoản đọc từ `id_token` trong tệp đó; đăng xuất = xoá tệp.
   - **Đăng nhập**: Console bấm Đăng nhập → worker chạy luồng đăng nhập của chính CLI trong container, chuyển link/mã xác thực lên Console qua WebSocket; xong thì tệp token được đọc, **mã hoá** và lưu vào `agent.cli_profiles` (email, gói, hạn).
-  - **Đổi tài khoản**: nhiều hồ sơ trong `agent.cli_profiles`, một hồ sơ hoạt động; chuyển hồ sơ = ghi tệp token của hồ sơ đó vào thư mục cấu hình CLI trong volume rồi khởi động lại phiên CLI. Cần PIN, vào Action Log.
+  - **Đổi tài khoản**: nhiều hồ sơ trong `agent.cli_profiles`, một hồ sơ hoạt động; chuyển hồ sơ = ghi tệp token của hồ sơ đó vào thư mục cấu hình CLI trong volume (api và worker mount chung `agy_state`; worker chạy `agy -p` mới cho mỗi lượt nên lượt kế tiếp dùng ngay tài khoản mới). Cần PIN, vào Action Log. Hồ sơ không có phiên đã lưu → `409 CLI_PROFILE_NO_SESSION` (không "đổi giả").
+  - **Thêm tài khoản khi đang đăng nhập** (v0.1.30): CLI đã đăng nhập không in link đăng nhập, nên trước khi chạy CLI tệp phiên hiện tại được gửi tạm sang `antigravity-oauth-token.before-login`; xong → bỏ bản gửi tạm (tài khoản mới thành tài khoản đang dùng), lỗi/huỷ/quá giờ → trả về chỗ cũ; api/worker khởi động mà thấy bản gửi tạm thì trả về trước. Trong lúc đó đổi/xoá tài khoản trả `409 CLI_LOGIN_IN_PROGRESS`; lượt gọi AI qua CLI chuyển nhà cung cấp kế tiếp mà không đánh dấu CLI hết hạn. Trạng thái đăng nhập còn đọc được qua `GET /cli/login/{id}` (UI hỏi 2 giây/lần, không phụ thuộc WebSocket).
   - Hết hạn/lỗi → provider `expired`, chuỗi chuyển hướng sang khoá API kế tiếp.
 
 ---

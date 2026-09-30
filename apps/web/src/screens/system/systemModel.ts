@@ -15,6 +15,7 @@ import type {
   PermScope,
   ViewScope,
 } from '@gen-harness/contracts';
+import { ApiError, PinCancelledError } from '@gen-harness/contracts';
 import { countWord, fmtHM, fmtInt, fmtLatency, fmtPct, fmtRemaining, fmtSessionAge } from '../../lib/format';
 import { ACC3, BAD, N3, N4, N5, N8, OK, TXT, WARN, channelIcon, channelTone } from '../data/dataModel';
 
@@ -181,6 +182,22 @@ export function cliChip(active: CliProfile | undefined): { label: string; tone: 
   if (active.state === 'expired') return { label: 'Hết hạn', tone: BAD };
   if (active.state === 'expiring') return { label: 'Sắp hết hạn', tone: WARN };
   return { label: 'Đã xác thực', tone: OK };
+}
+
+/** Email of a CLI profile, or a readable stand-in when the session file did not reveal it (email null). */
+export function cliAccountLabel(p: Pick<CliProfile, 'email'> | null | undefined): string {
+  return p?.email || 'Tài khoản Google (chưa rõ email)';
+}
+
+/** Friendly Vietnamese text for a failed switch / delete of a CLI account (v0.1.30). */
+export function cliSwitchError(e: unknown, fallback: (e: unknown) => string): string {
+  if (e instanceof PinCancelledError) return 'Chưa đổi — cần nhập mã PIN để đổi hoặc xoá tài khoản Google.';
+  if (e instanceof ApiError) {
+    if (e.code === 'CLI_LOGIN_IN_PROGRESS') return 'Đang đăng nhập thêm một tài khoản Google — hoàn tất hoặc bấm “Huỷ đăng nhập” trước.';
+    if (e.code === 'CLI_PROFILE_NO_SESSION') return 'Tài khoản này chưa có phiên đăng nhập đã lưu — bấm “Thêm tài khoản Google” để đăng nhập lại.';
+    if (e.status === 404) return 'Tài khoản này không còn nữa — danh sách vừa được làm mới.';
+  }
+  return fallback(e);
 }
 
 /** "Google AI Pro · token 0 ₫ · còn hiệu lực 23 giờ" — plan_label carries the plan/token part. */

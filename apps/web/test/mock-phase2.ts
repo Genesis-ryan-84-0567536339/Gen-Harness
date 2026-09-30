@@ -1262,6 +1262,7 @@ export function createPhase2(opts: Phase2Options) {
       if (seg[1] === 'login' && seg.length === 2 && m === 'POST') {
         if (!need('system.manage')) return true;
         const loginId = randomUUID();
+        cliLogins.set(loginId, { login_id: loginId, status: 'starting' });
         reply(202, { login_id: loginId });
         later(150, () => cliEmit({ login_id: loginId, status: 'starting' }));
         later(900, () =>
@@ -1274,6 +1275,10 @@ export function createPhase2(opts: Phase2Options) {
         return true;
       }
       const lg = cliLogins.get(seg[2]);
+      if (seg[1] === 'login' && seg.length === 3 && m === 'GET') {
+        if (!need('system.manage')) return true;
+        return lg ? reply(200, lg) : problem(404, 'NOT_FOUND', 'Phiên đăng nhập không tồn tại hoặc nằm ngoài phạm vi của bạn');
+      }
       if (seg[1] === 'login' && seg[3] === 'code' && m === 'POST') {
         if (!need('system.manage')) return true;
         if (!lg || lg.status !== 'waiting_code') return problem(409, 'CLI_LOGIN_NOT_WAITING', 'Phiên đăng nhập không còn chờ mã');
@@ -1287,8 +1292,10 @@ export function createPhase2(opts: Phase2Options) {
           }
           const profile: CliProfile = {
             id: randomUUID(), email: cliProfiles.length ? `genesis.ops${cliProfiles.length}@gmail.com` : 'ryan.genesis@gmail.com',
-            plan_label: 'Google AI Pro · token 0 ₫', active: !cliProfiles.some((x) => x.active), expires_at: iso(Date.now() + 24 * 3600_000), state: 'ok',
+            plan_label: 'Google AI Pro · token 0 ₫', active: true, expires_at: iso(Date.now() + 24 * 3600_000), state: 'ok',
           };
+          // Như api thật (gh.providers.cli._finish): tài khoản vừa đăng nhập thành tài khoản đang dùng.
+          cliProfiles.forEach((x) => (x.active = false));
           cliProfiles.push(profile);
           if (!providers.some((x) => x.kind === 'antigravity_cli')) {
             providers.unshift({ id: randomUUID(), kind: 'antigravity_cli', name: 'Antigravity Brain', endpoint: null, failover_rank: 0, enabled: true, auth_state: 'ok', keys: [], models: [{ id: randomUUID(), model_name: 'gemini-2.5-pro', daily_quota: 3200, used_today: 0 }] });

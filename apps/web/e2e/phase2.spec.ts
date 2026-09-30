@@ -252,14 +252,33 @@ test.describe('system › Kênh & đăng nhập', () => {
     const cli = page.getByRole('region', { name: 'Tài khoản Antigravity CLI' });
     await expect(cli).toContainText('ryan.genesis@gmail.com');
     await cli.getByRole('button', { name: /Đổi tài khoản/ }).click();
-    await page.getByRole('button', { name: 'Đăng nhập tài khoản khác' }).click();
+    await page.getByRole('button', { name: 'Thêm tài khoản Google' }).click();
     const link = cli.getByRole('link', { name: 'Mở trang đăng nhập Google' });
     await expect(link).toBeVisible({ timeout: 5000 });
     await expect(link).toHaveAttribute('target', '_blank');
     await expect(link).toHaveAttribute('href', /accounts\.google\.com/);
     await cli.getByLabel('Mã xác thực').fill('4/0AbCd-EfGh');
     await cli.getByRole('button', { name: 'Xác nhận' }).click();
-    await expect(page.getByText(/Đã đăng nhập genesis\.ops/)).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText(/Đã thêm tài khoản genesis\.ops\d@gmail\.com/)).toBeVisible({ timeout: 5000 });
+    // v0.1.30: the account just added is the one in use.
+    await expect(cli.getByTestId('cli-current')).toContainText(/genesis\.ops\d@gmail\.com/);
+  });
+
+  test('CLI switch account: PIN, then the chosen Google account is in use (v0.1.30)', async ({ page }) => {
+    await page.goto('/system');
+    const cli = page.getByRole('region', { name: 'Tài khoản Antigravity CLI' });
+    await expect(cli.getByTestId('cli-current')).toContainText('ryan.genesis@gmail.com');
+    await cli.getByRole('button', { name: /Đổi tài khoản/ }).click();
+    const dlg = page.getByRole('dialog', { name: 'Đổi tài khoản Google cho AI' });
+    await expect(dlg).toContainText('AI đang dùng ryan.genesis@gmail.com');
+    await dlg.getByRole('button', { name: 'Dùng tài khoản ops.genesis@gmail.com' }).click();
+    const pin = page.getByRole('dialog', { name: 'Mã PIN xác nhận thao tác' });
+    await expect(pin).toBeVisible();
+    await page.keyboard.type(OWNER.pin);
+    await expect(pin).toBeHidden();
+    await expect(page.getByText(/Đã chuyển sang ops\.genesis@gmail\.com/)).toBeVisible({ timeout: 5000 });
+    await expect(dlg).toBeHidden();
+    await expect(cli.getByTestId('cli-current')).toContainText('ops.genesis@gmail.com');
   });
 
   test('change PIN rejects a wrong current PIN', async ({ page }) => {
