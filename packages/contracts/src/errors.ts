@@ -8,8 +8,9 @@ export class ApiError extends Error {
 
   constructor(status: number, problem: Partial<Problem> | null, fallbackMessage?: string) {
     const p: Problem = { status, ...(problem ?? {}) } as Problem;
-    const detailText = typeof p.detail === 'string' ? p.detail : undefined;
-    super(detailText || p.title || fallbackMessage || `HTTP ${status}`);
+    // v0.1.30: `detail` có thể là đối tượng/mảng (vd `{reasons: […]}`, mảng lỗi kiểm tra của FastAPI) — message
+    // LUÔN là chuỗi, không bao giờ mang đối tượng thô (web vẽ message làm React child).
+    super(problemText(p.detail) || (typeof p.title === 'string' ? p.title : '') || fallbackMessage || `HTTP ${status}`);
     this.name = 'ApiError';
     this.status = status;
     this.code = p.code ?? codeFromStatus(status);
@@ -19,6 +20,17 @@ export class ApiError extends Error {
   /** 422 field errors, `{field: message}`. */
   get fieldErrors(): Record<string, string> {
     return this.problem.errors ?? {};
+  }
+
+  /**
+   * v0.1.30: lý do kỹ thuật (MODEL_UNAVAILABLE…) — `reasons` cấp ngoài cùng (khuôn mới) hoặc `detail.reasons`
+   * (máy chủ ≤ v0.1.29). Chỉ giữ chuỗi.
+   */
+  get reasons(): string[] {
+    const p = this.problem as Problem & { reasons?: unknown };
+    const d = p.detail as unknown;
+    const raw = Array.isArray(p.reasons) ? p.reasons : d && typeof d === 'object' && !Array.isArray(d) ? (d as { reasons?: unknown }).reasons : null;
+    return Array.isArray(raw) ? raw.filter((r): r is string => typeof r === 'string' && r.trim() !== '') : [];
   }
 
   /** 401 PIN_INVALID → attempts left before lock. */
@@ -48,6 +60,24 @@ export class PinCancelledError extends ApiError {
     super(423, { code: 'PIN_REQUIRED', title: 'Cần nhập mã PIN để tiếp tục' });
     this.name = 'PinCancelledError';
   }
+}
+
+/** Chuỗi đọc được từ `detail` bất kỳ kiểu: chuỗi giữ nguyên; `{message|msg|detail}` chuỗi; mảng lỗi `{msg}` nối lại. */
+function problemText(detail: unknown): string {
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    return detail
+      .map((x) => (typeof x === 'string' ? x : x && typeof x === 'object' && typeof (x as { msg?: unknown }).msg === 'string' ? (x as { msg: string }).msg : ''))
+      .filter(Boolean)
+      .join('; ');
+  }
+  if (detail && typeof detail === 'object') {
+    for (const k of ['message', 'msg', 'detail'] as const) {
+      const v = (detail as Record<string, unknown>)[k];
+      if (typeof v === 'string' && v) return v;
+    }
+  }
+  return '';
 }
 
 function codeFromStatus(status: number): string {

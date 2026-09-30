@@ -218,3 +218,9 @@
 .ib-hide__text { cursor: pointer; user-select: none; }
 .ib-hidden-note { margin: 0 0 8px; font-size: 11.5px; color: var(--color-neutral-500); }
 .ib-card__triage { cursor: help; }
+
+/* v0.1.30: nút "Ẩn" cạnh "Hướng dẫn từng bước". */
+.ov-followup__aside { display: inline-flex; gap: 6px; align-items: center; }
+/* v0.1.30: mục "Cập nhật phần mềm" cố định. */
+.upd-info { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 10px 16px; margin-bottom: 8px; }
+.upd-info .summary { flex: 1 1 220px; }

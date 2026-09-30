@@ -10,7 +10,7 @@ import { toast } from '../../lib/toast';
 import { useNow } from '../../lib/useNow';
 import { errorText } from '../../lib/errorText';
 import { CardError, InlineError, SkeletonLines, StateChip } from '../common';
-import { CLI_LOGIN_TEXT, cliChip, cliMeta, credTone } from './systemModel';
+import { CLI_LOGIN_TEXT, cliAccountLabel, cliChip, cliMeta, cliSwitchError, credTone } from './systemModel';
 import { useCliLogin, type CliLogin } from './useCliLogin';
 
 export function CliLoginPanel({ login }: { login: CliLogin }) {
@@ -40,10 +40,27 @@ export function CliLoginPanel({ login }: { login: CliLogin }) {
       )}
       {status === 'waiting_code' && event?.url ? (
         <>
-          <a className="cli-login__url" href={event.url} target="_blank" rel="noopener noreferrer">
-            <Icon name="ph ph-arrow-square-out" size={13} />
-            Mở trang đăng nhập Google
-          </a>
+          <div className="cli-login__links">
+            <a className="cli-login__url" href={event.url} target="_blank" rel="noopener noreferrer">
+              <Icon name="ph ph-arrow-square-out" size={13} />
+              Mở trang đăng nhập Google
+            </a>
+            <Button
+              variant="ghost"
+              className="btn-27"
+              icon="ph ph-copy"
+              onClick={() => {
+                const url = event.url ?? '';
+                void navigator.clipboard?.writeText(url).then(
+                  () => toast('Đã chép link — dán vào trình duyệt đang đăng nhập Google.', 'neutral'),
+                  () => toast('Không chép được — bấm giữ link “Mở trang đăng nhập Google” để chép.', 'warn'),
+                );
+              }}
+            >
+              Chép link
+            </Button>
+          </div>
+          <p className="cli-login__hint">Đăng nhập đúng tài khoản Google muốn dùng; trang Google sẽ hiện một mã — chép mã đó dán vào ô bên dưới.</p>
           {/* Not a <form>: this panel also sits inside the setup wizard's form (no nested forms). */}
           <div
             className="cli-login__row"
@@ -103,8 +120,14 @@ export function CliCard({ canManage, showCredentials = true }: { canManage: bool
   const now = useNow(60_000);
   const login = useCliLogin();
   const [switchOpen, setSwitchOpen] = useState(false);
-  const active = profiles.data?.find((p) => p.active);
+  const list = profiles.data ?? [];
+  const active = list.find((p) => p.active);
+  const others = list.filter((p) => !p.active).length;
   const chip = cliChip(active);
+  const startLogin = () => {
+    setSwitchOpen(false);
+    login.start.mutate();
+  };
 
   return (
     <section className="gh-card" aria-label="Tài khoản Antigravity CLI">
@@ -124,32 +147,27 @@ export function CliCard({ canManage, showCredentials = true }: { canManage: bool
           <SkeletonLines rows={2} padding="0" />
         ) : profiles.isError ? (
           <CardError error={profiles.error} onRetry={() => void profiles.refetch()} retrying={profiles.isFetching} />
-        ) : active ? (
-          <div className="cli-acct">
-            <div className="cli-avatar" aria-hidden>
-              {emailInitials(active.email)}
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div className="cli-email">{active.email}</div>
-              <div className="cli-meta">{cliMeta(active, now)}</div>
-            </div>
-            {canManage ? (
-              <Button variant="secondary" className="btn-28" icon="ph ph-user-switch" onClick={() => setSwitchOpen(true)}>
-                Đổi tài khoản
-              </Button>
-            ) : null}
-          </div>
         ) : (
-          <div className="cli-acct">
-            <div className="cli-avatar cli-avatar--empty" aria-hidden>
-              <Icon name="ph ph-user" size={15} />
+          <div className="cli-acct" data-testid="cli-current">
+            <div className={active ? 'cli-avatar' : 'cli-avatar cli-avatar--empty'} aria-hidden>
+              {active ? emailInitials(active.email) : <Icon name="ph ph-user" size={15} />}
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div className="cli-email">Chưa có tài khoản CLI</div>
-              <div className="cli-meta">Đăng nhập Google để hệ thống dùng AI qua Antigravity CLI</div>
+              <div className="cli-email">{active ? cliAccountLabel(active) : 'Chưa chọn tài khoản Google'}</div>
+              <div className="cli-meta">
+                {active
+                  ? `Đang dùng · ${cliMeta(active, now)}${others ? ` · ${others} tài khoản khác đã lưu` : ''}`
+                  : list.length
+                    ? `${list.length} tài khoản đã lưu — chọn một tài khoản để AI dùng`
+                    : 'Đăng nhập Google để hệ thống dùng AI qua Antigravity CLI'}
+              </div>
             </div>
-            {canManage && !login.active ? (
-              <Button variant="primary" className="btn-28" icon="ph ph-sign-out" onClick={() => login.start.mutate()} loading={login.start.isPending}>
+            {canManage && list.length ? (
+              <Button variant={active ? 'secondary' : 'primary'} className="btn-28" icon="ph ph-user-switch" onClick={() => setSwitchOpen(true)}>
+                {active ? 'Đổi tài khoản' : 'Chọn tài khoản'}
+              </Button>
+            ) : canManage && !login.active ? (
+              <Button variant="primary" className="btn-28" icon="ph ph-sign-in" onClick={() => login.start.mutate()} loading={login.start.isPending}>
                 Đăng nhập
               </Button>
             ) : null}
@@ -183,126 +201,170 @@ export function CliCard({ canManage, showCredentials = true }: { canManage: bool
           </>
         ) : null}
       </div>
-      <ProfilesDialog
-        open={switchOpen}
-        onClose={() => setSwitchOpen(false)}
-        profiles={profiles.data ?? []}
-        onAdd={() => {
-          setSwitchOpen(false);
-          login.start.mutate();
-        }}
-      />
+      <ProfilesDialog open={switchOpen} onClose={() => setSwitchOpen(false)} profiles={list} loginBusy={login.active && !login.finished} onAdd={startLogin} />
     </section>
   );
 }
 
+/**
+ * Danh sách tài khoản Google của CLI: tài khoản đang dùng, "Dùng tài khoản này", xoá, "Thêm tài khoản Google".
+ * Đổi/xoá cần PIN: API trả 423 → PinDialogHost (toàn cục) hiện hộp PIN, nhập đúng thì yêu cầu tự gửi lại.
+ */
 function ProfilesDialog({
   open,
   onClose,
   profiles,
+  loginBusy,
   onAdd,
 }: {
   open: boolean;
   onClose: () => void;
   profiles: CliProfile[];
+  loginBusy: boolean;
   onAdd: () => void;
 }) {
   const now = useNow(60_000, open);
   const [confirmDelete, setConfirmDelete] = useState<CliProfile | null>(null);
+  const refresh = () => {
+    void queryClient.invalidateQueries({ queryKey: qk2.cliProfiles });
+    void queryClient.invalidateQueries({ queryKey: qk2.providers });
+    void queryClient.invalidateQueries({ queryKey: qk2.credentials });
+  };
   const activate = useMutation({
     mutationFn: (id: string) => api.cli.activate(id),
     onSuccess: (p) => {
       queryClient.setQueryData<CliProfile[]>(qk2.cliProfiles, (old) => old?.map((x) => ({ ...x, active: x.id === p.id })));
-      void queryClient.invalidateQueries({ queryKey: qk2.cliProfiles });
-      void queryClient.invalidateQueries({ queryKey: qk2.credentials });
-      toast(`Hệ thống dùng tài khoản ${p.email}`);
+      refresh();
+      toast(`Đã chuyển sang ${cliAccountLabel(p)} — từ lượt tiếp theo AI dùng tài khoản này.`);
+      onClose();
+    },
+    onError: (e) => {
+      if (e instanceof ApiError && e.status === 404) refresh();
     },
   });
   const remove = useMutation({
     mutationFn: (id: string) => api.cli.remove(id),
     onSuccess: (_v, id) => {
+      const gone = profiles.find((x) => x.id === id);
       queryClient.setQueryData<CliProfile[]>(qk2.cliProfiles, (old) => old?.filter((x) => x.id !== id));
-      void queryClient.invalidateQueries({ queryKey: qk2.cliProfiles });
-      toast('Đã xoá hồ sơ CLI', 'neutral');
+      refresh();
+      toast(`Đã xoá ${cliAccountLabel(gone)} khỏi danh sách`, 'neutral');
+    },
+    onError: (e) => {
+      if (e instanceof ApiError && e.status === 404) refresh();
     },
   });
+  useEffect(() => {
+    if (!open) {
+      activate.reset();
+      remove.reset();
+      setConfirmDelete(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reset only when the dialog closes
+  }, [open]);
   const err = activate.error ?? remove.error;
+  const busy = activate.isPending || remove.isPending;
+  const active = profiles.find((p) => p.active);
   return (
     <Dialog
       open={open}
       onClose={onClose}
-      width={460}
-      title="Đổi tài khoản CLI"
-      kicker="Đổi hoặc xoá hồ sơ cần mã PIN"
+      width={480}
+      title="Đổi tài khoản Google cho AI"
+      kicker="Đổi hoặc xoá tài khoản cần mã PIN"
       actions={
         <>
           <Button variant="secondary" onClick={onClose}>
             Đóng
           </Button>
-          <Button variant="primary" icon="ph ph-plus" onClick={onAdd}>
-            Đăng nhập tài khoản khác
+          <Button variant="primary" icon="ph ph-plus" disabled={loginBusy} onClick={onAdd}>
+            Thêm tài khoản Google
           </Button>
         </>
       }
     >
+      <p className="gh-dialog__text" data-testid="cli-dialog-current">
+        {active ? (
+          <>
+            AI đang dùng <strong>{cliAccountLabel(active)}</strong>. Chọn tài khoản khác để chuyển; lượt gọi AI kế tiếp dùng tài khoản mới.
+          </>
+        ) : (
+          'Chưa chọn tài khoản nào — chọn một tài khoản bên dưới hoặc thêm tài khoản Google mới.'
+        )}
+      </p>
+      {loginBusy ? <p className="gh-dialog__status gh-dialog__status--warn">Đang đăng nhập thêm một tài khoản — hoàn tất hoặc huỷ bước đó trước khi đổi.</p> : null}
       {profiles.length === 0 ? (
-        <EmptyState icon="ph ph-user" title="Chưa có hồ sơ CLI nào" />
+        <EmptyState icon="ph ph-user" title="Chưa có tài khoản Google nào" />
       ) : (
-        <div>
-          {profiles.map((p) => (
-            <div className="profile-row" key={p.id}>
-              <div className="cli-avatar" aria-hidden>
-                {emailInitials(p.email)}
+        <div role="list" aria-label="Tài khoản Google đã lưu">
+          {profiles.map((p) => {
+            const label = cliAccountLabel(p);
+            return (
+              <div className="profile-row" role="listitem" key={p.id} aria-current={p.active ? 'true' : undefined}>
+                <div className="cli-avatar" aria-hidden>
+                  {emailInitials(p.email)}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="cli-email">{label}</div>
+                  <div className="cli-meta">{cliMeta(p, now)}</div>
+                </div>
+                {p.active ? (
+                  <StateChip color="var(--color-ok)" dot>
+                    Đang dùng
+                  </StateChip>
+                ) : confirmDelete?.id === p.id ? (
+                  <>
+                    <span className="cli-meta" style={{ marginTop: 0 }}>
+                      Xoá tài khoản này?
+                    </span>
+                    <Button variant="secondary" className="btn-27" onClick={() => setConfirmDelete(null)}>
+                      Huỷ
+                    </Button>
+                    <Button
+                      variant="primary"
+                      className="btn-27"
+                      icon="ph ph-trash"
+                      loading={remove.isPending}
+                      onClick={() => {
+                        setConfirmDelete(null);
+                        remove.mutate(p.id);
+                      }}
+                    >
+                      Xoá
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <Button
+                      variant="secondary"
+                      className="btn-27"
+                      aria-label={`Dùng tài khoản ${label}`}
+                      disabled={loginBusy || (busy && activate.variables !== p.id)}
+                      loading={activate.isPending && activate.variables === p.id}
+                      onClick={() => {
+                        activate.reset();
+                        remove.reset();
+                        activate.mutate(p.id);
+                      }}
+                    >
+                      Dùng tài khoản này
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      className="btn-27"
+                      icon="ph ph-trash"
+                      aria-label={`Xoá tài khoản ${label}`}
+                      disabled={loginBusy || busy}
+                      onClick={() => setConfirmDelete(p)}
+                    />
+                  </>
+                )}
               </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div className="cli-email">{p.email}</div>
-                <div className="cli-meta">{cliMeta(p, now)}</div>
-              </div>
-              {p.active ? (
-                <StateChip color="var(--color-ok)">Đang dùng</StateChip>
-              ) : confirmDelete?.id === p.id ? (
-                <>
-                  <span className="cli-meta" style={{ marginTop: 0 }}>Xoá hồ sơ?</span>
-                  <Button variant="secondary" className="btn-27" onClick={() => setConfirmDelete(null)}>
-                    Huỷ
-                  </Button>
-                  <Button
-                    variant="primary"
-                    className="btn-27"
-                    icon="ph ph-trash"
-                    loading={remove.isPending}
-                    onClick={() => {
-                      setConfirmDelete(null);
-                      remove.mutate(p.id);
-                    }}
-                  >
-                    Xoá
-                  </Button>
-                </>
-              ) : (
-                <>
-                  <Button
-                    variant="secondary"
-                    className="btn-27"
-                    loading={activate.isPending && activate.variables === p.id}
-                    onClick={() => activate.mutate(p.id)}
-                  >
-                    Dùng
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    className="btn-27"
-                    icon="ph ph-trash"
-                    aria-label={`Xoá hồ sơ ${p.email}`}
-                    onClick={() => setConfirmDelete(p)}
-                  />
-                </>
-              )}
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
-      {err ? <InlineError>{errorText(err)}</InlineError> : null}
+      {err ? <InlineError>{cliSwitchError(err, errorText)}</InlineError> : null}
     </Dialog>
   );
 }

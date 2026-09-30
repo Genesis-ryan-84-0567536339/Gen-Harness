@@ -33,7 +33,11 @@ router = APIRouter(tags=["system"])
 MANAGE = require("system.manage")
 
 LATEST_CACHE_KEY = "gh:update:latest"
-LATEST_CACHE_SECONDS = 3600
+# v0.1.30: 1 giờ → 10 phút (Boss thấy "mất nút update" gần 1 giờ sau khi v0.1.29 đã phát hành).
+LATEST_CACHE_SECONDS = 600
+# `POST /system/update/check` hỏi GitHub ngay (bỏ qua bộ đệm) — tối đa 1 lần / 30 giây cho cả tổ chức.
+CHECK_LOCK_KEY = "gh:update:check-lock"
+CHECK_MIN_INTERVAL_SECONDS = 30
 # Yêu cầu nằm quá lâu mà trạng thái không đổi ⇒ watcher không chạy (máy chủ tắt watcher, linger…) — cho bấm lại.
 STALE_REQUEST_SECONDS = 15 * 60
 _SEMVER = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
@@ -75,18 +79,22 @@ async def fetch_latest(repo: str) -> dict[str, Any] | None:
         return None
 
 
-async def _latest(request: Request) -> dict[str, Any] | None:
+async def _latest(request: Request, *, force: bool = False) -> dict[str, Any] | None:
+    """Bản mới nhất (đệm Redis `LATEST_CACHE_SECONDS`). `force` bỏ qua bộ đệm; hỏi GitHub lỗi thì giữ bản đệm cũ."""
     repo = get_settings().release_repo
     if not repo:
         return None
     redis = request.app.state.redis
-    cached = await redis.get(LATEST_CACHE_KEY)
-    if cached:
-        return json.loads(cached)  # type: ignore[no-any-return]
+    cached_raw = await redis.get(LATEST_CACHE_KEY)
+    cached = json.loads(cached_raw) if cached_raw else None
+    if cached and not force:
+        return cached  # type: ignore[no-any-return]
     latest = await fetch_latest(repo)
     if latest and latest.get("tag"):
+        latest = {**latest, "checked_at": datetime.now(UTC).isoformat()}
         await redis.set(LATEST_CACHE_KEY, json.dumps(latest), ex=LATEST_CACHE_SECONDS)
-    return latest
+        return latest
+    return cached or latest
 
 
 def _age_seconds(iso: str | None) -> float | None:
@@ -127,12 +135,13 @@ def _state() -> dict[str, Any]:
     }
 
 
-async def _payload(request: Request) -> dict[str, Any]:
+async def _payload(request: Request, *, force: bool = False) -> dict[str, Any]:
     s = _state()
-    latest = await _latest(request) if s["linked"] else None
+    latest = await _latest(request, force=force) if s["linked"] else None
     tag = latest.get("tag") if latest else None
     return {**s, "latest": tag, "release_url": latest.get("url") if latest else None,
             "release_notes": latest.get("notes") if latest else None,
+            "checked_at": latest.get("checked_at") if latest else None,
             "update_available": is_newer(tag, s["current"])}
 
 
@@ -140,6 +149,14 @@ async def _payload(request: Request) -> dict[str, Any]:
 async def get_update(request: Request, user: service.CurrentUser = Depends(MANAGE)) -> dict[str, Any]:
     """Phiên bản đang chạy, bản mới nhất, và tiến trình cập nhật (idle/requested/running/done/failed/stalled)."""
     return await _payload(request)
+
+
+@router.post("/system/update/check")
+async def check_update(request: Request, user: service.CurrentUser = Depends(MANAGE)) -> dict[str, Any]:
+    """v0.1.30: nút "Kiểm tra bản mới" — hỏi GitHub ngay, bỏ qua bộ đệm. Giới hạn 1 lần / 30 giây (bấm dồn thì trả
+    kết quả đang đệm, `throttled: true`) để không vượt hạn mức API GitHub không xác thực."""
+    fresh = bool(await request.app.state.redis.set(CHECK_LOCK_KEY, "1", nx=True, ex=CHECK_MIN_INTERVAL_SECONDS))
+    return {**await _payload(request, force=fresh), "throttled": not fresh}
 
 
 @router.post("/system/update", status_code=202)

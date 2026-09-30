@@ -2,6 +2,8 @@ import { useState } from 'react';
 import type { SetupState, Step8Agent as Step8Result } from '@gen-harness/contracts';
 import { Icon, SelectField, TextField } from '@gen-harness/ui';
 import { api } from '../lib/api';
+import { reasonsOf } from '../lib/friendlyError';
+import { FriendlyErrorText, ModelUnavailableNotice } from '../screens/common';
 import { StepFrame } from './StepFrame';
 import { describeError, type StepProps } from './types';
 
@@ -15,6 +17,29 @@ const TEMPLATES: Array<{ value: string; label: string; name: string; role: strin
   { value: 'recruiter', label: 'Tuyển dụng', name: 'Trợ lý Tuyển dụng', role: 'Ghi nhận ứng viên, lịch phỏng vấn và nhắc việc tuyển dụng.' },
   { value: 'secretary', label: 'Thư ký cá nhân', name: 'Thư ký', role: 'Tóm tắt tin nhắn quan trọng, nhắc lịch và soạn sẵn trả lời cho Sếp duyệt.' },
 ];
+
+/**
+ * v0.1.30: thử trò chuyện lỗi. `try_error` là chuỗi từ v0.1.30; máy chủ cũ trả đối tượng `{reasons}` — trước đây vẽ
+ * thẳng làm React child → màn /guide/8 sập (React error #31). Không có model chạy được → trạng thái "Chọn model".
+ */
+function TryFailed({ agent }: { agent: Step8Result }) {
+  const raw: unknown = agent.try_error;
+  const legacyReasons = reasonsOf(raw);
+  if (agent.try_error_code === 'MODEL_UNAVAILABLE' || legacyReasons) {
+    return (
+      <>
+        <p className="muted-note">Agent đã lưu, nhưng chưa trò chuyện thử được.</p>
+        <ModelUnavailableNotice reasons={agent.try_reasons?.length ? agent.try_reasons : legacyReasons} />
+      </>
+    );
+  }
+  return (
+    <div className="muted-note">
+      Agent đã lưu, nhưng chưa trò chuyện thử được — thử lại sau ở màn Danh tính Agent.
+      <FriendlyErrorText raw={raw} fallback="bộ não AI chưa trả lời." />
+    </div>
+  );
+}
 
 /** Bước 8 — Agent đầu tiên: tạo agent (PUT /setup/steps/8) và nghe thử một câu trả lời. Gán kênh/nhóm làm sau ở màn Agent. */
 export function Step8Agent({ meta, description, onBack, onSaved, formRef, onSkip, skipping, skipError }: StepProps) {
@@ -63,9 +88,7 @@ export function Step8Agent({ meta, description, onBack, onSaved, formRef, onSkip
               <p className="setup-try__reply">{agent.try_reply}</p>
             </div>
           ) : (
-            <p className="muted-note">
-              Agent đã lưu, nhưng chưa trò chuyện thử được: {agent.try_error ?? 'bộ não AI chưa trả lời'}. Thử lại sau ở màn Danh tính Agent.
-            </p>
+            <TryFailed agent={agent} />
           )}
           <p className="muted-note">Gán kênh và nhóm cho agent làm sau ở màn Danh tính Agent.</p>
         </div>

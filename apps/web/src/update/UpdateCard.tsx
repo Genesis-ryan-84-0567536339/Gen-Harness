@@ -4,8 +4,9 @@ import { ApiError, type SystemUpdate } from '@gen-harness/contracts';
 import { Button, Dialog, Icon } from '@gen-harness/ui';
 import { api } from '../lib/api';
 import { errorText } from '../lib/errorText';
+import { fmtDMClock } from '../lib/format';
 import { queryClient } from '../lib/queryClient';
-import { Panel } from '../screens/common';
+import { Panel, SkeletonLines } from '../screens/common';
 import { toast } from '../lib/toast';
 import { UPDATED_FLAG, UPDATE_COMMAND, UPDATE_KEY, readableNotes, updateView } from './updateModel';
 
@@ -14,7 +15,7 @@ import { UPDATED_FLAG, UPDATE_COMMAND, UPDATE_KEY, readableNotes, updateView } f
  * (gh/system_api/update.py). Trong lúc cập nhật api khởi động lại nên các lần hỏi trạng thái có thể lỗi mạng — coi là
  * "đang khởi động lại", không phải lỗi. Xong thì tự tải lại trang để chạy giao diện bản mới.
  */
-export function UpdateCard() {
+export function UpdateCard({ always = false }: { always?: boolean } = {}) {
   /** Bản Owner đã bấm cập nhật lên (giữ qua lúc api tắt/bật). */
   const [waitingFor, setWaitingFor] = useState<string | null>(null);
   const [confirm, setConfirm] = useState(false);
@@ -35,6 +36,19 @@ export function UpdateCard() {
       setWaitingFor(data.latest ?? 'bản mới');
       setConfirm(false);
     },
+  });
+
+  // v0.1.30: "Kiểm tra bản mới" — hỏi GitHub ngay (máy chủ đệm 10 phút, nút này bỏ qua bộ đệm).
+  const check = useMutation({
+    mutationFn: () => api.systemUpdate.check(),
+    onSuccess: (data) => {
+      queryClient.setQueryData(UPDATE_KEY, data);
+      if (data.update_available) toast(`Có bản mới ${data.latest}.`);
+      else if (data.throttled) toast('Vừa kiểm tra xong — thử lại sau ít giây.', 'warn');
+      else if (data.latest) toast(`Đang dùng bản mới nhất (${data.current ?? data.latest}).`);
+      else toast('Chưa hỏi được máy chủ phát hành — thử lại sau.', 'warn');
+    },
+    onError: (e) => toast(errorText(e), 'bad'),
   });
 
   const view = updateView(q.data, { waitingFor, offline: !!waitingFor && q.isError });
@@ -65,18 +79,36 @@ export function UpdateCard() {
     }
   }, []);
 
-  if (view.kind === 'hidden') return null;
   // Không phải Owner/quản trị (403) hay api chưa có tính năng này: im lặng.
   if (q.isError && !waitingFor && !(q.error instanceof ApiError && q.error.status === 0)) return null;
+  // v0.1.30: `always` = mục "Cập nhật phần mềm" cố định (Điều khiển hệ thống › Dữ liệu & lưu trữ, Trợ giúp) — không
+  // bao giờ biến mất như thẻ Tổng quan (chỉ hiện khi biết có bản mới).
+  if (view.kind === 'hidden' && !always) return null;
+  if (always && q.isPending) {
+    return (
+      <Panel title="Cập nhật phần mềm" label="Cập nhật phần mềm" bodyClass="upd">
+        <SkeletonLines rows={3} padding="0" />
+      </Panel>
+    );
+  }
   const d = q.data as SystemUpdate | undefined;
+  const idle = view.kind === 'hidden';
+  const title = idle ? 'Cập nhật phần mềm' : view.title;
+  const kicker = idle
+    ? d?.linked === false
+      ? 'Bản này không cài bằng genh — cập nhật theo cách đã cài'
+      : d?.latest
+        ? 'Đang dùng bản mới nhất'
+        : 'Chưa hỏi được máy chủ phát hành — bấm Kiểm tra bản mới'
+    : view.kicker;
 
   return (
     <Panel
-      title={view.title}
-      kicker={view.kicker}
-      label="Cập nhật phiên bản"
+      title={title}
+      kicker={kicker}
+      label={always ? 'Cập nhật phần mềm' : 'Cập nhật phiên bản'}
       bodyClass="upd"
-      className={`upd-card upd-card--${view.tone}`}
+      className={idle ? 'upd-card' : `upd-card upd-card--${view.tone}`}
       aside={
         view.kind === 'available' && d?.can_request ? (
           <Button variant="primary" icon="ph ph-arrow-circle-up" className="btn-30" onClick={() => setConfirm(true)}>
@@ -91,6 +123,21 @@ export function UpdateCard() {
         ) : null
       }
     >
+      {always ? (
+        <div className="upd-info" data-testid="update-section">
+          <div className="summary">
+            <span className="summary__k">đang dùng</span>
+            <span className="summary__v mono">{d?.current ?? 'bản phát triển'}</span>
+            <span className="summary__k">bản mới nhất</span>
+            <span className="summary__v mono">{d?.latest ?? '—'}</span>
+            <span className="summary__k">kiểm tra lúc</span>
+            <span className="summary__v">{d?.checked_at ? fmtDMClock(d.checked_at) : 'chưa kiểm tra'}</span>
+          </div>
+          <Button variant="secondary" size="sm" icon="ph ph-arrow-clockwise" loading={check.isPending} disabled={d?.linked === false} onClick={() => check.mutate()}>
+            Kiểm tra bản mới
+          </Button>
+        </div>
+      ) : null}
       {view.kind === 'working' ? (
         <ol className="upd-steps" aria-live="polite">
           {view.steps.map((s) => (
@@ -101,8 +148,8 @@ export function UpdateCard() {
           ))}
         </ol>
       ) : null}
-      {view.body ? <p className="upd-body">{view.body}</p> : null}
-      {view.showCommand ? (
+      {view.kind !== 'hidden' && view.body ? <p className="upd-body">{view.body}</p> : null}
+      {view.kind !== 'hidden' && view.showCommand ? (
         <div className="upd-cmd">
           <span>Chạy lệnh này một lần trên máy chủ (lần sau chỉ cần bấm nút ở đây):</span>
           <code className="mono">{UPDATE_COMMAND}</code>

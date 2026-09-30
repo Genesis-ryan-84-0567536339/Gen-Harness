@@ -1,5 +1,6 @@
 import type { RefObject } from 'react';
 import { ApiError, type SetupState, type SetupStepStatus } from '@gen-harness/contracts';
+import { MODEL_UNAVAILABLE_TEXT, detailToText } from '../lib/friendlyError';
 import type { StepMeta } from './steps';
 
 export interface StepProps {
@@ -27,9 +28,10 @@ export function describeError(e: unknown): string {
     if (e.code === 'STEP_INCOMPLETE' || e.code === 'STEP_ORDER') return e.message;
     if (e.status === 409) return 'Thiết lập đã hoàn tất hoặc bước này không còn sửa được ở đây.';
     if (e.status === 422) return 'Kiểm tra lại các trường được đánh dấu.';
-    return e.message;
+    if (e.code === 'MODEL_UNAVAILABLE') return MODEL_UNAVAILABLE_TEXT;
+    return detailToText(e.message) || 'Có lỗi không xác định.';
   }
-  return e instanceof Error ? e.message : 'Có lỗi không xác định.';
+  return (e instanceof Error ? detailToText(e.message) : detailToText(e)) || 'Có lỗi không xác định.';
 }
 
 export const TOKEN_INVALID = 'Mã thiết lập không hợp lệ hoặc đã hết hạn. Mở lại đường dẫn từ trình cài.';

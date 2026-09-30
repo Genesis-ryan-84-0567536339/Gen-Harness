@@ -63,12 +63,12 @@ function Where() {
   return <div data-testid="where">{l.pathname}</div>;
 }
 
-function renderSidebar(nav: NavDomain[], path: string) {
+function renderSidebar(nav: NavDomain[], path: string, role: { code: string; name: string } = { code: 'owner', name: 'Owner — Sếp' }) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   qc.setQueryData(qk.navigation, nav);
   qc.setQueryData(qk.me, {
     id: 'u', email: 'owner@genesis.local', display_name: 'Anh Cơ La (Ryan)',
-    role: { code: 'owner', name: 'Owner — Sếp' },
+    role,
     org: { id: 'o', name: 'x', timezone: 'Asia/Ho_Chi_Minh', currency: 'VND' },
     addressing: { self: 'Anh', bot_calls_me: 'Sếp' }, pin_verified_until: null, permissions: {},
   });
@@ -170,5 +170,42 @@ describe('<Sidebar>', () => {
       expect(el).toBeInTheDocument();
       expect(screen.getByRole('button', { name: /Thử lại/ })).toBeInTheDocument();
     });
+  });
+});
+
+describe('v0.1.30 — lối vào cố định "Hướng dẫn thiết lập"', () => {
+  beforeEach(() => {
+    useUiStore.setState({ sidebarMode: 'full', showEnglish: false, navOpen: {} });
+  });
+
+  it('Owner: mục ở thanh bên ngay dưới Điều khiển hệ thống, mở /guide', async () => {
+    renderSidebar(NAV, '/overview');
+    const nav = screen.getByRole('navigation', { name: 'Danh mục màn hình' });
+    const system = within(nav).getByRole('link', { name: /Điều khiển hệ thống/ });
+    const guide = within(nav).getByRole('link', { name: /Hướng dẫn thiết lập/ });
+    expect(guide).toHaveAttribute('href', '/guide');
+    // Đứng ngay sau Điều khiển hệ thống.
+    expect(system.closest('.sb-group')!.nextElementSibling).toBe(guide.closest('.sb-group'));
+    await userEvent.setup().click(guide);
+    expect(screen.getByTestId('where')).toHaveTextContent('/guide');
+  });
+
+  it('Owner: menu tài khoản có "Hướng dẫn thiết lập" cạnh Trợ giúp', async () => {
+    const user = userEvent.setup();
+    renderSidebar(NAV, '/overview');
+    await user.click(screen.getByRole('button', { name: /Anh Cơ La/ }));
+    const items = screen.getAllByRole('menuitem').map((m) => m.textContent);
+    const help = items.findIndex((t) => t?.includes('Trợ giúp'));
+    expect(items[help + 1]).toContain('Hướng dẫn thiết lập');
+    await user.click(screen.getByRole('menuitem', { name: /Hướng dẫn thiết lập/ }));
+    expect(screen.getByTestId('where')).toHaveTextContent('/guide');
+  });
+
+  it('không phải Owner: không có mục hướng dẫn ở thanh bên lẫn menu', async () => {
+    const user = userEvent.setup();
+    renderSidebar(NAV, '/overview', { code: 'manager', name: 'Quản lý' });
+    expect(screen.queryByRole('link', { name: /Hướng dẫn thiết lập/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Anh Cơ La/ }));
+    expect(screen.queryByRole('menuitem', { name: /Hướng dẫn thiết lập/ })).not.toBeInTheDocument();
   });
 });

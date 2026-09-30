@@ -18,6 +18,11 @@ interface UiPrefs {
   theme: ThemePref;
   /** Lựa chọn giao diện theo từng người dùng (id) — hai người dùng chung máy không đè lựa chọn của nhau. */
   themeByUser: Record<string, ThemePref>;
+  /**
+   * v0.1.30: thẻ "Việc thiết lập tiếp" người dùng (id) đã bấm "Ẩn" — lưu các bước còn dở lúc ẩn; có bước dở MỚI thì
+   * thẻ hiện lại. Chỉ ẩn cho người đó trên trình duyệt này (lối vào cố định: menu tài khoản / thanh bên).
+   */
+  followUpHiddenByUser: Record<string, number[]>;
   /** Ngăn kéo điều hướng trên điện thoại (B4) — không lưu. */
   drawerOpen: boolean;
   setSidebarMode: (m: SidebarMode) => void;
@@ -26,6 +31,7 @@ interface UiPrefs {
   setNavOpen: (group: string, open: boolean) => void;
   setTheme: (theme: ThemePref, userId?: string | null) => void;
   setDrawerOpen: (open: boolean) => void;
+  hideFollowUp: (userId: string, pending: number[]) => void;
 }
 
 const safeStorage = createJSONStorage<Partial<UiPrefs>>(() => {
@@ -51,6 +57,7 @@ export const useUiStore = create<UiPrefs>()(
       theme: 'system',
       themeByUser: {},
       drawerOpen: false,
+      followUpHiddenByUser: {},
       setSidebarMode: (sidebarMode) => set({ sidebarMode }),
       toggleSidebarMode: () => set((s) => ({ sidebarMode: s.sidebarMode === 'full' ? 'rail' : 'full' })),
       setShowEnglish: (showEnglish) => set({ showEnglish }),
@@ -58,6 +65,7 @@ export const useUiStore = create<UiPrefs>()(
       setTheme: (theme, userId) =>
         set((s) => ({ theme, themeByUser: userId ? { ...s.themeByUser, [userId]: theme } : s.themeByUser })),
       setDrawerOpen: (drawerOpen) => set({ drawerOpen }),
+      hideFollowUp: (userId, pending) => set((s) => ({ followUpHiddenByUser: { ...s.followUpHiddenByUser, [userId]: [...pending] } })),
     }),
     {
       name: 'gh-ui',
@@ -75,6 +83,7 @@ export const useUiStore = create<UiPrefs>()(
         navOpen: s.navOpen,
         theme: s.theme,
         themeByUser: s.themeByUser,
+        followUpHiddenByUser: s.followUpHiddenByUser,
       }),
     },
   ),

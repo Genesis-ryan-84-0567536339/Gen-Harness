@@ -31,6 +31,10 @@ dải "Chưa có model" ở bước 12 + Tổng quan, chọn model lại ở /gu
 không DB, không khoá master) + `browser-egress` (chỉ tên miền Facebook), màn Tài khoản mạng xã hội (chỉ Owner, chấp nhận
 rủi ro từng tài khoản, Owner tự đăng nhập trong cửa sổ trình duyệt từ xa, phiên mã hoá, gỡ = xoá phiên), Gen CHỈ ĐỌC thông
 báo + danh sách hội thoại Facebook cá nhân và tóm tắt, lịch đọc (tắt mặc định), Dừng tất cả, giới hạn tốc độ.
+v0.1.30 (hotfix): màn /guide/8 "Agent đầu tiên" sập (React error #31 `{reasons}`) khi không model nào chạy được — lỗi
+MODEL_UNAVAILABLE đúng khuôn chung (`detail` là chữ, `reasons` cấp ngoài), web không bao giờ vẽ đối tượng lỗi thô, trạng thái
+"Chọn model" tại chỗ; lối vào cố định "Hướng dẫn thiết lập" (thanh bên + menu tài khoản, Owner), thẻ "Việc thiết lập tiếp" có "Ẩn";
+mục "Cập nhật phần mềm" cố định (Hệ thống + Trợ giúp) có "Kiểm tra bản mới", đệm bản mới nhất 1 giờ → 10 phút.
 
 ## Đợt A — Gen v1 (thiết kế: docs/design/gen-v1.md)
 - ✅ A1 Khung chat phải + Gen trả lời/tóm tắt (chỉ đọc), lưu hội thoại, Nhật ký hành động — v0.1.21.
@@ -61,6 +65,6 @@ báo + danh sách hội thoại Facebook cá nhân và tóm tắt, lịch đọc
 - ~~D2 Jules worker~~ — **Bỏ** (Boss chốt QD-10, xác nhận lại 30/09). Không làm, không kiểm điều khoản Jules nữa.
 - 🟡 D3 Gen điều khiển mạng xã hội thay Boss (API trước, Playwright cho tài khoản cá nhân) — thiết kế:
   docs/design/gen-browser-agent.md. ✅ Lát đầu **v0.1.29**: Facebook cá nhân, đăng nhập + CHỈ ĐỌC (thông báo, hội thoại).
-  Tiếp: v0.1.30 ghi có xác nhận (đề xuất Gen + PIN + permit — chỗ cắm `gh/social/permit.py`); Trang FB/IG chuyên nghiệp
+  Tiếp: v0.1.31 ghi có xác nhận (đề xuất Gen + PIN + permit — chỗ cắm `gh/social/permit.py`); Trang FB/IG chuyên nghiệp
   qua API; nền tảng khác. Luật cứng giữ nguyên: không tài khoản giả, không lách chống bot (không stealth/proxy/giải CAPTCHA).
 Thiết kế: docs/design/gen-hub-link.md (lát đầu v0.1.26 ✅ — Gen đọc Kho qua Gen-hub, chỉ-đọc).

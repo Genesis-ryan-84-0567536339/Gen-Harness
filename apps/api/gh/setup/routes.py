@@ -592,14 +592,22 @@ async def step8(body: Step8In, request: Request, db: AsyncSession = DB,
         VALUES (:o, :n, :rd, :tpl, '{}'::jsonb, :v, :sw, :al) RETURNING id"""),
         {"o": row.org_id, "n": name, "rd": role_desc, "tpl": body.template, "v": voice, "sw": speak_when,
          "al": policy.DEFAULT_AUTONOMY})).scalar_one()
-    try_reply, try_error = None, None
+    try_reply: str | None = None
+    try_error: str | None = None
+    try_error_code: str | None = None
+    try_reasons: list[str] = []
     try:
         try_reply = await try_chat(request.app.state, row.org_id, agent_id, name=name, role_desc=role_desc,
                                    voice=voice, message=body.try_message)
     except ApiError as e:
-        try_error = e.detail
+        # v0.1.30: `try_error` LUÔN là chuỗi (hợp đồng web `string | null`). Trước đây gán thẳng `e.detail`
+        # (`{"reasons": […]}`) → web vẽ đối tượng làm React child → màn /guide/8 sập (React error #31).
+        try_error = e.detail if isinstance(e.detail, str) and e.detail else e.title
+        try_error_code = e.code
+        try_reasons = [str(r) for r in e.extra.get("reasons") or []]
     state = await _mark_done(db, request, row, owner, 8, {"agent_id": str(agent_id), "name": name})
-    state["agent"] = {"id": str(agent_id), "name": name, "try_reply": try_reply, "try_error": try_error}
+    state["agent"] = {"id": str(agent_id), "name": name, "try_reply": try_reply, "try_error": try_error,
+                      "try_error_code": try_error_code, "try_reasons": try_reasons}
     return state
 
 

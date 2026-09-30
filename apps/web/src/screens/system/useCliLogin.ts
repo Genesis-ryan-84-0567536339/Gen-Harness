@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import type { CliLoginEvent } from '@gen-harness/contracts';
+import { ApiError, type CliLoginEvent } from '@gen-harness/contracts';
 import { api } from '../../lib/api';
 import { qk2 } from '../../lib/dataQueries';
 import { queryClient } from '../../lib/queryClient';
@@ -10,14 +10,35 @@ import { toast } from '../../lib/toast';
  * Antigravity CLI login — URL + paste-back code (contract addendum):
  * POST /cli/login → WS `cli.login` starting → waiting_code {url} → the user
  * pastes the code → POST /cli/login/{id}/code → verifying → done|failed.
+ *
+ * v0.1.30: WS is not the only channel any more — while a login is open the hook also polls
+ * GET /cli/login/{id} every 2 s (before, a missed/blocked WS left the panel stuck on "Đang mở phiên…"
+ * with no link, i.e. "đổi tài khoản không hoạt động").
  */
+export const CLI_LOGIN_POLL_MS = 2000;
+
 export function useCliLogin() {
   const [loginId, setLoginId] = useState<string | null>(null);
   const ev = useQuery<CliLoginEvent | null>({
     queryKey: qk2.cliLogin(loginId ?? '-'),
-    queryFn: () => null,
-    enabled: false,
+    queryFn: async ({ signal }) => {
+      if (!loginId) return null;
+      try {
+        return await api.cli.loginStatus(loginId, signal);
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 404)
+          return { login_id: loginId, status: 'failed', message: 'Phiên đăng nhập đã kết thúc (máy chủ vừa khởi động lại) — bấm “Thử lại”.' };
+        throw e;
+      }
+    },
+    enabled: !!loginId,
     initialData: null,
+    staleTime: 0,
+    retry: false,
+    refetchInterval: (q) => {
+      const st = q.state.data?.status;
+      return st === 'done' || st === 'failed' ? false : CLI_LOGIN_POLL_MS;
+    },
   });
   const start = useMutation({
     mutationFn: () => api.cli.login(),
@@ -47,7 +68,12 @@ export function useCliLogin() {
   const finished = status === 'done' || status === 'failed';
   useEffect(() => {
     if (ev.data?.status === 'done') {
-      toast(ev.data.profile ? `Đã đăng nhập ${ev.data.profile.email}` : 'Đã đăng nhập Antigravity CLI');
+      // Polling may see "done" before (or instead of) the WS event: refresh what the WS handler would.
+      void queryClient.invalidateQueries({ queryKey: qk2.cliProfiles });
+      void queryClient.invalidateQueries({ queryKey: qk2.providers });
+      void queryClient.invalidateQueries({ queryKey: qk2.credentials });
+      const who = ev.data.profile?.email;
+      toast(who ? `Đã thêm tài khoản ${who} — AI đang dùng tài khoản này.` : 'Đã đăng nhập tài khoản Google cho AI.');
       setLoginId(null);
     }
   }, [ev.data]);

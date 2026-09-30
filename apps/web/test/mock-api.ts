@@ -265,6 +265,7 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     state: 'idle', message: null as string | null, from: null as string | null, to: null as string | null, started_at: null as string | null,
     finished_at: null as string | null, requested_at: null as string | null,
     release_url: 'https://github.com/Genesis-ryan-84-0567536339/Gen-Harness/releases', release_notes: '- Nút Cập nhật ngay trong Console',
+    checked_at: new Date().toISOString() as string | null,
   };
   const phase2 = createPhase2({
     fresh: opts.setup === 'fresh',
@@ -928,6 +929,12 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
       record(user, 'user.password_reset');
       notify(target.id, 'user.password_reset', 'Mật khẩu đã được đặt lại', `${user.display_name} đã đặt lại mật khẩu của bạn.`, '/account');
       return reply(200, { user: out(target), temp_password: pw });
+    }
+    if (path === '/system/update/check' && method === 'POST') {
+      // v0.1.30: "Kiểm tra bản mới" — mock coi như vừa hỏi GitHub xong.
+      if ((permissionsOf(user.role.code)['system.manage'] ?? 'none') === 'none') return problem(res, 403, 'FORBIDDEN', 'Không có quyền');
+      sysUpdate.checked_at = new Date().toISOString();
+      return reply(200, { ...sysUpdate, update_available: sysUpdate.latest !== sysUpdate.current, throttled: false });
     }
     if (path === '/system/update') {
       // Như gh/system_api/update.py: system.manage; mock mô phỏng genh trên máy chủ — mỗi lần hỏi tiến một bước

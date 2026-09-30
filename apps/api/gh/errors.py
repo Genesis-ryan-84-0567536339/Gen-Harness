@@ -41,6 +41,17 @@ def pin_required() -> ApiError:
     return ApiError(423, "PIN_REQUIRED", "Thao tác này cần nhập mã PIN")
 
 
+MODEL_UNAVAILABLE_HINT = "Chưa có model AI nào hoạt động — vào Agent & Model (Hướng dẫn bước 4) để chọn hoặc sửa model."
+
+
+def model_unavailable(title: str, reasons: list[str]) -> ApiError:
+    """v0.1.30: 503 MODEL_UNAVAILABLE đúng khuôn lỗi chung — `detail` là CÂU CHỮ cho người đọc (web hiện thẳng),
+    lý do kỹ thuật từng nhà cung cấp nằm ở `reasons` cấp ngoài cùng (chuỗi). Trước đây `detail={"reasons": …}` (đối
+    tượng) → web vẽ thẳng làm React child → sập màn (React error #31)."""
+    clean = [str(r) for r in reasons if str(r).strip()]
+    return ApiError(503, "MODEL_UNAVAILABLE", title, MODEL_UNAVAILABLE_HINT, reasons=clean)
+
+
 def field_errors(errors: dict[str, str]) -> ApiError:
     return ApiError(422, "VALIDATION", "Dữ liệu chưa hợp lệ", errors=errors)
 

@@ -126,6 +126,8 @@
   text-decoration: none; word-break: break-all;
 }
 .cli-login__url:hover { text-decoration: underline; }
+.cli-login__links { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.cli-login__hint { margin: 0; font-size: 11px; color: var(--color-neutral-500); line-height: 1.5; }
 .cli-login__row { display: flex; align-items: flex-end; gap: 8px; flex-wrap: wrap; }
 .cli-login__row > :first-child { flex: 1 1 180px; min-width: 0; }
 .cred { display: flex; align-items: center; gap: 11px; }

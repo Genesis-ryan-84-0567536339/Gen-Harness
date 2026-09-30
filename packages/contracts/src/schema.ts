@@ -24,6 +24,8 @@ export interface components {
       locked_until?: string | null;
       /** 422 field errors: `{ field: message }` */
       errors?: Record<string, string> | null;
+      /** v0.1.30: 503 MODEL_UNAVAILABLE — lý do kỹ thuật từng nhà cung cấp (chuỗi). */
+      reasons?: string[] | null;
     };
     Role: { code: string; name: string };
     Org: { id: string; name: string; timezone: string; currency: string };

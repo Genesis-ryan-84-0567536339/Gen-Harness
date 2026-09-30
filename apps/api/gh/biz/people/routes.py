@@ -33,7 +33,7 @@ from gh.biz.people import service as psvc
 from gh.chassis import actionlog
 from gh.data.common import iso, mask_text, parse_cursor
 from gh.db import DB
-from gh.errors import ApiError, field_errors, forbidden, pin_required
+from gh.errors import ApiError, field_errors, forbidden, model_unavailable, pin_required
 from gh.providers.clients import Message
 from gh.providers.router import ModelUnavailable
 
@@ -627,6 +627,5 @@ async def try_chat(request_app_state: Any, org_id: uuid.UUID, agent_id: uuid.UUI
                                         json_mode=False, temperature=0.4,
                                         messages=[Message("system", system), Message("user", message)])
     except ModelUnavailable as e:
-        raise ApiError(503, "MODEL_UNAVAILABLE", "Chưa có model nào chạy được để thử trò chuyện",
-                       detail={"reasons": e.reasons}) from e
+        raise model_unavailable("Chưa có model nào chạy được để thử trò chuyện", e.reasons) from e
     return routed.text.strip()

@@ -17,7 +17,7 @@ from gh.biz.core.scope import Scope, ensure_group, ensure_person, not_found, sco
 from gh.chassis import actionlog
 from gh.data.common import iso, mask_text, parse_cursor
 from gh.db import DB
-from gh.errors import ApiError, forbidden
+from gh.errors import ApiError, forbidden, model_unavailable
 from gh.providers.clients import Message
 from gh.providers.router import ModelUnavailable
 from gh.shell import navigation
@@ -314,6 +314,11 @@ class TranslateIn(BaseModel):
     lang: Literal["vi", "en", "zh", "ja", "ko"]
 
 
+def _owner_reasons(user: service.CurrentUser, reasons: list[str]) -> list[str]:
+    """Lý do kỹ thuật từng nhà cung cấp (tên nguồn, nhãn khoá, lỗi gốc) chỉ cho Owner; vai trò khác thấy câu chung."""
+    return reasons if user.role_code == rbac.OWNER else []
+
+
 def _agent_key(r: Any) -> str:
     return f"agent:{r.agent_id}" if r.agent_id else "core.reply_fast"
 
@@ -331,8 +336,7 @@ async def translate(draft_id: uuid.UUID, body: TranslateIn, request: Request,
                                         "định dạng đoạn. Chỉ trả bản dịch, không thêm lời."),
                       Message("user", src)])
     except ModelUnavailable as e:
-        raise ApiError(503, "MODEL_UNAVAILABLE", "Chưa có model nào chạy được để dịch",
-                       detail={"reasons": e.reasons}) from e
+        raise model_unavailable("Chưa có model nào chạy được để dịch", _owner_reasons(user, e.reasons)) from e
     owner = user.role_code == rbac.OWNER
     return {"lang": body.lang, "text": mask_text(routed.text.strip(), owner)}
 
@@ -359,8 +363,7 @@ async def regenerate(draft_id: uuid.UUID, request: Request, body: RegenerateIn |
                       Message("user", f"Bản nháp:\n{cur.get('text', '')}\n\nNguồn đã dùng:\n{ctx}\n\n"
                                       f"Yêu cầu: {ask}")])
     except ModelUnavailable as e:
-        raise ApiError(503, "MODEL_UNAVAILABLE", "Chưa có model nào chạy được để soạn lại",
-                       detail={"reasons": e.reasons}) from e
+        raise model_unavailable("Chưa có model nào chạy được để soạn lại", _owner_reasons(user, e.reasons)) from e
     versions = [*list(cur.get("versions") or []),
                 {"at": iso(datetime.now(UTC)),
                  "by": "agent" if r.agent_id else "user", "text": cur.get("text", "")}]

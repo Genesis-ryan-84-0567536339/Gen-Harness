@@ -9,6 +9,8 @@ export const queryClient = new QueryClient({
       retry: (failureCount, error) => {
         // 4xx (auth, permission, setup, validation) will not fix itself.
         if (error instanceof ApiError && error.status >= 400 && error.status < 500) return false;
+        // v0.1.30: không có model AI chạy được — thử lại ngay không giúp gì, hiện "Chọn model" luôn.
+        if (error instanceof ApiError && error.code === 'MODEL_UNAVAILABLE') return false;
         return failureCount < 2;
       },
     },

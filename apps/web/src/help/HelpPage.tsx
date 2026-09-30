@@ -9,6 +9,7 @@ import { useMe } from '../lib/queries';
 import { toast } from '../lib/toast';
 import { CardError, SkeletonLines } from '../screens/common';
 import { ScreenTitle } from '../screens/ScreenPage';
+import { UpdateCard } from '../update/UpdateCard';
 import { GENH_COMMANDS, diagnosticText } from './helpModel';
 import { roleLabel } from '../screens/system/systemModel';
 
@@ -86,6 +87,9 @@ export function HelpPage() {
             ) : null}
           </Card>
         ) : null}
+
+        {/* v0.1.30: mục "Cập nhật phần mềm" cố định (vai trò có system.manage). */}
+        {canGuide ? <UpdateCard always /> : null}
 
         {canGuide ? (
           <Card title="Hướng dẫn kết nối" kicker="Kênh, nhóm, sàng lọc, agent, đội ngũ, sao lưu">

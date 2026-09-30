@@ -128,8 +128,8 @@ Loại điều kiện: `keyword_any {values}`, `keyword_all {values}`, `regex {p
 - `GET /providers/credentials` → dòng thẻ "Khoá & phiên" của tab Kênh: `[{"icon","name","meta","state":"ok|warn|bad","state_label"}]`.
 - Antigravity CLI:
   - `GET /cli/profiles` → `[{"id","email","plan_label","active":true,"expires_at","state":"ok|expiring|expired"}]`.
-  - `POST /cli/login` (`system.manage`) → `202 {"login_id"}`; tiến trình qua WS `cli.login` `{"login_id","status":"starting|waiting_code|verifying|done|failed","url","message","profile"?}`. Owner mở `url`, đăng nhập Google, dán mã: `POST /cli/login/{id}/code` `{"code"}` → 202. Huỷ: `POST /cli/login/{id}/cancel` → 204.
-  - `POST /cli/profiles/{id}/activate` 🔒 `cli.switch_account` → hồ sơ. `DELETE /cli/profiles/{id}` 🔒.
+  - `POST /cli/login` (`system.manage`) → `202 {"login_id"}`; tiến trình qua WS `cli.login` `{"login_id","status":"starting|waiting_code|verifying|done|failed","url","message","profile"?}`. Owner mở `url`, đăng nhập Google, dán mã: `POST /cli/login/{id}/code` `{"code"}` → 202. Huỷ: `POST /cli/login/{id}/cancel` → 204. v0.1.30: `GET /cli/login/{id}` (`system.manage`) → cùng dạng sự kiện WS (dự phòng khi WS không tới; 404 khi không còn phiên).
+  - `POST /cli/profiles/{id}/activate` 🔒 `cli.switch_account` → hồ sơ. `DELETE /cli/profiles/{id}` 🔒. 409 `CLI_LOGIN_IN_PROGRESS` khi đang đăng nhập thêm tài khoản; 409 `CLI_PROFILE_NO_SESSION` khi hồ sơ không có phiên đã lưu. `email` có thể `null` (tệp phiên không cho biết email).
 
 ## Trình thiết lập bước 4–7, 12
 

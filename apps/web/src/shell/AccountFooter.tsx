@@ -159,6 +159,20 @@ function AccountMenu({ email, isOwner, onClose }: { email?: string; isOwner?: bo
         <Icon name="ph ph-question" size={15} />
         Trợ giúp
       </button>
+      {isOwner ? (
+        <button
+          type="button"
+          role="menuitem"
+          className="sb-menu__item"
+          onClick={() => {
+            navigate('/guide');
+            onClose(false);
+          }}
+        >
+          <Icon name="ph ph-list-checks" size={15} />
+          Hướng dẫn thiết lập
+        </button>
+      ) : null}
       <button
         type="button"
         role="menuitem"

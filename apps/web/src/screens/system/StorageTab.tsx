@@ -7,6 +7,7 @@ import { useCan, useOrgTimezone } from '../../lib/permissions';
 import { errorText } from '../../lib/errorText';
 import { toast } from '../../lib/toast';
 import { CardError, InlineError, Panel, SkeletonLines } from '../common';
+import { UpdateCard } from '../../update/UpdateCard';
 import { BackupPanel } from './BackupPanel';
 import { DATA_REQUEST_KIND, RETENTION_LABEL } from './systemModel';
 import { useCreateDataRequest, usePatchRetention, usePersonDataRequests, useRetentionPolicies } from './queries';
@@ -15,6 +16,7 @@ import { useCreateDataRequest, usePatchRetention, usePersonDataRequests, useRete
  * dữ liệu một người (PLAN 4.5). */
 export function StorageTab() {
   const canRead = useCan('system.read');
+  const canManage = useCan('system.manage');
   if (!canRead) {
     return (
       <div className="gh-card">
@@ -24,6 +26,8 @@ export function StorageTab() {
   }
   return (
     <div className="sys-tabs-col">
+      {/* v0.1.30: mục cập nhật cố định — thẻ Tổng quan chỉ hiện khi đã biết có bản mới. */}
+      {canManage ? <UpdateCard always /> : null}
       <BackupPanel />
       <RetentionPanel />
       <PersonDataRequestPanel />

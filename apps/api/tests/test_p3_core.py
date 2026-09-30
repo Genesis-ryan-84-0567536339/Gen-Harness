@@ -318,6 +318,22 @@ async def test_translate_and_regenerate_use_model_router(world, owner_api: Api, 
     assert r.status_code == 503 and r.json()["code"] == "MODEL_UNAVAILABLE"
 
 
+async def test_model_unavailable_reasons_are_hidden_from_non_owner(world, owner_api: Api, client, db,  # type: ignore[no-untyped-def]
+                                                                  app) -> None:
+    """v0.1.30: lý do kỹ thuật (tên nguồn, nhãn khoá, lỗi gốc) chỉ trả cho Owner; nhân viên thấy câu chung."""
+    from tests.phase2 import FakeRouter
+
+    d = (await owner_api.send("POST", "/drafts", {"kind": "message", "title": "x", "text": "y",
+                                                    "subject": {"type": "person", "id": str(world["person"])}})).json()
+    staff = await login_as(client, db, "agent_staff")
+    await assign(db, "agent_staff@example.vn", "person", world["person"])
+    app.state.model_router = FakeRouter(down=True)
+    for path, payload in ((f"/drafts/{d['id']}/translate", {"lang": "en"}), (f"/drafts/{d['id']}/regenerate", {})):
+        r = await staff.send("POST", path, payload)
+        assert r.status_code == 503 and r.json()["code"] == "MODEL_UNAVAILABLE"
+        assert r.json()["reasons"] == [] and isinstance(r.json()["detail"], str)
+
+
 async def test_note_side_action_defaults_to_a_valid_notebook_section(world, db) -> None:  # type: ignore[no-untyped-def]
     await drafts._execute_internal(db, world["org"], None, "note.write", "Khách thích gọi buổi sáng",
                                    ("person", world["person"]), None)

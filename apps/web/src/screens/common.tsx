@@ -1,7 +1,8 @@
 import type { CSSProperties, ReactNode } from 'react';
-import { ErrorState, Skeleton, cx } from '@gen-harness/ui';
-import { errorText } from '../lib/errorText';
-import { friendlyError } from '../lib/friendlyError';
+import { Link } from 'react-router-dom';
+import { ErrorState, Icon, Skeleton, cx } from '@gen-harness/ui';
+import { errorReasons, errorText, isModelUnavailable } from '../lib/errorText';
+import { MODEL_UNAVAILABLE_TEXT, friendlyError } from '../lib/friendlyError';
 
 /**
  * Screen-title row (docs/01 "Quy ước chung"): text block left, controls
@@ -122,7 +123,33 @@ export function SkeletonLines({ rows = 4, padding = '14px 16px', gap = 12 }: { r
 }
 
 export function CardError({ error, onRetry, retrying }: { error: unknown; onRetry?: () => void; retrying?: boolean }) {
+  if (isModelUnavailable(error)) return <ModelUnavailableNotice reasons={errorReasons(error)} />;
   return <ErrorState message={errorText(error)} onRetry={onRetry} retrying={retrying} />;
+}
+
+/**
+ * v0.1.30: "chưa có model AI hoạt động" — trạng thái tại chỗ có nút "Chọn model" (→ /guide/4, bước chọn model),
+ * lý do kỹ thuật từng nhà cung cấp ẩn trong "Chi tiết kỹ thuật". Dùng thay cho việc vẽ lỗi thô.
+ */
+export function ModelUnavailableNotice({ reasons, message, className }: { reasons?: string | string[] | null; message?: string; className?: string }) {
+  const tech = Array.isArray(reasons) ? reasons.filter(Boolean).join('; ') : reasons;
+  return (
+    <div className={cx('model-down', className)} role="status" data-testid="model-unavailable">
+      <Icon name="ph ph-warning-circle" size={16} />
+      <div className="model-down__body">
+        <div className="model-down__msg">{message || MODEL_UNAVAILABLE_TEXT}</div>
+        {tech ? (
+          <details className="tech-detail">
+            <summary>Chi tiết kỹ thuật</summary>
+            <code>{tech}</code>
+          </details>
+        ) : null}
+      </div>
+      <Link to="/guide/4" className="gh-btn gh-btn--secondary gh-btn--sm model-down__cta">
+        <Icon name="ph ph-plugs" size={14} /> Chọn model
+      </Link>
+    </div>
+  );
 }
 
 /** Inline form/action error line (11px BAD). */
@@ -138,7 +165,7 @@ export function InlineError({ children }: { children?: ReactNode }) {
  * v0.1.28 (UX N2): lỗi từ máy chủ/nhà cung cấp viết lại bằng câu dễ hiểu; chuỗi gốc nằm trong "Chi tiết kỹ thuật"
  * (đóng sẵn) cho người hỗ trợ.
  */
-export function FriendlyErrorText({ raw, fallback, prefix, className }: { raw: string | null | undefined; fallback?: string; prefix?: string; className?: string }) {
+export function FriendlyErrorText({ raw, fallback, prefix, className }: { raw: unknown; fallback?: string; prefix?: string; className?: string }) {
   const f = friendlyError(raw, fallback);
   return (
     <span className={cx('friendly-error', className)}>
