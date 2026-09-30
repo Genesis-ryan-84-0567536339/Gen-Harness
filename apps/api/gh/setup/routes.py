@@ -307,12 +307,14 @@ async def skip(n: int, request: Request, db: AsyncSession = DB,
     completed = dict(row.completed or {})
     done = dict(completed.get("steps", {}))
     if done.get(str(n)) != "done":
+        first_skip = str(n) not in done
         done[str(n)] = "skipped"
         # v0.1.28 (UX N3/N4): "Để sau" = dùng mặc định, không phải "không có gì". Bước 7 → nạp bộ quy tắc khởi đầu
-        # (nếu tổ chức chưa có quy tắc nào); bước 11 → lịch sao lưu hằng ngày 02:00 (nếu chưa có lịch).
-        if n == 7:
+        # (nếu tổ chức chưa có quy tắc nào); bước 11 → lịch sao lưu hằng ngày 02:00 (nếu chưa có lịch). Chỉ lần
+        # "Để sau" ĐẦU TIÊN — bấm lại sau khi Owner đã xoá bộ mặc định thì không nạp lại.
+        if first_skip and n == 7:
             await seed_default_rules(db, row.org_id, owner.id)
-        elif n == 11:
+        elif first_skip and n == 11:
             await db.execute(text("""UPDATE core.organizations SET settings = settings || CAST(:s AS jsonb)
                                      WHERE id = :o AND NOT (settings ? 'backup')"""),
                              {"s": json.dumps({"backup": DEFAULT_BACKUP}), "o": row.org_id})
@@ -450,7 +452,7 @@ async def step4(body: Step4In, request: Request, db: AsyncSession = DB,
 
 async def _first_model(db: AsyncSession, provider_id: uuid.UUID) -> uuid.UUID | None:
     return (await db.execute(text("""SELECT id FROM agent.models WHERE provider_id = :p
-                                     AND model_name NOT ILIKE '%embed%' ORDER BY id LIMIT 1"""),
+                                     AND is_enabled AND model_name NOT ILIKE '%embed%' ORDER BY id LIMIT 1"""),
                              {"p": provider_id})).scalar_one_or_none()
 
 

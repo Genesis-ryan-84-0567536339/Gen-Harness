@@ -112,6 +112,20 @@ async def test_skip_7_keeps_existing_rules(owner_api, db) -> None:  # type: igno
     assert n == 1
 
 
+async def test_skip_7_again_does_not_reseed_after_owner_removed_defaults(owner_api, db) -> None:  # type: ignore[no-untyped-def]
+    """Bấm "Để sau" lần hai (quay lại bước 7) sau khi Owner đã xoá bộ mặc định → không nạp lại."""
+    api: Api = owner_api
+    org = await org_id(db)
+    assert (await api.send("POST", "/setup/steps/7/skip")).status_code == 200
+    await db.execute(text("""DELETE FROM refinery.rule_versions
+                             WHERE rule_id IN (SELECT id FROM refinery.rules WHERE org_id = :o)"""), {"o": org})
+    await db.execute(text("DELETE FROM refinery.rules WHERE org_id = :o"), {"o": org})
+    await db.commit()
+    assert (await api.send("POST", "/setup/steps/7/skip")).status_code == 200
+    n = (await db.execute(text("SELECT count(*) FROM refinery.rules WHERE org_id = :o"), {"o": org})).scalar_one()
+    assert n == 0
+
+
 def test_temp_password_has_no_ambiguous_characters() -> None:
     for _ in range(200):
         pw = crypto.temp_password()
