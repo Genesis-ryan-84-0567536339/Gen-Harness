@@ -184,6 +184,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await app.state.cli_logins.shutdown()
         await app.state.ws_hub.stop()
         await app.state.plugins.shutdown()
+        await social_service.close_bus(app.state.redis)
         await app.state.redis.aclose()
         await dispose_engine()
 

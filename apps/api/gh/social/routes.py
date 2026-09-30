@@ -232,7 +232,8 @@ async def login_view(ws: WebSocket, ticket: str) -> None:
         await ws.close(code=4403)
         return
     key = crypto.browser_key()
-    pubsub = redis.pubsub()
+    chan = social.bus(redis)          # kênh riêng với browser-worker — không phải Redis chính
+    pubsub = chan.pubsub()
     await pubsub.subscribe(protocol.FRAMES_PREFIX + ticket)
 
     async def pump_frames() -> None:
@@ -267,7 +268,7 @@ async def login_view(ws: WebSocket, ticket: str) -> None:
             if ev is None:
                 continue
             ev |= {"ticket": ticket, "ts": int(social._now().timestamp())}
-            await redis.publish(protocol.INPUT_PREFIX + ticket, orjson.dumps(protocol.sign(key, protocol.P_INPUT, ev)))
+            await chan.publish(protocol.INPUT_PREFIX + ticket, orjson.dumps(protocol.sign(key, protocol.P_INPUT, ev)))
             if ev["type"] == "cancel":
                 async with sessionmaker()() as db:
                     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,

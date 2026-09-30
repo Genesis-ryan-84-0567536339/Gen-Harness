@@ -509,6 +509,27 @@ jobs:
           if grep -Eiq 'unhealthy|exited|restarting' /tmp/genh-status-upg.txt; then
             echo "::error::có dịch vụ không healthy sau nâng cấp" >&2; exit 1
           fi
+          # Cách ly: container Chromium (browser) và browser-egress KHÔNG được tới Redis chính (hàng đợi arq của
+          # worker giữ khoá master) hay Postgres; browser chỉ tới browser-redis.
+          probe() {  # probe <service> <host> <port> → in "reach" hoặc "blocked"
+            local cid
+            cid="$(docker ps -q --filter "label=com.docker.compose.service=$1" | head -n1)"
+            [ -n "$cid" ] || { echo "::error::không thấy container $1" >&2; exit 1; }
+            docker exec "$cid" python3 -c "import socket,sys
+          try:
+              socket.create_connection(('$2', $3), 3).close(); print('reach')
+          except OSError:
+              print('blocked')"
+          }
+          for svc in browser browser-egress; do
+            for target in redis:6379 db:5432 api:8000; do
+              r="$(probe "$svc" "${target%%:*}" "${target##*:}")"
+              echo "$svc → $target: $r"
+              [ "$r" = "blocked" ] || { echo "::error::$svc tới được $target — phải bị chặn" >&2; exit 1; }
+            done
+          done
+          r="$(probe browser browser-redis 6379)"; echo "browser → browser-redis:6379: $r"
+          [ "$r" = "reach" ] || { echo "::error::browser không tới được browser-redis" >&2; exit 1; }
 
       - name: Kiểm dữ liệu/bí mật KHÔNG bị tạo lại (app_db_password không đổi)
         if: steps.prev.outputs.skip == 'false'

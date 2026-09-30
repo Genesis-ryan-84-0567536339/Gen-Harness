@@ -7,7 +7,9 @@ phiên mã hoá bằng khoá master (không lộ cookie ở CSDL/API), gỡ = xo
 giới hạn tốc độ + 1 việc/tài khoản, checkpoint → dừng + chuông, bọc dữ liệu không tin cậy cho Gen, lịch đọc.
 """
 
+import asyncio
 import uuid
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -25,7 +27,7 @@ from gh.gen.tools import TOOLS, ToolRunner
 from gh.social import permit, platforms, protocol
 from gh.social import service as social
 from gh.social.routes import clean_input
-from tests.conftest import OWNER, Api
+from tests.conftest import OWNER, REDIS_URL, Api
 from tests.phase2 import org_id
 from tests.test_actionlog_db import _set_scope
 from tests.test_gen import _user_of
@@ -401,3 +403,54 @@ async def test_schedule_off_by_default_then_runs_once_per_slot(owner_api: Api, r
         assert await social.schedule_tick(s, redis, at + timedelta(minutes=1)) == 0
     via = (await db.execute(text("SELECT via FROM agent.browser_jobs WHERE kind = 'read'"))).scalars().all()
     assert via == ["schedule"]
+
+
+# ─── kênh Redis riêng với browser-worker (cách ly Chromium khỏi Redis chính) ────────
+
+@pytest.fixture
+async def browser_bus(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[Redis]:
+    """GH_BROWSER_REDIS_URL trỏ DB Redis khác (như dịch vụ browser-redis) — phải đặt TRƯỚC khi app dựng."""
+    url = REDIS_URL.rsplit("/", 1)[0] + "/13"
+    monkeypatch.setenv("GH_BROWSER_REDIS_URL", url)
+    b = Redis.from_url(url)
+    await b.flushdb()
+    yield b
+    await b.flushdb()
+    await b.aclose()
+
+
+async def test_browser_protocol_lives_on_separate_redis(browser_bus: Redis, owner_api: Api, redis: Redis,
+                                                        db: Any) -> None:
+    acc = await _add(owner_api)
+    await _pin(owner_api)
+    r = await owner_api.send("POST", f"/social/accounts/{acc['id']}/login", {})
+    assert r.status_code == 200, r.text
+    ticket = r.json()["ticket"]
+    # Việc chỉ ở kênh browser; vé đăng nhập chỉ ở Redis chính (browser không đọc được).
+    assert not await redis.exists(protocol.JOBS_STREAM)
+    job = (await _jobs(browser_bus))[-1]
+    assert await redis.exists(social.TICKET_PREFIX + ticket)
+    assert not await browser_bus.exists(social.TICKET_PREFIX + ticket)
+    # Kết quả đến qua kênh browser → consumer trong api xử lý.
+    await browser_bus.xadd(protocol.RESULTS_STREAM, {"m": orjson.dumps(_result(job, "started"))})
+    st = ""
+    for _ in range(50):
+        st = (await db.execute(text("SELECT status FROM agent.browser_jobs WHERE id = :i"),
+                               {"i": job["id"]})).scalar_one()
+        await db.rollback()
+        if st == "running":
+            break
+        await asyncio.sleep(0.1)
+    assert st == "running"
+    await browser_bus.set(protocol.HEARTBEAT_KEY, orjson.dumps({"version": "t", "at": "x", "running": 1}))
+    assert (await owner_api.send("GET", "/social/status")).json()["worker"]["running"] == 1
+    # Dừng tất cả: cờ gốc ở Redis chính, bản sao ở kênh browser; browser xoá bản sao cũng không mở lại được.
+    assert (await owner_api.send("POST", "/social/halt", {})).status_code == 200
+    assert await redis.exists(protocol.HALT_KEY) and await browser_bus.exists(protocol.HALT_KEY)
+    await browser_bus.delete(protocol.HALT_KEY)
+    assert (await owner_api.send("GET", "/social/status")).json()["halted"] is True
+    await _pin(owner_api)
+    r = await owner_api.send("POST", f"/social/accounts/{acc['id']}/login", {})
+    assert r.status_code == 409 and r.json()["code"] == "SOCIAL_HALTED"
+    assert (await owner_api.send("DELETE", "/social/halt")).status_code == 200
+    assert not await redis.exists(protocol.HALT_KEY) and not await browser_bus.exists(protocol.HALT_KEY)

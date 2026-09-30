@@ -1,10 +1,36 @@
 # Giao thức api ↔ browser-worker (Redis, v0.1.29)
 
 browser-worker (`apps/browser`, ảnh `deploy/images/browser.Dockerfile`, dịch vụ `browser`) là tiến trình duy nhất chạy
-Chromium (Playwright). Như bridge: **không** truy cập PostgreSQL, **không** giữ khoá master, **không** gọi model. Chỉ ở
-mạng nội bộ `browser` (không ra Internet); lối ra duy nhất là `browser-egress` (chỉ `CONNECT :443` tới tên miền nền tảng,
-chặn IP nội bộ, ghim DNS). Mã hai phía: `apps/api/gh/social/protocol.py` = `apps/browser/ghb/protocol.py` (bản sao,
-cùng vectơ thử).
+Chromium (Playwright). **Không** truy cập PostgreSQL, **không** giữ khoá master, **không** gọi model, **không** thấy
+Redis chính. Chỉ ở mạng nội bộ `browser` (không ra Internet); lối ra duy nhất là `browser-egress` (chỉ `CONNECT :443` tới
+tên miền nền tảng, chặn IP nội bộ, ghim DNS; bản thân egress chỉ ở `browser` + `browser-out`, cũng không thấy Redis
+chính/Postgres/api). Mã hai phía: `apps/api/gh/social/protocol.py` = `apps/browser/ghb/protocol.py` (bản sao, cùng
+vectơ thử).
+
+## Kênh Redis riêng (`browser-redis`)
+
+Chromium chạy trang không tin cậy với sandbox Chromium TẮT, nên container `browser` coi như có thể bị chiếm. Vì vậy mọi
+khoá `gh:browser:*` bên dưới nằm ở một Redis RIÊNG `browser-redis` (`GH_BROWSER_REDIS_URL`), không phải Redis chính
+(hàng đợi arq của worker giữ khoá master, khoá phiên, realtime…):
+
+| mạng | thành viên |
+|---|---|
+| `browser` (internal) | browser, browser-egress, browser-redis |
+| `browser-bus` (internal) | browser-redis, api, worker |
+| `browser-out` | browser-egress (ra Internet) |
+| `default` | api, worker, redis, db, bridge, web, proxy |
+
+- browser-redis: không lưu đĩa, `maxmemory 64mb noeviction`, ACL mặc định `+@all -@dangerous -@scripting` (không
+  EVAL/FUNCTION, CONFIG, KEYS, FLUSH*, DEBUG, MODULE, SAVE, REPLICAOF…), rootfs chỉ đọc, `cap_drop ALL` (+SETUID/SETGID
+  để hạ quyền về user redis). Không có hàng đợi arq hay khoá nào khác trên đó.
+- Cờ Dừng tất cả GỐC ở Redis chính (browser không xoá được); api chép sang `browser-redis` khi bật/tắt và mỗi ~30 s
+  (browser-redis khởi động lại thì nhóm consumer + bản sao cờ được tạo lại). Vé đăng nhập (`gh:social:ticket:*`) và khoá
+  lịch (`gh:social:sched:*`) ở Redis chính.
+- Dev/test không đặt `GH_BROWSER_REDIS_URL` → dùng chung `GH_REDIS_URL`.
+- arq mã hoá việc/kết quả bằng JSON (`gh/jobcodec.py`), không pickle — lớp phòng thủ thứ hai nếu Redis chính bị ghi bậy.
+- Sandbox Chromium vẫn TẮT: bật cần user namespace không đặc quyền (seccomp + AppArmor mặc định của Docker chặn
+  `unshare(CLONE_NEWUSER)`; Ubuntu ≥ 23.10 còn hạn chế userns) hoặc `chrome-sandbox` setuid (trái `no-new-privileges`).
+  Làm được bằng hồ sơ seccomp riêng + AppArmor riêng do genh cài — để bản sau; hiện bù bằng cách ly container/mạng.
 
 ## Khoá browser
 

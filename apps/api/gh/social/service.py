@@ -15,6 +15,7 @@ import logging
 import re
 import secrets
 import uuid
+import weakref
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -27,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gh import crypto, notifications, realtime
 from gh.auth import service as auth_service
 from gh.chassis import actionlog
+from gh.config import get_settings
 from gh.errors import ApiError, conflict, field_errors, not_found
 from gh.social import platforms, protocol
 
@@ -66,6 +68,44 @@ def _iso(v: datetime | None) -> str | None:
     return v.isoformat() if v else None
 
 
+# ─── kênh riêng với browser-worker ─────────────────────────────────────────────
+# Chromium chạy trang không tin cậy → container `browser` KHÔNG thấy Redis chính (hàng đợi arq, khoá phiên, pub/sub
+# realtime…). api/worker nói với nó qua một Redis RIÊNG (`browser-redis`, GH_BROWSER_REDIS_URL): chỉ các khoá
+# `gh:browser:*` của giao thức (việc, kết quả, điều khiển, khung hình, nhịp tim). Mọi thứ khác — vé đăng nhập, lịch,
+# realtime, cờ Dừng tất cả GỐC — vẫn ở Redis chính mà browser không chạm được.
+
+_BUSES: "weakref.WeakKeyDictionary[Redis, Redis]" = weakref.WeakKeyDictionary()
+
+
+def bus(redis: Redis) -> Redis:
+    """Redis kênh browser đi kèm client Redis chính `redis` (tạo một lần). Chưa cấu hình (dev/test) → chính `redis`."""
+    url = get_settings().browser_redis_url
+    if not url:
+        return redis
+    b = _BUSES.get(redis)
+    if b is None:
+        b = _BUSES[redis] = Redis.from_url(url, decode_responses=False)
+    return b
+
+
+async def close_bus(redis: Redis) -> None:
+    b = _BUSES.pop(redis, None)
+    if b is not None:
+        await b.aclose()
+
+
+async def _sync_halt_mirror(redis: Redis) -> None:
+    """Cờ Dừng tất cả GỐC ở Redis chính (browser không xoá được); bản sao ở kênh browser để worker thấy."""
+    b = bus(redis)
+    if b is redis:
+        return
+    raw = await redis.get(protocol.HALT_KEY)
+    if raw:
+        await b.set(protocol.HALT_KEY, raw)
+    else:
+        await b.delete(protocol.HALT_KEY)
+
+
 # ─── trạng thái chung ──────────────────────────────────────────────────────────
 
 async def halt_state(redis: Redis) -> dict[str, Any] | None:
@@ -80,7 +120,7 @@ async def halt_state(redis: Redis) -> dict[str, Any] | None:
 
 
 async def worker_state(redis: Redis) -> dict[str, Any] | None:
-    raw = await redis.get(protocol.HEARTBEAT_KEY)
+    raw = await bus(redis).get(protocol.HEARTBEAT_KEY)
     if not raw:
         return None
     try:
@@ -262,7 +302,8 @@ async def set_halt(db: AsyncSession, redis: Redis, user: auth_service.CurrentUse
     key = crypto.browser_key()
     if on:
         await redis.set(protocol.HALT_KEY, orjson.dumps({"at": _now().isoformat(), "by": str(user.id)}))
-        await redis.publish(protocol.CONTROL_CHANNEL, orjson.dumps(
+        await _sync_halt_mirror(redis)
+        await bus(redis).publish(protocol.CONTROL_CHANNEL, orjson.dumps(
             protocol.sign(key, protocol.P_CONTROL, {"type": "halt", "ts": int(_now().timestamp())})))
         rows = (await db.execute(text("""UPDATE agent.browser_jobs SET status = 'halted', finished_at = now(),
                                                 error = 'HALTED'
@@ -273,6 +314,7 @@ async def set_halt(db: AsyncSession, redis: Redis, user: auth_service.CurrentUse
                                detail={"jobs_halted": len(rows)}, ip=user.ip)
     else:
         await redis.delete(protocol.HALT_KEY)
+        await _sync_halt_mirror(redis)
         await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                                action="social.halt_released", target_type="browser", target_label="Bật lại",
                                ip=user.ip)
@@ -344,7 +386,7 @@ async def _cancel_active(db: AsyncSession, redis: Redis, account_id: uuid.UUID, 
                             {"a": account_id, "s": status})).scalars().all()
     key = crypto.browser_key()
     for jid in ids:
-        await redis.publish(protocol.CONTROL_CHANNEL, orjson.dumps(protocol.sign(
+        await bus(redis).publish(protocol.CONTROL_CHANNEL, orjson.dumps(protocol.sign(
             key, protocol.P_CONTROL, {"type": "cancel", "job_id": str(jid), "ts": int(_now().timestamp())})))
 
 
@@ -374,7 +416,7 @@ async def _enqueue(db: AsyncSession, redis: Redis, *, org_id: uuid.UUID, account
         "exp": int((_now() + timedelta(seconds=JOB_TTL_S)).timestamp()), "payload": payload})
     # Việc chỉ vào hàng đợi SAU KHI dòng DB đã commit — worker báo kết quả cho một job_id có thật.
     await db.commit()
-    await redis.xadd(protocol.JOBS_STREAM, {"m": orjson.dumps(env)}, maxlen=1000, approximate=True)
+    await bus(redis).xadd(protocol.JOBS_STREAM, {"m": orjson.dumps(env)}, maxlen=1000, approximate=True)
     return job_id
 
 
@@ -774,15 +816,20 @@ async def _push(redis: Redis, org_id: uuid.UUID, account_id: uuid.UUID) -> None:
 
 
 async def consume_results(sm: Any, redis: Redis, stop: asyncio.Event, consumer: str) -> None:
-    """Vòng tiêu thụ `gh:browser:results` (nhóm `api`) trong tiến trình api — mỗi kết quả một transaction."""
-    try:
-        await redis.xgroup_create(protocol.RESULTS_STREAM, protocol.RESULTS_GROUP, id="0", mkstream=True)
-    except Exception:  # noqa: BLE001 — nhóm đã có
-        pass
+    """Vòng tiêu thụ `gh:browser:results` (nhóm `api`, trên kênh browser) trong tiến trình api — mỗi kết quả một
+    transaction. Kênh browser không lưu xuống đĩa: mất/khởi động lại thì tạo lại nhóm + chép lại cờ Dừng tất cả."""
+    b = bus(redis)
+    loop = asyncio.get_running_loop()
+    ready_at: float | None = None
     while not stop.is_set():
         try:
-            resp = await redis.xreadgroup(protocol.RESULTS_GROUP, consumer, {protocol.RESULTS_STREAM: ">"},
-                                          count=20, block=2000)
+            if ready_at is None or loop.time() - ready_at > 30:
+                with contextlib.suppress(Exception):  # nhóm đã có
+                    await b.xgroup_create(protocol.RESULTS_STREAM, protocol.RESULTS_GROUP, id="0", mkstream=True)
+                await _sync_halt_mirror(redis)
+                ready_at = loop.time()
+            resp = await b.xreadgroup(protocol.RESULTS_GROUP, consumer, {protocol.RESULTS_STREAM: ">"},
+                                      count=20, block=2000)
             for _stream, entries in resp or []:
                 for entry_id, fields in entries:
                     raw = fields.get(b"m") or fields.get("m")
@@ -792,10 +839,11 @@ async def consume_results(sm: Any, redis: Redis, stop: asyncio.Event, consumer: 
                             await db.commit()
                     except Exception as exc:  # noqa: BLE001 — một kết quả hỏng không chặn các kết quả sau
                         log.error("xử lý kết quả trình duyệt lỗi: %s", exc)
-                    await redis.xack(protocol.RESULTS_STREAM, protocol.RESULTS_GROUP, entry_id)
+                    await b.xack(protocol.RESULTS_STREAM, protocol.RESULTS_GROUP, entry_id)
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 — mất Redis thì thử lại
             log.warning("consumer kết quả trình duyệt: %s", exc)
+            ready_at = None
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(stop.wait(), timeout=2)

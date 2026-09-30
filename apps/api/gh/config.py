@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     # hoá phiên mạng xã hội khi truyền qua Redis (docs/api/browser-protocol.md). Worker không bao giờ nhận khoá master.
     browser_key: str = ""
     browser_key_file: str = ""
+    # Redis RIÊNG nói chuyện với browser-worker (dịch vụ `browser-redis`, không hàng đợi arq, không dữ liệu nào khác):
+    # container Chromium KHÔNG có đường mạng tới Redis chính. Rỗng (dev/test) ⇒ dùng chung `redis_url`.
+    browser_redis_url: str = ""
     # Khoá RIÊNG cho backup CSDL (32 byte, dạng HEX 64 ký tự — khác `master_key` vốn là base64, xem hợp đồng
     # với genh ở docs/reports/HANDOFF-v0.1.2.md): backup MỚI mã hoá bằng khoá này khi có cấu hình, tách biệt
     # với bí mật ứng dụng (`master_key`) — mất một khoá không kéo theo mất khoá kia. Trống ⇒ giữ hành vi cũ

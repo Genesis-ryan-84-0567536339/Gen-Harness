@@ -15,7 +15,7 @@ from arq.connections import RedisSettings
 from redis.asyncio import Redis
 from sqlalchemy import text
 
-from gh import biz, notifications
+from gh import biz, jobcodec, notifications
 from gh.app import build_plugin_manager, configure_logging
 from gh.auth import service as auth_service
 from gh.backup import FUNCTIONS as BACKUP_FUNCTIONS
@@ -71,6 +71,7 @@ async def shutdown(ctx: dict[str, Any]) -> None:
     await asyncio.gather(*ctx["hooks"], return_exceptions=True)
     await ctx["scheduler"].stop()
     await ctx["plugins"].shutdown()
+    await social.close_bus(ctx["redis_bus"])
     await ctx["redis_bus"].aclose()
     await dispose_engine()
 
@@ -178,6 +179,9 @@ _BIZ_JOBS = [*biz.jobs(), *BACKUP_JOBS]  # PLAN §5.6 — gh.backup.scheduled_ba
 
 class WorkerSettings:
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
+    # JSON thay pickle — Redis bị ghi bậy cũng không thành chạy mã trong worker (gh/jobcodec.py).
+    job_serializer = staticmethod(jobcodec.dumps)
+    job_deserializer = staticmethod(jobcodec.loads)
     on_startup = startup
     on_shutdown = shutdown
     functions = [verify_action_log, partition_maintenance, detect_identities, compact_notebooks, expire_sessions,

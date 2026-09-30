@@ -901,6 +901,14 @@ hoá — hệ thống chỉ giảm (đọc ít, dừng ngay khi có cảnh báo)
   + phím, huỷ/URL bị chặn; chữ ký/hạn/nonce, khoá 1 việc + halt, vòng đọc hàng đợi, proxy ra ngoài); genh
   `ops/secrets_test.go`; web `test/unit/social.test.tsx` (7), `setup-v0129.test.tsx` (3); e2e mock `e2e/social.spec.ts` (3).
   CI: job mới `browser` (cài Chromium `--with-deps`, `GH_BROWSER_TESTS_REQUIRED=1`), `images` build thêm ảnh browser.
+- **Cách ly (sửa bảo mật trước merge)**: container `browser` (Chromium, sandbox tắt) KHÔNG còn đường mạng tới Redis chính
+  (hàng đợi arq — worker giữ khoá master). Kênh giao thức `gh:browser:*` chuyển sang Redis RIÊNG `browser-redis`
+  (`GH_BROWSER_REDIS_URL`; không lưu đĩa, 64 MB, ACL `-@dangerous -@scripting`, rootfs chỉ đọc) nối hai mạng internal:
+  `browser` (browser, browser-egress) và `browser-bus` (api, worker). browser-egress chuyển từ `default` sang mạng riêng
+  `browser-out`. Cờ Dừng tất cả gốc ở Redis chính, api chép sang browser-redis. arq chuyển pickle → JSON
+  (`gh/jobcodec.py`; việc pickle cũ còn trong hàng lúc nâng cấp bị arq bỏ, không chạy). e2e nâng cấp kiểm browser/egress
+  không tới `redis`/`db`/`api`, browser tới được `browser-redis`. Sandbox Chromium vẫn tắt (cần seccomp + AppArmor riêng —
+  để bản sau, xem docs/api/browser-protocol.md). Không cần bí mật mới → nâng cấp từ v0.1.28 không đổi gì với genh.
 - **Chưa kiểm được**: Facebook THẬT (bộ chọn dựa trên dấu hiệu tương đối bền + trang mẫu; giao diện đổi → lỗi `SELECTOR`
   rõ ràng). Nghiệm thu thật = Boss đăng nhập + đọc một lần. Ảnh arm64 build qua QEMU ở release (chưa chạy thử trên máy arm).
 - **Để lại**: ghi có xác nhận (v0.1.30 — đề xuất Gen + PIN + permit, `gh/social/permit.py`); Trang FB / IG chuyên nghiệp qua
