@@ -231,7 +231,12 @@ class AgyClient:
         prompt = "\n\n".join(f"[{m.role}]\n{m.content}" if m.role != "user" else m.content for m in messages)
         if len(prompt.encode()) > self.MAX_PROMPT:
             raise BadRequest("Prompt quá dài cho CLI")
-        if not (cli_home_dir(self.cli_home) / TOKEN_FILE).exists():
+        token = cli_home_dir(self.cli_home) / TOKEN_FILE
+        if not token.exists():
+            if token.with_name(TOKEN_FILE + ".before-login").exists():
+                # Console đang thêm tài khoản Google (tệp phiên gửi tạm, gh.providers.cli): tạm thời, không phải
+                # "hết hạn" — chuyển nhà cung cấp kế tiếp mà không đánh dấu CLI hết hạn.
+                raise ProviderError("CLI đang đăng nhập thêm tài khoản Google")
             raise AuthFailed("CLI chưa đăng nhập")
         started = time.monotonic()
         try:

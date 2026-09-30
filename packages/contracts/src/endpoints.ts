@@ -36,6 +36,7 @@ import type {
   CleanEvidence,
   CleanItem,
   CleanQuery,
+  CliLoginEvent,
   CliProfile,
   Credential,
   CursorPage,
@@ -243,6 +244,9 @@ export function createEndpoints(client: ApiClient) {
       /** 202 {}; 409 CLI_LOGIN_NOT_WAITING when the login is not at `waiting_code`. */
       submitCode: (loginId: string, code: string) =>
         r<Record<string, never>>(`/cli/login/${enc(loginId)}/code`, { method: 'POST', body: { code } }),
+      /** v0.1.30: trạng thái phiên đăng nhập — dự phòng khi WS `cli.login` không tới. */
+      loginStatus: (loginId: string, signal?: AbortSignal) =>
+        r<CliLoginEvent>(`/cli/login/${enc(loginId)}`, { signal, skipPinFlow: true }),
       cancelLogin: (loginId: string) => r<void>(`/cli/login/${enc(loginId)}/cancel`, { method: 'POST' }),
       activate: (id: string) => r<CliProfile>(`/cli/profiles/${enc(id)}/activate`, { method: 'POST' }),
       remove: (id: string) => r<void>(`/cli/profiles/${enc(id)}`, { method: 'DELETE' }),

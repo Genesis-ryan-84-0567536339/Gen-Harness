@@ -51,7 +51,7 @@ async def startup(ctx: dict[str, Any]) -> None:
     sm = sessionmaker()
     bus = EventBus(ctx["redis_bus"], s.stream_maxlen)
     try:
-        await climod.restore_active(sm)
+        await climod.restore_active(sm, owns_logins=False)
     except Exception as exc:  # noqa: BLE001 — thiếu phiên CLI không chặn worker
         log.warning("Không khôi phục được phiên CLI: %s", exc)
     router = ModelRouter(sm, ctx["redis_bus"])

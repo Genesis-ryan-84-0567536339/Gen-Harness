@@ -948,3 +948,27 @@ hoá — hệ thống chỉ giảm (đọc ít, dừng ngay khi có cảnh báo)
   `nav.test.tsx` (+3), `update.test.tsx` (+1); e2e mock `e2e/hotfix-v0130.spec.ts` (4: /guide/8 khuôn cũ, Đánh giá con
   người 503 MODEL_UNAVAILABLE, Cập nhật phần mềm ở Trợ giúp/Hệ thống, lối vào Hướng dẫn thiết lập); `visual.spec.ts` ẩn
   mục `guide` (ngoài thiết kế gốc) khi so ảnh.
+
+## v0.1.30 — Sửa nóng (hiển thị lỗi web; đổi tài khoản Google của Antigravity CLI)
+
+### Đổi tài khoản Google (Antigravity CLI) không hoạt động
+
+- **Nguyên nhân gốc**: (1) "Thêm tài khoản" khi đang đăng nhập: `agy` thấy tệp phiên nên vào thẳng chat, KHÔNG in link
+  đăng nhập; khi làm mới token nó ghi lại tệp → Console tưởng "đăng nhập xong" và lưu lại CHÍNH tài khoản cũ (hoặc treo
+  10 phút) → không bao giờ thêm được tài khoản thứ hai để đổi. (2) Link/trạng thái đăng nhập chỉ đi qua WebSocket — mất
+  WS là UI kẹt "Đang mở phiên…". (3) Hồ sơ không có phiên đã lưu vẫn "đổi" được (chỉ đổi cờ CSDL, AI vẫn chạy tài khoản
+  cũ). (4) `email` null (tệp phiên thiếu id_token, userinfo lỗi) làm vỡ thẻ CLI (`emailInitials(null)`). (5) Có hồ sơ đã
+  lưu nhưng không hồ sơ nào hoạt động → thẻ chỉ có nút "Đăng nhập", không chọn lại được.
+- **Sửa** (`gh/providers/cli.py`, `system_api/routes.py`, `clients.py`): gửi tạm tệp phiên sang
+  `antigravity-oauth-token.before-login` trước khi chạy CLI; xong → bỏ bản gửi tạm, lỗi/huỷ/quá giờ → trả về; api/worker
+  khởi động thấy bản gửi tạm thì trả về trước. `GET /cli/login/{id}` (UI hỏi 2 s/lần). Đổi/xoá khi đang đăng nhập →
+  `409 CLI_LOGIN_IN_PROGRESS`; hồ sơ không có phiên → `409 CLI_PROFILE_NO_SESSION`. Lưu ngược tệp phiên chỉ khi email trong
+  tệp khớp hồ sơ đang dùng. Lượt gọi AI lúc đang đăng nhập → chuyển nhà cung cấp kế tiếp, không đánh dấu CLI hết hạn.
+  Web (`CliCard.tsx`, `useCliLogin.ts`, `systemModel.ts`): tài khoản đang dùng + số tài khoản đã lưu, hộp "Đổi tài khoản
+  Google cho AI" (Đang dùng / "Dùng tài khoản này" / xoá / "Thêm tài khoản Google"), nút "Chép link", thông báo tiếng Việt
+  (PIN huỷ, đang đăng nhập, không có phiên), đóng hộp + làm mới nhà cung cấp sau khi đổi.
+- **Test**: api `tests/test_cli_switch.py` (6, CLI giả nhiều tài khoản `tests/fixtures/fake_agy_multi.py`: thêm tài khoản
+  thứ hai, đổi qua lại có PIN, `agy -p` sau khi đổi trả đúng email; huỷ giữ tài khoản cũ; tái hiện lỗi cũ khi tắt gửi
+  tạm); web `test/unit/cli-switch.test.tsx` (5, không WS); e2e mock `phase2.spec.ts` thêm "CLI switch account".
+- **Chưa kiểm được**: `agy` + Google THẬT (tên/định dạng tệp phiên, việc CLI có giữ trạng thái đăng nhập ở tệp khác ngoài
+  `antigravity-oauth-token` hay không). Nghiệm thu thật = Boss thêm tài khoản thứ hai rồi đổi qua lại một lần.

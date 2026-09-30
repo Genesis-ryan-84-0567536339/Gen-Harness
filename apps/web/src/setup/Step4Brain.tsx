@@ -12,7 +12,7 @@ import { CardError, FriendlyErrorText, InlineError, SkeletonLines, StateChip } f
 import { providerStatus } from '../screens/api/apiModel';
 import { CliLoginPanel } from '../screens/system/CliCard';
 import { useCliLogin } from '../screens/system/useCliLogin';
-import { cliChip, cliMeta } from '../screens/system/systemModel';
+import { cliAccountLabel, cliChip, cliMeta } from '../screens/system/systemModel';
 import { providerHasModel, providerReady, testedModels } from './phase2Model';
 import { StepFrame } from './StepFrame';
 import { describeError, type StepProps } from './types';
@@ -147,7 +147,7 @@ export function Step4Brain({ meta, description, onBack, onSaved, formRef, onSkip
               {activeProfile ? emailInitials(activeProfile.email) : '—'}
             </div>
             <div className="setup-row__main">
-              <div className="setup-row__title">{activeProfile ? activeProfile.email : 'Chưa đăng nhập'}</div>
+              <div className="setup-row__title">{activeProfile ? cliAccountLabel(activeProfile) : 'Chưa đăng nhập'}</div>
               <div className="cli-meta">
                 {activeProfile ? cliMeta(activeProfile, now) : 'Đăng nhập Google để hệ thống dùng AI qua tài khoản của Sếp.'}
               </div>
@@ -157,7 +157,7 @@ export function Step4Brain({ meta, description, onBack, onSaved, formRef, onSkip
             </StateChip>
             {!login.active ? (
               <Button variant={activeProfile ? 'secondary' : 'primary'} className="btn-28" icon="ph ph-user-switch" onClick={() => login.start.mutate()}>
-                {activeProfile ? 'Thêm tài khoản' : 'Đăng nhập'}
+                {activeProfile ? 'Thêm tài khoản Google' : 'Đăng nhập'}
               </Button>
             ) : null}
           </div>

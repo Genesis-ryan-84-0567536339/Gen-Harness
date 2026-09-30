@@ -500,7 +500,8 @@ export interface Credential {
 
 export interface CliProfile {
   id: string;
-  email: string;
+  /** null khi tệp phiên không cho biết email (id_token thiếu, userinfo lỗi) — UI hiện "Tài khoản Google". */
+  email: string | null;
   plan_label: string | null;
   active: boolean;
   expires_at: string | null;
@@ -519,7 +520,7 @@ export interface CliLoginEvent {
   status: CliLoginStatus;
   url?: string | null;
   message?: string | null;
-  profile?: CliProfile;
+  profile?: CliProfile | null;
 }
 
 // ── setup 4–7, 12 ─────────────────────────────────────────────────────────

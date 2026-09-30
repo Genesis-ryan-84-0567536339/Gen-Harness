@@ -548,6 +548,16 @@ async def cli_login(request: Request, user: service.CurrentUser = Depends(MANAGE
     return {"login_id": s.id}
 
 
+@router.get("/cli/login/{login_id}")
+async def cli_login_status(login_id: str, request: Request,
+                           user: service.CurrentUser = Depends(MANAGE)) -> dict[str, Any]:
+    """Trạng thái phiên đăng nhập (link, bước) — dự phòng khi WebSocket `cli.login` không tới được trình duyệt."""
+    s = request.app.state.cli_logins.get(login_id, user.org_id)
+    if s is None:
+        raise not_found("Phiên đăng nhập")
+    return s.public()  # type: ignore[no-any-return]
+
+
 @router.post("/cli/login/{login_id}/code", status_code=202)
 async def cli_code(login_id: str, body: CodeIn, request: Request,
                    user: service.CurrentUser = Depends(MANAGE)) -> dict[str, Any]:
@@ -567,9 +577,13 @@ async def cli_cancel(login_id: str, request: Request, user: service.CurrentUser 
 
 
 @router.post("/cli/profiles/{profile_id}/activate")
-async def cli_activate(profile_id: uuid.UUID, user: service.CurrentUser = Depends(MANAGE),
+async def cli_activate(profile_id: uuid.UUID, request: Request, user: service.CurrentUser = Depends(MANAGE),
                        _pin: Any = Depends(require_pin("cli.switch_account")),
                        db: AsyncSession = DB) -> dict[str, Any]:
+    if request.app.state.cli_logins.busy(user.org_id):
+        # Đang thêm tài khoản: tệp phiên đang để trống cho CLI — ghi tệp lúc này sẽ bị nhận nhầm là tài khoản mới.
+        raise conflict("CLI_LOGIN_IN_PROGRESS",
+                       "Đang đăng nhập thêm một tài khoản Google — hoàn tất hoặc huỷ bước đó rồi đổi tài khoản")
     out = await climod.activate(db, user.org_id, profile_id)
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                            action="cli.account_switched", target_type="cli_profile", target_id=out["id"],
@@ -578,9 +592,12 @@ async def cli_activate(profile_id: uuid.UUID, user: service.CurrentUser = Depend
 
 
 @router.delete("/cli/profiles/{profile_id}", status_code=204)
-async def cli_delete(profile_id: uuid.UUID, user: service.CurrentUser = Depends(MANAGE),
+async def cli_delete(profile_id: uuid.UUID, request: Request, user: service.CurrentUser = Depends(MANAGE),
                      _pin: Any = Depends(require_pin("cli.switch_account")),
                      db: AsyncSession = DB) -> Response:
+    if request.app.state.cli_logins.busy(user.org_id):
+        raise conflict("CLI_LOGIN_IN_PROGRESS",
+                       "Đang đăng nhập thêm một tài khoản Google — hoàn tất hoặc huỷ bước đó rồi xoá tài khoản")
     out = await climod.delete_profile(db, user.org_id, profile_id)
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                            action="cli.profile_deleted", target_type="cli_profile", target_id=str(profile_id),
