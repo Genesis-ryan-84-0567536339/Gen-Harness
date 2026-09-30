@@ -13,7 +13,7 @@
   Gen-hub **đã có sẵn** token riêng cho từng agent và tool đọc Kho. → Nối được **mà không cần sửa Gen-hub**.
 - **Đề xuất bản v0.1.26**: Gen đọc Kho (Việc đang mở, Quyết định, Phiên gần nhất) qua Gen-hub, chỉ-đọc, chỉ Owner.
   Boss chỉ cần: tạo 1 agent + token trong Gen-hub, dán vào Gen-Harness, bấm "Kiểm tra".
-- Jules/Playwright: **chưa làm ở v0.1.26**; còn điểm phải Boss xác nhận (điều khoản nhiều tài khoản Jules).
+- Jules: **Boss đã bỏ (30/09)**. Playwright vòng ngoài: chưa làm, chờ Boss quyết.
 
 ## 1. Ai là ai, ai giữ gì
 
@@ -160,7 +160,7 @@ Mỗi tổ chức (org) trong Gen-Harness có **token riêng** và agent riêng 
 ## 5. Câu hỏi cho Boss (kèm mặc định đề xuất)
 
 > **Boss đã chốt 29/09/2026**: (1) Có — chỉ Owner, chỉ đọc; (2) Có — gửi model đám mây, **có che** như gen-v1 §9.2;
-> (4) 1 tài khoản Jules, tối đa 5 việc/ngày — **chưa làm** (giữ ghi chú). Lát đầu v0.1.26 đã làm (HANDOFF v0.1.26).
+> (4) ~~1 tài khoản Jules~~ — **Boss bỏ Jules (QD-10, xác nhận 30/09)**; không làm. Lát đầu v0.1.26 đã làm (HANDOFF v0.1.26).
 > Khác thiết kế ban đầu: thẻ Gen-hub nhận thẳng địa chỉ + token (tự tạo máy chủ MCP "Gen-hub"), không phải chọn máy chủ có sẵn.
 
 1. **Gen đọc Kho** có được bật cho Owner ngay ở v0.1.26? — *Mặc định: Có, chỉ Owner, chỉ đọc.*

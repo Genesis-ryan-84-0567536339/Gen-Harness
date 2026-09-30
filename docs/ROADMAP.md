@@ -7,7 +7,7 @@ Nguồn chuẩn tiến độ. Mỗi đợt = 1 PR = 1 bản phát hành, CI + E2
 |---|---|---|
 | Owner | Sếp (Ryan) | định hướng, duyệt, brainstorm |
 | Dev | Claude Code (+ sub agent Haiku/Sonnet/Opus) | code, review, phát hành |
-| Dev phụ (dự kiến) | Google Jules (worker trong gen-workplace/Gen-hub) | việc code nhỏ, tự mở PR — Claude review trước merge |
+| ~~Dev phụ~~ | ~~Google Jules~~ — **Boss bỏ (QD-10, xác nhận 30/09)** | việc code cho repo khác đi theo agy đa repo (gen-workplace) |
 | Quản trị trong app | Gen | vận hành dữ liệu, dẫn Sếp dùng app |
 | Vòng ngoài | agent Zalo/WhatsApp (+ Playwright sau) | thu thập thị trường |
 
@@ -49,7 +49,6 @@ theo phạm vi, rà trần so trùng, hạn lưu chuông 30/90 ngày, nhắc vi�
 - 🟡 D1 Gen nối Kho/warroom/kanban của Gen-hub — **một phần** v0.1.26: Gen đọc Kho (Owner, chỉ đọc, che dữ liệu, đệm 5 phút,
   nhắc token trước 14 ngày; thẻ Gen-hub ở MCP Hub); v0.1.27 gia cố (ghim DNS, lỗi chỉ Owner, route MCP chung chỉ Owner).
   Còn: đề xuất ghi kanban/warroom (bản sau), phương án B.
-- D2 Jules worker trong gen-workplace (mỗi tài khoản có hạn mức riêng; kiểm điều khoản dùng nhiều tài khoản trước khi chạy
-  song song 5 tài khoản). Boss chốt 29/09: 1 tài khoản, tối đa 5 việc/ngày — chưa làm.
+- ~~D2 Jules worker~~ — **Bỏ** (Boss chốt QD-10, xác nhận lại 30/09). Không làm, không kiểm điều khoản Jules nữa.
 - D3 Playwright cho agent vòng ngoài.
 Thiết kế: docs/design/gen-hub-link.md (lát đầu v0.1.26 ✅ — Gen đọc Kho qua Gen-hub, chỉ-đọc).
