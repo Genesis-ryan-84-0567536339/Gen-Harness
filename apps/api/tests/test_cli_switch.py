@@ -178,3 +178,18 @@ async def test_worker_restart_does_not_touch_a_parked_token(tmp_path, monkeypatc
     await climod.restore_active(None, owns_logins=False)  # type: ignore[arg-type]
     assert not climod.token_path().exists() and climod.backup_path().exists()
     get_settings.cache_clear()
+
+
+async def test_api_restart_prefers_parked_token_over_half_finished_login(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """api chết SAU khi CLI đã ghi tệp của lượt đăng nhập dở: bản gửi tạm (tài khoản đang hoạt động) thắng, không
+    nằm lại để lượt đăng nhập sau ghi đè mất."""
+    monkeypatch.setenv("GH_CLI_HOME", str(tmp_path))
+    from gh.config import get_settings
+
+    get_settings.cache_clear()
+    climod.backup_path().write_bytes(b'{"access_token":"old"}')
+    climod.token_path().write_bytes(b'{"access_token":"half"}')
+    await climod.restore_active(None, owns_logins=True)  # type: ignore[arg-type]
+    assert climod.token_path().read_bytes() == b'{"access_token":"old"}'
+    assert not climod.backup_path().exists()
+    get_settings.cache_clear()

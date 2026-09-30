@@ -972,3 +972,7 @@ hoá — hệ thống chỉ giảm (đọc ít, dừng ngay khi có cảnh báo)
   tạm); web `test/unit/cli-switch.test.tsx` (5, không WS); e2e mock `phase2.spec.ts` thêm "CLI switch account".
 - **Chưa kiểm được**: `agy` + Google THẬT (tên/định dạng tệp phiên, việc CLI có giữ trạng thái đăng nhập ở tệp khác ngoài
   `antigravity-oauth-token` hay không). Nghiệm thu thật = Boss thêm tài khoản thứ hai rồi đổi qua lại một lần.
+- **Review trước merge**: `MODEL_UNAVAILABLE.reasons` (tên nguồn, nhãn khoá, lỗi gốc) ở `/drafts/{id}/translate|regenerate`
+  chỉ trả cho Owner, vai trò khác nhận `reasons: []` (test `test_model_unavailable_reasons_are_hidden_from_non_owner`).
+  api khởi động còn bản gửi tạm ⇒ luôn trả bản gửi tạm về (đè tệp phiên của lượt đăng nhập dở), tránh bản gửi tạm nằm lại
+  rồi bị lượt đăng nhập sau ghi đè (test `test_api_restart_prefers_parked_token_over_half_finished_login`).

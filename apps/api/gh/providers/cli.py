@@ -263,11 +263,14 @@ async def restore_active(sm: async_sessionmaker[AsyncSession], *, owns_logins: b
     Còn bản "gửi tạm" (api chết giữa lúc thêm tài khoản) thì api trả nó về trước — đó là tài khoản đang dùng. Worker
     (`owns_logins=False`) không đụng tới khi còn bản gửi tạm: có thể api đang chạy một phiên đăng nhập, ghi tệp lúc đó
     sẽ bị nhận nhầm là tài khoản mới."""
-    if not token_path().exists():
-        if not owns_logins and backup_path().exists():
-            return
+    if owns_logins:
+        # api vừa khởi động ⇒ không còn phiên đăng nhập nào. Bản gửi tạm là tài khoản đang hoạt động trong CSDL; tệp
+        # phiên (nếu có) là của lượt đăng nhập dở chưa ghi vào hồ sơ ⇒ trả bản gửi tạm về, đè lên tệp dở dang, để tệp
+        # và hồ sơ khớp nhau và bản gửi tạm không bị lượt đăng nhập sau ghi đè mất.
         with contextlib.suppress(OSError):
             unpark_token()
+    elif not token_path().exists() and backup_path().exists():
+        return
     if token_path().exists():
         return
     async with sm() as db:
