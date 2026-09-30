@@ -130,4 +130,22 @@ export const GUIDE: GuideItem[] = [
   },
 ];
 
-export const GUIDE_BY_N: Record<number, GuideItem> = Object.fromEntries(GUIDE.map((g) => [g.n, g]));
+/**
+ * v0.1.29: bước 4 "Để sau" được. Không nằm trong danh sách 5–11 của trang Hướng dẫn — Tổng quan có dải "Chưa có model"
+ * riêng mở thẳng `/guide/4` (cùng form bước 4 của trình thiết lập, lưu được cả sau Hoàn tất).
+ */
+export const MODEL_GUIDE: GuideItem = {
+  n: 4,
+  title: 'Chọn model AI (bộ não)',
+  why: 'Chưa có model thì Gen không trả lời được và tin nhắn chưa được sàng lọc — chỉ được gom về kho thô.',
+  prepare: ['Tài khoản Google (đăng nhập Antigravity CLI) hoặc một khoá API (Gemini, DeepSeek, tương thích OpenAI).'],
+  steps: [
+    'Đăng nhập Google, hoặc dán khoá API rồi bấm "Thêm & kiểm tra".',
+    'Khi nguồn báo Hoạt động, chọn model rồi bấm "Dùng model này" (không chọn thì hệ thống dùng model đầu tiên).',
+    'Bấm "Tiếp tục".',
+  ],
+  doneWhen: 'Gen hoặc Sàng lọc đã được gán một model.',
+  console: { label: 'API & Model', to: '/api' },
+};
+
+export const GUIDE_BY_N: Record<number, GuideItem> = Object.fromEntries([MODEL_GUIDE, ...GUIDE].map((g) => [g.n, g]));

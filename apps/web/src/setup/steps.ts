@@ -29,7 +29,7 @@ export const SETUP_STEPS: StepMeta[] = [
     doneWhen: 'Lưu',
   },
   {
-    n: 4, key: 'brain', title: 'Bộ não AI', required: true, built: true,
+    n: 4, key: 'brain', title: 'Bộ não AI', required: false, built: true,
     content: 'Chọn nguồn AI cho hệ thống: Antigravity CLI (đăng nhập Google rồi dán mã xác thực) và/hoặc khoá API (Gemini, DeepSeek, tương thích OpenAI). Mỗi khoá có nút Kiểm tra gọi thử một lượt, hiện độ trễ và model khả dụng. Sắp thứ tự chuỗi chuyển hướng.',
     doneWhen: 'Ít nhất một provider kiểm tra OK',
   },
@@ -80,7 +80,7 @@ export const STEP_DESCRIPTIONS: Record<number, string> = {
   1: 'Mã thiết lập chứng minh Sếp là người vừa chạy trình cài trên máy này. Chọn ngôn ngữ và cách bắt đầu.',
   2: 'Tài khoản Owner thấy toàn cảnh. Mật khẩu để đăng nhập, mã PIN để xác nhận thao tác nhạy cảm.',
   3: 'Thông tin tổ chức và cách agent xưng hô với Sếp trong mọi tin nhắn.',
-  4: 'Hệ thống cần ít nhất một nguồn AI để đọc và hiểu tin nhắn: đăng nhập tài khoản Google (Antigravity CLI) hoặc dán khoá API. Bấm Kiểm tra, chọn model, rồi xếp thứ tự dùng khi một nguồn hết hạn mức.',
+  4: 'Hệ thống cần ít nhất một nguồn AI để đọc và hiểu tin nhắn: đăng nhập tài khoản Google (Antigravity CLI) hoặc dán khoá API. Bấm Kiểm tra, chọn model, rồi xếp thứ tự dùng khi một nguồn hết hạn mức. Để sau được, nhưng khi chưa có model thì Gen và sàng lọc tin chưa chạy.',
   5: 'Kết nối ít nhất một kênh để hệ thống bắt đầu gom tin. Zalo và WhatsApp đăng nhập bằng mã QR trên điện thoại của Sếp.',
   6: 'Mọi nhóm vừa đồng bộ đều ở chế độ Không nghe. Sếp bật từng nhóm muốn agent lắng nghe và chọn ai được xem dữ liệu của nhóm.',
   7: 'Bao lâu hệ thống lọc tin một lần, những loại tin cần bắt, và cách chấm điểm. Bấm Để sau thì dùng sẵn bộ quy tắc khởi đầu — chỉnh lại được ở Quy tắc sàng lọc.',

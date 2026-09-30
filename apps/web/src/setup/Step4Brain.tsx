@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import type { Provider, ProviderKind, ProviderTestResult } from '@gen-harness/contracts';
-import { Button, EmptyState, IconButton, SelectField, TextField } from '@gen-harness/ui';
+import { Button, Dialog, EmptyState, Icon, IconButton, SelectField, TextField } from '@gen-harness/ui';
 import { api } from '../lib/api';
 import { qk2, useCliProfiles, useProviders } from '../lib/dataQueries';
 import { emailInitials, fmtInt, fmtLatency } from '../lib/format';
@@ -27,7 +27,7 @@ const N8 = 'var(--color-neutral-800)';
 const N4 = 'var(--color-neutral-400)';
 const N5 = 'var(--color-neutral-500)';
 
-export function Step4Brain({ meta, description, onBack, onSaved, formRef }: StepProps) {
+export function Step4Brain({ meta, description, onBack, onSaved, formRef, onSkip, skipping, skipError }: StepProps) {
   const providers = useProviders();
   const profiles = useCliProfiles();
   const login = useCliLogin();
@@ -36,6 +36,8 @@ export function Step4Brain({ meta, description, onBack, onSaved, formRef }: Step
   const [order, setOrder] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  // v0.1.29 (Boss 30/09): "Để sau" được, nhưng phải qua hộp cảnh báo nói rõ hậu quả.
+  const [confirmSkip, setConfirmSkip] = useState(false);
 
   // Jev (system_one) is not a text model — it never goes into the chain (same filter as the server).
   const list = useMemo(() => (providers.data ?? []).filter((p) => p.kind !== 'system_one'), [providers.data]);
@@ -117,9 +119,22 @@ export function Step4Brain({ meta, description, onBack, onSaved, formRef }: Step
       busy={busy}
       onContinue={() => void save()}
       onBack={onBack}
-      formError={formError}
+      onSkip={onSkip ? () => setConfirmSkip(true) : undefined}
+      skipping={skipping}
+      formError={formError ?? skipError}
       blockedHint={providers.data ? blockReason : null}
     >
+      {onSkip ? (
+        <SkipBrainDialog
+          open={confirmSkip}
+          hasTestedModel={canContinue}
+          onClose={() => setConfirmSkip(false)}
+          onConfirm={() => {
+            setConfirmSkip(false);
+            onSkip();
+          }}
+        />
+      ) : null}
       <div className="setup-section">
         <div className="setup-section__title">Tài khoản Google · Antigravity CLI</div>
         {profiles.isPending ? (
@@ -287,6 +302,54 @@ function AddProvider({ onAdded }: { onAdded: (p: Provider) => void }) {
       </div>
       {add.isError ? <InlineError>{errorText(add.error)}</InlineError> : null}
     </div>
+  );
+}
+
+/** Hộp cảnh báo trước khi "Để sau" bước 4 — nói thẳng việc gì sẽ KHÔNG chạy khi chưa có model. */
+export function SkipBrainDialog({
+  open,
+  hasTestedModel,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  hasTestedModel: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      width={460}
+      title="Để sau bước Bộ não AI?"
+      kicker="Chưa có model thì trợ lý chưa làm việc được"
+      actions={
+        <>
+          <Button variant="secondary" onClick={onClose} data-autofocus>
+            Quay lại chọn model
+          </Button>
+          <Button variant="primary" onClick={onConfirm}>
+            Vẫn để sau
+          </Button>
+        </>
+      }
+    >
+      <div className="dlg-fields">
+        <div className="risk-box" role="note">
+          <Icon name="ph ph-warning" size={16} color="var(--color-warn)" />
+          <div className="risk-box__text">
+            {hasTestedModel
+              ? 'Đã có nguồn gọi thử thành công — hệ thống vẫn tự dùng model của nguồn đó, Sếp đổi lại sau được.'
+              : 'Khi chưa chọn model: Gen (trợ lý) sẽ không trả lời và sàng lọc tin sẽ không chạy cho tới khi Sếp chọn model.'}
+          </div>
+        </div>
+        <ul className="risk-list">
+          <li>Tin nhắn vẫn được gom về kho thô, sẽ được lọc khi có model.</li>
+          <li>Tổng quan sẽ hiện dải "Chưa có model" kèm nút Chọn model để làm lại bất cứ lúc nào.</li>
+        </ul>
+      </div>
+    </Dialog>
   );
 }
 

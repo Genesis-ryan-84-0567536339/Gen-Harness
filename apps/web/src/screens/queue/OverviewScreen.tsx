@@ -9,6 +9,7 @@ import { useOverview } from './queries';
 import { UpdateCard } from '../../update/UpdateCard';
 import { useNavigation } from '../../lib/queries';
 import { screenKeys } from '../../shell/navModel';
+import { NoModelBanner } from './NoModelBanner';
 import { SetupFollowUp } from './SetupFollowUp';
 
 const KPI_ICON: Record<string, string> = {
@@ -156,6 +157,7 @@ export function OverviewScreen() {
   return (
     <div className="screen">
       <UpdateCard />
+      <NoModelBanner />
       <SetupFollowUp />
       <div className="ov-kpi-row" data-gen-target="overview.kpis">
         {row1.map((k) => (

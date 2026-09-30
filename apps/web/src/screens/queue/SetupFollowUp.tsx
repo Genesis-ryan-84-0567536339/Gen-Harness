@@ -12,7 +12,8 @@ import { Panel } from '../common';
  */
 export function SetupFollowUp() {
   const q = useQuery({ queryKey: FOLLOW_UP_KEY, queryFn: ({ signal }) => api.setup.followUp(signal) });
-  const items = (q.data ?? []).filter((s) => !s.done && GUIDE_BY_N[s.n]);
+  // Bước 4 (chưa có model) có dải cảnh báo riêng ở đầu Tổng quan — không lặp ở đây.
+  const items = (q.data ?? []).filter((s) => !s.done && s.n !== 4 && GUIDE_BY_N[s.n]);
   if (items.length === 0) return null;
 
   return (

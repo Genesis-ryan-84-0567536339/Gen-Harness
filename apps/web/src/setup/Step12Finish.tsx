@@ -10,6 +10,7 @@ import { fmtInt, fmtInterval } from '../lib/format';
 import { qk } from '../lib/queries';
 import { queryClient } from '../lib/queryClient';
 import { Bar } from '../screens/common';
+import { NoModelNotice } from '../screens/queue/NoModelBanner';
 import { ACC4, N5, OK, WARN } from '../screens/data/dataModel';
 import { firstRunCounters, missingRequiredSteps, setupGaps } from './phase2Model';
 import { StepFrame } from './StepFrame';
@@ -107,6 +108,11 @@ export function Step12Finish({ meta, description, onBack, onSaved, formRef }: St
               </p>
             </div>
           </div>
+        </div>
+      ) : null}
+      {gaps.some((g) => g.key === 'model') ? (
+        <div className="setup-section">
+          <NoModelNotice to="/setup?step=4" />
         </div>
       ) : null}
       {loaded ? (
