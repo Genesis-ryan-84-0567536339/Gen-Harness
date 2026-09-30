@@ -433,8 +433,9 @@ async def backup_now(ctx: dict[str, Any], trigger: str = "manual") -> dict[str, 
     await _set_job(redis, state="done", finished_at=datetime.now(UTC).isoformat(), key=entry.key)
     # v0.1.28 (UX L4): câu cho người dùng — không đưa đường dẫn tệp trong kho lên chuông.
     size_mb = max(entry.size_bytes, 0) / 1_048_576
-    await _notify_owners(redis, ok=True, message=f"Đã sao lưu ({size_mb:.1f} MB) — tải về hoặc khôi phục ở Dữ liệu & lưu trữ."
-                         .replace(".", ",", 1))
+    size = f"{size_mb:.1f}".replace(".", ",")
+    await _notify_owners(redis, ok=True,
+                         message=f"Đã sao lưu ({size} MB) — tải về hoặc khôi phục ở Dữ liệu & lưu trữ.")
     return {"ran": entry.key}
 
 

@@ -151,7 +151,8 @@ async def test_setup_finishes_with_only_steps_1_to_4(owner_api, db) -> None:  # 
     assert (await api.get("/setup/state")).json()["finished"]
     # Sau Hoàn tất: bước "Để sau" vẫn làm tiếp được từ trang Hướng dẫn kết nối, bước bắt buộc/skip thì không.
     items = {i["n"]: i for i in (await api.get("/setup/follow-up")).json()}
-    assert set(items) == set(range(5, 12)) and not items[11]["done"]
+    # v0.1.28 (UX N3/N4): "Để sau" dùng mặc định — bước 7 có bộ quy tắc khởi đầu, bước 11 có lịch 02:00 hằng ngày.
+    assert set(items) == set(range(5, 12)) and items[11]["done"] and items[7]["done"] and not items[10]["done"]
     r = await api.send("PUT", "/setup/steps/11", {"frequency": "daily", "time_of_day": "03:00"})
     assert r.status_code == 200, r.text
     assert r.json()["finished"] and r.json()["backup"]["time_of_day"] == "03:00"
@@ -229,7 +230,8 @@ async def test_follow_up_lists_deferred_steps_and_detects_real_completion(owner_
         assert (await api.send("POST", f"/setup/steps/{n}/skip")).status_code == 200
     items = {i["n"]: i for i in (await api.get("/setup/follow-up")).json()}
     assert items[5]["status"] == "skipped" and not items[5]["done"]
-    assert not items[8]["done"] and not items[11]["done"]
+    # v0.1.28 (UX N4): "Để sau" ở bước 11 đặt lịch sao lưu mặc định → đã có sao lưu tự động.
+    assert not items[8]["done"] and items[11]["done"]
     ch = (await db.execute(text("SELECT id FROM core.channels WHERE org_id = :o AND type = 'zalo'"),
                            {"o": org})).scalar()
     await db.execute(text("""INSERT INTO core.channel_sessions (channel_id, org_id, account_label, state, started_at)
@@ -239,4 +241,4 @@ async def test_follow_up_lists_deferred_steps_and_detects_real_completion(owner_
     await db.commit()
     items = {i["n"]: i for i in (await api.get("/setup/follow-up")).json()}
     assert items[5]["done"] and items[8]["done"] and items[9]["done"]
-    assert not items[11]["done"]
+    assert items[11]["done"]

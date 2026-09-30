@@ -37,7 +37,8 @@ async def test_step4_auto_picks_tested_model_binds_core_agents_and_sinks_failed_
     good = await _provider(api, db, "Model nội bộ", ok=True, tested=["text-embedding-3-small", "qwen2.5-7b"])
     r = await api.send("PUT", "/setup/steps/4", {"provider_ids": [good]})
     assert r.status_code == 200, r.text
-    models = (await db.execute(text("SELECT model_name FROM agent.models WHERE provider_id = :p"), {"p": good})).scalars().all()
+    models = (await db.execute(text("SELECT model_name FROM agent.models WHERE provider_id = :p"),
+                               {"p": good})).scalars().all()
     assert models == ["qwen2.5-7b"]                                              # bỏ model embedding
     bound = dict((await db.execute(text("""SELECT b.agent_key, m.model_name FROM agent.bindings b
                                             JOIN agent.models m ON m.id = b.model_id WHERE b.org_id = :o"""),
@@ -72,10 +73,11 @@ async def test_delete_provider_and_consistent_credential_label(owner_api, db) ->
     assert (await api.send("PUT", "/agents/bindings/core.gen", {"model_id": str(mid)})).status_code == 200
     assert (await api.send("DELETE", f"/providers/{bad}")).status_code == 204
     assert (await api.send("DELETE", f"/providers/{good}")).status_code == 204
-    left = (await db.execute(text("SELECT count(*) FROM agent.providers WHERE org_id = :o AND kind <> 'antigravity_cli'"),
-                             {"o": org})).scalar_one()
+    left = (await db.execute(text("""SELECT count(*) FROM agent.providers
+                                     WHERE org_id = :o AND kind <> 'antigravity_cli'"""), {"o": org})).scalar_one()
     assert left == 0
-    assert (await db.execute(text("SELECT count(*) FROM agent.bindings WHERE org_id = :o"), {"o": org})).scalar_one() == 0
+    n_bind = (await db.execute(text("SELECT count(*) FROM agent.bindings WHERE org_id = :o"), {"o": org})).scalar_one()
+    assert n_bind == 0
     assert (await api.send("DELETE", f"/providers/{bad}")).status_code == 404
     log = (await db.execute(text("SELECT count(*) FROM ops.action_log WHERE action = 'provider.deleted'"))).scalar_one()
     assert log == 2
@@ -87,9 +89,11 @@ async def test_skip_7_seeds_starter_rules_and_skip_11_sets_default_backup(owner_
     assert (await api.send("POST", "/setup/steps/7/skip")).status_code == 200
     rules = (await db.execute(text("SELECT code, is_enabled FROM refinery.rules WHERE org_id = :o ORDER BY code"),
                               {"o": org})).all()
-    assert [r.code for r in rules] == ["R-01", "R-02", "R-03", "R-04", "R-05", "R-06"] and all(r.is_enabled for r in rules)
+    assert [r.code for r in rules] == ["R-01", "R-02", "R-03", "R-04", "R-05", "R-06"]
+    assert all(r.is_enabled for r in rules)
     assert (await api.send("POST", "/setup/steps/11/skip")).status_code == 200
-    cfg = (await db.execute(text("SELECT settings -> 'backup' FROM core.organizations WHERE id = :o"), {"o": org})).scalar()
+    cfg = (await db.execute(text("SELECT settings -> 'backup' FROM core.organizations WHERE id = :o"),
+                            {"o": org})).scalar()
     assert cfg == {"frequency": "daily", "time_of_day": "02:00", "retention_count": 7, "destination": "local"}
     items = {i["n"]: i for i in (await api.get("/setup/follow-up")).json()}
     assert items[7]["done"] and items[11]["done"]

@@ -97,7 +97,7 @@ test.describe('owner setup', () => {
 
     await expect(page.getByRole('heading', { name: 'Bộ não AI' })).toBeVisible();
     // Phase 2: step 4 is a real form (CLI + API keys), no longer "Sắp có".
-    await expect(page.getByText('Antigravity CLI · tài khoản Google')).toBeVisible();
+    await expect(page.getByText('Tài khoản Google · Antigravity CLI')).toBeVisible();
     await expect(page.getByText('Sắp có')).toHaveCount(0);
     await expect(page.getByText('Bước 4/12')).toBeVisible();
     await page.reload();

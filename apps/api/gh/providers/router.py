@@ -48,9 +48,12 @@ CLI_AAD = b"cli_token"
 
 
 class ModelUnavailable(Exception):  # noqa: N818
-    def __init__(self, reasons: list[str]):
+    def __init__(self, reasons: list[str], *, no_chain: bool | None = None):
         super().__init__("; ".join(reasons) or "Chưa cấu hình model")
         self.reasons = reasons
+        # v0.1.28 (UX C1): True = chưa có nguồn/model nào trong chuỗi; False = có model nhưng lượt gọi đều lỗi
+        # (mạng, hạn mức…) — hai tình huống cần câu trả lời khác nhau cho người dùng. None = không rõ (coi như chưa có).
+        self.no_chain = no_chain
 
 
 @dataclass
@@ -264,7 +267,7 @@ class ModelRouter:
                 await self._count_use(org_id, p, m)
                 return Routed(c.text, p.name, m.model_name, c.tokens_in, c.tokens_out, reasons)
         await self._chain_exhausted(org_id, reasons)
-        raise ModelUnavailable(reasons)
+        raise ModelUnavailable(reasons, no_chain=not chain)
 
     async def _chain_exhausted(self, org_id: uuid.UUID, reasons: list[str]) -> None:
         if not await self.redis.set(f"gh:alert:chain:{org_id}", "1", nx=True, ex=3600):

@@ -213,7 +213,7 @@ function BoundariesPanel() {
               <Icon name={BOUNDARY_ICON[b.code] ?? 'ph ph-shield'} size={15} color={boundaryTone(b)} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="boundary-row__label">{b.label}</div>
-                {b.locked ? <div className="boundary-row__hint">Luôn bật — không ai tắt được, kể cả Owner.</div> : null}
+                {b.locked ? <div className="boundary-row__hint">Cố định — không ai bật/tắt được, kể cả Owner.</div> : null}
                 {b.code === 'approval_gate' ? (
                   <div className="boundary-row__threshold">
                     <TextField

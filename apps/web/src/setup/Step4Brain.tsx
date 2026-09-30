@@ -94,7 +94,10 @@ export function Step4Brain({ meta, description, onBack, onSaved, formRef }: Step
     setBusy(true);
     setFormError(null);
     try {
-      onSaved(await api.setup.step4(ready.map((p) => p.id)));
+      const state = await api.setup.step4(ready.map((p) => p.id));
+      // Máy chủ có thể vừa tự chọn model + xếp lại thứ tự — đọc lại cho bước 12 và các màn khác.
+      void queryClient.invalidateQueries({ queryKey: qk2.providers });
+      onSaved(state);
     } catch (e) {
       setFormError(describeError(e));
     } finally {

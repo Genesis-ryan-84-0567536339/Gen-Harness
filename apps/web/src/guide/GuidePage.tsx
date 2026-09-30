@@ -18,7 +18,7 @@ export function GuidePage() {
   // v0.1.28 (UX N9): việc thiết lập chỉ Owner làm — vai trò khác thấy lời giải thích, không phải "Không tải được" + Thử lại.
   const role = me.data?.role?.code;
   const nonOwner = !!role && role !== 'owner';
-  const q = useQuery({ queryKey: FOLLOW_UP_KEY, queryFn: ({ signal }) => api.setup.followUp(signal), enabled: !nonOwner });
+  const q = useQuery({ queryKey: FOLLOW_UP_KEY, queryFn: ({ signal }) => api.setup.followUp(signal), enabled: !!me.data && !nonOwner });
 
   useEffect(() => {
     document.title = 'Hướng dẫn kết nối · Gen-Harness';
