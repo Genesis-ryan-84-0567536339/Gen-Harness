@@ -50,5 +50,6 @@ theo phạm vi, rà trần so trùng, hạn lưu chuông 30/90 ngày, nhắc vi�
   nhắc token trước 14 ngày; thẻ Gen-hub ở MCP Hub); v0.1.27 gia cố (ghim DNS, lỗi chỉ Owner, route MCP chung chỉ Owner).
   Còn: đề xuất ghi kanban/warroom (bản sau), phương án B.
 - ~~D2 Jules worker~~ — **Bỏ** (Boss chốt QD-10, xác nhận lại 30/09). Không làm, không kiểm điều khoản Jules nữa.
-- D3 Playwright cho agent vòng ngoài.
+- D3 Gen điều khiển mạng xã hội thay Boss (API trước, Playwright cho tài khoản cá nhân) — thiết kế:
+  docs/design/gen-browser-agent.md (lát đầu đề xuất v0.1.28: đăng nhập + chỉ đọc 1 nền tảng; chờ Boss duyệt).
 Thiết kế: docs/design/gen-hub-link.md (lát đầu v0.1.26 ✅ — Gen đọc Kho qua Gen-hub, chỉ-đọc).
