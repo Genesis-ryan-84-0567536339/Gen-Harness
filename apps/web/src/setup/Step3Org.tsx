@@ -8,7 +8,7 @@ import { CURRENCIES, TIMEZONES } from './steps';
 import { StepFrame } from './StepFrame';
 import { describeError, type StepProps } from './types';
 import { useFieldErrors } from './useFieldErrors';
-import { addressingPreview, isComplete, step3Errors, type Step3Values } from './validation';
+import { addressingPreview, firstHiddenError, isComplete, step3Errors, type Step3Values } from './validation';
 
 type K = keyof Step3Values;
 
@@ -74,6 +74,7 @@ export function Step3Org({ meta, description, onBack, onSaved, formRef }: StepPr
       onContinue={() => void save()}
       onBack={onBack}
       formError={formError}
+      blockedHint={firstHiddenError(clientErrors, f.errorOf)}
     >
       <div className="setup-fields">
         {text('org_name', 'Tên tổ chức', { autoFocus: true, autoComplete: 'organization' })}

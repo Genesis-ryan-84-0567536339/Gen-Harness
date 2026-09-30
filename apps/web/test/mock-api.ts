@@ -654,7 +654,8 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
       if (path === '/setup/follow-up' && method === 'GET') {
         // Như API thật: mọi bước tuỳ chọn 5–11; `done` = đã xong trong trình thiết lập (dữ liệu thật: mock bỏ qua).
         return reply(200, setup.steps.filter((x) => !x.required && x.n >= 5 && x.n <= 11)
-          .map((x) => ({ n: x.n, key: x.key, title: x.title, status: x.status, done: x.status === 'done' })));
+          .map((x) => ({ n: x.n, key: x.key, title: x.title, status: x.status,
+            done: x.status === 'done' || (x.n === 11 && phase3.system.backupConfigured()) || (x.n === 7 && phase2.hooks.rulesEnabled()) })));
       }
       // Như API thật: sau Hoàn tất vẫn lưu lại được bước tuỳ chọn 5–11 (trang Hướng dẫn kết nối), còn lại 409.
       const optionalPut = /^\/setup\/steps\/([5-9]|1[01])$/.test(path) && method === 'PUT';
@@ -664,6 +665,10 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
         const n = Number(skip[1]);
         const step = setup.steps[n - 1];
         if (!step || step.required) return problem(res, 409, 'CONFLICT', 'Bước này bắt buộc');
+        if (step.status !== 'done') {
+          if (n === 7) phase2.seedDefaultRules();
+          if (n === 11 && !phase3.system.backupConfigured()) phase3.system.defaultBackup();
+        }
         advance(n, 'skipped');
         return reply(200, stateView());
       }

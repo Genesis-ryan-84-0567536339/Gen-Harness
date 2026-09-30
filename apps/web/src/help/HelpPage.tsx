@@ -10,6 +10,7 @@ import { toast } from '../lib/toast';
 import { CardError, SkeletonLines } from '../screens/common';
 import { ScreenTitle } from '../screens/ScreenPage';
 import { GENH_COMMANDS, diagnosticText } from './helpModel';
+import { roleLabel } from '../screens/system/systemModel';
 
 const GEN_EXAMPLES = ['Hôm nay có gì gấp?', 'Chỉ em chỗ thêm khoá Jev', 'Sao lưu ở đâu?', 'Mời nhân viên mới thế nào?'];
 
@@ -26,6 +27,9 @@ export function HelpPage() {
 
   const canGuide = can(me.data, 'system.manage');
   const genOn = !!me.data?.features?.gen;
+  // v0.1.28 (UX N9): trang theo vai trò — lệnh genh chạy trên máy chủ chỉ dành cho Owner (người cài), Gen chỉ hiện
+  // khi vai trò có Gen; vai trò khác thấy cách nhờ Owner (đặt lại mật khẩu, mở quyền).
+  const isOwner = me.data?.role?.code === 'owner';
 
   const copyDiagnostics = async () => {
     try {
@@ -39,7 +43,7 @@ export function HelpPage() {
 
   return (
     <div className="screen help">
-      <ScreenTitle title="Trợ giúp" description="Phiên bản đang chạy, cách hỏi Gen, các lệnh genh hay dùng và cách báo lỗi." maxWidth={640} />
+      <ScreenTitle title="Trợ giúp" description={isOwner ? "Phiên bản đang chạy, cách hỏi Gen, các lệnh genh hay dùng và cách báo lỗi." : "Phiên bản đang chạy, cách nhờ Owner khi cần và cách báo lỗi."} maxWidth={640} />
       <div className="acct-grid">
         <Card title="Giới thiệu" kicker="Gen-Harness · Genesis Harness OS" data-gen-target="help.version">
           {about.isPending ? (
@@ -55,33 +59,33 @@ export function HelpPage() {
               <span className="summary__k">múi giờ</span>
               <span className="summary__v">{about.data.timezone}</span>
               <span className="summary__k">vai trò</span>
-              <span className="summary__v">{about.data.role.name}</span>
+              <span className="summary__v">{roleLabel(about.data.role.code, about.data.role.name)}</span>
             </div>
           )}
         </Card>
 
-        <Card title="Hỏi Gen" kicker="Trợ lý quản trị trong app" data-gen-target="help.ask_gen">
-          <p className="help-text">
-            Bấm nút{' '}
-            <span className="help-inline-icon" aria-label="Gen">
-              <Icon name="ph ph-sparkle" size={13} />
-            </span>{' '}
-            ở góc trên bên phải để mở khung Gen, gõ câu hỏi bằng tiếng Việt. Gen tra số liệu, mở đúng màn và khoanh sáng
-            chỗ cần bấm — Gen không tự thay đổi dữ liệu.
-          </p>
-          <ul className="help-examples">
-            {GEN_EXAMPLES.map((q) => (
-              <li key={q}>“{q}”</li>
-            ))}
-          </ul>
-          {genOn && me.data ? (
-            <Button variant="secondary" icon="ph ph-sparkle" onClick={() => setGenOpen(me.data.id, true)}>
-              Mở Gen
-            </Button>
-          ) : (
-            <p className="muted-note">Gen chưa bật cho vai trò của bạn.</p>
-          )}
-        </Card>
+        {genOn ? (
+          <Card title="Hỏi Gen" kicker="Trợ lý quản trị trong app" data-gen-target="help.ask_gen">
+            <p className="help-text">
+              Bấm nút{' '}
+              <span className="help-inline-icon" aria-label="Gen">
+                <Icon name="ph ph-sparkle" size={13} />
+              </span>{' '}
+              ở góc trên bên phải để mở khung Gen, gõ câu hỏi bằng tiếng Việt. Gen tra số liệu, mở đúng màn và khoanh sáng
+              chỗ cần bấm — Gen không tự thay đổi dữ liệu.
+            </p>
+            <ul className="help-examples">
+              {GEN_EXAMPLES.map((q) => (
+                <li key={q}>“{q}”</li>
+              ))}
+            </ul>
+            {me.data ? (
+              <Button variant="secondary" icon="ph ph-sparkle" onClick={() => setGenOpen(me.data.id, true)}>
+                Mở Gen
+              </Button>
+            ) : null}
+          </Card>
+        ) : null}
 
         {canGuide ? (
           <Card title="Hướng dẫn kết nối" kicker="Kênh, nhóm, sàng lọc, agent, đội ngũ, sao lưu">
@@ -92,16 +96,26 @@ export function HelpPage() {
           </Card>
         ) : null}
 
-        <Card title="Lệnh genh hay dùng" kicker="Chạy trên máy chủ cài Gen-Harness" data-gen-target="help.genh" padded={false}>
-          <ul className="help-cmds">
-            {GENH_COMMANDS.map((c) => (
-              <li key={c.cmd}>
-                <code className="mono">{c.cmd}</code>
-                <span>{c.what}</span>
-              </li>
-            ))}
-          </ul>
-        </Card>
+        {isOwner ? (
+          <Card title="Lệnh genh hay dùng" kicker="Chạy trên máy chủ cài Gen-Harness" data-gen-target="help.genh" padded={false}>
+            <ul className="help-cmds">
+              {GENH_COMMANDS.map((c) => (
+                <li key={c.cmd}>
+                  <code className="mono">{c.cmd}</code>
+                  <span>{c.what}</span>
+                </li>
+              ))}
+            </ul>
+          </Card>
+        ) : (
+          <Card title="Cần giúp về tài khoản" kicker="Owner là người quản lý tài khoản của mọi người">
+            <ul className="help-examples">
+              <li>Quên mật khẩu: nhờ Owner vào Điều khiển hệ thống › Người dùng › Đặt lại mật khẩu, rồi đăng nhập bằng mật khẩu tạm Owner gửi.</li>
+              <li>Cần xem thêm màn hoặc làm thêm việc: nhờ Owner mở quyền cho vai trò của bạn.</li>
+              <li>Đổi mật khẩu, mã PIN của chính mình: menu tài khoản ở góc dưới bên trái › Tài khoản của tôi.</li>
+            </ul>
+          </Card>
+        )}
 
         <Card title="Báo lỗi" kicker="Chép thông tin chẩn đoán — không kèm mật khẩu hay khoá">
           <p className="help-text">

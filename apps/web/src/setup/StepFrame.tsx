@@ -20,6 +20,8 @@ export interface StepFrameProps {
   continueIcon?: string;
   /** Render children without the surface card (steps made of their own cards). */
   bare?: boolean;
+  /** v0.1.28 (UX V1): why "Tiếp tục" is disabled — shown beside the buttons while `canContinue` is false. */
+  blockedHint?: string | null;
 }
 
 /** Right pane of the wizard: title, description, surface card, action bar. */
@@ -39,6 +41,7 @@ export function StepFrame({
   continueLabel = 'Tiếp tục',
   continueIcon = 'ph ph-arrow-right',
   bare,
+  blockedHint,
 }: StepFrameProps) {
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -56,6 +59,11 @@ export function StepFrame({
       <div className="setup-error" role="alert" aria-live="assertive">
         {formError}
       </div>
+      {!canContinue && blockedHint ? (
+        <p className="setup-blocked" role="status">
+          {blockedHint}
+        </p>
+      ) : null}
       <div className="setup-actions">
         <Button variant="ghost" icon="ph ph-arrow-left" onClick={onBack} disabled={!onBack}>
           Quay lại
@@ -73,3 +81,4 @@ export function StepFrame({
     </form>
   );
 }
+

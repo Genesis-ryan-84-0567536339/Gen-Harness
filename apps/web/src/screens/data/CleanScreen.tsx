@@ -168,7 +168,7 @@ export function CleanScreen() {
               <EmptyState
                 icon="ph ph-check-circle"
                 title="Chưa có bản ghi sạch nào"
-                description="Core agent ghi vào đây sau mỗi chu kỳ sàng lọc. Kiểm tra quy tắc hoặc chạy sàng lọc ngay ở Kho dữ liệu thô."
+                description="Hệ thống ghi vào đây sau mỗi chu kỳ sàng lọc. Kiểm tra quy tắc hoặc chạy sàng lọc ngay ở Kho dữ liệu thô."
               />
             ) : null}
             <div ref={sentinel} aria-hidden style={{ height: 1 }} />

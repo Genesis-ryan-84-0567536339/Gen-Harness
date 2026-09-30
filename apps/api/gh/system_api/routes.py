@@ -412,6 +412,26 @@ async def patch_provider(pid: uuid.UUID, body: ProviderPatch, request: Request,
     return await _one_provider(db, request.app.state.redis, user.org_id, pid)
 
 
+@router.delete("/providers/{pid}", status_code=204)
+async def delete_provider(pid: uuid.UUID, user: service.CurrentUser = Depends(MANAGE),
+                          db: AsyncSession = DB) -> Response:
+    """v0.1.28 (UX N1): xoá một nguồn model nhập nhầm / gọi thử lỗi (bước 4 và màn API & Model). Gỡ luôn gán model của
+    các agent đang trỏ vào model của nguồn này (agent đó quay về dùng chuỗi chung). Antigravity CLI dùng phiên đăng
+    nhập — gỡ ở thẻ tài khoản CLI, không xoá ở đây."""
+    p = await _provider(db, user.org_id, pid)
+    if p.kind == "antigravity_cli":
+        raise conflict("CLI_PROVIDER", "Antigravity CLI gỡ bằng cách xoá tài khoản ở thẻ Tài khoản Antigravity CLI")
+    await db.execute(text("""DELETE FROM agent.bindings WHERE org_id = :o
+                             AND model_id IN (SELECT id FROM agent.models WHERE provider_id = :p)"""),
+                     {"o": user.org_id, "p": pid})
+    await db.execute(text("DELETE FROM agent.models WHERE provider_id = :p"), {"p": pid})
+    await db.execute(text("DELETE FROM agent.providers WHERE id = :p"), {"p": pid})
+    await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
+                           action="provider.deleted", target_type="provider", target_id=str(pid),
+                           target_label=p.name, detail={"kind": p.kind}, ip=user.ip)
+    return Response(status_code=204)
+
+
 @router.post("/providers/{pid}/keys", status_code=201)
 async def add_key(pid: uuid.UUID, body: KeyIn, request: Request, user: service.CurrentUser = Depends(MANAGE),
                   db: AsyncSession = DB) -> dict[str, Any]:
@@ -484,11 +504,15 @@ async def credentials(request: Request, user: service.CurrentUser = Depends(READ
         name = f"{p['name']} — {n} khoá xoay vòng" if n > 1 else p["name"]
         labels = " … ".join(dict.fromkeys([p["keys"][0]["label"], p["keys"][-1]["label"]])) if n else "chưa có khoá"
         meta = labels + (f" · còn {low[0]['left_pct']:.0f}% hạn mức".replace(".", ",") if low else "")
-        state = "bad" if not n or len(cooling) == n or p["auth_state"] == "expired" else "warn" if low or cooling \
-            else "ok"
-        out.append({"icon": "key", "name": name, "meta": meta, "state": state,
-                    "state_label": {"ok": "Hoạt động", "warn": "Sắp cạn" if low else "Đang nghỉ",
-                                    "bad": "Không dùng được"}[state]})
+        # v0.1.28 (UX N1): cùng nhãn với mọi màn khác (web `providerStatus`) — gọi thử lỗi là "Lỗi kết nối", không
+        # còn "Hoạt động" chỉ vì có khoá.
+        bad_auth = p["auth_state"] in ("expired", "error")
+        state = "bad" if not n or len(cooling) == n or bad_auth else "warn" if low or cooling \
+            or p["auth_state"] == "unconfigured" else "ok"
+        label = ("Hết hạn" if p["auth_state"] == "expired" else "Lỗi kết nối" if p["auth_state"] == "error"
+                 else "Không dùng được") if state == "bad" else \
+            ("Sắp cạn" if low else "Đang nghỉ" if cooling else "Chưa kiểm tra") if state == "warn" else "Hoạt động"
+        out.append({"icon": "key", "name": name, "meta": meta, "state": state, "state_label": label})
     for t in QR_CHANNELS:
         card = await channel_card(db, request.app.state.redis, user.org_id, t)
         if card["state"] == "not_installed":

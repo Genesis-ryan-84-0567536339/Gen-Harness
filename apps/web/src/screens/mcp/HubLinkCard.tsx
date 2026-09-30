@@ -3,7 +3,7 @@ import type { HubLink } from '@gen-harness/contracts';
 import { Button, Icon, Switch, TextField } from '@gen-harness/ui';
 import { errorText } from '../../lib/errorText';
 import { useMe } from '../../lib/queries';
-import { CardError, InlineError, Panel, SkeletonLines, StateChip } from '../common';
+import { CardError, FriendlyErrorText, InlineError, Panel, SkeletonLines, StateChip } from '../common';
 import { HUB_STATUS_LABEL, expiryToIso, hubStatusTone, isoToDay } from './mcpModel';
 import { useHubLink, useTestHubLink, useUpdateHubLink } from './queries';
 
@@ -20,7 +20,7 @@ export function HubLinkCard() {
   const link = useHubLink();
   return (
     <Panel
-      title="Gen-hub — Gen đọc Kho Ryan"
+      title="Gen-hub — Gen đọc Kho tri thức"
       kicker="Chỉ đọc · chỉ Sếp · tắt tới khi Kiểm tra xanh"
       label="Gen-hub"
       genTarget="mcp.hub_link"
@@ -137,13 +137,16 @@ function HubLinkBody({ link, isOwner }: { link: HubLink; isOwner: boolean }) {
           {test.isError ? <InlineError>{errorText(test.error)}</InlineError> : null}
           {result ? (
             <div className={result.ok ? 'apm-test-result apm-test-result--ok' : 'apm-test-result apm-test-result--bad'} role="status">
-              {result.ok ? `Đã nối Kho · ${result.latency_ms} ms · mở ${result.exposed_tools.length} tool đọc cho Gen` : result.error}
+              {result.ok ? `Đã nối Kho · ${result.latency_ms} ms · mở ${result.exposed_tools.length} tool đọc cho Gen` : <FriendlyErrorText raw={result.error} fallback="Chưa kết nối được Gen-hub — kiểm tra địa chỉ và thẻ truy cập." />}
             </div>
           ) : null}
-          <p className="muted-note">
-            Trong Gen-hub: tạo agent <span className="mono">gen-harness-&lt;công ty&gt;</span>, token 90 ngày, chỉ tick tool đọc Kho (kho_tom_tat, kho_search,
-            kho_get, kho_find_by_id, kho_list). Nội dung Kho được che số tài khoản, SĐT, email, khoá trước khi gửi model.
-          </p>
+          {/* v0.1.28 (UX V14): từng bước bằng lời thường, không tên riêng. */}
+          <ol className="muted-note hub-steps">
+            <li>Mở Gen-hub, vào mục tạo trợ lý mới, đặt tên có tên công ty (ví dụ gen-harness-congty).</li>
+            <li>Chọn thời hạn thẻ truy cập 90 ngày và chỉ bật các quyền ĐỌC Kho (tóm tắt, tìm, xem một mục) — không bật quyền ghi.</li>
+            <li>Chép thẻ truy cập (token) vừa tạo, dán vào ô trên rồi bấm Kiểm tra.</li>
+          </ol>
+          <p className="muted-note">Nội dung Kho được che số tài khoản, SĐT, email, khoá trước khi gửi cho AI.</p>
         </form>
       ) : (
         <p className="muted-note">Chỉ Sếp (Owner) cấu hình và dùng Gen-hub.</p>

@@ -97,7 +97,7 @@ test.describe('owner setup', () => {
 
     await expect(page.getByRole('heading', { name: 'Bộ não AI' })).toBeVisible();
     // Phase 2: step 4 is a real form (CLI + API keys), no longer "Sắp có".
-    await expect(page.getByText('Antigravity CLI · tài khoản Google')).toBeVisible();
+    await expect(page.getByText('Tài khoản Google · Antigravity CLI')).toBeVisible();
     await expect(page.getByText('Sắp có')).toHaveCount(0);
     await expect(page.getByText('Bước 4/12')).toBeVisible();
     await page.reload();
@@ -755,18 +755,18 @@ test.describe('giai đoạn 4.5/4.6: Điều khiển hệ thống', () => {
       await expect(ownerRow.locator('[data-locked]').first()).toBeVisible();
 
       // Auditor: cột "Hành động" (quyền ghi) khoá cứng — không có select cho ô này dù các cột đọc khác sửa được.
-      const auditorRow = page.locator('tr', { has: page.getByText('Auditor', { exact: true }) });
-      await expect(auditorRow.getByLabel('Auditor · Hành động')).toHaveCount(0);
-      await expect(auditorRow.getByLabel('Auditor · Nhật ký')).toHaveCount(1);
+      const auditorRow = page.locator('tr', { has: page.getByText('Kiểm soát', { exact: true }) });
+      await expect(auditorRow.getByLabel('Kiểm soát · Hành động')).toHaveCount(0);
+      await expect(auditorRow.getByLabel('Kiểm soát · Nhật ký')).toHaveCount(1);
 
       // Manager: sửa cột "Hành động" — cần mã PIN, ghi vào nhật ký, giữ nguyên sau khi tải lại trang.
-      const managerCell = page.getByLabel('Manager · Hành động');
+      const managerCell = page.getByLabel('Quản lý · Hành động');
       await expect(managerCell).toHaveValue('team');
       await managerCell.selectOption('none');
       await enterOwnerPin(page);
       await expect(managerCell).toHaveValue('none');
       await page.reload();
-      await expect(page.getByLabel('Manager · Hành động')).toHaveValue('none');
+      await expect(page.getByLabel('Quản lý · Hành động')).toHaveValue('none');
     });
 
     test('Ranh giới có trách nhiệm: khoá cứng không bật/tắt được; 2 khoá không có công tắc hiện tĩnh', async ({ page }) => {

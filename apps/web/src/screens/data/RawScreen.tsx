@@ -382,7 +382,7 @@ function TriggerCard({ canManage }: { canManage: boolean }) {
 function RunsCard({ tz }: { tz: string }) {
   const runs = useRuns();
   return (
-    <Panel title="Chu kỳ gần nhất" kicker="Refinery runs">
+    <Panel title="Chu kỳ gần nhất" kicker="Các lượt sàng lọc">
       {runs.isPending ? (
         <SkeletonLines rows={5} padding="12px 16px" gap={14} />
       ) : runs.isError ? (

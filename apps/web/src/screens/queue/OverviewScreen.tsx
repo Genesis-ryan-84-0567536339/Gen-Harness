@@ -7,6 +7,8 @@ import { CardError, Panel, SkeletonLines } from '../common';
 import { N5, OK, SPOTLIGHT_DIMENSION_LABEL, WARN, initialsOf, queueKindIcon, queueKindTone, QUEUE_ACTION_LABEL, QUEUE_KIND_LABEL } from './queueModel';
 import { useOverview } from './queries';
 import { UpdateCard } from '../../update/UpdateCard';
+import { useNavigation } from '../../lib/queries';
+import { screenKeys } from '../../shell/navModel';
 import { SetupFollowUp } from './SetupFollowUp';
 
 const KPI_ICON: Record<string, string> = {
@@ -27,7 +29,8 @@ function statusTone(s: KpiItem['status']): string {
   return s === 'bad' ? 'var(--color-bad)' : s === 'warn' ? WARN : OK;
 }
 
-function KpiCard({ k }: { k: KpiItem }) {
+/** v0.1.28 (UX N9): thẻ chỉ là liên kết khi vai trò mở được màn đích — không dẫn tới màn "không có quyền". */
+function KpiCard({ k, allowed }: { k: KpiItem; allowed: Set<string> | null }) {
   const body = (
     <>
       <div className="ov-kpi__head">
@@ -42,7 +45,7 @@ function KpiCard({ k }: { k: KpiItem }) {
       <span className="ov-kpi__bar" style={{ background: statusTone(k.status) } as CSSProperties} aria-hidden />
     </>
   );
-  if (!k.filter) return <div className="ov-kpi">{body}</div>;
+  if (!k.filter || (allowed && !allowed.has(k.filter.screen))) return <div className="ov-kpi">{body}</div>;
   return (
     <Link to={`/${k.filter.screen}${qs(k.filter.filters)}`} className="ov-kpi ov-kpi--link">
       {body}
@@ -121,6 +124,7 @@ function HourlyChart({ hourly }: { hourly: { hour: string; count: number }[] }) 
 
 export function OverviewScreen() {
   const q = useOverview();
+  const nav = useNavigation();
 
   if (q.isPending) {
     return (
@@ -145,6 +149,7 @@ export function OverviewScreen() {
     );
   }
   const d = q.data;
+  const allowed = nav.data ? screenKeys(nav.data) : null;
   const row1 = d.kpis.filter((k) => k.row === 1);
   const row2 = d.kpis.filter((k) => k.row === 2);
 
@@ -154,12 +159,12 @@ export function OverviewScreen() {
       <SetupFollowUp />
       <div className="ov-kpi-row" data-gen-target="overview.kpis">
         {row1.map((k) => (
-          <KpiCard key={k.key} k={k} />
+          <KpiCard key={k.key} k={k} allowed={allowed} />
         ))}
       </div>
       <div className="ov-kpi-row">
         {row2.map((k) => (
-          <KpiCard key={k.key} k={k} />
+          <KpiCard key={k.key} k={k} allowed={allowed} />
         ))}
       </div>
 
@@ -184,14 +189,14 @@ export function OverviewScreen() {
         </Panel>
 
         <div className="ov-side-col">
-          <Panel title="5 đối tượng đáng chú ý nhất" kicker="Today's five" bodyClass="ov-spot-list" genTarget="overview.spotlight">
+          <Panel title="5 đối tượng đáng chú ý nhất" kicker="Hôm nay" bodyClass="ov-spot-list" genTarget="overview.spotlight">
             {d.spotlight.length === 0 ? (
               <EmptyState icon="ph ph-user-focus" title="Chưa có đối tượng nổi bật" />
             ) : (
               d.spotlight.map((s, i) => <SpotlightRow key={`${s.person.id}-${i}`} s={s} />)
             )}
           </Panel>
-          <Panel title="Chủ đề đang nổi" kicker="Rising signals · 24 giờ" bodyClass="ov-signal-list">
+          <Panel title="Chủ đề đang nổi" kicker="Tăng nhanh trong 24 giờ" bodyClass="ov-signal-list">
             {d.signals.length === 0 ? (
               <EmptyState icon="ph ph-chart-line-up" title="Chưa có chủ đề nổi bật" />
             ) : (
@@ -224,7 +229,7 @@ export function OverviewScreen() {
             ))}
             <div className="ov-health__row">
               <span className="ov-health__dot" style={{ background: d.health.backlog_pending > 0 ? WARN : OK }} aria-hidden />
-              <span className="ov-health__name">Backlog sàng lọc</span>
+              <span className="ov-health__name">Tin chờ sàng lọc</span>
               <span className="ov-health__metric">{fmtInt(d.health.backlog_pending)} bản ghi chờ</span>
             </div>
           </div>

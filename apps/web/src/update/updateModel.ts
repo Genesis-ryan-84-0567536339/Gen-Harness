@@ -77,3 +77,26 @@ export function updateView(
   }
   return { kind: 'hidden' };
 }
+
+/**
+ * v0.1.28 (UX V11): ghi chú phát hành lấy từ GitHub có phần tự sinh bằng tiếng Anh ("What's Changed", "Full
+ * Changelog", "by @x in https://…/pull/12") — bỏ phần đó, giữ phần mô tả; dịch tiêu đề thường gặp.
+ */
+export function readableNotes(md: string | null | undefined): string {
+  if (!md) return '';
+  const out: string[] = [];
+  for (const raw of md.replace(/\r\n/g, '\n').split('\n')) {
+    if (/full changelog/i.test(raw) || /^#+\s*new contributors/i.test(raw) || /made their first contribution/i.test(raw)) continue;
+    const l = raw
+      .replace(/^(#+)\s*what'?s changed\s*$/i, '$1 Điểm mới')
+      .replace(/\s+by @[\w-]+(\[bot\])?\s+in\s+https?:\/\/\S+/gi, '')
+      .replace(/\s*\(#\d+\)\s*$/, '')
+      .replace(/https?:\/\/github\.com\/\S+/gi, '')
+      .trimEnd();
+    out.push(l);
+  }
+  return out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/** Khoá sessionStorage: bản vừa cập nhật lên — sau khi trang tự tải lại thì báo "Đã cập nhật lên vX" một lần. */
+export const UPDATED_FLAG = 'gh_updated_to';

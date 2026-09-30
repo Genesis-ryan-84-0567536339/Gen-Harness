@@ -142,7 +142,7 @@ function PinHistoryDialog({ open, onClose }: { open: boolean; onClose: () => voi
     enabled: open,
   });
   return (
-    <Dialog open={open} onClose={onClose} width={480} title="Lịch sử nhập PIN" kicker="30 lần gần nhất · từ Action Log">
+    <Dialog open={open} onClose={onClose} width={480} title="Lịch sử nhập PIN" kicker="30 lần gần nhất · từ Nhật ký hành động">
       {q.isPending ? (
         <SkeletonLines rows={4} padding="0" />
       ) : q.isError ? (

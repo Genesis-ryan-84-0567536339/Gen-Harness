@@ -69,3 +69,43 @@ export function firstRunCounters(f: FirstRun | undefined, p: RefineryProgress | 
 export function missingRequiredSteps(state: SetupState | undefined): Array<{ n: number; title: string }> {
   return (state?.steps ?? []).filter((s) => s.required && s.n !== 12 && s.status !== 'done').map((s) => ({ n: s.n, title: s.title }));
 }
+
+// ── Bước 4 (v0.1.28, UX C1) ───────────────────────────────────────────────
+/** Model names a provider offered when last tested — this session's result first, else the one saved on the server. */
+export function testedModels(p: Provider, tested: Record<string, ProviderTestResult>): string[] {
+  const t = tested[p.id] ?? p.last_test ?? null;
+  return t?.ok ? (t.models ?? []).filter((m) => !/embed/i.test(m)) : [];
+}
+
+/**
+ * A ready provider can actually answer: it already has a model, or it tested OK and offered one (the server picks
+ * the first when the Owner did not press "Dùng model này"). "Tiếp tục" stays off until one ready provider can.
+ */
+export function providerHasModel(p: Provider, tested: Record<string, ProviderTestResult>): boolean {
+  return p.models.length > 0 || testedModels(p, tested).length > 0;
+}
+
+// ── Bước 12 (v0.1.28, UX C1/V10) ──────────────────────────────────────────
+export interface SetupGap {
+  key: 'model' | 'channel' | 'groups' | 'rules' | 'backup';
+  text: string;
+  step: number;
+}
+
+/** What still keeps the system from running on its own — Bước 12 lists these instead of "Mọi thứ đã sẵn sàng". */
+export function setupGaps(i: {
+  providers?: Provider[];
+  activeChannels?: number;
+  groupsListening?: number;
+  enabledRules?: number;
+  backupDone?: boolean;
+}): SetupGap[] {
+  const out: SetupGap[] = [];
+  if (i.providers && !i.providers.some((p) => p.enabled && p.kind !== 'system_one' && p.models.length > 0))
+    out.push({ key: 'model', text: 'Chưa có model AI nào để trợ lý trả lời và sàng lọc tin', step: 4 });
+  if (i.activeChannels === 0) out.push({ key: 'channel', text: 'Chưa kết nối kênh chat nào (Zalo, WhatsApp…)', step: 5 });
+  if (i.groupsListening === 0) out.push({ key: 'groups', text: 'Chưa bật nhóm nào để lắng nghe', step: 6 });
+  if (i.enabledRules === 0) out.push({ key: 'rules', text: 'Chưa có quy tắc sàng lọc nào', step: 7 });
+  if (i.backupDone === false) out.push({ key: 'backup', text: 'Chưa có lịch sao lưu tự động', step: 11 });
+  return out;
+}

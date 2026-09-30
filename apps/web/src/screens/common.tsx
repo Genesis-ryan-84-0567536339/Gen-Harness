@@ -1,6 +1,7 @@
 import type { CSSProperties, ReactNode } from 'react';
 import { ErrorState, Skeleton, cx } from '@gen-harness/ui';
 import { errorText } from '../lib/errorText';
+import { friendlyError } from '../lib/friendlyError';
 
 /**
  * Screen-title row (docs/01 "Quy ước chung"): text block left, controls
@@ -130,5 +131,25 @@ export function InlineError({ children }: { children?: ReactNode }) {
     <div className="inline-error" role="alert" aria-live="assertive">
       {children}
     </div>
+  );
+}
+
+/**
+ * v0.1.28 (UX N2): lỗi từ máy chủ/nhà cung cấp viết lại bằng câu dễ hiểu; chuỗi gốc nằm trong "Chi tiết kỹ thuật"
+ * (đóng sẵn) cho người hỗ trợ.
+ */
+export function FriendlyErrorText({ raw, fallback, prefix, className }: { raw: string | null | undefined; fallback?: string; prefix?: string; className?: string }) {
+  const f = friendlyError(raw, fallback);
+  return (
+    <span className={cx('friendly-error', className)}>
+      {prefix ?? ''}
+      {f.message}
+      {f.detail ? (
+        <details className="tech-detail">
+          <summary>Chi tiết kỹ thuật</summary>
+          <code>{f.detail}</code>
+        </details>
+      ) : null}
+    </span>
   );
 }

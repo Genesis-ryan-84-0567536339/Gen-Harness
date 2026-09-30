@@ -23,7 +23,8 @@ from gh.auth import rbac, service
 from gh.auth.account import EMAIL_RE
 from gh.auth.deps import require, require_pin
 from gh.chassis import actionlog
-from gh.crypto import hash_secret, new_token
+from gh.crypto import hash_secret
+from gh.crypto import temp_password as new_temp_password
 from gh.db import DB
 from gh.errors import ApiError, field_errors, not_found
 
@@ -142,7 +143,7 @@ async def invite_user(body: InviteIn, me: service.CurrentUser = Depends(MANAGE),
         errors["email"] = "Email này đã có tài khoản"
     if errors:
         raise field_errors(errors)
-    temp_password = new_token(10)
+    temp_password = new_temp_password()
     uid = (await db.execute(text("""
         INSERT INTO core.users (org_id, email, display_name, password_hash, must_change_password)
         VALUES (:o, :e, :n, :p, true) RETURNING id"""),
@@ -208,7 +209,7 @@ async def reset_password(user_id: uuid.UUID, request: Request, me: service.Curre
                          _pin: Any = Depends(require_pin("user.manage")), db: AsyncSession = DB) -> dict[str, Any]:
     row = await _one(db, me, user_id)
     _not_self(me, row, "đặt lại mật khẩu")
-    temp_password = new_token(10)
+    temp_password = new_temp_password()
     await db.execute(text("UPDATE core.users SET password_hash = :h, must_change_password = true, "
                           "updated_at = now() WHERE id = :u"), {"h": hash_secret(temp_password), "u": row.id})
     revoked = await _revoke_all(db, row.id)

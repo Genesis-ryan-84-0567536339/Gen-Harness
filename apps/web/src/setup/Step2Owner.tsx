@@ -8,7 +8,7 @@ import { PIN_RULES } from './steps';
 import { StepFrame } from './StepFrame';
 import { describeError, TOKEN_INVALID, type StepProps } from './types';
 import { useFieldErrors } from './useFieldErrors';
-import { isComplete, passwordStrength, step2Errors, type Step2Values } from './validation';
+import { firstHiddenError, isComplete, passwordStrength, step2Errors, type Step2Values } from './validation';
 
 type K = keyof Step2Values;
 
@@ -71,6 +71,7 @@ export function Step2Owner({ meta, description, status, token, onBack, onSaved, 
       onContinue={() => void save()}
       onBack={onBack}
       formError={formError}
+      blockedHint={firstHiddenError(clientErrors, (k) => (k === 'pin_confirm' && v.pin_confirm.length === 6 ? 'shown' : f.errorOf(k)))}
     >
       <div className="setup-fields">
         {showToken ? (
@@ -141,7 +142,7 @@ export function Step2Owner({ meta, description, status, token, onBack, onSaved, 
             value={v.pin_confirm}
             onChange={(val) => set('pin_confirm', val)}
             onBlur={() => f.blur('pin_confirm')}
-            error={f.errorOf('pin_confirm')}
+            error={f.errorOf('pin_confirm') ?? (v.pin_confirm.length === 6 ? (clientErrors.pin_confirm ?? null) : null)}
           />
         </div>
         <div className="setup-pin-rules">

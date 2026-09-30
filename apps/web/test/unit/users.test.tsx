@@ -208,6 +208,18 @@ describe('HelpPage', () => {
     expect(text).not.toMatch(/gh_session|csrf/i);
   });
 
+  it('v0.1.28 (UX N9): Operator không thấy lệnh genh, Gen hay Hướng dẫn kết nối — thấy cách nhờ Owner', async () => {
+    const opMe = { ...me({ 'queue.read': 'all' }, { code: 'operator', name: 'Operator' }), features: { gen: false } };
+    stubApi((_m, url) => (url.endsWith('/system/about') ? { status: 200, body: { version: 'v0.1.28', org_name: 'Genesis Trading', timezone: 'Asia/Ho_Chi_Minh', role: { code: 'operator', name: 'Operator' } } } : undefined), opMe);
+    wrap(<HelpPage />);
+    expect(await screen.findByText('Cần giúp về tài khoản')).toBeInTheDocument();
+    expect(screen.getByText(/nhờ Owner vào Điều khiển hệ thống › Người dùng › Đặt lại mật khẩu/)).toBeInTheDocument();
+    expect(screen.queryByText('genh update')).toBeNull();
+    expect(screen.queryByText('Hỏi Gen')).toBeNull();
+    expect(screen.queryByRole('link', { name: /Mở Hướng dẫn kết nối/ })).toBeNull();
+    expect(await screen.findByText('Vận hành')).toBeInTheDocument(); // tên vai trò tiếng Việt
+  });
+
   it('diagnosticText: bản phát triển khi không có phiên bản', () => {
     expect(diagnosticText(undefined, undefined, new Date('2026-09-29T00:00:00Z'))).toContain('Phiên bản: bản phát triển');
   });

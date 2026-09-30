@@ -42,6 +42,17 @@ export const useCreateProvider = () => {
   });
 };
 
+export const useRemoveProvider = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.providers.remove(id),
+    onSuccess: () => {
+      invalidateProviders(qc);
+      void qc.invalidateQueries({ queryKey: qkApi.bindings });
+    },
+  });
+};
+
 export const useAddProviderKey = () => {
   const qc = useQueryClient();
   return useMutation({

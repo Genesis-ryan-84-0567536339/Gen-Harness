@@ -8,11 +8,12 @@ import { emailInitials, fmtInt, fmtLatency } from '../lib/format';
 import { queryClient } from '../lib/queryClient';
 import { useNow } from '../lib/useNow';
 import { errorText } from '../lib/errorText';
-import { CardError, InlineError, SkeletonLines, StateChip } from '../screens/common';
+import { CardError, FriendlyErrorText, InlineError, SkeletonLines, StateChip } from '../screens/common';
+import { providerStatus } from '../screens/api/apiModel';
 import { CliLoginPanel } from '../screens/system/CliCard';
 import { useCliLogin } from '../screens/system/useCliLogin';
 import { cliChip, cliMeta } from '../screens/system/systemModel';
-import { providerReady } from './phase2Model';
+import { providerHasModel, providerReady, testedModels } from './phase2Model';
 import { StepFrame } from './StepFrame';
 import { describeError, type StepProps } from './types';
 
@@ -22,13 +23,9 @@ const KINDS: Array<{ value: Exclude<ProviderKind, 'antigravity_cli'>; label: str
   { value: 'openai_compat', label: 'Tương thích OpenAI', name: '' },
 ];
 
-const AUTH_LABEL: Record<Provider['auth_state'], { label: string; tone: string }> = {
-  ok: { label: 'Hoạt động', tone: 'var(--color-ok)' },
-  expiring: { label: 'Sắp hết hạn', tone: 'var(--color-warn)' },
-  expired: { label: 'Hết hạn', tone: 'var(--color-bad)' },
-  error: { label: 'Lỗi', tone: 'var(--color-bad)' },
-  unconfigured: { label: 'Chưa cấu hình', tone: 'var(--color-neutral-400)' },
-};
+const N8 = 'var(--color-neutral-800)';
+const N4 = 'var(--color-neutral-400)';
+const N5 = 'var(--color-neutral-500)';
 
 export function Step4Brain({ meta, description, onBack, onSaved, formRef }: StepProps) {
   const providers = useProviders();
@@ -40,7 +37,8 @@ export function Step4Brain({ meta, description, onBack, onSaved, formRef }: Step
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  const list = useMemo(() => providers.data ?? [], [providers.data]);
+  // Jev (system_one) is not a text model — it never goes into the chain (same filter as the server).
+  const list = useMemo(() => (providers.data ?? []).filter((p) => p.kind !== 'system_one'), [providers.data]);
   // Keep the local order in sync with the server list (new providers go last).
   useEffect(() => {
     setOrder((prev) => {
@@ -49,34 +47,57 @@ export function Step4Brain({ meta, description, onBack, onSaved, formRef }: Step
       return [...kept, ...ids.filter((id) => !kept.includes(id))];
     });
   }, [list]);
-  const ordered = order.map((id) => list.find((p) => p.id === id)).filter((p): p is Provider => !!p);
 
   const activeProfile = profiles.data?.find((p) => p.active);
   const cliActive = !!activeProfile && activeProfile.state !== 'expired';
-  const ready = ordered.filter((p) => providerReady(p, tested, cliActive));
-  const canContinue = ready.length > 0 || (cliActive && ordered.length === 0);
+  const byOrder = order.map((id) => list.find((p) => p.id === id)).filter((p): p is Provider => !!p);
+  // v0.1.28 (UX N1): nguồn chưa gọi được (lỗi / chưa kiểm tra) luôn đứng SAU nguồn dùng được — không bao giờ đầu chuỗi.
+  const ready = byOrder.filter((p) => providerReady(p, tested, cliActive));
+  const notReady = byOrder.filter((p) => !ready.includes(p));
+  const ordered = [...ready, ...notReady];
+  // v0.1.28 (UX C1): chỉ cho Tiếp tục khi có nguồn dùng được CÓ model (đã chọn, hoặc máy chủ tự lấy model đầu tiên).
+  const withModel = ready.filter((p) => providerHasModel(p, tested));
+  const canContinue = withModel.length > 0;
+  const blockReason = canContinue
+    ? null
+    : ready.length
+      ? 'Chọn model cho nguồn đã kiểm tra OK (bấm "Kiểm tra" rồi "Dùng model này") để tiếp tục.'
+      : 'Cần ít nhất một nguồn gọi thử thành công để tiếp tục.';
 
+  const refreshProviders = () => void queryClient.invalidateQueries({ queryKey: qk2.providers });
   const test = useMutation({
     mutationFn: (id: string) => api.providers.test(id),
-    onSuccess: (r, id) => setTested((t) => ({ ...t, [id]: r })),
+    onSuccess: (r, id) => {
+      setTested((t) => ({ ...t, [id]: r }));
+      refreshProviders(); // trạng thái (Hoạt động / Lỗi kết nối) do máy chủ ghi — đọc lại cho khớp mọi màn
+    },
     onError: (e, id) => setTested((t) => ({ ...t, [id]: { ok: false, latency_ms: null, models: [], error: errorText(e) } })),
   });
+  const remove = useMutation({
+    mutationFn: (id: string) => api.providers.remove(id),
+    onSuccess: (_r, id) => {
+      queryClient.setQueryData<Provider[]>(qk2.providers, (old) => old?.filter((x) => x.id !== id));
+      setTested(({ [id]: _drop, ...rest }) => rest);
+      refreshProviders();
+    },
+  });
 
-  const move = (i: number, d: -1 | 1) =>
-    setOrder((o) => {
-      const j = i + d;
-      if (j < 0 || j >= o.length) return o;
-      const next = [...o];
-      [next[i], next[j]] = [next[j], next[i]];
-      return next;
-    });
+  const move = (i: number, d: -1 | 1) => {
+    const j = i + d;
+    if (j < 0 || j >= ordered.length) return;
+    const next = ordered.map((p) => p.id);
+    [next[i], next[j]] = [next[j], next[i]];
+    setOrder(next);
+  };
 
   const save = async () => {
     setBusy(true);
     setFormError(null);
     try {
-      const ids = ordered.filter((p) => providerReady(p, tested, cliActive)).map((p) => p.id);
-      onSaved(await api.setup.step4(ids));
+      const state = await api.setup.step4(ready.map((p) => p.id));
+      // Máy chủ có thể vừa tự chọn model + xếp lại thứ tự — đọc lại cho bước 12 và các màn khác.
+      void queryClient.invalidateQueries({ queryKey: qk2.providers });
+      onSaved(state);
     } catch (e) {
       setFormError(describeError(e));
     } finally {
@@ -97,9 +118,10 @@ export function Step4Brain({ meta, description, onBack, onSaved, formRef }: Step
       onContinue={() => void save()}
       onBack={onBack}
       formError={formError}
+      blockedHint={providers.data ? blockReason : null}
     >
       <div className="setup-section">
-        <div className="setup-section__title">Antigravity CLI · tài khoản Google</div>
+        <div className="setup-section__title">Tài khoản Google · Antigravity CLI</div>
         {profiles.isPending ? (
           <SkeletonLines rows={1} padding="0" />
         ) : profiles.isError ? (
@@ -112,10 +134,10 @@ export function Step4Brain({ meta, description, onBack, onSaved, formRef }: Step
             <div className="setup-row__main">
               <div className="setup-row__title">{activeProfile ? activeProfile.email : 'Chưa đăng nhập'}</div>
               <div className="cli-meta">
-                {activeProfile ? cliMeta(activeProfile, now) : 'Đăng nhập Google trong container để core agent dùng Antigravity CLI.'}
+                {activeProfile ? cliMeta(activeProfile, now) : 'Đăng nhập Google để hệ thống dùng AI qua tài khoản của Sếp.'}
               </div>
             </div>
-            <StateChip color={chip.tone} border={chip.tone === 'var(--color-neutral-400)' ? 'var(--color-neutral-800)' : chip.tone} dot size="md">
+            <StateChip color={chip.tone} border={chip.tone === N4 ? N8 : chip.tone} dot size="md">
               {chip.label}
             </StateChip>
             {!login.active ? (
@@ -129,23 +151,25 @@ export function Step4Brain({ meta, description, onBack, onSaved, formRef }: Step
       </div>
 
       <div className="setup-section">
-        <div className="setup-section__title">Khoá API · chuỗi chuyển hướng</div>
-        <p className="setup-section__hint">Nguồn đứng trên được dùng trước; khi cạn hạn mức hoặc lỗi, core agent chuyển xuống nguồn kế tiếp.</p>
+        <div className="setup-section__title">Khoá API · thứ tự dùng</div>
+        <p className="setup-section__hint">Nguồn đứng trên được dùng trước; khi hết hạn mức hoặc lỗi, hệ thống chuyển xuống nguồn kế tiếp. Nguồn chưa gọi được luôn xếp cuối.</p>
         {providers.isPending ? (
           <SkeletonLines rows={2} padding="0" />
         ) : providers.isError ? (
           <CardError error={providers.error} onRetry={() => void providers.refetch()} retrying={providers.isFetching} />
         ) : ordered.length === 0 ? (
-          <EmptyState icon="ph ph-key" title="Chưa có nguồn model nào" description="Đăng nhập CLI ở trên hoặc thêm một khoá API bên dưới." />
+          <EmptyState icon="ph ph-key" title="Chưa có nguồn model nào" description="Đăng nhập Google ở trên hoặc thêm một khoá API bên dưới." />
         ) : (
           <div className="prov-list" aria-label="Chuỗi chuyển hướng">
             {ordered.map((p, i) => {
-              const auth = AUTH_LABEL[p.auth_state] ?? AUTH_LABEL.unconfigured;
-              const t = tested[p.id];
+              const status = providerStatus(p);
+              const isReady = i < ready.length;
+              const t = tested[p.id] ?? p.last_test ?? null;
+              const offered = testedModels(p, tested);
               const testing = test.isPending && test.variables === p.id;
               return (
-                <div className="prov-row" key={p.id}>
-                  <span className="prov-rank">{i + 1}.</span>
+                <div className="prov-row" key={p.id} data-ready={isReady || undefined}>
+                  <span className="prov-rank">{isReady ? `${i + 1}.` : '–'}</span>
                   <div className="setup-row__main">
                     <div className="setup-row__title">{p.name}</div>
                     <div className="setup-row__meta">
@@ -156,26 +180,39 @@ export function Step4Brain({ meta, description, onBack, onSaved, formRef }: Step
                     </div>
                     {t ? (
                       <div className="prov-test" style={{ color: t.ok ? 'var(--color-ok)' : 'var(--color-bad)' }} role="status">
-                        {t.ok
-                          ? `Gọi thử OK · ${fmtLatency(t.latency_ms)}${t.models.length ? ` · ${t.models.join(', ')}` : ''}`
-                          : `Lỗi: ${t.error ?? 'không gọi được'}`}
+                        {t.ok ? (
+                          `Gọi thử OK${t.latency_ms != null ? ` · ${fmtLatency(t.latency_ms)}` : ''}`
+                        ) : (
+                          <FriendlyErrorText raw={t.error} prefix="Chưa dùng được: " fallback="không gọi được nguồn này." />
+                        )}
                       </div>
                     ) : null}
-                    {t?.ok && p.kind !== 'antigravity_cli' && !p.models.length && t.models.length ? <AddModel provider={p} models={t.models} /> : null}
+                    {isReady && !p.models.length && offered.length ? <AddModel provider={p} models={offered} /> : null}
                   </div>
-                  <StateChip color={auth.tone} border={auth.tone === 'var(--color-neutral-400)' ? 'var(--color-neutral-800)' : auth.tone}>
-                    {auth.label}
+                  <StateChip color={status.tone} border={status.tone === N5 || status.tone === N4 ? N8 : status.tone}>
+                    {status.label}
                   </StateChip>
                   <Button variant="secondary" className="btn-27" loading={testing} onClick={() => test.mutate(p.id)}>
                     Kiểm tra
                   </Button>
-                  <IconButton icon="ph ph-arrow-up" label={`Đưa ${p.name} lên trước`} disabled={i === 0} onClick={() => move(i, -1)} />
-                  <IconButton icon="ph ph-arrow-down" label={`Đưa ${p.name} xuống sau`} disabled={i === ordered.length - 1} onClick={() => move(i, 1)} />
+                  <IconButton icon="ph ph-arrow-up" label={`Đưa ${p.name} lên trước`} disabled={i === 0 || !isReady} onClick={() => move(i, -1)} />
+                  <IconButton icon="ph ph-arrow-down" label={`Đưa ${p.name} xuống sau`} disabled={i >= ready.length - 1} onClick={() => move(i, 1)} />
+                  {p.kind !== 'antigravity_cli' ? (
+                    <IconButton
+                      icon="ph ph-trash"
+                      label={`Xoá ${p.name}`}
+                      disabled={remove.isPending}
+                      onClick={() => {
+                        if (window.confirm(`Xoá nguồn "${p.name}"? Khoá API của nguồn này cũng bị xoá.`)) remove.mutate(p.id);
+                      }}
+                    />
+                  ) : null}
                 </div>
               );
             })}
           </div>
         )}
+        {remove.isError ? <InlineError>{errorText(remove.error)}</InlineError> : null}
         <AddProvider onAdded={(p) => test.mutate(p.id)} />
       </div>
     </StepFrame>
@@ -201,6 +238,8 @@ function AddProvider({ onAdded }: { onAdded: (p: Provider) => void }) {
       onAdded(p);
     },
   });
+  const keyShort = key.trim().length > 0 && key.trim().length < 8;
+  const endpointBad = kind === 'openai_compat' && endpoint.trim().length > 0 && !/^https?:\/\//.test(endpoint.trim());
   const valid = key.trim().length >= 8 && (kind !== 'openai_compat' || /^https?:\/\//.test(endpoint.trim()));
   return (
     <div className="dlg-fields" style={{ gap: 10 }}>
@@ -217,13 +256,20 @@ function AddProvider({ onAdded }: { onAdded: (p: Provider) => void }) {
         />
         <TextField label="Tên hiển thị" value={name} onChange={(e) => setName(e.target.value)} />
         {kind === 'openai_compat' ? (
-          <TextField label="Endpoint" placeholder="https://…/v1" value={endpoint} onChange={(e) => setEndpoint(e.target.value)} />
+          <TextField
+            label="Địa chỉ gọi (Endpoint)"
+            placeholder="https://…/v1"
+            value={endpoint}
+            error={endpointBad ? 'Địa chỉ cần bắt đầu bằng https:// (hoặc http://)' : null}
+            onChange={(e) => setEndpoint(e.target.value)}
+          />
         ) : null}
         <TextField
           label="Khoá API"
           type="password"
           autoComplete="off"
           value={key}
+          error={keyShort ? 'Khoá API có vẻ quá ngắn — kiểm tra lại đã dán đủ chưa' : null}
           onChange={(e) => setKey(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
@@ -237,7 +283,7 @@ function AddProvider({ onAdded }: { onAdded: (p: Provider) => void }) {
         <Button variant="secondary" icon="ph ph-plus" disabled={!valid} loading={add.isPending} onClick={() => add.mutate()}>
           Thêm & kiểm tra
         </Button>
-        <span className="muted-note">Khoá được mã hoá trong két; Console chỉ hiện 4 ký tự cuối.</span>
+        <span className="muted-note">Khoá được mã hoá khi lưu; Console chỉ hiện 4 ký tự cuối.</span>
       </div>
       {add.isError ? <InlineError>{errorText(add.error)}</InlineError> : null}
     </div>
@@ -263,9 +309,8 @@ function AddModel({ provider, models }: { provider: Provider; models: string[] }
       <Button variant="secondary" size="sm" loading={add.isPending} onClick={() => add.mutate()}>
         Dùng model này
       </Button>
+      <span className="muted-note">Chưa chọn thì hệ thống dùng {models[0]}.</span>
       {add.isError ? <span className="prov-model__err">{errorText(add.error)}</span> : null}
     </div>
   );
 }
-
-

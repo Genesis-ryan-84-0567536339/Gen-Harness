@@ -156,8 +156,13 @@ export function BackupPanel() {
           <ScheduleRow schedule={d.schedule} timezone={d.timezone} />
 
           {isOwner && !d.restore.can_request ? (
-            <div className="upd-cmd">
-              <span>Máy chủ chưa bật khôi phục bằng nút bấm — chạy lệnh này một lần trên máy chủ:</span>
+            // v0.1.28 (UX N4): lời thường cho Sếp — sao lưu vẫn chạy; nút Khôi phục cần một việc một lần trên máy chủ.
+            <div className="upd-cmd" data-testid="restore-disabled">
+              <span>
+                Sao lưu vẫn tự chạy bình thường. Riêng nút <b>Khôi phục</b> chưa dùng được trên máy này vì máy chủ chưa bật trình
+                khôi phục. Nhờ người cài đặt hệ thống chạy lệnh dưới đây một lần trên máy chủ (lệnh cập nhật này bật luôn khôi phục) —
+                sau đó nút Khôi phục tự mở.
+              </span>
               <code className="mono">{ENABLE_COMMAND}</code>
             </div>
           ) : null}
@@ -240,7 +245,7 @@ function BackupRow({ b, tz, isOwner, canRestore, onRestore }: { b: BackupItem; t
           <Button variant="ghost" className="btn-27" icon="ph ph-download-simple" loading={download.isPending} onClick={() => download.mutate()} aria-label={`Tải về bản ${when(b.taken_at, tz)}`}>
             Tải về
           </Button>
-          <Button variant="ghost" className="btn-27" icon="ph ph-clock-counter-clockwise" disabled={!canRestore} onClick={onRestore} aria-label={`Khôi phục bản ${when(b.taken_at, tz)}`}>
+          <Button variant="ghost" className="btn-27" icon="ph ph-clock-counter-clockwise" disabled={!canRestore} title={canRestore ? undefined : 'Máy chủ chưa bật khôi phục bằng nút bấm — xem hướng dẫn phía trên'} onClick={onRestore} aria-label={`Khôi phục bản ${when(b.taken_at, tz)}`}>
             Khôi phục
           </Button>
         </td>

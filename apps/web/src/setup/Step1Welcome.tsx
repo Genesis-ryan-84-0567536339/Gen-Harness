@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ApiError } from '@gen-harness/contracts';
-import { Icon, Segmented, TextField } from '@gen-harness/ui';
+import { Icon, TextField } from '@gen-harness/ui';
 import { api } from '../lib/api';
 import { StepFrame } from './StepFrame';
 import { describeError, TOKEN_INVALID, type StepProps } from './types';
@@ -82,21 +82,7 @@ export function Step1Welcome({ meta, description, status, token, setToken, onSav
             error={f.errorOf('token')}
             hint="Hiện trong trình cài (TUI) — tự điền khi mở từ đường dẫn của trình cài."
           />
-          <div className="gh-field">
-            <span className="gh-field__label" id="setup-lang-label">
-              Ngôn ngữ giao diện
-            </span>
-            <Segmented
-              label="Ngôn ngữ giao diện"
-              value={v.language}
-              onChange={(language) => setV({ ...v, language })}
-              options={[
-                { value: 'vi', label: 'Tiếng Việt' },
-                { value: 'en', label: 'English' },
-              ]}
-              className="setup-seg"
-            />
-          </div>
+          {/* v0.1.28 (UX V3): chưa có bản dịch giao diện tiếng Anh — ẩn lựa chọn ngôn ngữ (luôn gửi "vi") tới khi có. */}
           <fieldset className="setup-options">
             <legend className="gh-field__label">Cách bắt đầu</legend>
             {MODES.map((m) => (
