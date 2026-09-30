@@ -123,3 +123,12 @@ export function addressingPreview(selfName: string, botCallsMe: string): string 
   const Boss = boss.charAt(0).toLocaleUpperCase('vi') + boss.slice(1);
   return `“Sáng nay ${self} cần xem gì?” → “Dạ ${Boss}, sáng nay có 3 cơ hội nóng và 2 tin đang chờ ${boss} duyệt ạ.”`;
 }
+
+/**
+ * v0.1.28 (UX V1): lý do "Tiếp tục" đang khoá — lỗi đầu tiên CHƯA hiện dưới ô nào (ô chưa rời khỏi / chưa chạm),
+ * để không lặp lại câu đã có ngay dưới ô.
+ */
+export function firstHiddenError<K extends string>(errors: Partial<Record<K, string>>, shown: (k: K) => string | null): string | null {
+  for (const [k, msg] of Object.entries(errors) as Array<[K, string | undefined]>) if (msg && !shown(k)) return `Còn thiếu: ${msg}`;
+  return null;
+}

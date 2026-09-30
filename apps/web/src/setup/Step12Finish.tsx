@@ -73,9 +73,9 @@ export function Step12Finish({ meta, description, onBack, onSaved, formRef }: St
     activeChannels: channels.data ? activeChannels.length : undefined,
     groupsListening: pipeline.data?.groups_listening,
     enabledRules: rules.data ? enabledRules.length : undefined,
-    backupDone: followUp.data ? !!followUp.data.find((i) => i.n === 11)?.done : undefined,
+    backupDone: Array.isArray(followUp.data) ? !!followUp.data.find((i) => i.n === 11)?.done : undefined,
   });
-  const loaded = !!(providers.data && channels.data && pipeline.data && rules.data && followUp.data);
+  const loaded = !!(providers.data && channels.data && pipeline.data && rules.data && Array.isArray(followUp.data));
 
   return (
     <StepFrame

@@ -10,7 +10,7 @@ import { toast } from '../../lib/toast';
 import { serverFieldErrors } from '../../account/accountModel';
 import { validateEmail, validateRequired } from '../../setup/validation';
 import { CardError, InlineError, Panel, SkeletonLines } from '../common';
-import { INVITE_ROLES, USERS_KEY, userStatus } from './usersModel';
+import { INVITE_ROLES, USERS_KEY, inviteMessage, userStatus } from './usersModel';
 
 type Pending = { kind: 'deactivate' | 'reset'; user: ManagedUser };
 
@@ -75,7 +75,7 @@ function UsersPanel() {
         )}
       </Panel>
       <p className="muted-note">
-        Chưa nối SMTP: mật khẩu tạm hiện một lần sau khi mời hoặc đặt lại — Sếp tự gửi qua kênh riêng; người đó phải đổi mật khẩu ở lần đăng nhập đầu. Owner chỉ tạo ở trình
+        Hệ thống chưa tự gửi email mời: mật khẩu tạm hiện một lần sau khi mời hoặc đặt lại — Sếp tự gửi qua kênh riêng; người đó phải đổi mật khẩu ở lần đăng nhập đầu. Owner chỉ tạo ở trình
         thiết lập; tổ chức luôn giữ ít nhất một Owner.
       </p>
 
@@ -128,7 +128,7 @@ function UserRow({ u, onAsk }: { u: ManagedUser; onAsk: (k: Pending['kind']) => 
         </div>
         <div className="retention-table__code">{u.email}</div>
       </td>
-      <td>
+      <td data-label="Vai trò">
         {u.is_self || isOwner ? (
           <span className="users-table__role">{u.role.name}</span>
         ) : (
@@ -147,12 +147,12 @@ function UserRow({ u, onAsk }: { u: ManagedUser; onAsk: (k: Pending['kind']) => 
           </select>
         )}
       </td>
-      <td>
+      <td data-label="Trạng thái">
         <Chip tone={st.tone} dot>
           {st.label}
         </Chip>
       </td>
-      <td>{u.last_login_at ? fmtAgo(u.last_login_at) : 'chưa đăng nhập'}</td>
+      <td data-label="Đăng nhập gần nhất">{u.last_login_at ? fmtAgo(u.last_login_at) : 'chưa đăng nhập'}</td>
       <td className="retention-table__actions">
         {u.is_self ? (
           <span className="muted-note">sửa ở Tài khoản của tôi</span>
@@ -297,7 +297,7 @@ function TempPasswordDialog({ title, result, onClose }: { title: string; result:
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(`Email: ${result.user.email}\nMật khẩu tạm: ${result.temp_password}`);
+      await navigator.clipboard.writeText(inviteMessage(result, window.location.origin));
       setCopied(true);
     } catch {
       toast('Không chép được — hãy bôi đen và chép tay.', 'warn');
@@ -314,7 +314,7 @@ function TempPasswordDialog({ title, result, onClose }: { title: string; result:
       actions={
         <>
           <Button variant="secondary" icon={copied ? 'ph ph-check' : 'ph ph-copy'} onClick={() => void copy()}>
-            {copied ? 'Đã chép' : 'Chép email + mật khẩu'}
+            {copied ? 'Đã chép' : 'Chép lời nhắn gửi nhân viên'}
           </Button>
           <Button variant="primary" onClick={onClose}>
             Đã gửi, đóng
@@ -335,8 +335,8 @@ function TempPasswordDialog({ title, result, onClose }: { title: string; result:
         </span>
       </div>
       <p className="muted-note">
-        Gửi cho người này qua kênh riêng (Zalo, email cá nhân…). Đăng nhập lần đầu bằng mật khẩu tạm sẽ bắt đặt mật khẩu mới. Đóng hộp này là không xem lại được — quên thì
-        bấm Đặt lại mật khẩu.
+        Gửi cho người này qua kênh riêng (Zalo, email cá nhân…) — lời nhắn đã chép gồm địa chỉ đăng nhập {window.location.origin}/login, email và mật khẩu tạm. Đăng nhập
+        lần đầu sẽ bắt đặt mật khẩu mới. Hộp này chỉ đóng bằng nút "Đã gửi, đóng" — đóng rồi là không xem lại được, quên thì bấm Đặt lại mật khẩu.
       </p>
     </Dialog>
   );

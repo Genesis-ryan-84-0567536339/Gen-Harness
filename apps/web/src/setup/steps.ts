@@ -60,7 +60,7 @@ export const SETUP_STEPS: StepMeta[] = [
   },
   {
     n: 10, key: 'team', title: 'Mời đội ngũ', required: false, built: true,
-    content: 'Thêm email và vai trò (Manager, Operator, Agent nhân viên, Auditor), xem trước ma trận quyền của vai trò đã chọn. Sinh liên kết mời.',
+    content: 'Thêm email và vai trò (Quản lý, Vận hành, Nhân viên phụ trách, Kiểm soát), xem trước ma trận quyền của vai trò đã chọn. Sinh liên kết mời.',
     doneWhen: 'Để sau được — hiện ở "Việc thiết lập tiếp" trên Tổng quan',
   },
   {

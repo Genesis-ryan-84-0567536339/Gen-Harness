@@ -60,7 +60,10 @@ export function InboxScreen() {
             {triage?.enabled ? (
               <span className="ib-hide" data-gen-target="inbox.hide_junk">
                 <Switch checked={hide === '1'} onChange={(v) => setHide(v ? '1' : '')} label="Ẩn rác & trùng" />
-                <span aria-hidden>Ẩn rác &amp; trùng</span>
+                {/* v0.1.28 (UX V7): bấm vào chữ cũng bật/tắt được, không chỉ nút gạt nhỏ. */}
+                <span aria-hidden className="ib-hide__text" onClick={() => setHide(hide === '1' ? '' : '1')}>
+                  Ẩn rác &amp; trùng
+                </span>
               </span>
             ) : null}
             <FilterSelect label="Ý định" value={intent} onChange={setIntent} options={INTENT_OPTIONS} />
@@ -130,8 +133,12 @@ function InboxCard({ item, onAssign, onSilence }: { item: InboxItem; onAssign: (
         <span className="ib-card__prio" style={{ color: priorityTone(item.priority) }}>
           {item.priority}
         </span>
-        <span className="ib-card__tag" style={{ color: itemTagTone(item), borderColor: itemTagTone(item) }}>
-          {itemTag(item)}
+        {/* v0.1.28 (UX V8): mục nghi rác không còn mang nhãn "Cơ hội" cùng lúc với "Rác". */}
+        <span
+          className="ib-card__tag"
+          style={item.triage?.spam ? { color: 'var(--color-neutral-500)', borderColor: 'var(--color-neutral-700)' } : { color: itemTagTone(item), borderColor: itemTagTone(item) }}
+        >
+          {item.triage?.spam ? 'Nghi rác' : itemTag(item)}
         </span>
         {item.code ? <span className="mono">{item.code}</span> : null}
         {triageBadges(item.triage).map((b) => (
@@ -145,13 +152,13 @@ function InboxCard({ item, onAssign, onSilence }: { item: InboxItem; onAssign: (
         <span className="ib-card__meta">{fmtAgo(item.created_at)}</span>
         <span style={{ flex: 1 }} />
         {item.score !== null ? (
-          <span className="ib-card__score">
-            <b>{Math.round(item.score * 100)}</b>/100
+          <span className="ib-card__score" title="Độ ưu tiên: mức đáng xử lý trước, 0–100">
+            ưu tiên <b>{Math.round(item.score * 100)}</b>/100
           </span>
         ) : null}
         {item.confidence_band ? (
           <span className="ib-card__conf" style={{ color: confidenceTone(item.confidence_band) }}>
-            tin cậy {item.confidence_band}
+            độ tin cậy {item.confidence_band}
           </span>
         ) : null}
       </div>

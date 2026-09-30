@@ -20,7 +20,8 @@ export interface DialogProps {
   padded?: boolean;
   className?: string;
   children?: ReactNode;
-  /** Close on backdrop click (default true). */
+  /** Close on backdrop click, Esc and the × button (default true). `false`: only the dialog's own actions close it
+   * (v0.1.28, UX V4 — e.g. a one-time temp password must not vanish on a stray Esc/click). */
   dismissable?: boolean;
 }
 
@@ -71,7 +72,7 @@ export function Dialog({
   const onKeyDown = (e: KeyboardEvent) => {
     if (e.key === 'Escape') {
       e.stopPropagation();
-      onClose();
+      if (dismissable) onClose();
     } else if (e.key === 'Tab' && ref.current) {
       const f = Array.from(ref.current.querySelectorAll<HTMLElement>(FOCUSABLE));
       if (!f.length) return;
@@ -113,9 +114,11 @@ export function Dialog({
           </div>
           <div className="gh-dialog__head-aside">
             {aside}
-            <button type="button" className="gh-dialog__close" aria-label="Đóng" onClick={onClose}>
-              <Icon name="ph ph-x" size={14} />
-            </button>
+            {dismissable ? (
+              <button type="button" className="gh-dialog__close" aria-label="Đóng" onClick={onClose}>
+                <Icon name="ph ph-x" size={14} />
+              </button>
+            ) : null}
           </div>
         </div>
         <div className={cx('gh-dialog__scroll', padded && 'gh-dialog__body')}>{children}</div>

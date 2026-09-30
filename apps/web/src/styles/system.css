@@ -164,7 +164,7 @@
 .roles-matrix { width: 100%; min-width: 760px; border-collapse: collapse; }
 .roles-matrix th { text-align: left; font-size: 9.5px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--color-neutral-500); padding: 9px 8px; }
 .roles-matrix th:first-child { padding-left: 0; }
-.roles-matrix__col { text-align: center; width: 116px; }
+.roles-matrix__col { text-align: center; width: 128px; }
 .roles-matrix td { padding: 10px 8px; border-top: 1px solid var(--color-divider); }
 .roles-matrix td:first-child { padding-left: 0; }
 .roles-matrix__role { font-size: 12.5px; color: var(--color-text); }
@@ -173,7 +173,7 @@
 .roles-matrix__cell[data-locked] { opacity: .75; }
 .roles-matrix__select {
   height: 24px; padding: 0 20px 0 6px; font: inherit; font-size: 10.5px; color: var(--color-text);
-  background: var(--color-bg); border: 1px solid var(--color-neutral-800); border-radius: var(--radius-sm); max-width: 128px;
+  background: var(--color-bg); border: 1px solid var(--color-neutral-800); border-radius: var(--radius-sm); max-width: 136px;
 }
 .roles-matrix__select:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
 .roles-matrix__select:disabled { opacity: .6; }
@@ -267,3 +267,20 @@
 .users-table__role { font-size: 11.5px; color: var(--color-neutral-300); }
 .users-table__select { height: 27px; padding: 0 8px; font-size: 11.5px; max-width: 190px; }
 .org-form { padding: 14px 16px 16px; }
+
+/* v0.1.28 (UX V5): trên điện thoại bảng Người dùng và ma trận Quyền hạn thành thẻ — nút Đặt lại mật khẩu / Khoá
+   và mọi ô quyền nằm trong khung, không phải cuộn ngang tìm. */
+@media (max-width: 760px) {
+  .retention-wrap .users-table, .roles-matrix { min-width: 0; }
+  .users-table thead, .roles-matrix thead { display: none; }
+  .users-table, .users-table tbody, .users-table tr, .users-table td,
+  .roles-matrix, .roles-matrix tbody, .roles-matrix tr, .roles-matrix td { display: block; width: 100%; }
+  .users-table tr, .roles-matrix tr { padding: 8px 0; border-top: 1px solid var(--color-divider); }
+  .users-table td, .roles-matrix td { border-top: none; padding: 4px 16px; }
+  .roles-matrix td { padding: 4px 0; }
+  .users-table td[data-label], .roles-matrix td[data-label] { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .users-table td[data-label]::before, .roles-matrix td[data-label]::before {
+    content: attr(data-label); font-size: 10.5px; color: var(--color-neutral-500); text-align: left; flex: 1; min-width: 0;
+  }
+  .retention-table__actions { flex-wrap: wrap; white-space: normal; }
+}

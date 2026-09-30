@@ -1,7 +1,8 @@
 import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Icon } from '@gen-harness/ui';
+import { EmptyState, Icon } from '@gen-harness/ui';
+import { useMe } from '../lib/queries';
 import { api } from '../lib/api';
 import { CardError, SkeletonLines } from '../screens/common';
 import { ScreenTitle } from '../screens/ScreenPage';
@@ -13,7 +14,11 @@ import { FOLLOW_UP_KEY, GUIDE, type GuideItem } from './guideContent';
  * liệu thật) — làm xong ở đâu (form hướng dẫn hay màn Console) thì việc cũng tự đánh dấu xong.
  */
 export function GuidePage() {
-  const q = useQuery({ queryKey: FOLLOW_UP_KEY, queryFn: ({ signal }) => api.setup.followUp(signal) });
+  const me = useMe();
+  // v0.1.28 (UX N9): việc thiết lập chỉ Owner làm — vai trò khác thấy lời giải thích, không phải "Không tải được" + Thử lại.
+  const role = me.data?.role?.code;
+  const nonOwner = !!role && role !== 'owner';
+  const q = useQuery({ queryKey: FOLLOW_UP_KEY, queryFn: ({ signal }) => api.setup.followUp(signal), enabled: !nonOwner });
 
   useEffect(() => {
     document.title = 'Hướng dẫn kết nối · Gen-Harness';
@@ -30,7 +35,15 @@ export function GuidePage() {
         description="Làm lần lượt từ trên xuống. Mỗi việc có nút mở đúng form cần điền; làm xong việc nào, việc đó tự đánh dấu — kể cả khi Sếp làm ở màn Console."
         maxWidth={640}
       />
-      {q.isPending ? (
+      {nonOwner ? (
+        <div className="gh-card">
+          <EmptyState
+            icon="ph ph-lock-simple"
+            title="Việc kết nối do Owner làm"
+            description="Kết nối kênh, chọn nhóm, sao lưu… chỉ Owner cài đặt được. Cần thêm gì, hãy nhắn Owner."
+          />
+        </div>
+      ) : q.isPending ? (
         <div className="gh-card">
           <SkeletonLines rows={6} />
         </div>

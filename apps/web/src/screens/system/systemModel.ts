@@ -200,19 +200,35 @@ export const CLI_LOGIN_TEXT: Record<CliLoginStatus, string> = {
 export { N3 };
 
 // ── Quyền hạn: ma trận (PLAN 4.5, thiết kế `permCols`/`permRows`) ───────────
+// v0.1.28 (UX N7): ô ma trận nói PHẠM VI dữ liệu (tất cả / theo team / khách được phân / không), không nói "toàn
+// quyền" — Auditor chỉ xem, ô ✓ của Auditor nghĩa là xem được tất cả, không phải được làm mọi thứ. Nhãn ngắn để ô
+// chọn không bị cắt chữ.
 export const SCOPE_CELL: Record<PermScope, { icon: string; tone: string; title: string }> = {
-  all: { icon: 'ph-fill ph-check-circle', tone: OK, title: 'Toàn quyền' },
-  team: { icon: 'ph ph-minus-circle', tone: WARN, title: 'Có giới hạn — theo team' },
-  assigned: { icon: 'ph ph-minus-circle', tone: WARN, title: 'Có giới hạn — khách được phân' },
-  none: { icon: 'ph ph-x', tone: N5, title: 'Không có quyền' },
+  all: { icon: 'ph-fill ph-check-circle', tone: OK, title: 'Tất cả dữ liệu' },
+  team: { icon: 'ph ph-minus-circle', tone: WARN, title: 'Chỉ dữ liệu của team mình' },
+  assigned: { icon: 'ph ph-minus-circle', tone: WARN, title: 'Chỉ khách được phân' },
+  none: { icon: 'ph ph-x', tone: N5, title: 'Không được' },
 };
 
 export const SCOPE_OPTIONS: Array<{ value: PermScope; label: string }> = [
-  { value: 'all', label: 'Toàn quyền' },
-  { value: 'team', label: 'Có giới hạn — team' },
-  { value: 'assigned', label: 'Có giới hạn — được phân' },
-  { value: 'none', label: 'Không có quyền' },
+  { value: 'all', label: 'Tất cả' },
+  { value: 'team', label: 'Theo team' },
+  { value: 'assigned', label: 'Khách được phân' },
+  { value: 'none', label: 'Không' },
 ];
+
+/** v0.1.28 (UX N7): tên vai trò tiếng Việt trên giao diện (mã vai trò và tên lưu ở máy chủ giữ nguyên). */
+export const ROLE_LABEL: Record<string, { name: string; meta: string }> = {
+  owner: { name: 'Owner — Sếp', meta: 'thấy và làm mọi thứ' },
+  manager: { name: 'Quản lý', meta: 'thấy team mình' },
+  operator: { name: 'Vận hành', meta: 'xử lý hàng đợi việc' },
+  agent_staff: { name: 'Nhân viên phụ trách', meta: 'chỉ khách được phân' },
+  auditor: { name: 'Kiểm soát', meta: 'chỉ xem, không làm thao tác nào' },
+};
+
+export function roleLabel(code: string, fallback: string): string {
+  return ROLE_LABEL[code]?.name ?? fallback;
+}
 
 /** Owner luôn `all` mọi cột; Auditor không bao giờ có quyền ghi — khoá cứng ARCHITECTURE §7.4/§8.3, ô ma
  * trận tương ứng bị khoá (disabled), không phải cho bấm rồi báo lỗi. */

@@ -88,9 +88,14 @@ export function LoginPage() {
           <Button variant="primary" type="submit" block loading={busy} disabled={!canSubmit && !busy} iconRight="ph ph-arrow-right">
             Đăng nhập
           </Button>
-          <p className="login-card__help">
-            Quên mật khẩu? Trên máy chủ chạy: <code className="mono">{RESET_PASSWORD_COMMAND}</code>
-          </p>
+          {/* v0.1.28 (UX N9/V15): nhân viên không có máy chủ — nhờ Owner; lệnh cho Owner không ngắt giữa chữ. */}
+          <div className="login-card__help">
+            <p>Quên mật khẩu?</p>
+            <p>Nhân viên: nhờ Owner bấm "Đặt lại mật khẩu" ở Điều khiển hệ thống › Người dùng.</p>
+            <p>
+              Owner: nhờ người cài đặt hệ thống chạy trên máy chủ <code className="mono login-card__cmd">{RESET_PASSWORD_COMMAND}</code>
+            </p>
+          </div>
         </div>
       </form>
     </div>

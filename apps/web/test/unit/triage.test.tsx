@@ -70,9 +70,9 @@ function page(items: InboxItem[], hidden = 0): InboxPage {
 describe('Lọc đầu Hộp thư — huy hiệu', () => {
   it('Trùng / Rác / điểm, không dấu → không huy hiệu', () => {
     expect(triageBadges(null)).toEqual([]);
-    expect(triageBadges(GOOD.triage).map((b) => b.label)).toEqual(['Điểm 82']);
+    expect(triageBadges(GOOD.triage).map((b) => b.label)).toEqual(['Lọc đầu 82']);
     const junk = triageBadges(JUNK.triage);
-    expect(junk.map((b) => b.label)).toEqual(['Trùng', 'Rác', 'Điểm 5']);
+    expect(junk.map((b) => b.label)).toEqual(['Trùng', 'Rác', 'Lọc đầu 5']);
     expect(junk[0].title).toContain('y hệt');
     expect(junk[2].title).toContain('quy tắc');
   });
@@ -87,7 +87,7 @@ describe('Hộp thư — "Ẩn rác & trùng"', () => {
     renderScreen(<InboxScreen />);
     expect(await screen.findByText('Rác')).toBeInTheDocument();
     expect(screen.getByText('Trùng')).toBeInTheDocument();
-    expect(screen.getByText('Điểm 82')).toBeInTheDocument();
+    expect(screen.getByText('Lọc đầu 82')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('switch', { name: 'Ẩn rác & trùng' }));
     await waitFor(() => expect(calls.some((c) => c.url.includes('hide_junk=true'))).toBe(true));
     expect(await screen.findByText(/Đã ẩn 1 mục/)).toBeInTheDocument();

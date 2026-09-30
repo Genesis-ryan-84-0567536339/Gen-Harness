@@ -1,4 +1,4 @@
-import { useRef, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useRef, type KeyboardEvent, type ReactNode } from 'react';
 import { cx } from './cx';
 
 export interface TabItem<K extends string = string> {
@@ -23,6 +23,17 @@ export interface TabsProps<K extends string = string> {
 /** 34px tabs with a 2px accent underline; arrow keys move between tabs. */
 export function Tabs<K extends string>({ items, value, onChange, label, className, idPrefix = 'tab' }: TabsProps<K>) {
   const refs = useRef<Array<HTMLButtonElement | null>>([]);
+  const listRef = useRef<HTMLDivElement>(null);
+  const index = items.findIndex((t) => t.key === value);
+  // v0.1.28 (UX V5): dải tab cuộn ngang (điện thoại) → đưa tab đang mở vào giữa dải; không cuộn trang.
+  useEffect(() => {
+    const list = listRef.current;
+    const btn = refs.current[index];
+    if (!list || !btn || list.scrollWidth <= list.clientWidth) return;
+    const b = btn.getBoundingClientRect();
+    const l = list.getBoundingClientRect();
+    list.scrollLeft = Math.max(0, list.scrollLeft + (b.left - l.left) - (list.clientWidth - b.width) / 2);
+  }, [index]);
   const onKey = (e: KeyboardEvent, i: number) => {
     let next = -1;
     if (e.key === 'ArrowRight') next = (i + 1) % items.length;
@@ -36,7 +47,7 @@ export function Tabs<K extends string>({ items, value, onChange, label, classNam
     }
   };
   return (
-    <div role="tablist" aria-label={label} className={cx('gh-tabs', className)}>
+    <div ref={listRef} role="tablist" aria-label={label} className={cx('gh-tabs', className)}>
       {items.map((t, i) => {
         const selected = t.key === value;
         return (

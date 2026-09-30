@@ -7,7 +7,7 @@ import { useCan } from '../../lib/permissions';
 import { errorText } from '../../lib/errorText';
 import { CardError, InlineError, Panel, SkeletonLines } from '../common';
 import { BAD, N5, OK, WARN } from '../data/dataModel';
-import { BOUNDARY_ICON, GROUP_KIND_LABEL, LISTEN_MODES, SCOPE_CELL, SCOPE_OPTIONS, VIEW_SCOPES, boundaryTone, cellLocked, listenTone } from './systemModel';
+import { BOUNDARY_ICON, GROUP_KIND_LABEL, LISTEN_MODES, ROLE_LABEL, SCOPE_CELL, SCOPE_OPTIONS, VIEW_SCOPES, boundaryTone, cellLocked, listenTone } from './systemModel';
 import { useBoundaries, useListeningGroups, usePatchBoundary, usePatchPermission, usePermissions } from './queries';
 
 /** Quyền hạn — ma trận vai trò, nhóm đang lắng nghe, ranh giới có trách nhiệm (PLAN 4.5). */
@@ -67,7 +67,7 @@ function PermissionMatrix() {
             {(['all', 'team', 'none'] as PermScope[]).map((s) => (
               <span className="roles-legend__item" key={s}>
                 <Icon name={SCOPE_CELL[s].icon} size={13} color={SCOPE_CELL[s].tone} />
-                {s === 'all' ? 'toàn quyền' : s === 'team' ? 'có giới hạn' : 'không'}
+                {s === 'all' ? 'tất cả dữ liệu' : s === 'team' ? 'có giới hạn (theo team / khách được phân)' : 'không được'}
               </span>
             ))}
           </div>
@@ -86,8 +86,8 @@ function PermissionMatrix() {
               {q.data.roles.map((role) => (
                 <tr key={role.code}>
                   <td>
-                    <div className="roles-matrix__role">{role.name}</div>
-                    <div className="roles-matrix__meta">{role.meta}</div>
+                    <div className="roles-matrix__role">{ROLE_LABEL[role.code]?.name ?? role.name}</div>
+                    <div className="roles-matrix__meta">{ROLE_LABEL[role.code]?.meta ?? role.meta}</div>
                   </td>
                   {q.data.columns.map((c) => {
                     // Mỗi cột có thể gồm nhiều quyền (vd Đánh giá nhân sự = 3 quyền) — ô hiện/sửa quyền ĐỌC
@@ -99,18 +99,18 @@ function PermissionMatrix() {
                     const key = `${role.code}:${primary}`;
                     if (!canManage || locked) {
                       return (
-                        <td key={c.key} className="roles-matrix__cell" data-locked={locked || undefined}>
-                          <span title={locked ? 'Giới hạn cố định — không sửa được' : cell.title}>
-                            <Icon name={cell.icon} size={15} color={cell.tone} />
+                        <td key={c.key} className="roles-matrix__cell" data-label={c.label} data-locked={locked || undefined}>
+                          <span title={locked ? `${cell.title} — cố định, không sửa được` : cell.title}>
+                            <Icon name={cell.icon} size={15} color={cell.tone} label={cell.title} />
                           </span>
                         </td>
                       );
                     }
                     return (
-                      <td key={c.key} className="roles-matrix__cell">
+                      <td key={c.key} className="roles-matrix__cell" data-label={c.label}>
                         <select
                           className="roles-matrix__select"
-                          aria-label={`${role.name} · ${c.label}`}
+                          aria-label={`${ROLE_LABEL[role.code]?.name ?? role.name} · ${c.label}`}
                           value={scope}
                           disabled={busyCell === key}
                           onChange={(e) => onChange(role.code, primary, e.target.value as PermScope)}
@@ -213,7 +213,7 @@ function BoundariesPanel() {
               <Icon name={BOUNDARY_ICON[b.code] ?? 'ph ph-shield'} size={15} color={boundaryTone(b)} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="boundary-row__label">{b.label}</div>
-                {b.locked ? <div className="boundary-row__hint">Khoá cứng — không tắt/bật được, kể cả Owner.</div> : null}
+                {b.locked ? <div className="boundary-row__hint">Luôn bật — không ai tắt được, kể cả Owner.</div> : null}
                 {b.code === 'approval_gate' ? (
                   <div className="boundary-row__threshold">
                     <TextField
@@ -223,6 +223,7 @@ function BoundariesPanel() {
                       step={1000000}
                       value={thresholdValue}
                       disabled={!canManage}
+                      hint={thresholdValue && Number.isFinite(Number(thresholdValue)) ? `= ${Number(thresholdValue).toLocaleString('vi-VN')} ₫` : undefined}
                       onChange={(e) => setThreshold(e.target.value)}
                       onBlur={saveThreshold}
                     />

@@ -106,7 +106,7 @@ export const GUIDE: GuideItem[] = [
     prepare: ['Tên và email của từng người.'],
     steps: [
       'Bấm "Làm bước này".',
-      'Bấm "Thêm người", điền "Tên hiển thị", "Email" và chọn "Vai trò" (Manager, Operator, Agent nhân viên, Auditor).',
+      'Bấm "Thêm người", điền "Tên hiển thị", "Email" và chọn "Vai trò" (Quản lý, Vận hành, Nhân viên phụ trách, Kiểm soát).',
       'Thêm đủ người rồi bấm "Tiếp tục".',
       'Hệ thống hiện mật khẩu tạm của từng người — chép lại và tự gửi cho họ qua Zalo/email riêng (chưa có gửi thư tự động).',
       'Bấm "Đã lưu, sang bước sau".',

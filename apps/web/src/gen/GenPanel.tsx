@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { GEN_SCREEN_BY_KEY, GEN_TARGET_BY_ID, splitTargetId, type GenStep, type UiAction } from '@gen-harness/contracts';
 import { Icon, IconButton } from '@gen-harness/ui';
 import { useMe } from '../lib/queries';
-import { executeUiAction } from './director';
+import { closeSpotlight, executeUiAction } from './director';
 import { sendQuestion } from './genClient';
 import { ProposalCard } from './ProposalCard';
 import { useGenStore, type GenChatMessage } from './genStore';
@@ -25,9 +25,9 @@ const TOOL_LABEL: Record<string, string> = {
   'task.list': 'việc & nhắc hẹn',
   'staff.list': 'danh sách người',
   'refinery.summary': 'lọc đầu Hộp thư',
-  'hub.kho_summary': 'Kho Ryan (Gen-hub)',
-  'hub.kho_search': 'Kho Ryan (Gen-hub)',
-  'hub.kho_get': 'Kho Ryan (Gen-hub)',
+  'hub.kho_summary': 'Kho tri thức (Gen-hub)',
+  'hub.kho_search': 'Kho tri thức (Gen-hub)',
+  'hub.kho_get': 'Kho tri thức (Gen-hub)',
 };
 
 function targetLabel(id: string): string {
@@ -120,6 +120,8 @@ export function GenPanel({ userId }: { userId: string }) {
   const submit = (q = text) => {
     if (!q.trim() || busy) return;
     setText('');
+    // v0.1.28 (UX V12): câu hỏi mới → dừng lượt dẫn đường cũ (ô khoanh sáng không còn đè màn hình).
+    if (useGenStore.getState().spotlight) closeSpotlight();
     void sendQuestion(q);
   };
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {

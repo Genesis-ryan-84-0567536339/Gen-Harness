@@ -127,7 +127,8 @@
 .login-card__error { font-size: 11px; color: var(--color-bad); min-height: 0; margin-top: -6px; }
 .login-card__error:empty { display: none; }
 .login-card__help { margin: -4px 0 0; font-size: 11px; line-height: 1.6; color: var(--color-neutral-400); }
-.login-card__help code { padding: 1px 5px; border-radius: 4px; background: var(--color-neutral-900, rgba(0,0,0,.3)); color: var(--color-accent-300); word-break: break-all; }
+.login-card__help code { padding: 1px 5px; border-radius: 4px; background: var(--color-neutral-900, rgba(0,0,0,.3)); color: var(--color-accent-300); white-space: nowrap; display: inline-block; max-width: 100%; overflow-x: auto; vertical-align: bottom; }
+.login-card__help p { margin: 0; }
 
 /* ── Phase 2 steps (4–7, 12) ───────────────────────────────────────────── */
 .setup-bare { display: flex; flex-direction: column; gap: 12px; min-width: 0; }

@@ -108,9 +108,14 @@ describe('Điều khiển hệ thống › Quyền hạn', () => {
     // Owner: mọi cột đều là icon khoá (không có <select>) — khoá cứng ARCHITECTURE §8.3.
     expect(within(ownerRow).queryAllByRole('combobox')).toHaveLength(0);
 
-    const managerRow = screen.getByText('Manager').closest('tr') as HTMLElement;
+    const managerRow = screen.getByText('Quản lý').closest('tr') as HTMLElement;
     // Manager không phải Owner/Auditor: mọi cột sửa được → có <select> cho từng cột.
     expect(within(managerRow).getAllByRole('combobox').length).toBe(PERMISSIONS_PAGE.columns.length);
+    // v0.1.28 (UX N7): tên vai trò tiếng Việt; Auditor = "chỉ xem", ô không bao giờ ghi "Toàn quyền"; nhãn ngắn.
+    const auditorRow = screen.getByText('Kiểm soát').closest('tr') as HTMLElement;
+    expect(within(auditorRow).getByText('chỉ xem, không làm thao tác nào')).toBeInTheDocument();
+    expect(screen.queryByText(/Toàn quyền/)).toBeNull();
+    for (const o of within(managerRow).getAllByRole('option')) expect((o.textContent ?? '').length).toBeLessThanOrEqual(16);
   });
 
   it('sửa một ô (Manager · Hành động) gửi đúng PATCH /permissions rồi cập nhật lại bảng', async () => {
@@ -130,8 +135,8 @@ describe('Điều khiển hệ thống › Quyền hạn', () => {
     renderScreen(<SystemScreen />, FULL_PERMS, 'roles');
     await screen.findByText('Ma trận quyền theo vai trò');
 
-    const managerRow = (await screen.findByText('Manager')).closest('tr') as HTMLElement;
-    const actionSelect = within(managerRow).getByLabelText('Manager · Hành động') as HTMLSelectElement;
+    const managerRow = (await screen.findByText('Quản lý')).closest('tr') as HTMLElement;
+    const actionSelect = within(managerRow).getByLabelText('Quản lý · Hành động') as HTMLSelectElement;
     expect(actionSelect.value).toBe('team');
     await user.selectOptions(actionSelect, 'none');
 

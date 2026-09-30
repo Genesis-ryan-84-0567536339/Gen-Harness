@@ -22,7 +22,8 @@ from gh.auth.routes import set_session_cookies
 from gh.biz.duty.context import DEFAULT_CONTEXT_TOKENS
 from gh.biz.people.routes import try_chat
 from gh.chassis import actionlog, policy
-from gh.crypto import hash_secret, new_token, token_digest
+from gh.crypto import hash_secret, token_digest
+from gh.crypto import temp_password as new_temp_password
 from gh.data_api.routes import RuleIn, ScheduleIn, create_rule, save_schedule, save_weights
 from gh.db import DB
 from gh.errors import ApiError, conflict, field_errors, forbidden, unauthenticated
@@ -626,7 +627,7 @@ async def step10(body: Step10In, request: Request, db: AsyncSession = DB,
         if f"invites.{idx}.email" in errors or f"invites.{idx}.display_name" in errors:
             continue
         seen.add(email)
-        temp_password = new_token(10)
+        temp_password = new_temp_password()
         uid = (await db.execute(text("""INSERT INTO core.users (org_id, email, display_name, password_hash,
                                                                 must_change_password)
                                         VALUES (:o, :e, :n, :p, true) RETURNING id"""),
