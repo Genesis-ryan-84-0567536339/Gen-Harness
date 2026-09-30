@@ -130,7 +130,7 @@ function ProviderCard({ provider: p, canManage, onAddKey }: { provider: Provider
         </StateChip>
       </div>
       <div className="apm-provider__body">
-        {p.endpoint ? <ProviderField label="ENDPOINT" value={p.endpoint} tone="var(--color-neutral-300)" /> : null}
+        {p.endpoint ? <ProviderField label="ĐỊA CHỈ GỌI" value={p.endpoint} tone="var(--color-neutral-300)" /> : null}
         <ProviderField
           label="KHOÁ"
           value={p.kind === 'antigravity_cli' ? 'dùng phiên đăng nhập CLI' : p.keys.length ? p.keys.map((k) => `${k.label} ····${k.last4}`).join(' · ') : 'chưa có khoá'}
@@ -343,7 +343,7 @@ function CoreParamsPanel() {
       ]
     : [];
   return (
-    <Panel title="Tham số core agent" kicker="Dùng cho việc sàng lọc thô → sạch" bodyClass="apm-params" label="Tham số core agent">
+    <Panel title="Tham số sàng lọc" kicker="Dùng cho việc sàng lọc thô → sạch" bodyClass="apm-params" label="Tham số sàng lọc">
       {bindings.isPending ? (
         <SkeletonLines rows={4} padding="0" />
       ) : bindings.isError ? (
@@ -542,7 +542,7 @@ function AddProviderDialog({ onClose }: { onClose: () => void }) {
           ]}
         />
         <TextField label="Tên hiển thị" value={name} onChange={(e) => setName(e.target.value)} maxLength={80} />
-        {kind === 'openai_compat' ? <TextField label="Endpoint" value={endpoint} onChange={(e) => setEndpoint(e.target.value)} placeholder="https://…" /> : null}
+        {kind === 'openai_compat' ? <TextField label="Địa chỉ gọi (Endpoint)" value={endpoint} onChange={(e) => setEndpoint(e.target.value)} placeholder="https://…" /> : null}
         <div className="gh-field">
           <label className="gh-field__label" htmlFor="apm-new-keys">
             Khoá API (mỗi dòng một khoá)

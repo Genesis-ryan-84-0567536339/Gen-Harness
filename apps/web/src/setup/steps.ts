@@ -30,7 +30,7 @@ export const SETUP_STEPS: StepMeta[] = [
   },
   {
     n: 4, key: 'brain', title: 'Bộ não AI', required: true, built: true,
-    content: 'Chọn nguồn core agent: Antigravity CLI (đăng nhập Google rồi dán mã xác thực) và/hoặc khoá API (Gemini, DeepSeek, tương thích OpenAI). Mỗi khoá có nút Kiểm tra gọi thử một lượt, hiện độ trễ và model khả dụng. Sắp thứ tự chuỗi chuyển hướng.',
+    content: 'Chọn nguồn AI cho hệ thống: Antigravity CLI (đăng nhập Google rồi dán mã xác thực) và/hoặc khoá API (Gemini, DeepSeek, tương thích OpenAI). Mỗi khoá có nút Kiểm tra gọi thử một lượt, hiện độ trễ và model khả dụng. Sắp thứ tự chuỗi chuyển hướng.',
     doneWhen: 'Ít nhất một provider kiểm tra OK',
   },
   {

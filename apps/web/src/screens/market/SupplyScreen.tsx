@@ -22,7 +22,7 @@ export function SupplyScreen() {
     <div className="screen">
       <ScreenHead
         title="Cung ↔ Cầu"
-        description="Hai danh sách rút từ kho sạch: người đang cần nguồn hàng và người đang cần bán. Core agent đề xuất cặp ghép, Sếp quyết định có bắt tay hay không."
+        description="Hai danh sách rút từ kho sạch: người đang cần nguồn hàng và người đang cần bán. Hệ thống đề xuất cặp ghép, Sếp quyết định có bắt tay hay không."
         maxWidth={760}
         actions={
           <div className="sup-head-actions">
@@ -48,7 +48,7 @@ export function SupplyScreen() {
         <SideList title="Đang cần bán" subtitle="Supply · CUNG" tone="var(--color-accent-400)" icon="ph ph-storefront" q={supply} />
       </div>
 
-      <Panel title="Cặp ghép core agent đề xuất" kicker="Cầu ↔ Cung · kèm lý do và điểm khớp" bodyClass="sup-matches" aside={<span className="sup-matches__note">Không tự liên hệ hai bên khi chưa được Sếp duyệt</span>}>
+      <Panel title="Cặp ghép hệ thống đề xuất" kicker="Cầu ↔ Cung · kèm lý do và điểm khớp" bodyClass="sup-matches" aside={<span className="sup-matches__note">Không tự liên hệ hai bên khi chưa được Sếp duyệt</span>}>
         {matches.isPending ? (
           <SkeletonLines rows={5} />
         ) : matches.isError ? (
