@@ -25,7 +25,12 @@ theo phạm vi, rà trần so trùng, hạn lưu chuông 30/90 ngày, nhắc vi�
 v0.1.28: sửa theo rà soát UX — bước 4 phải có model (tự chọn model đã gọi thử, gán cho agent lõi), bước 12 nói thật việc còn
 thiếu, nguồn lỗi xuống cuối + xoá được + một nhãn trạng thái, lỗi kỹ thuật thành câu dễ hiểu, "Để sau" dùng quy tắc/sao lưu
 mặc định, tắt phụ đề tiếng Anh + bỏ chữ lập trình viên, ma trận quyền tiếng Việt, bớt ngõ cụt cho vai trò khác Owner, điện thoại
-(bảng → thẻ). Còn lại: V2 (bước 4 "Để sau" — chờ Boss), ghi chú phát hành tiếng Việt, số đếm Hộp thư, một số mục Nhẹ.
+(bảng → thẻ). Còn lại: ghi chú phát hành tiếng Việt, số đếm Hộp thư, một số mục Nhẹ.
+v0.1.29: Boss 30/09 "có công cụ, dùng hay không do Owner quyết, cảnh báo rủi ro rõ" — V2 bước 4 "Để sau" được (hộp cảnh báo,
+dải "Chưa có model" ở bước 12 + Tổng quan, chọn model lại ở /guide/4); **D3 lát đầu**: dịch vụ `browser` (Playwright,
+không DB, không khoá master) + `browser-egress` (chỉ tên miền Facebook), màn Tài khoản mạng xã hội (chỉ Owner, chấp nhận
+rủi ro từng tài khoản, Owner tự đăng nhập trong cửa sổ trình duyệt từ xa, phiên mã hoá, gỡ = xoá phiên), Gen CHỈ ĐỌC thông
+báo + danh sách hội thoại Facebook cá nhân và tóm tắt, lịch đọc (tắt mặc định), Dừng tất cả, giới hạn tốc độ.
 
 ## Đợt A — Gen v1 (thiết kế: docs/design/gen-v1.md)
 - ✅ A1 Khung chat phải + Gen trả lời/tóm tắt (chỉ đọc), lưu hội thoại, Nhật ký hành động — v0.1.21.
@@ -54,6 +59,8 @@ mặc định, tắt phụ đề tiếng Anh + bỏ chữ lập trình viên, ma
   nhắc token trước 14 ngày; thẻ Gen-hub ở MCP Hub); v0.1.27 gia cố (ghim DNS, lỗi chỉ Owner, route MCP chung chỉ Owner).
   Còn: đề xuất ghi kanban/warroom (bản sau), phương án B.
 - ~~D2 Jules worker~~ — **Bỏ** (Boss chốt QD-10, xác nhận lại 30/09). Không làm, không kiểm điều khoản Jules nữa.
-- D3 Gen điều khiển mạng xã hội thay Boss (API trước, Playwright cho tài khoản cá nhân) — thiết kế:
-  docs/design/gen-browser-agent.md (lát đầu đề xuất v0.1.28: đăng nhập + chỉ đọc 1 nền tảng; chờ Boss duyệt).
+- 🟡 D3 Gen điều khiển mạng xã hội thay Boss (API trước, Playwright cho tài khoản cá nhân) — thiết kế:
+  docs/design/gen-browser-agent.md. ✅ Lát đầu **v0.1.29**: Facebook cá nhân, đăng nhập + CHỈ ĐỌC (thông báo, hội thoại).
+  Tiếp: v0.1.30 ghi có xác nhận (đề xuất Gen + PIN + permit — chỗ cắm `gh/social/permit.py`); Trang FB/IG chuyên nghiệp
+  qua API; nền tảng khác. Luật cứng giữ nguyên: không tài khoản giả, không lách chống bot (không stealth/proxy/giải CAPTCHA).
 Thiết kế: docs/design/gen-hub-link.md (lát đầu v0.1.26 ✅ — Gen đọc Kho qua Gen-hub, chỉ-đọc).
