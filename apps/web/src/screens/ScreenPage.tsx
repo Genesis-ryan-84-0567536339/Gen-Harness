@@ -1,6 +1,7 @@
 import { useEffect, type ComponentType } from 'react';
 import { SCREEN_BY_KEY } from '@gen-harness/contracts';
 import { Card, EmptyState, ErrorState, Skeleton } from '@gen-harness/ui';
+import { errorText } from '../lib/errorText';
 import { useNavigation } from '../lib/queries';
 import { screenKeys } from '../shell/navModel';
 import { CleanScreen } from './data/CleanScreen';
@@ -96,7 +97,7 @@ export function ScreenPage({ screenKey }: { screenKey: string }) {
       <div className="screen">
         {title}
         <Card padded={false}>
-          <ErrorState message={nav.error.message} onRetry={() => void nav.refetch()} retrying={nav.isFetching} />
+          <ErrorState message={errorText(nav.error)} onRetry={() => void nav.refetch()} retrying={nav.isFetching} />
         </Card>
       </div>
     );

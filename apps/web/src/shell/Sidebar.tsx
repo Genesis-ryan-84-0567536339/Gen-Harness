@@ -1,8 +1,8 @@
-import type { CSSProperties } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Fragment, type CSSProperties } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import type { NavDomain, NavItem } from '@gen-harness/contracts';
 import { ErrorState, Icon, Skeleton, Tooltip, toneColor, toneTint } from '@gen-harness/ui';
-import { useNavigation } from '../lib/queries';
+import { useMe, useNavigation } from '../lib/queries';
 import { useUiStore } from '../lib/uiStore';
 import { useIsMobile } from '../lib/useMediaQuery';
 import { AccountFooter } from './AccountFooter';
@@ -68,8 +68,42 @@ function Domain({ dm, index, wide, activeKey }: { dm: NavDomain; index: number; 
         <div className="sb-rail-rule" aria-hidden />
       ) : null}
       {dm.groups.map((g) => (
-        <Group key={g.key ?? g.name} g={g} wide={wide} activeKey={activeKey} />
+        <Fragment key={g.key ?? g.name}>
+          <Group g={g} wide={wide} activeKey={activeKey} />
+          {g.key === 'system' ? <GuideNavItem wide={wide} /> : null}
+        </Fragment>
       ))}
+    </div>
+  );
+}
+
+/**
+ * v0.1.30: lối vào cố định tới "Hướng dẫn thiết lập" (/guide) ngay dưới Điều khiển hệ thống — chỉ Owner (API
+ * /setup/* chỉ cho Owner). Trước đây chỉ vào được qua Trợ giúp hoặc thẻ "Việc thiết lập tiếp" (có lúc ẩn).
+ */
+function GuideNavItem({ wide }: { wide: boolean }) {
+  const me = useMe();
+  const { pathname } = useLocation();
+  if (me.data?.role?.code !== 'owner') return null;
+  const on = pathname === '/guide' || pathname.startsWith('/guide/');
+  const el = (
+    <Link
+      to="/guide"
+      className="sb-item"
+      data-on={on || undefined}
+      data-self={on || undefined}
+      aria-current={on ? 'page' : undefined}
+      aria-label={wide ? undefined : 'Hướng dẫn thiết lập'}
+      title={wide ? 'Hướng dẫn thiết lập — các bước kết nối còn lại' : undefined}
+    >
+      <span className="sb-item__bar" aria-hidden />
+      <Icon name="ph ph-list-checks" size={16} />
+      {wide ? <span className="sb-item__name">Hướng dẫn thiết lập</span> : null}
+    </Link>
+  );
+  return (
+    <div className="sb-group" data-screen="guide">
+      {wide ? el : <Tooltip content="Hướng dẫn thiết lập" placement="right" delay={150}>{el}</Tooltip>}
     </div>
   );
 }

@@ -149,3 +149,9 @@ export const MODEL_GUIDE: GuideItem = {
 };
 
 export const GUIDE_BY_N: Record<number, GuideItem> = Object.fromEntries([MODEL_GUIDE, ...GUIDE].map((g) => [g.n, g]));
+
+/** v0.1.30: thẻ ẩn khi người dùng đã bấm "Ẩn" và KHÔNG có bước dở nào mới so với lúc ẩn. */
+export function followUpHidden(pending: number[], hidden: number[] | undefined): boolean {
+  if (!hidden) return false;
+  return pending.every((n) => hidden.includes(n));
+}

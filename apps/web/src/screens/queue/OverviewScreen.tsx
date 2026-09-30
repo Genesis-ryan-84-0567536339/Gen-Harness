@@ -145,6 +145,9 @@ export function OverviewScreen() {
   if (q.isError) {
     return (
       <div className="screen">
+        {/* v0.1.30: số liệu Tổng quan lỗi không được kéo mất lối vào "Việc thiết lập tiếp". */}
+        <NoModelBanner />
+        <SetupFollowUp />
         <CardError error={q.error} onRetry={() => void q.refetch()} retrying={q.isFetching} />
       </div>
     );

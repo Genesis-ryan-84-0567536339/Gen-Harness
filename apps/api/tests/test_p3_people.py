@@ -370,7 +370,7 @@ async def test_step8_and_step9_require_prior_steps_then_create_agent(owner_api: 
     body3 = r3.json()
     assert body3["agent"]["name"] == "Trợ lý Mai"
     # Chưa cấu hình model nào ở bước 4 (test không dựng provider thật) → thử trò chuyện lỗi nhưng KHÔNG chặn bước.
-    assert body3["agent"]["try_reply"] is None and body3["agent"]["try_error"] is not None
+    assert body3["agent"]["try_reply"] is None and isinstance(body3["agent"]["try_error"], str)
     agent_id = body3["agent"]["id"]
     row = (await db.execute(text("SELECT autonomy_level FROM agent.identities WHERE id = :i"),
                             {"i": agent_id})).scalar_one()

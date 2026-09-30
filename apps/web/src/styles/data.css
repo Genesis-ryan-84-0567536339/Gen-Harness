@@ -297,3 +297,9 @@ a.pipe-card:hover { border-color: var(--color-neutral-700); color: inherit; }
 
 /* A progress bar inside a flex row takes the free width. */
 .dlg-row > .gh-bar, .mini-bars__row > .gh-bar, .qr-count > .gh-bar { flex: 1 1 auto; min-width: 40px; }
+
+/* v0.1.30: trạng thái "chưa có model AI hoạt động" (thay cho lỗi thô). */
+.model-down { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border: 1px solid var(--color-neutral-200); border-radius: 10px; background: var(--color-neutral-100); color: var(--color-neutral-700); font-size: 12.5px; flex-wrap: wrap; }
+.model-down__body { flex: 1 1 220px; min-width: 0; }
+.model-down__msg { line-height: 1.45; }
+.model-down__cta { flex: none; text-decoration: none; }

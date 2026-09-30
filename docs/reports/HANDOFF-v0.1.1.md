@@ -913,3 +913,30 @@ hoá — hệ thống chỉ giảm (đọc ít, dừng ngay khi có cảnh báo)
   rõ ràng). Nghiệm thu thật = Boss đăng nhập + đọc một lần. Ảnh arm64 build qua QEMU ở release (chưa chạy thử trên máy arm).
 - **Để lại**: ghi có xác nhận (v0.1.30 — đề xuất Gen + PIN + permit, `gh/social/permit.py`); Trang FB / IG chuyên nghiệp qua
   API; nền tảng khác; ảnh chụp/trace mỗi việc (thiết kế §3.3); Jev phân loại từng tin.
+
+## v0.1.30 — hotfix: màn sập "React error #31 {reasons}" khi chưa có model + lối vào Hướng dẫn thiết lập (30/09/2026)
+
+- **Lỗi Boss gặp** (v0.1.28/29): "Minified React error #31 … object with keys {reasons}" → khung lỗi. Gốc: `PUT
+  /setup/steps/8` (màn **/guide/8 "Agent đầu tiên"**, thử trò chuyện) gán `try_error = e.detail` với `detail =
+  {"reasons": [...]}` khi `ModelUnavailable` (`gh/biz/people/routes.py:try_chat`) → web vẽ thẳng đối tượng làm React child
+  (`Step8Agent`). Cùng khuôn `detail={"reasons"}` ở `/drafts/{id}/translate|regenerate` (`gh/biz/core/routes.py`).
+  (`gh/biz/core/drafts.py:158` chỉ là `detail` của Action Log, không phải lỗi HTTP — giữ nguyên.)
+- **API**: `gh.errors.model_unavailable(title, reasons)` → 503 `MODEL_UNAVAILABLE`, `detail` = câu chữ ("Chưa có model AI
+  nào hoạt động — vào Agent & Model …"), `reasons` (danh sách chuỗi) ở **cấp ngoài cùng** của problem+json. Bước 8:
+  `try_error` luôn là chuỗi, thêm `try_error_code` + `try_reasons`. Tương thích: web mới đọc được cả khuôn cũ
+  (`detail.reasons`) lẫn mới; trong repo không client nào đọc `detail.reasons` (genh/bridge không dùng).
+- **Contracts**: `ApiError.message` luôn là chuỗi (`detail` đối tượng/mảng → `message|msg|detail` chuỗi, mảng lỗi FastAPI
+  nối `msg`, không thì `title`); getter `ApiError.reasons` (khuôn mới + cũ). `Problem.reasons`, `Step8Agent.try_error_code/
+  try_reasons`.
+- **Web**: `detailToText` / `reasonsOf` (lib/friendlyError) — mọi `detail` không phải chuỗi thành chữ; `friendlyError`
+  nhận `unknown`; `errorText`/`describeError` qua helper, `MODEL_UNAVAILABLE` → câu cố định; `ModelUnavailableNotice`
+  (screens/common) có nút **Chọn model** → `/guide/4` + "Chi tiết kỹ thuật"; `CardError` tự dùng khi lỗi là
+  MODEL_UNAVAILABLE; truy vấn không thử lại khi MODEL_UNAVAILABLE; `ScreenPage` dùng `errorText`.
+- **Hướng dẫn thiết lập "biến mất"**: /guide chỉ vào được qua Trợ giúp + thẻ "Việc thiết lập tiếp" — thẻ ẩn khi số liệu
+  Tổng quan lỗi (return sớm) và khi mọi bước 5–11 đã "xong theo dữ liệu thật" (từ v0.1.28 "Để sau" ở bước 7/11 tự nạp quy tắc
+  / lịch sao lưu mặc định → tính là xong). Sửa: mục cố định **Hướng dẫn thiết lập** ở thanh bên (ngay dưới Điều khiển hệ
+  thống) + menu tài khoản (cạnh Trợ giúp), chỉ Owner; thẻ vẫn hiện cả khi số liệu Tổng quan lỗi; nút **Ẩn** chỉ ẩn cho đúng
+  người bấm (localStorage theo user id), có bước dở MỚI thì hiện lại; thẻ chỉ gọi API khi là Owner.
+- **Test**: api `tests/test_hotfix_v0130.py` (3); web `test/unit/hotfix-v0130.test.tsx` (7 — tái hiện /guide/8 với
+  `try_error={reasons}`), `setup-followup.test.tsx` (+2), `nav.test.tsx` (+3); e2e mock `e2e/hotfix-v0130.spec.ts` (3:
+  /guide/8 khuôn cũ, Đánh giá con người 503 MODEL_UNAVAILABLE, lối vào Hướng dẫn thiết lập).

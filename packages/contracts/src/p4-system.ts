@@ -169,7 +169,11 @@ export interface Step8Agent {
   id: string;
   name: string;
   try_reply: string | null;
+  /** Câu chữ cho người đọc. Máy chủ ≤ v0.1.29 có thể trả đối tượng `{reasons}` — web phải qua `friendlyError`. */
   try_error: string | null;
+  /** v0.1.30: mã lỗi (vd `MODEL_UNAVAILABLE`) + lý do kỹ thuật. */
+  try_error_code?: string | null;
+  try_reasons?: string[];
 }
 
 export interface Step9Body {
