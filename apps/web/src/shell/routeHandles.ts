@@ -12,6 +12,7 @@ export interface RouteHandle {
 
 export const ACCOUNT_CRUMBS = { domain: 'TÀI KHOẢN', title: 'Tài khoản của tôi', subtitle: 'My account' };
 export const HELP_CRUMBS = { domain: 'TRỢ GIÚP', title: 'Trợ giúp', subtitle: 'Help & about' };
+export const SOCIAL_CRUMBS = { domain: 'KẾT NỐI', title: 'Tài khoản mạng xã hội', subtitle: 'Social accounts' };
 
 export function useActiveScreenKey(): string | null {
   const matches = useMatches();

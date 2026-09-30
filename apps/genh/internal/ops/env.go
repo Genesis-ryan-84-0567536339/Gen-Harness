@@ -73,7 +73,7 @@ func (e *Env) LocatePath() (string, error) {
 			Err:  err,
 		}
 	}
-	return path, nil
+	return path, ensureAuxSecretsOp(path)
 }
 
 // LocatePathSync tìm deploy/compose.yaml thật NHƯ LocatePath, nhưng qua
@@ -100,7 +100,7 @@ func (e *Env) LocatePathSync() (string, error) {
 			Err:  err,
 		}
 	}
-	return path, nil
+	return path, ensureAuxSecretsOp(path)
 }
 
 // LoadSecrets đọc lại bí mật đã sinh ở Bước 4, TỰ BỔ SUNG (và ghi lại ngay)
@@ -174,3 +174,18 @@ func EnvOverlay(b secretgen.Bundle) []string {
 
 // composeDir trả về thư mục chứa composePath, dùng làm Dir cho dockercli.Cmd.
 func composeDir(composePath string) string { return filepath.Dir(composePath) }
+
+// ensureAuxSecretsOp: xem ensureAuxSecrets (secrets.go) — lỗi ghi khoá (quyền
+// thư mục) trả OpError rõ ràng thay vì để `docker compose up` hỏng sau đó.
+func ensureAuxSecretsOp(composePath string) error {
+	if err := ensureAuxSecrets(composePath); err != nil {
+		return &OpError{
+			Code: ErrCodeComposeNotFound,
+			What: "Không chuẩn bị được khoá bí mật cho docker compose (gh_bridge_key/gh_browser_key)",
+			Why:  err.Error(),
+			Next: "Kiểm quyền ghi thư mục secrets/ cạnh deploy/ rồi thử lại.",
+			Err:  err,
+		}
+	}
+	return nil
+}

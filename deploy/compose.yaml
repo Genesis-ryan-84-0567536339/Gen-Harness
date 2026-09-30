@@ -15,6 +15,11 @@ x-app-env: &app-env
   GH_OBJECTS_DIR: /var/lib/gh/objects
   GH_MASTER_KEY_FILE: /run/secrets/gh_master_key
   GH_BRIDGE_KEY_FILE: /run/secrets/gh_bridge_key
+  # v0.1.29: khoá RIÊNG với browser-worker (ký việc/kết quả, mã hoá phiên mạng xã hội khi truyền) — genh tự sinh
+  # secrets/gh_browser_key (cả khi cài mới lẫn `genh update` bản cũ lên).
+  GH_BROWSER_KEY_FILE: /run/secrets/gh_browser_key
+  # Redis RIÊNG với browser-worker (chỉ khoá gh:browser:*) — container Chromium KHÔNG thấy Redis chính (hàng đợi arq).
+  GH_BROWSER_REDIS_URL: redis://browser-redis:6379/0
   GH_SETUP_TOKEN: ${GH_SETUP_TOKEN:-}
   # Khoá mã hoá riêng cho backup (khác GH_MASTER_KEY) — sinh ở Bước 4
   # (secretgen.Bundle.BackupKey, hex 64 ký tự), agent Python (gh/backup.py)
@@ -73,16 +78,19 @@ services:
       # Superuser dự phòng cho backup/bảo trì phân vùng
       # (Settings.admin_database_url) — rỗng thì code tự dùng GH_DATABASE_URL.
       GH_ADMIN_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-gh}:${POSTGRES_PASSWORD:?đặt POSTGRES_PASSWORD trong .env}@db:5432/${POSTGRES_DB:-gen_harness}
-    secrets: [gh_master_key, gh_bridge_key]
+    secrets: [gh_master_key, gh_bridge_key, gh_browser_key]
     volumes:
       - agy_state:/var/lib/gh/agy
       - gh_objects:/var/lib/gh/objects
       # Hộp thư Console ↔ genh trên máy chủ (<gốc cài đặt>/run, genh tạo sẵn 0777 và đặt
       # GH_HOST_LINK_DIR): phiên bản đang chạy, yêu cầu "Cập nhật ngay", trạng thái cập nhật.
       - ${GH_HOST_LINK_DIR:-../run}:/var/lib/gh/host
+    # browser-bus: chỉ để tới browser-redis (không chung mạng với container browser).
+    networks: [default, browser-bus]
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
+      browser-redis: { condition: service_started }
 
   worker:
     build: { context: .., dockerfile: deploy/images/api.Dockerfile }
@@ -92,7 +100,7 @@ services:
       <<: *app-env
       GH_DATABASE_URL: postgresql+asyncpg://gh_app:${GH_APP_DB_PASSWORD:?đặt GH_APP_DB_PASSWORD trong .env}@db:5432/${POSTGRES_DB:-gen_harness}
       GH_ADMIN_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-gh}:${POSTGRES_PASSWORD:?đặt POSTGRES_PASSWORD trong .env}@db:5432/${POSTGRES_DB:-gen_harness}
-    secrets: [gh_master_key, gh_bridge_key]
+    secrets: [gh_master_key, gh_bridge_key, gh_browser_key]
     # nocopy + chờ api: volume mới tinh được Docker chép nội dung ảnh
     # (/var/lib/gh/agy/.gemini/…, quyền gh) vào lần mount đầu. api và worker
     # tạo cùng lúc thì cả hai cùng chép → "mkdir …: file exists" (e2e release
@@ -105,9 +113,11 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+    networks: [default, browser-bus]
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
+      browser-redis: { condition: service_started }
       api: { condition: service_started }
 
   bridge:
@@ -120,6 +130,89 @@ services:
     secrets: [gh_bridge_key]
     depends_on:
       redis: { condition: service_healthy }
+
+  # v0.1.29 — Gen đọc mạng xã hội (docs/design/gen-browser-agent.md §3.1): Playwright + Chromium trong container
+  # RIÊNG. KHÔNG truy cập Postgres, KHÔNG giữ khoá master, không gọi model, KHÔNG thấy Redis chính (hàng đợi arq của
+  # worker giữ khoá master) — chỉ nói với browser-redis. Chỉ ở mạng nội bộ `browser` (không có đường ra Internet) — lối
+  # ra duy nhất là browser-egress (chỉ tên miền nền tảng, chặn IP nội bộ). Rảnh thì chỉ là một tiến trình Python nhỏ;
+  # Chromium chỉ mở khi có việc (Owner bấm/hỏi Gen/lịch Owner bật).
+  # Sandbox của Chromium đang TẮT (Playwright mặc định --no-sandbox): bật cần user namespace (seccomp/AppArmor mặc định
+  # của Docker chặn) hoặc chrome-sandbox setuid (trái no-new-privileges) — bù lại bằng cách ly container ở đây.
+  browser:
+    build: { context: .., dockerfile: deploy/images/browser.Dockerfile }
+    restart: unless-stopped
+    init: true
+    environment:
+      GH_REDIS_URL: redis://browser-redis:6379/0
+      GH_BROWSER_KEY_FILE: /run/secrets/gh_browser_key
+      GH_BROWSER_PROXY: http://browser-egress:3128
+      GH_BROWSER_HEADLESS: "0"
+      GH_BROWSER_MAX_JOBS: "2"
+    secrets: [gh_browser_key]
+    networks: [browser]
+    read_only: true
+    tmpfs: ["/tmp:size=768m"]
+    shm_size: 256m
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 1536m
+    cpus: 1.5
+    pids_limit: 512
+    depends_on:
+      browser-redis: { condition: service_healthy }
+      browser-egress: { condition: service_started }
+
+  # Kênh RIÊNG api/worker ↔ browser-worker: chỉ khoá gh:browser:* (việc/kết quả đã ký, điều khiển, khung hình, nhịp
+  # tim) — không hàng đợi arq, không dữ liệu nào khác. Hai chân: `browser` (container browser) và `browser-bus`
+  # (api/worker); không ở mạng default nên kể cả bị chiếm cũng không tới được Redis chính/Postgres. Không lưu xuống
+  # đĩa; tắt Lua/lệnh nguy hiểm (CONFIG, KEYS, FLUSH*, DEBUG, MODULE…) cho mọi kết nối.
+  browser-redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --save
+      - ""
+      - --appendonly
+      - "no"
+      - --maxmemory
+      - 64mb
+      - --maxmemory-policy
+      - noeviction
+      - --user
+      - default
+      - "on"
+      - nopass
+      - "~*"
+      - "&*"
+      - "+@all"
+      - "-@dangerous"
+      - "-@scripting"
+    networks: [browser, browser-bus]
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [SETUID, SETGID]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 128m
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  browser-egress:
+    build: { context: .., dockerfile: deploy/images/browser.Dockerfile }
+    command: ["python3", "-m", "ghb.egress"]
+    restart: unless-stopped
+    init: true
+    environment:
+      GH_EGRESS_ALLOW: facebook.com,fbcdn.net,facebook.net,fbsbx.com,messenger.com
+    # browser-out: mạng riêng chỉ để ra Internet — egress cũng không chung mạng với Redis chính/Postgres/api.
+    networks: [browser, browser-out]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 128m
 
   db:
     build: { context: .., dockerfile: deploy/images/db.Dockerfile }
@@ -169,6 +262,19 @@ secrets:
     file: ../secrets/gh_master_key
   gh_bridge_key:
     file: ../secrets/gh_bridge_key
+  gh_browser_key:
+    file: ../secrets/gh_browser_key
+
+networks:
+  default: {}
+  # browser + browser-egress + browser-redis — không ra Internet, không có api/worker/redis/db.
+  browser:
+    internal: true
+  # browser-redis + api + worker — chỉ để api/worker tới browser-redis.
+  browser-bus:
+    internal: true
+  # Chỉ browser-egress: đường ra Internet của trình duyệt.
+  browser-out: {}
 
 volumes:
   caddy_data:

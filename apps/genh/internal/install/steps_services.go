@@ -13,11 +13,12 @@ import (
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/machine"
 )
 
-// startupServices là 5 service Bước 7 khởi động, đúng tên VÀ đúng thứ tự
+// startupServices là các service Bước 7 khởi động, đúng tên VÀ đúng thứ tự
 // liệt kê trong docs/handoff/05-installer.md — tên trùng khớp 1-1 với
 // deploy/compose.yaml (api, worker, bridge, web, proxy đều là tên service
-// thật, không cần đổi).
-var startupServices = []string{"api", "worker", "bridge", "web", "proxy"}
+// thật, không cần đổi). v0.1.29 thêm browser-egress + browser (Gen đọc mạng
+// xã hội — container riêng, không DB, không khoá master).
+var startupServices = []string{"api", "worker", "bridge", "browser-egress", "browser", "web", "proxy"}
 
 // readyPath là endpoint readiness thật của apps/api — xem
 // apps/api/gh/shell/routes.py (@router.get("/ready"), mount ở

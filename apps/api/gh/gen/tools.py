@@ -83,6 +83,14 @@ TOOLS: dict[str, Tool] = {t.name: t for t in (
     Tool("hub.kho_get", "Một bản ghi Kho Ryan theo mã; args.ma (vd VIEC-12, QD-3, PHIEN-1)", ("system.manage",),
          "/hub/kho/records/{ma}", path_args=("ma",), path_patterns={"ma": r"^[A-Za-z]{2,6}-\d{1,6}$"},
          owner_only=True),
+    # v0.1.29 (Đợt D3 lát đầu): mạng xã hội — CHỈ ĐỌC, chỉ Owner. social.read xếp một lượt đọc trình duyệt (tính vào
+    # giới hạn 6 lượt/ngày; dùng lại lượt vừa đọc trong 10 phút) rồi chờ ngắn; nội dung đã làm sạch + gắn cờ đáng ngờ.
+    Tool("social.accounts", "Tài khoản mạng xã hội đã kết nối (id, tên, nền tảng, trạng thái, lần đọc gần nhất)",
+         ("system.manage",), "/social/accounts", owner_only=True),
+    Tool("social.read", "ĐỌC thông báo + danh sách hội thoại (xem trước tin mới nhất) của một tài khoản mạng xã hội; "
+         "args.account_id (tuỳ chọn — bỏ trống = tài khoản đang hoạt động đầu tiên). Chỉ đọc, tốn 1 lượt "
+         "(tối đa 6 lượt/ngày)",
+         ("system.manage",), owner_only=True),
 )}
 
 
@@ -200,6 +208,8 @@ class ToolRunner:
         try:
             if tool.name == "screens.list":
                 data: Any = registry.visible_screens(self.user.permissions)
+            elif tool.name == "social.read":
+                data = await self._social_read(args)
             elif tool.name == "guide.list":
                 status, follow = await self._get("/setup/follow-up", {})
                 done = {i.get("n"): i.get("done") for i in follow} if status == 200 and isinstance(follow, list) \
@@ -226,6 +236,21 @@ class ToolRunner:
         collect_ids(small if small is not None else data, ids)
         self.seen_ids |= ids
         return ToolResult(ok=True, data=small, text=raw, ids=ids)
+
+    async def _social_read(self, args: dict[str, Any]) -> Any:
+        from gh.db import sessionmaker
+        from gh.social import service as social
+
+        account_id = str(args.get("account_id") or "") or None
+        if account_id is not None:
+            try:
+                uuid.UUID(account_id)
+            except ValueError as e:
+                raise ToolError("BAD_ARGS", "account_id phải là UUID") from e
+        async with sessionmaker()() as db:
+            out = await social.gen_read(db, self.app.state.redis, self.user, account_id)
+            await db.commit()
+        return out
 
     @staticmethod
     def _fail(code: str, message: str) -> ToolResult:

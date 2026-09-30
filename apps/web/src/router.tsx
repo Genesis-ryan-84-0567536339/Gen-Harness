@@ -12,7 +12,8 @@ import { ScreenPage } from './screens/ScreenPage';
 import { NotFoundPage, RouteErrorPage } from './shell/ErrorPage';
 import { SetupPage } from './setup/SetupPage';
 import { AppShell } from './shell/AppShell';
-import { ACCOUNT_CRUMBS, HELP_CRUMBS, type RouteHandle } from './shell/routeHandles';
+import { ACCOUNT_CRUMBS, HELP_CRUMBS, SOCIAL_CRUMBS, type RouteHandle } from './shell/routeHandles';
+import { SocialPage } from './social/SocialPage';
 import { RootLayout } from './RootLayout';
 
 /**
@@ -76,6 +77,8 @@ export const routes: RouteObject[] = [
           { path: 'account', handle: { page: ACCOUNT_CRUMBS } satisfies RouteHandle, element: <AccountPage /> },
           // Trợ giúp / Giới thiệu (v0.1.22) — phiên bản, hỏi Gen, lệnh genh, Báo lỗi.
           { path: 'help', handle: { page: HELP_CRUMBS } satisfies RouteHandle, element: <HelpPage /> },
+          // Tài khoản mạng xã hội (v0.1.29, chỉ Owner) — mở từ menu tài khoản ở chân thanh bên.
+          { path: 'social', handle: { page: SOCIAL_CRUMBS } satisfies RouteHandle, element: <SocialPage /> },
           // B5: trang 404 trong khung Console (thanh bên vẫn dùng được).
           { path: '*', element: <NotFoundPage /> },
         ],

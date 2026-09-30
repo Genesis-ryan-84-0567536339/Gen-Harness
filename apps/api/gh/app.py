@@ -47,6 +47,8 @@ from gh.providers.router import ModelRouter
 from gh.refinery.triage_routes import router as triage_router
 from gh.setup.routes import router as setup_router
 from gh.shell.routes import router as shell_router
+from gh.social import service as social_service
+from gh.social.routes import router as social_router
 from gh.system_api.backups import router as backups_router
 from gh.system_api.org import router as org_router
 from gh.system_api.routes import router as system_router
@@ -166,6 +168,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     stop = asyncio.Event()
     consumers = start_ingest(app, stop)
     consumers.append(asyncio.create_task(_permit_sweep_loop(sm, app.state.redis, stop), name="permit-sweep"))
+    # v0.1.29: kết quả đã ký từ browser-worker (gh:browser:results) → DB, phiên mã hoá, chuông Owner.
+    consumers.append(asyncio.create_task(
+        social_service.consume_results(sm, app.state.redis, stop, f"api-{socket.gethostname()}"),
+        name="social-results"))
     log.info("Gen-Harness API %s sẵn sàng", __version__)
     try:
         yield
@@ -178,6 +184,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await app.state.cli_logins.shutdown()
         await app.state.ws_hub.stop()
         await app.state.plugins.shutdown()
+        await social_service.close_bus(app.state.redis)
         await app.state.redis.aclose()
         await dispose_engine()
 
@@ -192,7 +199,7 @@ def create_app(*, with_lifespan: bool = True) -> FastAPI:
     app.add_exception_handler(OSError, infra_error_handler)
     for r in (auth_router, account_router, users_router, setup_router, shell_router, audit_router, plugins_router,
              mcp_router, data_router, system_router, update_router, backups_router, org_router, gen_router,
-             notifications_router, triage_router, hub_router):
+             notifications_router, triage_router, hub_router, social_router):
         app.include_router(r, prefix="/api/v1")
     for r in biz.routers():
         app.include_router(r, prefix="/api/v1")

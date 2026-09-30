@@ -18,7 +18,7 @@ import (
 // install/steps_pull.go pullServiceOrder, đã bỏ "objects" — MinIO không còn
 // trong compose.yaml), viết lại ở đây vì đó là biến không xuất của package
 // khác.
-var updateServiceOrder = []string{"db", "redis", "proxy", "api", "web", "bridge"}
+var updateServiceOrder = []string{"db", "redis", "proxy", "api", "web", "bridge", "browser"}
 
 // UpdateOptions là các cờ đã phân tích của `genh update`.
 type UpdateOptions struct {

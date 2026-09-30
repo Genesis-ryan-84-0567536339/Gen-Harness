@@ -20,3 +20,4 @@ export * from './users';
 export * from './gen';
 export * from './genTargets';
 export * from './notifications';
+export * from './social';

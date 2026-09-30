@@ -243,9 +243,10 @@ jobs:
           retention-days: 14
 
   # ── build-images ─────────────────────────────────────────────────────────
-  # Chỉ 4 ảnh cần build+push: api (dùng CHUNG cho api/migrate/worker — cả 3
+  # Chỉ 5 ảnh cần build+push: api (dùng CHUNG cho api/migrate/worker — cả 3
   # service này build từ CÙNG deploy/images/api.Dockerfile, xem
-  # deploy/compose.yaml — không build trùng), web, bridge, db. proxy/redis
+  # deploy/compose.yaml — không build trùng), web, bridge, db, browser (chung
+  # cho browser/browser-egress, v0.1.29). proxy/redis
   # ĐÃ có "image:" cố định sẵn (caddy:2-alpine, redis:7-alpine) nên không cần
   # build ở đây — Bước 3 của genh pull thẳng từ Docker Hub.
   build-images:
@@ -273,6 +274,9 @@ jobs:
             dockerfile: deploy/images/bridge.Dockerfile
           - service: db
             dockerfile: deploy/images/db.Dockerfile
+          # v0.1.29: browser-worker + browser-egress (chung một ảnh; gốc Playwright ghim digest trong Dockerfile).
+          - service: browser
+            dockerfile: deploy/images/browser.Dockerfile
     steps:
       - uses: actions/checkout@v4
 
@@ -314,7 +318,7 @@ jobs:
 
   # ── pin-compose ──────────────────────────────────────────────────────────
   # Sinh deploy/compose.release.yaml với "image: ...@sha256:<digest thật>"
-  # thay cho "build:" của web/migrate/api/worker/bridge/db.
+  # thay cho "build:" của web/migrate/api/worker/bridge/db/browser/browser-egress.
   #
   # Job build-genh (chạy SAU job này — xem needs) copy file này đè lên
   # apps/genh/internal/compose/embedded_compose.yaml rồi mới `go build`, nhờ
@@ -347,12 +351,14 @@ jobs:
           web_digest=$(cat digests/web.digest)
           bridge_digest=$(cat digests/bridge.digest)
           db_digest=$(cat digests/db.digest)
+          browser_digest=$(cat digests/browser.digest)
           chmod +x deploy/scripts/pin-compose-images.sh
           deploy/scripts/pin-compose-images.sh deploy/compose.yaml deploy/compose.release.yaml \
             --api "${{ env.REGISTRY }}/${OWNER}/gen-harness-api@${api_digest}" \
             --web "${{ env.REGISTRY }}/${OWNER}/gen-harness-web@${web_digest}" \
             --bridge "${{ env.REGISTRY }}/${OWNER}/gen-harness-bridge@${bridge_digest}" \
-            --db "${{ env.REGISTRY }}/${OWNER}/gen-harness-db@${db_digest}"
+            --db "${{ env.REGISTRY }}/${OWNER}/gen-harness-db@${db_digest}" \
+            --browser "${{ env.REGISTRY }}/${OWNER}/gen-harness-browser@${browser_digest}"
 
       - name: Kiểm compose.release.yaml là YAML hợp lệ
         run: python3 -c "import yaml,sys; d=yaml.safe_load(open('deploy/compose.release.yaml')); assert 'services' in d; print('ok:', sorted(d['services']))"

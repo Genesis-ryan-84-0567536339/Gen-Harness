@@ -38,8 +38,10 @@ STEPS: tuple[tuple[int, str, str, bool, int], ...] = (
     (1, "welcome", "Chào mừng", True, 1),
     (2, "owner", "Tài khoản Owner", True, 1),
     (3, "org", "Tổ chức & xưng hô", True, 1),
-    (4, "brain", "Bộ não AI", True, 2),
-    # Chỉ 1–4 bắt buộc: có Owner + tổ chức + một bộ não AI là dùng được. 5–11 bỏ qua được và làm lại sau ở
+    # v0.1.29 (Boss 30/09, UX V2): bước 4 "Để sau" được — web hỏi lại bằng hộp cảnh báo (Gen/sàng lọc không chạy tới
+    # khi có model); bước 12 + Tổng quan hiện "Chưa có model" kèm nút sửa (`/guide/4`, lưu được cả sau Hoàn tất).
+    (4, "brain", "Bộ não AI", False, 2),
+    # Chỉ 1–3 bắt buộc: có Owner + tổ chức là vào được Console. 4–11 bỏ qua được và làm lại sau ở
     # màn tương ứng của Console — bắt quét QR Zalo/WhatsApp hay dựng agent ngay khi cài làm Owner kẹt
     # (bước 8–9 web chưa có form, trước đây khiến bước 12 không bao giờ hoàn tất được).
     (5, "channels", "Kết nối kênh", False, 2),
@@ -318,6 +320,10 @@ async def skip(n: int, request: Request, db: AsyncSession = DB,
             await db.execute(text("""UPDATE core.organizations SET settings = settings || CAST(:s AS jsonb)
                                      WHERE id = :o AND NOT (settings ? 'backup')"""),
                              {"s": json.dumps({"backup": DEFAULT_BACKUP}), "o": row.org_id})
+        elif n == 4:
+            # "Để sau" bước 4 nhưng đã có nguồn gọi thử OK kèm model → vẫn gán model đó cho agent lõi còn trống
+            # (giữ tự gán của v0.1.28); không có thì thôi — Tổng quan hiện "Chưa có model".
+            await auto_assign_tested_model(db, row.org_id)
     completed["steps"] = done
     await actionlog.record(db, org_id=row.org_id, actor_type="user", actor_id=owner.actor_id,
                            action="setup.step_skipped", target_type="setup_step", target_id=str(n),
@@ -395,8 +401,10 @@ async def _owner_step_after(db: AsyncSession, user: service.CurrentUser | None,
 @router.put("/steps/4")
 async def step4(body: Step4In, request: Request, db: AsyncSession = DB,
                 user: service.CurrentUser | None = Depends(optional_user)) -> dict[str, Any]:
-    """Bộ não AI: thứ tự ưu tiên chuyển dự phòng. Cần ít nhất một nhà cung cấp đã gọi thử thành công."""
-    row, owner = await _owner_step(db, user)
+    """Bộ não AI: thứ tự ưu tiên chuyển dự phòng. Cần ít nhất một nhà cung cấp đã gọi thử thành công.
+
+    v0.1.29: lưu được cả sau Hoàn tất (Owner "Để sau" bước 4 rồi chọn model từ `/guide/4`)."""
+    row, owner = await _owner_step(db, user, after_finish=True)
     ids = list(dict.fromkeys(body.provider_ids))
     found = (await db.execute(text("""
         SELECT p.id, p.kind, p.auth_state, COALESCE((p.last_test->>'ok')::boolean, false) AS tested,
@@ -439,15 +447,47 @@ async def step4(body: Step4In, request: Request, db: AsyncSession = DB,
         await db.execute(text("""UPDATE agent.providers SET failover_rank = :r,
                                  is_enabled = CASE WHEN id = ANY(:ids) THEN true ELSE is_enabled END WHERE id = :i"""),
                          {"r": rank, "i": pid, "ids": ids})
-    # Gán model cho các agent lõi còn trống (Sàng lọc, Gen…) — Owner đổi lại được ở màn API & Model.
+    await _bind_core_agents(db, row.org_id, model_id)
+    return await _mark_done(db, request, row, owner, 4, {"provider_ids": [str(i) for i in ids],
+                                                          "model_id": str(model_id)})
+
+
+async def _bind_core_agents(db: AsyncSession, org_id: uuid.UUID, model_id: uuid.UUID) -> None:
+    """Gán model cho các agent lõi còn trống (Sàng lọc, Gen…) — Owner đổi lại được ở màn API & Model."""
     for key in CORE_AGENT_KEYS:
         if key == "core.indexing":   # embedding — model sinh chữ không dùng được
             continue
         await db.execute(text("""INSERT INTO agent.bindings (org_id, agent_key, model_id, context_tokens)
                                  VALUES (:o, :k, :m, :ct) ON CONFLICT (org_id, agent_key) DO NOTHING"""),
-                         {"o": row.org_id, "k": key, "m": model_id, "ct": DEFAULT_CONTEXT_TOKENS})
-    return await _mark_done(db, request, row, owner, 4, {"provider_ids": [str(i) for i in ids],
-                                                          "model_id": str(model_id)})
+                         {"o": org_id, "k": key, "m": model_id, "ct": DEFAULT_CONTEXT_TOKENS})
+
+
+async def auto_assign_tested_model(db: AsyncSession, org_id: uuid.UUID) -> uuid.UUID | None:
+    """Model của nguồn đã gọi thử OK (đã chọn, hoặc model đầu tiên nhận được khi gọi thử) → gán cho agent lõi còn
+    trống. Không có nguồn nào như vậy → None, không đổi gì."""
+    rows = (await db.execute(text("""
+        SELECT p.id, CASE WHEN jsonb_typeof(p.last_test->'models') = 'array' THEN
+                    ARRAY(SELECT jsonb_array_elements_text(p.last_test->'models')) END AS test_models
+        FROM agent.providers p
+        WHERE p.org_id = :o AND p.kind <> 'system_one' AND p.is_enabled
+          AND ((p.kind = 'antigravity_cli' AND EXISTS (SELECT 1 FROM agent.cli_profiles c
+                                                      WHERE c.provider_id = p.id AND c.is_active))
+               OR (p.kind <> 'antigravity_cli' AND p.auth_state = 'ok'
+                   AND COALESCE((p.last_test->>'ok')::boolean, false)))
+        ORDER BY p.failover_rank NULLS LAST, p.created_at"""), {"o": org_id})).all()
+    for p in rows:
+        mid = await _first_model(db, p.id)
+        if mid is None:
+            name = next((m for m in (p.test_models or []) if isinstance(m, str) and "embed" not in m.lower()), None)
+            if name is None:
+                continue
+            mid = (await db.execute(text("""
+                INSERT INTO agent.models (provider_id, model_name) VALUES (:p, :m)
+                ON CONFLICT (provider_id, model_name) DO UPDATE SET model_name = EXCLUDED.model_name
+                RETURNING id"""), {"p": p.id, "m": name[:120]})).scalar_one()
+        await _bind_core_agents(db, org_id, mid)
+        return mid
+    return None
 
 
 async def _first_model(db: AsyncSession, provider_id: uuid.UUID) -> uuid.UUID | None:
@@ -682,6 +722,9 @@ async def step11(body: Step11In, request: Request, db: AsyncSession = DB,
 # Bước tuỳ chọn → màn Console làm tiếp (khớp FOLLOW_UP ở web). "done" suy từ DỮ LIỆU THẬT, không chỉ từ trạng thái
 # trình thiết lập: Owner để sau bước 5 rồi quét QR ở màn Kênh thì mục tự biến mất khỏi "Việc thiết lập tiếp".
 FOLLOW_UP_SQL: dict[int, str] = {
+    # v0.1.29: bước 4 "Để sau" được → "Chưa có model" khi Gen lẫn Sàng lọc đều chưa được gán model nào.
+    4: """SELECT EXISTS (SELECT 1 FROM agent.bindings b JOIN agent.models m ON m.id = b.model_id
+                         WHERE b.org_id = :o AND b.agent_key IN ('core.gen', 'core.refinery'))""",
     5: """SELECT EXISTS (SELECT 1 FROM core.channel_sessions s JOIN core.channels c ON c.id = s.channel_id
                          WHERE c.org_id = :o AND s.state = 'active' AND s.ended_at IS NULL)""",
     6: "SELECT EXISTS (SELECT 1 FROM core.groups WHERE org_id = :o AND listen_mode NOT IN ('off', 'paused'))",
@@ -715,8 +758,9 @@ async def follow_up(db: AsyncSession = DB,
     for n, key, title, required, _phase in STEPS:
         if required or n not in FOLLOW_UP_SQL:
             continue
-        done = status.get(str(n)) == "done" or \
-            bool((await db.execute(text(FOLLOW_UP_SQL[n]), {"o": row.org_id})).scalar())
+        real = bool((await db.execute(text(FOLLOW_UP_SQL[n]), {"o": row.org_id})).scalar())
+        # Bước 4 chỉ theo dữ liệu thật: xoá nguồn (gỡ gán model) sau khi đã xong bước 4 thì lại "Chưa có model".
+        done = real if n == 4 else status.get(str(n)) == "done" or real
         out.append({"n": n, "key": key, "title": title, "status": status.get(str(n), "todo"), "done": done})
     return out
 

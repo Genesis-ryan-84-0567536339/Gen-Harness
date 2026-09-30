@@ -2,16 +2,17 @@
 COMPOSE = docker compose -f deploy/compose.yaml --env-file .env
 API = apps/api
 
-.PHONY: secrets up down logs logs-token ps api-dev api-test api-test-app-role api-lint web-test bridge-test \
+.PHONY: secrets up down logs logs-token ps api-dev api-test api-test-app-role api-lint web-test bridge-test browser-test \
         test migrate seed-demo seed-demo-clean backup backup-list restore
 
 secrets:
 	@mkdir -p secrets
 	@test -f secrets/gh_master_key || python3 -c "import os,base64;print(base64.b64encode(os.urandom(32)).decode())" > secrets/gh_master_key
 	@test -f secrets/gh_bridge_key || python3 -c "import os,base64;print(base64.b64encode(os.urandom(32)).decode())" > secrets/gh_bridge_key
-	@chmod 700 secrets && chmod 644 secrets/gh_master_key secrets/gh_bridge_key  # tệp 644 để container (user khác) đọc được, thư mục 700 chặn user khác trên host
+	@test -f secrets/gh_browser_key || python3 -c "import os,base64;print(base64.b64encode(os.urandom(32)).decode())" > secrets/gh_browser_key
+	@chmod 700 secrets && chmod 644 secrets/gh_master_key secrets/gh_bridge_key secrets/gh_browser_key  # tệp 644 để container (user khác) đọc được, thư mục 700 chặn user khác trên host
 	@test -f .env || cp .env.example .env
-	@echo "Đã có secrets/gh_master_key, secrets/gh_bridge_key và .env — nhớ đổi mật khẩu trong .env"
+	@echo "Đã có secrets/gh_master_key, secrets/gh_bridge_key, secrets/gh_browser_key và .env — nhớ đổi mật khẩu trong .env"
 
 up: secrets
 	$(COMPOSE) up -d --build
@@ -52,7 +53,12 @@ web-test:
 bridge-test:
 	npm run -w apps/bridge test
 
-test: api-lint api-test bridge-test web-test
+# v0.1.29 — browser-worker: cần `cd apps/browser && uv venv .venv && uv pip install -e ".[dev]" && .venv/bin/playwright
+# install chromium` một lần. Test chạy Chromium thật trên trang mẫu (không gọi facebook.com).
+browser-test:
+	cd apps/browser && .venv/bin/ruff check ghb tests && .venv/bin/mypy ghb && .venv/bin/pytest -q
+
+test: api-lint api-test bridge-test browser-test web-test
 
 # PLAN §5.1 — dữ liệu mẫu đi qua đúng luồng raw → refinery → clean (gh/seed_demo.py). Idempotent: chạy lại
 # không tạo trùng. seed-demo-clean xoá mọi kết luận/đối tượng đã sinh (không đụng raw.events — xem docstring

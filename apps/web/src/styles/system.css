@@ -74,6 +74,9 @@
 .risk-box__title { font-size: 12px; font-weight: 500; color: var(--color-text); margin-bottom: 4px; }
 .risk-box__text a { color: var(--color-accent); }
 .risk-box__text { font-size: 11.5px; color: var(--color-neutral-300); line-height: 1.55; text-wrap: pretty; }
+.no-model { border-color: var(--color-bad); background: color-mix(in srgb, var(--color-bad) 7%, transparent); align-items: center; margin-bottom: 12px; }
+.no-model__body { flex: 1; min-width: 0; }
+.no-model__body .risk-box__text { margin: 0; }
 .risk-list { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 5px; font-size: 11.5px; color: var(--color-neutral-300); line-height: 1.5; }
 
 /* ── Groups dialog ──────────────────────────────────────────────────────── */

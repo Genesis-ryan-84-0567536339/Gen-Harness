@@ -63,6 +63,33 @@ jobs:
           GH_TEST_REDIS: redis://localhost:6379/15
         run: .venv/bin/pytest -q
 
+  # v0.1.29 — browser-worker (apps/browser): Chromium thật trên TRANG MẪU (không gọi facebook.com), Redis thật.
+  browser:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: --health-cmd "redis-cli ping" --health-interval 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with: { python-version: "3.11" }
+      - name: Cài phụ thuộc + Chromium của Playwright
+        working-directory: apps/browser
+        run: |
+          uv venv .venv && uv pip install --python .venv/bin/python -e ".[dev]"
+          .venv/bin/playwright install --with-deps chromium
+      - name: Lint + typecheck
+        working-directory: apps/browser
+        run: .venv/bin/ruff check ghb tests && .venv/bin/mypy ghb
+      - name: Test (Chromium + Redis thật, trang mẫu)
+        working-directory: apps/browser
+        env:
+          GH_TEST_REDIS: redis://localhost:6379/14
+          GH_BROWSER_TESTS_REQUIRED: "1"
+        run: .venv/bin/pytest -q
+
   web:
     runs-on: ubuntu-latest
     steps:
@@ -78,12 +105,13 @@ jobs:
 
   images:
     runs-on: ubuntu-latest
-    needs: [api, web]
+    needs: [api, web, browser]
     steps:
       - uses: actions/checkout@v4
-      - name: Build image api/worker, bridge, web, db
+      - name: Build image api/worker, bridge, web, db, browser
         run: |
           docker build -f deploy/images/api.Dockerfile -t gh-api .
+          docker build -f deploy/images/browser.Dockerfile -t gh-browser .
           docker build -f deploy/images/bridge.Dockerfile -t gh-bridge .
           docker build -f apps/web/Dockerfile -t gh-web .
           docker build -f deploy/images/db.Dockerfile -t gh-db .
@@ -92,5 +120,7 @@ jobs:
           cp .env.example .env && mkdir -p secrets
           python3 -c "import os,base64;print(base64.b64encode(os.urandom(32)).decode())" > secrets/gh_master_key
           python3 -c "import os,base64;print(base64.b64encode(os.urandom(32)).decode())" > secrets/gh_bridge_key
+          python3 -c "import os,base64;print(base64.b64encode(os.urandom(32)).decode())" > secrets/gh_browser_key
           docker run --rm --entrypoint agy gh-api --version
+          docker run --rm --init --read-only --tmpfs /tmp --cap-drop ALL gh-browser python3 -c "import ghb.worker, ghb.egress"
           docker compose -f deploy/compose.yaml --env-file .env config -q

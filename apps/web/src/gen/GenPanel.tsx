@@ -28,6 +28,8 @@ const TOOL_LABEL: Record<string, string> = {
   'hub.kho_summary': 'Kho tri thức (Gen-hub)',
   'hub.kho_search': 'Kho tri thức (Gen-hub)',
   'hub.kho_get': 'Kho tri thức (Gen-hub)',
+  'social.accounts': 'tài khoản mạng xã hội',
+  'social.read': 'đọc mạng xã hội',
 };
 
 function targetLabel(id: string): string {

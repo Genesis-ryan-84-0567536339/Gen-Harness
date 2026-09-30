@@ -238,8 +238,13 @@ func ensureComposeSecretFiles(composePath string, res secretgen.Result) error {
 	if err := writeSecretFileIfMissing(filepath.Join(secretsDir, "gh_master_key"), res.Bundle.MasterKey); err != nil {
 		return err
 	}
-	if _, err := ensureRandomSecretFile(filepath.Join(secretsDir, "gh_bridge_key")); err != nil {
-		return err
+	// gh_browser_key (v0.1.29): khoá riêng giữa api/worker và browser-worker —
+	// cùng cách sinh với gh_bridge_key (ops.ensureAuxSecrets làm y hệt cho máy
+	// cài từ bản cũ khi `genh update`).
+	for _, name := range []string{"gh_bridge_key", "gh_browser_key"} {
+		if _, err := ensureRandomSecretFile(filepath.Join(secretsDir, name)); err != nil {
+			return err
+		}
 	}
 	// Docker secret dạng file là bind mount GIỮ NGUYÊN quyền trên host: tệp
 	// 0600 thuộc user host thì tiến trình trong container (USER gh / node,
@@ -250,7 +255,7 @@ func ensureComposeSecretFiles(composePath string, res secretgen.Result) error {
 	if err := os.Chmod(secretsDir, 0o700); err != nil {
 		return fmt.Errorf("đặt quyền %s: %w", secretsDir, err)
 	}
-	for _, name := range []string{"gh_master_key", "gh_bridge_key"} {
+	for _, name := range []string{"gh_master_key", "gh_bridge_key", "gh_browser_key"} {
 		if err := os.Chmod(filepath.Join(secretsDir, name), secretFilePerm); err != nil {
 			return fmt.Errorf("đặt quyền %s: %w", name, err)
 		}

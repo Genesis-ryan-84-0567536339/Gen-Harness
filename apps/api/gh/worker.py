@@ -15,7 +15,7 @@ from arq.connections import RedisSettings
 from redis.asyncio import Redis
 from sqlalchemy import text
 
-from gh import biz, notifications
+from gh import biz, jobcodec, notifications
 from gh.app import build_plugin_manager, configure_logging
 from gh.auth import service as auth_service
 from gh.backup import FUNCTIONS as BACKUP_FUNCTIONS
@@ -34,6 +34,7 @@ from gh.providers import cli as climod
 from gh.providers.router import ModelRouter
 from gh.refinery.runner import Refinery
 from gh.refinery.scheduler import Scheduler
+from gh.social import service as social
 
 log = logging.getLogger("gh.worker")
 
@@ -70,6 +71,7 @@ async def shutdown(ctx: dict[str, Any]) -> None:
     await asyncio.gather(*ctx["hooks"], return_exceptions=True)
     await ctx["scheduler"].stop()
     await ctx["plugins"].shutdown()
+    await social.close_bus(ctx["redis_bus"])
     await ctx["redis_bus"].aclose()
     await dispose_engine()
 
@@ -164,15 +166,26 @@ async def hub_token_expiry_scan(ctx: dict[str, Any]) -> int:
     return n
 
 
+async def social_schedule(ctx: dict[str, Any]) -> int:
+    """v0.1.29: lịch đọc mạng xã hội (TẮT mặc định; Owner bật từng tài khoản, vd 08:00/17:00) — mỗi phút."""
+    async with sessionmaker()() as db:
+        n = await social.schedule_tick(db, ctx["redis_bus"])
+        await db.commit()
+    return n
+
+
 _BIZ_JOBS = [*biz.jobs(), *BACKUP_JOBS]  # PLAN §5.6 — gh.backup.scheduled_backup_scan cùng mẫu CronJob
 
 
 class WorkerSettings:
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
+    # JSON thay pickle — Redis bị ghi bậy cũng không thành chạy mã trong worker (gh/jobcodec.py).
+    job_serializer = staticmethod(jobcodec.dumps)
+    job_deserializer = staticmethod(jobcodec.loads)
     on_startup = startup
     on_shutdown = shutdown
     functions = [verify_action_log, partition_maintenance, detect_identities, compact_notebooks, expire_sessions,
-                 purge_gen_conversations, purge_notifications, hub_token_expiry_scan,
+                 purge_gen_conversations, purge_notifications, hub_token_expiry_scan, social_schedule,
                  *(fn for fn, _ in _BIZ_JOBS), *BACKUP_FUNCTIONS]
     health_check_interval = 30
     cron_jobs = [
@@ -184,6 +197,7 @@ class WorkerSettings:
         cron(purge_gen_conversations, hour={3}, minute={40}),   # 03:40 hằng ngày — hạn lưu hội thoại Gen
         cron(purge_notifications, hour={3}, minute={45}),       # 03:45 hằng ngày — hạn lưu chuông thông báo
         cron(hub_token_expiry_scan, hour={1}, minute={50}),     # 01:50 UTC (08:50 giờ VN) — nhắc token Gen-hub
+        cron(social_schedule, minute=set(range(60))),           # mỗi phút — lịch đọc mạng xã hội (tắt mặc định)
         *(cron(fn, **kw) for fn, kw in _BIZ_JOBS),  # type: ignore[arg-type]
     ]
 

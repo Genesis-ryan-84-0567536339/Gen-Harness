@@ -1,6 +1,10 @@
 # Gen điều khiển mạng xã hội thay Boss (Đợt D3 — bản nháp thiết kế)
 
-> Trạng thái: NHÁP để Boss duyệt · 2026-09-30 · Thay mục "D3 Playwright cho agent vòng ngoài" trong `docs/ROADMAP.md`.
+> Trạng thái: lát đầu (§5.1) ĐÃ LÀM ở **v0.1.29** theo quyết định Boss 30/09 ("có công cụ, dùng hay không do Owner quyết,
+> cảnh báo rủi ro rõ"). Khác bản nháp: mã worker ở `apps/browser/ghb` (gói riêng, không có mã `gh`/DB); hàng đợi là Redis
+> Stream đã ký HMAC thay cho arq (arq dùng pickle); migration `0021_v0129_social`; không có cờ `social.enabled` — thêm
+> tài khoản + tích chấp nhận rủi ro là bật, "Dừng tất cả" là tắt; Owner-only dùng `require_owner` (không thêm quyền mới).
+> Giao thức: `docs/api/browser-protocol.md`. Thay mục "D3 Playwright cho agent vòng ngoài" trong `docs/ROADMAP.md`.
 > Nguồn đã đọc: `CLAUDE.md`, `docs/ROADMAP.md`, `docs/design/gen-v1.md` (§5, §10), `docs/design/gen-hub-link.md`,
 > `apps/api/gh/gen/{jev,decider,engine,proposals}.py`, `apps/bridge/` + `docs/api/bridge-protocol.md`,
 > `apps/api/gh/crypto.py`, `gh/worker.py`, `gh/chassis/objects.py`, `deploy/compose.yaml`.

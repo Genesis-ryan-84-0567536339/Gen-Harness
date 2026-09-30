@@ -26,7 +26,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gh import backup
+from gh import backup, jobcodec
 from gh.auth import service
 from gh.auth.deps import require, require_owner, require_pin
 from gh.chassis import actionlog
@@ -127,7 +127,8 @@ async def backup_now(request: Request, db: AsyncSession = DB,
     await redis.set(backup.JOB_KEY, orjson.dumps({"id": job_id, "state": "queued", "by": user.actor_id,
                                                   "requested_at": datetime.now(UTC).isoformat()}),
                     ex=7 * 24 * 3600)
-    await ArqRedis(pool_or_conn=redis.connection_pool).enqueue_job("backup_now", trigger="manual", _job_id=job_id)
+    await ArqRedis(pool_or_conn=redis.connection_pool, job_serializer=jobcodec.dumps,
+                   job_deserializer=jobcodec.loads).enqueue_job("backup_now", trigger="manual", _job_id=job_id)
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                            action="backup.requested", target_type="system", target_id="backup",
                            detail={"job_id": job_id}, ip=user.ip)

@@ -14,7 +14,7 @@ import (
 // còn trong compose.yaml, xem docs/reports/HANDOFF-v0.1.1.md), theo đúng
 // thứ tự liệt kê trong docs/handoff/05-installer.md Bước 3 — thứ tự này
 // cũng là thứ tự hiển thị SubLines khi nhiều image đang tải cùng lúc.
-var pullServiceOrder = []string{"db", "redis", "proxy", "api", "web", "bridge"}
+var pullServiceOrder = []string{"db", "redis", "proxy", "api", "web", "bridge", "browser"}
 
 // pullStep cài Bước 3 — Tải image (50%, trọng số lớn nhất): tải song song
 // image của 7 service compose.yaml có sẵn "image:" (build: cục bộ chưa có

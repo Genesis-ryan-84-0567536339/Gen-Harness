@@ -117,7 +117,8 @@ async def test_setup_steps_4_to_7_and_finish(owner_api, db) -> None:  # type: ig
     assert (await api.get("/setup/state")).json()["finished"]
     # Sau Hoàn tất: bước "Để sau" vẫn làm tiếp được từ trang Hướng dẫn kết nối, bước bắt buộc/skip thì không.
     items = {i["n"]: i for i in (await api.get("/setup/follow-up")).json()}
-    assert set(items) == set(range(5, 12)) and not items[11]["done"]
+    # v0.1.29: bước 4 cũng là việc tiếp theo được ("Chưa có model") — ở đây đã có model nên đã xong.
+    assert set(items) == set(range(4, 12)) and items[4]["done"] and not items[11]["done"]
     r = await api.send("PUT", "/setup/steps/11", {"frequency": "daily", "time_of_day": "03:00"})
     assert r.status_code == 200, r.text
     assert r.json()["finished"] and r.json()["backup"]["time_of_day"] == "03:00"
@@ -132,10 +133,9 @@ async def test_setup_steps_4_to_7_and_finish(owner_api, db) -> None:  # type: ig
 
 
 async def test_setup_finishes_with_only_steps_1_to_4(owner_api, db) -> None:  # type: ignore[no-untyped-def]
-    """Owner chỉ cần 1–4 (Owner, tổ chức, bộ não AI): bỏ qua 5–11 rồi hoàn tất — không bắt quét QR hay dựng agent."""
+    """Owner làm 1–4 (Owner, tổ chức, bộ não AI): bỏ qua 5–11 rồi hoàn tất — không bắt quét QR hay dựng agent.
+    (v0.1.29: bước 4 cũng "Để sau" được — xem tests/test_setup_v0129.py.)"""
     api: Api = owner_api
-    r = await api.send("PUT", "/setup/steps/12", {})
-    assert r.status_code == 409 and "4" in str(r.json())
     r = await api.send("POST", "/providers", {"kind": "gemini", "name": "Gemini", "keys": ["AIza-test-key-1234"],
                                               "models": ["gemini-2.5-flash"]})
     pid = r.json()["id"]
@@ -152,7 +152,8 @@ async def test_setup_finishes_with_only_steps_1_to_4(owner_api, db) -> None:  # 
     # Sau Hoàn tất: bước "Để sau" vẫn làm tiếp được từ trang Hướng dẫn kết nối, bước bắt buộc/skip thì không.
     items = {i["n"]: i for i in (await api.get("/setup/follow-up")).json()}
     # v0.1.28 (UX N3/N4): "Để sau" dùng mặc định — bước 7 có bộ quy tắc khởi đầu, bước 11 có lịch 02:00 hằng ngày.
-    assert set(items) == set(range(5, 12)) and items[11]["done"] and items[7]["done"] and not items[10]["done"]
+    assert set(items) == set(range(4, 12)) and items[4]["done"] and items[11]["done"] and items[7]["done"] \
+        and not items[10]["done"]
     r = await api.send("PUT", "/setup/steps/11", {"frequency": "daily", "time_of_day": "03:00"})
     assert r.status_code == 200, r.text
     assert r.json()["finished"] and r.json()["backup"]["time_of_day"] == "03:00"
