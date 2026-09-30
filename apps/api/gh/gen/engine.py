@@ -42,6 +42,9 @@ NOT_UNDERSTOOD = "Gen chưa hiểu, {addr} hỏi lại giúp em nhé."
 NO_MODEL = ("Gen chưa có model để trả lời. {addr} gán model cho mục \"Gen — trợ lý quản trị\" ở màn API & Model "
             "(hoặc đăng nhập Antigravity CLI) rồi hỏi lại nhé.")
 FAILED = "Gen gặp lỗi khi trả lời, {addr} thử lại sau giúp em."
+# v0.1.28 (UX C1): có model nhưng lượt gọi lỗi (mạng, hạn mức…) — không nói "chưa có model".
+MODEL_DOWN = ("Gen chưa gọi được model lúc này (nguồn AI đang lỗi hoặc hết hạn mức). {addr} thử lại sau ít phút, "
+              "hoặc xem trạng thái nguồn ở màn API & Model nhé.")
 
 ACTION_NAMES = {"navigate": "gen.navigate", "highlight": "gen.highlight", "tour": "gen.tour"}
 
@@ -291,13 +294,14 @@ async def _run(turn: Turn, *, app: Any, router: ModelRouter, session_token: str,
             routed = await router.generate(user.org_id, agent_key=AGENT_KEY, purpose="gen.turn", messages=messages,
                                            json_mode=True)
         except ModelUnavailable as e:
-            await turn.emit({"kind": "say", "text": NO_MODEL.format(addr=turn.addr)})
+            down = e.no_chain is False
+            await turn.emit({"kind": "say", "text": (MODEL_DOWN if down else NO_MODEL).format(addr=turn.addr)})
             await turn.log("gen.answer", result="failed", target_type="model", reasons=e.reasons[:5])
-            if registry.can_see(user.permissions, "api"):
+            if not down and registry.can_see(user.permissions, "api"):
                 await _ui(turn, validator, envelope.Navigate(type="navigate", screen="api"))
                 await _ui(turn, validator, envelope.Highlight(
                     type="highlight", target="api.bindings",
-                    message="Chọn model cho dòng \"Gen — trợ lý quản trị\" (core.gen)"))
+                    message="Chọn model cho dòng \"Gen — trợ lý quản trị\""))
             return
         turn.model, turn.provider = routed.model, routed.provider
         try:

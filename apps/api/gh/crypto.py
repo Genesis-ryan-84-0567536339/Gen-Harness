@@ -34,6 +34,15 @@ def new_token(nbytes: int = 32) -> str:
     return secrets.token_urlsafe(nbytes)
 
 
+# v0.1.28 (UX V4): mật khẩu tạm đọc/gõ lại được — bỏ ký tự dễ nhầm (0/O/o, 1/l/I, 5/S…), chia nhóm bằng "-".
+TEMP_PASSWORD_ALPHABET = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRTUVWXYZ2346789"
+
+
+def temp_password(groups: int = 3, size: int = 4) -> str:
+    """Mật khẩu tạm dạng `xxxx-xxxx-xxxx` (≈ 68 bit) — không có ký tự dễ nhìn nhầm khi Owner đọc cho nhân viên."""
+    return "-".join("".join(secrets.choice(TEMP_PASSWORD_ALPHABET) for _ in range(size)) for _ in range(groups))
+
+
 def token_digest(token: str) -> bytes:
     """Băm token phiên/CSRF/setup để lưu DB (không lưu token gốc)."""
     return hashlib.sha256(token.encode()).digest()

@@ -35,6 +35,7 @@ from gh.chassis import actionlog
 from gh.config import get_settings
 from gh.providers.clients import TOKEN_FILE, cli_env, cli_home_dir
 
+CLI_MISSING = "Máy chủ chưa cài công cụ đăng nhập Google (Antigravity CLI) — dùng khoá API ở bên dưới thay thế"
 log = logging.getLogger("gh.cli")
 
 CLI_AAD = b"cli_token"
@@ -358,9 +359,11 @@ class CliLogins:
             raise
         except Exception as exc:  # noqa: BLE001 — báo lỗi lên Console, không làm sập api
             log.warning("Đăng nhập CLI lỗi: %s", exc)
-            s.status, s.message = "failed", str(exc)[:300]
+            # v0.1.28 (UX N2): không đưa lỗi hệ điều hành ("[Errno 2] No such file or directory") thẳng lên Console.
+            s.status = "failed"
+            s.message = (CLI_MISSING if isinstance(exc, FileNotFoundError) else str(exc)[:300])
             await self._emit(s)
-            await self._log(s, "failed", {"error": s.message})
+            await self._log(s, "failed", {"error": str(exc)[:300]})
         finally:
             with contextlib.suppress(Exception):
                 loop.remove_reader(master)

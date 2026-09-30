@@ -209,6 +209,14 @@ async def test_no_model_points_to_bindings(owner_api: Api, app: Any) -> None:
     assert "chưa có model" in s["steps"][0]["step"]["text"]
 
 
+async def test_model_down_is_not_reported_as_no_model(owner_api: Api, app: Any) -> None:
+    """v0.1.28 (UX C1): có model nhưng mọi lượt gọi lỗi → nói "chưa gọi được", không bảo Sếp đi gán model."""
+    t = await ask(owner_api, app, FakeRouter([ModelUnavailable(["Model nội bộ: mạng: lỗi"], no_chain=False)]), "alo")
+    assert kinds(t) == ["say"]
+    text_ = t["steps"][0]["step"]["text"]
+    assert "chưa gọi được model" in text_ and "chưa có model" not in text_
+
+
 async def _user_of(api: Api) -> tuple[service.CurrentUser, str]:
     token = api.c.cookies.get(service.SESSION_COOKIE)
     assert token
