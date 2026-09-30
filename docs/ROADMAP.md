@@ -22,6 +22,10 @@ v0.1.25: Đợt C1 — lọc đầu Hộp thư (trùng, rác, điểm) dùng Jev
 v0.1.26: Đợt D1 (lát đầu) — Gen đọc Kho Ryan qua Gen-hub (chỉ đọc, chỉ Owner, che dữ liệu trước khi gửi model).
 v0.1.27: gia cố & phủ test — ghim DNS cho Gen-hub, lỗi Gen-hub chỉ Owner thấy, route MCP chung không lộ Kho, số liệu lọc đầu
 theo phạm vi, rà trần so trùng, hạn lưu chuông 30/90 ngày, nhắc việc chịu lỗi từng dòng; e2e thẻ đề xuất/lọc đầu/Gen-hub/chuông.
+v0.1.28: sửa theo rà soát UX — bước 4 phải có model (tự chọn model đã gọi thử, gán cho agent lõi), bước 12 nói thật việc còn
+thiếu, nguồn lỗi xuống cuối + xoá được + một nhãn trạng thái, lỗi kỹ thuật thành câu dễ hiểu, "Để sau" dùng quy tắc/sao lưu
+mặc định, tắt phụ đề tiếng Anh + bỏ chữ lập trình viên, ma trận quyền tiếng Việt, bớt ngõ cụt cho vai trò khác Owner, điện thoại
+(bảng → thẻ). Còn lại: V2 (bước 4 "Để sau" — chờ Boss), ghi chú phát hành tiếng Việt, số đếm Hộp thư, một số mục Nhẹ.
 
 ## Đợt A — Gen v1 (thiết kế: docs/design/gen-v1.md)
 - ✅ A1 Khung chat phải + Gen trả lời/tóm tắt (chỉ đọc), lưu hội thoại, Nhật ký hành động — v0.1.21.
