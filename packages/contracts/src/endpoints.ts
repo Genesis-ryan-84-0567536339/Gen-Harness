@@ -230,6 +230,8 @@ export function createEndpoints(client: ApiClient) {
       /** Kéo-thả sắp lại toàn bộ chuỗi chuyển hướng một lượt (PLAN 4.2) — khác `update` vốn chỉ đổi một ô. */
       chain: (providerIds: string[]) => r<Provider[]>('/providers/chain', { method: 'PATCH', body: { provider_ids: providerIds } }),
       test: (id: string) => r<ProviderTestResult>(`/providers/${enc(id)}/test`, { method: 'POST' }),
+      /** v0.1.28 (UX N1): xoá nguồn nhập nhầm / gọi thử lỗi (không áp dụng cho Antigravity CLI). */
+      remove: (id: string) => r<void>(`/providers/${enc(id)}`, { method: 'DELETE' }),
       addModel: (id: string, body: { model_name: string; daily_quota?: number; rate_limit_per_min?: number }) =>
         r<Provider>(`/providers/${enc(id)}/models`, { method: 'POST', body }),
       credentials: (signal?: AbortSignal) => r<Credential[]>('/providers/credentials', { signal }),

@@ -466,10 +466,17 @@ export function createMock(opts: P4SystemOptions) {
     return { ok: true, value: { backup: { ...backup } } };
   }
 
+  /** v0.1.28 (UX N4): "Để sau" ở bước 11 = lịch mặc định hằng ngày 02:00 (như `gh.setup.routes.skip`). */
+  function defaultBackup(): void {
+    backupConfigured = true;
+  }
+
   return {
     handle,
     step10,
     step11,
+    defaultBackup,
+    backupConfigured: () => backupConfigured,
     hooks: {} as Record<string, (...args: never[]) => unknown>,
     dispose: () => {},
   };

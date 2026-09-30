@@ -457,9 +457,9 @@ async def overview(user: service.CurrentUser = Depends(require("overview.read"))
              filters={"kind": "quotation"}),
         _kpi("opportunity_claim_rate", "Tỉ lệ cơ hội được nhận", claim_rate, unit="%", row=2, screen="opportunity",
              filters={"owner": "none"}),
-        _kpi("chassis_latency", "Độ trễ xử lý chassis", round(float(latency), 1) if latency is not None else None,
+        _kpi("chassis_latency", "Độ trễ xử lý của hệ thống", round(float(latency), 1) if latency is not None else None,
              unit="giây", row=2, screen="rules"),
-        _kpi("active_profiles", "Hồ sơ active (30 ngày)", active_profiles, row=2, screen="directory"),
+        _kpi("active_profiles", "Hồ sơ hoạt động (30 ngày)", active_profiles, row=2, screen="directory"),
     ]
     return {"kpis": kpis, "queue": await _queue_widget(db, user, sc), "spotlight": await _spotlight(db, user, sc),
             "signals": await _signals(db, user, sc), "health": health, "dataQuality": await _data_quality(db, org),

@@ -79,7 +79,7 @@ export function Step10Team({ meta, description, onBack, onSaved, formRef, onSkip
       >
         <div className="setup-section">
           <div className="setup-section__title">Đã tạo {invited.length} tài khoản — chưa gửi thư mời thật</div>
-          <p className="muted-note">Chưa nối SMTP thật ở giai đoạn này: mật khẩu tạm hiện thẳng dưới đây, Sếp tự gửi qua kênh riêng (Zalo, email cá nhân…) rồi đổi lại ở lần đăng nhập đầu.</p>
+          <p className="muted-note">Hệ thống chưa tự gửi email mời: mật khẩu tạm hiện ngay dưới đây, Sếp tự gửi qua kênh riêng (Zalo, email cá nhân…) rồi đổi lại ở lần đăng nhập đầu.</p>
           <div className="invite-result-list">
             {invited.map((inv) => (
               <div className="invite-result-row" key={inv.id}>

@@ -15,9 +15,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gh.agents_api.routes import CORE_AGENT_KEYS
 from gh.auth import rbac, service
 from gh.auth.deps import client_ip, optional_user
 from gh.auth.routes import set_session_cookies
+from gh.biz.duty.context import DEFAULT_CONTEXT_TOKENS
 from gh.biz.people.routes import try_chat
 from gh.chassis import actionlog, policy
 from gh.crypto import hash_secret, new_token, token_digest
@@ -273,6 +275,23 @@ async def step3(body: Step3In, request: Request, db: AsyncSession = DB,
     return state_payload(await _save(db, row.org_id, completed, max(row.step, _next_open_step(done, 3))))
 
 
+DEFAULT_BACKUP: dict[str, Any] = {"frequency": "daily", "time_of_day": "02:00", "retention_count": 7,
+                                  "destination": "local"}
+
+
+async def seed_default_rules(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID | None) -> int:
+    """Nạp bộ quy tắc khởi đầu (`presets.PRESETS`, bật theo mặc định của từng quy tắc) khi tổ chức CHƯA có quy tắc
+    nào — không đụng tới quy tắc Owner đã tạo/tắt. Trả số quy tắc đã thêm."""
+    if (await db.execute(text("SELECT EXISTS (SELECT 1 FROM refinery.rules WHERE org_id = :o)"),
+                         {"o": org_id})).scalar():
+        return 0
+    for p in presets.PRESETS:
+        rin = RuleIn(name=p["name"], kind=p["kind"], conditions=p["conditions"], outputs=p["outputs"],
+                     threshold=p["threshold"], prompt_hint=p.get("prompt_hint"))
+        await create_rule(db, org_id, rin, user_id, code=p["code"], enabled=bool(p["enabled"]))
+    return len(presets.PRESETS)
+
+
 @router.post("/steps/{n}/skip")
 async def skip(n: int, request: Request, db: AsyncSession = DB,
                user: service.CurrentUser | None = Depends(optional_user)) -> dict[str, Any]:
@@ -288,6 +307,14 @@ async def skip(n: int, request: Request, db: AsyncSession = DB,
     done = dict(completed.get("steps", {}))
     if done.get(str(n)) != "done":
         done[str(n)] = "skipped"
+        # v0.1.28 (UX N3/N4): "Để sau" = dùng mặc định, không phải "không có gì". Bước 7 → nạp bộ quy tắc khởi đầu
+        # (nếu tổ chức chưa có quy tắc nào); bước 11 → lịch sao lưu hằng ngày 02:00 (nếu chưa có lịch).
+        if n == 7:
+            await seed_default_rules(db, row.org_id, owner.id)
+        elif n == 11:
+            await db.execute(text("""UPDATE core.organizations SET settings = settings || CAST(:s AS jsonb)
+                                     WHERE id = :o AND NOT (settings ? 'backup')"""),
+                             {"s": json.dumps({"backup": DEFAULT_BACKUP}), "o": row.org_id})
     completed["steps"] = done
     await actionlog.record(db, org_id=row.org_id, actor_type="user", actor_id=owner.actor_id,
                            action="setup.step_skipped", target_type="setup_step", target_id=str(n),
@@ -370,6 +397,8 @@ async def step4(body: Step4In, request: Request, db: AsyncSession = DB,
     ids = list(dict.fromkeys(body.provider_ids))
     found = (await db.execute(text("""
         SELECT p.id, p.kind, p.auth_state, COALESCE((p.last_test->>'ok')::boolean, false) AS tested,
+               CASE WHEN jsonb_typeof(p.last_test->'models') = 'array' THEN
+                    ARRAY(SELECT jsonb_array_elements_text(p.last_test->'models')) END AS test_models,
                EXISTS (SELECT 1 FROM agent.cli_profiles c WHERE c.provider_id = p.id AND c.is_active) AS cli_ok
         FROM agent.providers p WHERE p.org_id = :o AND p.id = ANY(:ids)"""),
         {"o": row.org_id, "ids": ids})).all()
@@ -379,10 +408,49 @@ async def step4(body: Step4In, request: Request, db: AsyncSession = DB,
              and (p.cli_ok if p.kind == "antigravity_cli" else p.tested and p.auth_state == "ok")]
     if not ready:
         raise incomplete("Cần ít nhất một nhà cung cấp đã gọi thử thành công, hoặc Antigravity CLI đã đăng nhập")
-    for rank, pid in enumerate(ids, start=1):
-        await db.execute(text("UPDATE agent.providers SET failover_rank = :r, is_enabled = true WHERE id = :i"),
-                         {"r": rank, "i": pid})
-    return await _mark_done(db, request, row, owner, 4, {"provider_ids": [str(i) for i in ids]})
+    # v0.1.28 (UX C1): nguồn đã gọi thử OK mà Owner chưa bấm "Dùng model này" → tự dùng model đầu tiên nhận được khi
+    # gọi thử (bỏ model embedding). Không nguồn nào có model → chưa cho qua bước (trước đây qua được nhưng không agent
+    # nào gọi được model: sàng lọc không chạy, Gen báo "chưa có model").
+    model_id = None
+    ready_ids = {p.id for p in ready}
+    for p in (next(f for f in found if f.id == i) for i in ids):
+        if p.id not in ready_ids:
+            continue
+        mid = await _first_model(db, p.id)
+        if mid is None:
+            name = next((m for m in (p.test_models or []) if isinstance(m, str) and "embed" not in m.lower()), None)
+            if name:
+                mid = (await db.execute(text("""
+                    INSERT INTO agent.models (provider_id, model_name) VALUES (:p, :m)
+                    ON CONFLICT (provider_id, model_name) DO UPDATE SET model_name = EXCLUDED.model_name
+                    RETURNING id"""), {"p": p.id, "m": name[:120]})).scalar_one()
+        model_id = model_id or mid
+    if model_id is None:
+        raise incomplete("Chưa có model nào để dùng — bấm \"Kiểm tra\" ở một nguồn rồi chọn \"Dùng model này\"")
+    # Thứ tự: nguồn Owner chọn (đã sẵn sàng) đứng đầu theo đúng thứ tự gửi lên; nguồn lỗi / chưa kiểm tra xuống cuối
+    # (UX N1: nguồn gọi thử lỗi từng đứng ĐẦU chuỗi).
+    rest = (await db.execute(text("""SELECT id FROM agent.providers WHERE org_id = :o AND NOT (id = ANY(:ids))
+                                     ORDER BY failover_rank NULLS LAST, created_at"""),
+                             {"o": row.org_id, "ids": ids})).scalars().all()
+    for rank, pid in enumerate([*ids, *rest], start=1):
+        await db.execute(text("""UPDATE agent.providers SET failover_rank = :r,
+                                 is_enabled = CASE WHEN id = ANY(:ids) THEN true ELSE is_enabled END WHERE id = :i"""),
+                         {"r": rank, "i": pid, "ids": ids})
+    # Gán model cho các agent lõi còn trống (Sàng lọc, Gen…) — Owner đổi lại được ở màn API & Model.
+    for key in CORE_AGENT_KEYS:
+        if key == "core.indexing":   # embedding — model sinh chữ không dùng được
+            continue
+        await db.execute(text("""INSERT INTO agent.bindings (org_id, agent_key, model_id, context_tokens)
+                                 VALUES (:o, :k, :m, :ct) ON CONFLICT (org_id, agent_key) DO NOTHING"""),
+                         {"o": row.org_id, "k": key, "m": model_id, "ct": DEFAULT_CONTEXT_TOKENS})
+    return await _mark_done(db, request, row, owner, 4, {"provider_ids": [str(i) for i in ids],
+                                                          "model_id": str(model_id)})
+
+
+async def _first_model(db: AsyncSession, provider_id: uuid.UUID) -> uuid.UUID | None:
+    return (await db.execute(text("""SELECT id FROM agent.models WHERE provider_id = :p
+                                     AND model_name NOT ILIKE '%embed%' ORDER BY id LIMIT 1"""),
+                             {"p": provider_id})).scalar_one_or_none()
 
 
 @router.put("/steps/5")

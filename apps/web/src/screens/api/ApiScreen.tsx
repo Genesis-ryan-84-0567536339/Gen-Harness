@@ -6,9 +6,9 @@ import { useProviders } from '../../lib/dataQueries';
 import { errorText } from '../../lib/errorText';
 import { useCan } from '../../lib/permissions';
 import { toast } from '../../lib/toast';
-import { CardError, InlineError, Panel, ScreenHead, SkeletonLines, StateChip } from '../common';
+import { CardError, FriendlyErrorText, InlineError, Panel, ScreenHead, SkeletonLines, StateChip } from '../common';
 import { CliCard } from '../system/CliCard';
-import { AUTH_STATE_LABEL, PROVIDER_ICON, PROVIDER_KIND_LABEL, fmtContextTokens, fmtQuota, fmtTemperature, providerTone } from './apiModel';
+import { PROVIDER_ICON, PROVIDER_KIND_LABEL, fmtContextTokens, fmtQuota, fmtTemperature, providerStatus } from './apiModel';
 import {
   useAddModel,
   useAddProviderKey,
@@ -16,6 +16,7 @@ import {
   useCreateProvider,
   useFailoverRules,
   useRemoveBinding,
+  useRemoveProvider,
   useReorderChain,
   useSetBinding,
   useSetProviderEnabled,
@@ -109,7 +110,9 @@ function ProviderCardSkeleton() {
 function ProviderCard({ provider: p, canManage, onAddKey }: { provider: Provider; canManage: boolean; onAddKey: () => void }) {
   const test = useTestProvider();
   const setEnabled = useSetProviderEnabled();
-  const tone = providerTone(p);
+  const remove = useRemoveProvider();
+  const status = providerStatus(p);
+  const tone = status.tone;
   const testErr = test.isError && test.variables === p.id ? test.error : null;
   const lastResult = test.data && test.variables === p.id ? test.data : null;
   return (
@@ -123,7 +126,7 @@ function ProviderCard({ provider: p, canManage, onAddKey }: { provider: Provider
           <div className="apm-provider__kind">{PROVIDER_KIND_LABEL[p.kind as ProviderKind]}</div>
         </div>
         <StateChip color={tone} dot>
-          {AUTH_STATE_LABEL[p.auth_state]}
+          {status.label}
         </StateChip>
       </div>
       <div className="apm-provider__body">
@@ -149,16 +152,30 @@ function ProviderCard({ provider: p, canManage, onAddKey }: { provider: Provider
         <Button variant="secondary" className="btn-22" icon="ph ph-pulse" loading={test.isPending && test.variables === p.id} onClick={() => test.mutate(p.id)}>
           Kiểm tra kết nối
         </Button>
+        {canManage && p.kind !== 'antigravity_cli' && p.kind !== 'system_one' ? (
+          <Button
+            variant="ghost"
+            className="btn-22"
+            icon="ph ph-trash"
+            loading={remove.isPending}
+            onClick={() => {
+              if (window.confirm(`Xoá nguồn "${p.name}"? Khoá API của nguồn này cũng bị xoá.`)) remove.mutate(p.id);
+            }}
+          >
+            Xoá
+          </Button>
+        ) : null}
         {canManage ? (
           <Switch checked={p.enabled} label={`${p.enabled ? 'Tắt' : 'Bật'} ${p.name}`} disabled={setEnabled.isPending} onChange={(v) => setEnabled.mutate({ id: p.id, enabled: v })} />
         ) : null}
       </div>
       {lastResult ? (
         <div className={lastResult.ok ? 'apm-test-result apm-test-result--ok' : 'apm-test-result apm-test-result--bad'} role="status">
-          {lastResult.ok ? `Kết nối được · độ trễ ${lastResult.latency_ms} ms` : lastResult.error}
+          {lastResult.ok ? `Kết nối được · độ trễ ${lastResult.latency_ms} ms` : <FriendlyErrorText raw={lastResult.error} />}
         </div>
       ) : null}
       {testErr ? <InlineError>{errorText(testErr)}</InlineError> : null}
+      {remove.isError ? <InlineError>{errorText(remove.error)}</InlineError> : null}
     </article>
   );
 }
@@ -332,7 +349,7 @@ function CoreParamsPanel() {
       ) : bindings.isError ? (
         <CardError error={bindings.error} onRetry={() => void bindings.refetch()} retrying={bindings.isFetching} />
       ) : !core ? (
-        <EmptyState icon="ph ph-brain" title="Chưa gán model cho core agent" description="Gán ở bảng bên trên, khoá agent_key core.refinery." />
+        <EmptyState icon="ph ph-brain" title="Chưa gán model cho việc sàng lọc" description="Gán ở bảng bên trên, dòng Sàng lọc & suy luận chính." />
       ) : (
         rows.map(([k, v]) => (
           <div className="apm-param-row" key={k}>
@@ -349,7 +366,7 @@ function RateLimitsPanel() {
   const providers = useProviders();
   const rows = (providers.data ?? []).flatMap((p) => p.models.map((m) => ({ key: `${p.id}-${m.id}`, label: `${p.name} · ${m.model_name}`, quota: fmtQuota(m.used_today, m.daily_quota) })));
   return (
-    <Panel title="Giới hạn gọi API" kicker="Rate limit · bảo vệ hạn mức" bodyClass="apm-rates" label="Giới hạn gọi API">
+    <Panel title="Giới hạn gọi API" kicker="Bảo vệ hạn mức" bodyClass="apm-rates" label="Giới hạn gọi API">
       {providers.isPending ? (
         <SkeletonLines rows={4} padding="8px 16px" />
       ) : providers.isError ? (
@@ -421,8 +438,8 @@ function PriorityChainPanel({ canManage }: { canManage: boolean }) {
                 <div className="apm-chain-row__name">{p.name}</div>
                 <div className="apm-chain-row__model mono">{p.models[0]?.model_name ?? '—'}</div>
               </div>
-              <span className="apm-chain-row__state" style={{ color: p.auth_state === 'ok' ? 'var(--color-ok)' : 'var(--color-neutral-500)' }}>
-                {p.enabled ? 'đang bật' : 'đã tắt'}
+              <span className="apm-chain-row__state" style={{ color: providerStatus(p).tone }}>
+                {providerStatus(p).label}
               </span>
               {canManage ? (
                 <span className="apm-chain-row__keys">
@@ -449,7 +466,7 @@ function PriorityChainPanel({ canManage }: { canManage: boolean }) {
 function FailoverRulesPanel() {
   const rules = useFailoverRules();
   return (
-    <Panel title="Quy tắc chuyển hướng" kicker="Failover rules — cố định" bodyClass="apm-rules" label="Quy tắc chuyển hướng">
+    <Panel title="Quy tắc chuyển hướng" kicker="Cố định, không cần chỉnh" bodyClass="apm-rules" label="Quy tắc chuyển hướng">
       {rules.isPending ? (
         <SkeletonLines rows={4} padding="8px 16px" />
       ) : rules.isError ? (

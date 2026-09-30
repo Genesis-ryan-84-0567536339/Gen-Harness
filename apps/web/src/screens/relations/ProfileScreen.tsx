@@ -157,7 +157,7 @@ function ProfileBody({ id, p }: { id: string; p: Profile }) {
             </div>
           </Panel>
 
-          <Panel title="Tài liệu đã trao đổi" kicker="Documents">
+          <Panel title="Tài liệu đã trao đổi" kicker="Tài liệu">
             {p.documents.length === 0 ? (
               <EmptyState icon="ph ph-files" title="Chưa có tài liệu nào" />
             ) : (
@@ -175,7 +175,7 @@ function ProfileBody({ id, p }: { id: string; p: Profile }) {
             )}
           </Panel>
 
-          <Panel title="Người nội bộ từng chạm" kicker="Internal touchpoints">
+          <Panel title="Người nội bộ từng chạm" kicker="Người trong công ty">
             {p.touchpoints.length === 0 ? (
               <EmptyState icon="ph ph-users-three" title="Chưa ai từng chạm hồ sơ này" />
             ) : (
@@ -190,7 +190,7 @@ function ProfileBody({ id, p }: { id: string; p: Profile }) {
             )}
           </Panel>
 
-          <Panel title="Ghi chú tay của Sếp" kicker="Owner notes · hệ thống không sửa">
+          <Panel title="Ghi chú tay của Sếp" kicker="Hệ thống không sửa">
             {p.owner_note ? <p className="pf-note">{p.owner_note}</p> : <EmptyState icon="ph ph-note-pencil" title="Chưa có ghi chú" />}
           </Panel>
         </div>

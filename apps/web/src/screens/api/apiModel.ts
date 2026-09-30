@@ -37,8 +37,28 @@ export function authStateTone(s: Provider['auth_state']): string {
 }
 
 export function providerTone(p: Provider): string {
-  if (!p.enabled) return N5;
-  return authStateTone(p.auth_state);
+  return providerStatus(p).tone;
+}
+
+/**
+ * v0.1.28 (UX N1): MỘT nhãn trạng thái cho nguồn model ở mọi màn (bước 4, API & Model, Điều khiển hệ thống › Bộ não
+ * AI) — trước đây cùng một nguồn lỗi hiện "Chưa cấu hình" / "Chờ kết nối" / "Lỗi kết nối" / "Hoạt động" tuỳ màn.
+ * Khớp `state_label` của `GET /providers/credentials` (máy chủ).
+ */
+export function providerStatus(p: Pick<Provider, 'enabled' | 'auth_state' | 'kind'> & { models?: Provider['models'] }): { label: string; tone: string } {
+  if (!p.enabled) return { label: 'Đã tắt', tone: N5 };
+  switch (p.auth_state) {
+    case 'ok':
+      return p.kind !== 'system_one' && p.models && p.models.length === 0 ? { label: 'Chưa chọn model', tone: WARN } : { label: 'Hoạt động', tone: OK };
+    case 'expiring':
+      return { label: 'Sắp hết hạn', tone: WARN };
+    case 'expired':
+      return { label: 'Hết hạn', tone: BAD };
+    case 'error':
+      return { label: 'Lỗi kết nối', tone: BAD };
+    default:
+      return { label: p.kind === 'antigravity_cli' ? 'Chưa đăng nhập' : 'Chưa kiểm tra', tone: N5 };
+  }
 }
 
 /** ARCHITECTURE §11 — tham số core dùng cho `core.refinery` (sàng lọc thô → sạch). */

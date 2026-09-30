@@ -145,7 +145,7 @@ function PersonDataRequestPanel() {
   return (
     <Panel
       title="Yêu cầu xuất / xoá dữ liệu một người"
-      kicker="Spec I · ghi vào nhật ký — không đụng kho thô (khoá cứng #5)"
+      kicker="Có ghi vào Nhật ký — dữ liệu gốc không bị sửa"
       label="Yêu cầu xuất / xoá dữ liệu một người"
       bodyClass="data-request"
     >

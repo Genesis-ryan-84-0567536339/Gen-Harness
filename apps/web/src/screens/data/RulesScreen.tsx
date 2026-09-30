@@ -205,7 +205,7 @@ function WeightsCard({ canManage }: { canManage: boolean }) {
   };
 
   return (
-    <Panel genTarget="rules.weights" title="Trọng số chấm điểm" kicker="Evaluation Fabric · dùng chung cho mọi đối tượng" label="Trọng số chấm điểm">
+    <Panel genTarget="rules.weights" title="Trọng số chấm điểm" kicker="Dùng chung cho mọi đối tượng" label="Trọng số chấm điểm">
       {weights.isPending ? (
         <SkeletonLines rows={6} padding="13px 16px 15px" gap={11} />
       ) : weights.isError ? (

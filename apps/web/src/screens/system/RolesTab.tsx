@@ -100,7 +100,7 @@ function PermissionMatrix() {
                     if (!canManage || locked) {
                       return (
                         <td key={c.key} className="roles-matrix__cell" data-locked={locked || undefined}>
-                          <span title={locked ? 'Khoá cứng — không sửa được (ARCHITECTURE §7.4/§8.3)' : cell.title}>
+                          <span title={locked ? 'Giới hạn cố định — không sửa được' : cell.title}>
                             <Icon name={cell.icon} size={15} color={cell.tone} />
                           </span>
                         </td>
@@ -138,7 +138,7 @@ function PermissionMatrix() {
 function ListeningGroupsPanel() {
   const groups = useListeningGroups();
   return (
-    <Panel title="Nhóm đang lắng nghe" kicker="Chỉ nhóm tổ chức có quyền hợp lệ — khoá cứng #1" label="Nhóm đang lắng nghe" bodyClass="roles-groups-wrap">
+    <Panel title="Nhóm đang lắng nghe" kicker="Chỉ nhóm tổ chức có quyền hợp lệ" label="Nhóm đang lắng nghe" bodyClass="roles-groups-wrap">
       {groups.isPending ? (
         <SkeletonLines rows={4} padding="10px 16px" />
       ) : groups.isError ? (
@@ -198,7 +198,7 @@ function BoundariesPanel() {
   return (
     <Panel
       title="Ranh giới có trách nhiệm"
-      kicker="Hệ thống quan sát, không phải máy kết án — 8 khoá cứng ARCHITECTURE §7.4"
+      kicker="Hệ thống quan sát, không phải máy kết án — 8 giới hạn không tắt được"
       label="Ranh giới có trách nhiệm"
       bodyClass="roles-boundaries"
     >

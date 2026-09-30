@@ -184,14 +184,14 @@ export function OverviewScreen() {
         </Panel>
 
         <div className="ov-side-col">
-          <Panel title="5 đối tượng đáng chú ý nhất" kicker="Today's five" bodyClass="ov-spot-list" genTarget="overview.spotlight">
+          <Panel title="5 đối tượng đáng chú ý nhất" kicker="Hôm nay" bodyClass="ov-spot-list" genTarget="overview.spotlight">
             {d.spotlight.length === 0 ? (
               <EmptyState icon="ph ph-user-focus" title="Chưa có đối tượng nổi bật" />
             ) : (
               d.spotlight.map((s, i) => <SpotlightRow key={`${s.person.id}-${i}`} s={s} />)
             )}
           </Panel>
-          <Panel title="Chủ đề đang nổi" kicker="Rising signals · 24 giờ" bodyClass="ov-signal-list">
+          <Panel title="Chủ đề đang nổi" kicker="Tăng nhanh trong 24 giờ" bodyClass="ov-signal-list">
             {d.signals.length === 0 ? (
               <EmptyState icon="ph ph-chart-line-up" title="Chưa có chủ đề nổi bật" />
             ) : (
@@ -224,7 +224,7 @@ export function OverviewScreen() {
             ))}
             <div className="ov-health__row">
               <span className="ov-health__dot" style={{ background: d.health.backlog_pending > 0 ? WARN : OK }} aria-hidden />
-              <span className="ov-health__name">Backlog sàng lọc</span>
+              <span className="ov-health__name">Tin chờ sàng lọc</span>
               <span className="ov-health__metric">{fmtInt(d.health.backlog_pending)} bản ghi chờ</span>
             </div>
           </div>

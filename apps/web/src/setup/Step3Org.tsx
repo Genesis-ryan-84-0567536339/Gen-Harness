@@ -74,6 +74,7 @@ export function Step3Org({ meta, description, onBack, onSaved, formRef }: StepPr
       onContinue={() => void save()}
       onBack={onBack}
       formError={formError}
+      blockedHint={Object.values(clientErrors)[0] ?? null}
     >
       <div className="setup-fields">
         {text('org_name', 'Tên tổ chức', { autoFocus: true, autoComplete: 'organization' })}

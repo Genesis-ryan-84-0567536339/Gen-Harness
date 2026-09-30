@@ -128,7 +128,7 @@ export async function resetMock(
 /** Per-viewer layout prefs as the app persists them (zustand persist, key gh-ui). */
 export async function setUiPrefs(page: Page, prefs: { sidebarMode?: 'full' | 'rail'; showEnglish?: boolean }) {
   await page.addInitScript((p) => {
-    localStorage.setItem('gh-ui', JSON.stringify({ state: { sidebarMode: 'full', showEnglish: true, navOpen: {}, ...p }, version: 0 }));
+    localStorage.setItem('gh-ui', JSON.stringify({ state: { sidebarMode: 'full', showEnglish: true, navOpen: {}, ...p }, version: 1 }));
   }, prefs);
 }
 

@@ -71,6 +71,7 @@ export function Step2Owner({ meta, description, status, token, onBack, onSaved, 
       onContinue={() => void save()}
       onBack={onBack}
       formError={formError}
+      blockedHint={Object.values(clientErrors)[0] ?? null}
     >
       <div className="setup-fields">
         {showToken ? (
@@ -141,7 +142,7 @@ export function Step2Owner({ meta, description, status, token, onBack, onSaved, 
             value={v.pin_confirm}
             onChange={(val) => set('pin_confirm', val)}
             onBlur={() => f.blur('pin_confirm')}
-            error={f.errorOf('pin_confirm')}
+            error={f.errorOf('pin_confirm') ?? (v.pin_confirm.length === 6 ? (clientErrors.pin_confirm ?? null) : null)}
           />
         </div>
         <div className="setup-pin-rules">

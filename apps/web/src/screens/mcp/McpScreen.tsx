@@ -84,7 +84,7 @@ export function McpScreen() {
         </div>
       </div>
 
-      <Panel title="Rào chắn khoá cứng" kicker="ARCHITECTURE §7.4, §10 — không cài đặt nào tắt được" bodyClass="mcp-guards" label="Rào chắn khoá cứng MCP">
+      <Panel title="Rào chắn khoá cứng" kicker="Không cài đặt nào tắt được" bodyClass="mcp-guards" label="Rào chắn khoá cứng MCP">
         <GuardRow label="Tool có ghi phải qua Bàn làm việc trước khi thực thi" hint="Mọi tool loại ghi tạo bản nháp chờ duyệt, không gọi thẳng ra ngoài." />
         <GuardRow label="Agent chỉ gọi được tool Sếp đã mở VÀ đã cấp" hint="Thiếu một trong hai điều kiện → chặn ngay, ghi log, không có cách bật nhanh." />
         <GuardRow label="Tool mới khám phá luôn đóng mặc định" hint="Khám phá xong vẫn phải bật tay từng tool, cần PIN." />

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import type { RefineryProgress } from '@gen-harness/contracts';
 import { Icon } from '@gen-harness/ui';
+import { FOLLOW_UP_KEY } from '../guide/guideContent';
 import { api } from '../lib/api';
 import { qk2, useChannels, usePipeline, useProviders, useRules, useSchedule } from '../lib/dataQueries';
 import { fmtInt, fmtInterval } from '../lib/format';
@@ -10,13 +11,13 @@ import { qk } from '../lib/queries';
 import { queryClient } from '../lib/queryClient';
 import { Bar } from '../screens/common';
 import { ACC4, N5, OK, WARN } from '../screens/data/dataModel';
-import { firstRunCounters, missingRequiredSteps } from './phase2Model';
+import { firstRunCounters, missingRequiredSteps, setupGaps } from './phase2Model';
 import { StepFrame } from './StepFrame';
 import { describeError, type StepProps } from './types';
 
 const STATUS_TEXT = {
-  idle: 'Lần sàng lọc đầu tiên sẽ chạy khi bridge gom đủ tin hoặc hết chu kỳ đầu.',
-  running: 'Core agent đang phân loại lần đầu…',
+  idle: 'Lần sàng lọc đầu tiên sẽ chạy khi hệ thống gom đủ tin hoặc hết chu kỳ đầu.',
+  running: 'Hệ thống đang phân loại tin lần đầu…',
   done: 'Lần sàng lọc đầu tiên đã xong.',
   failed: 'Lần sàng lọc đầu tiên gặp lỗi — xem Chu kỳ gần nhất ở Kho dữ liệu thô.',
 } as const;
@@ -44,6 +45,7 @@ export function Step12Finish({ meta, description, onBack, onSaved, formRef }: St
   // Same query as SetupPage (deduplicated): which required steps still block "Hoàn tất".
   const setupState = useQuery({ queryKey: qk.setupState, queryFn: ({ signal }) => api.setup.state(signal) });
   const missing = missingRequiredSteps(setupState.data);
+  const followUp = useQuery({ queryKey: FOLLOW_UP_KEY, queryFn: ({ signal }) => api.setup.followUp(signal) });
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -65,6 +67,15 @@ export function Step12Finish({ meta, description, onBack, onSaved, formRef }: St
   const enabledRules = rules.data?.filter((r) => r.enabled) ?? [];
   const chain = [...(providers.data ?? [])].sort((a, b) => a.failover_rank - b.failover_rank).filter((p) => p.enabled);
   const dash = '…';
+  // v0.1.28 (UX C1/V10): nói thật những gì còn thiếu thay vì "Mọi thứ đã sẵn sàng".
+  const gaps = setupGaps({
+    providers: providers.data,
+    activeChannels: channels.data ? activeChannels.length : undefined,
+    groupsListening: pipeline.data?.groups_listening,
+    enabledRules: rules.data ? enabledRules.length : undefined,
+    backupDone: followUp.data ? !!followUp.data.find((i) => i.n === 11)?.done : undefined,
+  });
+  const loaded = !!(providers.data && channels.data && pipeline.data && rules.data && followUp.data);
 
   return (
     <StepFrame
@@ -96,11 +107,35 @@ export function Step12Finish({ meta, description, onBack, onSaved, formRef }: St
           </div>
         </div>
       ) : null}
+      {loaded ? (
+        <div className="setup-section" data-testid="setup-gaps">
+          <div className="risk-box" role="note">
+            <Icon name={gaps.length ? 'ph ph-list-checks' : 'ph ph-check-circle'} size={16} color={gaps.length ? WARN : OK} />
+            <div>
+              <div className="risk-box__title">
+                {gaps.length ? `Đã lưu — còn ${gaps.length} việc để hệ thống chạy đầy đủ` : 'Mọi thứ đã sẵn sàng'}
+              </div>
+              {gaps.length ? (
+                <ul className="setup-gaps">
+                  {gaps.map((g) => (
+                    <li key={g.key}>
+                      {g.text} — <Link to={`/setup?step=${g.step}`}>làm ở bước {g.step}</Link>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="risk-box__text">Model AI, kênh, nhóm lắng nghe, quy tắc sàng lọc và sao lưu đều đã bật.</p>
+              )}
+              {gaps.length ? <p className="risk-box__text">Có thể hoàn tất ngay và làm tiếp sau ở "Việc thiết lập tiếp" trên Tổng quan.</p> : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
       <div className="setup-section">
         <div className="setup-section__title">Những gì đã bật</div>
         <div className="summary">
           <span className="summary__k">bộ não AI</span>
-          <span className="summary__v">{providers.data ? (chain.length ? chain.map((p) => p.name).join(' → ') : 'chưa có nguồn nào') : dash}</span>
+          <span className="summary__v">{providers.data ? (chain.length ? chain.map((p) => (p.models[0] ? `${p.name} (${p.models[0].model_name})` : p.name)).join(' → ') : 'chưa có nguồn nào') : dash}</span>
           <span className="summary__k">kênh</span>
           <span className="summary__v">{channels.data ? (activeChannels.length ? activeChannels.join(', ') : 'chưa kết nối') : dash}</span>
           <span className="summary__k">nhóm lắng nghe</span>

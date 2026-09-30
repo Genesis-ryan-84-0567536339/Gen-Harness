@@ -471,6 +471,8 @@ export interface Provider {
   auth_state: 'ok' | 'expiring' | 'expired' | 'error' | 'unconfigured';
   keys: ProviderKey[];
   models: ProviderModel[];
+  /** Kết quả lần gọi thử gần nhất (lưu ở máy chủ) — bước 4 dùng để còn nút "Dùng model này" sau khi tải lại trang. */
+  last_test?: (ProviderTestResult & { at?: string }) | null;
 }
 
 export interface ProviderCreateBody {
