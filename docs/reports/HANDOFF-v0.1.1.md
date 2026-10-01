@@ -1017,7 +1017,7 @@ hoá — hệ thống chỉ giảm (đọc ít, dừng ngay khi có cảnh báo)
   `.credentials.json` khi thêm tài khoản, hồ sơ = gói {credentials, oauthAccount} mã hoá trong `agent.cli_profiles` (tách theo
   provider), đổi/xoá cần PIN, email/gói qua `oauthAccount` hoặc `claude auth status --json` (`email`, `subscriptionType`).
   Gọi model: `claude -p --model <bí danh> --output-format json --no-session-persistence --strict-mcp-config
-  --disable-slash-commands [--system-prompt …] --tools ""` (prompt qua stdin, **tắt mọi công cụ** — model chỉ trả lời chữ,
+  --disable-slash-commands --safe-mode [--system-prompt-file <tệp tạm 0600>] --tools ""` (prompt qua stdin, **tắt mọi công cụ** — model chỉ trả lời chữ,
   không chạy lệnh trong container), môi trường sạch (`CLAUDE_CONFIG_DIR`, không truyền ANTHROPIC_API_KEY), quá giờ 300 s,
   token không bao giờ nằm trên dòng lệnh/log. Lỗi: 404/"issue with the selected model" → ModelRejected, 401/login →
   AuthFailed, 429/usage limit → RateLimited. Danh sách model = bí danh `haiku`, `sonnet`, `opus`, `fable` (Claude Code không
@@ -1041,6 +1041,11 @@ hoá — hệ thống chỉ giảm (đọc ít, dừng ngay khi có cảnh báo)
   `gemini-3.1-pro-{low,high}`, "Gemini 3.8 Flash (High)"… có trong tệp chạy. `claude` 2.1.285/2.1.286: cờ ở trên, `auth
   login --claudeai` in link + chờ dán mã, `auth status --json` có `email`/`subscriptionType`, `-p` đọc prompt từ stdin với
   `--tools ""`, model lạ → `is_error` + `api_error_status: 404`.
+- **Review trước merge (đo thật claude 2.1.285)**: `--tools ""` tắt mọi công cụ (model chỉ "giả vờ" gọi công cụ bằng chữ,
+  không có gì chạy) nhưng **hook trong `settings.json` và CLAUDE.md của CLAUDE_CONFIG_DIR vẫn chạy/nạp** → thêm `--safe-mode`
+  (đo: hook không chạy, CLAUDE.md không nạp, lượt gọi vẫn OK). Lời nhắn hệ thống chuyển sang `--system-prompt-file` (không lộ
+  trên /proc/*/cmdline, không vỡ khi > 128 KiB). `--model=<tên>`; tên model CLI chỉ gồm `[A-Za-z0-9._:/[]-]`, không bắt đầu
+  bằng `-`. Gọi thử model CLI (thêm model mới, "Gọi thử") giới hạn 12 lượt / 10 phút / tổ chức (429 `PROBE_RATE_LIMITED`).
 - **Chưa kiểm**: định dạng `agy models` KHI ĐÃ đăng nhập (bộ đọc chịu được nhiều dạng); mã model Claude trong Antigravity;
   đăng nhập Claude thật tới cuối (cần tài khoản Boss) và tệp `.credentials.json` sau đăng nhập; build Docker thật của ảnh mới
   (CI/e2e cài thật sẽ kiểm). Điều khoản: Anthropic (trang Legal and compliance của Claude Code, 02/2026) nói đăng nhập gói

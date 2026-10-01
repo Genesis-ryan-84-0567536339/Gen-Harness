@@ -6,7 +6,8 @@
 - `claude auth status --json`: {loggedIn, authMethod: "claude.ai", email, subscriptionType}; thoát 1 khi chưa đăng nhập.
 - `claude -p … --model X --output-format json --tools ""` (prompt qua stdin): JSON một dòng {type: result, is_error,
   result, usage, api_error_status}. Model ngoài bí danh → is_error + 404 "There's an issue with the selected model".
-  Thiếu `--tools ""` (công cụ chưa tắt) → lỗi, để test bắt được nếu client quên tắt công cụ.
+  Thiếu `--tools ""` (công cụ chưa tắt), `--safe-mode`/`--strict-mcp-config`, hoặc lời nhắn hệ thống nằm trên dòng
+  lệnh (phải qua `--system-prompt-file`, tệp 0600) → lỗi, để test bắt được nếu client quên.
 """
 
 import json
@@ -43,8 +44,14 @@ if args[:3] == ["auth", "status", "--json"]:
 
 if args[:1] == ["-p"]:
     prompt = sys.stdin.read()
-    model = args[args.index("--model") + 1] if "--model" in args else "sonnet"
-    tools_off = "--tools" in args and args[args.index("--tools") + 1:args.index("--tools") + 2] == [""]
+    model = next((a.split("=", 1)[1] for a in args if a.startswith("--model=")), None) or \
+        (args[args.index("--model") + 1] if "--model" in args else "sonnet")
+    tools_off = "--tools" in args and args[args.index("--tools") + 1:] == [""]
+    # Review v0.1.31: hook/CLAUDE.md của thư mục cấu hình chỉ tắt bằng --safe-mode; lời nhắn hệ thống qua tệp.
+    hardened = "--safe-mode" in args and "--strict-mcp-config" in args and "--system-prompt" not in args
+    if "--system-prompt-file" in args:
+        sp = Path(args[args.index("--system-prompt-file") + 1])
+        hardened = hardened and sp.read_text() != "" and (sp.stat().st_mode & 0o077) == 0
 
     def result(text: str, *, error: bool = False, status: int | None = None) -> None:
         print(json.dumps({"type": "result", "subtype": "success", "is_error": error, "result": text,
@@ -56,6 +63,8 @@ if args[:1] == ["-p"]:
         result("Not logged in · Please run /login", error=True, status=401)
     if not tools_off:
         result("tools were not disabled", error=True)
+    if not hardened:
+        result("settings/hooks not disabled or system prompt on argv", error=True)
     if model not in ALIASES:
         result(f"There's an issue with the selected model ({model}). It may not exist or you may not have access to "
                "it. Run --model to pick a different model.", error=True, status=404)

@@ -2,6 +2,7 @@
 
 import csv
 import io
+import re
 import uuid
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -468,6 +469,22 @@ async def delete_key(pid: uuid.UUID, kid: uuid.UUID, user: service.CurrentUser =
     return Response(status_code=204)
 
 
+# Review v0.1.31: gọi thử model CLI là lượt gọi THẬT (tốn hạn mức gói) → giới hạn số lượt / tổ chức; tên model CLI chỉ
+# gồm ký tự an toàn (không bắt đầu bằng "-" — không bao giờ bị CLI hiểu thành một cờ).
+PROBE_LIMIT, PROBE_WINDOW_S = 12, 600
+CLI_MODEL_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/\[\]-]{0,119}")
+
+
+async def _probe_budget(redis: Any, org_id: uuid.UUID) -> None:
+    k = f"gh:cli-probe:{org_id}"
+    n = int(await redis.incr(k))
+    if n == 1:
+        await redis.expire(k, PROBE_WINDOW_S)
+    if n > PROBE_LIMIT:
+        raise ApiError(429, "PROBE_RATE_LIMITED", "Gọi thử quá nhiều lần — đợi vài phút rồi thử lại",
+                       "Mỗi lần gọi thử dùng hạn mức thật của gói CLI")
+
+
 @router.post("/providers/{pid}/models", status_code=201)
 async def add_model(pid: uuid.UUID, body: ModelIn, request: Request, user: service.CurrentUser = Depends(MANAGE),
                     db: AsyncSession = DB) -> dict[str, Any]:
@@ -475,7 +492,10 @@ async def add_model(pid: uuid.UUID, body: ModelIn, request: Request, user: servi
     name = body.model_name.strip()
     exists = (await db.execute(text("SELECT 1 FROM agent.models WHERE provider_id = :p AND model_name = :m"),
                                {"p": pid, "m": name})).scalar_one_or_none()
+    if p.kind in CLI_KINDS and not CLI_MODEL_RE.fullmatch(name):
+        raise field_errors({"model_name": "Tên model chỉ gồm chữ, số và . _ - : / [ ]"})
     if p.kind in CLI_KINDS and not exists:
+        await _probe_budget(request.app.state.redis, user.org_id)
         # v0.1.31: danh sách model của CLI có thể là danh mục dự phòng → gọi thử THẬT trước khi lưu; CLI từ chối thì
         # không lưu (không bao giờ ghi một mã model mà CLI không nhận).
         await db.commit()
@@ -506,6 +526,8 @@ async def add_model(pid: uuid.UUID, body: ModelIn, request: Request, user: servi
 async def test_provider(pid: uuid.UUID, request: Request, user: service.CurrentUser = Depends(MANAGE),
                         db: AsyncSession = DB) -> dict[str, Any]:
     p = await _provider(db, user.org_id, pid)
+    if p.kind in CLI_KINDS:
+        await _probe_budget(request.app.state.redis, user.org_id)
     await db.commit()
     result: dict[str, Any] = await request.app.state.model_router.test_provider(pid)
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id, action="provider.tested",

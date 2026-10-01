@@ -257,3 +257,27 @@ async def test_claude_code_cli_missing_shows_friendly_message(owner_api, app, cl
     r = await owner_api.send("POST", "/cli/login?kind=claude_code_cli")
     st = await _wait(owner_api, r.json()["login_id"], ("failed", "done"))
     assert st["status"] == "failed" and "chưa cài Claude Code CLI" in st["message"]
+
+
+async def test_claude_code_hardening_probe_limit_and_model_name(owner_api, clis, tmp_path,
+                                                                monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Review v0.1.31: lời nhắn hệ thống qua tệp tạm 0600 (xoá ngay), tên model kiểu cờ bị chặn, gọi thử có giới hạn."""
+    import tempfile
+
+    api = owner_api
+    await _login(api, "claude_code_cli", "c/boss")
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    c = ClaudeCodeClient(clis["claude"], str(clis["claude_home"]), timeout=30)
+    got = await c.generate("sonnet", [Message("system", "bí mật hệ thống " * 8_000), Message("user", "hi")],
+                           json_mode=False, temperature=0)
+    assert got.text == "whoami:boss@example.vn|sonnet"
+    assert not list(tmp_path.glob("gh-claude-sys-*"))
+
+    p = await _provider(api, "claude_code_cli")
+    r = await api.send("POST", f"/providers/{p['id']}/models", {"model_name": "--dangerously-skip-permissions"})
+    assert r.status_code == 422
+    from gh.system_api import routes as sysroutes
+
+    codes = [(await api.send("POST", f"/providers/{p['id']}/models", {"model_name": f"m-{i}"})).status_code
+             for i in range(sysroutes.PROBE_LIMIT + 1)]
+    assert codes[:-1] == [422] * sysroutes.PROBE_LIMIT and codes[-1] == 429

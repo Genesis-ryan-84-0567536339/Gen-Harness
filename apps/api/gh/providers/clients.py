@@ -7,6 +7,7 @@ Mọi client trả `Completion` hoặc ném một trong các lỗi phân loại 
 import asyncio
 import contextlib
 import os
+import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -326,7 +327,12 @@ class ClaudeCodeClient:
     Cờ đã kiểm trên `claude --help` 2.1.286: `-p/--print`, `--model <alias|tên>`, `--output-format json`, `--tools ""`
     (tắt MỌI công cụ — model chỉ trả lời chữ, không chạy lệnh trong container), `--system-prompt`,
     `--no-session-persistence`, `--strict-mcp-config`, `--disable-slash-commands`. Prompt đưa qua stdin (không giới
-    hạn độ dài đối số dòng lệnh). JSON trả về: `result`, `is_error`, `usage.input_tokens/output_tokens`."""
+    hạn độ dài đối số dòng lệnh). JSON trả về: `result`, `is_error`, `usage.input_tokens/output_tokens`.
+
+    Review v0.1.31 (đo thật trên 2.1.285): `--tools ""` KHÔNG chặn hook trong settings.json hay CLAUDE.md của
+    CLAUDE_CONFIG_DIR/thư mục cha — thêm `--safe-mode` (tắt hook, CLAUDE.md, skill, plugin, MCP; đăng nhập vẫn chạy).
+    Lời nhắn hệ thống đưa qua `--system-prompt-file` (tệp tạm 0600): không lộ trên /proc/*/cmdline và không vỡ khi dài
+    quá 128 KiB (MAX_ARG_STRLEN). `--model=<tên>` để tên model không bao giờ bị hiểu thành một cờ."""
 
     kind = "claude_code_cli"
     MAX_PROMPT = 400_000
@@ -379,16 +385,26 @@ class ClaudeCodeClient:
                                for m in messages if m.role != "system")
         if len(prompt.encode()) > self.MAX_PROMPT:
             raise BadRequest("Prompt quá dài cho CLI")
-        args = ["-p", "--model", model, "--output-format", "json", "--no-session-persistence",
+        if len(system.encode()) > self.MAX_PROMPT:
+            raise BadRequest("Lời nhắn hệ thống quá dài cho CLI")
+        args = ["-p", f"--model={model}", "--output-format", "json", "--no-session-persistence", "--safe-mode",
                 "--strict-mcp-config", "--disable-slash-commands"]
+        sys_file: str | None = None
         if system:
-            args += ["--system-prompt", system]
-        args += ["--tools", ""]
+            fd, sys_file = tempfile.mkstemp(prefix="gh-claude-sys-", suffix=".txt")   # 0600, xoá ngay sau lượt gọi
+            with os.fdopen(fd, "wb") as fh:
+                fh.write(system.encode())
+            args += ["--system-prompt-file", sys_file]
+        args += ["--tools", ""]   # cuối cùng: `--tools <tools...>` nhận nhiều giá trị
         started = time.monotonic()
         try:
             code, out, err = await self._run(*args, stdin=prompt.encode())
         except TimeoutError as e:
             raise ProviderError(f"CLI quá {self.timeout:.0f}s") from e
+        finally:
+            if sys_file:
+                with contextlib.suppress(OSError):
+                    os.unlink(sys_file)
         text = out.decode(errors="replace").strip()
         try:
             env = orjson.loads(text.splitlines()[-1] if text else "")
