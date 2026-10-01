@@ -15,7 +15,9 @@ thật đúng tag → job `promote` nâng thành bản chính thức (latest). S
     make_latest: "false"; build-images KHÔNG gắn tag ảnh `:latest` (chạy
     trước E2E — `:latest` chỉ gắn ở promote).
   - e2e-install.yml: job `promote` có permissions.contents == write, needs
-    e2e-install + e2e-upgrade và `if` đòi e2e-install.result == 'success'; promote ghi dấu `<!-- genh:promoted_at=… -->`
+    e2e-install + e2e-upgrade + e2e-rollback và `if` đòi e2e-install.result == 'success' VÀ
+    e2e-rollback.result == 'success' (v0.1.34, F-35: job `e2e-rollback` phải tồn tại — bản hỏng cố ý chứng minh
+    genh tự quay về bản cũ, giữ dữ liệu, chặn lịch đêm thử lại); promote ghi dấu `<!-- genh:promoted_at=… -->`
     (định dạng `date -u +%Y-%m-%dT%H:%M:%SZ`, khớp selfupdate.PromotedMarker)
     trong CÙNG lệnh `gh release edit … --latest --notes-file` — thời gian chín
     24 giờ của lịch đêm tính từ dấu này; job `e2e-selfupdate` (needs promote)
@@ -52,6 +54,8 @@ INSTALLER_PATH = ".github/workflows/installer-matrix.yml"
 INSTALLER_USES = "./.github/workflows/installer-matrix.yml"
 TAG_GUARD_ID = "tag-guard"
 PROMOTE_IF_E2E = "needs.e2e-install.result == 'success'"
+ROLLBACK_JOB = "e2e-rollback"
+PROMOTE_IF_ROLLBACK = "needs.e2e-rollback.result == 'success'"
 RELEASE_PATH = ".github/workflows/release.yml"
 E2E_PATH = ".github/workflows/e2e-install.yml"
 CI_USES = "./.github/workflows/ci.yml"
@@ -240,6 +244,21 @@ def check_e2e(e2e: dict[Any, Any]) -> list[str]:
         for j in ("e2e-install", "e2e-upgrade"):
             if j not in needs:
                 errs.append(f"{E2E_PATH}: job `promote` thiếu '{j}' trong needs — có thể promote khi E2E chưa xanh.")
+        if ROLLBACK_JOB not in needs:
+            errs.append(
+                f"{E2E_PATH}: job `promote` thiếu '{ROLLBACK_JOB}' trong needs — bản hỏng cố ý chưa chứng minh rollback "
+                "mà vẫn promote."
+            )
+        if not isinstance(jobs.get(ROLLBACK_JOB), dict):
+            errs.append(
+                f"{E2E_PATH}: thiếu job `{ROLLBACK_JOB}` — bản hỏng cố ý chưa chứng minh rollback mà vẫn promote "
+                "(không còn E2E nào kiểm genh tự quay về bản cũ, giữ dữ liệu và chặn lịch đêm thử lại bản hỏng)."
+            )
+        if PROMOTE_IF_ROLLBACK not in str(promote.get("if", "")):
+            errs.append(
+                f"{E2E_PATH}: `if` của job `promote` không đòi `{PROMOTE_IF_ROLLBACK}` — bản hỏng cố ý chưa chứng minh "
+                "rollback mà vẫn promote."
+            )
         errs += check_promote_marker(promote)
 
     selfupd = jobs.get("e2e-selfupdate")
