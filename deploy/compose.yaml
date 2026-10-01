@@ -26,10 +26,18 @@ x-app-env: &app-env
   # dùng để mã hoá bytes backup độc lập với khoá master của máy.
   GH_BACKUP_KEY: ${GH_BACKUP_KEY:-}
 
+# Giới hạn log container (F-37): json-file, tối đa 3 tệp × 10 MB mỗi dịch vụ — log không giới hạn làm đầy đĩa.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   proxy:
     image: caddy:2-alpine
     restart: unless-stopped
+    logging: *logging
     ports: ["${GH_PORT:-8443}:8443"]
     environment:
       GH_SITE_ADDRESS: ${GH_SITE_ADDRESS:-localhost}
@@ -43,8 +51,9 @@ services:
   web:
     build: { context: .., dockerfile: apps/web/Dockerfile }
     restart: unless-stopped
+    logging: *logging
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
       interval: 15s
       timeout: 3s
       retries: 5
@@ -66,10 +75,12 @@ services:
     depends_on:
       db: { condition: service_healthy }
     restart: "no"
+    logging: *logging
 
   api:
     build: { context: .., dockerfile: deploy/images/api.Dockerfile }
     restart: unless-stopped
+    logging: *logging
     environment:
       <<: *app-env
       # api/worker kết nối bằng role gh_app (không phải superuser, không
@@ -96,6 +107,7 @@ services:
     build: { context: .., dockerfile: deploy/images/api.Dockerfile }
     command: ["arq", "gh.worker.WorkerSettings"]
     restart: unless-stopped
+    logging: *logging
     environment:
       <<: *app-env
       GH_DATABASE_URL: postgresql+asyncpg://gh_app:${GH_APP_DB_PASSWORD:?đặt GH_APP_DB_PASSWORD trong .env}@db:5432/${POSTGRES_DB:-gen_harness}
@@ -123,6 +135,7 @@ services:
   bridge:
     build: { context: .., dockerfile: deploy/images/bridge.Dockerfile }
     restart: unless-stopped
+    logging: *logging
     environment:
       GH_REDIS_URL: redis://redis:6379/0
       GH_BRIDGE_KEY_FILE: /run/secrets/gh_bridge_key
@@ -141,6 +154,7 @@ services:
   browser:
     build: { context: .., dockerfile: deploy/images/browser.Dockerfile }
     restart: unless-stopped
+    logging: *logging
     init: true
     environment:
       GH_REDIS_URL: redis://browser-redis:6379/0
@@ -169,6 +183,7 @@ services:
   browser-redis:
     image: redis:7-alpine
     restart: unless-stopped
+    logging: *logging
     command:
       - redis-server
       - --save
@@ -204,6 +219,7 @@ services:
     build: { context: .., dockerfile: deploy/images/browser.Dockerfile }
     command: ["python3", "-m", "ghb.egress"]
     restart: unless-stopped
+    logging: *logging
     init: true
     environment:
       GH_EGRESS_ALLOW: facebook.com,fbcdn.net,facebook.net,fbsbx.com,messenger.com
@@ -217,6 +233,7 @@ services:
   db:
     build: { context: .., dockerfile: deploy/images/db.Dockerfile }
     restart: unless-stopped
+    logging: *logging
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-gh}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?đặt POSTGRES_PASSWORD trong .env}
@@ -248,6 +265,7 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    logging: *logging
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis_data:/data
