@@ -18,8 +18,9 @@
 // khi thấy request/update.json hoặc request/restore.json — genh tự chọn việc
 // (cập nhật trước, khôi phục sau) (thư mục riêng để launchd
 // QueueDirectories chỉ chạy khi thư mục này có tệp). Container api chạy dưới uid
-// khác người dùng máy chủ nên thư mục run để 0777: trong đó chỉ có ba tệp
-// trạng thái nhỏ, không có bí mật.
+// khác người dùng máy chủ nên thư mục run để 0777: trong đó chỉ có vài tệp
+// trạng thái nhỏ, không có bí mật — và vì ai cũng ghi được, genh không tin tệp
+// nào ở đây khi đọc (readStateFile: không theo symlink, giới hạn kích thước).
 package hostlink
 
 import (
@@ -217,14 +218,26 @@ func Finish(installDir, state, to, message string) error {
 	return writeJSON(filepath.Join(Dir(installDir), StatusFile), st)
 }
 
-// SnapshotStatus đọc NGUYÊN BYTE update-status.json hiện có (ok=false nếu chưa
-// có) — để RestoreStatusSnapshot trả hộp thư về đúng như cũ.
+// SnapshotStatus chụp update-status.json hiện có (ok=false nếu chưa có, hoặc
+// tệp không an toàn/hỏng) — để RestoreStatusSnapshot trả hộp thư về như cũ.
+// KHÔNG chép nguyên byte: run/ 0777 (container api ghi được) nên tệp có thể là
+// symlink/hard link tới bí mật của người chạy genh hoặc /dev/zero — chỉ đọc tệp
+// thường nhỏ (readStateFile), parse thành Status rồi ghi lại đúng các trường
+// đó (cùng định dạng writeJSON — tệp genh tự ghi thì trùng từng byte).
 func SnapshotStatus(installDir string) (raw []byte, ok bool) {
-	b, err := os.ReadFile(filepath.Join(Dir(installDir), StatusFile))
+	b, err := readStateFile(filepath.Join(Dir(installDir), StatusFile), false)
 	if err != nil {
 		return nil, false
 	}
-	return b, true
+	var st Status
+	if err := json.Unmarshal(b, &st); err != nil {
+		return nil, false
+	}
+	out, err := json.MarshalIndent(st, "", "  ")
+	if err != nil {
+		return nil, false
+	}
+	return append(out, '\n'), true
 }
 
 // RestoreStatusSnapshot ghi lại update-status.json đúng từng byte như lúc
@@ -244,9 +257,10 @@ func RestoreStatusSnapshot(installDir string, raw []byte, ok bool) error {
 }
 
 // ReadStatus đọc update-status.json (Status rỗng nếu chưa có).
+// Chỉ đọc tệp thường nhỏ (readStateFile) — xem SnapshotStatus.
 func ReadStatus(installDir string) (Status, error) {
 	var s Status
-	b, err := os.ReadFile(filepath.Join(Dir(installDir), StatusFile))
+	b, err := readStateFile(filepath.Join(Dir(installDir), StatusFile), false)
 	if err != nil {
 		return s, err
 	}

@@ -7,8 +7,9 @@ import (
 	"path/filepath"
 )
 
-// UpdateBlockedFile ghi lại bản genh đã lỗi ở lần cập nhật trước VÀ đã tự quay
-// về bản cũ sau khi đụng CSDL (F-33) — lịch đêm (`genh update --yes`, không
+// UpdateBlockedFile ghi lại bản genh đã lỗi ở lần cập nhật trước, ở bước
+// migrate trở đi (có hoặc không đụng CSDL — F-33), và genh đã tự quay về bản cũ
+// (hoặc thử mà thất bại: rollback_failed) — lịch đêm (`genh update --yes`, không
 // --if-requested) đọc tệp này để không thử lại đúng bản đó mỗi đêm. Nút "Cập
 // nhật ngay" và gõ tay không bị chặn; cập nhật thành công thì genh xoá tệp.
 const UpdateBlockedFile = "update-blocked.json"
@@ -18,7 +19,14 @@ type UpdateBlocked struct {
 	Version   string `json:"version"`
 	BlockedAt string `json:"blocked_at"`
 	Code      string `json:"code,omitempty"`
+	// BackupKey: bản sao lưu CẦN khôi phục khi xử lý tay — chỉ ghi khi CSDL đã
+	// bị đụng (DBTouched). CSDL chưa bị đụng thì để trống: khôi phục bản sao lưu
+	// sẽ xoá mọi ghi chép của worker/bridge/api từ lúc sao lưu.
 	BackupKey string `json:"backup_key,omitempty"`
+	// DBTouched: bản lỗi đã chạy migration (CSDL có thể đã đổi). Tệp cũ không
+	// có khoá → false; khi đó có BackupKey thì coi như đã đụng (tệp cũ chỉ ghi
+	// sau khi đụng CSDL).
+	DBTouched bool   `json:"db_touched"`
 	Message   string `json:"message,omitempty"`
 	// RollbackFailed: tự quay về bản cũ CŨNG thất bại (khôi phục CSDL hoặc khởi
 	// động lại lỗi) — máy cần xử lý tay. Không có khoá (tệp cũ) = quay về ổn.
@@ -41,9 +49,14 @@ func WriteUpdateBlocked(installDir string, b UpdateBlocked) error {
 }
 
 // ReadUpdateBlocked đọc update-blocked.json — không có tệp → (rỗng, false, nil).
+//
+// Tệp nằm trong run/ (0777, container api ghi được) và quyết định lịch đêm có
+// cài một bản hay không (kể cả bản vá bảo mật) — chỉ tin tệp thường, không theo
+// symlink, do CHÍNH uid đang chạy genh ghi (readStateFile requireOwner). Tệp
+// không đạt → lỗi, coi như không bị chặn.
 func ReadUpdateBlocked(installDir string) (UpdateBlocked, bool, error) {
 	var b UpdateBlocked
-	raw, err := os.ReadFile(updateBlockedPath(installDir))
+	raw, err := readStateFile(updateBlockedPath(installDir), true)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return b, false, nil

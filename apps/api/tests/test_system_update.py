@@ -179,7 +179,13 @@ async def test_blocked_version_from_update_blocked_json(owner_api: Api, link: Pa
     assert (await owner_api.get("/system/update")).json()["blocked_version"] is None
     (link / "update-blocked.json").write_text(json.dumps({"version": "v0.1.17", "blocked_at": "2026-09-30T03:00:00Z",
                                                           "code": "GH-E944", "rollback_failed": True}))
-    assert (await owner_api.get("/system/update")).json()["blocked_version"] == "v0.1.17"
+    body = (await owner_api.get("/system/update")).json()
+    assert body["blocked_version"] == "v0.1.17"
+    assert body["blocked_rollback_failed"] is True
+    (link / "update-blocked.json").write_text(json.dumps({"version": "v0.1.17", "blocked_at": "2026-09-30T03:00:00Z"}))
+    assert (await owner_api.get("/system/update")).json()["blocked_rollback_failed"] is False
     for raw in ("{hỏng", json.dumps({"version": 17}), json.dumps({"version": ""}), json.dumps(["v0.1.17"])):
         (link / "update-blocked.json").write_text(raw)
-        assert (await owner_api.get("/system/update")).json()["blocked_version"] is None, raw
+        body = (await owner_api.get("/system/update")).json()
+        assert body["blocked_version"] is None, raw
+        assert body["blocked_rollback_failed"] is None, raw

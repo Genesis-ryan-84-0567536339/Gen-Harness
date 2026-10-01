@@ -79,6 +79,60 @@ describe('updateView', () => {
     expect(v.kicker).toMatch(/đã tự quay về bản đang dùng/);
     expect(v.body).toMatch(/lịch đêm sẽ không tự cài lại/);
   });
+  it('quay về CŨNG thất bại: không nói "có tên bản sao lưu cần khôi phục" (CSDL có thể chưa bị đụng)', () => {
+    const v = failedAt('ready lỗi — CSDL chưa bị đụng, NHƯNG khởi động lại bằng bản cũ chưa trọn — chạy tay docker compose up -d --remove-orphans. (GH-E945)');
+    if (v.kind !== 'failed') throw new Error(v.kind);
+    expect(v.kicker).toMatch(/Cần xử lý tay/);
+    expect(v.body).not.toMatch(/bản sao lưu/);
+    expect(v.body).toMatch(/Chi tiết kỹ thuật/);
+  });
+  it('rollback_failed có cấu trúc (api) thắng chữ trong thông điệp — genh đổi câu chữ vẫn báo đúng', () => {
+    const msg = 'ready lỗi — một câu chữ mới hoàn toàn (GH-E945)';
+    const v = failedAt(msg, { to: 'v0.1.17', blocked_version: 'v0.1.17', blocked_rollback_failed: true });
+    if (v.kind !== 'failed') throw new Error(v.kind);
+    expect(v.tone).toBe('bad');
+    expect(v.kicker).toMatch(/Cần xử lý tay/);
+    // Bị chặn bản KHÁC: không áp cờ của bản đó.
+    const other = failedAt(msg, { to: 'v0.1.17', blocked_version: 'v0.1.15', blocked_rollback_failed: true });
+    expect(other.kind === 'failed' && other.kicker).not.toMatch(/Cần xử lý tay/);
+  });
+  it('máy chủ chưa nhận yêu cầu từ nút bấm (can_request=false): không nhắc "bấm Thử lại", hiện lệnh chạy tay', () => {
+    for (const msg of [
+      'Ổ đĩa không đủ chỗ — DỪNG LẠI, chưa đụng gì (GH-E948)',
+      'Tải bản mới thất bại — CHƯA đụng gì (GH-E941)',
+      'ready lỗi — đã tự quay về bản cũ (khôi phục bản sao lưu) (GH-E945)',
+      'Lỗi lạ (GH-E942)',
+    ]) {
+      const v = failedAt(msg, { can_request: false, updater: null });
+      if (v.kind !== 'failed') throw new Error(v.kind);
+      expect(v.body).not.toMatch(/Thử lại/);
+      expect(v.body).toMatch(/chạy lệnh bên dưới trên máy chủ/i);
+      expect(v.showCommand).toBe(true);
+    }
+    const withButton = failedAt('Tải bản mới thất bại — CHƯA đụng gì (GH-E941)');
+    expect(withButton.kind === 'failed' && withButton.showCommand).toBe(false);
+    expect(withButton.kind === 'failed' && withButton.body).toMatch(/bấm Thử lại/);
+  });
+  it('GH-E946 sau khi cập nhật xong: bản mới ĐANG chạy — không nói "đã tự quay về"', () => {
+    const v = failedAt('Cập nhật xong, dịch vụ đã sẵn sàng, NHƯNG chép dữ liệu đã di trú vào volume gh_objects thất bại — Dữ liệu THÔ vẫn còn nguyên (GH-E946)');
+    if (v.kind !== 'failed') throw new Error(v.kind);
+    expect(v.tone).toBe('warn');
+    expect(v.kicker).toMatch(/Bản mới đã chạy/);
+    expect(v.kicker).not.toMatch(/quay về/);
+  });
+  it('GH-E900/GH-E901 và mã chưa có lời dẫn riêng: không nói "đã tự quay về — dữ liệu giữ nguyên"', () => {
+    const e901 = failedAt('Không đọc được compose.yaml hiện tại — DỪNG LẠI, chưa đụng gì (GH-E901)');
+    expect(e901.kind === 'failed' && e901.kicker).toBe('Chưa đụng gì — bản đang dùng vẫn chạy bình thường');
+    const e900 = failedAt('Chưa cài đặt — thiếu bí mật (GH-E900)');
+    expect(e900.kind === 'failed' && e900.kicker).toMatch(/Chưa đụng gì/);
+    const other = failedAt('Lỗi lạ (GH-E942)');
+    if (other.kind !== 'failed') throw new Error(other.kind);
+    expect(other.kicker).toBe('Cập nhật chưa xong — xem Chi tiết kỹ thuật');
+    expect(other.tone).toBe('warn');
+    // E947 đã tự quay về: vẫn báo quay về.
+    const e947 = failedAt('Đồng bộ compose.yaml lỗi — CSDL chưa bị đụng, đã tự quay về bản cũ và khởi động lại (GH-E947)');
+    expect(e947.kind === 'failed' && e947.kicker).toMatch(/đã tự quay về bản đang dùng/);
+  });
   it('"Có bản mới" mà bản đó đang bị chặn: không hứa "Tự cài đêm", nói rõ phải bấm để thử lại', () => {
     const v = updateView({ ...base, auto_update_enabled: true, published_at: '2026-09-20T08:00:00Z', blocked_version: 'v0.1.17' }, { waitingFor: null, offline: false, now: NOW });
     if (v.kind !== 'available') throw new Error(v.kind);
@@ -171,6 +225,23 @@ describe('<UpdateCard>', () => {
     await waitFor(() => expect(posted).toBe(true));
     expect(await screen.findByText('Đang cập nhật lên v0.1.17')).toBeInTheDocument();
     expect(screen.getByText('Nhận yêu cầu')).toBeInTheDocument();
+  });
+
+  it('cập nhật lỗi + máy chủ chưa nhận yêu cầu từ nút bấm: không có nút Thử lại, hiện lệnh chạy tay', async () => {
+    const failed = {
+      ...base, can_request: false, updater: null, state: 'failed', to: 'v0.1.17',
+      message: 'Tải bản mới thất bại — CHƯA đụng gì (GH-E941)', finished_at: new Date().toISOString(),
+    };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(failed), { status: 200, headers: { 'Content-Type': 'application/json' } })));
+    render(
+      <QueryClientProvider client={queryClient}>
+        <UpdateCard />
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByText('Cập nhật lên v0.1.17 chưa thành công')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Thử lại/ })).toBeNull();
+    expect(screen.getByText('~/.gen-harness/bin/genh update')).toBeInTheDocument();
+    expect(screen.getByText(/chạy lệnh bên dưới trên máy chủ/)).toBeInTheDocument();
   });
 
   it('không có quyền (403) thì không hiện gì', async () => {

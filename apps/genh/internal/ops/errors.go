@@ -35,7 +35,7 @@ const (
 	ErrCodeUpdateObjectsMigrateFailed = "GH-E946" // di trú /tmp/gh-objects (bản cài cũ) -> volume gh_objects thất bại (xem migrateobjects.go)
 	ErrCodeUpdateComposeSyncFailed    = "GH-E947" // đồng bộ compose.yaml với bản genh mới thất bại SAU KHI backup đã xong — chưa đụng migrate/restart
 	ErrCodeUpdateDiskLow              = "GH-E948" // ổ đĩa không đủ chỗ (sau khi đã dọn ảnh cũ) — dừng TRƯỚC khi tải, chưa đụng gì
-	ErrCodeUpdateBlocked              = "GH-E949" // bản này đã rollback (đụng CSDL) ở lần trước — lịch đêm không thử lại; chỉ dùng cho thông điệp/log, không phải lỗi thoát
+	ErrCodeUpdateBlocked              = "GH-E949" // bản này đã lỗi từ bước migrate trở đi ở lần trước (có hoặc không đụng CSDL) — lịch đêm không thử lại; chỉ dùng cho thông điệp/log, không phải lỗi thoát
 
 	// 95x — genh backup / genh restore.
 	ErrCodeBackupFailed  = "GH-E950"

@@ -2,6 +2,9 @@ package main
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -227,5 +230,83 @@ func TestConsoleUpdateMessage(t *testing.T) {
 	}
 	if got := consoleUpdateMessage(errors.New("lạ")); got != "lạ" {
 		t.Errorf("lỗi thường: %q", got)
+	}
+}
+
+// Review v0.1.34: quay về bản cũ thất bại mà CSDL CHƯA bị đụng — KHÔNG được
+// bảo khôi phục bản sao lưu (xoá mất ghi chép sau lúc sao lưu), chỉ up -d.
+func TestBlockedLine_RollbackFailed_DBNotTouched_NoRestoreAdvice(t *testing.T) {
+	b := hostlink.UpdateBlocked{Version: "v0.1.34", RollbackFailed: true, DBTouched: false}
+	for _, m := range []string{blockedLine("v0.1.34", b), blockedConsoleMessage("v0.1.34", b)} {
+		if strings.Contains(m, "khôi phục bản sao lưu backups") || !strings.Contains(m, "KHÔNG khôi phục bản sao lưu") {
+			t.Errorf("không được khuyên khôi phục: %q", m)
+		}
+		if !strings.Contains(m, "docker compose up -d --remove-orphans") || !strings.Contains(m, "cần xử lý tay") {
+			t.Errorf("phải hướng dẫn up -d: %q", m)
+		}
+	}
+	// Đã đụng CSDL: vẫn chỉ đúng bản sao lưu cần khôi phục.
+	touched := hostlink.UpdateBlocked{Version: "v0.1.34", RollbackFailed: true, DBTouched: true, BackupKey: "backups/k.enc"}
+	if l := blockedLine("v0.1.34", touched); !strings.Contains(l, "khôi phục bản sao lưu backups/k.enc") {
+		t.Errorf("đã đụng CSDL phải chỉ bản sao lưu: %q", l)
+	}
+}
+
+// Review v0.1.34: update-status.json là symlink tới tệp bí mật (container api
+// cài vào run/) + lịch đêm đi nhánh bản bị chặn: bí mật không được lọt vào run/.
+func TestSkipBlockedUpdate_SymlinkedStatus_DoesNotLeakSecret(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink kiểu Unix")
+	}
+	dir := t.TempDir()
+	if err := hostlink.EnsureDir(dir); err != nil {
+		t.Fatal(err)
+	}
+	secret := filepath.Join(t.TempDir(), "id_ed25519")
+	if err := os.WriteFile(secret, []byte(`{"state":"failed","message":"BI-MAT-KHOA-SSH"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secret, filepath.Join(hostlink.Dir(dir), hostlink.StatusFile)); err != nil {
+		t.Fatal(err)
+	}
+	// Đúng thứ tự runUpdate: chụp → Start → nhánh bị chặn.
+	snap, had := hostlink.SnapshotStatus(dir)
+	_ = hostlink.Start(dir, "v0.1.34")
+	skipBlockedUpdate(&strings.Builder{}, dir, "v0.1.34", hostlink.UpdateBlocked{Version: "v0.1.34"}, snap, had, false)
+	entries, _ := os.ReadDir(hostlink.Dir(dir))
+	for _, e := range entries {
+		if b, err := os.ReadFile(filepath.Join(hostlink.Dir(dir), e.Name())); err == nil && strings.Contains(string(b), "BI-MAT") {
+			t.Fatalf("bí mật lọt vào run/%s", e.Name())
+		}
+	}
+	if b, _ := os.ReadFile(secret); !strings.Contains(string(b), "BI-MAT") {
+		t.Fatal("tệp bí mật bị ghi đè")
+	}
+}
+
+// Review v0.1.34: lịch đêm nuốt yêu cầu "Cập nhật ngay" của Owner → tiến trình
+// con (re-exec) phải nhận --if-requested để không bị chặn/không đợi chín.
+func TestChildUpdateArgs_PassesConsumedRequest(t *testing.T) {
+	args := []string{"--yes", "--quiet"}
+	got := childUpdateArgs(args, false, true)
+	if strings.Join(got, " ") != "--yes --quiet --if-requested" {
+		t.Errorf("phải thêm --if-requested: %v", got)
+	}
+	if strings.Join(args, " ") != "--yes --quiet" {
+		t.Errorf("không được sửa args gốc: %v", args)
+	}
+	if got := childUpdateArgs(args, false, false); strings.Join(got, " ") != "--yes --quiet" {
+		t.Errorf("không có yêu cầu thì giữ nguyên: %v", got)
+	}
+	if got := childUpdateArgs([]string{"--if-requested"}, true, true); len(got) != 1 {
+		t.Errorf("đã có --if-requested thì không thêm lần nữa: %v", got)
+	}
+	// Có yêu cầu (dù lịch đêm --yes) → không còn là "lịch đêm": bản bị chặn vẫn chạy.
+	if skip, _ := decideServiceUpdate(serviceUpdateInput{Scheduled: false, Version: "v0.1.34", BlockedVersion: "v0.1.34"}); skip {
+		t.Error("có yêu cầu thì không bị chặn")
+	}
+	parsed, err := parseUpdateFlags(got)
+	if err != nil || !parsed.ifRequested || !parsed.yes {
+		t.Errorf("args con phải parse được --yes --if-requested: %+v %v", parsed, err)
 	}
 }

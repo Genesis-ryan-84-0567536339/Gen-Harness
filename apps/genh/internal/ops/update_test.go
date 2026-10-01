@@ -58,6 +58,7 @@ func exactArgs(want ...string) func(dockercli.Cmd) bool {
 
 var (
 	matchAlembicCurrent = exactArgs("alembic", "current")
+	matchAlembicHeads   = exactArgs("alembic", "heads")
 	matchBackupRun      = exactArgs("gh.backup", "run")
 	matchRestore        = exactArgs("gh.backup", "restore")
 	matchPull           = exactArgs("pull")
@@ -94,6 +95,7 @@ func lastCallIndex(fr *fake.Runner, match func(dockercli.Cmd) bool) int {
 func updateFakeRunner(over ...fake.Response) *fake.Runner {
 	base := []fake.Response{
 		{Match: matchAlembicCurrent, Output: []byte("INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.\n0042_x (head)\n")},
+		{Match: matchAlembicHeads, Output: []byte("0042_x (head)\n")},
 		{Match: matchBackupRun, Lines: []string{updateTestBackupLine}},
 		{Match: matchPull, Output: []byte("")},
 		{Match: matchMigrate, Lines: []string{}},
@@ -239,7 +241,7 @@ func TestRunUpdate_ReadyNeverHealthy_RestoresWithOldImage_WritesBlocked(t *testi
 		t.Errorf("restore phải chạy bằng container tạm `run --rm --no-deps -T api`: %+v", fr.Calls)
 	}
 	b, ok, _ := hostlink.ReadUpdateBlocked(env.InstallDir)
-	if !ok || b.Version != testVersion || b.Code != ErrCodeUpdateNotReady || b.BackupKey != updateTestBackupKey {
+	if !ok || b.Version != testVersion || b.Code != ErrCodeUpdateNotReady || b.BackupKey != updateTestBackupKey || !b.DBTouched {
 		t.Errorf("update-blocked.json sai: ok=%v %+v", ok, b)
 	}
 }
@@ -1062,6 +1064,33 @@ func TestPendingMigrationFromCurrent(t *testing.T) {
 	}
 }
 
+// Review v0.1.34: bản mới thêm head RIÊNG (nhánh/gốc mới) — `alembic current`
+// vẫn in "(head)" cho nhánh cũ; phải so với `alembic heads` của ảnh mới.
+func TestNeedsMigration_ComparesWithHeads(t *testing.T) {
+	cases := []struct {
+		name     string
+		current  string
+		heads    string
+		headsErr error
+		want     bool
+	}{
+		{"khớp", "0042_x (head)\n", "0042_x (head)\n", nil, false},
+		{"bản mới thêm head riêng", "0042_x (head)\n", "0042_x (head)\n0001_new (head)\n", nil, true},
+		{"nhiều head, khớp không theo thứ tự", "0042_a (head)\n0042_b (head)\n", "INFO  [alembic] x\n0042_b (head)\n0042_a (head)\n", nil, false},
+		{"heads lỗi → theo riêng current", "0042_x (head)\n", "", errors.New("lỗi"), false},
+		{"current chưa ở head → khỏi hỏi heads", "0041_x\n", "0042_x (head)\n", nil, true},
+	}
+	for _, c := range cases {
+		fr := &fake.Runner{Responses: []fake.Response{
+			{Match: matchAlembicCurrent, Output: []byte(c.current)},
+			{Match: matchAlembicHeads, Output: []byte(c.heads), Err: c.headsErr},
+		}}
+		if got := needsMigration(context.Background(), fr, "/x/compose.yaml", nil, "/x"); got != c.want {
+			t.Errorf("%s: needsMigration = %v, muốn %v", c.name, got, c.want)
+		}
+	}
+}
+
 func TestPullWithRetry_RespectsContextDuringBackoff(t *testing.T) {
 	fr := &fake.Runner{Responses: []fake.Response{{Match: matchPull, Err: errors.New("net down")}}}
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
@@ -1180,6 +1209,9 @@ func TestRunUpdate_ReadyFails_NoPendingMigration_NoRestore_StillBlocked(t *testi
 	if !ok || b.Version != testVersion || b.Code != ErrCodeUpdateNotReady || b.RollbackFailed {
 		t.Errorf("bản hỏng vẫn phải chặn lịch đêm: ok=%v %+v", ok, b)
 	}
+	if b.BackupKey != "" || b.DBTouched {
+		t.Errorf("CSDL chưa bị đụng: KHÔNG ghi bản sao lưu cần khôi phục (khôi phục = mất dữ liệu): %+v", b)
+	}
 	if !strings.Contains(opErr.What, "CSDL chưa bị đụng") || !strings.Contains(opErr.Next, "lịch đêm sẽ không tự thử lại") {
 		t.Errorf("What/Next sai: %q / %q", opErr.What, opErr.Next)
 	}
@@ -1188,6 +1220,61 @@ func TestRunUpdate_ReadyFails_NoPendingMigration_NoRestore_StillBlocked(t *testi
 	}
 	if hostlink.UpdateInProgressExists(env.InstallDir) {
 		t.Error("đã trả compose.yaml về bản cũ và chạy lại được thì phải xoá update-inprogress.json")
+	}
+}
+
+// Review v0.1.34: lỗi sau migrate, KHÔNG có migration chờ, và khởi động lại bằng
+// bản cũ CŨNG lỗi — update-blocked.json không được mang bản sao lưu (hướng dẫn
+// xử lý tay chỉ là up -d, không khôi phục), nhưng phải rollback_failed.
+func TestRunUpdate_ReadyFails_NoPendingMigration_RestartAlsoFails_NoBackupKey(t *testing.T) {
+	env, _ := realComposeUpdateEnv(t, updateTestComposeYAML)
+	_, port := listenReadyServer(t, false)
+	env.Port = port
+
+	fr := updateFakeRunner(fake.Response{Match: matchFullUp, ErrSeq: []error{nil, errors.New("không khởi động được")}})
+	err := RunUpdate(context.Background(), env, UpdateOptions{Version: testVersion}, fastUpdateDeps(fr), &strings.Builder{})
+	opErr := asOpError(t, err)
+	if opErr.Code != ErrCodeUpdateRolledBack {
+		t.Errorf("Code = %q, muốn %q", opErr.Code, ErrCodeUpdateRolledBack)
+	}
+	if countCalls(fr, matchRestore) != 0 {
+		t.Error("CSDL chưa bị đụng thì không khôi phục")
+	}
+	b, ok, _ := hostlink.ReadUpdateBlocked(env.InstallDir)
+	if !ok || !b.RollbackFailed || b.DBTouched || b.BackupKey != "" {
+		t.Errorf("muốn rollback_failed=true, db_touched=false, không backup_key: ok=%v %+v", ok, b)
+	}
+	if strings.Contains(opErr.Next, "gh.backup restore") {
+		t.Errorf("Next không được bảo khôi phục bản sao lưu: %q", opErr.Next)
+	}
+	if !hostlink.UpdateInProgressExists(env.InstallDir) {
+		t.Error("quay về chưa trọn: phải GIỮ update-inprogress.json")
+	}
+}
+
+// Review v0.1.34: nhánh c) (đã đụng CSDL) quay về ổn + compose.yaml đã trả về
+// bản cũ → xoá update-inprogress.json như nhánh b).
+func TestRunUpdate_ReadyFails_PendingMigration_RolledBack_ClearsInProgress(t *testing.T) {
+	env, composePath := realComposeUpdateEnv(t, updateTestComposeYAML)
+	_, port := listenReadyServer(t, false)
+	env.Port = port
+
+	fr := updateFakeRunner(pendingMigration)
+	err := RunUpdate(context.Background(), env, UpdateOptions{Version: testVersion}, fastUpdateDeps(fr), &strings.Builder{})
+	if asOpError(t, err).Code != ErrCodeUpdateRolledBack {
+		t.Fatalf("muốn %s, được %v", ErrCodeUpdateRolledBack, err)
+	}
+	if countCalls(fr, matchRestore) != 1 {
+		t.Error("đã đụng CSDL thì phải khôi phục")
+	}
+	if after, _ := os.ReadFile(composePath); string(after) != updateTestComposeYAML {
+		t.Error("compose.yaml phải về bản cũ")
+	}
+	if hostlink.UpdateInProgressExists(env.InstallDir) {
+		t.Error("quay về ổn + compose.yaml đã về bản cũ thì phải xoá update-inprogress.json")
+	}
+	if b, ok, _ := hostlink.ReadUpdateBlocked(env.InstallDir); !ok || !b.DBTouched || b.BackupKey != updateTestBackupKey {
+		t.Errorf("đã đụng CSDL: phải ghi db_touched + backup_key: ok=%v %+v", ok, b)
 	}
 }
 

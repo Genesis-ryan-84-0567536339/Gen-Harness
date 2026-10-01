@@ -135,8 +135,9 @@ Lệnh vận hành (cờ chung mọi lệnh dưới đây: --port N, --install-d
                                           --yes hoặc "Cập nhật ngay" trong Console thì cài
                                           luôn) · --quiet: chỉ in dòng quan trọng ·
                                           --no-self-update: chỉ nâng cấp dịch vụ, không đụng
-                                          binary genh — bỏ qua nếu dịch vụ đã khớp bản genh
-                                          này (không sao lưu, không tải)
+                                          binary genh. Mọi cách chạy: dịch vụ đã khớp bản genh
+                                          này thì bỏ qua (không sao lưu, không tải) — dịch vụ
+                                          đang dừng/lỗi thì dùng genh start
   genh auto-update enable|disable|status tự chạy "genh update --yes --quiet" mỗi đêm ~03:00
                                           (systemd timer/crontab, LaunchAgent, hoặc Task
                                           Scheduler tuỳ hệ điều hành) — mặc định đã BẬT sau
@@ -281,7 +282,7 @@ func parseUpdateFlags(args []string) (updateFlags, error) {
 	channel := fs.String("channel", "stable", "kênh cập nhật: stable hoặc beta")
 	yes := fs.Bool("yes", false, "chạy không tương tác — dùng cho lịch tự động (genh auto-update); KHÔNG hỏi gì kể cả khi có TTY, và (không kèm --if-requested) chỉ tự cài bản genh đã là bản chính thức ≥ 24 giờ (thời gian chín) — muốn cài ngay thì bỏ --yes")
 	quiet := fs.Bool("quiet", false, "chỉ in các dòng quan trọng (có bản mới/lỗi/xong) — bỏ log tiến độ từng bước")
-	noSelfUpdate := fs.Bool("no-self-update", false, "bỏ qua tự cập nhật BINARY genh — chỉ chạy phần nâng cấp dịch vụ (backup/pull/migrate/restart) bằng bản genh hiện tại; bỏ qua nếu dịch vụ đã khớp bản genh này (không sao lưu, không tải)")
+	noSelfUpdate := fs.Bool("no-self-update", false, "bỏ qua tự cập nhật BINARY genh — chỉ chạy phần nâng cấp dịch vụ (backup/pull/migrate/restart) bằng bản genh hiện tại (như mọi cách chạy genh update: dịch vụ đã khớp bản genh này thì bỏ qua — dịch vụ dừng/lỗi thì dùng genh start)")
 	selfUpdated := fs.Bool("self-updated", false, "cờ NỘI BỘ: tiến trình này vừa được re-exec ngay sau khi tự thay binary — KHÔNG dùng tay, chỉ genh tự đặt cho chính nó")
 	ifRequested := fs.Bool("if-requested", false, "chỉ cập nhật nếu Owner vừa bấm \"Cập nhật ngay\" trong Console (watcher trên máy chủ gọi) — không có yêu cầu thì thoát ngay")
 	if err := fs.Parse(args); err != nil {
@@ -305,7 +306,6 @@ func runUpdate(args []string) int {
 	// chín 24 giờ (selfUpdateMinAge) — xem lý do giữ --yes làm cờ kích hoạt ở
 	// đó. Bản chưa đủ chín: không thay binary, phần dịch vụ vẫn chạy như khi
 	// đã mới nhất, dòng kết nói rõ bản mới đang đợi (updateDoneLine).
-	minAge := selfUpdateMinAge(f.yes, f.ifRequested)
 
 	env, ok := resolveOpsEnv(f.port, f.installDir)
 	if !ok {
@@ -317,16 +317,22 @@ func runUpdate(args []string) int {
 	// watcher không kích lặp — rồi báo "running" cho Console hiện tiến trình.
 	// Chụp nguyên hộp thư TRƯỚC khi báo "running": lịch đêm gặp bản bị chặn thì
 	// trả về đúng như cũ (skipBlockedUpdate).
+	//
+	// Lịch đêm chạy ĐÚNG lúc Owner vừa bấm "Cập nhật ngay"/"Thử lại" (watcher
+	// chưa kịp gọi): lịch đêm đã nuốt yêu cầu thì phải làm như --if-requested
+	// (không bị chặn, không đợi chín) — nếu không yêu cầu mất không dấu vết.
 	var statusSnap []byte
-	hadStatus := false
+	hadStatus, hadRequest := false, false
 	if !f.selfUpdated {
 		if f.ifRequested && !hostlink.HasRequest(env.InstallDir) {
 			return 0
 		}
 		statusSnap, hadStatus = hostlink.SnapshotStatus(env.InstallDir)
-		hostlink.ConsumeRequest(env.InstallDir)
+		hadRequest = hostlink.ConsumeRequest(env.InstallDir)
 		_ = hostlink.Start(env.InstallDir, version)
 	}
+	requested := f.ifRequested || hadRequest
+	minAge := selfUpdateMinAge(f.yes, requested)
 
 	// Tự cập nhật BINARY genh TRƯỚC KHI đụng gì tới dịch vụ — xem
 	// internal/selfupdate. Bỏ qua nếu: --no-self-update, HOẶC tiến trình
@@ -334,7 +340,7 @@ func runUpdate(args []string) int {
 	// vô hạn tự-tải-tự-re-exec nếu có gì đó luôn báo "mới hơn" sai).
 	deferred := false
 	if !f.noSelfUpdate && !f.selfUpdated {
-		code, ok, d := trySelfUpdateAndReExec(args, f.quiet, minAge)
+		code, ok, d := trySelfUpdateAndReExec(childUpdateArgs(args, f.ifRequested, requested), f.quiet, minAge)
 		deferred = d
 		if ok {
 			// Bản mới (tiến trình con) tự ghi kết quả; con chết giữa chừng thì
@@ -352,7 +358,7 @@ func runUpdate(args []string) int {
 	blocked, _, _ := hostlink.ReadUpdateBlocked(env.InstallDir)
 	inSync, _ := ops.UpdateNeeded(env) // lỗi → false: để RunUpdate tự báo lỗi đúng khuôn
 	switch skip, kind := decideServiceUpdate(serviceUpdateInput{
-		Scheduled:      f.yes && !f.ifRequested,
+		Scheduled:      f.yes && !requested,
 		SelfUpdated:    f.selfUpdated,
 		Version:        version,
 		InSync:         inSync,
@@ -394,6 +400,16 @@ func runUpdate(args []string) int {
 	return 0
 }
 
+// childUpdateArgs: args cho tiến trình re-exec sau khi tự thay binary. Tiến
+// trình ngoài đã nuốt yêu cầu Console (lịch đêm trùng lúc Owner bấm) thì con
+// không còn thấy yêu cầu — thêm --if-requested để con cũng không bị chặn.
+func childUpdateArgs(args []string, ifRequested, requested bool) []string {
+	if requested && !ifRequested {
+		return append(append([]string{}, args...), "--if-requested")
+	}
+	return args
+}
+
 // serviceUpdateInput là dữ kiện để quyết định có chạy ops.RunUpdate không.
 type serviceUpdateInput struct {
 	Scheduled      bool   // lịch đêm: --yes không kèm --if-requested
@@ -428,12 +444,18 @@ func blockedLine(v string, b hostlink.UpdateBlocked) string {
 	return "genh: bản " + v + " đã lỗi ở lần cập nhật trước và đã tự quay về bản cũ — lịch đêm không tự thử lại bản này. Có bản mới hơn sẽ tự cài; muốn thử lại ngay: bấm \"Cập nhật ngay\" trong Console hoặc chạy genh update."
 }
 
-// backupHint: " (khôi phục bản sao lưu <key> rồi docker compose up -d --remove-orphans)".
+// backupHint: cách xử lý tay khi quay về bản cũ thất bại. CSDL đã bị đụng (có
+// BackupKey — genh chỉ ghi khoá khi đó) → khôi phục bản sao lưu rồi up -d. CSDL
+// CHƯA bị đụng → TUYỆT ĐỐI không khôi phục (worker/bridge/api vẫn ghi sau lúc
+// sao lưu — khôi phục sẽ xoá mất), chỉ up -d.
 func backupHint(b hostlink.UpdateBlocked) string {
-	if b.BackupKey == "" {
-		return " (xem logs/auto-update.log)"
+	if b.BackupKey != "" {
+		return " (khôi phục bản sao lưu " + b.BackupKey + " rồi chạy docker compose up -d --remove-orphans — xem logs/auto-update.log)"
 	}
-	return " (khôi phục bản sao lưu " + b.BackupKey + " rồi chạy docker compose up -d --remove-orphans — xem logs/auto-update.log)"
+	if !b.DBTouched {
+		return " (CSDL chưa bị đụng — KHÔNG khôi phục bản sao lưu, chỉ chạy docker compose up -d --remove-orphans — xem logs/auto-update.log)"
+	}
+	return " (xem logs/auto-update.log)"
 }
 
 // blockedConsoleMessage: thông điệp hộp thư Console khi tiến trình re-exec (vừa
@@ -486,7 +508,7 @@ func consoleUpdateMessage(err error) string {
 
 // upToDateLine: dòng log khi dịch vụ đã đúng bản (E2E grep "không cần cập nhật").
 func upToDateLine(v string) string {
-	return "genh: dịch vụ đã ở đúng bản " + v + " — không cần cập nhật (không sao lưu, không tải ảnh)."
+	return "genh: dịch vụ đã ở đúng bản " + v + " — không cần cập nhật (không sao lưu, không tải ảnh). Dịch vụ đang dừng/lỗi thì chạy genh start."
 }
 
 // deferredAfterRunLine: RunUpdate ĐÃ chạy xong bằng bản genh hiện tại nhưng bản

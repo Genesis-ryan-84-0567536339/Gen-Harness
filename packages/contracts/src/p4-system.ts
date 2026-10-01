@@ -227,6 +227,11 @@ export interface SystemUpdate {
    * tự cài lại đúng bản này; null = không có bản nào bị chặn.
    */
   blocked_version?: string | null;
+  /**
+   * v0.1.34: `rollback_failed` trong run/update-blocked.json của bản bị chặn — tự quay về bản cũ CŨNG thất bại, máy cần
+   * xử lý tay. null = không có bản bị chặn (hoặc api cũ) — Console rơi về dò chữ trong thông điệp genh.
+   */
+  blocked_rollback_failed?: boolean | null;
   /** v0.1.30: lần hỏi GitHub gần nhất thành công (ISO); null = chưa hỏi được. */
   checked_at?: string | null;
   /** v0.1.30: `POST /system/update/check` bị giới hạn (≤ 1 lần / 30 giây) — trả kết quả đang đệm. */

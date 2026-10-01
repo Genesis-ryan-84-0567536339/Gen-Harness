@@ -1300,7 +1300,8 @@ xoá nhánh cả hai sau khi kiểm.
 quay về bản đang dùng", Boss không phải làm gì (có thể bấm **Thử lại** / **Cập nhật ngay** nếu muốn thử lại).
 
 **Chỉ cần làm khi Console báo:** "Ổ đĩa máy chủ sắp đầy" (GH-E948) ⇒ dọn ổ đĩa máy chủ rồi bấm **Thử lại**; "Cần xử lý tay"
-(tự quay về bản cũ thất bại) ⇒ làm theo "Chi tiết kỹ thuật" trên thẻ (có tên bản sao lưu cần khôi phục).
+(tự quay về bản cũ thất bại) ⇒ làm theo "Chi tiết kỹ thuật" trên thẻ (chỉ khôi phục bản sao lưu khi chi tiết ghi rõ tên bản
+cần khôi phục — CSDL chưa bị đụng thì chỉ cần `docker compose up -d --remove-orphans`, KHÔNG khôi phục).
 
 ### Vì sao
 
@@ -1321,8 +1322,9 @@ quay về bản đang dùng", Boss không phải làm gì (có thể bấm **Th�
   worker + bridge trước sao lưu; sao lưu lỗi ⇒ bật lại) → sao lưu → mới đổi `compose.yaml` → migrate/up/ready. Chỉ lỗi từ
   migrate trở đi mới khôi phục: compose cũ (từ bộ nhớ, không dùng `.bak`), `stop api worker bridge web`, khôi phục bằng
   `run --rm --no-deps -T api` (ảnh cũ), `up -d --remove-orphans`, ghi `run/update-blocked.json` ⇒ **GH-E945**. Thành công ⇒
-  xoá `update-blocked.json`, dọn ảnh `gen-harness-*` giữ 2 bản. Lịch đêm gặp đúng bản bị chặn ⇒ bỏ qua (thoát 0, "lịch đêm không
-  tự thử lại", mã **GH-E949** trong thông điệp); "Cập nhật ngay"/gõ tay không bị chặn; đã mới nhất ⇒ "không cần cập nhật".
+  xoá `update-blocked.json`, dọn ảnh `gen-harness-*` giữ 2 bản. Lịch đêm gặp đúng bản bị chặn ⇒ bỏ qua (thoát 0, log "lịch đêm
+  không tự thử lại"; tiến trình lịch đêm để NGUYÊN hộp thư Console — mã **GH-E949** chỉ xuất hiện khi tiến trình re-exec sau tự
+  cập nhật binary gặp bản bị chặn); "Cập nhật ngay"/gõ tay không bị chặn; đã mới nhất ⇒ "không cần cập nhật".
   `isServiceNotRunning` nhận "is restarting" (rơi về `run --rm`).
 - **compose**: `x-logging` json-file `max-size: 10m`, `max-file: 3` cho mọi dịch vụ; web healthcheck `/healthz`; bản nhúng
   trùng từng byte `deploy/compose.yaml` (có test giữ).
@@ -1331,7 +1333,7 @@ quay về bản đang dùng", Boss không phải làm gì (có thể bấm **Th�
   nữa bị dọn (mỗi repo ≤ 2 digest); job mới **`e2e-rollback`** (genh-tot/hong/sua: bản hỏng tự quay về, dữ liệu nguyên,
   `update-blocked.json` đúng version, lịch đêm không thử lại, bản sửa gỡ chặn); **promote đòi `e2e-rollback` xanh**
   (`check_release_gate.py` giữ + test).
-- Web: thêm Playwright mock `apps/web/e2e/update-rollback-v0134.spec.ts` (thẻ "chưa thành công" + thông điệp genh GH-E949 +
+- Web: thêm Playwright mock `apps/web/e2e/update-rollback-v0134.spec.ts` (thẻ "chưa thành công" + thông điệp genh GH-E945 + GH-E948 +
   "Thử lại" gửi yêu cầu; lỗi cũ không treo thẻ đỏ). `ci.yml`: sửa cảnh báo actionlint SC2034 (biến vòng lặp không dùng).
 - `VERSION` → `v0.1.34`; `docs/ROADMAP.md` mục Đã xong.
 
@@ -1353,6 +1355,23 @@ quay về bản đang dùng", Boss không phải làm gì (có thể bấm **Th�
 - Nhỏ: dọn ảnh chỉ trong repo (owner/tên) của bản giữ; ghi tệp `run/` qua tệp tạm ngẫu nhiên (O_EXCL, không theo symlink);
   thông điệp "đã tự quay về bản cũ" thay "đã tự động rollback"; help `--no-self-update` nói rõ bỏ qua khi đã khớp; e2e-rollback
   kiểm hộp thư Console (failed + GH-E945, đêm sau không đổi) và "Cập nhật ngay" (`--if-requested`) vẫn thử lại bản bị chặn.
+- **Review lượt 2 (F-10, F-11, F-33)**:
+  - Hộp thư `run/` (0777, container api ghi được): genh đọc tệp trạng thái chỉ khi là tệp thường, một liên kết, ≤ 64 KiB, mở
+    O_NOFOLLOW (`hostlink/safefile*.go`); ảnh chụp `update-status.json` parse thành `Status` rồi ghi lại đúng các trường đó (không
+    chép nguyên byte) ⇒ symlink tới `~/.ssh/…`/`~/.docker/config.json` không bị chép vào `run/`, `/dev/zero` không treo genh.
+    `update-blocked.json` còn phải thuộc đúng uid đang chạy genh (không thì coi như không bị chặn).
+  - `update-blocked.json` thêm `db_touched`; chỉ ghi `backup_key` khi CSDL đã bị đụng ⇒ quay về thất bại mà CSDL chưa đụng thì
+    log/Console chỉ bảo `docker compose up -d --remove-orphans`, KHÔNG bảo khôi phục bản sao lưu (sẽ mất ghi chép sau lúc sao lưu).
+    api trả thêm `blocked_rollback_failed` — Console dùng trường này trước, dò chữ chỉ để đỡ genh cũ.
+  - Console thẻ lỗi: máy chủ chưa nhận yêu cầu từ nút bấm (`can_request=false`) ⇒ không nhắc "bấm Thử lại", hiện lệnh chạy tay;
+    GH-E946 sau khi cập nhật xong ⇒ "Bản mới đã chạy — còn bước chép dữ liệu cũ"; GH-E900/E901 ⇒ "Chưa đụng gì"; "đã tự quay về"
+    chỉ cho GH-E945/E949/E946/E947 khi thông điệp nói vậy; mã khác ⇒ "Cập nhật chưa xong — xem Chi tiết kỹ thuật".
+  - Dò migration chờ so cả tập `alembic current` với `alembic heads` (bản mới thêm head riêng ⇒ coi là có migration).
+  - Nhánh đã đụng CSDL quay về ổn ⇒ xoá `update-inprogress.json` như nhánh không đụng CSDL.
+  - Lịch đêm chạy trùng lúc Owner bấm "Cập nhật ngay"/"Thử lại": yêu cầu đã nuốt ⇒ chạy như `--if-requested` (không bị chặn,
+    không đợi chín; truyền `--if-requested` cho tiến trình re-exec) — yêu cầu không còn mất không dấu vết.
+  - Help: "dịch vụ đã khớp ⇒ bỏ qua" áp cho mọi cách chạy `genh update`; dòng "không cần cập nhật" chỉ `genh start` khi dịch vụ
+    dừng/lỗi.
 - Chấp nhận (ghi rõ): api không dừng trước sao lưu — ghi của api trong vài giây giữa sao lưu và migrate chỉ mất nếu phải khôi phục.
 
 ### Kiểm tra (nhánh tích hợp, máy dựng Linux, 01/10/2026)

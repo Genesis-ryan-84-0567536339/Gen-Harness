@@ -50,37 +50,72 @@ export function updateErrorCode(message: string | null | undefined): string | nu
 }
 
 /**
- * Lời dẫn thẻ "chưa thành công" theo mã lỗi genh — mỗi mã nghĩa khác nhau: chưa đụng gì (tải/sao lưu/ổ đĩa), đã tự
- * quay về bản cũ, hay quay về CŨNG thất bại (cần xử lý tay).
+ * Lời dẫn thẻ "chưa thành công" theo mã lỗi genh — mỗi mã nghĩa khác nhau: chưa đụng gì (tải/sao lưu/ổ đĩa/cấu hình),
+ * đã tự quay về bản cũ, bản mới đã chạy nhưng còn bước chép dữ liệu, hay quay về CŨNG thất bại (cần xử lý tay).
+ * `rollbackFailed`: trường có cấu trúc từ api (run/update-blocked.json) — ưu tiên; dò chữ chỉ để đỡ genh cũ/nhánh
+ * không ghi update-blocked. `canRequest=false` (máy chủ chưa nhận yêu cầu từ nút bấm): không có nút Thử lại — hướng
+ * dẫn chạy lệnh bên dưới (thẻ hiện lệnh).
  */
-function failedCopy(message: string | null): { tone: 'warn' | 'bad'; kicker: string; body: string } {
+function failedCopy(
+  message: string | null,
+  opts: { canRequest: boolean; rollbackFailed: boolean },
+): { tone: 'warn' | 'bad'; kicker: string; body: string } {
   const code = updateErrorCode(message);
   const msg = message ?? '';
-  if (/CŨNG THẤT BẠI|chưa trọn|can thiệp tay|xử lý tay/i.test(msg)) {
+  const retry = opts.canRequest ? 'bấm Thử lại' : 'chạy lệnh bên dưới trên máy chủ';
+  const Retry = retry.charAt(0).toUpperCase() + retry.slice(1);
+  if (opts.rollbackFailed || /CŨNG THẤT BẠI|chưa trọn|can thiệp tay|xử lý tay/i.test(msg)) {
     return {
       tone: 'bad', kicker: 'Cần xử lý tay — tự quay về bản cũ chưa trọn',
-      body: 'Hệ thống chưa tự đưa máy về trạng thái chạy ổn. Cần người quản trị máy chủ làm theo hướng dẫn trong Chi tiết kỹ thuật (có tên bản sao lưu cần khôi phục).',
+      body: 'Hệ thống chưa tự đưa máy về trạng thái chạy ổn. Cần người quản trị máy chủ làm theo hướng dẫn trong Chi tiết kỹ thuật.',
     };
   }
   if (code === 'GH-E948') {
     return {
       tone: 'warn', kicker: 'Ổ đĩa máy chủ sắp đầy — chưa đụng gì, bản đang dùng vẫn chạy bình thường',
-      body: 'Cần giải phóng ổ đĩa trên máy chủ (ảnh Docker cũ, tệp lớn), rồi bấm Thử lại — lịch đêm cũng sẽ tự thử lại.',
+      body: `Cần giải phóng ổ đĩa trên máy chủ (ảnh Docker cũ, tệp lớn), rồi ${retry} — lịch đêm cũng sẽ tự thử lại.`,
     };
   }
   if (code === 'GH-E941' || code === 'GH-E940') {
     return {
       tone: 'warn', kicker: 'Chưa đụng gì — bản đang dùng vẫn chạy bình thường',
       body: code === 'GH-E941'
-        ? 'Chưa tải được bản mới (thường do mạng). Lịch đêm sẽ tự thử lại, hoặc bấm Thử lại.'
-        : 'Chưa sao lưu được trước khi cập nhật nên hệ thống dừng lại. Bấm Thử lại; nếu vẫn lỗi, chạy genh doctor trên máy chủ.',
+        ? `Chưa tải được bản mới (thường do mạng). Lịch đêm sẽ tự thử lại, hoặc ${retry}.`
+        : `Chưa sao lưu được trước khi cập nhật nên hệ thống dừng lại. ${Retry}; nếu vẫn lỗi, chạy genh doctor trên máy chủ.`,
     };
   }
+  if (code === 'GH-E900' || code === 'GH-E901') {
+    return {
+      tone: 'warn', kicker: 'Chưa đụng gì — bản đang dùng vẫn chạy bình thường',
+      body: 'genh trên máy chủ chưa đọc được cấu hình cài đặt nên dừng lại trước khi làm gì. Chạy genh doctor trên máy chủ và xem Chi tiết kỹ thuật.',
+    };
+  }
+  if (code === 'GH-E946' && /Cập nhật xong/i.test(msg)) {
+    return {
+      tone: 'warn', kicker: 'Bản mới đã chạy — còn bước chép dữ liệu cũ chưa xong',
+      body: 'Dịch vụ đã lên bản mới, nhưng chép dữ liệu tệp cũ sang chỗ lưu mới chưa xong. Dữ liệu gốc vẫn còn trên máy chủ — làm theo Chi tiết kỹ thuật để chép nốt.',
+    };
+  }
+  const rolledBack = /đã tự quay về/i.test(msg);
+  if ((code === 'GH-E945' || code === 'GH-E949') && rolledBack) {
+    return {
+      tone: 'bad', kicker: 'Hệ thống đã tự quay về bản đang dùng — dữ liệu giữ nguyên',
+      body: `Bản mới lỗi khi khởi động nên lịch đêm sẽ không tự cài lại bản này. ${Retry} nếu muốn thử ngay, hoặc đợi bản mới hơn.`,
+    };
+  }
+  if ((code === 'GH-E946' || code === 'GH-E947') && rolledBack) {
+    return {
+      tone: 'bad', kicker: 'Hệ thống đã tự quay về bản đang dùng — dữ liệu giữ nguyên',
+      body: `${Retry}, hoặc xem logs/auto-update.log trên máy chủ.`,
+    };
+  }
+  if (code === null) {
+    // genh cũ (≤ v0.1.33, không có mã) luôn tự quay về khi lỗi — giữ lời dẫn như trước; thân thẻ là thông điệp genh.
+    return { tone: 'bad', kicker: 'Hệ thống đã tự quay về bản đang dùng — dữ liệu giữ nguyên', body: msg };
+  }
   return {
-    tone: 'bad', kicker: 'Hệ thống đã tự quay về bản đang dùng — dữ liệu giữ nguyên',
-    body: code === 'GH-E945' || code === 'GH-E949'
-      ? 'Bản mới lỗi khi khởi động nên lịch đêm sẽ không tự cài lại bản này. Bấm Thử lại nếu muốn thử ngay, hoặc đợi bản mới hơn.'
-      : 'Bấm Thử lại, hoặc xem logs/auto-update.log trên máy chủ.',
+    tone: 'warn', kicker: 'Cập nhật chưa xong — xem Chi tiết kỹ thuật',
+    body: `Xem Chi tiết kỹ thuật (hoặc logs/auto-update.log trên máy chủ) để biết máy đang ở bản nào, rồi ${retry}.`,
   };
 }
 
@@ -126,13 +161,16 @@ export function updateView(
   if (d.state === 'failed' && recent(d.finished_at, now)) {
     // Tiêu đề theo bản ĐÃ THỬ (`to` genh ghi), không theo bản mới nhất — v0.1.35 ra rồi thì lỗi đêm qua vẫn là của v0.1.34.
     const tried = d.to && d.to !== d.current ? d.to : target;
-    const copy = failedCopy(d.message);
+    const rollbackFailed = d.blocked_rollback_failed === true && !!d.blocked_version && d.blocked_version === tried;
+    const copy = failedCopy(d.message, { canRequest: d.can_request, rollbackFailed });
     const coded = updateErrorCode(d.message) !== null;
     return {
       kind: 'failed', tone: copy.tone, title: `Cập nhật lên ${tried} chưa thành công`, kicker: copy.kicker,
       // genh cũ (không có mã): thông điệp đã là câu thân thiện — hiện thẳng như trước.
       body: coded ? copy.body : (d.message ?? 'Xem chi tiết trong logs/auto-update.log trên máy chủ.'),
       detail: coded ? (d.message ?? undefined) : undefined,
+      // Không có nút Thử lại (máy chủ chưa nhận yêu cầu từ nút bấm) → hiện lệnh chạy tay như thẻ "Có bản mới".
+      showCommand: !d.can_request,
       steps: [],
     };
   }

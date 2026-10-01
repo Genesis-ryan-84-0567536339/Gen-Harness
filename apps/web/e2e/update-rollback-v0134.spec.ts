@@ -88,6 +88,33 @@ test.describe('v0.1.34 — cập nhật lỗi tự quay về bản cũ', () => {
     await expect(page.getByText('[object Object]')).toHaveCount(0);
   });
 
+  test('máy chủ chưa nhận yêu cầu từ nút bấm: không nhắc nút Thử lại không tồn tại, hiện lệnh chạy tay', async ({ page }) => {
+    const noWatcher = updateState({ message: DISK_MSG, can_request: false, updater: null });
+    await page.route('**/api/v1/system/update', (route) =>
+      route.request().method() === 'GET' ? route.fulfill({ json: noWatcher }) : route.fallback(),
+    );
+    await page.goto('/help');
+    await expect(page.getByText('Cập nhật lên v0.1.34 chưa thành công')).toBeVisible();
+    await expect(page.getByText(/chạy lệnh bên dưới trên máy chủ/)).toBeVisible();
+    await expect(page.getByText(/bấm Thử lại/)).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /Thử lại/ })).toHaveCount(0);
+    await expect(page.getByText('~/.gen-harness/bin/genh update')).toBeVisible();
+  });
+
+  test('quay về bản cũ CŨNG thất bại (rollback_failed từ api): thẻ "Cần xử lý tay", không nhắc khôi phục bản sao lưu', async ({ page }) => {
+    const failed = updateState({
+      message: '/api/v1/ready không trả 200 sau khi cập nhật — CSDL chưa bị đụng, NHƯNG khởi động lại bằng bản cũ chưa trọn — chạy tay docker compose up -d --remove-orphans. (GH-E945)',
+      blocked_version: 'v0.1.34', blocked_rollback_failed: true,
+    });
+    await page.route('**/api/v1/system/update', (route) =>
+      route.request().method() === 'GET' ? route.fulfill({ json: failed }) : route.fallback(),
+    );
+    await page.goto('/help');
+    await expect(page.getByText('Cần xử lý tay — tự quay về bản cũ chưa trọn')).toBeVisible();
+    await expect(page.getByText(/bản sao lưu cần khôi phục/)).toHaveCount(0);
+    await expect(page.getByText(/dữ liệu giữ nguyên/)).toHaveCount(0);
+  });
+
   test('bản mới nhất đang bị chặn: không hứa "Tự cài đêm", bảo bấm Cập nhật ngay để thử lại', async ({ page }) => {
     const old = updateState({
       finished_at: '2020-01-01T00:00:00Z', started_at: '2020-01-01T00:00:00Z',

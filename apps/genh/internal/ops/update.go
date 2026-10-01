@@ -560,16 +560,57 @@ func pullWithRetry(ctx context.Context, runner dockercli.Runner, cmd dockercli.C
 	return attempts, lastErr
 }
 
-// needsMigration dò `alembic current` bằng ảnh MỚI (compose pullPath): còn
-// revision nào không phải "(head)" (hoặc không có revision nào) → bản mới có
-// thay đổi CSDL. Lệnh lỗi → true (an toàn: coi như có).
+// needsMigration dò `alembic current` và `alembic heads` bằng ảnh MỚI (compose
+// pullPath): còn revision nào không phải "(head)" (hoặc không có revision nào),
+// HOẶC tập revision hiện tại khác tập head của bản mới (bản mới thêm head riêng —
+// nhánh/gốc mới, lý do dùng `upgrade heads` — thì `current` vẫn in "(head)" cho
+// nhánh cũ) → bản mới có thay đổi CSDL. `current` lỗi → true (an toàn: coi như
+// có); chỉ `heads` lỗi → theo riêng `current`.
 func needsMigration(ctx context.Context, runner dockercli.Runner, pullPath string, envOverlay []string, dir string) bool {
-	args := compose.BaseArgs(pullPath, "run", "--rm", "--no-deps", "-T", "migrate", "alembic", "current")
-	output, err := runner.Output(ctx, dockercli.Cmd{Name: "docker", Args: args, Env: envOverlay, Dir: dir})
+	run := func(sub string) ([]byte, error) {
+		args := compose.BaseArgs(pullPath, "run", "--rm", "--no-deps", "-T", "migrate", "alembic", sub)
+		return runner.Output(ctx, dockercli.Cmd{Name: "docker", Args: args, Env: envOverlay, Dir: dir})
+	}
+	current, err := run("current")
 	if err != nil {
 		return true
 	}
-	return pendingMigrationFromCurrent(string(output))
+	if pendingMigrationFromCurrent(string(current)) {
+		return true
+	}
+	heads, err := run("heads")
+	if err != nil {
+		return false
+	}
+	return !sameRevisions(alembicRevisions(string(current)), alembicRevisions(string(heads)))
+}
+
+// alembicRevisions lấy tập revision (từ đầu mỗi dòng) trong stdout của
+// `alembic current`/`alembic heads`, bỏ dòng rỗng và dòng log.
+func alembicRevisions(output string) map[string]bool {
+	revs := map[string]bool{}
+	for _, line := range strings.Split(output, "\n") {
+		t := strings.TrimSpace(line)
+		if t == "" || strings.HasPrefix(t, "INFO") || strings.HasPrefix(t, "WARN") || strings.Contains(t, "[alembic") {
+			continue
+		}
+		if f := strings.Fields(t); len(f) > 0 {
+			revs[f[0]] = true
+		}
+	}
+	return revs
+}
+
+func sameRevisions(a, b map[string]bool) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for r := range a {
+		if !b[r] {
+			return false
+		}
+	}
+	return true
 }
 
 // pendingMigrationFromCurrent phân tích stdout của `alembic current`: bỏ dòng
@@ -670,7 +711,8 @@ type rollbackPlan struct {
 //	   từ ảnh CŨ (`run --rm`, không exec vào api ảnh mới), `up -d
 //	   --remove-orphans`, dọn ảnh (best-effort), ghi run/update-blocked.json
 //	   (CẢ khi rollback thất bại, kèm rollback_failed) để lịch đêm không thử lại
-//	   đúng bản này; trả GH-E945.
+//	   đúng bản này; quay về ổn + compose.yaml đã trả về → xoá
+//	   update-inprogress.json như b); trả GH-E945.
 func rollbackAndWrap(ctx context.Context, p rollbackPlan, out io.Writer, original *OpError) error {
 	runner := p.runner
 	up := func() error {
@@ -776,6 +818,12 @@ func rollbackAndWrap(ctx context.Context, p rollbackPlan, out io.Writer, origina
 	}
 
 	p.writeBlocked(out, original, !rolledBackOK)
+	if rolledBackOK && p.oldCompose != nil && p.installDir != "" {
+		// Như nhánh b): compose.yaml đã về bản cũ, dịch vụ chạy lại bằng nó.
+		if err := hostlink.ClearUpdateInProgress(p.installDir); err != nil {
+			_, _ = fmt.Fprintf(out, "     (không xoá được %s — %v)\n", hostlink.UpdateInProgressFile, err)
+		}
+	}
 
 	var next strings.Builder
 	if rolledBackOK {
@@ -820,10 +868,16 @@ func (p rollbackPlan) writeBlocked(out io.Writer, original *OpError, rollbackFai
 	if p.installDir == "" {
 		return
 	}
-	if err := hostlink.WriteUpdateBlocked(p.installDir, hostlink.UpdateBlocked{
-		Version: p.version, Code: original.Code, BackupKey: p.key, Message: original.What,
-		RollbackFailed: rollbackFailed,
-	}); err != nil {
+	b := hostlink.UpdateBlocked{
+		Version: p.version, Code: original.Code, Message: original.What,
+		DBTouched: p.dbTouched, RollbackFailed: rollbackFailed,
+	}
+	if p.dbTouched {
+		// Chỉ ghi bản sao lưu khi CSDL đã bị đụng: chưa đụng mà khôi phục thì
+		// mất mọi ghi chép của worker/bridge/api từ lúc sao lưu tới giờ.
+		b.BackupKey = p.key
+	}
+	if err := hostlink.WriteUpdateBlocked(p.installDir, b); err != nil {
 		_, _ = fmt.Fprintf(out, "     (không ghi được %s — %v)\n", hostlink.UpdateBlockedFile, err)
 	}
 }

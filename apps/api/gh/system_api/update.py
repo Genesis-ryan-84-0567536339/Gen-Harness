@@ -153,12 +153,17 @@ def _state() -> dict[str, Any]:
     # ghi hoặc giá trị lạ ⇒ None — Console không hứa "Tự cài đêm …".
     auto = info.get("auto_update_enabled")
     # v0.1.34: bản genh đã lỗi + quay về bản cũ — lịch đêm không tự cài lại; Console không hứa "Tự cài đêm …".
-    blocked = (_read_json(d / "update-blocked.json") or {}).get("version")
+    blocked_file = _read_json(d / "update-blocked.json") or {}
+    blocked = blocked_file.get("version")
+    blocked_ok = isinstance(blocked, str) and bool(blocked)
+    # Trường có cấu trúc (genh ghi): tự quay về bản cũ CŨNG thất bại — Console dùng thay vì dò chữ trong thông điệp.
+    rollback_failed = blocked_file.get("rollback_failed")
     return {
         "current": info.get("version") or None,
         "updater": updater,
         "auto_update_enabled": auto if isinstance(auto, bool) else None,
-        "blocked_version": blocked if isinstance(blocked, str) and blocked else None,
+        "blocked_version": blocked if blocked_ok else None,
+        "blocked_rollback_failed": rollback_failed is True if blocked_ok else None,
         "linked": d.is_dir(),
         "can_request": bool(updater) and os.access(d / "request", os.W_OK),
         "state": state,
