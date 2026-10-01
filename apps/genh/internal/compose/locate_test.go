@@ -45,7 +45,14 @@ func TestSearchCandidates_IncludesInstallDirAndAscendingParents(t *testing.T) {
 func TestLocate_FindsFileAmongAscendingParents(t *testing.T) {
 	t.Setenv(EnvOverrideVar, "")
 
-	root := t.TempDir()
+	// Locate dò từ os.Getwd(), mà Getwd trả đường dẫn THẬT của thư mục hiện
+	// tại: trên macOS t.TempDir() nằm dưới /var/folders/… nhưng /var là
+	// symlink tới /private/var; trên Windows runner TEMP có thể ở dạng tên
+	// ngắn 8.3 (RUNNER~1). Chuẩn hoá gốc tạm trước để so đúng một đường dẫn.
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
 	deployDir := filepath.Join(root, "deploy")
 	if err := os.MkdirAll(deployDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)

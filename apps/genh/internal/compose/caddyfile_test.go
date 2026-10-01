@@ -22,11 +22,12 @@ func TestEmbeddedCaddyfileMatchesRepo(t *testing.T) {
 func isolateLocate(t *testing.T) string {
 	t.Helper()
 	t.Setenv(EnvOverrideVar, "")
-	oldWd, _ := os.Getwd()
-	t.Cleanup(func() { _ = os.Chdir(oldWd) })
-	if err := os.Chdir(t.TempDir()); err != nil {
-		t.Fatalf("Chdir: %v", err)
-	}
+	// t.Chdir khôi phục cwd cũ trong Cleanup đăng ký SAU TempDir của chính nó
+	// ⇒ chạy TRƯỚC khi thư mục tạm bị xoá (Cleanup chạy ngược thứ tự). Trước
+	// đây Cleanup Chdir đăng ký trước TempDir nên lúc xoá, cwd vẫn nằm trong
+	// thư mục tạm — Windows từ chối xoá thư mục đang là cwd của tiến trình
+	// ("being used by another process").
+	t.Chdir(t.TempDir())
 	return t.TempDir()
 }
 

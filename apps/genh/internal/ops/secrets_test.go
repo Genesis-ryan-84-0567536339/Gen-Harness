@@ -46,10 +46,7 @@ func TestEnsureAuxSecrets_FillsMissingBrowserKeyOnly(t *testing.T) {
 	if err != nil || len(key) != 32 {
 		t.Fatalf("gh_browser_key phải là 32 byte base64, được %q (%v)", raw, err)
 	}
-	st, _ := os.Stat(filepath.Join(secrets, "gh_browser_key"))
-	if st.Mode().Perm() != 0o644 {
-		t.Fatalf("quyền gh_browser_key = %v, muốn 0644", st.Mode().Perm())
-	}
+	// Quyền 0644 của gh_browser_key: kiểm ở secrets_unix_test.go (bit quyền POSIX).
 	// Lần hai: giữ nguyên.
 	if err := ensureAuxSecrets(composePath); err != nil {
 		t.Fatal(err)

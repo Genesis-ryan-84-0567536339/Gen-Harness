@@ -59,9 +59,7 @@ func TestRunExport_HappyPath_StreamsStdoutToFile(t *testing.T) {
 	if string(data) != bundleMagic+"fake-bytes" {
 		t.Errorf("nội dung tệp = %q, muốn %q", data, bundleMagic+"fake-bytes")
 	}
-	if info, err := os.Stat(toPath); err == nil && info.Mode().Perm() != 0o600 {
-		t.Errorf("quyền tệp = %o, muốn 0600", info.Mode().Perm())
-	}
+	// Quyền 0600 của tệp xuất: kiểm ở bundle_unix_test.go (bit quyền POSIX).
 	// Mật khẩu KHÔNG được xuất hiện trong argv của lệnh đã gọi.
 	for _, c := range fr.Calls {
 		for _, a := range c.Cmd.Args {
