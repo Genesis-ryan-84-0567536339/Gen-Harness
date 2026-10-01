@@ -1119,3 +1119,119 @@ hoá — hệ thống chỉ giảm (đọc ít, dừng ngay khi có cảnh báo)
   typecheck/lint/vitest, e2e mock.
 - **Chưa kiểm (cần đầu ra thật của Boss)**: định dạng `agy models` KHI ĐÃ đăng nhập và `--model gemini-3.8-flash --effort high`
   được nhận thật (máy dựng không đăng nhập được) → Boss bấm **Chẩn đoán** → **Chép** gửi lại nếu còn lỗi.
+
+## v0.1.33 — Cổng phát hành & CI đủ test (01/10/2026)
+
+### Boss cần làm gì
+
+1. Máy Boss: **không cần làm gì.** Bản mới chỉ tới máy sau khi qua E2E cài thật; lịch tự cập nhật đêm đợi bản ra đủ 24 giờ.
+   Muốn lấy sớm: Console → **Cập nhật ngay** (không bị đợi 24 giờ).
+2. Một lần, ~2 phút, cần quyền admin repo: **bật bảo vệ nhánh `main` + tag `v*`** — làm theo mục ngay dưới "Đã làm".
+   Chưa bật cũng không hỏng gì (mã không phụ thuộc vào nó), chỉ là PR đỏ vẫn còn đường merge tay.
+
+### Nguyên nhân gốc
+
+- **F-9**: `release.yml` chạy song song với CI (các job chỉ `needs: meta`), Release tạo xong là thành **latest** ngay; E2E cài
+  thật chỉ chạy SAU đó (`workflow_run`) nên đỏ cũng không chặn được gì. v0.1.24 từng phát hành xanh trong khi CI trên đúng
+  commit đó đỏ. Timer đêm 03:00 cài luôn bản vừa ra. Chữ ký cosign có đính kèm nhưng không nơi nào kiểm, trong khi
+  `docs/ROADMAP.md:3` và `docs/handoff/05-installer.md:30` ghi như đã kiểm. `main` không được bảo vệ.
+- **F-13**: CI bỏ sót bộ test đã có — `go test` của genh (45 tệp `_test.go`) không chạy ở đâu; Playwright mock của web không
+  chạy; pytest chạy bằng superuser (thiếu GRANT/RLS cho `gh_app` chỉ lộ sau phát hành); E2E chế độ pr không kích hoạt khi đổi
+  `apps/api/**`, `apps/web/Dockerfile`, `VERSION`; không kiểm `alembic heads` = 1 (`alembic upgrade heads` che nhánh migration kép).
+
+### Đã làm
+
+- **F-9 — cổng phát hành (6 bước, tự động, không cần người duyệt)**:
+  1. `ci.yml` thêm `on: workflow_call` (input `from_release`, mặc định false); `release.yml` gọi nó thành job `ci`
+     (`uses: ./.github/workflows/ci.yml`, `from_release: true`) và đưa `ci` vào `needs` của job `release` — CI đỏ thì không
+     có Release. Khi `from_release`, nhóm concurrency của `ci.yml` là duy nhất theo `run_id`, `cancel-in-progress: false`.
+  2. Job `release` tạo **bản thử (prerelease)** (`make_latest: false`). `/releases/latest` bỏ qua prerelease nên genh,
+     `install.sh`, Console (`apps/api/gh/system_api/update.py`) chưa thấy bản này.
+  3. `e2e-install.yml` (chế độ release) tìm **đúng tag** từ `workflow_run.head_sha`, cài bằng `install.sh` với biến mới
+     `GEN_HARNESS_RELEASE_TAG` (tuỳ chọn, chỉ CI/E2E); `e2e-upgrade` cài **bản chính thức (latest)** hiện tại rồi nâng cấp LÊN
+     đúng tag đó (đặt binary mới bằng tay vì bản thử bị ẩn khỏi tự cập nhật).
+  4. Job cuối `promote`: E2E xanh → `gh release edit <tag> --prerelease=false --latest`, in `releases/latest` trước/sau,
+     `exit 1` nếu sai. Bản có hậu tố `-` không bao giờ được promote. **Promote tay** (chỉ khi E2E lỗi vì lý do ngoài mã):
+     Actions → **E2E cài đặt thật** → **Run workflow** với `tag` + `promote=true` + `skip_e2e=true`.
+  5. **Thời gian chín 24 giờ** (chỉ lịch đêm): `selfupdate.NightlyMinAge = 24h` qua `Options.MinAge`; `genh update --yes`
+     KHÔNG kèm `--if-requested` bỏ qua bản có `published_at` < 24 giờ (`Result.Deferred`), để đêm sau. "Cập nhật ngay"
+     (`--yes --if-requested`) và `genh update` gõ tay không bị chặn. 24 giờ tính từ lúc tạo bản thử (promote không đổi
+     `published_at`).
+  6. Tài liệu đúng thực tế: genh/`install.sh`/`install.ps1` chỉ kiểm SHA-256 theo `checksums.txt`, **CHƯA kiểm cosign** (để
+     sau); khối "Cổng phát hành" trong `docs/handoff/05-installer.md`. Script bất biến `.github/scripts/check_release_gate.py`
+     chạy trong job `version` của CI — PR lỡ gỡ cổng sẽ đỏ ngay. Bảo vệ nhánh: hướng dẫn bên dưới (cần admin, ngoài mã).
+- **F-13 — CI chạy đủ bộ test đã có**: `installer-matrix.yml` thêm `go vet ./...` + `go test ./...` trên 4 hệ điều hành
+  (ubuntu-22.04/24.04, macos-14, windows-2022); pytest api thêm một lượt `GH_TEST_APP_ROLE=1` (dưới vai `gh_app`); job web chạy
+  Playwright mock; kiểm `alembic heads` chỉ có đúng 1 head; bộ lọc E2E chế độ pr thêm `apps/api/**`, `apps/web/Dockerfile`,
+  `deploy/images/**`, `VERSION`; **job tổng `ci-ok`** (ci.yml) và **`installer-ok`** (installer-matrix.yml) luôn chạy, không lọc
+  đường dẫn, đỏ khi bất kỳ job con nào đỏ/bị huỷ — đây là 2 required check DUY NHẤT.
+- `VERSION` → `v0.1.33`. `docs/ROADMAP.md` dòng 3 + mục Đã xong.
+
+### Bật bảo vệ nhánh `main` + tag `v*` (~2 phút, cần quyền admin repo)
+
+Mở https://github.com/Genesis-ryan-84-0567536339/Gen-Harness/settings/rules (Settings → Rules → Rulesets).
+
+**A. Nhánh `main`** — bấm **New ruleset** → **New branch ruleset**:
+1. **Ruleset Name**: `main`. **Enforcement status**: **Active**. Bypass list: để trống.
+2. **Target branches** → **Add target** → **Include default branch**.
+3. Bật **Require status checks to pass** → **Add checks** → gõ và chọn đúng 2 check: `ci-ok` và `installer-ok`.
+   - CHỈ 2 job tổng này (luôn chạy). **KHÔNG** thêm job E2E hay job con nào khác: E2E có lọc đường dẫn, PR chỉ sửa docs sẽ
+     kẹt "Expected — waiting for status to be reported" mãi.
+   - Ô tìm không ra tên → mở 1 PR bất kỳ đã chạy CI xong (GitHub chỉ gợi ý tên check đã từng chạy) rồi thử lại.
+   - **Không** bật "Require branches to be up to date before merging" (mỗi PR phải cập nhật lại nhánh mới merge được, chậm
+     vô ích với quy trình tự merge).
+4. Giữ bật **Block force pushes** và **Restrict deletions** (thường đã bật sẵn).
+5. **KHÔNG** bật "Require a pull request before merging" / approvals — quy trình tự merge khi CI xanh giữ nguyên.
+6. Bấm **Create**.
+
+**B. Tag `v*`** — **New ruleset** → **New tag ruleset**:
+1. **Ruleset Name**: `tag v*`. **Enforcement status**: **Active**.
+2. **Target tags** → **Add target** → **Include by pattern** → `v*`.
+3. Bật **Restrict updates**, **Restrict deletions**, **Block force pushes**.
+4. **KHÔNG** bật **Restrict creations**. Nếu vẫn muốn bật thì **PHẢI** thêm **GitHub Actions** vào **Bypass list** — nếu không,
+   `release.yml` (`github-actions[bot]`) không tạo được tag và **phát hành bị chặn**.
+5. Bấm **Create**.
+
+Hệ quả cần biết: tag `v*` không xoá/dời được nữa — bản thử hỏng cứ để nguyên (máy nào cũng không thấy), sửa mã rồi tăng
+`VERSION`. Gỡ tạm: mở ruleset → **Enforcement status: Disabled** → Save.
+
+Kiểm sau khi bật (người điều phối): 1 PR thử cố ý làm đỏ CI → nút merge bị chặn; 1 PR thử chỉ sửa `docs/` → merge được. Đóng,
+xoá nhánh cả hai sau khi kiểm.
+
+### Bẫy đã tránh
+
+- **Concurrency `ci.yml` khi `workflow_call`**: trong workflow được gọi, `github.*` là ngữ cảnh của workflow gọi (push, ref
+  `main`), nên nhóm cũ `ci-${{ github.ref }}` + `cancel-in-progress: true` trùng với lượt CI do chính push vào `main` → hai bên
+  huỷ nhau, job `ci` "cancelled" → không phát hành. Sửa: khi `from_release`, nhóm duy nhất theo `run_id`, không huỷ.
+- **Concurrency `e2e-install` theo `head_sha`**: nhóm cũ theo `github.ref` (= `main` với `workflow_run`) + huỷ lượt cũ → một lượt
+  Release sau đó không tạo tag (PR không đổi `VERSION`) sẽ huỷ E2E đang chạy của bản có tag → bản thử không bao giờ được
+  promote. Nay mỗi commit một nhóm; lượt không có tag ứng với `head_sha` thì bỏ qua, không promote.
+- **E2E chế độ pr dùng `releases/latest`** thay `gh release list` (danh sách đó gồm cả prerelease → ghim nhầm compose của bản
+  thử chưa qua E2E). `e2e-upgrade` cũng nâng cấp TỪ bản chính thức thay vì "tag thứ 2 trong danh sách".
+- Required check chỉ là job tổng luôn chạy (xem trên) — tránh PR chỉ sửa docs kẹt mãi.
+
+### Rủi ro đã biết
+
+1. `go test` trên windows-2022/macos-14 lần đầu chạy có thể đỏ — chỉ CI mới kiểm được (máy dựng là Linux).
+2. `e2e-upgrade` không còn đi qua đường "genh cũ tự tải binary mới" (bản thử bị ẩn khỏi tự cập nhật) — đường đó do `go test` của
+   `internal/selfupdate` kiểm.
+3. `published_at` không đổi khi promote → 24 giờ tính từ lúc tạo bản thử; E2E càng lâu thì thời gian đợi sau promote càng ngắn.
+4. Bảo vệ nhánh là việc của người có quyền admin — mã không phụ thuộc vào nó; chưa bật thì PR đỏ vẫn merge tay được.
+
+### Test
+
+- genh: `go test` của `internal/selfupdate` (bỏ qua bản < 24 giờ khi `--yes` không `--if-requested`; "Cập nhật ngay" không bị
+  chặn) — nay chạy trong CI trên 4 hệ điều hành cùng toàn bộ `go test ./...`.
+- CI: `check_release_gate.py` trong job `version`; `tr -d '[:space:]' < VERSION` = `v0.1.33` khớp regex job `version`.
+- _(người điều phối điền tên tệp test/số test từ báo cáo các gói cong-phat-hanh, ci-du-test, chin-24h.)_
+
+### Đã kiểm vs chưa kiểm
+
+- Đã kiểm: _(người điều phối điền sau merge — link + kết quả thật, KHÔNG ghi trước)_
+  - CI trên PR (`ci-ok`, `installer-ok`, go test 4 hệ điều hành): _…_
+  - Release v0.1.33 tạo ra **bản thử**, `gh api repos/Genesis-ryan-84-0567536339/Gen-Harness/releases/latest` lúc đó vẫn
+    v0.1.32: _…_
+  - Không có job `ci` bị "cancelled" trong lượt Release trên `main`: _…_
+  - E2E (`e2e-install` + `e2e-upgrade`) đúng tag v0.1.33 xanh; job `promote` in latest trước v0.1.32 → sau v0.1.33: _…_
+  - genh tải về (checksum/version) đúng v0.1.33: _…_
+- Chưa kiểm: _(điền)_ — bảo vệ nhánh (chờ admin bật, rồi 2 PR thử ở trên); timer đêm thật bỏ qua bản < 24 giờ trên máy Boss.
