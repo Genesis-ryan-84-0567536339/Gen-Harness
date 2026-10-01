@@ -15,10 +15,12 @@ END $$;
 -- Bản ≤ v0.1.31 lưu biến thể của Antigravity làm tên model ("gemini-3.8-flash-high"). Đổi thành model gốc + effort.
 -- Chỉ đổi tên khi nguồn chưa có dòng trùng tên gốc (UNIQUE provider_id, model_name); dòng còn lại chỉ ghi effort —
 -- lúc gọi, AgyClient vẫn tách hậu tố (gh.providers.catalog.split_variant) nên không bao giờ gửi tên biến thể cho CLI.
+-- "…-extra-low" (vd gemini-3.5-flash-extra-low trong tệp chạy agy 1.2.9) là tên riêng, không tách.
 UPDATE agent.models m
    SET effort = COALESCE(m.effort, substring(m.model_name FROM '-(low|medium|high)$'))
   FROM agent.providers p
- WHERE p.id = m.provider_id AND p.kind = 'antigravity_cli' AND m.model_name ~ '-(low|medium|high)$';
+ WHERE p.id = m.provider_id AND p.kind = 'antigravity_cli' AND m.model_name ~ '-(low|medium|high)$'
+   AND m.model_name !~ '-extra-(low|medium|high)$';
 
 WITH ranked AS (
   SELECT m.id, regexp_replace(m.model_name, '-(low|medium|high)$', '') AS base,
@@ -26,6 +28,7 @@ WITH ranked AS (
                             ORDER BY m.is_default DESC, m.id) AS rn
     FROM agent.models m JOIN agent.providers p ON p.id = m.provider_id
    WHERE p.kind = 'antigravity_cli' AND m.model_name ~ '-(low|medium|high)$'
+     AND m.model_name !~ '-extra-(low|medium|high)$'
 )
 UPDATE agent.models m SET model_name = r.base
   FROM ranked r

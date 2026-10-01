@@ -121,6 +121,25 @@ describe('ModelPicker — model gốc + ô "Mức suy nghĩ"', () => {
   });
 });
 
+describe('ModelPicker — model đã lưu ngoài danh sách (review v0.1.32)', () => {
+  it('mang theo mức đã lưu: "Đang dùng", không ghi đè mức thành rỗng', () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json(200, [])));
+    const saved: Provider = { ...AGY, models: [{ id: 'm', model_name: 'gemini-2.5-pro', effort: 'high', daily_quota: null, used_today: 0, is_default: true }] };
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ModelPicker provider={saved} test={TEST} />
+      </QueryClientProvider>,
+    );
+    const model = screen.getByRole('combobox', { name: 'Model cho Antigravity CLI' }) as HTMLSelectElement;
+    expect(model.value).toBe('gemini-2.5-pro');
+    const effort = screen.getByRole('combobox', { name: 'Mức suy nghĩ (effort) cho Antigravity CLI' }) as HTMLSelectElement;
+    expect([...effort.options].map((o) => o.value)).toEqual(['high']);
+    expect(effort.value).toBe('high');
+    expect(screen.getByRole('button', { name: 'Đang dùng' })).toBeDisabled();
+    expect(screen.queryByText(/không chỉnh mức suy nghĩ/)).toBeNull();
+  });
+});
+
 describe('Chẩn đoán (chỉ Owner)', () => {
   const DIAG: ProviderDiagnosis = {
     provider: 'Antigravity CLI',

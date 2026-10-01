@@ -59,14 +59,18 @@ class ModelRejected(BadRequest):
 
 
 # Mẫu lỗi "không nhận model" — CHÍNH XÁC (v0.1.32). Nguồn: chuỗi trong agy 1.2.9 ("invalid model selection (--model %q
-# --effort %q)", "Invalid model %q (available: %s)", "unknown model %q", "invalid --effort %q (valid: %s)") và Claude
+# --effort %q)", "Invalid model %q (available: %s)", "unknown model %q", "unknown model name %s", "invalid --effort %q
+# (valid: %s)", "--effort is not supported for the current model", "--effort is not supported for model %q") và Claude
 # Code ("There's an issue with the selected model", API 404 "not_found_error"). Trước đây mọi câu có "model" + "invalid"
 # đều bị coi là từ chối model → báo nhầm "CLI không nhận model" cho lỗi khác.
+# KHÔNG khớp (review v0.1.32): "unknown model tier: %q" / "unknown model key %s" (nội bộ agy), "The model is not
+# available right now … (503)" (lỗi tạm thời — để bộ định tuyến thử lại / chuyển nguồn).
 _MODEL_REJECT = re.compile(
-    r"invalid model selection|invalid model\s+[\"'“]|unknown model\b|model not found|model_not_found|no such model"
-    r"|issue with the selected model|not_found_error|unsupported model|not a valid model|model is not available"
-    r"|model .{0,60} (?:does not exist|is not supported)", re.I)
-_EFFORT_REJECT = re.compile(r"invalid (?:--)?effort|effort isn't adjustable|unsupported effort", re.I)
+    r"invalid model selection|invalid model\s+[\"'“]|unknown model(?: name)?\s+[\"'“]|unknown model name\b"
+    r"|model not found|model_not_found|no such model|issue with the selected model|not_found_error|unsupported model"
+    r"|not a valid model|model .{0,60} (?:does not exist|is not supported)", re.I)
+_EFFORT_REJECT = re.compile(
+    r"invalid (?:--)?effort|effort isn't adjustable|unsupported effort|--effort is not supported", re.I)
 
 
 def model_rejected(msg: str) -> bool:
@@ -80,8 +84,8 @@ def rejection(msg: str) -> ModelRejected | None:
     from gh.providers.catalog import parse_available
 
     # "invalid model selection (--model … --effort …): invalid --effort …" = model đúng, MỨC sai.
-    bad_model = re.search(r"invalid model\s+[\"'“]|unknown model\b|model not found|issue with the selected model", msg,
-                          re.I)
+    bad_model = re.search(r"invalid model\s+[\"'“]|unknown model(?: name)?\s+[\"'“]|unknown model name\b"
+                          r"|model not found|issue with the selected model", msg, re.I)
     what = "effort" if _EFFORT_REJECT.search(msg) and not bad_model else "model"
     return ModelRejected(msg[:300], what=what, available=parse_available(msg), raw=msg[-2000:])
 
@@ -386,16 +390,29 @@ class AgyClient:
         return parse_agy_models(out.decode(errors="replace"))
 
     async def diagnose(self, model: str | None, effort: str | None, prompt: str) -> list[dict[str, Any]]:
-        """Phiên bản, `agy models`, một lượt gọi rất ngắn đúng cờ đang dùng — đầu ra thô đã che (v0.1.32)."""
+        """Phiên bản, `agy models`, `agy -p /model`, `agy -p /effort`, một lượt gọi rất ngắn đúng cờ đang dùng — đầu ra
+        thô đã che (v0.1.32).
+
+        `-p "/model"` / `-p "/effort"`: changelog trong tệp chạy agy 1.2.9 (1.1.11) — ở chế độ in, `/model`, `/effort`…
+        "emit one tab-separated record per line … without starting an agent turn, spending quota" → lấy được danh sách
+        model / mức suy nghĩ THẬT của tài khoản đã đăng nhập mà không tốn lượt."""
         name = Path(self.binary).name
         steps = [await diag_step("Phiên bản", [name, "--version"], lambda: self._run("--version"), 20),
                  await diag_step("Danh sách model", [name, "models"], lambda: self._run("models"), 60)]
         argv = ["-p", prompt, *(self.model_args(model, effort) if model else []), "--output-format", "json"]
+        model_argv = ["-p", "/model"]
+        effort_argv = ["-p", "/effort", *(self.model_args(model) if model else [])]
         if not (cli_home_dir(self.cli_home) / TOKEN_FILE).exists():
             # CLI chưa đăng nhập mà chạy -p sẽ in link đăng nhập rồi chờ 60 giây — không chạy.
-            steps.append(_skipped("Gọi thử 1 lượt", [name, *argv], "bỏ qua — CLI chưa đăng nhập"))
-        else:
-            steps.append(await diag_step("Gọi thử 1 lượt", [name, *argv], lambda: self._run(*argv), 90))
+            for label, av in (("Model của tài khoản (/model)", model_argv),
+                              ("Mức suy nghĩ (/effort)", effort_argv), ("Gọi thử 1 lượt", argv)):
+                steps.append(_skipped(label, [name, *av], "bỏ qua — CLI chưa đăng nhập"))
+            return steps
+        steps.append(await diag_step("Model của tài khoản (/model)", [name, *model_argv],
+                                     lambda: self._run(*model_argv), 60))
+        steps.append(await diag_step("Mức suy nghĩ (/effort)", [name, *effort_argv],
+                                     lambda: self._run(*effort_argv), 60))
+        steps.append(await diag_step("Gọi thử 1 lượt", [name, *argv], lambda: self._run(*argv), 90))
         return steps
 
     async def embed(self, model: str, texts: list[str]) -> list[list[float]]:

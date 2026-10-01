@@ -6,7 +6,6 @@ CLI giả mô phỏng đúng cờ của agy 1.2.9 thật (tests/fixtures/fake_ag
 "invalid model selection …", "Invalid model %q (available: %s)") và claude 2.1.285 (`--effort`).
 """
 
-import inspect
 import json
 import uuid
 from pathlib import Path
@@ -37,6 +36,10 @@ def test_split_variant_and_effort_lists() -> None:
     assert catalog.split_variant("antigravity_cli", "gemini-3.8-flash-high") == ("gemini-3.8-flash", "high")
     assert catalog.split_variant("antigravity_cli", "gemini-3.1-pro") == ("gemini-3.1-pro", None)
     assert catalog.split_variant("claude_code_cli", "opus") == ("opus", None)
+    # Review v0.1.32: "gemini-3.5-flash-extra-low" có trong tệp chạy agy 1.2.9 — tên riêng, không tách "-extra" + low.
+    xl = "gemini-3.5-flash-extra-low"
+    assert catalog.split_variant("antigravity_cli", xl) == (xl, None)
+    assert [m["id"] for m in catalog.parse_agy_models(xl + "\n")] == [xl]
     assert catalog.valid_efforts("antigravity_cli") == ("low", "medium", "high")
     assert catalog.valid_efforts("claude_code_cli") == ("low", "medium", "high", "xhigh", "max")
 
@@ -79,9 +82,17 @@ def test_rejection_detection_is_precise() -> None:
     e = rejection('invalid --effort "medium" (valid: low, high)')
     assert e is not None and e.what == "effort"
     assert rejection("There's an issue with the selected model (x). It may not exist") is not None
+    assert rejection('unknown model "gemini-9"') is not None and rejection("unknown model name foo") is not None
+    # agy 1.2.9: "--effort is not supported for the current model" / "… for model %q" = MỨC sai, không phải model sai.
+    for msg in ("--effort is not supported for the current model",
+                '--effort is not supported for model "claude-sonnet-4-6-thinking"'):
+        eff = rejection(msg)
+        assert eff is not None and eff.what == "effort", msg
     # Không phải lỗi "không biết model" → KHÔNG báo "CLI không nhận model".
     for msg in ("Invalid model tier 3", "model returned invalid JSON", "context window: model output not supported "
-                "for tool", "429 RESOURCE_EXHAUSTED", "authentication failed or timed out"):
+                "for tool", "429 RESOURCE_EXHAUSTED", "authentication failed or timed out",
+                'unknown model tier: "x"', "unknown model key gemini31", "The model is not available right now, "
+                "please try again later (503)"):
         assert rejection(msg) is None, msg
 
 
@@ -171,6 +182,11 @@ async def test_claude_code_effort_flag(owner_api, clis) -> None:  # type: ignore
     assert t["ok"] and (t["probe_model"], t["probe_effort"]) == ("opus", "xhigh")
     r = await api.send("POST", f"/providers/{p['id']}/models", {"model_name": "opus", "effort": "ultra"})
     assert r.status_code == 422
+    # Review v0.1.32: mức suy nghĩ theo TỪNG model — haiku không có (tài liệu Claude Code) → 422, không lưu.
+    r = await api.send("POST", f"/providers/{p['id']}/models", {"model_name": "haiku", "effort": "high"})
+    assert r.status_code == 422 and "không chỉnh được mức suy nghĩ" in r.json()["errors"]["effort"], r.text
+    r = await api.send("POST", f"/providers/{p['id']}/models", {"model_name": "haiku"})
+    assert r.status_code == 201, r.text
 
 
 # ─── chuyển dữ liệu cũ (migration 0023) ────────────────────────────────────
@@ -184,7 +200,7 @@ async def test_migration_splits_saved_variant_names(owner_api, clis) -> None:  #
     pid = uuid.UUID(p["id"])
     async with sessionmaker()() as db:
         for name, default in (("gemini-3.8-flash-high", True), ("gemini-3.8-flash-low", False),
-                              ("gemini-3.1-pro-low", False)):
+                              ("gemini-3.1-pro-low", False), ("gemini-3.5-flash-extra-low", False)):
             await db.execute(text("""INSERT INTO agent.models (provider_id, model_name, is_default)
                                      VALUES (:p, :m, :d)"""), {"p": pid, "m": name, "d": default})
         await db.commit()
@@ -196,7 +212,33 @@ async def test_migration_splits_saved_variant_names(owner_api, clis) -> None:  #
         rows = {r.model_name: r.effort for r in (await db.execute(text(
             "SELECT model_name, effort FROM agent.models WHERE provider_id = :p"), {"p": pid})).all()}
     # Dòng mặc định thắng tên gốc; dòng trùng còn lại chỉ ghi effort (lúc gọi vẫn tách hậu tố).
-    assert rows == {"gemini-3.8-flash": "high", "gemini-3.8-flash-low": "low", "gemini-3.1-pro": "low"}
+    assert rows == {"gemini-3.8-flash": "high", "gemini-3.8-flash-low": "low", "gemini-3.1-pro": "low",
+                    "gemini-3.5-flash-extra-low": None}     # tên riêng — không tách
+
+
+async def test_auto_assign_splits_pre_upgrade_probe_model(owner_api, clis) -> None:  # type: ignore[no-untyped-def]
+    """Review v0.1.32: `last_test.probe_model` của bản ≤ v0.1.31 còn tên biến thể → tự gán lưu model gốc + mức."""
+    api = owner_api
+    await _login(api, "antigravity_cli", "4/an")
+    p = await _provider(api, "antigravity_cli")
+    from gh.db import sessionmaker
+    from gh.setup.routes import _tested_choice, auto_assign_tested_model
+
+    assert _tested_choice(type("P", (), {"kind": "antigravity_cli", "probe_model": "gemini-3.8-flash-high",
+                                          "probe_effort": None, "test_models": []})()) == ("gemini-3.8-flash", "high")
+    pid = uuid.UUID(p["id"])
+    async with sessionmaker()() as db:
+        org = (await db.execute(text("SELECT org_id FROM agent.providers WHERE id = :i"), {"i": pid})).scalar_one()
+        await db.execute(text("DELETE FROM agent.bindings WHERE org_id = :o"), {"o": org})
+        await db.execute(text("""UPDATE agent.providers SET is_enabled = (id = :i), last_test = CAST(:t AS jsonb)
+                                 WHERE org_id = :o"""),
+                         {"i": pid, "o": org, "t": json.dumps({"ok": True, "probe_model": "gemini-3.8-flash-high",
+                                                               "models": ["gemini-3.8-flash-high"]})})
+        await db.commit()
+        mid = await auto_assign_tested_model(db, org)
+        await db.commit()
+        row = (await db.execute(text("SELECT model_name, effort FROM agent.models WHERE id = :m"), {"m": mid})).one()
+    assert (row.model_name, row.effort) == ("gemini-3.8-flash", "high")
 
 
 # ─── Chẩn đoán (chỉ Owner) ─────────────────────────────────────────────────
@@ -208,17 +250,30 @@ async def test_diagnose_returns_redacted_raw_output(owner_api, clis) -> None:  #
     r = await api.send("POST", f"/providers/{p['id']}/diagnose")
     assert r.status_code == 200, r.text
     d = r.json()
-    assert [s["label"] for s in d["steps"]] == ["Phiên bản", "Danh sách model", "Gọi thử 1 lượt"]
+    assert [s["label"] for s in d["steps"]] == ["Phiên bản", "Danh sách model", "Model của tài khoản (/model)",
+                                                "Mức suy nghĩ (/effort)", "Gọi thử 1 lượt"]
     assert d["steps"][0]["stdout"].strip() == "1.2.9" and d["steps"][0]["exit_code"] == 0
     assert "gemini-3.8-flash-high" in d["steps"][1]["stdout"]
-    call = d["steps"][2]
+    # agy -p "/model", "/effort": bản ghi tab-separated, không tốn lượt (changelog agy 1.1.11).
+    assert d["steps"][2]["command"] == "agy -p /model" and "gemini-3.1-pro\tlow,high" in d["steps"][2]["stdout"]
+    assert d["steps"][3]["command"].startswith("agy -p /effort --model gemini-3.8-flash")
+    assert "high\tcurrent" in d["steps"][3]["stdout"]
+    call = d["steps"][4]
     assert call["exit_code"] == 0 and "--model gemini-3.8-flash" in call["command"]
     assert "a***@example.vn" in call["stdout"] and "an@example.vn" not in call["stdout"]
 
-    from gh.auth.deps import require_owner
-    from gh.system_api.routes import diagnose_provider
 
-    assert inspect.signature(diagnose_provider).parameters["user"].default.dependency is require_owner
+async def test_diagnose_is_owner_only(owner_api, client, db, clis) -> None:  # type: ignore[no-untyped-def]
+    """Chẩn đoán chạy lệnh CLI thật (tốn lượt) và lộ đầu ra thô → chỉ Owner; Quản lý (có system.manage) bị 403."""
+    from tests.test_rbac_api import login_as
+
+    await _login(owner_api, "antigravity_cli", "4/an")
+    p = await _provider(owner_api, "antigravity_cli")
+    manager = await login_as(client, db, "manager")
+    n = len(_calls(clis))
+    r = await manager.send("POST", f"/providers/{p['id']}/diagnose")
+    assert r.status_code == 403, r.text
+    assert len(_calls(clis)) == n   # không lệnh CLI nào chạy
 
 
 async def test_diagnose_claude_not_logged_in_skips_call(owner_api, app, clis) -> None:  # type: ignore[no-untyped-def]

@@ -1269,6 +1269,13 @@ export function createPhase2(opts: Phase2Options) {
             agy
               ? { label: 'Danh sách model', command: 'agy models', exit_code: 0, stdout: 'Fetching available models...\nAvailable models:\n  gemini-3.8-flash-high (current)\n  gemini-3.8-flash-low\n  gemini-3.1-pro-high\n', stderr: '', ms: 930, note: null }
               : { label: 'Đăng nhập (Claude Code không có lệnh liệt kê model)', command: 'claude auth status --json', exit_code: 0, stdout: '{"loggedIn": true, "email": "r***@gmail.com"}\n', stderr: '', ms: 210, note: null },
+            // v0.1.32 (review): agy -p "/model", "/effort" — bản ghi tab-separated, không tốn lượt (changelog agy 1.1.11).
+            ...(agy
+              ? [
+                  { label: 'Model của tài khoản (/model)', command: 'agy -p /model', exit_code: 0, stdout: 'gemini-3.8-flash\tlow,medium,high\tcurrent\ngemini-3.1-pro\tlow,high\t\n', stderr: '', ms: 640, note: null },
+                  { label: 'Mức suy nghĩ (/effort)', command: `agy -p /effort --model ${model}`, exit_code: 0, stdout: 'low\t\nmedium\t\nhigh\tcurrent\n', stderr: '', ms: 610, note: null },
+                ]
+              : []),
             { label: 'Gọi thử 1 lượt', command: call, exit_code: 0, stdout: '{"response":"OK","usage":{"input_tokens":9,"output_tokens":1}}\n', stderr: '', ms: 3120, note: null },
           ],
         });

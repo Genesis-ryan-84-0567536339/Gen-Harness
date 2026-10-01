@@ -1074,25 +1074,34 @@ hoá — hệ thống chỉ giảm (đọc ít, dừng ngay khi có cảnh báo)
   gốc + `effort=high`, dòng trùng tên gốc chỉ ghi effort — lúc gọi vẫn tách hậu tố, chạy lại an toàn). `catalog.py`: bộ đọc
   `agy models` gộp biến thể về model gốc + danh sách mức (`efforts`, `default_effort` từ dòng "(current)"); danh sách không bao
   giờ thu gọn còn model đã lưu (CLI liệt kê ≤ 1 model → thêm mục dự phòng "chưa xác minh"; model đã lưu mà CLI không liệt kê
-  vẫn hiện); mỗi mục có `verified` + `source_ref`. Bỏ `claude-sonnet-4-6`/`claude-opus-4-6` (qua Antigravity) — không có nguồn.
+  vẫn hiện); mỗi mục có `verified` + `source_ref`. `claude-sonnet-4-6`/`claude-opus-4-6` (qua Antigravity): tệp chạy có chuỗi
+  này nhưng chưa xác minh khi đăng nhập; bỏ khỏi danh sách cho đến khi xác minh. `gemini-3.5-flash-extra-low` (tên riêng trong
+  tệp chạy) không bị tách thành `-extra` + low (Python lẫn migration).
   `AgyClient`: `--model <gốc> [--effort <mức>]` (không mức → không gửi `--effort`, CLI tự chọn); `ClaudeCodeClient`:
-  `--effort=<mức>` (low…max). Nhận diện từ chối CHÍNH XÁC theo chuỗi lỗi có trong agy 1.2.9 / Claude Code; phân biệt model
-  sai / mức sai; đọc danh sách CLI tự nêu ("available: …") đưa vào câu lỗi; 422 kèm `technical` (lỗi gốc đã che) cho "Chi
-  tiết kỹ thuật". `POST /providers/{id}/models` nhận `effort` (không gửi = giữ mức đã lưu; đổi mức = gọi thử lại).
+  `--effort=<mức>` (low…max). Nhận diện từ chối CHÍNH XÁC theo chuỗi lỗi có trong agy 1.2.9 / Claude Code ("invalid model
+  selection", `Invalid model "…"`, `unknown model "…"`/"unknown model name", "invalid --effort", "--effort is not supported for
+  the current model / for model %q"); KHÔNG khớp "unknown model tier/key" (nội bộ agy) và "The model is not available right
+  now (503)" (lỗi tạm thời — chuyển nguồn/thử lại); phân biệt model sai / mức sai; đọc danh sách CLI tự nêu ("available: …")
+  đưa vào câu lỗi; 422 kèm `technical` (lỗi gốc đã che) cho "Chi tiết kỹ thuật". `POST /providers/{id}/models` nhận `effort`
+  (không gửi = giữ mức đã lưu; đổi mức = gọi thử lại; kiểm theo TỪNG model khi đã biết — haiku + effort → 422). Bước 4 / tự
+  gán: `last_test.probe_model` cũ dạng biến thể được tách thành model gốc + mức.
   `POST /providers/{id}/test`: thêm `at`, `probe_effort`, `error_detail`, `models_raw`. Mới: `POST /providers/{id}/diagnose`
-  (chỉ Owner, chung giới hạn 12 lượt/10 phút): `--version`, `agy models` / `claude auth status --json`, 1 lượt gọi rất ngắn
-  đúng model + mức; trả stdout/stderr/mã thoát đã che (token, link OAuth, email → `a***@miền`).
+  (chỉ Owner — Quản lý bị 403; chung giới hạn 12 lượt/10 phút): `--version`, `agy models` / `claude auth status --json`,
+  với agy đã đăng nhập thêm `agy -p "/model"` và `agy -p "/effort" --model <gốc>` (changelog agy 1.1.11: ở chế độ in các lệnh
+  này "emit one tab-separated record per line … without starting an agent turn, spending quota" → danh sách model/mức THẬT
+  của tài khoản, không tốn lượt), rồi 1 lượt gọi rất ngắn đúng model + mức; trả stdout/stderr/mã thoát đã che (token, link
+  OAuth, email → `a***@miền`).
 - **Web**: `ModelPicker` = ô model gốc (nhóm, "chưa xác minh" khi cần) + ô **Mức suy nghĩ** (chỉ mức model nhận; model không
   chỉnh mức → ghi "CLI tự chọn"); lỗi có "Chi tiết kỹ thuật". "Gọi thử OK · 4,63 s · gemini-3.8-flash · Cao · lúc 01/10 10:21"
   (luôn kèm giờ lần gọi thật). Nút **Chẩn đoán** + **Chép** (chỉ Owner) trên dòng nguồn CLI ở bước 4 và Agent & Model.
-- **Test**: api `tests/test_cli_effort_v0132.py` (12; CLI giả `fake_agy_multi.py` mô phỏng đúng cờ/lỗi agy 1.2.9,
-  `fake_claude.py` thêm `--effort`, `--version`); web `test/unit/cli-effort-v0132.test.tsx` (4); e2e mock
+- **Test**: api `tests/test_cli_effort_v0132.py` (14; CLI giả `fake_agy_multi.py` mô phỏng đúng cờ/lỗi agy 1.2.9,
+  `fake_claude.py` thêm `--effort`, `--version`); web `test/unit/cli-effort-v0132.test.tsx` (5); e2e mock
   `e2e/cli-effort-v0132.spec.ts` (2).
 
 ### Nguồn dữ liệu model (thứ tự tin cậy — Boss 01/10)
 
-1. **CLI đã đăng nhập, lúc chạy**: `agy models` (đọc trung thực), lỗi `Invalid model %q (available: %s)` của chính CLI,
-   `--help`. Claude Code không có lệnh liệt kê model.
+1. **CLI đã đăng nhập, lúc chạy**: `agy models` (đọc trung thực), `agy -p "/model"` / `"/effort"` (Chẩn đoán), lỗi
+   `Invalid model %q (available: %s)` của chính CLI, `--help`. Claude Code không có lệnh liệt kê model.
 2. **Tài liệu chính thức**: https://code.claude.com/docs/en/model-config (đọc 01/10/2026): bí danh `fable/sonnet/opus/haiku…`;
    effort low…max cho Fable/Opus/Sonnet (Haiku không có trong bảng → không gửi `--effort`). Chưa đọc được tài liệu chính thức
    của Antigravity CLI (codelabs.developers.google.com bị chặn mạng trong máy dựng).

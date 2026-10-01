@@ -37,14 +37,16 @@ test.describe('v0.1.32 — model + mức suy nghĩ tách riêng, Chẩn đoán C
     await expect(row).toContainText('không chỉnh mức suy nghĩ');
   });
 
-  test('Chẩn đoán (Owner): phiên bản, agy models, 1 lượt gọi — mã thoát + đầu ra thô, có nút Chép', async ({ page }) => {
+  test('Chẩn đoán (Owner): phiên bản, agy models, /model, /effort, 1 lượt gọi — mã thoát + đầu ra thô, có nút Chép', async ({ page }) => {
     await page.goto('/guide/4');
     const row = page.locator('.prov-row', { hasText: 'Antigravity Brain' });
     await row.getByRole('button', { name: 'Chẩn đoán' }).click();
-    await expect(row.locator('.cli-diag__step')).toHaveCount(3);
+    await expect(row.locator('.cli-diag__step')).toHaveCount(5);
     await expect(row.locator('.cli-diag__step').nth(0)).toContainText('1.2.9');
     await expect(row.locator('.cli-diag__step').nth(1)).toContainText('gemini-3.8-flash-high');
-    await expect(row.locator('.cli-diag__step').nth(2)).toContainText('mã thoát 0');
+    await expect(row.locator('.cli-diag__step').nth(2)).toContainText('agy -p /model');
+    await expect(row.locator('.cli-diag__step').nth(3)).toContainText('agy -p /effort');
+    await expect(row.locator('.cli-diag__step').nth(4)).toContainText('mã thoát 0');
     await expect(row.getByRole('button', { name: 'Chép' })).toBeVisible();
   });
 });

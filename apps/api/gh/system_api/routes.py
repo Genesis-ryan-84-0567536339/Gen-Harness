@@ -505,6 +505,12 @@ async def add_model(pid: uuid.UUID, body: ModelIn, request: Request, user: servi
         raise field_errors({"model_name": "Tên model chỉ gồm chữ, số và . _ - : / [ ]"})
     if effort and effort not in catalog.valid_efforts(p.kind):
         raise field_errors({"effort": f"{p.name} không có mức suy nghĩ “{effort}”"})
+    # Review v0.1.32: theo TỪNG model khi nguồn chính thức nói rõ (Claude Code: haiku không có mức suy nghĩ — claude
+    # bỏ qua `--effort`, lưu vào chỉ gây hiểu nhầm). Model lạ (CLI liệt kê lúc chạy) → để lượt gọi thử quyết định.
+    known = catalog.known_efforts(p.kind, name)
+    if effort and known is not None and effort not in known:
+        raise field_errors({"effort": f"Model “{name}” không chỉnh được mức suy nghĩ “{effort}”"
+                                      + (f" (chỉ: {', '.join(known)})" if known else "")})
     if p.kind in CLI_KINDS and (prev is None or (prev.effort or None) != effort):
         await _probe_budget(request.app.state.redis, user.org_id)
         # v0.1.31: danh sách model của CLI có thể là danh mục dự phòng → gọi thử THẬT (đúng cờ --model/--effort) trước

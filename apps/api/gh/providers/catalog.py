@@ -23,7 +23,8 @@ Bằng chứng đã đo (2026-10-01, tệp chạy agy 1.2.9 thật, chưa đăng
   "--model <model> … an alias for the latest model (e.g. 'fable', 'opus', or 'sonnet') or a model's full name".
 - https://code.claude.com/docs/en/model-config (đọc 2026-10-01): bí danh thêm `haiku`; bảng effort chỉ liệt kê
   Fable/Opus/Sonnet (low…max) — Haiku không có trong bảng → không gửi `--effort` cho haiku.
-Bản v0.1.31 có "claude-sonnet-4-6"/"claude-opus-4-6" (qua Antigravity) không có nguồn (1)/(2) → đã bỏ.
+Bản v0.1.31 có "claude-sonnet-4-6"/"claude-opus-4-6" (qua Antigravity): tệp chạy agy 1.2.9 có chuỗi này nhưng chưa xác
+minh khi đăng nhập (không phải nguồn (1)/(2)) → bỏ khỏi danh sách dự phòng cho đến khi xác minh.
 """
 
 import re
@@ -41,7 +42,8 @@ EFFORT_ORDER = ("low", "medium", "high", "xhigh", "max")
 EFFORT_LABEL = {"low": "Thấp", "medium": "Vừa", "high": "Cao", "xhigh": "Rất cao", "max": "Tối đa"}
 AGY_EFFORTS = ("low", "medium", "high")                     # `agy --help` 1.2.9
 CLAUDE_EFFORTS = ("low", "medium", "high", "xhigh", "max")  # `claude --help` 2.1.285
-_VARIANT = re.compile(r"^(?P<base>.+?)-(?P<effort>low|medium|high)$", re.I)
+# "gemini-3.5-flash-extra-low" (có trong tệp chạy agy 1.2.9) KHÔNG phải "gemini-3.5-flash-extra" + "low" → giữ nguyên.
+_VARIANT = re.compile(r"^(?P<base>.+?)(?<!-extra)-(?P<effort>low|medium|high)$", re.I)
 _EFFORT_WORD = re.compile(r"(?<![\w-])(low|medium|high)(?![\w-])", re.I)
 
 GROUP_ORDER = ("Gemini", "Claude (qua Antigravity)", "Claude", "GPT-OSS", "Khác")
@@ -76,6 +78,15 @@ def strip_ansi(s: str) -> str:
 
 def valid_efforts(kind: str) -> tuple[str, ...]:
     return AGY_EFFORTS if kind == "antigravity_cli" else CLAUDE_EFFORTS if kind == "claude_code_cli" else ()
+
+
+def known_efforts(kind: str, model_id: str) -> tuple[str, ...] | None:
+    """Mức suy nghĩ của model theo nguồn ĐÃ xác minh (CLI --help + tài liệu chính thức); None = không biết."""
+    if kind == "claude_code_cli":
+        for m in CLAUDE_CODE_MODELS:
+            if m["id"] == model_id:
+                return tuple(m["efforts"])
+    return None
 
 
 def split_variant(kind: str, model_id: str) -> tuple[str, str | None]:

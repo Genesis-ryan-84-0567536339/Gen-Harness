@@ -70,6 +70,17 @@ if sys.argv[1:2] == ["-p"]:
             sys.exit(2)
     model = sys.argv[sys.argv.index("--model") + 1] if "--model" in sys.argv else ""
     effort = sys.argv[sys.argv.index("--effort") + 1] if "--effort" in sys.argv else ""
+    # agy 1.2.9 (changelog 1.1.11): `-p "/model"`, `-p "/effort"` in một bản ghi tab-separated mỗi dòng, không tốn lượt.
+    # Định dạng cột chưa đo được khi đã đăng nhập → giả định.
+    if sys.argv[2] == "/model":
+        for base, effs in VARIANTS.items():
+            print("\t".join([base, ",".join(effs), "current" if base == "gemini-3.8-flash" else ""]))
+        sys.exit(0)
+    if sys.argv[2] == "/effort":
+        effs = VARIANTS.get(model or "gemini-3.8-flash", [])
+        for e in effs:
+            print("\t".join([e, "current" if e == "high" else ""]))
+        sys.exit(0)
     with CALLS.open("a") as fh:
         fh.write(json.dumps({"model": model, "effort": effort}) + "\n")
     err = None

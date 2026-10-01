@@ -19,7 +19,7 @@ import { EFFORT_HINT, choiceText, effortOptionText, currentChoice, isCliKind, mo
  */
 export function ModelPicker({ provider: p, test }: { provider: Provider; test: ProviderTestResult | null | undefined }) {
   const current = currentChoice(p);
-  const groups = useMemo(() => withSaved(offeredGroups(test), current?.model ?? null), [test, current?.model]);
+  const groups = useMemo(() => withSaved(offeredGroups(test), current), [test, current?.model, current?.effort]); // eslint-disable-line react-hooks/exhaustive-deps
   const all = useMemo(() => groups.flatMap((g) => g.models), [groups]);
   const initial = (current && all.some((m) => m.id === current.model) ? current.model : null) ?? test?.probe_model ?? all[0]?.id ?? '';
   const [model, setModel] = useState(initial);
@@ -122,8 +122,30 @@ export function ModelPicker({ provider: p, test }: { provider: Provider; test: P
   );
 }
 
-/** Model đã lưu mà danh sách không có (vd máy chủ cũ) vẫn hiện — không bao giờ mất lựa chọn đang dùng. */
-function withSaved(groups: ModelGroup[], saved: string | null): ModelGroup[] {
-  if (!saved || !groups.length || groups.some((g) => g.models.some((m) => m.id === saved))) return groups;
-  return [...groups, { label: 'Đã lưu', models: [{ id: saved, label: saved, group: 'Đã lưu', tier: 'balanced', hint: '', source: 'saved' }] }];
+/**
+ * Model đã lưu mà danh sách không có (vd máy chủ cũ) vẫn hiện — không bao giờ mất lựa chọn đang dùng. Review v0.1.32: mang
+ * theo MỨC đã lưu (đã gọi thử OK lúc lưu) để nút hiện "Đang dùng" và bấm lại không ghi đè mức thành rỗng.
+ */
+function withSaved(groups: ModelGroup[], saved: { model: string; effort: Effort | null } | null): ModelGroup[] {
+  if (!saved || !groups.length) return groups;
+  const eff = saved.effort;
+  if (groups.some((g) => g.models.some((m) => m.id === saved.model)))
+    return eff
+      ? groups.map((g) => ({
+          ...g,
+          models: g.models.map((m) => (m.id === saved.model && !(m.efforts ?? []).includes(eff) ? { ...m, efforts: sortEfforts([...(m.efforts ?? []), eff]) } : m)),
+        }))
+      : groups;
+  return [
+    ...groups,
+    {
+      label: 'Đã lưu',
+      models: [{ id: saved.model, label: saved.model, group: 'Đã lưu', tier: 'balanced', hint: '', source: 'saved', efforts: eff ? [eff] : [], default_effort: eff }],
+    },
+  ];
+}
+
+const EFFORT_ORDER: Effort[] = ['low', 'medium', 'high', 'xhigh', 'max'];
+function sortEfforts(e: Effort[]): Effort[] {
+  return EFFORT_ORDER.filter((x) => e.includes(x));
 }

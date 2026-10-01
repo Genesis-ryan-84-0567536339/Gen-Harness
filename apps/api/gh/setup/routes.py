@@ -431,12 +431,12 @@ async def step4(body: Step4In, request: Request, db: AsyncSession = DB,
             continue
         mid = await _first_model(db, p.id)
         if mid is None:
-            name = _tested_name(p)
-            if name:
+            choice = _tested_choice(p)
+            if choice:
                 mid = (await db.execute(text("""
                     INSERT INTO agent.models (provider_id, model_name, effort) VALUES (:p, :m, :e)
                     ON CONFLICT (provider_id, model_name) DO UPDATE SET model_name = EXCLUDED.model_name
-                    RETURNING id"""), {"p": p.id, "m": name[:120], "e": _tested_effort(p, name)})).scalar_one()
+                    RETURNING id"""), {"p": p.id, "m": choice[0], "e": choice[1]})).scalar_one()
         model_id = model_id or mid
     if model_id is None:
         raise incomplete("Chưa có model nào để dùng — bấm \"Kiểm tra\" ở một nguồn rồi chọn \"Dùng model này\"")
@@ -468,7 +468,7 @@ async def auto_assign_tested_model(db: AsyncSession, org_id: uuid.UUID) -> uuid.
     """Model của nguồn đã gọi thử OK (đã chọn, hoặc model đầu tiên nhận được khi gọi thử) → gán cho agent lõi còn
     trống. Không có nguồn nào như vậy → None, không đổi gì."""
     rows = (await db.execute(text("""
-        SELECT p.id, CASE WHEN jsonb_typeof(p.last_test->'models') = 'array' THEN
+        SELECT p.id, p.kind, CASE WHEN jsonb_typeof(p.last_test->'models') = 'array' THEN
                     ARRAY(SELECT jsonb_array_elements_text(p.last_test->'models')) END AS test_models,
                p.last_test->>'probe_model' AS probe_model, p.last_test->>'probe_effort' AS probe_effort
         FROM agent.providers p
@@ -481,13 +481,13 @@ async def auto_assign_tested_model(db: AsyncSession, org_id: uuid.UUID) -> uuid.
     for p in rows:
         mid = await _first_model(db, p.id)
         if mid is None:
-            name = _tested_name(p)
-            if name is None:
+            choice = _tested_choice(p)
+            if choice is None:
                 continue
             mid = (await db.execute(text("""
                 INSERT INTO agent.models (provider_id, model_name, effort) VALUES (:p, :m, :e)
                 ON CONFLICT (provider_id, model_name) DO UPDATE SET model_name = EXCLUDED.model_name
-                RETURNING id"""), {"p": p.id, "m": name[:120], "e": _tested_effort(p, name)})).scalar_one()
+                RETURNING id"""), {"p": p.id, "m": choice[0], "e": choice[1]})).scalar_one()
         await _bind_core_agents(db, org_id, mid)
         return mid
     return None
@@ -511,6 +511,18 @@ def _tested_effort(p: Any, name: str) -> str | None:
     if name == getattr(p, "probe_model", None) and eff in ("low", "medium", "high", "xhigh", "max"):
         return str(eff)
     return None
+
+
+def _tested_choice(p: Any) -> tuple[str, str | None] | None:
+    """(model gốc, mức suy nghĩ) tự dùng khi Owner chưa chọn. `last_test` từ bản ≤ v0.1.31 có thể còn tên biến thể
+    ("gemini-3.8-flash-high") → tách thành model gốc + mức (review v0.1.32), không bao giờ lưu tên biến thể."""
+    from gh.providers.catalog import split_variant
+
+    name = _tested_name(p)
+    if not name:
+        return None
+    base, var_effort = split_variant(str(getattr(p, "kind", "") or ""), name)
+    return base[:120], _tested_effort(p, name) or var_effort
 
 
 async def _first_model(db: AsyncSession, provider_id: uuid.UUID) -> uuid.UUID | None:
