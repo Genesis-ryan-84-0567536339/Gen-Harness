@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     # Kho phát hành để hỏi bản mới nhất (GitHub Releases); rỗng ⇒ không kiểm bản mới.
     release_repo: str = "Genesis-ryan-84-0567536339/Gen-Harness"
     cli_binary: str = "agy"
+    # v0.1.31: Claude Code CLI (gói Claude của Owner) — CLAUDE_CONFIG_DIR (.credentials.json + .claude.json); volume
+    # chung api/worker như agy. Không có tệp chạy ⇒ thẻ Claude Code báo "chưa cài", không ảnh hưởng nguồn khác.
+    claude_home: str = "~/.claude-gh/.claude"
+    claude_binary: str = "claude"
 
     # Phiên đăng nhập 7 ngày, trượt (gia hạn khi còn dưới nửa — gh/auth/service.py::load_session): app tự host,
     # một Owner, không nên bắt đăng nhập lại mỗi ngày.
