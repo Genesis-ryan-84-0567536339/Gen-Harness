@@ -664,12 +664,28 @@ export function createPhase2(opts: Phase2Options) {
         { id: randomUUID(), email: 'ryan.genesis@gmail.com', plan_label: 'Google AI Pro · token 0 ₫', active: true, expires_at: iso(Date.now() + 23 * 3600_000 + 20 * 60_000), state: 'ok' },
         { id: randomUUID(), email: 'ops.genesis@gmail.com', plan_label: 'Google AI · miễn phí', active: false, expires_at: iso(Date.now() + 5 * 86_400_000), state: 'ok' },
       ];
+  // v0.1.31: hồ sơ Claude Code CLI (gói Claude) — tách khỏi hồ sơ Google của Antigravity, mặc định trống (TẮT).
+  const claudeProfiles: CliProfile[] = [];
+  const profilesOf = (kind: string | null) => (kind === 'claude_code_cli' ? claudeProfiles : cliProfiles);
   const cliLogins = new Map<string, CliLoginEvent>();
+  // Như máy chủ (gh.providers.catalog): danh sách model theo nhóm + gợi ý nhanh/rẻ hay mạnh.
+  const opt = (id: string, label: string, group: string, tier: 'fast' | 'balanced' | 'strong', source: 'cli' | 'catalog' = 'cli') => ({
+    id, label, group, tier, hint: tier === 'fast' ? 'nhanh, rẻ' : tier === 'balanced' ? 'cân bằng' : 'mạnh, chậm hơn, tốn hạn mức hơn', source,
+  });
+  const MODEL_GROUPS: Record<string, Array<{ label: string; models: ReturnType<typeof opt>[] }>> = {
+    antigravity_cli: [
+      { label: 'Gemini', models: [opt('gemini-3.8-flash-high', 'Gemini 3.8 Flash (High)', 'Gemini', 'strong'), opt('gemini-3.8-flash-low', 'Gemini 3.8 Flash (Low)', 'Gemini', 'fast'), opt('gemini-3.1-pro-high', 'Gemini 3.1 Pro (High)', 'Gemini', 'strong')] },
+      { label: 'Claude (qua Antigravity)', models: [opt('claude-sonnet-4-6-thinking', 'Claude Sonnet 4.6 (Thinking)', 'Claude (qua Antigravity)', 'balanced'), opt('claude-opus-4-6-thinking', 'Claude Opus 4.6 (Thinking)', 'Claude (qua Antigravity)', 'strong')] },
+    ],
+    claude_code_cli: [
+      { label: 'Claude', models: [opt('haiku', 'Haiku (bản mới nhất)', 'Claude', 'fast', 'catalog'), opt('sonnet', 'Sonnet (bản mới nhất)', 'Claude', 'balanced', 'catalog'), opt('opus', 'Opus (bản mới nhất)', 'Claude', 'strong', 'catalog'), opt('fable', 'Fable (bản mới nhất)', 'Claude', 'strong', 'catalog')] },
+    ],
+  };
 
   const credentials = (): Credential[] => {
     const out: Credential[] = [];
     for (const p of providers) {
-      if (p.kind === 'antigravity_cli') continue;
+      if (p.kind === 'antigravity_cli' || p.kind === 'claude_code_cli') continue;
       if (p.kind === 'gemini' && p.keys.length > 1) {
         out.push({ icon: 'ph ph-key', name: `${p.name} — ${p.keys.length} khoá xoay vòng`, meta: `${p.keys[0].label} … ${p.keys[p.keys.length - 1].label.slice(-2)} · làm mới 00:00`, state: p.auth_state === 'ok' ? 'ok' : 'warn', state_label: p.auth_state === 'ok' ? 'Hoạt động' : 'Sắp cạn' });
       } else {
@@ -1206,12 +1222,16 @@ export function createPhase2(opts: Phase2Options) {
       if (seg[2] === 'test' && m === 'POST') {
         const secret = (pv as Provider & { _secret?: string })._secret ?? '';
         const ok = !/bad|sai/i.test(secret);
-        const models = pv.kind === 'system_one' ? [pv.models[0]?.model_name ?? 'typesafe/jev-1.13'] : pv.kind === 'gemini' ? ['gemini-2.5-flash', 'gemini-2.5-flash-lite'] : pv.kind === 'deepseek' ? ['deepseek-chat', 'deepseek-reasoner'] : pv.kind === 'antigravity_cli' ? ['gemini-2.5-pro'] : ['gpt-4o-mini'];
+        const groups = MODEL_GROUPS[pv.kind];
+        const models = groups ? groups.flatMap((g) => g.models.map((x) => x.id)) : pv.kind === 'system_one' ? [pv.models[0]?.model_name ?? 'typesafe/jev-1.13'] : pv.kind === 'gemini' ? ['gemini-2.5-flash', 'gemini-2.5-flash-lite'] : pv.kind === 'deepseek' ? ['deepseek-chat', 'deepseek-reasoner'] : ['gpt-4o-mini'];
         pv.auth_state = ok ? 'ok' : 'error';
         // Như máy chủ thật (v0.1.28): gọi thử KHÔNG tự thêm model — lưu `last_test`; bước 4 tự lấy model đầu tiên
         // khi Owner chưa bấm "Dùng model này". Jev (system_one) có model mặc định từ lúc tạo.
         const result = ok
-          ? { ok: true, latency_ms: pv.kind === 'system_one' ? 164 : 812, models, error: null }
+          ? {
+              ok: true, latency_ms: pv.kind === 'system_one' ? 164 : 812, models, error: null,
+              ...(groups ? { model_groups: groups, models_source: groups[0].models[0].source, probe_model: pv.models.find((x) => x.is_default)?.model_name ?? models[0] } : {}),
+            }
           : { ok: false, latency_ms: null, models: [], error: /endpoint|127\.0\.0\.1|localhost/i.test(pv.endpoint ?? '') ? 'mạng: All connection attempts failed' : 'HTTP 401: API key not valid' };
         pv.last_test = { ...result, at: iso(Date.now()) };
         reply(200, result);
@@ -1219,7 +1239,7 @@ export function createPhase2(opts: Phase2Options) {
       }
       if (seg.length === 2 && m === 'DELETE') {
         if (!need('system.manage')) return true;
-        if (pv.kind === 'antigravity_cli') return problem(409, 'CLI_PROVIDER', 'Antigravity CLI gỡ bằng cách xoá tài khoản ở thẻ Tài khoản Antigravity CLI');
+        if (pv.kind === 'antigravity_cli' || pv.kind === 'claude_code_cli') return problem(409, 'CLI_PROVIDER', `${pv.name} gỡ bằng cách xoá tài khoản ở thẻ tài khoản CLI`);
         providers.splice(providers.indexOf(pv), 1);
         return reply(204);
       }
@@ -1227,8 +1247,14 @@ export function createPhase2(opts: Phase2Options) {
         if (!need('system.manage')) return true;
         const name = String(body.model_name ?? '').trim();
         if (!name) return problem(422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors: { model_name: 'Bắt buộc' } });
-        pv.models.push({ id: randomUUID(), model_name: name, daily_quota: typeof body.daily_quota === 'number' ? body.daily_quota : null, used_today: 0 });
-        return reply(200, stripSecret(pv));
+        const exists = pv.models.find((x) => x.model_name === name);
+        // v0.1.31: nguồn CLI gọi thử model MỚI trước khi lưu — CLI không nhận thì 422, không lưu.
+        const cliGroups = MODEL_GROUPS[pv.kind];
+        if (cliGroups && !exists && (/bad|sai/i.test(name) || !cliGroups.some((g) => g.models.some((x) => x.id === name))))
+          return problem(422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors: { model_name: `CLI không nhận model “${name}” — chọn model khác trong danh sách` } });
+        if (!exists) pv.models.push({ id: randomUUID(), model_name: name, daily_quota: typeof body.daily_quota === 'number' ? body.daily_quota : null, used_today: 0 });
+        if (body.make_default === true) pv.models.forEach((x) => (x.is_default = x.model_name === name));
+        return reply(cliGroups ? 201 : 200, stripSecret(pv));
       }
       if (seg.length === 2 && m === 'PATCH') {
         if (!need('system.manage')) return true;
@@ -1241,34 +1267,39 @@ export function createPhase2(opts: Phase2Options) {
 
     // CLI
     if (seg[0] === 'cli') {
-      if (seg[1] === 'profiles' && seg.length === 2 && m === 'GET') return need('system.read') ? reply(200, cliProfiles) : true;
+      if (seg[1] === 'profiles' && seg.length === 2 && m === 'GET') return need('system.read') ? reply(200, profilesOf(q.get('kind'))) : true;
       if (seg[1] === 'profiles' && seg[3] === 'activate' && m === 'POST') {
         if (!need('system.manage') || !pin('cli.switch_account')) return true;
-        const pr = cliProfiles.find((x) => x.id === seg[2]);
+        const list = cliProfiles.some((x) => x.id === seg[2]) ? cliProfiles : claudeProfiles;
+        const pr = list.find((x) => x.id === seg[2]);
         if (!pr) return problem(404, 'NOT_FOUND', 'Không tồn tại');
-        cliProfiles.forEach((x) => (x.active = x.id === pr.id));
+        list.forEach((x) => (x.active = x.id === pr.id));
         reply(200, pr);
         return true;
       }
       if (seg[1] === 'profiles' && seg.length === 3 && m === 'DELETE') {
         if (!need('system.manage') || !pin('cli.switch_account')) return true;
-        const i = cliProfiles.findIndex((x) => x.id === seg[2]);
+        const list = cliProfiles.some((x) => x.id === seg[2]) ? cliProfiles : claudeProfiles;
+        const i = list.findIndex((x) => x.id === seg[2]);
         if (i < 0) return problem(404, 'NOT_FOUND', 'Không tồn tại');
-        if (cliProfiles[i].active) return problem(409, 'CONFLICT', 'Không xoá được hồ sơ đang dùng');
-        cliProfiles.splice(i, 1);
+        if (list[i].active) return problem(409, 'CONFLICT', 'Không xoá được hồ sơ đang dùng');
+        list.splice(i, 1);
         reply(204);
         return true;
       }
       if (seg[1] === 'login' && seg.length === 2 && m === 'POST') {
         if (!need('system.manage')) return true;
         const loginId = randomUUID();
-        cliLogins.set(loginId, { login_id: loginId, status: 'starting' });
+        const kind = q.get('kind') === 'claude_code_cli' ? 'claude_code_cli' : 'antigravity_cli';
+        cliLogins.set(loginId, { login_id: loginId, kind, status: 'starting' });
         reply(202, { login_id: loginId });
-        later(150, () => cliEmit({ login_id: loginId, status: 'starting' }));
+        later(150, () => cliEmit({ login_id: loginId, kind, status: 'starting' }));
         later(900, () =>
           cliEmit({
-            login_id: loginId, status: 'waiting_code',
-            url: `https://accounts.google.com/o/oauth2/v2/auth?client_id=antigravity-cli&response_type=code&state=${loginId.slice(0, 8)}`,
+            login_id: loginId, kind, status: 'waiting_code',
+            url: kind === 'claude_code_cli'
+              ? `https://claude.com/cai/oauth/authorize?code=true&client_id=claude-code&response_type=code&state=${loginId.slice(0, 8)}`
+              : `https://accounts.google.com/o/oauth2/v2/auth?client_id=antigravity-cli&response_type=code&state=${loginId.slice(0, 8)}`,
             message: 'Mở trang đăng nhập, rồi dán mã xác thực vào đây.',
           }),
         );
@@ -1288,6 +1319,18 @@ export function createPhase2(opts: Phase2Options) {
         later(900, () => {
           if (code.length < 4 || /sai|bad/i.test(code)) {
             cliEmit({ login_id: lg.login_id, status: 'failed', message: 'Mã xác thực không đúng hoặc đã hết hạn.' });
+            return;
+          }
+          if (lg.kind === 'claude_code_cli') {
+            const cp: CliProfile = {
+              id: randomUUID(), kind: 'claude_code_cli', email: claudeProfiles.length ? `claude.ops${claudeProfiles.length}@gmail.com` : 'ryan.claude@gmail.com',
+              plan_label: 'Claude Max', active: true, expires_at: iso(Date.now() - 60_000), refreshable: true, state: 'ok',
+            };
+            claudeProfiles.forEach((x) => (x.active = false));
+            claudeProfiles.push(cp);
+            if (!providers.some((x) => x.kind === 'claude_code_cli'))
+              providers.push({ id: randomUUID(), kind: 'claude_code_cli', name: 'Claude Code CLI', endpoint: null, failover_rank: providers.length + 1, enabled: true, auth_state: 'ok', keys: [], models: [] });
+            cliEmit({ login_id: lg.login_id, kind: 'claude_code_cli', status: 'done', profile: cp });
             return;
           }
           const profile: CliProfile = {

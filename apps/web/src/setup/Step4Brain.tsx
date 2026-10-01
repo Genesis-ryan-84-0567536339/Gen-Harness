@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import type { Provider, ProviderKind, ProviderTestResult } from '@gen-harness/contracts';
+import type { CliKind, Provider, ProviderKind, ProviderTestResult } from '@gen-harness/contracts';
 import { Button, Dialog, EmptyState, Icon, IconButton, SelectField, TextField } from '@gen-harness/ui';
 import { api } from '../lib/api';
 import { qk2, useCliProfiles, useProviders } from '../lib/dataQueries';
@@ -9,15 +9,16 @@ import { queryClient } from '../lib/queryClient';
 import { useNow } from '../lib/useNow';
 import { errorText } from '../lib/errorText';
 import { CardError, FriendlyErrorText, InlineError, SkeletonLines, StateChip } from '../screens/common';
-import { providerStatus } from '../screens/api/apiModel';
-import { CliLoginPanel } from '../screens/system/CliCard';
+import { PROVIDER_KIND_LABEL, isCliKind, providerStatus } from '../screens/api/apiModel';
+import { ModelPicker } from '../screens/api/ModelPicker';
+import { ClaudeRiskNotice, CliLoginPanel } from '../screens/system/CliCard';
 import { useCliLogin } from '../screens/system/useCliLogin';
-import { cliAccountLabel, cliChip, cliMeta } from '../screens/system/systemModel';
+import { CLI_TEXT, cliAccountLabel, cliChip, cliMeta } from '../screens/system/systemModel';
 import { providerHasModel, providerReady, testedModels } from './phase2Model';
 import { StepFrame } from './StepFrame';
 import { describeError, type StepProps } from './types';
 
-const KINDS: Array<{ value: Exclude<ProviderKind, 'antigravity_cli'>; label: string; name: string }> = [
+const KINDS: Array<{ value: Exclude<ProviderKind, CliKind | 'system_one'>; label: string; name: string }> = [
   { value: 'gemini', label: 'Gemini API', name: 'Gemini API' },
   { value: 'deepseek', label: 'DeepSeek API', name: 'DeepSeek API' },
   { value: 'openai_compat', label: 'Tương thích OpenAI', name: '' },
@@ -30,8 +31,7 @@ const N5 = 'var(--color-neutral-500)';
 export function Step4Brain({ meta, description, onBack, onSaved, formRef, onSkip, skipping, skipError }: StepProps) {
   const providers = useProviders();
   const profiles = useCliProfiles();
-  const login = useCliLogin();
-  const now = useNow(60_000);
+  const claudeProfiles = useCliProfiles('claude_code_cli');
   const [tested, setTested] = useState<Record<string, ProviderTestResult>>({});
   const [order, setOrder] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
@@ -51,7 +51,11 @@ export function Step4Brain({ meta, description, onBack, onSaved, formRef, onSkip
   }, [list]);
 
   const activeProfile = profiles.data?.find((p) => p.active);
-  const cliActive = !!activeProfile && activeProfile.state !== 'expired';
+  const claudeActive = claudeProfiles.data?.find((p) => p.active);
+  const cliActive = {
+    antigravity_cli: !!activeProfile && activeProfile.state !== 'expired',
+    claude_code_cli: !!claudeActive && claudeActive.state !== 'expired',
+  };
   const byOrder = order.map((id) => list.find((p) => p.id === id)).filter((p): p is Provider => !!p);
   // v0.1.28 (UX N1): nguồn chưa gọi được (lỗi / chưa kiểm tra) luôn đứng SAU nguồn dùng được — không bao giờ đầu chuỗi.
   const ready = byOrder.filter((p) => providerReady(p, tested, cliActive));
@@ -107,8 +111,6 @@ export function Step4Brain({ meta, description, onBack, onSaved, formRef, onSkip
     }
   };
 
-  const chip = cliChip(activeProfile);
-
   return (
     <StepFrame
       n={meta.n}
@@ -135,35 +137,8 @@ export function Step4Brain({ meta, description, onBack, onSaved, formRef, onSkip
           }}
         />
       ) : null}
-      <div className="setup-section">
-        <div className="setup-section__title">Tài khoản Google · Antigravity CLI</div>
-        {profiles.isPending ? (
-          <SkeletonLines rows={1} padding="0" />
-        ) : profiles.isError ? (
-          <CardError error={profiles.error} onRetry={() => void profiles.refetch()} retrying={profiles.isFetching} />
-        ) : (
-          <div className="setup-row">
-            <div className={activeProfile ? 'cli-avatar' : 'cli-avatar cli-avatar--empty'} aria-hidden>
-              {activeProfile ? emailInitials(activeProfile.email) : '—'}
-            </div>
-            <div className="setup-row__main">
-              <div className="setup-row__title">{activeProfile ? cliAccountLabel(activeProfile) : 'Chưa đăng nhập'}</div>
-              <div className="cli-meta">
-                {activeProfile ? cliMeta(activeProfile, now) : 'Đăng nhập Google để hệ thống dùng AI qua tài khoản của Sếp.'}
-              </div>
-            </div>
-            <StateChip color={chip.tone} border={chip.tone === N4 ? N8 : chip.tone} dot size="md">
-              {chip.label}
-            </StateChip>
-            {!login.active ? (
-              <Button variant={activeProfile ? 'secondary' : 'primary'} className="btn-28" icon="ph ph-user-switch" onClick={() => login.start.mutate()}>
-                {activeProfile ? 'Thêm tài khoản Google' : 'Đăng nhập'}
-              </Button>
-            ) : null}
-          </div>
-        )}
-        <CliLoginPanel login={login} />
-      </div>
+      <CliAccountSection kind="antigravity_cli" />
+      <CliAccountSection kind="claude_code_cli" />
 
       <div className="setup-section">
         <div className="setup-section__title">Khoá API · thứ tự dùng</div>
@@ -188,21 +163,21 @@ export function Step4Brain({ meta, description, onBack, onSaved, formRef, onSkip
                   <div className="setup-row__main">
                     <div className="setup-row__title">{p.name}</div>
                     <div className="setup-row__meta">
-                      {p.kind === 'antigravity_cli'
-                        ? 'Antigravity CLI'
+                      {isCliKind(p.kind)
+                        ? PROVIDER_KIND_LABEL[p.kind]
                         : `${fmtInt(p.keys.length)} khoá${p.keys[0] ? ` · …${p.keys[0].last4}` : ''}`}
                       {p.models.length ? ` · ${p.models.map((m) => m.model_name).join(', ')}` : ''}
                     </div>
                     {t ? (
                       <div className="prov-test" style={{ color: t.ok ? 'var(--color-ok)' : 'var(--color-bad)' }} role="status">
                         {t.ok ? (
-                          `Gọi thử OK${t.latency_ms != null ? ` · ${fmtLatency(t.latency_ms)}` : ''}`
+                          `Gọi thử OK${t.latency_ms != null ? ` · ${fmtLatency(t.latency_ms)}` : ''}${t.probe_model ? ` · ${t.probe_model}` : ''}`
                         ) : (
                           <FriendlyErrorText raw={t.error} prefix="Chưa dùng được: " fallback="không gọi được nguồn này." />
                         )}
                       </div>
                     ) : null}
-                    {isReady && !p.models.length && offered.length ? <AddModel provider={p} models={offered} /> : null}
+                    {isReady && offered.length ? <ModelPicker provider={p} test={t} /> : null}
                   </div>
                   <StateChip color={status.tone} border={status.tone === N5 || status.tone === N4 ? N8 : status.tone}>
                     {status.label}
@@ -212,7 +187,7 @@ export function Step4Brain({ meta, description, onBack, onSaved, formRef, onSkip
                   </Button>
                   <IconButton icon="ph ph-arrow-up" label={`Đưa ${p.name} lên trước`} disabled={i === 0 || !isReady} onClick={() => move(i, -1)} />
                   <IconButton icon="ph ph-arrow-down" label={`Đưa ${p.name} xuống sau`} disabled={i >= ready.length - 1} onClick={() => move(i, 1)} />
-                  {p.kind !== 'antigravity_cli' ? (
+                  {!isCliKind(p.kind) ? (
                     <IconButton
                       icon="ph ph-trash"
                       label={`Xoá ${p.name}`}
@@ -353,27 +328,53 @@ export function SkipBrainDialog({
   );
 }
 
-/** Bước 4: pick the model the brain uses on a freshly tested provider (`POST /providers/{id}/models`). */
-function AddModel({ provider, models }: { provider: Provider; models: string[] }) {
-  const [model, setModel] = useState(models[0]);
-  const add = useMutation({
-    mutationFn: () => api.providers.addModel(provider.id, { model_name: model }),
-    onSuccess: (next) => queryClient.setQueryData<Provider[]>(qk2.providers, (old) => old?.map((x) => (x.id === next.id ? next : x))),
-  });
+/**
+ * Bước 4 · tài khoản CLI (v0.1.31): Antigravity (Google) và Claude Code (gói Claude, tuỳ chọn — QD-12 Owner tự quyết).
+ * Hết hạn thật → nút "Đăng nhập lại"; token ngắn hạn quá giờ mà CLI tự gia hạn → "Đang hoạt động".
+ */
+function CliAccountSection({ kind }: { kind: CliKind }) {
+  const profiles = useCliProfiles(kind);
+  const login = useCliLogin(kind);
+  const now = useNow(60_000);
+  const txt = CLI_TEXT[kind];
+  const active = profiles.data?.find((p) => p.active);
+  const chip = cliChip(active);
+  const claude = kind === 'claude_code_cli';
   return (
-    <div className="prov-model">
-      <select className="mini-select" aria-label={`Model cho ${provider.name}`} value={model} onChange={(e) => setModel(e.target.value)}>
-        {models.map((m) => (
-          <option key={m} value={m}>
-            {m}
-          </option>
-        ))}
-      </select>
-      <Button variant="secondary" size="sm" loading={add.isPending} onClick={() => add.mutate()}>
-        Dùng model này
-      </Button>
-      <span className="muted-note">Chưa chọn thì hệ thống dùng {models[0]}.</span>
-      {add.isError ? <span className="prov-model__err">{errorText(add.error)}</span> : null}
+    <div className="setup-section" data-testid={`setup-cli-${kind}`}>
+      <div className="setup-section__title">{claude ? 'Claude Code CLI · gói Claude (tuỳ chọn)' : 'Tài khoản Google · Antigravity CLI'}</div>
+      {claude && !active ? <ClaudeRiskNotice /> : null}
+      {profiles.isPending ? (
+        <SkeletonLines rows={1} padding="0" />
+      ) : profiles.isError ? (
+        <CardError error={profiles.error} onRetry={() => void profiles.refetch()} retrying={profiles.isFetching} />
+      ) : (
+        <div className="setup-row">
+          <div className={active ? 'cli-avatar' : 'cli-avatar cli-avatar--empty'} aria-hidden>
+            {active ? emailInitials(active.email) : '—'}
+          </div>
+          <div className="setup-row__main">
+            <div className="setup-row__title">{active ? cliAccountLabel(active) : claude ? 'Chưa bật' : 'Chưa đăng nhập'}</div>
+            <div className="cli-meta">
+              {active ? cliMeta(active, now) : claude ? txt.empty : 'Đăng nhập Google để hệ thống dùng AI qua tài khoản của Sếp.'}
+            </div>
+          </div>
+          <StateChip color={chip.tone} border={chip.tone === N4 ? N8 : chip.tone} dot size="md">
+            {chip.label}
+          </StateChip>
+          {!login.active ? (
+            <Button
+              variant={active && active.state !== 'expired' ? 'secondary' : 'primary'}
+              className="btn-28"
+              icon="ph ph-user-switch"
+              onClick={() => login.start.mutate()}
+            >
+              {active?.state === 'expired' ? 'Đăng nhập lại' : active ? txt.add : txt.login}
+            </Button>
+          ) : null}
+        </div>
+      )}
+      <CliLoginPanel login={login} />
     </div>
   );
 }

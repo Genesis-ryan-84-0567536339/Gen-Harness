@@ -296,7 +296,8 @@ async def provider_payloads(db: AsyncSession, redis: Any, org_id: uuid.UUID) -> 
     for p in rows:
         keys = (await db.execute(text("""SELECT id, label, last4, is_enabled FROM agent.provider_keys
                                          WHERE provider_id = :p ORDER BY rotation_order"""), {"p": p.id})).all()
-        models = (await db.execute(text("""SELECT id, model_name, daily_quota, rate_limit_per_min, is_enabled
+        models = (await db.execute(text("""SELECT id, model_name, daily_quota, rate_limit_per_min, is_enabled,
+                                                  is_default
                                            FROM agent.models WHERE provider_id = :p ORDER BY id"""),
                                    {"p": p.id})).all()
         key_out = []
@@ -310,6 +311,7 @@ async def provider_payloads(db: AsyncSession, redis: Any, org_id: uuid.UUID) -> 
             used = int(await redis.get(quota_key(m.id)) or 0)
             model_out.append({"id": str(m.id), "model_name": m.model_name, "daily_quota": m.daily_quota,
                               "rate_limit_per_min": m.rate_limit_per_min, "enabled": m.is_enabled,
+                              "is_default": m.is_default,
                               "used_today": used,
                               "left_pct": (round(max(0, 100 - used * 100 / m.daily_quota), 1)
                                            if m.daily_quota else None)})

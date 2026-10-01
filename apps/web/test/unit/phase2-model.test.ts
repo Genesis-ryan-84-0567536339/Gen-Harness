@@ -219,7 +219,7 @@ describe('channels model', () => {
 
   it('CLI chip', () => {
     expect(cliChip(undefined).label).toBe('Chưa đăng nhập');
-    expect(cliChip({ id: 'p', email: 'a@b', plan_label: '', active: true, expires_at: null, state: 'ok' }).label).toBe('Đã xác thực');
+    expect(cliChip({ id: 'p', email: 'a@b', plan_label: '', active: true, expires_at: null, state: 'ok' }).label).toBe('Đang hoạt động');
     expect(cliChip({ id: 'p', email: 'a@b', plan_label: '', active: true, expires_at: null, state: 'expired' }).label).toBe('Hết hạn');
   });
 });

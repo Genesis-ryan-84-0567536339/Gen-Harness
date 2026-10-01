@@ -1,5 +1,5 @@
 import { keepPreviousData, useInfiniteQuery, useQuery } from '@tanstack/react-query';
-import type { CleanQuery, NotebookSubjectType, RawQuery } from '@gen-harness/contracts';
+import type { CleanQuery, CliKind, NotebookSubjectType, RawQuery } from '@gen-harness/contracts';
 import { api } from './api';
 
 /** Query keys for phase-2 data. Realtime events patch these caches (lib/realtime.ts). */
@@ -83,5 +83,12 @@ export const useChannelGroups = (type: string, enabled = true) =>
 
 export const useProviders = () => useQuery({ queryKey: qk2.providers, queryFn: ({ signal }) => api.providers.list(signal) });
 
-export const useCliProfiles = () =>
-  useQuery({ queryKey: qk2.cliProfiles, queryFn: ({ signal }) => api.cli.profiles(signal) });
+/** v0.1.31: hồ sơ theo loại CLI. Khoá `['cli','profiles']` (Antigravity) là tiền tố của khoá Claude → invalidate một lần là đủ cả hai. */
+export const cliProfilesKey = (kind: CliKind = 'antigravity_cli'): readonly string[] =>
+  kind === 'antigravity_cli' ? qk2.cliProfiles : [...qk2.cliProfiles, kind];
+
+export const useCliProfiles = (kind: CliKind = 'antigravity_cli') =>
+  useQuery({
+    queryKey: cliProfilesKey(kind),
+    queryFn: ({ signal }) => api.cli.profiles(signal, kind),
+  });

@@ -7,6 +7,7 @@ import type {
   Boundary,
   Channel,
   ChannelState,
+  CliKind,
   CliLoginStatus,
   CliProfile,
   Credential,
@@ -177,16 +178,48 @@ export function credTone(s: Credential['state'] | string): string {
   return s === 'ok' ? OK : s === 'warn' ? WARN : s === 'bad' ? BAD : N4;
 }
 
+/**
+ * v0.1.31 (Boss 01/10): MỘT sự thật với dòng nguồn — máy chủ tính `state` từ hạn token + refresh token + lượt gọi thật
+ * gần nhất. "ok" = AI gọi được (kể cả khi token ngắn hạn đã quá giờ nhưng CLI tự gia hạn) → "Đang hoạt động".
+ */
 export function cliChip(active: CliProfile | undefined): { label: string; tone: string } {
   if (!active) return { label: 'Chưa đăng nhập', tone: N4 };
   if (active.state === 'expired') return { label: 'Hết hạn', tone: BAD };
   if (active.state === 'expiring') return { label: 'Sắp hết hạn', tone: WARN };
-  return { label: 'Đã xác thực', tone: OK };
+  return { label: 'Đang hoạt động', tone: OK };
 }
 
+/** v0.1.31: chữ theo loại CLI — Antigravity (tài khoản Google) hay Claude Code (gói Claude Pro/Max). */
+export const CLI_TEXT: Record<CliKind, { title: string; kicker: string; account: string; login: string; add: string; empty: string; openLink: string; hint: string }> = {
+  antigravity_cli: {
+    title: 'Tài khoản Antigravity CLI',
+    kicker: 'Tài khoản Google dùng cho AI',
+    account: 'Google',
+    login: 'Đăng nhập',
+    add: 'Thêm tài khoản Google',
+    empty: 'Đăng nhập Google để hệ thống dùng AI qua Antigravity CLI',
+    openLink: 'Mở trang đăng nhập Google',
+    hint: 'Đăng nhập đúng tài khoản Google muốn dùng; trang Google sẽ hiện một mã — chép mã đó dán vào ô bên dưới.',
+  },
+  claude_code_cli: {
+    title: 'Tài khoản Claude Code CLI',
+    kicker: 'Gói Claude Pro/Max của Sếp · tuỳ chọn',
+    account: 'Claude',
+    login: 'Đăng nhập Claude',
+    add: 'Thêm tài khoản Claude',
+    empty: 'Chưa bật — đăng nhập gói Claude (Pro/Max) nếu Sếp muốn AI dùng thêm model Claude',
+    openLink: 'Mở trang đăng nhập Claude',
+    hint: 'Đăng nhập đúng tài khoản Claude muốn dùng, bấm cho phép; trang sẽ hiện một mã — chép mã đó dán vào ô bên dưới.',
+  },
+};
+
+/** Trang điều khoản chính thức (QD-12: Owner tự quyết) — Anthropic: đăng nhập gói Free/Pro/Max chỉ cho dùng cá nhân thông thường. */
+export const CLAUDE_TERMS_URL = 'https://code.claude.com/docs/en/legal-and-compliance';
+export const CLAUDE_CONSUMER_TERMS_URL = 'https://www.anthropic.com/legal/consumer-terms';
+
 /** Email of a CLI profile, or a readable stand-in when the session file did not reveal it (email null). */
-export function cliAccountLabel(p: Pick<CliProfile, 'email'> | null | undefined): string {
-  return p?.email || 'Tài khoản Google (chưa rõ email)';
+export function cliAccountLabel(p: Pick<CliProfile, 'email'> & { kind?: CliKind } | null | undefined): string {
+  return p?.email || (p?.kind === 'claude_code_cli' ? 'Tài khoản Claude (chưa rõ email)' : 'Tài khoản Google (chưa rõ email)');
 }
 
 /** Friendly Vietnamese text for a failed switch / delete of a CLI account (v0.1.30). */
@@ -200,9 +233,15 @@ export function cliSwitchError(e: unknown, fallback: (e: unknown) => string): st
   return fallback(e);
 }
 
-/** "Google AI Pro · token 0 ₫ · còn hiệu lực 23 giờ" — plan_label carries the plan/token part. */
+/**
+ * "Google AI Pro · token 0 ₫ · còn hiệu lực 23 giờ" — plan_label carries the plan/token part.
+ * v0.1.31: token ngắn hạn quá giờ mà còn refresh token → "tự gia hạn" (không còn "đã hết hiệu lực" gây hiểu nhầm);
+ * hết hạn thật → nói việc cần làm.
+ */
 export function cliMeta(p: CliProfile, now = Date.now()): string {
-  const left = p.expires_at ? (fmtRemaining(p.expires_at, now) === 'đã hết' ? 'đã hết hiệu lực' : `còn hiệu lực ${fmtRemaining(p.expires_at, now)}`) : null;
+  if (p.state === 'expired') return [p.plan_label, 'phiên đã hết hiệu lực — bấm “Đăng nhập lại”'].filter(Boolean).join(' · ');
+  const passed = p.expires_at ? fmtRemaining(p.expires_at, now) === 'đã hết' : false;
+  const left = p.expires_at ? (passed ? (p.refreshable ? 'tự gia hạn' : 'đã hết hiệu lực') : `còn hiệu lực ${fmtRemaining(p.expires_at, now)}`) : p.refreshable ? 'tự gia hạn' : null;
   return [p.plan_label, left].filter(Boolean).join(' · ') || '—';
 }
 

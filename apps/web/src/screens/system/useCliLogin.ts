@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { ApiError, type CliLoginEvent } from '@gen-harness/contracts';
+import { ApiError, type CliKind, type CliLoginEvent } from '@gen-harness/contracts';
 import { api } from '../../lib/api';
 import { qk2 } from '../../lib/dataQueries';
 import { queryClient } from '../../lib/queryClient';
@@ -17,7 +17,7 @@ import { toast } from '../../lib/toast';
  */
 export const CLI_LOGIN_POLL_MS = 2000;
 
-export function useCliLogin() {
+export function useCliLogin(kind: CliKind = 'antigravity_cli') {
   const [loginId, setLoginId] = useState<string | null>(null);
   const ev = useQuery<CliLoginEvent | null>({
     queryKey: qk2.cliLogin(loginId ?? '-'),
@@ -41,7 +41,7 @@ export function useCliLogin() {
     },
   });
   const start = useMutation({
-    mutationFn: () => api.cli.login(),
+    mutationFn: () => api.cli.login(kind),
     onSuccess: (r) => {
       // The WS event may arrive before or after the 202; seed "starting" only if nothing came yet.
       if (!queryClient.getQueryData(qk2.cliLogin(r.login_id)))
@@ -73,11 +73,19 @@ export function useCliLogin() {
       void queryClient.invalidateQueries({ queryKey: qk2.providers });
       void queryClient.invalidateQueries({ queryKey: qk2.credentials });
       const who = ev.data.profile?.email;
-      toast(who ? `Đã thêm tài khoản ${who} — AI đang dùng tài khoản này.` : 'Đã đăng nhập tài khoản Google cho AI.');
+      toast(
+        who
+          ? `Đã thêm tài khoản ${who} — AI đang dùng tài khoản này.`
+          : kind === 'claude_code_cli'
+            ? 'Đã đăng nhập tài khoản Claude cho AI.'
+            : 'Đã đăng nhập tài khoản Google cho AI.',
+      );
       setLoginId(null);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `kind` is fixed for the hook's lifetime
   }, [ev.data]);
   return {
+    kind,
     active: !!loginId || start.isPending,
     event: ev.data,
     status,
