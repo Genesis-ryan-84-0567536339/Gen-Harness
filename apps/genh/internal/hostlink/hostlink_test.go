@@ -155,3 +155,61 @@ func TestPendingDispatch(t *testing.T) {
 		t.Fatalf("có cả hai thì cập nhật trước, Pending = %q", got)
 	}
 }
+
+// v0.1.34 (F-33): update-blocked.json — ghi/đọc/xoá.
+func TestUpdateBlocked_RoundTrip(t *testing.T) {
+	root := t.TempDir()
+	if _, ok, err := ReadUpdateBlocked(root); ok || err != nil {
+		t.Fatalf("chưa có tệp: muốn false,nil — được %v,%v", ok, err)
+	}
+	if err := ClearUpdateBlocked(root); err != nil {
+		t.Fatalf("xoá khi chưa có tệp phải nil: %v", err)
+	}
+	if err := WriteUpdateBlocked(root, UpdateBlocked{Version: "v0.1.34", Code: "GH-E942", BackupKey: "backups/x.enc", Message: "migrate lỗi"}); err != nil {
+		t.Fatal(err)
+	}
+	b, ok, err := ReadUpdateBlocked(root)
+	if err != nil || !ok {
+		t.Fatalf("đọc: %v,%v", ok, err)
+	}
+	if b.Version != "v0.1.34" || b.Code != "GH-E942" || b.BackupKey != "backups/x.enc" || b.BlockedAt == "" {
+		t.Errorf("nội dung sai: %+v", b)
+	}
+	raw, _ := os.ReadFile(filepath.Join(Dir(root), UpdateBlockedFile))
+	for _, k := range []string{`"version"`, `"blocked_at"`, `"code"`, `"backup_key"`, `"message"`} {
+		if !strings.Contains(string(raw), k) {
+			t.Errorf("thiếu khoá %s: %s", k, raw)
+		}
+	}
+	if err := ClearUpdateBlocked(root); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := ReadUpdateBlocked(root); ok {
+		t.Error("đã xoá mà vẫn đọc được")
+	}
+}
+
+// v0.1.34 (F-11): disk-status.json — chuông "đĩa sắp đầy" (v0.1.36) đọc, giữ tên khoá.
+func TestDiskStatus_RoundTrip(t *testing.T) {
+	root := t.TempDir()
+	if _, err := ReadDiskStatus(root); err == nil {
+		t.Fatal("chưa có tệp phải lỗi")
+	}
+	in := DiskStatus{State: "low", FreeBytes: 1 << 30, MinBytes: 5 << 30, Path: "/var/lib/docker", PrunedImages: 2}
+	if err := WriteDiskStatus(root, in); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadDiskStatus(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != "low" || got.FreeBytes != in.FreeBytes || got.MinBytes != in.MinBytes || got.Path != in.Path || got.PrunedImages != 2 || got.CheckedAt == "" {
+		t.Errorf("nội dung sai: %+v", got)
+	}
+	raw, _ := os.ReadFile(filepath.Join(Dir(root), DiskStatusFile))
+	for _, k := range []string{`"state"`, `"free_bytes"`, `"min_bytes"`, `"path"`, `"pruned_images"`, `"checked_at"`} {
+		if !strings.Contains(string(raw), k) {
+			t.Errorf("thiếu khoá %s: %s", k, raw)
+		}
+	}
+}

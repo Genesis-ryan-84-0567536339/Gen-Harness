@@ -293,3 +293,70 @@ func TestLocate_OnlyWarnsWithoutSyncing(t *testing.T) {
 		t.Error("Locate lần 2 vẫn phải nhắc (vẫn còn lệch)")
 	}
 }
+
+func TestInSyncWithEmbedded(t *testing.T) {
+	writeManaged := func(t *testing.T, composeData, caddy []byte) (installDir, path string) {
+		t.Helper()
+		installDir = t.TempDir()
+		path = ManagedComposePath(installDir)
+		if err := os.MkdirAll(filepath.Join(filepath.Dir(path), "proxy"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, composeData, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if caddy != nil {
+			if err := os.WriteFile(filepath.Join(filepath.Dir(path), "proxy", "Caddyfile"), caddy, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return installDir, path
+	}
+
+	t.Run("managed trùng bản nhúng", func(t *testing.T) {
+		dir, path := writeManaged(t, EmbeddedCompose(), embeddedCaddyfile)
+		ok, err := InSyncWithEmbedded(dir, path)
+		if err != nil || !ok {
+			t.Fatalf("muốn true,nil — được %v,%v", ok, err)
+		}
+	})
+	t.Run("compose khác", func(t *testing.T) {
+		dir, path := writeManaged(t, []byte("name: cu\n"), embeddedCaddyfile)
+		if ok, err := InSyncWithEmbedded(dir, path); err != nil || ok {
+			t.Fatalf("muốn false,nil — được %v,%v", ok, err)
+		}
+	})
+	t.Run("Caddyfile khác", func(t *testing.T) {
+		dir, path := writeManaged(t, EmbeddedCompose(), []byte("khac\n"))
+		if ok, err := InSyncWithEmbedded(dir, path); err != nil || ok {
+			t.Fatalf("muốn false,nil — được %v,%v", ok, err)
+		}
+	})
+	t.Run("thiếu Caddyfile", func(t *testing.T) {
+		dir, path := writeManaged(t, EmbeddedCompose(), nil)
+		if ok, err := InSyncWithEmbedded(dir, path); err != nil || ok {
+			t.Fatalf("muốn false,nil — được %v,%v", ok, err)
+		}
+	})
+	t.Run("đường ngoài (không phải managed)", func(t *testing.T) {
+		dir := t.TempDir()
+		other := filepath.Join(t.TempDir(), "deploy", "compose.yaml")
+		if ok, err := InSyncWithEmbedded(dir, other); err != nil || !ok {
+			t.Fatalf("muốn true,nil — được %v,%v", ok, err)
+		}
+	})
+}
+
+func TestEmbeddedCompose_IsCopy(t *testing.T) {
+	a := EmbeddedCompose()
+	if len(a) == 0 {
+		t.Fatal("bản nhúng rỗng")
+	}
+	a[0] ^= 0xff
+	if EmbeddedCompose()[0] == a[0] {
+		t.Error("EmbeddedCompose phải trả bản sao, sửa bản trả về không được đổi bản nhúng")
+	}
+	if ManagedComposePath("") != "" {
+		t.Error("installDir rỗng → \"\"")
+	}
+}

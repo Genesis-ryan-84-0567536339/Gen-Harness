@@ -21,6 +21,10 @@ func DetectRAM() (uint64, error) {
 	return probeRAM()
 }
 
+// ProbeDiskFree trả dung lượng trống (byte) của ổ chứa path — `genh update`
+// kiểm trước khi tải bản mới (so với MinDiskBytes, xem internal/ops/diskspace.go).
+func ProbeDiskFree(path string) (uint64, error) { return probeDiskFree(path) }
+
 // probePort dò cổng TCP có đang rảnh hay không bằng cách thử lắng nghe.
 // Không xác định được tên/PID tiến trình đang chiếm cổng bằng thư viện
 // chuẩn một cách cross-platform, nên chỉ báo "đang bị dùng" chung chung;

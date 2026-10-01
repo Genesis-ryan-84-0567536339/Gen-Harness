@@ -98,11 +98,20 @@ func findBackupKey(lines []string) string {
 // restoreInContainer chạy `python -m gh.backup restore --key <key>` trong
 // container api — dùng chung giữa `genh restore` (backup.go) và rollback tự
 // động của `genh update` (update.go).
-func restoreInContainer(ctx context.Context, runner dockercli.Runner, composePath string, envOverlay []string, dir, key string) error {
+//
+// forceOneOff=true (rollback của update, F-33): gọi THẲNG `run --rm --no-deps`
+// — container tạm dựng từ ảnh theo compose.yaml CŨ (vừa ghi lại), không exec
+// vào container api đang chạy ảnh MỚI (đang lỗi/khởi động lại liên tục, hoặc
+// mang mã gh.backup mới không khớp bản sao lưu cũ). forceOneOff=false: exec
+// trước, api không chạy thì rơi về run --rm.
+func restoreInContainer(ctx context.Context, runner dockercli.Runner, composePath string, envOverlay []string, dir, key string, forceOneOff bool) error {
 	run := func(oneOff bool) error {
 		args := apiCommandArgs(composePath, oneOff, "python", "-m", "gh.backup", "restore", "--key", key)
 		_, err := runner.Output(ctx, dockercli.Cmd{Name: "docker", Args: args, Env: envOverlay, Dir: dir})
 		return err
+	}
+	if forceOneOff {
+		return run(true)
 	}
 	err := run(false)
 	if isServiceNotRunning(err) {
@@ -124,9 +133,15 @@ func apiCommandArgs(composePath string, oneOff bool, cmd ...string) []string {
 }
 
 // isServiceNotRunning nhận ra lỗi `docker compose exec` khi container api
-// không chạy ("service \"api\" is not running").
+// không chạy ("service \"api\" is not running") HOẶC đang khởi động lại liên
+// tục ("Container … is restarting, wait until the container is running" —
+// F-33: api ảnh mới lỗi vòng lặp restart) — cả hai đều rơi về `run --rm`.
 func isServiceNotRunning(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "is not running")
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "is not running") || strings.Contains(msg, "is restarting")
 }
 
 // checkBackupExists chạy `python -m gh.backup list` trong api và báo lỗi rõ nếu
