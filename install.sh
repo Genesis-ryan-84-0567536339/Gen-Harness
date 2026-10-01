@@ -13,20 +13,34 @@ REPO="Genesis-ryan-84-0567536339/Gen-Harness"
 RELEASE_BASE="https://github.com/${REPO}/releases/latest/download"
 INSTALL_ROOT="${GEN_HARNESS_HOME:-$HOME/.gen-harness}"
 BIN_DIR="${INSTALL_ROOT}/bin"
-# SECRETS_FILE: đúng đường dẫn config.Paths.ConfigDir()/secrets.json mà
-# secretgen.Ensure ghi ở Bước 4 — có nghĩa máy này ĐÃ có một bản cài (xem
-# hàm main() dưới cùng và docs/reports/HANDOFF-v0.1.1.md mục "Lỗi cần sửa"
-# #1 của v0.1.3).
+# SECRETS_FILE: config.Paths.ConfigDir()/secrets.json do secretgen.Ensure ghi
+# ở Bước 4 — có tệp này nghĩa là máy ĐÃ có một bản cài (xem main() dưới cùng).
 SECRETS_FILE="${INSTALL_ROOT}/config/secrets.json"
 
 log() { printf '%s\n' "$*" >&2; }
-die() {
-	log "genh: $*"
-	exit 1
-}
+die() { log "genh: $*"; exit 1; }
 
-# fetch <url> <đích>: dùng curl nếu có, không thì wget.
-fetch() {
+# GEN_HARNESS_RELEASE_TAG (tuỳ chọn): cài ĐÚNG tag này thay vì bản chính thức (latest) —
+# dành cho CI/E2E kiểm bản thử (prerelease) trước khi promote; người dùng bình thường không đặt.
+# Máy đã cài thì main() chạy `genh update --no-self-update` để genh không tự thay bản ghim bằng latest.
+RELEASE_LABEL="bản phát hành mới nhất"
+PINNED_TAG=""
+if [ -n "${GEN_HARNESS_RELEASE_TAG:-}" ]; then
+	# Regex thật (glob `v[0-9]*.…` lọt cả 'v1a.2b.3c') — cùng định dạng với job meta của release.yml.
+	# `case` chặn trước ký tự lạ (kể cả xuống dòng: grep xét TỪNG dòng, một dòng đúng là lọt).
+	case "$GEN_HARNESS_RELEASE_TAG" in
+	*[!0-9A-Za-z.-]*) die "GEN_HARNESS_RELEASE_TAG không hợp lệ: chỉ được chữ, số, '.', '-' (vd v0.1.33)." ;;
+	esac
+	if ! printf '%s' "$GEN_HARNESS_RELEASE_TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
+		die "GEN_HARNESS_RELEASE_TAG không hợp lệ: '$GEN_HARNESS_RELEASE_TAG' — cần dạng vMAJOR.MINOR.PATCH[-PRERELEASE] (vd v0.1.33)."
+	fi
+	PINNED_TAG="$GEN_HARNESS_RELEASE_TAG"
+	RELEASE_BASE="https://github.com/${REPO}/releases/download/${PINNED_TAG}"
+	RELEASE_LABEL="bản $PINNED_TAG"
+	log "genh: cài đúng bản $PINNED_TAG (GEN_HARNESS_RELEASE_TAG)"
+fi
+
+fetch() { # fetch <url> <đích>: dùng curl nếu có, không thì wget.
 	url="$1"
 	dest="$2"
 	if command -v curl >/dev/null 2>&1; then
@@ -36,6 +50,14 @@ fetch() {
 	else
 		die "cần curl hoặc wget để tải genh, máy này không có cái nào."
 	fi
+}
+
+# fetch_failed <tệp>: báo lỗi tải dễ hiểu thay cho dòng 404 trơ trọi của curl/wget.
+fetch_failed() {
+	if [ -n "$PINNED_TAG" ]; then
+		die "không tải được $1 của bản $PINNED_TAG (tag không tồn tại hoặc Release thiếu asset) — kiểm lại GEN_HARNESS_RELEASE_TAG, hoặc bỏ biến này để cài bản chính thức mới nhất."
+	fi
+	die "không tải được $1 từ ${RELEASE_LABEL} — kiểm tra mạng (mở được github.com không) rồi chạy lại lệnh cài."
 }
 
 detect_os() {
@@ -105,13 +127,13 @@ main() {
 	arch=$(detect_arch)
 	asset="genh-${os}-${arch}"
 
-	log "genh: đang tải ${asset} từ bản phát hành mới nhất…"
+	log "genh: đang tải ${asset} từ ${RELEASE_LABEL}…"
 	mkdir -p "$BIN_DIR"
 	tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/genh-install.XXXXXX")
 	trap 'rm -rf "$tmp_dir"' EXIT
 
-	fetch "${RELEASE_BASE}/${asset}" "${tmp_dir}/${asset}"
-	fetch "${RELEASE_BASE}/checksums.txt" "${tmp_dir}/checksums.txt"
+	fetch "${RELEASE_BASE}/${asset}" "${tmp_dir}/${asset}" || fetch_failed "$asset"
+	fetch "${RELEASE_BASE}/checksums.txt" "${tmp_dir}/checksums.txt" || fetch_failed checksums.txt
 
 	verify_checksum "${tmp_dir}/${asset}" "$asset" "${tmp_dir}/checksums.txt"
 
@@ -124,22 +146,17 @@ main() {
 
 	log "genh: đã cài vào ${BIN_DIR}/genh — mở phiên shell mới để PATH có hiệu lực lâu dài."
 
-	# SỬA LỖI (docs/reports/HANDOFF-v0.1.1.md mục "Lỗi cần sửa" #1 của
-	# v0.1.3): trước đây luôn `exec genh install` — trên máy ĐÃ CÀI TỪ TRƯỚC
-	# (Owner chạy lại đúng dòng lệnh này chỉ để lấy binary genh mới), `genh
-	# install` KHÔNG phát hiện được máy đã cài, sẽ dựng lại container và BỎ
-	# QUA backup + di trú dữ liệu mà chỉ `genh update` mới có → mất dữ
-	# liệu/tài liệu. Từ đây: máy chưa từng cài (chưa có secrets.json) exec
-	# install như cũ.
-	#
-	# v0.1.5: máy ĐÃ CÀI giờ CHẠY LUÔN `genh update` (thay vì chỉ in hướng
-	# dẫn rồi dừng như v0.1.3/v0.1.4) — an toàn để tự động hoá vì `genh
-	# update` TỰ CÓ backup + rollback nếu bất kỳ bước nào lỗi (xem
-	# internal/ops.RunUpdate), và từ v0.1.5 chính `genh update` cũng TỰ tải
-	# bản genh mới nhất (internal/selfupdate) trước khi đụng dịch vụ — nên
-	# Owner không cần tự chạy lại lệnh này định kỳ nữa, `genh auto-update`
-	# (bật mặc định lúc cài) đã lo việc đó mỗi đêm.
+	# SỬA LỖI (HANDOFF-v0.1.1.md "Lỗi cần sửa" #1, v0.1.3): `genh install` trên
+	# máy ĐÃ CÀI sẽ dựng lại container, BỎ QUA backup + di trú → mất dữ liệu.
+	# Nên: máy chưa cài (chưa có secrets.json) → install; máy đã cài → từ
+	# v0.1.5 chạy luôn `genh update` (tự backup + rollback khi lỗi, xem
+	# internal/ops.RunUpdate; tự tải genh mới qua internal/selfupdate).
 	if [ -f "$SECRETS_FILE" ]; then
+		if [ -n "$PINNED_TAG" ]; then
+			# Ghim tag: KHÔNG để genh tự thay binary bằng releases/latest (selfupdate) — sẽ âm thầm bỏ bản ghim.
+			log "genh: máy này đã cài Gen-Harness từ trước — đang chạy 'genh update --no-self-update' để nâng cấp dịch vụ lên đúng $PINNED_TAG…"
+			exec "${BIN_DIR}/genh" update --no-self-update
+		fi
 		log "genh: máy này đã cài Gen-Harness từ trước — đang chạy 'genh update' để nâng cấp dịch vụ lên đúng bản mới…"
 		exec "${BIN_DIR}/genh" update
 	fi

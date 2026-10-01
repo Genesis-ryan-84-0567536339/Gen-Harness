@@ -1,17 +1,33 @@
 name: Installer matrix
 
-# Chạy trên PUSH THƯỜNG (không đợi tag release) để bắt lỗi build/khởi động
-# genh sớm trên nhiều OS — xem docs/handoff/05-installer.md mục "Kiểm thử
-# trình cài". File RIÊNG (không sửa ci.yml) để không đụng job api/web/images
-# hiện có.
+# Chạy trên PUSH THƯỜNG (không đợi tag release) để bắt lỗi genh sớm trên cả
+# 4 hệ điều hành của ma trận: `go vet ./...` + `go test ./...` (từ v0.1.33,
+# F-13 — trước đó go test chỉ chạy tay trên Linux), rồi build binary và chạy
+# thử `genh version`/`help` — xem docs/handoff/05-installer.md mục "Kiểm thử
+# trình cài". File RIÊNG (không gộp vào ci.yml) để không đụng job api/web/
+# images. Job tổng `installer-ok` ở cuối là required check duy nhất của tệp
+# này (luôn chạy, không lọc đường dẫn).
 on:
   push:
     branches: [main, "claude/**"]
   pull_request:
+  # v0.1.33 — release.yml gọi lại workflow này thành job `installer` và đưa
+  # vào `needs` của job release: bản thử chỉ được tạo khi go vet/go test xanh
+  # trên cả 4 hệ điều hành ở ĐÚNG commit sắp phát hành.
+  workflow_call:
+    inputs:
+      from_release:
+        type: boolean
+        required: false
+        default: false
+        description: "true khi release.yml gọi"
 
+# Như ci.yml: khi gọi qua workflow_call, `github.ref` là của release.yml (main)
+# ⇒ trùng nhóm với lượt push main và hai bên huỷ nhau. Lượt từ Release có
+# nhóm riêng theo sha + run_id và không huỷ ai; push/PR giữ hành vi cũ.
 concurrency:
-  group: installer-matrix-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ inputs.from_release && format('installer-matrix-release-{0}-{1}', github.sha, github.run_id) || format('installer-matrix-{0}', github.ref) }}
+  cancel-in-progress: ${{ !inputs.from_release }}
 
 jobs:
   # Ma trận đúng tài liệu: Ubuntu 22.04/24.04, macOS 14 arm64, Windows 11
@@ -30,6 +46,19 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.24.0"
+
+      # v0.1.33 (F-13) — vet + test TRƯỚC khi build, trên đúng hệ điều hành
+      # của runner: lỗi chỉ lộ trên Windows/macOS (đường dẫn, quyền tệp, CRLF…)
+      # phải đỏ ở đây chứ không phải trên máy Boss.
+      - name: go vet ./...
+        working-directory: apps/genh
+        shell: bash
+        run: go vet ./...
+
+      - name: go test ./...
+        working-directory: apps/genh
+        shell: bash
+        run: go test -count=1 ./...
 
       - name: Build genh từ mã nguồn (native GOOS/GOARCH của runner)
         working-directory: apps/genh
@@ -68,3 +97,24 @@ jobs:
           docker version
           ./"${GENH_BIN}" install --install-dir /tmp/genh-installer-matrix --port 18443 --yes || \
             echo "genh install dừng giữa chừng (dự kiến — deploy/compose.yaml chưa có image publish sẵn cho api/web/bridge/db/migrate/worker ở nhánh này, xem release.yml job build-images/pin-compose). Đây là smoke-test best-effort, không chặn CI."
+
+  # ── installer-ok ─────────────────────────────────────────────────────────
+  # v0.1.33 (F-9/F-13) — job tổng: required check DUY NHẤT của tệp này. Luôn
+  # chạy (if: always(), không lọc đường dẫn); đỏ khi ma trận build-and-smoke
+  # không xanh trọn vẹn trên cả 4 hệ điều hành (failure/cancelled/skipped).
+  installer-ok:
+    name: installer-ok
+    runs-on: ubuntu-latest
+    needs: build-and-smoke
+    if: always()
+    steps:
+      - name: Tổng hợp kết quả ma trận trình cài
+        env:
+          RESULT: ${{ needs.build-and-smoke.result }}
+        run: |
+          echo "build-and-smoke=$RESULT"
+          if [ "$RESULT" != "success" ]; then
+            echo "::error::Ma trận trình cài chưa xanh ($RESULT) — mở job hệ điều hành bị đỏ (go vet/go test/build), sửa lỗi rồi đẩy lại hoặc bấm Re-run." >&2
+            exit 1
+          fi
+          echo "Ma trận trình cài xanh trên cả 4 hệ điều hành."

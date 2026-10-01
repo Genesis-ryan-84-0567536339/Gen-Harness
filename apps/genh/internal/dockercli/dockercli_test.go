@@ -16,6 +16,18 @@ func shellCmd(script string) Cmd {
 	return Cmd{Name: "sh", Args: []string{"-c", script}}
 }
 
+// shellSeq chạy lần lượt các lệnh trong CÙNG một shell. cmd.exe không hiểu
+// dấu ";" của sh — "echo boom 1>&2; exit 3" chạy dưới cmd /C chỉ là MỘT lệnh
+// echo (in nguyên phần còn lại) và thoát 0, nên các test "thoát khác 0" đỏ
+// trên Windows. cmd.exe nối lệnh bằng "&".
+func shellSeq(cmds ...string) Cmd {
+	sep := "; "
+	if runtime.GOOS == "windows" {
+		sep = " & "
+	}
+	return shellCmd(strings.Join(cmds, sep))
+}
+
 func TestExecRunner_Output(t *testing.T) {
 	r := ExecRunner{}
 	out, err := r.Output(context.Background(), shellCmd("echo hello"))
@@ -29,7 +41,7 @@ func TestExecRunner_Output(t *testing.T) {
 
 func TestExecRunner_Output_NonZeroExit_IncludesStderr(t *testing.T) {
 	r := ExecRunner{}
-	_, err := r.Output(context.Background(), shellCmd("echo boom 1>&2; exit 3"))
+	_, err := r.Output(context.Background(), shellSeq("echo boom 1>&2", "exit 3"))
 	if err == nil {
 		t.Fatal("muốn lỗi khi lệnh thoát khác 0")
 	}
@@ -54,7 +66,7 @@ func TestExecRunner_Stream_ReceivesAllLines(t *testing.T) {
 
 func TestExecRunner_Stream_NonZeroExit_ReturnsError(t *testing.T) {
 	r := ExecRunner{}
-	err := r.Stream(context.Background(), shellCmd("echo x; exit 1"), func(string) {})
+	err := r.Stream(context.Background(), shellSeq("echo x", "exit 1"), func(string) {})
 	if err == nil {
 		t.Fatal("muốn lỗi khi lệnh thoát khác 0")
 	}
@@ -75,7 +87,7 @@ func TestExecRunner_RunIO_StreamsStdinToStdout(t *testing.T) {
 func TestExecRunner_RunIO_NonZeroExit_ReturnsExitError(t *testing.T) {
 	r := ExecRunner{}
 	var out bytes.Buffer
-	err := r.RunIO(context.Background(), shellCmd("echo boom 1>&2; exit 2"), nil, &out)
+	err := r.RunIO(context.Background(), shellSeq("echo boom 1>&2", "exit 2"), nil, &out)
 	if err == nil {
 		t.Fatal("muốn lỗi khi lệnh thoát khác 0")
 	}

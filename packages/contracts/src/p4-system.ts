@@ -212,6 +212,16 @@ export interface SystemUpdate {
   requested_at: string | null;
   release_url: string | null;
   release_notes: string | null;
+  /**
+   * v0.1.33: lúc bản `latest` thành bản chính thức (ISO — dấu promote trong ghi chú Release, không có thì
+   * published_at); lịch tự cập nhật đêm (~03:00) chỉ cài bản đã là bản chính thức ≥ 24 giờ. null = không rõ.
+   */
+  published_at?: string | null;
+  /**
+   * v0.1.33: lịch tự cập nhật đêm đang bật (genh ghi vào genh.json khi cài / `genh auto-update enable|disable`);
+   * null = genh cũ chưa ghi hoặc không đọc được — Console không hứa "Tự cài".
+   */
+  auto_update_enabled?: boolean | null;
   /** v0.1.30: lần hỏi GitHub gần nhất thành công (ISO); null = chưa hỏi được. */
   checked_at?: string | null;
   /** v0.1.30: `POST /system/update/check` bị giới hạn (≤ 1 lần / 30 giây) — trả kết quả đang đệm. */

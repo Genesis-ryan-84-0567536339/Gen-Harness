@@ -7,19 +7,35 @@ name: E2E cài đặt thật
 # (Docker có sẵn) — xem docs/handoff/05-installer.md mục "Kiểm thử trình
 # cài": "Mỗi ô: cài sạch → /api/ready xanh → genh update → genh uninstall".
 #
-# Ba cách kích hoạt, HAI chế độ:
-#   - workflow_run (workflow "Release" chạy xong, thành công) hoặc
-#     workflow_dispatch (input `tag` tuỳ chọn) → CHẾ ĐỘ "release": kiểm bằng
-#     install.sh + asset THẬT của bản phát hành (mặc định bản mới nhất, hoặc
-#     đúng tag Owner chỉ định).
-#   - pull_request/push đổi apps/genh/**, deploy/**, install.sh → CHẾ ĐỘ
-#     "pr": build genh TỪ SOURCE (đúng commit đang xét, bắt lỗi code genh
-#     sớm) nhưng NHÚNG deploy/compose.release.yaml của bản phát hành GẦN
-#     NHẤT (ảnh api/web/bridge/db ĐÃ publish lên GHCR) vào binary — giống hệt
-#     bước "Ghim compose.yaml đã publish vào binary" của release.yml (job
-#     build-genh) — để không phải tự build 4 ảnh docker đa kiến trúc trong
-#     CI này (image build/push đã có job riêng ở release.yml, kiểm lại ở đây
-#     là thừa và tốn nhiều phút chờ).
+# CỔNG PHÁT HÀNH (v0.1.33, F-9/F-13): release.yml chỉ tạo BẢN THỬ
+# (prerelease, không đổi latest). Workflow này cài thật ĐÚNG tag bản thử đó;
+# e2e-install + e2e-upgrade xanh thì job `promote` mới nâng nó thành BẢN
+# CHÍNH THỨC (latest) — lúc đó máy Boss (install.sh, genh tự cập nhật) mới
+# thấy. E2E đỏ → bản thử nằm yên, bản chính thức không đổi. Promote ghi dấu
+# `<!-- genh:promoted_at=… -->` vào ghi chú Release (cùng một lệnh
+# gh release edit) — thời gian chín 24 giờ của lịch đêm tính từ dấu này, vì
+# published_at là lúc tạo bản thử và promote không đổi nó. Sau promote, job
+# `e2e-selfupdate` đi đúng đường máy Owner đi: genh CŨ tự tải genh mới qua
+# releases/latest, re-exec, nâng cấp dịch vụ (đỏ ⇒ ::error kèm cách lùi bản).
+#
+# Job `resolve` quyết định mọi thứ (mode, tag, có chạy E2E/promote không):
+#   - workflow_run (workflow "Release" xong) → CHẾ ĐỘ "release": tìm tag trỏ
+#     ĐÚNG commit Release vừa chạy (head_sha). Không có tag (lượt Release bỏ
+#     qua vì VERSION không đổi) hoặc Release không success → không làm gì.
+#     Có tag và còn là bản thử → E2E rồi promote.
+#   - workflow_dispatch → CHẾ ĐỘ "release": `tag` (bỏ trống = bản chính thức
+#     hiện tại), `promote` (E2E xanh thì nâng tag thành latest), `skip_e2e`
+#     (promote tay BỎ QUA E2E — chỉ khi E2E lỗi vì lý do ngoài mã).
+#   - pull_request/push đổi các đường dẫn ở `paths` dưới → CHẾ ĐỘ "pr":
+#     build genh TỪ SOURCE (đúng commit đang xét, bắt lỗi code genh sớm),
+#     trỏ genh vào deploy/compose.yaml của checkout (build ảnh cục bộ — bắt
+#     lỗi ảnh api/web trước khi phát hành), lấy compose.release.yaml của BẢN
+#     CHÍNH THỨC mới nhất (releases/latest) để nhúng vào binary — giống bước
+#     "Ghim compose.yaml đã publish vào binary" của release.yml.
+#
+# LƯU Ý: workflow này LỌC ĐƯỜNG DẪN (paths) nên KHÔNG được làm required check
+# trong branch protection — PR không chạm các đường dẫn đó sẽ treo "Expected"
+# mãi. Required check duy nhất là job tổng ci-ok / installer-ok.
 #
 # THÀNH THẬT: bước "tạo dữ liệu mẫu" (mục 4 trong kế hoạch) chỉ gọi được
 # `POST /api/v1/setup/steps/1` (bước 1 của trình thiết lập 12 bước, xem
@@ -35,36 +51,244 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag bản phát hành để kiểm (bỏ trống = bản mới nhất trên GitHub Releases)"
+        description: "Tag bản phát hành để kiểm (bỏ trống = bản chính thức mới nhất, releases/latest)"
         required: false
         type: string
+      promote:
+        description: "E2E xanh thì nâng tag này thành latest"
+        required: false
+        type: boolean
+        default: false
+      skip_e2e:
+        description: "Promote tay, BỎ QUA E2E — chỉ dùng khi E2E lỗi vì lý do ngoài mã (GitHub/mạng); bắt buộc có tag và promote=true"
+        required: false
+        type: boolean
+        default: false
   pull_request:
     paths:
       - "apps/genh/**"
+      - "apps/api/**"
+      - "apps/web/Dockerfile"
       - "deploy/**"
+      - "deploy/images/**"
       - "install.sh"
+      - "VERSION"
+      - ".github/workflows/e2e-install.yml"
   push:
     branches: [main, "claude/**"]
     paths:
       - "apps/genh/**"
+      - "apps/api/**"
+      - "apps/web/Dockerfile"
       - "deploy/**"
+      - "deploy/images/**"
       - "install.sh"
+      - "VERSION"
+      - ".github/workflows/e2e-install.yml"
 
+# Nhóm theo ĐÚNG đối tượng được kiểm: workflow_run theo commit Release
+# (head_sha), dispatch theo tag, pr/push theo ref. Chỉ pr/push được huỷ lượt
+# cũ — một lượt Release bỏ qua (skip=true, commit khác) chạy sau KHÔNG được
+# huỷ nhầm E2E của bản thử đang kiểm.
 concurrency:
-  group: e2e-install-${{ github.ref }}-${{ github.event_name }}
-  cancel-in-progress: true
+  group: e2e-install-${{ github.event_name }}-${{ github.event.workflow_run.head_sha || inputs.tag || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
 
 permissions:
   contents: read
 
 jobs:
+  # ── resolve ──────────────────────────────────────────────────────────────
+  # Nguồn duy nhất cho mode (pr|release), tag cần kiểm, có chạy E2E không,
+  # có promote không, và bản chính thức liền trước (prev_tag) cho e2e-upgrade.
+  # Mọi giá trị do người/sự kiện đưa vào (inputs.*, workflow_run.*) chỉ đi
+  # qua env — không nội suy ${{ }} thẳng vào shell.
+  resolve:
+    name: xác định chế độ, tag cần kiểm, có promote không
+    runs-on: ubuntu-latest
+    outputs:
+      mode: ${{ steps.r.outputs.mode }}
+      tag: ${{ steps.r.outputs.tag }}
+      run_e2e: ${{ steps.r.outputs.run_e2e }}
+      promote: ${{ steps.r.outputs.promote }}
+      skip_e2e: ${{ steps.r.outputs.skip_e2e }}
+      prev_tag: ${{ steps.r.outputs.prev_tag }}
+      broken_install: ${{ steps.r.outputs.broken_install }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      R: ${{ github.repository }}
+      EVENT: ${{ github.event_name }}
+      RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+      RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+      IN_TAG: ${{ inputs.tag }}
+      IN_PROMOTE: ${{ inputs.promote }}
+      IN_SKIP_E2E: ${{ inputs.skip_e2e }}
+    steps:
+      - name: Lấy mã nguồn (cần remote origin cho git ls-remote)
+        uses: actions/checkout@v4
+
+      - name: Xác định chế độ, tag, run_e2e, promote, prev_tag
+        id: r
+        run: |
+          set -euo pipefail
+          # Bản chính thức (latest) hiện tại; rỗng nếu repo chưa có (404).
+          # Không dùng `$(… || true)`: khi lỗi HTTP, gh api vẫn in thân JSON
+          # lỗi ra stdout.
+          latest_official() {
+            local t
+            if t="$(gh api "repos/$R/releases/latest" --jq .tag_name 2>/dev/null)"; then printf '%s' "$t"; fi
+          }
+          # Tag trỏ đúng commit $1 (tag nhẹ: "<sha> refs/tags/vX"; tag có chú
+          # thích: thêm dòng "<sha> refs/tags/vX^{}") — đọc từ stdin là đầu ra
+          # `git ls-remote --tags origin`. Không có → rỗng. Ưu tiên tag KHÔNG
+          # hậu tố: `sort -V` của GNU xếp v0.1.33-rc.1 SAU v0.1.33, nên nếu cả
+          # hai cùng trỏ một commit mà lấy tail thì chọn nhầm bản -rc (không
+          # bao giờ promote) và bản thật không được promote.
+          tag_at_sha() {
+            local all
+            all="$(awk -v s="$1" '$1==s{print $2}' | sed -e 's#^refs/tags/##' -e 's#\^{}$##' \
+              | { grep -E '^v[0-9]+\.[0-9]+\.[0-9]+' || true; } | sort -uV)"
+            if printf '%s\n' "$all" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+              printf '%s\n' "$all" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | tail -n1
+            else
+              printf '%s\n' "$all" | sed '/^$/d' | tail -n1
+            fi
+          }
+
+          mode=release
+          tag=""
+          run_e2e=true
+          promote=false
+          skip_e2e=false
+          case "$EVENT" in
+            pull_request | push)
+              mode=pr
+              tag="$(latest_official)"
+              if [ -z "$tag" ]; then
+                echo "::error::Chưa có bản chính thức (releases/latest) nào để lấy compose.release.yaml — cần phát hành và promote ít nhất một bản (merge PR tăng VERSION, chờ E2E xanh) trước khi chế độ pr kiểm được." >&2
+                exit 1
+              fi
+              ;;
+            workflow_run)
+              if [ "$RUN_CONCLUSION" != "success" ]; then
+                echo "Release kết thúc '$RUN_CONCLUSION' (không phải success) — không có bản thử mới để kiểm, bỏ qua."
+                run_e2e=false
+              else
+                # ls-remote chạy riêng để lỗi mạng làm job ĐỎ (không lặng lẽ
+                # coi như "không có tag" rồi bỏ qua E2E của bản thử thật).
+                refs="$(git ls-remote --tags origin)"
+                tag="$(printf '%s\n' "$refs" | tag_at_sha "$RUN_SHA")"
+                if [ -z "$tag" ]; then
+                  echo "không có bản phát hành mới ở $RUN_SHA — bỏ qua (lượt Release bỏ qua vì VERSION không đổi)."
+                  run_e2e=false
+                else
+                  if ! info="$(gh release view "$tag" --repo "$R" --json isPrerelease,isDraft --jq '"\(.isPrerelease) \(.isDraft)"')"; then
+                    echo "::error::Tag $tag trỏ đúng commit $RUN_SHA nhưng không có GitHub Release tương ứng — kiểm lại job release của lượt Release vừa chạy (log bước softprops/action-gh-release)." >&2
+                    exit 1
+                  fi
+                  is_pre="${info%% *}"
+                  is_draft="${info##* }"
+                  if [ "$is_draft" = "true" ]; then
+                    echo "::error::Release $tag đang là bản nháp (draft) — install.sh không tải được. Bỏ nháp (gh release edit $tag --draft=false) rồi chạy tay workflow này với tag=$tag, promote=true." >&2
+                    exit 1
+                  fi
+                  case "$tag" in
+                    *-*) echo "$tag có hậu tố '-' — chỉ kiểm, KHÔNG bao giờ promote thành bản chính thức." ;;
+                    *) if [ "$is_pre" = "true" ]; then promote=true; fi ;;
+                  esac
+                  echo "bản thử: $tag (prerelease=$is_pre) ở commit $RUN_SHA"
+                fi
+              fi
+              ;;
+            workflow_dispatch)
+              tag="$IN_TAG"
+              if [ -z "$tag" ]; then
+                tag="$(latest_official)"
+              fi
+              promote="${IN_PROMOTE:-false}"
+              skip_e2e="${IN_SKIP_E2E:-false}"
+              if [ "$skip_e2e" = "true" ]; then
+                if [ -z "$IN_TAG" ] || [ "$promote" != "true" ]; then
+                  echo "::error::skip_e2e=true bắt buộc nhập tag cụ thể VÀ bật promote=true — chạy lại workflow với đủ cả hai, hoặc tắt skip_e2e để chạy E2E bình thường." >&2
+                  exit 1
+                fi
+                run_e2e=false
+                echo "::warning::PROMOTE TAY — sẽ bỏ qua E2E cho $tag. Chỉ dùng khi E2E lỗi vì lý do ngoài mã (GitHub/mạng); ghi lại lý do vào HANDOFF."
+              fi
+              if [ -z "$tag" ]; then
+                echo "::error::Chưa có bản chính thức (releases/latest) nào — nhập tag cụ thể ở ô 'tag' khi chạy tay." >&2
+                exit 1
+              fi
+              if ! gh release view "$tag" --repo "$R" --json tagName >/dev/null; then
+                echo "::error::Không tìm thấy GitHub Release '$tag' — kiểm lại tên tag (dạng vMAJOR.MINOR.PATCH, vd v0.1.33)." >&2
+                exit 1
+              fi
+              ;;
+            *)
+              echo "::error::sự kiện '$EVENT' không được hỗ trợ" >&2
+              exit 1
+              ;;
+          esac
+
+          if [ -n "$tag" ] && ! printf '%s' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
+            echo "::error::tag '$tag' không đúng định dạng vMAJOR.MINOR.PATCH[-PRERELEASE] — nhập lại tag đúng (vd v0.1.33)." >&2
+            exit 1
+          fi
+
+          # prev_tag cho e2e-upgrade / e2e-selfupdate = bản CHÍNH THỨC gần nhất
+          # cũ hơn $tag (bỏ bản nháp + bản thử) — chính là bản máy Boss đang
+          # chạy. Tính cả khi promote tay skip_e2e (run_e2e=false): e2e-selfupdate
+          # sau promote vẫn cần nó.
+          prev=""
+          broken=false
+          if [ "$mode" = "release" ] && { [ "$run_e2e" = "true" ] || [ "$promote" = "true" ]; }; then
+            official="$(gh release list --repo "$R" --exclude-drafts --exclude-pre-releases --limit 10 --json tagName --jq '.[].tagName')"
+            for t in $official; do
+              [ "$t" != "$tag" ] || continue
+              if [ "$(printf '%s\n%s\n' "$t" "$tag" | sort -V | head -n1)" = "$t" ]; then
+                prev="$t"
+                break
+              fi
+            done
+            # Các bản genh ≤ v0.1.8 cài từ binary phát hành KHÔNG ghi
+            # Caddyfile (≤v0.1.7) hoặc đụng nhau khi chép volume agy_state
+            # (≤v0.1.8) → không lên (Docker tạo thư mục rỗng thay tệp). Với
+            # các bản đó, bước cài bản cũ được phép đỏ; bước `genh update`
+            # phía sau phải TỰ SỬA máy cài lỗi đó rồi ready xanh.
+            case "$prev" in
+              v0.1.[0-8]) broken=true; echo "bản trước $prev thuộc nhóm cài lỗi Caddyfile — kiểm đường tự sửa khi update" ;;
+            esac
+            if [ -z "$prev" ]; then
+              echo "chưa có bản chính thức nào cũ hơn $tag — e2e-upgrade sẽ bỏ qua."
+            fi
+          fi
+
+          {
+            echo "mode=$mode"
+            echo "tag=$tag"
+            echo "run_e2e=$run_e2e"
+            echo "promote=$promote"
+            echo "skip_e2e=$skip_e2e"
+            echo "prev_tag=$prev"
+            echo "broken_install=$broken"
+          } >>"$GITHUB_OUTPUT"
+          {
+            echo "### E2E cài đặt thật — quyết định"
+            echo "| mode | tag | run_e2e | promote | skip_e2e | prev_tag |"
+            echo "|---|---|---|---|---|---|"
+            echo "| $mode | ${tag:--} | $run_e2e | $promote | $skip_e2e | ${prev:--} |"
+          } >>"$GITHUB_STEP_SUMMARY"
+          echo "mode=$mode tag=${tag:-<rỗng>} run_e2e=$run_e2e promote=$promote skip_e2e=$skip_e2e prev_tag=${prev:-<rỗng>}"
+
   # ── e2e-install ──────────────────────────────────────────────────────────
   # Luồng chính (mục 1-10 trong kế hoạch bàn giao): cài sạch, chờ ready,
   # status, dữ liệu mẫu (best-effort), backup, export/import, update,
   # auto-update enable/status/disable, uninstall — log docker compose luôn
   # in ra dù bước nào lỗi (if: always()).
   e2e-install:
-    name: cài đặt thật đầu-cuối (chế độ ${{ github.event_name == 'pull_request' && 'pr' || (github.event_name == 'push' && 'pr' || 'release') }})
+    name: cài đặt thật đầu-cuối (chế độ ${{ needs.resolve.outputs.mode }}${{ needs.resolve.outputs.mode == 'release' && format(', {0}', needs.resolve.outputs.tag) || '' }})
+    needs: resolve
+    if: needs.resolve.outputs.run_e2e == 'true'
     runs-on: ubuntu-24.04
     # Chạy ngoài checkout repo: genh tìm compose.yaml theo cwd trước — trong repo
     # nó sẽ dùng deploy/compose.yaml (build cục bộ) thay vì compose bản phát hành
@@ -72,9 +296,6 @@ jobs:
     defaults:
       run:
         working-directory: /tmp
-    # workflow_run chỉ chạy tiếp nếu chính workflow Release đã THÀNH CÔNG —
-    # Release fail/bị huỷ thì không có gì mới để kiểm.
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     timeout-minutes: 45
     env:
       # GEN_HARNESS_HOME KHÔNG đặt bằng ${{ runner.temp }} ở đây — "runner"
@@ -84,6 +305,9 @@ jobs:
       # trường runner luôn có sẵn, tương đương giá trị của context đó).
       GH_PORT: "8443"
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      R: ${{ github.repository }}
+      # pr: bản chính thức lấy compose.release.yaml; release: tag cài đặt.
+      TAG: ${{ needs.resolve.outputs.tag }}
     steps:
       - name: Lấy mã nguồn
         uses: actions/checkout@v4
@@ -91,66 +315,40 @@ jobs:
       - name: Đặt GEN_HARNESS_HOME (thư mục cài đặt tạm của job này)
         run: echo "GEN_HARNESS_HOME=$RUNNER_TEMP/gh" >>"$GITHUB_ENV"
 
-      - name: Xác định chế độ (release hay pr) và tag cần kiểm
-        id: mode
-        run: |
-          set -euo pipefail
-          if [ "${{ github.event_name }}" = "pull_request" ] || [ "${{ github.event_name }}" = "push" ]; then
-            mode="pr"
-          else
-            mode="release"
-          fi
-          echo "mode=$mode" >>"$GITHUB_OUTPUT"
-          echo "chế độ: $mode"
-          if [ "$mode" = "pr" ]; then
-            # Chế độ pr kiểm CODE của PR, kể cả ảnh api/worker/web/bridge/db:
-            # trỏ genh vào deploy/compose.yaml của checkout (build: cục bộ)
-            # thay vì ảnh đã publish — nếu không, lỗi trong ảnh (vd thiếu thư
-            # viện Python) chỉ lộ ra SAU khi đã phát hành.
-            echo "GENH_COMPOSE_FILE=$GITHUB_WORKSPACE/deploy/compose.yaml" >>"$GITHUB_ENV"
-          fi
-
-          # Tag của bản phát hành ĐÃ publish sẵn (dùng để lấy compose.release
-          # ở chế độ pr, hoặc để cài đặt ở chế độ release) — luôn là bản MỚI
-          # NHẤT trừ khi workflow_dispatch chỉ định `tag` cụ thể.
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ inputs.tag }}" ]; then
-            tag="${{ inputs.tag }}"
-          else
-            tag="$(gh release list --repo "${{ github.repository }}" --limit 1 --json tagName -q '.[0].tagName')"
-          fi
-          if [ -z "$tag" ]; then
-            echo "::error::không tìm thấy bản phát hành nào trên GitHub Releases — cần chạy release.yml (merge PR tăng VERSION) trước khi workflow này kiểm được gì." >&2
-            exit 1
-          fi
-          echo "tag=$tag" >>"$GITHUB_OUTPUT"
-          echo "dùng bản phát hành: $tag"
+      - name: (pr) Trỏ genh vào deploy/compose.yaml của checkout
+        if: needs.resolve.outputs.mode == 'pr'
+        # Chế độ pr kiểm CODE của PR, kể cả ảnh api/worker/web/bridge/db:
+        # trỏ genh vào deploy/compose.yaml của checkout (build: cục bộ) thay
+        # vì ảnh đã publish — nếu không, lỗi trong ảnh (vd thiếu thư viện
+        # Python) chỉ lộ ra SAU khi đã phát hành.
+        run: echo "GENH_COMPOSE_FILE=$GITHUB_WORKSPACE/deploy/compose.yaml" >>"$GITHUB_ENV"
 
       # ── Chế độ "pr": build genh từ source, ghim compose.release.yaml đã
-      # publish của bản mới nhất (ảnh không build lại ở CI này) ──────────────
+      # publish của bản chính thức mới nhất (releases/latest) ────────────────
       - name: (pr) Cài Go
-        if: steps.mode.outputs.mode == 'pr'
+        if: needs.resolve.outputs.mode == 'pr'
         uses: actions/setup-go@v5
         with:
           go-version: "1.24.0"
 
-      - name: (pr) Tải deploy/compose.release.yaml của bản phát hành ${{ steps.mode.outputs.tag }}
-        if: steps.mode.outputs.mode == 'pr'
+      - name: (pr) Tải deploy/compose.release.yaml của bản chính thức ${{ needs.resolve.outputs.tag }}
+        if: needs.resolve.outputs.mode == 'pr'
         run: |
           set -euo pipefail
-          gh release download "${{ steps.mode.outputs.tag }}" --repo "${{ github.repository }}" \
+          gh release download "$TAG" --repo "$R" \
             --pattern 'compose.release.yaml' --dir "${{ runner.temp }}/pinned" --clobber
 
       - name: (pr) Ghim compose.yaml đã publish vào binary (giống bước cùng tên ở release.yml)
-        if: steps.mode.outputs.mode == 'pr'
+        if: needs.resolve.outputs.mode == 'pr'
         run: |
           set -euo pipefail
           cd "$GITHUB_WORKSPACE"
           cp "${{ runner.temp }}/pinned/compose.release.yaml" apps/genh/internal/compose/embedded_compose.yaml
-          echo "đã ghi đè embedded_compose.yaml bằng compose.release.yaml của ${{ steps.mode.outputs.tag }} (digest thật):"
+          echo "đã ghi đè embedded_compose.yaml bằng compose.release.yaml của $TAG (digest thật):"
           grep '^\s*image:' apps/genh/internal/compose/embedded_compose.yaml || true
 
       - name: (pr) Build genh từ mã nguồn đang xét
-        if: steps.mode.outputs.mode == 'pr'
+        if: needs.resolve.outputs.mode == 'pr'
         working-directory: ${{ github.workspace }}/apps/genh
         env:
           CGO_ENABLED: "0"
@@ -170,23 +368,25 @@ jobs:
           go build -trimpath -ldflags "-s -w" -o "${{ runner.temp }}/genh" ./cmd/genh
           echo "GENH=${{ runner.temp }}/genh" >>"$GITHUB_ENV"
 
-      # ── Chế độ "release": tải install.sh + asset THẬT của đúng bản phát
-      # hành, chạy y hệt người dùng thật (curl … | sh) ─────────────────────
-      - name: (release) Tải install.sh của bản phát hành ${{ steps.mode.outputs.tag }}
-        if: steps.mode.outputs.mode == 'release'
+      # ── Chế độ "release": tải install.sh + asset THẬT của ĐÚNG tag (thường
+      # là bản thử vừa tạo), chạy y hệt người dùng thật (curl … | sh) ───────
+      - name: (release) Tải install.sh của bản phát hành ${{ needs.resolve.outputs.tag }}
+        if: needs.resolve.outputs.mode == 'release'
         run: |
           set -euo pipefail
-          gh release download "${{ steps.mode.outputs.tag }}" --repo "${{ github.repository }}" \
-            --pattern 'install.sh' --dir "${{ runner.temp }}" --clobber
-          chmod +x "${{ runner.temp }}/install.sh"
+          gh release download "$TAG" --repo "$R" \
+            --pattern 'install.sh' --dir "$RUNNER_TEMP" --clobber
+          chmod +x "$RUNNER_TEMP/install.sh"
 
-      - name: (release) Cài sạch bằng install.sh thật (curl … | sh, không tương tác)
-        if: steps.mode.outputs.mode == 'release'
+      - name: (release) Cài sạch bằng install.sh thật của ${{ needs.resolve.outputs.tag }} (không tương tác)
+        if: needs.resolve.outputs.mode == 'release'
         run: |
           set -euo pipefail
-          # install.sh (xem file gốc): phát hiện OS/kiến trúc, tải đúng
-          # asset genh-linux-amd64 + checksums.txt từ CHÍNH bản phát hành
-          # $GH_PORT? không — install.sh không nhận cờ, chỉ tải binary rồi tự
+          # install.sh (xem file gốc): phát hiện OS/kiến trúc, tải đúng asset
+          # genh-linux-amd64 + checksums.txt, kiểm SHA-256. Mặc định nó tải từ
+          # /releases/latest/download — bản thử (prerelease) KHÔNG nằm ở đó,
+          # nên đặt GEN_HARNESS_RELEASE_TAG để install.sh tải ĐÚNG tag đang
+          # kiểm (biến chỉ dành cho CI/E2E). install.sh không nhận cờ, tự
           # `exec genh install` KHÔNG kèm cờ nào (máy sạch → không có
           # secrets.json). Không cần TTY: genh install tự chuyển "chế độ
           # dòng" khi stdout không phải terminal (xem tui.IsTerminal,
@@ -198,8 +398,23 @@ jobs:
           # thứ duy nhất bị ảnh hưởng là CA nội bộ không được tự tin cậy vào
           # hệ điều hành (StatusWarn, không chặn cài đặt) — vì vậy các bước
           # `curl` sau này đều dùng `-k`.
-          "${{ runner.temp }}/install.sh"
+          GEN_HARNESS_RELEASE_TAG="$TAG" "$RUNNER_TEMP/install.sh"
           echo "GENH=${GEN_HARNESS_HOME}/bin/genh" >>"$GITHUB_ENV"
+
+      - name: (release) Kiểm genh vừa cài đúng tag ${{ needs.resolve.outputs.tag }}
+        if: needs.resolve.outputs.mode == 'release'
+        run: |
+          set -euo pipefail
+          out="$("$GENH" version)"
+          echo "$out"
+          # So khớp NGUYÊN từ (v0.1.3 không được khớp nhầm v0.1.33).
+          case " $out " in
+            *" $TAG "*) echo "OK: genh đã cài đúng $TAG" ;;
+            *)
+              echo "::error::genh vừa cài báo '$out', không phải $TAG — install.sh đã tải nhầm bản (kiểm GEN_HARNESS_RELEASE_TAG trong install.sh của $TAG và asset genh-linux-amd64 của Release)." >&2
+              exit 1
+              ;;
+          esac
 
       - name: In phiên bản genh vừa cài
         run: "$GENH version"
@@ -208,7 +423,7 @@ jobs:
       # không dùng ở chế độ này vì nó tải BẢN ĐÃ PUBLISH, không phải bản
       # đang review ──────────────────────────────────────────────────────────
       - name: (pr) Cài sạch không tương tác bằng genh build từ source
-        if: steps.mode.outputs.mode == 'pr'
+        if: needs.resolve.outputs.mode == 'pr'
         run: |
           set -euo pipefail
           "$GENH" install --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes --no-auto-update
@@ -279,6 +494,8 @@ jobs:
           done
 
       - name: genh update --yes (đã mới nhất → phải không lỗi)
+        # Chế độ release: genh đang là bản thử, releases/latest (bản chính thức)
+        # CŨ hơn → selfupdate không hạ cấp (IsNewer=false), chỉ chạy phần dịch vụ.
         run: $GENH update --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes
 
       - name: Nút "Cập nhật ngay" — api ghi yêu cầu, genh trên máy chủ tự nhận và cập nhật (tối đa 7 phút)
@@ -377,16 +594,25 @@ jobs:
           fi
 
   # ── e2e-upgrade ──────────────────────────────────────────────────────────
-  # Chỉ chạy ở chế độ workflow_run/workflow_dispatch (kiểm nâng cấp cần CÓ
-  # bản phát hành THẬT trước đó trên GitHub Releases — chế độ pr build từ
-  # source, không có "bản trước" để nâng cấp lên chính commit đang review).
-  # Kịch bản: cài bản phát hành LIỀN TRƯỚC (tag thứ 2 trong danh sách release,
-  # mới nhất → cũ dần) → genh update --yes (tự tải genh mới nhất qua
-  # internal/selfupdate rồi mới nâng cấp dịch vụ, xem cmd/genh/main.go hàm
-  # trySelfUpdateAndReExec — không cần bước tải genh riêng) → ready xanh →
-  # xác nhận dữ liệu/bí mật KHÔNG bị tạo lại (app_db_password không đổi).
+  # Chỉ chạy ở chế độ release (kiểm nâng cấp cần CÓ bản chính thức THẬT trước
+  # đó — chế độ pr build từ source, không có "bản trước" để nâng cấp lên chính
+  # commit đang review) và khi resolve tìm được prev_tag.
+  # Kịch bản: cài BẢN CHÍNH THỨC liền trước (prev_tag = bản máy Boss đang chạy)
+  # → đặt genh của tag đang kiểm đè lên → genh update --yes --no-self-update
+  # → ready xanh → genh version đúng tag → xác nhận dữ liệu/bí mật KHÔNG bị
+  # tạo lại (app_db_password không đổi).
+  #
+  # THÀNH THẬT: genh cũ tự cập nhật (internal/selfupdate) CHỈ thấy
+  # releases/latest — bản thử (prerelease) bị ẩn, nên nó sẽ không tự tải được
+  # bản đang kiểm. Vì vậy E2E tự tải genh-linux-amd64 + checksums.txt của tag
+  # đang kiểm, kiểm sha256 rồi đặt binary mới bằng tay; đường "genh cũ tự tải
+  # binary mới" KHÔNG đi qua ở đây — đường đó do job e2e-selfupdate kiểm SAU
+  # promote (lúc releases/latest đã là tag này), cùng go test của
+  # apps/genh/internal/selfupdate.
   e2e-upgrade:
-    name: nâng cấp từ bản phát hành liền trước
+    name: nâng cấp ${{ needs.resolve.outputs.prev_tag }} → ${{ needs.resolve.outputs.tag }}
+    needs: resolve
+    if: needs.resolve.outputs.run_e2e == 'true' && needs.resolve.outputs.mode == 'release' && needs.resolve.outputs.prev_tag != ''
     runs-on: ubuntu-24.04
     # Chạy ngoài checkout repo: genh tìm compose.yaml theo cwd trước — trong repo
     # nó sẽ dùng deploy/compose.yaml (build cục bộ) thay vì compose bản phát hành
@@ -394,13 +620,15 @@ jobs:
     defaults:
       run:
         working-directory: /tmp
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
     timeout-minutes: 30
     env:
       # Xem ghi chú tương tự ở job e2e-install — không dùng ${{ runner.temp }}
       # trong `env:` cấp job.
       GH_PORT: "8444"
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      R: ${{ github.repository }}
+      TAG: ${{ needs.resolve.outputs.tag }}
+      PREV_TAG: ${{ needs.resolve.outputs.prev_tag }}
     steps:
       - name: Lấy mã nguồn (chỉ cần cho tham chiếu, không build gì ở job này)
         uses: actions/checkout@v4
@@ -408,59 +636,25 @@ jobs:
       - name: Đặt GEN_HARNESS_HOME (thư mục cài đặt tạm của job này)
         run: echo "GEN_HARNESS_HOME=$RUNNER_TEMP/gh-upgrade" >>"$GITHUB_ENV"
 
-      - name: Tìm tag của bản phát hành LIỀN TRƯỚC bản mới nhất
-        id: prev
+      - name: Cài sạch bản chính thức TRƯỚC ĐÓ (${{ needs.resolve.outputs.prev_tag }})
+        continue-on-error: ${{ needs.resolve.outputs.broken_install == 'true' }}
         run: |
           set -euo pipefail
-          mapfile -t tags < <(gh release list --repo "${{ github.repository }}" --limit 5 --json tagName -q '.[].tagName')
-          if [ "${#tags[@]}" -lt 2 ]; then
-            echo "skip=true" >>"$GITHUB_OUTPUT"
-            echo "chưa đủ 2 bản phát hành trên GitHub Releases (mới có ${#tags[@]}) — bỏ qua job này, không có gì để nâng cấp TỪ."
-            exit 0
-          fi
-          echo "skip=false" >>"$GITHUB_OUTPUT"
-          echo "tag=${tags[1]}" >>"$GITHUB_OUTPUT"
-          echo "bản trước: ${tags[1]} (mới nhất: ${tags[0]})"
-          # Các bản genh ≤ v0.1.8 cài từ binary phát hành KHÔNG ghi
-          # Caddyfile (≤v0.1.7) hoặc đụng nhau khi chép volume agy_state (≤v0.1.8) → không lên (Docker
-          # tạo thư mục rỗng thay tệp). Với các bản đó, bước cài bản cũ được
-          # phép đỏ; bước `genh update` phía sau phải TỰ SỬA máy cài lỗi đó
-          # (đúng tình huống thật của Owner đã thử cài bản lỗi) rồi ready xanh.
-          case "${tags[1]}" in
-            v0.1.[0-8]) echo "broken_install=true" >>"$GITHUB_OUTPUT"; echo "bản trước thuộc nhóm cài lỗi Caddyfile — kiểm đường tự sửa khi update" ;;
-            *) echo "broken_install=false" >>"$GITHUB_OUTPUT" ;;
-          esac
-
-      - name: Tải install.sh của bản trước (${{ steps.prev.outputs.tag }})
-        if: steps.prev.outputs.skip == 'false'
-        run: |
-          set -euo pipefail
-          gh release download "${{ steps.prev.outputs.tag }}" --repo "${{ github.repository }}" \
-            --pattern 'install.sh' --dir "${{ runner.temp }}" --clobber
-          chmod +x "${{ runner.temp }}/install.sh"
-
-      - name: Cài sạch bản phát hành TRƯỚC ĐÓ bằng install.sh thật
-        if: steps.prev.outputs.skip == 'false'
-        continue-on-error: ${{ steps.prev.outputs.broken_install == 'true' }}
-        run: |
-          set -euo pipefail
-          # install.sh luôn tải "release/latest/download/…" (xem RELEASE_BASE
-          # trong file gốc) — KHÔNG tự nhận một tag cụ thể. Để cài đúng bản
-          # LIỀN TRƯỚC, tự tải asset của đúng tag đó rồi làm y hệt phần thân
-          # install.sh (kiểm checksum, đặt vào bin/, thêm PATH) thay vì gọi
-          # thẳng install.sh (nó sẽ luôn ra bản mới nhất, không phải bản cũ
-          # cần cho phép thử nâng cấp).
+          # Tự tải asset của đúng prev_tag rồi làm y hệt phần thân install.sh
+          # (kiểm checksum, đặt vào bin/) — install.sh của bản cũ chưa biết
+          # GEN_HARNESS_RELEASE_TAG, gọi thẳng nó sẽ ra bản chính thức hiện tại.
           mkdir -p "$GEN_HARNESS_HOME/bin"
-          gh release download "${{ steps.prev.outputs.tag }}" --repo "${{ github.repository }}" \
-            --pattern 'genh-linux-amd64' --pattern 'checksums.txt' --dir "${{ runner.temp }}/prev" --clobber
-          want="$(awk '$2=="genh-linux-amd64"||$2=="./genh-linux-amd64"{print $1}' "${{ runner.temp }}/prev/checksums.txt")"
-          got="$(sha256sum "${{ runner.temp }}/prev/genh-linux-amd64" | awk '{print $1}')"
-          [ -n "$want" ] && [ "$got" = "$want" ] || { echo "::error::sha256 của genh-linux-amd64 (${{ steps.prev.outputs.tag }}) không khớp checksums.txt" >&2; exit 1; }
-          install -m 0755 "${{ runner.temp }}/prev/genh-linux-amd64" "$GEN_HARNESS_HOME/bin/genh"
+          gh release download "$PREV_TAG" --repo "$R" \
+            --pattern 'genh-linux-amd64' --pattern 'checksums.txt' --dir "$RUNNER_TEMP/prev" --clobber
+          want="$(awk '$2=="genh-linux-amd64"||$2=="./genh-linux-amd64"{print $1}' "$RUNNER_TEMP/prev/checksums.txt")"
+          got="$(sha256sum "$RUNNER_TEMP/prev/genh-linux-amd64" | awk '{print $1}')"
+          [ -n "$want" ] && [ "$got" = "$want" ] || { echo "::error::sha256 của genh-linux-amd64 ($PREV_TAG) không khớp checksums.txt — asset Release bị thay hoặc tải hỏng; tải lại/kiểm Release $PREV_TAG." >&2; exit 1; }
+          install -m 0755 "$RUNNER_TEMP/prev/genh-linux-amd64" "$GEN_HARNESS_HOME/bin/genh"
+          "$GEN_HARNESS_HOME/bin/genh" version
           "$GEN_HARNESS_HOME/bin/genh" install --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes --no-auto-update
 
       - name: Chờ /api/v1/ready xanh (bản cũ, tối đa 5 phút)
-        if: steps.prev.outputs.skip == 'false' && steps.prev.outputs.broken_install != 'true'
+        if: needs.resolve.outputs.broken_install != 'true'
         run: |
           set -euo pipefail
           deadline=$((SECONDS + 300))
@@ -470,7 +664,6 @@ jobs:
           done
 
       - name: Ghi lại app_db_password TRƯỚC khi nâng cấp
-        if: steps.prev.outputs.skip == 'false'
         id: before
         run: |
           set -euo pipefail
@@ -478,12 +671,25 @@ jobs:
           echo "::add-mask::$pw"
           echo "pw=$pw" >>"$GITHUB_OUTPUT"
 
-      - name: genh update --yes (tự tải genh mới nhất rồi nâng cấp dịch vụ)
-        if: steps.prev.outputs.skip == 'false'
-        run: $GEN_HARNESS_HOME/bin/genh update --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes
+      - name: Đặt genh ${{ needs.resolve.outputs.tag }} đè lên genh cũ (tải + kiểm sha256)
+        run: |
+          set -euo pipefail
+          # Xem ghi chú THÀNH THẬT ở đầu job: genh cũ không thấy bản thử qua
+          # releases/latest nên đặt binary mới bằng tay, đúng như install.sh
+          # làm (tải asset + checksums.txt của ĐÚNG tag, kiểm sha256).
+          d="$RUNNER_TEMP/new"
+          gh release download "$TAG" --repo "$R" \
+            --pattern 'genh-linux-amd64' --pattern 'checksums.txt' --dir "$d" --clobber
+          want="$(awk '$2=="genh-linux-amd64"||$2=="./genh-linux-amd64"{print $1}' "$d/checksums.txt")"
+          got="$(sha256sum "$d/genh-linux-amd64" | awk '{print $1}')"
+          [ -n "$want" ] && [ "$got" = "$want" ] || { echo "::error::sha256 của genh-linux-amd64 ($TAG) không khớp checksums.txt — KHÔNG promote bản này; kiểm lại asset của Release $TAG." >&2; exit 1; }
+          install -m 0755 "$d/genh-linux-amd64" "$GEN_HARNESS_HOME/bin/genh"
+          "$GEN_HARNESS_HOME/bin/genh" version
+
+      - name: genh update --yes --no-self-update (genh ${{ needs.resolve.outputs.tag }} nâng cấp dịch vụ từ bản cũ)
+        run: $GEN_HARNESS_HOME/bin/genh update --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes --no-self-update
 
       - name: Chờ /api/v1/ready xanh lại sau nâng cấp (tối đa 5 phút)
-        if: steps.prev.outputs.skip == 'false'
         run: |
           set -euo pipefail
           deadline=$((SECONDS + 300))
@@ -492,10 +698,22 @@ jobs:
             sleep 3
           done
 
-      # v0.1.29: compose mới mount Docker secret gh_browser_key (genh cũ không sinh) — genh mới (tự cập nhật rồi
-      # re-exec) phải tự sinh khoá trước `docker compose up`, và browser/browser-egress phải chạy sau nâng cấp.
+      - name: Kiểm genh sau nâng cấp đúng tag ${{ needs.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          out="$("$GEN_HARNESS_HOME/bin/genh" version)"
+          echo "$out"
+          case " $out " in
+            *" $TAG "*) echo "OK: sau nâng cấp genh là $TAG (từ $PREV_TAG)" ;;
+            *)
+              echo "::error::sau genh update, genh báo '$out' chứ không phải $TAG — binary bị thay ngược (vd tự cập nhật về releases/latest); KHÔNG promote, xem log bước genh update." >&2
+              exit 1
+              ;;
+          esac
+
+      # v0.1.29: compose mới mount Docker secret gh_browser_key (genh cũ không sinh) — genh mới (đặt đè ở bước
+      # trên) phải tự sinh khoá trước `docker compose up`, và browser/browser-egress phải chạy sau nâng cấp.
       - name: Kiểm khoá gh_browser_key + dịch vụ browser sau nâng cấp (nếu compose có browser)
-        if: steps.prev.outputs.skip == 'false'
         run: |
           set -euo pipefail
           if ! grep -q '^  browser-egress:' "$GEN_HARNESS_HOME/deploy/compose.yaml"; then
@@ -532,7 +750,6 @@ jobs:
           [ "$r" = "reach" ] || { echo "::error::browser không tới được browser-redis" >&2; exit 1; }
 
       - name: Kiểm dữ liệu/bí mật KHÔNG bị tạo lại (app_db_password không đổi)
-        if: steps.prev.outputs.skip == 'false'
         run: |
           set -euo pipefail
           pw_after="$(python3 -c "import json;print(json.load(open('${GEN_HARNESS_HOME}/config/secrets.json'))['app_db_password'])")"
@@ -545,11 +762,373 @@ jobs:
           "$GEN_HARNESS_HOME/bin/genh" version --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT"
 
       - name: genh uninstall --yes (dọn dẹp)
-        if: always() && steps.prev.outputs.skip == 'false'
+        if: always()
         run: $GEN_HARNESS_HOME/bin/genh uninstall --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes || true
 
       - name: (luôn) In log docker compose (tail 200) để debug
-        if: always() && steps.prev.outputs.skip == 'false'
+        if: always()
+        run: |
+          set -euo pipefail
+          docker ps -a || true
+          for c in $(docker ps -a --format '{{.Names}}' | grep '^gen-harness-' || true); do
+            echo "════ $c ════"
+            docker logs --tail 200 "$c" 2>&1 || true
+          done
+
+  # ── promote ──────────────────────────────────────────────────────────────
+  # Nâng tag thành BẢN CHÍNH THỨC (latest) — chỉ khi resolve bảo promote VÀ
+  # (e2e-install xanh VÀ e2e-upgrade xanh/bỏ qua), hoặc khi Owner chạy tay
+  # với skip_e2e=true (promote tay, có cảnh báo). always() để job vẫn được
+  # xét khi e2e-upgrade bị bỏ qua (chưa có bản chính thức cũ hơn).
+  # Không bao giờ hạ cấp: latest hiện tại mới hơn thì chỉ cảnh báo.
+  # Cùng MỘT lệnh `gh release edit` (một PATCH) với việc nâng latest, ghi dấu
+  # `<!-- genh:promoted_at=<UTC> -->` vào cuối ghi chú Release: selfupdate
+  # (apps/genh/internal/selfupdate, PromotedMarker) tính thời gian chín 24 giờ
+  # của lịch đêm TỪ dấu này — published_at là lúc tạo bản thử, promote không
+  # đổi nó, nên bản thử promote muộn (vd promote tay sau vài ngày) sẽ lọt
+  # cổng ngay nếu chỉ dựa vào published_at. Định dạng dấu phải khớp
+  # PromotedMarker (check_release_gate.py giữ).
+  # Ảnh GHCR `:latest` cũng chỉ gắn ở đây (build-images của release.yml chỉ
+  # đẩy `:<version>`) — `:latest` không bao giờ trỏ ảnh chưa qua cổng.
+  promote:
+    name: nâng thành bản chính thức (promote ${{ needs.resolve.outputs.tag }})
+    runs-on: ubuntu-latest
+    needs: [resolve, e2e-install, e2e-upgrade]
+    if: always() && needs.resolve.outputs.promote == 'true' && (needs.resolve.outputs.skip_e2e == 'true' || (needs.e2e-install.result == 'success' && (needs.e2e-upgrade.result == 'success' || needs.e2e-upgrade.result == 'skipped')))
+    permissions:
+      contents: write
+      packages: write
+    outputs:
+      # true khi CHÍNH lượt này vừa nâng tag thành latest (e2e-selfupdate chỉ
+      # chạy khi đó); false khi đã là latest từ trước hoặc không hạ cấp.
+      promoted: ${{ steps.p.outputs.promoted }}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ needs.resolve.outputs.tag }}
+      R: ${{ github.repository }}
+      SKIP_E2E: ${{ needs.resolve.outputs.skip_e2e }}
+    steps:
+      - name: Nâng ${{ needs.resolve.outputs.tag }} thành bản chính thức (latest) + ghi dấu thời điểm promote
+        id: p
+        run: |
+          set -euo pipefail
+          # Ghi output đúng MỘT lần, ở mọi lối thoát (exit 0 sớm, exit 1, xong).
+          promoted=false
+          is_latest=false
+          trap 'printf "promoted=%s\nis_latest=%s\n" "$promoted" "$is_latest" >>"$GITHUB_OUTPUT"' EXIT
+          # Bản chính thức hiện tại; rỗng nếu 404 (không dùng `$(… || true)`:
+          # khi lỗi HTTP, gh api vẫn in thân JSON lỗi ra stdout).
+          latest_official() {
+            local t
+            if t="$(gh api "repos/$R/releases/latest" --jq .tag_name 2>/dev/null)"; then printf '%s' "$t"; fi
+          }
+          if [ "$SKIP_E2E" = "true" ]; then
+            echo "::warning::PROMOTE TAY — đã bỏ qua E2E cho $TAG (skip_e2e=true). Ghi lý do vào HANDOFF và chạy lại E2E khi GitHub/mạng ổn."
+          fi
+
+          before="$(latest_official)"
+          echo "releases/latest TRƯỚC: ${before:-<chưa có>}"
+
+          pre="$(gh release view "$TAG" --repo "$R" --json isPrerelease --jq .isPrerelease)"
+          if [ "$pre" != "true" ] && [ "$before" = "$TAG" ]; then
+            echo "$TAG đã là latest (bản chính thức) — không cần làm gì."
+            is_latest=true
+            exit 0
+          fi
+          case "$TAG" in
+            *-*)
+              echo "::error::$TAG có hậu tố '-' (bản thử dài hạn) — không được nâng thành bản chính thức. Phát hành bản không hậu tố (tăng VERSION) nếu muốn máy Boss nhận." >&2
+              exit 1
+              ;;
+          esac
+          if [ -n "$before" ] && [ "$before" != "$TAG" ] \
+            && [ "$(printf '%s\n%s\n' "$before" "$TAG" | sort -V | tail -n1)" = "$before" ]; then
+            echo "::warning::bản mới hơn đã là latest ($before), không hạ cấp — $TAG giữ nguyên là bản thử."
+            exit 0
+          fi
+
+          # Dấu thời điểm promote — đúng định dạng selfupdate.PromotedMarker
+          # (RFC 3339, UTC, đơn vị giây). Bỏ dấu cũ (nếu bản này từng được
+          # promote rồi hạ về bản thử) để ghi chú chỉ còn một dấu.
+          marker="<!-- genh:promoted_at=$(date -u +%Y-%m-%dT%H:%M:%SZ) -->"
+          notes="$RUNNER_TEMP/notes-promoted.md"
+          gh release view "$TAG" --repo "$R" --json body --jq .body >"$RUNNER_TEMP/notes.md"
+          { grep -v 'genh:promoted_at=' "$RUNNER_TEMP/notes.md" || true; printf '\n%s\n' "$marker"; } >"$notes"
+          gh release edit "$TAG" --repo "$R" --prerelease=false --latest --notes-file "$notes"
+
+          # API releases/latest có thể trễ vài giây — chờ tối đa 60 giây.
+          after=""
+          deadline=$((SECONDS + 60))
+          while :; do
+            after="$(latest_official)"
+            if [ "$after" = "$TAG" ] || [ "$SECONDS" -ge "$deadline" ]; then
+              break
+            fi
+            sleep 5
+          done
+          echo "releases/latest SAU: ${after:-<chưa có>}"
+          if [ "$after" != "$TAG" ]; then
+            echo "::error::Đã sửa Release $TAG nhưng releases/latest vẫn là '${after:-<chưa có>}' sau 60 giây — kiểm tay: gh release edit $TAG --prerelease=false --latest, rồi gh api repos/$R/releases/latest." >&2
+            exit 1
+          fi
+          is_latest=true
+          # So khớp trong bash (không `| grep -q`: grep thoát sớm → gh nhận SIGPIPE → pipefail báo nhầm là thiếu dấu).
+          body_after="$(gh api "repos/$R/releases/latest" --jq .body)"
+          if [[ "$body_after" != *"$marker"* ]]; then
+            echo "::error::$TAG đã là latest nhưng ghi chú Release thiếu dấu $marker — lịch đêm sẽ tính 24 giờ từ published_at (lúc tạo bản thử), có thể cài ngay đêm nay. Thêm tay dòng đó vào cuối ghi chú: gh release view $TAG --repo $R --json body --jq .body > n.md; echo '$marker' >> n.md; gh release edit $TAG --repo $R --notes-file n.md" >&2
+            exit 1
+          fi
+          promoted=true
+          is_latest=true
+          {
+            echo "### Promote"
+            echo "releases/latest: ${before:-<chưa có>} → **$after** (dấu: \`$marker\`)"
+          } >>"$GITHUB_STEP_SUMMARY"
+          echo "OK: $TAG là bản chính thức — máy Boss (install.sh, genh tự cập nhật) sẽ nhận bản này; lịch đêm đợi đủ 24 giờ từ $marker."
+
+      - name: Đăng nhập GHCR (gắn ảnh :latest)
+        if: steps.p.outputs.is_latest == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v3
+        if: steps.p.outputs.is_latest == 'true'
+
+      - name: Gắn ảnh GHCR :latest = :${{ needs.resolve.outputs.tag }} (sau khi đã là bản chính thức)
+        if: steps.p.outputs.is_latest == 'true'
+        run: |
+          set -euo pipefail
+          # genh ghim ảnh theo digest (compose.release.yaml) nên máy Owner không
+          # dùng :latest — tag này chỉ cho người kéo ảnh tay. Lỗi ở đây KHÔNG
+          # làm hỏng việc promote đã xong: chỉ cảnh báo, kèm lệnh làm tay.
+          owner="$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
+          failed=""
+          for svc in api web bridge db browser; do
+            img="ghcr.io/$owner/gen-harness-$svc"
+            if docker buildx imagetools create -t "$img:latest" "$img:$TAG"; then
+              echo "OK: $img:latest → $img:$TAG"
+            else
+              failed="$failed $svc"
+            fi
+          done
+          if [ -n "$failed" ]; then
+            echo "::warning::Chưa gắn được ảnh :latest cho:$failed — máy Owner KHÔNG bị ảnh hưởng (genh ghim digest). Làm tay: docker buildx imagetools create -t ghcr.io/$owner/gen-harness-<dịch vụ>:latest ghcr.io/$owner/gen-harness-<dịch vụ>:$TAG"
+          fi
+
+  # ── e2e-selfupdate ───────────────────────────────────────────────────────
+  # Đường MỌI máy Owner thật sự đi khi có bản mới: genh CŨ (bản chính thức
+  # liền trước = PREV_TAG) tự hỏi releases/latest, tự tải genh mới + kiểm
+  # checksum (internal/selfupdate), re-exec bằng --self-updated rồi nâng cấp
+  # dịch vụ bằng compose.yaml NHÚNG của bản mới. Bản thử bị ẩn khỏi
+  # releases/latest nên đường này chỉ kiểm được SAU promote — job này vì thế
+  # KHÔNG chặn promote, nhưng chạy ngay sau đó, trong khi lịch đêm của máy
+  # Owner còn đợi 24 giờ (dấu promoted_at): đỏ ⇒ còn thời gian lùi bản (xem
+  # ::error ở bước cuối) trước khi máy nào tự cài.
+  # Kịch bản: cài PREV_TAG → (genh cũ có cổng 24 giờ) `genh update --yes` phải
+  # HOÃN, version không đổi → `genh update` (không --yes, MinAge = 0) → version
+  # = TAG, /api/v1/ready xanh, compose.yaml theo ảnh của TAG, app_db_password
+  # không đổi.
+  e2e-selfupdate:
+    name: genh ${{ needs.resolve.outputs.prev_tag }} tự cập nhật lên ${{ needs.resolve.outputs.tag }} (sau promote)
+    needs: [resolve, promote]
+    # always(): promote chạy nhờ always() khi e2e-upgrade/e2e-install bị bỏ
+    # qua (skip_e2e) — không có always() ở đây thì job này bị bỏ qua theo.
+    if: always() && needs.promote.result == 'success' && needs.promote.outputs.promoted == 'true' && needs.resolve.outputs.prev_tag != '' && needs.resolve.outputs.broken_install != 'true'
+    runs-on: ubuntu-24.04
+    # Chạy ngoài checkout repo: genh tìm compose.yaml theo cwd trước — xem e2e-install.
+    defaults:
+      run:
+        working-directory: /tmp
+    timeout-minutes: 45
+    # contents: write — bước rollback (if: failure()) tự lùi bản chính thức.
+    permissions:
+      contents: write
+    env:
+      GH_PORT: "8445"
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      R: ${{ github.repository }}
+      TAG: ${{ needs.resolve.outputs.tag }}
+      PREV_TAG: ${{ needs.resolve.outputs.prev_tag }}
+    steps:
+      - name: Đặt GEN_HARNESS_HOME (thư mục cài đặt tạm của job này)
+        run: echo "GEN_HARNESS_HOME=$RUNNER_TEMP/gh-selfupdate" >>"$GITHUB_ENV"
+
+      - name: Cài sạch bản chính thức TRƯỚC ĐÓ (${{ needs.resolve.outputs.prev_tag }})
+        run: |
+          set -euo pipefail
+          # Như e2e-upgrade: tải asset của đúng PREV_TAG, kiểm checksum, đặt vào bin/.
+          mkdir -p "$GEN_HARNESS_HOME/bin"
+          gh release download "$PREV_TAG" --repo "$R" \
+            --pattern 'genh-linux-amd64' --pattern 'checksums.txt' --dir "$RUNNER_TEMP/prev" --clobber
+          want="$(awk '$2=="genh-linux-amd64"||$2=="./genh-linux-amd64"{print $1}' "$RUNNER_TEMP/prev/checksums.txt")"
+          got="$(sha256sum "$RUNNER_TEMP/prev/genh-linux-amd64" | awk '{print $1}')"
+          [ -n "$want" ] && [ "$got" = "$want" ] || { echo "::error::sha256 của genh-linux-amd64 ($PREV_TAG) không khớp checksums.txt — asset Release bị thay hoặc tải hỏng; tải lại/kiểm Release $PREV_TAG." >&2; exit 1; }
+          install -m 0755 "$RUNNER_TEMP/prev/genh-linux-amd64" "$GEN_HARNESS_HOME/bin/genh"
+          "$GEN_HARNESS_HOME/bin/genh" version
+          "$GEN_HARNESS_HOME/bin/genh" install --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes --no-auto-update
+
+      - name: Chờ /api/v1/ready xanh (bản cũ, tối đa 5 phút)
+        run: |
+          set -euo pipefail
+          deadline=$((SECONDS + 300))
+          until curl -k -fsS -o /dev/null "https://localhost:${GH_PORT}/api/v1/ready"; do
+            [ "$SECONDS" -lt "$deadline" ] || { echo "::error::ready không xanh (bản cũ $PREV_TAG)" >&2; exit 1; }
+            sleep 3
+          done
+
+      - name: Ghi lại app_db_password TRƯỚC khi tự cập nhật
+        id: before
+        run: |
+          set -euo pipefail
+          pw="$(python3 -c "import json;print(json.load(open('${GEN_HARNESS_HOME}/config/secrets.json'))['app_db_password'])")"
+          echo "::add-mask::$pw"
+          echo "pw=$pw" >>"$GITHUB_OUTPUT"
+
+      - name: Chờ releases/latest CÔNG KHAI (không token, đúng như genh hỏi) trả ${{ needs.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # API công khai có thể đệm vài phút sau khi promote — genh cũ hỏi
+          # trước lúc đó sẽ thấy bản cũ và báo "đã mới nhất".
+          deadline=$((SECONDS + 300))
+          while :; do
+            t="$(curl -fsS -H 'Accept: application/vnd.github+json' -H 'User-Agent: gen-harness-genh' \
+              "https://api.github.com/repos/$R/releases/latest" 2>/dev/null \
+              | python3 -c 'import json,sys; print(json.load(sys.stdin).get("tag_name",""))' 2>/dev/null || true)"
+            echo "releases/latest (công khai): ${t:-<không đọc được>}"
+            [ "$t" != "$TAG" ] || break
+            [ "$SECONDS" -lt "$deadline" ] || { echo "::error::sau 5 phút releases/latest công khai vẫn là '${t:-<không đọc được>}', không phải $TAG — kiểm job promote." >&2; exit 1; }
+            sleep 15
+          done
+
+      - name: (cổng 24 giờ) genh update --yes --quiet (như lịch đêm) phải HOÃN bản vừa promote — version giữ ${{ needs.resolve.outputs.prev_tag }}
+        run: |
+          set -euo pipefail
+          # Cổng 24 giờ nằm trong code của genh CŨ: chỉ genh ≥ v0.1.33 có.
+          # Bản cũ hơn (vd v0.1.32) gặp --yes sẽ cài luôn — bỏ qua bước này.
+          if [ "$(printf '%s\n%s\n' v0.1.33 "$PREV_TAG" | sort -V | head -n1)" != v0.1.33 ]; then
+            echo "genh $PREV_TAG chưa có cổng 24 giờ (có từ v0.1.33) — bỏ qua bước kiểm hoãn."
+            exit 0
+          fi
+          # Chạy lại job này (Re-run) sau gần 24 giờ thì bản đã "chín" — --yes cài là ĐÚNG, không kiểm hoãn nữa.
+          body="$(gh api "repos/$R/releases/latest" --jq .body)"
+          pa="$(printf '%s\n' "$body" | sed -n 's/.*genh:promoted_at=\([0-9TZ:-]*\).*/\1/p' | tail -n1)"
+          [ -n "$pa" ] || { echo "::error::ghi chú Release $TAG không có dấu genh:promoted_at — job promote chưa ghi dấu, lịch đêm sẽ tính từ published_at." >&2; exit 1; }
+          age=$(( $(date -u +%s) - $(date -u -d "$pa" +%s) ))
+          if [ "$age" -ge $((23 * 3600)) ]; then
+            echo "promote lúc $pa (đã ${age}s) — gần/đủ 24 giờ, bỏ qua bước kiểm hoãn."
+            exit 0
+          fi
+          log="$RUNNER_TEMP/update-yes.log"
+          for attempt in 1 2 3; do
+            # Đúng cờ timer đêm (internal/autoupdate): update --yes --quiet.
+            "$GEN_HARNESS_HOME/bin/genh" update --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes --quiet 2>&1 | tee "$log"
+            # Hạn mức API GitHub không xác thực (runner dùng chung IP) ⇒ genh
+            # báo "không hỏi được bản mới nhất" — thử lại, không coi là lỗi mã.
+            grep -q 'không hỏi được bản mới nhất' "$log" || break
+            echo "::warning::lần $attempt: genh không hỏi được releases/latest (mạng/hạn mức API) — thử lại sau 60 giây."
+            sleep 60
+          done
+          if ! grep -q 'đợi đủ 24 giờ' "$log"; then
+            echo "::error::genh $PREV_TAG chạy \`genh update --yes\` KHÔNG hoãn $TAG vừa promote — cổng 24 giờ của lịch đêm không chặn (thiếu dấu promoted_at trong ghi chú Release, hoặc lỗi selfupdate). Xem log bước này." >&2
+            exit 1
+          fi
+          out="$("$GEN_HARNESS_HOME/bin/genh" version)"
+          echo "$out"
+          case " $out " in
+            *" $PREV_TAG "*) echo "OK: --yes hoãn $TAG, genh vẫn là $PREV_TAG" ;;
+            *) echo "::error::sau \`genh update --yes\` genh báo '$out' — đáng lẽ vẫn là $PREV_TAG (bản mới chưa đủ 24 giờ)." >&2; exit 1 ;;
+          esac
+          if grep -q 'genh: cập nhật xong\.' "$log"; then
+            echo "::error::bị hoãn mà log vẫn in 'genh: cập nhật xong.' — người đọc logs/auto-update.log sẽ tưởng đã cài." >&2
+            exit 1
+          fi
+
+      - name: genh ${{ needs.resolve.outputs.prev_tag }} tự cập nhật — genh update (không --yes, như Owner gõ tay / "Cập nhật ngay")
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/update.log"
+          for attempt in 1 2 3; do
+            "$GEN_HARNESS_HOME/bin/genh" update --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" 2>&1 | tee "$log"
+            grep -q 'không hỏi được bản mới nhất' "$log" || break
+            echo "::warning::lần $attempt: genh không hỏi được releases/latest (mạng/hạn mức API) — thử lại sau 60 giây."
+            sleep 60
+          done
+
+      - name: Chờ /api/v1/ready xanh lại sau tự cập nhật (tối đa 5 phút)
+        run: |
+          set -euo pipefail
+          deadline=$((SECONDS + 300))
+          until curl -k -fsS -o /dev/null "https://localhost:${GH_PORT}/api/v1/ready"; do
+            [ "$SECONDS" -lt "$deadline" ] || { echo "::error::ready không xanh sau khi genh tự cập nhật lên $TAG" >&2; exit 1; }
+            sleep 3
+          done
+
+      - name: Kiểm genh đã tự thay thành ${{ needs.resolve.outputs.tag }} và compose.yaml theo ảnh của bản đó
+        run: |
+          set -euo pipefail
+          out="$("$GEN_HARNESS_HOME/bin/genh" version)"
+          echo "$out"
+          case " $out " in
+            *" $TAG "*) echo "OK: genh $PREV_TAG đã tự tải và thay bằng $TAG" ;;
+            *)
+              echo "::error::sau \`genh update\`, genh báo '$out' chứ không phải $TAG — genh cũ KHÔNG tự lên được bản mới (xem log bước trước: dòng 'genh: …' của selfupdate)." >&2
+              exit 1
+              ;;
+          esac
+          # Phần dịch vụ phải chạy bằng code MỚI (re-exec --self-updated):
+          # compose.yaml genh quản lý phải mang đúng ảnh (digest) của $TAG.
+          gh release download "$TAG" --repo "$R" --pattern 'compose.release.yaml' --dir "$RUNNER_TEMP/new" --clobber
+          imgs() { grep -E '^[[:space:]]*image:' "$1" | sed -E 's/^[[:space:]]*image:[[:space:]]*//' | sort -u; }
+          if ! diff <(imgs "$RUNNER_TEMP/new/compose.release.yaml") <(imgs "$GEN_HARNESS_HOME/deploy/compose.yaml"); then
+            echo "::error::compose.yaml sau tự cập nhật không mang ảnh của $TAG (diff ở trên: < bản $TAG, > đang dùng) — phần nâng cấp dịch vụ chưa chạy bằng genh mới (re-exec --self-updated)." >&2
+            exit 1
+          fi
+          echo "OK: compose.yaml dùng đúng ảnh của $TAG"
+
+      - name: Kiểm dữ liệu/bí mật KHÔNG bị tạo lại (app_db_password không đổi)
+        run: |
+          set -euo pipefail
+          pw_after="$(python3 -c "import json;print(json.load(open('${GEN_HARNESS_HOME}/config/secrets.json'))['app_db_password'])")"
+          echo "::add-mask::$pw_after"
+          if [ "$pw_after" != "${{ steps.before.outputs.pw }}" ]; then
+            echo "::error::app_db_password đã ĐỔI sau khi genh tự cập nhật — bí mật/dữ liệu có vẻ bị tạo lại thay vì giữ nguyên." >&2
+            exit 1
+          fi
+          echo "OK: app_db_password giữ nguyên sau khi genh $PREV_TAG tự cập nhật lên $TAG."
+
+      - name: Đỏ ⇒ TỰ lùi bản chính thức về ${{ needs.resolve.outputs.prev_tag }} (trước khi lịch đêm của máy Owner tự cài)
+        id: rollback
+        if: failure()
+        run: |
+          set -euo pipefail
+          echo "::error::$TAG đã là bản chính thức nhưng genh $PREV_TAG (bản máy Owner đang chạy) KHÔNG tự cập nhật lên được — tự lùi bản chính thức về $PREV_TAG. Máy đã lên $TAG (bấm Cập nhật ngay) giữ nguyên, không tự hạ cấp. Sửa mã, tăng VERSION, phát hành bản mới."
+          latest_now() { gh api "repos/$R/releases/latest" --jq .tag_name 2>/dev/null || echo "<không đọc được>"; }
+          before="$(latest_now)"
+          echo "TRƯỚC: releases/latest = $before"
+          gh release edit "$TAG" --repo "$R" --prerelease=true
+          gh release edit "$PREV_TAG" --repo "$R" --latest
+          after="$(latest_now)"
+          echo "SAU: releases/latest = $after"
+          {
+            echo "### ⚠️ Tự cập nhật $PREV_TAG → $TAG ĐỎ — đã tự lùi bản chính thức"
+            echo "- TRƯỚC: releases/latest = $before"
+            echo "- SAU: releases/latest = $after (phải là $PREV_TAG)"
+          } >>"$GITHUB_STEP_SUMMARY"
+          if [ "$after" != "$PREV_TAG" ]; then
+            echo "::error::Lùi KHÔNG thành: releases/latest là '$after', không phải $PREV_TAG. Làm tay NGAY: gh release edit $TAG --repo $R --prerelease=true && gh release edit $PREV_TAG --repo $R --latest, rồi kiểm gh api repos/$R/releases/latest --jq .tag_name." >&2
+            exit 1
+          fi
+          echo "OK: bản chính thức đã lùi về $PREV_TAG; $TAG thành bản thử."
+
+      - name: genh uninstall --yes (dọn dẹp)
+        if: always()
+        run: '"$GEN_HARNESS_HOME/bin/genh" uninstall --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes || true'
+
+      - name: (luôn) In log docker compose (tail 200) để debug
+        if: always()
         run: |
           set -euo pipefail
           docker ps -a || true

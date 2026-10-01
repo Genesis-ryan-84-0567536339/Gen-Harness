@@ -135,9 +135,12 @@ một nơi khác, an toàn (không cùng chỗ với gói) — mất mật khẩ
 
 **Từ v0.1.5: tự động mỗi đêm — không phải làm gì.** `genh install` tự bật lịch "tự cập nhật" (systemd
 timer/crontab trên Linux, LaunchAgent trên macOS, Task Scheduler trên Windows), chạy `genh update --yes
---quiet` lúc ~03:00 giờ máy: tự hỏi bản `genh` mới nhất trên GitHub Releases, kiểm SHA-256, thay binary, RỒI
-mới backup + migrate + khởi động lại dịch vụ — tự rollback nếu bất kỳ bước nào lỗi. Muốn có bản mới **ngay**,
-không đợi tới đêm, chạy tay:
+--quiet` lúc ~03:00 giờ máy: tự hỏi bản `genh` chính thức mới nhất trên GitHub Releases, kiểm SHA-256, thay
+binary, RỒI mới backup + migrate + khởi động lại dịch vụ — tự rollback nếu bất kỳ bước nào lỗi.
+
+**Từ v0.1.33, lịch đêm chỉ cài bản đã là bản chính thức đủ 24 giờ** (bản mới ra chưa đủ thì đợi đêm sau — có
+thể tới 2 đêm), để bản lỗi vừa phát hành không tự lan sang mọi máy ngay đêm đầu. Thẻ "Có bản mới" trong Console
+ghi rõ lúc nào sẽ tự cài. Muốn cài **ngay**: Console → **Cập nhật ngay**, hoặc chạy tay (không kèm `--yes`):
 
 ```bash
 genh update

@@ -76,8 +76,13 @@ type Info struct {
 	// hoặc "" (chưa có — Console hiện lệnh để Owner tự chạy).
 	Updater string `json:"updater"`
 	// Requests: loại yêu cầu watcher nhận (rỗng khi chưa có watcher).
-	Requests  []string `json:"requests,omitempty"`
-	WrittenAt string   `json:"written_at"`
+	Requests []string `json:"requests,omitempty"`
+	// AutoUpdateEnabled (v0.1.33): lịch tự cập nhật đêm (~03:00) đang bật hay
+	// tắt — ghi lúc cài/update và khi `genh auto-update enable|disable`. nil
+	// (không có khoá) = không rõ (genh cũ / không đọc được) ⇒ Console không
+	// hứa "Tự cài đêm …".
+	AutoUpdateEnabled *bool  `json:"auto_update_enabled,omitempty"`
+	WrittenAt         string `json:"written_at"`
 }
 
 // Status là nội dung update-status.json.
@@ -104,15 +109,32 @@ func writeJSON(path string, v any) error {
 	return os.Rename(tmp, path)
 }
 
-// WriteInfo ghi phiên bản genh đang chạy + cơ chế nhận yêu cầu.
-func WriteInfo(installDir, version, updater string) error {
+// WriteInfo ghi phiên bản genh đang chạy + cơ chế nhận yêu cầu + trạng thái
+// lịch tự cập nhật đêm (autoUpdate nil = không rõ, bỏ khoá).
+func WriteInfo(installDir, version, updater string, autoUpdate *bool) error {
 	if err := EnsureDir(installDir); err != nil {
 		return err
 	}
-	info := Info{Version: version, Updater: updater, WrittenAt: now()}
+	info := Info{Version: version, Updater: updater, AutoUpdateEnabled: autoUpdate, WrittenAt: now()}
 	if updater != "" {
 		info.Requests = Requests
 	}
+	return writeJSON(filepath.Join(Dir(installDir), InfoFile), info)
+}
+
+// SetAutoUpdate chỉ đổi trạng thái lịch tự cập nhật đêm trong genh.json (giữ
+// nguyên version/updater/requests đã ghi). Chưa có genh.json (hoặc hỏng) thì
+// ghi mới với version cho trước, chưa có watcher.
+func SetAutoUpdate(installDir, version string, enabled bool) error {
+	if err := EnsureDir(installDir); err != nil {
+		return err
+	}
+	info, err := ReadInfo(installDir)
+	if err != nil {
+		info = Info{Version: version}
+	}
+	info.AutoUpdateEnabled = &enabled
+	info.WrittenAt = now()
 	return writeJSON(filepath.Join(Dir(installDir), InfoFile), info)
 }
 

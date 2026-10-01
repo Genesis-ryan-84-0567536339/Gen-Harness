@@ -146,7 +146,9 @@ func buildTarGz(t *testing.T, files map[string]string, mode int64) []byte {
 	return buf.Bytes()
 }
 
-func TestExtractTarGz_ExtractsFilesWithMode(t *testing.T) {
+// Bit thực thi sau khi giải nén: kiểm ở download_unix_test.go (bit quyền
+// POSIX — Windows không có bit thực thi trong os.FileMode).
+func TestExtractTarGz_ExtractsFiles(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "in.tar.gz")
 	data := buildTarGz(t, map[string]string{
@@ -163,12 +165,8 @@ func TestExtractTarGz_ExtractsFilesWithMode(t *testing.T) {
 	}
 
 	binPath := filepath.Join(destDir, "docker", "docker")
-	info, err := os.Stat(binPath)
-	if err != nil {
+	if _, err := os.Stat(binPath); err != nil {
 		t.Fatalf("stat %s: %v", binPath, err)
-	}
-	if info.Mode().Perm()&0o100 == 0 {
-		t.Error("bit thực thi phải được giữ lại sau khi giải nén")
 	}
 
 	content, err := os.ReadFile(filepath.Join(destDir, "docker", "LICENSE"))

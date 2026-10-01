@@ -195,8 +195,9 @@ func (r ExecRunner) RunIO(ctx context.Context, cmd Cmd, stdin io.Reader, stdout 
 		}
 	}()
 
-	waitErr := c.Wait()
+	// Phải đọc hết stderr TRƯỚC khi Wait: Wait đóng pipe, gọi sớm sẽ làm mất dòng lỗi cuối.
 	<-done
+	waitErr := c.Wait()
 
 	if waitErr == nil {
 		return nil
