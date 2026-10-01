@@ -34,6 +34,9 @@ TEMPLATE = os.environ.get("GH_TEST_TEMPLATE", "gh_test_template")
 os.environ.setdefault("GH_ENV", "test")
 os.environ["GH_COOKIE_SECURE"] = "false"
 os.environ["GH_REDIS_URL"] = REDIS_URL
+# v0.1.31: thư mục phiên Claude Code CLI của test không bao giờ là ~/.claude thật của máy chạy test.
+os.environ.setdefault("GH_CLAUDE_HOME", f"/tmp/gh-test-claude-{os.getpid()}/.claude")
+os.environ.setdefault("GH_CLAUDE_BINARY", "gh-test-no-claude")
 os.environ.setdefault("GH_MASTER_KEY", "")
 
 # gh_app (migration 0014) — mật khẩu test cố định, KHÔNG dùng ngoài môi trường test. Luôn đặt (kể cả khi

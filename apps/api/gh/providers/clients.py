@@ -7,6 +7,7 @@ Mọi client trả `Completion` hoặc ném một trong các lỗi phân loại 
 import asyncio
 import contextlib
 import os
+import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -43,6 +44,21 @@ class QuotaExhausted(ProviderError):  # noqa: N818
 
 class BadRequest(ProviderError):
     """Yêu cầu không hợp lệ — đổi khoá không giúp được."""
+
+
+class ModelRejected(BadRequest):
+    """Nhà cung cấp / CLI không nhận mã model này (v0.1.31: gọi thử trước khi lưu model)."""
+
+
+_MODEL_REJECT = ("issue with the selected model", "unknown model", "invalid model", "model not found",
+                 "unsupported model", "not a valid model",
+                 "model is not available", "no such model", "model_not_found", "not_found_error")
+
+
+def model_rejected(msg: str) -> bool:
+    low = msg.lower()
+    return any(k in low for k in _MODEL_REJECT) or ("model" in low and ("not found" in low or "invalid" in low
+                                                                        or "not supported" in low))
 
 
 @dataclass
@@ -253,6 +269,8 @@ class AgyClient:
             msg = (str(env.get("error")) if isinstance(env, dict) and env.get("error") else "") or \
                 err.decode(errors="replace")[-300:] or text[-300:]
             low = msg.lower()
+            if model_rejected(msg):
+                raise ModelRejected(msg)
             if "auth" in low or "login" in low or "credential" in low:
                 raise AuthFailed(msg)
             if "quota" in low or "resource_exhausted" in low or "429" in low:
@@ -265,15 +283,163 @@ class AgyClient:
                            "ms": int((time.monotonic() - started) * 1000)})
 
     async def list_models(self) -> list[str]:
-        code, out, err = await self._run("models")
+        return [m["id"] for m in await self.discover_models()]
+
+    async def discover_models(self) -> list[dict[str, Any]]:
+        """`agy models` (cần đã đăng nhập). Chưa đăng nhập / phiên hết hạn → AuthFailed, không coi là "OK"."""
+        from gh.providers.catalog import parse_agy_models, strip_ansi
+
+        try:
+            code, out, err = await self._run("models")
+        except TimeoutError as e:
+            raise ProviderError(f"CLI quá {self.timeout:.0f}s") from e
+        text = out.decode(errors="replace") + "\n" + err.decode(errors="replace")
+        low = strip_ansi(text).lower()
+        if "sign in" in low or "login" in low or "authenticat" in low or "credential" in low:
+            raise AuthFailed(strip_ansi(text).strip()[-300:])
         if code != 0:
-            raise ProviderError(err.decode(errors="replace")[-300:])
-        models = []
-        for line in out.decode(errors="replace").splitlines():
-            tok = line.strip().split()[0] if line.strip() else ""
-            if tok and not tok.endswith(":") and "-" in tok:
-                models.append(tok.strip("*•-"))
-        return models
+            raise ProviderError(f"CLI thoát {code}: {strip_ansi(text).strip()[-300:]}")
+        return parse_agy_models(out.decode(errors="replace"))
+
+    async def embed(self, model: str, texts: list[str]) -> list[list[float]]:
+        raise BadRequest("CLI không hỗ trợ embedding")
+
+
+# ─── Claude Code CLI (v0.1.31) ───────────────────────────────────────────────
+
+CLAUDE_CRED_FILE = ".credentials.json"     # trong CLAUDE_CONFIG_DIR (chuỗi trong tệp chạy claude 2.1.285)
+CLAUDE_STATE_FILE = ".claude.json"         # thông tin tài khoản (oauthAccount.emailAddress …), cùng thư mục
+
+
+def claude_env(claude_home: str) -> dict[str, str]:
+    """Môi trường SẠCH cho `claude`: chỉ phiên đăng nhập gói Claude trong CLAUDE_CONFIG_DIR — không truyền
+    ANTHROPIC_API_KEY hay biến nào khác của api (token không bao giờ nằm trên dòng lệnh / log)."""
+    home = cli_home_dir(claude_home)
+    return {"PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"), "HOME": str(home.parent),
+            "CLAUDE_CONFIG_DIR": str(home), "NO_COLOR": "1", "TERM": "dumb", "LANG": "C.UTF-8",
+            "DISABLE_AUTOUPDATER": "1", "DISABLE_TELEMETRY": "1", "DISABLE_ERROR_REPORTING": "1",
+            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
+
+
+class ClaudeCodeClient:
+    """Gọi `claude -p` (Claude Code, chế độ không tương tác) bằng phiên đăng nhập gói Claude của Owner.
+
+    Cờ đã kiểm trên `claude --help` 2.1.286: `-p/--print`, `--model <alias|tên>`, `--output-format json`, `--tools ""`
+    (tắt MỌI công cụ — model chỉ trả lời chữ, không chạy lệnh trong container), `--system-prompt`,
+    `--no-session-persistence`, `--strict-mcp-config`, `--disable-slash-commands`. Prompt đưa qua stdin (không giới
+    hạn độ dài đối số dòng lệnh). JSON trả về: `result`, `is_error`, `usage.input_tokens/output_tokens`.
+
+    Review v0.1.31 (đo thật trên 2.1.285): `--tools ""` KHÔNG chặn hook trong settings.json hay CLAUDE.md của
+    CLAUDE_CONFIG_DIR/thư mục cha — thêm `--safe-mode` (tắt hook, CLAUDE.md, skill, plugin, MCP; đăng nhập vẫn chạy).
+    Lời nhắn hệ thống đưa qua `--system-prompt-file` (tệp tạm 0600): không lộ trên /proc/*/cmdline và không vỡ khi dài
+    quá 128 KiB (MAX_ARG_STRLEN). `--model=<tên>` để tên model không bao giờ bị hiểu thành một cờ."""
+
+    kind = "claude_code_cli"
+    MAX_PROMPT = 400_000
+
+    def __init__(self, binary: str, claude_home: str, timeout: float = 300.0):
+        self.binary, self.claude_home, self.timeout = binary, claude_home, timeout
+
+    def _workdir(self) -> Path:
+        d = cli_home_dir(self.claude_home).parent / "work"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    async def _run(self, *args: str, stdin: bytes | None = None) -> tuple[int, bytes, bytes]:
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                self.binary, *args, stdin=asyncio.subprocess.PIPE if stdin is not None else asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=claude_env(self.claude_home),
+                cwd=str(self._workdir()))
+        except FileNotFoundError as e:
+            raise AuthFailed("Chưa cài Claude Code CLI trong máy chủ") from e
+        try:
+            out, err = await asyncio.wait_for(proc.communicate(stdin), self.timeout)
+        except (TimeoutError, asyncio.CancelledError):
+            with contextlib.suppress(ProcessLookupError):
+                proc.kill()
+            await proc.wait()
+            raise
+        return proc.returncode or 0, out, err
+
+    async def auth_status(self) -> dict[str, Any]:
+        """`claude auth status --json` → {loggedIn, authMethod, email, subscriptionType…}; thoát 1 khi chưa đăng
+        nhập."""
+        try:
+            code, out, _err = await self._run("auth", "status", "--json")
+        except TimeoutError as e:
+            raise ProviderError(f"CLI quá {self.timeout:.0f}s") from e
+        try:
+            data = orjson.loads(out)
+        except orjson.JSONDecodeError:
+            data = {}
+        return data if isinstance(data, dict) else {"loggedIn": code == 0}
+
+    async def generate(self, model: str, messages: list[Message], *, json_mode: bool, temperature: float) -> Completion:
+        if not (cli_home_dir(self.claude_home) / CLAUDE_CRED_FILE).exists():
+            if (cli_home_dir(self.claude_home) / (CLAUDE_CRED_FILE + ".before-login")).exists():
+                raise ProviderError("Claude Code CLI đang đăng nhập thêm tài khoản")
+            raise AuthFailed("Claude Code CLI chưa đăng nhập")
+        system = "\n\n".join(m.content for m in messages if m.role == "system")
+        prompt = "\n\n".join(f"[{m.role}]\n{m.content}" if m.role != "user" else m.content
+                               for m in messages if m.role != "system")
+        if len(prompt.encode()) > self.MAX_PROMPT:
+            raise BadRequest("Prompt quá dài cho CLI")
+        if len(system.encode()) > self.MAX_PROMPT:
+            raise BadRequest("Lời nhắn hệ thống quá dài cho CLI")
+        args = ["-p", f"--model={model}", "--output-format", "json", "--no-session-persistence", "--safe-mode",
+                "--strict-mcp-config", "--disable-slash-commands"]
+        sys_file: str | None = None
+        if system:
+            fd, sys_file = tempfile.mkstemp(prefix="gh-claude-sys-", suffix=".txt")   # 0600, xoá ngay sau lượt gọi
+            with os.fdopen(fd, "wb") as fh:
+                fh.write(system.encode())
+            args += ["--system-prompt-file", sys_file]
+        args += ["--tools", ""]   # cuối cùng: `--tools <tools...>` nhận nhiều giá trị
+        started = time.monotonic()
+        try:
+            code, out, err = await self._run(*args, stdin=prompt.encode())
+        except TimeoutError as e:
+            raise ProviderError(f"CLI quá {self.timeout:.0f}s") from e
+        finally:
+            if sys_file:
+                with contextlib.suppress(OSError):
+                    os.unlink(sys_file)
+        text = out.decode(errors="replace").strip()
+        try:
+            env = orjson.loads(text.splitlines()[-1] if text else "")
+        except (orjson.JSONDecodeError, IndexError):
+            env = None
+        if code != 0 or not isinstance(env, dict) or env.get("is_error"):
+            msg = (str(env.get("result") or env.get("error") or env.get("subtype") or "")
+                   if isinstance(env, dict) else "") or err.decode(errors="replace")[-300:] or text[-300:]
+            low = msg.lower()
+            status = env.get("api_error_status") if isinstance(env, dict) else None
+            if model_rejected(msg) or status == 404:
+                raise ModelRejected(msg[:300])
+            if status in (401, 403) or any(k in low for k in ("log in", "login", "authenticat", "oauth",
+                                                                 "credential", "unauthorized")):
+                raise AuthFailed(msg[:300])
+            if status == 429 or any(k in low for k in ("rate limit", "usage limit", "limit reached", "429")):
+                raise RateLimited(msg[:300], 300)
+            raise ProviderError(f"CLI thoát {code}: {msg[:300]}")
+        usage = env.get("usage") or {}
+        return Completion(str(env.get("result") or ""), usage.get("input_tokens"), usage.get("output_tokens"),
+                          {"duration_ms": env.get("duration_ms"), "ms": int((time.monotonic() - started) * 1000)})
+
+    async def discover_models(self) -> list[dict[str, Any]]:
+        """Claude Code không có lệnh liệt kê model → chỉ kiểm phiên đăng nhập; danh sách là bí danh
+        (gh.providers.catalog)."""
+        st = await self.auth_status()
+        if not st.get("loggedIn"):
+            raise AuthFailed("Claude Code CLI chưa đăng nhập")
+        return []
+
+    async def list_models(self) -> list[str]:
+        from gh.providers.catalog import CLAUDE_CODE_MODELS
+
+        await self.discover_models()
+        return [m["id"] for m in CLAUDE_CODE_MODELS]
 
     async def embed(self, model: str, texts: list[str]) -> list[list[float]]:
         raise BadRequest("CLI không hỗ trợ embedding")

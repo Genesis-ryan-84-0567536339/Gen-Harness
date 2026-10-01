@@ -5,6 +5,8 @@
   `4/<tên>` → ghi tệp phiên của `<tên>@example.vn`.
 - `agy -p …` (headless, như AgyClient gọi): trả JSON `{"response": "whoami:<email>"}` theo tệp phiên hiện tại.
 - `agy whoami`: in email đang đăng nhập (chỉ để test đọc nhanh).
+- `agy models` (v0.1.31): chưa đăng nhập → đúng câu lỗi của agy 1.2.9 thật, thoát 1; đã đăng nhập → danh sách (định
+  dạng giả định: "Tên hiển thị   mã-model", có dòng chỉ có tên hiển thị). `-p --model X` từ chối model ngoài danh sách.
 """
 
 import base64
@@ -32,10 +34,28 @@ def email_of() -> str | None:
 if sys.argv[1:2] == ["whoami"]:
     print(email_of() or "not signed in")
     sys.exit(0)
+MODELS = ["gemini-3.8-flash-high", "gemini-3.8-flash-low", "gemini-3.1-pro-high", "claude-sonnet-4-6-thinking",
+          "claude-opus-4-6-thinking"]
+if sys.argv[1:2] == ["models"]:
+    print("Fetching available models...")
+    if email_of() is None:
+        print("Error: Please sign in to view available models. Launch the CLI without arguments to sign in.")
+        sys.exit(1)
+    print("Available models:")
+    print("  Gemini 3.8 Flash (High)        gemini-3.8-flash-high (current)")
+    print("  Gemini 3.8 Flash (Low)         gemini-3.8-flash-low")
+    print("  Gemini 3.1 Pro (High)          gemini-3.1-pro-high")
+    print("  Claude Sonnet 4.6 (Thinking)   claude-sonnet-4-6-thinking")
+    print("  Claude Opus 4.6 (Thinking)")
+    sys.exit(0)
 if sys.argv[1:2] == ["-p"]:
     who = email_of()
     if who is None:
         print(json.dumps({"error": "Not authenticated: please login"}))
+        sys.exit(1)
+    model = sys.argv[sys.argv.index("--model") + 1] if "--model" in sys.argv else ""
+    if model and model not in MODELS and model != "gemini-2.5-pro":
+        print(json.dumps({"status": "ERROR", "response": "", "error": f"unknown model: {model}"}))
         sys.exit(1)
     print(json.dumps({"response": f"whoami:{who}", "usage": {"input_tokens": 1, "output_tokens": 1}}))
     sys.exit(0)

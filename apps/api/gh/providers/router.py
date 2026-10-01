@@ -9,6 +9,8 @@ Theo `failoverRules` của thiết kế (ARCHITECTURE §11):
 Mọi lượt gọi (thành công hay không) ghi `agent.model_calls`.
 """
 
+import asyncio
+import contextlib
 import logging
 import time
 import uuid
@@ -27,9 +29,11 @@ from gh.providers.clients import (
     AgyClient,
     AuthFailed,
     BadRequest,
+    ClaudeCodeClient,
     Completion,
     GeminiClient,
     Message,
+    ModelRejected,
     OpenAICompatClient,
     ProviderError,
     QuotaExhausted,
@@ -45,6 +49,22 @@ BREAKER_FAILS = 3
 LOW_QUOTA = 0.20
 KEY_AAD = b"provider_key"
 CLI_AAD = b"cli_token"
+CLI_KINDS = ("antigravity_cli", "claude_code_cli")
+PROBE_PROMPT = "Trả lời đúng một chữ: OK"
+PROBE_TIMEOUT_S = 90.0
+
+
+def friendly_probe_error(e: Exception, model: str) -> str:
+    """Câu báo lỗi ngắn cho Console khi gọi thử một model (v0.1.31)."""
+    if isinstance(e, ModelRejected):
+        return f"CLI không nhận model “{model}” — chọn model khác trong danh sách"
+    if isinstance(e, AuthFailed):
+        return "Phiên đăng nhập đã hết hiệu lực — bấm “Đăng nhập lại” ở thẻ tài khoản"
+    if isinstance(e, RateLimited | QuotaExhausted):
+        return "Tài khoản đang hết lượt dùng (giới hạn của gói) — thử lại sau hoặc chọn model nhẹ hơn"
+    if isinstance(e, TimeoutError):
+        return "Gọi thử quá lâu không có trả lời — thử lại sau"
+    return f"Gọi thử chưa được: {str(e)[:160]}"
 
 
 class ModelUnavailable(Exception):  # noqa: N818
@@ -107,10 +127,13 @@ async def raise_alert(db: AsyncSession, org_id: uuid.UUID, *, alert_type: str, p
 
 class ModelRouter:
     def __init__(self, sm: async_sessionmaker[AsyncSession], redis: Redis, *,
-                 transport: httpx.AsyncBaseTransport | None = None, cli_factory: Any = None):
+                 transport: httpx.AsyncBaseTransport | None = None, cli_factory: Any = None,
+                 claude_factory: Any = None):
         self.sm, self.redis, self.transport = sm, redis, transport
         s = get_settings()
         self.cli_factory = cli_factory or (lambda: AgyClient(s.cli_binary, s.cli_home))
+        self.claude_factory = claude_factory or (lambda: ClaudeCodeClient(get_settings().claude_binary,
+                                                                          get_settings().claude_home))
 
     # ─── chuỗi ───────────────────────────────────────────────────────────────
 
@@ -129,7 +152,8 @@ class ModelRouter:
             models = (await db.execute(text("""
                 SELECT id, model_name, daily_quota, rate_limit_per_min FROM agent.models
                 WHERE provider_id = :p AND is_enabled AND model_name NOT ILIKE '%embedding%'
-                ORDER BY (id = :bm) DESC, id"""), {"p": p.id, "bm": bound.id if bound else None})).all()
+                ORDER BY (id = :bm) DESC, is_default DESC, id"""),
+                {"p": p.id, "bm": bound.id if bound else None})).all()
             if not models:
                 continue
             keys = (await db.execute(text("""
@@ -142,6 +166,8 @@ class ModelRouter:
     def _client(self, p: Any, secret: str | None) -> Any:
         if p.kind == "antigravity_cli":
             return self.cli_factory()
+        if p.kind == "claude_code_cli":
+            return self.claude_factory()
         if p.kind == "gemini":
             return GeminiClient(p.endpoint, secret or "", transport=self.transport)
         return OpenAICompatClient(p.endpoint or ("https://api.deepseek.com/v1" if p.kind == "deepseek" else None),
@@ -217,7 +243,7 @@ class ModelRouter:
                 if n > int(m.rate_limit_per_min):
                     reasons.append(f"{p.name}: vượt {m.rate_limit_per_min} lượt/phút")
                     continue
-            slots: list[tuple[Any, str | None]] = [(None, None)] if p.kind == "antigravity_cli" else []
+            slots: list[tuple[Any, str | None]] = [(None, None)] if p.kind in CLI_KINDS else []
             for k in link["keys"]:
                 if await self.redis.exists(cooldown_key(k.id)):
                     continue
@@ -264,6 +290,9 @@ class ModelRouter:
                     break
                 await self._record(org_id, m.id, kid, agent_key, purpose, "ok", started, c)
                 await self.redis.delete(f"gh:pfail:{p.id}")
+                if key is None and p.auth_state != "ok":
+                    # CLI vừa gọi được thật (token đã tự làm mới) → bỏ nhãn "Hết hạn" cũ (một sự thật, v0.1.31).
+                    await self._set_auth_state(p, "ok")
                 await self._count_use(org_id, p, m)
                 return Routed(c.text, p.name, m.model_name, c.tokens_in, c.tokens_out, reasons)
         await self._chain_exhausted(org_id, reasons)
@@ -332,31 +361,103 @@ class ModelRouter:
             raise ProviderError(f"Jev: {e}") from e
         return str(client.model)
 
+    async def _cli_probe(self, client: Any, candidates: list[str]) -> tuple[str, Completion]:
+        """Một lượt gọi thật rất ngắn; model bị CLI từ chối thì thử model kế (tối đa 3)."""
+        last: Exception | None = None
+        for model in [c for c in dict.fromkeys(candidates) if c][:3]:
+            try:
+                return model, await asyncio.wait_for(
+                    client.generate(model, [Message("user", PROBE_PROMPT)], json_mode=False, temperature=0),
+                    PROBE_TIMEOUT_S)
+            except ModelRejected as e:
+                last = e
+                continue
+        raise last or BadRequest("Chưa có model nào để gọi thử")
+
+    async def probe_model(self, provider_id: uuid.UUID, model: str) -> dict[str, Any]:
+        """Gọi thử ĐÚNG model này trước khi lưu (v0.1.31) — CLI từ chối thì không lưu, trả câu lỗi dễ hiểu."""
+        async with self.sm() as db:
+            p = (await db.execute(text("SELECT id, kind, name, endpoint, auth_state FROM agent.providers "
+                                       "WHERE id = :i"), {"i": provider_id})).one()
+        started = time.monotonic()
+        try:
+            await asyncio.wait_for(self._client(p, None).generate(
+                model, [Message("user", PROBE_PROMPT)], json_mode=False, temperature=0), PROBE_TIMEOUT_S)
+        except Exception as e:  # noqa: BLE001 — trả lỗi cho Console
+            if isinstance(e, AuthFailed):
+                await self._set_auth_state(p, "expired")
+            return {"ok": False, "error": friendly_probe_error(e, model), "rejected": isinstance(e, ModelRejected),
+                    "latency_ms": int((time.monotonic() - started) * 1000)}
+        if p.auth_state != "ok":
+            await self._set_auth_state(p, "ok")
+        return {"ok": True, "error": None, "rejected": False, "latency_ms": int((time.monotonic() - started) * 1000)}
+
+    async def _test_cli(self, p: Any, result: dict[str, Any]) -> None:
+        """Nguồn CLI: (1) liệt kê model (agy models / phiên Claude), (2) gọi thật một lượt ngắn. "Gọi thử OK" CHỈ khi
+        lượt gọi thật thành công — trước đây chỉ liệt kê model nên phiên hết hạn vẫn báo OK (Boss 01/10)."""
+        from gh.providers import catalog
+
+        client = self._client(p, None)
+        discovered = await client.discover_models()
+        built = catalog.build(p.kind, discovered)
+        result.update(built)
+        async with self.sm() as db:
+            chosen = (await db.execute(text("""SELECT model_name FROM agent.models WHERE provider_id = :p AND is_enabled
+                                              ORDER BY is_default DESC, id LIMIT 1"""),
+                                       {"p": p.id})).scalar_one_or_none()
+        current = [d["id"] for d in discovered if isinstance(d, dict) and d.get("current")]
+        probe_model, _c = await self._cli_probe(client, [chosen or "", *current, *built["models"]])
+        result["probe_model"] = probe_model
+        # CLI có thể vừa làm mới token → lưu lại vào hồ sơ đang dùng (hạn mới hiện đúng trên thẻ tài khoản).
+        from gh.providers import cli as climod
+
+        async with self.sm() as db:
+            org = (await db.execute(text("SELECT org_id FROM agent.providers WHERE id = :i"),
+                                    {"i": p.id})).scalar_one()
+            with contextlib.suppress(Exception):
+                await climod.save_current_back(db, org, p.kind)
+                await db.commit()
+
     async def test_provider(self, provider_id: uuid.UUID) -> dict[str, Any]:
         async with self.sm() as db:
-            p = (await db.execute(text("SELECT id, kind, name, endpoint FROM agent.providers WHERE id = :i"),
-                                  {"i": provider_id})).one()
+            p = (await db.execute(text("SELECT id, kind, name, endpoint, auth_state FROM agent.providers "
+                                       "WHERE id = :i"), {"i": provider_id})).one()
             key = (await db.execute(text("""SELECT secret_enc FROM agent.provider_keys WHERE provider_id = :p
                                             AND is_enabled ORDER BY rotation_order LIMIT 1"""),
                                     {"p": provider_id})).scalar_one_or_none()
         started = time.monotonic()
         result: dict[str, Any] = {"ok": False, "latency_ms": None, "models": [], "error": None}
+        auth_bad = False
         try:
-            if p.kind != "antigravity_cli" and key is None:
-                raise AuthFailed("Chưa có khoá API")
-            secret = crypto.decrypt(bytes(key), KEY_AAD).decode() if key is not None else None
-            if p.kind == "system_one":
-                # Jev (gh.gen.jev): thử một lượt quyết định nhỏ thay vì liệt kê model.
-                result["models"] = [await self._jev_ping(db_provider_id=p.id, endpoint=p.endpoint,
-                                                         secret=secret or "")]
+            if p.kind in CLI_KINDS:
+                await self._test_cli(p, result)
             else:
-                result["models"] = (await self._client(p, secret).list_models())[:50]
+                if key is None:
+                    raise AuthFailed("Chưa có khoá API")
+                secret = crypto.decrypt(bytes(key), KEY_AAD).decode()
+                if p.kind == "system_one":
+                    # Jev (gh.gen.jev): thử một lượt quyết định nhỏ thay vì liệt kê model.
+                    result["models"] = [await self._jev_ping(db_provider_id=p.id, endpoint=p.endpoint,
+                                                             secret=secret or "")]
+                else:
+                    from gh.providers import catalog
+
+                    names = (await self._client(p, secret).list_models())[:50]
+                    result.update(catalog.build(p.kind, names))
+                    result["models"] = names
             result["ok"] = True
         except Exception as e:  # noqa: BLE001 — trả lỗi cho Console, không ném
-            result["error"] = str(e)[:300]
+            auth_bad = isinstance(e, AuthFailed)
+            result["error"] = (friendly_probe_error(e, result.get("probe_model") or "")
+                               if p.kind in CLI_KINDS else str(e)[:300])
+            if p.kind in CLI_KINDS and not result.get("model_groups"):
+                from gh.providers import catalog
+
+                # Vẫn cho Console thấy danh sách (dự phòng) để Owner biết sẽ chọn được gì sau khi đăng nhập lại.
+                result.update(catalog.build(p.kind, None))
         result["latency_ms"] = int((time.monotonic() - started) * 1000)
-        state = "ok" if result["ok"] else ("expired" if "xác thực" in (result["error"] or "") or
-                                            "401" in (result["error"] or "") else "error")
+        err = result["error"] or ""
+        state = "ok" if result["ok"] else ("expired" if auth_bad or "xác thực" in err or "401" in err else "error")
         async with self.sm() as db:
             import orjson
 
