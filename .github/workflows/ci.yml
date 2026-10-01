@@ -4,10 +4,25 @@ on:
   push:
     branches: [main, "claude/**"]
   pull_request:
+  # v0.1.33 (F-9) — release.yml gọi lại CHÍNH workflow này thành job `ci` và đưa vào `needs` của bước phát
+  # hành: bản thử (prerelease) chỉ được tạo khi toàn bộ CI ở đây xanh trên đúng commit sắp phát hành.
+  workflow_call:
+    inputs:
+      from_release:
+        type: boolean
+        required: false
+        default: false
+        description: "true khi release.yml gọi"
 
+# Bẫy F-9 bước 5: khi được gọi qua workflow_call, context `github` là của workflow GỌI (release.yml: event
+# push, ref main) → nhóm cũ `ci-${{ github.ref }}` trùng với lượt CI do chính lần push main đó kích hoạt ⇒
+# hai bên huỷ lẫn nhau (Release mất job `ci`, cổng phát hành không bao giờ xanh). Ngoài ra concurrency với
+# cancel-in-progress=false vẫn chỉ giữ MỘT lượt chờ (lượt chờ cũ bị huỷ khi có lượt mới), nên lượt gọi từ
+# Release phải có nhóm riêng theo sha + run_id và không huỷ ai. Khi push/PR, `inputs` rỗng ⇒ hành vi cũ:
+# nhóm theo workflow + event + ref, lượt mới huỷ lượt cũ.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ inputs.from_release && format('ci-release-{0}-{1}', github.sha, github.run_id) || format('ci-{0}-{1}-{2}', github.workflow, github.event_name, github.ref) }}
+  cancel-in-progress: ${{ !inputs.from_release }}
 
 jobs:
   # ── version ──────────────────────────────────────────────────────────────
@@ -33,9 +48,15 @@ jobs:
             exit 1
           fi
           echo "VERSION hợp lệ: $version"
+      # v0.1.33 (F-9) — cổng phát hành: script bất biến do gói cong-phat-hanh tạo, kiểm các điều kiện để một
+      # bản chỉ thành bản thử (prerelease) rồi mới được nâng thành bản chính thức (latest) sau E2E cài thật.
+      - name: Kiểm cổng phát hành
+        run: python3 .github/scripts/check_release_gate.py
 
   api:
     runs-on: ubuntu-latest
+    # Hai lượt pytest đầy đủ (superuser + gh_app) + build image db — chặn treo vô hạn nếu test kẹt.
+    timeout-minutes: 40
     services:
       redis:
         image: redis:7-alpine
@@ -56,11 +77,33 @@ jobs:
       - name: Lint + typecheck
         working-directory: apps/api
         run: .venv/bin/ruff check gh tests && .venv/bin/mypy gh
+      # v0.1.33 (F-13) — tests/conftest.py và container migrate chạy `alembic upgrade heads` (số nhiều) nên tự
+      # nó che lỗi nhiều head (thứ tự migrate không xác định, gh/bundle.py so revision sai). `alembic heads` chỉ
+      # đọc thư mục migrations, không chạy env.py ⇒ không cần DB. Chốt chặn thứ hai: tests/test_migrations_heads.py.
+      - name: Kiểm alembic chỉ có đúng 1 head
+        working-directory: apps/api
+        run: |
+          set -euo pipefail
+          heads="$(.venv/bin/alembic heads)"
+          echo "$heads"
+          n=$(printf '%s\n' "$heads" | grep -c '(head)' || true)
+          [ "$n" -eq 1 ] || { echo "::error::alembic có $n head — phải gộp bằng 'alembic merge' để chỉ còn 1" >&2; exit 1; }
       - name: Test (Postgres + Redis thật)
         working-directory: apps/api
         env:
           GH_TEST_PG: postgresql://postgres:postgres@localhost:5432
           GH_TEST_REDIS: redis://localhost:6379/15
+        run: .venv/bin/pytest -q
+      # v0.1.33 (F-13) — chạy lại TOÀN BỘ bộ test dưới role ứng dụng gh_app (không superuser, không BYPASSRLS —
+      # migration 0014), giống `make api-test-app-role`, để GRANT còn thiếu lộ ra ở CI chứ không phải trên máy
+      # Boss. CSDL mẫu riêng (GH_TEST_TEMPLATE) để không đè lên CSDL mẫu của lượt trên.
+      - name: Test dưới role ứng dụng gh_app (GH_TEST_APP_ROLE=1)
+        working-directory: apps/api
+        env:
+          GH_TEST_PG: postgresql://postgres:postgres@localhost:5432
+          GH_TEST_REDIS: redis://localhost:6379/15
+          GH_TEST_APP_ROLE: "1"
+          GH_TEST_TEMPLATE: gh_test_template_app
         run: .venv/bin/pytest -q
 
   # v0.1.29 — browser-worker (apps/browser): Chromium thật trên TRANG MẪU (không gọi facebook.com), Redis thật.
@@ -92,6 +135,8 @@ jobs:
 
   web:
     runs-on: ubuntu-latest
+    # Playwright (mock) gồm cả so ảnh với thiết kế (visual.spec.ts) — chặn treo vô hạn nếu dev server kẹt.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -102,6 +147,23 @@ jobs:
       - run: npm run -w apps/web test
       - run: npm run -w apps/web build
       - run: npm run -w apps/bridge test
+      # v0.1.33 (F-13) — bộ e2e mock (apps/web/e2e) trước đây chỉ chạy tay. playwright.config.ts tự dựng
+      # `vite --mode mock`; GitHub đặt CI=true ⇒ không dùng lại server có sẵn.
+      - name: Cài Chromium cho Playwright
+        working-directory: apps/web
+        run: npx playwright install --with-deps chromium
+      - name: Playwright (mock)
+        run: npm run -w apps/web test:e2e
+      - name: Lưu báo cáo Playwright khi lỗi
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ github.run_attempt }}
+          path: |
+            apps/web/playwright-report
+            apps/web/test-results
+          retention-days: 7
+          if-no-files-found: ignore
 
   images:
     runs-on: ubuntu-latest
@@ -124,3 +186,30 @@ jobs:
           docker run --rm --entrypoint agy gh-api --version
           docker run --rm --init --read-only --tmpfs /tmp --cap-drop ALL gh-browser python3 -c "import ghb.worker, ghb.egress"
           docker compose -f deploy/compose.yaml --env-file .env config -q
+
+  # ── ci-ok ────────────────────────────────────────────────────────────────
+  # v0.1.33 (F-9/F-13) — job tổng: required check DUY NHẤT của branch protection. Luôn chạy (if: always(),
+  # không lọc đường dẫn) để PR chỉ sửa tài liệu không kẹt "Expected — waiting"; đỏ khi BẤT KỲ job nào phía
+  # trên failure/cancelled/skipped (skipped tính là đỏ: job bị bỏ qua vì job trước nó hỏng thì không được
+  # coi là xanh). Thêm job mới vào ci.yml thì nhớ thêm vào `needs` dưới đây.
+  ci-ok:
+    name: ci-ok
+    runs-on: ubuntu-latest
+    needs: [version, api, browser, web, images]
+    if: always()
+    steps:
+      - name: Tổng hợp kết quả các job CI
+        env:
+          R_VERSION: ${{ needs.version.result }}
+          R_API: ${{ needs.api.result }}
+          R_BROWSER: ${{ needs.browser.result }}
+          R_WEB: ${{ needs.web.result }}
+          R_IMAGES: ${{ needs.images.result }}
+          NOT_GREEN: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped') }}
+        run: |
+          echo "version=$R_VERSION api=$R_API browser=$R_BROWSER web=$R_WEB images=$R_IMAGES"
+          if [ "$NOT_GREEN" = "true" ]; then
+            echo "::error::CI chưa xanh: có job failure/cancelled/skipped (xem dòng kết quả ngay trên) — mở job đỏ, sửa lỗi rồi đẩy lại hoặc bấm Re-run." >&2
+            exit 1
+          fi
+          echo "Tất cả job CI xanh."
