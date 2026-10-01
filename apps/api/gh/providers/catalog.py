@@ -164,7 +164,7 @@ def family(kind: str, model_id: str) -> str:
 
 
 def tier(model_id: str) -> str:
-    """Theo TỪ trong tên model gốc (không theo mức suy nghĩ). "gemini" chứa "mini" → so theo từ, không theo chuỗi con."""
+    """Theo TỪ trong tên model gốc (không theo mức suy nghĩ): "gemini" chứa "mini" → so theo từ, không chuỗi con."""
     words = set(re.split(r"[-_.\[\]\s]+", model_id.lower()))
     if words & {"lite", "haiku", "nano", "mini", "20b", "flash"}:
         return "fast"

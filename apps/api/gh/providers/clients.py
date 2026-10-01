@@ -79,8 +79,10 @@ def rejection(msg: str) -> ModelRejected | None:
         return None
     from gh.providers.catalog import parse_available
 
-    what = "effort" if _EFFORT_REJECT.search(msg) and not re.search(r"invalid model|unknown model", msg, re.I) \
-        else "model"
+    # "invalid model selection (--model … --effort …): invalid --effort …" = model đúng, MỨC sai.
+    bad_model = re.search(r"invalid model\s+[\"'“]|unknown model\b|model not found|issue with the selected model", msg,
+                          re.I)
+    what = "effort" if _EFFORT_REJECT.search(msg) and not bad_model else "model"
     return ModelRejected(msg[:300], what=what, available=parse_available(msg), raw=msg[-2000:])
 
 
