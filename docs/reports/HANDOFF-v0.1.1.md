@@ -1290,3 +1290,76 @@ xoá nhánh cả hai sau khi kiểm.
   - `e2e-selfupdate` v0.1.32 → v0.1.33 xanh (genh cũ tự tải genh mới): _…_
   - genh tải về (checksum/version) đúng v0.1.33: _…_
 - Chưa kiểm: _(điền)_ — bảo vệ nhánh (chờ admin bật, rồi 2 PR thử ở trên); timer đêm thật bỏ qua bản < 24 giờ trên máy Boss.
+
+## v0.1.34 — `genh update` an toàn, giới hạn log, E2E dữ liệu + bản hỏng (01/10/2026)
+
+### Boss cần làm gì
+
+**Không cần làm gì.** Sau khi bản v0.1.34 tự cài: lần cập nhật đêm tự bỏ qua khi không có bản mới (không sao lưu, không tải
+ảnh), tự dọn ảnh cũ; nếu một bản mới lỗi, máy tự quay về bản cũ và Console hiện "Cập nhật … chưa thành công — Hệ thống đã tự
+quay về bản đang dùng", Boss không phải làm gì (có thể bấm **Thử lại** / **Cập nhật ngay** nếu muốn thử lại).
+
+### Vì sao
+
+- **F-10/F-11**: `genh update` sao lưu rồi mới tải ảnh; tải lỗi (mạng chập) vẫn chạy rollback = khôi phục CSDL không cần thiết.
+  Khôi phục `exec` vào api ảnh MỚI đang lỗi; `.bak` cũ từ lần trước có thể bị khôi phục nhầm. Bản lỗi bị lịch đêm thử lại mỗi
+  đêm (mỗi đêm một lần sao lưu + khôi phục).
+- **F-33**: không kiểm đĩa, ảnh cũ không bao giờ dọn ⇒ đĩa đầy dần; đêm nào cũng sao lưu + tải dù đã mới nhất.
+- **F-37**: log Docker không giới hạn (json-file mặc định) ⇒ đĩa đầy theo thời gian; compose nhúng trong genh lệch
+  `deploy/compose.yaml` (thiếu `browser*`); healthcheck web không gọi `/healthz`.
+- **F-35**: E2E chỉ cài sạch — không có dữ liệu thật để chứng minh nâng cấp/khôi phục giữ dữ liệu, không có ca bản hỏng.
+
+### Thay đổi
+
+- **genh (`apps/genh/internal/ops/update.go` + `cmd/genh`)** — thứ tự mới, chi tiết ở `docs/handoff/05-installer.md` mục
+  "`genh update` — thứ tự an toàn": kiểm đĩa (gốc cài đặt + DockerRootDir, < 5 GB ⇒ dọn ảnh rồi đo lại, vẫn thiếu ⇒ **GH-E948**,
+  ghi `run/disk-status.json`) → tải ảnh bằng compose tạm `compose.update-next.yaml` TRƯỚC sao lưu, thử 3 lần có timeout từng lần
+  (lỗi ⇒ **GH-E941 chưa đụng gì**, không khôi phục/không up/không sao lưu) → dò `alembic current` (có migrate ⇒ tạm dừng
+  worker + bridge trước sao lưu; sao lưu lỗi ⇒ bật lại) → sao lưu → mới đổi `compose.yaml` → migrate/up/ready. Chỉ lỗi từ
+  migrate trở đi mới khôi phục: compose cũ (từ bộ nhớ, không dùng `.bak`), `stop api worker bridge web`, khôi phục bằng
+  `run --rm --no-deps -T api` (ảnh cũ), `up -d --remove-orphans`, ghi `run/update-blocked.json` ⇒ **GH-E945**. Thành công ⇒
+  xoá `update-blocked.json`, dọn ảnh `gen-harness-*` giữ 2 bản. Lịch đêm gặp đúng bản bị chặn ⇒ bỏ qua (thoát 0, "lịch đêm không
+  tự thử lại", mã **GH-E949** trong thông điệp); "Cập nhật ngay"/gõ tay không bị chặn; đã mới nhất ⇒ "không cần cập nhật".
+  `isServiceNotRunning` nhận "is restarting" (rơi về `run --rm`).
+- **compose**: `x-logging` json-file `max-size: 10m`, `max-file: 3` cho mọi dịch vụ; web healthcheck `/healthz`; bản nhúng
+  trùng từng byte `deploy/compose.yaml` (có test giữ).
+- **E2E (`e2e-install.yml`, `.github/scripts/e2e_data.sh`)**: dữ liệu mẫu + đếm dòng; bước "đã mới nhất" (log "không cần cập
+  nhật", số bản sao lưu không đổi, 0 lượt docker pull); `e2e-upgrade` seed ở bản cũ, số dòng trước/sau trùng, ảnh bản cũ hơn
+  nữa bị dọn (mỗi repo ≤ 2 digest); job mới **`e2e-rollback`** (genh-tot/hong/sua: bản hỏng tự quay về, dữ liệu nguyên,
+  `update-blocked.json` đúng version, lịch đêm không thử lại, bản sửa gỡ chặn); **promote đòi `e2e-rollback` xanh**
+  (`check_release_gate.py` giữ + test).
+- Web: thêm Playwright mock `apps/web/e2e/update-rollback-v0134.spec.ts` (thẻ "chưa thành công" + thông điệp genh GH-E949 +
+  "Thử lại" gửi yêu cầu; lỗi cũ không treo thẻ đỏ). `ci.yml`: sửa cảnh báo actionlint SC2034 (biến vòng lặp không dùng).
+- `VERSION` → `v0.1.34`; `docs/ROADMAP.md` mục Đã xong.
+
+### Kiểm tra (nhánh tích hợp, máy dựng Linux, 01/10/2026)
+
+- genh: `go vet ./...` sạch (cả GOOS=windows/darwin), `go test -count=1 ./...` 357 pass (kể cả subtest) / 1 skip (máy không có
+  certutil) — gồm các ca tiêu chí 1 (`TestRunUpdate_PullFails_NoRestore_NothingTouched`, `…PullRetriesThenSucceeds`,
+  `…PullTimeoutPerAttempt`, `…PullBeforeBackup_UsesTempComposeNotSynced`, `…MigrateFails_RestoresWithOldImage_WritesBlocked`,
+  `…NeedsMigrate_StopsWorkerBridgeBeforeBackup`, `…BackupFailsAfterStoppingWriters_StartsThemAgain`, `…DiskLow_PrunesThenStops`,
+  `…ComposeUnchanged_StaleBakNotRestoredOnRollback`, `TestPruneOldImages_*`, `TestRunBackupInContainer_IsRestarting_FallsBackToRunRm`,
+  `TestDecideServiceUpdate`) và tiêu chí 2 (`TestDeployCompose_EveryServiceHasLogLimits`, `TestEmbeddedComposeMatchesRepo`,
+  `TestDeployCompose_WebHealthcheckUsesHealthz`).
+- compose: `docker compose -f deploy/compose.yaml --env-file .env config -q` (env giả) OK; `pin-compose-images.sh` sinh
+  compose.release.yaml (0 dòng `build:`, `config -q` OK); bản nhúng trùng byte `deploy/compose.yaml`.
+- Cổng: `check_release_gate.py` OK; `unittest` `.github/scripts` 16/16; `actionlint` sạch (cả 4 workflow); `shellcheck
+  .github/scripts/e2e_data.sh` sạch.
+- api: ruff + mypy sạch (127 tệp), `alembic heads` = `0023 (head)`; pytest 1110 pass (lượt thường) + 1110 pass
+  (`GH_TEST_APP_ROLE=1`). browser: ruff + mypy sạch, pytest 14 pass. web: lint/typecheck sạch, vitest 284/284, build OK;
+  bridge 50 pass; Playwright mock 136/136 (11 spec, gồm `update-rollback-v0134.spec.ts`).
+- Chưa chạy được ở máy dựng (không có Docker daemon): e2e-install / e2e-upgrade / e2e-rollback / e2e-selfupdate thật — chờ CI.
+
+### Đã kiểm vs chưa kiểm
+
+- Đã kiểm: _(người điều phối điền sau merge — link + kết quả thật, KHÔNG ghi trước)_ — CI PR (`ci-ok`, `installer-ok`,
+  e2e-install + e2e-rollback chế độ pr); Release v0.1.34 bản thử → e2e-install + e2e-upgrade (từ v0.1.33) + e2e-rollback chế độ
+  release xanh → promote latest; e2e-selfupdate xanh; genh tải về (checksum + `genh version` = v0.1.34).
+- Chưa kiểm: lịch đêm thật trên máy Boss bỏ qua khi đã mới nhất; GH-E948 trên máy đĩa đầy thật (chỉ có unit test).
+
+### Rủi ro đã biết
+
+1. Thứ tự an toàn nằm trong genh v0.1.34: tới khi genh trên máy tự lên v0.1.34 (lịch đêm đợi bản chính thức đủ 24 giờ), lịch
+   đêm vẫn chạy kiểu cũ của v0.1.33. `e2e-selfupdate` kiểm đường genh cũ tự tải genh mới rồi nâng dịch vụ.
+2. Dọn ảnh chỉ đụng repo `ghcr.io/<owner>/gen-harness-*`, không `-f`; ảnh đang dùng bị bỏ qua — cài bằng build cục bộ thì không
+   dọn gì.
