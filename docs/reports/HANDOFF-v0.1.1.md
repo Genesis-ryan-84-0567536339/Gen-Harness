@@ -1126,7 +1126,9 @@ hoá — hệ thống chỉ giảm (đọc ít, dừng ngay khi có cảnh báo)
 
 1. Máy Boss: **không cần làm gì.** Bản mới chỉ tới máy sau khi qua E2E cài thật; lịch tự cập nhật đêm đợi bản ra đủ 24 giờ.
    Muốn lấy sớm: Console → **Cập nhật ngay** (không bị đợi 24 giờ).
-2. Một lần, ~2 phút, cần quyền admin repo: **bật bảo vệ nhánh `main` + tag `v*`** — làm theo mục ngay dưới "Đã làm".
+2. **Chỉ khi Claude báo token không có quyền admin repo**: mở https://github.com/Genesis-ryan-84-0567536339/Gen-Harness/settings/rules,
+   **bật bảo vệ nhánh `main` + tag `v*`** theo mục "Bật bảo vệ nhánh main + tag v*" ngay dưới "Đã làm" (~2 phút, chỉ bấm chọn,
+   không gõ lệnh). Ngoài ra không cần làm gì.
    Chưa bật cũng không hỏng gì (mã không phụ thuộc vào nó), chỉ là PR đỏ vẫn còn đường merge tay.
 
 ### Nguyên nhân gốc
@@ -1223,7 +1225,15 @@ xoá nhánh cả hai sau khi kiểm.
 - genh: `go test` của `internal/selfupdate` (bỏ qua bản < 24 giờ khi `--yes` không `--if-requested`; "Cập nhật ngay" không bị
   chặn) — nay chạy trong CI trên 4 hệ điều hành cùng toàn bộ `go test ./...`.
 - CI: `check_release_gate.py` trong job `version`; `tr -d '[:space:]' < VERSION` = `v0.1.33` khớp regex job `version`.
-- _(người điều phối điền tên tệp test/số test từ báo cáo các gói cong-phat-hanh, ci-du-test, chin-24h.)_
+- Tệp test mới: `apps/genh/internal/selfupdate/selfupdate_test.go` (`TestRun_MinAge_*`, `TestRun_KhongMinAge_CapNhatNgay`,
+  `TestRun_Prerelease_BoQua`), `apps/genh/cmd/genh/main_test.go` (`--yes` → 24 giờ, `--yes --if-requested` → 0, không
+  `--yes` → 0; đường nút "Cập nhật ngay"), `apps/api/tests/test_migrations_heads.py`; test genh phụ thuộc POSIX tách sang
+  `*_unix_test.go` / `steps_finalize_linux_test.go` để chạy được trên Windows/macOS.
+- Chạy trên nhánh tích hợp (máy dựng Linux, 01/10/2026): genh `go vet ./...` sạch (cả GOOS=windows/darwin), `go test -count=1
+  ./...` 305 pass / 1 skip (máy không có certutil); api ruff + mypy sạch (127 tệp), `alembic heads` = `0023 (head)`, pytest
+  1106 pass (lượt thường) + 1106 pass (`GH_TEST_APP_ROLE=1`); web lint/typecheck sạch, vitest 280/280, build OK, bridge 50
+  pass, Playwright mock 134/134 (10 spec); browser ruff + mypy sạch, pytest 14 pass; `check_release_gate.py` OK; actionlint
+  sạch cho ci/release/e2e-install/installer-matrix; `install.sh` `bash -n` OK, `GEN_HARNESS_RELEASE_TAG` sai dạng bị từ chối.
 
 ### Đã kiểm vs chưa kiểm
 
