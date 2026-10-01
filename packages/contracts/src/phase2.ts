@@ -463,7 +463,12 @@ export interface ProviderModel {
   used_today: number;
   /** v0.1.31: model mặc định của nguồn ("Dùng model này"). */
   is_default?: boolean;
+  /** v0.1.32: mức suy nghĩ đã lưu (nguồn CLI); null = để CLI tự chọn. */
+  effort?: Effort | null;
 }
+
+/** v0.1.32: mức suy nghĩ — agy `--effort low|medium|high`; Claude Code thêm `xhigh`, `max`. */
+export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 /** v0.1.31: một model trong danh sách chọn — nhóm theo họ (Gemini, Claude…), kèm gợi ý nhanh/rẻ hay mạnh. */
 export interface ModelOption {
@@ -472,8 +477,16 @@ export interface ModelOption {
   group: string;
   tier: 'fast' | 'balanced' | 'strong';
   hint: string;
-  /** `cli` = CLI liệt kê được; `catalog` = danh mục dự phòng (gọi thử thật trước khi lưu). */
-  source: 'cli' | 'catalog';
+  /** `cli` = CLI liệt kê được; `catalog` = danh mục dự phòng; `saved` = model đã lưu mà CLI không liệt kê. */
+  source: 'cli' | 'catalog' | 'saved';
+  /** v0.1.32: mức suy nghĩ model này nhận (rỗng = không chỉnh được, CLI tự chọn). */
+  efforts?: Effort[];
+  /** v0.1.32: mức CLI đang dùng cho model này (nếu CLI cho biết). */
+  default_effort?: Effort | null;
+  /** v0.1.32: false = chưa xác minh bằng CLI / tài liệu chính thức (Console ghi "chưa xác minh"). */
+  verified?: boolean;
+  /** v0.1.32: nguồn dữ liệu (lệnh CLI hoặc URL tài liệu + ngày kiểm). */
+  source_ref?: string | null;
 }
 
 export interface ModelGroup {
@@ -492,7 +505,7 @@ export interface Provider {
   keys: ProviderKey[];
   models: ProviderModel[];
   /** Kết quả lần gọi thử gần nhất (lưu ở máy chủ) — bước 4 dùng để còn nút "Dùng model này" sau khi tải lại trang. */
-  last_test?: (ProviderTestResult & { at?: string }) | null;
+  last_test?: ProviderTestResult | null;
 }
 
 export interface ProviderCreateBody {
@@ -513,6 +526,34 @@ export interface ProviderTestResult {
   models_source?: 'cli' | 'catalog';
   /** v0.1.31 (nguồn CLI): model đã gọi thật thành công trong lần kiểm tra này. */
   probe_model?: string | null;
+  /** v0.1.32: mức suy nghĩ của lượt gọi thật đó. */
+  probe_effort?: Effort | null;
+  /** v0.1.32: giờ của lần gọi thật (ISO) — Console hiện "lúc …" để biết kết quả cũ hay mới. */
+  at?: string;
+  /** v0.1.32: lỗi gốc đã che bí mật, cho mục "Chi tiết kỹ thuật". */
+  error_detail?: string | null;
+  /** v0.1.32: đầu ra thô (đã che) của `agy models`. */
+  models_raw?: string | null;
+}
+
+/** v0.1.32 — "Chẩn đoán" nguồn CLI (chỉ Owner): đầu ra thô đã che token/email. */
+export interface DiagnosisStep {
+  label: string;
+  command: string;
+  exit_code: number | null;
+  stdout: string;
+  stderr: string;
+  ms: number;
+  note: string | null;
+}
+
+export interface ProviderDiagnosis {
+  provider: string;
+  kind: CliKind;
+  model: string | null;
+  effort: Effort | null;
+  steps: DiagnosisStep[];
+  at: string;
 }
 
 export interface Credential {

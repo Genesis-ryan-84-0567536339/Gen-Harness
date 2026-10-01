@@ -36,6 +36,9 @@ def email_of() -> str | None:
 
 
 args = sys.argv[1:]
+if args[:1] == ["--version"]:
+    print("2.1.285 (Claude Code)")
+    sys.exit(0)
 if args[:3] == ["auth", "status", "--json"]:
     who = email_of()
     print(json.dumps({"loggedIn": who is not None, "authMethod": "claude.ai" if who else "none", "email": who,
@@ -46,6 +49,13 @@ if args[:1] == ["-p"]:
     prompt = sys.stdin.read()
     model = next((a.split("=", 1)[1] for a in args if a.startswith("--model=")), None) or \
         (args[args.index("--model") + 1] if "--model" in args else "sonnet")
+    # v0.1.32: `--effort` như claude 2.1.285 thật (đo 2026-10-01): mức lạ → cảnh báo trên stderr rồi bỏ qua.
+    effort = next((a.split("=", 1)[1] for a in args if a.startswith("--effort=")), None) or \
+        (args[args.index("--effort") + 1] if "--effort" in args else None)
+    if effort and effort not in ("low", "medium", "high", "xhigh", "max"):
+        print(f"Warning: Unknown --effort value '{effort}' — ignoring it and using the default effort. Valid values: "
+              "low, medium, high, xhigh, max.", file=sys.stderr)
+        effort = None
     tools_off = "--tools" in args and args[args.index("--tools") + 1:] == [""]
     # Review v0.1.31: hook/CLAUDE.md của thư mục cấu hình chỉ tắt bằng --safe-mode; lời nhắn hệ thống qua tệp.
     hardened = "--safe-mode" in args and "--strict-mcp-config" in args and "--system-prompt" not in args
@@ -68,7 +78,7 @@ if args[:1] == ["-p"]:
     if model not in ALIASES:
         result(f"There's an issue with the selected model ({model}). It may not exist or you may not have access to "
                "it. Run --model to pick a different model.", error=True, status=404)
-    result(f"whoami:{who}|{model}")
+    result(f"whoami:{who}|{model}" + (f"|{effort}" if effort else ""))
 
 if args[:2] == ["auth", "login"]:
     def out(s: str) -> None:

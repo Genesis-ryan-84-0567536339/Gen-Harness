@@ -9,7 +9,8 @@ import { toast } from '../../lib/toast';
 import { CardError, FriendlyErrorText, InlineError, Panel, ScreenHead, SkeletonLines, StateChip } from '../common';
 import { CliCard } from '../system/CliCard';
 import { ModelPicker } from './ModelPicker';
-import { PROVIDER_ICON, PROVIDER_KIND_LABEL, fmtContextTokens, fmtQuota, fmtTemperature, isCliKind, providerStatus } from './apiModel';
+import { CliDiagnose } from '../system/CliDiagnose';
+import { PROVIDER_ICON, PROVIDER_KIND_LABEL, choiceText, fmtContextTokens, fmtQuota, fmtTemperature, isCliKind, providerStatus } from './apiModel';
 import {
   useAddModel,
   useAddProviderKey,
@@ -141,7 +142,7 @@ function ProviderCard({ provider: p, canManage, onAddKey }: { provider: Provider
         />
         <ProviderField
           label="MODEL"
-          value={p.models.length ? p.models.map((m) => m.model_name).join(', ') : 'chưa có model'}
+          value={p.models.length ? p.models.map((m) => choiceText(m.model_name, m.effort)).join(', ') : 'chưa có model'}
           tone="var(--color-neutral-300)"
         />
       </div>
@@ -177,6 +178,7 @@ function ProviderCard({ provider: p, canManage, onAddKey }: { provider: Provider
         </div>
       ) : null}
       {canManage && p.kind !== 'system_one' ? <ModelPicker provider={p} test={lastResult ?? p.last_test} /> : null}
+      {isCliKind(p.kind) ? <CliDiagnose provider={p} /> : null}
       {testErr ? <InlineError>{errorText(testErr)}</InlineError> : null}
       {remove.isError ? <InlineError>{errorText(remove.error)}</InlineError> : null}
     </article>

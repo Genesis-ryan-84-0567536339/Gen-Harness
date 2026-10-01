@@ -93,9 +93,10 @@ def test_parse_agy_models_reads_slugs_and_display_names_anywhere_in_line() -> No
            "  \x1b[1mClaude Sonnet 4.6 (Thinking)\x1b[0m  claude-sonnet-4-6\n"
            "  Gemini 3.8 Flash (Low)\n")
     got = catalog.parse_agy_models(out)
-    assert [m["id"] for m in got] == ["gemini-3.8-flash-high", "gemini-3.1-pro-low", "claude-sonnet-4-6",
-                                      "gemini-3.8-flash-low"]
-    assert got[0]["current"] and got[0]["label"] == "Gemini 3.8 Flash (High)"
+    # v0.1.32: biến thể gộp về model gốc; "High"/"Low" là mức suy nghĩ, không phải tên model.
+    assert [m["id"] for m in got] == ["gemini-3.8-flash", "gemini-3.1-pro", "claude-sonnet-4-6"]
+    assert got[0]["current"] and got[0]["label"] == "Gemini 3.8 Flash"
+    assert got[0]["efforts"] == ["low", "high"] and got[0]["current_effort"] == "high"
     # Lỗi cũ (v0.1.30): chỉ nhận TỪ ĐẦU dòng có dấu "-" → dòng "Tên hiển thị  mã" bị bỏ, còn đúng 1 model.
     old = [ln.strip().split()[0] for ln in out.splitlines() if ln.strip() and "-" in ln.strip().split()[0]]
     assert len(old) <= 1
@@ -106,10 +107,12 @@ def test_build_groups_with_hints_and_fallback() -> None:
     assert built["models_source"] == "cli"
     assert [g["label"] for g in built["model_groups"]] == ["Gemini", "Claude (qua Antigravity)"]
     flash = built["model_groups"][0]["models"][0]
+    assert flash["id"] == "gemini-3.8-flash" and flash["efforts"] == ["low"]
     assert flash["tier"] == "fast" and flash["hint"] == "nhanh, rẻ"
     assert built["model_groups"][1]["models"][0]["tier"] == "strong"
     fb = catalog.build("antigravity_cli", [])
-    assert fb["models_source"] == "catalog" and "gemini-3.8-flash-high" in fb["models"]
+    assert fb["models_source"] == "catalog" and "gemini-3.8-flash" in fb["models"]
+    assert not [m for m in fb["models"] if m.endswith(("-low", "-medium", "-high"))]
     cc = catalog.build("claude_code_cli", None)
     assert cc["models"] == ["haiku", "sonnet", "opus", "fable"]
     assert [g["label"] for g in cc["model_groups"]] == ["Claude"]
@@ -136,9 +139,10 @@ async def test_agy_models_grouped_probe_and_validated_choice(owner_api, clis) ->
     t = r.json()
     assert t["ok"] is True, t
     assert t["models_source"] == "cli"
-    assert len(t["models"]) == 5
+    assert t["models"] == ["gemini-3.8-flash", "gemini-3.1-pro", "claude-sonnet-4-6-thinking"]
     assert [g["label"] for g in t["model_groups"]] == ["Gemini", "Claude (qua Antigravity)"]
-    assert t["probe_model"] == "gemini-3.8-flash-high"     # model "(current)" của CLI
+    # model "(current)" của CLI, gọi bằng --model gốc + --effort (v0.1.32)
+    assert (t["probe_model"], t["probe_effort"]) == ("gemini-3.8-flash", "high")
     # Chọn model nhóm Claude: gọi thử thật rồi mới lưu, thành model mặc định của nguồn.
     r = await api.send("POST", f"/providers/{p['id']}/models",
                        {"model_name": "claude-sonnet-4-6-thinking", "make_default": True})

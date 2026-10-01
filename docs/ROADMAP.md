@@ -40,6 +40,10 @@ v0.1.31: Boss 01/10 "không thấy model và nhóm model nào để chọn" — 
 THẬT trước khi lưu model ("Dùng model này" = model mặc định của nguồn); một sự thật cho trạng thái phiên CLI (token tự gia hạn
 → "Đang hoạt động", "Gọi thử OK" chỉ khi gọi thật được); nguồn mới **Claude Code CLI** (gói Claude Pro/Max của Owner, đăng
 nhập trong container bằng link + mã, nhiều tài khoản, tắt tới khi đăng nhập, cảnh báo điều khoản — QD-12 Owner tự quyết).
+v0.1.32: Boss 01/10 "high là mức suy nghĩ, không phải tên model" — model và MỨC SUY NGHĨ (effort) tách riêng (agy `--model
+<gốc> --effort low|medium|high`, Claude Code `--effort` low…max), chuyển dữ liệu cũ (migration 0023), danh sách không thu gọn
+còn model đã lưu, mỗi model có nguồn (CLI / tài liệu chính thức / "chưa xác minh"), nhận diện "CLI không nhận" chính xác +
+"Chi tiết kỹ thuật", "Gọi thử OK" kèm giờ, nút **Chẩn đoán** (chỉ Owner) cho nguồn CLI với đầu ra thô đã che + "Chép".
 
 ## Đợt A — Gen v1 (thiết kế: docs/design/gen-v1.md)
 - ✅ A1 Khung chat phải + Gen trả lời/tóm tắt (chỉ đọc), lưu hội thoại, Nhật ký hành động — v0.1.21.
