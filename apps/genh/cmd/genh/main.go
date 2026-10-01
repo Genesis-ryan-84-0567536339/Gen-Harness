@@ -339,13 +339,40 @@ func runUpdate(args []string) int {
 		}
 	}
 
+	// Có cần chạy phần nâng cấp dịch vụ không (F-10 bước 3, F-33 bước 5): lịch
+	// đêm không thử lại bản đã rollback; dịch vụ đã khớp bản genh này thì không
+	// sao lưu/tải ảnh vô ích mỗi đêm.
+	blocked, _, _ := hostlink.ReadUpdateBlocked(env.InstallDir)
+	inSync, _ := ops.UpdateNeeded(env) // lỗi → false: để RunUpdate tự báo lỗi đúng khuôn
+	switch skip, kind := decideServiceUpdate(serviceUpdateInput{
+		Scheduled:      f.yes && !f.ifRequested,
+		SelfUpdated:    f.selfUpdated,
+		Version:        version,
+		InSync:         inSync,
+		BlockedVersion: blocked.Version,
+	}); {
+	case skip && kind == "blocked":
+		// In ra stdout CẢ khi --quiet để vào logs/auto-update.log.
+		fmt.Println(blockedLine(version))
+		_ = hostlink.Finish(env.InstallDir, "failed", "", "Bản "+version+" đã lỗi ở lần cập nhật trước và đã tự quay về bản cũ — lịch đêm không tự thử lại bản này. Bấm \"Cập nhật ngay\" để thử lại. ("+ops.ErrCodeUpdateBlocked+")")
+		return 0
+	case skip && kind == "up-to-date":
+		fmt.Println(upToDateLine(version))
+		_ = hostlink.Finish(env.InstallDir, "done", version, "")
+		publishHostInfo(env.InstallDir, env.Port)
+		if deferred {
+			fmt.Println(updateDoneLine(true))
+		}
+		return 0
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	out := io.Writer(os.Stdout)
 	if f.quiet {
 		out = io.Discard
 	}
-	opts := ops.UpdateOptions{Channel: f.channel}
+	opts := ops.UpdateOptions{Channel: f.channel, Version: version}
 	if err := ops.RunUpdate(ctx, env, opts, ops.UpdateDeps{}, out); err != nil {
 		reportOpErr(err)
 		msg := err.Error()
@@ -357,18 +384,61 @@ func runUpdate(args []string) int {
 	}
 	_ = hostlink.Finish(env.InstallDir, "done", version, "")
 	publishHostInfo(env.InstallDir, env.Port)
-	if f.quiet {
-		fmt.Println(updateDoneLine(deferred))
+	if deferred {
+		fmt.Println(deferredAfterRunLine)
+	} else if f.quiet {
+		fmt.Println(updateDoneLine(false))
 	}
 	return 0
 }
 
-// updateDoneLine là dòng kết của `genh update --quiet` (vào
-// logs/auto-update.log). Bản genh mới bị thời gian chín hoãn (deferred) thì
-// KHÔNG được in "cập nhật xong." — người đọc log sẽ tưởng bản mới đã cài.
+// serviceUpdateInput là dữ kiện để quyết định có chạy ops.RunUpdate không.
+type serviceUpdateInput struct {
+	Scheduled      bool   // lịch đêm: --yes không kèm --if-requested
+	SelfUpdated    bool   // tiến trình vừa re-exec sau khi tự thay binary
+	Version        string // main.version
+	InSync         bool   // compose.yaml + Caddyfile đã khớp bản nhúng (ops.UpdateNeeded)
+	BlockedVersion string // version trong run/update-blocked.json ("" nếu không có)
+}
+
+// decideServiceUpdate (hàm thuần) quyết định bỏ qua phần nâng cấp dịch vụ:
+//  1. lịch đêm + bản đang chạy đúng là bản đã bị chặn (so khớp CHÍNH XÁC) →
+//     "blocked" — "Cập nhật ngay" và gõ tay luôn được chạy;
+//  2. không vừa tự cập nhật + dịch vụ đã khớp bản genh này → "up-to-date";
+//  3. còn lại chạy RunUpdate (skip=false, kind="").
+func decideServiceUpdate(in serviceUpdateInput) (skip bool, kind string) {
+	if in.Scheduled && in.BlockedVersion != "" && in.BlockedVersion == in.Version {
+		return true, "blocked"
+	}
+	if !in.SelfUpdated && in.InSync {
+		return true, "up-to-date"
+	}
+	return false, ""
+}
+
+// blockedLine: dòng log khi lịch đêm bỏ qua bản đã bị chặn (E2E grep "lịch đêm
+// không tự thử lại").
+func blockedLine(v string) string {
+	return "genh: bản " + v + " đã lỗi ở lần cập nhật trước và đã tự quay về bản cũ — lịch đêm không tự thử lại bản này. Có bản mới hơn sẽ tự cài; muốn thử lại ngay: bấm \"Cập nhật ngay\" trong Console hoặc chạy genh update."
+}
+
+// upToDateLine: dòng log khi dịch vụ đã đúng bản (E2E grep "không cần cập nhật").
+func upToDateLine(v string) string {
+	return "genh: dịch vụ đã ở đúng bản " + v + " — không cần cập nhật (không sao lưu, không tải ảnh)."
+}
+
+// deferredAfterRunLine: RunUpdate ĐÃ chạy xong bằng bản genh hiện tại nhưng bản
+// genh mới hơn đang bị thời gian chín hoãn — KHÔNG in "genh: cập nhật xong."
+// (người đọc log sẽ tưởng bản mới đã cài).
+const deferredAfterRunLine = "genh: dịch vụ đã nâng cấp theo bản genh hiện tại — bản genh mới đang đợi đủ 24 giờ (thời gian chín) mới tự cài."
+
+// updateDoneLine là dòng kết vào logs/auto-update.log. Bản genh mới bị thời
+// gian chín hoãn (deferred) và dịch vụ đã khớp bản hiện tại → không có gì để
+// cập nhật; KHÔNG được in "genh: cập nhật xong." — chỉ in câu đó khi RunUpdate
+// thật sự chạy xong.
 func updateDoneLine(deferred bool) string {
 	if deferred {
-		return "genh: dịch vụ đã kiểm/khởi động lại xong — bản genh mới đang đợi đủ 24 giờ (thời gian chín) mới tự cài."
+		return "genh: không có gì để cập nhật — bản genh mới đang đợi đủ 24 giờ (thời gian chín) mới tự cài."
 	}
 	return "genh: cập nhật xong."
 }

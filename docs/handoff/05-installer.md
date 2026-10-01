@@ -133,7 +133,7 @@ Mọi bước **idempotent**: chạy lại `genh install` sau lỗi tiếp tục
 | `genh status` | Bảng dịch vụ + healthy + phiên bản + dung lượng dữ liệu |
 | `genh open` | Mở Console |
 | `genh logs [dịch vụ] [-f]` | Log gọn, có màu theo mức |
-| `genh update [--channel stable\|beta] [--yes] [--quiet] [--no-self-update]` | **v0.1.5:** tự hỏi bản `genh` mới nhất trên GitHub Releases (`/repos/<owner>/<repo>/releases/latest`), kiểm SHA-256, thay binary rồi RE-EXEC bằng code mới (`internal/selfupdate`), rồi mới backup tự động, migrate, khởi động lại theo thứ tự; lỗi ở bất kỳ bước nào → tự rollback. `--yes`: không hỏi gì; không kèm `--if-requested` ⇒ chỉ cài bản genh đã là bản chính thức ≥ 24 giờ (lịch đêm — xem "Cổng phát hành"). Không có TTY mà không `--yes`: cũng không hỏi gì (`RunUpdate` vốn không có bước hỏi) và **không** bị chặn 24 giờ. `--quiet`: chỉ in dòng quan trọng (bị hoãn thì dòng kết là "dịch vụ đã kiểm/khởi động lại xong — bản genh mới đang đợi đủ 24 giờ", không phải "cập nhật xong."). `--no-self-update`: chỉ nâng cấp dịch vụ, không đụng binary. **v0.1.33:** `/releases/latest` chỉ trả **bản chính thức** (đã qua E2E) |
+| `genh update [--channel stable\|beta] [--yes] [--quiet] [--no-self-update]` | **v0.1.5:** tự hỏi bản `genh` mới nhất trên GitHub Releases (`/repos/<owner>/<repo>/releases/latest`), kiểm SHA-256, thay binary rồi RE-EXEC bằng code mới (`internal/selfupdate`), rồi mới nâng cấp dịch vụ theo thứ tự an toàn (xem mục "`genh update` — thứ tự an toàn" ngay dưới bảng). `--yes`: không hỏi gì; không kèm `--if-requested` ⇒ chỉ cài bản genh đã là bản chính thức ≥ 24 giờ (lịch đêm — xem "Cổng phát hành"). Không có TTY mà không `--yes`: cũng không hỏi gì (`RunUpdate` vốn không có bước hỏi) và **không** bị chặn 24 giờ. `--quiet`: chỉ in dòng quan trọng; "genh: cập nhật xong." CHỈ in khi phần nâng cấp dịch vụ thật sự chạy xong (bị hoãn thì dòng kết chứa "đợi đủ 24 giờ", không phải "cập nhật xong."). `--no-self-update`: chỉ nâng cấp dịch vụ, không đụng binary. **v0.1.33:** `/releases/latest` chỉ trả **bản chính thức** (đã qua E2E) |
 | `genh auto-update enable\|disable\|status` | **v0.1.5:** bật/tắt/kiểm lịch tự chạy `genh update --yes --quiet` mỗi đêm ~03:00 giờ máy (`internal/autoupdate`) — systemd `--user` timer (fallback crontab) trên Linux, LaunchAgent trên macOS, Task Scheduler trên Windows. `genh install` tự bật mặc định (tắt bằng `--no-auto-update`) |
 | `genh backup [--to path]` / `genh restore <file>` | Chạy trong container |
 | `genh export --to <file>` / `genh import <file> [--yes]` | Gói hồ sơ Owner `.ghbundle` (CSDL + object + bí mật, mã hoá) — chuyển sang máy khác (v0.1.1 §1b/2b, `docs/reports/HANDOFF-v0.1.1.md`) |
@@ -141,6 +141,36 @@ Mọi bước **idempotent**: chạy lại `genh install` sau lỗi tiếp tục
 | `genh reset-setup` | Sinh mã thiết lập mới (cần xác nhận) |
 | `genh stop` / `genh start` | |
 | `genh uninstall [--keep-data]` | Gỡ sạch container, runtime do genh cài, lối tắt, PATH; hỏi trước khi xoá dữ liệu |
+
+### `genh update` — thứ tự an toàn (v0.1.34, F-10/F-11/F-33)
+
+Trước khi đụng dịch vụ, `cmd/genh` (`decideServiceUpdate`) quyết định có chạy `ops.RunUpdate` không:
+
+- **Bản bị chặn tự cập nhật** — lịch đêm (`--yes` không kèm `--if-requested`) mà `run/update-blocked.json` ghi **đúng** bản genh đang chạy (so khớp chính xác chuỗi version) ⇒ bỏ qua, thoát 0, log: "… lịch đêm không tự thử lại bản này …". Có bản genh mới hơn thì vẫn tự cài. Nút **Cập nhật ngay** và gõ tay `genh update` **không** bị chặn.
+- **Đã mới nhất** — không vừa tự cập nhật binary và `compose.yaml` genh quản lý + `proxy/Caddyfile` đã trùng bản nhúng (`ops.UpdateNeeded` → `compose.InSyncWithEmbedded`; compose ngoài như `GENH_COMPOSE_FILE`/checkout repo luôn coi là đã khớp) ⇒ không sao lưu, không tải ảnh, log: "… không cần cập nhật …", thoát 0.
+
+`ops.RunUpdate` chạy theo thứ tự:
+
+1. **Kiểm đĩa** — đo chỗ trống ở gốc cài đặt và (Docker gốc trên Linux) `docker info --format {{.DockerRootDir}}`, lấy số nhỏ hơn. Dưới 5 GB (`machine.MinDiskBytes`) ⇒ **dọn ảnh cũ** rồi đo lại; vẫn thiếu ⇒ **GH-E948**, dừng, chưa đụng gì. Đo lỗi ⇒ chỉ cảnh báo. Mỗi lần đo ghi `run/disk-status.json`.
+2. **Tải bản mới** TRƯỚC sao lưu — nếu compose sẽ đổi, tải bằng `deploy/compose.update-next.yaml` (bản nhúng, cùng thư mục, xoá ngay sau đó); `compose.yaml` thật chưa đổi. Thử 3 lần, mỗi lần tối đa 20 phút, chờ 20 giây rồi 60 giây giữa các lần. Hết lần ⇒ **GH-E941 "chưa đụng gì"**: không sao lưu, không khôi phục, không `up`; lịch đêm tự thử lại đêm sau.
+3. **Dò thay đổi CSDL** — `run --rm --no-deps -T migrate alembic current` bằng ảnh mới; còn revision không phải `(head)` (hoặc lệnh lỗi — coi như có) ⇒ **tạm dừng worker và bridge** (nguồn ghi) để bản sao lưu không lỡ ghi chép.
+4. **Sao lưu** (`pre-update`). Lỗi ⇒ bật lại worker/bridge, **GH-E940**, chưa đụng gì.
+5. **Đồng bộ compose.yaml** với bản nhúng (giữ `compose.yaml.bak`), rồi di trú `/tmp/gh-objects` của bản cài cũ nếu có. Lỗi ⇒ trả `compose.yaml` về bản cũ (từ bộ nhớ) + `up -d --remove-orphans`, **không khôi phục CSDL** (chưa bị đụng), giữ mã lỗi gốc (GH-E947/GH-E946).
+6. **Migrate** → `up -d --remove-orphans` → chờ `/api/v1/ready`. Từ lúc bắt đầu migrate, CSDL coi như **đã bị đụng**.
+7. **Thành công** ⇒ xoá `run/update-blocked.json`, **dọn ảnh cũ** (giữ ảnh bản hiện tại + bản liền trước), tin cậy lại CA.
+
+**Khi nào khôi phục CSDL:** chỉ khi lỗi xảy ra ở bước 6 (migrate/up/ready lỗi). Quay về bản cũ: ghi lại `compose.yaml` cũ (từ bộ nhớ — không dùng `.bak`, vì `.bak` có thể cũ từ lần trước), dừng api/worker/bridge/web, khôi phục bản sao lưu bằng **container tạm từ ảnh cũ** (`run --rm --no-deps -T api python -m gh.backup restore --key …` — không `exec` vào api ảnh mới đang lỗi), `up -d --remove-orphans`, rồi ghi `run/update-blocked.json` (kể cả khi quay về bản cũ thất bại) ⇒ **GH-E945**, thoát 1, log có "rollback".
+
+**Dọn ảnh cũ:** chỉ repo `ghcr.io/<owner>/gen-harness-*`; giữ mọi ảnh có trong compose hiện tại/bản đích và compose cũ/`.bak`; `docker rmi` từng ảnh (không `-f`, không `docker image prune`); ảnh đang dùng thì bỏ qua. Compose không có ảnh gen-harness (dev/build cục bộ) ⇒ không dọn gì.
+
+**Tệp trạng thái mới trong `run/`** (không chứa bí mật):
+
+| Tệp | Nội dung | Ghi / xoá |
+|---|---|---|
+| `update-blocked.json` | `{version, blocked_at, code, backup_key, message}` | genh ghi khi quay về bản cũ ĐÃ đụng CSDL; xoá khi cập nhật thành công |
+| `disk-status.json` | `{state: ok\|low, free_bytes, min_bytes, path, pruned_images, checked_at}` | genh ghi mỗi lần `genh update` kiểm đĩa (chuông "đĩa sắp đầy" v0.1.36 đọc — giữ tên khoá) |
+
+**Mã lỗi mới:** **GH-E948** — ổ đĩa không đủ chỗ (sau khi đã dọn ảnh cũ), dừng trước khi tải, chưa đụng gì. **GH-E949** — bản đã quay về bản cũ, lịch đêm không thử lại (chỉ dùng cho thông điệp/log, không phải lỗi thoát). GH-E941 nay nghĩa là "tải thất bại, chưa đụng gì"; GH-E945 chỉ khi đã đụng CSDL và đã tự khôi phục.
 
 ## Phát hành
 

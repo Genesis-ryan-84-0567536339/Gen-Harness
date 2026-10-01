@@ -7,6 +7,9 @@
 //	  update-status.json         ← genh ghi: running → done/failed (+ thông báo)
 //	  request/restore.json       ← api ghi khi Owner bấm "Khôi phục" (v0.1.20): {key}
 //	  restore-status.json        ← genh ghi: running → done/failed (+ bản an toàn)
+//	  update-blocked.json        ← genh ghi (v0.1.34): bản đã lỗi + đã quay về bản cũ sau khi
+//	                               đụng CSDL — lịch đêm không thử lại; xoá khi cập nhật thành công
+//	  disk-status.json           ← genh ghi (v0.1.34) mỗi lần update kiểm đĩa: ok|low + số byte
 //
 // Bên máy chủ, một "watcher" (systemd path unit / crontab mỗi phút / launchd
 // QueueDirectories — xem internal/autoupdate) chạy `genh handle-requests`

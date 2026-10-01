@@ -49,6 +49,30 @@ type Response struct {
 	// ExitCode} thay vì Err — dùng để giả lập mã thoát cụ thể (2 sai mật
 	// khẩu/gói hỏng, 3 không tương thích, theo hợp đồng gh.bundle).
 	ExitCode int
+
+	// ErrSeq, nếu khác nil, làm lỗi trả về đổi theo SỐ LẦN response này đã
+	// khớp (0-based, kẹp phần tử cuối; phần tử nil = thành công) — dùng để
+	// giả lập "lỗi, lỗi, rồi được" khi test thử lại (ví dụ `docker compose
+	// pull` của genh update). Khi có ErrSeq, Err bị bỏ qua.
+	ErrSeq []error
+	// WaitCtx làm lệnh CHẶN tới khi ctx.Done() rồi trả ctx.Err() — giả lập
+	// lệnh treo để test thời gian chờ tối đa mỗi lần.
+	WaitCtx bool
+}
+
+// errFor chọn lỗi trả về theo ErrSeq (nếu có) hoặc Err.
+func (resp Response) errFor(occurrence int) error {
+	if resp.ErrSeq == nil {
+		return resp.Err
+	}
+	idx := occurrence
+	if idx >= len(resp.ErrSeq) {
+		idx = len(resp.ErrSeq) - 1
+	}
+	if idx < 0 {
+		return nil
+	}
+	return resp.ErrSeq[idx]
 }
 
 // Runner là dockercli.Runner giả, phát Response đã định sẵn theo thứ tự
@@ -94,23 +118,31 @@ func (r *Runner) Output(ctx context.Context, cmd dockercli.Cmd) ([]byte, error) 
 	if !ok {
 		return nil, fmt.Errorf("fake.Runner: không có Response khớp lệnh %s %v", cmd.Name, cmd.Args)
 	}
+	if resp.WaitCtx {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	if resp.OutputSeq != nil {
 		idx := occurrence
 		if idx >= len(resp.OutputSeq) {
 			idx = len(resp.OutputSeq) - 1
 		}
 		if idx >= 0 {
-			return resp.OutputSeq[idx], resp.Err
+			return resp.OutputSeq[idx], resp.errFor(occurrence)
 		}
 	}
-	return resp.Output, resp.Err
+	return resp.Output, resp.errFor(occurrence)
 }
 
 func (r *Runner) Stream(ctx context.Context, cmd dockercli.Cmd, onLine func(line string)) error {
 	r.record(cmd)
-	resp, _, ok := r.match(cmd)
+	resp, occurrence, ok := r.match(cmd)
 	if !ok {
 		return fmt.Errorf("fake.Runner: không có Response khớp lệnh %s %v", cmd.Name, cmd.Args)
+	}
+	if resp.WaitCtx {
+		<-ctx.Done()
+		return ctx.Err()
 	}
 	for _, l := range resp.Lines {
 		select {
@@ -120,7 +152,7 @@ func (r *Runner) Stream(ctx context.Context, cmd dockercli.Cmd, onLine func(line
 		}
 		onLine(l)
 	}
-	return resp.Err
+	return resp.errFor(occurrence)
 }
 
 // RunIO đọc hết stdin (nếu khác nil, ghi lại vào Call.Stdin để test kiểm
@@ -138,9 +170,13 @@ func (r *Runner) RunIO(ctx context.Context, cmd dockercli.Cmd, stdin io.Reader, 
 	}
 	r.recordCall(Call{Cmd: cmd, Stdin: stdinData})
 
-	resp, _, ok := r.match(cmd)
+	resp, occurrence, ok := r.match(cmd)
 	if !ok {
 		return fmt.Errorf("fake.Runner: không có Response khớp lệnh %s %v", cmd.Name, cmd.Args)
+	}
+	if resp.WaitCtx {
+		<-ctx.Done()
+		return ctx.Err()
 	}
 	if len(resp.RunIOStdout) > 0 && stdout != nil {
 		if _, err := stdout.Write(resp.RunIOStdout); err != nil {
@@ -150,7 +186,7 @@ func (r *Runner) RunIO(ctx context.Context, cmd dockercli.Cmd, stdin io.Reader, 
 	if resp.ExitCode != 0 {
 		return &dockercli.ExitError{Code: resp.ExitCode}
 	}
-	return resp.Err
+	return resp.errFor(occurrence)
 }
 
 // MatchArgsContain trả về một Match khớp khi mọi chuỗi trong want đều xuất

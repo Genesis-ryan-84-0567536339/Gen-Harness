@@ -86,13 +86,62 @@ func TestUpdateDoneLine_HoanThiKhongNoiCapNhatXong(t *testing.T) {
 	if got := updateDoneLine(false); got != "genh: cập nhật xong." {
 		t.Fatalf("không hoãn: muốn %q, được %q", "genh: cập nhật xong.", got)
 	}
-	got := updateDoneLine(true)
-	if strings.Contains(got, "cập nhật xong") {
-		t.Fatalf("bị hoãn mà dòng kết vẫn nói cập nhật xong: %q", got)
+	for _, got := range []string{updateDoneLine(true), deferredAfterRunLine} {
+		if strings.Contains(got, "genh: cập nhật xong.") || strings.Contains(got, "cập nhật xong") {
+			t.Fatalf("bị hoãn mà dòng kết vẫn nói cập nhật xong: %q", got)
+		}
+		if !strings.Contains(got, "đợi đủ 24 giờ") {
+			t.Errorf("dòng kết khi hoãn thiếu %q: %q", "đợi đủ 24 giờ", got)
+		}
 	}
-	for _, want := range []string{"dịch vụ đã kiểm/khởi động lại xong", "đang đợi đủ 24 giờ"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("dòng kết khi hoãn thiếu %q: %q", want, got)
+	if !strings.Contains(updateDoneLine(true), "không có gì để cập nhật") {
+		t.Errorf("hoãn + dịch vụ đã khớp: phải nói không có gì để cập nhật: %q", updateDoneLine(true))
+	}
+}
+
+func TestDecideServiceUpdate(t *testing.T) {
+	const v = "v0.1.34"
+	cases := []struct {
+		name     string
+		in       serviceUpdateInput
+		wantSkip bool
+		wantKind string
+	}{
+		{"(a) lịch đêm + bản bị chặn đúng bản này → blocked",
+			serviceUpdateInput{Scheduled: true, Version: v, BlockedVersion: v}, true, "blocked"},
+		{"(b) lịch đêm + bị chặn bản KHÁC + chưa khớp → chạy (bản mới hơn vẫn nhận)",
+			serviceUpdateInput{Scheduled: true, Version: v, BlockedVersion: "v0.1.33"}, false, ""},
+		{"(c) gõ tay/\"Cập nhật ngay\" + bị chặn đúng bản này → chạy",
+			serviceUpdateInput{Scheduled: false, Version: v, BlockedVersion: v}, false, ""},
+		{"(d) đã khớp + không vừa tự cập nhật → up-to-date",
+			serviceUpdateInput{Version: v, InSync: true}, true, "up-to-date"},
+		{"(e) vừa tự cập nhật + đã khớp → chạy",
+			serviceUpdateInput{Version: v, InSync: true, SelfUpdated: true}, false, ""},
+		{"(f) bị chặn bản khác + đã khớp → up-to-date",
+			serviceUpdateInput{Scheduled: true, Version: v, InSync: true, BlockedVersion: "v0.1.33"}, true, "up-to-date"},
+		{"lịch đêm + bị chặn đúng bản + đã khớp → blocked (ưu tiên)",
+			serviceUpdateInput{Scheduled: true, Version: v, InSync: true, BlockedVersion: v}, true, "blocked"},
+		{"so khớp CHÍNH XÁC version (v0.1.3 ≠ v0.1.34)",
+			serviceUpdateInput{Scheduled: true, Version: v, BlockedVersion: "v0.1.3"}, false, ""},
+	}
+	for _, c := range cases {
+		skip, kind := decideServiceUpdate(c.in)
+		if skip != c.wantSkip || kind != c.wantKind {
+			t.Errorf("%s: được (%v,%q), muốn (%v,%q)", c.name, skip, kind, c.wantSkip, c.wantKind)
+		}
+	}
+}
+
+func TestServiceUpdateLines_E2EContract(t *testing.T) {
+	if !strings.Contains(blockedLine("v0.1.34"), "lịch đêm không tự thử lại") {
+		t.Errorf("dòng bản bị chặn phải chứa \"lịch đêm không tự thử lại\": %q", blockedLine("v0.1.34"))
+	}
+	if !strings.Contains(upToDateLine("v0.1.34"), "không cần cập nhật") {
+		t.Errorf("dòng đã mới nhất phải chứa \"không cần cập nhật\": %q", upToDateLine("v0.1.34"))
+	}
+	for _, l := range []string{blockedLine("v0.1.34"), upToDateLine("v0.1.34")} {
+		if strings.Contains(l, "genh: cập nhật xong.") {
+			t.Errorf("chỉ in \"genh: cập nhật xong.\" khi RunUpdate chạy xong: %q", l)
 		}
 	}
 }
