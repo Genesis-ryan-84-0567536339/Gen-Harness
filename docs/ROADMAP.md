@@ -35,6 +35,11 @@ v0.1.30 (hotfix): màn /guide/8 "Agent đầu tiên" sập (React error #31 `{re
 MODEL_UNAVAILABLE đúng khuôn chung (`detail` là chữ, `reasons` cấp ngoài), web không bao giờ vẽ đối tượng lỗi thô, trạng thái
 "Chọn model" tại chỗ; lối vào cố định "Hướng dẫn thiết lập" (thanh bên + menu tài khoản, Owner), thẻ "Việc thiết lập tiếp" có "Ẩn";
 mục "Cập nhật phần mềm" cố định (Hệ thống + Trợ giúp) có "Kiểm tra bản mới", đệm bản mới nhất 1 giờ → 10 phút.
+v0.1.31: Boss 01/10 "không thấy model và nhóm model nào để chọn" — nguồn CLI liệt kê model thật (`agy models`) theo nhóm
+(Gemini / Claude qua Antigravity / Claude…) kèm gợi ý nhanh-rẻ / mạnh, danh mục dự phòng khi CLI không liệt kê được, gọi thử
+THẬT trước khi lưu model ("Dùng model này" = model mặc định của nguồn); một sự thật cho trạng thái phiên CLI (token tự gia hạn
+→ "Đang hoạt động", "Gọi thử OK" chỉ khi gọi thật được); nguồn mới **Claude Code CLI** (gói Claude Pro/Max của Owner, đăng
+nhập trong container bằng link + mã, nhiều tài khoản, tắt tới khi đăng nhập, cảnh báo điều khoản — QD-12 Owner tự quyết).
 
 ## Đợt A — Gen v1 (thiết kế: docs/design/gen-v1.md)
 - ✅ A1 Khung chat phải + Gen trả lời/tóm tắt (chỉ đọc), lưu hội thoại, Nhật ký hành động — v0.1.21.
