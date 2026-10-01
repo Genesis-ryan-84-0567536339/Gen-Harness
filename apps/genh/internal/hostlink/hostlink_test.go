@@ -2,12 +2,59 @@ package hostlink
 
 import (
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
+// v0.1.33: genh.json mang trạng thái lịch tự cập nhật đêm cho Console (gh/system_api/update.py).
+func TestAutoUpdateEnabled(t *testing.T) {
+	root := t.TempDir()
+	// Không rõ ⇒ không có khoá (api trả null).
+	if err := WriteInfo(root, "v0.1.33", "systemd", nil); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(filepath.Join(Dir(root), InfoFile))
+	if strings.Contains(string(raw), "auto_update_enabled") {
+		t.Fatalf("nil phải bỏ khoá auto_update_enabled: %s", raw)
+	}
+	off := false
+	if err := WriteInfo(root, "v0.1.33", "systemd", &off); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ = os.ReadFile(filepath.Join(Dir(root), InfoFile))
+	if !strings.Contains(string(raw), `"auto_update_enabled": false`) {
+		t.Fatalf("false phải ghi rõ (không omitempty): %s", raw)
+	}
+	// auto-update enable: chỉ đổi cờ, giữ version/updater/requests.
+	if err := SetAutoUpdate(root, "v9.9.9", true); err != nil {
+		t.Fatal(err)
+	}
+	info, err := ReadInfo(root)
+	if err != nil || info.AutoUpdateEnabled == nil || !*info.AutoUpdateEnabled || info.Version != "v0.1.33" ||
+		info.Updater != "systemd" || len(info.Requests) != 2 {
+		t.Fatalf("SetAutoUpdate(true) = %+v, %v", info, err)
+	}
+	if err := SetAutoUpdate(root, "v9.9.9", false); err != nil {
+		t.Fatal(err)
+	}
+	if info, _ := ReadInfo(root); info.AutoUpdateEnabled == nil || *info.AutoUpdateEnabled {
+		t.Fatalf("SetAutoUpdate(false) = %+v", info)
+	}
+	// Chưa có genh.json ⇒ ghi mới với version cho trước, chưa có watcher.
+	fresh := t.TempDir()
+	if err := SetAutoUpdate(fresh, "v0.1.33", true); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := ReadInfo(fresh); err != nil || info.Version != "v0.1.33" || info.Updater != "" ||
+		info.AutoUpdateEnabled == nil || !*info.AutoUpdateEnabled {
+		t.Fatalf("SetAutoUpdate trên máy chưa có genh.json = %+v, %v", info, err)
+	}
+}
+
 func TestRoundTrip(t *testing.T) {
 	root := t.TempDir()
-	if err := WriteInfo(root, "v0.1.17", "systemd"); err != nil {
+	if err := WriteInfo(root, "v0.1.17", "systemd", nil); err != nil {
 		t.Fatal(err)
 	}
 	info, err := ReadInfo(root)
@@ -43,13 +90,13 @@ func TestRoundTrip(t *testing.T) {
 
 func TestRestoreRequestRoundTrip(t *testing.T) {
 	root := t.TempDir()
-	if err := WriteInfo(root, "v0.1.20", "cron"); err != nil {
+	if err := WriteInfo(root, "v0.1.20", "cron", nil); err != nil {
 		t.Fatal(err)
 	}
 	if info, _ := ReadInfo(root); len(info.Requests) != 2 || info.Requests[1] != "restore" {
 		t.Fatalf("genh.json phải báo watcher nhận cả update lẫn restore: %+v", info)
 	}
-	if err := WriteInfo(root, "v0.1.20", ""); err != nil {
+	if err := WriteInfo(root, "v0.1.20", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	if info, _ := ReadInfo(root); len(info.Requests) != 0 {

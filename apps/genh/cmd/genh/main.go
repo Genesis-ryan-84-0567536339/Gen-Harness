@@ -493,6 +493,8 @@ func runAutoUpdate(args []string) int {
 			fmt.Fprintf(os.Stderr, "genh: bật tự cập nhật hằng đêm thất bại: %v\n", err)
 			return 1
 		}
+		// v0.1.33: báo Console (genh.json) lịch đêm đã bật — lỗi ghi chỉ làm Console không hứa "Tự cài".
+		_ = hostlink.SetAutoUpdate(env.InstallDir, version, true)
 		fmt.Println(msg)
 		return 0
 	case "disable":
@@ -501,6 +503,7 @@ func runAutoUpdate(args []string) int {
 			fmt.Fprintf(os.Stderr, "genh: tắt tự cập nhật hằng đêm thất bại: %v\n", err)
 			return 1
 		}
+		_ = hostlink.SetAutoUpdate(env.InstallDir, version, false)
 		fmt.Println(msg)
 		return 0
 	case "status":
@@ -901,6 +904,7 @@ func enableAutoUpdateAfterInstall(installDir string) {
 // bao giờ làm hỏng install/update vừa xong.
 func publishHostInfo(installDir string, port int) {
 	updater := ""
+	var autoUpdate *bool
 	if execPath, err := os.Executable(); err == nil {
 		execPath, _ = filepath.Abs(execPath)
 		logFile := filepath.Join(config.New(installDir).LogsDir(), "auto-update.log")
@@ -915,11 +919,17 @@ func publishHostInfo(installDir string, port int) {
 		if v := os.Getenv(compose.EnvOverrideVar); v != "" {
 			rp.Env = append(rp.Env, compose.EnvOverrideVar+"="+v)
 		}
-		if u, err := autoupdate.EnsureRequestWatcher(ctx, autoupdate.Deps{GenhPath: execPath, LogFile: logFile}, rp); err == nil {
+		deps := autoupdate.Deps{GenhPath: execPath, LogFile: logFile}
+		if u, err := autoupdate.EnsureRequestWatcher(ctx, deps, rp); err == nil {
 			updater = u
 		}
+		// v0.1.33: Console chỉ hứa "Tự cài đêm …" khi lịch đêm thật sự đang bật.
+		if st, err := autoupdate.GetStatus(ctx, deps); err == nil {
+			enabled := st.Enabled
+			autoUpdate = &enabled
+		}
 	}
-	_ = hostlink.WriteInfo(installDir, version, updater)
+	_ = hostlink.WriteInfo(installDir, version, updater, autoUpdate)
 }
 
 // programObserver chuyển install.Snapshot thành tui.SnapshotMsg gửi vào

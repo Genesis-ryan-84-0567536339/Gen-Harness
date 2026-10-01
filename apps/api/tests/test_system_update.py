@@ -160,3 +160,13 @@ async def test_payload_exposes_official_time_and_hides_marker(owner_api: Api, li
     # Console đếm 24 giờ của lịch đêm từ lúc promote, không phải lúc tạo bản thử.
     assert r["published_at"] == "2026-09-30T08:00:00Z"
     assert r["release_notes"] == "- Nút cập nhật"
+
+
+async def test_auto_update_enabled_from_genh_json(owner_api: Api, link: Path, redis) -> None:  # type: ignore[no-untyped-def]
+    """v0.1.33: `auto_update_enabled` đọc từ genh.json — genh cũ chưa ghi / giá trị lạ ⇒ null."""
+    await redis.delete(upd.LATEST_CACHE_KEY)
+    assert (await owner_api.get("/system/update")).json()["auto_update_enabled"] is None
+    for raw, want in ((True, True), (False, False), ("true", None), (1, None)):
+        (link / "genh.json").write_text(json.dumps({"version": "v0.1.16", "updater": "systemd",
+                                                    "auto_update_enabled": raw}))
+        assert (await owner_api.get("/system/update")).json()["auto_update_enabled"] is want, raw

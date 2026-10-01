@@ -1233,11 +1233,27 @@ xoá nhánh cả hai sau khi kiểm.
 - `check_release_gate.py` giữ thêm: dấu promote cùng lệnh nâng latest, có `e2e-selfupdate`, build-images không gắn `:latest`;
   có test riêng (`.github/scripts/test_check_release_gate.py`, chạy trong job `version`).
 
+### Sửa sau review đợt 2 (trước merge)
+
+- genh `dockercli.RunIO`: đọc hết stderr rồi mới `Wait()` (trước đó `Wait` đóng pipe sớm → mất dòng lỗi, test
+  `TestExecRunner_RunIO_NonZeroExit_ReturnsExitError` chập chờn).
+- `release.yml`: job `installer` gọi lại `installer-matrix.yml` (`workflow_call`, nhóm concurrency riêng theo sha + run_id
+  như `ci.yml`) và nằm trong `needs` của `release` — go vet/go test 4 hệ điều hành đỏ thì không có Release. Bước
+  `tag-guard` trước softprops: tag đã có mà trỏ commit khác, hoặc Release đã promote ⇒ dừng (Re-run không ghi đè).
+- `e2e-selfupdate` có `contents: write`; đỏ ⇒ **tự lùi**: `$TAG` về bản thử, `$PREV_TAG` thành latest, in TRƯỚC/SAU, kiểm
+  `releases/latest == PREV_TAG` (sai ⇒ đỏ + lệnh lùi tay).
+- `check_release_gate.py` giữ thêm: job `installer` + needs, `tag-guard`, `if` của promote đòi
+  `e2e-install.result == 'success'`, bước tự lùi của `e2e-selfupdate` (+ 7 test).
+- genh ghi `auto_update_enabled` vào `run/genh.json` (lúc cài/update theo trạng thái lịch thật, và khi `genh auto-update
+  enable|disable`); `GET /system/update` trả `auto_update_enabled: bool|null`. Thẻ "Có bản mới" chỉ ghi "Tự cài đêm dd/mm
+  (~03:00)" (giờ trình duyệt, lần 03:00 đầu tiên sau khi bản đủ 24 giờ) khi cờ = true; false/null ⇒ chỉ "bấm Cập nhật ngay".
+- Playwright: `retries: 1` khi `CI`.
+
 ### Rủi ro đã biết
 
 1. `go test` trên windows-2022/macos-14 lần đầu chạy có thể đỏ — chỉ CI mới kiểm được (máy dựng là Linux).
-2. `e2e-selfupdate` chỉ chạy SAU promote (bản thử bị ẩn khỏi `releases/latest`) — đỏ thì bản đã là latest, phải lùi tay theo
-   `::error` của job (còn 24 giờ trước khi lịch đêm tự cài). Bước kiểm hoãn chỉ chạy khi bản trước ≥ v0.1.33 (bản cũ hơn
+2. `e2e-selfupdate` chỉ chạy SAU promote (bản thử bị ẩn khỏi `releases/latest`) — đỏ thì job tự lùi latest về bản trước
+   (còn 24 giờ trước khi lịch đêm tự cài); lùi không thành thì job đỏ kèm lệnh lùi tay. Bước kiểm hoãn chỉ chạy khi bản trước ≥ v0.1.33 (bản cũ hơn
    chưa có cổng); lần phát hành v0.1.33 (bản trước v0.1.32) chỉ kiểm phần tự tải + nâng cấp.
 3. Promote **ngoài** workflow (sửa Release bằng tay) không ghi dấu `promoted_at` → 24 giờ tính từ `published_at`. Promote tay
    luôn đi qua Actions → E2E cài đặt thật (`skip_e2e`) để có dấu.

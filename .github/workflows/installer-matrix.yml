@@ -11,10 +11,23 @@ on:
   push:
     branches: [main, "claude/**"]
   pull_request:
+  # v0.1.33 — release.yml gọi lại workflow này thành job `installer` và đưa
+  # vào `needs` của job release: bản thử chỉ được tạo khi go vet/go test xanh
+  # trên cả 4 hệ điều hành ở ĐÚNG commit sắp phát hành.
+  workflow_call:
+    inputs:
+      from_release:
+        type: boolean
+        required: false
+        default: false
+        description: "true khi release.yml gọi"
 
+# Như ci.yml: khi gọi qua workflow_call, `github.ref` là của release.yml (main)
+# ⇒ trùng nhóm với lượt push main và hai bên huỷ nhau. Lượt từ Release có
+# nhóm riêng theo sha + run_id và không huỷ ai; push/PR giữ hành vi cũ.
 concurrency:
-  group: installer-matrix-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ inputs.from_release && format('installer-matrix-release-{0}-{1}', github.sha, github.run_id) || format('installer-matrix-{0}', github.ref) }}
+  cancel-in-progress: ${{ !inputs.from_release }}
 
 jobs:
   # Ma trận đúng tài liệu: Ubuntu 22.04/24.04, macOS 14 arm64, Windows 11

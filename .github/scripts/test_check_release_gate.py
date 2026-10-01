@@ -27,7 +27,7 @@ class ReleaseGateTest(unittest.TestCase):
     def run_gate(self, mutate: Callable[[Path], None] | None = None) -> tuple[int, str]:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            for rel in (gate.CI_PATH, gate.RELEASE_PATH, gate.E2E_PATH):
+            for rel in (gate.CI_PATH, gate.INSTALLER_PATH, gate.RELEASE_PATH, gate.E2E_PATH):
                 (root / rel).parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy(ROOT / rel, root / rel)
             if mutate:
@@ -80,6 +80,45 @@ class ReleaseGateTest(unittest.TestCase):
         code, err = self.run_gate(self.replace(gate.RELEASE_PATH, "prerelease: true", "prerelease: false"))
         self.assertEqual(code, 1)
         self.assertIn("prerelease: true", err)
+
+    def test_release_khong_cho_installer(self) -> None:
+        code, err = self.run_gate(self.replace(gate.RELEASE_PATH, "needs: [meta, ci, installer,", "needs: [meta, ci,"))
+        self.assertEqual(code, 1)
+        self.assertIn("'installer' trong needs", err)
+
+    def test_thieu_job_installer(self) -> None:
+        old = "uses: ./.github/workflows/installer-matrix.yml"
+        code, err = self.run_gate(self.replace(gate.RELEASE_PATH, old, "uses: ./.github/workflows/khac.yml"))
+        self.assertEqual(code, 1)
+        self.assertIn("thiếu job `installer`", err)
+
+    def test_installer_matrix_khong_goi_lai_duoc(self) -> None:
+        code, err = self.run_gate(self.replace(gate.INSTALLER_PATH, "  workflow_call:\n", "  workflow_dispatch:\n"))
+        self.assertEqual(code, 1)
+        self.assertIn(gate.INSTALLER_PATH, err)
+
+    def test_thieu_tag_guard(self) -> None:
+        code, err = self.run_gate(self.replace(gate.RELEASE_PATH, "id: tag-guard", "id: tag-khac"))
+        self.assertEqual(code, 1)
+        self.assertIn("tag-guard", err)
+
+    def test_promote_if_khong_doi_e2e_install(self) -> None:
+        old = "needs.e2e-install.result == 'success' && (needs.e2e-upgrade"
+        code, err = self.run_gate(self.replace(gate.E2E_PATH, old, "(needs.e2e-upgrade"))
+        self.assertEqual(code, 1)
+        self.assertIn("e2e-install.result", err)
+
+    def test_selfupdate_khong_tu_lui(self) -> None:
+        old = 'gh release edit "$PREV_TAG" --repo "$R" --latest'
+        code, err = self.run_gate(self.replace(gate.E2E_PATH, old, 'echo "lùi tay"'))
+        self.assertEqual(code, 1)
+        self.assertIn("TỰ lùi", err)
+
+    def test_selfupdate_thieu_quyen_ghi(self) -> None:
+        old = "    # contents: write — bước rollback (if: failure()) tự lùi bản chính thức.\n    permissions:\n      contents: write\n"
+        code, err = self.run_gate(self.replace(gate.E2E_PATH, old, ""))
+        self.assertEqual(code, 1)
+        self.assertIn("e2e-selfupdate` cần", err)
 
 
 if __name__ == "__main__":

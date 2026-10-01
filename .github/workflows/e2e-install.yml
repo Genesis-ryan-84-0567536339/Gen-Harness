@@ -943,6 +943,9 @@ jobs:
       run:
         working-directory: /tmp
     timeout-minutes: 45
+    # contents: write — bước rollback (if: failure()) tự lùi bản chính thức.
+    permissions:
+      contents: write
     env:
       GH_PORT: "8445"
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -1096,18 +1099,29 @@ jobs:
           fi
           echo "OK: app_db_password giữ nguyên sau khi genh $PREV_TAG tự cập nhật lên $TAG."
 
-      - name: Đỏ ⇒ cách lùi bản chính thức (trước khi lịch đêm của máy Owner tự cài)
+      - name: Đỏ ⇒ TỰ lùi bản chính thức về ${{ needs.resolve.outputs.prev_tag }} (trước khi lịch đêm của máy Owner tự cài)
+        id: rollback
         if: failure()
         run: |
-          echo "::error::$TAG đã là bản chính thức nhưng genh $PREV_TAG (bản máy Owner đang chạy) KHÔNG tự cập nhật lên được — máy Owner sẽ gặp đúng lỗi này. Lịch đêm còn đợi 24 giờ từ lúc promote, lùi ngay: (1) gh release edit $TAG --repo $R --prerelease=true  (2) gh release edit $PREV_TAG --repo $R --latest  (3) kiểm: gh api repos/$R/releases/latest --jq .tag_name phải là $PREV_TAG. Máy đã lên $TAG (bấm Cập nhật ngay) giữ nguyên, không tự hạ cấp. Rồi sửa mã, tăng VERSION, phát hành bản mới."
+          set -euo pipefail
+          echo "::error::$TAG đã là bản chính thức nhưng genh $PREV_TAG (bản máy Owner đang chạy) KHÔNG tự cập nhật lên được — tự lùi bản chính thức về $PREV_TAG. Máy đã lên $TAG (bấm Cập nhật ngay) giữ nguyên, không tự hạ cấp. Sửa mã, tăng VERSION, phát hành bản mới."
+          latest_now() { gh api "repos/$R/releases/latest" --jq .tag_name 2>/dev/null || echo "<không đọc được>"; }
+          before="$(latest_now)"
+          echo "TRƯỚC: releases/latest = $before"
+          gh release edit "$TAG" --repo "$R" --prerelease=true
+          gh release edit "$PREV_TAG" --repo "$R" --latest
+          after="$(latest_now)"
+          echo "SAU: releases/latest = $after"
           {
-            echo "### ⚠️ Tự cập nhật $PREV_TAG → $TAG ĐỎ — lùi bản chính thức"
-            echo '```'
-            echo "gh release edit $TAG --repo $R --prerelease=true"
-            echo "gh release edit $PREV_TAG --repo $R --latest"
-            echo "gh api repos/$R/releases/latest --jq .tag_name   # phải là $PREV_TAG"
-            echo '```'
+            echo "### ⚠️ Tự cập nhật $PREV_TAG → $TAG ĐỎ — đã tự lùi bản chính thức"
+            echo "- TRƯỚC: releases/latest = $before"
+            echo "- SAU: releases/latest = $after (phải là $PREV_TAG)"
           } >>"$GITHUB_STEP_SUMMARY"
+          if [ "$after" != "$PREV_TAG" ]; then
+            echo "::error::Lùi KHÔNG thành: releases/latest là '$after', không phải $PREV_TAG. Làm tay NGAY: gh release edit $TAG --repo $R --prerelease=true && gh release edit $PREV_TAG --repo $R --latest, rồi kiểm gh api repos/$R/releases/latest --jq .tag_name." >&2
+            exit 1
+          fi
+          echo "OK: bản chính thức đã lùi về $PREV_TAG; $TAG thành bản thử."
 
       - name: genh uninstall --yes (dọn dẹp)
         if: always()

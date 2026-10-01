@@ -44,28 +44,47 @@ describe('updateView', () => {
     expect(updateView({ ...base, state: 'stalled' }, { waitingFor: null, offline: false }).kind).toBe('stalled');
   });
 
-  // v0.1.33: lịch đêm chỉ cài bản đã là bản chính thức ≥ 24 giờ — thẻ "Có bản mới" phải nói khi nào tự cài.
-  it('"Có bản mới" báo lịch đêm tự cài khi nào (24 giờ sau khi thành bản chính thức) — hoặc bấm Cập nhật ngay', () => {
+  // v0.1.33: lịch đêm chỉ cài bản đã là bản chính thức ≥ 24 giờ — thẻ "Có bản mới" nói khi nào tự cài, nhưng CHỈ khi
+  // genh báo lịch đêm đang bật (auto_update_enabled). Mốc dựng theo giờ máy chạy test (= giờ trình duyệt).
+  const local = (d: number, h: number, m = 0, s = 0) => new Date(2026, 8, d, h, m, s).getTime();
+  const LNOW = local(28, 10);
+  it('"Có bản mới": lịch đêm BẬT ⇒ báo đêm tự cài — hoặc bấm Cập nhật ngay', () => {
+    const on = { ...base, auto_update_enabled: true };
     const kicker = (d: SystemUpdate) => {
-      const v = updateView(d, { waitingFor: null, offline: false, now: NOW });
+      const v = updateView(d, { waitingFor: null, offline: false, now: LNOW });
       return v.kind === 'available' ? v.kicker : v.kind;
     };
-    // Promote 2 giờ trước (08:00Z) ⇒ đủ 24 giờ lúc 29/09 08:00Z = 15:00 giờ Việt Nam.
-    expect(kicker({ ...base, published_at: '2026-09-28T08:00:00Z' })).toBe(
-      'Đang dùng v0.1.16 · Tự cài lúc ~03:00 sau 29/09 15:00 — hoặc bấm Cập nhật ngay',
+    // Promote 28/09 08:00 ⇒ đủ 24 giờ 29/09 08:00 ⇒ lần 03:00 đầu tiên sau đó là 30/09.
+    const pub = new Date(local(28, 8)).toISOString();
+    expect(kicker({ ...on, published_at: pub })).toBe('Đang dùng v0.1.16 · Tự cài đêm 30/09 (~03:00) — hoặc bấm Cập nhật ngay');
+    // Đã đủ 24 giờ từ lâu ⇒ lần 03:00 tới (29/09).
+    expect(kicker({ ...on, published_at: new Date(local(25, 0)).toISOString() })).toBe(
+      'Đang dùng v0.1.16 · Tự cài đêm 29/09 (~03:00) — hoặc bấm Cập nhật ngay',
     );
-    // Đã đủ 24 giờ ⇒ lần ~03:00 tới.
-    expect(kicker({ ...base, published_at: '2026-09-26T00:00:00Z' })).toBe('Đang dùng v0.1.16 · Tự cài lúc ~03:00 tới — hoặc bấm Cập nhật ngay');
     // Máy chủ chưa có watcher ⇒ không có nút, chỉ có lệnh.
-    expect(kicker({ ...base, can_request: false, updater: null, published_at: '2026-09-28T08:00:00Z' })).toMatch(/— hoặc chạy lệnh bên dưới$/);
-    // Không biết lúc phát hành (api cũ / lỗi) ⇒ giữ câu cũ.
-    expect(kicker(base)).toBe('Đang dùng v0.1.16 · cập nhật mất khoảng 2–5 phút, tự sao lưu trước');
-    expect(kicker({ ...base, published_at: 'không-phải-ngày' })).toBe('Đang dùng v0.1.16 · cập nhật mất khoảng 2–5 phút, tự sao lưu trước');
+    expect(kicker({ ...on, can_request: false, updater: null, published_at: pub })).toMatch(/— hoặc chạy lệnh bên dưới$/);
+    // Không biết lúc phát hành ⇒ chỉ hành động tay.
+    expect(kicker(on)).toBe('Đang dùng v0.1.16 · bấm Cập nhật ngay (mất khoảng 2–5 phút, tự sao lưu trước)');
+    expect(kicker({ ...on, published_at: 'không-phải-ngày' })).toBe('Đang dùng v0.1.16 · bấm Cập nhật ngay (mất khoảng 2–5 phút, tự sao lưu trước)');
   });
 
-  it('autoInstallHint: biên đúng 24 giờ tính là đã đủ', () => {
-    expect(autoInstallHint('2026-09-27T10:00:00Z', NOW)).toBe('Tự cài lúc ~03:00 tới');
-    expect(autoInstallHint('2026-09-27T10:00:01Z', NOW)).toMatch(/^Tự cài lúc ~03:00 sau 28\/09 17:00$/);
+  it('"Có bản mới": lịch đêm TẮT hoặc không rõ (genh cũ) ⇒ không hứa "Tự cài", chỉ bấm Cập nhật ngay', () => {
+    const pub = new Date(local(28, 8)).toISOString();
+    for (const flag of [false, null, undefined]) {
+      const v = updateView({ ...base, auto_update_enabled: flag, published_at: pub }, { waitingFor: null, offline: false, now: LNOW });
+      expect(v.kind === 'available' && v.kicker).toBe('Đang dùng v0.1.16 · bấm Cập nhật ngay (mất khoảng 2–5 phút, tự sao lưu trước)');
+    }
+    const cmd = updateView({ ...base, auto_update_enabled: false, can_request: false, updater: null, published_at: pub }, { waitingFor: null, offline: false, now: LNOW });
+    expect(cmd.kind === 'available' && cmd.kicker).toBe('Đang dùng v0.1.16 · chạy lệnh bên dưới (mất khoảng 2–5 phút, tự sao lưu trước)');
+  });
+
+  it('autoInstallHint: biên 24 giờ và biên 03:00 theo giờ trình duyệt', () => {
+    // Đủ 24 giờ đúng lúc 03:00 ⇒ cài ngay lần 03:00 đó.
+    expect(autoInstallHint(new Date(local(27, 3)).toISOString(), local(27, 10))).toBe('Tự cài đêm 28/09 (~03:00)');
+    // Chín lúc 03:00:01 ⇒ lỡ lần đó, sang đêm sau.
+    expect(autoInstallHint(new Date(local(27, 3, 0, 1)).toISOString(), local(27, 10))).toBe('Tự cài đêm 29/09 (~03:00)');
+    // Chín trước 03:00 cùng ngày.
+    expect(autoInstallHint(new Date(local(27, 1)).toISOString(), local(27, 10))).toBe('Tự cài đêm 28/09 (~03:00)');
     expect(autoInstallHint(null, NOW)).toBeNull();
   });
 

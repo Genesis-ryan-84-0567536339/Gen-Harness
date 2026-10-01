@@ -110,6 +110,19 @@ jobs:
   # dockerStaticChecksums) — job này tải lại đúng 4 tệp đó (2 kiến trúc x 2
   # gói) từ download.docker.com và so với checksum ghim trong mã nguồn,
   # fail sớm nếu Docker từng thay nội dung tệp mà không đổi tên/version.
+  # v0.1.33 — ma trận trình cài (installer-matrix.yml: go vet + go test genh
+  # trên Ubuntu 22.04/24.04, macOS 14, Windows 2022) trên đúng commit sắp
+  # phát hành; job release chờ job tổng của nó — đỏ thì không có Release.
+  installer:
+    name: Installer matrix (installer-matrix.yml, đúng commit sắp phát hành)
+    needs: meta
+    if: needs.meta.outputs.skip != 'true'
+    uses: ./.github/workflows/installer-matrix.yml
+    with:
+      from_release: true
+    permissions:
+      contents: read
+
   verify-docker-pins:
     name: kiểm checksum Docker tĩnh đã ghim (bootstrap_linux.go)
     runs-on: ubuntu-latest
@@ -466,7 +479,7 @@ jobs:
   release:
     name: checksums + cosign + GitHub Release (bản thử)
     runs-on: ubuntu-latest
-    needs: [meta, ci, verify-docker-pins, build-genh, pin-compose, wsl-rootfs]
+    needs: [meta, ci, installer, verify-docker-pins, build-genh, pin-compose, wsl-rootfs]
     if: needs.meta.outputs.skip != 'true'
     concurrency:
       group: release-${{ needs.meta.outputs.version }}-release
@@ -526,6 +539,39 @@ jobs:
 
       - name: Danh sách file đính kèm Release
         run: ls -la dist
+
+      # v0.1.33 — chặn Re-run ghi đè: tag đã có mà trỏ commit KHÁC, hoặc
+      # Release của tag đã là bản chính thức (đã promote) ⇒ dừng, không để
+      # softprops ghi đè asset/đổi lại thành prerelease.
+      - name: Kiểm tag ${{ needs.meta.outputs.version }} chưa có hoặc trỏ đúng commit này, Release chưa promote
+        id: tag-guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+          V: ${{ needs.meta.outputs.version }}
+          R: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          refs="$(git ls-remote --tags origin "refs/tags/$V" "refs/tags/$V^{}")"
+          if [ -n "$refs" ]; then
+            # Tag có chú thích: dòng "^{}" là commit thật — ưu tiên dòng đó.
+            tag_sha="$(printf '%s\n' "$refs" | awk -v r="refs/tags/$V^{}" '$2==r{print $1}' | head -n1)"
+            [ -n "$tag_sha" ] || tag_sha="$(printf '%s\n' "$refs" | awk '{print $1}' | head -n1)"
+            echo "tag $V đã tồn tại, trỏ $tag_sha (lượt này: $SHA)"
+            if [ "$tag_sha" != "$SHA" ]; then
+              echo "::error::Tag $V đã tồn tại và trỏ commit $tag_sha, KHÔNG phải commit đang phát hành ($SHA) — dừng để không ghi đè Release của commit khác. Muốn phát hành commit này: tăng VERSION sang bản mới rồi merge lại; KHÔNG xoá tag $V nếu bản đó đã tới máy Owner." >&2
+              exit 1
+            fi
+          else
+            echo "tag $V chưa có — bước sau sẽ tạo trỏ $SHA"
+          fi
+          if pre="$(gh api "repos/$R/releases/tags/$V" --jq .prerelease 2>/dev/null)"; then
+            echo "Release $V đã có, prerelease=$pre"
+            if [ "$pre" != "true" ]; then
+              echo "::error::Release $V đã là bản chính thức (đã promote) — chạy lại job này sẽ ghi đè asset và hạ nó về bản thử. Dừng. Cần phát hành lại thì tăng VERSION." >&2
+              exit 1
+            fi
+          fi
 
       - name: Tạo GitHub Release bản thử (và tag ${{ needs.meta.outputs.version }} nếu chưa có)
         uses: softprops/action-gh-release@v2

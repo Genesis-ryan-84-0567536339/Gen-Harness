@@ -7,16 +7,21 @@ thật đúng tag → job `promote` nâng thành bản chính thức (latest). S
 
   - ci.yml gọi lại được từ release.yml: on.workflow_call.inputs.from_release,
     nhóm concurrency có nhắc from_release (lượt từ Release không bị huỷ ngang).
+  - installer-matrix.yml gọi lại được (workflow_call.inputs.from_release,
+    concurrency nhắc from_release); release.yml có job `installer` dùng nó.
   - release.yml: job `ci` dùng ./.github/workflows/ci.yml; job `release`
-    needs `ci`; bước softprops/action-gh-release tạo prerelease: true và
+    needs `ci` + `installer`; bước `tag-guard` đứng TRƯỚC softprops (tag đã
+    có mà trỏ commit khác / Release đã promote ⇒ dừng); bước softprops/action-gh-release tạo prerelease: true và
     make_latest: "false"; build-images KHÔNG gắn tag ảnh `:latest` (chạy
     trước E2E — `:latest` chỉ gắn ở promote).
-  - e2e-install.yml: job `promote` có permissions.contents == write và needs
-    e2e-install + e2e-upgrade; promote ghi dấu `<!-- genh:promoted_at=… -->`
+  - e2e-install.yml: job `promote` có permissions.contents == write, needs
+    e2e-install + e2e-upgrade và `if` đòi e2e-install.result == 'success'; promote ghi dấu `<!-- genh:promoted_at=… -->`
     (định dạng `date -u +%Y-%m-%dT%H:%M:%SZ`, khớp selfupdate.PromotedMarker)
     trong CÙNG lệnh `gh release edit … --latest --notes-file` — thời gian chín
     24 giờ của lịch đêm tính từ dấu này; job `e2e-selfupdate` (needs promote)
-    kiểm đường genh cũ tự tải genh mới; workflow_dispatch có
+    kiểm đường genh cũ tự tải genh mới, có contents: write và bước
+    `if: failure()` TỰ lùi (gh release edit $TAG --prerelease=true, $PREV_TAG
+    --latest, kiểm releases/latest == PREV_TAG); workflow_dispatch có
     tag/promote/skip_e2e; bộ lọc paths của pull_request gồm apps/api/**,
     apps/web/Dockerfile, deploy/images/**, VERSION.
 
@@ -43,6 +48,10 @@ except ImportError:  # pragma: no cover - chỉ khi máy thiếu PyYAML
     sys.exit(2)
 
 CI_PATH = ".github/workflows/ci.yml"
+INSTALLER_PATH = ".github/workflows/installer-matrix.yml"
+INSTALLER_USES = "./.github/workflows/installer-matrix.yml"
+TAG_GUARD_ID = "tag-guard"
+PROMOTE_IF_E2E = "needs.e2e-install.result == 'success'"
 RELEASE_PATH = ".github/workflows/release.yml"
 E2E_PATH = ".github/workflows/e2e-install.yml"
 CI_USES = "./.github/workflows/ci.yml"
@@ -109,21 +118,22 @@ def joined_commands(script: str) -> list[str]:
     return script.replace("\\\n", " ").splitlines()
 
 
-def check_ci(ci: dict[Any, Any]) -> list[str]:
+def check_ci(ci: dict[Any, Any], path: str = CI_PATH, job: str = "ci") -> list[str]:
+    """Workflow gọi lại được từ release.yml (ci.yml → job `ci`, installer-matrix.yml → job `installer`)."""
     errs: list[str] = []
     on = triggers(ci)
     wc = on.get("workflow_call")
     inputs = (wc or {}).get("inputs") if isinstance(wc, dict) else None
     if not isinstance(inputs, dict) or "from_release" not in inputs:
         errs.append(
-            f"{CI_PATH}: thiếu on.workflow_call.inputs.from_release — release.yml (job ci) không gọi lại được CI; "
-            "thêm workflow_call với input boolean from_release (mặc định false)."
+            f"{path}: thiếu on.workflow_call.inputs.from_release — release.yml (job {job}) không gọi lại được "
+            "workflow này; thêm workflow_call với input boolean from_release (mặc định false)."
         )
     conc = ci.get("concurrency")
     group = conc.get("group") if isinstance(conc, dict) else conc
     if not isinstance(group, str) or "from_release" not in group:
         errs.append(
-            f"{CI_PATH}: nhóm concurrency không nhắc from_release — lượt CI gọi từ Release sẽ chung nhóm với CI của "
+            f"{path}: nhóm concurrency không nhắc from_release — lượt gọi từ Release sẽ chung nhóm với lượt của "
             "push main và bị huỷ ngang (cancel-in-progress); đặt nhóm riêng theo run_id khi from_release."
         )
     return errs
@@ -140,6 +150,14 @@ def check_release(rel: dict[Any, Any]) -> list[str]:
         )
     elif not is_true((ci_job.get("with") or {}).get("from_release")):
         errs.append(f"{RELEASE_PATH}: job `ci` phải truyền `with: {{ from_release: true }}` cho ci.yml.")
+    inst_job = jobs.get("installer")
+    if not isinstance(inst_job, dict) or inst_job.get("uses") != INSTALLER_USES:
+        errs.append(
+            f"{RELEASE_PATH}: thiếu job `installer` với `uses: {INSTALLER_USES}` — "
+            "Release sẽ phát hành mà không chờ go vet/go test genh trên 4 hệ điều hành."
+        )
+    elif not is_true((inst_job.get("with") or {}).get("from_release")):
+        errs.append(f"{RELEASE_PATH}: job `installer` phải truyền `with: {{ from_release: true }}`.")
 
     build_images = jobs.get("build-images")
     if isinstance(build_images, dict):
@@ -163,6 +181,11 @@ def check_release(rel: dict[Any, Any]) -> list[str]:
             f"{RELEASE_PATH}: job `release` không có 'ci' trong needs — "
             "CI đỏ vẫn tạo được Release; thêm 'ci' vào needs."
         )
+    if "installer" not in as_list(release_job.get("needs")):
+        errs.append(
+            f"{RELEASE_PATH}: job `release` không có 'installer' trong needs — "
+            "ma trận trình cài (go vet/go test 4 hệ điều hành) đỏ vẫn tạo được Release; thêm 'installer' vào needs."
+        )
 
     gh_release_steps = [
         s
@@ -171,6 +194,16 @@ def check_release(rel: dict[Any, Any]) -> list[str]:
     ]
     if not gh_release_steps:
         errs.append(f"{RELEASE_PATH}: job `release` không có bước softprops/action-gh-release.")
+    else:
+        steps = [st for st in release_job.get("steps") or [] if isinstance(st, dict)]
+        guard_idx = next((i for i, st in enumerate(steps) if st.get("id") == TAG_GUARD_ID), None)
+        first_gh = steps.index(gh_release_steps[0])
+        guard_run = str(steps[guard_idx].get("run", "")) if guard_idx is not None else ""
+        if guard_idx is None or guard_idx > first_gh or "ls-remote" not in guard_run or "prerelease" not in guard_run:
+            errs.append(
+                f"{RELEASE_PATH}: job `release` thiếu bước `id: {TAG_GUARD_ID}` (git ls-remote tag + kiểm prerelease) "
+                "ĐỨNG TRƯỚC softprops/action-gh-release — Re-run có thể ghi đè Release của commit khác hoặc bản đã promote."
+            )
     for s in gh_release_steps:
         w = s.get("with") or {}
         if not is_true(w.get("prerelease")):
@@ -198,6 +231,11 @@ def check_e2e(e2e: dict[Any, Any]) -> list[str]:
             errs.append(
                 f"{E2E_PATH}: job `promote` cần `permissions: {{ contents: write }}` để sửa Release (gh release edit)."
             )
+        if PROMOTE_IF_E2E not in str(promote.get("if", "")):
+            errs.append(
+                f"{E2E_PATH}: `if` của job `promote` không đòi `{PROMOTE_IF_E2E}` — promote có thể chạy khi E2E cài "
+                "thật đỏ/bị bỏ qua (always())."
+            )
         needs = as_list(promote.get("needs"))
         for j in ("e2e-install", "e2e-upgrade"):
             if j not in needs:
@@ -210,6 +248,8 @@ def check_e2e(e2e: dict[Any, Any]) -> list[str]:
             f"{E2E_PATH}: thiếu job `e2e-selfupdate` (needs promote) — không còn E2E nào đi đường genh cũ tự tải "
             "genh mới qua releases/latest (đường mọi máy Owner nâng cấp)."
         )
+    else:
+        errs += check_selfupdate_rollback(selfupd)
 
     on = triggers(e2e)
     wd = on.get("workflow_dispatch")
@@ -227,6 +267,33 @@ def check_e2e(e2e: dict[Any, Any]) -> list[str]:
                 f"{E2E_PATH}: bộ lọc paths của pull_request thiếu '{want}' — "
                 "PR đổi phần này sẽ không chạy E2E cài thật."
             )
+    return errs
+
+
+def check_selfupdate_rollback(job: dict[Any, Any]) -> list[str]:
+    """e2e-selfupdate đỏ (bản đã là latest) ⇒ phải TỰ lùi latest về PREV_TAG rồi kiểm lại, không chỉ in hướng dẫn."""
+    errs: list[str] = []
+    perms = job.get("permissions")
+    if not isinstance(perms, dict) or perms.get("contents") != "write":
+        errs.append(
+            f"{E2E_PATH}: job `e2e-selfupdate` cần `permissions: {{ contents: write }}` để bước rollback sửa Release."
+        )
+    ok = False
+    for st in job.get("steps") or []:
+        if not isinstance(st, dict) or "failure()" not in str(st.get("if", "")):
+            continue
+        cmds = [ln for ln in joined_commands(str(st.get("run", ""))) if not ln.lstrip().startswith(("#", "echo"))]
+        has_pre = any("gh release edit" in ln and "$TAG" in ln and "--prerelease=true" in ln for ln in cmds)
+        has_latest = any("gh release edit" in ln and "$PREV_TAG" in ln and "--latest" in ln for ln in cmds)
+        has_check = any("releases/latest" in ln for ln in cmds) and any("exit 1" in ln for ln in cmds)
+        if has_pre and has_latest and has_check:
+            ok = True
+    if not ok:
+        errs.append(
+            f"{E2E_PATH}: job `e2e-selfupdate` thiếu bước `if: failure()` TỰ lùi bản chính thức "
+            '(`gh release edit "$TAG" --prerelease=true`, `gh release edit "$PREV_TAG" --latest`, kiểm releases/latest '
+            "== PREV_TAG, sai thì exit 1) — máy Owner sẽ tự cài bản lỗi sau 24 giờ."
+        )
     return errs
 
 
@@ -267,7 +334,12 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
     root: Path = args.root
 
-    errs = check_ci(load(root, CI_PATH)) + check_release(load(root, RELEASE_PATH)) + check_e2e(load(root, E2E_PATH))
+    errs = (
+        check_ci(load(root, CI_PATH))
+        + check_ci(load(root, INSTALLER_PATH), INSTALLER_PATH, "installer")
+        + check_release(load(root, RELEASE_PATH))
+        + check_e2e(load(root, E2E_PATH))
+    )
     if errs:
         print(f"Cổng phát hành: {len(errs)} lỗi bất biến:", file=sys.stderr)
         for e in errs:

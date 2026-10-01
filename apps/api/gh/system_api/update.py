@@ -149,9 +149,13 @@ def _state() -> dict[str, Any]:
         age = _age_seconds(request.get("requested_at"))
         state = "stalled" if age is not None and age > STALE_REQUEST_SECONDS else "requested"
     updater = info.get("updater") or None
+    # v0.1.33: genh ghi trạng thái lịch tự cập nhật đêm (cài/update/`genh auto-update enable|disable`); genh cũ chưa
+    # ghi hoặc giá trị lạ ⇒ None — Console không hứa "Tự cài đêm …".
+    auto = info.get("auto_update_enabled")
     return {
         "current": info.get("version") or None,
         "updater": updater,
+        "auto_update_enabled": auto if isinstance(auto, bool) else None,
         "linked": d.is_dir(),
         "can_request": bool(updater) and os.access(d / "request", os.W_OK),
         "state": state,
