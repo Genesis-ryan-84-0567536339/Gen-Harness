@@ -1,6 +1,8 @@
-# Gen-Harness — Lộ trình tổng thể (cập nhật 30/09/2026)
+# Gen-Harness — Lộ trình tổng thể (cập nhật 01/10/2026)
 
-Nguồn chuẩn tiến độ. Mỗi đợt = 1 PR = 1 bản phát hành, CI + E2E cài thật xanh mới phát hành.
+Nguồn chuẩn tiến độ. Mỗi đợt = 1 PR = 1 bản phát hành. CI xanh mới tạo bản thử (prerelease); E2E cài thật xanh mới tự
+nâng thành bản chính thức (latest); lịch tự cập nhật đêm đợi bản chính thức ra đủ 24 giờ. genh chỉ kiểm SHA-256 theo
+checksums.txt — CHƯA kiểm chữ ký cosign (để sau).
 
 ## Vai trò
 | Vai | Ai | Việc |
@@ -44,6 +46,9 @@ v0.1.32: Boss 01/10 "high là mức suy nghĩ, không phải tên model" — mod
 <gốc> --effort low|medium|high`, Claude Code `--effort` low…max), chuyển dữ liệu cũ (migration 0023), danh sách không thu gọn
 còn model đã lưu, mỗi model có nguồn (CLI / tài liệu chính thức / "chưa xác minh"), nhận diện "CLI không nhận" chính xác +
 "Chi tiết kỹ thuật", "Gọi thử OK" kèm giờ, nút **Chẩn đoán** (chỉ Owner) cho nguồn CLI với đầu ra thô đã che + "Chép".
+v0.1.33: cổng phát hành & CI đủ test (F-9, F-13) — CI chạy trước Release, Release ra dạng bản thử (prerelease), E2E cài
+thật xanh mới tự nâng thành bản chính thức (latest); lịch đêm đợi thời gian chín 24 giờ; CI thêm go vet/go test 4 hệ điều
+hành, pytest dưới vai app, Playwright mock, kiểm alembic 1 head, job tổng `ci-ok`/`installer-ok`. Sửa tài liệu: genh chưa kiểm cosign.
 
 ## Đợt A — Gen v1 (thiết kế: docs/design/gen-v1.md)
 - ✅ A1 Khung chat phải + Gen trả lời/tóm tắt (chỉ đọc), lưu hội thoại, Nhật ký hành động — v0.1.21.
