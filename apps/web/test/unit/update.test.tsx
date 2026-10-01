@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { QueryClientProvider } from '@tanstack/react-query';
 import type { SystemUpdate } from '@gen-harness/contracts';
 import { UpdateCard } from '../../src/update/UpdateCard';
-import { updateView } from '../../src/update/updateModel';
+import { autoInstallHint, readableNotes, updateView } from '../../src/update/updateModel';
 import { queryClient } from '../../src/lib/queryClient';
 
 const base: SystemUpdate = {
@@ -42,6 +42,35 @@ describe('updateView', () => {
     const old = updateView({ ...base, state: 'failed', finished_at: '2026-09-20T09:00:00Z' }, { waitingFor: null, offline: false, now: NOW });
     expect(old.kind).toBe('available');
     expect(updateView({ ...base, state: 'stalled' }, { waitingFor: null, offline: false }).kind).toBe('stalled');
+  });
+
+  // v0.1.33: lịch đêm chỉ cài bản đã là bản chính thức ≥ 24 giờ — thẻ "Có bản mới" phải nói khi nào tự cài.
+  it('"Có bản mới" báo lịch đêm tự cài khi nào (24 giờ sau khi thành bản chính thức) — hoặc bấm Cập nhật ngay', () => {
+    const kicker = (d: SystemUpdate) => {
+      const v = updateView(d, { waitingFor: null, offline: false, now: NOW });
+      return v.kind === 'available' ? v.kicker : v.kind;
+    };
+    // Promote 2 giờ trước (08:00Z) ⇒ đủ 24 giờ lúc 29/09 08:00Z = 15:00 giờ Việt Nam.
+    expect(kicker({ ...base, published_at: '2026-09-28T08:00:00Z' })).toBe(
+      'Đang dùng v0.1.16 · Tự cài lúc ~03:00 sau 29/09 15:00 — hoặc bấm Cập nhật ngay',
+    );
+    // Đã đủ 24 giờ ⇒ lần ~03:00 tới.
+    expect(kicker({ ...base, published_at: '2026-09-26T00:00:00Z' })).toBe('Đang dùng v0.1.16 · Tự cài lúc ~03:00 tới — hoặc bấm Cập nhật ngay');
+    // Máy chủ chưa có watcher ⇒ không có nút, chỉ có lệnh.
+    expect(kicker({ ...base, can_request: false, updater: null, published_at: '2026-09-28T08:00:00Z' })).toMatch(/— hoặc chạy lệnh bên dưới$/);
+    // Không biết lúc phát hành (api cũ / lỗi) ⇒ giữ câu cũ.
+    expect(kicker(base)).toBe('Đang dùng v0.1.16 · cập nhật mất khoảng 2–5 phút, tự sao lưu trước');
+    expect(kicker({ ...base, published_at: 'không-phải-ngày' })).toBe('Đang dùng v0.1.16 · cập nhật mất khoảng 2–5 phút, tự sao lưu trước');
+  });
+
+  it('autoInstallHint: biên đúng 24 giờ tính là đã đủ', () => {
+    expect(autoInstallHint('2026-09-27T10:00:00Z', NOW)).toBe('Tự cài lúc ~03:00 tới');
+    expect(autoInstallHint('2026-09-27T10:00:01Z', NOW)).toMatch(/^Tự cài lúc ~03:00 sau 28\/09 17:00$/);
+    expect(autoInstallHint(null, NOW)).toBeNull();
+  });
+
+  it('ghi chú phát hành không hiện dấu promote (chú thích HTML)', () => {
+    expect(readableNotes('## Điểm mới\n- Nút cập nhật\n\n<!-- genh:promoted_at=2026-09-28T08:00:00Z -->\n')).toBe('## Điểm mới\n- Nút cập nhật');
   });
 });
 

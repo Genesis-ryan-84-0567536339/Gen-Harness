@@ -129,17 +129,18 @@ Lệnh vận hành (cờ chung mọi lệnh dưới đây: --port N, --install-d
                                           tự tải genh mới nhất (kiểm checksum, re-exec bằng
                                           code mới) rồi mới backup tự động, migrate, khởi động
                                           lại theo thứ tự; lỗi ở bất kỳ bước nào → tự rollback.
-                                          --yes (lịch đêm): chỉ nhận bản đã phát hành ≥ 24 giờ
-                                          (thời gian chín; gõ tay không --yes hoặc "Cập nhật
-                                          ngay" trong Console thì cài luôn) · --quiet: chỉ in
-                                          dòng quan trọng · --no-self-update: chỉ nâng cấp
-                                          dịch vụ, không đụng binary genh
+                                          --yes (lịch đêm dùng cờ này): chỉ nhận bản genh đã là
+                                          bản chính thức ≥ 24 giờ (thời gian chín; gõ tay không
+                                          --yes hoặc "Cập nhật ngay" trong Console thì cài
+                                          luôn) · --quiet: chỉ in dòng quan trọng ·
+                                          --no-self-update: chỉ nâng cấp dịch vụ, không đụng
+                                          binary genh
   genh auto-update enable|disable|status tự chạy "genh update --yes --quiet" mỗi đêm ~03:00
                                           (systemd timer/crontab, LaunchAgent, hoặc Task
                                           Scheduler tuỳ hệ điều hành) — mặc định đã BẬT sau
                                           "genh install" (tắt bằng --no-auto-update lúc cài,
-                                          hoặc "genh auto-update disable" sau đó); --yes (lịch
-                                          đêm): chỉ nhận bản đã phát hành ≥ 24 giờ
+                                          hoặc "genh auto-update disable" sau đó); vì có --yes,
+                                          lịch đêm chỉ nhận bản đã là bản chính thức ≥ 24 giờ
   genh backup [--to path]                sao lưu vào ObjectStore nội bộ (--to: copy thêm ra host)
   genh restore <khoá>                    khôi phục một bản backup theo khoá: tự sao lưu an toàn,
                                           dừng api/worker, khôi phục, migrate, khởi động lại
@@ -276,7 +277,7 @@ type updateFlags struct {
 func parseUpdateFlags(args []string) (updateFlags, error) {
 	fs, port, installDir := opsFlagSet("update")
 	channel := fs.String("channel", "stable", "kênh cập nhật: stable hoặc beta")
-	yes := fs.Bool("yes", false, "chạy không tương tác — dùng cho lịch tự động (genh auto-update); KHÔNG hỏi gì kể cả khi có TTY, và chỉ tự cài bản genh đã phát hành ≥ 24 giờ (thời gian chín)")
+	yes := fs.Bool("yes", false, "chạy không tương tác — dùng cho lịch tự động (genh auto-update); KHÔNG hỏi gì kể cả khi có TTY, và (không kèm --if-requested) chỉ tự cài bản genh đã là bản chính thức ≥ 24 giờ (thời gian chín) — muốn cài ngay thì bỏ --yes")
 	quiet := fs.Bool("quiet", false, "chỉ in các dòng quan trọng (có bản mới/lỗi/xong) — bỏ log tiến độ từng bước")
 	noSelfUpdate := fs.Bool("no-self-update", false, "bỏ qua tự cập nhật BINARY genh — chỉ chạy phần nâng cấp dịch vụ (backup/pull/migrate/restart) bằng bản genh hiện tại")
 	selfUpdated := fs.Bool("self-updated", false, "cờ NỘI BỘ: tiến trình này vừa được re-exec ngay sau khi tự thay binary — KHÔNG dùng tay, chỉ genh tự đặt cho chính nó")
@@ -298,9 +299,10 @@ func runUpdate(args []string) int {
 	}
 	// --yes không đổi phần nâng cấp dịch vụ (RunUpdate không hỏi gì, kể cả có
 	// TTY — đã rà soát internal/ops/update.go: không có prompt nào), nhưng
-	// --yes KHÔNG kèm --if-requested nghĩa là lịch đêm đang gọi ⇒ bước tự cập
-	// nhật binary áp thời gian chín 24 giờ (selfUpdateMinAge). Bản chưa đủ
-	// chín: không thay binary, phần dịch vụ vẫn chạy như khi đã mới nhất.
+	// --yes KHÔNG kèm --if-requested ⇒ bước tự cập nhật binary áp thời gian
+	// chín 24 giờ (selfUpdateMinAge) — xem lý do giữ --yes làm cờ kích hoạt ở
+	// đó. Bản chưa đủ chín: không thay binary, phần dịch vụ vẫn chạy như khi
+	// đã mới nhất, dòng kết nói rõ bản mới đang đợi (updateDoneLine).
 	minAge := selfUpdateMinAge(f.yes, f.ifRequested)
 
 	env, ok := resolveOpsEnv(f.port, f.installDir)
@@ -323,8 +325,11 @@ func runUpdate(args []string) int {
 	// internal/selfupdate. Bỏ qua nếu: --no-self-update, HOẶC tiến trình
 	// này đã là kết quả của một lần tự cập nhật (--self-updated, tránh lặp
 	// vô hạn tự-tải-tự-re-exec nếu có gì đó luôn báo "mới hơn" sai).
+	deferred := false
 	if !f.noSelfUpdate && !f.selfUpdated {
-		if code, ok := trySelfUpdateAndReExec(args, f.quiet, minAge); ok {
+		code, ok, d := trySelfUpdateAndReExec(args, f.quiet, minAge)
+		deferred = d
+		if ok {
 			// Bản mới (tiến trình con) tự ghi kết quả; con chết giữa chừng thì
 			// trạng thái vẫn "running" — báo lỗi thay nó để Console không chờ mãi.
 			if st, err := hostlink.ReadStatus(env.InstallDir); code != 0 && err == nil && st.State == "running" {
@@ -353,19 +358,37 @@ func runUpdate(args []string) int {
 	_ = hostlink.Finish(env.InstallDir, "done", version, "")
 	publishHostInfo(env.InstallDir, env.Port)
 	if f.quiet {
-		fmt.Println("genh: cập nhật xong.")
+		fmt.Println(updateDoneLine(deferred))
 	}
 	return 0
+}
+
+// updateDoneLine là dòng kết của `genh update --quiet` (vào
+// logs/auto-update.log). Bản genh mới bị thời gian chín hoãn (deferred) thì
+// KHÔNG được in "cập nhật xong." — người đọc log sẽ tưởng bản mới đã cài.
+func updateDoneLine(deferred bool) string {
+	if deferred {
+		return "genh: dịch vụ đã kiểm/khởi động lại xong — bản genh mới đang đợi đủ 24 giờ (thời gian chín) mới tự cài."
+	}
+	return "genh: cập nhật xong."
 }
 
 // selfUpdateMinAge chọn thời gian chín (selfupdate.Options.MinAge) cho bước
 // tự cập nhật binary theo cách `genh update` được gọi:
 //   - timer đêm gọi `update --yes --quiet` (internal/autoupdate/content.go)
 //     ⇒ --yes, không --if-requested ⇒ selfupdate.NightlyMinAge (24 giờ): bản
-//     vừa phát hành chưa đủ 24 giờ thì đợi đêm sau;
+//     vừa lên bản chính thức chưa đủ 24 giờ thì đợi đêm sau;
 //   - nút "Cập nhật ngay" trong Console đi qua `genh handle-requests` →
 //     `update --yes --if-requested` (handleRequestUpdateArgs) ⇒ 0, không chặn;
 //   - Owner gõ tay `genh update` (không --yes) ⇒ 0, không chặn.
+//
+// Cờ kích hoạt CỐ Ý là --yes chứ không phải một cờ nội bộ riêng (kiểu
+// --scheduled): unit systemd/crontab/LaunchAgent/schtasks chỉ được ghi lúc
+// `genh install`/`genh auto-update enable` — `genh update` không ghi lại —
+// nên mọi máy đã cài đều đang chạy `update --yes --quiet`; đổi sang cờ mới
+// sẽ làm các máy đó âm thầm mất cổng 24 giờ. Đổi lại: ai gõ tay
+// `genh update --yes` cũng bị đợi; dòng lý do (selfupdate) nói rõ "chế độ
+// --yes" và cách cài ngay (bỏ --yes / nút "Cập nhật ngay").
 func selfUpdateMinAge(yes, ifRequested bool) time.Duration {
 	if yes && !ifRequested {
 		return selfupdate.NightlyMinAge
@@ -388,12 +411,13 @@ func selfUpdateMinAge(yes, ifRequested bool) time.Duration {
 //
 // minAge là thời gian chín truyền thẳng vào selfupdate.Options.MinAge (xem
 // selfUpdateMinAge) — bản chưa đủ chín: Run trả Skipped/Deferred, hàm này
-// trả (0, false) như khi đã mới nhất.
-func trySelfUpdateAndReExec(originalArgs []string, quiet bool, minAge time.Duration) (exitCode int, reExeced bool) {
+// trả (0, false, true): caller chạy phần dịch vụ như khi đã mới nhất nhưng
+// biết là có bản mới đang đợi (dòng kết không được nói "cập nhật xong").
+func trySelfUpdateAndReExec(originalArgs []string, quiet bool, minAge time.Duration) (exitCode int, reExeced bool, deferred bool) {
 	execPath, err := os.Executable()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "genh: không tự cập nhật binary được (không xác định được đường dẫn của chính nó): %v — tiếp tục với bản hiện tại.\n", err)
-		return 0, false
+		return 0, false, false
 	}
 	execPath, _ = filepath.Abs(execPath)
 
@@ -410,10 +434,10 @@ func trySelfUpdateAndReExec(originalArgs []string, quiet bool, minAge time.Durat
 		// Tải/kiểm checksum/thay binary thất bại: KHÔNG chặn `genh update`
 		// — báo rõ rồi tiếp tục nâng cấp dịch vụ bằng binary hiện tại.
 		fmt.Fprintf(os.Stderr, "genh: tự cập nhật binary thất bại (%v) — tiếp tục nâng cấp dịch vụ với bản genh hiện tại.\n", err)
-		return 0, false
+		return 0, false, false
 	}
 	if !res.Updated {
-		return 0, false
+		return 0, false, res.Deferred
 	}
 
 	newArgs := append(append([]string{}, originalArgs...), "--self-updated")
@@ -424,12 +448,12 @@ func trySelfUpdateAndReExec(originalArgs []string, quiet bool, minAge time.Durat
 	if err := child.Run(); err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
-			return exitErr.ExitCode(), true
+			return exitErr.ExitCode(), true, false
 		}
 		fmt.Fprintf(os.Stderr, "genh: chạy lại genh %s sau tự cập nhật thất bại: %v\n", res.To, err)
-		return 1, true
+		return 1, true, false
 	}
-	return 0, true
+	return 0, true, false
 }
 
 func runAutoUpdate(args []string) int {

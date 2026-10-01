@@ -52,6 +52,8 @@ jobs:
       # bản chỉ thành bản thử (prerelease) rồi mới được nâng thành bản chính thức (latest) sau E2E cài thật.
       - name: Kiểm cổng phát hành
         run: python3 .github/scripts/check_release_gate.py
+      - name: Test script kiểm cổng phát hành (gỡ từng mắt xích → phải bắt được)
+        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py' -v
 
   api:
     runs-on: ubuntu-latest
@@ -209,7 +211,7 @@ jobs:
         run: |
           echo "version=$R_VERSION api=$R_API browser=$R_BROWSER web=$R_WEB images=$R_IMAGES"
           if [ "$NOT_GREEN" = "true" ]; then
-            echo "::error::CI chưa xanh: có job failure/cancelled/skipped (xem dòng "version=… api=…" của bước này) — mở job đỏ, sửa lỗi rồi đẩy lại hoặc bấm Re-run." >&2
+            echo "::error::CI chưa xanh: có job failure/cancelled/skipped (xem dòng 'version=… api=…' của bước này) — mở job đỏ, sửa lỗi rồi đẩy lại hoặc bấm Re-run." >&2
             exit 1
           fi
           echo "Tất cả job CI xanh."

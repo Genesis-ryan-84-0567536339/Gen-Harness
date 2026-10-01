@@ -78,3 +78,21 @@ func TestLichDem_ApThoiGianChin24h(t *testing.T) {
 		t.Fatalf("lịch đêm (%q) phải áp thời gian chín %v, được %v", args, selfupdate.NightlyMinAge, got)
 	}
 }
+
+// Bản genh mới bị thời gian chín hoãn: dòng kết của `--quiet` (vào
+// logs/auto-update.log) KHÔNG được nói "cập nhật xong." — người đọc log sẽ
+// tưởng bản mới đã cài.
+func TestUpdateDoneLine_HoanThiKhongNoiCapNhatXong(t *testing.T) {
+	if got := updateDoneLine(false); got != "genh: cập nhật xong." {
+		t.Fatalf("không hoãn: muốn %q, được %q", "genh: cập nhật xong.", got)
+	}
+	got := updateDoneLine(true)
+	if strings.Contains(got, "cập nhật xong") {
+		t.Fatalf("bị hoãn mà dòng kết vẫn nói cập nhật xong: %q", got)
+	}
+	for _, want := range []string{"dịch vụ đã kiểm/khởi động lại xong", "đang đợi đủ 24 giờ"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("dòng kết khi hoãn thiếu %q: %q", want, got)
+		}
+	}
+}

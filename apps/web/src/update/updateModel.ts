@@ -1,4 +1,5 @@
 import type { SystemUpdate } from '@gen-harness/contracts';
+import { fmtDM, fmtHM } from '../lib/format';
 
 export const UPDATE_COMMAND = '~/.gen-harness/bin/genh update';
 export const UPDATE_KEY = ['system', 'update'] as const;
@@ -17,6 +18,22 @@ export type UpdateView =
     };
 
 const RECENT_MS = 24 * 3600 * 1000;
+/** Thời gian chín của lịch tự cập nhật đêm (genh `selfupdate.NightlyMinAge`): chỉ cài bản đã là bản chính thức ≥ 24 giờ. */
+export const NIGHTLY_MIN_AGE_MS = 24 * 3600 * 1000;
+
+/**
+ * v0.1.33: lịch đêm (~03:00 giờ máy chủ) tự cài bản mới khi nào — `published_at` là lúc bản đó thành bản chính thức
+ * (gh/system_api/update.py official_since). null khi không biết, để thẻ giữ câu cũ.
+ */
+export function autoInstallHint(publishedAt: string | null | undefined, now: number): string | null {
+  if (!publishedAt) return null;
+  const t = Date.parse(publishedAt);
+  if (!Number.isFinite(t)) return null;
+  const ripe = t + NIGHTLY_MIN_AGE_MS;
+  if (ripe <= now) return 'Tự cài lúc ~03:00 tới';
+  const iso = new Date(ripe).toISOString();
+  return `Tự cài lúc ~03:00 sau ${fmtDM(iso)} ${fmtHM(iso)}`;
+}
 
 function recent(iso: string | null, now: number): boolean {
   if (!iso) return false;
@@ -68,9 +85,13 @@ export function updateView(
     return { kind: 'finished', tone: 'ok', title: `Đã cập nhật lên ${d.current ?? target}`, kicker: 'Đang tải lại trang để dùng bản mới…', steps: [] };
   }
   if (d.update_available) {
+    const hint = autoInstallHint(d.published_at, now);
     return {
       kind: 'available', tone: 'accent', title: `Có bản mới ${d.latest}`,
-      kicker: `Đang dùng ${d.current} · cập nhật mất khoảng 2–5 phút, tự sao lưu trước`,
+      // Lịch đêm đợi bản ra đủ 24 giờ: nói rõ khi nào tự cài, kẻo Owner thấy "Có bản mới" tới 2 đêm mà không hiểu.
+      kicker: hint
+        ? `Đang dùng ${d.current} · ${hint} — hoặc ${d.can_request ? 'bấm Cập nhật ngay' : 'chạy lệnh bên dưới'}`
+        : `Đang dùng ${d.current} · cập nhật mất khoảng 2–5 phút, tự sao lưu trước`,
       body: d.can_request ? undefined : 'Máy chủ chưa bật cập nhật bằng nút bấm.',
       showCommand: !d.can_request, steps: [],
     };
@@ -87,6 +108,8 @@ export function readableNotes(md: string | null | undefined): string {
   const out: string[] = [];
   for (const raw of md.replace(/\r\n/g, '\n').split('\n')) {
     if (/full changelog/i.test(raw) || /^#+\s*new contributors/i.test(raw) || /made their first contribution/i.test(raw)) continue;
+    // Chú thích HTML (vd dấu `<!-- genh:promoted_at=… -->` của job promote) — GitHub không hiện, Console cũng không.
+    if (/^\s*<!--.*-->\s*$/.test(raw)) continue;
     const l = raw
       .replace(/^(#+)\s*what'?s changed\s*$/i, '$1 Điểm mới')
       .replace(/\s+by @[\w-]+(\[bot\])?\s+in\s+https?:\/\/\S+/gi, '')

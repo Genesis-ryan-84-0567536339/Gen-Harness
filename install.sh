@@ -22,16 +22,22 @@ die() { log "genh: $*"; exit 1; }
 
 # GEN_HARNESS_RELEASE_TAG (tuỳ chọn): cài ĐÚNG tag này thay vì bản chính thức (latest) —
 # dành cho CI/E2E kiểm bản thử (prerelease) trước khi promote; người dùng bình thường không đặt.
+# Máy đã cài thì main() chạy `genh update --no-self-update` để genh không tự thay bản ghim bằng latest.
 RELEASE_LABEL="bản phát hành mới nhất"
+PINNED_TAG=""
 if [ -n "${GEN_HARNESS_RELEASE_TAG:-}" ]; then
+	# Regex thật (glob `v[0-9]*.…` lọt cả 'v1a.2b.3c') — cùng định dạng với job meta của release.yml.
+	# `case` chặn trước ký tự lạ (kể cả xuống dòng: grep xét TỪNG dòng, một dòng đúng là lọt).
 	case "$GEN_HARNESS_RELEASE_TAG" in
 	*[!0-9A-Za-z.-]*) die "GEN_HARNESS_RELEASE_TAG không hợp lệ: chỉ được chữ, số, '.', '-' (vd v0.1.33)." ;;
-	v[0-9]*.[0-9]*.[0-9]*) ;;
-	*) die "GEN_HARNESS_RELEASE_TAG không hợp lệ: '$GEN_HARNESS_RELEASE_TAG' — cần dạng vMAJOR.MINOR.PATCH (vd v0.1.33)." ;;
 	esac
-	RELEASE_BASE="https://github.com/${REPO}/releases/download/${GEN_HARNESS_RELEASE_TAG}"
-	RELEASE_LABEL="bản $GEN_HARNESS_RELEASE_TAG"
-	log "genh: cài đúng bản $GEN_HARNESS_RELEASE_TAG (GEN_HARNESS_RELEASE_TAG)"
+	if ! printf '%s' "$GEN_HARNESS_RELEASE_TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
+		die "GEN_HARNESS_RELEASE_TAG không hợp lệ: '$GEN_HARNESS_RELEASE_TAG' — cần dạng vMAJOR.MINOR.PATCH[-PRERELEASE] (vd v0.1.33)."
+	fi
+	PINNED_TAG="$GEN_HARNESS_RELEASE_TAG"
+	RELEASE_BASE="https://github.com/${REPO}/releases/download/${PINNED_TAG}"
+	RELEASE_LABEL="bản $PINNED_TAG"
+	log "genh: cài đúng bản $PINNED_TAG (GEN_HARNESS_RELEASE_TAG)"
 fi
 
 fetch() { # fetch <url> <đích>: dùng curl nếu có, không thì wget.
@@ -44,6 +50,14 @@ fetch() { # fetch <url> <đích>: dùng curl nếu có, không thì wget.
 	else
 		die "cần curl hoặc wget để tải genh, máy này không có cái nào."
 	fi
+}
+
+# fetch_failed <tệp>: báo lỗi tải dễ hiểu thay cho dòng 404 trơ trọi của curl/wget.
+fetch_failed() {
+	if [ -n "$PINNED_TAG" ]; then
+		die "không tải được $1 của bản $PINNED_TAG (tag không tồn tại hoặc Release thiếu asset) — kiểm lại GEN_HARNESS_RELEASE_TAG, hoặc bỏ biến này để cài bản chính thức mới nhất."
+	fi
+	die "không tải được $1 từ ${RELEASE_LABEL} — kiểm tra mạng (mở được github.com không) rồi chạy lại lệnh cài."
 }
 
 detect_os() {
@@ -118,8 +132,8 @@ main() {
 	tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/genh-install.XXXXXX")
 	trap 'rm -rf "$tmp_dir"' EXIT
 
-	fetch "${RELEASE_BASE}/${asset}" "${tmp_dir}/${asset}"
-	fetch "${RELEASE_BASE}/checksums.txt" "${tmp_dir}/checksums.txt"
+	fetch "${RELEASE_BASE}/${asset}" "${tmp_dir}/${asset}" || fetch_failed "$asset"
+	fetch "${RELEASE_BASE}/checksums.txt" "${tmp_dir}/checksums.txt" || fetch_failed checksums.txt
 
 	verify_checksum "${tmp_dir}/${asset}" "$asset" "${tmp_dir}/checksums.txt"
 
@@ -138,6 +152,11 @@ main() {
 	# v0.1.5 chạy luôn `genh update` (tự backup + rollback khi lỗi, xem
 	# internal/ops.RunUpdate; tự tải genh mới qua internal/selfupdate).
 	if [ -f "$SECRETS_FILE" ]; then
+		if [ -n "$PINNED_TAG" ]; then
+			# Ghim tag: KHÔNG để genh tự thay binary bằng releases/latest (selfupdate) — sẽ âm thầm bỏ bản ghim.
+			log "genh: máy này đã cài Gen-Harness từ trước — đang chạy 'genh update --no-self-update' để nâng cấp dịch vụ lên đúng $PINNED_TAG…"
+			exec "${BIN_DIR}/genh" update --no-self-update
+		fi
 		log "genh: máy này đã cài Gen-Harness từ trước — đang chạy 'genh update' để nâng cấp dịch vụ lên đúng bản mới…"
 		exec "${BIN_DIR}/genh" update
 	fi

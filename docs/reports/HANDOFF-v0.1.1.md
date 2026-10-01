@@ -1124,8 +1124,8 @@ hoá — hệ thống chỉ giảm (đọc ít, dừng ngay khi có cảnh báo)
 
 ### Boss cần làm gì
 
-1. Máy Boss: **không cần làm gì.** Bản mới chỉ tới máy sau khi qua E2E cài thật; lịch tự cập nhật đêm đợi bản ra đủ 24 giờ.
-   Muốn lấy sớm: Console → **Cập nhật ngay** (không bị đợi 24 giờ).
+1. Máy Boss: **không cần làm gì.** Bản mới chỉ tới máy sau khi qua E2E cài thật; lịch tự cập nhật đêm đợi bản đã là bản
+   chính thức đủ 24 giờ (thẻ "Có bản mới" ghi lúc nào tự cài). Muốn lấy sớm: Console → **Cập nhật ngay**.
 2. **Chỉ khi Claude báo token không có quyền admin repo**: mở https://github.com/Genesis-ryan-84-0567536339/Gen-Harness/settings/rules,
    **bật bảo vệ nhánh `main` + tag `v*`** theo mục "Bật bảo vệ nhánh main + tag v*" ngay dưới "Đã làm" (~2 phút, chỉ bấm chọn,
    không gõ lệnh). Ngoài ra không cần làm gì.
@@ -1143,7 +1143,7 @@ hoá — hệ thống chỉ giảm (đọc ít, dừng ngay khi có cảnh báo)
 
 ### Đã làm
 
-- **F-9 — cổng phát hành (6 bước, tự động, không cần người duyệt)**:
+- **F-9 — cổng phát hành (7 bước, tự động, không cần người duyệt)**:
   1. `ci.yml` thêm `on: workflow_call` (input `from_release`, mặc định false); `release.yml` gọi nó thành job `ci`
      (`uses: ./.github/workflows/ci.yml`, `from_release: true`) và đưa `ci` vào `needs` của job `release` — CI đỏ thì không
      có Release. Khi `from_release`, nhóm concurrency của `ci.yml` là duy nhất theo `run_id`, `cancel-in-progress: false`.
@@ -1152,16 +1152,21 @@ hoá — hệ thống chỉ giảm (đọc ít, dừng ngay khi có cảnh báo)
   3. `e2e-install.yml` (chế độ release) tìm **đúng tag** từ `workflow_run.head_sha`, cài bằng `install.sh` với biến mới
      `GEN_HARNESS_RELEASE_TAG` (tuỳ chọn, chỉ CI/E2E); `e2e-upgrade` cài **bản chính thức (latest)** hiện tại rồi nâng cấp LÊN
      đúng tag đó (đặt binary mới bằng tay vì bản thử bị ẩn khỏi tự cập nhật).
-  4. Job cuối `promote`: E2E xanh → `gh release edit <tag> --prerelease=false --latest`, in `releases/latest` trước/sau,
-     `exit 1` nếu sai. Bản có hậu tố `-` không bao giờ được promote. **Promote tay** (chỉ khi E2E lỗi vì lý do ngoài mã):
-     Actions → **E2E cài đặt thật** → **Run workflow** với `tag` + `promote=true` + `skip_e2e=true`.
+  4. Job `promote`: E2E xanh → **một** lệnh `gh release edit <tag> --prerelease=false --latest --notes-file …` vừa nâng latest
+     vừa ghi dấu `<!-- genh:promoted_at=<UTC> -->` vào ghi chú Release; in `releases/latest` trước/sau, `exit 1` nếu sai
+     hoặc thiếu dấu; rồi gắn ảnh GHCR `:latest` (build-images chỉ đẩy `:<version>`). Bản có hậu tố `-` không bao giờ được
+     promote. **Promote tay** (chỉ khi E2E lỗi vì lý do ngoài mã): Actions → **E2E cài đặt thật** → **Run workflow** với
+     `tag` + `promote=true` + `skip_e2e=true`.
   5. **Thời gian chín 24 giờ** (chỉ lịch đêm): `selfupdate.NightlyMinAge = 24h` qua `Options.MinAge`; `genh update --yes`
-     KHÔNG kèm `--if-requested` bỏ qua bản có `published_at` < 24 giờ (`Result.Deferred`), để đêm sau. "Cập nhật ngay"
-     (`--yes --if-requested`) và `genh update` gõ tay không bị chặn. 24 giờ tính từ lúc tạo bản thử (promote không đổi
-     `published_at`).
+     KHÔNG kèm `--if-requested` bỏ qua bản chưa là bản chính thức đủ 24 giờ (`Result.Deferred`), để đêm sau. Mốc = dấu
+     `promoted_at` (không có thì `published_at`, lấy mốc muộn hơn) — `published_at` là lúc tạo bản thử, promote không đổi.
+     "Cập nhật ngay" (`--yes --if-requested`) và `genh update` gõ tay không bị chặn.
   6. Tài liệu đúng thực tế: genh/`install.sh`/`install.ps1` chỉ kiểm SHA-256 theo `checksums.txt`, **CHƯA kiểm cosign** (để
      sau); khối "Cổng phát hành" trong `docs/handoff/05-installer.md`. Script bất biến `.github/scripts/check_release_gate.py`
      chạy trong job `version` của CI — PR lỡ gỡ cổng sẽ đỏ ngay. Bảo vệ nhánh: hướng dẫn bên dưới (cần admin, ngoài mã).
+  7. Sau promote, job **`e2e-selfupdate`** đi đúng đường máy Owner: cài bản chính thức trước, `genh update --yes --quiet` phải
+     hoãn (genh cũ ≥ v0.1.33), `genh update` → genh cũ tự tải genh mới, re-exec, nâng dịch vụ bằng compose nhúng mới; đỏ ⇒
+     `::error` + cách lùi bản (còn trong 24 giờ chín).
 - **F-13 — CI chạy đủ bộ test đã có**: `installer-matrix.yml` thêm `go vet ./...` + `go test ./...` trên 4 hệ điều hành
   (ubuntu-22.04/24.04, macos-14, windows-2022); pytest api thêm một lượt `GH_TEST_APP_ROLE=1` (dưới vai `gh_app`); job web chạy
   Playwright mock; kiểm `alembic heads` chỉ có đúng 1 head; bộ lọc E2E chế độ pr thêm `apps/api/**`, `apps/web/Dockerfile`,
@@ -1212,12 +1217,30 @@ xoá nhánh cả hai sau khi kiểm.
   thử chưa qua E2E). `e2e-upgrade` cũng nâng cấp TỪ bản chính thức thay vì "tag thứ 2 trong danh sách".
 - Required check chỉ là job tổng luôn chạy (xem trên) — tránh PR chỉ sửa docs kẹt mãi.
 
+### Sửa sau review (trước merge)
+
+- 24 giờ tính từ **lúc promote** (dấu `promoted_at` trong ghi chú Release), không từ `published_at` — bản thử promote muộn
+  (vd promote tay `skip_e2e` sau vài ngày) trước đây lọt cổng ngay đêm đó. Console (`GET /system/update`) trả `published_at` =
+  mốc đó, thẻ "Có bản mới" ghi "Tự cài lúc ~03:00 sau <ngày giờ> — hoặc bấm Cập nhật ngay"; dấu không hiện trong ghi chú.
+- Job `e2e-selfupdate` (trên). Rủi ro cũ "không E2E nào đi đường genh cũ tự tải binary mới" đã đóng.
+- `--yes` vẫn là cờ kích hoạt cổng (unit lịch đêm không được ghi lại khi `genh update` — đổi sang cờ mới thì máy đã cài mất
+  cổng); dòng lý do nói rõ "chế độ --yes (lịch đêm)" và cách cài ngay (`genh update` không `--yes` / nút). Bị hoãn thì dòng kết
+  `--quiet` là "dịch vụ đã kiểm/khởi động lại xong — bản genh mới đang đợi đủ 24 giờ", không còn "cập nhật xong.".
+- `install.sh`: `GEN_HARNESS_RELEASE_TAG` kiểm bằng regex thật; tag không tồn tại → lỗi dễ hiểu; máy đã cài + ghim tag →
+  `genh update --no-self-update` (trước đó selfupdate âm thầm thay bản ghim bằng latest).
+- `resolve` ưu tiên tag không hậu tố khi `v0.1.33` và `v0.1.33-rc.1` cùng trỏ một commit (trước đó chọn nhầm bản `-rc`).
+- Ảnh GHCR `:latest` chỉ gắn ở `promote`. `ci-ok`: sửa dấu nháy lồng trong `::error` (SC2140).
+- `check_release_gate.py` giữ thêm: dấu promote cùng lệnh nâng latest, có `e2e-selfupdate`, build-images không gắn `:latest`;
+  có test riêng (`.github/scripts/test_check_release_gate.py`, chạy trong job `version`).
+
 ### Rủi ro đã biết
 
 1. `go test` trên windows-2022/macos-14 lần đầu chạy có thể đỏ — chỉ CI mới kiểm được (máy dựng là Linux).
-2. `e2e-upgrade` không còn đi qua đường "genh cũ tự tải binary mới" (bản thử bị ẩn khỏi tự cập nhật) — đường đó do `go test` của
-   `internal/selfupdate` kiểm.
-3. `published_at` không đổi khi promote → 24 giờ tính từ lúc tạo bản thử; E2E càng lâu thì thời gian đợi sau promote càng ngắn.
+2. `e2e-selfupdate` chỉ chạy SAU promote (bản thử bị ẩn khỏi `releases/latest`) — đỏ thì bản đã là latest, phải lùi tay theo
+   `::error` của job (còn 24 giờ trước khi lịch đêm tự cài). Bước kiểm hoãn chỉ chạy khi bản trước ≥ v0.1.33 (bản cũ hơn
+   chưa có cổng); lần phát hành v0.1.33 (bản trước v0.1.32) chỉ kiểm phần tự tải + nâng cấp.
+3. Promote **ngoài** workflow (sửa Release bằng tay) không ghi dấu `promoted_at` → 24 giờ tính từ `published_at`. Promote tay
+   luôn đi qua Actions → E2E cài đặt thật (`skip_e2e`) để có dấu.
 4. Bảo vệ nhánh là việc của người có quyền admin — mã không phụ thuộc vào nó; chưa bật thì PR đỏ vẫn merge tay được.
 
 ### Test
@@ -1226,9 +1249,13 @@ xoá nhánh cả hai sau khi kiểm.
   chặn) — nay chạy trong CI trên 4 hệ điều hành cùng toàn bộ `go test ./...`.
 - CI: `check_release_gate.py` trong job `version`; `tr -d '[:space:]' < VERSION` = `v0.1.33` khớp regex job `version`.
 - Tệp test mới: `apps/genh/internal/selfupdate/selfupdate_test.go` (`TestRun_MinAge_*`, `TestRun_KhongMinAge_CapNhatNgay`,
-  `TestRun_Prerelease_BoQua`), `apps/genh/cmd/genh/main_test.go` (`--yes` → 24 giờ, `--yes --if-requested` → 0, không
-  `--yes` → 0; đường nút "Cập nhật ngay"), `apps/api/tests/test_migrations_heads.py`; test genh phụ thuộc POSIX tách sang
-  `*_unix_test.go` / `steps_finalize_linux_test.go` để chạy được trên Windows/macOS.
+  `TestRun_Prerelease_BoQua`, `TestRun_MinAge_PromoteMuon_TinhTuLucPromote` — published_at 5 ngày, promote 2 giờ ⇒ hoãn,
+  `TestPromotedMarker_DinhDangVaDocLai`), `apps/genh/cmd/genh/main_test.go` (`--yes` → 24 giờ, `--yes --if-requested` → 0,
+  không `--yes` → 0; đường nút "Cập nhật ngay"; dòng kết khi bị hoãn), `apps/genh/cmd/genh/installsh_unix_test.go`
+  (`install.sh` thật với curl/genh giả: tag sai dạng, tag không tồn tại, máy đã cài + ghim tag → `update --no-self-update`),
+  `apps/api/tests/test_system_update.py` (`official_since`, ẩn dấu, payload `published_at`), `apps/web/test/unit/update.test.tsx`
+  (câu "Tự cài lúc ~03:00 sau …"), `.github/scripts/test_check_release_gate.py`, `apps/api/tests/test_migrations_heads.py`;
+  test genh phụ thuộc POSIX tách sang `*_unix_test.go` / `steps_finalize_linux_test.go` để chạy được trên Windows/macOS.
 - Chạy trên nhánh tích hợp (máy dựng Linux, 01/10/2026): genh `go vet ./...` sạch (cả GOOS=windows/darwin), `go test -count=1
   ./...` 305 pass / 1 skip (máy không có certutil); api ruff + mypy sạch (127 tệp), `alembic heads` = `0023 (head)`, pytest
   1106 pass (lượt thường) + 1106 pass (`GH_TEST_APP_ROLE=1`); web lint/typecheck sạch, vitest 280/280, build OK, bridge 50
@@ -1242,6 +1269,8 @@ xoá nhánh cả hai sau khi kiểm.
   - Release v0.1.33 tạo ra **bản thử**, `gh api repos/Genesis-ryan-84-0567536339/Gen-Harness/releases/latest` lúc đó vẫn
     v0.1.32: _…_
   - Không có job `ci` bị "cancelled" trong lượt Release trên `main`: _…_
-  - E2E (`e2e-install` + `e2e-upgrade`) đúng tag v0.1.33 xanh; job `promote` in latest trước v0.1.32 → sau v0.1.33: _…_
+  - E2E (`e2e-install` + `e2e-upgrade`) đúng tag v0.1.33 xanh; job `promote` in latest trước v0.1.32 → sau v0.1.33 (kèm dấu
+    `promoted_at`): _…_
+  - `e2e-selfupdate` v0.1.32 → v0.1.33 xanh (genh cũ tự tải genh mới): _…_
   - genh tải về (checksum/version) đúng v0.1.33: _…_
 - Chưa kiểm: _(điền)_ — bảo vệ nhánh (chờ admin bật, rồi 2 PR thử ở trên); timer đêm thật bỏ qua bản < 24 giờ trên máy Boss.

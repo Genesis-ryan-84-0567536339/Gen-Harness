@@ -19,8 +19,9 @@ name: Release
 #   chính thức (promote).
 #   1. Job `ci` gọi lại ci.yml (from_release: true) trên ĐÚNG commit sắp phát
 #      hành; job release chờ nó — CI đỏ thì không có Release nào được tạo.
-#      build-images/build-genh vẫn chạy song song với ci cho nhanh (ảnh đẩy
-#      theo digest, không ai dùng tới khi chưa có Release).
+#      build-images/build-genh vẫn chạy song song với ci cho nhanh (ảnh chỉ
+#      đẩy tag `:<version>` + dùng theo digest, không ai dùng tới khi chưa
+#      có Release; tag `:latest` chỉ gắn ở job promote của e2e-install.yml).
 #   2. Release tạo ra LUÔN là bản thử (prerelease, make_latest=false): máy
 #      Boss (install.sh /releases/latest/download, genh tự cập nhật qua
 #      /releases/latest) CHƯA thấy bản này.
@@ -280,6 +281,10 @@ jobs:
   # cho browser/browser-egress, v0.1.29). proxy/redis
   # ĐÃ có "image:" cố định sẵn (caddy:2-alpine, redis:7-alpine) nên không cần
   # build ở đây — Bước 3 của genh pull thẳng từ Docker Hub.
+  # Chỉ đẩy tag `:<version>`: job này chạy SONG SONG với ci, trước E2E — gắn
+  # `:latest` ở đây sẽ cho ai kéo `gen-harness-*:latest` một ảnh chưa qua cổng
+  # phát hành. `:latest` gắn ở job promote (e2e-install.yml) bằng
+  # `docker buildx imagetools create`, sau khi tag thành bản chính thức.
   build-images:
     name: build+push ảnh ${{ matrix.service }}
     runs-on: ubuntu-latest
@@ -334,7 +339,6 @@ jobs:
           push: true
           tags: |
             ${{ env.REGISTRY }}/${{ needs.meta.outputs.owner_lower }}/gen-harness-${{ matrix.service }}:${{ needs.meta.outputs.version }}
-            ${{ env.REGISTRY }}/${{ needs.meta.outputs.owner_lower }}/gen-harness-${{ matrix.service }}:latest
 
       - name: Lưu digest để job pin-compose ghim vào compose.release.yaml
         run: |

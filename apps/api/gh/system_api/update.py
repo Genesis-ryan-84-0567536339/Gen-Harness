@@ -41,6 +41,10 @@ CHECK_MIN_INTERVAL_SECONDS = 30
 # Yêu cầu nằm quá lâu mà trạng thái không đổi ⇒ watcher không chạy (máy chủ tắt watcher, linger…) — cho bấm lại.
 STALE_REQUEST_SECONDS = 15 * 60
 _SEMVER = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
+# v0.1.33: dấu job `promote` (e2e-install.yml) ghi vào ghi chú Release lúc nâng bản thử thành bản chính thức — cùng
+# định dạng với apps/genh/internal/selfupdate PromotedMarker. Thời gian chín 24 giờ của lịch đêm tính từ dấu này
+# (published_at là lúc tạo bản thử, promote không đổi nó).
+_PROMOTED = re.compile(r"<!--\s*genh:promoted_at=(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\s*-->")
 
 
 def _dir() -> Path:
@@ -65,16 +69,41 @@ def is_newer(latest: str | None, current: str | None) -> bool:
     return a is not None and b is not None and a > b
 
 
+def _ts(iso: str | None) -> datetime | None:
+    try:
+        t = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return t if t.tzinfo else None
+
+
+def official_since(published_at: str | None, notes: str | None) -> str | None:
+    """Lúc bản này thành bản chính thức: dấu promote MUỘN NHẤT trong ghi chú, hoặc published_at — lấy cái muộn hơn,
+    như selfupdate.officialSince của genh (cùng mốc lịch đêm dùng để đếm 24 giờ). Không đọc được ⇒ None."""
+    times = [t for t in (_ts(published_at), *(_ts(m) for m in _PROMOTED.findall(notes or ""))) if t is not None]
+    return max(times).astimezone(UTC).isoformat().replace("+00:00", "Z") if times else None
+
+
+def strip_markers(notes: str) -> str:
+    """Bỏ dấu promote (chú thích HTML, GitHub không hiện) khỏi ghi chú trước khi đưa lên Console."""
+    return _PROMOTED.sub("", notes).strip()
+
+
 async def fetch_latest(repo: str) -> dict[str, Any] | None:
-    """Bản phát hành mới nhất trên GitHub (tag, link, ghi chú) — lỗi mạng ⇒ None, không làm hỏng màn hình."""
+    """Bản phát hành mới nhất trên GitHub (tag, link, ghi chú) — lỗi mạng ⇒ None, không làm hỏng màn hình.
+
+    `published_at` trả về là lúc bản này thành BẢN CHÍNH THỨC (official_since) — Console dùng để báo lịch đêm tự cài
+    từ khi nào."""
     try:
         async with httpx.AsyncClient(timeout=6.0, headers={"Accept": "application/vnd.github+json"}) as c:
             r = await c.get(f"https://api.github.com/repos/{repo}/releases/latest")
         if r.status_code != 200:
             return None
         body = r.json()
+        raw = body.get("body") or ""
         return {"tag": body.get("tag_name"), "url": body.get("html_url"),
-                "published_at": body.get("published_at"), "notes": (body.get("body") or "")[:4000]}
+                "published_at": official_since(body.get("published_at"), raw),
+                "notes": strip_markers(raw)[:4000]}
     except (httpx.HTTPError, ValueError):
         return None
 
@@ -141,6 +170,7 @@ async def _payload(request: Request, *, force: bool = False) -> dict[str, Any]:
     tag = latest.get("tag") if latest else None
     return {**s, "latest": tag, "release_url": latest.get("url") if latest else None,
             "release_notes": latest.get("notes") if latest else None,
+            "published_at": latest.get("published_at") if latest else None,
             "checked_at": latest.get("checked_at") if latest else None,
             "update_available": is_newer(tag, s["current"])}
 

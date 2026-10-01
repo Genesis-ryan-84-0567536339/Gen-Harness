@@ -9,11 +9,16 @@
 //
 // Thời gian chín 24 giờ (từ v0.1.33): lịch tự cập nhật đêm (`genh update
 // --yes --quiet`, internal/autoupdate) đặt Options.MinAge = NightlyMinAge —
-// bản mới nhất có published_at chưa đủ 24 giờ thì BỎ QUA (Result.Deferred),
-// đợi đêm sau. Một bản lỗi vừa phát hành vì thế không tự lan sang mọi máy
-// trong đêm đầu tiên; ai cần ngay thì bấm "Cập nhật ngay" trong Console
-// (đi qua `--if-requested`, MinAge = 0, không bị chặn). Bản thử (prerelease)
-// và bản nháp (draft) luôn bị bỏ qua, kể cả khi MinAge = 0.
+// bản mới nhất chưa LÀ BẢN CHÍNH THỨC đủ 24 giờ thì BỎ QUA (Result.Deferred),
+// đợi đêm sau. Mốc tính tuổi là lúc promote (dấu PromotedMarker mà job
+// `promote` của e2e-install.yml ghi vào ghi chú Release), không có dấu thì
+// published_at — xem officialSince: published_at là lúc tạo BẢN THỬ, promote
+// không đổi nó, nên một bản thử promote muộn (vd promote tay skip_e2e sau
+// vài ngày) sẽ lọt cổng ngay nếu chỉ dựa vào published_at. Một bản lỗi vừa
+// lên bản chính thức vì thế không tự lan sang mọi máy trong đêm đầu tiên; ai
+// cần ngay thì bấm "Cập nhật ngay" trong Console (đi qua `--if-requested`,
+// MinAge = 0, không bị chặn) hoặc gõ `genh update` không kèm --yes. Bản thử
+// (prerelease) và bản nháp (draft) luôn bị bỏ qua, kể cả khi MinAge = 0.
 //
 // Gói này CHỈ lo phần "tải + kiểm checksum + thay tệp trên đĩa" — việc
 // RE-EXEC lại chính nó bằng code mới (để phần nâng cấp dịch vụ chạy đúng
@@ -32,6 +37,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -85,10 +91,11 @@ type Options struct {
 	Out   io.Writer
 	Quiet bool
 
-	// MinAge là thời gian chín: > 0 ⇒ bản mới nhất có published_at mới hơn
-	// now-MinAge bị BỎ QUA (Result.Deferred = true), đợi lần chạy sau. 0 =
-	// không chặn — mặc định cho nút "Cập nhật ngay" và `genh update` gõ tay;
-	// lịch đêm dùng NightlyMinAge (quyết định ở cmd/genh selfUpdateMinAge).
+	// MinAge là thời gian chín: > 0 ⇒ bản mới nhất thành bản chính thức
+	// (officialSince: dấu promote, không có thì published_at) chưa đủ MinAge
+	// bị BỎ QUA (Result.Deferred = true), đợi lần chạy sau. 0 = không chặn —
+	// mặc định cho nút "Cập nhật ngay" và `genh update` gõ tay; `--yes` (lịch
+	// đêm) dùng NightlyMinAge (quyết định ở cmd/genh selfUpdateMinAge).
 	MinAge time.Duration
 	// Now trả "bây giờ" để tính tuổi bản phát hành — nil dùng time.Now; tách
 	// riêng để test tiêm đồng hồ cố định.
@@ -96,8 +103,39 @@ type Options struct {
 }
 
 // NightlyMinAge là thời gian chín cho lịch tự cập nhật đêm: chỉ tự cài bản
-// đã phát hành ít nhất 24 giờ (tính theo published_at của GitHub Release).
+// đã là bản chính thức ít nhất 24 giờ (tính từ lúc promote — xem
+// officialSince).
 const NightlyMinAge = 24 * time.Hour
+
+// promotedMarkerRe khớp dấu PromotedMarker trong ghi chú Release. Chỉ nhận
+// đúng dạng RFC 3339 UTC giây (job promote ghi bằng `date -u
+// +%Y-%m-%dT%H:%M:%SZ`) — chuỗi lạ bị bỏ qua, rơi về published_at.
+var promotedMarkerRe = regexp.MustCompile(`<!--\s*genh:promoted_at=([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)\s*-->`)
+
+// PromotedMarker là dòng job `promote` (.github/workflows/e2e-install.yml)
+// ghi vào cuối ghi chú Release CÙNG LÚC nâng bản thử thành bản chính thức
+// (một lệnh `gh release edit --prerelease=false --latest --notes-file`):
+// một chú thích HTML — không hiện khi GitHub hiển thị ghi chú — mang thời
+// điểm promote, để thời gian chín tính từ lúc bản này tới tay máy người
+// dùng thay vì từ lúc tạo bản thử (published_at, promote không đổi).
+// Hàm này là nguồn chuẩn của định dạng; test giữ workflow khớp nó.
+func PromotedMarker(t time.Time) string {
+	return "<!-- genh:promoted_at=" + t.UTC().Format(time.RFC3339) + " -->"
+}
+
+// promotedAt đọc thời điểm promote MUỘN NHẤT trong ghi chú Release (đề
+// phòng ghi chú còn dấu cũ của một lần promote trước); không có dấu hợp lệ
+// ⇒ zero.
+func promotedAt(body string) time.Time {
+	var latest time.Time
+	for _, m := range promotedMarkerRe.FindAllStringSubmatch(body, -1) {
+		t, err := time.Parse(time.RFC3339, m[1])
+		if err == nil && t.After(latest) {
+			latest = t
+		}
+	}
+	return latest
+}
 
 // Result là kết quả một lần Run.
 type Result struct {
@@ -189,8 +227,9 @@ func AssetName(goos, goarch string) string {
 // err == nil, KHÔNG có request tải asset/checksums nào):
 //   - bản thử (prerelease) hoặc bản nháp (draft) ⇒ luôn bỏ qua (phòng hờ —
 //     /releases/latest của GitHub vốn không trả 2 loại này);
-//   - thời gian chín: MinAge > 0 và published_at chưa đủ MinAge (hoặc không
-//     đọc được published_at) ⇒ bỏ qua; riêng trường hợp chưa đủ tuổi đặt
+//   - thời gian chín: MinAge > 0 và bản này chưa là bản chính thức đủ MinAge
+//     (officialSince — dấu promote, không có thì published_at; không đọc
+//     được cả hai) ⇒ bỏ qua; riêng trường hợp chưa đủ tuổi đặt
 //     Result.Deferred = true. Đúng biên (tuổi == MinAge) thì cho cài.
 //
 // LỖI MẠNG khi hỏi bản mới nhất KHÔNG làm Run trả lỗi — theo đúng yêu cầu
@@ -226,15 +265,16 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	}
 
 	if opts.MinAge > 0 {
-		if meta.PublishedAt.IsZero() {
-			reason := fmt.Sprintf("không đọc được thời điểm phát hành của %s — lịch tự động bỏ qua cho an toàn", latest)
+		since := meta.officialSince()
+		if since.IsZero() {
+			reason := fmt.Sprintf("không đọc được thời điểm phát hành của %s — chế độ --yes (lịch đêm) bỏ qua cho an toàn; %s", latest, installNowHint)
 			opts.logf(true, "genh: %s", reason)
 			return Result{Skipped: true, Reason: reason}, nil
 		}
-		age := opts.now().Sub(meta.PublishedAt)
+		age := opts.now().Sub(since)
 		if age < opts.MinAge {
-			reason := fmt.Sprintf("bản %s mới phát hành %s trước — lịch tự động đợi đủ %s rồi mới cài (bấm \"Cập nhật ngay\" trong Console để cài luôn)",
-				latest, formatDurationVi(age), formatDurationVi(opts.MinAge))
+			reason := fmt.Sprintf("bản %s mới phát hành %s trước — chế độ --yes (lịch đêm) đợi đủ %s rồi mới cài; %s",
+				latest, formatDurationVi(age), formatDurationVi(opts.MinAge), installNowHint)
 			// important=true: dòng này phải vào logs/auto-update.log cả khi --quiet.
 			opts.logf(true, "genh: %s", reason)
 			return Result{Skipped: true, Deferred: true, Reason: reason}, nil
@@ -261,15 +301,35 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	return Result{Updated: true, From: current, To: latest}, nil
 }
 
+// installNowHint là phần "muốn cài ngay thì làm gì" của Reason khi thời
+// gian chín chặn — nút chỉ có khi máy chủ đã cài watcher nhận yêu cầu (Console
+// thiếu watcher thì hiện lệnh), nên nêu cả lệnh gõ tay.
+const installNowHint = "muốn cài ngay: bấm \"Cập nhật ngay\" trong Console hoặc chạy `genh update` (không kèm --yes)"
+
 // releaseMeta là phần JSON cần của response GitHub
 // GET /repos/{owner}/{repo}/releases/latest.
 type releaseMeta struct {
 	TagName string `json:"tag_name"`
-	// PublishedAt rỗng (zero) nếu GitHub trả null/thiếu — Run coi là "không
-	// đọc được thời điểm phát hành" khi đang áp thời gian chín.
+	// PublishedAt rỗng (zero) nếu GitHub trả null/thiếu. Là lúc tạo bản
+	// (bản thử) — promote KHÔNG đổi trường này.
 	PublishedAt time.Time `json:"published_at"`
 	Prerelease  bool      `json:"prerelease"`
 	Draft       bool      `json:"draft"`
+	// Body là ghi chú Release — nơi job promote ghi PromotedMarker.
+	Body string `json:"body"`
+}
+
+// officialSince là mốc tính thời gian chín: lúc bản này thành bản chính
+// thức. Lấy cái MUỘN HƠN giữa dấu promote trong ghi chú và published_at —
+// bản phát hành trước cổng v0.1.33 (thẳng thành latest, không có dấu) dùng
+// published_at; dấu lỡ ghi sớm hơn published_at cũng không làm cổng ngắn
+// đi. Cả hai zero ⇒ zero (Run coi là không đọc được thời điểm phát hành).
+func (m releaseMeta) officialSince() time.Time {
+	since := m.PublishedAt
+	if p := promotedAt(m.Body); p.After(since) {
+		since = p
+	}
+	return since
 }
 
 func latestRelease(ctx context.Context, opts Options) (releaseMeta, error) {

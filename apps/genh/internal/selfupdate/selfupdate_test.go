@@ -26,8 +26,11 @@ type fakeRelease struct {
 	PublishedAt time.Time
 	Prerelease  bool
 	Draft       bool
-	Assets      map[string][]byte
-	Checksums   string
+	// Body là ghi chú Release (nơi job promote ghi PromotedMarker); rỗng ⇒
+	// không có trường body trong JSON.
+	Body      string
+	Assets    map[string][]byte
+	Checksums string
 }
 
 // fakeGH là httptest.Server giả GitHub kèm bộ đếm số request tải
@@ -52,6 +55,9 @@ func fakeGitHub(t *testing.T, rel fakeRelease) *fakeGH {
 		if !rel.PublishedAt.IsZero() {
 			// Đúng định dạng GitHub trả: RFC 3339, UTC, đơn vị giây.
 			body["published_at"] = rel.PublishedAt.UTC().Format(time.RFC3339)
+		}
+		if rel.Body != "" {
+			body["body"] = rel.Body
 		}
 		_ = json.NewEncoder(w).Encode(body)
 	})
@@ -330,7 +336,9 @@ func TestRun_MinAge_BoQuaBanDuoi24h(t *testing.T) {
 	if !res.Deferred {
 		t.Fatalf("chưa đủ thời gian chín thì Deferred phải = true — được %+v", res)
 	}
-	for _, want := range []string{"v0.1.33", "2 giờ trước", "24 giờ", "Cập nhật ngay"} {
+	// Lý do phải nói rõ cờ nào gây đợi và cách cài ngay CẢ KHI Console không
+	// có nút (máy chủ chưa cài watcher): gõ `genh update` không kèm --yes.
+	for _, want := range []string{"v0.1.33", "2 giờ trước", "đợi đủ 24 giờ", "--yes (lịch đêm)", "Cập nhật ngay", "`genh update` (không kèm --yes)"} {
 		if !strings.Contains(res.Reason, want) {
 			t.Errorf("Reason thiếu %q: %q", want, res.Reason)
 		}
@@ -389,6 +397,99 @@ func TestRun_MinAge_ThieuPublishedAt(t *testing.T) {
 	assertNotInstalled(t, res, srv, execPath)
 	if !strings.Contains(res.Reason, "thời điểm phát hành") {
 		t.Errorf("Reason phải nói rõ không đọc được thời điểm phát hành: %q", res.Reason)
+	}
+}
+
+// Bản thử tạo từ lâu (published_at 5 ngày trước) nhưng vừa được promote 2
+// giờ trước (vd promote tay skip_e2e sau khi E2E đỏ) — thời gian chín phải
+// tính từ lúc promote, KHÔNG được lọt cổng chỉ vì published_at đã cũ.
+func TestRun_MinAge_PromoteMuon_TinhTuLucPromote(t *testing.T) {
+	body := "## Điểm mới\n- sửa lỗi\n\n" + PromotedMarker(fixedNow.Add(-2*time.Hour)) + "\n"
+	srv, execPath, opts := minAgeFixture(t, fakeRelease{PublishedAt: fixedNow.Add(-5 * 24 * time.Hour), Body: body})
+	opts.MinAge = NightlyMinAge
+
+	res, err := Run(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	assertNotInstalled(t, res, srv, execPath)
+	if !res.Deferred {
+		t.Fatalf("promote mới 2 giờ thì phải hoãn (Deferred=true) dù published_at đã 5 ngày — được %+v", res)
+	}
+	if !strings.Contains(res.Reason, "2 giờ trước") {
+		t.Errorf("tuổi trong Reason phải tính từ lúc promote (2 giờ), được %q", res.Reason)
+	}
+}
+
+func TestRun_MinAge_PromoteDu24h_Cai(t *testing.T) {
+	body := PromotedMarker(fixedNow.Add(-25 * time.Hour))
+	_, execPath, opts := minAgeFixture(t, fakeRelease{PublishedAt: fixedNow.Add(-5 * 24 * time.Hour), Body: body})
+	opts.MinAge = NightlyMinAge
+
+	res, err := Run(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	assertInstalled(t, res, execPath)
+}
+
+// Dấu promote lỡ ghi SỚM hơn published_at (không xảy ra ở luồng chuẩn) không
+// được làm cổng ngắn đi: lấy mốc muộn hơn.
+func TestRun_MinAge_DauPromoteSomHonPublished_LayMocMuonHon(t *testing.T) {
+	body := PromotedMarker(fixedNow.Add(-30 * time.Hour))
+	srv, execPath, opts := minAgeFixture(t, fakeRelease{PublishedAt: fixedNow.Add(-2 * time.Hour), Body: body})
+	opts.MinAge = NightlyMinAge
+
+	res, err := Run(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	assertNotInstalled(t, res, srv, execPath)
+	if !res.Deferred {
+		t.Fatalf("muốn Deferred=true — được %+v", res)
+	}
+}
+
+// Thiếu published_at nhưng có dấu promote đủ 24 giờ ⇒ vẫn đọc được mốc, cài.
+func TestRun_MinAge_ChiCoDauPromote(t *testing.T) {
+	_, execPath, opts := minAgeFixture(t, fakeRelease{Body: PromotedMarker(fixedNow.Add(-48 * time.Hour))})
+	opts.MinAge = NightlyMinAge
+
+	res, err := Run(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	assertInstalled(t, res, execPath)
+}
+
+func TestPromotedMarker_DinhDangVaDocLai(t *testing.T) {
+	at := time.Date(2026, 10, 1, 12, 34, 56, 0, time.UTC)
+	// Định dạng phải khớp đúng dòng job promote (e2e-install.yml) sinh bằng
+	// `date -u +%Y-%m-%dT%H:%M:%SZ` — check_release_gate.py giữ phía workflow.
+	if got, want := PromotedMarker(at), "<!-- genh:promoted_at=2026-10-01T12:34:56Z -->"; got != want {
+		t.Fatalf("PromotedMarker = %q, muốn %q", got, want)
+	}
+	// Múi giờ khác vẫn ghi ra UTC.
+	if got := PromotedMarker(at.In(time.FixedZone("ICT", 7*3600))); got != PromotedMarker(at) {
+		t.Fatalf("PromotedMarker phải luôn ghi UTC, được %q", got)
+	}
+
+	cases := []struct {
+		name string
+		body string
+		want time.Time
+	}{
+		{"không có dấu", "## Điểm mới\n- a", time.Time{}},
+		{"một dấu", "x\n" + PromotedMarker(at) + "\n", at},
+		{"nhiều dấu lấy muộn nhất", PromotedMarker(at.Add(-time.Hour)) + "\n" + PromotedMarker(at) + "\n" + PromotedMarker(at.Add(-2*time.Hour)), at},
+		{"khoảng trắng thừa", "<!--   genh:promoted_at=2026-10-01T12:34:56Z   -->", at},
+		{"sai định dạng bị bỏ qua", "<!-- genh:promoted_at=hom-qua -->", time.Time{}},
+		{"không phải UTC bị bỏ qua", "<!-- genh:promoted_at=2026-10-01T12:34:56+07:00 -->", time.Time{}},
+	}
+	for _, c := range cases {
+		if got := promotedAt(c.body); !got.Equal(c.want) {
+			t.Errorf("%s: promotedAt = %v, muốn %v", c.name, got, c.want)
+		}
 	}
 }
 
