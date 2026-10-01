@@ -148,7 +148,7 @@ async def test_old_bug_without_parking_cli_never_asks_for_the_new_account(owner_
     """Tái hiện lỗi v0.1.29: không gửi tạm tệp phiên thì CLI (đã đăng nhập) không in link; lần ghi lại tệp khi làm
     mới token bị hiểu là "đăng nhập xong" → Console báo xong với CHÍNH tài khoản cũ, tài khoản mới không bao giờ có."""
     await _login(owner_api, "an")
-    monkeypatch.setattr(climod, "park_token", lambda: None)
+    monkeypatch.setattr(climod, "park_token", lambda *a: None)
     r = await owner_api.send("POST", "/cli/login")
     st = await _wait(owner_api, r.json()["login_id"], ("waiting_code", "done", "failed"))
     assert st["status"] == "done" and st["url"] is None

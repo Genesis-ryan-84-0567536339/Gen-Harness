@@ -1,5 +1,5 @@
 /** Presentation logic for API & Model — mirrors `dataModel.ts` / `agentsModel.ts` conventions. */
-import type { Provider, ProviderKind } from '@gen-harness/contracts';
+import type { ModelGroup, Provider, ProviderKind, ProviderTestResult } from '@gen-harness/contracts';
 
 export const OK = 'var(--color-ok)';
 export const WARN = 'var(--color-warn)';
@@ -10,6 +10,7 @@ export const N5 = 'var(--color-neutral-500)';
 
 export const PROVIDER_ICON: Record<ProviderKind, string> = {
   antigravity_cli: 'ph ph-terminal-window',
+  claude_code_cli: 'ph ph-terminal',
   gemini: 'ph ph-sparkle',
   deepseek: 'ph ph-brain',
   openai_compat: 'ph ph-plugs',
@@ -18,6 +19,7 @@ export const PROVIDER_ICON: Record<ProviderKind, string> = {
 
 export const PROVIDER_KIND_LABEL: Record<ProviderKind, string> = {
   antigravity_cli: 'Antigravity CLI',
+  claude_code_cli: 'Claude Code CLI · gói Claude',
   gemini: 'Gemini API',
   deepseek: 'DeepSeek API',
   openai_compat: 'API tương thích OpenAI',
@@ -57,7 +59,7 @@ export function providerStatus(p: Pick<Provider, 'enabled' | 'auth_state' | 'kin
     case 'error':
       return { label: 'Lỗi kết nối', tone: BAD };
     default:
-      return { label: p.kind === 'antigravity_cli' ? 'Chưa đăng nhập' : 'Chưa kiểm tra', tone: N5 };
+      return { label: isCliKind(p.kind) ? 'Chưa đăng nhập' : 'Chưa kiểm tra', tone: N5 };
   }
 }
 
@@ -78,4 +80,35 @@ export function fmtQuota(used: number, quota: number | null): string {
   if (quota == null) return `${used.toLocaleString('vi-VN')} · không hạn mức`;
   const leftPct = Math.max(0, Math.round(100 - (used * 100) / quota));
   return `${used.toLocaleString('vi-VN')} / ${quota.toLocaleString('vi-VN')} · còn ${leftPct}%`;
+}
+
+// ── v0.1.31: nguồn CLI + danh sách model theo nhóm ─────────────────────────
+/** Nguồn dùng phiên đăng nhập CLI (không khoá API, không xoá ở danh sách nguồn). */
+export function isCliKind(kind: ProviderKind | string): kind is 'antigravity_cli' | 'claude_code_cli' {
+  return kind === 'antigravity_cli' || kind === 'claude_code_cli';
+}
+
+/**
+ * Nhóm model để chọn (Gemini, Claude…) từ lần kiểm tra gần nhất — chỉ khi kiểm tra OK. Máy chủ cũ (không có
+ * `model_groups`) → một nhóm "Model" từ danh sách tên. Bỏ model embedding (không sinh chữ được).
+ */
+export function offeredGroups(t: ProviderTestResult | null | undefined): ModelGroup[] {
+  if (!t?.ok) return [];
+  const notEmbed = (id: string) => !/embed/i.test(id);
+  if (t.model_groups?.length)
+    return t.model_groups.map((g) => ({ ...g, models: g.models.filter((m) => notEmbed(m.id)) })).filter((g) => g.models.length > 0);
+  const ids = (t.models ?? []).filter(notEmbed);
+  return ids.length
+    ? [{ label: 'Model', models: ids.map((id) => ({ id, label: id, group: 'Model', tier: 'balanced' as const, hint: '', source: 'cli' as const })) }]
+    : [];
+}
+
+/** Model đang là mặc định của nguồn (đã "Dùng model này"), không có thì model đã lưu đầu tiên. */
+export function currentModelName(p: Pick<Provider, 'models'>): string | null {
+  return p.models.find((m) => m.is_default)?.model_name ?? p.models[0]?.model_name ?? null;
+}
+
+/** Chữ hiện trong ô chọn: "Gemini 3.8 Flash (High) · nhanh, rẻ". */
+export function modelOptionText(m: { id: string; label: string; hint: string }): string {
+  return m.hint ? `${m.label} · ${m.hint}` : m.label;
 }

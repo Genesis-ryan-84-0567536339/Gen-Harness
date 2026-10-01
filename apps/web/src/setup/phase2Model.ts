@@ -1,10 +1,18 @@
 /** Pure logic for setup steps 4–7 and 12 (unit-tested). */
-import type { ChannelGroup, FirstRun, ListenMode, Provider, ProviderTestResult, RefineryProgress, SetupState, ViewScope } from '@gen-harness/contracts';
+import type { ChannelGroup, CliKind, FirstRun, ListenMode, Provider, ProviderTestResult, RefineryProgress, SetupState, ViewScope } from '@gen-harness/contracts';
 
-/** Bước 4: a provider can go into the chain when it tested OK here, is already healthy, or is the CLI with an active profile. */
-export function providerReady(p: Provider, tested: Record<string, ProviderTestResult>, cliActive: boolean): boolean {
+/**
+ * Bước 4: a provider can go into the chain when it tested OK here, is already healthy, or is a CLI with an active
+ * profile. `cliActive`: one flag (Antigravity, older callers) or one per CLI kind (v0.1.31: + Claude Code).
+ */
+export function providerReady(
+  p: Provider,
+  tested: Record<string, ProviderTestResult>,
+  cliActive: boolean | Partial<Record<CliKind, boolean>>,
+): boolean {
   if (tested[p.id]) return tested[p.id].ok;
-  if (p.kind === 'antigravity_cli') return cliActive;
+  if (p.kind === 'antigravity_cli' || p.kind === 'claude_code_cli')
+    return typeof cliActive === 'boolean' ? (p.kind === 'antigravity_cli' ? cliActive : false) : !!cliActive[p.kind];
   return p.auth_state === 'ok';
 }
 

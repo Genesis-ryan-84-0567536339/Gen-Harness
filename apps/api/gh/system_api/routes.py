@@ -247,12 +247,15 @@ async def patch_group(gid: uuid.UUID, body: GroupPatch, request: Request, user: 
 # ─── Nhà cung cấp & khoá ───────────────────────────────────────────────────
 
 # `system_one` (v0.1.21) = Jev của TypeSafe — bộ quyết định nhanh cho Gen (gh.gen.jev), KHÔNG vào chuỗi sinh chữ.
-PROVIDER_KINDS = ("antigravity_cli", "gemini", "deepseek", "openai_compat", "system_one")
+# `claude_code_cli` (v0.1.31) = Claude Code CLI bằng gói Claude của Owner (QD-12: Owner tự quyết rủi ro điều khoản).
+PROVIDER_KINDS = ("antigravity_cli", "claude_code_cli", "gemini", "deepseek", "openai_compat", "system_one")
+CLI_KINDS = climod.CLI_KINDS
+CliKind = Literal["antigravity_cli", "claude_code_cli"]
 KEY_PREFIX = {"gemini": "GEM", "deepseek": "DS", "openai_compat": "API", "system_one": "JEV"}
 
 
 class ProviderIn(BaseModel):
-    kind: Literal["antigravity_cli", "gemini", "deepseek", "openai_compat", "system_one"]
+    kind: Literal["antigravity_cli", "claude_code_cli", "gemini", "deepseek", "openai_compat", "system_one"]
     name: str = Field(min_length=1, max_length=80)
     endpoint: str | None = Field(default=None, max_length=300)
     keys: list[str] = Field(default_factory=list, max_length=20)
@@ -272,6 +275,8 @@ class ModelIn(BaseModel):
     model_name: str = Field(min_length=1, max_length=120)
     daily_quota: int | None = Field(default=None, ge=1)
     rate_limit_per_min: int | None = Field(default=None, ge=1)
+    # v0.1.31: "Dùng model này" → model mặc định của nguồn. Nguồn CLI: model MỚI được gọi thử thật trước khi lưu.
+    make_default: bool = False
 
 
 async def _add_key(db: AsyncSession, provider_id: uuid.UUID, kind: str, secret: str) -> None:
@@ -291,7 +296,8 @@ async def provider_payloads(db: AsyncSession, redis: Any, org_id: uuid.UUID) -> 
     for p in rows:
         keys = (await db.execute(text("""SELECT id, label, last4, is_enabled FROM agent.provider_keys
                                          WHERE provider_id = :p ORDER BY rotation_order"""), {"p": p.id})).all()
-        models = (await db.execute(text("""SELECT id, model_name, daily_quota, rate_limit_per_min, is_enabled
+        models = (await db.execute(text("""SELECT id, model_name, daily_quota, rate_limit_per_min, is_enabled,
+                                                  is_default
                                            FROM agent.models WHERE provider_id = :p ORDER BY id"""),
                                    {"p": p.id})).all()
         key_out = []
@@ -305,6 +311,7 @@ async def provider_payloads(db: AsyncSession, redis: Any, org_id: uuid.UUID) -> 
             used = int(await redis.get(quota_key(m.id)) or 0)
             model_out.append({"id": str(m.id), "model_name": m.model_name, "daily_quota": m.daily_quota,
                               "rate_limit_per_min": m.rate_limit_per_min, "enabled": m.is_enabled,
+                              "is_default": m.is_default,
                               "used_today": used,
                               "left_pct": (round(max(0, 100 - used * 100 / m.daily_quota), 1)
                                            if m.daily_quota else None)})
@@ -337,15 +344,15 @@ async def create_provider(body: ProviderIn, request: Request, user: service.Curr
                           db: AsyncSession = DB) -> dict[str, Any]:
     if body.kind == "openai_compat" and not body.endpoint:
         raise field_errors({"endpoint": "Cần endpoint cho API tương thích OpenAI"})
-    if body.kind != "antigravity_cli" and not body.keys:
+    if body.kind not in CLI_KINDS and not body.keys:
         raise field_errors({"keys": "Cần ít nhất một khoá API"})
     if body.kind == "system_one":
         body.endpoint = (body.endpoint or jev.DEFAULT_BASE_URL).rstrip("/")
         if not body.endpoint.startswith("https://"):
             raise field_errors({"endpoint": "Địa chỉ Jev phải bắt đầu bằng https://"})
         body.models = body.models or [jev.DEFAULT_MODEL]
-    if body.kind == "antigravity_cli":
-        pid = await climod.cli_provider_id(db, user.org_id)
+    if body.kind in CLI_KINDS:
+        pid = await climod.cli_provider_id(db, user.org_id, body.kind)
         await db.execute(text("UPDATE agent.providers SET name = :n WHERE id = :i"), {"n": body.name, "i": pid})
     else:
         rank = (await db.execute(text("""SELECT COALESCE(max(failover_rank), 0) + 1 FROM agent.providers
@@ -419,8 +426,9 @@ async def delete_provider(pid: uuid.UUID, user: service.CurrentUser = Depends(MA
     các agent đang trỏ vào model của nguồn này (agent đó quay về dùng chuỗi chung). Antigravity CLI dùng phiên đăng
     nhập — gỡ ở thẻ tài khoản CLI, không xoá ở đây."""
     p = await _provider(db, user.org_id, pid)
-    if p.kind == "antigravity_cli":
-        raise conflict("CLI_PROVIDER", "Antigravity CLI gỡ bằng cách xoá tài khoản ở thẻ Tài khoản Antigravity CLI")
+    if p.kind in CLI_KINDS:
+        name = climod.spec(p.kind).name
+        raise conflict("CLI_PROVIDER", f"{name} gỡ bằng cách xoá tài khoản ở thẻ Tài khoản {name}")
     await db.execute(text("""DELETE FROM agent.bindings WHERE org_id = :o
                              AND model_id IN (SELECT id FROM agent.models WHERE provider_id = :p)"""),
                      {"o": user.org_id, "p": pid})
@@ -436,8 +444,8 @@ async def delete_provider(pid: uuid.UUID, user: service.CurrentUser = Depends(MA
 async def add_key(pid: uuid.UUID, body: KeyIn, request: Request, user: service.CurrentUser = Depends(MANAGE),
                   db: AsyncSession = DB) -> dict[str, Any]:
     p = await _provider(db, user.org_id, pid)
-    if p.kind == "antigravity_cli":
-        raise conflict("CLI_NO_KEYS", "Antigravity CLI dùng phiên đăng nhập, không dùng khoá API")
+    if p.kind in CLI_KINDS:
+        raise conflict("CLI_NO_KEYS", f"{climod.spec(p.kind).name} dùng phiên đăng nhập, không dùng khoá API")
     await _add_key(db, pid, p.kind, body.secret)
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                            action="provider.key_added",
@@ -464,10 +472,30 @@ async def delete_key(pid: uuid.UUID, kid: uuid.UUID, user: service.CurrentUser =
 async def add_model(pid: uuid.UUID, body: ModelIn, request: Request, user: service.CurrentUser = Depends(MANAGE),
                     db: AsyncSession = DB) -> dict[str, Any]:
     p = await _provider(db, user.org_id, pid)
+    name = body.model_name.strip()
+    exists = (await db.execute(text("SELECT 1 FROM agent.models WHERE provider_id = :p AND model_name = :m"),
+                               {"p": pid, "m": name})).scalar_one_or_none()
+    if p.kind in CLI_KINDS and not exists:
+        # v0.1.31: danh sách model của CLI có thể là danh mục dự phòng → gọi thử THẬT trước khi lưu; CLI từ chối thì
+        # không lưu (không bao giờ ghi một mã model mà CLI không nhận).
+        await db.commit()
+        probe = await request.app.state.model_router.probe_model(pid, name)
+        if not probe["ok"]:
+            await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
+                                   action="provider.model_rejected", target_type="provider", target_id=str(pid),
+                                   target_label=p.name, result="failed",
+                                   detail={"model": name, "error": probe["error"]}, ip=user.ip)
+            await db.commit()
+            raise field_errors({"model_name": probe["error"]})
     await db.execute(text("""
         INSERT INTO agent.models (provider_id, model_name, daily_quota, rate_limit_per_min) VALUES (:p, :m, :q, :r)
         ON CONFLICT (provider_id, model_name) DO UPDATE SET daily_quota = :q, rate_limit_per_min = :r"""),
-        {"p": pid, "m": body.model_name.strip(), "q": body.daily_quota, "r": body.rate_limit_per_min})
+        {"p": pid, "m": name, "q": body.daily_quota, "r": body.rate_limit_per_min})
+    if body.make_default:
+        await db.execute(text("UPDATE agent.models SET is_default = false WHERE provider_id = :p AND is_default"),
+                         {"p": pid})
+        await db.execute(text("""UPDATE agent.models SET is_default = true, is_enabled = true
+                                 WHERE provider_id = :p AND model_name = :m"""), {"p": pid, "m": name})
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                            action="provider.model_set", target_type="provider", target_id=str(pid),
                            target_label=p.name, detail=body.model_dump(), ip=user.ip)
@@ -492,7 +520,7 @@ async def credentials(request: Request, user: service.CurrentUser = Depends(READ
     """Dòng thẻ "Khoá & phiên" (thiết kế `creds`): khoá API theo nhà cung cấp + khoá phiên QR theo kênh."""
     out: list[dict[str, Any]] = []
     for p in await provider_payloads(db, request.app.state.redis, user.org_id):
-        if p["kind"] == "antigravity_cli":
+        if p["kind"] in CLI_KINDS:
             state = {"ok": "ok", "expiring": "warn"}.get(p["auth_state"], "bad")
             out.append({"icon": "terminal-window", "name": f"{p['name']} — phiên CLI",
                         "meta": p["account_label"] or "chưa đăng nhập", "state": state,
@@ -526,26 +554,32 @@ async def credentials(request: Request, user: service.CurrentUser = Depends(READ
     return out
 
 
-# ─── Antigravity CLI ───────────────────────────────────────────────────────
+# ─── CLI: Antigravity (Google) và Claude Code (v0.1.31) ─────────────────────
+
+async def _profile_kind(db: AsyncSession, org_id: uuid.UUID, profile_id: uuid.UUID) -> str | None:
+    return (await db.execute(text("""SELECT p.kind FROM agent.cli_profiles c JOIN agent.providers p
+                                     ON p.id = c.provider_id WHERE c.id = :i AND c.org_id = :o"""),
+                             {"i": profile_id, "o": org_id})).scalar_one_or_none()
+
 
 class CodeIn(BaseModel):
     code: str = Field(min_length=4, max_length=500)
 
 
 @router.get("/cli/profiles")
-async def cli_profiles(user: service.CurrentUser = Depends(READ),
+async def cli_profiles(kind: CliKind = "antigravity_cli", user: service.CurrentUser = Depends(READ),
                        db: AsyncSession = DB) -> list[dict[str, Any]]:
-    return await climod.profiles(db, user.org_id)
+    return await climod.profiles(db, user.org_id, kind)
 
 
 @router.post("/cli/login", status_code=202)
-async def cli_login(request: Request, user: service.CurrentUser = Depends(MANAGE),
+async def cli_login(request: Request, kind: CliKind = "antigravity_cli", user: service.CurrentUser = Depends(MANAGE),
                     db: AsyncSession = DB) -> dict[str, Any]:
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
-                           action="cli.login_started", target_type="cli", ip=user.ip)
+                           action="cli.login_started", target_type="cli", detail={"kind": kind}, ip=user.ip)
     await db.commit()
-    s = await request.app.state.cli_logins.start(user.org_id, user.id)
-    return {"login_id": s.id}
+    s = await request.app.state.cli_logins.start(user.org_id, user.id, kind)
+    return {"login_id": s.id, "kind": kind}
 
 
 @router.get("/cli/login/{login_id}")
@@ -580,24 +614,24 @@ async def cli_cancel(login_id: str, request: Request, user: service.CurrentUser 
 async def cli_activate(profile_id: uuid.UUID, request: Request, user: service.CurrentUser = Depends(MANAGE),
                        _pin: Any = Depends(require_pin("cli.switch_account")),
                        db: AsyncSession = DB) -> dict[str, Any]:
-    if request.app.state.cli_logins.busy(user.org_id):
+    if request.app.state.cli_logins.busy(user.org_id, await _profile_kind(db, user.org_id, profile_id)):
         # Đang thêm tài khoản: tệp phiên đang để trống cho CLI — ghi tệp lúc này sẽ bị nhận nhầm là tài khoản mới.
         raise conflict("CLI_LOGIN_IN_PROGRESS",
-                       "Đang đăng nhập thêm một tài khoản Google — hoàn tất hoặc huỷ bước đó rồi đổi tài khoản")
+                       "Đang đăng nhập thêm một tài khoản — hoàn tất hoặc huỷ bước đó rồi đổi tài khoản")
     out = await climod.activate(db, user.org_id, profile_id)
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                            action="cli.account_switched", target_type="cli_profile", target_id=out["id"],
                            target_label=out["email"], ip=user.ip)
-    return next(p for p in await climod.profiles(db, user.org_id) if p["id"] == out["id"])
+    return next(p for p in await climod.profiles(db, user.org_id, out["kind"]) if p["id"] == out["id"])
 
 
 @router.delete("/cli/profiles/{profile_id}", status_code=204)
 async def cli_delete(profile_id: uuid.UUID, request: Request, user: service.CurrentUser = Depends(MANAGE),
                      _pin: Any = Depends(require_pin("cli.switch_account")),
                      db: AsyncSession = DB) -> Response:
-    if request.app.state.cli_logins.busy(user.org_id):
+    if request.app.state.cli_logins.busy(user.org_id, await _profile_kind(db, user.org_id, profile_id)):
         raise conflict("CLI_LOGIN_IN_PROGRESS",
-                       "Đang đăng nhập thêm một tài khoản Google — hoàn tất hoặc huỷ bước đó rồi xoá tài khoản")
+                       "Đang đăng nhập thêm một tài khoản — hoàn tất hoặc huỷ bước đó rồi xoá tài khoản")
     out = await climod.delete_profile(db, user.org_id, profile_id)
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                            action="cli.profile_deleted", target_type="cli_profile", target_id=str(profile_id),

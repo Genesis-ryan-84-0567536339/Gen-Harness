@@ -8,12 +8,18 @@ WORKDIR /app/apps/api
 ARG AGY_VERSION=1.2.9
 ARG AGY_SHA256_AMD64=d9850373f3df866011024a961fa9740cc4adaac060eebe9c70fbf263ac6b2624
 ARG AGY_SHA256_ARM64=8a63cf4c4f559e2ff91bd46fbdf015ca7937415805d0cff82015b9cb9dbbdfcd
+# v0.1.31 — Claude Code CLI chính hãng của Anthropic (tuỳ chọn, TẮT tới khi Owner đăng nhập gói Claude; QD-12): bản dựng
+# native trong gói npm theo nền tảng @anthropic-ai/claude-code-linux-<arch> (không cần Node), ghim phiên bản + SHA-256
+# của tệp .tgz (đã đối chiếu với dist.integrity sha512 của npm). Tắt tự cập nhật (DISABLE_AUTOUPDATER).
+ARG CLAUDE_CODE_VERSION=2.1.285
+ARG CLAUDE_SHA256_AMD64=3fea1abf2d5f42236ebf7e59126698e347ac80437a145dd6e85b87c8c3341ffe
+ARG CLAUDE_SHA256_ARM64=f8a0dc539db3c860bdd12a345a51db798908b089a1696f9720c57776dace4cbf
 ARG TARGETARCH
 RUN set -eux; \
     apt-get update; apt-get install -y --no-install-recommends ca-certificates curl; \
     case "${TARGETARCH:-amd64}" in \
-      amd64) arch=x64; sum="$AGY_SHA256_AMD64" ;; \
-      arm64) arch=arm64; sum="$AGY_SHA256_ARM64" ;; \
+      amd64) arch=x64; sum="$AGY_SHA256_AMD64"; csum="$CLAUDE_SHA256_AMD64" ;; \
+      arm64) arch=arm64; sum="$AGY_SHA256_ARM64"; csum="$CLAUDE_SHA256_ARM64" ;; \
       *) echo "Kiến trúc chưa hỗ trợ: $TARGETARCH"; exit 1 ;; \
     esac; \
     curl -fsSL -o /tmp/agy.tgz "https://github.com/google-antigravity/antigravity-cli/releases/download/${AGY_VERSION}/agy_cli_linux_${arch}.tar.gz"; \
@@ -21,6 +27,12 @@ RUN set -eux; \
     tar -xzf /tmp/agy.tgz -C /usr/local/bin antigravity; \
     chmod 0755 /usr/local/bin/antigravity; ln -s /usr/local/bin/antigravity /usr/local/bin/agy; \
     rm -f /tmp/agy.tgz; \
+    curl -fsSL -o /tmp/claude.tgz "https://registry.npmjs.org/@anthropic-ai/claude-code-linux-${arch}/-/claude-code-linux-${arch}-${CLAUDE_CODE_VERSION}.tgz"; \
+    echo "$csum  /tmp/claude.tgz" | sha256sum -c -; \
+    tar -xzf /tmp/claude.tgz -C /tmp package/claude; \
+    install -m 0755 /tmp/package/claude /usr/local/bin/claude; \
+    rm -rf /tmp/claude.tgz /tmp/package; \
+    DISABLE_AUTOUPDATER=1 HOME=/tmp claude --version; \
     # pg_dump/pg_restore cho gh.backup và gh.bundle (genh backup/update/export/import) — thiếu nó
     # mọi luồng sao lưu chết với FileNotFoundError: 'pg_dump' (phát hiện ở e2e cài thật). Phải
     # CÙNG major với server (db.Dockerfile: Postgres 16): lấy từ kho chính thức apt.postgresql.org
@@ -46,8 +58,11 @@ COPY plugins /app/plugins
 # volume sẽ được tạo với quyền root, tiến trình chạy dưới USER gh (dòng dưới)
 # sẽ không ghi được tài liệu/backup.
 RUN useradd --system --uid 10001 --home-dir /home/gh --create-home gh \
-    && mkdir -p /var/lib/gh/agy/.gemini/antigravity-cli /var/lib/gh/objects && chown -R gh:gh /var/lib/gh
-ENV GH_CLI_HOME=/var/lib/gh/agy/.gemini/antigravity-cli GH_CLI_BINARY=agy AGY_CLI_DISABLE_AUTO_UPDATE=1
+    && mkdir -p /var/lib/gh/agy/.gemini/antigravity-cli /var/lib/gh/agy/claude/.claude /var/lib/gh/objects \
+    && chown -R gh:gh /var/lib/gh
+# Phiên Claude Code nằm trong CÙNG volume agy_state (api và worker đã mount chung) — không thêm volume mới.
+ENV GH_CLI_HOME=/var/lib/gh/agy/.gemini/antigravity-cli GH_CLI_BINARY=agy AGY_CLI_DISABLE_AUTO_UPDATE=1 \
+    GH_CLAUDE_HOME=/var/lib/gh/agy/claude/.claude GH_CLAUDE_BINARY=claude DISABLE_AUTOUPDATER=1
 USER gh
 EXPOSE 8000
 HEALTHCHECK --interval=15s --timeout=3s --retries=5 \

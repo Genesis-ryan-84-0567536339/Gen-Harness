@@ -410,15 +410,17 @@ async def step4(body: Step4In, request: Request, db: AsyncSession = DB,
         SELECT p.id, p.kind, p.auth_state, COALESCE((p.last_test->>'ok')::boolean, false) AS tested,
                CASE WHEN jsonb_typeof(p.last_test->'models') = 'array' THEN
                     ARRAY(SELECT jsonb_array_elements_text(p.last_test->'models')) END AS test_models,
+               p.last_test->>'probe_model' AS probe_model,
                EXISTS (SELECT 1 FROM agent.cli_profiles c WHERE c.provider_id = p.id AND c.is_active) AS cli_ok
         FROM agent.providers p WHERE p.org_id = :o AND p.id = ANY(:ids)"""),
         {"o": row.org_id, "ids": ids})).all()
     if len(found) != len(ids):
         raise field_errors({"provider_ids": "Có nhà cung cấp không tồn tại"})
     ready = [p for p in found if p.kind != "system_one"  # Jev không sinh được văn bản
-             and (p.cli_ok if p.kind == "antigravity_cli" else p.tested and p.auth_state == "ok")]
+             and (p.cli_ok if p.kind in CLI_KINDS else p.tested and p.auth_state == "ok")]
     if not ready:
-        raise incomplete("Cần ít nhất một nhà cung cấp đã gọi thử thành công, hoặc Antigravity CLI đã đăng nhập")
+        raise incomplete("Cần ít nhất một nhà cung cấp đã gọi thử thành công, hoặc một CLI (Antigravity / Claude Code) "
+                         "đã đăng nhập")
     # v0.1.28 (UX C1): nguồn đã gọi thử OK mà Owner chưa bấm "Dùng model này" → tự dùng model đầu tiên nhận được khi
     # gọi thử (bỏ model embedding). Không nguồn nào có model → chưa cho qua bước (trước đây qua được nhưng không agent
     # nào gọi được model: sàng lọc không chạy, Gen báo "chưa có model").
@@ -429,7 +431,7 @@ async def step4(body: Step4In, request: Request, db: AsyncSession = DB,
             continue
         mid = await _first_model(db, p.id)
         if mid is None:
-            name = next((m for m in (p.test_models or []) if isinstance(m, str) and "embed" not in m.lower()), None)
+            name = _tested_name(p)
             if name:
                 mid = (await db.execute(text("""
                     INSERT INTO agent.models (provider_id, model_name) VALUES (:p, :m)
@@ -467,18 +469,19 @@ async def auto_assign_tested_model(db: AsyncSession, org_id: uuid.UUID) -> uuid.
     trống. Không có nguồn nào như vậy → None, không đổi gì."""
     rows = (await db.execute(text("""
         SELECT p.id, CASE WHEN jsonb_typeof(p.last_test->'models') = 'array' THEN
-                    ARRAY(SELECT jsonb_array_elements_text(p.last_test->'models')) END AS test_models
+                    ARRAY(SELECT jsonb_array_elements_text(p.last_test->'models')) END AS test_models,
+               p.last_test->>'probe_model' AS probe_model
         FROM agent.providers p
         WHERE p.org_id = :o AND p.kind <> 'system_one' AND p.is_enabled
-          AND ((p.kind = 'antigravity_cli' AND EXISTS (SELECT 1 FROM agent.cli_profiles c
+          AND ((p.kind IN ('antigravity_cli', 'claude_code_cli') AND EXISTS (SELECT 1 FROM agent.cli_profiles c
                                                       WHERE c.provider_id = p.id AND c.is_active))
-               OR (p.kind <> 'antigravity_cli' AND p.auth_state = 'ok'
+               OR (p.kind NOT IN ('antigravity_cli', 'claude_code_cli') AND p.auth_state = 'ok'
                    AND COALESCE((p.last_test->>'ok')::boolean, false)))
         ORDER BY p.failover_rank NULLS LAST, p.created_at"""), {"o": org_id})).all()
     for p in rows:
         mid = await _first_model(db, p.id)
         if mid is None:
-            name = next((m for m in (p.test_models or []) if isinstance(m, str) and "embed" not in m.lower()), None)
+            name = _tested_name(p)
             if name is None:
                 continue
             mid = (await db.execute(text("""
@@ -490,9 +493,22 @@ async def auto_assign_tested_model(db: AsyncSession, org_id: uuid.UUID) -> uuid.
     return None
 
 
+CLI_KINDS = ("antigravity_cli", "claude_code_cli")
+
+
+def _tested_name(p: Any) -> str | None:
+    """Model tự dùng khi Owner chưa bấm "Dùng model này": model ĐÃ gọi thử thật thành công (v0.1.31, nguồn CLI), không
+    có thì model đầu tiên nhận được khi gọi thử (bỏ embedding)."""
+    if isinstance(getattr(p, "probe_model", None), str) and p.probe_model:
+        return str(p.probe_model)[:120]
+    name = next((m for m in (p.test_models or []) if isinstance(m, str) and "embed" not in m.lower()), None)
+    return name[:120] if name else None
+
+
 async def _first_model(db: AsyncSession, provider_id: uuid.UUID) -> uuid.UUID | None:
     return (await db.execute(text("""SELECT id FROM agent.models WHERE provider_id = :p
-                                     AND is_enabled AND model_name NOT ILIKE '%embed%' ORDER BY id LIMIT 1"""),
+                                     AND is_enabled AND model_name NOT ILIKE '%embed%'
+                                     ORDER BY is_default DESC, id LIMIT 1"""),
                              {"p": provider_id})).scalar_one_or_none()
 
 

@@ -443,7 +443,9 @@ export interface ChannelStatusEvent {
 
 // ── AI brain ──────────────────────────────────────────────────────────────
 /** `system_one` = Jev (TypeSafe System One, v0.1.21): bộ quyết định nhanh cho Gen — KHÔNG nằm trong chuỗi sinh chữ. */
-export type ProviderKind = 'antigravity_cli' | 'gemini' | 'deepseek' | 'openai_compat' | 'system_one';
+export type ProviderKind = 'antigravity_cli' | 'claude_code_cli' | 'gemini' | 'deepseek' | 'openai_compat' | 'system_one';
+/** v0.1.31: nguồn dùng phiên đăng nhập CLI (không khoá API): Antigravity (Google) và Claude Code (gói Claude). */
+export type CliKind = 'antigravity_cli' | 'claude_code_cli';
 
 export interface ProviderKey {
   id: string;
@@ -459,6 +461,24 @@ export interface ProviderModel {
   model_name: string;
   daily_quota: number | null;
   used_today: number;
+  /** v0.1.31: model mặc định của nguồn ("Dùng model này"). */
+  is_default?: boolean;
+}
+
+/** v0.1.31: một model trong danh sách chọn — nhóm theo họ (Gemini, Claude…), kèm gợi ý nhanh/rẻ hay mạnh. */
+export interface ModelOption {
+  id: string;
+  label: string;
+  group: string;
+  tier: 'fast' | 'balanced' | 'strong';
+  hint: string;
+  /** `cli` = CLI liệt kê được; `catalog` = danh mục dự phòng (gọi thử thật trước khi lưu). */
+  source: 'cli' | 'catalog';
+}
+
+export interface ModelGroup {
+  label: string;
+  models: ModelOption[];
 }
 
 export interface Provider {
@@ -488,6 +508,11 @@ export interface ProviderTestResult {
   latency_ms: number | null;
   models: string[];
   error: string | null;
+  /** v0.1.31: danh sách nhóm model (CLI và khoá API). */
+  model_groups?: ModelGroup[];
+  models_source?: 'cli' | 'catalog';
+  /** v0.1.31 (nguồn CLI): model đã gọi thật thành công trong lần kiểm tra này. */
+  probe_model?: string | null;
 }
 
 export interface Credential {
@@ -500,6 +525,10 @@ export interface Credential {
 
 export interface CliProfile {
   id: string;
+  /** v0.1.31: loại CLI của hồ sơ (mặc định Antigravity). */
+  kind?: CliKind;
+  /** v0.1.31: còn refresh token — CLI tự gia hạn, token ngắn hạn quá giờ vẫn dùng được. */
+  refreshable?: boolean;
   /** null khi tệp phiên không cho biết email (id_token thiếu, userinfo lỗi) — UI hiện "Tài khoản Google". */
   email: string | null;
   plan_label: string | null;
@@ -517,6 +546,7 @@ export type CliLoginStatus = 'starting' | 'waiting_code' | 'verifying' | 'done' 
 
 export interface CliLoginEvent {
   login_id: string;
+  kind?: CliKind;
   status: CliLoginStatus;
   url?: string | null;
   message?: string | null;

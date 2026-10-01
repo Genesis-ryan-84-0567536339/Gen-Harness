@@ -8,7 +8,8 @@ import { useCan } from '../../lib/permissions';
 import { toast } from '../../lib/toast';
 import { CardError, FriendlyErrorText, InlineError, Panel, ScreenHead, SkeletonLines, StateChip } from '../common';
 import { CliCard } from '../system/CliCard';
-import { PROVIDER_ICON, PROVIDER_KIND_LABEL, fmtContextTokens, fmtQuota, fmtTemperature, providerStatus } from './apiModel';
+import { ModelPicker } from './ModelPicker';
+import { PROVIDER_ICON, PROVIDER_KIND_LABEL, fmtContextTokens, fmtQuota, fmtTemperature, isCliKind, providerStatus } from './apiModel';
 import {
   useAddModel,
   useAddProviderKey,
@@ -32,7 +33,7 @@ export function ApiScreen() {
   const [addingKeyFor, setAddingKeyFor] = useState<Provider | null>(null);
 
   const testAllConnections = async () => {
-    const list = (providers.data ?? []).filter((p) => p.kind !== 'antigravity_cli' && p.kind !== 'system_one');
+    const list = (providers.data ?? []).filter((p) => !isCliKind(p.kind) && p.kind !== 'system_one');
     let ok = 0;
     for (const p of list) {
       try {
@@ -92,6 +93,7 @@ export function ApiScreen() {
       </div>
 
       <CliCard canManage={canManage} />
+      <CliCard canManage={canManage} kind="claude_code_cli" showCredentials={false} />
 
       {addingProvider ? <AddProviderDialog onClose={() => setAddingProvider(false)} /> : null}
       {addingKeyFor ? <AddKeyDialog provider={addingKeyFor} onClose={() => setAddingKeyFor(null)} /> : null}
@@ -133,9 +135,9 @@ function ProviderCard({ provider: p, canManage, onAddKey }: { provider: Provider
         {p.endpoint ? <ProviderField label="ĐỊA CHỈ GỌI" value={p.endpoint} tone="var(--color-neutral-300)" /> : null}
         <ProviderField
           label="KHOÁ"
-          value={p.kind === 'antigravity_cli' ? 'dùng phiên đăng nhập CLI' : p.keys.length ? p.keys.map((k) => `${k.label} ····${k.last4}`).join(' · ') : 'chưa có khoá'}
-          tone={p.keys.length || p.kind === 'antigravity_cli' ? 'var(--color-neutral-300)' : 'var(--color-warn)'}
-          secret={p.kind !== 'antigravity_cli' && p.keys.length > 0}
+          value={isCliKind(p.kind) ? 'dùng phiên đăng nhập CLI' : p.keys.length ? p.keys.map((k) => `${k.label} ····${k.last4}`).join(' · ') : 'chưa có khoá'}
+          tone={p.keys.length || isCliKind(p.kind) ? 'var(--color-neutral-300)' : 'var(--color-warn)'}
+          secret={!isCliKind(p.kind) && p.keys.length > 0}
         />
         <ProviderField
           label="MODEL"
@@ -144,7 +146,7 @@ function ProviderCard({ provider: p, canManage, onAddKey }: { provider: Provider
         />
       </div>
       <div className="apm-provider__foot">
-        {canManage && p.kind !== 'antigravity_cli' ? (
+        {canManage && !isCliKind(p.kind) ? (
           <Button variant="ghost" className="btn-22" icon="ph ph-key" onClick={onAddKey}>
             Thêm khoá
           </Button>
@@ -152,7 +154,7 @@ function ProviderCard({ provider: p, canManage, onAddKey }: { provider: Provider
         <Button variant="secondary" className="btn-22" icon="ph ph-pulse" loading={test.isPending && test.variables === p.id} onClick={() => test.mutate(p.id)}>
           Kiểm tra kết nối
         </Button>
-        {canManage && p.kind !== 'antigravity_cli' && p.kind !== 'system_one' ? (
+        {canManage && !isCliKind(p.kind) && p.kind !== 'system_one' ? (
           <Button
             variant="ghost"
             className="btn-22"
@@ -174,6 +176,7 @@ function ProviderCard({ provider: p, canManage, onAddKey }: { provider: Provider
           {lastResult.ok ? `Kết nối được · độ trễ ${lastResult.latency_ms} ms` : <FriendlyErrorText raw={lastResult.error} />}
         </div>
       ) : null}
+      {canManage && p.kind !== 'system_one' ? <ModelPicker provider={p} test={lastResult ?? p.last_test} /> : null}
       {testErr ? <InlineError>{errorText(testErr)}</InlineError> : null}
       {remove.isError ? <InlineError>{errorText(remove.error)}</InlineError> : null}
     </article>

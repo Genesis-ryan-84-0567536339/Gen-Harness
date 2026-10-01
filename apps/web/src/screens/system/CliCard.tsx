@@ -1,21 +1,32 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { ApiError, type CliProfile } from '@gen-harness/contracts';
+import { ApiError, type CliKind, type CliProfile } from '@gen-harness/contracts';
 import { Button, Dialog, EmptyState, Icon, TextField } from '@gen-harness/ui';
 import { api } from '../../lib/api';
-import { qk2, useCliProfiles } from '../../lib/dataQueries';
+import { cliProfilesKey, qk2, useCliProfiles } from '../../lib/dataQueries';
 import { emailInitials } from '../../lib/format';
 import { queryClient } from '../../lib/queryClient';
 import { toast } from '../../lib/toast';
 import { useNow } from '../../lib/useNow';
 import { errorText } from '../../lib/errorText';
 import { CardError, InlineError, SkeletonLines, StateChip } from '../common';
-import { CLI_LOGIN_TEXT, cliAccountLabel, cliChip, cliMeta, cliSwitchError, credTone } from './systemModel';
+import {
+  CLAUDE_CONSUMER_TERMS_URL,
+  CLAUDE_TERMS_URL,
+  CLI_LOGIN_TEXT,
+  CLI_TEXT,
+  cliAccountLabel,
+  cliChip,
+  cliMeta,
+  cliSwitchError,
+  credTone,
+} from './systemModel';
 import { useCliLogin, type CliLogin } from './useCliLogin';
 
 export function CliLoginPanel({ login }: { login: CliLogin }) {
   const [code, setCode] = useState('');
   const { event, status } = login;
+  const txt = CLI_TEXT[login.kind];
   useEffect(() => {
     if (status === 'waiting_code') setCode('');
   }, [status]);
@@ -43,7 +54,7 @@ export function CliLoginPanel({ login }: { login: CliLogin }) {
           <div className="cli-login__links">
             <a className="cli-login__url" href={event.url} target="_blank" rel="noopener noreferrer">
               <Icon name="ph ph-arrow-square-out" size={13} />
-              Mở trang đăng nhập Google
+              {txt.openLink}
             </a>
             <Button
               variant="ghost"
@@ -52,15 +63,15 @@ export function CliLoginPanel({ login }: { login: CliLogin }) {
               onClick={() => {
                 const url = event.url ?? '';
                 void navigator.clipboard?.writeText(url).then(
-                  () => toast('Đã chép link — dán vào trình duyệt đang đăng nhập Google.', 'neutral'),
-                  () => toast('Không chép được — bấm giữ link “Mở trang đăng nhập Google” để chép.', 'warn'),
+                  () => toast(`Đã chép link — dán vào trình duyệt đang đăng nhập ${txt.account}.`, 'neutral'),
+                  () => toast(`Không chép được — bấm giữ link “${txt.openLink}” để chép.`, 'warn'),
                 );
               }}
             >
               Chép link
             </Button>
           </div>
-          <p className="cli-login__hint">Đăng nhập đúng tài khoản Google muốn dùng; trang Google sẽ hiện một mã — chép mã đó dán vào ô bên dưới.</p>
+          <p className="cli-login__hint">{txt.hint}</p>
           {/* Not a <form>: this panel also sits inside the setup wizard's form (no nested forms). */}
           <div
             className="cli-login__row"
@@ -109,16 +120,42 @@ export function CliLoginPanel({ login }: { login: CliLogin }) {
   );
 }
 
-/** Tài khoản Antigravity CLI + "Khoá & phiên" rows (design CLI card + `creds`). */
-export function CliCard({ canManage, showCredentials = true }: { canManage: boolean; showCredentials?: boolean }) {
-  const profiles = useCliProfiles();
+/**
+ * v0.1.31 — QD-12 (Owner tự quyết): dùng gói Claude cá nhân qua một ứng dụng tự động có thể bị điều khoản của Anthropic
+ * hạn chế. Hiện rõ trước khi đăng nhập, kèm link điều khoản chính thức.
+ */
+export function ClaudeRiskNotice() {
+  return (
+    <div className="risk-box" role="note" data-testid="claude-risk">
+      <Icon name="ph ph-warning" size={16} color="var(--color-warn)" />
+      <div className="risk-box__text">
+        <strong>Sếp tự quyết rủi ro:</strong> Anthropic quy định đăng nhập gói Claude (Free/Pro/Max) dành cho cá nhân dùng
+        Claude Code thông thường; dùng qua một ứng dụng tự động như Gen-Harness có thể bị hạn chế hoặc khoá tài khoản. Muốn an
+        toàn, dùng khoá API (Claude Console) thay thế. Xem{' '}
+        <a href={CLAUDE_TERMS_URL} target="_blank" rel="noopener noreferrer">
+          điều khoản Claude Code
+        </a>{' '}
+        và{' '}
+        <a href={CLAUDE_CONSUMER_TERMS_URL} target="_blank" rel="noopener noreferrer">
+          điều khoản người dùng
+        </a>
+        . Mặc định TẮT — chỉ chạy sau khi Sếp đăng nhập.
+      </div>
+    </div>
+  );
+}
+
+/** Tài khoản CLI (Antigravity hoặc Claude Code) + "Khoá & phiên" rows (design CLI card + `creds`). */
+export function CliCard({ canManage, showCredentials = true, kind = 'antigravity_cli' }: { canManage: boolean; showCredentials?: boolean; kind?: CliKind }) {
+  const profiles = useCliProfiles(kind);
+  const txt = CLI_TEXT[kind];
   const creds = useQuery({
     queryKey: qk2.credentials,
     queryFn: ({ signal }) => api.providers.credentials(signal),
     enabled: showCredentials,
   });
   const now = useNow(60_000);
-  const login = useCliLogin();
+  const login = useCliLogin(kind);
   const [switchOpen, setSwitchOpen] = useState(false);
   const list = profiles.data ?? [];
   const active = list.find((p) => p.active);
@@ -130,11 +167,11 @@ export function CliCard({ canManage, showCredentials = true }: { canManage: bool
   };
 
   return (
-    <section className="gh-card" aria-label="Tài khoản Antigravity CLI">
+    <section className="gh-card" aria-label={txt.title} data-testid={`cli-card-${kind}`}>
       <div className="gh-card__header">
         <div style={{ minWidth: 0 }}>
-          <div className="gh-card__title">Tài khoản Antigravity CLI</div>
-          <div className="gh-card__kicker">Tài khoản Google dùng cho AI</div>
+          <div className="gh-card__title">{txt.title}</div>
+          <div className="gh-card__kicker">{txt.kicker}</div>
         </div>
         {profiles.data ? (
           <StateChip color={chip.tone} border={chip.tone === 'var(--color-neutral-400)' ? 'var(--color-neutral-800)' : chip.tone} size="md" dot>
@@ -148,30 +185,37 @@ export function CliCard({ canManage, showCredentials = true }: { canManage: bool
         ) : profiles.isError ? (
           <CardError error={profiles.error} onRetry={() => void profiles.refetch()} retrying={profiles.isFetching} />
         ) : (
+          <>
+          {kind === 'claude_code_cli' ? <ClaudeRiskNotice /> : null}
           <div className="cli-acct" data-testid="cli-current">
             <div className={active ? 'cli-avatar' : 'cli-avatar cli-avatar--empty'} aria-hidden>
               {active ? emailInitials(active.email) : <Icon name="ph ph-user" size={15} />}
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div className="cli-email">{active ? cliAccountLabel(active) : 'Chưa chọn tài khoản Google'}</div>
+              <div className="cli-email">{active ? cliAccountLabel(active) : `Chưa chọn tài khoản ${txt.account}`}</div>
               <div className="cli-meta">
                 {active
                   ? `Đang dùng · ${cliMeta(active, now)}${others ? ` · ${others} tài khoản khác đã lưu` : ''}`
                   : list.length
                     ? `${list.length} tài khoản đã lưu — chọn một tài khoản để AI dùng`
-                    : 'Đăng nhập Google để hệ thống dùng AI qua Antigravity CLI'}
+                    : txt.empty}
               </div>
             </div>
-            {canManage && list.length ? (
+            {canManage && active?.state === 'expired' && !login.active ? (
+              <Button variant="primary" className="btn-28" icon="ph ph-sign-in" onClick={() => login.start.mutate()} loading={login.start.isPending}>
+                Đăng nhập lại
+              </Button>
+            ) : canManage && list.length ? (
               <Button variant={active ? 'secondary' : 'primary'} className="btn-28" icon="ph ph-user-switch" onClick={() => setSwitchOpen(true)}>
                 {active ? 'Đổi tài khoản' : 'Chọn tài khoản'}
               </Button>
             ) : canManage && !login.active ? (
               <Button variant="primary" className="btn-28" icon="ph ph-sign-in" onClick={() => login.start.mutate()} loading={login.start.isPending}>
-                Đăng nhập
+                {txt.login}
               </Button>
             ) : null}
           </div>
+          </>
         )}
         <CliLoginPanel login={login} />
         {showCredentials ? (
@@ -201,7 +245,7 @@ export function CliCard({ canManage, showCredentials = true }: { canManage: bool
           </>
         ) : null}
       </div>
-      <ProfilesDialog open={switchOpen} onClose={() => setSwitchOpen(false)} profiles={list} loginBusy={login.active && !login.finished} onAdd={startLogin} />
+      <ProfilesDialog kind={kind} open={switchOpen} onClose={() => setSwitchOpen(false)} profiles={list} loginBusy={login.active && !login.finished} onAdd={startLogin} />
     </section>
   );
 }
@@ -211,12 +255,14 @@ export function CliCard({ canManage, showCredentials = true }: { canManage: bool
  * Đổi/xoá cần PIN: API trả 423 → PinDialogHost (toàn cục) hiện hộp PIN, nhập đúng thì yêu cầu tự gửi lại.
  */
 function ProfilesDialog({
+  kind,
   open,
   onClose,
   profiles,
   loginBusy,
   onAdd,
 }: {
+  kind: CliKind;
   open: boolean;
   onClose: () => void;
   profiles: CliProfile[];
@@ -224,6 +270,8 @@ function ProfilesDialog({
   onAdd: () => void;
 }) {
   const now = useNow(60_000, open);
+  const txt = CLI_TEXT[kind];
+  const key = cliProfilesKey(kind);
   const [confirmDelete, setConfirmDelete] = useState<CliProfile | null>(null);
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: qk2.cliProfiles });
@@ -233,7 +281,7 @@ function ProfilesDialog({
   const activate = useMutation({
     mutationFn: (id: string) => api.cli.activate(id),
     onSuccess: (p) => {
-      queryClient.setQueryData<CliProfile[]>(qk2.cliProfiles, (old) => old?.map((x) => ({ ...x, active: x.id === p.id })));
+      queryClient.setQueryData<CliProfile[]>(key, (old) => old?.map((x) => ({ ...x, active: x.id === p.id })));
       refresh();
       toast(`Đã chuyển sang ${cliAccountLabel(p)} — từ lượt tiếp theo AI dùng tài khoản này.`);
       onClose();
@@ -246,7 +294,7 @@ function ProfilesDialog({
     mutationFn: (id: string) => api.cli.remove(id),
     onSuccess: (_v, id) => {
       const gone = profiles.find((x) => x.id === id);
-      queryClient.setQueryData<CliProfile[]>(qk2.cliProfiles, (old) => old?.filter((x) => x.id !== id));
+      queryClient.setQueryData<CliProfile[]>(key, (old) => old?.filter((x) => x.id !== id));
       refresh();
       toast(`Đã xoá ${cliAccountLabel(gone)} khỏi danh sách`, 'neutral');
     },
@@ -270,7 +318,7 @@ function ProfilesDialog({
       open={open}
       onClose={onClose}
       width={480}
-      title="Đổi tài khoản Google cho AI"
+      title={`Đổi tài khoản ${txt.account} cho AI`}
       kicker="Đổi hoặc xoá tài khoản cần mã PIN"
       actions={
         <>
@@ -278,7 +326,7 @@ function ProfilesDialog({
             Đóng
           </Button>
           <Button variant="primary" icon="ph ph-plus" disabled={loginBusy} onClick={onAdd}>
-            Thêm tài khoản Google
+            {txt.add}
           </Button>
         </>
       }
@@ -289,14 +337,14 @@ function ProfilesDialog({
             AI đang dùng <strong>{cliAccountLabel(active)}</strong>. Chọn tài khoản khác để chuyển; lượt gọi AI kế tiếp dùng tài khoản mới.
           </>
         ) : (
-          'Chưa chọn tài khoản nào — chọn một tài khoản bên dưới hoặc thêm tài khoản Google mới.'
+          `Chưa chọn tài khoản nào — chọn một tài khoản bên dưới hoặc thêm tài khoản ${txt.account} mới.`
         )}
       </p>
       {loginBusy ? <p className="gh-dialog__status gh-dialog__status--warn">Đang đăng nhập thêm một tài khoản — hoàn tất hoặc huỷ bước đó trước khi đổi.</p> : null}
       {profiles.length === 0 ? (
-        <EmptyState icon="ph ph-user" title="Chưa có tài khoản Google nào" />
+        <EmptyState icon="ph ph-user" title={`Chưa có tài khoản ${txt.account} nào`} />
       ) : (
-        <div role="list" aria-label="Tài khoản Google đã lưu">
+        <div role="list" aria-label={`Tài khoản ${txt.account} đã lưu`}>
           {profiles.map((p) => {
             const label = cliAccountLabel(p);
             return (

@@ -38,6 +38,7 @@ import type {
   CleanQuery,
   CliLoginEvent,
   CliProfile,
+  CliKind,
   Credential,
   CursorPage,
   FirstRun,
@@ -234,13 +235,16 @@ export function createEndpoints(client: ApiClient) {
       test: (id: string) => r<ProviderTestResult>(`/providers/${enc(id)}/test`, { method: 'POST' }),
       /** v0.1.28 (UX N1): xoá nguồn nhập nhầm / gọi thử lỗi (không áp dụng cho Antigravity CLI). */
       remove: (id: string) => r<void>(`/providers/${enc(id)}`, { method: 'DELETE' }),
-      addModel: (id: string, body: { model_name: string; daily_quota?: number; rate_limit_per_min?: number }) =>
+      /** v0.1.31: nguồn CLI gọi thử model MỚI trước khi lưu (422 `model_name` khi CLI không nhận); `make_default` = "Dùng model này". */
+      addModel: (id: string, body: { model_name: string; daily_quota?: number; rate_limit_per_min?: number; make_default?: boolean }) =>
         r<Provider>(`/providers/${enc(id)}/models`, { method: 'POST', body }),
       credentials: (signal?: AbortSignal) => r<Credential[]>('/providers/credentials', { signal }),
     },
     cli: {
-      profiles: (signal?: AbortSignal) => r<CliProfile[]>('/cli/profiles', { signal }),
-      login: () => r<{ login_id: string }>('/cli/login', { method: 'POST' }),
+      profiles: (signal?: AbortSignal, kind: CliKind = 'antigravity_cli') =>
+        r<CliProfile[]>('/cli/profiles', { signal, ...(kind !== 'antigravity_cli' ? { query: { kind } } : {}) }),
+      login: (kind: CliKind = 'antigravity_cli') =>
+        r<{ login_id: string }>('/cli/login', { method: 'POST', ...(kind !== 'antigravity_cli' ? { query: { kind } } : {}) }),
       /** 202 {}; 409 CLI_LOGIN_NOT_WAITING when the login is not at `waiting_code`. */
       submitCode: (loginId: string, code: string) =>
         r<Record<string, never>>(`/cli/login/${enc(loginId)}/code`, { method: 'POST', body: { code } }),
