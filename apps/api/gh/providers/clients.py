@@ -7,6 +7,7 @@ Mọi client trả `Completion` hoặc ném một trong các lỗi phân loại 
 import asyncio
 import contextlib
 import os
+import re
 import tempfile
 import time
 from dataclasses import dataclass, field
@@ -47,18 +48,86 @@ class BadRequest(ProviderError):
 
 
 class ModelRejected(BadRequest):
-    """Nhà cung cấp / CLI không nhận mã model này (v0.1.31: gọi thử trước khi lưu model)."""
+    """CLI không nhận model / mức suy nghĩ này (v0.1.31: gọi thử trước khi lưu model).
+
+    v0.1.32: chỉ dùng cho lỗi "không biết model" THẬT (mẫu chính xác bên dưới); `what` = "model" | "effort";
+    `available` = danh sách CLI tự nêu trong lỗi (agy: "Invalid model %q (available: %s)"); `raw` = lỗi gốc."""
+
+    def __init__(self, msg: str, *, what: str = "model", available: list[str] | None = None, raw: str = ""):
+        super().__init__(msg)
+        self.what, self.available, self.raw = what, available or [], raw or msg
 
 
-_MODEL_REJECT = ("issue with the selected model", "unknown model", "invalid model", "model not found",
-                 "unsupported model", "not a valid model",
-                 "model is not available", "no such model", "model_not_found", "not_found_error")
+# Mẫu lỗi "không nhận model" — CHÍNH XÁC (v0.1.32). Nguồn: chuỗi trong agy 1.2.9 ("invalid model selection (--model %q
+# --effort %q)", "Invalid model %q (available: %s)", "unknown model %q", "invalid --effort %q (valid: %s)") và Claude
+# Code ("There's an issue with the selected model", API 404 "not_found_error"). Trước đây mọi câu có "model" + "invalid"
+# đều bị coi là từ chối model → báo nhầm "CLI không nhận model" cho lỗi khác.
+_MODEL_REJECT = re.compile(
+    r"invalid model selection|invalid model\s+[\"'“]|unknown model\b|model not found|model_not_found|no such model"
+    r"|issue with the selected model|not_found_error|unsupported model|not a valid model|model is not available"
+    r"|model .{0,60} (?:does not exist|is not supported)", re.I)
+_EFFORT_REJECT = re.compile(r"invalid (?:--)?effort|effort isn't adjustable|unsupported effort", re.I)
 
 
 def model_rejected(msg: str) -> bool:
-    low = msg.lower()
-    return any(k in low for k in _MODEL_REJECT) or ("model" in low and ("not found" in low or "invalid" in low
-                                                                        or "not supported" in low))
+    return bool(_MODEL_REJECT.search(msg) or _EFFORT_REJECT.search(msg))
+
+
+def rejection(msg: str) -> ModelRejected | None:
+    """ModelRejected nếu `msg` đúng là lỗi CLI không nhận model/effort, kèm danh sách CLI tự nêu (nếu có)."""
+    if not model_rejected(msg):
+        return None
+    from gh.providers.catalog import parse_available
+
+    # "invalid model selection (--model … --effort …): invalid --effort …" = model đúng, MỨC sai.
+    bad_model = re.search(r"invalid model\s+[\"'“]|unknown model\b|model not found|issue with the selected model", msg,
+                          re.I)
+    what = "effort" if _EFFORT_REJECT.search(msg) and not bad_model else "model"
+    return ModelRejected(msg[:300], what=what, available=parse_available(msg), raw=msg[-2000:])
+
+
+# ─── Chẩn đoán CLI (v0.1.32): đầu ra thô đã che bí mật để Boss gửi khi còn lỗi ────────────────────────────
+
+_REDACT: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"(https?://[^\s?\"']+)\?[^\s\"']*"), r"\1?…"),                          # link OAuth (code, state…)
+    (re.compile(r'("(?:access_token|refresh_token|id_token|token|apiKey|api_key|accessToken|refreshToken|'
+                r'secret|password)"\s*:\s*)"[^"]*"', re.I), r'\1"***"'),
+    (re.compile(r"\bBearer\s+\S+", re.I), "Bearer ***"),
+    (re.compile(r"\b(?:ya29\.|1//|sk-ant-|sk-|AIza)[\w.\-]{8,}"), "***"),
+    (re.compile(r"\beyJ[\w-]{6,}\.[\w-]{6,}\.[\w-]*"), "***"),                                   # JWT
+    (re.compile(r"\b[A-Za-z0-9_\-+/=]{48,}"), "***"),                                             # chuỗi dài kiểu token
+    (re.compile(r"\b([A-Za-z0-9._%+-])[A-Za-z0-9._%+-]*@([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b"), r"\1***@\2"),
+)
+
+
+def redact(text: str, limit: int = 6000) -> str:
+    """Che token, link OAuth, email (giữ chữ đầu + tên miền) trong đầu ra CLI trước khi hiện / cho chép."""
+    for pat, sub in _REDACT:
+        text = pat.sub(sub, text)
+    return text if len(text) <= limit else text[:limit] + f"\n… (cắt bớt {len(text) - limit} ký tự)"
+
+
+async def diag_step(label: str, argv_shown: list[str], run: Any, limit_s: float) -> dict[str, Any]:
+    """Chạy một bước chẩn đoán: {label, command, exit_code, stdout, stderr, ms, note}. Không bao giờ ném."""
+    started = time.monotonic()
+    step: dict[str, Any] = {"label": label, "command": redact(" ".join(argv_shown)), "exit_code": None, "stdout": "",
+                            "stderr": "", "ms": 0, "note": None}
+    try:
+        async with asyncio.timeout(limit_s):
+            code, out, err = await run()
+        step.update(exit_code=code, stdout=redact(out.decode(errors="replace")),
+                    stderr=redact(err.decode(errors="replace")))
+    except TimeoutError:
+        step["note"] = f"quá {limit_s:.0f}s không xong"
+    except Exception as e:  # noqa: BLE001 — chẩn đoán phải trả được mọi lỗi
+        step["note"] = redact(f"{type(e).__name__}: {e}")[:500]
+    step["ms"] = int((time.monotonic() - started) * 1000)
+    return step
+
+
+def _skipped(label: str, argv: list[str], note: str) -> dict[str, Any]:
+    return {"label": label, "command": redact(" ".join(argv)), "exit_code": None, "stdout": "", "stderr": "",
+            "ms": 0, "note": note}
 
 
 @dataclass
@@ -224,8 +293,10 @@ class AgyClient:
     kind = "antigravity_cli"
     MAX_PROMPT = 120_000   # giới hạn một đối số dòng lệnh (MAX_ARG_STRLEN 128 KiB)
 
-    def __init__(self, binary: str, cli_home: str, effort: str = "medium", timeout: float = 300.0):
+    def __init__(self, binary: str, cli_home: str, effort: str | None = None, timeout: float = 300.0):
+        # `effort` = mức mặc định khi model không có mức riêng; None = để CLI tự chọn (không gửi --effort).
         self.binary, self.cli_home, self.effort, self.timeout = binary, cli_home, effort, timeout
+        self.last_models_raw: str | None = None
 
     async def _run(self, *args: str) -> tuple[int, bytes, bytes]:
         try:
@@ -243,7 +314,17 @@ class AgyClient:
             raise
         return proc.returncode or 0, out, err
 
-    async def generate(self, model: str, messages: list[Message], *, json_mode: bool, temperature: float) -> Completion:
+    def model_args(self, model: str, effort: str | None = None) -> list[str]:
+        """`--model <model gốc> [--effort <mức>]` (v0.1.32). Tên biến thể cũ ("gemini-3.8-flash-high") được tách —
+        không bao giờ gửi biến thể làm `--model` (agy 1.2.9 từ chối: "invalid model selection")."""
+        from gh.providers.catalog import AGY_EFFORTS, split_variant
+
+        base, var_effort = split_variant(self.kind, model)
+        eff = effort or var_effort or self.effort
+        return ["--model", base, *(["--effort", eff] if eff in AGY_EFFORTS else [])]
+
+    async def generate(self, model: str, messages: list[Message], *, json_mode: bool, temperature: float,
+                       effort: str | None = None) -> Completion:
         prompt = "\n\n".join(f"[{m.role}]\n{m.content}" if m.role != "user" else m.content for m in messages)
         if len(prompt.encode()) > self.MAX_PROMPT:
             raise BadRequest("Prompt quá dài cho CLI")
@@ -256,8 +337,7 @@ class AgyClient:
             raise AuthFailed("CLI chưa đăng nhập")
         started = time.monotonic()
         try:
-            code, out, err = await self._run("-p", prompt, "--model", model, "--effort", self.effort,
-                                             "--output-format", "json")
+            code, out, err = await self._run("-p", prompt, *self.model_args(model, effort), "--output-format", "json")
         except TimeoutError as e:
             raise ProviderError(f"CLI quá {self.timeout:.0f}s") from e
         text = out.decode(errors="replace").strip()
@@ -266,11 +346,14 @@ class AgyClient:
         except orjson.JSONDecodeError:
             env = None
         if code != 0 or not isinstance(env, dict) or env.get("error"):
+            stderr = err.decode(errors="replace")
             msg = (str(env.get("error")) if isinstance(env, dict) and env.get("error") else "") or \
-                err.decode(errors="replace")[-300:] or text[-300:]
+                stderr[-300:] or text[-300:]
             low = msg.lower()
-            if model_rejected(msg):
-                raise ModelRejected(msg)
+            # agy 1.2.9 (-p): lỗi model/agent → thoát 3 + dòng "AGY_ERROR: {...}" trên stderr; xét cả hai.
+            rej = rejection(f"{msg}\n{stderr[-2000:]}")
+            if rej is not None:
+                raise rej
             if "auth" in low or "login" in low or "credential" in low:
                 raise AuthFailed(msg)
             if "quota" in low or "resource_exhausted" in low or "429" in low:
@@ -294,12 +377,26 @@ class AgyClient:
         except TimeoutError as e:
             raise ProviderError(f"CLI quá {self.timeout:.0f}s") from e
         text = out.decode(errors="replace") + "\n" + err.decode(errors="replace")
+        self.last_models_raw = redact(strip_ansi(text).strip(), 3000)   # cho "Chi tiết kỹ thuật" (v0.1.32)
         low = strip_ansi(text).lower()
         if "sign in" in low or "login" in low or "authenticat" in low or "credential" in low:
             raise AuthFailed(strip_ansi(text).strip()[-300:])
         if code != 0:
             raise ProviderError(f"CLI thoát {code}: {strip_ansi(text).strip()[-300:]}")
         return parse_agy_models(out.decode(errors="replace"))
+
+    async def diagnose(self, model: str | None, effort: str | None, prompt: str) -> list[dict[str, Any]]:
+        """Phiên bản, `agy models`, một lượt gọi rất ngắn đúng cờ đang dùng — đầu ra thô đã che (v0.1.32)."""
+        name = Path(self.binary).name
+        steps = [await diag_step("Phiên bản", [name, "--version"], lambda: self._run("--version"), 20),
+                 await diag_step("Danh sách model", [name, "models"], lambda: self._run("models"), 60)]
+        argv = ["-p", prompt, *(self.model_args(model, effort) if model else []), "--output-format", "json"]
+        if not (cli_home_dir(self.cli_home) / TOKEN_FILE).exists():
+            # CLI chưa đăng nhập mà chạy -p sẽ in link đăng nhập rồi chờ 60 giây — không chạy.
+            steps.append(_skipped("Gọi thử 1 lượt", [name, *argv], "bỏ qua — CLI chưa đăng nhập"))
+        else:
+            steps.append(await diag_step("Gọi thử 1 lượt", [name, *argv], lambda: self._run(*argv), 90))
+        return steps
 
     async def embed(self, model: str, texts: list[str]) -> list[list[float]]:
         raise BadRequest("CLI không hỗ trợ embedding")
@@ -375,7 +472,15 @@ class ClaudeCodeClient:
             data = {}
         return data if isinstance(data, dict) else {"loggedIn": code == 0}
 
-    async def generate(self, model: str, messages: list[Message], *, json_mode: bool, temperature: float) -> Completion:
+    @staticmethod
+    def model_args(model: str, effort: str | None = None) -> list[str]:
+        """`--model=<tên>` + `--effort=<mức>` (v0.1.32, `claude --help` 2.1.285: low, medium, high, xhigh, max)."""
+        from gh.providers.catalog import CLAUDE_EFFORTS
+
+        return [f"--model={model}", *([f"--effort={effort}"] if effort in CLAUDE_EFFORTS else [])]
+
+    async def generate(self, model: str, messages: list[Message], *, json_mode: bool, temperature: float,
+                       effort: str | None = None) -> Completion:
         if not (cli_home_dir(self.claude_home) / CLAUDE_CRED_FILE).exists():
             if (cli_home_dir(self.claude_home) / (CLAUDE_CRED_FILE + ".before-login")).exists():
                 raise ProviderError("Claude Code CLI đang đăng nhập thêm tài khoản")
@@ -387,8 +492,8 @@ class ClaudeCodeClient:
             raise BadRequest("Prompt quá dài cho CLI")
         if len(system.encode()) > self.MAX_PROMPT:
             raise BadRequest("Lời nhắn hệ thống quá dài cho CLI")
-        args = ["-p", f"--model={model}", "--output-format", "json", "--no-session-persistence", "--safe-mode",
-                "--strict-mcp-config", "--disable-slash-commands"]
+        args = ["-p", *self.model_args(model, effort), "--output-format", "json", "--no-session-persistence",
+                "--safe-mode", "--strict-mcp-config", "--disable-slash-commands"]
         sys_file: str | None = None
         if system:
             fd, sys_file = tempfile.mkstemp(prefix="gh-claude-sys-", suffix=".txt")   # 0600, xoá ngay sau lượt gọi
@@ -415,8 +520,9 @@ class ClaudeCodeClient:
                    if isinstance(env, dict) else "") or err.decode(errors="replace")[-300:] or text[-300:]
             low = msg.lower()
             status = env.get("api_error_status") if isinstance(env, dict) else None
-            if model_rejected(msg) or status == 404:
-                raise ModelRejected(msg[:300])
+            rej = rejection(msg)
+            if rej is not None or status == 404:
+                raise rej or ModelRejected(msg[:300], raw=msg)
             if status in (401, 403) or any(k in low for k in ("log in", "login", "authenticat", "oauth",
                                                                  "credential", "unauthorized")):
                 raise AuthFailed(msg[:300])
@@ -426,6 +532,22 @@ class ClaudeCodeClient:
         usage = env.get("usage") or {}
         return Completion(str(env.get("result") or ""), usage.get("input_tokens"), usage.get("output_tokens"),
                           {"duration_ms": env.get("duration_ms"), "ms": int((time.monotonic() - started) * 1000)})
+
+    async def diagnose(self, model: str | None, effort: str | None, prompt: str) -> list[dict[str, Any]]:
+        """Phiên bản, trạng thái đăng nhập (Claude Code không có lệnh liệt kê model), một lượt gọi rất ngắn."""
+        name = Path(self.binary).name
+        steps = [await diag_step("Phiên bản", [name, "--version"], lambda: self._run("--version"), 20),
+                 await diag_step("Đăng nhập (Claude Code không có lệnh liệt kê model)",
+                                 [name, "auth", "status", "--json"], lambda: self._run("auth", "status", "--json"), 30)]
+        argv = ["-p", *self.model_args(model or "haiku", effort), "--output-format", "json",
+                "--no-session-persistence", "--safe-mode", "--strict-mcp-config", "--disable-slash-commands",
+                "--tools", ""]
+        if not (cli_home_dir(self.claude_home) / CLAUDE_CRED_FILE).exists():
+            steps.append(_skipped("Gọi thử 1 lượt", [name, *argv], "bỏ qua — CLI chưa đăng nhập"))
+        else:
+            steps.append(await diag_step("Gọi thử 1 lượt", [name, *argv, "(stdin:", prompt + ")"],
+                                         lambda: self._run(*argv, stdin=prompt.encode()), 90))
+        return steps
 
     async def discover_models(self) -> list[dict[str, Any]]:
         """Claude Code không có lệnh liệt kê model → chỉ kiểm phiên đăng nhập; danh sách là bí danh

@@ -1051,3 +1051,62 @@ hoá — hệ thống chỉ giảm (đọc ít, dừng ngay khi có cảnh báo)
   (CI/e2e cài thật sẽ kiểm). Điều khoản: Anthropic (trang Legal and compliance của Claude Code, 02/2026) nói đăng nhập gói
   Free/Pro/Max chỉ dành cho dùng cá nhân thông thường Claude Code và ứng dụng gốc của Anthropic — dùng qua app tự động có rủi ro
   bị hạn chế; Boss đã quyết "Owner tự quyết" (QD-12), UI cảnh báo + gợi ý khoá API.
+
+## v0.1.32 — Model và MỨC SUY NGHĨ (effort) tách riêng, Chẩn đoán CLI (01/10/2026)
+
+### Boss cần làm gì (sau khi cập nhật)
+
+1. Hướng dẫn thiết lập › bước 4 (hoặc Agent & Model) → dòng **Antigravity CLI** → **Kiểm tra** → ô model giờ chỉ có tên
+   model gốc (vd **Gemini 3.8 Flash**, **Gemini 3.1 Pro**), ô bên cạnh **Mức suy nghĩ**: Thấp (nhanh, rẻ) / Vừa / Cao (kỹ,
+   chậm hơn). Chọn → **Dùng model này**.
+2. Nếu vẫn báo lỗi: bấm **Chẩn đoán** (chỉ Owner) trên dòng nguồn → **Chép** → gửi nội dung đã chép (token, email đã che).
+
+### Nguyên nhân gốc
+
+- "high" là mức suy nghĩ chứ không phải tên model (Boss 01/10). agy 1.2.9 nhận `--model <model gốc> --effort low|medium|high`;
+  bản ≤ v0.1.31 lưu/gửi tên biến thể `gemini-3.8-flash-high` làm `--model` (kèm `--effort medium` cố định) → agy từ chối
+  ("invalid model selection (--model … --effort …)") → "CLI không nhận model". Bộ nhận diện "không nhận model" cũ còn bắt
+  nhầm mọi câu có "model" + "invalid".
+
+### Đã làm
+
+- **API**: `agent.models.effort` (migration **0023**, CHECK low|medium|high|xhigh|max; chuyển dữ liệu cũ: `…-high` → model
+  gốc + `effort=high`, dòng trùng tên gốc chỉ ghi effort — lúc gọi vẫn tách hậu tố, chạy lại an toàn). `catalog.py`: bộ đọc
+  `agy models` gộp biến thể về model gốc + danh sách mức (`efforts`, `default_effort` từ dòng "(current)"); danh sách không bao
+  giờ thu gọn còn model đã lưu (CLI liệt kê ≤ 1 model → thêm mục dự phòng "chưa xác minh"; model đã lưu mà CLI không liệt kê
+  vẫn hiện); mỗi mục có `verified` + `source_ref`. Bỏ `claude-sonnet-4-6`/`claude-opus-4-6` (qua Antigravity) — không có nguồn.
+  `AgyClient`: `--model <gốc> [--effort <mức>]` (không mức → không gửi `--effort`, CLI tự chọn); `ClaudeCodeClient`:
+  `--effort=<mức>` (low…max). Nhận diện từ chối CHÍNH XÁC theo chuỗi lỗi có trong agy 1.2.9 / Claude Code; phân biệt model
+  sai / mức sai; đọc danh sách CLI tự nêu ("available: …") đưa vào câu lỗi; 422 kèm `technical` (lỗi gốc đã che) cho "Chi
+  tiết kỹ thuật". `POST /providers/{id}/models` nhận `effort` (không gửi = giữ mức đã lưu; đổi mức = gọi thử lại).
+  `POST /providers/{id}/test`: thêm `at`, `probe_effort`, `error_detail`, `models_raw`. Mới: `POST /providers/{id}/diagnose`
+  (chỉ Owner, chung giới hạn 12 lượt/10 phút): `--version`, `agy models` / `claude auth status --json`, 1 lượt gọi rất ngắn
+  đúng model + mức; trả stdout/stderr/mã thoát đã che (token, link OAuth, email → `a***@miền`).
+- **Web**: `ModelPicker` = ô model gốc (nhóm, "chưa xác minh" khi cần) + ô **Mức suy nghĩ** (chỉ mức model nhận; model không
+  chỉnh mức → ghi "CLI tự chọn"); lỗi có "Chi tiết kỹ thuật". "Gọi thử OK · 4,63 s · gemini-3.8-flash · Cao · lúc 01/10 10:21"
+  (luôn kèm giờ lần gọi thật). Nút **Chẩn đoán** + **Chép** (chỉ Owner) trên dòng nguồn CLI ở bước 4 và Agent & Model.
+- **Test**: api `tests/test_cli_effort_v0132.py` (12; CLI giả `fake_agy_multi.py` mô phỏng đúng cờ/lỗi agy 1.2.9,
+  `fake_claude.py` thêm `--effort`, `--version`); web `test/unit/cli-effort-v0132.test.tsx` (4); e2e mock
+  `e2e/cli-effort-v0132.spec.ts` (2).
+
+### Nguồn dữ liệu model (thứ tự tin cậy — Boss 01/10)
+
+1. **CLI đã đăng nhập, lúc chạy**: `agy models` (đọc trung thực), lỗi `Invalid model %q (available: %s)` của chính CLI,
+   `--help`. Claude Code không có lệnh liệt kê model.
+2. **Tài liệu chính thức**: https://code.claude.com/docs/en/model-config (đọc 01/10/2026): bí danh `fable/sonnet/opus/haiku…`;
+   effort low…max cho Fable/Opus/Sonnet (Haiku không có trong bảng → không gửi `--effort`). Chưa đọc được tài liệu chính thức
+   của Antigravity CLI (codelabs.developers.google.com bị chặn mạng trong máy dựng).
+3. **Dự phòng tối thiểu, "chưa xác minh"** (chỉ khi không có 1): `gemini-3.8-flash` (low/medium/high), `gemini-3.1-pro`
+   (low/high) — biến thể có trong tệp chạy agy 1.2.9.
+- Đo thật 01/10/2026 (agy 1.2.9 chưa đăng nhập): `agy --help` → `--effort  Reasoning effort for the current CLI session
+  (low|medium|high)`, `--model  Model for the current CLI session`; changelog trong tệp chạy: "Added an `--effort` flag to select
+  a model's reasoning-effort variant", "/model picker … group models by their base model and choose reasoning effort"; hàm
+  `SlugParts`, `EffortsForBase`, `ModelForBaseEffort`. `claude --help` 2.1.285: `--effort <level> (low, medium, high, xhigh,
+  max)`; mức lạ → "Warning: Unknown --effort value … ignoring it" (không lỗi).
+
+### Đã kiểm vs chưa kiểm
+
+- Đã kiểm: cờ/lỗi ở trên trên tệp chạy thật; ruff, mypy, pytest đủ + `GH_TEST_APP_ROLE=1` phần chạm, web
+  typecheck/lint/vitest, e2e mock.
+- **Chưa kiểm (cần đầu ra thật của Boss)**: định dạng `agy models` KHI ĐÃ đăng nhập và `--model gemini-3.8-flash --effort high`
+  được nhận thật (máy dựng không đăng nhập được) → Boss bấm **Chẩn đoán** → **Chép** gửi lại nếu còn lỗi.

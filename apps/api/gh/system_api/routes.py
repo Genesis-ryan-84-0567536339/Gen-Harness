@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gh import crypto, realtime
 from gh.audit.routes import export_rows, query_log
 from gh.auth import rbac, service
-from gh.auth.deps import require, require_pin
+from gh.auth.deps import require, require_owner, require_pin
 from gh.chassis import actionlog
 from gh.chassis.bus import BRIDGE_CONTROL
 from gh.data.common import CHANNEL_NAME, LISTENING_MODES, iso, org_settings
@@ -24,6 +24,7 @@ from gh.data.ingest import sync_listen_sets, uptime_pct
 from gh.db import DB
 from gh.errors import ApiError, conflict, field_errors, not_found
 from gh.gen import jev
+from gh.providers import catalog
 from gh.providers import cli as climod
 from gh.providers.router import KEY_AAD, cooldown_key, quota_key
 from gh.shell.routes import publish_header
@@ -278,6 +279,9 @@ class ModelIn(BaseModel):
     rate_limit_per_min: int | None = Field(default=None, ge=1)
     # v0.1.31: "Dùng model này" → model mặc định của nguồn. Nguồn CLI: model MỚI được gọi thử thật trước khi lưu.
     make_default: bool = False
+    # v0.1.32: mức suy nghĩ tách khỏi tên model (agy `--effort low|medium|high`; claude thêm xhigh, max).
+    # None = để CLI tự chọn (không gửi --effort).
+    effort: Literal["low", "medium", "high", "xhigh", "max"] | None = None
 
 
 async def _add_key(db: AsyncSession, provider_id: uuid.UUID, kind: str, secret: str) -> None:
@@ -297,8 +301,8 @@ async def provider_payloads(db: AsyncSession, redis: Any, org_id: uuid.UUID) -> 
     for p in rows:
         keys = (await db.execute(text("""SELECT id, label, last4, is_enabled FROM agent.provider_keys
                                          WHERE provider_id = :p ORDER BY rotation_order"""), {"p": p.id})).all()
-        models = (await db.execute(text("""SELECT id, model_name, daily_quota, rate_limit_per_min, is_enabled,
-                                                  is_default
+        models = (await db.execute(text("""SELECT id, model_name, effort, daily_quota, rate_limit_per_min,
+                                                  is_enabled, is_default
                                            FROM agent.models WHERE provider_id = :p ORDER BY id"""),
                                    {"p": p.id})).all()
         key_out = []
@@ -310,7 +314,8 @@ async def provider_payloads(db: AsyncSession, redis: Any, org_id: uuid.UUID) -> 
         model_out = []
         for m in models:
             used = int(await redis.get(quota_key(m.id)) or 0)
-            model_out.append({"id": str(m.id), "model_name": m.model_name, "daily_quota": m.daily_quota,
+            model_out.append({"id": str(m.id), "model_name": m.model_name, "effort": m.effort,
+                              "daily_quota": m.daily_quota,
                               "rate_limit_per_min": m.rate_limit_per_min, "enabled": m.is_enabled,
                               "is_default": m.is_default,
                               "used_today": used,
@@ -489,28 +494,37 @@ async def _probe_budget(redis: Any, org_id: uuid.UUID) -> None:
 async def add_model(pid: uuid.UUID, body: ModelIn, request: Request, user: service.CurrentUser = Depends(MANAGE),
                     db: AsyncSession = DB) -> dict[str, Any]:
     p = await _provider(db, user.org_id, pid)
-    name = body.model_name.strip()
-    exists = (await db.execute(text("SELECT 1 FROM agent.models WHERE provider_id = :p AND model_name = :m"),
-                               {"p": pid, "m": name})).scalar_one_or_none()
+    # v0.1.32: tên biến thể cũ của agy ("gemini-3.8-flash-high") → model gốc + mức suy nghĩ.
+    name, var_effort = catalog.split_variant(p.kind, body.model_name.strip())
+    prev = (await db.execute(text("SELECT effort FROM agent.models WHERE provider_id = :p AND model_name = :m"),
+                             {"p": pid, "m": name})).one_or_none()
+    # Không gửi `effort` (vd chỉ sửa hạn mức) → giữ mức đã lưu.
+    effort = body.effort if "effort" in body.model_fields_set else (var_effort or (prev.effort if prev else None))
+    effort = effort or var_effort
     if p.kind in CLI_KINDS and not CLI_MODEL_RE.fullmatch(name):
         raise field_errors({"model_name": "Tên model chỉ gồm chữ, số và . _ - : / [ ]"})
-    if p.kind in CLI_KINDS and not exists:
+    if effort and effort not in catalog.valid_efforts(p.kind):
+        raise field_errors({"effort": f"{p.name} không có mức suy nghĩ “{effort}”"})
+    if p.kind in CLI_KINDS and (prev is None or (prev.effort or None) != effort):
         await _probe_budget(request.app.state.redis, user.org_id)
-        # v0.1.31: danh sách model của CLI có thể là danh mục dự phòng → gọi thử THẬT trước khi lưu; CLI từ chối thì
-        # không lưu (không bao giờ ghi một mã model mà CLI không nhận).
+        # v0.1.31: danh sách model của CLI có thể là danh mục dự phòng → gọi thử THẬT (đúng cờ --model/--effort) trước
+        # khi lưu; CLI từ chối thì không lưu (không bao giờ ghi một mã model mà CLI không nhận).
         await db.commit()
-        probe = await request.app.state.model_router.probe_model(pid, name)
+        probe = await request.app.state.model_router.probe_model(pid, name, effort)
         if not probe["ok"]:
             await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                                    action="provider.model_rejected", target_type="provider", target_id=str(pid),
                                    target_label=p.name, result="failed",
-                                   detail={"model": name, "error": probe["error"]}, ip=user.ip)
+                                   detail={"model": name, "effort": effort, "error": probe["error"]}, ip=user.ip)
             await db.commit()
-            raise field_errors({"model_name": probe["error"]})
+            raise ApiError(422, "VALIDATION", "Dữ liệu chưa hợp lệ",
+                           errors={"model_name": probe["error"]}, technical=probe.get("error_detail"),
+                           available=probe.get("available") or [])
     await db.execute(text("""
-        INSERT INTO agent.models (provider_id, model_name, daily_quota, rate_limit_per_min) VALUES (:p, :m, :q, :r)
-        ON CONFLICT (provider_id, model_name) DO UPDATE SET daily_quota = :q, rate_limit_per_min = :r"""),
-        {"p": pid, "m": name, "q": body.daily_quota, "r": body.rate_limit_per_min})
+        INSERT INTO agent.models (provider_id, model_name, effort, daily_quota, rate_limit_per_min)
+        VALUES (:p, :m, :e, :q, :r)
+        ON CONFLICT (provider_id, model_name) DO UPDATE SET effort = :e, daily_quota = :q, rate_limit_per_min = :r"""),
+        {"p": pid, "m": name, "e": effort, "q": body.daily_quota, "r": body.rate_limit_per_min})
     if body.make_default:
         await db.execute(text("UPDATE agent.models SET is_default = false WHERE provider_id = :p AND is_default"),
                          {"p": pid})
@@ -533,6 +547,24 @@ async def test_provider(pid: uuid.UUID, request: Request, user: service.CurrentU
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id, action="provider.tested",
                            target_type="provider", target_id=str(pid), target_label=p.name,
                            result="ok" if result["ok"] else "failed", detail={"error": result["error"]}, ip=user.ip)
+    return result
+
+
+@router.post("/providers/{pid}/diagnose")
+async def diagnose_provider(pid: uuid.UUID, request: Request, user: service.CurrentUser = Depends(require_owner),
+                            db: AsyncSession = DB) -> dict[str, Any]:
+    """v0.1.32 — "Chẩn đoán" (chỉ Owner) cho nguồn CLI: phiên bản, liệt kê model, một lượt gọi rất ngắn; trả đầu ra
+    thô (stdout/stderr/mã thoát) đã che token & email để Boss chép gửi khi còn lỗi."""
+    p = await _provider(db, user.org_id, pid)
+    if p.kind not in CLI_KINDS:
+        raise conflict("NOT_CLI", "Chỉ chẩn đoán được nguồn CLI")
+    await _probe_budget(request.app.state.redis, user.org_id)
+    await db.commit()
+    result: dict[str, Any] = await request.app.state.model_router.diagnose(pid)
+    await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
+                           action="provider.diagnosed", target_type="provider", target_id=str(pid),
+                           target_label=p.name,
+                           detail={"exit_codes": [s["exit_code"] for s in result["steps"]]}, ip=user.ip)
     return result
 
 

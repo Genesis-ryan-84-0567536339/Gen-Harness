@@ -4,14 +4,15 @@ import type { CliKind, Provider, ProviderKind, ProviderTestResult } from '@gen-h
 import { Button, Dialog, EmptyState, Icon, IconButton, SelectField, TextField } from '@gen-harness/ui';
 import { api } from '../lib/api';
 import { qk2, useCliProfiles, useProviders } from '../lib/dataQueries';
-import { emailInitials, fmtInt, fmtLatency } from '../lib/format';
+import { emailInitials, fmtDMClock, fmtInt, fmtLatency } from '../lib/format';
 import { queryClient } from '../lib/queryClient';
 import { useNow } from '../lib/useNow';
 import { errorText } from '../lib/errorText';
 import { CardError, FriendlyErrorText, InlineError, SkeletonLines, StateChip } from '../screens/common';
-import { PROVIDER_KIND_LABEL, isCliKind, providerStatus } from '../screens/api/apiModel';
+import { PROVIDER_KIND_LABEL, choiceText, isCliKind, providerStatus, testOkText } from '../screens/api/apiModel';
 import { ModelPicker } from '../screens/api/ModelPicker';
 import { ClaudeRiskNotice, CliLoginPanel } from '../screens/system/CliCard';
+import { CliDiagnose } from '../screens/system/CliDiagnose';
 import { useCliLogin } from '../screens/system/useCliLogin';
 import { CLI_TEXT, cliAccountLabel, cliChip, cliMeta } from '../screens/system/systemModel';
 import { providerHasModel, providerReady, testedModels } from './phase2Model';
@@ -166,18 +167,28 @@ export function Step4Brain({ meta, description, onBack, onSaved, formRef, onSkip
                       {isCliKind(p.kind)
                         ? PROVIDER_KIND_LABEL[p.kind]
                         : `${fmtInt(p.keys.length)} khoá${p.keys[0] ? ` · …${p.keys[0].last4}` : ''}`}
-                      {p.models.length ? ` · ${p.models.map((m) => m.model_name).join(', ')}` : ''}
+                      {p.models.length ? ` · ${p.models.map((m) => choiceText(m.model_name, m.effort)).join(', ')}` : ''}
                     </div>
                     {t ? (
                       <div className="prov-test" style={{ color: t.ok ? 'var(--color-ok)' : 'var(--color-bad)' }} role="status">
                         {t.ok ? (
-                          `Gọi thử OK${t.latency_ms != null ? ` · ${fmtLatency(t.latency_ms)}` : ''}${t.probe_model ? ` · ${t.probe_model}` : ''}`
+                          testOkText(t, fmtLatency)
                         ) : (
-                          <FriendlyErrorText raw={t.error} prefix="Chưa dùng được: " fallback="không gọi được nguồn này." />
+                          <>
+                            <FriendlyErrorText raw={t.error} prefix="Chưa dùng được: " fallback="không gọi được nguồn này." />
+                            {t.at ? ` (lúc ${fmtDMClock(t.at)})` : null}
+                            {t.error_detail || t.models_raw ? (
+                              <details className="tech-detail">
+                                <summary>Chi tiết kỹ thuật</summary>
+                                <code>{[t.error_detail, t.models_raw ? `agy models:\n${t.models_raw}` : null].filter(Boolean).join('\n\n')}</code>
+                              </details>
+                            ) : null}
+                          </>
                         )}
                       </div>
                     ) : null}
                     {isReady && offered.length ? <ModelPicker provider={p} test={t} /> : null}
+                    {isCliKind(p.kind) ? <CliDiagnose provider={p} /> : null}
                   </div>
                   <StateChip color={status.tone} border={status.tone === N5 || status.tone === N4 ? N8 : status.tone}>
                     {status.label}
