@@ -18,6 +18,23 @@ name: E2E cài đặt thật
 # `e2e-selfupdate` đi đúng đường máy Owner đi: genh CŨ tự tải genh mới qua
 # releases/latest, re-exec, nâng cấp dịch vụ (đỏ ⇒ ::error kèm cách lùi bản).
 #
+# LƯỚI AN TOÀN CẬP NHẬT (v0.1.34, F-35; nghiệm thu thật F-10/F-11/F-33) —
+# promote đòi THÊM job `e2e-rollback` xanh:
+#   - e2e-install: `genh update --yes` khi đã mới nhất phải in "không cần cập
+#     nhật", KHÔNG tạo bản sao lưu mới và KHÔNG tải ảnh nào (docker events).
+#   - e2e-upgrade (release): nạp dữ liệu mẫu THẬT vào bản cũ (python -m
+#     gh.seed_demo seed, script .github/scripts/e2e_data.sh), đếm số dòng các
+#     bảng chính trước/sau nâng cấp — phải trùng; kéo sẵn ảnh của bản cũ hơn
+#     nữa (PREV2) rồi kiểm genh dọn ảnh cũ: chỉ còn ảnh của bản hiện tại + bản
+#     liền trước, mỗi repo gen-harness-* tối đa 2 digest.
+#   - e2e-rollback (pr + release): build 3 genh từ mã đang xét — "tốt" (compose
+#     đúng), "hỏng" (api `command: ["false"]` — không bao giờ lên), "sửa" (khác
+#     byte, cùng cấu hình). Cài bằng genh tốt + dữ liệu mẫu → genh hỏng update
+#     phải thoát khác 0, tự quay về bản cũ (compose cũ, api cũ chạy, số dòng
+#     giữ nguyên) và ghi run/update-blocked.json; chạy lại như lịch đêm → "lịch
+#     đêm không tự thử lại", không sao lưu/không tải ảnh; genh sửa update →
+#     thành công, xoá update-blocked.json, dữ liệu vẫn nguyên.
+#
 # Job `resolve` quyết định mọi thứ (mode, tag, có chạy E2E/promote không):
 #   - workflow_run (workflow "Release" xong) → CHẾ ĐỘ "release": tìm tag trỏ
 #     ĐÚNG commit Release vừa chạy (head_sha). Không có tag (lượt Release bỏ
@@ -37,7 +54,8 @@ name: E2E cài đặt thật
 # trong branch protection — PR không chạm các đường dẫn đó sẽ treo "Expected"
 # mãi. Required check duy nhất là job tổng ci-ok / installer-ok.
 #
-# THÀNH THẬT: bước "tạo dữ liệu mẫu" (mục 4 trong kế hoạch) chỉ gọi được
+# THÀNH THẬT: ở e2e-install, bước "tạo dữ liệu mẫu" (mục 4 trong kế hoạch)
+# vẫn best-effort và chỉ gọi được
 # `POST /api/v1/setup/steps/1` (bước 1 của trình thiết lập 12 bước, xem
 # apps/api/gh/setup/routes.py — bước này là DUY NHẤT không cần tài khoản
 # Owner, chỉ cần setup_token) ở chế độ mode=sample — các bước 2 trở đi cần
@@ -74,6 +92,7 @@ on:
       - "install.sh"
       - "VERSION"
       - ".github/workflows/e2e-install.yml"
+      - ".github/scripts/e2e_data.sh"
   push:
     branches: [main, "claude/**"]
     paths:
@@ -85,6 +104,7 @@ on:
       - "install.sh"
       - "VERSION"
       - ".github/workflows/e2e-install.yml"
+      - ".github/scripts/e2e_data.sh"
 
 # Nhóm theo ĐÚNG đối tượng được kiểm: workflow_run theo commit Release
 # (head_sha), dispatch theo tag, pr/push theo ref. Chỉ pr/push được huỷ lượt
@@ -162,7 +182,7 @@ jobs:
           skip_e2e=false
           case "$EVENT" in
             pull_request | push)
-              mode=pr
+              mode="pr"
               tag="$(latest_official)"
               if [ -z "$tag" ]; then
                 echo "::error::Chưa có bản chính thức (releases/latest) nào để lấy compose.release.yaml — cần phát hành và promote ít nhất một bản (merge PR tăng VERSION, chờ E2E xanh) trước khi chế độ pr kiểm được." >&2
@@ -496,7 +516,31 @@ jobs:
       - name: genh update --yes (đã mới nhất → phải không lỗi)
         # Chế độ release: genh đang là bản thử, releases/latest (bản chính thức)
         # CŨ hơn → selfupdate không hạ cấp (IsNewer=false), chỉ chạy phần dịch vụ.
-        run: $GENH update --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes
+        # Chế độ pr: GENH_COMPOSE_FILE trỏ tệp ngoài nên genh coi là đã khớp.
+        # v0.1.34 (F-10/F-11): đã mới nhất thì genh phải in "không cần cập
+        # nhật" và KHÔNG sao lưu, KHÔNG tải ảnh (docker events type=image pull).
+        run: |
+          set -euo pipefail
+          data="$GITHUB_WORKSPACE/.github/scripts/e2e_data.sh"
+          t0="$(date +%s)"
+          n0="$("$data" backups)"
+          echo "trước update: $n0 bản sao lưu, mốc t0=$t0"
+          "$GENH" update --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes 2>&1 | tee "$RUNNER_TEMP/update-noop.log"
+          if ! grep -q "không cần cập nhật" "$RUNNER_TEMP/update-noop.log"; then
+            echo "::error::đã mới nhất mà genh update không in \"không cần cập nhật\" — genh vẫn chạy đường cập nhật đầy đủ (sao lưu/tải ảnh) mỗi đêm." >&2
+            exit 1
+          fi
+          n1="$("$data" backups)"
+          if [ "$n1" != "$n0" ]; then
+            echo "::error::đã mới nhất mà genh update vẫn tạo bản sao lưu ($n0 → $n1) — tốn đĩa mỗi đêm vô ích." >&2
+            exit 1
+          fi
+          pulls="$("$data" pulls-since "$t0")"
+          if [ "$pulls" != "0" ]; then
+            echo "::error::đã mới nhất mà genh update vẫn tải bản mới ($pulls lượt docker pull) — phải dừng trước khi tải." >&2
+            exit 1
+          fi
+          echo "OK: đã mới nhất — không sao lưu ($n1 bản), không tải ảnh."
 
       - name: Nút "Cập nhật ngay" — api ghi yêu cầu, genh trên máy chủ tự nhận và cập nhật (tối đa 7 phút)
         run: |
@@ -513,7 +557,7 @@ jobs:
           while :; do
             st="$(python3 -c "import json;d=json.load(open('$run/update-status.json'));print(d.get('state',''), d.get('started_at',''))" 2>/dev/null || true)"
             state="${st%% *}"; started="${st#* }"
-            if [ "$started" != "$before" ] && [ "$state" = done ] && [ ! -e "$run/request/update.json" ]; then break; fi
+            if [ "$started" != "$before" ] && [ "$state" = "done" ] && [ ! -e "$run/request/update.json" ]; then break; fi
             if [ "$started" != "$before" ] && [ "$state" = failed ]; then
               cat "$run/update-status.json"; echo "::error::genh báo cập nhật lỗi" >&2; exit 1
             fi
@@ -540,7 +584,7 @@ jobs:
           while :; do
             st="$(python3 -c "import json;d=json.load(open('$run/restore-status.json'));print(d.get('state',''), d.get('key',''))" 2>/dev/null || true)"
             state="${st%% *}"; got="${st#* }"
-            if [ "$got" = "$key" ] && [ "$state" = done ] && [ ! -e "$run/request/restore.json" ]; then break; fi
+            if [ "$got" = "$key" ] && [ "$state" = "done" ] && [ ! -e "$run/request/restore.json" ]; then break; fi
             if [ "$got" = "$key" ] && [ "$state" = failed ]; then
               cat "$run/restore-status.json"; echo "::error::genh báo khôi phục lỗi" >&2; exit 1
             fi
@@ -620,7 +664,7 @@ jobs:
     defaults:
       run:
         working-directory: /tmp
-    timeout-minutes: 30
+    timeout-minutes: 40
     env:
       # Xem ghi chú tương tự ở job e2e-install — không dùng ${{ runner.temp }}
       # trong `env:` cấp job.
@@ -630,7 +674,7 @@ jobs:
       TAG: ${{ needs.resolve.outputs.tag }}
       PREV_TAG: ${{ needs.resolve.outputs.prev_tag }}
     steps:
-      - name: Lấy mã nguồn (chỉ cần cho tham chiếu, không build gì ở job này)
+      - name: Lấy mã nguồn (dùng .github/scripts/e2e_data.sh, không build gì ở job này)
         uses: actions/checkout@v4
 
       - name: Đặt GEN_HARNESS_HOME (thư mục cài đặt tạm của job này)
@@ -663,6 +707,56 @@ jobs:
             sleep 3
           done
 
+      # v0.1.34 (F-35): dữ liệu mẫu THẬT (gh.seed_demo — luồng ingest → sàng lọc → nghiệp vụ thật) để phép
+      # "số dòng không đổi sau nâng cấp" có ý nghĩa; seed lỗi ⇒ đỏ (không continue-on-error).
+      - name: Nạp dữ liệu mẫu vào bản cũ + đếm số dòng
+        if: needs.resolve.outputs.broken_install != 'true'
+        run: |
+          set -euo pipefail
+          data="$GITHUB_WORKSPACE/.github/scripts/e2e_data.sh"
+          "$data" seed
+          # Chờ số dòng đứng yên (job nền của worker có thể còn ghi thêm ngay sau seed) — tối đa 2 phút.
+          "$data" count >"$RUNNER_TEMP/rows-before.txt"
+          for _ in $(seq 1 12); do
+            sleep 10
+            "$data" count >"$RUNNER_TEMP/rows-check.txt"
+            if cmp -s "$RUNNER_TEMP/rows-before.txt" "$RUNNER_TEMP/rows-check.txt"; then break; fi
+            cp "$RUNNER_TEMP/rows-check.txt" "$RUNNER_TEMP/rows-before.txt"
+          done
+          cat "$RUNNER_TEMP/rows-before.txt"
+          "$data" require-data "$RUNNER_TEMP/rows-before.txt"
+
+      # Máy Owner lâu năm còn ảnh của các bản cũ hơn nữa — kéo sẵn ảnh của bản chính thức liền trước PREV_TAG
+      # (PREV2) để kiểm genh mới DỌN chúng sau nâng cấp (chỉ giữ ảnh bản hiện tại + bản liền trước).
+      - name: Giả lập ảnh tồn đọng của bản cũ hơn nữa
+        run: |
+          set -euo pipefail
+          refs="$RUNNER_TEMP/prev2-refs.txt"
+          : >"$refs"
+          prev2=""
+          official="$(gh release list --repo "$R" --exclude-drafts --exclude-pre-releases --limit 15 --json tagName --jq '.[].tagName')"
+          for t in $official; do
+            [ "$t" != "$PREV_TAG" ] || continue
+            if [ "$(printf '%s\n%s\n' "$t" "$PREV_TAG" | sort -V | head -n1)" = "$t" ]; then
+              prev2="$t"
+              break
+            fi
+          done
+          if [ -z "$prev2" ]; then
+            echo "::notice::không có bản chính thức nào cũ hơn $PREV_TAG — bỏ qua giả lập ảnh tồn đọng."
+            exit 0
+          fi
+          if ! gh release download "$prev2" --repo "$R" --pattern 'compose.release.yaml' --dir "$RUNNER_TEMP/prev2" --clobber; then
+            echo "::notice::$prev2 không có compose.release.yaml — bỏ qua giả lập ảnh tồn đọng."
+            exit 0
+          fi
+          { grep -oE 'ghcr\.io/[^"[:space:]]+@sha256:[0-9a-f]{64}' "$RUNNER_TEMP/prev2/compose.release.yaml" || true; } | sort -u >"$refs"
+          echo "ảnh của $prev2 (bản chính thức cũ hơn $PREV_TAG):"
+          cat "$refs"
+          while read -r ref; do
+            docker pull -q "$ref"
+          done <"$refs"
+
       - name: Ghi lại app_db_password TRƯỚC khi nâng cấp
         id: before
         run: |
@@ -687,7 +781,7 @@ jobs:
           "$GEN_HARNESS_HOME/bin/genh" version
 
       - name: genh update --yes --no-self-update (genh ${{ needs.resolve.outputs.tag }} nâng cấp dịch vụ từ bản cũ)
-        run: $GEN_HARNESS_HOME/bin/genh update --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes --no-self-update
+        run: '"$GEN_HARNESS_HOME/bin/genh" update --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes --no-self-update'
 
       - name: Chờ /api/v1/ready xanh lại sau nâng cấp (tối đa 5 phút)
         run: |
@@ -697,6 +791,50 @@ jobs:
             [ "$SECONDS" -lt "$deadline" ] || { echo "::error::ready không xanh sau update" >&2; exit 1; }
             sleep 3
           done
+
+      - name: Số dòng không đổi sau nâng cấp
+        if: needs.resolve.outputs.broken_install != 'true'
+        run: |
+          set -euo pipefail
+          "$GITHUB_WORKSPACE/.github/scripts/e2e_data.sh" count >"$RUNNER_TEMP/rows-after.txt"
+          if ! diff -u "$RUNNER_TEMP/rows-before.txt" "$RUNNER_TEMP/rows-after.txt"; then
+            echo "::error::số dòng bảng chính đổi sau nâng cấp $PREV_TAG → $TAG (xem diff ở trên) — dữ liệu Owner bị mất hoặc nhân đôi; KHÔNG promote." >&2
+            exit 1
+          fi
+          echo "OK: số dòng các bảng chính giữ nguyên sau nâng cấp."
+
+      # F-33: genh dọn ảnh cũ — chỉ giữ ảnh của bản hiện tại (compose.yaml) và bản liền trước (compose.yaml.bak).
+      - name: Chỉ còn ảnh của bản hiện tại và bản liền trước
+        run: |
+          set -euo pipefail
+          deploy="$GEN_HARNESS_HOME/deploy"
+          refre='ghcr\.io/[^"[:space:]]+@sha256:[0-9a-f]{64}'
+          keep="$RUNNER_TEMP/keep-refs.txt"
+          for f in "$deploy/compose.yaml" "$deploy/compose.yaml.bak"; do
+            if [ -f "$f" ]; then grep -oE "$refre" "$f" || true; fi
+          done | sort -u >"$keep"
+          echo "── docker images ──"
+          docker images --digests
+          have="$RUNNER_TEMP/have-refs.txt"
+          docker images --digests --format '{{.Repository}}@{{.Digest}}' | sort -u >"$have"
+          bad=0
+          while read -r ref; do
+            [ -n "$ref" ] || continue
+            if grep -qxF "$ref" "$keep"; then continue; fi
+            if grep -qxF "$ref" "$have"; then
+              echo "::error::ảnh cũ $ref (bản cũ hơn bản liền trước) vẫn còn sau nâng cấp — genh chưa dọn ảnh cũ, đĩa máy Owner sẽ đầy dần." >&2
+              bad=1
+            fi
+          done <"$RUNNER_TEMP/prev2-refs.txt"
+          over="$(docker images --digests --format '{{.Repository}} {{.Digest}}' \
+            | awk '$1 ~ /^ghcr\.io\/[^\/]+\/gen-harness-/ && $2 != "<none>"' | sort -u \
+            | awk '{c[$1]++} END{for (r in c) if (c[r] > 2) print r " (" c[r] " bản)"}')"
+          if [ -n "$over" ]; then
+            echo "::error::còn hơn 2 bản ảnh cho: $over — genh phải chỉ giữ ảnh của bản hiện tại và bản liền trước." >&2
+            bad=1
+          fi
+          [ "$bad" = 0 ] || exit 1
+          echo "OK: chỉ còn ảnh của bản hiện tại và bản liền trước."
 
       - name: Kiểm genh sau nâng cấp đúng tag ${{ needs.resolve.outputs.tag }}
         run: |
@@ -763,7 +901,7 @@ jobs:
 
       - name: genh uninstall --yes (dọn dẹp)
         if: always()
-        run: $GEN_HARNESS_HOME/bin/genh uninstall --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes || true
+        run: '"$GEN_HARNESS_HOME/bin/genh" uninstall --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes || true'
 
       - name: (luôn) In log docker compose (tail 200) để debug
         if: always()
@@ -775,9 +913,261 @@ jobs:
             docker logs --tail 200 "$c" 2>&1 || true
           done
 
+  # ── e2e-rollback ─────────────────────────────────────────────────────────
+  # v0.1.34 (F-35; nghiệm thu thật F-10/F-11): BẢN HỎNG CỐ Ý. Chạy cả pr và
+  # release. Build 3 genh từ ĐÚNG mã đang xét (release: mã của tag; pr: commit
+  # đang xét), cùng compose.release.yaml của $TAG nhúng vào:
+  #   - genh-tot: compose đúng (version = $BASE, BASE = tag ở release, "dev" ở pr);
+  #   - genh-hong: compose có api `command: ["false"]` — api không bao giờ lên;
+  #   - genh-sua: compose khác byte, cùng cấu hình (bản "mới hơn" đã sửa).
+  # Cài bằng genh-tot + dữ liệu mẫu → genh-hong update phải thoát khác 0, TỰ quay
+  # về bản cũ (compose cũ, api cũ chạy, số dòng giữ nguyên), ghi
+  # run/update-blocked.json đúng version bản hỏng; chạy lại như lịch đêm → "lịch
+  # đêm không tự thử lại" (thoát 0, không sao lưu thêm, không tải ảnh); genh-sua
+  # update → thành công, xoá update-blocked.json, dữ liệu vẫn nguyên.
+  e2e-rollback:
+    name: "bản hỏng cố ý: api không lên → tự quay về bản cũ, dữ liệu giữ nguyên"
+    needs: resolve
+    if: needs.resolve.outputs.run_e2e == 'true'
+    runs-on: ubuntu-24.04
+    # Chạy ngoài checkout repo — xem e2e-install.
+    defaults:
+      run:
+        working-directory: /tmp
+    timeout-minutes: 45
+    env:
+      GH_PORT: "8445"
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      R: ${{ github.repository }}
+      # pr: bản chính thức mới nhất (lấy compose.release.yaml); release: bản thử đang kiểm.
+      TAG: ${{ needs.resolve.outputs.tag }}
+      MODE: ${{ needs.resolve.outputs.mode }}
+    steps:
+      - name: Lấy mã nguồn (release — đúng mã của tag; pr — commit đang xét)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.mode == 'release' && needs.resolve.outputs.tag || '' }}
+
+      - name: Đặt GEN_HARNESS_HOME (thư mục cài đặt tạm của job này)
+        run: echo "GEN_HARNESS_HOME=$RUNNER_TEMP/gh-hong" >>"$GITHUB_ENV"
+
+      - name: Cài Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.0"
+
+      - name: Tải compose.release.yaml của ${{ needs.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release download "$TAG" --repo "$R" \
+            --pattern 'compose.release.yaml' --dir "$RUNNER_TEMP/rel" --clobber
+          grep '^\s*image:' "$RUNNER_TEMP/rel/compose.release.yaml"
+
+      - name: Build genh-tot, genh-hong, genh-sua từ mã nguồn
+        working-directory: ${{ github.workspace }}/apps/genh
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+          rel="$RUNNER_TEMP/rel/compose.release.yaml"
+          emb="internal/compose/embedded_compose.yaml"
+          out="$RUNNER_TEMP/bin-e2e"
+          mkdir -p "$out"
+          if [ "$MODE" = "release" ]; then base="$TAG"; else base="dev"; fi
+          # build <tên> <version> <tệp compose nhúng>
+          build() {
+            cp "$3" "$emb"
+            go build -trimpath -ldflags "-s -w -X main.version=$2" -o "$out/$1" ./cmd/genh
+            git checkout -- "$emb"
+            "$out/$1" version
+          }
+          # Bản hỏng: api chạy `false` — thoát ngay, không bao giờ healthy.
+          sed '/^  api:$/a\    command: ["false"]' "$rel" >"$RUNNER_TEMP/compose-hong.yaml"
+          n="$(grep -c '^    command: \["false"\]$' "$RUNNER_TEMP/compose-hong.yaml" || true)"
+          if [ "$n" != "1" ]; then
+            echo "::error::chèn command: [\"false\"] vào api được $n dòng (cần đúng 1) — compose.release.yaml của $TAG đổi định dạng khối api:, sửa lệnh sed." >&2
+            exit 1
+          fi
+          # Bản sửa: khác byte (genh thấy có bản mới), cùng cấu hình.
+          cp "$rel" "$RUNNER_TEMP/compose-sua.yaml"
+          echo '# e2e: bản sửa — khác byte, cùng cấu hình' >>"$RUNNER_TEMP/compose-sua.yaml"
+          build genh-tot "$base" "$rel"
+          build genh-hong "$base-e2e-hong" "$RUNNER_TEMP/compose-hong.yaml"
+          build genh-sua "$base-e2e-sua" "$RUNNER_TEMP/compose-sua.yaml"
+          echo "HONG_VER=$base-e2e-hong" >>"$GITHUB_ENV"
+          echo "BIN=$out" >>"$GITHUB_ENV"
+
+      - name: Cài sạch bằng genh-tot
+        run: |
+          set -euo pipefail
+          "$BIN/genh-tot" install --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes --no-auto-update
+
+      - name: Chờ /api/v1/ready xanh (bản tốt, tối đa 5 phút)
+        run: |
+          set -euo pipefail
+          deadline=$((SECONDS + 300))
+          until curl -k -fsS -o /dev/null "https://localhost:${GH_PORT}/api/v1/ready"; do
+            [ "$SECONDS" -lt "$deadline" ] || { echo "::error::ready không xanh sau khi cài bản tốt" >&2; exit 1; }
+            sleep 3
+          done
+
+      - name: Nạp dữ liệu mẫu + đếm số dòng + đếm bản sao lưu
+        run: |
+          set -euo pipefail
+          data="$GITHUB_WORKSPACE/.github/scripts/e2e_data.sh"
+          "$data" seed
+          # Chờ số dòng đứng yên (job nền của worker có thể còn ghi thêm ngay sau seed) — tối đa 2 phút.
+          "$data" count >"$RUNNER_TEMP/rows-before.txt"
+          for _ in $(seq 1 12); do
+            sleep 10
+            "$data" count >"$RUNNER_TEMP/rows-check.txt"
+            if cmp -s "$RUNNER_TEMP/rows-before.txt" "$RUNNER_TEMP/rows-check.txt"; then break; fi
+            cp "$RUNNER_TEMP/rows-check.txt" "$RUNNER_TEMP/rows-before.txt"
+          done
+          cat "$RUNNER_TEMP/rows-before.txt"
+          "$data" require-data "$RUNNER_TEMP/rows-before.txt"
+          n0="$("$data" backups)"
+          echo "bản sao lưu trước khi cập nhật: $n0"
+          echo "N0=$n0" >>"$GITHUB_ENV"
+
+      - name: genh-hong update — PHẢI thất bại và tự quay về bản cũ
+        run: |
+          set -euo pipefail
+          rc=0
+          "$BIN/genh-hong" update --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes --no-self-update \
+            2>&1 | tee "$RUNNER_TEMP/update-hong.log" || rc=$?
+          if [ "$rc" = 0 ]; then
+            echo "::error::bản hỏng mà genh báo thành công — api không bao giờ lên nhưng genh update thoát 0; máy Owner sẽ kẹt ở bản hỏng." >&2
+            exit 1
+          fi
+          if ! grep -qi "rollback" "$RUNNER_TEMP/update-hong.log"; then
+            echo "::error::genh update thất bại (mã $rc) nhưng log không nhắc \"rollback\" — không rõ đã quay về bản cũ chưa." >&2
+            exit 1
+          fi
+          echo "OK: bản hỏng → genh update thoát $rc và đã quay về bản cũ (rollback)."
+
+      - name: Chờ /api/v1/ready xanh lại sau khi quay về bản cũ (tối đa 5 phút)
+        run: |
+          set -euo pipefail
+          deadline=$((SECONDS + 300))
+          until curl -k -fsS -o /dev/null "https://localhost:${GH_PORT}/api/v1/ready"; do
+            [ "$SECONDS" -lt "$deadline" ] || { echo "::error::ready không xanh lại sau khi quay về bản cũ — rollback không đưa dịch vụ về trạng thái chạy được." >&2; exit 1; }
+            sleep 3
+          done
+
+      - name: Kiểm đã quay về đúng bản cũ (api cũ chạy, compose cũ, update-blocked.json)
+        run: |
+          set -euo pipefail
+          rel="$RUNNER_TEMP/rel/compose.release.yaml"
+          api="$(docker ps -q --filter label=com.docker.compose.project=gen-harness --filter label=com.docker.compose.service=api | head -n1)"
+          [ -n "$api" ] || { echo "::error::không có container api đang chạy sau khi quay về bản cũ" >&2; exit 1; }
+          running="$(docker inspect -f '{{.State.Running}}' "$api")"
+          cmd="$(docker inspect -f '{{json .Config.Cmd}}' "$api")"
+          img="$(docker inspect -f '{{.Config.Image}}' "$api")"
+          # Ảnh của dịch vụ api trong compose cũ (dòng `image:` đầu tiên trong khối `  api:`).
+          want="$(awk '/^  api:$/{f=1; next} f && /^  [^ ]/{exit} f && $1=="image:"{print $2; exit}' "$rel")"
+          [ -n "$want" ] || { echo "::error::không đọc được ảnh api trong compose.release.yaml của $TAG" >&2; exit 1; }
+          echo "api: running=$running cmd=$cmd image=$img (cần $want)"
+          [ "$running" = "true" ] || { echo "::error::container api không chạy sau khi quay về bản cũ" >&2; exit 1; }
+          [ "$cmd" != '["false"]' ] || { echo "::error::container api vẫn chạy cấu hình bản hỏng (command false) — chưa quay về bản cũ" >&2; exit 1; }
+          [ "$img" = "$want" ] || { echo "::error::ảnh api ($img) không phải ảnh của bản cũ ($want)" >&2; exit 1; }
+          if ! cmp "$GEN_HARNESS_HOME/deploy/compose.yaml" "$rel"; then
+            diff -u "$rel" "$GEN_HARNESS_HOME/deploy/compose.yaml" || true
+            echo "::error::deploy/compose.yaml chưa được trả về compose cũ sau rollback — lần khởi động lại sau sẽ lại chạy bản hỏng." >&2
+            exit 1
+          fi
+          blocked="$GEN_HARNESS_HOME/run/update-blocked.json"
+          [ -f "$blocked" ] || { echo "::error::thiếu run/update-blocked.json sau rollback có đụng CSDL — lịch đêm sẽ thử lại bản hỏng mỗi đêm." >&2; exit 1; }
+          cat "$blocked"; echo
+          python3 -c 'import json,sys; v=json.load(open(sys.argv[1])).get("version"); sys.exit(0 if v==sys.argv[2] else "update-blocked.json ghi version %r, cần %r" % (v, sys.argv[2]))' "$blocked" "$HONG_VER"
+          echo "OK: đã quay về bản cũ và chặn bản $HONG_VER."
+
+      - name: Số dòng không đổi sau khi quay về bản cũ
+        run: |
+          set -euo pipefail
+          "$GITHUB_WORKSPACE/.github/scripts/e2e_data.sh" count >"$RUNNER_TEMP/rows-after-rollback.txt"
+          if ! diff -u "$RUNNER_TEMP/rows-before.txt" "$RUNNER_TEMP/rows-after-rollback.txt"; then
+            echo "::error::số dòng bảng chính đổi sau khi quay về bản cũ (xem diff ở trên) — khôi phục làm mất hoặc nhân đôi dữ liệu." >&2
+            exit 1
+          fi
+          echo "OK: số dòng các bảng chính giữ nguyên sau khi quay về bản cũ."
+
+      - name: Lịch đêm chạy lại bản hỏng — phải bỏ qua, không sao lưu, không tải ảnh
+        run: |
+          set -euo pipefail
+          data="$GITHUB_WORKSPACE/.github/scripts/e2e_data.sh"
+          t0="$(date +%s)"
+          rc=0
+          "$BIN/genh-hong" update --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes --no-self-update \
+            2>&1 | tee "$RUNNER_TEMP/update-hong-2.log" || rc=$?
+          if [ "$rc" != 0 ]; then
+            echo "::error::lịch đêm gặp bản bị chặn tự cập nhật mà genh thoát $rc (cần 0) — timer sẽ báo lỗi mỗi đêm." >&2
+            exit 1
+          fi
+          if ! grep -q "lịch đêm không tự thử lại" "$RUNNER_TEMP/update-hong-2.log"; then
+            echo "::error::chạy lại bản đã quay về bản cũ mà genh không in \"lịch đêm không tự thử lại\" — bản bị chặn tự cập nhật chưa có tác dụng." >&2
+            exit 1
+          fi
+          n="$("$data" backups)"
+          want=$((N0 + 1))
+          if [ "$n" != "$want" ]; then
+            echo "::error::số bản sao lưu là $n, cần $want (chỉ bản trước-cập-nhật của lần hỏng) — lịch đêm vẫn sao lưu lại bản bị chặn." >&2
+            exit 1
+          fi
+          pulls="$("$data" pulls-since "$t0")"
+          if [ "$pulls" != "0" ]; then
+            echo "::error::lịch đêm vẫn tải bản mới ($pulls lượt docker pull) cho bản bị chặn tự cập nhật." >&2
+            exit 1
+          fi
+          echo "OK: bản bị chặn — lịch đêm không thử lại, không sao lưu, không tải ảnh."
+
+      - name: genh-sua update (bản mới hơn đã sửa) — thành công, gỡ chặn, dữ liệu nguyên
+        run: |
+          set -euo pipefail
+          "$BIN/genh-sua" update --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes --no-self-update
+          deadline=$((SECONDS + 300))
+          until curl -k -fsS -o /dev/null "https://localhost:${GH_PORT}/api/v1/ready"; do
+            [ "$SECONDS" -lt "$deadline" ] || { echo "::error::ready không xanh sau khi cập nhật bản sửa" >&2; exit 1; }
+            sleep 3
+          done
+          if [ -e "$GEN_HARNESS_HOME/run/update-blocked.json" ]; then
+            cat "$GEN_HARNESS_HOME/run/update-blocked.json"
+            echo "::error::cập nhật bản sửa thành công mà run/update-blocked.json vẫn còn — Console sẽ báo nhầm bản bị chặn." >&2
+            exit 1
+          fi
+          "$GITHUB_WORKSPACE/.github/scripts/e2e_data.sh" count >"$RUNNER_TEMP/rows-after-fix.txt"
+          if ! diff -u "$RUNNER_TEMP/rows-before.txt" "$RUNNER_TEMP/rows-after-fix.txt"; then
+            echo "::error::số dòng bảng chính đổi sau khi cập nhật bản sửa (xem diff ở trên)." >&2
+            exit 1
+          fi
+          echo "OK: bản sửa cài được, gỡ chặn, dữ liệu giữ nguyên."
+
+      - name: (luôn) Gỡ cài đặt + in log để debug
+        if: always()
+        run: |
+          set -uo pipefail
+          if [ -x "${BIN:-}/genh-tot" ]; then
+            "$BIN/genh-tot" uninstall --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes || true
+          fi
+          docker ps -a || true
+          for c in $(docker ps -a --format '{{.Names}}' | grep '^gen-harness-' || true); do
+            echo "════ $c ════"
+            docker logs --tail 200 "$c" 2>&1 || true
+          done
+          for f in "$GEN_HARNESS_HOME"/run/*.json; do
+            [ -f "$f" ] || continue
+            echo "── $f ──"; cat "$f"; echo
+          done
+          if [ -d "$GEN_HARNESS_HOME/logs" ]; then
+            for f in "$GEN_HARNESS_HOME"/logs/*; do
+              echo "── $f ──"
+              tail -n 200 "$f" || true
+            done
+          fi
+
   # ── promote ──────────────────────────────────────────────────────────────
   # Nâng tag thành BẢN CHÍNH THỨC (latest) — chỉ khi resolve bảo promote VÀ
-  # (e2e-install xanh VÀ e2e-upgrade xanh/bỏ qua), hoặc khi Owner chạy tay
+  # (e2e-install xanh VÀ e2e-rollback xanh VÀ e2e-upgrade xanh/bỏ qua), hoặc khi Owner chạy tay
   # với skip_e2e=true (promote tay, có cảnh báo). always() để job vẫn được
   # xét khi e2e-upgrade bị bỏ qua (chưa có bản chính thức cũ hơn).
   # Không bao giờ hạ cấp: latest hiện tại mới hơn thì chỉ cảnh báo.
@@ -793,8 +1183,8 @@ jobs:
   promote:
     name: nâng thành bản chính thức (promote ${{ needs.resolve.outputs.tag }})
     runs-on: ubuntu-latest
-    needs: [resolve, e2e-install, e2e-upgrade]
-    if: always() && needs.resolve.outputs.promote == 'true' && (needs.resolve.outputs.skip_e2e == 'true' || (needs.e2e-install.result == 'success' && (needs.e2e-upgrade.result == 'success' || needs.e2e-upgrade.result == 'skipped')))
+    needs: [resolve, e2e-install, e2e-upgrade, e2e-rollback]
+    if: always() && needs.resolve.outputs.promote == 'true' && (needs.resolve.outputs.skip_e2e == 'true' || (needs.e2e-install.result == 'success' && needs.e2e-rollback.result == 'success' && (needs.e2e-upgrade.result == 'success' || needs.e2e-upgrade.result == 'skipped')))
     permissions:
       contents: write
       packages: write
