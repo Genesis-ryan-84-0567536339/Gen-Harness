@@ -222,6 +222,11 @@ export interface SystemUpdate {
    * null = genh cũ chưa ghi hoặc không đọc được — Console không hứa "Tự cài".
    */
   auto_update_enabled?: boolean | null;
+  /**
+   * v0.1.34: bản đã lỗi ở lần cập nhật trước và đã quay về bản cũ (genh ghi run/update-blocked.json) — lịch đêm không
+   * tự cài lại đúng bản này; null = không có bản nào bị chặn.
+   */
+  blocked_version?: string | null;
   /** v0.1.30: lần hỏi GitHub gần nhất thành công (ISO); null = chưa hỏi được. */
   checked_at?: string | null;
   /** v0.1.30: `POST /system/update/check` bị giới hạn (≤ 1 lần / 30 giây) — trả kết quả đang đệm. */

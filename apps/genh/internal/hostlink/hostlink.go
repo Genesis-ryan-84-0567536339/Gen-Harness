@@ -10,6 +10,8 @@
 //	  update-blocked.json        ← genh ghi (v0.1.34): bản đã lỗi + đã quay về bản cũ sau khi
 //	                               đụng CSDL — lịch đêm không thử lại; xoá khi cập nhật thành công
 //	  disk-status.json           ← genh ghi (v0.1.34) mỗi lần update kiểm đĩa: ok|low + số byte
+//	  update-inprogress.json     ← genh ghi (v0.1.34) ngay trước khi đổi compose.yaml; xoá khi xong —
+//	                               còn tệp = lần trước dừng giữa chừng, lần sau phải chạy lại đủ
 //
 // Bên máy chủ, một "watcher" (systemd path unit / crontab mỗi phút / launchd
 // QueueDirectories — xem internal/autoupdate) chạy `genh handle-requests`
@@ -105,11 +107,43 @@ func writeJSON(path string, v any) error {
 	if err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, append(b, '\n'), 0o644); err != nil {
+	return writeFileAtomic(path, append(b, '\n'))
+}
+
+// writeFileAtomic ghi data ra path qua tệp tạm TÊN NGẪU NHIÊN (os.CreateTemp —
+// O_EXCL, không đi theo symlink) rồi rename. Thư mục run/ để 0777 và được
+// bind-mount vào container api: tên tạm cố định (<tệp>.tmp) cho phép ai ghi
+// được run/ cài sẵn symlink để genh (có thể chạy bằng root) ghi đè tệp ngoài.
+// rename thay chính đường dẫn đích (kể cả khi đích là symlink) chứ không đi theo.
+func writeFileAtomic(path string, data []byte) error {
+	f, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	tmp := f.Name()
+	done := false
+	defer func() {
+		if !done {
+			_ = os.Remove(tmp)
+		}
+	}()
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return err
+	}
+	// CreateTemp tạo 0600 — api (uid khác) phải đọc được tệp trạng thái.
+	if err := f.Chmod(0o644); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return err
+	}
+	done = true
+	return nil
 }
 
 // WriteInfo ghi phiên bản genh đang chạy + cơ chế nhận yêu cầu + trạng thái
@@ -181,6 +215,32 @@ func Finish(installDir, state, to, message string) error {
 	st, _ := ReadStatus(installDir)
 	st.State, st.To, st.Message, st.FinishedAt = state, to, message, now()
 	return writeJSON(filepath.Join(Dir(installDir), StatusFile), st)
+}
+
+// SnapshotStatus đọc NGUYÊN BYTE update-status.json hiện có (ok=false nếu chưa
+// có) — để RestoreStatusSnapshot trả hộp thư về đúng như cũ.
+func SnapshotStatus(installDir string) (raw []byte, ok bool) {
+	b, err := os.ReadFile(filepath.Join(Dir(installDir), StatusFile))
+	if err != nil {
+		return nil, false
+	}
+	return b, true
+}
+
+// RestoreStatusSnapshot ghi lại update-status.json đúng từng byte như lúc
+// SnapshotStatus (ok=false → xoá tệp, như trước đó chưa có). Dùng khi một lần
+// chạy quyết định KHÔNG làm gì sau khi đã báo "running" (lịch đêm gặp bản bị
+// chặn): không làm mới finished_at, không ghi đè thông điệp lỗi gốc.
+func RestoreStatusSnapshot(installDir string, raw []byte, ok bool) error {
+	path := filepath.Join(Dir(installDir), StatusFile)
+	if !ok {
+		err := os.Remove(path)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		return nil
+	}
+	return writeFileAtomic(path, raw)
 }
 
 // ReadStatus đọc update-status.json (Status rỗng nếu chưa có).

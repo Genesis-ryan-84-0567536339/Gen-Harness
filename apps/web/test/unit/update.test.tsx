@@ -44,6 +44,51 @@ describe('updateView', () => {
     expect(updateView({ ...base, state: 'stalled' }, { waitingFor: null, offline: false }).kind).toBe('stalled');
   });
 
+  // v0.1.34: genh ghi "<việc> — <cách xử lý> (GH-E9xx)" — lời dẫn theo mã, nguyên văn vào "Chi tiết kỹ thuật".
+  const failedAt = (message: string, over: Partial<SystemUpdate> = {}) =>
+    updateView({ ...base, state: 'failed', message, finished_at: '2026-09-28T09:00:00Z', ...over }, { waitingFor: null, offline: false, now: NOW });
+  it('GH-E948 ổ đĩa đầy: chưa đụng gì, Owner phải dọn đĩa; chi tiết giữ số GB + mã', () => {
+    const msg = 'Ổ đĩa không đủ chỗ để tải bản mới — DỪNG LẠI, chưa đụng gì (còn 1.0 GB trống tại /var/lib/docker, cần tối thiểu 5 GB) — Giải phóng ổ đĩa (xem docker system df), rồi chạy lại genh update — lịch đêm cũng sẽ tự thử lại. (GH-E948)';
+    const v = failedAt(msg);
+    if (v.kind !== 'failed') throw new Error(v.kind);
+    expect(v.tone).toBe('warn');
+    expect(v.kicker).toMatch(/Ổ đĩa máy chủ sắp đầy — chưa đụng gì/);
+    expect(v.kicker).not.toMatch(/quay về/);
+    expect(v.body).toMatch(/giải phóng ổ đĩa/i);
+    expect(v.detail).toBe(msg);
+  });
+  it('GH-E941 tải lỗi: chưa đụng gì, không nói "đã quay về"', () => {
+    const v = failedAt('Tải bản mới thất bại sau 3 lần thử — CHƯA đụng gì — Kiểm kết nối mạng. (GH-E941)');
+    if (v.kind !== 'failed') throw new Error(v.kind);
+    expect(v.kicker).toBe('Chưa đụng gì — bản đang dùng vẫn chạy bình thường');
+    expect(v.detail).toMatch(/GH-E941/);
+  });
+  it('quay về bản cũ CŨNG thất bại: tông đỏ, "Cần xử lý tay", không nói dữ liệu giữ nguyên', () => {
+    const v = failedAt('migrate lỗi — ROLLBACK TỰ ĐỘNG CŨNG THẤT BẠI — ROLLBACK TỰ ĐỘNG THẤT BẠI, cần can thiệp tay ngay: khôi phục backups/k.enc lỗi (GH-E945)');
+    if (v.kind !== 'failed') throw new Error(v.kind);
+    expect(v.tone).toBe('bad');
+    expect(v.kicker).toMatch(/Cần xử lý tay/);
+    expect(v.kicker).not.toMatch(/dữ liệu giữ nguyên/);
+  });
+  it('GH-E945 quay về ổn: lời dẫn "đã tự quay về"; tiêu đề theo bản ĐÃ THỬ (to), không theo latest', () => {
+    const v = failedAt('ready lỗi — đã tự quay về bản cũ (khôi phục bản sao lưu) — Rollback đã hoàn tất tự động (GH-E945)', {
+      latest: 'v0.1.18', to: 'v0.1.17',
+    });
+    if (v.kind !== 'failed') throw new Error(v.kind);
+    expect(v.title).toBe('Cập nhật lên v0.1.17 chưa thành công');
+    expect(v.kicker).toMatch(/đã tự quay về bản đang dùng/);
+    expect(v.body).toMatch(/lịch đêm sẽ không tự cài lại/);
+  });
+  it('"Có bản mới" mà bản đó đang bị chặn: không hứa "Tự cài đêm", nói rõ phải bấm để thử lại', () => {
+    const v = updateView({ ...base, auto_update_enabled: true, published_at: '2026-09-20T08:00:00Z', blocked_version: 'v0.1.17' }, { waitingFor: null, offline: false, now: NOW });
+    if (v.kind !== 'available') throw new Error(v.kind);
+    expect(v.kicker).not.toMatch(/Tự cài/);
+    expect(v.kicker).toMatch(/lịch đêm không tự cài lại — bấm Cập nhật ngay để thử lại/);
+    // Bị chặn bản KHÁC (cũ hơn) thì vẫn hứa như thường.
+    const other = updateView({ ...base, auto_update_enabled: true, published_at: '2026-09-20T08:00:00Z', blocked_version: 'v0.1.16' }, { waitingFor: null, offline: false, now: NOW });
+    expect(other.kind === 'available' && other.kicker).toMatch(/Tự cài đêm/);
+  });
+
   // v0.1.33: lịch đêm chỉ cài bản đã là bản chính thức ≥ 24 giờ — thẻ "Có bản mới" nói khi nào tự cài, nhưng CHỈ khi
   // genh báo lịch đêm đang bật (auto_update_enabled). Mốc dựng theo giờ máy chạy test (= giờ trình duyệt).
   const local = (d: number, h: number, m = 0, s = 0) => new Date(2026, 8, d, h, m, s).getTime();

@@ -328,6 +328,7 @@ jobs:
       R: ${{ github.repository }}
       # pr: bản chính thức lấy compose.release.yaml; release: tag cài đặt.
       TAG: ${{ needs.resolve.outputs.tag }}
+      MODE: ${{ needs.resolve.outputs.mode }}
     steps:
       - name: Lấy mã nguồn
         uses: actions/checkout@v4
@@ -516,9 +517,11 @@ jobs:
       - name: genh update --yes (đã mới nhất → phải không lỗi)
         # Chế độ release: genh đang là bản thử, releases/latest (bản chính thức)
         # CŨ hơn → selfupdate không hạ cấp (IsNewer=false), chỉ chạy phần dịch vụ.
-        # Chế độ pr: GENH_COMPOSE_FILE trỏ tệp ngoài nên genh coi là đã khớp.
-        # v0.1.34 (F-10/F-11): đã mới nhất thì genh phải in "không cần cập
-        # nhật" và KHÔNG sao lưu, KHÔNG tải ảnh (docker events type=image pull).
+        # v0.1.34 (F-10/F-11): compose genh quản lý đã khớp thì genh phải in
+        # "không cần cập nhật" và KHÔNG sao lưu, KHÔNG tải ảnh (docker events
+        # type=image pull). Chế độ pr: GENH_COMPOSE_FILE trỏ tệp NGOÀI — genh
+        # không biết tệp đó đã dựng lên chưa nên PHẢI chạy đủ đường cập nhật
+        # (gõ tay / "Cập nhật ngay" trên bản cài kiểu này không được im lặng).
         run: |
           set -euo pipefail
           data="$GITHUB_WORKSPACE/.github/scripts/e2e_data.sh"
@@ -526,6 +529,14 @@ jobs:
           n0="$("$data" backups)"
           echo "trước update: $n0 bản sao lưu, mốc t0=$t0"
           "$GENH" update --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes 2>&1 | tee "$RUNNER_TEMP/update-noop.log"
+          if [ "$MODE" = "pr" ]; then
+            if grep -q "không cần cập nhật" "$RUNNER_TEMP/update-noop.log" || ! grep -q "Cập nhật xong" "$RUNNER_TEMP/update-noop.log"; then
+              echo "::error::GENH_COMPOSE_FILE (compose ngoài) mà genh update không chạy đủ đường cập nhật (thiếu \"Cập nhật xong\") — gõ tay/\"Cập nhật ngay\" trên bản cài kiểu này sẽ không làm gì." >&2
+              exit 1
+            fi
+            echo "OK: compose ngoài — genh chạy đủ đường cập nhật."
+            exit 0
+          fi
           if ! grep -q "không cần cập nhật" "$RUNNER_TEMP/update-noop.log"; then
             echo "::error::đã mới nhất mà genh update không in \"không cần cập nhật\" — genh vẫn chạy đường cập nhật đầy đủ (sao lưu/tải ảnh) mỗi đêm." >&2
             exit 1
@@ -921,10 +932,12 @@ jobs:
   #   - genh-hong: compose có api `command: ["false"]` — api không bao giờ lên;
   #   - genh-sua: compose khác byte, cùng cấu hình (bản "mới hơn" đã sửa).
   # Cài bằng genh-tot + dữ liệu mẫu → genh-hong update phải thoát khác 0, TỰ quay
-  # về bản cũ (compose cũ, api cũ chạy, số dòng giữ nguyên), ghi
-  # run/update-blocked.json đúng version bản hỏng; chạy lại như lịch đêm → "lịch
-  # đêm không tự thử lại" (thoát 0, không sao lưu thêm, không tải ảnh); genh-sua
-  # update → thành công, xoá update-blocked.json, dữ liệu vẫn nguyên.
+  # về bản cũ (compose cũ, api cũ chạy, số dòng giữ nguyên; bản hỏng không có
+  # migration chờ nên KHÔNG khôi phục CSDL), ghi run/update-blocked.json đúng
+  # version bản hỏng + hộp thư Console "failed" có mã lỗi; chạy lại như lịch đêm
+  # → "lịch đêm không tự thử lại" (thoát 0, không sao lưu thêm, không tải ảnh,
+  # hộp thư giữ nguyên); "Cập nhật ngay" (--if-requested) thì VẪN thử lại;
+  # genh-sua update → thành công, xoá update-blocked.json, dữ liệu vẫn nguyên.
   e2e-rollback:
     name: "bản hỏng cố ý: api không lên → tự quay về bản cũ, dữ liệu giữ nguyên"
     needs: resolve
@@ -1077,9 +1090,15 @@ jobs:
             exit 1
           fi
           blocked="$GEN_HARNESS_HOME/run/update-blocked.json"
-          [ -f "$blocked" ] || { echo "::error::thiếu run/update-blocked.json sau rollback có đụng CSDL — lịch đêm sẽ thử lại bản hỏng mỗi đêm." >&2; exit 1; }
+          [ -f "$blocked" ] || { echo "::error::thiếu run/update-blocked.json sau khi bản hỏng tự quay về bản cũ — lịch đêm sẽ thử lại bản hỏng mỗi đêm." >&2; exit 1; }
           cat "$blocked"; echo
           python3 -c 'import json,sys; v=json.load(open(sys.argv[1])).get("version"); sys.exit(0 if v==sys.argv[2] else "update-blocked.json ghi version %r, cần %r" % (v, sys.argv[2]))' "$blocked" "$HONG_VER"
+          python3 -c 'import json,sys; sys.exit("update-blocked.json ghi rollback_failed=true dù đã quay về bản cũ" if json.load(open(sys.argv[1])).get("rollback_failed") else 0)' "$blocked"
+          # Hộp thư Console: failed + thông điệp có mã lỗi (GH-E945) — Console chọn lời dẫn theo mã.
+          st="$GEN_HARNESS_HOME/run/update-status.json"
+          cat "$st"; echo
+          python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); m=d.get("message") or ""; sys.exit(0 if d.get("state")=="failed" and "GH-E945" in m and d.get("finished_at") else "update-status.json cần state=failed + message có GH-E945 + finished_at, được %r" % d)' "$st"
+          cp "$st" "$RUNNER_TEMP/status-after-rollback.json"
           echo "OK: đã quay về bản cũ và chặn bản $HONG_VER."
 
       - name: Số dòng không đổi sau khi quay về bản cũ
@@ -1119,7 +1138,39 @@ jobs:
             echo "::error::lịch đêm vẫn tải bản mới ($pulls lượt docker pull) cho bản bị chặn tự cập nhật." >&2
             exit 1
           fi
-          echo "OK: bản bị chặn — lịch đêm không thử lại, không sao lưu, không tải ảnh."
+          # Hộp thư Console giữ NGUYÊN như đêm lỗi (không làm mới finished_at, không ghi đè thông điệp gốc).
+          if ! cmp "$RUNNER_TEMP/status-after-rollback.json" "$GEN_HARNESS_HOME/run/update-status.json"; then
+            diff -u "$RUNNER_TEMP/status-after-rollback.json" "$GEN_HARNESS_HOME/run/update-status.json" || true
+            echo "::error::lịch đêm gặp bản bị chặn mà vẫn ghi đè run/update-status.json — thẻ đỏ của Console không bao giờ tự hết, mất thông điệp lỗi gốc." >&2
+            exit 1
+          fi
+          echo "OK: bản bị chặn — lịch đêm không thử lại, không sao lưu, không tải ảnh, hộp thư giữ nguyên."
+
+      - name: '"Cập nhật ngay" (--if-requested) trên bản bị chặn — VẪN thử lại (không bị chặn như lịch đêm)'
+        run: |
+          set -euo pipefail
+          run="$GEN_HARNESS_HOME/run"
+          mkdir -p "$run/request"
+          python3 -c "import json,datetime,sys; open(sys.argv[1],'w').write(json.dumps({'requested_at': datetime.datetime.now(datetime.timezone.utc).isoformat()}))" "$run/request/update.json"
+          rc=0
+          "$BIN/genh-hong" update --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes --if-requested --no-self-update \
+            2>&1 | tee "$RUNNER_TEMP/update-hong-req.log" || rc=$?
+          if grep -q "lịch đêm không tự thử lại" "$RUNNER_TEMP/update-hong-req.log"; then
+            echo "::error::\"Cập nhật ngay\" trên bản bị chặn mà genh vẫn bỏ qua như lịch đêm — Owner không thử lại được." >&2
+            exit 1
+          fi
+          if [ "$rc" = 0 ] || ! grep -qi "rollback" "$RUNNER_TEMP/update-hong-req.log"; then
+            echo "::error::\"Cập nhật ngay\" bản hỏng phải chạy lại đủ đường cập nhật rồi tự quay về bản cũ (thoát $rc)." >&2
+            exit 1
+          fi
+          [ ! -e "$run/request/update.json" ] || { echo "::error::genh không xoá request/update.json — watcher sẽ kích lặp." >&2; exit 1; }
+          python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); o=json.load(open(sys.argv[2])); sys.exit(0 if d.get("state")=="failed" and d.get("started_at")!=o.get("started_at") and "GH-E945" in (d.get("message") or "") else "update-status.json phải là lần chạy MỚI (started_at khác) state=failed có GH-E945, được %r" % d)' "$run/update-status.json" "$RUNNER_TEMP/status-after-rollback.json"
+          deadline=$((SECONDS + 300))
+          until curl -k -fsS -o /dev/null "https://localhost:${GH_PORT}/api/v1/ready"; do
+            [ "$SECONDS" -lt "$deadline" ] || { echo "::error::ready không xanh lại sau lần \"Cập nhật ngay\" bản hỏng" >&2; exit 1; }
+            sleep 3
+          done
+          echo "OK: \"Cập nhật ngay\" không bị chặn — đã thử lại và tự quay về bản cũ."
 
       - name: genh-sua update (bản mới hơn đã sửa) — thành công, gỡ chặn, dữ liệu nguyên
         run: |

@@ -338,11 +338,21 @@ func TestInSyncWithEmbedded(t *testing.T) {
 			t.Fatalf("muốn false,nil — được %v,%v", ok, err)
 		}
 	})
-	t.Run("đường ngoài (không phải managed)", func(t *testing.T) {
+	t.Run("đường ngoài (GENH_COMPOSE_FILE/checkout) → không bao giờ coi là đã khớp", func(t *testing.T) {
 		dir := t.TempDir()
 		other := filepath.Join(t.TempDir(), "deploy", "compose.yaml")
-		if ok, err := InSyncWithEmbedded(dir, other); err != nil || !ok {
-			t.Fatalf("muốn true,nil — được %v,%v", ok, err)
+		if err := os.MkdirAll(filepath.Dir(other), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		// Kể cả tệp ngoài trùng từng byte bản nhúng: genh không quản lý nó.
+		if err := os.WriteFile(other, EmbeddedCompose(), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if ok, err := InSyncWithEmbedded(dir, other); err != nil || ok {
+			t.Fatalf("muốn false,nil — được %v,%v", ok, err)
+		}
+		if ok, err := InSyncWithEmbedded("", other); err != nil || ok {
+			t.Fatalf("installDir rỗng: muốn false,nil — được %v,%v", ok, err)
 		}
 	})
 }

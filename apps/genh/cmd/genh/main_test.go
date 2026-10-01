@@ -1,11 +1,14 @@
 package main
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/autoupdate"
+	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/hostlink"
+	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/ops"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/selfupdate"
 )
 
@@ -133,15 +136,96 @@ func TestDecideServiceUpdate(t *testing.T) {
 }
 
 func TestServiceUpdateLines_E2EContract(t *testing.T) {
-	if !strings.Contains(blockedLine("v0.1.34"), "lịch đêm không tự thử lại") {
-		t.Errorf("dòng bản bị chặn phải chứa \"lịch đêm không tự thử lại\": %q", blockedLine("v0.1.34"))
+	ok := hostlink.UpdateBlocked{Version: "v0.1.34"}
+	if !strings.Contains(blockedLine("v0.1.34", ok), "lịch đêm không tự thử lại") {
+		t.Errorf("dòng bản bị chặn phải chứa \"lịch đêm không tự thử lại\": %q", blockedLine("v0.1.34", ok))
 	}
 	if !strings.Contains(upToDateLine("v0.1.34"), "không cần cập nhật") {
 		t.Errorf("dòng đã mới nhất phải chứa \"không cần cập nhật\": %q", upToDateLine("v0.1.34"))
 	}
-	for _, l := range []string{blockedLine("v0.1.34"), upToDateLine("v0.1.34")} {
+	for _, l := range []string{blockedLine("v0.1.34", ok), upToDateLine("v0.1.34")} {
 		if strings.Contains(l, "genh: cập nhật xong.") {
 			t.Errorf("chỉ in \"genh: cập nhật xong.\" khi RunUpdate chạy xong: %q", l)
 		}
+	}
+}
+
+// Lịch đêm gặp bản bị chặn HAI đêm liền: hộp thư Console giữ NGUYÊN thông
+// điệp + finished_at của đêm lỗi (thẻ đỏ tự hết sau 24 giờ, không mất chi tiết).
+func TestSkipBlockedUpdate_KeepsStatusAcrossNights(t *testing.T) {
+	dir := t.TempDir()
+	orig := "migrate lỗi — đã tự quay về bản cũ (GH-E945)"
+	if err := hostlink.Start(dir, "v0.1.33"); err != nil {
+		t.Fatal(err)
+	}
+	if err := hostlink.Finish(dir, "failed", "v0.1.34", orig); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := hostlink.SnapshotStatus(dir)
+	b := hostlink.UpdateBlocked{Version: "v0.1.34", BackupKey: "backups/k.enc"}
+	for night := 0; night < 2; night++ {
+		snap, had := hostlink.SnapshotStatus(dir)
+		if err := hostlink.Start(dir, "v0.1.34"); err != nil { // đúng như runUpdate
+			t.Fatal(err)
+		}
+		var out strings.Builder
+		skipBlockedUpdate(&out, dir, "v0.1.34", b, snap, had, false)
+		if !strings.Contains(out.String(), "lịch đêm không tự thử lại") {
+			t.Errorf("đêm %d: thiếu dòng log: %q", night, out.String())
+		}
+	}
+	after, _ := hostlink.SnapshotStatus(dir)
+	if string(after) != string(before) {
+		t.Fatalf("update-status.json bị đổi:\n%s\n---\n%s", before, after)
+	}
+	st, _ := hostlink.ReadStatus(dir)
+	if st.State != "failed" || st.Message != orig {
+		t.Errorf("phải giữ thông điệp gốc: %+v", st)
+	}
+}
+
+// Quay về bản cũ THẤT BẠI: dòng log/hộp thư không được nói "đã tự quay về bản
+// cũ", phải nói cần xử lý tay + bản sao lưu.
+func TestBlockedMessages_RollbackFailed(t *testing.T) {
+	b := hostlink.UpdateBlocked{Version: "v0.1.34", BackupKey: "backups/k.enc", RollbackFailed: true}
+	for _, m := range []string{blockedLine("v0.1.34", b), blockedConsoleMessage("v0.1.34", b)} {
+		if strings.Contains(m, "đã tự quay về bản cũ") {
+			t.Errorf("rollback thất bại mà vẫn nói đã quay về bản cũ: %q", m)
+		}
+		for _, want := range []string{"cần xử lý tay", "backups/k.enc", "lịch đêm không tự thử lại"} {
+			if !strings.Contains(strings.ToLower(m), strings.ToLower(want)) {
+				t.Errorf("thiếu %q: %q", want, m)
+			}
+		}
+	}
+	// Tiến trình re-exec (không có ảnh chụp): kết thúc "running" bằng thông điệp chặn đúng.
+	dir := t.TempDir()
+	_ = hostlink.Start(dir, "v0.1.33")
+	skipBlockedUpdate(&strings.Builder{}, dir, "v0.1.34", b, nil, false, true)
+	st, _ := hostlink.ReadStatus(dir)
+	if st.State != "failed" || !strings.Contains(st.Message, "CŨNG THẤT BẠI") {
+		t.Errorf("re-exec: hộp thư phải báo cần xử lý tay: %+v", st)
+	}
+}
+
+// Hộp thư Console nhận đủ What — Next (mã); ổ đĩa đầy kèm số GB; bỏ dấu `.
+func TestConsoleUpdateMessage(t *testing.T) {
+	disk := &ops.OpError{Code: ops.ErrCodeUpdateDiskLow, What: "Ổ đĩa không đủ chỗ để tải bản mới — DỪNG LẠI, chưa đụng gì",
+		Why: "còn 1.0 GB trống tại /var/lib/docker, cần tối thiểu 5 GB", Next: "Giải phóng ổ đĩa (xem `docker system df`), rồi chạy lại `genh update`."}
+	got := consoleUpdateMessage(disk)
+	for _, want := range []string{"Ổ đĩa không đủ chỗ", "còn 1.0 GB", "Giải phóng ổ đĩa", "(GH-E948)"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("thiếu %q: %q", want, got)
+		}
+	}
+	if strings.Contains(got, "`") {
+		t.Errorf("không được còn dấu `: %q", got)
+	}
+	pull := &ops.OpError{Code: ops.ErrCodeUpdatePullFailed, What: "Tải bản mới thất bại", Why: "raw docker output", Next: "Kiểm mạng."}
+	if got := consoleUpdateMessage(pull); got != "Tải bản mới thất bại — Kiểm mạng. (GH-E941)" || strings.Contains(got, "raw docker") {
+		t.Errorf("được %q", got)
+	}
+	if got := consoleUpdateMessage(errors.New("lạ")); got != "lạ" {
+		t.Errorf("lỗi thường: %q", got)
 	}
 }

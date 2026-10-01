@@ -58,7 +58,7 @@ func splitImageRef(ref string) (repo, digest, tag string) {
 
 // pruneOldImages dọn ảnh Gen-Harness cũ, GIỮ ảnh của mọi compose trong keep
 // (bản hiện tại + bản liền trước). An toàn:
-//   - chỉ xét repo khớp ghImageRepoRe;
+//   - chỉ xét repo khớp ghImageRepoRe VÀ có mặt trong tập giữ (cùng owner/tên);
 //   - tập giữ không có ref gen-harness nào (compose dùng build: cục bộ/dev)
 //     → không xoá gì;
 //   - `docker rmi` KHÔNG -f; ảnh đang dùng (rmi lỗi) chỉ in một dòng rồi bỏ qua.
@@ -82,6 +82,16 @@ func pruneOldImages(ctx context.Context, runner dockercli.Runner, keep [][]byte,
 	if len(keepKeys) == 0 {
 		return 0, nil
 	}
+	// Chỉ dọn trong ĐÚNG các repo (owner/tên) mà bản giữ dùng — không đụng ảnh
+	// gen-harness-* của owner khác (bản cài thứ hai dùng chung Docker, bản fork/dev).
+	keepRepos := map[string]bool{}
+	for k := range keepKeys {
+		if i := strings.Index(k, "@"); i >= 0 {
+			keepRepos[k[:i]] = true
+		} else if i := strings.LastIndex(k, ":"); i >= 0 {
+			keepRepos[k[:i]] = true
+		}
+	}
 
 	listed, err := runner.Output(ctx, dockercli.Cmd{Name: "docker", Args: []string{
 		"images", "--digests", "--no-trunc", "--format", "{{.Repository}}\t{{.Tag}}\t{{.Digest}}\t{{.ID}}",
@@ -94,7 +104,7 @@ func pruneOldImages(ctx context.Context, runner dockercli.Runner, keep [][]byte,
 	var rows []row
 	for _, line := range strings.Split(string(listed), "\n") {
 		f := strings.Split(strings.TrimSpace(line), "\t")
-		if len(f) < 4 || !ghImageRepoRe.MatchString(f[0]) {
+		if len(f) < 4 || !ghImageRepoRe.MatchString(f[0]) || !keepRepos[f[0]] {
 			continue
 		}
 		rows = append(rows, row{repo: f[0], tag: f[1], digest: f[2], id: f[3]})

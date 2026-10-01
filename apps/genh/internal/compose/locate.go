@@ -293,14 +293,16 @@ func ManagedComposePath(installDir string) string {
 
 // InSyncWithEmbedded báo compose.yaml tại path đã khớp bản nhúng của binary
 // đang chạy chưa (chỉ đọc, không ghi). path KHÁC compose.yaml genh quản lý
-// (GENH_COMPOSE_FILE, checkout repo) → true: genh không đồng bộ tệp ngoài nên
-// không có gì "lệch" để cập nhật. Với tệp genh quản lý: true chỉ khi
+// (GENH_COMPOSE_FILE, checkout repo) → false: genh không biết tệp ngoài đó đã
+// được dựng lên chưa (ảnh `image:` có thể có bản mới, cần migrate…) nên KHÔNG
+// được coi là "đã khớp" — `genh update` luôn chạy đủ sao lưu/tải/migrate/khởi
+// động lại như trước v0.1.34. Với tệp genh quản lý: true chỉ khi
 // compose.yaml trùng từng byte bản nhúng VÀ deploy/proxy/Caddyfile trùng
 // embeddedCaddyfile (thiếu Caddyfile = không trùng).
 func InSyncWithEmbedded(installDir, path string) (bool, error) {
 	managed := ManagedComposePath(installDir)
 	if managed == "" || filepath.Clean(path) != filepath.Clean(managed) {
-		return true, nil
+		return false, nil
 	}
 	current, err := os.ReadFile(managed)
 	if err != nil {

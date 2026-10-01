@@ -12,6 +12,8 @@ export type UpdateView =
       title: string;
       kicker: string;
       body?: string;
+      /** Nguyên văn thông điệp genh (mã lỗi, lệnh, bản sao lưu) — hiện trong "Chi tiết kỹ thuật". */
+      detail?: string;
       showCommand?: boolean;
       steps: Array<{ label: string; state: StepState }>;
     };
@@ -39,6 +41,47 @@ export function autoInstallHint(publishedAt: string | null | undefined, now: num
   const dd = String(run.getDate()).padStart(2, '0');
   const mm = String(run.getMonth() + 1).padStart(2, '0');
   return `Tự cài đêm ${dd}/${mm} (~03:00)`;
+}
+
+/** Mã lỗi genh (GH-E9xx) cuối thông điệp hộp thư — genh ≥ v0.1.34 ghi "<việc> — <cách xử lý> (GH-E9xx)". */
+export function updateErrorCode(message: string | null | undefined): string | null {
+  const m = message?.match(/GH-E[0-9A-F]{3}/g);
+  return m ? m[m.length - 1] : null;
+}
+
+/**
+ * Lời dẫn thẻ "chưa thành công" theo mã lỗi genh — mỗi mã nghĩa khác nhau: chưa đụng gì (tải/sao lưu/ổ đĩa), đã tự
+ * quay về bản cũ, hay quay về CŨNG thất bại (cần xử lý tay).
+ */
+function failedCopy(message: string | null): { tone: 'warn' | 'bad'; kicker: string; body: string } {
+  const code = updateErrorCode(message);
+  const msg = message ?? '';
+  if (/CŨNG THẤT BẠI|chưa trọn|can thiệp tay|xử lý tay/i.test(msg)) {
+    return {
+      tone: 'bad', kicker: 'Cần xử lý tay — tự quay về bản cũ chưa trọn',
+      body: 'Hệ thống chưa tự đưa máy về trạng thái chạy ổn. Cần người quản trị máy chủ làm theo hướng dẫn trong Chi tiết kỹ thuật (có tên bản sao lưu cần khôi phục).',
+    };
+  }
+  if (code === 'GH-E948') {
+    return {
+      tone: 'warn', kicker: 'Ổ đĩa máy chủ sắp đầy — chưa đụng gì, bản đang dùng vẫn chạy bình thường',
+      body: 'Cần giải phóng ổ đĩa trên máy chủ (ảnh Docker cũ, tệp lớn), rồi bấm Thử lại — lịch đêm cũng sẽ tự thử lại.',
+    };
+  }
+  if (code === 'GH-E941' || code === 'GH-E940') {
+    return {
+      tone: 'warn', kicker: 'Chưa đụng gì — bản đang dùng vẫn chạy bình thường',
+      body: code === 'GH-E941'
+        ? 'Chưa tải được bản mới (thường do mạng). Lịch đêm sẽ tự thử lại, hoặc bấm Thử lại.'
+        : 'Chưa sao lưu được trước khi cập nhật nên hệ thống dừng lại. Bấm Thử lại; nếu vẫn lỗi, chạy genh doctor trên máy chủ.',
+    };
+  }
+  return {
+    tone: 'bad', kicker: 'Hệ thống đã tự quay về bản đang dùng — dữ liệu giữ nguyên',
+    body: code === 'GH-E945' || code === 'GH-E949'
+      ? 'Bản mới lỗi khi khởi động nên lịch đêm sẽ không tự cài lại bản này. Bấm Thử lại nếu muốn thử ngay, hoặc đợi bản mới hơn.'
+      : 'Bấm Thử lại, hoặc xem logs/auto-update.log trên máy chủ.',
+  };
 }
 
 function recent(iso: string | null, now: number): boolean {
@@ -81,10 +124,16 @@ export function updateView(
     };
   }
   if (d.state === 'failed' && recent(d.finished_at, now)) {
+    // Tiêu đề theo bản ĐÃ THỬ (`to` genh ghi), không theo bản mới nhất — v0.1.35 ra rồi thì lỗi đêm qua vẫn là của v0.1.34.
+    const tried = d.to && d.to !== d.current ? d.to : target;
+    const copy = failedCopy(d.message);
+    const coded = updateErrorCode(d.message) !== null;
     return {
-      kind: 'failed', tone: 'bad', title: `Cập nhật lên ${target} chưa thành công`,
-      kicker: 'Hệ thống đã tự quay về bản đang dùng — dữ liệu giữ nguyên',
-      body: d.message ?? 'Xem chi tiết trong logs/auto-update.log trên máy chủ.', steps: [],
+      kind: 'failed', tone: copy.tone, title: `Cập nhật lên ${tried} chưa thành công`, kicker: copy.kicker,
+      // genh cũ (không có mã): thông điệp đã là câu thân thiện — hiện thẳng như trước.
+      body: coded ? copy.body : (d.message ?? 'Xem chi tiết trong logs/auto-update.log trên máy chủ.'),
+      detail: coded ? (d.message ?? undefined) : undefined,
+      steps: [],
     };
   }
   if (opts.waitingFor && !d.update_available && (d.state === 'done' || d.state === 'idle')) {
@@ -93,13 +142,17 @@ export function updateView(
   if (d.update_available) {
     // Lịch đêm đợi bản ra đủ 24 giờ: nói rõ khi nào tự cài, kẻo Owner thấy "Có bản mới" tới 2 đêm mà không hiểu.
     // Chỉ nói khi genh báo lịch đêm đang BẬT (genh.json auto_update_enabled === true) — tắt/không rõ thì không hứa.
-    const hint = d.auto_update_enabled === true ? autoInstallHint(d.published_at, now) : null;
+    // Bản mới nhất đã lỗi lần trước (genh ghi run/update-blocked.json): lịch đêm KHÔNG tự cài lại — không hứa "Tự cài".
+    const blocked = !!d.blocked_version && d.blocked_version === d.latest;
+    const hint = d.auto_update_enabled === true && !blocked ? autoInstallHint(d.published_at, now) : null;
     const action = d.can_request ? 'bấm Cập nhật ngay' : 'chạy lệnh bên dưới';
     return {
       kind: 'available', tone: 'accent', title: `Có bản mới ${d.latest}`,
-      kicker: hint
-        ? `Đang dùng ${d.current} · ${hint} — hoặc ${action}`
-        : `Đang dùng ${d.current} · ${action} (mất khoảng 2–5 phút, tự sao lưu trước)`,
+      kicker: blocked
+        ? `Đang dùng ${d.current} · bản này đã lỗi ở lần cập nhật trước nên lịch đêm không tự cài lại — ${action} để thử lại`
+        : hint
+          ? `Đang dùng ${d.current} · ${hint} — hoặc ${action}`
+          : `Đang dùng ${d.current} · ${action} (mất khoảng 2–5 phút, tự sao lưu trước)`,
       body: d.can_request ? undefined : 'Máy chủ chưa bật cập nhật bằng nút bấm.',
       showCommand: !d.can_request, steps: [],
     };

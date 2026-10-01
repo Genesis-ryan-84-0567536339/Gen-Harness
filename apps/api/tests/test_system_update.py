@@ -170,3 +170,16 @@ async def test_auto_update_enabled_from_genh_json(owner_api: Api, link: Path, re
         (link / "genh.json").write_text(json.dumps({"version": "v0.1.16", "updater": "systemd",
                                                     "auto_update_enabled": raw}))
         assert (await owner_api.get("/system/update")).json()["auto_update_enabled"] is want, raw
+
+
+async def test_blocked_version_from_update_blocked_json(owner_api: Api, link: Path, redis) -> None:  # type: ignore[no-untyped-def]
+    """v0.1.34: `blocked_version` đọc từ run/update-blocked.json (genh ghi khi bản mới lỗi + đã quay về bản cũ) —
+    không có tệp / tệp hỏng / giá trị lạ ⇒ null."""
+    await redis.delete(upd.LATEST_CACHE_KEY)
+    assert (await owner_api.get("/system/update")).json()["blocked_version"] is None
+    (link / "update-blocked.json").write_text(json.dumps({"version": "v0.1.17", "blocked_at": "2026-09-30T03:00:00Z",
+                                                          "code": "GH-E944", "rollback_failed": True}))
+    assert (await owner_api.get("/system/update")).json()["blocked_version"] == "v0.1.17"
+    for raw in ("{hỏng", json.dumps({"version": 17}), json.dumps({"version": ""}), json.dumps(["v0.1.17"])):
+        (link / "update-blocked.json").write_text(raw)
+        assert (await owner_api.get("/system/update")).json()["blocked_version"] is None, raw

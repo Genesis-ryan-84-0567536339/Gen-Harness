@@ -1299,6 +1299,9 @@ xoá nhánh cả hai sau khi kiểm.
 ảnh), tự dọn ảnh cũ; nếu một bản mới lỗi, máy tự quay về bản cũ và Console hiện "Cập nhật … chưa thành công — Hệ thống đã tự
 quay về bản đang dùng", Boss không phải làm gì (có thể bấm **Thử lại** / **Cập nhật ngay** nếu muốn thử lại).
 
+**Chỉ cần làm khi Console báo:** "Ổ đĩa máy chủ sắp đầy" (GH-E948) ⇒ dọn ổ đĩa máy chủ rồi bấm **Thử lại**; "Cần xử lý tay"
+(tự quay về bản cũ thất bại) ⇒ làm theo "Chi tiết kỹ thuật" trên thẻ (có tên bản sao lưu cần khôi phục).
+
 ### Vì sao
 
 - **F-10/F-11**: `genh update` sao lưu rồi mới tải ảnh; tải lỗi (mạng chập) vẫn chạy rollback = khôi phục CSDL không cần thiết.
@@ -1331,6 +1334,26 @@ quay về bản đang dùng", Boss không phải làm gì (có thể bấm **Th�
 - Web: thêm Playwright mock `apps/web/e2e/update-rollback-v0134.spec.ts` (thẻ "chưa thành công" + thông điệp genh GH-E949 +
   "Thử lại" gửi yêu cầu; lỗi cũ không treo thẻ đỏ). `ci.yml`: sửa cảnh báo actionlint SC2034 (biến vòng lặp không dùng).
 - `VERSION` → `v0.1.34`; `docs/ROADMAP.md` mục Đã xong.
+
+### Sửa sau review (trước merge)
+
+- **Compose ngoài** (`GENH_COMPOSE_FILE`, checkout repo) không bao giờ coi là "đã khớp" ⇒ gõ tay / "Cập nhật ngay" luôn chạy đủ
+  (trước đó luôn "không cần cập nhật", không pull/migrate/up). E2E chế độ pr kiểm bước "đã mới nhất" chạy đủ ("Cập nhật xong").
+- **Dấu cập nhật dở** `run/update-inprogress.json`: ghi ngay trước khi đổi compose.yaml, xoá khi sẵn sàng / đã trả compose cũ;
+  còn dấu ⇒ không coi "đã khớp" (genh bị tắt giữa chừng không còn kẹt "không cần cập nhật" mãi).
+- **Không có migration chờ ⇒ không khôi phục CSDL** khi up/ready lỗi (worker/bridge/api vẫn ghi suốt — khôi phục sẽ mất dữ liệu):
+  chỉ trả compose cũ + `up -d`, vẫn chặn lịch đêm (GH-E945). Có migration chờ: dựng lại db bằng ảnh **cũ**
+  (`up -d --wait --no-deps db`, ≤ 3 phút) trước khi khôi phục.
+- **Lịch đêm gặp bản bị chặn**: để nguyên `update-status.json` như đêm lỗi (không làm mới `finished_at`, không ghi đè thông
+  điệp gốc) ⇒ thẻ đỏ tự hết sau 24 giờ. `update-blocked.json` có `rollback_failed` ⇒ log/thông điệp không nói "đã quay về bản
+  cũ" khi quay về thất bại.
+- **Console**: hộp thư nhận `<việc> — <cách xử lý> (GH-E9xx)`; thẻ chọn lời dẫn theo mã (GH-E948 ổ đĩa đầy, GH-E941/E940
+  chưa đụng gì, quay về thất bại "Cần xử lý tay"), nguyên văn trong "Chi tiết kỹ thuật"; tiêu đề theo bản đã thử (`to`). api
+  `GET /system/update` thêm `blocked_version` ⇒ không hứa "Tự cài đêm" cho bản đang bị chặn.
+- Nhỏ: dọn ảnh chỉ trong repo (owner/tên) của bản giữ; ghi tệp `run/` qua tệp tạm ngẫu nhiên (O_EXCL, không theo symlink);
+  thông điệp "đã tự quay về bản cũ" thay "đã tự động rollback"; help `--no-self-update` nói rõ bỏ qua khi đã khớp; e2e-rollback
+  kiểm hộp thư Console (failed + GH-E945, đêm sau không đổi) và "Cập nhật ngay" (`--if-requested`) vẫn thử lại bản bị chặn.
+- Chấp nhận (ghi rõ): api không dừng trước sao lưu — ghi của api trong vài giây giữa sao lưu và migrate chỉ mất nếu phải khôi phục.
 
 ### Kiểm tra (nhánh tích hợp, máy dựng Linux, 01/10/2026)
 

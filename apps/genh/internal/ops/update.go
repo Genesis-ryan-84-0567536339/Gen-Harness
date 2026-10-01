@@ -28,6 +28,11 @@ var updateServiceOrder = []string{"db", "redis", "proxy", "api", "web", "bridge"
 // updateWriterServices là các nguồn GHI vào CSDL ngoài api — tạm dừng trước
 // khi sao lưu nếu bản mới có thay đổi CSDL (F-10), để bản sao lưu không lỡ
 // mất các ghi chép đến SAU lúc chụp mà migrate sắp đụng.
+//
+// api CỐ Ý không dừng (Console phải còn chạy để Owner thấy tiến trình, proxy
+// chưa có trang bảo trì): khoảng hở CHẤP NHẬN là các ghi của api (thao tác
+// Owner, webhook) trong vài giây giữa lúc sao lưu xong và lúc migrate — chỉ mất
+// nếu migrate/khởi động lại lỗi và phải khôi phục bản sao lưu đó.
 var updateWriterServices = []string{"worker", "bridge"}
 
 // rollbackStopServices là các service dừng lại trước khi khôi phục CSDL khi
@@ -91,14 +96,19 @@ const defaultPullTimeout = 20 * time.Minute
 
 var defaultPullBackoff = []time.Duration{20 * time.Second, 60 * time.Second}
 
-// UpdateNeeded báo dịch vụ đã khớp bản genh đang chạy chưa (compose.yaml genh
-// quản lý + Caddyfile trùng bản nhúng — compose.InSyncWithEmbedded). Lỗi (không
-// tìm thấy compose…) → (false, err): bên gọi coi như CẦN cập nhật để RunUpdate
-// tự báo lỗi đúng khuôn.
+// UpdateNeeded báo dịch vụ đã khớp bản genh đang chạy chưa: compose.yaml GENH
+// QUẢN LÝ + Caddyfile trùng bản nhúng (compose.InSyncWithEmbedded) VÀ không còn
+// dấu cập nhật dở (run/update-inprogress.json — lần trước đã ghi compose.yaml
+// mới nhưng chưa tới `up -d` thành công). compose.yaml ngoài (GENH_COMPOSE_FILE,
+// checkout) → false: luôn chạy đủ. Lỗi (không tìm thấy compose…) → (false,
+// err): bên gọi coi như CẦN cập nhật để RunUpdate tự báo lỗi đúng khuôn.
 func UpdateNeeded(env *Env) (inSync bool, err error) {
 	path, err := env.LocatePath()
 	if err != nil {
 		return false, err
+	}
+	if env.InstallDir != "" && hostlink.UpdateInProgressExists(env.InstallDir) {
+		return false, nil
 	}
 	return compose.InSyncWithEmbedded(env.InstallDir, path)
 }
@@ -111,19 +121,25 @@ func UpdateNeeded(env *Env) (inSync bool, err error) {
 //     nếu compose.yaml sẽ đổi, KHÔNG đồng bộ compose.yaml lúc này. Thử tối đa
 //     PullAttempts lần, mỗi lần có giới hạn thời gian; hết lần → GH-E941, CHƯA
 //     đụng gì (không sao lưu, không khôi phục, không up).
-//  3. Dò `alembic current` bằng ảnh mới: có thay đổi CSDL → tạm dừng worker và
-//     bridge (nguồn ghi) trước khi sao lưu.
+//  3. Dò `alembic current` bằng ảnh mới: có thay đổi CSDL (migrationPending) →
+//     tạm dừng worker và bridge (nguồn ghi) trước khi sao lưu.
 //  4. Sao lưu (pre-update). Lỗi → bật lại worker/bridge nếu đã dừng, DỪNG (GH-E940).
-//  5. Đồng bộ compose.yaml với bản nhúng (SAU sao lưu, mục #3 v0.1.2).
+//  5. Ghi run/update-inprogress.json rồi đồng bộ compose.yaml với bản nhúng
+//     (SAU sao lưu, mục #3 v0.1.2). Dấu này chỉ xoá khi đã sẵn sàng (bước 9) hoặc
+//     đã trả compose.yaml về bản cũ — genh chết giữa chừng thì lần sau không
+//     coi "đã khớp" (UpdateNeeded).
 //  6. Di trú /tmp/gh-objects của bản cài cũ (nếu có).
-//  7. Migrate — từ đây CSDL coi như ĐÃ bị đụng (dbTouched).
+//  7. Migrate — từ đây bản này coi như HỎNG nếu có lỗi (versionBroken); CSDL
+//     chỉ coi là ĐÃ bị đụng (dbTouched) khi bước 3 thấy có migration chờ.
 //  8. up -d --remove-orphans.  9. Chờ /api/v1/ready.  10. Chép dữ liệu di trú.
 //  11. Thành công: xoá run/update-blocked.json, dọn ảnh cũ (giữ bản hiện tại +
 //     bản liền trước), tin cậy lại CA.
 //
 // Lỗi ở bước 5–6 (CSDL chưa bị đụng): trả compose.yaml về bản cũ + up -d, KHÔNG
-// khôi phục CSDL. Lỗi ở bước 7–9: khôi phục bản sao lưu bằng ảnh CŨ + ghi
-// run/update-blocked.json — xem rollbackAndWrap.
+// khôi phục CSDL. Lỗi ở bước 7–9: không có migration chờ → cũng chỉ trả
+// compose.yaml + up -d (KHÔNG khôi phục — worker/bridge/api vẫn ghi suốt lúc đó,
+// khôi phục sẽ làm mất các ghi đó); có migration chờ → khôi phục bản sao lưu
+// bằng ảnh CŨ. Cả hai đều ghi run/update-blocked.json — xem rollbackAndWrap.
 //
 // GIỚI HẠN: chưa có pipeline phát hành thật gắn image theo Channel (xem
 // UpdateOptions.Channel). Các service dùng "build:" cục bộ được báo RÕ RÀNG là
@@ -253,7 +269,8 @@ func RunUpdate(ctx context.Context, env *Env, opts UpdateOptions, deps UpdateDep
 	// 3. Bản mới có thay đổi CSDL? (F-10 bước 4) — có thì tạm dừng nguồn ghi.
 	writersStopped := false
 	oldWriters := servicesPresent(oldCompose, updateWriterServices)
-	if needsMigration(ctx, runner, pullPath, envOverlay, dir) {
+	migrationPending := needsMigration(ctx, runner, pullPath, envOverlay, dir)
+	if migrationPending {
 		if len(oldWriters) > 0 {
 			_, _ = fmt.Fprintln(out, "Bản mới có thay đổi CSDL — tạm dừng worker và bridge (nguồn ghi) trước khi sao lưu…")
 			stopArgs := compose.BaseArgs(composePath, append([]string{"stop"}, oldWriters...)...)
@@ -303,8 +320,14 @@ func RunUpdate(ctx context.Context, env *Env, opts UpdateOptions, deps UpdateDep
 		plan.oldCompose = oldCompose
 	}
 
-	// 5. Đồng bộ compose.yaml SAU sao lưu (giữ bản cũ ở compose.yaml.bak).
+	// 5. Dấu "đang cập nhật dở" TRƯỚC khi đổi compose.yaml, rồi đồng bộ
+	// compose.yaml SAU sao lưu (giữ bản cũ ở compose.yaml.bak).
 	_, _ = fmt.Fprintln(out, "4/7 Đồng bộ compose.yaml + kiểm dữ liệu /tmp/gh-objects (bản cài cũ)…")
+	if env.InstallDir != "" {
+		if err := hostlink.MarkUpdateInProgress(env.InstallDir, hostlink.UpdateInProgress{Version: opts.Version, BackupKey: key}); err != nil {
+			_, _ = fmt.Fprintf(out, "     (không ghi được %s — %v)\n", hostlink.UpdateInProgressFile, err)
+		}
+	}
 	syncedPath, err := env.LocatePathSync()
 	if err != nil {
 		return rollbackAndWrap(ctx, plan, out, &OpError{
@@ -341,9 +364,13 @@ func RunUpdate(ctx context.Context, env *Env, opts UpdateOptions, deps UpdateDep
 	}
 	plan.objectsHostDir = objectsHostDir
 
-	// 7. Migrate — từ lệnh này CSDL coi như đã bị đụng.
+	// 7. Migrate — từ lệnh này lỗi nghĩa là bản này hỏng (chặn lịch đêm); CSDL
+	// chỉ coi là đã bị đụng khi thật sự có migration chờ (bước 3) — không có
+	// thì worker/bridge chưa từng dừng, khôi phục bản sao lưu sẽ xoá mất mọi
+	// ghi chép từ lúc sao lưu tới giờ.
 	_, _ = fmt.Fprintln(out, "5/7 Tạo cấu trúc dữ liệu (migrate)…")
-	plan.dbTouched = true
+	plan.versionBroken = true
+	plan.dbTouched = migrationPending
 	migrateArgs := compose.BaseArgs(composePath, "run", "--rm", "-T", "--no-deps", "migrate")
 	if err := runner.Stream(ctx, dockercli.Cmd{Name: "docker", Args: migrateArgs, Env: envOverlay, Dir: dir}, func(string) {}); err != nil {
 		return rollbackAndWrap(ctx, plan, out, &OpError{
@@ -380,6 +407,13 @@ func RunUpdate(ctx context.Context, env *Env, opts UpdateOptions, deps UpdateDep
 			Next: "Xem `docker compose logs` sau khi rollback xong.",
 			Err:  err,
 		})
+	}
+
+	// Dịch vụ bản mới đã lên và sẵn sàng — lần cập nhật này không còn "dở".
+	if env.InstallDir != "" {
+		if err := hostlink.ClearUpdateInProgress(env.InstallDir); err != nil {
+			_, _ = fmt.Fprintf(out, "     (không xoá được %s — %v)\n", hostlink.UpdateInProgressFile, err)
+		}
 	}
 
 	// 10. Container api MỚI (đã mount volume gh_objects) đã lên VÀ healthy —
@@ -605,11 +639,15 @@ type rollbackPlan struct {
 	// oldCompose: nội dung compose.yaml lúc bắt đầu (đã đọc vào bộ nhớ) — nil
 	// nghĩa là lần này compose.yaml KHÔNG đổi, không có gì để trả về.
 	oldCompose []byte
-	// dbTouched: migrate đã bắt đầu chạy → CSDL có thể đã đổi, PHẢI khôi phục.
-	dbTouched  bool
-	installDir string
-	version    string // genh main.version — ghi vào update-blocked.json
-	target     []byte // compose bản đích (giữ ảnh của nó khi dọn)
+	// dbTouched: migrate đã bắt đầu chạy VÀ có migration chờ → CSDL có thể đã
+	// đổi, PHẢI khôi phục.
+	dbTouched bool
+	// versionBroken: lỗi từ bước migrate trở đi (migrate/up/ready) → bản này
+	// hỏng, ghi update-blocked.json kể cả khi không cần khôi phục CSDL.
+	versionBroken bool
+	installDir    string
+	version       string // genh main.version — ghi vào update-blocked.json
+	target        []byte // compose bản đích (giữ ảnh của nó khi dọn)
 }
 
 // rollbackAndWrap là TRÁI TIM của `genh update`: khi một bước SAU sao lưu thất
@@ -619,15 +657,20 @@ type rollbackPlan struct {
 //	a) oldCompose != nil → ghi lại compose.yaml CŨ từ bộ nhớ (tmp + rename).
 //	   KHÔNG đọc compose.yaml.bak: .bak có thể cũ từ một lần cập nhật trước,
 //	   khôi phục nó khi lần này compose không đổi là SAI.
-//	b) dbTouched=false (lỗi đồng bộ compose / di trú /tmp/gh-objects): CSDL chưa
-//	   bị đụng → chỉ `up -d --remove-orphans` (bật lại worker/bridge nếu đã
-//	   dừng), KHÔNG khôi phục, KHÔNG ghi update-blocked; giữ Code gốc.
+//	b) dbTouched=false: CSDL chưa bị đụng → chỉ `up -d --remove-orphans` (bật
+//	   lại worker/bridge nếu đã dừng), KHÔNG khôi phục. Lỗi đồng bộ compose / di
+//	   trú /tmp/gh-objects: KHÔNG ghi update-blocked, giữ Code gốc. Lỗi từ
+//	   migrate trở đi (versionBroken, không có migration chờ): bản này hỏng →
+//	   ghi update-blocked.json, trả GH-E945. Đã trả compose.yaml về bản cũ +
+//	   khởi động lại được → xoá update-inprogress.json.
 //	c) dbTouched=true (F-33): chép lại dữ liệu di trú vào volume (nếu có, trước
-//	   khi dừng api — xem seedObjectsVolume), dừng api/worker/bridge/web, khôi
-//	   phục bản sao lưu bằng container TẠM dựng từ ảnh CŨ (`run --rm`, không
-//	   exec vào api ảnh mới), `up -d --remove-orphans`, dọn ảnh (best-effort),
-//	   ghi run/update-blocked.json (CẢ khi rollback thất bại) để lịch đêm không
-//	   thử lại đúng bản này; trả GH-E945.
+//	   khi dừng api — xem seedObjectsVolume), dừng api/worker/bridge/web, dựng
+//	   lại db bằng ảnh CŨ (nếu compose đổi — để bản sao lưu được khôi phục bởi
+//	   đúng ảnh db sẽ chạy tiếp), khôi phục bản sao lưu bằng container TẠM dựng
+//	   từ ảnh CŨ (`run --rm`, không exec vào api ảnh mới), `up -d
+//	   --remove-orphans`, dọn ảnh (best-effort), ghi run/update-blocked.json
+//	   (CẢ khi rollback thất bại, kèm rollback_failed) để lịch đêm không thử lại
+//	   đúng bản này; trả GH-E945.
 func rollbackAndWrap(ctx context.Context, p rollbackPlan, out io.Writer, original *OpError) error {
 	runner := p.runner
 	up := func() error {
@@ -637,7 +680,7 @@ func rollbackAndWrap(ctx context.Context, p rollbackPlan, out io.Writer, origina
 	}
 
 	if !p.dbTouched {
-		_, _ = fmt.Fprintf(out, "LỖI (%s) — CSDL chưa bị đụng: trả compose.yaml về bản cũ và khởi động lại (không cần khôi phục dữ liệu)…\n", original.Code)
+		_, _ = fmt.Fprintf(out, "LỖI (%s) — CSDL chưa bị đụng: tự rollback — trả compose.yaml về bản cũ và khởi động lại (không cần khôi phục dữ liệu)…\n", original.Code)
 	} else {
 		_, _ = fmt.Fprintf(out, "LỖI (%s) — đang tự động rollback về bản sao lưu %s…\n", original.Code, p.key)
 	}
@@ -651,9 +694,19 @@ func rollbackAndWrap(ctx context.Context, p rollbackPlan, out io.Writer, origina
 
 	if !p.dbTouched {
 		upErr := up()
-		what := original.What + " — CSDL chưa bị đụng, đã trả compose.yaml về bản cũ và khởi động lại"
+		ok := upErr == nil && composeErr == nil
+		if ok && p.oldCompose != nil && p.installDir != "" {
+			// compose.yaml đã về đúng bản cũ và dịch vụ chạy lại bằng nó — không
+			// còn "dở". compose không đổi lần này (oldCompose nil) thì GIỮ dấu:
+			// compose.yaml vẫn trùng bản nhúng, thiếu dấu thì lần gõ tay sau sẽ
+			// tưởng "đã khớp" mà không thử lại.
+			if err := hostlink.ClearUpdateInProgress(p.installDir); err != nil {
+				_, _ = fmt.Fprintf(out, "     (không xoá được %s — %v)\n", hostlink.UpdateInProgressFile, err)
+			}
+		}
+		what := original.What + " — CSDL chưa bị đụng, đã tự quay về bản cũ và khởi động lại"
 		next := original.Next
-		if upErr != nil || composeErr != nil {
+		if !ok {
 			what = original.What + " — CSDL chưa bị đụng, NHƯNG khởi động lại bằng bản cũ chưa trọn"
 			var b strings.Builder
 			if composeErr != nil {
@@ -667,9 +720,18 @@ func rollbackAndWrap(ctx context.Context, p rollbackPlan, out io.Writer, origina
 			next = b.String()
 			_, _ = fmt.Fprintln(out, "Khởi động lại bằng bản cũ THẤT BẠI — cần can thiệp tay.")
 		} else {
-			_, _ = fmt.Fprintln(out, "Đã trả về bản cũ và khởi động lại dịch vụ (dữ liệu không đổi).")
+			_, _ = fmt.Fprintln(out, "Rollback xong: đã trả về bản cũ và khởi động lại dịch vụ (dữ liệu không đổi).")
 		}
-		return &OpError{Code: original.Code, What: what, Why: original.Why, Next: next, Err: original.Err}
+		if !p.versionBroken {
+			return &OpError{Code: original.Code, What: what, Why: original.Why, Next: next, Err: original.Err}
+		}
+		// Lỗi từ migrate trở đi mà không có migration chờ: bản này hỏng —
+		// chặn lịch đêm như nhánh c), nhưng KHÔNG khôi phục CSDL.
+		p.writeBlocked(out, original, !ok)
+		if ok {
+			next = "Đã tự quay về bản cũ (CSDL không đổi, không cần khôi phục); lịch đêm sẽ không tự thử lại bản này. " + original.Next
+		}
+		return &OpError{Code: ErrCodeUpdateRolledBack, What: what, Why: original.Why, Next: next, Err: original.Err}
 	}
 
 	// c) Đã đụng CSDL.
@@ -692,6 +754,19 @@ func rollbackAndWrap(ctx context.Context, p rollbackPlan, out io.Writer, origina
 		}
 	}
 
+	if p.oldCompose != nil {
+		// Lỗi ở bước 8–9 thì db đã được dựng lại bằng ảnh MỚI: dựng lại bằng
+		// ảnh CŨ và chờ healthy TRƯỚC khi khôi phục, để pg_restore tạo extension
+		// đúng phiên bản của ảnh db sẽ chạy tiếp. Có giới hạn thời gian; lỗi →
+		// vẫn khôi phục tiếp (best-effort).
+		dbCtx, cancel := context.WithTimeout(ctx, rollbackDBWait)
+		dbArgs := compose.BaseArgs(p.composePath, "up", "-d", "--wait", "--no-deps", "db")
+		if _, err := runner.Output(dbCtx, dockercli.Cmd{Name: "docker", Args: dbArgs, Env: p.envOverlay, Dir: p.dir}); err != nil {
+			_, _ = fmt.Fprintf(out, "     (không dựng lại được db bằng bản cũ trước khi khôi phục — %v; vẫn khôi phục tiếp)\n", err)
+		}
+		cancel()
+	}
+
 	restoreErr := restoreInContainer(ctx, runner, p.composePath, p.envOverlay, p.dir, p.key, true)
 	restartErr := up()
 	rolledBackOK := restoreErr == nil && restartErr == nil
@@ -700,13 +775,7 @@ func rollbackAndWrap(ctx context.Context, p rollbackPlan, out io.Writer, origina
 		_, _ = fmt.Fprintf(out, "     đã dọn %d ảnh cũ.\n", n)
 	}
 
-	if p.installDir != "" {
-		if err := hostlink.WriteUpdateBlocked(p.installDir, hostlink.UpdateBlocked{
-			Version: p.version, Code: original.Code, BackupKey: p.key, Message: original.What,
-		}); err != nil {
-			_, _ = fmt.Fprintf(out, "     (không ghi được %s — %v)\n", hostlink.UpdateBlockedFile, err)
-		}
-	}
+	p.writeBlocked(out, original, !rolledBackOK)
 
 	var next strings.Builder
 	if rolledBackOK {
@@ -727,7 +796,7 @@ func rollbackAndWrap(ctx context.Context, p rollbackPlan, out io.Writer, origina
 
 	what := original.What
 	if rolledBackOK {
-		what += " — đã tự động rollback"
+		what += " — đã tự quay về bản cũ (khôi phục bản sao lưu)"
 	} else {
 		what += " — ROLLBACK TỰ ĐỘNG CŨNG THẤT BẠI"
 	}
@@ -738,6 +807,24 @@ func rollbackAndWrap(ctx context.Context, p rollbackPlan, out io.Writer, origina
 		Why:  original.Why,
 		Next: next.String(),
 		Err:  original.Err,
+	}
+}
+
+// rollbackDBWait giới hạn lần dựng lại db bằng ảnh cũ trước khi khôi phục.
+const rollbackDBWait = 3 * time.Minute
+
+// writeBlocked ghi run/update-blocked.json cho bản đang cập nhật (CẢ khi quay
+// về bản cũ thất bại — rollbackFailed=true để genh/Console không nói "đã quay
+// về bản cũ" khi chưa).
+func (p rollbackPlan) writeBlocked(out io.Writer, original *OpError, rollbackFailed bool) {
+	if p.installDir == "" {
+		return
+	}
+	if err := hostlink.WriteUpdateBlocked(p.installDir, hostlink.UpdateBlocked{
+		Version: p.version, Code: original.Code, BackupKey: p.key, Message: original.What,
+		RollbackFailed: rollbackFailed,
+	}); err != nil {
+		_, _ = fmt.Fprintf(out, "     (không ghi được %s — %v)\n", hostlink.UpdateBlockedFile, err)
 	}
 }
 

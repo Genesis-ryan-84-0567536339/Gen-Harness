@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -134,7 +135,8 @@ Lệnh vận hành (cờ chung mọi lệnh dưới đây: --port N, --install-d
                                           --yes hoặc "Cập nhật ngay" trong Console thì cài
                                           luôn) · --quiet: chỉ in dòng quan trọng ·
                                           --no-self-update: chỉ nâng cấp dịch vụ, không đụng
-                                          binary genh
+                                          binary genh — bỏ qua nếu dịch vụ đã khớp bản genh
+                                          này (không sao lưu, không tải)
   genh auto-update enable|disable|status tự chạy "genh update --yes --quiet" mỗi đêm ~03:00
                                           (systemd timer/crontab, LaunchAgent, hoặc Task
                                           Scheduler tuỳ hệ điều hành) — mặc định đã BẬT sau
@@ -279,7 +281,7 @@ func parseUpdateFlags(args []string) (updateFlags, error) {
 	channel := fs.String("channel", "stable", "kênh cập nhật: stable hoặc beta")
 	yes := fs.Bool("yes", false, "chạy không tương tác — dùng cho lịch tự động (genh auto-update); KHÔNG hỏi gì kể cả khi có TTY, và (không kèm --if-requested) chỉ tự cài bản genh đã là bản chính thức ≥ 24 giờ (thời gian chín) — muốn cài ngay thì bỏ --yes")
 	quiet := fs.Bool("quiet", false, "chỉ in các dòng quan trọng (có bản mới/lỗi/xong) — bỏ log tiến độ từng bước")
-	noSelfUpdate := fs.Bool("no-self-update", false, "bỏ qua tự cập nhật BINARY genh — chỉ chạy phần nâng cấp dịch vụ (backup/pull/migrate/restart) bằng bản genh hiện tại")
+	noSelfUpdate := fs.Bool("no-self-update", false, "bỏ qua tự cập nhật BINARY genh — chỉ chạy phần nâng cấp dịch vụ (backup/pull/migrate/restart) bằng bản genh hiện tại; bỏ qua nếu dịch vụ đã khớp bản genh này (không sao lưu, không tải)")
 	selfUpdated := fs.Bool("self-updated", false, "cờ NỘI BỘ: tiến trình này vừa được re-exec ngay sau khi tự thay binary — KHÔNG dùng tay, chỉ genh tự đặt cho chính nó")
 	ifRequested := fs.Bool("if-requested", false, "chỉ cập nhật nếu Owner vừa bấm \"Cập nhật ngay\" trong Console (watcher trên máy chủ gọi) — không có yêu cầu thì thoát ngay")
 	if err := fs.Parse(args); err != nil {
@@ -313,10 +315,15 @@ func runUpdate(args []string) int {
 	// Hộp thư Console (internal/hostlink): tiến trình NGOÀI CÙNG (không phải bản
 	// re-exec sau tự cập nhật) xoá yêu cầu "Cập nhật ngay" TRƯỚC khi chạy — để
 	// watcher không kích lặp — rồi báo "running" cho Console hiện tiến trình.
+	// Chụp nguyên hộp thư TRƯỚC khi báo "running": lịch đêm gặp bản bị chặn thì
+	// trả về đúng như cũ (skipBlockedUpdate).
+	var statusSnap []byte
+	hadStatus := false
 	if !f.selfUpdated {
 		if f.ifRequested && !hostlink.HasRequest(env.InstallDir) {
 			return 0
 		}
+		statusSnap, hadStatus = hostlink.SnapshotStatus(env.InstallDir)
 		hostlink.ConsumeRequest(env.InstallDir)
 		_ = hostlink.Start(env.InstallDir, version)
 	}
@@ -353,8 +360,7 @@ func runUpdate(args []string) int {
 	}); {
 	case skip && kind == "blocked":
 		// In ra stdout CẢ khi --quiet để vào logs/auto-update.log.
-		fmt.Println(blockedLine(version))
-		_ = hostlink.Finish(env.InstallDir, "failed", "", "Bản "+version+" đã lỗi ở lần cập nhật trước và đã tự quay về bản cũ — lịch đêm không tự thử lại bản này. Bấm \"Cập nhật ngay\" để thử lại. ("+ops.ErrCodeUpdateBlocked+")")
+		skipBlockedUpdate(os.Stdout, env.InstallDir, version, blocked, statusSnap, hadStatus, f.selfUpdated)
 		return 0
 	case skip && kind == "up-to-date":
 		fmt.Println(upToDateLine(version))
@@ -375,11 +381,7 @@ func runUpdate(args []string) int {
 	opts := ops.UpdateOptions{Channel: f.channel, Version: version}
 	if err := ops.RunUpdate(ctx, env, opts, ops.UpdateDeps{}, out); err != nil {
 		reportOpErr(err)
-		msg := err.Error()
-		if opErr, ok := err.(*ops.OpError); ok {
-			msg = opErr.What
-		}
-		_ = hostlink.Finish(env.InstallDir, "failed", version, msg)
+		_ = hostlink.Finish(env.InstallDir, "failed", version, consoleUpdateMessage(err))
 		return 1
 	}
 	_ = hostlink.Finish(env.InstallDir, "done", version, "")
@@ -417,9 +419,69 @@ func decideServiceUpdate(in serviceUpdateInput) (skip bool, kind string) {
 }
 
 // blockedLine: dòng log khi lịch đêm bỏ qua bản đã bị chặn (E2E grep "lịch đêm
-// không tự thử lại").
-func blockedLine(v string) string {
+// không tự thử lại"). Quay về bản cũ đã THẤT BẠI (b.RollbackFailed) thì KHÔNG
+// được nói "đã tự quay về bản cũ" — máy đang cần xử lý tay.
+func blockedLine(v string, b hostlink.UpdateBlocked) string {
+	if b.RollbackFailed {
+		return "genh: bản " + v + " đã lỗi ở lần cập nhật trước và tự quay về bản cũ CŨNG THẤT BẠI — cần xử lý tay ngay" + backupHint(b) + ". Lịch đêm không tự thử lại bản này."
+	}
 	return "genh: bản " + v + " đã lỗi ở lần cập nhật trước và đã tự quay về bản cũ — lịch đêm không tự thử lại bản này. Có bản mới hơn sẽ tự cài; muốn thử lại ngay: bấm \"Cập nhật ngay\" trong Console hoặc chạy genh update."
+}
+
+// backupHint: " (khôi phục bản sao lưu <key> rồi docker compose up -d --remove-orphans)".
+func backupHint(b hostlink.UpdateBlocked) string {
+	if b.BackupKey == "" {
+		return " (xem logs/auto-update.log)"
+	}
+	return " (khôi phục bản sao lưu " + b.BackupKey + " rồi chạy docker compose up -d --remove-orphans — xem logs/auto-update.log)"
+}
+
+// blockedConsoleMessage: thông điệp hộp thư Console khi tiến trình re-exec (vừa
+// tự thay binary) gặp bản bị chặn — tiến trình ngoài đã ghi "running" nên phải
+// kết thúc nó. Tiến trình ngoài thì KHÔNG dùng hàm này (trả hộp thư về như cũ).
+func blockedConsoleMessage(v string, b hostlink.UpdateBlocked) string {
+	if b.RollbackFailed {
+		return "Bản " + v + " đã lỗi ở lần cập nhật trước và tự quay về bản cũ CŨNG THẤT BẠI — cần xử lý tay ngay" + backupHint(b) + ". Lịch đêm không tự thử lại bản này. (" + ops.ErrCodeUpdateBlocked + ")"
+	}
+	return "Bản " + v + " đã lỗi ở lần cập nhật trước và đã tự quay về bản cũ — lịch đêm không tự thử lại bản này. Bấm \"Cập nhật ngay\" để thử lại. (" + ops.ErrCodeUpdateBlocked + ")"
+}
+
+// skipBlockedUpdate: lịch đêm gặp đúng bản đã bị chặn — chỉ in một dòng log và
+// để NGUYÊN update-status.json như lần cập nhật lỗi để lại (statusSnap chụp
+// trước Start): không làm mới finished_at mỗi đêm (thẻ đỏ của Console tự hết
+// sau 24 giờ), không ghi đè thông điệp gốc (mã lỗi, lý do, bản sao lưu, hoặc
+// cảnh báo quay về bản cũ thất bại). selfUpdated: tiến trình này không có ảnh
+// chụp (tiến trình ngoài đã báo "running") → kết thúc bằng thông điệp chặn.
+func skipBlockedUpdate(w io.Writer, installDir, v string, b hostlink.UpdateBlocked, statusSnap []byte, hadStatus, selfUpdated bool) {
+	_, _ = fmt.Fprintln(w, blockedLine(v, b))
+	if !selfUpdated {
+		_ = hostlink.RestoreStatusSnapshot(installDir, statusSnap, hadStatus)
+		return
+	}
+	_ = hostlink.Finish(installDir, "failed", v, blockedConsoleMessage(v, b))
+}
+
+// consoleUpdateMessage dựng thông điệp lỗi cho hộp thư Console từ lỗi của
+// ops.RunUpdate: "<What> — <Next> (<mã>)" — Console chọn lời dẫn theo mã (vd
+// GH-E948 ổ đĩa đầy: Owner PHẢI dọn đĩa) và hiện phần còn lại trong "Chi tiết
+// kỹ thuật". Ổ đĩa đầy kèm Why (còn bao nhiêu GB / cần bao nhiêu). Bỏ dấu `
+// (định dạng lệnh cho terminal, Console hiện chữ thường).
+func consoleUpdateMessage(err error) string {
+	opErr, ok := err.(*ops.OpError)
+	if !ok {
+		return err.Error()
+	}
+	msg := opErr.What
+	if opErr.Code == ops.ErrCodeUpdateDiskLow && opErr.Why != "" {
+		msg += " (" + opErr.Why + ")"
+	}
+	if opErr.Next != "" {
+		msg += " — " + opErr.Next
+	}
+	if opErr.Code != "" {
+		msg += " (" + opErr.Code + ")"
+	}
+	return strings.ReplaceAll(msg, "`", "")
 }
 
 // upToDateLine: dòng log khi dịch vụ đã đúng bản (E2E grep "không cần cập nhật").
