@@ -668,17 +668,22 @@ export function createPhase2(opts: Phase2Options) {
   const claudeProfiles: CliProfile[] = [];
   const profilesOf = (kind: string | null) => (kind === 'claude_code_cli' ? claudeProfiles : cliProfiles);
   const cliLogins = new Map<string, CliLoginEvent>();
-  // Như máy chủ (gh.providers.catalog): danh sách model theo nhóm + gợi ý nhanh/rẻ hay mạnh.
-  const opt = (id: string, label: string, group: string, tier: 'fast' | 'balanced' | 'strong', source: 'cli' | 'catalog' = 'cli') => ({
-    id, label, group, tier, hint: tier === 'fast' ? 'nhanh, rẻ' : tier === 'balanced' ? 'cân bằng' : 'mạnh, chậm hơn, tốn hạn mức hơn', source,
+  // Như máy chủ (gh.providers.catalog): danh sách model GỐC theo nhóm + gợi ý nhanh/rẻ hay mạnh; v0.1.32: mức suy nghĩ
+  // (effort) tách riêng — agy `--effort low|medium|high`, Claude Code thêm xhigh, max (haiku không chỉnh mức).
+  type Eff = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+  const opt = (id: string, label: string, group: string, tier: 'fast' | 'balanced' | 'strong', source: 'cli' | 'catalog' = 'cli', efforts: Eff[] = [], extra: { default_effort?: Eff; verified?: boolean; source_ref?: string } = {}) => ({
+    id, label, group, tier, hint: tier === 'fast' ? 'nhanh, rẻ' : tier === 'balanced' ? 'cân bằng' : 'mạnh, chậm hơn, tốn hạn mức hơn', source, efforts,
+    default_effort: extra.default_effort ?? null, verified: extra.verified ?? true, source_ref: extra.source_ref ?? null,
   });
+  const CC: Eff[] = ['low', 'medium', 'high', 'xhigh', 'max'];
+  const CC_SRC = '`claude --help` 2.1.285 + https://code.claude.com/docs/en/model-config (đọc 2026-10-01)';
   const MODEL_GROUPS: Record<string, Array<{ label: string; models: ReturnType<typeof opt>[] }>> = {
     antigravity_cli: [
-      { label: 'Gemini', models: [opt('gemini-3.8-flash-high', 'Gemini 3.8 Flash (High)', 'Gemini', 'strong'), opt('gemini-3.8-flash-low', 'Gemini 3.8 Flash (Low)', 'Gemini', 'fast'), opt('gemini-3.1-pro-high', 'Gemini 3.1 Pro (High)', 'Gemini', 'strong')] },
-      { label: 'Claude (qua Antigravity)', models: [opt('claude-sonnet-4-6-thinking', 'Claude Sonnet 4.6 (Thinking)', 'Claude (qua Antigravity)', 'balanced'), opt('claude-opus-4-6-thinking', 'Claude Opus 4.6 (Thinking)', 'Claude (qua Antigravity)', 'strong')] },
+      { label: 'Gemini', models: [opt('gemini-3.8-flash', 'Gemini 3.8 Flash', 'Gemini', 'fast', 'cli', ['low', 'medium', 'high'], { default_effort: 'high' }), opt('gemini-3.1-pro', 'Gemini 3.1 Pro', 'Gemini', 'strong', 'cli', ['low', 'high'])] },
+      { label: 'Claude (qua Antigravity)', models: [opt('claude-sonnet-4-6-thinking', 'Claude Sonnet 4.6 (Thinking)', 'Claude (qua Antigravity)', 'balanced')] },
     ],
     claude_code_cli: [
-      { label: 'Claude', models: [opt('haiku', 'Haiku (bản mới nhất)', 'Claude', 'fast', 'catalog'), opt('sonnet', 'Sonnet (bản mới nhất)', 'Claude', 'balanced', 'catalog'), opt('opus', 'Opus (bản mới nhất)', 'Claude', 'strong', 'catalog'), opt('fable', 'Fable (bản mới nhất)', 'Claude', 'strong', 'catalog')] },
+      { label: 'Claude', models: [opt('haiku', 'Haiku (bản mới nhất)', 'Claude', 'fast', 'catalog', [], { source_ref: CC_SRC }), opt('sonnet', 'Sonnet (bản mới nhất)', 'Claude', 'balanced', 'catalog', CC, { source_ref: CC_SRC }), opt('opus', 'Opus (bản mới nhất)', 'Claude', 'strong', 'catalog', CC, { source_ref: CC_SRC }), opt('fable', 'Fable (bản mới nhất)', 'Claude', 'strong', 'catalog', CC, { source_ref: CC_SRC })] },
     ],
   };
 
@@ -1222,7 +1227,11 @@ export function createPhase2(opts: Phase2Options) {
       if (seg[2] === 'test' && m === 'POST') {
         const secret = (pv as Provider & { _secret?: string })._secret ?? '';
         const ok = !/bad|sai/i.test(secret);
-        const groups = MODEL_GROUPS[pv.kind];
+        // Như máy chủ (catalog.build, v0.1.32): model đã lưu mà CLI không liệt kê vẫn có trong danh sách (nguồn "saved").
+        const base = MODEL_GROUPS[pv.kind];
+        const listed = new Set(base?.flatMap((g) => g.models.map((x) => x.id)) ?? []);
+        const extra = base ? pv.models.filter((x) => !listed.has(x.model_name)).map((x) => opt(x.model_name, x.model_name, base[0].label, 'balanced', 'catalog', x.effort ? [x.effort] : [], { verified: false, source_ref: 'model đã lưu' })) : [];
+        const groups = base ? base.map((g, i) => (i === 0 ? { ...g, models: [...g.models, ...extra.map((x) => ({ ...x, source: 'saved' as 'cli' }))] } : g)) : undefined;
         const models = groups ? groups.flatMap((g) => g.models.map((x) => x.id)) : pv.kind === 'system_one' ? [pv.models[0]?.model_name ?? 'typesafe/jev-1.13'] : pv.kind === 'gemini' ? ['gemini-2.5-flash', 'gemini-2.5-flash-lite'] : pv.kind === 'deepseek' ? ['deepseek-chat', 'deepseek-reasoner'] : ['gpt-4o-mini'];
         pv.auth_state = ok ? 'ok' : 'error';
         // Như máy chủ thật (v0.1.28): gọi thử KHÔNG tự thêm model — lưu `last_test`; bước 4 tự lấy model đầu tiên
@@ -1230,12 +1239,39 @@ export function createPhase2(opts: Phase2Options) {
         const result = ok
           ? {
               ok: true, latency_ms: pv.kind === 'system_one' ? 164 : 812, models, error: null,
-              ...(groups ? { model_groups: groups, models_source: groups[0].models[0].source, probe_model: pv.models.find((x) => x.is_default)?.model_name ?? models[0] } : {}),
+              ...(groups
+                ? (() => {
+                    const cur = pv.models.find((x) => x.is_default);
+                    const first = groups[0].models[0];
+                    return { model_groups: groups, models_source: first.source, probe_model: cur?.model_name ?? models[0], probe_effort: cur ? (cur.effort ?? null) : first.default_effort };
+                  })()
+                : {}),
+              at: iso(Date.now()),
             }
-          : { ok: false, latency_ms: null, models: [], error: /endpoint|127\.0\.0\.1|localhost/i.test(pv.endpoint ?? '') ? 'mạng: All connection attempts failed' : 'HTTP 401: API key not valid' };
-        pv.last_test = { ...result, at: iso(Date.now()) };
+          : { ok: false, latency_ms: null, models: [], error: /endpoint|127\.0\.0\.1|localhost/i.test(pv.endpoint ?? '') ? 'mạng: All connection attempts failed' : 'HTTP 401: API key not valid', at: iso(Date.now()) };
+        pv.last_test = result;
         reply(200, result);
         return true;
+      }
+      if (seg[2] === 'diagnose' && m === 'POST') {
+        // v0.1.32: chỉ Owner (máy chủ: require_owner) — đầu ra thô đã che token/email.
+        if (ctx.role !== 'owner') return problem(403, 'FORBIDDEN', 'Chỉ Owner');
+        if (pv.kind !== 'antigravity_cli' && pv.kind !== 'claude_code_cli') return problem(409, 'NOT_CLI', 'Chỉ chẩn đoán được nguồn CLI');
+        const cur = pv.models.find((x) => x.is_default) ?? pv.models[0];
+        const agy = pv.kind === 'antigravity_cli';
+        const model = cur?.model_name ?? (agy ? 'gemini-3.8-flash' : 'haiku');
+        const eff = cur?.effort ?? null;
+        const call = agy ? `agy -p Trả lời đúng một chữ: OK --model ${model}${eff ? ` --effort ${eff}` : ''} --output-format json` : `claude -p --model=${model}${eff ? ` --effort=${eff}` : ''} --output-format json`;
+        return reply(200, {
+          provider: pv.name, kind: pv.kind, model, effort: eff, at: iso(Date.now()),
+          steps: [
+            { label: 'Phiên bản', command: agy ? 'agy --version' : 'claude --version', exit_code: 0, stdout: agy ? '1.2.9\n' : '2.1.285 (Claude Code)\n', stderr: '', ms: 41, note: null },
+            agy
+              ? { label: 'Danh sách model', command: 'agy models', exit_code: 0, stdout: 'Fetching available models...\nAvailable models:\n  gemini-3.8-flash-high (current)\n  gemini-3.8-flash-low\n  gemini-3.1-pro-high\n', stderr: '', ms: 930, note: null }
+              : { label: 'Đăng nhập (Claude Code không có lệnh liệt kê model)', command: 'claude auth status --json', exit_code: 0, stdout: '{"loggedIn": true, "email": "r***@gmail.com"}\n', stderr: '', ms: 210, note: null },
+            { label: 'Gọi thử 1 lượt', command: call, exit_code: 0, stdout: '{"response":"OK","usage":{"input_tokens":9,"output_tokens":1}}\n', stderr: '', ms: 3120, note: null },
+          ],
+        });
       }
       if (seg.length === 2 && m === 'DELETE') {
         if (!need('system.manage')) return true;
@@ -1248,11 +1284,25 @@ export function createPhase2(opts: Phase2Options) {
         const name = String(body.model_name ?? '').trim();
         if (!name) return problem(422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors: { model_name: 'Bắt buộc' } });
         const exists = pv.models.find((x) => x.model_name === name);
+        const effort = (typeof body.effort === 'string' ? body.effort : null) as Eff | null;
         // v0.1.31: nguồn CLI gọi thử model MỚI trước khi lưu — CLI không nhận thì 422, không lưu.
+        // v0.1.32: gọi thử đúng --model <gốc> --effort <mức>; mức model không có → 422 kèm lỗi gốc ("Chi tiết kỹ thuật").
         const cliGroups = MODEL_GROUPS[pv.kind];
-        if (cliGroups && !exists && (/bad|sai/i.test(name) || !cliGroups.some((g) => g.models.some((x) => x.id === name))))
-          return problem(422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors: { model_name: `CLI không nhận model “${name}” — chọn model khác trong danh sách` } });
-        if (!exists) pv.models.push({ id: randomUUID(), model_name: name, daily_quota: typeof body.daily_quota === 'number' ? body.daily_quota : null, used_today: 0 });
+        const known = cliGroups?.flatMap((g) => g.models).find((x) => x.id === name);
+        if (cliGroups && (!exists || (exists.effort ?? null) !== effort)) {
+          if (/bad|sai/i.test(name) || !known)
+            return problem(422, 'VALIDATION', 'Dữ liệu chưa hợp lệ', {
+              errors: { model_name: `CLI không nhận model “${name}” — chọn model khác trong danh sách` },
+              technical: `ModelRejected: Invalid model "${name}" (available: ${cliGroups.flatMap((g) => g.models.map((x) => x.id)).join(', ')})`,
+            });
+          if (effort && !(known.efforts as string[]).includes(effort))
+            return problem(422, 'VALIDATION', 'Dữ liệu chưa hợp lệ', {
+              errors: { model_name: `CLI không nhận mức suy nghĩ “${effort}” cho model “${name}” — chọn mức khác` },
+              technical: `ModelRejected: invalid --effort "${effort}" (valid: ${known.efforts.join(', ')})`,
+            });
+        }
+        if (!exists) pv.models.push({ id: randomUUID(), model_name: name, effort, daily_quota: typeof body.daily_quota === 'number' ? body.daily_quota : null, used_today: 0 });
+        else if ('effort' in body) exists.effort = effort;
         if (body.make_default === true) pv.models.forEach((x) => (x.is_default = x.model_name === name));
         return reply(cliGroups ? 201 : 200, stripSecret(pv));
       }

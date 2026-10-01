@@ -21,7 +21,7 @@ test.describe('v0.1.31 — model CLI theo nhóm + Claude Code CLI', () => {
     await expect(select.locator('optgroup')).toHaveCount(2);
     await expect(select.locator('optgroup').nth(0)).toHaveAttribute('label', 'Gemini');
     await expect(select.locator('optgroup').nth(1)).toHaveAttribute('label', 'Claude (qua Antigravity)');
-    await expect(select.locator('option')).toHaveCount(5);
+    await expect(select.locator('option')).toHaveCount(4); // v0.1.32: 3 model gốc (mức suy nghĩ là ô riêng) + model đã lưu
     await select.selectOption('claude-sonnet-4-6-thinking');
     await row.getByRole('button', { name: 'Dùng model này' }).click();
     await expect(row.getByRole('button', { name: 'Đang dùng' })).toBeVisible();
