@@ -513,7 +513,8 @@ class CliLogins:
         started = time.time()
         sp = spec(s.kind)
         path = token_path(s.kind)
-        path.parent.mkdir(parents=True, exist_ok=True)
+        with contextlib.suppress(OSError):
+            path.parent.mkdir(parents=True, exist_ok=True)
         # CLI đang đăng nhập sẵn sẽ không in link → gửi tạm tệp phiên (đã lưu vào hồ sơ ở start()).
         park_token(s.kind)
         before = path.stat().st_mtime if path.exists() else 0.0

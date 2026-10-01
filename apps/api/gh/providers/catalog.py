@@ -57,12 +57,12 @@ def parse_agy_models(text: str) -> list[dict[str, Any]]:
         line = raw.strip().lstrip("*•->› ").strip()
         if not line or (_SKIP.search(line) and not _SLUG.search(line)):
             continue
-        current = bool(re.search(r"\(current\)|\(default\)|\bcurrent\b|^\s*[*>›]", raw, re.I))
+        current = bool(re.search(r"\(current\)|\(default\)|\bcurrent\b|^\s*[*>›]", strip_ansi(raw), re.I))
+        line = re.sub(r"\s*\((current|default)\)\s*", " ", line, flags=re.I).strip()
         m = _SLUG.search(line)
         if m:
             slug = m.group(1).lower()
-            label = (line[:m.start()] + line[m.end():]).strip(" -—:|()[]")
-            label = re.sub(r"\s*\((current|default)\)\s*", " ", label, flags=re.I).strip()
+            label = re.sub(r"\s{2,}", " ", line[:m.start()] + " " + line[m.end():]).strip(" -—:|[]")
         else:
             d = _DISPLAY.search(re.sub(r"\s*\((current|default)\)\s*$", "", line, flags=re.I))
             if not d:
