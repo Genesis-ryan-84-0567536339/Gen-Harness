@@ -106,7 +106,7 @@ describe('ModelPicker — ô chọn có nhóm', () => {
     await user.selectOptions(select, 'claude-sonnet-4-6-thinking');
     await user.click(screen.getByRole('button', { name: 'Dùng model này' }));
     await waitFor(() => expect(bodies).toHaveLength(2));
-    expect(bodies[1]).toEqual({ model_name: 'claude-sonnet-4-6-thinking', make_default: true });
+    expect(bodies[1]).toEqual({ model_name: 'claude-sonnet-4-6-thinking', make_default: true, effort: null });
   });
 });
 

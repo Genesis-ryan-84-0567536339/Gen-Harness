@@ -1,5 +1,7 @@
 /** Presentation logic for API & Model — mirrors `dataModel.ts` / `agentsModel.ts` conventions. */
-import type { ModelGroup, Provider, ProviderKind, ProviderTestResult } from '@gen-harness/contracts';
+import { ApiError } from '@gen-harness/contracts';
+import type { Effort, ModelGroup, ModelOption, Provider, ProviderDiagnosis, ProviderKind, ProviderTestResult } from '@gen-harness/contracts';
+import { fmtDMClock } from '../../lib/format';
 
 export const OK = 'var(--color-ok)';
 export const WARN = 'var(--color-warn)';
@@ -108,7 +110,70 @@ export function currentModelName(p: Pick<Provider, 'models'>): string | null {
   return p.models.find((m) => m.is_default)?.model_name ?? p.models[0]?.model_name ?? null;
 }
 
-/** Chữ hiện trong ô chọn: "Gemini 3.8 Flash (High) · nhanh, rẻ". */
-export function modelOptionText(m: { id: string; label: string; hint: string }): string {
-  return m.hint ? `${m.label} · ${m.hint}` : m.label;
+/** Chữ hiện trong ô chọn: "Gemini 3.8 Flash · nhanh, rẻ" (+ "chưa xác minh" khi không có nguồn CLI/tài liệu). */
+export function modelOptionText(m: Pick<ModelOption, 'id' | 'label' | 'hint'> & { verified?: boolean }): string {
+  const base = m.hint ? `${m.label} · ${m.hint}` : m.label;
+  return m.verified === false ? `${base} · chưa xác minh` : base;
+}
+
+// ── v0.1.32: mức suy nghĩ (effort) tách khỏi tên model ────────────────────
+/** Boss 01/10: "high" là MỨC SUY NGHĨ, không phải tên model. */
+export const EFFORT_LABEL: Record<Effort, string> = { low: 'Thấp', medium: 'Vừa', high: 'Cao', xhigh: 'Rất cao', max: 'Tối đa' };
+export const EFFORT_HINT = 'Thấp = nhanh, rẻ · Cao = kỹ hơn, chậm hơn, tốn hạn mức hơn';
+const EFFORT_NOTE: Record<Effort, string> = { low: 'nhanh, rẻ', medium: 'cân bằng', high: 'kỹ, chậm hơn', xhigh: 'kỹ hơn nữa', max: 'kỹ nhất, chậm nhất' };
+
+/** Chữ trong ô "Mức suy nghĩ": "Thấp · nhanh, rẻ". */
+export function effortOptionText(e: Effort): string {
+  return `${EFFORT_LABEL[e] ?? e} · ${EFFORT_NOTE[e] ?? ''}`;
+}
+
+/** Model + mức đang dùng của nguồn ("Dùng model này"), không có thì model đã lưu đầu tiên. */
+export function currentChoice(p: Pick<Provider, 'models'>): { model: string; effort: Effort | null } | null {
+  const m = p.models.find((x) => x.is_default) ?? p.models[0];
+  return m ? { model: m.model_name, effort: m.effort ?? null } : null;
+}
+
+/** "gemini-3.1-pro · Cao" — tên model kèm mức suy nghĩ (nếu có). */
+export function choiceText(model: string | null | undefined, effort: Effort | null | undefined): string {
+  if (!model) return '';
+  return effort ? `${model} · ${EFFORT_LABEL[effort] ?? effort}` : model;
+}
+
+/** Mức mặc định khi chọn một model: mức đã lưu (nếu model nhận), mức CLI đang dùng, "Vừa", rồi mức đầu tiên. */
+export function pickEffort(m: Pick<ModelOption, 'efforts' | 'default_effort'> | undefined, saved?: Effort | null): Effort | null {
+  const effs = m?.efforts ?? [];
+  if (!effs.length) return null;
+  if (saved && effs.includes(saved)) return saved;
+  if (m?.default_effort && effs.includes(m.default_effort)) return m.default_effort;
+  return effs.includes('medium') ? 'medium' : effs[0];
+}
+
+/** "Gọi thử OK · 4,63s · gemini-3.8-flash · Cao · lúc 10:21 01/10" — luôn kèm giờ của lần gọi thật. */
+export function testOkText(t: Pick<ProviderTestResult, 'latency_ms' | 'probe_model' | 'probe_effort' | 'at'>, fmtLatency: (ms: number) => string): string {
+  const parts = ['Gọi thử OK'];
+  if (t.latency_ms != null) parts.push(fmtLatency(t.latency_ms));
+  if (t.probe_model) parts.push(choiceText(t.probe_model, t.probe_effort ?? null));
+  parts.push(t.at ? `lúc ${fmtDMClock(t.at)}` : 'chưa rõ giờ — bấm Kiểm tra để gọi lại');
+  return parts.join(' · ');
+}
+
+/** Lỗi gốc (đã che) máy chủ gửi kèm 422 khi CLI không nhận model — cho "Chi tiết kỹ thuật". */
+export function technicalDetail(e: unknown): string | null {
+  if (!(e instanceof ApiError)) return null;
+  const t = (e.problem as { technical?: unknown }).technical;
+  return typeof t === 'string' && t.trim() ? t : null;
+}
+
+/** v0.1.32 — chẩn đoán CLI: văn bản để Boss chép gửi. */
+export function diagnosisText(d: ProviderDiagnosis): string {
+  const head = `Chẩn đoán ${d.provider} · ${fmtDMClock(d.at)} · model ${choiceText(d.model, d.effort) || '—'}`;
+  const steps = d.steps.map((s) =>
+    [
+      `## ${s.label} — $ ${s.command}`,
+      `mã thoát: ${s.exit_code ?? '—'} · ${s.ms} ms${s.note ? ` · ${s.note}` : ''}`,
+      s.stdout ? `stdout:\n${s.stdout.trimEnd()}` : 'stdout: (trống)',
+      s.stderr ? `stderr:\n${s.stderr.trimEnd()}` : 'stderr: (trống)',
+    ].join('\n'),
+  );
+  return [head, ...steps].join('\n\n');
 }
