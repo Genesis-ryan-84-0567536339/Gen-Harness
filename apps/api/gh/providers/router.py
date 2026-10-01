@@ -54,10 +54,26 @@ PROBE_PROMPT = "Trả lời đúng một chữ: OK"
 PROBE_TIMEOUT_S = 90.0
 
 
-def friendly_probe_error(e: Exception, model: str) -> str:
-    """Câu báo lỗi ngắn cho Console khi gọi thử một model (v0.1.31)."""
+def error_detail(e: BaseException | None) -> str | None:
+    """Lỗi gốc (đã che bí mật) cho mục "Chi tiết kỹ thuật" của Console."""
+    if e is None:
+        return None
+    from gh.providers.clients import redact
+
+    raw = getattr(e, "raw", None) or str(e)
+    return redact(f"{type(e).__name__}: {raw}", 2000)
+
+
+def friendly_probe_error(e: Exception, model: str, effort: str | None = None) -> str:
+    """Câu báo lỗi ngắn cho Console khi gọi thử một model (v0.1.31; v0.1.32: tách model / mức suy nghĩ)."""
     if isinstance(e, ModelRejected):
-        return f"CLI không nhận model “{model}” — chọn model khác trong danh sách"
+        from gh.providers.catalog import EFFORT_LABEL
+
+        if e.what == "effort" and effort:
+            return (f"CLI không nhận mức suy nghĩ “{EFFORT_LABEL.get(effort, effort)}” cho model “{model}” — "
+                    "chọn mức khác")
+        tail = f" (CLI nhận: {', '.join(e.available[:8])})" if e.available else ""
+        return f"CLI không nhận model “{model}” — chọn model khác trong danh sách{tail}"
     if isinstance(e, AuthFailed):
         return "Phiên đăng nhập đã hết hiệu lực — bấm “Đăng nhập lại” ở thẻ tài khoản"
     if isinstance(e, RateLimited | QuotaExhausted):
@@ -150,7 +166,7 @@ class ModelRouter:
         chain = []
         for p in providers:
             models = (await db.execute(text("""
-                SELECT id, model_name, daily_quota, rate_limit_per_min FROM agent.models
+                SELECT id, model_name, effort, daily_quota, rate_limit_per_min FROM agent.models
                 WHERE provider_id = :p AND is_enabled AND model_name NOT ILIKE '%embedding%'
                 ORDER BY (id = :bm) DESC, is_default DESC, id"""),
                 {"p": p.id, "bm": bound.id if bound else None})).all()
@@ -258,8 +274,9 @@ class ModelRouter:
                 started = time.monotonic()
                 kid = key.id if key else None
                 try:
+                    extra = {"effort": m.effort} if p.kind in CLI_KINDS and m.effort else {}
                     c = await self._client(p, secret).generate(m.model_name, messages, json_mode=json_mode,
-                                                               temperature=temperature)
+                                                               temperature=temperature, **extra)
                 except RateLimited as e:
                     await self._record(org_id, m.id, kid, agent_key, purpose, "rate_limited", started, None)
                     if key is not None:
@@ -361,32 +378,36 @@ class ModelRouter:
             raise ProviderError(f"Jev: {e}") from e
         return str(client.model)
 
-    async def _cli_probe(self, client: Any, candidates: list[str]) -> tuple[str, Completion]:
-        """Một lượt gọi thật rất ngắn; model bị CLI từ chối thì thử model kế (tối đa 3)."""
+    async def _cli_probe(self, client: Any, candidates: list[tuple[str, str | None]]
+                         ) -> tuple[str, str | None, Completion]:
+        """Một lượt gọi thật rất ngắn; (model, mức suy nghĩ) bị CLI từ chối thì thử cặp kế (tối đa 3)."""
         last: Exception | None = None
-        for model in [c for c in dict.fromkeys(candidates) if c][:3]:
+        for model, effort in [c for c in dict.fromkeys(candidates) if c[0]][:3]:
             try:
-                return model, await asyncio.wait_for(
-                    client.generate(model, [Message("user", PROBE_PROMPT)], json_mode=False, temperature=0),
-                    PROBE_TIMEOUT_S)
+                return model, effort, await asyncio.wait_for(
+                    client.generate(model, [Message("user", PROBE_PROMPT)], json_mode=False, temperature=0,
+                                    effort=effort), PROBE_TIMEOUT_S)
             except ModelRejected as e:
                 last = e
                 continue
         raise last or BadRequest("Chưa có model nào để gọi thử")
 
-    async def probe_model(self, provider_id: uuid.UUID, model: str) -> dict[str, Any]:
-        """Gọi thử ĐÚNG model này trước khi lưu (v0.1.31) — CLI từ chối thì không lưu, trả câu lỗi dễ hiểu."""
+    async def probe_model(self, provider_id: uuid.UUID, model: str, effort: str | None = None) -> dict[str, Any]:
+        """Gọi thử ĐÚNG model + mức suy nghĩ này trước khi lưu (v0.1.31/32) — CLI từ chối thì không lưu."""
         async with self.sm() as db:
             p = (await db.execute(text("SELECT id, kind, name, endpoint, auth_state FROM agent.providers "
                                        "WHERE id = :i"), {"i": provider_id})).one()
         started = time.monotonic()
         try:
             await asyncio.wait_for(self._client(p, None).generate(
-                model, [Message("user", PROBE_PROMPT)], json_mode=False, temperature=0), PROBE_TIMEOUT_S)
+                model, [Message("user", PROBE_PROMPT)], json_mode=False, temperature=0, effort=effort),
+                PROBE_TIMEOUT_S)
         except Exception as e:  # noqa: BLE001 — trả lỗi cho Console
             if isinstance(e, AuthFailed):
                 await self._set_auth_state(p, "expired")
-            return {"ok": False, "error": friendly_probe_error(e, model), "rejected": isinstance(e, ModelRejected),
+            return {"ok": False, "error": friendly_probe_error(e, model, effort),
+                    "rejected": isinstance(e, ModelRejected), "error_detail": error_detail(e),
+                    "available": getattr(e, "available", []),
                     "latency_ms": int((time.monotonic() - started) * 1000)}
         if p.auth_state != "ok":
             await self._set_auth_state(p, "ok")
@@ -398,16 +419,25 @@ class ModelRouter:
         from gh.providers import catalog
 
         client = self._client(p, None)
-        discovered = await client.discover_models()
-        built = catalog.build(p.kind, discovered)
-        result.update(built)
         async with self.sm() as db:
-            chosen = (await db.execute(text("""SELECT model_name FROM agent.models WHERE provider_id = :p AND is_enabled
-                                              ORDER BY is_default DESC, id LIMIT 1"""),
-                                       {"p": p.id})).scalar_one_or_none()
-        current = [d["id"] for d in discovered if isinstance(d, dict) and d.get("current")]
-        probe_model, _c = await self._cli_probe(client, [chosen or "", *current, *built["models"]])
-        result["probe_model"] = probe_model
+            saved = [(r.model_name, r.effort) for r in (await db.execute(text(
+                """SELECT model_name, effort FROM agent.models WHERE provider_id = :p AND is_enabled
+                   ORDER BY is_default DESC, id"""), {"p": p.id})).all()]
+        try:
+            discovered = await client.discover_models()
+        finally:
+            if getattr(client, "last_models_raw", None):
+                result["models_raw"] = client.last_models_raw
+        built = catalog.build(p.kind, discovered, saved)
+        result.update(built)
+        chosen: list[tuple[str, str | None]] = []
+        if saved:
+            base, var_effort = catalog.split_variant(p.kind, saved[0][0])
+            chosen.append((base, saved[0][1] or var_effort))
+        current = [(d["id"], d.get("current_effort")) for d in discovered if isinstance(d, dict) and d.get("current")]
+        offered = [(m["id"], m.get("default_effort")) for g in built["model_groups"] for m in g["models"]]
+        probe_model, probe_effort, _c = await self._cli_probe(client, [*chosen, *current, *offered])
+        result["probe_model"], result["probe_effort"] = probe_model, probe_effort
         # CLI có thể vừa làm mới token → lưu lại vào hồ sơ đang dùng (hạn mới hiện đúng trên thẻ tài khoản).
         from gh.providers import cli as climod
 
@@ -450,12 +480,14 @@ class ModelRouter:
             auth_bad = isinstance(e, AuthFailed)
             result["error"] = (friendly_probe_error(e, result.get("probe_model") or "")
                                if p.kind in CLI_KINDS else str(e)[:300])
+            result["error_detail"] = error_detail(e)
             if p.kind in CLI_KINDS and not result.get("model_groups"):
                 from gh.providers import catalog
 
                 # Vẫn cho Console thấy danh sách (dự phòng) để Owner biết sẽ chọn được gì sau khi đăng nhập lại.
                 result.update(catalog.build(p.kind, None))
         result["latency_ms"] = int((time.monotonic() - started) * 1000)
+        result["at"] = datetime.now(UTC).isoformat()   # Console hiện giờ của lần gọi thật gần nhất (v0.1.32)
         err = result["error"] or ""
         state = "ok" if result["ok"] else ("expired" if auth_bad or "xác thực" in err or "401" in err else "error")
         async with self.sm() as db:
@@ -464,6 +496,26 @@ class ModelRouter:
             await db.execute(text("""UPDATE agent.providers SET auth_state = :s,
                                      last_test = CAST(:t AS jsonb) WHERE id = :i"""),
                              {"s": state, "i": provider_id,
-                              "t": orjson.dumps({**result, "at": datetime.now(UTC).isoformat()}).decode()})
+                              "t": orjson.dumps(result).decode()})
             await db.commit()
         return result
+
+    async def diagnose(self, provider_id: uuid.UUID) -> dict[str, Any]:
+        """Chẩn đoán nguồn CLI (v0.1.32, chỉ Owner): phiên bản, liệt kê model, một lượt gọi rất ngắn với đúng model +
+        mức suy nghĩ đang dùng. Đầu ra thô đã che token/email để Boss chép gửi khi còn lỗi."""
+        from gh.providers import catalog
+
+        async with self.sm() as db:
+            p = (await db.execute(text("SELECT id, kind, name FROM agent.providers WHERE id = :i"),
+                                  {"i": provider_id})).one()
+            row = (await db.execute(text("""SELECT model_name, effort FROM agent.models WHERE provider_id = :p
+                                            AND is_enabled ORDER BY is_default DESC, id LIMIT 1"""),
+                                    {"p": provider_id})).one_or_none()
+        model, effort = (catalog.split_variant(p.kind, row.model_name) if row else (None, None))
+        effort = (row.effort if row else None) or effort
+        if model is None:
+            first = catalog.fallback(p.kind)[:1]
+            model = first[0]["id"] if first else None
+        steps = await self._client(p, None).diagnose(model, effort, PROBE_PROMPT)
+        return {"provider": p.name, "kind": p.kind, "model": model, "effort": effort, "steps": steps,
+                "at": datetime.now(UTC).isoformat()}

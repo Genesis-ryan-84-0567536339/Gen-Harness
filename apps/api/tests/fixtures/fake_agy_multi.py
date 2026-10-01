@@ -5,8 +5,8 @@
   `4/<tên>` → ghi tệp phiên của `<tên>@example.vn`.
 - `agy -p …` (headless, như AgyClient gọi): trả JSON `{"response": "whoami:<email>"}` theo tệp phiên hiện tại.
 - `agy whoami`: in email đang đăng nhập (chỉ để test đọc nhanh).
-- `agy models` (v0.1.31): chưa đăng nhập → đúng câu lỗi của agy 1.2.9 thật, thoát 1; đã đăng nhập → danh sách (định
-  dạng giả định: "Tên hiển thị   mã-model", có dòng chỉ có tên hiển thị). `-p --model X` từ chối model ngoài danh sách.
+- `agy models` (v0.1.31): chưa đăng nhập → đúng câu lỗi của agy 1.2.9 thật, thoát 1; đã đăng nhập → danh sách.
+- v0.1.32: `-p --model <gốc> --effort <mức>` như agy 1.2.9 thật (xem VARIANTS); ghi mỗi lượt vào $HOME/agy-calls.log.
 """
 
 import base64
@@ -34,29 +34,57 @@ def email_of() -> str | None:
 if sys.argv[1:2] == ["whoami"]:
     print(email_of() or "not signed in")
     sys.exit(0)
-MODELS = ["gemini-3.8-flash-high", "gemini-3.8-flash-low", "gemini-3.1-pro-high", "claude-sonnet-4-6-thinking",
-          "claude-opus-4-6-thinking"]
+# v0.1.32 — mô phỏng agy 1.2.9 THẬT (đo 2026-10-01): `--model` nhận model GỐC, `--effort low|medium|high` chọn biến thể
+# (changelog: "Added an `--effort` flag to select a model's reasoning-effort variant"); tên biến thể làm `--model` bị từ
+# chối với đúng mẫu lỗi trong tệp chạy ("invalid model selection (--model %q --effort %q): …", "Invalid model %q
+# (available: %s)", "invalid --effort %q (valid: %s)"). Định dạng `agy models` khi đã đăng nhập CHƯA đo được → giả định
+# một biến thể mỗi dòng (theo hướng dẫn công khai) + tên hiển thị.
+VARIANTS = {"gemini-3.8-flash": ["low", "medium", "high"], "gemini-3.1-pro": ["low", "high"],
+            "claude-sonnet-4-6-thinking": []}
+LEGACY_OK = {"gemini-2.5-pro"}   # test cũ (đổi tài khoản) gọi model này
+CALLS = Path(os.environ["HOME"]) / "agy-calls.log"
+FLAGS = {"--model", "--effort", "--output-format", "-p", "--print", "--prompt", "--print-timeout"}
+if sys.argv[1:2] == ["--version"]:
+    print("1.2.9")
+    sys.exit(0)
 if sys.argv[1:2] == ["models"]:
     print("Fetching available models...")
     if email_of() is None:
         print("Error: Please sign in to view available models. Launch the CLI without arguments to sign in.")
         sys.exit(1)
     print("Available models:")
-    print("  Gemini 3.8 Flash (High)        gemini-3.8-flash-high (current)")
-    print("  Gemini 3.8 Flash (Low)         gemini-3.8-flash-low")
-    print("  Gemini 3.1 Pro (High)          gemini-3.1-pro-high")
-    print("  Claude Sonnet 4.6 (Thinking)   claude-sonnet-4-6-thinking")
-    print("  Claude Opus 4.6 (Thinking)")
+    for base, effs in VARIANTS.items():
+        for e in effs or [""]:
+            slug = f"{base}-{e}" if e else base
+            mark = " (current)" if slug == "gemini-3.8-flash-high" else ""
+            print(f"  {slug}{mark}")
     sys.exit(0)
 if sys.argv[1:2] == ["-p"]:
     who = email_of()
     if who is None:
         print(json.dumps({"error": "Not authenticated: please login"}))
         sys.exit(1)
+    for a in sys.argv[3:]:
+        if a.startswith("-") and a not in FLAGS:
+            print(f"Error: flags provided but not defined: {a.lstrip('-')}", file=sys.stderr)
+            sys.exit(2)
     model = sys.argv[sys.argv.index("--model") + 1] if "--model" in sys.argv else ""
-    if model and model not in MODELS and model != "gemini-2.5-pro":
-        print(json.dumps({"status": "ERROR", "response": "", "error": f"unknown model: {model}"}))
-        sys.exit(1)
+    effort = sys.argv[sys.argv.index("--effort") + 1] if "--effort" in sys.argv else ""
+    with CALLS.open("a") as fh:
+        fh.write(json.dumps({"model": model, "effort": effort}) + "\n")
+    err = None
+    if effort and effort not in ("low", "medium", "high"):
+        err = f'invalid --effort "{effort}" (valid: low, medium, high)'
+    elif model and model not in VARIANTS and model not in LEGACY_OK:
+        err = (f'invalid model selection (--model "{model}" --effort "{effort}"): Invalid model "{model}" '
+               f'(available: {", ".join(VARIANTS)})')
+    elif model in VARIANTS and effort and effort not in VARIANTS[model]:
+        err = (f'invalid model selection (--model "{model}" --effort "{effort}"): invalid --effort "{effort}" '
+               f'(valid: {", ".join(VARIANTS[model])})')
+    if err:
+        print(json.dumps({"conversation_id": "", "status": "ERROR", "response": "", "error": err}))
+        print("AGY_ERROR: " + json.dumps({"status": "INVALID_ARGUMENT", "message": err}), file=sys.stderr)
+        sys.exit(3)
     print(json.dumps({"response": f"whoami:{who}", "usage": {"input_tokens": 1, "output_tokens": 1}}))
     sys.exit(0)
 
