@@ -1,9 +1,13 @@
 package compose
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 const sampleCompose = `
@@ -103,4 +107,84 @@ func TestBaseArgs(t *testing.T) {
 			t.Errorf("BaseArgs[%d] = %q, muốn %q", i, got[i], want[i])
 		}
 	}
+}
+
+// F-37: mọi dịch vụ phải giới hạn log (json-file, 3 tệp × 10 MB) — log không
+// giới hạn làm đầy đĩa máy Owner. Đọc YAML thô (không qua Parse) để thấy
+// khoá logging sau khi anchor *logging đã được giải.
+func repoComposePath() string {
+	return filepath.Join("..", "..", "..", "..", "deploy", "compose.yaml")
+}
+
+func readRepoCompose(t *testing.T) []byte {
+	t.Helper()
+	data, err := os.ReadFile(repoComposePath())
+	if err != nil {
+		t.Fatalf("đọc deploy/compose.yaml: %v", err)
+	}
+	return data
+}
+
+func composeServices(t *testing.T, data []byte) map[string]any {
+	t.Helper()
+	var doc map[string]any
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	services, ok := doc["services"].(map[string]any)
+	if !ok || len(services) == 0 {
+		t.Fatal("compose không có khối services")
+	}
+	return services
+}
+
+func assertEveryServiceHasLogLimits(t *testing.T, label string, data []byte) {
+	t.Helper()
+	for name, raw := range composeServices(t, data) {
+		svc, _ := raw.(map[string]any)
+		logging, ok := svc["logging"].(map[string]any)
+		if !ok {
+			t.Errorf("%s: service %q thiếu logging: *logging (F-37)", label, name)
+			continue
+		}
+		if got := logging["driver"]; got != "json-file" {
+			t.Errorf("%s: service %q logging.driver = %v, muốn json-file", label, name, got)
+		}
+		opts, _ := logging["options"].(map[string]any)
+		if got := opts["max-size"]; got != "10m" {
+			t.Errorf("%s: service %q logging.options.max-size = %v, muốn \"10m\"", label, name, got)
+		}
+		if got := opts["max-file"]; got != "3" {
+			t.Errorf("%s: service %q logging.options.max-file = %v, muốn \"3\"", label, name, got)
+		}
+	}
+}
+
+func TestDeployCompose_EveryServiceHasLogLimits(t *testing.T) {
+	assertEveryServiceHasLogLimits(t, "deploy/compose.yaml", readRepoCompose(t))
+}
+
+func TestEmbeddedCompose_EveryServiceHasLogLimits(t *testing.T) {
+	assertEveryServiceHasLogLimits(t, "embedded_compose.yaml", embeddedComposeYAML)
+}
+
+func TestEmbeddedComposeMatchesRepo(t *testing.T) {
+	if !bytes.Equal(readRepoCompose(t), embeddedComposeYAML) {
+		t.Fatal("apps/genh/internal/compose/embedded_compose.yaml lệch deploy/compose.yaml — chép lại cho khớp")
+	}
+}
+
+func TestDeployCompose_WebHealthcheckUsesHealthz(t *testing.T) {
+	web, ok := composeServices(t, readRepoCompose(t))["web"].(map[string]any)
+	if !ok {
+		t.Fatal("deploy/compose.yaml thiếu service web")
+	}
+	hc, _ := web["healthcheck"].(map[string]any)
+	test, _ := hc["test"].([]any)
+	for _, part := range test {
+		if s, ok := part.(string); ok && strings.Contains(s, "/healthz") {
+			return
+		}
+	}
+	t.Fatalf("healthcheck.test của web = %v, phải gọi /healthz", hc["test"])
 }

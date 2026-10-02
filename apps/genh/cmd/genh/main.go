@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -134,7 +135,9 @@ Lệnh vận hành (cờ chung mọi lệnh dưới đây: --port N, --install-d
                                           --yes hoặc "Cập nhật ngay" trong Console thì cài
                                           luôn) · --quiet: chỉ in dòng quan trọng ·
                                           --no-self-update: chỉ nâng cấp dịch vụ, không đụng
-                                          binary genh
+                                          binary genh. Mọi cách chạy: dịch vụ đã khớp bản genh
+                                          này thì bỏ qua (không sao lưu, không tải) — dịch vụ
+                                          đang dừng/lỗi thì dùng genh start
   genh auto-update enable|disable|status tự chạy "genh update --yes --quiet" mỗi đêm ~03:00
                                           (systemd timer/crontab, LaunchAgent, hoặc Task
                                           Scheduler tuỳ hệ điều hành) — mặc định đã BẬT sau
@@ -279,7 +282,7 @@ func parseUpdateFlags(args []string) (updateFlags, error) {
 	channel := fs.String("channel", "stable", "kênh cập nhật: stable hoặc beta")
 	yes := fs.Bool("yes", false, "chạy không tương tác — dùng cho lịch tự động (genh auto-update); KHÔNG hỏi gì kể cả khi có TTY, và (không kèm --if-requested) chỉ tự cài bản genh đã là bản chính thức ≥ 24 giờ (thời gian chín) — muốn cài ngay thì bỏ --yes")
 	quiet := fs.Bool("quiet", false, "chỉ in các dòng quan trọng (có bản mới/lỗi/xong) — bỏ log tiến độ từng bước")
-	noSelfUpdate := fs.Bool("no-self-update", false, "bỏ qua tự cập nhật BINARY genh — chỉ chạy phần nâng cấp dịch vụ (backup/pull/migrate/restart) bằng bản genh hiện tại")
+	noSelfUpdate := fs.Bool("no-self-update", false, "bỏ qua tự cập nhật BINARY genh — chỉ chạy phần nâng cấp dịch vụ (backup/pull/migrate/restart) bằng bản genh hiện tại (như mọi cách chạy genh update: dịch vụ đã khớp bản genh này thì bỏ qua — dịch vụ dừng/lỗi thì dùng genh start)")
 	selfUpdated := fs.Bool("self-updated", false, "cờ NỘI BỘ: tiến trình này vừa được re-exec ngay sau khi tự thay binary — KHÔNG dùng tay, chỉ genh tự đặt cho chính nó")
 	ifRequested := fs.Bool("if-requested", false, "chỉ cập nhật nếu Owner vừa bấm \"Cập nhật ngay\" trong Console (watcher trên máy chủ gọi) — không có yêu cầu thì thoát ngay")
 	if err := fs.Parse(args); err != nil {
@@ -303,7 +306,6 @@ func runUpdate(args []string) int {
 	// chín 24 giờ (selfUpdateMinAge) — xem lý do giữ --yes làm cờ kích hoạt ở
 	// đó. Bản chưa đủ chín: không thay binary, phần dịch vụ vẫn chạy như khi
 	// đã mới nhất, dòng kết nói rõ bản mới đang đợi (updateDoneLine).
-	minAge := selfUpdateMinAge(f.yes, f.ifRequested)
 
 	env, ok := resolveOpsEnv(f.port, f.installDir)
 	if !ok {
@@ -313,13 +315,24 @@ func runUpdate(args []string) int {
 	// Hộp thư Console (internal/hostlink): tiến trình NGOÀI CÙNG (không phải bản
 	// re-exec sau tự cập nhật) xoá yêu cầu "Cập nhật ngay" TRƯỚC khi chạy — để
 	// watcher không kích lặp — rồi báo "running" cho Console hiện tiến trình.
+	// Chụp nguyên hộp thư TRƯỚC khi báo "running": lịch đêm gặp bản bị chặn thì
+	// trả về đúng như cũ (skipBlockedUpdate).
+	//
+	// Lịch đêm chạy ĐÚNG lúc Owner vừa bấm "Cập nhật ngay"/"Thử lại" (watcher
+	// chưa kịp gọi): lịch đêm đã nuốt yêu cầu thì phải làm như --if-requested
+	// (không bị chặn, không đợi chín) — nếu không yêu cầu mất không dấu vết.
+	var statusSnap []byte
+	hadStatus, hadRequest := false, false
 	if !f.selfUpdated {
 		if f.ifRequested && !hostlink.HasRequest(env.InstallDir) {
 			return 0
 		}
-		hostlink.ConsumeRequest(env.InstallDir)
+		statusSnap, hadStatus = hostlink.SnapshotStatus(env.InstallDir)
+		hadRequest = hostlink.ConsumeRequest(env.InstallDir)
 		_ = hostlink.Start(env.InstallDir, version)
 	}
+	requested := f.ifRequested || hadRequest
+	minAge := selfUpdateMinAge(f.yes, requested)
 
 	// Tự cập nhật BINARY genh TRƯỚC KHI đụng gì tới dịch vụ — xem
 	// internal/selfupdate. Bỏ qua nếu: --no-self-update, HOẶC tiến trình
@@ -327,7 +340,7 @@ func runUpdate(args []string) int {
 	// vô hạn tự-tải-tự-re-exec nếu có gì đó luôn báo "mới hơn" sai).
 	deferred := false
 	if !f.noSelfUpdate && !f.selfUpdated {
-		code, ok, d := trySelfUpdateAndReExec(args, f.quiet, minAge)
+		code, ok, d := trySelfUpdateAndReExec(childUpdateArgs(args, f.ifRequested, requested), f.quiet, minAge)
 		deferred = d
 		if ok {
 			// Bản mới (tiến trình con) tự ghi kết quả; con chết giữa chừng thì
@@ -339,36 +352,177 @@ func runUpdate(args []string) int {
 		}
 	}
 
+	// Có cần chạy phần nâng cấp dịch vụ không (F-10 bước 3, F-33 bước 5): lịch
+	// đêm không thử lại bản đã rollback; dịch vụ đã khớp bản genh này thì không
+	// sao lưu/tải ảnh vô ích mỗi đêm.
+	blocked, _, _ := hostlink.ReadUpdateBlocked(env.InstallDir)
+	inSync, _ := ops.UpdateNeeded(env) // lỗi → false: để RunUpdate tự báo lỗi đúng khuôn
+	switch skip, kind := decideServiceUpdate(serviceUpdateInput{
+		Scheduled:      f.yes && !requested,
+		SelfUpdated:    f.selfUpdated,
+		Version:        version,
+		InSync:         inSync,
+		BlockedVersion: blocked.Version,
+	}); {
+	case skip && kind == "blocked":
+		// In ra stdout CẢ khi --quiet để vào logs/auto-update.log.
+		skipBlockedUpdate(os.Stdout, env.InstallDir, version, blocked, statusSnap, hadStatus, f.selfUpdated)
+		return 0
+	case skip && kind == "up-to-date":
+		fmt.Println(upToDateLine(version))
+		_ = hostlink.Finish(env.InstallDir, "done", version, "")
+		publishHostInfo(env.InstallDir, env.Port)
+		if deferred {
+			fmt.Println(updateDoneLine(true))
+		}
+		return 0
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	out := io.Writer(os.Stdout)
 	if f.quiet {
 		out = io.Discard
 	}
-	opts := ops.UpdateOptions{Channel: f.channel}
+	opts := ops.UpdateOptions{Channel: f.channel, Version: version}
 	if err := ops.RunUpdate(ctx, env, opts, ops.UpdateDeps{}, out); err != nil {
 		reportOpErr(err)
-		msg := err.Error()
-		if opErr, ok := err.(*ops.OpError); ok {
-			msg = opErr.What
-		}
-		_ = hostlink.Finish(env.InstallDir, "failed", version, msg)
+		_ = hostlink.Finish(env.InstallDir, "failed", version, consoleUpdateMessage(err))
 		return 1
 	}
 	_ = hostlink.Finish(env.InstallDir, "done", version, "")
 	publishHostInfo(env.InstallDir, env.Port)
-	if f.quiet {
-		fmt.Println(updateDoneLine(deferred))
+	if deferred {
+		fmt.Println(deferredAfterRunLine)
+	} else if f.quiet {
+		fmt.Println(updateDoneLine(false))
 	}
 	return 0
 }
 
-// updateDoneLine là dòng kết của `genh update --quiet` (vào
-// logs/auto-update.log). Bản genh mới bị thời gian chín hoãn (deferred) thì
-// KHÔNG được in "cập nhật xong." — người đọc log sẽ tưởng bản mới đã cài.
+// childUpdateArgs: args cho tiến trình re-exec sau khi tự thay binary. Tiến
+// trình ngoài đã nuốt yêu cầu Console (lịch đêm trùng lúc Owner bấm) thì con
+// không còn thấy yêu cầu — thêm --if-requested để con cũng không bị chặn.
+func childUpdateArgs(args []string, ifRequested, requested bool) []string {
+	if requested && !ifRequested {
+		return append(append([]string{}, args...), "--if-requested")
+	}
+	return args
+}
+
+// serviceUpdateInput là dữ kiện để quyết định có chạy ops.RunUpdate không.
+type serviceUpdateInput struct {
+	Scheduled      bool   // lịch đêm: --yes không kèm --if-requested
+	SelfUpdated    bool   // tiến trình vừa re-exec sau khi tự thay binary
+	Version        string // main.version
+	InSync         bool   // compose.yaml + Caddyfile đã khớp bản nhúng (ops.UpdateNeeded)
+	BlockedVersion string // version trong run/update-blocked.json ("" nếu không có)
+}
+
+// decideServiceUpdate (hàm thuần) quyết định bỏ qua phần nâng cấp dịch vụ:
+//  1. lịch đêm + bản đang chạy đúng là bản đã bị chặn (so khớp CHÍNH XÁC) →
+//     "blocked" — "Cập nhật ngay" và gõ tay luôn được chạy;
+//  2. không vừa tự cập nhật + dịch vụ đã khớp bản genh này → "up-to-date";
+//  3. còn lại chạy RunUpdate (skip=false, kind="").
+func decideServiceUpdate(in serviceUpdateInput) (skip bool, kind string) {
+	if in.Scheduled && in.BlockedVersion != "" && in.BlockedVersion == in.Version {
+		return true, "blocked"
+	}
+	if !in.SelfUpdated && in.InSync {
+		return true, "up-to-date"
+	}
+	return false, ""
+}
+
+// blockedLine: dòng log khi lịch đêm bỏ qua bản đã bị chặn (E2E grep "lịch đêm
+// không tự thử lại"). Quay về bản cũ đã THẤT BẠI (b.RollbackFailed) thì KHÔNG
+// được nói "đã tự quay về bản cũ" — máy đang cần xử lý tay.
+func blockedLine(v string, b hostlink.UpdateBlocked) string {
+	if b.RollbackFailed {
+		return "genh: bản " + v + " đã lỗi ở lần cập nhật trước và tự quay về bản cũ CŨNG THẤT BẠI — cần xử lý tay ngay" + backupHint(b) + ". Lịch đêm không tự thử lại bản này."
+	}
+	return "genh: bản " + v + " đã lỗi ở lần cập nhật trước và đã tự quay về bản cũ — lịch đêm không tự thử lại bản này. Có bản mới hơn sẽ tự cài; muốn thử lại ngay: bấm \"Cập nhật ngay\" trong Console hoặc chạy genh update."
+}
+
+// backupHint: cách xử lý tay khi quay về bản cũ thất bại. CSDL đã bị đụng (có
+// BackupKey — genh chỉ ghi khoá khi đó) → khôi phục bản sao lưu rồi up -d. CSDL
+// CHƯA bị đụng → TUYỆT ĐỐI không khôi phục (worker/bridge/api vẫn ghi sau lúc
+// sao lưu — khôi phục sẽ xoá mất), chỉ up -d.
+func backupHint(b hostlink.UpdateBlocked) string {
+	if b.BackupKey != "" {
+		return " (khôi phục bản sao lưu " + b.BackupKey + " rồi chạy docker compose up -d --remove-orphans — xem logs/auto-update.log)"
+	}
+	if !b.DBTouched {
+		return " (CSDL chưa bị đụng — KHÔNG khôi phục bản sao lưu, chỉ chạy docker compose up -d --remove-orphans — xem logs/auto-update.log)"
+	}
+	return " (xem logs/auto-update.log)"
+}
+
+// blockedConsoleMessage: thông điệp hộp thư Console khi tiến trình re-exec (vừa
+// tự thay binary) gặp bản bị chặn — tiến trình ngoài đã ghi "running" nên phải
+// kết thúc nó. Tiến trình ngoài thì KHÔNG dùng hàm này (trả hộp thư về như cũ).
+func blockedConsoleMessage(v string, b hostlink.UpdateBlocked) string {
+	if b.RollbackFailed {
+		return "Bản " + v + " đã lỗi ở lần cập nhật trước và tự quay về bản cũ CŨNG THẤT BẠI — cần xử lý tay ngay" + backupHint(b) + ". Lịch đêm không tự thử lại bản này. (" + ops.ErrCodeUpdateBlocked + ")"
+	}
+	return "Bản " + v + " đã lỗi ở lần cập nhật trước và đã tự quay về bản cũ — lịch đêm không tự thử lại bản này. Bấm \"Cập nhật ngay\" để thử lại. (" + ops.ErrCodeUpdateBlocked + ")"
+}
+
+// skipBlockedUpdate: lịch đêm gặp đúng bản đã bị chặn — chỉ in một dòng log và
+// để NGUYÊN update-status.json như lần cập nhật lỗi để lại (statusSnap chụp
+// trước Start): không làm mới finished_at mỗi đêm (thẻ đỏ của Console tự hết
+// sau 24 giờ), không ghi đè thông điệp gốc (mã lỗi, lý do, bản sao lưu, hoặc
+// cảnh báo quay về bản cũ thất bại). selfUpdated: tiến trình này không có ảnh
+// chụp (tiến trình ngoài đã báo "running") → kết thúc bằng thông điệp chặn.
+func skipBlockedUpdate(w io.Writer, installDir, v string, b hostlink.UpdateBlocked, statusSnap []byte, hadStatus, selfUpdated bool) {
+	_, _ = fmt.Fprintln(w, blockedLine(v, b))
+	if !selfUpdated {
+		_ = hostlink.RestoreStatusSnapshot(installDir, statusSnap, hadStatus)
+		return
+	}
+	_ = hostlink.Finish(installDir, "failed", v, blockedConsoleMessage(v, b))
+}
+
+// consoleUpdateMessage dựng thông điệp lỗi cho hộp thư Console từ lỗi của
+// ops.RunUpdate: "<What> — <Next> (<mã>)" — Console chọn lời dẫn theo mã (vd
+// GH-E948 ổ đĩa đầy: Owner PHẢI dọn đĩa) và hiện phần còn lại trong "Chi tiết
+// kỹ thuật". Ổ đĩa đầy kèm Why (còn bao nhiêu GB / cần bao nhiêu). Bỏ dấu `
+// (định dạng lệnh cho terminal, Console hiện chữ thường).
+func consoleUpdateMessage(err error) string {
+	opErr, ok := err.(*ops.OpError)
+	if !ok {
+		return err.Error()
+	}
+	msg := opErr.What
+	if opErr.Code == ops.ErrCodeUpdateDiskLow && opErr.Why != "" {
+		msg += " (" + opErr.Why + ")"
+	}
+	if opErr.Next != "" {
+		msg += " — " + opErr.Next
+	}
+	if opErr.Code != "" {
+		msg += " (" + opErr.Code + ")"
+	}
+	return strings.ReplaceAll(msg, "`", "")
+}
+
+// upToDateLine: dòng log khi dịch vụ đã đúng bản (E2E grep "không cần cập nhật").
+func upToDateLine(v string) string {
+	return "genh: dịch vụ đã ở đúng bản " + v + " — không cần cập nhật (không sao lưu, không tải ảnh). Dịch vụ đang dừng/lỗi thì chạy genh start."
+}
+
+// deferredAfterRunLine: RunUpdate ĐÃ chạy xong bằng bản genh hiện tại nhưng bản
+// genh mới hơn đang bị thời gian chín hoãn — KHÔNG in "genh: cập nhật xong."
+// (người đọc log sẽ tưởng bản mới đã cài).
+const deferredAfterRunLine = "genh: dịch vụ đã nâng cấp theo bản genh hiện tại — bản genh mới đang đợi đủ 24 giờ (thời gian chín) mới tự cài."
+
+// updateDoneLine là dòng kết vào logs/auto-update.log. Bản genh mới bị thời
+// gian chín hoãn (deferred) và dịch vụ đã khớp bản hiện tại → không có gì để
+// cập nhật; KHÔNG được in "genh: cập nhật xong." — chỉ in câu đó khi RunUpdate
+// thật sự chạy xong.
 func updateDoneLine(deferred bool) string {
 	if deferred {
-		return "genh: dịch vụ đã kiểm/khởi động lại xong — bản genh mới đang đợi đủ 24 giờ (thời gian chín) mới tự cài."
+		return "genh: không có gì để cập nhật — bản genh mới đang đợi đủ 24 giờ (thời gian chín) mới tự cài."
 	}
 	return "genh: cập nhật xong."
 }

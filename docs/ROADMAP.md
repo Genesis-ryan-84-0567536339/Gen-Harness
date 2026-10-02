@@ -49,6 +49,10 @@ còn model đã lưu, mỗi model có nguồn (CLI / tài liệu chính thức /
 v0.1.33: cổng phát hành & CI đủ test (F-9, F-13) — CI chạy trước Release, Release ra dạng bản thử (prerelease), E2E cài
 thật xanh mới tự nâng thành bản chính thức (latest); lịch đêm đợi thời gian chín 24 giờ; CI thêm go vet/go test 4 hệ điều
 hành, pytest dưới vai app, Playwright mock, kiểm alembic 1 head, job tổng `ci-ok`/`installer-ok`. Sửa tài liệu: genh chưa kiểm cosign.
+v0.1.34: `genh update` an toàn (F-10, F-11, F-33, F-35, F-37) — tải bản mới TRƯỚC sao lưu (tải lỗi = chưa đụng gì), chỉ
+khôi phục CSDL khi đã migrate (container tạm từ ảnh cũ), bản lỗi tự quay về bản cũ và lịch đêm không thử lại bản đó, đã mới
+nhất thì không sao lưu/không tải, kiểm đĩa + dọn ảnh cũ (giữ 2 bản), giới hạn log mọi dịch vụ (10 MB × 3); E2E thêm dữ liệu
+mẫu + đếm dòng và job bản hỏng cố ý (promote đòi xanh).
 
 ## Đợt A — Gen v1 (thiết kế: docs/design/gen-v1.md)
 - ✅ A1 Khung chat phải + Gen trả lời/tóm tắt (chỉ đọc), lưu hội thoại, Nhật ký hành động — v0.1.21.

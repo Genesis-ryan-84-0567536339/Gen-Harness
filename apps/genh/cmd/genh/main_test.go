@@ -1,11 +1,17 @@
 package main
 
 import (
+	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/autoupdate"
+	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/hostlink"
+	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/ops"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/selfupdate"
 )
 
@@ -86,13 +92,221 @@ func TestUpdateDoneLine_HoanThiKhongNoiCapNhatXong(t *testing.T) {
 	if got := updateDoneLine(false); got != "genh: cập nhật xong." {
 		t.Fatalf("không hoãn: muốn %q, được %q", "genh: cập nhật xong.", got)
 	}
-	got := updateDoneLine(true)
-	if strings.Contains(got, "cập nhật xong") {
-		t.Fatalf("bị hoãn mà dòng kết vẫn nói cập nhật xong: %q", got)
-	}
-	for _, want := range []string{"dịch vụ đã kiểm/khởi động lại xong", "đang đợi đủ 24 giờ"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("dòng kết khi hoãn thiếu %q: %q", want, got)
+	for _, got := range []string{updateDoneLine(true), deferredAfterRunLine} {
+		if strings.Contains(got, "genh: cập nhật xong.") || strings.Contains(got, "cập nhật xong") {
+			t.Fatalf("bị hoãn mà dòng kết vẫn nói cập nhật xong: %q", got)
 		}
+		if !strings.Contains(got, "đợi đủ 24 giờ") {
+			t.Errorf("dòng kết khi hoãn thiếu %q: %q", "đợi đủ 24 giờ", got)
+		}
+	}
+	if !strings.Contains(updateDoneLine(true), "không có gì để cập nhật") {
+		t.Errorf("hoãn + dịch vụ đã khớp: phải nói không có gì để cập nhật: %q", updateDoneLine(true))
+	}
+}
+
+func TestDecideServiceUpdate(t *testing.T) {
+	const v = "v0.1.34"
+	cases := []struct {
+		name     string
+		in       serviceUpdateInput
+		wantSkip bool
+		wantKind string
+	}{
+		{"(a) lịch đêm + bản bị chặn đúng bản này → blocked",
+			serviceUpdateInput{Scheduled: true, Version: v, BlockedVersion: v}, true, "blocked"},
+		{"(b) lịch đêm + bị chặn bản KHÁC + chưa khớp → chạy (bản mới hơn vẫn nhận)",
+			serviceUpdateInput{Scheduled: true, Version: v, BlockedVersion: "v0.1.33"}, false, ""},
+		{"(c) gõ tay/\"Cập nhật ngay\" + bị chặn đúng bản này → chạy",
+			serviceUpdateInput{Scheduled: false, Version: v, BlockedVersion: v}, false, ""},
+		{"(d) đã khớp + không vừa tự cập nhật → up-to-date",
+			serviceUpdateInput{Version: v, InSync: true}, true, "up-to-date"},
+		{"(e) vừa tự cập nhật + đã khớp → chạy",
+			serviceUpdateInput{Version: v, InSync: true, SelfUpdated: true}, false, ""},
+		{"(f) bị chặn bản khác + đã khớp → up-to-date",
+			serviceUpdateInput{Scheduled: true, Version: v, InSync: true, BlockedVersion: "v0.1.33"}, true, "up-to-date"},
+		{"lịch đêm + bị chặn đúng bản + đã khớp → blocked (ưu tiên)",
+			serviceUpdateInput{Scheduled: true, Version: v, InSync: true, BlockedVersion: v}, true, "blocked"},
+		{"so khớp CHÍNH XÁC version (v0.1.3 ≠ v0.1.34)",
+			serviceUpdateInput{Scheduled: true, Version: v, BlockedVersion: "v0.1.3"}, false, ""},
+	}
+	for _, c := range cases {
+		skip, kind := decideServiceUpdate(c.in)
+		if skip != c.wantSkip || kind != c.wantKind {
+			t.Errorf("%s: được (%v,%q), muốn (%v,%q)", c.name, skip, kind, c.wantSkip, c.wantKind)
+		}
+	}
+}
+
+func TestServiceUpdateLines_E2EContract(t *testing.T) {
+	ok := hostlink.UpdateBlocked{Version: "v0.1.34"}
+	if !strings.Contains(blockedLine("v0.1.34", ok), "lịch đêm không tự thử lại") {
+		t.Errorf("dòng bản bị chặn phải chứa \"lịch đêm không tự thử lại\": %q", blockedLine("v0.1.34", ok))
+	}
+	if !strings.Contains(upToDateLine("v0.1.34"), "không cần cập nhật") {
+		t.Errorf("dòng đã mới nhất phải chứa \"không cần cập nhật\": %q", upToDateLine("v0.1.34"))
+	}
+	for _, l := range []string{blockedLine("v0.1.34", ok), upToDateLine("v0.1.34")} {
+		if strings.Contains(l, "genh: cập nhật xong.") {
+			t.Errorf("chỉ in \"genh: cập nhật xong.\" khi RunUpdate chạy xong: %q", l)
+		}
+	}
+}
+
+// Lịch đêm gặp bản bị chặn HAI đêm liền: hộp thư Console giữ NGUYÊN thông
+// điệp + finished_at của đêm lỗi (thẻ đỏ tự hết sau 24 giờ, không mất chi tiết).
+func TestSkipBlockedUpdate_KeepsStatusAcrossNights(t *testing.T) {
+	dir := t.TempDir()
+	orig := "migrate lỗi — đã tự quay về bản cũ (GH-E945)"
+	if err := hostlink.Start(dir, "v0.1.33"); err != nil {
+		t.Fatal(err)
+	}
+	if err := hostlink.Finish(dir, "failed", "v0.1.34", orig); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := hostlink.SnapshotStatus(dir)
+	b := hostlink.UpdateBlocked{Version: "v0.1.34", BackupKey: "backups/k.enc"}
+	for night := 0; night < 2; night++ {
+		snap, had := hostlink.SnapshotStatus(dir)
+		if err := hostlink.Start(dir, "v0.1.34"); err != nil { // đúng như runUpdate
+			t.Fatal(err)
+		}
+		var out strings.Builder
+		skipBlockedUpdate(&out, dir, "v0.1.34", b, snap, had, false)
+		if !strings.Contains(out.String(), "lịch đêm không tự thử lại") {
+			t.Errorf("đêm %d: thiếu dòng log: %q", night, out.String())
+		}
+	}
+	after, _ := hostlink.SnapshotStatus(dir)
+	if string(after) != string(before) {
+		t.Fatalf("update-status.json bị đổi:\n%s\n---\n%s", before, after)
+	}
+	st, _ := hostlink.ReadStatus(dir)
+	if st.State != "failed" || st.Message != orig {
+		t.Errorf("phải giữ thông điệp gốc: %+v", st)
+	}
+}
+
+// Quay về bản cũ THẤT BẠI: dòng log/hộp thư không được nói "đã tự quay về bản
+// cũ", phải nói cần xử lý tay + bản sao lưu.
+func TestBlockedMessages_RollbackFailed(t *testing.T) {
+	b := hostlink.UpdateBlocked{Version: "v0.1.34", BackupKey: "backups/k.enc", RollbackFailed: true}
+	for _, m := range []string{blockedLine("v0.1.34", b), blockedConsoleMessage("v0.1.34", b)} {
+		if strings.Contains(m, "đã tự quay về bản cũ") {
+			t.Errorf("rollback thất bại mà vẫn nói đã quay về bản cũ: %q", m)
+		}
+		for _, want := range []string{"cần xử lý tay", "backups/k.enc", "lịch đêm không tự thử lại"} {
+			if !strings.Contains(strings.ToLower(m), strings.ToLower(want)) {
+				t.Errorf("thiếu %q: %q", want, m)
+			}
+		}
+	}
+	// Tiến trình re-exec (không có ảnh chụp): kết thúc "running" bằng thông điệp chặn đúng.
+	dir := t.TempDir()
+	_ = hostlink.Start(dir, "v0.1.33")
+	skipBlockedUpdate(&strings.Builder{}, dir, "v0.1.34", b, nil, false, true)
+	st, _ := hostlink.ReadStatus(dir)
+	if st.State != "failed" || !strings.Contains(st.Message, "CŨNG THẤT BẠI") {
+		t.Errorf("re-exec: hộp thư phải báo cần xử lý tay: %+v", st)
+	}
+}
+
+// Hộp thư Console nhận đủ What — Next (mã); ổ đĩa đầy kèm số GB; bỏ dấu `.
+func TestConsoleUpdateMessage(t *testing.T) {
+	disk := &ops.OpError{Code: ops.ErrCodeUpdateDiskLow, What: "Ổ đĩa không đủ chỗ để tải bản mới — DỪNG LẠI, chưa đụng gì",
+		Why: "còn 1.0 GB trống tại /var/lib/docker, cần tối thiểu 5 GB", Next: "Giải phóng ổ đĩa (xem `docker system df`), rồi chạy lại `genh update`."}
+	got := consoleUpdateMessage(disk)
+	for _, want := range []string{"Ổ đĩa không đủ chỗ", "còn 1.0 GB", "Giải phóng ổ đĩa", "(GH-E948)"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("thiếu %q: %q", want, got)
+		}
+	}
+	if strings.Contains(got, "`") {
+		t.Errorf("không được còn dấu `: %q", got)
+	}
+	pull := &ops.OpError{Code: ops.ErrCodeUpdatePullFailed, What: "Tải bản mới thất bại", Why: "raw docker output", Next: "Kiểm mạng."}
+	if got := consoleUpdateMessage(pull); got != "Tải bản mới thất bại — Kiểm mạng. (GH-E941)" || strings.Contains(got, "raw docker") {
+		t.Errorf("được %q", got)
+	}
+	if got := consoleUpdateMessage(errors.New("lạ")); got != "lạ" {
+		t.Errorf("lỗi thường: %q", got)
+	}
+}
+
+// Review v0.1.34: quay về bản cũ thất bại mà CSDL CHƯA bị đụng — KHÔNG được
+// bảo khôi phục bản sao lưu (xoá mất ghi chép sau lúc sao lưu), chỉ up -d.
+func TestBlockedLine_RollbackFailed_DBNotTouched_NoRestoreAdvice(t *testing.T) {
+	b := hostlink.UpdateBlocked{Version: "v0.1.34", RollbackFailed: true, DBTouched: false}
+	for _, m := range []string{blockedLine("v0.1.34", b), blockedConsoleMessage("v0.1.34", b)} {
+		if strings.Contains(m, "khôi phục bản sao lưu backups") || !strings.Contains(m, "KHÔNG khôi phục bản sao lưu") {
+			t.Errorf("không được khuyên khôi phục: %q", m)
+		}
+		if !strings.Contains(m, "docker compose up -d --remove-orphans") || !strings.Contains(m, "cần xử lý tay") {
+			t.Errorf("phải hướng dẫn up -d: %q", m)
+		}
+	}
+	// Đã đụng CSDL: vẫn chỉ đúng bản sao lưu cần khôi phục.
+	touched := hostlink.UpdateBlocked{Version: "v0.1.34", RollbackFailed: true, DBTouched: true, BackupKey: "backups/k.enc"}
+	if l := blockedLine("v0.1.34", touched); !strings.Contains(l, "khôi phục bản sao lưu backups/k.enc") {
+		t.Errorf("đã đụng CSDL phải chỉ bản sao lưu: %q", l)
+	}
+}
+
+// Review v0.1.34: update-status.json là symlink tới tệp bí mật (container api
+// cài vào run/) + lịch đêm đi nhánh bản bị chặn: bí mật không được lọt vào run/.
+func TestSkipBlockedUpdate_SymlinkedStatus_DoesNotLeakSecret(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink kiểu Unix")
+	}
+	dir := t.TempDir()
+	if err := hostlink.EnsureDir(dir); err != nil {
+		t.Fatal(err)
+	}
+	secret := filepath.Join(t.TempDir(), "id_ed25519")
+	if err := os.WriteFile(secret, []byte(`{"state":"failed","message":"BI-MAT-KHOA-SSH"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secret, filepath.Join(hostlink.Dir(dir), hostlink.StatusFile)); err != nil {
+		t.Fatal(err)
+	}
+	// Đúng thứ tự runUpdate: chụp → Start → nhánh bị chặn.
+	snap, had := hostlink.SnapshotStatus(dir)
+	_ = hostlink.Start(dir, "v0.1.34")
+	skipBlockedUpdate(&strings.Builder{}, dir, "v0.1.34", hostlink.UpdateBlocked{Version: "v0.1.34"}, snap, had, false)
+	entries, _ := os.ReadDir(hostlink.Dir(dir))
+	for _, e := range entries {
+		if b, err := os.ReadFile(filepath.Join(hostlink.Dir(dir), e.Name())); err == nil && strings.Contains(string(b), "BI-MAT") {
+			t.Fatalf("bí mật lọt vào run/%s", e.Name())
+		}
+	}
+	if b, _ := os.ReadFile(secret); !strings.Contains(string(b), "BI-MAT") {
+		t.Fatal("tệp bí mật bị ghi đè")
+	}
+}
+
+// Review v0.1.34: lịch đêm nuốt yêu cầu "Cập nhật ngay" của Owner → tiến trình
+// con (re-exec) phải nhận --if-requested để không bị chặn/không đợi chín.
+func TestChildUpdateArgs_PassesConsumedRequest(t *testing.T) {
+	args := []string{"--yes", "--quiet"}
+	got := childUpdateArgs(args, false, true)
+	if strings.Join(got, " ") != "--yes --quiet --if-requested" {
+		t.Errorf("phải thêm --if-requested: %v", got)
+	}
+	if strings.Join(args, " ") != "--yes --quiet" {
+		t.Errorf("không được sửa args gốc: %v", args)
+	}
+	if got := childUpdateArgs(args, false, false); strings.Join(got, " ") != "--yes --quiet" {
+		t.Errorf("không có yêu cầu thì giữ nguyên: %v", got)
+	}
+	if got := childUpdateArgs([]string{"--if-requested"}, true, true); len(got) != 1 {
+		t.Errorf("đã có --if-requested thì không thêm lần nữa: %v", got)
+	}
+	// Có yêu cầu (dù lịch đêm --yes) → không còn là "lịch đêm": bản bị chặn vẫn chạy.
+	if skip, _ := decideServiceUpdate(serviceUpdateInput{Scheduled: false, Version: "v0.1.34", BlockedVersion: "v0.1.34"}); skip {
+		t.Error("có yêu cầu thì không bị chặn")
+	}
+	parsed, err := parseUpdateFlags(got)
+	if err != nil || !parsed.ifRequested || !parsed.yes {
+		t.Errorf("args con phải parse được --yes --if-requested: %+v %v", parsed, err)
 	}
 }

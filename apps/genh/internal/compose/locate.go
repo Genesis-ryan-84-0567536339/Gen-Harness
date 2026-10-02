@@ -274,3 +274,49 @@ func ensureCaddyfile(deployDir string, sync bool) error {
 	}
 	return nil
 }
+
+// EmbeddedCompose trả bản sao compose.yaml nhúng trong binary genh đang chạy —
+// `genh update` dùng làm "bản đích" để tải ảnh mới TRƯỚC khi đụng compose.yaml
+// trên đĩa (xem internal/ops/update.go).
+func EmbeddedCompose() []byte {
+	return append([]byte(nil), embeddedComposeYAML...)
+}
+
+// ManagedComposePath là compose.yaml GENH QUẢN LÝ dưới gốc cài đặt ("" nếu
+// installDir rỗng) — cùng đường dẫn locate dùng.
+func ManagedComposePath(installDir string) string {
+	if installDir == "" {
+		return ""
+	}
+	return filepath.Join(installDir, "deploy", "compose.yaml")
+}
+
+// InSyncWithEmbedded báo compose.yaml tại path đã khớp bản nhúng của binary
+// đang chạy chưa (chỉ đọc, không ghi). path KHÁC compose.yaml genh quản lý
+// (GENH_COMPOSE_FILE, checkout repo) → false: genh không biết tệp ngoài đó đã
+// được dựng lên chưa (ảnh `image:` có thể có bản mới, cần migrate…) nên KHÔNG
+// được coi là "đã khớp" — `genh update` luôn chạy đủ sao lưu/tải/migrate/khởi
+// động lại như trước v0.1.34. Với tệp genh quản lý: true chỉ khi
+// compose.yaml trùng từng byte bản nhúng VÀ deploy/proxy/Caddyfile trùng
+// embeddedCaddyfile (thiếu Caddyfile = không trùng).
+func InSyncWithEmbedded(installDir, path string) (bool, error) {
+	managed := ManagedComposePath(installDir)
+	if managed == "" || filepath.Clean(path) != filepath.Clean(managed) {
+		return false, nil
+	}
+	current, err := os.ReadFile(managed)
+	if err != nil {
+		return false, fmt.Errorf("đọc %s: %w", managed, err)
+	}
+	if !bytes.Equal(current, embeddedComposeYAML) {
+		return false, nil
+	}
+	caddy, err := os.ReadFile(filepath.Join(filepath.Dir(managed), "proxy", "Caddyfile"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("đọc Caddyfile: %w", err)
+	}
+	return bytes.Equal(caddy, embeddedCaddyfile), nil
+}

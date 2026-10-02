@@ -11,19 +11,22 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/compose"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/dockercli"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/dockercli/fake"
+	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/hostlink"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/secretgen"
 )
 
 // updateTestComposeYAML phản ánh đúng dạng thật của deploy/compose.yaml:
-// proxy/redis có "image:" cố định (pull được), api/web/bridge/db dùng
+// proxy/redis có "image:" cố định (pull được), api/web/bridge/db/worker dùng
 // "build:" cục bộ (KHÔNG pull được) — đúng resolveUpdateServices phải tách
-// hai nhóm này ra.
+// hai nhóm này ra. Khác bản nhúng thật → với testEnv (compose genh quản lý)
+// lần cập nhật này "đổi compose".
 const updateTestComposeYAML = `name: gen-harness
 services:
   proxy:
@@ -31,6 +34,8 @@ services:
   redis:
     image: redis:7-alpine
   api:
+    build: { context: .. }
+  worker:
     build: { context: .. }
   web:
     build: { context: .. }
@@ -40,18 +45,70 @@ services:
     build: { context: .. }
 `
 
-const updateTestBackupLine = "INFO:gh.backup:Backup mới: backups/20260925T100000Z-deadbeef.pgcustom.enc (999 byte, CSDL gen_harness)"
+const updateTestBackupKey = "backups/20260925T100000Z-deadbeef.pgcustom.enc"
+const updateTestBackupLine = "INFO:gh.backup:Backup mới: " + updateTestBackupKey + " (999 byte, CSDL gen_harness)"
 
-// updateHappyFakeRunner dựng fake.Runner khớp đúng 4 lệnh của luồng cập
-// nhật bình thường (backup/pull/migrate/restart), tất cả đều thành công.
-func updateHappyFakeRunner() *fake.Runner {
-	return &fake.Runner{Responses: []fake.Response{
-		{Match: fake.MatchArgsContain("exec", "-T", "api", "python", "-m", "gh.backup", "run"), Lines: []string{updateTestBackupLine}},
-		{Match: fake.MatchArgsContain("pull"), Output: []byte("")},
-		{Match: fake.MatchArgsContain("run", "--rm", "-T", "--no-deps", "migrate"), Lines: []string{}},
-		{Match: fake.MatchArgsContain("up", "-d"), Output: []byte("")},
-	}}
+const testVersion = "v0.1.34"
+
+// exactArgs khớp lệnh có MỌI phần tử want xuất hiện NGUYÊN VẸN trong Args —
+// tránh khớp nhầm chuỗi con ("up" nằm trong "gh.backup"/"update-next").
+func exactArgs(want ...string) func(dockercli.Cmd) bool {
+	return func(cmd dockercli.Cmd) bool { return hasExactArgs(cmd.Args, want...) }
 }
+
+var (
+	matchAlembicCurrent = exactArgs("alembic", "current")
+	matchAlembicHeads   = exactArgs("alembic", "heads")
+	matchBackupRun      = exactArgs("gh.backup", "run")
+	matchRestore        = exactArgs("gh.backup", "restore")
+	matchPull           = exactArgs("pull")
+	matchMigrate        = func(cmd dockercli.Cmd) bool {
+		return hasExactArgs(cmd.Args, "run", "--rm", "-T", "--no-deps", "migrate") && !hasExactArgs(cmd.Args, "alembic")
+	}
+	matchUp    = exactArgs("up", "-d")
+	matchStop  = exactArgs("stop")
+	matchStart = exactArgs("start")
+	// matchFullUp: `up -d --remove-orphans` (cả hệ thống) — khác `up -d --wait
+	// --no-deps db` (dựng lại db bằng ảnh cũ trước khi khôi phục).
+	matchFullUp = exactArgs("up", "-d", "--remove-orphans")
+	matchDBUp   = exactArgs("up", "-d", "--wait", "--no-deps", "db")
+)
+
+// pendingMigration: `alembic current` bằng ảnh mới báo CHƯA ở head — bản mới
+// có thay đổi CSDL (dừng worker/bridge trước sao lưu; lỗi sau migrate thì phải
+// khôi phục CSDL).
+var pendingMigration = fake.Response{Match: matchAlembicCurrent, Output: []byte("0041_x\n")}
+
+// lastCallIndex như callIndex nhưng lấy lần gọi CUỐI.
+func lastCallIndex(fr *fake.Runner, match func(dockercli.Cmd) bool) int {
+	for i := len(fr.Calls) - 1; i >= 0; i-- {
+		if match(fr.Calls[i].Cmd) {
+			return i
+		}
+	}
+	return -1
+}
+
+// updateFakeRunner dựng fake.Runner cho luồng cập nhật, mọi lệnh thành công
+// trừ khi over ghi đè (response trong over được xét TRƯỚC). `alembic current`
+// mặc định báo đã ở head (không có thay đổi CSDL).
+func updateFakeRunner(over ...fake.Response) *fake.Runner {
+	base := []fake.Response{
+		{Match: matchAlembicCurrent, Output: []byte("INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.\n0042_x (head)\n")},
+		{Match: matchAlembicHeads, Output: []byte("0042_x (head)\n")},
+		{Match: matchBackupRun, Lines: []string{updateTestBackupLine}},
+		{Match: matchPull, Output: []byte("")},
+		{Match: matchMigrate, Lines: []string{}},
+		{Match: matchRestore, Output: []byte("")},
+		{Match: matchStop, Output: []byte("")},
+		{Match: matchStart, Output: []byte("")},
+		{Match: matchUp, Output: []byte("")},
+	}
+	return &fake.Runner{Responses: append(append([]fake.Response{}, over...), base...)}
+}
+
+// updateHappyFakeRunner giữ tên cũ cho các test di trú dữ liệu.
+func updateHappyFakeRunner() *fake.Runner { return updateFakeRunner() }
 
 // listenReadyServer bind một httptest TLS server vào 127.0.0.1:0 (cổng ngẫu
 // nhiên do hệ điều hành cấp), trả về server + cổng — dùng để test RunUpdate
@@ -80,9 +137,52 @@ func listenReadyServer(t *testing.T, healthy bool) (srv *httptest.Server, port i
 	return srv, ln.Addr().(*net.TCPAddr).Port
 }
 
+// fastUpdateDeps: thời gian chờ ngắn, KHÔNG đo đĩa thật (100 GB trống), không
+// chờ giữa các lần pull.
 func fastUpdateDeps(runner dockercli.Runner) UpdateDeps {
 	return UpdateDeps{Runner: runner, Timeout: 200 * time.Millisecond, PollEvery: 5 * time.Millisecond,
-		ReTrustCA: func(context.Context, *Env) {}}
+		ReTrustCA:   func(context.Context, *Env) {},
+		DiskFree:    func(string) (uint64, error) { return 100 << 30, nil },
+		PullBackoff: []time.Duration{0},
+		PullTimeout: 5 * time.Second,
+	}
+}
+
+func callIndex(fr *fake.Runner, match func(dockercli.Cmd) bool) int {
+	for i, c := range fr.Calls {
+		if match(c.Cmd) {
+			return i
+		}
+	}
+	return -1
+}
+
+func countCalls(fr *fake.Runner, match func(dockercli.Cmd) bool) int {
+	n := 0
+	for _, c := range fr.Calls {
+		if match(c.Cmd) {
+			n++
+		}
+	}
+	return n
+}
+
+func blockedExists(t *testing.T, installDir string) bool {
+	t.Helper()
+	_, ok, err := hostlink.ReadUpdateBlocked(installDir)
+	if err != nil {
+		t.Fatalf("ReadUpdateBlocked: %v", err)
+	}
+	return ok
+}
+
+func asOpError(t *testing.T, err error) *OpError {
+	t.Helper()
+	opErr, ok := err.(*OpError)
+	if !ok {
+		t.Fatalf("lỗi phải là *OpError, được %T (%v)", err, err)
+	}
+	return opErr
 }
 
 func TestRunUpdate_HappyPath_ReadySucceeds_NoRollback(t *testing.T) {
@@ -92,154 +192,281 @@ func TestRunUpdate_HappyPath_ReadySucceeds_NoRollback(t *testing.T) {
 	_, port := listenReadyServer(t, true)
 	env.Port = port
 
-	fr := updateHappyFakeRunner()
+	fr := updateFakeRunner()
 
 	var out strings.Builder
-	if err := RunUpdate(context.Background(), env, UpdateOptions{Channel: "stable"}, fastUpdateDeps(fr), &out); err != nil {
+	if err := RunUpdate(context.Background(), env, UpdateOptions{Channel: "stable", Version: testVersion}, fastUpdateDeps(fr), &out); err != nil {
 		t.Fatalf("RunUpdate: %v", err)
 	}
 	if !strings.Contains(out.String(), "Cập nhật xong") {
 		t.Errorf("output phải xác nhận cập nhật xong, được %q", out.String())
 	}
-
-	restoreCalls := 0
-	for _, c := range fr.Calls {
-		if strings.Contains(strings.Join(c.Cmd.Args, " "), "restore") {
-			restoreCalls++
-		}
-	}
-	if restoreCalls != 0 {
-		t.Errorf("KHÔNG được gọi restore khi cập nhật thành công, restoreCalls=%d", restoreCalls)
+	if n := countCalls(fr, matchRestore); n != 0 {
+		t.Errorf("KHÔNG được gọi restore khi cập nhật thành công, restoreCalls=%d", n)
 	}
 	// Bản sao lưu trước cập nhật ghi nguồn "pre-update" (Console hiện cột Nguồn).
-	if !strings.Contains(strings.Join(fr.Calls[0].Cmd.Args, " "), "-e GH_BACKUP_TRIGGER=pre-update api python -m gh.backup run") {
-		t.Errorf("backup trước cập nhật phải mang GH_BACKUP_TRIGGER=pre-update: %v", fr.Calls[0].Cmd.Args)
+	bi := callIndex(fr, matchBackupRun)
+	if bi < 0 || !strings.Contains(strings.Join(fr.Calls[bi].Cmd.Args, " "), "-e GH_BACKUP_TRIGGER=pre-update api python -m gh.backup run") {
+		t.Errorf("backup trước cập nhật phải mang GH_BACKUP_TRIGGER=pre-update: %+v", fr.Calls)
+	}
+	ds, err := hostlink.ReadDiskStatus(env.InstallDir)
+	if err != nil || ds.State != "ok" || ds.FreeBytes != 100<<30 {
+		t.Errorf("disk-status.json phải state=ok, 100 GB: %+v (%v)", ds, err)
+	}
+	if n := countCalls(fr, matchStop); n != 0 {
+		t.Errorf("không có thay đổi CSDL thì không được dừng dịch vụ nào, stop=%d", n)
 	}
 }
 
-func TestRunUpdate_ReadyNeverBecomesHealthy_TriggersRollback(t *testing.T) {
+func TestRunUpdate_ReadyNeverHealthy_RestoresWithOldImage_WritesBlocked(t *testing.T) {
 	composePath := testComposePath(t, updateTestComposeYAML)
 	env := testEnv(t, composePath)
 
 	_, port := listenReadyServer(t, false) // luôn 503
 	env.Port = port
 
-	fr := updateHappyFakeRunner()
-	fr.Responses = append(fr.Responses, fake.Response{
-		Match: fake.MatchArgsContain("exec", "-T", "api", "python", "-m", "gh.backup", "restore", "--key"), Output: []byte(""),
-	})
+	fr := updateFakeRunner(pendingMigration)
 
 	var out strings.Builder
-	err := RunUpdate(context.Background(), env, UpdateOptions{}, fastUpdateDeps(fr), &out)
-	opErr, ok := err.(*OpError)
-	if !ok {
-		t.Fatalf("lỗi phải là *OpError, được %T (%v)", err, err)
-	}
+	err := RunUpdate(context.Background(), env, UpdateOptions{Version: testVersion}, fastUpdateDeps(fr), &out)
+	opErr := asOpError(t, err)
 	if opErr.Code != ErrCodeUpdateRolledBack {
 		t.Errorf("Code = %q, muốn %q", opErr.Code, ErrCodeUpdateRolledBack)
 	}
 	if !strings.Contains(out.String(), "Rollback xong") {
 		t.Errorf("output phải xác nhận rollback xong, được %q", out.String())
 	}
+	ri := callIndex(fr, matchRestore)
+	if ri < 0 || !hasExactArgs(fr.Calls[ri].Cmd.Args, "run", "--rm", "--no-deps", "-T", "api") {
+		t.Errorf("restore phải chạy bằng container tạm `run --rm --no-deps -T api`: %+v", fr.Calls)
+	}
+	b, ok, _ := hostlink.ReadUpdateBlocked(env.InstallDir)
+	if !ok || b.Version != testVersion || b.Code != ErrCodeUpdateNotReady || b.BackupKey != updateTestBackupKey || !b.DBTouched {
+		t.Errorf("update-blocked.json sai: ok=%v %+v", ok, b)
+	}
 }
 
-func TestRunUpdate_BackupFails_NoRollbackAttempted(t *testing.T) {
+func TestRunUpdate_BackupFails_NoRestoreNoUp(t *testing.T) {
 	composePath := testComposePath(t, updateTestComposeYAML)
 	env := testEnv(t, composePath)
 
-	fr := &fake.Runner{Responses: []fake.Response{
-		{Match: fake.MatchArgsContain("exec", "-T", "api", "python", "-m", "gh.backup", "run"), Err: errors.New("db down")},
-	}}
+	fr := updateFakeRunner(fake.Response{Match: matchBackupRun, Err: errors.New("db down")})
 
 	err := RunUpdate(context.Background(), env, UpdateOptions{}, fastUpdateDeps(fr), &strings.Builder{})
-	opErr, ok := err.(*OpError)
-	if !ok {
-		t.Fatalf("lỗi phải là *OpError, được %T", err)
-	}
+	opErr := asOpError(t, err)
 	if opErr.Code != ErrCodeUpdateBackupFailed {
 		t.Errorf("Code = %q, muốn %q", opErr.Code, ErrCodeUpdateBackupFailed)
 	}
-	if len(fr.Calls) != 1 {
-		t.Errorf("Calls = %d, muốn 1 (chỉ backup, KHÔNG được thử rollback khi backup chính là bước thất bại)", len(fr.Calls))
+	if countCalls(fr, matchRestore) != 0 || countCalls(fr, matchUp) != 0 || countCalls(fr, matchMigrate) != 0 {
+		t.Errorf("backup lỗi thì KHÔNG restore/up/migrate: %+v", fr.Calls)
 	}
 }
 
-func TestRunUpdate_PullFails_TriggersRollback(t *testing.T) {
+func TestRunUpdate_PullFails_NoRestore_NothingTouched(t *testing.T) {
 	composePath := testComposePath(t, updateTestComposeYAML)
 	env := testEnv(t, composePath)
 
-	fr := &fake.Runner{Responses: []fake.Response{
-		{Match: fake.MatchArgsContain("exec", "-T", "api", "python", "-m", "gh.backup", "run"), Lines: []string{updateTestBackupLine}},
-		{Match: fake.MatchArgsContain("pull"), Err: errors.New("net down")},
-		{Match: fake.MatchArgsContain("exec", "-T", "api", "python", "-m", "gh.backup", "restore", "--key"), Output: []byte("")},
-		{Match: fake.MatchArgsContain("up", "-d"), Output: []byte("")},
-	}}
+	fr := updateFakeRunner(fake.Response{Match: matchPull, Err: errors.New("net down")})
 
 	var out strings.Builder
-	err := RunUpdate(context.Background(), env, UpdateOptions{}, fastUpdateDeps(fr), &out)
-	opErr, ok := err.(*OpError)
-	if !ok {
-		t.Fatalf("lỗi phải là *OpError, được %T", err)
+	err := RunUpdate(context.Background(), env, UpdateOptions{Version: testVersion}, fastUpdateDeps(fr), &out)
+	opErr := asOpError(t, err)
+	if opErr.Code != ErrCodeUpdatePullFailed {
+		t.Errorf("Code = %q, muốn %q", opErr.Code, ErrCodeUpdatePullFailed)
 	}
-	if opErr.Code != ErrCodeUpdateRolledBack {
-		t.Errorf("Code = %q, muốn %q", opErr.Code, ErrCodeUpdateRolledBack)
+	if !strings.Contains(opErr.What, "CHƯA đụng gì") || !strings.Contains(opErr.What, "3 lần") {
+		t.Errorf("What phải nói rõ thử 3 lần và chưa đụng gì: %q", opErr.What)
 	}
-	if !strings.Contains(out.String(), "Rollback xong") {
-		t.Errorf("output phải xác nhận rollback xong, được %q", out.String())
+	if n := countCalls(fr, matchPull); n != 3 {
+		t.Errorf("pull phải thử 3 lần, được %d", n)
 	}
-
-	var sawRestore bool
-	for _, c := range fr.Calls {
-		if strings.Contains(strings.Join(c.Cmd.Args, " "), "restore --key backups/20260925T100000Z-deadbeef.pgcustom.enc") {
-			sawRestore = true
+	for name, m := range map[string]func(dockercli.Cmd) bool{"backup": matchBackupRun, "restore": matchRestore, "up": matchUp, "stop": matchStop, "migrate": matchMigrate} {
+		if n := countCalls(fr, m); n != 0 {
+			t.Errorf("pull lỗi thì KHÔNG được %s (được %d lần)", name, n)
 		}
 	}
-	if !sawRestore {
-		t.Errorf("phải gọi restore đúng khoá vừa backup, Calls=%+v", fr.Calls)
+	after, _ := os.ReadFile(composePath)
+	if string(after) != updateTestComposeYAML {
+		t.Error("compose.yaml phải giữ nguyên khi tải lỗi")
+	}
+	if blockedExists(t, env.InstallDir) {
+		t.Error("tải lỗi thì KHÔNG ghi update-blocked.json")
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(composePath), updateNextComposeName)); !os.IsNotExist(err) {
+		t.Errorf("compose tạm phải bị xoá: %v", err)
 	}
 }
 
-func TestRunUpdate_MigrateFails_TriggersRollback_RestoreAndRestartCalled(t *testing.T) {
+func TestRunUpdate_PullRetriesThenSucceeds(t *testing.T) {
+	composePath := testComposePath(t, updateTestComposeYAML)
+	env := testEnv(t, composePath)
+	_, port := listenReadyServer(t, true)
+	env.Port = port
+
+	fr := updateFakeRunner(fake.Response{Match: matchPull, ErrSeq: []error{errors.New("lỗi 1"), errors.New("lỗi 2"), nil}})
+	if err := RunUpdate(context.Background(), env, UpdateOptions{}, fastUpdateDeps(fr), &strings.Builder{}); err != nil {
+		t.Fatalf("RunUpdate: %v", err)
+	}
+	if n := countCalls(fr, matchPull); n != 3 {
+		t.Errorf("pull phải gọi 3 lần, được %d", n)
+	}
+	if countCalls(fr, matchBackupRun) != 1 || countCalls(fr, matchMigrate) != 1 {
+		t.Errorf("tải được ở lần 3 thì phải chạy tiếp sao lưu + migrate: %+v", fr.Calls)
+	}
+}
+
+func TestRunUpdate_PullTimeoutPerAttempt(t *testing.T) {
 	composePath := testComposePath(t, updateTestComposeYAML)
 	env := testEnv(t, composePath)
 
-	fr := &fake.Runner{Responses: []fake.Response{
-		{Match: fake.MatchArgsContain("exec", "-T", "api", "python", "-m", "gh.backup", "run"), Lines: []string{updateTestBackupLine}},
-		{Match: fake.MatchArgsContain("pull"), Output: []byte("")},
-		{Match: fake.MatchArgsContain("run", "--rm", "-T", "--no-deps", "migrate"), Err: errors.New("alembic: lock timeout")},
-		{Match: fake.MatchArgsContain("exec", "-T", "api", "python", "-m", "gh.backup", "restore", "--key"), Output: []byte("")},
-		{Match: fake.MatchArgsContain("up", "-d"), Output: []byte("")},
-	}}
+	fr := updateFakeRunner(fake.Response{Match: matchPull, WaitCtx: true})
+	deps := fastUpdateDeps(fr)
+	deps.PullTimeout = 50 * time.Millisecond
 
-	err := RunUpdate(context.Background(), env, UpdateOptions{}, fastUpdateDeps(fr), &strings.Builder{})
-	opErr, ok := err.(*OpError)
-	if !ok {
-		t.Fatalf("lỗi phải là *OpError, được %T", err)
+	start := time.Now()
+	err := RunUpdate(context.Background(), env, UpdateOptions{}, deps, &strings.Builder{})
+	opErr := asOpError(t, err)
+	if opErr.Code != ErrCodeUpdatePullFailed {
+		t.Errorf("Code = %q, muốn %q", opErr.Code, ErrCodeUpdatePullFailed)
 	}
+	if n := countCalls(fr, matchPull); n != 3 {
+		t.Errorf("pull phải thử 3 lần, được %d", n)
+	}
+	if time.Since(start) > 10*time.Second {
+		t.Errorf("mỗi lần pull phải bị cắt theo PullTimeout, chạy mất %s", time.Since(start))
+	}
+	if countCalls(fr, matchBackupRun) != 0 {
+		t.Error("tải quá giờ thì không được sao lưu")
+	}
+}
+
+// realComposeUpdateEnv dựng một *Env KHÔNG tiêm locate/locateSync giả — đi
+// thẳng qua compose.Locate/LocateAndSync THẬT — dùng để kiểm thứ tự đồng bộ
+// compose.yaml và rollback compose.yaml trên đĩa.
+func realComposeUpdateEnv(t *testing.T, yaml string) (env *Env, composePath string) {
+	t.Helper()
+	t.Setenv(compose.EnvOverrideVar, "")
+
+	installDir := t.TempDir()
+	composePath = filepath.Join(installDir, "deploy", "compose.yaml")
+	if err := os.MkdirAll(filepath.Dir(composePath), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(composePath, []byte(yaml), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if _, err := secretgen.Ensure(filepath.Join(installDir, "config")); err != nil {
+		t.Fatalf("secretgen.Ensure: %v", err)
+	}
+	return &Env{InstallDir: installDir, Port: 18443}, composePath
+}
+
+func TestRunUpdate_PullBeforeBackup_UsesTempComposeNotSynced(t *testing.T) {
+	env, composePath := realComposeUpdateEnv(t, updateTestComposeYAML)
+	_, port := listenReadyServer(t, true)
+	env.Port = port
+	nextPath := filepath.Join(filepath.Dir(composePath), updateNextComposeName)
+
+	var composeAtPull, composeAtBackup, nextAtPull string
+	fr := updateFakeRunner(
+		fake.Response{Match: func(cmd dockercli.Cmd) bool {
+			if !matchPull(cmd) {
+				return false
+			}
+			b, _ := os.ReadFile(composePath)
+			composeAtPull = string(b)
+			n, _ := os.ReadFile(nextPath)
+			nextAtPull = string(n)
+			return true
+		}},
+		fake.Response{Match: func(cmd dockercli.Cmd) bool {
+			if !matchBackupRun(cmd) {
+				return false
+			}
+			b, _ := os.ReadFile(composePath)
+			composeAtBackup = string(b)
+			return true
+		}, Lines: []string{updateTestBackupLine}},
+	)
+
+	if err := RunUpdate(context.Background(), env, UpdateOptions{}, fastUpdateDeps(fr), &strings.Builder{}); err != nil {
+		t.Fatalf("RunUpdate: %v", err)
+	}
+	pi, bi := callIndex(fr, matchPull), callIndex(fr, matchBackupRun)
+	if pi < 0 || bi < 0 || pi > bi {
+		t.Fatalf("pull (idx %d) phải đứng TRƯỚC backup (idx %d)", pi, bi)
+	}
+	pullArgs := fr.Calls[pi].Cmd.Args
+	if len(pullArgs) < 3 || pullArgs[1] != "-f" || pullArgs[2] != nextPath {
+		t.Errorf("pull phải dùng -f %s, được %v", nextPath, pullArgs)
+	}
+	if nextAtPull != string(compose.EmbeddedCompose()) {
+		t.Error("compose tạm lúc pull phải là bản nhúng (bản đích)")
+	}
+	if composeAtPull != updateTestComposeYAML || composeAtBackup != updateTestComposeYAML {
+		t.Error("compose.yaml phải còn bản CŨ lúc pull và lúc backup (chỉ đồng bộ SAU backup)")
+	}
+	after, _ := os.ReadFile(composePath)
+	if string(after) != string(compose.EmbeddedCompose()) {
+		t.Error("sau khi cập nhật xong, compose.yaml phải là bản nhúng")
+	}
+	if _, err := os.Stat(nextPath); !os.IsNotExist(err) {
+		t.Errorf("compose tạm phải bị xoá sau đó: %v", err)
+	}
+	bak, err := os.ReadFile(composePath + ".bak")
+	if err != nil || string(bak) != updateTestComposeYAML {
+		t.Errorf("phải giữ bản cũ ở compose.yaml.bak: %v", err)
+	}
+}
+
+func TestRunUpdate_MigrateFails_RestoresWithOldImage_WritesBlocked(t *testing.T) {
+	composePath := testComposePath(t, updateTestComposeYAML)
+	env := testEnv(t, composePath)
+
+	fr := updateFakeRunner(pendingMigration, fake.Response{Match: matchMigrate, Err: errors.New("alembic: lock timeout")})
+
+	var out strings.Builder
+	err := RunUpdate(context.Background(), env, UpdateOptions{Version: testVersion}, fastUpdateDeps(fr), &out)
+	opErr := asOpError(t, err)
 	if opErr.Code != ErrCodeUpdateRolledBack {
 		t.Errorf("Code = %q, muốn %q", opErr.Code, ErrCodeUpdateRolledBack)
 	}
-	if !strings.Contains(opErr.What, "rollback") {
-		t.Errorf("What phải nói rõ đã rollback, được %q", opErr.What)
+	// Console nhận What: tiếng Việt "quay về bản cũ"; log CLI vẫn có "Rollback xong" (E2E grep).
+	if !strings.Contains(opErr.What, "đã tự quay về bản cũ") || strings.Contains(opErr.What, "rollback") || !strings.Contains(out.String(), "Rollback xong") {
+		t.Errorf("What phải nói \"đã tự quay về bản cũ\" (không dùng chữ rollback), log có \"Rollback xong\", được %q", opErr.What)
 	}
 
-	restoreCalls, upCalls := 0, 0
+	// stop ĐẦU là dừng worker/bridge trước sao lưu; stop CUỐI là của rollback.
+	si, ri, ui := lastCallIndex(fr, matchStop), callIndex(fr, matchRestore), callIndex(fr, matchFullUp)
+	if si < 0 || ri < 0 || ui < 0 || !(si < ri && ri < ui) {
+		t.Fatalf("thứ tự phải là stop → restore → up, được stop=%d restore=%d up=%d: %+v", si, ri, ui, fr.Calls)
+	}
+	stopArgs := strings.Join(fr.Calls[si].Cmd.Args, " ")
+	if !strings.HasSuffix(stopArgs, "stop api worker bridge web") {
+		t.Errorf("phải dừng api worker bridge web, được %q", stopArgs)
+	}
+	restoreArgs := strings.Join(fr.Calls[ri].Cmd.Args, " ")
+	if !strings.Contains(restoreArgs, "run --rm --no-deps -T api python -m gh.backup restore --key "+updateTestBackupKey) {
+		t.Errorf("restore phải là `run --rm --no-deps -T api …`, được %q", restoreArgs)
+	}
 	for _, c := range fr.Calls {
-		if hasExactArgs(c.Cmd.Args, "restore", "--key") {
-			restoreCalls++
-		}
-		// "up"/"-d" phải khớp CHÍNH XÁC từng phần tử args (không phải chuỗi
-		// con đã nối lại) — "up" là chuỗi con của "gh.backup" nên so khớp
-		// kiểu Contains trên chuỗi nối sẽ đếm nhầm cả lệnh backup/restore.
-		if hasExactArgs(c.Cmd.Args, "up", "-d") {
-			upCalls++
+		if matchRestore(c.Cmd) && hasExactArgs(c.Cmd.Args, "exec") {
+			t.Errorf("KHÔNG BAO GIỜ được `exec … restore` (api ảnh mới): %v", c.Cmd.Args)
 		}
 	}
-	if restoreCalls != 1 {
-		t.Errorf("restoreCalls = %d, muốn 1", restoreCalls)
+	if !hasExactArgs(fr.Calls[ui].Cmd.Args, "--remove-orphans") {
+		t.Errorf("up của rollback phải có --remove-orphans: %v", fr.Calls[ui].Cmd.Args)
 	}
-	if upCalls != 1 {
-		t.Errorf("upCalls = %d, muốn 1 (chỉ lần rollback — bước restart chính chưa tới vì migrate lỗi trước)", upCalls)
+	if countCalls(fr, matchFullUp) != 1 {
+		t.Errorf("chỉ 1 lần up -d --remove-orphans (của rollback), được %d", countCalls(fr, matchFullUp))
+	}
+	// Compose đổi → dựng lại db bằng ảnh CŨ (compose cũ) TRƯỚC khi khôi phục.
+	if di := callIndex(fr, matchDBUp); di < 0 || di > ri || di < si {
+		t.Errorf("phải `up -d --wait --no-deps db` bằng compose cũ giữa stop và restore: db=%d stop=%d restore=%d", di, si, ri)
+	}
+	b, ok, _ := hostlink.ReadUpdateBlocked(env.InstallDir)
+	if !ok || b.Version != testVersion || b.Code != ErrCodeUpdateMigrateFailed || b.BackupKey != updateTestBackupKey || b.BlockedAt == "" {
+		t.Errorf("update-blocked.json sai: ok=%v %+v", ok, b)
 	}
 }
 
@@ -258,57 +485,64 @@ func hasExactArgs(args []string, want ...string) bool {
 	return true
 }
 
-func TestRunUpdate_MigrateFails_RollbackAlsoFails_ReportsBothFailures(t *testing.T) {
+func TestRunUpdate_MigrateFails_RollbackAlsoFails_ReportsBothFailures_StillBlocked(t *testing.T) {
 	composePath := testComposePath(t, updateTestComposeYAML)
 	env := testEnv(t, composePath)
 
-	fr := &fake.Runner{Responses: []fake.Response{
-		{Match: fake.MatchArgsContain("exec", "-T", "api", "python", "-m", "gh.backup", "run"), Lines: []string{updateTestBackupLine}},
-		{Match: fake.MatchArgsContain("pull"), Output: []byte("")},
-		{Match: fake.MatchArgsContain("run", "--rm", "-T", "--no-deps", "migrate"), Err: errors.New("alembic: lock timeout")},
-		{Match: fake.MatchArgsContain("exec", "-T", "api", "python", "-m", "gh.backup", "restore", "--key"), Err: errors.New("khoá không tồn tại")},
-		{Match: fake.MatchArgsContain("up", "-d"), Err: errors.New("container không khởi động lại được")},
-	}}
+	fr := updateFakeRunner(
+		pendingMigration,
+		fake.Response{Match: matchMigrate, Err: errors.New("alembic: lock timeout")},
+		fake.Response{Match: matchRestore, Err: errors.New("khoá không tồn tại")},
+		fake.Response{Match: matchUp, Err: errors.New("container không khởi động lại được")},
+	)
 
 	var out strings.Builder
-	err := RunUpdate(context.Background(), env, UpdateOptions{}, fastUpdateDeps(fr), &out)
-	opErr, ok := err.(*OpError)
-	if !ok {
-		t.Fatalf("lỗi phải là *OpError, được %T", err)
-	}
+	err := RunUpdate(context.Background(), env, UpdateOptions{Version: testVersion}, fastUpdateDeps(fr), &out)
+	opErr := asOpError(t, err)
 	if opErr.Code != ErrCodeUpdateRolledBack {
 		t.Errorf("Code = %q, muốn %q", opErr.Code, ErrCodeUpdateRolledBack)
 	}
 	if !strings.Contains(opErr.What, "ROLLBACK") {
 		t.Errorf("What phải cảnh báo RÕ RÀNG rollback cũng thất bại, được %q", opErr.What)
 	}
-	if !strings.Contains(opErr.Next, "chạy tay") {
-		t.Errorf("Next phải hướng dẫn Owner chạy tay khi rollback tự động cũng thất bại, được %q", opErr.Next)
+	if !strings.Contains(opErr.Next, "chạy tay `docker compose run --rm --no-deps -T api python -m gh.backup restore --key "+updateTestBackupKey+"`") {
+		t.Errorf("Next phải hướng dẫn chạy tay bằng container tạm, được %q", opErr.Next)
 	}
 	if !strings.Contains(out.String(), "ROLLBACK THẤT BẠI") {
 		t.Errorf("output phải cảnh báo rõ rollback thất bại, được %q", out.String())
 	}
+	b, ok, _ := hostlink.ReadUpdateBlocked(env.InstallDir)
+	if !ok || !b.RollbackFailed {
+		t.Errorf("rollback hỏng vẫn phải ghi update-blocked.json kèm rollback_failed=true: ok=%v %+v", ok, b)
+	}
+	if !hostlink.UpdateInProgressExists(env.InstallDir) {
+		t.Error("rollback hỏng: phải GIỮ update-inprogress.json (lần sau không được coi là đã khớp)")
+	}
 }
 
-func TestRunUpdate_RestartFails_TriggersRollback(t *testing.T) {
+func TestRunUpdate_RestartFails_RestoresWithOldImage_WritesBlocked(t *testing.T) {
 	composePath := testComposePath(t, updateTestComposeYAML)
 	env := testEnv(t, composePath)
 
-	fr := &fake.Runner{Responses: []fake.Response{
-		{Match: fake.MatchArgsContain("exec", "-T", "api", "python", "-m", "gh.backup", "run"), Lines: []string{updateTestBackupLine}},
-		{Match: fake.MatchArgsContain("pull"), Output: []byte("")},
-		{Match: fake.MatchArgsContain("run", "--rm", "-T", "--no-deps", "migrate"), Lines: []string{}},
-		{Match: fake.MatchArgsContain("up", "-d"), Err: errors.New("port already in use")},
-		{Match: fake.MatchArgsContain("exec", "-T", "api", "python", "-m", "gh.backup", "restore", "--key"), Output: []byte("")},
-	}}
+	fr := updateFakeRunner(pendingMigration, fake.Response{Match: matchFullUp, ErrSeq: []error{errors.New("port already in use"), nil}})
 
-	err := RunUpdate(context.Background(), env, UpdateOptions{}, fastUpdateDeps(fr), &strings.Builder{})
-	opErr, ok := err.(*OpError)
-	if !ok {
-		t.Fatalf("lỗi phải là *OpError, được %T", err)
-	}
+	err := RunUpdate(context.Background(), env, UpdateOptions{Version: testVersion}, fastUpdateDeps(fr), &strings.Builder{})
+	opErr := asOpError(t, err)
 	if opErr.Code != ErrCodeUpdateRolledBack {
 		t.Errorf("Code = %q, muốn %q", opErr.Code, ErrCodeUpdateRolledBack)
+	}
+	ri := callIndex(fr, matchRestore)
+	if ri < 0 || !hasExactArgs(fr.Calls[ri].Cmd.Args, "run", "--rm", "--no-deps") {
+		t.Errorf("phải restore bằng container tạm: %+v", fr.Calls)
+	}
+	b, ok, _ := hostlink.ReadUpdateBlocked(env.InstallDir)
+	if !ok || b.Code != ErrCodeUpdateRestartFailed || b.Version != testVersion {
+		t.Errorf("update-blocked.json sai: ok=%v %+v", ok, b)
+	}
+	// compose.yaml trả về bản cũ (testEnv: compose genh quản lý, lần này đổi compose).
+	after, _ := os.ReadFile(composePath)
+	if string(after) != updateTestComposeYAML {
+		t.Error("compose.yaml phải là bản cũ sau rollback")
 	}
 }
 
@@ -318,10 +552,7 @@ func TestRunUpdate_InvalidChannel_ReturnsErrorBeforeAnyDockerCall(t *testing.T) 
 	fr := &fake.Runner{}
 
 	err := RunUpdate(context.Background(), env, UpdateOptions{Channel: "nightly"}, fastUpdateDeps(fr), &strings.Builder{})
-	opErr, ok := err.(*OpError)
-	if !ok {
-		t.Fatalf("lỗi phải là *OpError, được %T", err)
-	}
+	opErr := asOpError(t, err)
 	if opErr.Code != ErrCodeUpdatePullFailed {
 		t.Errorf("Code = %q, muốn %q", opErr.Code, ErrCodeUpdatePullFailed)
 	}
@@ -392,30 +623,39 @@ func TestRunUpdate_LegacyObjectsFound_SeedsVolumeAfterHealthy(t *testing.T) {
 	}
 }
 
-func TestRunUpdate_ObjectsCaptureFails_StopsBeforePullNoRollback(t *testing.T) {
-	composePath := testComposePath(t, updateTestComposeYAML)
-	env := testEnv(t, composePath)
+// Di trú /tmp/gh-objects lỗi (CSDL chưa bị đụng): không khôi phục, trả
+// compose.yaml về bản cũ (bản cũ để lại compose MỚI + container cũ) và up -d.
+func TestRunUpdate_ObjectsCaptureFails_NoRestore_ComposeRestored(t *testing.T) {
+	env, composePath := realComposeUpdateEnv(t, updateTestComposeYAML)
 
-	fr := &fake.Runner{Responses: []fake.Response{
-		{Match: fake.MatchArgsContain("exec", "-T", "api", "python", "-m", "gh.backup", "run"), Lines: []string{updateTestBackupLine}},
-		{Match: fake.MatchArgsContain("exec", "-T", "api", "sh", "-c"), Output: []byte("/tmp/gh-objects/docs/a.pdf")},
-		{Match: fake.MatchArgsContain("exec", "-T", "worker", "sh", "-c"), Output: []byte("")},
-		{Match: fake.MatchArgsContain("cp", "api:/tmp/gh-objects/."), Err: errors.New("container biến mất giữa chừng")},
-	}}
+	fr := updateFakeRunner(
+		fake.Response{Match: fake.MatchArgsContain("exec", "-T", "api", "sh", "-c"), Output: []byte("/tmp/gh-objects/docs/a.pdf")},
+		fake.Response{Match: fake.MatchArgsContain("exec", "-T", "worker", "sh", "-c"), Output: []byte("")},
+		fake.Response{Match: fake.MatchArgsContain("cp", "api:/tmp/gh-objects/."), Err: errors.New("container biến mất giữa chừng")},
+	)
 
-	err := RunUpdate(context.Background(), env, UpdateOptions{}, fastUpdateDeps(fr), &strings.Builder{})
-	opErr, ok := err.(*OpError)
-	if !ok {
-		t.Fatalf("lỗi phải là *OpError, được %T (%v)", err, err)
-	}
+	var out strings.Builder
+	err := RunUpdate(context.Background(), env, UpdateOptions{Version: testVersion}, fastUpdateDeps(fr), &out)
+	opErr := asOpError(t, err)
 	if opErr.Code != ErrCodeUpdateObjectsMigrateFailed {
 		t.Errorf("Code = %q, muốn %q", opErr.Code, ErrCodeUpdateObjectsMigrateFailed)
 	}
-	for _, c := range fr.Calls {
-		joined := strings.Join(c.Cmd.Args, " ")
-		if strings.Contains(joined, "pull") || hasExactArgs(c.Cmd.Args, "up", "-d") {
-			t.Errorf("KHÔNG được pull/up khi di trú dữ liệu thất bại, Calls=%+v", fr.Calls)
-		}
+	if !strings.Contains(opErr.What, "CSDL chưa bị đụng") {
+		t.Errorf("What phải nói CSDL chưa bị đụng: %q", opErr.What)
+	}
+	if countCalls(fr, matchRestore) != 0 || countCalls(fr, matchMigrate) != 0 {
+		t.Errorf("không được restore/migrate: %+v", fr.Calls)
+	}
+	ui := callIndex(fr, matchUp)
+	if ui < 0 || !hasExactArgs(fr.Calls[ui].Cmd.Args, "--remove-orphans") {
+		t.Errorf("phải up -d --remove-orphans bằng compose cũ: %+v", fr.Calls)
+	}
+	after, _ := os.ReadFile(composePath)
+	if string(after) != updateTestComposeYAML {
+		t.Errorf("compose.yaml phải về bản cũ, được:\n%s", after)
+	}
+	if blockedExists(t, env.InstallDir) {
+		t.Error("CSDL chưa bị đụng thì KHÔNG ghi update-blocked.json")
 	}
 }
 
@@ -432,20 +672,15 @@ func TestRunUpdate_SeedFailsAfterHealthy_ReportsErrorServiceStaysUpNoRollback(t 
 	})
 
 	err := RunUpdate(context.Background(), env, UpdateOptions{}, fastUpdateDeps(fr), &strings.Builder{})
-	opErr, ok := err.(*OpError)
-	if !ok {
-		t.Fatalf("lỗi phải là *OpError, được %T (%v)", err, err)
-	}
+	opErr := asOpError(t, err)
 	if opErr.Code != ErrCodeUpdateObjectsMigrateFailed {
 		t.Errorf("Code = %q, muốn %q", opErr.Code, ErrCodeUpdateObjectsMigrateFailed)
 	}
 	if !strings.Contains(opErr.What, "sẵn sàng") {
 		t.Errorf("What phải nói rõ dịch vụ ĐÃ sẵn sàng (chỉ chép vào volume lỗi, không phải cả update) — được %q", opErr.What)
 	}
-	for _, c := range fr.Calls {
-		if strings.Contains(strings.Join(c.Cmd.Args, " "), "restore") {
-			t.Error("KHÔNG được rollback khi service đã healthy, chỉ bước chép vào volume thất bại")
-		}
+	if countCalls(fr, matchRestore) != 0 {
+		t.Error("KHÔNG được rollback khi service đã healthy, chỉ bước chép vào volume thất bại")
 	}
 }
 
@@ -455,7 +690,7 @@ func TestRunUpdate_RollbackAfterUpReSeedsVolumeBeforeRestore(t *testing.T) {
 	_, port := listenReadyServer(t, false) // luôn 503 -> waitReady thất bại -> rollback SAU khi up -d đã chạy
 	env.Port = port
 
-	fr := updateHappyFakeRunner()
+	fr := updateFakeRunner(pendingMigration)
 	fr.Responses = append(fr.Responses, legacyObjectsHappyResponses()...)
 	fr.Responses = append(fr.Responses, fake.Response{
 		Match: fake.MatchArgsContain("cp", "api:"+volumeObjectsDir), Output: []byte(""),
@@ -463,166 +698,65 @@ func TestRunUpdate_RollbackAfterUpReSeedsVolumeBeforeRestore(t *testing.T) {
 	fr.Responses = append(fr.Responses, fake.Response{
 		Match: fake.MatchArgsContain("exec", "-u", "root", "-T", "api", "chown", "-R", "gh:gh", volumeObjectsDir), Output: []byte(""),
 	})
-	fr.Responses = append(fr.Responses, fake.Response{
-		Match: fake.MatchArgsContain("exec", "-T", "api", "python", "-m", "gh.backup", "restore", "--key"), Output: []byte(""),
-	})
 
 	err := RunUpdate(context.Background(), env, UpdateOptions{}, fastUpdateDeps(fr), &strings.Builder{})
-	opErr, ok := err.(*OpError)
-	if !ok {
-		t.Fatalf("lỗi phải là *OpError, được %T (%v)", err, err)
-	}
+	opErr := asOpError(t, err)
 	if opErr.Code != ErrCodeUpdateRolledBack {
 		t.Errorf("Code = %q, muốn %q", opErr.Code, ErrCodeUpdateRolledBack)
 	}
 
-	seedIdx, restoreIdx := -1, -1
-	for i, c := range fr.Calls {
-		joined := strings.Join(c.Cmd.Args, " ")
-		if seedIdx == -1 && strings.Contains(joined, "cp") && strings.Contains(joined, "api:"+volumeObjectsDir) {
-			seedIdx = i
-		}
-		if restoreIdx == -1 && strings.Contains(joined, "restore") {
-			restoreIdx = i
-		}
+	seedIdx := callIndex(fr, func(c dockercli.Cmd) bool {
+		joined := strings.Join(c.Args, " ")
+		return strings.Contains(joined, "cp") && strings.Contains(joined, "api:"+volumeObjectsDir)
+	})
+	restoreIdx := callIndex(fr, matchRestore)
+	stopIdx := lastCallIndex(fr, matchStop)
+	if seedIdx == -1 || restoreIdx == -1 {
+		t.Fatalf("rollback phải chép lại dữ liệu di trú vào volume rồi restore, Calls=%+v", fr.Calls)
 	}
-	if seedIdx == -1 {
-		t.Fatalf("rollback phải chép lại dữ liệu di trú vào volume trước khi restore, Calls=%+v", fr.Calls)
-	}
-	if restoreIdx == -1 {
-		t.Fatalf("rollback phải gọi restore, Calls=%+v", fr.Calls)
-	}
-	if seedIdx > restoreIdx {
-		t.Errorf("chép vào volume (idx %d) phải chạy TRƯỚC restore (idx %d)", seedIdx, restoreIdx)
+	if seedIdx > restoreIdx || (stopIdx >= 0 && seedIdx > stopIdx) {
+		t.Errorf("chép vào volume (idx %d) phải chạy TRƯỚC khi dừng api (idx %d) và restore (idx %d)", seedIdx, stopIdx, restoreIdx)
 	}
 }
 
-// realComposeUpdateEnv dựng một *Env KHÔNG tiêm locate/locateSync giả — đi
-// thẳng qua compose.Locate/LocateAndSync THẬT (khác testEnv, dùng cho các
-// test ở trên chỉ cần fake.Runner, không cần compose.yaml GENH QUẢN LÝ được
-// đồng bộ/backup thật trên đĩa) — dùng để kiểm mục #3 v0.1.2 (thứ tự backup
-// trước khi đồng bộ compose.yaml, và rollback khôi phục đúng compose.yaml
-// cũ từ .bak).
-func realComposeUpdateEnv(t *testing.T, yaml string) (env *Env, composePath string) {
-	t.Helper()
-	// Compose.Locate/LocateAndSync đọc GENH_COMPOSE_FILE trước mọi candidate
-	// khác — đảm bảo biến này rỗng để không lỡ trỏ vào một compose.yaml khác
-	// ngoài ý muốn (ví dụ do máy chạy test đã có sẵn biến này).
-	t.Setenv(compose.EnvOverrideVar, "")
-
-	installDir := t.TempDir()
-	composePath = filepath.Join(installDir, "deploy", "compose.yaml")
-	if err := os.MkdirAll(filepath.Dir(composePath), 0o755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
-	if err := os.WriteFile(composePath, []byte(yaml), 0o644); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-	if _, err := secretgen.Ensure(filepath.Join(installDir, "config")); err != nil {
-		t.Fatalf("secretgen.Ensure: %v", err)
-	}
-	return &Env{InstallDir: installDir, Port: 18443}, composePath
-}
-
-// TestRunUpdate_BackupRunsBeforeComposeSync_ThenSyncsAndKeepsBak kiểm mục #3
-// v0.1.2: bước 1 (backup) phải chạy với ĐÚNG compose.yaml đang có trên đĩa
-// (bản cũ, TRƯỚC khi đồng bộ với bản nhúng của binary genh đang chạy) —
-// không phải bản vừa bị RunUpdate ghi đè trước khi backup, như hành vi lỗi
-// cũ (LocatePathSync gọi ngay đầu hàm). Sau khi cập nhật xong, compose.yaml
-// phải đã đồng bộ (khác nội dung cũ, vì updateTestComposeYAML chắc chắn khác
-// bản nhúng thật) và giữ bản cũ ở compose.yaml.bak.
-func TestRunUpdate_BackupRunsBeforeComposeSync_ThenSyncsAndKeepsBak(t *testing.T) {
-	env, composePath := realComposeUpdateEnv(t, updateTestComposeYAML)
-	_, port := listenReadyServer(t, true)
-	env.Port = port
-
-	var contentAtBackupTime string
-	fr := &fake.Runner{Responses: []fake.Response{
-		{
-			Match: func(cmd dockercli.Cmd) bool {
-				matched := fake.MatchArgsContain("exec", "-T", "api", "python", "-m", "gh.backup", "run")(cmd)
-				if matched {
-					data, err := os.ReadFile(composePath)
-					if err != nil {
-						t.Fatalf("đọc compose.yaml lúc backup: %v", err)
-					}
-					contentAtBackupTime = string(data)
-				}
-				return matched
-			},
-			Lines: []string{updateTestBackupLine},
-		},
-		{Match: fake.MatchArgsContain("pull"), Output: []byte("")},
-		{Match: fake.MatchArgsContain("run", "--rm", "-T", "--no-deps", "migrate"), Lines: []string{}},
-		{Match: fake.MatchArgsContain("up", "-d"), Output: []byte("")},
-	}}
-
-	var out strings.Builder
-	if err := RunUpdate(context.Background(), env, UpdateOptions{}, fastUpdateDeps(fr), &out); err != nil {
-		t.Fatalf("RunUpdate: %v", err)
-	}
-
-	if contentAtBackupTime != updateTestComposeYAML {
-		t.Errorf("backup phải chạy với compose.yaml CŨ (chưa đồng bộ), được:\n%s", contentAtBackupTime)
-	}
-
-	after, err := os.ReadFile(composePath)
-	if err != nil {
-		t.Fatalf("đọc compose.yaml sau khi cập nhật: %v", err)
-	}
-	if string(after) == updateTestComposeYAML {
-		t.Error("compose.yaml phải được đồng bộ với bản nhúng SAU KHI backup xong, nhưng vẫn còn nguyên bản cũ")
-	}
-
-	bak, err := os.ReadFile(composePath + ".bak")
-	if err != nil {
-		t.Fatalf("phải giữ bản cũ ở compose.yaml.bak sau khi đồng bộ: %v", err)
-	}
-	if string(bak) != updateTestComposeYAML {
-		t.Error("compose.yaml.bak phải đúng nội dung CŨ (bản đã dùng lúc backup)")
-	}
-}
-
-// TestRunUpdate_RollbackRestoresOldComposeBeforeUpAndRemovesOrphans kiểm mục
-// #3 + #5 v0.1.2: khi một bước SAU đồng bộ compose.yaml thất bại (ở đây:
-// dịch vụ không bao giờ sẵn sàng), rollback phải khôi phục compose.yaml về
-// ĐÚNG bản CŨ (từ .bak) TRƯỚC KHI restore dữ liệu + `up -d`, và lệnh `up -d`
-// của rollback phải có --remove-orphans (dọn container không còn trong
-// compose.yaml — nhưng vì compose.yaml lúc "up -d" rollback là bản CŨ, không
-// được xoá nhầm service chỉ bản CŨ mới có).
+// TestRunUpdate_RollbackRestoresOldComposeBeforeUpAndRemovesOrphans: lỗi SAU
+// đồng bộ compose.yaml (dịch vụ không bao giờ sẵn sàng) → rollback trả
+// compose.yaml về đúng bản CŨ (từ bộ nhớ) TRƯỚC restore + `up -d
+// --remove-orphans`.
 func TestRunUpdate_RollbackRestoresOldComposeBeforeUpAndRemovesOrphans(t *testing.T) {
 	env, composePath := realComposeUpdateEnv(t, updateTestComposeYAML)
-	_, port := listenReadyServer(t, false) // luôn 503 -> rollback sau khi "up -d" chính đã chạy
+	_, port := listenReadyServer(t, false)
 	env.Port = port
 
-	fr := updateHappyFakeRunner()
-	fr.Responses = append(fr.Responses, fake.Response{
-		Match: fake.MatchArgsContain("exec", "-T", "api", "python", "-m", "gh.backup", "restore", "--key"), Output: []byte(""),
-	})
+	var composeAtRestore string
+	fr := updateFakeRunner(pendingMigration, fake.Response{Match: func(cmd dockercli.Cmd) bool {
+		if !matchRestore(cmd) {
+			return false
+		}
+		b, _ := os.ReadFile(composePath)
+		composeAtRestore = string(b)
+		return true
+	}})
 
 	err := RunUpdate(context.Background(), env, UpdateOptions{}, fastUpdateDeps(fr), &strings.Builder{})
-	opErr, ok := err.(*OpError)
-	if !ok {
-		t.Fatalf("lỗi phải là *OpError, được %T (%v)", err, err)
-	}
+	opErr := asOpError(t, err)
 	if opErr.Code != ErrCodeUpdateRolledBack {
 		t.Errorf("Code = %q, muốn %q", opErr.Code, ErrCodeUpdateRolledBack)
 	}
-
-	after, err := os.ReadFile(composePath)
-	if err != nil {
-		t.Fatalf("đọc compose.yaml sau rollback: %v", err)
+	if composeAtRestore != updateTestComposeYAML {
+		t.Error("lúc restore, compose.yaml phải đã về bản CŨ (ảnh cũ)")
 	}
+	after, _ := os.ReadFile(composePath)
 	if string(after) != updateTestComposeYAML {
-		t.Errorf("rollback phải khôi phục compose.yaml về đúng bản CŨ đã dùng lúc backup, được:\n%s", after)
+		t.Errorf("rollback phải khôi phục compose.yaml về đúng bản CŨ, được:\n%s", after)
 	}
 
 	var rollbackUpArgs []string
 	upCount := 0
 	for _, c := range fr.Calls {
-		if hasExactArgs(c.Cmd.Args, "up", "-d") {
+		if matchFullUp(c.Cmd) {
 			upCount++
-			rollbackUpArgs = c.Cmd.Args // lần cuối cùng là của rollback (lần chính đã chạy trước đó)
+			rollbackUpArgs = c.Cmd.Args
 		}
 	}
 	if upCount < 2 {
@@ -630,6 +764,362 @@ func TestRunUpdate_RollbackRestoresOldComposeBeforeUpAndRemovesOrphans(t *testin
 	}
 	if !hasExactArgs(rollbackUpArgs, "--remove-orphans") {
 		t.Errorf("`up -d` của rollback phải có --remove-orphans, được %v", rollbackUpArgs)
+	}
+}
+
+// compose.yaml KHÔNG đổi lần này (đã khớp bản nhúng) nhưng có .bak cũ từ lần
+// trước: rollback KHÔNG được thay compose.yaml bằng .bak.
+func TestRunUpdate_ComposeUnchanged_StaleBakNotRestoredOnRollback(t *testing.T) {
+	embedded := string(compose.EmbeddedCompose())
+	env, composePath := realComposeUpdateEnv(t, embedded)
+	stale := "name: ban-rat-cu\nservices: {}\n"
+	if err := os.WriteFile(composePath+".bak", []byte(stale), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	fr := updateFakeRunner(pendingMigration, fake.Response{Match: matchMigrate, Err: errors.New("alembic lỗi")})
+	err := RunUpdate(context.Background(), env, UpdateOptions{Version: testVersion}, fastUpdateDeps(fr), &strings.Builder{})
+	if asOpError(t, err).Code != ErrCodeUpdateRolledBack {
+		t.Fatalf("muốn %s, được %v", ErrCodeUpdateRolledBack, err)
+	}
+	after, _ := os.ReadFile(composePath)
+	if string(after) != embedded {
+		t.Errorf("compose.yaml KHÔNG được bị thay bằng .bak cũ, được:\n%s", after)
+	}
+	if countCalls(fr, matchDBUp) != 0 {
+		t.Error("compose không đổi (ảnh db không đổi) thì không cần dựng lại db trước khi khôi phục")
+	}
+	// Compose không đổi → pull bằng chính compose.yaml, không có compose tạm.
+	pi := callIndex(fr, matchPull)
+	if pi < 0 || fr.Calls[pi].Cmd.Args[2] != composePath {
+		t.Errorf("compose không đổi thì pull bằng compose.yaml: %+v", fr.Calls)
+	}
+}
+
+func TestRunUpdate_NeedsMigrate_StopsWorkerBridgeBeforeBackup(t *testing.T) {
+	composePath := testComposePath(t, updateTestComposeYAML)
+	env := testEnv(t, composePath)
+	_, port := listenReadyServer(t, true)
+	env.Port = port
+
+	fr := updateFakeRunner(fake.Response{Match: matchAlembicCurrent, Output: []byte("0041_x\n")})
+	var out strings.Builder
+	if err := RunUpdate(context.Background(), env, UpdateOptions{}, fastUpdateDeps(fr), &out); err != nil {
+		t.Fatalf("RunUpdate: %v", err)
+	}
+	si, bi := callIndex(fr, matchStop), callIndex(fr, matchBackupRun)
+	if si < 0 || si > bi {
+		t.Fatalf("phải dừng worker/bridge TRƯỚC backup: stop=%d backup=%d", si, bi)
+	}
+	if got := strings.Join(fr.Calls[si].Cmd.Args, " "); !strings.HasSuffix(got, "stop worker bridge") || fr.Calls[si].Cmd.Args[2] != composePath {
+		t.Errorf("phải `compose -f <compose.yaml> stop worker bridge`, được %q", got)
+	}
+	if !strings.Contains(out.String(), "tạm dừng worker và bridge") {
+		t.Errorf("phải báo tạm dừng worker và bridge: %q", out.String())
+	}
+	ai := callIndex(fr, matchAlembicCurrent)
+	if ai < 0 || !strings.HasSuffix(fr.Calls[ai].Cmd.Args[2], updateNextComposeName) {
+		t.Errorf("alembic current phải chạy bằng ảnh MỚI (compose tạm): %+v", fr.Calls)
+	}
+}
+
+func TestRunUpdate_NoPendingMigration_DoesNotStopWriters(t *testing.T) {
+	composePath := testComposePath(t, updateTestComposeYAML)
+	env := testEnv(t, composePath)
+	_, port := listenReadyServer(t, true)
+	env.Port = port
+
+	fr := updateFakeRunner(fake.Response{Match: matchAlembicCurrent, Output: []byte("0042_x (head)\n")})
+	if err := RunUpdate(context.Background(), env, UpdateOptions{}, fastUpdateDeps(fr), &strings.Builder{}); err != nil {
+		t.Fatalf("RunUpdate: %v", err)
+	}
+	if countCalls(fr, matchStop) != 0 {
+		t.Errorf("không có migration chờ thì không dừng worker/bridge: %+v", fr.Calls)
+	}
+}
+
+func TestRunUpdate_AlembicCheckFails_AssumesMigrate(t *testing.T) {
+	composePath := testComposePath(t, updateTestComposeYAML)
+	env := testEnv(t, composePath)
+	_, port := listenReadyServer(t, true)
+	env.Port = port
+
+	fr := updateFakeRunner(fake.Response{Match: matchAlembicCurrent, Err: errors.New("không kết nối được db")})
+	if err := RunUpdate(context.Background(), env, UpdateOptions{}, fastUpdateDeps(fr), &strings.Builder{}); err != nil {
+		t.Fatalf("RunUpdate: %v", err)
+	}
+	si, bi := callIndex(fr, matchStop), callIndex(fr, matchBackupRun)
+	if si < 0 || si > bi {
+		t.Errorf("dò migrate lỗi thì coi như có (an toàn): phải dừng worker/bridge trước backup, stop=%d backup=%d", si, bi)
+	}
+}
+
+func TestRunUpdate_BackupFailsAfterStoppingWriters_StartsThemAgain(t *testing.T) {
+	composePath := testComposePath(t, updateTestComposeYAML)
+	env := testEnv(t, composePath)
+
+	fr := updateFakeRunner(
+		fake.Response{Match: matchAlembicCurrent, Output: []byte("0041_x\n")},
+		fake.Response{Match: matchBackupRun, Err: errors.New("db down")},
+	)
+	err := RunUpdate(context.Background(), env, UpdateOptions{}, fastUpdateDeps(fr), &strings.Builder{})
+	if asOpError(t, err).Code != ErrCodeUpdateBackupFailed {
+		t.Fatalf("muốn %s, được %v", ErrCodeUpdateBackupFailed, err)
+	}
+	sti := callIndex(fr, matchStart)
+	if sti < 0 || !strings.HasSuffix(strings.Join(fr.Calls[sti].Cmd.Args, " "), "start worker bridge") {
+		t.Errorf("phải `start worker bridge` lại: %+v", fr.Calls)
+	}
+	if countCalls(fr, matchRestore) != 0 || countCalls(fr, matchUp) != 0 {
+		t.Error("backup lỗi thì không restore/up")
+	}
+}
+
+// ghcrCompose dựng compose dùng ảnh ghcr.io gen-harness theo digest.
+func ghcrCompose(api, web, db string) string {
+	return "name: gen-harness\nservices:\n" +
+		"  api:\n    image: ghcr.io/acme/gen-harness-api@" + api + "\n" +
+		"  web:\n    image: ghcr.io/acme/gen-harness-web@" + web + "\n" +
+		"  db:\n    image: ghcr.io/acme/gen-harness-db@" + db + "\n" +
+		"  redis:\n    image: redis:7-alpine\n"
+}
+
+// unmanagedEnv: compose.yaml NGOÀI gốc cài đặt (GENH_COMPOSE_FILE/checkout) —
+// genh không đồng bộ nó, bản đích = chính nó.
+func unmanagedEnv(t *testing.T, yaml string) (*Env, string) {
+	t.Helper()
+	composePath := testComposePath(t, yaml)
+	installDir := t.TempDir()
+	if _, err := secretgen.Ensure(filepath.Join(installDir, "config")); err != nil {
+		t.Fatalf("secretgen.Ensure: %v", err)
+	}
+	return &Env{InstallDir: installDir, Port: 18443, locate: func(string) (string, error) { return composePath, nil }}, composePath
+}
+
+func imagesListing(lines ...string) []byte { return []byte(strings.Join(lines, "\n") + "\n") }
+
+func TestRunUpdate_DiskLow_PrunesThenStops(t *testing.T) {
+	env, _ := unmanagedEnv(t, ghcrCompose("sha256:a3", "sha256:w3", "sha256:d3"))
+
+	fr := updateFakeRunner(
+		fake.Response{Match: exactArgs("images"), Output: imagesListing(
+			"ghcr.io/acme/gen-harness-api\t<none>\tsha256:a3\tid-a3",
+			"ghcr.io/acme/gen-harness-api\t<none>\tsha256:a1\tid-a1",
+			"postgres\t16\tsha256:pg\tid-pg",
+		)},
+		fake.Response{Match: exactArgs("rmi"), Output: []byte("")},
+	)
+	deps := fastUpdateDeps(fr)
+	deps.DiskFree = func(string) (uint64, error) { return 1 << 30, nil }
+
+	err := RunUpdate(context.Background(), env, UpdateOptions{}, deps, &strings.Builder{})
+	opErr := asOpError(t, err)
+	if opErr.Code != ErrCodeUpdateDiskLow {
+		t.Fatalf("Code = %q, muốn %q", opErr.Code, ErrCodeUpdateDiskLow)
+	}
+	if !strings.Contains(opErr.Why, "1.0 GB") || !strings.Contains(opErr.Why, "5 GB") {
+		t.Errorf("Why phải nêu còn bao nhiêu / cần 5 GB: %q", opErr.Why)
+	}
+	if countCalls(fr, exactArgs("images")) == 0 {
+		t.Error("đĩa thiếu thì phải liệt kê ảnh để dọn")
+	}
+	ri := callIndex(fr, exactArgs("rmi"))
+	if ri < 0 || fr.Calls[ri].Cmd.Args[1] != "ghcr.io/acme/gen-harness-api@sha256:a1" || countCalls(fr, exactArgs("rmi")) != 1 {
+		t.Errorf("chỉ được rmi ảnh không thuộc bản giữ: %+v", fr.Calls)
+	}
+	if countCalls(fr, matchPull) != 0 || countCalls(fr, matchBackupRun) != 0 {
+		t.Error("đĩa thiếu thì KHÔNG pull/backup")
+	}
+	ds, err := hostlink.ReadDiskStatus(env.InstallDir)
+	if err != nil || ds.State != "low" || ds.FreeBytes != 1<<30 || ds.PrunedImages != 1 {
+		t.Errorf("disk-status.json phải state=low: %+v (%v)", ds, err)
+	}
+}
+
+func TestRunUpdate_DiskLow_PruneFreesEnough_Continues(t *testing.T) {
+	env, _ := unmanagedEnv(t, ghcrCompose("sha256:a3", "sha256:w3", "sha256:d3"))
+	_, port := listenReadyServer(t, true)
+	env.Port = port
+
+	fr := updateFakeRunner(
+		fake.Response{Match: exactArgs("images"), Output: imagesListing("ghcr.io/acme/gen-harness-api\t<none>\tsha256:a1\tid-a1")},
+		fake.Response{Match: exactArgs("rmi"), Output: []byte("")},
+	)
+	deps := fastUpdateDeps(fr)
+	var calls int32
+	deps.DiskFree = func(string) (uint64, error) {
+		if atomic.AddInt32(&calls, 1) == 1 {
+			return 1 << 30, nil
+		}
+		return 50 << 30, nil
+	}
+	if err := RunUpdate(context.Background(), env, UpdateOptions{}, deps, &strings.Builder{}); err != nil {
+		t.Fatalf("RunUpdate: %v", err)
+	}
+	if countCalls(fr, matchPull) != 1 || countCalls(fr, matchBackupRun) != 1 {
+		t.Errorf("dọn xong đủ chỗ thì phải tải + sao lưu tiếp: %+v", fr.Calls)
+	}
+	ds, _ := hostlink.ReadDiskStatus(env.InstallDir)
+	if ds.State != "ok" || ds.FreeBytes != 50<<30 {
+		t.Errorf("disk-status.json phải state=ok sau khi dọn: %+v", ds)
+	}
+}
+
+func TestRunUpdate_DiskProbeFails_WarnsAndContinues(t *testing.T) {
+	composePath := testComposePath(t, updateTestComposeYAML)
+	env := testEnv(t, composePath)
+	_, port := listenReadyServer(t, true)
+	env.Port = port
+
+	fr := updateFakeRunner()
+	deps := fastUpdateDeps(fr)
+	deps.DiskFree = func(string) (uint64, error) { return 0, errors.New("statfs lỗi") }
+	var out strings.Builder
+	if err := RunUpdate(context.Background(), env, UpdateOptions{}, deps, &out); err != nil {
+		t.Fatalf("đo đĩa lỗi không được chặn cập nhật: %v", err)
+	}
+	if !strings.Contains(out.String(), "không đo được chỗ trống") {
+		t.Errorf("phải cảnh báo không đo được: %q", out.String())
+	}
+}
+
+func TestRunUpdate_Success_ClearsBlockedAndPrunesKeepingTwo(t *testing.T) {
+	env, composePath := unmanagedEnv(t, ghcrCompose("sha256:a3", "sha256:w3", "sha256:d3"))
+	if err := os.WriteFile(composePath+".bak", []byte(ghcrCompose("sha256:a2", "sha256:w2", "sha256:d2")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := hostlink.WriteUpdateBlocked(env.InstallDir, hostlink.UpdateBlocked{Version: "v0.1.33"}); err != nil {
+		t.Fatal(err)
+	}
+	_, port := listenReadyServer(t, true)
+	env.Port = port
+
+	fr := updateFakeRunner(
+		fake.Response{Match: exactArgs("images"), Output: imagesListing(
+			"ghcr.io/acme/gen-harness-api\t<none>\tsha256:a3\tid-a3",
+			"ghcr.io/acme/gen-harness-api\t<none>\tsha256:a2\tid-a2",
+			"ghcr.io/acme/gen-harness-api\t<none>\tsha256:a1\tid-a1",
+			"ghcr.io/acme/gen-harness-web\t<none>\tsha256:w1\tid-w1",
+			"ghcr.io/acme/gen-harness-web\t<none>\tsha256:w2\tid-w2",
+		)},
+		fake.Response{Match: exactArgs("rmi"), Output: []byte("")},
+	)
+	var out strings.Builder
+	if err := RunUpdate(context.Background(), env, UpdateOptions{Version: testVersion}, fastUpdateDeps(fr), &out); err != nil {
+		t.Fatalf("RunUpdate: %v", err)
+	}
+	if blockedExists(t, env.InstallDir) {
+		t.Error("cập nhật thành công phải xoá update-blocked.json")
+	}
+	var removed []string
+	for _, c := range fr.Calls {
+		if exactArgs("rmi")(c.Cmd) {
+			removed = append(removed, c.Cmd.Args[1])
+		}
+	}
+	want := []string{"ghcr.io/acme/gen-harness-api@sha256:a1", "ghcr.io/acme/gen-harness-web@sha256:w1"}
+	if strings.Join(removed, ",") != strings.Join(want, ",") {
+		t.Errorf("rmi = %v, muốn %v", removed, want)
+	}
+	if !strings.Contains(out.String(), "Đã dọn 2 ảnh cũ (giữ bản hiện tại và bản liền trước).") {
+		t.Errorf("phải báo đã dọn: %q", out.String())
+	}
+}
+
+func TestRunBackupInContainer_IsRestarting_FallsBackToRunRm(t *testing.T) {
+	composePath := testComposePath(t, "")
+	fr := &fake.Runner{Responses: []fake.Response{
+		{Match: fake.MatchArgsContain("exec", "-T", "api", "python", "-m", "gh.backup", "run"), Err: errors.New("Error response from daemon: Container abc is restarting, wait until the container is running")},
+		{Match: fake.MatchArgsContain("run", "--rm", "--no-deps", "-T", "api", "python", "-m", "gh.backup", "run"), Lines: []string{updateTestBackupLine}},
+	}}
+	key, err := runBackupInContainer(context.Background(), fr, composePath, nil, filepath.Dir(composePath), BackupTriggerPreUpdate)
+	if err != nil {
+		t.Fatalf("runBackupInContainer: %v", err)
+	}
+	if key != updateTestBackupKey {
+		t.Errorf("key = %q", key)
+	}
+	if len(fr.Calls) != 2 || !hasExactArgs(fr.Calls[1].Cmd.Args, "run", "--rm", "--no-deps", "-T", "api") {
+		t.Errorf("phải rơi về `run --rm --no-deps -T api …`: %+v", fr.Calls)
+	}
+}
+
+func TestPendingMigrationFromCurrent(t *testing.T) {
+	cases := []struct {
+		out  string
+		want bool
+	}{
+		{"0042_x (head)\n", false},
+		{"INFO  [alembic.runtime.migration] Context impl.\n0042_x (head)\n", false},
+		{"0042_a (head)\n0042_b (head)\n", false},
+		{"0041_x\n", true},
+		{"0042_a (head)\n0040_b\n", true},
+		{"", true},
+		{"INFO  [alembic.runtime.migration] Will assume transactional DDL.\n", true},
+	}
+	for _, c := range cases {
+		if got := pendingMigrationFromCurrent(c.out); got != c.want {
+			t.Errorf("pendingMigrationFromCurrent(%q) = %v, muốn %v", c.out, got, c.want)
+		}
+	}
+}
+
+// Review v0.1.34: bản mới thêm head RIÊNG (nhánh/gốc mới) — `alembic current`
+// vẫn in "(head)" cho nhánh cũ; phải so với `alembic heads` của ảnh mới.
+func TestNeedsMigration_ComparesWithHeads(t *testing.T) {
+	cases := []struct {
+		name     string
+		current  string
+		heads    string
+		headsErr error
+		want     bool
+	}{
+		{"khớp", "0042_x (head)\n", "0042_x (head)\n", nil, false},
+		{"bản mới thêm head riêng", "0042_x (head)\n", "0042_x (head)\n0001_new (head)\n", nil, true},
+		{"nhiều head, khớp không theo thứ tự", "0042_a (head)\n0042_b (head)\n", "INFO  [alembic] x\n0042_b (head)\n0042_a (head)\n", nil, false},
+		{"heads lỗi → theo riêng current", "0042_x (head)\n", "", errors.New("lỗi"), false},
+		{"current chưa ở head → khỏi hỏi heads", "0041_x\n", "0042_x (head)\n", nil, true},
+	}
+	for _, c := range cases {
+		fr := &fake.Runner{Responses: []fake.Response{
+			{Match: matchAlembicCurrent, Output: []byte(c.current)},
+			{Match: matchAlembicHeads, Output: []byte(c.heads), Err: c.headsErr},
+		}}
+		if got := needsMigration(context.Background(), fr, "/x/compose.yaml", nil, "/x"); got != c.want {
+			t.Errorf("%s: needsMigration = %v, muốn %v", c.name, got, c.want)
+		}
+	}
+}
+
+func TestPullWithRetry_RespectsContextDuringBackoff(t *testing.T) {
+	fr := &fake.Runner{Responses: []fake.Response{{Match: matchPull, Err: errors.New("net down")}}}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := pullWithRetry(ctx, fr, dockercli.Cmd{Name: "docker", Args: []string{"compose", "pull"}},
+		UpdateDeps{PullBackoff: []time.Duration{time.Hour}}, &strings.Builder{})
+	if err == nil {
+		t.Fatal("muốn lỗi")
+	}
+	if time.Since(start) > 5*time.Second {
+		t.Errorf("chờ giữa các lần phải dừng khi ctx huỷ, mất %s", time.Since(start))
+	}
+	if len(fr.Calls) != 1 {
+		t.Errorf("ctx huỷ trong lúc chờ thì không thử lần 2, Calls=%d", len(fr.Calls))
+	}
+}
+
+func TestUpdateNeeded(t *testing.T) {
+	env, composePath := realComposeUpdateEnv(t, updateTestComposeYAML)
+	if ok, err := UpdateNeeded(env); err != nil || ok {
+		t.Fatalf("compose lệch bản nhúng: muốn false,nil — được %v,%v", ok, err)
+	}
+	if err := os.WriteFile(composePath, compose.EmbeddedCompose(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// LocatePath (không đồng bộ) đã ghi Caddyfile nhúng khi thiếu.
+	if ok, err := UpdateNeeded(env); err != nil || !ok {
+		t.Fatalf("compose khớp bản nhúng: muốn true,nil — được %v,%v", ok, err)
 	}
 }
 
@@ -671,10 +1161,7 @@ func TestRunUpdate_Success_ReTrustsCA_FailureDoesNot(t *testing.T) {
 		_, port := listenReadyServer(t, healthy)
 		env.Port = port
 
-		fr := updateHappyFakeRunner()
-		fr.Responses = append(fr.Responses, fake.Response{
-			Match: fake.MatchArgsContain("exec", "-T", "api", "python", "-m", "gh.backup", "restore", "--key"), Output: []byte(""),
-		})
+		fr := updateFakeRunner()
 		deps := fastUpdateDeps(fr)
 		called := 0
 		deps.ReTrustCA = func(context.Context, *Env) { called++ }
@@ -687,5 +1174,179 @@ func TestRunUpdate_Success_ReTrustsCA_FailureDoesNot(t *testing.T) {
 		if called != want {
 			t.Errorf("healthy=%v: ReTrustCA gọi %d lần, muốn %d", healthy, called, want)
 		}
+	}
+}
+
+// F-xx (review v0.1.34): lỗi SAU migrate mà KHÔNG có migration chờ — worker/
+// bridge/api vẫn ghi suốt từ lúc sao lưu: KHÔNG được khôi phục CSDL (mất dữ
+// liệu), chỉ trả compose.yaml + up -d; vẫn chặn lịch đêm (bản hỏng).
+func TestRunUpdate_ReadyFails_NoPendingMigration_NoRestore_StillBlocked(t *testing.T) {
+	env, composePath := realComposeUpdateEnv(t, updateTestComposeYAML)
+	_, port := listenReadyServer(t, false)
+	env.Port = port
+
+	fr := updateFakeRunner() // alembic current: đã ở head
+	var out strings.Builder
+	err := RunUpdate(context.Background(), env, UpdateOptions{Version: testVersion}, fastUpdateDeps(fr), &out)
+	opErr := asOpError(t, err)
+	if opErr.Code != ErrCodeUpdateRolledBack {
+		t.Errorf("Code = %q, muốn %q", opErr.Code, ErrCodeUpdateRolledBack)
+	}
+	if n := countCalls(fr, matchRestore); n != 0 {
+		t.Errorf("không có migration chờ thì KHÔNG được khôi phục CSDL, restore=%d", n)
+	}
+	if n := countCalls(fr, matchStop); n != 0 {
+		t.Errorf("không có migration chờ thì không dừng gì, stop=%d", n)
+	}
+	if n := countCalls(fr, matchFullUp); n != 2 {
+		t.Errorf("phải up -d --remove-orphans 2 lần (bản mới + quay về), được %d", n)
+	}
+	after, _ := os.ReadFile(composePath)
+	if string(after) != updateTestComposeYAML {
+		t.Error("compose.yaml phải về bản cũ")
+	}
+	b, ok, _ := hostlink.ReadUpdateBlocked(env.InstallDir)
+	if !ok || b.Version != testVersion || b.Code != ErrCodeUpdateNotReady || b.RollbackFailed {
+		t.Errorf("bản hỏng vẫn phải chặn lịch đêm: ok=%v %+v", ok, b)
+	}
+	if b.BackupKey != "" || b.DBTouched {
+		t.Errorf("CSDL chưa bị đụng: KHÔNG ghi bản sao lưu cần khôi phục (khôi phục = mất dữ liệu): %+v", b)
+	}
+	if !strings.Contains(opErr.What, "CSDL chưa bị đụng") || !strings.Contains(opErr.Next, "lịch đêm sẽ không tự thử lại") {
+		t.Errorf("What/Next sai: %q / %q", opErr.What, opErr.Next)
+	}
+	if !strings.Contains(out.String(), "rollback") {
+		t.Errorf("log phải nhắc rollback (E2E grep): %q", out.String())
+	}
+	if hostlink.UpdateInProgressExists(env.InstallDir) {
+		t.Error("đã trả compose.yaml về bản cũ và chạy lại được thì phải xoá update-inprogress.json")
+	}
+}
+
+// Review v0.1.34: lỗi sau migrate, KHÔNG có migration chờ, và khởi động lại bằng
+// bản cũ CŨNG lỗi — update-blocked.json không được mang bản sao lưu (hướng dẫn
+// xử lý tay chỉ là up -d, không khôi phục), nhưng phải rollback_failed.
+func TestRunUpdate_ReadyFails_NoPendingMigration_RestartAlsoFails_NoBackupKey(t *testing.T) {
+	env, _ := realComposeUpdateEnv(t, updateTestComposeYAML)
+	_, port := listenReadyServer(t, false)
+	env.Port = port
+
+	fr := updateFakeRunner(fake.Response{Match: matchFullUp, ErrSeq: []error{nil, errors.New("không khởi động được")}})
+	err := RunUpdate(context.Background(), env, UpdateOptions{Version: testVersion}, fastUpdateDeps(fr), &strings.Builder{})
+	opErr := asOpError(t, err)
+	if opErr.Code != ErrCodeUpdateRolledBack {
+		t.Errorf("Code = %q, muốn %q", opErr.Code, ErrCodeUpdateRolledBack)
+	}
+	if countCalls(fr, matchRestore) != 0 {
+		t.Error("CSDL chưa bị đụng thì không khôi phục")
+	}
+	b, ok, _ := hostlink.ReadUpdateBlocked(env.InstallDir)
+	if !ok || !b.RollbackFailed || b.DBTouched || b.BackupKey != "" {
+		t.Errorf("muốn rollback_failed=true, db_touched=false, không backup_key: ok=%v %+v", ok, b)
+	}
+	if strings.Contains(opErr.Next, "gh.backup restore") {
+		t.Errorf("Next không được bảo khôi phục bản sao lưu: %q", opErr.Next)
+	}
+	if !hostlink.UpdateInProgressExists(env.InstallDir) {
+		t.Error("quay về chưa trọn: phải GIỮ update-inprogress.json")
+	}
+}
+
+// Review v0.1.34: nhánh c) (đã đụng CSDL) quay về ổn + compose.yaml đã trả về
+// bản cũ → xoá update-inprogress.json như nhánh b).
+func TestRunUpdate_ReadyFails_PendingMigration_RolledBack_ClearsInProgress(t *testing.T) {
+	env, composePath := realComposeUpdateEnv(t, updateTestComposeYAML)
+	_, port := listenReadyServer(t, false)
+	env.Port = port
+
+	fr := updateFakeRunner(pendingMigration)
+	err := RunUpdate(context.Background(), env, UpdateOptions{Version: testVersion}, fastUpdateDeps(fr), &strings.Builder{})
+	if asOpError(t, err).Code != ErrCodeUpdateRolledBack {
+		t.Fatalf("muốn %s, được %v", ErrCodeUpdateRolledBack, err)
+	}
+	if countCalls(fr, matchRestore) != 1 {
+		t.Error("đã đụng CSDL thì phải khôi phục")
+	}
+	if after, _ := os.ReadFile(composePath); string(after) != updateTestComposeYAML {
+		t.Error("compose.yaml phải về bản cũ")
+	}
+	if hostlink.UpdateInProgressExists(env.InstallDir) {
+		t.Error("quay về ổn + compose.yaml đã về bản cũ thì phải xoá update-inprogress.json")
+	}
+	if b, ok, _ := hostlink.ReadUpdateBlocked(env.InstallDir); !ok || !b.DBTouched || b.BackupKey != updateTestBackupKey {
+		t.Errorf("đã đụng CSDL: phải ghi db_touched + backup_key: ok=%v %+v", ok, b)
+	}
+}
+
+// Dấu cập nhật dở: ghi TRƯỚC khi đổi compose.yaml, xoá khi đã sẵn sàng.
+func TestRunUpdate_InProgressMarker_WrittenBeforeSyncClearedOnSuccess(t *testing.T) {
+	env, composePath := realComposeUpdateEnv(t, updateTestComposeYAML)
+	_, port := listenReadyServer(t, true)
+	env.Port = port
+
+	markerAtMigrate, composeAtMigrate := false, ""
+	fr := updateFakeRunner(fake.Response{Match: func(cmd dockercli.Cmd) bool {
+		if !matchMigrate(cmd) {
+			return false
+		}
+		markerAtMigrate = hostlink.UpdateInProgressExists(env.InstallDir)
+		b, _ := os.ReadFile(composePath)
+		composeAtMigrate = string(b)
+		return true
+	}, Lines: []string{}})
+	if err := RunUpdate(context.Background(), env, UpdateOptions{Version: testVersion}, fastUpdateDeps(fr), &strings.Builder{}); err != nil {
+		t.Fatalf("RunUpdate: %v", err)
+	}
+	if !markerAtMigrate || composeAtMigrate != string(compose.EmbeddedCompose()) {
+		t.Errorf("lúc migrate (compose.yaml đã là bản mới) phải có update-inprogress.json: marker=%v", markerAtMigrate)
+	}
+	if hostlink.UpdateInProgressExists(env.InstallDir) {
+		t.Error("cập nhật xong phải xoá update-inprogress.json")
+	}
+}
+
+// genh chết sau khi đã ghi compose.yaml mới (còn dấu dở) → lần sau KHÔNG được
+// coi "đã khớp" dù compose.yaml + Caddyfile trùng bản nhúng.
+func TestUpdateNeeded_InProgressMarker_NotInSync(t *testing.T) {
+	env, composePath := realComposeUpdateEnv(t, string(compose.EmbeddedCompose()))
+	if ok, err := UpdateNeeded(env); err != nil || !ok {
+		t.Fatalf("compose khớp, không có dấu dở: muốn true — được %v,%v (%s)", ok, err, composePath)
+	}
+	if err := hostlink.MarkUpdateInProgress(env.InstallDir, hostlink.UpdateInProgress{Version: testVersion}); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := UpdateNeeded(env); err != nil || ok {
+		t.Fatalf("còn update-inprogress.json: muốn false,nil — được %v,%v", ok, err)
+	}
+}
+
+// GENH_COMPOSE_FILE / checkout (compose ngoài gốc cài đặt): không bao giờ "đã
+// khớp" — `genh update` gõ tay / "Cập nhật ngay" luôn chạy RunUpdate đủ bước.
+func TestUpdateNeeded_UnmanagedCompose_AlwaysRuns(t *testing.T) {
+	env, _ := unmanagedEnv(t, string(compose.EmbeddedCompose()))
+	if ok, err := UpdateNeeded(env); err != nil || ok {
+		t.Fatalf("compose ngoài (trùng bản nhúng): muốn false,nil — được %v,%v", ok, err)
+	}
+}
+
+// Dọn ảnh chỉ trong đúng repo (owner/tên) của bản giữ — không đụng ảnh
+// gen-harness-* của owner khác dùng chung Docker.
+func TestPruneOldImages_OnlyKeptRepos(t *testing.T) {
+	fr := &fake.Runner{Responses: []fake.Response{
+		{Match: exactArgs("images"), Output: imagesListing(
+			"ghcr.io/acme/gen-harness-api\t<none>\tsha256:a3\tid-a3",
+			"ghcr.io/acme/gen-harness-api\t<none>\tsha256:a1\tid-a1",
+			"ghcr.io/other/gen-harness-api\t<none>\tsha256:o1\tid-o1",
+			"ghcr.io/acme/gen-harness-worker\tdev\t<none>\tid-wk",
+		)},
+		{Match: exactArgs("rmi"), Output: []byte("")},
+	}}
+	n, err := pruneOldImages(context.Background(), fr, [][]byte{[]byte(ghcrCompose("sha256:a3", "sha256:w3", "sha256:d3"))}, &strings.Builder{})
+	if err != nil || n != 1 {
+		t.Fatalf("muốn dọn đúng 1 ảnh, được %d (%v)", n, err)
+	}
+	ri := callIndex(fr, exactArgs("rmi"))
+	if fr.Calls[ri].Cmd.Args[1] != "ghcr.io/acme/gen-harness-api@sha256:a1" {
+		t.Errorf("chỉ được rmi ảnh cũ cùng repo bản giữ: %+v", fr.Calls)
 	}
 }

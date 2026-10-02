@@ -129,3 +129,13 @@ func TestOverall(t *testing.T) {
 		t.Errorf("Overall(nil) = %v, want ok", got)
 	}
 }
+
+func TestProbeDiskFree_TempDir(t *testing.T) {
+	free, err := ProbeDiskFree(t.TempDir())
+	if err != nil {
+		t.Fatalf("ProbeDiskFree: %v", err)
+	}
+	if free == 0 {
+		t.Error("dung lượng trống phải > 0")
+	}
+}

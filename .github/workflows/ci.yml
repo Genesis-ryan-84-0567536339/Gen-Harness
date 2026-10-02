@@ -70,7 +70,7 @@ jobs:
         run: |
           docker build -f deploy/images/db.Dockerfile -t gh-db .
           docker run -d --name db -p 5432:5432 -e POSTGRES_PASSWORD=postgres gh-db
-          for i in $(seq 1 30); do docker exec db pg_isready -U postgres && break; sleep 2; done
+          for _ in $(seq 1 30); do docker exec db pg_isready -U postgres && break; sleep 2; done
       - uses: astral-sh/setup-uv@v6
         with: { python-version: "3.11" }
       - name: Cài phụ thuộc

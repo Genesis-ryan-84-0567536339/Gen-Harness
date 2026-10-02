@@ -149,6 +149,12 @@ export function UpdateCard({ always = false }: { always?: boolean } = {}) {
         </ol>
       ) : null}
       {view.kind !== 'hidden' && view.body ? <p className="upd-body">{view.body}</p> : null}
+      {view.kind !== 'hidden' && view.detail ? (
+        <details className="upd-notes">
+          <summary>Chi tiết kỹ thuật</summary>
+          <pre>{view.detail}</pre>
+        </details>
+      ) : null}
       {view.kind !== 'hidden' && view.showCommand ? (
         <div className="upd-cmd">
           <span>Chạy lệnh này một lần trên máy chủ (lần sau chỉ cần bấm nút ở đây):</span>
