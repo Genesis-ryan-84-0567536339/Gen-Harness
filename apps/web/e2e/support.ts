@@ -119,16 +119,16 @@ async function csrf(request: APIRequestContext): Promise<string> {
 export async function resetMock(
   request: APIRequestContext,
   setup: 'fresh' | 'finished' = 'finished',
-  opts: { simulate?: boolean; allowFinish?: boolean; startAtStep?: number } = {},
+  opts: { simulate?: boolean; allowFinish?: boolean; startAtStep?: number; staff?: boolean } = {},
 ) {
   const res = await request.post('/api/v1/__mock/reset', { data: { setup, simulate: false, ...opts } });
   if (!res.ok()) throw new Error(`mock reset failed: ${res.status()}`);
 }
 
 /** Per-viewer layout prefs as the app persists them (zustand persist, key gh-ui). */
-export async function setUiPrefs(page: Page, prefs: { sidebarMode?: 'full' | 'rail'; showEnglish?: boolean }) {
+export async function setUiPrefs(page: Page, prefs: { sidebarMode?: 'full' | 'rail' }) {
   await page.addInitScript((p) => {
-    localStorage.setItem('gh-ui', JSON.stringify({ state: { sidebarMode: 'full', showEnglish: true, navOpen: {}, ...p }, version: 1 }));
+    localStorage.setItem('gh-ui', JSON.stringify({ state: { sidebarMode: 'full', navOpen: {}, ...p }, version: 2 }));
   }, prefs);
 }
 

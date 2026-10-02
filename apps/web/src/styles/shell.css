@@ -39,6 +39,11 @@
 }
 .sb-domain__rule { flex: 1; height: 1px; background: linear-gradient(90deg, var(--rule), transparent); }
 .sb-domain__count { flex: none; font-size: 9px; color: var(--color-neutral-500); font-family: var(--font-mono); }
+/* v0.1.42: domain thu gọn (Nâng cao) — một nút đầu mục; mục con thụt nhẹ khi mở. */
+.sb-domain--collapsible { margin-top: 6px; border-top: 1px solid var(--color-divider); padding-top: 8px; }
+.sb-domain-toggle .sb-domain__count { margin-left: auto; }
+.sb-domain__items { display: flex; flex-direction: column; gap: 1px; margin-top: 2px; }
+.sb[data-mode='rail'] .sb-domain--collapsible { border-top: none; padding-top: 0; margin-top: 0; }
 .sb-rail-rule { height: 1px; margin: 8px 6px; background: linear-gradient(90deg, transparent, var(--rule), transparent); }
 
 .sb-group { display: flex; flex-direction: column; gap: 1px; }

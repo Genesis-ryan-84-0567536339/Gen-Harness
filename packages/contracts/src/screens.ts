@@ -38,6 +38,13 @@ export interface ScreenMeta {
    * built in the same design language, absent from docs/design/screens.json.
    */
   extra?: boolean;
+  /**
+   * v0.1.42 (F-65, F-41): có trong cây, có route, nhưng KHÔNG hiện trên thanh bên (GET /navigation trả
+   * `hidden: true`) — Hồ sơ sống mở từ danh sách, Plugin đóng băng.
+   */
+  navHidden?: boolean;
+  /** v0.1.42: chỉ hiện trên thanh bên khi đã có ít nhất 1 nhân viên (API ẩn khi chưa có). */
+  needsStaff?: boolean;
 }
 
 export interface DomainMeta {
@@ -45,123 +52,123 @@ export interface DomainMeta {
   label: string;
   crumb: string;
   icon: string;
+  /** v0.1.42: domain thu gọn mặc định trên thanh bên (Nâng cao). */
+  collapsedByDefault: boolean;
 }
 
 export const DOMAINS: Record<DomainId, DomainMeta> = {
-  business: { id: 'business', label: 'Kinh doanh', crumb: 'KINH DOANH', icon: 'ph-fill ph-briefcase' },
-  tech: { id: 'tech', label: 'Kỹ thuật · Backend', crumb: 'KỸ THUẬT', icon: 'ph-fill ph-cpu' },
+  business: { id: 'business', label: 'Việc hằng ngày', crumb: 'HẰNG NGÀY', icon: 'ph-fill ph-briefcase', collapsedByDefault: false },
+  tech: { id: 'tech', label: 'Nâng cao', crumb: 'NÂNG CAO', icon: 'ph-fill ph-cpu', collapsedByDefault: true },
 };
 
 export const GROUP_ICONS: Record<string, string> = {
-  'Hàng đợi & Hành động': 'ph ph-tray',
-  'Bản đồ quan hệ': 'ph ph-graph',
-  'Cơ hội & Thị trường': 'ph ph-target',
-  'Con người & Chất lượng': 'ph ph-users-three',
+  'Hộp thư & Việc': 'ph ph-tray',
+  'Khách & Cơ hội': 'ph ph-address-book',
   'Tầng dữ liệu': 'ph ph-database',
   'Agent & Model': 'ph ph-robot',
 };
 
 export const SCREENS: ScreenMeta[] = [
   {
-    key: 'overview', domain: 'business', parent: null, icon: 'ph ph-gauge',
-    name: 'Tổng quan điều hành', en: 'Command Overview — màn hình 10 phút',
-    title: 'Tổng quan điều hành', subtitle: 'Command Overview · hôm nay có gì đang xảy ra',
+    key: 'overview', domain: 'business', parent: null, icon: 'ph ph-sun-horizon',
+    name: 'Hôm nay', en: 'Cần Sếp xử lý · 4 số chính',
+    title: 'Hôm nay', subtitle: 'Cần Sếp xử lý · 4 số chính',
     description: 'Command Overview · hôm nay có gì đang xảy ra', descMaxWidth: 700, designTitleRow: false,
   },
   {
-    key: 'inbox', domain: 'business', parent: 'Hàng đợi & Hành động', icon: 'ph ph-tray',
-    name: 'Hộp thư ý nghĩa', en: 'Inbox of Meaning',
-    title: 'Hộp thư ý nghĩa', subtitle: 'Inbox of Meaning · cái gì quan trọng nhất lúc này',
+    key: 'inbox', domain: 'business', parent: 'Hộp thư & Việc', icon: 'ph ph-tray',
+    name: 'Hộp thư', en: 'Tin quan trọng đã được sắp xếp',
+    title: 'Hộp thư', subtitle: 'Tin quan trọng đã được sắp xếp · cái gì quan trọng nhất lúc này',
     description: 'Không phải tin nhắn thô. Mỗi dòng là một đơn vị ý nghĩa đã được cấu trúc: nguồn, đối tượng, điểm số, tóm tắt hai câu, hành động đề xuất và chứng cứ gốc.',
     descMaxWidth: 700, designTitleRow: true,
   },
   {
-    key: 'workbench', domain: 'business', parent: 'Hàng đợi & Hành động', icon: 'ph ph-pen-nib',
+    key: 'workbench', domain: 'business', parent: 'Hộp thư & Việc', icon: 'ph ph-pen-nib',
     name: 'Bàn làm việc', en: 'Workbench — soạn & duyệt',
     title: 'Bàn làm việc', subtitle: 'Workbench · soạn, duyệt, hành động',
     description: 'Workbench · soạn, duyệt, hành động', descMaxWidth: 700, designTitleRow: false,
   },
   {
-    key: 'tasks', domain: 'business', parent: 'Hàng đợi & Hành động', icon: 'ph ph-check-square', extra: true,
+    key: 'tasks', domain: 'business', parent: 'Hộp thư & Việc', icon: 'ph ph-check-square', extra: true,
     name: 'Việc & Nhắc hẹn', en: 'Tasks & Reminders',
     title: 'Việc & Nhắc hẹn', subtitle: 'Tasks & Reminders · việc đến hạn và lời hứa',
     description: 'Việc sinh ra từ lời hứa trong hội thoại, từ bản nháp đã duyệt hoặc do Sếp tạo tay. Việc quá hạn tô đỏ, lời hứa sắp đến hạn được nhắc trước để không ai bị bỏ quên.',
     descMaxWidth: 700, designTitleRow: true,
   },
   {
-    key: 'directory', domain: 'business', parent: null, icon: 'ph ph-address-book',
-    name: 'Nhóm & Con người', en: 'Groups by channel · people filters',
-    title: 'Nhóm & Con người', subtitle: 'Danh sách nhóm theo kênh và con người có bộ lọc',
+    key: 'directory', domain: 'business', parent: 'Khách & Cơ hội', icon: 'ph ph-address-book',
+    name: 'Khách & Nhóm', en: 'Groups by channel · people filters',
+    title: 'Khách & Nhóm', subtitle: 'Danh sách nhóm theo kênh và con người có bộ lọc',
     description: 'Danh sách nhóm tách theo từng kênh, và danh sách con người lọc được theo mức liên quan với Sếp, độ nhiệt, giá trị và mức ưu tiên — từ đó gán agent trực tương ứng.',
     descMaxWidth: 760, designTitleRow: true,
   },
   {
-    key: 'documents', domain: 'business', parent: null, icon: 'ph ph-files', extra: true,
-    name: 'Tài liệu', en: 'Documents',
-    title: 'Tài liệu', subtitle: 'Documents · báo giá, hợp đồng, tệp đã trao đổi',
-    description: 'Báo giá, hợp đồng, biên bản và tệp đã trao đổi trên các kênh, gắn về nhóm và người sở hữu. Ai được xem tài liệu nào do quyền truy cập của từng tài liệu quyết định.',
-    descMaxWidth: 700, designTitleRow: true,
-  },
-  {
-    key: 'graph', domain: 'business', parent: null, icon: 'ph ph-graph',
-    name: 'Bản đồ quan hệ', en: 'Relationship Map',
-    title: 'Bản đồ quan hệ', subtitle: 'Relationship Map · ai đang liên quan',
-    description: 'Không phải danh bạ. Trọng số của mỗi quan hệ thay đổi theo tần suất, chiều tương tác và giai đoạn — nên thấy được ai là cầu nối, khách nào đang lạnh, ai đang ôm quá nhiều việc.',
-    descMaxWidth: 700, designTitleRow: true,
-  },
-  {
-    key: 'profile', domain: 'business', parent: 'Bản đồ quan hệ', icon: 'ph ph-identification-card',
-    name: 'Hồ sơ sống', en: 'Living Profile — bấm một node để mở',
-    title: 'Hồ sơ sống', subtitle: 'Living Profile · vì sao hệ thống nghĩ vậy',
-    description: 'Living Profile · vì sao hệ thống nghĩ vậy', descMaxWidth: 700, designTitleRow: false,
-  },
-  {
-    key: 'notebook', domain: 'business', parent: 'Bản đồ quan hệ', icon: 'ph ph-notebook',
-    name: 'Sổ tay nhận thức', en: 'Assistant notebook per ID',
-    title: 'Sổ tay nhận thức', subtitle: 'AI-trợ lý tự ghi nhận thức lũy tiến cho từng ID người và ID nhóm',
-    description: 'Mỗi ID người và ID nhóm có một sổ tay riêng do AI-trợ lý tự ghi trong quá trình tương tác: nhận thức hiện tại, các mốc lũy tiến, và danh sách ID dữ liệu cần gọi lại khi cần. Đây là cửa sổ ngữ cảnh ngắn — không phải toàn bộ kho sạch.',
-    descMaxWidth: 760, designTitleRow: true,
-  },
-  {
-    key: 'opportunity', domain: 'business', parent: 'Cơ hội & Thị trường', icon: 'ph ph-target',
+    key: 'opportunity', domain: 'business', parent: 'Khách & Cơ hội', icon: 'ph ph-target',
     name: 'Bảng cơ hội', en: 'Opportunity Board',
     title: 'Bảng cơ hội', subtitle: 'Opportunity Board · pipeline sống từ chat',
     description: 'Pipeline sống từ hội thoại, không phải form nhập tay. Mỗi thẻ trả lời: ai cần gì, nóng đến đâu, tin được đến đâu, nên ghép với ai, và mất gì nếu không làm gì.',
     descMaxWidth: 700, designTitleRow: true,
   },
   {
-    key: 'supply', domain: 'business', parent: 'Cơ hội & Thị trường', icon: 'ph ph-arrows-left-right',
-    name: 'Cung ↔ Cầu', en: 'Supply & Demand',
-    title: 'Cung ↔ Cầu', subtitle: 'Ai cần mua, ai cần bán, ghép được với ai',
-    description: 'Hai danh sách rút từ kho sạch: người đang cần nguồn hàng và người đang cần bán. Core agent đề xuất cặp ghép, Sếp quyết định có bắt tay hay không.',
-    descMaxWidth: 760, designTitleRow: true,
-  },
-  {
-    key: 'search', domain: 'business', parent: 'Cơ hội & Thị trường', icon: 'ph ph-brain',
-    name: 'Kho hội thoại', en: 'Knowledge & Search',
-    title: 'Kho hội thoại', subtitle: 'Knowledge & Search · tìm mẫu, không chỉ tìm câu',
-    description: 'Tìm theo ý định, người, ngành hàng, khoảng giá, thời gian và thái độ — không chỉ theo chữ. Mục đích là tìm ra mẫu, không chỉ tìm ra câu.',
-    descMaxWidth: 700, designTitleRow: true,
-  },
-  {
-    key: 'deals', domain: 'business', parent: 'Cơ hội & Thị trường', icon: 'ph ph-handshake', extra: true,
+    key: 'deals', domain: 'business', parent: 'Khách & Cơ hội', icon: 'ph ph-handshake', extra: true,
     name: 'Deal & Vụ việc', en: 'Deals & Cases',
     title: 'Deal & Vụ việc', subtitle: 'Deals & Cases · đã chốt và đang xử lý',
     description: 'Deal đã chốt từ bảng cơ hội và các vụ việc cần xử lý như khiếu nại, cảnh báo giao hàng hay thanh toán, kèm trạng thái và người đang xử lý.',
     descMaxWidth: 700, designTitleRow: true,
   },
   {
-    key: 'people', domain: 'business', parent: 'Con người & Chất lượng', icon: 'ph ph-users-three',
+    key: 'documents', domain: 'business', parent: 'Khách & Cơ hội', icon: 'ph ph-files', extra: true,
+    name: 'Tài liệu', en: 'Documents',
+    title: 'Tài liệu', subtitle: 'Documents · báo giá, hợp đồng, tệp đã trao đổi',
+    description: 'Báo giá, hợp đồng, biên bản và tệp đã trao đổi trên các kênh, gắn về nhóm và người sở hữu. Ai được xem tài liệu nào do quyền truy cập của từng tài liệu quyết định.',
+    descMaxWidth: 700, designTitleRow: true,
+  },
+  {
+    key: 'search', domain: 'business', parent: 'Khách & Cơ hội', icon: 'ph ph-brain',
+    name: 'Kho hội thoại', en: 'Knowledge & Search',
+    title: 'Kho hội thoại', subtitle: 'Knowledge & Search · tìm mẫu, không chỉ tìm câu',
+    description: 'Tìm theo ý định, người, ngành hàng, khoảng giá, thời gian và thái độ — không chỉ theo chữ. Mục đích là tìm ra mẫu, không chỉ tìm ra câu.',
+    descMaxWidth: 700, designTitleRow: true,
+  },
+  {
+    key: 'profile', domain: 'business', parent: 'Khách & Cơ hội', icon: 'ph ph-identification-card', navHidden: true,
+    name: 'Hồ sơ sống', en: 'Living Profile — mở từ danh sách',
+    title: 'Hồ sơ sống', subtitle: 'Living Profile · vì sao hệ thống nghĩ vậy',
+    description: 'Living Profile · vì sao hệ thống nghĩ vậy', descMaxWidth: 700, designTitleRow: false,
+  },
+  {
+    key: 'connections', domain: 'business', parent: null, icon: 'ph ph-plugs-connected', extra: true,
+    name: 'Kết nối', en: 'Bộ não AI, Zalo, Facebook, Gen-hub…',
+    title: 'Kết nối', subtitle: 'Connections · bộ não AI, kênh, Facebook, Gen-hub, MCP',
+    description: 'Mỗi thứ một thẻ, cùng một kiểu trạng thái: Đang chạy, Cần Sếp xử lý hoặc Chưa nối. Bấm nút chính trên thẻ để nối hoặc sửa.',
+    descMaxWidth: 700, designTitleRow: true,
+  },
+  {
+    key: 'team', domain: 'business', parent: null, icon: 'ph ph-users', extra: true,
+    name: 'Đội ngũ', en: 'Người dùng, đánh giá, chăm sóc',
+    title: 'Đội ngũ', subtitle: 'Team · người dùng, đánh giá, chăm sóc',
+    description: 'Người dùng Console: mời, đổi vai trò, khoá. Đánh giá và Chăm sóc nhân viên hiện khi đã có ít nhất 1 nhân viên.',
+    descMaxWidth: 700, designTitleRow: true,
+  },
+  {
+    key: 'people', domain: 'business', parent: 'Đội ngũ', needsStaff: true, icon: 'ph ph-users-three',
     name: 'Đánh giá con người', en: 'People Review',
     title: 'Đánh giá con người', subtitle: 'People Review · điểm số có chứng cứ',
     description: 'Điểm số là công cụ hỗ trợ quản lý, không phải bản án. Mỗi dòng có xu hướng, tín hiệu nổi bật trong tuần, khuyến nghị và nút xem chứng cứ gốc.',
     descMaxWidth: 700, designTitleRow: true,
   },
   {
-    key: 'care', domain: 'business', parent: 'Con người & Chất lượng', icon: 'ph ph-heartbeat',
+    key: 'care', domain: 'business', parent: 'Đội ngũ', needsStaff: true, icon: 'ph ph-heartbeat',
     name: 'Chất lượng chăm sóc', en: 'Care Quality',
     title: 'Chất lượng chăm sóc', subtitle: 'Care Quality · cách chăm, không chỉ số lần nhắn',
     description: 'Hệ thống không chỉ biết đã nhắn hay chưa, mà biết cách nhắn: follow quá sớm hay quá muộn, hứa rồi quên, quên khách sau báo giá, và kịch bản nào đang chuyển thành deal.',
+    descMaxWidth: 700, designTitleRow: true,
+  },
+  {
+    key: 'system', domain: 'business', parent: null, icon: 'ph ph-gear-six',
+    name: 'Cài đặt', en: 'Sao lưu, cập nhật, tổ chức, bộ não AI, quyền, nhật ký',
+    title: 'Cài đặt', subtitle: 'Settings · sao lưu, cập nhật, tổ chức, bộ não AI, quyền, nhật ký',
+    description: 'Cài đặt chung: sao lưu & cập nhật, tổ chức, bộ não AI, quyền hạn và nhật ký. Kênh và tài khoản nằm ở Kết nối, người dùng ở Đội ngũ.',
     descMaxWidth: 700, designTitleRow: true,
   },
   {
@@ -214,18 +221,32 @@ export const SCREENS: ScreenMeta[] = [
     descMaxWidth: 760, designTitleRow: true,
   },
   {
-    key: 'plugins', domain: 'tech', parent: null, icon: 'ph ph-puzzle-piece',
+    key: 'graph', domain: 'tech', parent: null, icon: 'ph ph-graph',
+    name: 'Bản đồ quan hệ', en: 'Relationship Map',
+    title: 'Bản đồ quan hệ', subtitle: 'Relationship Map · ai đang liên quan',
+    description: 'Không phải danh bạ. Trọng số của mỗi quan hệ thay đổi theo tần suất, chiều tương tác và giai đoạn — nên thấy được ai là cầu nối, khách nào đang lạnh, ai đang ôm quá nhiều việc.',
+    descMaxWidth: 700, designTitleRow: true,
+  },
+  {
+    key: 'notebook', domain: 'tech', parent: 'Bản đồ quan hệ', icon: 'ph ph-notebook',
+    name: 'Sổ tay nhận thức', en: 'Assistant notebook per ID',
+    title: 'Sổ tay nhận thức', subtitle: 'AI-trợ lý tự ghi nhận thức lũy tiến cho từng ID người và ID nhóm',
+    description: 'Mỗi ID người và ID nhóm có một sổ tay riêng do AI-trợ lý tự ghi trong quá trình tương tác: nhận thức hiện tại, các mốc lũy tiến, và danh sách ID dữ liệu cần gọi lại khi cần. Đây là cửa sổ ngữ cảnh ngắn — không phải toàn bộ kho sạch.',
+    descMaxWidth: 760, designTitleRow: true,
+  },
+  {
+    key: 'supply', domain: 'tech', parent: null, icon: 'ph ph-arrows-left-right',
+    name: 'Cung ↔ Cầu', en: 'Supply & Demand',
+    title: 'Cung ↔ Cầu', subtitle: 'Ai cần mua, ai cần bán, ghép được với ai',
+    description: 'Hai danh sách rút từ kho sạch: người đang cần nguồn hàng và người đang cần bán. Core agent đề xuất cặp ghép, Sếp quyết định có bắt tay hay không.',
+    descMaxWidth: 760, designTitleRow: true,
+  },
+  {
+    key: 'plugins', domain: 'tech', parent: null, icon: 'ph ph-puzzle-piece', navHidden: true,
     name: 'Plugin & Tiện ích', en: 'DSH base plugins & external add-ons',
     title: 'Plugin & Tiện ích', subtitle: 'Plugin nền DSH và plugin cài thêm từ bên ngoài',
     description: 'Mọi thành phần của hệ thống đều là plugin cắm rút nóng. Plugin nền DSH không tắt được vì khung gầm dựa vào chúng; plugin cài thêm thì tắt, cập nhật hoặc gỡ tuỳ ý. Một plugin lỗi chỉ ngắt mạch trong vùng cách ly của chính nó.',
     descMaxWidth: 760, designTitleRow: true,
-  },
-  {
-    key: 'system', domain: 'tech', parent: null, icon: 'ph ph-sliders-horizontal',
-    name: 'Điều khiển hệ thống', en: 'System Control — kênh, quyền, nhật ký',
-    title: 'Điều khiển hệ thống', subtitle: 'System Control · kênh, quyền hạn, nhật ký',
-    description: 'Góc kỹ thuật của Console: kênh và đăng nhập, bộ não AI, quyền hạn và nhật ký. Plugin có màn riêng. Việc hằng ngày không cần vào đây.',
-    descMaxWidth: 700, designTitleRow: true,
   },
 ];
 
@@ -233,8 +254,8 @@ export const SCREEN_BY_KEY: Record<string, ScreenMeta> = Object.fromEntries(SCRE
 
 /** Level-1 order of the design NAV, per domain. Group entries are parent names. */
 export const NAV_ORDER: Record<DomainId, string[]> = {
-  business: ['overview', 'Hàng đợi & Hành động', 'directory', 'documents', 'graph', 'Cơ hội & Thị trường', 'Con người & Chất lượng'],
-  tech: ['Tầng dữ liệu', 'Agent & Model', 'plugins', 'system'],
+  business: ['overview', 'Hộp thư & Việc', 'Khách & Cơ hội', 'connections', 'team', 'system'],
+  tech: ['Tầng dữ liệu', 'Agent & Model', 'graph', 'supply', 'plugins'],
 };
 
 export interface ScreenTreeGroup {

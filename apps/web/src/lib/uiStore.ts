@@ -25,12 +25,18 @@ interface UiPrefs {
   followUpHiddenByUser: Record<string, number[]>;
   /** Ngăn kéo điều hướng trên điện thoại (B4) — không lưu. */
   drawerOpen: boolean;
+  /**
+   * v0.1.42: domain thu gọn (Nâng cao) người dùng đã bấm mở/đóng — KHÔNG lưu (không nằm trong partialize): mở lại
+   * trang là thu gọn như mặc định.
+   */
+  domainOpen: Record<string, boolean>;
   setSidebarMode: (m: SidebarMode) => void;
   toggleSidebarMode: () => void;
   setShowEnglish: (v: boolean) => void;
   setNavOpen: (group: string, open: boolean) => void;
   setTheme: (theme: ThemePref, userId?: string | null) => void;
   setDrawerOpen: (open: boolean) => void;
+  setDomainOpen: (domain: string, open: boolean) => void;
   hideFollowUp: (userId: string, pending: number[]) => void;
 }
 
@@ -57,6 +63,7 @@ export const useUiStore = create<UiPrefs>()(
       theme: 'system',
       themeByUser: {},
       drawerOpen: false,
+      domainOpen: {},
       followUpHiddenByUser: {},
       setSidebarMode: (sidebarMode) => set({ sidebarMode }),
       toggleSidebarMode: () => set((s) => ({ sidebarMode: s.sidebarMode === 'full' ? 'rail' : 'full' })),
@@ -65,6 +72,7 @@ export const useUiStore = create<UiPrefs>()(
       setTheme: (theme, userId) =>
         set((s) => ({ theme, themeByUser: userId ? { ...s.themeByUser, [userId]: theme } : s.themeByUser })),
       setDrawerOpen: (drawerOpen) => set({ drawerOpen }),
+      setDomainOpen: (domain, open) => set((s) => ({ domainOpen: { ...s.domainOpen, [domain]: open } })),
       hideFollowUp: (userId, pending) => set((s) => ({ followUpHiddenByUser: { ...s.followUpHiddenByUser, [userId]: [...pending] } })),
     }),
     {

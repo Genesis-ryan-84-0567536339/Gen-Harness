@@ -92,6 +92,8 @@ export interface MockOptions {
   updateAvailable?: boolean;
   /** v0.1.19: Owner vừa được genh reset-password → `must_change_password` (MOCK_MUST_CHANGE=1). */
   mustChangePassword?: boolean;
+  /** v0.1.42: đã có ít nhất 1 nhân viên (mặc định true) — false thì Đánh giá/Chăm sóc ẩn trên thanh bên. */
+  staff?: boolean;
 }
 
 // RBAC as apps/api gh/auth/rbac.py seeds it: Owner, Manager, Operator, Agent NV, Auditor.
@@ -129,6 +131,8 @@ const SCREEN_PERMISSION: Record<string, string[]> = {
   raw: ['data.read'], rules: ['data.read'], clean: ['data.read'], identity: ['data.read'],
   agents: ['system.read'], api: ['system.read'], mcp: ['system.read'], plugins: ['system.read'],
   system: ['system.read', 'audit.read'],
+  // v0.1.42: Kết nối (system.read), Đội ngũ (roles.manage).
+  connections: ['system.read'], team: ['roles.manage'],
 };
 export function permissionsOf(role: RoleCode): Record<string, string> {
   const i = ROLE_ORDER.indexOf(role);
@@ -155,7 +159,21 @@ const EVENT_PERMISSION: Array<[string, string | null]> = [
   ['header', null],
 ];
 
-export function buildNavigation(hidden: Set<string> = new Set(), badges = true): NavDomain[] {
+/**
+ * GET /navigation như API thật (v0.1.42): `hidden` (tham số) = màn vai trò KHÔNG được thấy (bỏ khỏi cây);
+ * node `hidden: true` = có trong cây, có route, nhưng không hiện thanh bên (màn `navHidden`, và `needsStaff` khi
+ * chưa có nhân viên). `count` = số khoá màn không ẩn trong domain; domain có `collapsed` theo DOMAINS.
+ */
+export function buildNavigation(
+  hidden: Set<string> = new Set(),
+  badges = true,
+  opts: { hasStaff?: boolean } = {},
+): NavDomain[] {
+  const hasStaff = opts.hasStaff ?? true;
+  const navHidden = (key: string) => {
+    const m = SCREEN_BY_KEY[key];
+    return !!m?.navHidden || (!!m?.needsStaff && !hasStaff);
+  };
   const leaf = (key: string, name: string, en: string, icon: string): NavItem => ({
     key,
     name,
@@ -163,7 +181,9 @@ export function buildNavigation(hidden: Set<string> = new Set(), badges = true):
     icon,
     badge: badges ? (DESIGN_BADGES[key] ?? null) : null,
     children: [],
+    ...(navHidden(key) ? { hidden: true } : {}),
   });
+  const visible = (it: NavItem) => !it.hidden;
   return buildScreenTree()
     .map((d) => {
       const groups: NavItem[] = [];
@@ -181,13 +201,17 @@ export function buildNavigation(hidden: Set<string> = new Set(), badges = true):
           groups.push({ key: null, name: g.name, icon: g.icon, badge: null, children });
         }
       }
-      const count = groups.reduce((n, g) => n + (g.key ? 1 : 0) + (g.children?.length ?? 0), 0);
+      const count = groups.reduce(
+        (n, g) => n + (g.key && visible(g) ? 1 : 0) + (g.children?.filter((c) => c.key && visible(c)).length ?? 0),
+        0,
+      );
       return {
         domain: d.id,
         label: d.label,
         crumb: d.crumb,
         icon: d.icon,
         tone: d.id === 'business' ? ('ok' as const) : ('accent' as const),
+        collapsed: d.collapsedByDefault,
         count,
         groups,
       };
@@ -998,7 +1022,7 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     // v0.1.20: như gh/auth/deps.py current_user — mật khẩu tạm thì mọi route khác /auth/* và /account trả 403.
     if (user.mustChange) return problem(res, 403, 'PASSWORD_CHANGE_REQUIRED', 'Cần đặt mật khẩu mới trước khi tiếp tục');
 
-    if (path === '/navigation' && method === 'GET') return reply(200, buildNavigation(user.hidden, opts.badges ?? true));
+    if (path === '/navigation' && method === 'GET') return reply(200, buildNavigation(user.hidden, opts.badges ?? true, { hasStaff: opts.staff ?? true }));
     // v0.1.22 (Đợt B1–B3) — như gh/auth/users.py + gh/system_api/org.py.
     if (path === '/system/about' && method === 'GET') {
       // v0.1.36 (F-46): như gh/system_api/org.py — version = genh_version ?? image_version (giữ tương thích).
@@ -1210,7 +1234,7 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
 
 /**
  * Mock API with test-only hooks (all POST, JSON body):
- *   /api/v1/__mock/reset    {"setup":"fresh"|"finished","simulate":bool,"allowFinish":bool} rebuilds the state
+ *   /api/v1/__mock/reset    {"setup":"fresh"|"finished","simulate":bool,"allowFinish":bool,"staff":bool} rebuilds the state
  *   /api/v1/__mock/emit     {"type","data"} broadcasts one realtime frame
  *   /api/v1/__mock/notify   {"title","body","link","kind"} gives every Owner one notification (notification.new)
  *   /api/v1/__mock/raw      {} pushes one simulated raw message (raw.new → raw.state)

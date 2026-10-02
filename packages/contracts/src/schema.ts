@@ -60,6 +60,8 @@ export interface components {
       icon: string;
       badge?: components['schemas']['Badge'] | null;
       children?: components['schemas']['NavItem'][];
+      /** v0.1.42: có trong cây, có route, nhưng không hiện trên thanh bên (Hồ sơ sống, Plugin, Đánh giá/Chăm sóc khi chưa có nhân viên). */
+      hidden?: boolean;
     };
     NavDomain: {
       domain: 'business' | 'tech' | string;
@@ -67,6 +69,8 @@ export interface components {
       crumb: string;
       icon: string;
       tone: components['schemas']['Tone'];
+      /** v0.1.42: domain thu gọn mặc định trên thanh bên (Nâng cao). */
+      collapsed?: boolean;
       count: number;
       groups: components['schemas']['NavItem'][];
     };

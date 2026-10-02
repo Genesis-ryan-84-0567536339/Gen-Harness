@@ -39,8 +39,46 @@ export function screenKeys(nav: NavDomain[] | undefined): Set<string> {
   return out;
 }
 
+/** v0.1.42: con KHÔNG ẩn (node `hidden: true` có route nhưng không hiện thanh bên). */
+export function visibleChildren(g: NavItem): NavItem[] {
+  return (g.children ?? []).filter((c) => !c.hidden);
+}
+
 export function hasChildren(g: NavItem): boolean {
-  return !!g.children && g.children.length > 0;
+  return visibleChildren(g).length > 0;
+}
+
+/**
+ * v0.1.42: các mục cấp 1 hiện trên thanh bên — bỏ node ẩn; nhóm thuần chỉ còn con ẩn thì bỏ luôn.
+ */
+export function visibleGroups(dm: NavDomain): NavItem[] {
+  return dm.groups.filter((g) => !g.hidden && (g.key ? true : hasChildren(g)));
+}
+
+/**
+ * v0.1.42 (F-26): màn đầu tiên KHÔNG ẩn trong cây vai trò được thấy — duyệt domain → mục cấp 1: khoá của mục trước,
+ * rồi con không ẩn đầu tiên. `null` khi vai trò chưa được cấp màn nào (trang chủ "/" chuyển về đây).
+ */
+export function firstScreenKey(nav: NavDomain[] | undefined): string | null {
+  for (const d of nav ?? []) {
+    for (const g of d.groups) {
+      if (g.hidden) continue;
+      if (g.key) return g.key;
+      const kid = visibleChildren(g).find((c) => !!c.key);
+      if (kid?.key) return kid.key;
+    }
+  }
+  return null;
+}
+
+/**
+ * v0.1.42: domain thu gọn (Nâng cao) mở hay đóng — người dùng bấm thì theo lựa chọn đó (không lưu, mở lại trang là
+ * thu gọn); chưa bấm thì mở khi domain không thu gọn mặc định hoặc màn đang mở thuộc domain này.
+ */
+export function domainOpen(dm: NavDomain, activeKey: string | null | undefined, override: boolean | undefined): boolean {
+  if (!dm.collapsed) return true;
+  if (override !== undefined) return override;
+  return !!activeKey && dm.groups.some((g) => g.key === activeKey || !!g.children?.some((c) => c.key === activeKey));
 }
 
 /** Group key used for the open/closed override map (design uses the label). */
@@ -71,7 +109,8 @@ export function groupView(
 ): GroupView {
   const kids = hasChildren(g);
   const self = !!g.key && g.key === activeKey;
-  const activeKid = kids && !!activeKey && g.children!.some((c) => c.key === activeKey);
+  // Màn ẩn đang mở (vd. Hồ sơ sống) vẫn tô sáng nhóm cha.
+  const activeKid = !!activeKey && !!g.children?.some((c) => c.key === activeKey);
   const open = wide && kids ? (navOpen[groupId(g)] ?? (activeKid || self)) : false;
   return { self, activeKid, on: self || activeKid, open, showCaret: wide && kids };
 }
@@ -95,10 +134,10 @@ export function groupAction(
   wide: boolean,
 ): GroupAction {
   if (g.key) return { type: 'navigate', key: g.key };
-  const kids = g.children ?? [];
+  const kids = visibleChildren(g);
   if (!kids.length) return { type: 'none' };
   if (wide) {
-    const activeKid = !!activeKey && kids.some((c) => c.key === activeKey);
+    const activeKid = !!activeKey && !!g.children?.some((c) => c.key === activeKey);
     const current = navOpen[groupId(g)] ?? activeKid;
     return { type: 'toggle', group: groupId(g), open: !current };
   }
@@ -106,7 +145,7 @@ export function groupAction(
   return first?.key ? { type: 'navigate', key: first.key } : { type: 'none' };
 }
 
-/** Domain label colour: Kinh doanh = OK green, Kỹ thuật = accent-400 (docs/01). */
+/** Domain label colour: Việc hằng ngày = OK green, Nâng cao = accent-400 (docs/01). */
 export function domainColor(tone: Tone | string | undefined): string {
   switch (tone) {
     case 'ok':
