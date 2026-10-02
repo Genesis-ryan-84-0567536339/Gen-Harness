@@ -17,7 +17,8 @@ thật đúng tag → job `promote` nâng thành bản chính thức (latest). S
   - e2e-install.yml: job `promote` có permissions.contents == write, needs
     e2e-install + e2e-upgrade + e2e-rollback và `if` đòi e2e-install.result == 'success' VÀ
     e2e-rollback.result == 'success' (v0.1.34, F-35: job `e2e-rollback` phải tồn tại — bản hỏng cố ý chứng minh
-    genh tự quay về bản cũ, giữ dữ liệu, chặn lịch đêm thử lại); promote ghi dấu `<!-- genh:promoted_at=… -->`
+    genh tự quay về bản cũ, giữ dữ liệu, chặn lịch đêm thử lại) — v0.1.40 (F-12) thêm job `e2e-offsite` trong
+    needs + `if` đòi e2e-offsite.result == 'success' (thử khôi phục thật từ bản sao ngoài máy); promote ghi dấu `<!-- genh:promoted_at=… -->`
     (định dạng `date -u +%Y-%m-%dT%H:%M:%SZ`, khớp selfupdate.PromotedMarker)
     trong CÙNG lệnh `gh release edit … --latest --notes-file` — thời gian chín
     24 giờ của lịch đêm tính từ dấu này; job `e2e-selfupdate` (needs promote)
@@ -61,6 +62,9 @@ TAG_GUARD_ID = "tag-guard"
 PROMOTE_IF_E2E = "needs.e2e-install.result == 'success'"
 ROLLBACK_JOB = "e2e-rollback"
 PROMOTE_IF_ROLLBACK = "needs.e2e-rollback.result == 'success'"
+# v0.1.40 (F-12): thử khôi phục thật từ bản sao ngoài máy (lịch xuất → uninstall → cài mới → genh import, số dòng khớp).
+OFFSITE_JOB = "e2e-offsite"
+PROMOTE_IF_OFFSITE = "needs.e2e-offsite.result == 'success'"
 RELEASE_PATH = ".github/workflows/release.yml"
 E2E_PATH = ".github/workflows/e2e-install.yml"
 CI_USES = "./.github/workflows/ci.yml"
@@ -267,6 +271,12 @@ def check_e2e(e2e: dict[Any, Any]) -> list[str]:
             errs.append(
                 f"{E2E_PATH}: `if` của job `promote` không đòi `{PROMOTE_IF_ROLLBACK}` — bản hỏng cố ý chưa chứng minh "
                 "rollback mà vẫn promote."
+            )
+        if OFFSITE_JOB not in needs or not isinstance(jobs.get(OFFSITE_JOB), dict) \
+                or PROMOTE_IF_OFFSITE not in str(promote.get("if", "")):
+            errs.append(
+                f"{E2E_PATH}: job `promote` phải có job `{OFFSITE_JOB}` trong needs và `if` đòi `{PROMOTE_IF_OFFSITE}` — "
+                "bản sao ngoài máy chưa chứng minh khôi phục được mà vẫn promote."
             )
         errs += check_promote_marker(promote)
 

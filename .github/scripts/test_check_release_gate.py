@@ -115,8 +115,8 @@ class ReleaseGateTest(unittest.TestCase):
         self.assertIn("bản hỏng cố ý chưa chứng minh rollback mà vẫn promote", err)
 
     def test_promote_needs_thieu_e2e_rollback(self) -> None:
-        old = "needs: [resolve, e2e-install, e2e-upgrade, e2e-rollback]"
-        code, err = self.run_gate(self.replace(gate.E2E_PATH, old, "needs: [resolve, e2e-install, e2e-upgrade]"))
+        old = "needs: [resolve, e2e-install, e2e-upgrade, e2e-rollback, e2e-offsite]"
+        code, err = self.run_gate(self.replace(gate.E2E_PATH, old, "needs: [resolve, e2e-install, e2e-upgrade, e2e-offsite]"))
         self.assertEqual(code, 1)
         self.assertIn("thiếu 'e2e-rollback' trong needs", err)
         self.assertIn("bản hỏng cố ý chưa chứng minh rollback mà vẫn promote", err)
@@ -127,6 +127,19 @@ class ReleaseGateTest(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("e2e-rollback.result", err)
         self.assertIn("bản hỏng cố ý chưa chứng minh rollback mà vẫn promote", err)
+
+    def test_promote_needs_thieu_e2e_offsite(self) -> None:
+        old = "needs: [resolve, e2e-install, e2e-upgrade, e2e-rollback, e2e-offsite]"
+        code, err = self.run_gate(self.replace(gate.E2E_PATH, old, "needs: [resolve, e2e-install, e2e-upgrade, e2e-rollback]"))
+        self.assertEqual(code, 1)
+        self.assertIn("e2e-offsite", err)
+        self.assertIn("chưa chứng minh khôi phục được", err)
+
+    def test_promote_if_khong_doi_e2e_offsite(self) -> None:
+        old = " && needs.e2e-offsite.result == 'success'"
+        code, err = self.run_gate(self.replace(gate.E2E_PATH, old, ""))
+        self.assertEqual(code, 1)
+        self.assertIn("e2e-offsite.result", err)
 
     def test_selfupdate_khong_tu_lui(self) -> None:
         old = 'gh release edit "$PREV_TAG" --repo "$R" --latest'
