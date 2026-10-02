@@ -263,6 +263,28 @@ describe('Việc Sếp cần làm (/guide/viec-sep)', () => {
     expect(within(jev3).queryByRole('button', { name: 'Kiểm tra 1 lần' })).toBeNull();
   });
 
+  it('tải lại: máy chủ chỉ trả email đã che (detail.account_masked) → vẫn báo đúng tài khoản; Jev lỗi khác vẫn ẩn thẻ', async () => {
+    setup({
+      agy: [BINH, AN],
+      providers: [{ id: 'j', kind: 'system_one', name: 'Jev' }],
+      results: {
+        ...EMPTY,
+        agy_call: check('agy_call', 'pass', { detail: { account_masked: 'b***@genesis.vn' } }),
+        agy_switch: check('agy_switch', 'pass', { runs: 2, detail: { account_masked: 'b***@genesis.vn', account_match: true } }),
+        jev: check('jev', 'fail', { error_code: 'PROVIDER_ERROR', message: 'upstream 500' }),
+      },
+    });
+    renderPage();
+    const agy = await screen.findByRole('region', { name: 'Google (Antigravity) — hai tài khoản' });
+    expect(await within(agy).findByText('Đạt · đang dùng b***@genesis.vn')).toBeInTheDocument();
+    expect(within(agy).getByText('Đã đổi · gọi thử chạy bằng b***@genesis.vn — khớp')).toBeInTheDocument();
+    expect(within(agy).getByText(/Đã đổi qua lại 2\/2 lần/)).toBeInTheDocument();
+    const jev = screen.getByRole('region', { name: 'Jev' });
+    expect(within(jev).getByText('Lỗi — thẻ Jev sẽ ẩn, không cần làm thêm')).toBeInTheDocument();
+    expect(within(jev).getByText('Mã lỗi PROVIDER_ERROR')).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain('[object Object]');
+  });
+
   it('vai trò Vận hành → lời giải thích, không gọi /boss-checks', async () => {
     const { calls } = setup();
     renderPage('operator');

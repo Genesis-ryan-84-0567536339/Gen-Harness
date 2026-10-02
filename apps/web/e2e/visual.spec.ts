@@ -361,6 +361,13 @@ const outDir = join(resultsDir, 'visual');
 const EXTRA_SCREENS = ['tasks', 'documents', 'deals', 'guide', 'social'];
 
 /**
+ * Thẻ thêm SAU thiết kế gốc, ẩn khi so ảnh (như EXTRA_SCREENS). v0.1.39 (F-28): "Việc thiết lập tiếp" ở Tổng quan nay có
+ * thêm việc 13 Kết nối Facebook / 14 Nối Gen-hub — mock "finished" chưa làm hai việc này nên thẻ hiện, đẩy hàng KPI xuống
+ * (thiết kế gốc không vẽ thẻ). Hành vi của thẻ được kiểm ở `v0139-integ.spec.ts` và vitest `setup-followup`.
+ */
+const EXTRA_PANELS = ['section[aria-label="Việc thiết lập tiếp"]'];
+
+/**
  * Nút header thêm SAU thiết kế gốc: Gen ✦ (v0.1.21), chuông thông báo + sáng/tối (v0.1.23, B6–B7). Thiết kế không vẽ
  * chúng nên để nguyên thì header lệch vài chục px ở mọi màn (lỗi "Gen ✦" trước đây). Cách làm: TRƯỚC khi chụp, kiểm
  * chúng thật sự hiện, nằm gọn trong header và không làm header cao hơn (không mất độ phủ); SAU đó mới ẩn đúng các nút
@@ -465,7 +472,7 @@ for (const sc of SCENARIOS) {
     await checkExtraHeaderControls(appPage, sc.name);
     await appPage.addStyleTag({
       content:
-        [...EXTRA_SCREENS.map((k) => `[data-screen="${k}"]`), ...EXTRA_HEADER_CONTROLS.map((c) => `header.hd ${c}`)].join(',') +
+        [...EXTRA_SCREENS.map((k) => `[data-screen="${k}"]`), ...EXTRA_HEADER_CONTROLS.map((c) => `header.hd ${c}`), ...EXTRA_PANELS].join(',') +
         '{display:none !important}',
     });
     await settle(appPage);

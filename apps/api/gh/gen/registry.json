@@ -788,8 +788,8 @@
       ],
       "done_when": "Có thêm ít nhất một tài khoản ngoài Sếp.",
       "console": {
-        "label": "Điều khiển hệ thống › Quyền hạn",
-        "to": "/system?tab=roles"
+        "label": "Điều khiển hệ thống › Người dùng",
+        "to": "/system?tab=users"
       }
     },
     {
@@ -806,6 +806,39 @@
       "console": {
         "label": "Điều khiển hệ thống › Dữ liệu & lưu trữ",
         "to": "/system?tab=storage"
+      }
+    },
+    {
+      "n": 13,
+      "title": "Kết nối Facebook",
+      "why": "Để Gen đọc thông báo và tin nhắn Facebook của Sếp — chỉ đọc, không đăng bài hay trả lời thay Sếp.",
+      "steps": [
+        "Bấm \"Mở trang Tài khoản mạng xã hội\" bên dưới.",
+        "Bấm \"Thêm tài khoản\", đặt tên dễ nhận ra.",
+        "Đọc kỹ cảnh báo rủi ro, tích hai ô xác nhận rồi lưu.",
+        "Bấm \"Đăng nhập\" — Sếp tự đăng nhập ngay trong app (mật khẩu, mã 2FA không lưu lại).",
+        "Khi tài khoản báo Đang kết nối, bấm \"Đọc ngay\" để thử đọc thông báo."
+      ],
+      "done_when": "Có tài khoản Facebook đã đăng nhập.",
+      "console": {
+        "label": "Tài khoản mạng xã hội",
+        "to": "/social"
+      }
+    },
+    {
+      "n": 14,
+      "title": "Nối Gen-hub",
+      "why": "Để Gen đọc Kho tri thức của Sếp trên Gen-hub (chỉ đọc) — trả lời có căn cứ từ việc, quyết định, bài học đã ghi.",
+      "steps": [
+        "Trong Gen-hub: tạo trợ lý mới, chọn thẻ truy cập (token) 90 ngày, chỉ bật quyền ĐỌC Kho.",
+        "Chép token vừa tạo.",
+        "Bấm \"Mở thẻ Gen-hub\" bên dưới, dán địa chỉ và token vào thẻ Gen-hub.",
+        "Bấm \"Kiểm tra\" (nhập PIN khi được hỏi) và chờ báo Đã nối Kho."
+      ],
+      "done_when": "Kiểm tra xanh ít nhất một lần.",
+      "console": {
+        "label": "Kết nối MCP › Gen-hub",
+        "to": "/mcp"
       }
     }
   ]

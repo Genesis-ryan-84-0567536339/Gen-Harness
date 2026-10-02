@@ -1931,3 +1931,63 @@ Facebook báo **"Cần đăng nhập lại"** thì chỉ bấm **Đăng nhập l
   `/tmp/gh-agy-*` dùng chung ⇒ đỏ khi hai lượt pytest chạy song song).
 - Chờ sau phát hành: e2e-install chế độ pr/release bước canary offline trên ảnh thật + e2e-upgrade chuyển tệp Claude cũ
   (v0.1.37 → v0.1.38); kiểm genh tải từ releases/latest (checksum + `genh version` = v0.1.38) rồi mới báo Boss.
+
+## v0.1.39 — Kết nối chạy thật cùng Boss: "Việc Sếp cần làm" + lối vào Mạng xã hội + Hướng dẫn thiết lập (02/10/2026)
+
+### Boss cần làm gì
+
+Sau khi cập nhật bản mới (~20 phút), Sếp mở menu **Hướng dẫn thiết lập** → bấm thẻ **Việc Sếp cần làm** rồi làm từ trên
+xuống, mỗi dòng bấm một nút:
+
+1. Tạo token **CHỈ ĐỌC 90 ngày** trong Gen-hub, dán vào ô Token, bấm **Kiểm tra**, nhập PIN.
+2. Bấm **Mở trang tài khoản mạng xã hội**, thêm Facebook, đăng nhập ngay trong cửa sổ của app, quay lại bấm **Đọc ngay**.
+3. **Đăng nhập Google** bằng tài khoản của chính Sếp → **Gọi thử** → **Thêm tài khoản thứ hai** → bấm **Đổi sang…** qua
+   lại 2 lần.
+4. **Đăng nhập Claude Code** → dán mã đăng nhập → **Gọi thử**.
+5. Nếu có khoá Jev thì bấm **Kiểm tra 1 lần**; lỗi thì bỏ qua (thẻ Jev tự ẩn vào "Nâng cao").
+
+Không cần chụp màn hình hay gửi mã cho Claude — kết quả tự lưu, Claude đọc lại. Mục **Mạng xã hội** nay ở thanh bên trái
+(dưới Hướng dẫn thiết lập) và thẻ Facebook ở Điều khiển hệ thống › Kênh.
+
+### Vì sao (kế hoạch tổng `docs/audit/2026-10-01/0-ke-hoach-tong.md`, mục v0.1.39)
+
+- **F-74, F-76, F-77, F-78**: Gen-hub, Google/agy (2 tài khoản), Claude Code CLI, Jev chưa từng được nghiệm thu với tài
+  khoản thật; trước đây Boss phải chụp màn hình/chép mã cho Claude. Cần trang làm từng dòng + kết quả lưu ở máy chủ.
+- **F-31**: Gen-hub khó nối (công tắc mạng công cộng ẩn, lỗi khó hiểu). **F-32**: Facebook chỉ vào được từ menu tài
+  khoản. **F-28**: hướng dẫn có 3 tên gọi, việc 10 trỏ sai, thiếu Facebook/Gen-hub, thẻ Tổng quan nhắc mãi.
+
+### Thay đổi
+
+- **API kiểm thật (F-74, F-76, F-77)** — bảng `ops.boss_checks` (migration 0025, RLS theo org, chạy lại an toàn); `GET
+  /boss-checks` (chốt lượt đọc Facebook đang chờ) + `POST /boss-checks/{hub|facebook|agy_call|agy_switch|claude_call|jev}/run`,
+  chỉ Owner, `hub`/`agy_switch` cần PIN; lỗi nghiệp vụ vẫn 200 + `status: fail` + mã thống nhất. Đổi tài khoản agy = đổi
+  rồi **gọi thử thật** và so email của tệp phiên vừa dùng (`AGY_ACCOUNT_MISMATCH` nếu lệch); đổi qua lại 2 lần đạt mới
+  "Xong". Đăng nhập Claude ghi `claude_login` với `code_shape` (độ dài, lớp ký tự — không lưu giá trị) và kiểm
+  `.credentials.json` trong `GH_CLAUDE_HOME`. Bản ghi không chứa token/mật khẩu/email đầy đủ (chỉ `b***@miền`), `detail`
+  theo danh sách khoá cho phép, `message` qua `redact`. `/system/health` có khối `boss_checks` (không tính vào overall).
+  Gen-hub `_classify` + `error_code` (`HUB_TOKEN_REJECTED`, `MCP_NETWORK_BLOCKED` → "Bật 'Cho phép Gen-hub ở mạng công
+  cộng' ngay trong thẻ này", `HUB_TOOLS_MISSING`…); "Gọi thử" có `error_code` + `account`.
+- **Web "Việc Sếp cần làm" (F-74, F-31, F-28)** — `/guide/viec-sep`: 5 dòng (4 bắt buộc + Jev "Không bắt buộc"), ô kết
+  quả cạnh mỗi dòng (Đạt · giờ / Lỗi + câu thân thiện + "Chi tiết kỹ thuật" / Đang chạy… tự thăm lại 3 giây), tiến độ
+  x/4, vai trò khác thấy lời giải thích. Thẻ Gen-hub (/mcp và trang mới): địa chỉ https công khai tự bật mạng công cộng
+  + cảnh báo; "Kiểm tra" tự lưu trước (một lần PIN). Hướng dẫn thiết lập: một tên duy nhất, 9 việc 01–09, việc 10 trỏ
+  `/system?tab=users`, thêm "Kết nối Facebook" (/social) và "Nối Gen-hub" (/mcp), xong theo dữ liệu thật (API
+  `/setup/follow-up` thêm mục 13/14) nên thẻ "Việc thiết lập tiếp" ở Tổng quan không nhắc mãi.
+- **Web lối vào Mạng xã hội + Jev (F-32, F-78)** — mục "Mạng xã hội" trên thanh bên (chỉ Owner), thẻ Facebook ở Hệ thống ›
+  Kênh, Gen điều hướng tới `/social` (registry có màn `social`); Jev "Kiểm tra 1 lần", lỗi thì thẻ thu vào "Nâng cao".
+- **Sửa khi tích hợp** — `apps/api/gh/gen/registry.json` sinh lại (gói nav sinh trước khi gói hướng dẫn thêm việc 13/14 và
+  sửa việc 10 ⇒ vitest `gen-targets` đỏ); trang Việc Sếp: sau khi tải lại máy chủ chỉ trả email đã che
+  (`detail.account_masked`) ⇒ web dùng nó thay vì "tài khoản Google" chung chung; Jev lỗi mã nào (trừ chưa cấu hình) cũng
+  báo "thẻ Jev sẽ ẩn" (máy thật trả `PROVIDER_ERROR`/`JEV_ERROR`); mock Gen trả `navigate social` cho câu "mạng xã hội".
+
+### Kiểm tra
+
+- api: `test_boss_checks_v0139.py` (bản ghi không chứa token/mật khẩu/email đầy đủ/giá trị mã), `test_agy_switch_v0139.py`
+  (đổi 2 lần, gọi thử báo đúng tài khoản), `test_claude_login_v0139.py` (`.credentials.json` trong GH_CLAUDE_HOME,
+  `code_shape`), `test_hub_classify_v0139.py`, `test_setup_followup_v0139.py`, `test_gen_social_nav_v0139.py`; migration
+  0025 chạy lại an toàn; `/system/health` có `boss_checks`.
+- web: vitest `boss-checks-v0139`, `hub-link`, `guide`, `setup-followup`, `social-nav-v0139`, `jev-once-v0139`; e2e mock
+  `boss-checks-v0139.spec.ts`, `social-nav-v0139.spec.ts`, `v0139-integ.spec.ts` (13 tiêu chí nghiệm thu sau gộp: thanh
+  bên theo vai trò, Gen mở /social, /guide 9 việc + không còn "Hướng dẫn kết nối", Tổng quan hết việc đã xong, token sai →
+  `HUB_TOKEN_REJECTED`, /mcp công tắc mạng công cộng, Claude Code đăng nhập → Gọi thử Đạt, Jev 1 lần + tải lại vẫn còn,
+  không "[object Object]", Vận hành thấy lời giải thích).

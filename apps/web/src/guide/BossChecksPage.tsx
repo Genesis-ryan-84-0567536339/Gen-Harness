@@ -16,7 +16,7 @@ import { useHubLink, useUpdateHubLink } from '../screens/mcp/queries';
 import { ClaudeRiskNotice, CliLoginPanel } from '../screens/system/CliCard';
 import { useCliLogin } from '../screens/system/useCliLogin';
 import { qkSocial } from '../social/socialModel';
-import { BOSS_CHECKS_KEY, BOSS_CHECKS_POLL_MS, bossErrorText, fmtCheckedAt, hasPending, resultOf, withResult } from './bossChecksModel';
+import { BOSS_CHECKS_KEY, BOSS_CHECKS_POLL_MS, accountOf, bossErrorText, fmtCheckedAt, hasPending, resultOf, withResult } from './bossChecksModel';
 
 type Results = BossOverview | undefined;
 
@@ -321,8 +321,8 @@ function AgyRow({ data, done }: { data: Results; done: boolean }) {
       results={
         <>
           <ResultCell label="Đăng nhập" check={resultOf(data, 'agy_login')} />
-          <ResultCell label="Gọi thử" check={resultOf(data, 'agy_call')} okText={(c) => `Đạt · đang dùng ${c.account ?? 'tài khoản Google'}`} />
-          <ResultCell label="Đổi tài khoản" check={sw0} okText={(c) => `Đã đổi · gọi thử chạy bằng ${c.account ?? 'tài khoản Google'} — khớp`} />
+          <ResultCell label="Gọi thử" check={resultOf(data, 'agy_call')} okText={(c) => `Đạt · đang dùng ${accountOf(c) ?? 'tài khoản Google'}`} />
+          <ResultCell label="Đổi tài khoản" check={sw0} okText={(c) => `Đã đổi · gọi thử chạy bằng ${accountOf(c) ?? 'tài khoản Google'} — khớp`} />
         </>
       }
     >
@@ -391,7 +391,7 @@ function ClaudeRow({ data, done }: { data: Results; done: boolean }) {
       results={
         <>
           <ResultCell label="Đăng nhập" check={resultOf(data, 'claude_login')} />
-          <ResultCell label="Gọi thử" check={resultOf(data, 'claude_call')} okText={(c) => (c.account ? `Đạt · đang dùng ${c.account}` : `Đạt`)} />
+          <ResultCell label="Gọi thử" check={resultOf(data, 'claude_call')} okText={(c) => (accountOf(c) ? `Đạt · đang dùng ${accountOf(c)}` : `Đạt`)} />
         </>
       }
     >
@@ -427,7 +427,7 @@ function JevRow({ data, done }: { data: Results; done: boolean }) {
       optional
       done={done}
       todo="Không bắt buộc. Có khoá Jev thì kiểm một lần; không có thì bỏ qua dòng này."
-      results={<ResultCell check={result} failText={result?.error_code === 'JEV_ERROR' ? 'Lỗi — thẻ Jev sẽ ẩn, không cần làm thêm' : undefined} />}
+      results={<ResultCell check={result} failText={result?.status === 'fail' && result.error_code !== 'JEV_NOT_CONFIGURED' ? 'Lỗi — thẻ Jev sẽ ẩn, không cần làm thêm' : undefined} />}
     >
       {providers.isPending ? (
         <SkeletonLines rows={1} padding="0" />

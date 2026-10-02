@@ -64,6 +64,16 @@ export function resultOf(o: BossOverview | undefined, key: BossCheckKey): BossCh
   return o?.results?.[key] ?? null;
 }
 
+/**
+ * Tài khoản đang dùng của một kết quả: email đầy đủ khi vừa chạy (phản hồi `run`), sau khi tải lại thì máy chủ chỉ
+ * còn dạng che trong `detail.account_masked` (CSDL không lưu email đầy đủ). Luôn là chuỗi hoặc null.
+ */
+export function accountOf(c: Pick<BossCheck, 'account' | 'detail'>): string | null {
+  if (typeof c.account === 'string' && c.account) return c.account;
+  const m = c.detail?.account_masked;
+  return typeof m === 'string' && m ? m : null;
+}
+
 /** Có kết quả nào đang chạy → trang thăm lại. */
 export function hasPending(o: BossOverview | undefined): boolean {
   return !!o && Object.values(o.results ?? {}).some((c) => c?.status === 'pending');
