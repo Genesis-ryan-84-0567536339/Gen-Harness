@@ -23,6 +23,7 @@ import fcntl
 import logging
 import os
 import re
+import shutil
 import signal
 import struct
 import termios
@@ -396,12 +397,102 @@ async def delete_profile(db: AsyncSession, org_id: uuid.UUID, profile_id: uuid.U
     return {"email": row.email, "was_active": row.is_active, "kind": row.kind}
 
 
+CLAUDE_HOME_SHARED_MSG = "GH_CLAUDE_HOME nằm trong HOME của Antigravity CLI — agy có thể đọc phiên Claude"
+CLAUDE_HOME_SHARED_KEY = "cli.claude_home_shared"
+
+
+def _agy_home() -> Path:
+    return Path(cli_env(get_settings().cli_home)["HOME"])
+
+
+def _inside(path: Path, parent: Path) -> bool:
+    return path == parent or parent in path.parents
+
+
+def migrate_legacy_claude_home() -> int:
+    """F-22 (v0.1.38): chuyển phiên Claude Code từ đường dẫn cũ `<HOME agy>/claude/.claude` (≤ v0.1.37, nằm trong
+    volume agy_state — agy có công cụ đọc tệp nên đọc được `.credentials.json`) sang GH_CLAUDE_HOME mới (volume
+    claude_state). Trả số mục đã chuyển.
+
+    Chỉ api gọi (đầu `restore_active`, `owns_logins=True`), trước khi trả bản gửi tạm/ghi lại phiên. Tệp/thư mục đã có
+    ở đích (vd. phiên mới hơn) KHÔNG bị bản cũ ghi đè. Xong thì xoá cả `<HOME agy>/claude` (gồm `claude/work`). Chạy
+    lại an toàn: không còn thư mục cũ ⇒ không làm gì. Lỗi OSError chỉ ghi cảnh báo (không làm sập api); tệp còn thiếu
+    thì `restore_active` ghi lại từ agent.cli_profiles nên không mất đăng nhập.
+    Rollback về v0.1.37: bản cũ thấy thiếu tệp ở đường dẫn cũ ⇒ restore_active của nó ghi lại từ CSDL ⇒ vẫn an toàn.
+    Không bao giờ log nội dung tệp — chỉ số mục."""
+    target = cli_home_dir(get_settings().claude_home)
+    legacy = _agy_home() / "claude" / ".claude"
+    moved = 0
+    try:
+        if not legacy.is_dir():
+            return 0
+        legacy_r, target_r = legacy.resolve(), target.resolve()
+        if legacy_r == target_r or _inside(target_r, legacy_r):
+            return 0
+        target.mkdir(parents=True, exist_ok=True)
+        for item in sorted(legacy.iterdir()):
+            dest = target / item.name
+            if dest.exists() or dest.is_symlink():
+                continue
+            shutil.move(str(item), str(dest))
+            if not dest.is_symlink():
+                dest.chmod(0o700 if dest.is_dir() else 0o600)
+            moved += 1
+        shutil.rmtree(legacy.parent)
+        log.info("Đã chuyển %d mục phiên Claude Code sang thư mục riêng (F-22)", moved)
+    except OSError as exc:
+        log.warning("Chuyển phiên Claude Code sang thư mục riêng lỗi (%s) — sẽ ghi lại từ hồ sơ đã lưu",
+                    type(exc).__name__)
+    return moved
+
+
+def claude_home_shared() -> bool:
+    """True khi GH_CLAUDE_HOME nằm trong HOME của Antigravity CLI (agy có thể đọc phiên Claude)."""
+    try:
+        return _inside(cli_home_dir(get_settings().claude_home).resolve(), _agy_home().resolve())
+    except OSError:
+        return False
+
+
+async def _report_claude_home(sm: async_sessionmaker[AsyncSession] | None, shared: bool) -> None:
+    """Mở/đóng sự cố `cli.claude_home_shared` cho từng tổ chức (gh.health — v0.1.36). Lỗi thì bỏ qua."""
+    if sm is None:
+        return
+    from gh import health
+
+    try:
+        async with sm() as db:
+            orgs = (await db.execute(text("SELECT id FROM core.organizations"))).scalars().all()
+            for org_id in orgs:
+                if shared:
+                    await health.raise_once(
+                        db, org_id, key=CLAUDE_HOME_SHARED_KEY, kind=CLAUDE_HOME_SHARED_KEY, severity="bad",
+                        title="Phiên Claude Code nằm chung chỗ với Antigravity CLI",
+                        body="Antigravity CLI có thể đọc phiên đăng nhập đã lưu của Claude Code. Cập nhật Gen-Harness "
+                             "bản mới (dùng volume claude_state riêng). Chi tiết kỹ thuật: " + CLAUDE_HOME_SHARED_MSG,
+                        link=None)
+                else:
+                    await health.clear(db, org_id, CLAUDE_HOME_SHARED_KEY)
+            await db.commit()
+    except Exception as exc:  # noqa: BLE001 — báo sự cố là phụ, không làm hỏng khởi động
+        log.warning("Không ghi được sự cố %s: %s", CLAUDE_HOME_SHARED_KEY, type(exc).__name__)
+
+
 async def restore_active(sm: async_sessionmaker[AsyncSession] | None, *, owns_logins: bool = True) -> None:
     """Khi khởi động: tệp phiên trong volume trống mà có hồ sơ hoạt động → ghi lại tệp (từng loại CLI).
 
     Còn bản "gửi tạm" (api chết giữa lúc thêm tài khoản) thì api trả nó về trước — đó là tài khoản đang dùng. Worker
     (`owns_logins=False`) không đụng tới khi còn bản gửi tạm: có thể api đang chạy một phiên đăng nhập, ghi tệp lúc đó
-    sẽ bị nhận nhầm là tài khoản mới."""
+    sẽ bị nhận nhầm là tài khoản mới.
+
+    F-22: api chuyển phiên Claude từ đường dẫn cũ trong HOME của agy sang GH_CLAUDE_HOME riêng TRƯỚC mọi bước khác
+    (`migrate_legacy_claude_home`); tệp còn thiếu sau đó được ghi lại từ hồ sơ như thường."""
+    if owns_logins:
+        migrate_legacy_claude_home()
+        shared = claude_home_shared()
+        if shared:
+            log.error(CLAUDE_HOME_SHARED_MSG)
+        await _report_claude_home(sm, shared)
     need: list[str] = []
     for kind in CLI_KINDS:
         if owns_logins:

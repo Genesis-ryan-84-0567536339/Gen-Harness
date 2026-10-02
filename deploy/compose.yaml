@@ -96,6 +96,8 @@ services:
     secrets: [gh_master_key, gh_bridge_key, gh_browser_key]
     volumes:
       - agy_state:/var/lib/gh/agy
+      # F-22: phiên Claude Code tách khỏi HOME của Antigravity CLI (agy đọc được tệp trong HOME của nó).
+      - claude_state:/var/lib/gh/claude
       - gh_objects:/var/lib/gh/objects
       # Hộp thư Console ↔ genh trên máy chủ (<gốc cài đặt>/run, genh tạo sẵn 0777 và đặt
       # GH_HOST_LINK_DIR): phiên bản đang chạy, yêu cầu "Cập nhật ngay", trạng thái cập nhật.
@@ -123,6 +125,7 @@ services:
     # v0.1.8). Chỉ api chép; worker mount sau, không chép.
     volumes:
       - { type: volume, source: agy_state, target: /var/lib/gh/agy, volume: { nocopy: true } }
+      - { type: volume, source: claude_state, target: /var/lib/gh/claude, volume: { nocopy: true } }
       - { type: volume, source: gh_objects, target: /var/lib/gh/objects, volume: { nocopy: true } }
     healthcheck:
       test: ["CMD", "arq", "--check", "gh.worker.WorkerSettings"]
@@ -304,3 +307,5 @@ volumes:
   redis_data:
   gh_objects:
   agy_state:
+  # F-22 (v0.1.38): phiên Claude Code (GH_CLAUDE_HOME=/var/lib/gh/claude/.claude), tách khỏi agy_state.
+  claude_state:

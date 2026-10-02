@@ -63,11 +63,15 @@ LABEL org.opencontainers.image.version=${VERSION}
 # volume sẽ được tạo với quyền root, tiến trình chạy dưới USER gh (dòng dưới)
 # sẽ không ghi được tài liệu/backup.
 RUN useradd --system --uid 10001 --home-dir /home/gh --create-home gh \
-    && mkdir -p /var/lib/gh/agy/.gemini/antigravity-cli /var/lib/gh/agy/claude/.claude /var/lib/gh/objects \
+    && mkdir -p /var/lib/gh/agy/.gemini/antigravity-cli /var/lib/gh/claude/.claude /var/lib/gh/objects \
     && chown -R gh:gh /var/lib/gh
-# Phiên Claude Code nằm trong CÙNG volume agy_state (api và worker đã mount chung) — không thêm volume mới.
+# F-22 (v0.1.38): phiên Claude Code nằm ở volume RIÊNG claude_state (/var/lib/gh/claude), KHÔNG còn trong agy_state —
+# HOME của Antigravity CLI là /var/lib/gh/agy và agy có công cụ đọc tệp, nên để `.credentials.json` của Claude dưới
+# HOME đó là cho agy đọc được phiên Claude. /var/lib/gh/claude/.claude tạo sẵn (chown gh:gh ở trên) để Docker chép
+# đúng quyền vào volume mới ở lần mount đầu. Tệp ở đường dẫn cũ do api tự chuyển khi khởi động
+# (gh/providers/cli.py::migrate_legacy_claude_home).
 ENV GH_CLI_HOME=/var/lib/gh/agy/.gemini/antigravity-cli GH_CLI_BINARY=agy AGY_CLI_DISABLE_AUTO_UPDATE=1 \
-    GH_CLAUDE_HOME=/var/lib/gh/agy/claude/.claude GH_CLAUDE_BINARY=claude DISABLE_AUTOUPDATER=1
+    GH_CLAUDE_HOME=/var/lib/gh/claude/.claude GH_CLAUDE_BINARY=claude DISABLE_AUTOUPDATER=1
 USER gh
 EXPOSE 8000
 HEALTHCHECK --interval=15s --timeout=3s --retries=5 \
