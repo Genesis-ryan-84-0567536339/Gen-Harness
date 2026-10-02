@@ -36,8 +36,13 @@ chung, đây chỉ đề phòng kết nối lạ khác) → `pg_restore --clean 
 "nhập = thay thế hoàn toàn", giống `gh.backup.restore_backup`) → ghi lại object
 → MÃ HOÁ LẠI mọi cột bí mật (đã bị `pg_restore` mang nguyên bản mã hoá bằng khoá master CŨ vào CSDL) bằng khoá
 master HIỆN HÀNH của máy đích, dùng đúng `associated data` từng loại (không đổi AAD nào — đổi AAD tương đương
-đổi bí mật, không giải mã lại được nữa). Khoá cũ == khoá hiện tại (nhập lại cùng máy, hoặc hai máy chia sẻ
-`GH_MASTER_KEY`) → bỏ qua bước này (không cần giải mã/mã hoá lại vô ích).
+đổi bí mật, không giải mã lại được nữa). AAD có hai dạng (`ReencryptTarget.aad`): byte cố định cho cả bảng, hoặc
+hàm tính THEO DÒNG từ các cột của dòng đó (vd. phiên mạng xã hội `core.social_accounts.state_enc` dùng
+`social:<org_id>:<id>` — F-17, v0.1.38; trước đó cột này bị sót nên nhập sang máy khoá khác thì đọc/kiểm lỗi 500).
+Mục có `on_fail="needs_login"` mà blob không giải được bằng khoá cũ (gói cũ, blob hỏng) KHÔNG làm hỏng cả lượt
+nhập: xoá phiên đó, chuyển tài khoản sang `needs_login` (`pause_reason='key_changed'`) để Owner đăng nhập lại;
+mục `on_fail="raise"` giữ hành vi cũ (ném lỗi). Log chỉ ghi số đếm. Khoá cũ == khoá hiện tại (nhập lại cùng máy,
+hoặc hai máy chia sẻ `GH_MASTER_KEY`) → bỏ qua bước này (không cần giải mã/mã hoá lại vô ích).
 
 Không đọc cả gói vào RAM nếu tránh được: `pg_dump`/`pg_restore` luôn ghi/đọc qua tệp tạm (không qua stdout của
 subprocess); tar cũng dựng trên đĩa. Chỉ bước mã hoá/giải mã lớp ngoài cùng cần trọn `tar` trong bộ nhớ một lần
@@ -57,9 +62,11 @@ import shutil
 import sys
 import tarfile
 import tempfile
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlsplit, urlunsplit
 
 import orjson
@@ -74,6 +81,7 @@ from gh import db as dbmod
 from gh.backup import database_name, libpq_url, recreate_database
 from gh.chassis.objects import LocalObjectStore, ObjectStore, get_object_store
 from gh.config import get_settings
+from gh.social import protocol as social_protocol
 
 log = logging.getLogger("gh.bundle")
 
@@ -95,18 +103,48 @@ OBJECTS_EXCLUDE_PREFIX = "backups/"      # bản backup GFS không thuộc hồ 
 RESTORE_LOCK_TIMEOUT_MS = 30_000
 
 # ─── các cột CSDL mã hoá bằng khoá master (`gh.crypto`) — rà theo mọi lời gọi `crypto.encrypt(...)` trong gh/ ──
-# (table, cột khoá chính, cột bí mật, associated data — PHẢI khớp y hệt AAD dùng ở nơi mã hoá gốc, xem cạnh mỗi
-# dòng để đối chiếu nếu AAD đổi ở nơi đó).
-REENCRYPT_TARGETS: list[tuple[str, str, str, bytes]] = [
-    ("agent.provider_keys", "id", "secret_enc", b"provider_key"),      # gh/providers/router.py::KEY_AAD
-    ("agent.cli_profiles", "id", "token_enc", b"cli_token"),           # gh/providers/cli.py::CLI_AAD
-    ("agent.mcp_servers", "id", "auth_enc", b"mcp_server_auth"),       # gh/mcp_api/routes.py::MCP_AAD
-    ("core.channel_sessions", "id", "credential_enc", b"channel_session"),  # gh/data/ingest.py (literal)
+# `aad` PHẢI khớp y hệt AAD dùng ở nơi mã hoá gốc (xem cạnh mỗi dòng để đối chiếu nếu AAD đổi ở nơi đó).
+# `tests/test_enc_columns_v0138.py` quét mọi cột `bytea` tên `*_enc` trong CSDL đã migrate và đòi tập đó BẰNG
+# ĐÚNG tập trong danh sách này — thêm cột bí mật mới mà quên khai ở đây thì test đỏ.
+
+@dataclass(frozen=True)
+class ReencryptTarget:
+    """Một cột bí mật cần mã hoá lại khi nhập gói. `aad`: byte cố định, hoặc hàm tính theo dòng (nhận mapping gồm
+    `id_col` + `extra_cols`). `on_fail`: 'raise' (mặc định, lỗi giải mã làm hỏng lượt nhập) hoặc 'needs_login'
+    (chỉ dành cho `core.social_accounts` — xoá phiên, tài khoản chuyển sang Cần đăng nhập lại)."""
+
+    table: str
+    id_col: str
+    secret_col: str
+    aad: bytes | Callable[[Mapping[str, Any]], bytes]
+    extra_cols: tuple[str, ...] = ()
+    on_fail: Literal["raise", "needs_login"] = "raise"
+
+    def aad_for(self, row: Mapping[str, Any]) -> bytes:
+        return self.aad if isinstance(self.aad, bytes) else self.aad(row)
+
+
+def _social_state_aad(row: Mapping[str, Any]) -> bytes:
+    # gh/social/service.py::_store_state — f"social:{protocol.account_aad(org_id, account_id)}"
+    return f"social:{social_protocol.account_aad(row['org_id'], row['id'])}".encode()
+
+
+REENCRYPT_TARGETS: list[ReencryptTarget] = [
+    ReencryptTarget("agent.provider_keys", "id", "secret_enc", b"provider_key"),      # gh/providers/router.py::KEY_AAD
+    ReencryptTarget("agent.cli_profiles", "id", "token_enc", b"cli_token"),           # gh/providers/cli.py::CLI_AAD
+    ReencryptTarget("agent.mcp_servers", "id", "auth_enc", b"mcp_server_auth"),       # gh/mcp_api/routes.py::MCP_AAD
+    ReencryptTarget("core.channel_sessions", "id", "credential_enc", b"channel_session"),  # gh/data/ingest.py (literal)
     # Cột tồn tại từ 0001_baseline nhưng CHƯA có chỗ nào trong gh/ ghi/đọc nó (chưa nối dây tính năng TOTP) —
     # luôn NULL hiện tại nên nhánh này không có tác dụng gì, chỉ để không sót cột nếu tính năng được nối dây
     # sau mà quên cập nhật danh sách này (rà lại AAD thật khi đó, đây chỉ là giá trị tạm hợp lý).
-    ("core.users", "id", "totp_secret_enc", b"totp_secret"),
+    ReencryptTarget("core.users", "id", "totp_secret_enc", b"totp_secret"),
+    # F-17 (v0.1.38): phiên mạng xã hội — AAD theo dòng; blob không giải được → Cần đăng nhập lại, không làm hỏng
+    # lượt nhập (phiên chỉ là cookie, đăng nhập lại là lấy lại được).
+    ReencryptTarget("core.social_accounts", "id", "state_enc", _social_state_aad, extra_cols=("org_id",),
+                    on_fail="needs_login"),
 ]
+
+SOCIAL_KEY_CHANGED_REASON = "key_changed"
 
 
 class BundleError(Exception):
@@ -409,18 +447,37 @@ async def _reencrypt_secrets(old_master_key: bytes) -> None:
     await dbmod.dispose_engine()  # pg_restore vừa thay toàn bộ schema/dữ liệu — không dùng engine/pool cũ
     sm = dbmod.sessionmaker()
     total = 0
+    needs_login = 0
     async with sm() as db:
-        for table, id_col, secret_col, aad in REENCRYPT_TARGETS:
+        for t in REENCRYPT_TARGETS:
+            cols = ", ".join((t.id_col, t.secret_col, *t.extra_cols))
             rows = (await db.execute(
-                text(f"SELECT {id_col}, {secret_col} FROM {table} WHERE {secret_col} IS NOT NULL"))).all()  # noqa: S608
-            for row_id, blob in rows:
-                plain = crypto.decrypt(bytes(blob), aad, key=old_master_key)
+                text(f"SELECT {cols} FROM {t.table} WHERE {t.secret_col} IS NOT NULL"))).mappings().all()  # noqa: S608
+            for row in rows:
+                aad = t.aad_for({c: row[c] for c in (t.id_col, *t.extra_cols)})
+                try:
+                    plain = crypto.decrypt(bytes(row[t.secret_col]), aad, key=old_master_key)
+                except (InvalidTag, ValueError):
+                    if t.on_fail != "needs_login":
+                        raise
+                    # Phiên không mở được bằng khoá cũ (gói cũ / blob hỏng) → bỏ phiên, Owner đăng nhập lại.
+                    await db.execute(text(f"""UPDATE {t.table} SET {t.secret_col} = NULL,
+                                                     status = CASE WHEN status = 'revoked' THEN status
+                                                                   ELSE 'needs_login' END,
+                                                     pause_reason = :r
+                                              WHERE {t.id_col} = :i"""),  # noqa: S608
+                                     {"r": SOCIAL_KEY_CHANGED_REASON, "i": row[t.id_col]})
+                    needs_login += 1
+                    continue
                 new_blob = crypto.encrypt(plain, aad, key=crypto.master_key())
-                await db.execute(text(f"UPDATE {table} SET {secret_col} = :v WHERE {id_col} = :i"),  # noqa: S608
-                                 {"v": new_blob, "i": row_id})
+                await db.execute(text(f"UPDATE {t.table} SET {t.secret_col} = :v WHERE {t.id_col} = :i"),  # noqa: S608
+                                 {"v": new_blob, "i": row[t.id_col]})
                 total += 1
         await db.commit()
     log.info("Đã mã hoá lại %d bí mật bằng khoá master hiện hành của máy này", total)
+    if needs_login:
+        log.warning("%d phiên mạng xã hội không giải mã được bằng khoá cũ — đã chuyển sang Cần đăng nhập lại",
+                    needs_login)
 
 
 # ─── tiến trình con thật (giống gh/backup.py) ─────────────────────────────────────────────────────────────────
