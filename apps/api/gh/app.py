@@ -57,6 +57,7 @@ from gh.social import service as social_service
 from gh.social.routes import router as social_router
 from gh.system_api.backups import router as backups_router
 from gh.system_api.health import router as health_router
+from gh.system_api.offsite import router as offsite_router
 from gh.system_api.org import router as org_router
 from gh.system_api.routes import router as system_router
 from gh.system_api.update import router as update_router
@@ -221,8 +222,9 @@ def create_app(*, with_lifespan: bool = True, expose_docs: bool | None = None) -
     # Lưới cuối: ngoại lệ lạ (KeyError, ValueError…) vẫn là problem+json 500 INTERNAL kèm error_id, không text/plain.
     app.add_exception_handler(Exception, unhandled_error_handler)
     for r in (auth_router, account_router, users_router, setup_router, shell_router, audit_router, plugins_router,
-             mcp_router, data_router, system_router, update_router, backups_router, org_router, gen_router,
-             notifications_router, triage_router, hub_router, social_router, health_router, boss_checks_router):
+             mcp_router, data_router, system_router, update_router, backups_router, offsite_router, org_router,
+             gen_router, notifications_router, triage_router, hub_router, social_router, health_router,
+             boss_checks_router):
         app.include_router(r, prefix="/api/v1")
     for r in biz.routers():
         app.include_router(r, prefix="/api/v1")

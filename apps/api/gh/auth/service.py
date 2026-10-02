@@ -41,6 +41,10 @@ PIN_OPERATIONS: dict[str, str] = {
     "user.manage": "Mời / khoá / đặt lại mật khẩu người dùng",
     # v0.1.35 (F-20): phiên Owner bị lấy không được âm thầm chuyển lưu lượng LLM ra máy chủ lạ.
     "ai.route_change": "Thêm / sửa nhà cung cấp AI, khoá API, chuỗi ưu tiên",
+    # v0.1.40 (F-12): bản sao ngoài máy — đổi nơi lưu, xem Khoá khôi phục, tải toàn bộ dữ liệu ra trình duyệt.
+    "offsite.destination": "Chọn nơi lưu bản sao ngoài máy",
+    "offsite.recovery_kit": "Xem Bộ khôi phục",
+    "offsite.portable": "Tải gói mang đi",
 }
 
 
