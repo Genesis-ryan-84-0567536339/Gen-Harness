@@ -39,6 +39,10 @@ services:
     restart: unless-stopped
     logging: *logging
     ports: ["${GH_PORT:-8443}:8443"]
+    # Đổi Caddyfile ⇒ đổi nhãn ⇒ compose tạo lại proxy (không thì container cũ giữ CSP cũ).
+    # Giá trị = 12 ký tự đầu sha256(deploy/proxy/Caddyfile); tests/test_proxy_csp_v0135.py canh.
+    labels:
+      gh.caddyfile-sha: "d1061c2e0d55"
     environment:
       GH_SITE_ADDRESS: ${GH_SITE_ADDRESS:-localhost}
     volumes:

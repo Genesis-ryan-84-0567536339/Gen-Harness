@@ -299,6 +299,75 @@ async def test_documents_upload_download_and_default_acl(world, owner_api: Api, 
     assert (await owner_api.get(f"/documents/{doc['id']}")).status_code == 404
 
 
+async def _upload(owner_api: Api, mime: str, body: bytes, filename: str = "f.bin") -> str:
+    r = await owner_api.send("POST", "/documents", {"title": "Tệp thử", "filename": filename, "mime": mime,
+                                                     "content_base64": base64.b64encode(body).decode()})
+    assert r.status_code == 201, r.text
+    return str(r.json()["id"])
+
+
+def _assert_sandboxed(dl) -> None:  # type: ignore[no-untyped-def]
+    csp = dl.headers["content-security-policy"]
+    assert "sandbox" in csp and "default-src 'none'" in csp
+    assert dl.headers["x-content-type-options"] == "nosniff"
+    assert dl.headers["cross-origin-resource-policy"] == "same-origin"
+    assert "no-store" in dl.headers["cache-control"]
+
+
+@pytest.mark.parametrize(("mime", "body"), [
+    ("text/html", b"<script>alert(1)</script>"),
+    ("application/javascript", b"alert(1)"),
+    ("image/svg+xml", b'<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"/>'),
+    ("text/xml", b"<x/>"),
+])
+async def test_documents_active_content_forced_download(  # type: ignore[no-untyped-def]
+        world, owner_api: Api, mime: str, body: bytes) -> None:
+    """F-5: tệp có thể chạy mã (html/js/svg/xml) không bao giờ hiển thị inline cùng origin."""
+    doc_id = await _upload(owner_api, mime, body)
+    dl = await owner_api.get(f"/documents/{doc_id}/content")
+    assert dl.status_code == 200 and dl.content == body
+    assert dl.headers["content-type"].startswith("application/octet-stream")
+    assert dl.headers["content-disposition"].startswith("attachment")
+    _assert_sandboxed(dl)
+
+
+@pytest.mark.parametrize("mime", ["image/png", "application/pdf"])
+async def test_documents_safe_mime_inline_still_sandboxed(  # type: ignore[no-untyped-def]
+        world, owner_api: Api, mime: str) -> None:
+    doc_id = await _upload(owner_api, mime, b"\x89PNG-or-%PDF")
+    dl = await owner_api.get(f"/documents/{doc_id}/content")
+    assert dl.status_code == 200
+    assert dl.headers["content-type"].startswith(mime)
+    assert dl.headers["content-disposition"].startswith("inline")
+    assert "filename*=UTF-8''T%E1%BB%87p%20th%E1%BB%AD" in dl.headers["content-disposition"]
+    _assert_sandboxed(dl)
+
+
+async def test_documents_legacy_mime_with_params_forced_download(  # type: ignore[no-untyped-def]
+        world, owner_api: Api, db) -> None:
+    """Dòng cũ đã lưu mime viết hoa có tham số vẫn bị buộc tải xuống (thi hành lúc phục vụ)."""
+    doc_id = await _upload(owner_api, "text/plain", b"<script>alert(1)</script>")
+    await db.execute(text("UPDATE biz.documents SET mime = 'TEXT/HTML; charset=utf-8' WHERE id = :i"),
+                     {"i": doc_id})
+    await db.commit()
+    dl = await owner_api.get(f"/documents/{doc_id}/content")
+    assert dl.status_code == 200
+    assert dl.headers["content-type"].startswith("application/octet-stream")
+    assert dl.headers["content-disposition"].startswith("attachment")
+    _assert_sandboxed(dl)
+
+
+def test_content_headers_pure() -> None:
+    from gh.biz.relations.routes import _content_headers
+
+    assert _content_headers(" Image/PNG ; x=1", "a")[0] == "image/png"
+    for bad in ("image/svg+xml", "text/html", "text/plain", "application/x-javascript", "", None):
+        media, headers = _content_headers(bad, "a b")
+        assert media == "application/octet-stream"
+        assert headers["Content-Disposition"] == "attachment; filename*=UTF-8''a%20b"
+        assert headers["Content-Security-Policy"] == "sandbox; default-src 'none'"
+
+
 async def test_documents_acl_by_role_and_scope(world, owner_api: Api, client, db) -> None:  # type: ignore[no-untyped-def]
     """Tài liệu gắn với `pb` — Agent nhân viên (mặc định phạm vi `assigned`, chưa được phân `pb`) không thấy;
     ACL cấp thêm quyền cho đúng người đó (không phải team/role) — đọc được nhưng không sửa được (`can_write`
