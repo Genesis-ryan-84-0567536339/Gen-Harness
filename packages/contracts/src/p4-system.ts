@@ -124,12 +124,23 @@ export interface RetentionPolicy {
   last_run_at?: string | null;
   /** v0.1.40: số dòng đã xoá ở lần dọn gần nhất; null = chưa dọn / không áp dụng. */
   last_deleted?: number | null;
+  /**
+   * v0.1.40 (F-2): hạn đặt TRƯỚC v0.1.40 (lúc chỉ để hiển thị) — việc dọn CHƯA thi hành cho tới khi Owner lưu lại có
+   * xác nhận xoá vĩnh viễn. Thiếu ở api cũ.
+   */
+  needs_confirm?: boolean;
 }
 
 export interface RetentionPatchBody {
   dataset: RetentionEditableDataset;
   keep_days?: number | null;
   anonymize_after_days?: number | null;
+  /**
+   * v0.1.40 (F-2): bắt buộc `true` khi đặt số ngày cho tập dữ liệu bị xoá thật (mọi tập trừ ops.action_log) — người
+   * dùng đã đồng ý dữ liệu quá hạn bị XOÁ VĨNH VIỄN ở lượt dọn kế tiếp. Thiếu ⇒ 422 RETENTION_CONFIRM_REQUIRED.
+   * Bảng phân vùng (raw.events, clean.meaning_units, agent.model_calls) chỉ Owner đổi được (403 với vai trò khác).
+   */
+  confirm_delete?: boolean;
 }
 
 export type DataRequestKind = 'export' | 'erase' | 'restrict';

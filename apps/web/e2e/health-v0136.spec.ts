@@ -179,6 +179,11 @@ test.describe('v0.1.36 — Cần Sếp xử lý & Sức khoẻ hệ thống', ()
     await edit.click();
     await rawRow.getByLabel(/Giữ trong \(ngày\)/).fill('400');
     await rawRow.getByRole('button', { name: 'Lưu', exact: true }).click();
+    // Hỏi lại trước khi lưu: dữ liệu quá hạn bị XOÁ VĨNH VIỄN ở lượt dọn kế tiếp.
+    const confirm = panel.getByTestId('retention-confirm');
+    await expect(confirm).toContainText('Mọi tháng dữ liệu đã cũ hơn 400 ngày sẽ bị XOÁ VĨNH VIỄN');
+    expect(patches).toHaveLength(0);
+    await confirm.getByRole('button', { name: 'Đồng ý xoá dữ liệu quá hạn' }).click();
     const pin = page.getByRole('dialog', { name: 'Mã PIN xác nhận thao tác' });
     await expect(pin).toBeVisible();
     await page.getByLabel('Mã PIN — chữ số 1/6').click();
@@ -186,7 +191,7 @@ test.describe('v0.1.36 — Cần Sếp xử lý & Sức khoẻ hệ thống', ()
     await expect(pin).toBeHidden();
     await expect(rawRow.getByText('400 ngày')).toBeVisible();
     await expect(panel.getByRole('button', { name: 'Lưu', exact: true })).toHaveCount(0);
-    expect(patches.at(-1)).toEqual({ dataset: 'raw.events', keep_days: 400, anonymize_after_days: null });
+    expect(patches.at(-1)).toEqual({ dataset: 'raw.events', keep_days: 400, anonymize_after_days: null, confirm_delete: true });
     await expect(page.getByText('[object Object]')).toHaveCount(0);
   });
 

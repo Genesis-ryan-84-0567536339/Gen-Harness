@@ -277,6 +277,14 @@
 .retention-table__note, .retention-table__last { font-size: 10.5px; color: var(--color-neutral-400); margin-top: 3px; line-height: 1.45; }
 .retention-table__last { color: var(--color-neutral-500); }
 .retention-table__actions { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+/* v0.1.40 (F-2): hạn đặt trước v0.1.40 chưa áp dụng + hỏi lại trước khi lưu (xoá vĩnh viễn). */
+.retention-table__pending { font-size: 10.5px; color: var(--color-warn); margin-top: 3px; line-height: 1.45; }
+.retention-table__confirm-row td { border-top: 0; padding-top: 0; }
+.retention-confirm { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 8px; padding: 9px 12px; border-radius: var(--radius-md, 8px);
+  border: 1px solid var(--color-bad); background: color-mix(in srgb, var(--color-bad) 9%, transparent); color: var(--color-text); line-height: 1.5; }
+.retention-confirm .ph { flex: none; margin-top: 2px; color: var(--color-bad); }
+.retention-confirm > span { flex: 1 1 260px; }
+.retention-confirm__actions { display: flex; gap: 6px; margin-left: auto; }
 .data-request { padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
 .data-request__picker { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
 .data-request__actions { display: flex; gap: 8px; flex-wrap: wrap; }

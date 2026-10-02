@@ -258,7 +258,7 @@ async def test_retention_policies_default_and_patch(owner_api) -> None:  # type:
     assert r.status_code == 423
     await _pin(api)
     r = await api.send("PATCH", "/retention-policies", {"dataset": "raw.events", "keep_days": 365,
-                                                         "anonymize_after_days": 90})
+                                                         "anonymize_after_days": 90, "confirm_delete": True})
     assert r.status_code == 200, r.text
     got2 = {r_["dataset"]: r_ for r_ in r.json()}
     assert got2["raw.events"]["keep_days"] == 365 and got2["raw.events"]["anonymize_after_days"] == 90

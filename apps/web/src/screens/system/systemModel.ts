@@ -363,6 +363,24 @@ export interface RetentionRowView {
   note: string | null;
   /** "Lần dọn gần nhất: … · đã xoá N"; null = chưa dọn. */
   lastRun: string | null;
+  /** Hạn đặt trước v0.1.40 chưa xác nhận ⇒ chưa thi hành (câu nhắc dưới tên tập dữ liệu); null = không. */
+  pending: string | null;
+}
+
+/** Tập dữ liệu mà lưu số ngày là đồng ý XOÁ VĨNH VIỄN dữ liệu quá hạn (cần hỏi lại trước khi gửi). */
+export function retentionDeletes(r: RetentionPolicy): boolean {
+  return r.mode !== 'not_applicable' && r.dataset !== 'ops.action_log' && r.dataset !== 'agent.browser_jobs.result';
+}
+
+/** Câu cảnh báo trước khi lưu hạn lưu (xoá vĩnh viễn ở lượt dọn kế tiếp). */
+export function retentionConfirmText(r: RetentionPolicy, days: number): string {
+  const what = r.mode === 'partition' ? `Mọi tháng dữ liệu đã cũ hơn ${days} ngày` : `Dữ liệu cũ hơn ${days} ngày`;
+  return `${what} sẽ bị XOÁ VĨNH VIỄN ở lượt dọn kế tiếp (05:00 hằng ngày) — chỉ lấy lại được từ bản sao lưu.`;
+}
+
+/** Bảng phân vùng (xoá cả tháng cho mọi tổ chức trên máy) — chỉ Owner đổi được hạn. */
+export function retentionOwnerOnly(r: RetentionPolicy): boolean {
+  return r.mode === 'partition';
 }
 
 /** v0.1.40 (F-2): một dòng bảng "Hạn lưu dữ liệu" — mọi giá trị là chuỗi/bool. */
@@ -381,7 +399,18 @@ export function retentionRowView(r: RetentionPolicy, tz = DEFAULT_TZ): Retention
     r.last_run_at && !notApplicable
       ? `Lần dọn gần nhất: ${fmtDM(r.last_run_at, tz)} ${fmtHM(r.last_run_at, tz)}${typeof r.last_deleted === 'number' ? ` · đã xoá ${fmtInt(r.last_deleted)}` : ''}`
       : null;
-  return { keep, applicable: !notApplicable, editable: !notApplicable && !fixed && r.editable !== false, note, lastRun };
+  const pending =
+    r.needs_confirm === true && r.keep_days != null && !notApplicable && !fixed
+      ? 'Chưa áp dụng — hạn này đặt trước bản v0.1.40. Bấm Sửa → Lưu để xác nhận (dữ liệu quá hạn sẽ bị xoá vĩnh viễn).'
+      : null;
+  return {
+    keep: pending ? `${keep} (chưa áp dụng)` : keep,
+    applicable: !notApplicable,
+    editable: !notApplicable && !fixed && r.editable !== false,
+    note,
+    lastRun,
+    pending,
+  };
 }
 
 export const DATA_REQUEST_KIND: Record<string, { label: string; icon: string; tone: string }> = {

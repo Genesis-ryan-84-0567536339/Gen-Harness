@@ -31,10 +31,10 @@ function mockFetch(handler: (c: Call) => Response | Promise<Response>) {
   return calls;
 }
 
-function meWith(permissions: Record<string, string>) {
+function meWith(permissions: Record<string, string>, role = 'owner') {
   return {
     id: 'u', email: 'owner@genesis.local', display_name: 'Anh Cơ La (Ryan)',
-    role: { code: 'owner', name: 'Owner — Sếp' },
+    role: { code: role, name: role === 'owner' ? 'Owner — Sếp' : role },
     org: { id: 'o', name: 'x', timezone: 'Asia/Ho_Chi_Minh', currency: 'VND' },
     addressing: { self: 'Anh', bot_calls_me: 'Sếp' }, pin_verified_until: null,
     permissions,
@@ -42,10 +42,10 @@ function meWith(permissions: Record<string, string>) {
 }
 const FULL_PERMS = { 'system.read': 'all', 'system.manage': 'all', 'roles.manage': 'all', 'audit.read': 'all', 'data.manage': 'all' };
 
-function renderScreen(ui: ReactElement, permissions: Record<string, string> = FULL_PERMS, tab = 'channels') {
+function renderScreen(ui: ReactElement, permissions: Record<string, string> = FULL_PERMS, tab = 'channels', role = 'owner') {
   useUrlStateStore.setState({ params: { tab } });
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  qc.setQueryData(qk.me, meWith(permissions));
+  qc.setQueryData(qk.me, meWith(permissions, role));
   return render(
     <QueryClientProvider client={qc}>
       <MemoryRouter>{ui}</MemoryRouter>
@@ -248,6 +248,11 @@ describe('Điều khiển hệ thống › Dữ liệu & lưu trữ', () => {
     await user.clear(input);
     await user.type(input, '120');
     await user.click(within(modelRow).getByRole('button', { name: 'Lưu' }));
+    // v0.1.40 (F-2): hỏi lại trước — dữ liệu quá hạn bị XOÁ VĨNH VIỄN; chưa gửi PATCH nào trước khi đồng ý.
+    const confirm = await within(panel).findByTestId('retention-confirm');
+    expect(confirm).toHaveTextContent('Mọi tháng dữ liệu đã cũ hơn 120 ngày sẽ bị XOÁ VĨNH VIỄN ở lượt dọn kế tiếp');
+    expect(calls.filter((c) => c.method === 'PATCH')).toHaveLength(0);
+    await user.click(within(confirm).getByRole('button', { name: 'Đồng ý xoá dữ liệu quá hạn' }));
 
     const pin = await screen.findByRole('dialog', { name: 'Mã PIN xác nhận thao tác' });
     const boxes = within(pin).getAllByLabelText(/Mã PIN — chữ số/);
@@ -256,7 +261,7 @@ describe('Điều khiển hệ thống › Dữ liệu & lưu trữ', () => {
 
     await waitFor(() => expect(calls.filter((c) => c.url.endsWith('/retention-policies') && c.method === 'PATCH')).toHaveLength(2));
     const patch = calls.filter((c) => c.method === 'PATCH').pop();
-    expect(patch?.body).toEqual({ dataset: 'agent.model_calls', keep_days: 120, anonymize_after_days: 30 });
+    expect(patch?.body).toEqual({ dataset: 'agent.model_calls', keep_days: 120, anonymize_after_days: 30, confirm_delete: true });
     await waitFor(() => expect(within(panel).queryByLabelText(/Giữ trong \(ngày\)/)).toBeNull());
     const after = within(panel).getByText('Lượt gọi model').closest('tr') as HTMLElement;
     expect(within(after).getByText('120 ngày')).toBeInTheDocument();
@@ -293,6 +298,52 @@ describe('Điều khiển hệ thống › Dữ liệu & lưu trữ', () => {
     await user.click(within(rawRow).getByRole('button', { name: 'Lưu' }));
     expect(await within(rawRow).findByText('Số ngày từ 1 đến 3650')).toBeInTheDocument();
     expect(screen.queryByText('[object Object]')).toBeNull();
+  });
+
+  it('hạn lưu đặt trước v0.1.40 (needs_confirm) hiện "chưa áp dụng"; Quay lại không gửi; để trống = giữ mãi không cần hỏi lại', async () => {
+    const rows: RetentionPolicy[] = RETENTION.map((r) => (r.dataset === 'memory.entries' ? { ...r, keep_days: 60, needs_confirm: true } : r));
+    const calls = mockFetch((c) => {
+      if (c.url.endsWith('/retention-policies') && c.method === 'GET') return json(200, rows);
+      if (c.url.endsWith('/retention-policies') && c.method === 'PATCH') return json(200, rows);
+      if (c.url.includes('/directory/people')) return json(200, { items: [], next_cursor: null, total: 0 });
+      return json(404);
+    });
+    document.cookie = 'gh_csrf=test-csrf';
+    const user = userEvent.setup();
+    renderScreen(<SystemScreen />, FULL_PERMS, 'storage');
+    const panel = await screen.findByRole('region', { name: 'Hạn lưu dữ liệu' });
+    const memRow = (await within(panel).findByText('Sổ tay nhận thức')).closest('tr') as HTMLElement;
+    expect(within(memRow).getByText('60 ngày (chưa áp dụng)')).toBeInTheDocument();
+    expect(within(memRow).getByText(/Chưa áp dụng — hạn này đặt trước bản v0\.1\.40/)).toBeInTheDocument();
+
+    await user.click(within(memRow).getByRole('button', { name: /Sửa/ }));
+    await user.click(within(memRow).getByRole('button', { name: 'Lưu' }));
+    const confirm = await within(panel).findByTestId('retention-confirm');
+    expect(confirm).toHaveTextContent('Dữ liệu cũ hơn 60 ngày sẽ bị XOÁ VĨNH VIỄN');
+    await user.click(within(confirm).getByRole('button', { name: 'Quay lại' }));
+    expect(within(panel).queryByTestId('retention-confirm')).toBeNull();
+    expect(calls.filter((c) => c.method === 'PATCH')).toHaveLength(0);
+
+    await user.clear(within(memRow).getByLabelText(/Giữ trong \(ngày\)/));
+    await user.click(within(memRow).getByRole('button', { name: 'Lưu' }));
+    await waitFor(() => expect(calls.filter((c) => c.method === 'PATCH')).toHaveLength(1));
+    expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ dataset: 'memory.entries', keep_days: null, anonymize_after_days: null });
+  });
+
+  it('hạn lưu: Manager (system.manage, không phải Owner) không sửa được bảng xoá theo tháng, vẫn sửa được Sổ tay', async () => {
+    mockFetch((c) => {
+      if (c.url.endsWith('/retention-policies') && c.method === 'GET') return json(200, RETENTION);
+      if (c.url.includes('/directory/people')) return json(200, { items: [], next_cursor: null, total: 0 });
+      return json(404);
+    });
+    renderScreen(<SystemScreen />, { 'system.read': 'all', 'system.manage': 'all' }, 'storage', 'manager');
+    const panel = await screen.findByRole('region', { name: 'Hạn lưu dữ liệu' });
+    const rawRow = (await within(panel).findByText(/Kho thô/)).closest('tr') as HTMLElement;
+    const rawEdit = within(rawRow).getByRole('button', { name: /Sửa/ });
+    expect(rawEdit).toBeDisabled();
+    expect(rawEdit).toHaveAttribute('title', 'Chỉ Owner đổi được hạn lưu của dữ liệu xoá theo tháng');
+    const memRow = within(panel).getByText('Sổ tay nhận thức').closest('tr') as HTMLElement;
+    expect(within(memRow).getByRole('button', { name: /Sửa/ })).toBeEnabled();
   });
 
   it('yêu cầu xuất dữ liệu một người gọi đúng POST /persons/{id}/data-requests với kind=export', async () => {

@@ -35,11 +35,19 @@ async def test_migration_0026_is_rerunnable(fresh_db: str) -> None:
         c.execute(sql)  # type: ignore[call-overload]
         pol = c.execute("""SELECT count(*) FROM pg_policies
                            WHERE schemaname = 'ops' AND tablename = 'job_watermarks'""").fetchone()
-        idx = c.execute("""SELECT count(*) FROM pg_indexes WHERE indexname IN ('persons_lower_name_trgm_idx',
+        idx = c.execute("""SELECT count(*) FROM pg_indexes WHERE indexname IN (
                            'browser_jobs_finished_result_idx', 'memory_entries_archived_idx',
                            'attachments_event_received_idx')""").fetchone()
+        lower_idx = c.execute("""SELECT count(*) FROM pg_indexes
+                                 WHERE indexname = 'persons_lower_name_trgm_idx'""").fetchone()
+        cols = c.execute("""SELECT count(*) FROM information_schema.columns
+                            WHERE (table_schema, table_name, column_name) IN
+                              (('ops', 'retention_policies', 'confirmed_at'), ('ops', 'job_watermarks', 'full_at'))"""
+                         ).fetchone()
     assert pol is not None and pol[0] == 1
-    assert idx is not None and idx[0] == 4
+    assert idx is not None and idx[0] == 3
+    assert lower_idx is not None and lower_idx[0] == 0                # chỉ mục lower() không dùng được dưới RLS — bỏ
+    assert cols is not None and cols[0] == 2
 
 
 async def _part_config(table: str) -> Any:
@@ -48,8 +56,9 @@ async def _part_config(table: str) -> Any:
                                           WHERE parent_table = :t"""), {"t": table})).one()
 
 
-async def _patch(api: Api, dataset: str, keep: int | None) -> Any:
-    return await api.send("PATCH", "/retention-policies", {"dataset": dataset, "keep_days": keep})
+async def _patch(api: Api, dataset: str, keep: int | None, confirm: bool = True) -> Any:
+    return await api.send("PATCH", "/retention-policies", {"dataset": dataset, "keep_days": keep,
+                                                            "confirm_delete": confirm})
 
 
 @pytest.mark.parametrize("dataset", ["raw.events", "clean.meaning_units", "agent.model_calls"])
@@ -75,11 +84,96 @@ async def test_patch_syncs_partman(owner_api: Api, db, dataset: str) -> None:  #
     r = await _patch(api, dataset, 30)
     assert r.status_code == 200
     assert (await _part_config(dataset)).retention is None
-    await db.execute(text("""INSERT INTO ops.retention_policies (org_id, dataset, keep_days) VALUES (:o, :d, 90)"""),
-                     {"o": org2, "d": dataset})
+    await db.execute(text("""INSERT INTO ops.retention_policies (org_id, dataset, keep_days, confirmed_at)
+                             VALUES (:o, :d, 90, now())"""), {"o": org2, "d": dataset})
     await db.commit()
     await retention.sync_partman_now()
     assert (await _part_config(dataset)).retention == "90 days"
+
+
+async def test_patch_requires_delete_confirmation(owner_api: Api) -> None:
+    """Đặt hạn cho tập dữ liệu bị xoá thật mà không xác nhận ⇒ 422 tiếng Việt, không ghi gì, partman giữ nguyên."""
+    api = owner_api
+    await verify_pin(api)
+    for ds in ("raw.events", "memory.entries"):
+        r = await _patch(api, ds, 30, confirm=False)
+        assert r.status_code == 422, r.text
+        body = r.json()
+        assert body["code"] == "RETENTION_CONFIRM_REQUIRED"
+        assert "XOÁ VĨNH VIỄN" in body["errors"]["keep_days"] and "30 ngày" in body["errors"]["keep_days"]
+    assert (await _part_config("raw.events")).retention is None
+    got = {x["dataset"]: x for x in (await api.get("/retention-policies")).json()}
+    assert got["raw.events"]["keep_days"] is None and got["raw.events"]["needs_confirm"] is False
+    # Bỏ hạn (giữ mãi) không xoá gì ⇒ không cần xác nhận.
+    assert (await _patch(api, "raw.events", None, confirm=False)).status_code == 200
+
+
+async def test_preexisting_unconfirmed_policy_not_enforced(owner_api: Api, db, redis: Redis) -> None:  # type: ignore[no-untyped-def]
+    """Hạn lưu đặt TRƯỚC v0.1.40 (chỉ hiển thị, confirmed_at NULL) KHÔNG được đẩy sang partman/xoá theo lô; Owner nhận
+    chuông nhắc xác nhận (một lần trong 30 ngày); lưu lại có xác nhận ⇒ mới thi hành."""
+    api = owner_api
+    org = await org_id(db)
+    await db.execute(text("""INSERT INTO ops.retention_policies (org_id, dataset, keep_days) VALUES
+                             (:o, 'raw.events', 30), (:o, 'memory.entries', 30), (:o, 'ops.action_log', 30)"""),
+                     {"o": org})
+    await db.commit()
+    assert await retention.effective_keep_days(db, "raw.events") is None
+    assert {r.org_id: r.datasets for r in await retention.unconfirmed_orgs(db)} == {
+        org: ["memory.entries", "raw.events"]}
+    await retention.sync_partman_now()
+    assert (await _part_config("raw.events")).retention is None
+    got = {x["dataset"]: x for x in (await api.get("/retention-policies")).json()}
+    assert got["raw.events"]["keep_days"] == 30 and got["raw.events"]["needs_confirm"] is True
+    assert got["memory.entries"]["needs_confirm"] is True
+    assert got["ops.action_log"]["needs_confirm"] is False
+
+    out = await retention.retention_sweep({"redis": redis})
+    assert out["datasets"]["raw.events"]["ok"] is True
+    assert (await _part_config("raw.events")).retention is None
+    rows = (await db.execute(text("""SELECT title, link FROM core.notifications
+                                     WHERE org_id = :o AND kind = :k"""), {"o": org, "k": retention.CONFIRM_KIND})
+            ).all()
+    assert len(rows) == 1 and rows[0].title == "Hạn lưu dữ liệu cần xác nhận lại"
+    assert rows[0].link == "/system?tab=storage"
+    await retention.retention_sweep({"redis": redis})              # lượt sau trong 30 ngày: không nhắc lại
+    assert (await db.execute(text("SELECT count(*) FROM core.notifications WHERE kind = :k"),
+                             {"k": retention.CONFIRM_KIND})).scalar_one() == 1
+
+    await verify_pin(api)
+    r = await _patch(api, "raw.events", 30)
+    assert r.status_code == 200, r.text
+    row = next(x for x in r.json() if x["dataset"] == "raw.events")
+    assert row["needs_confirm"] is False and row["partman_synced"] is True
+    assert (await _part_config("raw.events")).retention == "30 days"
+
+
+async def test_manager_cannot_set_partitioned_retention(client, db, owner_api: Api) -> None:  # type: ignore[no-untyped-def]
+    """Bảng phân vùng (xoá cả tháng cho mọi tổ chức) chỉ Owner đổi được; Manager có system.manage vẫn đổi hạn sổ tay."""
+    from tests.test_rbac_api import login_as
+
+    await db.execute(text("""INSERT INTO core.role_permissions (role_id, permission_code, scope)
+                             SELECT id, 'system.manage', 'all' FROM core.roles WHERE code = 'manager'
+                             ON CONFLICT (role_id, permission_code) DO UPDATE SET scope = 'all'"""))
+    await db.commit()
+    mgr = await login_as(client, db, "manager")
+    await verify_pin(mgr, "112233")
+    r = await _patch(mgr, "raw.events", 30)
+    assert r.status_code == 403, r.text
+    assert (await _part_config("raw.events")).retention is None
+    assert (await _patch(mgr, "memory.entries", 30)).status_code == 200
+
+
+async def test_ensure_leakproof_restores_attribute(app) -> None:  # type: ignore[no-untyped-def]
+    """pg_restore không giữ LEAKPROOF của similarity_op ⇒ partition_maintenance đặt lại."""
+    async with admin_sessionmaker()() as adb:
+        await adb.execute(text("ALTER FUNCTION public.similarity_op(text, text) NOT LEAKPROOF"))
+        await adb.commit()
+        assert await retention.ensure_leakproof(adb) is True
+        await adb.commit()
+        assert await retention.ensure_leakproof(adb) is False
+        leak = (await adb.execute(text(
+            "SELECT proleakproof FROM pg_proc WHERE oid = 'similarity_op(text,text)'::regprocedure"))).scalar_one()
+    assert leak is True
 
 
 async def test_action_log_not_applicable(owner_api: Api) -> None:
@@ -148,8 +242,8 @@ async def swept(owner_api: Api, db, redis: Redis, monkeypatch):  # type: ignore[
     pid = (await db.execute(text("""INSERT INTO core.persons (org_id, code, display_name)
                                     VALUES (:o, 'PER-R1', 'Chị Mai') RETURNING id"""), {"o": org})).scalar_one()
     nb = await notebook.ensure(db, org, "person", pid)
-    await db.execute(text("""INSERT INTO ops.retention_policies (org_id, dataset, keep_days)
-                             VALUES (:o, 'memory.entries', 30), (:o, 'raw.events', 30)"""), {"o": org})
+    await db.execute(text("""INSERT INTO ops.retention_policies (org_id, dataset, keep_days, confirmed_at)
+                             VALUES (:o, 'memory.entries', 30, now()), (:o, 'raw.events', 30, now())"""), {"o": org})
     await db.execute(text("""
         INSERT INTO memory.entries (notebook_id, section, body, author, is_pinned, archived_at)
         SELECT :nb, 'rolling_context', 'cũ ' || g, 'agent:test', false, now() - interval '40 days'

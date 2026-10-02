@@ -4,6 +4,7 @@ import { Button, EmptyState, Icon, SelectField, TextField } from '@gen-harness/u
 import { useDirPeople } from '../relations/queries';
 import { fmtDMClock } from '../../lib/format';
 import { useCan, useOrgTimezone } from '../../lib/permissions';
+import { useMe } from '../../lib/queries';
 import { errorText } from '../../lib/errorText';
 import { toast } from '../../lib/toast';
 import { CardError, InlineError, Panel, SkeletonLines } from '../common';
@@ -11,7 +12,7 @@ import { UpdateCard } from '../../update/UpdateCard';
 import { BackupPanel } from './BackupPanel';
 import { OffsitePanel } from './OffsitePanel';
 import { HealthCard } from './HealthCard';
-import { DATA_REQUEST_KIND, RETENTION_LABEL, retentionRowView } from './systemModel';
+import { DATA_REQUEST_KIND, RETENTION_LABEL, retentionConfirmText, retentionDeletes, retentionOwnerOnly, retentionRowView } from './systemModel';
 import { useCreateDataRequest, usePatchRetention, usePersonDataRequests, useRetentionPolicies } from './queries';
 
 /** Dữ liệu & lưu trữ — sao lưu & khôi phục (v0.1.20), bản sao ngoài máy (v0.1.40); spec I: hạn lưu theo tập dữ liệu, yêu cầu xuất/xoá/giới hạn
@@ -46,25 +47,52 @@ export function StorageTab() {
  * `not_applicable` (Nhật ký hành động — chỉ ghi thêm) hiện "Không áp dụng"; `agent.browser_jobs.result` cố định
  * 14 ngày. "Ẩn danh sau" không hiện (hệ thống chưa thi hành ẩn danh — không hứa điều chưa làm); PATCH gửi lại nguyên
  * `anonymize_after_days` đang có để không xoá cấu hình cũ.
+ *
+ * Lưu số ngày cho tập dữ liệu bị xoá thật ⇒ hỏi lại ngay dưới dòng ("… sẽ bị XOÁ VĨNH VIỄN ở lượt dọn kế tiếp") rồi mới
+ * gửi `confirm_delete: true`. Hạn đặt trước v0.1.40 (`needs_confirm`) hiện "chưa áp dụng". Bảng phân vùng (xoá cả tháng
+ * cho mọi tổ chức) chỉ Owner sửa được.
  */
 function RetentionPanel() {
   const canManage = useCan('system.manage');
+  const me = useMe();
+  const isOwner = me.data?.role?.code === 'owner';
   const tz = useOrgTimezone();
   const q = useRetentionPolicies();
   const patch = usePatchRetention();
   const [editing, setEditing] = useState<RetentionEditableDataset | null>(null);
   const [keepDays, setKeepDays] = useState('');
+  const [confirming, setConfirming] = useState<number | null>(null);
 
   const startEdit = (r: RetentionPolicy) => {
     patch.reset();
+    setConfirming(null);
     setEditing(r.dataset as RetentionEditableDataset);
     setKeepDays(r.keep_days != null ? String(r.keep_days) : '');
   };
-  const save = (r: RetentionPolicy) => {
+  const cancel = () => {
+    setConfirming(null);
+    setEditing(null);
+  };
+  const send = (r: RetentionPolicy, keep: number | null, confirm: boolean) => {
     patch.mutate(
-      { dataset: r.dataset as RetentionEditableDataset, keep_days: keepDays.trim() ? Number(keepDays) : null, anonymize_after_days: r.anonymize_after_days },
-      { onSuccess: () => setEditing(null) },
+      {
+        dataset: r.dataset as RetentionEditableDataset,
+        keep_days: keep,
+        anonymize_after_days: r.anonymize_after_days,
+        ...(confirm ? { confirm_delete: true } : {}),
+      },
+      { onSuccess: cancel },
     );
+  };
+  const save = (r: RetentionPolicy) => {
+    const keep = keepDays.trim() ? Number(keepDays) : null;
+    // Số ngày hợp lệ cho tập bị xoá thật ⇒ hỏi lại trước; số sai (0, chữ…) gửi luôn để API báo lỗi dưới ô.
+    if (keep != null && Number.isInteger(keep) && keep >= 1 && retentionDeletes(r)) {
+      patch.reset();
+      setConfirming(keep);
+      return;
+    }
+    send(r, keep, false);
   };
   const fieldErrors = patch.error instanceof ApiError && patch.error.status === 422 ? patch.error.fieldErrors : {};
   const keepError = typeof fieldErrors.keep_days === 'string' ? fieldErrors.keep_days : null;
@@ -92,17 +120,21 @@ function RetentionPanel() {
             </tr>
           </thead>
           <tbody>
-            {q.data.map((r) => {
+            {q.data.flatMap((r) => {
               const view = retentionRowView(r, tz);
-              return (
+              const label = RETENTION_LABEL[r.dataset] ?? r.dataset;
+              const ownerLocked = retentionOwnerOnly(r) && !isOwner;
+              const isEditing = editing === r.dataset;
+              const rows = [
                 <tr key={r.dataset} data-testid={`retention-${r.dataset}`}>
                   <td>
-                    <div className="retention-table__name">{RETENTION_LABEL[r.dataset] ?? r.dataset}</div>
+                    <div className="retention-table__name">{label}</div>
                     <div className="mono retention-table__code">{r.dataset}</div>
                     {view.note ? <div className="retention-table__note">{view.note}</div> : null}
+                    {view.pending ? <div className="retention-table__pending">{view.pending}</div> : null}
                     {view.lastRun ? <div className="retention-table__last">{view.lastRun}</div> : null}
                   </td>
-                  {editing === r.dataset ? (
+                  {isEditing ? (
                     <>
                       <td>
                         <TextField
@@ -111,16 +143,19 @@ function RetentionPanel() {
                           min={1}
                           max={3650}
                           value={keepDays}
-                          onChange={(e) => setKeepDays(e.target.value)}
+                          onChange={(e) => {
+                            setConfirming(null);
+                            setKeepDays(e.target.value);
+                          }}
                           placeholder="mãi mãi"
                           error={keepError}
                         />
                       </td>
                       <td className="retention-table__actions">
-                        <Button variant="ghost" className="btn-27" onClick={() => setEditing(null)}>
+                        <Button variant="ghost" className="btn-27" onClick={cancel}>
                           Huỷ
                         </Button>
-                        <Button variant="primary" className="btn-27" loading={patch.isPending} onClick={() => save(r)}>
+                        <Button variant="primary" className="btn-27" loading={patch.isPending && confirming == null} disabled={confirming != null} onClick={() => save(r)}>
                           Lưu
                         </Button>
                       </td>
@@ -131,7 +166,15 @@ function RetentionPanel() {
                       {canManage ? (
                         <td className="retention-table__actions">
                           {view.editable ? (
-                            <Button variant="ghost" className="btn-27" icon="ph ph-pencil-simple" onClick={() => startEdit(r)} aria-label={`Sửa hạn lưu ${RETENTION_LABEL[r.dataset] ?? r.dataset}`}>
+                            <Button
+                              variant="ghost"
+                              className="btn-27"
+                              icon="ph ph-pencil-simple"
+                              disabled={ownerLocked}
+                              title={ownerLocked ? 'Chỉ Owner đổi được hạn lưu của dữ liệu xoá theo tháng' : undefined}
+                              onClick={() => startEdit(r)}
+                              aria-label={`Sửa hạn lưu ${label}`}
+                            >
                               Sửa
                             </Button>
                           ) : null}
@@ -139,8 +182,29 @@ function RetentionPanel() {
                       ) : null}
                     </>
                   )}
-                </tr>
-              );
+                </tr>,
+              ];
+              if (isEditing && confirming != null) {
+                rows.push(
+                  <tr key={`${r.dataset}-confirm`} className="retention-table__confirm-row">
+                    <td colSpan={canManage ? 3 : 2}>
+                      <div className="retention-confirm" role="alert" data-testid="retention-confirm">
+                        <Icon name="ph ph-warning" size={14} />
+                        <span>{retentionConfirmText(r, confirming)}</span>
+                        <div className="retention-confirm__actions">
+                          <Button variant="ghost" className="btn-27" onClick={() => setConfirming(null)}>
+                            Quay lại
+                          </Button>
+                          <Button variant="primary" className="btn-27" icon="ph ph-trash" loading={patch.isPending} onClick={() => send(r, confirming, true)}>
+                            Đồng ý xoá dữ liệu quá hạn
+                          </Button>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>,
+                );
+              }
+              return rows;
             })}
           </tbody>
         </table>

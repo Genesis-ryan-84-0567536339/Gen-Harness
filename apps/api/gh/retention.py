@@ -6,6 +6,11 @@ Ba kiểu dọn:
   TÁCH bảng con chứ không xoá). raw.events và ops.action_log có trigger `core.forbid_mutation` chặn UPDATE/DELETE
   theo dòng ⇒ tuyệt đối không DELETE theo dòng ở đây. Hạn hiệu lực = MAX(keep_days) qua mọi tổ chức; tổ chức nào
   chưa đặt (NULL) ⇒ giữ mãi (retention NULL) — một máy cài, các tổ chức dùng chung bảng phân vùng.
+
+CHỈ thi hành dòng ĐÃ XÁC NHẬN (`confirmed_at`, migration 0026): trước v0.1.40 hạn lưu chỉ để hiển thị ("Chưa tự xoá —
+sẽ áp dụng ở bản sau") nên giá trị cũ có thể được đặt mà không ai nghĩ tới chuyện xoá thật. Dòng `keep_days` có mà
+`confirmed_at` NULL = "chưa xác nhận" ⇒ coi như giữ mãi; lượt dọn gửi chuông nhắc Owner xác nhận lại
+(`notify_unconfirmed`). PATCH chỉ đặt `confirmed_at` khi bên gọi gửi `confirm_delete: true` (web hỏi lại trước).
 - `batch` — xoá/làm rỗng theo lô (5000 dòng/lô, commit mỗi lô, dừng khi lô < 5000 hoặc hết ngân sách thời gian):
   memory.entries (chỉ mục ĐÃ NÉN quá hạn, không ghim), agent.browser_jobs.result (cố định 14 ngày — giữ dòng việc,
   bỏ nội dung đã đọc), raw.attachments của sự kiện đã bị partman xoá (xoá dòng + object, best-effort).
@@ -73,9 +78,12 @@ def _utc_iso() -> str:
 # ─── partman ───────────────────────────────────────────────────────────────────────────────────────────────
 
 async def effective_keep_days(db: AsyncSession, dataset: str) -> int | None:
-    """MAX(keep_days) qua mọi tổ chức; có tổ chức chưa đặt (NULL/thiếu dòng) hoặc chưa có tổ chức ⇒ None (giữ mãi)."""
+    """MAX(keep_days) qua mọi tổ chức; có tổ chức chưa đặt (NULL/thiếu dòng/chưa xác nhận) hoặc chưa có tổ chức ⇒ None
+    (giữ mãi)."""
     r = (await db.execute(text("""
-        SELECT count(*) AS orgs, count(rp.keep_days) AS set_, max(rp.keep_days) AS keep
+        SELECT count(*) AS orgs,
+               count(rp.keep_days) FILTER (WHERE rp.confirmed_at IS NOT NULL) AS set_,
+               max(rp.keep_days) FILTER (WHERE rp.confirmed_at IS NOT NULL) AS keep
         FROM core.organizations o
         LEFT JOIN ops.retention_policies rp ON rp.org_id = o.id AND rp.dataset = :d"""), {"d": dataset})).one()
     if not r.orgs or r.set_ < r.orgs or r.keep is None:
@@ -131,13 +139,15 @@ async def _batched(db: AsyncSession, sql: str, params: dict[str, Any], deadline:
 
 
 async def purge_memory_entries(db: AsyncSession, deadline: float) -> int:
-    """Mục sổ tay ĐÃ NÉN (archived_at) quá `keep_days` của tổ chức sở hữu sổ — không bao giờ xoá mục ghim."""
+    """Mục sổ tay ĐÃ NÉN (archived_at) quá `keep_days` (đã xác nhận) của tổ chức sở hữu sổ — không bao giờ xoá mục
+    ghim."""
     return await _batched(db, """
         DELETE FROM memory.entries WHERE id IN (
           SELECT e.id FROM memory.entries e
           JOIN memory.notebooks n ON n.id = e.notebook_id
           JOIN ops.retention_policies rp ON rp.org_id = n.org_id AND rp.dataset = 'memory.entries'
-          WHERE rp.keep_days IS NOT NULL AND e.archived_at IS NOT NULL AND NOT e.is_pinned
+          WHERE rp.keep_days IS NOT NULL AND rp.confirmed_at IS NOT NULL
+            AND e.archived_at IS NOT NULL AND NOT e.is_pinned
             AND e.archived_at < now() - make_interval(days => rp.keep_days)
           LIMIT :lim)""", {}, deadline)
 
@@ -208,6 +218,64 @@ async def purge_notifications(db: AsyncSession) -> int:
     return await notifications.purge_old(db, commit_each=True)
 
 
+# ─── hạn lưu chưa xác nhận ─────────────────────────────────────────────────────────────────────────────────
+
+CONFIRM_KIND = "retention.confirm_needed"
+CONFIRM_LINK = "/system?tab=storage"
+#: Nhắc lại tối đa mỗi 30 ngày (Owner có thể cố ý để nguyên — chuông không được thành rác).
+CONFIRM_REMIND_DAYS = 30
+CONFIRM_TITLE = "Hạn lưu dữ liệu cần xác nhận lại"
+CONFIRM_BODY = ("Hạn lưu đặt trước bản v0.1.40 chưa được thi hành. Từ bản này, dữ liệu quá hạn bị XOÁ VĨNH VIỄN — mở "
+                "Hạn lưu dữ liệu, kiểm số ngày rồi bấm Lưu để xác nhận (hoặc để trống = giữ mãi).")
+#: Tập dữ liệu mà hạn lưu thật sự xoá dữ liệu (không gồm ops.action_log — không áp dụng).
+ENFORCED = tuple(d for d, v in DATASETS.items() if v["mode"] != "not_applicable")
+
+
+async def unconfirmed_orgs(db: AsyncSession) -> list[Any]:
+    """Tổ chức có hạn lưu đã đặt mà CHƯA xác nhận (đặt trước v0.1.40) — việc dọn bỏ qua các dòng này."""
+    rows = (await db.execute(text("""
+        SELECT org_id, array_agg(dataset ORDER BY dataset) AS datasets FROM ops.retention_policies
+        WHERE keep_days IS NOT NULL AND confirmed_at IS NULL AND dataset = ANY(:ds)
+        GROUP BY org_id"""), {"ds": list(ENFORCED)})).all()
+    return list(rows)
+
+
+async def notify_unconfirmed(db: AsyncSession, redis: Any = None) -> int:
+    """Chuông nhắc Owner xác nhận lại hạn lưu chưa xác nhận (tối đa mỗi `CONFIRM_REMIND_DAYS` ngày). Trả số tổ chức
+    đã nhắc. Bên gọi commit."""
+    from gh import notifications
+
+    n = 0
+    for r in await unconfirmed_orgs(db):
+        recent = (await db.execute(text("""
+            SELECT 1 FROM core.notifications WHERE org_id = :o AND kind = :k
+              AND created_at > now() - make_interval(days => :d) LIMIT 1"""),
+            {"o": r.org_id, "k": CONFIRM_KIND, "d": CONFIRM_REMIND_DAYS})).first()
+        if recent is not None:
+            continue
+        owners = await notifications.owner_ids(db, r.org_id)
+        if not owners:
+            continue
+        await notifications.notify(db, r.org_id, owners, kind=CONFIRM_KIND, title=CONFIRM_TITLE, body=CONFIRM_BODY,
+                                   link=CONFIRM_LINK, redis=redis)
+        n += 1
+    return n
+
+
+async def ensure_leakproof(admin_db: AsyncSession) -> bool:
+    """Đặt lại LEAKPROOF cho `similarity_op` (migration 0026) — pg_dump/pg_restore không giữ thuộc tính này của hàm
+    thuộc extension ⇒ sau `genh import` dò trùng tên âm thầm về đường chậm. Chạy qua admin session (cần superuser).
+    Trả True khi vừa phải đặt lại. Bên gọi commit."""
+    leak = (await admin_db.execute(text("""
+        SELECT proleakproof FROM pg_proc WHERE oid = to_regprocedure('public.similarity_op(text, text)')"""))
+            ).scalar_one_or_none()
+    if leak is None or leak:
+        return False
+    await admin_db.execute(text("ALTER FUNCTION public.similarity_op(text, text) LEAKPROOF"))
+    log.info("Đã đặt lại LEAKPROOF cho similarity_op (mất sau khi khôi phục dữ liệu)")
+    return True
+
+
 # ─── lượt dọn hằng ngày ────────────────────────────────────────────────────────────────────────────────────
 
 async def read_last(redis: Any) -> dict[str, Any] | None:
@@ -274,6 +342,12 @@ async def retention_sweep(ctx: dict[str, Any]) -> dict[str, Any]:
     await part("raw.attachments", "batch", in_session(lambda db: purge_orphan_attachments(db, raw_keep, deadline)))
     await part("agent.gen_conversations", "batch", in_session(purge_gen))
     await part("core.notifications", "batch", in_session(purge_notifications))
+    try:  # hạn lưu đặt trước v0.1.40 chưa xác nhận ⇒ không xoá, chỉ nhắc Owner
+        async with sm() as db:
+            await notify_unconfirmed(db, ctx.get("redis"))
+            await db.commit()
+    except Exception:  # noqa: BLE001
+        log.exception("Không gửi được chuông nhắc xác nhận hạn lưu")
 
     summary = {"at": _utc_iso(), "datasets": datasets}
     redis = ctx.get("redis")
@@ -295,5 +369,6 @@ async def sync_partman_now() -> dict[str, int | None]:
     return out
 
 
-__all__ = ["BATCH", "DATASETS", "FIXED", "LAST_KEY", "PARTITIONED", "effective_keep_days", "read_last",
-           "retention_sweep", "sync_partman", "sync_partman_now"]
+__all__ = ["BATCH", "CONFIRM_KIND", "DATASETS", "ENFORCED", "FIXED", "LAST_KEY", "PARTITIONED", "effective_keep_days",
+           "ensure_leakproof", "notify_unconfirmed", "read_last", "retention_sweep", "sync_partman",
+           "sync_partman_now", "unconfirmed_orgs"]

@@ -811,6 +811,7 @@ test.describe('giai đoạn 4.5/4.6: Điều khiển hệ thống', () => {
       await rawRow.getByRole('button', { name: /Sửa/ }).click();
       await rawRow.getByLabel(/Giữ trong \(ngày\)/).fill('500');
       await rawRow.getByRole('button', { name: 'Lưu', exact: true }).click();
+      await page.getByTestId('retention-confirm').getByRole('button', { name: 'Đồng ý xoá dữ liệu quá hạn' }).click();
       await enterOwnerPin(page);
       await expect(rawRow.getByText('500 ngày')).toBeVisible();
 

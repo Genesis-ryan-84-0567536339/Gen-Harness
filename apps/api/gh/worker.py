@@ -267,6 +267,13 @@ async def partition_maintenance(ctx: dict[str, Any]) -> None:
     async with admin_sessionmaker()() as db:
         await db.execute(text("SELECT partman.run_maintenance()"))
         await db.commit()
+    # v0.1.40 (F-16): LEAKPROOF của similarity_op mất sau `genh import` (pg_restore không giữ) — đặt lại ở đây.
+    try:
+        async with admin_sessionmaker()() as db:
+            await retention.ensure_leakproof(db)
+            await db.commit()
+    except Exception:  # noqa: BLE001 — chỉ ảnh hưởng tốc độ dò trùng tên
+        log.warning("Không đặt lại được LEAKPROOF cho similarity_op", exc_info=True)
 
 
 async def detect_identities(ctx: dict[str, Any]) -> dict[str, int]:

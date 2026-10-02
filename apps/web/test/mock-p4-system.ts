@@ -123,6 +123,8 @@ type RetentionDataset = (typeof RETENTION_DATASETS)[number];
 interface RetentionRow {
   keep_days: number | null;
   anonymize_after_days: number | null;
+  /** v0.1.40 (F-2): như API — hạn đặt trước v0.1.40 chưa xác nhận ⇒ chưa thi hành. */
+  needs_confirm?: boolean;
 }
 /** v0.1.40 (F-2): cách dọn từng tập (như gh/retention — bảng phân vùng xoá theo cả tháng; ops.action_log chỉ ghi thêm). */
 const RETENTION_MODE: Record<string, { mode: 'partition' | 'batch' | 'not_applicable'; note: string }> = {
@@ -252,7 +254,8 @@ export function createMock(opts: P4SystemOptions) {
     const info = RETENTION_MODE[d];
     const na = info.mode === 'not_applicable';
     return {
-      dataset: d, ...row, mode: info.mode, editable: !na && d !== 'agent.browser_jobs.result', note: info.note,
+      dataset: d, ...row, needs_confirm: !!row.needs_confirm && !na && row.keep_days != null,
+      mode: info.mode, editable: !na && d !== 'agent.browser_jobs.result', note: info.note,
       last_run_at: na ? null : retentionLast.at, last_deleted: na || !retentionLast.at ? null : (retentionLast.deleted[d] ?? 0),
     };
   }
@@ -513,6 +516,14 @@ export function createMock(opts: P4SystemOptions) {
       }
       if (b.keep_days != null && (!Number.isInteger(b.keep_days) || b.keep_days < 1 || b.keep_days > 3650)) {
         return problem(422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors: { keep_days: 'Số ngày từ 1 đến 3650' } });
+      }
+      // v0.1.40 (F-2): như API — bảng phân vùng chỉ Owner; đặt số ngày cho tập bị xoá thật cần confirm_delete.
+      const partition = RETENTION_MODE[dataset]?.mode === 'partition';
+      if (partition && !ctx.owner) return problem(403, 'FORBIDDEN', 'Vai trò của bạn không có quyền thao tác này', { detail: 'Chỉ Owner đổi được hạn lưu của dữ liệu xoá theo tháng' });
+      if (b.keep_days != null && (body as { confirm_delete?: boolean }).confirm_delete !== true) {
+        return problem(422, 'RETENTION_CONFIRM_REQUIRED', 'Cần xác nhận xoá vĩnh viễn', {
+          errors: { keep_days: `Cần xác nhận: ${partition ? 'cả tháng dữ liệu cũ hơn' : 'dữ liệu cũ hơn'} ${b.keep_days} ngày sẽ bị XOÁ VĨNH VIỄN ở lượt dọn kế tiếp (05:00 hằng ngày) — chỉ lấy lại được từ bản sao lưu` },
+        });
       }
       retention.set(dataset, { keep_days: b.keep_days ?? null, anonymize_after_days: b.anonymize_after_days ?? null });
       return reply(200, retentionList());
