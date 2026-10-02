@@ -112,7 +112,7 @@ export function SetupPage() {
       </div>
     );
   }
-  if (state.data.finished) return <Navigate to="/overview" replace />;
+  if (state.data.finished) return <Navigate to="/" replace />;
 
   const data = state.data;
   const steps = mergeSteps(data);

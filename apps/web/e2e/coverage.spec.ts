@@ -153,7 +153,7 @@ test.describe('MCP Hub — thẻ Gen-hub', () => {
       if (res.url().includes('/api/v1/hub/')) hubBodies.push(await res.text().catch(() => ''));
     });
     await loginAsOwner(page);
-    await page.goto('/mcp');
+    await page.goto('/connections'); // v0.1.42 (F-61): thẻ Gen-hub chỉ ở Kết nối
     const card = page.getByRole('region', { name: 'Gen-hub' });
     await expect(card).toContainText('Chưa nối');
     await expect(card).toContainText('Đang tắt');
@@ -199,7 +199,7 @@ test.describe('MCP Hub — thẻ Gen-hub', () => {
 
   test('vai trò khác chỉ xem trạng thái, không có ô token / nút', async ({ page }) => {
     await loginAs(page, AUDITOR.email);
-    await page.goto('/mcp');
+    await page.goto('/connections');
     const card = page.getByRole('region', { name: 'Gen-hub' });
     await expect(card).toContainText('Chỉ Sếp (Owner) cấu hình và dùng Gen-hub.');
     await expect(card.getByLabel('Token Gen-hub')).toHaveCount(0);

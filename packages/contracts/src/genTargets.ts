@@ -4,7 +4,8 @@
  * - `GEN_SCREENS`: khoá màn Gen được `navigate` tới (khoá screens.ts + trang `guide`, `account`) → đường dẫn.
  * - `GEN_TARGETS`: mỗi mục tiêu gắn bằng `data-gen-target="<id>"` trên đúng một phần tử React của màn `screen`.
  *   `dynamic: 'row'` = mục tiêu theo dòng, id thật là `<id>:<row id>`; row id PHẢI đến từ kết quả tool của chính lượt
- *   đó (server kiểm, chống bịa). `params` = trạng thái URL cần có để phần tử hiện ra (vd tab của Điều khiển hệ thống).
+ *   đó (server kiểm, chống bịa). `params` = trạng thái URL cần có để phần tử hiện ra (vd tab của Cài đặt).
+ *   v0.1.42: id GIỮ NGUYÊN khi phần tử chuyển chỗ (chỉ đổi `screen`/`params`) để hội thoại cũ và test API không gãy.
  *
  * Kiểm chéo: `apps/web/test/unit/gen-targets.test.ts` quét `apps/web/src` (mỗi id có chỗ gắn và ngược lại) và so
  * với bản xuất cho API `apps/api/gh/gen/registry.json` (chạy `GEN_WRITE=1 npx vitest run gen-targets` để ghi lại).
@@ -42,14 +43,17 @@ const EXTRA_SCREENS: GenScreen[] = [
   { key: 'guide', path: '/guide', title: 'Hướng dẫn thiết lập' },
   { key: 'account', path: '/account', title: 'Tài khoản của tôi' },
   { key: 'help', path: '/help', title: 'Trợ giúp' },
-  // v0.1.39 (F-32): trang Tài khoản mạng xã hội (Facebook) — chỉ Owner, có mục riêng trên thanh bên.
+  // v0.1.39 (F-32): trang Tài khoản mạng xã hội (Facebook) — chỉ Owner; v0.1.42 mở từ thẻ Facebook ở Kết nối.
   { key: 'social', path: '/social', title: 'Tài khoản mạng xã hội' },
   // v0.1.39 (F-74): "Việc Sếp cần làm" — 5 dòng kết nối chạy thật (trang con của Hướng dẫn thiết lập) — chỉ Owner.
   { key: 'boss_checks', path: '/guide/viec-sep', title: 'Việc Sếp cần làm' },
 ];
 
+/** v0.1.42 (F-41): Plugin & Tiện ích đóng băng (ẩn khỏi thanh bên, route giữ) — Gen không mở tới đó. */
+const GEN_EXCLUDED_SCREENS = new Set(['plugins']);
+
 export const GEN_SCREENS: GenScreen[] = [
-  ...SCREENS.map((s) => ({ key: s.key, path: `/${s.key}`, title: s.title })),
+  ...SCREENS.filter((s) => !GEN_EXCLUDED_SCREENS.has(s.key)).map((s) => ({ key: s.key, path: `/${s.key}`, title: s.title })),
   ...EXTRA_SCREENS,
 ];
 
@@ -61,22 +65,21 @@ export const GEN_TARGETS: GenTarget[] = [
   { id: 'overview.kpis', screen: 'overview', label: 'Hàng chỉ số chính', description: 'Các ô số liệu đầu trang Tổng quan (cơ hội, cảnh báo, chờ duyệt…)' },
   { id: 'overview.queue', screen: 'overview', label: 'Hàng đợi cần xử lý', description: 'Khung liệt kê cơ hội, cảnh báo, bản nháp chờ duyệt, việc đến hạn' },
   { id: 'overview.queue.row', screen: 'overview', label: 'Một dòng hàng đợi', description: 'Một mục cụ thể trong Hàng đợi cần xử lý', dynamic: 'row' },
-  { id: 'overview.queue.open_inbox', screen: 'overview', label: 'Nút "Mở hộp thư ý nghĩa"', description: 'Mở Hộp thư ý nghĩa để xem toàn bộ hàng đợi' },
+  { id: 'overview.queue.open_inbox', screen: 'overview', label: 'Nút "Mở hộp thư"', description: 'Mở Hộp thư để xem toàn bộ hàng đợi' },
   { id: 'overview.spotlight', screen: 'overview', label: '5 đối tượng đáng chú ý', description: 'Năm người/khách nổi bật nhất hôm nay' },
-  { id: 'overview.health', screen: 'overview', label: 'Sức khoẻ hệ thống', description: 'Tình trạng kênh và backlog sàng lọc' },
+  { id: 'overview.health', screen: 'overview', label: 'Sức khoẻ hệ thống', description: 'Tình trạng kênh, nhóm lắng nghe, sự kiện hôm nay, độ trễ xử lý và tin chờ sàng lọc' },
   // ── Hướng dẫn thiết lập ──
   { id: 'guide.progress', screen: 'guide', label: 'Thanh tiến độ', description: 'Bao nhiêu việc thiết lập đã xong' },
   { id: 'guide.item', screen: 'guide', label: 'Một việc thiết lập', description: 'Thẻ một việc thiết lập (theo số việc n)', dynamic: 'row' },
   { id: 'guide.item.do', screen: 'guide', label: 'Nút "Làm bước này"', description: 'Mở form làm việc thiết lập n', dynamic: 'row' },
-  // ── Điều khiển hệ thống ──
-  { id: 'system.tab.channels', screen: 'system', label: 'Tab "Kênh & đăng nhập"', description: 'Chuyển sang tab kênh Zalo/WhatsApp, PIN, CLI' },
+  // ── Cài đặt (v0.1.42; trước là Điều khiển hệ thống) ──
   { id: 'system.tab.brain', screen: 'system', label: 'Tab "Bộ não AI"', description: 'Chuyển sang tab nhà cung cấp model, hạn mức, Jev' },
-  { id: 'system.tab.users', screen: 'system', label: 'Tab "Người dùng"', description: 'Chuyển sang tab mời người dùng, đổi vai trò, khoá tài khoản (chỉ Owner)', permission: 'roles.manage' },
   { id: 'system.tab.org', screen: 'system', label: 'Tab "Tổ chức"', description: 'Chuyển sang tab sửa tên tổ chức, múi giờ, tiền tệ, xưng hô' },
-  { id: 'system.tab.storage', screen: 'system', label: 'Tab "Dữ liệu & lưu trữ"', description: 'Chuyển sang tab hạn lưu, sao lưu & khôi phục' },
-  { id: 'system.channels.list', screen: 'system', label: 'Danh sách kênh', description: 'Thẻ các kênh Zalo/WhatsApp và nút tạo mã QR', params: { tab: 'channels' } },
-  { id: 'system.channels.pin', screen: 'system', label: 'Thẻ mã PIN', description: 'Đổi mã PIN, xem lịch sử nhập PIN', params: { tab: 'channels' }, sensitive: true },
-  { id: 'system.channels.facebook', screen: 'system', label: 'Thẻ Facebook', description: 'Mở trang Tài khoản mạng xã hội (chỉ Owner)', params: { tab: 'channels' }, permission: 'roles.manage' },
+  { id: 'system.tab.storage', screen: 'system', label: 'Tab "Sao lưu & cập nhật"', description: 'Chuyển sang tab sao lưu & khôi phục, cập nhật phần mềm, hạn lưu dữ liệu' },
+  // v0.1.42 (F-7): kênh và Facebook ở Kết nối (id giữ nguyên); thẻ mã PIN chỉ còn ở Tài khoản của tôi (account.pin).
+  { id: 'system.channels.list', screen: 'connections', label: 'Danh sách kênh', description: 'Thẻ các kênh Zalo/WhatsApp/Telegram và nút tạo mã QR' },
+  { id: 'system.channels.facebook', screen: 'connections', label: 'Thẻ Facebook', description: 'Mở trang Tài khoản mạng xã hội (chỉ Owner)', permission: 'roles.manage' },
+  { id: 'connections.brain', screen: 'connections', label: 'Thẻ "Bộ não AI"', description: 'Trạng thái bộ não AI (model, khoá API, tài khoản CLI) và nút mở Bộ não AI ở Cài đặt' },
   { id: 'system.brain.quota', screen: 'system', label: 'Hạn mức theo model', description: 'Bảng dùng trong ngày / còn lại của từng model', params: { tab: 'brain' } },
   { id: 'system.brain.chain', screen: 'system', label: 'Chuỗi chuyển hướng', description: 'Thứ tự nhà cung cấp model khi một nơi lỗi', params: { tab: 'brain' } },
   { id: 'system.brain.open_api', screen: 'system', label: 'Nút "Mở API & Model"', description: 'Sang màn thêm nhà cung cấp, khoá API, gán model', params: { tab: 'brain' } },
@@ -93,24 +96,25 @@ export const GEN_TARGETS: GenTarget[] = [
   { id: 'system.offsite.run', screen: 'system', label: 'Nút "Sao lưu ra ổ ngoài ngay"', description: 'Xuất bản sao ra ổ ngoài ngay lúc này', params: { tab: 'storage' }, sensitive: true, permission: 'system.manage' },
   { id: 'system.offsite.portable', screen: 'system', label: 'Nút "Tải gói mang đi"', description: 'Tải gói dữ liệu mã hoá về máy đang dùng (chỉ Owner, cần mã PIN)', params: { tab: 'storage' }, sensitive: true, permission: 'roles.manage' },
   { id: 'system.offsite.kit', screen: 'system', label: 'Nút "Bộ khôi phục"', description: 'Xem/in khoá khôi phục để mở bản sao ngoài máy (chỉ Owner, cần mã PIN)', params: { tab: 'storage' }, sensitive: true, permission: 'roles.manage' },
-  { id: 'system.users.list', screen: 'system', label: 'Danh sách người dùng', description: 'Tên, email, vai trò, trạng thái, lần đăng nhập gần nhất; nút đặt lại mật khẩu, khoá/mở khoá', params: { tab: 'users' }, sensitive: true, permission: 'roles.manage' },
-  { id: 'system.users.invite', screen: 'system', label: 'Nút "Mời người dùng"', description: 'Tạo tài khoản mới với mật khẩu tạm (cần mã PIN)', params: { tab: 'users' }, permission: 'roles.manage' },
-  { id: 'system.users.temp_password', screen: 'system', label: 'Mật khẩu tạm vừa tạo', description: 'Hộp hiện mật khẩu tạm một lần sau khi mời / đặt lại mật khẩu', params: { tab: 'users' }, sensitive: true, permission: 'roles.manage' },
+  // v0.1.42 (F-7): người dùng ở Đội ngũ (id giữ nguyên).
+  { id: 'system.users.list', screen: 'team', label: 'Danh sách người dùng', description: 'Tên, email, vai trò, trạng thái, lần đăng nhập gần nhất; nút đặt lại mật khẩu, khoá/mở khoá', sensitive: true, permission: 'roles.manage' },
+  { id: 'system.users.invite', screen: 'team', label: 'Nút "Mời người dùng"', description: 'Tạo tài khoản mới với mật khẩu tạm (cần mã PIN)', permission: 'roles.manage' },
+  { id: 'system.users.temp_password', screen: 'team', label: 'Mật khẩu tạm vừa tạo', description: 'Hộp hiện mật khẩu tạm một lần sau khi mời / đặt lại mật khẩu', sensitive: true, permission: 'roles.manage' },
   { id: 'system.org.form', screen: 'system', label: 'Thông tin tổ chức', description: 'Tên tổ chức, múi giờ, tiền tệ, Sếp tự xưng là, Agent gọi Sếp là', params: { tab: 'org' } },
   { id: 'system.org.save', screen: 'system', label: 'Nút "Lưu thông tin tổ chức"', description: 'Lưu thay đổi thông tin tổ chức và xưng hô', params: { tab: 'org' } },
   // ── Việc & Nhắc hẹn / Hộp thư / Bàn làm việc (Gen v2 — A4: đề xuất có xác nhận gắn với các mục tiêu này) ──
   { id: 'tasks.new', screen: 'tasks', label: 'Nút "Tạo việc mới"', description: 'Tạo việc hoặc nhắc hẹn mới (tiêu đề, ưu tiên, hạn)', permission: 'queue.act' },
   { id: 'tasks.row', screen: 'tasks', label: 'Một dòng việc', description: 'Một việc cụ thể trong Danh sách việc (theo id việc)', dynamic: 'row' },
   { id: 'inbox.hide_junk', screen: 'inbox', label: 'Bộ lọc "Ẩn rác & trùng"', description: 'Ẩn các mục trùng, rác hoặc điểm dưới ngưỡng khỏi Hộp thư' },
-  { id: 'inbox.row', screen: 'inbox', label: 'Một mục hộp thư', description: 'Một thẻ trong Hộp thư ý nghĩa (theo id mục)', dynamic: 'row' },
+  { id: 'inbox.row', screen: 'inbox', label: 'Một mục hộp thư', description: 'Một thẻ trong Hộp thư (theo id mục)', dynamic: 'row' },
   { id: 'workbench.drafts', screen: 'workbench', label: 'Bản nháp chờ duyệt', description: 'Danh sách bản nháp tin gửi đi đang chờ Sếp duyệt', permission: 'action.draft', sensitive: true },
   // ── API & Model ──
   { id: 'api.add_provider', screen: 'api', label: 'Nút "Thêm nhà cung cấp"', description: 'Thêm Gemini/DeepSeek/API tương thích OpenAI' },
   { id: 'api.bindings', screen: 'api', label: 'Gán model cho từng agent', description: 'Chọn model cho từng mục đích, gồm core.gen của Gen' },
-  // ── MCP Hub — Gen-hub (v0.1.26, Đợt D1: Gen đọc Kho Ryan, chỉ đọc, chỉ Owner) ──
-  { id: 'mcp.hub_link', screen: 'mcp', label: 'Thẻ "Gen-hub"', description: 'Nối Gen-hub để Gen đọc Kho Ryan (chỉ đọc, chỉ Sếp): địa chỉ, token, hạn token, trạng thái', permission: 'system.manage' },
-  { id: 'mcp.hub_link.token', screen: 'mcp', label: 'Ô "Token Gen-hub"', description: 'Dán token agent tạo trong Gen-hub (chỉ ghi — không bao giờ hiện lại)', permission: 'system.manage', sensitive: true },
-  { id: 'mcp.hub_link.test', screen: 'mcp', label: 'Nút "Kiểm tra" Gen-hub', description: 'Thử kết nối, mở đúng tool đọc Kho cho Gen rồi bật liên kết (cần PIN)', permission: 'system.manage' },
+  // ── Gen-hub (v0.1.26, Đợt D1: Gen đọc Kho Ryan, chỉ đọc, chỉ Owner) — v0.1.42: thẻ ở Kết nối (id giữ nguyên) ──
+  { id: 'mcp.hub_link', screen: 'connections', label: 'Thẻ "Gen-hub"', description: 'Nối Gen-hub để Gen đọc Kho Ryan (chỉ đọc, chỉ Sếp): địa chỉ, token, hạn token, trạng thái', permission: 'system.manage' },
+  { id: 'mcp.hub_link.token', screen: 'connections', label: 'Ô "Token Gen-hub"', description: 'Dán token agent tạo trong Gen-hub (chỉ ghi — không bao giờ hiện lại)', permission: 'system.manage', sensitive: true },
+  { id: 'mcp.hub_link.test', screen: 'connections', label: 'Nút "Kiểm tra" Gen-hub', description: 'Thử kết nối, mở đúng tool đọc Kho cho Gen rồi bật liên kết (cần PIN)', permission: 'system.manage' },
   // ── Tài khoản của tôi ──
   { id: 'account.profile', screen: 'account', label: 'Hồ sơ', description: 'Đổi tên hiển thị, email' },
   { id: 'account.password', screen: 'account', label: 'Đổi mật khẩu', description: 'Đặt mật khẩu mới', sensitive: true },

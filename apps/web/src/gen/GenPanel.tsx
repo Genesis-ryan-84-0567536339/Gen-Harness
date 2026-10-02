@@ -12,7 +12,7 @@ const EXAMPLES = ['Hôm nay có gì cần tôi xử lý?', 'Nhắc tôi gọi l�
 
 const TOOL_LABEL: Record<string, string> = {
   'overview.summary': 'Tổng quan',
-  'queue.list': 'Hộp thư ý nghĩa',
+  'queue.list': 'Hộp thư',
   'draft.list': 'bản nháp',
   'draft.get': 'bản nháp',
   'profile.search': 'tìm kiếm',

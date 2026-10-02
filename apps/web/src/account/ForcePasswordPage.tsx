@@ -23,7 +23,7 @@ export function ForcePasswordPage() {
     document.title = 'Đặt mật khẩu mới · Gen-Harness';
   }, []);
 
-  if (me.data && !me.data.must_change_password) return <Navigate to="/overview" replace />;
+  if (me.data && !me.data.must_change_password) return <Navigate to="/" replace />;
 
   const logout = async () => {
     setLeaving(true);
@@ -63,7 +63,7 @@ export function ForcePasswordPage() {
               if (cur) queryClient.setQueryData(qk.me, { ...cur, must_change_password: false });
               await queryClient.invalidateQueries({ queryKey: qk.me });
               toast('Đã đặt mật khẩu mới.');
-              navigate('/overview', { replace: true });
+              navigate('/', { replace: true });
             }}
             footer={
               <Button variant="ghost" block icon="ph ph-sign-out" loading={leaving} onClick={() => void logout()}>

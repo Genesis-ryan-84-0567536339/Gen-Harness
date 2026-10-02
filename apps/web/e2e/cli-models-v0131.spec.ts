@@ -50,8 +50,12 @@ test.describe('v0.1.31 — model CLI theo nhóm + Claude Code CLI', () => {
     await expect(row).toContainText('Đang dùng opus');
   });
 
-  test('API & Model: có thẻ Claude Code CLI (tuỳ chọn) bên cạnh Antigravity', async ({ page }) => {
+  // v0.1.42 (F-61): thẻ tài khoản CLI chỉ ở Kết nối (mục Bộ não AI); API & Model chỉ còn liên kết tới đó.
+  test('Kết nối: có thẻ Claude Code CLI (tuỳ chọn) bên cạnh Antigravity', async ({ page }) => {
     await page.goto('/api');
+    await page.getByRole('link', { name: /Tài khoản Google \/ Claude CLI ở Kết nối/ }).click();
+    await expect(page).toHaveURL(/\/connections#brain$/);
+    await expect(page.getByTestId('cli-card-antigravity_cli')).toBeVisible();
     const card = page.getByTestId('cli-card-claude_code_cli');
     await expect(card).toContainText('Tài khoản Claude Code CLI');
     await expect(card.getByTestId('claude-risk')).toBeVisible();

@@ -9,7 +9,6 @@ import { useMe } from '../lib/queries';
 import { toast } from '../lib/toast';
 import { CardError, SkeletonLines } from '../screens/common';
 import { ScreenTitle } from '../screens/ScreenPage';
-import { UpdateCard } from '../update/UpdateCard';
 import { GENH_COMMANDS, GENH_VERSION_LABEL, SERVER_VERSION_LABEL, diagnosticText, withVersions } from './helpModel';
 import { roleLabel } from '../screens/system/systemModel';
 
@@ -92,8 +91,14 @@ export function HelpPage() {
           </Card>
         ) : null}
 
-        {/* v0.1.30: mục "Cập nhật phần mềm" cố định (vai trò có system.manage). */}
-        {canGuide ? <UpdateCard always /> : null}
+        {/* v0.1.42 (F-61): thẻ cập nhật chỉ ở Cài đặt › Sao lưu & cập nhật — ở đây là liên kết tới đó. */}
+        {canGuide ? (
+          <Card title="Cập nhật phần mềm" kicker="Phiên bản đang dùng, bản mới, sao lưu">
+            <Link className="gh-btn gh-btn--secondary help-link" to="/system?tab=storage" data-testid="help-update-link">
+              <Icon name="ph ph-arrow-circle-up" size={14} /> Sao lưu &amp; cập nhật ở Cài đặt
+            </Link>
+          </Card>
+        ) : null}
 
         {canGuide ? (
           <Card title="Hướng dẫn thiết lập" kicker="Kênh, nhóm, sàng lọc, agent, đội ngũ, sao lưu, Facebook, Gen-hub">
@@ -118,7 +123,7 @@ export function HelpPage() {
         ) : (
           <Card title="Cần giúp về tài khoản" kicker="Owner là người quản lý tài khoản của mọi người">
             <ul className="help-examples">
-              <li>Quên mật khẩu: nhờ Owner vào Điều khiển hệ thống › Người dùng › Đặt lại mật khẩu, rồi đăng nhập bằng mật khẩu tạm Owner gửi.</li>
+              <li>Quên mật khẩu: nhờ Owner vào Đội ngũ › Người dùng › Đặt lại mật khẩu, rồi đăng nhập bằng mật khẩu tạm Owner gửi.</li>
               <li>Cần xem thêm màn hoặc làm thêm việc: nhờ Owner mở quyền cho vai trò của bạn.</li>
               <li>Đổi mật khẩu, mã PIN của chính mình: menu tài khoản ở góc dưới bên trái › Tài khoản của tôi.</li>
             </ul>

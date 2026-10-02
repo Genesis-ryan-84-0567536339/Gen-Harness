@@ -1,131 +1,10 @@
-import { useEffect, useState } from 'react';
-import { useMutation, useQuery } from '@tanstack/react-query';
-import { ApiError } from '@gen-harness/contracts';
-import { Button, Dialog, EmptyState, PinInput } from '@gen-harness/ui';
+import { useQuery } from '@tanstack/react-query';
+import { Dialog, EmptyState } from '@gen-harness/ui';
 import { api } from '../../lib/api';
 import { fmtDMClock } from '../../lib/format';
-import { useCan, useOrgTimezone } from '../../lib/permissions';
-import { toast } from '../../lib/toast';
-import { PIN_RULES } from '../../setup/steps';
-import { errorText } from '../../lib/errorText';
-import { CardError, InlineError, Panel, SkeletonLines, StateChip } from '../common';
+import { useOrgTimezone } from '../../lib/permissions';
+import { CardError, SkeletonLines, StateChip } from '../common';
 import { BAD, N4, OK, WARN } from '../data/dataModel';
-
-/** Mã PIN xác nhận thao tác (design `pinDigits` + `pinRules`). */
-export function PinCard() {
-  const canAudit = useCan('audit.read');
-  const [changeOpen, setChangeOpen] = useState(false);
-  const [historyOpen, setHistoryOpen] = useState(false);
-  return (
-    <Panel genTarget="system.channels.pin" title="Mã PIN xác nhận thao tác" kicker="6 chữ số · bảo vệ mọi thao tác nhạy cảm" label="Mã PIN xác nhận thao tác">
-      <div className="pin-body">
-        <div className="pin-digits" aria-label="Mã PIN đã đặt, 6 chữ số" role="img">
-          {Array.from({ length: 6 }, (_, i) => (
-            <span className="pin-digit" key={i} aria-hidden>
-              •
-            </span>
-          ))}
-        </div>
-        {PIN_RULES.map(([k, v]) => (
-          <div className="pin-rule" key={k}>
-            <span className="pin-rule__k">{k}</span>
-            <span className="pin-rule__v">{v}</span>
-          </div>
-        ))}
-        <div className="pin-actions">
-          <Button variant="primary" icon="ph ph-password" onClick={() => setChangeOpen(true)}>
-            Đổi mã PIN
-          </Button>
-          {canAudit ? (
-            <Button variant="secondary" icon="ph ph-clock-counter-clockwise" onClick={() => setHistoryOpen(true)}>
-              Lịch sử nhập
-            </Button>
-          ) : null}
-        </div>
-      </div>
-      <ChangePinDialog open={changeOpen} onClose={() => setChangeOpen(false)} />
-      <PinHistoryDialog open={historyOpen} onClose={() => setHistoryOpen(false)} />
-    </Panel>
-  );
-}
-
-function ChangePinDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const tz = useOrgTimezone();
-  const [cur, setCur] = useState('');
-  const [next, setNext] = useState('');
-  const [confirm, setConfirm] = useState('');
-  useEffect(() => {
-    if (open) {
-      setCur('');
-      setNext('');
-      setConfirm('');
-    }
-  }, [open]);
-  const mismatch = confirm.length === 6 && next !== confirm;
-  const same = next.length === 6 && next === cur;
-  const valid = cur.length === 6 && next.length === 6 && next === confirm && !same;
-  const save = useMutation({
-    mutationFn: () => api.auth.changePin(cur, next),
-    onSuccess: () => {
-      toast('Đã đổi mã PIN');
-      onClose();
-    },
-  });
-  const err = save.error;
-  const wrongCurrent = err instanceof ApiError && (err.code === 'PIN_INVALID' || err.status === 403);
-  return (
-    <Dialog
-      open={open}
-      onClose={onClose}
-      width={400}
-      title="Đổi mã PIN"
-      kicker="6 chữ số · mọi lần đổi đều vào nhật ký"
-      actions={
-        <>
-          <Button variant="secondary" onClick={onClose}>
-            Huỷ
-          </Button>
-          <Button variant="primary" icon="ph ph-check" disabled={!valid} loading={save.isPending} onClick={() => save.mutate()}>
-            Lưu mã mới
-          </Button>
-        </>
-      }
-    >
-      <form
-        className="dlg-fields"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (valid) save.mutate();
-        }}
-      >
-        <div className="dlg-fields" style={{ gap: 6 }}>
-          <span className="dlg-section-title">PIN hiện tại</span>
-          <PinInput value={cur} onChange={setCur} label="PIN hiện tại" autoFocus invalid={wrongCurrent} idPrefix="pin-cur" />
-        </div>
-        <div className="dlg-fields" style={{ gap: 6 }}>
-          <span className="dlg-section-title">PIN mới</span>
-          <PinInput value={next} onChange={setNext} label="PIN mới" invalid={same} idPrefix="pin-new" />
-        </div>
-        <div className="dlg-fields" style={{ gap: 6 }}>
-          <span className="dlg-section-title">Nhập lại PIN mới</span>
-          <PinInput value={confirm} onChange={setConfirm} label="Nhập lại PIN mới" invalid={mismatch} idPrefix="pin-confirm" />
-        </div>
-        <InlineError>
-          {same
-            ? 'PIN mới phải khác PIN hiện tại.'
-            : mismatch
-              ? 'Hai lần nhập PIN mới chưa khớp.'
-              : err
-                ? wrongCurrent
-                  ? 'PIN hiện tại không đúng.'
-                  : errorText(err, tz)
-                : null}
-        </InlineError>
-        <button type="submit" hidden />
-      </form>
-    </Dialog>
-  );
-}
 
 const PIN_ACTION_LABEL: Record<string, { label: string; tone: string }> = {
   'auth.pin_verified': { label: 'Nhập đúng', tone: OK },
@@ -135,7 +14,11 @@ const PIN_ACTION_LABEL: Record<string, { label: string; tone: string }> = {
   'auth.pin_changed': { label: 'Đổi PIN', tone: N4 },
 };
 
-function PinHistoryDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+/**
+ * v0.1.42 (F-61): thẻ mã PIN chỉ còn ở một chỗ — Tài khoản của tôi (AccountPage). File này chỉ giữ hộp "Lịch sử nhập
+ * PIN" (đọc Nhật ký hành động) để thẻ đó mở khi vai trò có `audit.read`.
+ */
+export function PinHistoryDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const tz = useOrgTimezone();
   const q = useQuery({
     queryKey: ['audit', 'pin'],

@@ -7,7 +7,6 @@ import { useFailoverRules, useTestProvider } from '../api/queries';
 import { fmtQuota, providerStatus } from '../api/apiModel';
 import { CardError, Panel, SkeletonLines } from '../common';
 import { N4, OK, WARN } from '../data/dataModel';
-import { CliCard } from './CliCard';
 import { JevCard } from './JevCard';
 import { TriageCard } from './TriageCard';
 import { BackgroundSourcesCard } from './BackgroundSourcesCard';
@@ -21,7 +20,23 @@ import { useCan } from '../../lib/permissions';
  * `useFailoverRules`), không lặp lại logic sửa/thêm/kéo-thả, và dẫn sang màn đó cho việc cấu hình đầy đủ.
  */
 export function BrainTab() {
-  const canManage = useCan('system.manage');
+  // v0.1.42 (F-7): Cài đặt mở cho cả `audit.read` — vai trò không có `system.read` thấy ổ khoá, KHÔNG gọi /providers.
+  const canRead = useCan('system.read');
+  if (!canRead) {
+    return (
+      <div className="gh-card">
+        <EmptyState
+          icon="ph ph-lock-simple"
+          title="Vai trò của bạn không xem được Bộ não AI"
+          description="Model, hạn mức và chuỗi chuyển hướng chỉ hiện với vai trò có quyền xem hệ thống."
+        />
+      </div>
+    );
+  }
+  return <BrainTabBody />;
+}
+
+export function BrainTabBody() {
   const providers = useProviders();
   const rules = useFailoverRules();
   const qc = useQueryClient();
@@ -156,7 +171,13 @@ export function BrainTab() {
         ) : (
           jevCard
         )}
-        <CliCard canManage={canManage} showCredentials={false} />
+        {/* v0.1.42 (F-61): thẻ tài khoản CLI chỉ ở một chỗ — Kết nối › Bộ não AI. */}
+        <div className="gh-card brain-cli-link">
+          <Link to="/connections#brain" className="sys-link">
+            <Icon name="ph ph-plugs-connected" size={13} />
+            Tài khoản Google / Claude CLI ở Kết nối
+          </Link>
+        </div>
       </div>
 
       {/* v0.1.41 (F-86, F-84): nguồn AI cho việc nền (khoá API mặc định; Claude Code CLI cần cảnh báo + PIN) và chi phí. */}

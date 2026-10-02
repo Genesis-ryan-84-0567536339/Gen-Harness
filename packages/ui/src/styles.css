@@ -85,11 +85,16 @@
 
 /* ── Tabs ───────────────────────────────────────────────────────────────── */
 .gh-tabs { display: flex; align-items: center; gap: 2px; border-bottom: 1px solid var(--color-divider); }
+/* v0.1.42: máy tính — dải tab dài xuống dòng thay vì tràn ngang (chữ tab không bị cắt "…"). Điện thoại: cuộn ngang
+ * trong dải (apps/web shell.css). */
+@media (min-width: 761px) {
+  .gh-tabs { flex-wrap: wrap; row-gap: 0; }
+}
 .gh-tab {
   display: flex; align-items: center; gap: 7px;
   height: 34px; padding: 0 14px; border: none; background: transparent;
   font: inherit; font-size: 12.5px; font-weight: 400; color: var(--color-neutral-400);
-  cursor: pointer; white-space: nowrap;
+  cursor: pointer; white-space: nowrap; flex: none; overflow: visible; text-overflow: clip;
   border-bottom: 2px solid transparent; margin-bottom: -1px;
 }
 .gh-tab:hover { color: var(--color-text); }

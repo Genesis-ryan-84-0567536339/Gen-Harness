@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import type { McpServer, McpServerCreateBody, McpTool, McpTransport } from '@gen-harness/contracts';
 import { SCREEN_BY_KEY } from '@gen-harness/contracts';
 import { Button, Dialog, EmptyState, Icon, SelectField, Switch, TextField } from '@gen-harness/ui';
@@ -7,7 +8,6 @@ import { errorText } from '../../lib/errorText';
 import { useCan } from '../../lib/permissions';
 import { toast } from '../../lib/toast';
 import { CardError, InlineError, Panel, ScreenHead, SkeletonLines, StateChip } from '../common';
-import { HubLinkCard } from './HubLinkCard';
 import { ACCESS_LABEL, N5, OK, OUTCOME_LABEL, TRANSPORT_LABEL, WARN, fmtLatency, healthLabel, healthTone, mcpErrorText, outcomeTone } from './mcpModel';
 import {
   useCallTool,
@@ -96,7 +96,13 @@ export function McpScreen() {
         />
       </Panel>
 
-      <HubLinkCard />
+      {/* v0.1.42 (F-61): thẻ Gen-hub chỉ ở Kết nối — ở đây chỉ còn dòng liên kết. */}
+      <div className="gh-card mcp-hub-link-row">
+        <Link to="/connections#genhub" className="sys-link">
+          <Icon name="ph ph-plugs-connected" size={13} />
+          Gen-hub nối ở Kết nối
+        </Link>
+      </div>
 
       <Panel title="Máy chủ MCP" bodyClass="mcp-servers" label="Danh sách máy chủ MCP">
         {servers.isPending ? (

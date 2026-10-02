@@ -4,7 +4,7 @@ import { usePipeline } from '../../lib/dataQueries';
 import { CardError } from '../common';
 import { pipelineCards, type DataScreen } from './dataModel';
 
-const TARGET: Record<number, string> = { 1: '/system', 2: '/raw', 3: '/rules', 4: '/clean' };
+const TARGET: Record<number, string> = { 1: '/connections', 2: '/raw', 3: '/rules', 4: '/clean' };
 
 /**
  * Dải pipeline dùng chung cho Kho thô · Quy tắc · Kho sạch (design `pipeline`):

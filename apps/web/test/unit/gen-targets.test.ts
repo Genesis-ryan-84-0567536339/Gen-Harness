@@ -69,14 +69,33 @@ describe('gen targets registry', () => {
 
   it('backup / PIN / password / sessions targets are sensitive', () => {
     const sens = new Set(GEN_TARGETS.filter((t) => t.sensitive).map((t) => t.id));
-    for (const id of ['system.backup.panel', 'system.backup.now', 'system.backup.schedule', 'system.channels.pin', 'account.password', 'account.pin', 'account.sessions']) {
+    // v0.1.42 (F-61): thẻ PIN chỉ ở Tài khoản của tôi — `system.channels.pin` bỏ, `account.pin` giữ.
+    for (const id of ['system.backup.panel', 'system.backup.now', 'system.backup.schedule', 'account.password', 'account.pin', 'account.sessions']) {
       expect(sens.has(id), id).toBe(true);
     }
+    expect(resolveTarget('system.channels.pin')).toBeNull();
+  });
+
+  it('v0.1.42: id cũ giữ nguyên, chỉ đổi chỗ (Kết nối, Đội ngũ); bỏ tab Kênh/Người dùng; Gen không mở Plugin', () => {
+    expect(resolveTarget('system.channels.list')).toMatchObject({ screen: 'connections' });
+    expect(resolveTarget('system.channels.list')?.params).toBeUndefined();
+    expect(resolveTarget('system.channels.facebook')).toMatchObject({ screen: 'connections', permission: 'roles.manage' });
+    expect(resolveTarget('connections.brain')).toMatchObject({ screen: 'connections' });
+    for (const id of ['mcp.hub_link', 'mcp.hub_link.token', 'mcp.hub_link.test']) expect(resolveTarget(id)?.screen, id).toBe('connections');
+    for (const id of ['system.users.list', 'system.users.invite', 'system.users.temp_password']) {
+      expect(resolveTarget(id)?.screen, id).toBe('team');
+      expect(resolveTarget(id)?.params, id).toBeUndefined();
+    }
+    expect(resolveTarget('system.tab.channels')).toBeNull();
+    expect(resolveTarget('system.tab.users')).toBeNull();
+    expect(resolveTarget('system.tab.storage')?.label).toBe('Tab "Sao lưu & cập nhật"');
+    expect(GEN_SCREENS.map((s) => s.key)).not.toContain('plugins');
+    expect(GEN_SCREENS.map((s) => s.key)).toEqual(expect.arrayContaining(['connections', 'team', 'profile']));
   });
 
   it('user-management targets require roles.manage', () => {
-    const users = GEN_TARGETS.filter((t) => t.id === 'system.tab.users' || t.id.startsWith('system.users.'));
-    expect(users.length).toBeGreaterThan(0);
+    const users = GEN_TARGETS.filter((t) => t.id.startsWith('system.users.'));
+    expect(users.length).toBe(3);
     for (const t of users) expect(t.permission, t.id).toBe('roles.manage');
   });
 

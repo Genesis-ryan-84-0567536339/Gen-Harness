@@ -15,6 +15,7 @@ interface DesignScreen {
   en: string;
   title: string;
   subtitle: string;
+  hidden?: boolean;
 }
 const design: DesignScreen[] = JSON.parse(
   readFileSync(resolve(__dirname, '../../../../docs/design/screens.json'), 'utf8'),
@@ -30,7 +31,8 @@ describe('screen registry', () => {
       expect(s.title).toBe(d.title);
       expect(s.subtitle).toBe(d.subtitle);
       expect(s.parent).toBe(d.parent);
-      expect(s.domain).toBe(d.domain === 'Kinh doanh' ? 'business' : 'tech');
+      expect(s.domain).toBe(({ 'Việc hằng ngày': 'business', 'Nâng cao': 'tech' } as Record<string, string>)[d.domain]);
+      expect(!!s.navHidden).toBe(!!d.hidden);
     }
   });
 
@@ -44,8 +46,11 @@ describe('screen registry', () => {
     walk(routes, []);
     // 21 màn thiết kế + 3 màn spec bổ sung (tasks, documents, deals) + Hướng dẫn thiết lập (guide, guide/:n)
     // + Tài khoản của tôi (account, v0.1.19) + Trợ giúp (help, v0.1.22) + Tài khoản mạng xã hội (social, v0.1.29)
-    // + Việc Sếp cần làm (guide/viec-sep, v0.1.39)
-    expect(paths).toHaveLength(30);
+    // + Việc Sếp cần làm (guide/viec-sep, v0.1.39) + Kết nối, Đội ngũ (v0.1.42)
+    expect(paths).toHaveLength(32);
+    expect(paths).toContain('domain:business > connections');
+    expect(paths).toContain('domain:business > team');
+    expect(paths).toContain('domain:business > group:Đội ngũ > people');
     expect(paths).toContain('account');
     expect(paths).toContain('help');
     expect(paths).toContain('guide');
@@ -53,11 +58,15 @@ describe('screen registry', () => {
     expect(paths).toContain('guide/viec-sep');
     // `guide/viec-sep` phải đứng TRƯỚC `guide/:n` (không bị `:n` nuốt).
     expect(paths.indexOf('guide/viec-sep')).toBeLessThan(paths.indexOf('guide/:n'));
-    expect(paths).toContain('domain:business > group:Hàng đợi & Hành động > inbox');
-    expect(paths).toContain('domain:business > graph');
-    expect(paths).toContain('domain:business > group:Bản đồ quan hệ > profile');
-    expect(paths).toContain('domain:tech > system');
-    expect(buildScreenTree().map((d) => d.entries.length)).toEqual([7, 4]); // + Tài liệu (cấp 1, spec bổ sung)
+    expect(paths).toContain('domain:business > group:Hộp thư & Việc > inbox');
+    expect(paths).toContain('domain:tech > graph');
+    expect(paths).toContain('domain:tech > group:Bản đồ quan hệ > notebook');
+    // Màn ẩn (Hồ sơ sống, Plugin) vẫn có route.
+    expect(paths).toContain('domain:business > group:Khách & Cơ hội > profile');
+    expect(paths).toContain('domain:tech > plugins');
+    expect(paths).toContain('domain:business > system');
+    // v0.1.42: 6 mục Việc hằng ngày + 5 mục Nâng cao.
+    expect(buildScreenTree().map((d) => d.entries.length)).toEqual([6, 5]);
   });
 });
 
@@ -81,8 +90,8 @@ describe('header + footer helpers', () => {
   });
   it('login ?next= only accepts in-app paths', () => {
     expect(safeNext('/inbox?tab=all')).toBe('/inbox?tab=all');
-    expect(safeNext('//evil.example')).toBe('/overview');
-    expect(safeNext('https://evil.example')).toBe('/overview');
-    expect(safeNext(null)).toBe('/overview');
+    expect(safeNext('//evil.example')).toBe('/');
+    expect(safeNext('https://evil.example')).toBe('/');
+    expect(safeNext(null)).toBe('/');
   });
 });

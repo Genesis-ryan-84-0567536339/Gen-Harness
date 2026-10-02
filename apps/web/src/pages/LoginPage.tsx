@@ -91,7 +91,7 @@ export function LoginPage() {
           {/* v0.1.28 (UX N9/V15): nhân viên không có máy chủ — nhờ Owner; lệnh cho Owner không ngắt giữa chữ. */}
           <div className="login-card__help">
             <p>Quên mật khẩu?</p>
-            <p>Nhân viên: nhờ Owner bấm "Đặt lại mật khẩu" ở Điều khiển hệ thống › Người dùng.</p>
+            <p>Nhân viên: nhờ Owner bấm "Đặt lại mật khẩu" ở Đội ngũ › Người dùng.</p>
             <p>
               Owner: nhờ người cài đặt hệ thống chạy trên máy chủ <code className="mono login-card__cmd">{RESET_PASSWORD_COMMAND}</code>
             </p>

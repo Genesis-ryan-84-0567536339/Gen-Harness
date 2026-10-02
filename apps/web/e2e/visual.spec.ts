@@ -7,9 +7,12 @@ import { loginAsOwner, openDesign, OWNER, resetMock, resultsDir, settle, setUiPr
 
 /**
  * docs/handoff/07 §1: put the app next to the design at 1440 and 1280 and
- * compare. Phase 1 builds the shell only, so the comparison covers the
- * sidebar and the header; full-page screenshots of both are saved for review
- * in test-results/visual/.
+ * compare. Full-page screenshots of both are saved for review in test-results/visual/.
+ *
+ * v0.1.42 (F-7, F-67): thanh bên (một menu 6 mục + Nâng cao) và header (viên tự trị/khiên chỉ ở Nâng cao) đã cố ý
+ * khác thiết kế gốc ⇒ vùng sidebar/header của mọi kịch bản và nội dung Tổng quan chỉ còn KIỂM KHÓI (vẽ được, đúng
+ * cấu trúc, không tràn ngang, header vẫn cao 58px) — vẫn cắt ảnh hai bên lưu lại để người xem so bằng mắt. Nội dung
+ * các màn còn giữ nguyên bố cục (inbox, raw…) vẫn so pixel như cũ. `design.clicks` là nhãn trong file THIẾT KẾ.
  */
 interface Scenario {
   name: string;
@@ -44,8 +47,9 @@ async function ownerPinIfNeeded(page: Page): Promise<void> {
 }
 
 const SCENARIOS: Scenario[] = [
-  { name: 'overview-1440', viewport: { width: 1440, height: 900 }, appPath: '/overview', design: {}, sidebar: 'full', contentUntil: '.ov-kpi-row' },
-  { name: 'overview-1280', viewport: { width: 1280, height: 800 }, appPath: '/overview', design: {}, sidebar: 'full', contentUntil: '.ov-kpi-row' },
+  // v0.1.42 (F-64): Hôm nay một hàng 4 số — nội dung chỉ kiểm khói (không còn contentUntil).
+  { name: 'overview-1440', viewport: { width: 1440, height: 900 }, appPath: '/overview', design: {}, sidebar: 'full' },
+  { name: 'overview-1280', viewport: { width: 1280, height: 800 }, appPath: '/overview', design: {}, sidebar: 'full' },
   {
     name: 'inbox-1440',
     viewport: { width: 1440, height: 900 },
@@ -355,10 +359,8 @@ const MAX_DIFF_RATIO = Number(process.env.VISUAL_MAX_DIFF ?? 0.015);
 
 const outDir = join(resultsDir, 'visual');
 
-/** Màn spec bổ sung (quyết định Q5) không có trong thiết kế: ẩn khỏi danh mục khi so ảnh. */
-// v0.1.30: 'guide' = mục "Hướng dẫn thiết lập" (Owner) dưới Điều khiển hệ thống — thiết kế gốc không có.
-// v0.1.39 (F-32): 'social' = mục "Mạng xã hội" (Owner) ngay dưới Hướng dẫn thiết lập — thiết kế gốc không có.
-const EXTRA_SCREENS = ['tasks', 'documents', 'deals', 'guide', 'social'];
+/** Số mục cấp 1 trên thanh bên của Owner (v0.1.42): 6 mục Việc hằng ngày + nút "Nâng cao". */
+const LEVEL1 = 7;
 
 /**
  * Thẻ thêm SAU thiết kế gốc, ẩn khi so ảnh (như EXTRA_SCREENS). v0.1.39 (F-28): "Việc thiết lập tiếp" ở Tổng quan nay có
@@ -466,14 +468,17 @@ for (const sc of SCENARIOS) {
     await loginAsOwner(appPage);
     await appPage.goto(sc.appPath);
     if (sc.afterGoto) await sc.afterGoto(appPage);
-    await expect(appPage.locator('header.hd').getByText('tự trị 4')).toBeVisible();
+    // Viên "N kênh · M nhóm" luôn có; viên tự trị chỉ ở màn Nâng cao (F-67).
+    await expect(appPage.locator('header.hd .hd-status')).toContainText(/kênh · \d+ nhóm/);
     await expect(appPage.locator('.sb-avatar')).toHaveText('CL');
     await expect(appPage.locator('.sb-nav .sb-item').first()).toBeVisible();
+    // Kiểm khói thanh bên: đúng 7 mục cấp 1 (6 + Nâng cao), không có mục nào bị cắt ra ngoài thanh bên.
+    await expect(appPage.locator('.sb-nav [data-level1]')).toHaveCount(LEVEL1);
     await checkExtraHeaderControls(appPage, sc.name);
+    const overflow = await appPage.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    expect(overflow, `${sc.name}: trang không cuộn ngang`).toBeLessThanOrEqual(0);
     await appPage.addStyleTag({
-      content:
-        [...EXTRA_SCREENS.map((k) => `[data-screen="${k}"]`), ...EXTRA_HEADER_CONTROLS.map((c) => `header.hd ${c}`), ...EXTRA_PANELS].join(',') +
-        '{display:none !important}',
+      content: [...EXTRA_HEADER_CONTROLS.map((c) => `header.hd ${c}`), ...EXTRA_PANELS].join(',') + '{display:none !important}',
     });
     await settle(appPage);
     const app = await shot(appPage, `app-${sc.name}.png`);
@@ -517,9 +522,15 @@ for (const sc of SCENARIOS) {
     }
     writeFileSync(join(outDir, `report-${sc.name}.json`), JSON.stringify({ ...report, content: contentResult }, null, 2));
     console.log(`visual ${sc.name}: ${JSON.stringify(report)}`);
-    for (const [k, r] of Object.entries(report)) {
-      expect.soft(r.ratio, `${sc.name} ${k} differs in ${r.diffPixels} px`).toBeLessThanOrEqual(sc.maxDiffRatio ?? MAX_DIFF_RATIO);
+    // v0.1.42: sidebar/header không còn so pixel với thiết kế gốc (menu và header mới) — số đo vẫn ghi ở report để
+    // theo dõi; chỉ kiểm khói hai vùng không trống (có nội dung vẽ ra).
+    for (const [k, [x, y, w, h]] of Object.entries(regions)) {
+      const b = crop(app, x, y, w, h);
+      let lit = 0;
+      for (let i = 0; i < b.data.length; i += 4) if (b.data[i] + b.data[i + 1] + b.data[i + 2] > 120) lit++;
+      expect(lit, `${sc.name} ${k}: vùng có nội dung`).toBeGreaterThan(50);
     }
+    console.log(`visual ${sc.name}: sidebar/header chỉ để tham khảo (ngưỡng cũ ${sc.maxDiffRatio ?? MAX_DIFF_RATIO}, không chặn)`);
     await context.close();
   });
 }

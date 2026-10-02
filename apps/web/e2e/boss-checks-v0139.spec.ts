@@ -34,7 +34,7 @@ test.describe('Việc Sếp cần làm (v0.1.39)', () => {
     });
     await loginAsOwner(page);
     await page.goto('/guide');
-    await expect(page.getByRole('heading', { name: 'Hướng dẫn thiết lập' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 2, name: 'Hướng dẫn thiết lập' })).toBeVisible();
     const card = page.getByRole('link', { name: /Việc Sếp cần làm — kết nối chạy thật/ });
     await expect(card).toContainText('Đã đạt 0/4 dòng bắt buộc');
     await card.click();

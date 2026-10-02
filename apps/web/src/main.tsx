@@ -23,6 +23,7 @@ import './styles/p4-api.css';
 import './styles/p4-mcp.css';
 import './styles/p4-plugins.css';
 import './styles/system.css';
+import './styles/connections.css';
 import './styles/account.css';
 import './styles/gen.css';
 import './styles/notifications.css';

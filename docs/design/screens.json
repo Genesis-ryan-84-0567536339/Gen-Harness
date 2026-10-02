@@ -1,28 +1,28 @@
 [
   {
     "key": "overview",
-    "domain": "Kinh doanh",
+    "domain": "Việc hằng ngày",
     "parent": null,
-    "name": "Tổng quan điều hành",
-    "en": "Command Overview — màn hình 10 phút",
-    "title": "Tổng quan điều hành",
-    "subtitle": "Command Overview · hôm nay có gì đang xảy ra",
+    "name": "Hôm nay",
+    "en": "Cần Sếp xử lý · 4 số chính",
+    "title": "Hôm nay",
+    "subtitle": "Cần Sếp xử lý · 4 số chính",
     "badge": "9"
   },
   {
     "key": "inbox",
-    "domain": "Kinh doanh",
-    "parent": "Hàng đợi & Hành động",
-    "name": "Hộp thư ý nghĩa",
-    "en": "Inbox of Meaning",
-    "title": "Hộp thư ý nghĩa",
-    "subtitle": "Inbox of Meaning · cái gì quan trọng nhất lúc này",
+    "domain": "Việc hằng ngày",
+    "parent": "Hộp thư & Việc",
+    "name": "Hộp thư",
+    "en": "Tin quan trọng đã được sắp xếp",
+    "title": "Hộp thư",
+    "subtitle": "Tin quan trọng đã được sắp xếp · cái gì quan trọng nhất lúc này",
     "badge": "28"
   },
   {
     "key": "workbench",
-    "domain": "Kinh doanh",
-    "parent": "Hàng đợi & Hành động",
+    "domain": "Việc hằng ngày",
+    "parent": "Hộp thư & Việc",
     "name": "Bàn làm việc",
     "en": "Workbench — soạn & duyệt",
     "title": "Bàn làm việc",
@@ -31,48 +31,18 @@
   },
   {
     "key": "directory",
-    "domain": "Kinh doanh",
-    "parent": null,
-    "name": "Nhóm & Con người",
+    "domain": "Việc hằng ngày",
+    "parent": "Khách & Cơ hội",
+    "name": "Khách & Nhóm",
     "en": "Groups by channel · people filters",
-    "title": "Nhóm & Con người",
+    "title": "Khách & Nhóm",
     "subtitle": "Danh sách nhóm theo kênh và con người có bộ lọc",
     "badge": null
   },
   {
-    "key": "graph",
-    "domain": "Kinh doanh",
-    "parent": null,
-    "name": "Bản đồ quan hệ",
-    "en": "Relationship Map",
-    "title": "Bản đồ quan hệ",
-    "subtitle": "Relationship Map · ai đang liên quan",
-    "badge": null
-  },
-  {
-    "key": "profile",
-    "domain": "Kinh doanh",
-    "parent": "Bản đồ quan hệ",
-    "name": "Hồ sơ sống",
-    "en": "Living Profile — bấm một node để mở",
-    "title": "Hồ sơ sống",
-    "subtitle": "Living Profile · vì sao hệ thống nghĩ vậy",
-    "badge": null
-  },
-  {
-    "key": "notebook",
-    "domain": "Kinh doanh",
-    "parent": "Bản đồ quan hệ",
-    "name": "Sổ tay nhận thức",
-    "en": "Assistant notebook per ID",
-    "title": "Sổ tay nhận thức",
-    "subtitle": "AI-trợ lý tự ghi nhận thức lũy tiến cho từng ID người và ID nhóm",
-    "badge": null
-  },
-  {
     "key": "opportunity",
-    "domain": "Kinh doanh",
-    "parent": "Cơ hội & Thị trường",
+    "domain": "Việc hằng ngày",
+    "parent": "Khách & Cơ hội",
     "name": "Bảng cơ hội",
     "en": "Opportunity Board",
     "title": "Bảng cơ hội",
@@ -80,19 +50,9 @@
     "badge": "41"
   },
   {
-    "key": "supply",
-    "domain": "Kinh doanh",
-    "parent": "Cơ hội & Thị trường",
-    "name": "Cung ↔ Cầu",
-    "en": "Supply & Demand",
-    "title": "Cung ↔ Cầu",
-    "subtitle": "Ai cần mua, ai cần bán, ghép được với ai",
-    "badge": "27"
-  },
-  {
     "key": "search",
-    "domain": "Kinh doanh",
-    "parent": "Cơ hội & Thị trường",
+    "domain": "Việc hằng ngày",
+    "parent": "Khách & Cơ hội",
     "name": "Kho hội thoại",
     "en": "Knowledge & Search",
     "title": "Kho hội thoại",
@@ -100,9 +60,20 @@
     "badge": null
   },
   {
+    "key": "profile",
+    "domain": "Việc hằng ngày",
+    "parent": "Khách & Cơ hội",
+    "name": "Hồ sơ sống",
+    "en": "Living Profile — mở từ danh sách",
+    "title": "Hồ sơ sống",
+    "subtitle": "Living Profile · vì sao hệ thống nghĩ vậy",
+    "badge": null,
+    "hidden": true
+  },
+  {
     "key": "people",
-    "domain": "Kinh doanh",
-    "parent": "Con người & Chất lượng",
+    "domain": "Việc hằng ngày",
+    "parent": "Đội ngũ",
     "name": "Đánh giá con người",
     "en": "People Review",
     "title": "Đánh giá con người",
@@ -111,8 +82,8 @@
   },
   {
     "key": "care",
-    "domain": "Kinh doanh",
-    "parent": "Con người & Chất lượng",
+    "domain": "Việc hằng ngày",
+    "parent": "Đội ngũ",
     "name": "Chất lượng chăm sóc",
     "en": "Care Quality",
     "title": "Chất lượng chăm sóc",
@@ -120,8 +91,18 @@
     "badge": null
   },
   {
+    "key": "system",
+    "domain": "Việc hằng ngày",
+    "parent": null,
+    "name": "Cài đặt",
+    "en": "Sao lưu, cập nhật, tổ chức, bộ não AI, quyền, nhật ký",
+    "title": "Cài đặt",
+    "subtitle": "Settings · sao lưu, cập nhật, tổ chức, bộ não AI, quyền, nhật ký",
+    "badge": null
+  },
+  {
     "key": "raw",
-    "domain": "Kỹ thuật · Backend",
+    "domain": "Nâng cao",
     "parent": "Tầng dữ liệu",
     "name": "Kho dữ liệu thô",
     "en": "Raw Lake — bridge gom về",
@@ -131,7 +112,7 @@
   },
   {
     "key": "rules",
-    "domain": "Kỹ thuật · Backend",
+    "domain": "Nâng cao",
     "parent": "Tầng dữ liệu",
     "name": "Quy tắc sàng lọc",
     "en": "Refinery Rules",
@@ -141,7 +122,7 @@
   },
   {
     "key": "clean",
-    "domain": "Kỹ thuật · Backend",
+    "domain": "Nâng cao",
     "parent": "Tầng dữ liệu",
     "name": "Kho sạch SSOT",
     "en": "Clean store & working memory",
@@ -151,7 +132,7 @@
   },
   {
     "key": "identity",
-    "domain": "Kỹ thuật · Backend",
+    "domain": "Nâng cao",
     "parent": "Tầng dữ liệu",
     "name": "Hợp nhất danh tính",
     "en": "Identity Resolution",
@@ -161,7 +142,7 @@
   },
   {
     "key": "agents",
-    "domain": "Kỹ thuật · Backend",
+    "domain": "Nâng cao",
     "parent": "Agent & Model",
     "name": "Danh tính Agent",
     "en": "Agent Identity",
@@ -171,7 +152,7 @@
   },
   {
     "key": "api",
-    "domain": "Kỹ thuật · Backend",
+    "domain": "Nâng cao",
     "parent": "Agent & Model",
     "name": "API & Model",
     "en": "AI agent API settings",
@@ -181,7 +162,7 @@
   },
   {
     "key": "mcp",
-    "domain": "Kỹ thuật · Backend",
+    "domain": "Nâng cao",
     "parent": "Agent & Model",
     "name": "MCP Hub",
     "en": "External MCP servers",
@@ -190,23 +171,44 @@
     "badge": "7"
   },
   {
+    "key": "graph",
+    "domain": "Nâng cao",
+    "parent": null,
+    "name": "Bản đồ quan hệ",
+    "en": "Relationship Map",
+    "title": "Bản đồ quan hệ",
+    "subtitle": "Relationship Map · ai đang liên quan",
+    "badge": null
+  },
+  {
+    "key": "notebook",
+    "domain": "Nâng cao",
+    "parent": "Bản đồ quan hệ",
+    "name": "Sổ tay nhận thức",
+    "en": "Assistant notebook per ID",
+    "title": "Sổ tay nhận thức",
+    "subtitle": "AI-trợ lý tự ghi nhận thức lũy tiến cho từng ID người và ID nhóm",
+    "badge": null
+  },
+  {
+    "key": "supply",
+    "domain": "Nâng cao",
+    "parent": null,
+    "name": "Cung ↔ Cầu",
+    "en": "Supply & Demand",
+    "title": "Cung ↔ Cầu",
+    "subtitle": "Ai cần mua, ai cần bán, ghép được với ai",
+    "badge": "27"
+  },
+  {
     "key": "plugins",
-    "domain": "Kỹ thuật · Backend",
+    "domain": "Nâng cao",
     "parent": null,
     "name": "Plugin & Tiện ích",
     "en": "DSH base plugins & external add-ons",
     "title": "Plugin & Tiện ích",
     "subtitle": "Plugin nền DSH và plugin cài thêm từ bên ngoài",
-    "badge": "11"
-  },
-  {
-    "key": "system",
-    "domain": "Kỹ thuật · Backend",
-    "parent": null,
-    "name": "Điều khiển hệ thống",
-    "en": "System Control — kênh, quyền, nhật ký",
-    "title": "Điều khiển hệ thống",
-    "subtitle": "System Control · kênh, quyền hạn, nhật ký",
-    "badge": null
+    "badge": "11",
+    "hidden": true
   }
 ]

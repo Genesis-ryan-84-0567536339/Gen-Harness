@@ -109,7 +109,7 @@ test.describe('Bước 4 "Để sau" (v0.1.29)', () => {
     for (const n of [5, 6, 7, 8, 9, 10, 11]) await apiCall(page, 'POST', `/setup/steps/${n}/skip`);
     await page.goto('/setup');
     await expect(page.getByTestId('no-model')).toBeVisible();
-    await page.getByRole('button', { name: /Mở Tổng quan điều hành/ }).click();
+    await page.getByRole('button', { name: /Vào Console/ }).click();
     await expect(page).toHaveURL(/\/overview/);
     const banner = page.getByTestId('no-model');
     await expect(banner).toContainText('Chưa có model');

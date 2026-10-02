@@ -1,113 +1,104 @@
+import { Link, Navigate } from 'react-router-dom';
 import { SCREEN_BY_KEY } from '@gen-harness/contracts';
-import { EmptyState, Tabs } from '@gen-harness/ui';
-import { useChannels } from '../../lib/dataQueries';
+import { EmptyState, Icon, Tabs } from '@gen-harness/ui';
 import { useCan } from '../../lib/permissions';
+import { useMe } from '../../lib/queries';
 import { useUrlState } from '../../lib/uiStore';
-import { CardError, ScreenHead, SkeletonLines } from '../common';
+import { ScreenHead, SkeletonLines } from '../common';
 import { BrainTab } from './BrainTab';
-import { ChannelCard } from './ChannelCard';
-import { CliCard } from './CliCard';
 import { LogTab } from './LogTab';
 import { OrgTab } from './OrgTab';
-import { PinCard } from './PinCard';
 import { RolesTab } from './RolesTab';
-import { SocialEntryCard } from './SocialEntryCard';
 import { StorageTab } from './StorageTab';
-import { UsersTab } from './UsersTab';
 
-type SysTab = 'channels' | 'brain' | 'roles' | 'users' | 'org' | 'log' | 'storage';
+type SysTab = 'storage' | 'org' | 'brain' | 'roles' | 'log';
 
-/** Design `sysTabs` (4 tab) + `storage` (PLAN 4.5, spec I) + `users`, `org` (v0.1.22, Đợt B1–B2) — thêm ngoài thiết kế gốc.
- * v0.1.28 (UX N6/V6/V9): chữ phụ ngắn, viết cho người dùng — bỏ mã đặc tả ("spec I") và số model cố định ("6 model"). */
-const TABS: Array<{ key: SysTab; label: string; count: string; genTarget?: string }> = [
-  { key: 'channels', label: 'Kênh & đăng nhập', count: 'QR · PIN', genTarget: 'system.tab.channels' },
-  { key: 'brain', label: 'Bộ não AI', count: 'model · khoá', genTarget: 'system.tab.brain' },
-  { key: 'roles', label: 'Quyền hạn', count: 'vai trò' },
-  { key: 'users', label: 'Người dùng', count: 'mời · khoá', genTarget: 'system.tab.users' },
-  { key: 'org', label: 'Tổ chức', count: 'tên · giờ', genTarget: 'system.tab.org' },
-  { key: 'log', label: 'Nhật ký', count: '30 ngày' },
-  { key: 'storage', label: 'Dữ liệu & lưu trữ', count: 'sao lưu · cập nhật', genTarget: 'system.tab.storage' },
+/**
+ * v0.1.42 (F-7): Cài đặt — 5 tab theo thứ tự, mỗi tab có quyền riêng; chỉ hiện tab vai trò được xem (Manager chỉ có
+ * `audit.read` ⇒ đúng 1 tab Nhật ký, không gọi /providers). Kênh & đăng nhập chuyển sang Kết nối (/connections),
+ * Người dùng sang Đội ngũ (/team) — link cũ `?tab=channels`, `?tab=users` tự chuyển tới đó.
+ */
+const TABS: Array<{ key: SysTab; label: string; count?: string; genTarget?: string; perm: 'system.read' | 'audit.read' }> = [
+  { key: 'storage', label: 'Sao lưu & cập nhật', count: 'sao lưu · bản mới', genTarget: 'system.tab.storage', perm: 'system.read' },
+  { key: 'org', label: 'Tổ chức', count: 'tên · giờ', genTarget: 'system.tab.org', perm: 'system.read' },
+  { key: 'brain', label: 'Bộ não AI', count: 'model · hạn mức', genTarget: 'system.tab.brain', perm: 'system.read' },
+  { key: 'roles', label: 'Quyền hạn', count: 'vai trò', perm: 'system.read' },
+  { key: 'log', label: 'Nhật ký', count: '30 ngày', perm: 'audit.read' },
 ];
+
+/** Tab cũ (trước v0.1.42) → trang mới. */
+const MOVED: Record<string, string> = { channels: '/connections', users: '/team' };
 
 export function SystemScreen() {
   const meta = SCREEN_BY_KEY.system;
-  const [tab, setTab] = useUrlState<SysTab>('tab', 'channels');
-  const current = TABS.some((t) => t.key === tab) ? tab : 'channels';
-  return (
-    <div className="screen">
-      <ScreenHead title={meta.title} description={meta.description} maxWidth={700} />
-      <Tabs items={TABS} value={current} onChange={setTab} label="Điều khiển hệ thống" idPrefix="sys" />
-      <div role="tabpanel" id={`sys-panel-${current}`} aria-labelledby={`sys-${current}`} className="sys-tabs-panel">
-        {current === 'channels' ? (
-          <ChannelsTab />
-        ) : current === 'brain' ? (
-          <BrainTab />
-        ) : current === 'roles' ? (
-          <RolesTab />
-        ) : current === 'users' ? (
-          <UsersTab />
-        ) : current === 'org' ? (
-          <OrgTab />
-        ) : current === 'log' ? (
-          <LogTab />
-        ) : (
-          <StorageTab />
-        )}
-      </div>
-    </div>
+  const canSystem = useCan('system.read');
+  const canAudit = useCan('audit.read');
+  const me = useMe();
+  const isOwner = me.data?.role?.code === 'owner';
+  const allowed = TABS.filter((t) => (t.perm === 'audit.read' ? canAudit : canSystem));
+  const fallback: SysTab = allowed[0]?.key ?? 'storage';
+  const [tab, setTab] = useUrlState<string>('tab', fallback);
+  if (MOVED[tab]) return <Navigate to={MOVED[tab]} replace />;
+  const current = allowed.find((t) => t.key === tab)?.key ?? fallback;
+  const head = (
+    <ScreenHead
+      title={meta.title}
+      description={meta.description}
+      maxWidth={700}
+      actions={
+        <nav className="sys-links" aria-label="Liên kết cài đặt">
+          <Link to="/account" className="sys-link">
+            <Icon name="ph ph-user-circle" size={13} />
+            Tài khoản &amp; PIN của tôi
+          </Link>
+          <Link to="/help" className="sys-link">
+            <Icon name="ph ph-question" size={13} />
+            Trợ giúp
+          </Link>
+          {isOwner ? (
+            <Link to="/guide" className="sys-link">
+              <Icon name="ph ph-list-checks" size={13} />
+              Hướng dẫn thiết lập
+            </Link>
+          ) : null}
+        </nav>
+      }
+    />
   );
-}
-
-function ChannelsTab() {
-  const canRead = useCan('system.read');
-  // The System screen is open to audit.read too (a Manager sees only the log); channels need system.read.
-  if (!canRead) {
+  if (me.isPending) {
     return (
-      <div className="sys-grid">
+      <div className="screen">
+        {head}
+        <SkeletonLines rows={3} padding="10px 0" />
+      </div>
+    );
+  }
+  if (!allowed.length) {
+    return (
+      <div className="screen">
+        {head}
         <div className="gh-card">
-          <EmptyState
-            icon="ph ph-lock-simple"
-            title="Vai trò của bạn không xem được kênh"
-            description="Kênh, phiên đăng nhập và khoá chỉ hiện với vai trò có quyền xem hệ thống. Nhật ký hành động ở tab Nhật ký."
-          />
-        </div>
-        <div className="side-col">
-          <PinCard />
+          <EmptyState icon="ph ph-lock-simple" title="Vai trò của bạn không xem được Cài đặt" />
         </div>
       </div>
     );
   }
-  return <ChannelsTabBody />;
-}
-
-function ChannelsTabBody() {
-  const canManage = useCan('system.manage');
-  const channels = useChannels();
   return (
-    <div className="sys-grid">
-      <div className="ch-list" aria-label="Kênh" aria-busy={channels.isFetching || undefined} data-gen-target="system.channels.list">
-        {channels.isPending ? (
-          Array.from({ length: 4 }, (_, i) => (
-            <div className="ch-card" key={i} aria-hidden>
-              <SkeletonLines rows={2} padding="0" />
-            </div>
-          ))
-        ) : channels.isError ? (
-          <div className="gh-card">
-            <CardError error={channels.error} onRetry={() => void channels.refetch()} retrying={channels.isFetching} />
-          </div>
-        ) : channels.data.length === 0 ? (
-          <div className="gh-card">
-            <EmptyState icon="ph ph-plugs" title="Chưa có kênh nào" description="Cài plugin kênh ở Plugin & Tiện ích." />
-          </div>
+    <div className="screen">
+      {head}
+      <Tabs items={allowed} value={current} onChange={(k) => setTab(k)} label="Cài đặt" idPrefix="sys" />
+      <div role="tabpanel" id={`sys-panel-${current}`} aria-labelledby={`sys-${current}`} className="sys-tabs-panel">
+        {current === 'storage' ? (
+          <StorageTab />
+        ) : current === 'org' ? (
+          <OrgTab />
+        ) : current === 'brain' ? (
+          <BrainTab />
+        ) : current === 'roles' ? (
+          <RolesTab />
         ) : (
-          channels.data.map((c) => <ChannelCard key={c.type} channel={c} canManage={canManage} />)
+          <LogTab />
         )}
-      </div>
-      <div className="side-col">
-        <PinCard />
-        <SocialEntryCard />
-        <CliCard canManage={canManage} />
       </div>
     </div>
   );

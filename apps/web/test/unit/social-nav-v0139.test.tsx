@@ -5,14 +5,18 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { GEN_SCREEN_BY_KEY, GEN_TARGET_BY_ID } from '@gen-harness/contracts';
 import { Sidebar } from '../../src/shell/Sidebar';
-import { SystemScreen } from '../../src/screens/system/SystemScreen';
+import { ConnectionsScreen } from '../../src/screens/connections/ConnectionsScreen';
 import { executeUiAction } from '../../src/gen/director';
 import { setNavigator } from '../../src/lib/navigation';
 import { qk } from '../../src/lib/queries';
 import { useUiStore, useUrlStateStore } from '../../src/lib/uiStore';
 import { buildNavigation } from '../mock-api';
 
-/** v0.1.39 (F-32): trang Tài khoản mạng xã hội có mục riêng ở thanh bên, Gen mở được, và thẻ Facebook ở Hệ thống › Kênh. */
+/**
+ * v0.1.39 (F-32): trang Tài khoản mạng xã hội — Gen mở được, thẻ Facebook dẫn tới.
+ * v0.1.42 (F-7): không còn mục riêng ở thanh bên — Facebook vào Kết nối (thẻ Facebook), /social tô sáng "Kết nối";
+ * menu tài khoản của Owner vẫn có "Tài khoản mạng xã hội".
+ */
 
 const OWNER = { code: 'owner', name: 'Owner — Sếp' };
 const OPERATOR = { code: 'operator', name: 'Vận hành' };
@@ -31,7 +35,7 @@ function Where() {
   return <div data-testid="where">{l.pathname}</div>;
 }
 
-function renderSidebar(role: { code: string; name: string }, path = '/overview') {
+function renderSidebar(role: { code: string; name: string }, path = '/overview', activeKey = path.slice(1)) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   qc.setQueryData(qk.navigation, buildNavigation());
   qc.setQueryData(qk.me, me(role));
@@ -43,7 +47,7 @@ function renderSidebar(role: { code: string; name: string }, path = '/overview')
             path="*"
             element={
               <>
-                <Sidebar activeKey={path.slice(1)} />
+                <Sidebar activeKey={activeKey} />
                 <Where />
               </>
             }
@@ -57,20 +61,23 @@ function renderSidebar(role: { code: string; name: string }, path = '/overview')
 function renderChannels(role: { code: string; name: string }, permissions: Record<string, string>) {
   vi.stubGlobal(
     'fetch',
-    vi.fn(async () => new Response(JSON.stringify([]), { status: 200, headers: { 'Content-Type': 'application/json' } })),
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const body = url.includes('/social/accounts') ? { items: [] } : url.includes('/hub/link') ? { configured: false, enabled: false, status: 'off' } : [];
+      return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }),
   );
-  useUrlStateStore.setState({ params: { tab: 'channels' } });
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   qc.setQueryData(qk.me, me(role, permissions));
   return render(
     <QueryClientProvider client={qc}>
-      <MemoryRouter initialEntries={['/system?tab=channels']}>
+      <MemoryRouter initialEntries={['/connections']}>
         <Routes>
           <Route
             path="*"
             element={
               <>
-                <SystemScreen />
+                <ConnectionsScreen />
                 <Where />
               </>
             }
@@ -82,35 +89,33 @@ function renderChannels(role: { code: string; name: string }, permissions: Recor
 }
 
 beforeEach(() => {
-  useUiStore.setState({ sidebarMode: 'full', showEnglish: false, navOpen: {} });
+  useUiStore.setState({ sidebarMode: 'full', navOpen: {}, domainOpen: {} });
   useUrlStateStore.setState({ params: {} });
 });
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('v0.1.39 — mục "Mạng xã hội" ở thanh bên', () => {
-  it('Owner (rộng): link "Mạng xã hội" trỏ /social, ngay sau Hướng dẫn thiết lập; bấm thì mở /social', async () => {
+describe('v0.1.42 — Facebook vào Kết nối (không còn mục "Mạng xã hội" ở thanh bên)', () => {
+  it('Owner (rộng): không có mục "Mạng xã hội"; menu tài khoản vẫn mở /social', async () => {
+    const user = userEvent.setup();
     renderSidebar(OWNER);
     const nav = screen.getByRole('navigation', { name: 'Danh mục màn hình' });
-    const social = within(nav).getByRole('link', { name: /Mạng xã hội/ });
-    expect(social).toHaveAttribute('href', '/social');
-    expect(social).toHaveAttribute('title', expect.stringMatching(/^Tài khoản mạng xã hội — Facebook/));
-    expect(social.closest('.sb-group')).toHaveAttribute('data-screen', 'social');
-    const guide = within(nav).getByRole('link', { name: /Hướng dẫn thiết lập/ });
-    expect(guide.closest('.sb-group')!.nextElementSibling).toBe(social.closest('.sb-group'));
-    expect(social).not.toHaveAttribute('aria-current');
-    await userEvent.setup().click(social);
+    expect(within(nav).queryByRole('link', { name: /Mạng xã hội/ })).not.toBeInTheDocument();
+    expect(document.querySelector('[data-screen="social"]')).toBeNull();
+    expect(within(nav).getByRole('link', { name: /Kết nối/ })).toHaveAttribute('href', '/connections');
+    await user.click(screen.getByRole('button', { name: /Anh Cơ La/ }));
+    await user.click(screen.getByRole('menuitem', { name: /Tài khoản mạng xã hội/ }));
     expect(screen.getByTestId('where')).toHaveTextContent('/social');
   });
 
-  it('Owner (hẹp): mục chỉ có icon + tooltip, nhãn đọc màn hình "Mạng xã hội"; đang ở /social thì aria-current', () => {
+  it('Owner (hẹp): đang ở /social (navKey = connections) thì "Kết nối" có aria-current', () => {
     useUiStore.setState({ sidebarMode: 'rail' });
-    renderSidebar(OWNER, '/social');
-    const social = screen.getByRole('link', { name: 'Mạng xã hội' });
-    expect(social).toHaveAttribute('href', '/social');
-    expect(social).toHaveAttribute('aria-current', 'page');
-    expect(within(social).queryByText('Mạng xã hội')).not.toBeInTheDocument();
+    renderSidebar(OWNER, '/social', 'connections');
+    const conn = screen.getByRole('link', { name: 'Kết nối' });
+    expect(conn).toHaveAttribute('href', '/connections');
+    expect(conn).toHaveAttribute('aria-current', 'page');
+    expect(screen.queryByRole('link', { name: 'Mạng xã hội' })).not.toBeInTheDocument();
   });
 
   it('Vận hành (Operator): không có mục "Mạng xã hội"', () => {
@@ -124,7 +129,9 @@ describe('v0.1.39 — Gen điều hướng tới /social', () => {
   it('registry có màn social và target thẻ Facebook', () => {
     expect(GEN_SCREEN_BY_KEY.social).toEqual({ key: 'social', path: '/social', title: 'Tài khoản mạng xã hội' });
     expect(GEN_SCREEN_BY_KEY.guide.title).toBe('Hướng dẫn thiết lập');
-    expect(GEN_TARGET_BY_ID['system.channels.facebook']).toMatchObject({ screen: 'system', params: { tab: 'channels' }, permission: 'roles.manage' }); // chỉ Owner thấy thẻ → target chỉ Owner (Admin có system.manage không được chỉ tới)
+    // v0.1.42 (F-7): thẻ Facebook ở Kết nối — id giữ nguyên, không còn tham số tab.
+    expect(GEN_TARGET_BY_ID['system.channels.facebook']).toMatchObject({ screen: 'connections', permission: 'roles.manage' }); // chỉ Owner thấy thẻ → target chỉ Owner (Admin có system.manage không được chỉ tới)
+    expect(GEN_TARGET_BY_ID['system.channels.facebook'].params).toBeUndefined();
   });
 
   it('hành động {type:navigate, screen:social} → navigateTo("/social")', async () => {
@@ -135,13 +142,14 @@ describe('v0.1.39 — Gen điều hướng tới /social', () => {
   });
 });
 
-describe('v0.1.39 — thẻ Facebook ở Hệ thống › Kênh', () => {
-  it('Owner: có thẻ Facebook, link "Mở trang Tài khoản mạng xã hội" tới /social', async () => {
+describe('v0.1.42 — thẻ Facebook ở Kết nối', () => {
+  it('Owner: có thẻ Facebook, nút "Mở Facebook" tới /social', async () => {
     renderChannels(OWNER, { 'system.read': 'all', 'system.manage': 'all' });
     const card = await screen.findByRole('region', { name: 'Facebook' });
     expect(card).toHaveAttribute('data-gen-target', 'system.channels.facebook');
-    expect(within(card).getByText('Đọc thông báo và tin nhắn — đăng nhập ngay trong app')).toBeInTheDocument();
-    const link = within(card).getByRole('link', { name: /Mở trang Tài khoản mạng xã hội/ });
+    expect(await within(card).findByText('Đọc thông báo và tin nhắn — đăng nhập ngay trong app')).toBeInTheDocument();
+    expect(card.querySelector('.conn-pill')).toHaveAttribute('data-status', 'not_connected');
+    const link = within(card).getByRole('link', { name: /Mở Facebook/ });
     expect(link).toHaveAttribute('href', '/social');
     await userEvent.setup().click(link);
     expect(screen.getByTestId('where')).toHaveTextContent('/social');

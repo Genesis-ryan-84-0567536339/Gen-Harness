@@ -309,7 +309,7 @@ describe('<SetupPage>', () => {
     renderSetup();
     expect(await screen.findByText('Còn bước bắt buộc chưa xong: 4')).toBeInTheDocument();
     expect(await screen.findByText('1.244')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: /Mở Tổng quan điều hành/ }));
+    await user.click(screen.getByRole('button', { name: /Vào Console/ }));
     await waitFor(() => expect(put).toHaveBeenCalled());
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent('Còn bước bắt buộc chưa xong: 4');

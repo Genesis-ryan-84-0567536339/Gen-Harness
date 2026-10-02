@@ -15,7 +15,7 @@ import { HealthCard } from './HealthCard';
 import { DATA_REQUEST_KIND, RETENTION_LABEL, RETENTION_OWNER_ONLY_REASON, retentionConfirmText, retentionDeletes, retentionOwnerOnly, retentionRowView } from './systemModel';
 import { useCreateDataRequest, usePatchRetention, usePersonDataRequests, useRetentionPolicies } from './queries';
 
-/** Dữ liệu & lưu trữ — sao lưu & khôi phục (v0.1.20), bản sao ngoài máy (v0.1.40); spec I: hạn lưu theo tập dữ liệu, yêu cầu xuất/xoá/giới hạn
+/** Cài đặt › Sao lưu & cập nhật (trước v0.1.42: Dữ liệu & lưu trữ) — sao lưu & khôi phục (v0.1.20), bản sao ngoài máy (v0.1.40); spec I: hạn lưu theo tập dữ liệu, yêu cầu xuất/xoá/giới hạn
  * dữ liệu một người (PLAN 4.5). */
 export function StorageTab() {
   const canRead = useCan('system.read');
@@ -23,7 +23,7 @@ export function StorageTab() {
   if (!canRead) {
     return (
       <div className="gh-card">
-        <EmptyState icon="ph ph-lock-simple" title="Vai trò của bạn không xem được Dữ liệu & lưu trữ" />
+        <EmptyState icon="ph ph-lock-simple" title="Vai trò của bạn không xem được Sao lưu & cập nhật" />
       </div>
     );
   }
