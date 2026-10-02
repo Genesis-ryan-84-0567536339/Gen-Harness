@@ -1,15 +1,17 @@
 import { useState, type DragEvent } from 'react';
-import type { AgentBindingSlot, Provider, ProviderKind } from '@gen-harness/contracts';
-import { SCREEN_BY_KEY } from '@gen-harness/contracts';
+import type { AgentBindingSlot, BindableModel, Provider, ProviderKind } from '@gen-harness/contracts';
+import { ApiError, SCREEN_BY_KEY } from '@gen-harness/contracts';
 import { Button, Dialog, EmptyState, Icon, SelectField, Switch, TextField } from '@gen-harness/ui';
 import { useProviders } from '../../lib/dataQueries';
-import { errorText } from '../../lib/errorText';
+import { errorReasons, errorText } from '../../lib/errorText';
+import { detailToText } from '../../lib/friendlyError';
 import { useCan } from '../../lib/permissions';
 import { toast } from '../../lib/toast';
 import { CardError, FriendlyErrorText, InlineError, Panel, PinHint, PIN_ROUTE_CHANGE_TITLE, ScreenHead, SkeletonLines, StateChip } from '../common';
 import { CliCard } from '../system/CliCard';
 import { ModelPicker } from './ModelPicker';
 import { CliDiagnose } from '../system/CliDiagnose';
+import { AGY_SCOPE_TEXT } from '../system/systemModel';
 import { PROVIDER_ICON, PROVIDER_KIND_LABEL, choiceText, fmtContextTokens, fmtQuota, fmtTemperature, isCliKind, providerStatus } from './apiModel';
 import {
   useAddModel,
@@ -246,6 +248,12 @@ function BindingsPanel({ canManage }: { canManage: boolean }) {
                   ) : (
                     <span>{slot.binding?.model_name ?? 'chưa gán'}</span>
                   )}
+                  {blockedReason(slot) ? (
+                    // v0.1.38 (F-22): API báo slot không dùng được model đang gán (vd agy chỉ cho Gen của Sếp).
+                    <span title={blockedReason(slot) ?? undefined} data-testid={`binding-blocked-${slot.agent_key}`} style={{ marginLeft: 6 }}>
+                      <StateChip color="var(--color-warn)">Không dùng được</StateChip>
+                    </span>
+                  ) : null}
                 </td>
                 <td className="mono">{slot.binding?.rule_codes.length ? slot.binding.rule_codes.join(', ') : '—'}</td>
                 <td className="mono">{slot.binding ? fmtTemperature(slot.binding.temperature) : '—'}</td>
@@ -265,6 +273,34 @@ function BindingsPanel({ canManage }: { canManage: boolean }) {
   );
 }
 
+/** Khoá agent Gen của Sếp — khoá duy nhất được dùng model của Antigravity CLI (v0.1.38, F-22). */
+const GEN_AGENT_KEY = 'core.gen';
+
+/** `blocked_reason` của slot dưới dạng chuỗi an toàn (máy chủ cũ không có trường này → null). */
+function blockedReason(slot: AgentBindingSlot): string | null {
+  const r = slot.blocked_reason;
+  if (r == null) return null;
+  const t = detailToText(r).trim();
+  return t || null;
+}
+
+/**
+ * v0.1.38 (F-22): lỗi khi lưu gán model — câu thân thiện (title của ApiError) + phần mã/lý do để trong "Chi tiết kỹ
+ * thuật". Luôn trả chuỗi (không bao giờ đưa đối tượng vào JSX).
+ */
+function bindingErrorView(e: unknown): { message: string; detail: string | null } {
+  if (e instanceof ApiError && e.code === 'AGY_OWNER_GEN_ONLY') {
+    const title = typeof e.problem.title === 'string' && e.problem.title.trim() ? e.problem.title.trim() : `Model của Antigravity CLI ${AGY_SCOPE_TEXT.charAt(0).toLowerCase()}${AGY_SCOPE_TEXT.slice(1)}`;
+    const extra = [errorReasons(e), detailToText(e.problem.detail)].filter((x): x is string => !!x && x !== title);
+    return { message: title, detail: [`${e.status} ${e.code}`, ...extra].join(' · ') };
+  }
+  const message = errorText(e);
+  const reasons = errorReasons(e);
+  const code = e instanceof ApiError ? `${e.status} ${e.code}` : null;
+  const detail = [code, reasons].filter(Boolean).join(' · ');
+  return { message, detail: reasons ? detail : null };
+}
+
 function RemoveBindingButton({ agentKey }: { agentKey: string }) {
   const remove = useRemoveBinding();
   return (
@@ -272,8 +308,13 @@ function RemoveBindingButton({ agentKey }: { agentKey: string }) {
   );
 }
 
-function BindingEditDialog({ slot, models, onClose }: { slot: AgentBindingSlot; models: { id: string; model_name: string; provider_name: string; enabled: boolean }[]; onClose: () => void }) {
+function BindingEditDialog({ slot, models, onClose }: { slot: AgentBindingSlot; models: BindableModel[]; onClose: () => void }) {
   const set = useSetBinding();
+  const providers = useProviders();
+  // v0.1.38 (F-22): model thuộc nguồn Antigravity CLI — chỉ dùng cho Gen của Sếp. Ô chọn chỉ làm mờ + chú thích;
+  // API (409 AGY_OWNER_GEN_ONLY) mới là chốt chặn cuối.
+  const agyIds = new Set((providers.data ?? []).filter((p) => p.kind === 'antigravity_cli').flatMap((p) => p.models.map((m) => m.id)));
+  const agyOnly = (m: BindableModel) => slot.agent_key !== GEN_AGENT_KEY && agyIds.has(m.id);
   const [modelId, setModelId] = useState(slot.binding?.model_id ?? models[0]?.id ?? '');
   const [temperature, setTemperature] = useState(String(slot.binding?.temperature ?? 0.3));
   const [contextTokens, setContextTokens] = useState(String(slot.binding?.context_tokens ?? 8000));
@@ -323,19 +364,45 @@ function BindingEditDialog({ slot, models, onClose }: { slot: AgentBindingSlot; 
         {models.length === 0 ? (
           <p className="muted-note">Chưa có model nào — thêm model ở thẻ nhà cung cấp trước.</p>
         ) : (
-          <SelectField
-            label="Model"
-            value={modelId}
-            onChange={(e) => setModelId(e.target.value)}
-            options={models.map((m) => ({ value: m.id, label: `${m.provider_name} · ${m.model_name}${m.enabled ? '' : ' (đã tắt)'}` }))}
-          />
+          <div className="gh-field">
+            <label className="gh-field__label" htmlFor="apm-binding-model">
+              Model
+            </label>
+            <select id="apm-binding-model" className="gh-input" value={modelId} onChange={(e) => setModelId(e.target.value)}>
+              {models.map((m) => (
+                <option key={m.id} value={m.id} style={agyOnly(m) ? { color: 'var(--color-neutral-500)' } : undefined}>
+                  {`${m.provider_name} · ${m.model_name}${m.enabled ? '' : ' (đã tắt)'}${agyOnly(m) ? ' — chỉ cho Gen' : ''}`}
+                </option>
+              ))}
+            </select>
+            {models.some(agyOnly) ? (
+              <p className="muted-note" data-testid="binding-agy-note" style={models.some((m) => m.id === modelId && agyOnly(m)) ? { color: 'var(--color-warn)' } : undefined}>
+                Model Antigravity CLI (ghi “chỉ cho Gen”): {AGY_SCOPE_TEXT}
+              </p>
+            ) : null}
+          </div>
         )}
         <TextField label="Nhiệt độ (0–2)" type="number" step="0.05" min={0} max={2} value={temperature} onChange={(e) => setTemperature(e.target.value)} />
         <TextField label="Ngữ cảnh (token)" type="number" min={256} value={contextTokens} onChange={(e) => setContextTokens(e.target.value)} />
         <TextField label="Bộ quy tắc (mã, cách nhau dấu phẩy)" value={ruleCodes} onChange={(e) => setRuleCodes(e.target.value)} placeholder="R-01, R-02" />
-        {set.isError ? <InlineError>{errorText(set.error)}</InlineError> : null}
+        {set.isError ? <BindingSaveError error={set.error} /> : null}
       </form>
     </Dialog>
+  );
+}
+
+function BindingSaveError({ error }: { error: unknown }) {
+  const v = bindingErrorView(error);
+  return (
+    <InlineError>
+      {v.message}
+      {v.detail ? (
+        <details className="tech-detail">
+          <summary>Chi tiết kỹ thuật</summary>
+          <code>{v.detail}</code>
+        </details>
+      ) : null}
+    </InlineError>
   );
 }
 
