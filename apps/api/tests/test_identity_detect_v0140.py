@@ -69,6 +69,7 @@ async def test_existing_2000_pairs_do_not_block_new(app, db, redis) -> None:  # 
 
 
 async def test_watermark_advances_only_when_not_truncated(app, db, redis, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setattr(identity, "ID_MARGIN", "0 seconds")             # mọi định danh vừa tạo đều "đủ cũ"
     org = await org_id(db)
     ch = await _channel(db, redis, org)
     await _pairs(db, org, ch, "A-", 1, 5)
@@ -140,3 +141,86 @@ async def test_name_query_uses_trigram_operator_and_index(app, db) -> None:  # t
     await db.rollback()
     left = (await db.execute(text("SELECT current_setting('pg_trgm.similarity_threshold', true)"))).scalar_one()
     assert left in (None, "", "0.3")
+
+
+# ─── lưới an toàn của mốc tiến độ ───────────────────────────────────────────────────────────────────────────
+
+#: uuid_v7 nhỏ nhất của mili-giây `now() - :ago` + phần ngẫu nhiên — giả lập định danh TẠO lúc đó (id theo giờ INSERT).
+OLD_ID = """CAST(rpad(lpad(to_hex(CAST(floor(extract(epoch FROM clock_timestamp() - CAST(CAST(:ago AS text) AS interval)) * 1000)
+                AS bigint)), 12, '0'), 12, '0') || substr(md5(random()::text), 1, 20) AS uuid)"""
+
+
+async def _person(db: Any, org: uuid.UUID, ch: uuid.UUID, code: str, *, phone: str | None, ago: str,
+                  updated_ago: str = "2 days") -> uuid.UUID:
+    pid = (await db.execute(text("""INSERT INTO core.persons (org_id, code, display_name, updated_at)
+                                    VALUES (:o, :c, md5(:c), now() - CAST(CAST(:u AS text) AS interval)) RETURNING id"""),
+                            {"o": org, "c": code, "u": updated_ago})).scalar_one()
+    return (await db.execute(text(f"""INSERT INTO core.person_identities (id, person_id, channel_id, external_id,
+                                                                            phone_e164)
+                                      VALUES ({OLD_ID}, :p, :ch, :x, :ph) RETURNING id"""),
+                             {"ago": ago, "p": pid, "ch": ch, "x": code, "ph": phone})).scalar_one()  # type: ignore[no-any-return]
+
+
+async def test_late_commit_identity_not_skipped(app, db, redis) -> None:  # type: ignore[no-untyped-def]
+    """Mốc định danh lùi biên an toàn: định danh Y tạo lúc T nhưng commit SAU lượt dò (trong khi định danh Z id > Y đã
+    commit) vẫn được xét ở lượt sau — trước đây mốc nhảy qua Y."""
+    org = await org_id(db)
+    ch = await _channel(db, redis, org)
+    x = await _person(db, org, ch, "X-1", phone="+84911000001", ago="20 minutes")
+    await _person(db, org, ch, "Z-1", phone=None, ago="0 seconds")     # Z: định danh mới nhất, đã commit
+    await db.commit()
+    assert await identity.detect(db, org) == 0
+    await db.commit()
+    wm = await _wm(db, org)
+    assert wm is not None and wm.last_id == x                            # không tiến tới Z (trong biên 5 phút)
+    # Y (tạo 3 phút trước, hồ sơ cũ) mới commit — trùng SĐT với X.
+    await _person(db, org, ch, "Y-1", phone="+84911000001", ago="3 minutes")
+    await db.commit()
+    assert await identity.detect(db, org) == 1
+
+
+async def test_phone_added_to_old_identity_is_detected(app, db, redis) -> None:  # type: ignore[no-untyped-def]
+    """Định danh cũ có thêm SĐT qua ingest (UPDATE phone_e164) ⇒ hồ sơ được chạm updated_at ⇒ cặp trùng SĐT ra ở lượt
+    sau (trước đây định danh cũ không bao giờ "mới" lại)."""
+    from gh.data.ingest import channel_row, upsert_identity
+
+    org = await org_id(db)
+    ch = await _channel(db, redis, org)
+    await _person(db, org, ch, "P-1", phone="+84922000002", ago="2 days")
+    await _person(db, org, ch, "P-2", phone=None, ago="2 days")
+    await db.commit()
+    assert await identity.detect(db, org) == 0
+    await db.commit()
+    channel = await channel_row(db, org, "zalo")
+    await upsert_identity(db, org, channel, "P-2", None, "0922000002")
+    await db.commit()
+    assert await identity.detect(db, org) == 1
+
+
+async def test_full_scan_runs_daily(app, db, redis) -> None:  # type: ignore[no-untyped-def]
+    """Quét đủ mỗi ngày một lần: cặp không "mới" theo mốc (vd SĐT sửa thẳng trong CSDL) vẫn được dò khi tới hạn."""
+    org = await org_id(db)
+    ch = await _channel(db, redis, org)
+    a = await _person(db, org, ch, "F-1", phone="+84933000003", ago="2 days")
+    b = await _person(db, org, ch, "F-2", phone=None, ago="2 days")
+    await db.commit()
+    assert await identity.detect(db, org) == 0                          # lần đầu: quét đủ, đặt full_at
+    await db.commit()
+    full_at = (await db.execute(text("""SELECT full_at FROM ops.job_watermarks
+                                        WHERE org_id = :o AND job = 'identity.detect'"""), {"o": org})).scalar_one()
+    assert full_at is not None
+    await db.execute(text("UPDATE core.person_identities SET phone_e164 = '+84933000003' WHERE id = :i"), {"i": b})
+    await db.commit()
+    assert await identity.detect(db, org) == 0                          # chưa tới hạn quét đủ ⇒ chưa thấy
+    await db.commit()
+    await db.execute(text("""UPDATE ops.job_watermarks SET full_at = now() - interval '25 hours'
+                             WHERE org_id = :o AND job = 'identity.detect'"""), {"o": org})
+    await db.commit()
+    assert await identity.detect(db, org) == 1
+    await db.commit()
+    row = (await db.execute(text("SELECT identity_a, identity_b FROM core.identity_merge_candidates WHERE org_id = :o"),
+                            {"o": org})).one()
+    assert {row.identity_a, row.identity_b} == {a, b}
+    newer = (await db.execute(text("""SELECT full_at FROM ops.job_watermarks
+                                      WHERE org_id = :o AND job = 'identity.detect'"""), {"o": org})).scalar_one()
+    assert newer > full_at

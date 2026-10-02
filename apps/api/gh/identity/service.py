@@ -27,6 +27,12 @@ def level(conf: float) -> str:
 WATERMARK_JOB = "identity.detect"
 DETECT_LIMIT = 2000
 NAME_THRESHOLD = 0.55
+#: Quét đủ (không theo mốc) tối đa mỗi chừng này một lần — lưới an toàn cho thay đổi không làm "mới" định danh/hồ sơ
+#: (vd sửa trực tiếp core.person_identities, transaction ingest dài hơn biên an toàn).
+FULL_SCAN_EVERY = "24 hours"
+#: Biên an toàn của mốc định danh: chỉ tiến `last_id` tới định danh tạo trước `now - biên` (uuid_v7 = giờ INSERT, không
+#: phải giờ COMMIT) ⇒ định danh của transaction commit trễ (id nhỏ hơn định danh đã commit khác) vẫn được xét lại.
+ID_MARGIN = "5 minutes"
 
 #: Cặp ứng viên: vế a = định danh MỚI (id > mốc — uuid_v7 tăng theo thời gian) hoặc hồ sơ sửa sau mốc; vế b = mọi
 #: định danh còn sống. Trùng SĐT (chỉ mục phone_e164) hoặc tên gần giống (`display_name % f.name` — pg_trgm tự gộp
@@ -80,19 +86,30 @@ async def detect(db: AsyncSession, org_id: uuid.UUID) -> int:
     """Sinh đề xuất mới (không trùng cặp): trùng số điện thoại, tên gần giống, cùng nhóm.
 
     v0.1.40 (F-16): có mốc tiến độ (`ops.job_watermarks`, job 'identity.detect') — lượt sau chỉ xét định danh mới/hồ
-    sơ vừa sửa so với mọi định danh; lần đầu quét đủ. Mốc CHỈ tiến khi lượt không bị cắt bởi LIMIT/MAX_NEW."""
-    wm = (await db.execute(text("""SELECT last_id, last_at FROM ops.job_watermarks
-                                   WHERE org_id = :o AND job = :j"""), {"o": org_id, "j": WATERMARK_JOB})).one_or_none()
+    sơ vừa sửa so với mọi định danh; lần đầu và mỗi `FULL_SCAN_EVERY` quét đủ một lần. Mốc CHỈ tiến khi lượt không
+    bị cắt bởi LIMIT/MAX_NEW; `last_id` lùi một biên `ID_MARGIN` (định danh của transaction commit trễ vẫn được xét).
+    Định danh cũ có thêm SĐT (`ingest.upsert_identity`) chạm `persons.updated_at` ⇒ thành "mới" ở lượt sau."""
+    wm = (await db.execute(text("""
+        SELECT last_id, last_at, full_at IS NULL OR full_at < now() - CAST(CAST(:every AS text) AS interval) AS full_due
+        FROM ops.job_watermarks WHERE org_id = :o AND job = :j"""),
+        {"o": org_id, "j": WATERMARK_JOB, "every": FULL_SCAN_EVERY})).one_or_none()
+    # Mốc định danh: id lớn nhất trong các định danh TẠO trước now - biên (so sánh uuid_v7 với id nhỏ nhất của mili-giây
+    # đó: 48 bit đầu = epoch ms, phần còn lại 0 — xem core.uuid_v7()).
     mark = (await db.execute(text("""
-        SELECT clock_timestamp() AS at,
+        WITH b AS (SELECT clock_timestamp() AS at,
+                          CAST(rpad(lpad(to_hex(CAST(floor(extract(epoch FROM clock_timestamp()
+                                                                - CAST(CAST(:margin AS text) AS interval)) * 1000) AS bigint)),
+                                         12, '0'), 32, '0') AS uuid) AS floor_id)
+        SELECT b.at,
                (SELECT pi.id FROM core.person_identities pi JOIN core.persons p ON p.id = pi.person_id
-                WHERE p.org_id = :o ORDER BY pi.id DESC LIMIT 1) AS max_id"""), {"o": org_id})).one()
+                WHERE p.org_id = :o AND pi.id < b.floor_id ORDER BY pi.id DESC LIMIT 1) AS max_id
+        FROM b"""), {"o": org_id, "margin": ID_MARGIN})).one()
     # SET LOCAL: chỉ trong transaction này, không rò sang kết nối khác của pool (khác set_limit()).
     await db.execute(text(f"SET LOCAL pg_trgm.similarity_threshold = {NAME_THRESHOLD}"))
     # Planner coi `%` là phép rẻ ⇒ hay chọn quét tuần tự core.persons cho TỪNG định danh mới (N×M phép so trigram —
     # 4000 định danh mất hơn một phút). Tắt seqscan riêng cho câu này để luôn dò qua chỉ mục (mọi bước đều có chỉ mục).
     await db.execute(text("SET LOCAL enable_seqscan = off"))
-    full = wm is None or (wm.last_id is None and wm.last_at is None)
+    full = wm is None or (wm.last_id is None and wm.last_at is None) or bool(wm.full_due)
     rows = (await db.execute(text(DETECT_SQL), {
         "o": org_id, "full": full, "last_id": None if wm is None else wm.last_id,
         "last_at": None if wm is None else wm.last_at, "th": NAME_THRESHOLD, "lim": DETECT_LIMIT})).all()
@@ -135,13 +152,16 @@ async def detect(db: AsyncSession, org_id: uuid.UUID) -> int:
     if not truncated:
         # Mốc lùi 5 phút: hồ sơ sửa trong transaction khác commit SAU khi lượt này bắt đầu vẫn được xét lại lượt sau
         # (cặp đã đề xuất bị NOT EXISTS loại nên không trùng).
+        # full_at chỉ đặt khi lượt QUÉT ĐỦ không bị cắt — bị cắt thì lượt sau quét đủ tiếp.
         await db.execute(text("""
-            INSERT INTO ops.job_watermarks (org_id, job, last_id, last_at, updated_at)
-            VALUES (:o, :j, :id, CAST(:at AS timestamptz) - interval '5 minutes', now())
+            INSERT INTO ops.job_watermarks (org_id, job, last_id, last_at, full_at, updated_at)
+            VALUES (:o, :j, :id, CAST(:at AS timestamptz) - interval '5 minutes',
+                    CASE WHEN CAST(:full AS boolean) THEN CAST(:at AS timestamptz) END, now())
             ON CONFLICT (org_id, job) DO UPDATE SET
               last_id = GREATEST(ops.job_watermarks.last_id, EXCLUDED.last_id),
-              last_at = EXCLUDED.last_at, updated_at = now()"""),
-            {"o": org_id, "j": WATERMARK_JOB, "id": mark.max_id, "at": mark.at})
+              last_at = EXCLUDED.last_at,
+              full_at = COALESCE(EXCLUDED.full_at, ops.job_watermarks.full_at), updated_at = now()"""),
+            {"o": org_id, "j": WATERMARK_JOB, "id": mark.max_id, "at": mark.at, "full": full})
     return n
 
 
