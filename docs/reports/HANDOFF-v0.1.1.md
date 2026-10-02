@@ -1977,6 +1977,32 @@ Không cần chụp màn hình hay gửi mã cho Claude — kết quả tự lư
   `/setup/follow-up` thêm mục 13/14) nên thẻ "Việc thiết lập tiếp" ở Tổng quan không nhắc mãi.
 - **Web lối vào Mạng xã hội + Jev (F-32, F-78)** — mục "Mạng xã hội" trên thanh bên (chỉ Owner), thẻ Facebook ở Hệ thống ›
   Kênh & đăng nhập, Gen điều hướng tới `/social` (registry có màn `social`); Jev "Kiểm tra 1 lần", lỗi thì thẻ thu vào "Nâng cao".
+- **Sửa sau review (F-2, F-12, F-16)**:
+  - Hạn lưu đặt TRƯỚC v0.1.40 (lúc chỉ hiển thị) **không** tự thi hành: cột `ops.retention_policies.confirmed_at` (0026),
+    partman/xoá theo lô chỉ tính dòng đã xác nhận; `retention_sweep` gửi chuông `retention.confirm_needed` cho Owner (tối
+    đa 30 ngày/lần); GET có `needs_confirm` (web: "… (chưa áp dụng)"). `PATCH` đặt số ngày cho tập bị xoá thật cần
+    `confirm_delete: true` (thiếu ⇒ 422 `RETENTION_CONFIRM_REQUIRED`); web hỏi lại "… sẽ bị XOÁ VĨNH VIỄN ở lượt dọn kế
+    tiếp" trước khi gửi. Bảng phân vùng (xoá cả tháng cho mọi tổ chức) chỉ Owner đổi được (403 với Manager).
+  - Dò trùng: SĐT mới của định danh cũ (ingest) chạm `persons.updated_at`; mốc `last_id` lùi biên 5 phút (uuid_v7 theo
+    giờ INSERT, transaction commit trễ vẫn được xét); quét đủ mỗi 24 giờ (`ops.job_watermarks.full_at`). Bỏ chỉ mục
+    `lower(display_name)` (không dùng được dưới RLS); `partition_maintenance` đặt lại LEAKPROOF cho `similarity_op` (mất
+    sau `genh import`).
+  - `manual_command` theo đúng việc: `genh offsite run` / `genh offsite disable` / `genh offsite set "<đường dẫn thật>"`;
+    GET chỉ có lệnh khi đang có yêu cầu chờ (theo action/path của chính yêu cầu); đường dẫn có `"`/`$`/`` ` `` ⇒ không
+    ghép lệnh (web hướng dẫn bằng lời). Đường dẫn giới hạn 400 **byte** như genh. Tải gói mang đi: dọn tệp tạm + nhả
+    khoá Redis cả khi trình duyệt ngắt giữa chừng.
+  - Web: câu hướng dẫn theo vai trò (Owner "Chọn nơi lưu", Manager/Viewer "Nhờ Owner…", chỉ system.read "Báo
+    Owner/quản trị…"), dải "Cần Sếp xử lý" của người không phải Owner hiện "Xem bản sao ngoài máy"; thiếu Khoá khôi phục ⇒
+    khoá "Tải gói mang đi"/"Bộ khôi phục" kèm câu `genh update` (thống nhất với API); "Tải gói mang đi" không huỷ lượt
+    đang chuẩn bị (khoá nút + dòng "đừng tải lại hay đóng trang"), lỗi giữ trên thẻ kèm Chi tiết kỹ thuật; Bộ khôi phục có
+    Thử lại; nút Chép báo lỗi khi không có clipboard. Gen: đích choose/portable/kit khai `roles.manage`, run khai
+    `system.manage`. Mock chép đúng chữ API (offsite.stale, RECOVERY_STEPS `genh import --yes`).
+  - genh: từ chối đích trên tmpfs/ramfs/overlay (GH-EB07, kể cả `--allow-same-disk`); subvolume/bind mount cùng thiết bị
+    khối (`/proc/self/mountinfo`) coi là cùng ổ; ổ đầy/bị rút khi đang xuất ⇒ GH-EB04 (không còn GH-EB02); yêu cầu
+    Console hỏng (JSON/action lạ) vẫn ghi kết quả failed/GH-EB07. E2E kiểm đúng khoá của bản cài mới.
+  - **Giới hạn đã biết**: gói `.ghbundle` mã hoá một khối AES-GCM (≤ 2 GiB, cả gói nằm trong RAM 2–3 lần) — dữ liệu
+    vượt 2 GiB ⇒ bản sao ngoài máy/gói mang đi lỗi với câu rõ "Gói dữ liệu lớn hơn 2 GiB chưa hỗ trợ" (GH-EB02). Bản sau:
+    mã hoá theo đoạn (stream) ở phiên bản định dạng gói mới.
 - **Sửa khi tích hợp** — `apps/api/gh/gen/registry.json` sinh lại (gói nav sinh trước khi gói hướng dẫn thêm việc 13/14 và
   sửa việc 10 ⇒ vitest `gen-targets` đỏ); trang Việc Sếp: sau khi tải lại máy chủ chỉ trả email đã che
   (`detail.account_masked`) ⇒ web dùng nó thay vì "tài khoản Google" chung chung; Jev lỗi mã nào (trừ chưa cấu hình) cũng
@@ -2061,7 +2087,9 @@ Không cần chụp màn hình hay gửi mã cho Claude — kết quả tự lư
    chép một bản.
 2. Bấm **"Bộ khôi phục"** (nhập PIN) → bấm **In** → cất bản in ở chỗ an toàn, **TÁCH khỏi ổ USB**.
 3. Không cần làm gì khác. Nếu Console báo **"Bản sao ngoài máy đã cũ"** thì cắm lại ổ USB và bấm **"Sao lưu ra ổ ngoài
-   ngay"**. (Muốn đổi "Hạn lưu dữ liệu" thì vào Dữ liệu & lưu trữ › Sửa, nhập PIN — tuỳ chọn.)
+   ngay"**. (Muốn đổi "Hạn lưu dữ liệu" thì vào Dữ liệu & lưu trữ › Sửa, nhập PIN — tuỳ chọn.) Nếu chuông báo **"Hạn lưu
+   dữ liệu cần xác nhận lại"**: hạn đặt từ bản cũ CHƯA tự xoá gì — mở Hạn lưu dữ liệu, Sửa → Lưu → "Đồng ý xoá dữ liệu
+   quá hạn" nếu muốn xoá thật, hoặc để trống ô (giữ mãi).
 
 ### Vì sao (kế hoạch tổng `docs/audit/2026-10-01/0-ke-hoach-tong.md`, mục v0.1.40)
 
@@ -2080,9 +2108,11 @@ Không cần chụp màn hình hay gửi mã cho Claude — kết quả tự lư
   `pg_restore --list`); lỗi ⇒ xoá tệp, `GH-EB03`, coi như chưa có bản sao. Trạng thái ở `run/offsite-status.json`, hộp
   thư `run/request/offsite.json` (ưu tiên update > restore > offsite). `genh uninstall` mặc định **giữ dữ liệu**;
   `--delete-data` mới xoá volume (gõ "XOÁ DỮ LIỆU").
-- **API (F-12)** — `/system/offsite*` (chỉ Owner + PIN): xem tình trạng, chọn nơi lưu (ghi hộp thư; genh chưa nhận ⇒
-  409 kèm `manual_command`), chạy ngay, **Bộ khôi phục** (khoá không lọt vào action_log), **Tải gói mang đi** (stream,
-  khoá Redis chống chạy chồng). Chuông `offsite.stale` (> 7 ngày, đỏ > 30 ngày, hiện ở "Cần Sếp xử lý") và
+- **API (F-12)** — quyền theo từng endpoint (như `docs/api/system-offsite.md`): `GET /system/offsite` cần
+  `system.read`; `POST /system/offsite/run` cần `system.manage` (không PIN); `PUT …/destination`, `POST …/disable`,
+  `GET …/recovery-kit`, `GET …/portable` chỉ Owner + PIN. Chọn nơi lưu ghi hộp thư (genh chưa nhận ⇒ 409 kèm
+  `manual_command` theo đúng việc), chạy ngay, **Bộ khôi phục** (khoá không lọt vào action_log), **Tải gói mang đi**
+  (stream, khoá Redis chống chạy chồng). Chuông `offsite.stale` (> 7 ngày, đỏ > 30 ngày, hiện ở "Cần Sếp xử lý") và
   `offsite.failed` (chưa thấy ổ / gói lỗi). Bước 11 trình thiết lập chỉ nhận đích sao lưu `local` (bỏ S3/MinIO giả).
 - **Hạn lưu thật (F-2)** — `gh/retention.py` gom mọi kiểu dọn: bảng phân vùng ghi `partman.part_config.retention`
   (`retention_keep_table=false`), bảng thường xoá theo lô (memory.entries đã nén không ghim, `browser_jobs.result` > 14

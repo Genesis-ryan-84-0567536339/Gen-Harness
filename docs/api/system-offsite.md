@@ -40,7 +40,7 @@ Ba endpoint ghi yêu cầu trả lại đúng khuôn `GET /system/offsite`.
   "schedule": "systemd",
   "request": {"state": "idle", "action": null, "requested_at": null},
   "can_request": true,
-  "manual_command": "genh offsite set \"<path>\"",
+  "manual_command": null,
   "key_present": true
 }
 ```
@@ -54,7 +54,11 @@ Ba endpoint ghi yêu cầu trả lại đúng khuôn `GET /system/offsite`.
 - `schedule`: `systemd | cron | launchd | schtasks` hoặc `null`; `key_id`: 8 hex hoặc `null`.
 - `request.state`: `idle | requested | stalled` (yêu cầu nằm > 15 phút mà genh không giữ khoá ⇒ `stalled`).
 - `can_request`: `genh.json` có `updater` VÀ `"offsite"` trong `requests` VÀ `run/request/` ghi được.
-- `manual_command`: lệnh Owner tự chạy trên máy chủ khi chưa có watcher (Windows / máy cài trước v0.1.40).
+- `manual_command`: lệnh Owner tự chạy trên máy chủ khi chưa có watcher (Windows / máy cài trước v0.1.40) — CHỈ khi
+  đang có yêu cầu chờ (`request.state` = `requested|stalled`), theo `action`/`path` của chính yêu cầu đó:
+  `genh offsite run`, `genh offsite disable`, `genh offsite set "<đường dẫn>"`. `null` khi không có yêu cầu, hoặc
+  đường dẫn không ghép an toàn được (có `"`, `$`, `` ` ``, ký tự điều khiển, không tuyệt đối, > 400 byte) — không bao giờ
+  trả lệnh chứa chỗ giữ chỗ.
 - `key_present`: có tệp Khoá khôi phục (`GH_OFFSITE_KEY_FILE`, mặc định `/run/secrets/gh_offsite_key`).
 
 ### `PUT /system/offsite/destination`
@@ -62,7 +66,7 @@ Ba endpoint ghi yêu cầu trả lại đúng khuôn `GET /system/offsite`.
 Kiểm sơ bộ `path` (genh kiểm thật: ổ đã gắn, khác ổ máy chủ, ghi được) ⇒ 422 `VALIDATION`, `errors.path`:
 
 - tuyệt đối: POSIX `/…`, Windows `X:\…` (hoặc `X:/…`), UNC `\\…`;
-- ≤ 400 ký tự; không xuống dòng / ký tự điều khiển; không rỗng.
+- ≤ 400 byte UTF-8 (như genh — chữ có dấu tính 2–3 byte); không xuống dòng / ký tự điều khiển; không rỗng.
 
 `allow_same_disk` (lưu ngay trên ổ máy chủ) **chỉ** đặt được từ CLI genh (Owner tự quyết rủi ro, có cảnh
 báo) — Console không bao giờ gửi trường này.
@@ -92,7 +96,7 @@ bằng `genh import` + Khoá khôi phục (Bộ khôi phục).
 
 | HTTP | `code` | Khi nào |
 |---|---|---|
-| 409 | `OFFSITE_UNAVAILABLE` | Máy chủ chưa nhận lệnh từ Console. Kèm `manual_command` (đã điền `path` khi có, trừ khi `path` chứa `"`). |
+| 409 | `OFFSITE_UNAVAILABLE` | Máy chủ chưa nhận lệnh từ Console. Kèm `manual_command` theo đúng việc (`run`/`disable`/`set "<path>"`); `null` khi `path` không ghép an toàn được. |
 | 409 | `OFFSITE_IN_PROGRESS` | Đang có yêu cầu chờ genh, hoặc `state=running` bắt đầu chưa quá 2 giờ. |
 | 409 | `UPDATE_IN_PROGRESS` / `RESTORE_IN_PROGRESS` | Đang cập nhật / khôi phục (thứ tự xử lý: update > restore > offsite). |
 | 409 | `OFFSITE_KEY_MISSING` | Thiếu tệp Khoá khôi phục (recovery-kit, portable). |
