@@ -13,6 +13,7 @@ import { NeedsBossStrip } from './NeedsBossStrip';
 import { useCan } from '../../lib/permissions';
 import { useSystemHealth } from '../system/queries';
 import { SetupFollowUp } from './SetupFollowUp';
+import { AiCostPanel } from './AiCostPanel';
 
 const KPI_ICON: Record<string, string> = {
   channels_live: 'ph ph-broadcast',
@@ -251,6 +252,8 @@ export function OverviewScreen() {
             </div>
           </div>
         </Panel>
+        {/* v0.1.41 (F-84): chi phí AI trong ngày ngay sau Sức khoẻ hệ thống (chỉ vai trò có system.read). */}
+        <AiCostPanel />
         <Panel title="Chất lượng dữ liệu" kicker="Hôm nay hệ thống chắc chắn đến đâu">
           <div className="ov-dq">
             <div className="ov-dq__row">

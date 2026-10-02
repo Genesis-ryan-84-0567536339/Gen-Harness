@@ -28,6 +28,37 @@ export const PROVIDER_KIND_LABEL: Record<ProviderKind, string> = {
   system_one: 'Jev (System One) · quyết định nhanh',
 };
 
+/**
+ * v0.1.41 (F-84): mẫu nhà cung cấp dựng sẵn — MỘT nguồn dùng chung cho hộp "Thêm nhà cung cấp" (API & Model) và Hướng
+ * dẫn bước 4. Chọn mẫu ⇒ gửi `kind` thật (vd `openai_compat`), điền sẵn Tên + Endpoint (vẫn sửa được) và gợi ý model.
+ */
+export interface ProviderPreset {
+  id: string;
+  label: string;
+  kind: Extract<ProviderKind, 'openai_compat' | 'gemini' | 'deepseek'>;
+  name: string;
+  endpoint: string;
+  modelHint: string;
+  /** Dòng hướng dẫn lấy khoá. */
+  keyHint: string;
+}
+
+export const PROVIDER_PRESETS: ReadonlyArray<ProviderPreset> = [
+  {
+    id: 'openrouter',
+    label: 'OpenRouter (nhiều model, một khoá)',
+    kind: 'openai_compat',
+    name: 'OpenRouter',
+    endpoint: 'https://openrouter.ai/api/v1',
+    modelHint: 'google/gemini-2.5-flash',
+    keyHint: 'Tạo khoá ở openrouter.ai › Keys rồi dán vào đây',
+  },
+];
+
+export function findPreset(id: string): ProviderPreset | undefined {
+  return PROVIDER_PRESETS.find((p) => p.id === id);
+}
+
 export const AUTH_STATE_LABEL: Record<Provider['auth_state'], string> = {
   ok: 'Hoạt động',
   expiring: 'Sắp hết hạn',

@@ -10,6 +10,8 @@ import { execFileSync } from 'node:child_process';
  * hỏi giá, một người dùng thứ hai + một trợ lý), rồi 4 luồng giao/gán qua GIAO DIỆN thật:
  *   (a) Hộp thư → 'Giao cho người khác'   (b) Vụ việc → 'Gán người xử lý'
  *   (c) Nhóm → 'Gán BOT trực nhóm' → 'Lưu' (d) Gen đề xuất 'Giao người phụ trách' → Xác nhận.
+ * v0.1.41 (F-84): (e) "nối model" — thêm nhà cung cấp từ mẫu OpenRouter (đổi endpoint sang fake_llm giao thức OpenAI)
+ *   → Kiểm tra kết nối OK → thấy trong chuỗi chuyển hướng ở Bộ não AI.
  * Người dùng thứ hai là dữ liệu kiểm thử nội bộ trên CSDL gh_live (bị xoá mỗi lần chạy) — không phải tài khoản
  * trên dịch vụ ngoài.
  */
@@ -240,5 +242,49 @@ test.describe.serial('CI — e2e thật rút gọn: giao/gán người & trợ l
     expect(activeAssignee(itemId)).toBe(ids.staff);
     expect(await lastAssignedTo(itemId)).toBe(ids.staff);
     await shot('ci-d-gen-assign');
+  });
+
+  test('(e) Nối model từ mẫu OpenRouter → gọi thử → thấy trong chuỗi', async () => {
+    await page.goto('/api');
+    await page.getByRole('button', { name: /Thêm nhà cung cấp/ }).first().click();
+    const dlg = page.getByRole('dialog', { name: 'Thêm nhà cung cấp' });
+    await expect(dlg).toBeVisible();
+    await dlg.getByLabel('Loại').selectOption('openrouter');
+    const endpoint = dlg.getByLabel('Địa chỉ gọi (Endpoint)');
+    await expect(endpoint).toHaveValue('https://openrouter.ai/api/v1');
+    await expect(dlg.getByLabel('Tên hiển thị')).toHaveValue('OpenRouter');
+    // Máy CI không ra Internet: trỏ mẫu về fake_llm.py (giao thức OpenAI) — khoá test giả, không phải bí mật.
+    await endpoint.fill('http://127.0.0.1:9911/v1');
+    await dlg.getByLabel('Khoá API (mỗi dòng một khoá)').fill('sk-live-or-9911');
+    await dlg.getByLabel(/Model ban đầu/).fill('fake-flash');
+    const createdP = writeResponse(page, 'POST', /\/api\/v1\/providers$/);
+    await dlg.getByRole('button', { name: 'Thêm', exact: true }).click();
+    await maybeEnterOwnerPin(page);
+    const created = await createdP;
+    expect(created.status(), await created.text()).toBe(201);
+    const sent = created.request().postDataJSON() as { kind: string; name: string; endpoint: string; models: string[] };
+    expect({ kind: sent.kind, name: sent.name, endpoint: sent.endpoint, models: sent.models }).toEqual({
+      kind: 'openai_compat', name: 'OpenRouter', endpoint: 'http://127.0.0.1:9911/v1', models: ['fake-flash'],
+    });
+    const provId = ((await created.json()) as { id: string }).id;
+    expect(provId).toMatch(UUID_RE);
+    await expect(dlg).toBeHidden();
+
+    // Gọi thử thật (api liệt kê model qua fake_llm) ⇒ "Kết nối được".
+    const card = page.getByRole('article', { name: 'OpenRouter' });
+    await expect(card).toBeVisible({ timeout: 20_000 });
+    const testP = writeResponse(page, 'POST', new RegExp(`/api/v1/providers/${provId}/test$`));
+    await card.getByRole('button', { name: 'Kiểm tra kết nối' }).click();
+    const tested = await testP;
+    expect(tested.status(), await tested.text()).toBe(200);
+    expect(((await tested.json()) as { ok: boolean }).ok, 'gọi thử nguồn OpenRouter (fake_llm) phải OK').toBe(true);
+    await expect(card.locator('.apm-test-result--ok')).toContainText('Kết nối được');
+
+    // Bộ não AI › Chuỗi chuyển hướng có OpenRouter.
+    await page.goto('/system?tab=brain');
+    const chain = page.getByRole('region', { name: 'Chuỗi chuyển hướng' });
+    await expect(chain.locator('.brain-chain-row__name', { hasText: 'OpenRouter' })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText('[object Object]')).toHaveCount(0);
+    await shot('ci-e-openrouter-chain');
   });
 });

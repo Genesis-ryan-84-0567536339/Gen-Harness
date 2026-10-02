@@ -12,7 +12,7 @@ import { CliCard } from '../system/CliCard';
 import { ModelPicker } from './ModelPicker';
 import { CliDiagnose } from '../system/CliDiagnose';
 import { AGY_SCOPE_TEXT } from '../system/systemModel';
-import { PROVIDER_ICON, PROVIDER_KIND_LABEL, choiceText, fmtContextTokens, fmtQuota, fmtTemperature, isCliKind, providerStatus } from './apiModel';
+import { PROVIDER_ICON, PROVIDER_KIND_LABEL, PROVIDER_PRESETS, choiceText, findPreset, fmtContextTokens, fmtQuota, fmtTemperature, isCliKind, providerStatus } from './apiModel';
 import {
   useAddModel,
   useAddProviderKey,
@@ -582,13 +582,31 @@ function FailoverRulesPanel() {
   );
 }
 
+/** Lựa chọn ô "Loại": loại thật hoặc mẫu dựng sẵn (v0.1.41, F-84 — `PROVIDER_PRESETS`). */
+type AddChoice = 'gemini' | 'deepseek' | 'openai_compat' | (typeof PROVIDER_PRESETS)[number]['id'];
+
 function AddProviderDialog({ onClose }: { onClose: () => void }) {
   const create = useCreateProvider();
-  const [kind, setKind] = useState<'gemini' | 'deepseek' | 'openai_compat'>('gemini');
+  const [choice, setChoice] = useState<AddChoice>('gemini');
+  const preset = findPreset(choice);
+  const kind: ProviderKind = preset ? preset.kind : (choice as ProviderKind);
   const [name, setName] = useState('');
   const [endpoint, setEndpoint] = useState('');
   const [keys, setKeys] = useState('');
   const [models, setModels] = useState('');
+  const onChoice = (next: AddChoice) => {
+    const prev = findPreset(choice);
+    const p = findPreset(next);
+    setChoice(next);
+    // Mẫu điền sẵn Tên + Endpoint (vẫn sửa được); rời mẫu thì xoá phần mẫu đã điền nếu Sếp chưa sửa.
+    if (p) {
+      setName(p.name);
+      setEndpoint(p.endpoint);
+    } else if (prev) {
+      if (name === prev.name) setName('');
+      if (endpoint === prev.endpoint) setEndpoint('');
+    }
+  };
   const submit = () => {
     const keyList = keys.split('\n').map((k) => k.trim()).filter(Boolean);
     if (!name.trim() || !keyList.length || (kind === 'openai_compat' && !endpoint.trim())) return;
@@ -596,7 +614,7 @@ function AddProviderDialog({ onClose }: { onClose: () => void }) {
       {
         kind,
         name: name.trim(),
-        endpoint: endpoint.trim() || undefined,
+        endpoint: kind === 'openai_compat' ? endpoint.trim() || undefined : undefined,
         keys: keyList,
         models: models
           .split(',')
@@ -632,14 +650,20 @@ function AddProviderDialog({ onClose }: { onClose: () => void }) {
       >
         <SelectField
           label="Loại"
-          value={kind}
-          onChange={(e) => setKind(e.target.value as typeof kind)}
+          value={choice}
+          onChange={(e) => onChoice(e.target.value as AddChoice)}
           options={[
             { value: 'gemini', label: 'Gemini API' },
             { value: 'deepseek', label: 'DeepSeek API' },
             { value: 'openai_compat', label: 'API tương thích OpenAI' },
+            ...PROVIDER_PRESETS.map((p) => ({ value: p.id, label: p.label })),
           ]}
         />
+        {preset ? (
+          <p className="muted-note" data-testid="provider-preset-hint">
+            {preset.keyHint}
+          </p>
+        ) : null}
         <TextField label="Tên hiển thị" value={name} onChange={(e) => setName(e.target.value)} maxLength={80} />
         {kind === 'openai_compat' ? <TextField label="Địa chỉ gọi (Endpoint)" value={endpoint} onChange={(e) => setEndpoint(e.target.value)} placeholder="https://…" /> : null}
         <div className="gh-field">
@@ -648,7 +672,13 @@ function AddProviderDialog({ onClose }: { onClose: () => void }) {
           </label>
           <textarea id="apm-new-keys" className="gh-input" rows={2} value={keys} onChange={(e) => setKeys(e.target.value)} />
         </div>
-        <TextField label="Model ban đầu (tuỳ chọn, cách nhau dấu phẩy)" value={models} onChange={(e) => setModels(e.target.value)} placeholder="gemini-2.5-flash" />
+        <TextField
+          label="Model ban đầu (tuỳ chọn, cách nhau dấu phẩy)"
+          value={models}
+          onChange={(e) => setModels(e.target.value)}
+          placeholder={preset ? preset.modelHint : 'gemini-2.5-flash'}
+        />
+        {preset ? <p className="muted-note">Gợi ý model: <span className="mono">{preset.modelHint}</span></p> : null}
         <PinHint />
         {create.isError ? <InlineError>{errorText(create.error)}</InlineError> : null}
       </form>

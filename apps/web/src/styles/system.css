@@ -395,3 +395,33 @@
 /* v0.1.40 (F-12): Bộ khôi phục lỗi — nút Thử lại; gói mang đi đang chuẩn bị. */
 .rk-retry { margin-top: 8px; }
 [data-testid='offsite-portable-preparing'] { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+
+/* ── v0.1.41 (F-86): Nguồn AI cho việc nền ─────────────────────────────────── */
+.bg-src { padding: 12px 16px 14px; display: flex; flex-direction: column; gap: 10px; }
+.bg-src__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.bg-src__row { display: flex; align-items: flex-start; gap: 10px; }
+.bg-src__rank { width: 20px; flex: none; text-align: center; font-size: 11px; color: var(--color-neutral-500); padding-top: 2px; }
+.bg-src__body { flex: 1; min-width: 0; }
+.bg-src__name { font-size: 12.5px; color: var(--color-text); overflow-wrap: anywhere; }
+.bg-src__reason { font-size: 11px; color: var(--color-neutral-500); line-height: 1.45; text-wrap: pretty; }
+.bg-src__pill {
+  flex: none; font-size: 10.5px; padding: 2px 8px; border-radius: 999px; white-space: nowrap;
+  border: 1px solid var(--color-neutral-700); color: var(--color-neutral-400);
+}
+.bg-src__pill[data-used='yes'] { border-color: var(--color-ok); color: var(--color-ok); }
+.bg-src__cta { margin-top: 8px; }
+.bg-src__cli { display: flex; flex-direction: column; gap: 6px; padding-top: 4px; border-top: 1px solid var(--color-divider); }
+.bg-src__cli .triage-row { flex-wrap: wrap; padding-top: 8px; }
+.bg-src__risk { white-space: pre-wrap; }
+
+/* ── v0.1.41 (F-84): Chi phí & trần ngân sách ──────────────────────────────── */
+.ai-budget { padding: 12px 16px 14px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.ai-budget__form { display: flex; align-items: flex-end; gap: 8px; flex-wrap: wrap; }
+.ai-budget__form .gh-field { flex: 1 1 200px; }
+.ai-budget__table-wrap { overflow-x: auto; }
+.ai-budget__table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+.ai-budget__table th { text-align: left; font-weight: 500; font-size: 10.5px; color: var(--color-neutral-500); padding: 4px 6px; border-bottom: 1px solid var(--color-divider); white-space: nowrap; }
+.ai-budget__table td { padding: 6px; border-bottom: 1px solid var(--color-divider); color: var(--color-neutral-300); vertical-align: top; }
+.ai-budget__price { width: 96px; height: 26px; font-size: 11.5px; font-family: var(--font-mono); }
+.ai-budget__sub { color: var(--color-neutral-400); font-style: italic; }
+.ai-budget__source[data-source='none'] { color: var(--color-warn); }

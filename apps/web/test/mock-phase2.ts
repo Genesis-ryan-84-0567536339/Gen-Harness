@@ -1204,6 +1204,8 @@ export function createPhase2(opts: Phase2Options) {
       // `mock-p4-api.ts` (phase3) vì màn đó cần trả lại đúng hình `Provider[]` sau khi đổi `failover_rank`
       // trên CHÍNH mảng `providers` dùng chung này (`hooks.providers()` bên dưới), không phải một bản sao.
       if (seg[1] === 'chain') return false;
+      // v0.1.41 (F-86): `/providers/background` ở `mock-p4-api.ts` — phải nhường TRƯỚC mẫu `/providers/{id}` bên dưới.
+      if (seg[1] === 'background' && seg.length === 2) return false;
       if (!need('system.read')) return true;
       if (seg[1] === 'credentials' && m === 'GET') return reply(200, credentials());
       if (seg.length === 1 && m === 'GET') return reply(200, [...providers].sort((a, b) => a.failover_rank - b.failover_rank));

@@ -319,6 +319,59 @@ export function createMock(opts: P4SystemOptions) {
     };
   }
 
+  // ── v0.1.41 (F-84): Chi phí AI hôm nay — dữ liệu mẫu tính sẵn như gh/system_api/ai_cost.py: chi phí = token × giá
+  // (₫/1M token) theo model; CLI trả theo gói (0 ₫); model chưa có giá ⇒ lượt "chưa có giá". Mẫu: 12.500 ₫.
+  interface CostModel { model_id: string; provider_name: string; provider_kind: string; model_name: string; in_vnd_per_mtok: number | null; out_vnd_per_mtok: number | null; price_source: 'owner' | 'subscription' | 'none' }
+  const costModels: CostModel[] = [
+    { model_id: 'mc-gemini-flash', provider_name: 'Gemini API', provider_kind: 'gemini', model_name: 'gemini-2.5-flash', in_vnd_per_mtok: 7_500, out_vnd_per_mtok: 62_500, price_source: 'owner' },
+    { model_id: 'mc-deepseek', provider_name: 'DeepSeek API', provider_kind: 'deepseek', model_name: 'deepseek-reasoner', in_vnd_per_mtok: null, out_vnd_per_mtok: null, price_source: 'none' },
+    { model_id: 'mc-claude-cli', provider_name: 'Claude Code CLI', provider_kind: 'claude_code_cli', model_name: 'claude-sonnet', in_vnd_per_mtok: 0, out_vnd_per_mtok: 0, price_source: 'subscription' },
+  ];
+  const costCalls: Array<{ agent_key: string; label: string; model_id: string; calls: number; tokens_in: number; tokens_out: number }> = opts.fresh
+    ? []
+    : [
+        { agent_key: 'core.gen', label: 'Gen — trợ lý quản trị', model_id: 'mc-gemini-flash', calls: 12, tokens_in: 400_000, tokens_out: 80_000 },
+        { agent_key: 'core.gen', label: 'Gen — trợ lý quản trị', model_id: 'mc-claude-cli', calls: 5, tokens_in: 60_000, tokens_out: 9_000 },
+        { agent_key: 'core.refinery', label: 'Sàng lọc & suy luận chính', model_id: 'mc-gemini-flash', calls: 30, tokens_in: 200_000, tokens_out: 48_000 },
+        { agent_key: 'duty.decide', label: 'Trực việc', model_id: 'mc-deepseek', calls: 3, tokens_in: 30_000, tokens_out: 6_000 },
+      ];
+  let dailyBudget: number | null = opts.fresh ? null : 20_000;
+  const vnDate = (t: number) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' }).format(new Date(t));
+  function aiCostView(date: string) {
+    const today = vnDate(Date.now());
+    const calls = date === today ? costCalls : [];
+    const agents = new Map<string, { agent_key: string; label: string; calls: number; tokens_in: number; tokens_out: number; cost_vnd: number; unpriced_calls: number }>();
+    for (const c of calls) {
+      const mdl = costModels.find((x) => x.model_id === c.model_id)!;
+      const a = agents.get(c.agent_key) ?? { agent_key: c.agent_key, label: c.label, calls: 0, tokens_in: 0, tokens_out: 0, cost_vnd: 0, unpriced_calls: 0 };
+      a.calls += c.calls;
+      a.tokens_in += c.tokens_in;
+      a.tokens_out += c.tokens_out;
+      if (mdl.price_source === 'none' || mdl.in_vnd_per_mtok == null || mdl.out_vnd_per_mtok == null) a.unpriced_calls += c.calls;
+      else a.cost_vnd += Math.round((c.tokens_in * mdl.in_vnd_per_mtok + c.tokens_out * mdl.out_vnd_per_mtok) / 1_000_000);
+      agents.set(c.agent_key, a);
+    }
+    const agentList = [...agents.values()].sort((x, y) => y.cost_vnd - x.cost_vnd);
+    const total = agentList.reduce((n, a) => n + a.cost_vnd, 0);
+    const last7 = Array.from({ length: 7 }, (_, i) => {
+      const d = vnDate(Date.now() - (6 - i) * DAY);
+      return { date: d, total_vnd: d === today ? total : opts.fresh ? 0 : 8_000 + i * 700 };
+    });
+    return {
+      date,
+      timezone: 'Asia/Ho_Chi_Minh',
+      total_vnd: total,
+      budget_vnd: dailyBudget,
+      over_budget: dailyBudget != null && total > dailyBudget,
+      unpriced_calls: agentList.reduce((n, a) => n + a.unpriced_calls, 0),
+      agents: agentList,
+      models: costModels.map((mdl) => ({ ...mdl, calls_today: calls.filter((c) => c.model_id === mdl.model_id).reduce((n, c) => n + c.calls, 0) })),
+      last_7_days: last7,
+      feedback_7d: opts.fresh ? { helpful: 0, not_helpful: 0, briefing_helpful: 0, briefing_not_helpful: 0 } : { helpful: 14, not_helpful: 3, briefing_helpful: 5, briefing_not_helpful: 1 },
+    };
+  }
+  const isVnd = (v: unknown) => typeof v === 'number' && Number.isFinite(v) && v >= 0;
+
   function handle(ctx: P2Ctx): boolean {
     const { method: m, path: p, url, reply, problem, body } = ctx;
     const q = url.searchParams;
@@ -459,6 +512,43 @@ export function createMock(opts: P4SystemOptions) {
         if (restore.state === 'requested' || restore.state === 'running') return problem(409, 'RESTORE_IN_PROGRESS', 'Đang khôi phục');
         Object.assign(restore, { state: 'requested', key: b.key, requested_at: new Date().toISOString(), safety_key: null, message: null });
         return reply(202, backupsPage());
+      }
+      return problem(404, 'NOT_FOUND', 'Không tìm thấy');
+    }
+
+    // ── v0.1.41 (F-84): Chi phí AI hôm nay + trần ngân sách + giá model ──
+    if (p.startsWith('/system/ai-cost')) {
+      if (p === '/system/ai-cost' && m === 'GET') {
+        if (!has(ctx, 'system.read')) return problem(403, 'FORBIDDEN', 'Vai trò không có quyền này');
+        const date = q.get('date') || vnDate(Date.now());
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return problem(422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors: { date: 'Ngày dạng YYYY-MM-DD' } });
+        return reply(200, aiCostView(date));
+      }
+      if (p === '/system/ai-cost/budget' && m === 'PUT') {
+        if (!has(ctx, 'system.manage')) return problem(403, 'FORBIDDEN', 'Vai trò không có quyền này');
+        const v = (body as { daily_budget_vnd?: unknown }).daily_budget_vnd;
+        if (v !== null && !(isVnd(v) && Number.isInteger(v))) {
+          return problem(422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors: { daily_budget_vnd: 'Trần chi phí là số tiền nguyên (₫), không âm — để trống nếu không giới hạn' } });
+        }
+        dailyBudget = v as number | null;
+        return reply(200, aiCostView(vnDate(Date.now())));
+      }
+      if (seg[0] === 'system' && seg[1] === 'ai-cost' && seg[2] === 'prices' && seg.length === 4 && m === 'PUT') {
+        if (!has(ctx, 'system.manage')) return problem(403, 'FORBIDDEN', 'Vai trò không có quyền này');
+        const mdl = costModels.find((x) => x.model_id === decodeURIComponent(seg[3]));
+        if (!mdl) return problem(404, 'NOT_FOUND', 'Model không tồn tại');
+        if (mdl.price_source === 'subscription') {
+          return problem(422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors: { in_vnd_per_mtok: 'Nguồn CLI trả theo gói — không đặt giá theo token' } });
+        }
+        const b = body as { in_vnd_per_mtok?: unknown; out_vnd_per_mtok?: unknown };
+        const errors: Record<string, string> = {};
+        if (b.in_vnd_per_mtok !== null && !isVnd(b.in_vnd_per_mtok)) errors.in_vnd_per_mtok = 'Giá là số tiền (₫), không âm';
+        if (b.out_vnd_per_mtok !== null && !isVnd(b.out_vnd_per_mtok)) errors.out_vnd_per_mtok = 'Giá là số tiền (₫), không âm';
+        if (Object.keys(errors).length) return problem(422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors });
+        mdl.in_vnd_per_mtok = b.in_vnd_per_mtok as number | null;
+        mdl.out_vnd_per_mtok = b.out_vnd_per_mtok as number | null;
+        mdl.price_source = mdl.in_vnd_per_mtok == null || mdl.out_vnd_per_mtok == null ? 'none' : 'owner';
+        return reply(200, aiCostView(vnDate(Date.now())));
       }
       return problem(404, 'NOT_FOUND', 'Không tìm thấy');
     }
