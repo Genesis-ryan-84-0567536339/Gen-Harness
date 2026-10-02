@@ -245,7 +245,13 @@ test.describe.serial('CI — e2e thật rút gọn: giao/gán người & trợ l
   });
 
   test('(e) Nối model từ mẫu OpenRouter → gọi thử → thấy trong chuỗi', async () => {
-    await page.goto('/api');
+    // `/api` là tiền tố proxy của vite dev (→ api thật) nên không tải thẳng được: vào app rồi chuyển màn phía trình duyệt.
+    await page.goto('/overview');
+    await page.evaluate(() => {
+      window.history.pushState({}, '', '/api');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+    await expect(page).toHaveURL(/\/api$/);
     await page.getByRole('button', { name: /Thêm nhà cung cấp/ }).first().click();
     const dlg = page.getByRole('dialog', { name: 'Thêm nhà cung cấp' });
     await expect(dlg).toBeVisible();
