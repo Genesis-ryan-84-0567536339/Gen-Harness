@@ -251,4 +251,43 @@ describe('v0.1.36 — thẻ cập nhật ở Tổng quan', () => {
     await new Promise((r) => setTimeout(r, 30));
     expect(hidden.container).toBeEmptyDOMElement();
   });
+
+  it('(h) hideFailed + "Máy chủ chưa nhận yêu cầu" (stalled) ⇒ thẻ VẪN hiện (dải không có dòng cho trạng thái này)', async () => {
+    mockFetch((c) => (c.url.includes('/system/update') ? json(200, { ...failed, state: 'stalled', finished_at: null }) : json(404)));
+    render(
+      <QueryClientProvider client={appQueryClient}>
+        <MemoryRouter>
+          <UpdateCard hideFailed />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByText('Máy chủ chưa nhận yêu cầu cập nhật')).toBeInTheDocument();
+  });
+
+  const overviewWithUpdate = (healthRes: () => Response) =>
+    mockFetch((c) => {
+      if (c.url.includes('/system/update')) return json(200, failed);
+      return route({ step4Done: true, health: healthRes })(c);
+    });
+
+  it('(i) Tổng quan: cập nhật lỗi có trong dải ⇒ chỉ hiện MỘT lần (dải), không lặp thẻ', async () => {
+    const UPDATE_FAILED: HealthIssue = {
+      key: 'update.failed', kind: 'update.failed', severity: 'bad', title: 'Cập nhật lên v0.1.36 chưa thành công',
+      body: 'Hệ thống đã tự quay về bản cũ, dữ liệu an toàn.', link: '/system?tab=storage', action: 'Xem & thử lại', raised_at: '2026-10-02T02:00:00Z',
+    };
+    overviewWithUpdate(() => json(200, health({ overall: 'bad', issues: [UPDATE_FAILED] })));
+    renderUi(<OverviewScreen />);
+    const strip = await screen.findByTestId('needs-boss');
+    expect(within(strip).getByRole('link', { name: /Xem & thử lại/ })).toHaveAttribute('href', '/system?tab=storage');
+    await screen.findByText('Kênh sống');
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.getAllByText(/Cập nhật lên v0.1.36 chưa thành công/)).toHaveLength(1);
+  });
+
+  it('(j) Tổng quan: /system/health lỗi 500 ⇒ thẻ cập nhật lỗi vẫn hiện (không mất cảnh báo)', async () => {
+    overviewWithUpdate(() => json(500, { title: 'Lỗi máy chủ', status: 500, code: 'INTERNAL' }, 'application/problem+json'));
+    renderUi(<OverviewScreen />);
+    expect(await screen.findByText(/Cập nhật lên v0.1.36 chưa thành công/)).toBeInTheDocument();
+    expect(screen.queryByTestId('needs-boss')).toBeNull();
+  });
 });

@@ -1411,15 +1411,12 @@ cần khôi phục — CSDL chưa bị đụng thì chỉ cần `docker compose 
 ### Boss cần làm gì
 
 **Không cần làm gì.** Sau khi cập nhật:
-- Ô "Giao cho người khác", "Gán người xử lý" hiện đúng người trong công ty (Sếp là "Tôi"); ô "Gán BOT trực nhóm" hiện các trợ
-  lý đang bật. Danh sách trống nghĩa là chưa mời người dùng / chưa tạo trợ lý.
-- Khi thêm hoặc sửa nhà cung cấp AI, thêm khoá API, bật/tắt nhà cung cấp hay đổi thứ tự chuỗi ưu tiên nhà cung cấp, hệ thống
-  hỏi **mã PIN 6 số** (mã đặt lúc thiết lập). Nhập một lần dùng được 30 phút. Đổi/chọn model mặc định ("Dùng model này")
-  **chưa** hỏi PIN (để bản v0.1.45).
-- Tài liệu không phải PDF/ảnh (vd .html, .txt, .docx) giờ bấm vào sẽ **tải về máy** thay vì mở thẳng trong trình duyệt — chủ
-  ý để chặn mã độc.
-- Khi có lỗi lạ, màn hình hiện câu dễ hiểu kèm "Mã lỗi xxxxxxxx" — Sếp chỉ cần chép mã đó gửi Claude. PIN bị khoá do nhập
-  sai nhiều lần thì hiện rõ "Mã PIN đang bị khoá…" kèm giờ mở khoá theo giờ Việt Nam.
+- Khi kênh Zalo rớt / model hết hạn đăng nhập / cập nhật lỗi / sao lưu quá 36 giờ / Bộ xử lý nền im / ổ đĩa sắp đầy, Sếp
+  thấy **MỘT** chuông kèm nút sửa; bấm nút là tới đúng chỗ xử lý.
+- Mở Tổng quan: nếu có sự cố sẽ thấy dải **"Cần Sếp xử lý"** ở đầu trang, mỗi dòng có nút sửa. Điều khiển hệ thống › Dữ
+  liệu & lưu trữ có thẻ **"Sức khoẻ hệ thống"**.
+- Việc dọn dẹp/tính toán nặng chạy lúc 04:20–05:10 sáng giờ VN, không còn chạy giữa giờ làm việc; trang Trợ giúp hiện
+  đúng số phiên bản.
 
 ### Vì sao (kế hoạch tổng `docs/audit/2026-10-01/0-ke-hoach-tong.md`)
 
@@ -1564,8 +1561,29 @@ cần khôi phục — CSDL chưa bị đụng thì chỉ cần `docker compose 
   `gh:worker:heartbeat` = ISO UTC, TTL 1 ngày, ghi lúc startup và sau mỗi cron. Tên cron (`cron:<tên>`) và tên job enqueue
   không đổi.
 
+- Web (gói web-can-sep-suc-khoe): dải "Cần Sếp xử lý" (`NeedsBossStrip`, đầu Tổng quan — gom "Chưa có model" + `issues`
+  của `/system/health`, 'bad' trước 'warn'), thẻ "Sức khoẻ hệ thống" (`HealthCard`, "Chi tiết kỹ thuật" liệt kê cron +
+  hàng lỗi DLQ), chuông có biểu tượng riêng cho kind sự cố và làm mới sức khoẻ ngay khi nhận chuông, Trợ giúp hiện
+  "Phiên bản ảnh" + genh. Vai trò không có `system.read` không gọi `/system/health`.
+- Tích hợp: thẻ "cập nhật lỗi" ở Tổng quan CHỈ ẩn khi dải thật sự có dòng `update.failed` (vai trò không có `system.read`
+  hoặc `/system/health` lỗi ⇒ thẻ vẫn hiện, lỗi cập nhật không biến mất); "Máy chủ chưa nhận yêu cầu" (stalled) không có
+  dòng trong dải nên thẻ vẫn hiện.
+
 ### Kiểm tra
 
-- api: `tests/test_worker_schedule_v0136.py`, `tests/test_version_v0136.py` (+ toàn bộ pytest, ruff, mypy).
-- genh: `internal/ops/doctor_test.go` — `TestRunDoctor_LogsHaveTimestamps` (`logs -t --tail=500`); `go vet` + `go test ./...`.
-- (Người điều phối bổ sung kết quả kiểm trên nhánh tích hợp sau khi gộp các gói.)
+- api: `tests/test_health_v0136.py` (chuông channel.down/model/disk.low/update.failed/backup.stale đúng 1 lần, worker
+  ok/silent/unknown, `/ready` không đổi), `tests/test_backup_v0136.py` (timeout 3600, CancelledError ⇒ backup.failed rồi
+  ném lại, không pg_dump mồ côi), `tests/test_logging_v0136.py` (500 cố ý ⇒ log JSON có ts + exc + error_id khớp phản hồi),
+  `tests/test_worker_schedule_v0136.py` (không cron nặng trong 02:30–03:30 và 08:00–18:00 giờ VN, timezone
+  Asia/Ho_Chi_Minh), `tests/test_version_v0136.py` (`/system/about` + log khởi động khớp VERSION).
+- genh: `internal/ops/doctor_test.go` — `TestRunDoctor_LogsHaveTimestamps` (`logs -t --tail=500`).
+- web: `test/unit/needs-boss-v0136.test.tsx`, e2e mock `e2e/health-v0136.spec.ts` (11 kịch bản: dải 2 dòng + 2 nút, bad
+  trước warn, Chưa có model, cập nhật lỗi chỉ 1 lần, thẻ Sức khoẻ + Im 14 phút, Hạn lưu khoá Sửa không PATCH, chuông
+  channel.down, Trợ giúp phiên bản ảnh, vai trò không system.read, /system/health 500); `social.spec`,
+  `update-rollback-v0134.spec`, `flows.spec` vẫn xanh.
+- Thêm khi tích hợp: `apps/api/tests/test_integ_v0136.py` (worker `_tracked` ghi ⇒ `/system/health` đọc đúng: cron ok/lỗi,
+  worker 'ok'), vitest (h)(i)(j) trong `needs-boss-v0136.test.tsx`.
+- Kết quả trên nhánh tích hợp (02/10): ruff + mypy sạch, alembic 1 head (0024); pytest 1230 passed (superuser) và 1230
+  passed (gh_app) + 2 test tích hợp mới xanh cả hai vai; web lint/typecheck sạch, vitest 338 passed, build OK, bridge test OK; Playwright mock 162 passed;
+  browser 14 passed; genh `go vet` + `go test ./...` 15 gói ok; cổng phát hành OK. Ảnh api (GH_VERSION/LABEL) kiểm ở CI
+  job `images` (máy tích hợp không có Docker daemon).

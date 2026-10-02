@@ -10,6 +10,8 @@ import { UpdateCard } from '../../update/UpdateCard';
 import { useNavigation } from '../../lib/queries';
 import { screenKeys } from '../../shell/navModel';
 import { NeedsBossStrip } from './NeedsBossStrip';
+import { useCan } from '../../lib/permissions';
+import { useSystemHealth } from '../system/queries';
 import { SetupFollowUp } from './SetupFollowUp';
 
 const KPI_ICON: Record<string, string> = {
@@ -126,6 +128,10 @@ function HourlyChart({ hourly }: { hourly: { hour: string; count: number }[] }) 
 export function OverviewScreen() {
   const q = useOverview();
   const nav = useNavigation();
+  // v0.1.36 (F-6): chỉ ẩn thẻ "cập nhật lỗi" khi dải "Cần Sếp xử lý" THẬT SỰ có dòng update.failed — vai trò không có
+  // system.read hoặc /system/health lỗi thì thẻ vẫn hiện (lỗi cập nhật không bao giờ biến mất khỏi Tổng quan).
+  const health = useSystemHealth(useCan('system.read'));
+  const updateInStrip = Array.isArray(health.data?.issues) && health.data.issues.some((i) => i.kind === 'update.failed');
 
   if (q.isPending) {
     return (
@@ -163,7 +169,7 @@ export function OverviewScreen() {
       {/* v0.1.36 (F-6): "Cần Sếp xử lý" ĐẦU trang; cập nhật lỗi chỉ hiện một lần trong dải (thẻ đầy đủ có nút Thử lại
           ở Dữ liệu & lưu trữ và Trợ giúp). */}
       <NeedsBossStrip />
-      <UpdateCard hideFailed />
+      <UpdateCard hideFailed={updateInStrip} />
       <SetupFollowUp />
       <div className="ov-kpi-row" data-gen-target="overview.kpis">
         {row1.map((k) => (

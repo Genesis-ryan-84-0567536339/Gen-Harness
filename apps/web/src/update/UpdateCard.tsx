@@ -84,8 +84,9 @@ export function UpdateCard({ always = false, hideFailed = false }: { always?: bo
   // v0.1.30: `always` = mục "Cập nhật phần mềm" cố định (Điều khiển hệ thống › Dữ liệu & lưu trữ, Trợ giúp) — không
   // bao giờ biến mất như thẻ Tổng quan (chỉ hiện khi biết có bản mới).
   if (view.kind === 'hidden' && !always) return null;
-  // v0.1.36 (F-6): Tổng quan — cập nhật lỗi/kẹt đã có một dòng trong dải "Cần Sếp xử lý"; không lặp lại thẻ ở đây.
-  if (hideFailed && (view.kind === 'failed' || view.kind === 'stalled')) return null;
+  // v0.1.36 (F-6): Tổng quan — cập nhật lỗi đã có một dòng trong dải "Cần Sếp xử lý"; không lặp lại thẻ ở đây.
+  // "Máy chủ chưa nhận yêu cầu" (stalled) KHÔNG có dòng sự cố trong dải nên vẫn hiện thẻ (có nút Thử lại).
+  if (hideFailed && view.kind === 'failed') return null;
   if (always && q.isPending) {
     return (
       <Panel title="Cập nhật phần mềm" label="Cập nhật phần mềm" bodyClass="upd">
