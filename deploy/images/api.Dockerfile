@@ -51,6 +51,11 @@ COPY apps/api/alembic.ini ./
 COPY apps/api/migrations ./migrations
 COPY db/sql /app/db/sql
 COPY plugins /app/plugins
+# v0.1.36 (F-46): phiên bản của ảnh — release.yml/ci.yml truyền `--build-arg VERSION=<VERSION>`; đặt SAU các bước cài
+# nặng để đổi phiên bản không phá cache. gh.__version__ đọc GH_VERSION (thiếu ⇒ "dev").
+ARG VERSION=dev
+ENV GH_VERSION=${VERSION}
+LABEL org.opencontainers.image.version=${VERSION}
 # Tạo sẵn /var/lib/gh/objects (volume gh_objects của deploy/compose.yaml gắn
 # vào đây cho cả api và worker, GH_OBJECTS_DIR) trước khi chown -R: Docker
 # sao chép nội dung + QUYỀN của thư mục này từ image sang volume ở lần mount

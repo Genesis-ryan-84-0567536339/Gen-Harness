@@ -196,7 +196,9 @@ async def test_org_settings_reuse_step3_validation(owner_api: Api) -> None:
 async def test_about_reads_genh_version(owner_api: Api, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(get_settings(), "host_link_dir", str(tmp_path))
     r = await owner_api.get("/system/about")
-    assert r.status_code == 200 and r.json()["version"] is None and r.json()["org_name"] == "Genesis Việt"
+    # v0.1.36 (F-46): không có genh.json ⇒ genh_version null, version rơi về image_version (gh.__version__).
+    assert r.status_code == 200 and r.json()["genh_version"] is None and r.json()["org_name"] == "Genesis Việt"
+    assert r.json()["version"] == r.json()["image_version"]
     (tmp_path / "genh.json").write_text('{"version": "v0.1.22"}', encoding="utf-8")
     body = (await owner_api.get("/system/about")).json()
     assert body["version"] == "v0.1.22" and body["role"]["code"] == "owner" and body["timezone"] == "Asia/Ho_Chi_Minh"

@@ -159,4 +159,5 @@ async def people_review_recompute(ctx: dict[str, Any]) -> dict[str, int]:
     return out
 
 
-JOBS: list[CronJob] = [(people_review_recompute, {"hour": {2}, "minute": {30}})]
+# v0.1.36 (F-45): 04:40 giờ VN (WorkerSettings.timezone) — ngoài giờ làm việc và cửa sổ cập nhật genh 02:30–03:30.
+JOBS: list[CronJob] = [(people_review_recompute, {"hour": {4}, "minute": {40}})]
