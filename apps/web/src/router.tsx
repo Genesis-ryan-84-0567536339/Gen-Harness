@@ -1,4 +1,4 @@
-import { Navigate, createBrowserRouter, type RouteObject } from 'react-router-dom';
+import { createBrowserRouter, type RouteObject } from 'react-router-dom';
 import { buildScreenTree } from '@gen-harness/contracts';
 import { setNavigator } from './lib/navigation';
 import { UrlStateSync } from './lib/uiStore';
@@ -13,7 +13,8 @@ import { ScreenPage } from './screens/ScreenPage';
 import { NotFoundPage, RouteErrorPage } from './shell/ErrorPage';
 import { SetupPage } from './setup/SetupPage';
 import { AppShell } from './shell/AppShell';
-import { ACCOUNT_CRUMBS, HELP_CRUMBS, SOCIAL_CRUMBS, type RouteHandle } from './shell/routeHandles';
+import { ACCOUNT_CRUMBS, BOSS_CHECKS_CRUMBS, GUIDE_CRUMBS, HELP_CRUMBS, SOCIAL_CRUMBS, type RouteHandle } from './shell/routeHandles';
+import { HomeRedirect } from './shell/HomeRedirect';
 import { SocialPage } from './social/SocialPage';
 import { RootLayout } from './RootLayout';
 
@@ -69,19 +70,21 @@ export const routes: RouteObject[] = [
         path: '/',
         element: <AppShell />,
         children: [
-          { index: true, element: <Navigate to="/overview" replace /> },
+          // v0.1.42 (F-26): "/" → màn đầu tiên KHÔNG ẩn của vai trò (GET /navigation), giữ ?gen=.
+          { index: true, element: <HomeRedirect /> },
           ...buildConsoleRoutes(),
           // Hướng dẫn thiết lập (việc "Để sau" 5–11 + Facebook, Gen-hub) — mở từ thẻ Việc thiết lập tiếp ở Tổng quan.
-          { path: 'guide', element: <GuidePage /> },
+          // v0.1.42 (F-66): có breadcrumb riêng, tô sáng Cài đặt trên thanh bên.
+          { path: 'guide', handle: { page: GUIDE_CRUMBS, navKey: 'system' } satisfies RouteHandle, element: <GuidePage /> },
           // v0.1.39 (F-74): "Việc Sếp cần làm" — đặt TRƯỚC `guide/:n`.
-          { path: 'guide/viec-sep', element: <BossChecksPage /> },
-          { path: 'guide/:n', element: <GuideStepPage /> },
-          // Tài khoản của tôi (v0.1.19) — mở từ khối tài khoản ở chân thanh bên.
-          { path: 'account', handle: { page: ACCOUNT_CRUMBS } satisfies RouteHandle, element: <AccountPage /> },
+          { path: 'guide/viec-sep', handle: { page: BOSS_CHECKS_CRUMBS, navKey: 'system' } satisfies RouteHandle, element: <BossChecksPage /> },
+          { path: 'guide/:n', handle: { page: GUIDE_CRUMBS, navKey: 'system' } satisfies RouteHandle, element: <GuideStepPage /> },
+          // Tài khoản của tôi (v0.1.19) — mở từ khối tài khoản ở chân thanh bên và từ Cài đặt.
+          { path: 'account', handle: { page: ACCOUNT_CRUMBS, navKey: 'system' } satisfies RouteHandle, element: <AccountPage /> },
           // Trợ giúp / Giới thiệu (v0.1.22) — phiên bản, hỏi Gen, lệnh genh, Báo lỗi.
-          { path: 'help', handle: { page: HELP_CRUMBS } satisfies RouteHandle, element: <HelpPage /> },
-          // Tài khoản mạng xã hội (v0.1.29, chỉ Owner) — mở từ menu tài khoản ở chân thanh bên.
-          { path: 'social', handle: { page: SOCIAL_CRUMBS } satisfies RouteHandle, element: <SocialPage /> },
+          { path: 'help', handle: { page: HELP_CRUMBS, navKey: 'system' } satisfies RouteHandle, element: <HelpPage /> },
+          // Tài khoản mạng xã hội (v0.1.29, chỉ Owner) — mở từ thẻ Facebook ở Kết nối và menu tài khoản.
+          { path: 'social', handle: { page: SOCIAL_CRUMBS, navKey: 'connections' } satisfies RouteHandle, element: <SocialPage /> },
           // B5: trang 404 trong khung Console (thanh bên vẫn dùng được).
           { path: '*', element: <NotFoundPage /> },
         ],

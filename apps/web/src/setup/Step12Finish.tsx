@@ -104,7 +104,7 @@ export function Step12Finish({ meta, description, onBack, onSaved, formRef }: St
               <p className="risk-box__text">
                 Cần xong {missing.map((m) => m.title).join(', ')} trước khi hoàn tất thiết lập. Các bước khác Sếp đã để sau sẽ hiện ở
                 "Việc thiết lập tiếp" trên Tổng quan.{' '}
-                <Link to="/overview">Vào Console</Link>
+                <Link to="/">Vào Console</Link>
               </p>
             </div>
           </div>
