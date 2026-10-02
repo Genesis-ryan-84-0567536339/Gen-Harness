@@ -5,7 +5,14 @@
 # agent soạn/duyệt/gửi, hợp nhất danh tính, plugin lỗi liên tục, MCP) trong CÙNG một phiên api/worker/CSDL —
 # live-phase3 tiếp tục đúng dữ liệu live-phase2 để lại (xem docs/reports/phase-5-e2e-live.md).
 #   cd apps/web && bash e2e-live/run.sh
+# v0.1.35 (F-14): `LIVE_SPECS` chọn tệp spec (mặc định "live-phase2 live-phase3" như trên — chạy tay giữ nguyên).
+# CI (job `api` của .github/workflows/ci.yml) chạy bản rút gọn tự đủ: `LIVE_SPECS=live-ci bash e2e-live/run.sh`.
+# Playwright đỏ → in đuôi api.log + worker.log ra stderr (khoá GH_* chỉ nằm trong env, không bao giờ vào log).
 set -euo pipefail
+LIVE_SPECS=${LIVE_SPECS:-"live-phase2 live-phase3"}
+for tool in psql redis-cli curl; do
+  command -v "$tool" >/dev/null || { echo "Thiếu lệnh '$tool' — cài trước khi chạy e2e thật (Ubuntu: apt-get install postgresql-client redis-tools curl)" >&2; exit 1; }
+done
 HERE=$(cd "$(dirname "$0")" && pwd); API=$(cd "$HERE/../../api" && pwd); WEB=$(cd "$HERE/.." && pwd)
 export LIVE_OUT=${LIVE_OUT:-$WEB/test-results/live-shots}; OUT=$LIVE_OUT; mkdir -p "$OUT"
 # `export` (không chỉ gán $OUT cục bộ) để fake_bridge.py chạy nền bên dưới cũng thấy đúng LIVE_OUT — thiếu dòng
@@ -67,10 +74,20 @@ python3 "$HERE/fake_mcp.py" > "$OUT/mcp.log" 2>&1 & PIDS+=($!)
 (cd "$API" && exec .venv/bin/arq gh.worker.WorkerSettings) > "$OUT/worker.log" 2>&1 & PIDS+=($!)
 (cd "$WEB" && exec npx vite --port 5175 --strictPort) > "$OUT/web.log" 2>&1 & PIDS+=($!)
 for _ in $(seq 1 60); do curl -sf localhost:5175/api/v1/health >/dev/null && break; sleep 1; done
+curl -sf localhost:5175/api/v1/health >/dev/null || { echo "api/web chưa lên sau 60 giây — xem $OUT/api.log, $OUT/web.log" >&2; tail -n 120 "$OUT/api.log" "$OUT/web.log" >&2 || true; exit 1; }
 export ORG=$(psql "$PG/gh_live" -tAc "SELECT id FROM core.organizations")
 SCAN_AFTER=5 "$API/.venv/bin/python" "$HERE/fake_bridge.py" > "$OUT/bridge.log" 2>&1 & PIDS+=($!)
 sleep 2
+# shellcheck disable=SC2086 # LIVE_SPECS cố ý tách theo khoảng trắng thành nhiều tên spec
 cd "$WEB" && LIVE_OUT=$OUT SEND_SCRIPT=$HERE/send.py DETECT_SCRIPT=$HERE/detect_identities.py \
   SIGN_SCRIPT=$HERE/sign_plugin.py PLUGIN_SIGN_KEY=$PLUGIN_KEY EXPLODE_SCRIPT=$HERE/explode_plugin.py \
-  PY=$API/.venv/bin/python LIVE_BASE_URL=http://localhost:5175 \
-  npx playwright test -c playwright.live.config.ts live-phase2 live-phase3
+  PY=$API/.venv/bin/python LIVE_BASE_URL=http://localhost:5175 LIVE_DB_URL=$PG/gh_live \
+  npx playwright test -c playwright.live.config.ts $LIVE_SPECS || {
+  code=$?
+  for f in api.log worker.log; do
+    echo "──── đuôi $OUT/$f (120 dòng) ────" >&2
+    tail -n 120 "$OUT/$f" >&2 || true
+  done
+  echo "E2E thật đỏ (LIVE_SPECS=$LIVE_SPECS, mã $code) — ảnh chụp + log ở $OUT, vết Playwright ở $WEB/test-results/live" >&2
+  exit "$code"
+}
