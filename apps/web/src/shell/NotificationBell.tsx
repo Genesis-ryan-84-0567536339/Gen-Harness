@@ -10,6 +10,7 @@ import { qk, useNotifications } from '../lib/queries';
 import { toast } from '../lib/toast';
 import { useNow } from '../lib/useNow';
 import { badgeText } from './headerModel';
+import { HEALTH_KINDS, qkSystem } from '../screens/system/queries';
 
 const KIND_ICON: Record<string, string> = {
   'user.role_changed': 'ph ph-user-switch',
@@ -21,7 +22,34 @@ const KIND_ICON: Record<string, string> = {
   'hub.token_expiring': 'ph ph-key',
   'social.read': 'ph ph-facebook-logo',
   'social.paused': 'ph ph-shield-warning',
+  // v0.1.36 (F-6): sự cố sức khoẻ (khử trùng lặp ở API — mỗi sự cố một chuông tới khi hết).
+  'channel.down': 'ph ph-plugs',
+  'model.auth_expired': 'ph ph-brain',
+  'update.failed': 'ph ph-arrow-counter-clockwise',
+  'backup.stale': 'ph ph-clock-countdown',
+  'worker.silent': 'ph ph-pulse',
+  'disk.low': 'ph ph-hard-drives',
 };
+
+/**
+ * v0.1.36 (F-6): `notification.new` (lib/realtime.ts chèn thẳng vào bộ đệm chuông) thuộc kind sự cố sức khoẻ ⇒ làm mới
+ * `['system','health']` để dải "Cần Sếp xử lý" / thẻ "Sức khoẻ hệ thống" đổi ngay. Lần tải đầu chỉ ghi nhận, không làm mới.
+ */
+function useHealthRefreshOnNotify(items: NotificationItem[] | undefined) {
+  const qc = useQueryClient();
+  const seen = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    if (!items) return;
+    if (!seen.current) {
+      seen.current = new Set(items.map((n) => n.id));
+      return;
+    }
+    const known = seen.current;
+    const fresh = items.filter((n) => !known.has(n.id));
+    for (const n of fresh) known.add(n.id);
+    if (fresh.some((n) => HEALTH_KINDS.has(n.kind))) void qc.invalidateQueries({ queryKey: qkSystem.health });
+  }, [items, qc]);
+}
 
 /**
  * v0.1.23 (Đợt B6) — chuông thông báo ở header: số chưa đọc, danh sách 20 thông báo gần nhất của CHÍNH người đang
@@ -31,6 +59,7 @@ export function NotificationBell() {
   const [open, setOpen] = useState(false);
   const q = useNotifications();
   const unread = q.data?.unread ?? 0;
+  useHealthRefreshOnNotify(q.data?.items);
   const wrap = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
 

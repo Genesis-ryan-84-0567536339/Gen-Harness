@@ -26,7 +26,10 @@ export function NoModelNotice({ to }: { to: string }) {
   );
 }
 
-/** Dải đầu Tổng quan — chỉ Owner (API `GET /setup/follow-up` chỉ trả cho Owner; vai trò khác không thấy gì). */
+/**
+ * Dải đầu Tổng quan — chỉ Owner (API `GET /setup/follow-up` chỉ trả cho Owner; vai trò khác không thấy gì).
+ * v0.1.36 (F-6): Tổng quan dùng `NeedsBossStrip` (gom "Chưa có model" + sự cố sức khoẻ); giữ lại để tương thích.
+ */
 export function NoModelBanner() {
   const q = useQuery({ queryKey: FOLLOW_UP_KEY, queryFn: ({ signal }) => api.setup.followUp(signal) });
   const item = Array.isArray(q.data) ? q.data.find((s) => s.n === 4) : undefined;

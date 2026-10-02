@@ -62,8 +62,12 @@ export interface OrgSettings {
 export type OrgSettingsBody = Omit<OrgSettings, 'currencies' | 'can_edit'>;
 
 export interface AboutInfo {
-  /** Phiên bản genh đã cài (vd `v0.1.22`); null = bản phát triển. */
+  /** Phiên bản genh đã cài (vd `v0.1.22`); null = bản phát triển. Giữ tương thích: = genh_version ?? image_version. */
   version: string | null;
+  /** v0.1.36 (F-46): phiên bản ảnh đang chạy (GH_VERSION / tệp VERSION); máy chủ ≤ v0.1.35 không trả — web hiện "—". */
+  image_version: string;
+  /** v0.1.36 (F-46): phiên bản genh ghi trong genh.json; null = không cài bằng genh / không đọc được. */
+  genh_version: string | null;
   org_name: string;
   timezone: string;
   role: Me['role'];

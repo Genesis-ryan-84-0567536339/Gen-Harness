@@ -307,6 +307,16 @@
       }
     },
     {
+      "id": "system.storage.health",
+      "screen": "system",
+      "label": "Sức khoẻ hệ thống",
+      "description": "Bộ xử lý nền, Trình duyệt nền, hàng lỗi, sao lưu, cập nhật, ổ đĩa; chi tiết kỹ thuật lịch chạy",
+      "dynamic": null,
+      "params": {
+        "tab": "storage"
+      }
+    },
+    {
       "id": "system.storage.retention",
       "screen": "system",
       "label": "Hạn lưu dữ liệu",

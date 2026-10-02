@@ -287,6 +287,41 @@ export interface BackupsPage {
   restore: BackupRestoreStatus;
 }
 
+/**
+ * v0.1.36 (F-6): `GET /system/health` (quyền `system.read`; KHÔNG thuộc `/ready` — genh dùng `/ready` để quyết quay về
+ * bản cũ). Tổng hợp sức khoẻ: Bộ xử lý nền (arq), Trình duyệt nền, hàng lỗi (DLQ), lịch chạy, sao lưu, cập nhật, ổ đĩa,
+ * cộng các sự cố đang mở ở `ops.health_alerts` (`issues` — nguồn của dải "Cần Sếp xử lý" đầu Tổng quan). Mọi trường là
+ * chuỗi/số/bool — web không bao giờ render object.
+ */
+export type HealthSeverity = 'bad' | 'warn';
+export interface HealthIssue {
+  /** Khoá khử trùng lặp, vd `channel.down:zalo`, `update.failed`. */
+  key: string;
+  /** Cùng `kind` của chuông: channel.down, model.auth_expired, update.failed, backup.stale, worker.silent, disk.low. */
+  kind: string;
+  severity: HealthSeverity;
+  title: string;
+  body: string;
+  /** Đường dẫn trong Console để xử lý (vd `/system?tab=channels`); null = không có. */
+  link: string | null;
+  /** Nhãn nút, vd "Đăng nhập lại". */
+  action: string;
+  raised_at: string;
+}
+export interface SystemHealth {
+  checked_at: string;
+  overall: 'ok' | 'warn' | 'bad';
+  worker: { state: 'ok' | 'silent' | 'unknown'; alive: boolean; last_seen_at: string | null; silent_minutes: number | null };
+  browser: { state: 'ok' | 'silent' | 'off'; last_heartbeat_at: string | null };
+  /** `stream` là tên stream gốc (không có `.dlq`). */
+  queues: Array<{ stream: string; dlq: number }>;
+  crons: Array<{ name: string; last_at: string | null; ok: boolean | null }>;
+  backup: { configured: boolean; latest_at: string | null; age_hours: number | null; stale: boolean };
+  update: { state: SystemUpdateState | 'unknown' | string; failed: boolean; blocked_version: string | null; finished_at: string | null };
+  disk: { state: 'ok' | 'low' | 'unknown'; free_bytes: number | null; min_bytes: number | null; checked_at: string | null };
+  issues: HealthIssue[];
+}
+
 const enc = encodeURIComponent;
 
 /** `/permissions`, `/listening-groups`, `/boundaries*`, `/audit-log*`, `/retention-policies`, `/persons/{id}/data-requests`. */
@@ -325,6 +360,10 @@ export function systemEndpoints(r: ApiClient['request']) {
       request: () => r<SystemUpdate>('/system/update', { method: 'POST' }),
       /** v0.1.30: "Kiểm tra bản mới" — hỏi GitHub ngay, bỏ qua bộ đệm (≤ 1 lần / 30 giây). */
       check: () => r<SystemUpdate>('/system/update/check', { method: 'POST' }),
+    },
+    /** v0.1.36 (F-6): sức khoẻ hệ thống + sự cố cần Sếp xử lý. */
+    systemHealth: {
+      get: (signal?: AbortSignal) => r<SystemHealth>('/system/health', { signal }),
     },
     personDataRequests: {
       create: (personId: string, kind: DataRequestKind) =>

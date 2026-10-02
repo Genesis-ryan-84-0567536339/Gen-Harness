@@ -15,7 +15,7 @@ import { UPDATED_FLAG, UPDATE_COMMAND, UPDATE_KEY, readableNotes, updateView } f
  * (gh/system_api/update.py). Trong lúc cập nhật api khởi động lại nên các lần hỏi trạng thái có thể lỗi mạng — coi là
  * "đang khởi động lại", không phải lỗi. Xong thì tự tải lại trang để chạy giao diện bản mới.
  */
-export function UpdateCard({ always = false }: { always?: boolean } = {}) {
+export function UpdateCard({ always = false, hideFailed = false }: { always?: boolean; hideFailed?: boolean } = {}) {
   /** Bản Owner đã bấm cập nhật lên (giữ qua lúc api tắt/bật). */
   const [waitingFor, setWaitingFor] = useState<string | null>(null);
   const [confirm, setConfirm] = useState(false);
@@ -84,6 +84,8 @@ export function UpdateCard({ always = false }: { always?: boolean } = {}) {
   // v0.1.30: `always` = mục "Cập nhật phần mềm" cố định (Điều khiển hệ thống › Dữ liệu & lưu trữ, Trợ giúp) — không
   // bao giờ biến mất như thẻ Tổng quan (chỉ hiện khi biết có bản mới).
   if (view.kind === 'hidden' && !always) return null;
+  // v0.1.36 (F-6): Tổng quan — cập nhật lỗi/kẹt đã có một dòng trong dải "Cần Sếp xử lý"; không lặp lại thẻ ở đây.
+  if (hideFailed && (view.kind === 'failed' || view.kind === 'stalled')) return null;
   if (always && q.isPending) {
     return (
       <Panel title="Cập nhật phần mềm" label="Cập nhật phần mềm" bodyClass="upd">

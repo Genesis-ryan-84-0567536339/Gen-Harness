@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
+import type { AboutInfo } from '@gen-harness/contracts';
 import { Button, Card, Icon } from '@gen-harness/ui';
 import { api } from '../lib/api';
 import { useGenStore } from '../gen/genStore';
@@ -12,6 +13,18 @@ import { ScreenTitle } from '../screens/ScreenPage';
 import { UpdateCard } from '../update/UpdateCard';
 import { GENH_COMMANDS, diagnosticText } from './helpModel';
 import { roleLabel } from '../screens/system/systemModel';
+
+/**
+ * v0.1.36 (F-46): thêm phiên bản ảnh + genh vào thông tin báo lỗi (ngay sau dòng "Phiên bản:" của `diagnosticText`) —
+ * hai số có thể lệch nhau (genh cũ, ảnh mới) và người hỗ trợ cần cả hai.
+ */
+function withVersions(text: string, about: AboutInfo | undefined): string {
+  const extra = `Phiên bản ảnh: ${about?.image_version || '—'} · genh: ${about?.genh_version ?? '—'}`;
+  const lines = text.split('\n');
+  const i = lines.findIndex((l) => l.startsWith('Phiên bản:'));
+  lines.splice(i < 0 ? 1 : i + 1, 0, extra);
+  return lines.join('\n');
+}
 
 const GEN_EXAMPLES = ['Hôm nay có gì gấp?', 'Chỉ em chỗ thêm khoá Jev', 'Sao lưu ở đâu?', 'Mời nhân viên mới thế nào?'];
 
@@ -34,7 +47,7 @@ export function HelpPage() {
 
   const copyDiagnostics = async () => {
     try {
-      await navigator.clipboard.writeText(diagnosticText(about.data, me.data));
+      await navigator.clipboard.writeText(withVersions(diagnosticText(about.data, me.data), about.data));
       setCopied(true);
       toast('Đã chép thông tin báo lỗi — dán vào tin nhắn gửi người hỗ trợ.');
     } catch {
@@ -55,6 +68,11 @@ export function HelpPage() {
             <div className="summary help-about">
               <span className="summary__k">phiên bản</span>
               <span className="summary__v mono">{about.data.version ?? 'bản phát triển'}</span>
+              {/* v0.1.36 (F-46): ảnh đang chạy và genh có thể lệch nhau — hiện cả hai. */}
+              <span className="summary__k">Phiên bản ảnh</span>
+              <span className="summary__v mono" data-testid="about-image-version">{about.data.image_version || '—'}</span>
+              <span className="summary__k">genh</span>
+              <span className="summary__v mono">{about.data.genh_version ?? '—'}</span>
               <span className="summary__k">tổ chức</span>
               <span className="summary__v">{about.data.org_name}</span>
               <span className="summary__k">múi giờ</span>

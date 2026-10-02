@@ -801,24 +801,23 @@ test.describe('giai đoạn 4.5/4.6: Điều khiển hệ thống', () => {
       expect(download.suggestedFilename()).toMatch(/^nhat-ky-.*\.csv$/);
     });
 
-    test('Dữ liệu & lưu trữ: sửa hạn lưu, rồi xuất và xoá dữ liệu một người (cần PIN, ghi nhật ký)', async ({ page }) => {
+    test('Dữ liệu & lưu trữ: hạn lưu chưa sửa được (chưa tự xoá), xuất và xoá dữ liệu một người (cần PIN, ghi nhật ký)', async ({ page }) => {
       await page.goto('/system?tab=storage');
       await expect(page.getByText('Hạn lưu dữ liệu')).toBeVisible();
 
+      // v0.1.36 (F-2 tạm): hệ thống chưa tự xoá theo hạn lưu — nút "Sửa" khoá kèm lý do (job thật ở bản sau).
       const rawRow = page.locator('tr', { has: page.getByText('Kho thô') });
-      await rawRow.getByRole('button', { name: 'Sửa' }).click();
-      await rawRow.getByLabel(/Giữ trong \(ngày\)/).fill('180');
-      await rawRow.getByRole('button', { name: 'Lưu' }).click();
-      await enterOwnerPin(page);
-      await expect(rawRow.getByText('180 ngày')).toBeVisible();
+      await expect(rawRow.getByRole('button', { name: 'Sửa' })).toBeDisabled();
+      await expect(page.getByText('Chưa tự xoá — sẽ áp dụng ở bản sau')).toBeVisible();
 
       await page.getByLabel('Tìm người (tên hoặc mã)').fill('Bảo');
       await page.getByLabel('Người', { exact: true }).selectOption('p-bao');
       await page.getByRole('button', { name: 'Xuất dữ liệu' }).click();
-      // Phiên PIN vừa mở ở lượt sửa hạn lưu vẫn còn hiệu lực — không hỏi PIN lại lần này.
+      await enterOwnerPin(page);
       await expect(page.getByText('Đã tạo gói xuất dữ liệu')).toBeVisible();
       await expect(page.getByText('Xuất dữ liệu').last()).toBeVisible(); // dòng lịch sử vừa ghi
 
+      // Phiên PIN vừa mở ở lượt xuất vẫn còn hiệu lực — không hỏi PIN lại lần này.
       await page.getByRole('button', { name: 'Xoá dữ liệu' }).click();
       await expect(page.getByText('Đã xoá dữ liệu suy ra của người này')).toBeVisible();
     });

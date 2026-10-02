@@ -124,6 +124,7 @@ import {
   WarningOctagonIcon,
   FacebookLogoIcon,
   HandPalmIcon,
+  HardDrivesIcon,
   MonitorIcon,
   PauseIcon,
   SignInIcon,
@@ -449,6 +450,8 @@ export const ICONS: Record<string, PhosphorIcon> = {
   // v0.1.29 — Tài khoản mạng xã hội
   'facebook-logo': FacebookLogoIcon,
   'hand-palm': HandPalmIcon,
+  // v0.1.36 (F-6): chuông "disk.low".
+  'hard-drives': HardDrivesIcon,
   monitor: MonitorIcon,
   pause: PauseIcon,
   'sign-in': SignInIcon,
