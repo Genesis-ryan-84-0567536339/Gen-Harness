@@ -102,6 +102,8 @@ func run(args []string) int {
 		return runUninstall(args[1:])
 	case "export":
 		return runExport(args[1:])
+	case "offsite":
+		return runOffsite(args[1:])
 	case "import":
 		return runImport(args[1:])
 	case "version", "-v", "--version":
@@ -151,7 +153,8 @@ Lệnh vận hành (cờ chung mọi lệnh dưới đây: --port N, --install-d
                                           dừng api/worker, khôi phục, migrate, khởi động lại
                                           (lỗi → quay về bản an toàn; chưa nhận file host tuỳ ý)
   genh handle-requests                   (watcher gọi) làm yêu cầu Console để lại trong hộp thư
-                                          run/request: update.json → cập nhật, restore.json → khôi phục
+                                          run/request: update.json → cập nhật, restore.json → khôi phục,
+                                          offsite.json → bản sao ngoài máy (thứ tự update > restore > offsite)
   genh doctor [--out report.zip]         chẩn đoán runtime/cổng/chứng chỉ/dung lượng/đồng hồ/
                                           kết nối kênh, xuất báo cáo zip
   genh reset-setup [--yes]               sinh mã thiết lập mới (hỏi xác nhận trừ khi --yes)
@@ -161,7 +164,14 @@ Lệnh vận hành (cờ chung mọi lệnh dưới đây: --port N, --install-d
                                           (hết cảnh báo "Not secure"; genh update tự làm)
   genh stop                              dừng toàn bộ dịch vụ (giữ dữ liệu)
   genh start                             khởi động lại toàn bộ dịch vụ
-  genh uninstall [--keep-data] [--yes]   gỡ container/volume/lối tắt/PATH (hỏi xác nhận trừ --yes)
+  genh uninstall [--delete-data] [--yes] gỡ container/lối tắt/PATH/lịch — mặc định GIỮ dữ liệu
+                                          (volume Docker); --delete-data mới xoá dữ liệu (gõ
+                                          "XOÁ DỮ LIỆU" hoặc kèm --yes); --keep-data vẫn nhận
+  genh offsite set [--allow-same-disk] [--no-run] <thư mục>
+                                          chọn nơi lưu bản sao ngoài máy (ổ USB/NAS đã mount),
+                                          bật lịch mỗi Chủ nhật ~05:30 và xuất bản đầu tiên ngay
+  genh offsite run [--quiet]             xuất + kiểm đọc lại một bản sao ngoài máy (giữ 4 bản)
+  genh offsite status|disable            xem tình trạng / tắt lịch bản sao ngoài máy
   genh export --to <file>                xuất gói hồ sơ .ghbundle (hỏi mật khẩu ẩn 2 lần,
                                           hoặc biến GH_BUNDLE_PASSWORD cho script/test)
   genh import <file> [--yes]             nhập gói .ghbundle — GHI ĐÈ dữ liệu hiện tại (hỏi
@@ -988,9 +998,133 @@ func runHandleRequests(args []string) int {
 		return runUpdate(append(handleRequestUpdateArgs(*quiet), pass...))
 	case "restore":
 		return runRestore(append([]string{"--if-requested"}, pass...))
+	case "offsite":
+		return runOffsite(append(handleRequestOffsiteArgs(*quiet), pass...))
 	default:
 		return 0
 	}
+}
+
+// handleRequestOffsiteArgs: cờ runHandleRequests chuyển cho runOffsite khi
+// Console để lại run/request/offsite.json — lệnh con "run" + --if-requested:
+// việc thật (set|run|disable) đọc từ tệp yêu cầu, không từ dòng lệnh.
+func handleRequestOffsiteArgs(quiet bool) []string {
+	a := []string{"run", "--if-requested"}
+	if quiet {
+		a = append(a, "--quiet")
+	}
+	return a
+}
+
+// offsiteFlags là cờ của `genh offsite <lệnh con>` sau khi Parse.
+type offsiteFlags struct {
+	sub           string
+	port          int
+	installDir    string
+	allowSameDisk bool
+	noRun         bool
+	quiet         bool
+	ifRequested   bool
+	path          string
+}
+
+// parseOffsiteFlags phân tích `genh offsite set|run|status|disable [cờ…] [đường dẫn]`
+// — MỌI cờ đứng trước đối số vị trí (package flag dừng ở đối số không-cờ đầu tiên).
+func parseOffsiteFlags(args []string) (offsiteFlags, error) {
+	if len(args) == 0 {
+		return offsiteFlags{}, errors.New("thiếu lệnh con (set|run|status|disable)")
+	}
+	f := offsiteFlags{sub: args[0]}
+	fs, port, installDir := opsFlagSet("offsite " + args[0])
+	fs.SetOutput(io.Discard)
+	var allow, noRun, quiet, ifReq *bool
+	switch f.sub {
+	case "set":
+		allow = fs.Bool("allow-same-disk", false, "cho phép nơi lưu nằm CÙNG ổ với máy chủ (hỏng ổ là mất cả hai — chỉ CLI)")
+		noRun = fs.Bool("no-run", false, "chỉ lưu nơi lưu + bật lịch, chưa xuất bản sao ngay")
+		quiet = fs.Bool("quiet", false, "chỉ in dòng quan trọng")
+	case "run":
+		quiet = fs.Bool("quiet", false, "chỉ in dòng quan trọng (lịch tuần dùng cờ này)")
+		ifReq = fs.Bool("if-requested", false, "làm yêu cầu Console trong run/request/offsite.json (watcher gọi); không có thì thoát ngay")
+	case "status", "disable":
+	default:
+		return offsiteFlags{}, fmt.Errorf("lệnh con offsite không rõ %q (dùng set|run|status|disable)", f.sub)
+	}
+	if err := fs.Parse(args[1:]); err != nil {
+		return offsiteFlags{}, err
+	}
+	f.port, f.installDir = *port, *installDir
+	if allow != nil {
+		f.allowSameDisk, f.noRun = *allow, *noRun
+	}
+	if quiet != nil {
+		f.quiet = *quiet
+	}
+	if ifReq != nil {
+		f.ifRequested = *ifReq
+	}
+	if f.sub == "set" {
+		if fs.NArg() != 1 {
+			return offsiteFlags{}, errors.New("cách dùng: genh offsite set [--allow-same-disk] [--no-run] <thư mục trên ổ USB/NAS>")
+		}
+		f.path = fs.Arg(0)
+	} else if fs.NArg() != 0 {
+		return offsiteFlags{}, fmt.Errorf("genh offsite %s không nhận đối số %q (cờ phải đứng trước)", f.sub, fs.Arg(0))
+	}
+	return f, nil
+}
+
+// offsiteExitCode: mã thoát cho lỗi của `genh offsite`. Lịch tuần (--quiet) và
+// watcher (--if-requested) gặp khoá bận (GH-EB05) thoát 0 — tuần sau/lần bấm
+// sau thử lại; mọi lỗi khác (kể cả chưa thấy ổ USB/NAS) thoát 1.
+func offsiteExitCode(err error, f offsiteFlags) int {
+	if err == nil {
+		return 0
+	}
+	var oe *ops.OpError
+	if errors.As(err, &oe) && oe.Code == ops.ErrCodeOffsiteBusy && (f.quiet || f.ifRequested) {
+		return 0
+	}
+	return 1
+}
+
+// runOffsite: `genh offsite set|run|status|disable` (v0.1.40, F-12 — bản sao ngoài máy).
+func runOffsite(args []string) int {
+	f, err := parseOffsiteFlags(args)
+	if err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "genh: %v\n", err)
+		_, _ = fmt.Fprintln(os.Stderr, "cách dùng: genh offsite set [--allow-same-disk] [--no-run] <thư mục> | run [--quiet] | status | disable")
+		return 2
+	}
+	env, ok := resolveOpsEnv(f.port, f.installDir)
+	if !ok {
+		return 1
+	}
+	ctx, stop := signalContext()
+	defer stop()
+	deps := ops.OffsiteDeps{}
+	switch f.sub {
+	case "set":
+		if f.allowSameDisk {
+			_, _ = fmt.Fprintln(os.Stderr, "CẢNH BÁO: --allow-same-disk — "+ops.OffsiteSameDiskWarning+". Bạn tự quyết rủi ro này.")
+		}
+		err = ops.RunOffsiteSet(ctx, env, ops.OffsiteSetOptions{Path: f.path, AllowSameDisk: f.allowSameDisk, NoRun: f.noRun, Quiet: f.quiet}, deps, os.Stdout)
+	case "run":
+		if f.ifRequested {
+			_, err = ops.RunOffsiteRequest(ctx, env, deps, os.Stdout)
+		} else {
+			err = ops.RunOffsiteRun(ctx, env, ops.OffsiteRunOptions{Quiet: f.quiet}, deps, os.Stdout)
+		}
+	case "status":
+		err = ops.RunOffsiteStatus(ctx, env, deps, os.Stdout)
+	case "disable":
+		err = ops.RunOffsiteDisable(ctx, env, deps, os.Stdout)
+	}
+	if err != nil {
+		// Lịch tuần ghi stdout+stderr vào logs/offsite.log — báo lỗi đủ 3 dòng.
+		reportOpErr(err)
+	}
+	return offsiteExitCode(err, f)
 }
 
 // handleRequestUpdateArgs là cờ runHandleRequests chuyển cho runUpdate khi
@@ -1113,13 +1247,16 @@ func runStart(args []string) int {
 
 func runUninstall(args []string) int {
 	fs, port, installDir := opsFlagSet("uninstall")
-	keepData := fs.Bool("keep-data", false, "giữ lại dữ liệu (không xoá volume)")
+	// v0.1.40 (F-12): mặc định GIỮ dữ liệu; --delete-data mới xoá volume.
+	// --keep-data vẫn nhận (không làm gì thêm) cho script cũ.
+	keepData := fs.Bool("keep-data", false, "giữ lại dữ liệu (đã là mặc định từ v0.1.40 — vẫn nhận cho script cũ)")
+	deleteData := fs.Bool("delete-data", false, "XOÁ VĨNH VIỄN dữ liệu (volume Docker) — không có --yes thì phải gõ đúng \"XOÁ DỮ LIỆU\"")
 	// --yes: cần cho kịch bản không tương tác (CI e2e, script) — trước phiên
 	// này ops.UninstallOptions.AutoApprove chỉ dùng được từ test Go gọi thẳng
 	// RunUninstall, CLI không có cách bật (xem comment cũ ở
 	// internal/ops/uninstall.go). Đọc kỹ tài liệu (docs/handoff/05-installer.md
 	// mục "Lệnh vận hành") trước khi đổi mô tả cờ ở đó.
-	yes := fs.Bool("yes", false, "bỏ qua hỏi xác nhận (dùng cho script/CI không có TTY) — vẫn xoá dữ liệu như bình thường nếu không kèm --keep-data")
+	yes := fs.Bool("yes", false, "bỏ qua hỏi xác nhận (dùng cho script/CI không có TTY) — kèm --delete-data thì xoá dữ liệu không hỏi")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -1127,13 +1264,14 @@ func runUninstall(args []string) int {
 	if !ok {
 		return 1
 	}
-	opts := ops.UninstallOptions{KeepData: *keepData, AutoApprove: *yes}
+	opts := ops.UninstallOptions{KeepData: *keepData, DeleteData: *deleteData, AutoApprove: *yes}
 	if err := ops.RunUninstall(context.Background(), env, opts, nil, os.Stdin, os.Stdout); err != nil {
 		reportOpErr(err)
 		return 1
 	}
 	// Gỡ luôn lịch tự cập nhật hằng đêm + watcher "Cập nhật ngay" — không để lại
-	// dòng cron/unit systemd gọi một bản cài đã gỡ.
+	// dòng cron/unit systemd gọi một bản cài đã gỡ (lịch tuần bản sao ngoài máy
+	// do ops.RunUninstall gỡ).
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	deps := autoupdate.Deps{}
@@ -1311,7 +1449,7 @@ func publishHostInfo(installDir string, port int) {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
 		rp := autoupdate.RequestPaths{InstallDir: installDir, RequestDir: hostlink.RequestDirPath(installDir), RequestFile: hostlink.RequestPath(installDir),
-			RestoreFile: hostlink.RestoreRequestPath(installDir)}
+			RestoreFile: hostlink.RestoreRequestPath(installDir), OffsiteFile: hostlink.OffsiteRequestPath(installDir)}
 		if port != machine.DefaultPort {
 			rp.Port = port
 		}
@@ -1328,6 +1466,11 @@ func publishHostInfo(installDir string, port int) {
 		}
 		if u, err := autoupdate.EnsureRequestWatcher(ctx, deps, rp); err == nil {
 			updater = u
+		}
+		// v0.1.40: bản sao ngoài máy đang bật → ghi lại lịch tuần (idempotent) cho
+		// khớp bản genh này (máy cập nhật từ bản cũ). Chưa bật thì không làm gì.
+		if _, err := ops.RefreshOffsiteSchedule(ctx, &ops.Env{InstallDir: installDir, Port: port}, ops.OffsiteDeps{}); err != nil {
+			fmt.Fprintf(os.Stderr, "genh: cảnh báo — không làm mới được lịch sao lưu ra ổ ngoài: %v\n", err)
 		}
 		// v0.1.33: Console chỉ hứa "Tự cài đêm …" khi lịch đêm thật sự đang bật.
 		if st, err := autoupdate.GetStatus(ctx, deps); err == nil {

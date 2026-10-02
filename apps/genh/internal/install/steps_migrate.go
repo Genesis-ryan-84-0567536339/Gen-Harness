@@ -3,6 +3,7 @@ package install
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base32"
 	"encoding/base64"
 	"fmt"
 	"os"
@@ -246,6 +247,11 @@ func ensureComposeSecretFiles(composePath string, res secretgen.Result) error {
 			return err
 		}
 	}
+	// gh_offsite_key (v0.1.40, F-12): "Khoá khôi phục" — mật khẩu gói .ghbundle
+	// của bản sao ngoài máy, định dạng dễ gõ/in (xem generateOffsiteKey).
+	if err := ensureOffsiteKeyFile(filepath.Join(secretsDir, "gh_offsite_key")); err != nil {
+		return err
+	}
 	// Docker secret dạng file là bind mount GIỮ NGUYÊN quyền trên host: tệp
 	// 0600 thuộc user host thì tiến trình trong container (USER gh / node,
 	// uid khác) không đọc được → api/worker/bridge chết ngay lúc khởi động
@@ -255,7 +261,7 @@ func ensureComposeSecretFiles(composePath string, res secretgen.Result) error {
 	if err := os.Chmod(secretsDir, 0o700); err != nil {
 		return fmt.Errorf("đặt quyền %s: %w", secretsDir, err)
 	}
-	for _, name := range []string{"gh_master_key", "gh_bridge_key", "gh_browser_key"} {
+	for _, name := range []string{"gh_master_key", "gh_bridge_key", "gh_browser_key", "gh_offsite_key"} {
 		if err := os.Chmod(filepath.Join(secretsDir, name), secretFilePerm); err != nil {
 			return fmt.Errorf("đặt quyền %s: %w", name, err)
 		}
@@ -304,6 +310,37 @@ func ensureRandomSecretFile(path string) (string, error) {
 // nửa vời nếu tiến trình bị ngắt giữa chừng (cùng cách
 // secretgen.writeFileAtomic làm, viết riêng ở đây vì hàm đó không xuất ra
 // khỏi package secretgen).
+// ensureOffsiteKeyFile sinh secrets/gh_offsite_key nếu CHƯA có (không bao giờ
+// ghi đè — khoá cũ đang mã hoá các gói trên ổ USB/NAS của Owner).
+func ensureOffsiteKeyFile(path string) error {
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("kiểm tra %s: %w", path, err)
+	}
+	key, err := generateOffsiteKey()
+	if err != nil {
+		return fmt.Errorf("sinh khoá khôi phục %s: %w", filepath.Base(path), err)
+	}
+	return writeFileAtomicPerm(path, []byte(key), secretFilePerm)
+}
+
+// generateOffsiteKey: 6 nhóm × 5 ký tự base32 HOA (A–Z, 2–7) nối '-', 150 bit,
+// không xuống dòng — BẢN SAO y hệt ops.GenerateOffsiteKey (install không import
+// được ops: ops đã import install). Đổi một bên thì đổi cả bên kia.
+func generateOffsiteKey() (string, error) {
+	buf := make([]byte, 19)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	s := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(buf)[:30]
+	groups := make([]string, 0, 6)
+	for i := 0; i < 30; i += 5 {
+		groups = append(groups, s[i:i+5])
+	}
+	return strings.Join(groups, "-"), nil
+}
+
 func writeFileAtomicPerm(path string, data []byte, perm os.FileMode) error {
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, data, perm); err != nil {

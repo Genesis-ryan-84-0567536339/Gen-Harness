@@ -5,7 +5,7 @@
 // Run* ở đây, giữ main.go mỏng đúng pattern đã có với runInstall.
 package ops
 
-// Mã lỗi tra được (GH-E9xx) cho các lệnh vận hành — dải MỚI, không đụng
+// Mã lỗi tra được (GH-E9xx, GH-EAxx, GH-EBxx) cho các lệnh vận hành — dải MỚI, không đụng
 // 0xx/1xx/2xx/3xx/5xx/6xx/7xx/8xx đã dùng cho 8 Step cài đặt (xem
 // internal/install/errors.go). Đánh số theo lệnh, mỗi lệnh một dải 10 mã để
 // còn chỗ mở rộng.
@@ -78,6 +78,17 @@ const (
 	// A2x — genh reset-password / genh trust-ca.
 	ErrCodeResetPasswordFailed = "GH-EA20" // `python -m gh.auth.reset_owner` lỗi hoặc output không đọc được
 	ErrCodeTrustCAFailed       = "GH-EA21" // không trích/ghi được CA nội bộ của Caddy
+
+	// B0x — genh offsite (v0.1.40, F-12): bản sao ngoài máy (USB/NAS). HỢP ĐỒNG
+	// với apps/api (run/offsite-status.json "error_code") — giữ đúng mã.
+	ErrCodeOffsiteNotConfigured = "GH-EB00" // chưa chọn nơi lưu bản sao ngoài máy
+	ErrCodeOffsiteNotMounted    = "GH-EB01" // chưa thấy ổ USB/NAS (đích không có/không phải thư mục/cùng ổ với máy chủ)
+	ErrCodeOffsiteExportFailed  = "GH-EB02" // xuất gói .ghbundle lỗi
+	ErrCodeOffsiteVerifyFailed  = "GH-EB03" // gói vừa ghi không đọc lại được — CHƯA có bản sao ngoài máy
+	ErrCodeOffsiteWriteFailed   = "GH-EB04" // không ghi được vào đích (quyền/đầy)
+	ErrCodeOffsiteBusy          = "GH-EB05" // đang bận cập nhật/khôi phục (khoá loại trừ)
+	ErrCodeOffsiteNotRunning    = "GH-EB06" // dịch vụ (api) chưa chạy
+	ErrCodeOffsiteInvalidDest   = "GH-EB07" // đích không hợp lệ khi chọn (không tuyệt đối/không phải thư mục/nằm trong thư mục cài)
 )
 
 // OpError là lỗi có cấu trúc cho các lệnh vận hành, theo đúng tinh thần

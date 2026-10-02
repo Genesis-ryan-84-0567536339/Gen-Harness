@@ -33,7 +33,7 @@ func TestAutoUpdateEnabled(t *testing.T) {
 	}
 	info, err := ReadInfo(root)
 	if err != nil || info.AutoUpdateEnabled == nil || !*info.AutoUpdateEnabled || info.Version != "v0.1.33" ||
-		info.Updater != "systemd" || len(info.Requests) != 2 {
+		info.Updater != "systemd" || len(info.Requests) != len(Requests) {
 		t.Fatalf("SetAutoUpdate(true) = %+v, %v", info, err)
 	}
 	if err := SetAutoUpdate(root, "v9.9.9", false); err != nil {
@@ -94,8 +94,8 @@ func TestRestoreRequestRoundTrip(t *testing.T) {
 	if err := WriteInfo(root, "v0.1.20", "cron", nil); err != nil {
 		t.Fatal(err)
 	}
-	if info, _ := ReadInfo(root); len(info.Requests) != 2 || info.Requests[1] != "restore" {
-		t.Fatalf("genh.json phải báo watcher nhận cả update lẫn restore: %+v", info)
+	if info, _ := ReadInfo(root); len(info.Requests) != 3 || info.Requests[1] != "restore" || info.Requests[2] != "offsite" {
+		t.Fatalf("genh.json phải báo watcher nhận update, restore và offsite (v0.1.40): %+v", info)
 	}
 	if err := WriteInfo(root, "v0.1.20", "", nil); err != nil {
 		t.Fatal(err)

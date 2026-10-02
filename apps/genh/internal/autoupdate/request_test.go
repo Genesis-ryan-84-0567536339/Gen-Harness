@@ -93,6 +93,28 @@ func TestEnsureRequestWatcher_WindowsUnsupported(t *testing.T) {
 	}
 }
 
+// v0.1.40: watcher nhận cả yêu cầu bản sao ngoài máy (run/request/offsite.json).
+func TestRequestWatcher_OffsiteFile(t *testing.T) {
+	rp := testRP
+	rp.OffsiteFile = "/home/u/.gen-harness/run/request/offsite.json"
+	path := SystemdRequestPathUnit(rp.files()...)
+	mustContain(t, path, "PathExists="+rp.RequestFile)
+	mustContain(t, path, "PathExists="+rp.RestoreFile)
+	mustContain(t, path, "PathExists="+rp.OffsiteFile)
+	line := CrontabRequestLine("/g/genh", "/g/log", rp)
+	mustContain(t, line, "* * * * * { [ -f "+rp.RequestFile+" ] || [ -f "+rp.RestoreFile+" ] || [ -f "+rp.OffsiteFile+" ]; } && ")
+	mustContain(t, line, "handle-requests")
+
+	home := t.TempDir()
+	deps := Deps{Runner: newFakeRunner(), GenhPath: "/g/genh", LogFile: "/g/log", HomeDir: home, GOOS: "linux",
+		LookPath: func(string) (string, error) { return "/usr/bin/systemctl", nil }}
+	if got, err := EnsureRequestWatcher(context.Background(), deps, rp); err != nil || got != UpdaterSystemd {
+		t.Fatalf("EnsureRequestWatcher = %q, %v", got, err)
+	}
+	b, _ := os.ReadFile(filepath.Join(home, ".config", "systemd", "user", RequestTaskName+".path"))
+	mustContain(t, string(b), "PathExists="+rp.OffsiteFile)
+}
+
 func TestSystemdRequestServiceUnit_KillModeMixed(t *testing.T) {
 	unit := SystemdRequestServiceUnit("/g/genh", "/g/log", RequestPaths{InstallDir: "/r"})
 	mustContain(t, unit, "KillMode=mixed")
