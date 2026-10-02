@@ -11,7 +11,8 @@ cả chuông (core.notifications) lẫn dải "Cần Sếp xử lý" ở Tổng 
   nhật tốt.
 - `evaluate` + `watch_loop` (chạy trong api, `Settings.health_watch_seconds`): mỗi phút tính lại các sự cố theo dõi
   định kỳ (cập nhật lỗi trong 24 giờ, quá hạn sao lưu theo tần suất bước 11, bộ xử lý nền im, ổ đĩa sắp đầy, model
-  đang hết đăng nhập, bản sao ngoài máy cũ/lỗi — v0.1.40) và dọn dòng sự kiện cũ.
+  đang hết đăng nhập, bản sao ngoài máy cũ/lỗi — v0.1.40, chi phí AI hôm nay vượt trần — v0.1.41) và dọn dòng sự
+  kiện cũ.
 
 Hợp đồng Redis với worker (gh/worker.py ghi): `gh:cron:last:<tên hàm>` = JSON {"at": ISO UTC 'Z', "ok": bool,
 "ms": int} + tên hàm trong tập `gh:cron:names`; `gh:worker:heartbeat` = ISO UTC. Hàng lỗi: tập `gh:dlq:streams`
@@ -85,6 +86,10 @@ ACTIONS = {
     "offsite.failed": "Xem bản sao ngoài máy",
     # Do worker mở/đóng (key "job.timeout:<tên hàm>") — chỉ khai nhãn ở đây.
     "job.timeout": "Xem sức khoẻ",
+    # v0.1.41 (F-84): chi phí AI hôm nay vượt trần (`_eval_budget`).
+    "ai.budget_exceeded": "Xem chi phí AI",
+    # v0.1.41: việc nền không còn nguồn AI dùng được — do gói bản tin/nguồn nền mở/đóng, chỉ khai nhãn ở đây.
+    "ai.background_no_source": "Mở Bộ não AI",
 }
 #: Nhãn cho người KHÔNG phải Owner khi nút ở nhãn gốc chỉ Owner có (vd "Chọn nơi lưu" — Manager không có nút đó).
 NON_OWNER_ACTIONS = {
@@ -726,6 +731,30 @@ async def _eval_models(db: AsyncSession, org_id: uuid.UUID, redis: Any) -> None:
         await raise_model_expired(db, org_id, r.id, r.name, redis=redis)
 
 
+#: v0.1.41 (F-84): đích chuông "Chi phí AI hôm nay vượt trần" — thẻ chi phí AI ở Tổng quan › Sức khoẻ.
+AI_COST_LINK = "/overview?focus=ai-cost"
+
+
+async def _eval_budget(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: datetime) -> None:
+    """Trần chi phí AI mỗi ngày (gh/ai_cost.py). Có trần và tổng hôm nay (giờ VN) > trần ⇒ mở sự cố `ai.budget`;
+    fingerprint = ngày VN ⇒ mỗi ngày tối đa MỘT chuông (ngày hôm sau vẫn vượt ⇒ chuông mới). ≤ trần / bỏ trần ⇒ đóng."""
+    from gh import ai_cost
+
+    budget = await ai_cost.get_budget(db, org_id)
+    if budget is None:
+        await clear(db, org_id, "ai.budget")
+        return
+    day = ai_cost.today_vn(now)
+    total = (await ai_cost.day_cost(db, org_id, day))["total_vnd"]
+    if total <= budget:
+        await clear(db, org_id, "ai.budget")
+        return
+    await raise_once(db, org_id, key="ai.budget", kind="ai.budget_exceeded", severity="warn",
+                     fingerprint=day.isoformat(), title=f"Chi phí AI hôm nay vượt trần {ai_cost.fmt_vnd(budget)}",
+                     body=f"Đã dùng {ai_cost.fmt_vnd(total)}. Xem agent nào tốn nhiều ở Tổng quan › Sức khoẻ; "
+                          "đổi trần ở Bộ não AI.", link=AI_COST_LINK, redis=redis)
+
+
 async def _eval_events(db: AsyncSession, org_id: uuid.UUID) -> None:
     """Dọn dòng sự kiện cũ: kênh đã đăng nhập lại (hoặc không còn kênh loại đó dùng được — bị xoá, plugin cầu nối bị
     tắt) / model đã ổn (hoặc bị tắt, bị xoá) ⇒ đóng sự cố."""
@@ -771,6 +800,7 @@ async def evaluate(db: AsyncSession, redis: Any, org_id: uuid.UUID, *, now: date
         ("offsite", lambda: _eval_offsite(db, org_id, redis, now)),
         ("models", lambda: _eval_models(db, org_id, redis)),
         ("events", lambda: _eval_events(db, org_id)),
+        ("ai.budget", lambda: _eval_budget(db, org_id, redis, now)),
     )
     from gh import notifications
 

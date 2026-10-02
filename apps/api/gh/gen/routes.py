@@ -96,6 +96,35 @@ async def delete_conversation(cid: uuid.UUID, user: service.CurrentUser = Depend
     return Response(status_code=204)
 
 
+class FeedbackIn(BaseModel):
+    conversation_id: uuid.UUID
+    turn_id: uuid.UUID
+    rating: Literal["helpful", "not_helpful"]
+
+
+@router.put("/feedback")
+async def put_feedback(body: FeedbackIn, user: service.CurrentUser = Depends(gen_user),
+                       db: AsyncSession = DB) -> dict[str, Any]:
+    """v0.1.41 (F-84): "Hữu ích / Không hữu ích" cho một câu trả lời (hoặc Bản tin Gen) trong hội thoại của chính
+    mình — chấm lại thì đổi đánh giá. Số đo riêng tư ⇒ không ghi Nhật ký (như đánh dấu đã đọc thông báo)."""
+    if not await store.owned(db, user, body.conversation_id):
+        raise not_found("Hội thoại")
+    kind = await store.set_feedback(db, user, body.conversation_id, body.turn_id, body.rating)
+    if kind is None:
+        raise not_found("Câu trả lời")
+    actionlog.exempt()
+    return {"turn_id": str(body.turn_id), "rating": body.rating, "kind": kind}
+
+
+@router.delete("/feedback/{turn_id}", status_code=204)
+async def delete_feedback(turn_id: uuid.UUID, user: service.CurrentUser = Depends(gen_user),
+                          db: AsyncSession = DB) -> Response:
+    """Bỏ chấm (chỉ đánh giá của chính mình)."""
+    await store.delete_feedback(db, user, turn_id)
+    actionlog.exempt()
+    return Response(status_code=204)
+
+
 class TurnContextIn(BaseModel):
     route: str = Field(default="/", max_length=300)
     screen_key: str | None = Field(default=None, max_length=40)

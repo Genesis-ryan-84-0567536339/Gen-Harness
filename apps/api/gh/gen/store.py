@@ -39,7 +39,8 @@ def available(cfg: dict[str, Any], user: service.CurrentUser) -> bool:
 
 def _conv(r: Any) -> dict[str, Any]:
     return {"id": str(r.id), "title": r.title, "created_at": r.created_at.isoformat().replace("+00:00", "Z"),
-            "last_at": r.last_at.isoformat().replace("+00:00", "Z")}
+            "last_at": r.last_at.isoformat().replace("+00:00", "Z"),
+            "kind": "briefing" if getattr(r, "is_briefing", False) else "chat"}
 
 
 async def create_conversation(db: AsyncSession, user: service.CurrentUser, title: str) -> uuid.UUID:
@@ -57,8 +58,14 @@ async def owned(db: AsyncSession, user: service.CurrentUser, cid: uuid.UUID) -> 
 
 
 async def list_conversations(db: AsyncSession, user: service.CurrentUser, limit: int = 30) -> list[dict[str, Any]]:
-    rows = (await db.execute(text("""SELECT id, title, created_at, last_at FROM agent.gen_conversations
-                                     WHERE org_id = :o AND user_id = :u ORDER BY last_at DESC LIMIT :l"""),
+    """v0.1.41 (F-84): mỗi mục có "kind" = 'briefing' nếu hội thoại có tin Bản tin Gen (content kind='briefing'),
+    ngược lại 'chat' — danh sách "Hội thoại cũ" gắn nhãn."""
+    rows = (await db.execute(text("""
+        SELECT c.id, c.title, c.created_at, c.last_at,
+               EXISTS (SELECT 1 FROM agent.gen_messages gm
+                       WHERE gm.conversation_id = c.id AND gm.content->>'kind' = 'briefing') AS is_briefing
+        FROM agent.gen_conversations c
+        WHERE c.org_id = :o AND c.user_id = :u ORDER BY c.last_at DESC LIMIT :l"""),
                              {"o": user.org_id, "u": user.id, "l": limit})).all()
     return [_conv(r) for r in rows]
 
@@ -73,14 +80,49 @@ async def add_message(db: AsyncSession, org_id: uuid.UUID, cid: uuid.UUID, role:
 
 async def list_messages(db: AsyncSession, cid: uuid.UUID, limit: int = 200,
                         before: datetime | None = None) -> list[dict[str, Any]]:
-    """`limit` tin MỚI NHẤT (cũ → mới). `before` = mốc created_at để lấy trang cũ hơn."""
-    rows = (await db.execute(text("""SELECT id, turn_id, role, content, created_at FROM agent.gen_messages
-                                     WHERE conversation_id = :c AND (CAST(:b AS timestamptz) IS NULL OR created_at < :b)
-                                     ORDER BY created_at DESC, id DESC LIMIT :l"""),
+    """`limit` tin MỚI NHẤT (cũ → mới). `before` = mốc created_at để lấy trang cũ hơn.
+
+    v0.1.41 (F-84): mỗi tin có "feedback" = 'helpful' | 'not_helpful' | None (đánh giá của chủ hội thoại cho câu trả
+    lời — chỉ chủ hội thoại chấm được nên mỗi lượt có tối đa một dòng)."""
+    rows = (await db.execute(text("""
+        SELECT m.id, m.turn_id, m.role, m.content, m.created_at, f.rating AS feedback
+        FROM agent.gen_messages m
+        LEFT JOIN agent.gen_feedback f ON f.conversation_id = m.conversation_id AND f.turn_id = m.turn_id
+                                       AND m.role = 'assistant'
+        WHERE m.conversation_id = :c AND (CAST(:b AS timestamptz) IS NULL OR m.created_at < :b)
+        ORDER BY m.created_at DESC, m.id DESC LIMIT :l"""),
                              {"c": cid, "l": limit, "b": before})).all()
     return [{"id": str(r.id), "turn_id": str(r.turn_id) if r.turn_id else None, "role": r.role,
-             "content": r.content, "created_at": r.created_at.isoformat().replace("+00:00", "Z")}
+             "content": r.content, "created_at": r.created_at.isoformat().replace("+00:00", "Z"),
+             "feedback": r.feedback}
             for r in reversed(rows)]
+
+
+async def set_feedback(db: AsyncSession, user: service.CurrentUser, cid: uuid.UUID, turn_id: uuid.UUID,
+                       rating: str) -> str | None:
+    """v0.1.41 (F-84): lưu/đổi đánh giá "Hữu ích / Không hữu ích" cho câu trả lời `turn_id` của hội thoại `cid` (bên
+    gọi đã kiểm chủ hội thoại). Không có tin trả lời của lượt đó ⇒ None.
+    Trả kind: 'briefing' (Bản tin Gen) | 'reply'."""
+    r = (await db.execute(text("""
+        SELECT count(*) AS n, COALESCE(bool_or(content->>'kind' = 'briefing'), false) AS briefing
+        FROM agent.gen_messages WHERE conversation_id = :c AND turn_id = :t AND role = 'assistant'"""),
+                          {"c": cid, "t": turn_id})).one()
+    if not r.n:
+        return None
+    kind = "briefing" if r.briefing else "reply"
+    await db.execute(text("""
+        INSERT INTO agent.gen_feedback (org_id, user_id, conversation_id, turn_id, kind, rating)
+        VALUES (:o, :u, :c, :t, :k, :r)
+        ON CONFLICT (user_id, turn_id) DO UPDATE SET rating = EXCLUDED.rating, kind = EXCLUDED.kind,
+               conversation_id = EXCLUDED.conversation_id, updated_at = now()"""),
+                     {"o": user.org_id, "u": user.id, "c": cid, "t": turn_id, "k": kind, "r": rating})
+    return kind
+
+
+async def delete_feedback(db: AsyncSession, user: service.CurrentUser, turn_id: uuid.UUID) -> None:
+    """Bỏ chấm — chỉ xoá đánh giá của chính người dùng."""
+    await db.execute(text("DELETE FROM agent.gen_feedback WHERE org_id = :o AND user_id = :u AND turn_id = :t"),
+                     {"o": user.org_id, "u": user.id, "t": turn_id})
 
 
 async def update_proposal_step(db: AsyncSession, cid: uuid.UUID, turn_id: uuid.UUID, pid: str,
@@ -108,7 +150,8 @@ async def delete_conversation(db: AsyncSession, cid: uuid.UUID) -> None:
 
 
 async def purge_expired(db: AsyncSession) -> int:
-    """Xoá hội thoại có tin cuối cũ hơn hạn lưu của tổ chức (mặc định 90 ngày) — tin nhắn xoá theo (CASCADE)."""
+    """Xoá hội thoại có tin cuối cũ hơn hạn lưu của tổ chức (mặc định 90 ngày) — tin nhắn và đánh giá Hữu ích
+    (agent.gen_feedback, v0.1.41) xoá theo (CASCADE)."""
     total = 0
     for org_id in (await db.execute(text("SELECT id FROM core.organizations"))).scalars().all():
         days = int((await get_settings(db, org_id))["retention_days"])
