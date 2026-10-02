@@ -766,6 +766,26 @@ async def create_document(body: DocumentIn, user: service.CurrentUser = Depends(
     return await get_document(row.id, user, db)
 
 
+# F-5: chỉ các định dạng không chạy được mã mới hiển thị inline; còn lại (html, svg, xml, js, text…) buộc tải
+# xuống dạng octet-stream. Thi hành lúc PHỤC VỤ để cả dòng cũ (mime tuỳ ý đã lưu) cũng an toàn.
+INLINE_SAFE_MIME = frozenset({"application/pdf", "image/png", "image/jpeg", "image/webp", "image/gif"})
+
+
+def _content_headers(mime: str | None, title: str) -> tuple[str, dict[str, str]]:
+    m = (mime or "").split(";")[0].strip().lower()
+    inline = m in INLINE_SAFE_MIME
+    # Header HTTP chỉ nhận latin-1 — tên tài liệu tiếng Việt phải mã hoá theo RFC 5987 (filename*=UTF-8''…).
+    filename = urllib.parse.quote(title)
+    disposition = "inline" if inline else "attachment"
+    return (m if inline else "application/octet-stream"), {
+        "Content-Disposition": f"{disposition}; filename*=UTF-8''{filename}",
+        "Content-Security-Policy": "sandbox; default-src 'none'",
+        "X-Content-Type-Options": "nosniff",
+        "Cross-Origin-Resource-Policy": "same-origin",
+        "Cache-Control": "private, no-store",
+    }
+
+
 @router.get("/documents/{document_id}/content")
 async def download_document(document_id: uuid.UUID, user: service.CurrentUser = Depends(READ),
                             db: AsyncSession = DB) -> Response:
@@ -778,10 +798,8 @@ async def download_document(document_id: uuid.UUID, user: service.CurrentUser = 
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                            action="document.downloaded", target_type="document", target_id=str(document_id),
                            target_label=r.title, result="ok", ip=user.ip)
-    # Header HTTP chỉ nhận latin-1 — tên tài liệu tiếng Việt phải mã hoá theo RFC 5987 (filename*=UTF-8''…).
-    filename = urllib.parse.quote(r.title)
-    return Response(content=data, media_type=r.mime,
-                    headers={"Content-Disposition": f"inline; filename*=UTF-8''{filename}"})
+    media_type, headers = _content_headers(r.mime, r.title)
+    return Response(content=data, media_type=media_type, headers=headers)
 
 
 class DocumentPatch(BaseModel):

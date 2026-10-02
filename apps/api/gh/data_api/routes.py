@@ -706,8 +706,10 @@ async def notebook_payload(db: AsyncSession, org_id: uuid.UUID, type_: str, sid:
             "compaction_no": nb.compaction_no, "last_compacted_at": iso(nb.last_compacted_at), "sections": sections}
 
 
-NB_READ = require("profile.read")
-NB_WRITE = require("profile.write")
+# F-15: /notebooks chỉ màn Kho sạch dùng và KHÔNG lọc theo phạm vi → khoá theo quyền Kho (data.read /
+# data.manage) như phần còn lại của router. Sổ tay có phạm vi cho từng người/nhóm là /notebook của relations.
+NB_READ = READ
+NB_WRITE = MANAGE
 
 
 @router.get("/notebooks/{type_}/{sid}")
