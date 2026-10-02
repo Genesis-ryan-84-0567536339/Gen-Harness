@@ -1,6 +1,10 @@
 """CLI giả mô phỏng Antigravity CLI 1.2.9 đo thật trên pty (test_cli_login.py):
 hỏi terminal (DA) và CHỜ trả lời trước khi vẽ; link dài bị ngắt dòng, bản đầy đủ nằm trong hyperlink OSC 8;
-đọc mã xác thực rồi ghi tệp phiên."""
+đọc mã xác thực rồi ghi tệp phiên.
+
+v0.1.38 (F-22): không có -p/--print/--prompt mà stdin không phải tty → print mode như agy 1.2.9 thật: đọc prompt từ
+stdin, nhận `--model x` lẫn `--model=x`, `--effort=x`, bỏ qua `--disable-slash-commands`; ghi $HOME/agy-calls.log
+(`cwd`, `via_stdin`, `argv`)."""
 
 import base64
 import json
@@ -28,6 +32,38 @@ def read_until(pred, timeout: float) -> bytes:
     return data
 
 
+def print_mode(argv: list[str]) -> None:
+    opts = {"-p": None, "--print": None, "--prompt": None, "--model": "", "--effort": ""}
+    i = 0
+    while i < len(argv):
+        name, eq, val = argv[i].partition("=")
+        if name in opts or name in ("--output-format", "--print-timeout"):
+            if not eq:
+                i += 1
+                val = argv[i] if i < len(argv) else ""
+            opts[name] = val
+        elif argv[i] != "--disable-slash-commands" and argv[i].startswith("-"):
+            print(f"flag provided but not defined: {name}", file=sys.stderr)
+            sys.exit(2)
+        i += 1
+    prompt = opts["-p"] or opts["--print"] or opts["--prompt"]
+    via_stdin = prompt is None
+    if via_stdin:
+        if os.isatty(0):
+            return
+        prompt = sys.stdin.read()
+    with (Path(os.environ["HOME"]) / "agy-calls.log").open("a") as fh:
+        fh.write(json.dumps({"model": opts["--model"], "effort": opts["--effort"], "cwd": os.getcwd(),
+                             "via_stdin": via_stdin, "prompt_len": len(prompt or ""), "argv": argv}) + "\n")
+    token = Path(os.environ["HOME"]) / ".gemini" / "antigravity-cli" / "antigravity-oauth-token"
+    if not token.exists():
+        print(json.dumps({"status": "ERROR", "error": "authentication failed or timed out"}))
+        sys.exit(1)
+    print(json.dumps({"response": "ok", "usage": {"input_tokens": 1, "output_tokens": 1}}))
+    sys.exit(0)
+
+
+print_mode(sys.argv[1:])
 tty.setraw(0)
 out("\x1b[>c\x1b_Ga=q,f=32,s=1,v=1,i=31;AAAAAA==\x1b\\\x1b[c")
 read_until(lambda d: b"c" in d and b"\x1b[?" in d, 5)

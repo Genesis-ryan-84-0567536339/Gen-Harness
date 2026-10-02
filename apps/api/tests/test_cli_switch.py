@@ -59,12 +59,13 @@ async def _login(api: Any, name: str) -> dict[str, Any]:
 
 
 async def _whoami(home: Path) -> str:
-    """Một lượt gọi model như worker (AgyClient `agy -p`), với CLI giả trả về email của tệp phiên đang dùng."""
+    """Một lượt gọi model như worker (AgyClient, prompt qua stdin), với CLI giả trả về email của tệp phiên đang dùng."""
     c = AgyClient(sys.executable, str(home))
     orig = c._run
 
-    async def run(*args: str) -> tuple[int, bytes, bytes]:
-        return await orig(str(FAKE), *args)
+    async def run(*args: str, stdin: bytes | None = None) -> tuple[int, bytes, bytes]:
+        # v0.1.38 (F-22): AgyClient gửi prompt qua stdin — chuyển tiếp stdin cho CLI giả.
+        return await orig(str(FAKE), *args, stdin=stdin)
 
     c._run = run  # type: ignore[method-assign]
     out = await c.generate("gemini-2.5-pro", [Message("user", "hi")], json_mode=False, temperature=0)

@@ -27,8 +27,10 @@ SQL = Path(__file__).resolve().parents[3] / "db" / "sql" / "0023_v0132_model_eff
 
 
 def _calls(clis: dict[str, Any]) -> list[dict[str, str]]:
+    # v0.1.38 (F-22): CLI giả ghi thêm cwd/via_stdin/argv mỗi lượt — test này chỉ so model + mức suy nghĩ.
     log = Path(clis["agy_home"]).parent.parent / "agy-calls.log"
-    return [json.loads(x) for x in log.read_text().splitlines()] if log.exists() else []
+    rows = [json.loads(x) for x in log.read_text().splitlines()] if log.exists() else []
+    return [{"model": r["model"], "effort": r["effort"]} for r in rows]
 
 
 # ─── dữ liệu model: nguồn + tách biến thể ───────────────────────────────────
@@ -112,10 +114,11 @@ def test_redact_hides_tokens_links_and_emails() -> None:
 async def test_agy_invocation_splits_legacy_variant_name(owner_api, clis) -> None:  # type: ignore[no-untyped-def]
     await _login(owner_api, "antigravity_cli", "4/an")
     c = AgyClient(clis["agy"], str(clis["agy_home"]), timeout=30)
-    assert c.model_args("gemini-3.8-flash-high") == ["--model", "gemini-3.8-flash", "--effort", "high"]
-    assert c.model_args("gemini-3.1-pro") == ["--model", "gemini-3.1-pro"]          # không mức → CLI tự chọn
-    assert c.model_args("gemini-3.1-pro", "low") == ["--model", "gemini-3.1-pro", "--effort", "low"]
-    assert c.model_args("gemini-3.1-pro", "--x") == ["--model", "gemini-3.1-pro"]   # mức lạ không bao giờ lên argv
+    # v0.1.38 (F-22): dạng `--model=<gốc>` / `--effort=<mức>` — tên không bao giờ bị hiểu thành một cờ.
+    assert c.model_args("gemini-3.8-flash-high") == ["--model=gemini-3.8-flash", "--effort=high"]
+    assert c.model_args("gemini-3.1-pro") == ["--model=gemini-3.1-pro"]          # không mức → CLI tự chọn
+    assert c.model_args("gemini-3.1-pro", "low") == ["--model=gemini-3.1-pro", "--effort=low"]
+    assert c.model_args("gemini-3.1-pro", "--x") == ["--model=gemini-3.1-pro"]   # mức lạ không bao giờ lên argv
     out = await c.generate("gemini-3.8-flash-high", [Message("user", "hi")], json_mode=False, temperature=0)
     assert out.text == "whoami:an@example.vn"
     assert _calls(clis)[-1] == {"model": "gemini-3.8-flash", "effort": "high"}
@@ -166,8 +169,9 @@ async def test_choose_model_and_effort_validated_with_real_flags(owner_api, app,
         await db.execute(text("UPDATE agent.providers SET is_enabled = (kind = 'antigravity_cli') WHERE org_id = :o"),
                          {"o": org})
         await db.commit()
-    await app.state.model_router.generate(org, agent_key="core.refinery", purpose="test",
-                                          messages=[Message("user", "hi")], json_mode=False)
+    # v0.1.38 (F-22): Antigravity CLI chỉ cho Gen của Sếp — gọi như lượt Gen của Owner (core.gen, allow_agy=True).
+    await app.state.model_router.generate(org, agent_key="core.gen", purpose="test",
+                                          messages=[Message("user", "hi")], json_mode=False, allow_agy=True)
     assert _calls(clis)[-1] == {"model": "gemini-3.1-pro", "effort": "low"}
 
 
@@ -256,11 +260,13 @@ async def test_diagnose_returns_redacted_raw_output(owner_api, clis) -> None:  #
     assert d["steps"][0]["stdout"].strip() == "1.2.9" and d["steps"][0]["exit_code"] == 0
     assert "gemini-3.8-flash-high" in d["steps"][1]["stdout"]
     # agy -p "/model", "/effort": bản ghi tab-separated, không tốn lượt (changelog agy 1.1.11).
-    assert d["steps"][2]["command"] == "agy -p /model" and "gemini-3.1-pro\tlow,high" in d["steps"][2]["stdout"]
-    assert d["steps"][3]["command"].startswith("agy -p /effort --model gemini-3.8-flash")
+    # v0.1.38 (F-22): `-p=/model` (dạng `=`: `-p` không nuốt cờ kế tiếp), `--model=<gốc>`.
+    assert d["steps"][2]["command"] == "agy -p=/model" and "gemini-3.1-pro\tlow,high" in d["steps"][2]["stdout"]
+    assert d["steps"][3]["command"].startswith("agy -p=/effort --model=gemini-3.8-flash")
     assert "high\tcurrent" in d["steps"][3]["stdout"]
     call = d["steps"][4]
-    assert call["exit_code"] == 0 and "--model gemini-3.8-flash" in call["command"]
+    assert call["exit_code"] == 0 and "--model=gemini-3.8-flash" in call["command"]
+    assert "--disable-slash-commands" in call["command"] and "(stdin:" in call["command"]   # prompt qua stdin
     assert "a***@example.vn" in call["stdout"] and "an@example.vn" not in call["stdout"]
 
 

@@ -28,7 +28,8 @@ const readyPath = "/api/v1/ready"
 // đầu compose.yaml) trừ khi ghi đè bằng "name:" trên từng volume (không
 // dùng ở đây) — nên lọc theo CHỨA (Contains) tên khai, không so khớp tuyệt
 // đối, để không phụ thuộc tiền tố project chính xác.
-var volumeBaseNames = []string{"caddy_data", "pg_data", "redis_data", "gh_objects", "agy_state"}
+// F-22 (v0.1.38): claude_state — phiên Claude Code tách khỏi agy_state.
+var volumeBaseNames = []string{"caddy_data", "pg_data", "redis_data", "gh_objects", "agy_state", "claude_state"}
 
 // StatusDeps cho phép tiêm dockercli.Runner/http.Client giả khi test — các
 // trường nil dùng cài đặt thật (ExecRunner, client TLS bỏ qua xác thực CA

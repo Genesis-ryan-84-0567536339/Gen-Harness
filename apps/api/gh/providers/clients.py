@@ -8,6 +8,8 @@ import asyncio
 import contextlib
 import os
 import re
+import shutil
+import signal
 import tempfile
 import time
 from dataclasses import dataclass, field
@@ -291,41 +293,91 @@ def cli_env(cli_home: str) -> dict[str, str]:
             "GEMINI_FORCE_FILE_STORAGE": "true", "LANG": "C.UTF-8"}
 
 
+# v0.1.38 (F-22): tên model cho `--model=<tên>` — chỉ chữ, số và . _ : - (không khoảng trắng, tối đa 80 ký tự); ký tự
+# đầu phải là chữ/số để tên kiểu cờ ("--dangerously-skip-permissions") cũng bị chặn.
+AGY_MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$")
+
+
 class AgyClient:
-    """Gọi `agy -p` (chế độ headless chính thức) với tệp phiên của hồ sơ đang hoạt động."""
+    """Gọi Antigravity CLI (`agy`, chế độ in/headless chính thức) với tệp phiên của hồ sơ đang hoạt động.
+
+    v0.1.38 (F-22) — cờ đã đo trên `agy --help` 1.2.9 (HOME tạm, chưa đăng nhập): KHÔNG có cờ tắt công cụ (đọc tệp,
+    chạy lệnh, mở URL); có `--sandbox`, `--mode accept-edits|plan`, `--dangerously-skip-permissions` (CẤM dùng),
+    `--disable-slash-commands` ("Disable slash command and skill expansion in print mode"), `--input-format
+    stream-json`, `--print-timeout`, `--log-file`, `--agent`, `--add-dir`. Prompt qua stdin ĐƯỢC hỗ trợ: stdin là ống
+    và không có `-p` → print mode (log agy: `Print mode: starting (promptLength=N, …)`) → prompt không lộ trên
+    /proc/*/cmdline, không bị hiểu thành cờ, không vướng MAX_ARG_STRLEN. `-p` không gắn giá trị nuốt cờ kế tiếp làm
+    prompt → slash command cố định viết `-p=/model`.
+
+    Cô lập mỗi lượt: cwd = thư mục mới rỗng 0700 (`gh-agy-*`, xoá sau lượt — kể cả hết giờ/huỷ), env sạch
+    (`cli_env`: không biến GH_*, không khoá), `--model=<tên>` qua AGY_MODEL_RE. Changelog agy nói đọc tệp TRONG
+    workspace được tự cho phép, ngoài workspace phải xin phép (bị từ chối trong print mode) — CHƯA kiểm được khi đã
+    đăng nhập → không dựa vào đó: LUẬT CỨNG ở gh.providers.router (AGY_OWNER_ONLY_REASON) — agy chỉ cho Gen của Sếp.
+    agy chạy cùng uid với api/worker nên các lớp cô lập ở đây chỉ là phòng thủ thêm."""
 
     kind = "antigravity_cli"
-    MAX_PROMPT = 120_000   # giới hạn một đối số dòng lệnh (MAX_ARG_STRLEN 128 KiB)
+    MAX_PROMPT = 120_000   # giữ giới hạn cũ (prompt qua stdin từ v0.1.38, không còn vướng MAX_ARG_STRLEN)
 
     def __init__(self, binary: str, cli_home: str, effort: str | None = None, timeout: float = 300.0):
         # `effort` = mức mặc định khi model không có mức riêng; None = để CLI tự chọn (không gửi --effort).
         self.binary, self.cli_home, self.effort, self.timeout = binary, cli_home, effort, timeout
         self.last_models_raw: str | None = None
 
-    async def _run(self, *args: str) -> tuple[int, bytes, bytes]:
+    @staticmethod
+    def _workdir() -> str:
+        """Thư mục làm việc riêng mỗi lượt: mkdtemp (0700) dưới thư mục tạm của hệ thống — không nằm trong HOME của
+        agy hay GH_CLAUDE_HOME, rỗng → công cụ đọc tệp "trong workspace" của agy không thấy gì."""
+        d = tempfile.mkdtemp(prefix="gh-agy-")
+        if os.stat(d).st_mode & 0o777 != 0o700:
+            os.chmod(d, 0o700)
+        return d
+
+    async def _run(self, *args: str, stdin: bytes | None = None) -> tuple[int, bytes, bytes]:
+        work = self._workdir()
         try:
-            proc = await asyncio.create_subprocess_exec(
-                self.binary, *args, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE, env=cli_env(self.cli_home))
-        except FileNotFoundError as e:
-            raise AuthFailed("Chưa cài Antigravity CLI trong worker") from e
-        try:
-            out, err = await asyncio.wait_for(proc.communicate(), self.timeout)
-        except (TimeoutError, asyncio.CancelledError):
-            with contextlib.suppress(ProcessLookupError):
-                proc.kill()
-            await proc.wait()
-            raise
-        return proc.returncode or 0, out, err
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    self.binary, *args,
+                    stdin=asyncio.subprocess.PIPE if stdin is not None else asyncio.subprocess.DEVNULL,
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=cli_env(self.cli_home),
+                    cwd=work, start_new_session=True)
+            except FileNotFoundError as e:
+                raise AuthFailed("Chưa cài Antigravity CLI trong worker") from e
+            try:
+                out, err = await asyncio.wait_for(proc.communicate(stdin), self.timeout)
+            except (TimeoutError, asyncio.CancelledError):
+                self._kill_group(proc.pid)
+                await proc.wait()
+                raise
+            # Tiến trình con agy để lại (công cụ chạy lệnh chạy nền) không được sống quá lượt gọi.
+            # Rủi ro chấp nhận (review): lúc này agy chính đã được bộ theo dõi tiến trình con của asyncio thu hồi
+            # (không chặn được thứ tự). Còn tiến trình con ⇒ nhóm còn ⇒ Linux không cấp lại số pgid này cho tiến
+            # trình khác. Không còn ⇒ killpg chỉ trúng nhóm lạ nếu số PID quay vòng hết pid_max VÀ tiến trình mới đó
+            # tự lập nhóm đúng trong vài micro giây giữa hai dòng — thực tế không xảy ra; đổi lại không để sót tiến
+            # trình nền của agy.
+            self._kill_group(proc.pid)
+            return proc.returncode or 0, out, err
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+
+    @staticmethod
+    def _kill_group(pgid: int) -> None:
+        """Review F-22: agy chạy trong session/nhóm tiến trình riêng (`start_new_session`) ⇒ giết cả nhóm — gồm tiến
+        trình con agy sinh ra (công cụ chạy lệnh), không chỉ tiến trình agy chính."""
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(pgid, signal.SIGKILL)
 
     def model_args(self, model: str, effort: str | None = None) -> list[str]:
-        """`--model <model gốc> [--effort <mức>]` (v0.1.32). Tên biến thể cũ ("gemini-3.8-flash-high") được tách —
-        không bao giờ gửi biến thể làm `--model` (agy 1.2.9 từ chối: "invalid model selection")."""
+        """`--model=<model gốc> [--effort=<mức>]` (v0.1.32; dạng `=` từ v0.1.38). Tên biến thể cũ
+        ("gemini-3.8-flash-high") được tách — không bao giờ gửi biến thể làm `--model` (agy 1.2.9 từ chối: "invalid
+        model selection"). Tên gốc sai AGY_MODEL_RE → BadRequest, tiến trình KHÔNG được khởi chạy (F-22)."""
         from gh.providers.catalog import AGY_EFFORTS, split_variant
 
         base, var_effort = split_variant(self.kind, model)
+        if not AGY_MODEL_RE.fullmatch(base or ""):
+            raise BadRequest("Tên model không hợp lệ cho Antigravity CLI")
         eff = effort or var_effort or self.effort
-        return ["--model", base, *(["--effort", eff] if eff in AGY_EFFORTS else [])]
+        return [f"--model={base}", *([f"--effort={eff}"] if eff in AGY_EFFORTS else [])]
 
     async def generate(self, model: str, messages: list[Message], *, json_mode: bool, temperature: float,
                        effort: str | None = None) -> Completion:
@@ -339,9 +391,12 @@ class AgyClient:
                 # "hết hạn" — chuyển nhà cung cấp kế tiếp mà không đánh dấu CLI hết hạn.
                 raise ProviderError("CLI đang đăng nhập thêm tài khoản Google")
             raise AuthFailed("CLI chưa đăng nhập")
+        margs = self.model_args(model, effort)    # BadRequest trước khi khởi chạy tiến trình
         started = time.monotonic()
         try:
-            code, out, err = await self._run("-p", prompt, *self.model_args(model, effort), "--output-format", "json")
+            # F-22: prompt CHỈ qua stdin (stdin là ống, không -p → print mode của agy 1.2.9).
+            code, out, err = await self._run("--output-format", "json", "--disable-slash-commands", *margs,
+                                             stdin=prompt.encode())
         except TimeoutError as e:
             raise ProviderError(f"CLI quá {self.timeout:.0f}s") from e
         text = out.decode(errors="replace").strip()
@@ -390,29 +445,39 @@ class AgyClient:
         return parse_agy_models(out.decode(errors="replace"))
 
     async def diagnose(self, model: str | None, effort: str | None, prompt: str) -> list[dict[str, Any]]:
-        """Phiên bản, `agy models`, `agy -p /model`, `agy -p /effort`, một lượt gọi rất ngắn đúng cờ đang dùng — đầu ra
-        thô đã che (v0.1.32).
+        """Phiên bản, `agy models`, `agy -p=/model`, `agy -p=/effort`, một lượt gọi rất ngắn đúng cờ đang dùng (prompt
+        qua stdin như `generate`) — đầu ra thô đã che (v0.1.32).
 
-        `-p "/model"` / `-p "/effort"`: changelog trong tệp chạy agy 1.2.9 (1.1.11) — ở chế độ in, `/model`, `/effort`…
+        `-p=/model` / `-p=/effort` (chuỗi cố định; dạng `=` để `-p` không nuốt cờ kế tiếp): changelog trong tệp chạy
+        agy 1.2.9 (1.1.11) — ở chế độ in, `/model`, `/effort`…
         "emit one tab-separated record per line … without starting an agent turn, spending quota" → lấy được danh sách
         model / mức suy nghĩ THẬT của tài khoản đã đăng nhập mà không tốn lượt."""
         name = Path(self.binary).name
         steps = [await diag_step("Phiên bản", [name, "--version"], lambda: self._run("--version"), 20),
                  await diag_step("Danh sách model", [name, "models"], lambda: self._run("models"), 60)]
-        argv = ["-p", prompt, *(self.model_args(model, effort) if model else []), "--output-format", "json"]
-        model_argv = ["-p", "/model"]
-        effort_argv = ["-p", "/effort", *(self.model_args(model) if model else [])]
+        try:
+            margs, base_args = ((self.model_args(model, effort), self.model_args(model)) if model else ([], []))
+            skip = None
+        except BadRequest as e:      # tên model đã lưu sai AGY_MODEL_RE (bản cài cũ) — không chạy với tên đó
+            margs, base_args, skip = [], [], f"bỏ qua — {e}"
+        argv = ["--output-format", "json", "--disable-slash-commands", *margs]
+        model_argv = ["-p=/model"]
+        effort_argv = ["-p=/effort", *base_args]
+        shown = [name, *argv, "(stdin:", prompt + ")"]
         if not (cli_home_dir(self.cli_home) / TOKEN_FILE).exists():
-            # CLI chưa đăng nhập mà chạy -p sẽ in link đăng nhập rồi chờ 60 giây — không chạy.
+            # CLI chưa đăng nhập mà chạy print mode sẽ in link đăng nhập rồi chờ 60 giây — không chạy.
+            skip = "bỏ qua — CLI chưa đăng nhập"
+        if skip:
             for label, av in (("Model của tài khoản (/model)", model_argv),
-                              ("Mức suy nghĩ (/effort)", effort_argv), ("Gọi thử 1 lượt", argv)):
-                steps.append(_skipped(label, [name, *av], "bỏ qua — CLI chưa đăng nhập"))
+                              ("Mức suy nghĩ (/effort)", effort_argv)):
+                steps.append(_skipped(label, [name, *av], skip))
+            steps.append(_skipped("Gọi thử 1 lượt", shown, skip))
             return steps
         steps.append(await diag_step("Model của tài khoản (/model)", [name, *model_argv],
                                      lambda: self._run(*model_argv), 60))
         steps.append(await diag_step("Mức suy nghĩ (/effort)", [name, *effort_argv],
                                      lambda: self._run(*effort_argv), 60))
-        steps.append(await diag_step("Gọi thử 1 lượt", [name, *argv], lambda: self._run(*argv), 90))
+        steps.append(await diag_step("Gọi thử 1 lượt", shown, lambda: self._run(*argv, stdin=prompt.encode()), 90))
         return steps
 
     async def embed(self, model: str, texts: list[str]) -> list[list[float]]:

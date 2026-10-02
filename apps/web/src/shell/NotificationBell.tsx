@@ -22,6 +22,8 @@ const KIND_ICON: Record<string, string> = {
   'hub.token_expiring': 'ph ph-key',
   'social.read': 'ph ph-facebook-logo',
   'social.paused': 'ph ph-shield-warning',
+  // v0.1.38 (F-17): phiên mạng xã hội không mở được trên máy này — cần đăng nhập lại.
+  'social.needs_login': 'ph ph-sign-in',
   // v0.1.36 (F-6): sự cố sức khoẻ (khử trùng lặp ở API — mỗi sự cố một chuông tới khi hết).
   'channel.down': 'ph ph-plugs',
   'model.auth_expired': 'ph ph-brain',

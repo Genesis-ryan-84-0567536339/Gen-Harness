@@ -14,6 +14,7 @@ import type { AgentBinding } from './p4-agents';
 export interface AgentBindingSlot {
   agent_key: string;
   label: string;
+  /** v0.1.38 (F-22): lý do không dùng được nằm trong `binding.blocked_reason` (xem AgentBinding). */
   binding: AgentBinding | null;
 }
 

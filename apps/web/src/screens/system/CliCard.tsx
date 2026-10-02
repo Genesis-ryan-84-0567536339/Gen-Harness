@@ -172,6 +172,13 @@ export function CliCard({ canManage, showCredentials = true, kind = 'antigravity
         <div style={{ minWidth: 0 }}>
           <div className="gh-card__title">{txt.title}</div>
           <div className="gh-card__kicker">{txt.kicker}</div>
+          {txt.scope ? (
+            // v0.1.38 (F-22): luật cứng — Antigravity CLI chỉ dùng cho Gen của Sếp.
+            <div className="gh-card__kicker" role="note" data-testid="cli-scope" style={{ color: 'var(--color-warn)', display: 'flex', gap: 6, alignItems: 'flex-start' }}>
+              <Icon name="ph ph-shield-warning" size={13} color="var(--color-warn)" />
+              <span>{txt.scope}</span>
+            </div>
+          ) : null}
         </div>
         {profiles.data ? (
           <StateChip color={chip.tone} border={chip.tone === 'var(--color-neutral-400)' ? 'var(--color-neutral-800)' : chip.tone} size="md" dot>

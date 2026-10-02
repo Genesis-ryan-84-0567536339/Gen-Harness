@@ -1,8 +1,8 @@
 import type { CSSProperties, ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { ErrorState, Icon, Skeleton, cx } from '@gen-harness/ui';
-import { errorReasons, errorText, isModelUnavailable } from '../lib/errorText';
-import { MODEL_UNAVAILABLE_TEXT, friendlyError } from '../lib/friendlyError';
+import { errorReasons, errorText, isAgyOnlyUnavailable, isModelUnavailable } from '../lib/errorText';
+import { AGY_ONLY_TEXT, MODEL_UNAVAILABLE_TEXT, agyOnlyReasons, friendlyError, isAgyOnlyText } from '../lib/friendlyError';
 
 /** Mô tả chung: thao tác nhà cung cấp AI nào cần phiên PIN `ai.route_change` (v0.1.35, F-20). */
 export const PIN_ROUTE_CHANGE_TITLE = 'cần mã PIN 6 số (bật/tắt, thêm/sửa nhà cung cấp AI, khoá API, chuỗi ưu tiên)';
@@ -137,6 +137,7 @@ export function SkeletonLines({ rows = 4, padding = '14px 16px', gap = 12 }: { r
 }
 
 export function CardError({ error, onRetry, retrying }: { error: unknown; onRetry?: () => void; retrying?: boolean }) {
+  if (isAgyOnlyUnavailable(error)) return <ModelUnavailableNotice reasons={errorReasons(error)} message={errorText(error)} agyOnly />;
   if (isModelUnavailable(error)) return <ModelUnavailableNotice reasons={errorReasons(error)} />;
   return <ErrorState message={errorText(error)} onRetry={onRetry} retrying={retrying} />;
 }
@@ -145,13 +146,25 @@ export function CardError({ error, onRetry, retrying }: { error: unknown; onRetr
  * v0.1.30: "chưa có model AI hoạt động" — trạng thái tại chỗ có nút "Chọn model" (→ /guide/4, bước chọn model),
  * lý do kỹ thuật từng nhà cung cấp ẩn trong "Chi tiết kỹ thuật". Dùng thay cho việc vẽ lỗi thô.
  */
-export function ModelUnavailableNotice({ reasons, message, className }: { reasons?: string | string[] | null; message?: string; className?: string }) {
+export function ModelUnavailableNotice({
+  reasons,
+  message,
+  className,
+  agyOnly,
+}: {
+  reasons?: string | string[] | null;
+  message?: string;
+  className?: string;
+  /** v0.1.38 (F-22): chuỗi chỉ có Antigravity CLI — nút dẫn tới Agent & Model (/api), không về bước 4 (agy hiện "sẵn sàng"). */
+  agyOnly?: boolean;
+}) {
   const tech = Array.isArray(reasons) ? reasons.filter(Boolean).join('; ') : reasons;
+  const agy = agyOnly ?? (isAgyOnlyText(message) || agyOnlyReasons(Array.isArray(reasons) ? reasons : reasons ? [reasons] : null));
   return (
     <div className={cx('model-down', className)} role="status" data-testid="model-unavailable">
       <Icon name="ph ph-warning-circle" size={16} />
       <div className="model-down__body">
-        <div className="model-down__msg">{message || MODEL_UNAVAILABLE_TEXT}</div>
+        <div className="model-down__msg">{message || (agy ? AGY_ONLY_TEXT : MODEL_UNAVAILABLE_TEXT)}</div>
         {tech ? (
           <details className="tech-detail">
             <summary>Chi tiết kỹ thuật</summary>
@@ -159,11 +172,27 @@ export function ModelUnavailableNotice({ reasons, message, className }: { reason
           </details>
         ) : null}
       </div>
-      <Link to="/guide/4" className="gh-btn gh-btn--secondary gh-btn--sm model-down__cta">
-        <Icon name="ph ph-plugs" size={14} /> Chọn model
-      </Link>
+      {agy ? (
+        <Link to="/api" className="gh-btn gh-btn--secondary gh-btn--sm model-down__cta">
+          <Icon name="ph ph-plugs" size={14} /> Thêm nguồn AI
+        </Link>
+      ) : (
+        <Link to="/guide/4" className="gh-btn gh-btn--secondary gh-btn--sm model-down__cta">
+          <Icon name="ph ph-plugs" size={14} /> Chọn model
+        </Link>
+      )}
     </div>
   );
+}
+
+/**
+ * v0.1.38 (F-22): lỗi của một thao tác AI (dịch, tạo lại bản nháp…): không có model chạy được ⇒ thẻ "Chọn model"/"Thêm
+ * nguồn AI" kèm "Chi tiết kỹ thuật"; lỗi khác ⇒ dòng InlineError.
+ */
+export function ActionError({ error }: { error: unknown }) {
+  if (isAgyOnlyUnavailable(error)) return <ModelUnavailableNotice reasons={errorReasons(error)} message={errorText(error)} agyOnly />;
+  if (isModelUnavailable(error)) return <ModelUnavailableNotice reasons={errorReasons(error)} />;
+  return <InlineError>{errorText(error)}</InlineError>;
 }
 
 /** Inline form/action error line (11px BAD). */

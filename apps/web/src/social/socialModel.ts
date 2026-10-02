@@ -16,6 +16,14 @@ export interface StatusView {
   hint: string;
 }
 
+/**
+ * Nhãn nút đăng nhập (review F-17): tài khoản `needs_login` (phiên không mở được sau chuyển máy/đổi khoá ⇒ máy chủ xoá
+ * phiên, `has_session=false`) vẫn là "Đăng nhập lại" — khớp gợi ý ở dòng trạng thái, chuông và hướng dẫn.
+ */
+export function loginLabel(a: Pick<SocialAccount, 'status' | 'has_session'>): 'Đăng nhập lại' | 'Đăng nhập' {
+  return a.has_session || a.status === 'needs_login' ? 'Đăng nhập lại' : 'Đăng nhập';
+}
+
 /** Trạng thái tài khoản → nhãn tiếng Việt + việc Owner cần làm (một nguồn cho thẻ, test, e2e). */
 export function accountStatus(a: Pick<SocialAccount, 'status' | 'pause_reason' | 'active_job'>): StatusView {
   if (a.active_job) {
@@ -28,6 +36,14 @@ export function accountStatus(a: Pick<SocialAccount, 'status' | 'pause_reason' |
     case 'pending_login':
       return { label: 'Chưa đăng nhập', tone: 'neutral', hint: 'Bấm Đăng nhập — Sếp tự đăng nhập trong cửa sổ trình duyệt.' };
     case 'needs_login':
+      // F-17 (v0.1.38): phiên đã lưu không mở được sau khi chuyển máy/đổi khoá.
+      if (a.pause_reason === 'key_changed') {
+        return {
+          label: 'Cần đăng nhập lại',
+          tone: 'warn',
+          hint: 'Phiên đã lưu không mở được trên máy này (chuyển máy hoặc đổi khoá) — bấm Đăng nhập lại.',
+        };
+      }
       return { label: 'Cần đăng nhập lại', tone: 'warn', hint: 'Phiên đã hết hoặc bị đăng xuất — bấm Đăng nhập lại.' };
     case 'paused':
       return a.pause_reason === 'checkpoint' || a.pause_reason === 'captcha'

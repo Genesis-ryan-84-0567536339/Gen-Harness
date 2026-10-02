@@ -49,6 +49,9 @@ class Settings(BaseSettings):
     # chung api/worker như agy. Không có tệp chạy ⇒ thẻ Claude Code báo "chưa cài", không ảnh hưởng nguồn khác.
     claude_home: str = "~/.claude-gh/.claude"
     claude_binary: str = "claude"
+    # F-22 (v0.1.38): đường dẫn phiên Claude cũ (≤ v0.1.37, trong HOME agy) cần chuyển sang claude_home khi api khởi
+    # động. CHỈ đặt trong api.Dockerfile; rỗng (dev/test) ⇒ không chuyển/xoá gì (gh/providers/cli.py).
+    claude_legacy_home: str = ""
 
     # Phiên đăng nhập 7 ngày, trượt (gia hạn khi còn dưới nửa — gh/auth/service.py::load_session): app tự host,
     # một Owner, không nên bắt đăng nhập lại mỗi ngày.

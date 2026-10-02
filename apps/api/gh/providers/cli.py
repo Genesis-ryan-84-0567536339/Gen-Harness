@@ -23,6 +23,7 @@ import fcntl
 import logging
 import os
 import re
+import shutil
 import signal
 import struct
 import termios
@@ -396,12 +397,190 @@ async def delete_profile(db: AsyncSession, org_id: uuid.UUID, profile_id: uuid.U
     return {"email": row.email, "was_active": row.is_active, "kind": row.kind}
 
 
+CLAUDE_HOME_SHARED_MSG = "GH_CLAUDE_HOME nằm trong HOME của Antigravity CLI — agy có thể đọc phiên Claude"
+CLAUDE_HOME_SHARED_KEY = "cli.claude_home_shared"
+
+
+def _agy_home() -> Path:
+    return Path(cli_env(get_settings().cli_home)["HOME"])
+
+
+def _inside(path: Path, parent: Path) -> bool:
+    return path == parent or parent in path.parents
+
+
+def _remove(p: Path) -> None:
+    if p.is_dir() and not p.is_symlink():
+        shutil.rmtree(p)
+    elif p.exists() or p.is_symlink():
+        p.unlink()
+
+
+def _copy_into(item: Path, dest: Path) -> None:
+    """Chép `item` sang `dest` an toàn khi đứt giữa chừng: chép vào `<dest>.migrating` rồi `os.replace` — đích không
+    bao giờ là bản dở. Hai volume khác nhau nên không dùng `rename`/`shutil.move` (= chép rồi xoá, không nguyên tử)."""
+    tmp = dest.with_name(dest.name + ".migrating")
+    _remove(tmp)
+    try:
+        if item.is_symlink():
+            os.symlink(os.readlink(item), tmp)
+        elif item.is_dir():
+            shutil.copytree(item, tmp, symlinks=True)
+            tmp.chmod(0o700)
+        else:
+            shutil.copy2(item, tmp)
+            tmp.chmod(0o600)
+        os.replace(tmp, dest)
+    except OSError:
+        with contextlib.suppress(OSError):
+            _remove(tmp)
+        raise
+
+
+def legacy_claude_pending() -> bool:
+    """True khi còn thư mục phiên Claude cũ (GH_CLAUDE_LEGACY_HOME) chờ api chuyển (F-22). Worker dùng để KHÔNG tự ghi
+    tệp phiên Claude từ hồ sơ trước khi api chuyển — bản trong CSDL là ảnh lúc đăng nhập, có thể cũ hơn tệp CLI đã tự
+    làm mới; ghi trước thì api thấy đích đã có và bỏ qua bản mới."""
+    s = get_settings()
+    if not s.claude_legacy_home.strip():
+        return False
+    with contextlib.suppress(OSError):
+        legacy = cli_home_dir(s.claude_legacy_home)
+        return legacy.is_dir() and not legacy.is_symlink()
+    return False
+
+
+def _legacy_session_newer(item: Path, dest: Path) -> bool:
+    """Tệp phiên (`.credentials.json`/`.claude.json`) cũ mới hơn tệp ở đích (vd. đích là bản ghi lại từ hồ sơ lúc đăng
+    nhập, còn bản cũ đã được CLI làm mới token) ⇒ bản cũ được ghi đè lên đích. Mục khác: đích đã có thì giữ."""
+    if item.name not in (CLAUDE_CRED_FILE, CLAUDE_STATE_FILE):
+        return False
+    try:
+        if item.is_symlink() or not item.is_file() or dest.is_symlink() or not dest.is_file():
+            return False
+        return item.stat().st_mtime > dest.stat().st_mtime
+    except OSError:
+        return False
+
+
+def migrate_legacy_claude_home() -> int:
+    """F-22 (v0.1.38): chuyển phiên Claude Code từ đường dẫn cũ (≤ v0.1.37: `/var/lib/gh/agy/claude/.claude`, nằm trong
+    volume agy_state — agy có công cụ đọc tệp nên đọc được `.credentials.json`) sang GH_CLAUDE_HOME mới (volume
+    claude_state). Trả số mục đã chuyển.
+
+    Đường dẫn cũ CHỈ lấy từ GH_CLAUDE_LEGACY_HOME (chỉ đặt trong api.Dockerfile). Rỗng (dev, pytest) ⇒ không làm gì:
+    ngoài Docker HOME của agy là HOME thật của người dùng, `~/claude/.claude` có thể là thư mục dự án của họ.
+
+    Chỉ api gọi (đầu `restore_active`, `owns_logins=True`), trước khi trả bản gửi tạm/ghi lại phiên. Tệp/thư mục đã có
+    ở đích (vd. phiên mới hơn) KHÔNG bị bản cũ ghi đè — trừ `.credentials.json`/`.claude.json` cũ có mtime mới hơn
+    đích (CLI đã tự làm mới token). Mỗi mục chép vào tên tạm rồi `os.replace`; CHỈ khi mọi mục đều xong mới xoá
+    đúng thư mục cũ và `<cha>/work` (thư mục làm việc cũ của claude), rồi `rmdir` thư mục cha nếu đã rỗng (còn mục
+    khác ⇒ chỉ ghi TÊN chúng vào log) — không bao giờ xoá cả thư mục cha. Có lỗi ⇒ giữ nguyên thư mục cũ, lần
+    khởi động sau làm tiếp. Chạy lại an toàn.
+    Lỗi OSError chỉ ghi cảnh báo (không làm sập api); tệp còn thiếu thì `restore_active` ghi lại từ agent.cli_profiles.
+    Rollback về v0.1.37: bản cũ thấy thiếu tệp ở đường dẫn cũ ⇒ restore_active của nó ghi lại từ CSDL ⇒ vẫn an toàn.
+    Không bao giờ log nội dung tệp — chỉ số mục."""
+    s = get_settings()
+    if not s.claude_legacy_home.strip():
+        return 0
+    target = cli_home_dir(s.claude_home)
+    legacy = cli_home_dir(s.claude_legacy_home)
+    moved = 0
+    try:
+        if not legacy.is_dir() or legacy.is_symlink():
+            return 0
+        legacy_r, target_r = legacy.resolve(), target.resolve()
+        if legacy_r == target_r or _inside(target_r, legacy_r) or _inside(legacy_r, target_r):
+            return 0
+        target.mkdir(parents=True, exist_ok=True)
+        failed = 0
+        for item in sorted(legacy.iterdir()):
+            if item.name.endswith(".migrating"):
+                continue
+            dest = target / item.name
+            if (dest.exists() or dest.is_symlink()) and not _legacy_session_newer(item, dest):
+                continue
+            try:
+                _copy_into(item, dest)
+                moved += 1
+            except OSError as exc:
+                failed += 1
+                log.warning("Chuyển một mục phiên Claude Code lỗi (%s) — giữ thư mục cũ, thử lại lần khởi động sau",
+                            type(exc).__name__)
+        if failed:
+            return moved
+        shutil.rmtree(legacy)
+        work = legacy.parent / "work"
+        if work.is_dir() and not work.is_symlink():
+            shutil.rmtree(work)
+        try:
+            legacy.parent.rmdir()  # chỉ khi đã rỗng
+        except OSError:
+            # Không xoá thay (có thể là dự án của người dùng) — chỉ ghi TÊN các mục còn lại để Owner/hỗ trợ dọn tay.
+            with contextlib.suppress(OSError):
+                left = sorted(p.name for p in legacy.parent.iterdir())
+                if left:
+                    log.warning("Thư mục phiên Claude Code cũ %s còn %d mục không thuộc phiên đã chuyển: %s",
+                                legacy.parent, len(left), ", ".join(left[:20]))
+        log.info("Đã chuyển %d mục phiên Claude Code sang thư mục riêng (F-22)", moved)
+    except OSError as exc:
+        log.warning("Chuyển phiên Claude Code sang thư mục riêng lỗi (%s) — sẽ ghi lại từ hồ sơ đã lưu",
+                    type(exc).__name__)
+    return moved
+
+
+def claude_home_shared() -> bool:
+    """True khi GH_CLAUDE_HOME nằm trong HOME của Antigravity CLI (agy có thể đọc phiên Claude)."""
+    try:
+        return _inside(cli_home_dir(get_settings().claude_home).resolve(), _agy_home().resolve())
+    except OSError:
+        return False
+
+
+async def _report_claude_home(sm: async_sessionmaker[AsyncSession] | None, shared: bool) -> None:
+    """Mở/đóng sự cố `cli.claude_home_shared` cho từng tổ chức (gh.health — v0.1.36). Lỗi thì bỏ qua."""
+    if sm is None:
+        return
+    from gh import health
+
+    try:
+        async with sm() as db:
+            orgs = (await db.execute(text("SELECT id FROM core.organizations"))).scalars().all()
+            for org_id in orgs:
+                if shared:
+                    await health.raise_once(
+                        db, org_id, key=CLAUDE_HOME_SHARED_KEY, kind=CLAUDE_HOME_SHARED_KEY, severity="bad",
+                        title="Phiên Claude Code nằm chung chỗ với Antigravity CLI",
+                        body="Antigravity CLI có thể đọc phiên đăng nhập đã lưu của Claude Code. Cập nhật Gen-Harness "
+                             "bản mới (dùng volume claude_state riêng). Chi tiết kỹ thuật: " + CLAUDE_HOME_SHARED_MSG,
+                        link=None)
+                else:
+                    await health.clear(db, org_id, CLAUDE_HOME_SHARED_KEY)
+            await db.commit()
+    except Exception as exc:  # noqa: BLE001 — báo sự cố là phụ, không làm hỏng khởi động
+        log.warning("Không ghi được sự cố %s: %s", CLAUDE_HOME_SHARED_KEY, type(exc).__name__)
+
+
 async def restore_active(sm: async_sessionmaker[AsyncSession] | None, *, owns_logins: bool = True) -> None:
     """Khi khởi động: tệp phiên trong volume trống mà có hồ sơ hoạt động → ghi lại tệp (từng loại CLI).
 
     Còn bản "gửi tạm" (api chết giữa lúc thêm tài khoản) thì api trả nó về trước — đó là tài khoản đang dùng. Worker
     (`owns_logins=False`) không đụng tới khi còn bản gửi tạm: có thể api đang chạy một phiên đăng nhập, ghi tệp lúc đó
-    sẽ bị nhận nhầm là tài khoản mới."""
+    sẽ bị nhận nhầm là tài khoản mới.
+
+    F-22: api chuyển phiên Claude từ đường dẫn cũ trong HOME của agy sang GH_CLAUDE_HOME riêng TRƯỚC mọi bước khác
+    (`migrate_legacy_claude_home`); tệp còn thiếu sau đó được ghi lại từ hồ sơ như thường."""
+    if owns_logins:
+        migrate_legacy_claude_home()
+        shared = claude_home_shared()
+        if shared and get_settings().env == "development":
+            # Dev ngoài Docker: HOME của agy là HOME thật (~) nên mọi GH_CLAUDE_HOME mặc định đều "chung" — chỉ nhắc,
+            # không mở sự cố đỏ cho mọi tổ chức mỗi lần khởi động (production/test vẫn báo đầy đủ).
+            log.warning(CLAUDE_HOME_SHARED_MSG + " (môi trường phát triển — đặt GH_CLI_HOME riêng nếu cần tách)")
+            shared = False
+        elif shared:
+            log.error(CLAUDE_HOME_SHARED_MSG)
+        await _report_claude_home(sm, shared)
     need: list[str] = []
     for kind in CLI_KINDS:
         if owns_logins:
@@ -412,6 +591,8 @@ async def restore_active(sm: async_sessionmaker[AsyncSession] | None, *, owns_lo
                 unpark_token(kind)
         elif not token_path(kind).exists() and backup_path(kind).exists():
             continue
+        elif kind == CLAUDE and legacy_claude_pending():
+            continue  # F-22: chờ api chuyển phiên cũ trước (xem legacy_claude_pending)
         if not token_path(kind).exists():
             need.append(kind)
     if not need or sm is None:

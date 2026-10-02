@@ -37,6 +37,8 @@ os.environ["GH_REDIS_URL"] = REDIS_URL
 # v0.1.31: thư mục phiên Claude Code CLI của test không bao giờ là ~/.claude thật của máy chạy test.
 os.environ.setdefault("GH_CLAUDE_HOME", f"/tmp/gh-test-claude-{os.getpid()}/.claude")
 os.environ.setdefault("GH_CLAUDE_BINARY", "gh-test-no-claude")
+# F-22: HOME của agy trong test không bao giờ là HOME thật (mặc định ~/.gemini/antigravity-cli ⇒ HOME = ~).
+os.environ.setdefault("GH_CLI_HOME", f"/tmp/gh-test-agy-{os.getpid()}/.gemini/antigravity-cli")
 os.environ.setdefault("GH_MASTER_KEY", "")
 
 # gh_app (migration 0014) — mật khẩu test cố định, KHÔNG dùng ngoài môi trường test. Luôn đặt (kể cả khi

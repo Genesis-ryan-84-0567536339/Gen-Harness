@@ -34,6 +34,25 @@ const TECHNICAL = /[[\]{}]|errno|exception|traceback|error:|http\s?\d{3}|\b[a-z]
 
 export const MODEL_UNAVAILABLE_TEXT = 'Chưa có model AI hoạt động — chọn hoặc sửa model ở Agent & Model (Hướng dẫn bước 4).';
 
+/**
+ * v0.1.38 (F-22): chuỗi model chỉ có Antigravity CLI mà việc không phải Gen của Sếp. Đầu câu khớp máy chủ
+ * (gh/providers/router.py::AGY_ONLY_TITLE, AGY_ONLY_HINT, AGY_OWNER_ONLY_REASON — test_agy_only_web_markers_match_server).
+ */
+export const AGY_ONLY_TITLE_PREFIX = 'Agent cần nguồn AI khác Antigravity CLI';
+export const AGY_ONLY_MARK = 'Antigravity CLI chỉ dùng cho Gen';
+export const AGY_ONLY_TEXT =
+  'Agent cần nguồn AI khác Antigravity CLI (chỉ dành cho Gen của Sếp) — vào Agent & Model thêm khoá API hoặc Claude Code CLI rồi gán model đó cho agent này.';
+
+/** Chuỗi máy chủ (title/detail/lý do) cho biết nguyên nhân là luật "Antigravity CLI chỉ cho Gen của Sếp". */
+export function isAgyOnlyText(text: unknown): boolean {
+  return typeof text === 'string' && (text.startsWith(AGY_ONLY_TITLE_PREFIX) || text.startsWith(AGY_ONLY_MARK));
+}
+
+/** Mọi lý do đều là luật agy (khớp gh/providers/router.py::agy_only). */
+export function agyOnlyReasons(reasons: readonly unknown[] | null | undefined): boolean {
+  return !!reasons && reasons.length > 0 && reasons.every(isAgyOnlyText);
+}
+
 /** Lý do kỹ thuật dạng `{reasons: [...]}` (máy chủ ≤ v0.1.29) hoặc mảng chuỗi — null nếu không phải. */
 export function reasonsOf(value: unknown): string[] | null {
   const raw = Array.isArray(value) ? null : value && typeof value === 'object' ? (value as { reasons?: unknown }).reasons : undefined;

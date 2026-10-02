@@ -65,6 +65,9 @@ export function Step4Brain({ meta, description, onBack, onSaved, formRef, onSkip
   // v0.1.28 (UX C1): chỉ cho Tiếp tục khi có nguồn dùng được CÓ model (đã chọn, hoặc máy chủ tự lấy model đầu tiên).
   const withModel = ready.filter((p) => providerHasModel(p, tested));
   const canContinue = withModel.length > 0;
+  // v0.1.38 (F-22): Antigravity CLI chỉ dùng cho Gen của Sếp — nếu đó là nguồn sẵn sàng duy nhất, nhắc thêm nguồn khác
+  // để sàng lọc tin và trực việc chạy được.
+  const onlyAgyReady = ready.length > 0 && ready.every((p) => p.kind === 'antigravity_cli');
   const blockReason = canContinue
     ? null
     : ready.length
@@ -138,7 +141,7 @@ export function Step4Brain({ meta, description, onBack, onSaved, formRef, onSkip
           }}
         />
       ) : null}
-      <CliAccountSection kind="antigravity_cli" />
+      <CliAccountSection kind="antigravity_cli" onlyAgyReady={onlyAgyReady} />
       <CliAccountSection kind="claude_code_cli" />
 
       <div className="setup-section">
@@ -345,7 +348,7 @@ export function SkipBrainDialog({
  * Bước 4 · tài khoản CLI (v0.1.31): Antigravity (Google) và Claude Code (gói Claude, tuỳ chọn — QD-12 Owner tự quyết).
  * Hết hạn thật → nút "Đăng nhập lại"; token ngắn hạn quá giờ mà CLI tự gia hạn → "Đang hoạt động".
  */
-function CliAccountSection({ kind }: { kind: CliKind }) {
+function CliAccountSection({ kind, onlyAgyReady = false }: { kind: CliKind; onlyAgyReady?: boolean }) {
   const profiles = useCliProfiles(kind);
   const login = useCliLogin(kind);
   const now = useNow(60_000);
@@ -388,6 +391,22 @@ function CliAccountSection({ kind }: { kind: CliKind }) {
         </div>
       )}
       <CliLoginPanel login={login} />
+      {txt.scope ? (
+        <div className="risk-box" role="note" data-testid={`setup-cli-scope-${kind}`}>
+          <Icon name="ph ph-shield-warning" size={16} color="var(--color-warn)" />
+          <div className="risk-box__text">
+            {txt.scope}
+            {onlyAgyReady ? (
+              <>
+                {' '}
+                <strong data-testid="setup-agy-only-hint">
+                  Gen dùng được ngay; muốn hệ thống tự sàng lọc tin, trực việc và trò chuyện thử agent ở bước 8, thêm một khoá API hoặc Claude Code CLI.
+                </strong>
+              </>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

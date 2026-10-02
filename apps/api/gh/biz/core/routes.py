@@ -336,7 +336,8 @@ async def translate(draft_id: uuid.UUID, body: TranslateIn, request: Request,
                                         "định dạng đoạn. Chỉ trả bản dịch, không thêm lời."),
                       Message("user", src)])
     except ModelUnavailable as e:
-        raise model_unavailable("Chưa có model nào chạy được để dịch", _owner_reasons(user, e.reasons)) from e
+        raise model_unavailable("Chưa có model nào chạy được để dịch", _owner_reasons(user, e.reasons),
+                                chain_reasons=e.reasons) from e
     owner = user.role_code == rbac.OWNER
     return {"lang": body.lang, "text": mask_text(routed.text.strip(), owner)}
 
@@ -363,7 +364,8 @@ async def regenerate(draft_id: uuid.UUID, request: Request, body: RegenerateIn |
                       Message("user", f"Bản nháp:\n{cur.get('text', '')}\n\nNguồn đã dùng:\n{ctx}\n\n"
                                       f"Yêu cầu: {ask}")])
     except ModelUnavailable as e:
-        raise model_unavailable("Chưa có model nào chạy được để soạn lại", _owner_reasons(user, e.reasons)) from e
+        raise model_unavailable("Chưa có model nào chạy được để soạn lại", _owner_reasons(user, e.reasons),
+                                chain_reasons=e.reasons) from e
     versions = [*list(cur.get("versions") or []),
                 {"at": iso(datetime.now(UTC)),
                  "by": "agent" if r.agent_id else "user", "text": cur.get("text", "")}]

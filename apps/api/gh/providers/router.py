@@ -51,6 +51,47 @@ KEY_AAD = b"provider_key"
 CLI_AAD = b"cli_token"
 CLI_KINDS = ("antigravity_cli", "claude_code_cli")
 PROBE_PROMPT = "Trả lời đúng một chữ: OK"
+# v0.1.38 (F-22) — LUẬT CỨNG, không phải tuỳ chọn: agy 1.2.9 không có cờ tắt công cụ đọc tệp/chạy lệnh, chạy cùng uid
+# với api/worker → nội dung của khách (sàng lọc tin, trực việc…) có thể điều khiển agy đọc bí mật. Chỉ lượt Gen của
+# Owner (gh.gen.engine truyền allow_agy=True) mới được dùng; mọi nơi khác mặc định bị từ chối.
+AGY_OWNER_ONLY_REASON = ("Antigravity CLI chỉ dùng cho Gen — trợ lý quản trị (Gen của Sếp). Sàng lọc tin và trực việc "
+                         "phải dùng nguồn khác (khoá API hoặc Claude Code CLI) — luật an toàn, không tắt được.")
+AGY_ADD_SOURCE = "Thêm khoá API hoặc Claude Code CLI — Antigravity CLI chỉ dùng cho Gen của Sếp"
+
+
+# Lỗi 503 khi chuỗi chỉ có agy (thử trò chuyện bước 8, dịch/soạn lại nháp…) — gh.errors.model_unavailable.
+AGY_ONLY_TITLE = ("Agent cần nguồn AI khác Antigravity CLI (chỉ dành cho Gen của Sếp) — thêm khoá API hoặc Claude Code "
+                  "CLI")
+# Web nhận diện qua đầu câu (apps/web/src/lib/friendlyError.ts::AGY_ONLY_TITLE_PREFIX/AGY_ONLY_MARK) — đổi thì đổi cả
+# hai (test_agy_only_web_markers_match_server). Không trỏ "Hướng dẫn bước 4": ở đó agy hiện "sẵn sàng" ⇒ Owner đi vòng.
+AGY_ONLY_HINT = ("Antigravity CLI chỉ dùng cho Gen của Sếp. Vào Agent & Model thêm khoá API hoặc Claude Code CLI rồi "
+                 "gán model đó cho agent này.")
+
+
+# Review: tiêu đề cảnh báo `model_chain_agy_only` theo việc gặp lỗi (Sếp biết sửa ở đâu); khác ⇒ câu chung.
+_AGY_ALERT_BY_PURPOSE = {
+    "refinery": "Sàng lọc tin chưa có nguồn AI phù hợp",
+    "gen.turn": "Gen của nhân viên (hoặc khi đọc nội dung bên ngoài) chưa có nguồn AI phù hợp",
+    "draft_translate": "Dịch bản nháp chưa có nguồn AI phù hợp",
+    "draft_regenerate": "Tạo lại bản nháp chưa có nguồn AI phù hợp",
+    "setup_agent_try": "Trò chuyện thử agent chưa có nguồn AI phù hợp",
+}
+AGY_ALERT_TITLE = "Việc AI cần nguồn khác Antigravity CLI (chỉ dành cho Gen của Sếp)"
+
+
+def agy_only_alert_title(agent_key: str, purpose: str) -> str:
+    for key, title in _AGY_ALERT_BY_PURPOSE.items():
+        if purpose == key or purpose.startswith(key + "."):
+            return title
+    if agent_key.startswith("agent:"):
+        return "Agent trực việc chưa có nguồn AI phù hợp"
+    return AGY_ALERT_TITLE
+
+
+def agy_only(reasons: list[str]) -> bool:
+    """Mọi lý do đều là luật owner-only của agy (F-22) — chuỗi model chỉ có Antigravity CLI."""
+    return bool(reasons) and all(r == AGY_OWNER_ONLY_REASON for r in reasons)
+
 PROBE_TIMEOUT_S = 90.0
 
 
@@ -261,12 +302,17 @@ class ModelRouter:
     # ─── gọi ─────────────────────────────────────────────────────────────────
 
     async def generate(self, org_id: uuid.UUID, *, agent_key: str, purpose: str, messages: list[Message],
-                       json_mode: bool = True, temperature: float = 0.2) -> Routed:
+                       json_mode: bool = True, temperature: float = 0.2, allow_agy: bool = False) -> Routed:
+        """`allow_agy` (F-22): mặc định TỪ CHỐI Antigravity CLI — chỉ lượt Gen của Owner truyền True."""
         async with self.sm() as db:
             chain = await self._chain(db, org_id, agent_key)
         reasons: list[str] = []
         for link in chain:
             p, m = link["provider"], link["model"]
+            if p.kind == "antigravity_cli" and not allow_agy:
+                if AGY_OWNER_ONLY_REASON not in reasons:
+                    reasons.append(AGY_OWNER_ONLY_REASON)
+                continue
             if await self.redis.exists(breaker_key(p.id)):
                 reasons.append(f"{p.name}: đang ngắt mạch")
                 continue
@@ -333,17 +379,29 @@ class ModelRouter:
                     await self._set_auth_state(p, "ok")
                 await self._count_use(org_id, p, m)
                 return Routed(c.text, p.name, m.model_name, c.tokens_in, c.tokens_out, reasons)
-        await self._chain_exhausted(org_id, reasons)
+        await self._chain_exhausted(org_id, reasons, agent_key=agent_key, purpose=purpose)
         raise ModelUnavailable(reasons, no_chain=not chain)
 
-    async def _chain_exhausted(self, org_id: uuid.UUID, reasons: list[str]) -> None:
+    async def _chain_exhausted(self, org_id: uuid.UUID, reasons: list[str], *, agent_key: str = "",
+                               purpose: str = "") -> None:
+        if agy_only(reasons):
+            # Review F-22: chỉ có agy mà việc không phải Gen của Sếp ⇒ đăng nhập lại không giúp gì; cảnh báo riêng,
+            # P2, tối đa một lần / ngày (không dội chuông mỗi giờ).
+            if not await self.redis.set(f"gh:alert:chain_agy:{org_id}", "1", nx=True, ex=86400):
+                return
+            async with self.sm() as db:
+                await raise_alert(db, org_id, alert_type="model_chain_agy_only", priority="P2",
+                                  title=agy_only_alert_title(agent_key, purpose),
+                                  summary=AGY_OWNER_ONLY_REASON, suggested=AGY_ADD_SOURCE)
+                await db.commit()
+            return
         if not await self.redis.set(f"gh:alert:chain:{org_id}", "1", nx=True, ex=3600):
             return
         async with self.sm() as db:
             await raise_alert(db, org_id, alert_type="model_chain_exhausted", priority="P1",
                               title="Hết chuỗi model — việc AI đang xếp hàng chờ",
                               summary="; ".join(reasons)[:500] or "Chưa cấu hình nhà cung cấp nào",
-                              suggested="Kiểm tra khoá, hạn mức hoặc đăng nhập lại Antigravity CLI")
+                              suggested="Kiểm tra khoá, hạn mức và trạng thái đăng nhập các nguồn ở màn API & Model")
             await db.commit()
 
     async def embed(self, org_id: uuid.UUID, texts: list[str]) -> list[list[float]] | None:

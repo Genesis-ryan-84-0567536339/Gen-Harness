@@ -224,5 +224,21 @@ export function createMock(opts: Opts) {
     timers.clear();
   };
 
-  return { handle, liveSocket, liveInput, hooks: {}, dispose };
+  /**
+   * F-17 (v0.1.38) — hook e2e `POST /api/v1/__mock/p3/social/importKeyChanged {label}`: như nhập gói chuyển máy mà phiên
+   * đã lưu không giải mã được — máy chủ đặt `needs_login` + `key_changed` và xoá phiên (`has_session=false`).
+   */
+  const importKeyChanged = (b: unknown) => {
+    const label = String((b as { label?: string } | null)?.label ?? 'Facebook chuyển máy');
+    const a: SocialAccount = {
+      id: randomUUID(), platform: FACEBOOK.key, platform_name: FACEBOOK.name, mode: 'browser', label,
+      external_handle: null, status: 'needs_login', pause_reason: 'key_changed', has_session: false, session_updated_at: null,
+      last_health: null, risk_accepted_at: now(), risk_version: RISK_VERSION, schedule: { enabled: false, times: ['08:00', '17:00'] },
+      daily_read_limit: 6, last_read_at: null, created_at: now(), active_job: null,
+    };
+    accounts.push(a);
+    return out(a);
+  };
+
+  return { handle, liveSocket, liveInput, hooks: { importKeyChanged }, dispose };
 }

@@ -60,7 +60,13 @@ const CORE_AGENT_KEYS: Record<string, string> = {
   'core.intent': 'Tách ý định / phân loại',
   'core.scoring': 'Chấm điểm suy luận dài',
   'core.indexing': 'Đánh chỉ mục / embedding',
+  // v0.1.21: Gen — trợ lý quản trị (gh.gen.engine.AGENT_KEY); v0.1.38 (F-22): khoá DUY NHẤT được gán Antigravity CLI.
+  'core.gen': 'Gen — trợ lý quản trị',
 };
+const GEN_KEY = 'core.gen';
+/** Chuỗi THẬT của máy chủ: gh/providers/router.py::AGY_OWNER_ONLY_REASON = gh/agents_api/routes.py::AGY_GEN_ONLY_MSG. */
+export const AGY_OWNER_ONLY_REASON =
+  'Antigravity CLI chỉ dùng cho Gen — trợ lý quản trị (Gen của Sếp). Sàng lọc tin và trực việc phải dùng nguồn khác (khoá API hoặc Claude Code CLI) — luật an toàn, không tắt được.';
 
 interface BindingState {
   model_id: string;
@@ -87,6 +93,13 @@ export function createMock(opts: P4ApiOptions) {
       if (m) return { model_name: m.model_name, provider_name: p.name };
     }
     return null;
+  }
+
+  /** F-22: model thuộc nguồn Antigravity CLI (theo id, hoặc theo tên nguồn — dữ liệu mẫu gán sẵn bằng id cố định). */
+  function isAgy(b: { model_id: string; provider_name?: string }): boolean {
+    return opts
+      .getProviders()
+      .some((p) => p.kind === 'antigravity_cli' && (p.models.some((m) => m.id === b.model_id) || p.name === b.provider_name));
   }
 
   function bindableModels(): BindableModel[] {
@@ -166,7 +179,11 @@ export function createMock(opts: P4ApiOptions) {
 
     if (seg.length === 2 && m === 'GET') {
       if (!has(ctx, 'system.read')) return problem(403, 'FORBIDDEN', 'Vai trò không có quyền này');
-      const items = keysAndLabels().map(([agent_key, label]) => ({ agent_key, label, binding: bindings.get(agent_key) ?? null }));
+      // Như gh/agents_api/routes.py::_binding_out: `blocked_reason` nằm TRONG binding (bản cài cũ gán agy cho khoá khác Gen).
+      const items = keysAndLabels().map(([agent_key, label]) => {
+        const b = bindings.get(agent_key);
+        return { agent_key, label, binding: b ? { ...b, blocked_reason: agent_key !== GEN_KEY && isAgy(b) ? AGY_OWNER_ONLY_REASON : null } : null };
+      });
       return reply(200, { items, models: bindableModels() });
     }
 
@@ -180,6 +197,8 @@ export function createMock(opts: P4ApiOptions) {
       const modelId = String(b.model_id ?? '');
       const found = findModel(modelId);
       if (!found) return problem(404, 'NOT_FOUND', 'Model không tồn tại');
+      // F-22: luật cứng — model Antigravity CLI chỉ gán được cho Gen (gh.errors.conflict: chỉ title + code).
+      if (agentKey !== GEN_KEY && isAgy({ model_id: modelId })) return problem(409, 'AGY_OWNER_GEN_ONLY', AGY_OWNER_ONLY_REASON);
       const binding: BindingState = {
         model_id: modelId, model_name: found.model_name, provider_name: found.provider_name,
         temperature: typeof b.temperature === 'number' ? b.temperature : 0.3,
@@ -187,7 +206,7 @@ export function createMock(opts: P4ApiOptions) {
         rule_codes: Array.isArray(b.rule_codes) ? (b.rule_codes as string[]) : [],
       };
       bindings.set(agentKey, binding);
-      return reply(200, { agent_key: agentKey, label, binding });
+      return reply(200, { agent_key: agentKey, label, binding: { ...binding, blocked_reason: null } });
     }
 
     if (seg.length === 3 && m === 'DELETE') {

@@ -21,6 +21,7 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import orjson
+from cryptography.exceptions import InvalidTag
 from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -420,10 +421,54 @@ async def _enqueue(db: AsyncSession, redis: Redis, *, org_id: uuid.UUID, account
     return job_id
 
 
+class _SessionUnreadable(Exception):
+    """Phiên đã lưu không giải mã được bằng khoá master hiện hành (chuyển máy bằng gói cũ / đổi khoá) — F-17."""
+
+
 def _sealed_state(org_id: uuid.UUID, account_id: uuid.UUID, state_enc: bytes) -> str:
     aad = protocol.account_aad(org_id, account_id)
-    plain = crypto.decrypt(bytes(state_enc), f"social:{aad}".encode())
+    try:
+        plain = crypto.decrypt(bytes(state_enc), f"social:{aad}".encode())
+    except (InvalidTag, ValueError) as e:
+        raise _SessionUnreadable from e
     return protocol.seal(crypto.browser_key(), plain, aad)
+
+
+KEY_CHANGED_REASON = "key_changed"
+# Một câu cho API 409, chuông và web (apps/web/src/social/socialModel.ts::accountStatus) — review F-17.
+KEY_CHANGED_CAUSE = "Phiên đã lưu không mở được trên máy này (chuyển máy hoặc đổi khoá)"
+NEEDS_LOGIN_TEXT = KEY_CHANGED_CAUSE + " — bấm Đăng nhập lại."
+
+
+async def _seal_or_needs_login(db: AsyncSession, redis: Redis, org_id: uuid.UUID, r: Any, enc: bytes, *,
+                               user: auth_service.CurrentUser | None = None) -> str:
+    """`_sealed_state`, nhưng phiên không mở được → xoá phiên, tài khoản sang Cần đăng nhập lại
+    (`pause_reason='key_changed'`), ghi nhật ký + báo Owner, COMMIT rồi mới ném 409 SOCIAL_NEEDS_LOGIN (để trạng
+    thái không bị rollback cùng request). Không bao giờ để lọt 500 (F-17, v0.1.38)."""
+    try:
+        return _sealed_state(org_id, r.id, enc)
+    except _SessionUnreadable:
+        pass
+    await db.execute(text("""UPDATE core.social_accounts SET status = 'needs_login', pause_reason = :r,
+                                    state_enc = NULL, last_health = CAST(:lh AS jsonb) WHERE id = :i"""),
+                     {"i": r.id, "r": KEY_CHANGED_REASON,
+                      "lh": orjson.dumps({"ok": False, "at": _now().isoformat(), "state": "KEY_CHANGED"}).decode()})
+    detail = {"platform": r.platform, "reason": KEY_CHANGED_REASON}
+    if user is not None:
+        await _log(db, user, "social.session_unreadable", r, result="failed", detail=detail)
+    else:
+        await actionlog.record(db, org_id=org_id, actor_type="system", actor_id="system:social",
+                               action="social.session_unreadable", target_type="social_account", target_id=str(r.id),
+                               target_label=r.label, result="failed", detail=detail)
+    await notifications.notify(
+        db, org_id, await notifications.owner_ids(db, org_id), kind="social.needs_login", redis=redis,
+        title=f"{r.label}: cần đăng nhập lại",
+        body=KEY_CHANGED_CAUSE + " — mở Tài khoản mạng xã hội và bấm Đăng nhập lại.",
+        link="/social")
+    await db.commit()
+    await _push(redis, org_id, r.id)
+    log.warning("phiên mạng xã hội %s không giải mã được — chuyển sang cần đăng nhập lại", r.id)
+    raise ApiError(409, "SOCIAL_NEEDS_LOGIN", NEEDS_LOGIN_TEXT)
 
 
 async def _state_enc(db: AsyncSession, account_id: uuid.UUID) -> bytes | None:
@@ -464,8 +509,9 @@ async def request_check(db: AsyncSession, redis: Redis, user: auth_service.Curre
     await _guard(db, redis, r)
     if await _count_today(db, r.id, "health") >= HEALTH_PER_DAY_MAX:
         raise ApiError(429, "SOCIAL_RATE_LIMIT", f"Đã kiểm {HEALTH_PER_DAY_MAX} lần trong 24 giờ — thử lại sau")
+    sealed = await _seal_or_needs_login(db, redis, user.org_id, r, enc, user=user)
     job_id = await _enqueue(db, redis, org_id=user.org_id, account=r, kind="health", via="user", requested_by=user.id,
-                            payload={"state": _sealed_state(user.org_id, r.id, enc)})
+                            payload={"state": sealed})
     await _log(db, user, "social.check", r, detail={"job_id": str(job_id)})
     await db.commit()
     await _push(redis, user.org_id, r.id)
@@ -498,9 +544,10 @@ async def request_read(db: AsyncSession, redis: Redis, *, org_id: uuid.UUID, acc
                                                  "rủi ro khoá tài khoản)")
     p = platforms.PLATFORMS[r.platform]
     kinds = [k for k in (what or list(p.read_kinds)) if k in p.read_kinds] or list(p.read_kinds)
+    sealed = await _seal_or_needs_login(db, redis, org_id, r, enc, user=user)
     job_id = await _enqueue(db, redis, org_id=org_id, account=r, kind="read", via=via,
                             requested_by=user.id if user else None,
-                            payload={"state": _sealed_state(org_id, r.id, enc), "what": kinds,
+                            payload={"state": sealed, "what": kinds,
                                      "limits": {"max_pages": MAX_PAGES_PER_JOB, "max_items": MAX_ITEMS}})
     if user is not None:
         await _log(db, user, "social.read_requested", r, detail={"job_id": str(job_id), "via": via, "what": kinds})
@@ -740,6 +787,9 @@ async def schedule_tick(db: AsyncSession, redis: Redis, now: datetime | None = N
         except ApiError as e:
             await db.rollback()
             log.info("lịch đọc %s bỏ qua: %s", r.id, e.code)
+        except Exception as e:  # noqa: BLE001 — F-17: một tài khoản lỗi không chặn tài khoản khác
+            await db.rollback()
+            log.warning("lịch đọc %s lỗi: %s", r.id, type(e).__name__)  # chỉ tên lớp lỗi — không lộ dữ liệu
     return n
 
 

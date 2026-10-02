@@ -35,7 +35,7 @@ ALERT_TYPE_LABELS = {
     "repeated_complaint": "Than phiền lặp lại", "unclaimed_opportunity": "Cơ hội nóng chưa ai nhận",
     "competitor": "Đối thủ xuất hiện", "forgotten_deadline": "Deadline bị bỏ quên",
     "data_conflict": "Dữ liệu mâu thuẫn", "model_quota_low": "Hạn mức model sắp hết",
-    "model_chain_exhausted": "Hết chuỗi model",
+    "model_chain_exhausted": "Hết chuỗi model", "model_chain_agy_only": "Chưa có nguồn AI phù hợp",
 }
 # Đơn vị ý nghĩa nào rơi vào tab nào của Hộp thư (mục "Chỗ tự quyết" trong docs/api/phase-3-queue.md).
 OPPORTUNITY_EVENTS = frozenset({"AskedPrice", "OfferedSupply", "RequestedPartnership"})
