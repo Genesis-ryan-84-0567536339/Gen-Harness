@@ -391,6 +391,66 @@
       "safe_message": "Đây là thao tác nhạy cảm — Sếp tự xem kỹ và tự quyết định, Gen không làm thay."
     },
     {
+      "id": "system.storage.offsite",
+      "screen": "system",
+      "label": "Bản sao ngoài máy",
+      "description": "Bản sao dữ liệu ra ổ USB/NAS cắm vào máy chủ: lần gần nhất, cảnh báo quá 7 ngày, nơi lưu, lịch hằng tuần",
+      "dynamic": null,
+      "params": {
+        "tab": "storage"
+      },
+      "sensitive": true,
+      "safe_message": "Đây là thao tác nhạy cảm — Sếp tự xem kỹ và tự quyết định, Gen không làm thay."
+    },
+    {
+      "id": "system.offsite.choose",
+      "screen": "system",
+      "label": "Nút \"Chọn nơi lưu bản sao ngoài máy\"",
+      "description": "Chọn đường dẫn ổ USB/NAS trên máy chủ để lưu bản sao ngoài máy (chỉ Owner, cần mã PIN)",
+      "dynamic": null,
+      "params": {
+        "tab": "storage"
+      },
+      "sensitive": true,
+      "safe_message": "Đây là thao tác nhạy cảm — Sếp tự xem kỹ và tự quyết định, Gen không làm thay."
+    },
+    {
+      "id": "system.offsite.run",
+      "screen": "system",
+      "label": "Nút \"Sao lưu ra ổ ngoài ngay\"",
+      "description": "Xuất bản sao ra ổ ngoài ngay lúc này",
+      "dynamic": null,
+      "params": {
+        "tab": "storage"
+      },
+      "sensitive": true,
+      "safe_message": "Đây là thao tác nhạy cảm — Sếp tự xem kỹ và tự quyết định, Gen không làm thay."
+    },
+    {
+      "id": "system.offsite.portable",
+      "screen": "system",
+      "label": "Nút \"Tải gói mang đi\"",
+      "description": "Tải gói dữ liệu mã hoá về máy đang dùng (chỉ Owner, cần mã PIN)",
+      "dynamic": null,
+      "params": {
+        "tab": "storage"
+      },
+      "sensitive": true,
+      "safe_message": "Đây là thao tác nhạy cảm — Sếp tự xem kỹ và tự quyết định, Gen không làm thay."
+    },
+    {
+      "id": "system.offsite.kit",
+      "screen": "system",
+      "label": "Nút \"Bộ khôi phục\"",
+      "description": "Xem/in khoá khôi phục để mở bản sao ngoài máy (chỉ Owner, cần mã PIN)",
+      "dynamic": null,
+      "params": {
+        "tab": "storage"
+      },
+      "sensitive": true,
+      "safe_message": "Đây là thao tác nhạy cảm — Sếp tự xem kỹ và tự quyết định, Gen không làm thay."
+    },
+    {
       "id": "system.users.list",
       "screen": "system",
       "label": "Danh sách người dùng",
