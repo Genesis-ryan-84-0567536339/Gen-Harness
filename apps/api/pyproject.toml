@@ -20,6 +20,9 @@ dependencies = [
   # Gọi nhà cung cấp AI, MCP, CLI (gh/providers, gh/chassis/mcp_client) — phụ
   # thuộc lúc CHẠY, không chỉ lúc test: thiếu nó api/worker chết ngay khi import.
   "httpx>=0.27",
+  # v0.1.36 (F-45): worker chạy cron theo ZoneInfo("Asia/Ho_Chi_Minh") — ảnh python:slim có thể thiếu
+  # /usr/share/zoneinfo; tzdata bảo đảm ZoneInfo luôn nạp được.
+  "tzdata>=2024.1",
 ]
 
 [project.optional-dependencies]

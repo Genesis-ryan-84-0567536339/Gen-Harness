@@ -9,7 +9,9 @@ import { useOverview } from './queries';
 import { UpdateCard } from '../../update/UpdateCard';
 import { useNavigation } from '../../lib/queries';
 import { screenKeys } from '../../shell/navModel';
-import { NoModelBanner } from './NoModelBanner';
+import { NeedsBossStrip } from './NeedsBossStrip';
+import { useCan } from '../../lib/permissions';
+import { useSystemHealth } from '../system/queries';
 import { SetupFollowUp } from './SetupFollowUp';
 
 const KPI_ICON: Record<string, string> = {
@@ -126,6 +128,13 @@ function HourlyChart({ hourly }: { hourly: { hour: string; count: number }[] }) 
 export function OverviewScreen() {
   const q = useOverview();
   const nav = useNavigation();
+  // v0.1.36 (F-6): chỉ ẩn thẻ "cập nhật lỗi" khi dải "Cần Sếp xử lý" THẬT SỰ có dòng update.failed — vai trò không có
+  // system.manage (dải không hiện) hoặc /system/health lỗi thì thẻ vẫn hiện (lỗi cập nhật không biến mất khỏi Tổng quan).
+  // Lần tải đầu (/system/health đang tải): tạm ẩn thẻ lỗi để không nhảy bố cục (thẻ hiện rồi biến mất khi dải chèn lên).
+  const canManage = useCan('system.manage');
+  const health = useSystemHealth(canManage);
+  const updateInStrip = Array.isArray(health.data?.issues) && health.data.issues.some((i) => i.kind === 'update.failed');
+  const healthLoading = canManage && health.isLoading;
 
   if (q.isPending) {
     return (
@@ -145,8 +154,9 @@ export function OverviewScreen() {
   if (q.isError) {
     return (
       <div className="screen">
-        {/* v0.1.30: số liệu Tổng quan lỗi không được kéo mất lối vào "Việc thiết lập tiếp". */}
-        <NoModelBanner />
+        {/* v0.1.30: số liệu Tổng quan lỗi không được kéo mất lối vào "Việc thiết lập tiếp". v0.1.36 (F-6): cả dải
+            "Cần Sếp xử lý" cũng vậy. */}
+        <NeedsBossStrip />
         <SetupFollowUp />
         <CardError error={q.error} onRetry={() => void q.refetch()} retrying={q.isFetching} />
       </div>
@@ -159,8 +169,10 @@ export function OverviewScreen() {
 
   return (
     <div className="screen">
-      <UpdateCard />
-      <NoModelBanner />
+      {/* v0.1.36 (F-6): "Cần Sếp xử lý" ĐẦU trang; cập nhật lỗi chỉ hiện một lần trong dải (thẻ đầy đủ có nút Thử lại
+          ở Dữ liệu & lưu trữ và Trợ giúp). */}
+      <NeedsBossStrip />
+      <UpdateCard hideFailed={updateInStrip || healthLoading} />
       <SetupFollowUp />
       <div className="ov-kpi-row" data-gen-target="overview.kpis">
         {row1.map((k) => (

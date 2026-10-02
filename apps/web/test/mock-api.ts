@@ -16,7 +16,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { randomUUID } from 'node:crypto';
-import type { AgentIdentity } from '@gen-harness/contracts';
+import type { AgentIdentity, HealthIssue, SystemHealth } from '@gen-harness/contracts';
 import { createPhase2, maskText, seedRows, type P2Ctx } from './mock-phase2';
 import { createMock as createP3Core } from './mock-p3-core';
 import { createMock as createP3Queue } from './mock-p3-queue';
@@ -256,6 +256,37 @@ function seedAuditLog(audit: AuditRow[], fresh: boolean) {
   });
 }
 
+/**
+ * v0.1.36 (F-6): nhãn mặc định từng kind sự cố (như `ops.health_alerts` của API: khoá, mức, đường dẫn, nút) — hook
+ * `__mock/health` chỉ cần đưa `kind` (+ tuỳ chọn title/body/key) là ra đúng khuôn `HealthIssue`.
+ */
+const HEALTH_KIND_DEFAULTS: Record<string, Omit<HealthIssue, 'raised_at' | 'body'> & { body: string }> = {
+  // Chữ/khoá chép đúng từ API: gh/data/ingest.py (channel.down), gh/health.py (raise_model_expired, _eval_update,
+  // _eval_backup, _eval_worker, _eval_disk). Phần có số (phút, GB, bản) do healthView tính khi suy từ trạng thái.
+  'channel.down': { key: 'channel.down:zalo', kind: 'channel.down', severity: 'bad', title: 'Kênh Zalo đã ngắt kết nối', body: 'Zalo Sếp: phiên đã hết hạn — đăng nhập lại để tiếp tục nhận tin.', link: '/system?tab=channels', action: 'Đăng nhập lại' },
+  'model.auth_expired': { key: 'model.auth_expired:7d1c3a52-5b0e-4c1f-9a8e-2f6b1d4c9e03', kind: 'model.auth_expired', severity: 'warn', title: 'Model Claude cần đăng nhập lại', body: 'Gen và sàng lọc tin có thể dừng nếu không còn model khác. Bấm để đăng nhập lại.', link: '/system?tab=brain', action: 'Đăng nhập lại model' },
+  'update.failed': { key: 'update.failed', kind: 'update.failed', severity: 'bad', title: 'Cập nhật lên bản mới chưa thành công', body: 'Hệ thống đã tự quay về bản cũ, dữ liệu an toàn. Bấm để xem và thử lại.', link: '/system?tab=storage', action: 'Xem & thử lại' },
+  'backup.stale': { key: 'backup.stale', kind: 'backup.stale', severity: 'bad', title: 'Đã hơn 36 giờ chưa có bản sao lưu mới', body: 'Chưa có bản nào. Mở mục Sao lưu và bấm Sao lưu ngay để giữ an toàn dữ liệu.', link: '/system?tab=storage&focus=backup', action: 'Mở mục Sao lưu' },
+  'worker.silent': { key: 'worker.silent', kind: 'worker.silent', severity: 'bad', title: 'Bộ xử lý nền đã ngừng 12 phút', body: 'Sàng lọc tin, nhắc việc và sao lưu theo lịch đang dừng. Bấm để xem cách khởi động lại.', link: '/system?tab=storage', action: 'Xem sức khoẻ' },
+  'disk.low': { key: 'disk.low', kind: 'disk.low', severity: 'bad', title: 'Ổ đĩa sắp hết chỗ', body: 'Còn 3,0 GB trống, cần tối thiểu 5,0 GB — cập nhật tự động đang tạm dừng.', link: '/system?tab=storage', action: 'Xem cách giải phóng' },
+};
+
+export interface MockHealthOverride {
+  issues?: Array<Partial<HealthIssue>>;
+  worker?: Partial<SystemHealth['worker']>;
+  backup?: Partial<SystemHealth['backup']>;
+  disk?: Partial<SystemHealth['disk']>;
+  update?: Partial<SystemHealth['update']>;
+}
+
+/** gh/health.py WORKER_SILENT_MINUTES. */
+const WORKER_SILENT_MIN = 10;
+
+function healthIssue(i: Partial<HealthIssue>, now: string): HealthIssue {
+  const d = HEALTH_KIND_DEFAULTS[String(i.kind ?? '')] ?? { key: String(i.kind ?? 'other'), kind: String(i.kind ?? 'other'), severity: 'warn' as const, title: 'Sự cố', body: '', link: null, action: 'Xem' };
+  return { ...d, raised_at: now, ...i } as HealthIssue;
+}
+
 function createMockState(opts: MockOptions = {}, broadcast: (type: string, data: unknown, toUser?: string) => void = () => {}) {
   const latency = opts.latencyMs ?? Number(process.env.MOCK_LATENCY ?? 0);
   /** Test-only: let step 12 finish although 8–9 (not built in phase 2) are missing. */
@@ -268,6 +299,8 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     release_url: 'https://github.com/Genesis-ryan-84-0567536339/Gen-Harness/releases', release_notes: '- Nút Cập nhật ngay trong Console',
     checked_at: new Date().toISOString() as string | null,
   };
+  /** v0.1.36 (F-6): `__mock/health` ghi đè trạng thái `/system/health` (mặc định khoẻ; `__mock/reset` khôi phục). */
+  let healthOverride: MockHealthOverride = {};
   const phase2 = createPhase2({
     fresh: opts.setup === 'fresh',
     simulate: opts.simulate ?? process.env.MOCK_SIMULATE !== '0',
@@ -355,6 +388,44 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
       }
     }
     return list;
+  };
+  /** Như `GET /system/health` (gh/system_api): mặc định khoẻ; sự cố suy từ trạng thái + `issues` của hook. */
+  const healthView = (): SystemHealth => {
+    const nowMs = Date.now();
+    const now = new Date(nowMs).toISOString();
+    const o = healthOverride;
+    const worker: SystemHealth['worker'] = { state: 'ok', alive: true, last_seen_at: new Date(nowMs - 40_000).toISOString(), silent_minutes: null, ...o.worker };
+    const latest = phase3.system.latestBackupAt();
+    const configured = phase3.system.backupConfigured();
+    const age = latest ? Math.max(0, Math.round(((nowMs - new Date(latest).getTime()) / 3_600_000) * 10) / 10) : null;
+    const backup: SystemHealth['backup'] = {
+      configured, latest_at: latest, age_hours: age, stale: configured && age != null && age > 36,
+      frequency: configured ? 'daily' : null, stale_after: configured ? '36 giờ' : null, ...o.backup,
+    };
+    // Như gh/health._update_failed_recent: lỗi chỉ còn là sự cố trong 24 giờ sau finished_at.
+    const recentFail = sysUpdate.state === 'failed' && !!sysUpdate.finished_at && nowMs - Date.parse(sysUpdate.finished_at) < 24 * 3_600_000;
+    const update: SystemHealth['update'] = { state: sysUpdate.state, failed: recentFail, blocked_version: null, finished_at: sysUpdate.finished_at, ...o.update };
+    const disk: SystemHealth['disk'] = { state: 'ok', free_bytes: 42 * 1024 ** 3, min_bytes: 5 * 1024 ** 3, checked_at: new Date(nowMs - 5 * 60_000).toISOString(), ...o.disk };
+    const derived: Array<Partial<HealthIssue>> = [];
+    const gb = (n: number | null) => (n == null ? '?' : (n / 1024 ** 3).toFixed(1).replace('.', ','));
+    if (worker.state === 'silent') derived.push({ kind: 'worker.silent', title: `Bộ xử lý nền đã ngừng ${worker.silent_minutes ?? WORKER_SILENT_MIN} phút` });
+    if (backup.stale) derived.push({ kind: 'backup.stale', title: `Đã hơn ${backup.stale_after ?? '36 giờ'} chưa có bản sao lưu mới` });
+    if (update.failed) derived.push({ kind: 'update.failed', title: `Cập nhật lên ${sysUpdate.to ?? 'bản mới'} chưa thành công` });
+    if (disk.state === 'low') derived.push({ kind: 'disk.low', body: `Còn ${gb(disk.free_bytes)} GB trống, cần tối thiểu ${gb(disk.min_bytes)} GB — cập nhật tự động đang tạm dừng.` });
+    const issues: HealthIssue[] = [];
+    for (const i of [...(o.issues ?? []), ...derived].map((x) => healthIssue(x, now))) if (!issues.some((y) => y.key === i.key)) issues.push(i);
+    const overall = issues.some((i) => i.severity === 'bad') ? 'bad' : issues.length ? 'warn' : 'ok';
+    return {
+      checked_at: now, overall, worker,
+      browser: { state: 'ok', last_heartbeat_at: new Date(nowMs - 20_000).toISOString() },
+      queues: [{ stream: 'gh:raw', dlq: 0 }, { stream: 'gh:refinery', dlq: 0 }],
+      crons: [
+        { name: 'backup_scheduled', last_at: latest, ok: latest ? true : null },
+        { name: 'task_reminders', last_at: new Date(nowMs - 60_000).toISOString(), ok: true },
+        { name: 'health_watch', last_at: new Date(nowMs - 60_000).toISOString(), ok: true },
+      ],
+      backup, update, disk, issues,
+    };
   };
   const notify = (userId: string, kind: string, title: string, body = '', link: string | null = null) => {
     const item: MockNotification = { id: randomUUID(), kind, title, body, link, created_at: new Date().toISOString(), read: false };
@@ -844,7 +915,14 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     if (path === '/navigation' && method === 'GET') return reply(200, buildNavigation(user.hidden, opts.badges ?? true));
     // v0.1.22 (Đợt B1–B3) — như gh/auth/users.py + gh/system_api/org.py.
     if (path === '/system/about' && method === 'GET') {
-      return reply(200, { version: sysUpdate.current, org_name: setup.org.name, timezone: setup.org.timezone, role: user.role });
+      // v0.1.36 (F-46): như gh/system_api/org.py — version = genh_version ?? image_version (giữ tương thích).
+      return reply(200, { version: sysUpdate.current, image_version: sysUpdate.current ?? 'v0.1.36-dev', genh_version: sysUpdate.current,
+        org_name: setup.org.name, timezone: setup.org.timezone, role: user.role });
+    }
+    // v0.1.36 (F-6): sức khoẻ hệ thống — cùng quyền `system.read` như /system/org.
+    if (path === '/system/health' && method === 'GET') {
+      if ((permissionsOf(user.role.code)['system.read'] ?? 'none') === 'none') return problem(res, 403, 'FORBIDDEN', 'Không có quyền');
+      return reply(200, healthView());
     }
     if (path === '/system/org') {
       if ((permissionsOf(user.role.code)['system.read'] ?? 'none') === 'none') return problem(res, 403, 'FORBIDDEN', 'Không có quyền');
@@ -1038,7 +1116,10 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     return problem(res, 404, 'NOT_FOUND', 'Không tồn tại');
   };
 
-  return { middleware, setup, users, sessions, phase2, phase3, sessionUser, notify };
+  const setHealth = (o: MockHealthOverride) => {
+    healthOverride = { ...healthOverride, ...o };
+  };
+  return { middleware, setup, users, sessions, phase2, phase3, sessionUser, notify, setHealth };
 }
 
 /**
@@ -1050,6 +1131,8 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
  *   /api/v1/__mock/scan     {"type":"zalo"} simulates the phone scanning the QR
  *   /api/v1/__mock/simulate {"on":bool} toggles the background simulation
  *   /api/v1/__mock/bridge   {"online":bool} makes channel login answer 503 BRIDGE_OFFLINE
+ *   /api/v1/__mock/health  {"issues"?,"worker"?,"backup"?,"disk"?,"update"?} ghi đè `GET /system/health` (v0.1.36;
+ *                           `issues` chỉ cần `kind` — nhãn/nút/đường dẫn mặc định theo kind; reset khôi phục khoẻ)
  *   /api/v1/__mock/p3/{cụm}/{hook}  body → `phase3[cụm].hooks[hook](body)`; trả JSON kết quả (404 nếu không có)
  */
 export function createMockApi(opts: MockOptions = {}) {
@@ -1122,6 +1205,9 @@ export function createMockApi(opts: MockOptions = {}) {
           );
           return done(res, 200, items);
         }
+        case 'health':
+          current.setHealth(body as MockHealthOverride);
+          return done(res);
         case 'raw':
           return done(res, 200, current.phase2.hooks.pushRaw());
         case 'scan':

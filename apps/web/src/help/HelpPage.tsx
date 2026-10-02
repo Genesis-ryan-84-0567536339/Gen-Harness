@@ -10,7 +10,7 @@ import { toast } from '../lib/toast';
 import { CardError, SkeletonLines } from '../screens/common';
 import { ScreenTitle } from '../screens/ScreenPage';
 import { UpdateCard } from '../update/UpdateCard';
-import { GENH_COMMANDS, diagnosticText } from './helpModel';
+import { GENH_COMMANDS, GENH_VERSION_LABEL, SERVER_VERSION_LABEL, diagnosticText, withVersions } from './helpModel';
 import { roleLabel } from '../screens/system/systemModel';
 
 const GEN_EXAMPLES = ['Hôm nay có gì gấp?', 'Chỉ em chỗ thêm khoá Jev', 'Sao lưu ở đâu?', 'Mời nhân viên mới thế nào?'];
@@ -34,7 +34,7 @@ export function HelpPage() {
 
   const copyDiagnostics = async () => {
     try {
-      await navigator.clipboard.writeText(diagnosticText(about.data, me.data));
+      await navigator.clipboard.writeText(withVersions(diagnosticText(about.data, me.data), about.data));
       setCopied(true);
       toast('Đã chép thông tin báo lỗi — dán vào tin nhắn gửi người hỗ trợ.');
     } catch {
@@ -53,8 +53,12 @@ export function HelpPage() {
             <CardError error={about.error} onRetry={() => void about.refetch()} retrying={about.isFetching} />
           ) : (
             <div className="summary help-about">
-              <span className="summary__k">phiên bản</span>
-              <span className="summary__v mono">{about.data.version ?? 'bản phát triển'}</span>
+              {/* v0.1.36 (F-46): bản máy chủ (ảnh Docker) đang chạy và genh có thể lệch nhau — hiện cả hai (dòng
+                  "phiên bản" cũ = genh ?? máy chủ, lặp lại một trong hai nên đã bỏ). */}
+              <span className="summary__k">{SERVER_VERSION_LABEL}</span>
+              <span className="summary__v mono" data-testid="about-image-version">{about.data.image_version || about.data.version || 'bản phát triển'}</span>
+              <span className="summary__k">{GENH_VERSION_LABEL}</span>
+              <span className="summary__v mono" data-testid="about-genh-version">{about.data.genh_version ?? 'chưa cài'}</span>
               <span className="summary__k">tổ chức</span>
               <span className="summary__v">{about.data.org_name}</span>
               <span className="summary__k">múi giờ</span>

@@ -7,7 +7,11 @@ import type { ApiClient } from './client';
 
 export interface NotificationItem {
   id: string;
-  /** Ví dụ `user.role_changed`, `user.password_reset`, `user.reactivated`, `backup.done`, `backup.failed`. */
+  /**
+   * Ví dụ `user.role_changed`, `user.password_reset`, `user.reactivated`, `backup.done`, `backup.failed`; v0.1.36 (F-6)
+   * thêm sự cố sức khoẻ (khử trùng lặp theo `ops.health_alerts`): `channel.down`, `model.auth_expired`, `update.failed`,
+   * `backup.stale`, `worker.silent`, `disk.low`.
+   */
   kind: string;
   title: string;
   body: string;

@@ -196,32 +196,31 @@ describe('Điều khiển hệ thống › Nhật ký', () => {
 });
 
 describe('Điều khiển hệ thống › Dữ liệu & lưu trữ', () => {
-  it('sửa hạn lưu một tập dữ liệu gửi đúng PATCH /retention-policies', async () => {
-    let current = RETENTION;
+  // v0.1.36 (F-2 tạm): hệ thống CHƯA tự xoá theo hạn lưu (job thật ở bản sau) — nút "Sửa" bị khoá kèm lý do, không gửi PATCH.
+  it('hạn lưu: "Chưa tự xoá — sẽ áp dụng ở bản sau", nút Sửa bị khoá có lý do, bấm không gửi PATCH', async () => {
     const calls = mockFetch((c) => {
-      if (c.url.endsWith('/retention-policies') && c.method === 'GET') return json(200, current);
-      if (c.url.endsWith('/retention-policies') && c.method === 'PATCH') {
-        const b = c.body as { dataset: string; keep_days: number | null; anonymize_after_days: number | null };
-        current = current.map((r) => (r.dataset === b.dataset ? { ...r, keep_days: b.keep_days, anonymize_after_days: b.anonymize_after_days } : r));
-        return json(200, current);
-      }
+      if (c.url.endsWith('/retention-policies') && c.method === 'GET') return json(200, RETENTION);
+      if (c.url.endsWith('/retention-policies') && c.method === 'PATCH') return json(200, RETENTION);
       if (c.url.includes('/directory/people')) return json(200, { items: [], next_cursor: null, total: 0 });
       return json(404);
     });
     const user = userEvent.setup();
     renderScreen(<SystemScreen />, FULL_PERMS, 'storage');
     await screen.findByText('Hạn lưu dữ liệu');
+    expect(screen.getByText('Chưa tự xoá — sẽ áp dụng ở bản sau')).toBeInTheDocument();
+    const notes = screen.getAllByRole('note').filter((n) => /CHƯA tự xoá dữ liệu theo các hạn này/.test(n.textContent ?? ''));
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toHaveTextContent('Hệ thống CHƯA tự xoá dữ liệu theo các hạn này — sẽ áp dụng ở bản sau. Hiện chỉ hiển thị cấu hình.');
 
     const rawRow = (await screen.findByText(/Kho thô/)).closest('tr') as HTMLElement;
-    await user.click(within(rawRow).getByRole('button', { name: 'Sửa' }));
-    const keepInput = within(rawRow).getByLabelText(/Giữ trong \(ngày\)/) as HTMLInputElement;
-    await user.clear(keepInput);
-    await user.type(keepInput, '180');
-    await user.click(within(rawRow).getByRole('button', { name: 'Lưu' }));
-
-    await waitFor(() => expect(calls.some((c) => c.url.endsWith('/retention-policies') && c.method === 'PATCH')).toBe(true));
-    const patch = calls.find((c) => c.method === 'PATCH');
-    expect(patch?.body).toEqual({ dataset: 'raw.events', keep_days: 180, anonymize_after_days: null });
+    const edit = within(rawRow).getByRole('button', { name: 'Sửa' });
+    expect(edit).toBeDisabled();
+    expect(edit).toHaveAttribute('aria-describedby', notes[0].id);
+    expect(edit).toHaveAttribute('title', expect.stringContaining('CHƯA tự xoá'));
+    await user.click(edit);
+    expect(within(rawRow).queryByLabelText(/Giữ trong \(ngày\)/)).toBeNull();
+    await new Promise((r) => setTimeout(r, 30));
+    expect(calls.some((c) => c.url.endsWith('/retention-policies') && c.method === 'PATCH')).toBe(false);
   });
 
   it('yêu cầu xuất dữ liệu một người gọi đúng POST /persons/{id}/data-requests với kind=export', async () => {

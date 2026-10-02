@@ -70,7 +70,8 @@ func (d diagLine) String() string {
 
 // RunDoctor chẩn đoán runtime/cổng/chứng chỉ/dung lượng/đồng hồ/kết nối
 // kênh, in tóm tắt ra out, và xuất báo cáo đầy đủ (report.txt +
-// `docker compose logs --tail=500`) vào một tệp zip tại outPath.
+// `docker compose logs -t --tail=500`, mỗi dòng log có dấu thời gian —
+// v0.1.36 F-4) vào một tệp zip tại outPath.
 func RunDoctor(ctx context.Context, env *Env, outPath string, deps DoctorDeps, out io.Writer) error {
 	runner := deps.Runner
 	if runner == nil {
@@ -165,14 +166,15 @@ func RunDoctor(ctx context.Context, env *Env, outPath string, deps DoctorDeps, o
 	}
 
 	// Xuất báo cáo zip: report.txt (các dòng trên, đầy đủ) + logs.txt
-	// (`docker compose logs --tail=500` mọi service).
+	// (`docker compose logs -t --tail=500` mọi service; `-t` = dấu thời gian
+	// đầu mỗi dòng để đối chiếu sự cố theo giờ — v0.1.36 F-4).
 	composePath, locErr := env.LocatePath()
 	var logsOut []byte
 	var logsErr error
 	if locErr == nil {
 		bundle, secErr := env.LoadSecrets()
 		if secErr == nil {
-			logsArgs := compose.BaseArgs(composePath, "logs", "--tail=500")
+			logsArgs := compose.BaseArgs(composePath, "logs", "-t", "--tail=500")
 			logsOut, logsErr = runner.Output(ctx, dockercli.Cmd{Name: "docker", Args: logsArgs, Env: EnvOverlay(bundle), Dir: composeDir(composePath)})
 		} else {
 			logsErr = secErr

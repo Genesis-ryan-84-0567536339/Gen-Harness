@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
 import { ApiError, type BackupItem, type BackupSchedule, type BackupsPage } from '@gen-harness/contracts';
 import { Button, Dialog, EmptyState, Icon, Segmented, TextField } from '@gen-harness/ui';
 import { api } from '../../lib/api';
@@ -55,6 +56,19 @@ export function BackupPanel() {
       return waiting || busyRestore ? 4000 : busyJob ? 2000 : false;
     },
   });
+
+  // v0.1.36 (F-6): dải "Cần Sếp xử lý" (backup.stale → `/system?tab=storage&focus=backup`) — mục Sao lưu nằm dưới
+  // thẻ Sức khoẻ và thẻ Cập nhật, nên cuộn tới và đặt con trỏ vào nút "Sao lưu ngay" (nút hứa gì, trang đích có nấy).
+  const [params] = useSearchParams();
+  const focusBackup = params.get('focus') === 'backup';
+  const focused = useRef(false);
+  useEffect(() => {
+    if (!focusBackup || focused.current || !q.data) return;
+    focused.current = true;
+    const panel = document.querySelector<HTMLElement>('[data-gen-target="system.backup.panel"]');
+    panel?.scrollIntoView?.({ block: 'start' });
+    panel?.querySelector<HTMLElement>('[data-gen-target="system.backup.now"]')?.focus({ preventScroll: true });
+  }, [focusBackup, q.data]);
 
   const runNow = useMutation({
     mutationFn: () => api.backups.runNow(),

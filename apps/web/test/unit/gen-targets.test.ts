@@ -24,8 +24,9 @@ function files(dir: string): string[] {
 /** Gắn tĩnh `data-gen-target="x"` / `genTarget="x"` / `genTarget: 'x'`; động `data-gen-target={`x:${…}`}`. */
 function scan(): Set<string> {
   const found = new Set<string>();
-  const statik = /(?:data-gen-target|genTarget)\s*[=:]\s*["']([\w.]+)["']/g;
-  const dynamic = /data-gen-target=\{`([\w.]+):\$\{/g;
+  // Cho phép cả '-' trong id: id có gạch nối trước đây lọt qua cả hai chiều kiểm (v0.1.36).
+  const statik = /(?:data-gen-target|genTarget)\s*[=:]\s*["']([\w.-]+)["']/g;
+  const dynamic = /data-gen-target=\{`([\w.-]+):\$\{/g;
   for (const f of files(SRC)) {
     if (f.includes(`${SRC}/gen/`)) continue; // khung Gen tự nó không phải chỗ gắn
     const text = readFileSync(f, 'utf8');

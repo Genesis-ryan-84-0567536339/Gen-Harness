@@ -223,11 +223,19 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build image api/worker, bridge, web, db, browser
         run: |
-          docker build -f deploy/images/api.Dockerfile -t gh-api .
+          docker build --build-arg VERSION="$(tr -d '[:space:]' < VERSION)" -f deploy/images/api.Dockerfile -t gh-api .
           docker build -f deploy/images/browser.Dockerfile -t gh-browser .
           docker build -f deploy/images/bridge.Dockerfile -t gh-bridge .
           docker build -f apps/web/Dockerfile -t gh-web .
           docker build -f deploy/images/db.Dockerfile -t gh-db .
+      - name: Ảnh api mang đúng phiên bản (v0.1.36 F-46)
+        run: |
+          want="$(tr -d '[:space:]' < VERSION)"
+          got="$(docker run --rm --entrypoint python gh-api -c 'import gh;print(gh.__version__)')"
+          label="$(docker inspect gh-api --format '{{ index .Config.Labels "org.opencontainers.image.version" }}')"
+          echo "VERSION=$want gh.__version__=$got label=$label"
+          if [ "$got" != "$want" ]; then echo "::error::gh.__version__ trong ảnh là '$got', VERSION là '$want'"; exit 1; fi
+          if [ "$label" != "$want" ]; then echo "::error::LABEL org.opencontainers.image.version là '$label', VERSION là '$want'"; exit 1; fi
       - name: Kiểm tra compose
         run: |
           cp .env.example .env && mkdir -p secrets

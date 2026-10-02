@@ -4,8 +4,13 @@
   xưng là", "Agent gọi Sếp là" — sửa được sau khi thiết lập, kiểm bằng ĐÚNG hàm của bước 3
   (`gh.setup.routes.validate_org`). Xưng hô là của Owner đang đăng nhập (`core.users.addressing`). Ghi Action Log
   `org.updated` kèm các trường đã đổi (giá trị cũ → mới).
-- `GET /system/about` (mọi người đã đăng nhập): phiên bản đang chạy (genh.json trong hộp thư chung — cùng nguồn với
-  "Cập nhật ngay"; bản phát triển không có ⇒ null), tên tổ chức, múi giờ — cho trang /help và "Báo lỗi".
+- `GET /system/about` (mọi người đã đăng nhập): phiên bản đang chạy, tên tổ chức, múi giờ — cho trang /help và
+  "Báo lỗi". v0.1.36 (F-46) tách hai nguồn phiên bản:
+  - `image_version`: phiên bản của chính ảnh api/worker (`gh.__version__` — `GH_VERSION` từ build-arg `VERSION`, hoặc
+    tệp VERSION của repo khi phát triển; không có ⇒ "dev");
+  - `genh_version`: bản genh đã cài (genh.json trong hộp thư chung — cùng nguồn với "Cập nhật ngay"; bản phát triển
+    không có ⇒ null);
+  - `version` = `genh_version` nếu có, không thì `image_version` (giữ khoá cũ cho web cũ).
 """
 
 import json
@@ -15,6 +20,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import gh
 from gh.auth import service
 from gh.auth.deps import current_user, require, require_owner
 from gh.chassis import actionlog
@@ -68,5 +74,10 @@ async def patch_org(body: Step3In, user: service.CurrentUser = Depends(require_o
 async def about(user: service.CurrentUser = Depends(current_user), db: AsyncSession = DB) -> dict[str, Any]:
     org = (await db.execute(text("SELECT name, timezone FROM core.organizations WHERE id = :o"),
                             {"o": user.org_id})).one()
-    return {"version": update.running_version(), "org_name": org.name,
+    genh_version = update.running_version()
+    image_version = gh.__version__
+    # Bản phát triển (không build-arg, không tệp VERSION ⇒ "dev"): `version` null để web hiện "bản phát triển".
+    legacy = genh_version or (image_version if image_version != "dev" else None)
+    return {"version": legacy, "image_version": image_version,
+            "genh_version": genh_version, "org_name": org.name,
             "timezone": org.timezone, "role": {"code": user.role_code, "name": user.role_name}}

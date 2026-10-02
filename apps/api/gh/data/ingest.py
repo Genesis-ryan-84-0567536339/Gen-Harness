@@ -20,11 +20,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gh import crypto, realtime
 from gh.chassis import actionlog
 from gh.chassis.bus import BRIDGE_CONTROL, EventBus, uuid7
-from gh.data.common import CHANNEL_PREFIX, LISTENING_MODES, fetch_raw, iso, org_settings, raw_item
+from gh.data.common import CHANNEL_NAME, CHANNEL_PREFIX, LISTENING_MODES, fetch_raw, iso, org_settings, raw_item
 
 log = logging.getLogger("gh.ingest")
 
 QR_TTL_S = 70
+#: v0.1.36 (F-6a): lý do phiên rớt → câu cho chuông "Kênh … đã ngắt kết nối" (không đưa lỗi thô/credential).
+CHANNEL_DOWN_REASONS = {"expired": "phiên đã hết hạn", "error": "gặp lỗi", "logged_out": "đã bị đăng xuất"}
 KINDS = ("text", "image", "file", "sticker", "reaction", "system", "other")
 
 
@@ -191,7 +193,7 @@ async def _session(db: AsyncSession, session_id: Any) -> Any:
     except ValueError:
         return None
     return (await db.execute(text("""
-        SELECT s.id, s.channel_id, s.state, s.account_label, s.started_at, c.type, c.org_id
+        SELECT s.id, s.channel_id, s.state, s.account_label, s.started_at, s.ended_at, c.type, c.org_id
         FROM core.channel_sessions s JOIN core.channels c ON c.id = s.channel_id WHERE s.id = :i"""),
         {"i": sid})).one_or_none()
 
@@ -256,6 +258,9 @@ async def handle_status(db: AsyncSession, redis: Redis, bus: EventBus, org_id: u
             {"c": cred, "x": str(account.get("id") or "") or None, "l": label, "i": s.id,
              "m": orjson.dumps({"account_name": account.get("name")}).decode()})
         await redis.delete(f"gh:channel:qr:{s.id}")
+        from gh import health  # v0.1.36 (F-6a): kênh đã nối lại ⇒ đóng sự cố "kênh rớt"
+
+        await health.clear(db, org_id, f"channel.down:{s.type}")
         await actionlog.record(db, org_id=org_id, actor_type="system", actor_id=f"bridge:{s.type}",
                                action="channel.session_active", target_type="channel_session",
                                target_id=str(s.id), target_label=label)
@@ -268,12 +273,24 @@ async def handle_status(db: AsyncSession, redis: Redis, bus: EventBus, org_id: u
                              {"c": cred, "i": s.id})
     elif type == "session.ended":
         reason = p.get("reason") if p.get("reason") in ("expired", "logged_out", "error") else "error"
+        # v0.1.36 (F-6a): chỉ phiên ĐANG CHẠY rớt mới đáng chuông. Phiên chờ QR hết hạn (Sếp chưa quét) và phiên
+        # Console đã tự đăng xuất (routes.channel_logout đặt ended_at trước khi bridge báo lại) thì không.
+        was_live = s.state == "active" and s.ended_at is None
         await db.execute(text("""
             UPDATE core.channel_sessions SET state = :st, ended_at = COALESCE(ended_at, now()),
                    credential_enc = CASE WHEN :st IN ('logged_out', 'expired') THEN NULL ELSE credential_enc END,
                    meta = meta || CAST(:m AS jsonb) WHERE id = :i"""),
             {"st": reason, "i": s.id, "m": orjson.dumps({"error": p.get("error")}).decode()})
         await redis.delete(f"gh:channel:qr:{s.id}")
+        if was_live and reason in CHANNEL_DOWN_REASONS:
+            from gh import health
+
+            name = CHANNEL_NAME.get(s.type, s.type)
+            await health.raise_once(
+                db, org_id, key=f"channel.down:{s.type}", kind="channel.down", severity="bad",
+                title=f"Kênh {name} đã ngắt kết nối",
+                body=f"{s.account_label or name}: {CHANNEL_DOWN_REASONS[reason]} — đăng nhập lại để tiếp tục nhận tin.",
+                link="/system?tab=channels", redis=redis)
         await actionlog.record(db, org_id=org_id, actor_type="system", actor_id=f"bridge:{s.type}",
                                action="channel.session_ended", target_type="channel_session", target_id=str(s.id),
                                target_label=s.account_label, result="ok" if reason == "logged_out" else "failed",

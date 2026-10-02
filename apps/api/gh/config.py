@@ -60,6 +60,9 @@ class Settings(BaseSettings):
     # Dọn core.sessions (PLAN §5.6 lỗi 🟡): xoá vĩnh viễn phiên đã HẾT HẠN hoặc BỊ THU HỒI quá N ngày (job
     # hằng giờ — gh/worker.py::expire_sessions). Phiên còn hiệu lực không bao giờ bị đụng tới dù N nhỏ.
     session_purge_after_days: int = 30
+    # v0.1.36 (F-6): chu kỳ (giây) vòng theo dõi sức khoẻ trong api (gh/health.py::watch_loop) — mở/đóng sự cố
+    # "cập nhật lỗi", "quá 36 giờ chưa sao lưu", "bộ xử lý nền im", "ổ đĩa sắp đầy" và gửi chuông một lần. 0 = tắt.
+    health_watch_seconds: int = 60
 
     stream_maxlen: int = Field(default=100_000, description="Độ dài tối đa mỗi Redis Stream (xấp xỉ)")
     # Khoá công khai ed25519 (base64, 32 byte) tin cậy để kiểm chữ ký plugin nạp từ tệp (ARCHITECTURE §6.4),

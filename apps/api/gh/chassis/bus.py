@@ -23,6 +23,9 @@ from redis.exceptions import ResponseError
 log = logging.getLogger("gh.bus")
 
 SCHEMA_VERSION = 1
+#: v0.1.36: tập tên các stream `<stream>.dlq` đã từng nhận tin — GET /system/health đọc tập này thay vì SCAN cả
+#: keyspace mỗi lần (gh/health.py).
+DLQ_STREAMS_KEY = "gh:dlq:streams"
 
 # Stream chuẩn của hệ thống.
 BRIDGE_INBOUND = "gh.bridge.inbound"
@@ -124,6 +127,7 @@ class EventBus:
             if fails >= max_deliveries:
                 await self.redis.xadd(f"{stream}.dlq", {**fields, "error": str(exc)[:500], "group": group},
                                       maxlen=self.maxlen, approximate=True)
+                await self.redis.sadd(DLQ_STREAMS_KEY, f"{stream}.dlq")  # type: ignore[misc]
                 await self.redis.xack(stream, group, message_id)
                 await self.redis.hdel(fails_key, message_id)  # type: ignore[misc]
             return False

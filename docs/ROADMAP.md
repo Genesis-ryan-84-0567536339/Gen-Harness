@@ -57,6 +57,12 @@ v0.1.35: sửa lỗi đỏ trong ứng dụng (F-1, F-5, F-14, F-15, F-20 phần
 người và trợ lý thật (`/pickers/*`, CI cấm ID giả), Tài liệu không phải PDF/ảnh buộc tải xuống + CSP sandbox, Sổ tay theo
 quyền Kho, PIN cho nhà cung cấp AI / khoá / chuỗi ưu tiên, lỗi thân thiện có mã (không lộ SQL, tắt /docs production), e2e
 thật rút gọn 4 luồng trong CI. Còn: F-20 phần còn lại (v0.1.45), sinh type từ OpenAPI (hoãn).
+v0.1.36: hệ thống tự báo khi hỏng (F-6 bước 1, F-3, F-4 bước 1, F-45, F-46, F-2 tạm) — chuông khử trùng lặp
+(`ops.health_alerts`) cho kênh rớt / model hết hạn / cập nhật lỗi / sao lưu quá 36 giờ / Bộ xử lý nền im / ổ đĩa sắp đầy,
+`GET /system/health` (không đụng `/ready`), dải "Cần Sếp xử lý" đầu Tổng quan + thẻ "Sức khoẻ hệ thống"; sao lưu timeout
+3600 giây, bị huỷ thì báo chuông; log JSON có ts + traceback + error_id; cron theo giờ VN (job nặng 04:20–05:10); một số
+phiên bản từ build-arg (`gh.__version__`, LABEL ảnh, Trợ giúp hiện "phiên bản máy chủ" + "phiên bản công cụ cài đặt (genh)"). Còn: F-2 job tự xoá theo hạn lưu
+(v0.1.40 — hiện khoá nút Sửa, ghi "Chưa tự xoá"), F-6/F-4 các bước sau.
 
 ## Đợt A — Gen v1 (thiết kế: docs/design/gen-v1.md)
 - ✅ A1 Khung chat phải + Gen trả lời/tóm tắt (chỉ đọc), lưu hội thoại, Nhật ký hành động — v0.1.21.

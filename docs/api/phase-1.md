@@ -46,6 +46,15 @@ Lỗi theo RFC 7807: `{"type": "...", "title": "...", "status": 4xx, "code": "PI
   `tone` ∈ `ok | warn | bad | accent`. `badge` là số thật từ API (giai đoạn 1 trả `null` khi chưa có dữ liệu).
 - `GET /header` → `{"channels_live": 0, "groups_listening": 0, "autonomy_level": 4, "data_confidence": null}`.
 - `GET /health` → `{"status": "ok"}`; `GET /ready` → `{"db": "ok", "redis": "ok", "objects": "ok"|"skip", "bridge": "ok"|"down"}`.
+- `GET /system/health` (v0.1.36, F-6; quyền `system.read`) — thẻ "Sức khoẻ hệ thống" và dải "Cần Sếp xử lý". Đọc thuần,
+  không gửi chuông; **KHÔNG thuộc `/ready`** (genh dùng `/ready` để quyết rollback — bộ xử lý nền im không được làm
+  hỏng một bản cập nhật tốt). Trả `{checked_at, overall: ok|warn|bad, worker: {state: ok|silent|unknown, alive,
+  last_seen_at, silent_minutes}, browser: {state: ok|silent|off, last_heartbeat_at}, queues: [{stream, dlq}],
+  crons: [{name, last_at, ok}], backup: {configured, latest_at, age_hours, stale}, update: {state, failed,
+  blocked_version, finished_at}, disk: {state: ok|low|unknown, free_bytes, min_bytes, checked_at}, issues: [{key, kind,
+  severity: bad|warn, title, body, link, action, raised_at}]}` — mọi trường là chuỗi/số/bool/null. `issues` là các dòng
+  `ops.health_alerts` đang mở (migration 0024); chuông của cùng một sự cố chỉ gửi MỘT lần (`gh/health.py::raise_once`).
+  Nguồn đọc lỗi ⇒ phần đó `unknown`, không 500.
 
 ## Thiết lập Owner (`/setup`)
 
