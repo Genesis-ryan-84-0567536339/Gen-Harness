@@ -40,16 +40,46 @@ if [ -n "${GEN_HARNESS_RELEASE_TAG:-}" ]; then
 	log "genh: cài đúng bản $PINNED_TAG (GEN_HARNESS_RELEASE_TAG)"
 fi
 
-fetch() { # fetch <url> <đích>: dùng curl nếu có, không thì wget.
+# FETCH_ATTEMPTS / FETCH_RETRY_DELAY: số lần thử mỗi tệp và số giây chờ giữa hai lần.
+FETCH_ATTEMPTS=3
+FETCH_RETRY_DELAY=2
+
+# fetch <url> <đích>: dùng curl nếu có, không thì wget; thử lại tối đa
+# FETCH_ATTEMPTS lần khi mạng chập chờn. Chỉ coi là hỏng khi RẢNH (không
+# nhận dữ liệu) chứ không giới hạn cả tệp: curl dưới 1 KB/s suốt 60 giây ⇒
+# mã 28; wget -T 60. Lỗi máy chủ trả về rõ ràng (curl 22 = HTTP 4xx như 404,
+# wget 8) KHÔNG thử lại — trả mã ngay để fetch_failed báo lỗi dễ hiểu.
+# Không dùng `wget --tries` (busybox wget không có).
+fetch() {
 	url="$1"
 	dest="$2"
 	if command -v curl >/dev/null 2>&1; then
-		curl -fsSL -o "$dest" "$url"
+		fetch_tool=curl
+		fetch_fatal_rc=22
 	elif command -v wget >/dev/null 2>&1; then
-		wget -q -O "$dest" "$url"
+		fetch_tool=wget
+		fetch_fatal_rc=8
 	else
 		die "cần curl hoặc wget để tải genh, máy này không có cái nào."
 	fi
+	fetch_attempt=1
+	while :; do
+		fetch_rc=0
+		if [ "$fetch_tool" = curl ]; then
+			curl -fsSL --connect-timeout 30 --speed-limit 1024 --speed-time 60 -o "$dest" "$url" || fetch_rc=$?
+		else
+			wget -q -T 60 -O "$dest" "$url" || fetch_rc=$?
+		fi
+		if [ "$fetch_rc" -eq 0 ]; then
+			return 0
+		fi
+		if [ "$fetch_rc" -eq "$fetch_fatal_rc" ] || [ "$fetch_attempt" -ge "$FETCH_ATTEMPTS" ]; then
+			return "$fetch_rc"
+		fi
+		fetch_attempt=$((fetch_attempt + 1))
+		log "genh: tải ${url##*/} bị ngắt ($fetch_tool mã lỗi $fetch_rc) — thử lại lần $fetch_attempt/$FETCH_ATTEMPTS sau $FETCH_RETRY_DELAY giây…"
+		sleep "$FETCH_RETRY_DELAY"
+	done
 }
 
 # fetch_failed <tệp>: báo lỗi tải dễ hiểu thay cho dòng 404 trơ trọi của curl/wget.
