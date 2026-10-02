@@ -17,10 +17,11 @@ test.describe('v0.1.40 — Bản sao ngoài máy', () => {
     await p3Hook(page.request, 'system', 'offsite', { days_ago: 9 });
     await page.goto('/overview');
     const strip = page.getByRole('region', { name: 'Cần Sếp xử lý' });
-    const row = strip.getByTestId('needs-boss-row').filter({ hasText: 'Đã hơn 7 ngày chưa có bản sao ngoài máy' });
+    // Chữ của API thật (gh/health._eval_offsite / ACTIONS) — mock chép đúng.
+    const row = strip.getByTestId('needs-boss-row').filter({ hasText: 'Bản sao ngoài máy đã cũ 9 ngày' });
     await expect(row).toHaveCount(1);
     await expect(row).toHaveAttribute('data-severity', 'warn');
-    await row.getByRole('link', { name: 'Mở Bản sao ngoài máy' }).click();
+    await row.getByRole('link', { name: 'Chọn nơi lưu / sao lưu ngay' }).click();
     await expect(page).toHaveURL(/\/system\?tab=storage&focus=offsite$/);
 
     const card = page.getByRole('region', { name: 'Bản sao ngoài máy' });
@@ -64,6 +65,7 @@ test.describe('v0.1.40 — Bản sao ngoài máy', () => {
     await expect(kit.getByTestId('recovery-key')).toHaveText(/^[A-Z2-7]{5}(-[A-Z2-7]{5}){5}$/);
     await expect(kit.getByRole('img', { name: 'Mã QR của Khoá khôi phục' })).toBeVisible();
     await expect(kit).toContainText('Cất TÁCH khỏi ổ USB');
+    await expect(kit).toContainText('genh import --yes <tệp .ghbundle>');
     await kit.getByRole('button', { name: 'Đã cất xong' }).click();
     await expect(kit).toBeHidden();
     await expect(page.getByTestId('recovery-key')).toHaveCount(0);

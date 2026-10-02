@@ -1,5 +1,6 @@
 import type { SystemHealth } from '@gen-harness/contracts';
 import { useCan, useOrgTimezone } from '../../lib/permissions';
+import { useMe } from '../../lib/queries';
 import { useNow } from '../../lib/useNow';
 import { CardError, Panel, SkeletonLines } from '../common';
 import { TONE_COLOR, healthRows, healthTechRows, healthTips } from './healthModel';
@@ -30,7 +31,9 @@ export function HealthCard() {
 }
 
 function HealthBody({ data, now, tz }: { data: SystemHealth; now: number; tz: string }) {
-  const rows = healthRows(data, now, tz);
+  const canManage = useCan('system.manage');
+  const isOwner = useMe().data?.role?.code === 'owner';
+  const rows = healthRows(data, now, tz, { isOwner, canManage });
   const tech = healthTechRows(data, tz);
   const tips = healthTips(data);
   return (

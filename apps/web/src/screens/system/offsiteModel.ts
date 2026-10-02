@@ -86,8 +86,32 @@ export interface OffsiteView {
 
 const ERROR_STATES = new Set(['failed', 'not_mounted', 'not_configured']);
 
+/**
+ * Vai trò người xem — câu hướng dẫn chỉ nhắc nút người đó CÓ: "Chọn nơi lưu" chỉ Owner; "Sao lưu ra ổ ngoài ngay" cần
+ * `system.manage`; chỉ có `system.read` thì nhờ Owner/quản trị.
+ */
+export interface OffsiteViewer {
+  isOwner: boolean;
+  canManage: boolean;
+}
+const OWNER_VIEWER: OffsiteViewer = { isOwner: true, canManage: true };
+
+const LOSS = 'Hỏng ổ đĩa là mất hết dữ liệu';
+
+/** Việc cần làm tiếp theo (một câu) theo trạng thái + vai trò. */
+export function offsiteNextStep(configured: boolean, who: OffsiteViewer = OWNER_VIEWER): string {
+  if (!configured) {
+    return who.isOwner
+      ? 'Cắm ổ USB/NAS vào máy chủ rồi bấm "Chọn nơi lưu bản sao ngoài máy".'
+      : 'Nhờ Owner cắm ổ USB/NAS vào máy chủ và chọn nơi lưu bản sao ngoài máy.';
+  }
+  return who.canManage
+    ? 'Cắm ổ USB/NAS rồi bấm "Sao lưu ra ổ ngoài ngay".'
+    : 'Báo Owner/quản trị cắm ổ USB/NAS và sao lưu ra ổ ngoài.';
+}
+
 /** Toàn bộ chữ của thẻ "Bản sao ngoài máy" — tuổi tính lại ở trình duyệt (API có `age_days` làm dự phòng). */
-export function offsiteView(o: OffsiteState, now = Date.now(), tz = DEFAULT_TZ): OffsiteView {
+export function offsiteView(o: OffsiteState, now = Date.now(), tz = DEFAULT_TZ, who: OffsiteViewer = OWNER_VIEWER): OffsiteView {
   const fromIso = ageDays(o.last_success_at, now);
   const days = fromIso ?? (o.last_success_at && typeof o.age_days === 'number' ? Math.floor(o.age_days) : null);
   const hasCopy = !!o.last_success_at;
@@ -104,13 +128,12 @@ export function offsiteView(o: OffsiteState, now = Date.now(), tz = DEFAULT_TZ):
     headline = parts.join(' · ');
   }
 
+  const next = offsiteNextStep(!!o.configured, who);
   const warning = !stale
     ? null
     : hasCopy
-      ? `Hỏng ổ đĩa là mất hết dữ liệu — đã ${days ?? 'nhiều'} ngày chưa có bản sao ngoài máy. Cắm ổ USB/NAS rồi bấm "Sao lưu ra ổ ngoài ngay".`
-      : o.configured
-        ? 'Hỏng ổ đĩa là mất hết dữ liệu — chưa có bản sao nào nằm ngoài máy chủ. Cắm ổ USB/NAS rồi bấm "Sao lưu ra ổ ngoài ngay".'
-        : 'Hỏng ổ đĩa là mất hết dữ liệu — chưa có bản sao nào nằm ngoài máy chủ. Cắm ổ USB/NAS vào máy chủ rồi chọn nơi lưu bản sao ngoài máy.';
+      ? `${LOSS} — đã ${days ?? 'nhiều'} ngày chưa có bản sao ngoài máy. ${next}`
+      : `${LOSS} — chưa có bản sao nào nằm ngoài máy chủ. ${next}`;
 
   const code = typeof o.error_code === 'string' ? o.error_code.trim() : '';
   const failed = ERROR_STATES.has(String(o.state)) || (!!code && o.state !== 'ok' && o.state !== 'running');
@@ -173,11 +196,11 @@ export function offsiteApiErrorText(e: unknown): string | null {
   if (!(e instanceof ApiError)) return null;
   switch (e.code) {
     case 'OFFSITE_UNAVAILABLE':
-      return 'Máy chủ chưa nhận được yêu cầu từ Console (trình nhận yêu cầu chưa bật). Chạy lệnh dưới đây một lần trên máy chủ.';
+      return 'Máy chủ chưa nhận được yêu cầu từ Console (trình nhận yêu cầu chưa bật).';
     case 'OFFSITE_IN_PROGRESS':
       return 'Đang sao lưu ra ổ ngoài — chờ xong rồi thử lại.';
     case 'OFFSITE_KEY_MISSING':
-      return 'Máy chủ chưa có Khoá khôi phục — chạy "genh offsite" trên máy chủ một lần để tạo.';
+      return OFFSITE_KEY_MISSING_TEXT;
     case 'PORTABLE_IN_PROGRESS':
       return 'Đang chuẩn bị một gói mang đi khác — chờ tải xong rồi thử lại.';
     case 'UPDATE_IN_PROGRESS':
@@ -188,6 +211,15 @@ export function offsiteApiErrorText(e: unknown): string | null {
       return null;
   }
 }
+
+/** Cùng câu với API (`_key_or_409`): khoá do `genh update` tạo, container api chỉ thấy sau khi được tạo lại. */
+export const OFFSITE_KEY_MISSING_TEXT = 'Máy chủ chưa có Khoá khôi phục — chạy "genh update" một lần trên máy chủ.';
+
+/** Câu mở đầu khối lệnh chạy tay (409 OFFSITE_UNAVAILABLE / yêu cầu bị kẹt). */
+export const MANUAL_COMMAND_INTRO = 'Chạy lệnh dưới đây một lần trên máy chủ:';
+/** Không ghép được lệnh (đường dẫn có ký tự đặc biệt…) ⇒ hướng dẫn bằng lời, KHÔNG đưa lệnh có chỗ giữ chỗ. */
+export const MANUAL_COMMAND_FALLBACK =
+  'Chạy "genh offsite set" kèm đường dẫn đầy đủ của thư mục trên ổ USB/NAS, ngay trên máy chủ (hoặc chọn thư mục có tên không chứa dấu nháy, $ hay `).';
 
 /** Mã lỗi (chuỗi) cho "Chi tiết kỹ thuật". */
 export function errorCodeOf(e: unknown): string {
@@ -203,14 +235,53 @@ export function portableName(now = new Date()): string {
 }
 
 const FRAME_ID = 'gh-portable-frame';
+/** Máy chủ có thể mất tới 30 phút xuất gói trước khi trình duyệt bắt đầu tải — quá thời gian này mới mở khoá nút. */
+export const PORTABLE_PREPARE_MS = 35 * 60_000;
+
+/**
+ * Trạng thái cấp module của lượt "Tải gói mang đi" đang chuẩn bị (sống qua đóng hộp thoại / đổi thẻ trong trang): nút
+ * khoá + dòng trạng thái tới khi khung nhận trang lỗi hoặc hết `PORTABLE_PREPARE_MS`. Bấm lại lúc này sẽ gỡ khung đang
+ * tải (huỷ lượt 1) còn lượt 2 dính khoá máy chủ (409) ⇒ không tệp nào về máy.
+ */
+type PortableListener = (preparing: boolean) => void;
+let portableSince: number | null = null;
+let portableTimer: ReturnType<typeof setTimeout> | null = null;
+const portableListeners = new Set<PortableListener>();
+
+export function portablePreparing(now = Date.now()): boolean {
+  return portableSince != null && now - portableSince < PORTABLE_PREPARE_MS;
+}
+
+function setPortablePreparing(on: boolean): void {
+  if (portableTimer) clearTimeout(portableTimer);
+  portableTimer = null;
+  portableSince = on ? Date.now() : null;
+  if (on) portableTimer = setTimeout(() => setPortablePreparing(false), PORTABLE_PREPARE_MS);
+  for (const l of portableListeners) l(on);
+}
+
+/** Bỏ cờ (lỗi trước khi tải / người dùng huỷ PIN). */
+export function clearPortablePreparing(): void {
+  setPortablePreparing(false);
+}
+
+export function subscribePortable(l: PortableListener): () => void {
+  portableListeners.add(l);
+  return () => {
+    portableListeners.delete(l);
+  };
+}
 
 /**
  * "Tải gói mang đi": trình duyệt tự tải bằng điều hướng một khung ẩn tới URL (gói có thể rất lớn — KHÔNG fetch→blob vào
  * bộ nhớ). Tệp đính kèm thì trình duyệt ghi thẳng xuống đĩa; nếu máy chủ trả lỗi JSON (409/423…) thì khung tải được
- * trang lỗi ⇒ đọc mã lỗi để báo thân thiện. Khung giữ lại trên trang (gỡ sớm có thể cắt ngang lượt tải).
+ * trang lỗi ⇒ đọc mã lỗi để báo thân thiện. Khung giữ lại trên trang (gỡ sớm cắt ngang lượt tải) — đang chuẩn bị một
+ * lượt thì KHÔNG mở lượt mới (trả false).
  */
-export function startPortableDownload(url: string, onError: (code: string, title: string) => void): void {
-  document.getElementById(FRAME_ID)?.remove();
+export function startPortableDownload(url: string, onError: (code: string, title: string) => void): boolean {
+  if (portablePreparing()) return false;
+  setPortablePreparing(true);
+  document.getElementById(FRAME_ID)?.remove(); // khung của lượt cũ đã xong/lỗi (cờ đã bỏ) — gỡ an toàn
   const frame = document.createElement('iframe');
   frame.id = FRAME_ID;
   frame.title = 'Tải gói mang đi';
@@ -227,11 +298,15 @@ export function startPortableDownload(url: string, onError: (code: string, title
     if (!text.trim().startsWith('{')) return;
     try {
       const p = JSON.parse(text) as { code?: unknown; title?: unknown };
-      if (typeof p.code === 'string') onError(p.code, typeof p.title === 'string' ? p.title : '');
+      if (typeof p.code === 'string') {
+        setPortablePreparing(false);
+        onError(p.code, typeof p.title === 'string' ? p.title : '');
+      }
     } catch {
       /* không phải JSON — bỏ qua */
     }
   });
   frame.src = url;
   document.body.appendChild(frame);
+  return true;
 }

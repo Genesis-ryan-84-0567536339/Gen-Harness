@@ -119,16 +119,31 @@ export function RecoveryKitDialog({ onClose }: { onClose: () => void }) {
           ) : null}
         </div>
       ) : load.isError ? (
-        <InlineError>
-          {load.error instanceof PinCancelledError ? 'Chưa mở — cần nhập mã PIN.' : (offsiteApiErrorText(load.error) ?? errorText(load.error))}
-          <details className="tech-detail">
-            <summary>Chi tiết kỹ thuật</summary>
-            <code className="mono">{errorCodeOf(load.error)}</code>
-          </details>
-        </InlineError>
+        <RecoveryKitError error={load.error} onRetry={() => load.mutate()} />
       ) : (
         <SkeletonLines rows={4} padding="0" />
       )}
     </Dialog>
+  );
+}
+
+/** Lỗi mở Bộ khôi phục: câu thân thiện + "Chi tiết kỹ thuật" CHỈ khi có mã (huỷ PIN/lỗi mạng thì không có) + Thử lại. */
+function RecoveryKitError({ error, onRetry }: { error: unknown; onRetry: () => void }) {
+  const code = error instanceof PinCancelledError ? '' : errorCodeOf(error);
+  return (
+    <InlineError>
+      {error instanceof PinCancelledError ? 'Chưa mở — cần nhập mã PIN.' : (offsiteApiErrorText(error) ?? errorText(error))}
+      {code ? (
+        <details className="tech-detail">
+          <summary>Chi tiết kỹ thuật</summary>
+          <code className="mono">{code}</code>
+        </details>
+      ) : null}
+      <div className="rk-retry">
+        <Button variant="secondary" className="btn-27" icon="ph ph-arrow-clockwise" onClick={onRetry}>
+          Thử lại
+        </Button>
+      </div>
+    </InlineError>
   );
 }

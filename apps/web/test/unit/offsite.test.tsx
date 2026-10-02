@@ -10,7 +10,19 @@ import { PinDialogHost } from '../../src/shell/PinDialogHost';
 import { queryClient } from '../../src/lib/queryClient';
 import { qk } from '../../src/lib/queries';
 import { qkSystem } from '../../src/screens/system/queries';
-import { ageDays, offsiteErrorText, offsiteRequestView, offsiteScheduleText, offsiteView } from '../../src/screens/system/offsiteModel';
+import type { SystemHealth } from '@gen-harness/contracts';
+import {
+  ageDays,
+  clearPortablePreparing,
+  offsiteApiErrorText,
+  offsiteErrorText,
+  offsiteRequestView,
+  offsiteScheduleText,
+  offsiteView,
+} from '../../src/screens/system/offsiteModel';
+import { healthRows } from '../../src/screens/system/healthModel';
+import { useToasts } from '../../src/lib/toast';
+import { ApiError } from '@gen-harness/contracts';
 
 /**
  * v0.1.40 (F-12): thẻ "Bản sao ngoài máy" (Dữ liệu & lưu trữ) + Bộ khôi phục + chuông kind mới. Khuôn API theo hợp đồng
@@ -21,11 +33,13 @@ const DAY = 24 * 3600 * 1000;
 const json = (status: number, body?: unknown) =>
   new Response(body === undefined ? null : JSON.stringify(body), { status, headers: { 'Content-Type': status >= 400 ? 'application/problem+json' : 'application/json' } });
 
-function meAs(role: 'owner' | 'manager', pinUntil: string | null = null) {
+type Role = 'owner' | 'manager' | 'auditor';
+function meAs(role: Role, pinUntil: string | null = null) {
   return {
     id: 'u', email: `${role}@genesis.local`, display_name: role, role: { code: role, name: role },
     org: { id: 'o', name: 'x', timezone: 'Asia/Ho_Chi_Minh', currency: 'VND' }, addressing: { self: 'Anh', bot_calls_me: 'Sếp' },
-    pin_verified_until: pinUntil, permissions: { 'system.read': 'all', 'system.manage': 'all' },
+    pin_verified_until: pinUntil,
+    permissions: role === 'auditor' ? { 'system.read': 'all' } : { 'system.read': 'all', 'system.manage': 'all' },
   };
 }
 
@@ -44,7 +58,7 @@ interface Call {
   method: string;
   body: unknown;
 }
-function mockFetch(handler: (c: Call) => Response | undefined, role: 'owner' | 'manager' = 'owner') {
+function mockFetch(handler: (c: Call) => Response | undefined, role: Role = 'owner') {
   const calls: Call[] = [];
   vi.stubGlobal(
     'fetch',
@@ -60,7 +74,7 @@ function mockFetch(handler: (c: Call) => Response | undefined, role: 'owner' | '
   return calls;
 }
 
-function renderPanel(role: 'owner' | 'manager' = 'owner') {
+function renderPanel(role: Role = 'owner') {
   queryClient.setQueryData(qk.me, meAs(role));
   return render(
     <QueryClientProvider client={queryClient}>
@@ -89,6 +103,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.unstubAllGlobals();
+  clearPortablePreparing();
   document.getElementById('gh-portable-frame')?.remove();
 });
 
@@ -224,7 +239,7 @@ describe('Bản sao ngoài máy — thẻ', () => {
     mockFetch((c) => {
       if (c.url.endsWith('/system/offsite') && c.method === 'GET') return json(200, state());
       if (c.url.endsWith('/system/offsite/destination')) {
-        return json(409, { status: 409, code: 'OFFSITE_UNAVAILABLE', title: 'Máy chủ chưa bật nhận yêu cầu', manual_command: 'genh offsite set E:\\GenBackup' });
+        return json(409, { status: 409, code: 'OFFSITE_UNAVAILABLE', title: 'Máy chủ chưa nhận lệnh từ Console — chạy lệnh sau một lần trên máy chủ', manual_command: 'genh offsite set "E:\\GenBackup"' });
       }
       return undefined;
     });
@@ -237,7 +252,8 @@ describe('Bản sao ngoài máy — thẻ', () => {
     await user.type(input, 'E:\\GenBackup');
     await user.click(within(dlg).getByRole('button', { name: 'Lưu' }));
     const cmd = await within(dlg).findByTestId('offsite-manual-command');
-    expect(within(cmd).getByText('genh offsite set E:\\GenBackup')).toBeInTheDocument();
+    expect(within(cmd).getByText('genh offsite set "E:\\GenBackup"')).toBeInTheDocument();
+    expect(cmd).toHaveTextContent('Chạy lệnh dưới đây một lần trên máy chủ:');
     expect(within(cmd).getByRole('button', { name: 'Chép lệnh' })).toBeInTheDocument();
   });
 
@@ -314,6 +330,180 @@ describe('Bản sao ngoài máy — thẻ', () => {
     expect(frame.getAttribute('src')).toBe('/api/v1/system/offsite/portable');
     expect(calls.some((c) => c.url.includes('/system/offsite/portable'))).toBe(false);
     expect(calls.some((c) => c.url.endsWith('/auth/pin/verify'))).toBe(true);
+  });
+});
+
+describe('Bản sao ngoài máy — câu theo vai trò, lệnh chạy tay, khoá, gói mang đi', () => {
+  const OWNER = { isOwner: true, canManage: true };
+  const MANAGER = { isOwner: false, canManage: true };
+  const VIEWER = { isOwner: false, canManage: false };
+
+  it('cảnh báo chỉ nhắc nút người xem CÓ: chưa cấu hình ⇒ Owner "Chọn nơi lưu", Manager/Viewer "Nhờ Owner"; đã cấu hình ⇒ Viewer "Báo Owner/quản trị"', () => {
+    const fresh = state({ configured: false, state: 'not_configured', last_success_at: null, last_attempt_at: null, age_days: null, stale: true });
+    expect(offsiteView(fresh, Date.now(), 'Asia/Ho_Chi_Minh', OWNER).warning).toContain('bấm "Chọn nơi lưu bản sao ngoài máy"');
+    for (const who of [MANAGER, VIEWER]) {
+      const w = offsiteView(fresh, Date.now(), 'Asia/Ho_Chi_Minh', who).warning ?? '';
+      expect(w).toContain('Nhờ Owner cắm ổ USB/NAS vào máy chủ và chọn nơi lưu bản sao ngoài máy.');
+      expect(w).not.toContain('Sao lưu ra ổ ngoài ngay');
+    }
+    const old = state({ last_success_at: new Date(Date.now() - 9 * DAY).toISOString(), age_days: 9, stale: true });
+    expect(offsiteView(old, Date.now(), 'Asia/Ho_Chi_Minh', MANAGER).warning).toContain('bấm "Sao lưu ra ổ ngoài ngay"');
+    const vw = offsiteView(old, Date.now(), 'Asia/Ho_Chi_Minh', VIEWER).warning ?? '';
+    expect(vw).toContain('Báo Owner/quản trị cắm ổ USB/NAS và sao lưu ra ổ ngoài.');
+    expect(vw).not.toContain('bấm');
+  });
+
+  it('thẻ Sức khoẻ: gợi ý dòng "Bản sao ngoài máy" theo cấu hình + vai trò (không bảo bấm nút đang khoá)', () => {
+    const now = Date.now();
+    const h: SystemHealth = {
+      checked_at: new Date(now).toISOString(),
+      overall: 'warn',
+      worker: { state: 'ok', alive: true, last_seen_at: new Date(now - 60_000).toISOString(), silent_minutes: null },
+      browser: { state: 'ok', last_heartbeat_at: new Date(now - 30_000).toISOString() },
+      queues: [{ stream: 'gh:raw', dlq: 0 }],
+      crons: [],
+      backup: { configured: true, latest_at: new Date(now - 3_600_000).toISOString(), age_hours: 1, stale: false },
+      update: { state: 'idle', failed: false, blocked_version: null, finished_at: null },
+      disk: { state: 'ok', free_bytes: 40 * 1024 ** 3, min_bytes: 5 * 1024 ** 3, checked_at: new Date(now).toISOString() },
+      issues: [],
+      offsite: { state: 'not_configured', configured: false, last_success_at: null, age_days: null, stale: true, error_code: null, schedule: null },
+    } as SystemHealth;
+    const hint = (who: { isOwner: boolean; canManage: boolean }, hh: SystemHealth = h) =>
+      healthRows(hh, Date.now(), 'Asia/Ho_Chi_Minh', who).find((r) => r.key === 'offsite')?.hint ?? '';
+    expect(hint(OWNER)).toContain('bấm "Chọn nơi lưu bản sao ngoài máy"');
+    expect(hint(MANAGER)).toContain('nhờ Owner cắm ổ USB/NAS');
+    expect(hint(MANAGER)).not.toContain('Sao lưu ra ổ ngoài ngay');
+    const cfg = { ...h, offsite: { ...h.offsite!, configured: true, state: 'ok', last_success_at: new Date(Date.now() - 9 * DAY).toISOString(), age_days: 9 } } as SystemHealth;
+    expect(hint(MANAGER, cfg)).toContain('bấm "Sao lưu ra ổ ngoài ngay"');
+    expect(hint(VIEWER, cfg)).toContain('báo Owner/quản trị');
+  });
+
+  it('Manager/Viewer khi chưa cấu hình: nút Sao lưu ngay khoá đúng lý do; Viewer không có nút nào', async () => {
+    const fresh = state({ configured: false, state: 'not_configured', last_success_at: null, last_attempt_at: null, age_days: null, stale: true, dest: null });
+    mockFetch((c) => (c.url.endsWith('/system/offsite') ? json(200, fresh) : undefined), 'manager');
+    const { unmount } = renderPanel('manager');
+    await screen.findByTestId('offsite-warning');
+    const run = screen.getByRole('button', { name: 'Sao lưu ra ổ ngoài ngay' });
+    expect(run).toBeDisabled();
+    expect(run).toHaveAttribute('title', 'Owner chưa chọn nơi lưu bản sao ngoài máy');
+    expect(screen.getByTestId('offsite-warning')).toHaveTextContent('Nhờ Owner');
+    unmount();
+    queryClient.clear();
+    mockFetch((c) => (c.url.endsWith('/system/offsite') ? json(200, fresh) : undefined), 'auditor');
+    renderPanel('auditor');
+    expect(await screen.findByTestId('offsite-warning')).toHaveTextContent('Nhờ Owner');
+    expect(screen.queryByRole('button', { name: 'Sao lưu ra ổ ngoài ngay' })).toBeNull();
+  });
+
+  it('yêu cầu bị kẹt ⇒ lệnh chạy tay của CHÍNH yêu cầu (vd genh offsite run); không ghép được lệnh ⇒ câu hướng dẫn, không chỗ giữ chỗ', async () => {
+    const old = new Date(Date.now() - 30 * 60_000).toISOString();
+    mockFetch((c) =>
+      c.url.endsWith('/system/offsite')
+        ? json(200, state({ request: { state: 'stalled', action: 'run', requested_at: old }, can_request: false, manual_command: 'genh offsite run' }))
+        : undefined,
+    );
+    const { unmount } = renderPanel();
+    const cmd = await screen.findByTestId('offsite-manual-command');
+    expect(cmd).toHaveTextContent('Chạy lệnh dưới đây một lần trên máy chủ:');
+    expect(within(cmd).getByText('genh offsite run')).toBeInTheDocument();
+    unmount();
+    queryClient.clear();
+    mockFetch((c) =>
+      c.url.endsWith('/system/offsite')
+        ? json(200, state({ request: { state: 'stalled', action: 'set', requested_at: old }, can_request: false, manual_command: null }))
+        : undefined,
+    );
+    renderPanel();
+    expect(await screen.findByTestId('offsite-manual-fallback')).toHaveTextContent('genh offsite set" kèm đường dẫn đầy đủ');
+    expect(screen.queryByTestId('offsite-manual-command')).toBeNull();
+    expect(document.body.textContent).not.toContain('<path>');
+  });
+
+  it('chưa có Khoá khôi phục ⇒ "Tải gói mang đi"/"Bộ khôi phục" khoá sẵn, ghi lý do "genh update" (không bắt nhập PIN rồi mới báo)', async () => {
+    const calls = mockFetch((c) => (c.url.endsWith('/system/offsite') ? json(200, state({ key_present: false })) : undefined));
+    renderPanel();
+    const portable = await screen.findByRole('button', { name: 'Tải gói mang đi' });
+    const kit = screen.getByRole('button', { name: 'Bộ khôi phục' });
+    const why = 'Máy chủ chưa có Khoá khôi phục — chạy "genh update" một lần trên máy chủ.';
+    expect(portable).toBeDisabled();
+    expect(kit).toBeDisabled();
+    expect(portable).toHaveAttribute('title', why);
+    expect(screen.getByTestId('offsite-key-missing')).toHaveTextContent(why);
+    expect(offsiteApiErrorText(new ApiError(409, { code: 'OFFSITE_KEY_MISSING', title: 'x' }))).toBe(why);
+    expect(calls.some((c) => c.url.endsWith('/auth/pin/verify'))).toBe(false);
+  });
+
+  it('Tải gói mang đi: đang chuẩn bị ⇒ nút khoá + dòng "đừng tải lại"; lỗi máy chủ ⇒ lỗi nằm trên thẻ kèm "Chi tiết kỹ thuật", mở khoá nút', async () => {
+    mockFetch((c) => {
+      if (c.url.endsWith('/system/offsite')) return json(200, state());
+      if (c.url.endsWith('/auth/me')) return json(200, meAs('owner', new Date(Date.now() + 1800_000).toISOString()));
+      return undefined;
+    });
+    const user = userEvent.setup();
+    renderPanel();
+    await user.click(await screen.findByRole('button', { name: 'Tải gói mang đi' }));
+    const dlg = await screen.findByRole('dialog', { name: 'Tải gói mang đi?' });
+    expect(dlg).toHaveTextContent('Đừng tải lại hay đóng trang cho tới khi trình duyệt bắt đầu tải');
+    await user.click(within(dlg).getByRole('button', { name: 'Tải về' }));
+    await waitFor(() => expect(document.getElementById('gh-portable-frame')).not.toBeNull());
+    const frame = document.getElementById('gh-portable-frame') as HTMLIFrameElement;
+    expect(await screen.findByTestId('offsite-portable-preparing')).toHaveTextContent('đừng tải lại hay đóng trang');
+    expect(screen.getByRole('button', { name: 'Tải gói mang đi' })).toBeDisabled();
+
+    // Máy chủ trả trang lỗi JSON vào khung ⇒ báo trên thẻ (không chỉ toast), khung cũ không bị gỡ trước đó.
+    const page = JSON.stringify({ status: 500, code: 'PORTABLE_FAILED', title: 'Không tạo được gói mang đi' });
+    Object.defineProperty(frame, 'contentDocument', { configurable: true, value: { body: { textContent: page } } });
+    act(() => {
+      frame.dispatchEvent(new Event('load'));
+    });
+    const err = await screen.findByTestId('offsite-portable-error');
+    expect(err).toHaveTextContent('Không tạo được gói mang đi');
+    expect(within(err).getByText('Chi tiết kỹ thuật')).toBeInTheDocument();
+    expect(err).toHaveTextContent('PORTABLE_FAILED');
+    expect(screen.queryByTestId('offsite-portable-preparing')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Tải gói mang đi' })).toBeEnabled();
+    expect(screen.queryByText('[object Object]')).toBeNull();
+  });
+
+  it('Bộ khôi phục: huỷ PIN ⇒ không có "Chi tiết kỹ thuật" rỗng, có nút Thử lại gọi lại', async () => {
+    const calls = mockFetch((c) => {
+      if (c.url.endsWith('/system/offsite')) return json(200, state());
+      if (c.url.endsWith('/system/offsite/recovery-kit')) return PIN_REQUIRED();
+      return undefined;
+    });
+    const user = userEvent.setup();
+    renderPanel();
+    await user.click(await screen.findByRole('button', { name: 'Bộ khôi phục' }));
+    const pin = await screen.findByRole('dialog', { name: 'Mã PIN xác nhận thao tác' });
+    await user.click(within(pin).getByRole('button', { name: /Huỷ/ }));
+    const dlg = await screen.findByRole('dialog', { name: 'Bộ khôi phục' });
+    expect(await within(dlg).findByText(/Chưa mở — cần nhập mã PIN\./)).toBeInTheDocument();
+    expect(within(dlg).queryByText('Chi tiết kỹ thuật')).toBeNull();
+    const before = calls.filter((c) => c.url.endsWith('/recovery-kit')).length;
+    await user.click(within(dlg).getByRole('button', { name: 'Thử lại' }));
+    await waitFor(() => expect(calls.filter((c) => c.url.endsWith('/recovery-kit')).length).toBeGreaterThan(before));
+  });
+
+  it('nút Chép khi trình duyệt không có navigator.clipboard (http) ⇒ báo "Không chép được", không im lặng', async () => {
+    const old = new Date(Date.now() - 30 * 60_000).toISOString();
+    mockFetch((c) =>
+      c.url.endsWith('/system/offsite')
+        ? json(200, state({ request: { state: 'stalled', action: 'run', requested_at: old }, manual_command: 'genh offsite run' }))
+        : undefined,
+    );
+    const orig = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true });
+    try {
+      const user = userEvent.setup();
+      renderPanel();
+      const cmd = await screen.findByTestId('offsite-manual-command');
+      Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true });
+      await user.click(within(cmd).getByRole('button', { name: 'Chép lệnh' }));
+      expect(useToasts.getState().toasts.some((t) => t.text === 'Không chép được — bôi đen lệnh rồi chép tay.')).toBe(true);
+    } finally {
+      if (orig) Object.defineProperty(navigator, 'clipboard', orig);
+      else delete (navigator as unknown as { clipboard?: unknown }).clipboard;
+    }
   });
 });
 

@@ -269,6 +269,7 @@ export function createMock(opts: P4SystemOptions) {
   // ── v0.1.40 (F-12): Bản sao ngoài máy — mock mô phỏng genh trên máy chủ (run/offsite-status.json + hộp thư
   // run/request/offsite.json). Yêu cầu nằm 'requested' tới khi hook `offsite` đổi (e2e thấy "Đang chờ máy chủ nhận…").
   const OFFSITE_KEY_MOCK = 'ABCDE-FGHIJ-KLMN2-OPQR3-STUV4-WXYZ5';
+  const OFFSITE_KEY_MISSING_TITLE = 'Chưa có Khoá khôi phục trên máy chủ — chạy `genh update` một lần trên máy chủ để tạo khoá';
   const offsite = {
     configured: !opts.fresh,
     dest: opts.fresh ? '' : '/media/sep/GEN-USB',
@@ -286,12 +287,23 @@ export function createMock(opts: P4SystemOptions) {
     manual_command: null as string | null,
     key_present: true,
   };
-  const MANUAL = (path: string) => `~/.gen-harness/bin/genh offsite set ${path || '<đường dẫn>'}`;
+  // Như gh/system_api/offsite.manual_command: lệnh theo đúng việc; `set` chỉ khi có đường dẫn dùng được trong nháy kép.
+  const MANUAL = (action: string | null, path?: string | null): string | null =>
+    action === 'run'
+      ? 'genh offsite run'
+      : action === 'disable'
+        ? 'genh offsite disable'
+        : action === 'set' && path && ![...path].some((c) => '"$`'.includes(c) || c.charCodeAt(0) < 32)
+          ? `genh offsite set "${path}"`
+          : null;
+  let offsiteRequestPath: string | null = null;
+  const UNAVAILABLE_TITLE = 'Máy chủ chưa nhận lệnh từ Console — chạy lệnh sau một lần trên máy chủ';
   function offsiteView() {
     const last = offsite.last_success_at || null;
     const age = last ? Math.max(0, Math.round(((Date.now() - Date.parse(last)) / DAY) * 10) / 10) : null;
     return {
       ...offsite,
+      manual_command: offsite.request.state === 'idle' ? null : MANUAL(offsite.request.action, offsiteRequestPath),
       dest: offsite.dest || null,
       error_code: offsite.error_code || null,
       last_attempt_at: offsite.last_attempt_at || null,
@@ -456,7 +468,7 @@ export function createMock(opts: P4SystemOptions) {
       }
       if (p === '/system/offsite/run' && m === 'POST') {
         if (!has(ctx, 'system.manage')) return problem(403, 'FORBIDDEN', 'Vai trò không có quyền này');
-        if (!offsite.can_request) return problem(409, 'OFFSITE_UNAVAILABLE', 'Máy chủ chưa bật nhận yêu cầu từ Console', { manual_command: '~/.gen-harness/bin/genh offsite run' });
+        if (!offsite.can_request) return problem(409, 'OFFSITE_UNAVAILABLE', UNAVAILABLE_TITLE, { manual_command: MANUAL('run') });
         if (offsite.request.state === 'requested' || offsite.state === 'running') return problem(409, 'OFFSITE_IN_PROGRESS', 'Đang sao lưu ra ổ ngoài');
         offsite.request = { state: 'requested', action: 'run', requested_at: new Date().toISOString() };
         return reply(202, offsiteView());
@@ -469,31 +481,36 @@ export function createMock(opts: P4SystemOptions) {
         if (path === '/' || path.startsWith('/home') || path.startsWith('/root')) {
           return problem(422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors: { path: 'Đây là ổ chính của máy chủ — chọn ổ USB/NAS khác' } });
         }
-        if (!offsite.can_request) return problem(409, 'OFFSITE_UNAVAILABLE', 'Máy chủ chưa bật nhận yêu cầu từ Console', { manual_command: MANUAL(path) });
+        if (!offsite.can_request) return problem(409, 'OFFSITE_UNAVAILABLE', UNAVAILABLE_TITLE, { manual_command: MANUAL('set', path) });
         offsite.request = { state: 'requested', action: 'set', requested_at: new Date().toISOString() };
+        offsiteRequestPath = path;
         return reply(202, offsiteView());
       }
       if (p === '/system/offsite/disable' && m === 'POST') {
         if (!pin(ctx, 'offsite.disable')) return true;
-        if (!offsite.can_request) return problem(409, 'OFFSITE_UNAVAILABLE', 'Máy chủ chưa bật nhận yêu cầu từ Console', { manual_command: '~/.gen-harness/bin/genh offsite disable' });
+        if (!offsite.can_request) return problem(409, 'OFFSITE_UNAVAILABLE', UNAVAILABLE_TITLE, { manual_command: MANUAL('disable') });
         offsite.request = { state: 'requested', action: 'disable', requested_at: new Date().toISOString() };
         return reply(202, offsiteView());
       }
       if (p === '/system/offsite/recovery-kit' && m === 'GET') {
         if (!pin(ctx, 'offsite.recovery_kit')) return true;
-        if (!offsite.key_present) return problem(409, 'OFFSITE_KEY_MISSING', 'Máy chủ chưa có khoá khôi phục');
+        if (!offsite.key_present) return problem(409, 'OFFSITE_KEY_MISSING', OFFSITE_KEY_MISSING_TITLE);
+        // Chép đúng gh/system_api/offsite.py RECOVERY_STEPS / RECOVERY_WARNING.
         return reply(200, {
-          key: OFFSITE_KEY_MOCK, key_id: offsite.key_id,
+          key: OFFSITE_KEY_MOCK, key_id: offsite.key_id, created_hint: '2026-10-01',
           steps: [
-            'Cài Gen-Harness trên máy mới (genh install).',
-            'Cắm ổ USB/NAS có bản sao, chạy: genh restore-bundle <tệp .ghbundle>.',
-            'Nhập Khoá khôi phục này khi được hỏi.',
+            'Cài Gen-Harness trên máy mới theo hướng dẫn cài đặt (chưa cần tạo dữ liệu gì).',
+            'Cắm ổ USB (hoặc mở thư mục NAS) chứa bản sao ngoài máy, chọn tệp .ghbundle mới nhất.',
+            'Chạy trên máy mới: genh import --yes <tệp .ghbundle>',
+            "Khi được hỏi mật khẩu gói, nhập Khoá khôi phục này (gõ đủ cả dấu '-').",
+            'Đăng nhập Console bằng tài khoản Owner cũ và kiểm tra dữ liệu.',
           ],
-          warning: 'Ai có khoá này và ổ USB là mở được toàn bộ dữ liệu — cất ở nơi khác ổ USB.',
+          warning: 'Cất Bộ khôi phục TÁCH khỏi ổ USB: ai có cả hai sẽ đọc được toàn bộ dữ liệu',
         });
       }
       if (p === '/system/offsite/portable' && m === 'GET') {
         if (!pin(ctx, 'offsite.portable')) return true;
+        if (!offsite.key_present) return problem(409, 'OFFSITE_KEY_MISSING', OFFSITE_KEY_MISSING_TITLE);
         return ctx.text(200, 'application/octet-stream', 'GHBUNDLE-MOCK', 'gen-harness-portable.ghbundle');
       }
       return problem(404, 'NOT_FOUND', 'Không tìm thấy');

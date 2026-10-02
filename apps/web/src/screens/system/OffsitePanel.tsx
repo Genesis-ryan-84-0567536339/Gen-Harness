@@ -13,24 +13,32 @@ import { useNow } from '../../lib/useNow';
 import { CardError, InlineError, Panel, SkeletonLines } from '../common';
 import { RecoveryKitDialog } from './RecoveryKitDialog';
 import {
+  MANUAL_COMMAND_FALLBACK,
+  MANUAL_COMMAND_INTRO,
   OFFSITE_KEY,
+  OFFSITE_KEY_MISSING_TEXT,
   OFFSITE_PATH_HINTS,
+  clearPortablePreparing,
   errorCodeOf,
   manualCommandOf,
   offsiteApiErrorText,
   offsiteBusy,
   offsiteRequestView,
   offsiteView,
+  portablePreparing,
   startPortableDownload,
+  subscribePortable,
 } from './offsiteModel';
 
 /** Lỗi API ⇒ câu thân thiện + "Chi tiết kỹ thuật" (mã, chuỗi) — không bao giờ render object. */
 function ErrorBlock({ error }: { error: unknown }) {
   if (error instanceof PinCancelledError) return <InlineError>Chưa làm — cần nhập mã PIN.</InlineError>;
   const code = errorCodeOf(error);
+  const unavailable = error instanceof ApiError && error.code === 'OFFSITE_UNAVAILABLE';
   return (
     <InlineError>
       {offsiteApiErrorText(error) ?? errorText(error)}
+      {unavailable ? ` ${MANUAL_COMMAND_FALLBACK}` : null}
       {code ? (
         <details className="tech-detail">
           <summary>Chi tiết kỹ thuật</summary>
@@ -44,7 +52,12 @@ function ErrorBlock({ error }: { error: unknown }) {
 /** Lệnh chạy một lần trên máy chủ, dạng mã + nút Chép. */
 function CommandBlock({ command, intro }: { command: string; intro: string }) {
   const copy = () => {
-    void navigator.clipboard?.writeText(command).then(
+    // Console mở qua http (không an toàn) ⇒ không có navigator.clipboard — vẫn phải báo, không im lặng.
+    if (!navigator.clipboard?.writeText) {
+      toast('Không chép được — bôi đen lệnh rồi chép tay.', 'bad');
+      return;
+    }
+    navigator.clipboard.writeText(command).then(
       () => toast('Đã chép lệnh.', 'ok'),
       () => toast('Không chép được — bôi đen lệnh rồi chép tay.', 'bad'),
     );
@@ -73,6 +86,19 @@ async function hasPinSession(): Promise<boolean> {
   }
 }
 
+/** Lượt "Tải gói mang đi" đang chuẩn bị (cờ cấp module — sống qua đóng hộp thoại). */
+function usePortablePreparing(): boolean {
+  const [on, setOn] = useState(() => portablePreparing());
+  useEffect(() => subscribePortable(setOn), []);
+  return on;
+}
+
+/** Lỗi "Tải gói mang đi" giữ trên thẻ (không chỉ toast tự tắt): câu thân thiện + mã cho "Chi tiết kỹ thuật". */
+interface PortableError {
+  text: string;
+  code: string;
+}
+
 /**
  * v0.1.40 (F-12): "Bản sao ngoài máy" — bản sao dữ liệu ra ổ USB/NAS cắm vào máy chủ (genh làm thật, lịch Chủ nhật
  * ~05:30). Hiện lần gần nhất + cảnh báo > 7 ngày; Owner chọn nơi lưu (PIN), tải gói mang đi (PIN) và xem Bộ khôi phục
@@ -89,6 +115,8 @@ export function OffsitePanel() {
   const [choosing, setChoosing] = useState(false);
   const [kitOpen, setKitOpen] = useState(false);
   const [portableOpen, setPortableOpen] = useState(false);
+  const [portableError, setPortableError] = useState<PortableError | null>(null);
+  const preparing = usePortablePreparing();
 
   const q = useQuery({
     queryKey: OFFSITE_KEY,
@@ -122,7 +150,8 @@ export function OffsitePanel() {
 
   if (!canRead) return null;
   const d = q.data as OffsiteState | undefined;
-  const v = d ? offsiteView(d, now, tz) : null;
+  const v = d ? offsiteView(d, now, tz, { isOwner, canManage }) : null;
+  const keyMissing = d?.key_present === false;
   const rq = offsiteRequestView(d, now);
   const busy = rq.kind === 'waiting' || rq.kind === 'running';
   const runCmd = manualCommandOf(runNow.error);
@@ -143,7 +172,7 @@ export function OffsitePanel() {
             data-gen-target="system.offsite.run"
             loading={runNow.isPending || rq.kind === 'running'}
             disabled={!d || !d.configured || busy}
-            title={d && !d.configured ? 'Chọn nơi lưu bản sao ngoài máy trước' : undefined}
+            title={d && !d.configured ? (isOwner ? 'Chọn nơi lưu bản sao ngoài máy trước' : 'Owner chưa chọn nơi lưu bản sao ngoài máy') : undefined}
             onClick={() => runNow.mutate()}
           >
             Sao lưu ra ổ ngoài ngay
@@ -162,8 +191,14 @@ export function OffsitePanel() {
               <Icon name={rq.kind === 'stalled' ? 'ph ph-warning' : 'ph ph-circle-notch'} size={13} className={rq.kind === 'stalled' ? undefined : 'spin'} /> {rq.text}
             </div>
           ) : null}
-          {rq.kind === 'stalled' && d.manual_command ? (
-            <CommandBlock command={d.manual_command} intro="Chạy lệnh dưới đây một lần trên máy chủ để làm ngay:" />
+          {rq.kind === 'stalled' && canManage ? (
+            d.manual_command ? (
+              <CommandBlock command={d.manual_command} intro={MANUAL_COMMAND_INTRO} />
+            ) : (
+              <p className="muted-note" data-testid="offsite-manual-fallback">
+                {MANUAL_COMMAND_FALLBACK}
+              </p>
+            )
           ) : null}
 
           <p className="offsite-latest" data-testid="offsite-latest">
@@ -209,7 +244,7 @@ export function OffsitePanel() {
 
           {runNow.isError ? (
             runCmd ? (
-              <CommandBlock command={runCmd} intro={offsiteApiErrorText(runNow.error) ?? errorText(runNow.error)} />
+              <CommandBlock command={runCmd} intro={`${offsiteApiErrorText(runNow.error) ?? errorText(runNow.error)} ${MANUAL_COMMAND_INTRO}`} />
             ) : (
               <ErrorBlock error={runNow.error} />
             )
@@ -220,15 +255,62 @@ export function OffsitePanel() {
               <Button variant="secondary" className="btn-30" icon="ph ph-folder-open" data-gen-target="system.offsite.choose" disabled={busy} onClick={() => setChoosing(true)}>
                 Chọn nơi lưu bản sao ngoài máy
               </Button>
-              <Button variant="secondary" className="btn-30" icon="ph ph-download-simple" data-gen-target="system.offsite.portable" onClick={() => setPortableOpen(true)}>
+              <Button
+                variant="secondary"
+                className="btn-30"
+                icon="ph ph-download-simple"
+                data-gen-target="system.offsite.portable"
+                disabled={keyMissing || preparing}
+                loading={preparing}
+                title={keyMissing ? OFFSITE_KEY_MISSING_TEXT : preparing ? 'Đang chuẩn bị gói mang đi' : undefined}
+                onClick={() => {
+                  setPortableError(null);
+                  setPortableOpen(true);
+                }}
+              >
                 Tải gói mang đi
               </Button>
-              <Button variant="secondary" className="btn-30" icon="ph ph-key" data-gen-target="system.offsite.kit" onClick={() => setKitOpen(true)}>
+              <Button
+                variant="secondary"
+                className="btn-30"
+                icon="ph ph-key"
+                data-gen-target="system.offsite.kit"
+                disabled={keyMissing}
+                title={keyMissing ? OFFSITE_KEY_MISSING_TEXT : undefined}
+                onClick={() => setKitOpen(true)}
+              >
                 Bộ khôi phục
               </Button>
             </div>
           ) : null}
-          {isOwner ? <p className="muted-note offsite-note">Gói mang đi đã mã hoá — mở bằng Bộ khôi phục.</p> : null}
+          {isOwner && keyMissing ? (
+            <p className="muted-note offsite-note" data-testid="offsite-key-missing">
+              {OFFSITE_KEY_MISSING_TEXT}
+            </p>
+          ) : null}
+          {isOwner && preparing ? (
+            <div className="offsite-req offsite-req--waiting" role="status" aria-live="polite" data-testid="offsite-portable-preparing">
+              <Icon name="ph ph-circle-notch" size={13} className="spin" />{' '}
+              <span>
+                Đang chuẩn bị gói mang đi (có thể tới 30 phút) — đừng tải lại hay đóng trang cho tới khi trình duyệt bắt đầu tải.
+              </span>{' '}
+              <Button variant="ghost" className="btn-27" onClick={clearPortablePreparing}>
+                Trình duyệt đã bắt đầu tải
+              </Button>
+            </div>
+          ) : null}
+          {isOwner && portableError ? (
+            <div className="offsite-error" role="alert" data-testid="offsite-portable-error">
+              <span>{portableError.text}</span>
+              {portableError.code ? (
+                <details className="tech-detail">
+                  <summary>Chi tiết kỹ thuật</summary>
+                  <code className="mono">{portableError.code}</code>
+                </details>
+              ) : null}
+            </div>
+          ) : null}
+          {isOwner && !keyMissing ? <p className="muted-note offsite-note">Gói mang đi đã mã hoá — mở bằng Bộ khôi phục.</p> : null}
         </>
       ) : null}
 
@@ -244,7 +326,7 @@ export function OffsitePanel() {
         />
       ) : null}
       {kitOpen ? <RecoveryKitDialog onClose={() => setKitOpen(false)} /> : null}
-      {portableOpen ? <PortableDialog onClose={() => setPortableOpen(false)} /> : null}
+      {portableOpen ? <PortableDialog onClose={() => setPortableOpen(false)} onError={setPortableError} /> : null}
     </Panel>
   );
 }
@@ -297,7 +379,7 @@ function ChooseDestinationDialog({ current, onClose, onSaved }: { current: strin
       <p className="muted-note">Cần mã PIN. Máy chủ nhận yêu cầu trong khoảng 1 phút rồi kiểm ổ và chạy bản sao đầu tiên.</p>
       {save.isError && !fieldError ? (
         cmd ? (
-          <CommandBlock command={cmd} intro={offsiteApiErrorText(err) ?? errorText(err)} />
+          <CommandBlock command={cmd} intro={`${offsiteApiErrorText(err) ?? errorText(err)} ${MANUAL_COMMAND_INTRO}`} />
         ) : (
           <ErrorBlock error={err} />
         )
@@ -306,7 +388,7 @@ function ChooseDestinationDialog({ current, onClose, onSaved }: { current: strin
   );
 }
 
-function PortableDialog({ onClose }: { onClose: () => void }) {
+function PortableDialog({ onClose, onError }: { onClose: () => void; onError: (e: PortableError) => void }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -322,18 +404,24 @@ function PortableDialog({ onClose }: { onClose: () => void }) {
         }
       }
       let retried = false;
-      const go = () =>
+      const go = (): boolean =>
         startPortableDownload(api.offsite.portableUrl, (code, title) => {
           if (code === 'PIN_REQUIRED' && !retried) {
             retried = true;
-            void usePinStore.getState().request().then((ok) => (ok ? go() : toast('Chưa tải — cần nhập mã PIN.', 'bad')));
+            void usePinStore
+              .getState()
+              .request()
+              .then((ok) => (ok ? go() : onError({ text: 'Chưa tải — cần nhập mã PIN.', code: '' })));
             return;
           }
           const friendly = offsiteApiErrorText(new ApiError(409, { code, title })) ?? (title || 'Chưa tải được gói mang đi.');
-          toast(friendly, 'bad');
+          onError({ text: friendly, code });
         });
-      go();
-      toast('Trình duyệt đang tải gói mang đi — gói lớn có thể mất vài phút mới bắt đầu.', 'ok');
+      if (!go()) {
+        setError('Đang chuẩn bị một gói mang đi — chờ trình duyệt bắt đầu tải.');
+        return;
+      }
+      toast('Đang chuẩn bị gói mang đi — gói lớn có thể mất tới 30 phút mới bắt đầu tải.', 'ok');
       onClose();
     } finally {
       setPending(false);
@@ -360,7 +448,7 @@ function PortableDialog({ onClose }: { onClose: () => void }) {
     >
       <ul className="upd-confirm">
         <li>Gói được mã hoá bằng Khoá khôi phục — mở bằng Bộ khôi phục.</li>
-        <li>Gói có thể rất lớn; trình duyệt tự lưu vào thư mục Tải về, không cần giữ trang này mở sau khi đã bắt đầu tải.</li>
+        <li>Máy chủ có thể mất tới 30 phút chuẩn bị gói. Đừng tải lại hay đóng trang cho tới khi trình duyệt bắt đầu tải; sau đó trình duyệt tự lưu vào thư mục Tải về.</li>
         <li>Cần mã PIN. Cất gói và Bộ khôi phục ở hai nơi khác nhau.</li>
       </ul>
       {error ? <InlineError>{error}</InlineError> : null}

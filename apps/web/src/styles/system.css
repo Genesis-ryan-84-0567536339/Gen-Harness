@@ -391,3 +391,7 @@
   body.rk-open .rk-dialog .gh-dialog__actions, body.rk-open .rk-dialog .gh-dialog__close { display: none; }
   body.rk-open .rk-dialog .rk-key, body.rk-open .rk-dialog .rk-steps, body.rk-open .rk-dialog .rk-warn, body.rk-open .rk-dialog .gh-card__title { color: #000; }
 }
+
+/* v0.1.40 (F-12): Bộ khôi phục lỗi — nút Thử lại; gói mang đi đang chuẩn bị. */
+.rk-retry { margin-top: 8px; }
+[data-testid='offsite-portable-preparing'] { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }

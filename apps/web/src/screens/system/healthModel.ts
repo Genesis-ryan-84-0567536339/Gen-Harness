@@ -5,6 +5,7 @@
  */
 import type { HealthIssue, SystemHealth } from '@gen-harness/contracts';
 import { DEFAULT_TZ, fmtAgo, fmtDM, fmtDMClock, fmtDec, fmtHM, fmtInt } from '../../lib/format';
+import { offsiteNextStep, type OffsiteViewer } from './offsiteModel';
 
 export type HealthTone = 'ok' | 'warn' | 'bad' | 'muted';
 
@@ -31,7 +32,12 @@ export function fmtGb(bytes: number): string {
 }
 
 /** Các dòng chính của thẻ "Sức khoẻ hệ thống" (theo đúng thứ tự hiển thị). */
-export function healthRows(h: SystemHealth, now = Date.now(), tz = DEFAULT_TZ): HealthRow[] {
+export function healthRows(
+  h: SystemHealth,
+  now = Date.now(),
+  tz = DEFAULT_TZ,
+  who: OffsiteViewer = { isOwner: true, canManage: true },
+): HealthRow[] {
   const rows: HealthRow[] = [];
 
   const w = h.worker;
@@ -88,7 +94,8 @@ export function healthRows(h: SystemHealth, now = Date.now(), tz = DEFAULT_TZ): 
               : { key: 'offsite', label: 'Bản sao ngoài máy', value: `Bản mới nhất ${fmtAgo(off.last_success_at, now, tz)}`, tone: 'ok' },
     );
     const last = rows[rows.length - 1];
-    if (last.tone !== 'ok') last.hint = 'Xem thẻ "Bản sao ngoài máy" bên dưới — cắm ổ USB/NAS rồi bấm "Sao lưu ra ổ ngoài ngay".';
+    // Gợi ý theo trạng thái + vai trò: chưa chọn nơi lưu thì nút "Sao lưu ngay" đang khoá; "Chọn nơi lưu" chỉ Owner có.
+    if (last.tone !== 'ok') last.hint = `Xem thẻ "Bản sao ngoài máy" bên dưới — ${offsiteNextStep(!!off.configured, who).replace(/^./, (c) => c.toLowerCase())}`;
   }
 
   const u = h.update;
