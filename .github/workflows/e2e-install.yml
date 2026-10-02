@@ -27,6 +27,17 @@ name: E2E cài đặt thật
 #     bảng chính trước/sau nâng cấp — phải trùng; kéo sẵn ảnh của bản cũ hơn
 #     nữa (PREV2) rồi kiểm genh dọn ảnh cũ: chỉ còn ảnh của bản hiện tại + bản
 #     liền trước, mỗi repo gen-harness-* tối đa 2 digest.
+#     v0.1.37: job là MA TRẬN hai ô nâng cấp (output upgrade_from của resolve):
+#     ô tags[1] = bản chính thức liền trước (máy Boss cập nhật đều mỗi đêm) và
+#     ô tags[3] = bản chính thức cũ hơn 3 bậc — máy Boss tắt vài ngày rồi bật
+#     lại, nhảy nhiều bản một lần (migration dồn, compose đổi nhiều lần). Chưa
+#     đủ 3 bản chính thức cũ hơn ⇒ ô tags[3] vắng (ghi ở tóm tắt resolve,
+#     không đỏ). fail-fast: false; ô nào đỏ ⇒ kết quả job = failure ⇒ KHÔNG
+#     promote (check_release_gate.py giữ bất biến này).
+#   - e2e-install (pr + release, genh v0.1.37+): khoá loại trừ <gốc cài>/
+#     genh.lock đang bị giữ ⇒ `genh update` thoát 0, in "đang có một lần cập
+#     nhật/khôi phục khác chạy", không đụng update-status.json; `genh status`
+#     ghi run/autostart-status.json đúng hợp đồng (tự chạy lại khi bật máy).
 #   - e2e-rollback (pr + release): build 3 genh từ mã đang xét — "tốt" (compose
 #     đúng), "hỏng" (api `command: ["false"]` — không bao giờ lên), "sửa" (khác
 #     byte, cùng cấu hình). Cài bằng genh tốt + dữ liệu mẫu → genh hỏng update
@@ -134,6 +145,9 @@ jobs:
       skip_e2e: ${{ steps.r.outputs.skip_e2e }}
       prev_tag: ${{ steps.r.outputs.prev_tag }}
       broken_install: ${{ steps.r.outputs.broken_install }}
+      # Ma trận ô nâng cấp của e2e-upgrade (JSON): ô tags[1] (= prev_tag) và
+      # ô tags[3] (khi có đủ 3 bản chính thức cũ hơn tag). "[]" khi không có.
+      upgrade_from: ${{ steps.r.outputs.upgrade_from }}
     env:
       GH_TOKEN: ${{ github.token }}
       R: ${{ github.repository }}
@@ -147,7 +161,7 @@ jobs:
       - name: Lấy mã nguồn (cần remote origin cho git ls-remote)
         uses: actions/checkout@v4
 
-      - name: Xác định chế độ, tag, run_e2e, promote, prev_tag
+      - name: Xác định chế độ, tag, run_e2e, promote, prev_tag, upgrade_from
         id: r
         run: |
           set -euo pipefail
@@ -255,31 +269,55 @@ jobs:
             exit 1
           fi
 
-          # prev_tag cho e2e-upgrade / e2e-selfupdate = bản CHÍNH THỨC gần nhất
-          # cũ hơn $tag (bỏ bản nháp + bản thử) — chính là bản máy Boss đang
-          # chạy. Tính cả khi promote tay skip_e2e (run_e2e=false): e2e-selfupdate
-          # sau promote vẫn cần nó.
+          # tags = [$tag, cũ1, cũ2, cũ3] — các bản CHÍNH THỨC cũ hơn $tag (bỏ bản
+          # nháp + bản thử), mới→cũ theo sort -V. prev_tag (cho e2e-selfupdate
+          # và ô tags[1] của e2e-upgrade) = tags[1] = cũ1 — chính là bản máy Boss
+          # đang chạy. Ô tags[3] = cũ3 — máy Boss tắt vài ngày, nhảy nhiều bản
+          # một lần. Tính cả khi promote tay skip_e2e (run_e2e=false):
+          # e2e-selfupdate sau promote vẫn cần prev_tag.
+          # Các bản genh ≤ v0.1.8 cài từ binary phát hành KHÔNG ghi Caddyfile
+          # (≤v0.1.7) hoặc đụng nhau khi chép volume agy_state (≤v0.1.8) → không
+          # lên (Docker tạo thư mục rỗng thay tệp). Với các bản đó (tính RIÊNG
+          # từng ô), bước cài bản cũ được phép đỏ; bước `genh update` phía sau
+          # phải TỰ SỬA máy cài lỗi đó rồi ready xanh.
+          is_broken() {
+            case "$1" in
+              v0.1.[0-8]) echo true ;;
+              *) echo false ;;
+            esac
+          }
           prev=""
           broken=false
+          old3=""
+          upgrade_from="[]"
           if [ "$mode" = "release" ] && { [ "$run_e2e" = "true" ] || [ "$promote" = "true" ]; }; then
-            official="$(gh release list --repo "$R" --exclude-drafts --exclude-pre-releases --limit 10 --json tagName --jq '.[].tagName')"
-            for t in $official; do
+            official="$(gh release list --repo "$R" --exclude-drafts --exclude-pre-releases --limit 20 --json tagName --jq '.[].tagName')"
+            older="$(for t in $official; do
               [ "$t" != "$tag" ] || continue
               if [ "$(printf '%s\n%s\n' "$t" "$tag" | sort -V | head -n1)" = "$t" ]; then
-                prev="$t"
-                break
+                printf '%s\n' "$t"
               fi
-            done
-            # Các bản genh ≤ v0.1.8 cài từ binary phát hành KHÔNG ghi
-            # Caddyfile (≤v0.1.7) hoặc đụng nhau khi chép volume agy_state
-            # (≤v0.1.8) → không lên (Docker tạo thư mục rỗng thay tệp). Với
-            # các bản đó, bước cài bản cũ được phép đỏ; bước `genh update`
-            # phía sau phải TỰ SỬA máy cài lỗi đó rồi ready xanh.
-            case "$prev" in
-              v0.1.[0-8]) broken=true; echo "bản trước $prev thuộc nhóm cài lỗi Caddyfile — kiểm đường tự sửa khi update" ;;
-            esac
-            if [ -z "$prev" ]; then
+            done | sort -rV -u)"
+            prev="$(printf '%s\n' "$older" | sed -n 1p)"
+            old3="$(printf '%s\n' "$older" | sed -n 3p)"
+            if [ -n "$prev" ]; then
+              broken="$(is_broken "$prev")"
+              if [ "$broken" = "true" ]; then
+                echo "tags[1] $prev thuộc nhóm cài lỗi Caddyfile — kiểm đường tự sửa khi update"
+              fi
+              upgrade_from="$(jq -nc --arg f "$prev" --arg b "$broken" '[{from: $f, slot: "tags[1]", broken: $b}]')"
+            else
               echo "chưa có bản chính thức nào cũ hơn $tag — e2e-upgrade sẽ bỏ qua."
+            fi
+            if [ -n "$old3" ]; then
+              broken3="$(is_broken "$old3")"
+              if [ "$broken3" = "true" ]; then
+                echo "tags[3] $old3 thuộc nhóm cài lỗi Caddyfile — kiểm đường tự sửa khi update"
+              fi
+              upgrade_from="$(printf '%s' "$upgrade_from" | jq -c --arg f "$old3" --arg b "$broken3" '. + [{from: $f, slot: "tags[3]", broken: $b}]')"
+            else
+              echo "tags[3]: bỏ qua — chưa đủ 3 bản chính thức cũ hơn $tag" >>"$GITHUB_STEP_SUMMARY"
+              echo "tags[3]: bỏ qua — chưa đủ 3 bản chính thức cũ hơn $tag"
             fi
           fi
 
@@ -291,14 +329,15 @@ jobs:
             echo "skip_e2e=$skip_e2e"
             echo "prev_tag=$prev"
             echo "broken_install=$broken"
+            echo "upgrade_from=$upgrade_from"
           } >>"$GITHUB_OUTPUT"
           {
             echo "### E2E cài đặt thật — quyết định"
-            echo "| mode | tag | run_e2e | promote | skip_e2e | prev_tag |"
-            echo "|---|---|---|---|---|---|"
-            echo "| $mode | ${tag:--} | $run_e2e | $promote | $skip_e2e | ${prev:--} |"
+            echo "| mode | tag | run_e2e | promote | skip_e2e | prev_tag (tags[1]) | tags[3] |"
+            echo "|---|---|---|---|---|---|---|"
+            echo "| $mode | ${tag:--} | $run_e2e | $promote | $skip_e2e | ${prev:--} | ${old3:--} |"
           } >>"$GITHUB_STEP_SUMMARY"
-          echo "mode=$mode tag=${tag:-<rỗng>} run_e2e=$run_e2e promote=$promote skip_e2e=$skip_e2e prev_tag=${prev:-<rỗng>}"
+          echo "mode=$mode tag=${tag:-<rỗng>} run_e2e=$run_e2e promote=$promote skip_e2e=$skip_e2e prev_tag=${prev:-<rỗng>} upgrade_from=$upgrade_from"
 
   # ── e2e-install ──────────────────────────────────────────────────────────
   # Luồng chính (mục 1-10 trong kế hoạch bàn giao): cài sạch, chờ ready,
@@ -474,6 +513,101 @@ jobs:
             echo "::error::genh status thấy dịch vụ không healthy — xem bảng ở trên" >&2
             exit 1
           fi
+
+      # v0.1.37 (F-34/F-73): hai bước dưới kiểm hành vi chỉ có từ genh v0.1.37.
+      # Chế độ pr: genh build từ mã đang xét ⇒ luôn chạy. Chế độ release: chỉ
+      # chạy khi genh vừa cài ≥ v0.1.37 (so sort -V) — chạy tay workflow cho
+      # tag cũ hơn không bị đỏ vì tính năng bản đó chưa có.
+      - name: genh có khoá loại trừ + tự chạy lại khi bật máy chưa (v0.1.37+)
+        id: v137
+        run: |
+          set -euo pipefail
+          if [ "$MODE" = "pr" ]; then
+            echo "run=true" >>"$GITHUB_OUTPUT"
+            echo "chế độ pr — genh build từ mã đang xét, kiểm khoá loại trừ + tự chạy lại khi bật máy."
+            exit 0
+          fi
+          out="$("$GENH" version)"
+          have="$(printf '%s\n' "$out" | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+[0-9A-Za-z.-]*' | head -n1 || true)"
+          have="${have:-$TAG}"
+          if [ "$(printf '%s\n%s\n' v0.1.37 "$have" | sort -V | head -n1)" = "v0.1.37" ]; then
+            echo "run=true" >>"$GITHUB_OUTPUT"
+            echo "genh $have ≥ v0.1.37 — kiểm khoá loại trừ + tự chạy lại khi bật máy."
+          else
+            echo "run=false" >>"$GITHUB_OUTPUT"
+            echo "::notice::genh $have cũ hơn v0.1.37 — bỏ qua kiểm khoá loại trừ và tự chạy lại khi bật máy."
+          fi
+
+      - name: Khoá loại trừ — genh update khi lần khác đang giữ khoá phải thoát 0, không đụng update-status.json
+        if: steps.v137.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          # Khoá ở <gốc cài>/genh.lock (KHÔNG ở run/ — run/ bind-mount vào container
+          # api). util-linux flock dùng flock(2) như genh. -o: tiến trình flock giữ
+          # khoá, lệnh con (sleep) không giữ fd ⇒ kill flock là nhả khoá ngay.
+          lock="$GEN_HARNESS_HOME/genh.lock"
+          st="$GEN_HARNESS_HOME/run/update-status.json"
+          flock -o "$lock" sleep 60 &
+          fpid=$!
+          stop_lock() { pkill -P "$fpid" 2>/dev/null || true; kill "$fpid" 2>/dev/null || true; }
+          trap stop_lock EXIT
+          # Chờ flock nền thật sự giữ khoá (thăm dò không chặn bằng fd riêng).
+          held=false
+          for _ in $(seq 1 100); do
+            if ! flock -n "$lock" true; then held=true; break; fi
+            sleep 0.1
+          done
+          [ "$held" = true ] || { echo "::error::không giữ được $lock để giả lập lần cập nhật khác" >&2; exit 1; }
+          if [ -f "$st" ]; then before="$(sha256sum <"$st")"; else before="(không có)"; fi
+          rc=0
+          timeout 50 "$GENH" update --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes --no-self-update \
+            >"$RUNNER_TEMP/update-locked.log" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/update-locked.log"
+          if [ "$rc" != 0 ]; then
+            echo "::error::khoá đang bị giữ mà genh update thoát $rc (124 = treo chờ khoá) — phải thoát 0 và bỏ qua (lịch đêm bận ⇒ không báo lỗi)." >&2
+            exit 1
+          fi
+          if ! grep -q "đang có một lần cập nhật/khôi phục khác chạy" "$RUNNER_TEMP/update-locked.log"; then
+            echo "::error::khoá đang bị giữ mà genh update không in \"đang có một lần cập nhật/khôi phục khác chạy\" — có thể hai genh cùng cập nhật một máy." >&2
+            exit 1
+          fi
+          if [ -f "$st" ]; then after="$(sha256sum <"$st")"; else after="(không có)"; fi
+          if [ "$after" != "$before" ]; then
+            echo "::error::genh bị khoá loại trừ chặn mà vẫn ghi run/update-status.json — Console sẽ hiện sai trạng thái của lần đang chạy." >&2
+            exit 1
+          fi
+          stop_lock
+          wait "$fpid" 2>/dev/null || true
+          trap - EXIT
+          flock -w 10 "$lock" true || { echo "::error::khoá $lock không được nhả sau khi dừng tiến trình giữ khoá" >&2; exit 1; }
+          echo "OK: khoá loại trừ chặn lần cập nhật thứ hai (thoát 0, update-status.json không đổi)."
+
+      - name: Tự chạy lại khi bật máy — genh status ghi run/autostart-status.json đúng hợp đồng
+        if: steps.v137.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          "$GENH" status --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT"
+          f="$GEN_HARNESS_HOME/run/autostart-status.json"
+          [ -s "$f" ] || { echo "::error::genh status không ghi $f — Console không biết máy có tự chạy lại khi bật máy không." >&2; exit 1; }
+          cat "$f"; echo
+          # Chỉ kiểm hình dạng; giá trị linger/docker_enabled phụ thuộc cấu hình
+          # runner nên chỉ in ra, không đỏ.
+          python3 - "$f" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1], encoding="utf-8"))
+          assert isinstance(d, dict), "autostart-status.json không phải object JSON"
+          keys = ("os", "linger", "linger_required", "docker_enabled", "docker_mode", "checked_at")
+          missing = [k for k in keys if k not in d]
+          assert not missing, "autostart-status.json thiếu khoá: %s" % missing
+          assert d["os"] == "linux", "os phải là linux trên ubuntu, có %r" % d["os"]
+          assert isinstance(d["linger_required"], bool), "linger_required phải là bool"
+          assert d["linger"] in ("yes", "no", "unknown", "not_applicable"), "linger lạ: %r" % d["linger"]
+          assert d["docker_enabled"] in ("yes", "no", "unknown"), "docker_enabled lạ trên ubuntu: %r" % d["docker_enabled"]
+          assert d["docker_mode"] in ("system", "rootless", "desktop", "unknown"), "docker_mode lạ: %r" % d["docker_mode"]
+          assert isinstance(d["checked_at"], str) and d["checked_at"], "checked_at rỗng"
+          print("tự chạy lại khi bật máy: linger=%s (cần: %s), docker_enabled=%s, docker_mode=%s"
+                % (d["linger"], d["linger_required"], d["docker_enabled"], d["docker_mode"]))
+          PY
 
       - name: Dữ liệu mẫu tối thiểu — best-effort, xem ghi chú đầu file
         continue-on-error: true
@@ -652,7 +786,10 @@ jobs:
   # Chỉ chạy ở chế độ release (kiểm nâng cấp cần CÓ bản chính thức THẬT trước
   # đó — chế độ pr build từ source, không có "bản trước" để nâng cấp lên chính
   # commit đang review) và khi resolve tìm được prev_tag.
-  # Kịch bản: cài BẢN CHÍNH THỨC liền trước (prev_tag = bản máy Boss đang chạy)
+  # Ma trận (v0.1.37): mỗi ô của upgrade_from là một runner riêng — ô tags[1]
+  # (matrix.from = prev_tag, bản máy Boss đang chạy) và ô tags[3] (máy tắt vài
+  # ngày, nhảy nhiều bản; vắng khi chưa đủ 3 bản chính thức cũ hơn).
+  # Kịch bản mỗi ô: cài BẢN CHÍNH THỨC cũ (matrix.from)
   # → đặt genh của tag đang kiểm đè lên → genh update --yes --no-self-update
   # → ready xanh → genh version đúng tag → xác nhận dữ liệu/bí mật KHÔNG bị
   # tạo lại (app_db_password không đổi).
@@ -665,10 +802,16 @@ jobs:
   # promote (lúc releases/latest đã là tag này), cùng go test của
   # apps/genh/internal/selfupdate.
   e2e-upgrade:
-    name: nâng cấp ${{ needs.resolve.outputs.prev_tag }} → ${{ needs.resolve.outputs.tag }}
+    name: nâng cấp ${{ matrix.slot }} ${{ matrix.from }} → ${{ needs.resolve.outputs.tag }}
     needs: resolve
     if: needs.resolve.outputs.run_e2e == 'true' && needs.resolve.outputs.mode == 'release' && needs.resolve.outputs.prev_tag != ''
     runs-on: ubuntu-24.04
+    # Không continue-on-error: ô nào đỏ ⇒ needs.e2e-upgrade.result == 'failure'
+    # ⇒ promote không chạy (đòi success hoặc skipped).
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.resolve.outputs.upgrade_from) }}
     # Chạy ngoài checkout repo: genh tìm compose.yaml theo cwd trước — trong repo
     # nó sẽ dùng deploy/compose.yaml (build cục bộ) thay vì compose bản phát hành
     # nhúng trong binary như máy người dùng thật.
@@ -683,7 +826,8 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       R: ${{ github.repository }}
       TAG: ${{ needs.resolve.outputs.tag }}
-      PREV_TAG: ${{ needs.resolve.outputs.prev_tag }}
+      # Bản cũ của ô này (tags[1] hoặc tags[3]) — các bước dưới đọc PREV_TAG.
+      PREV_TAG: ${{ matrix.from }}
     steps:
       - name: Lấy mã nguồn (dùng .github/scripts/e2e_data.sh, không build gì ở job này)
         uses: actions/checkout@v4
@@ -691,11 +835,11 @@ jobs:
       - name: Đặt GEN_HARNESS_HOME (thư mục cài đặt tạm của job này)
         run: echo "GEN_HARNESS_HOME=$RUNNER_TEMP/gh-upgrade" >>"$GITHUB_ENV"
 
-      - name: Cài sạch bản chính thức TRƯỚC ĐÓ (${{ needs.resolve.outputs.prev_tag }})
-        continue-on-error: ${{ needs.resolve.outputs.broken_install == 'true' }}
+      - name: Cài sạch bản chính thức cũ (${{ matrix.slot }} ${{ matrix.from }})
+        continue-on-error: ${{ matrix.broken == 'true' }}
         run: |
           set -euo pipefail
-          # Tự tải asset của đúng prev_tag rồi làm y hệt phần thân install.sh
+          # Tự tải asset của đúng PREV_TAG (bản cũ của ô) rồi làm y hệt phần thân install.sh
           # (kiểm checksum, đặt vào bin/) — install.sh của bản cũ chưa biết
           # GEN_HARNESS_RELEASE_TAG, gọi thẳng nó sẽ ra bản chính thức hiện tại.
           mkdir -p "$GEN_HARNESS_HOME/bin"
@@ -709,7 +853,7 @@ jobs:
           "$GEN_HARNESS_HOME/bin/genh" install --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes --no-auto-update
 
       - name: Chờ /api/v1/ready xanh (bản cũ, tối đa 5 phút)
-        if: needs.resolve.outputs.broken_install != 'true'
+        if: matrix.broken != 'true'
         run: |
           set -euo pipefail
           deadline=$((SECONDS + 300))
@@ -721,7 +865,7 @@ jobs:
       # v0.1.34 (F-35): dữ liệu mẫu THẬT (gh.seed_demo — luồng ingest → sàng lọc → nghiệp vụ thật) để phép
       # "số dòng không đổi sau nâng cấp" có ý nghĩa; seed lỗi ⇒ đỏ (không continue-on-error).
       - name: Nạp dữ liệu mẫu vào bản cũ + đếm số dòng
-        if: needs.resolve.outputs.broken_install != 'true'
+        if: matrix.broken != 'true'
         run: |
           set -euo pipefail
           data="$GITHUB_WORKSPACE/.github/scripts/e2e_data.sh"
@@ -745,7 +889,7 @@ jobs:
           refs="$RUNNER_TEMP/prev2-refs.txt"
           : >"$refs"
           prev2=""
-          official="$(gh release list --repo "$R" --exclude-drafts --exclude-pre-releases --limit 15 --json tagName --jq '.[].tagName')"
+          official="$(gh release list --repo "$R" --exclude-drafts --exclude-pre-releases --limit 20 --json tagName --jq '.[].tagName')"
           for t in $official; do
             [ "$t" != "$PREV_TAG" ] || continue
             if [ "$(printf '%s\n%s\n' "$t" "$PREV_TAG" | sort -V | head -n1)" = "$t" ]; then
@@ -804,7 +948,7 @@ jobs:
           done
 
       - name: Số dòng không đổi sau nâng cấp
-        if: needs.resolve.outputs.broken_install != 'true'
+        if: matrix.broken != 'true'
         run: |
           set -euo pipefail
           "$GITHUB_WORKSPACE/.github/scripts/e2e_data.sh" count >"$RUNNER_TEMP/rows-after.txt"

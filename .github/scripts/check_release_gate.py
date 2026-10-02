@@ -26,6 +26,11 @@ thật đúng tag → job `promote` nâng thành bản chính thức (latest). S
     --latest, kiểm releases/latest == PREV_TAG); workflow_dispatch có
     tag/promote/skip_e2e; bộ lọc paths của pull_request gồm apps/api/**,
     apps/web/Dockerfile, deploy/images/**, VERSION.
+  - e2e-install.yml (v0.1.37): job `e2e-upgrade` là MA TRẬN ô nâng cấp —
+    strategy.matrix.include == `${{ fromJSON(needs.resolve.outputs.upgrade_from) }}`,
+    strategy.fail-fast false, KHÔNG continue-on-error true (ô nào đỏ ⇒ job
+    failure ⇒ không promote); job `resolve` có outputs.upgrade_from và script
+    tính ô "tags[3]" (máy Boss tắt vài ngày, nhảy nhiều bản một lần).
 
 Chạy:  python3 .github/scripts/check_release_gate.py [--root <thư mục repo>]
 Cần python3 + PyYAML. Lưu ý PyYAML (YAML 1.1) đọc khoá `on:` thành True.
@@ -65,6 +70,10 @@ E2E_DISPATCH_INPUTS = ("tag", "promote", "skip_e2e")
 # ("<!-- genh:promoted_at=" + RFC 3339 UTC giây + " -->").
 PROMOTED_MARKER_PREFIX = "<!-- genh:promoted_at="
 PROMOTED_MARKER_DATE = "date -u +%Y-%m-%dT%H:%M:%SZ"
+# Ma trận ô nâng cấp (v0.1.37): ô tags[1] (bản chính thức liền trước) + ô tags[3] (nhảy nhiều bản).
+UPGRADE_JOB = "e2e-upgrade"
+UPGRADE_MATRIX = "${{ fromJSON(needs.resolve.outputs.upgrade_from) }}"
+UPGRADE_SLOT3 = "tags[3]"
 
 
 def load(root: Path, rel: str) -> dict[Any, Any]:
@@ -270,6 +279,8 @@ def check_e2e(e2e: dict[Any, Any]) -> list[str]:
     else:
         errs += check_selfupdate_rollback(selfupd)
 
+    errs += check_upgrade_matrix(jobs)
+
     on = triggers(e2e)
     wd = on.get("workflow_dispatch")
     wd_inputs = (wd or {}).get("inputs") if isinstance(wd, dict) else None
@@ -286,6 +297,53 @@ def check_e2e(e2e: dict[Any, Any]) -> list[str]:
                 f"{E2E_PATH}: bộ lọc paths của pull_request thiếu '{want}' — "
                 "PR đổi phần này sẽ không chạy E2E cài thật."
             )
+    return errs
+
+
+def check_upgrade_matrix(jobs: dict[Any, Any]) -> list[str]:
+    """e2e-upgrade chạy MỌI ô của upgrade_from (tags[1] + tags[3]); ô nào đỏ thì promote phải bị chặn."""
+    errs: list[str] = []
+    hau_qua = "ô nâng cấp nhiều bản (tags[3]) có thể đỏ mà vẫn promote"
+    upg = jobs.get(UPGRADE_JOB)
+    if not isinstance(upg, dict):
+        errs.append(
+            f"{E2E_PATH}: thiếu job `{UPGRADE_JOB}` — không còn E2E nào nâng cấp có dữ liệu từ bản chính thức cũ; "
+            "máy Boss nâng cấp có thể mất dữ liệu mà vẫn promote."
+        )
+    else:
+        strat = upg.get("strategy")
+        strat = strat if isinstance(strat, dict) else {}
+        matrix = strat.get("matrix")
+        include = matrix.get("include") if isinstance(matrix, dict) else None
+        if include != UPGRADE_MATRIX:
+            errs.append(
+                f"{E2E_PATH}: job `{UPGRADE_JOB}` phải có `strategy.matrix.include: {UPGRADE_MATRIX}` "
+                f"(hiện: {include!r}) — thiếu ô tags[3] ⇒ {hau_qua} (máy Boss tắt vài ngày nhảy nhiều bản không được kiểm)."
+            )
+        if not is_false(strat.get("fail-fast")):
+            errs.append(
+                f"{E2E_PATH}: job `{UPGRADE_JOB}` phải có `strategy.fail-fast: false` (hiện: {strat.get('fail-fast')!r}) "
+                "— một ô đỏ sẽ huỷ ô còn lại, không biết bản cũ nào nâng cấp được."
+            )
+        if is_true(upg.get("continue-on-error")) or "${{" in str(upg.get("continue-on-error", "")):
+            errs.append(
+                f"{E2E_PATH}: job `{UPGRADE_JOB}` không được có `continue-on-error` — kết quả job vẫn là success khi "
+                f"một ô đỏ ⇒ {hau_qua}."
+            )
+    resolve = jobs.get("resolve")
+    if not isinstance(resolve, dict):
+        errs.append(f"{E2E_PATH}: thiếu job `resolve` — không có ai tính ô nâng cấp ⇒ {hau_qua}.")
+        return errs
+    outputs = resolve.get("outputs")
+    if not isinstance(outputs, dict) or "upgrade_from" not in outputs:
+        errs.append(
+            f"{E2E_PATH}: job `resolve` thiếu `outputs.upgrade_from` — ma trận của `{UPGRADE_JOB}` rỗng/lỗi ⇒ {hau_qua}."
+        )
+    if not any(UPGRADE_SLOT3 in sc for sc in run_scripts(resolve)):
+        errs.append(
+            f"{E2E_PATH}: script của job `resolve` không tính ô '{UPGRADE_SLOT3}' — chỉ còn ô tags[1] ⇒ "
+            f"{hau_qua} (máy Boss tắt vài ngày nhảy nhiều bản không được kiểm)."
+        )
     return errs
 
 
