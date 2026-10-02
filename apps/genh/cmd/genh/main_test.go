@@ -1,11 +1,16 @@
 package main
 
 import (
+	"context"
 	"errors"
+	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -308,5 +313,270 @@ func TestChildUpdateArgs_PassesConsumedRequest(t *testing.T) {
 	parsed, err := parseUpdateFlags(got)
 	if err != nil || !parsed.ifRequested || !parsed.yes {
 		t.Errorf("args con phải parse được --yes --if-requested: %+v %v", parsed, err)
+	}
+}
+
+// ─── v0.1.37: tín hiệu dừng + khoá loại trừ ─────────────────────────────────
+
+// signalContext phải huỷ khi nhận SIGTERM (systemd tắt máy), không chỉ Ctrl-C.
+func TestSignalContext_HuyKhiNhanSIGTERM(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows không gửi được SIGTERM")
+	}
+	ctx, stop := signalContext()
+	defer stop()
+	p, err := os.FindProcess(os.Getpid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-ctx.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("signalContext không huỷ khi nhận SIGTERM")
+	}
+}
+
+// captureStd chạy f với os.Stdout/os.Stderr chuyển hướng, trả nội dung.
+func captureStd(t *testing.T, f func()) (stdout, stderr string) {
+	t.Helper()
+	oldOut, oldErr := os.Stdout, os.Stderr
+	ro, wo, _ := os.Pipe()
+	re, we, _ := os.Pipe()
+	os.Stdout, os.Stderr = wo, we
+	outC, errC := make(chan string), make(chan string)
+	go func() { b, _ := io.ReadAll(ro); outC <- string(b) }()
+	go func() { b, _ := io.ReadAll(re); errC <- string(b) }()
+	defer func() { os.Stdout, os.Stderr = oldOut, oldErr }()
+	f()
+	_ = wo.Close()
+	_ = we.Close()
+	return <-outC, <-errC
+}
+
+// lockTestInstall dựng gốc cài đặt tạm có compose.yaml GENH QUẢN LÝ (để không
+// dò lên compose.yaml của repo), một yêu cầu "Cập nhật ngay" và update-status.json.
+func lockTestInstall(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "deploy"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "deploy", "compose.yaml"), []byte("name: gen-harness\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GENH_COMPOSE_FILE", filepath.Join(dir, "deploy", "compose.yaml"))
+	if err := hostlink.EnsureDir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hostlink.RequestPath(dir), []byte(`{"by":"owner"}`), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	if err := hostlink.Start(dir, "v0.1.35"); err != nil {
+		t.Fatal(err)
+	}
+	if err := hostlink.Finish(dir, "done", "v0.1.36", ""); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func readFileStr(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("đọc %s: %v", path, err)
+	}
+	return string(b)
+}
+
+func TestRunUpdate_KhoaBan_LichDem_BoQuaThoat0_KhongDungHopThu(t *testing.T) {
+	dir := lockTestInstall(t)
+	held, err := hostlink.AcquireLock(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Release()
+	stopBeat := hostlink.StartHeartbeat(dir, "update") // "lần khác" đang chạy
+	defer stopBeat()
+	statusBefore := readFileStr(t, filepath.Join(hostlink.Dir(dir), hostlink.StatusFile))
+	reqBefore := readFileStr(t, hostlink.RequestPath(dir))
+
+	var code int
+	out, _ := captureStd(t, func() {
+		code = runUpdate([]string{"--yes", "--quiet", "--no-self-update", "--install-dir", dir})
+	})
+	if code != 0 {
+		t.Fatalf("lịch đêm gặp khoá bận phải thoát 0, được %d", code)
+	}
+	want := fmt.Sprintf("genh: đang có một lần cập nhật/khôi phục khác chạy (PID %d) — lần này bỏ qua.", os.Getpid())
+	if !strings.Contains(out, want) {
+		t.Fatalf("stdout (cả khi --quiet) phải có %q, được %q", want, out)
+	}
+	if got := readFileStr(t, filepath.Join(hostlink.Dir(dir), hostlink.StatusFile)); got != statusBefore {
+		t.Errorf("update-status.json bị đổi:\n%s\n---\n%s", statusBefore, got)
+	}
+	if got := readFileStr(t, hostlink.RequestPath(dir)); got != reqBefore {
+		t.Errorf("request/update.json bị đổi/xoá")
+	}
+}
+
+func TestRunUpdate_KhoaBan_GoTay_Thoat1_GHE94A(t *testing.T) {
+	dir := lockTestInstall(t)
+	held, err := hostlink.AcquireLock(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Release()
+	statusBefore := readFileStr(t, filepath.Join(hostlink.Dir(dir), hostlink.StatusFile))
+
+	var code int
+	_, errOut := captureStd(t, func() {
+		code = runUpdate([]string{"--no-self-update", "--install-dir", dir})
+	})
+	if code != 1 {
+		t.Fatalf("gõ tay gặp khoá bận phải thoát 1, được %d", code)
+	}
+	for _, want := range []string{"đang có một lần cập nhật/khôi phục khác chạy", ops.ErrCodeUpdateLocked, "rồi chạy lại"} {
+		if !strings.Contains(errOut, want) {
+			t.Errorf("stderr thiếu %q: %q", want, errOut)
+		}
+	}
+	if got := readFileStr(t, filepath.Join(hostlink.Dir(dir), hostlink.StatusFile)); got != statusBefore {
+		t.Error("gõ tay gặp khoá bận không được đụng hộp thư")
+	}
+	if !hostlink.HasRequest(dir) {
+		t.Error("không được nuốt yêu cầu của Console")
+	}
+}
+
+// Nút Console (--if-requested): chờ lần khác nhả khoá rồi chạy (nuốt yêu cầu,
+// báo running → kết quả).
+func TestRunUpdate_IfRequested_ChoKhoaNhaRoiChay(t *testing.T) {
+	old := requestLockWait
+	requestLockWait = 20 * time.Second
+	defer func() { requestLockWait = old }()
+	dir := lockTestInstall(t)
+	held, err := hostlink.AcquireLock(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	released := make(chan time.Time, 1)
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		released <- time.Now()
+		held.Release()
+	}()
+
+	var code int
+	out, _ := captureStd(t, func() {
+		code = runUpdate([]string{"--yes", "--if-requested", "--no-self-update", "--install-dir", dir})
+	})
+	releasedAt := <-released
+	if time.Now().Before(releasedAt) {
+		t.Fatal("không được chạy trước khi khoá nhả")
+	}
+	if strings.Contains(out, "lần này bỏ qua") {
+		t.Fatalf("--if-requested phải CHỜ, không bỏ qua: %q", out)
+	}
+	if hostlink.HasRequest(dir) {
+		t.Error("chờ được khoá rồi thì phải xử lý (nuốt) yêu cầu")
+	}
+	st, err := hostlink.ReadStatus(dir)
+	if err != nil || st.State == "done" && st.To == "v0.1.36" {
+		t.Fatalf("phải đã chạy (ghi trạng thái mới): %+v %v (code=%d)", st, err, code)
+	}
+	if st.PID != os.Getpid() {
+		t.Errorf("update-status.json phải ghi PID tiến trình ngoài cùng: %+v", st)
+	}
+	if _, err := os.Stat(hostlink.HeartbeatPath(dir)); !os.IsNotExist(err) {
+		t.Errorf("xong thì phải xoá genh-heartbeat.json: %v", err)
+	}
+	// Khoá đã được nhả lại.
+	l, err := hostlink.AcquireLock(dir)
+	if err != nil {
+		t.Fatalf("runUpdate xong phải nhả khoá: %v", err)
+	}
+	l.Release()
+}
+
+// Chờ được khoá mà yêu cầu đã bị lần trước nuốt → thoát 0, không làm gì.
+func TestAcquireOpLock_IfRequested_YeuCauDaBiNuot(t *testing.T) {
+	dir := t.TempDir()
+	var out, errOut strings.Builder
+	l, code, ok := acquireOpLock(context.Background(), dir, lockRequested, func() bool { return false }, &out, &errOut)
+	if ok || code != 0 || l != nil {
+		t.Fatalf("yêu cầu đã hết: ok=%v code=%d", ok, code)
+	}
+	l2, err := hostlink.AcquireLock(dir)
+	if err != nil {
+		t.Fatalf("phải nhả khoá khi không làm gì: %v", err)
+	}
+	l2.Release()
+}
+
+// Tiến trình con --self-updated KHÔNG lấy khoá (cha đang giữ).
+func TestRunUpdate_SelfUpdated_KhongLayKhoa(t *testing.T) {
+	dir := lockTestInstall(t)
+	held, err := hostlink.AcquireLock(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Release()
+	_ = hostlink.Start(dir, "v0.1.36") // tiến trình cha đã báo running
+
+	out, errOut := captureStd(t, func() {
+		_ = runUpdate([]string{"--yes", "--quiet", "--self-updated", "--install-dir", dir})
+	})
+	if strings.Contains(out+errOut, "đang có một lần cập nhật/khôi phục khác chạy") {
+		t.Fatalf("--self-updated không được kiểm khoá: %q %q", out, errOut)
+	}
+	st, _ := hostlink.ReadStatus(dir)
+	if st.State == "running" {
+		t.Fatalf("tiến trình con phải chạy tiếp và ghi kết quả: %+v", st)
+	}
+	if !hostlink.HasRequest(dir) {
+		t.Error("tiến trình con không nuốt hộp thư (việc của tiến trình ngoài)")
+	}
+}
+
+// restore gõ tay / import khi khoá bận: thoát 1, GH-E94A.
+func TestRunRestoreImport_KhoaBan_GoTay_Thoat1(t *testing.T) {
+	dir := lockTestInstall(t)
+	held, err := hostlink.AcquireLock(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Release()
+	for name, f := range map[string]func() int{
+		"restore": func() int { return runRestore([]string{"--install-dir", dir, "backups/k.enc"}) },
+		"import": func() int {
+			return runImport([]string{"--install-dir", dir, "--yes", filepath.Join(dir, "x.ghbundle")})
+		},
+	} {
+		var code int
+		_, errOut := captureStd(t, func() { code = f() })
+		if code != 1 || !strings.Contains(errOut, ops.ErrCodeUpdateLocked) || !strings.Contains(errOut, "đang có một lần cập nhật/khôi phục khác chạy") {
+			t.Errorf("%s: muốn thoát 1 + GH-E94A, được %d %q", name, code, errOut)
+		}
+	}
+}
+
+// Đang chờ tiến trình con (sau tự cập nhật) mà nhận tín hiệu dừng: chuyển tiếp
+// SIGTERM cho con và CHỜ con tự kết thúc (con quay về bản cũ) — không Kill.
+func TestRunChildForwardingSignal_ChuyenTiepSIGTERM_VanCho(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows không chuyển tiếp được SIGTERM")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	child := exec.Command("sh", "-c", "trap 'sleep 0.3; exit 7' TERM; while :; do sleep 0.05; done")
+	go func() { time.Sleep(200 * time.Millisecond); cancel() }()
+	err := runChildForwardingSignal(ctx, child)
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 7 {
+		t.Fatalf("con phải nhận SIGTERM, tự dọn rồi thoát 7 (không bị Kill), được %v", err)
 	}
 }

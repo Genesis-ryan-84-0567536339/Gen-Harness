@@ -170,6 +170,17 @@ func GetStatus(ctx context.Context, deps Deps) (Status, error) {
 	}
 }
 
+// RefreshUnits (v0.1.37) cập nhật unit lịch đêm ĐÃ CÀI cho khớp bản genh này
+// (unit chỉ được ghi lúc install/enable — máy cài từ bản cũ sẽ thiếu
+// KillMode=mixed/TimeoutStopSec). Chỉ Linux (systemd --user) làm việc; hệ điều
+// hành khác trả (false, nil). Không bật/tắt lịch. Trả true nếu đã ghi lại.
+func RefreshUnits(ctx context.Context, deps Deps) (bool, error) {
+	if deps.goos() != "linux" || deps.GenhPath == "" {
+		return false, nil
+	}
+	return refreshUnitsLinux(ctx, deps)
+}
+
 // systemdUserDir trả về ~/.config/systemd/user (KHÔNG tạo — caller tự
 // MkdirAll khi cần ghi).
 func systemdUserDir(home string) string {

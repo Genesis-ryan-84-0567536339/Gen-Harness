@@ -89,3 +89,30 @@ var errPsFailed = &fakeErr{"docker compose ps: exit status 1"}
 type fakeErr struct{ s string }
 
 func (e *fakeErr) Error() string { return e.s }
+
+// v0.1.37 (F-73): genh status in "Tự chạy lại khi bật máy" + ghi run/autostart-status.json.
+func TestRunStatus_TuChayLaiKhiBatMay(t *testing.T) {
+	composePath := testComposePath(t, "")
+	env := testEnv(t, composePath)
+	fr := &fake.Runner{Responses: append([]fake.Response{
+		{Match: fake.MatchArgsContain("ps", "--format", "json"), Output: []byte(`[{"Service":"api","State":"running","Health":"healthy"}]`)},
+		{Match: fake.MatchArgsContain("system", "df", "-v"), Output: []byte("VOLUME NAME\n")},
+	}, autostartFakeResponses()...)}
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer srv.Close()
+
+	var out strings.Builder
+	if err := RunStatus(context.Background(), env, "v0.1.37", StatusDeps{Runner: fr, Client: srv.Client(), GOOS: "linux", UID: "1000"}, &out); err != nil {
+		t.Fatalf("RunStatus: %v", err)
+	}
+	got := out.String()
+	for _, want := range []string{"Tự chạy lại khi bật máy:", "sudo systemctl enable docker", "sudo loginctl enable-linger $USER"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("thiếu %q:\n%s", want, got)
+		}
+	}
+	raw := checkAutostartFile(t, env.InstallDir)
+	if raw["os"] != "linux" || raw["docker_enabled"] != "no" || raw["docker_mode"] != "system" || raw["linger"] != "no" || raw["linger_required"] != true {
+		t.Errorf("autostart-status.json sai: %v", raw)
+	}
+}

@@ -275,3 +275,59 @@ var errCommandFailed = &fakeCmdError{"lệnh giả thất bại"}
 type fakeCmdError struct{ msg string }
 
 func (e *fakeCmdError) Error() string { return e.msg }
+
+// v0.1.37: RefreshUnits ghi lại unit lịch đêm đã cài nếu khác bản hiện tại.
+func TestRefreshUnits(t *testing.T) {
+	home := t.TempDir()
+	deps := func(r *fakeRunner) Deps {
+		return Deps{Runner: r, GenhPath: "/g/genh", LogFile: "/g/log", HomeDir: home, GOOS: "linux"}
+	}
+	path := serviceUnitPath(home)
+
+	// Chưa có unit (lịch đêm tắt / crontab) → không tạo, không gọi gì.
+	r := newFakeRunner()
+	changed, err := RefreshUnits(context.Background(), deps(r))
+	if err != nil || changed || len(r.calls) != 0 {
+		t.Fatalf("chưa có unit: changed=%v err=%v calls=%+v", changed, err, r.calls)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatal("không được tạo unit khi chưa có")
+	}
+
+	// Unit cũ (thiếu KillMode) → ghi lại + daemon-reload, không enable/disable.
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := "[Unit]\nDescription=cu\n\n[Service]\nType=oneshot\nExecStart=/g/genh update --yes --quiet\n"
+	if err := os.WriteFile(path, []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r = newFakeRunner()
+	changed, err = RefreshUnits(context.Background(), deps(r))
+	if err != nil || !changed {
+		t.Fatalf("unit cũ: changed=%v err=%v", changed, err)
+	}
+	b, _ := os.ReadFile(path)
+	if string(b) != SystemdServiceUnit("/g/genh", "/g/log") {
+		t.Fatalf("unit chưa được ghi lại:\n%s", b)
+	}
+	if len(r.calls) != 1 || !r.calledWith("systemctl", "--user daemon-reload") {
+		t.Fatalf("chỉ được gọi daemon-reload: %+v", r.calls)
+	}
+
+	// Đã đúng → không gọi gì.
+	r = newFakeRunner()
+	changed, err = RefreshUnits(context.Background(), deps(r))
+	if err != nil || changed || len(r.calls) != 0 {
+		t.Fatalf("đã đúng: changed=%v err=%v calls=%+v", changed, err, r.calls)
+	}
+
+	// Hệ điều hành khác Linux → không làm gì.
+	_ = os.WriteFile(path, []byte(old), 0o644)
+	r = newFakeRunner()
+	d := deps(r)
+	d.GOOS = "darwin"
+	if changed, err := RefreshUnits(context.Background(), d); err != nil || changed || len(r.calls) != 0 {
+		t.Fatalf("darwin: changed=%v err=%v", changed, err)
+	}
+}

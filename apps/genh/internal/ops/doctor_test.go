@@ -187,3 +187,48 @@ func TestRunDoctor_LogsHaveTimestamps(t *testing.T) {
 	}
 	t.Fatal("zip thiếu logs.txt")
 }
+
+// v0.1.37 (F-73): genh doctor thêm 2 dòng Docker/linger tự chạy lại + ghi run/autostart-status.json.
+func TestRunDoctor_TuChayLaiKhiBatMay(t *testing.T) {
+	composePath := testComposePath(t, "")
+	env := testEnv(t, composePath)
+	outPath := filepath.Join(t.TempDir(), "report.zip")
+	fr := &fake.Runner{Responses: append([]fake.Response{
+		{Match: fake.MatchArgsContain("version", "--format"), Output: []byte("27.1.0")},
+		{Match: fake.MatchArgsContain("system", "df", "-v"), Output: []byte("VOLUME NAME\n")},
+		{Match: fake.MatchArgsContain("logs", "--tail=500"), Output: []byte("")},
+	}, autostartFakeResponses()...)}
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer srv.Close()
+	deps := DoctorDeps{Runner: fr, Client: srv.Client(), GOOS: "linux", UID: "1000",
+		DialTCP: func(string, time.Duration) error { return nil },
+		DialTLS: func(string, time.Duration) (string, time.Time, error) { return "CN=x", time.Now(), nil },
+	}
+	var out strings.Builder
+	if err := RunDoctor(context.Background(), env, outPath, deps, &out); err != nil {
+		t.Fatalf("RunDoctor: %v", err)
+	}
+	got := out.String()
+	for _, want := range []string{"✕ Docker tự chạy", "sudo systemctl enable docker", "✕ Linger (systemd --user)", "sudo loginctl enable-linger $USER"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("thiếu %q:\n%s", want, got)
+		}
+	}
+	raw := checkAutostartFile(t, env.InstallDir)
+	if raw["docker_enabled"] != "no" || raw["linger_required"] != true {
+		t.Errorf("autostart-status.json sai: %v", raw)
+	}
+
+	// Darwin: không áp dụng — vẫn ✓ và ghi tệp.
+	var out2 strings.Builder
+	deps.GOOS = "darwin"
+	if err := RunDoctor(context.Background(), env, outPath, deps, &out2); err != nil {
+		t.Fatalf("RunDoctor darwin: %v", err)
+	}
+	if !strings.Contains(out2.String(), "✓ Docker tự chạy") {
+		t.Errorf("darwin: %s", out2.String())
+	}
+	if raw := checkAutostartFile(t, env.InstallDir); raw["linger"] != "not_applicable" || raw["docker_mode"] != "desktop" {
+		t.Errorf("darwin: %v", raw)
+	}
+}
