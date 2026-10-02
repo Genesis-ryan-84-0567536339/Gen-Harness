@@ -430,4 +430,89 @@ func TestRunImport_StopContainersFails_TriesRecoveryUpAndReportsBoth(t *testing.
 	}
 }
 
+// v0.1.40: RunExport (CLI) vẫn hỏi mật khẩu ẩn 2 lần khi không có GH_BUNDLE_PASSWORD.
+func TestRunExport_CLI_VanHoiMatKhauHaiLan(t *testing.T) {
+	t.Setenv(bundlePasswordEnv, "")
+	env := testEnv(t, testComposePath(t, ""))
+	calls := 0
+	orig := readSecretLine
+	readSecretLine = func() (string, error) { calls++; return "mat-khau-du-dai-123", nil }
+	t.Cleanup(func() { readSecretLine = orig })
+	fr := &fake.Runner{Responses: []fake.Response{{Match: fake.MatchArgsContain("gh.bundle", "export"), RunIOStdout: []byte(bundleMagic)}}}
+	if err := RunExport(context.Background(), env, filepath.Join(t.TempDir(), "o.ghbundle"), ExportDeps{Runner: fr}, &strings.Builder{}); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Fatalf("RunExport phải hỏi mật khẩu 2 lần, hỏi %d", calls)
+	}
+}
+
+// exportBundle (lõi cho `genh offsite run`) KHÔNG hỏi gì; mật khẩu chỉ qua Env, không qua argv.
+func TestExportBundle_KhongHoiMatKhau_MatKhauQuaEnv(t *testing.T) {
+	t.Setenv(bundlePasswordEnv, "")
+	env := testEnv(t, testComposePath(t, ""))
+	orig := readSecretLine
+	readSecretLine = func() (string, error) { t.Fatal("exportBundle không được hỏi mật khẩu"); return "", nil }
+	t.Cleanup(func() { readSecretLine = orig })
+	fr := &fake.Runner{Responses: []fake.Response{
+		{Match: fake.MatchArgsContain("exec", "-T", "-e", bundlePasswordEnv, "api", "python", "-m", "gh.bundle", "export", "--out", "-"), RunIOStdout: []byte(bundleMagic + "x")},
+	}}
+	to := filepath.Join(t.TempDir(), "o.ghbundle")
+	const pw = "K7QX2-AAAAA-BBBBB-CCCCC-DDDDD-EEEEE"
+	if err := exportBundle(context.Background(), env, to, pw, ExportDeps{Runner: fr}, &strings.Builder{}); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(to); string(b) != bundleMagic+"x" {
+		t.Fatalf("nội dung = %q", b)
+	}
+	c := fr.Calls[0].Cmd
+	if strings.Contains(strings.Join(c.Args, " "), pw) {
+		t.Fatalf("mật khẩu lộ vào argv: %v", c.Args)
+	}
+	found := false
+	for _, e := range c.Env {
+		if e == bundlePasswordEnv+"="+pw {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("mật khẩu phải đi qua Env GH_BUNDLE_PASSWORD của tiến trình con")
+	}
+}
+
+// verifyBundle: hợp đồng tham số docker + ánh xạ mã thoát 0/2/3/1.
+func TestVerifyBundle_HopDongThamSoVaMaThoat(t *testing.T) {
+	env := testEnv(t, testComposePath(t, ""))
+	path := bundleFile(t, "noi-dung")
+	const pw = "K7QX2-AAAAA-BBBBB-CCCCC-DDDDD-EEEEE"
+	verifyArgs := []string{"exec", "-T", "-e", bundlePasswordEnv, "api", "python", "-m", "gh.bundle", "verify", "--in", "-"}
+
+	fr := &fake.Runner{Responses: []fake.Response{{Match: fake.MatchArgsContain(verifyArgs...),
+		RunIOStdout: []byte(`{"ok":true,"alembic_revision":"0026","objects":3,"db_dump_bytes":42,"created_at":"2026-10-04T05:40:00Z"}` + "\n")}}}
+	info, err := verifyBundle(context.Background(), env, path, pw, ExportDeps{Runner: fr})
+	if err != nil || !info.OK || info.Objects != 3 || info.AlembicRevision != "0026" {
+		t.Fatalf("verify thoát 0 = %+v, %v", info, err)
+	}
+	call := fr.Calls[0]
+	args := strings.Join(call.Cmd.Args, " ")
+	if !strings.Contains(args, strings.Join(verifyArgs, " ")) || strings.Contains(args, pw) {
+		t.Fatalf("args docker sai hoặc lộ mật khẩu: %v", call.Cmd.Args)
+	}
+	if string(call.Stdin) != bundleMagic+"noi-dung" {
+		t.Fatalf("stdin phải là đúng tệp gói, được %q", call.Stdin)
+	}
+	for _, code := range []int{2, 3, 1} {
+		fr := &fake.Runner{Responses: []fake.Response{{Match: fake.MatchArgsContain("gh.bundle", "verify"), ExitCode: code}}}
+		_, err := verifyBundle(context.Background(), env, path, pw, ExportDeps{Runner: fr})
+		var opErr *OpError
+		if !errors.As(err, &opErr) || opErr.Code != ErrCodeOffsiteVerifyFailed {
+			t.Fatalf("thoát %d phải là GH-EB03, được %v", code, err)
+		}
+		var exitErr *dockercli.ExitError
+		if !errors.As(err, &exitErr) || exitErr.Code != code {
+			t.Fatalf("thoát %d: phải giữ mã thoát gốc, được %v", code, err)
+		}
+	}
+}
+
 var _ dockercli.Runner = (*fake.Runner)(nil)

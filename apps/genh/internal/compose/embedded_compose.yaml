@@ -93,7 +93,10 @@ services:
       # Superuser dự phòng cho backup/bảo trì phân vùng
       # (Settings.admin_database_url) — rỗng thì code tự dùng GH_DATABASE_URL.
       GH_ADMIN_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-gh}:${POSTGRES_PASSWORD:?đặt POSTGRES_PASSWORD trong .env}@db:5432/${POSTGRES_DB:-gen_harness}
-    secrets: [gh_master_key, gh_bridge_key, gh_browser_key]
+      # v0.1.40 (F-12): "Khoá khôi phục" — mật khẩu gói .ghbundle của bản sao ngoài máy
+      # (genh tự sinh secrets/gh_offsite_key). CHỈ api (Owner + PIN mới xem/tải được).
+      GH_OFFSITE_KEY_FILE: /run/secrets/gh_offsite_key
+    secrets: [gh_master_key, gh_bridge_key, gh_browser_key, gh_offsite_key]
     volumes:
       - agy_state:/var/lib/gh/agy
       # F-22: phiên Claude Code tách khỏi HOME của Antigravity CLI (agy đọc được tệp trong HOME của nó).
@@ -289,6 +292,8 @@ secrets:
     file: ../secrets/gh_bridge_key
   gh_browser_key:
     file: ../secrets/gh_browser_key
+  gh_offsite_key:
+    file: ../secrets/gh_offsite_key
 
 networks:
   default: {}

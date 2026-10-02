@@ -654,6 +654,120 @@ func TestRunChildForwardingSignal_ChuyenTiepSIGTERM_VanCho(t *testing.T) {
 	}
 }
 
+// v0.1.40: cờ `genh offsite set|run|status|disable` — mọi cờ đứng trước đối số vị trí.
+func TestParseOffsiteFlags(t *testing.T) {
+	f, err := parseOffsiteFlags([]string{"set", "--allow-same-disk", "--no-run", "--install-dir", "/i", "--port", "9443", "/media/usb"})
+	if err != nil || f.sub != "set" || !f.allowSameDisk || !f.noRun || f.installDir != "/i" || f.port != 9443 || f.path != "/media/usb" {
+		t.Fatalf("set = %+v, %v", f, err)
+	}
+	if f, err := parseOffsiteFlags([]string{"set", "/media/usb"}); err != nil || f.allowSameDisk || f.noRun || f.path != "/media/usb" {
+		t.Fatalf("set mặc định = %+v, %v", f, err)
+	}
+	// Cờ đặt SAU đường dẫn không được tính (package flag dừng ở đối số đầu) → lỗi cách dùng.
+	if _, err := parseOffsiteFlags([]string{"set", "/media/usb", "--allow-same-disk"}); err == nil {
+		t.Fatal("cờ sau đường dẫn phải lỗi cách dùng")
+	}
+	if _, err := parseOffsiteFlags([]string{"set"}); err == nil {
+		t.Fatal("set thiếu đường dẫn phải lỗi")
+	}
+	f, err = parseOffsiteFlags([]string{"run", "--quiet", "--install-dir", "/i"})
+	if err != nil || f.sub != "run" || !f.quiet || f.ifRequested {
+		t.Fatalf("run = %+v, %v", f, err)
+	}
+	// run không có --allow-same-disk (chỉ set từ CLI mới có).
+	if _, err := parseOffsiteFlags([]string{"run", "--allow-same-disk"}); err == nil {
+		t.Fatal("run không nhận --allow-same-disk")
+	}
+	for _, sub := range []string{"status", "disable"} {
+		if f, err := parseOffsiteFlags([]string{sub, "--install-dir", "/i"}); err != nil || f.sub != sub {
+			t.Fatalf("%s = %+v, %v", sub, f, err)
+		}
+		if _, err := parseOffsiteFlags([]string{sub, "thua"}); err == nil {
+			t.Fatalf("%s không nhận đối số vị trí", sub)
+		}
+	}
+	if _, err := parseOffsiteFlags([]string{"xoa"}); err == nil {
+		t.Fatal("lệnh con lạ phải lỗi")
+	}
+	if _, err := parseOffsiteFlags(nil); err == nil {
+		t.Fatal("thiếu lệnh con phải lỗi")
+	}
+	// Lịch tuần (dòng do internal/autoupdate sinh) parse được bằng đúng bộ cờ này.
+	line := autoupdate.OffsiteCrontabLine("/g/genh", "/g/log", autoupdate.OffsiteJob{InstallDir: "/i", Port: 9443}, 0)
+	fields := strings.Fields(line)
+	var cmdArgs []string
+	for i, x := range fields {
+		if x == "offsite" {
+			cmdArgs = fields[i+1:]
+			break
+		}
+	}
+	for i, x := range cmdArgs {
+		if x == ">>" {
+			cmdArgs = cmdArgs[:i]
+			break
+		}
+	}
+	if f, err := parseOffsiteFlags(cmdArgs); err != nil || f.sub != "run" || !f.quiet || f.installDir != "/i" || f.port != 9443 {
+		t.Fatalf("cờ lịch tuần %v → %+v, %v", cmdArgs, f, err)
+	}
+}
+
+// Khoá bận: lịch tuần (--quiet) / watcher (--if-requested) thoát 0; gõ tay thoát 1;
+// chưa thấy ổ USB/NAS luôn thoát 1.
+func TestOffsiteExitCode(t *testing.T) {
+	busy := &ops.OpError{Code: ops.ErrCodeOffsiteBusy}
+	if offsiteExitCode(busy, offsiteFlags{quiet: true}) != 0 || offsiteExitCode(busy, offsiteFlags{ifRequested: true}) != 0 {
+		t.Fatal("lịch/watcher gặp khoá bận phải thoát 0")
+	}
+	if offsiteExitCode(busy, offsiteFlags{}) != 1 {
+		t.Fatal("gõ tay gặp khoá bận thoát 1")
+	}
+	if offsiteExitCode(&ops.OpError{Code: ops.ErrCodeOffsiteNotMounted}, offsiteFlags{quiet: true}) != 1 {
+		t.Fatal("chưa thấy ổ USB/NAS phải thoát 1 kể cả lịch")
+	}
+	if offsiteExitCode(nil, offsiteFlags{}) != 0 {
+		t.Fatal("không lỗi thoát 0")
+	}
+}
+
+// handle-requests: run/request/offsite.json → chuyển sang `genh offsite run --if-requested`
+// (xoá tệp yêu cầu trước khi làm); update/restore vẫn được ưu tiên trước.
+func TestHandleRequests_ChuyenSangOffsite(t *testing.T) {
+	f, err := parseOffsiteFlags(append(handleRequestOffsiteArgs(true), "--port", "8443", "--install-dir", "/i"))
+	if err != nil || f.sub != "run" || !f.ifRequested || !f.quiet || f.installDir != "/i" {
+		t.Fatalf("cờ handle-requests → offsite = %+v, %v", f, err)
+	}
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "deploy"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "deploy", "compose.yaml"), []byte("name: gen-harness\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GENH_COMPOSE_FILE", filepath.Join(dir, "deploy", "compose.yaml"))
+	if err := hostlink.EnsureDir(dir); err != nil {
+		t.Fatal(err)
+	}
+	// Chưa cấu hình bản sao ngoài máy + Console bấm "Sao lưu ra ổ ngoài ngay".
+	if err := os.WriteFile(hostlink.OffsiteRequestPath(dir), []byte(`{"action":"run"}`), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	var code int
+	captureStd(t, func() { code = runHandleRequests([]string{"--quiet", "--install-dir", dir}) })
+	if code != 0 {
+		t.Fatalf("thoát %d, muốn 0", code)
+	}
+	if hostlink.HasOffsiteRequest(dir) {
+		t.Fatal("tệp yêu cầu offsite phải bị xoá")
+	}
+	st, err := hostlink.ReadOffsiteStatus(dir)
+	if err != nil || st.State != hostlink.OffsiteStateNotConfigured {
+		t.Fatalf("offsite-status = %+v, %v", st, err)
+	}
+}
+
 // Tín hiệu dừng tới ngay sau lúc tải genh mới (chưa chạy con): Console phải
 // nhận GH-E94B "chưa đụng gì" — không phải thông điệp không mã (rơi vào thẻ đỏ
 // "đã tự quay về").

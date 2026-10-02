@@ -3,12 +3,14 @@ package ops
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"golang.org/x/term"
@@ -25,6 +27,8 @@ import (
 //
 //   - `python -m gh.bundle export --out -`  : gói ra STDOUT, log ra STDERR.
 //   - `python -m gh.bundle import --in -`   : gói đọc từ STDIN.
+//   - `python -m gh.bundle verify --in -`   : (v0.1.40) chỉ KIỂM gói đọc từ STDIN
+//     (giải mã + pg_restore --list), không đụng CSDL — xem verifyBundle.
 //   - Mật khẩu truyền qua biến môi trường GH_BUNDLE_PASSWORD (KHÔNG qua argv
 //     — argv của tiến trình con hiện ra trong `ps`/log hệ thống, môi trường
 //     của một tiến trình không-con thì không).
@@ -130,14 +134,20 @@ type ExportDeps struct {
 // stream bytes stdout THẲNG vào một tệp tạm cạnh toPath rồi rename — KHÔNG
 // bao giờ đọc cả gói vào RAM (gói có thể rất lớn, chứa toàn bộ dữ liệu Owner).
 func RunExport(ctx context.Context, env *Env, toPath string, deps ExportDeps, out io.Writer) error {
-	runner := deps.Runner
-	if runner == nil {
-		runner = dockercli.ExecRunner{}
-	}
-
 	password, err := resolveBundlePassword(out, true, ErrCodeExportPasswordMismatch)
 	if err != nil {
 		return err
+	}
+	return exportBundle(ctx, env, toPath, password, deps, out)
+}
+
+// exportBundle là lõi của RunExport (v0.1.40 tách ra cho `genh offsite run`):
+// KHÔNG hỏi mật khẩu — caller đưa sẵn. Mật khẩu chỉ đi qua biến môi trường
+// GH_BUNDLE_PASSWORD của tiến trình con (Cmd.Env), không bao giờ qua argv/log.
+func exportBundle(ctx context.Context, env *Env, toPath, password string, deps ExportDeps, out io.Writer) error {
+	runner := deps.Runner
+	if runner == nil {
+		runner = dockercli.ExecRunner{}
 	}
 
 	composePath, err := env.LocatePath()
@@ -215,6 +225,100 @@ func RunExport(ctx context.Context, env *Env, toPath string, deps ExportDeps, ou
 
 	_, _ = fmt.Fprintln(out, "Xuất gói xong: "+absTo)
 	return nil
+}
+
+// bundleVerifyInfo là dòng JSON `gh.bundle verify` in ra stdout khi gói đọc được.
+type bundleVerifyInfo struct {
+	OK              bool   `json:"ok"`
+	AlembicRevision string `json:"alembic_revision"`
+	Objects         int64  `json:"objects"`
+	DBDumpBytes     int64  `json:"db_dump_bytes"`
+	CreatedAt       string `json:"created_at"`
+}
+
+// maxVerifyStdout giới hạn stdout của `gh.bundle verify` genh giữ lại (một dòng JSON).
+const maxVerifyStdout = 64 << 10
+
+// limitedBuffer giữ tối đa n byte đầu, bỏ phần thừa (không lỗi — tiến trình con
+// không bị chặn vì stdout dài).
+type limitedBuffer struct {
+	buf []byte
+	n   int
+}
+
+func (b *limitedBuffer) Write(p []byte) (int, error) {
+	if room := b.n - len(b.buf); room > 0 {
+		if len(p) < room {
+			room = len(p)
+		}
+		b.buf = append(b.buf, p[:room]...)
+	}
+	return len(p), nil
+}
+
+// verifyBundle (v0.1.40, F-12) kiểm gói vừa ghi đọc lại được: `docker compose
+// exec -T -e GH_BUNDLE_PASSWORD api python -m gh.bundle verify --in -` (stdin =
+// tệp gói; giải mã + `pg_restore --list`, không đụng CSDL). Mã thoát (hợp đồng
+// gh.bundle): 0 OK · 2 sai khoá/gói hỏng/pg_restore --list lỗi · 3 không tương
+// thích · 1 khác. Mọi lỗi trả *OpError mã GH-EB03 (= CHƯA có bản sao dùng được).
+func verifyBundle(ctx context.Context, env *Env, path, password string, deps ExportDeps) (bundleVerifyInfo, error) {
+	var info bundleVerifyInfo
+	runner := deps.Runner
+	if runner == nil {
+		runner = dockercli.ExecRunner{}
+	}
+	composePath, err := env.LocatePath()
+	if err != nil {
+		return info, err
+	}
+	bundle, err := env.LoadSecrets()
+	if err != nil {
+		return info, err
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return info, &OpError{
+			Code: ErrCodeOffsiteVerifyFailed,
+			What: "Bản sao vừa tạo không đọc lại được — CHƯA có bản sao ngoài máy",
+			Why:  err.Error(),
+			Next: "Kiểm ổ USB/NAS còn cắm và đọc được rồi chạy lại `genh offsite run`.",
+			Err:  err,
+		}
+	}
+	defer func() { _ = f.Close() }()
+
+	envOverlay := append(append([]string{}, EnvOverlay(bundle)...), bundlePasswordEnv+"="+password)
+	args := compose.BaseArgs(composePath, "exec", "-T", "-e", bundlePasswordEnv, bundleServiceName, "python", "-m", "gh.bundle", "verify", "--in", "-")
+	stdout := &limitedBuffer{n: maxVerifyStdout}
+	runErr := runner.RunIO(ctx, dockercli.Cmd{Name: "docker", Args: args, Env: envOverlay, Dir: composeDir(composePath)}, f, stdout)
+	if runErr == nil {
+		line := strings.TrimSpace(string(stdout.buf))
+		if i := strings.LastIndex(line, "\n"); i >= 0 {
+			line = line[i+1:]
+		}
+		_ = json.Unmarshal([]byte(line), &info) // chỉ để in số liệu; thoát 0 là đủ
+		return info, nil
+	}
+	what := "Bản sao vừa tạo không đọc lại được — CHƯA có bản sao ngoài máy"
+	why := runErr.Error()
+	var exitErr *dockercli.ExitError
+	if errors.As(runErr, &exitErr) {
+		switch exitErr.Code {
+		case 2:
+			why = "gói không giải mã được bằng khoá khôi phục, hoặc pg_restore --list không đọc được bản CSDL trong gói (" + runErr.Error() + ")"
+		case 3:
+			why = "gh.bundle báo gói không tương thích với phiên bản hiện tại (" + runErr.Error() + ")"
+		default:
+			why = "gh.bundle verify lỗi (" + runErr.Error() + ")"
+		}
+	}
+	return info, &OpError{
+		Code: ErrCodeOffsiteVerifyFailed,
+		What: what,
+		Why:  why,
+		Next: "Kiểm ổ USB/NAS (còn chỗ, không lỗi) rồi chạy lại `genh offsite run`; vẫn lỗi thì gửi `genh doctor` cho người hỗ trợ.",
+		Err:  runErr,
+	}
 }
 
 // ImportOptions là các cờ đã phân tích của `genh import`.

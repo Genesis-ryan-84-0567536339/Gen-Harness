@@ -10,9 +10,11 @@ secrets:
 	@test -f secrets/gh_master_key || python3 -c "import os,base64;print(base64.b64encode(os.urandom(32)).decode())" > secrets/gh_master_key
 	@test -f secrets/gh_bridge_key || python3 -c "import os,base64;print(base64.b64encode(os.urandom(32)).decode())" > secrets/gh_bridge_key
 	@test -f secrets/gh_browser_key || python3 -c "import os,base64;print(base64.b64encode(os.urandom(32)).decode())" > secrets/gh_browser_key
-	@chmod 700 secrets && chmod 644 secrets/gh_master_key secrets/gh_bridge_key secrets/gh_browser_key  # tệp 644 để container (user khác) đọc được, thư mục 700 chặn user khác trên host
+	@# gh_offsite_key (v0.1.40): "Khoá khôi phục" — 6 nhóm × 5 ký tự base32 HOA nối '-', KHÔNG xuống dòng (như genh sinh)
+	@test -f secrets/gh_offsite_key || python3 -c "import os,base64;k=base64.b32encode(os.urandom(19)).decode()[:30];print('-'.join(k[i:i+5] for i in range(0,30,5)),end='')" > secrets/gh_offsite_key
+	@chmod 700 secrets && chmod 644 secrets/gh_master_key secrets/gh_bridge_key secrets/gh_browser_key secrets/gh_offsite_key # tệp 644 để container (user khác) đọc được, thư mục 700 chặn user khác trên host
 	@test -f .env || cp .env.example .env
-	@echo "Đã có secrets/gh_master_key, secrets/gh_bridge_key, secrets/gh_browser_key và .env — nhớ đổi mật khẩu trong .env"
+	@echo "Đã có secrets/gh_master_key, secrets/gh_bridge_key, secrets/gh_browser_key, secrets/gh_offsite_key và .env — nhớ đổi mật khẩu trong .env"
 
 up: secrets
 	$(COMPOSE) up -d --build

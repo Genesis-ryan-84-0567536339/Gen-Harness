@@ -1,12 +1,14 @@
 package ops
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
 	"os"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/browseropen"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/compose"
@@ -15,16 +17,46 @@ import (
 
 // UninstallOptions là các cờ đã phân tích của `genh uninstall`.
 type UninstallOptions struct {
-	KeepData bool // --keep-data: KHÔNG xoá volume dữ liệu
+	// KeepData (--keep-data): từ v0.1.40 mặc định đã GIỮ dữ liệu — cờ vẫn nhận
+	// (không làm gì thêm) để script cũ không hỏng.
+	KeepData bool
+	// DeleteData (--delete-data, v0.1.40): MỚI xoá volume dữ liệu (`down
+	// --volumes`). Không có AutoApprove thì Owner phải gõ đúng "XOÁ DỮ LIỆU".
+	DeleteData bool
 	// AutoApprove bỏ qua hỏi xác nhận — ứng với cờ CLI `genh uninstall --yes`
 	// (thêm ở phiên e2e-install, cần cho kịch bản không tương tác: CI, script
 	// tự động gỡ cài). Test gọi RunUninstall trực tiếp cũng dùng trường này để
 	// không phải mô phỏng stdin cho từng test case.
 	AutoApprove bool
+	// Offsite gỡ lịch tuần bản sao ngoài máy (nil = lịch thật theo hệ điều hành).
+	Offsite OffsiteScheduler
+	// Now cho test (nil = time.Now) — để cảnh báo "Chưa có bản sao ngoài máy gần đây".
+	Now func() time.Time
 }
 
-// RunUninstall gỡ container + volume (trừ khi --keep-data) + lối tắt desktop
-// + dòng PATH mà install.sh/install.ps1 đã thêm.
+// deleteDataPhrase là cụm Owner phải gõ để xác nhận xoá dữ liệu khi không có --yes.
+const deleteDataPhrase = "XOÁ DỮ LIỆU"
+
+// ansiRed/ansiReset tô đỏ cảnh báo (terminal không hỗ trợ thì chỉ thấy ký tự thừa).
+const (
+	ansiRed   = "\033[1;31m"
+	ansiReset = "\033[0m"
+)
+
+// confirmDeletePhrase đọc một dòng và so với deleteDataPhrase (chấp nhận cả cách
+// viết "XÓA DỮ LIỆU" — cùng một chữ, khác chỗ đặt dấu).
+func confirmDeletePhrase(in io.Reader) bool {
+	scanner := bufio.NewScanner(in)
+	if !scanner.Scan() {
+		return false
+	}
+	answer := strings.TrimSpace(scanner.Text())
+	return answer == deleteDataPhrase || answer == "XÓA DỮ LIỆU"
+}
+
+// RunUninstall gỡ container (+ volume CHỈ khi --delete-data, v0.1.40) + lối tắt
+// desktop + dòng PATH mà install.sh/install.ps1 đã thêm + lịch tuần bản sao
+// ngoài máy.
 //
 // GIỚI HẠN QUAN TRỌNG (đọc kỹ trước khi coi lệnh này "gỡ sạch"): tài liệu
 // nói "Gỡ sạch container, runtime do genh cài, lối tắt, PATH". internal/
@@ -43,19 +75,43 @@ func RunUninstall(ctx context.Context, env *Env, opts UninstallOptions, runner d
 		runner = dockercli.ExecRunner{}
 	}
 
+	if opts.DeleteData && opts.KeepData {
+		return &OpError{
+			Code: ErrCodeUninstallCancelled,
+			What: "Không gỡ gì cả — --keep-data và --delete-data mâu thuẫn nhau",
+			Next: "Chọn một: bỏ --delete-data để giữ dữ liệu (mặc định), hoặc bỏ --keep-data để xoá dữ liệu.",
+		}
+	}
+	now := time.Now()
+	if opts.Now != nil {
+		now = opts.Now()
+	}
+	if opts.DeleteData && !OffsiteRecentSuccess(env.InstallDir, now) {
+		_, _ = fmt.Fprintln(out, ansiRed+"CẢNH BÁO: Chưa có bản sao ngoài máy gần đây (7 ngày) — xoá dữ liệu là MẤT HẲN, không khôi phục được."+ansiReset)
+		_, _ = fmt.Fprintln(out, ansiRed+"  Nên chạy `genh offsite run` (hoặc `genh export --to <tệp>`) và cất gói + Bộ khôi phục ra ngoài máy trước."+ansiReset)
+	}
+
 	if !opts.AutoApprove {
 		_, _ = fmt.Fprintln(out, "Gỡ Gen-Harness khỏi máy này?")
-		if opts.KeepData {
-			_, _ = fmt.Fprintln(out, "  --keep-data: dữ liệu (CSDL, tệp) sẽ được GIỮ LẠI.")
+		if opts.DeleteData {
+			_, _ = fmt.Fprintln(out, "  --delete-data: TOÀN BỘ dữ liệu (CSDL, tệp đã tải lên) sẽ bị XOÁ VĨNH VIỄN.")
+			_, _ = fmt.Fprintln(out, "Gõ đúng \""+deleteDataPhrase+"\" để xác nhận (gõ khác = huỷ):")
+			if !confirmDeletePhrase(in) {
+				return &OpError{
+					Code: ErrCodeUninstallCancelled,
+					What: "Đã huỷ — không gỡ gì cả, dữ liệu còn nguyên",
+					Next: "Muốn xoá cả dữ liệu: chạy lại `genh uninstall --delete-data` và gõ đúng \"" + deleteDataPhrase + "\". Muốn giữ dữ liệu: `genh uninstall`.",
+				}
+			}
 		} else {
-			_, _ = fmt.Fprintln(out, "  KHÔNG có --keep-data: TOÀN BỘ dữ liệu (CSDL, tệp đã tải lên) sẽ bị XOÁ VĨNH VIỄN.")
-		}
-		_, _ = fmt.Fprintln(out, "Tiếp tục? [y/N]")
-		if !confirmYesNo(in) {
-			return &OpError{
-				Code: ErrCodeUninstallCancelled,
-				What: "Đã huỷ — không gỡ gì cả",
-				Next: "Chạy lại `genh uninstall` khi chắc chắn.",
+			_, _ = fmt.Fprintln(out, "  Dữ liệu (CSDL, tệp) sẽ được GIỮ LẠI trong volume Docker (cài lại là thấy). Muốn xoá cả dữ liệu: --delete-data.")
+			_, _ = fmt.Fprintln(out, "Tiếp tục? [y/N]")
+			if !confirmYesNo(in) {
+				return &OpError{
+					Code: ErrCodeUninstallCancelled,
+					What: "Đã huỷ — không gỡ gì cả",
+					Next: "Chạy lại `genh uninstall` khi chắc chắn.",
+				}
 			}
 		}
 	}
@@ -68,7 +124,7 @@ func RunUninstall(ctx context.Context, env *Env, opts UninstallOptions, runner d
 		_, _ = fmt.Fprintln(out, "Không tìm thấy deploy/compose.yaml — bỏ qua `docker compose down` ("+locErr.Error()+").")
 	} else {
 		sub := []string{"down"}
-		if !opts.KeepData {
+		if opts.DeleteData {
 			sub = append(sub, "--volumes")
 		}
 		downArgs := compose.BaseArgs(composePath, sub...)
@@ -86,8 +142,21 @@ func RunUninstall(ctx context.Context, env *Env, opts UninstallOptions, runner d
 				Err:  err,
 			}
 		}
-		_, _ = fmt.Fprintln(out, "Đã dừng và gỡ container"+volumesSuffix(opts.KeepData)+".")
+		_, _ = fmt.Fprintln(out, "Đã dừng và gỡ container"+volumesSuffix(!opts.DeleteData)+".")
 	}
+
+	// Gỡ lịch tuần bản sao ngoài máy (v0.1.40) — không để lịch gọi một bản cài đã gỡ.
+	offsite := opts.Offsite
+	if offsite == nil {
+		offsite = NewOffsiteScheduler(env)
+	}
+	octx, ocancel := context.WithTimeout(ctx, 20*time.Second)
+	if msg, err := offsite.Disable(octx); err != nil {
+		_, _ = fmt.Fprintln(out, "Không gỡ được lịch sao lưu ra ổ ngoài: "+err.Error())
+	} else {
+		_, _ = fmt.Fprintln(out, msg)
+	}
+	ocancel()
 
 	if path, err := browseropen.ShortcutPath(); err == nil {
 		if rmErr := os.Remove(path); rmErr == nil {
@@ -111,7 +180,7 @@ func RunUninstall(ctx context.Context, env *Env, opts UninstallOptions, runner d
 
 func volumesSuffix(keepData bool) string {
 	if keepData {
-		return " (giữ nguyên dữ liệu — --keep-data)"
+		return " (giữ nguyên dữ liệu trong volume Docker — xoá hẳn: genh uninstall --delete-data)"
 	}
 	return " và volume dữ liệu"
 }

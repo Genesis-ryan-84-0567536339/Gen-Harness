@@ -28,7 +28,8 @@ const (
 
 // requestArgs là đối số watcher: `genh handle-requests` tự chọn việc theo tệp
 // trong hộp thư (update.json → `genh update --if-requested`, restore.json →
-// `genh restore --if-requested`). Port > 0 (bản cài không dùng cổng mặc định)
+// `genh restore --if-requested`, offsite.json (v0.1.40) → `genh offsite
+// … --if-requested`). Port > 0 (bản cài không dùng cổng mặc định)
 // được truyền theo để bước kiểm /ready gọi đúng cổng.
 func requestArgs(port int) []string {
 	args := []string{"handle-requests", "--quiet"}
@@ -155,6 +156,8 @@ type RequestPaths struct {
 	RequestFile string
 	// RestoreFile là tệp yêu cầu khôi phục (v0.1.20; rỗng = chỉ nhận cập nhật).
 	RestoreFile string
+	// OffsiteFile là tệp yêu cầu bản sao ngoài máy (v0.1.40; rỗng = không nhận).
+	OffsiteFile string
 	// Port là cổng HTTPS của bản cài khi KHÁC mặc định (0 = mặc định).
 	Port int
 	// Env là biến môi trường "KEY=VALUE" cần mang theo (ví dụ GENH_COMPOSE_FILE
@@ -167,6 +170,9 @@ func (rp RequestPaths) files() []string {
 	out := []string{rp.RequestFile}
 	if rp.RestoreFile != "" {
 		out = append(out, rp.RestoreFile)
+	}
+	if rp.OffsiteFile != "" {
+		out = append(out, rp.OffsiteFile)
 	}
 	return out
 }
