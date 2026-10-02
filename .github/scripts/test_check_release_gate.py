@@ -140,6 +140,57 @@ class ReleaseGateTest(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("e2e-selfupdate` cần", err)
 
+    # ── v0.1.37: ma trận ô nâng cấp tags[1] + tags[3] ─────────────────────────
+    MATRIX_LINE = "        include: ${{ fromJSON(needs.resolve.outputs.upgrade_from) }}\n"
+
+    def test_upgrade_thieu_matrix(self) -> None:
+        old = "    strategy:\n      fail-fast: false\n      matrix:\n" + self.MATRIX_LINE
+        code, err = self.run_gate(self.replace(gate.E2E_PATH, old, ""))
+        self.assertEqual(code, 1)
+        self.assertIn("strategy.matrix.include", err)
+        self.assertIn("tags[3]) có thể đỏ mà vẫn promote", err)
+
+    def test_upgrade_matrix_khong_dung_upgrade_from(self) -> None:
+        new = '        include: [{"from": "v0.1.36", "slot": "tags[1]", "broken": "false"}]\n'
+        code, err = self.run_gate(self.replace(gate.E2E_PATH, self.MATRIX_LINE, new))
+        self.assertEqual(code, 1)
+        self.assertIn("strategy.matrix.include", err)
+
+    def test_upgrade_fail_fast_true(self) -> None:
+        old = "    strategy:\n      fail-fast: false\n"
+        code, err = self.run_gate(self.replace(gate.E2E_PATH, old, "    strategy:\n      fail-fast: true\n"))
+        self.assertEqual(code, 1)
+        self.assertIn("fail-fast: false", err)
+
+    def test_upgrade_continue_on_error(self) -> None:
+        old = "    strategy:\n      fail-fast: false\n"
+        code, err = self.run_gate(self.replace(gate.E2E_PATH, old, "    continue-on-error: true\n" + old))
+        self.assertEqual(code, 1)
+        self.assertIn("continue-on-error", err)
+        self.assertIn("tags[3]) có thể đỏ mà vẫn promote", err)
+
+    def test_resolve_thieu_output_upgrade_from(self) -> None:
+        old = "      upgrade_from: ${{ steps.r.outputs.upgrade_from }}\n"
+        code, err = self.run_gate(self.replace(gate.E2E_PATH, old, ""))
+        self.assertEqual(code, 1)
+        self.assertIn("outputs.upgrade_from", err)
+
+    def test_resolve_khong_tinh_tags3(self) -> None:
+        def mutate(root: Path) -> None:
+            p = root / gate.E2E_PATH
+            s = p.read_text(encoding="utf-8")
+            head, sep, rest = s.partition("\n  e2e-install:\n")
+            assert sep, "không thấy job e2e-install"
+            p.write_text(head.replace("tags[3]", "tags[x]") + sep + rest, encoding="utf-8")
+
+        code, err = self.run_gate(mutate)
+        self.assertEqual(code, 1)
+        self.assertIn("không tính ô 'tags[3]'", err)
+
+    def test_upgrade_matrix_tep_that_khong_loi(self) -> None:
+        errs = gate.check_e2e(gate.load(ROOT, gate.E2E_PATH))
+        self.assertEqual([e for e in errs if gate.UPGRADE_JOB in e or "upgrade_from" in e or "tags[3]" in e], [])
+
 
 if __name__ == "__main__":
     unittest.main()
