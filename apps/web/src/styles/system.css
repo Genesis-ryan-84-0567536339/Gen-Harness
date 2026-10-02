@@ -77,6 +77,43 @@
 .no-model { border-color: var(--color-bad); background: color-mix(in srgb, var(--color-bad) 7%, transparent); align-items: center; margin-bottom: 12px; }
 .no-model__body { flex: 1; min-width: 0; }
 .no-model__body .risk-box__text { margin: 0; }
+/* ── v0.1.36 (F-6): dải "Cần Sếp xử lý" đầu Tổng quan ─────────────────────── */
+.needs-boss {
+  display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; margin-bottom: 14px;
+  border: 1px solid color-mix(in srgb, var(--color-bad) 45%, var(--color-neutral-800)); border-radius: var(--radius-md, 8px);
+  background: color-mix(in srgb, var(--color-bad) 4%, var(--color-surface, transparent));
+}
+.needs-boss__title { display: flex; align-items: center; gap: 7px; margin: 0; font-size: 13px; font-weight: 600; color: var(--color-text); }
+.needs-boss .no-model { margin-bottom: 0; }
+.needs-boss__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.needs-boss__row {
+  display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: var(--radius-sm);
+  border: 1px solid var(--color-warn); background: color-mix(in srgb, var(--color-warn) 7%, transparent);
+}
+.needs-boss__row[data-severity='bad'] { border-color: var(--color-bad); background: color-mix(in srgb, var(--color-bad) 7%, transparent); }
+.needs-boss__body { flex: 1; min-width: 0; }
+.needs-boss__row-title { font-size: 12px; font-weight: 500; color: var(--color-text); }
+.needs-boss__text { margin: 2px 0 0; font-size: 11.5px; color: var(--color-neutral-300); line-height: 1.5; text-wrap: pretty; overflow-wrap: anywhere; }
+.needs-boss__row > .gh-btn { flex: none; }
+@media (max-width: 640px) {
+  .needs-boss__row { flex-wrap: wrap; }
+  .needs-boss__row > .gh-btn { margin-left: 26px; }
+}
+
+/* ── v0.1.36 (F-6): thẻ "Sức khoẻ hệ thống" (Dữ liệu & lưu trữ) ─────────────── */
+.health-card { display: flex; flex-direction: column; gap: 10px; padding: 4px 0; }
+.health-card__rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.health-card__row { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.health-card__dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.health-card__label { flex: 1; min-width: 0; font-size: 12px; color: var(--color-neutral-300); }
+.health-card__value { flex: none; max-width: 60%; text-align: right; font-size: 11.5px; color: var(--color-text); overflow-wrap: anywhere; }
+.health-card__tech { margin-top: 2px; }
+.health-card__tech-title { margin: 8px 0 4px; font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--color-neutral-500); }
+.health-card__tech-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.health-card__tech-list li { display: flex; justify-content: space-between; gap: 10px; font-size: 11px; }
+.health-card__tech-list code { color: var(--color-neutral-300); overflow-wrap: anywhere; }
+.retention-note { display: flex; align-items: flex-start; gap: 6px; margin: 0 16px 8px; }
+
 .risk-list { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 5px; font-size: 11.5px; color: var(--color-neutral-300); line-height: 1.5; }
 
 /* ── Groups dialog ──────────────────────────────────────────────────────── */

@@ -77,6 +77,7 @@ export const GEN_TARGETS: GenTarget[] = [
   { id: 'system.brain.jev', screen: 'system', label: 'Thẻ Jev (System One)', description: 'Cấu hình nguồn model quyết định nhanh Jev', params: { tab: 'brain' } },
   { id: 'system.brain.jev.test', screen: 'system', label: 'Nút "Kiểm tra" Jev', description: 'Gọi thử Jev để biết khoá và địa chỉ đúng chưa', params: { tab: 'brain' } },
   { id: 'system.brain.triage', screen: 'system', label: 'Thẻ "Lọc đầu Hộp thư"', description: 'Bật/tắt lọc trùng & rác, ngưỡng điểm chất lượng, dùng Jev để chấm (chỉ Owner sửa)', params: { tab: 'brain' } },
+  { id: 'system.storage.health', screen: 'system', label: 'Sức khoẻ hệ thống', description: 'Bộ xử lý nền, Trình duyệt nền, hàng lỗi, sao lưu, cập nhật, ổ đĩa; chi tiết kỹ thuật lịch chạy', params: { tab: 'storage' } },
   { id: 'system.storage.retention', screen: 'system', label: 'Hạn lưu dữ liệu', description: 'Mỗi tập dữ liệu giữ bao lâu', params: { tab: 'storage' } },
   { id: 'system.backup.panel', screen: 'system', label: 'Sao lưu & khôi phục', description: 'Danh sách bản sao lưu, tải về, khôi phục', params: { tab: 'storage' }, sensitive: true },
   { id: 'system.backup.now', screen: 'system', label: 'Nút "Sao lưu ngay"', description: 'Tạo bản sao lưu ngay lúc này', params: { tab: 'storage' }, sensitive: true },

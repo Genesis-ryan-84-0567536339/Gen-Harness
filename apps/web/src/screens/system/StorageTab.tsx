@@ -9,6 +9,7 @@ import { toast } from '../../lib/toast';
 import { CardError, InlineError, Panel, SkeletonLines } from '../common';
 import { UpdateCard } from '../../update/UpdateCard';
 import { BackupPanel } from './BackupPanel';
+import { HealthCard } from './HealthCard';
 import { DATA_REQUEST_KIND, RETENTION_LABEL } from './systemModel';
 import { useCreateDataRequest, usePatchRetention, usePersonDataRequests, useRetentionPolicies } from './queries';
 
@@ -26,6 +27,8 @@ export function StorageTab() {
   }
   return (
     <div className="sys-tabs-col">
+      {/* v0.1.36 (F-6): sức khoẻ hệ thống đứng đầu — Bộ xử lý nền, sao lưu, cập nhật, ổ đĩa. */}
+      <HealthCard />
       {/* v0.1.30: mục cập nhật cố định — thẻ Tổng quan chỉ hiện khi đã biết có bản mới. */}
       {canManage ? <UpdateCard always /> : null}
       <BackupPanel />
@@ -34,6 +37,14 @@ export function StorageTab() {
     </div>
   );
 }
+
+/**
+ * v0.1.36 (F-2 tạm): hệ thống CHƯA có việc nền tự xoá theo hạn lưu (job thật dự kiến v0.1.40) — không để Sếp tưởng đã
+ * được xoá. Hiện cấu hình nhưng khoá nút "Sửa" kèm lý do; mã sửa giữ nguyên để bật lại khi job xong.
+ */
+const RETENTION_NOTE_ID = 'retention-not-enforced-note';
+const RETENTION_NOTE = 'Hệ thống CHƯA tự xoá dữ liệu theo các hạn này — sẽ áp dụng ở bản sau. Hiện chỉ hiển thị cấu hình.';
+const RETENTION_ENFORCED = false;
 
 function RetentionPanel() {
   const canManage = useCan('system.manage');
@@ -57,7 +68,18 @@ function RetentionPanel() {
   };
 
   return (
-    <Panel genTarget="system.storage.retention" title="Hạn lưu dữ liệu" kicker="Mỗi tập dữ liệu một hạn — đổi cần mã PIN" label="Hạn lưu dữ liệu" bodyClass="retention-wrap">
+    <Panel
+      genTarget="system.storage.retention"
+      title="Hạn lưu dữ liệu"
+      kicker={RETENTION_ENFORCED ? 'Mỗi tập dữ liệu một hạn — đổi cần mã PIN' : 'Chưa tự xoá — sẽ áp dụng ở bản sau'}
+      label="Hạn lưu dữ liệu"
+      bodyClass="retention-wrap"
+    >
+      {RETENTION_ENFORCED ? null : (
+        <p className="muted-note retention-note" role="note" id={RETENTION_NOTE_ID}>
+          <Icon name="ph ph-info" size={12} /> {RETENTION_NOTE}
+        </p>
+      )}
       {q.isPending ? (
         <SkeletonLines rows={5} padding="10px 16px" />
       ) : q.isError ? (
@@ -102,7 +124,15 @@ function RetentionPanel() {
                     <td className="mono">{r.anonymize_after_days != null ? `${r.anonymize_after_days} ngày` : '—'}</td>
                     {canManage ? (
                       <td className="retention-table__actions">
-                        <Button variant="ghost" className="btn-27" icon="ph ph-pencil-simple" onClick={() => startEdit(r.dataset, r.keep_days, r.anonymize_after_days)}>
+                        <Button
+                          variant="ghost"
+                          className="btn-27"
+                          icon="ph ph-pencil-simple"
+                          disabled={!RETENTION_ENFORCED}
+                          aria-describedby={RETENTION_ENFORCED ? undefined : RETENTION_NOTE_ID}
+                          title={RETENTION_ENFORCED ? undefined : RETENTION_NOTE}
+                          onClick={() => startEdit(r.dataset, r.keep_days, r.anonymize_after_days)}
+                        >
                           Sửa
                         </Button>
                       </td>

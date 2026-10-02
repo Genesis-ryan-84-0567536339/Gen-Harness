@@ -477,6 +477,8 @@ export function createMock(opts: P4SystemOptions) {
     step11,
     defaultBackup,
     backupConfigured: () => backupConfigured,
+    /** v0.1.36 (F-6): bản sao lưu mới nhất (mọi nguồn, cả pre-update) — `GET /system/health` (mock-api.ts) đọc. */
+    latestBackupAt: (): string | null => backups.reduce<string | null>((max, b) => (!max || b.taken_at > max ? b.taken_at : max), null),
     hooks: {} as Record<string, (...args: never[]) => unknown>,
     dispose: () => {},
   };

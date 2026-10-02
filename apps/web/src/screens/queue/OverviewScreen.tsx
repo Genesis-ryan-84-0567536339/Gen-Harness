@@ -9,7 +9,7 @@ import { useOverview } from './queries';
 import { UpdateCard } from '../../update/UpdateCard';
 import { useNavigation } from '../../lib/queries';
 import { screenKeys } from '../../shell/navModel';
-import { NoModelBanner } from './NoModelBanner';
+import { NeedsBossStrip } from './NeedsBossStrip';
 import { SetupFollowUp } from './SetupFollowUp';
 
 const KPI_ICON: Record<string, string> = {
@@ -145,8 +145,9 @@ export function OverviewScreen() {
   if (q.isError) {
     return (
       <div className="screen">
-        {/* v0.1.30: số liệu Tổng quan lỗi không được kéo mất lối vào "Việc thiết lập tiếp". */}
-        <NoModelBanner />
+        {/* v0.1.30: số liệu Tổng quan lỗi không được kéo mất lối vào "Việc thiết lập tiếp". v0.1.36 (F-6): cả dải
+            "Cần Sếp xử lý" cũng vậy. */}
+        <NeedsBossStrip />
         <SetupFollowUp />
         <CardError error={q.error} onRetry={() => void q.refetch()} retrying={q.isFetching} />
       </div>
@@ -159,8 +160,10 @@ export function OverviewScreen() {
 
   return (
     <div className="screen">
-      <UpdateCard />
-      <NoModelBanner />
+      {/* v0.1.36 (F-6): "Cần Sếp xử lý" ĐẦU trang; cập nhật lỗi chỉ hiện một lần trong dải (thẻ đầy đủ có nút Thử lại
+          ở Dữ liệu & lưu trữ và Trợ giúp). */}
+      <NeedsBossStrip />
+      <UpdateCard hideFailed />
       <SetupFollowUp />
       <div className="ov-kpi-row" data-gen-target="overview.kpis">
         {row1.map((k) => (
