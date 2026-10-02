@@ -1665,7 +1665,13 @@ jobs:
             [ "$SECONDS" -lt "$deadline" ] || { echo "::error::/api/v1/ready không xanh sau khi cài mới" >&2; exit 1; }
             sleep 3
           done
-          if cmp -s "$SECDIR/gh_offsite_key" "$RUNNER_TEMP/kit.txt"; then
+          # Khoá của BẢN CÀI MỚI (chế độ release: secrets/ cạnh deploy/ của gh-off2; chế độ pr:
+          # GENH_COMPOSE_FILE trỏ checkout) — KHÔNG dùng SECDIR (đó là secrets của bản cài cũ, đã xoá
+          # khoá ⇒ cmp luôn "khác" và phép thử không kiểm gì).
+          new_compose="${GENH_COMPOSE_FILE:-$RUNNER_TEMP/gh-off2/deploy/compose.yaml}"
+          new_key="$(dirname "$new_compose")/../secrets/gh_offsite_key"
+          [ -s "$new_key" ] || { echo "::error::bản cài mới chưa có Khoá khôi phục tại $new_key" >&2; exit 1; }
+          if cmp -s "$new_key" "$RUNNER_TEMP/kit.txt"; then
             echo "::error::bản cài mới trùng khoá khôi phục cũ — phép thử không chứng minh được gì" >&2; exit 1
           fi
 

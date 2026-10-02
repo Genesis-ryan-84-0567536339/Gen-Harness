@@ -186,9 +186,22 @@ func exportBundle(ctx context.Context, env *Env, toPath, password string, deps E
 	}
 
 	_, _ = fmt.Fprintln(out, "Đang xuất gói .ghbundle…")
-	runErr := runner.RunIO(ctx, dockercli.Cmd{Name: "docker", Args: args, Env: envOverlay, Dir: dir}, nil, tmpFile)
+	sink := &writeErrRecorder{w: tmpFile}
+	runErr := runner.RunIO(ctx, dockercli.Cmd{Name: "docker", Args: args, Env: envOverlay, Dir: dir}, nil, sink)
 	closeErr := tmpFile.Close()
 
+	if runErr != nil && sink.err != nil {
+		// Lỗi là do GHI tệp tạm (ổ USB đầy/bị rút/chỉ đọc) chứ không phải lệnh xuất —
+		// mã riêng để offsite báo GH-EB04 "Không ghi được vào ổ ngoài" thay vì GH-EB02.
+		_ = os.Remove(tmpPath)
+		return &OpError{
+			Code: ErrCodeExportWriteFailed,
+			What: "Ghi tệp tạm " + tmpPath + " thất bại",
+			Why:  sink.err.Error(),
+			Next: "Kiểm ổ đích còn chỗ trống, còn cắm và cho phép ghi rồi thử lại.",
+			Err:  sink.err,
+		}
+	}
 	if runErr != nil {
 		_ = os.Remove(tmpPath)
 		return &OpError{
@@ -225,6 +238,21 @@ func exportBundle(ctx context.Context, env *Env, toPath, password string, deps E
 
 	_, _ = fmt.Fprintln(out, "Xuất gói xong: "+absTo)
 	return nil
+}
+
+// writeErrRecorder nhớ lỗi GHI đầu tiên của w — tách "ghi tệp đích hỏng" khỏi
+// "lệnh xuất hỏng" khi RunIO trả lỗi (cả hai đều làm RunIO lỗi).
+type writeErrRecorder struct {
+	w   io.Writer
+	err error
+}
+
+func (r *writeErrRecorder) Write(p []byte) (int, error) {
+	n, err := r.w.Write(p)
+	if err != nil && r.err == nil {
+		r.err = err
+	}
+	return n, err
 }
 
 // bundleVerifyInfo là dòng JSON `gh.bundle verify` in ra stdout khi gói đọc được.

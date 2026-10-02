@@ -186,6 +186,9 @@ type OffsiteDeps struct {
 	// SameDevice báo dest và installDir có nằm cùng một ổ/thiết bị không — nil
 	// dùng sameDevice của hệ điều hành (Unix: Stat_t.Dev; Windows: tên ổ/UNC).
 	SameDevice func(dest, installDir string) (bool, error)
+	// VolatileFS trả kiểu hệ tệp tạm (tmpfs/ramfs/overlay) chứa dest, "" nếu
+	// không — nil dùng volatileFS của hệ điều hành (Linux: /proc/self/mountinfo).
+	VolatileFS func(dest string) string
 	Now        func() time.Time
 	// LockWait: thời gian tối đa chờ khoá loại trừ (0 = defaultOffsiteLockWait).
 	LockWait time.Duration
@@ -210,6 +213,13 @@ func (d OffsiteDeps) sameDevice() func(string, string) (bool, error) {
 		return d.SameDevice
 	}
 	return sameDevice
+}
+
+func (d OffsiteDeps) volatileFS() func(string) string {
+	if d.VolatileFS != nil {
+		return d.VolatileFS
+	}
+	return volatileFS
 }
 
 func (d OffsiteDeps) runner() dockercli.Runner {
@@ -286,7 +296,7 @@ func isWithin(child, parent string) bool {
 // checkOffsiteDest kiểm đích TỒN TẠI, là thư mục, không nằm trong gốc cài và
 // (trừ allowSameDisk) KHÁC thiết bị với gốc cài. KHÔNG tạo gì. forSet: "không
 // phải thư mục" là GH-EB07 (Owner chọn sai) thay vì GH-EB01.
-func checkOffsiteDest(dest, installDir string, allowSameDisk, forSet bool, same func(string, string) (bool, error)) (sameDisk bool, opErr *OpError) {
+func checkOffsiteDest(dest, installDir string, allowSameDisk, forSet bool, same func(string, string) (bool, error), volatile func(string) string) (sameDisk bool, opErr *OpError) {
 	if isWithin(resolveForCompare(dest), resolveForCompare(installDir)) || isWithin(dest, filepath.Clean(installDir)) {
 		return false, invalidDest(dest, "thư mục nằm trong thư mục cài Gen-Harness ("+installDir+") — hỏng ổ là mất cả hai")
 	}
@@ -302,6 +312,14 @@ func checkOffsiteDest(dest, installDir string, allowSameDisk, forSet bool, same 
 			return false, invalidDest(dest, dest+" không phải thư mục")
 		}
 		return false, notMounted(dest, dest+" không phải thư mục", nil)
+	}
+	// tmpfs (/tmp, /dev/shm), ramfs, overlay: Dev khác ổ chính nên lọt qua kiểm
+	// "khác ổ", nhưng bản sao mất khi khởi động lại / vẫn nằm trên ổ chính —
+	// không bao giờ là ổ USB/NAS (kể cả --allow-same-disk).
+	if volatile != nil {
+		if kind := volatile(dest); kind != "" {
+			return false, invalidDest(dest, "thư mục nằm trên hệ tệp tạm "+kind+" (bộ nhớ RAM/lớp ghi đè) — bản sao mất khi khởi động lại, không phải ổ USB/NAS")
+		}
 	}
 	s, err := same(dest, installDir)
 	if err != nil {
@@ -469,7 +487,7 @@ func RunOffsiteSet(ctx context.Context, env *Env, opts OffsiteSetOptions, deps O
 	if opErr != nil {
 		return fail(opErr, hostlink.OffsiteStateFailed)
 	}
-	sameDisk, opErr := checkOffsiteDest(dest, env.InstallDir, allowSame, true, deps.sameDevice())
+	sameDisk, opErr := checkOffsiteDest(dest, env.InstallDir, allowSame, true, deps.sameDevice(), deps.volatileFS())
 	if opErr != nil {
 		state := hostlink.OffsiteStateFailed
 		if opErr.Code == ErrCodeOffsiteNotMounted {
@@ -569,7 +587,7 @@ func RunOffsiteRun(ctx context.Context, env *Env, opts OffsiteRunOptions, deps O
 	}
 
 	// 1. Đích còn đó và đúng là ổ ngoài — KHÔNG tạo gì nếu chưa thấy.
-	if _, e := checkOffsiteDest(cfg.Path, env.InstallDir, cfg.AllowSameDisk, false, deps.sameDevice()); e != nil {
+	if _, e := checkOffsiteDest(cfg.Path, env.InstallDir, cfg.AllowSameDisk, false, deps.sameDevice(), deps.volatileFS()); e != nil {
 		return finish(hostlink.OffsiteStateNotMounted, e)
 	}
 
@@ -867,7 +885,7 @@ func RunOffsiteRequest(ctx context.Context, env *Env, deps OffsiteDeps, out io.W
 	req, rerr := hostlink.ReadOffsiteRequest(env.InstallDir)
 	_ = hostlink.ClearOffsiteRequest(env.InstallDir)
 	if rerr != nil {
-		return true, &OpError{Code: ErrCodeOffsiteInvalidDest, What: "Yêu cầu bản sao ngoài máy từ Console không đọc được", Why: rerr.Error(), Next: "Thử lại trong Console.", Err: rerr}
+		return true, failOffsiteRequest(ctx, env, deps, &OpError{Code: ErrCodeOffsiteInvalidDest, What: "Yêu cầu bản sao ngoài máy từ Console không đọc được", Why: rerr.Error(), Next: "Thử lại trong Console.", Err: rerr})
 	}
 	switch req.Action {
 	case "set":
@@ -878,8 +896,27 @@ func RunOffsiteRequest(ctx context.Context, env *Env, deps OffsiteDeps, out io.W
 	case "disable":
 		return true, RunOffsiteDisable(ctx, env, deps, out)
 	default:
-		return true, &OpError{Code: ErrCodeOffsiteInvalidDest, What: "Yêu cầu bản sao ngoài máy từ Console không hợp lệ", Why: fmt.Sprintf("action %q không được hỗ trợ (set|run|disable)", truncateForLog(req.Action, 40))}
+		return true, failOffsiteRequest(ctx, env, deps, &OpError{Code: ErrCodeOffsiteInvalidDest, What: "Yêu cầu bản sao ngoài máy từ Console không hợp lệ", Why: fmt.Sprintf("action %q không được hỗ trợ (set|run|disable)", truncateForLog(req.Action, 40)), Next: "Thử lại trong Console."})
 	}
+}
+
+// failOffsiteRequest ghi kết quả "failed" (mã của e — GH-EB07) vào
+// offsite-status.json cho yêu cầu Console hỏng (JSON không đọc được / action
+// lạ) — yêu cầu đã bị xoá nên thiếu bước này Console thấy yêu cầu biến mất mà
+// không có kết quả. Giữ nguyên thông tin lần thành công trước (nơi lưu, tệp…).
+func failOffsiteRequest(ctx context.Context, env *Env, deps OffsiteDeps, e *OpError) *OpError {
+	st := baseStatus(env.InstallDir, "")
+	if prev, err := hostlink.ReadOffsiteStatus(env.InstallDir); err == nil {
+		st = prev
+	}
+	if cfg, ok, _ := loadOffsiteConfig(env.InstallDir); ok && !cfg.Disabled {
+		st.Configured, st.Dest = true, cfg.Path
+	}
+	st.State, st.ErrorCode, st.LastAttemptAt = hostlink.OffsiteStateFailed, e.Code, rfc3339(deps.now())
+	st.Schedule = scheduleMechanism(ctx, deps.scheduler(env))
+	st.KeyID = offsiteKeyIDFor(env)
+	_ = hostlink.WriteOffsiteStatus(env.InstallDir, st)
+	return e
 }
 
 func truncateForLog(s string, n int) string {

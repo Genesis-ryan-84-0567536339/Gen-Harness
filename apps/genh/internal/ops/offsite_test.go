@@ -349,10 +349,27 @@ func TestOffsiteRequest_Console_KhongTinCay(t *testing.T) {
 	if f.sched.enables != 1 || f.status(t).State != hostlink.OffsiteStateOK {
 		t.Fatalf("phải bật lịch + chạy lần đầu: enables=%d status=%+v", f.sched.enables, f.status(t))
 	}
-	// action lạ → lỗi, tệp vẫn bị xoá; không có yêu cầu → handled=false.
+	// action lạ → lỗi, tệp vẫn bị xoá; Console thấy KẾT QUẢ (failed/GH-EB07) chứ không phải yêu cầu biến mất,
+	// thông tin lần thành công trước giữ nguyên.
+	okBefore := f.status(t)
 	write(`{"action":"rm -rf"}`)
 	if _, err := RunOffsiteRequest(context.Background(), f.env, f.deps(okRunner(0)), &strings.Builder{}); err == nil || hostlink.HasOffsiteRequest(f.env.InstallDir) {
 		t.Fatalf("action lạ phải lỗi và xoá tệp: %v", err)
+	}
+	st := f.status(t)
+	if st.State != hostlink.OffsiteStateFailed || st.ErrorCode != ErrCodeOffsiteInvalidDest {
+		t.Fatalf("action lạ phải ghi failed/GH-EB07: %+v", st)
+	}
+	if st.LastSuccessAt != okBefore.LastSuccessAt || st.LastFile != okBefore.LastFile || st.Dest != f.dest || !st.Configured {
+		t.Fatalf("phải giữ thông tin lần thành công trước: trước=%+v sau=%+v", okBefore, st)
+	}
+	// JSON hỏng → cũng ghi kết quả failed/GH-EB07.
+	write(`{không phải json`)
+	if _, err := RunOffsiteRequest(context.Background(), f.env, f.deps(okRunner(0)), &strings.Builder{}); err == nil {
+		t.Fatal("JSON hỏng phải lỗi")
+	}
+	if st := f.status(t); st.State != hostlink.OffsiteStateFailed || st.ErrorCode != ErrCodeOffsiteInvalidDest {
+		t.Fatalf("JSON hỏng phải ghi failed/GH-EB07: %+v", st)
 	}
 	if handled, _ := RunOffsiteRequest(context.Background(), f.env, f.deps(okRunner(0)), &strings.Builder{}); handled {
 		t.Fatal("hộp thư trống thì handled=false")
@@ -411,6 +428,66 @@ func TestRunOffsiteRun_DichVuChuaChay_EB06(t *testing.T) {
 		t.Fatalf("status = %+v", st)
 	}
 }
+
+func TestOffsiteSet_HeTepTam_EB07_KeCaAllowSameDisk(t *testing.T) {
+	f := newOffsiteFixture(t)
+	deps := f.deps(okRunner(0))
+	deps.VolatileFS = func(string) string { return "tmpfs" }
+	for _, allow := range []bool{false, true} {
+		err := RunOffsiteSet(context.Background(), f.env, OffsiteSetOptions{Path: f.dest, AllowSameDisk: allow, NoRun: true}, deps, &strings.Builder{})
+		oe := wantOpCode(t, err, ErrCodeOffsiteInvalidDest)
+		if !strings.Contains(oe.Why, "tmpfs") {
+			t.Fatalf("lý do phải nêu tmpfs: %q", oe.Why)
+		}
+		if _, ok, _ := loadOffsiteConfig(f.env.InstallDir); ok {
+			t.Fatal("đích tmpfs không được lưu config")
+		}
+	}
+}
+
+func TestMountinfo_TmpfsVaCungThietBiKhoi(t *testing.T) {
+	const mi = `22 1 252:1 / / rw,relatime shared:1 - ext4 /dev/vda1 rw
+23 22 0:21 / /tmp rw,nosuid shared:2 - tmpfs tmpfs rw
+24 22 0:22 / /dev/shm rw - tmpfs shm rw
+25 22 0:40 /@data /srv/data rw - btrfs /dev/sdb1 rw
+26 22 0:41 /@home /home rw - btrfs /dev/sdb1 rw
+27 22 8:33 / /media/sep/USB\040Moi rw - vfat /dev/sdc1 rw
+28 22 0:50 / /mnt/nas rw - nfs4 192.168.1.5:/share rw
+hỏng không có dấu gạch`
+	es := parseMountinfo(mi)
+	if len(es) != 7 {
+		t.Fatalf("phải tách 7 dòng, được %d: %+v", len(es), es)
+	}
+	for path, want := range map[string]string{"/tmp/gen": "tmpfs", "/dev/shm": "tmpfs", "/media/sep/USB Moi/x": "", "/srv/data": "", "/": ""} {
+		if got := volatileKind(es, path); got != want {
+			t.Errorf("volatileKind(%q) = %q, muốn %q", path, got, want)
+		}
+	}
+	if e, ok := mountFor(es, "/media/sep/USB Moi/gen"); !ok || e.Source != "/dev/sdc1" {
+		t.Fatalf("điểm mount có dấu cách (\\040) phải giải mã: %+v %v", e, ok)
+	}
+	// Hai subvolume btrfs của CÙNG /dev/sdb1 (Dev khác nhau) ⇒ cùng ổ.
+	if !sameBlockSource(es, "/srv/data/gen", "/home/sep/gen-harness") {
+		t.Fatal("subvolume btrfs cùng /dev/sdb1 phải coi là cùng ổ")
+	}
+	if sameBlockSource(es, "/media/sep/USB Moi", "/home/sep/gen-harness") {
+		t.Fatal("ổ USB /dev/sdc1 khác /dev/sdb1")
+	}
+	if sameBlockSource(es, "/mnt/nas/a", "/mnt/nas/b") {
+		t.Fatal("nguồn không phải /dev/… (NAS) không so theo thiết bị khối")
+	}
+}
+
+func TestWriteErrRecorder_NhoLoiGhiDauTien(t *testing.T) {
+	w := &writeErrRecorder{w: failWriter{}}
+	if _, err := w.Write([]byte("a")); err == nil || w.err == nil || !strings.Contains(w.err.Error(), "đầy") {
+		t.Fatalf("phải nhớ lỗi ghi: %v %v", err, w.err)
+	}
+}
+
+type failWriter struct{}
+
+func (failWriter) Write([]byte) (int, error) { return 0, errors.New("ổ đã đầy") }
 
 func TestSameVolumeWindows(t *testing.T) {
 	cases := []struct {

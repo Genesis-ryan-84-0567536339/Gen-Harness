@@ -7,3 +7,6 @@ package ops
 func sameDevice(dest, installDir string) (bool, error) {
 	return sameVolumeWindows(dest, installDir), nil
 }
+
+// volatileFS (Windows): không có tmpfs/overlay — luôn "".
+func volatileFS(string) string { return "" }
