@@ -158,7 +158,7 @@ export const GUIDE: GuideItem[] = [
       'Trong Gen-hub: tạo trợ lý mới, chọn thẻ truy cập (token) 90 ngày, chỉ bật quyền ĐỌC Kho.',
       'Chép token vừa tạo.',
       'Bấm "Mở thẻ Gen-hub" bên dưới, dán địa chỉ và token vào thẻ Gen-hub.',
-      'Bấm "Kiểm tra" (nhập PIN khi được hỏi) và chờ báo Đã nối Kho.',
+      'Bấm "Lưu & kiểm tra" (nhập PIN khi được hỏi) và chờ báo Đã nối Kho.',
     ],
     doneWhen: 'Kiểm tra xanh ít nhất một lần.',
     console: { label: 'Kết nối MCP › Gen-hub', to: '/mcp' },

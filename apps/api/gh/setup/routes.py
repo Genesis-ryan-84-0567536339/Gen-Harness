@@ -814,7 +814,7 @@ FOLLOW_UP_SQL: dict[int, str] = {
 # "Hướng dẫn thiết lập" — xong theo dữ liệu thật: Facebook đã từng đăng nhập; Gen-hub đã Kiểm tra xanh ít nhất một lần.
 FOLLOW_UP_EXTRA: tuple[tuple[int, str, str, str], ...] = (
     (13, "social", "Kết nối Facebook",
-     "SELECT EXISTS (SELECT 1 FROM core.social_accounts WHERE org_id = :o "
+     "SELECT EXISTS (SELECT 1 FROM core.social_accounts WHERE org_id = :o AND platform LIKE 'facebook%' "
      "AND status IN ('active', 'paused', 'needs_login'))"),
     (14, "hub", "Nối Gen-hub",
      "SELECT EXISTS (SELECT 1 FROM agent.hub_links WHERE org_id = :o AND last_ok_at IS NOT NULL)"),

@@ -124,7 +124,7 @@ describe('v0.1.39 — Gen điều hướng tới /social', () => {
   it('registry có màn social và target thẻ Facebook', () => {
     expect(GEN_SCREEN_BY_KEY.social).toEqual({ key: 'social', path: '/social', title: 'Tài khoản mạng xã hội' });
     expect(GEN_SCREEN_BY_KEY.guide.title).toBe('Hướng dẫn thiết lập');
-    expect(GEN_TARGET_BY_ID['system.channels.facebook']).toMatchObject({ screen: 'system', params: { tab: 'channels' }, permission: 'system.manage' });
+    expect(GEN_TARGET_BY_ID['system.channels.facebook']).toMatchObject({ screen: 'system', params: { tab: 'channels' }, permission: 'roles.manage' }); // chỉ Owner thấy thẻ → target chỉ Owner (Admin có system.manage không được chỉ tới)
   });
 
   it('hành động {type:navigate, screen:social} → navigateTo("/social")', async () => {

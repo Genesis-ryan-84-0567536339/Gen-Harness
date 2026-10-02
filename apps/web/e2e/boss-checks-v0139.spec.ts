@@ -27,7 +27,7 @@ test.describe('Việc Sếp cần làm (v0.1.39)', () => {
 
   test('Owner: thẻ ở Hướng dẫn thiết lập → 5 dòng; Gen-hub PIN một lần → Đạt; Facebook Đọc ngay → Đang chạy… → Đạt', async ({ page }) => {
     test.setTimeout(90_000);
-    await p3Hook(page.request, 'social', 'importKeyChanged', { label: 'Facebook của Sếp' });
+    await p3Hook(page.request, 'social', 'seedActive', { label: 'Facebook của Sếp' });
     let pinDialogs = 0;
     page.on('response', (res) => {
       if (res.url().includes('/api/v1/') && res.status() === 423) pinDialogs += 1;
@@ -61,7 +61,10 @@ test.describe('Việc Sếp cần làm (v0.1.39)', () => {
     const fb = row(page, 'Kết nối Facebook');
     await fb.getByRole('button', { name: 'Đọc ngay' }).click();
     await expect(fb.getByTestId('boss-result')).toContainText('Đang chạy…');
+    // Đang chạy → nút tắt (bấm lại sẽ chỉ ra SOCIAL_BUSY và che mất lượt đang chạy).
+    await expect(fb.getByRole('button', { name: 'Đọc ngay' })).toBeDisabled();
     await expect(fb.getByTestId('boss-result')).toContainText('Đạt ·', { timeout: 15_000 });
+    await expect(fb.getByRole('button', { name: 'Đọc lại' })).toBeEnabled();
     await expect(page.getByText('Đã đạt 2/4 dòng bắt buộc')).toBeVisible();
 
     // Hướng dẫn thiết lập: việc "Nối Gen-hub" và "Kết nối Facebook" tự hiện Đã xong.
@@ -93,11 +96,11 @@ test.describe('Việc Sếp cần làm (v0.1.39)', () => {
     await expect(agy).toContainText('Đã đổi qua lại 2/2 lần');
     await expect(agy).toContainText('Xong');
 
-    // Tải lại: kết quả đọc lại từ API.
+    // Tải lại: kết quả đọc lại từ API — máy chủ chỉ lưu email ĐÃ CHE (email đầy đủ chỉ có trong phản hồi lúc bấm).
     await page.reload();
     const again = row(page, 'Google (Antigravity) — hai tài khoản');
-    await expect(again.getByTestId('boss-result').nth(1)).toContainText('Đạt · đang dùng binh@genesis.vn');
-    await expect(again.getByTestId('boss-result').nth(2)).toContainText('gọi thử chạy bằng binh@genesis.vn — khớp');
+    await expect(again.getByTestId('boss-result').nth(1)).toContainText('Đạt · đang dùng b***@genesis.vn');
+    await expect(again.getByTestId('boss-result').nth(2)).toContainText('gọi thử chạy bằng b***@genesis.vn — khớp');
     await expect(again).toContainText('Đã đổi qua lại 2/2 lần');
   });
 });

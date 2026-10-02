@@ -36,7 +36,7 @@ REQUIRED_TOTAL = sum(1 for r in ROWS if not r["optional"])
 
 DETAIL_KEYS = frozenset({"latency_ms", "probe_model", "models_count", "models_source", "account_masked",
                          "expected_masked", "account_match", "code_shape", "credentials_file", "job_status",
-                         "exposed_tools", "missing_tools"})
+                         "exposed_tools", "missing_tools", "target_profile"})
 
 SOCIAL_FAILED_MSG = "Lượt đọc Facebook chưa thành công — mở trang Mạng xã hội xem lý do rồi bấm Đọc ngay lần nữa"
 SOCIAL_HALTED_MSG = "Lượt đọc Facebook đã bị dừng hoặc huỷ — bấm Đọc ngay lần nữa"
@@ -169,16 +169,36 @@ async def pass_count(db: AsyncSession, org_id: uuid.UUID, key: str) -> int:
                                          AND status = 'pass'"""), {"o": org_id, "k": key})).scalar_one())
 
 
+async def switch_passes(db: AsyncSession, org_id: uuid.UUID) -> int:
+    """Số lần ĐỔI THẬT đã đạt: các lượt `agy_switch` 'pass' theo thời gian, chỉ đếm lượt có tài khoản đích KHÁC lượt
+    đạt ngay trước (đổi sang chính tài khoản vừa đổi tới không chứng minh được gì). Tài khoản đích = `target_profile`
+    (hồ sơ), thiếu thì email đã che; không có cả hai (bản ghi cũ) → coi là khác."""
+    rows = (await db.execute(text("""
+        SELECT id, COALESCE(detail->>'target_profile', detail->>'expected_masked') AS target
+        FROM ops.boss_checks WHERE org_id = :o AND check_key = 'agy_switch' AND status = 'pass'
+        ORDER BY checked_at, id"""), {"o": org_id})).all()
+    n, prev = 0, None
+    for r in rows:
+        target = r.target or f"row:{r.id}"
+        if target != prev:
+            n += 1
+        prev = target
+    return n
+
+
 def _passed(results: dict[str, dict[str, Any] | None], key: str) -> bool:
     r = results.get(key)
     return r is not None and r["status"] == "pass"
 
 
 async def overview(db: AsyncSession, org_id: uuid.UUID) -> dict[str, Any]:
-    """Quy tắc 'done': hub/facebook/jev = kiểm tương ứng đạt; agy = agy_call đạt VÀ ≥2 lần agy_switch đạt (đổi qua
-    lại 2 lần); claude = claude_login đạt VÀ claude_call đạt."""
+    """Quy tắc 'done': hub/facebook/jev = kiểm tương ứng đạt; agy = agy_call đạt VÀ ≥2 lần đổi tài khoản THẬT đạt
+    (`switch_passes` — đổi qua lại giữa hai tài khoản); claude = claude_login đạt VÀ claude_call đạt.
+
+    `switch_passes` trả kèm cho web (bộ đếm "Đã đổi qua lại x/2 lần"): `results.agy_switch.runs` đếm MỌI bản ghi, cả
+    lượt lỗi, nên không dùng được cho bộ đếm."""
     results = await latest(db, org_id)
-    switches = await pass_count(db, org_id, "agy_switch")
+    switches = await switch_passes(db, org_id)
     rows: list[dict[str, Any]] = []
     for row in ROWS:
         if row["key"] == "agy":
@@ -189,4 +209,5 @@ async def overview(db: AsyncSession, org_id: uuid.UUID) -> dict[str, Any]:
             done = _passed(results, row["checks"][0])
         rows.append({**row, "checks": list(row["checks"]), "done": done})
     required_done = sum(1 for r in rows if r["done"] and not r["optional"])
-    return {"rows": rows, "results": results, "required_done": required_done, "required_total": REQUIRED_TOTAL}
+    return {"rows": rows, "results": results, "required_done": required_done, "required_total": REQUIRED_TOTAL,
+            "switch_passes": switches}

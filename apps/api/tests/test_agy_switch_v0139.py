@@ -69,7 +69,8 @@ async def test_switch_back_and_forth_calls_with_selected_account(owner_api: Api,
     out = await _run(api, "agy_switch", {"profile_id": an})
     assert out["status"] == "pass" and out["account"] == "an@example.vn", out
     assert out["detail"] == {"expected_masked": "a***@example.vn", "account_masked": "a***@example.vn",
-                             "account_match": True, "latency_ms": out["detail"]["latency_ms"]}
+                             "account_match": True, "latency_ms": out["detail"]["latency_ms"],
+                             "target_profile": an}
     assert (await _run(api, "agy_call"))["account"] == "an@example.vn"
     assert (await _provider(api, AGY))["account_label"] == "an@example.vn"
 
@@ -80,7 +81,7 @@ async def test_switch_back_and_forth_calls_with_selected_account(owner_api: Api,
     assert (await _provider(api, AGY))["account_label"] == "binh@example.vn"
 
     ov = (await api.get("/boss-checks")).json()
-    assert next(r for r in ov["rows"] if r["key"] == "agy")["done"] is True
+    assert next(r for r in ov["rows"] if r["key"] == "agy")["done"] is True and ov["switch_passes"] == 2
     # Hồ sơ nào giữ đúng phiên của mình (không bị ghi đè chéo khi đổi qua lại).
     async with admin_sessionmaker()() as db:
         rows = (await db.execute(text("SELECT email, token_enc, is_active FROM agent.cli_profiles"))).all()
@@ -131,7 +132,41 @@ async def test_switch_while_login_in_progress_is_recorded(owner_api: Api, clis: 
         out = await _run(api, "agy_switch", {"profile_id": an})
     finally:
         del app.state.cli_logins.busy
-    assert out["status"] == "fail" and out["error_code"] == "CLI_LOGIN_IN_PROGRESS"
+    assert out["status"] == "fail" and out["error_code"] == "CLI_LOGIN_IN_PROGRESS" and out["transient"] is True
+    # Lỗi tạm: không ghi bản kiểm nào (không che kết quả đổi tài khoản đã lưu).
+    assert (await api.get("/boss-checks")).json()["results"]["agy_switch"] is None
+
+
+async def test_switch_without_id_token_uses_userinfo_not_mismatch(owner_api: Api, clis: Any,  # noqa: F811
+                                                                  monkeypatch: Any) -> None:
+    """Tệp phiên agy có thể không có id_token (email chỉ có qua userinfo) → lượt đổi thành công KHÔNG được báo
+    AGY_ACCOUNT_MISMATCH; không đọc được email nào thì 'pass' với account_match = None (không so được ≠ lệch)."""
+    api = owner_api
+    await _login(api, AGY, "4/an")
+    await _login(api, AGY, "4/binh")
+    await verify_pin(api)
+    an, binh = await _profile_id(api, "an@example.vn"), await _profile_id(api, "binh@example.vn")
+    monkeypatch.setattr(climod, "session_email", lambda kind, raw: None)     # như tệp phiên không có id_token
+    asked: list[bytes] = []
+
+    async def userinfo(raw: bytes, transport: Any = None) -> dict[str, Any]:
+        asked.append(raw)
+        return {"email": "an@example.vn", "expires_at": None}
+
+    monkeypatch.setattr(climod, "token_identity", userinfo)
+    out = await _run(api, "agy_switch", {"profile_id": an})
+    assert out["status"] == "pass" and out["error_code"] is None and out["account"] == "an@example.vn", out
+    assert out["detail"]["account_match"] is True and asked
+
+    async def unknown(raw: bytes, transport: Any = None) -> dict[str, Any]:
+        return {"email": None, "expires_at": None}
+
+    monkeypatch.setattr(climod, "token_identity", unknown)
+    out = await _run(api, "agy_switch", {"profile_id": binh})
+    assert out["status"] == "pass" and out["error_code"] is None, out
+    assert out["detail"]["account_match"] is None and out["detail"]["account_masked"] is None
+    ov = (await api.get("/boss-checks")).json()
+    assert ov["switch_passes"] == 2
 
 
 async def test_switch_to_active_account_keeps_refreshed_session(owner_api: Api, clis: Any) -> None:  # noqa: F811
@@ -152,3 +187,29 @@ async def test_switch_to_active_account_keeps_refreshed_session(owner_api: Api, 
     assert orjson.loads(path.read_bytes())["access_token"] == "tok-an"
     await _run(api, "agy_switch", {"profile_id": await _profile_id(api, "binh@example.vn")})
     assert orjson.loads(path.read_bytes())["access_token"] == "tok-binh-lam-moi"
+
+
+def test_scrub_codes_masks_cut_and_wrapped_pieces() -> None:
+    code = "4/0AVGzR1A-abcdefghijklmnopqrstuvwxyz0123456789"
+    # Đuôi bộ đệm cắt ngang mã + TUI ngắt dòng giữa mã: không mảnh ≥ 8 ký tự nào được lọt ra.
+    msg = "CLI đã thoát: " + code[17:] + " | dòng: " + code[:20] + "\n" + code[20:]
+    out = climod.scrub_codes(msg, [code])
+    for i in range(len(code) - 7):
+        assert code[i:i + 8] not in out, code[i:i + 8]
+    assert out.startswith("CLI đã thoát: ") and "dòng:" in out
+    assert climod.scrub_codes("không có mã", [code, ""]) == "không có mã"
+
+
+async def test_login_done_even_if_boss_check_raises(owner_api: Api, clis: Any, app: Any,  # noqa: F811
+                                                    monkeypatch: Any) -> None:
+    """Việc phụ sau khi đã commit hồ sơ (ghi kết quả kiểm) ném lỗi → lượt đăng nhập vẫn 'done', tệp phiên mới giữ
+    nguyên (không bị trả tệp phiên cũ về đè)."""
+    api = owner_api
+    await _login(api, AGY, "4/an")
+
+    async def boom(*a: Any, **k: Any) -> None:
+        raise RuntimeError("hỏng khi ghi kết quả kiểm")
+
+    monkeypatch.setattr(type(app.state.cli_logins), "_boss_check_record", boom)
+    await _login(api, AGY, "4/binh")
+    assert climod.file_email(climod.token_path(AGY).read_bytes()) == "binh@example.vn"

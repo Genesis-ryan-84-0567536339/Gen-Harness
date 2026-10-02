@@ -25,6 +25,13 @@ def test_classify_network_blocked_link_local_is_forbidden() -> None:
     assert hub._error_code(hub.ENDPOINT_FORBIDDEN_MSG, code="MCP_NETWORK_BLOCKED") == "HUB_ENDPOINT_FORBIDDEN"
 
 
+def test_classify_network_blocked_invalid_endpoint_is_not_forbidden() -> None:
+    msg = "Địa chỉ máy chủ MCP không hợp lệ"
+    got = hub._classify(msg, code="MCP_NETWORK_BLOCKED")
+    assert got == hub.ENDPOINT_INVALID_MSG and got != hub.ENDPOINT_FORBIDDEN_MSG
+    assert hub._error_code(got, code="MCP_NETWORK_BLOCKED") == "HUB_ENDPOINT_INVALID"
+
+
 def test_classify_keeps_old_branches() -> None:
     assert hub._classify("401: unauthorized") == (
         "401: Token Gen-hub hết hạn hoặc đã bị thu hồi — tạo token mới trong Gen-hub rồi dán lại")

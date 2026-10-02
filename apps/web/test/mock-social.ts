@@ -240,5 +240,21 @@ export function createMock(opts: Opts) {
     return out(a);
   };
 
-  return { handle, liveSocket, liveInput, hooks: { importKeyChanged }, dispose };
+  /**
+   * v0.1.39 — hook e2e `POST /api/v1/__mock/p3/social/seedActive {label}`: tài khoản Facebook ĐÃ đăng nhập (active, có
+   * phiên) cho "Việc Sếp cần làm" (nút "Đọc ngay" chỉ hiện khi tài khoản đang kết nối).
+   */
+  const seedActive = (b: unknown) => {
+    const label = String((b as { label?: string } | null)?.label ?? 'Facebook của Sếp');
+    const a: SocialAccount = {
+      id: randomUUID(), platform: FACEBOOK.key, platform_name: FACEBOOK.name, mode: 'browser', label,
+      external_handle: null, status: 'active', pause_reason: null, has_session: true, session_updated_at: now(),
+      last_health: null, risk_accepted_at: now(), risk_version: RISK_VERSION, schedule: { enabled: false, times: ['08:00', '17:00'] },
+      daily_read_limit: 6, last_read_at: null, created_at: now(), active_job: null,
+    };
+    accounts.push(a);
+    return out(a);
+  };
+
+  return { handle, liveSocket, liveInput, hooks: { importKeyChanged, seedActive }, dispose };
 }

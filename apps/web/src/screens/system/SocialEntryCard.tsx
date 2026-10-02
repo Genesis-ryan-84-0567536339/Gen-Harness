@@ -5,7 +5,9 @@ import { Panel } from '../common';
 
 /**
  * v0.1.39 (F-32): thẻ Facebook ở Hệ thống › Kênh — lối vào trang Tài khoản mạng xã hội (/social), nơi Sếp đăng
- * nhập Facebook ngay trong app để Gen đọc thông báo và tin nhắn. Chỉ Owner (trang /social chỉ cho Owner).
+ * nhập Facebook ngay trong app để Gen đọc thông báo và tin nhắn. Chỉ Owner (trang /social chỉ cho Owner) — target Gen
+ * `system.channels.facebook` khai `permission: 'roles.manage'` (quyền chỉ Owner có, như các target Owner khác) để Gen
+ * không chỉ một Admin tới thẻ không hiện trên màn hình của họ.
  */
 export function SocialEntryCard() {
   const me = useMe();

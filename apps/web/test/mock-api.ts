@@ -369,6 +369,7 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
       cliProfiles: phase2.hooks.cliProfiles,
       activateCli: phase2.hooks.activateCli,
       providers: phase2.hooks.providers,
+      onCliLogin: phase2.hooks.onCliLogin as (fn: (kind: string, ok: boolean, email: string | null) => void) => void,
     }),
     // agents TRƯỚC core: `GET /agents/decisions` cần trả dữ liệu thật ("agent đã nói gì") — core.handle() có
     // một stub rỗng cho cùng đường (chưa màn nào dùng tới trước giai đoạn 4) nên phải chặn trước nó.

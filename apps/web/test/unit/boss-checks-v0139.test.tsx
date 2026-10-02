@@ -51,6 +51,9 @@ interface World {
   link: HubLink;
   accounts: SocialAccount[];
   agy: CliProfile[];
+  claude: CliProfile[];
+  /** `switch_passes` của máy chủ (số lần đổi ĐẠT) — tự tăng khi `run` trả agy_switch 'pass'. */
+  switchPasses: number;
   providers: Array<{ id: string; kind: string; name: string }>;
   run: (key: string, body: Record<string, unknown>) => BossCheck;
   /** Gọi trước mỗi GET /boss-checks (đổi pending → pass). */
@@ -59,7 +62,7 @@ interface World {
 
 function setup(w: Partial<World> = {}) {
   const world: World = {
-    results: { ...EMPTY }, link: SAVED, accounts: [], agy: [], providers: [],
+    results: { ...EMPTY }, link: SAVED, accounts: [], agy: [], claude: [], switchPasses: 0, providers: [],
     run: (key) => check(key as BossCheckKey, 'pass'), ...w,
   };
   const calls: Call[] = [];
@@ -74,12 +77,14 @@ function setup(w: Partial<World> = {}) {
       calls.push({ path, method, body });
       if (path === '/boss-checks' && method === 'GET') {
         world.onList?.(++lists);
-        return json(200, { rows: ROWS, results: world.results, required_done: 0, required_total: 4 });
+        return json(200, { rows: ROWS, results: world.results, required_done: 0, required_total: 4, switch_passes: world.switchPasses });
       }
       const run = /^\/boss-checks\/([a-z_]+)\/run$/.exec(path);
       if (run && method === 'POST') {
         const c = world.run(run[1], body ?? {});
-        world.results[c.key] = c;
+        // Như máy chủ: lỗi tạm không được ghi.
+        if (!c.transient) world.results[c.key] = c;
+        if (c.key === 'agy_switch' && c.status === 'pass') world.switchPasses += 1;
         return json(200, c);
       }
       if (path === '/hub/link' && method === 'GET') return json(200, world.link);
@@ -89,7 +94,7 @@ function setup(w: Partial<World> = {}) {
         return json(200, world.link);
       }
       if (path === '/social/accounts') return json(200, { items: world.accounts });
-      if (path === '/cli/profiles') return json(200, u.searchParams.get('kind') === 'claude_code_cli' ? [] : world.agy);
+      if (path === '/cli/profiles') return json(200, u.searchParams.get('kind') === 'claude_code_cli' ? world.claude : world.agy);
       if (path === '/providers') return json(200, world.providers);
       if (path === '/auth/me') return json(200, me('owner'));
       return json(404, { code: 'NOT_FOUND', title: 'Không tồn tại' });
@@ -142,7 +147,13 @@ describe('Việc Sếp cần làm (/guide/viec-sep)', () => {
     await waitFor(() => expect(within(hub).getByText(/^Đạt · \d\d:\d\d \d\d\/\d\d$/)).toBeInTheDocument());
     const writes = calls.filter((c) => c.method !== 'GET').map((c) => `${c.method} ${c.path}`);
     expect(writes).toEqual(['PATCH /hub/link', 'POST /boss-checks/hub/run']);
-    expect(calls.find((c) => c.method === 'PATCH')!.body).toEqual({ token: 'ghtok_Moi_123456789' });
+    const patch = calls.find((c) => c.method === 'PATCH')!.body as { token: string; token_expires_at: string };
+    expect(patch.token).toBe('ghtok_Moi_123456789');
+    // Token mới = token 90 ngày → gửi kèm hạn (nhắc trước 14 ngày chạy đúng ngày, không giữ hạn cũ).
+    const days = (Date.parse(patch.token_expires_at) - Date.now()) / 86_400_000;
+    expect(days).toBeGreaterThan(89.9);
+    expect(days).toBeLessThan(90.1);
+    expect(Object.keys(patch).sort()).toEqual(['token', 'token_expires_at']);
     expect(token).toHaveValue('');
     expect(document.body.innerHTML).not.toContain('ghtok_Moi_123456789');
   });
@@ -273,6 +284,7 @@ describe('Việc Sếp cần làm (/guide/viec-sep)', () => {
         agy_switch: check('agy_switch', 'pass', { runs: 2, detail: { account_masked: 'b***@genesis.vn', account_match: true } }),
         jev: check('jev', 'fail', { error_code: 'PROVIDER_ERROR', message: 'upstream 500' }),
       },
+      switchPasses: 2,
     });
     renderPage();
     const agy = await screen.findByRole('region', { name: 'Google (Antigravity) — hai tài khoản' });
@@ -283,6 +295,113 @@ describe('Việc Sếp cần làm (/guide/viec-sep)', () => {
     expect(within(jev).getByText('Lỗi — thẻ Jev sẽ ẩn, không cần làm thêm')).toBeInTheDocument();
     expect(within(jev).getByText('Mã lỗi PROVIDER_ERROR')).toBeInTheDocument();
     expect(document.body.textContent).not.toContain('[object Object]');
+  });
+
+  it('bộ đếm đổi qua lại dùng switch_passes (chỉ lượt ĐẠT) — 2 bản ghi mà 1 lỗi vẫn là 1/2', async () => {
+    setup({
+      agy: [BINH, AN],
+      switchPasses: 1,
+      results: {
+        ...EMPTY,
+        agy_switch: check('agy_switch', 'fail', { runs: 2, error_code: 'PROBE_RATE_LIMITED', message: 'Gọi thử quá nhiều lần' }),
+      },
+    });
+    renderPage();
+    const agy = await screen.findByRole('region', { name: 'Google (Antigravity) — hai tài khoản' });
+    expect(await within(agy).findByText(/Đã đổi qua lại 1\/2 lần/)).toBeInTheDocument();
+  });
+
+  it('đổi tài khoản không đọc được email để so → vẫn Đạt, nói rõ không so được', async () => {
+    setup({
+      agy: [BINH, AN],
+      results: { ...EMPTY, agy_switch: check('agy_switch', 'pass', { detail: { account_masked: null, account_match: null } }) },
+    });
+    renderPage();
+    const agy = await screen.findByRole('region', { name: 'Google (Antigravity) — hai tài khoản' });
+    expect(await within(agy).findByText('Đã đổi · gọi thử chạy được (không đọc được email để so)')).toBeInTheDocument();
+  });
+
+  it('Facebook: đang chạy → nút tắt; đã Đạt → "Đọc lại"', async () => {
+    setup({ accounts: [FB], results: { ...EMPTY, facebook: check('facebook', 'pending') } });
+    const { unmount } = renderPage();
+    const fb = await screen.findByRole('region', { name: 'Kết nối Facebook' });
+    expect(await within(fb).findByRole('button', { name: 'Đọc ngay' })).toBeDisabled();
+    unmount();
+    queryClient.clear();
+    setup({ accounts: [FB], results: { ...EMPTY, facebook: check('facebook', 'pass') } });
+    renderPage();
+    const fb2 = await screen.findByRole('region', { name: 'Kết nối Facebook' });
+    expect(await within(fb2).findByRole('button', { name: 'Đọc lại' })).toBeEnabled();
+    expect(within(fb2).queryByRole('button', { name: 'Đọc ngay' })).toBeNull();
+  });
+
+  it('Facebook lỗi tạm (hạn mức) → KHÔNG thay ô "Đạt", chỉ báo cạnh nút', async () => {
+    setup({
+      accounts: [FB],
+      results: { ...EMPTY, facebook: check('facebook', 'pass') },
+      run: (key) => check(key as BossCheckKey, 'fail', { error_code: 'SOCIAL_RATE_LIMIT', message: 'Vừa đọc xong', transient: true, runs: 0 }),
+    });
+    renderPage();
+    const user = userEvent.setup();
+    const fb = await screen.findByRole('region', { name: 'Kết nối Facebook' });
+    await user.click(await within(fb).findByRole('button', { name: 'Đọc lại' }));
+    expect(await within(fb).findByTestId('boss-transient')).toHaveTextContent('Đã đọc đủ số lần cho phép');
+    expect(within(fb).getByTestId('boss-result')).toHaveTextContent(/Đạt · /);
+  });
+
+  it('Facebook đã thêm nhưng chưa đăng nhập (pending_login) → lối chính sang /social, không có "Đọc ngay"', async () => {
+    setup({ accounts: [{ ...FB, status: 'pending_login', pause_reason: null, active_job: null }] });
+    renderPage();
+    const fb = await screen.findByRole('region', { name: 'Kết nối Facebook' });
+    expect(await within(fb).findByRole('link', { name: /Đăng nhập ở trang Tài khoản mạng xã hội/ })).toHaveAttribute('href', '/social');
+    expect(within(fb).getByText('Facebook của Sếp · Chưa đăng nhập')).toBeInTheDocument();
+    expect(within(fb).queryByRole('button', { name: /Đọc/ })).toBeNull();
+  });
+
+  it('Google gọi thử AUTH_EXPIRED / đổi AGY_ACCOUNT_MISMATCH → nút "Đăng nhập lại" + câu chỉ đăng nhập lại', async () => {
+    setup({
+      agy: [BINH, AN],
+      results: {
+        ...EMPTY,
+        agy_switch: check('agy_switch', 'fail', { error_code: 'AGY_ACCOUNT_MISMATCH', message: 'x' }),
+      },
+    });
+    const { unmount } = renderPage();
+    const agy = await screen.findByRole('region', { name: 'Google (Antigravity) — hai tài khoản' });
+    expect(await within(agy).findByRole('button', { name: 'Đăng nhập lại' })).toBeInTheDocument();
+    expect(within(agy).getByText(/Lỗi · Gọi thử vẫn chạy bằng tài khoản khác.*Đăng nhập lại/)).toBeInTheDocument();
+    expect(within(agy).getByRole('link', { name: /Kênh & đăng nhập/ })).toHaveAttribute('href', '/system?tab=channels');
+    unmount();
+    queryClient.clear();
+    setup({ agy: [BINH], results: { ...EMPTY, agy_call: check('agy_call', 'fail', { error_code: 'AUTH_EXPIRED' }) } });
+    renderPage();
+    const agy2 = await screen.findByRole('region', { name: 'Google (Antigravity) — hai tài khoản' });
+    expect(await within(agy2).findByRole('button', { name: 'Đăng nhập lại' })).toBeInTheDocument();
+  });
+
+  it('Claude Code gọi thử AUTH_EXPIRED → nút "Đăng nhập lại Claude Code"', async () => {
+    setup({
+      claude: [{ ...BINH, id: 'c1', email: 'ryan@claude.ai' }],
+      results: { ...EMPTY, claude_call: check('claude_call', 'fail', { error_code: 'AUTH_EXPIRED' }) },
+    });
+    renderPage();
+    const cl = await screen.findByRole('region', { name: 'Claude Code CLI' });
+    expect(await within(cl).findByRole('button', { name: 'Đăng nhập lại Claude Code' })).toBeInTheDocument();
+  });
+
+  it('Gen-hub: lỗi địa chỉ → link "Sửa địa chỉ ở Kết nối MCP"; chưa cấu hình mà thiếu ô → gợi ý vì sao chưa bấm được', async () => {
+    setup({ results: { ...EMPTY, hub: check('hub', 'fail', { error_code: 'HUB_UNREACHABLE' }) } });
+    const { unmount } = renderPage();
+    const hub = await screen.findByRole('region', { name: 'Nối Gen-hub' });
+    expect(await within(hub).findByRole('link', { name: 'Sửa địa chỉ ở Kết nối MCP' })).toHaveAttribute('href', '/mcp');
+    unmount();
+    queryClient.clear();
+    setup({ link: { ...SAVED, configured: false, endpoint: null, has_token: false } });
+    renderPage();
+    const hub2 = await screen.findByRole('region', { name: 'Nối Gen-hub' });
+    expect(await within(hub2).findByText(/Cần địa chỉ http\(s\) và token ít nhất 8 ký tự/)).toBeInTheDocument();
+    expect(within(hub2).getByRole('button', { name: 'Kiểm tra' })).toBeDisabled();
+    expect(within(hub2).getByText(/Nhập địa chỉ Gen-hub/)).toBeInTheDocument();
   });
 
   it('vai trò Vận hành → lời giải thích, không gọi /boss-checks', async () => {

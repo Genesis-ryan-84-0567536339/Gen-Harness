@@ -118,6 +118,7 @@ def endpoint_forbidden(endpoint: str) -> bool:
 
 
 ENDPOINT_FORBIDDEN_MSG = "Địa chỉ Gen-hub trỏ tới vùng mạng bị cấm (link-local/siêu dữ liệu đám mây)"
+ENDPOINT_INVALID_MSG = "Địa chỉ Gen-hub không hợp lệ — kiểm tra lại (dạng https://hub.genos.top/mcp)"
 
 
 def _summary(suffix: str, result: Any) -> str:
@@ -237,9 +238,14 @@ def _classify(message: str, code: str | None = None) -> str:
     """Lỗi McpClient dạng "<mã HTTP>: …" / "mạng: …" → câu ngắn tiếng Việt, giữ mã đầu dòng cho `status_of`.
 
     v0.1.39 (F-31): guard mạng MCP Hub (`MCP_NETWORK_BLOCKED`) chặn vì địa chỉ ở mạng công cộng → chỉ đúng công tắc
-    trong thẻ Gen-hub (server KHÔNG tự bật); chặn vì link-local/siêu dữ liệu → câu vùng mạng bị cấm."""
+    trong thẻ Gen-hub (server KHÔNG tự bật); chặn vì link-local/siêu dữ liệu → câu vùng mạng bị cấm; địa chỉ sai dạng
+    (scheme lạ, cổng ngoài 0–65535) → câu "không hợp lệ" riêng (trước đây bị gán nhầm "vùng mạng bị cấm")."""
     if code == "MCP_NETWORK_BLOCKED":
-        return PUBLIC_NET_HINT if "mạng công cộng" in message else ENDPOINT_FORBIDDEN_MSG
+        if "mạng công cộng" in message:
+            return PUBLIC_NET_HINT
+        if "vùng mạng bị cấm" in message:
+            return ENDPOINT_FORBIDDEN_MSG
+        return ENDPOINT_INVALID_MSG
     head = message.split(":", 1)[0].strip()
     if head in ("401", "403"):
         return f"{head}: Token Gen-hub hết hạn hoặc đã bị thu hồi — tạo token mới trong Gen-hub rồi dán lại"
@@ -254,6 +260,8 @@ def _error_code(msg: str, *, code: str | None = None, missing: bool = False) -> 
     """Mã lỗi thống nhất cho trang "Việc Sếp cần làm" (v0.1.39) — đọc từ câu đã phân loại."""
     if msg == ENDPOINT_FORBIDDEN_MSG:
         return "HUB_ENDPOINT_FORBIDDEN"
+    if msg == ENDPOINT_INVALID_MSG:
+        return "HUB_ENDPOINT_INVALID"
     if msg == PUBLIC_NET_HINT or code == "MCP_NETWORK_BLOCKED":
         return "MCP_NETWORK_BLOCKED"
     if missing:

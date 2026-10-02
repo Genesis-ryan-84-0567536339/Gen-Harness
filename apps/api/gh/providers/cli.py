@@ -193,6 +193,23 @@ def write_session(kind: str, raw: bytes) -> None:
     _atomic_write(state_path, orjson.dumps(state))
 
 
+CODE_SCRUB_MIN = 8
+
+
+def scrub_codes(message: str, codes: list[str]) -> str:
+    """Che mã đăng nhập Sếp đã dán khỏi một thông báo (v0.1.39): cả mã nguyên vẹn lẫn MỌI mảnh ≥ 8 ký tự của mã —
+    thông báo lỗi chỉ giữ đuôi bộ đệm (`buf[-300:]`, có thể cắt ngang mã) và TUI có thể ngắt dòng mã dài."""
+    out = message
+    for c in sorted({c for c in codes if c}, key=len, reverse=True):
+        out = out.replace(c, "***")
+        for n in range(len(c) - 1, CODE_SCRUB_MIN - 1, -1):
+            for i in range(len(c) - n + 1):
+                piece = c[i:i + n]
+                if piece in out:
+                    out = out.replace(piece, "***")
+    return out
+
+
 def session_email(kind: str, raw: bytes) -> str | None:
     if kind != CLAUDE:
         return file_email(raw)
@@ -796,17 +813,16 @@ class CliLogins:
             await self._emit(s)
             raise
         except Exception as exc:  # noqa: BLE001 — báo lỗi lên Console, không làm sập api
-            err = str(exc)
-            for c in typed:
-                if c:
-                    err = err.replace(c, "***")   # v0.1.39: CLI in lại mã (echo) → không để mã lọt vào log/Console
+            # v0.1.39: CLI in lại mã (echo) → không để mã (kể cả mảnh bị cắt/ngắt dòng) lọt vào log/Console.
+            err = scrub_codes(str(exc), typed)
             log.warning("Đăng nhập CLI lỗi: %s", err[:300])
+            # Ghi kết quả kiểm trước khi báo "failed" — web thấy "failed" là tải lại ô kết quả ngay.
+            await self._boss_check(s, ok=False, exc=exc)
             # v0.1.28 (UX N2): không đưa lỗi hệ điều hành ("[Errno 2] No such file or directory") thẳng lên Console.
             s.status = "failed"
             s.message = (sp.missing if isinstance(exc, FileNotFoundError) else err[:300])
             await self._emit(s)
             await self._log(s, "failed", {"error": err[:300]})
-            await self._boss_check(s, ok=False, exc=exc)
         finally:
             with contextlib.suppress(Exception):
                 loop.remove_reader(master)
@@ -881,15 +897,23 @@ class CliLogins:
                                    target_label=ident["email"], detail=detail)
             await db.commit()
             profs = await profiles(db, s.org_id, s.kind)
+        s.profile = next((p for p in profs if p["id"] == str(profile_id)), None)
+        # Ghi kết quả kiểm TRƯỚC khi báo "done" (web thấy "done" là tải lại ô kết quả ngay). `_boss_check` nuốt mọi lỗi
+        # (cả phần dựng detail) — hồ sơ mới đã commit, một lỗi ở đây không được đẩy lượt đăng nhập sang nhánh 'failed'
+        # (khối finally sẽ trả tệp phiên CŨ về đè lên tài khoản vừa đăng nhập).
         await self._boss_check(s, ok=True, email=ident["email"])
         s.status, s.message = "done", None
-        s.profile = next((p for p in profs if p["id"] == str(profile_id)), None)
         await self._emit(s, profile=s.profile)
 
     async def _boss_check(self, s: LoginSession, *, ok: bool, exc: BaseException | None = None,
                           email: str | None = None) -> None:
         """v0.1.39 (F-77): ghi kết quả kiểm `<agy|claude>_login` cho trang "Việc Sếp cần làm" — chỉ DẠNG mã, email đã
         che. Lỗi ghi không bao giờ làm hỏng luồng đăng nhập."""
+        with contextlib.suppress(Exception):   # cả phần dựng detail: không ngoại lệ nào thoát ra luồng đăng nhập
+            await self._boss_check_record(s, ok=ok, exc=exc, email=email)
+
+    async def _boss_check_record(self, s: LoginSession, *, ok: bool, exc: BaseException | None,
+                                 email: str | None) -> None:
         from gh.boss_checks import service as boss_checks
 
         key = "claude_login" if s.kind == CLAUDE else "agy_login"
@@ -898,7 +922,7 @@ class CliLogins:
             detail["code_shape"] = s.code_shape
         if ok:
             detail["credentials_file"] = token_path(s.kind).exists()
-            detail["account_masked"] = boss_checks.mask_email(email)
+            detail["account_masked"] = boss_checks.mask_email(email if isinstance(email, str) else None)
             code, message = None, None
         elif isinstance(exc, FileNotFoundError):
             code, message = "CLI_MISSING", spec(s.kind).missing
@@ -907,11 +931,10 @@ class CliLogins:
         else:
             code, message = "CLI_LOGIN_FAILED", ("Đăng nhập chưa xong — CLI dừng trước khi lưu phiên. Bấm Đăng nhập "
                                                  "lại, mở link mới và dán đúng mã vừa nhận")
-        with contextlib.suppress(Exception):
-            async with self.sm() as db:
-                await boss_checks.record(db, s.org_id, key, "pass" if ok else "fail", error_code=code,
-                                         message=message, detail=detail, user_id=s.user_id)
-                await db.commit()
+        async with self.sm() as db:
+            await boss_checks.record(db, s.org_id, key, "pass" if ok else "fail", error_code=code,
+                                     message=message, detail=detail, user_id=s.user_id)
+            await db.commit()
 
     async def _log(self, s: LoginSession, result: str, detail: dict[str, Any]) -> None:
         with contextlib.suppress(Exception):

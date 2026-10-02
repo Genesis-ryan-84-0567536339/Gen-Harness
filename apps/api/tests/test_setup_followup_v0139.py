@@ -19,9 +19,10 @@ async def _items(api: Api) -> dict[int, dict[str, Any]]:
     return {i["n"]: i for i in r.json()}
 
 
-async def _social(db, org: object, label: str, status: str) -> None:  # type: ignore[no-untyped-def]
+async def _social(db, org: object, label: str, status: str,  # type: ignore[no-untyped-def]
+                  platform: str = "facebook_personal") -> None:
     await db.execute(text("""INSERT INTO core.social_accounts (org_id, platform, label, status)
-                             VALUES (:o, 'facebook_personal', :l, :s)"""), {"o": org, "l": label, "s": status})
+                             VALUES (:o, :p, :l, :s)"""), {"o": org, "l": label, "s": status, "p": platform})
     await db.commit()
 
 
@@ -61,6 +62,13 @@ async def test_needs_login_counts_revoked_does_not(owner_api, db) -> None:  # ty
     assert (await _items(api))[13]["done"] is False
     await _social(db, org, "Cần đăng nhập lại", "needs_login")
     assert (await _items(api))[13]["done"] is True
+
+
+async def test_other_platform_does_not_count_as_facebook(owner_api, db) -> None:  # type: ignore[no-untyped-def]
+    api: Api = owner_api
+    org = await org_id(db)
+    await _social(db, org, "Nền tảng khác", "active", platform="zalo_personal")
+    assert (await _items(api))[13]["done"] is False
 
 
 async def test_items_13_14_do_not_block_finish(owner_api) -> None:  # type: ignore[no-untyped-def]

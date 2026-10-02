@@ -74,7 +74,7 @@ export const GEN_TARGETS: GenTarget[] = [
   { id: 'system.tab.storage', screen: 'system', label: 'Tab "Dữ liệu & lưu trữ"', description: 'Chuyển sang tab hạn lưu, sao lưu & khôi phục' },
   { id: 'system.channels.list', screen: 'system', label: 'Danh sách kênh', description: 'Thẻ các kênh Zalo/WhatsApp và nút tạo mã QR', params: { tab: 'channels' } },
   { id: 'system.channels.pin', screen: 'system', label: 'Thẻ mã PIN', description: 'Đổi mã PIN, xem lịch sử nhập PIN', params: { tab: 'channels' }, sensitive: true },
-  { id: 'system.channels.facebook', screen: 'system', label: 'Thẻ Facebook', description: 'Mở trang tài khoản mạng xã hội', params: { tab: 'channels' }, permission: 'system.manage' },
+  { id: 'system.channels.facebook', screen: 'system', label: 'Thẻ Facebook', description: 'Mở trang tài khoản mạng xã hội (chỉ Owner)', params: { tab: 'channels' }, permission: 'roles.manage' },
   { id: 'system.brain.quota', screen: 'system', label: 'Hạn mức theo model', description: 'Bảng dùng trong ngày / còn lại của từng model', params: { tab: 'brain' } },
   { id: 'system.brain.chain', screen: 'system', label: 'Chuỗi chuyển hướng', description: 'Thứ tự nhà cung cấp model khi một nơi lỗi', params: { tab: 'brain' } },
   { id: 'system.brain.open_api', screen: 'system', label: 'Nút "Mở API & Model"', description: 'Sang màn thêm nhà cung cấp, khoá API, gán model', params: { tab: 'brain' } },

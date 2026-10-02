@@ -160,8 +160,11 @@ test.describe('v0.1.39 · nghiệm thu sau gộp', () => {
     await code.fill('abcd-EFGH-1234');
     await cl.getByRole('button', { name: 'Xác nhận' }).click();
     await expect(cl.getByRole('button', { name: 'Đăng nhập Claude Code' })).toHaveCount(0, { timeout: 10_000 });
-    await cl.getByRole('button', { name: 'Gọi thử' }).click();
     const results = cl.getByTestId('boss-result');
+    // Ô "Đăng nhập" tự cập nhật ngay khi đăng nhập xong — TRƯỚC khi bấm Gọi thử (máy chủ ghi trong luồng đăng nhập).
+    await expect(results.nth(0)).toContainText('Đạt');
+    await expect(results.nth(1)).toContainText('Chưa kiểm');
+    await cl.getByRole('button', { name: 'Gọi thử' }).click();
     await expect(results.nth(1)).toContainText('Đạt');
     await expect(results.nth(0)).toContainText('Đạt');
     await expect(cl).toContainText('Xong');

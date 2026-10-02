@@ -1939,15 +1939,17 @@ Facebook báo **"Cần đăng nhập lại"** thì chỉ bấm **Đăng nhập l
 Sau khi cập nhật bản mới (~20 phút), Sếp mở menu **Hướng dẫn thiết lập** → bấm thẻ **Việc Sếp cần làm** rồi làm từ trên
 xuống, mỗi dòng bấm một nút:
 
-1. Tạo token **CHỈ ĐỌC 90 ngày** trong Gen-hub, dán vào ô Token, bấm **Kiểm tra**, nhập PIN.
-2. Bấm **Mở trang tài khoản mạng xã hội**, thêm Facebook, đăng nhập ngay trong cửa sổ của app, quay lại bấm **Đọc ngay**.
+1. Lần đầu: nhập **địa chỉ Gen-hub** (vd `https://hub.genos.top/mcp`), tạo token **CHỈ ĐỌC 90 ngày** trong Gen-hub, dán
+   vào ô Token, bấm **Kiểm tra**, nhập PIN. (Nút Kiểm tra chỉ bấm được khi đã có địa chỉ và token.)
+2. Bấm **Mở trang tài khoản mạng xã hội**, thêm Facebook, đăng nhập ngay trong cửa sổ của app, quay lại bấm **Đọc ngay**
+   (tài khoản chưa đăng nhập thì dòng này hiện nút **Đăng nhập ở trang Tài khoản mạng xã hội**).
 3. **Đăng nhập Google** bằng tài khoản của chính Sếp → **Gọi thử** → **Thêm tài khoản thứ hai** → bấm **Đổi sang…** qua
    lại 2 lần.
 4. **Đăng nhập Claude Code** → dán mã đăng nhập → **Gọi thử**.
 5. Nếu có khoá Jev thì bấm **Kiểm tra 1 lần**; lỗi thì bỏ qua (thẻ Jev tự ẩn vào "Nâng cao").
 
 Không cần chụp màn hình hay gửi mã cho Claude — kết quả tự lưu, Claude đọc lại. Mục **Mạng xã hội** nay ở thanh bên trái
-(dưới Hướng dẫn thiết lập) và thẻ Facebook ở Điều khiển hệ thống › Kênh.
+(dưới Hướng dẫn thiết lập) và thẻ Facebook ở Điều khiển hệ thống › Kênh & đăng nhập.
 
 ### Vì sao (kế hoạch tổng `docs/audit/2026-10-01/0-ke-hoach-tong.md`, mục v0.1.39)
 
@@ -1974,11 +1976,35 @@ Không cần chụp màn hình hay gửi mã cho Claude — kết quả tự lư
   `/system?tab=users`, thêm "Kết nối Facebook" (/social) và "Nối Gen-hub" (/mcp), xong theo dữ liệu thật (API
   `/setup/follow-up` thêm mục 13/14) nên thẻ "Việc thiết lập tiếp" ở Tổng quan không nhắc mãi.
 - **Web lối vào Mạng xã hội + Jev (F-32, F-78)** — mục "Mạng xã hội" trên thanh bên (chỉ Owner), thẻ Facebook ở Hệ thống ›
-  Kênh, Gen điều hướng tới `/social` (registry có màn `social`); Jev "Kiểm tra 1 lần", lỗi thì thẻ thu vào "Nâng cao".
+  Kênh & đăng nhập, Gen điều hướng tới `/social` (registry có màn `social`); Jev "Kiểm tra 1 lần", lỗi thì thẻ thu vào "Nâng cao".
 - **Sửa khi tích hợp** — `apps/api/gh/gen/registry.json` sinh lại (gói nav sinh trước khi gói hướng dẫn thêm việc 13/14 và
   sửa việc 10 ⇒ vitest `gen-targets` đỏ); trang Việc Sếp: sau khi tải lại máy chủ chỉ trả email đã che
   (`detail.account_masked`) ⇒ web dùng nó thay vì "tài khoản Google" chung chung; Jev lỗi mã nào (trừ chưa cấu hình) cũng
   báo "thẻ Jev sẽ ẩn" (máy thật trả `PROVIDER_ERROR`/`JEV_ERROR`); mock Gen trả `navigate social` cho câu "mạng xã hội".
+
+### Sửa sau review (F-74, F-76, F-77, F-31, F-32, F-28)
+
+- **Đổi tài khoản Google không báo lệch oan** — tệp phiên agy không có id_token thì hỏi userinfo (như lúc đăng nhập);
+  chỉ báo `AGY_ACCOUNT_MISMATCH` khi có ĐỦ hai email và chúng khác nhau, không đọc được email thì vẫn Đạt với
+  `account_match = null` ("không đọc được email để so"). Bộ đếm "Đã đổi qua lại x/2" lấy `switch_passes` của máy chủ
+  (chỉ lượt ĐẠT, và chỉ khi tài khoản đích khác lượt đạt trước — đổi sang chính tài khoản vừa đổi tới không tính);
+  `runs` vẫn là tổng số bản ghi (cả lỗi).
+- **Lỗi tạm không đè kết quả** — `SOCIAL_BUSY`, `SOCIAL_RATE_LIMIT`, `PROBE_RATE_LIMITED`, `HUB_RATE_LIMITED`,
+  `CLI_LOGIN_IN_PROGRESS` trả `transient: true` và KHÔNG ghi: "Đạt"/"Đang chạy…" giữ nguyên, web báo cạnh nút. Nút Facebook
+  tắt khi đang đọc, đã Đạt thì thành "Đọc lại"; tài khoản Facebook chưa đăng nhập thì dòng 2 hiện lối chính "Đăng nhập ở
+  trang Tài khoản mạng xã hội" kèm trạng thái.
+- **Có lối đăng nhập lại** — `AUTH_EXPIRED`, `CLI_PROFILE_NO_SESSION`, `AGY_ACCOUNT_MISMATCH` (hoặc hồ sơ hết hạn) hiện
+  nút "Đăng nhập lại" ở dòng Google / "Đăng nhập lại Claude Code"; câu `AGY_ACCOUNT_MISMATCH` của web nay khớp máy chủ.
+- **Ô "Đăng nhập" tự cập nhật** — máy chủ ghi kết quả kiểm TRƯỚC khi báo done/failed, web tải lại `/boss-checks` khi lượt
+  đăng nhập kết thúc. Đăng nhập đã commit hồ sơ mới không còn bị một lỗi phụ đẩy sang 'failed' (trả tệp phiên cũ về).
+- **Gen-hub** — token mới gửi kèm hạn 90 ngày (lời nhắc trước 14 ngày chạy đúng ngày); link "Sửa địa chỉ ở Kết nối MCP";
+  gợi ý vì sao nút Kiểm tra chưa bấm được; địa chỉ sai dạng có mã riêng `HUB_ENDPOINT_INVALID` (trước bị gán nhầm
+  "vùng mạng bị cấm").
+- **Nhỏ** — `/system/health` bỏ `detail` của `boss_checks` (Auditor cũng đọc được); mã đăng nhập bị CLI in lại được che cả
+  mảnh ≥ 8 ký tự; việc 13 chỉ tính tài khoản Facebook; target Gen thẻ Facebook chỉ Owner; câu Jev chỉ đúng Bộ não AI;
+  tiến độ dùng `total` của máy chủ; câu thân thiện cho `SOCIAL_BUSY/HALTED/NEEDS_LOGIN`, `CLI_PROFILE_NO_SESSION`;
+  hướng dẫn việc 14 ghi "Lưu & kiểm tra"; mock e2e khớp máy chủ (ghi kết quả đăng nhập trong luồng đăng nhập, sau tải lại
+  chỉ có email đã che, `runs` đếm mọi bản ghi).
 
 ### Kiểm tra
 

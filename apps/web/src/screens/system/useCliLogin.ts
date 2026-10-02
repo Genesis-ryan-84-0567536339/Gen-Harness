@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { ApiError, type CliKind, type CliLoginEvent } from '@gen-harness/contracts';
+import { BOSS_CHECKS_KEY } from '../../guide/bossChecksModel';
 import { api } from '../../lib/api';
 import { qk2 } from '../../lib/dataQueries';
 import { queryClient } from '../../lib/queryClient';
@@ -67,6 +68,9 @@ export function useCliLogin(kind: CliKind = 'antigravity_cli') {
   const status = ev.data?.status ?? (start.isPending ? 'starting' : null);
   const finished = status === 'done' || status === 'failed';
   useEffect(() => {
+    // v0.1.39: máy chủ ghi kết quả kiểm "Đăng nhập" (agy_login/claude_login) TRƯỚC khi báo done/failed → tải lại ô kết
+    // quả của "Việc Sếp cần làm" ngay (trang đó không thăm lại khi không có kết quả 'pending').
+    if (ev.data?.status === 'done' || ev.data?.status === 'failed') void queryClient.invalidateQueries({ queryKey: BOSS_CHECKS_KEY });
     if (ev.data?.status === 'done') {
       // Polling may see "done" before (or instead of) the WS event: refresh what the WS handler would.
       void queryClient.invalidateQueries({ queryKey: qk2.cliProfiles });

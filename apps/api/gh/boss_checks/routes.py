@@ -5,9 +5,14 @@
   và GHI kết quả. Lỗi nghiệp vụ (chưa cấu hình, 409/429 từ dịch vụ, gọi thử lỗi) vẫn 200 với `status: 'fail'` + mã lỗi
   thống nhất; chỉ 401/403/422/423 mới ném. `hub` và `agy_switch` cần phiên PIN (423 → web hỏi PIN rồi gửi lại).
 - Phản hồi cho Owner được kèm email ĐẦY ĐỦ (`account`); CSDL chỉ lưu email đã che.
+- Lỗi TẠM (bận/hạn mức: `TRANSIENT_CODES`) KHÔNG ghi thành bản kiểm: trả `{transient: true, status: 'fail', …}` để web
+  báo ngay cạnh nút, còn kết quả đã lưu (Đạt / Đang chạy…) giữ nguyên — bấm lại khi đang chạy không biến "Xong" thành
+  "Lỗi", lượt đọc Facebook đang chạy không bị một bản 'fail' mới hơn che mất.
 """
 
+import contextlib
 import uuid
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
@@ -33,8 +38,11 @@ CALL_KINDS = {"agy_call": "antigravity_cli", "claude_call": "claude_code_cli", "
 NOT_READY = {
     "agy_call": ("AGY_NOT_LOGGED_IN", "Chưa đăng nhập Google (Antigravity CLI) — bấm Đăng nhập Google trước"),
     "claude_call": ("CLAUDE_NOT_LOGGED_IN", "Chưa đăng nhập Claude Code — bấm Đăng nhập Claude Code trước"),
-    "jev": ("JEV_NOT_CONFIGURED", "Chưa thêm Jev — mục này không bắt buộc; thêm khoá Jev ở Agent & Model nếu Sếp cần"),
+    "jev": ("JEV_NOT_CONFIGURED",
+            "Chưa thêm Jev — mục này không bắt buộc; thêm khoá Jev ở Điều khiển hệ thống › Bộ não AI nếu Sếp cần"),
 }
+TRANSIENT_CODES = frozenset({"SOCIAL_BUSY", "SOCIAL_RATE_LIMIT", "PROBE_RATE_LIMITED", "HUB_RATE_LIMITED",
+                             "CLI_LOGIN_IN_PROGRESS"})
 SOCIAL_NO_ACCOUNT_MSG = "Chưa có tài khoản Facebook — mở trang Tài khoản mạng xã hội để thêm và đăng nhập"
 
 
@@ -76,8 +84,17 @@ async def run_check(key: str, request: Request, body: BossRunIn | None = None,
             raise
         # Lỗi nghiệp vụ (409/429/404…): câu của dịch vụ đã thân thiện → ghi thành một lần kiểm "Lỗi".
         await db.rollback()
+        if e.code in TRANSIENT_CODES:
+            return transient(key, e.code, e.title)
         return await boss.record(db, user.org_id, key, "fail", error_code=e.code, message=e.title,
                                  user_id=user.id)
+
+
+def transient(key: str, code: str, message: str | None) -> dict[str, Any]:
+    """Kết quả lỗi TẠM (bận/hạn mức) — KHÔNG ghi CSDL, không thay kết quả đã lưu (xem docstring module)."""
+    return {"id": None, "key": key, "status": "fail", "error_code": code, "message": boss.clean_message(message),
+            "detail": {}, "checked_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"), "runs": 0,
+            "transient": True}
 
 
 # ─── từng mục ───────────────────────────────────────────────────────────────
@@ -86,6 +103,8 @@ async def _run_hub(request: Request, db: AsyncSession, user: service.CurrentUser
     client = hub.client_for(getattr(request.app.state, "mcp_transport", None))
     r = await hub.test_link(db, request.app.state.redis, client, user=user)
     ok = bool(r["ok"])
+    if not ok and r.get("error_code") in TRANSIENT_CODES:
+        return transient("hub", str(r["error_code"]), r.get("error"))
     detail = {"latency_ms": r.get("latency_ms"), "exposed_tools": len(r.get("exposed_tools") or []),
               "missing_tools": list(r.get("missing_tools") or [])}
     return await boss.record(db, user.org_id, "hub", "pass" if ok else "fail",
@@ -145,6 +164,8 @@ async def _run_call(request: Request, db: AsyncSession, user: service.CurrentUse
         return await boss.record(db, user.org_id, key, "fail", error_code=code, message=msg, user_id=user.id)
     result = await _probe(request, db, user, p, kind)
     ok = bool(result["ok"])
+    if not ok and result.get("error_code") in TRANSIENT_CODES:
+        return transient(key, str(result["error_code"]), result.get("error"))
     out = await boss.record(db, user.org_id, key, "pass" if ok else "fail",
                             error_code=None if ok else (result.get("error_code") or "PROVIDER_ERROR"),
                             message=None if ok else result.get("error"), detail=_call_detail(result),
@@ -165,9 +186,8 @@ async def _run_switch(request: Request, db: AsyncSession, user: service.CurrentU
     if row.kind != climod.AGY:
         raise field_errors({"profile_id": "Đây không phải tài khoản Google / Antigravity"})
     if request.app.state.cli_logins.busy(user.org_id, climod.AGY):
-        return await boss.record(db, user.org_id, "agy_switch", "fail", error_code="CLI_LOGIN_IN_PROGRESS",
-                                 message="Đang đăng nhập thêm một tài khoản — hoàn tất hoặc huỷ bước đó rồi đổi "
-                                         "tài khoản", user_id=user.id)
+        return transient("agy_switch", "CLI_LOGIN_IN_PROGRESS",
+                         "Đang đăng nhập thêm một tài khoản — hoàn tất hoặc huỷ bước đó rồi đổi tài khoản")
     from gh.system_api.routes import _probe_budget
 
     # Đổi tài khoản rồi gọi thử THẬT — kiểm hạn mức trước để không đổi mà không kiểm được.
@@ -180,12 +200,16 @@ async def _run_switch(request: Request, db: AsyncSession, user: service.CurrentU
     p = await _provider(db, user.org_id, climod.AGY)
     result: dict[str, Any] = await request.app.state.model_router.test_provider(p.id)
     expected, actual = out["email"], result.get("account")
-    match = bool(expected and actual and str(expected).lower() == str(actual).lower())
+    if result["ok"] and not actual:
+        # Tệp phiên agy có thể không có id_token → hỏi userinfo (như lúc đăng nhập) trước khi kết luận.
+        actual = await _session_account(request)
+    # Chỉ kết luận "lệch" khi có ĐỦ hai email và chúng khác nhau; thiếu một bên = không so được (None), không phải lệch.
+    match: bool | None = (str(expected).lower() == str(actual).lower()) if expected and actual else None
     detail = {"expected_masked": boss.mask_email(expected), "account_masked": boss.mask_email(actual),
-              "account_match": match, "latency_ms": result.get("latency_ms")}
+              "account_match": match, "latency_ms": result.get("latency_ms"), "target_profile": str(profile_id)}
     if not result["ok"]:
         status, code, msg = "fail", result.get("error_code") or "PROVIDER_ERROR", result.get("error")
-    elif match:
+    elif match is not False:
         status, code, msg = "pass", None, None
     else:
         status, code = "fail", "AGY_ACCOUNT_MISMATCH"
@@ -195,6 +219,20 @@ async def _run_switch(request: Request, db: AsyncSession, user: service.CurrentU
                             user_id=user.id)
     rec["account"] = actual
     return rec
+
+
+async def _session_account(request: Request) -> str | None:
+    """Email của tệp phiên agy đang dùng qua `token_identity` (id_token, không có thì userinfo của Google)."""
+    raw = None
+    with contextlib.suppress(OSError):
+        raw = climod.read_session(climod.AGY)
+    if not raw:
+        return None
+    with contextlib.suppress(Exception):
+        ident = await climod.token_identity(raw, getattr(request.app.state.cli_logins, "transport", None))
+        email = ident.get("email")
+        return email if isinstance(email, str) and email else None
+    return None
 
 
 __all__ = ["router"]

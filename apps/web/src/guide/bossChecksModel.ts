@@ -19,6 +19,7 @@ export const BOSS_CHECKS_POLL_MS = 3000;
 export const BOSS_ERROR_TEXT: Record<string, string> = {
   HUB_LINK_NOT_CONFIGURED: 'Chưa nhập địa chỉ và token Gen-hub — điền rồi bấm Kiểm tra.',
   HUB_ENDPOINT_FORBIDDEN: 'Địa chỉ Gen-hub này không được phép gọi — kiểm tra lại địa chỉ.',
+  HUB_ENDPOINT_INVALID: 'Địa chỉ Gen-hub không hợp lệ — sửa lại theo dạng https://hub.genos.top/mcp.',
   MCP_NETWORK_BLOCKED: "Bật 'Cho phép Gen-hub ở mạng công cộng' ngay trong thẻ này",
   HUB_TOKEN_REJECTED: 'Gen-hub từ chối token — token sai, hết hạn hoặc đã bị thu hồi. Tạo token mới rồi dán lại.',
   HUB_RATE_LIMITED: 'Gen-hub đang giới hạn số lần gọi — đợi vài phút rồi kiểm tra lại.',
@@ -28,12 +29,16 @@ export const BOSS_ERROR_TEXT: Record<string, string> = {
   SOCIAL_NO_ACCOUNT: 'Chưa có tài khoản Facebook — thêm và đăng nhập ở trang Tài khoản mạng xã hội.',
   SOCIAL_NOT_ACTIVE: 'Tài khoản Facebook chưa đăng nhập — bấm Đăng nhập ở trang Tài khoản mạng xã hội.',
   SOCIAL_NO_SESSION: 'Phiên đăng nhập Facebook không còn — đăng nhập lại ở trang Tài khoản mạng xã hội.',
+  SOCIAL_NEEDS_LOGIN: 'Phiên Facebook không mở được trên máy này — bấm Đăng nhập lại ở trang Tài khoản mạng xã hội.',
+  SOCIAL_BUSY: 'Tài khoản Facebook đang chạy một việc khác — đợi việc đó xong rồi bấm Đọc ngay.',
+  SOCIAL_HALTED: 'Đang dừng tất cả việc trình duyệt — bấm Bật lại ở trang Tài khoản mạng xã hội trước.',
   SOCIAL_RATE_LIMIT: 'Đã đọc đủ số lần cho phép — đợi một lúc rồi bấm Đọc ngay lại.',
   SOCIAL_READ_FAILED: 'Đọc Facebook không thành công — mở trang Tài khoản mạng xã hội xem lý do.',
   SOCIAL_READ_HALTED: 'Đọc mạng xã hội đang bị dừng (Dừng tất cả) — bật lại ở trang Tài khoản mạng xã hội.',
   SOCIAL_JOB_MISSING: 'Không thấy lượt đọc vừa chạy — bấm Đọc ngay lại.',
   AGY_NOT_LOGGED_IN: 'Chưa đăng nhập Google cho Antigravity — bấm Đăng nhập Google.',
-  AGY_ACCOUNT_MISMATCH: 'Gọi thử chạy bằng tài khoản khác với tài khoản vừa chọn — bấm đổi lại rồi thử lần nữa.',
+  AGY_ACCOUNT_MISMATCH: 'Gọi thử vẫn chạy bằng tài khoản khác với tài khoản vừa chọn — bấm Đăng nhập lại và đăng nhập đúng tài khoản đó.',
+  CLI_PROFILE_NO_SESSION: 'Tài khoản này chưa có phiên đăng nhập đã lưu — bấm Đăng nhập lại tài khoản đó.',
   CLAUDE_NOT_LOGGED_IN: 'Chưa đăng nhập Claude Code — bấm Đăng nhập Claude Code.',
   CLI_LOGIN_IN_PROGRESS: 'Đang có một lượt đăng nhập dở — hoàn tất hoặc huỷ lượt đó trước.',
   CLI_MISSING: 'Máy chủ chưa cài công cụ dòng lệnh này — chạy lại trình cài genh.',
@@ -47,6 +52,28 @@ export const BOSS_ERROR_TEXT: Record<string, string> = {
   JEV_NOT_CONFIGURED: 'Chưa nhập khoá Jev.',
   JEV_ERROR: 'Thẻ Jev sẽ ẩn, không cần làm thêm.',
 };
+
+/** Lỗi chỉ sửa được bằng ĐĂNG NHẬP LẠI (đổi lại hay gọi thử lại chỉ lặp lại lỗi) → dòng hiện nút "Đăng nhập lại". */
+export const RELOGIN_CODES: ReadonlySet<string> = new Set(['AUTH_EXPIRED', 'CLI_PROFILE_NO_SESSION', 'AGY_ACCOUNT_MISMATCH']);
+
+/** Lỗi Gen-hub do ĐỊA CHỈ/mạng → chỉ lối sửa địa chỉ ở Kết nối MCP (/mcp). */
+export const HUB_ADDRESS_CODES: ReadonlySet<string> = new Set(['HUB_ENDPOINT_FORBIDDEN', 'HUB_ENDPOINT_INVALID', 'HUB_UNREACHABLE', 'MCP_NETWORK_BLOCKED']);
+
+/** Kết quả lỗi cần đăng nhập lại (theo mã lỗi thống nhất). */
+export function needsRelogin(c: Pick<BossCheck, 'status' | 'error_code'> | null | undefined): boolean {
+  return !!c && c.status === 'fail' && !!c.error_code && RELOGIN_CODES.has(c.error_code);
+}
+
+/** Token Gen-hub trang yêu cầu tạo là 90 ngày → hạn gửi kèm khi lưu token (nhắc trước 14 ngày chạy được). */
+export const HUB_TOKEN_DAYS = 90;
+export function hubTokenExpiry(now: number = Date.now()): string {
+  return new Date(now + HUB_TOKEN_DAYS * 86_400_000).toISOString();
+}
+
+/** Bộ đếm "Đã đổi qua lại x/2 lần" — số lần đổi ĐẠT do máy chủ tính (không phải `runs`, vốn đếm cả lượt lỗi). */
+export function switchesOf(o: BossOverview | undefined): number {
+  return Math.min(o?.switch_passes ?? 0, 2);
+}
 
 /** Câu thân thiện cho một kết quả lỗi — luôn là chuỗi. */
 export function bossErrorText(c: Pick<BossCheck, 'error_code' | 'message'>): string {
@@ -68,8 +95,11 @@ export function resultOf(o: BossOverview | undefined, key: BossCheckKey): BossCh
  * Tài khoản đang dùng của một kết quả: email đầy đủ khi vừa chạy (phản hồi `run`), sau khi tải lại thì máy chủ chỉ
  * còn dạng che trong `detail.account_masked` (CSDL không lưu email đầy đủ). Luôn là chuỗi hoặc null.
  */
-export function accountOf(c: Pick<BossCheck, 'account' | 'detail'>): string | null {
+export function accountOf(c: Pick<BossCheck, 'key' | 'checked_at' | 'account' | 'detail'>, fresh?: BossCheck | null): string | null {
   if (typeof c.account === 'string' && c.account) return c.account;
+  // Bản tổng quan tải lại ngay sau lượt chạy chỉ có email đã che → giữ email đầy đủ của CHÍNH lượt vừa bấm (cùng mục,
+  // cùng giờ kiểm) tới khi tải lại trang, để ô không "nháy" từ email đầy đủ sang dạng che.
+  if (fresh && fresh.key === c.key && fresh.checked_at === c.checked_at && typeof fresh.account === 'string' && fresh.account) return fresh.account;
   const m = c.detail?.account_masked;
   return typeof m === 'string' && m ? m : null;
 }

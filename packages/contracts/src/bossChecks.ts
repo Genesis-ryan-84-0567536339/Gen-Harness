@@ -19,10 +19,15 @@ export interface BossCheck {
   message: string | null;
   detail: Record<string, string | number | boolean | null | string[] | Record<string, unknown>>;
   checked_at: string;
-  /** Số lần đã chạy (agy_switch: số lần đổi qua lại). */
+  /** Số bản ghi đang giữ của mục này — TÍNH CẢ lượt lỗi (bộ đếm đổi qua lại dùng `BossOverview.switch_passes`). */
   runs: number;
-  /** Tài khoản đang dùng (agy/claude) — Owner thấy email đầy đủ. */
+  /** Tài khoản đang dùng (agy/claude) — Owner thấy email đầy đủ, CHỈ trong phản hồi `run` (tải lại: `detail.account_masked`). */
   account?: string | null;
+  /**
+   * Lỗi TẠM (bận/hạn mức: SOCIAL_BUSY, SOCIAL_RATE_LIMIT, PROBE_RATE_LIMITED, HUB_RATE_LIMITED, CLI_LOGIN_IN_PROGRESS)
+   * — máy chủ KHÔNG ghi, kết quả đã lưu giữ nguyên. Web báo cạnh nút, không thay ô kết quả.
+   */
+  transient?: boolean;
 }
 
 export interface BossRow {
@@ -40,6 +45,8 @@ export interface BossOverview {
   results: Record<BossCheckKey, BossCheck | null>;
   required_done: number;
   required_total: number;
+  /** Số lần đổi tài khoản Google THẬT đã đạt (chỉ lượt 'pass', đích khác lượt trước) — dòng 3 cần ≥ 2. */
+  switch_passes: number;
 }
 
 export interface BossCheckRunBody {

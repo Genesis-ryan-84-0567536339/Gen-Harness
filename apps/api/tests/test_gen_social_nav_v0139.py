@@ -36,7 +36,11 @@ def test_facebook_card_target() -> None:
     assert t is not None
     assert t.screen == "system"
     assert t.params == {"tab": "channels"}
-    assert t.permission == "system.manage"
+    assert t.permission == "roles.manage"      # thẻ chỉ hiện cho Owner → target chỉ Owner (như các target Owner khác)
     v = Validator(_owner(), set(), "overview")
     assert v.check(envelope.Navigate(type="navigate", screen="system", params={"tab": "channels"})).ok
     assert v.check(envelope.Highlight(type="highlight", target="system.channels.facebook", message="Thẻ Facebook")).ok
+    # Vai trò tuỳ biến có system.manage nhưng không phải Owner: không chỉ tới thẻ không hiện trên màn hình của họ.
+    admin = _operator() | {"system.read": rbac.ALL, "system.manage": rbac.ALL}
+    hl = envelope.Highlight(type="highlight", target="system.channels.facebook", message="Thẻ Facebook")
+    assert not Validator(admin, set(), "overview").check(hl).ok

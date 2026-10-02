@@ -263,12 +263,12 @@
       "id": "system.channels.facebook",
       "screen": "system",
       "label": "Thẻ Facebook",
-      "description": "Mở trang tài khoản mạng xã hội",
+      "description": "Mở trang tài khoản mạng xã hội (chỉ Owner)",
       "dynamic": null,
       "params": {
         "tab": "channels"
       },
-      "permission": "system.manage"
+      "permission": "roles.manage"
     },
     {
       "id": "system.brain.quota",
@@ -833,7 +833,7 @@
         "Trong Gen-hub: tạo trợ lý mới, chọn thẻ truy cập (token) 90 ngày, chỉ bật quyền ĐỌC Kho.",
         "Chép token vừa tạo.",
         "Bấm \"Mở thẻ Gen-hub\" bên dưới, dán địa chỉ và token vào thẻ Gen-hub.",
-        "Bấm \"Kiểm tra\" (nhập PIN khi được hỏi) và chờ báo Đã nối Kho."
+        "Bấm \"Lưu & kiểm tra\" (nhập PIN khi được hỏi) và chờ báo Đã nối Kho."
       ],
       "done_when": "Kiểm tra xanh ít nhất một lần.",
       "console": {

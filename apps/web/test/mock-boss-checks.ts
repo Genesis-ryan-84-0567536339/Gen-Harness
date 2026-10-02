@@ -5,7 +5,11 @@
  *
  * - hub: dùng chung lượt "Kiểm tra" của `mock-p4-mcp` (token chứa "sai" → HUB_TOKEN_REJECTED).
  * - facebook: trả `pending`; lần GET cách lượt chạy ≥ 1,5 giây thì thành `pass` (như việc đọc chạy nền).
- * - agy_call / agy_switch / claude_call: theo hồ sơ CLI của `mock-phase2` (`account` = email hồ sơ đang dùng).
+ * - agy_call / agy_switch / claude_call: theo hồ sơ CLI của `mock-phase2` (`account` = email hồ sơ đang dùng — CHỈ
+ *   trong phản hồi `run`; `GET` như `latest()` thật chỉ có `detail.account_masked`).
+ * - agy_login / claude_login: ghi trong LUỒNG đăng nhập CLI của `mock-phase2` (như `_boss_check` thật), không suy khi GET.
+ * - `runs` = số bản ghi (cả lỗi); `switch_passes` = số lần đổi ĐẠT sang tài khoản khác lượt trước (như máy chủ).
+ * - Lỗi tạm (SOCIAL_BUSY khi đang đọc) trả `transient: true`, không ghi.
  * - jev: theo nguồn `system_one` của `mock-phase2` (không có → JEV_NOT_CONFIGURED).
  * Hook e2e `POST /api/v1/__mock/p3/bossChecks/seedAgy {}`: đặt sẵn 2 hồ sơ Google an@… (không dùng), binh@… (đang dùng).
  */
@@ -22,7 +26,15 @@ interface Opts {
   cliProfiles: (kind: string) => CliProfile[];
   activateCli: (id: string) => boolean;
   providers: () => Provider[];
+  onCliLogin: (fn: (kind: string, ok: boolean, email: string | null) => void) => void;
 }
+
+/** Như `boss.mask_email` của api: 'binh@x.vn' → 'b***@x.vn'. */
+const mask = (email: string | null | undefined): string | null => {
+  if (!email || !email.includes('@')) return null;
+  const i = email.lastIndexOf('@');
+  return i > 0 ? `${email[0]}***@${email.slice(i + 1)}` : null;
+};
 
 const KEYS: BossCheckKey[] = ['hub', 'facebook', 'agy_login', 'agy_call', 'agy_switch', 'claude_login', 'claude_call', 'jev'];
 const RUNNABLE = new Set<BossCheckKey>(['hub', 'facebook', 'agy_call', 'agy_switch', 'claude_call', 'jev']);
@@ -39,8 +51,9 @@ const ROWS: Array<Omit<BossRow, 'done'>> = [
 
 export function createMock(opts: Opts) {
   const results = Object.fromEntries(KEYS.map((k) => [k, null])) as Record<BossCheckKey, BossCheck | null>;
-  /** Số lần đổi tài khoản ĐẠT (dòng 3 xong khi ≥ 2). */
+  /** Số lần đổi tài khoản ĐẠT sang tài khoản khác lượt đạt trước (dòng 3 xong khi ≥ 2) — như `switch_passes` thật. */
   let switchPasses = 0;
+  let lastSwitchTarget: string | null = null;
   let fbStartedAt = 0;
 
   const now = () => new Date().toISOString();
@@ -49,18 +62,27 @@ export function createMock(opts: Opts) {
     const c: BossCheck = {
       key, status, error_code: null, message: null, detail: {}, checked_at: now(), runs: (prev?.runs ?? 0) + 1, ...extra,
     };
-    results[key] = c;
+    // Bản lưu như CSDL thật: không có email đầy đủ (`account` chỉ có trong phản hồi `run`).
+    const { account: _full, ...stored } = c;
+    void _full;
+    results[key] = stored;
     return c;
   };
   const fail = (key: BossCheckKey, code: string, message: string) => record(key, 'fail', { error_code: code, message });
+  /** Lỗi tạm (bận/hạn mức) — như api: trả về nhưng KHÔNG ghi. */
+  const transient = (key: BossCheckKey, code: string, message: string): BossCheck => ({
+    key, status: 'fail', error_code: code, message, detail: {}, checked_at: now(), runs: 0, transient: true,
+  });
   const activeOf = (kind: string) => opts.cliProfiles(kind).find((p) => p.active) ?? null;
 
-  /** Đăng nhập CLI do luồng đăng nhập tự ghi — mock suy từ hồ sơ đang có. */
+  // Đăng nhập CLI: luồng đăng nhập của mock-phase2 báo xong/lỗi → ghi kết quả (như `_boss_check` của api thật).
+  opts.onCliLogin((kind, ok, email) => {
+    const key: BossCheckKey = kind === 'claude_code_cli' ? 'claude_login' : 'agy_login';
+    if (ok) record(key, 'pass', { detail: { account_masked: mask(email), credentials_file: true } });
+    else fail(key, 'CLI_LOGIN_FAILED', 'Đăng nhập chưa xong — bấm Đăng nhập lại, mở link mới và dán đúng mã vừa nhận');
+  });
+
   const syncLogins = () => {
-    for (const [key, kind] of [['agy_login', 'antigravity_cli'], ['claude_login', 'claude_code_cli']] as const) {
-      const a = activeOf(kind);
-      if (a && results[key]?.status !== 'pass') record(key, 'pass', { account: a.email, runs: 1 });
-    }
     const fb = results.facebook;
     if (fb?.status === 'pending' && Date.now() - fbStartedAt >= FB_READ_MS) {
       results.facebook = { ...fb, status: 'pass', checked_at: now(), detail: { items: 3 } };
@@ -78,7 +100,7 @@ export function createMock(opts: Opts) {
       5: pass('jev'),
     };
     const rows = ROWS.map((r) => ({ ...r, done: done[r.row] }));
-    return { rows, results: { ...results }, required_done: rows.filter((r) => !r.optional && r.done).length, required_total: 4 };
+    return { rows, results: { ...results }, required_done: rows.filter((r) => !r.optional && r.done).length, required_total: 4, switch_passes: switchPasses };
   };
 
   const run = (key: BossCheckKey, body: { profile_id?: string; account_id?: string }): BossCheck | null => {
@@ -91,23 +113,30 @@ export function createMock(opts: Opts) {
       case 'facebook': {
         const acc = opts.socialAccounts().find((a) => a.id === body.account_id && a.status !== 'revoked');
         if (!acc) return fail('facebook', 'SOCIAL_NO_ACCOUNT', 'Chưa có tài khoản Facebook');
+        if (acc.status !== 'active') return fail('facebook', 'SOCIAL_NOT_ACTIVE', 'Tài khoản chưa đăng nhập');
+        if (results.facebook?.status === 'pending')
+          return { ...transient('facebook', 'SOCIAL_BUSY', 'Tài khoản này đang có một việc chạy') };
         fbStartedAt = Date.now();
         return record('facebook', 'pending', { detail: { account_id: acc.id } });
       }
       case 'agy_call': {
         const a = activeOf('antigravity_cli');
-        return a ? record('agy_call', 'pass', { account: a.email }) : fail('agy_call', 'AGY_NOT_LOGGED_IN', 'Chưa đăng nhập Google cho Antigravity');
+        return a ? record('agy_call', 'pass', { account: a.email, detail: { account_masked: mask(a.email) } }) : fail('agy_call', 'AGY_NOT_LOGGED_IN', 'Chưa đăng nhập Google cho Antigravity');
       }
       case 'agy_switch': {
         const p = opts.cliProfiles('antigravity_cli').find((x) => x.id === body.profile_id);
         if (!p) return null;
         opts.activateCli(p.id);
-        switchPasses += 1;
-        return record('agy_switch', 'pass', { account: p.email, runs: switchPasses, detail: { expected: p.email, match: true } });
+        if (p.id !== lastSwitchTarget) switchPasses += 1;
+        lastSwitchTarget = p.id;
+        return record('agy_switch', 'pass', {
+          account: p.email,
+          detail: { expected_masked: mask(p.email), account_masked: mask(p.email), account_match: true, target_profile: p.id },
+        });
       }
       case 'claude_call': {
         const a = activeOf('claude_code_cli');
-        return a ? record('claude_call', 'pass', { account: a.email }) : fail('claude_call', 'CLAUDE_NOT_LOGGED_IN', 'Chưa đăng nhập Claude Code');
+        return a ? record('claude_call', 'pass', { account: a.email, detail: { account_masked: mask(a.email) } }) : fail('claude_call', 'CLAUDE_NOT_LOGGED_IN', 'Chưa đăng nhập Claude Code');
       }
       case 'jev': {
         const jev = opts.providers().find((p) => p.kind === 'system_one');

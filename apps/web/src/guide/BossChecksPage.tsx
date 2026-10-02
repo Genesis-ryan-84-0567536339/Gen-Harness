@@ -15,8 +15,21 @@ import { isPublicHttpsUrl } from '../screens/mcp/mcpModel';
 import { useHubLink, useUpdateHubLink } from '../screens/mcp/queries';
 import { ClaudeRiskNotice, CliLoginPanel } from '../screens/system/CliCard';
 import { useCliLogin } from '../screens/system/useCliLogin';
-import { qkSocial } from '../social/socialModel';
-import { BOSS_CHECKS_KEY, BOSS_CHECKS_POLL_MS, accountOf, bossErrorText, fmtCheckedAt, hasPending, resultOf, withResult } from './bossChecksModel';
+import { accountStatus, qkSocial } from '../social/socialModel';
+import {
+  BOSS_CHECKS_KEY,
+  BOSS_CHECKS_POLL_MS,
+  HUB_ADDRESS_CODES,
+  accountOf,
+  bossErrorText,
+  fmtCheckedAt,
+  hasPending,
+  hubTokenExpiry,
+  needsRelogin,
+  resultOf,
+  switchesOf,
+  withResult,
+} from './bossChecksModel';
 
 type Results = BossOverview | undefined;
 
@@ -77,7 +90,7 @@ export function BossChecksPage() {
             <div className="guide-progress__bar" role="progressbar" aria-label="Tiến độ việc Sếp cần làm" aria-valuemin={0} aria-valuemax={total} aria-valuenow={done}>
               <span style={{ width: `${total ? (done / total) * 100 : 0}%` }} />
             </div>
-            <span className="guide-progress__text">{done >= total ? 'Đã đạt đủ 4 dòng bắt buộc — kết nối chạy thật.' : `Đã đạt ${done}/${total} dòng bắt buộc`}</span>
+            <span className="guide-progress__text">{done >= total ? `Đã đạt đủ ${total} dòng bắt buộc — kết nối chạy thật.` : `Đã đạt ${done}/${total} dòng bắt buộc`}</span>
           </div>
           <ol className="boss-list">
             <HubRow data={data} done={rowDone(1)} />
@@ -95,15 +108,34 @@ export function BossChecksPage() {
   );
 }
 
-/** Chạy một lượt kiểm: hiện kết quả ngay từ phản hồi rồi tải lại bản tổng quan. */
+/**
+ * Chạy một lượt kiểm: hiện kết quả ngay từ phản hồi rồi tải lại bản tổng quan. Lỗi TẠM (`transient`: bận/hạn mức) máy
+ * chủ không ghi → KHÔNG thay ô kết quả (giữ "Đạt"/"Đang chạy…"), chỉ báo cạnh nút qua `TransientNote`.
+ */
 function useRunCheck() {
   return useMutation({
     mutationFn: ({ key, body }: { key: BossCheckKey; body?: BossCheckRunBody }) => api.bossChecks.run(key, body),
     onSuccess: (c) => {
-      queryClient.setQueryData<BossOverview>(BOSS_CHECKS_KEY, (old) => withResult(old, c));
+      if (!c.transient) queryClient.setQueryData<BossOverview>(BOSS_CHECKS_KEY, (old) => withResult(old, c));
       void queryClient.invalidateQueries({ queryKey: BOSS_CHECKS_KEY });
     },
   });
+}
+
+/** Câu báo lỗi tạm của lượt vừa bấm (không lưu) — chuỗi thân thiện + Chi tiết kỹ thuật. */
+function TransientNote({ check }: { check: BossCheck | undefined }) {
+  if (!check?.transient) return null;
+  return (
+    <div className="muted-note friendly-error" role="status" data-testid="boss-transient">
+      {bossErrorText(check)} Kết quả đã lưu giữ nguyên.
+      {check.error_code ? (
+        <details className="tech-detail">
+          <summary>Chi tiết kỹ thuật</summary>
+          <code>Mã lỗi {check.error_code}</code>
+        </details>
+      ) : null}
+    </div>
+  );
 }
 
 function Row({ n, title, optional, done, todo, children, results }: { n: number; title: string; optional?: boolean; done: boolean; todo: string; children: ReactNode; results: ReactNode }) {
@@ -184,6 +216,7 @@ function HubRow({ data, done }: { data: Results; done: boolean }) {
   const validNew = /^https?:\/\/\S+$/.test(endpoint.trim()) && token.trim().length >= 8;
   const tokenOk = !token.trim() || token.trim().length >= 8;
   const canRun = !!l && (configured ? tokenOk : validNew);
+  const hubRes = resultOf(data, 'hub');
 
   const check = async () => {
     if (!l) return;
@@ -192,6 +225,8 @@ function HubRow({ data, done }: { data: Results; done: boolean }) {
       body.endpoint = endpoint.trim();
       body.token = token.trim();
     } else if (token.trim()) body.token = token.trim();
+    // Token mới (lần đầu hoặc thay) = token 90 ngày trang yêu cầu → gửi kèm hạn để lời nhắc trước 14 ngày chạy đúng ngày.
+    if (body.token) body.token_expires_at = hubTokenExpiry();
     if (publicNet !== l.allow_public_network) body.allow_public_network = publicNet;
     if (Object.keys(body).length) {
       try {
@@ -210,8 +245,8 @@ function HubRow({ data, done }: { data: Results; done: boolean }) {
       n={1}
       title="Nối Gen-hub"
       done={done}
-      todo="Trong Gen-hub tạo token chỉ đọc 90 ngày, dán vào đây rồi bấm Kiểm tra."
-      results={<ResultCell check={resultOf(data, 'hub')} />}
+      todo="Nhập địa chỉ Gen-hub (vd https://hub.genos.top/mcp), trong Gen-hub tạo token chỉ đọc 90 ngày, dán vào đây rồi bấm Kiểm tra."
+      results={<ResultCell check={hubRes} />}
     >
       {link.isPending ? (
         <SkeletonLines rows={2} padding="0" />
@@ -226,7 +261,12 @@ function HubRow({ data, done }: { data: Results; done: boolean }) {
             </>
           ) : (
             <>
-              <p className="muted-note mono">{savedEndpoint}</p>
+              <p className="muted-note">
+                <span className="mono">{savedEndpoint}</span>{' '}
+                <Link to="/mcp" className={HUB_ADDRESS_CODES.has(hubRes?.error_code ?? '') ? 'gh-btn gh-btn--secondary btn-27' : undefined}>
+                  Sửa địa chỉ ở Kết nối MCP
+                </Link>
+              </p>
               <TextField label="Token mới (bỏ trống để giữ)" type="password" autoComplete="off" value={token} onChange={(e) => setToken(e.target.value)} placeholder="Dán token mới nếu cần đổi" />
             </>
           )}
@@ -251,8 +291,14 @@ function HubRow({ data, done }: { data: Results; done: boolean }) {
               Kiểm tra
             </Button>
           </div>
+          {l && !canRun ? (
+            <p className="muted-note" data-testid="boss-hub-hint">
+              {configured ? 'Token mới cần ít nhất 8 ký tự (bỏ trống để giữ token cũ).' : 'Cần địa chỉ http(s) và token ít nhất 8 ký tự rồi mới bấm Kiểm tra được.'}
+            </p>
+          ) : null}
           {update.isError ? <InlineError>{errorText(update.error)}</InlineError> : null}
           {run.isError ? <InlineError>{errorText(run.error)}</InlineError> : null}
+          <TransientNote check={run.data} />
         </div>
       )}
     </Row>
@@ -265,13 +311,15 @@ function FacebookRow({ data, done }: { data: Results; done: boolean }) {
   const run = useRunCheck();
   const fb = (accounts.data?.items ?? []).filter((a) => a.platform.startsWith('facebook') && a.status !== 'revoked');
   const acc = fb.find((a) => a.status === 'active') ?? fb[0];
+  const res = resultOf(data, 'facebook');
+  const running = res?.status === 'pending';
   return (
     <Row
       n={2}
       title="Kết nối Facebook"
       done={done}
       todo="Thêm tài khoản Facebook của Sếp, tự đăng nhập ngay trong app, rồi bấm Đọc ngay."
-      results={<ResultCell check={resultOf(data, 'facebook')} />}
+      results={<ResultCell check={res} />}
     >
       {accounts.isPending ? (
         <SkeletonLines rows={1} padding="0" />
@@ -285,15 +333,33 @@ function FacebookRow({ data, done }: { data: Results; done: boolean }) {
           </Link>
           <span className="muted-note">Đăng nhập ngay trong app — mật khẩu, mã 2FA Sếp tự gõ, không lưu lại.</span>
         </div>
+      ) : acc.status !== 'active' ? (
+        // Có tài khoản nhưng chưa đăng nhập / cần đăng nhập lại / tạm dừng: "Đọc ngay" chỉ ra SOCIAL_NOT_ACTIVE → lối
+        // chính là trang Tài khoản mạng xã hội.
+        <div className="boss-actions">
+          <Link to="/social" className="gh-btn gh-btn--primary btn-27">
+            Đăng nhập ở trang Tài khoản mạng xã hội
+            <Icon name="ph ph-arrow-right" size={13} />
+          </Link>
+          <span className="muted-note">{`${acc.label} · ${accountStatus(acc).label}`}</span>
+        </div>
       ) : (
         <div className="boss-actions">
-          <Button variant="primary" className="btn-27" icon="ph ph-book-open" loading={run.isPending} onClick={() => run.mutate({ key: 'facebook', body: { account_id: acc.id } })}>
-            Đọc ngay
+          <Button
+            variant={res?.status === 'pass' ? 'secondary' : 'primary'}
+            className="btn-27"
+            icon="ph ph-book-open"
+            disabled={running}
+            loading={run.isPending}
+            onClick={() => run.mutate({ key: 'facebook', body: { account_id: acc.id } })}
+          >
+            {res?.status === 'pass' ? 'Đọc lại' : 'Đọc ngay'}
           </Button>
-          <span className="muted-note">{acc.label}</span>
+          <span className="muted-note">{running ? `${acc.label} · đang đọc, đợi xong rồi mới bấm lại được` : acc.label}</span>
         </div>
       )}
       {run.isError ? <InlineError>{errorText(run.error)}</InlineError> : null}
+      <TransientNote check={run.data} />
     </Row>
   );
 }
@@ -306,7 +372,9 @@ function AgyRow({ data, done }: { data: Results; done: boolean }) {
   const sw = useRunCheck();
   const list: CliProfile[] = profiles.data ?? [];
   const sw0 = resultOf(data, 'agy_switch');
-  const switches = Math.min(sw0?.runs ?? 0, 2);
+  const switches = switchesOf(data);
+  // Hết hạn / chưa có phiên / gọi thử vẫn chạy tài khoản khác: chỉ đăng nhập lại mới sửa được (đổi lại = lặp lỗi).
+  const relogin = list.length > 0 && (needsRelogin(resultOf(data, 'agy_call')) || needsRelogin(sw0) || list.some((p) => p.state === 'expired'));
   const doSwitch = (p: CliProfile) =>
     sw.mutate(
       { key: 'agy_switch', body: { profile_id: p.id } },
@@ -321,8 +389,16 @@ function AgyRow({ data, done }: { data: Results; done: boolean }) {
       results={
         <>
           <ResultCell label="Đăng nhập" check={resultOf(data, 'agy_login')} />
-          <ResultCell label="Gọi thử" check={resultOf(data, 'agy_call')} okText={(c) => `Đạt · đang dùng ${accountOf(c) ?? 'tài khoản Google'}`} />
-          <ResultCell label="Đổi tài khoản" check={sw0} okText={(c) => `Đã đổi · gọi thử chạy bằng ${accountOf(c) ?? 'tài khoản Google'} — khớp`} />
+          <ResultCell label="Gọi thử" check={resultOf(data, 'agy_call')} okText={(c) => `Đạt · đang dùng ${accountOf(c, call.data) ?? 'tài khoản Google'}`} />
+          <ResultCell
+            label="Đổi tài khoản"
+            check={sw0}
+            okText={(c) =>
+              c.detail?.account_match === null || !accountOf(c, sw.data)
+                ? 'Đã đổi · gọi thử chạy được (không đọc được email để so)'
+                : `Đã đổi · gọi thử chạy bằng ${accountOf(c, sw.data)} — khớp`
+            }
+          />
         </>
       }
     >
@@ -336,6 +412,10 @@ function AgyRow({ data, done }: { data: Results; done: boolean }) {
             {list.length === 0 ? (
               <Button variant="primary" className="btn-27" icon="ph ph-google-logo" disabled={login.active} loading={login.start.isPending} onClick={() => login.start.mutate()}>
                 Đăng nhập Google
+              </Button>
+            ) : relogin ? (
+              <Button variant="primary" className="btn-27" icon="ph ph-arrow-clockwise" disabled={login.active} loading={login.start.isPending} onClick={() => login.start.mutate()}>
+                Đăng nhập lại
               </Button>
             ) : list.length === 1 ? (
               <Button variant="secondary" className="btn-27" icon="ph ph-user-plus" disabled={login.active} loading={login.start.isPending} onClick={() => login.start.mutate()}>
@@ -367,11 +447,18 @@ function AgyRow({ data, done }: { data: Results; done: boolean }) {
               Đang dùng: {list.find((p) => p.active)?.email ?? '—'} · Đã đổi qua lại {switches}/2 lần
             </p>
           ) : null}
+          {relogin ? (
+            <p className="muted-note" role="note">
+              Bấm Đăng nhập lại rồi đăng nhập đúng tài khoản Google cần dùng — hoặc làm ở <Link to="/system?tab=channels">Điều khiển hệ thống › Kênh &amp; đăng nhập</Link>.
+            </p>
+          ) : null}
           <CliLoginPanel login={login} />
         </>
       )}
       {call.isError ? <InlineError>{errorText(call.error)}</InlineError> : null}
       {sw.isError ? <InlineError>{errorText(sw.error)}</InlineError> : null}
+      <TransientNote check={call.data} />
+      <TransientNote check={sw.data} />
     </Row>
   );
 }
@@ -382,6 +469,7 @@ function ClaudeRow({ data, done }: { data: Results; done: boolean }) {
   const login = useCliLogin('claude_code_cli');
   const call = useRunCheck();
   const has = (profiles.data ?? []).length > 0;
+  const relogin = has && (needsRelogin(resultOf(data, 'claude_call')) || (profiles.data ?? []).some((p) => p.active && p.state === 'expired'));
   return (
     <Row
       n={4}
@@ -391,7 +479,7 @@ function ClaudeRow({ data, done }: { data: Results; done: boolean }) {
       results={
         <>
           <ResultCell label="Đăng nhập" check={resultOf(data, 'claude_login')} />
-          <ResultCell label="Gọi thử" check={resultOf(data, 'claude_call')} okText={(c) => (accountOf(c) ? `Đạt · đang dùng ${accountOf(c)}` : `Đạt`)} />
+          <ResultCell label="Gọi thử" check={resultOf(data, 'claude_call')} okText={(c) => (accountOf(c, call.data) ? `Đạt · đang dùng ${accountOf(c, call.data)}` : `Đạt`)} />
         </>
       }
     >
@@ -401,6 +489,10 @@ function ClaudeRow({ data, done }: { data: Results; done: boolean }) {
           <Button variant="primary" className="btn-27" icon="ph ph-sign-in" disabled={login.active} loading={login.start.isPending} onClick={() => login.start.mutate()}>
             Đăng nhập Claude Code
           </Button>
+        ) : relogin ? (
+          <Button variant="primary" className="btn-27" icon="ph ph-arrow-clockwise" disabled={login.active} loading={login.start.isPending} onClick={() => login.start.mutate()}>
+            Đăng nhập lại Claude Code
+          </Button>
         ) : null}
         <Button variant={has ? 'primary' : 'secondary'} className="btn-27" icon="ph ph-chat-circle-dots" loading={call.isPending} onClick={() => call.mutate({ key: 'claude_call' })}>
           Gọi thử
@@ -408,6 +500,7 @@ function ClaudeRow({ data, done }: { data: Results; done: boolean }) {
       </div>
       <CliLoginPanel login={login} />
       {call.isError ? <InlineError>{errorText(call.error)}</InlineError> : null}
+      <TransientNote check={call.data} />
     </Row>
   );
 }
@@ -446,6 +539,7 @@ function JevRow({ data, done }: { data: Results; done: boolean }) {
         </div>
       ) : null}
       {run.isError ? <InlineError>{errorText(run.error)}</InlineError> : null}
+      <TransientNote check={run.data} />
     </Row>
   );
 }

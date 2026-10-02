@@ -171,6 +171,12 @@ async def test_facebook_no_account_pending_then_resolved(owner_api: Api, redis: 
     fb = ov["results"]["facebook"]
     assert fb["status"] == "pass" and fb["detail"]["job_status"] == "done" and fb["error_code"] is None
     assert next(r for r in ov["rows"] if r["key"] == "facebook")["done"] is True
+    # Bấm lại ngay (cách < 10 phút) → 429 SOCIAL_RATE_LIMIT là lỗi TẠM: trả về nhưng KHÔNG ghi, "Đạt" giữ nguyên.
+    out = (await _run(owner_api, "facebook", {"account_id": acc["id"]})).json()
+    assert out["status"] == "fail" and out["error_code"] == "SOCIAL_RATE_LIMIT" and out["transient"] is True, out
+    ov = (await owner_api.get("/boss-checks")).json()
+    assert ov["results"]["facebook"]["status"] == "pass" and ov["results"]["facebook"]["runs"] == 3
+    assert next(r for r in ov["rows"] if r["key"] == "facebook")["done"] is True
     # Lượt đọc kế (lùi giờ lượt trước cho qua khoảng cách tối thiểu) → lỗi ở worker.
     async with admin_sessionmaker()() as db:
         await db.execute(text("UPDATE agent.browser_jobs SET created_at = now() - interval '2 days', "
@@ -233,6 +239,31 @@ async def test_overview_rows_and_done_rules(owner_api: Api, db: Any) -> None:
     assert got["claude"] is True and got["hub"] is True and got["facebook"] is False and got["_n"] == 2
 
 
+async def test_switch_counter_counts_real_switches_only(owner_api: Api, db: Any) -> None:
+    """Bộ đếm "Đã đổi qua lại x/2" = `switch_passes`: không tính lượt lỗi, không tính đổi sang CHÍNH tài khoản vừa đổi
+    tới; `results.agy_switch.runs` vẫn là tổng số bản ghi (cả lỗi)."""
+    org = await org_id(db)
+    a, b = str(uuid.uuid4()), str(uuid.uuid4())
+
+    async def ov() -> dict[str, Any]:
+        return (await owner_api.get("/boss-checks")).json()  # type: ignore[no-any-return]
+
+    await boss.record(db, org, "agy_call", "pass")
+    await boss.record(db, org, "agy_switch", "pass", detail={"target_profile": a})
+    await boss.record(db, org, "agy_switch", "fail", error_code="AGY_ACCOUNT_MISMATCH", detail={"target_profile": b})
+    await db.commit()
+    got = await ov()
+    assert got["switch_passes"] == 1 and got["results"]["agy_switch"]["runs"] == 2
+    await boss.record(db, org, "agy_switch", "pass", detail={"target_profile": a})       # lại chính tài khoản a
+    await db.commit()
+    got = await ov()
+    assert got["switch_passes"] == 1 and next(r for r in got["rows"] if r["key"] == "agy")["done"] is False
+    await boss.record(db, org, "agy_switch", "pass", detail={"target_profile": b})
+    await db.commit()
+    got = await ov()
+    assert got["switch_passes"] == 2 and next(r for r in got["rows"] if r["key"] == "agy")["done"] is True
+
+
 # ─── (g) /system/health ─────────────────────────────────────────────────────
 
 async def test_health_has_boss_checks_without_changing_overall(owner_api: Api, db: Any) -> None:
@@ -247,8 +278,8 @@ async def test_health_has_boss_checks_without_changing_overall(owner_api: Api, d
     got = {c["key"]: c for c in after["boss_checks"]}
     assert set(got) == {"claude_call", "hub"}
     assert got["claude_call"]["status"] == "fail" and got["claude_call"]["error_code"] == "AUTH_EXPIRED"
-    assert got["claude_call"]["detail"] == {"account_masked": "b***@example.vn"}
-    assert set(got["hub"]) == {"key", "status", "error_code", "checked_at", "detail"}
+    assert set(got["hub"]) == {"key", "status", "error_code", "checked_at"}     # không lộ detail cho system.read
+    assert "b***@example.vn" not in (await owner_api.get("/system/health")).text
 
 
 # ─── (h) bộ lọc bí mật + giữ 50 bản ─────────────────────────────────────────
