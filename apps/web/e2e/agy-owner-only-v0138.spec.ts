@@ -4,15 +4,18 @@
  * gán cho Gen của Sếp → lưu được.
  *
  * Luật cứng nằm ở API (gói agy-co-lap-api). Mock dùng chung (test/mock-p4-api.ts) chưa có slot `core.gen` và luật
- * này, nên spec chặn `/agents/bindings*` bằng page.route và trả đúng hợp đồng: GET có `blocked_reason`, PUT trả 409
+ * này, nên spec chặn `/agents/bindings*` bằng page.route và trả đúng hợp đồng: GET có `binding.blocked_reason` (TRONG
+ * binding, như gh/agents_api/routes.py::_binding_out), PUT trả 409
  * AGY_OWNER_GEN_ONLY (title là câu tiếng Việt, `reasons` là lý do dùng chung).
  */
 import { expect, test, type APIRequestContext, type Route } from '@playwright/test';
 import { loginAsOwner, resetMock } from './support';
 
 const GEN_KEY = 'core.gen';
-const AGY_REASON = 'Model của Antigravity CLI chỉ dùng cho Gen của Sếp — luật an toàn, không tắt được.';
-const AGY_TITLE = 'Model của Antigravity CLI chỉ dùng cho Gen của Sếp. Sàng lọc tin và trực việc nên dùng khoá API hoặc Claude Code CLI.';
+// Chuỗi THẬT của máy chủ: gh/providers/router.py::AGY_OWNER_ONLY_REASON và gh/agents_api/routes.py::AGY_GEN_ONLY_MSG.
+const AGY_REASON = 'Antigravity CLI: chỉ dùng cho Gen của Sếp (agy chưa tắt được công cụ đọc tệp — luật an toàn, không đổi được)';
+const AGY_TITLE =
+  'Antigravity CLI chỉ dùng được cho Gen của Sếp — sàng lọc tin và trực việc nhận nội dung của khách nên phải dùng nguồn khác (khoá API hoặc Claude Code CLI)';
 
 interface Binding {
   model_id: string;
@@ -21,12 +24,12 @@ interface Binding {
   temperature: number;
   context_tokens: number;
   rule_codes: string[];
+  blocked_reason?: string | null;
 }
 interface Slot {
   agent_key: string;
   label: string;
   binding: Binding | null;
-  blocked_reason?: string | null;
 }
 interface BindingsPayload {
   items: Slot[];
@@ -60,9 +63,9 @@ test.describe('v0.1.38 · Antigravity CLI chỉ dùng cho Gen của Sếp', () =
       lastModels = body.models;
       const items: Slot[] = body.items.map((s) => ({
         ...s,
-        blocked_reason: s.agent_key !== GEN_KEY && s.binding && isAgyBinding(s.binding) ? AGY_REASON : null,
+        binding: s.binding ? { ...s.binding, blocked_reason: s.agent_key !== GEN_KEY && isAgyBinding(s.binding) ? AGY_REASON : null } : null,
       }));
-      if (!items.some((s) => s.agent_key === GEN_KEY)) items.unshift({ agent_key: GEN_KEY, label: 'Gen của Sếp', binding: genBinding, blocked_reason: null });
+      if (!items.some((s) => s.agent_key === GEN_KEY)) items.unshift({ agent_key: GEN_KEY, label: 'Gen của Sếp', binding: genBinding });
       await route.fulfill({ response: res, json: { ...body, items } });
     });
 
@@ -76,7 +79,8 @@ test.describe('v0.1.38 · Antigravity CLI chỉ dùng cho Gen của Sếp', () =
         return route.fulfill({
           status: 409,
           contentType: 'application/problem+json',
-          body: JSON.stringify({ type: 'about:blank', title: AGY_TITLE, status: 409, code: 'AGY_OWNER_GEN_ONLY', detail: AGY_TITLE, reasons: [AGY_REASON] }),
+          // Đúng hình dạng gh.errors.conflict(): chỉ title + code, detail null.
+          body: JSON.stringify({ type: 'about:blank', title: AGY_TITLE, status: 409, code: 'AGY_OWNER_GEN_ONLY', detail: null }),
         });
       }
       if (key === GEN_KEY) {
@@ -84,6 +88,7 @@ test.describe('v0.1.38 · Antigravity CLI chỉ dùng cho Gen của Sếp', () =
         genBinding = {
           model_id: m.id, model_name: m.model_name, provider_name: m.provider_name,
           temperature: b.temperature ?? 0.3, context_tokens: b.context_tokens ?? 8000, rule_codes: b.rule_codes ?? [],
+          blocked_reason: null,
         };
         putCodes.push(200);
         return route.fulfill({ status: 200, json: { agent_key: GEN_KEY, label: 'Gen của Sếp', binding: genBinding } });
@@ -101,6 +106,7 @@ test.describe('v0.1.38 · Antigravity CLI chỉ dùng cho Gen của Sếp', () =
     // Slot sàng lọc đang gán model agy → "Không dùng được".
     const refineryRow = table.locator('tr', { hasText: 'Sàng lọc & suy luận chính' });
     await expect(refineryRow.getByTestId('binding-blocked-core.refinery')).toContainText('Không dùng được');
+    await expect(refineryRow.getByTestId('binding-blocked-core.refinery')).toHaveAttribute('title', AGY_REASON);
 
     // 1) Gán model agy cho Sàng lọc → 409 → câu tiếng Việt.
     await refineryRow.locator('.apm-model-pill').click();
@@ -112,7 +118,7 @@ test.describe('v0.1.38 · Antigravity CLI chỉ dùng cho Gen của Sếp', () =
     await expect(dlg.getByTestId('binding-agy-note')).toContainText('Chỉ dùng cho Gen của Sếp');
     await dlg.getByRole('button', { name: 'Lưu' }).click();
     const alert = dlg.getByRole('alert');
-    await expect(alert).toContainText('chỉ dùng cho Gen của Sếp');
+    await expect(alert).toContainText('chỉ dùng được cho Gen của Sếp');
     await expect(alert).not.toContainText('[object Object]');
     await expect(alert.locator('details.tech-detail summary')).toHaveText('Chi tiết kỹ thuật');
     // Mã lỗi chỉ nằm trong "Chi tiết kỹ thuật" (đóng sẵn → không hiển thị).

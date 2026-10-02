@@ -36,6 +36,12 @@ export interface AgentBinding {
   temperature: number;
   context_tokens: number;
   rule_codes: string[];
+  /**
+   * v0.1.38 (F-22): lý do model đang gán hiện KHÔNG dùng được cho khoá này (vd model của Antigravity CLI gán cho khoá
+   * khác `core.gen` — agy chỉ dùng cho Gen của Sếp). `null`/thiếu (máy chủ cũ) = dùng được. Câu tiếng Việt, hiển thị
+   * thẳng. Máy chủ trả trong `binding` (gh/agents_api/routes.py::_binding_out), không ở cấp slot.
+   */
+  blocked_reason?: string | null;
 }
 
 export interface AgentIdentity {

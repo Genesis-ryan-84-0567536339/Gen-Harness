@@ -1782,3 +1782,90 @@ lần** (máy sẽ hỏi mật khẩu đăng nhập máy), rồi chạy `genh st
   `test_health_v0137.py` (GH-E94B warn/body theo lịch đêm/resume; quay về chưa trọn vẫn bad; autostart ok cần Docker
   rõ; không có "đêm"); web `update-stalled-v0137.test.tsx` (resume, process_gone đã ở bản mới nhất, dòng Sức khoẻ
   interrupted), e2e mock `update-stalled-v0137.spec.ts` (GH-E94B dừng gọn ⇒ dải/thẻ vàng; GH-E94B cần chạy tiếp).
+
+## v0.1.38 — Cô lập Antigravity CLI (agy) + gói chuyển máy giữ phiên mạng xã hội (02/10/2026)
+
+### Boss cần làm gì
+
+**Không cần làm gì.** Nếu Sếp đã đăng nhập Claude Code CLI, phiên tự chuyển sang chỗ mới khi cập nhật. Nếu sau này chuyển
+máy mà tài khoản Facebook báo **"Cần đăng nhập lại"** thì chỉ bấm **Đăng nhập lại**.
+
+### Vì sao (kế hoạch tổng `docs/audit/2026-10-01/0-ke-hoach-tong.md`, mục v0.1.38)
+
+- **F-22**: agy 1.2.9 có công cụ đọc tệp/chạy lệnh, chạy cùng uid với api/worker, phiên Claude Code nằm TRONG HOME của agy,
+  prompt đi trên dòng lệnh (`-p <prompt>`, lộ ở /proc/*/cmdline, có thể bị hiểu thành cờ), tên model ghép thẳng vào argv
+  ⇒ nội dung không tin cậy (tin của khách qua sàng lọc/trực việc) có thể điều khiển agy đọc bí mật. Phải xử lý TRƯỚC khi
+  Boss đăng nhập agy/Google thật ở v0.1.39.
+- **F-17**: gói chuyển máy bỏ sót `core.social_accounts.state_enc` ⇒ nhập sang máy khoá khác thì đọc/kiểm Facebook lỗi 500;
+  `schedule_tick` để một tài khoản lỗi chặn cả lịch đọc.
+
+### Thay đổi
+
+- **agy chạy cô lập (F-22)** — `AgyClient._run`: mỗi lượt một `cwd` mới rỗng 0700 (`gh-agy-*` dưới thư mục tạm, không nằm
+  trong HOME agy hay GH_CLAUDE_HOME), xoá sau lượt kể cả hết giờ/huỷ; env sạch (`cli_env`: không biến GH_*/khoá); prompt
+  **chỉ qua stdin** (agy 1.2.9: stdin là ống + không `-p` ⇒ print mode); `--output-format json --disable-slash-commands
+  --model=<tên> [--effort=<mức>]`; tên model qua `AGY_MODEL_RE` (`^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$`) — sai ⇒ BadRequest
+  **trước** khi khởi chạy tiến trình, API thêm model agy sai ⇒ 422. Chẩn đoán dùng `-p=/model`, `-p=/effort` (chuỗi cố
+  định). Canary `python -m gh.providers.agy_canary --offline|--live` in đúng 1 dòng JSON {result, checks, agy_version},
+  không bao giờ in canary/đầu ra thô.
+- **Luật cứng đang áp dụng (F-22)** — agy **chỉ dùng cho Gen của Sếp**: `ModelRouter.generate(allow_agy=False)` mặc định
+  bỏ qua nguồn agy với lý do "Antigravity CLI: chỉ dùng cho Gen của Sếp…" (sàng lọc `core.refinery`, trực việc
+  `agent:<id>`, mọi purpose khác); chỉ lượt Gen của Owner truyền `allow_agy=True`; Gen của nhân viên mà chỉ có agy ⇒ câu
+  "Gen chưa trả lời được…" (không gọi agy). `PUT /agents/bindings/<khoá khác core.gen>` với model agy ⇒ 409
+  `AGY_OWNER_GEN_ONLY`; bản cài cũ đã gán ⇒ `binding.blocked_reason` (Console hiện "Không dùng được"). Bước 4/tự gán chỉ
+  gán agy cho `core.gen`. Web: thẻ CLI Antigravity + bước 4 ghi phạm vi, ô chọn model ghi "chỉ cho Gen", lỗi 409 là câu
+  tiếng Việt + mã trong "Chi tiết kỹ thuật".
+- **Tách phiên Claude Code khỏi HOME agy (F-22)** — volume mới `claude_state` (`GH_CLAUDE_HOME=/var/lib/gh/claude/.claude`)
+  cho api + worker (compose, compose nhúng của genh, `volumeBaseNames` có `claude_state`); api khi khởi động tự chuyển tệp
+  cũ `/var/lib/gh/agy/claude/.claude` sang chỗ mới (không ghi đè tệp mới hơn, chạy lại an toàn) rồi xoá
+  `/var/lib/gh/agy/claude`; nếu GH_CLAUDE_HOME vẫn nằm trong HOME agy ⇒ log lỗi + sự cố `cli.claude_home_shared`.
+- **Gói chuyển máy (F-17)** — `REENCRYPT_TARGETS` thành `ReencryptTarget` (AAD cố định hoặc theo dòng), thêm
+  `core.social_accounts.state_enc` (AAD `social:<org>:<id>`); blob không giải được bằng khoá cũ ⇒ xoá phiên, tài khoản
+  "Cần đăng nhập lại" (`pause_reason='key_changed'`), lượt nhập vẫn thành công. Đọc/kiểm mà phiên không mở được ⇒ 409
+  `SOCIAL_NEEDS_LOGIN`, tài khoản chuyển "Cần đăng nhập lại", Owner nhận 1 thông báo (không còn 500). `schedule_tick` cô lập
+  lỗi từng tài khoản (InvalidTag/RuntimeError không chặn tài khoản khác, hàm không ném). Web: lời dẫn riêng cho
+  `key_changed`.
+- **E2E cài thật** — e2e-install (pr + release ≥ v0.1.38): bước "Cô lập agy — canary offline" (agy 1.2.9 ghim SHA trong
+  ảnh) đòi `result=khong_lo` và `/var/lib/gh/agy/claude` không tồn tại; e2e-upgrade: tệp giả ở đường dẫn Claude cũ phải sang
+  `/var/lib/gh/claude/.claude` và thư mục cũ biến mất.
+- **Sửa khi tích hợp (F-22, web)** — máy chủ trả `blocked_reason` TRONG `binding` nhưng web đọc ở cấp slot ⇒ nhãn "Không
+  dùng được" không bao giờ hiện trên máy thật (mock xanh). Hợp đồng `AgentBinding.blocked_reason`, web đọc
+  `slot.binding.blocked_reason`; vitest + e2e mock dùng đúng hình dạng và chuỗi thật của máy chủ (409 chỉ có title).
+
+### Canary agy — kết quả (không chép nội dung bí mật/canary)
+
+- **Offline (agy 1.2.9 thật, tải đúng SHA-256 ghim trong `api.Dockerfile`, HOME tạm, chưa đăng nhập): "không lộ"** —
+  `result=khong_lo`, mọi kiểm tra đúng: env sạch, phiên Claude tách khỏi HOME agy, đầu ra + log agy không chứa canary,
+  stdin tới được print mode (log agy có `promptLength=` đúng độ dài prompt), cờ hợp lệ (không "flag provided but not
+  defined"), thư mục tạm đã xoá. Lưu ý: agy chưa đăng nhập từ chối trước khi chạy model ⇒ chứng minh cờ/stdin/cô lập đúng,
+  **chưa** chứng minh công cụ đọc tệp của agy bị chặn.
+- **Canary thật có đăng nhập (`--live`): CHƯA chạy** — để v0.1.39 sau khi Boss đăng nhập agy. Chỉ nới luật cứng khi live
+  báo "không lộ" và có test.
+- **Cờ tìm thấy trong `agy --help` (1.2.9)**: `--add-dir --agent --continue/-c --conversation --dangerously-skip-permissions
+  --disable-slash-commands --effort --input-format --json-schema --log-file --mode --model --new-project --output-format
+  --print/-p --print-timeout --project --prompt --prompt-interactive/-i --remote-control --sandbox`. **Không có cờ tắt công
+  cụ** (đọc tệp/chạy lệnh/mở URL) ⇒ luật cứng ở trên. `--dangerously-skip-permissions` bị cấm (regex chặn tên kiểu cờ).
+
+### Rủi ro còn lại
+
+- agy vẫn chạy cùng uid với api/worker: Gen của Sếp dùng agy thì prompt (do Sếp gõ + ngữ cảnh Gen) vẫn có thể khiến agy đọc
+  tệp mà uid `gh` đọc được (vd `/run/secrets/*`) — cwd rỗng/env sạch chỉ là phòng thủ thêm. Chưa thử `--sandbox`.
+- Luật cứng dựa vào `allow_agy` ở mọi nơi gọi `ModelRouter.generate`; nơi gọi mới mặc định bị từ chối (an toàn mặc định).
+- Gói chuyển máy cũ (≤ v0.1.37) đã nhập trước đó: phiên mạng xã hội chỉ được phát hiện hỏng khi đọc/kiểm (409 + Cần đăng
+  nhập lại), không tự sửa được — Sếp phải đăng nhập lại.
+
+### Kiểm tra
+
+- api: `tests/test_agy_isolation_v0138.py` (cwd 0700 xoá sau lượt kể cả hết giờ, stdin không argv, regex chặn trước khi
+  khởi chạy, fake_agy_hostile đọc cwd/HOME/env/cmdline — đầu ra Gen, caplog, log agy, `agent.model_calls` không chứa
+  canary; canary offline khong_lo/lo/loi), `test_agy_owner_only_v0138.py` (core.refinery/agent:<id>/purpose khác ⇒
+  ModelUnavailable, CLI giả không được gọi; Gen Owner dùng agy, nhân viên không; PUT ⇒ 409; bước 4/tự gán; model sai ⇒
+  422), `test_claude_home_split_v0138.py`, `test_bundle_social_v0138.py` (khoá A → khoá B đọc/kiểm OK; gói cũ ⇒ 409 +
+  `key_changed` + 1 thông báo; import không hỏng vì phiên lỗi; schedule_tick InvalidTag/RuntimeError),
+  `test_enc_columns_v0138.py` (mọi cột bytea `*_enc` đã migrate có trong REENCRYPT_TARGETS, AAD social khớp nơi ghi).
+- genh: `internal/ops/status_volumes_test.go` (`claude_state` trong `volumeBaseNames`, khớp compose).
+- web: `test/unit/agy-owner-only-v0138.test.tsx`, `test/unit/social-key-v0138.test.ts`, e2e mock
+  `e2e/agy-owner-only-v0138.spec.ts`.
+- Kết quả trên nhánh tích hợp (02/10): KQ_TONG_HOP
+- Chờ sau phát hành: e2e-install chế độ pr/release bước canary offline trên ảnh thật + e2e-upgrade chuyển tệp Claude cũ
+  (v0.1.37 → v0.1.38); kiểm genh tải từ releases/latest (checksum + `genh version` = v0.1.38) rồi mới báo Boss.

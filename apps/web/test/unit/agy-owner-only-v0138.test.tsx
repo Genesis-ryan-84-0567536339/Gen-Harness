@@ -55,7 +55,10 @@ function renderWith(ui: ReactElement, qc: QueryClient) {
 }
 const freshClient = () => new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
-const AGY_REASON = 'Model của Antigravity CLI chỉ dùng cho Gen của Sếp — luật an toàn, không tắt được.';
+// Chuỗi THẬT của máy chủ: gh/providers/router.py::AGY_OWNER_ONLY_REASON và gh/agents_api/routes.py::AGY_GEN_ONLY_MSG.
+const AGY_REASON = 'Antigravity CLI: chỉ dùng cho Gen của Sếp (agy chưa tắt được công cụ đọc tệp — luật an toàn, không đổi được)';
+const AGY_REAL_TITLE =
+  'Antigravity CLI chỉ dùng được cho Gen của Sếp — sàng lọc tin và trực việc nhận nội dung của khách nên phải dùng nguồn khác (khoá API hoặc Claude Code CLI)';
 const AGY_TITLE = 'Model của Antigravity CLI chỉ dùng cho Gen của Sếp. Sàng lọc tin và trực việc nên dùng khoá API hoặc Claude Code CLI.';
 
 const PROVIDERS: Provider[] = [
@@ -74,10 +77,10 @@ const BINDINGS: BindingsPage = {
   items: [
     {
       agent_key: 'core.refinery', label: 'Sàng lọc & suy luận chính',
-      binding: { model_id: 'm-agy', model_name: 'gemini-3-pro', provider_name: 'Antigravity CLI', temperature: 0.2, context_tokens: 64000, rule_codes: [] },
-      blocked_reason: AGY_REASON,
+      // Đúng hình dạng máy chủ (gh/agents_api/routes.py::_binding_out): blocked_reason nằm TRONG binding.
+      binding: { model_id: 'm-agy', model_name: 'gemini-3-pro', provider_name: 'Antigravity CLI', temperature: 0.2, context_tokens: 64000, rule_codes: [], blocked_reason: AGY_REASON },
     },
-    { agent_key: 'core.gen', label: 'Gen của Sếp', binding: null, blocked_reason: null },
+    { agent_key: 'core.gen', label: 'Gen của Sếp', binding: null },
   ],
   models: [
     { id: 'm-agy', model_name: 'gemini-3-pro', provider_name: 'Antigravity CLI', enabled: true },
@@ -117,7 +120,7 @@ describe('v0.1.38 F-22 — Antigravity CLI chỉ dùng cho Gen của Sếp', () 
     expect(within(claude).queryByText(/Chỉ dùng cho Gen của Sếp/)).toBeNull();
   });
 
-  it('bảng gán model: slot core.refinery có blocked_reason → nhãn "Không dùng được" kèm câu giải thích', async () => {
+  it('bảng gán model: slot core.refinery có binding.blocked_reason → nhãn "Không dùng được" kèm câu giải thích', async () => {
     mockFetch((c) => apiHandler(c) ?? json(404));
     renderWith(<ApiScreen />, freshClient());
     const badge = await screen.findByTestId('binding-blocked-core.refinery');
@@ -155,6 +158,29 @@ describe('v0.1.38 F-22 — Antigravity CLI chỉ dùng cho Gen của Sếp', () 
     expect(within(details).getByText('Chi tiết kỹ thuật')).toBeInTheDocument();
     expect(details.textContent).toContain('AGY_OWNER_GEN_ONLY');
     // Mã lỗi KHÔNG nằm ở phần câu chính (ngoài "Chi tiết kỹ thuật").
+    const outside = (alert.textContent ?? '').replace(details.textContent ?? '', '');
+    expect(outside).not.toContain('AGY_OWNER_GEN_ONLY');
+    expect(document.body.textContent).not.toContain('[object Object]');
+  });
+
+  it('PUT 409 đúng hình dạng máy chủ thật (chỉ title, không detail/reasons) → câu thân thiện + "Chi tiết kỹ thuật" có mã', async () => {
+    mockFetch((c) => {
+      if (c.url.includes('/agents/bindings/') && c.method === 'PUT') {
+        return json(409, { type: 'about:blank', title: AGY_REAL_TITLE, status: 409, code: 'AGY_OWNER_GEN_ONLY', detail: null });
+      }
+      return apiHandler(c) ?? json(404);
+    });
+    renderWith(<ApiScreen />, freshClient());
+    const user = userEvent.setup();
+    const row = (await screen.findByText('Sàng lọc & suy luận chính', { selector: '.apm-table__agent' })).closest('tr') as HTMLElement;
+    await user.click(within(row).getByRole('button', { name: /gemini-3-pro/ }));
+    const dialog = await screen.findByRole('dialog');
+    await user.selectOptions(within(dialog).getByLabelText('Model'), 'm-agy');
+    await user.click(within(dialog).getByRole('button', { name: 'Lưu' }));
+    const alert = await within(dialog).findByRole('alert');
+    expect(alert).toHaveTextContent(AGY_REAL_TITLE);
+    const details = alert.querySelector('details.tech-detail') as HTMLElement;
+    expect(details.textContent).toContain('409 AGY_OWNER_GEN_ONLY');
     const outside = (alert.textContent ?? '').replace(details.textContent ?? '', '');
     expect(outside).not.toContain('AGY_OWNER_GEN_ONLY');
     expect(document.body.textContent).not.toContain('[object Object]');

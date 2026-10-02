@@ -66,10 +66,6 @@ def _gone(p: str | Path) -> bool:
     return not Path(p).exists()
 
 
-def _agy_dirs() -> set[Path]:
-    return set(Path(tempfile.gettempdir()).glob("gh-agy-*"))
-
-
 def _plant_claude_canary(claude_home: Path, canary: str) -> None:
     claude_home.mkdir(parents=True, exist_ok=True)
     (claude_home / ".credentials.json").write_text(json.dumps({"claudeAiOauth": {"accessToken": canary}}))
@@ -92,22 +88,27 @@ async def test_run_uses_fresh_private_cwd_removed_after_turn(agy: dict[str, Any]
     assert first["cwd"] != second["cwd"]                                        # mỗi lượt một thư mục mới
 
 
-async def test_run_removes_cwd_even_on_timeout(tmp_path: Path, agy: dict[str, Any]) -> None:
+async def test_run_removes_cwd_even_on_timeout(tmp_path: Path, agy: dict[str, Any],
+                                               monkeypatch: pytest.MonkeyPatch) -> None:
+    # Thư mục tạm RIÊNG của test: /tmp dùng chung với tiến trình khác (vd hai lượt pytest song song cùng gọi agy giả)
+    # làm phép so "không còn gh-agy-*" bị nhiễu.
+    tmpd = tmp_path / "tmpd"
+    tmpd.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(tmpd))
     slow = tmp_path / "bin" / "agy-slow"
     slow.write_text('#!/bin/sh\npwd > "$HOME/slow-cwd"\nexec sleep 30\n')
     slow.chmod(0o755)
-    c = AgyClient(str(slow), str(agy["home"]), timeout=1.0)
+    c = AgyClient(str(slow), str(agy["home"]), timeout=3.0)
     with pytest.raises(TimeoutError):
         await c._run("--output-format", "json", stdin=b"hi")
     cwd = (tmp_path / "agy" / "slow-cwd").read_text().strip()
-    assert Path(cwd).name.startswith("gh-agy-") and _gone(cwd)
+    assert Path(cwd).name.startswith("gh-agy-") and Path(cwd).parent == tmpd and _gone(cwd)
     # generate đổi hết giờ thành ProviderError (bộ định tuyến chuyển nguồn) — vẫn không còn thư mục nào.
-    before = _agy_dirs()
     from gh.providers.clients import ProviderError
 
     with pytest.raises(ProviderError):
         await c.generate("gemini-3.1-pro", [Message("user", "hi")], json_mode=False, temperature=0)
-    assert _agy_dirs() <= before
+    assert list(tmpd.iterdir()) == []
 
 
 # ─── (2) prompt qua stdin, cờ đúng ─────────────────────────────────────────

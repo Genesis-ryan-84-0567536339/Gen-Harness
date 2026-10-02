@@ -69,6 +69,13 @@ lại), unit systemd `KillMode=mixed`/`TimeoutStopSec=900`, nhịp sống `run/g
 chừng" + Thử lại thay vì kẹt "đang cập nhật"; tải binary genh theo thời gian rảnh + thử lại 3 lần (cả `install.sh`);
 `genh status/doctor` kiểm linger + `docker.service` enabled, chuông `host.autostart` kèm lệnh sửa; E2E nâng cấp có dữ liệu
 thêm ô `tags[3]` (nhảy nhiều bản) + kiểm khoá/tự chạy lại khi bật máy.
+v0.1.38: cô lập Antigravity CLI + gói chuyển máy (F-22, F-17) — agy chạy với cwd rỗng 0700 riêng mỗi lượt, env sạch,
+prompt qua stdin, `--model=<tên>` qua regex, tắt slash command; phiên Claude Code sang volume riêng `claude_state` (api tự
+chuyển tệp cũ); **luật cứng: agy chỉ dùng cho Gen của Sếp** (sàng lọc/trực việc/nhân viên bị từ chối, gán → 409
+`AGY_OWNER_GEN_ONLY`); canary offline trên agy 1.2.9 thật "không lộ" + bước canary trong E2E cài thật. Gói chuyển máy mã
+hoá lại phiên mạng xã hội; phiên không mở được → 409 `SOCIAL_NEEDS_LOGIN` + "Cần đăng nhập lại"; lịch đọc cô lập lỗi từng
+tài khoản; test quét mọi cột `*_enc`. Còn: canary `--live` có đăng nhập (v0.1.39, sau khi Boss đăng nhập agy) — chỉ nới
+luật cứng khi live "không lộ".
 
 ## Đợt A — Gen v1 (thiết kế: docs/design/gen-v1.md)
 - ✅ A1 Khung chat phải + Gen trả lời/tóm tắt (chỉ đọc), lưu hội thoại, Nhật ký hành động — v0.1.21.

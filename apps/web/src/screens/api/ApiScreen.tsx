@@ -276,9 +276,12 @@ function BindingsPanel({ canManage }: { canManage: boolean }) {
 /** Khoá agent Gen của Sếp — khoá duy nhất được dùng model của Antigravity CLI (v0.1.38, F-22). */
 const GEN_AGENT_KEY = 'core.gen';
 
-/** `blocked_reason` của slot dưới dạng chuỗi an toàn (máy chủ cũ không có trường này → null). */
+/**
+ * `binding.blocked_reason` của slot dưới dạng chuỗi an toàn (máy chủ cũ không có trường này → null). Máy chủ đặt trường
+ * này TRONG `binding` (gh/agents_api/routes.py::_binding_out) — đọc ở cấp slot thì nhãn không bao giờ hiện (F-22).
+ */
 function blockedReason(slot: AgentBindingSlot): string | null {
-  const r = slot.blocked_reason;
+  const r: unknown = slot.binding?.blocked_reason;
   if (r == null) return null;
   const t = detailToText(r).trim();
   return t || null;
