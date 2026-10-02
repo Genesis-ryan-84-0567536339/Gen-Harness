@@ -51,6 +51,20 @@ class NoFakeIdsTest(unittest.TestCase):
         })
         self.assertEqual(code, 0, out)
 
+    def test_agent_prefix_only_in_id_keys(self) -> None:
+        """'agent-' chỉ vi phạm khi là giá trị id/value/agent_id; className/testid/khoá i18n hợp lệ."""
+        code, out = self.run_check({
+            "ok/Card.tsx": ('<div className="agent-card" data-testid="agent-row" />\n'
+                            "const k = t('agent-params.title');\n"
+                            "const css = `agent-${size}`;\n"),
+            "ok/Mock.ts": "const A = { id: 'agent-demo' }; // allow-fake-id\n",
+        })
+        self.assertEqual(code, 0, out)
+        code, out = self.run_check({"bad/A.ts": 'const x = { agent_id: "agent-ka" };\nconst y = { value : `agent-z` };\n'})
+        self.assertEqual(code, 1)
+        self.assertIn("A.ts:1", out)
+        self.assertIn("A.ts:2", out)
+
     def test_real_web_src_is_clean(self) -> None:
         out = io.StringIO()
         with contextlib.redirect_stdout(out):

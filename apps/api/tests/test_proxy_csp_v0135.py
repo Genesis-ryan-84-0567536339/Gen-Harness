@@ -37,6 +37,19 @@ def test_caddy_csp_locked_down() -> None:
     assert all(t == "'self'" or t == "wss://{http.request.hostport}" for t in d["connect-src"])
 
 
+def test_caddy_keeps_upstream_csp_and_sends_single_csp() -> None:
+    """CSP của Caddy nằm trong khối `header` (có `-Server` ⇒ deferred) nên nếu ĐẶT thẳng sẽ GHI ĐÈ CSP riêng của
+    tệp tài liệu từ api (sandbox / PDF). `?` = chỉ đặt khi upstream chưa có. Riêng web (nginx có CSP riêng,
+    `connect-src 'self'`) thì bỏ CSP upstream bằng `header_down` để trình duyệt chỉ nhận MỘT CSP — của Caddy."""
+    text = CADDYFILE.read_text()
+    assert re.search(r'^\s*\?Content-Security-Policy\s+"', text, re.M), "CSP Caddy phải là `?Content-Security-Policy`"
+    assert not re.search(r'^\s*Content-Security-Policy\s+"', text, re.M)
+    web = re.search(r"reverse_proxy web:8080 \{([^}]*)\}", text)
+    assert web and "header_down -Content-Security-Policy" in web.group(1)
+    api = re.search(r"reverse_proxy api:8000([^\n]*)", text)
+    assert api and "header_down" not in api.group(1)
+
+
 def test_compose_label_tracks_caddyfile_hash() -> None:
     sha = hashlib.sha256(CADDYFILE.read_bytes()).hexdigest()[:12]
     compose = (ROOT / "deploy" / "compose.yaml").read_text()

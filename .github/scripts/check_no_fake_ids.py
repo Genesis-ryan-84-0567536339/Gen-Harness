@@ -4,7 +4,9 @@
 Mọi ô chọn người / trợ lý phải lấy id THẬT (UUID) từ `GET /pickers/users` / `GET /pickers/agents`
 (`apps/web/src/lib/pickers.ts`). Script quét *.ts / *.tsx dưới thư mục gốc (mặc định `apps/web/src`) và báo:
   - `id: 'u-…'` / `value: 'u-…'` (cả nháy kép và backtick),
-  - mọi chuỗi bắt đầu bằng `'agent-` (cả nháy kép và backtick).
+  - `id: 'agent-…'` / `value: 'agent-…'` / `agent_id: 'agent-…'` (cả nháy kép và backtick).
+Chuỗi `agent-` khác (className="agent-card", data-testid="agent-row", khoá i18n…) là hợp lệ. Dòng có chú thích
+`allow-fake-id` được bỏ qua (chỉ dùng khi thật sự cần, vd. dữ liệu mẫu có chủ đích).
 
 Cách chạy: `python3 .github/scripts/check_no_fake_ids.py [root]` — in `tệp:dòng` + dòng `::error::` cho GitHub
 Actions, exit 1 nếu có vi phạm, 0 nếu sạch.
@@ -23,8 +25,9 @@ SUFFIXES = (".ts", ".tsx")
 
 PATTERNS = (
     re.compile(r"""\b(id|value)\s*:\s*['"`]u-"""),
-    re.compile(r"""['"`]agent-"""),
+    re.compile(r"""\b(id|value|agent_id)\s*:\s*['"`]agent-"""),
 )
+ALLOW_MARK = "allow-fake-id"
 
 
 def violations(root: Path) -> Iterator[tuple[Path, int, str]]:
@@ -32,7 +35,7 @@ def violations(root: Path) -> Iterator[tuple[Path, int, str]]:
         if not path.is_file() or path.suffix not in SUFFIXES or "node_modules" in path.parts:
             continue
         for n, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), start=1):
-            if any(p.search(line) for p in PATTERNS):
+            if ALLOW_MARK not in line and any(p.search(line) for p in PATTERNS):
                 yield path, n, line.strip()
 
 

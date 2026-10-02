@@ -6,7 +6,7 @@ import { useProviders } from '../../lib/dataQueries';
 import { errorText } from '../../lib/errorText';
 import { useCan } from '../../lib/permissions';
 import { toast } from '../../lib/toast';
-import { CardError, FriendlyErrorText, InlineError, Panel, ScreenHead, SkeletonLines, StateChip } from '../common';
+import { CardError, FriendlyErrorText, InlineError, Panel, PinHint, PIN_ROUTE_CHANGE_TITLE, ScreenHead, SkeletonLines, StateChip } from '../common';
 import { CliCard } from '../system/CliCard';
 import { ModelPicker } from './ModelPicker';
 import { CliDiagnose } from '../system/CliDiagnose';
@@ -102,16 +102,6 @@ export function ApiScreen() {
   );
 }
 
-/** v0.1.35 (F-20): thêm / sửa nhà cung cấp AI, khoá API, chuỗi chuyển hướng cần phiên PIN `ai.route_change` — hộp PIN
- * tự mở khi máy chủ trả 423 (lib/api.ts + PinDialogHost); ở đây chỉ báo trước. */
-function PinHint() {
-  return (
-    <span className="muted-note" title="Thêm / sửa nhà cung cấp AI, khoá API, chuỗi chuyển hướng cần mã PIN">
-      <Icon name="ph ph-lock-simple" size={11} /> Cần mã PIN 6 số
-    </span>
-  );
-}
-
 function ProviderCardSkeleton() {
   return (
     <div className="apm-provider" aria-hidden>
@@ -179,7 +169,9 @@ function ProviderCard({ provider: p, canManage, onAddKey }: { provider: Provider
           </Button>
         ) : null}
         {canManage ? (
-          <Switch checked={p.enabled} label={`${p.enabled ? 'Tắt' : 'Bật'} ${p.name}`} disabled={setEnabled.isPending} onChange={(v) => setEnabled.mutate({ id: p.id, enabled: v })} />
+          <span title={`${p.enabled ? 'Tắt' : 'Bật'} nhà cung cấp — ${PIN_ROUTE_CHANGE_TITLE}`}>
+            <Switch checked={p.enabled} label={`${p.enabled ? 'Tắt' : 'Bật'} ${p.name}`} disabled={setEnabled.isPending} onChange={(v) => setEnabled.mutate({ id: p.id, enabled: v })} />
+          </span>
         ) : null}
       </div>
       {lastResult ? (

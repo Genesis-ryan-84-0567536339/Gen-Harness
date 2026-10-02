@@ -100,6 +100,23 @@ describe('Bản đồ quan hệ', () => {
     await waitFor(() => expect(useUrlStateStore.getState().params.heat).toBe('high'));
   });
 
+  it('link cũ ?owner=u-ha (id giả trước v0.1.35) → bỏ qua bộ lọc thay vì 422; UUID thật vẫn gửi owner_user_id', async () => {
+    const calls = mockFetch(graphHandler);
+    useUrlStateStore.setState({ params: { owner: 'u-ha' } });
+    renderScreen(<GraphScreen />);
+    expect(await screen.findByText('Nguyễn Văn Bảo')).toBeInTheDocument();
+    const lists = calls.filter((c) => c.url.includes('/graph/list'));
+    expect(lists.length).toBeGreaterThan(0);
+    expect(lists.every((c) => !c.url.includes('owner_user_id'))).toBe(true);
+    await waitFor(() => expect(useUrlStateStore.getState().params.owner).toBeUndefined());
+
+    calls.length = 0;
+    useUrlStateStore.setState((st) => ({ params: { ...st.params, owner: USER_IDS.lan } }));
+    await waitFor(() =>
+      expect(calls.some((c) => c.url.includes('/graph/list') && c.url.includes(`owner_user_id=${USER_IDS.lan}`))).toBe(true),
+    );
+  });
+
   it('chế độ Người↔Người: hiện node và cạnh từ GET /graph/people, chọn một node mở panel chi tiết', async () => {
     mockFetch(graphHandler);
     renderScreen(<GraphScreen />);

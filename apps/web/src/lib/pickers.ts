@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from './api';
+import { useCan } from './permissions';
 
 /**
  * Ô chọn người / trợ lý THẬT (v0.1.35, F-1) — dùng chung cho «Giao cho người khác» (Hộp thư), «Gán người xử lý»
@@ -19,8 +20,21 @@ export interface PickerOption {
 
 /** Nhãn của người đang đăng nhập trong mọi ô chọn người. */
 export const ME_LABEL = 'Tôi';
-export const EMPTY_USERS_TEXT = 'Chưa có người dùng nào khác — mời thêm ở Người dùng';
-export const EMPTY_AGENTS_TEXT = 'Chưa có trợ lý nào đang bật — tạo ở Danh tính Agent';
+/** Gợi ý khi danh sách rỗng — đường dẫn đầy đủ cho người CÓ quyền; người không có quyền được bảo nhờ Owner. */
+export const EMPTY_USERS_TEXT = 'Chưa có người dùng nào khác — mời thêm ở Điều khiển hệ thống › Người dùng';
+export const EMPTY_USERS_TEXT_ASK = 'Chưa có người dùng nào khác — nhờ Owner mời thêm người dùng';
+export const EMPTY_AGENTS_TEXT = 'Chưa có trợ lý nào đang bật — tạo ở Agent & Model › Danh tính Agent';
+export const EMPTY_AGENTS_TEXT_ASK = 'Chưa có trợ lý nào đang bật — nhờ Owner tạo ở Agent & Model › Danh tính Agent';
+
+/** Câu gợi ý khi không có người nào khác: mời người dùng cần `roles.manage` (apps/api/gh/auth/users.py). */
+export function useEmptyUsersText(): string {
+  return useCan('roles.manage') ? EMPTY_USERS_TEXT : EMPTY_USERS_TEXT_ASK;
+}
+
+/** Câu gợi ý khi không có trợ lý nào bật: tạo/bật Danh tính Agent cần `system.manage`. */
+export function useEmptyAgentsText(): string {
+  return useCan('system.manage') ? EMPTY_AGENTS_TEXT : EMPTY_AGENTS_TEXT_ASK;
+}
 
 const STALE_MS = 60_000;
 

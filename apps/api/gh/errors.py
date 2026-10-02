@@ -1,6 +1,8 @@
 """Lỗi theo RFC 7807 với mã máy đọc được (xem docs/api/phase-1.md)."""
 
+import errno
 import logging
+import socket
 from typing import Any
 from uuid import uuid4
 
@@ -14,9 +16,27 @@ from sqlalchemy.exc import InterfaceError, OperationalError
 log = logging.getLogger("gh.errors")
 
 #: v0.1.35 (F-43): lớp lỗi "mất kết nối hạ tầng" → 503 SERVICE_UNAVAILABLE. redis-py có ConnectionError/TimeoutError
-#: riêng (không phải lớp con OSError) nên phải liệt kê thêm.
-INFRA_ERRORS: tuple[type[Exception], ...] = (ConnectionError, TimeoutError, redis_exc.ConnectionError,
-                                                 redis_exc.TimeoutError)
+#: riêng (không phải lớp con OSError) nên phải liệt kê thêm. `socket.gaierror` (lớp con OSError trực tiếp, không phải
+#: ConnectionError): container `db`/`redis` dừng → Docker DNS không phân giải được tên → asyncpg ném gaierror thô.
+INFRA_ERRORS: tuple[type[Exception], ...] = (ConnectionError, TimeoutError, socket.gaierror,
+                                                 redis_exc.ConnectionError, redis_exc.TimeoutError)
+
+#: errno của `OSError` thường (không phải lớp con ConnectionError) vẫn nghĩa là "không tới được máy chủ hạ tầng".
+_INFRA_ERRNOS = frozenset({errno.EHOSTUNREACH, errno.ENETUNREACH, errno.ECONNREFUSED, errno.EHOSTDOWN,
+                           errno.ENETDOWN})
+
+
+def is_infra_os_error(exc: BaseException) -> bool:
+    """OSError mất kết nối hạ tầng mà không thuộc INFRA_ERRORS: errno không tới được máy/mạng, hoặc
+    `OSError('Multiple exceptions: …')` asyncio ném khi MỌI địa chỉ của máy (IPv4+IPv6) đều kết nối thất bại."""
+    if isinstance(exc, INFRA_ERRORS):
+        return True
+    if not isinstance(exc, OSError):
+        return False
+    if exc.errno in _INFRA_ERRNOS:
+        return True
+    msg = str(exc.args[0]) if exc.args and exc.errno is None else ""
+    return msg.startswith("Multiple exceptions")
 
 INTERNAL_TITLE = "Hệ thống gặp lỗi khi xử lý yêu cầu — đã ghi nhật ký"
 
@@ -141,7 +161,11 @@ async def infra_error_handler(request: Request, exc: Exception) -> JsonResponse:
 
 async def os_error_handler(request: Request, exc: Exception) -> JsonResponse:
     """v0.1.35 (F-43): `OSError` còn lại (đĩa đầy, thiếu quyền, thiếu tệp…) không phải mất kết nối → 500 INTERNAL
-    kèm `error_id`. Starlette chọn handler theo MRO nên `ConnectionError`/`TimeoutError` vẫn về infra_error_handler."""
+    kèm `error_id`. Starlette chọn handler theo MRO nên `ConnectionError`/`TimeoutError`/`gaierror` vẫn về
+    infra_error_handler; OSError thường mang errno EHOSTUNREACH/ENETUNREACH/ECONNREFUSED… hoặc "Multiple
+    exceptions" (asyncio, máy hai ngăn xếp) cũng là mất kết nối → chuyển sang infra_error_handler (503)."""
+    if is_infra_os_error(exc):
+        return await infra_error_handler(request, exc)
     return _internal(request, "Lỗi hệ điều hành không mong đợi")
 
 

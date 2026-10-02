@@ -87,7 +87,8 @@ async def test_error_table_is_problem_json(owner_api: Api, client, db, app) -> N
     assert r is not None
     body = _check(r, 423, "PIN_LOCKED")
     assert isinstance(body["locked_until"], str) and body["locked_until"]
-    assert body["detail"] == f"Thử lại sau {body['locked_until']}"
+    # detail không chứa giờ ISO UTC thô (web hiện thẳng) — giờ mở khoá chỉ ở `locked_until`.
+    assert body["detail"] == "Thử lại sau ít phút" and body["locked_until"] not in body["detail"]
     # PUT /auth/pin khi đang khoá (vẫn trong phiên PIN? không — khoá thu hồi phiên PIN → 423 PIN_REQUIRED/LOCKED).
     r = await owner_api.send("PUT", "/auth/pin", {"current_pin": OWNER["pin"], "new_pin": "135790"})
     _check(r, 423)

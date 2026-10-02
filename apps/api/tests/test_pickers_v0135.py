@@ -114,6 +114,19 @@ async def test_inbox_assign_fake_id_is_422_and_unknown_uuid_404(world, owner_api
     assert r3.status_code == 404
 
 
+async def test_soft_deleted_active_user_cannot_be_assigned(world, owner_api: Api, db) -> None:  # type: ignore[no-untyped-def]
+    """Người dùng xoá mềm (deleted_at) dù is_active vẫn true: không có trong /pickers/users ⇒ cũng không gán được
+    qua API (Hộp thư, Vụ việc) — khớp ô chọn."""
+    await db.execute(text("UPDATE core.users SET deleted_at = now() WHERE id = :u"), {"u": world["lan"]})
+    await db.commit()
+    ids = {i["id"] for i in (await owner_api.get("/pickers/users")).json()["items"]}
+    assert str(world["lan"]) not in ids
+    r = await owner_api.send("POST", f"/inbox/{world['unit']}/assign", {"user_id": str(world["lan"])})
+    assert r.status_code == 404 and r.json()["code"] == "NOT_FOUND", r.text
+    r = await owner_api.send("POST", "/cases", {"title": "Giao trễ", "assignee_user_id": str(world["lan"])})
+    assert r.status_code == 404 and r.json()["code"] == "NOT_FOUND", r.text
+
+
 # ─── Vụ việc «Gán người xử lý» ───────────────────────────────────────────────
 
 async def test_case_assignee_unknown_uuid_404_real_user_200(world, owner_api: Api, db) -> None:  # type: ignore[no-untyped-def]

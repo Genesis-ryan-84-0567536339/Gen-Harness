@@ -6,7 +6,7 @@ import { errorText } from '../../lib/errorText';
 import { useCan } from '../../lib/permissions';
 import { useCreateProvider, useTestProvider } from '../api/queries';
 import { providerStatus } from '../api/apiModel';
-import { FriendlyErrorText, InlineError, Panel, SkeletonLines } from '../common';
+import { FriendlyErrorText, InlineError, Panel, PinHint, SkeletonLines } from '../common';
 
 const JEV_BASE_URLS = [
   { value: 'https://openrouter.ai/api/v1', label: 'OpenRouter — openrouter.ai/api/v1' },
@@ -110,6 +110,7 @@ function JevForm({ test }: { test: TestMutation }) {
         <Button variant="primary" type="submit" className="btn-27" icon="ph ph-floppy-disk" disabled={!valid} loading={create.isPending} data-gen-target="system.brain.jev.test">
           Lưu &amp; kiểm tra
         </Button>
+        <PinHint />
       </div>
       {create.isError ? <InlineError>{errorText(create.error)}</InlineError> : null}
     </form>

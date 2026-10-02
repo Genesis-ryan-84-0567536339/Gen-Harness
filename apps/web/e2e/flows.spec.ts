@@ -556,23 +556,6 @@ test.describe('cụm Con người & Chất lượng', () => {
   });
 });
 
-/**
- * Hộp PIN KHOAN DUNG (hợp đồng giữa các gói v0.1.35): đợi hộp 'Mã PIN xác nhận thao tác' tối đa 4 giây — có thì
- * gõ PIN Owner, không có thì đi tiếp. Thao tác nhà cung cấp AI (thêm khoá, chuỗi chuyển hướng) chỉ cần PIN từ gói
- * f20 (`ai.route_change`), nên bài test phải xanh cả trước lẫn sau gói đó.
- */
-async function maybeEnterOwnerPin(page: import('@playwright/test').Page) {
-  const dlg = page.getByRole('dialog', { name: 'Mã PIN xác nhận thao tác' });
-  try {
-    await dlg.waitFor({ state: 'visible', timeout: 4_000 });
-  } catch {
-    return;
-  }
-  await page.getByLabel('Mã PIN — chữ số 1/6').click();
-  await page.keyboard.type(OWNER.pin);
-  await expect(dlg).toBeHidden();
-}
-
 test.describe('giai đoạn 4: Agent + API & Model', () => {
   test.beforeEach(async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
@@ -639,12 +622,12 @@ test.describe('giai đoạn 4: Agent + API & Model', () => {
     await expect(geminiCard).toBeVisible();
     await expect(geminiCard).toContainText('GEM-KEY-01');
 
-    // Thêm khoá — cần system.manage; từ v0.1.35 (gói f20) có thể hỏi thêm PIN `ai.route_change` → nhập PIN nếu hỏi.
+    // Thêm khoá — cần system.manage + PIN `ai.route_change` (v0.1.35, F-20): hộp PIN BẮT BUỘC hiện.
     await geminiCard.getByRole('button', { name: 'Thêm khoá' }).click();
     const keyDlg = page.getByRole('dialog', { name: /Thêm khoá cho Gemini API/ });
     await keyDlg.getByLabel('Khoá API mới').fill('sk-test-khoa-moi-88221');
     await keyDlg.getByRole('button', { name: 'Thêm khoá' }).click();
-    await maybeEnterOwnerPin(page);
+    await enterOwnerPin(page);
     await expect(keyDlg).toBeHidden();
     await expect(geminiCard).toContainText('GEM-KEY-02');
 
@@ -663,8 +646,9 @@ test.describe('giai đoạn 4: Agent + API & Model', () => {
       (r) => r.url().includes('/providers/chain') && r.request().method() === 'PATCH' && r.ok(),
     );
     await page.getByRole('button', { name: 'Đưa DeepSeek API lên trước' }).click();
-    await maybeEnterOwnerPin(page);
+    // Cùng phiên PIN với bước thêm khoá ở trên → máy chủ không hỏi lại.
     await chainReq;
+    await expect(page.getByRole('dialog', { name: 'Mã PIN xác nhận thao tác' })).toBeHidden();
     await expect(chain.locator('.apm-chain-row').nth(1)).toContainText('DeepSeek API');
   });
 });

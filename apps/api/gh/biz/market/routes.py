@@ -841,10 +841,12 @@ async def get_case(case_id: uuid.UUID, user: service.CurrentUser = Depends(READ)
 
 
 async def _ensure_assignee(db: AsyncSession, org_id: uuid.UUID, assignee: uuid.UUID | None) -> None:
-    """UUID người xử lý phải là người dùng đang hoạt động cùng org — không để khoá ngoại nổ thành 500 (F-1)."""
+    """UUID người xử lý phải là người dùng đang hoạt động (chưa xoá mềm) cùng org — khớp /pickers/users; không để
+    khoá ngoại nổ thành 500 (F-1)."""
     if assignee is None:
         return
-    ok = (await db.execute(text("SELECT 1 FROM core.users WHERE id = :u AND org_id = :o AND is_active"),
+    ok = (await db.execute(text("SELECT 1 FROM core.users WHERE id = :u AND org_id = :o AND is_active "
+                                "AND deleted_at IS NULL"),
                            {"u": assignee, "o": org_id})).first()
     if ok is None:
         raise not_found("Người dùng")

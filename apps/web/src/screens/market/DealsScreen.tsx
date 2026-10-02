@@ -5,7 +5,7 @@ import { Button, Dialog, EmptyState, Icon, Tabs, type FilterOption, type TabItem
 import { api } from '../../lib/api';
 import { errorText } from '../../lib/errorText';
 import { fmtDM, fmtInt } from '../../lib/format';
-import { EMPTY_USERS_TEXT, useAssignees } from '../../lib/pickers';
+import { useAssignees, useEmptyUsersText } from '../../lib/pickers';
 import { useUrlState } from '../../lib/uiStore';
 import { CardError, InlineError, ScreenHead, SkeletonLines } from '../common';
 import {
@@ -214,6 +214,9 @@ function CasesPane() {
 function AssigneeDialog({ c, onClose }: { c: CaseItem; onClose: () => void }) {
   const patch = usePatchCase();
   const { options, hasOthers, query: people } = useAssignees();
+  const emptyText = useEmptyUsersText();
+  // Người đang được gán nhưng không còn trong /pickers/users (đã khoá/xoá) — vẫn hiện, đánh dấu chọn (như AgentChoices).
+  const missing = c.assignee && people.isSuccess && !options.some((u) => u.id === c.assignee?.id) ? c.assignee : null;
   return (
     <Dialog
       open
@@ -228,8 +231,9 @@ function AssigneeDialog({ c, onClose }: { c: CaseItem; onClose: () => void }) {
       }
     >
       <div className="dlg-list" role="list">
-        <button type="button" className="sv-open" onClick={() => patch.mutate({ id: c.id, body: { assignee_user_id: null } }, { onSuccess: onClose })}>
+        <button type="button" className="sv-open" aria-pressed={!c.assignee} onClick={() => patch.mutate({ id: c.id, body: { assignee_user_id: null } }, { onSuccess: onClose })}>
           <span className="sv-open__name">Chưa gán</span>
+          {!c.assignee ? <Icon name="ph ph-check" size={14} /> : null}
         </button>
         {people.isPending ? (
           <SkeletonLines rows={3} />
@@ -237,13 +241,19 @@ function AssigneeDialog({ c, onClose }: { c: CaseItem; onClose: () => void }) {
           <InlineError>{errorText(people.error)}</InlineError>
         ) : (
           <>
+            {missing ? (
+              <button type="button" className="sv-open" aria-pressed disabled title="Người này đã bị khoá hoặc xoá — chọn người khác để gán lại">
+                <span className="sv-open__name">{`${missing.name || 'Người dùng'} (đã khoá)`}</span>
+                <Icon name="ph ph-check" size={14} />
+              </button>
+            ) : null}
             {options.map((u) => (
               <button key={u.id} type="button" className="sv-open" aria-pressed={c.assignee?.id === u.id} onClick={() => patch.mutate({ id: c.id, body: { assignee_user_id: u.id } }, { onSuccess: onClose })}>
                 <span className="sv-open__name">{u.label}</span>
                 {c.assignee?.id === u.id ? <Icon name="ph ph-check" size={14} /> : null}
               </button>
             ))}
-            {!hasOthers ? <p className="muted-note">{EMPTY_USERS_TEXT}</p> : null}
+            {!hasOthers ? <p className="muted-note">{emptyText}</p> : null}
           </>
         )}
       </div>

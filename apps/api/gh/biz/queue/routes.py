@@ -234,7 +234,8 @@ async def assign_inbox_item(item_id: uuid.UUID, body: AssignIn,
     sc = await scope_for(db, user, "queue.act")
     r = await _load_item(db, user.org_id, sc, item_id)
     target = (await db.execute(text("""SELECT id, display_name FROM core.users
-                                       WHERE id = :u AND org_id = :o AND is_active"""),
+                                       WHERE id = :u AND org_id = :o AND is_active
+                                         AND deleted_at IS NULL"""),
                                {"u": body.user_id, "o": user.org_id})).one_or_none()
     if target is None:
         raise not_found("Người dùng")

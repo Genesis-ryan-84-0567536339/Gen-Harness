@@ -3,7 +3,7 @@
  * còn danh sách cứng 'u-lan' / 'agent-ka'. Mock kiểm như API thật: id không phải UUID → 422 VALIDATION.
  */
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
-import { loginAsOwner, resetMock } from './support';
+import { AUDITOR, loginAs, loginAsOwner, resetMock } from './support';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -126,5 +126,50 @@ test.describe('v0.1.35 · chọn người / trợ lý thật', () => {
     await expect(alert).not.toHaveText('');
     await expect(alert).not.toContainText('[object Object]');
     await expect(dlg).toBeVisible();
+  });
+});
+
+/** Vai trò khác Owner — backend đã có ma trận vai trò (tests/test_pickers_v0135.py), đây là phía giao diện. */
+test.describe('v0.1.35 · chọn người theo vai trò', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await resetMock(page.request as APIRequestContext, 'finished');
+  });
+
+  test('Operator: Hộp thư › Giao cho người khác thấy "Tôi" + người khác, gửi UUID', async ({ page }) => {
+    await loginAs(page, 'operator@genesis.local');
+    const users = await pickerUsers(page);
+    const me = users.find((u) => u.me);
+    expect(me?.id).toMatch(UUID_RE);
+    expect(me?.name).not.toBe('Anh Cơ La (Ryan)');
+    const owner = users.find((u) => u.name === 'Anh Cơ La (Ryan)' && !u.me);
+
+    await page.goto('/inbox');
+    const card = page.locator('.ib-card').first();
+    await card.getByRole('button', { name: 'Giao cho người khác' }).click();
+    const dlg = page.getByRole('dialog', { name: 'Giao cho người khác' });
+    await expect(dlg.getByRole('list').getByRole('button').first()).toHaveText('Tôi');
+    await expect(dlg.getByText('Anh Cơ La (Ryan)')).toBeVisible();
+    // Operator không có roles.manage → không bị chỉ tới màn mời người dùng.
+    await expect(dlg.getByText(/mời thêm ở Điều khiển hệ thống/)).toHaveCount(0);
+    expect(owner?.id).toMatch(UUID_RE);
+    const req = page.waitForRequest((r) => /\/inbox\/[^/]+\/assign$/.test(r.url()) && r.method() === 'POST');
+    await dlg.getByText('Anh Cơ La (Ryan)').click();
+    expect(((await req).postDataJSON() as { user_id: string }).user_id).toBe(owner!.id);
+    await expect(dlg).toBeHidden();
+  });
+
+  test('Auditor: Bản đồ quan hệ › bộ lọc Phụ trách vẫn tải người thật', async ({ page }) => {
+    await loginAs(page, AUDITOR.email);
+    const users = await pickerUsers(page);
+    const owner = users.find((u) => u.name === 'Anh Cơ La (Ryan)')!;
+    expect(owner.id).toMatch(UUID_RE);
+    await page.goto('/graph');
+    await expect(page.getByText('Nguyễn Văn Bảo')).toBeVisible();
+    await page.getByRole('button', { name: /Phụ trách/ }).click();
+    await expect(page.getByRole('option', { name: 'Tôi' })).toBeVisible();
+    const req = page.waitForRequest((r) => r.url().includes('/graph/list') && r.url().includes('owner_user_id='));
+    await page.getByRole('option', { name: 'Anh Cơ La (Ryan)' }).click();
+    expect(new URL((await req).url()).searchParams.get('owner_user_id')).toBe(owner.id);
   });
 });

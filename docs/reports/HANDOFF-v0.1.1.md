@@ -1413,11 +1413,13 @@ cần khôi phục — CSDL chưa bị đụng thì chỉ cần `docker compose 
 **Không cần làm gì.** Sau khi cập nhật:
 - Ô "Giao cho người khác", "Gán người xử lý" hiện đúng người trong công ty (Sếp là "Tôi"); ô "Gán BOT trực nhóm" hiện các trợ
   lý đang bật. Danh sách trống nghĩa là chưa mời người dùng / chưa tạo trợ lý.
-- Khi thêm hoặc sửa nhà cung cấp AI, thêm khoá API, bật/tắt hay đổi thứ tự ưu tiên model, hệ thống hỏi **mã PIN 6 số** (mã
-  đặt lúc thiết lập). Nhập một lần dùng được 30 phút.
+- Khi thêm hoặc sửa nhà cung cấp AI, thêm khoá API, bật/tắt nhà cung cấp hay đổi thứ tự chuỗi ưu tiên nhà cung cấp, hệ thống
+  hỏi **mã PIN 6 số** (mã đặt lúc thiết lập). Nhập một lần dùng được 30 phút. Đổi/chọn model mặc định ("Dùng model này")
+  **chưa** hỏi PIN (để bản v0.1.45).
 - Tài liệu không phải PDF/ảnh (vd .html, .txt, .docx) giờ bấm vào sẽ **tải về máy** thay vì mở thẳng trong trình duyệt — chủ
   ý để chặn mã độc.
-- Khi có lỗi lạ, màn hình hiện câu dễ hiểu kèm "Mã lỗi xxxxxxxx" — Sếp chỉ cần chép mã đó gửi Claude.
+- Khi có lỗi lạ, màn hình hiện câu dễ hiểu kèm "Mã lỗi xxxxxxxx" — Sếp chỉ cần chép mã đó gửi Claude. PIN bị khoá do nhập
+  sai nhiều lần thì hiện rõ "Mã PIN đang bị khoá…" kèm giờ mở khoá theo giờ Việt Nam.
 
 ### Vì sao (kế hoạch tổng `docs/audit/2026-10-01/0-ke-hoach-tong.md`)
 
@@ -1439,12 +1441,19 @@ cần khôi phục — CSDL chưa bị đụng thì chỉ cần `docker compose 
 - **F-20** — thao tác PIN `ai.route_change` cho tạo/sửa/bật-tắt nhà cung cấp, thêm khoá, đổi chuỗi ưu tiên; thiếu PIN ⇒ 423
   (bảng test `test_pin_providers_v0135.py`). Web: Thiết lập bước 4 và API & Model hỏi PIN (huỷ ⇒ "Đã huỷ — thao tác cần mã
   PIN.", không tạo gì); PIN dùng lại 30 phút trong phiên.
-- **F-5/F-15** — `/documents/{id}/content`: chỉ PDF/ảnh raster mở trực tiếp, còn lại `Content-Disposition: attachment` +
-  `Content-Security-Policy: sandbox`, `nosniff`; siết CSP ở Caddy/nginx; `/notebooks` dùng `data.read`/`data.manage` như
-  phần còn lại của Kho (AgentNV ⇒ 403).
+- **F-5/F-15** — `/documents/{id}/content`: chỉ PDF/ảnh raster mở trực tiếp, còn lại `Content-Disposition: attachment`;
+  mọi tệp kèm `nosniff`, CORP same-origin, `no-store`. CSP theo loại: ảnh + tệp tải về `sandbox; default-src 'none'`; **PDF
+  inline KHÔNG sandbox** (`default-src 'none'; object-src 'self'; frame-ancestors 'none'`) vì trình xem PDF của Chrome là
+  plugin — sandbox/`object-src 'none'` chặn nó. Caddy: CSP ứng dụng đặt bằng `?Content-Security-Policy` (chỉ khi upstream
+  chưa có) nên CSP riêng của tệp từ api **đi qua nguyên vẹn**; với web thì `header_down -Content-Security-Policy` bỏ CSP của
+  nginx để trình duyệt chỉ nhận MỘT CSP (của Caddy, có `wss://host`). `/notebooks` dùng `data.read`/`data.manage` như phần
+  còn lại của Kho (AgentNV ⇒ 403); nút «Sếp ghim thêm» ở Kho sạch theo `data.manage` cho khớp.
 - **F-43** — 500 không bao giờ chứa SQL/tham số: `IntegrityError`… ⇒ "Hệ thống gặp lỗi…" + `Mã lỗi xxxxxxxx` (chi tiết chỉ
-  ở log server); chỉ lỗi mất kết nối (SQLSTATE 08/57P0x, ConnectionError/TimeoutError/redis) mới 503; OSError khác ⇒ 500
-  thân thiện. `/api/v1/docs`, `/openapi.json` tắt ở production (redoc tắt hẳn). Nhật ký hành động khi đăng nhập sai che email (`o***@miền`). `detail` của
+  ở log server); web hiện **cả** câu dễ hiểu lẫn mã lỗi. Chỉ lỗi mất kết nối mới 503: SQLSTATE 08/57P0x,
+  ConnectionError/TimeoutError/redis, `socket.gaierror` (container `db` dừng ⇒ DNS Docker không phân giải được `db`), OSError
+  errno EHOSTUNREACH/ENETUNREACH/ECONNREFUSED… và `OSError('Multiple exceptions…')` của asyncio; OSError khác ⇒ 500 thân
+  thiện. 423 PIN_LOCKED: `detail` không còn giờ ISO UTC thô ("Thử lại sau ít phút"), giờ ở `locked_until`, web tự định dạng
+  theo múi giờ tổ chức. `/api/v1/docs`, `/openapi.json` tắt ở production (redoc tắt hẳn). Nhật ký hành động khi đăng nhập sai che email (`o***@miền`). `detail` của
   problem+json **luôn là chuỗi hoặc null** (giá trị khác chuyển sang `context`).
 - **F-14** — `apps/web/e2e-live/live-ci.spec.ts` + `LIVE_SPECS` trong `run.sh`: job `api` chạy api + worker thật trên
   Postgres/Redis của job, Chromium bấm 4 luồng (giao việc Hộp thư, gán người Vụ việc, gán BOT nhóm, xác nhận đề xuất Gen),
@@ -1470,4 +1479,19 @@ cần khôi phục — CSDL chưa bị đụng thì chỉ cần `docker compose 
 
 - Đã kiểm: _(người điều phối điền sau merge — link + kết quả thật, KHÔNG ghi trước)_ — CI PR (`ci-ok`, gồm e2e thật rút gọn
   trong job `api`); Release v0.1.35 bản thử → E2E cài thật → promote latest; genh tải về (checksum + `genh version` = v0.1.35).
-- Chưa kiểm: trên máy Boss với người dùng/trợ lý thật (danh sách chọn người), tải tài liệu .docx thật qua Caddy production.
+- Chưa kiểm: trên máy Boss với người dùng/trợ lý thật (danh sách chọn người), tải tài liệu .docx thật qua Caddy production;
+  **mở PDF inline trên Chrome/Firefox desktop thật** qua Caddy production (Chrome headless không vẽ PDF nên không tự kiểm
+  được — header đã chốt bằng test `test_p3_relations`, và chạy Caddy 2.8 cục bộ xác nhận CSP của api đi qua nguyên vẹn).
+
+### Sửa sau review (v0.1.35, trước merge)
+
+- F-43: `socket.gaierror`, OSError errno không tới được máy/mạng, "Multiple exceptions" ⇒ 503 (trước là 500 + stack trace).
+- F-43: 500 INTERNAL hiện "Hệ thống gặp lỗi… . Mã lỗi xxxxxxxx — gửi mã này cho người hỗ trợ." (trước chỉ còn mã lỗi);
+  PIN_LOCKED ở «Đổi mã PIN» hiện câu bị khoá + giờ địa phương (trước là giờ ISO UTC thô).
+- F-5: PDF bỏ `sandbox`, `object-src 'self'`; Caddy không còn ghi đè CSP của api; nginx CSP bị bỏ sau Caddy (một CSP duy nhất).
+- F-1: `check_no_fake_ids.py` chỉ bắt `id|value|agent_id: 'agent-…'` (không còn bắt nhầm `className="agent-card"`), dòng có
+  `allow-fake-id` được bỏ qua; gán người xử lý (Vụ việc, Hộp thư) chặn người đã xoá mềm như ô chọn; hộp «Gán người xử lý» hiện
+  "<tên> (đã khoá)" cho người đang gán đã bị khoá; gợi ý khi danh sách rỗng ghi rõ đường dẫn và đổi câu cho vai trò không có
+  quyền ("nhờ Owner…"); link cũ `?owner=u-ha` ở Bản đồ quan hệ bị bỏ qua thay vì lỗi 422; e2e thêm Operator/Auditor.
+- F-20: thẻ Jev «Lưu & kiểm tra» và công tắc bật/tắt nhà cung cấp có gợi ý cần mã PIN; e2e bỏ helper PIN "khoan dung" — hộp
+  PIN bắt buộc hiện ở lần đầu, lần sau trong cùng phiên thì không.

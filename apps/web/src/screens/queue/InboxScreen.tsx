@@ -6,7 +6,7 @@ import { WhyButton } from '../core/Evidence';
 import { errorText } from '../../lib/errorText';
 import { fmtAgo } from '../../lib/format';
 import { useUrlState } from '../../lib/uiStore';
-import { EMPTY_USERS_TEXT, useAssignees } from '../../lib/pickers';
+import { useAssignees, useEmptyUsersText } from '../../lib/pickers';
 import { CardError, InlineError, ScreenHead, SkeletonLines } from '../common';
 import { confidenceTone, itemTag, itemTagTone, priorityTone, triageBadges } from './queueModel';
 import { useInbox, useInboxAct, useInboxAssign, useInboxSilence } from './queries';
@@ -212,6 +212,7 @@ function InboxCard({ item, onAssign, onSilence }: { item: InboxItem; onAssign: (
 function AssignDialog({ item, onClose }: { item: InboxItem; onClose: () => void }) {
   const assign = useInboxAssign();
   const { options, hasOthers, query: people } = useAssignees();
+  const emptyText = useEmptyUsersText();
   return (
     <Dialog
       open
@@ -249,7 +250,7 @@ function AssignDialog({ item, onClose }: { item: InboxItem; onClose: () => void 
               <span className="sv-open__name">{u.label}</span>
             </button>
           ))}
-          {!hasOthers ? <p className="muted-note">{EMPTY_USERS_TEXT}</p> : null}
+          {!hasOthers ? <p className="muted-note">{emptyText}</p> : null}
         </div>
       )}
       {assign.isError ? <InlineError>{errorText(assign.error)}</InlineError> : null}

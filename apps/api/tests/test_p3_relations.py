@@ -331,7 +331,7 @@ async def test_documents_active_content_forced_download(  # type: ignore[no-unty
     _assert_sandboxed(dl)
 
 
-@pytest.mark.parametrize("mime", ["image/png", "application/pdf"])
+@pytest.mark.parametrize("mime", ["image/png", "image/jpeg", "image/webp", "image/gif"])
 async def test_documents_safe_mime_inline_still_sandboxed(  # type: ignore[no-untyped-def]
         world, owner_api: Api, mime: str) -> None:
     doc_id = await _upload(owner_api, mime, b"\x89PNG-or-%PDF")
@@ -341,6 +341,23 @@ async def test_documents_safe_mime_inline_still_sandboxed(  # type: ignore[no-un
     assert dl.headers["content-disposition"].startswith("inline")
     assert "filename*=UTF-8''T%E1%BB%87p%20th%E1%BB%AD" in dl.headers["content-disposition"]
     _assert_sandboxed(dl)
+    assert dl.headers["content-security-policy"] == "sandbox; default-src 'none'"
+
+
+async def test_documents_pdf_inline_not_sandboxed(world, owner_api: Api) -> None:  # type: ignore[no-untyped-def]
+    """PDF inline: KHÔNG sandbox, object-src 'self' (trình xem PDF của Chromium là plugin nhúng cùng URL — sandbox
+    hoặc object-src 'none' chặn nó); vẫn default-src 'none', không cho nhúng khung, nosniff, CORP, no-store."""
+    doc_id = await _upload(owner_api, "application/pdf", b"%PDF-1.4")
+    dl = await owner_api.get(f"/documents/{doc_id}/content")
+    assert dl.status_code == 200
+    assert dl.headers["content-type"].startswith("application/pdf")
+    assert dl.headers["content-disposition"].startswith("inline")
+    csp = dl.headers["content-security-policy"]
+    assert csp == "default-src 'none'; object-src 'self'; frame-ancestors 'none'"
+    assert "sandbox" not in csp and "object-src 'none'" not in csp
+    assert dl.headers["x-content-type-options"] == "nosniff"
+    assert dl.headers["cross-origin-resource-policy"] == "same-origin"
+    assert "no-store" in dl.headers["cache-control"]
 
 
 async def test_documents_legacy_mime_with_params_forced_download(  # type: ignore[no-untyped-def]
@@ -366,6 +383,25 @@ def test_content_headers_pure() -> None:
         assert media == "application/octet-stream"
         assert headers["Content-Disposition"] == "attachment; filename*=UTF-8''a%20b"
         assert headers["Content-Security-Policy"] == "sandbox; default-src 'none'"
+    # Bảng chốt header theo từng MIME: chỉ PDF bỏ sandbox; ảnh và mọi thứ khác giữ sandbox.
+    pdf_csp = "default-src 'none'; object-src 'self'; frame-ancestors 'none'"
+    expected = {
+        "application/pdf": ("application/pdf", "inline", pdf_csp),
+        "image/png": ("image/png", "inline", "sandbox; default-src 'none'"),
+        "image/jpeg": ("image/jpeg", "inline", "sandbox; default-src 'none'"),
+        "image/webp": ("image/webp", "inline", "sandbox; default-src 'none'"),
+        "image/gif": ("image/gif", "inline", "sandbox; default-src 'none'"),
+        "image/svg+xml": ("application/octet-stream", "attachment", "sandbox; default-src 'none'"),
+        "text/html": ("application/octet-stream", "attachment", "sandbox; default-src 'none'"),
+        "application/x-pdf; x=1": ("application/octet-stream", "attachment", "sandbox; default-src 'none'"),
+    }
+    for mime, (media_exp, disp, csp) in expected.items():
+        media, headers = _content_headers(mime, "a")
+        assert media == media_exp, mime
+        assert headers["Content-Disposition"].startswith(disp), mime
+        assert headers["Content-Security-Policy"] == csp, mime
+        assert headers["X-Content-Type-Options"] == "nosniff"
+        assert headers["Cross-Origin-Resource-Policy"] == "same-origin"
 
 
 async def test_documents_acl_by_role_and_scope(world, owner_api: Api, client, db) -> None:  # type: ignore[no-untyped-def]

@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import type { ChannelType, DirRelation, GraphHeatBand, GraphState, GraphValueBand, PersonType } from '@gen-harness/contracts';
 import { EmptyState, FilterSelect, Icon } from '@gen-harness/ui';
@@ -25,6 +25,9 @@ import {
 } from './graphModel';
 import { useGraphList } from './queries';
 
+/** owner_user_id phải là UUID — link/bookmark cũ `?owner=u-ha` (danh sách cứng trước v0.1.35) bị bỏ qua thay vì 422. */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export function ListPane() {
   const [type, setType] = useUrlState<string>('type', '');
   const [channel, setChannel] = useUrlState<string>('channel', '');
@@ -34,6 +37,10 @@ export function ListPane() {
   const [owner, setOwner] = useUrlState<string>('owner', '');
   const [state, setState] = useUrlState<string>('state', '');
   const [relation, setRelation] = useUrlState<string>('rel', '');
+  const ownerId = UUID_RE.test(owner) ? owner : '';
+  useEffect(() => {
+    if (owner && !ownerId) setOwner('');
+  }, [owner, ownerId, setOwner]);
 
   const query = useMemo(
     () => ({
@@ -42,12 +49,12 @@ export function ListPane() {
       heat: (heat || undefined) as GraphHeatBand | undefined,
       potential: (potential || undefined) as GraphValueBand | undefined,
       risk: (risk || undefined) as GraphValueBand | undefined,
-      owner_user_id: owner || undefined,
+      owner_user_id: ownerId || undefined,
       state: (state || undefined) as GraphState | undefined,
       relation: (relation || undefined) as DirRelation | undefined,
       limit: 100,
     }),
-    [type, channel, heat, potential, risk, owner, state, relation],
+    [type, channel, heat, potential, risk, ownerId, state, relation],
   );
   const list = useGraphList(query);
   // Người phụ trách THẬT (v0.1.35) — 403/lỗi/đang tải → chỉ còn 'Tất cả', không chặn màn.

@@ -4,6 +4,7 @@ server; người dùng nhận 500 INTERNAL kèm mã lỗi. /docs tắt ở produ
 import errno
 import logging
 import re
+import socket
 from typing import Any
 
 import httpx
@@ -93,7 +94,8 @@ async def test_dbapi_error_connection_invalidated_is_503() -> None:
                                  TimeoutError("timed out connecting to 10.1.2.3:6379"),
                                  ConnectionResetError("reset by 192.168.1.9"),
                                  redis_exc.ConnectionError("Error 111 connecting to 10.9.8.7:6379"),
-                                 redis_exc.TimeoutError("Timeout reading from 10.9.8.7:6379")])
+                                 redis_exc.TimeoutError("Timeout reading from 10.9.8.7:6379"),
+                                 socket.gaierror(-2, "Name or service not known")])
 async def test_infra_errors_are_503_without_ip(exc: Exception) -> None:
     resp = await infra_error_handler(_req(), exc)
     body = _json(resp)
@@ -111,6 +113,21 @@ async def test_other_os_errors_are_500_internal(exc: OSError) -> None:
     assert "/var/lib" not in raw and "/data/x" not in raw and "space" not in raw
 
 
+@pytest.mark.parametrize("exc", [socket.gaierror(-2, "Name or service not known"),
+                                 OSError(errno.EHOSTUNREACH, "No route to host"),
+                                 OSError(errno.ENETUNREACH, "Network is unreachable"),
+                                 OSError(errno.ECONNREFUSED, "Connect call failed ('10.0.0.5', 5432)"),
+                                 OSError("Multiple exceptions: [Errno 111] Connect call failed ('10.0.0.5', 5432), "
+                                         "[Errno 99] Cannot assign requested address")])
+async def test_os_errors_meaning_unreachable_are_503(exc: OSError) -> None:
+    """Container `db` dừng → Docker DNS không phân giải `db` → asyncpg ném socket.gaierror thô; asyncio ném
+    OSError('Multiple exceptions…') khi mọi địa chỉ đều hỏng; EHOSTUNREACH/ENETUNREACH → vẫn là mất kết nối (503)."""
+    resp = await os_error_handler(_req(), exc)
+    body = _json(resp)
+    assert resp.status_code == 503 and body["code"] == "SERVICE_UNAVAILABLE" and body["detail"] is None
+    assert not IP_RE.search(bytes(resp.body).decode())
+
+
 async def test_app_routes_exceptions_by_mro(owner_api: Api, app) -> None:  # type: ignore[no-untyped-def]
     """Đăng ký thật trong create_app: lớp con mất kết nối → 503; OSError còn lại → 500; redis → 503."""
     cases: list[tuple[str, BaseException, int, str]] = [
@@ -122,6 +139,10 @@ async def test_app_routes_exceptions_by_mro(owner_api: Api, app) -> None:  # typ
         ("rtimeout", redis_exc.TimeoutError("Timeout reading from 10.9.8.7:6379"), 503, "SERVICE_UNAVAILABLE"),
         ("perm", PermissionError(errno.EACCES, "Permission denied", "/etc/gh"), 500, "INTERNAL"),
         ("nospc", OSError(errno.ENOSPC, "No space left on device"), 500, "INTERNAL"),
+        ("dns", socket.gaierror(-2, "Name or service not known"), 503, "SERVICE_UNAVAILABLE"),
+        ("unreach", OSError(errno.EHOSTUNREACH, "No route to host"), 503, "SERVICE_UNAVAILABLE"),
+        ("multi", OSError("Multiple exceptions: [Errno 111] Connect call failed ('10.0.0.5', 5432)"), 503,
+         "SERVICE_UNAVAILABLE"),
         ("operational", OperationalError("SELECT 1", None, Exception("10.0.0.5")), 503, "DB_UNAVAILABLE"),
         ("integrity", _integrity(), 500, "INTERNAL"),
     ]

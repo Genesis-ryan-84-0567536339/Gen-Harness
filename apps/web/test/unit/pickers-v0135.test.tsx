@@ -14,7 +14,15 @@ import { DealsScreen } from '../../src/screens/market/DealsScreen';
 import { DirectoryScreen } from '../../src/screens/relations/DirectoryScreen';
 import { queryClient } from '../../src/lib/queryClient';
 import { errorText } from '../../src/lib/errorText';
-import { EMPTY_AGENTS_TEXT, EMPTY_USERS_TEXT, useAgentOptions, useAssignees } from '../../src/lib/pickers';
+import {
+  EMPTY_AGENTS_TEXT,
+  EMPTY_AGENTS_TEXT_ASK,
+  EMPTY_USERS_TEXT,
+  EMPTY_USERS_TEXT_ASK,
+  useAgentOptions,
+  useAssignees,
+} from '../../src/lib/pickers';
+import { qk } from '../../src/lib/queries';
 import { useUrlStateStore } from '../../src/lib/uiStore';
 import { AGENT_IDS, USER_IDS } from '../mock-ids';
 
@@ -46,6 +54,17 @@ function mockFetch(handler: (c: Call) => Response | Promise<Response>) {
 }
 
 const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+
+/** Đặt /auth/me với bảng quyền cho trước (gợi ý khi rỗng phụ thuộc quyền mời người / tạo agent). */
+function meWith(permissions: Record<string, string>) {
+  const me = {
+    id: USER_IDS.owner, email: 'x@genesis.local', display_name: 'X', role: { code: 'custom', name: 'Tuỳ biến' },
+    org: { id: 'o', name: 'x', timezone: 'Asia/Ho_Chi_Minh', currency: 'VND' },
+    addressing: { self: 'Anh', bot_calls_me: 'Sếp' }, pin_verified_until: null, permissions,
+  };
+  queryClient.setQueryData(qk.me, me);
+  return me;
+}
 
 function renderScreen(ui: ReactElement) {
   return render(
@@ -162,8 +181,13 @@ describe('Hộp thư ý nghĩa › Giao cho người khác', () => {
     expect(alert.textContent).not.toContain('[object Object]');
   });
 
-  it('chỉ có người đang đăng nhập → "Tôi" + gợi ý mời thêm', async () => {
+  it.each([
+    ['có roles.manage → chỉ đường Điều khiển hệ thống › Người dùng', { 'queue.act': 'all', 'roles.manage': 'all' }, EMPTY_USERS_TEXT],
+    ['operator (không roles.manage) → nhờ Owner mời', { 'queue.act': 'team' }, EMPTY_USERS_TEXT_ASK],
+  ])('chỉ có người đang đăng nhập → "Tôi" + gợi ý: %s', async (_name, perms, text) => {
+    const me = meWith(perms);
     mockFetch((c) => {
+      if (c.url.includes('/auth/me')) return json(200, me);
       if (c.url.includes('/pickers/users')) return json(200, { items: [{ id: USER_IDS.owner, name: 'Anh Cơ La (Ryan)', me: true }] });
       if (c.url.includes('/inbox')) return json(200, INBOX);
       return json(404);
@@ -173,7 +197,7 @@ describe('Hộp thư ý nghĩa › Giao cho người khác', () => {
     await screen.findByText(/Xưởng gỗ Bình Dương hỏi giá/);
     await user.click(screen.getByRole('button', { name: 'Giao cho người khác' }));
     const dlg = await screen.findByRole('dialog', { name: 'Giao cho người khác' });
-    expect(await within(dlg).findByText(EMPTY_USERS_TEXT)).toBeInTheDocument();
+    expect(await within(dlg).findByText(text)).toBeInTheDocument();
     expect(within(dlg).getByText('Tôi')).toBeInTheDocument();
   });
 });
@@ -204,6 +228,27 @@ describe('Deal & Vụ việc › Gán người xử lý', () => {
     await waitFor(() => expect(calls.some((c) => c.method === 'PATCH' && c.url.includes('/cases/case-1'))).toBe(true));
     const call = calls.find((c) => c.method === 'PATCH' && c.url.includes('/cases/case-1'))!;
     expect(call.body).toEqual({ assignee_user_id: USER_IDS.lan });
+  });
+
+  it('người đang được gán đã bị khoá (không có trong /pickers/users) → dòng "(đã khoá)" được đánh dấu chọn', async () => {
+    const LOCKED = { ...CASE, assignee: { id: '0199a000-0000-7000-8000-00000000dead', name: 'Anh Tùng' } };
+    mockFetch((c) => {
+      if (c.url.includes('/pickers/users')) return json(200, USERS);
+      if (c.url.includes('/cases')) return json(200, { items: [LOCKED], next_cursor: null, total: 1 });
+      if (c.url.includes('/deals')) return json(200, { items: [], next_cursor: null, total: 0 });
+      if (c.url.includes('/opportunities')) return json(200, { items: [], next_cursor: null, total: 0 });
+      return json(404);
+    });
+    useUrlStateStore.setState({ params: { dtab: 'cases' } });
+    const user = userEvent.setup();
+    renderScreen(<DealsScreen />);
+    const row = (await screen.findByText('CAS-0018')).closest('tr') as HTMLElement;
+    await user.click(within(row).getByRole('button', { name: 'Đổi' }));
+    const dlg = await screen.findByRole('dialog', { name: 'Gán người xử lý' });
+    const locked = (await within(dlg).findByText('Anh Tùng (đã khoá)')).closest('button') as HTMLElement;
+    expect(locked).toHaveAttribute('aria-pressed', 'true');
+    expect(within(dlg).getByText('Chưa gán').closest('button')).toHaveAttribute('aria-pressed', 'false');
+    expect(within(dlg).getByText('Chị Lan Phạm').closest('button')).toHaveAttribute('aria-pressed', 'false');
   });
 });
 
@@ -243,8 +288,13 @@ describe('Nhóm & Con người › Gán BOT trực nhóm', () => {
     expect(call.body).toEqual({ agent_id: AGENT_IDS.hc });
   });
 
-  it('không có trợ lý nào đang bật → hướng dẫn tạo ở Danh tính Agent', async () => {
+  it.each([
+    ['có system.manage → chỉ đường Agent & Model › Danh tính Agent', { 'profile.write': 'all', 'system.manage': 'all' }, EMPTY_AGENTS_TEXT],
+    ['không system.manage → nhờ Owner tạo', { 'profile.write': 'team' }, EMPTY_AGENTS_TEXT_ASK],
+  ])('không có trợ lý nào đang bật → %s', async (_name, perms, text) => {
+    const me = meWith(perms);
     mockFetch((c) => {
+      if (c.url.includes('/auth/me')) return json(200, me);
       if (c.url.includes('/pickers/agents')) return json(200, { items: [] });
       if (c.url.includes('/directory/channels')) return json(200, CHANNELS);
       if (c.url.includes('/directory/groups')) return json(200, { ...GROUPS, items: [{ ...GROUPS.items[0], bot: null }] });
@@ -255,6 +305,6 @@ describe('Nhóm & Con người › Gán BOT trực nhóm', () => {
     const row = (await screen.findByText('GRP-ZL-0114')).closest('tr') as HTMLElement;
     await user.click(within(row).getByRole('button', { name: /Đổi|Gán/ }));
     const dlg = await screen.findByRole('dialog', { name: 'Gán BOT trực nhóm' });
-    expect(await within(dlg).findByText(EMPTY_AGENTS_TEXT)).toBeInTheDocument();
+    expect(await within(dlg).findByText(text)).toBeInTheDocument();
   });
 });

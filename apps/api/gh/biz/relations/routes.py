@@ -770,6 +770,14 @@ async def create_document(body: DocumentIn, user: service.CurrentUser = Depends(
 # xuống dạng octet-stream. Thi hành lúc PHỤC VỤ để cả dòng cũ (mime tuỳ ý đã lưu) cũng an toàn.
 INLINE_SAFE_MIME = frozenset({"application/pdf", "image/png", "image/jpeg", "image/webp", "image/gif"})
 
+#: CSP mặc định cho mọi tệp tài liệu: tài liệu bị sandbox (nguồn gốc rỗng, không script/plugin), không nạp gì thêm.
+DOC_CSP = "sandbox; default-src 'none'"
+#: v0.1.35: PDF inline KHÔNG được sandbox — trình xem PDF của Chromium là plugin (MimeHandlerView) nhúng cùng URL;
+#: tài liệu bị sandbox không được nạp plugin và `object-src 'none'` chặn chính trình xem → "This page has been
+#: blocked by Chrome"/trang trắng. Vẫn chặn mọi nạp khác (`default-src 'none'`), chỉ cho nhúng chính nó
+#: (`object-src 'self'`), không cho nhúng vào khung trang khác; nosniff + CORP giữ nguyên.
+PDF_CSP = "default-src 'none'; object-src 'self'; frame-ancestors 'none'"
+
 
 def _content_headers(mime: str | None, title: str) -> tuple[str, dict[str, str]]:
     m = (mime or "").split(";")[0].strip().lower()
@@ -779,7 +787,7 @@ def _content_headers(mime: str | None, title: str) -> tuple[str, dict[str, str]]
     disposition = "inline" if inline else "attachment"
     return (m if inline else "application/octet-stream"), {
         "Content-Disposition": f"{disposition}; filename*=UTF-8''{filename}",
-        "Content-Security-Policy": "sandbox; default-src 'none'",
+        "Content-Security-Policy": PDF_CSP if inline and m == "application/pdf" else DOC_CSP,
         "X-Content-Type-Options": "nosniff",
         "Cross-Origin-Resource-Policy": "same-origin",
         "Cache-Control": "private, no-store",

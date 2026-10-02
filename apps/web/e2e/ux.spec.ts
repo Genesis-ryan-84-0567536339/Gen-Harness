@@ -1,12 +1,12 @@
 import { expect, test, type Page } from '@playwright/test';
 import { OWNER, SETUP_TOKEN, apiCall, loginAs, resetMock } from './support';
 
-/** v0.1.35 (F-20): thêm nhà cung cấp AI cần PIN `ai.route_change` — KHOAN DUNG: đợi hộp PIN ≤ 4s, có thì gõ PIN Owner
- * (phiên PIN còn hạn thì máy chủ không hỏi lại). */
-async function maybeEnterOwnerPin(page: Page): Promise<void> {
-  const dlg = page.getByRole('dialog', { name: 'Mã PIN xác nhận thao tác' });
-  const shown = await dlg.waitFor({ state: 'visible', timeout: 4000 }).then(() => true, () => false);
-  if (!shown) return;
+const PIN_DIALOG = 'Mã PIN xác nhận thao tác';
+
+/** v0.1.35 (F-20): thêm nhà cung cấp AI cần PIN `ai.route_change` — hộp PIN BẮT BUỘC hiện ở lần đầu. */
+async function enterOwnerPin(page: Page): Promise<void> {
+  const dlg = page.getByRole('dialog', { name: PIN_DIALOG });
+  await expect(dlg).toBeVisible();
   await page.keyboard.type(OWNER.pin);
   await expect(dlg).toBeHidden();
 }
@@ -45,7 +45,7 @@ test.describe('UX v0.1.28', () => {
     await page.getByLabel('Địa chỉ gọi (Endpoint)').fill('http://127.0.0.1:9999/v1');
     await page.getByLabel('Khoá API').fill('sk-sai-12345678');
     await page.getByRole('button', { name: 'Thêm & kiểm tra' }).click();
-    await maybeEnterOwnerPin(page);
+    await enterOwnerPin(page);
     const bad = page.locator('.prov-row', { hasText: 'Model sai' });
     await expect(bad.getByText(/Không gọi được địa chỉ này/)).toBeVisible();
     await expect(bad.getByText('All connection attempts failed')).toBeHidden(); // chi tiết thô thu gọn
@@ -56,7 +56,7 @@ test.describe('UX v0.1.28', () => {
     await page.getByLabel('Loại').selectOption('gemini');
     await page.getByLabel('Khoá API').fill('AIza-good-key-1234');
     await page.getByRole('button', { name: 'Thêm & kiểm tra' }).click();
-    await maybeEnterOwnerPin(page);
+    // Phiên PIN còn hạn từ lần thêm trên → máy chủ không hỏi lại.
     const good = page.locator('.prov-row', { hasText: 'Gemini API' });
     await expect(good.getByRole('button', { name: 'Dùng model này' })).toBeVisible();
     await expect(page.locator('.prov-row').first()).toContainText('Gemini API');

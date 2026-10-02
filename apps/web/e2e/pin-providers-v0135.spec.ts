@@ -60,6 +60,8 @@ test.describe('PIN nhà cung cấp AI v0.1.35', () => {
     const card = page.locator('.apm-provider', { hasText: 'DeepSeek API' });
     await expect(card).toBeVisible();
 
+    // Công tắc báo trước cần mã PIN (tooltip), như PinHint ở các hộp thêm/sửa.
+    await expect(card.locator('span[title*="cần mã PIN 6 số"]')).toHaveCount(1);
     await card.getByRole('switch', { name: 'Tắt DeepSeek API' }).click();
     await enterOwnerPin(page);
     await expect(card.getByRole('switch', { name: 'Bật DeepSeek API' })).toHaveAttribute('aria-checked', 'false');

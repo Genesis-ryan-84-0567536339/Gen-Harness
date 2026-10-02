@@ -5,7 +5,7 @@ import { Bar, CardError, InlineError, ScreenHead, SkeletonLines } from '../commo
 import { Button, Dialog, EmptyState, Icon, Tabs, type FilterOption, type TabItem } from '@gen-harness/ui';
 import { errorText } from '../../lib/errorText';
 import { fmtInt } from '../../lib/format';
-import { EMPTY_AGENTS_TEXT, useAgentOptions } from '../../lib/pickers';
+import { useAgentOptions, useEmptyAgentsText } from '../../lib/pickers';
 import { useUrlState } from '../../lib/uiStore';
 import {
   CHANNEL_LABEL,
@@ -40,6 +40,7 @@ function AgentChoices({
   noneLabel?: string;
 }) {
   const { options, query } = useAgentOptions();
+  const emptyText = useEmptyAgentsText();
   const missing = current && query.isSuccess && !options.some((a) => a.id === current.id) ? current : null;
   return (
     <div className="dlg-list" role="list">
@@ -65,7 +66,7 @@ function AgentChoices({
               {value === a.id ? <Icon name="ph ph-check" size={14} /> : null}
             </button>
           ))}
-          {options.length === 0 ? <p className="muted-note">{EMPTY_AGENTS_TEXT}</p> : null}
+          {options.length === 0 ? <p className="muted-note">{emptyText}</p> : null}
         </>
       )}
     </div>

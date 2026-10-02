@@ -27,6 +27,22 @@ describe('ApiError v0.1.35', () => {
     expect(err.code).toBe('PIN_LOCKED');
     expect(err.lockedUntil).toBe(until);
     expect(err.message).toBe(`Thử lại sau ${until}`);
+    // errorText: nói rõ PIN bị khoá + giờ địa phương theo múi giờ tổ chức, KHÔNG phải ISO UTC thô.
+    const text = errorText(err, 'Asia/Ho_Chi_Minh');
+    expect(text).toBe('Mã PIN đang bị khoá do nhập sai nhiều lần. Thử lại sau 02/10 15:15:00.');
+    expect(text).not.toContain('T08:15');
+  });
+
+  it('PIN_LOCKED máy chủ mới (detail "Thử lại sau ít phút") → title + giờ từ locked_until; thiếu giờ → "ít phút"', () => {
+    const e = new ApiError(423, {
+      code: 'PIN_LOCKED',
+      title: 'Mã PIN đang bị khoá do nhập sai nhiều lần',
+      detail: 'Thử lại sau ít phút',
+      locked_until: '2026-10-02T08:15:00Z',
+    });
+    expect(errorText(e, 'UTC')).toBe('Mã PIN đang bị khoá do nhập sai nhiều lần. Thử lại sau 02/10 08:15:00.');
+    const noTime = new ApiError(423, { code: 'PIN_LOCKED', detail: 'Thử lại sau ít phút' });
+    expect(errorText(noTime)).toBe('Mã PIN đang bị khoá do nhập sai nhiều lần. Thử lại sau ít phút.');
   });
 
   it('ưu tiên khoá ngoài hơn detail (kể cả detail cũ dạng đối tượng)', () => {
@@ -60,7 +76,8 @@ describe('ApiError v0.1.35', () => {
     expect((err as ApiError).code).toBe('INTERNAL');
     const text = errorText(err);
     expect(typeof text).toBe('string');
-    expect(text).toBe('Mã lỗi 3fa9c0de — gửi mã này cho người hỗ trợ');
+    // Có CẢ câu dễ hiểu (title) lẫn mã lỗi — detail chỉ chứa mã nên không được thay chỗ title.
+    expect(text).toBe('Hệ thống gặp lỗi khi xử lý yêu cầu — đã ghi nhật ký. Mã lỗi 3fa9c0de — gửi mã này cho người hỗ trợ.');
     expect(text).not.toContain('[object Object]');
   });
 

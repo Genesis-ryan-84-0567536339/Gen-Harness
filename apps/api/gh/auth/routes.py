@@ -78,7 +78,9 @@ def _mask_email(raw: str) -> str | None:
 
 def _pin_locked(locked_until: datetime | None) -> ApiError:
     until = _iso(locked_until)
-    return ApiError(423, "PIN_LOCKED", "Mã PIN đang bị khoá do nhập sai nhiều lần", f"Thử lại sau {until}",
+    # v0.1.35: detail KHÔNG chứa giờ ISO UTC thô (web hiện thẳng detail) — giờ mở khoá ở khoá ngoài `locked_until`,
+    # web tự định dạng theo múi giờ tổ chức.
+    return ApiError(423, "PIN_LOCKED", "Mã PIN đang bị khoá do nhập sai nhiều lần", "Thử lại sau ít phút",
                     locked_until=until)
 
 
