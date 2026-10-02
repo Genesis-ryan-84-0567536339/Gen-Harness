@@ -9,6 +9,20 @@
 CREATE INDEX IF NOT EXISTS persons_lower_name_trgm_idx ON core.persons USING gin (lower(display_name) gin_trgm_ops)
   WITH (fastupdate = off);
 ALTER INDEX core.persons_lower_name_trgm_idx SET (fastupdate = off);
+-- Dò tên chạy dưới role gh_app ⇒ RLS của core.persons là "security barrier": chỉ phép so LEAKPROOF mới được đẩy vào
+-- điều kiện chỉ mục. lower() (pg_catalog) không leakproof nên dò dùng chỉ mục gin sẵn có trên display_name (0001;
+-- pg_trgm tự gộp hoa/thường khi tách trigram ⇒ `display_name % x` ≡ `lower(display_name) % lower(x)`) và đánh dấu
+-- similarity_op (toán tử `%`) LEAKPROOF — hàm chỉ tính trigram, không ném lỗi theo giá trị đầu vào. Cần superuser;
+-- thiếu quyền chỉ ghi NOTICE (dò vẫn đúng, chỉ chậm hơn).
+ALTER INDEX IF EXISTS core.persons_display_name_idx SET (fastupdate = off);
+DO $$
+BEGIN
+  IF to_regprocedure('public.similarity_op(text, text)') IS NOT NULL THEN
+    ALTER FUNCTION public.similarity_op(text, text) LEAKPROOF;
+  END IF;
+EXCEPTION WHEN insufficient_privilege THEN
+  RAISE NOTICE 'Bỏ qua LEAKPROOF cho similarity_op: thiếu quyền superuser';
+END $$;
 
 CREATE TABLE IF NOT EXISTS ops.job_watermarks (
   org_id      uuid NOT NULL,

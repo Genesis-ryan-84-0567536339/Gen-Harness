@@ -125,13 +125,17 @@ async def test_renamed_profile_detected_after_watermark(app, db, redis) -> None:
 
 
 async def test_name_query_uses_trigram_operator_and_index(app, db) -> None:  # type: ignore[no-untyped-def]
-    assert "lower(pb.display_name) % f.name" in identity.DETECT_SQL
+    assert "pb.display_name % f.name" in identity.DETECT_SQL
     assert "NOT EXISTS (SELECT 1 FROM core.identity_merge_candidates m" in identity.DETECT_SQL
     await db.execute(text("SET LOCAL enable_seqscan = off"))
     await db.execute(text("SET LOCAL pg_trgm.similarity_threshold = 0.55"))
     plan = "\n".join((await db.execute(text(
-        "EXPLAIN SELECT 1 FROM core.persons pb WHERE lower(pb.display_name) % 'nguyễn văn hùng'"))).scalars().all())
-    assert "persons_lower_name_trgm_idx" in plan
+        "EXPLAIN SELECT 1 FROM core.persons pb WHERE pb.display_name % 'nguyễn văn hùng'"))).scalars().all())
+    # Chỉ mục trigram dùng được kể cả dưới RLS của gh_app (similarity_op LEAKPROOF — migration 0026).
+    assert "persons_display_name_idx" in plan and "Index Cond" in plan
+    leak = (await db.execute(text(
+        "SELECT proleakproof FROM pg_proc WHERE oid = 'similarity_op(text,text)'::regprocedure"))).scalar_one()
+    assert leak is True
     # SET LOCAL không rò ra ngoài transaction
     await db.rollback()
     left = (await db.execute(text("SELECT current_setting('pg_trgm.similarity_threshold', true)"))).scalar_one()

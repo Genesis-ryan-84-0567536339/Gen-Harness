@@ -29,12 +29,13 @@ DETECT_LIMIT = 2000
 NAME_THRESHOLD = 0.55
 
 #: Cặp ứng viên: vế a = định danh MỚI (id > mốc — uuid_v7 tăng theo thời gian) hoặc hồ sơ sửa sau mốc; vế b = mọi
-#: định danh còn sống. Trùng SĐT (chỉ mục phone_e164) hoặc tên gần giống (`%` trên lower(display_name) ⇒ chỉ mục gin
-#: persons_lower_name_trgm_idx, ngưỡng `pg_trgm.similarity_threshold` đặt bằng SET LOCAL; LATERAL … OFFSET 0 giữ
-#: dạng "dò chỉ mục cho từng định danh mới"). Mọi CTE MATERIALIZED: cặp ứng viên tính xong mới nối với bảng gốc theo
-#: khoá chính — không để planner trải tích Đề-các định danh × định danh. Cặp đã có trong identity_merge_candidates
-#: bị loại TRƯỚC LIMIT (NOT EXISTS khớp unique index LEAST/GREATEST của 0003) — trước v0.1.40 LIMIT lấy cả cặp cũ
-#: rồi ON CONFLICT bỏ qua ⇒ đủ 2000 cặp cũ là không bao giờ ra đề xuất mới.
+#: định danh còn sống. Trùng SĐT (chỉ mục phone_e164) hoặc tên gần giống (`display_name % f.name` — pg_trgm tự gộp
+#: hoa/thường; dùng chỉ mục gin trên display_name vì dưới RLS của gh_app chỉ phép so LEAKPROOF mới vào được điều
+#: kiện chỉ mục, lower() thì không — xem 0026). Ngưỡng `pg_trgm.similarity_threshold` đặt bằng SET LOCAL; LATERAL …
+#: OFFSET 0 giữ dạng "dò chỉ mục cho từng định danh mới". Mọi CTE MATERIALIZED: cặp ứng viên tính xong mới nối với
+#: bảng gốc theo khoá chính — không để planner trải tích Đề-các định danh × định danh. Cặp đã có trong
+#: identity_merge_candidates bị loại TRƯỚC LIMIT (NOT EXISTS khớp unique index LEAST/GREATEST của 0003) — trước
+#: v0.1.40 LIMIT lấy cả cặp cũ rồi ON CONFLICT bỏ qua ⇒ đủ 2000 cặp cũ là không bao giờ ra đề xuất mới.
 DETECT_SQL = """
 WITH fresh AS MATERIALIZED (
   SELECT pi.id, pi.person_id, pi.phone_e164, lower(p.display_name) AS name
@@ -51,7 +52,7 @@ cand AS MATERIALIZED (
   SELECT f.id, pib.id
   FROM fresh f
   CROSS JOIN LATERAL (SELECT pb.id FROM core.persons pb
-                      WHERE lower(pb.display_name) % f.name AND pb.id <> f.person_id OFFSET 0) pb
+                      WHERE pb.display_name % f.name AND pb.id <> f.person_id OFFSET 0) pb
   JOIN core.person_identities pib ON pib.person_id = pb.id),
 pairs AS MATERIALIZED (
   SELECT DISTINCT LEAST(a_id, b_id) AS a, GREATEST(a_id, b_id) AS b FROM cand)
