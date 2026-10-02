@@ -45,6 +45,8 @@ PIN_OPERATIONS: dict[str, str] = {
     "offsite.destination": "Chọn nơi lưu bản sao ngoài máy",
     "offsite.recovery_kit": "Xem Bộ khôi phục",
     "offsite.portable": "Tải gói mang đi",
+    # v0.1.41 (F-86): gói Claude Pro/Max cá nhân chạy việc nền tự động là rủi ro điều khoản của Sếp (QD-12).
+    "ai.background_cli": "Cho Claude Code CLI chạy việc nền",
 }
 
 
