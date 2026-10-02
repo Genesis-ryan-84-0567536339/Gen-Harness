@@ -6,7 +6,7 @@ import { fmtAgo, fmtDMClock, fmtDec, fmtInt, fmtPct } from '../../lib/format';
 import { CardError, Panel, SkeletonLines } from '../common';
 import { N5, OK, SPOTLIGHT_DIMENSION_LABEL, WARN, initialsOf, queueKindIcon, queueKindTone, QUEUE_ACTION_LABEL, QUEUE_KIND_LABEL } from './queueModel';
 import { useOverview } from './queries';
-import { UpdateCard } from '../../update/UpdateCard';
+import { UpdateNotice } from '../../update/UpdateNotice';
 import { useNavigation } from '../../lib/queries';
 import { screenKeys } from '../../shell/navModel';
 import { NeedsBossStrip } from './NeedsBossStrip';
@@ -126,6 +126,17 @@ function HourlyChart({ hourly }: { hourly: { hour: string; count: number }[] }) 
   );
 }
 
+/** v0.1.42 (F-64): một dòng số kỹ thuật trong thẻ Sức khoẻ hệ thống. */
+function TechRow({ label, value, ok }: { label: string; value: string; ok: boolean }) {
+  return (
+    <div className="ov-health__row" data-testid="ov-tech-row">
+      <span className="ov-health__dot" style={{ background: ok ? OK : WARN }} aria-hidden />
+      <span className="ov-health__name">{label}</span>
+      <span className="ov-health__metric">{value}</span>
+    </div>
+  );
+}
+
 export function OverviewScreen() {
   const q = useOverview();
   const nav = useNavigation();
@@ -141,7 +152,7 @@ export function OverviewScreen() {
     return (
       <div className="screen">
         <div className="ov-kpi-row">
-          {Array.from({ length: 6 }, (_, i) => (
+          {Array.from({ length: 4 }, (_, i) => (
             <div className="ov-kpi" key={i}>
               <Skeleton width={90} height={10} />
               <Skeleton width={50} height={22} style={{ marginTop: 8 }} />
@@ -165,23 +176,18 @@ export function OverviewScreen() {
   }
   const d = q.data;
   const allowed = nav.data ? screenKeys(nav.data) : null;
-  const row1 = d.kpis.filter((k) => k.row === 1);
-  const row2 = d.kpis.filter((k) => k.row === 2);
+  const tech = d.health.tech;
 
   return (
     <div className="screen">
-      {/* v0.1.36 (F-6): "Cần Sếp xử lý" ĐẦU trang; cập nhật lỗi chỉ hiện một lần trong dải (thẻ đầy đủ có nút Thử lại
-          ở Dữ liệu & lưu trữ và Trợ giúp). */}
+      {/* v0.1.36 (F-6): "Cần Sếp xử lý" ĐẦU trang; cập nhật lỗi chỉ hiện một lần trong dải. v0.1.42 (F-61): thẻ cập
+          nhật đầy đủ chỉ ở Cài đặt › Sao lưu & cập nhật — ở đây chỉ một dòng báo bản mới. */}
       <NeedsBossStrip />
-      <UpdateCard hideFailed={updateInStrip || healthLoading} />
+      <UpdateNotice hideFailed={updateInStrip || healthLoading} />
       <SetupFollowUp />
+      {/* v0.1.42 (F-64): MỘT hàng số chính (API trả 4 ô); số kỹ thuật ở thẻ Sức khoẻ hệ thống. */}
       <div className="ov-kpi-row" data-gen-target="overview.kpis">
-        {row1.map((k) => (
-          <KpiCard key={k.key} k={k} allowed={allowed} />
-        ))}
-      </div>
-      <div className="ov-kpi-row">
-        {row2.map((k) => (
+        {d.kpis.map((k) => (
           <KpiCard key={k.key} k={k} allowed={allowed} />
         ))}
       </div>
@@ -192,7 +198,7 @@ export function OverviewScreen() {
           kicker="Cơ hội · cảnh báo · chờ duyệt · việc đến hạn — ưu tiên trước"
           aside={
             <Link to="/inbox" className="gh-btn gh-btn--secondary btn-24" data-gen-target="overview.queue.open_inbox">
-              Mở hộp thư ý nghĩa
+              Mở hộp thư
               <Icon name="ph ph-arrow-right" size={12} />
             </Link>
           }
@@ -236,8 +242,20 @@ export function OverviewScreen() {
       </div>
 
       <div className="ov-bottom-grid">
-        <Panel genTarget="overview.health" title="Sức khoẻ hệ thống" kicker={`${fmtInt(d.health.plugins.healthy)} khoẻ · ${fmtInt(d.health.plugins.degraded)} suy giảm · ${fmtInt(d.health.plugins.isolated)} cách ly`}>
+        <Panel genTarget="overview.health" title="Sức khoẻ hệ thống" kicker="Kênh, nhóm lắng nghe và tin chờ sàng lọc">
           <div className="ov-health">
+            {tech ? (
+              <>
+                <TechRow label="Kênh đang sống" value={fmtInt(tech.channels_live)} ok={tech.channels_live > 0} />
+                <TechRow label="Nhóm đang lắng nghe" value={fmtInt(tech.groups_listening)} ok={tech.groups_listening > 0} />
+                <TechRow label="Sự kiện hôm nay" value={fmtInt(tech.events_today)} ok />
+                <TechRow
+                  label="Độ trễ xử lý"
+                  value={tech.processing_latency_s === null ? 'chưa đủ dữ liệu' : `${fmtDec(tech.processing_latency_s, 1)} giây`}
+                  ok={tech.processing_latency_s === null || tech.processing_latency_s < 60}
+                />
+              </>
+            ) : null}
             {d.health.channels.map((c) => (
               <div className="ov-health__row" key={c.type}>
                 <span className="ov-health__dot" style={{ background: c.active > 0 ? OK : N5 }} aria-hidden />

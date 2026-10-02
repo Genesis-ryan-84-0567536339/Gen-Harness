@@ -38,8 +38,20 @@ export interface SignalItem {
 }
 export interface OverviewHealth {
   channels: { type: string; active: number }[];
-  plugins: { healthy: number; degraded: number; isolated: number };
+  /** Trước v0.1.42 — Console không còn đếm plugin (F-41, F-64); API có thể vẫn gửi. */
+  plugins?: { healthy: number; degraded: number; isolated: number };
   backlog_pending: number;
+  /**
+   * v0.1.42 (F-64): 4 số kỹ thuật chuyển từ hàng KPI xuống thẻ "Sức khoẻ hệ thống". Thiếu (API cũ) thì bỏ qua.
+   * `processing_latency_s` null khi chưa đủ dữ liệu.
+   */
+  tech?: OverviewHealthTech;
+}
+export interface OverviewHealthTech {
+  channels_live: number;
+  groups_listening: number;
+  events_today: number;
+  processing_latency_s: number | null;
 }
 export interface OverviewDataQuality {
   missing_identity_pct: number;
