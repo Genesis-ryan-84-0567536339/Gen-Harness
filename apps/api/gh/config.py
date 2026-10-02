@@ -1,6 +1,7 @@
 """Cấu hình đọc từ biến môi trường (tiền tố GH_)."""
 
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -42,6 +43,9 @@ class Settings(BaseSettings):
     # Hộp thư với genh trên máy chủ (bind mount <gốc cài đặt>/run, xem apps/genh/internal/hostlink): phiên bản đang
     # chạy, yêu cầu "Cập nhật ngay" từ Console, trạng thái cập nhật. Không có thư mục (dev/test) ⇒ nút cập nhật ẩn.
     host_link_dir: str = "/var/lib/gh/host"
+    # v0.1.40 (F-12): Khoá khôi phục = mật khẩu gói .ghbundle của bản sao ngoài máy (genh sinh, Docker secret chỉ mount
+    # vào api). Console chỉ đọc khi Owner + PIN (Bộ khôi phục, Tải gói mang đi). Thiếu tệp ⇒ None (`offsite_key()`).
+    offsite_key_file: str = "/run/secrets/gh_offsite_key"
     # Kho phát hành để hỏi bản mới nhất (GitHub Releases); rỗng ⇒ không kiểm bản mới.
     release_repo: str = "Genesis-ryan-84-0567536339/Gen-Harness"
     cli_binary: str = "agy"
@@ -89,3 +93,13 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def offsite_key() -> str | None:
+    """Khoá khôi phục (bản sao ngoài máy) đọc từ `Settings.offsite_key_file`, đã bỏ khoảng trắng/xuống dòng đầu-cuối.
+    Thiếu tệp / không đọc được / rỗng ⇒ None. KHÔNG BAO GIỜ log giá trị trả về."""
+    try:
+        key = Path(get_settings().offsite_key_file).read_text(encoding="utf-8").strip()
+    except (OSError, ValueError):
+        return None
+    return key or None
