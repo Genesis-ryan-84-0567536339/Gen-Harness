@@ -1853,7 +1853,8 @@ Facebook báo **"Cần đăng nhập lại"** thì chỉ bấm **Đăng nhập l
 - **Tiến trình con của agy bị giết cùng** — agy chạy trong nhóm tiến trình riêng (`start_new_session`); hết giờ/huỷ/xong
   lượt ⇒ `killpg(SIGKILL)` cả nhóm (công cụ chạy lệnh không sống tiếp sau khi cwd đã xoá).
 - **Chuỗi chỉ có agy** — sàng lọc/trực việc hết chuỗi chỉ vì luật owner-only ⇒ cảnh báo riêng `model_chain_agy_only` P2,
-  tối đa 1 lần/ngày, "Sàng lọc/trực việc chưa có nguồn AI phù hợp" + "Thêm khoá API hoặc Claude Code CLI…" (không còn P1
+  tối đa 1 lần/ngày, tiêu đề theo việc gặp lỗi ("Sàng lọc tin…", "Gen của nhân viên…", "Dịch bản nháp…", "Agent trực
+  việc…" + "chưa có nguồn AI phù hợp") + "Thêm khoá API hoặc Claude Code CLI…" (không còn P1
   "Hết chuỗi model" mỗi giờ với gợi ý sai "đăng nhập lại Antigravity CLI"; cảnh báo P1 thường cũng bỏ gợi ý đó). Thử trò
   chuyện bước 8, dịch/soạn lại nháp ⇒ "Agent cần nguồn AI khác Antigravity CLI (chỉ dành cho Gen của Sếp)…" thay vì "Chưa
   có model nào chạy được".
@@ -1865,6 +1866,24 @@ Facebook báo **"Cần đăng nhập lại"** thì chỉ bấm **Đăng nhập l
   model khác hoặc bỏ gán." (không chỉ tooltip); tài khoản mạng xã hội `needs_login` (kể cả không còn phiên) có nút
   **Đăng nhập lại** khớp gợi ý; chuông `social.needs_login` có biểu tượng riêng. Mock dùng chung có slot `core.gen` (nhãn
   thật), `blocked_reason` và 409; e2e `/social` cho tài khoản `key_changed`.
+
+### Sửa sau review lần 2 (F-22, F-17)
+
+- **Không mất phiên Claude đã làm mới khi nâng cấp** — worker có thể khởi động trước api: trước đây nó ghi
+  `.credentials.json` từ hồ sơ (ảnh lúc đăng nhập, có thể cũ) vào đích mới ⇒ api thấy đích đã có, bỏ qua bản CLI đã làm
+  mới rồi xoá thư mục cũ ⇒ Claude Code có thể bị đăng xuất. Giờ worker bỏ qua Claude khi thư mục cũ còn
+  (`legacy_claude_pending`); khi chuyển, `.credentials.json`/`.claude.json` cũ có mtime mới hơn đích thì ghi đè. Thư mục
+  cha cũ còn mục lạ ⇒ chỉ ghi TÊN chúng vào log (không xoá — có thể là dự án người dùng).
+- **Web hiện đúng lỗi "chỉ có Antigravity CLI"** — `errorText`, thẻ lỗi, bước 8, Dịch và **Soạn lại** (trước đây im
+  lặng) hiện câu máy chủ (AGY_ONLY_TITLE + hướng dẫn) với nút **Thêm nguồn AI** → Agent & Model (`/api`), không còn "Chưa có
+  model AI hoạt động" + "Chọn model" → bước 4 (ở đó agy "sẵn sàng" ⇒ đi vòng). Hướng dẫn máy chủ bỏ "(Hướng dẫn bước 4)".
+  Bước 4 nhắc thêm: trò chuyện thử agent ở bước 8 cũng cần khoá API/Claude Code CLI.
+- **Gen: lịch sử đã có nội dung bên ngoài** — câu riêng "Cuộc trò chuyện này đã có nội dung từ bên ngoài… mở cuộc trò
+  chuyện mới để hỏi việc nội bộ, hoặc thêm nguồn khác…"; Sếp luôn được dẫn tới màn API (đánh dấu dòng Gen) khi chỉ có agy.
+- Nhỏ: vai trò chỉ xem thấy "Báo Sếp đổi model." thay cho "Chọn model khác hoặc bỏ gán."; dev ngoài Docker (`GH_ENV=
+  development`) không mở sự cố đỏ `cli.claude_home_shared` mỗi lần khởi động (chỉ cảnh báo log); câu `key_changed` thống
+  nhất "Phiên đã lưu không mở được trên máy này (chuyển máy hoặc đổi khoá) — bấm Đăng nhập lại." (API, chuông, web);
+  `killpg` sau khi agy đã được thu hồi — rủi ro trùng pgid ghi rõ trong chú thích (thực tế không xảy ra).
 
 ### Canary agy — kết quả (không chép nội dung bí mật/canary)
 

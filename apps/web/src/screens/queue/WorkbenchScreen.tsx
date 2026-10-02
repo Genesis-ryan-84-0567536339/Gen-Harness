@@ -6,7 +6,7 @@ import { api } from '../../lib/api';
 import { errorText } from '../../lib/errorText';
 import { fmtDMClock, fmtInt } from '../../lib/format';
 import { useUrlState } from '../../lib/uiStore';
-import { CardError, InlineError, Panel, SkeletonLines } from '../common';
+import { ActionError, CardError, InlineError, Panel, SkeletonLines } from '../common';
 import { WhyButton } from '../core/Evidence';
 import { qk3, useDraft, useDrafts } from '../core/queries';
 
@@ -159,7 +159,7 @@ function DraftDetailView({ d }: { d: DraftDetail }) {
         <div className="wb-translate">
           <Segmented options={LANGS} value={(translated?.lang as (typeof LANGS)[number]['value']) ?? 'vi'} onChange={(v) => translate.mutate(v)} label="Ngôn ngữ dịch" />
           {translate.isPending ? <Skeleton width="80%" height={12} /> : translated ? <p className="wb-translate__text">{translated.text}</p> : null}
-          {translate.isError ? <InlineError>{errorText(translate.error)}</InlineError> : null}
+          {translate.isError ? <ActionError error={translate.error} /> : null}
         </div>
       ) : null}
 
@@ -245,6 +245,7 @@ function DraftDetailView({ d }: { d: DraftDetail }) {
           </>
         )}
       </div>
+      {regenerate.isError ? <ActionError error={regenerate.error} /> : null}
       {approve.isError ? <InlineError>{errorText(approve.error)}</InlineError> : null}
       {editSend.isError ? <InlineError>{errorText(editSend.error)}</InlineError> : null}
       {reject.isError ? <InlineError>{errorText(reject.error)}</InlineError> : null}

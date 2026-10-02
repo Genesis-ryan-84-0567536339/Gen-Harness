@@ -437,6 +437,32 @@ def _copy_into(item: Path, dest: Path) -> None:
         raise
 
 
+def legacy_claude_pending() -> bool:
+    """True khi còn thư mục phiên Claude cũ (GH_CLAUDE_LEGACY_HOME) chờ api chuyển (F-22). Worker dùng để KHÔNG tự ghi
+    tệp phiên Claude từ hồ sơ trước khi api chuyển — bản trong CSDL là ảnh lúc đăng nhập, có thể cũ hơn tệp CLI đã tự
+    làm mới; ghi trước thì api thấy đích đã có và bỏ qua bản mới."""
+    s = get_settings()
+    if not s.claude_legacy_home.strip():
+        return False
+    with contextlib.suppress(OSError):
+        legacy = cli_home_dir(s.claude_legacy_home)
+        return legacy.is_dir() and not legacy.is_symlink()
+    return False
+
+
+def _legacy_session_newer(item: Path, dest: Path) -> bool:
+    """Tệp phiên (`.credentials.json`/`.claude.json`) cũ mới hơn tệp ở đích (vd. đích là bản ghi lại từ hồ sơ lúc đăng
+    nhập, còn bản cũ đã được CLI làm mới token) ⇒ bản cũ được ghi đè lên đích. Mục khác: đích đã có thì giữ."""
+    if item.name not in (CLAUDE_CRED_FILE, CLAUDE_STATE_FILE):
+        return False
+    try:
+        if item.is_symlink() or not item.is_file() or dest.is_symlink() or not dest.is_file():
+            return False
+        return item.stat().st_mtime > dest.stat().st_mtime
+    except OSError:
+        return False
+
+
 def migrate_legacy_claude_home() -> int:
     """F-22 (v0.1.38): chuyển phiên Claude Code từ đường dẫn cũ (≤ v0.1.37: `/var/lib/gh/agy/claude/.claude`, nằm trong
     volume agy_state — agy có công cụ đọc tệp nên đọc được `.credentials.json`) sang GH_CLAUDE_HOME mới (volume
@@ -446,9 +472,11 @@ def migrate_legacy_claude_home() -> int:
     ngoài Docker HOME của agy là HOME thật của người dùng, `~/claude/.claude` có thể là thư mục dự án của họ.
 
     Chỉ api gọi (đầu `restore_active`, `owns_logins=True`), trước khi trả bản gửi tạm/ghi lại phiên. Tệp/thư mục đã có
-    ở đích (vd. phiên mới hơn) KHÔNG bị bản cũ ghi đè. Mỗi mục chép vào tên tạm rồi `os.replace`; CHỈ khi mọi mục đều
-    xong mới xoá đúng thư mục cũ và `<cha>/work` (thư mục làm việc cũ của claude), rồi `rmdir` thư mục cha nếu đã rỗng —
-    không bao giờ xoá cả thư mục cha. Có lỗi ⇒ giữ nguyên thư mục cũ, lần khởi động sau làm tiếp. Chạy lại an toàn.
+    ở đích (vd. phiên mới hơn) KHÔNG bị bản cũ ghi đè — trừ `.credentials.json`/`.claude.json` cũ có mtime mới hơn
+    đích (CLI đã tự làm mới token). Mỗi mục chép vào tên tạm rồi `os.replace`; CHỈ khi mọi mục đều xong mới xoá
+    đúng thư mục cũ và `<cha>/work` (thư mục làm việc cũ của claude), rồi `rmdir` thư mục cha nếu đã rỗng (còn mục
+    khác ⇒ chỉ ghi TÊN chúng vào log) — không bao giờ xoá cả thư mục cha. Có lỗi ⇒ giữ nguyên thư mục cũ, lần
+    khởi động sau làm tiếp. Chạy lại an toàn.
     Lỗi OSError chỉ ghi cảnh báo (không làm sập api); tệp còn thiếu thì `restore_active` ghi lại từ agent.cli_profiles.
     Rollback về v0.1.37: bản cũ thấy thiếu tệp ở đường dẫn cũ ⇒ restore_active của nó ghi lại từ CSDL ⇒ vẫn an toàn.
     Không bao giờ log nội dung tệp — chỉ số mục."""
@@ -470,7 +498,7 @@ def migrate_legacy_claude_home() -> int:
             if item.name.endswith(".migrating"):
                 continue
             dest = target / item.name
-            if dest.exists() or dest.is_symlink():
+            if (dest.exists() or dest.is_symlink()) and not _legacy_session_newer(item, dest):
                 continue
             try:
                 _copy_into(item, dest)
@@ -485,8 +513,15 @@ def migrate_legacy_claude_home() -> int:
         work = legacy.parent / "work"
         if work.is_dir() and not work.is_symlink():
             shutil.rmtree(work)
-        with contextlib.suppress(OSError):
+        try:
             legacy.parent.rmdir()  # chỉ khi đã rỗng
+        except OSError:
+            # Không xoá thay (có thể là dự án của người dùng) — chỉ ghi TÊN các mục còn lại để Owner/hỗ trợ dọn tay.
+            with contextlib.suppress(OSError):
+                left = sorted(p.name for p in legacy.parent.iterdir())
+                if left:
+                    log.warning("Thư mục phiên Claude Code cũ %s còn %d mục không thuộc phiên đã chuyển: %s",
+                                legacy.parent, len(left), ", ".join(left[:20]))
         log.info("Đã chuyển %d mục phiên Claude Code sang thư mục riêng (F-22)", moved)
     except OSError as exc:
         log.warning("Chuyển phiên Claude Code sang thư mục riêng lỗi (%s) — sẽ ghi lại từ hồ sơ đã lưu",
@@ -538,7 +573,12 @@ async def restore_active(sm: async_sessionmaker[AsyncSession] | None, *, owns_lo
     if owns_logins:
         migrate_legacy_claude_home()
         shared = claude_home_shared()
-        if shared:
+        if shared and get_settings().env == "development":
+            # Dev ngoài Docker: HOME của agy là HOME thật (~) nên mọi GH_CLAUDE_HOME mặc định đều "chung" — chỉ nhắc,
+            # không mở sự cố đỏ cho mọi tổ chức mỗi lần khởi động (production/test vẫn báo đầy đủ).
+            log.warning(CLAUDE_HOME_SHARED_MSG + " (môi trường phát triển — đặt GH_CLI_HOME riêng nếu cần tách)")
+            shared = False
+        elif shared:
             log.error(CLAUDE_HOME_SHARED_MSG)
         await _report_claude_home(sm, shared)
     need: list[str] = []
@@ -551,6 +591,8 @@ async def restore_active(sm: async_sessionmaker[AsyncSession] | None, *, owns_lo
                 unpark_token(kind)
         elif not token_path(kind).exists() and backup_path(kind).exists():
             continue
+        elif kind == CLAUDE and legacy_claude_pending():
+            continue  # F-22: chờ api chuyển phiên cũ trước (xem legacy_claude_pending)
         if not token_path(kind).exists():
             need.append(kind)
     if not need or sm is None:

@@ -32,7 +32,7 @@ from tests.test_social import STATE, _add, _jobs, _login
 
 KEY_A = _random_master_key()
 PASSWORD = "mat-khau-goi-rat-dai-va-manh"
-NEEDS_LOGIN_TEXT = "Phiên đăng nhập đã lưu không mở được trên máy này (đã chuyển máy hoặc đổi khoá) — bấm Đăng nhập lại"
+NEEDS_LOGIN_TEXT = "Phiên đã lưu không mở được trên máy này (chuyển máy hoặc đổi khoá) — bấm Đăng nhập lại."
 
 
 @pytest.fixture(autouse=True)

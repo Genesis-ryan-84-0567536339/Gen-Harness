@@ -435,8 +435,9 @@ def _sealed_state(org_id: uuid.UUID, account_id: uuid.UUID, state_enc: bytes) ->
 
 
 KEY_CHANGED_REASON = "key_changed"
-NEEDS_LOGIN_TEXT = ("Phiên đăng nhập đã lưu không mở được trên máy này (đã chuyển máy hoặc đổi khoá) — bấm Đăng "
-                    "nhập lại")
+# Một câu cho API 409, chuông và web (apps/web/src/social/socialModel.ts::accountStatus) — review F-17.
+KEY_CHANGED_CAUSE = "Phiên đã lưu không mở được trên máy này (chuyển máy hoặc đổi khoá)"
+NEEDS_LOGIN_TEXT = KEY_CHANGED_CAUSE + " — bấm Đăng nhập lại."
 
 
 async def _seal_or_needs_login(db: AsyncSession, redis: Redis, org_id: uuid.UUID, r: Any, enc: bytes, *,
@@ -462,8 +463,7 @@ async def _seal_or_needs_login(db: AsyncSession, redis: Redis, org_id: uuid.UUID
     await notifications.notify(
         db, org_id, await notifications.owner_ids(db, org_id), kind="social.needs_login", redis=redis,
         title=f"{r.label}: cần đăng nhập lại",
-        body="Phiên đã lưu không mở được trên máy này (đã chuyển máy hoặc đổi khoá) — mở Tài khoản mạng xã hội và "
-             "bấm Đăng nhập lại.",
+        body=KEY_CHANGED_CAUSE + " — mở Tài khoản mạng xã hội và bấm Đăng nhập lại.",
         link="/social")
     await db.commit()
     await _push(redis, org_id, r.id)

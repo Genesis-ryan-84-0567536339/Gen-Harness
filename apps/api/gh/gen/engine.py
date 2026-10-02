@@ -59,6 +59,13 @@ AGY_TAINTED = ("Dữ liệu này có nội dung từ bên ngoài (tin khách, m�
                "API hoặc Claude Code CLI) cho mục \"Gen — trợ lý quản trị\" ở màn API & Model để Gen xử lý câu hỏi "
                "này nhé.")
 
+# Lịch sử (không phải lượt này) đã có nội dung bên ngoài: câu hỏi mới dù chỉ là "Xin chào" cũng không gửi agy được
+# trong HISTORY_MESSAGES tin tới ⇒ nói rõ cách làm được ngay không cần cấu hình: mở cuộc trò chuyện mới.
+AGY_TAINTED_HISTORY = ("Cuộc trò chuyện này đã có nội dung từ bên ngoài (tin khách, mạng xã hội, Kho…), mà "
+                       "nguồn AI hiện có là Antigravity CLI — không được đọc nội dung bên ngoài (luật an toàn). "
+                       "{addr} mở cuộc trò chuyện mới để hỏi việc nội bộ, hoặc thêm nguồn khác (khoá API hoặc "
+                       "Claude Code CLI) cho mục \"Gen — trợ lý quản trị\" ở màn API & Model nhé.")
+
 ACTION_NAMES = {"navigate": "gen.navigate", "highlight": "gen.highlight", "tour": "gen.tour"}
 
 
@@ -323,9 +330,12 @@ async def _run(turn: Turn, *, app: Any, router: ModelRouter, session_token: str,
     # F-22: Antigravity CLI chỉ cho Gen của Sếp (luật cứng — gh.providers.router.AGY_OWNER_ONLY_REASON). Bộ định
     # tuyến giả (test, dữ liệu mẫu) không có tham số này và không bao giờ gọi agy → chỉ truyền cho ModelRouter thật.
     # Review F-22: nội dung bên ngoài (kết quả công cụ, hoặc lịch sử đã có) ⇒ không cho agy nữa (`tainted`).
-    tainted = _history_tainted(prior)
+    history_tainted = _history_tainted(prior)
+    tainted = history_tainted
+    turn_tainted = False  # lượt NÀY đã gọi công cụ trả nội dung bên ngoài
+    owner = user.role_code == rbac.OWNER
     real = isinstance(router, ModelRouter)
-    route_kw = {"allow_agy": user.role_code == rbac.OWNER and not tainted} if real else {}
+    route_kw = {"allow_agy": owner and not tainted} if real else {}
     retried = False
     for _ in range(MAX_ROUNDS):
         try:
@@ -334,15 +344,21 @@ async def _run(turn: Turn, *, app: Any, router: ModelRouter, session_token: str,
         except ModelUnavailable as e:
             down = e.no_chain is False
             only_agy = agy_only(e.reasons)
-            msg = (AGY_TAINTED if tainted and user.role_code == rbac.OWNER else AGY_STAFF) if only_agy else (
-                MODEL_DOWN if down else NO_MODEL)
+            if only_agy and owner and tainted:
+                msg = AGY_TAINTED if turn_tainted or not history_tainted else AGY_TAINTED_HISTORY
+            elif only_agy:
+                msg = AGY_STAFF
+            else:
+                msg = MODEL_DOWN if down else NO_MODEL
             await turn.emit({"kind": "say", "text": msg.format(addr=turn.addr)})
             await turn.log("gen.answer", result="failed", target_type="model", reasons=e.reasons[:5])
-            if not down and registry.can_see(user.permissions, "api"):
+            # Chỉ có agy (Sếp, nội dung bên ngoài): chuỗi "chạy" (down) nhưng vẫn cần thêm nguồn ⇒ dẫn tới màn API.
+            if (not down or (only_agy and owner)) and registry.can_see(user.permissions, "api"):
                 await _ui(turn, validator, envelope.Navigate(type="navigate", screen="api"))
                 await _ui(turn, validator, envelope.Highlight(
                     type="highlight", target="api.bindings",
-                    message="Chọn model cho dòng \"Gen — trợ lý quản trị\""))
+                    message=("Thêm nguồn khác (khoá API hoặc Claude Code CLI) cho dòng \"Gen — trợ lý quản trị\""
+                             if only_agy else "Chọn model cho dòng \"Gen — trợ lý quản trị\"")))
             return
         turn.model, turn.provider = routed.model, routed.provider
         try:
@@ -370,7 +386,7 @@ async def _run(turn: Turn, *, app: Any, router: ModelRouter, session_token: str,
                 await turn.emit({"kind": "tool", "name": step.name, "args": step.args})
                 observations.append(wrap_untrusted(step.name, res.text))
                 if _untrusted_tool(step.name):
-                    tainted = True
+                    tainted = turn_tainted = True
                     if real:
                         route_kw["allow_agy"] = False
             elif isinstance(step, envelope.Ui):

@@ -62,8 +62,30 @@ AGY_ADD_SOURCE = "Thêm khoá API hoặc Claude Code CLI — Antigravity CLI ch�
 # Lỗi 503 khi chuỗi chỉ có agy (thử trò chuyện bước 8, dịch/soạn lại nháp…) — gh.errors.model_unavailable.
 AGY_ONLY_TITLE = ("Agent cần nguồn AI khác Antigravity CLI (chỉ dành cho Gen của Sếp) — thêm khoá API hoặc Claude Code "
                   "CLI")
-AGY_ONLY_HINT = ("Antigravity CLI chỉ dùng cho Gen của Sếp. Vào Agent & Model (Hướng dẫn bước 4) thêm khoá API hoặc "
-                 "Claude Code CLI rồi gán model đó cho agent này.")
+# Web nhận diện qua đầu câu (apps/web/src/lib/friendlyError.ts::AGY_ONLY_TITLE_PREFIX/AGY_ONLY_MARK) — đổi thì đổi cả
+# hai (test_agy_only_web_markers_match_server). Không trỏ "Hướng dẫn bước 4": ở đó agy hiện "sẵn sàng" ⇒ Owner đi vòng.
+AGY_ONLY_HINT = ("Antigravity CLI chỉ dùng cho Gen của Sếp. Vào Agent & Model thêm khoá API hoặc Claude Code CLI rồi "
+                 "gán model đó cho agent này.")
+
+
+# Review: tiêu đề cảnh báo `model_chain_agy_only` theo việc gặp lỗi (Sếp biết sửa ở đâu); khác ⇒ câu chung.
+_AGY_ALERT_BY_PURPOSE = {
+    "refinery": "Sàng lọc tin chưa có nguồn AI phù hợp",
+    "gen.turn": "Gen của nhân viên (hoặc khi đọc nội dung bên ngoài) chưa có nguồn AI phù hợp",
+    "draft_translate": "Dịch bản nháp chưa có nguồn AI phù hợp",
+    "draft_regenerate": "Tạo lại bản nháp chưa có nguồn AI phù hợp",
+    "setup_agent_try": "Trò chuyện thử agent chưa có nguồn AI phù hợp",
+}
+AGY_ALERT_TITLE = "Việc AI cần nguồn khác Antigravity CLI (chỉ dành cho Gen của Sếp)"
+
+
+def agy_only_alert_title(agent_key: str, purpose: str) -> str:
+    for key, title in _AGY_ALERT_BY_PURPOSE.items():
+        if purpose == key or purpose.startswith(key + "."):
+            return title
+    if agent_key.startswith("agent:"):
+        return "Agent trực việc chưa có nguồn AI phù hợp"
+    return AGY_ALERT_TITLE
 
 
 def agy_only(reasons: list[str]) -> bool:
@@ -357,10 +379,11 @@ class ModelRouter:
                     await self._set_auth_state(p, "ok")
                 await self._count_use(org_id, p, m)
                 return Routed(c.text, p.name, m.model_name, c.tokens_in, c.tokens_out, reasons)
-        await self._chain_exhausted(org_id, reasons)
+        await self._chain_exhausted(org_id, reasons, agent_key=agent_key, purpose=purpose)
         raise ModelUnavailable(reasons, no_chain=not chain)
 
-    async def _chain_exhausted(self, org_id: uuid.UUID, reasons: list[str]) -> None:
+    async def _chain_exhausted(self, org_id: uuid.UUID, reasons: list[str], *, agent_key: str = "",
+                               purpose: str = "") -> None:
         if agy_only(reasons):
             # Review F-22: chỉ có agy mà việc không phải Gen của Sếp ⇒ đăng nhập lại không giúp gì; cảnh báo riêng,
             # P2, tối đa một lần / ngày (không dội chuông mỗi giờ).
@@ -368,7 +391,7 @@ class ModelRouter:
                 return
             async with self.sm() as db:
                 await raise_alert(db, org_id, alert_type="model_chain_agy_only", priority="P2",
-                                  title="Sàng lọc/trực việc chưa có nguồn AI phù hợp",
+                                  title=agy_only_alert_title(agent_key, purpose),
                                   summary=AGY_OWNER_ONLY_REASON, suggested=AGY_ADD_SOURCE)
                 await db.commit()
             return

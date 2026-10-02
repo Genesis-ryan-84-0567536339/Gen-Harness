@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { SetupState, Step8Agent as Step8Result } from '@gen-harness/contracts';
 import { Icon, SelectField, TextField } from '@gen-harness/ui';
 import { api } from '../lib/api';
-import { reasonsOf } from '../lib/friendlyError';
+import { AGY_ONLY_TEXT, agyOnlyReasons, isAgyOnlyText, reasonsOf } from '../lib/friendlyError';
 import { FriendlyErrorText, ModelUnavailableNotice } from '../screens/common';
 import { StepFrame } from './StepFrame';
 import { describeError, type StepProps } from './types';
@@ -26,10 +26,13 @@ function TryFailed({ agent }: { agent: Step8Result }) {
   const raw: unknown = agent.try_error;
   const legacyReasons = reasonsOf(raw);
   if (agent.try_error_code === 'MODEL_UNAVAILABLE' || legacyReasons) {
+    // v0.1.38 (F-22): chuỗi chỉ có Antigravity CLI ⇒ hiện đúng câu máy chủ (try_error = AGY_ONLY_HINT), nút tới /api.
+    const agy = isAgyOnlyText(raw) || agyOnlyReasons(agent.try_reasons);
+    const message = agy ? (typeof raw === 'string' && raw.trim() ? raw : AGY_ONLY_TEXT) : undefined;
     return (
       <>
         <p className="muted-note">Agent đã lưu, nhưng chưa trò chuyện thử được.</p>
-        <ModelUnavailableNotice reasons={agent.try_reasons?.length ? agent.try_reasons : legacyReasons} />
+        <ModelUnavailableNotice reasons={agent.try_reasons?.length ? agent.try_reasons : legacyReasons} message={message} agyOnly={agy} />
       </>
     );
   }

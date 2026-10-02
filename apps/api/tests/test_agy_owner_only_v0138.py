@@ -7,6 +7,7 @@ trực việc, dịch/soạn lại nháp…) không bao giờ được đưa và
 
 import asyncio
 import json
+import re
 import uuid
 from pathlib import Path
 from typing import Any
@@ -91,6 +92,11 @@ async def _turn(api: Api, q: str) -> dict[str, Any]:
 
 def _says(t: dict[str, Any]) -> list[str]:
     return [s["step"]["text"] for s in t["steps"] if s["step"]["kind"] == "say"]
+
+
+def _uis(t: dict[str, Any]) -> list[dict[str, Any]]:
+    return [{k: v for k, v in s["step"]["action"].items() if k in ("type", "screen", "target")}
+            for s in t["steps"] if s["step"]["kind"] == "ui"]
 
 
 async def test_gen_turn_owner_uses_agy_staff_does_not(owner_api, client, db, clis) -> None:  # type: ignore[no-untyped-def]
@@ -225,8 +231,33 @@ async def test_agy_only_chain_raises_own_alert_not_p1(owner_api, app, db, clis) 
     assert len(rows) == 1, rows                                        # một lần, không dội chuông mỗi giờ
     a = rows[0]
     assert a.alert_type == "model_chain_agy_only" and a.priority == "P2"
-    assert a.title == "Sàng lọc/trực việc chưa có nguồn AI phù hợp" and a.suggested_action == AGY_ADD_SOURCE
+    assert a.title == "Sàng lọc tin chưa có nguồn AI phù hợp" and a.suggested_action == AGY_ADD_SOURCE
     assert "đăng nhập lại" not in a.suggested_action
+
+
+def test_agy_only_alert_title_names_the_source() -> None:
+    """Review: cảnh báo nói đúng việc gặp lỗi (Gen nhân viên, dịch/tạo lại nháp, thử agent…), không luôn "Sàng lọc"."""
+    from gh.providers.router import AGY_ALERT_TITLE, agy_only_alert_title
+
+    assert agy_only_alert_title("core.gen", "gen.turn").startswith("Gen của nhân viên")
+    assert agy_only_alert_title("agent:x", "draft_translate") == "Dịch bản nháp chưa có nguồn AI phù hợp"
+    assert agy_only_alert_title("agent:x", "draft_regenerate") == "Tạo lại bản nháp chưa có nguồn AI phù hợp"
+    assert agy_only_alert_title("agent:x", "setup_agent_try") == "Trò chuyện thử agent chưa có nguồn AI phù hợp"
+    assert agy_only_alert_title("agent:x", "duty") == "Agent trực việc chưa có nguồn AI phù hợp"
+    assert agy_only_alert_title("core.reply", "khac") == AGY_ALERT_TITLE
+
+
+def test_agy_only_web_markers_match_server() -> None:
+    """Web nhận diện lỗi "chỉ có Antigravity CLI" theo đầu câu máy chủ — đổi chữ ở đây thì đổi cả web."""
+    from gh.providers.router import AGY_ONLY_HINT, AGY_ONLY_TITLE
+
+    web = (Path(__file__).resolve().parents[3] / "apps" / "web" / "src" / "lib" / "friendlyError.ts").read_text("utf-8")
+    title_prefix = re.search(r"AGY_ONLY_TITLE_PREFIX = '([^']+)'", web)
+    mark = re.search(r"AGY_ONLY_MARK = '([^']+)'", web)
+    assert title_prefix and mark
+    assert AGY_ONLY_TITLE.startswith(title_prefix.group(1))
+    assert AGY_ONLY_HINT.startswith(mark.group(1)) and AGY_OWNER_ONLY_REASON.startswith(mark.group(1))
+    assert "Hướng dẫn bước 4" not in AGY_ONLY_HINT  # bước 4 hiện agy "sẵn sàng" ⇒ Owner đi vòng
 
 
 async def test_mixed_chain_alert_drops_agy_relogin_advice(app, db, redis) -> None:  # type: ignore[no-untyped-def]
@@ -305,18 +336,31 @@ async def _turn_with(api: Api, app: Any, router: Any, q: str, conversation_id: s
 
 
 async def test_gen_tool_output_never_reaches_agy(owner_api, app) -> None:  # type: ignore[no-untyped-def]
-    from gh.gen.engine import AGY_TAINTED
+    from gh.gen.engine import AGY_TAINTED, AGY_TAINTED_HISTORY
 
     router = _AgyRouter([{"steps": [{"kind": "tool", "name": "queue.list", "args": {"tab": "all"}}]}])
     t = await _turn_with(owner_api, app, router, "Hộp thư có gì?")
     assert router.allow == [True, False]                 # vòng 2 (có kết quả công cụ) KHÔNG được dùng agy
     assert len(router.prompts) == 1 and "[kết quả queue.list]" not in router.prompts[0]
     assert any(AGY_TAINTED.split("{addr}")[0] in s for s in _says(t)), t
+    # Review: chuỗi chỉ có agy ⇒ vẫn dẫn Sếp tới màn API (dù chuỗi "chạy").
+    assert {"type": "navigate", "screen": "api"} in _uis(t), t
+    assert any(a.get("type") == "highlight" and a.get("target") == "api.bindings" for a in _uis(t)), t
 
-    # Hỏi tiếp trong cùng hội thoại: lịch sử đã có kết quả công cụ bên ngoài ⇒ không gửi cho agy ngay từ vòng đầu.
+    # Hỏi tiếp trong cùng hội thoại: lịch sử đã có kết quả công cụ bên ngoài ⇒ không gửi cho agy ngay từ vòng đầu, và
+    # câu báo nói rõ do CUỘC TRÒ CHUYỆN (không phải câu hỏi này) + cách làm ngay: mở cuộc trò chuyện mới.
     router2 = _AgyRouter([])
-    await _turn_with(owner_api, app, router2, "Tóm tắt lại", conversation_id=t["conversation_id"])
+    t2 = await _turn_with(owner_api, app, router2, "Xin chào", conversation_id=t["conversation_id"])
     assert router2.allow == [False] and router2.prompts == []
+    says2 = _says(t2)
+    assert any(AGY_TAINTED_HISTORY.split("{addr}")[0] in s and "mở cuộc trò chuyện mới" in s for s in says2), t2
+    assert not any(AGY_TAINTED.split("{addr}")[0] in s for s in says2), t2
+    assert {"type": "navigate", "screen": "api"} in _uis(t2), t2
+
+    # Cuộc trò chuyện mới ⇒ agy dùng lại được ngay.
+    router3 = _AgyRouter([{"steps": [{"kind": "say", "text": "Dạ."}, {"kind": "done"}]}])
+    t3 = await _turn_with(owner_api, app, router3, "Xin chào")
+    assert router3.allow == [True] and t3["status"] == "done"
 
 
 async def test_gen_internal_tool_keeps_agy(owner_api, app) -> None:  # type: ignore[no-untyped-def]

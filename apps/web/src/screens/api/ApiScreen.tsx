@@ -256,7 +256,7 @@ function BindingsPanel({ canManage }: { canManage: boolean }) {
                         <StateChip color="var(--color-warn)">Chỉ cho Gen</StateChip>
                       </span>
                       <p className="muted-note" data-testid={`binding-blocked-hint-${slot.agent_key}`} style={{ margin: '4px 0 0' }}>
-                        {BLOCKED_HINT}
+                        {canManage ? BLOCKED_HINT : BLOCKED_HINT_READONLY}
                       </p>
                     </>
                   ) : null}
@@ -283,6 +283,8 @@ function BindingsPanel({ canManage }: { canManage: boolean }) {
 const GEN_AGENT_KEY = 'core.gen';
 /** Câu hiện dưới dòng gán model bị bỏ qua (review F-22): agent vẫn chạy bằng nguồn khác trong chuỗi nếu có. */
 const BLOCKED_HINT = 'Model này chỉ cho Gen — agent này bỏ qua nó. Chọn model khác hoặc bỏ gán.';
+/** Vai trò chỉ xem (không có nút đổi/bỏ gán) — nói việc họ làm được. */
+const BLOCKED_HINT_READONLY = 'Model này chỉ cho Gen — agent này bỏ qua nó. Báo Sếp đổi model.';
 
 /**
  * `binding.blocked_reason` của slot dưới dạng chuỗi an toàn (máy chủ cũ không có trường này → null). Máy chủ đặt trường

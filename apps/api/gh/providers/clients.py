@@ -350,6 +350,11 @@ class AgyClient:
                 await proc.wait()
                 raise
             # Tiến trình con agy để lại (công cụ chạy lệnh chạy nền) không được sống quá lượt gọi.
+            # Rủi ro chấp nhận (review): lúc này agy chính đã được bộ theo dõi tiến trình con của asyncio thu hồi
+            # (không chặn được thứ tự). Còn tiến trình con ⇒ nhóm còn ⇒ Linux không cấp lại số pgid này cho tiến
+            # trình khác. Không còn ⇒ killpg chỉ trúng nhóm lạ nếu số PID quay vòng hết pid_max VÀ tiến trình mới đó
+            # tự lập nhóm đúng trong vài micro giây giữa hai dòng — thực tế không xảy ra; đổi lại không để sót tiến
+            # trình nền của agy.
             self._kill_group(proc.pid)
             return proc.returncode or 0, out, err
         finally:

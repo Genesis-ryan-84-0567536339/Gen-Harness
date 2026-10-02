@@ -400,7 +400,7 @@ function CliAccountSection({ kind, onlyAgyReady = false }: { kind: CliKind; only
               <>
                 {' '}
                 <strong data-testid="setup-agy-only-hint">
-                  Gen dùng được ngay; muốn hệ thống tự sàng lọc tin và trực việc, thêm một khoá API hoặc Claude Code CLI.
+                  Gen dùng được ngay; muốn hệ thống tự sàng lọc tin, trực việc và trò chuyện thử agent ở bước 8, thêm một khoá API hoặc Claude Code CLI.
                 </strong>
               </>
             ) : null}

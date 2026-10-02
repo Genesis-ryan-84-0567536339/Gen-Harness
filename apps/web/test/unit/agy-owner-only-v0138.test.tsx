@@ -137,6 +137,23 @@ describe('v0.1.38 F-22 — Antigravity CLI chỉ dùng cho Gen của Sếp', () 
     expect(document.body.textContent).not.toContain('[object Object]');
   });
 
+  it('vai trò chỉ xem: câu dưới dòng bị chặn không bảo "chọn model khác" (không có nút) mà bảo báo Sếp', async () => {
+    mockFetch((c) => apiHandler(c) ?? json(404));
+    const qc = freshClient();
+    qc.setQueryData(qk.me, { ...ME, role: { code: 'manager', name: 'Quản lý' }, permissions: { 'system.read': 'all' } });
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter>
+          <ApiScreen />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByTestId('binding-blocked-hint-core.refinery')).toHaveTextContent(
+      'Model này chỉ cho Gen — agent này bỏ qua nó. Báo Sếp đổi model.',
+    );
+    expect(screen.getByTestId('binding-blocked-hint-core.refinery')).not.toHaveTextContent('Chọn model khác');
+  });
+
   it('slot chưa gán (khác Gen): ô chọn mặc định model KHÔNG phải agy; slot Gen giữ model đầu tiên', async () => {
     const calls = mockFetch((c) => (c.method === 'PUT' ? json(200, { agent_key: 'core.reply_fast', binding: null }) : apiHandler(c) ?? json(404)));
     renderWith(<ApiScreen />, freshClient());
@@ -246,7 +263,7 @@ describe('v0.1.38 F-22 — Antigravity CLI chỉ dùng cho Gen của Sếp', () 
     const scope = await screen.findByTestId('setup-cli-scope-antigravity_cli');
     expect(scope).toHaveTextContent(SCOPE_RE);
     expect(await screen.findByTestId('setup-agy-only-hint')).toHaveTextContent(
-      'Gen dùng được ngay; muốn hệ thống tự sàng lọc tin và trực việc, thêm một khoá API hoặc Claude Code CLI',
+      'Gen dùng được ngay; muốn hệ thống tự sàng lọc tin, trực việc và trò chuyện thử agent ở bước 8, thêm một khoá API hoặc Claude Code CLI',
     );
     expect(screen.queryByTestId('setup-cli-scope-claude_code_cli')).toBeNull();
   });

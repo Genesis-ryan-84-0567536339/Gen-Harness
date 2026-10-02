@@ -5,6 +5,7 @@
 tự chuyển tệp từ đường dẫn cũ khi khởi động (`restore_active` → `migrate_legacy_claude_home`)."""
 
 import logging
+import os
 import re
 import stat
 from pathlib import Path
@@ -171,6 +172,71 @@ async def test_shared_home_opens_incident_then_clears(owner_api, app, tmp_path, 
         monkeypatch.setenv("GH_CLAUDE_HOME", str(tmp_path / "claude" / ".claude"))
         get_settings.cache_clear()
         await climod.restore_active(sessionmaker())
+        async with sessionmaker()() as s:
+            assert (await s.execute(sql)).scalar_one() == 0
+    finally:
+        get_settings.cache_clear()
+
+
+async def test_worker_skips_claude_while_legacy_pending(homes, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Review F-22: worker khởi động trước api không được ghi `.credentials.json` từ hồ sơ (ảnh lúc đăng nhập, có
+    thể cũ) vào đích mới khi thư mục cũ còn — nếu không api thấy đích đã có và bỏ mất bản CLI đã làm mới."""
+    agy_home, legacy, target = homes
+    assert climod.legacy_claude_pending()
+    await climod.restore_active(None, owns_logins=False)
+    assert not (target / ".credentials.json").exists()
+    await climod.restore_active(None)  # api chuyển xong
+    assert not climod.legacy_claude_pending()
+    assert (target / ".credentials.json").read_bytes() == CRED
+
+
+async def test_newer_legacy_credentials_overwrite_older_target(homes) -> None:  # type: ignore[no-untyped-def]
+    """Đích đã có `.credentials.json` CŨ hơn (vd. ghi lại từ hồ sơ) ⇒ bản cũ (đã được CLI làm mới) thắng; mục khác
+    ở đích thì vẫn giữ."""
+    agy_home, legacy, target = homes
+    target.mkdir(parents=True)
+    (target / ".credentials.json").write_bytes(b'{"anh_luc_dang_nhap":1}')
+    (target / ".claude.json").write_bytes(b'{"moi":1}')
+    (legacy / "settings.json").write_bytes(b'{"cu":1}')
+    (target / "settings.json").write_bytes(b'{"moi":1}')
+    os.utime(target / ".credentials.json", (1_000_000, 1_000_000))
+    os.utime(target / "settings.json", (1_000_000, 1_000_000))
+    await climod.restore_active(None)
+    assert (target / ".credentials.json").read_bytes() == CRED
+    assert (target / ".claude.json").read_bytes() == b'{"moi":1}'  # đích mới hơn ⇒ giữ
+    assert (target / "settings.json").read_bytes() == b'{"moi":1}'  # không phải tệp phiên ⇒ giữ
+    assert _mode(target / ".credentials.json") == 0o600
+    assert not (agy_home / "claude").exists()
+
+
+async def test_leftover_names_logged(homes, caplog) -> None:  # type: ignore[no-untyped-def]
+    agy_home, legacy, target = homes
+    (agy_home / "claude" / ".cache").mkdir()
+    with caplog.at_level(logging.WARNING, logger="gh.cli"):
+        await climod.restore_active(None)
+    msgs = [r.getMessage() for r in caplog.records]
+    assert any(".cache" in m and "còn 1 mục" in m for m in msgs)
+    assert (agy_home / "claude" / ".cache").is_dir()
+
+
+async def test_dev_shared_home_warns_without_incident(owner_api, app, tmp_path, monkeypatch, caplog) -> None:  # type: ignore[no-untyped-def]
+    """Review: dev ngoài Docker (HOME agy = ~) ⇒ chỉ cảnh báo trong log, không mở sự cố đỏ mỗi lần khởi động."""
+    from sqlalchemy import text
+
+    from gh.db import sessionmaker
+
+    agy_home = tmp_path / "agy"
+    (agy_home / ".gemini" / "antigravity-cli").mkdir(parents=True)
+    monkeypatch.setenv("GH_CLI_HOME", str(agy_home / ".gemini" / "antigravity-cli"))
+    monkeypatch.setenv("GH_CLAUDE_HOME", str(agy_home / "claude" / ".claude"))
+    monkeypatch.setenv("GH_ENV", "development")
+    get_settings.cache_clear()
+    sql = text("SELECT count(*) FROM ops.health_alerts WHERE key = 'cli.claude_home_shared' AND cleared_at IS NULL")
+    try:
+        with caplog.at_level(logging.WARNING, logger="gh.cli"):
+            await climod.restore_active(sessionmaker())
+        assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
+        assert any(climod.CLAUDE_HOME_SHARED_MSG in r.getMessage() for r in caplog.records)
         async with sessionmaker()() as s:
             assert (await s.execute(sql)).scalar_one() == 0
     finally:
