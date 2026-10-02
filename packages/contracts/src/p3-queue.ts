@@ -2,7 +2,7 @@
 import type { ApiClient } from './client';
 import type { AgentRef, EvidenceRef, ExplainUnit, GroupRef, PersonRef, UserRef } from './p3-core';
 
-// ─── Tổng quan điều hành ────────────────────────────────────────────────────
+// ─── Hôm nay (Tổng quan) ────────────────────────────────────────────────────
 export interface KpiItem {
   key: string;
   label: string;
@@ -72,7 +72,7 @@ export interface Overview {
   hourly: HourlyPoint[];
 }
 
-// ─── Hộp thư ý nghĩa ────────────────────────────────────────────────────────
+// ─── Hộp thư ──────────────────────────────────────────────────────────────────
 export type InboxTab = 'all' | 'opportunity' | 'alert' | 'approval' | 'reply' | 'candidate';
 export type InboxItemType = 'unit' | 'alert' | 'draft';
 export type ConfidenceBandLabel = 'cao' | 'trung bình' | 'thấp';

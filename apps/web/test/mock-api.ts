@@ -138,7 +138,7 @@ export function permissionsOf(role: RoleCode): Record<string, string> {
   const i = ROLE_ORDER.indexOf(role);
   return Object.fromEntries(Object.entries(MATRIX).map(([k, v]) => [k, v[i]]));
 }
-function hiddenScreens(role: RoleCode): Set<string> {
+export function hiddenScreens(role: RoleCode): Set<string> {
   const perms = permissionsOf(role);
   const hidden = new Set(Object.entries(SCREEN_PERMISSION).filter(([, need]) => !need.some((p) => perms[p] !== 'none')).map(([k]) => k));
   // Q4 (docs/PLAN.md): Auditor VẪN thấy màn "Đánh giá con người" trong danh mục (nhánh log — nhật ký ai đã
