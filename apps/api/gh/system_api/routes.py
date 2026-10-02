@@ -1,4 +1,4 @@
-"""Điều khiển hệ thống › Kênh & đăng nhập; nhà cung cấp model, khoá; hồ sơ Antigravity CLI (docs/api/phase-2.md)."""
+"""Kết nối (kênh & đăng nhập); nhà cung cấp model, khoá; hồ sơ Antigravity CLI (docs/api/phase-2.md)."""
 
 import csv
 import io

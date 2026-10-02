@@ -1,7 +1,7 @@
 """Phân quyền 5 vai trò theo ma trận của thiết kế (ARCHITECTURE §8.3, PLAN "Định nghĩa có giới hạn").
 
 Quyền = năng lực × phạm vi. Phạm vi: all | team | assigned | none (khớp ✓ / – / ✕ của ma trận).
-Ma trận dưới đây là giá trị khởi tạo; Owner sửa được từng ô trong Điều khiển hệ thống › Quyền hạn.
+Ma trận dưới đây là giá trị khởi tạo; Owner sửa được từng ô trong Cài đặt › Quyền hạn.
 """
 
 from dataclasses import dataclass
@@ -31,9 +31,9 @@ ROLES = (
 # Cột ma trận của thiết kế → các quyền thuộc cột đó.
 PERMISSIONS: dict[str, str] = {
     # Tổng quan
-    "overview.read": "Xem Tổng quan điều hành",
+    "overview.read": "Xem Hôm nay (Tổng quan)",
     # Hàng đợi
-    "queue.read": "Xem hàng đợi / Hộp thư ý nghĩa",
+    "queue.read": "Xem hàng đợi / Hộp thư",
     "queue.act": "Xử lý item trong hàng đợi",
     # Hồ sơ khách
     "profile.read": "Xem nhóm, con người, hồ sơ sống, sổ tay",
@@ -114,6 +114,8 @@ SCREEN_PERMISSION: dict[str, tuple[str, ...]] = {
     "mcp": ("system.read",),
     "plugins": ("system.read",),
     "system": ("system.read", "audit.read"),
+    "connections": ("system.read",),     # v0.1.42: Kết nối (tách khỏi Cài đặt)
+    "team": ("roles.manage",),           # v0.1.42: Đội ngũ (người dùng, đánh giá, chăm sóc)
 }
 
 

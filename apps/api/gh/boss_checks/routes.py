@@ -39,7 +39,7 @@ NOT_READY = {
     "agy_call": ("AGY_NOT_LOGGED_IN", "Chưa đăng nhập Google (Antigravity CLI) — bấm Đăng nhập Google trước"),
     "claude_call": ("CLAUDE_NOT_LOGGED_IN", "Chưa đăng nhập Claude Code — bấm Đăng nhập Claude Code trước"),
     "jev": ("JEV_NOT_CONFIGURED",
-            "Chưa thêm Jev — mục này không bắt buộc; thêm khoá Jev ở Điều khiển hệ thống › Bộ não AI nếu Sếp cần"),
+            "Chưa thêm Jev — mục này không bắt buộc; thêm khoá Jev ở Cài đặt › Bộ não AI nếu Sếp cần"),
 }
 TRANSIENT_CODES = frozenset({"SOCIAL_BUSY", "SOCIAL_RATE_LIMIT", "PROBE_RATE_LIMITED", "HUB_RATE_LIMITED",
                              "CLI_LOGIN_IN_PROGRESS"})

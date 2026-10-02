@@ -1,4 +1,4 @@
-"""/users — Quản lý người dùng (v0.1.22, Đợt B1): Điều khiển hệ thống › Người dùng.
+"""/users — Quản lý người dùng (v0.1.22, Đợt B1): Đội ngũ.
 
 Chỉ vai trò có `roles.manage` (mặc định Owner). Mọi thao tác ghi cần phiên PIN (`user.manage`, đổi vai trò dùng
 `roles.change` như ma trận quyền) và ghi Action Log `user.*`. Bất biến:

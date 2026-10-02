@@ -17,15 +17,22 @@ router = APIRouter(tags=["shell"])
 
 
 async def _badges(db: AsyncSession, user: service.CurrentUser) -> dict[str, int | None]:
-    # Nguồn số thật của từng màn được thêm ở giai đoạn làm màn đó. Plugin nền đếm được ngay từ giai đoạn 1.
-    plugins = (await db.execute(text("SELECT count(*) FROM ops.plugins"))).scalar_one()
-    return {"plugins": plugins}
+    # Nguồn số thật của từng màn được thêm ở giai đoạn làm màn đó. v0.1.42 (F-41): màn Plugin đóng băng,
+    # ẩn khỏi thanh bên ⇒ không đếm ops.plugins nữa.
+    return {}
+
+
+async def has_staff(db: AsyncSession, org_id: Any) -> bool:
+    """Tổ chức đã có nhân viên (person_type='staff' còn hiệu lực) chưa — quyết định hiện Đánh giá/Chăm sóc."""
+    return bool((await db.execute(text("""
+        SELECT EXISTS(SELECT 1 FROM core.persons WHERE org_id = :o AND person_type = 'staff'
+                      AND deleted_at IS NULL AND merged_into_id IS NULL)"""), {"o": org_id})).scalar_one())
 
 
 @router.get("/navigation")
 async def get_navigation(user: service.CurrentUser = Depends(current_user),
                          db: AsyncSession = DB) -> list[dict[str, Any]]:
-    return navigation.build(user.permissions, await _badges(db, user))
+    return navigation.build(user.permissions, await _badges(db, user), has_staff=await has_staff(db, user.org_id))
 
 
 async def header_payload(db: AsyncSession, org_id: Any) -> dict[str, Any]:

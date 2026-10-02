@@ -88,7 +88,7 @@ async def test_channel_down_rings_once_and_again_after_reconnect(owner_api: Api,
     await status(app, org, "session.ended", {"session_id": sid, "reason": "expired", "error": "token=bi-mat"})
     rows = await bells(db, "channel.down")
     assert len(rows) == 1
-    assert rows[0].link == "/system?tab=channels"
+    assert rows[0].link == "/connections"
     assert rows[0].title == "Kênh Zalo đã ngắt kết nối"
     assert rows[0].body == "Zalo Sếp: phiên đã hết hạn — đăng nhập lại để tiếp tục nhận tin."
     assert "bi-mat" not in rows[0].body

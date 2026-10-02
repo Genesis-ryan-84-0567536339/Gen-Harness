@@ -200,7 +200,7 @@ async def labels(db: AsyncSession, user: service.CurrentUser, ptype: str, fields
             r = await _load_item(db, user.org_id, await scope_for(db, user, "queue.read"),
                                  uuid.UUID(fields["item_id"]))
         except ApiError as e:
-            raise ValueError("mục trong Hộp thư ý nghĩa không tồn tại hoặc ngoài phạm vi") from e
+            raise ValueError("mục trong Hộp thư không tồn tại hoặc ngoài phạm vi") from e
         item = _item_payload(r, owner=owner)
         out["item"] = f"{item['code']} · {item['title']}" if item.get("code") else str(item["title"] or "")
     return out
