@@ -26,6 +26,7 @@ from gh.errors import ApiError, conflict, field_errors, not_found
 from gh.gen import jev
 from gh.providers import catalog
 from gh.providers import cli as climod
+from gh.providers.clients import AGY_MODEL_RE
 from gh.providers.router import KEY_AAD, cooldown_key, quota_key
 from gh.shell.routes import publish_header
 
@@ -514,6 +515,9 @@ async def add_model(pid: uuid.UUID, body: ModelIn, request: Request, user: servi
     # Không gửi `effort` (vd chỉ sửa hạn mức) → giữ mức đã lưu.
     effort = body.effort if "effort" in body.model_fields_set else (var_effort or (prev.effort if prev else None))
     effort = effort or var_effort
+    if p.kind == "antigravity_cli" and not AGY_MODEL_RE.fullmatch(name):
+        # F-22: đúng regex AgyClient dùng cho `--model=<tên>` (không bao giờ thành một cờ).
+        raise field_errors({"model_name": "Tên model chỉ gồm chữ, số và . _ : - (tối đa 80 ký tự)"})
     if p.kind in CLI_KINDS and not CLI_MODEL_RE.fullmatch(name):
         raise field_errors({"model_name": "Tên model chỉ gồm chữ, số và . _ - : / [ ]"})
     if effort and effort not in catalog.valid_efforts(p.kind):

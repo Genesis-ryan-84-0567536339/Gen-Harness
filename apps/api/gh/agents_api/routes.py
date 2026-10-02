@@ -35,7 +35,8 @@ from gh.chassis import actionlog
 from gh.chassis.policy import DEFAULT_AUTONOMY
 from gh.data.common import iso
 from gh.db import DB
-from gh.errors import field_errors, not_found
+from gh.errors import conflict, field_errors, not_found
+from gh.providers.router import AGY_OWNER_ONLY_REASON
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 READ = require("system.read", rbac.ALL)
@@ -160,10 +161,17 @@ async def _agent_key_label(db: AsyncSession, org_id: uuid.UUID, agent_key: str) 
     raise field_errors({"agent_key": "agent_key phải là mục dùng chung (core.*) hoặc agent:<id>"})
 
 
-def _binding_out(r: Any) -> dict[str, Any]:
+GEN_KEY = "core.gen"    # gh.gen.engine.AGENT_KEY — khoá DUY NHẤT được gán Antigravity CLI (F-22)
+AGY_GEN_ONLY_MSG = ("Antigravity CLI chỉ dùng được cho Gen của Sếp — sàng lọc tin và trực việc nhận nội dung của khách "
+                    "nên phải dùng nguồn khác (khoá API hoặc Claude Code CLI)")
+
+
+def _binding_out(r: Any, agent_key: str) -> dict[str, Any]:
+    # F-22: bản cài cũ có thể đã gán agy cho khoá khác core.gen — bộ định tuyến từ chối, Console hiện lý do.
+    blocked = AGY_OWNER_ONLY_REASON if r.provider_kind == "antigravity_cli" and agent_key != GEN_KEY else None
     return {"model_id": str(r.model_id), "model_name": r.model_name, "provider_name": r.provider_name,
             "temperature": float(r.temperature), "context_tokens": r.context_tokens,
-            "rule_codes": list(r.rule_codes or [])}
+            "rule_codes": list(r.rule_codes or []), "blocked_reason": blocked}
 
 
 @router.get("/bindings")
@@ -172,12 +180,12 @@ async def list_bindings(user: service.CurrentUser = Depends(READ), db: AsyncSess
                                {"o": user.org_id})).all()
     keys = [*CORE_AGENT_KEYS.items(), *((f"agent:{a.id}", a.name) for a in agents)]
     rows = (await db.execute(text("""
-        SELECT b.agent_key, b.model_id, m.model_name, p.name AS provider_name, b.temperature, b.context_tokens,
-               b.rule_codes
+        SELECT b.agent_key, b.model_id, m.model_name, p.name AS provider_name, p.kind AS provider_kind,
+               b.temperature, b.context_tokens, b.rule_codes
         FROM agent.bindings b JOIN agent.models m ON m.id = b.model_id JOIN agent.providers p ON p.id = m.provider_id
         WHERE b.org_id = :o"""), {"o": user.org_id})).all()
     by_key = {r.agent_key: r for r in rows}
-    items = [{"agent_key": k, "label": label, "binding": _binding_out(by_key[k]) if k in by_key else None}
+    items = [{"agent_key": k, "label": label, "binding": _binding_out(by_key[k], k) if k in by_key else None}
              for k, label in keys]
     models = (await db.execute(text("""
         SELECT m.id, m.model_name, p.name AS provider_name, m.is_enabled FROM agent.models m
@@ -199,11 +207,13 @@ class BindingIn(BaseModel):
 async def set_binding(agent_key: str, body: BindingIn, user: service.CurrentUser = Depends(MANAGE),
                       db: AsyncSession = DB) -> dict[str, Any]:
     label = await _agent_key_label(db, user.org_id, agent_key)
-    m = (await db.execute(text("""SELECT m.id FROM agent.models m JOIN agent.providers p ON p.id = m.provider_id
+    m = (await db.execute(text("""SELECT m.id, p.kind FROM agent.models m JOIN agent.providers p ON p.id = m.provider_id
                                   WHERE m.id = :m AND p.org_id = :o"""),
                           {"m": body.model_id, "o": user.org_id})).one_or_none()
     if m is None:
         raise not_found("Model")
+    if m.kind == "antigravity_cli" and agent_key != GEN_KEY:
+        raise conflict("AGY_OWNER_GEN_ONLY", AGY_GEN_ONLY_MSG)
     await db.execute(text("""
         INSERT INTO agent.bindings (org_id, agent_key, model_id, temperature, context_tokens, rule_codes)
         VALUES (:o, :k, :m, :t, :ct, :rc)
@@ -215,10 +225,11 @@ async def set_binding(agent_key: str, body: BindingIn, user: service.CurrentUser
                            target_type="binding", target_id=agent_key, target_label=label,
                            detail=body.model_dump(mode="json"), ip=user.ip)
     r = (await db.execute(text("""
-        SELECT b.model_id, m.model_name, p.name AS provider_name, b.temperature, b.context_tokens, b.rule_codes
+        SELECT b.model_id, m.model_name, p.name AS provider_name, p.kind AS provider_kind, b.temperature,
+               b.context_tokens, b.rule_codes
         FROM agent.bindings b JOIN agent.models m ON m.id = b.model_id JOIN agent.providers p ON p.id = m.provider_id
         WHERE b.org_id = :o AND b.agent_key = :k"""), {"o": user.org_id, "k": agent_key})).one()
-    return {"agent_key": agent_key, "label": label, "binding": _binding_out(r)}
+    return {"agent_key": agent_key, "label": label, "binding": _binding_out(r, agent_key)}
 
 
 @router.delete("/bindings/{agent_key}", status_code=204)
@@ -333,10 +344,11 @@ async def _scopes_of(db: AsyncSession, agent_id: uuid.UUID) -> list[dict[str, An
 
 async def _binding_of(db: AsyncSession, org_id: uuid.UUID, agent_id: uuid.UUID) -> dict[str, Any] | None:
     r = (await db.execute(text("""
-        SELECT b.model_id, m.model_name, p.name AS provider_name, b.temperature, b.context_tokens, b.rule_codes
+        SELECT b.model_id, m.model_name, p.name AS provider_name, p.kind AS provider_kind, b.temperature,
+               b.context_tokens, b.rule_codes
         FROM agent.bindings b JOIN agent.models m ON m.id = b.model_id JOIN agent.providers p ON p.id = m.provider_id
         WHERE b.org_id = :o AND b.agent_key = :k"""), {"o": org_id, "k": f"agent:{agent_id}"})).one_or_none()
-    return None if r is None else _binding_out(r)
+    return None if r is None else _binding_out(r, f"agent:{agent_id}")
 
 
 def _agent_out(r: Any) -> dict[str, Any]:

@@ -7,6 +7,10 @@
 - `agy whoami`: in email đang đăng nhập (chỉ để test đọc nhanh).
 - `agy models` (v0.1.31): chưa đăng nhập → đúng câu lỗi của agy 1.2.9 thật, thoát 1; đã đăng nhập → danh sách.
 - v0.1.32: `-p --model <gốc> --effort <mức>` như agy 1.2.9 thật (xem VARIANTS); ghi mỗi lượt vào $HOME/agy-calls.log.
+- v0.1.38 (F-22): prompt qua stdin (không -p, stdin không phải tty → print mode như agy 1.2.9 thật), nhận `--model=x`,
+  `--effort=x`, `-p=/model`, `--disable-slash-commands`; agy-calls.log ghi thêm `cwd`, `via_stdin`, `argv`; ghi log
+  print mode `promptLength=N` vào $HOME/.gemini/antigravity-cli/log/cli-<pid>.log như agy thật; cờ lạ → "flag provided
+  but not defined" (đúng câu của Go flag).
 """
 
 import base64
@@ -43,7 +47,7 @@ VARIANTS = {"gemini-3.8-flash": ["low", "medium", "high"], "gemini-3.1-pro": ["l
             "claude-sonnet-4-6-thinking": []}
 LEGACY_OK = {"gemini-2.5-pro"}   # test cũ (đổi tài khoản) gọi model này
 CALLS = Path(os.environ["HOME"]) / "agy-calls.log"
-FLAGS = {"--model", "--effort", "--output-format", "-p", "--print", "--prompt", "--print-timeout"}
+FLAGS = {"--model", "--effort", "--output-format", "-p", "--print", "--prompt", "--print-timeout"}  # có giá trị
 if sys.argv[1:2] == ["--version"]:
     print("1.2.9")
     sys.exit(0)
@@ -59,30 +63,66 @@ if sys.argv[1:2] == ["models"]:
             mark = " (current)" if slug == "gemini-3.8-flash-high" else ""
             print(f"  {slug}{mark}")
     sys.exit(0)
-if sys.argv[1:2] == ["-p"]:
+def parse_print(argv: list[str]) -> dict | None:  # type: ignore[type-arg]
+    """Đọc cờ như agy 1.2.9 (Go flag): `--model x` lẫn `--model=x`, `-p=x`/`-p x`, cờ bool `--disable-slash-commands`.
+    Không có -p/--print/--prompt mà stdin không phải tty → print mode, prompt đọc từ stdin (v0.1.38, F-22).
+    Trả None khi không phải print mode (chạy tương tác)."""
+    opts: dict = {"prompt": None, "model": "", "effort": "", "disable_slash": False}  # type: ignore[type-arg]
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        name, eq, val = a.partition("=")
+        if a == "--disable-slash-commands":
+            opts["disable_slash"] = True
+        elif name in FLAGS:
+            if not eq:
+                i += 1
+                val = argv[i] if i < len(argv) else ""
+            key = {"-p": "prompt", "--print": "prompt", "--prompt": "prompt", "--model": "model",
+                   "--effort": "effort"}.get(name)
+            if key:
+                opts[key] = val
+        elif a.startswith("-"):
+            print(f"flag provided but not defined: {name}", file=sys.stderr)
+            sys.exit(2)
+        i += 1
+    opts["via_stdin"] = opts["prompt"] is None
+    if opts["via_stdin"]:
+        if os.isatty(0):
+            return None
+        opts["prompt"] = sys.stdin.read()
+    return opts
+
+
+opts = parse_print(sys.argv[1:])
+if opts is not None:
+    prompt = opts["prompt"]
+    model, effort = opts["model"], opts["effort"]
+    # agy 1.2.9 ghi log print mode (đo thật): `printmode.go: Print mode: starting (promptLength=N, …)` — N = số byte.
+    logdir = TOKEN.parent / "log"
+    logdir.mkdir(parents=True, exist_ok=True)
+    with (logdir / f"cli-{os.getpid()}.log").open("a") as fh:
+        fh.write(f"printmode.go: Print mode: starting (promptLength={len(prompt.encode())}, outputFormat=json)\n")
     who = email_of()
     if who is None:
-        print(json.dumps({"error": "Not authenticated: please login"}))
+        print(json.dumps({"status": "ERROR", "error": "authentication failed or timed out"}))
         sys.exit(1)
-    for a in sys.argv[3:]:
-        if a.startswith("-") and a not in FLAGS:
-            print(f"Error: flags provided but not defined: {a.lstrip('-')}", file=sys.stderr)
-            sys.exit(2)
-    model = sys.argv[sys.argv.index("--model") + 1] if "--model" in sys.argv else ""
-    effort = sys.argv[sys.argv.index("--effort") + 1] if "--effort" in sys.argv else ""
     # agy 1.2.9 (changelog 1.1.11): `-p "/model"`, `-p "/effort"` in một bản ghi tab-separated mỗi dòng, không tốn lượt.
-    # Định dạng cột chưa đo được khi đã đăng nhập → giả định.
-    if sys.argv[2] == "/model":
+    # Định dạng cột chưa đo được khi đã đăng nhập → giả định. `--disable-slash-commands` tắt việc này.
+    if prompt == "/model" and not opts["disable_slash"]:
         for base, effs in VARIANTS.items():
             print("\t".join([base, ",".join(effs), "current" if base == "gemini-3.8-flash" else ""]))
         sys.exit(0)
-    if sys.argv[2] == "/effort":
+    if prompt == "/effort" and not opts["disable_slash"]:
         effs = VARIANTS.get(model or "gemini-3.8-flash", [])
         for e in effs:
             print("\t".join([e, "current" if e == "high" else ""]))
         sys.exit(0)
+    cwd = os.getcwd()
     with CALLS.open("a") as fh:
-        fh.write(json.dumps({"model": model, "effort": effort}) + "\n")
+        fh.write(json.dumps({"model": model, "effort": effort, "cwd": cwd, "cwd_entries": len(os.listdir(cwd)),
+                             "cwd_mode": oct(os.stat(cwd).st_mode & 0o777), "via_stdin": opts["via_stdin"],
+                             "prompt_len": len(prompt), "argv": sys.argv[1:]}) + "\n")
     err = None
     if effort and effort not in ("low", "medium", "high"):
         err = f'invalid --effort "{effort}" (valid: low, medium, high)'

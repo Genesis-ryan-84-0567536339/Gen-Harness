@@ -51,6 +51,11 @@ KEY_AAD = b"provider_key"
 CLI_AAD = b"cli_token"
 CLI_KINDS = ("antigravity_cli", "claude_code_cli")
 PROBE_PROMPT = "Trả lời đúng một chữ: OK"
+# v0.1.38 (F-22) — LUẬT CỨNG, không phải tuỳ chọn: agy 1.2.9 không có cờ tắt công cụ đọc tệp/chạy lệnh, chạy cùng uid
+# với api/worker → nội dung của khách (sàng lọc tin, trực việc…) có thể điều khiển agy đọc bí mật. Chỉ lượt Gen của
+# Owner (gh.gen.engine truyền allow_agy=True) mới được dùng; mọi nơi khác mặc định bị từ chối.
+AGY_OWNER_ONLY_REASON = ("Antigravity CLI: chỉ dùng cho Gen của Sếp (agy chưa tắt được công cụ đọc tệp — luật an toàn, "
+                         "không đổi được)")
 PROBE_TIMEOUT_S = 90.0
 
 
@@ -261,12 +266,17 @@ class ModelRouter:
     # ─── gọi ─────────────────────────────────────────────────────────────────
 
     async def generate(self, org_id: uuid.UUID, *, agent_key: str, purpose: str, messages: list[Message],
-                       json_mode: bool = True, temperature: float = 0.2) -> Routed:
+                       json_mode: bool = True, temperature: float = 0.2, allow_agy: bool = False) -> Routed:
+        """`allow_agy` (F-22): mặc định TỪ CHỐI Antigravity CLI — chỉ lượt Gen của Owner truyền True."""
         async with self.sm() as db:
             chain = await self._chain(db, org_id, agent_key)
         reasons: list[str] = []
         for link in chain:
             p, m = link["provider"], link["model"]
+            if p.kind == "antigravity_cli" and not allow_agy:
+                if AGY_OWNER_ONLY_REASON not in reasons:
+                    reasons.append(AGY_OWNER_ONLY_REASON)
+                continue
             if await self.redis.exists(breaker_key(p.id)):
                 reasons.append(f"{p.name}: đang ngắt mạch")
                 continue

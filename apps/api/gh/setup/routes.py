@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gh.agents_api.routes import CORE_AGENT_KEYS
+from gh.agents_api.routes import CORE_AGENT_KEYS, GEN_KEY
 from gh.auth import rbac, service
 from gh.auth.deps import client_ip, optional_user
 from gh.auth.routes import set_session_cookies
@@ -425,6 +425,7 @@ async def step4(body: Step4In, request: Request, db: AsyncSession = DB,
     # gọi thử (bỏ model embedding). Không nguồn nào có model → chưa cho qua bước (trước đây qua được nhưng không agent
     # nào gọi được model: sàng lọc không chạy, Gen báo "chưa có model").
     model_id = None
+    other_id = None    # F-22: model đầu tiên của nguồn KHÔNG phải Antigravity CLI — cho sàng lọc tin, trực việc…
     ready_ids = {p.id for p in ready}
     for p in (next(f for f in found if f.id == i) for i in ids):
         if p.id not in ready_ids:
@@ -438,6 +439,8 @@ async def step4(body: Step4In, request: Request, db: AsyncSession = DB,
                     ON CONFLICT (provider_id, model_name) DO UPDATE SET model_name = EXCLUDED.model_name
                     RETURNING id"""), {"p": p.id, "m": choice[0], "e": choice[1]})).scalar_one()
         model_id = model_id or mid
+        if p.kind != "antigravity_cli":
+            other_id = other_id or mid
     if model_id is None:
         raise incomplete("Chưa có model nào để dùng — bấm \"Kiểm tra\" ở một nguồn rồi chọn \"Dùng model này\"")
     # Thứ tự: nguồn Owner chọn (đã sẵn sàng) đứng đầu theo đúng thứ tự gửi lên; nguồn lỗi / chưa kiểm tra xuống cuối
@@ -449,19 +452,37 @@ async def step4(body: Step4In, request: Request, db: AsyncSession = DB,
         await db.execute(text("""UPDATE agent.providers SET failover_rank = :r,
                                  is_enabled = CASE WHEN id = ANY(:ids) THEN true ELSE is_enabled END WHERE id = :i"""),
                          {"r": rank, "i": pid, "ids": ids})
-    await _bind_core_agents(db, row.org_id, model_id)
+    await _bind_core_agents(db, row.org_id, model_id, other_id)
     return await _mark_done(db, request, row, owner, 4, {"provider_ids": [str(i) for i in ids],
                                                           "model_id": str(model_id)})
 
 
-async def _bind_core_agents(db: AsyncSession, org_id: uuid.UUID, model_id: uuid.UUID) -> None:
-    """Gán model cho các agent lõi còn trống (Sàng lọc, Gen…) — Owner đổi lại được ở màn API & Model."""
+async def _is_agy_model(db: AsyncSession, model_id: uuid.UUID | None) -> bool:
+    if model_id is None:
+        return False
+    kind = (await db.execute(text("""SELECT p.kind FROM agent.models m JOIN agent.providers p ON p.id = m.provider_id
+                                     WHERE m.id = :m"""), {"m": model_id})).scalar_one_or_none()
+    return kind == "antigravity_cli"
+
+
+async def _bind_core_agents(db: AsyncSession, org_id: uuid.UUID, model_id: uuid.UUID,
+                            other_id: uuid.UUID | None = None) -> None:
+    """Gán model cho các agent lõi còn trống (Sàng lọc, Gen…) — Owner đổi lại được ở màn API & Model.
+
+    F-22 (luật cứng): model của Antigravity CLI CHỈ gán cho Gen (core.gen); khoá lõi khác nhận `other_id` (model đầu
+    tiên của nguồn không phải agy đã sẵn sàng), không có thì để trống."""
+    agy = await _is_agy_model(db, model_id)
+    if agy and await _is_agy_model(db, other_id):
+        other_id = None
     for key in CORE_AGENT_KEYS:
         if key == "core.indexing":   # embedding — model sinh chữ không dùng được
             continue
+        mid = model_id if (not agy or key == GEN_KEY) else other_id
+        if mid is None:
+            continue
         await db.execute(text("""INSERT INTO agent.bindings (org_id, agent_key, model_id, context_tokens)
                                  VALUES (:o, :k, :m, :ct) ON CONFLICT (org_id, agent_key) DO NOTHING"""),
-                         {"o": org_id, "k": key, "m": model_id, "ct": DEFAULT_CONTEXT_TOKENS})
+                         {"o": org_id, "k": key, "m": mid, "ct": DEFAULT_CONTEXT_TOKENS})
 
 
 async def auto_assign_tested_model(db: AsyncSession, org_id: uuid.UUID) -> uuid.UUID | None:
@@ -478,7 +499,10 @@ async def auto_assign_tested_model(db: AsyncSession, org_id: uuid.UUID) -> uuid.
                OR (p.kind NOT IN ('antigravity_cli', 'claude_code_cli') AND p.auth_state = 'ok'
                    AND COALESCE((p.last_test->>'ok')::boolean, false)))
         ORDER BY p.failover_rank NULLS LAST, p.created_at"""), {"o": org_id})).all()
+    first: uuid.UUID | None = None
     for p in rows:
+        if first is not None and p.kind == "antigravity_cli":
+            continue
         mid = await _first_model(db, p.id)
         if mid is None:
             choice = _tested_choice(p)
@@ -488,9 +512,15 @@ async def auto_assign_tested_model(db: AsyncSession, org_id: uuid.UUID) -> uuid.
                 INSERT INTO agent.models (provider_id, model_name, effort) VALUES (:p, :m, :e)
                 ON CONFLICT (provider_id, model_name) DO UPDATE SET model_name = EXCLUDED.model_name
                 RETURNING id"""), {"p": p.id, "m": choice[0], "e": choice[1]})).scalar_one()
-        await _bind_core_agents(db, org_id, mid)
-        return mid
-    return None
+        if first is None and p.kind == "antigravity_cli":
+            # F-22: agy chỉ cho Gen — tìm tiếp model của nguồn khác cho các khoá lõi còn lại.
+            first = mid
+            continue
+        await _bind_core_agents(db, org_id, first or mid, mid)
+        return first or mid
+    if first is not None:
+        await _bind_core_agents(db, org_id, first)
+    return first
 
 
 CLI_KINDS = ("antigravity_cli", "claude_code_cli")

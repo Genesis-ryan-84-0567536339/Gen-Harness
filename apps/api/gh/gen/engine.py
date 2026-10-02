@@ -22,14 +22,14 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from gh import realtime
-from gh.auth import service
+from gh.auth import rbac, service
 from gh.chassis import actionlog
 from gh.gen import decider as decmod
 from gh.gen import envelope, proposals, registry, store
 from gh.gen.tools import ToolRunner, tools_for
 from gh.gen.validator import Validator
 from gh.providers.clients import Message
-from gh.providers.router import ModelRouter, ModelUnavailable
+from gh.providers.router import AGY_OWNER_ONLY_REASON, ModelRouter, ModelUnavailable
 
 log = logging.getLogger("gh.gen")
 
@@ -45,6 +45,9 @@ FAILED = "Gen gặp lỗi khi trả lời, {addr} thử lại sau giúp em."
 # v0.1.28 (UX C1): có model nhưng lượt gọi lỗi (mạng, hạn mức…) — không nói "chưa có model".
 MODEL_DOWN = ("Gen chưa gọi được model lúc này (nguồn AI đang lỗi hoặc hết hạn mức). {addr} thử lại sau ít phút, "
               "hoặc xem trạng thái nguồn ở màn API & Model nhé.")
+# v0.1.38 (F-22): chuỗi model chỉ có Antigravity CLI mà người hỏi không phải Sếp.
+AGY_STAFF = ("Gen chưa trả lời được {addr}: nguồn AI hiện có là Antigravity CLI, chỉ dùng cho Gen của Sếp (luật an "
+             "toàn). Nhờ Sếp thêm nguồn khác (khoá API hoặc Claude Code CLI) cho mục \"Gen — trợ lý quản trị\" nhé.")
 
 ACTION_NAMES = {"navigate": "gen.navigate", "highlight": "gen.highlight", "tour": "gen.tour"}
 
@@ -291,14 +294,19 @@ async def _run(turn: Turn, *, app: Any, router: ModelRouter, session_token: str,
     hints = await _hints(turn, dec, inp.text, inp)
     messages = [Message("system", system_prompt(user, inp, hints, now_text)), *_history_text(prior),
                 Message("user", inp.text[:4000])]
+    # F-22: Antigravity CLI chỉ cho Gen của Sếp (luật cứng — gh.providers.router.AGY_OWNER_ONLY_REASON). Bộ định
+    # tuyến giả (test, dữ liệu mẫu) không có tham số này và không bao giờ gọi agy → chỉ truyền cho ModelRouter thật.
+    route_kw = {"allow_agy": user.role_code == rbac.OWNER} if isinstance(router, ModelRouter) else {}
     retried = False
     for _ in range(MAX_ROUNDS):
         try:
             routed = await router.generate(user.org_id, agent_key=AGENT_KEY, purpose="gen.turn", messages=messages,
-                                           json_mode=True)
+                                           json_mode=True, **route_kw)
         except ModelUnavailable as e:
             down = e.no_chain is False
-            await turn.emit({"kind": "say", "text": (MODEL_DOWN if down else NO_MODEL).format(addr=turn.addr)})
+            only_agy = bool(e.reasons) and all(r == AGY_OWNER_ONLY_REASON for r in e.reasons)
+            msg = AGY_STAFF if only_agy else (MODEL_DOWN if down else NO_MODEL)
+            await turn.emit({"kind": "say", "text": msg.format(addr=turn.addr)})
             await turn.log("gen.answer", result="failed", target_type="model", reasons=e.reasons[:5])
             if not down and registry.can_see(user.permissions, "api"):
                 await _ui(turn, validator, envelope.Navigate(type="navigate", screen="api"))
