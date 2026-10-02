@@ -97,16 +97,37 @@ export interface SystemAuditQuery {
 
 // ── Dữ liệu & lưu trữ (spec I) ───────────────────────────────────────────────
 
-export type RetentionDataset = 'raw.events' | 'clean.meaning_units' | 'ops.action_log' | 'memory.entries' | 'agent.model_calls';
+/** 5 tập dữ liệu sửa được hạn (PATCH /retention-policies). */
+export type RetentionEditableDataset = 'raw.events' | 'clean.meaning_units' | 'ops.action_log' | 'memory.entries' | 'agent.model_calls';
+/** v0.1.40 (F-2): thêm dòng chỉ đọc `agent.browser_jobs.result` (kết quả việc trình duyệt nền, cố định 14 ngày). */
+export type RetentionDataset = RetentionEditableDataset | 'agent.browser_jobs.result';
+
+/**
+ * v0.1.40 (F-2): cách việc nền dọn tập dữ liệu — `partition` = xoá theo cả phân vùng tháng (raw.events,
+ * clean.meaning_units, agent.model_calls); `batch` = xoá từng lô dòng quá hạn; `not_applicable` = không dọn
+ * (ops.action_log chỉ ghi thêm).
+ */
+export type RetentionMode = 'partition' | 'batch' | 'not_applicable';
 
 export interface RetentionPolicy {
   dataset: RetentionDataset;
   keep_days: number | null;
+  /** Cấu hình cũ — hệ thống CHƯA thi hành ẩn danh; web không hiện, chỉ gửi lại nguyên giá trị khi PATCH. */
   anonymize_after_days: number | null;
+  /** v0.1.40 — thiếu ở api cũ. */
+  mode?: RetentionMode;
+  /** v0.1.40: false ⇒ không có nút Sửa (ops.action_log, agent.browser_jobs.result). Thiếu ở api cũ. */
+  editable?: boolean;
+  /** v0.1.40: câu giải thích cho Sếp (vd "Xoá theo cả tháng"); null = không có. */
+  note?: string | null;
+  /** v0.1.40: lần việc nền dọn tập này gần nhất (ISO); null = chưa dọn. */
+  last_run_at?: string | null;
+  /** v0.1.40: số dòng đã xoá ở lần dọn gần nhất; null = chưa dọn / không áp dụng. */
+  last_deleted?: number | null;
 }
 
 export interface RetentionPatchBody {
-  dataset: RetentionDataset;
+  dataset: RetentionEditableDataset;
   keep_days?: number | null;
   anonymize_after_days?: number | null;
 }
@@ -149,7 +170,8 @@ export interface Step11Body {
   frequency: 'daily' | 'weekly' | 'monthly';
   time_of_day: string;
   retention_count: number;
-  destination: 'local' | 's3' | 'minio';
+  /** v0.1.40: chỉ còn 'local' — bản sao ra ngoài máy đi qua `offsite` (ổ USB/NAS), không qua S3/MinIO. */
+  destination: 'local';
 }
 
 export type BackupConfig = Step11Body;
@@ -365,6 +387,11 @@ export interface SystemHealth {
    * v0.1.37 (F-73): máy chủ có tự chạy lại Gen-Harness khi bật máy không (genh ghi run/autostart-status.json). Chỉ có
    * khi api có hộp thư với genh; 'warn' khi Docker chưa bật tự chạy hoặc thiếu linger (kèm sự cố host.autostart).
    */
+  /**
+   * v0.1.40 (F-12): bản sao ngoài máy (ổ USB/NAS — genh ghi run/offsite-status.json). CHỈ có khi api có hộp thư với
+   * genh (giữ khuôn cũ khi không có) ⇒ vắng khối thì thẻ Sức khoẻ không hiện dòng.
+   */
+  offsite?: SystemHealthOffsite;
   autostart?: {
     state: 'ok' | 'warn' | 'unknown';
     linger: 'yes' | 'no' | 'unknown' | 'not_applicable';
@@ -374,6 +401,73 @@ export interface SystemHealth {
     checked_at: string | null;
   };
 }
+
+/** Trạng thái lần xuất bản sao ngoài máy (genh ghi `state` vào run/offsite-status.json; 'unknown' = đọc không được). */
+export type OffsiteRunState = 'ok' | 'failed' | 'not_mounted' | 'not_configured' | 'running' | 'skipped_busy' | 'unknown';
+
+/** Khối `offsite` của `GET /system/health` — tập con của `OffsiteState`. Mọi trường là chuỗi/số/bool/null. */
+export interface SystemHealthOffsite {
+  configured: boolean;
+  state: OffsiteRunState | string;
+  /** Mã lỗi genh `GH-EBxx`; '' / null = không lỗi. */
+  error_code?: string | null;
+  last_success_at: string | null;
+  age_days: number | null;
+  /** > 7 ngày chưa có bản sao ngoài máy (hoặc chưa có bản nào). */
+  stale: boolean;
+}
+
+/** Yêu cầu Console gửi genh qua hộp thư run/request/offsite.json. */
+export interface OffsiteRequest {
+  state: 'idle' | 'requested' | 'running' | 'done' | 'failed' | 'stalled' | string;
+  action: 'set' | 'run' | 'disable' | string | null;
+  requested_at: string | null;
+}
+
+/**
+ * v0.1.40 (F-12): `GET /system/offsite` — Bản sao ngoài máy (ổ USB/NAS cắm vào máy chủ). genh trên máy chủ làm việc thật
+ * (lịch Chủ nhật ~05:30), api chỉ đọc run/offsite-status.json + ghi run/request/offsite.json. Mọi trường là
+ * chuỗi/số/bool/null — web không render object.
+ */
+export interface OffsiteState {
+  configured: boolean;
+  /** Đường dẫn đích trên MÁY CHỦ (vd `/media/sep/USB`); '' / null khi chưa chọn. */
+  dest: string | null;
+  state: OffsiteRunState | string;
+  /** Mã lỗi genh: GH-EB00 chưa chọn nơi lưu · GH-EB01 chưa thấy ổ USB/NAS · … ; '' / null = không lỗi. */
+  error_code: string | null;
+  /** Câu thân thiện cho Sếp (api dựng theo mã lỗi); null = không có. */
+  message: string | null;
+  last_attempt_at: string | null;
+  last_success_at: string | null;
+  age_days: number | null;
+  stale: boolean;
+  last_size_bytes: number | null;
+  /** Bản gần nhất đã được kiểm đọc lại được (`gh.bundle verify`). */
+  verified: boolean;
+  /** 8 ký tự hex đầu sha256(khoá khôi phục) — để đối chiếu với Bộ khôi phục đã in; không phải khoá. */
+  key_id: string | null;
+  /** Cơ chế lịch tuần trên máy chủ (systemd/cron/launchd/schtasks); '' / null = chưa bật lịch. */
+  schedule: string | null;
+  request: OffsiteRequest;
+  /** Máy chủ có watcher nhận yêu cầu từ Console. */
+  can_request: boolean;
+  /** Lệnh Owner tự chạy trên máy chủ khi Console chưa gửi được yêu cầu; null = không cần. */
+  manual_command: string | null;
+  /** Khoá khôi phục đã có trên máy chủ (secret gh_offsite_key). */
+  key_present: boolean;
+}
+
+/** `GET /system/offsite/recovery-kit` (Owner + PIN `offsite.recovery_kit`, no-store). KHÔNG lưu/ghi log khoá. */
+export interface RecoveryKit {
+  key: string;
+  key_id: string;
+  steps: string[];
+  warning: string;
+}
+
+/** `GET /system/offsite/portable` — tải bằng điều hướng trình duyệt (gói có thể rất lớn), KHÔNG fetch→blob. */
+export const OFFSITE_PORTABLE_URL = '/api/v1/system/offsite/portable';
 
 const enc = encodeURIComponent;
 
@@ -413,6 +507,20 @@ export function systemEndpoints(r: ApiClient['request']) {
       request: () => r<SystemUpdate>('/system/update', { method: 'POST' }),
       /** v0.1.30: "Kiểm tra bản mới" — hỏi GitHub ngay, bỏ qua bộ đệm (≤ 1 lần / 30 giây). */
       check: () => r<SystemUpdate>('/system/update/check', { method: 'POST' }),
+    },
+    /** v0.1.40 (F-12): Bản sao ngoài máy (ổ USB/NAS). */
+    offsite: {
+      get: (signal?: AbortSignal) => r<OffsiteState>('/system/offsite', { signal }),
+      /** Owner + PIN (`offsite.destination`). 409 OFFSITE_UNAVAILABLE kèm `manual_command`. */
+      setDestination: (body: { path: string }) => r<OffsiteState>('/system/offsite/destination', { method: 'PUT', body }),
+      /** `system.manage`. */
+      runNow: () => r<OffsiteState>('/system/offsite/run', { method: 'POST' }),
+      /** Owner + PIN. */
+      disable: () => r<OffsiteState>('/system/offsite/disable', { method: 'POST' }),
+      /** Owner + PIN (`offsite.recovery_kit`) — gọi qua useMutation, không để trong bộ đệm truy vấn. */
+      recoveryKit: () => r<RecoveryKit>('/system/offsite/recovery-kit'),
+      /** Owner + PIN (`offsite.portable`): tệp .ghbundle — trình duyệt tự tải bằng điều hướng tới URL này. */
+      portableUrl: OFFSITE_PORTABLE_URL,
     },
     /** v0.1.36 (F-6): sức khoẻ hệ thống + sự cố cần Sếp xử lý. */
     systemHealth: {
