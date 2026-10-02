@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { loginAsOwner, p3Hook, resetMock } from './support';
+import { MANAGER, loginAs, loginAsOwner, OWNER, p3Hook, resetMock } from './support';
 
 /**
  * v0.1.40 (F-12) — Bản sao ngoài máy (ổ USB/NAS cắm vào máy chủ): sự cố `offsite.stale` ở dải "Cần Sếp xử lý" dẫn tới
@@ -65,10 +65,69 @@ test.describe('v0.1.40 — Bản sao ngoài máy', () => {
     await expect(kit.getByTestId('recovery-key')).toHaveText(/^[A-Z2-7]{5}(-[A-Z2-7]{5}){5}$/);
     await expect(kit.getByRole('img', { name: 'Mã QR của Khoá khôi phục' })).toBeVisible();
     await expect(kit).toContainText('Cất TÁCH khỏi ổ USB');
+    await expect(kit.getByTestId('recovery-key-created')).toHaveText('· Khoá tạo ngày 01/10/2026');
     await expect(kit).toContainText('genh import --yes <tệp .ghbundle>');
     await kit.getByRole('button', { name: 'Đã cất xong' }).click();
     await expect(kit).toBeHidden();
     await expect(page.getByTestId('recovery-key')).toHaveCount(0);
+    await expect(page.getByText('[object Object]')).toHaveCount(0);
+  });
+
+  test('Manager (system.read + system.manage): dải nhờ Owner, thẻ có "Sao lưu ra ổ ngoài ngay" nhưng không có nút chỉ Owner', async ({ page }) => {
+    await loginAsOwner(page);
+    const grants: Array<{ permission: string; prev: string }> = [];
+    try {
+      for (const permission of ['system.read', 'system.manage']) {
+        const r = (await p3Hook(page.request, 'system', 'grant', { role: 'manager', permission, scope: 'all' })) as { prev: string };
+        grants.push({ permission, prev: r.prev });
+      }
+      // Chưa chọn nơi lưu ⇒ offsite.stale "Chưa có bản sao ngoài máy" — thân cho Manager nhờ Owner (gh/health.NON_OWNER_BODIES).
+      await p3Hook(page.request, 'system', 'offsite', { configured: false, dest: '', days_ago: null });
+      await loginAs(page, MANAGER.email);
+      await page.goto('/overview');
+      const strip = page.getByRole('region', { name: 'Cần Sếp xử lý' });
+      const row = strip.getByTestId('needs-boss-row').filter({ hasText: 'Chưa có bản sao ngoài máy' });
+      await expect(row).toHaveCount(1);
+      await expect(row).toContainText('Nhờ Owner cắm ổ USB/NAS và chọn nơi lưu bản sao ngoài máy');
+      await expect(row).not.toContainText("bấm 'Chọn nơi lưu");
+      await expect(row.getByRole('link', { name: 'Xem bản sao ngoài máy' })).toBeVisible();
+
+      // Đã chọn nơi lưu, bản cũ 9 ngày ⇒ Manager bấm được "Sao lưu ra ổ ngoài ngay"; không có nút chỉ Owner.
+      await p3Hook(page.request, 'system', 'offsite', { configured: true, dest: '/media/usb/gen-harness', days_ago: 9 });
+      await page.goto('/system?tab=storage&focus=offsite');
+      const card = page.getByRole('region', { name: 'Bản sao ngoài máy' });
+      await expect(card.getByRole('button', { name: 'Sao lưu ra ổ ngoài ngay' })).toBeEnabled();
+      for (const name of ['Chọn nơi lưu bản sao ngoài máy', 'Tải gói mang đi', 'Bộ khôi phục']) {
+        await expect(card.getByRole('button', { name })).toHaveCount(0);
+      }
+      await expect(page.getByText('[object Object]')).toHaveCount(0);
+    } finally {
+      await loginAs(page, OWNER.email);
+      for (const g of grants) await p3Hook(page.request, 'system', 'grant', { role: 'manager', permission: g.permission, scope: g.prev });
+    }
+  });
+
+  test('Tải gói mang đi lỗi (409) qua khung ẩn — header khung như proxy Caddy — hiện lỗi thân thiện + Chi tiết kỹ thuật', async ({ page }) => {
+    await loginAsOwner(page);
+    // Mock đặt X-Frame-Options/CSP như Caddy (DENY cho mọi /api, riêng gói mang đi SAMEORIGIN do api tự đặt).
+    await p3Hook(page.request, 'system', 'offsite', { portable_busy: true });
+    await page.goto('/system?tab=storage');
+    const card = page.getByRole('region', { name: 'Bản sao ngoài máy' });
+    await card.getByRole('button', { name: 'Tải gói mang đi' }).click();
+    const dlg = page.getByRole('dialog', { name: 'Tải gói mang đi?' });
+    const frameRes = page.waitForResponse((r) => r.url().endsWith('/api/v1/system/offsite/portable') && r.status() === 409);
+    await dlg.getByRole('button', { name: 'Tải về' }).click();
+    const pin = page.getByRole('dialog', { name: 'Mã PIN xác nhận thao tác' });
+    await expect(pin).toBeVisible();
+    await page.getByLabel('Mã PIN — chữ số 1/6').click();
+    await page.keyboard.type('246810');
+    const res = await frameRes;
+    expect(res.headers()['x-frame-options']).toBe('SAMEORIGIN');
+    const err = card.getByTestId('offsite-portable-error');
+    await expect(err).toContainText('Đang chuẩn bị một gói mang đi khác — chờ tải xong rồi thử lại.');
+    await err.getByText('Chi tiết kỹ thuật').click();
+    await expect(err).toContainText('PORTABLE_IN_PROGRESS');
+    await expect(card.getByTestId('offsite-portable-preparing')).toHaveCount(0);
     await expect(page.getByText('[object Object]')).toHaveCount(0);
   });
 });

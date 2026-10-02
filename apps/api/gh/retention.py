@@ -3,9 +3,11 @@
 Ba kiểu dọn:
 - `partition` — bảng phân vùng theo tháng (raw.events, clean.meaning_units, agent.model_calls): chỉ xoá theo CẢ phân
   vùng tháng qua pg_partman (`partman.part_config.retention` + `retention_keep_table = false`; mặc định partman chỉ
-  TÁCH bảng con chứ không xoá). raw.events và ops.action_log có trigger `core.forbid_mutation` chặn UPDATE/DELETE
-  theo dòng ⇒ tuyệt đối không DELETE theo dòng ở đây. Hạn hiệu lực = MAX(keep_days) qua mọi tổ chức; tổ chức nào
-  chưa đặt (NULL) ⇒ giữ mãi (retention NULL) — một máy cài, các tổ chức dùng chung bảng phân vùng.
+  TÁCH bảng con chứ không xoá). Retention CHỈ được đặt bên trong giao dịch của `retention_sweep` (05:00) rồi trả về
+  NULL — PATCH không đẩy sang partman, `partition_maintenance` (23:20/04:20) xoá retention trước khi bảo trì ⇒ dữ liệu
+  chỉ bị xoá ở lượt dọn 05:00 như câu xác nhận nói. raw.events và ops.action_log có trigger `core.forbid_mutation`
+  chặn UPDATE/DELETE theo dòng ⇒ tuyệt đối không DELETE theo dòng ở đây. Hạn hiệu lực = MAX(keep_days) qua mọi tổ
+  chức; tổ chức nào chưa đặt (NULL) ⇒ giữ mãi (retention NULL) — một máy cài, các tổ chức dùng chung bảng phân vùng.
 
 CHỈ thi hành dòng ĐÃ XÁC NHẬN (`confirmed_at`, migration 0026): trước v0.1.40 hạn lưu chỉ để hiển thị ("Chưa tự xoá —
 sẽ áp dụng ở bản sau") nên giá trị cũ có thể được đặt mà không ai nghĩ tới chuyện xoá thật. Dòng `keep_days` có mà
@@ -91,19 +93,18 @@ async def effective_keep_days(db: AsyncSession, dataset: str) -> int | None:
     return int(r.keep)
 
 
-async def sync_partman(admin_db: AsyncSession) -> dict[str, int | None]:
-    """Đặt `partman.part_config.retention` cho 3 bảng phân vùng theo hạn hiệu lực. PHẢI chạy qua
-    `admin_sessionmaker` (role gh_app không có quyền schema partman). Bên gọi commit."""
-    out: dict[str, int | None] = {}
-    for ds in PARTITIONED:
-        keep = await effective_keep_days(admin_db, ds)
-        await admin_db.execute(text("""
-            UPDATE partman.part_config
-            SET retention = CASE WHEN CAST(:k AS int) IS NULL THEN NULL ELSE CAST(:k AS int)::text || ' days' END,
-                retention_keep_table = false
-            WHERE parent_table = :t"""), {"k": keep, "t": ds})
-        out[ds] = keep
-    return out
+async def partman_keeps(db: AsyncSession) -> dict[str, int | None]:
+    """Hạn hiệu lực của 3 bảng phân vùng (None = giữ mãi) — chỉ đọc bảng chính sách."""
+    return {ds: await effective_keep_days(db, ds) for ds in PARTITIONED}
+
+
+async def clear_partman_retention(admin_db: AsyncSession) -> None:
+    """Đưa `partman.part_config.retention` của 3 bảng phân vùng về NULL. `partition_maintenance` (23:20/04:20) gọi
+    TRƯỚC `run_maintenance()` để bảo trì phân vùng không bao giờ xoá tháng nào — chỉ `retention_sweep` (05:00) xoá, đúng
+    giờ câu xác nhận hứa với Owner và đếm đủ số tháng đã xoá. Dọn cả giá trị cũ do bản dev v0.1.40 trước đã ghi."""
+    await admin_db.execute(text("""UPDATE partman.part_config SET retention = NULL
+                                   WHERE parent_table = ANY(:t) AND retention IS NOT NULL"""),
+                           {"t": list(PARTITIONED)})
 
 
 async def _partition_count(admin_db: AsyncSession, parent: str) -> int:
@@ -112,16 +113,31 @@ async def _partition_count(admin_db: AsyncSession, parent: str) -> int:
 
 
 async def drop_expired_partitions(admin_db: AsyncSession, keeps: dict[str, int | None]) -> dict[str, int]:
-    """Chạy bảo trì partman cho từng bảng có hạn lưu ⇒ phân vùng tháng quá hạn bị XOÁ. Trả số phân vùng đã xoá."""
+    """XOÁ phân vùng tháng quá hạn của từng bảng có hạn lưu. PHẢI chạy qua `admin_sessionmaker` (role gh_app không có
+    quyền schema partman). Mỗi bảng một giao dịch: đặt `part_config.retention` → `run_maintenance(bảng)` → đếm → trả
+    retention về NULL → commit. Phiên khác (bảo trì phân vùng chạy `run_maintenance()` cho mọi bảng) không bao giờ thấy
+    retention khác NULL ⇒ không xoá sớm hơn lượt dọn này. Trả số phân vùng đã xoá theo bảng."""
     out: dict[str, int] = {}
     for ds in PARTITIONED:
-        if keeps.get(ds) is None:
+        keep = keeps.get(ds)
+        if keep is None:
             out[ds] = 0
             continue
-        before = await _partition_count(admin_db, ds)
-        await admin_db.execute(text("SELECT partman.run_maintenance(p_parent_table => :t)"), {"t": ds})
-        await admin_db.commit()
-        out[ds] = max(0, before - await _partition_count(admin_db, ds))
+        try:
+            before = await _partition_count(admin_db, ds)
+            await admin_db.execute(text("""
+                UPDATE partman.part_config
+                SET retention = CAST(:k AS int)::text || ' days', retention_keep_table = false
+                WHERE parent_table = :t"""), {"k": keep, "t": ds})
+            await admin_db.execute(text("SELECT partman.run_maintenance(p_parent_table => :t)"), {"t": ds})
+            dropped = max(0, before - await _partition_count(admin_db, ds))
+            await admin_db.execute(text("UPDATE partman.part_config SET retention = NULL WHERE parent_table = :t"),
+                                   {"t": ds})
+            await admin_db.commit()
+        except Exception:
+            await admin_db.rollback()
+            raise
+        out[ds] = dropped
     return out
 
 
@@ -310,8 +326,7 @@ async def retention_sweep(ctx: dict[str, Any]) -> dict[str, Any]:
 
     async def do_partman() -> int:
         async with admin_sessionmaker()() as adb:
-            keeps.update(await sync_partman(adb))
-            await adb.commit()
+            keeps.update(await partman_keeps(adb))
             dropped.update(await drop_expired_partitions(adb, keeps))
         return sum(dropped.values())
 
@@ -359,16 +374,6 @@ async def retention_sweep(ctx: dict[str, Any]) -> dict[str, Any]:
     return summary
 
 
-async def sync_partman_now() -> dict[str, int | None]:
-    """Gọi ngay sau khi Owner đổi hạn lưu bảng phân vùng (PATCH /retention-policies) — qua admin session."""
-    from gh.db import admin_sessionmaker
-
-    async with admin_sessionmaker()() as adb:
-        out = await sync_partman(adb)
-        await adb.commit()
-    return out
-
-
 __all__ = ["BATCH", "CONFIRM_KIND", "DATASETS", "ENFORCED", "FIXED", "LAST_KEY", "PARTITIONED", "effective_keep_days",
-           "ensure_leakproof", "notify_unconfirmed", "read_last", "retention_sweep", "sync_partman",
-           "sync_partman_now", "unconfirmed_orgs"]
+           "clear_partman_retention", "drop_expired_partitions", "ensure_leakproof", "notify_unconfirmed",
+           "partman_keeps", "read_last", "retention_sweep", "unconfirmed_orgs"]

@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import type { Boundary, PermissionsPage, PermScope, RetentionPolicy } from '@gen-harness/contracts';
 import { SystemScreen } from '../../src/screens/system/SystemScreen';
+import { retentionRowView } from '../../src/screens/system/systemModel';
 import { PinDialogHost } from '../../src/shell/PinDialogHost';
 import { qk } from '../../src/lib/queries';
 import { useUrlStateStore } from '../../src/lib/uiStore';
@@ -93,7 +94,7 @@ const RETENTION: RetentionPolicy[] = [
   { dataset: 'clean.meaning_units', keep_days: 730, anonymize_after_days: null, mode: 'partition', editable: true, note: null, last_run_at: null, last_deleted: null },
   { dataset: 'ops.action_log', keep_days: 2555, anonymize_after_days: null, mode: 'not_applicable', editable: false, note: 'Nhật ký hành động chỉ ghi thêm — không xoá theo hạn', last_run_at: null, last_deleted: null },
   { dataset: 'memory.entries', keep_days: null, anonymize_after_days: null, mode: 'batch', editable: true, note: 'Xoá dần các dòng quá hạn mỗi đêm', last_run_at: LAST_RUN, last_deleted: 12 },
-  { dataset: 'agent.model_calls', keep_days: 90, anonymize_after_days: 30, mode: 'partition', editable: true, note: null, last_run_at: LAST_RUN, last_deleted: 3480 },
+  { dataset: 'agent.model_calls', keep_days: 90, anonymize_after_days: 30, mode: 'partition', editable: true, note: null, last_run_at: LAST_RUN, last_deleted: 2 },
   { dataset: 'agent.browser_jobs.result', keep_days: 14, anonymize_after_days: null, mode: 'batch', editable: false, note: 'Kết quả việc trình duyệt nền tự xoá sau 14 ngày', last_run_at: LAST_RUN, last_deleted: 7 },
 ];
 
@@ -239,7 +240,7 @@ describe('Điều khiển hệ thống › Dữ liệu & lưu trữ', () => {
     expect(within(panel).queryAllByRole('columnheader').map((h) => h.textContent)).not.toContain('Ẩn danh sau');
 
     const modelRow = within(panel).getByText('Lượt gọi model').closest('tr') as HTMLElement;
-    expect(within(modelRow).getByText(/Lần dọn gần nhất: .* · đã xoá 3\.480/)).toBeInTheDocument();
+    expect(within(modelRow).getByText(/Lần dọn gần nhất: .* · đã xoá 2 tháng$/)).toBeInTheDocument();
     const edit = within(modelRow).getByRole('button', { name: /Sửa/ });
     expect(edit).toBeEnabled();
     await user.click(edit);
@@ -287,7 +288,7 @@ describe('Điều khiển hệ thống › Dữ liệu & lưu trữ', () => {
     const jobsRow = within(panel).getByText('agent.browser_jobs.result').closest('tr') as HTMLElement;
     expect(within(jobsRow).getByText('14 ngày (cố định)')).toBeInTheDocument();
     expect(within(jobsRow).queryByRole('button', { name: /Sửa/ })).toBeNull();
-    expect(within(jobsRow).getByText(/Lần dọn gần nhất: .* · đã xoá 7/)).toBeInTheDocument();
+    expect(within(jobsRow).getByText(/Lần dọn gần nhất: .* · đã xoá 7 dòng$/)).toBeInTheDocument();
 
     const rawRow = within(panel).getByText(/Kho thô/).closest('tr') as HTMLElement;
     expect(within(rawRow).getByText('Xoá theo cả tháng khi cả tháng đã quá hạn')).toBeInTheDocument();
@@ -344,6 +345,46 @@ describe('Điều khiển hệ thống › Dữ liệu & lưu trữ', () => {
     expect(rawEdit).toHaveAttribute('title', 'Chỉ Owner đổi được hạn lưu của dữ liệu xoá theo tháng');
     const memRow = within(panel).getByText('Sổ tay nhận thức').closest('tr') as HTMLElement;
     expect(within(memRow).getByRole('button', { name: /Sửa/ })).toBeEnabled();
+  });
+
+  it('hạn lưu: lượt dọn lỗi (last_ok false) báo lỗi + giờ thử lại, không hiện "đã xoá 0"', async () => {
+    const rows: RetentionPolicy[] = RETENTION.map((r) => (r.dataset === 'memory.entries' ? { ...r, last_deleted: 0, last_ok: false } : r));
+    mockFetch((c) => {
+      if (c.url.endsWith('/retention-policies') && c.method === 'GET') return json(200, rows);
+      if (c.url.includes('/directory/people')) return json(200, { items: [], next_cursor: null, total: 0 });
+      return json(404);
+    });
+    renderScreen(<SystemScreen />, FULL_PERMS, 'storage');
+    const panel = await screen.findByRole('region', { name: 'Hạn lưu dữ liệu' });
+    const memRow = (await within(panel).findByText('Sổ tay nhận thức')).closest('tr') as HTMLElement;
+    const failed = within(memRow).getByTestId('retention-failed-memory.entries');
+    expect(failed).toHaveTextContent(/^Lần dọn gần nhất lỗi \(.*\) — hệ thống sẽ thử lại lúc 05:00$/);
+    expect(within(memRow).queryByText(/đã xoá 0/)).toBeNull();
+  });
+
+  it('hạn lưu chưa xác nhận: Manager trên bảng xoá theo tháng được nhờ Owner (không bảo bấm Sửa), lý do hiện thành chữ', async () => {
+    const rows: RetentionPolicy[] = RETENTION.map((r) => (r.dataset === 'raw.events' ? { ...r, needs_confirm: true } : r));
+    mockFetch((c) => {
+      if (c.url.endsWith('/retention-policies') && c.method === 'GET') return json(200, rows);
+      if (c.url.includes('/directory/people')) return json(200, { items: [], next_cursor: null, total: 0 });
+      return json(404);
+    });
+    renderScreen(<SystemScreen />, { 'system.read': 'all', 'system.manage': 'all' }, 'storage', 'manager');
+    const panel = await screen.findByRole('region', { name: 'Hạn lưu dữ liệu' });
+    const rawRow = (await within(panel).findByText(/Kho thô/)).closest('tr') as HTMLElement;
+    expect(within(rawRow).getByText('Chưa áp dụng — hạn này đặt trước bản v0.1.40. Nhờ Owner xác nhận lại hạn này.')).toBeInTheDocument();
+    expect(within(rawRow).queryByText(/Bấm Sửa/)).toBeNull();
+    expect(within(rawRow).getByTestId('retention-locked-raw.events')).toHaveTextContent('Chỉ Owner đổi được hạn lưu của dữ liệu xoá theo tháng');
+  });
+
+  it('retentionRowView: người chỉ xem (system.read) được nhờ Owner; Owner giữ câu "Bấm Sửa → Lưu"', () => {
+    const mem = RETENTION.find((x) => x.dataset === 'memory.entries') as RetentionPolicy;
+    const r: RetentionPolicy = { ...mem, keep_days: 60, needs_confirm: true };
+    expect(retentionRowView(r, undefined, { isOwner: false, canManage: false }).pending).toMatch(/Nhờ Owner xác nhận lại hạn này\.$/);
+    expect(retentionRowView(r, undefined, { isOwner: false, canManage: false }).lockedReason).toBeNull();
+    expect(retentionRowView(r, undefined, { isOwner: true, canManage: true }).pending).toMatch(/Bấm Sửa → Lưu để xác nhận/);
+    // Manager vẫn sửa được Sổ tay (không phải bảng xoá theo tháng) ⇒ giữ câu "Bấm Sửa".
+    expect(retentionRowView(r, undefined, { isOwner: false, canManage: true }).pending).toMatch(/Bấm Sửa → Lưu/);
   });
 
   it('yêu cầu xuất dữ liệu một người gọi đúng POST /persons/{id}/data-requests với kind=export', async () => {

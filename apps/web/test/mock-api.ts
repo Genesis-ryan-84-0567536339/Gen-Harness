@@ -471,7 +471,10 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     else if (offsite && !offsite.configured && opts.setup !== 'fresh') {
       derived.push({
         kind: 'offsite.stale', severity: 'warn', title: 'Chưa có bản sao ngoài máy', action: staleAction,
-        body: "Hỏng ổ đĩa là mất hết dữ liệu. Cắm ổ USB hoặc chọn thư mục NAS rồi bấm 'Chọn nơi lưu bản sao ngoài máy'",
+        // Như gh/health.NON_OWNER_BODIES: không phải Owner thì nhờ Owner (không bảo bấm nút chỉ Owner có).
+        body: isOwner
+          ? "Hỏng ổ đĩa là mất hết dữ liệu. Cắm ổ USB hoặc chọn thư mục NAS rồi bấm 'Chọn nơi lưu bản sao ngoài máy'"
+          : 'Hỏng ổ đĩa là mất hết dữ liệu. Nhờ Owner cắm ổ USB/NAS và chọn nơi lưu bản sao ngoài máy',
       });
     } else if (offsite?.configured && offsite.stale) {
       const days = offsite.age_days != null ? Math.floor(offsite.age_days) : null;
@@ -774,6 +777,11 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     if (!url.pathname.startsWith('/api/v1/')) return next();
     if (latency) await new Promise((r) => setTimeout(r, latency));
     const path = url.pathname.slice('/api/v1'.length);
+    // Như proxy Caddy (`?X-Frame-Options DENY` + CSP `frame-ancestors 'none'` khi upstream chưa đặt) và api
+    // (gh.middleware.SameOriginFrame: riêng gói mang đi cho khung cùng gốc) — e2e bắt được trang lỗi bị chặn trong khung.
+    const framable = path === '/system/offsite/portable';
+    res.setHeader('X-Frame-Options', framable ? 'SAMEORIGIN' : 'DENY');
+    res.setHeader('Content-Security-Policy', framable ? "default-src 'none'; frame-ancestors 'self'" : "frame-ancestors 'none'");
     const method = (req.method ?? 'GET').toUpperCase();
     const cookies = parseCookies(req);
     const setCookies: string[] = [];

@@ -80,6 +80,11 @@ func TestRunUninstall_MacDinh_GiuDuLieu_KhongVolumes(t *testing.T) {
 	if strings.Contains(out.String(), "Chưa có bản sao ngoài máy gần đây") {
 		t.Fatal("giữ dữ liệu thì không cần cảnh báo bản sao ngoài máy")
 	}
+	// Volume giữ lại khoá bằng mật khẩu trong thư mục cài ⇒ phải dặn cài lại đúng thư mục, xoá thư mục thì xoá dữ liệu trước.
+	if !strings.Contains(out.String(), "cài lại phải dùng đúng thư mục này (--install-dir "+env.InstallDir+")") ||
+		!strings.Contains(out.String(), "genh uninstall --delete-data") {
+		t.Fatalf("thiếu lời dặn giữ thư mục cài khi giữ dữ liệu, out=%q", out.String())
+	}
 }
 
 // --keep-data vẫn hợp lệ (script cũ) — giữ dữ liệu như mặc định.

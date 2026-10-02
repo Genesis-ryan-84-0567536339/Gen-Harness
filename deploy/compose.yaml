@@ -42,7 +42,7 @@ services:
     # Đổi Caddyfile ⇒ đổi nhãn ⇒ compose tạo lại proxy (không thì container cũ giữ CSP cũ).
     # Giá trị = 12 ký tự đầu sha256(deploy/proxy/Caddyfile); tests/test_proxy_csp_v0135.py canh.
     labels:
-      gh.caddyfile-sha: "334bdccc4b22"
+      gh.caddyfile-sha: "81317ac9a141"
     environment:
       GH_SITE_ADDRESS: ${GH_SITE_ADDRESS:-localhost}
     volumes:

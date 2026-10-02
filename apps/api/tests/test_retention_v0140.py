@@ -1,7 +1,8 @@
 """v0.1.40 (F-2): hạn lưu dữ liệu THẬT (gh/retention.py).
 
-- Bảng phân vùng: PATCH đặt `partman.part_config.retention` (+ `retention_keep_table = false`) theo MAX qua mọi tổ
-  chức; tổ chức chưa đặt ⇒ giữ mãi (NULL).
+- Bảng phân vùng: hạn hiệu lực = MAX qua mọi tổ chức; tổ chức chưa đặt ⇒ giữ mãi. PATCH KHÔNG đẩy sang partman;
+  chỉ lượt dọn 05:00 đặt `partman.part_config.retention` trong giao dịch riêng, xoá tháng quá hạn, đếm rồi trả về NULL
+  ⇒ bảo trì phân vùng 23:20/04:20 không xoá sớm hơn giờ câu xác nhận đã hứa.
 - ops.action_log: "Không áp dụng" — PATCH keep_days ⇒ 422 tiếng Việt; GET luôn keep_days null.
 - Xoá theo lô: memory.entries (đã nén, quá hạn, không ghim), browser_jobs.result 14 ngày, tệp đính kèm mồ côi; gom
   hội thoại Gen + chuông vào `retention_sweep`; ghi `gh:retention:last`; một phần lỗi không chặn phần khác.
@@ -61,21 +62,26 @@ async def _patch(api: Api, dataset: str, keep: int | None, confirm: bool = True)
                                                             "confirm_delete": confirm})
 
 
+async def _partitions(table: str) -> int:
+    async with admin_sessionmaker()() as adb:
+        return int((await adb.execute(text("SELECT count(*) FROM partman.show_partitions(:t)"), {"t": table})
+                    ).scalar_one())
+
+
 @pytest.mark.parametrize("dataset", ["raw.events", "clean.meaning_units", "agent.model_calls"])
-async def test_patch_syncs_partman(owner_api: Api, db, dataset: str) -> None:  # type: ignore[no-untyped-def]
+async def test_patch_sets_effective_keep_without_touching_partman(owner_api: Api, db, dataset: str) -> None:  # type: ignore[no-untyped-def]
     api = owner_api
     await verify_pin(api)
     r = await _patch(api, dataset, 30)
     assert r.status_code == 200, r.text
     row = next(x for x in r.json() if x["dataset"] == dataset)
-    assert row["keep_days"] == 30 and row["partman_synced"] is True and row["mode"] == "partition"
-    pc = await _part_config(dataset)
-    assert pc.retention == "30 days" and pc.retention_keep_table is False
+    assert row["keep_days"] == 30 and row["mode"] == "partition" and "partman_synced" not in row
+    assert await retention.effective_keep_days(db, dataset) == 30
+    assert (await _part_config(dataset)).retention is None            # chỉ lượt dọn 05:00 đặt (rồi trả về NULL)
 
     r = await _patch(api, dataset, None)
     assert r.status_code == 200, r.text
-    pc = await _part_config(dataset)
-    assert pc.retention is None and pc.retention_keep_table is False
+    assert await retention.effective_keep_days(db, dataset) is None
 
     # Hai tổ chức 30 và 90 ⇒ hạn hiệu lực 90 (MAX); tổ chức thứ hai chưa đặt ⇒ giữ mãi.
     org2 = (await db.execute(text("INSERT INTO core.organizations (name) VALUES ('Tổ chức 2') RETURNING id"))
@@ -83,12 +89,39 @@ async def test_patch_syncs_partman(owner_api: Api, db, dataset: str) -> None:  #
     await db.commit()
     r = await _patch(api, dataset, 30)
     assert r.status_code == 200
-    assert (await _part_config(dataset)).retention is None
+    assert await retention.effective_keep_days(db, dataset) is None
     await db.execute(text("""INSERT INTO ops.retention_policies (org_id, dataset, keep_days, confirmed_at)
                              VALUES (:o, :d, 90, now())"""), {"o": org2, "d": dataset})
     await db.commit()
-    await retention.sync_partman_now()
-    assert (await _part_config(dataset)).retention == "90 days"
+    assert await retention.effective_keep_days(db, dataset) == 90
+
+
+async def test_partition_maintenance_never_drops_only_sweep_does(owner_api: Api, db, redis: Redis) -> None:  # type: ignore[no-untyped-def]
+    """Owner xác nhận lúc 22:00 ⇒ bảo trì phân vùng 23:20/04:20 KHÔNG xoá tháng nào (kể cả retention cũ còn sót trong
+    part_config); chỉ lượt dọn 05:00 xoá và ghi đúng số tháng đã xoá cho dòng hạn lưu."""
+    from gh import worker
+
+    api = owner_api
+    await verify_pin(api)
+    assert (await _patch(api, "raw.events", 30)).status_code == 200
+    async with admin_sessionmaker()() as adb:  # giá trị sót từ bản dev v0.1.40 trước (PATCH từng đẩy ngay)
+        await adb.execute(text("UPDATE partman.part_config SET retention = '30 days', retention_keep_table = false "
+                               "WHERE parent_table = 'raw.events'"))
+        await adb.commit()
+    before = await _partitions("raw.events")
+    await worker.partition_maintenance({})
+    assert await _partitions("raw.events") == before
+    assert (await _part_config("raw.events")).retention is None
+
+    out = await retention.retention_sweep({"redis": redis})
+    after = await _partitions("raw.events")
+    assert after < before                                               # tháng cũ hơn 30 ngày đã bị xoá ở 05:00
+    assert out["datasets"]["raw.events"] == {"mode": "partition", "deleted": before - after, "ok": True}
+    assert (await _part_config("raw.events")).retention is None        # trả về NULL sau lượt dọn
+    got = {x["dataset"]: x for x in (await api.get("/retention-policies")).json()}
+    assert got["raw.events"]["last_deleted"] == before - after and got["raw.events"]["last_ok"] is True
+    await worker.partition_maintenance({})
+    assert await _partitions("raw.events") >= after                     # bảo trì chỉ tạo thêm, không xoá
 
 
 async def test_patch_requires_delete_confirmation(owner_api: Api) -> None:
@@ -120,8 +153,7 @@ async def test_preexisting_unconfirmed_policy_not_enforced(owner_api: Api, db, r
     assert await retention.effective_keep_days(db, "raw.events") is None
     assert {r.org_id: r.datasets for r in await retention.unconfirmed_orgs(db)} == {
         org: ["memory.entries", "raw.events"]}
-    await retention.sync_partman_now()
-    assert (await _part_config("raw.events")).retention is None
+    assert await retention.partman_keeps(db) == {d: None for d in retention.PARTITIONED}
     got = {x["dataset"]: x for x in (await api.get("/retention-policies")).json()}
     assert got["raw.events"]["keep_days"] == 30 and got["raw.events"]["needs_confirm"] is True
     assert got["memory.entries"]["needs_confirm"] is True
@@ -143,8 +175,8 @@ async def test_preexisting_unconfirmed_policy_not_enforced(owner_api: Api, db, r
     r = await _patch(api, "raw.events", 30)
     assert r.status_code == 200, r.text
     row = next(x for x in r.json() if x["dataset"] == "raw.events")
-    assert row["needs_confirm"] is False and row["partman_synced"] is True
-    assert (await _part_config("raw.events")).retention == "30 days"
+    assert row["needs_confirm"] is False
+    assert await retention.effective_keep_days(db, "raw.events") == 30
 
 
 async def test_manager_cannot_set_partitioned_retention(client, db, owner_api: Api) -> None:  # type: ignore[no-untyped-def]
@@ -159,7 +191,7 @@ async def test_manager_cannot_set_partitioned_retention(client, db, owner_api: A
     await verify_pin(mgr, "112233")
     r = await _patch(mgr, "raw.events", 30)
     assert r.status_code == 403, r.text
-    assert (await _part_config("raw.events")).retention is None
+    assert await retention.effective_keep_days(db, "raw.events") is None
     assert (await _patch(mgr, "memory.entries", 30)).status_code == 200
 
 
@@ -215,8 +247,14 @@ async def test_get_has_mode_note_and_browser_row(owner_api: Api, redis: Redis) -
         "memory.entries": {"mode": "batch", "deleted": 12}}}))
     got = {x["dataset"]: x for x in (await api.get("/retention-policies")).json()}
     assert got["memory.entries"]["last_run_at"] == "2026-10-01T22:00:00Z"
-    assert got["memory.entries"]["last_deleted"] == 12
-    assert got["raw.events"]["last_deleted"] is None
+    assert got["memory.entries"]["last_deleted"] == 12 and got["memory.entries"]["last_ok"] is True
+    assert got["raw.events"]["last_deleted"] is None and got["raw.events"]["last_ok"] is None
+
+    # Lượt dọn của tập lỗi ⇒ last_ok false (web báo lỗi, không hiện "đã xoá 0" như thành công).
+    await redis.set(retention.LAST_KEY, orjson.dumps({"at": "2026-10-01T22:00:00Z", "datasets": {
+        "memory.entries": {"mode": "batch", "deleted": 0, "ok": False}}}))
+    got = {x["dataset"]: x for x in (await api.get("/retention-policies")).json()}
+    assert got["memory.entries"]["last_ok"] is False and got["memory.entries"]["last_deleted"] == 0
 
 
 # ─── lượt dọn hằng ngày ─────────────────────────────────────────────────────────────────────────────────────
@@ -315,7 +353,7 @@ async def test_retention_sweep_batches_and_summary(swept, db, redis: Redis) -> N
     assert ds["ops.action_log"]["mode"] == "not_applicable"
     assert ds["raw.events"]["mode"] == "partition" and ds["raw.events"]["ok"] is True
     pc = await _part_config("raw.events")
-    assert pc.retention == "30 days" and pc.retention_keep_table is False   # sweep tự đồng bộ partman
+    assert pc.retention is None and pc.retention_keep_table is False        # sweep đặt rồi trả về NULL
 
     saved = orjson.loads(await redis.get(retention.LAST_KEY))
     assert saved["at"].endswith("Z") and saved["datasets"]["memory.entries"]["deleted"] == 12005
@@ -327,7 +365,7 @@ async def test_one_failing_part_does_not_block_others(swept, db, redis: Redis, m
         raise RuntimeError("hỏng thử")
 
     monkeypatch.setattr(retention, "purge_memory_entries", boom)
-    monkeypatch.setattr(retention, "sync_partman", boom)
+    monkeypatch.setattr(retention, "partman_keeps", boom)
     out = await retention.retention_sweep({"redis": redis})
     ds = out["datasets"]
     assert ds["memory.entries"]["ok"] is False and ds["raw.events"]["ok"] is False

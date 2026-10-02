@@ -12,7 +12,7 @@ import { UpdateCard } from '../../update/UpdateCard';
 import { BackupPanel } from './BackupPanel';
 import { OffsitePanel } from './OffsitePanel';
 import { HealthCard } from './HealthCard';
-import { DATA_REQUEST_KIND, RETENTION_LABEL, retentionConfirmText, retentionDeletes, retentionOwnerOnly, retentionRowView } from './systemModel';
+import { DATA_REQUEST_KIND, RETENTION_LABEL, RETENTION_OWNER_ONLY_REASON, retentionConfirmText, retentionDeletes, retentionOwnerOnly, retentionRowView } from './systemModel';
 import { useCreateDataRequest, usePatchRetention, usePersonDataRequests, useRetentionPolicies } from './queries';
 
 /** Dữ liệu & lưu trữ — sao lưu & khôi phục (v0.1.20), bản sao ngoài máy (v0.1.40); spec I: hạn lưu theo tập dữ liệu, yêu cầu xuất/xoá/giới hạn
@@ -121,7 +121,7 @@ function RetentionPanel() {
           </thead>
           <tbody>
             {q.data.flatMap((r) => {
-              const view = retentionRowView(r, tz);
+              const view = retentionRowView(r, tz, { isOwner, canManage });
               const label = RETENTION_LABEL[r.dataset] ?? r.dataset;
               const ownerLocked = retentionOwnerOnly(r) && !isOwner;
               const isEditing = editing === r.dataset;
@@ -132,7 +132,12 @@ function RetentionPanel() {
                     <div className="mono retention-table__code">{r.dataset}</div>
                     {view.note ? <div className="retention-table__note">{view.note}</div> : null}
                     {view.pending ? <div className="retention-table__pending">{view.pending}</div> : null}
-                    {view.lastRun ? <div className="retention-table__last">{view.lastRun}</div> : null}
+                    {view.lockedReason ? <div className="retention-table__note" data-testid={`retention-locked-${r.dataset}`}>{view.lockedReason}</div> : null}
+                    {view.lastRun ? (
+                      <div className={view.lastFailed ? 'retention-table__pending' : 'retention-table__last'} data-testid={view.lastFailed ? `retention-failed-${r.dataset}` : undefined}>
+                        {view.lastRun}
+                      </div>
+                    ) : null}
                   </td>
                   {isEditing ? (
                     <>
@@ -171,7 +176,7 @@ function RetentionPanel() {
                               className="btn-27"
                               icon="ph ph-pencil-simple"
                               disabled={ownerLocked}
-                              title={ownerLocked ? 'Chỉ Owner đổi được hạn lưu của dữ liệu xoá theo tháng' : undefined}
+                              title={ownerLocked ? RETENTION_OWNER_ONLY_REASON : undefined}
                               onClick={() => startEdit(r)}
                               aria-label={`Sửa hạn lưu ${label}`}
                             >

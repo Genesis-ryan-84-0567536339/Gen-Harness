@@ -58,12 +58,18 @@ WATCH_LOCK_KEY = "gh:health:tick"
 BROWSER_SILENT_SECONDS = 40
 
 STORAGE_LINK = "/system?tab=storage"
+#: Đích của job.timeout ("Xem sức khoẻ"): thẻ "Sức khoẻ hệ thống" đầu Dữ liệu & lưu trữ (HealthCard đọc `focus=health`).
+HEALTH_LINK = "/system?tab=storage&focus=health"
 #: Đích của backup.stale: Dữ liệu & lưu trữ, cuộn tới mục Sao lưu (BackupPanel đọc `focus=backup`).
 BACKUP_LINK = "/system?tab=storage&focus=backup"
 #: v0.1.40 (F-12): đích của offsite.stale/offsite.failed — mục "Bản sao ngoài máy" ở Dữ liệu & lưu trữ.
 OFFSITE_LINK = "/system?tab=storage&focus=offsite"
 #: Bản sao ngoài máy quá N ngày chưa có lần thành công ⇒ cũ (lịch tuần + bù vài ngày lỡ); quá 30 ngày ⇒ 'bad'.
 OFFSITE_STALE_DAYS = 7
+#: Ngưỡng "cũ" thật = lịch tuần + 12 giờ ân hạn: `last_success_at` là giờ BẮT ĐẦU lượt tuần trước, timer systemd trễ
+#: ngẫu nhiên tới 30 phút và xuất+kiểm mất vài phút ⇒ đúng 7 ngày thì lượt tuần này thường chưa xong — không được coi
+#: là cũ (tránh chuông giả mỗi tuần). Dùng chung cho chuông (health) và GET /system/offsite (offsite.read_status).
+OFFSITE_STALE_AFTER = timedelta(days=OFFSITE_STALE_DAYS, hours=12)
 OFFSITE_BAD_DAYS = 30
 
 #: Nhãn nút hành động theo kind (web hiện trên dải "Cần Sếp xử lý").
@@ -84,6 +90,23 @@ ACTIONS = {
 NON_OWNER_ACTIONS = {
     "offsite.stale": "Xem bản sao ngoài máy",
 }
+#: Thân sự cố cho người KHÔNG phải Owner khi thân gốc bảo bấm nút chỉ Owner có ("Chọn nơi lưu…"). Khoá = (kind, mã) —
+#: mã là fingerprint (offsite.stale) hoặc mã genh ở cuối fingerprint (offsite.failed: "<lần thử>|<mã>").
+NON_OWNER_BODIES = {
+    ("offsite.stale", "not_configured"): "Hỏng ổ đĩa là mất hết dữ liệu. Nhờ Owner cắm ổ USB/NAS và chọn nơi lưu bản "
+                                         "sao ngoài máy",
+    ("offsite.failed", "GH-EB00"): "Chưa chọn nơi lưu — nhờ Owner cắm ổ USB/NAS và chọn nơi lưu bản sao ngoài máy",
+    ("offsite.failed", "GH-EB07"): "Nơi lưu không hợp lệ — nhờ Owner chọn lại thư mục trên ổ USB/NAS",
+}
+
+
+def _viewer_body(kind: str, fingerprint: str | None, body: str, is_owner: bool) -> str:
+    """Thân sự cố theo vai trò người xem: không phải Owner thì không bảo bấm nút chỉ Owner có (`NON_OWNER_BODIES`)."""
+    if is_owner:
+        return body
+    fp = fingerprint or ""
+    code = fp.rpartition("|")[2] if kind == "offsite.failed" else fp
+    return NON_OWNER_BODIES.get((kind, code), body)
 
 #: v0.1.37 (F-73): `run/autostart-status.json` (genh ghi) — chỉ nhận giá trị trong các tập này, còn lại 'unknown'.
 AUTOSTART_YES_NO = ("yes", "no", "unknown", "not_applicable")
@@ -171,13 +194,14 @@ async def clear(db: AsyncSession, org_id: uuid.UUID, key: str) -> bool:
 
 async def active_issues(db: AsyncSession, org_id: uuid.UUID, *, is_owner: bool = True) -> list[dict[str, Any]]:
     """Sự cố đang mở: 'bad' trước, rồi mới nhất trước. Mọi trường là chuỗi (web không render object). Nhãn nút theo
-    vai trò người xem: không phải Owner thì không hứa nút chỉ Owner có (`NON_OWNER_ACTIONS`)."""
+    vai trò người xem: không phải Owner thì không hứa nút chỉ Owner có (`NON_OWNER_ACTIONS`, `NON_OWNER_BODIES`)."""
     labels = ACTIONS if is_owner else {**ACTIONS, **NON_OWNER_ACTIONS}
     rows = (await db.execute(text("""
-        SELECT key, kind, severity, title, body, link, raised_at FROM ops.health_alerts
+        SELECT key, kind, severity, title, body, link, raised_at, fingerprint FROM ops.health_alerts
         WHERE org_id = :o AND cleared_at IS NULL
         ORDER BY (severity = 'bad') DESC, raised_at DESC"""), {"o": org_id})).all()
-    return [{"key": r.key, "kind": r.kind, "severity": r.severity, "title": r.title, "body": r.body,
+    return [{"key": r.key, "kind": r.kind, "severity": r.severity, "title": r.title,
+             "body": _viewer_body(r.kind, r.fingerprint, r.body, is_owner),
              "link": r.link, "action": labels.get(r.kind, "Xem chi tiết"), "raised_at": _iso(r.raised_at)}
             for r in rows]
 
@@ -607,10 +631,10 @@ async def _eval_autostart(db: AsyncSession, org_id: uuid.UUID, redis: Any) -> No
 
 
 def _offsite_stale(st: dict[str, Any], org_created: datetime | None, now: datetime) -> bool:
-    """Bản sao ngoài máy đáng nhắc: chưa có lần thành công / cũ hơn `OFFSITE_STALE_DAYS` ngày — nhưng tổ chức mới tạo
-    (≤ 7 ngày) chưa có lần nào thì chưa nhắc (vừa cài xong, chưa kịp cắm ổ)."""
+    """Bản sao ngoài máy đáng nhắc: chưa có lần thành công / cũ hơn `OFFSITE_STALE_AFTER` (7 ngày + ân hạn) — nhưng tổ
+    chức mới tạo chưa có lần nào thì chưa nhắc trong cùng khoảng đó (vừa cài xong, chưa kịp cắm ổ)."""
     last = _parse_ts(st.get("last_success_at"))
-    limit = timedelta(days=OFFSITE_STALE_DAYS)
+    limit = OFFSITE_STALE_AFTER
     if last is not None:
         return now - last > limit
     return org_created is not None and now - org_created > limit

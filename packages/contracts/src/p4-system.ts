@@ -122,8 +122,10 @@ export interface RetentionPolicy {
   note?: string | null;
   /** v0.1.40: lần việc nền dọn tập này gần nhất (ISO); null = chưa dọn. */
   last_run_at?: string | null;
-  /** v0.1.40: số dòng đã xoá ở lần dọn gần nhất; null = chưa dọn / không áp dụng. */
+  /** v0.1.40: số đã xoá ở lần dọn gần nhất (bảng phân vùng: số THÁNG; còn lại: số dòng); null = chưa dọn / không áp dụng. */
   last_deleted?: number | null;
+  /** v0.1.40: false ⇒ lượt dọn gần nhất của tập này LỖI (last_deleted = 0 không có nghĩa là xong); null = chưa dọn. */
+  last_ok?: boolean | null;
   /**
    * v0.1.40 (F-2): hạn đặt TRƯỚC v0.1.40 (lúc chỉ để hiển thị) — việc dọn CHƯA thi hành cho tới khi Owner lưu lại có
    * xác nhận xoá vĩnh viễn. Thiếu ở api cũ.
@@ -473,6 +475,8 @@ export interface OffsiteState {
 export interface RecoveryKit {
   key: string;
   key_id: string;
+  /** Ngày tạo khoá (YYYY-MM-DD) để Owner đối chiếu bản đã cất còn đúng; null = không đọc được. Thiếu ở api cũ. */
+  created_hint?: string | null;
   steps: string[];
   warning: string;
 }

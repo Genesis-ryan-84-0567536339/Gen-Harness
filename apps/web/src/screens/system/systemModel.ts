@@ -361,11 +361,23 @@ export interface RetentionRowView {
   /** Có nút Sửa. */
   editable: boolean;
   note: string | null;
-  /** "Lần dọn gần nhất: … · đã xoá N"; null = chưa dọn. */
+  /** "Lần dọn gần nhất: … · đã xoá N tháng/dòng"; null = chưa dọn. */
   lastRun: string | null;
+  /** Lượt dọn gần nhất của tập này lỗi ⇒ hiện tông cảnh báo (không coi "đã xoá 0" là thành công). */
+  lastFailed: boolean;
   /** Hạn đặt trước v0.1.40 chưa xác nhận ⇒ chưa thi hành (câu nhắc dưới tên tập dữ liệu); null = không. */
   pending: string | null;
+  /** Lý do không sửa được (vd Manager trên bảng xoá theo tháng) — hiện thành chữ, không chỉ tooltip; null = không. */
+  lockedReason: string | null;
 }
+
+/** Người xem dòng hạn lưu: Owner / có quyền sửa (system.manage). Mặc định = Owner (giữ hành vi cũ). */
+export interface RetentionViewer {
+  isOwner: boolean;
+  canManage: boolean;
+}
+
+export const RETENTION_OWNER_ONLY_REASON = 'Chỉ Owner đổi được hạn lưu của dữ liệu xoá theo tháng';
 
 /** Tập dữ liệu mà lưu số ngày là đồng ý XOÁ VĨNH VIỄN dữ liệu quá hạn (cần hỏi lại trước khi gửi). */
 export function retentionDeletes(r: RetentionPolicy): boolean {
@@ -384,7 +396,7 @@ export function retentionOwnerOnly(r: RetentionPolicy): boolean {
 }
 
 /** v0.1.40 (F-2): một dòng bảng "Hạn lưu dữ liệu" — mọi giá trị là chuỗi/bool. */
-export function retentionRowView(r: RetentionPolicy, tz = DEFAULT_TZ): RetentionRowView {
+export function retentionRowView(r: RetentionPolicy, tz = DEFAULT_TZ, viewer: RetentionViewer = { isOwner: true, canManage: true }): RetentionRowView {
   const notApplicable = r.mode === 'not_applicable';
   const fixed = r.dataset === 'agent.browser_jobs.result';
   const note = typeof r.note === 'string' && r.note.trim() ? r.note.trim() : r.mode ? (RETENTION_MODE_NOTE[r.mode] ?? null) : null;
@@ -395,21 +407,31 @@ export function retentionRowView(r: RetentionPolicy, tz = DEFAULT_TZ): Retention
       : r.keep_days != null
         ? `${r.keep_days} ngày`
         : 'mãi mãi';
+  const lastFailed = !!r.last_run_at && !notApplicable && r.last_ok === false;
+  const unit = r.mode === 'partition' ? 'tháng' : 'dòng';
   const lastRun =
     r.last_run_at && !notApplicable
-      ? `Lần dọn gần nhất: ${fmtDM(r.last_run_at, tz)} ${fmtHM(r.last_run_at, tz)}${typeof r.last_deleted === 'number' ? ` · đã xoá ${fmtInt(r.last_deleted)}` : ''}`
+      ? lastFailed
+        ? `Lần dọn gần nhất lỗi (${fmtDM(r.last_run_at, tz)} ${fmtHM(r.last_run_at, tz)}) — hệ thống sẽ thử lại lúc 05:00`
+        : `Lần dọn gần nhất: ${fmtDM(r.last_run_at, tz)} ${fmtHM(r.last_run_at, tz)}${typeof r.last_deleted === 'number' ? ` · đã xoá ${fmtInt(r.last_deleted)} ${unit}` : ''}`
       : null;
+  const editable = !notApplicable && !fixed && r.editable !== false;
+  const canEdit = editable && viewer.canManage && (viewer.isOwner || !retentionOwnerOnly(r));
   const pending =
     r.needs_confirm === true && r.keep_days != null && !notApplicable && !fixed
-      ? 'Chưa áp dụng — hạn này đặt trước bản v0.1.40. Bấm Sửa → Lưu để xác nhận (dữ liệu quá hạn sẽ bị xoá vĩnh viễn).'
+      ? canEdit
+        ? 'Chưa áp dụng — hạn này đặt trước bản v0.1.40. Bấm Sửa → Lưu để xác nhận (dữ liệu quá hạn sẽ bị xoá vĩnh viễn).'
+        : 'Chưa áp dụng — hạn này đặt trước bản v0.1.40. Nhờ Owner xác nhận lại hạn này.'
       : null;
   return {
     keep: pending ? `${keep} (chưa áp dụng)` : keep,
     applicable: !notApplicable,
-    editable: !notApplicable && !fixed && r.editable !== false,
+    editable,
     note,
     lastRun,
+    lastFailed,
     pending,
+    lockedReason: editable && viewer.canManage && !viewer.isOwner && retentionOwnerOnly(r) ? RETENTION_OWNER_ONLY_REASON : null,
   };
 }
 

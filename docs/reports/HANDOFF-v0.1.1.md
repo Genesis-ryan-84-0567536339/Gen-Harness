@@ -2157,3 +2157,29 @@ Không cần chụp màn hình hay gửi mã cho Claude — kết quả tự lư
   `check_release_gate.py` thoát 0, unittest `.github/scripts` 30 OK.
 - Chờ sau phát hành (người điều phối): kiểm genh tải từ Release đúng checksum + `genh version` = v0.1.40; E2E release (gồm
   `e2e-offsite`) xanh rồi mới promote; sau đó Boss làm 3 bước ở đầu mục này.
+
+### Sửa sau review (lượt 2, 02/10)
+
+- **Tải gói mang đi báo lỗi được qua proxy (F-12, chặn)** — Caddy đặt `X-Frame-Options DENY` + CSP
+  `frame-ancestors 'none'` cho mọi phản hồi ⇒ trang lỗi JSON (409/423/500) bị chặn trong khung tải ẩn, Owner chờ 35 phút
+  không có lỗi. Caddyfile đổi sang `?X-Frame-Options` (chỉ đặt khi upstream chưa có; bản nhúng genh + nhãn
+  `gh.caddyfile-sha` cập nhật); api thêm middleware `SameOriginFrame` đặt `X-Frame-Options SAMEORIGIN` + CSP
+  `default-src 'none'; frame-ancestors 'self'` cho RIÊNG `/api/v1/system/offsite/portable` (cả lỗi PIN/quyền/428). Mock
+  e2e đặt header như Caddy; e2e mới: 409 PORTABLE_IN_PROGRESS ⇒ `offsite-portable-error` + "Chi tiết kỹ thuật" (đã kiểm:
+  bỏ SAMEORIGIN thì test đỏ đúng như lỗi thật).
+- **Hạn lưu chỉ xoá ở lượt dọn 05:00 (F-2)** — PATCH không còn đẩy hạn sang partman; `retention_sweep` đặt
+  `part_config.retention`, chạy bảo trì, đếm số tháng đã xoá rồi trả retention về NULL trong CÙNG giao dịch;
+  `partition_maintenance` (23:20/04:20) xoá retention trước `run_maintenance()` ⇒ không bao giờ xoá sớm hơn câu xác nhận
+  "05:00 hằng ngày", và "đã xoá N" đếm đủ. GET trả `last_ok`: lượt dọn lỗi hiện "Lần dọn gần nhất lỗi — hệ thống sẽ thử
+  lại lúc 05:00" (vàng), không còn "đã xoá 0"; bảng phân vùng ghi đơn vị "tháng", còn lại "dòng".
+- **Chuông bản sao ngoài máy không giả mỗi tuần (F-12)** — ngưỡng cũ = lịch tuần + 12 giờ ân hạn
+  (`health.OFFSITE_STALE_AFTER`, dùng chung cho chuông và GET /system/offsite).
+- **Dải "Cần Sếp xử lý" theo vai trò (F-12)** — Manager không còn được bảo bấm "Chọn nơi lưu…": thân `offsite.stale`
+  (chưa chọn nơi lưu) và `offsite.failed` GH-EB00/GH-EB07 đổi sang "nhờ Owner…" (`health.NON_OWNER_BODIES`).
+- **Nhỏ** — chuông `job.timeout` mở đúng thẻ Sức khoẻ (`focus=health`); dòng "Bản sao ngoài máy" ở thẻ Sức khoẻ gợi ý
+  theo mã lỗi (GH-EB07 chọn nơi khác, GH-EB04 giải phóng chỗ/cho ghi); hạn lưu "chưa áp dụng" theo vai trò (không phải
+  Owner trên bảng xoá theo tháng ⇒ "Nhờ Owner xác nhận lại", lý do "Chỉ Owner…" hiện thành chữ); Bộ khôi phục hiện
+  "Khoá tạo ngày dd/mm/yyyy"; bước 11 bỏ chữ S3 (cả `docs/handoff/06-owner-onboarding.md`); `genh uninstall` giữ dữ
+  liệu thì dặn cài lại đúng thư mục cài (mật khẩu ở secrets/ + .env), muốn xoá thư mục thì `--delete-data` trước;
+  doc comment `writeFileAtomicPerm` về đúng chỗ.
+- Chưa làm: preflight cài đặt tự phát hiện volume `<project>_pg_data` cũ khi sinh mật khẩu mới (nit, tuỳ chọn) — để bản sau.

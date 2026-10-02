@@ -98,8 +98,22 @@ const OWNER_VIEWER: OffsiteViewer = { isOwner: true, canManage: true };
 
 const LOSS = 'Hỏng ổ đĩa là mất hết dữ liệu';
 
-/** Việc cần làm tiếp theo (một câu) theo trạng thái + vai trò. */
-export function offsiteNextStep(configured: boolean, who: OffsiteViewer = OWNER_VIEWER): string {
+/**
+ * Việc cần làm tiếp theo (một câu) theo trạng thái + vai trò. `errorCode` (lần thử gần nhất lỗi) đổi việc cần làm khi
+ * "cắm ổ rồi sao lưu lại" không giúp được: GH-EB07 (nơi lưu không hợp lệ) ⇒ chọn nơi khác; GH-EB04 (ổ đầy/chỉ đọc) ⇒
+ * giải phóng chỗ/cho phép ghi.
+ */
+export function offsiteNextStep(configured: boolean, who: OffsiteViewer = OWNER_VIEWER, errorCode?: string | null): string {
+  if (errorCode === 'GH-EB07') {
+    return who.isOwner
+      ? 'Bấm "Chọn nơi lưu bản sao ngoài máy" và chọn thư mục khác trên ổ USB/NAS.'
+      : 'Nhờ Owner chọn lại nơi lưu bản sao ngoài máy (thư mục trên ổ USB/NAS).';
+  }
+  if (errorCode === 'GH-EB04') {
+    return who.canManage
+      ? 'Giải phóng chỗ trống trên ổ USB/NAS, kiểm tra ổ cho phép ghi rồi bấm "Sao lưu ra ổ ngoài ngay".'
+      : 'Báo Owner/quản trị giải phóng chỗ trống trên ổ USB/NAS và kiểm tra ổ cho phép ghi.';
+  }
   if (!configured) {
     return who.isOwner
       ? 'Cắm ổ USB/NAS vào máy chủ rồi bấm "Chọn nơi lưu bản sao ngoài máy".'
@@ -309,4 +323,11 @@ export function startPortableDownload(url: string, onError: (code: string, title
   frame.src = url;
   document.body.appendChild(frame);
   return true;
+}
+
+/** "Khoá tạo ngày dd/mm/yyyy" từ `created_hint` (YYYY-MM-DD) — chỉ chuỗi; sai khuôn/thiếu ⇒ null (không hiện). */
+export function keyCreatedText(hint: unknown): string | null {
+  if (typeof hint !== 'string') return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(hint.trim());
+  return m ? `Khoá tạo ngày ${m[3]}/${m[2]}/${m[1]}` : null;
 }

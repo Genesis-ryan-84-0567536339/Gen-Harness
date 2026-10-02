@@ -952,7 +952,9 @@ async def get_retention(request: Request, user: service.CurrentUser = Depends(RE
                     "editable": bool(meta["editable"]), "note": retention.note_for(d),
                     "needs_confirm": needs_confirm,
                     "last_run_at": last.get("at") if isinstance(run, dict) else None,
-                    "last_deleted": run.get("deleted") if isinstance(run, dict) else None})
+                    "last_deleted": run.get("deleted") if isinstance(run, dict) else None,
+                    # Lượt dọn của tập này lỗi (`ok: false`) ⇒ web báo lỗi, không hiện "đã xoá 0" như thành công.
+                    "last_ok": (run.get("ok") is not False) if isinstance(run, dict) else None})
     return out
 
 
@@ -995,23 +997,9 @@ async def patch_retention(body: RetentionIn, request: Request, user: service.Cur
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                            action="retention_policy.changed", target_type="retention_policy",
                            target_id=body.dataset, detail=body.model_dump(), ip=user.ip)
-    synced: bool | None = None
-    if body.dataset in retention.PARTITIONED:
-        # Hạn hiệu lực của bảng phân vùng = MAX qua mọi tổ chức ⇒ commit trước rồi đồng bộ partman ngay (qua admin);
-        # lỗi chỉ log — lượt dọn 05:00 (`retention_sweep`) tự đồng bộ lại.
-        await db.commit()
-        try:
-            await retention.sync_partman_now()
-            synced = True
-        except Exception as exc:  # noqa: BLE001
-            synced = False
-            log.warning("Không đồng bộ được hạn lưu sang partman: %s", exc)
-    rows = await get_retention(request, user, db)
-    if synced is not None:
-        for r in rows:
-            if r["dataset"] == body.dataset:
-                r["partman_synced"] = synced
-    return rows
+    # Bảng phân vùng: KHÔNG đẩy hạn sang partman ở đây — chỉ lượt dọn 05:00 (`retention_sweep`) đặt retention, xoá
+    # phân vùng quá hạn và đếm, đúng giờ câu xác nhận đã hứa (`partition_maintenance` 23:20/04:20 không xoá gì).
+    return await get_retention(request, user, db)
 
 
 async def _person_row(db: AsyncSession, org_id: uuid.UUID, person_id: uuid.UUID) -> Any:

@@ -104,7 +104,7 @@ func RunUninstall(ctx context.Context, env *Env, opts UninstallOptions, runner d
 				}
 			}
 		} else {
-			_, _ = fmt.Fprintln(out, "  Dữ liệu (CSDL, tệp) sẽ được GIỮ LẠI trong volume Docker (cài lại là thấy). Muốn xoá cả dữ liệu: --delete-data.")
+			_, _ = fmt.Fprintln(out, "  Dữ liệu (CSDL, tệp) sẽ được GIỮ LẠI trong volume Docker (cài lại vào ĐÚNG thư mục cài này là thấy). Muốn xoá cả dữ liệu: --delete-data.")
 			_, _ = fmt.Fprintln(out, "Tiếp tục? [y/N]")
 			if !confirmYesNo(in) {
 				return &OpError{
@@ -143,6 +143,9 @@ func RunUninstall(ctx context.Context, env *Env, opts UninstallOptions, runner d
 			}
 		}
 		_, _ = fmt.Fprintln(out, "Đã dừng và gỡ container"+volumesSuffix(!opts.DeleteData)+".")
+		if !opts.DeleteData {
+			_, _ = fmt.Fprintln(out, keepDataNote(env.InstallDir))
+		}
 	}
 
 	// Gỡ lịch tuần bản sao ngoài máy (v0.1.40) — không để lịch gọi một bản cài đã gỡ.
@@ -176,6 +179,15 @@ func RunUninstall(ctx context.Context, env *Env, opts UninstallOptions, runner d
 
 	_, _ = fmt.Fprintln(out, "\nGIỚI HẠN: genh uninstall KHÔNG tự gỡ Docker Engine/Colima/WSL kể cả khi genh đã tự cài ở Bước 2 (không có cách phân biệt an toàn với runtime sẵn có của Owner) — tự gỡ tay nếu không còn cần, xem ~/.gen-harness/runtime.")
 	return nil
+}
+
+// keepDataNote: volume giữ lại (pg_data…) vẫn khoá bằng mật khẩu CŨ trong
+// secrets/ + .env của thư mục cài. Cài lại vào thư mục khác (hoặc sau khi xoá
+// thư mục cài) sẽ sinh mật khẩu MỚI ⇒ migrate lỗi xác thực với CSDL cũ.
+func keepDataNote(installDir string) string {
+	return "Lưu ý: dữ liệu giữ lại chỉ mở được bằng mật khẩu trong thư mục cài " + installDir +
+		" (secrets/, .env) — cài lại phải dùng đúng thư mục này (--install-dir " + installDir + "), đừng xoá nó. " +
+		"Muốn xoá thư mục cài thì xoá dữ liệu trước: genh uninstall --delete-data (hoặc docker volume rm các volume của Gen-Harness)."
 }
 
 func volumesSuffix(keepData bool) string {

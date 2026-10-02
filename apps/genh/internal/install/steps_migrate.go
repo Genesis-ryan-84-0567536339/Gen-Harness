@@ -306,10 +306,6 @@ func ensureRandomSecretFile(path string) (string, error) {
 	return key, nil
 }
 
-// writeFileAtomicPerm ghi qua tệp tạm rồi rename — tránh để lại tệp bí mật
-// nửa vời nếu tiến trình bị ngắt giữa chừng (cùng cách
-// secretgen.writeFileAtomic làm, viết riêng ở đây vì hàm đó không xuất ra
-// khỏi package secretgen).
 // ensureOffsiteKeyFile sinh secrets/gh_offsite_key nếu CHƯA có (không bao giờ
 // ghi đè — khoá cũ đang mã hoá các gói trên ổ USB/NAS của Owner).
 func ensureOffsiteKeyFile(path string) error {
@@ -341,6 +337,10 @@ func generateOffsiteKey() (string, error) {
 	return strings.Join(groups, "-"), nil
 }
 
+// writeFileAtomicPerm ghi qua tệp tạm rồi rename — tránh để lại tệp bí mật
+// nửa vời nếu tiến trình bị ngắt giữa chừng (cùng cách
+// secretgen.writeFileAtomic làm, viết riêng ở đây vì hàm đó không xuất ra
+// khỏi package secretgen).
 func writeFileAtomicPerm(path string, data []byte, perm os.FileMode) error {
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, data, perm); err != nil {

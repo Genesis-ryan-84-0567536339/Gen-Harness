@@ -50,7 +50,8 @@ Ba endpoint ghi yêu cầu trả lại đúng khuôn `GET /system/offsite`.
 - `error_code`: `null` hoặc `GH-EB00…GH-EB07`; mã lạ ⇒ `"unknown"`.
 - `message`: API tự ghép theo `state`/`error_code` từ bảng tiếng Việt cố định (KHÔNG lấy chữ từ tệp run/).
 - `dest`: bỏ ký tự điều khiển, cắt ≤ 200 ký tự; rỗng ⇒ `null`.
-- `stale`: chưa có lần thành công hoặc `last_success_at` cũ hơn 7 ngày.
+- `stale`: chưa có lần thành công hoặc `last_success_at` cũ hơn 7 ngày 12 giờ (`health.OFFSITE_STALE_AFTER` = lịch tuần
+  + ân hạn: `last_success_at` là giờ BẮT ĐẦU lượt trước, timer trễ ngẫu nhiên tới 30 phút ⇒ không báo cũ giả mỗi tuần).
 - `schedule`: `systemd | cron | launchd | schtasks` hoặc `null`; `key_id`: 8 hex hoặc `null`.
 - `request.state`: `idle | requested | stalled` (yêu cầu nằm > 15 phút mà genh không giữ khoá ⇒ `stalled`).
 - `can_request`: `genh.json` có `updater` VÀ `"offsite"` trong `requests` VÀ `run/request/` ghi được.
@@ -161,18 +162,25 @@ Mật khẩu qua `GH_BUNDLE_PASSWORD`. KHÔNG đụng CSDL. Giải mã → giả
 
 Khối `offsite` **chỉ** có khi có hộp thư run/:
 `{state, configured, last_success_at, age_days, stale, error_code, schedule}`. Ở đây `stale` không tính tổ chức mới
-tạo ≤ 7 ngày chưa có lần nào; `stale` ⇒ `overall` tối đa `warn`.
+tạo trong `OFFSITE_STALE_AFTER` chưa có lần nào; `stale` ⇒ `overall` tối đa `warn`.
 
 Vòng theo dõi (`health.evaluate`, phần `offsite`, savepoint riêng) mở/đóng `ops.health_alerts` (key = kind),
 link `/system?tab=storage&focus=offsite`:
 
 | kind | Khi nào | Mức | fingerprint |
 |---|---|---|---|
-| `offsite.stale` | chưa cấu hình và tổ chức > 7 ngày — "Chưa có bản sao ngoài máy" | warn | `not_configured` |
-| `offsite.stale` | đã cấu hình, chưa có lần thành công và tổ chức > 7 ngày — "Chưa có bản sao ngoài máy" | warn | `never` |
-| `offsite.stale` | `last_success_at` cũ hơn 7 ngày — "Bản sao ngoài máy đã cũ N ngày" | warn; bad khi > 30 ngày | mức (`warn`/`bad`) |
+| `offsite.stale` | chưa cấu hình và tổ chức > 7 ngày 12 giờ — "Chưa có bản sao ngoài máy" | warn | `not_configured` |
+| `offsite.stale` | đã cấu hình, chưa có lần thành công và tổ chức > 7 ngày 12 giờ — "Chưa có bản sao ngoài máy" | warn | `never` |
+| `offsite.stale` | `last_success_at` cũ hơn 7 ngày 12 giờ — "Bản sao ngoài máy đã cũ N ngày" | warn; bad khi > 30 ngày | mức (`warn`/`bad`) |
 | `offsite.failed` | `state` failed/not_mounted và `last_attempt_at` > `last_success_at` — thân theo mã lỗi | warn | `last_attempt_at|error_code` |
 
 Hết điều kiện ⇒ đóng từng key (`offsite.failed` để nguyên khi `state=running`). Nhãn nút (`health.ACTIONS`):
 `offsite.stale` "Chọn nơi lưu / sao lưu ngay", `offsite.failed` "Xem bản sao ngoài máy", `job.timeout` "Xem sức khoẻ"
-(job.timeout do worker mở/đóng).
+(job.timeout do worker mở/đóng, link `/system?tab=storage&focus=health`). Người xem KHÔNG phải Owner: nhãn
+`offsite.stale` thành "Xem bản sao ngoài máy" (`NON_OWNER_ACTIONS`) và thân sự cố bảo bấm nút chỉ Owner có
+(`offsite.stale` `not_configured`, `offsite.failed` GH-EB00/GH-EB07) đổi sang câu "nhờ Owner…" (`NON_OWNER_BODIES`,
+chọn theo fingerprint).
+
+`GET /system/offsite/portable` tải trong khung ẩn cùng gốc: api đặt `X-Frame-Options: SAMEORIGIN` + CSP
+`default-src 'none'; frame-ancestors 'self'` cho riêng đường này (cả phản hồi lỗi) — proxy Caddy chỉ đặt DENY /
+`frame-ancestors 'none'` khi upstream chưa có (`?`), nên web đọc được mã lỗi JSON trong khung.

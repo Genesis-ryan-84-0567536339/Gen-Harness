@@ -11,7 +11,7 @@ import pytest
 from redis.asyncio import Redis
 from sqlalchemy import text
 
-from gh import worker
+from gh import health, worker
 
 
 async def slow_job(ctx: dict[str, Any]) -> str:
@@ -52,7 +52,7 @@ async def test_two_timeouts_raise_one_bell_then_success_clears(owner_api, db, re
     assert len(alerts) == 1
     a = alerts[0]
     assert a.key == "job.timeout:slow_job" and a.severity == "warn" and a.cleared_at is None
-    assert a.link == "/system?tab=storage" and "quá giờ 2 lần liền" in a.title
+    assert a.link == health.HEALTH_LINK == "/system?tab=storage&focus=health" and "quá giờ 2 lần liền" in a.title
     bells = await _bells(db)
     owners = (await db.execute(text("""SELECT count(*) FROM core.users u JOIN core.user_roles ur ON ur.user_id = u.id
                                         JOIN core.roles r ON r.id = ur.role_id AND r.code = 'owner'"""))).scalar_one()

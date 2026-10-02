@@ -94,8 +94,9 @@ export function healthRows(
               : { key: 'offsite', label: 'Bản sao ngoài máy', value: `Bản mới nhất ${fmtAgo(off.last_success_at, now, tz)}`, tone: 'ok' },
     );
     const last = rows[rows.length - 1];
-    // Gợi ý theo trạng thái + vai trò: chưa chọn nơi lưu thì nút "Sao lưu ngay" đang khoá; "Chọn nơi lưu" chỉ Owner có.
-    if (last.tone !== 'ok') last.hint = `Xem thẻ "Bản sao ngoài máy" bên dưới — ${offsiteNextStep(!!off.configured, who).replace(/^./, (c) => c.toLowerCase())}`;
+    // Gợi ý theo trạng thái + mã lỗi + vai trò: chưa chọn nơi lưu thì nút "Sao lưu ngay" đang khoá; "Chọn nơi lưu" chỉ
+    // Owner có; GH-EB07/GH-EB04 thì cắm ổ rồi sao lưu lại không giúp được (chọn nơi khác / giải phóng chỗ).
+    if (last.tone !== 'ok') last.hint = `Xem thẻ "Bản sao ngoài máy" bên dưới — ${offsiteNextStep(!!off.configured, who, failed ? off.error_code : null).replace(/^./, (c) => c.toLowerCase())}`;
   }
 
   const u = h.update;

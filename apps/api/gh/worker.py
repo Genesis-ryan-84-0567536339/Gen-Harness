@@ -117,7 +117,7 @@ async def _job_timeout_alert(ctx: dict[str, Any], name: str, *, open_: bool) -> 
                     db, org, key=key, kind="job.timeout", severity="warn",
                     title=f"Việc nền '{label}' chạy quá giờ {TIMEOUT_ALERT_AFTER} lần liền",
                     body="Hệ thống vẫn chạy; việc này sẽ thử lại ở lượt sau. Nếu còn lặp lại, mở Sức khoẻ hệ thống.",
-                    link="/system?tab=storage", fingerprint=str(TIMEOUT_ALERT_AFTER), redis=ctx.get("redis"))
+                    link=health.HEALTH_LINK, fingerprint=str(TIMEOUT_ALERT_AFTER), redis=ctx.get("redis"))
             else:
                 await health.clear(db, org, key)
         await db.commit()
@@ -265,6 +265,9 @@ async def partition_maintenance(ctx: dict[str, Any]) -> None:
     """`partman.run_maintenance()` tạo bảng phân vùng mới hằng tháng — là DDL, role `gh_app` (GH_DATABASE_URL,
     không superuser) không có quyền tạo bảng nên job này luôn chạy qua `GH_ADMIN_DATABASE_URL`."""
     async with admin_sessionmaker()() as db:
+        # v0.1.40 (F-2): bảo trì chỉ tạo phân vùng mới, KHÔNG xoá tháng quá hạn — retention đưa về NULL trong cùng giao
+        # dịch; chỉ `retention_sweep` 05:00 xoá (đúng giờ câu xác nhận nói với Owner, đếm đủ số tháng đã xoá).
+        await retention.clear_partman_retention(db)
         await db.execute(text("SELECT partman.run_maintenance()"))
         await db.commit()
     # v0.1.40 (F-16): LEAKPROOF của similarity_op mất sau `genh import` (pg_restore không giữ) — đặt lại ở đây.

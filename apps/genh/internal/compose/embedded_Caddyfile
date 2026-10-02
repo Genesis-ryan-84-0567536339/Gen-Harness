@@ -10,7 +10,8 @@
 	header {
 		Strict-Transport-Security "max-age=31536000"
 		X-Content-Type-Options "nosniff"
-		X-Frame-Options "DENY"
+		# `?`: api tự đặt SAMEORIGIN cho riêng /system/offsite/portable (khung tải cùng gốc đọc được trang lỗi, F-12).
+		?X-Frame-Options "DENY"
 		Referrer-Policy "same-origin"
 		Permissions-Policy "camera=(), microphone=(), geolocation=()"
 		# Chỉ đặt khi upstream CHƯA có (`?`): giữ CSP riêng của tệp tài liệu từ api (sandbox / chặn mã, F-5).

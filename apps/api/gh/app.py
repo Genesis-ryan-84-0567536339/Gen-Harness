@@ -45,7 +45,7 @@ from gh.errors import (
 from gh.gen.routes import router as gen_router
 from gh.hub_link.routes import router as hub_router
 from gh.mcp_api.routes import router as mcp_router
-from gh.middleware import ActionLogGuard, SessionCookieRenewal, SetupGate
+from gh.middleware import ActionLogGuard, SameOriginFrame, SessionCookieRenewal, SetupGate
 from gh.notifications import router as notifications_router
 from gh.plugins_api.routes import router as plugins_router
 from gh.providers import cli as climod
@@ -236,6 +236,7 @@ def create_app(*, with_lifespan: bool = True, expose_docs: bool | None = None) -
     app.add_middleware(SessionCookieRenewal)
     app.add_middleware(ActionLogGuard)
     app.add_middleware(SetupGate)
+    app.add_middleware(SameOriginFrame)  # ngoài cùng: cả 428 của SetupGate cũng mang header khung cùng gốc
     return app
 
 

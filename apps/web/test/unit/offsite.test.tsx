@@ -281,7 +281,7 @@ describe('Bản sao ngoài máy — thẻ', () => {
       if (c.url.endsWith('/system/offsite')) return json(200, state());
       if (c.url.endsWith('/system/offsite/recovery-kit')) {
         if (!pinOk) return PIN_REQUIRED();
-        return json(200, { key: KEY, key_id: 'a1b2c3d4', steps: ['Cài Gen-Harness trên máy mới.', 'Nhập Khoá khôi phục khi được hỏi.'], warning: 'Ai có khoá này và ổ USB là mở được dữ liệu.' });
+        return json(200, { key: KEY, key_id: 'a1b2c3d4', created_hint: '2026-09-28', steps: ['Cài Gen-Harness trên máy mới.', 'Nhập Khoá khôi phục khi được hỏi.'], warning: 'Ai có khoá này và ổ USB là mở được dữ liệu.' });
       }
       if (c.url.endsWith('/auth/pin/verify')) {
         pinOk = true;
@@ -296,6 +296,7 @@ describe('Bản sao ngoài máy — thẻ', () => {
     const dlg = await screen.findByRole('dialog', { name: 'Bộ khôi phục' });
     expect(await within(dlg).findByTestId('recovery-key')).toHaveTextContent(KEY);
     expect(dlg).toHaveTextContent('Cất TÁCH khỏi ổ USB');
+    expect(within(dlg).getByTestId('recovery-key-created')).toHaveTextContent('Khoá tạo ngày 28/09/2026');
     expect(dlg).toHaveTextContent('Nhập Khoá khôi phục khi được hỏi.');
     const svg = dlg.querySelector('svg.rk-qr') as SVGElement;
     expect(svg).not.toBeNull();
@@ -376,6 +377,15 @@ describe('Bản sao ngoài máy — câu theo vai trò, lệnh chạy tay, khoá
     const cfg = { ...h, offsite: { ...h.offsite!, configured: true, state: 'ok', last_success_at: new Date(Date.now() - 9 * DAY).toISOString(), age_days: 9 } } as SystemHealth;
     expect(hint(MANAGER, cfg)).toContain('bấm "Sao lưu ra ổ ngoài ngay"');
     expect(hint(VIEWER, cfg)).toContain('báo Owner/quản trị');
+    // Lỗi mà "cắm ổ rồi sao lưu lại" không giúp được: gợi ý theo mã lỗi.
+    const eb07 = { ...cfg, offsite: { ...cfg.offsite!, state: 'failed', error_code: 'GH-EB07' } } as SystemHealth;
+    expect(hint(OWNER, eb07)).toContain('bấm "Chọn nơi lưu bản sao ngoài máy" và chọn thư mục khác');
+    expect(hint(MANAGER, eb07)).toContain('nhờ Owner chọn lại nơi lưu');
+    expect(hint(MANAGER, eb07)).not.toContain('cắm ổ USB/NAS rồi bấm');
+    const eb04 = { ...cfg, offsite: { ...cfg.offsite!, state: 'failed', error_code: 'GH-EB04' } } as SystemHealth;
+    expect(hint(OWNER, eb04)).toContain('giải phóng chỗ trống trên ổ USB/NAS, kiểm tra ổ cho phép ghi');
+    expect(hint(VIEWER, eb04)).toContain('báo Owner/quản trị giải phóng chỗ trống');
+    expect(hint(OWNER, eb04)).not.toContain('cắm ổ USB/NAS rồi bấm');
   });
 
   it('Manager/Viewer khi chưa cấu hình: nút Sao lưu ngay khoá đúng lý do; Viewer không có nút nào', async () => {

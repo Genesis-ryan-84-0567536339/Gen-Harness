@@ -6,7 +6,7 @@ import { Button, Dialog, Icon } from '@gen-harness/ui';
 import { api } from '../../lib/api';
 import { errorText } from '../../lib/errorText';
 import { InlineError, SkeletonLines } from '../common';
-import { errorCodeOf, offsiteApiErrorText } from './offsiteModel';
+import { errorCodeOf, keyCreatedText, offsiteApiErrorText } from './offsiteModel';
 
 /** Chế độ mã QR: base32 HOA + '-' nằm trọn trong bảng Alphanumeric (gọn hơn Byte); chữ khác thì dùng Byte. */
 const ALNUM_RE = /^[0-9A-Z $%*+\-./:]+$/;
@@ -97,6 +97,7 @@ export function RecoveryKitDialog({ onClose }: { onClose: () => void }) {
               </div>
               <div className="rk-keyid">
                 Mã nhận diện khoá: <span className="mono">{kit.key_id}</span>
+                {keyCreatedText(kit.created_hint) ? <span data-testid="recovery-key-created"> · {keyCreatedText(kit.created_hint)}</span> : null}
               </div>
             </div>
             <QrSvg text={kit.key} label="Mã QR của Khoá khôi phục" />

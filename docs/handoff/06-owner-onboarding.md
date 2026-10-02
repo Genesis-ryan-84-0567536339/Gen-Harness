@@ -25,7 +25,7 @@ Dùng cùng token và thành phần của Console (`docs/02`) — không phải 
 | 8 | **Agent đầu tiên** | ✓ | Chọn mẫu (Trợ lý thương mại, Key Account, Admin hậu cần, CSKH, Recruiter, Thư ký cá nhân) hoặc tạo trống. Sửa tên, xưng hô, giọng, được nói khi, cấm. Gán kênh/nhóm. Khung **Thử trò chuyện** 3 lượt để nghe giọng | Agent lưu, có ≥1 phạm vi kênh |
 | 9 | **Tự trị & ranh giới** | ✓ | Thang 0–6 dạng segmented, mô tả từng mức; mặc định 4. Ngưỡng tiền phải duyệt (mặc định 50.000.000 ₫). Danh sách ranh giới có trách nhiệm (từ `boundaries`), mục khoá hiện công tắc mờ + giải thích vì sao không tắt được | Lưu |
 | 10 | **Mời đội ngũ** | — | Thêm email + vai trò (Manager, Operator, Agent nhân viên, Auditor), xem trước ma trận quyền của vai trò đã chọn. Sinh liên kết mời | Bỏ qua được |
-| 11 | **Sao lưu** | — | Lịch (hằng ngày 02:00 mặc định), nơi lưu (trong máy / S3-compatible), giữ bao lâu. Nút **Sao lưu thử ngay** với tiến độ % | Bỏ qua được (cảnh báo WARN) |
+| 11 | **Sao lưu** | — | Lịch (hằng ngày 02:00 mặc định), nơi lưu trên máy chủ (bản sao ra ổ USB/NAS chọn ở Điều khiển hệ thống › Dữ liệu & lưu trữ), giữ bao lâu. Nút **Sao lưu thử ngay** với tiến độ % | Bỏ qua được (cảnh báo WARN) |
 | 12 | **Hoàn tất** | ✓ | Tóm tắt những gì đã bật. Khung tiến độ **lần sàng lọc đầu tiên** realtime qua WebSocket: bản ghi thô đã gom · đang phân loại · đã vào kho sạch. Nút **Mở Tổng quan điều hành** | Bấm nút |
 
 ## Hành vi

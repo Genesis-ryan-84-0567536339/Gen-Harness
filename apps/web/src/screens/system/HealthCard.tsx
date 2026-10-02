@@ -1,3 +1,5 @@
+import { useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import type { SystemHealth } from '@gen-harness/contracts';
 import { useCan, useOrgTimezone } from '../../lib/permissions';
 import { useMe } from '../../lib/queries';
@@ -16,6 +18,19 @@ export function HealthCard() {
   const tz = useOrgTimezone();
   const now = useNow(30_000);
   const q = useSystemHealth(canRead);
+  // Dải "Cần Sếp xử lý" (job.timeout → `/system?tab=storage&focus=health`, nút "Xem sức khoẻ"): cuộn tới thẻ này.
+  const [params] = useSearchParams();
+  const focusHealth = params.get('focus') === 'health';
+  const focused = useRef(false);
+  useEffect(() => {
+    if (!focusHealth || focused.current || !q.data) return;
+    focused.current = true;
+    const panel = document.querySelector<HTMLElement>('[data-gen-target="system.storage.health"]');
+    if (!panel) return;
+    panel.scrollIntoView?.({ block: 'start' });
+    panel.setAttribute('tabindex', '-1');
+    panel.focus({ preventScroll: true });
+  }, [focusHealth, q.data]);
   if (!canRead) return null;
   return (
     <Panel genTarget="system.storage.health" title="Sức khoẻ hệ thống" kicker="Tự kiểm mỗi phút" label="Sức khoẻ hệ thống" bodyClass="health-card" className="health-card-panel">

@@ -275,6 +275,13 @@ async def test_recovery_kit_missing_key(owner_api: Api, link: Path, monkeypatch:
 
 # ─── Tải gói mang đi ────────────────────────────────────────────────────────────────────────────────────────
 
+def _assert_same_origin_frame(r: Any) -> None:
+    """Proxy Caddy đặt `?X-Frame-Options DENY` / `?CSP frame-ancestors 'none'` (chỉ khi api chưa đặt) ⇒ api phải tự
+    đặt cho phép khung cùng gốc, nếu không trang lỗi JSON bị chặn trong khung tải ẩn và web không báo lỗi được."""
+    assert r.headers["x-frame-options"] == "SAMEORIGIN"
+    assert r.headers["content-security-policy"] == "default-src 'none'; frame-ancestors 'self'"
+
+
 class FakeProc:
     def __init__(self, out: Path, gate: asyncio.Event | None, rc: int = 0, err: bytes = b"") -> None:
         self.out, self.gate, self.returncode, self.err = out, gate, rc, err
@@ -306,18 +313,24 @@ async def test_portable_streams_bundle_with_key_in_env_only(owner_api: Api, link
         return FakeProc(out, gate)
 
     monkeypatch.setattr(offsite, "_exec", fake_exec)
-    assert (await owner_api.get("/system/offsite/portable")).status_code == 423
+    locked = await owner_api.get("/system/offsite/portable")
+    assert locked.status_code == 423
+    _assert_same_origin_frame(locked)  # trang lỗi PIN cũng đọc được trong khung tải cùng gốc
     await _pin(owner_api)
 
     first = asyncio.create_task(owner_api.get("/system/offsite/portable"))
     await asyncio.wait_for(started.wait(), 10)
     second = await owner_api.get("/system/offsite/portable")  # lần 2 song song ⇒ khoá Redis
     assert second.status_code == 409 and second.json()["code"] == "PORTABLE_IN_PROGRESS"
+    _assert_same_origin_frame(second)
     gate.set()
     r = await first
     assert r.status_code == 200, r.text
     assert r.content.startswith(b"GHBUNDLE1\n")
     assert r.headers["cache-control"] == "no-store"
+    _assert_same_origin_frame(r)
+    other = await owner_api.get("/system/offsite")  # đường khác: không nới — Caddy đặt DENY + frame-ancestors 'none'
+    assert "x-frame-options" not in other.headers and "content-security-policy" not in other.headers
     assert re.search(r'filename="gen-harness-mang-di-\d{8}-\d{4}\.ghbundle"', r.headers["content-disposition"])
 
     [call] = calls
@@ -346,6 +359,7 @@ async def test_portable_failure_is_friendly_and_cleans_up(owner_api: Api, link: 
     assert r.status_code == 500
     body = r.json()
     assert body["code"] == "PORTABLE_FAILED" and body["title"] == "Không tạo được gói mang đi"
+    _assert_same_origin_frame(r)
     assert KEY not in r.text
     assert not outs[0].exists()
     assert await redis.get(offsite.PORTABLE_LOCK_KEY) is None

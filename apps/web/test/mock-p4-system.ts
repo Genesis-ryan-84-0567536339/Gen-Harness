@@ -297,6 +297,8 @@ export function createMock(opts: P4SystemOptions) {
           ? `genh offsite set "${path}"`
           : null;
   let offsiteRequestPath: string | null = null;
+  /** Hook `portable_busy` ⇒ GET /system/offsite/portable trả 409 PORTABLE_IN_PROGRESS (như khoá Redis của API). */
+  let portableBusy = false;
   const UNAVAILABLE_TITLE = 'Máy chủ chưa nhận lệnh từ Console — chạy lệnh sau một lần trên máy chủ';
   function offsiteView() {
     const last = offsite.last_success_at || null;
@@ -309,7 +311,8 @@ export function createMock(opts: P4SystemOptions) {
       last_attempt_at: offsite.last_attempt_at || null,
       last_success_at: last,
       age_days: age,
-      stale: age == null || age > 7,
+      // Như health.OFFSITE_STALE_AFTER: lịch tuần + 12 giờ ân hạn.
+      stale: age == null || age > 7.5,
       last_size_bytes: offsite.last_size_bytes || null,
       schedule: offsite.schedule || null,
       request: { ...offsite.request },
@@ -511,6 +514,8 @@ export function createMock(opts: P4SystemOptions) {
       if (p === '/system/offsite/portable' && m === 'GET') {
         if (!pin(ctx, 'offsite.portable')) return true;
         if (!offsite.key_present) return problem(409, 'OFFSITE_KEY_MISSING', OFFSITE_KEY_MISSING_TITLE);
+        // Chép đúng gh/system_api/offsite.portable (conflict PORTABLE_IN_PROGRESS).
+        if (portableBusy) return problem(409, 'PORTABLE_IN_PROGRESS', 'Đang tạo một gói mang đi khác — chờ xong rồi thử lại');
         return ctx.text(200, 'application/octet-stream', 'GHBUNDLE-MOCK', 'gen-harness-portable.ghbundle');
       }
       return problem(404, 'NOT_FOUND', 'Không tìm thấy');
@@ -636,11 +641,24 @@ export function createMock(opts: P4SystemOptions) {
     hooks: {
       /** `__mock/p3/system/offsite` {…OffsiteState một phần; `days_ago` đặt lần thành công gần nhất (null = chưa có)}. */
       offsite: (b: Record<string, unknown>) => {
-        const { days_ago: daysAgo, ...rest } = b ?? {};
+        const { days_ago: daysAgo, portable_busy: busy, ...rest } = b ?? {};
+        if (typeof busy === 'boolean') portableBusy = busy;
         Object.assign(offsite, rest);
         if (typeof daysAgo === 'number') offsite.last_success_at = new Date(Date.now() - daysAgo * DAY).toISOString();
         if (daysAgo === null) offsite.last_success_at = '';
         return offsiteView();
+      },
+      /**
+       * `__mock/p3/system/grant` {role, permission, scope} — đổi MỘT ô ma trận quyền kể cả quyền ngoài 7 cột sửa được (vd
+       * cấp system.read/system.manage cho Manager như Owner tự cấp ở API thật). Trả giá trị cũ để test trả lại.
+       */
+      grant: (b: { role: RoleCode; permission: string; scope: string }) => {
+        const idx = opts.roleOrder.indexOf(b.role);
+        const row = opts.matrix[b.permission];
+        if (idx < 0 || !row) return null;
+        const prev = row[idx];
+        row[idx] = b.scope;
+        return { prev };
       },
     } as unknown as Record<string, (...args: never[]) => unknown>,
     dispose: () => {},

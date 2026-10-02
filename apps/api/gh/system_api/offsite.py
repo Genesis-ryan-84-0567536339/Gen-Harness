@@ -172,7 +172,7 @@ def read_status(d: Path, *, now: datetime | None = None) -> dict[str, Any]:
 
 
 def _stale_after() -> timedelta:
-    return timedelta(days=health.OFFSITE_STALE_DAYS)
+    return health.OFFSITE_STALE_AFTER
 
 
 def _request_raw(d: Path) -> dict[str, Any] | None:

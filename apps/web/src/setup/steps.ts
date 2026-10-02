@@ -65,7 +65,7 @@ export const SETUP_STEPS: StepMeta[] = [
   },
   {
     n: 11, key: 'backup', title: 'Sao lưu', required: false, built: true,
-    content: 'Lịch sao lưu (mặc định hằng ngày 02:00), nơi lưu (trong máy hoặc S3-compatible), giữ bao lâu. Nút Sao lưu thử ngay với tiến độ %.',
+    content: 'Lịch sao lưu (mặc định hằng ngày 02:00), nơi lưu trên máy chủ (bản sao ra ổ USB/NAS chọn ở Dữ liệu & lưu trữ), giữ bao lâu. Nút Sao lưu thử ngay với tiến độ %.',
     doneWhen: 'Để sau được (có cảnh báo) — hiện ở "Việc thiết lập tiếp" trên Tổng quan',
   },
   {

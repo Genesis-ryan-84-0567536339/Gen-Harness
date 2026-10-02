@@ -219,3 +219,57 @@ async def test_no_host_link_keeps_old_shape(owner_api: Api, tmp_path: Path, monk
     get_settings.cache_clear()
     assert "offsite" not in body
     assert await _alerts(db, "offsite.stale") == []
+
+
+async def test_weekly_run_in_progress_is_not_stale(owner_api: Api, link: Path, db, redis) -> None:  # type: ignore[no-untyped-def]
+    """Lịch tuần: lần thành công trước cách 7 ngày + 40 phút, lượt tuần này đang chạy (timer trễ ngẫu nhiên tới 30 phút,
+    xuất+kiểm mất vài phút) ⇒ chưa được coi là cũ — không chuông giả mỗi tuần."""
+    org = await org_id(db)
+    await _age_org(db, org, 40)
+    now = datetime.now(UTC)
+    last = now - timedelta(days=7, minutes=40)
+    _status(link, state="running", last_attempt_at=_iso(now - timedelta(minutes=5)), last_success_at=_iso(last))
+    await _evaluate(redis, org, now)
+    assert await _alerts(db, "offsite.stale") == []
+    assert await _bells(db, "offsite.stale") == []
+    body = (await owner_api.get("/system/health")).json()
+    assert body["offsite"]["stale"] is False
+    assert (await owner_api.get("/system/offsite")).json()["stale"] is False
+    # quá ân hạn (7 ngày 12 giờ) mới là cũ
+    await _evaluate(redis, org, last + health.OFFSITE_STALE_AFTER + timedelta(minutes=1))
+    [row] = await _alerts(db, "offsite.stale")
+    assert row.cleared_at is None
+
+
+async def test_manager_body_does_not_promise_owner_buttons(client, owner_api: Api, link: Path, db, redis) -> None:  # type: ignore[no-untyped-def]
+    """Thân sự cố của Manager không bảo bấm "Chọn nơi lưu…" (nút chỉ Owner có) — nhờ Owner; Owner giữ thân gốc."""
+    from tests.test_rbac_api import login_as
+
+    org = await org_id(db)
+    await _age_org(db, org, 8)
+    now = datetime.now(UTC)
+    _status(link, configured=False, dest="", state="failed", error_code="GH-EB07", last_attempt_at=_iso(now))
+    await _evaluate(redis, org, now)
+    await db.execute(text("""INSERT INTO core.role_permissions (role_id, permission_code, scope)
+                             SELECT id, p, 'all' FROM core.roles, unnest(ARRAY['system.read', 'system.manage']) p
+                             WHERE code = 'manager'
+                             ON CONFLICT (role_id, permission_code) DO UPDATE SET scope = 'all'"""))
+    await db.commit()
+    mgr = await login_as(client, db, "manager")
+    m_bodies = {i["kind"]: i["body"] for i in (await mgr.get("/system/health")).json()["issues"]}
+    o_bodies = {i["kind"]: i["body"] for i in (await owner_api.get("/system/health")).json()["issues"]}
+    assert m_bodies["offsite.stale"] == health.NON_OWNER_BODIES[("offsite.stale", "not_configured")]
+    assert m_bodies["offsite.failed"] == health.NON_OWNER_BODIES[("offsite.failed", "GH-EB07")]
+    for b in (m_bodies["offsite.stale"], m_bodies["offsite.failed"]):
+        assert "bấm 'Chọn nơi lưu" not in b and "nhờ Owner" in b.replace("Nhờ Owner", "nhờ Owner")
+    assert "'Chọn nơi lưu bản sao ngoài máy'" in o_bodies["offsite.stale"]
+    assert o_bodies["offsite.failed"] == health.OFFSITE_FAILED_BODY["GH-EB07"]
+
+
+def test_viewer_body_keeps_run_button_text_for_manager() -> None:
+    """Manager CÓ nút "Sao lưu ra ổ ngoài ngay" ⇒ thân offsite cũ/EB01 giữ nguyên."""
+    body = "Cắm ổ USB/NAS rồi bấm 'Sao lưu ra ổ ngoài ngay' để có bản sao mới ngoài máy chủ"
+    assert health._viewer_body("offsite.stale", "warn", body, False) == body
+    assert health._viewer_body("offsite.failed", "2026-01-01T00:00:00Z|GH-EB01", "x", False) == "x"
+    assert health._viewer_body("offsite.failed", "2026-01-01T00:00:00Z|GH-EB00", "x", True) == "x"
+    assert health._viewer_body("offsite.failed", "t|GH-EB00", "x", False).startswith("Chưa chọn nơi lưu — nhờ Owner")
