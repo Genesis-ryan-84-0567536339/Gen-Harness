@@ -60,12 +60,6 @@ export function initialsOf(name: string): string {
   return (first + last).toLocaleUpperCase('vi').slice(0, 2) || '·';
 }
 
-/** Thang tự trị 0–6 (nhãn tĩnh — docs/design seed autonomySteps, không qua API). */
-export const AUTONOMY_STEPS = [
-  'Chỉ ghi nhận', 'Tóm tắt', 'Chấm điểm + giải thích', 'Gợi ý hành động',
-  'Soạn sẵn chờ duyệt', 'Tự làm việc thấp rủi ro', 'Tự làm việc đã whitelist',
-];
-
 export const SUMMARY_TONE: Record<string, string> = { ok: OK, bad: BAD, neutral: N4 };
 
 const EVENT_TONE: Record<string, string> = {

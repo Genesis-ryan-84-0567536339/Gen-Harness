@@ -23,3 +23,4 @@ export * from './notifications';
 export * from './social';
 export * from './pickers';
 export * from './bossChecks';
+export * from './autonomy';

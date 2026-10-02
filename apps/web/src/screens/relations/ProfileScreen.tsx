@@ -1,13 +1,13 @@
 import { useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import type { Profile } from '@gen-harness/contracts';
+import { AUTONOMY_LEVELS, type Profile } from '@gen-harness/contracts';
 import { Button, Card, Dialog, EmptyState, Icon, TextField } from '@gen-harness/ui';
 import { fmtDMClock } from '../../lib/format';
 import { useUrlState } from '../../lib/uiStore';
 import { CardError, InlineError, Panel, SkeletonLines } from '../common';
 import { WhyButton } from '../core/Evidence';
 import { errorText } from '../../lib/errorText';
-import { AUTONOMY_STEPS, SUMMARY_TONE, channelIcon, channelTone, eventTone, fmtBytes, initialsOf } from './relationsModel';
+import { SUMMARY_TONE, channelIcon, channelTone, eventTone, fmtBytes, initialsOf } from './relationsModel';
 import { useProfile, useUpdateProfile } from './queries';
 
 export function ProfileScreen() {
@@ -18,7 +18,17 @@ export function ProfileScreen() {
     return (
       <div className="screen">
         <Card>
-          <EmptyState icon="ph ph-identification-card" title="Chưa chọn hồ sơ" description="Mở một hồ sơ từ Nhóm & Con người hoặc Bản đồ quan hệ." />
+          <EmptyState
+            icon="ph ph-identification-card"
+            title="Chưa chọn hồ sơ"
+            description="Mở một hồ sơ từ Khách & Nhóm."
+            actions={
+              <Link to="/directory" className="gh-btn gh-btn--primary btn-24">
+                <Icon name="ph ph-address-book" size={12} />
+                Mở Khách &amp; Nhóm
+              </Link>
+            }
+          />
         </Card>
       </div>
     );
@@ -48,7 +58,7 @@ function ProfileBody({ id, p }: { id: string; p: Profile }) {
     <div className="screen">
       <Link to="/directory" className="gh-btn gh-btn--ghost pf-back">
         <Icon name="ph ph-arrow-left" size={13} />
-        Quay lại Nhóm &amp; Con người
+        Quay lại Khách &amp; Nhóm
       </Link>
 
       <div className="pf-head">
@@ -144,13 +154,13 @@ function ProfileBody({ id, p }: { id: string; p: Profile }) {
           <Panel title="Mức tự trị với đối tượng này" kicker={`Thang 0–6 · đang đặt mức ${p.autonomy_level ?? '—'}`}>
             <div className="pf-autonomy">
               <div className="pf-autonomy__steps">
-                {AUTONOMY_STEPS.map((title, n) => (
+                {AUTONOMY_LEVELS.map((title, n) => (
                   <span key={n} className="pf-autonomy__step" data-on={p.autonomy_level !== null && n <= p.autonomy_level} title={`Mức ${n} — ${title}`}>
                     {n}
                   </span>
                 ))}
               </div>
-              <p className="pf-autonomy__desc">{p.autonomy_level !== null ? `Mức ${p.autonomy_level} — ${AUTONOMY_STEPS[p.autonomy_level]}.` : 'Chưa đặt mức tự trị riêng cho đối tượng này — dùng mức mặc định.'}</p>
+              <p className="pf-autonomy__desc">{p.autonomy_level !== null ? `Mức ${p.autonomy_level} — ${AUTONOMY_LEVELS[p.autonomy_level]}.` : 'Chưa đặt mức tự trị riêng cho đối tượng này — dùng mức mặc định.'}</p>
               <Button variant="ghost" size="sm" icon="ph ph-sliders-horizontal" onClick={() => setAutonomyOpen(true)}>
                 Đổi mức tự trị
               </Button>
@@ -215,13 +225,13 @@ function AutonomyDialog({ id, p, onClose }: { id: string; p: Profile; onClose: (
       onSave={() => update.mutate({ id, body: { autonomy_level: level } }, { onSuccess: onClose })}
     >
       <div className="pf-autonomy__steps">
-        {AUTONOMY_STEPS.map((title, n) => (
+        {AUTONOMY_LEVELS.map((title, n) => (
           <button key={n} type="button" className="pf-autonomy__step pf-autonomy__step--btn" data-on={n <= level} aria-pressed={n === level} title={title} onClick={() => setLevel(n)}>
             {n}
           </button>
         ))}
       </div>
-      <p className="pf-autonomy__desc">Mức {level} — {AUTONOMY_STEPS[level]}.</p>
+      <p className="pf-autonomy__desc">Mức {level} — {AUTONOMY_LEVELS[level]}.</p>
     </DialogShell>
   );
 }
