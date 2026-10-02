@@ -24,21 +24,79 @@ def level(conf: float) -> str:
 
 # ─── Đề xuất ────────────────────────────────────────────────────────────────
 
+WATERMARK_JOB = "identity.detect"
+DETECT_LIMIT = 2000
+NAME_THRESHOLD = 0.55
+
+#: Cặp ứng viên: vế a = định danh MỚI (id > mốc — uuid_v7 tăng theo thời gian) hoặc hồ sơ sửa sau mốc; vế b = mọi
+#: định danh còn sống. Trùng SĐT (chỉ mục phone_e164) hoặc tên gần giống (`%` trên lower(display_name) ⇒ chỉ mục gin
+#: persons_lower_name_trgm_idx, ngưỡng `pg_trgm.similarity_threshold` đặt bằng SET LOCAL; LATERAL … OFFSET 0 giữ
+#: dạng "dò chỉ mục cho từng định danh mới"). Mọi CTE MATERIALIZED: cặp ứng viên tính xong mới nối với bảng gốc theo
+#: khoá chính — không để planner trải tích Đề-các định danh × định danh. Cặp đã có trong identity_merge_candidates
+#: bị loại TRƯỚC LIMIT (NOT EXISTS khớp unique index LEAST/GREATEST của 0003) — trước v0.1.40 LIMIT lấy cả cặp cũ
+#: rồi ON CONFLICT bỏ qua ⇒ đủ 2000 cặp cũ là không bao giờ ra đề xuất mới.
+DETECT_SQL = """
+WITH fresh AS MATERIALIZED (
+  SELECT pi.id, pi.person_id, pi.phone_e164, lower(p.display_name) AS name
+  FROM core.person_identities pi JOIN core.persons p ON p.id = pi.person_id
+  WHERE p.org_id = :o AND p.merged_into_id IS NULL AND p.deleted_at IS NULL
+    AND (CAST(:full AS boolean)
+         OR pi.id > COALESCE(CAST(:last_id AS uuid), '00000000-0000-0000-0000-000000000000'::uuid)
+         OR p.updated_at > CAST(:last_at AS timestamptz))),
+cand AS MATERIALIZED (
+  SELECT f.id AS a_id, pib.id AS b_id
+  FROM fresh f JOIN core.person_identities pib ON pib.phone_e164 = f.phone_e164
+  WHERE f.phone_e164 IS NOT NULL AND pib.person_id <> f.person_id
+  UNION
+  SELECT f.id, pib.id
+  FROM fresh f
+  CROSS JOIN LATERAL (SELECT pb.id FROM core.persons pb
+                      WHERE lower(pb.display_name) % f.name AND pb.id <> f.person_id OFFSET 0) pb
+  JOIN core.person_identities pib ON pib.person_id = pb.id),
+pairs AS MATERIALIZED (
+  SELECT DISTINCT LEAST(a_id, b_id) AS a, GREATEST(a_id, b_id) AS b FROM cand)
+SELECT x.a, x.b, ia.phone_e164 IS NOT NULL AND ia.phone_e164 = ib.phone_e164 AS phone,
+       similarity(lower(pa.display_name), lower(pb.display_name)) AS sim, ca.type AS ch_a, cb.type AS ch_b,
+       EXISTS (SELECT 1 FROM core.group_members ga JOIN core.group_members gb ON gb.group_id = ga.group_id
+               WHERE ga.person_id = pa.id AND gb.person_id = pb.id) AS cogroup
+FROM pairs x
+JOIN core.person_identities ia ON ia.id = x.a JOIN core.persons pa ON pa.id = ia.person_id
+JOIN core.channels ca ON ca.id = ia.channel_id
+JOIN core.person_identities ib ON ib.id = x.b JOIN core.persons pb ON pb.id = ib.person_id
+JOIN core.channels cb ON cb.id = ib.channel_id
+WHERE pa.id <> pb.id
+  AND pa.org_id = :o AND pa.merged_into_id IS NULL AND pa.deleted_at IS NULL
+  AND pb.org_id = :o AND pb.merged_into_id IS NULL AND pb.deleted_at IS NULL
+  AND ((ia.phone_e164 IS NOT NULL AND ia.phone_e164 = ib.phone_e164)
+       OR similarity(lower(pa.display_name), lower(pb.display_name)) >= :th)
+  AND NOT EXISTS (SELECT 1 FROM core.identity_merge_candidates m
+                  WHERE LEAST(m.identity_a, m.identity_b) = x.a AND GREATEST(m.identity_a, m.identity_b) = x.b)
+ORDER BY 3 DESC, 4 DESC LIMIT :lim
+"""
+
+
 async def detect(db: AsyncSession, org_id: uuid.UUID) -> int:
-    """Sinh đề xuất mới (không trùng cặp): trùng số điện thoại, tên gần giống, cùng nhóm."""
-    rows = (await db.execute(text("""
-        WITH ids AS (
-          SELECT pi.id, pi.person_id, pi.phone_e164, lower(p.display_name) AS name, c.type AS ch
-          FROM core.person_identities pi JOIN core.persons p ON p.id = pi.person_id
-          JOIN core.channels c ON c.id = pi.channel_id
-          WHERE p.org_id = :o AND p.merged_into_id IS NULL AND p.deleted_at IS NULL)
-        SELECT a.id AS a, b.id AS b, a.phone_e164 IS NOT NULL AND a.phone_e164 = b.phone_e164 AS phone,
-               similarity(a.name, b.name) AS sim, a.ch AS ch_a, b.ch AS ch_b,
-               EXISTS (SELECT 1 FROM core.group_members ga JOIN core.group_members gb ON gb.group_id = ga.group_id
-                       WHERE ga.person_id = a.person_id AND gb.person_id = b.person_id) AS cogroup
-        FROM ids a JOIN ids b ON a.id < b.id AND a.person_id <> b.person_id
-        WHERE (a.phone_e164 IS NOT NULL AND a.phone_e164 = b.phone_e164) OR similarity(a.name, b.name) >= 0.55
-        ORDER BY 3 DESC, 4 DESC LIMIT 2000"""), {"o": org_id})).all()
+    """Sinh đề xuất mới (không trùng cặp): trùng số điện thoại, tên gần giống, cùng nhóm.
+
+    v0.1.40 (F-16): có mốc tiến độ (`ops.job_watermarks`, job 'identity.detect') — lượt sau chỉ xét định danh mới/hồ
+    sơ vừa sửa so với mọi định danh; lần đầu quét đủ. Mốc CHỈ tiến khi lượt không bị cắt bởi LIMIT/MAX_NEW."""
+    wm = (await db.execute(text("""SELECT last_id, last_at FROM ops.job_watermarks
+                                   WHERE org_id = :o AND job = :j"""), {"o": org_id, "j": WATERMARK_JOB})).one_or_none()
+    mark = (await db.execute(text("""
+        SELECT clock_timestamp() AS at,
+               (SELECT pi.id FROM core.person_identities pi JOIN core.persons p ON p.id = pi.person_id
+                WHERE p.org_id = :o ORDER BY pi.id DESC LIMIT 1) AS max_id"""), {"o": org_id})).one()
+    # SET LOCAL: chỉ trong transaction này, không rò sang kết nối khác của pool (khác set_limit()).
+    await db.execute(text(f"SET LOCAL pg_trgm.similarity_threshold = {NAME_THRESHOLD}"))
+    # Planner coi `%` là phép rẻ ⇒ hay chọn quét tuần tự core.persons cho TỪNG định danh mới (N×M phép so trigram —
+    # 4000 định danh mất hơn một phút). Tắt seqscan riêng cho câu này để luôn dò qua chỉ mục (mọi bước đều có chỉ mục).
+    await db.execute(text("SET LOCAL enable_seqscan = off"))
+    full = wm is None or (wm.last_id is None and wm.last_at is None)
+    rows = (await db.execute(text(DETECT_SQL), {
+        "o": org_id, "full": full, "last_id": None if wm is None else wm.last_id,
+        "last_at": None if wm is None else wm.last_at, "th": NAME_THRESHOLD, "lim": DETECT_LIMIT})).all()
+    await db.execute(text("SET LOCAL enable_seqscan = on"))
+    truncated = len(rows) >= DETECT_LIMIT
     n = 0
     for r in rows:
         conf, parts = 0.0, []
@@ -71,7 +129,18 @@ async def detect(db: AsyncSession, org_id: uuid.UUID) -> int:
             {"o": org_id, "a": r.a, "b": r.b, "c": conf, "bj": orjson.dumps(basis).decode(), "bt": text_basis})
         n += res.rowcount or 0  # type: ignore[attr-defined]
         if n >= MAX_NEW:
+            truncated = truncated or r is not rows[-1]
             break
+    if not truncated:
+        # Mốc lùi 5 phút: hồ sơ sửa trong transaction khác commit SAU khi lượt này bắt đầu vẫn được xét lại lượt sau
+        # (cặp đã đề xuất bị NOT EXISTS loại nên không trùng).
+        await db.execute(text("""
+            INSERT INTO ops.job_watermarks (org_id, job, last_id, last_at, updated_at)
+            VALUES (:o, :j, :id, CAST(:at AS timestamptz) - interval '5 minutes', now())
+            ON CONFLICT (org_id, job) DO UPDATE SET
+              last_id = GREATEST(ops.job_watermarks.last_id, EXCLUDED.last_id),
+              last_at = EXCLUDED.last_at, updated_at = now()"""),
+            {"o": org_id, "j": WATERMARK_JOB, "id": mark.max_id, "at": mark.at})
     return n
 
 
