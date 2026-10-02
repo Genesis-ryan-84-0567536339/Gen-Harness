@@ -47,8 +47,10 @@ FETCH_RETRY_DELAY=2
 # fetch <url> <đích>: dùng curl nếu có, không thì wget; thử lại tối đa
 # FETCH_ATTEMPTS lần khi mạng chập chờn. Chỉ coi là hỏng khi RẢNH (không
 # nhận dữ liệu) chứ không giới hạn cả tệp: curl dưới 1 KB/s suốt 60 giây ⇒
-# mã 28; wget -T 60. Lỗi máy chủ trả về rõ ràng (curl 22 = HTTP 4xx như 404,
-# wget 8) KHÔNG thử lại — trả mã ngay để fetch_failed báo lỗi dễ hiểu.
+# mã 28; wget -T 60. Lỗi máy chủ trả về rõ ràng (curl 22 với HTTP 4xx như
+# 404, wget 8) KHÔNG thử lại — trả mã ngay để fetch_failed báo lỗi dễ hiểu.
+# curl 22 với HTTP 5xx/408/429 (GitHub/CDN quá tải tạm thời) VẪN thử lại, như
+# downloadWithRetry của genh — curl in mã HTTP qua -w kể cả khi -f báo lỗi.
 # Không dùng `wget --tries` (busybox wget không có).
 fetch() {
 	url="$1"
@@ -65,19 +67,27 @@ fetch() {
 	fetch_attempt=1
 	while :; do
 		fetch_rc=0
+		fetch_http=""
 		if [ "$fetch_tool" = curl ]; then
-			curl -fsSL --connect-timeout 30 --speed-limit 1024 --speed-time 60 -o "$dest" "$url" || fetch_rc=$?
+			fetch_http=$(curl -fsSL --connect-timeout 30 --speed-limit 1024 --speed-time 60 -w '%{http_code}' -o "$dest" "$url") || fetch_rc=$?
 		else
 			wget -q -T 60 -O "$dest" "$url" || fetch_rc=$?
 		fi
 		if [ "$fetch_rc" -eq 0 ]; then
 			return 0
 		fi
-		if [ "$fetch_rc" -eq "$fetch_fatal_rc" ] || [ "$fetch_attempt" -ge "$FETCH_ATTEMPTS" ]; then
+		fetch_fatal=0
+		if [ "$fetch_rc" -eq "$fetch_fatal_rc" ]; then
+			case "$fetch_http" in
+			5?? | 408 | 429) ;;
+			*) fetch_fatal=1 ;;
+			esac
+		fi
+		if [ "$fetch_fatal" -eq 1 ] || [ "$fetch_attempt" -ge "$FETCH_ATTEMPTS" ]; then
 			return "$fetch_rc"
 		fi
 		fetch_attempt=$((fetch_attempt + 1))
-		log "genh: tải ${url##*/} bị ngắt ($fetch_tool mã lỗi $fetch_rc) — thử lại lần $fetch_attempt/$FETCH_ATTEMPTS sau $FETCH_RETRY_DELAY giây…"
+		log "genh: tải ${url##*/} bị ngắt ($fetch_tool mã lỗi $fetch_rc${fetch_http:+, HTTP $fetch_http}) — thử lại lần $fetch_attempt/$FETCH_ATTEMPTS sau $FETCH_RETRY_DELAY giây…"
 		sleep "$FETCH_RETRY_DELAY"
 	done
 }

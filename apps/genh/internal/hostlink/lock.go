@@ -79,6 +79,33 @@ func AcquireLock(installDir string) (*Lock, error) {
 	return &Lock{f: f}, nil
 }
 
+// WaitLockFile: tệp khoá "người chờ" (<gốc cài đặt>/genh-wait.lock) — chỉ MỘT
+// tiến trình `genh update/restore --if-requested` được chờ khoá chính cùng lúc.
+// Watcher crontab chạy mỗi phút khi còn tệp yêu cầu: thiếu khoá này thì trong
+// lúc lịch đêm giữ khoá, mỗi phút lại thêm một genh chờ (tới ~30 tiến trình
+// cùng thăm dò genh.lock).
+const WaitLockFile = "genh-wait.lock"
+
+// AcquireWaitLock thử lấy khoá người chờ NGAY (không chờ). Bận → *LockBusyError
+// (PID 0); lỗi khác trả nguyên.
+func AcquireWaitLock(installDir string) (*Lock, error) {
+	path := filepath.Join(installDir, WaitLockFile)
+	f, err := openLockFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("mở %s: %w", path, err)
+	}
+	busy, err := tryLock(f)
+	if err != nil {
+		_ = f.Close()
+		return nil, fmt.Errorf("khoá %s: %w", path, err)
+	}
+	if busy {
+		_ = f.Close()
+		return nil, &LockBusyError{}
+	}
+	return &Lock{f: f}, nil
+}
+
 // AcquireLockWait thử lấy khoá mỗi lockRetryEvery cho tới khi được, hết max
 // (trả lỗi bận cuối cùng) hoặc ctx bị huỷ (trả ctx.Err()). Lỗi không phải "bận"
 // trả ngay.

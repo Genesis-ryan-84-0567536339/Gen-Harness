@@ -20,7 +20,8 @@ from gh.db import sessionmaker
 from tests.conftest import Api
 from tests.phase2 import org_id
 
-TITLE = "Máy chủ chưa tự chạy lại Gen-Harness sau khi khởi động lại"
+TITLE = "Máy chủ có thể không tự chạy lại Gen-Harness khi bật lại máy"
+DONE = "Chạy xong thì chạy genh status để cảnh báo tự hết (hoặc đợi tới đêm)"
 
 
 @pytest.fixture
@@ -67,12 +68,15 @@ async def test_docker_not_enabled_rings_once_then_clears(owner_api: Api, app, db
     await evaluate(redis, org)
     rows = await bells(db)
     assert len(rows) == 1
-    assert rows[0].title == TITLE and rows[0].link is None
+    # Chuông có đích (thẻ Sức khoẻ — hướng dẫn từng bước, lệnh chép được), không phải mục bấm vào không đi đâu.
+    assert rows[0].title == TITLE and rows[0].link == health.STORAGE_LINK
     assert "sudo systemctl enable docker" in rows[0].body and "loginctl" not in rows[0].body
+    assert rows[0].body.endswith(DONE)
     a = await alert(db)
     assert a.severity == "warn" and a.cleared_at is None
     [issue] = await health.active_issues(db, org)
-    assert issue["kind"] == "host.autostart" and issue["action"] == "Xem cách bật" and issue["link"] is None
+    assert issue["kind"] == "host.autostart" and issue["action"] == "Xem cách bật"
+    assert issue["link"] == health.STORAGE_LINK and issue["title"] == TITLE
     write_autostart(link, docker_enabled="yes")
     await evaluate(redis, org)
     assert (await alert(db)).cleared_at is not None
@@ -86,9 +90,11 @@ async def test_rootless_and_linger_bodies(owner_api: Api, app, db, redis, link: 
     [row] = await bells(db)
     assert "systemctl --user enable docker" in row.body and "sudo systemctl enable docker" not in row.body
     assert "sudo loginctl enable-linger $USER" in row.body
+    # Docker rootless chạy dưới user manager ⇒ thiếu linger thì cả Docker cũng không tự lên — nói rõ.
+    assert "Docker rootless" in row.body
     # Sếp chép nguyên lệnh: không có dấu chấm dính sau lệnh ("docker." / "$USER." chạy sẽ lỗi).
     assert "docker." not in row.body and "$USER." not in row.body
-    assert row.body.endswith("$USER") and " · " in row.body
+    assert "$USER · " in row.body and row.body.endswith(DONE) and not row.body.endswith(".")
     # đổi tập vấn đề (chỉ còn linger) ⇒ fingerprint đổi ⇒ một chuông mới
     write_autostart(link, linger="no")
     await evaluate(redis, org)

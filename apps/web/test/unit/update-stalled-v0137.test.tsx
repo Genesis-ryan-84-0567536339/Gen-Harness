@@ -30,8 +30,23 @@ describe('updateView — stalled theo lý do', () => {
     expect(v.kicker).toBe('Tiến trình cập nhật trên máy chủ không còn chạy — có thể máy vừa tắt hoặc khởi động lại');
     expect(v.body).toMatch(/Bấm Thử lại để chạy lại từ đầu/);
     expect(v.showCommand).toBe(false);
+    expect(v.body).not.toMatch(/genh/);
     const manual = updateView({ ...base, can_request: false, state: 'stalled', stalled_reason: 'process_gone' }, opts);
     expect(manual.kind !== 'hidden' && manual.showCommand).toBe(true);
+  });
+  it('process_gone + can_request=false: không trỏ tới nút Thử lại (thẻ không vẽ nút) — chỉ lệnh chạy tay', () => {
+    const v = updateView({ ...base, can_request: false, state: 'stalled', stalled_reason: 'process_gone' }, opts);
+    if (v.kind !== 'stalled') throw new Error(v.kind);
+    expect(v.body).not.toMatch(/Bấm Thử lại/);
+    expect(v.body).toMatch(/Chạy lệnh dưới đây trên máy chủ/);
+  });
+  it('requested + host_busy: nói đang xếp hàng sau lần khác, không hứa "trong vòng 1 phút"', () => {
+    const v = updateView({ ...base, state: 'requested', host_busy: true }, opts);
+    if (v.kind !== 'working') throw new Error(v.kind);
+    expect(v.kicker).toMatch(/đang chạy một lần cập nhật\/khôi phục khác/);
+    expect(v.kicker).not.toMatch(/1 phút/);
+    const plain = updateView({ ...base, state: 'requested' }, opts);
+    expect(plain.kind === 'working' && plain.kicker).toMatch(/1 phút/);
   });
   it('not_picked_up / thiếu lý do (api cũ): giữ chữ cũ', () => {
     for (const reason of ['not_picked_up', null, undefined] as const) {
@@ -63,6 +78,20 @@ describe('failedCopy — mã GH-E94B / GH-E94A', () => {
     expect(v.kicker).toBe('Cập nhật bị dừng giữa chừng');
     expect(v.body).not.toMatch(/đã tự quay về/);
     expect(v.body).toMatch(/Chi tiết kỹ thuật/);
+    // Chưa quay về trọn: genh chặn lịch đêm — không được hứa lịch đêm tự thử lại.
+    expect(v.body).not.toMatch(/lịch đêm/);
+  });
+  it('GH-E94B chưa đụng gì: lịch đêm tự thử lại', () => {
+    const v = failedAt('Cập nhật bị dừng giữa chừng (máy tắt, khởi động lại hoặc bị dừng tay) — chưa đụng gì (CSDL, compose.yaml giữ nguyên) (GH-E94B)');
+    if (v.kind !== 'failed') throw new Error(v.kind);
+    expect(v.kicker).toMatch(/chưa đụng gì/);
+    expect(v.body).toMatch(/lịch đêm tự thử lại/);
+  });
+  it('GH-E94B quay về CHƯA trọn (genh ghi update-blocked rollback_failed): "Cần xử lý tay", không hứa lịch đêm', () => {
+    const v = failedAt('Cập nhật bị dừng giữa chừng (máy tắt, khởi động lại hoặc bị dừng tay) — quay về bản cũ CHƯA trọn — Máy tắt giữa lúc cập nhật đã đổi CSDL (GH-E94B)');
+    if (v.kind !== 'failed') throw new Error(v.kind);
+    expect(v.kicker).toMatch(/Cần xử lý tay/);
+    expect(v.body).not.toMatch(/lịch đêm/);
   });
   it('GH-E94A: đang có lần cập nhật/khôi phục khác chạy', () => {
     const msg = 'Đang có một lần cập nhật/khôi phục khác chạy — chờ xong rồi thử lại (GH-E94A)';

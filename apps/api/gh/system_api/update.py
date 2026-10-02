@@ -170,6 +170,20 @@ def _process_gone(status: dict[str, Any], d: Path) -> bool:
     return not alive
 
 
+def _host_busy(d: Path) -> bool:
+    """Một tiến trình genh đang giữ khoá loại trừ (update/restore/import — vd lịch đêm) và còn sống: nhịp sống
+    `run/genh-heartbeat.json` tươi (≤ `HEARTBEAT_STALE_SECONDS`) và cùng lần khởi động máy. Yêu cầu "Cập nhật ngay" nằm
+    lâu trong lúc này là đang XẾP HÀNG sau lần đó (genh --if-requested chờ khoá), không phải watcher không chạy."""
+    hb = _read_json(d / "genh-heartbeat.json") or {}
+    hb_at = hb.get("at")
+    hb_age = _age_seconds(hb_at) if isinstance(hb_at, str) and hb_at else None
+    if hb_age is None or hb_age > HEARTBEAT_STALE_SECONDS:
+        return False
+    hb_boot = hb.get("boot_id")
+    here = _boot_id()
+    return not (isinstance(hb_boot, str) and hb_boot and here and hb_boot != here)
+
+
 def running_version() -> str | None:
     """Phiên bản genh đã cài (genh.json) — None khi chạy bản phát triển không có hộp thư chung."""
     v = (_read_json(_dir() / "genh.json") or {}).get("version")
@@ -185,9 +199,11 @@ def _state() -> dict[str, Any]:
     stalled_reason: str | None = None
     if state == "running" and _process_gone(status, d):
         state, stalled_reason = "stalled", "process_gone"
+    host_busy = False
     if request is not None:
         age = _age_seconds(request.get("requested_at"))
-        if age is not None and age > STALE_REQUEST_SECONDS:
+        host_busy = _host_busy(d)
+        if age is not None and age > STALE_REQUEST_SECONDS and not host_busy:
             state, stalled_reason = "stalled", "not_picked_up"
         else:
             state, stalled_reason = "requested", None
@@ -211,6 +227,8 @@ def _state() -> dict[str, Any]:
         "can_request": bool(updater) and os.access(d / "request", os.W_OK),
         "state": state,
         "stalled_reason": stalled_reason,
+        # v0.1.37: yêu cầu đang chờ một lần cập nhật/khôi phục khác (vd lịch đêm) chạy xong — không phải "chưa nhận".
+        "host_busy": host_busy,
         "message": status.get("message") or None,
         "from": status.get("from") or None,
         "to": status.get("to") or None,

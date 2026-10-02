@@ -23,6 +23,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -183,8 +184,49 @@ theo kênh — xem docs/handoff/05-installer.md).
 // hoặc `systemctl stop` (v0.1.37, F-34: trước đây chỉ bắt Ctrl-C nên SIGTERM
 // giết genh ngay giữa lúc migrate, không kịp quay về bản cũ). syscall.SIGTERM có
 // trên mọi hệ điều hành Go hỗ trợ (Windows: chỉ là hằng, không bao giờ tới).
+//
+// Nguyên nhân huỷ (context.Cause) nói tín hiệu nào: SIGTERM → ops.ErrShutdownSignal
+// (máy tắt — rollback không bắt đầu khôi phục CSDL trong khung ~2 phút trước
+// SIGKILL), Ctrl-C → ops.ErrInterruptSignal. Như signal.NotifyContext, sau tín
+// hiệu đầu genh VẪN bắt tín hiệu (không chết vì tín hiệu thứ hai) cho tới stop.
 func signalContext() (context.Context, context.CancelFunc) {
-	return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, cancel := context.WithCancelCause(context.Background())
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
+	done := make(chan struct{})
+	go func() {
+		select {
+		case sig := <-ch:
+			cancel(signalCause(sig))
+		case <-done:
+		}
+	}()
+	var once sync.Once
+	return ctx, func() {
+		once.Do(func() {
+			signal.Stop(ch)
+			close(done)
+			cancel(context.Canceled)
+		})
+	}
+}
+
+// signalCause: nguyên nhân huỷ ngữ cảnh ứng với tín hiệu nhận được.
+func signalCause(sig os.Signal) error {
+	if sig == syscall.SIGTERM {
+		return ops.ErrShutdownSignal
+	}
+	return ops.ErrInterruptSignal
+}
+
+// forwardSignal: tín hiệu chuyển cho tiến trình con theo nguyên nhân huỷ ctx —
+// giữ đúng loại (Ctrl-C vẫn là SIGINT để con khôi phục như thường, SIGTERM vẫn
+// là SIGTERM để con không bắt đầu khôi phục lúc máy đang tắt).
+func forwardSignal(ctx context.Context) os.Signal {
+	if errors.Is(context.Cause(ctx), ops.ErrInterruptSignal) {
+		return os.Interrupt
+	}
+	return syscall.SIGTERM
 }
 
 // lockMode: cách lấy khoá loại trừ (<gốc cài đặt>/genh.lock) theo cách genh
@@ -225,8 +267,16 @@ func lockBusyLine(err error) string {
 func acquireOpLock(ctx context.Context, installDir string, mode lockMode, stillWanted func() bool, stdout, stderr io.Writer) (lock *hostlink.Lock, exitCode int, ok bool) {
 	lock, err := hostlink.AcquireLock(installDir)
 	if mode == lockRequested && errors.Is(err, hostlink.ErrLockBusy) {
+		// Chỉ MỘT người chờ cùng lúc (watcher crontab kích mỗi phút — xem
+		// hostlink.WaitLockFile); người chờ đó sẽ làm yêu cầu, lần này thoát.
+		waiter, werr := hostlink.AcquireWaitLock(installDir)
+		if errors.Is(werr, hostlink.ErrLockBusy) {
+			_, _ = fmt.Fprintln(stdout, "genh: đã có một tiến trình khác đang chờ để làm yêu cầu từ Console — lần này bỏ qua.")
+			return nil, 0, false
+		}
 		_, _ = fmt.Fprintf(stdout, "genh: chờ lần cập nhật/khôi phục đang chạy xong (tối đa %s) rồi làm tiếp yêu cầu từ Console…\n", requestLockWait)
 		lock, err = hostlink.AcquireLockWait(ctx, installDir, requestLockWait)
+		waiter.Release()
 	}
 	switch {
 	case err == nil:
@@ -708,6 +758,10 @@ func trySelfUpdateAndReExec(ctx context.Context, originalArgs []string, quiet bo
 	child.Stdout = os.Stdout
 	child.Stderr = os.Stderr
 	if err := runChildForwardingSignal(ctx, child); err != nil {
+		if errors.Is(err, errStoppedBeforeReExec) {
+			fmt.Fprintf(os.Stderr, "genh: nhận tín hiệu dừng ngay sau khi tải genh %s — chưa đụng gì tới dịch vụ; lần sau (lịch đêm hoặc genh update) sẽ làm tiếp.\n", res.To)
+			return 1, true, false
+		}
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			return exitErr.ExitCode(), true, false
@@ -718,12 +772,20 @@ func trySelfUpdateAndReExec(ctx context.Context, originalArgs []string, quiet bo
 	return 0, true, false
 }
 
+// errStoppedBeforeReExec: tín hiệu dừng tới trước khi kịp chạy genh bản mới.
+var errStoppedBeforeReExec = errors.New("nhận tín hiệu dừng trước khi chạy genh bản mới")
+
 // runChildForwardingSignal chạy child và chờ nó xong; trong lúc chờ, ctx bị huỷ
 // (tín hiệu dừng tới tiến trình này) ⇒ chuyển tiếp SIGTERM cho con một lần rồi
 // VẪN chờ (con tự quay về bản cũ — xem ops.rollbackAndWrap). Windows không gửi
 // được SIGTERM/Interrupt cho tiến trình khác ⇒ chỉ ghi log (con cùng console
-// vẫn nhận Ctrl-C của chính nó).
+// vẫn nhận Ctrl-C của chính nó). ctx ĐÃ bị huỷ trước khi chạy ⇒ KHÔNG chạy con
+// (con chưa kịp cài bộ bắt tín hiệu sẽ bị giết ngay, không ghi được kết quả) —
+// trả errStoppedBeforeReExec.
 func runChildForwardingSignal(ctx context.Context, child *exec.Cmd) error {
+	if ctx.Err() != nil {
+		return errStoppedBeforeReExec
+	}
 	if err := child.Start(); err != nil {
 		return err
 	}
@@ -738,7 +800,7 @@ func runChildForwardingSignal(ctx context.Context, child *exec.Cmd) error {
 				return
 			}
 			fmt.Fprintln(os.Stderr, "genh: nhận tín hiệu dừng — chuyển cho genh bản mới để quay về bản cũ rồi dừng…")
-			_ = child.Process.Signal(syscall.SIGTERM)
+			_ = child.Process.Signal(forwardSignal(ctx))
 		}
 	}()
 	return child.Wait()
@@ -1235,8 +1297,10 @@ func publishHostInfo(installDir string, port int) {
 		deps := autoupdate.Deps{GenhPath: execPath, LogFile: logFile}
 		// v0.1.37: unit lịch đêm chỉ được ghi lúc install/enable — máy cài từ bản
 		// cũ cần ghi lại để có KillMode=mixed/TimeoutStopSec (không bật/tắt gì).
-		if _, err := autoupdate.RefreshUnits(ctx, deps); err != nil {
+		if changed, err := autoupdate.RefreshUnits(ctx, deps); err != nil {
 			fmt.Fprintf(os.Stderr, "genh: cảnh báo — không làm mới được unit lịch tự cập nhật: %v\n", err)
+		} else if changed {
+			fmt.Println("genh: đã thêm KillMode=mixed/TimeoutStopSec vào unit lịch tự cập nhật (~/.config/systemd/user/" + autoupdate.TaskName + ".service) — các dòng khác giữ nguyên.")
 		}
 		if u, err := autoupdate.EnsureRequestWatcher(ctx, deps, rp); err == nil {
 			updater = u

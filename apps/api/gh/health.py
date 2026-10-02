@@ -81,7 +81,15 @@ AUTOSTART_FIX = {
     "docker_rootless": "Docker chưa bật tự chạy khi mở máy — chạy một lần trên máy chủ: systemctl --user enable docker",
     "linger": "Lịch tự cập nhật và nút Cập nhật ngay chỉ chạy khi có người đăng nhập — chạy một lần: "
               "sudo loginctl enable-linger $USER",
+    # Docker rootless chạy dưới user manager của người dùng ⇒ thiếu linger thì CẢ Docker cũng không tự lên khi bật máy.
+    "linger_rootless": "Docker rootless, lịch tự cập nhật và nút Cập nhật ngay chỉ chạy khi có người đăng nhập — chạy "
+                       "một lần: sudo loginctl enable-linger $USER",
 }
+#: Câu cuối của thân cảnh báo: genh chỉ ghi lại `run/autostart-status.json` khi chạy `genh status`/`genh doctor` hoặc
+#: lần cập nhật kế tiếp (lịch đêm) — chạy xong lệnh sửa mà không biết điều này, Sếp sẽ tưởng lệnh không có tác dụng.
+AUTOSTART_DONE = "Chạy xong thì chạy genh status để cảnh báo tự hết (hoặc đợi tới đêm)"
+#: Tiêu đề cảnh báo phòng trước (máy VẪN đang chạy — chỉ là khi bật lại sẽ không tự lên); cùng câu ở tài liệu/web/test.
+AUTOSTART_TITLE = "Máy chủ có thể không tự chạy lại Gen-Harness khi bật lại máy"
 #: Mỗi câu kết thúc bằng lệnh — KHÔNG thêm dấu chấm sau lệnh (Sếp chép nguyên dòng: "docker." / "$USER." chạy sẽ lỗi).
 AUTOSTART_SEP = " · "
 
@@ -109,8 +117,11 @@ def _s(value: Any) -> str:
 # ─── dòng sự cố: mở một lần / đóng ───────────────────────────────────────────────────────────────────────────
 
 async def raise_once(db: AsyncSession, org_id: uuid.UUID, *, key: str, kind: str, severity: str, title: str,
-                     body: str, link: str | None, fingerprint: str = "", redis: Any = None) -> bool:
+                     body: str, link: str | None, fingerprint: str = "", redis: Any = None,
+                     notify_link: str | None = None) -> bool:
     """Mở sự cố `key`; gửi chuông cho các Owner CHỈ khi dòng mới mở hoặc `fingerprint` đổi. Trả True nếu đã gửi.
+
+    `notify_link`: đích riêng cho chuông (mặc định = `link` của dòng trên dải "Cần Sếp xử lý").
 
     Sự cố đang mở với cùng fingerprint ⇒ không chuông thứ hai (chỉ làm mới tiêu đề/nội dung cho dải "Cần Sếp xử lý",
     vd. số phút bộ xử lý nền đã ngừng). Bên gọi commit (chuông đẩy WebSocket sau commit — gh.notifications)."""
@@ -135,7 +146,7 @@ async def raise_once(db: AsyncSession, org_id: uuid.UUID, *, key: str, kind: str
             {"o": org_id, "k": key, "t": title, "b": body, "l": link})
         return False
     await notifications.notify(db, org_id, await notifications.owner_ids(db, org_id), kind=kind, title=title,
-                               body=body, link=link, redis=redis)
+                               body=body, link=notify_link or link, redis=redis)
     return True
 
 
@@ -275,7 +286,7 @@ def _autostart_problems(linger: str, required: bool | None, docker: str, mode: s
     if docker == "no":
         problems.append("docker_rootless" if mode == "rootless" else "docker_system")
     if required is True and linger == "no":
-        problems.append("linger")
+        problems.append("linger_rootless" if mode == "rootless" else "linger")
     return problems
 
 
@@ -513,9 +524,11 @@ async def _eval_autostart(db: AsyncSession, org_id: uuid.UUID, redis: Any) -> No
     st = _autostart_status()
     problems = _autostart_problems(st["linger"], st["linger_required"], st["docker_enabled"], st["docker_mode"])
     if problems:
+        # Đích: thẻ "Sức khoẻ hệ thống" (Dữ liệu & lưu trữ) — hướng dẫn từng bước, lệnh dạng mã chép được (thân chuông
+        # bị cắt còn 2 dòng, không đủ chỗ cho lệnh). Câu cuối nói cách làm cảnh báo tự hết.
+        body = AUTOSTART_SEP.join([*(AUTOSTART_FIX[p] for p in problems), AUTOSTART_DONE])
         await raise_once(db, org_id, key="host.autostart", kind="host.autostart", severity="warn",
-                         title="Máy chủ chưa tự chạy lại Gen-Harness sau khi khởi động lại",
-                         body=AUTOSTART_SEP.join(AUTOSTART_FIX[p] for p in problems), link=None,
+                         title=AUTOSTART_TITLE, body=body, link=STORAGE_LINK,
                          fingerprint="|".join(sorted(problems)), redis=redis)
         return
     good = ("yes", "not_applicable")

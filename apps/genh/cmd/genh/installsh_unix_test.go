@@ -74,16 +74,22 @@ func newInstallShEnv(t *testing.T, withAsset bool) installShEnv {
 	// install.sh gọi: curl <cờ…> -o <đích> <url> (url là đối số cuối).
 	// CURL_FAIL28_NAME/CURL_FAIL28_TIMES: trả mã 28 (quá chậm/rảnh) cho
 	// tệp tên đó trong CURL_FAIL28_TIMES lần gọi đầu — giả mạng chập chờn.
+	// CURL_FAIL503_NAME/CURL_FAIL503_TIMES: như trên nhưng HTTP 503 (curl -f
+	// mã 22, -w in "503") — máy chủ quá tải tạm thời. Lỗi HTTP in mã qua -w
+	// (như curl thật) khi được gọi kèm -w.
 	curl := `#!/bin/sh
 printf '%s\n' "$*" >> "$CURL_ARGS_LOG"
 dest=""
 url=""
+wfmt=""
 while [ $# -gt 0 ]; do
 	case "$1" in
 	-o) dest="$2"; shift 2 ;;
+	-w) wfmt="$2"; shift 2 ;;
 	*) url="$1"; shift ;;
 	esac
 done
+code() { [ -n "$wfmt" ] && printf '%s' "$1"; return 0; }
 printf '%s\n' "$url" >> "$CURL_URLS_FILE"
 name="${url##*/}"
 if [ -n "${CURL_FAIL28_NAME:-}" ] && [ "$name" = "$CURL_FAIL28_NAME" ]; then
@@ -94,10 +100,21 @@ if [ -n "${CURL_FAIL28_NAME:-}" ] && [ "$name" = "$CURL_FAIL28_NAME" ]; then
 		exit 28
 	fi
 fi
+if [ -n "${CURL_FAIL503_NAME:-}" ] && [ "$name" = "$CURL_FAIL503_NAME" ]; then
+	n=$(cat "$CURL_FAIL503_COUNT" 2>/dev/null || echo 0)
+	if [ "$n" -lt "$CURL_FAIL503_TIMES" ]; then
+		echo $((n + 1)) > "$CURL_FAIL503_COUNT"
+		code 503
+		echo "curl: (22) The requested URL returned error: 503" >&2
+		exit 22
+	fi
+fi
 if [ -f "$FIXTURES_DIR/$name" ]; then
 	cp "$FIXTURES_DIR/$name" "$dest"
+	code 200
 	exit 0
 fi
+code 404
 echo "curl: (22) The requested URL returned error: 404" >&2
 exit 22
 `
@@ -290,6 +307,31 @@ func TestInstallSh_Curl28HaiLan_ThuLaiRoiCaiTiep(t *testing.T) {
 		if !strings.Contains(string(args), flag) {
 			t.Errorf("curl phải được gọi với %q (thời gian rảnh), đối số:\n%s", flag, args)
 		}
+	}
+}
+
+// HTTP 503 (curl -f mã 22) là lỗi tạm thời của GitHub/CDN — thử lại như
+// downloadWithRetry của genh, không coi như 404.
+func TestInstallSh_Curl503_ThuLaiRoiCaiTiep(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("máy test không có sh")
+	}
+	e := newInstallShEnv(t, true)
+	asset := installShAsset(t)
+	e.extraEnv = []string{
+		"CURL_FAIL503_NAME=" + asset,
+		"CURL_FAIL503_TIMES=1",
+		"CURL_FAIL503_COUNT=" + filepath.Join(t.TempDir(), "fail503-count"),
+	}
+	out, err := e.run(t, "")
+	if err != nil {
+		t.Fatalf("install.sh lỗi dù lần 2 tải được: %v\n%s", err, out)
+	}
+	if n := countSuffix(e.urls(t), "/"+asset); n != 2 {
+		t.Fatalf("503 phải thử lại: muốn 2 lần gọi URL asset, được %d:\n%s", n, e.urls(t))
+	}
+	if !strings.Contains(out, "HTTP 503") || !strings.Contains(out, "thử lại lần 2/3") {
+		t.Errorf("thiếu dòng thử lại kèm HTTP 503:\n%s", out)
 	}
 }
 

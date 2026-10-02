@@ -337,6 +337,25 @@ func TestSignalContext_HuyKhiNhanSIGTERM(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("signalContext không huỷ khi nhận SIGTERM")
 	}
+	if !errors.Is(context.Cause(ctx), ops.ErrShutdownSignal) {
+		t.Errorf("SIGTERM phải để nguyên nhân ops.ErrShutdownSignal (rollback không khôi phục CSDL lúc máy tắt), được %v", context.Cause(ctx))
+	}
+}
+
+func TestSignalCause_PhanBietSIGTERMVaCtrlC(t *testing.T) {
+	if !errors.Is(signalCause(syscall.SIGTERM), ops.ErrShutdownSignal) || !errors.Is(signalCause(os.Interrupt), ops.ErrInterruptSignal) {
+		t.Fatal("SIGTERM → ErrShutdownSignal, Ctrl-C → ErrInterruptSignal")
+	}
+	ctx, cancel := context.WithCancelCause(context.Background())
+	cancel(ops.ErrInterruptSignal)
+	if forwardSignal(ctx) != os.Interrupt {
+		t.Error("Ctrl-C phải chuyển tiếp SIGINT cho con")
+	}
+	ctx2, cancel2 := context.WithCancelCause(context.Background())
+	cancel2(ops.ErrShutdownSignal)
+	if forwardSignal(ctx2) != syscall.SIGTERM {
+		t.Error("SIGTERM phải chuyển tiếp SIGTERM cho con")
+	}
 }
 
 // captureStd chạy f với os.Stdout/os.Stderr chuyển hướng, trả nội dung.
@@ -494,12 +513,48 @@ func TestRunUpdate_IfRequested_ChoKhoaNhaRoiChay(t *testing.T) {
 	if _, err := os.Stat(hostlink.HeartbeatPath(dir)); !os.IsNotExist(err) {
 		t.Errorf("xong thì phải xoá genh-heartbeat.json: %v", err)
 	}
-	// Khoá đã được nhả lại.
+	// Khoá đã được nhả lại (cả khoá người chờ).
 	l, err := hostlink.AcquireLock(dir)
 	if err != nil {
 		t.Fatalf("runUpdate xong phải nhả khoá: %v", err)
 	}
 	l.Release()
+	w, err := hostlink.AcquireWaitLock(dir)
+	if err != nil {
+		t.Fatalf("chờ xong phải nhả khoá người chờ: %v", err)
+	}
+	w.Release()
+}
+
+// Khoá chính bận VÀ đã có một người chờ (watcher crontab kích mỗi phút): lần
+// này thoát NGAY (0), không chờ, không nuốt yêu cầu — không chồng ~30 genh chờ.
+func TestRunUpdate_IfRequested_DaCoNguoiCho_ThoatNgay(t *testing.T) {
+	dir := lockTestInstall(t)
+	held, err := hostlink.AcquireLock(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Release()
+	waiter, err := hostlink.AcquireWaitLock(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer waiter.Release()
+
+	start := time.Now()
+	var code int
+	out, _ := captureStd(t, func() {
+		code = runUpdate([]string{"--yes", "--if-requested", "--no-self-update", "--install-dir", dir})
+	})
+	if code != 0 || time.Since(start) > 5*time.Second {
+		t.Fatalf("phải thoát 0 ngay, được code=%d sau %v", code, time.Since(start))
+	}
+	if !strings.Contains(out, "đã có một tiến trình khác đang chờ") {
+		t.Errorf("thiếu dòng log người chờ: %q", out)
+	}
+	if !hostlink.HasRequest(dir) {
+		t.Error("không được nuốt yêu cầu — người chờ kia sẽ làm")
+	}
 }
 
 // Chờ được khoá mà yêu cầu đã bị lần trước nuốt → thoát 0, không làm gì.
@@ -561,6 +616,24 @@ func TestRunRestoreImport_KhoaBan_GoTay_Thoat1(t *testing.T) {
 		if code != 1 || !strings.Contains(errOut, ops.ErrCodeUpdateLocked) || !strings.Contains(errOut, "đang có một lần cập nhật/khôi phục khác chạy") {
 			t.Errorf("%s: muốn thoát 1 + GH-E94A, được %d %q", name, code, errOut)
 		}
+	}
+}
+
+// Tín hiệu dừng tới TRƯỚC khi chạy con: không chạy con (con chưa kịp bắt tín
+// hiệu sẽ bị giết ngay, không ghi kết quả).
+func TestRunChildForwardingSignal_DaHuyTruoc_KhongChayCon(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	marker := filepath.Join(t.TempDir(), "ran")
+	child := exec.Command("sh", "-c", "touch "+marker)
+	if err := runChildForwardingSignal(ctx, child); !errors.Is(err, errStoppedBeforeReExec) {
+		t.Fatalf("muốn errStoppedBeforeReExec, được %v", err)
+	}
+	if child.Process != nil {
+		t.Error("không được Start tiến trình con")
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Error("tiến trình con đã chạy")
 	}
 }
 

@@ -44,8 +44,8 @@ func updateRequestCmd(genhPath string, port int) string {
 
 // SystemdRequestServiceUnit: chạy `genh handle-requests` một lần (genh tự xoá
 // tệp yêu cầu trước khi làm nên path unit không kích lặp). KillMode=mixed +
-// TimeoutStopSec=900: như SystemdServiceUnit — tắt máy giữa chừng thì genh kịp
-// quay về bản cũ.
+// TimeoutStopSec=900: như SystemdServiceUnit (lúc tắt máy giới hạn thật vẫn là
+// ~120 giây của user@.service — xem chú thích ở đó).
 func SystemdRequestServiceUnit(genhPath, logFile string, rp RequestPaths) string {
 	env := ""
 	for _, kv := range rp.env() {

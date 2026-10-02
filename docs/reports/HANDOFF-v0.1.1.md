@@ -1640,9 +1640,9 @@ cần khôi phục — CSDL chưa bị đụng thì chỉ cần `docker compose 
 
 ### Boss cần làm gì
 
-**Không cần làm gì.** Sau khi máy tự cập nhật lên v0.1.37, nếu Console hiện **"Máy chủ chưa tự chạy lại Gen-Harness sau
-khi khởi động lại"** thì chép đúng lệnh trong dòng đó, dán vào cửa sổ dòng lệnh trên máy chủ **một lần** (máy sẽ hỏi mật
-khẩu đăng nhập máy).
+**Không cần làm gì.** Sau khi máy tự cập nhật lên v0.1.37, nếu Console hiện **"Máy chủ có thể không tự chạy lại
+Gen-Harness khi bật lại máy"** thì bấm **Xem cách bật**, chép đúng từng lệnh, dán vào cửa sổ dòng lệnh trên máy chủ **một
+lần** (máy sẽ hỏi mật khẩu đăng nhập máy), rồi chạy `genh status` — cảnh báo tự hết (không chạy thì cảnh báo còn tới đêm).
 
 ### Vì sao (kế hoạch tổng `docs/audit/2026-10-01/0-ke-hoach-tong.md`, mục v0.1.37)
 
@@ -1671,7 +1671,7 @@ khẩu đăng nhập máy).
   `'not_picked_up'`; thời điểm không múi giờ/tệp rác trong `run/` không gây 500. `/system/health` thêm `update.stalled_reason`
   và khối `autostart`; chuông `host.autostart` (warn, một lần, lệnh sửa ghép từ chuỗi cố định — không lấy từ tệp). Web:
   thẻ "Cập nhật lên vX bị dừng giữa chừng" + Thử lại, lời dẫn GH-E94B/GH-E94A, dòng Sức khoẻ "Cập nhật bị dừng giữa chừng",
-  dải "Cần Sếp xử lý" có dòng `host.autostart` (nút "Xem cách bật").
+  dải "Cần Sếp xử lý" có dòng `host.autostart` (nút "Xem cách bật" tới thẻ Sức khoẻ — xem "Sửa sau review" bên dưới).
 - **E2E (F-35)** — e2e-upgrade thành ma trận `upgrade_from`: ô `tags[1]` (bản liền trước) + ô `tags[3]` (nhảy nhiều bản);
   thiếu bản cũ ⇒ ô `tags[3]` vắng, tóm tắt ghi "bỏ qua", không đỏ; `fail-fast: false`, ô nào đỏ ⇒ không promote
   (`check_release_gate.py` giữ: ma trận, fail-fast, không continue-on-error, resolve có `tags[3]`). e2e-install (pr +
@@ -1703,3 +1703,42 @@ khẩu đăng nhập máy).
   actionlint sạch (mọi workflow); `check_release_gate.py` thoát 0, unittest `.github/scripts` 28 OK.
 - Chờ sau phát hành (chế độ release): e2e-upgrade hai ô `tags[1]` (v0.1.36 → v0.1.37) và `tags[3]` (v0.1.34 → v0.1.37) có
   dữ liệu xanh, promote; kiểm genh tải từ releases/latest (checksum + `genh version` = v0.1.37) rồi mới báo Boss.
+
+### Sửa sau review v0.1.37 (F-34, F-35, F-72, F-73)
+
+- **Không để lịch đêm chạy đè lên CSDL khôi phục dở (F-34, blocker)** — bị dừng (Ctrl-C/SIGTERM) mà quay về bản cũ
+  **chưa trọn** (vd pg_restore bị cắt sau `DROP DATABASE`) ⇒ genh **vẫn** ghi `update-blocked.json` (`rollback_failed` +
+  `backup_key`); trước đây bỏ qua nên lịch đêm chạy lại `genh update`, sao lưu chính CSDL hỏng rồi migrate — mất dữ liệu
+  âm thầm. Nhánh CSDL chưa đụng + bản hỏng + `up -d` lỗi cũng ghi. Console: GH-E94B chưa quay về không còn hứa "lịch đêm
+  sẽ tự thử lại" (chỉ "chưa đụng gì"/"đã tự quay về" mới hứa).
+- **Lúc tắt máy không khôi phục CSDL (F-34)** — `TimeoutStopSec=900` không nới được gì khi tắt máy (`user@.service`
+  SIGKILL sau ~120 giây, `docker.service` có thể đang dừng song song); tài liệu/chú thích sửa đúng. genh phân biệt SIGTERM
+  (`ops.ErrShutdownSignal`) với Ctrl-C (`ops.ErrInterruptSignal`) qua `context.Cause`: SIGTERM sau khi đã đụng CSDL ⇒ chỉ
+  trả `compose.yaml` về bản cũ, ghi `update-blocked.json` (`rollback_failed` + `backup_key`), giữ `update-inprogress.json`,
+  thông điệp chỉ lệnh khôi phục sau khi bật lại máy. Tiến trình ngoài chuyển tiếp đúng loại tín hiệu; tín hiệu tới trước
+  khi re-exec ⇒ không chạy con.
+- **Rollback vì lỗi thường không có hạn (F-34)** — hạn `rollbackTimeout` 10 phút chỉ áp khi bị dừng; migrate lỗi / `/ready`
+  không lên ⇒ pg_restore CSDL lớn chạy tới xong như trước v0.1.37.
+- **Nút Console chờ khoá không bị báo "chưa nhận" (F-35)** — API: yêu cầu quá 15 phút mà nhịp sống genh còn tươi ⇒
+  `requested` + `host_busy: true` (Console: "Máy chủ đang chạy một lần cập nhật/khôi phục khác — sẽ làm yêu cầu này ngay
+  khi lần đó xong"). genh: khoá người chờ `<gốc cài>/genh-wait.lock` — chỉ một `--if-requested` chờ cùng lúc, còn lại thoát
+  0 ngay (watcher crontab mỗi phút không chồng ~30 genh).
+- **host.autostart (F-73)** — tiêu đề "Máy chủ có thể không tự chạy lại Gen-Harness khi bật lại máy" (cảnh báo phòng
+  trước, không phải sự cố đã xảy ra); thân thêm câu cuối "Chạy xong thì chạy genh status để cảnh báo tự hết (hoặc đợi tới
+  đêm)"; Docker rootless thì câu linger nói rõ cả Docker cần linger. Dòng dải và chuông dẫn tới `/system?tab=storage`
+  (nút "Xem cách bật"; chuông không còn là mục bấm không đi đâu). Thẻ "Sức khoẻ hệ thống" thêm dòng **"Tự chạy lại khi
+  bật máy"** (Có / Chưa bật / Chưa rõ + giờ kiểm) và hướng dẫn từng bước có lệnh dạng mã — Auditor (`system.read`) cũng
+  thấy. Lệnh thống nhất ở tài liệu/genh/API/web: `sudo systemctl enable docker` (rootless: `systemctl --user enable
+  docker`), `sudo loginctl enable-linger $USER`.
+- **Console**: thẻ "bị dừng giữa chừng" khi máy chủ chưa nhận nút bấm (`can_request=false`) nói "Chạy lệnh dưới đây trên
+  máy chủ" thay cho "Bấm Thử lại" (thẻ không vẽ nút); "hệ thống tự sao lưu" thay cho "genh tự sao lưu".
+- **Nit**: `install.sh` thử lại cả HTTP 5xx/408/429 (curl `-w '%{http_code}'`), chỉ 4xx khác là dừng ngay;
+  `genh update`/`install` chỉ **thêm dòng thiếu** (`KillMode=mixed`, `TimeoutStopSec=900`) vào unit lịch đêm — giữ ExecStart
+  và sửa tay của Owner — và in một dòng khi có thêm.
+- Test thêm: genh `update_test.go` (dừng + khôi phục lỗi ⇒ `update-blocked.json` rollback_failed + backup_key; CSDL chưa
+  đụng + up lỗi; SIGTERM không chạy lệnh docker nào; rollback thường không có hạn), `main_test.go` (nguyên nhân tín hiệu,
+  chuyển tiếp SIGINT/SIGTERM, không chạy con khi đã huỷ, khoá người chờ), `installsh_unix_test.go` (503 thử lại),
+  `autoupdate_test.go` (chỉ thêm dòng thiếu, giữ KillMode Owner đặt); api `test_system_update.py` (`host_busy`),
+  `test_health_v0137.py` (tiêu đề, link, câu cuối, rootless); web `needs-boss-autostart-v0137.test.tsx` (dòng/hướng dẫn
+  autostart), `update-stalled-v0137.test.tsx` (can_request=false, host_busy, GH-E94B không hứa lịch đêm), e2e mock
+  `update-stalled-v0137.spec.ts` (nút "Xem cách bật" → hướng dẫn có lệnh, bấm chuông tới thẻ Sức khoẻ, Auditor thấy dòng).

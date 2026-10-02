@@ -9,7 +9,7 @@ import { DEFAULT_TZ, fmtAgo, fmtDM, fmtDMClock, fmtDec, fmtHM, fmtInt } from '..
 export type HealthTone = 'ok' | 'warn' | 'bad' | 'muted';
 
 export interface HealthRow {
-  key: 'worker' | 'browser' | 'dlq' | 'backup' | 'update' | 'disk';
+  key: 'worker' | 'browser' | 'dlq' | 'backup' | 'update' | 'disk' | 'autostart';
   label: string;
   value: string;
   tone: HealthTone;
@@ -97,6 +97,20 @@ export function healthRows(h: SystemHealth, now = Date.now(), tz = DEFAULT_TZ): 
         ? { key: 'disk', label: 'Ổ đĩa', value: `Còn ${fmtGb(d.free_bytes)} trống${measured}`, tone: 'ok' }
         : { key: 'disk', label: 'Ổ đĩa', value: 'Chưa đo', tone: 'muted' },
   );
+
+  // v0.1.37 (F-73): máy chủ có tự chạy lại Gen-Harness khi bật máy không — genh chỉ kiểm khi chạy genh status/doctor
+  // hoặc lần cập nhật kế tiếp ⇒ luôn ghi giờ kiểm. api cũ/không có hộp thư với genh ⇒ không có khối ⇒ không có dòng.
+  const a = h.autostart;
+  if (a) {
+    const checked = a.checked_at ? ` · kiểm lúc ${fmtDM(a.checked_at, tz)} ${fmtHM(a.checked_at, tz)}` : '';
+    rows.push(
+      a.state === 'warn'
+        ? { key: 'autostart', label: 'Tự chạy lại khi bật máy', value: `Chưa bật${checked}`, tone: 'warn' }
+        : a.state === 'ok'
+          ? { key: 'autostart', label: 'Tự chạy lại khi bật máy', value: `Có${checked}`, tone: 'ok' }
+          : { key: 'autostart', label: 'Tự chạy lại khi bật máy', value: 'Chưa rõ', tone: 'muted' },
+    );
+  }
   return rows;
 }
 
@@ -106,7 +120,7 @@ export interface HealthTipStep {
   cmd?: string;
 }
 export interface HealthTip {
-  key: 'disk' | 'worker';
+  key: 'disk' | 'worker' | 'autostart';
   title: string;
   steps: HealthTipStep[];
   /** Cảnh báo rủi ro (Sếp tự quyết, nhưng phải thấy rõ). */
@@ -114,8 +128,8 @@ export interface HealthTip {
 }
 
 /**
- * Hướng dẫn tự xử lý ngay trong thẻ — đích của nút "Xem cách giải phóng" (disk.low) và "Xem sức khoẻ" (worker.silent)
- * ở dải "Cần Sếp xử lý": nút hứa gì thì trang đích phải có đúng cái đó.
+ * Hướng dẫn tự xử lý ngay trong thẻ — đích của nút "Xem cách giải phóng" (disk.low), "Xem sức khoẻ" (worker.silent) và
+ * "Xem cách bật" (host.autostart, cả chuông) ở dải "Cần Sếp xử lý": nút hứa gì thì trang đích phải có đúng cái đó.
  */
 export function healthTips(h: SystemHealth): HealthTip[] {
   const tips: HealthTip[] = [];
@@ -147,6 +161,28 @@ export function healthTips(h: SystemHealth): HealthTip[] {
         { text: 'Vẫn ngừng thì xem lỗi của Bộ xử lý nền và gửi kèm khi báo lỗi (Trợ giúp › Báo lỗi):', cmd: 'genh logs worker' },
       ],
     });
+  }
+  const a = h.autostart;
+  if (a && a.state === 'warn') {
+    // Lệnh cố định (cùng chuỗi genh/API in) — dựng từ giá trị đã lọc của API, không lấy chữ nào từ tệp trên máy chủ.
+    const steps: HealthTipStep[] = [];
+    if (a.docker_enabled === 'no') {
+      steps.push(
+        a.docker_mode === 'rootless'
+          ? { text: 'Trên máy chủ, bật Docker (rootless) tự chạy khi mở máy — chạy một lần:', cmd: 'systemctl --user enable docker' }
+          : { text: 'Trên máy chủ, bật Docker tự chạy khi mở máy — chạy một lần (máy hỏi mật khẩu đăng nhập máy):', cmd: 'sudo systemctl enable docker' },
+      );
+    }
+    if (a.linger_required === true && a.linger === 'no') {
+      steps.push({
+        text: a.docker_mode === 'rootless'
+          ? 'Cho Docker rootless, lịch tự cập nhật và nút Cập nhật ngay chạy cả khi không ai đăng nhập — chạy một lần:'
+          : 'Cho lịch tự cập nhật và nút Cập nhật ngay chạy cả khi không ai đăng nhập — chạy một lần:',
+        cmd: 'sudo loginctl enable-linger $USER',
+      });
+    }
+    steps.push({ text: 'Chạy xong thì kiểm lại để cảnh báo tự hết (hoặc đợi tới đêm, lần cập nhật tự động sẽ kiểm lại):', cmd: 'genh status' });
+    tips.push({ key: 'autostart', title: 'Cách bật tự chạy lại khi bật máy', steps });
   }
   return tips;
 }

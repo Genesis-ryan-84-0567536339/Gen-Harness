@@ -211,6 +211,11 @@ export interface SystemUpdate {
    * thiếu ở api cũ.
    */
   stalled_reason?: SystemUpdateStalledReason;
+  /**
+   * v0.1.37: yêu cầu đang xếp hàng sau một lần cập nhật/khôi phục khác đang chạy trên máy chủ (vd lịch đêm — genh còn
+   * nhịp sống); khi đó yêu cầu nằm quá 15 phút vẫn là 'requested', không phải `not_picked_up`. Thiếu ở api cũ.
+   */
+  host_busy?: boolean;
   message: string | null;
   from: string | null;
   to: string | null;

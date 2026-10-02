@@ -1,5 +1,11 @@
 import { expect, test } from '@playwright/test';
-import { loginAsOwner, mockHook, resetMock } from './support';
+import { AUDITOR, loginAs, loginAsOwner, mockHook, resetMock } from './support';
+
+/** Khối `autostart` của `/system/health` khi Docker chưa bật tự chạy và thiếu linger (genh ghi run/autostart-status.json). */
+const AUTOSTART_WARN = {
+  state: 'warn', linger: 'no', linger_required: true, docker_enabled: 'no', docker_mode: 'system',
+  checked_at: new Date(Date.now() - 30 * 60_000).toISOString(),
+};
 
 /**
  * v0.1.37 (F-34) — 'running' mà tiến trình genh trên máy chủ đã chết (máy tắt/khởi động lại giữa chừng): api trả
@@ -100,19 +106,60 @@ test.describe('v0.1.37 — cập nhật bị dừng giữa chừng', () => {
     await expect(page.getByText('[object Object]')).toHaveCount(0);
   });
 
-  test('host.autostart: dải "Cần Sếp xử lý" có dòng kèm lệnh, KHÔNG có nút chết', async ({ page }) => {
-    await mockHook(page.request, 'health', { issues: [{ kind: 'host.autostart' }] });
+  test('host.autostart: dải "Cần Sếp xử lý" có dòng kèm lệnh, nút "Xem cách bật" tới hướng dẫn có lệnh', async ({ page }) => {
+    await mockHook(page.request, 'health', { autostart: AUTOSTART_WARN });
     await page.goto('/overview');
     const strip = page.getByRole('region', { name: 'Cần Sếp xử lý' });
     const rows = strip.getByTestId('needs-boss-row');
     await expect(rows).toHaveCount(1);
     await expect(rows.first()).toHaveAttribute('data-severity', 'warn');
-    await expect(rows.first()).toContainText('Máy chủ chưa tự chạy lại Gen-Harness sau khi khởi động lại');
+    await expect(rows.first()).toContainText('Máy chủ có thể không tự chạy lại Gen-Harness khi bật lại máy');
     await expect(rows.first()).toContainText('sudo systemctl enable docker');
     await expect(rows.first()).toContainText('sudo loginctl enable-linger $USER');
-    // Lệnh chạy trên máy chủ ⇒ không có đích trong Console: không vẽ nút/link nào.
-    await expect(rows.first().getByRole('link')).toHaveCount(0);
-    await expect(rows.first().getByRole('button')).toHaveCount(0);
+    await expect(rows.first()).toContainText('genh status');
+    // Nút dẫn tới thẻ Sức khoẻ — hướng dẫn từng bước, lệnh dạng mã chép được (thân chuông bị cắt 2 dòng).
+    await rows.first().getByRole('link', { name: /Xem cách bật/ }).click();
+    await expect(page).toHaveURL(/\/system\?tab=storage/);
+    await expect(page.getByTestId('health-tip-autostart')).toBeVisible();
+    await expect(page.getByTestId('health-tip-autostart').locator('code', { hasText: 'sudo systemctl enable docker' })).toBeVisible();
+    await expect(page.getByText('[object Object]')).toHaveCount(0);
+  });
+
+  test('host.autostart: bấm chuông tới thẻ Sức khoẻ có lệnh (không phải mục chết)', async ({ page }) => {
+    await page.goto('/overview');
+    const bell = page.locator('header .hd-bell');
+    await expect(bell).toHaveAccessibleName('Thông báo — 1 chưa đọc');
+    // API thật: health.raise_once mở dòng ops.health_alerts rồi gửi chuông với link /system?tab=storage.
+    await mockHook(page.request, 'health', { autostart: AUTOSTART_WARN });
+    await mockHook(page.request, 'notify', {
+      kind: 'host.autostart', title: 'Máy chủ có thể không tự chạy lại Gen-Harness khi bật lại máy',
+      body: 'Docker chưa bật tự chạy khi mở máy — chạy một lần trên máy chủ: sudo systemctl enable docker · Chạy xong thì chạy genh status để cảnh báo tự hết (hoặc đợi tới đêm)',
+      link: '/system?tab=storage',
+    });
+    await expect(bell).toHaveAccessibleName('Thông báo — 2 chưa đọc');
+    await bell.click();
+    const dlg = page.getByRole('dialog', { name: 'Thông báo' });
+    await dlg.getByRole('button', { name: /có thể không tự chạy lại Gen-Harness/ }).click();
+    await expect(page).toHaveURL(/\/system\?tab=storage$/);
+    const tip = page.getByTestId('health-tip-autostart');
+    await expect(tip.locator('code', { hasText: 'sudo systemctl enable docker' })).toBeVisible();
+    await expect(tip.locator('code', { hasText: 'sudo loginctl enable-linger $USER' })).toBeVisible();
+    await expect(tip.locator('code', { hasText: 'genh status' })).toBeVisible();
+  });
+
+  test('Auditor (chỉ system.read): thẻ Sức khoẻ có dòng "Tự chạy lại khi bật máy" + hướng dẫn có lệnh', async ({ page }) => {
+    await mockHook(page.request, 'health', { autostart: AUTOSTART_WARN });
+    await page.context().clearCookies();
+    await loginAs(page, AUDITOR.email);
+    await page.goto('/system?tab=storage');
+    const card = page.getByRole('region', { name: 'Sức khoẻ hệ thống' });
+    const row = card.getByTestId('health-autostart');
+    await expect(row).toContainText('Tự chạy lại khi bật máy');
+    await expect(row).toContainText('Chưa bật');
+    await expect(row).toHaveAttribute('data-tone', 'warn');
+    const tip = card.getByTestId('health-tip-autostart');
+    await expect(tip.locator('code', { hasText: 'sudo systemctl enable docker' })).toBeVisible();
+    await expect(tip.locator('code', { hasText: 'genh status' })).toBeVisible();
     await expect(page.getByText('[object Object]')).toHaveCount(0);
   });
 });

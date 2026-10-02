@@ -290,6 +290,20 @@ async def test_stale_request_reason_not_picked_up(owner_api: Api, link: Path, re
     assert body["state"] == "requested" and body["stalled_reason"] is None
 
 
+async def test_stale_request_while_other_genh_runs_is_queued(owner_api: Api, link: Path, redis) -> None:  # type: ignore[no-untyped-def]
+    await redis.delete(upd.LATEST_CACHE_KEY)
+    # Yêu cầu nằm quá 15 phút NHƯNG một lần genh khác (lịch đêm) đang giữ khoá và còn nhịp sống ⇒ đang xếp hàng
+    # (genh --if-requested chờ khoá), không phải "Máy chủ chưa nhận yêu cầu".
+    (link / "request" / "update.json").write_text(json.dumps({"requested_at": _ago(minutes=25)}))
+    _heartbeat(link, pid=4242, minutes_ago=0.5)
+    body = await _get(owner_api)
+    assert body["state"] == "requested" and body["stalled_reason"] is None and body["host_busy"] is True
+    # Nhịp sống cũ (genh kia đã chết) ⇒ lại là not_picked_up.
+    _heartbeat(link, pid=4242, minutes_ago=10)
+    body = await _get(owner_api)
+    assert body["state"] == "stalled" and body["stalled_reason"] == "not_picked_up" and body["host_busy"] is False
+
+
 async def test_garbage_heartbeat_and_status_never_500(owner_api: Api, link: Path, redis) -> None:  # type: ignore[no-untyped-def]
     await redis.delete(upd.LATEST_CACHE_KEY)
     # (h) nhịp sống là JSON rác / không phải dict / kiểu sai ⇒ không 500, coi như không có nhịp

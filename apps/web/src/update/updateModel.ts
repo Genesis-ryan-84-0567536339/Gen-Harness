@@ -98,13 +98,24 @@ function failedCopy(
   }
   const rolledBack = /đã tự quay về/i.test(msg);
   if (code === 'GH-E94B') {
-    // v0.1.37: genh nhận tín hiệu dừng (SIGINT/SIGTERM — máy tắt, bị kill) giữa chừng — không phải bản mới hỏng, lịch
-    // đêm vẫn thử lại bản này.
+    // v0.1.37: genh nhận tín hiệu dừng (SIGINT/SIGTERM — máy tắt, bị kill) giữa chừng — không phải bản mới hỏng. Lịch
+    // đêm CHỈ tự thử lại khi đã dừng gọn (chưa đụng gì / đã tự quay về); quay về chưa trọn thì genh chặn lịch đêm
+    // (update-blocked.json) — không hứa tự thử lại (nhánh đó thường đã rơi vào "Cần xử lý tay" ở trên).
+    if (rolledBack) {
+      return {
+        tone: 'warn', kicker: 'Cập nhật bị dừng giữa chừng',
+        body: `Hệ thống đã tự quay về bản đang dùng, dữ liệu giữ nguyên. Đây không phải lỗi của bản mới — ${retry} để chạy lại từ đầu, hoặc đợi lịch đêm tự thử lại.`,
+      };
+    }
+    if (/chưa đụng gì/i.test(msg)) {
+      return {
+        tone: 'warn', kicker: 'Cập nhật bị dừng giữa chừng — chưa đụng gì, bản đang dùng vẫn chạy bình thường',
+        body: `Đây không phải lỗi của bản mới — ${retry} để chạy lại, hoặc đợi lịch đêm tự thử lại.`,
+      };
+    }
     return {
       tone: 'warn', kicker: 'Cập nhật bị dừng giữa chừng',
-      body: rolledBack
-        ? `Hệ thống đã tự quay về bản đang dùng, dữ liệu giữ nguyên. Đây không phải lỗi của bản mới — ${retry} để chạy lại từ đầu, hoặc đợi lịch đêm tự thử lại.`
-        : `Đây không phải lỗi của bản mới. Xem Chi tiết kỹ thuật (hoặc logs/auto-update.log trên máy chủ) để biết máy đang ở bản nào, rồi ${retry} — lịch đêm cũng sẽ tự thử lại.`,
+      body: `Đây không phải lỗi của bản mới. Xem Chi tiết kỹ thuật (hoặc logs/auto-update.log trên máy chủ) để biết máy đang ở bản nào, rồi ${retry}.`,
     };
   }
   if (code === 'GH-E94A') {
@@ -162,7 +173,11 @@ export function updateView(
   }
   if (!d) return { kind: 'hidden' };
   if (d.state === 'requested') {
-    return { kind: 'working', tone: 'accent', title: `Đang cập nhật lên ${target}`, kicker: 'Đã gửi yêu cầu, máy chủ sẽ bắt đầu trong vòng 1 phút', steps: steps(0) };
+    // v0.1.37: máy chủ đang chạy một lần cập nhật/khôi phục khác (vd lịch đêm) — yêu cầu xếp hàng, làm ngay sau đó.
+    const kicker = d.host_busy
+      ? 'Máy chủ đang chạy một lần cập nhật/khôi phục khác — sẽ làm yêu cầu này ngay khi lần đó xong'
+      : 'Đã gửi yêu cầu, máy chủ sẽ bắt đầu trong vòng 1 phút';
+    return { kind: 'working', tone: 'accent', title: `Đang cập nhật lên ${target}`, kicker, steps: steps(0) };
   }
   if (d.state === 'running') {
     return { kind: 'working', tone: 'accent', title: `Đang cập nhật lên ${target}`, kicker: 'Mất khoảng 2–5 phút — trang tự tải lại khi xong', steps: steps(1) };
@@ -172,7 +187,7 @@ export function updateView(
     return {
       kind: 'stalled', tone: 'warn', title: `Cập nhật lên ${target} bị dừng giữa chừng`,
       kicker: 'Tiến trình cập nhật trên máy chủ không còn chạy — có thể máy vừa tắt hoặc khởi động lại',
-      body: 'Bấm Thử lại để chạy lại từ đầu (genh tự sao lưu trước khi làm). Lỗi lặp lại thì xem logs/auto-update.log trên máy chủ.',
+      body: `${d.can_request ? 'Bấm Thử lại' : 'Chạy lệnh dưới đây trên máy chủ'} để chạy lại từ đầu (hệ thống tự sao lưu trước khi làm). Lỗi lặp lại thì xem logs/auto-update.log trên máy chủ.`,
       showCommand: !d.can_request, steps: [],
     };
   }

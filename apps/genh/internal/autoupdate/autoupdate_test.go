@@ -294,11 +294,13 @@ func TestRefreshUnits(t *testing.T) {
 		t.Fatal("không được tạo unit khi chưa có")
 	}
 
-	// Unit cũ (thiếu KillMode) → ghi lại + daemon-reload, không enable/disable.
+	// Unit cũ (thiếu KillMode) → CHỈ thêm dòng thiếu + daemon-reload, không
+	// enable/disable; giữ sửa tay của Owner và ExecStart cũ (binary ở đường dẫn
+	// khác — không trỏ lịch đêm sang genh đang chạy lệnh này).
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	old := "[Unit]\nDescription=cu\n\n[Service]\nType=oneshot\nExecStart=/g/genh update --yes --quiet\n"
+	old := "[Unit]\nDescription=cu\n\n[Service]\nType=oneshot\nExecStart=/opt/khac/genh update --yes --quiet\nEnvironment=HTTPS_PROXY=http://proxy:3128\nNice=10\n"
 	if err := os.WriteFile(path, []byte(old), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -308,8 +310,9 @@ func TestRefreshUnits(t *testing.T) {
 		t.Fatalf("unit cũ: changed=%v err=%v", changed, err)
 	}
 	b, _ := os.ReadFile(path)
-	if string(b) != SystemdServiceUnit("/g/genh", "/g/log") {
-		t.Fatalf("unit chưa được ghi lại:\n%s", b)
+	wantPatched := "[Unit]\nDescription=cu\n\n[Service]\nKillMode=mixed\nTimeoutStopSec=900\nType=oneshot\nExecStart=/opt/khac/genh update --yes --quiet\nEnvironment=HTTPS_PROXY=http://proxy:3128\nNice=10\n"
+	if string(b) != wantPatched {
+		t.Fatalf("unit phải chỉ được thêm dòng thiếu:\n%s", b)
 	}
 	if len(r.calls) != 1 || !r.calledWith("systemctl", "--user daemon-reload") {
 		t.Fatalf("chỉ được gọi daemon-reload: %+v", r.calls)
@@ -320,6 +323,15 @@ func TestRefreshUnits(t *testing.T) {
 	changed, err = RefreshUnits(context.Background(), deps(r))
 	if err != nil || changed || len(r.calls) != 0 {
 		t.Fatalf("đã đúng: changed=%v err=%v calls=%+v", changed, err, r.calls)
+	}
+
+	// Owner tự đặt KillMode khác (đã có khoá) → giữ nguyên, chỉ thêm TimeoutStopSec.
+	_ = os.WriteFile(path, []byte("[Service]\nKillMode=control-group\nExecStart=/g/genh update\n"), 0o644)
+	if changed, err := RefreshUnits(context.Background(), deps(newFakeRunner())); err != nil || !changed {
+		t.Fatalf("thiếu TimeoutStopSec: changed=%v err=%v", changed, err)
+	}
+	if b, _ := os.ReadFile(path); string(b) != "[Service]\nTimeoutStopSec=900\nKillMode=control-group\nExecStart=/g/genh update\n" {
+		t.Fatalf("không được đổi KillMode Owner đặt:\n%s", b)
 	}
 
 	// Hệ điều hành khác Linux → không làm gì.

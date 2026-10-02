@@ -19,11 +19,15 @@ const randomizedDelaySec = 30 * 60 // 30 phút
 // distro cũ hơn vẫn ghi log qua journal như mặc định, chỉ mất phần nối vào
 // logFile, không mất chức năng tự cập nhật).
 //
-// KillMode=mixed + TimeoutStopSec=900 (v0.1.37, F-34): khi máy tắt/khởi động
-// lại, systemd chỉ gửi SIGTERM cho tiến trình genh CHÍNH (genh tự chuyển tiếp
-// cho tiến trình con sau tự cập nhật và quay về bản cũ) và chờ tối đa 15 phút
-// cho phần quay về bản cũ chạy xong rồi mới SIGKILL — mặc định control-group
-// SIGTERM cả docker CLI con và chỉ chờ 90 giây.
+// KillMode=mixed + TimeoutStopSec=900 (v0.1.37, F-34): khi unit bị dừng,
+// systemd chỉ gửi SIGTERM cho tiến trình genh CHÍNH (genh tự chuyển tiếp cho
+// tiến trình con sau tự cập nhật) — mặc định control-group SIGTERM cả docker CLI
+// con giữa lúc quay về bản cũ. TimeoutStopSec=900 chỉ có tác dụng khi dừng unit
+// lúc máy VẪN chạy (`systemctl --user stop`, đăng xuất có linger…). LÚC TẮT MÁY
+// nó KHÔNG nới được gì: user@.service (TimeoutStopSec=120s) SIGKILL cả user
+// manager cùng cgroup sau khoảng 2 phút, và docker.service (unit hệ thống, không
+// xếp thứ tự với user@) có thể đang dừng song song — vì vậy genh nhận SIGTERM
+// sau khi đã đụng CSDL thì KHÔNG bắt đầu khôi phục (xem ops.ErrShutdownSignal).
 func SystemdServiceUnit(genhPath, logFile string) string {
 	return fmt.Sprintf(`[Unit]
 Description=Gen-Harness — tu dong cap nhat genh + dich vu hang dem

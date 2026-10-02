@@ -1356,8 +1356,9 @@ func TestPruneOldImages_OnlyKeptRepos(t *testing.T) {
 
 // ctxCall ghi một lệnh cùng ctx.Err() ĐÚNG LÚC lệnh được gọi.
 type ctxCall struct {
-	cmd    dockercli.Cmd
-	ctxErr error
+	cmd         dockercli.Cmd
+	ctxErr      error
+	hasDeadline bool
 }
 
 // ctxRecRunner bọc fake.Runner: ghi ctx.Err() của từng lệnh; before (nếu có)
@@ -1372,7 +1373,8 @@ type ctxRecRunner struct {
 
 func (r *ctxRecRunner) rec(ctx context.Context, cmd dockercli.Cmd) error {
 	r.mu.Lock()
-	r.calls = append(r.calls, ctxCall{cmd: cmd, ctxErr: ctx.Err()})
+	_, dl := ctx.Deadline()
+	r.calls = append(r.calls, ctxCall{cmd: cmd, ctxErr: ctx.Err(), hasDeadline: dl})
 	r.mu.Unlock()
 	if r.before != nil {
 		return r.before(cmd)
@@ -1536,15 +1538,140 @@ func TestRollback_CoHanRieng(t *testing.T) {
 	fr := updateFakeRunner(fake.Response{Match: matchRestore, WaitCtx: true})
 	plan := rollbackPlan{runner: fr, composePath: composePath, dir: filepath.Dir(composePath),
 		key: updateTestBackupKey, dbTouched: true, versionBroken: true, installDir: t.TempDir(), version: testVersion}
+	// Hạn riêng chỉ áp cho rollback vì tín hiệu dừng (Ctrl-C).
+	ctx, cancel := context.WithCancelCause(context.Background())
+	cancel(ErrInterruptSignal)
 	var out strings.Builder
 	start := time.Now()
-	err := rollbackAndWrap(context.Background(), plan, &out, &OpError{Code: ErrCodeUpdateMigrateFailed, What: "migrate lỗi"})
+	err := rollbackAndWrap(ctx, plan, &out, &OpError{Code: ErrCodeUpdateMigrateFailed, What: "migrate lỗi"})
 	if d := time.Since(start); d >= time.Second {
 		t.Fatalf("rollback phải có hạn riêng — mất %v", d)
 	}
 	opErr := asOpError(t, err)
-	if !strings.Contains(out.String(), "ROLLBACK THẤT BẠI") || !strings.Contains(opErr.What, "ROLLBACK TỰ ĐỘNG CŨNG THẤT BẠI") {
-		t.Errorf("restore treo quá hạn phải báo ROLLBACK … THẤT BẠI: %q / %q", out.String(), opErr.What)
+	if !strings.Contains(out.String(), "ROLLBACK THẤT BẠI") || opErr.Code != ErrCodeUpdateInterrupted || !strings.Contains(opErr.What, "CHƯA trọn") {
+		t.Errorf("restore treo quá hạn phải báo ROLLBACK THẤT BẠI / quay về CHƯA trọn: %q / %s %q", out.String(), opErr.Code, opErr.What)
+	}
+	b, ok, _ := hostlink.ReadUpdateBlocked(plan.installDir)
+	if !ok || !b.RollbackFailed || b.BackupKey != updateTestBackupKey {
+		t.Errorf("bị dừng mà quay về chưa trọn phải ghi update-blocked.json (rollback_failed + backup_key): %+v ok=%v", b, ok)
+	}
+}
+
+// Rollback vì lỗi thường (không có tín hiệu dừng): KHÔNG có hạn — pg_restore
+// trên CSDL lớn/đĩa chậm phải được chạy xong.
+func TestRollback_KhongBiDung_KhoiPhucKhongCoHan(t *testing.T) {
+	old := rollbackTimeout
+	rollbackTimeout = 50 * time.Millisecond
+	defer func() { rollbackTimeout = old }()
+
+	composePath := testComposePath(t, updateTestComposeYAML)
+	rr := &ctxRecRunner{Runner: updateFakeRunner()}
+	plan := rollbackPlan{runner: rr, composePath: composePath, dir: filepath.Dir(composePath),
+		key: updateTestBackupKey, dbTouched: true, versionBroken: true, installDir: t.TempDir(), version: testVersion}
+	err := rollbackAndWrap(context.Background(), plan, &strings.Builder{}, &OpError{Code: ErrCodeUpdateMigrateFailed, What: "migrate lỗi"})
+	if opErr := asOpError(t, err); opErr.Code != ErrCodeUpdateRolledBack || !strings.Contains(opErr.What, "đã tự quay về") {
+		t.Fatalf("muốn GH-E945 đã quay về, được %s %q", opErr.Code, opErr.What)
+	}
+	ri := rr.indexAfter(-1, matchRestore)
+	if ri < 0 {
+		t.Fatalf("phải khôi phục: %+v", rr.calls)
+	}
+	if rr.calls[ri].hasDeadline {
+		t.Error("rollback không do tín hiệu dừng: restore KHÔNG được có hạn")
+	}
+	if ui := rr.indexAfter(ri, matchFullUp); ui < 0 || rr.calls[ui].hasDeadline {
+		t.Errorf("up -d sau restore cũng không có hạn: %+v", rr.calls)
+	}
+}
+
+// Bị dừng (Ctrl-C) + đã đụng CSDL + khôi phục LỖI (vd pg_restore bị cắt sau
+// DROP DATABASE): PHẢI ghi update-blocked.json — lịch đêm không được chạy lại
+// `genh update` đè lên CSDL trống/dở.
+func TestRollback_BiDung_KhoiPhucLoi_VanGhiBlocked(t *testing.T) {
+	composePath := testComposePath(t, updateTestComposeYAML)
+	installDir := t.TempDir()
+	if err := hostlink.MarkUpdateInProgress(installDir, hostlink.UpdateInProgress{}); err != nil {
+		t.Fatal(err)
+	}
+	fr := updateFakeRunner(fake.Response{Match: matchRestore, Err: errors.New("pg_restore: bị giết")})
+	plan := rollbackPlan{runner: fr, composePath: composePath, dir: filepath.Dir(composePath),
+		key: updateTestBackupKey, dbTouched: true, versionBroken: true, installDir: installDir, version: testVersion}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var out strings.Builder
+	err := rollbackAndWrap(ctx, plan, &out, &OpError{Code: ErrCodeUpdateMigrateFailed, What: "migrate lỗi"})
+	opErr := asOpError(t, err)
+	if opErr.Code != ErrCodeUpdateInterrupted || strings.Contains(opErr.What, "đã tự quay về") {
+		t.Fatalf("muốn GH-E94B chưa quay về, được %s %q", opErr.Code, opErr.What)
+	}
+	b, ok, rerr := hostlink.ReadUpdateBlocked(installDir)
+	if rerr != nil || !ok {
+		t.Fatalf("phải ghi update-blocked.json: ok=%v err=%v", ok, rerr)
+	}
+	if !b.RollbackFailed || b.BackupKey != updateTestBackupKey || b.Version != testVersion || !b.DBTouched {
+		t.Errorf("update-blocked.json phải có rollback_failed + backup_key + version: %+v", b)
+	}
+	if !hostlink.UpdateInProgressExists(installDir) {
+		t.Error("quay về chưa trọn thì GIỮ update-inprogress.json")
+	}
+}
+
+// Bị dừng + CSDL chưa đụng + bản hỏng (versionBroken) + up -d lại LỖI: vẫn
+// chặn lịch đêm (rollback_failed, không có backup_key).
+func TestRollback_BiDung_KhongDungCsdl_UpLoi_GhiBlocked(t *testing.T) {
+	composePath := testComposePath(t, updateTestComposeYAML)
+	installDir := t.TempDir()
+	fr := updateFakeRunner(fake.Response{Match: matchFullUp, Err: errors.New("docker đang dừng")})
+	plan := rollbackPlan{runner: fr, composePath: composePath, dir: filepath.Dir(composePath),
+		key: updateTestBackupKey, dbTouched: false, versionBroken: true, installDir: installDir, version: testVersion}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := rollbackAndWrap(ctx, plan, &strings.Builder{}, &OpError{Code: ErrCodeUpdateNotReady, What: "chưa sẵn sàng"})
+	if opErr := asOpError(t, err); opErr.Code != ErrCodeUpdateInterrupted {
+		t.Fatalf("muốn GH-E94B, được %s", opErr.Code)
+	}
+	b, ok, _ := hostlink.ReadUpdateBlocked(installDir)
+	if !ok || !b.RollbackFailed || b.BackupKey != "" || b.DBTouched {
+		t.Errorf("phải ghi update-blocked.json rollback_failed, KHÔNG backup_key: %+v ok=%v", b, ok)
+	}
+}
+
+// SIGTERM (máy tắt) sau khi đã đụng CSDL: KHÔNG bắt đầu khôi phục (không
+// dừng dịch vụ, không DROP/pg_restore, không up) — trả compose.yaml về bản cũ,
+// ghi update-blocked.json (rollback_failed + backup_key), giữ update-inprogress.
+func TestRollback_SIGTERM_DaDungCsdl_KhongKhoiPhucLucTatMay(t *testing.T) {
+	composePath := testComposePath(t, "services: {}\n") // compose MỚI đang nằm trên đĩa
+	installDir := t.TempDir()
+	if err := hostlink.MarkUpdateInProgress(installDir, hostlink.UpdateInProgress{}); err != nil {
+		t.Fatal(err)
+	}
+	fr := updateFakeRunner()
+	plan := rollbackPlan{runner: fr, composePath: composePath, dir: filepath.Dir(composePath),
+		key: updateTestBackupKey, dbTouched: true, versionBroken: true, installDir: installDir, version: testVersion,
+		oldCompose: []byte(updateTestComposeYAML)}
+	ctx, cancel := context.WithCancelCause(context.Background())
+	cancel(ErrShutdownSignal)
+	var out strings.Builder
+	err := rollbackAndWrap(ctx, plan, &out, &OpError{Code: ErrCodeUpdateMigrateFailed, What: "migrate lỗi"})
+	opErr := asOpError(t, err)
+	if opErr.Code != ErrCodeUpdateInterrupted || !strings.Contains(opErr.What, "CHƯA trọn") {
+		t.Fatalf("muốn GH-E94B quay về CHƯA trọn, được %s %q", opErr.Code, opErr.What)
+	}
+	if !strings.Contains(opErr.Next, "restore --key "+updateTestBackupKey) {
+		t.Errorf("Next phải chỉ đúng lệnh khôi phục: %q", opErr.Next)
+	}
+	if len(fr.Calls) != 0 {
+		t.Errorf("máy đang tắt: KHÔNG chạy lệnh docker nào (stop/restore/up): %+v", fr.Calls)
+	}
+	if b, _ := os.ReadFile(composePath); string(b) != updateTestComposeYAML {
+		t.Error("compose.yaml vẫn phải được trả về bản cũ")
+	}
+	b, ok, _ := hostlink.ReadUpdateBlocked(installDir)
+	if !ok || !b.RollbackFailed || b.BackupKey != updateTestBackupKey {
+		t.Errorf("phải ghi update-blocked.json rollback_failed + backup_key: %+v ok=%v", b, ok)
+	}
+	if !hostlink.UpdateInProgressExists(installDir) {
+		t.Error("chưa khôi phục thì GIỮ update-inprogress.json")
 	}
 }
 
