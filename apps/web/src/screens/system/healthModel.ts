@@ -76,13 +76,15 @@ export function healthRows(h: SystemHealth, now = Date.now(), tz = DEFAULT_TZ): 
     // `failed` = lỗi trong 24 giờ qua (cùng điều kiện thẻ cập nhật) — quá hạn thì API trả false dù state vẫn 'failed'.
     u.failed
       ? { key: 'update', label: 'Cập nhật', value: u.blocked_version ? `Lần cập nhật gần nhất lỗi (${u.blocked_version})` : 'Lần cập nhật gần nhất lỗi', tone: 'bad' }
-      : u.state === 'stalled'
-        ? { key: 'update', label: 'Cập nhật', value: 'Máy chủ chưa nhận yêu cầu cập nhật', tone: 'warn' }
-        : u.state === 'requested' || u.state === 'running'
-          ? { key: 'update', label: 'Cập nhật', value: 'Đang cập nhật', tone: 'muted' }
-          : u.state === 'unknown'
-            ? { key: 'update', label: 'Cập nhật', value: 'Chưa rõ', tone: 'muted' }
-            : { key: 'update', label: 'Cập nhật', value: 'Bình thường', tone: 'ok' },
+      : u.state === 'stalled' && u.stalled_reason === 'process_gone'
+        ? { key: 'update', label: 'Cập nhật', value: 'Cập nhật bị dừng giữa chừng', tone: 'warn' }
+        : u.state === 'stalled'
+          ? { key: 'update', label: 'Cập nhật', value: 'Máy chủ chưa nhận yêu cầu cập nhật', tone: 'warn' }
+          : u.state === 'requested' || u.state === 'running'
+            ? { key: 'update', label: 'Cập nhật', value: 'Đang cập nhật', tone: 'muted' }
+            : u.state === 'unknown'
+              ? { key: 'update', label: 'Cập nhật', value: 'Chưa rõ', tone: 'muted' }
+              : { key: 'update', label: 'Cập nhật', value: 'Bình thường', tone: 'ok' },
   );
 
   // Ổ đĩa chỉ được đo khi genh chạy `genh update` (disk-status.json) — số có thể cũ cả ngày ⇒ luôn ghi giờ đo.
