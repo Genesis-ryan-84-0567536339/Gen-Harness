@@ -331,8 +331,10 @@ async def test_retention_sweep_batches_and_summary(swept, db, redis: Redis) -> N
     ds = out["datasets"]
     assert ds["memory.entries"] == {"mode": "batch", "deleted": 12005, "ok": True}
     assert seen["memory"] >= 3                                          # 5000 + 5000 + 2005
-    left = (await db.execute(text("SELECT body FROM memory.entries WHERE notebook_id = :n ORDER BY body"),
-                             {"n": swept["nb"]})).scalars().all()
+    # Sắp ở Python (theo mã ký tự), không ORDER BY trong SQL: thứ tự chuỗi tiếng Việt phụ thuộc
+    # collation của CSDL (C.UTF-8 đặt "đ" sau "n", en_US.utf8 của image CI đặt "đ" cạnh "d").
+    left = sorted((await db.execute(text("SELECT body FROM memory.entries WHERE notebook_id = :n"),
+                                    {"n": swept["nb"]})).scalars().all())
     assert left == ["ghim cũ", "nén gần đây", "đang dùng"]
 
     res = dict((await db.execute(text("SELECT id, result FROM agent.browser_jobs"))).all())
