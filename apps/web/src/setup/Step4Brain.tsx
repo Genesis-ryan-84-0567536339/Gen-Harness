@@ -7,7 +7,7 @@ import { qk2, useCliProfiles, useProviders } from '../lib/dataQueries';
 import { emailInitials, fmtDMClock, fmtInt, fmtLatency } from '../lib/format';
 import { queryClient } from '../lib/queryClient';
 import { useNow } from '../lib/useNow';
-import { errorText } from '../lib/errorText';
+import { errorDetail, errorText } from '../lib/errorText';
 import { CardError, FriendlyErrorText, InlineError, PinHint, SkeletonLines, StateChip } from '../screens/common';
 import { PROVIDER_KIND_LABEL, PROVIDER_PRESETS, choiceText, isCliKind, providerStatus, testOkText } from '../screens/api/apiModel';
 import { ModelPicker } from '../screens/api/ModelPicker';
@@ -219,7 +219,7 @@ export function Step4Brain({ meta, description, onBack, onSaved, formRef, onSkip
             })}
           </div>
         )}
-        {remove.isError ? <InlineError>{errorText(remove.error)}</InlineError> : null}
+        {remove.isError ? <InlineError detail={errorDetail(remove.error)}>{errorText(remove.error)}</InlineError> : null}
         <AddProvider onAdded={(p) => test.mutate(p.id)} />
       </div>
     </StepFrame>
@@ -308,7 +308,7 @@ function AddProvider({ onAdded }: { onAdded: (p: Provider) => void }) {
         <PinHint />
         <span className="muted-note">Khoá được mã hoá khi lưu; Console chỉ hiện 4 ký tự cuối.</span>
       </div>
-      {add.isError ? <InlineError>{errorText(add.error)}</InlineError> : null}
+      {add.isError ? <InlineError detail={errorDetail(add.error)}>{errorText(add.error)}</InlineError> : null}
     </div>
   );
 }

@@ -19,6 +19,7 @@ from gh.providers.router import (
     BACKGROUND_CLI_REASON,
     BACKGROUND_CLI_RISK,
     BG_NO_SOURCE_FLAG,
+    BG_NO_SOURCE_TRY,
     ModelRouter,
     ModelUnavailable,
     is_background,
@@ -118,6 +119,9 @@ async def test_cli_only_opens_incident_once_and_closes(owner_api, db, redis) -> 
     h = await _health(db, org)
     assert h is not None and h.cleared_at is None and h.kind == "ai.background_no_source"
     assert h.severity == "warn" and h.link == "/system?tab=brain"
+    body = (await db.execute(text("""SELECT body FROM ops.health_alerts WHERE org_id = :o
+                                     AND key = 'ai.background_no_source'"""), {"o": org})).scalar_one()
+    assert "API & Model (Thêm nhà cung cấp)" in body and "Bộ não AI" in body
     assert await _bells(db, "ai.background_no_source") == 1
     assert await redis.exists(BG_NO_SOURCE_FLAG.format(org))
     # Không dùng biz.alerts cho trường hợp này.
@@ -135,6 +139,35 @@ async def test_cli_only_opens_incident_once_and_closes(owner_api, db, redis) -> 
     h = await _health(db, org)
     assert h is not None and h.cleared_at is not None                 # sự cố tự đóng
     assert not await redis.exists(BG_NO_SOURCE_FLAG.format(org))
+    assert not await redis.exists(BG_NO_SOURCE_TRY.format(org))     # lần thiếu nguồn kế tiếp báo ngay
+
+
+async def test_cli_only_throttles_db_writes(owner_api, db, redis, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Mỗi lô việc nền hết chuỗi KHÔNG mở phiên DB / raise_once — tối đa một lần mỗi BG_NO_SOURCE_TRY_TTL."""
+    from gh import health
+
+    calls = 0
+    real = health.raise_once
+
+    async def counting(*a: Any, **kw: Any) -> Any:
+        nonlocal calls
+        calls += 1
+        return await real(*a, **kw)
+
+    monkeypatch.setattr(health, "raise_once", counting)
+    org = await org_id(db)
+    await cli_provider(db, org, "claude_code_cli", 1)
+    r = make_router(redis, FakeCli("claude"))
+    for _ in range(3):
+        with pytest.raises(ModelUnavailable):
+            await r.generate(org, agent_key="core.refinery", purpose="refinery", messages=MSGS)
+    assert calls == 1
+    assert 0 < await redis.ttl(BG_NO_SOURCE_TRY.format(org)) <= 600
+    await redis.delete(BG_NO_SOURCE_TRY.format(org))                 # hết ngưỡng ⇒ ghi lại (raise_once không chuông 2)
+    with pytest.raises(ModelUnavailable):
+        await r.generate(org, agent_key="agent:x", purpose="duty_decide", messages=MSGS)
+    assert calls == 2
+    assert await _bells(db, "ai.background_no_source") == 1
 
 
 @pytest.mark.parametrize("fix", ["api_key", "allow_cli"])
@@ -165,6 +198,7 @@ async def test_incident_closes_on_health_evaluate_without_background_call(owner_
     h = await _health(db, org)
     assert h is not None and h.cleared_at is not None
     assert not await redis.exists(BG_NO_SOURCE_FLAG.format(org))
+    assert not await redis.exists(BG_NO_SOURCE_TRY.format(org))
 
 
 async def test_opt_in_claude_cli_but_never_agy(app, db, redis) -> None:  # type: ignore[no-untyped-def]

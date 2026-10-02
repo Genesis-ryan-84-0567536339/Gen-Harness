@@ -10,7 +10,7 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, RouterProvider, createMemoryRouter } from 'react-router-dom';
 import type { GenConversation, GenMessage } from '@gen-harness/contracts';
 import { GenPanel } from '../../src/gen/GenPanel';
-import { sendQuestion, stopAll } from '../../src/gen/genClient';
+import { loadConversation, sendQuestion, stopAll } from '../../src/gen/genClient';
 import { useGenStore } from '../../src/gen/genStore';
 import { setNavigator } from '../../src/lib/navigation';
 import { qk } from '../../src/lib/queries';
@@ -84,7 +84,7 @@ beforeEach(() => {
   handler = () => undefined;
   window.localStorage.clear();
   useToasts.setState({ toasts: [] });
-  useGenStore.setState({ openByUser: {}, conversationId: null, conversationOwner: null, messages: [], busy: false, restoring: false, spotlight: null });
+  useGenStore.setState({ openByUser: {}, conversationId: null, conversationOwner: null, messages: [], busy: false, restoring: false, loadingConversation: false, spotlight: null });
   setNavigator((to) => navigations.push(to));
   vi.stubGlobal('WebSocket', undefined);
   stubApi();
@@ -247,6 +247,65 @@ describe('Hội thoại cũ (F-8a)', () => {
     expect(await screen.findByText('Chưa có hội thoại nào')).toBeInTheDocument();
   });
 
+  it('mở một dòng lỗi (không phải 404) ⇒ toast thân thiện + Chi tiết kỹ thuật', async () => {
+    handler = (url) =>
+      url.endsWith(`/gen/conversations/${CID}/messages`)
+        ? { status: 503, body: { status: 503, code: 'UNAVAILABLE', title: 'Dịch vụ tạm bận', detail: { reason: 'db' } } }
+        : undefined;
+    const user = userEvent.setup();
+    wrap(<GenPanel userId="u1" />);
+    await user.click(screen.getByRole('button', { name: 'Hội thoại cũ' }));
+    const dlg = await screen.findByRole('dialog', { name: 'Hội thoại cũ' });
+    const items = await within(dlg).findAllByRole('button');
+    await user.click(items[1]);
+    await waitFor(() => expect(useToasts.getState().toasts).toHaveLength(1));
+    const t = useToasts.getState().toasts[0];
+    expect(t.tone).toBe('bad');
+    expect(t.text).toMatch(/Chi tiết kỹ thuật: HTTP 503 · UNAVAILABLE/);
+    expect(t.text).not.toContain('[object Object]');
+  });
+
+  it('Gen đang trả lời ⇒ có dòng giải thích vì sao các dòng bị khoá', async () => {
+    useGenStore.setState({ busy: true });
+    wrap(<GenPanel userId="u1" />);
+    await userEvent.click(screen.getByRole('button', { name: 'Hội thoại cũ' }));
+    const dlg = await screen.findByRole('dialog', { name: 'Hội thoại cũ' });
+    expect(await within(dlg).findByTestId('gen-history-busy')).toHaveTextContent('Gen đang trả lời — đợi xong rồi mở hội thoại cũ nhé.');
+    for (const b of within(dlg).getAllByRole('button')) expect(b).toBeDisabled();
+  });
+
+  it('nút "Hội thoại cũ" chỉ có aria-expanded (không aria-pressed)', async () => {
+    wrap(<GenPanel userId="u1" />);
+    const btn = screen.getByRole('button', { name: 'Hội thoại cũ' });
+    expect(btn).toHaveAttribute('aria-expanded', 'false');
+    expect(btn).not.toHaveAttribute('aria-pressed');
+  });
+
+  it('đang tải hội thoại (vd bản tin từ chuông) ⇒ "Đang mở hội thoại…", không lời chào/ví dụ, chưa cho gửi', async () => {
+    let release!: () => void;
+    handler = (url) =>
+      url.endsWith(`/gen/conversations/${BID}/messages`)
+        ? new Promise<Reply>((r) => {
+            release = () => r({ status: 200, body: BRIEFING });
+          })
+        : undefined;
+    wrap(<GenPanel userId="u1" />);
+    let done!: Promise<unknown>;
+    act(() => {
+      done = loadConversation(BID, 'u1');
+    });
+    expect(await screen.findByText('Đang mở hội thoại…')).toBeInTheDocument();
+    expect(screen.queryByText(/Chào Sếp, em là Gen/)).toBeNull();
+    expect(screen.getByRole('button', { name: 'Gửi' })).toBeDisabled();
+    await waitFor(() => expect(release).toBeTypeOf('function'));
+    act(() => release());
+    await act(async () => {
+      expect(await done).toBe('opened');
+    });
+    expect(useGenStore.getState().loadingConversation).toBe(false);
+    expect(await screen.findByText(/Đã tra việc, khách, nháp, sự cố…/)).toBeInTheDocument();
+  });
+
   it('lỗi tải ⇒ câu thân thiện + Chi tiết kỹ thuật, không "[object Object]"', async () => {
     handler = (url, method) =>
       url.endsWith('/gen/conversations') && method === 'GET'
@@ -297,6 +356,8 @@ describe('Hữu ích / Không hữu ích (F-86)', () => {
     expect(toasts).toHaveLength(1);
     expect(toasts[0].tone).toBe('bad');
     expect(toasts[0].text).toMatch(/Hệ thống gặp lỗi/);
+    expect(toasts[0].text).toMatch(/Chi tiết kỹ thuật: HTTP 500 · INTERNAL/);
+    expect(toasts[0].text).not.toContain('[object Object]');
   });
 
   it('tin lỗi cục bộ (không có turnId) không có nút đánh giá', async () => {

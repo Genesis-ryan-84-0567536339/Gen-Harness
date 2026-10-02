@@ -144,6 +144,7 @@ export async function loadConversation(id: string, userId: string | null = curre
   if (genBusy()) return 'busy';
   const seq = ++loadSeq;
   loading += 1;
+  useGenStore.setState({ loadingConversation: true });
   let msgs: GenMessage[];
   try {
     msgs = await api.gen.messages(id);
@@ -155,6 +156,7 @@ export async function loadConversation(id: string, userId: string | null = curre
     throw e;
   } finally {
     loading -= 1;
+    if (loading === 0) useGenStore.setState({ loadingConversation: false });
   }
   if (seq !== loadSeq) return 'opened'; // đã có lần mở khác mới hơn
   if (genBusy()) {
@@ -263,7 +265,8 @@ export async function sendFeedback(m: GenChatMessage, rating: GenRating): Promis
     else await api.gen.clearFeedback(turnId);
   } catch (e) {
     setFeedback(turnId, prev);
-    toast(errorText(e) || 'Chưa lưu được đánh giá — thử lại sau.', 'bad');
+    const d = errorDetail(e);
+    toast(`${errorText(e) || 'Chưa lưu được đánh giá — thử lại sau.'}${d ? ` (Chi tiết kỹ thuật: ${d})` : ''}`, 'bad');
   }
 }
 

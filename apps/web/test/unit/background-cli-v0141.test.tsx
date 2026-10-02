@@ -233,7 +233,7 @@ describe('<BackgroundSourcesCard> Nguồn AI cho việc nền', () => {
     await waitFor(() => expect(screen.getByRole('switch', { name: 'Cho Claude Code CLI chạy việc nền' })).toHaveAttribute('aria-checked', 'false'));
   });
 
-  it('has_api_source=false ⇒ khung nhắc dán khoá + nút Thêm nhà cung cấp (/api)', async () => {
+  it('has_api_source=false ⇒ khung nhắc dán khoá + nút Thêm nhà cung cấp (mở thẳng hộp Thêm, mẫu OpenRouter)', async () => {
     mockFetch((c) =>
       c.url.endsWith('/providers/background')
         ? json(200, bg({ has_api_source: false, sources: [bg().sources[0]] }))
@@ -244,8 +244,25 @@ describe('<BackgroundSourcesCard> Nguồn AI cho việc nền', () => {
     renderCards();
     const box = await screen.findByTestId('bg-src-no-key');
     expect(box).toHaveTextContent('Chưa có khoá API — dán khoá OpenRouter/Gemini để việc nền chạy');
-    expect(within(box).getByRole('link', { name: /Thêm nhà cung cấp/ })).toHaveAttribute('href', '/api');
+    expect(within(box).getByRole('link', { name: /Thêm nhà cung cấp/ })).toHaveAttribute('href', '/api?add=openrouter');
     expect(screen.queryByRole('switch', { name: 'Cho Claude Code CLI chạy việc nền' })).toBeNull();
+  });
+
+  it('has_api_source=false + đã cho Claude Code CLI ⇒ KHÔNG nói "việc nền không chạy", chỉ khuyên thêm khoá API', async () => {
+    mockFetch((c) =>
+      c.url.endsWith('/providers/background')
+        ? json(200, bg({ has_api_source: false, allow_cli: ['claude_code_cli'], sources: [bg().sources[0], { ...bg().sources[2], used: true, reason: null }] }))
+        : c.url.includes('/system/ai-cost')
+          ? json(200, cost())
+          : undefined,
+    );
+    renderCards();
+    const box = await screen.findByTestId('bg-src-no-key');
+    expect(box).toHaveTextContent('Việc nền đang chạy bằng Claude Code CLI — nên dán khoá API OpenRouter/Gemini để an toàn hơn');
+    expect(box).not.toHaveTextContent('để việc nền chạy');
+    expect(box).not.toHaveTextContent('cần một nguồn AI bằng khoá API');
+    expect(within(box).getByRole('link', { name: /Thêm nhà cung cấp/ })).toHaveAttribute('href', '/api?add=openrouter');
+    expect(screen.getByRole('switch', { name: 'Cho Claude Code CLI chạy việc nền' })).toHaveAttribute('aria-checked', 'true');
   });
 
   it('Auditor + chưa có khoá API ⇒ không có nút Thêm nhà cung cấp (ngõ cụt), chỉ câu báo Owner', async () => {

@@ -139,6 +139,9 @@ export function GenPanel({ userId }: { userId: string }) {
   const messages = useGenStore((s) => s.messages);
   const busy = useGenStore((s) => s.busy);
   const restoring = useGenStore((s) => s.restoring);
+  // Đang tải nội dung hội thoại (tải lại trang, mở từ "Hội thoại cũ" hay bản tin từ chuông) ⇒ khoá gửi + "Đang mở…".
+  const loadingConversation = useGenStore((s) => s.loadingConversation);
+  const opening = restoring || loadingConversation;
   const setOpen = useGenStore((s) => s.setOpen);
   const reset = useGenStore((s) => s.reset);
   const addr = useAddressing();
@@ -168,7 +171,8 @@ export function GenPanel({ userId }: { userId: string }) {
   }, []);
 
   const submit = (q = text) => {
-    if (!q.trim() || busy || useGenStore.getState().restoring) return;
+    const st = useGenStore.getState();
+    if (!q.trim() || busy || st.restoring || st.loadingConversation) return;
     setText('');
     // v0.1.28 (UX V12): câu hỏi mới → dừng lượt dẫn đường cũ (ô khoanh sáng không còn đè màn hình).
     if (useGenStore.getState().spotlight) closeSpotlight();
@@ -198,17 +202,16 @@ export function GenPanel({ userId }: { userId: string }) {
           icon="ph ph-clock-counter-clockwise"
           label="Hội thoại cũ"
           aria-expanded={historyOpen}
-          aria-pressed={historyOpen}
           onClick={() => setHistoryOpen((v) => !v)}
         />
-        <IconButton icon="ph ph-plus" label="Hội thoại mới" onClick={reset} disabled={busy || restoring} />
+        <IconButton icon="ph ph-plus" label="Hội thoại mới" onClick={reset} disabled={busy || opening} />
         <IconButton icon="ph ph-x" label="Đóng khung Gen" onClick={() => setOpen(userId, false)} />
       </div>
       {historyOpen ? <GenHistory userId={userId} onClose={closeHistory} /> : null}
       <div className="gen-panel__list" ref={listRef} aria-live="polite">
-        {messages.length === 0 && restoring ? (
+        {messages.length === 0 && opening ? (
           <p className="gen-empty" role="status">
-            Đang mở lại hội thoại…
+            {restoring ? 'Đang mở lại hội thoại…' : 'Đang mở hội thoại…'}
           </p>
         ) : messages.length === 0 ? (
           <div className="gen-empty">
@@ -246,7 +249,7 @@ export function GenPanel({ userId }: { userId: string }) {
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKey}
         />
-        <IconButton icon="ph ph-paper-plane-right" label="Gửi" variant="primary" type="submit" disabled={busy || restoring || !text.trim()} />
+        <IconButton icon="ph ph-paper-plane-right" label="Gửi" variant="primary" type="submit" disabled={busy || opening || !text.trim()} />
       </form>
     </aside>
   );

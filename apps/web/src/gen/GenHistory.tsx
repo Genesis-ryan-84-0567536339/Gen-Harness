@@ -39,7 +39,8 @@ export function GenHistory({ userId, onClose }: { userId: string; onClose: () =>
       if (r === 'missing') toast('Hội thoại này không còn — có thể đã bị xoá hoặc quá hạn lưu.', 'warn');
       else if (r === 'busy') toast('Gen đang trả lời — đợi xong rồi mở hội thoại cũ nhé.', 'warn');
     } catch (e) {
-      toast(errorText(e) || 'Không mở được hội thoại — thử lại sau.', 'bad');
+      const d = errorDetail(e);
+      toast(`${errorText(e) || 'Không mở được hội thoại — thử lại sau.'}${d ? ` (Chi tiết kỹ thuật: ${d})` : ''}`, 'bad');
     }
   };
 
@@ -83,25 +84,32 @@ export function GenHistory({ userId, onClose }: { userId: string; onClose: () =>
       ) : q.data.length === 0 ? (
         <p className="gen-history__state">Chưa có hội thoại nào</p>
       ) : (
-        <ul className="gen-history__list">
-          {q.data.map((c) => (
-            <li key={c.id}>
-              <button
-                type="button"
-                className="gen-history__item"
-                aria-current={c.id === current ? 'true' : undefined}
-                disabled={busy}
-                onClick={() => void open(c.id)}
-              >
-                <span className="gen-history__title">
-                  {c.kind === 'briefing' ? <span className="gen-badge">Bản tin</span> : null}
-                  <span className="gen-history__name">{c.title || 'Hội thoại không tên'}</span>
-                </span>
-                <span className="gen-history__time">{fmtAgo(c.last_at, now)}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
+        <>
+          {busy ? (
+            <p className="gen-history__state" role="status" data-testid="gen-history-busy">
+              Gen đang trả lời — đợi xong rồi mở hội thoại cũ nhé.
+            </p>
+          ) : null}
+          <ul className="gen-history__list">
+            {q.data.map((c) => (
+              <li key={c.id}>
+                <button
+                  type="button"
+                  className="gen-history__item"
+                  aria-current={c.id === current ? 'true' : undefined}
+                  disabled={busy}
+                  onClick={() => void open(c.id)}
+                >
+                  <span className="gen-history__title">
+                    {c.kind === 'briefing' ? <span className="gen-badge">Bản tin</span> : null}
+                    <span className="gen-history__name">{c.title || 'Hội thoại không tên'}</span>
+                  </span>
+                  <span className="gen-history__time">{fmtAgo(c.last_at, now)}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
       )}
     </div>
   );

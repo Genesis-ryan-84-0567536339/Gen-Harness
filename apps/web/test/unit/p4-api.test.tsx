@@ -37,12 +37,12 @@ const ME = {
   permissions: { 'system.read': 'all', 'system.manage': 'all' },
 };
 
-function renderScreen(ui: ReactElement) {
+function renderScreen(ui: ReactElement, entries: string[] = ['/api']) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   qc.setQueryData(qk.me, ME);
   return render(
     <QueryClientProvider client={qc}>
-      <MemoryRouter>{ui}</MemoryRouter>
+      <MemoryRouter initialEntries={entries}>{ui}</MemoryRouter>
     </QueryClientProvider>,
   );
 }
@@ -89,6 +89,22 @@ function baseHandler(c: Call): Response | null {
 }
 
 describe('API & Model', () => {
+  it('/api?add=openrouter ⇒ mở thẳng hộp "Thêm nhà cung cấp", chọn sẵn mẫu OpenRouter; lỗi tạo ⇒ có "Chi tiết kỹ thuật"', async () => {
+    mockFetch((c) => {
+      if (c.url.endsWith('/providers') && c.method === 'POST') return json(400, { status: 400, code: 'PROVIDER_TEST_FAILED', title: 'Khoá không hợp lệ' });
+      return baseHandler(c) ?? json(404);
+    });
+    renderScreen(<ApiScreen />, ['/api?add=openrouter']);
+    const dlg = await screen.findByRole('dialog', { name: 'Thêm nhà cung cấp' });
+    expect(within(dlg).getByLabelText('Địa chỉ gọi (Endpoint)')).toHaveValue('https://openrouter.ai/api/v1');
+    expect(within(dlg).getByTestId('provider-preset-hint')).toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.type(within(dlg).getByLabelText('Khoá API (mỗi dòng một khoá)'), 'sk-or-khoa-thu-12345');
+    await user.click(within(dlg).getByRole('button', { name: 'Thêm' }));
+    expect(await within(dlg).findByText(/Chi tiết kỹ thuật/)).toBeInTheDocument();
+    expect(dlg).toHaveTextContent('HTTP 400');
+  });
+
   it('hiện thẻ nhà cung cấp, bảng gán model và quy tắc chuyển hướng', async () => {
     mockFetch((c) => baseHandler(c) ?? json(404));
     renderScreen(<ApiScreen />);

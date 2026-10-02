@@ -759,7 +759,13 @@ async def _eval_background_source(db: AsyncSession, org_id: uuid.UUID, redis: An
     """v0.1.41 (F-86): sự cố `ai.background_no_source` đang mở mà Sếp đã thêm khoá API (có model) hoặc đã cho Claude
     Code CLI chạy việc nền ⇒ đóng ngay, không đợi một lượt việc nền chạy được (refinery rảnh / trực việc tắt thì có
     thể tới bản tin kế tiếp mới có lượt). Chỉ truy vấn nguồn khi sự cố đang mở."""
-    from gh.providers.router import BG_NO_SOURCE_FLAG, BG_NO_SOURCE_KEY, background_cli_allowed, has_api_source
+    from gh.providers.router import (
+        BG_NO_SOURCE_FLAG,
+        BG_NO_SOURCE_KEY,
+        BG_NO_SOURCE_TRY,
+        background_cli_allowed,
+        has_api_source,
+    )
 
     open_ = (await db.execute(text("""SELECT 1 FROM ops.health_alerts
                                       WHERE org_id = :o AND key = :k AND cleared_at IS NULL"""),
@@ -768,7 +774,7 @@ async def _eval_background_source(db: AsyncSession, org_id: uuid.UUID, redis: An
         return
     if await has_api_source(db, org_id) or await background_cli_allowed(db, org_id):
         await clear(db, org_id, BG_NO_SOURCE_KEY)
-        await redis.delete(BG_NO_SOURCE_FLAG.format(org_id))
+        await redis.delete(BG_NO_SOURCE_FLAG.format(org_id), BG_NO_SOURCE_TRY.format(org_id))
 
 
 async def _eval_events(db: AsyncSession, org_id: uuid.UUID) -> None:

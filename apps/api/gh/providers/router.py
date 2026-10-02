@@ -118,6 +118,10 @@ BACKGROUND_PURPOSE_LABELS = ("Sàng lọc tin", "Trực việc (agent soạn nh�
 BG_NO_SOURCE_KEY = "ai.background_no_source"
 BG_NO_SOURCE_FLAG = "gh:bg_nosrc:{}"
 BG_NO_SOURCE_FLAG_TTL = 30 * 86400
+#: Ngưỡng ghi DB của `_background_no_source`: mỗi lượt việc nền hết chuỗi (mỗi lô sàng lọc) KHÔNG mở phiên DB — tối đa
+#: một lần / 10 phút / tổ chức (SET NX). Xoá cùng cờ khi sự cố đóng ⇒ lần thiếu nguồn kế tiếp báo ngay.
+BG_NO_SOURCE_TRY = "gh:bg_nosrc_try:{}"
+BG_NO_SOURCE_TRY_TTL = 600
 API_KINDS = ("gemini", "deepseek", "openai_compat")
 
 
@@ -510,8 +514,8 @@ class ModelRouter:
                     await health.raise_once(
                         db, org_id, key=BG_NO_SOURCE_KEY, kind=BG_NO_SOURCE_KEY, severity="warn",
                         title="Việc nền (sàng lọc, trực việc, bản tin) chưa có khoá API",
-                        body=("Dán khoá OpenRouter hoặc Gemini ở Bộ não AI, hoặc cho phép Claude Code CLI chạy việc "
-                              "nền (có cảnh báo điều khoản)."),
+                        body=("Dán khoá OpenRouter hoặc Gemini ở API & Model (Thêm nhà cung cấp), hoặc cho phép "
+                              "Claude Code CLI chạy việc nền ở Bộ não AI (có cảnh báo điều khoản)."),
                         link="/system?tab=brain", redis=self.redis)
             except asyncio.CancelledError:
                 raise
@@ -532,7 +536,7 @@ class ModelRouter:
             async with self.sm() as db:
                 await health.clear(db, org_id, BG_NO_SOURCE_KEY)
                 await db.commit()
-            await self.redis.delete(flag)
+            await self.redis.delete(flag, BG_NO_SOURCE_TRY.format(org_id))
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001 — kết quả model đã có; đóng sự cố lỗi thì lượt sau thử lại
@@ -541,8 +545,10 @@ class ModelRouter:
     async def _chain_exhausted(self, org_id: uuid.UUID, reasons: list[str], *, agent_key: str = "",
                                purpose: str = "") -> None:
         if is_background(purpose) and background_cli_only(reasons):
-            # v0.1.41 (F-86): sự cố sức khoẻ (dải "Cần Sếp xử lý" + chuông), KHÔNG dùng biz.alerts.
-            await self._background_no_source(org_id)
+            # v0.1.41 (F-86): sự cố sức khoẻ (dải "Cần Sếp xử lý" + chuông), KHÔNG dùng biz.alerts. Có ngưỡng: lô
+            # sàng lọc / trực việc kế tiếp trong 10 phút không mở phiên DB thêm lần nữa.
+            if await self.redis.set(BG_NO_SOURCE_TRY.format(org_id), "1", nx=True, ex=BG_NO_SOURCE_TRY_TTL):
+                await self._background_no_source(org_id)
             return
         if agy_only(reasons):
             # Review F-22: chỉ có agy mà việc không phải Gen của Sếp ⇒ đăng nhập lại không giúp gì; cảnh báo riêng,

@@ -33,7 +33,7 @@ from gh.chassis import actionlog
 from gh.gen import store
 from gh.gen.engine import wrap_untrusted
 from gh.providers.clients import Message
-from gh.providers.router import ModelRouter, background_cli_allowed, has_api_source
+from gh.providers.router import ModelRouter, background_sources, has_api_source
 
 log = logging.getLogger("gh.gen.briefing")
 
@@ -139,14 +139,15 @@ async def _tasks_due(db: AsyncSession, org: uuid.UUID, now: datetime) -> dict[st
 
 async def _hot_customers(db: AsyncSession, org: uuid.UUID, now: datetime) -> dict[str, Any]:
     # Nguồn nhiệt như màn Quan hệ (clean.current_scores, dimension='heat'); "có hoạt động trong 24 giờ" = điểm vừa
-    # được tính lại hoặc người đó vừa nhắn tin.
+    # được tính lại hoặc người đó vừa nhắn tin. `occurred_at > :since` để dùng chỉ mục (sender_identity_id, occurred_at
+    # DESC) — không quét hết sự kiện của người đó trong phân vùng tháng; `received_at` giữ nguyên nghĩa "vừa nhận".
     q = """FROM core.persons p
            JOIN clean.current_scores cs ON cs.subject_type = 'person' AND cs.subject_id = p.id
                                        AND cs.dimension = 'heat'
            WHERE p.org_id = :o AND p.deleted_at IS NULL AND p.merged_into_id IS NULL AND cs.value >= :h
              AND (cs.updated_at > :since OR EXISTS (
                    SELECT 1 FROM core.person_identities pi JOIN raw.events e ON e.sender_identity_id = pi.id
-                   WHERE pi.person_id = p.id AND e.received_at > :since))"""
+                   WHERE pi.person_id = p.id AND e.occurred_at > :since AND e.received_at > :since))"""
     p = {"o": org, "h": HOT_HEAT, "since": now - timedelta(hours=24)}
     n = (await db.execute(text("SELECT count(*) " + q), p)).scalar_one()  # noqa: S608
     rows = (await db.execute(text("SELECT p.display_name, cs.value " + q  # noqa: S608
@@ -302,7 +303,9 @@ async def _one_org(sm: async_sessionmaker[AsyncSession], redis: Any, router: Mod
         if not owners:
             return "no_owner"
         sections = await collect(db, org, slot, now)
-        has_source = await has_api_source(db, org) or bool(await background_cli_allowed(db, org))
+        # Có nguồn = khoá API dùng được, hoặc Claude Code CLI Owner đã cho chạy việc nền MÀ nguồn đó vẫn bật + có model
+        # (đã cho phép rồi tắt/xoá nguồn ⇒ vẫn nhắc dán khoá, không gọi model rồi báo "nguồn AI lỗi").
+        has_source = await has_api_source(db, org) or any(src["used"] for src in await background_sources(db, org))
         await db.rollback()
     needs_api_key = not has_source
     summary = None if needs_api_key else await _summarize(router, org, sections)

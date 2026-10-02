@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 import orjson
+import pytest
 from sqlalchemy import text
 
 from gh.db import sessionmaker
@@ -267,3 +268,66 @@ async def test_gen_disabled_no_briefing(owner_api, db, redis) -> None:  # type: 
 async def test_stale_slot_sends_nothing(owner_api, db, redis) -> None:  # type: ignore[no-untyped-def]
     out = await briefing.run_briefing(sessionmaker(), redis, _router(redis), now=_today(12, 0))
     assert out == {"skipped": "stale"} and await _bells(db) == []
+
+
+@pytest.mark.parametrize("state", ["disabled", "removed", "on"])
+async def test_cli_allowed_but_provider_gone(owner_api, db, redis, monkeypatch, state) -> None:  # type: ignore[no-untyped-def]
+    """Owner cho Claude Code CLI chạy việc nền rồi tắt / xoá nguồn ⇒ không còn nguồn thật ⇒ vẫn nhắc dán khoá (không gọi
+    model rồi báo "nguồn AI lỗi"). Nguồn còn bật + có model ⇒ có nguồn."""
+    from tests.test_background_cli_v0141 import set_background_cli
+
+    org = await org_id(db)
+    pid = await cli_provider(db, org, "claude_code_cli", 1)
+    await set_background_cli(db, org, ["claude_code_cli"])
+    if state == "disabled":
+        await db.execute(text("UPDATE agent.providers SET is_enabled = false WHERE id = :p"), {"p": pid})
+    elif state == "removed":
+        await db.execute(text("DELETE FROM agent.models WHERE provider_id = :p"), {"p": pid})
+        await db.execute(text("DELETE FROM agent.providers WHERE id = :p"), {"p": pid})
+    await db.commit()
+    seen: list[str] = []
+
+    async def fake_summary(router: Any, org_: Any, sections: Any) -> str:
+        seen.append("called")
+        return "Tóm tắt thử"
+
+    monkeypatch.setattr(briefing, "_summarize", fake_summary)
+    await briefing.run_briefing(sessionmaker(), redis, _router(redis), now=_today(7, 31))
+    c = (await _messages(db))[0]
+    if state == "on":
+        assert c["needs_api_key"] is False and seen == ["called"]
+    else:
+        assert c["needs_api_key"] is True and seen == [] and HINT in _says(c)
+
+
+async def test_hot_customer_by_recent_message(owner_api, db, redis) -> None:  # type: ignore[no-untyped-def]
+    """Điểm nhiệt cũ nhưng vừa nhắn tin (raw.events trong 24 giờ) ⇒ vẫn là khách nóng; tin cũ hơn 24 giờ ⇒ không."""
+    org = await org_id(db)
+    now = _today(7, 31)
+    ch = (await db.execute(text("SELECT id FROM core.channels WHERE org_id = :o LIMIT 1"), {"o": org})).scalar_one()
+    cols = (await db.execute(text("""
+        SELECT column_name, data_type FROM information_schema.columns
+        WHERE table_schema = 'raw' AND table_name = 'events' AND is_nullable = 'NO' AND column_default IS NULL
+        ORDER BY ordinal_position"""))).all()
+    fill = {"uuid": "core.uuid_v7()", "text": "'x'", "jsonb": "'{}'", "timestamp with time zone": "now()",
+            "bytea": "'\\x00'", "integer": "0", "smallint": "0", "bigint": "0", "boolean": "false"}
+    given = {"org_id": ":o", "received_at": ":t", "occurred_at": ":t", "sender_identity_id": ":i", "channel_id": ":c"}
+    names = list(dict.fromkeys([c.column_name for c in cols] + list(given)))
+    types = {c.column_name: c.data_type for c in cols}
+    vals = ", ".join(given.get(n) or fill.get(types.get(n, ""), "'x'") for n in names)
+    sql = f"INSERT INTO raw.events ({', '.join(names)}) VALUES ({vals})"  # noqa: S608
+    for name, ago in (("Anh Nam", timedelta(hours=1)), ("Cô Ba", timedelta(hours=30))):
+        pid = (await db.execute(text("""INSERT INTO core.persons (org_id, code, display_name, person_type)
+                                        VALUES (:o, :c, :n, 'customer') RETURNING id"""),
+                                {"o": org, "c": f"PER-{uuid.uuid4().hex[:6]}", "n": name})).scalar_one()
+        await db.execute(text("""INSERT INTO clean.current_scores (subject_type, subject_id, dimension, value, trend,
+                                                                   snapshot_id, updated_at)
+                                 VALUES ('person', :p, 'heat', 90, 'up', :s, :old)"""),
+                         {"p": pid, "s": uuid.uuid4(), "old": now - timedelta(days=3)})
+        iid = (await db.execute(text("""INSERT INTO core.person_identities (person_id, channel_id, external_id)
+                                        VALUES (:p, :c, :x) RETURNING id"""),
+                                {"p": pid, "c": ch, "x": f"x-{uuid.uuid4().hex[:8]}"})).scalar_one()
+        await db.execute(text(sql), {"o": org, "t": now - ago, "i": iid, "c": ch})
+    await db.commit()
+    sec = await briefing._hot_customers(db, org, now)
+    assert sec["count"] == 1 and "Anh Nam" in sec["lines"][0]

@@ -2246,6 +2246,13 @@ Không cần chụp màn hình hay gửi mã cho Claude — kết quả tự lư
   `ai.background_no_source` tự đóng ở lượt theo dõi sức khoẻ kế tiếp khi đã có khoá API / cho phép CLI. Giá model nhận
   phần lẻ ("0,5" không còn thành 5), không làm tròn giá đã lưu. Tổng quan có thẻ chi phí ⇒ lưới 2×2. Auditor không thấy
   nút/link dẫn tới chỗ không sửa được. "Hữu ích 7 ngày: chưa có đánh giá" thay "0/0". Mẫu OpenRouter điền sẵn model thật.
+- **Sửa sau review lượt 2 (F-86, F-8a, F-8, F-84)**: thẻ "Nguồn AI cho việc nền" không còn nói "việc nền không chạy" khi
+  Sếp đã cho Claude Code CLI chạy việc nền (chỉ khuyên thêm khoá API); nút "Thêm nhà cung cấp" mở thẳng hộp Thêm với mẫu
+  OpenRouter (`/api?add=openrouter`). Lỗi mở "Hội thoại cũ", lỗi Hữu ích/Không hữu ích, lỗi thêm nhà cung cấp / khoá / xoá /
+  gọi thử ở API & Model và bước Bộ não AI đều có "Chi tiết kỹ thuật". Đang tải hội thoại (kể cả bản tin từ chuông) ⇒ "Đang
+  mở hội thoại…", chưa cho gửi; danh sách "Hội thoại cũ" lúc Gen đang trả lời có dòng giải thích. Bản tin chỉ coi CLI là
+  nguồn khi nguồn đó còn bật + có model. Sự cố `ai.background_no_source` ghi DB tối đa 1 lần / 10 phút (không mỗi lô sàng
+  lọc), câu hướng dẫn chỉ đúng chỗ dán khoá (API & Model). "Khách nóng" lọc theo `occurred_at` để dùng chỉ mục.
 
 ### Kiểm tra
 
@@ -2256,7 +2263,7 @@ Không cần chụp màn hình hay gửi mã cho Claude — kết quả tự lư
 - web: vitest `gen-store-v0141`, `gen-history-feedback-v0141`, `ai-cost-v0141`, `background-cli-v0141` (thêm: nhãn
   purposes của API thật; lỗi có "Chi tiết kỹ thuật"), `provider-template-v0141`; e2e mock `gen-persist-v0141.spec.ts` (tải
   lại giữ hội thoại; Hội thoại cũ + nhãn Bản tin; 404 ⇒ khung trống không lỗi đỏ; chuông Bản tin Gen ⇒ đúng bản tin, mục,
-  gỡ `?gen=`, nút dán khoá ⇒ `/system?tab=brain`; Hữu ích trên câu trả lời và bản tin giữ qua tải lại, bấm lại bỏ chọn),
+  gỡ `?gen=`, nút "Mở nơi dán khoá" ⇒ `/api` (API & Model); Hữu ích trên câu trả lời và bản tin giữ qua tải lại, bấm lại bỏ chọn),
   `ai-cost-background-v0141.spec.ts` (panel chi phí + bảng agent + chưa có giá + focus; CLI "Không dùng" + lý do ⇒ bật ⇒
   cảnh báo nguyên văn ⇒ 423 ⇒ PIN ⇒ "Dùng cho việc nền", tắt không PIN; mẫu OpenRouter gửi `openai_compat`; lưu trần + giá
   đúng endpoint ⇒ "Vượt trần"; lỗi 500 ⇒ câu tiếng Việt + "Chi tiết kỹ thuật", không "[object Object]").

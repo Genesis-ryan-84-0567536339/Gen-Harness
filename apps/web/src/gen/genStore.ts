@@ -47,6 +47,8 @@ interface GenState {
   busy: boolean;
   /** v0.1.41 (F-8a): đang tải lại hội thoại đã lưu sau khi tải lại trang (hiện "Đang mở lại hội thoại…"). */
   restoring: boolean;
+  /** Đang tải nội dung một hội thoại (mở từ "Hội thoại cũ" hoặc bản tin từ chuông) ⇒ khoá gửi, hiện "Đang mở hội thoại…". */
+  loadingConversation: boolean;
   spotlight: SpotlightState | null;
   setOpen: (userId: string, open: boolean) => void;
   /** v0.1.41 (F-8a): ghi hội thoại đang mở kèm chủ của nó (được lưu máy để tải lại trang). */
@@ -109,6 +111,7 @@ export const useGenStore = create<GenState>()(
       messages: [],
       busy: false,
       restoring: false,
+      loadingConversation: false,
       spotlight: null,
       setOpen: (userId, open) => set((s) => ({ openByUser: { ...s.openByUser, [userId]: open } })),
       setConversation: (userId, id) => set({ conversationId: id, conversationOwner: id ? userId : null }),
