@@ -80,6 +80,10 @@ ACTIONS = {
     # Do worker mở/đóng (key "job.timeout:<tên hàm>") — chỉ khai nhãn ở đây.
     "job.timeout": "Xem sức khoẻ",
 }
+#: Nhãn cho người KHÔNG phải Owner khi nút ở nhãn gốc chỉ Owner có (vd "Chọn nơi lưu" — Manager không có nút đó).
+NON_OWNER_ACTIONS = {
+    "offsite.stale": "Xem bản sao ngoài máy",
+}
 
 #: v0.1.37 (F-73): `run/autostart-status.json` (genh ghi) — chỉ nhận giá trị trong các tập này, còn lại 'unknown'.
 AUTOSTART_YES_NO = ("yes", "no", "unknown", "not_applicable")
@@ -165,14 +169,16 @@ async def clear(db: AsyncSession, org_id: uuid.UUID, key: str) -> bool:
     return bool(getattr(res, "rowcount", 0))
 
 
-async def active_issues(db: AsyncSession, org_id: uuid.UUID) -> list[dict[str, Any]]:
-    """Sự cố đang mở: 'bad' trước, rồi mới nhất trước. Mọi trường là chuỗi (web không render object)."""
+async def active_issues(db: AsyncSession, org_id: uuid.UUID, *, is_owner: bool = True) -> list[dict[str, Any]]:
+    """Sự cố đang mở: 'bad' trước, rồi mới nhất trước. Mọi trường là chuỗi (web không render object). Nhãn nút theo
+    vai trò người xem: không phải Owner thì không hứa nút chỉ Owner có (`NON_OWNER_ACTIONS`)."""
+    labels = ACTIONS if is_owner else {**ACTIONS, **NON_OWNER_ACTIONS}
     rows = (await db.execute(text("""
         SELECT key, kind, severity, title, body, link, raised_at FROM ops.health_alerts
         WHERE org_id = :o AND cleared_at IS NULL
         ORDER BY (severity = 'bad') DESC, raised_at DESC"""), {"o": org_id})).all()
     return [{"key": r.key, "kind": r.kind, "severity": r.severity, "title": r.title, "body": r.body,
-             "link": r.link, "action": ACTIONS.get(r.kind, "Xem chi tiết"), "raised_at": _iso(r.raised_at)}
+             "link": r.link, "action": labels.get(r.kind, "Xem chi tiết"), "raised_at": _iso(r.raised_at)}
             for r in rows]
 
 
@@ -339,7 +345,7 @@ def _backup_stale(configured: bool, latest: datetime | None, org_created: dateti
 # ─── GET /system/health ───────────────────────────────────────────────────────────────────────────────────────
 
 async def collect(db: AsyncSession, redis: Any, org_id: uuid.UUID, *, now: datetime | None = None,
-                  started_at: datetime | None = None) -> dict[str, Any]:
+                  started_at: datetime | None = None, is_owner: bool = True) -> dict[str, Any]:
     """Khuôn trả về của `GET /api/v1/system/health` — mọi trường là chuỗi/số/bool/null. Đọc một nguồn lỗi ⇒ phần
     đó 'unknown', KHÔNG ném 500."""
     now = now or datetime.now(UTC)
@@ -435,7 +441,7 @@ async def collect(db: AsyncSession, redis: Any, org_id: uuid.UUID, *, now: datet
 
     issues: list[dict[str, Any]] = []
     try:
-        issues = await active_issues(db, org_id)
+        issues = await active_issues(db, org_id, is_owner=is_owner)
     except Exception:  # noqa: BLE001
         log.warning("Không đọc được sự cố đang mở", exc_info=True)
 

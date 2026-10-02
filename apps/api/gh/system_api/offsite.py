@@ -37,7 +37,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
-from starlette.background import BackgroundTask
+from starlette.types import Receive, Scope, Send
 
 from gh import health
 from gh.auth import service
@@ -66,9 +66,11 @@ _KEY_ID = re.compile(r"^[0-9a-f]{8}$")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 _WIN_ABS = re.compile(r"^[A-Za-z]:[\\/]")
 
-#: Lệnh Owner tự chạy trên máy chủ khi chưa có watcher nhận yêu cầu (Windows / máy cài trước v0.1.40).
-MANUAL_COMMAND = 'genh offsite set "{path}"'
-MANUAL_PLACEHOLDER = "<path>"
+#: Lệnh Owner tự chạy trên máy chủ khi chưa có watcher nhận yêu cầu (Windows / máy cài trước v0.1.40) — theo đúng
+#: việc đang yêu cầu. `set` chỉ có lệnh khi biết đường dẫn thật (không bao giờ đưa lệnh chứa chỗ giữ chỗ).
+MANUAL_COMMANDS = {"run": "genh offsite run", "disable": "genh offsite disable", "set": 'genh offsite set "{path}"'}
+#: Ký tự làm lệnh trong dấu nháy kép đổi nghĩa (bash/PowerShell: thay biến, chạy lệnh con) ⇒ không ghép lệnh.
+_UNSAFE_IN_QUOTES = re.compile(r'["$`]')
 
 #: Thông điệp theo mã lỗi genh (GH-EBxx) — bảng cố định, KHÔNG lấy chữ từ tệp run/.
 ERROR_MESSAGES = {
@@ -173,8 +175,12 @@ def _stale_after() -> timedelta:
     return timedelta(days=health.OFFSITE_STALE_DAYS)
 
 
-def _request_state(d: Path) -> dict[str, Any]:
-    req = upd._read_json(d / "request" / REQUEST_FILE)
+def _request_raw(d: Path) -> dict[str, Any] | None:
+    return upd._read_json(d / "request" / REQUEST_FILE)
+
+
+def _request_state(d: Path, req: dict[str, Any] | None = None) -> dict[str, Any]:
+    req = _request_raw(d) if req is None else req
     if req is None:
         return {"state": "idle", "action": None, "requested_at": None}
     age = upd._age_seconds(req.get("requested_at"))
@@ -192,18 +198,30 @@ def _can_request(d: Path) -> bool:
             and os.access(d / "request", os.W_OK))
 
 
-def manual_command(path: str | None = None) -> str:
-    """Lệnh chạy tay trên máy chủ. Đường dẫn có dấu nháy kép ⇒ giữ chỗ trống (không ghép lệnh vỡ)."""
-    usable = path if path and '"' not in path and not _CONTROL.search(path) else MANUAL_PLACEHOLDER
-    return MANUAL_COMMAND.format(path=usable)
+def manual_command(action: str | None, path: str | None = None) -> str | None:
+    """Lệnh chạy tay trên máy chủ cho đúng việc đang yêu cầu (run/disable/set). `set` cần đường dẫn đầy đủ dùng được
+    trong dấu nháy kép (không `"`, `$`, `` ` ``, ký tự điều khiển, ≤ PATH_MAX byte) — không có ⇒ None (web chỉ hiện câu
+    hướng dẫn, KHÔNG đưa lệnh chứa chỗ giữ chỗ để Owner chép nhầm)."""
+    if action not in MANUAL_COMMANDS:
+        return None
+    if action != "set":
+        return MANUAL_COMMANDS[action]
+    if (not isinstance(path, str) or not path.strip() or _CONTROL.search(path) or _UNSAFE_IN_QUOTES.search(path)
+            or len(path.encode("utf-8")) > PATH_MAX or not _is_absolute(path)):
+        return None
+    return MANUAL_COMMANDS["set"].format(path=path)
 
 
 def state(*, now: datetime | None = None) -> dict[str, Any]:
-    """Khuôn GET /system/offsite."""
+    """Khuôn GET /system/offsite. `manual_command` chỉ có khi đang có yêu cầu chờ máy chủ nhận — theo action/path của
+    chính yêu cầu đó (tệp run/ không tin cậy ⇒ path qua cùng bộ lọc như khi ghép lệnh)."""
     d = upd._dir()  # không có hộp thư (dev/test) ⇒ đọc tệp đều None ⇒ chưa cấu hình, không nhận lệnh
-    return {**read_status(d, now=now), "request": _request_state(d),
+    raw = _request_raw(d)
+    req = _request_state(d, raw)
+    cmd = manual_command(req["action"], raw.get("path")) if isinstance(raw, dict) else None
+    return {**read_status(d, now=now), "request": req,
             "can_request": d.is_dir() and _can_request(d),
-            "manual_command": manual_command(),
+            "manual_command": cmd,
             "key_present": offsite_key() is not None}
 
 
@@ -231,21 +249,26 @@ def _check_path(path: str) -> None:
         raise field_errors({"path": "Nhập đường dẫn thư mục trên ổ USB/NAS"})
     if _CONTROL.search(path):
         raise field_errors({"path": "Đường dẫn không được có xuống dòng hoặc ký tự điều khiển"})
-    if len(path) > PATH_MAX:
-        raise field_errors({"path": f"Đường dẫn quá dài (tối đa {PATH_MAX} ký tự)"})
-    if not (path.startswith("/") or path.startswith("\\\\") or _WIN_ABS.match(path)):
+    # genh giới hạn theo BYTE (UTF-8) — đường dẫn tiếng Việt có dấu tốn 2–3 byte mỗi ký tự.
+    if len(path.encode("utf-8")) > PATH_MAX:
+        raise field_errors({"path": f"Đường dẫn quá dài (tối đa {PATH_MAX} byte — chữ có dấu tính 2–3 byte)"})
+    if not _is_absolute(path):
         raise field_errors({"path": "Cần đường dẫn đầy đủ, vd /media/usb/gen-harness, D:\\GenHarness hoặc "
                                     "\\\\nas\\sao-luu"})
 
 
-def _guard(d: Path, *, path: str | None = None) -> None:
+def _is_absolute(path: str) -> bool:
+    return path.startswith("/") or path.startswith("\\\\") or bool(_WIN_ABS.match(path))
+
+
+def _guard(d: Path, *, action: str, path: str | None = None) -> None:
     """Các 409 dùng chung cho mọi yêu cầu: máy chủ chưa nhận lệnh, đang có yêu cầu, đang cập nhật/khôi phục."""
     from gh.system_api import backups
 
     if not d.is_dir() or not _can_request(d):
         raise ApiError(409, "OFFSITE_UNAVAILABLE",
                        "Máy chủ chưa nhận lệnh từ Console — chạy lệnh sau một lần trên máy chủ",
-                       manual_command=manual_command(path))
+                       manual_command=manual_command(action, path))
     now = datetime.now(UTC)
     if _request_state(d)["state"] == "requested" or _running_fresh(read_status(d, now=now), now):
         raise conflict("OFFSITE_IN_PROGRESS", "Đang sao lưu ra ổ ngoài — chờ xong rồi thử lại")
@@ -265,7 +288,7 @@ def _write_request(d: Path, req: dict[str, Any]) -> None:
 async def _request(db: AsyncSession, user: service.CurrentUser, action: str, log_action: str,
                    path: str | None = None) -> dict[str, Any]:
     d = upd._dir()
-    _guard(d, path=path)
+    _guard(d, action=action, path=path)
     req: dict[str, Any] = {"id": str(uuid.uuid4()), "action": action}
     if path is not None:
         req["path"] = path
@@ -382,6 +405,22 @@ def _portable_failed(reason: str) -> ApiError:
                     f"Chi tiết kỹ thuật: {reason}. Thử lại sau ít phút; nếu vẫn lỗi, xem nhật ký máy chủ.")
 
 
+class _CleanupFileResponse(FileResponse):
+    """FileResponse dọn tệp tạm + nhả khoá trong `finally` — BackgroundTask của Starlette KHÔNG chạy khi trình duyệt
+    ngắt giữa lượt tải (send ném lỗi) ⇒ khoá Redis 2 giờ và tệp trong /tmp/gh-portable còn lại, Owner bị 409
+    PORTABLE_IN_PROGRESS suốt 2 giờ."""
+
+    def __init__(self, *args: Any, cleanup: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._cleanup = cleanup
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            await asyncio.shield(self._cleanup())
+
+
 async def _org_tz(db: AsyncSession, org_id: uuid.UUID) -> Any:
     tz_name = (await db.execute(text("SELECT timezone FROM core.organizations WHERE id = :o"),
                                 {"o": org_id})).scalar_one_or_none()
@@ -430,5 +469,5 @@ async def portable(request: Request, db: AsyncSession = DB, user: service.Curren
         await cleanup()
         raise
     filename = f"gen-harness-mang-di-{datetime.now(tz):%Y%m%d-%H%M}.ghbundle"
-    return FileResponse(out, media_type="application/octet-stream", filename=filename,
-                        headers={"Cache-Control": "no-store"}, background=BackgroundTask(cleanup))
+    return _CleanupFileResponse(out, media_type="application/octet-stream", filename=filename,
+                                headers={"Cache-Control": "no-store"}, cleanup=cleanup)

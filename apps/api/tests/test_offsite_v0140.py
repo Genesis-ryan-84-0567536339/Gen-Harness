@@ -80,7 +80,7 @@ async def test_get_not_configured(owner_api: Api, link: Path) -> None:
     assert b["message"] == "Chưa chọn nơi lưu bản sao ngoài máy"
     assert b["request"] == {"state": "idle", "action": None, "requested_at": None}
     assert b["can_request"] is True and b["key_present"] is True
-    assert b["manual_command"] == 'genh offsite set "<path>"'
+    assert b["manual_command"] is None                                   # không có yêu cầu chờ ⇒ không có lệnh
 
 
 async def test_get_without_host_link(owner_api: Api, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -146,7 +146,8 @@ async def test_destination_needs_owner_and_pin(client, db, owner_api: Api, link:
     assert not (link / "request" / "offsite.json").exists()
 
 
-@pytest.mark.parametrize("path", ["media/usb", "usb\\sao-luu", "/media/usb\n/etc", "/a\x07b", "", "/" + "a" * 400])
+@pytest.mark.parametrize("path", ["media/usb", "usb\\sao-luu", "/media/usb\n/etc", "/a\x07b", "", "/" + "a" * 400,
+                                  "/media/" + "ổ" * 140])
 async def test_destination_rejects_bad_paths(owner_api: Api, link: Path, path: str) -> None:
     await _pin(owner_api)
     r = await owner_api.send("PUT", "/system/offsite/destination", {"path": path})
@@ -182,8 +183,35 @@ async def test_unavailable_without_offsite_watcher(owner_api: Api, link: Path) -
     assert body["title"] == "Máy chủ chưa nhận lệnh từ Console — chạy lệnh sau một lần trên máy chủ"
     assert body["manual_command"] == 'genh offsite set "/media/usb"'
     assert (await owner_api.get("/system/offsite")).json()["can_request"] is False
+    # Lệnh theo đúng việc đang làm — KHÔNG bao giờ là `set "<path>"` (Owner chép nguyên văn là hỏng).
     r = await owner_api.send("POST", "/system/offsite/run")
-    assert r.status_code == 409 and r.json()["manual_command"] == 'genh offsite set "<path>"'
+    assert r.status_code == 409 and r.json()["manual_command"] == "genh offsite run"
+    r = await owner_api.send("POST", "/system/offsite/disable")
+    assert r.status_code == 409 and r.json()["manual_command"] == "genh offsite disable"
+    # Đường dẫn làm lệnh đổi nghĩa trong dấu nháy kép ⇒ không ghép lệnh.
+    r = await owner_api.send("PUT", "/system/offsite/destination", {"path": "/media/$(rm -rf ~)"})
+    assert r.status_code == 409 and r.json()["manual_command"] is None
+
+
+@pytest.mark.parametrize(("req", "cmd"), [
+    ({"action": "run"}, "genh offsite run"),
+    ({"action": "disable"}, "genh offsite disable"),
+    ({"action": "set", "path": "/media/usb/gen"}, 'genh offsite set "/media/usb/gen"'),
+    ({"action": "set", "path": "D:\\GenBackup"}, 'genh offsite set "D:\\GenBackup"'),
+    ({"action": "set", "path": "/x`reboot`"}, None),
+    ({"action": "set", "path": "tuong-doi"}, None),
+    ({"action": "set"}, None),
+    ({"action": "xoa-het"}, None),
+])
+async def test_get_manual_command_follows_pending_request(owner_api: Api, link: Path, req: dict[str, str],
+                                                         cmd: str | None) -> None:
+    """Yêu cầu bị kẹt (Windows / máy cài trước v0.1.40) ⇒ lệnh chạy tay theo action/path của CHÍNH yêu cầu đó; tệp
+    run/ không tin cậy nên path qua cùng bộ lọc."""
+    old = _iso(datetime.now(UTC) - timedelta(minutes=30))
+    (link / "request" / "offsite.json").write_text(json.dumps({"id": "x", **req, "requested_at": old}))
+    b = (await owner_api.get("/system/offsite")).json()
+    assert b["request"]["state"] == "stalled"
+    assert b["manual_command"] == cmd
 
 
 async def test_run_writes_request_and_respects_update_restore(owner_api: Api, link: Path) -> None:
@@ -322,3 +350,32 @@ async def test_portable_failure_is_friendly_and_cleans_up(owner_api: Api, link: 
     assert not outs[0].exists()
     assert await redis.get(offsite.PORTABLE_LOCK_KEY) is None
     assert await _log("offsite.portable_downloaded") == []
+
+
+async def test_portable_cleanup_runs_when_browser_disconnects(tmp_path: Path) -> None:
+    """Trình duyệt ngắt giữa lượt tải (send ném lỗi) ⇒ vẫn xoá tệp tạm + nhả khoá (BackgroundTask thì không chạy)."""
+    out = tmp_path / "goi.ghbundle"
+    out.write_bytes(b"GHBUNDLE1\n" + b"x" * 200_000)
+    cleaned: list[bool] = []
+
+    async def cleanup() -> None:
+        out.unlink()
+        cleaned.append(True)
+
+    resp = offsite._CleanupFileResponse(out, media_type="application/octet-stream", filename="g.ghbundle",
+                                        cleanup=cleanup)
+    sent: list[str] = []
+
+    async def receive() -> dict[str, Any]:
+        await asyncio.sleep(3600)
+        return {"type": "http.disconnect"}
+
+    async def send(message: Any) -> None:
+        sent.append(message["type"])
+        if message["type"] == "http.response.body":
+            raise OSError("trình duyệt đã ngắt")
+
+    scope = {"type": "http", "method": "GET", "headers": [], "path": "/", "query_string": b""}
+    with pytest.raises(OSError):
+        await resp(scope, receive, send)
+    assert sent[0] == "http.response.start" and cleaned == [True] and not out.exists()

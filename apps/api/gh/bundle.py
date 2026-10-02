@@ -162,6 +162,13 @@ class BundleError(Exception):
         self.code = code
 
 
+#: Giới hạn đã biết của định dạng gói hiện tại: AES-GCM một khối của `cryptography` chỉ nhận ≤ 2**31-1 byte (và cả gói
+#: nằm trong RAM 2–3 lần). Vượt ⇒ báo rõ thay vì OverflowError khó hiểu; định dạng sau sẽ mã hoá theo đoạn (stream).
+GCM_MAX_BYTES = 2**31 - 1
+TOO_LARGE = ("Gói dữ liệu lớn hơn 2 GiB chưa hỗ trợ (giới hạn đã biết của định dạng .ghbundle hiện tại) — "
+             "dùng bản sao lưu thường (genh backup) trong lúc chờ bản hỗ trợ gói lớn")
+
+
 def _usage_error(message: str) -> BundleError:
     return BundleError(message, 1)
 
@@ -329,7 +336,12 @@ def _encrypt_bundle(tar_bytes: bytes, password: str) -> tuple[dict[str, Any], by
     key = _derive_key(password, salt=salt, time_cost=header["time_cost"], memory_cost=header["memory_cost"],
                       parallelism=header["parallelism"])
     aad = orjson.dumps(header)
-    ciphertext = AESGCM(key).encrypt(nonce, tar_bytes, aad)
+    if len(tar_bytes) > GCM_MAX_BYTES:
+        raise _usage_error(TOO_LARGE)
+    try:
+        ciphertext = AESGCM(key).encrypt(nonce, tar_bytes, aad)
+    except OverflowError as e:
+        raise _usage_error(TOO_LARGE) from e
     return header, ciphertext
 
 
@@ -497,6 +509,8 @@ def _decrypt_bundle(ciphertext: bytes, header: dict[str, Any], header_line: byte
         raise _bad_password_or_corrupt(f"Header gói thiếu/sai tham số KDF: {e}") from e
     try:
         return AESGCM(key).decrypt(nonce, ciphertext, header_line)
+    except OverflowError as e:
+        raise _usage_error(TOO_LARGE) from e
     except InvalidTag as e:
         raise _bad_password_or_corrupt("Sai GH_BUNDLE_PASSWORD hoặc gói đã bị sửa/hỏng (GCM tag không khớp)") from e
 

@@ -178,6 +178,26 @@ async def test_system_health_offsite_block_and_actions(owner_api: Api, link: Pat
     assert health.ACTIONS["job.timeout"] == "Xem sức khoẻ"
 
 
+async def test_manager_sees_neutral_offsite_action(client, owner_api: Api, link: Path, db, redis) -> None:  # type: ignore[no-untyped-def]
+    """Dải "Cần Sếp xử lý" của Manager không hứa nút "Chọn nơi lưu" (chỉ Owner có)."""
+    from tests.test_rbac_api import login_as
+
+    org = await org_id(db)
+    now = datetime.now(UTC)
+    _status(link, last_attempt_at=_iso(now - timedelta(days=10)), last_success_at=_iso(now - timedelta(days=10)))
+    await _evaluate(redis, org)
+    await db.execute(text("""INSERT INTO core.role_permissions (role_id, permission_code, scope)
+                             SELECT id, p, 'all' FROM core.roles, unnest(ARRAY['system.read', 'system.manage']) p
+                             WHERE code = 'manager'
+                             ON CONFLICT (role_id, permission_code) DO UPDATE SET scope = 'all'"""))
+    await db.commit()
+    mgr = await login_as(client, db, "manager")
+    actions = {i["kind"]: i["action"] for i in (await mgr.get("/system/health")).json()["issues"]}
+    assert actions["offsite.stale"] == "Xem bản sao ngoài máy"
+    owner_actions = {i["kind"]: i["action"] for i in (await owner_api.get("/system/health")).json()["issues"]}
+    assert owner_actions["offsite.stale"] == "Chọn nơi lưu / sao lưu ngay"
+
+
 async def test_stale_offsite_only_warns_overall(owner_api: Api, link: Path, db, redis) -> None:  # type: ignore[no-untyped-def]
     """Không có sự cố nào khác: bản sao ngoài máy cũ chỉ kéo 'overall' xuống 'warn', không 'bad'."""
     now = datetime.now(UTC)

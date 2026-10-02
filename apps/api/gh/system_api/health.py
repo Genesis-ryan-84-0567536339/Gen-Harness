@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gh import health
-from gh.auth import service
+from gh.auth import rbac, service
 from gh.auth.deps import require
 from gh.db import DB
 
@@ -22,4 +22,5 @@ async def system_health(request: Request, db: AsyncSession = DB,
                         user: service.CurrentUser = Depends(require("system.read"))) -> dict[str, Any]:
     """Bộ xử lý nền, trình duyệt nền, hàng đợi lỗi, lịch chạy, sao lưu, cập nhật, ổ đĩa và các sự cố đang mở."""
     return await health.collect(db, request.app.state.redis, user.org_id,
-                                started_at=getattr(request.app.state, "health_started_at", None))
+                                started_at=getattr(request.app.state, "health_started_at", None),
+                                is_owner=user.role_code == rbac.OWNER)

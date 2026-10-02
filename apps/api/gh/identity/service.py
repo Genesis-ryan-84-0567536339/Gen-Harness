@@ -98,7 +98,8 @@ async def detect(db: AsyncSession, org_id: uuid.UUID) -> int:
     mark = (await db.execute(text("""
         WITH b AS (SELECT clock_timestamp() AS at,
                           CAST(rpad(lpad(to_hex(CAST(floor(extract(epoch FROM clock_timestamp()
-                                                                - CAST(CAST(:margin AS text) AS interval)) * 1000) AS bigint)),
+                                                                - CAST(CAST(:margin AS text) AS interval))
+                                                         * 1000) AS bigint)),
                                          12, '0'), 32, '0') AS uuid) AS floor_id)
         SELECT b.at,
                (SELECT pi.id FROM core.person_identities pi JOIN core.persons p ON p.id = pi.person_id

@@ -146,14 +146,16 @@ async def test_name_query_uses_trigram_operator_and_index(app, db) -> None:  # t
 # ─── lưới an toàn của mốc tiến độ ───────────────────────────────────────────────────────────────────────────
 
 #: uuid_v7 nhỏ nhất của mili-giây `now() - :ago` + phần ngẫu nhiên — giả lập định danh TẠO lúc đó (id theo giờ INSERT).
-OLD_ID = """CAST(rpad(lpad(to_hex(CAST(floor(extract(epoch FROM clock_timestamp() - CAST(CAST(:ago AS text) AS interval)) * 1000)
+OLD_ID = """CAST(rpad(lpad(to_hex(CAST(floor(extract(epoch FROM clock_timestamp()
+                                                 - CAST(CAST(:ago AS text) AS interval)) * 1000)
                 AS bigint)), 12, '0'), 12, '0') || substr(md5(random()::text), 1, 20) AS uuid)"""
 
 
 async def _person(db: Any, org: uuid.UUID, ch: uuid.UUID, code: str, *, phone: str | None, ago: str,
                   updated_ago: str = "2 days") -> uuid.UUID:
     pid = (await db.execute(text("""INSERT INTO core.persons (org_id, code, display_name, updated_at)
-                                    VALUES (:o, :c, md5(:c), now() - CAST(CAST(:u AS text) AS interval)) RETURNING id"""),
+                                    VALUES (:o, :c, md5(:c), now() - CAST(CAST(:u AS text) AS interval))
+                                    RETURNING id"""),
                             {"o": org, "c": code, "u": updated_ago})).scalar_one()
     return (await db.execute(text(f"""INSERT INTO core.person_identities (id, person_id, channel_id, external_id,
                                                                             phone_e164)
