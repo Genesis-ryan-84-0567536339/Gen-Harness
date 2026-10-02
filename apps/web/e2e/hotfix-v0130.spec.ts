@@ -50,21 +50,24 @@ test.describe('Hotfix v0.1.30 — không có model AI', () => {
     await expect(page.getByRole('link', { name: /Chọn model/ })).toHaveAttribute('href', '/guide/4');
   });
 
-  test('mục "Cập nhật phần mềm" cố định ở Trợ giúp + Điều khiển hệ thống, "Kiểm tra bản mới" chạy được', async ({ page }) => {
+  // v0.1.42 (F-61): thẻ "Cập nhật phần mềm" chỉ ở Cài đặt › Sao lưu & cập nhật; Trợ giúp có liên kết tới đó.
+  test('mục "Cập nhật phần mềm" cố định ở Cài đặt (Trợ giúp dẫn tới), "Kiểm tra bản mới" chạy được', async ({ page }) => {
     await page.goto('/help');
+    await page.getByTestId('help-update-link').click();
+    await expect(page).toHaveURL(/\/system\?tab=storage$/);
     const section = page.getByTestId('update-section');
     await expect(section).toContainText('v0.1.16');
     await expect(page.getByText('Đang dùng bản mới nhất')).toBeVisible();
     await page.getByRole('button', { name: /Kiểm tra bản mới/ }).click();
     await expect(page.getByText(/Đang dùng bản mới nhất \(v0.1.16\)/)).toBeVisible();
-    await page.goto('/system?tab=storage');
-    await expect(page.getByTestId('update-section')).toBeVisible();
   });
 
-  test('lối vào cố định "Hướng dẫn thiết lập": thanh bên + menu tài khoản', async ({ page }) => {
-    await page.goto('/overview');
+  // v0.1.42 (F-7): lối vào ở Cài đặt (liên kết đầu màn) + menu tài khoản — không còn mục riêng trên thanh bên.
+  test('lối vào cố định "Hướng dẫn thiết lập": Cài đặt + menu tài khoản', async ({ page }) => {
+    await page.goto('/system');
     const nav = page.getByRole('navigation', { name: 'Danh mục màn hình' });
-    await nav.getByRole('link', { name: /Hướng dẫn thiết lập/ }).click();
+    await expect(nav.getByRole('link', { name: /Hướng dẫn thiết lập/ })).toHaveCount(0);
+    await page.locator('.screen').getByRole('link', { name: /Hướng dẫn thiết lập/ }).click();
     await expect(page).toHaveURL(/\/guide$/);
     await page.locator('.sb-account').click();
     await expect(page.getByRole('menuitem', { name: /Hướng dẫn thiết lập/ })).toBeVisible();

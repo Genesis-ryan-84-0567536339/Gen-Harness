@@ -21,8 +21,8 @@ test.describe('auth', () => {
     await page.getByLabel('Mật khẩu', { exact: true }).fill(OWNER.password);
     await page.keyboard.press('Enter');
     await expect(page).toHaveURL(/\/inbox$/);
-    await expect(page.getByRole('heading', { name: 'Hộp thư ý nghĩa', level: 2 })).toBeVisible();
-    await expect(page.locator('.hd-group')).toHaveText('Hàng đợi & Hành động');
+    await expect(page.getByRole('heading', { name: 'Hộp thư', level: 2 })).toBeVisible();
+    await expect(page.locator('.hd-group')).toHaveText('Hộp thư & Việc');
     await expect(page.getByRole('tab', { name: /Tất cả/ })).toBeVisible();
 
     await page.getByRole('button', { name: /Anh Cơ La/ }).click();
@@ -37,7 +37,8 @@ test.describe('auth', () => {
     await page.getByRole('button', { name: 'Đăng nhập' }).click();
     await expect(page).toHaveURL(/\/overview$/);
     await expect(page.getByRole('link', { name: /Plugin & Tiện ích/ })).toHaveCount(0);
-    await expect(page.getByRole('link', { name: /Điều khiển hệ thống/ })).toHaveCount(0);
+    await expect(page.getByRole('link', { name: /Cài đặt/ })).toHaveCount(0);
+    await expect(page.getByRole('link', { name: /Kết nối/ })).toHaveCount(0);
     await page.goto('/system');
     await expect(page.getByText('Vai trò của bạn không có quyền xem màn này')).toBeVisible();
   });
@@ -50,6 +51,8 @@ test.describe('auth', () => {
     await page.getByRole('button', { name: /Anh Cơ La/ }).click();
     await page.getByRole('menuitem', { name: 'Thu gọn thanh bên' }).click();
     await expect(page.locator('.app')).toHaveAttribute('data-sidebar', 'rail');
+    // v0.1.42: rail — "Nâng cao" là một icon, bấm thì hiện các nhóm của nó.
+    await page.getByRole('button', { name: 'Nâng cao' }).click();
     await page.getByRole('button', { name: 'Tầng dữ liệu' }).click();
     await expect(page).toHaveURL(/\/raw$/);
     await page.reload();
@@ -115,8 +118,10 @@ test.describe('cụm Hàng đợi & Hành động', () => {
 
   test('Tổng quan: KPI và hàng đợi hiện đúng dữ liệu mẫu, mỗi ô KPI dẫn tới màn đã lọc', async ({ page }) => {
     await page.goto('/overview');
-    const channelsKpi = page.getByText('Kênh sống').locator('..').locator('..');
-    await expect(channelsKpi).toContainText('4');
+    // v0.1.42 (F-64): một hàng 4 số kinh doanh; "Kênh sống" chuyển xuống thẻ Sức khoẻ hệ thống.
+    const claimKpi = page.getByText('Tỉ lệ cơ hội được nhận').locator('..').locator('..');
+    await expect(claimKpi).toContainText('71,4');
+    await expect(page.locator('[data-gen-target="overview.health"]')).toContainText('Kênh đang sống');
     await expect(page.getByText('Tỉ lệ chờ duyệt')).toBeVisible();
     await expect(page.locator('.ov-queue-row', { hasText: 'OPP-1842' })).toBeVisible();
     await expect(page.locator('.ov-spot-row', { hasText: 'Nguyễn Văn Bảo' })).toBeVisible();

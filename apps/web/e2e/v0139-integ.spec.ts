@@ -4,7 +4,7 @@ import { MANAGER, OWNER, apiCall, loginAs, loginAsOwner, p3Hook, resetMock } fro
 /**
  * v0.1.39 — nghiệm thu sau khi gộp 3 gói (mock, tất định): lối vào Mạng xã hội (thanh bên, thẻ Facebook, Gen mở
  * /social), Hướng dẫn thiết lập (9 việc, không còn tên cũ), "Việc Sếp cần làm" (Gen-hub lỗi token, Claude Code, Jev
- * một lần + tải lại vẫn còn), thẻ Gen-hub ở /mcp chỉ đúng công tắc mạng công cộng, Tổng quan hết việc khi đã xong.
+ * một lần + tải lại vẫn còn), thẻ Gen-hub (v0.1.42: ở /connections) chỉ đúng công tắc mạng công cộng, Tổng quan hết việc khi đã xong.
  * Phần Gen-hub đạt / Facebook / Google đổi qua lại nằm ở `boss-checks-v0139.spec.ts`.
  */
 
@@ -29,11 +29,16 @@ test.describe('v0.1.39 · nghiệm thu sau gộp', () => {
     await page.setViewportSize({ width: 1440, height: 900 });
   });
 
-  test('Owner: thanh bên có Hướng dẫn thiết lập + Mạng xã hội; Hỏi Gen "mở trang mạng xã hội" → /social', async ({ page }) => {
+  // v0.1.42 (F-7): Hướng dẫn thiết lập vào Cài đặt + menu tài khoản, Facebook vào Kết nối — không còn mục riêng.
+  test('Owner: lối vào Hướng dẫn thiết lập ở Cài đặt, Facebook ở Kết nối; Hỏi Gen "mở trang mạng xã hội" → /social', async ({ page }) => {
     await loginAsOwner(page);
+    await page.goto('/system');
+    await expect(page.getByRole('link', { name: /Hướng dẫn thiết lập/ })).toHaveAttribute('href', '/guide');
+    await page.goto('/connections');
+    await expect(page.locator('[data-gen-target="system.channels.facebook"]').getByRole('link', { name: 'Mở Facebook' })).toHaveAttribute('href', '/social');
     await page.goto('/overview');
-    await expect(nav(page).getByRole('link', { name: /Hướng dẫn thiết lập/ })).toBeVisible();
-    await expect(nav(page).getByRole('link', { name: /Mạng xã hội/ })).toBeVisible();
+    await expect(nav(page).getByRole('link', { name: /Hướng dẫn thiết lập/ })).toHaveCount(0);
+    await expect(nav(page).getByRole('link', { name: /Mạng xã hội/ })).toHaveCount(0);
     await noObjectText(page);
 
     const panel = page.getByRole('complementary', { name: /Gen — trợ lý quản trị/ });
@@ -57,17 +62,17 @@ test.describe('v0.1.39 · nghiệm thu sau gộp', () => {
   test('/guide: 9 việc 01–09, link đúng; không còn "Hướng dẫn kết nối" ở Trợ giúp, Tổng quan, breadcrumb', async ({ page }) => {
     await loginAsOwner(page);
     await page.goto('/guide');
-    await expect(page.getByRole('heading', { name: 'Hướng dẫn thiết lập' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 2, name: 'Hướng dẫn thiết lập' })).toBeVisible();
     const cards = page.locator('.guide-card');
     await expect(cards).toHaveCount(9);
     await expect(page.locator('.guide-card .guide-card__num')).toHaveText(['01', '02', '03', '04', '05', '06', '07', '08', '09']);
     const invite = page.locator('[data-gen-target="guide.item:10"]');
     await expect(invite).toContainText('Mời người trong đội');
-    await expect(invite.locator('a[href="/system?tab=users"]')).toHaveCount(1);
+    await expect(invite.locator('a[href="/team"]')).toHaveCount(1);
     await expect(page.locator('[data-gen-target="guide.item:13"]')).toContainText('Kết nối Facebook');
     await expect(page.locator('[data-gen-target="guide.item.do:13"]')).toHaveAttribute('href', '/social');
     await expect(page.locator('[data-gen-target="guide.item:14"]')).toContainText('Nối Gen-hub');
-    await expect(page.locator('[data-gen-target="guide.item.do:14"]')).toHaveAttribute('href', '/mcp');
+    await expect(page.locator('[data-gen-target="guide.item.do:14"]')).toHaveAttribute('href', '/connections');
     for (const path of ['/guide', '/help', '/overview', '/guide/viec-sep']) {
       await page.goto(path);
       await expect(page.locator('main, .screen').first()).toBeVisible();
@@ -133,9 +138,9 @@ test.describe('v0.1.39 · nghiệm thu sau gộp', () => {
     await noObjectText(page);
   });
 
-  test('Thẻ Gen-hub ở /mcp: bỏ tích mạng công cộng với địa chỉ công khai → Lưu & kiểm tra → chỉ đúng công tắc', async ({ page }) => {
+  test('Thẻ Gen-hub ở /connections (v0.1.42): bỏ tích mạng công cộng với địa chỉ công khai → Lưu & kiểm tra → chỉ đúng công tắc', async ({ page }) => {
     await loginAsOwner(page);
-    await page.goto('/mcp');
+    await page.goto('/connections');
     const card = page.getByRole('region', { name: 'Gen-hub' });
     await card.getByLabel('Địa chỉ Gen-hub').fill('https://hub.genos.top/mcp');
     await card.getByLabel('Token Gen-hub').fill('ghtok_E2E_dung_0123456789');

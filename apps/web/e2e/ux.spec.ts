@@ -102,7 +102,7 @@ test.describe('UX v0.1.28', () => {
     await expect(page.getByText('genh update')).toHaveCount(0);
     await expect(page.getByRole('link', { name: /Mở Hướng dẫn thiết lập/ })).toHaveCount(0);
     await page.goto('/guide');
-    await expect(page.getByRole('heading', { name: 'Hướng dẫn thiết lập' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 2, name: 'Hướng dẫn thiết lập' })).toBeVisible();
     await expect(page.getByText('Việc kết nối do Owner làm')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Thử lại' })).toHaveCount(0);
     // v0.1.39: trang "Việc Sếp cần làm" cũng chỉ giải thích, không báo lỗi.

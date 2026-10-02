@@ -13,7 +13,7 @@ test.describe('v0.1.36 — Cần Sếp xử lý & Sức khoẻ hệ thống', ()
     await loginAsOwner(page);
   });
 
-  test('sự cố kênh rớt + cập nhật lỗi ⇒ dải 2 dòng; "Đăng nhập lại" mở tab Kênh', async ({ page }) => {
+  test('sự cố kênh rớt + cập nhật lỗi ⇒ dải 2 dòng; "Đăng nhập lại" mở Kết nối (link cũ tab Kênh tự chuyển)', async ({ page }) => {
     await mockHook(page.request, 'health', { issues: [{ kind: 'channel.down', title: 'Kênh Zalo đã ngắt kết nối' }, { kind: 'update.failed' }] });
     await page.goto('/overview');
     const strip = page.getByRole('region', { name: 'Cần Sếp xử lý' });
@@ -30,7 +30,9 @@ test.describe('v0.1.36 — Cần Sếp xử lý & Sức khoẻ hệ thống', ()
     await expect(rows.nth(1).getByRole('link', { name: 'Xem & thử lại' })).toBeVisible();
     await expect(page.getByText('[object Object]')).toHaveCount(0);
     await strip.getByRole('link', { name: 'Đăng nhập lại' }).click();
-    await expect(page).toHaveURL(/\/system\?tab=channels$/);
+    // v0.1.42 (F-7): /system?tab=channels → /connections.
+    await expect(page).toHaveURL(/\/connections$/);
+    await expect(page.getByRole('article', { name: 'Kênh Zalo' })).toBeVisible();
     await expect(page.getByText('[object Object]')).toHaveCount(0);
 
     await page.goto('/overview');
@@ -69,7 +71,7 @@ test.describe('v0.1.36 — Cần Sếp xử lý & Sức khoẻ hệ thống', ()
     await expect(page).toHaveURL(/\/guide\/4$/);
   });
 
-  test('cập nhật lỗi chỉ hiện MỘT lần ở Tổng quan (trong dải); thẻ đầy đủ có "Thử lại" ở Dữ liệu & lưu trữ và Trợ giúp', async ({ page }) => {
+  test('cập nhật lỗi chỉ hiện MỘT lần ở Tổng quan (trong dải); thẻ đầy đủ có "Thử lại" chỉ ở Cài đặt › Sao lưu & cập nhật', async ({ page }) => {
     const failed = {
       current: 'v0.1.35', latest: 'v0.1.36', update_available: true, updater: 'systemd', linked: true, can_request: true,
       state: 'failed', message: 'Bản mới không khởi động được — đã tự quay về bản cũ (GH-E945)', from: 'v0.1.35', to: 'v0.1.36',
@@ -89,9 +91,10 @@ test.describe('v0.1.36 — Cần Sếp xử lý & Sức khoẻ hệ thống', ()
     await page.goto('/system?tab=storage');
     await expect(page.getByText('Cập nhật lên v0.1.36 chưa thành công')).toBeVisible();
     await expect(page.getByRole('button', { name: /Thử lại/ }).first()).toBeVisible();
+    // v0.1.42 (F-61): Trợ giúp chỉ còn liên kết tới Cài đặt › Sao lưu & cập nhật.
     await page.goto('/help');
-    await expect(page.getByText('Cập nhật lên v0.1.36 chưa thành công')).toBeVisible();
-    await expect(page.getByRole('button', { name: /Thử lại/ }).first()).toBeVisible();
+    await expect(page.getByTestId('help-update-link')).toHaveAttribute('href', '/system?tab=storage');
+    await expect(page.getByText('Cập nhật lên v0.1.36 chưa thành công')).toHaveCount(0);
     await expect(page.getByText('[object Object]')).toHaveCount(0);
   });
 
@@ -195,7 +198,7 @@ test.describe('v0.1.36 — Cần Sếp xử lý & Sức khoẻ hệ thống', ()
     await expect(page.getByText('[object Object]')).toHaveCount(0);
   });
 
-  test('chuông: kind channel.down mới ⇒ tăng 1, dải tự hiện không cần tải lại, bấm mở tab Kênh', async ({ page }) => {
+  test('chuông: kind channel.down mới ⇒ tăng 1, dải tự hiện không cần tải lại, bấm mở Kết nối', async ({ page }) => {
     await page.goto('/overview');
     const bell = page.locator('header .hd-bell');
     await expect(bell).toHaveAccessibleName('Thông báo — 1 chưa đọc');
@@ -212,7 +215,7 @@ test.describe('v0.1.36 — Cần Sếp xử lý & Sức khoẻ hệ thống', ()
     await expect(dlg.locator('.nt-item').first()).toContainText('Kênh Zalo đã ngắt kết nối');
     await expect(dlg.locator('.nt-item').first().locator('[data-icon]').first()).toHaveAttribute('data-icon', /plugs/);
     await dlg.getByRole('button', { name: /Kênh Zalo đã ngắt kết nối/ }).click();
-    await expect(page).toHaveURL(/\/system\?tab=channels$/);
+    await expect(page).toHaveURL(/\/connections$/);
   });
 
   test('Trợ giúp hiện phiên bản máy chủ và phiên bản công cụ cài đặt (genh), không lặp dòng "phiên bản"', async ({ page }) => {

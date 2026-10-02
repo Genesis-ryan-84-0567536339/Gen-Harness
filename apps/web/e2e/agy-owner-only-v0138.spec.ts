@@ -37,8 +37,11 @@ test.describe('v0.1.38 · Antigravity CLI chỉ dùng cho Gen của Sếp', () =
     await expect(table).toContainText('Sàng lọc & suy luận chính');
     await expect(table).toContainText(GEN_LABEL);
 
-    // Thẻ Antigravity CLI nói rõ phạm vi (cùng một câu với API).
+    // Thẻ Antigravity CLI nói rõ phạm vi (cùng một câu với API) — v0.1.42 (F-61): thẻ chỉ ở Kết nối.
+    await page.goto('/connections');
     await expect(page.getByTestId('cli-card-antigravity_cli')).toContainText('Chỉ dùng cho Gen — trợ lý quản trị (Gen của Sếp)');
+    await page.goto('/api');
+    await expect(table).toContainText('Sàng lọc & suy luận chính');
 
     // Slot sàng lọc đang gán model agy (bản cài cũ) → "Chỉ cho Gen" + câu việc cần làm hiện thẳng (không chỉ tooltip).
     const refineryRow = table.locator('tr', { hasText: 'Sàng lọc & suy luận chính' });
