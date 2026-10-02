@@ -23,7 +23,10 @@ export GH_SETUP_TOKEN=live-setup-token GH_COOKIE_SECURE=false GH_CLI_HOME=$OUT/a
 export GH_MASTER_KEY=$(python3 -c 'import os,base64;print(base64.b64encode(os.urandom(32)).decode())')
 export GH_BRIDGE_KEY=$(python3 -c 'import os,base64;print(base64.b64encode(os.urandom(32)).decode())')
 PIDS=()
-cleanup() { for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null || true; done; }
+# `npx vite` chạy vite thành tiến trình CHÁU của npx (npx → sh → node vite) — chỉ kill npx thì vite mồ côi vẫn giữ
+# cổng, lần chạy sau (`--strictPort`) hỏng vì cổng bận. Kill cả cây con (sâu trước) rồi mới tới tiến trình nền.
+killtree() { local c; for c in $(pgrep -P "$1" 2>/dev/null); do killtree "$c"; done; kill "$1" 2>/dev/null || true; }
+cleanup() { for p in "${PIDS[@]}"; do killtree "$p"; done; }
 trap cleanup EXIT
 psql "$PG/postgres" -qc "DROP DATABASE IF EXISTS gh_live WITH (FORCE)" -c "CREATE DATABASE gh_live"
 redis-cli -n 3 flushdb >/dev/null

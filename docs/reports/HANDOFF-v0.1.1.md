@@ -1405,3 +1405,69 @@ cần khôi phục — CSDL chưa bị đụng thì chỉ cần `docker compose 
    đêm vẫn chạy kiểu cũ của v0.1.33. `e2e-selfupdate` kiểm đường genh cũ tự tải genh mới rồi nâng dịch vụ.
 2. Dọn ảnh chỉ đụng repo `ghcr.io/<owner>/gen-harness-*`, không `-f`; ảnh đang dùng bị bỏ qua — cài bằng build cục bộ thì không
    dọn gì.
+
+## v0.1.35 — Sửa lỗi đỏ trong ứng dụng: chọn người/trợ lý thật, PIN nhà cung cấp AI, Tài liệu an toàn, lỗi thân thiện, e2e thật trong CI (02/10/2026)
+
+### Boss cần làm gì
+
+**Không cần làm gì.** Sau khi cập nhật:
+- Ô "Giao cho người khác", "Gán người xử lý" hiện đúng người trong công ty (Sếp là "Tôi"); ô "Gán BOT trực nhóm" hiện các trợ
+  lý đang bật. Danh sách trống nghĩa là chưa mời người dùng / chưa tạo trợ lý.
+- Khi thêm hoặc sửa nhà cung cấp AI, thêm khoá API, bật/tắt hay đổi thứ tự ưu tiên model, hệ thống hỏi **mã PIN 6 số** (mã
+  đặt lúc thiết lập). Nhập một lần dùng được 30 phút.
+- Tài liệu không phải PDF/ảnh (vd .html, .txt, .docx) giờ bấm vào sẽ **tải về máy** thay vì mở thẳng trong trình duyệt — chủ
+  ý để chặn mã độc.
+- Khi có lỗi lạ, màn hình hiện câu dễ hiểu kèm "Mã lỗi xxxxxxxx" — Sếp chỉ cần chép mã đó gửi Claude.
+
+### Vì sao (kế hoạch tổng `docs/audit/2026-10-01/0-ke-hoach-tong.md`)
+
+- **F-1 (đỏ)**: Hộp thư, Vụ việc, Nhóm & Con người, Bản đồ quan hệ dùng ID giả viết cứng (`u-lan`, `agent-tls`…) ⇒ giao việc /
+  gán người / gán BOT luôn lỗi 422 trên máy thật; test mock không bắt được.
+- **F-5 (đỏ)**: Tài liệu tải lên (.html/.svg) mở thẳng cùng origin ⇒ nhân viên chiếm phiên Owner (stored XSS).
+- **F-15**: API Sổ tay `/notebooks` phân quyền khác phần còn lại của Kho ⇒ vượt phạm vi dữ liệu.
+- **F-20 (phần gấp)**: tạo/sửa nhà cung cấp AI, thêm khoá, đổi chuỗi ưu tiên không cần PIN ⇒ kênh tuồn dữ liệu sang model lạ.
+- **F-43**: lỗi CSDL lộ SQL/tham số ra người dùng, mọi OSError thành 503, Swagger công khai ở production, email sai ghi log.
+- **F-14 (phần chặn tái phát)**: mock và API viết tay lệch nhau mà không ai biết ⇒ cần e2e thật trong CI.
+
+### Thay đổi
+
+- **F-1** — api: `GET /pickers/users`, `GET /pickers/agents` (`gh/biz/core/pickers.py`); gán Vụ việc/BOT với UUID lạ ⇒ 404
+  thay vì 500. Web: hook `useAssignees`/`useAgentOptions` (`src/lib/pickers.ts`) thay `TEAMMATES`/`AGENTS`/`OWNER_OPTIONS`;
+  dialog có trạng thái đang tải / rỗng (hướng dẫn tiếng Việt) / lỗi (InlineError). Mock dùng UUID cố định (`test/mock-ids.ts`),
+  trả 422 VALIDATION cho id không phải UUID, 404 cho UUID lạ. Script `.github/scripts/check_no_fake_ids.py` (+ test) chạy ở
+  job `web`.
+- **F-20** — thao tác PIN `ai.route_change` cho tạo/sửa/bật-tắt nhà cung cấp, thêm khoá, đổi chuỗi ưu tiên; thiếu PIN ⇒ 423
+  (bảng test `test_pin_providers_v0135.py`). Web: Thiết lập bước 4 và API & Model hỏi PIN (huỷ ⇒ "Đã huỷ — thao tác cần mã
+  PIN.", không tạo gì); PIN dùng lại 30 phút trong phiên.
+- **F-5/F-15** — `/documents/{id}/content`: chỉ PDF/ảnh raster mở trực tiếp, còn lại `Content-Disposition: attachment` +
+  `Content-Security-Policy: sandbox`, `nosniff`; siết CSP ở Caddy/nginx; `/notebooks` dùng `data.read`/`data.manage` như
+  phần còn lại của Kho (AgentNV ⇒ 403).
+- **F-43** — 500 không bao giờ chứa SQL/tham số: `IntegrityError`… ⇒ "Hệ thống gặp lỗi…" + `Mã lỗi xxxxxxxx` (chi tiết chỉ
+  ở log server); chỉ lỗi mất kết nối (SQLSTATE 08/57P0x, ConnectionError/TimeoutError/redis) mới 503; OSError khác ⇒ 500
+  thân thiện. `/api/v1/docs`, `/openapi.json` tắt ở production (redoc tắt hẳn). Nhật ký hành động khi đăng nhập sai che email (`o***@miền`). `detail` của
+  problem+json **luôn là chuỗi hoặc null** (giá trị khác chuyển sang `context`).
+- **F-14** — `apps/web/e2e-live/live-ci.spec.ts` + `LIVE_SPECS` trong `run.sh`: job `api` chạy api + worker thật trên
+  Postgres/Redis của job, Chromium bấm 4 luồng (giao việc Hộp thư, gán người Vụ việc, gán BOT nhóm, xác nhận đề xuất Gen),
+  kiểm 200 + UUID lưu đúng trong CSDL. `live-phase2` bỏ qua bước 8–11 bằng "Để sau". Tài liệu `docs/reports/phase-5-e2e-live.md`.
+- `VERSION` → `v0.1.35`; `docs/ROADMAP.md` mục Đã xong.
+
+### Kiểm tra (nhánh tích hợp `claude/v0135`, máy dựng Linux, 02/10/2026)
+
+- Tích hợp 5 nhánh `claude/wip/v0.1.35/*` (f1, f20, f5-f15, f43, f14) vào `claude/v0135`: không xung đột.
+- api: ruff + mypy sạch (128 tệp), `alembic heads` = `0023 (head)`; pytest **1178 pass** (lượt thường) + **1178 pass**
+  (`GH_TEST_APP_ROLE=1`) — gồm `test_p3_relations` (mime), `test_notebook_scope_v0135` (AgentNV 403), `test_errors_v0135`
+  (IntegrityError → 500 không SQL), `test_pin_providers_v0135` (bảng 423), `test_problem_json_v0135` (detail chuỗi/null),
+  `test_pickers_v0135`, `test_proxy_csp_v0135` (riêng 7 tệp này 81 pass).
+- E2E thật rút gọn `LIVE_SPECS=live-ci bash e2e-live/run.sh`: **5/5 pass** (~22 giây Playwright; thiết lập + 4 luồng Hộp thư /
+  Vụ việc / BOT nhóm / Gen đề xuất). Sửa nhỏ khi tích hợp: `run.sh` dọn cả cây tiến trình con (trước đó `npx vite` để lại
+  vite mồ côi giữ cổng 5175 ⇒ lần chạy sau hỏng vì `--strictPort`).
+- web: lint sạch, `check_no_fake_ids.py` sạch, typecheck sạch, vitest **308/308**, build OK; bridge 50 pass; Playwright mock
+  **149/149** (gồm `pickers-v0135` 5, `pin-providers-v0135` 4, flows 32, ux, visual — không đổi ảnh).
+- browser: ruff + mypy sạch, pytest 14 pass. genh: `go vet` sạch, `go test ./...` pass.
+- Cổng: `check_release_gate.py` OK; `unittest` `.github/scripts` 20/20.
+
+### Đã kiểm vs chưa kiểm
+
+- Đã kiểm: _(người điều phối điền sau merge — link + kết quả thật, KHÔNG ghi trước)_ — CI PR (`ci-ok`, gồm e2e thật rút gọn
+  trong job `api`); Release v0.1.35 bản thử → E2E cài thật → promote latest; genh tải về (checksum + `genh version` = v0.1.35).
+- Chưa kiểm: trên máy Boss với người dùng/trợ lý thật (danh sách chọn người), tải tài liệu .docx thật qua Caddy production.
