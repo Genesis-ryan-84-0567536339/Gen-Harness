@@ -25,6 +25,7 @@ import { createMock as createP3Graph } from './mock-p3-graph';
 import { createMock as createP3Market } from './mock-p3-market';
 import { createMock as createP3People } from './mock-p3-people';
 import { createMock as createP4Agents } from './mock-p4-agents';
+import { USER_IDS } from './mock-ids';
 import { createMock as createP4Api } from './mock-p4-api';
 import { createMock as createP4Mcp } from './mock-p4-mcp';
 import { createMock as createSocial } from './mock-social';
@@ -279,7 +280,14 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
   /** Giai đoạn 3: mỗi cụm màn một mock riêng (test/mock-p3-*.ts), hỏi lần lượt sau phase 2. */
   const p3Core = createP3Core({ fresh: opts.setup === 'fresh', emit: broadcast });
   const p4Agents = createP4Agents({ fresh: opts.setup === 'fresh', emit: broadcast, getChannels: phase2.hooks.channels });
-  const p3Relations = createP3Relations({ fresh: opts.setup === 'fresh', emit: broadcast });
+  // v0.1.35: gán BOT kiểm agent có thật ở Danh tính Agent — đọc CHUNG mảng của p4Agents (không copy).
+  const agentList = () => p4Agents.hooks.list() as AgentIdentity[];
+  const p3Relations = createP3Relations({
+    fresh: opts.setup === 'fresh', emit: broadcast,
+    findAgent: (id) => agentList().find((a) => a.id === id),
+  });
+  // Giao việc / gán người xử lý kiểm người dùng đang hoạt động (như API: UUID lạ hoặc bị khoá → 404).
+  const findUser = (id: string) => users.find((u) => u.id === id && !u.inactive);
   // v0.1.21 Gen: kịch bản cố định (test/mock-gen.ts); `features.gen` của /auth/me đọc cờ ở đây.
   const genMock = createGen({
     emit: broadcast,
@@ -299,11 +307,11 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     // chứng cứ) — core.handle() nuốt mọi `/explain/{kind}/{id}` không phân biệt kind nên phải chặn trước nó.
     people: createP3People({ fresh: opts.setup === 'fresh', emit: broadcast }),
     core: p3Core,
-    queue: createP3Queue({ fresh: opts.setup === 'fresh', emit: broadcast }),
+    queue: createP3Queue({ fresh: opts.setup === 'fresh', emit: broadcast, findUser }),
     relations: p3Relations,
     graph: createP3Graph({ fresh: opts.setup === 'fresh', emit: broadcast }),
     // market "Giới thiệu hai bên" tạo bản nháp thật qua core.hooks.push — cùng cơ chế create_draft dùng chung ở backend.
-    market: createP3Market({ fresh: opts.setup === 'fresh', emit: broadcast, pushDraft: p3Core.hooks.push as (d: unknown) => unknown }),
+    market: createP3Market({ fresh: opts.setup === 'fresh', emit: broadcast, pushDraft: p3Core.hooks.push as (d: unknown) => unknown, findUser }),
     // api & model (PLAN 4.2): bindings cần biết danh sách agent (p4Agents) + model theo provider (phase2 dùng chung).
     api: createP4Api({
       fresh: opts.setup === 'fresh', emit: broadcast,
@@ -372,7 +380,8 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
   const users: User[] = [];
   const addOwner = (email = MOCK_OWNER.email, password = MOCK_OWNER.password, pin = MOCK_OWNER.pin, name = 'Anh Cơ La (Ryan)') =>
     users.push({
-      id: randomUUID(),
+      // UUID cố định cho Owner seed (test/mock-ids.ts) — e2e so khớp id lấy từ /pickers/users.
+      id: users.some((u) => u.id === USER_IDS.owner) ? randomUUID() : USER_IDS.owner,
       email,
       password,
       pin,
@@ -410,7 +419,7 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
   }
   if (opts.setup !== 'fresh') {
     users.push({
-      id: randomUUID(),
+      id: USER_IDS.lan,
       email: 'operator@genesis.local',
       password: MOCK_OWNER.password,
       pin: '135790',
@@ -419,7 +428,7 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
       hidden: hiddenScreens('operator'),
     });
     users.push({
-      id: randomUUID(),
+      id: USER_IDS.minh,
       email: 'auditor@genesis.local',
       password: MOCK_OWNER.password,
       pin: '975310',
@@ -430,7 +439,7 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     // Q4 (docs/PLAN.md): cần một tài khoản Manager thật để e2e xác nhận nhánh "Manager không thấy" của
     // Đánh giá con người (trước đây chỉ owner/operator/auditor được seed, chưa cụm nào cần Manager tới giờ).
     users.push({
-      id: randomUUID(),
+      id: USER_IDS.hong,
       email: 'manager@genesis.local',
       password: MOCK_OWNER.password,
       pin: '864202',
@@ -731,7 +740,7 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
               return problem(res, 422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors: { name: 'Nhập tên agent' } });
             }
             advance(8, 'done');
-            const agent = { id: 'agent-setup-1', name: String(body.name), try_reply: `Chào Sếp, tôi là ${String(body.name)}.`, try_error: null };
+            const agent = { id: randomUUID(), name: String(body.name), try_reply: `Chào Sếp, tôi là ${String(body.name)}.`, try_error: null };
             return reply(200, { ...stateView(), agent });
           }
           if (setup.steps[7].status !== 'done') return problem(res, 409, 'STEP_INCOMPLETE', 'Cần hoàn thành bước 8 trước');
@@ -962,6 +971,28 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
       const list = notifsOf(user.id);
       for (const n of list) if (!ids || !ids.length || ids.includes(n.id)) n.read = true;
       return reply(200, { unread: list.filter((n) => !n.read).length });
+    }
+    // v0.1.35 (F-1) — như gh/biz/core/pickers.py: chỉ id + tên (không email/vai trò), người đang đăng nhập `me`.
+    if (path === '/pickers/users' && method === 'GET') {
+      const perms = permissionsOf(user.role.code);
+      if (['queue.act', 'opportunity.write', 'profile.read'].every((k) => (perms[k] ?? 'none') === 'none')) {
+        return problem(res, 403, 'FORBIDDEN', 'Vai trò của bạn không có quyền thao tác này', { detail: 'queue.act' });
+      }
+      const items = users
+        .filter((u) => !u.inactive)
+        .sort((a, b) => a.display_name.localeCompare(b.display_name, 'vi'))
+        .map((u) => ({ id: u.id, name: u.display_name, me: u.id === user.id }));
+      return reply(200, { items });
+    }
+    if (path === '/pickers/agents' && method === 'GET') {
+      if ((permissionsOf(user.role.code)['profile.write'] ?? 'none') === 'none') {
+        return problem(res, 403, 'FORBIDDEN', 'Vai trò của bạn không có quyền thao tác này', { detail: 'profile.write' });
+      }
+      const items = agentList()
+        .filter((a) => a.is_enabled)
+        .sort((a, b) => a.name.localeCompare(b.name, 'vi'))
+        .map((a) => ({ id: a.id, name: a.name }));
+      return reply(200, { items });
     }
     if (path === '/header' && method === 'GET') {
       return reply(200, { channels_live: 4, groups_listening: 42, autonomy_level: 4, data_confidence: 0.78 });

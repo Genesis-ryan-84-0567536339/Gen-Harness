@@ -347,7 +347,13 @@ async def providers(request: Request, user: service.CurrentUser = Depends(READ),
 
 @router.post("/providers", status_code=201)
 async def create_provider(body: ProviderIn, request: Request, user: service.CurrentUser = Depends(MANAGE),
+                          _pin: Any = Depends(require_pin("ai.route_change")),
                           db: AsyncSession = DB) -> dict[str, Any]:
+    """v0.1.35 (F-20): thêm / đổi tên nhà cung cấp AI (kể cả nhánh CLI) cần phiên PIN `ai.route_change` — kiểm SAU
+    quyền (vai trò thiếu quyền nhận 403 trước 423). Phạm vi PIN đợt này chỉ gồm 4 route ghi chuỗi chuyển hướng:
+    POST /providers, PATCH /providers/chain, PATCH /providers/{id}, POST /providers/{id}/keys. KHÔNG đòi PIN: GET,
+    DELETE nhà cung cấp/khoá (chỉ thu hẹp đường đi), /test, /diagnose, /models. Phần còn lại (setup bước 4–11 sau
+    Hoàn tất, cli_login, MCP, agents patch) làm ở v0.1.45."""
     if body.kind == "openai_compat" and not body.endpoint:
         raise field_errors({"endpoint": "Cần endpoint cho API tương thích OpenAI"})
     if body.kind not in CLI_KINDS and not body.keys:
@@ -385,6 +391,7 @@ class ChainIn(BaseModel):
 
 @router.patch("/providers/chain")
 async def patch_chain(body: ChainIn, request: Request, user: service.CurrentUser = Depends(MANAGE),
+                      _pin: Any = Depends(require_pin("ai.route_change")),
                       db: AsyncSession = DB) -> list[dict[str, Any]]:
     """Kéo-thả sắp lại toàn bộ chuỗi chuyển hướng một lượt (thiết kế `[providers]`) — khác `PATCH /providers/{id}`
     vốn chỉ đổi một ô; ở đây backend chỉ nhận thứ tự mới và ghi lại `failover_rank` theo đúng thứ tự đó.
@@ -406,8 +413,10 @@ async def patch_chain(body: ChainIn, request: Request, user: service.CurrentUser
 
 @router.patch("/providers/{pid}")
 async def patch_provider(pid: uuid.UUID, body: ProviderPatch, request: Request,
-                         user: service.CurrentUser = Depends(MANAGE), db: AsyncSession = DB
-                         ) -> dict[str, Any]:
+                         user: service.CurrentUser = Depends(MANAGE),
+                         _pin: Any = Depends(require_pin("ai.route_change")),
+                         db: AsyncSession = DB) -> dict[str, Any]:
+    """Bật/tắt hoặc đổi `failover_rank` — cần PIN `ai.route_change` (v0.1.35, F-20; xem `create_provider`)."""
     p = await _provider(db, user.org_id, pid)
     if body.enabled is not None:
         await db.execute(text("UPDATE agent.providers SET is_enabled = :e WHERE id = :i"),
@@ -448,7 +457,9 @@ async def delete_provider(pid: uuid.UUID, user: service.CurrentUser = Depends(MA
 
 @router.post("/providers/{pid}/keys", status_code=201)
 async def add_key(pid: uuid.UUID, body: KeyIn, request: Request, user: service.CurrentUser = Depends(MANAGE),
+                  _pin: Any = Depends(require_pin("ai.route_change")),
                   db: AsyncSession = DB) -> dict[str, Any]:
+    """Thêm khoá API — cần PIN `ai.route_change` (v0.1.35, F-20; xem `create_provider`)."""
     p = await _provider(db, user.org_id, pid)
     if p.kind in CLI_KINDS:
         raise conflict("CLI_NO_KEYS", f"{climod.spec(p.kind).name} dùng phiên đăng nhập, không dùng khoá API")

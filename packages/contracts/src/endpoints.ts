@@ -4,6 +4,7 @@ import { usersEndpoints } from './users';
 import { genEndpoints } from './gen';
 import { notificationsEndpoints } from './notifications';
 import { socialEndpoints } from './social';
+import { pickersEndpoints } from './pickers';
 import { coreEndpoints } from './p3-core';
 import { queueEndpoints } from './p3-queue';
 import { relationsEndpoints } from './p3-relations';
@@ -282,6 +283,7 @@ export function createEndpoints(client: ApiClient) {
     ...genEndpoints(r),
     ...notificationsEndpoints(r),
     ...socialEndpoints(r),
+    ...pickersEndpoints(r),
   };
 }
 

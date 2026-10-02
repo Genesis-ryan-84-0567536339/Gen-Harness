@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import type { DirGroup, DirHeatBand, DirPerson, DirPriority, DirRelation, DirValueBand } from '@gen-harness/contracts';
+import type { AgentRef, DirGroup, DirHeatBand, DirPerson, DirPriority, DirRelation, DirValueBand } from '@gen-harness/contracts';
 import { Bar, CardError, InlineError, ScreenHead, SkeletonLines } from '../common';
 import { Button, Dialog, EmptyState, Icon, Tabs, type FilterOption, type TabItem } from '@gen-harness/ui';
 import { errorText } from '../../lib/errorText';
 import { fmtInt } from '../../lib/format';
+import { useCan } from '../../lib/permissions';
+import { useAgentOptions, useEmptyAgentsText } from '../../lib/pickers';
 import { useUrlState } from '../../lib/uiStore';
 import {
   CHANNEL_LABEL,
@@ -25,13 +27,64 @@ import {
 } from './relationsModel';
 import { useDirChannels, useDirGroups, useDirPeople, useSetGroupBot, useSetPersonBot } from './queries';
 
-/** Đội ngũ agent tạm để gán BOT — chưa có màn Danh tính Agent (giai đoạn 4), giống TEAMMATES của Hộp thư ý nghĩa. */
-const AGENTS = [
-  { id: 'agent-tls', name: 'Trợ lý thương mại' },
-  { id: 'agent-ka', name: 'Key Account junior' },
-  { id: 'agent-hc', name: 'Admin hậu cần' },
-  { id: 'agent-thk', name: 'Thư ký cá nhân' },
-];
+/** Giá trị "giữ nguyên BOT hiện tại" của hộp gán hàng loạt — không gửi `agent_id` (API giữ nguyên). */
+const KEEP_BOT = '__keep__';
+
+/** Danh sách chọn trợ lý (agent THẬT từ `/pickers/agents`, v0.1.35) dùng chung cho 3 hộp gán BOT. BOT hiện tại đã
+ * bị tắt (không còn trong danh sách) vẫn hiện một dòng "<tên> (đã tắt)" được đánh dấu chọn. `keepLabel` thêm lựa
+ * chọn "giữ nguyên" (giá trị KEEP_BOT) đứng đầu — dùng cho hộp hàng loạt để mặc định không gỡ BOT của ai. */
+function AgentChoices({
+  value,
+  onChange,
+  current,
+  noneLabel = 'Chưa gán',
+  keepLabel,
+}: {
+  value: string;
+  onChange: (id: string) => void;
+  current?: AgentRef | null;
+  noneLabel?: string;
+  keepLabel?: string;
+}) {
+  const { options, query } = useAgentOptions();
+  const emptyText = useEmptyAgentsText();
+  const missing = current && query.isSuccess && !options.some((a) => a.id === current.id) ? current : null;
+  return (
+    <div className="dlg-list" role="list">
+      {keepLabel ? (
+        <button type="button" className="sv-open" aria-pressed={value === KEEP_BOT} onClick={() => onChange(KEEP_BOT)}>
+          <span className="sv-open__name">{keepLabel}</span>
+          {value === KEEP_BOT ? <Icon name="ph ph-check" size={14} /> : null}
+        </button>
+      ) : null}
+      <button type="button" className="sv-open" aria-pressed={value === ''} onClick={() => onChange('')}>
+        <span className="sv-open__name">{noneLabel}</span>
+        {value === '' ? <Icon name="ph ph-check" size={14} /> : null}
+      </button>
+      {query.isPending ? (
+        <SkeletonLines rows={3} />
+      ) : query.isError ? (
+        <InlineError>{errorText(query.error)}</InlineError>
+      ) : (
+        <>
+          {missing ? (
+            <button type="button" className="sv-open" aria-pressed={value === missing.id} onClick={() => onChange(missing.id)}>
+              <span className="sv-open__name">{`${missing.name || 'Trợ lý'} (đã tắt)`}</span>
+              {value === missing.id ? <Icon name="ph ph-check" size={14} /> : null}
+            </button>
+          ) : null}
+          {options.map((a) => (
+            <button key={a.id} type="button" className="sv-open" aria-pressed={value === a.id} onClick={() => onChange(a.id)}>
+              <span className="sv-open__name">{a.label}</span>
+              {value === a.id ? <Icon name="ph ph-check" size={14} /> : null}
+            </button>
+          ))}
+          {options.length === 0 ? <p className="muted-note">{emptyText}</p> : null}
+        </>
+      )}
+    </div>
+  );
+}
 
 type DirTab = 'groups' | 'people';
 
@@ -58,6 +111,8 @@ function GroupsPane() {
   const channels = useDirChannels();
   const groups = useDirGroups({});
   const [botFor, setBotFor] = useState<DirGroup | null>(null);
+  // Gán BOT cần profile.write — vai trò chỉ đọc (Auditor) không thấy nút "Đổi" (mở ra chỉ gặp 403).
+  const canWrite = useCan('profile.write');
 
   if (channels.isPending || groups.isPending) return <SkeletonLines rows={6} />;
   if (channels.isError) return <CardError error={channels.error} onRetry={() => void channels.refetch()} retrying={channels.isFetching} />;
@@ -130,9 +185,11 @@ function GroupsPane() {
                         <td>
                           <div className="dir-bot-cell">
                             <span className="dir-bot-cell__name">{g.bot ? g.bot.name : 'Chưa gán'}</span>
-                            <Button variant="ghost" size="sm" onClick={() => setBotFor(g)}>
-                              Đổi
-                            </Button>
+                            {canWrite ? (
+                              <Button variant="ghost" size="sm" onClick={() => setBotFor(g)}>
+                                Đổi
+                              </Button>
+                            ) : null}
                           </div>
                         </td>
                       </tr>
@@ -175,18 +232,7 @@ function GroupBotDialog({ group, onClose }: { group: DirGroup; onClose: () => vo
         </>
       }
     >
-      <div className="dlg-list" role="list">
-        <button type="button" className="sv-open" aria-pressed={agentId === ''} onClick={() => setAgentId('')}>
-          <span className="sv-open__name">Chưa gán</span>
-          {agentId === '' ? <Icon name="ph ph-check" size={14} /> : null}
-        </button>
-        {AGENTS.map((a) => (
-          <button key={a.id} type="button" className="sv-open" aria-pressed={agentId === a.id} onClick={() => setAgentId(a.id)}>
-            <span className="sv-open__name">{a.name}</span>
-            {agentId === a.id ? <Icon name="ph ph-check" size={14} /> : null}
-          </button>
-        ))}
-      </div>
+      <AgentChoices value={agentId} onChange={setAgentId} current={group.bot} />
       {setBot.isError ? <InlineError>{errorText(setBot.error)}</InlineError> : null}
     </Dialog>
   );
@@ -226,6 +272,7 @@ function PeoplePane() {
   const people = useDirPeople(query);
   const [botFor, setBotFor] = useState<DirPerson | null>(null);
   const [bulk, setBulk] = useState(false);
+  const canWrite = useCan('profile.write');
 
   return (
     <div className="dir-people">
@@ -238,9 +285,11 @@ function PeoplePane() {
         <span className="dir-filters__spacer" />
         <div className="dir-filters__actions">
           {people.data ? <span className="raw-count">{fmtInt(people.data.total)} người khớp</span> : null}
-          <Button variant="primary" icon="ph ph-robot" disabled={!people.data?.items.length} onClick={() => setBulk(true)}>
-            Thiết lập BOT cho nhóm đã lọc
-          </Button>
+          {canWrite ? (
+            <Button variant="primary" icon="ph ph-robot" disabled={!people.data?.items.length} onClick={() => setBulk(true)}>
+              Thiết lập BOT cho nhóm đã lọc
+            </Button>
+          ) : null}
         </div>
       </div>
 
@@ -309,9 +358,11 @@ function PeoplePane() {
                     <td>
                       <div className="dir-bot-cell">
                         <span className="dir-bot-cell__name">{p.bot ? p.bot.name : 'Chưa gán'}</span>
-                        <Button variant="ghost" size="sm" onClick={() => setBotFor(p)}>
-                          Đổi
-                        </Button>
+                        {canWrite ? (
+                          <Button variant="ghost" size="sm" onClick={() => setBotFor(p)}>
+                            Đổi
+                          </Button>
+                        ) : null}
                       </div>
                     </td>
                     <td className="td-id">{p.autonomy_level !== null ? `mức ${p.autonomy_level}` : '—'}</td>
@@ -395,18 +446,7 @@ function PersonBotDialog({ person, onClose }: { person: DirPerson; onClose: () =
       }
     >
       <div className="dlg-fields">
-        <div className="dlg-list" role="list">
-          <button type="button" className="sv-open" aria-pressed={agentId === ''} onClick={() => setAgentId('')}>
-            <span className="sv-open__name">Chưa gán</span>
-            {agentId === '' ? <Icon name="ph ph-check" size={14} /> : null}
-          </button>
-          {AGENTS.map((a) => (
-            <button key={a.id} type="button" className="sv-open" aria-pressed={agentId === a.id} onClick={() => setAgentId(a.id)}>
-              <span className="sv-open__name">{a.name}</span>
-              {agentId === a.id ? <Icon name="ph ph-check" size={14} /> : null}
-            </button>
-          ))}
-        </div>
+        <AgentChoices value={agentId} onChange={setAgentId} current={person.bot} />
         <AutonomySelect value={autonomy} onChange={setAutonomy} />
         {setBot.isError ? <InlineError>{errorText(setBot.error)}</InlineError> : null}
       </div>
@@ -416,8 +456,11 @@ function PersonBotDialog({ person, onClose }: { person: DirPerson; onClose: () =
 
 function BulkBotDialog({ ids, onClose }: { ids: string[]; onClose: () => void }) {
   const setBot = useSetPersonBot();
-  const [agentId, setAgentId] = useState('');
+  // Mặc định GIỮ NGUYÊN BOT: người chỉ muốn đổi mức tự trị không vô tình gỡ BOT của cả nhóm đã lọc.
+  const [agentId, setAgentId] = useState(KEEP_BOT);
   const [autonomy, setAutonomy] = useState('');
+  const keepBot = agentId === KEEP_BOT;
+  const nothingToApply = keepBot && autonomy === '';
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const apply = async () => {
@@ -426,7 +469,10 @@ function BulkBotDialog({ ids, onClose }: { ids: string[]; onClose: () => void })
     try {
       for (const id of ids) {
         // tuần tự (không await-in-loop song song) để không vượt giới hạn tốc độ API mock
-        await setBot.mutateAsync({ id, body: { agent_id: agentId || null, ...(autonomy !== '' ? { autonomy_level: Number(autonomy) } : {}) } });
+        await setBot.mutateAsync({
+          id,
+          body: { ...(keepBot ? {} : { agent_id: agentId || null }), ...(autonomy !== '' ? { autonomy_level: Number(autonomy) } : {}) },
+        });
       }
       onClose();
     } catch (e) {
@@ -447,25 +493,14 @@ function BulkBotDialog({ ids, onClose }: { ids: string[]; onClose: () => void })
           <Button variant="secondary" onClick={onClose}>
             Huỷ
           </Button>
-          <Button variant="primary" icon="ph ph-robot" loading={busy} disabled={!ids.length} onClick={() => void apply()}>
+          <Button variant="primary" icon="ph ph-robot" loading={busy} disabled={!ids.length || nothingToApply} onClick={() => void apply()}>
             Áp dụng cho {ids.length} người
           </Button>
         </>
       }
     >
       <div className="dlg-fields">
-        <div className="dlg-list" role="list">
-          <button type="button" className="sv-open" aria-pressed={agentId === ''} onClick={() => setAgentId('')}>
-            <span className="sv-open__name">Chưa gán (gỡ BOT)</span>
-            {agentId === '' ? <Icon name="ph ph-check" size={14} /> : null}
-          </button>
-          {AGENTS.map((a) => (
-            <button key={a.id} type="button" className="sv-open" aria-pressed={agentId === a.id} onClick={() => setAgentId(a.id)}>
-              <span className="sv-open__name">{a.name}</span>
-              {agentId === a.id ? <Icon name="ph ph-check" size={14} /> : null}
-            </button>
-          ))}
-        </div>
+        <AgentChoices value={agentId} onChange={setAgentId} noneLabel="Chưa gán (gỡ BOT)" keepLabel="Giữ nguyên BOT hiện tại" />
         <AutonomySelect value={autonomy} onChange={setAutonomy} />
         {error ? <InlineError>{errorText(error)}</InlineError> : null}
       </div>

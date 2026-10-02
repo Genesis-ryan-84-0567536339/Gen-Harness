@@ -57,8 +57,9 @@ jobs:
 
   api:
     runs-on: ubuntu-latest
-    # Hai lượt pytest đầy đủ (superuser + gh_app) + build image db — chặn treo vô hạn nếu test kẹt.
-    timeout-minutes: 40
+    # Hai lượt pytest đầy đủ (superuser + gh_app) + build image db + e2e thật rút gọn (v0.1.35, F-14) — chặn treo
+    # vô hạn nếu test kẹt.
+    timeout-minutes: 48
     services:
       redis:
         image: redis:7-alpine
@@ -107,6 +108,51 @@ jobs:
           GH_TEST_APP_ROLE: "1"
           GH_TEST_TEMPLATE: gh_test_template_app
         run: .venv/bin/pytest -q
+      # v0.1.35 (F-14) — e2e THẬT rút gọn: api + worker thật trên đúng Postgres (image gh-db) + Redis của job này,
+      # bridge giả + model giả, Chromium thật bấm 4 luồng giao/gán (Hộp thư, Vụ việc, BOT nhóm, Gen đề xuất). Bắt lỗi
+      # kiểu "mock xanh, máy thật hỏng" (id viết cứng, hợp đồng API lệch) — xem docs/reports/phase-5-e2e-live.md.
+      - uses: actions/setup-node@v4
+        with: { node-version: "22", cache: npm }
+      - name: Cài phụ thuộc web (npm ci ở gốc repo)
+        run: npm ci
+      - name: Phiên bản Playwright (khoá cache trình duyệt)
+        id: pw
+        run: echo "version=$(node -p "require('./package-lock.json').packages['node_modules/@playwright/test'].version")" >> "$GITHUB_OUTPUT"
+      - name: Cache trình duyệt Playwright
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ms-playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
+      - name: Cài Chromium cho Playwright
+        working-directory: apps/web
+        run: npx playwright install --with-deps chromium
+      - name: Công cụ CSDL/Redis cho e2e thật (psql, redis-cli)
+        run: |
+          set -euo pipefail
+          pkgs=()
+          command -v psql >/dev/null || pkgs+=(postgresql-client)
+          command -v redis-cli >/dev/null || pkgs+=(redis-tools)
+          if [ "${#pkgs[@]}" -gt 0 ]; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq "${pkgs[@]}"
+          fi
+          psql --version && redis-cli --version
+      - name: E2E thật rút gọn (4 luồng giao/gán + Gen)
+        working-directory: apps/web
+        timeout-minutes: 8
+        env:
+          LIVE_SPECS: live-ci
+          GH_LIVE_PG: postgresql://postgres:postgres@localhost:5432
+        run: bash e2e-live/run.sh
+      - name: Lưu ảnh + vết e2e thật khi lỗi
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-live-${{ github.run_attempt }}
+          path: |
+            apps/web/test-results/live-shots
+            apps/web/test-results/live
+          retention-days: 7
+          if-no-files-found: ignore
 
   # v0.1.29 — browser-worker (apps/browser): Chromium thật trên TRANG MẪU (không gọi facebook.com), Redis thật.
   browser:
@@ -145,6 +191,9 @@ jobs:
         with: { node-version: "22", cache: npm }
       - run: npm ci
       - run: npm run -w apps/web lint
+      # v0.1.35 (F-1) — script do gói f1 tạo: chặn id giả viết cứng (vd 'u-lan', 'agent-tls') lọt lại vào mã web.
+      - name: Cấm ID giả viết cứng trong apps/web/src (F-1)
+        run: python3 .github/scripts/check_no_fake_ids.py apps/web/src
       - run: npm run -w apps/web typecheck
       - run: npm run -w apps/web test
       - run: npm run -w apps/web build

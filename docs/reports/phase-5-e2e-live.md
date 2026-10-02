@@ -125,3 +125,49 @@ PW_CHROMIUM=/opt/pw-browsers/chromium-1194/chrome-linux/chrome bash e2e-live/run
 Yêu cầu: Postgres 16 + Redis chạy sẵn trên máy (không Docker), Playwright Chromium tại
 `/opt/pw-browsers/chromium-1194/chrome-linux/chrome` (máy này không có cache Playwright mặc định — bắt buộc
 truyền `PW_CHROMIUM`).
+
+## 10. Chế độ CI (v0.1.35, F-14)
+
+Mục tiêu: lỗi kiểu "mock xanh, máy thật hỏng" (vd ô chọn người dùng viết cứng id `u-lan` → API thật trả 422) bị CI
+chặn ngay ở PR. Job `api` của `.github/workflows/ci.yml`, sau hai lượt pytest, chạy bản e2e thật RÚT GỌN trên đúng
+Postgres (image `gh-db`) + Redis của job:
+
+```
+cd apps/web
+LIVE_SPECS=live-ci GH_LIVE_PG=postgresql://postgres:postgres@localhost:5432 bash e2e-live/run.sh
+```
+
+- `LIVE_SPECS` chọn tệp spec; mặc định `"live-phase2 live-phase3"` (chạy tay như mục 9, không đổi).
+- `run.sh` báo rõ nếu thiếu `psql` / `redis-cli` / `curl`; CI tự cài `redis-tools` (và `postgresql-client` nếu thiếu).
+- `e2e-live/live-ci.spec.ts` tự đủ (không cần live-phase2): thiết lập NHANH bằng API — bước 1–3, PIN, nhà cung
+  cấp `openai_compat` tới model giả `fake_llm.py`, bước 4, đăng nhập Zalo qua bridge giả, bật nghe nhóm g-si, bước 7,
+  bơm tin "Cần 3 container thép cuộn, báo giá giúp chị", sàng lọc → có mục Hộp thư; tạo người dùng thứ hai THẬT
+  (operator, dữ liệu nội bộ trên CSDL `gh_live` bị xoá mỗi lần chạy) và một trợ lý từ mẫu `commercial`. Id thật lấy
+  từ `GET /pickers/users`, `/pickers/agents`.
+- 4 luồng qua GIAO DIỆN thật (Chromium):
+  1. (a) Hộp thư → thẻ đầu → 'Giao cho người khác' → tên người dùng mới → `POST /inbox/{id}/assign` 200, `user_id`
+     là UUID thật; đọc lại qua `/audit` (`queue.assigned`) + `core.assignments` trong CSDL thử.
+  2. (b) Vụ việc tạo qua API (chủ thể: Nguyễn Thị Lan từ kho sạch) → Deal & Vụ việc › 'Vụ việc' → 'Đổi' → 'Gán người
+     xử lý' → `PATCH /cases/{id}` 200; `GET /cases/{id}` có `assignee.id` đúng UUID.
+  3. (c) Nhóm & Con người › Nhóm → 'Chợ thép sỉ miền Nam' → 'Đổi' → 'Gán BOT trực nhóm' → trợ lý → 'Lưu' →
+     `POST /directory/groups/{id}/bot` 200; `GET /directory/groups` có `bot.id` đúng UUID trợ lý.
+  4. (d) Khung Gen: "Giao việc hỏi giá thép cho Lê Văn Hải" → `fake_llm.py` (nhánh Gen) gọi `staff.list` rồi
+     `queue.list`, đề xuất `assign` với id LẤY TỪ KẾT QUẢ TOOL → thẻ 'Đề xuất: Giao người phụ trách' → 'Xác nhận' →
+     `POST /gen/proposals/{id}/confirm` 200; mục Hộp thư được giao đúng UUID người đó (trước đó trả mục về 'Tôi').
+- Thao tác PIN dùng helper khoan dung `maybeEnterOwnerPin` (xanh cả trước và sau gói f20).
+
+Thời gian đo (máy phát triển, Postgres/Redis có sẵn, Chromium đã cài): `run.sh` trọn gói **27 giây**, trong đó
+Playwright 19,6 giây (thiết lập API 9 s, 4 luồng ~10 s). Trên CI cộng thêm `npm ci` + cài Chromium (cache theo phiên
+bản `@playwright/test`) — mục tiêu tổng thêm ≤ 5 phút; bước e2e có `timeout-minutes: 8`, job `api` nâng 40 → 48 phút.
+
+Khi đỏ:
+- Log bước CI in tên test đỏ + lỗi Playwright, rồi 120 dòng cuối `api.log` và `worker.log` (không có khoá: khoá
+  `GH_*` sinh ngẫu nhiên chỉ nằm trong env).
+- Artifact `e2e-live-<lần chạy>` (giữ 7 ngày): `apps/web/test-results/live-shots` (ảnh `ci-a…ci-d-*.png`, `api.log`,
+  `worker.log`, `llm.log`, `bridge.log`, `web.log`) và `apps/web/test-results/live` (`error-context.md` = ảnh chụp cây
+  truy cập của trang lúc lỗi).
+- Chạy lại cục bộ đúng lệnh trên (cần Postgres có pgvector + pg_partman, Redis, cổng 8000/5175/9911 trống).
+
+Cũng trong v0.1.35: `live-phase2` gõ PIN khoan dung sau 'Thêm & kiểm tra' (bước 4) và ở bước 5, và bấm 'Để sau' cho
+bước 8–11 (bước 8 nay là form tạo agent thật, 'Tiếp tục' khoá tới khi điền đủ — trước đây làm live-phase2 đỏ).
+Job `web` thêm bước 'Cấm ID giả viết cứng trong apps/web/src (F-1)' (`.github/scripts/check_no_fake_ids.py`).

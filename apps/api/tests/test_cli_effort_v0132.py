@@ -16,6 +16,7 @@ from sqlalchemy import text
 
 from gh.providers import catalog
 from gh.providers.clients import AgyClient, Message, redact, rejection
+from tests.conftest import verify_pin
 from tests.test_cli_models_v0131 import (
     _login,
     _provider,
@@ -288,6 +289,8 @@ async def test_diagnose_claude_not_logged_in_skips_call(owner_api, app, clis) ->
 
 @pytest.mark.parametrize("kind", ["gemini"])
 async def test_diagnose_rejects_api_key_sources(owner_api, kind) -> None:  # type: ignore[no-untyped-def]
+    # v0.1.35 (F-20): tạo / sửa nhà cung cấp AI cần PIN `ai.route_change`.
+    await verify_pin(owner_api)
     r = await owner_api.send("POST", "/providers", {"kind": kind, "name": "G", "keys": ["AIzaSyTESTKEY000000"]})
     assert r.status_code in (200, 201), r.text
     r = await owner_api.send("POST", f"/providers/{r.json()['id']}/diagnose")

@@ -8,6 +8,7 @@ import type { GraphListPage, GraphPeopleResult, GraphTopicsPage } from '@gen-har
 import { GraphScreen } from '../../src/screens/graph/GraphScreen';
 import { queryClient } from '../../src/lib/queryClient';
 import { useUrlStateStore } from '../../src/lib/uiStore';
+import { USER_IDS } from '../mock-ids';
 
 const json = (status: number, body?: unknown) => new Response(body === undefined ? null : JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
@@ -44,7 +45,7 @@ const LIST_PAGE: GraphListPage = {
   items: [
     {
       id: 'p-bao', code: 'PER-0042', name: 'Nguyễn Văn Bảo', type: 'customer', org_name: 'Công ty in Thành Phát', relation: 'direct',
-      channels: ['zalo'], heat: 87, potential: 58, risk: 84, owner_user_id: 'u-ha', last_interaction_at: '2026-09-24T02:00:00Z',
+      channels: ['zalo'], heat: 87, potential: 58, risk: 84, owner_user_id: USER_IDS.lan, last_interaction_at: '2026-09-24T02:00:00Z',
       state: 'active', degree: 3, total_weight: 42.5, bridge_score: 0,
     },
     {
@@ -97,6 +98,23 @@ describe('Bản đồ quan hệ', () => {
     await userEvent.click(screen.getByRole('button', { name: /Độ nóng/ }));
     await userEvent.click(await screen.findByText('≥ 80'));
     await waitFor(() => expect(useUrlStateStore.getState().params.heat).toBe('high'));
+  });
+
+  it('link cũ ?owner=u-ha (id giả trước v0.1.35) → bỏ qua bộ lọc thay vì 422; UUID thật vẫn gửi owner_user_id', async () => {
+    const calls = mockFetch(graphHandler);
+    useUrlStateStore.setState({ params: { owner: 'u-ha' } });
+    renderScreen(<GraphScreen />);
+    expect(await screen.findByText('Nguyễn Văn Bảo')).toBeInTheDocument();
+    const lists = calls.filter((c) => c.url.includes('/graph/list'));
+    expect(lists.length).toBeGreaterThan(0);
+    expect(lists.every((c) => !c.url.includes('owner_user_id'))).toBe(true);
+    await waitFor(() => expect(useUrlStateStore.getState().params.owner).toBeUndefined());
+
+    calls.length = 0;
+    useUrlStateStore.setState((st) => ({ params: { ...st.params, owner: USER_IDS.lan } }));
+    await waitFor(() =>
+      expect(calls.some((c) => c.url.includes('/graph/list') && c.url.includes(`owner_user_id=${USER_IDS.lan}`))).toBe(true),
+    );
   });
 
   it('chế độ Người↔Người: hiện node và cạnh từ GET /graph/people, chọn một node mở panel chi tiết', async () => {

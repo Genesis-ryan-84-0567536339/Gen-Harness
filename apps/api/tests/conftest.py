@@ -173,3 +173,9 @@ async def owner_api(client: httpx.AsyncClient) -> Api:
     api = Api(client)
     await do_setup(api)
     return api
+
+
+async def verify_pin(api: Api, pin: str = OWNER["pin"]) -> None:
+    """v0.1.35 (F-20): mở phiên PIN trước thao tác cần PIN (vd `ai.route_change` khi tạo/sửa nhà cung cấp AI)."""
+    r = await api.send("POST", "/auth/pin/verify", {"pin": pin})
+    assert r.status_code == 200, r.text

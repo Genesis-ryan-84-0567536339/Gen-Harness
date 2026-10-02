@@ -39,10 +39,13 @@ export class ApiError extends Error {
     return typeof v === 'number' ? v : null;
   }
 
-  /** 423 PIN_LOCKED → ISO time until which PIN entry is locked. */
+  /**
+   * 423 PIN_LOCKED → ISO time until which PIN entry is locked. v0.1.35: ưu tiên khoá NGOÀI `locked_until`
+   * (detail giờ là chuỗi "Thử lại sau …"); detail đối tượng/chuỗi chỉ để tương thích máy chủ cũ.
+   */
   get lockedUntil(): string | null {
     const p = this.problem;
-    if (typeof p.locked_until === 'string') return p.locked_until;
+    if (typeof p.locked_until === 'string' && p.locked_until) return p.locked_until;
     if (p.detail && typeof p.detail === 'object' && typeof p.detail.locked_until === 'string') {
       return p.detail.locked_until;
     }

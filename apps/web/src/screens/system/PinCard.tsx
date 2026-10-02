@@ -50,6 +50,7 @@ export function PinCard() {
 }
 
 function ChangePinDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const tz = useOrgTimezone();
   const [cur, setCur] = useState('');
   const [next, setNext] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -117,7 +118,7 @@ function ChangePinDialog({ open, onClose }: { open: boolean; onClose: () => void
               : err
                 ? wrongCurrent
                   ? 'PIN hiện tại không đúng.'
-                  : errorText(err)
+                  : errorText(err, tz)
                 : null}
         </InlineError>
         <button type="submit" hidden />

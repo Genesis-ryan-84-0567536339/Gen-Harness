@@ -13,7 +13,8 @@
 		X-Frame-Options "DENY"
 		Referrer-Policy "same-origin"
 		Permissions-Policy "camera=(), microphone=(), geolocation=()"
-		Content-Security-Policy "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' wss:; frame-ancestors 'none'"
+		# Chỉ đặt khi upstream CHƯA có (`?`): giữ CSP riêng của tệp tài liệu từ api (sandbox / chặn mã, F-5).
+		?Content-Security-Policy "default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' wss://{http.request.hostport}; frame-ancestors 'none'"
 		-Server
 	}
 
@@ -21,6 +22,9 @@
 		reverse_proxy api:8000
 	}
 	handle {
-		reverse_proxy web:8080
+		# Bỏ CSP của nginx (web) để trình duyệt chỉ nhận MỘT CSP — của Caddy (lớp quyết định, có wss://host).
+		reverse_proxy web:8080 {
+			header_down -Content-Security-Policy
+		}
 	}
 }

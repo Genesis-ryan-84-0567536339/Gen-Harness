@@ -400,10 +400,9 @@ async def test_restore_overwrite_partitioned_tables_in_place(tmp_path, scratch_d
 
 async def _seed_old_entries(store: LocalObjectStore) -> tuple[list[BackupEntry], str]:
     from gh.backup import _write_manifest
+    now = datetime.now(UTC)
     # 3 bản cùng một ngày rất xa: GFS chỉ giữ bản mới nhất trong ngày, bản cũ nhất sẽ bị prune xoá nếu không được ghim.
-    # Neo 12:00 UTC: nếu lấy giờ hiện tại + i giờ thì chạy sau 22:00 UTC các bản rơi sang ngày hôm sau (test chập chờn).
-    day = (datetime.now(UTC) - timedelta(days=2000)).replace(hour=12, minute=0, second=0, microsecond=0)
-    entries = [BackupEntry(key=f"backups/e{i}.enc", taken_at=day + timedelta(hours=i), database="gh",
+    entries = [BackupEntry(key=f"backups/e{i}.enc", taken_at=now - timedelta(days=2000, hours=-i), database="gh",
                            size_bytes=1, sha256="x") for i in range(3)]
     for e in entries:
         await store.put(e.key, b"x")

@@ -66,6 +66,24 @@ def _iso(dt: datetime | None) -> str | None:
     return dt.isoformat().replace("+00:00", "Z") if dt else None
 
 
+def _mask_email(raw: str) -> str | None:
+    """v0.1.35 (F-43): Action Log đăng nhập sai không ghi email thô. Có '@' → `o***@example.vn`; không có '@'
+    (người dùng gõ nhầm mật khẩu vào ô email) → không ghi gì."""
+    v = raw.strip().lower()
+    local, at, domain = v.partition("@")
+    if not at or not local or not domain:
+        return None
+    return f"{local[0]}***@{domain}"
+
+
+def _pin_locked(locked_until: datetime | None) -> ApiError:
+    until = _iso(locked_until)
+    # v0.1.35: detail KHÔNG chứa giờ ISO UTC thô (web hiện thẳng detail) — giờ mở khoá ở khoá ngoài `locked_until`,
+    # web tự định dạng theo múi giờ tổ chức.
+    return ApiError(423, "PIN_LOCKED", "Mã PIN đang bị khoá do nhập sai nhiều lần", "Thử lại sau ít phút",
+                    locked_until=until)
+
+
 @router.post("/login")
 async def login(body: LoginIn, request: Request, response: Response,
                 db: AsyncSession = DB) -> dict[str, Any]:
@@ -76,7 +94,7 @@ async def login(body: LoginIn, request: Request, response: Response,
         if org_id is not None:
             await actionlog.record(db, org_id=org_id, actor_type="system", actor_id="system:auth",
                                    action="auth.login_failed", result="failed",
-                                   detail={"email": body.email.strip().lower()}, ip=ip)
+                                   detail={"email_masked": _mask_email(body.email)}, ip=ip)
             await db.commit()
         raise ApiError(401, "INVALID_CREDENTIALS", "Email hoặc mật khẩu không đúng")
     new = await service.create_session(db, found["id"], ip=ip, user_agent=request.headers.get("user-agent"))
@@ -113,8 +131,7 @@ async def pin_verify(body: PinIn, user: service.CurrentUser = Depends(current_us
         return {"pin_verified_until": _iso(result.pin_verified_until)}
     await db.commit()  # số lần sai và dòng nhật ký phải được lưu dù trả lỗi
     if result.locked_until is not None:
-        raise ApiError(423, "PIN_LOCKED", "Mã PIN đang bị khoá do nhập sai nhiều lần",
-                       {"locked_until": _iso(result.locked_until)}, locked_until=_iso(result.locked_until))
+        raise _pin_locked(result.locked_until)
     raise ApiError(401, "PIN_INVALID", "Mã PIN không đúng", attempts_left=result.attempts_left)
 
 
@@ -128,8 +145,7 @@ async def pin_change(body: PinChangeIn, response: Response,
     if not check.ok:
         await db.commit()
         if check.locked_until is not None:
-            raise ApiError(423, "PIN_LOCKED", "Mã PIN đang bị khoá do nhập sai nhiều lần",
-                           {"locked_until": _iso(check.locked_until)}, locked_until=_iso(check.locked_until))
+            raise _pin_locked(check.locked_until)
         raise ApiError(401, "PIN_INVALID", "Mã PIN hiện tại không đúng", attempts_left=check.attempts_left)
     await service.set_pin(db, user.id, body.new_pin)
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,

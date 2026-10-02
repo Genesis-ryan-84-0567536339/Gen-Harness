@@ -18,7 +18,7 @@ from gh.auth import rbac, service
 from gh.auth.deps import require
 from gh.biz.core import explain
 from gh.biz.core.drafts import Target, _execute_internal, create_draft
-from gh.biz.core.scope import Scope, ensure_group, ensure_person, not_found, scope_for
+from gh.biz.core.scope import Scope, ensure_active_user, ensure_group, ensure_person, not_found, scope_for
 from gh.biz.market import service as msvc
 from gh.biz.market.jobs import recompute_matches_org
 from gh.biz.market.service import CLOSED_STAGES, OPEN_STAGES, STAGES, person_or_group_scope_sql
@@ -862,6 +862,7 @@ async def create_case(body: CaseIn, user: service.CurrentUser = Depends(WRITE),
             await ensure_person(db, sc, subject_id)
         else:
             await ensure_group(db, sc, subject_id)
+    await ensure_active_user(db, user.org_id, body.assignee_user_id)
     code = (await db.execute(text("SELECT core.next_code('CAS')"))).scalar_one()
     row = (await db.execute(text("""
         INSERT INTO biz.cases (org_id, code, kind, priority, subject_type, subject_id, title, status,
@@ -894,6 +895,7 @@ async def patch_case(case_id: uuid.UUID, body: CasePatch, user: service.CurrentU
     fields = body.model_fields_set
     detail: dict[str, Any] = {}
     if "assignee_user_id" in fields:
+        await ensure_active_user(db, user.org_id, body.assignee_user_id)
         await db.execute(text("UPDATE biz.cases SET assignee_user_id = :a, updated_at = now() WHERE id = :i"),
                          {"a": body.assignee_user_id, "i": case_id})
         detail["assignee_user_id"] = str(body.assignee_user_id) if body.assignee_user_id else None

@@ -18,7 +18,7 @@ export const qk2 = {
   cleanRoot: ['clean', 'list'] as const,
   clean: (q: CleanQuery) => ['clean', 'list', q] as const,
   cleanEvidence: (id: string) => ['clean', 'evidence', id] as const,
-  agentParams: (g?: string, p?: string) => ['clean', 'agent-params', g ?? '', p ?? ''] as const,
+  agentParams: (g?: string, p?: string) => ['clean', 'agentParams', g ?? '', p ?? ''] as const,
   notebook: (t: NotebookSubjectType, id: string) => ['notebooks', t, id] as const,
   compactions: (t: NotebookSubjectType, id: string) => ['notebooks', t, id, 'compactions'] as const,
   idStats: ['identity', 'stats'] as const,

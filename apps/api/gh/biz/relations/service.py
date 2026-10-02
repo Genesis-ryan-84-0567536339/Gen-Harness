@@ -10,6 +10,8 @@ import orjson
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gh.errors import not_found
+
 VALUE_HIGH, VALUE_MID = 500_000_000, 100_000_000
 HEAT_HIGH, HEAT_MID = 80, 50
 
@@ -66,10 +68,23 @@ def value_bucket(vnd: int | None) -> str:
     return "unknown"
 
 
+async def _ensure_agent(db: AsyncSession, table: str, obj_id: uuid.UUID, agent_id: uuid.UUID | None) -> None:
+    """BOT phải là agent cùng org với nhóm/người (org lấy ngay từ đối tượng) — UUID lạ → 404 thay vì 500 (F-1)."""
+    if agent_id is None:
+        return
+    ok = (await db.execute(text(f"""SELECT 1 FROM agent.identities a JOIN {table} t ON t.org_id = a.org_id
+                                    WHERE a.id = :a AND t.id = :i"""),  # noqa: S608
+                           {"a": agent_id, "i": obj_id})).first()
+    if ok is None:
+        raise not_found("Agent")
+
+
 async def set_person_bot(db: AsyncSession, person_id: uuid.UUID, *, agent_id: uuid.UUID | None,
                          set_agent: bool, autonomy_level: int | None, set_autonomy: bool) -> None:
     """BOT + mức tự trị riêng cho một người (`core.persons.attrs`) — không cột mới, cùng quy ước
     `attrs.autonomy_level` mà `gh.biz.core.drafts.effective_level` đã đọc."""
+    if set_agent:
+        await _ensure_agent(db, "core.persons", person_id, agent_id)
     row = (await db.execute(text("SELECT attrs FROM core.persons WHERE id = :i"), {"i": person_id})).scalar_one()
     attrs = dict(row or {})
     if set_agent:
@@ -88,6 +103,7 @@ async def set_person_bot(db: AsyncSession, person_id: uuid.UUID, *, agent_id: uu
 
 async def set_group_bot(db: AsyncSession, group_id: uuid.UUID, *, agent_id: uuid.UUID | None,
                         autonomy_level: int | None, set_autonomy: bool) -> None:
+    await _ensure_agent(db, "core.groups", group_id, agent_id)
     row = (await db.execute(text("SELECT attrs FROM core.groups WHERE id = :i"), {"i": group_id})).scalar_one()
     attrs = dict(row or {})
     if set_autonomy:

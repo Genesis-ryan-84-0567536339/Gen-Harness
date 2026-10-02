@@ -1,15 +1,15 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import type { ChannelType, DirRelation, GraphHeatBand, GraphState, GraphValueBand, PersonType } from '@gen-harness/contracts';
 import { EmptyState, FilterSelect, Icon } from '@gen-harness/ui';
 import { Bar, CardError, SkeletonLines } from '../common';
 import { fmtAgo, fmtInt } from '../../lib/format';
+import { useAssignees } from '../../lib/pickers';
 import { useUrlState } from '../../lib/uiStore';
 import {
   CHANNEL_OPTIONS,
   HEAT_OPTIONS,
   N4,
-  OWNER_OPTIONS,
   PERSON_TYPE_LABEL,
   RELATION_LABEL,
   RELATION_OPTIONS,
@@ -25,6 +25,9 @@ import {
 } from './graphModel';
 import { useGraphList } from './queries';
 
+/** owner_user_id phải là UUID — link/bookmark cũ `?owner=u-ha` (danh sách cứng trước v0.1.35) bị bỏ qua thay vì 422. */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export function ListPane() {
   const [type, setType] = useUrlState<string>('type', '');
   const [channel, setChannel] = useUrlState<string>('channel', '');
@@ -34,6 +37,10 @@ export function ListPane() {
   const [owner, setOwner] = useUrlState<string>('owner', '');
   const [state, setState] = useUrlState<string>('state', '');
   const [relation, setRelation] = useUrlState<string>('rel', '');
+  const ownerId = UUID_RE.test(owner) ? owner : '';
+  useEffect(() => {
+    if (owner && !ownerId) setOwner('');
+  }, [owner, ownerId, setOwner]);
 
   const query = useMemo(
     () => ({
@@ -42,14 +49,20 @@ export function ListPane() {
       heat: (heat || undefined) as GraphHeatBand | undefined,
       potential: (potential || undefined) as GraphValueBand | undefined,
       risk: (risk || undefined) as GraphValueBand | undefined,
-      owner_user_id: owner || undefined,
+      owner_user_id: ownerId || undefined,
       state: (state || undefined) as GraphState | undefined,
       relation: (relation || undefined) as DirRelation | undefined,
       limit: 100,
     }),
-    [type, channel, heat, potential, risk, owner, state, relation],
+    [type, channel, heat, potential, risk, ownerId, state, relation],
   );
   const list = useGraphList(query);
+  // Người phụ trách THẬT (v0.1.35) — 403/lỗi/đang tải → chỉ còn 'Tất cả', không chặn màn.
+  const { options: assignees } = useAssignees();
+  const ownerOptions = useMemo(
+    () => [{ value: '', label: 'Tất cả' }, ...assignees.map((u) => ({ value: u.id, label: u.label }))],
+    [assignees],
+  );
 
   return (
     <div className="gp-list">
@@ -59,7 +72,7 @@ export function ListPane() {
         <FilterSelect label="Độ nóng" value={heat} onChange={setHeat} options={HEAT_OPTIONS} />
         <FilterSelect label="Tiềm năng" value={potential} onChange={setPotential} options={VALUE_OPTIONS} />
         <FilterSelect label="Rủi ro" value={risk} onChange={setRisk} options={VALUE_OPTIONS} />
-        <FilterSelect label="Phụ trách" value={owner} onChange={setOwner} options={OWNER_OPTIONS} />
+        <FilterSelect label="Phụ trách" value={owner} onChange={setOwner} options={ownerOptions} />
         <FilterSelect label="Chạm gần nhất" value={state} onChange={setState} options={STATE_OPTIONS} />
         <FilterSelect label="Giai đoạn" value={relation} onChange={setRelation} options={RELATION_OPTIONS} />
         <span className="gp-filters__spacer" />

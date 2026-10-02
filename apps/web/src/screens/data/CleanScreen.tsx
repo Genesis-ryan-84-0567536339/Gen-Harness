@@ -200,9 +200,10 @@ function SkeletonRow() {
 }
 
 // ── Trí nhớ tạm ───────────────────────────────────────────────────────────
-function MemoryCard({ row, loading, tz }: { row: CleanItem | null; loading: boolean; tz: string }) {
+export function MemoryCard({ row, loading, tz }: { row: CleanItem | null; loading: boolean; tz: string }) {
   const subject = subjectOf(row);
-  const canWrite = useCan('profile.write');
+  // v0.1.35: khớp backend NB_WRITE = data.manage (apps/api/gh/data_api/routes.py) — không hiện nút bấm vào là 403.
+  const canWrite = useCan('data.manage');
   const nb = useQuery({
     queryKey: qk2.notebook(subject?.type ?? 'person', subject?.id ?? '-'),
     queryFn: ({ signal }) => api.notebooks.get(subject!.type, subject!.id, signal),

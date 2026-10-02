@@ -1,4 +1,4 @@
-# Gen-Harness — Lộ trình tổng thể (cập nhật 01/10/2026)
+# Gen-Harness — Lộ trình tổng thể (cập nhật 02/10/2026)
 
 Nguồn chuẩn tiến độ. Mỗi đợt = 1 PR = 1 bản phát hành. CI xanh mới tạo bản thử (prerelease); E2E cài thật xanh mới tự
 nâng thành bản chính thức (latest); lịch tự cập nhật đêm đợi bản chính thức ra đủ 24 giờ. genh chỉ kiểm SHA-256 theo
@@ -53,6 +53,10 @@ v0.1.34: `genh update` an toàn (F-10, F-11, F-33, F-35, F-37) — tải bản m
 khôi phục CSDL khi đã migrate (container tạm từ ảnh cũ), bản lỗi tự quay về bản cũ và lịch đêm không thử lại bản đó, đã mới
 nhất thì không sao lưu/không tải, kiểm đĩa + dọn ảnh cũ (giữ 2 bản), giới hạn log mọi dịch vụ (10 MB × 3); E2E thêm dữ liệu
 mẫu + đếm dòng và job bản hỏng cố ý (promote đòi xanh).
+v0.1.35: sửa lỗi đỏ trong ứng dụng (F-1, F-5, F-14, F-15, F-20 phần gấp, F-43) — giao việc / gán người / gán BOT dùng
+người và trợ lý thật (`/pickers/*`, CI cấm ID giả), Tài liệu không phải PDF/ảnh buộc tải xuống + CSP sandbox, Sổ tay theo
+quyền Kho, PIN cho nhà cung cấp AI / khoá / chuỗi ưu tiên, lỗi thân thiện có mã (không lộ SQL, tắt /docs production), e2e
+thật rút gọn 4 luồng trong CI. Còn: F-20 phần còn lại (v0.1.45), sinh type từ OpenAPI (hoãn).
 
 ## Đợt A — Gen v1 (thiết kế: docs/design/gen-v1.md)
 - ✅ A1 Khung chat phải + Gen trả lời/tóm tắt (chỉ đọc), lưu hội thoại, Nhật ký hành động — v0.1.21.

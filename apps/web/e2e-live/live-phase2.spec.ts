@@ -15,6 +15,25 @@ async function call(page: Page, method: string, path: string, data?: unknown) {
   return res.status() === 204 ? null : res.json();
 }
 const shot = (page: Page, name: string) => page.screenshot({ path: `${OUT}/${name}.png`, fullPage: true });
+/** Helper NGHIÊM (v0.1.35, F-20 đã gộp): hộp 'Mã PIN xác nhận thao tác' BẮT BUỘC phải hiện rồi gõ PIN — dùng cho thao
+ * tác cần PIN đầu tiên của phiên (chưa có phiên PIN nào), chứng minh trên stack thật rằng máy chủ đòi PIN. */
+async function enterOwnerPin(page: Page) {
+  const dlg = page.getByRole('dialog', { name: 'Mã PIN xác nhận thao tác' });
+  await expect(dlg).toBeVisible();
+  await page.keyboard.type(PIN);
+  await expect(dlg).toBeHidden();
+}
+/** Helper khoan dung: chỉ cho thao tác SAU khi phiên PIN đã mở (hộp PIN có thể không hiện lại vì phiên còn hạn). */
+async function maybeEnterOwnerPin(page: Page) {
+  const dlg = page.getByRole('dialog', { name: 'Mã PIN xác nhận thao tác' });
+  try {
+    await dlg.waitFor({ state: 'visible', timeout: 4000 });
+  } catch {
+    return;
+  }
+  await page.keyboard.type(PIN);
+  await expect(dlg).toBeHidden();
+}
 /** Tin nhắn "từ Zalo" đi qua bridge giả → stream inbound → ingest thật. */
 function inbound(...msgs: Array<{ group: string; sender: string; name: string; text: string; mention?: boolean }>) {
   execFileSync(process.env.PY ?? 'python3', [process.env.SEND_SCRIPT!, JSON.stringify(msgs)], { stdio: 'inherit' });
@@ -38,6 +57,8 @@ test('toàn hệ thống: thiết lập 1–7, nhận tin, sàng lọc, màn d�
   await page.getByLabel('Endpoint').fill('http://127.0.0.1:9911/v1');
   await page.getByLabel('Khoá API').fill('sk-live-test-9911');
   await page.getByRole('button', { name: /Thêm & kiểm tra/ }).click();
+  // Thao tác cần PIN đầu tiên (bước 1–3 qua API không mở phiên PIN) → hộp PIN PHẢI hiện (F-20 `ai.route_change`).
+  await enterOwnerPin(page);
   await expect(page.getByText(/Gọi thử OK/)).toBeVisible();
   await page.getByRole('button', { name: 'Dùng model này' }).click();
   await expect(page.getByText(/fake-flash/).first()).toBeVisible();
@@ -52,8 +73,8 @@ test('toàn hệ thống: thiết lập 1–7, nhận tin, sàng lọc, màn d�
   const risk = page.getByRole('dialog', { name: 'Trước khi hiện mã QR' });
   await risk.getByRole('checkbox').check();
   await risk.getByRole('button', { name: /Tôi hiểu, hiện mã QR/ }).click();
-  await expect(page.getByRole('dialog', { name: 'Mã PIN xác nhận thao tác' })).toBeVisible();
-  await page.keyboard.type(PIN);
+  // Sau gói f20 phiên PIN đã mở ở bước 4 (thêm nhà cung cấp) → hộp PIN có thể không hiện lại ở đây.
+  await maybeEnterOwnerPin(page);
   await expect(page.getByRole('img', { name: /Mã QR đăng nhập Zalo/ })).toBeVisible();
   await shot(page, '02-step5-qr');
   await expect(zalo).toContainText(/Đang kết nối|Hoạt động/, { timeout: 30_000 });
@@ -73,7 +94,15 @@ test('toàn hệ thống: thiết lập 1–7, nhận tin, sàng lọc, màn d�
   await expect(page.getByRole('heading', { name: 'Sàng lọc dữ liệu' })).toBeVisible();
   await shot(page, '05-step7');
   await next.click();
-  for (let i = 0; i < 4; i++) await next.click();
+  // Bước 8–11 tuỳ chọn: từ khi bước 8 thành form thật (tạo agent, "Tiếp tục" khoá tới khi điền đủ) thì bấm "Để sau"
+  // (POST /setup/steps/{n}/skip) — agent được live-phase3 tạo ở màn Danh tính Agent như cũ.
+  for (let n = 8; n <= 11; n++) {
+    await expect(page.getByText(`Bước ${n}/12`)).toBeVisible();
+    // Lúc chuyển bước, form cũ và mới có thể cùng hiện trong chốc lát — đợi còn đúng một nút rồi mới bấm.
+    const later = page.getByRole('button', { name: 'Để sau', exact: true });
+    await expect(later).toHaveCount(1);
+    await later.click();
+  }
   await expect(page.getByRole('heading', { name: 'Hoàn tất' })).toBeVisible();
 
   // Tin nhắn thật đi qua bridge → Kho thô → sàng lọc (model giả) → Kho sạch.

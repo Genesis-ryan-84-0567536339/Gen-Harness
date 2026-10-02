@@ -29,11 +29,14 @@ from gh.data.ingest import Ingest
 from gh.data_api.routes import router as data_router
 from gh.db import dispose_engine, sessionmaker
 from gh.errors import (
+    INFRA_ERRORS,
     ApiError,
     JsonResponse,
     api_error_handler,
     db_error_handler,
     infra_error_handler,
+    os_error_handler,
+    unhandled_error_handler,
     validation_error_handler,
 )
 from gh.gen.routes import router as gen_router
@@ -189,14 +192,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await dispose_engine()
 
 
-def create_app(*, with_lifespan: bool = True) -> FastAPI:
+def create_app(*, with_lifespan: bool = True, expose_docs: bool | None = None) -> FastAPI:
+    # v0.1.35 (F-43): production KHÔNG mở /docs, /openapi.json (lộ toàn bộ bề mặt API); redoc tắt hẳn.
+    expose = (not get_settings().is_production) if expose_docs is None else expose_docs
     app = FastAPI(title="Gen-Harness API", version=__version__, default_response_class=JsonResponse,
-                  lifespan=lifespan if with_lifespan else None, docs_url="/api/v1/docs",
-                  openapi_url="/api/v1/openapi.json")
+                  lifespan=lifespan if with_lifespan else None,
+                  docs_url="/api/v1/docs" if expose else None,
+                  openapi_url="/api/v1/openapi.json" if expose else None, redoc_url=None)
     app.add_exception_handler(ApiError, api_error_handler)
     app.add_exception_handler(RequestValidationError, validation_error_handler)
     app.add_exception_handler(DBAPIError, db_error_handler)
-    app.add_exception_handler(OSError, infra_error_handler)
+    # Starlette chọn handler theo MRO: lớp con mất kết nối (ConnectionError/TimeoutError/redis) thắng OSError chung.
+    for exc_cls in INFRA_ERRORS:
+        app.add_exception_handler(exc_cls, infra_error_handler)
+    app.add_exception_handler(OSError, os_error_handler)
+    # Lưới cuối: ngoại lệ lạ (KeyError, ValueError…) vẫn là problem+json 500 INTERNAL kèm error_id, không text/plain.
+    app.add_exception_handler(Exception, unhandled_error_handler)
     for r in (auth_router, account_router, users_router, setup_router, shell_router, audit_router, plugins_router,
              mcp_router, data_router, system_router, update_router, backups_router, org_router, gen_router,
              notifications_router, triage_router, hub_router, social_router):

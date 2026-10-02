@@ -6,7 +6,8 @@ import { WhyButton } from '../core/Evidence';
 import { errorText } from '../../lib/errorText';
 import { fmtAgo } from '../../lib/format';
 import { useUrlState } from '../../lib/uiStore';
-import { CardError, InlineError, ScreenHead } from '../common';
+import { TRUNCATED_USERS_TEXT, useAssignees, useEmptyUsersText } from '../../lib/pickers';
+import { CardError, InlineError, ScreenHead, SkeletonLines } from '../common';
 import { confidenceTone, itemTag, itemTagTone, priorityTone, triageBadges } from './queueModel';
 import { useInbox, useInboxAct, useInboxAssign, useInboxSilence } from './queries';
 
@@ -20,13 +21,6 @@ const INTENT_OPTIONS = [
   { value: 'SentQuotation', label: 'Đã gửi báo giá' },
   { value: 'PromisedDelivery', label: 'Cam kết giao hàng' },
   { value: 'MentionsCompetitor', label: 'Nhắc đối thủ' },
-];
-
-/** Đội ngũ tạm để giao việc — chưa có màn Danh mục người dùng (GĐ 4), nên đây là danh sách rút gọn tại chỗ. */
-const TEAMMATES = [
-  { id: 'u-lan', name: 'Chị Lan Phạm' },
-  { id: 'u-minh', name: 'Anh Minh Kiểm' },
-  { id: 'u-me', name: 'Tôi' },
 ];
 
 export function InboxScreen() {
@@ -217,6 +211,8 @@ function InboxCard({ item, onAssign, onSilence }: { item: InboxItem; onAssign: (
 
 function AssignDialog({ item, onClose }: { item: InboxItem; onClose: () => void }) {
   const assign = useInboxAssign();
+  const { options, hasOthers, truncated, query: people } = useAssignees();
+  const emptyText = useEmptyUsersText();
   return (
     <Dialog
       open
@@ -230,26 +226,34 @@ function AssignDialog({ item, onClose }: { item: InboxItem; onClose: () => void 
         </Button>
       }
     >
-      <div className="dlg-list" role="list">
-        {TEAMMATES.map((u) => (
-          <button
-            key={u.id}
-            type="button"
-            className="sv-open"
-            disabled={assign.isPending}
-            onClick={() =>
-              assign.mutate(
-                { id: item.id, userId: u.id },
-                {
-                  onSuccess: onClose,
-                },
-              )
-            }
-          >
-            <span className="sv-open__name">{u.name}</span>
-          </button>
-        ))}
-      </div>
+      {people.isPending ? (
+        <SkeletonLines rows={3} />
+      ) : people.isError ? (
+        <InlineError>{errorText(people.error)}</InlineError>
+      ) : (
+        <div className="dlg-list" role="list">
+          {options.map((u) => (
+            <button
+              key={u.id}
+              type="button"
+              className="sv-open"
+              disabled={assign.isPending}
+              onClick={() =>
+                assign.mutate(
+                  { id: item.id, userId: u.id },
+                  {
+                    onSuccess: onClose,
+                  },
+                )
+              }
+            >
+              <span className="sv-open__name">{u.label}</span>
+            </button>
+          ))}
+          {!hasOthers ? <p className="muted-note">{emptyText}</p> : null}
+          {truncated ? <p className="muted-note">{TRUNCATED_USERS_TEXT}</p> : null}
+        </div>
+      )}
       {assign.isError ? <InlineError>{errorText(assign.error)}</InlineError> : null}
     </Dialog>
   );

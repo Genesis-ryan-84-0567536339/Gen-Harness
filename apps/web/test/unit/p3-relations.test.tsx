@@ -10,7 +10,9 @@ import { DocumentsScreen } from '../../src/screens/relations/DocumentsScreen';
 import { NotebookScreen } from '../../src/screens/relations/NotebookScreen';
 import { ProfileScreen } from '../../src/screens/relations/ProfileScreen';
 import { queryClient } from '../../src/lib/queryClient';
+import { qk } from '../../src/lib/queries';
 import { useUrlStateStore } from '../../src/lib/uiStore';
+import { AGENT_IDS } from '../mock-ids';
 
 const json = (status: number, body?: unknown) =>
   new Response(body === undefined ? null : JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -63,7 +65,7 @@ const GROUPS: DirCursorPage<DirGroup> = {
   items: [
     {
       id: 'g1', code: 'GRP-ZL-0114', name: 'Vận hành Genesis — Quý 4', kind: 'internal', listen_mode: 'tagged_only',
-      member_count: 24, events_24h: 412, heat: 87, channel: { type: 'zalo', name: 'Zalo' }, bot: { id: 'agent-tls', name: 'Trợ lý thương mại' },
+      member_count: 24, events_24h: 412, heat: 87, channel: { type: 'zalo', name: 'Zalo' }, bot: { id: AGENT_IDS.tls, name: 'Trợ lý thương mại' },
       created_at: '2026-01-01T00:00:00Z',
     },
   ],
@@ -75,7 +77,7 @@ const PEOPLE: DirCursorPage<DirPerson> = {
     {
       id: 'p1', code: 'PER-0042', name: 'Nguyễn Văn Bảo', type: 'customer', org_name: 'Công ty in Thành Phát',
       relation: 'direct', channels: ['zalo'], heat: 87, heat_trend: 'up', value_vnd: 84_000_000, priority: 'P1',
-      bot: { id: 'agent-tls', name: 'Trợ lý thương mại' }, autonomy_level: 3, owner_user_id: null,
+      bot: { id: AGENT_IDS.tls, name: 'Trợ lý thương mại' }, autonomy_level: 3, owner_user_id: null,
     },
     {
       id: 'p2', code: 'PER-0951', name: 'Trịnh Mỹ Duyên', type: 'customer', org_name: 'Bao bì Sài Gòn Mới',
@@ -118,10 +120,15 @@ describe('Nhóm & Con người', () => {
   });
 
   it('gán BOT cho một người qua hộp thoại', async () => {
+    // Nút "Đổi" chỉ hiện với quyền profile.write.
+    queryClient.setQueryData(qk.me, { id: 'u', permissions: { 'profile.read': 'all', 'profile.write': 'all' } });
     const calls = mockFetch((c) => {
       if (c.url.includes('/directory/channels')) return json(200, CHANNELS);
       if (c.url.includes('/directory/groups')) return json(200, GROUPS);
-      if (c.url.match(/\/directory\/people\/p2\/bot$/)) return json(200, { ...PEOPLE.items[1], bot: { id: 'agent-ka', name: 'Key Account junior' } });
+      if (c.url.includes('/pickers/agents')) {
+        return json(200, { items: [{ id: AGENT_IDS.tls, name: 'Trợ lý thương mại' }, { id: AGENT_IDS.ka, name: 'Key Account junior' }] });
+      }
+      if (c.url.match(/\/directory\/people\/p2\/bot$/)) return json(200, { ...PEOPLE.items[1], bot: { id: AGENT_IDS.ka, name: 'Key Account junior' } });
       if (c.url.includes('/directory/people')) return json(200, PEOPLE);
       return json(404);
     });
@@ -137,14 +144,14 @@ describe('Nhóm & Con người', () => {
 
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.url.includes('/directory/people/p2/bot'))).toBe(true));
     const call = calls.find((c) => c.method === 'POST' && c.url.includes('/directory/people/p2/bot'))!;
-    expect(call.body).toMatchObject({ agent_id: 'agent-ka' });
+    expect(call.body).toMatchObject({ agent_id: AGENT_IDS.ka });
   });
 });
 
 // ─── Hồ sơ sống ───────────────────────────────────────────────────────────────
 const PROFILE: Profile = {
   person: { id: 'p1', code: 'PER-0042', name: 'Nguyễn Văn Bảo', type: 'customer', org_name: 'Công ty in Thành Phát', title: null, relation_to_owner: 'direct', owner: null },
-  autonomy_level: 3, bot: { id: 'agent-tls', name: 'Trợ lý thương mại' }, owner_note: 'Thích nói chuyện thẳng.',
+  autonomy_level: 3, bot: { id: AGENT_IDS.tls, name: 'Trợ lý thương mại' }, owner_note: 'Thích nói chuyện thẳng.',
   identities: [{ id: 'id1', channel: { type: 'zalo', name: 'Zalo' }, external_id: 'zl-1', handle: 'Nguyễn Văn Bảo', phone_e164: null, first_seen_at: '2025-01-01T00:00:00Z' }],
   scores: [
     { dimension: 'heat', label: 'Độ nóng', value: 87, trend: 'up', updated_at: '2026-09-24T01:00:00Z' },

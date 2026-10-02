@@ -6,7 +6,7 @@ import { useProviders } from '../../lib/dataQueries';
 import { errorText } from '../../lib/errorText';
 import { useCan } from '../../lib/permissions';
 import { toast } from '../../lib/toast';
-import { CardError, FriendlyErrorText, InlineError, Panel, ScreenHead, SkeletonLines, StateChip } from '../common';
+import { CardError, FriendlyErrorText, InlineError, Panel, PinHint, PIN_ROUTE_CHANGE_TITLE, ScreenHead, SkeletonLines, StateChip } from '../common';
 import { CliCard } from '../system/CliCard';
 import { ModelPicker } from './ModelPicker';
 import { CliDiagnose } from '../system/CliDiagnose';
@@ -169,7 +169,9 @@ function ProviderCard({ provider: p, canManage, onAddKey }: { provider: Provider
           </Button>
         ) : null}
         {canManage ? (
-          <Switch checked={p.enabled} label={`${p.enabled ? 'Tắt' : 'Bật'} ${p.name}`} disabled={setEnabled.isPending} onChange={(v) => setEnabled.mutate({ id: p.id, enabled: v })} />
+          <span title={`${p.enabled ? 'Tắt' : 'Bật'} nhà cung cấp — ${PIN_ROUTE_CHANGE_TITLE}`}>
+            <Switch checked={p.enabled} label={`${p.enabled ? 'Tắt' : 'Bật'} ${p.name}`} disabled={setEnabled.isPending} onChange={(v) => setEnabled.mutate({ id: p.id, enabled: v })} />
+          </span>
         ) : null}
       </div>
       {lastResult ? (
@@ -181,6 +183,7 @@ function ProviderCard({ provider: p, canManage, onAddKey }: { provider: Provider
       {isCliKind(p.kind) ? <CliDiagnose provider={p} /> : null}
       {testErr ? <InlineError>{errorText(testErr)}</InlineError> : null}
       {remove.isError ? <InlineError>{errorText(remove.error)}</InlineError> : null}
+      {setEnabled.isError ? <InlineError>{errorText(setEnabled.error)}</InlineError> : null}
     </article>
   );
 }
@@ -463,6 +466,11 @@ function PriorityChainPanel({ canManage }: { canManage: boolean }) {
           ))}
         </ol>
       )}
+      {canManage && list.length > 1 ? (
+        <div style={{ padding: '6px 16px 0' }}>
+          <PinHint />
+        </div>
+      ) : null}
       {reorder.isError ? <InlineError>{errorText(reorder.error)}</InlineError> : null}
     </Panel>
   );
@@ -555,6 +563,7 @@ function AddProviderDialog({ onClose }: { onClose: () => void }) {
           <textarea id="apm-new-keys" className="gh-input" rows={2} value={keys} onChange={(e) => setKeys(e.target.value)} />
         </div>
         <TextField label="Model ban đầu (tuỳ chọn, cách nhau dấu phẩy)" value={models} onChange={(e) => setModels(e.target.value)} placeholder="gemini-2.5-flash" />
+        <PinHint />
         {create.isError ? <InlineError>{errorText(create.error)}</InlineError> : null}
       </form>
     </Dialog>
@@ -605,6 +614,7 @@ function AddKeyDialog({ provider, onClose }: { provider: Provider; onClose: () =
       >
         <TextField label="Khoá API mới" value={secret} onChange={(e) => setSecret(e.target.value)} revealable autoComplete="off" spellCheck={false} />
         <TextField label="Model đi kèm (tuỳ chọn)" value={modelName} onChange={(e) => setModelName(e.target.value)} placeholder="gemini-2.5-flash" />
+        <PinHint />
         {addKey.isError ? <InlineError>{errorText(addKey.error)}</InlineError> : null}
       </form>
     </Dialog>

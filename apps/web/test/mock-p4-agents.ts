@@ -10,6 +10,7 @@
 import { randomUUID } from 'node:crypto';
 import type { AgentChannelScope, AgentIdentity, AgentTemplate } from '@gen-harness/contracts';
 import { BAO, GROUP_TP } from './mock-p3-core';
+import { AGENT_IDS } from './mock-ids';
 import type { P2Ctx } from './mock-phase2';
 
 export interface P4Options {
@@ -74,7 +75,7 @@ function seedAgents(): AgentIdentity[] {
   });
   return [
     {
-      id: 'agent-tls', name: 'Trợ lý thương mại', role_desc: TEMPLATES[0].role_desc, template: 'commercial',
+      id: AGENT_IDS.tls, name: 'Trợ lý thương mại', role_desc: TEMPLATES[0].role_desc, template: 'commercial',
       addressing: { customer: 'anh/chị', internal: 'Sếp' }, voice: TEMPLATES[0].voice, speak_when: TEMPLATES[0].speak_when,
       forbidden: TEMPLATES[0].forbidden, autonomy_level: 4, is_enabled: true,
       limits: { decisions_per_min: 20, drafts_per_hour: 30 }, created_at: ago(60 * 24 * 40), updated_at: ago(60 * 6),
@@ -82,7 +83,7 @@ function seedAgents(): AgentIdentity[] {
       binding: { model_id: 'md-gemini-flash', model_name: 'gemini-2.5-flash', provider_name: 'Gemini API', temperature: 0.4, context_tokens: 32_000, rule_codes: ['R-01', 'R-02'] },
     },
     {
-      id: 'agent-hc', name: 'Admin hậu cần', role_desc: TEMPLATES[2].role_desc, template: 'admin',
+      id: AGENT_IDS.hc, name: 'Admin hậu cần', role_desc: TEMPLATES[2].role_desc, template: 'admin',
       addressing: { internal: 'anh/chị' }, voice: TEMPLATES[2].voice, speak_when: TEMPLATES[2].speak_when,
       forbidden: TEMPLATES[2].forbidden, autonomy_level: 3, is_enabled: true,
       limits: { decisions_per_min: 20, drafts_per_hour: 30 }, created_at: ago(60 * 24 * 30), updated_at: ago(60 * 20),
@@ -90,7 +91,7 @@ function seedAgents(): AgentIdentity[] {
       binding: { model_id: 'md-deepseek-chat', model_name: 'deepseek-chat', provider_name: 'DeepSeek API', temperature: 0.3, context_tokens: 16_000, rule_codes: [] },
     },
     {
-      id: 'agent-cs', name: 'CSKH', role_desc: TEMPLATES[3].role_desc, template: 'cs',
+      id: AGENT_IDS.cs, name: 'CSKH', role_desc: TEMPLATES[3].role_desc, template: 'cs',
       addressing: { customer: 'anh/chị' }, voice: TEMPLATES[3].voice, speak_when: TEMPLATES[3].speak_when,
       forbidden: TEMPLATES[3].forbidden, autonomy_level: 2, is_enabled: true,
       limits: { decisions_per_min: 20, drafts_per_hour: 30 }, created_at: ago(60 * 24 * 12), updated_at: ago(60 * 3),
@@ -98,7 +99,7 @@ function seedAgents(): AgentIdentity[] {
       binding: null,
     },
     {
-      id: 'agent-mascot', name: 'Bé Heo', role_desc: TEMPLATES[6].role_desc, template: 'mascot',
+      id: AGENT_IDS.mascot, name: 'Bé Heo', role_desc: TEMPLATES[6].role_desc, template: 'mascot',
       addressing: {}, voice: TEMPLATES[6].voice, speak_when: TEMPLATES[6].speak_when,
       forbidden: TEMPLATES[6].forbidden, autonomy_level: 0, is_enabled: false,
       limits: { decisions_per_min: 20, drafts_per_hour: 30 }, created_at: ago(60 * 24 * 400), updated_at: ago(60 * 24 * 400),
@@ -122,12 +123,12 @@ interface DecisionRow {
 function seedDecisions(agents: AgentIdentity[]): DecisionRow[] {
   const nameOf = (id: string) => agents.find((a) => a.id === id)?.name ?? id;
   return [
-    { id: 'adec-1', at: ago(4), agent: { id: 'agent-tls', name: nameOf('agent-tls') }, decision: 'draft', rationale: 'Khách hỏi giá lần hai, có đủ thông tin để soạn báo giá theo bảng giá đã duyệt.', trigger: { type: 'meaning_unit', id: 'mu-901', code: 'OPP-1842', label: 'Hỏi giá MDF E1' }, context_refs: [], draft: { id: 'draft-ACT-0231', code: 'ACT-0231' } },
-    { id: 'adec-2', at: ago(18), agent: { id: 'agent-tls', name: nameOf('agent-tls') }, decision: 'send', rationale: 'Trả lời câu hỏi thường gặp về thời gian giao hàng, không vượt phạm vi cho phép.', trigger: { type: 'raw', id: 'raw-4471', code: null, label: `Tin nhắn của ${BAO.name}` }, context_refs: [{ type: 'person', id: BAO.id, code: BAO.code, label: BAO.name }], draft: null },
-    { id: 'adec-3', at: ago(47), agent: { id: 'agent-hc', name: nameOf('agent-hc') }, decision: 'draft', rationale: 'Đối tác yêu cầu hợp đồng vòng ba, đã có đủ điều khoản đã thống nhất trong nhóm.', trigger: { type: 'meaning_unit', id: 'mu-877', code: 'ACT-0234', label: 'Yêu cầu hợp đồng vòng ba' }, context_refs: [{ type: 'group', id: GROUP_TP.id, code: GROUP_TP.code, label: GROUP_TP.name }], draft: { id: 'draft-ACT-0234', code: 'ACT-0234' } },
-    { id: 'adec-4', at: ago(90), agent: { id: 'agent-hc', name: nameOf('agent-hc') }, decision: 'note', rationale: 'Ghi nhận yêu cầu hậu cần mới, chưa đủ thông tin để hành động ngay.', trigger: { type: 'raw', id: 'raw-4402', code: null, label: 'Yêu cầu đổi lịch giao hàng' }, context_refs: [], draft: null },
-    { id: 'adec-5', at: ago(134), agent: { id: 'agent-tls', name: nameOf('agent-tls') }, decision: 'suggest', rationale: 'Khách có dấu hiệu lạnh dần, đề xuất Sếp chủ động liên hệ thay vì tự trả lời.', trigger: { type: 'alert', id: 'iq-alert-1', code: 'ALR-0233', label: 'Khách đang lạnh / sắp mất' }, context_refs: [{ type: 'person', id: BAO.id, code: BAO.code, label: BAO.name }], draft: null },
-    { id: 'adec-6', at: ago(300), agent: { id: 'agent-cs', name: nameOf('agent-cs') }, decision: 'silent', rationale: 'Câu hỏi ngoài phạm vi CSKH (giá hợp đồng), im lặng chờ nhân viên phụ trách.', trigger: { type: 'raw', id: 'raw-4390', code: null, label: 'Câu hỏi ngoài phạm vi' }, context_refs: [], draft: null },
+    { id: 'adec-1', at: ago(4), agent: { id: AGENT_IDS.tls, name: nameOf(AGENT_IDS.tls) }, decision: 'draft', rationale: 'Khách hỏi giá lần hai, có đủ thông tin để soạn báo giá theo bảng giá đã duyệt.', trigger: { type: 'meaning_unit', id: 'mu-901', code: 'OPP-1842', label: 'Hỏi giá MDF E1' }, context_refs: [], draft: { id: 'draft-ACT-0231', code: 'ACT-0231' } },
+    { id: 'adec-2', at: ago(18), agent: { id: AGENT_IDS.tls, name: nameOf(AGENT_IDS.tls) }, decision: 'send', rationale: 'Trả lời câu hỏi thường gặp về thời gian giao hàng, không vượt phạm vi cho phép.', trigger: { type: 'raw', id: 'raw-4471', code: null, label: `Tin nhắn của ${BAO.name}` }, context_refs: [{ type: 'person', id: BAO.id, code: BAO.code, label: BAO.name }], draft: null },
+    { id: 'adec-3', at: ago(47), agent: { id: AGENT_IDS.hc, name: nameOf(AGENT_IDS.hc) }, decision: 'draft', rationale: 'Đối tác yêu cầu hợp đồng vòng ba, đã có đủ điều khoản đã thống nhất trong nhóm.', trigger: { type: 'meaning_unit', id: 'mu-877', code: 'ACT-0234', label: 'Yêu cầu hợp đồng vòng ba' }, context_refs: [{ type: 'group', id: GROUP_TP.id, code: GROUP_TP.code, label: GROUP_TP.name }], draft: { id: 'draft-ACT-0234', code: 'ACT-0234' } },
+    { id: 'adec-4', at: ago(90), agent: { id: AGENT_IDS.hc, name: nameOf(AGENT_IDS.hc) }, decision: 'note', rationale: 'Ghi nhận yêu cầu hậu cần mới, chưa đủ thông tin để hành động ngay.', trigger: { type: 'raw', id: 'raw-4402', code: null, label: 'Yêu cầu đổi lịch giao hàng' }, context_refs: [], draft: null },
+    { id: 'adec-5', at: ago(134), agent: { id: AGENT_IDS.tls, name: nameOf(AGENT_IDS.tls) }, decision: 'suggest', rationale: 'Khách có dấu hiệu lạnh dần, đề xuất Sếp chủ động liên hệ thay vì tự trả lời.', trigger: { type: 'alert', id: 'iq-alert-1', code: 'ALR-0233', label: 'Khách đang lạnh / sắp mất' }, context_refs: [{ type: 'person', id: BAO.id, code: BAO.code, label: BAO.name }], draft: null },
+    { id: 'adec-6', at: ago(300), agent: { id: AGENT_IDS.cs, name: nameOf(AGENT_IDS.cs) }, decision: 'silent', rationale: 'Câu hỏi ngoài phạm vi CSKH (giá hợp đồng), im lặng chờ nhân viên phụ trách.', trigger: { type: 'raw', id: 'raw-4390', code: null, label: 'Câu hỏi ngoài phạm vi' }, context_refs: [], draft: null },
   ];
 }
 
