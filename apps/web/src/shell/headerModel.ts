@@ -1,16 +1,7 @@
-/** Level names from the design's autonomy scale (profile › autonomySteps). */
-export const AUTONOMY_LEVELS = [
-  'Chỉ ghi nhận',
-  'Tóm tắt',
-  'Chấm điểm + giải thích',
-  'Gợi ý hành động',
-  'Soạn sẵn chờ duyệt',
-  'Tự làm việc thấp rủi ro',
-  'Tự làm việc đã whitelist',
-];
+import { autonomyLabel } from '@gen-harness/contracts';
 
 export function autonomyTooltip(level: number): string {
-  const name = AUTONOMY_LEVELS[level];
+  const name = autonomyLabel(level);
   const lower = name ? name.charAt(0).toLocaleLowerCase('vi') + name.slice(1) : '';
   return `Mức tự trị hiện tại — mức ${level}${lower ? `: ${lower}` : ''} (thang 0–6)`;
 }
