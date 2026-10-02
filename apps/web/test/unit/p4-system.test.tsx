@@ -178,8 +178,8 @@ describe('Điều khiển hệ thống › Nhật ký', () => {
       if (c.url.includes('/audit-log')) return json(200, { items: AUDIT_ITEMS, next_cursor: null });
       return json(404);
     });
-    // jsdom không có URL.createObjectURL — chỉ downloadText (chạy sau khi export xong) cần nó, xem e2e cho tải tệp thật.
-    vi.stubGlobal('URL', { ...URL, createObjectURL: vi.fn(() => 'blob:mock'), revokeObjectURL: vi.fn() });
+    // jsdom không có URL.createObjectURL/revokeObjectURL — test/setup.ts đã bù trên URL thật (không stub URL ở đây:
+    // hẹn giờ revokeObjectURL 1 giây của downloadText sẽ chạy sau khi unstub). Tải tệp thật: xem e2e.
     const user = userEvent.setup();
     renderScreen(<SystemScreen />, FULL_PERMS, 'log');
     await screen.findByText('Trợ lý thương mại');
