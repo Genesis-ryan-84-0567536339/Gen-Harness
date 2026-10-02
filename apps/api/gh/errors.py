@@ -123,7 +123,9 @@ async def api_error_handler(_: Request, exc: Exception) -> JsonResponse:
 #: SQLSTATE nghĩa là "mất/không có kết nối": lớp 08 (connection exception), 57P01–57P03 (admin/crash shutdown,
 #: cannot connect now — Postgres đang tắt/khởi động). asyncpg ném các lỗi này dưới dạng PostgresError chung nên
 #: SQLAlchemy bọc thành DBAPIError gốc (không phải OperationalError).
-_DISCONNECT_SQLSTATES = ("08", "57P01", "57P02", "57P03")
+#: Thêm lỗi quá tải tạm thời — client nên thử lại, không phải lỗi mã: lớp 53 (insufficient resources: 53300
+#: too_many_connections, 53100 disk_full, 53200 out_of_memory…) và 57014 (query_canceled / statement_timeout).
+_DISCONNECT_SQLSTATES = ("08", "53", "57P01", "57P02", "57P03", "57014")
 
 
 def _db_disconnected(exc: Exception) -> bool:
@@ -167,6 +169,15 @@ async def os_error_handler(request: Request, exc: Exception) -> JsonResponse:
     if is_infra_os_error(exc):
         return await infra_error_handler(request, exc)
     return _internal(request, "Lỗi hệ điều hành không mong đợi")
+
+
+async def unhandled_error_handler(request: Request, exc: Exception) -> JsonResponse:
+    """v0.1.35 (F-43): lưới cuối cho MỌI ngoại lệ chưa có handler riêng (KeyError, ValueError, AttributeError…).
+
+    Thiếu nó Starlette trả `text/plain` "Internal Server Error" — không mã lỗi, không câu tiếng Việt. Đăng ký cho
+    `Exception` nên Starlette gắn vào ServerErrorMiddleware: phản hồi là problem+json 500 INTERNAL kèm `error_id`,
+    stack trace chỉ nằm trong log server."""
+    return _internal(request, f"Lỗi không mong đợi ({type(exc).__name__})")
 
 
 async def validation_error_handler(_: Request, exc: Exception) -> JsonResponse:

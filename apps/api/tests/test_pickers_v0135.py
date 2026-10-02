@@ -85,6 +85,17 @@ async def test_picker_users_hide_email_role_and_locked_users(world, owner_api: A
     assert "email" not in str(items) and "@" not in str(items)
 
 
+async def test_picker_users_reports_truncation(world, owner_api: Api, monkeypatch: pytest.MonkeyPatch) -> None:  # type: ignore[no-untyped-def]
+    """Vượt trần → `truncated: true` (không im lặng mất người); dưới trần → false."""
+    from gh.biz.core import pickers
+
+    body = (await owner_api.get("/pickers/users")).json()
+    assert body["truncated"] is False and len(body["items"]) >= 2
+    monkeypatch.setattr(pickers, "PICKER_USERS_LIMIT", 1)
+    body = (await owner_api.get("/pickers/users")).json()
+    assert body["truncated"] is True and len(body["items"]) == 1
+
+
 async def test_picker_agents_only_enabled(world, owner_api: Api) -> None:  # type: ignore[no-untyped-def]
     items = (await owner_api.get("/pickers/agents")).json()["items"]
     assert all(set(i) == {"id", "name"} for i in items)
@@ -125,6 +136,12 @@ async def test_soft_deleted_active_user_cannot_be_assigned(world, owner_api: Api
     assert r.status_code == 404 and r.json()["code"] == "NOT_FOUND", r.text
     r = await owner_api.send("POST", "/cases", {"title": "Giao trễ", "assignee_user_id": str(world["lan"])})
     assert r.status_code == 404 and r.json()["code"] == "NOT_FOUND", r.text
+    # Người phụ trách hồ sơ (PATCH /profile) cũng dùng chung điều kiện.
+    r = await owner_api.send("PATCH", f"/profile/{world['person']}", {"owner_user_id": str(world["lan"])})
+    assert r.status_code == 404 and r.json()["code"] == "NOT_FOUND", r.text
+    owner_id = (await owner_api.get("/auth/me")).json()["id"]
+    r = await owner_api.send("PATCH", f"/profile/{world['person']}", {"owner_user_id": owner_id})
+    assert r.status_code == 200, r.text
 
 
 # ─── Vụ việc «Gán người xử lý» ───────────────────────────────────────────────

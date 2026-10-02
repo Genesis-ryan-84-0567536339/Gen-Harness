@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { OWNER, SETUP_TOKEN, apiCall, loginAsOwner, resetMock } from './support';
 
 /**
- * v0.1.35 (F-20) — thêm / sửa nhà cung cấp AI, khoá API, chuỗi chuyển hướng cần mã PIN (`ai.route_change`).
+ * v0.1.35 (F-20) — thêm / sửa nhà cung cấp AI, khoá API, chuỗi ưu tiên cần mã PIN (`ai.route_change`).
  * Mock đặt PIN SAU kiểm quyền như API thật; client tự mở hộp PIN khi gặp 423 rồi gửi lại.
  */
 

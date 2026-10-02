@@ -8,7 +8,7 @@ import { emailInitials, fmtDMClock, fmtInt, fmtLatency } from '../lib/format';
 import { queryClient } from '../lib/queryClient';
 import { useNow } from '../lib/useNow';
 import { errorText } from '../lib/errorText';
-import { CardError, FriendlyErrorText, InlineError, SkeletonLines, StateChip } from '../screens/common';
+import { CardError, FriendlyErrorText, InlineError, PinHint, SkeletonLines, StateChip } from '../screens/common';
 import { PROVIDER_KIND_LABEL, choiceText, isCliKind, providerStatus, testOkText } from '../screens/api/apiModel';
 import { ModelPicker } from '../screens/api/ModelPicker';
 import { ClaudeRiskNotice, CliLoginPanel } from '../screens/system/CliCard';
@@ -285,9 +285,7 @@ function AddProvider({ onAdded }: { onAdded: (p: Provider) => void }) {
           Thêm & kiểm tra
         </Button>
         {/* v0.1.35 (F-20): thêm nhà cung cấp AI cần phiên PIN `ai.route_change` — hộp PIN tự mở khi máy chủ trả 423. */}
-        <span className="muted-note" title="Thêm / sửa nhà cung cấp AI, khoá API, chuỗi chuyển hướng cần mã PIN">
-          <Icon name="ph ph-lock-simple" size={11} /> Cần mã PIN 6 số
-        </span>
+        <PinHint />
         <span className="muted-note">Khoá được mã hoá khi lưu; Console chỉ hiện 4 ký tự cuối.</span>
       </div>
       {add.isError ? <InlineError>{errorText(add.error)}</InlineError> : null}

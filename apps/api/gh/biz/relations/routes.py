@@ -7,6 +7,8 @@ sửa/xoá/nén ngay/đặt lại, có kiểm phạm vi (`gh.biz.core.scope`), k
 """
 
 import base64
+import mimetypes
+import re
 import urllib.parse
 import uuid
 from typing import Any, Literal
@@ -20,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gh.auth import rbac, service
 from gh.auth.deps import require
 from gh.biz.core import explain
-from gh.biz.core.scope import Scope, ensure_group, ensure_person, not_found, scope_for
+from gh.biz.core.scope import Scope, ensure_active_user, ensure_group, ensure_person, not_found, scope_for
 from gh.biz.relations import service as rsvc
 from gh.chassis import actionlog
 from gh.chassis.objects import ObjectNotFound, content_hash, get_object_store, new_key
@@ -324,11 +326,7 @@ async def patch_profile(person_id: uuid.UUID, body: ProfilePatch, user: service.
     fields = body.model_fields_set
     detail: dict[str, Any] = {}
     if "owner_user_id" in fields:
-        if body.owner_user_id is not None:
-            ok = (await db.execute(text("SELECT 1 FROM core.users WHERE id = :u AND org_id = :o AND is_active"),
-                                   {"u": body.owner_user_id, "o": user.org_id})).first()
-            if ok is None:
-                raise not_found("Người dùng")
+        await ensure_active_user(db, user.org_id, body.owner_user_id)
         await db.execute(text("UPDATE core.persons SET owner_user_id = :u, updated_at = now() WHERE id = :i"),
                          {"u": body.owner_user_id, "i": person_id})
         detail["owner_user_id"] = str(body.owner_user_id) if body.owner_user_id else None
@@ -779,11 +777,34 @@ DOC_CSP = "sandbox; default-src 'none'"
 PDF_CSP = "default-src 'none'; object-src 'self'; frame-ancestors 'none'"
 
 
-def _content_headers(mime: str | None, title: str) -> tuple[str, dict[str, str]]:
+_EXT_RE = re.compile(r"\.([A-Za-z0-9]{1,10})$")
+
+
+def _download_name(title: str, mime: str, storage_key: str | None) -> str:
+    """Tên tệp tải về = `title` + đuôi của tệp gốc (nếu `title` chưa có đúng đuôi đó).
+
+    `title` là tên người dùng gõ, thường không có đuôi ("Hợp đồng khung"); tệp gửi dạng octet-stream thì trình
+    duyệt không tự thêm đuôi → máy không mở được. Đuôi lấy từ phần cuối `storage_key` (`new_key` giữ tên tệp gốc,
+    vd `…/hd.docx`), không có thì đoán từ MIME đã lưu.
+    """
+    ext = ""
+    if storage_key:
+        hit = _EXT_RE.search(storage_key.rsplit("/", 1)[-1])
+        if hit:
+            ext = "." + hit.group(1).lower()
+    if not ext and mime:
+        ext = (mimetypes.guess_extension(mime, strict=False) or "").lower()
+    name = title.strip() or "tep"
+    if ext and not name.lower().endswith(ext):
+        name += ext
+    return name
+
+
+def _content_headers(mime: str | None, title: str, storage_key: str | None = None) -> tuple[str, dict[str, str]]:
     m = (mime or "").split(";")[0].strip().lower()
     inline = m in INLINE_SAFE_MIME
     # Header HTTP chỉ nhận latin-1 — tên tài liệu tiếng Việt phải mã hoá theo RFC 5987 (filename*=UTF-8''…).
-    filename = urllib.parse.quote(title)
+    filename = urllib.parse.quote(_download_name(title, m, storage_key))
     disposition = "inline" if inline else "attachment"
     return (m if inline else "application/octet-stream"), {
         "Content-Disposition": f"{disposition}; filename*=UTF-8''{filename}",
@@ -806,7 +827,7 @@ async def download_document(document_id: uuid.UUID, user: service.CurrentUser = 
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                            action="document.downloaded", target_type="document", target_id=str(document_id),
                            target_label=r.title, result="ok", ip=user.ip)
-    media_type, headers = _content_headers(r.mime, r.title)
+    media_type, headers = _content_headers(r.mime, r.title, r.storage_key)
     return Response(content=data, media_type=media_type, headers=headers)
 
 

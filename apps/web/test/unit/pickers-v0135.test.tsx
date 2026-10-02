@@ -8,7 +8,7 @@ import { render, renderHook, screen, waitFor, within } from '@testing-library/re
 import userEvent from '@testing-library/user-event';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
-import type { CaseItem, DirChannel, DirCursorPage, DirGroup, InboxPage } from '@gen-harness/contracts';
+import type { CaseItem, DirChannel, DirCursorPage, DirGroup, DirPerson, InboxPage } from '@gen-harness/contracts';
 import { InboxScreen } from '../../src/screens/queue/InboxScreen';
 import { DealsScreen } from '../../src/screens/market/DealsScreen';
 import { DirectoryScreen } from '../../src/screens/relations/DirectoryScreen';
@@ -19,6 +19,7 @@ import {
   EMPTY_AGENTS_TEXT_ASK,
   EMPTY_USERS_TEXT,
   EMPTY_USERS_TEXT_ASK,
+  TRUNCATED_USERS_TEXT,
   useAgentOptions,
   useAssignees,
 } from '../../src/lib/pickers';
@@ -207,9 +208,14 @@ const CASE: CaseItem = {
   assignee: null, subject: null, opened_at: '2026-09-24T00:00:00Z', resolved_at: null, updated_at: '2026-09-24T00:00:00Z',
 };
 
+const CASE_WRITER = { 'opportunity.read': 'all', 'opportunity.write': 'all' };
+const DIR_WRITER = { 'profile.read': 'all', 'profile.write': 'all' };
+
 describe('Deal & Vụ việc › Gán người xử lý', () => {
   it('gửi assignee_user_id lấy từ /pickers/users, giữ nút "Chưa gán"', async () => {
+    const me = meWith(CASE_WRITER);
     const calls = mockFetch((c) => {
+      if (c.url.includes('/auth/me')) return json(200, me);
       if (c.url.includes('/pickers/users')) return json(200, USERS);
       if (c.method === 'PATCH' && c.url.includes('/cases/case-1')) return json(200, { ...CASE, assignee: { id: USER_IDS.lan, name: 'Chị Lan Phạm' } });
       if (c.url.includes('/cases')) return json(200, { items: [CASE], next_cursor: null, total: 1 });
@@ -230,9 +236,11 @@ describe('Deal & Vụ việc › Gán người xử lý', () => {
     expect(call.body).toEqual({ assignee_user_id: USER_IDS.lan });
   });
 
-  it('người đang được gán đã bị khoá (không có trong /pickers/users) → dòng "(đã khoá)" được đánh dấu chọn', async () => {
+  it('người đang được gán đã bị khoá/xoá (không có trong /pickers/users) → dòng "(đã khoá/xoá)" được đánh dấu chọn', async () => {
     const LOCKED = { ...CASE, assignee: { id: '0199a000-0000-7000-8000-00000000dead', name: 'Anh Tùng' } };
+    const me = meWith(CASE_WRITER);
     mockFetch((c) => {
+      if (c.url.includes('/auth/me')) return json(200, me);
       if (c.url.includes('/pickers/users')) return json(200, USERS);
       if (c.url.includes('/cases')) return json(200, { items: [LOCKED], next_cursor: null, total: 1 });
       if (c.url.includes('/deals')) return json(200, { items: [], next_cursor: null, total: 0 });
@@ -245,10 +253,73 @@ describe('Deal & Vụ việc › Gán người xử lý', () => {
     const row = (await screen.findByText('CAS-0018')).closest('tr') as HTMLElement;
     await user.click(within(row).getByRole('button', { name: 'Đổi' }));
     const dlg = await screen.findByRole('dialog', { name: 'Gán người xử lý' });
-    const locked = (await within(dlg).findByText('Anh Tùng (đã khoá)')).closest('button') as HTMLElement;
+    const locked = (await within(dlg).findByText('Anh Tùng (đã khoá/xoá)')).closest('button') as HTMLElement;
     expect(locked).toHaveAttribute('aria-pressed', 'true');
     expect(within(dlg).getByText('Chưa gán').closest('button')).toHaveAttribute('aria-pressed', 'false');
     expect(within(dlg).getByText('Chị Lan Phạm').closest('button')).toHaveAttribute('aria-pressed', 'false');
+    expect(within(dlg).getByText('Anh Tùng (đã khoá/xoá)').closest('button')).toHaveAttribute('title', expect.stringMatching(/khoá hoặc xoá/));
+  });
+
+  it('đang lưu → mọi lựa chọn bị khoá (bấm đúp không gửi hai PATCH)', async () => {
+    const me = meWith(CASE_WRITER);
+    let release: (r: Response) => void = () => {};
+    const calls = mockFetch((c) => {
+      if (c.url.includes('/auth/me')) return json(200, me);
+      if (c.url.includes('/pickers/users')) return json(200, USERS);
+      if (c.method === 'PATCH' && c.url.includes('/cases/case-1')) return new Promise<Response>((res) => { release = res; });
+      if (c.url.includes('/cases')) return json(200, { items: [CASE], next_cursor: null, total: 1 });
+      if (c.url.includes('/deals')) return json(200, { items: [], next_cursor: null, total: 0 });
+      if (c.url.includes('/opportunities')) return json(200, { items: [], next_cursor: null, total: 0 });
+      return json(404);
+    });
+    useUrlStateStore.setState({ params: { dtab: 'cases' } });
+    const user = userEvent.setup();
+    renderScreen(<DealsScreen />);
+    const row = (await screen.findByText('CAS-0018')).closest('tr') as HTMLElement;
+    await user.click(within(row).getByRole('button', { name: 'Đổi' }));
+    const dlg = await screen.findByRole('dialog', { name: 'Gán người xử lý' });
+    const lan = (await within(dlg).findByText('Chị Lan Phạm')).closest('button') as HTMLElement;
+    await user.click(lan);
+    await waitFor(() => expect(lan).toBeDisabled());
+    expect(within(dlg).getByText('Chưa gán').closest('button')).toBeDisabled();
+    await user.click(lan);
+    expect(calls.filter((c) => c.method === 'PATCH').length).toBe(1);
+    release(json(200, { ...CASE, assignee: { id: USER_IDS.lan, name: 'Chị Lan Phạm' } }));
+  });
+
+  it('danh sách bị cắt ở trần (truncated) → hộp chọn ghi chú rõ', async () => {
+    const me = meWith(CASE_WRITER);
+    mockFetch((c) => {
+      if (c.url.includes('/auth/me')) return json(200, me);
+      if (c.url.includes('/pickers/users')) return json(200, { ...USERS, truncated: true });
+      if (c.url.includes('/cases')) return json(200, { items: [CASE], next_cursor: null, total: 1 });
+      if (c.url.includes('/deals')) return json(200, { items: [], next_cursor: null, total: 0 });
+      if (c.url.includes('/opportunities')) return json(200, { items: [], next_cursor: null, total: 0 });
+      return json(404);
+    });
+    useUrlStateStore.setState({ params: { dtab: 'cases' } });
+    const user = userEvent.setup();
+    renderScreen(<DealsScreen />);
+    const row = (await screen.findByText('CAS-0018')).closest('tr') as HTMLElement;
+    await user.click(within(row).getByRole('button', { name: 'Đổi' }));
+    const dlg = await screen.findByRole('dialog', { name: 'Gán người xử lý' });
+    expect(await within(dlg).findByText(TRUNCATED_USERS_TEXT)).toBeInTheDocument();
+  });
+
+  it('vai trò không có opportunity.write (Auditor) → không có nút "Đổi"', async () => {
+    const me = meWith({ 'opportunity.read': 'all', 'opportunity.write': 'none' });
+    mockFetch((c) => {
+      if (c.url.includes('/auth/me')) return json(200, me);
+      if (c.url.includes('/cases')) return json(200, { items: [CASE], next_cursor: null, total: 1 });
+      if (c.url.includes('/deals')) return json(200, { items: [], next_cursor: null, total: 0 });
+      if (c.url.includes('/opportunities')) return json(200, { items: [], next_cursor: null, total: 0 });
+      return json(404);
+    });
+    useUrlStateStore.setState({ params: { dtab: 'cases' } });
+    renderScreen(<DealsScreen />);
+    const row = (await screen.findByText('CAS-0018')).closest('tr') as HTMLElement;
+    expect(within(row).getByText('Chưa gán')).toBeInTheDocument();
+    expect(within(row).queryByRole('button', { name: 'Đổi' })).toBeNull();
   });
 });
 
@@ -267,7 +338,9 @@ const GROUPS: DirCursorPage<DirGroup> = {
 
 describe('Nhóm & Con người › Gán BOT trực nhóm', () => {
   it('gửi agent_id lấy từ /pickers/agents; BOT hiện tại đã tắt vẫn hiện "(đã tắt)" và được chọn', async () => {
+    const me = meWith(DIR_WRITER);
     const calls = mockFetch((c) => {
+      if (c.url.includes('/auth/me')) return json(200, me);
       if (c.url.includes('/pickers/agents')) return json(200, AGENTS);
       if (c.url.includes('/directory/channels')) return json(200, CHANNELS);
       if (c.method === 'POST' && c.url.includes('/directory/groups/g1/bot')) return json(200, { ok: true });
@@ -306,5 +379,98 @@ describe('Nhóm & Con người › Gán BOT trực nhóm', () => {
     await user.click(within(row).getByRole('button', { name: /Đổi|Gán/ }));
     const dlg = await screen.findByRole('dialog', { name: 'Gán BOT trực nhóm' });
     expect(await within(dlg).findByText(text)).toBeInTheDocument();
+  });
+});
+
+const PEOPLE: DirCursorPage<DirPerson> = {
+  items: [
+    {
+      id: 'p1', code: 'PER-0042', name: 'Nguyễn Văn Bảo', type: 'customer', org_name: null, relation: 'direct',
+      channels: ['zalo'], heat: 87, heat_trend: 'up', value_vnd: null, priority: 'P1',
+      bot: { id: AGENT_IDS.tls, name: 'Trợ lý thương mại' }, autonomy_level: 3, owner_user_id: null,
+    },
+    {
+      id: 'p2', code: 'PER-0951', name: 'Trịnh Mỹ Duyên', type: 'customer', org_name: null, relation: 'via_staff',
+      channels: ['zalo'], heat: 18, heat_trend: null, value_vnd: null, priority: 'P3',
+      bot: { id: AGENT_IDS.hc, name: 'Admin hậu cần' }, autonomy_level: null, owner_user_id: null,
+    },
+  ],
+  next_cursor: null,
+  total: 2,
+};
+
+describe('Nhóm & Con người › Thiết lập BOT cho nhóm đã lọc', () => {
+  function mockDir(me: unknown, agents: () => Response) {
+    return mockFetch((c) => {
+      if (c.url.includes('/auth/me')) return json(200, me);
+      if (c.url.includes('/pickers/agents')) return agents();
+      if (c.url.includes('/directory/channels')) return json(200, CHANNELS);
+      if (c.url.includes('/directory/groups')) return json(200, GROUPS);
+      if (c.method === 'POST' && c.url.match(/\/directory\/people\/p\d\/bot$/)) return json(200, { ok: true });
+      if (c.url.includes('/directory/people')) return json(200, PEOPLE);
+      return json(404);
+    });
+  }
+
+  it('mặc định «Giữ nguyên BOT hiện tại»: chỉ đổi tự trị thì KHÔNG gửi agent_id (không gỡ BOT của ai)', async () => {
+    const calls = mockDir(meWith(DIR_WRITER), () => json(200, AGENTS));
+    useUrlStateStore.setState({ params: { dt: 'people' } });
+    const user = userEvent.setup();
+    renderScreen(<DirectoryScreen />);
+    await screen.findByText('Trịnh Mỹ Duyên');
+    await user.click(screen.getByRole('button', { name: 'Thiết lập BOT cho nhóm đã lọc' }));
+    const dlg = await screen.findByRole('dialog', { name: 'Thiết lập BOT cho nhóm đã lọc' });
+    expect(within(dlg).getByText('Giữ nguyên BOT hiện tại').closest('button')).toHaveAttribute('aria-pressed', 'true');
+    const apply = within(dlg).getByRole('button', { name: /Áp dụng cho 2 người/ });
+    expect(apply).toBeDisabled(); // chưa chọn gì để đổi
+    await user.click(within(within(dlg).getByRole('group', { name: 'Mức tự trị' })).getByRole('button', { name: '4' }));
+    expect(apply).toBeEnabled();
+    await user.click(apply);
+    await waitFor(() => expect(calls.filter((c) => c.method === 'POST' && c.url.includes('/bot')).length).toBe(2));
+    for (const c of calls.filter((x) => x.method === 'POST' && x.url.includes('/bot'))) expect(c.body).toEqual({ autonomy_level: 4 });
+  });
+
+  it('/pickers/agents lỗi → vẫn mặc định giữ nguyên, nút Áp dụng tắt cho tới khi chọn mức tự trị', async () => {
+    mockDir(meWith(DIR_WRITER), () => problem(503, 'DB_UNAVAILABLE', 'Cơ sở dữ liệu đang không phản hồi'));
+    useUrlStateStore.setState({ params: { dt: 'people' } });
+    const user = userEvent.setup();
+    renderScreen(<DirectoryScreen />);
+    await screen.findByText('Trịnh Mỹ Duyên');
+    await user.click(screen.getByRole('button', { name: 'Thiết lập BOT cho nhóm đã lọc' }));
+    const dlg = await screen.findByRole('dialog', { name: 'Thiết lập BOT cho nhóm đã lọc' });
+    await within(dlg).findByRole('alert', {}, { timeout: 8000 });
+    expect(within(dlg).getByText('Giữ nguyên BOT hiện tại').closest('button')).toHaveAttribute('aria-pressed', 'true');
+    expect(within(dlg).getByRole('button', { name: /Áp dụng cho 2 người/ })).toBeDisabled();
+  });
+
+  it('gỡ BOT chủ động → gửi agent_id: null', async () => {
+    const calls = mockDir(meWith(DIR_WRITER), () => json(200, AGENTS));
+    useUrlStateStore.setState({ params: { dt: 'people' } });
+    const user = userEvent.setup();
+    renderScreen(<DirectoryScreen />);
+    await screen.findByText('Trịnh Mỹ Duyên');
+    await user.click(screen.getByRole('button', { name: 'Thiết lập BOT cho nhóm đã lọc' }));
+    const dlg = await screen.findByRole('dialog', { name: 'Thiết lập BOT cho nhóm đã lọc' });
+    await user.click(within(dlg).getByText('Chưa gán (gỡ BOT)'));
+    await user.click(within(dlg).getByRole('button', { name: /Áp dụng cho 2 người/ }));
+    await waitFor(() => expect(calls.filter((c) => c.method === 'POST' && c.url.includes('/bot')).length).toBe(2));
+    for (const c of calls.filter((x) => x.method === 'POST' && x.url.includes('/bot'))) expect(c.body).toEqual({ agent_id: null });
+  });
+
+  it('vai trò chỉ đọc (Auditor: không profile.write) → không có nút "Đổi" và nút thiết lập hàng loạt', async () => {
+    mockDir(meWith({ 'profile.read': 'all', 'profile.write': 'none' }), () => json(200, AGENTS));
+    useUrlStateStore.setState({ params: { dt: 'people' } });
+    renderScreen(<DirectoryScreen />);
+    const row = (await screen.findByText('Trịnh Mỹ Duyên')).closest('tr') as HTMLElement;
+    expect(within(row).queryByRole('button', { name: 'Đổi' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Thiết lập BOT cho nhóm đã lọc' })).toBeNull();
+  });
+
+  it('Auditor ở tab Nhóm cũng không thấy "Đổi" BOT trực nhóm', async () => {
+    mockDir(meWith({ 'profile.read': 'all', 'profile.write': 'none' }), () => json(200, AGENTS));
+    renderScreen(<DirectoryScreen />);
+    const row = (await screen.findByText('GRP-ZL-0114')).closest('tr') as HTMLElement;
+    expect(within(row).getByText('Key Account junior')).toBeInTheDocument();
+    expect(within(row).queryByRole('button', { name: /Đổi/ })).toBeNull();
   });
 });

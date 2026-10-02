@@ -299,8 +299,8 @@ async def test_documents_upload_download_and_default_acl(world, owner_api: Api, 
     assert (await owner_api.get(f"/documents/{doc['id']}")).status_code == 404
 
 
-async def _upload(owner_api: Api, mime: str, body: bytes, filename: str = "f.bin") -> str:
-    r = await owner_api.send("POST", "/documents", {"title": "Tệp thử", "filename": filename, "mime": mime,
+async def _upload(owner_api: Api, mime: str, body: bytes, filename: str = "f.bin", title: str = "Tệp thử") -> str:
+    r = await owner_api.send("POST", "/documents", {"title": title, "filename": filename, "mime": mime,
                                                      "content_base64": base64.b64encode(body).decode()})
     assert r.status_code == 201, r.text
     return str(r.json()["id"])
@@ -339,7 +339,7 @@ async def test_documents_safe_mime_inline_still_sandboxed(  # type: ignore[no-un
     assert dl.status_code == 200
     assert dl.headers["content-type"].startswith(mime)
     assert dl.headers["content-disposition"].startswith("inline")
-    assert "filename*=UTF-8''T%E1%BB%87p%20th%E1%BB%AD" in dl.headers["content-disposition"]
+    assert "filename*=UTF-8''T%E1%BB%87p%20th%E1%BB%AD." in dl.headers["content-disposition"]
     _assert_sandboxed(dl)
     assert dl.headers["content-security-policy"] == "sandbox; default-src 'none'"
 
@@ -374,6 +374,32 @@ async def test_documents_legacy_mime_with_params_forced_download(  # type: ignor
     _assert_sandboxed(dl)
 
 
+@pytest.mark.parametrize(("mime", "filename", "title", "expected"), [
+    ("application/vnd.openxmlformats-officedocument.wordprocessingml.document", "hd.docx", "Hợp đồng",
+     "H%E1%BB%A3p%20%C4%91%E1%BB%93ng.docx"),
+    ("application/zip", "goi.zip", "Gói v1.2", "G%C3%B3i%20v1.2.zip"),
+    ("text/html", "trang.html", "Trang.HTML", "Trang.HTML"),
+])
+async def test_documents_download_keeps_extension(  # type: ignore[no-untyped-def]
+        world, owner_api: Api, mime: str, filename: str, title: str, expected: str) -> None:
+    """F-5: tải về octet-stream thì trình duyệt không tự thêm đuôi — tên tải về phải giữ đuôi của tệp gốc."""
+    doc_id = await _upload(owner_api, mime, b"PK\x03\x04", filename=filename, title=title)
+    dl = await owner_api.get(f"/documents/{doc_id}/content")
+    assert dl.status_code == 200
+    assert dl.headers["content-type"].startswith("application/octet-stream")
+    assert dl.headers["content-disposition"] == f"attachment; filename*=UTF-8''{expected}"
+
+
+def test_download_name_pure() -> None:
+    from gh.biz.relations.routes import _download_name
+
+    assert _download_name("Hợp đồng", "", "org-1/abc/hd.docx") == "Hợp đồng.docx"
+    assert _download_name("hd.DOCX", "", "org-1/abc/hd.docx") == "hd.DOCX"
+    assert _download_name("Báo cáo", "", "org-1/abc/file") == "Báo cáo"  # không có đuôi, không có MIME
+    assert _download_name("Ghi chú", "text/plain", "org-1/abc/file") == "Ghi chú.txt"  # đoán từ MIME
+    assert _download_name("  ", "", "org-1/abc/a.pdf") == "tep.pdf"
+
+
 def test_content_headers_pure() -> None:
     from gh.biz.relations.routes import _content_headers
 
@@ -381,7 +407,7 @@ def test_content_headers_pure() -> None:
     for bad in ("image/svg+xml", "text/html", "text/plain", "application/x-javascript", "", None):
         media, headers = _content_headers(bad, "a b")
         assert media == "application/octet-stream"
-        assert headers["Content-Disposition"] == "attachment; filename*=UTF-8''a%20b"
+        assert headers["Content-Disposition"].startswith("attachment; filename*=UTF-8''a%20b")
         assert headers["Content-Security-Policy"] == "sandbox; default-src 'none'"
     # Bảng chốt header theo từng MIME: chỉ PDF bỏ sandbox; ảnh và mọi thứ khác giữ sandbox.
     pdf_csp = "default-src 'none'; object-src 'self'; frame-ancestors 'none'"

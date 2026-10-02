@@ -15,8 +15,15 @@ async function call(page: Page, method: string, path: string, data?: unknown) {
   return res.status() === 204 ? null : res.json();
 }
 const shot = (page: Page, name: string) => page.screenshot({ path: `${OUT}/${name}.png`, fullPage: true });
-/** Helper KHOAN DUNG (v0.1.35, hợp đồng giữa các gói): hộp 'Mã PIN xác nhận thao tác' hiện trong ≤ 4s thì gõ PIN,
- * không hiện thì bỏ qua — xanh cả trước lẫn sau gói f20 (thêm nhà cung cấp AI đòi PIN `ai.route_change`). */
+/** Helper NGHIÊM (v0.1.35, F-20 đã gộp): hộp 'Mã PIN xác nhận thao tác' BẮT BUỘC phải hiện rồi gõ PIN — dùng cho thao
+ * tác cần PIN đầu tiên của phiên (chưa có phiên PIN nào), chứng minh trên stack thật rằng máy chủ đòi PIN. */
+async function enterOwnerPin(page: Page) {
+  const dlg = page.getByRole('dialog', { name: 'Mã PIN xác nhận thao tác' });
+  await expect(dlg).toBeVisible();
+  await page.keyboard.type(PIN);
+  await expect(dlg).toBeHidden();
+}
+/** Helper khoan dung: chỉ cho thao tác SAU khi phiên PIN đã mở (hộp PIN có thể không hiện lại vì phiên còn hạn). */
 async function maybeEnterOwnerPin(page: Page) {
   const dlg = page.getByRole('dialog', { name: 'Mã PIN xác nhận thao tác' });
   try {
@@ -50,7 +57,8 @@ test('toàn hệ thống: thiết lập 1–7, nhận tin, sàng lọc, màn d�
   await page.getByLabel('Endpoint').fill('http://127.0.0.1:9911/v1');
   await page.getByLabel('Khoá API').fill('sk-live-test-9911');
   await page.getByRole('button', { name: /Thêm & kiểm tra/ }).click();
-  await maybeEnterOwnerPin(page);
+  // Thao tác cần PIN đầu tiên (bước 1–3 qua API không mở phiên PIN) → hộp PIN PHẢI hiện (F-20 `ai.route_change`).
+  await enterOwnerPin(page);
   await expect(page.getByText(/Gọi thử OK/)).toBeVisible();
   await page.getByRole('button', { name: 'Dùng model này' }).click();
   await expect(page.getByText(/fake-flash/).first()).toBeVisible();

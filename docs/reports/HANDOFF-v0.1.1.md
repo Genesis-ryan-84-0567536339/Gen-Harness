@@ -1491,7 +1491,23 @@ cần khôi phục — CSDL chưa bị đụng thì chỉ cần `docker compose 
 - F-5: PDF bỏ `sandbox`, `object-src 'self'`; Caddy không còn ghi đè CSP của api; nginx CSP bị bỏ sau Caddy (một CSP duy nhất).
 - F-1: `check_no_fake_ids.py` chỉ bắt `id|value|agent_id: 'agent-…'` (không còn bắt nhầm `className="agent-card"`), dòng có
   `allow-fake-id` được bỏ qua; gán người xử lý (Vụ việc, Hộp thư) chặn người đã xoá mềm như ô chọn; hộp «Gán người xử lý» hiện
-  "<tên> (đã khoá)" cho người đang gán đã bị khoá; gợi ý khi danh sách rỗng ghi rõ đường dẫn và đổi câu cho vai trò không có
+  "<tên> (đã khoá/xoá)" cho người đang gán đã bị khoá hoặc xoá; gợi ý khi danh sách rỗng ghi rõ đường dẫn và đổi câu cho vai trò không có
   quyền ("nhờ Owner…"); link cũ `?owner=u-ha` ở Bản đồ quan hệ bị bỏ qua thay vì lỗi 422; e2e thêm Operator/Auditor.
-- F-20: thẻ Jev «Lưu & kiểm tra» và công tắc bật/tắt nhà cung cấp có gợi ý cần mã PIN; e2e bỏ helper PIN "khoan dung" — hộp
-  PIN bắt buộc hiện ở lần đầu, lần sau trong cùng phiên thì không.
+- F-20: thẻ Jev «Lưu & kiểm tra» và công tắc bật/tắt nhà cung cấp có gợi ý cần mã PIN; e2e mock (`pin-providers-v0135`)
+  bỏ helper PIN "khoan dung" — hộp PIN bắt buộc hiện ở lần đầu, lần sau trong cùng phiên thì không. E2E thật: `live-phase2`
+  bước 4 «Thêm & kiểm tra» bắt buộc hộp PIN hiện; các bước sau (và `live-ci`, vốn mở phiên PIN qua API từ đầu) vẫn dùng
+  helper khoan dung vì phiên PIN còn hạn.
+
+### Sửa sau review lần 2 (v0.1.35, trước merge)
+
+- F-5: tải tài liệu không phải PDF/ảnh (octet-stream) giữ đuôi tệp gốc — tên tải về = tên tài liệu + đuôi lấy từ tên tệp
+  lúc tải lên (vd «Hợp đồng» + `hd.docx` ⇒ `Hợp đồng.docx`); trước đó tải về tệp không đuôi, máy không mở được.
+- F-43: mọi lỗi lạ chưa có handler riêng (KeyError, ValueError…) cũng trả 500 INTERNAL dạng problem+json kèm «Mã lỗi»
+  (trước là chữ tiếng Anh "Internal Server Error"); lỗi Postgres quá tải tạm thời (lớp 53: hết kết nối/đĩa đầy/hết bộ nhớ;
+  57014 hết thời gian câu lệnh) ⇒ 503 để thử lại. Xác nhận đề xuất Gen bị lỗi giữ nguyên «Mã lỗi» của 500 và giờ mở khoá PIN.
+- F-1: người phụ trách hồ sơ cũng chặn người dùng đã xoá mềm (dùng chung một hàm với Vụ việc); `/pickers/users` báo
+  `truncated` khi vượt 500 người (hộp chọn hiện ghi chú); nút «Đổi» (gán BOT, gán người xử lý) và «Thiết lập BOT cho nhóm đã
+  lọc» ẩn với vai trò không có quyền ghi; hộp gán BOT hàng loạt mặc định «Giữ nguyên BOT hiện tại» (không vô tình gỡ BOT
+  của cả nhóm khi chỉ đổi mức tự trị), không có gì để áp dụng thì nút tắt; hộp «Gán người xử lý» khoá nút khi đang lưu.
+- F-20: thống nhất chữ «chuỗi ưu tiên» (gợi ý PIN, Hướng dẫn bước 4, nhãn Action Log `ai.route_change`); bước 4 dùng
+  chung `PinHint`.

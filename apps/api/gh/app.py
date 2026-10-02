@@ -36,6 +36,7 @@ from gh.errors import (
     db_error_handler,
     infra_error_handler,
     os_error_handler,
+    unhandled_error_handler,
     validation_error_handler,
 )
 from gh.gen.routes import router as gen_router
@@ -205,6 +206,8 @@ def create_app(*, with_lifespan: bool = True, expose_docs: bool | None = None) -
     for exc_cls in INFRA_ERRORS:
         app.add_exception_handler(exc_cls, infra_error_handler)
     app.add_exception_handler(OSError, os_error_handler)
+    # Lưới cuối: ngoại lệ lạ (KeyError, ValueError…) vẫn là problem+json 500 INTERNAL kèm error_id, không text/plain.
+    app.add_exception_handler(Exception, unhandled_error_handler)
     for r in (auth_router, account_router, users_router, setup_router, shell_router, audit_router, plugins_router,
              mcp_router, data_router, system_router, update_router, backups_router, org_router, gen_router,
              notifications_router, triage_router, hub_router, social_router):

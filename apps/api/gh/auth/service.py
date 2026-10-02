@@ -40,7 +40,7 @@ PIN_OPERATIONS: dict[str, str] = {
     "backup.restore": "Khôi phục bản sao lưu",
     "user.manage": "Mời / khoá / đặt lại mật khẩu người dùng",
     # v0.1.35 (F-20): phiên Owner bị lấy không được âm thầm chuyển lưu lượng LLM ra máy chủ lạ.
-    "ai.route_change": "Thêm / sửa nhà cung cấp AI, khoá API, chuỗi chuyển hướng",
+    "ai.route_change": "Thêm / sửa nhà cung cấp AI, khoá API, chuỗi ưu tiên",
 }
 
 

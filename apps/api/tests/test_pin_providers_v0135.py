@@ -1,4 +1,4 @@
-"""v0.1.35 (F-20): tạo / sửa nhà cung cấp AI, chuỗi chuyển hướng, thêm khoá API cần phiên PIN `ai.route_change`.
+"""v0.1.35 (F-20): tạo / sửa nhà cung cấp AI, chuỗi ưu tiên, thêm khoá API cần phiên PIN `ai.route_change`.
 
 Mục tiêu: phiên Owner bị lấy (vd qua XSS) không thể âm thầm chuyển lưu lượng LLM ra máy chủ lạ. PIN kiểm SAU quyền:
 vai trò thiếu `system.manage` vẫn nhận 403 (không lộ là route có PIN). Ngoài phạm vi (không 423): GET, DELETE nhà cung
@@ -54,7 +54,7 @@ OK_STATUS = {"create": 201, "chain": 200, "toggle": 200, "rank": 200, "add_key":
 
 def test_route_change_declared() -> None:
     assert "ai.route_change" in PIN_OPERATIONS
-    assert PIN_OPERATIONS["ai.route_change"] == "Thêm / sửa nhà cung cấp AI, khoá API, chuỗi chuyển hướng"
+    assert PIN_OPERATIONS["ai.route_change"] == "Thêm / sửa nhà cung cấp AI, khoá API, chuỗi ưu tiên"
 
 
 @pytest.mark.parametrize("idx", range(len(ROUTE_IDS)), ids=ROUTE_IDS)

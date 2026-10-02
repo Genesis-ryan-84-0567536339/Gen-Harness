@@ -6,7 +6,7 @@ import { WhyButton } from '../core/Evidence';
 import { errorText } from '../../lib/errorText';
 import { fmtAgo } from '../../lib/format';
 import { useUrlState } from '../../lib/uiStore';
-import { useAssignees, useEmptyUsersText } from '../../lib/pickers';
+import { TRUNCATED_USERS_TEXT, useAssignees, useEmptyUsersText } from '../../lib/pickers';
 import { CardError, InlineError, ScreenHead, SkeletonLines } from '../common';
 import { confidenceTone, itemTag, itemTagTone, priorityTone, triageBadges } from './queueModel';
 import { useInbox, useInboxAct, useInboxAssign, useInboxSilence } from './queries';
@@ -211,7 +211,7 @@ function InboxCard({ item, onAssign, onSilence }: { item: InboxItem; onAssign: (
 
 function AssignDialog({ item, onClose }: { item: InboxItem; onClose: () => void }) {
   const assign = useInboxAssign();
-  const { options, hasOthers, query: people } = useAssignees();
+  const { options, hasOthers, truncated, query: people } = useAssignees();
   const emptyText = useEmptyUsersText();
   return (
     <Dialog
@@ -251,6 +251,7 @@ function AssignDialog({ item, onClose }: { item: InboxItem; onClose: () => void 
             </button>
           ))}
           {!hasOthers ? <p className="muted-note">{emptyText}</p> : null}
+          {truncated ? <p className="muted-note">{TRUNCATED_USERS_TEXT}</p> : null}
         </div>
       )}
       {assign.isError ? <InlineError>{errorText(assign.error)}</InlineError> : null}

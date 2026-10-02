@@ -25,6 +25,18 @@ def not_found(what: str = "Đối tượng") -> ApiError:
     return ApiError(404, "NOT_FOUND", f"{what} không tồn tại hoặc ngoài phạm vi của bạn")
 
 
+async def ensure_active_user(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID | None) -> None:
+    """UUID người được gán (người xử lý/người phụ trách) phải là người dùng đang hoạt động, chưa xoá mềm, cùng org
+    — khớp /pickers/users; không để khoá ngoại nổ thành 500 (F-1). Dùng chung cho vụ việc, hồ sơ."""
+    if user_id is None:
+        return
+    ok = (await db.execute(text("SELECT 1 FROM core.users WHERE id = :u AND org_id = :o AND is_active "
+                                "AND deleted_at IS NULL"),
+                           {"u": user_id, "o": org_id})).first()
+    if ok is None:
+        raise not_found("Người dùng")
+
+
 @dataclass(frozen=True)
 class Scope:
     org_id: uuid.UUID

@@ -10,6 +10,7 @@ import { DocumentsScreen } from '../../src/screens/relations/DocumentsScreen';
 import { NotebookScreen } from '../../src/screens/relations/NotebookScreen';
 import { ProfileScreen } from '../../src/screens/relations/ProfileScreen';
 import { queryClient } from '../../src/lib/queryClient';
+import { qk } from '../../src/lib/queries';
 import { useUrlStateStore } from '../../src/lib/uiStore';
 import { AGENT_IDS } from '../mock-ids';
 
@@ -119,6 +120,8 @@ describe('Nhóm & Con người', () => {
   });
 
   it('gán BOT cho một người qua hộp thoại', async () => {
+    // Nút "Đổi" chỉ hiện với quyền profile.write.
+    queryClient.setQueryData(qk.me, { id: 'u', permissions: { 'profile.read': 'all', 'profile.write': 'all' } });
     const calls = mockFetch((c) => {
       if (c.url.includes('/directory/channels')) return json(200, CHANNELS);
       if (c.url.includes('/directory/groups')) return json(200, GROUPS);

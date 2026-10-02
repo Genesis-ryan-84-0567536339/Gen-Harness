@@ -21,10 +21,12 @@ router = APIRouter(prefix="/pickers", tags=["pickers"])
 
 
 def _any_of(*permissions: str) -> Callable[..., Awaitable[service.CurrentUser]]:
-    """Cần ít nhất MỘT trong các quyền (phạm vi bất kỳ khác NONE); cả ba đều NONE → 403 forbidden("queue.act").
+    """Cần ít nhất MỘT trong các quyền (phạm vi bất kỳ khác NONE); tất cả đều NONE → 403 forbidden(quyền đầu).
 
-    Thêm `profile.read` (ngoài queue.act / opportunity.write của kế hoạch) vì bộ lọc 'Phụ trách' ở Bản đồ quan hệ
-    cần cho Auditor — lệch có chủ đích so với kế hoạch; chỉ lộ tên hiển thị.
+    Lưu ý cho `USERS`: `profile.read` (thêm ngoài queue.act / opportunity.write của kế hoạch, vì bộ lọc 'Phụ trách'
+    ở Bản đồ quan hệ cần cho Auditor) khác NONE với MỌI vai trò trong ma trận rbac hiện tại — nên /pickers/users
+    thực tế MỞ cho mọi người dùng đã đăng nhập cùng org. Chấp nhận có chủ đích: chỉ lộ `id` + tên hiển thị (không
+    email, không vai trò); cổng vẫn giữ để vai trò tương lai không có quyền nào trong ba bị 403.
     """
 
     async def dep(user: service.CurrentUser = Depends(current_user)) -> service.CurrentUser:
@@ -36,6 +38,8 @@ def _any_of(*permissions: str) -> Callable[..., Awaitable[service.CurrentUser]]:
 
 
 USERS = _any_of("queue.act", "opportunity.write", "profile.read")
+#: Trần số người trả về; vượt trần → `truncated: true` để web báo "danh sách bị cắt" thay vì im lặng mất người.
+PICKER_USERS_LIMIT = 500
 
 
 @router.get("/users")
@@ -43,8 +47,11 @@ async def picker_users(user: service.CurrentUser = Depends(USERS), db: AsyncSess
     rows = (await db.execute(text("""
         SELECT u.id, u.display_name FROM core.users u
         WHERE u.org_id = :o AND u.is_active AND u.deleted_at IS NULL
-        ORDER BY lower(u.display_name) LIMIT 500"""), {"o": user.org_id})).all()
-    return {"items": [{"id": str(r.id), "name": r.display_name, "me": r.id == user.id} for r in rows]}
+        ORDER BY lower(u.display_name) LIMIT :lim"""), {"o": user.org_id, "lim": PICKER_USERS_LIMIT + 1})).all()
+    truncated = len(rows) > PICKER_USERS_LIMIT
+    rows = rows[:PICKER_USERS_LIMIT]
+    return {"items": [{"id": str(r.id), "name": r.display_name, "me": r.id == user.id} for r in rows],
+            "truncated": truncated}
 
 
 @router.get("/agents")

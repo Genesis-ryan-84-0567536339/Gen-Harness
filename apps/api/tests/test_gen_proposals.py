@@ -306,3 +306,34 @@ async def test_confirm_does_not_block_on_session_row_lock(owner_api: Api, app: A
     assert r.status_code == 200, r.text
     assert r.json()["status"] == "confirmed"
     assert len(await _log("gen.proposal_confirmed")) == 1
+
+
+async def test_confirm_failure_passes_error_id_and_pin_lock(owner_api: Api, app: Any, monkeypatch: Any) -> None:
+    """Endpoint nội bộ lỗi → web vẫn nhận mã lỗi (error_id) của 500 và giờ mở khoá của PIN_LOCKED; khoá lạ bị bỏ."""
+    tid = (await owner_api.send("POST", "/tasks", {"title": "Thử lỗi"})).json()["id"]
+    me = await _me(owner_api)
+    router = FakeRouter([
+        {"steps": [{"kind": "tool", "name": "task.list", "args": {}}]},
+        {"steps": [{"kind": "propose", "proposal": {"type": "assign", "fields": {
+            "item_type": "task", "item_id": tid, "user_id": me["id"]}}}]}])
+    p = _proposals(await ask(owner_api, app, router, "giao cho tôi", screen="tasks"))[0]
+    replies: list[tuple[int, dict[str, Any]]] = [
+        (500, {"code": "INTERNAL", "title": "Hệ thống gặp lỗi", "detail": "Mã lỗi abcd1234",
+               "error_id": "abcd1234", "sql": "SELECT bi_mat"}),
+        (423, {"code": "PIN_LOCKED", "title": "Mã PIN đang bị khoá", "detail": "Thử lại sau ít phút",
+               "locked_until": "2026-10-02T10:00:00+00:00"}),
+        (401, {"code": "PIN_INVALID", "title": "Mã PIN không đúng", "attempts_left": 2}),
+    ]
+
+    async def fake_call(*_: Any, **__: Any) -> tuple[int, dict[str, Any]]:
+        return replies.pop(0)
+
+    monkeypatch.setattr(proposals, "call_as_user", fake_call)
+    r = await owner_api.send("POST", f"/gen/proposals/{p['id']}/confirm", {})
+    assert r.status_code == 500 and r.json()["code"] == "INTERNAL" and r.json()["error_id"] == "abcd1234"
+    assert "sql" not in r.json() and "bi_mat" not in r.text
+    r = await owner_api.send("POST", f"/gen/proposals/{p['id']}/confirm", {})
+    assert r.status_code == 423 and r.json()["locked_until"] == "2026-10-02T10:00:00+00:00"
+    r = await owner_api.send("POST", f"/gen/proposals/{p['id']}/confirm", {})
+    assert r.status_code == 401 and r.json()["attempts_left"] == 2
+    assert (await proposals.load(app.state.redis, p["id"]))["status"] == "pending"

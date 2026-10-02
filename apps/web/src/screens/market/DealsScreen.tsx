@@ -5,7 +5,8 @@ import { Button, Dialog, EmptyState, Icon, Tabs, type FilterOption, type TabItem
 import { api } from '../../lib/api';
 import { errorText } from '../../lib/errorText';
 import { fmtDM, fmtInt } from '../../lib/format';
-import { useAssignees, useEmptyUsersText } from '../../lib/pickers';
+import { TRUNCATED_USERS_TEXT, useAssignees, useEmptyUsersText } from '../../lib/pickers';
+import { useCan } from '../../lib/permissions';
 import { useUrlState } from '../../lib/uiStore';
 import { CardError, InlineError, ScreenHead, SkeletonLines } from '../common';
 import {
@@ -127,6 +128,8 @@ function CasesPane() {
   const patch = usePatchCase();
   const [assigneeFor, setAssigneeFor] = useState<CaseItem | null>(null);
   const [creating, setCreating] = useState(false);
+  // Gán người xử lý cần opportunity.write — không có quyền thì không hiện nút "Đổi" (mở ra chỉ gặp 403).
+  const canWrite = useCan('opportunity.write');
 
   return (
     <div className="deals-pane">
@@ -191,9 +194,11 @@ function CasesPane() {
                     <td>
                       <div className="dir-bot-cell">
                         <span className="dir-bot-cell__name">{c.assignee ? c.assignee.name : 'Chưa gán'}</span>
-                        <Button variant="ghost" size="sm" onClick={() => setAssigneeFor(c)}>
-                          Đổi
-                        </Button>
+                        {canWrite ? (
+                          <Button variant="ghost" size="sm" onClick={() => setAssigneeFor(c)}>
+                            Đổi
+                          </Button>
+                        ) : null}
                       </div>
                     </td>
                   </tr>
@@ -213,7 +218,7 @@ function CasesPane() {
 
 function AssigneeDialog({ c, onClose }: { c: CaseItem; onClose: () => void }) {
   const patch = usePatchCase();
-  const { options, hasOthers, query: people } = useAssignees();
+  const { options, hasOthers, truncated, query: people } = useAssignees();
   const emptyText = useEmptyUsersText();
   // Người đang được gán nhưng không còn trong /pickers/users (đã khoá/xoá) — vẫn hiện, đánh dấu chọn (như AgentChoices).
   const missing = c.assignee && people.isSuccess && !options.some((u) => u.id === c.assignee?.id) ? c.assignee : null;
@@ -231,7 +236,7 @@ function AssigneeDialog({ c, onClose }: { c: CaseItem; onClose: () => void }) {
       }
     >
       <div className="dlg-list" role="list">
-        <button type="button" className="sv-open" aria-pressed={!c.assignee} onClick={() => patch.mutate({ id: c.id, body: { assignee_user_id: null } }, { onSuccess: onClose })}>
+        <button type="button" className="sv-open" aria-pressed={!c.assignee} disabled={patch.isPending} onClick={() => patch.mutate({ id: c.id, body: { assignee_user_id: null } }, { onSuccess: onClose })}>
           <span className="sv-open__name">Chưa gán</span>
           {!c.assignee ? <Icon name="ph ph-check" size={14} /> : null}
         </button>
@@ -242,18 +247,30 @@ function AssigneeDialog({ c, onClose }: { c: CaseItem; onClose: () => void }) {
         ) : (
           <>
             {missing ? (
-              <button type="button" className="sv-open" aria-pressed disabled title="Người này đã bị khoá hoặc xoá — chọn người khác để gán lại">
-                <span className="sv-open__name">{`${missing.name || 'Người dùng'} (đã khoá)`}</span>
+              <button
+                type="button"
+                className="sv-open"
+                aria-pressed
+                disabled
+                title={
+                  truncated
+                    ? 'Người này nằm ngoài 500 người đầu của danh sách (hoặc đã bị khoá/xoá)'
+                    : 'Người này đã bị khoá hoặc xoá — chọn người khác để gán lại'
+                }
+              >
+                {/* Danh sách bị cắt ở trần → không khẳng định là đã khoá/xoá. */}
+                <span className="sv-open__name">{`${missing.name || 'Người dùng'} (${truncated ? 'ngoài danh sách' : 'đã khoá/xoá'})`}</span>
                 <Icon name="ph ph-check" size={14} />
               </button>
             ) : null}
             {options.map((u) => (
-              <button key={u.id} type="button" className="sv-open" aria-pressed={c.assignee?.id === u.id} onClick={() => patch.mutate({ id: c.id, body: { assignee_user_id: u.id } }, { onSuccess: onClose })}>
+              <button key={u.id} type="button" className="sv-open" aria-pressed={c.assignee?.id === u.id} disabled={patch.isPending} onClick={() => patch.mutate({ id: c.id, body: { assignee_user_id: u.id } }, { onSuccess: onClose })}>
                 <span className="sv-open__name">{u.label}</span>
                 {c.assignee?.id === u.id ? <Icon name="ph ph-check" size={14} /> : null}
               </button>
             ))}
             {!hasOthers ? <p className="muted-note">{emptyText}</p> : null}
+            {truncated ? <p className="muted-note">{TRUNCATED_USERS_TEXT}</p> : null}
           </>
         )}
       </div>

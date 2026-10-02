@@ -24,6 +24,9 @@ from gh.gen import engine, proposals, store
 
 router = APIRouter(prefix="/gen", tags=["gen"])
 
+#: Khoá phụ của lỗi endpoint nội bộ được chuyển tiếp nguyên cho web khi xác nhận đề xuất Gen thất bại.
+_PASSTHROUGH_ERROR_KEYS = ("error_id", "locked_until", "attempts_left")
+
 
 async def _decider_kind(db: AsyncSession, org_id: uuid.UUID) -> str:
     has = (await db.execute(text("""SELECT 1 FROM agent.providers p
@@ -296,6 +299,10 @@ async def confirm_proposal(pid: uuid.UUID, request: Request, body: ConfirmIn | N
         await _log_apart(user, "gen.proposal_confirmed", "blocked" if status in (403, 404, 423) else "failed", p,
                          endpoint=f"{call.method} {call.path}", status=status, code=err_body.get("code"))
         extra = {"errors": err_body["errors"]} if isinstance(err_body.get("errors"), dict) else {}
+        # Giữ các khoá phụ người dùng cần thấy: mã lỗi của 500 INTERNAL (gửi hỗ trợ), giờ mở khoá/số lần còn lại
+        # của PIN. Chỉ danh sách trắng kiểu vô hướng — không chuyển tiếp khoá lạ từ phản hồi nội bộ.
+        extra.update({k: err_body[k] for k in _PASSTHROUGH_ERROR_KEYS
+                      if isinstance(err_body.get(k), (str, int)) and not isinstance(err_body.get(k), bool)})
         raise ApiError(status, str(err_body.get("code") or "GEN_PROPOSAL_FAILED"),
                        str(err_body.get("title") or "Không thực hiện được đề xuất"), err_body.get("detail"), **extra)
     result = proposals.result_of(call, fields, res)

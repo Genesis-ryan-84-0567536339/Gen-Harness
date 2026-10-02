@@ -85,9 +85,14 @@ async def test_dbapi_error_connection_invalidated_is_503() -> None:
             super().__init__("the database system is shutting down")
             self.sqlstate = sqlstate
 
-    for state, status in (("57P03", 503), ("57P01", 503), ("08006", 503), ("23505", 500)):
+    # Quá tải tạm thời (lớp 53: too_many_connections/disk_full/out_of_memory; 57014 statement_timeout) → 503
+    # để client thử lại; lớp 42 (lỗi cú pháp/thiếu bảng) và 22 (dữ liệu) vẫn là lỗi mã → 500.
+    for state, status in (("57P03", 503), ("57P01", 503), ("08006", 503), ("53300", 503), ("53100", 503),
+                          ("53200", 503), ("57014", 503), ("23505", 500), ("42P01", 500), ("22P02", 500)):
         resp = await db_error_handler(_req(), DBAPIError("SELECT 1", None, Orig(state)))
         assert resp.status_code == status, state
+        if status == 503:
+            assert _json(resp)["code"] == "DB_UNAVAILABLE", state
 
 
 @pytest.mark.parametrize("exc", [ConnectionRefusedError(111, "Connect call failed ('172.18.0.3', 5432)"),
@@ -177,6 +182,33 @@ async def test_integrity_error_end_to_end(owner_api: Api, app) -> None:  # type:
     assert body["code"] == "INTERNAL" and body["error_id"] and body["error_id"] in body["detail"]
     for leak in LEAKS:
         assert leak not in r.text
+
+
+@pytest.mark.parametrize("exc", [KeyError("khoa_bi_mat"), ValueError("bi-mat"), AttributeError("x")])
+async def test_unhandled_exception_is_problem_json_internal(  # type: ignore[no-untyped-def]
+        owner_api: Api, app, exc: Exception, caplog: pytest.LogCaptureFixture) -> None:
+    """Ngoại lệ lạ không có handler riêng vẫn là problem+json 500 INTERNAL kèm error_id (không text/plain)."""
+    caplog.set_level(logging.ERROR, logger="gh.errors")
+    name = type(exc).__name__.lower()
+
+    async def boom() -> None:
+        raise exc
+
+    app.add_api_route(f"/api/v1/__t/unhandled-{name}", boom, methods=["GET"])
+    # ServerErrorMiddleware gửi phản hồi rồi ném lại ngoại lệ cho server ghi log — client thật vẫn nhận 500 JSON.
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test",
+                                 cookies=owner_api.c.cookies) as c:
+        r = await c.get(f"/api/v1/__t/unhandled-{name}")
+    assert r.status_code == 500, r.text
+    assert r.headers["content-type"].startswith("application/problem+json"), r.text
+    body = r.json()
+    assert body["code"] == "INTERNAL"
+    assert re.fullmatch(r"[0-9a-f]{8}", body["error_id"])
+    assert body["error_id"] in body["detail"]
+    assert body["title"] == "Hệ thống gặp lỗi khi xử lý yêu cầu — đã ghi nhật ký"
+    assert "bi-mat" not in r.text and "khoa_bi_mat" not in r.text
+    assert any(body["error_id"] in rec.getMessage() and rec.exc_info for rec in caplog.records)
 
 
 # ── (f): /docs, /openapi.json theo môi trường ────────────────────────────────────────────────────────────────
