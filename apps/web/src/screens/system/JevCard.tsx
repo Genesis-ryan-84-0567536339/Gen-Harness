@@ -19,12 +19,14 @@ const JEV_DEFAULT_MODEL = 'typesafe/jev-1.13';
  * Gen dùng để chọn ý định và bước UI kế tiếp (trần ~1,5 s, lỗi/chậm thì rơi về model lớn). Không nằm trong chuỗi
  * sinh chữ. Khoá lưu như khoá nhà cung cấp khác (mã hoá phong bì).
  */
-export function JevCard() {
+export function JevCard({ test: lifted, onFailed }: { test?: TestMutation; onFailed?: () => void } = {}) {
   const canManage = useCan('system.manage');
   const providers = useProviders();
   const jev = (providers.data ?? []).find((p) => p.kind === 'system_one');
   // Một mutation cho cả thẻ: "Lưu & kiểm tra" ở form, kết quả hiện tiếp ở phần trạng thái sau khi lưu.
-  const test = useTestProvider();
+  // v0.1.39: BrainTab có thể truyền mutation của nó vào để kết quả "Kiểm tra 1 lần" còn giữ khi thẻ chuyển sang "Nâng cao".
+  const own = useTestProvider();
+  const test = lifted ?? own;
   return (
     <Panel
       title="Jev — quyết định nhanh cho Gen"
@@ -36,7 +38,7 @@ export function JevCard() {
       {providers.isPending ? (
         <SkeletonLines rows={3} padding="0" />
       ) : jev ? (
-        <JevStatus p={jev} test={test} />
+        <JevStatus p={jev} test={test} onFailed={onFailed} />
       ) : canManage ? (
         <JevForm test={test} />
       ) : (
@@ -46,9 +48,10 @@ export function JevCard() {
   );
 }
 
-type TestMutation = ReturnType<typeof useTestProvider>;
+export type TestMutation = ReturnType<typeof useTestProvider>;
 
-function JevStatus({ p, test }: { p: Provider; test: TestMutation }) {
+function JevStatus({ p, test, onFailed }: { p: Provider; test: TestMutation; onFailed?: () => void }) {
+  // v0.1.39 (F-78): Jev không bắt buộc — chỉ cần kiểm 1 lần; có kết quả trong phiên thì ẩn nút.
   const result = test.data && test.variables === p.id ? test.data : null;
   const status = providerStatus(p);
   const tone = status.tone;
@@ -65,9 +68,28 @@ function JevStatus({ p, test }: { p: Provider; test: TestMutation }) {
         <dd style={{ color: tone }}>{status.label}</dd>
       </dl>
       <div className="jev-actions">
-        <Button variant="secondary" className="btn-27" icon="ph ph-pulse" data-gen-target="system.brain.jev.test" loading={test.isPending} onClick={() => test.mutate(p.id)}>
-          Kiểm tra
-        </Button>
+        {result ? (
+          <span className="jev-note" role="status">
+            <Icon name="ph ph-check-circle" size={12} /> Đã kiểm tra — không cần kiểm thêm
+          </span>
+        ) : (
+          <Button
+            variant="secondary"
+            className="btn-27"
+            icon="ph ph-pulse"
+            data-gen-target="system.brain.jev.test"
+            loading={test.isPending}
+            onClick={() =>
+              test.mutate(p.id, {
+                onSuccess: (r) => {
+                  if (!r.ok) onFailed?.();
+                },
+              })
+            }
+          >
+            Kiểm tra 1 lần
+          </Button>
+        )}
         <span className="jev-note">
           <Icon name="ph ph-info" size={12} /> Gen hỏi Jev trước (tối đa 1,5 giây); lỗi hoặc chậm thì dùng model lớn.
         </span>

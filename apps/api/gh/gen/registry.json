@@ -99,7 +99,7 @@
     },
     "guide": {
       "path": "/guide",
-      "title": "Hướng dẫn kết nối"
+      "title": "Hướng dẫn thiết lập"
     },
     "account": {
       "path": "/account",
@@ -108,6 +108,10 @@
     "help": {
       "path": "/help",
       "title": "Trợ giúp"
+    },
+    "social": {
+      "path": "/social",
+      "title": "Tài khoản mạng xã hội"
     }
   },
   "targets": [
@@ -256,6 +260,17 @@
       "safe_message": "Đây là thao tác nhạy cảm — Sếp tự xem kỹ và tự quyết định, Gen không làm thay."
     },
     {
+      "id": "system.channels.facebook",
+      "screen": "system",
+      "label": "Thẻ Facebook",
+      "description": "Mở trang tài khoản mạng xã hội",
+      "dynamic": null,
+      "params": {
+        "tab": "channels"
+      },
+      "permission": "system.manage"
+    },
+    {
       "id": "system.brain.quota",
       "screen": "system",
       "label": "Hạn mức theo model",
@@ -298,8 +313,8 @@
     {
       "id": "system.brain.jev.test",
       "screen": "system",
-      "label": "Nút \"Kiểm tra\" Jev",
-      "description": "Gọi thử Jev để biết khoá và địa chỉ đúng chưa",
+      "label": "Nút \"Kiểm tra 1 lần\" Jev",
+      "description": "Gọi thử Jev một lần để biết khoá và địa chỉ đúng chưa",
       "dynamic": null,
       "params": {
         "tab": "brain"
@@ -574,7 +589,7 @@
     {
       "id": "help.guide",
       "screen": "help",
-      "label": "Nút \"Mở Hướng dẫn kết nối\"",
+      "label": "Nút \"Mở Hướng dẫn thiết lập\"",
       "description": "Sang trang hướng dẫn các việc thiết lập để sau (Owner)",
       "dynamic": null,
       "params": null

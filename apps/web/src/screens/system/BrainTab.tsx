@@ -1,7 +1,9 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { EmptyState, Icon } from '@gen-harness/ui';
-import { useProviders } from '../../lib/dataQueries';
-import { useFailoverRules } from '../api/queries';
+import { qk2, useProviders } from '../../lib/dataQueries';
+import { useFailoverRules, useTestProvider } from '../api/queries';
 import { fmtQuota, providerStatus } from '../api/apiModel';
 import { CardError, Panel, SkeletonLines } from '../common';
 import { N4, OK, WARN } from '../data/dataModel';
@@ -20,6 +22,19 @@ export function BrainTab() {
   const canManage = useCan('system.manage');
   const providers = useProviders();
   const rules = useFailoverRules();
+  const qc = useQueryClient();
+  // v0.1.39 (F-78): Jev không bắt buộc — kiểm tra lỗi thì thu thẻ vào "Nâng cao" thay vì để lỗi đỏ giữa tab.
+  // Mutation giữ ở đây để kết quả "Kiểm tra 1 lần" còn nguyên khi thẻ chuyển chỗ.
+  const jevTest = useTestProvider();
+  const [jevFailedNow, setJevFailedNow] = useState(false);
+  const jev = (providers.data ?? []).find((p) => p.kind === 'system_one');
+  const jevFailed =
+    !!jev && (jevFailedNow || jev.last_test?.ok === false || jev.auth_state === 'error' || jev.auth_state === 'expired');
+  const onJevFailed = () => {
+    setJevFailedNow(true);
+    void qc.invalidateQueries({ queryKey: qk2.providers });
+  };
+  const jevCard = <JevCard test={jevTest} onFailed={onJevFailed} />;
   // Jev (system_one) không nằm trong chuỗi sinh chữ — hiện riêng ở thẻ Jev.
   const sorted = [...(providers.data ?? [])].filter((p) => p.kind !== 'system_one').sort((a, b) => a.failover_rank - b.failover_rank);
   const models = sorted.flatMap((p) => p.models.map((m) => ({ ...m, providerName: p.name, providerId: p.id, enabled: p.enabled })));
@@ -131,7 +146,14 @@ export function BrainTab() {
       </div>
 
       <div className="sys-grid2">
-        <JevCard />
+        {jevFailed ? (
+          <details className="brain-advanced">
+            <summary>Nâng cao — Jev (đã ẩn vì kiểm tra lỗi, không bắt buộc)</summary>
+            {jevCard}
+          </details>
+        ) : (
+          jevCard
+        )}
         <CliCard canManage={canManage} showCredentials={false} />
       </div>
 

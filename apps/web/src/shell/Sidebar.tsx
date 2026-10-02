@@ -70,7 +70,12 @@ function Domain({ dm, index, wide, activeKey }: { dm: NavDomain; index: number; 
       {dm.groups.map((g) => (
         <Fragment key={g.key ?? g.name}>
           <Group g={g} wide={wide} activeKey={activeKey} />
-          {g.key === 'system' ? <GuideNavItem wide={wide} /> : null}
+          {g.key === 'system' ? (
+            <>
+              <GuideNavItem wide={wide} />
+              <SocialNavItem wide={wide} />
+            </>
+          ) : null}
         </Fragment>
       ))}
     </div>
@@ -82,28 +87,72 @@ function Domain({ dm, index, wide, activeKey }: { dm: NavDomain; index: number; 
  * /setup/* chỉ cho Owner). Trước đây chỉ vào được qua Trợ giúp hoặc thẻ "Việc thiết lập tiếp" (có lúc ẩn).
  */
 function GuideNavItem({ wide }: { wide: boolean }) {
+  return (
+    <OwnerNavLink
+      wide={wide}
+      to="/guide"
+      screen="guide"
+      icon="ph ph-list-checks"
+      label="Hướng dẫn thiết lập"
+      title="Hướng dẫn thiết lập — các bước kết nối còn lại"
+    />
+  );
+}
+
+/**
+ * v0.1.39 (F-32): lối vào cố định tới "Tài khoản mạng xã hội" (/social) ngay cạnh Hướng dẫn thiết lập — chỉ Owner.
+ * Trước đây chỉ vào được qua menu tài khoản (AccountFooter, vẫn giữ nguyên).
+ */
+function SocialNavItem({ wide }: { wide: boolean }) {
+  return (
+    <OwnerNavLink
+      wide={wide}
+      to="/social"
+      screen="social"
+      icon="ph ph-facebook-logo"
+      label="Mạng xã hội"
+      title="Tài khoản mạng xã hội — Facebook, đọc thông báo và tin nhắn"
+    />
+  );
+}
+
+function OwnerNavLink({
+  wide,
+  to,
+  screen,
+  icon,
+  label,
+  title,
+}: {
+  wide: boolean;
+  to: string;
+  screen: string;
+  icon: string;
+  label: string;
+  title: string;
+}) {
   const me = useMe();
   const { pathname } = useLocation();
   if (me.data?.role?.code !== 'owner') return null;
-  const on = pathname === '/guide' || pathname.startsWith('/guide/');
+  const on = pathname === to || pathname.startsWith(`${to}/`);
   const el = (
     <Link
-      to="/guide"
+      to={to}
       className="sb-item"
       data-on={on || undefined}
       data-self={on || undefined}
       aria-current={on ? 'page' : undefined}
-      aria-label={wide ? undefined : 'Hướng dẫn thiết lập'}
-      title={wide ? 'Hướng dẫn thiết lập — các bước kết nối còn lại' : undefined}
+      aria-label={wide ? undefined : label}
+      title={wide ? title : undefined}
     >
       <span className="sb-item__bar" aria-hidden />
-      <Icon name="ph ph-list-checks" size={16} />
-      {wide ? <span className="sb-item__name">Hướng dẫn thiết lập</span> : null}
+      <Icon name={icon} size={16} />
+      {wide ? <span className="sb-item__name">{label}</span> : null}
     </Link>
   );
   return (
-    <div className="sb-group" data-screen="guide">
-      {wide ? el : <Tooltip content="Hướng dẫn thiết lập" placement="right" delay={150}>{el}</Tooltip>}
+    <div className="sb-group" data-screen={screen}>
+      {wide ? el : <Tooltip content={label} placement="right" delay={150}>{el}</Tooltip>}
     </div>
   );
 }
