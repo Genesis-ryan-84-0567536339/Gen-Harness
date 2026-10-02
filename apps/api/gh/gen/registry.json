@@ -411,6 +411,7 @@
       "params": {
         "tab": "storage"
       },
+      "permission": "roles.manage",
       "sensitive": true,
       "safe_message": "Đây là thao tác nhạy cảm — Sếp tự xem kỹ và tự quyết định, Gen không làm thay."
     },
@@ -423,6 +424,7 @@
       "params": {
         "tab": "storage"
       },
+      "permission": "system.manage",
       "sensitive": true,
       "safe_message": "Đây là thao tác nhạy cảm — Sếp tự xem kỹ và tự quyết định, Gen không làm thay."
     },
@@ -435,6 +437,7 @@
       "params": {
         "tab": "storage"
       },
+      "permission": "roles.manage",
       "sensitive": true,
       "safe_message": "Đây là thao tác nhạy cảm — Sếp tự xem kỹ và tự quyết định, Gen không làm thay."
     },
@@ -447,6 +450,7 @@
       "params": {
         "tab": "storage"
       },
+      "permission": "roles.manage",
       "sensitive": true,
       "safe_message": "Đây là thao tác nhạy cảm — Sếp tự xem kỹ và tự quyết định, Gen không làm thay."
     },
