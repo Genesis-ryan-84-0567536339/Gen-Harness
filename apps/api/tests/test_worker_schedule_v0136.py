@@ -4,6 +4,8 @@
 - Job theo ngày (nặng) không rơi vào giờ làm việc 08:00–18:00 và cửa sổ cập nhật genh 02:30–03:30.
 - Mọi cron được bọc `_tracked`: ghi `gh:cron:last:<tên hàm>` + `gh:worker:heartbeat` (hợp đồng Redis với API), ném
   lại nguyên ngoại lệ của job; tên CronJob và `timeout` không đổi.
+- v0.1.40 (F-2): `retention_sweep` 05:00 thay purge_gen_conversations (05:00) + purge_notifications (05:10); hai
+  hàm cũ vẫn ở `functions`. Payload `_tracked` thêm "timeout": bool (F-16).
 """
 
 import asyncio
@@ -22,8 +24,8 @@ from gh.backup import scheduled_backup_scan
 from gh.worker import WorkerSettings
 
 LIGHT_ALLOWLIST = {"hub_token_expiry_scan"}  # nhẹ, chỉ nhắc — được chạy trong giờ làm việc
-DAILY = {"partition_maintenance", "verify_action_log", "compact_notebooks", "purge_gen_conversations",
-         "purge_notifications", "people_review_recompute"}
+DAILY = {"partition_maintenance", "verify_action_log", "compact_notebooks", "retention_sweep",
+         "people_review_recompute"}
 
 
 def _jobs() -> dict[str, CronJob]:
@@ -67,6 +69,8 @@ def test_daily_jobs_have_fixed_hour() -> None:
         assert jobs[name].hour is not None, f"{name} phải là job theo ngày (hour cố định)"
     assert _as_set(jobs["partition_maintenance"].hour, range(24)) == {4, 23}
     assert (jobs["people_review_recompute"].hour, jobs["people_review_recompute"].minute) == ({4}, {40})
+    assert (jobs["retention_sweep"].hour, jobs["retention_sweep"].minute) == ({5}, {0})
+    assert jobs["retention_sweep"].timeout_s == 1800
     # nhẹ: giữ đúng 08:50 giờ VN như trước
     assert (jobs["hub_token_expiry_scan"].hour, jobs["hub_token_expiry_scan"].minute) == ({8}, {50})
 
@@ -85,11 +89,17 @@ def test_backup_cron_keeps_kwargs_including_timeout() -> None:
 def test_cron_names_unchanged() -> None:
     names = {c.name for c in WorkerSettings.cron_jobs}
     for n in ("verify_action_log", "partition_maintenance", "detect_identities", "compact_notebooks",
-              "expire_sessions", "purge_gen_conversations", "purge_notifications", "hub_token_expiry_scan",
+              "expire_sessions", "retention_sweep", "hub_token_expiry_scan",
               "social_schedule", "people_review_recompute", "scheduled_backup_scan"):
         assert f"cron:{n}" in names, n
+    # v0.1.40: hai purge cũ không còn cron riêng (gộp vào retention_sweep) nhưng vẫn nhận job enqueue cũ
+    for n in ("purge_gen_conversations", "purge_notifications"):
+        assert f"cron:{n}" not in names, n
+        assert getattr(worker, n) in WorkerSettings.functions
     # danh sách functions (job enqueue) vẫn là hàm gốc, không phải bản bọc
     assert worker.verify_action_log in WorkerSettings.functions
+    assert worker.retention_sweep in WorkerSettings.functions
+    assert WorkerSettings.job_timeout == worker.JOB_TIMEOUT == 300
 
 
 async def _job_ok(ctx: dict[str, Any]) -> int:
@@ -111,7 +121,7 @@ async def test_tracked_writes_last_run_and_heartbeat(redis: Redis) -> None:
     raw = await redis.get("gh:cron:last:_job_ok")
     assert raw is not None
     data = orjson.loads(raw)
-    assert data["ok"] is True and isinstance(data["ms"], int)
+    assert data["ok"] is True and isinstance(data["ms"], int) and data["timeout"] is False
     assert data["at"].endswith("Z") and datetime.fromisoformat(data["at"].replace("Z", "+00:00"))
     assert 0 < await redis.ttl("gh:cron:last:_job_ok") <= 7 * 86400
     hb = await redis.get("gh:worker:heartbeat")

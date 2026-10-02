@@ -2,6 +2,7 @@
 
 import csv
 import io
+import logging
 import re
 import uuid
 from datetime import UTC, datetime
@@ -13,7 +14,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gh import crypto, health, realtime
+from gh import crypto, health, realtime, retention
 from gh.audit.routes import export_rows, query_log
 from gh.auth import rbac, service
 from gh.auth.deps import require, require_owner, require_pin
@@ -30,6 +31,7 @@ from gh.providers.clients import AGY_MODEL_RE
 from gh.providers.router import KEY_AAD, cooldown_key, quota_key
 from gh.shell.routes import publish_header
 
+log = logging.getLogger("gh.system")
 router = APIRouter(tags=["system"])
 READ = require("system.read")
 MANAGE = require("system.manage")
@@ -920,17 +922,34 @@ async def system_audit_log_export(actor_type: str | None = None, action: str | N
 # ─── Dữ liệu & lưu trữ (spec I) ──────────────────────────────────────────────
 
 # Tập dữ liệu Owner đặt được hạn lưu (`ops.retention_policies`, thiết kế 01-ui-screens §system bổ sung).
-RETENTION_DATASETS = ("raw.events", "clean.meaning_units", "ops.action_log", "memory.entries", "agent.model_calls")
+# v0.1.40 (F-2): nguồn sự thật là gh/retention.py (chế độ dọn, ghi chú, sync partman).
+RETENTION_DATASETS = tuple(retention.DATASETS)
 
 
 @router.get("/retention-policies")
-async def get_retention(user: service.CurrentUser = Depends(READ), db: AsyncSession = DB) -> list[dict[str, Any]]:
+async def get_retention(request: Request, user: service.CurrentUser = Depends(READ),
+                        db: AsyncSession = DB) -> list[dict[str, Any]]:
     rows = (await db.execute(text("""SELECT dataset, keep_days, anonymize_after_days FROM ops.retention_policies
                                      WHERE org_id = :o"""), {"o": user.org_id})).all()
     by_ds = {r.dataset: r for r in rows}
-    return [{"dataset": d, "keep_days": by_ds[d].keep_days if d in by_ds else None,
-             "anonymize_after_days": by_ds[d].anonymize_after_days if d in by_ds else None}
-            for d in RETENTION_DATASETS]
+    last = await retention.read_last(getattr(request.app.state, "redis", None)) or {}
+    last_ds = last.get("datasets") if isinstance(last.get("datasets"), dict) else {}
+    out: list[dict[str, Any]] = []
+    for d, meta in [*retention.DATASETS.items(), *retention.FIXED.items()]:
+        mode = str(meta["mode"])
+        if d in retention.FIXED:
+            keep, anon = meta["keep_days"], None
+        else:
+            keep = by_ds[d].keep_days if d in by_ds else None
+            anon = by_ds[d].anonymize_after_days if d in by_ds else None
+        if mode == "not_applicable":
+            keep = None
+        run = last_ds.get(d) if isinstance(last_ds, dict) else None
+        out.append({"dataset": d, "keep_days": keep, "anonymize_after_days": anon, "mode": mode,
+                    "editable": bool(meta["editable"]), "note": retention.note_for(d),
+                    "last_run_at": last.get("at") if isinstance(run, dict) else None,
+                    "last_deleted": run.get("deleted") if isinstance(run, dict) else None})
+    return out
 
 
 class RetentionIn(BaseModel):
@@ -940,9 +959,12 @@ class RetentionIn(BaseModel):
 
 
 @router.patch("/retention-policies")
-async def patch_retention(body: RetentionIn, user: service.CurrentUser = Depends(MANAGE),
+async def patch_retention(body: RetentionIn, request: Request, user: service.CurrentUser = Depends(MANAGE),
                           _pin: Any = Depends(require_pin("policy.change")), db: AsyncSession = DB
                           ) -> list[dict[str, Any]]:
+    if retention.DATASETS[body.dataset]["mode"] == "not_applicable" and body.keep_days is not None:
+        raise ApiError(422, "RETENTION_NOT_APPLICABLE", "Dữ liệu chưa hợp lệ",
+                       errors={"keep_days": retention.NOT_APPLICABLE_ERROR})
     await db.execute(text("""
         INSERT INTO ops.retention_policies (org_id, dataset, keep_days, anonymize_after_days)
         VALUES (:o, :d, :k, :a)
@@ -951,7 +973,23 @@ async def patch_retention(body: RetentionIn, user: service.CurrentUser = Depends
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                            action="retention_policy.changed", target_type="retention_policy",
                            target_id=body.dataset, detail=body.model_dump(), ip=user.ip)
-    return await get_retention(user, db)
+    synced: bool | None = None
+    if body.dataset in retention.PARTITIONED:
+        # Hạn hiệu lực của bảng phân vùng = MAX qua mọi tổ chức ⇒ commit trước rồi đồng bộ partman ngay (qua admin);
+        # lỗi chỉ log — lượt dọn 05:00 (`retention_sweep`) tự đồng bộ lại.
+        await db.commit()
+        try:
+            await retention.sync_partman_now()
+            synced = True
+        except Exception as exc:  # noqa: BLE001
+            synced = False
+            log.warning("Không đồng bộ được hạn lưu sang partman: %s", exc)
+    rows = await get_retention(request, user, db)
+    if synced is not None:
+        for r in rows:
+            if r["dataset"] == body.dataset:
+                r["partman_synced"] = synced
+    return rows
 
 
 async def _person_row(db: AsyncSession, org_id: uuid.UUID, person_id: uuid.UUID) -> Any:
