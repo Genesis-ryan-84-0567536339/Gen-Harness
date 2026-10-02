@@ -6,7 +6,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import type { HubLink } from '@gen-harness/contracts';
 import { HubLinkCard } from '../../src/screens/mcp/HubLinkCard';
-import { expiryToIso, isoToDay } from '../../src/screens/mcp/mcpModel';
+import { expiryToIso, isPublicHttpsUrl, isoToDay } from '../../src/screens/mcp/mcpModel';
+import { usePinStore } from '../../src/lib/pinStore';
 import { qk } from '../../src/lib/queries';
 
 /** v0.1.26 — thẻ Gen-hub (Gen đọc Kho Ryan): token chỉ ghi, Kiểm tra bật liên kết, chỉ Owner cấu hình. */
@@ -82,7 +83,8 @@ describe('Thẻ Gen-hub', () => {
     expect(tokenInput).toHaveAttribute('type', 'password');
     expect(tokenInput).toHaveAttribute('data-gen-target', 'mcp.hub_link.token');
     await user.type(tokenInput, TOKEN);
-    await user.click(screen.getByLabelText('Cho phép Gen-hub ở mạng công cộng'));
+    // v0.1.39 (F-31): địa chỉ https công khai → công tắc tự bật sẵn, kèm cảnh báo.
+    expect(screen.getByLabelText('Cho phép Gen-hub ở mạng công cộng')).toHaveAttribute('aria-checked', 'true');
     await user.click(save);
     await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true));
     const patch = calls.find((c) => c.method === 'PATCH')!;
@@ -140,5 +142,129 @@ describe('Thẻ Gen-hub', () => {
     expect(expiryToIso('')).toBeNull();
     expect(isoToDay('2026-12-28T16:59:00Z')).toBe('2026-12-28');
     expect(isoToDay(null)).toBe('');
+  });
+});
+
+describe('v0.1.39 (F-31) — mạng công cộng bật sẵn, Kiểm tra tự lưu', () => {
+  afterEach(() => {
+    usePinStore.setState({ open: false, waiters: [] });
+  });
+
+  it('isPublicHttpsUrl: chỉ https trỏ ra Internet', () => {
+    const cases: Array<[string, boolean]> = [
+      ['https://hub.genos.top/mcp', true],
+      ['https://8.8.8.8/mcp', true],
+      ['https://100.64.1.2/mcp', true], // 100.64/10 coi là công khai như máy chủ
+      ['https://[2001:4860::8888]/mcp', true],
+      ['http://hub.genos.top/mcp', false],
+      ['http://192.168.1.5/mcp', false],
+      ['https://192.168.1.5/mcp', false],
+      ['https://10.0.0.2/mcp', false],
+      ['https://172.16.0.1/mcp', false],
+      ['https://172.31.255.1/mcp', false],
+      ['https://172.32.0.1/mcp', true],
+      ['https://127.0.0.1/mcp', false],
+      ['https://169.254.169.254/latest', false],
+      ['https://0.0.0.0/mcp', false],
+      ['https://localhost/mcp', false],
+      ['https://hub.localhost/mcp', false],
+      ['https://hub.local', false],
+      ['https://hub.lan/mcp', false],
+      ['https://hub.corp.internal/mcp', false],
+      ['https://hub.home.arpa/mcp', false],
+      ['https://genhub/mcp', false],
+      ['https://[::1]/mcp', false],
+      ['https://[fd00::1]/mcp', false],
+      ['https://[fe80::1]/mcp', false],
+      ['https://[::ffff:192.168.1.5]/mcp', false],
+      ['khong-phai-url', false],
+      ['', false],
+    ];
+    for (const [url, want] of cases) expect([url, isPublicHttpsUrl(url)]).toEqual([url, want]);
+  });
+
+  it('gõ địa chỉ: https công khai → bật sẵn + cảnh báo; mạng nội bộ → tắt; Owner bỏ tích thì không tự bật lại', async () => {
+    mockFetch((c) => (c.url.includes('/hub/link') ? json(200, OFF) : json(404)));
+    renderCard(<HubLinkCard />);
+    const user = userEvent.setup();
+    const addr = await screen.findByLabelText('Địa chỉ Gen-hub');
+    const sw = screen.getByLabelText('Cho phép Gen-hub ở mạng công cộng');
+    await user.type(addr, 'https://hub.genos.top/mcp');
+    expect(sw).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('note')).toHaveTextContent('Đã bật sẵn vì địa chỉ là https công khai — Gen-hub sẽ được gọi qua Internet. Bỏ tích nếu Gen-hub nằm trong mạng nội bộ.');
+    await user.clear(addr);
+    await user.type(addr, 'http://192.168.1.5/mcp');
+    expect(sw).toHaveAttribute('aria-checked', 'false');
+    expect(screen.queryByRole('note')).toBeNull();
+    await user.clear(addr);
+    await user.type(addr, 'https://hub.local');
+    expect(sw).toHaveAttribute('aria-checked', 'false');
+    await user.clear(addr);
+    await user.type(addr, 'https://hub.genos.top/mcp');
+    expect(sw).toHaveAttribute('aria-checked', 'true');
+    // Owner tự bỏ tích → sửa địa chỉ không tự bật lại.
+    await user.click(sw);
+    expect(sw).toHaveAttribute('aria-checked', 'false');
+    await user.clear(addr);
+    await user.type(addr, 'https://kho.genos.top/mcp');
+    expect(sw).toHaveAttribute('aria-checked', 'false');
+    expect(screen.queryByRole('note')).toBeNull();
+  });
+
+  it('Kiểm tra khi còn thay đổi → PATCH rồi POST /hub/link/test; hộp PIN chỉ mở 1 lần', async () => {
+    let state = OFF;
+    let pinOk = false;
+    const calls = mockFetch((c) => {
+      if (c.url.includes('/hub/link') && c.method === 'GET') return json(200, state);
+      if (!pinOk && c.method !== 'GET') return json(423, { code: 'PIN_REQUIRED', title: 'Cần nhập mã PIN', status: 423 });
+      if (c.url.includes('/hub/link/test')) return json(200, { ok: true, error: null, error_code: null, latency_ms: 99, exposed_tools: ['a__kho_search'], missing_tools: [], link: { ...state, enabled: true, status: 'ok' } });
+      if (c.url.includes('/hub/link') && c.method === 'PATCH') {
+        state = SAVED;
+        return json(200, SAVED);
+      }
+      return json(404);
+    });
+    let opens = 0;
+    const unsub = usePinStore.subscribe((s, prev) => {
+      if (s.open && !prev.open) {
+        opens += 1;
+        pinOk = true;
+        queueMicrotask(() => usePinStore.getState().finish(true));
+      }
+    });
+    renderCard(<HubLinkCard />);
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText('Địa chỉ Gen-hub'), 'https://hub.genos.top/mcp');
+    await user.type(screen.getByLabelText('Token Gen-hub'), TOKEN);
+    const btn = screen.getByRole('button', { name: 'Lưu & kiểm tra' });
+    expect(btn).toHaveAttribute('data-gen-target', 'mcp.hub_link.test');
+    await user.click(btn);
+    expect(await screen.findByText(/Đã nối Kho · 99 ms/)).toBeInTheDocument();
+    unsub();
+    const writes = calls.filter((c) => c.method !== 'GET').map((c) => `${c.method} ${c.url.replace(/^.*\/api\/v1/, '')}`);
+    // PATCH bị 423 một lần → nhập PIN → PATCH lại → POST test (không hỏi PIN lần nữa).
+    expect(writes).toEqual(['PATCH /hub/link', 'PATCH /hub/link', 'POST /hub/link/test']);
+    expect(calls.find((c) => c.method === 'PATCH')!.body).toEqual({ endpoint: 'https://hub.genos.top/mcp', token: TOKEN, allow_public_network: true });
+    expect(opens).toBe(1);
+    expect(screen.getByLabelText('Token mới (bỏ trống để giữ token đã lưu)')).toHaveValue('');
+  });
+
+  it('Kiểm tra bị chặn mạng công cộng (MCP_NETWORK_BLOCKED) → câu hướng dẫn bật công tắc + mã lỗi', async () => {
+    const saved = { ...SAVED, allow_public_network: false };
+    mockFetch((c) => {
+      if (c.url.includes('/hub/link/test')) {
+        return json(200, { ok: false, error: { raw: 'blocked' }, error_code: 'MCP_NETWORK_BLOCKED', latency_ms: 0, exposed_tools: [], missing_tools: [], link: saved });
+      }
+      if (c.url.includes('/hub/link')) return json(200, saved);
+      return json(404);
+    });
+    const { container } = renderCard(<HubLinkCard />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Kiểm tra' }));
+    const status = await screen.findByRole('status');
+    expect(status).toHaveTextContent("Bật 'Cho phép Gen-hub ở mạng công cộng' ngay trong thẻ này");
+    expect(status).toHaveTextContent('Chi tiết kỹ thuật');
+    expect(status).toHaveTextContent('MCP_NETWORK_BLOCKED');
+    expect(container.innerHTML).not.toContain('[object Object]');
   });
 });

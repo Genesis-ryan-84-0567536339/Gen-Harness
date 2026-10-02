@@ -4,7 +4,7 @@ import { Button, Icon, Switch, TextField } from '@gen-harness/ui';
 import { errorText } from '../../lib/errorText';
 import { useMe } from '../../lib/queries';
 import { CardError, FriendlyErrorText, InlineError, Panel, SkeletonLines, StateChip } from '../common';
-import { HUB_STATUS_LABEL, expiryToIso, hubStatusTone, isoToDay } from './mcpModel';
+import { HUB_STATUS_LABEL, PUBLIC_NET_HINT, expiryToIso, hubStatusTone, isPublicHttpsUrl, isoToDay } from './mcpModel';
 import { useHubLink, useTestHubLink, useUpdateHubLink } from './queries';
 
 const fmtTime = (iso: string | null) => (iso ? new Date(iso).toLocaleString('vi-VN') : '—');
@@ -13,6 +13,8 @@ const fmtTime = (iso: string | null) => (iso ? new Date(iso).toLocaleString('vi-
  * Gen-hub (v0.1.26, docs/design/gen-hub-link.md §3): Gen đọc Kho Ryan qua Gen-hub — chỉ đọc, chỉ Sếp (Owner).
  * Token là ô CHỈ GHI: API không bao giờ trả lại (chỉ biết "đã lưu"). Liên kết tắt tới khi bấm "Kiểm tra" xanh;
  * đổi địa chỉ/token thì tắt lại, phải kiểm tra lại. Lưu / Kiểm tra cần PIN (`hub.link`), ghi Nhật ký hành động.
+ * v0.1.39 (F-31): gõ địa chỉ https công khai → công tắc "mạng công cộng" bật sẵn (Owner vẫn bỏ được); "Kiểm tra" khi
+ * còn thay đổi chưa lưu = lưu rồi kiểm tra luôn (một lần PIN — phiên PIN của lần lưu phủ lần kiểm tra).
  */
 export function HubLinkCard() {
   const me = useMe();
@@ -45,27 +47,61 @@ function HubLinkBody({ link, isOwner }: { link: HubLink; isOwner: boolean }) {
   const [token, setToken] = useState('');
   const [expiry, setExpiry] = useState(isoToDay(link.token_expires_at));
   const [publicNet, setPublicNet] = useState(link.allow_public_network);
+  // Owner đã tự bấm công tắc → không tự bật/tắt theo địa chỉ nữa.
+  const [publicTouched, setPublicTouched] = useState(false);
+  const [publicAuto, setPublicAuto] = useState(false);
   useEffect(() => {
     setEndpoint(link.endpoint ?? '');
     setExpiry(isoToDay(link.token_expires_at));
     setPublicNet(link.allow_public_network);
+    setPublicAuto(false);
   }, [link.endpoint, link.token_expires_at, link.allow_public_network]);
+  const onEndpoint = (v: string) => {
+    setEndpoint(v);
+    if (!publicTouched) {
+      const pub = isPublicHttpsUrl(v);
+      setPublicNet(pub);
+      setPublicAuto(pub);
+    }
+  };
+  const onPublic = (on: boolean) => {
+    setPublicTouched(true);
+    setPublicAuto(false);
+    setPublicNet(on);
+  };
 
   const firstTime = !link.configured;
   const valid = /^https?:\/\/\S+$/.test(endpoint.trim()) && (!firstTime || token.trim().length >= 8) && (!token.trim() || token.trim().length >= 8);
   const dirty =
     endpoint.trim() !== (link.endpoint ?? '') || token.trim() !== '' || expiry !== isoToDay(link.token_expires_at) || publicNet !== link.allow_public_network;
 
-  const save = () => {
-    if (!valid || !dirty) return;
+  const buildBody = () => {
     const body: Parameters<typeof update.mutate>[0] = {};
     if (endpoint.trim() !== (link.endpoint ?? '')) body.endpoint = endpoint.trim();
     if (token.trim()) body.token = token.trim();
     if (expiry !== isoToDay(link.token_expires_at)) body.token_expires_at = expiryToIso(expiry);
     if (publicNet !== link.allow_public_network) body.allow_public_network = publicNet;
-    update.mutate(body, { onSuccess: () => setToken('') });
+    return body;
+  };
+  const save = () => {
+    if (!valid || !dirty) return;
+    update.mutate(buildBody(), { onSuccess: () => setToken('') });
+  };
+  // "Kiểm tra" khi còn thay đổi: lưu trước rồi kiểm tra (lỗi lưu hiện ở dòng lỗi lưu, không kiểm tra).
+  const saveAndTest = async () => {
+    if (dirty) {
+      if (!valid) return;
+      try {
+        await update.mutateAsync(buildBody());
+      } catch {
+        return;
+      }
+      setToken('');
+    }
+    test.mutate();
   };
   const result = test.data;
+  const blocked = result && !result.ok && result.error_code === 'MCP_NETWORK_BLOCKED';
 
   return (
     <>
@@ -96,7 +132,7 @@ function HubLinkBody({ link, isOwner }: { link: HubLink; isOwner: boolean }) {
             save();
           }}
         >
-          <TextField label="Địa chỉ Gen-hub" value={endpoint} onChange={(e) => setEndpoint(e.target.value)} placeholder="https://hub.genos.top/mcp" className="mono" />
+          <TextField label="Địa chỉ Gen-hub" value={endpoint} onChange={(e) => onEndpoint(e.target.value)} placeholder="https://hub.genos.top/mcp" className="mono" />
           <TextField
             label={link.has_token ? 'Token mới (bỏ trống để giữ token đã lưu)' : 'Token Gen-hub'}
             type="password"
@@ -108,9 +144,14 @@ function HubLinkBody({ link, isOwner }: { link: HubLink; isOwner: boolean }) {
           />
           <TextField label="Ngày hết hạn token" type="date" value={expiry} onChange={(e) => setExpiry(e.target.value)} hint="Token thủ công của Gen-hub hết hạn sau 90 ngày — Gen nhắc Sếp trước 14 ngày." />
           <div className="triage-row">
-            <Switch checked={publicNet} label="Cho phép Gen-hub ở mạng công cộng" onChange={setPublicNet} />
+            <Switch checked={publicNet} label="Cho phép Gen-hub ở mạng công cộng" onChange={onPublic} />
             <span>Gen-hub ở Internet (mạng công cộng) — chỉ bật cho máy chủ này</span>
           </div>
+          {publicAuto && publicNet ? (
+            <p className="muted-note hub-public-note" role="note">
+              <Icon name="ph ph-globe" size={12} /> Đã bật sẵn vì địa chỉ là https công khai — Gen-hub sẽ được gọi qua Internet. Bỏ tích nếu Gen-hub nằm trong mạng nội bộ.
+            </p>
+          ) : null}
           <div className="jev-actions">
             <Button variant="primary" type="submit" className="btn-27" icon="ph ph-floppy-disk" disabled={!valid || !dirty} loading={update.isPending}>
               Lưu
@@ -120,12 +161,12 @@ function HubLinkBody({ link, isOwner }: { link: HubLink; isOwner: boolean }) {
               type="button"
               className="btn-27"
               icon="ph ph-pulse"
-              disabled={!link.configured || dirty}
-              loading={test.isPending}
+              disabled={dirty ? !valid : !link.configured}
+              loading={test.isPending || (update.isPending && dirty)}
               data-gen-target="mcp.hub_link.test"
-              onClick={() => test.mutate()}
+              onClick={() => void saveAndTest()}
             >
-              Kiểm tra
+              {dirty ? 'Lưu & kiểm tra' : 'Kiểm tra'}
             </Button>
             {link.enabled ? (
               <Button variant="ghost" type="button" className="btn-27" loading={update.isPending && update.variables?.enabled === false} onClick={() => update.mutate({ enabled: false })}>
@@ -137,7 +178,19 @@ function HubLinkBody({ link, isOwner }: { link: HubLink; isOwner: boolean }) {
           {test.isError ? <InlineError>{errorText(test.error)}</InlineError> : null}
           {result ? (
             <div className={result.ok ? 'apm-test-result apm-test-result--ok' : 'apm-test-result apm-test-result--bad'} role="status">
-              {result.ok ? `Đã nối Kho · ${result.latency_ms} ms · mở ${result.exposed_tools.length} tool đọc cho Gen` : <FriendlyErrorText raw={result.error} fallback="Chưa kết nối được Gen-hub — kiểm tra địa chỉ và thẻ truy cập." />}
+              {result.ok ? (
+                `Đã nối Kho · ${result.latency_ms} ms · mở ${result.exposed_tools.length} tool đọc cho Gen`
+              ) : (
+                <>
+                  <FriendlyErrorText raw={blocked ? PUBLIC_NET_HINT : result.error} fallback="Chưa kết nối được Gen-hub — kiểm tra địa chỉ và thẻ truy cập." />
+                  {result.error_code ? (
+                    <details className="tech-detail">
+                      <summary>Chi tiết kỹ thuật</summary>
+                      <code>Mã lỗi {result.error_code}</code>
+                    </details>
+                  ) : null}
+                </>
+              )}
             </div>
           ) : null}
           {/* v0.1.28 (UX V14): từng bước bằng lời thường, không tên riêng. */}
