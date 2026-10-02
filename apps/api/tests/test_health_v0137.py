@@ -21,7 +21,7 @@ from tests.conftest import Api
 from tests.phase2 import org_id
 
 TITLE = "Máy chủ có thể không tự chạy lại Gen-Harness khi bật lại máy"
-DONE = "Chạy xong thì chạy genh status để cảnh báo tự hết (hoặc đợi tới đêm)"
+DONE = "Chạy xong thì chạy genh status để cảnh báo tự hết"
 
 
 @pytest.fixture
@@ -72,6 +72,8 @@ async def test_docker_not_enabled_rings_once_then_clears(owner_api: Api, app, db
     assert rows[0].title == TITLE and rows[0].link == health.STORAGE_LINK
     assert "sudo systemctl enable docker" in rows[0].body and "loginctl" not in rows[0].body
     assert rows[0].body.endswith(DONE)
+    # Không hứa "đợi tới đêm": thiếu linger/tắt tự cập nhật thì không có lần chạy đêm nào làm cảnh báo tự hết.
+    assert "đêm" not in rows[0].body
     a = await alert(db)
     assert a.severity == "warn" and a.cleared_at is None
     [issue] = await health.active_issues(db, org)
@@ -158,3 +160,87 @@ async def test_system_health_has_autostart_and_stalled_reason(owner_api: Api, ap
     write_autostart(link)
     body = (await owner_api.get("/system/health")).json()
     assert body["autostart"]["state"] == "ok" and body["overall"] == "ok"
+
+
+async def test_autostart_ok_needs_docker_known(owner_api: Api, app, db, redis, link: Path) -> None:  # type: ignore[no-untyped-def]
+    """linger 'yes' một mình KHÔNG kéo state lên 'ok' khi Docker còn 'unknown' (macOS Colima, docker info lỗi)."""
+    write_autostart(link, docker_enabled="unknown", docker_mode="unknown")
+    assert health._autostart_status()["state"] == "unknown"
+    write_autostart(link, os="darwin", linger="not_applicable", linger_required=False, docker_enabled="unknown",
+                    docker_mode="unknown")
+    assert health._autostart_status()["state"] == "unknown"
+    write_autostart(link, os="darwin", linger="not_applicable", linger_required=False,
+                    docker_enabled="not_applicable", docker_mode="desktop")
+    assert health._autostart_status()["state"] == "ok"
+    # Docker chắc chắn, linger không rõ mà cần ⇒ chưa rõ
+    write_autostart(link, linger="unknown", linger_required=True)
+    assert health._autostart_status()["state"] == "unknown"
+
+
+# ─── GH-E94B: bị dừng giữa chừng (máy tắt/khởi động lại) ⇒ 'warn', không phải "chưa thành công" đỏ ─────────────
+
+E94B_ROLLED_BACK = ("Cập nhật bị dừng giữa chừng (máy tắt, khởi động lại hoặc bị dừng tay) — đã tự quay về bản cũ — "
+                    "Không cần làm gì — lịch đêm sẽ tự thử lại; muốn chạy ngay thì genh update. (GH-E94B)")
+E94B_RESUME = ("Cập nhật bị dừng giữa chừng (máy tắt, khởi động lại hoặc bị dừng tay) — CSDL đã sang bản mới, cần "
+               "chạy tiếp — Sau khi máy bật lại: chạy genh update để đi tiếp lên bản mới (GH-E94B)")
+E94B_MANUAL = ("Cập nhật bị dừng giữa chừng (máy tắt, khởi động lại hoặc bị dừng tay) — quay về bản cũ CHƯA trọn — "
+               "ROLLBACK TỰ ĐỘNG THẤT BẠI (GH-E94B)")
+
+
+def write_failed(link: Path, message: str, *, hours_ago: float = 1) -> None:
+    finished = (datetime.now(UTC) - timedelta(hours=hours_ago)).isoformat().replace("+00:00", "Z")
+    (link / "update-status.json").write_text(json.dumps({"state": "failed", "from": "v0.1.36", "to": "v0.1.37",
+                                                         "finished_at": finished, "message": message}))
+
+
+async def update_bells(db: Any) -> list[Any]:
+    await db.commit()
+    q = text("SELECT title, body FROM core.notifications WHERE kind = 'update.failed' ORDER BY created_at")
+    return list((await db.execute(q)).all())
+
+
+async def test_interrupted_update_is_warn_not_failed(owner_api: Api, app, db, redis, link: Path) -> None:  # type: ignore[no-untyped-def]
+    org = await org_id(db)
+    (link / "genh.json").write_text(json.dumps({"version": "v0.1.36", "updater": "systemd",
+                                                "auto_update_enabled": True}))
+    write_failed(link, E94B_ROLLED_BACK)
+    await evaluate(redis, org)
+    [bell] = await update_bells(db)
+    assert bell.title == "Cập nhật lên v0.1.37 bị dừng giữa chừng"
+    assert bell.body == "Bản đang dùng vẫn chạy bình thường — lịch đêm sẽ tự thử lại, hoặc bấm để thử lại ngay."
+    [issue] = await health.active_issues(db, org)
+    assert issue["severity"] == "warn" and issue["kind"] == "update.failed"
+    body = (await owner_api.get("/system/health")).json()
+    assert body["update"]["failed"] is True and body["update"]["interrupted"] == "rolled_back"
+    assert body["overall"] == "warn"
+    assert (await owner_api.get("/system/update")).json()["interrupted"] == "rolled_back"
+
+
+async def test_interrupted_body_without_nightly_and_resume(owner_api: Api, app, db, redis, link: Path) -> None:  # type: ignore[no-untyped-def]
+    org = await org_id(db)
+    write_failed(link, E94B_ROLLED_BACK)  # genh.json không có auto_update_enabled ⇒ không hứa lịch đêm
+    await evaluate(redis, org)
+    [bell] = await update_bells(db)
+    assert "đêm" not in bell.body
+    write_failed(link, E94B_RESUME, hours_ago=0.5)
+    await evaluate(redis, org)
+    bells_ = await update_bells(db)
+    assert len(bells_) == 2
+    assert bells_[-1].body == "Máy tắt giữa lúc cập nhật — cần chạy lại để hoàn tất. Bấm để thử lại ngay."
+    assert (await owner_api.get("/system/health")).json()["update"]["interrupted"] == "resume"
+
+
+async def test_interrupted_but_rollback_incomplete_stays_bad(owner_api: Api, app, db, redis, link: Path) -> None:  # type: ignore[no-untyped-def]
+    org = await org_id(db)
+    write_failed(link, E94B_MANUAL)
+    await evaluate(redis, org)
+    [bell] = await update_bells(db)
+    assert bell.title == "Cập nhật lên v0.1.37 chưa thành công"
+    [issue] = await health.active_issues(db, org)
+    assert issue["severity"] == "bad"
+    body = (await owner_api.get("/system/health")).json()
+    assert body["update"]["interrupted"] is None and body["overall"] == "bad"
+    # GH-E94B "đã quay về" nhưng update-blocked.json ghi rollback_failed cho đúng bản đó ⇒ vẫn đỏ
+    write_failed(link, E94B_ROLLED_BACK)
+    (link / "update-blocked.json").write_text(json.dumps({"version": "v0.1.37", "rollback_failed": True}))
+    assert (await owner_api.get("/system/health")).json()["update"]["interrupted"] is None

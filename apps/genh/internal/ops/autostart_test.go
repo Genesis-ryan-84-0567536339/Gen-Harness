@@ -116,16 +116,65 @@ func TestCheckAutostart_DockerInfoLoi_Unknown(t *testing.T) {
 	}
 }
 
-func TestCheckAutostart_Darwin_KhongApDung_KhongGoiLenh(t *testing.T) {
+const argsDockerOS = "info --format {{.OperatingSystem}}"
+
+// Ngoài Linux: chỉ Docker Desktop mới "tự lo" (not_applicable); không hỏi systemd.
+func TestCheckAutostart_Darwin_DockerDesktop_KhongApDung(t *testing.T) {
 	for _, goos := range []string{"darwin", "windows"} {
-		fr := &fake.Runner{}
+		fr := &fake.Runner{Responses: []fake.Response{{Match: cmdIs("docker", argsDockerOS), Output: []byte("Docker Desktop\n")}}}
 		st := CheckAutostart(context.Background(), AutostartDeps{Runner: fr, GOOS: goos})
 		if st.OS != goos || st.Linger != "not_applicable" || st.DockerEnabled != "not_applicable" || st.DockerMode != "desktop" || st.LingerRequired {
 			t.Errorf("%s: sai %+v", goos, st)
 		}
-		if len(fr.Calls) != 0 {
-			t.Errorf("%s: không được gọi lệnh nào: %+v", goos, fr.Calls)
+		for _, c := range fr.Calls {
+			if c.Cmd.Name != "docker" {
+				t.Errorf("%s: không được gọi %s", goos, c.Cmd.Name)
+			}
 		}
+		if l := autostartLines(st)[0]; !l.OK || !strings.Contains(l.Info, "Docker Desktop") {
+			t.Errorf("%s: dòng Docker: %+v", goos, l)
+		}
+	}
+}
+
+// Colima (macOS) / WSL do genh cài, hoặc docker info lỗi: KHÔNG được báo
+// not_applicable (Console sẽ hiện sai "Có") — "unknown".
+func TestCheckAutostart_Darwin_Colima_Unknown(t *testing.T) {
+	for name, resp := range map[string]fake.Response{
+		"colima": {Match: cmdIs("docker", argsDockerOS), Output: []byte("Ubuntu 24.04 LTS\n")},
+		"loi":    {Match: cmdIs("docker", argsDockerOS), Err: errors.New("Cannot connect to the Docker daemon")},
+	} {
+		fr := &fake.Runner{Responses: []fake.Response{resp}}
+		st := CheckAutostart(context.Background(), AutostartDeps{Runner: fr, GOOS: "darwin"})
+		if st.DockerEnabled != "unknown" || st.DockerMode != "unknown" || st.Linger != "not_applicable" {
+			t.Errorf("%s: muốn docker unknown, linger not_applicable: %+v", name, st)
+		}
+		if l := autostartLines(st)[0]; l.OK || !strings.Contains(l.Info, "không rõ") {
+			t.Errorf("%s: dòng Docker phải \"không rõ\": %+v", name, l)
+		}
+	}
+}
+
+// docker info lỗi (mode unknown): docker.service hệ thống "disabled" KHÔNG kết
+// luận "no" (máy rootless thường tắt nó) — chỉ tin "yes".
+func TestCheckAutostart_DockerInfoLoi_SystemDisabled_KhongBaoNo(t *testing.T) {
+	fr := &fake.Runner{Responses: []fake.Response{
+		{Match: cmdIs("docker", argsDockerInfo), Err: errors.New("timeout")},
+		{Match: cmdIs("systemctl", argsSysDocker), Output: []byte("disabled\n"), Err: errExit1},
+	}}
+	st := CheckAutostart(context.Background(), AutostartDeps{Runner: fr, GOOS: "linux", UID: "1000"})
+	if st.DockerMode != "unknown" || st.DockerEnabled != "unknown" {
+		t.Fatalf("muốn docker_enabled unknown: %+v", st)
+	}
+	if l := autostartLines(st)[0]; strings.Contains(l.Info, "sudo systemctl enable docker") {
+		t.Errorf("không được khuyên bật Docker rootful: %+v", l)
+	}
+	fr = &fake.Runner{Responses: []fake.Response{
+		{Match: cmdIs("docker", argsDockerInfo), Err: errors.New("timeout")},
+		{Match: cmdIs("systemctl", argsSysDocker), Output: []byte("enabled\n")},
+	}}
+	if st := CheckAutostart(context.Background(), AutostartDeps{Runner: fr, GOOS: "linux", UID: "1000"}); st.DockerEnabled != "yes" {
+		t.Errorf("mode unknown + docker.service enabled ⇒ yes: %+v", st)
 	}
 }
 

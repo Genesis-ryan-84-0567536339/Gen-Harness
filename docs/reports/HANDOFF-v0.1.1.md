@@ -1696,7 +1696,7 @@ lần** (máy sẽ hỏi mật khẩu đăng nhập máy), rồi chạy `genh st
   kind sự cố (biểu tượng chuông, làm mới `/system/health` ngay khi nhận chuông) và mock e2e. Test thêm:
   `test_health_v0137.py` (không dấu chấm sau lệnh), `test/unit/needs-boss-autostart-v0137.test.tsx`, e2e mock
   `update-stalled-v0137.spec.ts` thêm 5 kịch bản (not_picked_up chữ cũ, GH-E94B, GH-E94A, dòng Sức khoẻ "Cập nhật bị dừng
-  giữa chừng", dải có dòng `host.autostart` không nút).
+  giữa chừng", dải có dòng `host.autostart` + nút "Xem cách bật" tới thẻ Sức khoẻ).
 - Kết quả trên nhánh tích hợp (02/10): ruff + mypy sạch, alembic 1 head (0024); pytest 1254 passed (superuser) và 1254
   passed (gh_app); web lint/typecheck sạch, check_no_fake_ids sạch, vitest 355 passed (47 tệp), build OK, bridge test OK;
   Playwright mock 171 passed; browser 14 passed; genh gofmt sạch, `go vet` + `go test -count=1 ./...` 17 gói ok (412 test);
@@ -1742,3 +1742,43 @@ lần** (máy sẽ hỏi mật khẩu đăng nhập máy), rồi chạy `genh st
   `test_health_v0137.py` (tiêu đề, link, câu cuối, rootless); web `needs-boss-autostart-v0137.test.tsx` (dòng/hướng dẫn
   autostart), `update-stalled-v0137.test.tsx` (can_request=false, host_busy, GH-E94B không hứa lịch đêm), e2e mock
   `update-stalled-v0137.spec.ts` (nút "Xem cách bật" → hướng dẫn có lệnh, bấm chuông tới thẻ Sức khoẻ, Auditor thấy dòng).
+
+### Sửa sau review v0.1.37 — lần 2 (F-34, F-35, F-73)
+
+- **Ctrl-C không cắt khôi phục CSDL (F-34)** — `rollbackTimeout` (10 phút) nay chỉ giới hạn **bước nhẹ** (`up -d`, `stop`,
+  dọn ảnh) khi bị dừng; pg_restore và chép lại dữ liệu di trú chạy bằng ngữ cảnh không huỷ, **không hạn** — trước đây bản
+  sao lưu lớn/đĩa chậm bị giết docker CLI giữa chừng sau `DROP DATABASE` (container `run --rm` còn restore ngầm).
+- **Máy tắt sau khi đã đổi CSDL: đi tiếp, không lùi (F-34)** — genh không trả `compose.yaml` về bản cũ (CSDL đã migrate và
+  container bản mới chỉ khớp compose mới), không ghi `update-blocked.json` (trước đây kèm `backup_key` ⇒ Console/genh đẩy
+  Sếp khôi phục bản sao lưu cũ, xoá mọi dữ liệu ghi từ lúc bật lại máy), giữ `update-inprogress.json`. Thông điệp GH-E94B
+  "CSDL đã sang bản mới, cần chạy tiếp": chạy lại `genh update` (lịch đêm, nếu bật, cũng tự làm) — genh sao lưu lại CSDL
+  hiện tại rồi đi tiếp. Console: "dữ liệu đã chuyển sang bản mới, cần chạy lại để hoàn tất" + Thử lại, dặn không khôi
+  phục bản cũ.
+- **Dừng ngay sau khi tải genh mới** — trước khi chạy tiến trình con: Console nhận GH-E94B "chưa đụng gì" (thẻ vàng), không
+  còn thông điệp không mã rơi vào thẻ đỏ "đã tự quay về".
+- **Docker Desktop for Linux không bị báo "dừng giữa chừng" sai (F-34/F-35)** — API lấy nhịp sống làm nguồn chính: tươi +
+  đúng pid ⇒ còn chạy, không so `boot_id` container (VM của Docker Desktop có boot_id khác máy chủ). boot_id chỉ dùng khi
+  so hai giá trị cùng do genh ghi, hoặc khi nhịp sống đã cũ/thiếu. `host_busy`: nhịp sống tươi là đủ.
+- **GH-E94B không gióng chuông đỏ** — API thêm `interrupted` (`rolled_back`/`resume`) cho `/system/update` và
+  `/system/health.update`; sự cố `update.failed` lúc đó là `warn` "Cập nhật lên vX bị dừng giữa chừng" ("Bản đang dùng vẫn
+  chạy bình thường — lịch đêm sẽ tự thử lại, hoặc bấm để thử lại ngay"; chỉ hứa lịch đêm khi `auto_update_enabled`), thẻ
+  Sức khoẻ hiện "Cập nhật bị dừng giữa chừng" (vàng). Quay về chưa trọn vẫn đỏ.
+- **Tự chạy lại khi bật máy không báo "Có" sai (F-73)** — ngoài Linux, genh chỉ trả `not_applicable` khi phát hiện Docker
+  Desktop; Colima/WSL do genh cài ⇒ `unknown` ("Chưa rõ"; `genh status` gợi ý `genh start` sau khi bật máy). API: `state`
+  = `ok` chỉ khi `docker_enabled` ∈ yes/not_applicable và linger ổn. Linux mà `docker info` lỗi: chỉ tin `docker.service`
+  hệ thống khi enabled (`disabled` ⇒ `unknown` — máy rootless không bị khuyên bật Docker rootful).
+- **Bỏ lời hứa "(hoặc đợi tới đêm)"** ở chuông/dải/hướng dẫn `host.autostart` — thiếu linger thì lịch đêm không chạy, tắt tự
+  cập nhật thì không có lần chạy đêm nào.
+- **Thẻ cập nhật**: `process_gone` mà máy đã chạy đúng bản mới nhất ⇒ "Đang dùng bản mới nhất vX — lần cập nhật trước bị
+  ngắt…, không cần làm gì" (không có Thử lại). Nhánh GH-E94A ở web ghi rõ chỉ phòng hờ (genh ≥ v0.1.37 không ghi mã này vào
+  hộp thư) — bỏ ca e2e tương ứng, giữ unit test.
+- **Nit**: bỏ tham số chết `notify_link` của `raise_once`; tài liệu `docs/api/phase-1.md` thêm các trường v0.1.37
+  (`stalled_reason`, `host_busy`, `interrupted`, khối `autostart`, kind `host.autostart`); `05-installer.md` sửa mô tả
+  `unknown` ("thẻ Sức khoẻ hiện Chưa rõ"), SIGTERM/SIGINT, boot_id.
+- Test thêm: genh `update_test.go` (SIGINT + pg_restore lâu hơn hạn vẫn chạy xong; bước nhẹ treo có hạn; SIGTERM giữ
+  compose mới, không ghi blocked, giữ in-progress, Next bảo `genh update`), `main_test.go` (`childFailedMessage` GH-E94B),
+  `autostart_test.go` (Docker Desktop / Colima / docker info lỗi + docker.service disabled); api `test_system_update.py`
+  (Docker Desktop VM: boot_id khác cả hai mà nhịp sống tươi ⇒ running + host_busy; boot_id nhịp sống khác lúc bắt đầu),
+  `test_health_v0137.py` (GH-E94B warn/body theo lịch đêm/resume; quay về chưa trọn vẫn bad; autostart ok cần Docker
+  rõ; không có "đêm"); web `update-stalled-v0137.test.tsx` (resume, process_gone đã ở bản mới nhất, dòng Sức khoẻ
+  interrupted), e2e mock `update-stalled-v0137.spec.ts` (GH-E94B dừng gọn ⇒ dải/thẻ vàng; GH-E94B cần chạy tiếp).

@@ -20,7 +20,7 @@ const json = (status: number, body: unknown) =>
 const AUTOSTART: HealthIssue = {
   key: 'host.autostart', kind: 'host.autostart', severity: 'warn',
   title: 'Máy chủ có thể không tự chạy lại Gen-Harness khi bật lại máy',
-  body: 'Docker chưa bật tự chạy khi mở máy — chạy một lần trên máy chủ: sudo systemctl enable docker · Chạy xong thì chạy genh status để cảnh báo tự hết (hoặc đợi tới đêm)',
+  body: 'Docker chưa bật tự chạy khi mở máy — chạy một lần trên máy chủ: sudo systemctl enable docker · Chạy xong thì chạy genh status để cảnh báo tự hết',
   link: '/system?tab=storage', action: 'Xem cách bật', raised_at: '2026-10-02T01:00:00Z',
 };
 
@@ -106,6 +106,8 @@ describe('v0.1.37 — healthModel: Tự chạy lại khi bật máy', () => {
       .find((t) => t.key === 'autostart')!;
     expect(lingerOnly.steps.map((x) => x.cmd).filter(Boolean)).toEqual(['sudo loginctl enable-linger $USER', 'genh status']);
     for (const t of [sys, rootless, lingerOnly]) for (const st of t.steps) if (st.cmd) expect(st.cmd.endsWith('.')).toBe(false);
+    // Không hứa "đợi tới đêm": thiếu linger thì lịch đêm không chạy, tắt tự cập nhật thì không có lần chạy đêm nào.
+    for (const t of [sys, rootless, lingerOnly]) for (const st of t.steps) expect(st.text).not.toMatch(/đêm/);
     expect(healthTips(withAuto({ state: 'ok', linger: 'yes', linger_required: true, docker_enabled: 'yes', docker_mode: 'system', checked_at: null }))
       .find((t) => t.key === 'autostart')).toBeUndefined();
   });

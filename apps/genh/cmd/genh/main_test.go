@@ -653,3 +653,22 @@ func TestRunChildForwardingSignal_ChuyenTiepSIGTERM_VanCho(t *testing.T) {
 		t.Fatalf("con phải nhận SIGTERM, tự dọn rồi thoát 7 (không bị Kill), được %v", err)
 	}
 }
+
+// Tín hiệu dừng tới ngay sau lúc tải genh mới (chưa chạy con): Console phải
+// nhận GH-E94B "chưa đụng gì" — không phải thông điệp không mã (rơi vào thẻ đỏ
+// "đã tự quay về").
+func TestChildFailedMessage_DungTruocCon_GHE94BChuaDungGi(t *testing.T) {
+	msg := childFailedMessage(true, ops.ErrShutdownSignal)
+	if !strings.Contains(msg, "("+ops.ErrCodeUpdateInterrupted+")") || !strings.Contains(msg, "chưa đụng gì") {
+		t.Errorf("muốn GH-E94B \"chưa đụng gì\", được %q", msg)
+	}
+	if strings.Contains(msg, "đã tự quay về") || strings.Contains(msg, "`") {
+		t.Errorf("không nói \"đã tự quay về\", không có dấu `: %q", msg)
+	}
+	if m := childFailedMessage(true, nil); !strings.Contains(m, ops.ErrCodeUpdateInterrupted) {
+		t.Errorf("cause nil vẫn phải có GH-E94B: %q", m)
+	}
+	if m := childFailedMessage(false, nil); strings.Contains(m, "GH-E") {
+		t.Errorf("con chết giữa chừng (không do dừng trước khi chạy) giữ thông điệp cũ: %q", m)
+	}
+}

@@ -11,7 +11,8 @@ import { queryClient } from '../../src/lib/queryClient';
 /**
  * v0.1.37 (F-34): 'running' mà tiến trình genh trên máy chủ đã chết ⇒ api trả 'stalled' + `stalled_reason:
  * 'process_gone'` — thẻ cập nhật nói "bị dừng giữa chừng" và cho Thử lại; mã genh GH-E94B (dừng do tín hiệu) / GH-E94A
- * (đang có lần cập nhật/khôi phục khác) có lời dẫn riêng, nguyên văn vẫn ở "Chi tiết kỹ thuật".
+ * (đang có lần cập nhật/khôi phục khác — genh ≥ v0.1.37 không ghi mã này vào hộp thư, nhánh chỉ phòng hờ nên chỉ có unit
+ * test) có lời dẫn riêng, nguyên văn vẫn ở "Chi tiết kỹ thuật".
  */
 
 const NOW = Date.parse('2026-10-02T10:00:00Z');
@@ -33,6 +34,15 @@ describe('updateView — stalled theo lý do', () => {
     expect(v.body).not.toMatch(/genh/);
     const manual = updateView({ ...base, can_request: false, state: 'stalled', stalled_reason: 'process_gone' }, opts);
     expect(manual.kind !== 'hidden' && manual.showCommand).toBe(true);
+  });
+  it('process_gone mà máy đã chạy đúng bản mới nhất: không nói "Cập nhật lên vX bị dừng", không cần Thử lại', () => {
+    const v = updateView({ ...base, current: 'v0.1.37', latest: 'v0.1.37', update_available: false, state: 'stalled', stalled_reason: 'process_gone' }, opts);
+    expect(v.kind).toBe('finished');
+    if (v.kind === 'hidden') throw new Error(v.kind);
+    expect(v.tone).toBe('ok');
+    expect(v.title).toBe('Đang dùng bản mới nhất v0.1.37');
+    expect(v.title).not.toMatch(/bị dừng/);
+    expect(v.kicker).toMatch(/không cần làm gì/);
   });
   it('process_gone + can_request=false: không trỏ tới nút Thử lại (thẻ không vẽ nút) — chỉ lệnh chạy tay', () => {
     const v = updateView({ ...base, can_request: false, state: 'stalled', stalled_reason: 'process_gone' }, opts);
@@ -87,6 +97,15 @@ describe('failedCopy — mã GH-E94B / GH-E94A', () => {
     expect(v.kicker).toMatch(/chưa đụng gì/);
     expect(v.body).toMatch(/lịch đêm tự thử lại/);
   });
+  it('GH-E94B máy tắt sau khi đã đổi CSDL (cần chạy tiếp): bảo chạy lại để đi tiếp, KHÔNG bảo khôi phục bản cũ', () => {
+    const v = failedAt('Cập nhật bị dừng giữa chừng (máy tắt, khởi động lại hoặc bị dừng tay) — CSDL đã sang bản mới, cần chạy tiếp — Dữ liệu vẫn còn nguyên trong CSDL (bản sao lưu trước cập nhật: backups/x.enc). Sau khi máy bật lại: chạy genh update để đi tiếp lên bản mới (genh tự sao lưu lại CSDL hiện tại trước); lịch đêm, nếu bật, cũng sẽ tự làm. KHÔNG khôi phục bản sao lưu cũ — sẽ mất dữ liệu ghi sau lúc đó. (GH-E94B)');
+    if (v.kind !== 'failed') throw new Error(v.kind);
+    expect(v.tone).toBe('warn');
+    expect(v.kicker).toMatch(/cần chạy lại để hoàn tất/);
+    expect(v.kicker).not.toMatch(/xử lý tay/);
+    expect(v.body).toMatch(/bấm Thử lại để đi tiếp/);
+    expect(v.body).toMatch(/Không khôi phục bản sao lưu cũ/);
+  });
   it('GH-E94B quay về CHƯA trọn (genh ghi update-blocked rollback_failed): "Cần xử lý tay", không hứa lịch đêm', () => {
     const v = failedAt('Cập nhật bị dừng giữa chừng (máy tắt, khởi động lại hoặc bị dừng tay) — quay về bản cũ CHƯA trọn — Máy tắt giữa lúc cập nhật đã đổi CSDL (GH-E94B)');
     if (v.kind !== 'failed') throw new Error(v.kind);
@@ -119,6 +138,16 @@ describe('healthModel — dòng Cập nhật', () => {
     const stale = row({ state: 'stalled', stalled_reason: 'not_picked_up', failed: false, blocked_version: null, finished_at: null });
     expect(stale.value).toBe('Máy chủ chưa nhận yêu cầu cập nhật');
     expect(row({ state: 'running', stalled_reason: null, failed: false, blocked_version: null, finished_at: null }).value).toBe('Đang cập nhật');
+  });
+  it('failed + interrupted (GH-E94B dừng gọn) ⇒ "Cập nhật bị dừng giữa chừng" (vàng), không "lỗi" đỏ', () => {
+    for (const interrupted of ['rolled_back', 'resume'] as const) {
+      const r = row({ state: 'failed', stalled_reason: null, failed: true, interrupted, blocked_version: null, finished_at: null });
+      expect(r.value).toBe('Cập nhật bị dừng giữa chừng');
+      expect(r.tone).toBe('warn');
+    }
+    const bad = row({ state: 'failed', stalled_reason: null, failed: true, interrupted: null, blocked_version: null, finished_at: null });
+    expect(bad.value).toBe('Lần cập nhật gần nhất lỗi');
+    expect(bad.tone).toBe('bad');
   });
 });
 

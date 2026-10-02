@@ -101,6 +101,14 @@ function failedCopy(
     // v0.1.37: genh nhận tín hiệu dừng (SIGINT/SIGTERM — máy tắt, bị kill) giữa chừng — không phải bản mới hỏng. Lịch
     // đêm CHỈ tự thử lại khi đã dừng gọn (chưa đụng gì / đã tự quay về); quay về chưa trọn thì genh chặn lịch đêm
     // (update-blocked.json) — không hứa tự thử lại (nhánh đó thường đã rơi vào "Cần xử lý tay" ở trên).
+    if (/cần chạy tiếp/i.test(msg)) {
+      // Máy tắt SAU khi CSDL đã sang bản mới: genh giữ bản mới (compose.yaml, CSDL) — chạy lại để đi tiếp, KHÔNG khôi
+      // phục bản sao lưu cũ (mất mọi dữ liệu ghi từ lúc bật lại máy).
+      return {
+        tone: 'warn', kicker: 'Cập nhật bị dừng giữa chừng — dữ liệu đã chuyển sang bản mới, cần chạy lại để hoàn tất',
+        body: `Đây không phải lỗi của bản mới — ${retry} để đi tiếp (hệ thống tự sao lưu lại trước khi làm). Không khôi phục bản sao lưu cũ: sẽ mất dữ liệu ghi sau lúc đó.`,
+      };
+    }
     if (rolledBack) {
       return {
         tone: 'warn', kicker: 'Cập nhật bị dừng giữa chừng',
@@ -119,6 +127,8 @@ function failedCopy(
     };
   }
   if (code === 'GH-E94A') {
+    // Phòng hờ: genh ≥ v0.1.37 KHÔNG ghi GH-E94A vào run/update-status.json (khoá được lấy trước hostlink.Start, chỉ in ra
+    // stderr khi gõ tay — docs/handoff/05-installer.md). Giữ nhánh này cho genh khác/cũ hơn; chỉ có unit test.
     return {
       tone: 'warn', kicker: 'Đang có một lần cập nhật/khôi phục khác chạy — chờ xong rồi thử lại',
       body: `Chưa đụng gì — bản đang dùng vẫn chạy bình thường. Đợi lần đang chạy xong (vài phút), rồi ${retry}.`,
@@ -181,6 +191,14 @@ export function updateView(
   }
   if (d.state === 'running') {
     return { kind: 'working', tone: 'accent', title: `Đang cập nhật lên ${target}`, kicker: 'Mất khoảng 2–5 phút — trang tự tải lại khi xong', steps: steps(1) };
+  }
+  if (d.state === 'stalled' && d.stalled_reason === 'process_gone' && !d.update_available && !!d.current && d.current === d.latest) {
+    // genh bị ngắt SAU khi dịch vụ đã lên bản mới (trước lúc ghi kết quả): máy đang chạy đúng bản mới nhất — không nói
+    // "Cập nhật lên vX bị dừng" về chính bản đang chạy, không cần Thử lại.
+    return {
+      kind: 'finished', tone: 'ok', title: `Đang dùng bản mới nhất ${d.current}`,
+      kicker: 'Lần cập nhật trước bị ngắt trước khi kịp báo xong — máy đang chạy bản mới nhất, không cần làm gì', steps: [],
+    };
   }
   if (d.state === 'stalled' && d.stalled_reason === 'process_gone') {
     // v0.1.37 (F-34): 'running' mà tiến trình genh trên máy chủ không còn (máy tắt/khởi động lại, bị dừng).

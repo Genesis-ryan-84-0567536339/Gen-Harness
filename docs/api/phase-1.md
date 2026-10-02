@@ -56,6 +56,22 @@ Lỗi theo RFC 7807: `{"type": "...", "title": "...", "status": 4xx, "code": "PI
   `ops.health_alerts` đang mở (migration 0024); chuông của cùng một sự cố chỉ gửi MỘT lần (`gh/health.py::raise_once`).
   Nguồn đọc lỗi ⇒ phần đó `unknown`, không 500.
 
+  **v0.1.37:** `update` thêm `stalled_reason: not_picked_up|process_gone|null` (lý do khi `state` = `stalled`) và
+  `interrupted: rolled_back|resume|null` (lần lỗi trong 24 giờ là do genh nhận tín hiệu dừng — GH-E94B — mà không dở
+  dang: `rolled_back` = chưa đụng gì/đã tự quay về, `resume` = máy tắt sau khi đã đổi CSDL, chạy lại để đi tiếp; khi khác
+  null thì sự cố `update.failed` là `warn` "bị dừng giữa chừng", không phải `bad`). Thêm khối `autostart` (chỉ khi api có
+  hộp thư với genh): `{state: ok|warn|unknown, linger: yes|no|unknown|not_applicable, linger_required: bool|null,
+  docker_enabled: yes|no|unknown|not_applicable, docker_mode: system|rootless|desktop|unknown, checked_at}` — `ok` chỉ
+  khi `docker_enabled` ∈ yes/not_applicable và linger ổn (yes/not_applicable hoặc không cần). `issues[].kind` thêm
+  `host.autostart` (`severity: warn`, nút "Xem cách bật", đích `/system?tab=storage`).
+- `GET /system/update` (quyền `system.read`; `POST` cần `system.manage`) — trạng thái nút "Cập nhật ngay": `{current,
+  latest, update_available, updater, linked, can_request, state: idle|requested|running|done|failed|stalled, message,
+  from, to, started_at, finished_at, requested_at, release_url, release_notes, published_at, auto_update_enabled,
+  blocked_version, blocked_rollback_failed}`. **v0.1.37:** thêm `stalled_reason: not_picked_up|process_gone|null`
+  (`process_gone` = `running` mà tiến trình genh đã chết — nhịp sống `run/genh-heartbeat.json` là nguồn chính, boot_id chỉ
+  phụ), `host_busy: bool` (yêu cầu đang xếp hàng sau một lần genh khác còn nhịp sống — vẫn `requested`, không phải
+  `not_picked_up`) và `interrupted: rolled_back|resume|null` (như trên). Xem `packages/contracts/src/p4-system.ts`.
+
 ## Thiết lập Owner (`/setup`)
 
 - `GET /setup/state` → `{"finished": false, "current_step": 1, "steps": [{"n": 1, "key": "welcome", "title": "Chào mừng", "required": true, "status": "todo|doing|done|skipped"} …12]}`. Không cần đăng nhập khi chưa xong. Khi `finished=true`, mọi route `/setup/*` khác trả 409.

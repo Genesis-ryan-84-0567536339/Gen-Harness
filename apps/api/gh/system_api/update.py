@@ -42,7 +42,8 @@ CHECK_MIN_INTERVAL_SECONDS = 30
 STALE_REQUEST_SECONDS = 15 * 60
 # v0.1.37 (F-34): 'running' mà tiến trình genh đã chết (máy tắt/khởi động lại, bị kill) ⇒ 'stalled' để Console cho
 # bấm Thử lại. Container api không thấy PID máy chủ — "còn sống" suy từ nhịp sống `run/genh-heartbeat.json` (genh
-# ghi mỗi 30 giây khi giữ khoá loại trừ) và boot_id (container dùng chung nhân với máy chủ Linux).
+# ghi mỗi 30 giây khi giữ khoá loại trừ); boot_id chỉ phụ (container chỉ trùng nhân máy chủ khi Docker chạy thẳng trên
+# Linux — Docker Desktop chạy trong VM).
 RUNNING_STALL_SECONDS = 60 * 60
 HEARTBEAT_STALE_SECONDS = 5 * 60
 BOOT_ID_PATH = Path("/proc/sys/kernel/random/boot_id")
@@ -147,41 +148,71 @@ def _boot_id() -> str | None:
     return v or None
 
 
-def _process_gone(status: dict[str, Any], d: Path) -> bool:
-    """'running' nhưng tiến trình genh không còn: máy đã khởi động lại (boot_id khác), hoặc chạy quá
-    `RUNNING_STALL_SECONDS` mà nhịp sống thiếu / cũ hơn `HEARTBEAT_STALE_SECONDS` / khác pid. Mọi giá trị đọc từ run/
-    (0777) là dữ liệu không tin cậy — chỉ nhận đúng kiểu, không đưa vào thông điệp."""
-    status_boot = status.get("boot_id")
-    here = _boot_id()
-    if isinstance(status_boot, str) and status_boot and here and status_boot != here:
-        return True
-    started = status.get("started_at")
-    age = _age_seconds(started) if isinstance(started, str) and started else None
-    if age is None or age <= RUNNING_STALL_SECONDS:
-        return False
-    pid = status.get("pid")
-    pid = pid if isinstance(pid, int) and not isinstance(pid, bool) else None
+def _int(value: Any) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _str(value: Any) -> str | None:
+    return value if isinstance(value, str) and value else None
+
+
+def _heartbeat(d: Path) -> tuple[bool, int | None, str | None]:
+    """(nhịp tươi ≤ `HEARTBEAT_STALE_SECONDS`, pid, boot_id) từ `run/genh-heartbeat.json` — sai kiểu ⇒ None."""
     hb = _read_json(d / "genh-heartbeat.json") or {}
-    hb_at = hb.get("at")
-    hb_age = _age_seconds(hb_at) if isinstance(hb_at, str) and hb_at else None
-    hb_pid = hb.get("pid")
-    hb_pid = hb_pid if isinstance(hb_pid, int) and not isinstance(hb_pid, bool) else None
-    alive = hb_age is not None and hb_age <= HEARTBEAT_STALE_SECONDS and (pid is None or hb_pid == pid)
-    return not alive
+    at = _str(hb.get("at"))
+    age = _age_seconds(at) if at else None
+    return age is not None and age <= HEARTBEAT_STALE_SECONDS, _int(hb.get("pid")), _str(hb.get("boot_id"))
+
+
+def _process_gone(status: dict[str, Any], d: Path) -> bool:
+    """'running' nhưng tiến trình genh không còn. Nhịp sống là nguồn CHÍNH: tươi và đúng pid ⇒ còn sống — KHÔNG xét
+    boot_id của container (Docker Desktop for Linux chạy container trong VM: boot_id container ≠ máy chủ dù genh vẫn
+    chạy). Ngoài ra:
+      - boot_id lúc bắt đầu (update-status.json) ≠ boot_id của nhịp sống (cả hai do genh ghi) ⇒ máy đã khởi động lại;
+      - nhịp cũ/thiếu và boot_id lúc bắt đầu ≠ boot_id container ⇒ máy đã khởi động lại (dừng ngay, không chờ 60 phút);
+      - còn lại: chạy quá `RUNNING_STALL_SECONDS` mà không có nhịp sống đúng pid ⇒ đã chết.
+    Mọi giá trị đọc từ run/ (0777) là dữ liệu không tin cậy — chỉ nhận đúng kiểu, không đưa vào thông điệp."""
+    pid = _int(status.get("pid"))
+    fresh, hb_pid, hb_boot = _heartbeat(d)
+    if fresh and (pid is None or hb_pid == pid):
+        return False
+    status_boot = _str(status.get("boot_id"))
+    if status_boot and hb_boot and status_boot != hb_boot:
+        return True
+    here = _boot_id()
+    if not fresh and status_boot and here and status_boot != here:
+        return True
+    started = _str(status.get("started_at"))
+    age = _age_seconds(started) if started else None
+    return age is not None and age > RUNNING_STALL_SECONDS
 
 
 def _host_busy(d: Path) -> bool:
     """Một tiến trình genh đang giữ khoá loại trừ (update/restore/import — vd lịch đêm) và còn sống: nhịp sống
-    `run/genh-heartbeat.json` tươi (≤ `HEARTBEAT_STALE_SECONDS`) và cùng lần khởi động máy. Yêu cầu "Cập nhật ngay" nằm
-    lâu trong lúc này là đang XẾP HÀNG sau lần đó (genh --if-requested chờ khoá), không phải watcher không chạy."""
-    hb = _read_json(d / "genh-heartbeat.json") or {}
-    hb_at = hb.get("at")
-    hb_age = _age_seconds(hb_at) if isinstance(hb_at, str) and hb_at else None
-    if hb_age is None or hb_age > HEARTBEAT_STALE_SECONDS:
-        return False
-    hb_boot = hb.get("boot_id")
-    here = _boot_id()
-    return not (isinstance(hb_boot, str) and hb_boot and here and hb_boot != here)
+    `run/genh-heartbeat.json` tươi (≤ `HEARTBEAT_STALE_SECONDS`) là đủ — không so boot_id container (Docker Desktop
+    chạy container trong VM). Yêu cầu "Cập nhật ngay" nằm lâu trong lúc này là đang XẾP HÀNG sau lần đó (genh
+    --if-requested chờ khoá), không phải watcher không chạy."""
+    return _heartbeat(d)[0]
+
+
+#: Mã genh (GH-E9xx) cuối thông điệp hộp thư — cùng cách đọc với web (updateModel.ts `updateErrorCode`).
+_GH_CODE = re.compile(r"GH-E[0-9A-F]{3}")
+#: Dấu "quay về chưa trọn / cần xử lý tay" trong thông điệp genh — cùng mẫu với web (updateModel.ts `failedCopy`).
+_MANUAL = re.compile(r"CŨNG THẤT BẠI|chưa trọn|can thiệp tay|xử lý tay", re.IGNORECASE)
+#: Cụm cố định genh ghi khi máy tắt SAU lúc đã đổi CSDL (ops.updateShutdownForwardMarker): giữ bản mới, cần chạy tiếp.
+SHUTDOWN_FORWARD_MARKER = "CSDL đã sang bản mới, cần chạy tiếp"
+
+
+def _interrupted(state: str, message: Any, rollback_failed: bool) -> str | None:
+    """v0.1.37: lần cập nhật 'failed' do genh nhận TÍN HIỆU DỪNG (GH-E94B — máy tắt/khởi động lại/bị dừng tay) mà KHÔNG
+    để máy dở dang ⇒ không phải bản mới hỏng. 'rolled_back' (chưa đụng gì / đã tự quay về), 'resume' (máy tắt sau khi
+    đã đổi CSDL — giữ bản mới, chạy lại để đi tiếp); quay về chưa trọn hoặc không phải GH-E94B ⇒ None."""
+    if state != "failed" or not isinstance(message, str) or rollback_failed:
+        return None
+    codes = _GH_CODE.findall(message)
+    if not codes or codes[-1] != "GH-E94B" or _MANUAL.search(message):
+        return None
+    return "resume" if SHUTDOWN_FORWARD_MARKER in message else "rolled_back"
 
 
 def running_version() -> str | None:
@@ -217,6 +248,7 @@ def _state() -> dict[str, Any]:
     blocked_ok = isinstance(blocked, str) and bool(blocked)
     # Trường có cấu trúc (genh ghi): tự quay về bản cũ CŨNG thất bại — Console dùng thay vì dò chữ trong thông điệp.
     rollback_failed = blocked_file.get("rollback_failed")
+    rb_failed = rollback_failed is True and blocked_ok and blocked == status.get("to")
     return {
         "current": info.get("version") or None,
         "updater": updater,
@@ -230,6 +262,9 @@ def _state() -> dict[str, Any]:
         # v0.1.37: yêu cầu đang chờ một lần cập nhật/khôi phục khác (vd lịch đêm) chạy xong — không phải "chưa nhận".
         "host_busy": host_busy,
         "message": status.get("message") or None,
+        # v0.1.37: 'failed' vì tín hiệu dừng (GH-E94B) mà không dở dang — Console/chuông báo "bị dừng giữa chừng"
+        # (vàng), không phải "chưa thành công" (đỏ).
+        "interrupted": _interrupted(str(state), status.get("message"), rb_failed),
         "from": status.get("from") or None,
         "to": status.get("to") or None,
         "started_at": status.get("started_at") or None,

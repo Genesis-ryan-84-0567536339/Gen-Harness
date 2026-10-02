@@ -33,7 +33,12 @@ type AutostartDeps struct {
 //   - linger (systemd --user chạy khi chưa đăng nhập): bắt buộc nếu có lịch
 //     đêm/watcher systemd --user HOẶC Docker rootless.
 //
-// macOS/Windows: Docker Desktop tự lo — not_applicable. KHÔNG BAO GIỜ trả lỗi:
+// macOS/Windows: linger không áp dụng. Docker CHỈ coi là "tự lo"
+// (not_applicable, docker_mode=desktop) khi phát hiện được Docker Desktop
+// (`docker info` OperatingSystem "Docker Desktop" — Desktop có "Start when you
+// sign in"); runtime genh tự cài (Colima/Lima trên macOS, distro WSL trên
+// Windows) KHÔNG có gì tự khởi động VM khi bật máy, và không đọc được Docker →
+// "unknown" (Console hiện "Chưa rõ", không báo sai "Có"). KHÔNG BAO GIỜ trả lỗi:
 // lệnh lỗi → "unknown" (status/doctor vẫn chạy tiếp).
 func CheckAutostart(ctx context.Context, deps AutostartDeps) hostlink.AutostartStatus {
 	goos := deps.GOOS
@@ -41,22 +46,26 @@ func CheckAutostart(ctx context.Context, deps AutostartDeps) hostlink.AutostartS
 		goos = runtime.GOOS
 	}
 	st := hostlink.AutostartStatus{OS: goos, CheckedAt: time.Now().UTC().Format(time.RFC3339)}
-	if goos != "linux" {
-		st.Linger, st.DockerEnabled, st.DockerMode = "not_applicable", "not_applicable", "desktop"
-		return st
-	}
 	runner := deps.Runner
 	if runner == nil {
 		runner = dockercli.ExecRunner{}
-	}
-	uid := deps.UID
-	if uid == "" {
-		uid = fmt.Sprint(os.Getuid())
 	}
 	run := func(name string, args ...string) ([]byte, error) {
 		cctx, cancel := context.WithTimeout(ctx, autostartCmdTimeout)
 		defer cancel()
 		return runner.Output(cctx, dockercli.Cmd{Name: name, Args: args})
+	}
+	if goos != "linux" {
+		st.Linger = "not_applicable"
+		st.DockerEnabled, st.DockerMode = "unknown", "unknown"
+		if out, err := run("docker", "info", "--format", "{{.OperatingSystem}}"); err == nil && strings.Contains(string(out), "Docker Desktop") {
+			st.DockerEnabled, st.DockerMode = "not_applicable", "desktop"
+		}
+		return st
+	}
+	uid := deps.UID
+	if uid == "" {
+		uid = fmt.Sprint(os.Getuid())
 	}
 
 	// Docker system hay rootless.
@@ -73,10 +82,19 @@ func CheckAutostart(ctx context.Context, deps AutostartDeps) hostlink.AutostartS
 	switch st.DockerMode {
 	case "rootless":
 		st.DockerEnabled = normalizeIsEnabled(run("systemctl", "--user", "is-enabled", "docker.service"))
-	default:
-		// "unknown": vẫn hỏi systemd hệ thống (trường hợp phổ biến nhất) —
-		// không có docker.service thì lệnh lỗi ⇒ "unknown".
+	case "system":
 		st.DockerEnabled = normalizeIsEnabled(run("systemctl", "is-enabled", "docker.service"))
+	default:
+		// "unknown" (docker info lỗi/quá hạn): vẫn hỏi systemd hệ thống nhưng CHỈ
+		// tin "yes" — máy chỉ dùng Docker rootless thường TẮT docker.service hệ
+		// thống (dockerd-rootless-setuptool khuyên vậy): "no" ở đây không có
+		// nghĩa Gen-Harness sẽ không tự lên, và khuyên `sudo systemctl enable
+		// docker` là sai. Không có docker.service thì lệnh lỗi ⇒ "unknown".
+		if normalizeIsEnabled(run("systemctl", "is-enabled", "docker.service")) == "yes" {
+			st.DockerEnabled = "yes"
+		} else {
+			st.DockerEnabled = "unknown"
+		}
 	}
 
 	// linger.
@@ -124,10 +142,11 @@ func normalizeIsEnabled(out []byte, _ error) string {
 // (Docker, linger) — mỗi dòng: nhãn, OK hay không, mô tả kèm lệnh sửa khi "no".
 func autostartLines(st hostlink.AutostartStatus) []diagLine {
 	if st.OS != "linux" {
-		return []diagLine{
-			{"Docker tự chạy", true, "Docker Desktop tự quản lý (bật \"Start Docker Desktop when you sign in\")"},
-			{"Linger (systemd --user)", true, "không áp dụng trên " + st.OS},
+		docker := diagLine{"Docker tự chạy", true, "Docker Desktop tự quản lý (bật \"Start Docker Desktop when you sign in\")"}
+		if st.DockerEnabled != "not_applicable" {
+			docker = diagLine{"Docker tự chạy", false, "không rõ — không phải Docker Desktop (Colima/WSL do genh cài không tự chạy khi bật máy): sau khi bật lại máy, chạy genh start"}
 		}
+		return []diagLine{docker, {"Linger (systemd --user)", true, "không áp dụng trên " + st.OS}}
 	}
 	var docker diagLine
 	docker.Check = "Docker tự chạy"

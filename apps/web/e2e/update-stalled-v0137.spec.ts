@@ -81,10 +81,11 @@ test.describe('v0.1.37 — cập nhật bị dừng giữa chừng', () => {
       message: 'Cập nhật bị dừng giữa chừng do tín hiệu dừng — đã tự quay về v0.1.36 (GH-E94B)',
       kicker: 'Cập nhật bị dừng giữa chừng',
     },
+    // GH-E94A không có ở đây: genh ≥ v0.1.37 không ghi mã này vào run/update-status.json (chỉ unit test phòng hờ).
     {
-      code: 'GH-E94A',
-      message: 'Đang có một lần cập nhật/khôi phục khác chạy — chờ xong rồi thử lại (GH-E94A)',
-      kicker: 'Đang có một lần cập nhật/khôi phục khác chạy — chờ xong rồi thử lại',
+      code: 'GH-E94B (cần chạy tiếp)',
+      message: 'Cập nhật bị dừng giữa chừng (máy tắt, khởi động lại hoặc bị dừng tay) — CSDL đã sang bản mới, cần chạy tiếp — Sau khi máy bật lại: chạy genh update để đi tiếp lên bản mới (GH-E94B)',
+      kicker: 'Cập nhật bị dừng giữa chừng — dữ liệu đã chuyển sang bản mới, cần chạy lại để hoàn tất',
     },
   ]) {
     test(`${c.code}: lời dẫn riêng, nguyên văn ở "Chi tiết kỹ thuật"`, async ({ page }) => {
@@ -103,6 +104,21 @@ test.describe('v0.1.37 — cập nhật bị dừng giữa chừng', () => {
     await page.goto('/system?tab=storage');
     const card = page.getByRole('region', { name: 'Sức khoẻ hệ thống' });
     await expect(card.getByText('Cập nhật bị dừng giữa chừng')).toBeVisible();
+    await expect(page.getByText('[object Object]')).toHaveCount(0);
+  });
+
+  test('GH-E94B dừng gọn: thẻ Sức khoẻ vàng "bị dừng giữa chừng", dải "Cần Sếp xử lý" dòng vàng (không đỏ)', async ({ page }) => {
+    await mockHook(page.request, 'health', { update: { state: 'failed', failed: true, interrupted: 'rolled_back' } });
+    await page.goto('/overview');
+    const strip = page.getByRole('region', { name: 'Cần Sếp xử lý' });
+    const row = strip.getByTestId('needs-boss-row').filter({ hasText: 'bị dừng giữa chừng' });
+    await expect(row).toHaveCount(1);
+    await expect(row).toHaveAttribute('data-severity', 'warn');
+    await expect(strip.getByText(/chưa thành công/)).toHaveCount(0);
+    await page.goto('/system?tab=storage');
+    const card = page.getByRole('region', { name: 'Sức khoẻ hệ thống' });
+    await expect(card.getByText('Cập nhật bị dừng giữa chừng')).toBeVisible();
+    await expect(card.getByText(/Lần cập nhật gần nhất lỗi/)).toHaveCount(0);
     await expect(page.getByText('[object Object]')).toHaveCount(0);
   });
 
@@ -133,7 +149,7 @@ test.describe('v0.1.37 — cập nhật bị dừng giữa chừng', () => {
     await mockHook(page.request, 'health', { autostart: AUTOSTART_WARN });
     await mockHook(page.request, 'notify', {
       kind: 'host.autostart', title: 'Máy chủ có thể không tự chạy lại Gen-Harness khi bật lại máy',
-      body: 'Docker chưa bật tự chạy khi mở máy — chạy một lần trên máy chủ: sudo systemctl enable docker · Chạy xong thì chạy genh status để cảnh báo tự hết (hoặc đợi tới đêm)',
+      body: 'Docker chưa bật tự chạy khi mở máy — chạy một lần trên máy chủ: sudo systemctl enable docker · Chạy xong thì chạy genh status để cảnh báo tự hết',
       link: '/system?tab=storage',
     });
     await expect(bell).toHaveAccessibleName('Thông báo — 2 chưa đọc');

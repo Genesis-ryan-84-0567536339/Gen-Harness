@@ -194,6 +194,12 @@ export interface SetupFollowUpItem {
 /** `GET/POST /system/update` — nút "Cập nhật ngay" (genh trên máy chủ làm việc thật, xem gh/system_api/update.py). */
 export type SystemUpdateState = 'idle' | 'requested' | 'running' | 'done' | 'failed' | 'stalled';
 export type SystemUpdateStalledReason = 'not_picked_up' | 'process_gone' | null;
+/**
+ * v0.1.37: lần cập nhật 'failed' vì genh nhận tín hiệu dừng (GH-E94B — máy tắt/khởi động lại/bị dừng tay) mà KHÔNG để
+ * máy dở dang: `rolled_back` = chưa đụng gì / đã tự quay về bản cũ; `resume` = máy tắt sau khi đã đổi CSDL — giữ bản
+ * mới, chạy lại để đi tiếp. null = không phải trường hợp này (hoặc quay về chưa trọn); thiếu ở api cũ.
+ */
+export type SystemUpdateInterrupted = 'rolled_back' | 'resume' | null;
 export interface SystemUpdate {
   /** Phiên bản đang chạy (genh ghi vào hộp thư); null ở dev/test. */
   current: string | null;
@@ -216,6 +222,8 @@ export interface SystemUpdate {
    * nhịp sống); khi đó yêu cầu nằm quá 15 phút vẫn là 'requested', không phải `not_picked_up`. Thiếu ở api cũ.
    */
   host_busy?: boolean;
+  /** v0.1.37: xem `SystemUpdateInterrupted`. */
+  interrupted?: SystemUpdateInterrupted;
   message: string | null;
   from: string | null;
   to: string | null;
@@ -345,6 +353,8 @@ export interface SystemHealth {
     state: SystemUpdateState | 'unknown' | string;
     stalled_reason?: SystemUpdateStalledReason;
     failed: boolean;
+    /** v0.1.37: `failed` mà do tín hiệu dừng (GH-E94B), không dở dang ⇒ "bị dừng giữa chừng" (vàng), không đỏ. */
+    interrupted?: SystemUpdateInterrupted;
     blocked_version: string | null;
     finished_at: string | null;
   };

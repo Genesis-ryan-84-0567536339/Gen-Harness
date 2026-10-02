@@ -271,7 +271,7 @@ const HEALTH_KIND_DEFAULTS: Record<string, Omit<HealthIssue, 'raised_at' | 'body
   'disk.low': { key: 'disk.low', kind: 'disk.low', severity: 'bad', title: 'Ổ đĩa sắp hết chỗ', body: 'Còn 3,0 GB trống, cần tối thiểu 5,0 GB — cập nhật tự động đang tạm dừng.', link: '/system?tab=storage', action: 'Xem cách giải phóng' },
   // v0.1.37 (F-73) — gh/health.py _eval_autostart (AUTOSTART_TITLE/AUTOSTART_FIX/AUTOSTART_DONE): đích là thẻ Sức khoẻ
   // (hướng dẫn từng bước, lệnh dạng mã) — cả dòng dải lẫn chuông.
-  'host.autostart': { key: 'host.autostart', kind: 'host.autostart', severity: 'warn', title: 'Máy chủ có thể không tự chạy lại Gen-Harness khi bật lại máy', body: 'Docker chưa bật tự chạy khi mở máy — chạy một lần trên máy chủ: sudo systemctl enable docker · Lịch tự cập nhật và nút Cập nhật ngay chỉ chạy khi có người đăng nhập — chạy một lần: sudo loginctl enable-linger $USER · Chạy xong thì chạy genh status để cảnh báo tự hết (hoặc đợi tới đêm)', link: '/system?tab=storage', action: 'Xem cách bật' },
+  'host.autostart': { key: 'host.autostart', kind: 'host.autostart', severity: 'warn', title: 'Máy chủ có thể không tự chạy lại Gen-Harness khi bật lại máy', body: 'Docker chưa bật tự chạy khi mở máy — chạy một lần trên máy chủ: sudo systemctl enable docker · Lịch tự cập nhật và nút Cập nhật ngay chỉ chạy khi có người đăng nhập — chạy một lần: sudo loginctl enable-linger $USER · Chạy xong thì chạy genh status để cảnh báo tự hết', link: '/system?tab=storage', action: 'Xem cách bật' },
 };
 
 export interface MockHealthOverride {
@@ -415,7 +415,15 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     const gb = (n: number | null) => (n == null ? '?' : (n / 1024 ** 3).toFixed(1).replace('.', ','));
     if (worker.state === 'silent') derived.push({ kind: 'worker.silent', title: `Bộ xử lý nền đã ngừng ${worker.silent_minutes ?? WORKER_SILENT_MIN} phút` });
     if (backup.stale) derived.push({ kind: 'backup.stale', title: `Đã hơn ${backup.stale_after ?? '36 giờ'} chưa có bản sao lưu mới` });
-    if (update.failed) derived.push({ kind: 'update.failed', title: `Cập nhật lên ${sysUpdate.to ?? 'bản mới'} chưa thành công` });
+    // Như gh/health._eval_update: GH-E94B dừng gọn (`interrupted`) ⇒ 'warn' "bị dừng giữa chừng", không đỏ.
+    if (update.failed && update.interrupted) {
+      derived.push({
+        kind: 'update.failed', severity: 'warn', title: `Cập nhật lên ${sysUpdate.to ?? 'bản mới'} bị dừng giữa chừng`,
+        body: update.interrupted === 'resume'
+          ? 'Máy tắt giữa lúc cập nhật — cần chạy lại để hoàn tất. Bấm để thử lại ngay.'
+          : 'Bản đang dùng vẫn chạy bình thường — lịch đêm sẽ tự thử lại, hoặc bấm để thử lại ngay.',
+      });
+    } else if (update.failed) derived.push({ kind: 'update.failed', title: `Cập nhật lên ${sysUpdate.to ?? 'bản mới'} chưa thành công` });
     if (disk.state === 'low') derived.push({ kind: 'disk.low', body: `Còn ${gb(disk.free_bytes)} GB trống, cần tối thiểu ${gb(disk.min_bytes)} GB — cập nhật tự động đang tạm dừng.` });
     if (o.autostart?.state === 'warn') derived.push({ kind: 'host.autostart' });
     const issues: HealthIssue[] = [];

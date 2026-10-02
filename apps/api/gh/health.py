@@ -87,7 +87,8 @@ AUTOSTART_FIX = {
 }
 #: Câu cuối của thân cảnh báo: genh chỉ ghi lại `run/autostart-status.json` khi chạy `genh status`/`genh doctor` hoặc
 #: lần cập nhật kế tiếp (lịch đêm) — chạy xong lệnh sửa mà không biết điều này, Sếp sẽ tưởng lệnh không có tác dụng.
-AUTOSTART_DONE = "Chạy xong thì chạy genh status để cảnh báo tự hết (hoặc đợi tới đêm)"
+#: KHÔNG hứa "đợi tới đêm": thiếu linger thì lịch đêm không chạy, tắt tự cập nhật thì không có lần chạy đêm nào.
+AUTOSTART_DONE = "Chạy xong thì chạy genh status để cảnh báo tự hết"
 #: Tiêu đề cảnh báo phòng trước (máy VẪN đang chạy — chỉ là khi bật lại sẽ không tự lên); cùng câu ở tài liệu/web/test.
 AUTOSTART_TITLE = "Máy chủ có thể không tự chạy lại Gen-Harness khi bật lại máy"
 #: Mỗi câu kết thúc bằng lệnh — KHÔNG thêm dấu chấm sau lệnh (Sếp chép nguyên dòng: "docker." / "$USER." chạy sẽ lỗi).
@@ -117,11 +118,8 @@ def _s(value: Any) -> str:
 # ─── dòng sự cố: mở một lần / đóng ───────────────────────────────────────────────────────────────────────────
 
 async def raise_once(db: AsyncSession, org_id: uuid.UUID, *, key: str, kind: str, severity: str, title: str,
-                     body: str, link: str | None, fingerprint: str = "", redis: Any = None,
-                     notify_link: str | None = None) -> bool:
+                     body: str, link: str | None, fingerprint: str = "", redis: Any = None) -> bool:
     """Mở sự cố `key`; gửi chuông cho các Owner CHỈ khi dòng mới mở hoặc `fingerprint` đổi. Trả True nếu đã gửi.
-
-    `notify_link`: đích riêng cho chuông (mặc định = `link` của dòng trên dải "Cần Sếp xử lý").
 
     Sự cố đang mở với cùng fingerprint ⇒ không chuông thứ hai (chỉ làm mới tiêu đề/nội dung cho dải "Cần Sếp xử lý",
     vd. số phút bộ xử lý nền đã ngừng). Bên gọi commit (chuông đẩy WebSocket sau commit — gh.notifications)."""
@@ -146,7 +144,7 @@ async def raise_once(db: AsyncSession, org_id: uuid.UUID, *, key: str, kind: str
             {"o": org_id, "k": key, "t": title, "b": body, "l": link})
         return False
     await notifications.notify(db, org_id, await notifications.owner_ids(db, org_id), kind=kind, title=title,
-                               body=body, link=notify_link or link, redis=redis)
+                               body=body, link=link, redis=redis)
     return True
 
 
@@ -255,8 +253,8 @@ def _disk_status() -> dict[str, Any] | None:
 
 def _autostart_status() -> dict[str, Any]:
     """Khối `autostart` của /system/health từ `run/autostart-status.json`: mọi giá trị ngoài tập cho phép ⇒ 'unknown'.
-    `state`: 'warn' khi (linger_required và linger 'no') hoặc docker_enabled 'no'; 'ok' khi không vấn đề và có ít
-    nhất một giá trị yes/not_applicable; tệp thiếu/hỏng ⇒ 'unknown'."""
+    `state`: 'warn' khi (linger_required và linger 'no') hoặc docker_enabled 'no'; 'ok' khi không vấn đề, docker_enabled
+    yes/not_applicable và linger yes/not_applicable/không cần; còn lại (kể cả tệp thiếu/hỏng) ⇒ 'unknown'."""
     from gh.system_api import update
 
     d = _host_dir()
@@ -270,7 +268,9 @@ def _autostart_status() -> dict[str, Any]:
     mode = _pick(raw.get("docker_mode"), AUTOSTART_DOCKER_MODES)
     checked = _parse_ts(raw.get("checked_at"))
     problems = _autostart_problems(linger, required, docker, mode)
-    good = any(v in ("yes", "not_applicable") for v in (linger, docker))
+    # 'ok' chỉ khi Docker CHẮC tự chạy (yes/not_applicable) và linger ổn (có / không cần) — linger 'yes' một mình
+    # không kéo lên 'ok' khi Docker còn 'unknown' (vd macOS Colima, docker info lỗi). Cùng điều kiện đóng sự cố.
+    good = docker in ("yes", "not_applicable") and (linger in ("yes", "not_applicable") or required is False)
     state = "warn" if problems else ("ok" if good else "unknown")
     return {"state": state, "linger": linger, "linger_required": required, "docker_enabled": docker,
             "docker_mode": mode, "checked_at": _iso(checked)}
@@ -380,8 +380,8 @@ async def collect(db: AsyncSession, redis: Any, org_id: uuid.UUID, *, now: datet
     except Exception:  # noqa: BLE001
         log.warning("Không đọc được danh mục sao lưu", exc_info=True)
 
-    update: dict[str, Any] = {"state": "unknown", "stalled_reason": None, "failed": False, "blocked_version": None,
-                              "finished_at": None}
+    update: dict[str, Any] = {"state": "unknown", "stalled_reason": None, "failed": False, "interrupted": None,
+                              "blocked_version": None, "finished_at": None}
     disk: dict[str, Any] = {"state": "unknown", "free_bytes": None, "min_bytes": None, "checked_at": None}
     try:
         from gh.system_api import update as upd
@@ -390,6 +390,8 @@ async def collect(db: AsyncSession, redis: Any, org_id: uuid.UUID, *, now: datet
             st = upd._state()
             update = {"state": str(st.get("state") or "unknown"), "stalled_reason": st.get("stalled_reason"),
                       "failed": _update_failed_recent(st, now),
+                      # GH-E94B dừng gọn (không dở dang): thẻ Sức khoẻ hiện "bị dừng giữa chừng" (vàng), không đỏ.
+                      "interrupted": st.get("interrupted") if _update_failed_recent(st, now) else None,
                       "blocked_version": st.get("blocked_version"), "finished_at": st.get("finished_at")}
             ds = _disk_status() or {}
             disk_state = str(ds.get("state")) if ds.get("state") in ("ok", "low") else "unknown"
@@ -413,9 +415,9 @@ async def collect(db: AsyncSession, redis: Any, org_id: uuid.UUID, *, now: datet
     except Exception:  # noqa: BLE001
         log.warning("Không đọc được sự cố đang mở", exc_info=True)
 
-    bad = (any(i["severity"] == "bad" for i in issues) or worker["state"] == "silent" or update["failed"]
-           or disk["state"] == "low" or backup["stale"])
-    warn = (any(i["severity"] == "warn" for i in issues) or browser["state"] == "silent"
+    bad = (any(i["severity"] == "bad" for i in issues) or worker["state"] == "silent"
+           or (update["failed"] and not update["interrupted"]) or disk["state"] == "low" or backup["stale"])
+    warn = (any(i["severity"] == "warn" for i in issues) or browser["state"] == "silent" or update["failed"]
             or any(q["dlq"] > 0 for q in queues) or any(c["ok"] is False for c in crons)
             or (autostart is not None and autostart["state"] == "warn"))
     out: dict[str, Any] = {
@@ -455,6 +457,21 @@ async def _eval_update(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: dat
     state = st.get("state")
     if _update_failed_recent(st, now):
         target = st.get("to") or "bản mới"
+        fingerprint = f"{st.get('finished_at') or ''}|{st.get('to') or ''}"
+        interrupted = st.get("interrupted")
+        if interrupted:
+            # GH-E94B (máy tắt/khởi động lại/bị dừng tay) mà không dở dang: không phải bản mới hỏng ⇒ 'warn', không
+            # gióng chuông đỏ "chưa thành công" trái với thẻ cập nhật ("Đây không phải lỗi của bản mới").
+            if interrupted == "resume":
+                body = "Máy tắt giữa lúc cập nhật — cần chạy lại để hoàn tất. Bấm để thử lại ngay."
+            elif st.get("auto_update_enabled") is True:
+                body = "Bản đang dùng vẫn chạy bình thường — lịch đêm sẽ tự thử lại, hoặc bấm để thử lại ngay."
+            else:
+                body = "Bản đang dùng vẫn chạy bình thường — bấm để thử lại."
+            await raise_once(db, org_id, key="update.failed", kind="update.failed", severity="warn",
+                             title=f"Cập nhật lên {target} bị dừng giữa chừng", body=body, link=STORAGE_LINK,
+                             fingerprint=fingerprint, redis=redis)
+            return
         if st.get("blocked_rollback_failed") is True:
             body = "Tự quay về bản cũ cũng lỗi — cần hỗ trợ ngay."
         elif st.get("blocked_version"):
@@ -463,7 +480,7 @@ async def _eval_update(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: dat
             body = "Bấm để xem chi tiết và thử lại."
         await raise_once(db, org_id, key="update.failed", kind="update.failed", severity="bad",
                          title=f"Cập nhật lên {target} chưa thành công", body=body, link=STORAGE_LINK,
-                         fingerprint=f"{st.get('finished_at') or ''}|{st.get('to') or ''}", redis=redis)
+                         fingerprint=fingerprint, redis=redis)
     elif state in ("done", "idle", "failed"):  # 'failed' quá 24 giờ: thẻ cập nhật đã thôi báo ⇒ đóng sự cố
         await clear(db, org_id, "update.failed")
 

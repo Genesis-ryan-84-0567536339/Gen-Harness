@@ -74,7 +74,10 @@ export function healthRows(h: SystemHealth, now = Date.now(), tz = DEFAULT_TZ): 
   const u = h.update;
   rows.push(
     // `failed` = lỗi trong 24 giờ qua (cùng điều kiện thẻ cập nhật) — quá hạn thì API trả false dù state vẫn 'failed'.
-    u.failed
+    // v0.1.37: dừng do tín hiệu (máy tắt/khởi động lại — GH-E94B) mà không dở dang ⇒ vàng, cùng lời với thẻ cập nhật.
+    u.failed && u.interrupted
+      ? { key: 'update', label: 'Cập nhật', value: 'Cập nhật bị dừng giữa chừng', tone: 'warn' }
+    : u.failed
       ? { key: 'update', label: 'Cập nhật', value: u.blocked_version ? `Lần cập nhật gần nhất lỗi (${u.blocked_version})` : 'Lần cập nhật gần nhất lỗi', tone: 'bad' }
       : u.state === 'stalled' && u.stalled_reason === 'process_gone'
         ? { key: 'update', label: 'Cập nhật', value: 'Cập nhật bị dừng giữa chừng', tone: 'warn' }
@@ -181,7 +184,8 @@ export function healthTips(h: SystemHealth): HealthTip[] {
         cmd: 'sudo loginctl enable-linger $USER',
       });
     }
-    steps.push({ text: 'Chạy xong thì kiểm lại để cảnh báo tự hết (hoặc đợi tới đêm, lần cập nhật tự động sẽ kiểm lại):', cmd: 'genh status' });
+    // Không hứa "đợi tới đêm": thiếu linger thì lịch đêm không chạy, tắt tự cập nhật thì không có lần chạy đêm nào.
+    steps.push({ text: 'Chạy xong thì kiểm lại để cảnh báo tự hết:', cmd: 'genh status' });
     tips.push({ key: 'autostart', title: 'Cách bật tự chạy lại khi bật máy', steps });
   }
   return tips;

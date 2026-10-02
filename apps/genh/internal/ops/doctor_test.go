@@ -222,6 +222,7 @@ func TestRunDoctor_TuChayLaiKhiBatMay(t *testing.T) {
 	// Darwin: không áp dụng — vẫn ✓ và ghi tệp.
 	var out2 strings.Builder
 	deps.GOOS = "darwin"
+	fr.Responses = append(fr.Responses, fake.Response{Match: cmdIs("docker", "info --format {{.OperatingSystem}}"), Output: []byte("Docker Desktop\n")})
 	if err := RunDoctor(context.Background(), env, outPath, deps, &out2); err != nil {
 		t.Fatalf("RunDoctor darwin: %v", err)
 	}

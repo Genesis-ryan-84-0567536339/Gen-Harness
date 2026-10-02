@@ -500,8 +500,13 @@ func runUpdate(args []string) int {
 		if ok {
 			// Bản mới (tiến trình con) tự ghi kết quả; con chết giữa chừng thì
 			// trạng thái vẫn "running" — báo lỗi thay nó để Console không chờ mãi.
+			// Không chạy được con vì tín hiệu dừng tới ngay sau khi tải genh mới
+			// (code == exitStoppedBeforeReExec): chưa đụng gì — GH-E94B.
 			if st, err := hostlink.ReadStatus(env.InstallDir); code != 0 && err == nil && st.State == "running" {
-				_ = hostlink.Finish(env.InstallDir, "failed", "", "Cập nhật dừng giữa chừng — xem logs/auto-update.log")
+				_ = hostlink.Finish(env.InstallDir, "failed", "", childFailedMessage(code == exitStoppedBeforeReExec, context.Cause(ctx)))
+			}
+			if code == exitStoppedBeforeReExec {
+				return 1
 			}
 			return code
 		}
@@ -760,7 +765,7 @@ func trySelfUpdateAndReExec(ctx context.Context, originalArgs []string, quiet bo
 	if err := runChildForwardingSignal(ctx, child); err != nil {
 		if errors.Is(err, errStoppedBeforeReExec) {
 			fmt.Fprintf(os.Stderr, "genh: nhận tín hiệu dừng ngay sau khi tải genh %s — chưa đụng gì tới dịch vụ; lần sau (lịch đêm hoặc genh update) sẽ làm tiếp.\n", res.To)
-			return 1, true, false
+			return exitStoppedBeforeReExec, true, false
 		}
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
@@ -770,6 +775,25 @@ func trySelfUpdateAndReExec(ctx context.Context, originalArgs []string, quiet bo
 		return 1, true, false
 	}
 	return 0, true, false
+}
+
+// exitStoppedBeforeReExec: mã nội bộ trySelfUpdateAndReExec trả khi KHÔNG chạy
+// được genh bản mới vì tín hiệu dừng (errStoppedBeforeReExec) — caller ghi
+// Console GH-E94B "chưa đụng gì" rồi thoát mã 1 (không lộ mã này ra ngoài).
+const exitStoppedBeforeReExec = -2
+
+// childFailedMessage: thông điệp Console khi tiến trình con (genh bản mới) không
+// ghi được kết quả. stoppedBeforeChild: tín hiệu dừng tới trước khi chạy con —
+// chưa đụng gì (GH-E94B, Console hiện thẻ "dừng giữa chừng — chưa đụng gì",
+// không phải thẻ lỗi đỏ "đã tự quay về").
+func childFailedMessage(stoppedBeforeChild bool, cause error) string {
+	if stoppedBeforeChild {
+		if cause == nil {
+			cause = errStoppedBeforeReExec
+		}
+		return consoleUpdateMessage(ops.InterruptedBeforeTouch(cause))
+	}
+	return "Cập nhật dừng giữa chừng — xem logs/auto-update.log"
 }
 
 // errStoppedBeforeReExec: tín hiệu dừng tới trước khi kịp chạy genh bản mới.
