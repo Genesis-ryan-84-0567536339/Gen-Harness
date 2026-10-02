@@ -1572,9 +1572,9 @@ cần khôi phục — CSDL chưa bị đụng thì chỉ cần `docker compose 
 - Web (gói web-can-sep-suc-khoe): dải "Cần Sếp xử lý" (`NeedsBossStrip`, đầu Tổng quan — gom "Chưa có model" + `issues`
   của `/system/health`, 'bad' trước 'warn'), thẻ "Sức khoẻ hệ thống" (`HealthCard`, "Chi tiết kỹ thuật" liệt kê cron +
   hàng lỗi DLQ), chuông có biểu tượng riêng cho kind sự cố và làm mới sức khoẻ ngay khi nhận chuông, Trợ giúp hiện
-  "Phiên bản ảnh" + genh. Vai trò không có `system.read` không gọi `/system/health`.
-- Tích hợp: thẻ "cập nhật lỗi" ở Tổng quan CHỈ ẩn khi dải thật sự có dòng `update.failed` (vai trò không có `system.read`
-  hoặc `/system/health` lỗi ⇒ thẻ vẫn hiện, lỗi cập nhật không biến mất); "Máy chủ chưa nhận yêu cầu" (stalled) không có
+  "phiên bản máy chủ" + "phiên bản công cụ cài đặt (genh)". Vai trò không có `system.read` không gọi `/system/health`.
+- Tích hợp: thẻ "cập nhật lỗi" ở Tổng quan CHỈ ẩn khi dải thật sự có dòng `update.failed` (vai trò không có
+  `system.manage` (dải không hiện) hoặc `/system/health` lỗi ⇒ thẻ vẫn hiện, lỗi cập nhật không biến mất); "Máy chủ chưa nhận yêu cầu" (stalled) không có
   dòng trong dải nên thẻ vẫn hiện.
 
 ### Kiểm tra
@@ -1587,7 +1587,7 @@ cần khôi phục — CSDL chưa bị đụng thì chỉ cần `docker compose 
 - genh: `internal/ops/doctor_test.go` — `TestRunDoctor_LogsHaveTimestamps` (`logs -t --tail=500`).
 - web: `test/unit/needs-boss-v0136.test.tsx`, e2e mock `e2e/health-v0136.spec.ts` (11 kịch bản: dải 2 dòng + 2 nút, bad
   trước warn, Chưa có model, cập nhật lỗi chỉ 1 lần, thẻ Sức khoẻ + Im 14 phút, Hạn lưu khoá Sửa không PATCH, chuông
-  channel.down, Trợ giúp phiên bản ảnh, vai trò không system.read, /system/health 500); `social.spec`,
+  channel.down, Trợ giúp phiên bản máy chủ/genh, vai trò không system.read, /system/health 500); `social.spec`,
   `update-rollback-v0134.spec`, `flows.spec` vẫn xanh.
 - Thêm khi tích hợp: `apps/api/tests/test_integ_v0136.py` (worker `_tracked` ghi ⇒ `/system/health` đọc đúng: cron ok/lỗi,
   worker 'ok'), vitest (h)(i)(j) trong `needs-boss-v0136.test.tsx`.
@@ -1613,3 +1613,25 @@ cần khôi phục — CSDL chưa bị đụng thì chỉ cần `docker compose 
   nhất "Đã ngừng N phút", "Việc nền bị lỗi" (DLQ chỉ ở Chi tiết kỹ thuật); mock e2e chép đúng chữ/khoá của API; Gen
   target `overview.needs_boss` (test gen-targets nhận cả id có gạch nối).
 - Chưa làm: cache mốc sao lưu mới nhất trong Redis (vẫn đọc manifest mỗi phút và mỗi lần mở thẻ) — để bản sau.
+
+### Sửa sau review lần 2 (v0.1.36, trước merge)
+
+- Sao lưu ngay: job arq `backup_now` đăng ký `max_tries=1` — worker tắt giữa chừng (`genh update`/khởi động lại) không còn
+  tự chạy lại job đã báo "thất bại, bấm Sao lưu ngay để thử lại" (trước đây Sếp bấm theo chuông ⇒ hai pg_dump cùng lúc).
+  Test: arq chạy lại sau CancelledError ⇒ job KHÔNG chạy lần hai.
+- Ổ đĩa: hướng dẫn giải phóng chỗ trống bỏ câu "thẻ này tự cập nhật mỗi phút" (ổ đĩa chỉ đo khi `genh update`) — bước 4
+  là chạy `genh update` (hoặc chờ lần cập nhật tự động đêm nay) để đo lại; dòng "Ổ đĩa" ghi giờ đo ("· đo lúc 02/10 03:00").
+  Số GB một khuôn ở chuông/dải và thẻ ("3,0 GB").
+- `backup.stale`: nút trên dải đổi thành "Mở mục Sao lưu", đích `/system?tab=storage&focus=backup` — BackupPanel cuộn tới
+  và đặt con trỏ vào nút "Sao lưu ngay" (e2e mới).
+- Định tuyến model: mở/đóng sự cố `model.auth_expired` trong savepoint riêng, lỗi chỉ ghi log — không làm hỏng lượt gọi
+  model hay chuyển sang nhà cung cấp kế tiếp. Ghi chú nút "Gọi thử": lỗi `expired` vẫn có MỘT chuông từ vòng theo dõi
+  (cố ý, để dải nhắc tiếp).
+- `channel.down:<loại>` tự đóng khi không còn kênh loại đó dùng được (bị xoá, plugin cầu nối bị tắt).
+- `/system/health` không SCAN cả keyspace mỗi lần: worker ghi tên cron vào tập `gh:cron:names`, EventBus ghi tên stream
+  DLQ vào `gh:dlq:streams`; API quét bù tối đa một lần mỗi ngày (`gh:health:discovered`) cho khoá có từ trước.
+- Log JSON production che nhẹ bí mật (mật khẩu trong URL, `Bearer`, `token=`/`password=`/`api_key:`…, `?code=`) ở
+  `msg`/`exc`/`stack`/trường `extra` trước khi `genh doctor` gói log gửi hỗ trợ.
+- Trợ giúp: hai dòng "phiên bản máy chủ" và "phiên bản công cụ cài đặt (genh)" (bỏ dòng "phiên bản" lặp); thông tin báo
+  lỗi dùng cùng chữ. `genh status` mô tả là "dung lượng dữ liệu đang dùng" (không phải chỗ trống ổ đĩa).
+- "Việc nền bị lỗi: N việc" có câu hướng dẫn: thường tự hết, kéo dài thì gửi kèm khi Báo lỗi.

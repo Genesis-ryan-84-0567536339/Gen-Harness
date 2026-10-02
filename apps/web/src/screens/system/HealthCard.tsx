@@ -43,6 +43,7 @@ function HealthBody({ data, now, tz }: { data: SystemHealth; now: number; tz: st
             <span className="health-card__value" style={r.tone === 'bad' || r.tone === 'warn' ? { color: TONE_COLOR[r.tone] } : undefined}>
               {r.value}
             </span>
+            {r.hint ? <span className="health-card__hint">{r.hint}</span> : null}
           </li>
         ))}
       </ul>

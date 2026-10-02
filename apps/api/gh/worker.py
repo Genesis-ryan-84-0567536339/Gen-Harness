@@ -6,7 +6,8 @@
 - Giai đoạn 3: hook sau sàng lọc và việc định kỳ của từng cụm màn (`gh.biz.*.jobs`), tự đăng ký.
 - v0.1.36 (F-45): lịch cron hiểu theo GIỜ VN (`WORKER_TZ`, không phụ thuộc múi giờ máy/ảnh Docker); job nặng
   theo ngày dời về 04:20–05:10 — ngoài giờ làm việc 08:00–18:00 và ngoài cửa sổ cập nhật genh 02:30–03:30.
-- v0.1.36 (F-6): mọi cron được bọc `_tracked` — sau mỗi lần chạy ghi `gh:cron:last:<tên hàm>` = JSON
+- v0.1.36 (F-6): mọi cron được bọc `_tracked` — sau mỗi lần chạy ghi `gh:cron:last:<tên hàm>` (+ tên vào tập
+  `gh:cron:names`) = JSON
   {"at": ISO UTC "Z", "ok": bool, "ms": int} (TTL 7 ngày) và `gh:worker:heartbeat` = ISO UTC (TTL 1 ngày; cũng
   ghi lúc startup) — API đọc để dựng GET /system/health ("Bộ xử lý nền" im lặng / cron hỏng).
 """
@@ -57,6 +58,8 @@ WORKER_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 # v0.1.36 (F-6) — hợp đồng Redis với API (GET /system/health đọc).
 CRON_LAST_KEY = "gh:cron:last:{}"
 CRON_LAST_TTL = 7 * 86400
+#: Tập tên hàm cron đã ghi dấu — API đọc tập này + MGET thay vì SCAN `gh:cron:last:*` mỗi lần.
+CRON_NAMES_KEY = "gh:cron:names"
 HEARTBEAT_KEY = "gh:worker:heartbeat"
 HEARTBEAT_TTL = 86400
 
@@ -101,6 +104,7 @@ def _tracked(fn: Callable[[dict[str, Any]], Awaitable[Any]]) -> Callable[[dict[s
                 payload = {"at": _utc_iso(), "ok": ok, "ms": int((time.monotonic() - started) * 1000)}
                 try:
                     await redis.set(CRON_LAST_KEY.format(fn.__name__), orjson.dumps(payload), ex=CRON_LAST_TTL)
+                    await redis.sadd(CRON_NAMES_KEY, fn.__name__)
                 except Exception as exc:  # noqa: BLE001 — dấu sức khoẻ không được làm hỏng job
                     log.warning("Không ghi được dấu cron %s: %s", fn.__name__, exc)
                 await _beat(redis)

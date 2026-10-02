@@ -154,6 +154,59 @@ async def test_model_auth_expired_rings_once(owner_api: Api, app, db, redis) -> 
     assert await health.active_issues(db, org) == []
 
 
+async def test_model_alert_failure_never_breaks_routing(owner_api: Api, app, db, redis,  # type: ignore[no-untyped-def]
+                                                        monkeypatch: pytest.MonkeyPatch) -> None:
+    """Chuông/sự cố lỗi ⇒ `_set_auth_state` không ném (định tuyến model không hỏng), auth_state vẫn được ghi; vòng
+    theo dõi mở bù sự cố sau đó."""
+    org = await org_id(db)
+    p = (await db.execute(text("""INSERT INTO agent.providers (org_id, kind, name, endpoint, failover_rank)
+                                  VALUES (:o, 'openai_compat', 'Gamma', 'https://gamma.test/v1', 1)
+                                  RETURNING id, name"""), {"o": org})).one()
+    await db.commit()
+
+    async def boom(*_: Any, **__: Any) -> Any:
+        raise RuntimeError("notifications down")
+
+    monkeypatch.setattr(health, "raise_model_expired", boom)
+    monkeypatch.setattr(health, "clear", boom)
+    r = ModelRouter(sessionmaker(), redis)
+    await r._set_auth_state(p, "expired")
+    await db.commit()
+    state = (await db.execute(text("SELECT auth_state FROM agent.providers WHERE id = :i"), {"i": p.id})).scalar_one()
+    assert state == "expired"
+    assert await bells(db, "model.auth_expired") == []
+    await r._set_auth_state(p, "ok")
+    await db.commit()
+    state = (await db.execute(text("SELECT auth_state FROM agent.providers WHERE id = :i"), {"i": p.id})).scalar_one()
+    assert state == "ok"
+
+
+async def test_channel_down_clears_when_channel_gone_or_bridge_disabled(owner_api: Api, app, db,  # type: ignore[no-untyped-def]
+                                                                        redis) -> None:
+    """Sếp xoá kênh / tắt plugin cầu nối thay vì đăng nhập lại ⇒ dòng "Đăng nhập lại" không treo mãi."""
+    org = await org_id(db)
+    async with sessionmaker()() as s:
+        await health.raise_once(s, org, key="channel.down:nochannel", kind="channel.down", severity="bad",
+                                title="Kênh cũ đã ngắt kết nối", body="…", link="/system?tab=channels")
+        await s.commit()
+    plugin = (await db.execute(text("""INSERT INTO ops.plugins (package, name, layer, origin, version, is_enabled)
+                                       VALUES ('@test/bridge-v0136', 'Cầu nối thử', 'channel', 'local_file', '1.0.0',
+                                               true) RETURNING id"""))).scalar_one()
+    await db.execute(text("""INSERT INTO core.channels (org_id, type, name, plugin_id)
+                             VALUES (:o, 'bridgetest', 'Kênh thử', :p)"""), {"o": org, "p": plugin})
+    await db.commit()
+    async with sessionmaker()() as s:
+        await health.raise_once(s, org, key="channel.down:bridgetest", kind="channel.down", severity="bad",
+                                title="Kênh thử đã ngắt kết nối", body="…", link="/system?tab=channels")
+        await s.commit()
+    await evaluate(redis, org)
+    assert [i["key"] for i in await health.active_issues(db, org)] == ["channel.down:bridgetest"]
+    await db.execute(text("UPDATE ops.plugins SET is_enabled = false WHERE id = :i"), {"i": plugin})
+    await db.commit()
+    await evaluate(redis, org)
+    assert await health.active_issues(db, org) == []
+
+
 async def test_model_already_expired_is_picked_up_by_watch(owner_api: Api, app, db, redis) -> None:  # type: ignore[no-untyped-def]
     """Nhà cung cấp đã 'expired' từ trước v0.1.36 (hoặc do nút "Gọi thử") — vòng theo dõi vẫn mở sự cố, một chuông."""
     org = await org_id(db)
@@ -181,7 +234,7 @@ async def test_disk_low_rings_once_then_clears(owner_api: Api, app, db, redis, l
     rows = await bells(db, "disk.low")
     assert len(rows) == 1
     assert rows[0].title == "Ổ đĩa sắp hết chỗ"
-    assert rows[0].body == "Còn 3 GB trống, cần tối thiểu 5 GB — cập nhật tự động đang tạm dừng."
+    assert rows[0].body == "Còn 3,0 GB trống, cần tối thiểu 5,0 GB — cập nhật tự động đang tạm dừng."
     assert "/srv" not in rows[0].body and rows[0].link == "/system?tab=storage"
     (link / "disk-status.json").write_text(json.dumps({"state": "ok", "free_bytes": 50 << 30,
                                                        "min_bytes": 5 << 30}))
@@ -261,9 +314,11 @@ async def test_backup_stale_rings_and_clears(owner_api: Api, app, db, redis, sto
     rows = await bells(db, "backup.stale")
     assert len(rows) == 1
     assert rows[0].title == "Đã hơn 36 giờ chưa có bản sao lưu mới"
-    assert rows[0].body.startswith("Bản gần nhất lúc ") and rows[0].link == "/system?tab=storage"
+    assert rows[0].body.startswith("Bản gần nhất lúc ") and rows[0].link == "/system?tab=storage&focus=backup"
+    assert "Mở mục Sao lưu và bấm Sao lưu ngay" in rows[0].body
     issues = await health.active_issues(db, org)
-    assert [i["action"] for i in issues] == ["Sao lưu ngay"]
+    # Nút trên dải chỉ MỞ mục Sao lưu (không tự chạy sao lưu) ⇒ nhãn nói đúng việc nút làm.
+    assert [i["action"] for i in issues] == ["Mở mục Sao lưu"]
 
     # bản pre-update 2 giờ trước CŨNG tính ⇒ không chuông thêm, sự cố đóng
     await backup._write_manifest(store, [_entry(37, "scheduled"), _entry(2, "pre-update")])
@@ -325,6 +380,7 @@ async def test_worker_heartbeat_states(owner_api: Api, app, db, redis) -> None: 
     await redis.set(health.HEARTBEAT_KEY, _iso(now))
     await redis.set(f"{health.CRON_LAST_PREFIX}scheduled_backup_scan",
                     orjson.dumps({"at": _iso(now - timedelta(minutes=3)), "ok": True, "ms": 12}))
+    await redis.sadd(health.CRON_NAMES_KEY, "scheduled_backup_scan")  # như worker._tracked
     body = (await owner_api.get("/system/health")).json()
     assert body["worker"]["state"] == "ok" and body["worker"]["last_seen_at"] is not None
     assert body["crons"] == [{"name": "scheduled_backup_scan", "last_at": _iso(now - timedelta(minutes=3)),

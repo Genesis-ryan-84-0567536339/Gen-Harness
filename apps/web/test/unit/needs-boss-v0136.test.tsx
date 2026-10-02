@@ -213,6 +213,9 @@ describe('v0.1.36 — healthModel (thẻ "Sức khoẻ hệ thống")', () => {
     const rows = byKey(health({ queues: [{ stream: 'gh:raw', dlq: 2 }], browser: { state: 'silent', last_heartbeat_at: new Date(NOW - 5 * 60_000).toISOString() } }));
     expect(rows.dlq.label).toBe('Việc nền bị lỗi');
     expect(rows.dlq.value).toBe('2 việc');
+    // Dòng vàng phải nói Sếp cần làm gì (ở đây: thường không cần làm gì).
+    expect(rows.dlq.hint).toContain('Thường tự hết');
+    expect(rows.dlq.hint).toContain('Báo lỗi');
     expect(rows.browser.value).toBe('Ngừng từ 5 phút trước');
   });
 
@@ -225,7 +228,10 @@ describe('v0.1.36 — healthModel (thẻ "Sức khoẻ hệ thống")', () => {
       }),
     );
     expect(tips.map((t) => t.key)).toEqual(['disk', 'worker']);
-    expect(tips[0].steps.map((s) => s.cmd).filter(Boolean)).toEqual(['genh status', 'docker system prune']);
+    expect(tips[0].steps.map((s) => s.cmd).filter(Boolean)).toEqual(['genh status', 'docker system prune', 'genh update']);
+    // Ổ đĩa chỉ đo lại khi genh cập nhật — không hứa "tự cập nhật mỗi phút".
+    expect(tips[0].steps.some((s) => s.text.includes('mỗi phút'))).toBe(false);
+    expect(tips[0].steps[3].text).toContain('lần cập nhật tự động đêm nay');
     expect(tips[0].steps.some((s) => s.text.includes('5,0 GB'))).toBe(true);
     expect(tips[0].warning).toContain('volume');
     expect(tips[1].steps.map((s) => s.cmd).filter(Boolean)).toEqual(['genh stop', 'genh start', 'genh logs worker']);
@@ -248,8 +254,9 @@ describe('v0.1.36 — healthModel (thẻ "Sức khoẻ hệ thống")', () => {
     const rows = byKey(health());
     expect(rows.worker.value).toBe('Đang chạy · lần cuối 1 phút trước');
     expect(rows.backup.value).toBe('Bản mới nhất 1 giờ trước');
-    expect(rows.disk.value).toMatch(/^Còn 40,0 GB trống$/);
+    expect(rows.disk.value).toBe('Còn 40,0 GB trống · đo lúc 02/10 10:00');
     expect(rows.dlq.tone).toBe('ok');
+    expect(rows.dlq.hint).toBeUndefined();
     expect(rows.update.value).toBe('Bình thường');
     for (const r of Object.values(rows)) expect(typeof r.value).toBe('string');
   });
@@ -271,7 +278,7 @@ describe('v0.1.36 — healthModel (thẻ "Sức khoẻ hệ thống")', () => {
     expect(rows.dlq.tone).toBe('warn');
     expect(rows.update.value).toBe('Lần cập nhật gần nhất lỗi');
     expect(rows.dlq.label).toBe('Việc nền bị lỗi');
-    expect(rows.disk.value).toMatch(/^Sắp hết chỗ/);
+    expect(rows.disk.value).toBe('Sắp hết chỗ — còn 1,0 GB');
     expect(rows.disk.tone).toBe('bad');
     expect(rows.backup.value).toBe('Chưa cấu hình');
     expect(byKey(health({ disk: { state: 'unknown', free_bytes: null, min_bytes: null, checked_at: null } })).disk.value).toBe('Chưa đo');

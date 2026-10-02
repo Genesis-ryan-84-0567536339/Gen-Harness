@@ -76,3 +76,24 @@ async def test_500_logs_json_with_error_id(owner_api: Api, app) -> None:  # type
     assert entry["ts"].endswith("Z")
     assert "RuntimeError" in entry["exc"]
     assert entry["method"] == "GET" and entry["path"] == "/api/v1/__t/log500"
+
+
+def test_json_formatter_redacts_secrets_in_msg_and_traceback() -> None:
+    """`genh doctor` gói log vào tệp gửi hỗ trợ ⇒ mật khẩu trong URL, Bearer, token=… không lọt nguyên văn."""
+    try:
+        raise RuntimeError("connect failed: postgresql://gh:S3cretPw@db:5432/gh?sslmode=disable")
+    except RuntimeError:
+        exc_info = sys.exc_info()
+    rec = logging.LogRecord("gh.test", logging.ERROR, __file__, 1,
+                            "gọi https://api.test/v1?access_token=abc123XYZ&x=1 với Authorization: Bearer sk-live-999",
+                            (), exc_info)
+    rec.detail = "password=hunter2; api_key: KEY-42; status code: 500; https://cb.test/?code=OAUTH9&state=1"  # type: ignore[attr-defined]
+    rec.error_id = "err-1"  # type: ignore[attr-defined]
+    line = JsonFormatter().format(rec)
+    for secret in ("S3cretPw", "abc123XYZ", "sk-live-999", "hunter2", "KEY-42", "OAUTH9"):
+        assert secret not in line, secret
+    out = json.loads(line)
+    assert "postgresql://***:***@db:5432/gh" in out["exc"]
+    assert "access_token=***&x=1" in out["msg"] and "Bearer ***" in out["msg"]
+    assert out["detail"] == "password=***; api_key: ***; status code: 500; https://cb.test/?code=***&state=1"
+    assert out["error_id"] == "err-1" and out["level"] == "ERROR"

@@ -4,7 +4,7 @@
  * mọi giá trị trả ra là chuỗi (không bao giờ đưa object vào JSX).
  */
 import type { HealthIssue, SystemHealth } from '@gen-harness/contracts';
-import { DEFAULT_TZ, fmtAgo, fmtDMClock, fmtDec, fmtInt } from '../../lib/format';
+import { DEFAULT_TZ, fmtAgo, fmtDM, fmtDMClock, fmtDec, fmtHM, fmtInt } from '../../lib/format';
 
 export type HealthTone = 'ok' | 'warn' | 'bad' | 'muted';
 
@@ -13,6 +13,8 @@ export interface HealthRow {
   label: string;
   value: string;
   tone: HealthTone;
+  /** Câu ngắn dưới dòng: Sếp nên làm gì (hoặc không cần làm gì) khi dòng vàng/đỏ mà không có hướng dẫn riêng. */
+  hint?: string;
 }
 
 export interface HealthTechRow {
@@ -52,7 +54,11 @@ export function healthRows(h: SystemHealth, now = Date.now(), tz = DEFAULT_TZ): 
 
   const dlq = h.queues.reduce((sum, q) => sum + (Number.isFinite(q.dlq) ? q.dlq : 0), 0);
   // Thuật ngữ "DLQ" chỉ ở "Chi tiết kỹ thuật" (healthTechRows); chưa có màn xem từng việc lỗi ⇒ chỉ báo số lượng.
-  rows.push({ key: 'dlq', label: 'Việc nền bị lỗi', value: dlq > 0 ? `${fmtInt(dlq)} việc` : 'Không có', tone: dlq > 0 ? 'warn' : 'ok' });
+  rows.push(
+    dlq > 0
+      ? { key: 'dlq', label: 'Việc nền bị lỗi', value: `${fmtInt(dlq)} việc`, tone: 'warn', hint: 'Thường tự hết, chưa cần làm gì; kéo dài nhiều ngày thì gửi kèm khi báo lỗi (Trợ giúp › Báo lỗi).' }
+      : { key: 'dlq', label: 'Việc nền bị lỗi', value: 'Không có', tone: 'ok' },
+  );
 
   const bk = h.backup;
   rows.push(
@@ -79,12 +85,14 @@ export function healthRows(h: SystemHealth, now = Date.now(), tz = DEFAULT_TZ): 
             : { key: 'update', label: 'Cập nhật', value: 'Bình thường', tone: 'ok' },
   );
 
+  // Ổ đĩa chỉ được đo khi genh chạy `genh update` (disk-status.json) — số có thể cũ cả ngày ⇒ luôn ghi giờ đo.
   const d = h.disk;
+  const measured = d.checked_at ? ` · đo lúc ${fmtDM(d.checked_at, tz)} ${fmtHM(d.checked_at, tz)}` : '';
   rows.push(
     d.state === 'low'
-      ? { key: 'disk', label: 'Ổ đĩa', value: d.free_bytes != null ? `Sắp hết chỗ — còn ${fmtGb(d.free_bytes)}` : 'Sắp hết chỗ', tone: 'bad' }
+      ? { key: 'disk', label: 'Ổ đĩa', value: `${d.free_bytes != null ? `Sắp hết chỗ — còn ${fmtGb(d.free_bytes)}` : 'Sắp hết chỗ'}${measured}`, tone: 'bad' }
       : d.state === 'ok' && d.free_bytes != null
-        ? { key: 'disk', label: 'Ổ đĩa', value: `Còn ${fmtGb(d.free_bytes)} trống`, tone: 'ok' }
+        ? { key: 'disk', label: 'Ổ đĩa', value: `Còn ${fmtGb(d.free_bytes)} trống${measured}`, tone: 'ok' }
         : { key: 'disk', label: 'Ổ đĩa', value: 'Chưa đo', tone: 'muted' },
   );
   return rows;
@@ -118,7 +126,11 @@ export function healthTips(h: SystemHealth): HealthTip[] {
         { text: 'Trên máy chủ, xem dịch vụ và dung lượng đang dùng:', cmd: 'genh status' },
         { text: 'Xoá container đã dừng, ảnh Docker không gắn tên và bộ nhớ đệm build không còn dùng (không đụng dữ liệu Gen-Harness):', cmd: 'docker system prune' },
         { text: 'Chép bản sao lưu cũ, video, tệp tải về… sang ổ khác rồi xoá khỏi máy chủ.' },
-        { text: need ? `Còn trống từ ${need} trở lên thì cập nhật tự động chạy lại (thẻ này tự cập nhật mỗi phút).` : 'Đủ chỗ trống thì cập nhật tự động chạy lại (thẻ này tự cập nhật mỗi phút).' },
+        // Ổ đĩa chỉ được đo lại khi genh cập nhật (apps/genh/internal/ops/update.go ensureDiskSpace), không phải mỗi phút.
+        {
+          text: `${need ? `Còn trống từ ${need} trở lên thì` : 'Đủ chỗ trống thì'} chạy lệnh dưới để đo lại ổ đĩa và cập nhật luôn (hoặc chờ lần cập nhật tự động đêm nay) — cảnh báo sẽ tự hết:`,
+          cmd: 'genh update',
+        },
       ],
       warning: 'Không xoá thư mục cài Gen-Harness hay volume Docker (không dùng "docker volume prune" hoặc cờ --volumes) — đó là dữ liệu của Sếp.',
     });

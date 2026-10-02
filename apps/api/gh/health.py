@@ -14,7 +14,9 @@ cả chuông (core.notifications) lẫn dải "Cần Sếp xử lý" ở Tổng 
   đang hết đăng nhập) và dọn dòng sự kiện cũ.
 
 Hợp đồng Redis với worker (gh/worker.py ghi): `gh:cron:last:<tên hàm>` = JSON {"at": ISO UTC 'Z', "ok": bool,
-"ms": int}; `gh:worker:heartbeat` = ISO UTC. Mọi chuỗi hiện cho người dùng là tiếng Việt thân thiện, không đường dẫn
+"ms": int} + tên hàm trong tập `gh:cron:names`; `gh:worker:heartbeat` = ISO UTC. Hàng lỗi: tập `gh:dlq:streams`
+(gh/chassis/bus.py ghi). Không SCAN keyspace mỗi lần đọc — chỉ quét bù tối đa một lần mỗi ngày (`_discover`) cho
+khoá có từ trước khi có hai tập này. Mọi chuỗi hiện cho người dùng là tiếng Việt thân thiện, không đường dẫn
 tệp, không bí mật.
 """
 
@@ -47,19 +49,24 @@ UPDATE_FAILED_RECENT = timedelta(hours=24)
 WORKER_SILENT_MINUTES = 10
 HEARTBEAT_KEY = "gh:worker:heartbeat"
 CRON_LAST_PREFIX = "gh:cron:last:"
+CRON_NAMES_KEY = "gh:cron:names"
+DISCOVERED_KEY = "gh:health:discovered"
+DISCOVER_TTL = 86400
 WATCH_LOCK_KEY = "gh:health:tick"
 #: browser-worker ghi nhịp mỗi 15 giây (TTL 45 giây — apps/browser/ghb/worker.py) — quá 40 giây coi như im. Ngưỡng
 #: phải DƯỚI TTL: quá TTL khoá biến mất và trạng thái thành 'off' (không phân biệt được với chưa bật).
 BROWSER_SILENT_SECONDS = 40
 
 STORAGE_LINK = "/system?tab=storage"
+#: Đích của backup.stale: Dữ liệu & lưu trữ, cuộn tới mục Sao lưu (BackupPanel đọc `focus=backup`).
+BACKUP_LINK = "/system?tab=storage&focus=backup"
 
 #: Nhãn nút hành động theo kind (web hiện trên dải "Cần Sếp xử lý").
 ACTIONS = {
     "channel.down": "Đăng nhập lại",
     "model.auth_expired": "Đăng nhập lại model",
     "update.failed": "Xem & thử lại",
-    "backup.stale": "Sao lưu ngay",
+    "backup.stale": "Mở mục Sao lưu",
     "worker.silent": "Xem sức khoẻ",
     "disk.low": "Xem cách giải phóng",
 }
@@ -139,11 +146,43 @@ async def active_issues(db: AsyncSession, org_id: uuid.UUID) -> list[dict[str, A
 
 # ─── đọc nguồn (mọi lỗi ⇒ None/'unknown', không ném) ─────────────────────────────────────────────────────────
 
+async def _discover(redis: Any) -> None:
+    """Quét bù (SCAN) tối đa một lần mỗi `DISCOVER_TTL`: dấu cron / hàng lỗi ghi trước khi worker/bus đăng ký tên
+    vào tập. Lượt đọc thường chỉ SMEMBERS + MGET/XLEN — không quét cả keyspace mỗi lần GET /system/health."""
+    from gh.chassis.bus import DLQ_STREAMS_KEY
+
+    if not await redis.set(DISCOVERED_KEY, b"1", nx=True, ex=DISCOVER_TTL):
+        return
+    names = [_s(k)[len(CRON_LAST_PREFIX):] async for k in redis.scan_iter(match=f"{CRON_LAST_PREFIX}*", count=500)]
+    if names:
+        await redis.sadd(CRON_NAMES_KEY, *names)
+    dlqs = [_s(k) async for k in redis.scan_iter(match="*.dlq", count=500, _type="stream")]
+    if dlqs:
+        await redis.sadd(DLQ_STREAMS_KEY, *dlqs)
+
+
+async def _dlq_queues(redis: Any) -> list[dict[str, Any]]:
+    from gh.chassis.bus import DLQ_STREAMS_KEY
+
+    await _discover(redis)
+    queues: list[dict[str, Any]] = []
+    for name in sorted(_s(k) for k in await redis.smembers(DLQ_STREAMS_KEY)):
+        if not await redis.exists(name):  # stream đã bị xoá ⇒ bỏ khỏi tập
+            await redis.srem(DLQ_STREAMS_KEY, name)
+            continue
+        queues.append({"stream": name[: -len(".dlq")], "dlq": int(await redis.xlen(name))})
+    return queues
+
+
 async def _cron_runs(redis: Any) -> list[dict[str, Any]]:
+    await _discover(redis)
     out: list[dict[str, Any]] = []
-    async for k in redis.scan_iter(match=f"{CRON_LAST_PREFIX}*", count=200):
-        name = _s(k)[len(CRON_LAST_PREFIX):]
-        raw = await redis.get(k)
+    names = sorted(_s(k) for k in await redis.smembers(CRON_NAMES_KEY))
+    raws = await redis.mget([f"{CRON_LAST_PREFIX}{n}" for n in names]) if names else []
+    for name, raw in zip(names, raws, strict=True):
+        if raw is None:  # dấu đã hết hạn (job bị gỡ) ⇒ bỏ khỏi tập, như SCAN không còn thấy khoá
+            await redis.srem(CRON_NAMES_KEY, name)
+            continue
         data: dict[str, Any] = {}
         with contextlib.suppress(ValueError, TypeError):
             loaded = orjson.loads(raw) if raw else {}
@@ -194,8 +233,8 @@ def _gb(n: Any) -> str:
         v = float(n) / (1 << 30)
     except (TypeError, ValueError):
         return "?"
-    out = f"{v:.1f}".replace(".", ",")
-    return out[:-2] if out.endswith(",0") else out
+    # Giữ ",0" — cùng khuôn `fmtGb` của web (thẻ Sức khoẻ: "còn 3,0 GB"), một luồng một cách viết số.
+    return f"{v:.1f}".replace(".", ",")
 
 
 async def _org_backup_cfg(db: AsyncSession, org_id: uuid.UUID) -> Any:
@@ -261,10 +300,7 @@ async def collect(db: AsyncSession, redis: Any, org_id: uuid.UUID, *, now: datet
 
     queues: list[dict[str, Any]] = []
     try:
-        async for k in redis.scan_iter(match="*.dlq", count=200, _type="stream"):
-            name = _s(k)
-            queues.append({"stream": name[: -len(".dlq")], "dlq": int(await redis.xlen(k))})
-        queues.sort(key=lambda q: q["stream"])
+        queues = await _dlq_queues(redis)
     except Exception:  # noqa: BLE001
         log.warning("Không đọc được hàng đợi lỗi (DLQ)", exc_info=True)
 
@@ -379,7 +415,8 @@ async def _eval_backup(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: dat
         last = "Chưa có bản nào."
     await raise_once(db, org_id, key="backup.stale", kind="backup.stale", severity="bad",
                      title=f"Đã hơn {limit_text} chưa có bản sao lưu mới",
-                     body=f"{last} Bấm Sao lưu ngay để giữ an toàn dữ liệu.", link=STORAGE_LINK, redis=redis)
+                     body=f"{last} Mở mục Sao lưu và bấm Sao lưu ngay để giữ an toàn dữ liệu.", link=BACKUP_LINK,
+                     redis=redis)
 
 
 async def _eval_worker(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: datetime,
@@ -428,7 +465,8 @@ async def _eval_models(db: AsyncSession, org_id: uuid.UUID, redis: Any) -> None:
 
 
 async def _eval_events(db: AsyncSession, org_id: uuid.UUID) -> None:
-    """Dọn dòng sự kiện cũ: kênh đã đăng nhập lại / model đã ổn (hoặc bị tắt, bị xoá) ⇒ đóng sự cố."""
+    """Dọn dòng sự kiện cũ: kênh đã đăng nhập lại (hoặc không còn kênh loại đó dùng được — bị xoá, plugin cầu nối bị
+    tắt) / model đã ổn (hoặc bị tắt, bị xoá) ⇒ đóng sự cố."""
     keys = (await db.execute(text("""SELECT key FROM ops.health_alerts WHERE org_id = :o AND cleared_at IS NULL
                                       AND (key LIKE 'channel.down:%' OR key LIKE 'model.auth_expired:%')"""),
                              {"o": org_id})).scalars().all()
@@ -439,7 +477,11 @@ async def _eval_events(db: AsyncSession, org_id: uuid.UUID) -> None:
                 SELECT 1 FROM core.channel_sessions s JOIN core.channels c ON c.id = s.channel_id
                 WHERE c.org_id = :o AND c.type = :t AND s.state = 'active' AND s.ended_at IS NULL LIMIT 1"""),
                 {"o": org_id, "t": ref})).first()
-            if live is not None:
+            usable = live is not None or (await db.execute(text("""
+                SELECT 1 FROM core.channels c LEFT JOIN ops.plugins pl ON pl.id = c.plugin_id
+                WHERE c.org_id = :o AND c.type = :t AND (c.plugin_id IS NULL OR pl.is_enabled) LIMIT 1"""),
+                {"o": org_id, "t": ref})).first() is not None
+            if live is not None or not usable:  # không còn kênh để "Đăng nhập lại" ⇒ dòng nút chết, đóng
                 await clear(db, org_id, key)
         else:
             try:

@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import re
 import socket
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -240,11 +241,29 @@ _LOG_RECORD_ATTRS = frozenset(vars(logging.LogRecord("", 0, "", 0, "", (), None)
                                                                                          "taskName"}
 
 
+#: Che nhẹ bí mật trong log JSON (production) — `genh doctor` gói `docker compose logs` vào tệp Sếp gửi hỗ trợ, nên
+#: thông điệp/traceback có URL kèm mật khẩu, token trong query hay header không được lọt nguyên văn.
+_LOG_REDACT: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\b([a-z][a-z0-9+.\-]*://)[^/\s:@'\"]+:[^/\s@'\"]*@", re.I), r"\1***:***@"),  # userinfo trong URL
+    (re.compile(r"\bBearer\s+[^\s'\",]+", re.I), "Bearer ***"),
+    (re.compile(r"((?:access_token|refresh_token|id_token|token|api[_-]?key|apikey|password|passwd|secret|"
+                r"client_secret)\s*[=:]\s*['\"]?)[^\s&'\",;}]+", re.I), r"\1***"),
+    (re.compile(r"([?&]code=)[^\s&'\"]+"), r"\1***"),                                            # mã OAuth
+)
+
+
+def _redact_log(text: str) -> str:
+    for pat, repl in _LOG_REDACT:
+        text = pat.sub(repl, text)
+    return text
+
+
 class JsonFormatter(logging.Formatter):
     """v0.1.36 (F-4): một dòng JSON mỗi bản ghi log (production) — tra được theo thời điểm/mã lỗi.
 
     Khoá: `ts` (ISO UTC, mili giây, hậu tố 'Z'), `level`, `logger`, `msg`; `exc` (traceback) khi có ngoại lệ, `stack`
-    khi `stack_info=True`; mọi trường `extra=` (vd. `error_id`, `method`, `path` từ gh.errors) ở cấp ngoài cùng."""
+    khi `stack_info=True`; mọi trường `extra=` (vd. `error_id`, `method`, `path` từ gh.errors) ở cấp ngoài cùng.
+    Chuỗi đi qua `_redact_log` (mật khẩu trong URL, Bearer, token=/password=…) trước khi ghi."""
 
     def format(self, record: logging.LogRecord) -> str:
         ts = datetime.fromtimestamp(record.created, UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
@@ -258,6 +277,9 @@ class JsonFormatter(logging.Formatter):
         for k, v in record.__dict__.items():
             if k not in _LOG_RECORD_ATTRS and not k.startswith("_") and k not in out:
                 out[k] = v
+        for k, v in out.items():
+            if isinstance(v, str) and k not in ("ts", "level", "logger"):
+                out[k] = _redact_log(v)
         return json.dumps(out, ensure_ascii=False, default=str)
 
 

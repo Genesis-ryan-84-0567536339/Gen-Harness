@@ -58,6 +58,10 @@ async def test_poison_message_goes_to_dlq_after_max_deliveries(redis: Any) -> No
     assert len(dlq) == 1
     assert dlq[0][1][b"error"] == "hỏng".encode()
     assert dlq[0][1][b"group"] == b"g"
+    # GET /system/health đọc tập này thay vì SCAN cả keyspace.
+    from gh.chassis.bus import DLQ_STREAMS_KEY
+
+    assert await redis.smembers(DLQ_STREAMS_KEY) == {f"{STREAM}.dlq".encode()}
 
 
 async def test_deferred_is_not_counted_as_failure(redis: Any) -> None:

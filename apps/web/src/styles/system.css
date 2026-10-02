@@ -103,10 +103,11 @@
 /* ── v0.1.36 (F-6): thẻ "Sức khoẻ hệ thống" (Dữ liệu & lưu trữ) ─────────────── */
 .health-card { display: flex; flex-direction: column; gap: 10px; padding: 4px 0; }
 .health-card__rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
-.health-card__row { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.health-card__row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 9px; min-width: 0; }
 .health-card__dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
 .health-card__label { flex: 1; min-width: 0; font-size: 12px; color: var(--color-neutral-300); }
 .health-card__value { flex: none; max-width: 60%; text-align: right; font-size: 11.5px; color: var(--color-text); overflow-wrap: anywhere; }
+.health-card__hint { flex: 1 0 100%; padding-left: 16px; font-size: 11px; line-height: 1.45; color: var(--color-neutral-500); }
 .health-card__tech { margin-top: 2px; }
 .health-card__tip { border: 1px solid var(--color-divider); border-left: 3px solid var(--color-bad); border-radius: 6px; padding: 8px 10px; font-size: 11.5px; line-height: 1.5; color: var(--color-text); }
 .health-card__tip-title { font-weight: 600; margin-bottom: 4px; }

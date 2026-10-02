@@ -4,7 +4,7 @@ import { AUDITOR, MANAGER, loginAs, loginAsOwner, mockHook, resetMock } from './
 /**
  * v0.1.36 (F-6, F-2, F-46) — Sếp thấy ngay việc cần tự tay làm: dải "Cần Sếp xử lý" đầu Tổng quan (sự cố từ
  * `GET /system/health`), thẻ "Sức khoẻ hệ thống" ở Điều khiển hệ thống › Dữ liệu & lưu trữ, chuông có kind sự cố mới,
- * "Hạn lưu dữ liệu" nói rõ chưa tự xoá, Trợ giúp hiện phiên bản ảnh.
+ * "Hạn lưu dữ liệu" nói rõ chưa tự xoá, Trợ giúp hiện phiên bản máy chủ + phiên bản công cụ cài đặt (genh).
  */
 test.describe('v0.1.36 — Cần Sếp xử lý & Sức khoẻ hệ thống', () => {
   test.beforeEach(async ({ page }) => {
@@ -128,13 +128,32 @@ test.describe('v0.1.36 — Cần Sếp xử lý & Sức khoẻ hệ thống', ()
     await page.goto('/overview');
     const strip = page.getByRole('region', { name: 'Cần Sếp xử lý' });
     await expect(strip).toContainText('Ổ đĩa sắp hết chỗ');
-    await expect(strip).toContainText('Còn 3 GB trống, cần tối thiểu 5 GB');
+    await expect(strip).toContainText('Còn 3,0 GB trống, cần tối thiểu 5,0 GB');
     await strip.getByRole('link', { name: 'Xem cách giải phóng' }).click();
     await expect(page).toHaveURL(/\/system\?tab=storage$/);
     const tip = page.getByRole('region', { name: 'Sức khoẻ hệ thống' }).getByTestId('health-tip-disk');
     await expect(tip).toContainText('Cách giải phóng chỗ trống');
     await expect(tip.getByText('docker system prune')).toBeVisible();
     await expect(tip).toContainText('Không xoá thư mục cài Gen-Harness');
+    // Ổ đĩa chỉ được đo khi genh cập nhật (không phải mỗi phút) ⇒ hiện giờ đo và chỉ cách đo lại.
+    await expect(tip).toContainText('genh update');
+    await expect(tip).not.toContainText('mỗi phút');
+    await expect(page.getByRole('region', { name: 'Sức khoẻ hệ thống' }).getByTestId('health-disk')).toContainText(/Sắp hết chỗ — còn 3,0 GB · đo lúc \d{2}\/\d{2} \d{2}:\d{2}/);
+  });
+
+  test('quá hạn sao lưu: "Mở mục Sao lưu" đưa tới đúng nút "Sao lưu ngay" (thấy ngay, không phải cuộn)', async ({ page }) => {
+    await mockHook(page.request, 'health', { issues: [{ kind: 'backup.stale' }] });
+    await page.goto('/overview');
+    const strip = page.getByRole('region', { name: 'Cần Sếp xử lý' });
+    await expect(strip).toContainText('Mở mục Sao lưu và bấm Sao lưu ngay');
+    await expect(strip.getByRole('link', { name: 'Sao lưu ngay' })).toHaveCount(0);
+    await strip.getByRole('link', { name: 'Mở mục Sao lưu' }).click();
+    await expect(page).toHaveURL(/\/system\?tab=storage&focus=backup$/);
+    const now = page.getByRole('region', { name: 'Sao lưu & khôi phục' }).getByRole('button', { name: 'Sao lưu ngay' });
+    await expect(now).toBeVisible();
+    await expect(now).toBeInViewport();
+    await expect(now).toBeFocused();
+    await expect(page.getByText('[object Object]')).toHaveCount(0);
   });
 
   test('Hạn lưu dữ liệu: "Chưa tự xoá — sẽ áp dụng ở bản sau", nút Sửa bị khoá', async ({ page }) => {
@@ -177,12 +196,14 @@ test.describe('v0.1.36 — Cần Sếp xử lý & Sức khoẻ hệ thống', ()
     await expect(page).toHaveURL(/\/system\?tab=channels$/);
   });
 
-  test('Trợ giúp hiện phiên bản ảnh và genh', async ({ page }) => {
+  test('Trợ giúp hiện phiên bản máy chủ và phiên bản công cụ cài đặt (genh), không lặp dòng "phiên bản"', async ({ page }) => {
     await page.goto('/help');
     const about = page.locator('[data-gen-target="help.version"]');
-    await expect(about.getByText('phiên bản máy chủ')).toBeVisible();
+    await expect(about.getByText('phiên bản máy chủ', { exact: true })).toBeVisible();
     await expect(about.getByTestId('about-image-version')).toHaveText(/^v\d+\.\d+\.\d+/);
-    await expect(about.getByText('genh', { exact: true })).toBeVisible();
+    await expect(about.getByText('phiên bản công cụ cài đặt (genh)', { exact: true })).toBeVisible();
+    await expect(about.getByTestId('about-genh-version')).toBeVisible();
+    await expect(about.getByText('phiên bản', { exact: true })).toHaveCount(0);
   });
 
   test('vai trò không có system.read: không gọi /system/health, không thấy dải sự cố hệ thống', async ({ page }) => {
@@ -214,7 +235,7 @@ test.describe('v0.1.36 — Cần Sếp xử lý & Sức khoẻ hệ thống', ()
     await page.waitForTimeout(500);
     await expect(page.getByTestId('needs-boss')).toHaveCount(0);
     await expect(page.getByText('Cần Sếp', { exact: false })).toHaveCount(0);
-    for (const name of ['Sao lưu ngay', 'Đăng nhập lại', 'Xem & thử lại']) await expect(page.getByRole('link', { name })).toHaveCount(0);
+    for (const name of ['Mở mục Sao lưu', 'Đăng nhập lại', 'Xem & thử lại']) await expect(page.getByRole('link', { name })).toHaveCount(0);
     await page.goto('/system?tab=storage');
     await expect(page.getByRole('region', { name: 'Sức khoẻ hệ thống' }).getByTestId('health-backup')).toBeVisible();
     await expect(page.getByText('[object Object]')).toHaveCount(0);

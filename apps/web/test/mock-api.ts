@@ -266,9 +266,9 @@ const HEALTH_KIND_DEFAULTS: Record<string, Omit<HealthIssue, 'raised_at' | 'body
   'channel.down': { key: 'channel.down:zalo', kind: 'channel.down', severity: 'bad', title: 'Kênh Zalo đã ngắt kết nối', body: 'Zalo Sếp: phiên đã hết hạn — đăng nhập lại để tiếp tục nhận tin.', link: '/system?tab=channels', action: 'Đăng nhập lại' },
   'model.auth_expired': { key: 'model.auth_expired:7d1c3a52-5b0e-4c1f-9a8e-2f6b1d4c9e03', kind: 'model.auth_expired', severity: 'warn', title: 'Model Claude cần đăng nhập lại', body: 'Gen và sàng lọc tin có thể dừng nếu không còn model khác. Bấm để đăng nhập lại.', link: '/system?tab=brain', action: 'Đăng nhập lại model' },
   'update.failed': { key: 'update.failed', kind: 'update.failed', severity: 'bad', title: 'Cập nhật lên bản mới chưa thành công', body: 'Hệ thống đã tự quay về bản cũ, dữ liệu an toàn. Bấm để xem và thử lại.', link: '/system?tab=storage', action: 'Xem & thử lại' },
-  'backup.stale': { key: 'backup.stale', kind: 'backup.stale', severity: 'bad', title: 'Đã hơn 36 giờ chưa có bản sao lưu mới', body: 'Chưa có bản nào. Bấm Sao lưu ngay để giữ an toàn dữ liệu.', link: '/system?tab=storage', action: 'Sao lưu ngay' },
+  'backup.stale': { key: 'backup.stale', kind: 'backup.stale', severity: 'bad', title: 'Đã hơn 36 giờ chưa có bản sao lưu mới', body: 'Chưa có bản nào. Mở mục Sao lưu và bấm Sao lưu ngay để giữ an toàn dữ liệu.', link: '/system?tab=storage&focus=backup', action: 'Mở mục Sao lưu' },
   'worker.silent': { key: 'worker.silent', kind: 'worker.silent', severity: 'bad', title: 'Bộ xử lý nền đã ngừng 12 phút', body: 'Sàng lọc tin, nhắc việc và sao lưu theo lịch đang dừng. Bấm để xem cách khởi động lại.', link: '/system?tab=storage', action: 'Xem sức khoẻ' },
-  'disk.low': { key: 'disk.low', kind: 'disk.low', severity: 'bad', title: 'Ổ đĩa sắp hết chỗ', body: 'Còn 3 GB trống, cần tối thiểu 5 GB — cập nhật tự động đang tạm dừng.', link: '/system?tab=storage', action: 'Xem cách giải phóng' },
+  'disk.low': { key: 'disk.low', kind: 'disk.low', severity: 'bad', title: 'Ổ đĩa sắp hết chỗ', body: 'Còn 3,0 GB trống, cần tối thiểu 5,0 GB — cập nhật tự động đang tạm dừng.', link: '/system?tab=storage', action: 'Xem cách giải phóng' },
 };
 
 export interface MockHealthOverride {
@@ -407,7 +407,7 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     const update: SystemHealth['update'] = { state: sysUpdate.state, failed: recentFail, blocked_version: null, finished_at: sysUpdate.finished_at, ...o.update };
     const disk: SystemHealth['disk'] = { state: 'ok', free_bytes: 42 * 1024 ** 3, min_bytes: 5 * 1024 ** 3, checked_at: new Date(nowMs - 5 * 60_000).toISOString(), ...o.disk };
     const derived: Array<Partial<HealthIssue>> = [];
-    const gb = (n: number | null) => (n == null ? '?' : (n / 1024 ** 3).toFixed(1).replace('.', ',').replace(/,0$/, ''));
+    const gb = (n: number | null) => (n == null ? '?' : (n / 1024 ** 3).toFixed(1).replace('.', ','));
     if (worker.state === 'silent') derived.push({ kind: 'worker.silent', title: `Bộ xử lý nền đã ngừng ${worker.silent_minutes ?? WORKER_SILENT_MIN} phút` });
     if (backup.stale) derived.push({ kind: 'backup.stale', title: `Đã hơn ${backup.stale_after ?? '36 giờ'} chưa có bản sao lưu mới` });
     if (update.failed) derived.push({ kind: 'update.failed', title: `Cập nhật lên ${sysUpdate.to ?? 'bản mới'} chưa thành công` });

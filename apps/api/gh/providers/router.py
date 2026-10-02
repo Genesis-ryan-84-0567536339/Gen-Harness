@@ -233,17 +233,29 @@ class ModelRouter:
 
     async def _set_auth_state(self, p: Any, state: str) -> None:
         """Đổi `auth_state` khi khác giá trị cũ. v0.1.36 (F-6b): sang 'expired' ⇒ mở sự cố + chuông MỘT lần
-        (gh.health.raise_once — model 401 liên tục không dội chuông); về 'ok' ⇒ đóng sự cố. Cùng transaction."""
-        from gh import health
+        (gh.health.raise_once — model 401 liên tục không dội chuông); về 'ok' ⇒ đóng sự cố. Cùng transaction, nhưng
+        phần sự cố/chuông chạy trong savepoint riêng: lỗi ở đó chỉ ghi log — định tuyến model (chuyển sang nhà cung
+        cấp kế tiếp, hoặc kết quả đã gọi xong) không bao giờ hỏng vì một cái chuông;
+        `_eval_models` mở bù sau ≤60 giây."""
+        from gh import health, notifications
 
         async with self.sm() as db:
             row = (await db.execute(text("""UPDATE agent.providers SET auth_state = :s
                                             WHERE id = :i AND auth_state <> :s RETURNING org_id, name"""),
                                     {"s": state, "i": p.id})).one_or_none()
-            if row is not None and state == "expired":
-                await health.raise_model_expired(db, row.org_id, p.id, row.name, redis=self.redis)
-            elif row is not None and state == "ok":
-                await health.clear(db, row.org_id, f"model.auth_expired:{p.id}")
+            if row is not None and state in ("expired", "ok"):
+                mark = notifications.pending_mark(db)
+                try:
+                    async with db.begin_nested():
+                        if state == "expired":
+                            await health.raise_model_expired(db, row.org_id, p.id, row.name, redis=self.redis)
+                        else:
+                            await health.clear(db, row.org_id, f"model.auth_expired:{p.id}")
+                except asyncio.CancelledError:
+                    raise
+                except Exception:  # noqa: BLE001 — chuông lỗi không được làm hỏng lượt gọi model
+                    notifications.pending_reset(db, mark)
+                    log.warning("Không cập nhật được sự cố model %s (%s)", p.id, state, exc_info=True)
             await db.commit()
 
     # ─── gọi ─────────────────────────────────────────────────────────────────
@@ -507,7 +519,9 @@ class ModelRouter:
                                        {"s": state, "i": provider_id,
                                         "t": orjson.dumps(result).decode()})).scalar_one_or_none()
             if state == "ok" and org_id is not None:
-                # v0.1.36 (F-6b): Sếp đang nhìn kết quả gọi thử — chỉ đóng sự cố, không chuông khi lỗi.
+                # v0.1.36 (F-6b): gọi thử OK ⇒ đóng sự cố. Gọi thử lỗi 'expired' thì ở đây KHÔNG chuông (Sếp đang
+                # nhìn kết quả), nhưng vòng theo dõi (`health._eval_models`) vẫn mở sự cố + MỘT chuông trong ≤60 giây —
+                # cố ý: dải "Cần Sếp xử lý" phải nhắc tiếp nếu Sếp rời trang mà chưa đăng nhập lại.
                 from gh import health
 
                 await health.clear(db, org_id, f"model.auth_expired:{provider_id}")

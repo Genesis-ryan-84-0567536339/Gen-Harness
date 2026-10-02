@@ -480,7 +480,10 @@ async def backup_now(ctx: dict[str, Any], trigger: str = "manual") -> dict[str, 
 HOOKS: list[Hook] = []
 # v0.1.36 (F-3): timeout 3600 giây — mặc định arq (300 giây) huỷ pg_dump của CSDL lớn giữa chừng.
 JOBS: list[CronJob] = [(scheduled_backup_scan, {"minute": set(range(0, 60, DUE_WINDOW_MIN)), "timeout": 3600})]
-FUNCTIONS = [func(backup_now, timeout=3600)]  # job xếp hàng theo yêu cầu (không theo lịch) — gh/worker.py đăng ký
+# Job xếp hàng theo yêu cầu (không theo lịch) — gh/worker.py đăng ký. v0.1.36 (F-3): max_tries=1 — arq mặc định coi
+# CancelledError (worker tắt khi `genh update`/khởi động lại) là "sẽ chạy lại", trong khi `backup_now` đã ghi 'failed' +
+# nhả khoá + chuông "bấm Sao lưu ngay để thử lại". Chạy lại ngầm ⇒ Owner bấm theo chuông là có HAI pg_dump cùng lúc.
+FUNCTIONS = [func(backup_now, timeout=3600, max_tries=1)]
 
 
 # ─── CLI: `python -m gh.backup …` (Makefile bọc `make backup` / `make restore BACKUP=<khoá>`) ──────────────

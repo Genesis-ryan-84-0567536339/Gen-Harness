@@ -92,3 +92,47 @@ async def test_backup_now_cancelled_marks_failed_and_rings(owner_api: Api, db, r
     assert len(rows) == 1
     assert rows[0].title == "Sao lưu thất bại" and rows[0].link == "/system?tab=storage"
     assert rows[0].body.startswith("Sao lưu bị dừng giữa chừng")
+
+
+def test_backup_now_registered_without_retry() -> None:
+    [fn] = backup.FUNCTIONS
+    assert fn.name == "backup_now" and fn.max_tries == 1 and fn.timeout_s == 3600
+
+
+async def test_backup_now_cancelled_is_not_rerun_by_arq(owner_api: Api, redis,  # type: ignore[no-untyped-def]
+                                                        monkeypatch: pytest.MonkeyPatch) -> None:
+    """Worker tắt giữa chừng (CancelledError) ⇒ arq KHÔNG tự chạy lại job khi khởi động lại — trạng thái 'failed' +
+    chuông "bấm Sao lưu ngay" khớp thực tế, không có pg_dump thứ hai chạy ngầm."""
+    from arq.connections import ArqRedis
+    from arq.worker import Worker
+    from redis.asyncio import Redis
+
+    from gh import jobcodec
+    from tests.conftest import REDIS_URL
+
+    runs: list[int] = []
+
+    async def cancelled(**_: Any) -> Any:
+        runs.append(1)
+        raise asyncio.CancelledError
+
+    async def record(redis_: Any, *, ok: bool, message: str) -> None:
+        return None
+
+    monkeypatch.setattr(backup, "run_backup", cancelled)
+    monkeypatch.setattr(backup, "_notify_owners", record)
+    conn = Redis.from_url(REDIS_URL)
+    pool = ArqRedis(pool_or_conn=conn.connection_pool, job_serializer=jobcodec.dumps,
+                    job_deserializer=jobcodec.loads)
+    try:
+        await pool.enqueue_job("backup_now", trigger="manual", _job_id="backup-now-test")
+        for _ in range(2):  # lần 2 = worker khởi động lại và nhặt job bị huỷ
+            w = Worker(functions=backup.FUNCTIONS, redis_pool=pool, burst=True, poll_delay=0.01,
+                       job_serializer=jobcodec.dumps, job_deserializer=jobcodec.loads,
+                       handle_signals=False)
+            await w.main()
+    finally:
+        await conn.aclose()
+    assert runs == [1]
+    job = orjson.loads(await redis.get(backup.JOB_KEY))
+    assert job["state"] == "failed"

@@ -7,7 +7,7 @@ import { MemoryRouter } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import type { ManagedUser, UsersPage } from '@gen-harness/contracts';
 import { HelpPage } from '../../src/help/HelpPage';
-import { GENH_COMMANDS, diagnosticText } from '../../src/help/helpModel';
+import { GENH_COMMANDS, diagnosticText, withVersions } from '../../src/help/helpModel';
 import { queryClient } from '../../src/lib/queryClient';
 import { useToasts } from '../../src/lib/toast';
 import { OrgTab } from '../../src/screens/system/OrgTab';
@@ -218,6 +218,14 @@ describe('HelpPage', () => {
     expect(screen.queryByText('Hỏi Gen')).toBeNull();
     expect(screen.queryByRole('link', { name: /Mở Hướng dẫn kết nối/ })).toBeNull();
     expect(await screen.findByText('Vận hành')).toBeInTheDocument(); // tên vai trò tiếng Việt
+  });
+
+  it('withVersions: cùng chữ với thẻ Giới thiệu — "Phiên bản máy chủ" + "phiên bản công cụ cài đặt (genh)"', () => {
+    const about = { version: 'v0.1.36', image_version: 'v0.1.36', genh_version: 'v0.1.35', org_name: 'G', timezone: 'Asia/Ho_Chi_Minh', role: { code: 'owner', name: 'Owner' } };
+    const text = withVersions(diagnosticText(about as never, undefined, new Date('2026-10-02T00:00:00Z')), about as never);
+    expect(text).toContain('Phiên bản máy chủ: v0.1.36 · phiên bản công cụ cài đặt (genh): v0.1.35');
+    expect(text).not.toContain('Phiên bản ảnh');
+    expect(GENH_COMMANDS.find((c) => c.cmd === 'genh status')?.what).not.toContain('ổ đĩa');
   });
 
   it('diagnosticText: bản phát triển khi không có phiên bản', () => {
