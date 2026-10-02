@@ -1991,3 +1991,13 @@ Không cần chụp màn hình hay gửi mã cho Claude — kết quả tự lư
   bên theo vai trò, Gen mở /social, /guide 9 việc + không còn "Hướng dẫn kết nối", Tổng quan hết việc đã xong, token sai →
   `HUB_TOKEN_REJECTED`, /mcp công tắc mạng công cộng, Claude Code đăng nhập → Gọi thử Đạt, Jev 1 lần + tải lại vẫn còn,
   không "[object Object]", Vận hành thấy lời giải thích).
+- Kết quả trên nhánh tích hợp (02/10): ruff + mypy sạch, alembic 1 head (0025); pytest 1342 passed (superuser) và 1342
+  passed (gh_app), không skip (3 deselected `slow` như CI); web lint/typecheck sạch, check_no_fake_ids sạch, vitest 415
+  passed (53 tệp), build OK, bridge test 50 pass; Playwright mock 190 passed; e2e thật rút gọn (live-ci) 5 passed; browser
+  14 passed (ruff + mypy sạch); genh `go vet` + `go test ./...` ok; `check_release_gate.py` thoát 0, unittest
+  `.github/scripts` 28 OK.
+- Sửa khi tích hợp (test): `visual.spec.ts` ẩn thẻ "Việc thiết lập tiếp" khi so ảnh với thiết kế gốc (mock "finished" nay
+  còn việc 13/14 chưa làm nên thẻ hiện, đẩy hàng KPI — thiết kế không vẽ thẻ này; hành vi thẻ kiểm ở `v0139-integ.spec.ts`).
+- Chờ sau phát hành: Boss làm trang "Việc Sếp cần làm" với tài khoản thật; Claude đọc `GET /boss-checks` (hoặc khối
+  `boss_checks` ở `/system/health`) để nghiệm thu F-74/F-75/F-76/F-77/F-78; kiểm genh tải từ releases/latest (checksum +
+  `genh version` = v0.1.39) rồi mới báo Boss.
