@@ -79,14 +79,16 @@ describe('Hướng dẫn thiết lập (/guide)', () => {
     // data-gen-target vẫn theo số bước.
     expect(cards[7]).toHaveAttribute('data-gen-target', 'guide.item:13');
     const team = cards.find((c) => within(c).queryByText('Mời người trong đội'))!;
-    expect(within(team).getByRole('link', { name: /Hoặc làm ở Điều khiển hệ thống › Người dùng/ })).toHaveAttribute('href', '/system?tab=users');
+    // v0.1.42 (F-7): người dùng ở Đội ngũ.
+    expect(within(team).getByRole('link', { name: /Hoặc làm ở Đội ngũ › Người dùng/ })).toHaveAttribute('href', '/team');
     const fb = cards[7];
     expect(within(fb).getByText('Kết nối Facebook')).toBeInTheDocument();
     expect(within(fb).getByRole('link', { name: /Mở trang Tài khoản mạng xã hội/ })).toHaveAttribute('href', '/social');
     expect(within(fb).getByText('Đã xong')).toBeInTheDocument();
     const hub = cards[8];
     expect(within(hub).getByText('Nối Gen-hub')).toBeInTheDocument();
-    expect(within(hub).getByRole('link', { name: /Mở thẻ Gen-hub/ })).toHaveAttribute('href', '/mcp');
+    // v0.1.42 (F-61): thẻ Gen-hub chỉ ở Kết nối.
+    expect(within(hub).getByRole('link', { name: /Mở thẻ Gen-hub/ })).toHaveAttribute('href', '/connections');
     expect(within(hub).getByText('Đã xong')).toBeInTheDocument();
     expect(screen.getByText('Đã xong 2/9 việc')).toBeInTheDocument();
   });
@@ -160,7 +162,7 @@ describe('Làm một việc từ hướng dẫn (/guide/:n) — sau khi đã Ho�
 
   it('v0.1.39: /guide/13 và /guide/14 mở thẳng màn làm việc (không có form trình thiết lập)', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(followUp([])), { status: 200, headers: { 'Content-Type': 'application/json' } })));
-    for (const [n, to] of [[13, '/social'], [14, '/mcp']] as const) {
+    for (const [n, to] of [[13, '/social'], [14, '/connections']] as const) {
       const { unmount } = render(
         <QueryClientProvider client={queryClient}>
           <MemoryRouter initialEntries={[`/guide/${n}`]}>

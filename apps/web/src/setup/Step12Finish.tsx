@@ -91,7 +91,7 @@ export function Step12Finish({ meta, description, onBack, onSaved, formRef }: St
       onContinue={() => void finish()}
       onBack={onBack}
       formError={formError}
-      continueLabel="Mở Tổng quan điều hành"
+      continueLabel="Vào Console"
     >
       {missing.length ? (
         <div className="setup-section">

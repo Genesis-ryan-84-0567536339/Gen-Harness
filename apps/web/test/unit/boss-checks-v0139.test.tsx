@@ -374,7 +374,8 @@ describe('Việc Sếp cần làm (/guide/viec-sep)', () => {
     const agy = await screen.findByRole('region', { name: 'Google (Antigravity) — hai tài khoản' });
     expect(await within(agy).findByRole('button', { name: 'Đăng nhập lại' })).toBeInTheDocument();
     expect(within(agy).getByText(/Lỗi · Gọi thử vẫn chạy bằng tài khoản khác.*Đăng nhập lại/)).toBeInTheDocument();
-    expect(within(agy).getByRole('link', { name: /Kênh & đăng nhập/ })).toHaveAttribute('href', '/system?tab=channels');
+    // v0.1.42 (F-61): tài khoản CLI chỉ ở Kết nối › Bộ não AI.
+    expect(within(agy).getByRole('link', { name: /Kết nối › Bộ não AI/ })).toHaveAttribute('href', '/connections#brain');
     unmount();
     queryClient.clear();
     setup({ agy: [BINH], results: { ...EMPTY, agy_call: check('agy_call', 'fail', { error_code: 'AUTH_EXPIRED' }) } });
@@ -393,11 +394,11 @@ describe('Việc Sếp cần làm (/guide/viec-sep)', () => {
     expect(await within(cl).findByRole('button', { name: 'Đăng nhập lại Claude Code' })).toBeInTheDocument();
   });
 
-  it('Gen-hub: lỗi địa chỉ → link "Sửa địa chỉ ở Kết nối MCP"; chưa cấu hình mà thiếu ô → gợi ý vì sao chưa bấm được', async () => {
+  it('Gen-hub: lỗi địa chỉ → link "Sửa địa chỉ ở Kết nối"; chưa cấu hình mà thiếu ô → gợi ý vì sao chưa bấm được', async () => {
     setup({ results: { ...EMPTY, hub: check('hub', 'fail', { error_code: 'HUB_UNREACHABLE' }) } });
     const { unmount } = renderPage();
     const hub = await screen.findByRole('region', { name: 'Nối Gen-hub' });
-    expect(await within(hub).findByRole('link', { name: 'Sửa địa chỉ ở Kết nối MCP' })).toHaveAttribute('href', '/mcp');
+    expect(await within(hub).findByRole('link', { name: 'Sửa địa chỉ ở Kết nối' })).toHaveAttribute('href', '/connections#genhub');
     unmount();
     queryClient.clear();
     setup({ link: { ...SAVED, configured: false, endpoint: null, has_token: false } });

@@ -850,7 +850,7 @@ test.describe('giai đoạn 4.5/4.6: Điều khiển hệ thống', () => {
     await page.getByRole('button', { name: /Tiếp tục/ }).click();
 
     await expect(page.getByRole('heading', { name: 'Hoàn tất' })).toBeVisible();
-    await page.getByRole('button', { name: /Mở Tổng quan điều hành/ }).click();
+    await page.getByRole('button', { name: /Vào Console/ }).click();
     await expect(page).toHaveURL(/\/overview$/);
   });
 });

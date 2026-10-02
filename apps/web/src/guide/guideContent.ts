@@ -42,7 +42,7 @@ export const GUIDE: GuideItem[] = [
       'Bấm "Tiếp tục" để lưu.',
     ],
     doneWhen: 'Có ít nhất một kênh ở trạng thái Đang kết nối.',
-    console: { label: 'Điều khiển hệ thống › Kênh', to: '/system?tab=channels' },
+    console: { label: 'Kết nối', to: '/connections' },
   },
   {
     n: 6,
@@ -116,7 +116,7 @@ export const GUIDE: GuideItem[] = [
       'Bấm "Đã lưu, sang bước sau".',
     ],
     doneWhen: 'Có thêm ít nhất một tài khoản ngoài Sếp.',
-    console: { label: 'Điều khiển hệ thống › Người dùng', to: '/system?tab=users' },
+    console: { label: 'Đội ngũ › Người dùng', to: '/team' },
   },
   {
     n: 11,
@@ -130,7 +130,7 @@ export const GUIDE: GuideItem[] = [
       'Bấm "Tiếp tục".',
     ],
     doneWhen: 'Đã có lịch sao lưu.',
-    console: { label: 'Điều khiển hệ thống › Dữ liệu & lưu trữ', to: '/system?tab=storage' },
+    console: { label: 'Cài đặt › Sao lưu & cập nhật', to: '/system?tab=storage' },
   },
   {
     n: 13,
@@ -161,8 +161,8 @@ export const GUIDE: GuideItem[] = [
       'Bấm "Lưu & kiểm tra" (nhập PIN khi được hỏi) và chờ báo Đã nối Kho.',
     ],
     doneWhen: 'Kiểm tra xanh ít nhất một lần.',
-    console: { label: 'Kết nối MCP › Gen-hub', to: '/mcp' },
-    doTo: '/mcp',
+    console: { label: 'Kết nối › Gen-hub', to: '/connections' },
+    doTo: '/connections',
     doLabel: 'Mở thẻ Gen-hub',
   },
 ];

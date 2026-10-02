@@ -272,8 +272,8 @@ function HubRow({ data, done }: { data: Results; done: boolean }) {
             <>
               <p className="muted-note">
                 <span className="mono">{savedEndpoint}</span>{' '}
-                <Link to="/mcp" className={HUB_ADDRESS_CODES.has(hubRes?.error_code ?? '') ? 'gh-btn gh-btn--secondary btn-27' : undefined}>
-                  Sửa địa chỉ ở Kết nối MCP
+                <Link to="/connections#genhub" className={HUB_ADDRESS_CODES.has(hubRes?.error_code ?? '') ? 'gh-btn gh-btn--secondary btn-27' : undefined}>
+                  Sửa địa chỉ ở Kết nối
                 </Link>
               </p>
               <TextField label="Token mới (bỏ trống để giữ)" type="password" autoComplete="off" value={token} onChange={(e) => setToken(e.target.value)} placeholder="Dán token mới nếu cần đổi" />
@@ -465,7 +465,7 @@ function AgyRow({ data, done }: { data: Results; done: boolean }) {
           ) : null}
           {relogin ? (
             <p className="muted-note" role="note">
-              Bấm Đăng nhập lại rồi đăng nhập đúng tài khoản Google cần dùng — hoặc làm ở <Link to="/system?tab=channels">Điều khiển hệ thống › Kênh &amp; đăng nhập</Link>.
+              Bấm Đăng nhập lại rồi đăng nhập đúng tài khoản Google cần dùng — hoặc làm ở <Link to="/connections#brain">Kết nối › Bộ não AI</Link>.
             </p>
           ) : null}
           <CliLoginPanel login={login} />

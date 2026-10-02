@@ -30,7 +30,7 @@ export const SETUP_STEPS: StepMeta[] = [
   },
   {
     n: 4, key: 'brain', title: 'Bộ não AI', required: false, built: true,
-    content: 'Chọn nguồn AI cho hệ thống: Antigravity CLI (đăng nhập Google rồi dán mã xác thực) và/hoặc khoá API (Gemini, DeepSeek, tương thích OpenAI). Mỗi khoá có nút Kiểm tra gọi thử một lượt, hiện độ trễ và model khả dụng. Sắp thứ tự chuỗi ưu tiên.',
+    content: 'Chọn nguồn AI cho hệ thống: Antigravity CLI (đăng nhập Google rồi dán mã xác thực) và/hoặc khoá API (Gemini, DeepSeek, tương thích OpenAI). Mỗi khoá có nút Kiểm tra gọi thử một lượt, hiện độ trễ và model khả dụng. Sắp thứ tự chuỗi chuyển hướng.',
     doneWhen: 'Ít nhất một provider kiểm tra OK',
   },
   {
@@ -86,12 +86,12 @@ export const STEP_DESCRIPTIONS: Record<number, string> = {
   7: 'Bao lâu hệ thống lọc tin một lần, những loại tin cần bắt, và cách chấm điểm. Bấm Để sau thì dùng sẵn bộ quy tắc khởi đầu — chỉnh lại được ở Quy tắc sàng lọc.',
   8: 'Tạo trợ lý AI đầu tiên: chọn một mẫu hoặc tự đặt tên, vai trò và giọng nói, rồi nhắn thử một câu để nghe trợ lý trả lời.',
   9: 'Chọn mức trợ lý được tự làm. Những giới hạn bên dưới luôn bật để bảo vệ Sếp và nhân viên — không ai tắt được.',
-  10: 'Tuỳ chọn — để sau thì mời ở Điều khiển hệ thống › Người dùng. Hệ thống chưa tự gửi email mời: mật khẩu tạm hiện ngay ở đây, Sếp tự gửi qua Zalo hoặc email cá nhân.',
+  10: 'Tuỳ chọn — để sau thì mời ở Đội ngũ › Người dùng. Hệ thống chưa tự gửi email mời: mật khẩu tạm hiện ngay ở đây, Sếp tự gửi qua Zalo hoặc email cá nhân.',
   11: 'Chọn giờ hệ thống tự sao lưu mỗi ngày. Bấm Để sau thì hệ thống vẫn tự sao lưu hằng ngày lúc 02:00, giữ 7 bản gần nhất.',
   12: 'Kiểm tra lại những gì đã bật. Việc còn thiếu có liên kết để làm tiếp — làm ngay hoặc sau ở Tổng quan.',
 };
 
-/** When the PIN is asked for — design `pinRules` (Điều khiển hệ thống › Mã PIN). */
+/** When the PIN is asked for — design `pinRules` (Tài khoản của tôi › Mã PIN). */
 export const PIN_RULES: Array<[string, string]> = [
   ['yêu cầu PIN khi', 'đăng xuất kênh, đổi tài khoản CLI, cài plugin, đổi quyền'],
   ['hết hạn phiên PIN', 'sau 30 phút không thao tác'],
