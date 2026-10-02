@@ -107,9 +107,13 @@ def _problem(status: int, code: str, title: str, detail: str | None = None, **ex
 
 
 def _internal(request: Request, message: str) -> JsonResponse:
-    """500 INTERNAL thân thiện: chi tiết kỹ thuật CHỈ nằm trong log server, người dùng nhận mã lỗi để tra cứu."""
+    """500 INTERNAL thân thiện: chi tiết kỹ thuật CHỈ nằm trong log server, người dùng nhận mã lỗi để tra cứu.
+
+    v0.1.36 (F-4): `error_id`, `method`, `path` đi kèm bản ghi log dưới dạng trường riêng (`extra=`) — log JSON
+    (gh.app.JsonFormatter) tra thẳng theo mã lỗi người dùng gửi về."""
     error_id = uuid4().hex[:8]
-    log.exception("%s [%s] %s %s", message, error_id, request.method, request.url.path)
+    log.exception("%s [%s] %s %s", message, error_id, request.method, request.url.path,
+                  extra={"error_id": error_id, "method": request.method, "path": request.url.path})
     return _problem(500, "INTERNAL", INTERNAL_TITLE, f"Mã lỗi {error_id} — gửi mã này cho người hỗ trợ",
                     error_id=error_id)
 

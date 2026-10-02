@@ -232,9 +232,22 @@ class ModelRouter:
             await self.redis.delete(k)
 
     async def _set_auth_state(self, p: Any, state: str) -> None:
+        """Đổi `auth_state` khi khác giá trị cũ. v0.1.36 (F-6b): sang 'expired' ⇒ mở sự cố + chuông MỘT lần
+        (gh.health.raise_once — model 401 liên tục không dội chuông); về 'ok' ⇒ đóng sự cố. Cùng transaction."""
+        from gh import health
+
         async with self.sm() as db:
-            await db.execute(text("UPDATE agent.providers SET auth_state = :s WHERE id = :i AND auth_state <> :s"),
-                             {"s": state, "i": p.id})
+            row = (await db.execute(text("""UPDATE agent.providers SET auth_state = :s
+                                            WHERE id = :i AND auth_state <> :s RETURNING org_id, name"""),
+                                    {"s": state, "i": p.id})).one_or_none()
+            if row is not None and state == "expired":
+                await health.raise_once(
+                    db, row.org_id, key=f"model.auth_expired:{p.id}", kind="model.auth_expired", severity="warn",
+                    title=f"Model {row.name} cần đăng nhập lại",
+                    body="Gen và sàng lọc tin có thể dừng nếu không còn model khác. Bấm để đăng nhập lại.",
+                    link="/system?tab=brain", redis=self.redis)
+            elif row is not None and state == "ok":
+                await health.clear(db, row.org_id, f"model.auth_expired:{p.id}")
             await db.commit()
 
     # ─── gọi ─────────────────────────────────────────────────────────────────
@@ -493,10 +506,15 @@ class ModelRouter:
         async with self.sm() as db:
             import orjson
 
-            await db.execute(text("""UPDATE agent.providers SET auth_state = :s,
-                                     last_test = CAST(:t AS jsonb) WHERE id = :i"""),
-                             {"s": state, "i": provider_id,
-                              "t": orjson.dumps(result).decode()})
+            org_id = (await db.execute(text("""UPDATE agent.providers SET auth_state = :s,
+                                               last_test = CAST(:t AS jsonb) WHERE id = :i RETURNING org_id"""),
+                                       {"s": state, "i": provider_id,
+                                        "t": orjson.dumps(result).decode()})).scalar_one_or_none()
+            if state == "ok" and org_id is not None:
+                # v0.1.36 (F-6b): Sếp đang nhìn kết quả gọi thử — chỉ đóng sự cố, không chuông khi lỗi.
+                from gh import health
+
+                await health.clear(db, org_id, f"model.auth_expired:{provider_id}")
             await db.commit()
         return result
 

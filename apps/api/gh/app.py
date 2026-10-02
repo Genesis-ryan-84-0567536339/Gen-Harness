@@ -7,6 +7,7 @@ import logging
 import socket
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import FastAPI
@@ -15,7 +16,7 @@ from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
-from gh import __version__, biz, realtime
+from gh import __version__, biz, health, realtime
 from gh.agents_api.routes import router as agents_router
 from gh.audit.routes import router as audit_router
 from gh.auth.account import router as account_router
@@ -53,6 +54,7 @@ from gh.shell.routes import router as shell_router
 from gh.social import service as social_service
 from gh.social.routes import router as social_router
 from gh.system_api.backups import router as backups_router
+from gh.system_api.health import router as health_router
 from gh.system_api.org import router as org_router
 from gh.system_api.routes import router as system_router
 from gh.system_api.update import router as update_router
@@ -175,6 +177,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     consumers.append(asyncio.create_task(
         social_service.consume_results(sm, app.state.redis, stop, f"api-{socket.gethostname()}"),
         name="social-results"))
+    # v0.1.36 (F-6): vòng theo dõi sức khoẻ — mở/đóng sự cố (cập nhật lỗi, quá 36 giờ chưa sao lưu, bộ xử lý nền im,
+    # ổ đĩa sắp đầy) và gửi chuông MỘT lần mỗi sự cố. `health_started_at` cho biết api đã chạy bao lâu (worker chưa
+    # từng ghi nhịp mà api mới khởi động ⇒ 'unknown', chưa báo im).
+    app.state.health_started_at = datetime.now(UTC)
+    if s.health_watch_seconds > 0:
+        consumers.append(asyncio.create_task(
+            health.watch_loop(sm, app.state.redis, stop, interval=s.health_watch_seconds,
+                              started_at=app.state.health_started_at), name="health-watch"))
     log.info("Gen-Harness API %s sẵn sàng", __version__)
     try:
         yield
@@ -210,7 +220,7 @@ def create_app(*, with_lifespan: bool = True, expose_docs: bool | None = None) -
     app.add_exception_handler(Exception, unhandled_error_handler)
     for r in (auth_router, account_router, users_router, setup_router, shell_router, audit_router, plugins_router,
              mcp_router, data_router, system_router, update_router, backups_router, org_router, gen_router,
-             notifications_router, triage_router, hub_router, social_router):
+             notifications_router, triage_router, hub_router, social_router, health_router):
         app.include_router(r, prefix="/api/v1")
     for r in biz.routers():
         app.include_router(r, prefix="/api/v1")
@@ -225,12 +235,33 @@ def create_app(*, with_lifespan: bool = True, expose_docs: bool | None = None) -
     return app
 
 
-def configure_logging() -> None:
-    class JsonFormatter(logging.Formatter):
-        def format(self, record: logging.LogRecord) -> str:
-            return json.dumps({"level": record.levelname, "logger": record.name, "msg": record.getMessage()},
-                              ensure_ascii=False)
+#: Thuộc tính chuẩn của LogRecord — khoá khác trong `record.__dict__` là trường `extra=` (error_id, method, path…).
+_LOG_RECORD_ATTRS = frozenset(vars(logging.LogRecord("", 0, "", 0, "", (), None))) | {"message", "asctime",
+                                                                                         "taskName"}
 
+
+class JsonFormatter(logging.Formatter):
+    """v0.1.36 (F-4): một dòng JSON mỗi bản ghi log (production) — tra được theo thời điểm/mã lỗi.
+
+    Khoá: `ts` (ISO UTC, mili giây, hậu tố 'Z'), `level`, `logger`, `msg`; `exc` (traceback) khi có ngoại lệ, `stack`
+    khi `stack_info=True`; mọi trường `extra=` (vd. `error_id`, `method`, `path` từ gh.errors) ở cấp ngoài cùng."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        ts = datetime.fromtimestamp(record.created, UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+        out: dict[str, Any] = {"ts": ts, "level": record.levelname, "logger": record.name, "msg": record.getMessage()}
+        if record.exc_info and record.exc_info[0] is not None:
+            out["exc"] = self.formatException(record.exc_info)
+        elif record.exc_text:
+            out["exc"] = record.exc_text
+        if record.stack_info:
+            out["stack"] = self.formatStack(record.stack_info)
+        for k, v in record.__dict__.items():
+            if k not in _LOG_RECORD_ATTRS and not k.startswith("_") and k not in out:
+                out[k] = v
+        return json.dumps(out, ensure_ascii=False, default=str)
+
+
+def configure_logging() -> None:
     handler = logging.StreamHandler()
     handler.setFormatter(JsonFormatter() if get_settings().is_production else logging.Formatter(
         "%(asctime)s %(levelname)s %(name)s: %(message)s"))

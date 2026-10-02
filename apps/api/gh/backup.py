@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import logging
 import os
 import tempfile
@@ -229,8 +230,17 @@ async def list_backups(*, store: ObjectStore | None = None) -> list[BackupEntry]
 # ─── chạy tiến trình con thật ───────────────────────────────────────────────────────────────────────────────
 
 async def _run(cmd: list[str]) -> None:
+    """Chạy `pg_dump`/`pg_restore`. v0.1.36 (F-3): job bị huỷ (quá giờ arq, worker tắt) ⇒ giết tiến trình con rồi mới
+    ném lại `CancelledError` — không để pg_dump/pg_restore mồ côi chạy tiếp, giữ khoá CSDL/ghi đĩa không ai đợi."""
     proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-    _out, err = await proc.communicate()
+    try:
+        _out, err = await proc.communicate()
+    except asyncio.CancelledError:
+        with contextlib.suppress(ProcessLookupError):
+            proc.kill()
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(proc.wait(), 5)
+        raise
     if proc.returncode != 0:
         raise RuntimeError(f"{cmd[0]} thất bại (mã {proc.returncode}): {err.decode(errors='replace')[-4000:]}")
 
@@ -349,7 +359,12 @@ async def _acquire_lock(redis: Any) -> bool:
 async def scheduled_backup_scan(ctx: dict[str, Any]) -> dict[str, Any]:
     """Quét mỗi `DUE_WINDOW_MIN` phút (đăng ký ở `JOBS`): đọc `settings->'backup'` của tổ chức đầu tiên đã
     cấu hình (xem lý do ở docstring đầu module), chạy `run_backup()` thật nếu đến giờ. Giờ chạy (`time_of_day`)
-    tính theo múi giờ của tổ chức (bước 3), không phải UTC."""
+    tính theo múi giờ của tổ chức (bước 3), không phải UTC.
+
+    v0.1.36 (F-3): job có `timeout` 3600 giây (JOBS — mặc định arq 300 giây giết pg_dump giữa chừng); bị huỷ (quá
+    giờ, bộ xử lý nền khởi động lại) ⇒ chuông "Sao lưu thất bại" rồi mới ném lại — không chết âm thầm. Kiểm "bản
+    mới nhất quá 36 giờ" KHÔNG nằm ở đây (job này có thể không chạy chính vì worker chết): dùng chung
+    `gh.health.evaluate` (vòng theo dõi trong api, chuông `backup.stale`)."""
     from zoneinfo import ZoneInfo
 
     from gh.db import sessionmaker
@@ -377,6 +392,9 @@ async def scheduled_backup_scan(ctx: dict[str, Any]) -> dict[str, Any]:
         return {"skipped": "locked"}
     try:
         entry = await run_backup(store=store, trigger="scheduled")
+    except asyncio.CancelledError:
+        await _notify_cancelled(redis, CANCELLED_SCHEDULED_MESSAGE)
+        raise
     except Exception as exc:
         await _notify_owners(redis, ok=False, message=f"Bản sao lưu theo lịch lỗi: {str(exc)[-260:]}")
         raise
@@ -412,9 +430,22 @@ async def _notify_owners(redis: Any, *, ok: bool, message: str) -> None:
         log.exception("Không ghi được thông báo sao lưu")
 
 
+CANCELLED_SCHEDULED_MESSAGE = ("Sao lưu theo lịch bị dừng giữa chừng (quá 60 phút hoặc bộ xử lý nền khởi động lại) — "
+                               "bấm Sao lưu ngay để thử lại.")
+CANCELLED_NOW_MESSAGE = "Sao lưu bị dừng giữa chừng"
+
+
+async def _notify_cancelled(redis: Any, message: str) -> None:
+    """v0.1.36 (F-3): job đang bị huỷ — vẫn cố gửi chuông (shield: lệnh huỷ không cắt ngang việc ghi; tối đa 10 giây)
+    rồi để bên gọi ném lại `CancelledError`. Lỗi gửi chỉ ghi log."""
+    with contextlib.suppress(Exception):
+        await asyncio.wait_for(asyncio.shield(_notify_owners(redis, ok=False, message=message)), 10)
+
+
 async def backup_now(ctx: dict[str, Any], trigger: str = "manual") -> dict[str, Any]:
     """Nút "Sao lưu ngay" (gh/system_api/backups.py xếp hàng qua arq): chạy `run_backup()` và ghi tiến trình vào
-    Redis `JOB_KEY` (queued → running → done/failed) cho Console hỏi lại."""
+    Redis `JOB_KEY` (queued → running → done/failed) cho Console hỏi lại. v0.1.36 (F-3): bị huỷ giữa chừng ⇒ trạng
+    thái 'failed' + chuông, không treo mãi ở 'running'."""
     redis = ctx["redis"]
     if not await _acquire_lock(redis):
         await _set_job(redis, state="failed", finished_at=datetime.now(UTC).isoformat(),
@@ -423,6 +454,13 @@ async def backup_now(ctx: dict[str, Any], trigger: str = "manual") -> dict[str, 
     await _set_job(redis, state="running", started_at=datetime.now(UTC).isoformat(), message=None)
     try:
         entry = await run_backup(trigger=trigger)
+    except asyncio.CancelledError:
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(asyncio.shield(_set_job(redis, state="failed",
+                                                           finished_at=datetime.now(UTC).isoformat(),
+                                                           message=CANCELLED_NOW_MESSAGE)), 10)
+        await _notify_cancelled(redis, f"{CANCELLED_NOW_MESSAGE} — bấm Sao lưu ngay để thử lại.")
+        raise
     except Exception as exc:  # noqa: BLE001 — báo lỗi cho Console, không nuốt im lặng
         log.exception("Sao lưu ngay thất bại")
         await _set_job(redis, state="failed", finished_at=datetime.now(UTC).isoformat(), message=str(exc)[-500:])
@@ -440,7 +478,8 @@ async def backup_now(ctx: dict[str, Any], trigger: str = "manual") -> dict[str, 
 
 
 HOOKS: list[Hook] = []
-JOBS: list[CronJob] = [(scheduled_backup_scan, {"minute": set(range(0, 60, DUE_WINDOW_MIN))})]
+# v0.1.36 (F-3): timeout 3600 giây — mặc định arq (300 giây) huỷ pg_dump của CSDL lớn giữa chừng.
+JOBS: list[CronJob] = [(scheduled_backup_scan, {"minute": set(range(0, 60, DUE_WINDOW_MIN)), "timeout": 3600})]
 FUNCTIONS = [func(backup_now, timeout=3600)]  # job xếp hàng theo yêu cầu (không theo lịch) — gh/worker.py đăng ký
 
 
