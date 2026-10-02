@@ -16,7 +16,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { randomUUID } from 'node:crypto';
-import type { AgentIdentity, HealthIssue, SystemHealth } from '@gen-harness/contracts';
+import type { AgentIdentity, HealthIssue, HubLink, SocialAccount, SystemHealth } from '@gen-harness/contracts';
 import { createPhase2, maskText, seedRows, type P2Ctx } from './mock-phase2';
 import { createMock as createP3Core } from './mock-p3-core';
 import { createMock as createP3Queue } from './mock-p3-queue';
@@ -29,6 +29,7 @@ import { USER_IDS } from './mock-ids';
 import { createMock as createP4Api } from './mock-p4-api';
 import { createMock as createP4Mcp } from './mock-p4-mcp';
 import { createMock as createSocial } from './mock-social';
+import { createMock as createBossChecks } from './mock-boss-checks';
 import { createMock as createP4Plugins } from './mock-p4-plugins';
 import { createMock as createP4System } from './mock-p4-system';
 import { createMock as createGen } from './mock-gen';
@@ -334,10 +335,41 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     },
   });
   const gen = { enabled: () => genMock.hooks.settings().enabled };
+  // v0.1.29 — Tài khoản mạng xã hội (chỉ Owner, chỉ đọc).
+  const social = createSocial({ fresh: opts.setup === 'fresh', emit: broadcast });
+  /** v0.1.39: đọc danh sách tài khoản qua chính route `GET /social/accounts` của mock-social (không chép state). */
+  const socialAccounts = (): SocialAccount[] => {
+    let out: { items?: SocialAccount[] } | null = null;
+    social.handle({
+      method: 'GET', path: '/social/accounts', url: new URL('http://mock.local/api/v1/social/accounts'), body: {}, perms: {},
+      reply: (_status, b) => {
+        out = b as { items?: SocialAccount[] };
+        return true;
+      },
+      problem: () => true, text: () => true, needPin: () => false, userLabel: 'mock', owner: true, role: 'owner',
+    });
+    return (out as { items?: SocialAccount[] } | null)?.items ?? [];
+  };
+  // MCP Hub (PLAN 4.3): tool ghi tạo bản nháp qua p3Core.hooks.push — cùng cơ chế create_draft dùng chung.
+  const mcp = createP4Mcp({
+    fresh: opts.setup === 'fresh', emit: broadcast,
+    getAgents: p4Agents.hooks.list as () => AgentIdentity[],
+    pushDraft: p3Core.hooks.push as (d: Record<string, unknown>) => unknown,
+  });
+  const hubLinkOf = mcp.hooks.hubLink as () => HubLink;
   const phase3 = {
     gen: genMock,
-    // v0.1.29 — Tài khoản mạng xã hội (chỉ Owner, chỉ đọc).
-    social: createSocial({ fresh: opts.setup === 'fresh', emit: broadcast }),
+    social,
+    // v0.1.39 (F-74) — "Việc Sếp cần làm" (chỉ Owner; PIN cho hub/agy_switch).
+    bossChecks: createBossChecks({
+      fresh: opts.setup === 'fresh', emit: broadcast,
+      hubLink: hubLinkOf,
+      hubTest: mcp.hooks.hubTest as () => { ok: boolean; error: string | null; error_code: string | null },
+      socialAccounts,
+      cliProfiles: phase2.hooks.cliProfiles,
+      activateCli: phase2.hooks.activateCli,
+      providers: phase2.hooks.providers,
+    }),
     // agents TRƯỚC core: `GET /agents/decisions` cần trả dữ liệu thật ("agent đã nói gì") — core.handle() có
     // một stub rỗng cho cùng đường (chưa màn nào dùng tới trước giai đoạn 4) nên phải chặn trước nó.
     agents: p4Agents,
@@ -356,12 +388,7 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
       getAgents: p4Agents.hooks.list as () => AgentIdentity[],
       getProviders: phase2.hooks.providers as Parameters<typeof createP4Api>[0]['getProviders'],
     }),
-    // MCP Hub (PLAN 4.3): tool ghi tạo bản nháp qua p3Core.hooks.push — cùng cơ chế create_draft dùng chung.
-    mcp: createP4Mcp({
-      fresh: opts.setup === 'fresh', emit: broadcast,
-      getAgents: p4Agents.hooks.list as () => AgentIdentity[],
-      pushDraft: p3Core.hooks.push as (d: Record<string, unknown>) => unknown,
-    }),
+    mcp,
     // Plugin & Tiện ích (PLAN 4.4).
     plugins: createP4Plugins({ fresh: opts.setup === 'fresh', emit: broadcast }),
     // Điều khiển hệ thống — Bộ não AI đã có mock đủ ở phase2/api; đây chỉ Quyền hạn/Nhật ký/Dữ liệu (PLAN 4.5/4.6).
@@ -755,11 +782,17 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
         // Như API thật: mọi bước tuỳ chọn 5–11; `done` = đã xong trong trình thiết lập (dữ liệu thật: mock bỏ qua).
         // v0.1.29: bước 4 cũng có ("Chưa có model") — xong theo dữ liệu thật: có nguồn dùng được đang có model.
         const hasModel = phase2.hooks.providers().some((p) => p.enabled && p.kind !== 'system_one' && p.auth_state === 'ok' && p.models.length > 0);
-        return reply(200, setup.steps.filter((x) => !x.required && x.n >= 4 && x.n <= 11)
-          .map((x) => ({ n: x.n, key: x.key, title: x.title, status: x.status,
-            done: x.n === 4 ? hasModel : x.status === 'done' || (x.n === 11 && phase3.system.backupConfigured()) || (x.n === 7 && phase2.hooks.rulesEnabled()) })));
+        // v0.1.39 (F-28): 13 Facebook đã từng đăng nhập, 14 Gen-hub đã Kiểm tra xanh ít nhất một lần (không phải bước).
+        const fbDone = socialAccounts().some((a) => a.status === 'active' || a.status === 'paused' || a.status === 'needs_login');
+        return reply(200, [
+          ...setup.steps.filter((x) => !x.required && x.n >= 4 && x.n <= 11)
+            .map((x) => ({ n: x.n, key: x.key, title: x.title, status: x.status,
+              done: x.n === 4 ? hasModel : x.status === 'done' || (x.n === 11 && phase3.system.backupConfigured()) || (x.n === 7 && phase2.hooks.rulesEnabled()) })),
+          { n: 13, key: 'social', title: 'Kết nối Facebook', status: 'todo', done: fbDone },
+          { n: 14, key: 'hub', title: 'Nối Gen-hub', status: 'todo', done: !!hubLinkOf().last_ok_at },
+        ]);
       }
-      // Như API thật: sau Hoàn tất vẫn lưu lại được bước tuỳ chọn 4–11 (trang Hướng dẫn kết nối), còn lại 409.
+      // Như API thật: sau Hoàn tất vẫn lưu lại được bước tuỳ chọn 4–11 (trang Hướng dẫn thiết lập), còn lại 409.
       const optionalPut = /^\/setup\/steps\/([4-9]|1[01])$/.test(path) && method === 'PUT';
       if (setup.finished && !optionalPut) return problem(res, 409, 'CONFLICT', 'Thiết lập đã hoàn tất');
       const skip = /^\/setup\/steps\/(\d+)\/skip$/.exec(path);

@@ -161,7 +161,7 @@
 .ov-followup__hint { margin-top: 2px; font-size: 11px; color: var(--color-neutral-500); text-wrap: pretty; }
 @media (max-width: 640px) { .ov-followup__item { flex-wrap: wrap; } .ov-followup__body { flex-basis: calc(100% - 40px); } }
 
-/* Hướng dẫn kết nối (/guide, /guide/:n) */
+/* Hướng dẫn thiết lập (/guide, /guide/:n, /guide/viec-sep) */
 .guide-progress { display: flex; align-items: center; gap: 12px; }
 .guide-progress__bar { flex: 1; max-width: 360px; height: 6px; border-radius: 3px; background: var(--color-neutral-800); overflow: hidden; }
 .guide-progress__bar span { display: block; height: 100%; background: var(--color-ok); transition: width .3s; }
@@ -189,6 +189,30 @@
 .guide-back { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--color-neutral-400); text-decoration: none; }
 .guide-back:hover { color: var(--color-text); }
 @media (max-width: 640px) { .guide-card__body { padding-left: 16px; } }
+
+/* v0.1.39 (F-74): thẻ "Việc Sếp cần làm" đầu trang Hướng dẫn thiết lập + trang /guide/viec-sep. */
+.guide-boss { display: flex; align-items: center; gap: 12px; max-width: 760px; padding: 12px 16px; text-decoration: none; color: var(--color-text); border-color: var(--color-accent-300); }
+.guide-boss:hover { background: var(--color-neutral-900); }
+.guide-boss__icon { flex: none; color: var(--color-accent-300); }
+.guide-boss__body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.guide-boss__title { font-size: 13px; font-weight: 600; }
+.guide-boss__sub { font-size: 11.5px; color: var(--color-neutral-400); }
+.boss-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; max-width: 960px; }
+.boss-row { padding: 12px 16px; }
+.boss-row__head { display: flex; align-items: center; gap: 12px; }
+.boss-row__body { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 16px; margin-top: 8px; padding-left: 27px; }
+.boss-row__main { display: flex; flex-direction: column; gap: 8px; min-width: 0; font-size: 12.5px; color: var(--color-neutral-300); }
+.boss-row__todo { margin: 0; text-wrap: pretty; }
+.boss-row__results { display: flex; flex-direction: column; gap: 6px; }
+.boss-form { display: flex; flex-direction: column; gap: 8px; max-width: 460px; }
+.boss-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.boss-result { padding: 6px 10px; border-radius: 6px; border: 1px solid var(--color-divider); font-size: 11.5px; color: var(--color-neutral-400); overflow-wrap: anywhere; }
+.boss-result__label { display: block; font-size: 10.5px; letter-spacing: .04em; text-transform: uppercase; color: var(--color-neutral-500); }
+.boss-result--pass { color: var(--color-ok); border-color: var(--color-ok); }
+.boss-result--fail { color: var(--color-bad); border-color: var(--color-bad); }
+.boss-result--pending { color: var(--color-warn); border-color: var(--color-warn); }
+.boss-foot { display: flex; align-items: center; gap: 6px; max-width: 960px; }
+@media (max-width: 760px) { .boss-row__body { grid-template-columns: 1fr; padding-left: 0; } }
 
 /* Cập nhật phiên bản (Tổng quan) */
 .upd-card--accent { border-color: var(--color-accent); }
@@ -219,7 +243,7 @@
 .ib-hidden-note { margin: 0 0 8px; font-size: 11.5px; color: var(--color-neutral-500); }
 .ib-card__triage { cursor: help; }
 
-/* v0.1.30: nút "Ẩn" cạnh "Hướng dẫn từng bước". */
+/* v0.1.30: nút "Ẩn" cạnh "Hướng dẫn thiết lập". */
 .ov-followup__aside { display: inline-flex; gap: 6px; align-items: center; }
 /* v0.1.30: mục "Cập nhật phần mềm" cố định. */
 .upd-info { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 10px 16px; margin-bottom: 8px; }

@@ -16,7 +16,7 @@ async function enterOwnerPin(page: Page): Promise<void> {
  * - Bước 4: nguồn gọi thử lỗi báo câu dễ hiểu + chi tiết kỹ thuật thu gọn, xếp CUỐI chuỗi, xoá được; nguồn OK có
  *   "Dùng model này" còn nguyên sau khi tải lại; Tiếp tục chỉ bật khi có model.
  * - "Để sau" ở bước 7/11 dùng mặc định; bước 12 liệt kê việc còn thiếu thay vì "Mọi thứ đã sẵn sàng".
- * - Vai trò Vận hành: Trợ giúp không có lệnh máy chủ/Gen, Hướng dẫn kết nối giải thích thay vì báo lỗi.
+ * - Vai trò Vận hành: Trợ giúp không có lệnh máy chủ/Gen, Hướng dẫn thiết lập giải thích thay vì báo lỗi.
  */
 test.describe('UX v0.1.28', () => {
   test('bước 4 → 12: nguồn lỗi, model sau tải lại, xoá nguồn, việc còn thiếu', async ({ page }) => {
@@ -93,14 +93,20 @@ test.describe('UX v0.1.28', () => {
     await expect(page.locator('.summary')).toContainText('Gemini API (gemini-2.5-flash)');
   });
 
-  test('Vận hành: Trợ giúp theo vai trò, Hướng dẫn kết nối không báo lỗi', async ({ page }) => {
+  test('Vận hành: Trợ giúp theo vai trò, Hướng dẫn thiết lập không báo lỗi', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await resetMock(page.request, 'finished');
     await loginAs(page, 'operator@genesis.local');
     await page.goto('/help');
     await expect(page.getByText('Cần giúp về tài khoản')).toBeVisible();
     await expect(page.getByText('genh update')).toHaveCount(0);
+    await expect(page.getByRole('link', { name: /Mở Hướng dẫn thiết lập/ })).toHaveCount(0);
     await page.goto('/guide');
+    await expect(page.getByRole('heading', { name: 'Hướng dẫn thiết lập' })).toBeVisible();
+    await expect(page.getByText('Việc kết nối do Owner làm')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Thử lại' })).toHaveCount(0);
+    // v0.1.39: trang "Việc Sếp cần làm" cũng chỉ giải thích, không báo lỗi.
+    await page.goto('/guide/viec-sep');
     await expect(page.getByText('Việc kết nối do Owner làm')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Thử lại' })).toHaveCount(0);
   });

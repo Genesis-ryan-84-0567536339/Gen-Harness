@@ -1,0 +1,76 @@
+/**
+ * v0.1.39 (F-74) — "Việc Sếp cần làm" (`/guide/viec-sep`): nhãn, câu lỗi thân thiện theo mã lỗi thống nhất, định dạng
+ * ô kết quả. Không chứa bí mật: kết quả máy chủ trả chỉ có mã lỗi + câu đã lọc.
+ */
+import type { BossCheck, BossCheckKey, BossOverview } from '@gen-harness/contracts';
+import { friendlyError } from '../lib/friendlyError';
+import { DEFAULT_TZ, fmtDM, fmtHM } from '../lib/format';
+
+/** Khoá cache của `GET /boss-checks`. */
+export const BOSS_CHECKS_KEY = ['boss-checks'] as const;
+
+/** Đường dẫn trang con của Hướng dẫn thiết lập. */
+export const BOSS_CHECKS_PATH = '/guide/viec-sep';
+
+/** Thăm lại mỗi 3 giây khi có kết quả đang chạy (vd đọc Facebook chạy nền). */
+export const BOSS_CHECKS_POLL_MS = 3000;
+
+/** Câu cho Sếp theo mã lỗi (khớp mã máy chủ). Mã lạ → câu máy chủ qua `friendlyError`. */
+export const BOSS_ERROR_TEXT: Record<string, string> = {
+  HUB_LINK_NOT_CONFIGURED: 'Chưa nhập địa chỉ và token Gen-hub — điền rồi bấm Kiểm tra.',
+  HUB_ENDPOINT_FORBIDDEN: 'Địa chỉ Gen-hub này không được phép gọi — kiểm tra lại địa chỉ.',
+  MCP_NETWORK_BLOCKED: "Bật 'Cho phép Gen-hub ở mạng công cộng' ngay trong thẻ này",
+  HUB_TOKEN_REJECTED: 'Gen-hub từ chối token — token sai, hết hạn hoặc đã bị thu hồi. Tạo token mới rồi dán lại.',
+  HUB_RATE_LIMITED: 'Gen-hub đang giới hạn số lần gọi — đợi vài phút rồi kiểm tra lại.',
+  HUB_UNREACHABLE: 'Không gọi được Gen-hub — kiểm tra địa chỉ và mạng của máy chủ.',
+  HUB_TOOLS_MISSING: 'Token chưa được bật đủ quyền đọc Kho — bật quyền tóm tắt, tìm, xem một mục rồi kiểm tra lại.',
+  HUB_ERROR: 'Gen-hub báo lỗi — thử lại sau ít phút.',
+  SOCIAL_NO_ACCOUNT: 'Chưa có tài khoản Facebook — thêm và đăng nhập ở trang Tài khoản mạng xã hội.',
+  SOCIAL_NOT_ACTIVE: 'Tài khoản Facebook chưa đăng nhập — bấm Đăng nhập ở trang Tài khoản mạng xã hội.',
+  SOCIAL_NO_SESSION: 'Phiên đăng nhập Facebook không còn — đăng nhập lại ở trang Tài khoản mạng xã hội.',
+  SOCIAL_RATE_LIMIT: 'Đã đọc đủ số lần cho phép — đợi một lúc rồi bấm Đọc ngay lại.',
+  SOCIAL_READ_FAILED: 'Đọc Facebook không thành công — mở trang Tài khoản mạng xã hội xem lý do.',
+  SOCIAL_READ_HALTED: 'Đọc mạng xã hội đang bị dừng (Dừng tất cả) — bật lại ở trang Tài khoản mạng xã hội.',
+  SOCIAL_JOB_MISSING: 'Không thấy lượt đọc vừa chạy — bấm Đọc ngay lại.',
+  AGY_NOT_LOGGED_IN: 'Chưa đăng nhập Google cho Antigravity — bấm Đăng nhập Google.',
+  AGY_ACCOUNT_MISMATCH: 'Gọi thử chạy bằng tài khoản khác với tài khoản vừa chọn — bấm đổi lại rồi thử lần nữa.',
+  CLAUDE_NOT_LOGGED_IN: 'Chưa đăng nhập Claude Code — bấm Đăng nhập Claude Code.',
+  CLI_LOGIN_IN_PROGRESS: 'Đang có một lượt đăng nhập dở — hoàn tất hoặc huỷ lượt đó trước.',
+  CLI_MISSING: 'Máy chủ chưa cài công cụ dòng lệnh này — chạy lại trình cài genh.',
+  CLI_LOGIN_TIMEOUT: 'Đăng nhập quá lâu nên đã hết hạn — bấm đăng nhập lại.',
+  CLI_LOGIN_FAILED: 'Đăng nhập không thành công — mã xác thực sai hoặc đã hết hạn, thử lại.',
+  AUTH_EXPIRED: 'Phiên đăng nhập đã hết hạn — đăng nhập lại.',
+  MODEL_REJECTED: 'Model đang chọn không dùng được với tài khoản này — chọn model khác ở API & Model.',
+  TIMEOUT: 'Trả lời quá chậm — thử lại sau ít phút.',
+  PROVIDER_ERROR: 'Nguồn AI báo lỗi — thử lại sau ít phút.',
+  PROBE_RATE_LIMITED: 'Vừa gọi thử quá nhiều lần — đợi một phút rồi thử lại.',
+  JEV_NOT_CONFIGURED: 'Chưa nhập khoá Jev.',
+  JEV_ERROR: 'Thẻ Jev sẽ ẩn, không cần làm thêm.',
+};
+
+/** Câu thân thiện cho một kết quả lỗi — luôn là chuỗi. */
+export function bossErrorText(c: Pick<BossCheck, 'error_code' | 'message'>): string {
+  if (c.error_code && BOSS_ERROR_TEXT[c.error_code]) return BOSS_ERROR_TEXT[c.error_code];
+  return friendlyError(c.message, 'Chưa đạt — thử lại sau ít phút.').message;
+}
+
+/** "14:05 02/10" theo múi giờ tổ chức. */
+export function fmtCheckedAt(iso: string, tz: string = DEFAULT_TZ): string {
+  return `${fmtHM(iso, tz)} ${fmtDM(iso, tz)}`;
+}
+
+/** Kết quả của một mã kiểm (null = chưa kiểm). */
+export function resultOf(o: BossOverview | undefined, key: BossCheckKey): BossCheck | null {
+  return o?.results?.[key] ?? null;
+}
+
+/** Có kết quả nào đang chạy → trang thăm lại. */
+export function hasPending(o: BossOverview | undefined): boolean {
+  return !!o && Object.values(o.results ?? {}).some((c) => c?.status === 'pending');
+}
+
+/** Ghi kết quả vừa chạy vào bản tổng quan đang có (hiện ngay, trước khi tải lại). */
+export function withResult(o: BossOverview | undefined, c: BossCheck): BossOverview | undefined {
+  if (!o) return o;
+  return { ...o, results: { ...o.results, [c.key]: c } };
+}

@@ -5,6 +5,7 @@ import { UrlStateSync } from './lib/uiStore';
 import { LoginPage } from './pages/LoginPage';
 import { AccountPage } from './account/AccountPage';
 import { ForcePasswordPage } from './account/ForcePasswordPage';
+import { BossChecksPage } from './guide/BossChecksPage';
 import { GuidePage } from './guide/GuidePage';
 import { HelpPage } from './help/HelpPage';
 import { GuideStepPage } from './guide/GuideStepPage';
@@ -70,8 +71,10 @@ export const routes: RouteObject[] = [
         children: [
           { index: true, element: <Navigate to="/overview" replace /> },
           ...buildConsoleRoutes(),
-          // Hướng dẫn kết nối từng bước (việc "Để sau" 5–11) — mở từ thẻ Việc thiết lập tiếp ở Tổng quan.
+          // Hướng dẫn thiết lập (việc "Để sau" 5–11 + Facebook, Gen-hub) — mở từ thẻ Việc thiết lập tiếp ở Tổng quan.
           { path: 'guide', element: <GuidePage /> },
+          // v0.1.39 (F-74): "Việc Sếp cần làm" — đặt TRƯỚC `guide/:n`.
+          { path: 'guide/viec-sep', element: <BossChecksPage /> },
           { path: 'guide/:n', element: <GuideStepPage /> },
           // Tài khoản của tôi (v0.1.19) — mở từ khối tài khoản ở chân thanh bên.
           { path: 'account', handle: { page: ACCOUNT_CRUMBS } satisfies RouteHandle, element: <AccountPage /> },

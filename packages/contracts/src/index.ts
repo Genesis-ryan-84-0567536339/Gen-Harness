@@ -22,3 +22,4 @@ export * from './genTargets';
 export * from './notifications';
 export * from './social';
 export * from './pickers';
+export * from './bossChecks';
