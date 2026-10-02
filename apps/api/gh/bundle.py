@@ -4,11 +4,18 @@ Hợp đồng chung với `genh export/import` (Go, agent khác) — KHÔNG đư
 - CLI: `python -m gh.bundle export --out <path|->` ghi bytes gói ra tệp hoặc **stdout** (`-`); log luôn ra
   **stderr** (kể cả khi `--out -`) để không lẫn vào bytes gói.
 - CLI: `python -m gh.bundle import --in <path|->` đọc gói từ tệp hoặc **stdin** (`-`).
+- CLI (v0.1.40, F-12): `python -m gh.bundle verify --in <path|->` KIỂM gói mà KHÔNG đụng CSDL (không mở kết nối
+  nào): giải mã → giải nén an toàn vào thư mục tạm → manifest (package_version, sha256 db.dump, số object) →
+  `pg_restore --list db.dump`. Thành công: in ĐÚNG MỘT dòng JSON ra stdout
+  `{"ok":true,"alembic_revision":…,"objects":N,"db_dump_bytes":N,"created_at":…}` (không bí mật, không keys.json);
+  log ra stderr. `genh offsite` gọi lệnh này để chắc bản sao ngoài máy vừa ghi đọc lại được (GH-EB03 nếu không).
 - Mật khẩu bắt buộc qua biến môi trường `GH_BUNDLE_PASSWORD` (≥ 12 ký tự) — không có tham số dòng lệnh nào
   nhận mật khẩu (tránh lộ qua `ps`/lịch sử shell).
 - Mã thoát: `0` OK · `1` lỗi khác (thiếu/ngắn mật khẩu, lỗi hệ thống…) · `2` sai mật khẩu hoặc gói hỏng (GCM
   tag không khớp) · `3` phiên bản gói không tương thích, HOẶC alembic revision của gói MỚI HƠN CSDL đích hiện có
   (nhập một gói từ bản `gh` mới hơn vào máy chưa nâng cấp migrations tương ứng — từ chối thay vì phá schema).
+  Riêng `verify`: `2` còn gồm sha256/số object không khớp manifest và `pg_restore --list` lỗi (bản CSDL hỏng);
+  `3` chỉ là định dạng/package_version lạ (không so alembic revision — không có CSDL đích để so).
 
 Định dạng tệp (`GHBUNDLE1`):
     b"GHBUNDLE1\\n" + <header JSON, một dòng, KHÔNG newline cuối> + b"\\n" + <ciphertext>
@@ -153,6 +160,13 @@ class BundleError(Exception):
     def __init__(self, message: str, code: int):
         super().__init__(message)
         self.code = code
+
+
+#: Giới hạn đã biết của định dạng gói hiện tại: AES-GCM một khối của `cryptography` chỉ nhận ≤ 2**31-1 byte (và cả gói
+#: nằm trong RAM 2–3 lần). Vượt ⇒ báo rõ thay vì OverflowError khó hiểu; định dạng sau sẽ mã hoá theo đoạn (stream).
+GCM_MAX_BYTES = 2**31 - 1
+TOO_LARGE = ("Gói dữ liệu lớn hơn 2 GiB chưa hỗ trợ (giới hạn đã biết của định dạng .ghbundle hiện tại) — "
+             "dùng bản sao lưu thường (genh backup) trong lúc chờ bản hỗ trợ gói lớn")
 
 
 def _usage_error(message: str) -> BundleError:
@@ -322,7 +336,12 @@ def _encrypt_bundle(tar_bytes: bytes, password: str) -> tuple[dict[str, Any], by
     key = _derive_key(password, salt=salt, time_cost=header["time_cost"], memory_cost=header["memory_cost"],
                       parallelism=header["parallelism"])
     aad = orjson.dumps(header)
-    ciphertext = AESGCM(key).encrypt(nonce, tar_bytes, aad)
+    if len(tar_bytes) > GCM_MAX_BYTES:
+        raise _usage_error(TOO_LARGE)
+    try:
+        ciphertext = AESGCM(key).encrypt(nonce, tar_bytes, aad)
+    except OverflowError as e:
+        raise _usage_error(TOO_LARGE) from e
     return header, ciphertext
 
 
@@ -336,46 +355,69 @@ def _sha256_file(path: Path) -> str:
 
 # ─── import ──────────────────────────────────────────────────────────────────────────────────────────────────
 
+def _unpack(inp: str, tmp: Path, password: str) -> tuple[dict[str, Any], Path]:
+    """Đọc gói `inp` → kiểm magic/header → giải mã → giải nén an toàn vào `tmp/extracted` → kiểm manifest
+    (package_version, sha256 db.dump). Dùng chung cho `import` và `verify`; KHÔNG đụng CSDL."""
+    raw_path = tmp / "bundle.raw"
+    _copy_input(inp, raw_path)
+
+    with raw_path.open("rb") as f:
+        magic = f.readline().rstrip(b"\n")
+        header_line = f.readline().rstrip(b"\n")
+        ciphertext = f.read()
+    raw_path.unlink()
+
+    if magic != MAGIC:
+        raise _incompatible(f"Định dạng gói không nhận ra (magic={magic!r}, cần {MAGIC!r})")
+    try:
+        header = orjson.loads(header_line)
+    except orjson.JSONDecodeError as e:
+        raise _bad_password_or_corrupt(f"Header gói hỏng, không đọc được JSON: {e}") from e
+    if not isinstance(header, dict):
+        raise _bad_password_or_corrupt("Header gói hỏng (không phải đối tượng JSON)")
+    if header.get("v") != HEADER_VERSION:
+        raise _incompatible(f"Phiên bản phong bì gói lạ (v={header.get('v')!r}, chỉ hỗ trợ {HEADER_VERSION})")
+
+    tar_bytes = _decrypt_bundle(ciphertext, header, header_line, password)
+    del ciphertext
+
+    tar_path = tmp / "bundle.tar"
+    tar_path.write_bytes(tar_bytes)
+    del tar_bytes
+    extract_dir = tmp / "extracted"
+    extract_dir.mkdir()
+    try:
+        with tarfile.open(tar_path, "r") as tar:
+            _safe_extract(tar, extract_dir)
+    except tarfile.TarError as e:
+        raise _bad_password_or_corrupt(f"Gói hỏng: không giải nén được ({e})") from e
+    tar_path.unlink()
+
+    try:
+        manifest = orjson.loads((extract_dir / "manifest.json").read_bytes())
+    except (OSError, orjson.JSONDecodeError) as e:
+        raise _bad_password_or_corrupt(f"Gói hỏng: thiếu hoặc không đọc được manifest.json ({e})") from e
+    if not isinstance(manifest, dict):
+        raise _bad_password_or_corrupt("Gói hỏng: manifest.json không phải đối tượng JSON")
+    if manifest.get("package_version") != PACKAGE_VERSION:
+        raise _incompatible(f"Phiên bản cấu trúc gói lạ (package_version={manifest.get('package_version')!r}, "
+                            f"chỉ hỗ trợ {PACKAGE_VERSION})")
+
+    dump_path = extract_dir / "db.dump"
+    if not dump_path.is_file():
+        raise _bad_password_or_corrupt("Gói hỏng: thiếu db.dump")
+    if _sha256_file(dump_path) != manifest.get("db_dump_sha256"):
+        raise _bad_password_or_corrupt("sha256 của db.dump trong gói không khớp manifest.json — gói hỏng")
+    return manifest, extract_dir
+
+
 async def _import(inp: str) -> None:
     password = _bundle_password()
 
     with tempfile.TemporaryDirectory(prefix="gh-bundle-import-") as tmp_s:
         tmp = Path(tmp_s)
-        raw_path = tmp / "bundle.raw"
-        _copy_input(inp, raw_path)
-
-        with raw_path.open("rb") as f:
-            magic = f.readline().rstrip(b"\n")
-            header_line = f.readline().rstrip(b"\n")
-            ciphertext = f.read()
-
-        if magic != MAGIC:
-            raise _incompatible(f"Định dạng gói không nhận ra (magic={magic!r}, cần {MAGIC!r})")
-        try:
-            header = orjson.loads(header_line)
-        except orjson.JSONDecodeError as e:
-            raise _bad_password_or_corrupt(f"Header gói hỏng, không đọc được JSON: {e}") from e
-        if header.get("v") != HEADER_VERSION:
-            raise _incompatible(f"Phiên bản phong bì gói lạ (v={header.get('v')!r}, chỉ hỗ trợ {HEADER_VERSION})")
-
-        tar_bytes = _decrypt_bundle(ciphertext, header, header_line, password)
-
-        tar_path = tmp / "bundle.tar"
-        tar_path.write_bytes(tar_bytes)
-        del tar_bytes
-        extract_dir = tmp / "extracted"
-        extract_dir.mkdir()
-        with tarfile.open(tar_path, "r") as tar:
-            _safe_extract(tar, extract_dir)
-
-        manifest = orjson.loads((extract_dir / "manifest.json").read_bytes())
-        if manifest.get("package_version") != PACKAGE_VERSION:
-            raise _incompatible(f"Phiên bản cấu trúc gói lạ (package_version={manifest.get('package_version')!r}, "
-                                f"chỉ hỗ trợ {PACKAGE_VERSION})")
-
+        manifest, extract_dir = _unpack(inp, tmp, password)
         dump_path = extract_dir / "db.dump"
-        if _sha256_file(dump_path) != manifest.get("db_dump_sha256"):
-            raise _bad_password_or_corrupt("sha256 của db.dump trong gói không khớp manifest.json — gói hỏng")
 
         admin_url = _admin_database_url()
         target_rev = _current_alembic_revision(libpq_url(admin_url))
@@ -408,6 +450,47 @@ async def _import(inp: str) -> None:
     log.info("Đã nhập gói OK (alembic_revision=%s)", manifest.get("alembic_revision"))
 
 
+# ─── verify (v0.1.40, F-12): kiểm gói mà KHÔNG đụng CSDL ─────────────────────────────────────────────────────
+
+def _count_objects(objects_dir: Path) -> int:
+    return sum(1 for p in objects_dir.rglob("*") if p.is_file()) if objects_dir.is_dir() else 0
+
+
+async def _pg_restore_list(dump_path: Path) -> None:
+    """`pg_restore --list` chỉ đọc mục lục của bản custom-format — không cần (và không mở) kết nối CSDL nào."""
+    proc = await asyncio.create_subprocess_exec("pg_restore", "--list", str(dump_path),
+                                                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
+    _out, err = await proc.communicate()
+    if proc.returncode != 0:
+        log.error("pg_restore --list thất bại (mã %s): %s", proc.returncode, err.decode(errors="replace")[-2000:])
+        raise _bad_password_or_corrupt("Gói hỏng: không đọc được bản CSDL (pg_restore --list lỗi)")
+
+
+async def _verify(inp: str) -> dict[str, Any]:
+    """Kiểm gói `inp` (mật khẩu qua GH_BUNDLE_PASSWORD) — trả tóm tắt KHÔNG bí mật để in một dòng JSON."""
+    password = _bundle_password()
+    tmp = Path(tempfile.mkdtemp(prefix="gh-bundle-verify-"))
+    try:
+        manifest, extract_dir = _unpack(inp, tmp, password)
+        objects = _count_objects(extract_dir / "objects")
+        expected = manifest.get("object_count")
+        if not isinstance(expected, int) or isinstance(expected, bool) or objects != expected:
+            raise _bad_password_or_corrupt(
+                f"Gói hỏng: số object trong gói ({objects}) không khớp manifest.json ({expected!r})")
+        dump_path = extract_dir / "db.dump"
+        await _pg_restore_list(dump_path)
+        rev = manifest.get("alembic_revision")
+        created = manifest.get("created_at")
+        result = {"ok": True, "alembic_revision": rev if isinstance(rev, str) else None, "objects": objects,
+                  "db_dump_bytes": dump_path.stat().st_size,
+                  "created_at": created if isinstance(created, str) else None}
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    log.info("Gói đọc lại được: %d object, db.dump %d byte, revision=%s", result["objects"],
+             result["db_dump_bytes"], result["alembic_revision"])
+    return result
+
+
 def _copy_input(inp: str, dest: Path) -> None:
     if inp == "-":
         with dest.open("wb") as out:
@@ -426,6 +509,8 @@ def _decrypt_bundle(ciphertext: bytes, header: dict[str, Any], header_line: byte
         raise _bad_password_or_corrupt(f"Header gói thiếu/sai tham số KDF: {e}") from e
     try:
         return AESGCM(key).decrypt(nonce, ciphertext, header_line)
+    except OverflowError as e:
+        raise _usage_error(TOO_LARGE) from e
     except InvalidTag as e:
         raise _bad_password_or_corrupt("Sai GH_BUNDLE_PASSWORD hoặc gói đã bị sửa/hỏng (GCM tag không khớp)") from e
 
@@ -517,21 +602,28 @@ def _terminate_other_connections(pg_url: str) -> int:
     return n
 
 
-# ─── CLI: `python -m gh.bundle export --out <path|-> | import --in <path|->` ───────────────────────────────
+# ─── CLI: `python -m gh.bundle export --out <path|-> | import --in <path|-> | verify --in <path|->` ───────
 
 def _main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, stream=sys.stderr)
-    parser = argparse.ArgumentParser(description="Gói hồ sơ Owner .ghbundle (export/import) — HANDOFF-v0.1.1 §1b")
+    parser = argparse.ArgumentParser(
+        description="Gói hồ sơ Owner .ghbundle (export/import/verify) — HANDOFF-v0.1.1 §1b")
     sub = parser.add_subparsers(dest="action", required=True)
     p_export = sub.add_parser("export", help="Xuất gói .ghbundle (mật khẩu qua GH_BUNDLE_PASSWORD)")
     p_export.add_argument("--out", required=True, help="Đường dẫn tệp ra, hoặc '-' cho stdout")
     p_import = sub.add_parser("import", help="Nhập gói .ghbundle (mật khẩu qua GH_BUNDLE_PASSWORD)")
     p_import.add_argument("--in", dest="inp", required=True, help="Đường dẫn tệp vào, hoặc '-' cho stdin")
+    p_verify = sub.add_parser("verify", help="Kiểm gói .ghbundle đọc lại được (không đụng CSDL)")
+    p_verify.add_argument("--in", dest="inp", required=True, help="Đường dẫn tệp vào, hoặc '-' cho stdin")
     args = parser.parse_args(argv)
 
     try:
         if args.action == "export":
             asyncio.run(_export(args.out))
+        elif args.action == "verify":
+            result = asyncio.run(_verify(args.inp))
+            sys.stdout.write(orjson.dumps(result).decode() + "\n")
+            sys.stdout.flush()
         else:
             asyncio.run(_import(args.inp))
         return 0

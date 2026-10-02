@@ -45,22 +45,32 @@ def edge_state(last_at: datetime | None) -> str:
     return "cold" if (datetime.now(UTC) - last_at).days > COLD_DAYS else "active"
 
 
-async def _upsert(db: AsyncSession, org_id: uuid.UUID, from_type: str, from_id: uuid.UUID, to_type: str,
-                  to_id: uuid.UUID, kind: str, window_days: int, weight: float, interactions: int,
-                  last_at: datetime | None, topic: str | None) -> None:
-    # `clock_timestamp()`, không `now()`: cả lượt `recompute_org` chạy trong MỘT transaction, mà `now()` (=
-    # `CURRENT_TIMESTAMP`) đứng yên ở thời điểm transaction bắt đầu — sớm hơn `run_start` (đồng hồ Python, đọc
-    # sau khi transaction đã mở) — khiến bước dọn cạnh rác cuối hàm (`computed_at < run_start`) xoá nhầm mọi
-    # cạnh vừa upsert. `clock_timestamp()` luôn tăng theo thời gian thật của từng câu lệnh nên tránh được lỗi đó.
-    await db.execute(text("""
-        INSERT INTO clean.relationships (org_id, from_type, from_id, to_type, to_id, kind, window_days, weight,
-                                         interactions, last_at, state, topic, computed_at)
-        VALUES (:o, :ft, :fi, :tt, :ti, :k, :w, :wt, :n, :la, :st, :tp, clock_timestamp())
-        ON CONFLICT (org_id, from_type, from_id, to_type, to_id, kind, window_days) DO UPDATE SET
-          weight = EXCLUDED.weight, interactions = EXCLUDED.interactions, last_at = EXCLUDED.last_at,
-          state = EXCLUDED.state, topic = EXCLUDED.topic, computed_at = EXCLUDED.computed_at"""),
-        {"o": org_id, "ft": from_type, "fi": from_id, "tt": to_type, "ti": to_id, "k": kind, "w": window_days,
-         "wt": round(weight, 3), "n": interactions, "la": last_at, "st": edge_state(last_at), "tp": topic})
+# v0.1.40 (F-16): mỗi kind (trừ bridges) ghi bằng MỘT câu INSERT … SELECT … ON CONFLICT thay vì một câu cho mỗi
+# cạnh. `clock_timestamp()`, không `now()`: cả lượt `recompute_org` chạy trong MỘT transaction, mà `now()` đứng yên ở
+# thời điểm transaction bắt đầu — sớm hơn `run_start` — khiến bước dọn cạnh rác cuối hàm (`computed_at < run_start`)
+# xoá nhầm mọi cạnh vừa upsert. `state` tính trong SQL KHỚP `edge_state()`: `.days > 30` ⟺ khoảng cách ≥ 31 ngày.
+_STATE_SQL = (f"CASE WHEN src.last_at IS NULL OR clock_timestamp() - src.last_at >= interval '{COLD_DAYS + 1} days' "
+              "THEN 'cold' ELSE 'active' END")
+_UPSERT_TAIL = """
+ON CONFLICT (org_id, from_type, from_id, to_type, to_id, kind, window_days) DO UPDATE SET
+  weight = EXCLUDED.weight, interactions = EXCLUDED.interactions, last_at = EXCLUDED.last_at,
+  state = EXCLUDED.state, topic = EXCLUDED.topic, computed_at = EXCLUDED.computed_at"""
+
+
+def _upsert_sql(select_sql: str, *, from_type: str, from_col: str, to_type: str, to_col: str, kind: str,
+                weight: str, interactions: str, topic: str = "NULL") -> str:
+    """`INSERT INTO clean.relationships … SELECT … FROM (<select_sql>) src ON CONFLICT …` — một câu cho cả kind."""
+    return f"""
+INSERT INTO clean.relationships (org_id, from_type, from_id, to_type, to_id, kind, window_days, weight,
+                                 interactions, last_at, state, topic, computed_at)
+SELECT :o, '{from_type}', src.{from_col}, '{to_type}', src.{to_col}, '{kind}', :w, round(({weight})::numeric, 3),
+       ({interactions})::int, src.last_at, {_STATE_SQL}, {topic}, clock_timestamp()
+FROM ({select_sql}) src""" + _UPSERT_TAIL
+
+
+async def _run_upsert(db: AsyncSession, sql: str, org_id: uuid.UUID, window_days: int) -> int:
+    res = await db.execute(text(sql), {"o": org_id, "w": window_days})
+    return int(res.rowcount or 0)  # type: ignore[attr-defined]
 
 
 # ─── Người↔Người: đồng xuất hiện trong cùng nhóm, cùng ngày ───────────────────────────────────────────────
@@ -98,12 +108,13 @@ GROUP BY p.pa, p.pb
 """
 
 
+_INTERACTS_UPSERT = _upsert_sql(_INTERACTS_SQL, from_type="person", from_col="pa", to_type="person", to_col="pb",
+                                kind="interacts", weight="src.weight", interactions="src.interactions",
+                                topic="src.topic")
+
+
 async def _recompute_interacts(db: AsyncSession, org_id: uuid.UUID, window_days: int) -> int:
-    rows = (await db.execute(text(_INTERACTS_SQL), {"o": org_id, "w": window_days})).all()
-    for r in rows:
-        await _upsert(db, org_id, "person", r.pa, "person", r.pb, "interacts", window_days,
-                     float(r.weight), int(r.interactions), r.last_at, r.topic)
-    return len(rows)
+    return await _run_upsert(db, _INTERACTS_UPSERT, org_id, window_days)
 
 
 # ─── Nhóm↔Nhóm: thành viên chung ───────────────────────────────────────────────────────────────────────────
@@ -118,6 +129,7 @@ activity AS (
   SELECT e.group_id, max(e.occurred_at) AS last_at
   FROM raw.events e JOIN core.channels c ON c.id = e.channel_id
   WHERE c.org_id = :o AND e.group_id IS NOT NULL AND e.direction = 'inbound'
+    AND e.occurred_at > now() - make_interval(days => :w)
   GROUP BY e.group_id
 ),
 pairs AS (
@@ -133,12 +145,12 @@ LEFT JOIN activity aa ON aa.group_id = p.ga LEFT JOIN activity ab ON ab.group_id
 """
 
 
+_SHARES_UPSERT = _upsert_sql(_SHARES_SQL, from_type="group", from_col="ga", to_type="group", to_col="gb",
+                             kind="shares_members", weight="src.weight", interactions="src.shared")
+
+
 async def _recompute_shares(db: AsyncSession, org_id: uuid.UUID, window_days: int) -> int:
-    rows = (await db.execute(text(_SHARES_SQL), {"o": org_id})).all()
-    for r in rows:
-        await _upsert(db, org_id, "group", r.ga, "group", r.gb, "shares_members", window_days,
-                     float(r.weight), int(r.shared), r.last_at, None)
-    return len(rows)
+    return await _run_upsert(db, _SHARES_UPSERT, org_id, window_days)
 
 
 # ─── ai đang nắm: admin nhóm ───────────────────────────────────────────────────────────────────────────────
@@ -154,6 +166,7 @@ activity AS (
   FROM raw.events e JOIN core.channels c ON c.id = e.channel_id
   JOIN core.person_identities pi ON pi.id = e.sender_identity_id
   WHERE c.org_id = :o AND e.group_id IS NOT NULL AND e.direction = 'inbound'
+    AND e.occurred_at > now() - make_interval(days => :w)
   GROUP BY 1, 2
 )
 SELECT a.person_id, a.group_id, COALESCE(act.n, 0) AS interactions, act.last_at
@@ -161,13 +174,13 @@ FROM admins a LEFT JOIN activity act ON act.person_id = a.person_id AND act.grou
 """
 
 
+_OWNS_UPSERT = _upsert_sql(_OWNS_SQL, from_type="person", from_col="person_id", to_type="group", to_col="group_id",
+                           kind="owns", weight="CASE WHEN src.interactions > 0 THEN src.interactions ELSE 1 END",
+                           interactions="COALESCE(src.interactions, 0)")
+
+
 async def _recompute_owns(db: AsyncSession, org_id: uuid.UUID, window_days: int) -> int:
-    rows = (await db.execute(text(_OWNS_SQL), {"o": org_id})).all()
-    for r in rows:
-        weight = float(r.interactions) if r.interactions else 1.0
-        await _upsert(db, org_id, "person", r.person_id, "group", r.group_id, "owns", window_days,
-                     weight, int(r.interactions or 0), r.last_at, None)
-    return len(rows)
+    return await _run_upsert(db, _OWNS_UPSERT, org_id, window_days)
 
 
 # ─── cầu nối: thành viên duy nhất nối hai nhóm không liên quan trực tiếp ──────────────────────────────────
@@ -181,8 +194,15 @@ SELECT pi.person_id, e.group_id, max(e.occurred_at) AS last_at
 FROM raw.events e JOIN core.channels c ON c.id = e.channel_id
 JOIN core.person_identities pi ON pi.id = e.sender_identity_id
 WHERE c.org_id = :o AND e.group_id IS NOT NULL AND e.direction = 'inbound'
+  AND e.occurred_at > now() - make_interval(days => :w)
 GROUP BY 1, 2
 """
+_BRIDGES_UPSERT = _upsert_sql("""
+SELECT b.person_id, b.group_id, b.weight, b.last_at
+FROM unnest(CAST(:persons AS uuid[]), CAST(:groups AS uuid[]), CAST(:weights AS int[]),
+            CAST(:lasts AS timestamptz[])) AS b(person_id, group_id, weight, last_at)""",
+                              from_type="person", from_col="person_id", to_type="group", to_col="group_id",
+                              kind="bridges", weight="src.weight", interactions="src.weight")
 
 
 async def _recompute_bridges(db: AsyncSession, org_id: uuid.UUID, window_days: int) -> int:
@@ -192,10 +212,10 @@ async def _recompute_bridges(db: AsyncSession, org_id: uuid.UUID, window_days: i
     for r in rows:
         groups.setdefault(r.group_id, set()).add(r.person_id)
         persons.setdefault(r.person_id, set()).add(r.group_id)
-    act_rows = (await db.execute(text(_MEMBER_ACTIVITY_SQL), {"o": org_id})).all()
+    act_rows = (await db.execute(text(_MEMBER_ACTIVITY_SQL), {"o": org_id, "w": window_days})).all()
     last_activity = {(r.person_id, r.group_id): r.last_at for r in act_rows}
 
-    n = 0
+    edges: list[tuple[uuid.UUID, uuid.UUID, int, datetime | None]] = []
     for person_id, gset in persons.items():
         if len(gset) < 2:
             continue
@@ -213,10 +233,13 @@ async def _recompute_bridges(db: AsyncSession, org_id: uuid.UUID, window_days: i
         if not bridged_pairs:
             continue
         for g in bridged_groups:
-            await _upsert(db, org_id, "person", person_id, "group", g, "bridges", window_days,
-                         float(bridged_pairs), bridged_pairs, last_activity.get((person_id, g)), None)
-            n += 1
-    return n
+            edges.append((person_id, g, bridged_pairs, last_activity.get((person_id, g))))
+    if not edges:
+        return 0
+    await db.execute(text(_BRIDGES_UPSERT), {
+        "o": org_id, "w": window_days, "persons": [e[0] for e in edges], "groups": [e[1] for e in edges],
+        "weights": [e[2] for e in edges], "lasts": [e[3] for e in edges]})
+    return len(edges)
 
 
 async def recompute_org(db: AsyncSession, org_id: uuid.UUID, window_days: int = WINDOW_DAYS) -> dict[str, int]:
@@ -224,7 +247,9 @@ async def recompute_org(db: AsyncSession, org_id: uuid.UUID, window_days: int = 
     hợp lệ (không được đụng tới ở lượt chạy này, phát hiện qua `computed_at < run_start`).
 
     `run_start` đọc từ `clock_timestamp()` của chính CSDL (không phải đồng hồ Python) — để so sánh được với
-    `computed_at` (cũng ghi bằng `clock_timestamp()` ở `_upsert`) dù cả hàm chạy trong một transaction."""
+    `computed_at` (cũng ghi bằng `clock_timestamp()` ở `_upsert_sql`) dù cả hàm chạy trong một transaction.
+
+    v0.1.40 (F-16): mọi truy vấn raw.events giới hạn trong cửa sổ `window_days`; mỗi kind ghi bằng MỘT câu upsert."""
     run_start = (await db.execute(text("SELECT clock_timestamp()"))).scalar_one()
     counts = {"interacts": await _recompute_interacts(db, org_id, window_days),
               "shares_members": await _recompute_shares(db, org_id, window_days),

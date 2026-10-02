@@ -10,6 +10,11 @@
   `gh:cron:names`) = JSON
   {"at": ISO UTC "Z", "ok": bool, "ms": int} (TTL 7 ngày) và `gh:worker:heartbeat` = ISO UTC (TTL 1 ngày; cũng
   ghi lúc startup) — API đọc để dựng GET /system/health ("Bộ xử lý nền" im lặng / cron hỏng).
+- v0.1.40 (F-2): mọi việc dọn dữ liệu quá hạn đi qua `gh.retention` — một cron `retention_sweep` 05:00 giờ VN thay
+  cho purge_gen_conversations (05:00) và purge_notifications (05:10) cũ (hai hàm vẫn ở `functions` cho job enqueue cũ).
+- v0.1.40 (F-16): `job_timeout` tường minh (JOB_TIMEOUT = 300 giây như mặc định arq). `_tracked` nhận ra lần chạy
+  bị cắt vì quá giờ (payload thêm "timeout": bool, bộ đếm `gh:cron:timeouts:<tên>`); quá giờ 2 lần liền ⇒ sự cố
+  `job.timeout:<tên>` (ops.health_alerts + chuông cho Owner), tự đóng khi lần chạy sau thành công.
 """
 
 import asyncio
@@ -28,9 +33,8 @@ from arq.cron import CronJob as ArqCronJob
 from redis.asyncio import Redis
 from sqlalchemy import text
 
-from gh import __version__, biz, jobcodec, notifications
+from gh import __version__, biz, health, jobcodec, retention
 from gh.app import build_plugin_manager, configure_logging
-from gh.auth import service as auth_service
 from gh.backup import FUNCTIONS as BACKUP_FUNCTIONS
 from gh.backup import JOBS as BACKUP_JOBS
 from gh.biz.hooks import start_hooks
@@ -39,7 +43,6 @@ from gh.chassis import actionlog
 from gh.chassis.bus import EventBus
 from gh.config import get_settings
 from gh.db import admin_sessionmaker, dispose_engine, sessionmaker
-from gh.gen import store as gen_store
 from gh.hub_link import service as hub_link
 from gh.identity import service as identity
 from gh.memory import notebook
@@ -62,6 +65,26 @@ CRON_LAST_TTL = 7 * 86400
 CRON_NAMES_KEY = "gh:cron:names"
 HEARTBEAT_KEY = "gh:worker:heartbeat"
 HEARTBEAT_TTL = 86400
+# v0.1.40 (F-16): bộ đếm lần quá giờ LIÊN TIẾP của từng cron; đạt TIMEOUT_ALERT_AFTER ⇒ sự cố + chuông.
+CRON_TIMEOUTS_KEY = "gh:cron:timeouts:{}"
+CRON_TIMEOUTS_TTL = 7 * 86400
+TIMEOUT_ALERT_AFTER = 2
+#: Thời gian tối đa mặc định của một job (giây) — như mặc định arq, đặt tường minh để `_tracked` biết.
+JOB_TIMEOUT = 300
+#: Nhãn tiếng Việt của việc nền (tiêu đề chuông quá giờ); thiếu nhãn ⇒ tên hàm.
+JOB_LABELS = {
+    "detect_identities": "Dò trùng danh tính",
+    "graph_recompute": "Dựng bản đồ quan hệ",
+    "retention_sweep": "Dọn dữ liệu quá hạn",
+    "partition_maintenance": "Bảo trì phân vùng",
+    "verify_action_log": "Kiểm chuỗi nhật ký hành động",
+    "compact_notebooks": "Nén sổ tay",
+    "expire_sessions": "Dọn phiên đăng nhập",
+    "hub_token_expiry_scan": "Nhắc hạn token Gen-hub",
+    "social_schedule": "Lịch đọc mạng xã hội",
+    "people_review_recompute": "Tính lại đánh giá nhân sự",
+    "scheduled_backup_scan": "Sao lưu theo lịch",
+}
 
 
 def _utc_iso() -> str:
@@ -83,38 +106,94 @@ async def _beat(redis: Any) -> None:
         log.warning("Không ghi được nhịp tim worker: %s", exc)
 
 
-def _tracked(fn: Callable[[dict[str, Any]], Awaitable[Any]]) -> Callable[[dict[str, Any]], Awaitable[Any]]:
+async def _job_timeout_alert(ctx: dict[str, Any], name: str, *, open_: bool) -> None:
+    """Mở (quá giờ 2 lần liền) hoặc đóng sự cố `job.timeout:<tên>` cho MỌI tổ chức. Bên gọi bắt lỗi."""
+    label = JOB_LABELS.get(name, name)
+    key = f"job.timeout:{name}"
+    async with sessionmaker()() as db:
+        for org in (await db.execute(text("SELECT id FROM core.organizations"))).scalars().all():
+            if open_:
+                await health.raise_once(
+                    db, org, key=key, kind="job.timeout", severity="warn",
+                    title=f"Việc nền '{label}' chạy quá giờ {TIMEOUT_ALERT_AFTER} lần liền",
+                    body="Hệ thống vẫn chạy; việc này sẽ thử lại ở lượt sau. Nếu còn lặp lại, mở Sức khoẻ hệ thống.",
+                    link=health.HEALTH_LINK, fingerprint=str(TIMEOUT_ALERT_AFTER), redis=ctx.get("redis"))
+            else:
+                await health.clear(db, org, key)
+        await db.commit()
+
+
+async def _note_timeout(ctx: dict[str, Any], name: str, *, timed_out: bool, ok: bool) -> None:
+    """Đếm lần quá giờ liên tiếp (Redis) ⇒ mở/đóng sự cố. Mọi lỗi Redis/DB chỉ log.warning."""
+    redis = ctx.get("redis")
+    if redis is None:
+        return
+    key = CRON_TIMEOUTS_KEY.format(name)
+    try:
+        if timed_out:
+            count = int(await redis.incr(key))
+            await redis.expire(key, CRON_TIMEOUTS_TTL)
+            if count >= TIMEOUT_ALERT_AFTER:
+                await _job_timeout_alert(ctx, name, open_=True)
+            return
+        raw = await redis.get(key)
+        if raw is None:
+            return
+        prev = int(raw)
+        if ok or prev < TIMEOUT_ALERT_AFTER:
+            # lần chạy lỗi (không quá giờ) khi sự cố đang mở: giữ bộ đếm để lần thành công sau đóng sự cố
+            await redis.delete(key)
+        if ok and prev >= TIMEOUT_ALERT_AFTER:
+            await _job_timeout_alert(ctx, name, open_=False)
+    except Exception as exc:  # noqa: BLE001 — dấu sức khoẻ không được làm hỏng job
+        log.warning("Không ghi được bộ đếm quá giờ của %s: %s", name, exc)
+
+
+def _tracked(fn: Callable[[dict[str, Any]], Awaitable[Any]], timeout_s: float = JOB_TIMEOUT
+             ) -> Callable[[dict[str, Any]], Awaitable[Any]]:
     """v0.1.36 (F-6): bọc hàm cron — chạy `fn`, rồi (kể cả khi lỗi/bị huỷ) ghi dấu lần chạy cuối vào Redis.
 
     Ngoại lệ của `fn` (kể cả CancelledError) luôn được ném lại nguyên vẹn; lỗi ghi Redis chỉ log.warning.
     `functools.wraps` giữ `__qualname__` ⇒ tên CronJob của arq vẫn là `cron:<tên hàm>`.
+
+    v0.1.40 (F-16): CancelledError/TimeoutError khi đã chạy ≥ `timeout_s` − 1 giây ⇒ coi là quá giờ (arq huỷ job
+    bằng asyncio.wait_for); bị huỷ sớm hơn (vd tắt worker) KHÔNG tính.
     """
 
     @functools.wraps(fn)
     async def wrapper(ctx: dict[str, Any]) -> Any:
         started = time.monotonic()
         ok = False
+        timed_out = False
         try:
             result = await fn(ctx)
             ok = True
             return result
+        except (asyncio.CancelledError, TimeoutError):
+            timed_out = time.monotonic() - started >= timeout_s - 1
+            raise
         finally:
             redis = ctx.get("redis")
             if redis is not None:
-                payload = {"at": _utc_iso(), "ok": ok, "ms": int((time.monotonic() - started) * 1000)}
+                payload = {"at": _utc_iso(), "ok": ok, "ms": int((time.monotonic() - started) * 1000),
+                           "timeout": timed_out}
                 try:
                     await redis.set(CRON_LAST_KEY.format(fn.__name__), orjson.dumps(payload), ex=CRON_LAST_TTL)
                     await redis.sadd(CRON_NAMES_KEY, fn.__name__)
                 except Exception as exc:  # noqa: BLE001 — dấu sức khoẻ không được làm hỏng job
                     log.warning("Không ghi được dấu cron %s: %s", fn.__name__, exc)
+                await _note_timeout(ctx, fn.__name__, timed_out=timed_out, ok=ok)
                 await _beat(redis)
 
     return wrapper
 
 
 def _cron(fn: Callable[[dict[str, Any]], Awaitable[Any]], **kw: Any) -> ArqCronJob:
-    """`arq.cron` cho hàm đã bọc `_tracked` — truyền NGUYÊN mọi khoá (vd `timeout` của sao lưu)."""
-    return cron(_tracked(fn), **kw)  # type: ignore[arg-type]
+    """`arq.cron` cho hàm đã bọc `_tracked` — truyền NGUYÊN mọi khoá (vd `timeout` của sao lưu); timeout hiệu lực
+    (kw['timeout'] hoặc JOB_TIMEOUT) đi vào `_tracked` để nhận ra lần chạy quá giờ."""
+    timeout: Any = kw.get("timeout") or JOB_TIMEOUT
+    timeout_s = float(timeout.total_seconds()) if hasattr(timeout, "total_seconds") else float(timeout)
+    return cron(_tracked(fn, timeout_s=timeout_s), **kw)  # type: ignore[arg-type]
 
 
 async def startup(ctx: dict[str, Any]) -> None:
@@ -186,8 +265,18 @@ async def partition_maintenance(ctx: dict[str, Any]) -> None:
     """`partman.run_maintenance()` tạo bảng phân vùng mới hằng tháng — là DDL, role `gh_app` (GH_DATABASE_URL,
     không superuser) không có quyền tạo bảng nên job này luôn chạy qua `GH_ADMIN_DATABASE_URL`."""
     async with admin_sessionmaker()() as db:
+        # v0.1.40 (F-2): bảo trì chỉ tạo phân vùng mới, KHÔNG xoá tháng quá hạn — retention đưa về NULL trong cùng giao
+        # dịch; chỉ `retention_sweep` 05:00 xoá (đúng giờ câu xác nhận nói với Owner, đếm đủ số tháng đã xoá).
+        await retention.clear_partman_retention(db)
         await db.execute(text("SELECT partman.run_maintenance()"))
         await db.commit()
+    # v0.1.40 (F-16): LEAKPROOF của similarity_op mất sau `genh import` (pg_restore không giữ) — đặt lại ở đây.
+    try:
+        async with admin_sessionmaker()() as db:
+            await retention.ensure_leakproof(db)
+            await db.commit()
+    except Exception:  # noqa: BLE001 — chỉ ảnh hưởng tốc độ dò trùng tên
+        log.warning("Không đặt lại được LEAKPROOF cho similarity_op", exc_info=True)
 
 
 async def detect_identities(ctx: dict[str, Any]) -> dict[str, int]:
@@ -203,9 +292,8 @@ async def detect_identities(ctx: dict[str, Any]) -> dict[str, int]:
 async def expire_sessions(ctx: dict[str, Any]) -> int:
     """Dọn `core.sessions` (PLAN §5.6 lỗi 🟡): xoá vĩnh viễn phiên hết hạn/thu hồi quá
     `GH_SESSION_PURGE_AFTER_DAYS` ngày (mặc định 30) — chạy hằng giờ."""
-    s = get_settings()
     async with sessionmaker()() as db:
-        n = await auth_service.purge_expired_sessions(db, older_than_days=s.session_purge_after_days)
+        n = await retention.purge_sessions(db)
         await db.commit()
     return n
 
@@ -223,18 +311,22 @@ async def compact_notebooks(ctx: dict[str, Any]) -> int:
 
 
 async def purge_gen_conversations(ctx: dict[str, Any]) -> int:
-    """Gen v1 (§9.4): xoá hội thoại Gen quá hạn lưu (mặc định 90 ngày, `settings->'gen'->'retention_days'`)."""
+    """Gen v1 (§9.4): xoá hội thoại Gen quá hạn lưu (mặc định 90 ngày, `settings->'gen'->'retention_days'`).
+    v0.1.40: không còn cron riêng (nằm trong `retention_sweep`); giữ cho job enqueue cũ."""
     async with sessionmaker()() as db:
-        n = await gen_store.purge_expired(db)
-        await db.commit()
-    return n
+        return await retention.purge_gen(db)
 
 
 async def purge_notifications(ctx: dict[str, Any]) -> int:
-    """v0.1.27: hạn lưu chuông thông báo — đã đọc > 30 ngày, mọi thông báo > 90 ngày (`gh.notifications.purge_old`)."""
+    """v0.1.27: hạn lưu chuông thông báo — đã đọc > 30 ngày, mọi thông báo > 90 ngày (`gh.notifications.purge_old`).
+    v0.1.40: không còn cron riêng (nằm trong `retention_sweep`); giữ cho job enqueue cũ."""
     async with sessionmaker()() as db:
-        n = await notifications.purge_old(db, commit_each=True)
-    return n
+        return await retention.purge_notifications(db)
+
+
+async def retention_sweep(ctx: dict[str, Any]) -> dict[str, Any]:
+    """v0.1.40 (F-2): dọn dữ liệu quá hạn hằng ngày — xem `gh.retention.retention_sweep`."""
+    return await retention.retention_sweep(ctx)
 
 
 async def hub_token_expiry_scan(ctx: dict[str, Any]) -> int:
@@ -264,9 +356,11 @@ class WorkerSettings:
     on_startup = startup
     on_shutdown = shutdown
     functions = [verify_action_log, partition_maintenance, detect_identities, compact_notebooks, expire_sessions,
-                 purge_gen_conversations, purge_notifications, hub_token_expiry_scan, social_schedule,
+                 purge_gen_conversations, purge_notifications, retention_sweep, hub_token_expiry_scan,
+                 social_schedule,
                  *(fn for fn, _ in _BIZ_JOBS), *BACKUP_FUNCTIONS]
     health_check_interval = 30
+    job_timeout = JOB_TIMEOUT  # v0.1.40 (F-16): tường minh — `_cron` dùng cùng giá trị để nhận ra lần quá giờ
     # v0.1.36 (F-45): mọi giờ dưới đây là GIỜ VN (Asia/Ho_Chi_Minh). Job nặng theo ngày tránh 08:00–18:00 và cửa
     # sổ cập nhật genh 03:00 ±30' (02:30–03:30).
     timezone = WORKER_TZ
@@ -276,8 +370,7 @@ class WorkerSettings:
         _cron(detect_identities, minute=set(range(0, 60, 10))),  # mỗi 10 phút
         _cron(compact_notebooks, hour={4}, minute={50}),         # 04:50 giờ VN hằng ngày — nén sổ tay
         _cron(expire_sessions, minute={20}),                     # mỗi giờ — dọn core.sessions (0014_v011_db)
-        _cron(purge_gen_conversations, hour={5}, minute={0}),    # 05:00 giờ VN hằng ngày — hạn lưu hội thoại Gen
-        _cron(purge_notifications, hour={5}, minute={10}),       # 05:10 giờ VN hằng ngày — hạn lưu chuông
+        _cron(retention_sweep, hour={5}, minute={0}, timeout=1800),  # 05:00 giờ VN — dọn dữ liệu quá hạn (F-2)
         _cron(hub_token_expiry_scan, hour={8}, minute={50}),     # 08:50 giờ VN — nhắc token Gen-hub (nhẹ)
         _cron(social_schedule, minute=set(range(60))),           # mỗi phút — lịch đọc mạng xã hội (tắt mặc định)
         *(_cron(fn, **kw) for fn, kw in _BIZ_JOBS),              # biz + sao lưu: giữ NGUYÊN kw (kể cả timeout)

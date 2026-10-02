@@ -11,7 +11,7 @@ cả chuông (core.notifications) lẫn dải "Cần Sếp xử lý" ở Tổng 
   nhật tốt.
 - `evaluate` + `watch_loop` (chạy trong api, `Settings.health_watch_seconds`): mỗi phút tính lại các sự cố theo dõi
   định kỳ (cập nhật lỗi trong 24 giờ, quá hạn sao lưu theo tần suất bước 11, bộ xử lý nền im, ổ đĩa sắp đầy, model
-  đang hết đăng nhập) và dọn dòng sự kiện cũ.
+  đang hết đăng nhập, bản sao ngoài máy cũ/lỗi — v0.1.40) và dọn dòng sự kiện cũ.
 
 Hợp đồng Redis với worker (gh/worker.py ghi): `gh:cron:last:<tên hàm>` = JSON {"at": ISO UTC 'Z', "ok": bool,
 "ms": int} + tên hàm trong tập `gh:cron:names`; `gh:worker:heartbeat` = ISO UTC. Hàng lỗi: tập `gh:dlq:streams`
@@ -58,8 +58,19 @@ WATCH_LOCK_KEY = "gh:health:tick"
 BROWSER_SILENT_SECONDS = 40
 
 STORAGE_LINK = "/system?tab=storage"
+#: Đích của job.timeout ("Xem sức khoẻ"): thẻ "Sức khoẻ hệ thống" đầu Dữ liệu & lưu trữ (HealthCard đọc `focus=health`).
+HEALTH_LINK = "/system?tab=storage&focus=health"
 #: Đích của backup.stale: Dữ liệu & lưu trữ, cuộn tới mục Sao lưu (BackupPanel đọc `focus=backup`).
 BACKUP_LINK = "/system?tab=storage&focus=backup"
+#: v0.1.40 (F-12): đích của offsite.stale/offsite.failed — mục "Bản sao ngoài máy" ở Dữ liệu & lưu trữ.
+OFFSITE_LINK = "/system?tab=storage&focus=offsite"
+#: Bản sao ngoài máy quá N ngày chưa có lần thành công ⇒ cũ (lịch tuần + bù vài ngày lỡ); quá 30 ngày ⇒ 'bad'.
+OFFSITE_STALE_DAYS = 7
+#: Ngưỡng "cũ" thật = lịch tuần + 12 giờ ân hạn: `last_success_at` là giờ BẮT ĐẦU lượt tuần trước, timer systemd trễ
+#: ngẫu nhiên tới 30 phút và xuất+kiểm mất vài phút ⇒ đúng 7 ngày thì lượt tuần này thường chưa xong — không được coi
+#: là cũ (tránh chuông giả mỗi tuần). Dùng chung cho chuông (health) và GET /system/offsite (offsite.read_status).
+OFFSITE_STALE_AFTER = timedelta(days=OFFSITE_STALE_DAYS, hours=12)
+OFFSITE_BAD_DAYS = 30
 
 #: Nhãn nút hành động theo kind (web hiện trên dải "Cần Sếp xử lý").
 ACTIONS = {
@@ -70,7 +81,32 @@ ACTIONS = {
     "worker.silent": "Xem sức khoẻ",
     "disk.low": "Xem cách giải phóng",
     "host.autostart": "Xem cách bật",
+    "offsite.stale": "Chọn nơi lưu / sao lưu ngay",
+    "offsite.failed": "Xem bản sao ngoài máy",
+    # Do worker mở/đóng (key "job.timeout:<tên hàm>") — chỉ khai nhãn ở đây.
+    "job.timeout": "Xem sức khoẻ",
 }
+#: Nhãn cho người KHÔNG phải Owner khi nút ở nhãn gốc chỉ Owner có (vd "Chọn nơi lưu" — Manager không có nút đó).
+NON_OWNER_ACTIONS = {
+    "offsite.stale": "Xem bản sao ngoài máy",
+}
+#: Thân sự cố cho người KHÔNG phải Owner khi thân gốc bảo bấm nút chỉ Owner có ("Chọn nơi lưu…"). Khoá = (kind, mã) —
+#: mã là fingerprint (offsite.stale) hoặc mã genh ở cuối fingerprint (offsite.failed: "<lần thử>|<mã>").
+NON_OWNER_BODIES = {
+    ("offsite.stale", "not_configured"): "Hỏng ổ đĩa là mất hết dữ liệu. Nhờ Owner cắm ổ USB/NAS và chọn nơi lưu bản "
+                                         "sao ngoài máy",
+    ("offsite.failed", "GH-EB00"): "Chưa chọn nơi lưu — nhờ Owner cắm ổ USB/NAS và chọn nơi lưu bản sao ngoài máy",
+    ("offsite.failed", "GH-EB07"): "Nơi lưu không hợp lệ — nhờ Owner chọn lại thư mục trên ổ USB/NAS",
+}
+
+
+def _viewer_body(kind: str, fingerprint: str | None, body: str, is_owner: bool) -> str:
+    """Thân sự cố theo vai trò người xem: không phải Owner thì không bảo bấm nút chỉ Owner có (`NON_OWNER_BODIES`)."""
+    if is_owner:
+        return body
+    fp = fingerprint or ""
+    code = fp.rpartition("|")[2] if kind == "offsite.failed" else fp
+    return NON_OWNER_BODIES.get((kind, code), body)
 
 #: v0.1.37 (F-73): `run/autostart-status.json` (genh ghi) — chỉ nhận giá trị trong các tập này, còn lại 'unknown'.
 AUTOSTART_YES_NO = ("yes", "no", "unknown", "not_applicable")
@@ -156,14 +192,17 @@ async def clear(db: AsyncSession, org_id: uuid.UUID, key: str) -> bool:
     return bool(getattr(res, "rowcount", 0))
 
 
-async def active_issues(db: AsyncSession, org_id: uuid.UUID) -> list[dict[str, Any]]:
-    """Sự cố đang mở: 'bad' trước, rồi mới nhất trước. Mọi trường là chuỗi (web không render object)."""
+async def active_issues(db: AsyncSession, org_id: uuid.UUID, *, is_owner: bool = True) -> list[dict[str, Any]]:
+    """Sự cố đang mở: 'bad' trước, rồi mới nhất trước. Mọi trường là chuỗi (web không render object). Nhãn nút theo
+    vai trò người xem: không phải Owner thì không hứa nút chỉ Owner có (`NON_OWNER_ACTIONS`, `NON_OWNER_BODIES`)."""
+    labels = ACTIONS if is_owner else {**ACTIONS, **NON_OWNER_ACTIONS}
     rows = (await db.execute(text("""
-        SELECT key, kind, severity, title, body, link, raised_at FROM ops.health_alerts
+        SELECT key, kind, severity, title, body, link, raised_at, fingerprint FROM ops.health_alerts
         WHERE org_id = :o AND cleared_at IS NULL
         ORDER BY (severity = 'bad') DESC, raised_at DESC"""), {"o": org_id})).all()
-    return [{"key": r.key, "kind": r.kind, "severity": r.severity, "title": r.title, "body": r.body,
-             "link": r.link, "action": ACTIONS.get(r.kind, "Xem chi tiết"), "raised_at": _iso(r.raised_at)}
+    return [{"key": r.key, "kind": r.kind, "severity": r.severity, "title": r.title,
+             "body": _viewer_body(r.kind, r.fingerprint, r.body, is_owner),
+             "link": r.link, "action": labels.get(r.kind, "Xem chi tiết"), "raised_at": _iso(r.raised_at)}
             for r in rows]
 
 
@@ -330,7 +369,7 @@ def _backup_stale(configured: bool, latest: datetime | None, org_created: dateti
 # ─── GET /system/health ───────────────────────────────────────────────────────────────────────────────────────
 
 async def collect(db: AsyncSession, redis: Any, org_id: uuid.UUID, *, now: datetime | None = None,
-                  started_at: datetime | None = None) -> dict[str, Any]:
+                  started_at: datetime | None = None, is_owner: bool = True) -> dict[str, Any]:
     """Khuôn trả về của `GET /api/v1/system/health` — mọi trường là chuỗi/số/bool/null. Đọc một nguồn lỗi ⇒ phần
     đó 'unknown', KHÔNG ném 500."""
     now = now or datetime.now(UTC)
@@ -409,9 +448,24 @@ async def collect(db: AsyncSession, redis: Any, org_id: uuid.UUID, *, now: datet
     except Exception:  # noqa: BLE001
         log.warning("Không đọc được trạng thái tự chạy lại khi bật máy", exc_info=True)
 
+    # v0.1.40 (F-12): bản sao ngoài máy — CHỈ khi có hộp thư với genh (khuôn cũ giữ nguyên khi không có).
+    offsite: dict[str, Any] | None = None
+    try:
+        if _host_dir().is_dir():
+            from gh.system_api import offsite as offsite_api
+
+            ost = offsite_api.read_status(_host_dir(), now=now)
+            cfg_o = await _org_backup_cfg(db, org_id)
+            offsite = {"state": ost["state"], "configured": ost["configured"],
+                       "last_success_at": ost["last_success_at"], "age_days": ost["age_days"],
+                       "stale": _offsite_stale(ost, cfg_o.created_at if cfg_o else None, now),
+                       "error_code": ost["error_code"], "schedule": ost["schedule"]}
+    except Exception:  # noqa: BLE001
+        log.warning("Không đọc được trạng thái bản sao ngoài máy", exc_info=True)
+
     issues: list[dict[str, Any]] = []
     try:
-        issues = await active_issues(db, org_id)
+        issues = await active_issues(db, org_id, is_owner=is_owner)
     except Exception:  # noqa: BLE001
         log.warning("Không đọc được sự cố đang mở", exc_info=True)
 
@@ -435,7 +489,8 @@ async def collect(db: AsyncSession, redis: Any, org_id: uuid.UUID, *, now: datet
            or (update["failed"] and not update["interrupted"]) or disk["state"] == "low" or backup["stale"])
     warn = (any(i["severity"] == "warn" for i in issues) or browser["state"] == "silent" or update["failed"]
             or any(q["dlq"] > 0 for q in queues) or any(c["ok"] is False for c in crons)
-            or (autostart is not None and autostart["state"] == "warn"))
+            or (autostart is not None and autostart["state"] == "warn")
+            or (offsite is not None and offsite["stale"]))
     out: dict[str, Any] = {
         "checked_at": _iso(now),
         "overall": "bad" if bad else ("warn" if warn else "ok"),
@@ -453,6 +508,8 @@ async def collect(db: AsyncSession, redis: Any, org_id: uuid.UUID, *, now: datet
         out["boss_checks"] = boss_checks
     if autostart is not None:
         out["autostart"] = autostart
+    if offsite is not None:
+        out["offsite"] = offsite
     return out
 
 
@@ -573,6 +630,81 @@ async def _eval_autostart(db: AsyncSession, org_id: uuid.UUID, redis: Any) -> No
         await clear(db, org_id, "host.autostart")
 
 
+def _offsite_stale(st: dict[str, Any], org_created: datetime | None, now: datetime) -> bool:
+    """Bản sao ngoài máy đáng nhắc: chưa có lần thành công / cũ hơn `OFFSITE_STALE_AFTER` (7 ngày + ân hạn) — nhưng tổ
+    chức mới tạo chưa có lần nào thì chưa nhắc trong cùng khoảng đó (vừa cài xong, chưa kịp cắm ổ)."""
+    last = _parse_ts(st.get("last_success_at"))
+    limit = OFFSITE_STALE_AFTER
+    if last is not None:
+        return now - last > limit
+    return org_created is not None and now - org_created > limit
+
+
+#: Thân chuông offsite.failed theo mã genh — chuỗi cố định (không lấy chữ từ run/).
+OFFSITE_FAILED_BODY = {
+    "GH-EB00": "Chưa chọn nơi lưu — bấm 'Chọn nơi lưu bản sao ngoài máy'",
+    "GH-EB01": "Chưa thấy ổ USB/NAS — cắm lại ổ rồi bấm 'Sao lưu ra ổ ngoài ngay'",
+    "GH-EB02": "Không xuất được gói dữ liệu — bấm 'Sao lưu ra ổ ngoài ngay' để thử lại",
+    "GH-EB03": "Bản sao vừa tạo không đọc lại được — chưa có bản sao ngoài máy. Bấm 'Sao lưu ra ổ ngoài ngay' để "
+               "thử lại",
+    "GH-EB04": "Không ghi được vào ổ ngoài — kiểm tra ổ còn chỗ trống và cho phép ghi",
+    "GH-EB05": "Máy chủ đang cập nhật/khôi phục nên lần sao lưu ra ổ ngoài bị bỏ qua — sẽ thử lại sau",
+    "GH-EB06": "Dịch vụ Gen-Harness chưa chạy nên chưa sao lưu ra ổ ngoài được",
+    "GH-EB07": "Nơi lưu không hợp lệ — chọn lại thư mục trên ổ USB/NAS",
+}
+OFFSITE_FAILED_GENERIC = "Lần sao lưu ra ổ ngoài gần nhất chưa thành công — bấm để xem chi tiết và thử lại"
+
+
+async def _eval_offsite(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: datetime) -> None:
+    """F-12: (a) chưa chọn nơi lưu sau 7 ngày, (b) bản sao ngoài máy cũ > 7 ngày ('bad' khi > 30 ngày) ⇒ offsite.stale;
+    (c) lần thử cuối lỗi (failed/not_mounted, sau lần thành công gần nhất) ⇒ offsite.failed. Chỉ khi có hộp thư."""
+    from gh.system_api import offsite as offsite_api
+
+    d = _host_dir()
+    if not d.is_dir():
+        return
+    st = offsite_api.read_status(d, now=now)
+    cfg = await _org_backup_cfg(db, org_id)
+    created = cfg.created_at if cfg else None
+
+    if _offsite_stale(st, created, now):
+        last = _parse_ts(st["last_success_at"])
+        if not st["configured"]:
+            await raise_once(db, org_id, key="offsite.stale", kind="offsite.stale", severity="warn",
+                             title="Chưa có bản sao ngoài máy",
+                             body="Hỏng ổ đĩa là mất hết dữ liệu. Cắm ổ USB hoặc chọn thư mục NAS rồi bấm "
+                                  "'Chọn nơi lưu bản sao ngoài máy'",
+                             link=OFFSITE_LINK, fingerprint="not_configured", redis=redis)
+        elif last is None:
+            await raise_once(db, org_id, key="offsite.stale", kind="offsite.stale", severity="warn",
+                             title="Chưa có bản sao ngoài máy",
+                             body="Đã chọn nơi lưu nhưng chưa có lần nào thành công — cắm ổ rồi bấm "
+                                  "'Sao lưu ra ổ ngoài ngay'",
+                             link=OFFSITE_LINK, fingerprint="never", redis=redis)
+        else:
+            days = int((now - last).total_seconds() // 86400)
+            severity = "bad" if days > OFFSITE_BAD_DAYS else "warn"
+            await raise_once(db, org_id, key="offsite.stale", kind="offsite.stale", severity=severity,
+                             title=f"Bản sao ngoài máy đã cũ {days} ngày",
+                             body="Cắm ổ USB/NAS rồi bấm 'Sao lưu ra ổ ngoài ngay' để có bản sao mới ngoài máy chủ",
+                             link=OFFSITE_LINK, fingerprint=severity, redis=redis)
+    else:
+        await clear(db, org_id, "offsite.stale")
+
+    attempt = _parse_ts(st["last_attempt_at"])
+    success = _parse_ts(st["last_success_at"])
+    failed = (st["state"] in ("failed", "not_mounted") and attempt is not None
+              and (success is None or attempt > success))
+    if failed:
+        code = st["error_code"] or ("GH-EB01" if st["state"] == "not_mounted" else "")
+        await raise_once(db, org_id, key="offsite.failed", kind="offsite.failed", severity="warn",
+                         title="Sao lưu ra ổ ngoài chưa thành công",
+                         body=OFFSITE_FAILED_BODY.get(code, OFFSITE_FAILED_GENERIC), link=OFFSITE_LINK,
+                         fingerprint=f"{st['last_attempt_at'] or ''}|{st['error_code'] or ''}", redis=redis)
+    elif st["state"] != "running":  # đang chạy ⇒ chưa biết kết quả, để nguyên
+        await clear(db, org_id, "offsite.failed")
+
+
 async def raise_model_expired(db: AsyncSession, org_id: uuid.UUID, provider_id: uuid.UUID, name: str, *,
                               redis: Any = None) -> bool:
     """Sự cố "model cần đăng nhập lại" — một khoá mỗi nhà cung cấp (`model.auth_expired:<uuid>`)."""
@@ -636,6 +768,7 @@ async def evaluate(db: AsyncSession, redis: Any, org_id: uuid.UUID, *, now: date
         ("worker.silent", lambda: _eval_worker(db, org_id, redis, now, started_at)),
         ("disk.low", lambda: _eval_disk(db, org_id, redis)),
         ("host.autostart", lambda: _eval_autostart(db, org_id, redis)),
+        ("offsite", lambda: _eval_offsite(db, org_id, redis, now)),
         ("models", lambda: _eval_models(db, org_id, redis)),
         ("events", lambda: _eval_events(db, org_id)),
     )

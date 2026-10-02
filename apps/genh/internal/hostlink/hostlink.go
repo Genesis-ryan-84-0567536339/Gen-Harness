@@ -17,6 +17,9 @@
 //	                               xoá khi nhả khoá — Console suy "tiến trình còn sống" từ đây
 //	  autostart-status.json      ← genh ghi (v0.1.37) lúc status/doctor/update: Docker và linger
 //	                               có tự chạy lại khi bật máy không (xem autostart.go)
+//	  request/offsite.json       ← api ghi (v0.1.40) khi Owner chọn nơi lưu / bấm "Sao lưu ra ổ
+//	                               ngoài ngay" / tắt bản sao ngoài máy; genh xoá trước khi làm
+//	  offsite-status.json        ← genh ghi (v0.1.40): trạng thái bản sao ngoài máy (offsite.go)
 //
 // Khoá loại trừ (lock.go) KHÔNG nằm trong run/ mà ở <gốc cài đặt>/genh.lock —
 // run/ 0777 và bind-mount vào api, ai ghi được run/ sẽ xoá/thay/giữ được khoá.
@@ -54,8 +57,9 @@ const (
 )
 
 // Requests là các loại yêu cầu watcher hiện tại nhận (ghi vào genh.json để
-// Console biết nút nào bấm được — watcher cũ v0.1.19 chỉ nhận "update").
-var Requests = []string{"update", "restore"}
+// Console biết nút nào bấm được — watcher cũ v0.1.19 chỉ nhận "update";
+// "offsite" từ v0.1.40).
+var Requests = []string{"update", "restore", "offsite"}
 
 // Dir là thư mục hộp thư dưới gốc cài đặt.
 func Dir(installDir string) string { return filepath.Join(installDir, "run") }
@@ -363,13 +367,16 @@ func ReadRestoreStatus(installDir string) (RestoreStatus, error) {
 }
 
 // Pending cho biết watcher cần làm việc gì: "update" (ưu tiên — cập nhật đã
-// tự sao lưu trước), "restore", hoặc "" khi hộp thư trống.
+// tự sao lưu trước), "restore", "offsite" (v0.1.40 — bản sao ngoài máy, làm
+// sau cùng), hoặc "" khi hộp thư trống.
 func Pending(installDir string) string {
 	switch {
 	case HasRequest(installDir):
 		return "update"
 	case HasRestoreRequest(installDir):
 		return "restore"
+	case HasOffsiteRequest(installDir):
+		return "offsite"
 	default:
 		return ""
 	}

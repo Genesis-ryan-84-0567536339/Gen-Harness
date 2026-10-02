@@ -123,7 +123,18 @@ type RetentionDataset = (typeof RETENTION_DATASETS)[number];
 interface RetentionRow {
   keep_days: number | null;
   anonymize_after_days: number | null;
+  /** v0.1.40 (F-2): như API — hạn đặt trước v0.1.40 chưa xác nhận ⇒ chưa thi hành. */
+  needs_confirm?: boolean;
 }
+/** v0.1.40 (F-2): cách dọn từng tập (như gh/retention — bảng phân vùng xoá theo cả tháng; ops.action_log chỉ ghi thêm). */
+const RETENTION_MODE: Record<string, { mode: 'partition' | 'batch' | 'not_applicable'; note: string }> = {
+  'raw.events': { mode: 'partition', note: 'Xoá theo cả tháng khi cả tháng đã quá hạn' },
+  'clean.meaning_units': { mode: 'partition', note: 'Xoá theo cả tháng khi cả tháng đã quá hạn' },
+  'ops.action_log': { mode: 'not_applicable', note: 'Nhật ký hành động chỉ ghi thêm — không xoá theo hạn' },
+  'memory.entries': { mode: 'batch', note: 'Xoá dần các dòng quá hạn mỗi đêm' },
+  'agent.model_calls': { mode: 'partition', note: 'Xoá theo cả tháng khi cả tháng đã quá hạn' },
+  'agent.browser_jobs.result': { mode: 'batch', note: 'Kết quả việc trình duyệt nền tự xoá sau 14 ngày' },
+};
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -140,7 +151,7 @@ export interface BackupConfig {
   frequency: 'daily' | 'weekly' | 'monthly';
   time_of_day: string;
   retention_count: number;
-  destination: 'local' | 's3' | 'minio';
+  destination: 'local';
 }
 type StepResult<T> = { ok: true; value: T } | { ok: false; status: number; code: string; title: string; extra?: Record<string, unknown> };
 
@@ -235,8 +246,77 @@ export function createMock(opts: P4SystemOptions) {
     return { columns: PERMISSION_COLUMNS.map(([key, label, permissions]) => ({ key, label, permissions })), roles };
   }
 
+  // v0.1.40 (F-2): gh:retention:last — lần dọn gần nhất (bản đã thiết lập có sẵn một lần dọn đêm qua).
+  const retentionLast: { at: string | null; deleted: Record<string, number> } = opts.fresh
+    ? { at: null, deleted: {} }
+    : { at: new Date(Date.now() - 6 * 3600 * 1000).toISOString(), deleted: { 'raw.events': 0, 'clean.meaning_units': 0, 'memory.entries': 12, 'agent.model_calls': 3480, 'agent.browser_jobs.result': 7 } };
+  function retentionRow(d: string, row: RetentionRow) {
+    const info = RETENTION_MODE[d];
+    const na = info.mode === 'not_applicable';
+    return {
+      dataset: d, ...row, needs_confirm: !!row.needs_confirm && !na && row.keep_days != null,
+      mode: info.mode, editable: !na && d !== 'agent.browser_jobs.result', note: info.note,
+      last_run_at: na ? null : retentionLast.at, last_deleted: na || !retentionLast.at ? null : (retentionLast.deleted[d] ?? 0),
+    };
+  }
   function retentionList() {
-    return RETENTION_DATASETS.map((d) => ({ dataset: d, ...(retention.get(d) ?? { keep_days: null, anonymize_after_days: null }) }));
+    return [
+      ...RETENTION_DATASETS.map((d) => retentionRow(d, retention.get(d) ?? { keep_days: null, anonymize_after_days: null })),
+      retentionRow('agent.browser_jobs.result', { keep_days: 14, anonymize_after_days: null }),
+    ];
+  }
+
+  // ── v0.1.40 (F-12): Bản sao ngoài máy — mock mô phỏng genh trên máy chủ (run/offsite-status.json + hộp thư
+  // run/request/offsite.json). Yêu cầu nằm 'requested' tới khi hook `offsite` đổi (e2e thấy "Đang chờ máy chủ nhận…").
+  const OFFSITE_KEY_MOCK = 'ABCDE-FGHIJ-KLMN2-OPQR3-STUV4-WXYZ5';
+  const OFFSITE_KEY_MISSING_TITLE = 'Chưa có Khoá khôi phục trên máy chủ — chạy `genh update` một lần trên máy chủ để tạo khoá';
+  const offsite = {
+    configured: !opts.fresh,
+    dest: opts.fresh ? '' : '/media/sep/GEN-USB',
+    state: opts.fresh ? 'not_configured' : 'ok',
+    error_code: opts.fresh ? 'GH-EB00' : '',
+    message: null as string | null,
+    last_attempt_at: opts.fresh ? '' : new Date(Date.now() - 3 * DAY).toISOString(),
+    last_success_at: opts.fresh ? '' : new Date(Date.now() - 3 * DAY).toISOString(),
+    last_size_bytes: opts.fresh ? 0 : 1_288_490_189,
+    verified: !opts.fresh,
+    key_id: 'a1b2c3d4',
+    schedule: opts.fresh ? '' : 'systemd',
+    request: { state: 'idle', action: null as string | null, requested_at: null as string | null },
+    can_request: process.env.MOCK_OFFSITE_UNAVAILABLE !== '1',
+    manual_command: null as string | null,
+    key_present: true,
+  };
+  // Như gh/system_api/offsite.manual_command: lệnh theo đúng việc; `set` chỉ khi có đường dẫn dùng được trong nháy kép.
+  const MANUAL = (action: string | null, path?: string | null): string | null =>
+    action === 'run'
+      ? 'genh offsite run'
+      : action === 'disable'
+        ? 'genh offsite disable'
+        : action === 'set' && path && ![...path].some((c) => '"$`'.includes(c) || c.charCodeAt(0) < 32)
+          ? `genh offsite set "${path}"`
+          : null;
+  let offsiteRequestPath: string | null = null;
+  /** Hook `portable_busy` ⇒ GET /system/offsite/portable trả 409 PORTABLE_IN_PROGRESS (như khoá Redis của API). */
+  let portableBusy = false;
+  const UNAVAILABLE_TITLE = 'Máy chủ chưa nhận lệnh từ Console — chạy lệnh sau một lần trên máy chủ';
+  function offsiteView() {
+    const last = offsite.last_success_at || null;
+    const age = last ? Math.max(0, Math.round(((Date.now() - Date.parse(last)) / DAY) * 10) / 10) : null;
+    return {
+      ...offsite,
+      manual_command: offsite.request.state === 'idle' ? null : MANUAL(offsite.request.action, offsiteRequestPath),
+      dest: offsite.dest || null,
+      error_code: offsite.error_code || null,
+      last_attempt_at: offsite.last_attempt_at || null,
+      last_success_at: last,
+      age_days: age,
+      // Như health.OFFSITE_STALE_AFTER: lịch tuần + 12 giờ ân hạn.
+      stale: age == null || age > 7.5,
+      last_size_bytes: offsite.last_size_bytes || null,
+      schedule: offsite.schedule || null,
+      request: { ...offsite.request },
+    };
   }
 
   function handle(ctx: P2Ctx): boolean {
@@ -383,6 +463,64 @@ export function createMock(opts: P4SystemOptions) {
       return problem(404, 'NOT_FOUND', 'Không tìm thấy');
     }
 
+    // ── v0.1.40 (F-12): Bản sao ngoài máy ──
+    if (p.startsWith('/system/offsite')) {
+      if (p === '/system/offsite' && m === 'GET') {
+        if (!has(ctx, 'system.read')) return problem(403, 'FORBIDDEN', 'Vai trò không có quyền này');
+        return reply(200, offsiteView());
+      }
+      if (p === '/system/offsite/run' && m === 'POST') {
+        if (!has(ctx, 'system.manage')) return problem(403, 'FORBIDDEN', 'Vai trò không có quyền này');
+        if (!offsite.can_request) return problem(409, 'OFFSITE_UNAVAILABLE', UNAVAILABLE_TITLE, { manual_command: MANUAL('run') });
+        if (offsite.request.state === 'requested' || offsite.state === 'running') return problem(409, 'OFFSITE_IN_PROGRESS', 'Đang sao lưu ra ổ ngoài');
+        offsite.request = { state: 'requested', action: 'run', requested_at: new Date().toISOString() };
+        return reply(202, offsiteView());
+      }
+      if (!ctx.owner) return problem(403, 'FORBIDDEN', 'Chỉ Owner');
+      if (p === '/system/offsite/destination' && m === 'PUT') {
+        if (!pin(ctx, 'offsite.destination')) return true;
+        const path = String((body as { path?: unknown }).path ?? '').trim();
+        if (!path) return problem(422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors: { path: 'Nhập đường dẫn ổ USB/NAS trên máy chủ' } });
+        if (path === '/' || path.startsWith('/home') || path.startsWith('/root')) {
+          return problem(422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors: { path: 'Đây là ổ chính của máy chủ — chọn ổ USB/NAS khác' } });
+        }
+        if (!offsite.can_request) return problem(409, 'OFFSITE_UNAVAILABLE', UNAVAILABLE_TITLE, { manual_command: MANUAL('set', path) });
+        offsite.request = { state: 'requested', action: 'set', requested_at: new Date().toISOString() };
+        offsiteRequestPath = path;
+        return reply(202, offsiteView());
+      }
+      if (p === '/system/offsite/disable' && m === 'POST') {
+        if (!pin(ctx, 'offsite.disable')) return true;
+        if (!offsite.can_request) return problem(409, 'OFFSITE_UNAVAILABLE', UNAVAILABLE_TITLE, { manual_command: MANUAL('disable') });
+        offsite.request = { state: 'requested', action: 'disable', requested_at: new Date().toISOString() };
+        return reply(202, offsiteView());
+      }
+      if (p === '/system/offsite/recovery-kit' && m === 'GET') {
+        if (!pin(ctx, 'offsite.recovery_kit')) return true;
+        if (!offsite.key_present) return problem(409, 'OFFSITE_KEY_MISSING', OFFSITE_KEY_MISSING_TITLE);
+        // Chép đúng gh/system_api/offsite.py RECOVERY_STEPS / RECOVERY_WARNING.
+        return reply(200, {
+          key: OFFSITE_KEY_MOCK, key_id: offsite.key_id, created_hint: '2026-10-01',
+          steps: [
+            'Cài Gen-Harness trên máy mới theo hướng dẫn cài đặt (chưa cần tạo dữ liệu gì).',
+            'Cắm ổ USB (hoặc mở thư mục NAS) chứa bản sao ngoài máy, chọn tệp .ghbundle mới nhất.',
+            'Chạy trên máy mới: genh import --yes <tệp .ghbundle>',
+            "Khi được hỏi mật khẩu gói, nhập Khoá khôi phục này (gõ đủ cả dấu '-').",
+            'Đăng nhập Console bằng tài khoản Owner cũ và kiểm tra dữ liệu.',
+          ],
+          warning: 'Cất Bộ khôi phục TÁCH khỏi ổ USB: ai có cả hai sẽ đọc được toàn bộ dữ liệu',
+        });
+      }
+      if (p === '/system/offsite/portable' && m === 'GET') {
+        if (!pin(ctx, 'offsite.portable')) return true;
+        if (!offsite.key_present) return problem(409, 'OFFSITE_KEY_MISSING', OFFSITE_KEY_MISSING_TITLE);
+        // Chép đúng gh/system_api/offsite.portable (conflict PORTABLE_IN_PROGRESS).
+        if (portableBusy) return problem(409, 'PORTABLE_IN_PROGRESS', 'Đang tạo một gói mang đi khác — chờ xong rồi thử lại');
+        return ctx.text(200, 'application/octet-stream', 'GHBUNDLE-MOCK', 'gen-harness-portable.ghbundle');
+      }
+      return problem(404, 'NOT_FOUND', 'Không tìm thấy');
+    }
+
     // ── Dữ liệu & lưu trữ (spec I) ──
     if (p === '/retention-policies' && m === 'GET') {
       if (!has(ctx, 'system.read')) return problem(403, 'FORBIDDEN', 'Vai trò không có quyền này');
@@ -394,6 +532,21 @@ export function createMock(opts: P4SystemOptions) {
       const b = body as { dataset?: string; keep_days?: number | null; anonymize_after_days?: number | null };
       const dataset = b.dataset as RetentionDataset;
       if (!RETENTION_DATASETS.includes(dataset)) return problem(422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors: { dataset: 'Tập dữ liệu không hợp lệ' } });
+      // v0.1.40 (F-2): như API — ops.action_log chỉ ghi thêm (RETENTION_NOT_APPLICABLE).
+      if (dataset === 'ops.action_log' && b.keep_days != null) {
+        return problem(422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors: { keep_days: 'Nhật ký hành động chỉ ghi thêm — không đặt hạn xoá được' } });
+      }
+      if (b.keep_days != null && (!Number.isInteger(b.keep_days) || b.keep_days < 1 || b.keep_days > 3650)) {
+        return problem(422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors: { keep_days: 'Số ngày từ 1 đến 3650' } });
+      }
+      // v0.1.40 (F-2): như API — bảng phân vùng chỉ Owner; đặt số ngày cho tập bị xoá thật cần confirm_delete.
+      const partition = RETENTION_MODE[dataset]?.mode === 'partition';
+      if (partition && !ctx.owner) return problem(403, 'FORBIDDEN', 'Vai trò của bạn không có quyền thao tác này', { detail: 'Chỉ Owner đổi được hạn lưu của dữ liệu xoá theo tháng' });
+      if (b.keep_days != null && (body as { confirm_delete?: boolean }).confirm_delete !== true) {
+        return problem(422, 'RETENTION_CONFIRM_REQUIRED', 'Cần xác nhận xoá vĩnh viễn', {
+          errors: { keep_days: `Cần xác nhận: ${partition ? 'cả tháng dữ liệu cũ hơn' : 'dữ liệu cũ hơn'} ${b.keep_days} ngày sẽ bị XOÁ VĨNH VIỄN ở lượt dọn kế tiếp (05:00 hằng ngày) — chỉ lấy lại được từ bản sao lưu` },
+        });
+      }
       retention.set(dataset, { keep_days: b.keep_days ?? null, anonymize_after_days: b.anonymize_after_days ?? null });
       return reply(200, retentionList());
     }
@@ -459,7 +612,8 @@ export function createMock(opts: P4SystemOptions) {
       return { ok: false, status: 422, code: 'VALIDATION_ERROR', title: 'Dữ liệu chưa hợp lệ', extra: { errors: { time_of_day: 'Giờ chạy sao lưu dạng HH:MM (00:00–23:59)' } } };
     }
     const frequency = ['daily', 'weekly', 'monthly'].includes(String(body.frequency)) ? (body.frequency as BackupConfig['frequency']) : 'daily';
-    const destination = ['local', 's3', 'minio'].includes(String(body.destination)) ? (body.destination as BackupConfig['destination']) : 'local';
+    // v0.1.40: chỉ còn 'local' (bản sao ra ngoài máy đi qua /system/offsite).
+    const destination: BackupConfig['destination'] = 'local';
     const retention_count = Math.min(365, Math.max(1, Math.round(Number(body.retention_count ?? 7)) || 7));
     Object.assign(backup, { frequency, time_of_day, retention_count, destination });
     backupConfigured = true;
@@ -479,7 +633,34 @@ export function createMock(opts: P4SystemOptions) {
     backupConfigured: () => backupConfigured,
     /** v0.1.36 (F-6): bản sao lưu mới nhất (mọi nguồn, cả pre-update) — `GET /system/health` (mock-api.ts) đọc. */
     latestBackupAt: (): string | null => backups.reduce<string | null>((max, b) => (!max || b.taken_at > max ? b.taken_at : max), null),
-    hooks: {} as Record<string, (...args: never[]) => unknown>,
+    /** v0.1.40 (F-12): khối `offsite` của `GET /system/health` (mock-api.ts đọc). */
+    offsiteHealth: () => {
+      const v = offsiteView();
+      return { configured: v.configured, state: v.state, error_code: v.error_code, last_success_at: v.last_success_at, age_days: v.age_days, stale: v.stale };
+    },
+    hooks: {
+      /** `__mock/p3/system/offsite` {…OffsiteState một phần; `days_ago` đặt lần thành công gần nhất (null = chưa có)}. */
+      offsite: (b: Record<string, unknown>) => {
+        const { days_ago: daysAgo, portable_busy: busy, ...rest } = b ?? {};
+        if (typeof busy === 'boolean') portableBusy = busy;
+        Object.assign(offsite, rest);
+        if (typeof daysAgo === 'number') offsite.last_success_at = new Date(Date.now() - daysAgo * DAY).toISOString();
+        if (daysAgo === null) offsite.last_success_at = '';
+        return offsiteView();
+      },
+      /**
+       * `__mock/p3/system/grant` {role, permission, scope} — đổi MỘT ô ma trận quyền kể cả quyền ngoài 7 cột sửa được (vd
+       * cấp system.read/system.manage cho Manager như Owner tự cấp ở API thật). Trả giá trị cũ để test trả lại.
+       */
+      grant: (b: { role: RoleCode; permission: string; scope: string }) => {
+        const idx = opts.roleOrder.indexOf(b.role);
+        const row = opts.matrix[b.permission];
+        if (idx < 0 || !row) return null;
+        const prev = row[idx];
+        row[idx] = b.scope;
+        return { prev };
+      },
+    } as unknown as Record<string, (...args: never[]) => unknown>,
     dispose: () => {},
   };
 }

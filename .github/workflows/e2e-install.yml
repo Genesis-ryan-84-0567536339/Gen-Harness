@@ -794,8 +794,18 @@ jobs:
           "$GENH" auto-update status --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT"
           "$GENH" auto-update disable --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT"
 
-      - name: genh uninstall --yes (không tương tác)
-        run: $GENH uninstall --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes
+      - name: genh uninstall --yes --delete-data (không tương tác, dọn sạch cả dữ liệu)
+        # v0.1.40: uninstall mặc định GIỮ dữ liệu — dọn sạch phải kèm --delete-data.
+        # genh cũ (< v0.1.40, chạy tay workflow cho tag cũ) không biết cờ này: khi đó
+        # `--yes` một mình vẫn là xoá dữ liệu như trước.
+        run: |
+          set -euo pipefail
+          "$GENH" help >"$RUNNER_TEMP/genh-help.txt"
+          if grep -q -- '--delete-data' "$RUNNER_TEMP/genh-help.txt"; then
+            "$GENH" uninstall --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes --delete-data
+          else
+            "$GENH" uninstall --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes
+          fi
 
       - name: (luôn) In log docker compose (tail 200) để debug
         if: always()
@@ -1140,9 +1150,10 @@ jobs:
           echo "OK: app_db_password giữ nguyên sau nâng cấp — bí mật/dữ liệu không bị tạo lại. genh version hiện tại:"
           "$GEN_HARNESS_HOME/bin/genh" version --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT"
 
-      - name: genh uninstall --yes (dọn dẹp)
+      - name: genh uninstall --yes --delete-data (dọn dẹp)
         if: always()
-        run: '"$GEN_HARNESS_HOME/bin/genh" uninstall --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes || true'
+        # genh cũ không biết --delete-data (thoát 2) → thử lại không cờ (bản cũ: --yes là xoá dữ liệu).
+        run: '"$GEN_HARNESS_HOME/bin/genh" uninstall --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes --delete-data || "$GEN_HARNESS_HOME/bin/genh" uninstall --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes || true'
 
       - name: (luôn) In log docker compose (tail 200) để debug
         if: always()
@@ -1428,7 +1439,8 @@ jobs:
         run: |
           set -uo pipefail
           if [ -x "${BIN:-}/genh-tot" ]; then
-            "$BIN/genh-tot" uninstall --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes || true
+            "$BIN/genh-tot" uninstall --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes --delete-data \
+              || "$BIN/genh-tot" uninstall --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes || true
           fi
           docker ps -a || true
           for c in $(docker ps -a --format '{{.Names}}' | grep '^gen-harness-' || true); do
@@ -1446,9 +1458,273 @@ jobs:
             done
           fi
 
+  # ── e2e-offsite ──────────────────────────────────────────────────────────
+  # v0.1.40 (F-12) — THỬ KHÔI PHỤC THẬT từ bản sao ngoài máy: cài sạch + dữ
+  # liệu mẫu → `genh offsite set` vào thư mục KHÔNG tồn tại phải GH-EB01 và
+  # KHÔNG tạo thư mục → chọn "ổ USB" giả ($RUNNER_TEMP/usb, cùng ổ với runner
+  # nên phải --allow-same-disk) → chạy ĐÚNG lệnh lịch tuần (dòng crontab sau
+  # marker, hoặc unit systemd --user) → run/offsite-status.json ok + verified,
+  # đúng 1 gói → chép Khoá khôi phục ra kit.txt (giả lập Bộ khôi phục bản in)
+  # → `genh uninstall --yes --delete-data` → cài sạch vào GEN_HARNESS_HOME MỚI
+  # → `genh import` gói đó bằng kit.txt → số dòng các bảng chính trùng khớp.
+  # Không bao giờ in nội dung kit.txt.
+  e2e-offsite:
+    name: "bản sao ngoài máy: lịch tuần → gói đã kiểm → khôi phục vào cài đặt mới (chế độ ${{ needs.resolve.outputs.mode }})"
+    needs: resolve
+    if: needs.resolve.outputs.run_e2e == 'true'
+    runs-on: ubuntu-24.04
+    # Chạy ngoài checkout repo — xem e2e-install.
+    defaults:
+      run:
+        working-directory: /tmp
+    timeout-minutes: 60
+    env:
+      GH_PORT: "8446"
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      R: ${{ github.repository }}
+      TAG: ${{ needs.resolve.outputs.tag }}
+      MODE: ${{ needs.resolve.outputs.mode }}
+      OFFSITE_MARKER: "# gen-harness-offsite (genh offsite) — KHONG sua tay"
+    steps:
+      - name: Lấy mã nguồn (release — đúng mã của tag; pr — commit đang xét)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.mode == 'release' && needs.resolve.outputs.tag || '' }}
+
+      - name: Đặt GEN_HARNESS_HOME (bản cài thứ nhất)
+        run: |
+          echo "GEN_HARNESS_HOME=$RUNNER_TEMP/gh-off1" >>"$GITHUB_ENV"
+          echo "HOME1=$RUNNER_TEMP/gh-off1" >>"$GITHUB_ENV"
+
+      - name: (pr) Trỏ genh vào deploy/compose.yaml của checkout
+        if: needs.resolve.outputs.mode == 'pr'
+        # Như e2e-install: chế độ pr kiểm CODE của PR, kể cả ảnh api (gh.bundle verify).
+        run: echo "GENH_COMPOSE_FILE=$GITHUB_WORKSPACE/deploy/compose.yaml" >>"$GITHUB_ENV"
+
+      - name: Cài Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.0"
+
+      - name: Tải compose.release.yaml của ${{ needs.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release download "$TAG" --repo "$R" \
+            --pattern 'compose.release.yaml' --dir "$RUNNER_TEMP/rel" --clobber
+
+      - name: Build genh từ mã nguồn (nhúng compose.release.yaml như release.yml)
+        working-directory: ${{ github.workspace }}/apps/genh
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+          cp "$RUNNER_TEMP/rel/compose.release.yaml" internal/compose/embedded_compose.yaml
+          if [ "$MODE" = "release" ]; then ver="$TAG"; else ver="dev"; fi
+          mkdir -p "$RUNNER_TEMP/bin-off"
+          go build -trimpath -ldflags "-s -w -X main.version=$ver" -o "$RUNNER_TEMP/bin-off/genh" ./cmd/genh
+          git checkout -- internal/compose/embedded_compose.yaml
+          "$RUNNER_TEMP/bin-off/genh" version
+          echo "GENH=$RUNNER_TEMP/bin-off/genh" >>"$GITHUB_ENV"
+
+      - name: genh có lệnh offsite chưa (v0.1.40+)
+        id: has
+        run: |
+          set -euo pipefail
+          "$GENH" help >"$RUNNER_TEMP/genh-help.txt"
+          if grep -q 'genh offsite' "$RUNNER_TEMP/genh-help.txt"; then
+            echo "run=true" >>"$GITHUB_OUTPUT"
+          elif [ "$MODE" = "pr" ]; then
+            echo "::error::genh build từ mã đang xét không có lệnh offsite" >&2; exit 1
+          else
+            echo "::notice::$TAG cũ hơn v0.1.40 — chưa có genh offsite, bỏ qua."
+            echo "run=false" >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: Cài sạch (bản thứ nhất)
+        if: steps.has.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          "$GENH" install --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes --no-auto-update
+
+      - name: Chờ /api/v1/ready xanh (tối đa 5 phút)
+        if: steps.has.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          deadline=$((SECONDS + 300))
+          until curl -k -fsS -o /dev/null "https://localhost:${GH_PORT}/api/v1/ready"; do
+            [ "$SECONDS" -lt "$deadline" ] || { echo "::error::/api/v1/ready không xanh sau 5 phút" >&2; exit 1; }
+            sleep 3
+          done
+
+      - name: Nạp dữ liệu mẫu + đếm số dòng (trước)
+        if: steps.has.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          data="$GITHUB_WORKSPACE/.github/scripts/e2e_data.sh"
+          "$data" seed
+          "$data" count >"$RUNNER_TEMP/rows-before-offsite.txt"
+          cat "$RUNNER_TEMP/rows-before-offsite.txt"
+          "$data" require-data "$RUNNER_TEMP/rows-before-offsite.txt"
+
+      - name: Đích chưa mount → GH-EB01, KHÔNG tạo thư mục
+        if: steps.has.outputs.run == 'true'
+        run: |
+          set -uo pipefail
+          missing="$RUNNER_TEMP/usb-chua-cam"
+          rc=0
+          "$GENH" offsite set --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" "$missing" >"$RUNNER_TEMP/offsite-missing.log" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/offsite-missing.log"
+          [ "$rc" -ne 0 ] || { echo "::error::genh offsite set vào thư mục không tồn tại phải thoát khác 0" >&2; exit 1; }
+          grep -q 'GH-EB01' "$RUNNER_TEMP/offsite-missing.log" || { echo "::error::thiếu mã GH-EB01 (chưa thấy ổ USB/NAS)" >&2; exit 1; }
+          [ ! -e "$missing" ] || { echo "::error::genh đã tự tạo $missing — không bao giờ được tạo đích (sẽ ghi vào ổ chính khi USB rút ra)" >&2; exit 1; }
+          echo "OK: đích chưa mount → GH-EB01, không tạo gì."
+
+      - name: Chọn "ổ USB" giả (--allow-same-disk --no-run)
+        if: steps.has.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/usb"
+          "$GENH" offsite set --allow-same-disk --no-run --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" "$RUNNER_TEMP/usb" 2>&1 | tee "$RUNNER_TEMP/offsite-set.log"
+          grep -q 'cùng ổ với máy chủ' "$RUNNER_TEMP/offsite-set.log" || { echo "::error::--allow-same-disk phải in cảnh báo cùng ổ" >&2; exit 1; }
+          [ -z "$(ls -A "$RUNNER_TEMP/usb")" ] || { echo "::error::--no-run không được ghi gì vào đích" >&2; ls -la "$RUNNER_TEMP/usb"; exit 1; }
+
+      - name: Chạy ĐÚNG lệnh lịch tuần (crontab hoặc systemd --user)
+        if: steps.has.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          line="$(crontab -l 2>/dev/null | awk -v m="$OFFSITE_MARKER" 'f{print; exit} $0==m{f=1}' || true)"
+          if [ -n "$line" ]; then
+            echo "lịch tuần (crontab): $line"
+            cmd="$(printf '%s\n' "$line" | cut -d' ' -f6-)"
+            sh -c "$cmd"
+          elif systemctl --user cat gen-harness-offsite.service >/dev/null 2>&1; then
+            systemctl --user cat gen-harness-offsite.service gen-harness-offsite.timer
+            # Type=oneshot: `start` chờ tới khi chạy xong.
+            systemctl --user start gen-harness-offsite.service
+          else
+            echo "::error::không thấy lịch tuần gen-harness-offsite (crontab lẫn systemd --user)" >&2
+            crontab -l || true
+            exit 1
+          fi
+
+      - name: Kiểm run/offsite-status.json ok + verified, đúng 1 gói
+        if: steps.has.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          f="$GEN_HARNESS_HOME/run/offsite-status.json"
+          cat "$f"; echo
+          python3 - "$f" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1], encoding="utf-8"))
+          assert d.get("schema") == 1, "schema phải là 1: %r" % d.get("schema")
+          assert d.get("state") == "ok", "state phải là ok, có %r (error_code=%r)" % (d.get("state"), d.get("error_code"))
+          assert d.get("verified") is True, "verified phải true"
+          assert d.get("configured") is True and d.get("last_success_at"), "thiếu configured/last_success_at"
+          assert len(d.get("key_id") or "") == 8, "key_id phải 8 ký tự hex"
+          PY
+          n="$(find "$RUNNER_TEMP/usb/gen-harness-offsite" -maxdepth 1 -name '*.ghbundle' | wc -l | tr -d ' ')"
+          [ "$n" = "1" ] || { echo "::error::cần đúng 1 tệp .ghbundle trong usb/gen-harness-offsite, có $n" >&2; ls -la "$RUNNER_TEMP/usb/gen-harness-offsite" || true; exit 1; }
+          b="$(find "$RUNNER_TEMP/usb/gen-harness-offsite" -maxdepth 1 -name '*.ghbundle' | head -n1)"
+          ls -la "$b"
+          echo "BUNDLE=$b" >>"$GITHUB_ENV"
+          "$GENH" offsite status --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT"
+
+      - name: Chép Khoá khôi phục ra kit.txt (giả lập Bộ khôi phục bản in — KHÔNG in ra log)
+        if: steps.has.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          compose_file="${GENH_COMPOSE_FILE:-$GEN_HARNESS_HOME/deploy/compose.yaml}"
+          secdir="$(dirname "$compose_file")/../secrets"
+          install -m 0600 "$secdir/gh_offsite_key" "$RUNNER_TEMP/kit.txt"
+          echo "::add-mask::$(cat "$RUNNER_TEMP/kit.txt")"
+          echo "SECDIR=$secdir" >>"$GITHUB_ENV"
+          echo "đã chép khoá khôi phục ($(wc -c <"$RUNNER_TEMP/kit.txt") byte)."
+
+      - name: genh uninstall --yes --delete-data (mất máy)
+        if: steps.has.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          "$GENH" uninstall --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes --delete-data
+          left="$(docker volume ls -q --filter label=com.docker.compose.project=gen-harness)"
+          [ -z "$left" ] || { echo "::error::--delete-data còn sót volume: $left" >&2; exit 1; }
+          if crontab -l 2>/dev/null | grep -qF "$OFFSITE_MARKER"; then
+            echo "::error::uninstall phải gỡ lịch tuần bản sao ngoài máy" >&2; exit 1
+          fi
+          # Chế độ pr: secrets/ nằm ở checkout (dùng chung với bản cài mới) — xoá khoá cũ
+          # để chứng minh khôi phục dùng ĐÚNG kit.txt, không phải khoá còn sót trên máy.
+          rm -f "$SECDIR/gh_offsite_key"
+
+      - name: Cài sạch vào GEN_HARNESS_HOME mới (máy mới)
+        if: steps.has.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          echo "GEN_HARNESS_HOME=$RUNNER_TEMP/gh-off2" >>"$GITHUB_ENV"
+          "$GENH" install --install-dir "$RUNNER_TEMP/gh-off2" --port "$GH_PORT" --yes --no-auto-update
+          deadline=$((SECONDS + 300))
+          until curl -k -fsS -o /dev/null "https://localhost:${GH_PORT}/api/v1/ready"; do
+            [ "$SECONDS" -lt "$deadline" ] || { echo "::error::/api/v1/ready không xanh sau khi cài mới" >&2; exit 1; }
+            sleep 3
+          done
+          # Khoá của BẢN CÀI MỚI (chế độ release: secrets/ cạnh deploy/ của gh-off2; chế độ pr:
+          # GENH_COMPOSE_FILE trỏ checkout) — KHÔNG dùng SECDIR (đó là secrets của bản cài cũ, đã xoá
+          # khoá ⇒ cmp luôn "khác" và phép thử không kiểm gì).
+          new_compose="${GENH_COMPOSE_FILE:-$RUNNER_TEMP/gh-off2/deploy/compose.yaml}"
+          new_key="$(dirname "$new_compose")/../secrets/gh_offsite_key"
+          [ -s "$new_key" ] || { echo "::error::bản cài mới chưa có Khoá khôi phục tại $new_key" >&2; exit 1; }
+          if cmp -s "$new_key" "$RUNNER_TEMP/kit.txt"; then
+            echo "::error::bản cài mới trùng khoá khôi phục cũ — phép thử không chứng minh được gì" >&2; exit 1
+          fi
+
+      - name: genh import gói ngoài máy bằng Khoá khôi phục (kit.txt)
+        if: steps.has.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          GH_BUNDLE_PASSWORD="$(cat "$RUNNER_TEMP/kit.txt")"
+          export GH_BUNDLE_PASSWORD
+          # Mọi cờ đứng TRƯỚC đường dẫn tệp (package flag của Go).
+          "$GENH" import --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes "$BUNDLE"
+          deadline=$((SECONDS + 300))
+          until curl -k -fsS -o /dev/null "https://localhost:${GH_PORT}/api/v1/ready"; do
+            [ "$SECONDS" -lt "$deadline" ] || { echo "::error::/api/v1/ready không xanh sau import" >&2; exit 1; }
+            sleep 3
+          done
+
+      - name: Số dòng sau khôi phục phải trùng trước khi mất máy
+        if: steps.has.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          "$GITHUB_WORKSPACE/.github/scripts/e2e_data.sh" count >"$RUNNER_TEMP/rows-after-offsite.txt"
+          cat "$RUNNER_TEMP/rows-after-offsite.txt"
+          if ! diff "$RUNNER_TEMP/rows-before-offsite.txt" "$RUNNER_TEMP/rows-after-offsite.txt"; then
+            echo "::error::khôi phục từ bản sao ngoài máy lệch số dòng (diff ở trên)" >&2; exit 1
+          fi
+          echo "OK: khôi phục từ bản sao ngoài máy vào cài đặt mới — số dòng trùng khớp."
+
+      - name: (luôn) Gỡ cài đặt + in log để debug
+        if: always()
+        run: |
+          set -uo pipefail
+          if [ -x "${GENH:-}" ]; then
+            "$GENH" uninstall --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes --delete-data || true
+          fi
+          docker ps -a || true
+          for c in $(docker ps -a --format '{{.Names}}' | grep '^gen-harness-' || true); do
+            echo "════ $c ════"
+            docker logs --tail 200 "$c" 2>&1 || true
+          done
+          for d in "${HOME1:-}" "$RUNNER_TEMP/gh-off2"; do
+            [ -n "$d" ] && [ -d "$d/logs" ] || continue
+            for f in "$d"/logs/*; do
+              echo "── $f ──"
+              tail -n 200 "$f" || true
+            done
+            [ -f "$d/run/offsite-status.json" ] && { echo "── $d/run/offsite-status.json ──"; cat "$d/run/offsite-status.json"; }
+          done
+          crontab -l 2>/dev/null || true
+
   # ── promote ──────────────────────────────────────────────────────────────
   # Nâng tag thành BẢN CHÍNH THỨC (latest) — chỉ khi resolve bảo promote VÀ
-  # (e2e-install xanh VÀ e2e-rollback xanh VÀ e2e-upgrade xanh/bỏ qua), hoặc khi Owner chạy tay
+  # (e2e-install xanh VÀ e2e-rollback xanh VÀ e2e-offsite xanh VÀ e2e-upgrade xanh/bỏ qua), hoặc khi Owner chạy tay
   # với skip_e2e=true (promote tay, có cảnh báo). always() để job vẫn được
   # xét khi e2e-upgrade bị bỏ qua (chưa có bản chính thức cũ hơn).
   # Không bao giờ hạ cấp: latest hiện tại mới hơn thì chỉ cảnh báo.
@@ -1464,8 +1740,8 @@ jobs:
   promote:
     name: nâng thành bản chính thức (promote ${{ needs.resolve.outputs.tag }})
     runs-on: ubuntu-latest
-    needs: [resolve, e2e-install, e2e-upgrade, e2e-rollback]
-    if: always() && needs.resolve.outputs.promote == 'true' && (needs.resolve.outputs.skip_e2e == 'true' || (needs.e2e-install.result == 'success' && needs.e2e-rollback.result == 'success' && (needs.e2e-upgrade.result == 'success' || needs.e2e-upgrade.result == 'skipped')))
+    needs: [resolve, e2e-install, e2e-upgrade, e2e-rollback, e2e-offsite]
+    if: always() && needs.resolve.outputs.promote == 'true' && (needs.resolve.outputs.skip_e2e == 'true' || (needs.e2e-install.result == 'success' && needs.e2e-rollback.result == 'success' && needs.e2e-offsite.result == 'success' && (needs.e2e-upgrade.result == 'success' || needs.e2e-upgrade.result == 'skipped')))
     permissions:
       contents: write
       packages: write
@@ -1794,9 +2070,10 @@ jobs:
           fi
           echo "OK: bản chính thức đã lùi về $PREV_TAG; $TAG thành bản thử."
 
-      - name: genh uninstall --yes (dọn dẹp)
+      - name: genh uninstall --yes --delete-data (dọn dẹp)
         if: always()
-        run: '"$GEN_HARNESS_HOME/bin/genh" uninstall --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes || true'
+        # genh cũ không biết --delete-data (thoát 2) → thử lại không cờ (bản cũ: --yes là xoá dữ liệu).
+        run: '"$GEN_HARNESS_HOME/bin/genh" uninstall --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes --delete-data || "$GEN_HARNESS_HOME/bin/genh" uninstall --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes || true'
 
       - name: (luôn) In log docker compose (tail 200) để debug
         if: always()

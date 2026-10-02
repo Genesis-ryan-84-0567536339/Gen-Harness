@@ -96,6 +96,32 @@ async def test_import_unknown_header_version_exit_3(tmp_path, monkeypatch) -> No
     assert exc.value.code == 3
 
 
+def test_bundle_over_gcm_limit_has_clear_error(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """v0.1.40: gói > 2 GiB (giới hạn AES-GCM một khối) ⇒ BundleError tiếng Việt rõ ràng, không OverflowError."""
+    monkeypatch.setattr(bundle, "GCM_MAX_BYTES", 10)
+    with pytest.raises(bundle.BundleError) as exc:
+        bundle._encrypt_bundle(b"x" * 11, "mat-khau-bat-ky-123")
+    assert exc.value.code == 1 and "lớn hơn 2 GiB chưa hỗ trợ" in str(exc.value)
+
+    class _Overflow:
+        def __init__(self, key: bytes) -> None:
+            pass
+
+        def encrypt(self, *a: object) -> bytes:
+            raise OverflowError("Data or associated data too long. Max 2**31 - 1 bytes")
+
+        def decrypt(self, *a: object) -> bytes:
+            raise OverflowError("Data or associated data too long. Max 2**31 - 1 bytes")
+
+    monkeypatch.setattr(bundle, "GCM_MAX_BYTES", 2**31 - 1)
+    header, ct = bundle._encrypt_bundle(b"nho", "mat-khau-bat-ky-123")
+    monkeypatch.setattr(bundle, "AESGCM", _Overflow)
+    with pytest.raises(bundle.BundleError, match="lớn hơn 2 GiB"):
+        bundle._encrypt_bundle(b"nho", "mat-khau-bat-ky-123")
+    with pytest.raises(bundle.BundleError, match="lớn hơn 2 GiB"):
+        bundle._decrypt_bundle(ct, header, orjson.dumps(header), "mat-khau-bat-ky-123")
+
+
 async def test_import_wrong_magic_exit_3(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setenv("GH_BUNDLE_PASSWORD", "mat-khau-bat-ky-123")
     p = tmp_path / "x.ghbundle"

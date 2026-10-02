@@ -61,8 +61,8 @@ v0.1.36: hệ thống tự báo khi hỏng (F-6 bước 1, F-3, F-4 bước 1, F
 (`ops.health_alerts`) cho kênh rớt / model hết hạn / cập nhật lỗi / sao lưu quá 36 giờ / Bộ xử lý nền im / ổ đĩa sắp đầy,
 `GET /system/health` (không đụng `/ready`), dải "Cần Sếp xử lý" đầu Tổng quan + thẻ "Sức khoẻ hệ thống"; sao lưu timeout
 3600 giây, bị huỷ thì báo chuông; log JSON có ts + traceback + error_id; cron theo giờ VN (job nặng 04:20–05:10); một số
-phiên bản từ build-arg (`gh.__version__`, LABEL ảnh, Trợ giúp hiện "phiên bản máy chủ" + "phiên bản công cụ cài đặt (genh)"). Còn: F-2 job tự xoá theo hạn lưu
-(v0.1.40 — hiện khoá nút Sửa, ghi "Chưa tự xoá"), F-6/F-4 các bước sau.
+phiên bản từ build-arg (`gh.__version__`, LABEL ảnh, Trợ giúp hiện "phiên bản máy chủ" + "phiên bản công cụ cài đặt (genh)"). Còn: F-6/F-4 các
+bước sau (F-2 job tự xoá theo hạn lưu: xong ở v0.1.40).
 v0.1.37: cập nhật tự lành (F-34, F-35 phần còn lại, F-72, F-73) — khoá loại trừ `<gốc cài>/genh.lock` (lịch đêm bận
 bỏ qua, gõ tay bận GH-E94A), bắt SIGTERM + rollback không bị huỷ (hạn riêng 10 phút, dừng giữa chừng GH-E94B, lịch đêm thử
 lại), unit systemd `KillMode=mixed`/`TimeoutStopSec=900`, nhịp sống `run/genh-heartbeat.json` ⇒ Console hiện "bị dừng giữa
@@ -85,6 +85,15 @@ token/mật khẩu/email đầy đủ/giá trị mã — mã đăng nhập chỉ
 `/social`; một tên "Hướng dẫn thiết lập" (9 việc, thêm Facebook/Gen-hub, việc 10 trỏ `/system?tab=users`, xong theo dữ liệu
 thật). Còn: nghiệm thu thật với tài khoản của Boss (kết quả tự ghi ở `ops.boss_checks`), canary `--live` agy sau khi Boss
 đăng nhập, đối chiếu `code_shape` với regex F-56 (v0.1.45); Telegram trong hướng dẫn hoãn.
+v0.1.40: dữ liệu an toàn (F-12, F-2, F-16) — **bản sao ngoài máy**: `genh offsite set|run|status|disable`, lịch tuần Chủ
+nhật (systemd/cron/launchd/schtasks) xuất gói mã hoá ra ổ USB/NAS Owner chọn, tự kiểm gói (`gh.bundle verify`), xoay vòng 4
+gói, đích chưa mount ⇒ GH-EB01 không ghi gì; khoá khôi phục riêng + "Bộ khôi phục" (in/QR), "Tải gói mang đi" (Owner + PIN),
+chuông `offsite.stale` (> 7 ngày) / `offsite.failed` ở "Cần Sếp xử lý"; bỏ S3/MinIO giả (đích chỉ `local`); `genh uninstall`
+mặc định giữ dữ liệu (`--delete-data` mới xoá); E2E `e2e-offsite` thử khôi phục thật vào cài đặt mới (promote đòi xanh).
+**Hạn lưu thật**: `gh/retention.py` (partman retention + xoá theo lô, `browser_jobs.result` 14 ngày), nút Sửa mở lại,
+`ops.action_log` "Không áp dụng". **Job nặng**: dò trùng danh tính không còn ngừng đề xuất (NOT EXISTS + watermark + trigram),
+bản đồ chỉ quét cửa sổ thời gian, job quá giờ 2 lần ⇒ chuông `job.timeout`. Migration 0026. Còn: `ops.action_log` hạn lưu
+(vướng chuỗi băm) — để sau.
 
 ## Đợt A — Gen v1 (thiết kế: docs/design/gen-v1.md)
 - ✅ A1 Khung chat phải + Gen trả lời/tóm tắt (chỉ đọc), lưu hội thoại, Nhật ký hành động — v0.1.21.

@@ -6,6 +6,7 @@ ARCHITECTURE §7.4 không lộ ra như một ô sửa được qua API này (ki�
 
 import uuid
 
+import pytest
 from sqlalchemy import text
 
 from tests.conftest import OWNER, Api
@@ -257,7 +258,7 @@ async def test_retention_policies_default_and_patch(owner_api) -> None:  # type:
     assert r.status_code == 423
     await _pin(api)
     r = await api.send("PATCH", "/retention-policies", {"dataset": "raw.events", "keep_days": 365,
-                                                         "anonymize_after_days": 90})
+                                                         "anonymize_after_days": 90, "confirm_delete": True})
     assert r.status_code == 200, r.text
     got2 = {r_["dataset"]: r_ for r_ in r.json()}
     assert got2["raw.events"]["keep_days"] == 365 and got2["raw.events"]["anonymize_after_days"] == 90
@@ -344,14 +345,28 @@ async def test_setup_step10_rejects_duplicate_email(owner_api) -> None:  # type:
 async def test_setup_step11_configures_backup_schedule(owner_api, db) -> None:  # type: ignore[no-untyped-def]
     api: Api = owner_api
     r = await api.send("PUT", "/setup/steps/11", {"frequency": "weekly", "time_of_day": "03:30",
-                                                   "retention_count": 4, "destination": "s3"})
+                                                   "retention_count": 4, "destination": "local"})
     assert r.status_code == 200, r.text
     assert r.json()["backup"] == {"frequency": "weekly", "time_of_day": "03:30", "retention_count": 4,
-                                  "destination": "s3"}
+                                  "destination": "local"}
     org = await org_id(db)
     settings = (await db.execute(text("SELECT settings FROM core.organizations WHERE id = :o"),
                                  {"o": org})).scalar_one()
-    assert settings["backup"]["destination"] == "s3"
+    assert settings["backup"]["destination"] == "local"
+
+
+@pytest.mark.parametrize("dest", ["s3", "minio"])
+async def test_setup_step11_rejects_remote_destination(owner_api, db, dest) -> None:  # type: ignore[no-untyped-def]
+    """v0.1.40 (F-12): chỉ 'local' — S3/MinIO chưa có đường sao lưu thật ⇒ 422 tiếng Việt, không lưu gì."""
+    r = await owner_api.send("PUT", "/setup/steps/11", {"frequency": "daily", "time_of_day": "02:00",
+                                                         "destination": dest})
+    assert r.status_code == 422, r.text
+    body = r.json()
+    assert body["code"] == "VALIDATION"
+    assert body["errors"]["destination"].startswith("Hiện chỉ sao lưu trên máy chủ này")
+    settings = (await db.execute(text("SELECT settings FROM core.organizations WHERE id = :o"),
+                                 {"o": await org_id(db)})).scalar_one()
+    assert (settings.get("backup") or {}).get("destination") in (None, "local")
 
 
 async def test_setup_step11_rejects_bad_time(owner_api) -> None:  # type: ignore[no-untyped-def]

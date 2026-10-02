@@ -49,7 +49,8 @@ Từ `design/screens.json` — khoá route, miền, màn cha:
 6. **Hợp nhất danh tính** hai tài khoản → hồ sơ sống gộp lịch sử, sổ tay gộp, action log ghi `identity.merged`.
 7. **Plugin**: cài một plugin từ tệp → yêu cầu PIN → hiện quyền → chạy trong sandbox → cố tình làm lỗi → breaker mở, hệ thống chính vẫn chạy.
 8. **MCP**: gọi tool đọc → OK; gọi tool ghi → tạo bản nháp chờ duyệt; gọi tool chưa mở → bị chặn, ghi log.
-9. `genh backup` → `genh uninstall --keep-data` → cài lại → `genh restore` → dữ liệu nguyên vẹn.
+9. `genh backup` → `genh uninstall` (v0.1.40: mặc định giữ dữ liệu; `--keep-data` vẫn nhận) → cài lại → `genh restore` → dữ liệu nguyên vẹn.
+9b. **Bản sao ngoài máy (v0.1.40, F-12):** `genh offsite set <thư mục trên USB/NAS>` → lịch Chủ nhật ~05:30 xuất gói `.ghbundle` đã tự kiểm đọc lại được → `genh uninstall --delete-data` (gõ `XOÁ DỮ LIỆU`) → cài sạch máy mới → `GH_BUNDLE_PASSWORD=<Khoá khôi phục> genh import --yes <gói>` → số dòng trùng khớp (E2E job `e2e-offsite`). Rút USB ra rồi chạy lịch ⇒ "Chưa thấy ổ USB/NAS" (GH-EB01), không ghi gì vào ổ chính.
 10. `genh update` sang bản mới có migration → dữ liệu còn, rollback được khi migration lỗi.
 
 ## Tiêu chí phi chức năng

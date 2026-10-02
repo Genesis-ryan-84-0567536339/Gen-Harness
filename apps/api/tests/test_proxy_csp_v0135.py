@@ -64,3 +64,11 @@ def test_nginx_csp_no_open_websocket() -> None:
     assert "wss:" not in nginx.read_text()
     assert "ws:" not in d["connect-src"] and "'self'" in d["connect-src"]
     assert d["script-src"] == ["'self'"] and d["object-src"] == ["'none'"] and d["base-uri"] == ["'none'"]
+
+
+def test_caddy_xfo_conditional_so_portable_frame_can_read_errors() -> None:
+    """v0.1.40 (F-12): `?X-Frame-Options` — api đặt SAMEORIGIN cho riêng /system/offsite/portable (khung tải ẩn cùng gốc
+    phải đọc được trang lỗi JSON); mọi phản hồi khác vẫn DENY. Đặt thẳng (không `?`) sẽ ghi đè và chặn trang lỗi."""
+    text = CADDYFILE.read_text()
+    assert re.search(r'^\s*\?X-Frame-Options\s+"DENY"', text, re.M)
+    assert not re.search(r'^\s*X-Frame-Options\s+"', text, re.M)

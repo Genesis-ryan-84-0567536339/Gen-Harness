@@ -17,6 +17,35 @@ SETUP_EXEMPT = ("/setup", "/auth/login", "/auth/logout", "/auth/pin", "/health",
 WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 
+#: v0.1.40 (F-12): "Tải gói mang đi" tải bằng một khung ẩn CÙNG GỐC (gói rất lớn — không fetch→blob). Proxy Caddy đặt
+#: `X-Frame-Options DENY` + CSP `frame-ancestors 'none'` cho mọi phản hồi CHƯA có ⇒ trang lỗi JSON (409/423/500…) bị
+#: chặn trong khung, web không đọc được mã lỗi và Owner chờ 35 phút không có gì. Riêng đường này api tự đặt hai header
+#: cho phép khung cùng gốc (Caddy dùng `?` nên giữ nguyên) — vẫn chặn mọi trang khác nhúng.
+FRAMABLE_PATHS = frozenset({API_PREFIX + "/system/offsite/portable"})
+FRAMABLE_HEADERS = [(b"x-frame-options", b"SAMEORIGIN"),
+                    (b"content-security-policy", b"default-src 'none'; frame-ancestors 'self'")]
+
+
+class SameOriginFrame:
+    """Đặt header cho phép khung cùng gốc trên `FRAMABLE_PATHS` — cả phản hồi lỗi của dependency (PIN/quyền) và 428."""
+
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or scope["path"] not in FRAMABLE_PATHS:
+            return await self.app(scope, receive, send)
+
+        async def send_framable(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                names = {n for n, _ in FRAMABLE_HEADERS}
+                headers = [(n, v) for n, v in message.get("headers", []) if n.lower() not in names]
+                message = {**message, "headers": [*headers, *FRAMABLE_HEADERS]}
+            await send(message)
+
+        return await self.app(scope, receive, send_framable)
+
+
 async def _problem(send: Send, err: ApiError) -> None:
     import orjson
 

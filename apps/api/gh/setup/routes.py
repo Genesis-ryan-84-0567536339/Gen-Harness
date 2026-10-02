@@ -11,7 +11,8 @@ from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, Request, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+from pydantic_core import PydanticCustomError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -772,7 +773,19 @@ class Step11In(BaseModel):
     frequency: Literal["daily", "weekly", "monthly"] = "daily"
     time_of_day: str = Field(default="02:00", max_length=5)
     retention_count: int = Field(default=7, ge=1, le=365)
-    destination: Literal["local", "s3", "minio"] = "local"
+    # v0.1.40 (F-12): chỉ 'local' — chưa có đường sao lưu S3/MinIO thật; bản sao ngoài máy (ổ USB/NAS) chọn ở
+    # Dữ liệu & lưu trữ › Bản sao ngoài máy (genh chép gói ra ổ ngoài), không qua trường này.
+    destination: Literal["local"] = "local"
+
+    @field_validator("destination", mode="before")
+    @classmethod
+    def _only_local(cls, v: Any) -> Any:
+        if v != "local":
+            raise PydanticCustomError(
+                "destination_local_only",
+                "Hiện chỉ sao lưu trên máy chủ này — bản sao ngoài máy (ổ USB/NAS) chọn ở Dữ liệu & lưu trữ sau "
+                "khi thiết lập xong")
+        return v
 
 
 @router.put("/steps/11")

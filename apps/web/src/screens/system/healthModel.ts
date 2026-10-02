@@ -5,11 +5,12 @@
  */
 import type { HealthIssue, SystemHealth } from '@gen-harness/contracts';
 import { DEFAULT_TZ, fmtAgo, fmtDM, fmtDMClock, fmtDec, fmtHM, fmtInt } from '../../lib/format';
+import { offsiteNextStep, type OffsiteViewer } from './offsiteModel';
 
 export type HealthTone = 'ok' | 'warn' | 'bad' | 'muted';
 
 export interface HealthRow {
-  key: 'worker' | 'browser' | 'dlq' | 'backup' | 'update' | 'disk' | 'autostart';
+  key: 'worker' | 'browser' | 'dlq' | 'backup' | 'offsite' | 'update' | 'disk' | 'autostart';
   label: string;
   value: string;
   tone: HealthTone;
@@ -31,7 +32,12 @@ export function fmtGb(bytes: number): string {
 }
 
 /** Các dòng chính của thẻ "Sức khoẻ hệ thống" (theo đúng thứ tự hiển thị). */
-export function healthRows(h: SystemHealth, now = Date.now(), tz = DEFAULT_TZ): HealthRow[] {
+export function healthRows(
+  h: SystemHealth,
+  now = Date.now(),
+  tz = DEFAULT_TZ,
+  who: OffsiteViewer = { isOwner: true, canManage: true },
+): HealthRow[] {
   const rows: HealthRow[] = [];
 
   const w = h.worker;
@@ -70,6 +76,28 @@ export function healthRows(h: SystemHealth, now = Date.now(), tz = DEFAULT_TZ): 
           ? { key: 'backup', label: 'Sao lưu', value: `Bản mới nhất ${fmtAgo(bk.latest_at, now, tz)}`, tone: 'ok' }
           : { key: 'backup', label: 'Sao lưu', value: 'Chưa có bản nào', tone: 'warn' },
   );
+
+  // v0.1.40 (F-12): bản sao ngoài máy (ổ USB/NAS) — khối chỉ có khi api có hộp thư với genh ⇒ vắng khối thì không có dòng.
+  const off = h.offsite;
+  if (off) {
+    const days = typeof off.age_days === 'number' && Number.isFinite(off.age_days) ? Math.floor(off.age_days) : null;
+    const failed = off.state === 'failed' || off.state === 'not_mounted' || (!!off.error_code && off.state !== 'ok' && off.state !== 'running');
+    rows.push(
+      !off.configured
+        ? { key: 'offsite', label: 'Bản sao ngoài máy', value: 'Chưa có — chưa chọn nơi lưu', tone: 'warn' }
+        : failed
+          ? { key: 'offsite', label: 'Bản sao ngoài máy', value: off.state === 'not_mounted' ? 'Lần gần nhất lỗi — chưa thấy ổ USB/NAS' : 'Lần gần nhất lỗi', tone: days != null && days > 30 ? 'bad' : 'warn' }
+          : !off.last_success_at
+            ? { key: 'offsite', label: 'Bản sao ngoài máy', value: 'Chưa có bản nào', tone: 'warn' }
+            : off.stale
+              ? { key: 'offsite', label: 'Bản sao ngoài máy', value: `Cũ — ${days ?? 'nhiều'} ngày chưa sao lưu ra ổ ngoài`, tone: days != null && days > 30 ? 'bad' : 'warn' }
+              : { key: 'offsite', label: 'Bản sao ngoài máy', value: `Bản mới nhất ${fmtAgo(off.last_success_at, now, tz)}`, tone: 'ok' },
+    );
+    const last = rows[rows.length - 1];
+    // Gợi ý theo trạng thái + mã lỗi + vai trò: chưa chọn nơi lưu thì nút "Sao lưu ngay" đang khoá; "Chọn nơi lưu" chỉ
+    // Owner có; GH-EB07/GH-EB04 thì cắm ổ rồi sao lưu lại không giúp được (chọn nơi khác / giải phóng chỗ).
+    if (last.tone !== 'ok') last.hint = `Xem thẻ "Bản sao ngoài máy" bên dưới — ${offsiteNextStep(!!off.configured, who, failed ? off.error_code : null).replace(/^./, (c) => c.toLowerCase())}`;
+  }
 
   const u = h.update;
   rows.push(

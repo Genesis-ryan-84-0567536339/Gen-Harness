@@ -71,14 +71,20 @@ async def upsert_group(db: AsyncSession, org_id: uuid.UUID, channel: Any, extern
 
 async def upsert_identity(db: AsyncSession, org_id: uuid.UUID, channel: Any, external_id: str, name: str | None,
                           phone: str | None = None) -> Any:
-    row = (await db.execute(text("""SELECT id, person_id FROM core.person_identities
+    row = (await db.execute(text("""SELECT id, person_id, phone_e164 FROM core.person_identities
                                     WHERE channel_id = :c AND external_id = :x"""),
                             {"c": channel.id, "x": external_id})).one_or_none()
     if row is not None:
         if name or phone:
+            e164 = _e164(phone)
             await db.execute(text("""UPDATE core.person_identities SET handle = COALESCE(:h, handle),
                                      phone_e164 = COALESCE(:p, phone_e164) WHERE id = :i"""),
-                             {"h": name, "p": _e164(phone), "i": row.id})
+                             {"h": name, "p": e164, "i": row.id})
+            if e164 and e164 != row.phone_e164:
+                # v0.1.40 (F-16): dò trùng chỉ xét định danh mới/hồ sơ vừa sửa (mốc `ops.job_watermarks`) — SĐT mới
+                # của định danh cũ phải làm hồ sơ "mới" để cặp trùng SĐT được dò (trigger touch đặt updated_at).
+                await db.execute(text("UPDATE core.persons SET updated_at = now() WHERE id = :p"),
+                                 {"p": row.person_id})
         return row
     code = (await db.execute(text("SELECT core.next_code('PER')"))).scalar_one()
     person_id = (await db.execute(text("""

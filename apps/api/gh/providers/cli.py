@@ -842,13 +842,14 @@ class CliLogins:
             # v0.1.39: CLI in lại mã (echo) → không để mã (kể cả mảnh bị cắt/ngắt dòng) lọt vào log/Console.
             err = scrub_codes(str(exc), typed)
             log.warning("Đăng nhập CLI lỗi: %s", err[:300])
-            # Ghi kết quả kiểm trước khi báo "failed" — web thấy "failed" là tải lại ô kết quả ngay.
+            # Ghi nhật ký + kết quả kiểm TRƯỚC khi báo "failed": ai thấy "failed" (web, test) đều đọc được trạng thái
+            # đầy đủ ngay — trước đây nhật ký 'cli.login_failed' ghi SAU _emit nên có lúc chưa kịp có (race F-77).
+            await self._log(s, "failed", {"error": err[:300]})
             await self._boss_check(s, ok=False, exc=exc)
             # v0.1.28 (UX N2): không đưa lỗi hệ điều hành ("[Errno 2] No such file or directory") thẳng lên Console.
             s.status = "failed"
             s.message = (sp.missing if isinstance(exc, FileNotFoundError) else err[:300])
             await self._emit(s)
-            await self._log(s, "failed", {"error": err[:300]})
         finally:
             with contextlib.suppress(Exception):
                 loop.remove_reader(master)

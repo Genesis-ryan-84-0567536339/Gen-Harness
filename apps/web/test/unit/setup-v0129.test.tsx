@@ -57,3 +57,11 @@ describe('Bước 4 để sau', () => {
     expect(screen.queryByTestId('no-model')).toBeNull();
   });
 });
+
+describe('v0.1.40 — bước 11 Sao lưu', () => {
+  it('không còn hứa nơi lưu S3 (API chỉ nhận local); nhắc bản sao ra ổ USB/NAS', () => {
+    const backup = SETUP_STEPS.find((s) => s.key === 'backup');
+    expect(backup?.content).not.toMatch(/S3/);
+    expect(backup?.content).toContain('nơi lưu trên máy chủ (bản sao ra ổ USB/NAS chọn ở Dữ liệu & lưu trữ)');
+  });
+});
