@@ -514,6 +514,44 @@ jobs:
             exit 1
           fi
 
+      # v0.1.38 (F-22): phiên Claude Code ở volume claude_state riêng (/var/lib/gh/claude/.claude), không còn trong HOME
+      # của Antigravity CLI (/var/lib/gh/agy, agy_state); agy chạy cô lập (canary offline phải "khong_lo").
+      - name: Cô lập agy — canary offline (F-22)
+        run: |
+          set -euo pipefail
+          if [ "$MODE" != "pr" ]; then
+            have="$("$GENH" version | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+[0-9A-Za-z.-]*' | head -n1 || true)"
+            have="${have:-$TAG}"
+            if [ "$(printf '%s\n%s\n' v0.1.38 "$have" | sort -V | head -n1)" != "v0.1.38" ]; then
+              echo "::notice::$have cũ hơn v0.1.38 — chưa có volume claude_state / agy_canary, bỏ qua."; exit 0
+            fi
+          fi
+          api="$(docker ps --format '{{.Names}}' | grep -E '^gen-harness-api-[0-9]+$' | head -1)"
+          [ -n "$api" ] || { echo "::error::không thấy container api" >&2; exit 1; }
+          docker exec "$api" sh -c 'test ! -e /var/lib/gh/agy/claude && test -d /var/lib/gh/claude/.claude' \
+            || { echo "::error::phiên Claude Code vẫn nằm trong HOME của Antigravity CLI (/var/lib/gh/agy/claude) hoặc thiếu /var/lib/gh/claude/.claude (F-22)" >&2; exit 1; }
+          echo "OK: /var/lib/gh/agy/claude không có, /var/lib/gh/claude/.claude có."
+          # Canary offline (python -m gh.providers.agy_canary — hợp đồng do gói agy-co-lap-api viết): in ĐÚNG một dòng
+          # JSON {result, checks, agy_version}; chỉ in lại result/checks/agy_version — không bao giờ in đầu ra agy thô.
+          rc=0
+          docker exec "$api" python -m gh.providers.agy_canary --offline >"$RUNNER_TEMP/agy-canary.json" 2>/dev/null || rc=$?
+          python3 - "$RUNNER_TEMP/agy-canary.json" "$rc" <<'PY'
+          import json, sys
+          lines = [x for x in open(sys.argv[1], encoding="utf-8").read().splitlines() if x.strip()]
+          try:
+              d = json.loads(lines[-1]) if lines else {}
+          except ValueError:
+              d = {}
+          d = d if isinstance(d, dict) else {}
+          res = d.get("result")
+          print("agy canary offline: result=%s rc=%s agy_version=%s" % (res, sys.argv[2], d.get("agy_version")))
+          print("checks: %s" % json.dumps(d.get("checks"), ensure_ascii=False))
+          if res != "khong_lo":
+              print("::error::canary offline của Antigravity CLI báo %r (cần khong_lo) — agy có thể đọc bí mật/phiên Claude." % res,
+                    file=sys.stderr)
+              sys.exit(1)
+          PY
+
       # v0.1.37 (F-34/F-73): hai bước dưới kiểm hành vi chỉ có từ genh v0.1.37.
       # Chế độ pr: genh build từ mã đang xét ⇒ luôn chạy. Chế độ release: chỉ
       # chạy khi genh vừa cài ≥ v0.1.37 (so sort -V) — chạy tay workflow cho
@@ -920,6 +958,22 @@ jobs:
           echo "::add-mask::$pw"
           echo "pw=$pw" >>"$GITHUB_OUTPUT"
 
+      # v0.1.38 (F-22): tệp GIẢ (không phải phiên thật) ở đường dẫn cũ của phiên Claude Code trong agy_state — sau nâng
+      # cấp api phải tự chuyển nó sang volume claude_state và xoá /var/lib/gh/agy/claude.
+      - name: Cài tệp giả ở đường dẫn phiên Claude cũ (F-22)
+        id: claude_probe
+        if: matrix.broken != 'true'
+        run: |
+          set -euo pipefail
+          have="$TAG"
+          if [ "$(printf '%s\n%s\n' v0.1.38 "$have" | sort -V | head -n1)" != "v0.1.38" ]; then
+            echo "::notice::$have cũ hơn v0.1.38 — chưa có volume claude_state / agy_canary, bỏ qua."; echo "run=false" >>"$GITHUB_OUTPUT"; exit 0
+          fi
+          api="$(docker ps --format '{{.Names}}' | grep -E '^gen-harness-api-[0-9]+$' | head -1)"
+          [ -n "$api" ] || { echo "::error::không thấy container api (bản cũ)" >&2; exit 1; }
+          docker exec "$api" sh -c 'mkdir -p /var/lib/gh/agy/claude/.claude && printf {\"probe\":1} > /var/lib/gh/agy/claude/.claude/.claude.json'
+          echo "run=true" >>"$GITHUB_OUTPUT"
+
       - name: Đặt genh ${{ needs.resolve.outputs.tag }} đè lên genh cũ (tải + kiểm sha256)
         run: |
           set -euo pipefail
@@ -946,6 +1000,38 @@ jobs:
             [ "$SECONDS" -lt "$deadline" ] || { echo "::error::ready không xanh sau update" >&2; exit 1; }
             sleep 3
           done
+
+      - name: Phiên Claude cũ đã chuyển sang claude_state + canary offline (F-22)
+        if: steps.claude_probe.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          api="$(docker ps --format '{{.Names}}' | grep -E '^gen-harness-api-[0-9]+$' | head -1)"
+          [ -n "$api" ] || { echo "::error::không thấy container api sau nâng cấp" >&2; exit 1; }
+          docker exec "$api" sh -c 'grep -q probe /var/lib/gh/claude/.claude/.claude.json' \
+            || { echo "::error::tệp ở đường dẫn cũ (/var/lib/gh/agy/claude/.claude/.claude.json) không được chuyển sang /var/lib/gh/claude/.claude sau nâng cấp (F-22)" >&2; exit 1; }
+          docker exec "$api" sh -c 'test ! -e /var/lib/gh/agy/claude' \
+            || { echo "::error::/var/lib/gh/agy/claude vẫn còn sau nâng cấp — agy vẫn đọc được phiên Claude (F-22)" >&2; exit 1; }
+          echo "OK: tệp đã sang /var/lib/gh/claude/.claude, /var/lib/gh/agy/claude đã xoá."
+          # Canary offline (python -m gh.providers.agy_canary — hợp đồng do gói agy-co-lap-api viết): in ĐÚNG một dòng
+          # JSON {result, checks, agy_version}; chỉ in lại result/checks/agy_version — không bao giờ in đầu ra agy thô.
+          rc=0
+          docker exec "$api" python -m gh.providers.agy_canary --offline >"$RUNNER_TEMP/agy-canary.json" 2>/dev/null || rc=$?
+          python3 - "$RUNNER_TEMP/agy-canary.json" "$rc" <<'PY'
+          import json, sys
+          lines = [x for x in open(sys.argv[1], encoding="utf-8").read().splitlines() if x.strip()]
+          try:
+              d = json.loads(lines[-1]) if lines else {}
+          except ValueError:
+              d = {}
+          d = d if isinstance(d, dict) else {}
+          res = d.get("result")
+          print("agy canary offline: result=%s rc=%s agy_version=%s" % (res, sys.argv[2], d.get("agy_version")))
+          print("checks: %s" % json.dumps(d.get("checks"), ensure_ascii=False))
+          if res != "khong_lo":
+              print("::error::canary offline của Antigravity CLI báo %r (cần khong_lo) — agy có thể đọc bí mật/phiên Claude." % res,
+                    file=sys.stderr)
+              sys.exit(1)
+          PY
 
       - name: Số dòng không đổi sau nâng cấp
         if: matrix.broken != 'true'
