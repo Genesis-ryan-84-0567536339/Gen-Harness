@@ -2183,3 +2183,81 @@ Không cần chụp màn hình hay gửi mã cho Claude — kết quả tự lư
   liệu thì dặn cài lại đúng thư mục cài (mật khẩu ở secrets/ + .env), muốn xoá thư mục thì `--delete-data` trước;
   doc comment `writeFileAtomicPerm` về đúng chỗ.
 - Chưa làm: preflight cài đặt tự phát hiện volume `<project>_pg_data` cũ khi sinh mật khẩu mới (nit, tuỳ chọn) — để bản sau.
+
+## v0.1.41 — Gen trợ lý thật, lát 1: nhớ hội thoại, Bản tin Gen, Hữu ích, chi phí AI (02/10/2026)
+
+### Boss cần làm gì
+
+1. Không bắt buộc làm gì để dùng. Sau khi cập nhật: mỗi sáng **07:30** và chiều **17:30** chuông có thẻ **"Bản tin
+   Gen"** — bấm vào là mở Gen đúng bản tin đó. Chưa dán khoá OpenRouter/Gemini thì bản tin vẫn tới, kèm dòng **"Dán khoá
+   OpenRouter/Gemini để Gen tóm tắt"**.
+2. **Lưu ý:** nếu trước giờ máy chỉ có Claude Code CLI thì sàng lọc tin / trực việc sẽ **tạm dừng** và dải "Cần Sếp xử
+   lý" báo **"Việc nền chưa có khoá API"**. Sếp chọn MỘT:
+   - (khuyên) tạo khoá: openrouter.ai đăng nhập → Keys → Create key → copy. Trong Console: **API & Model › Thêm nhà cung
+     cấp** → Loại **"OpenRouter"** → dán khoá → gõ tên model (vd `google/gemini-2.5-flash`) → **Thêm** (nhập PIN) → bấm
+     **Gọi thử**; hoặc
+   - bật **"Cho Claude Code CLI chạy việc nền"** ở Điều khiển hệ thống › Bộ não AI, đọc cảnh báo, tích xác nhận, nhập
+     PIN — chỉ khi Sếp chấp nhận rủi ro gói Pro/Max bị hạn chế.
+3. Tuỳ chọn: ở **Điều khiển hệ thống › Bộ não AI › Chi phí & trần ngân sách**, nhập giá model đang dùng (₫ cho 1 triệu
+   token, lấy trên trang giá OpenRouter/Gemini) và đặt **"Trần chi phí mỗi ngày"** — vượt trần có chuông. Xem tiền AI mỗi
+   ngày ở Tổng quan, thẻ **"Chi phí AI hôm nay"**.
+4. Đọc Gen / bản tin xong bấm **Hữu ích** hoặc **Không hữu ích** — số liệu này giúp chọn nguồn AI. Muốn xem lại cuộc trò
+   chuyện trước: nút đồng hồ **"Hội thoại cũ"** ở đầu khung Gen.
+
+### Vì sao (kế hoạch tổng `docs/audit/2026-10-01/0-ke-hoach-tong.md`, mục v0.1.41)
+
+- **F-8 (a, b)** 🟠: Gen quên hội thoại khi tải lại trang và chỉ trả lời khi được hỏi — chưa phải trợ lý tự báo Sếp.
+- **F-86** 🟡: việc nền tự động gọi Claude Code CLI (gói Pro/Max cá nhân) có thể trái điều khoản gói ⇒ mặc định phải dùng
+  khoá API; dùng CLI là quyết định + rủi ro của Owner (QD-12), có cảnh báo rõ.
+- **F-84** (phần ưu tiên) 🟡: chưa có số đo Hữu ích và chi phí ₫ để chọn nguồn model bằng số liệu.
+
+### Thay đổi
+
+- **API — Bản tin Gen (F-8b)**: `gh/gen/briefing.py` + cron `gen_briefing` 07:30/17:30 giờ VN (chạy bù 08:30, 09:30,
+  18:30, 19:30; quá 3 giờ thì bỏ khung). 6 mục: việc đến hạn, khách nóng, nháp chờ duyệt, sự cố cần Sếp, Facebook mới,
+  Kho có gì mới. Mỗi Owner một hội thoại `kind=briefing` + MỘT chuông `gen.briefing` link `/overview?gen=<id>`, idempotent
+  theo khung giờ (chạy lại không gửi lần hai). Tóm tắt bằng nguồn khoá API; không có ⇒ vẫn gửi phần không cần model +
+  dòng "Dán khoá OpenRouter/Gemini để Gen tóm tắt" (gợi ý mở Bộ não AI), không gọi CLI.
+- **API — nguồn AI cho việc nền (F-86)**: bộ định tuyến cho sàng lọc / trực việc / bản tin bỏ qua Claude Code CLI trừ khi
+  Owner bật; Antigravity CLI không bao giờ. Chỉ còn CLI ⇒ sự cố `ai.background_no_source` (một chuông), tự đóng khi việc
+  nền chạy lại được. `GET /providers/background` (`system.read`: chuỗi nguồn + dùng/không + lý do + `risk_text`), `PUT`
+  (chỉ Owner; thêm CLI cần PIN `ai.background_cli` ⇒ 423, rồi `accept_risk` ⇒ 422; bỏ CLI không cần PIN).
+- **API — Hữu ích & chi phí (F-84)**: migration **0027** `agent.gen_feedback`, `agent.model_prices` (RLS, chạy lại an
+  toàn). `PUT/DELETE /gen/feedback`; tin nhắn có `feedback`, danh sách hội thoại có `kind`. `GET /system/ai-cost` (₫ theo
+  agent trong ngày giờ VN, giá từng model, CLI trả theo gói 0 ₫, lượt "chưa có giá", 7 ngày, Hữu ích 7 ngày), `PUT
+  /system/ai-cost/budget`, `PUT /system/ai-cost/prices/{model_id}`; sự cố `ai.budget_exceeded` (mỗi ngày tối đa 1 chuông).
+- **Web — Gen (F-8a, F-8, F-86)**: khung Gen nhớ `conversationId` (nội dung luôn lấy lại từ máy chủ), tải lại trang vẫn
+  thấy hội thoại; hội thoại đã bị xoá (404) ⇒ khung trống, không lỗi đỏ; nút **"Hội thoại cũ"** (nhãn "Bản tin"); chuông
+  Bản tin Gen mở đúng bản tin rồi gỡ `?gen=` khỏi địa chỉ; nút Hữu ích / Không hữu ích (aria-pressed, bấm lại để bỏ).
+- **Web — chi phí & nguồn nền (F-84, F-86)**: Tổng quan thẻ **"Chi phí AI hôm nay"** (tổng ₫ / trần, bảng theo agent,
+  "chưa có giá", "Vượt trần", `?focus=ai-cost`); Bộ não AI: **"Nguồn AI cho việc nền"** (cảnh báo hiện NGUYÊN VĂN
+  `risk_text`, nút "Cho phép" khoá tới khi tích, PIN) và **"Chi phí & trần ngân sách"**; mẫu nhà cung cấp **OpenRouter**
+  (`openai_compat`, endpoint `https://openrouter.ai/api/v1`) dùng chung cho API & Model và Hướng dẫn bước 4.
+- **Sửa khi tích hợp**: thẻ "Nguồn AI cho việc nền" hiểu `purposes` dạng nhãn mà API thật trả ("Sàng lọc tin"…; trước đó
+  chỉ hiểu mã `refinery`… của mock ⇒ câu đầu thẻ lệch); mock `/providers/background` đổi theo API thật (nhãn, `risk_text`,
+  lý do). Lỗi ở các thẻ tải dữ liệu (`CardError`/`ErrorState`) và lỗi lưu ở hai thẻ mới giờ có **"Chi tiết kỹ thuật"**
+  (mã HTTP · mã lỗi · error_id) dưới câu tiếng Việt (`errorDetail`, luôn là chuỗi). e2e mock bổ sung đủ tiêu chí nghiệm thu.
+
+### Kiểm tra
+
+- api: `test_briefing_v0141.py` (1 chuông mỗi khung giờ, chạy lại không gửi thêm; đủ mục; không có khoá API ⇒ vẫn gửi +
+  dòng nhắc, không gọi CLI), `test_background_cli_v0141.py` (thêm CLI không PIN ⇒ 423, thiếu xác nhận ⇒ 422, có PIN +
+  xác nhận lưu được; agy luôn 422; định tuyến việc nền bỏ CLI), `test_gen_feedback_v0141.py`, `test_ai_cost_v0141.py`
+  (tổng ₫ khớp `model_calls` mẫu, trần + chuông vượt trần), `test_migrations_heads.py` (đúng 1 head 0027).
+- web: vitest `gen-store-v0141`, `gen-history-feedback-v0141`, `ai-cost-v0141`, `background-cli-v0141` (thêm: nhãn
+  purposes của API thật; lỗi có "Chi tiết kỹ thuật"), `provider-template-v0141`; e2e mock `gen-persist-v0141.spec.ts` (tải
+  lại giữ hội thoại; Hội thoại cũ + nhãn Bản tin; 404 ⇒ khung trống không lỗi đỏ; chuông Bản tin Gen ⇒ đúng bản tin, mục,
+  gỡ `?gen=`, nút dán khoá ⇒ `/system?tab=brain`; Hữu ích trên câu trả lời và bản tin giữ qua tải lại, bấm lại bỏ chọn),
+  `ai-cost-background-v0141.spec.ts` (panel chi phí + bảng agent + chưa có giá + focus; CLI "Không dùng" + lý do ⇒ bật ⇒
+  cảnh báo nguyên văn ⇒ 423 ⇒ PIN ⇒ "Dùng cho việc nền", tắt không PIN; mẫu OpenRouter gửi `openai_compat`; lưu trần + giá
+  đúng endpoint ⇒ "Vượt trần"; lỗi 500 ⇒ câu tiếng Việt + "Chi tiết kỹ thuật", không "[object Object]").
+- e2e thật rút gọn (live-ci): thêm "(e) Nối model từ mẫu OpenRouter → gọi thử → thấy trong chuỗi" với fake_llm giao thức
+  OpenAI (127.0.0.1:9911).
+- Kết quả trên nhánh tích hợp (02/10): ruff + mypy sạch (138 tệp), alembic 1 head (0027); pytest
+  1468 test mỗi lượt (superuser và gh_app, 3 deselected `slow` như CI) — 1464 passed + 4 đỏ giả ở
+  `test_version_v0136.py` (VERSION đổi sang v0.1.41 giữa lượt chạy, module đã đọc v0.1.40) chạy lại riêng 7/7 passed ở
+  cả hai vai; web lint/typecheck sạch, check_no_fake_ids sạch, vitest 501 passed (59 tệp), build OK, bridge test 50
+  pass; Playwright mock 203 passed; e2e thật rút gọn (live-ci) 6 passed (gồm (e) OpenRouter); browser 14 passed (ruff +
+  mypy sạch); genh `go vet` + `go test ./...` 15 gói ok; `check_release_gate.py` thoát 0, unittest `.github/scripts` 30 OK.
+- Chờ sau phát hành (người điều phối): kiểm genh tải từ Release đúng checksum + `genh version` = v0.1.41; E2E release
+  xanh rồi mới promote; sau đó Boss làm các bước ở đầu mục này.

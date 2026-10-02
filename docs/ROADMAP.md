@@ -94,6 +94,14 @@ mặc định giữ dữ liệu (`--delete-data` mới xoá); E2E `e2e-offsite` 
 `ops.action_log` "Không áp dụng". **Job nặng**: dò trùng danh tính không còn ngừng đề xuất (NOT EXISTS + watermark + trigram),
 bản đồ chỉ quét cửa sổ thời gian, job quá giờ 2 lần ⇒ chuông `job.timeout`. Migration 0026. Còn: `ops.action_log` hạn lưu
 (vướng chuỗi băm) — để sau.
+v0.1.41: Gen trợ lý thật, lát 1 (F-8 a+b, F-86, F-84 phần ưu tiên) — khung Gen **nhớ hội thoại** qua tải lại + "Hội thoại
+cũ"; **Bản tin Gen** 07:30/17:30 giờ VN (việc đến hạn, khách nóng, nháp chờ duyệt, sự cố, Facebook mới, Kho) thành một
+chuông mở đúng bản tin, không có khoá API vẫn gửi kèm dòng "Dán khoá OpenRouter/Gemini để Gen tóm tắt"; **việc nền mặc định
+chỉ dùng khoá API** — Claude Code CLI chỉ khi Owner bật (cảnh báo nguyên văn + tích + PIN, QD-12), chỉ còn CLI ⇒ chuông
+`ai.background_no_source`; nút **Hữu ích / Không hữu ích**; **chi phí AI ₫/ngày theo agent** (giá model, trần mỗi ngày +
+chuông vượt trần) ở Tổng quan; mẫu nhà cung cấp **OpenRouter**. Migration 0027. Còn: F-8 (c) gửi bản tin qua Telegram
+(v0.1.44); F-84 phần khác (duyệt nháp, đề xuất Deal/Vụ việc, vai trò khác, stream) hoãn; bộ 10–15 câu hỏi chuẩn + quyết
+định giữ/bỏ Jev chạy song song sau bản này.
 
 ## Đợt A — Gen v1 (thiết kế: docs/design/gen-v1.md)
 - ✅ A1 Khung chat phải + Gen trả lời/tóm tắt (chỉ đọc), lưu hội thoại, Nhật ký hành động — v0.1.21.
