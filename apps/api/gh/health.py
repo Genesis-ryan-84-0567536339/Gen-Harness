@@ -82,6 +82,8 @@ AUTOSTART_FIX = {
     "linger": "Lịch tự cập nhật và nút Cập nhật ngay chỉ chạy khi có người đăng nhập — chạy một lần: "
               "sudo loginctl enable-linger $USER",
 }
+#: Mỗi câu kết thúc bằng lệnh — KHÔNG thêm dấu chấm sau lệnh (Sếp chép nguyên dòng: "docker." / "$USER." chạy sẽ lỗi).
+AUTOSTART_SEP = " · "
 
 
 def _iso(dt: datetime | None) -> str | None:
@@ -513,7 +515,7 @@ async def _eval_autostart(db: AsyncSession, org_id: uuid.UUID, redis: Any) -> No
     if problems:
         await raise_once(db, org_id, key="host.autostart", kind="host.autostart", severity="warn",
                          title="Máy chủ chưa tự chạy lại Gen-Harness sau khi khởi động lại",
-                         body=". ".join(AUTOSTART_FIX[p] for p in problems) + ".", link=None,
+                         body=AUTOSTART_SEP.join(AUTOSTART_FIX[p] for p in problems), link=None,
                          fingerprint="|".join(sorted(problems)), redis=redis)
         return
     good = ("yes", "not_applicable")

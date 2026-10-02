@@ -269,6 +269,8 @@ const HEALTH_KIND_DEFAULTS: Record<string, Omit<HealthIssue, 'raised_at' | 'body
   'backup.stale': { key: 'backup.stale', kind: 'backup.stale', severity: 'bad', title: 'Đã hơn 36 giờ chưa có bản sao lưu mới', body: 'Chưa có bản nào. Mở mục Sao lưu và bấm Sao lưu ngay để giữ an toàn dữ liệu.', link: '/system?tab=storage&focus=backup', action: 'Mở mục Sao lưu' },
   'worker.silent': { key: 'worker.silent', kind: 'worker.silent', severity: 'bad', title: 'Bộ xử lý nền đã ngừng 12 phút', body: 'Sàng lọc tin, nhắc việc và sao lưu theo lịch đang dừng. Bấm để xem cách khởi động lại.', link: '/system?tab=storage', action: 'Xem sức khoẻ' },
   'disk.low': { key: 'disk.low', kind: 'disk.low', severity: 'bad', title: 'Ổ đĩa sắp hết chỗ', body: 'Còn 3,0 GB trống, cần tối thiểu 5,0 GB — cập nhật tự động đang tạm dừng.', link: '/system?tab=storage', action: 'Xem cách giải phóng' },
+  // v0.1.37 (F-73) — gh/health.py _eval_autostart: không có đường dẫn (lệnh chạy trên máy chủ) ⇒ dải không vẽ nút.
+  'host.autostart': { key: 'host.autostart', kind: 'host.autostart', severity: 'warn', title: 'Máy chủ chưa tự chạy lại Gen-Harness sau khi khởi động lại', body: 'Docker chưa bật tự chạy khi mở máy — chạy một lần trên máy chủ: sudo systemctl enable docker · Lịch tự cập nhật và nút Cập nhật ngay chỉ chạy khi có người đăng nhập — chạy một lần: sudo loginctl enable-linger $USER', link: null, action: 'Xem cách bật' },
 };
 
 export interface MockHealthOverride {

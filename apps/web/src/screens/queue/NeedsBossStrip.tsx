@@ -14,6 +14,8 @@ import { WARN } from './queueModel';
  * - "Chưa có model" (bước 4 của việc thiết lập tiếp chưa xong — API `GET /setup/follow-up` chỉ trả cho Owner);
  * - sự cố đang mở của `GET /system/health` (`issues` — kênh rớt, model hết đăng nhập, cập nhật lỗi, sao lưu quá hạn,
  *   Bộ xử lý nền im, ổ đĩa sắp đầy), 'bad' trước 'warn', mỗi dòng một nút đi thẳng tới chỗ sửa.
+ *   v0.1.37 (F-73): `host.autostart` (máy chưa tự chạy lại khi bật máy) không có đích trong Console (`link` null — lệnh
+ *   chạy trên máy chủ nằm trong `body`) ⇒ dòng không vẽ nút, không có nút chết.
  * Chỉ vai trò có `system.manage` (Owner): mọi nút ở đây dẫn tới chỗ CHỈ người quản lý hệ thống làm được (Sao lưu ngay,
  * đăng nhập lại kênh/model, thử lại cập nhật). Vai trò chỉ có `system.read` (Auditor) không thấy dải — tình trạng vẫn
  * xem được ở thẻ "Sức khoẻ hệ thống" (Dữ liệu & lưu trữ), không có nút chết.

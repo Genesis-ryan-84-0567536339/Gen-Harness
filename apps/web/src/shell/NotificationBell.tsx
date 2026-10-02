@@ -29,6 +29,8 @@ const KIND_ICON: Record<string, string> = {
   'backup.stale': 'ph ph-clock-countdown',
   'worker.silent': 'ph ph-pulse',
   'disk.low': 'ph ph-hard-drives',
+  // v0.1.37 (F-73): máy chủ chưa tự chạy lại Gen-Harness khi bật máy.
+  'host.autostart': 'ph ph-power',
 };
 
 /**

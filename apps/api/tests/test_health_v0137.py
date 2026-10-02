@@ -86,6 +86,9 @@ async def test_rootless_and_linger_bodies(owner_api: Api, app, db, redis, link: 
     [row] = await bells(db)
     assert "systemctl --user enable docker" in row.body and "sudo systemctl enable docker" not in row.body
     assert "sudo loginctl enable-linger $USER" in row.body
+    # Sếp chép nguyên lệnh: không có dấu chấm dính sau lệnh ("docker." / "$USER." chạy sẽ lỗi).
+    assert "docker." not in row.body and "$USER." not in row.body
+    assert row.body.endswith("$USER") and " · " in row.body
     # đổi tập vấn đề (chỉ còn linger) ⇒ fingerprint đổi ⇒ một chuông mới
     write_autostart(link, linger="no")
     await evaluate(redis, org)
