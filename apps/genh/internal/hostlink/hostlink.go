@@ -12,6 +12,14 @@
 //	  disk-status.json           ← genh ghi (v0.1.34) mỗi lần update kiểm đĩa: ok|low + số byte
 //	  update-inprogress.json     ← genh ghi (v0.1.34) ngay trước khi đổi compose.yaml; xoá khi xong —
 //	                               còn tệp = lần trước dừng giữa chừng, lần sau phải chạy lại đủ
+//	  genh-heartbeat.json        ← genh ghi (v0.1.37) mỗi 30 giây khi đang giữ khoá loại trừ
+//	                               (update/restore/import): {pid, op, boot_id, started_at, at};
+//	                               xoá khi nhả khoá — Console suy "tiến trình còn sống" từ đây
+//	  autostart-status.json      ← genh ghi (v0.1.37) lúc status/doctor/update: Docker và linger
+//	                               có tự chạy lại khi bật máy không (xem autostart.go)
+//
+// Khoá loại trừ (lock.go) KHÔNG nằm trong run/ mà ở <gốc cài đặt>/genh.lock —
+// run/ 0777 và bind-mount vào api, ai ghi được run/ sẽ xoá/thay/giữ được khoá.
 //
 // Bên máy chủ, một "watcher" (systemd path unit / crontab mỗi phút / launchd
 // QueueDirectories — xem internal/autoupdate) chạy `genh handle-requests`
@@ -99,6 +107,12 @@ type Status struct {
 	Message    string `json:"message,omitempty"`
 	StartedAt  string `json:"started_at,omitempty"`
 	FinishedAt string `json:"finished_at,omitempty"`
+	// PID (v0.1.37) là PID tiến trình genh NGOÀI CÙNG (tiến trình giữ khoá và
+	// ghi nhịp sống genh-heartbeat.json) — Console đối chiếu với nhịp sống.
+	PID int `json:"pid,omitempty"`
+	// BootID (v0.1.37): /proc/sys/kernel/random/boot_id lúc Start ("" ngoài
+	// Linux) — khác boot_id hiện tại ⇒ máy đã khởi động lại, lần chạy đã chết.
+	BootID string `json:"boot_id,omitempty"`
 }
 
 func now() string { return time.Now().UTC().Format(time.RFC3339) }
@@ -199,16 +213,19 @@ func ConsumeRequest(installDir string) bool {
 	return err == nil || !errors.Is(err, os.ErrNotExist)
 }
 
-// Start ghi trạng thái "running".
+// Start ghi trạng thái "running" kèm PID tiến trình này (tiến trình NGOÀI CÙNG
+// — chỉ nó gọi Start) và boot_id của máy.
 func Start(installDir, from string) error {
 	if err := EnsureDir(installDir); err != nil {
 		return err
 	}
-	return writeJSON(filepath.Join(Dir(installDir), StatusFile), Status{State: "running", From: from, StartedAt: now()})
+	return writeJSON(filepath.Join(Dir(installDir), StatusFile), Status{
+		State: "running", From: from, StartedAt: now(), PID: os.Getpid(), BootID: BootID(),
+	})
 }
 
-// Finish ghi trạng thái cuối (done/failed) giữ nguyên From/StartedAt của lần
-// chạy đang dở nếu có.
+// Finish ghi trạng thái cuối (done/failed) giữ nguyên From/StartedAt/PID/
+// BootID của lần chạy đang dở nếu có.
 func Finish(installDir, state, to, message string) error {
 	if err := EnsureDir(installDir); err != nil {
 		return err

@@ -12,6 +12,7 @@ import (
 
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/compose"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/dockercli"
+	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/hostlink"
 )
 
 // readyPath là endpoint readiness thật của apps/api (xem apps/api/gh/shell/
@@ -35,6 +36,10 @@ var volumeBaseNames = []string{"caddy_data", "pg_data", "redis_data", "gh_object
 type StatusDeps struct {
 	Runner dockercli.Runner
 	Client *http.Client
+	// GOOS/UID cho phần "Tự chạy lại khi bật máy" (CheckAutostart) — rỗng dùng
+	// runtime.GOOS / os.Getuid().
+	GOOS string
+	UID  string
 }
 
 // RunStatus in bảng dịch vụ + kết quả /api/v1/ready + phiên bản + dung
@@ -121,7 +126,25 @@ func RunStatus(ctx context.Context, env *Env, version string, deps StatusDeps, o
 		}
 	}
 
+	// v0.1.37 (F-73): máy có tự chạy lại Gen-Harness sau khi bật không — in kèm
+	// lệnh sửa, rồi ghi run/autostart-status.json cho Console (lỗi ghi chỉ cảnh báo).
+	_, _ = fmt.Fprintln(out)
+	as := CheckAutostart(ctx, AutostartDeps{Runner: runner, GOOS: deps.GOOS, UID: deps.UID})
+	printAutostart(out, as)
+	writeAutostartStatus(env, as, out)
+
 	return nil
+}
+
+// writeAutostartStatus ghi run/autostart-status.json (bỏ qua khi không có gốc
+// cài đặt); lỗi chỉ in cảnh báo — không làm hỏng status/doctor.
+func writeAutostartStatus(env *Env, as hostlink.AutostartStatus, out io.Writer) {
+	if env.InstallDir == "" {
+		return
+	}
+	if err := hostlink.WriteAutostartStatus(env.InstallDir, as); err != nil {
+		_, _ = fmt.Fprintf(out, "  (cảnh báo: không ghi được %s — %v)\n", hostlink.AutostartStatusFile, err)
+	}
 }
 
 // probeReadyBody gọi GET url và giải mã thân JSON dạng {"db":"ok",...} —

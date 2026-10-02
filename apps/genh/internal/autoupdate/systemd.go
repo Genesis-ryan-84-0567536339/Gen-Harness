@@ -2,6 +2,7 @@ package autoupdate
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -59,6 +60,37 @@ func enableLinux(ctx context.Context, deps Deps) (string, error) {
 		return "", fmt.Errorf("cài crontab: %w", err)
 	}
 	return "Đã bật tự cập nhật hằng đêm lúc ~03:00 (crontab — máy này không có systemd --user) — tắt bằng `genh auto-update disable`", nil
+}
+
+// refreshUnitsLinux ghi lại unit lịch đêm khi nội dung trên đĩa khác bản genh
+// này sinh ra (vd thiếu KillMode=mixed/TimeoutStopSec của v0.1.37 — unit chỉ
+// được ghi lúc install/enable) rồi `systemctl --user daemon-reload`. Chưa có
+// unit (lịch đêm tắt, hoặc dùng crontab) → không làm gì; KHÔNG enable/disable
+// gì. Trả true nếu đã ghi lại.
+func refreshUnitsLinux(ctx context.Context, deps Deps) (bool, error) {
+	home, err := deps.homeDir()
+	if err != nil {
+		return false, fmt.Errorf("không xác định được thư mục home: %w", err)
+	}
+	path := serviceUnitPath(home)
+	cur, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("đọc %s: %w", path, err)
+	}
+	want := SystemdServiceUnit(deps.GenhPath, deps.LogFile)
+	if string(cur) == want {
+		return false, nil
+	}
+	if err := os.WriteFile(path, []byte(want), 0o644); err != nil {
+		return false, fmt.Errorf("ghi %s: %w", path, err)
+	}
+	if _, err := deps.runner().Output(ctx, "systemctl", []string{"--user", "daemon-reload"}); err != nil {
+		return true, fmt.Errorf("systemctl --user daemon-reload: %w", err)
+	}
+	return true, nil
 }
 
 func disableLinux(ctx context.Context, deps Deps) (string, error) {
