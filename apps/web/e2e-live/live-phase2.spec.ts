@@ -86,7 +86,15 @@ test('toàn hệ thống: thiết lập 1–7, nhận tin, sàng lọc, màn d�
   await expect(page.getByRole('heading', { name: 'Sàng lọc dữ liệu' })).toBeVisible();
   await shot(page, '05-step7');
   await next.click();
-  for (let i = 0; i < 4; i++) await next.click();
+  // Bước 8–11 tuỳ chọn: từ khi bước 8 thành form thật (tạo agent, "Tiếp tục" khoá tới khi điền đủ) thì bấm "Để sau"
+  // (POST /setup/steps/{n}/skip) — agent được live-phase3 tạo ở màn Danh tính Agent như cũ.
+  for (let n = 8; n <= 11; n++) {
+    await expect(page.getByText(`Bước ${n}/12`)).toBeVisible();
+    // Lúc chuyển bước, form cũ và mới có thể cùng hiện trong chốc lát — đợi còn đúng một nút rồi mới bấm.
+    const later = page.getByRole('button', { name: 'Để sau', exact: true });
+    await expect(later).toHaveCount(1);
+    await later.click();
+  }
   await expect(page.getByRole('heading', { name: 'Hoàn tất' })).toBeVisible();
 
   // Tin nhắn thật đi qua bridge → Kho thô → sàng lọc (model giả) → Kho sạch.
