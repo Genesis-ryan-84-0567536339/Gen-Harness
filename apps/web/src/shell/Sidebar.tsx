@@ -2,6 +2,8 @@ import { type CSSProperties } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import type { NavDomain, NavItem } from '@gen-harness/contracts';
 import { ErrorState, Icon, Skeleton, Tooltip, toneColor, toneTint } from '@gen-harness/ui';
+import { useQuery } from '@tanstack/react-query';
+import { api } from '../lib/api';
 import { useNavigation } from '../lib/queries';
 import { useUiStore } from '../lib/uiStore';
 import { useIsMobile } from '../lib/useMediaQuery';
@@ -16,10 +18,13 @@ export function Sidebar({ activeKey }: { activeKey: string | null }) {
   const mode = mobile ? 'full' : stored;
   const wide = mode === 'full';
   const nav = useNavigation();
+  // v0.1.42 (F-67): phiên bản thật dưới logo — cùng khoá truy vấn với Trợ giúp (HelpPage).
+  const about = useQuery({ queryKey: ['system', 'about'], queryFn: ({ signal }) => api.about(signal), staleTime: 5 * 60_000, retry: false });
+  const version = about.data ? about.data.image_version || about.data.version : null;
 
   return (
     <aside className="sb" id="app-sidebar" data-mode={mode} aria-label="Thanh bên">
-      <Logo wide={wide} />
+      <Logo wide={wide} version={version} />
       <div className="sb-rule" aria-hidden />
       <nav className="sb-nav" aria-label="Danh mục màn hình">
         {nav.isPending ? (

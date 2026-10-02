@@ -46,7 +46,7 @@ export function InboxScreen() {
   return (
     <div className="screen">
       <ScreenHead
-        title="Hộp thư ý nghĩa"
+        title="Hộp thư"
         description="Không phải tin nhắn thô. Mỗi dòng là một đơn vị ý nghĩa đã được cấu trúc: nguồn, đối tượng, điểm số, tóm tắt hai câu, hành động đề xuất và chứng cứ gốc."
         maxWidth={700}
         actions={

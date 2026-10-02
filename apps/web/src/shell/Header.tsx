@@ -19,13 +19,15 @@ export interface Crumbs {
   subtitle: string;
 }
 
-export function Header({ crumbs }: { crumbs: Crumbs | null }) {
-  const showEnglish = useUiStore((s) => s.showEnglish);
+/**
+ * v0.1.42 (F-67): viên "tự trị", khiên độ tin cậy và nút "Góc nhìn đã lưu" chỉ hiện khi màn đang mở thuộc Nâng cao
+ * (`advanced`); viên "N kênh · M nhóm" luôn hiện. F-63: bỏ dòng phụ đề tiếng Anh.
+ */
+export function Header({ crumbs, advanced = false }: { crumbs: Crumbs | null; advanced?: boolean }) {
   const status = useHeaderStatus();
   const navigate = useNavigate();
   const drawerOpen = useUiStore((s) => s.drawerOpen);
   const setDrawerOpen = useUiStore((s) => s.setDrawerOpen);
-  const hasSub = !!crumbs && showEnglish && !crumbs.group && !!crumbs.subtitle;
 
   return (
     <header className="hd">
@@ -52,7 +54,6 @@ export function Header({ crumbs }: { crumbs: Crumbs | null }) {
             <Icon className="hd-caret" name="ph ph-caret-right" size={11} />
             <div className="hd-titles">
               <h1 className="hd-title">{crumbs.title}</h1>
-              {hasSub ? <div className="hd-sub">{crumbs.subtitle}</div> : null}
             </div>
           </>
         ) : null}
@@ -63,8 +64,12 @@ export function Header({ crumbs }: { crumbs: Crumbs | null }) {
           {status.isPending ? (
             <>
               <Skeleton width={118} height={28} radius={999} />
-              <Skeleton width={78} height={28} radius={999} />
-              <Skeleton width={62} height={28} radius={999} />
+              {advanced ? (
+                <>
+                  <Skeleton width={78} height={28} radius={999} />
+                  <Skeleton width={62} height={28} radius={999} />
+                </>
+              ) : null}
             </>
           ) : status.isError ? (
             <Tooltip content="Không tải được trạng thái — bấm để thử lại">
@@ -75,10 +80,10 @@ export function Header({ crumbs }: { crumbs: Crumbs | null }) {
               </button>
             </Tooltip>
           ) : (
-            <StatusPills s={status.data} />
+            <StatusPills s={status.data} advanced={advanced} />
           )}
         </div>
-        <SavedViewsButton />
+        {advanced ? <SavedViewsButton /> : null}
         <GenToggle />
         <NotificationBell />
         <ThemeToggle />
@@ -88,17 +93,21 @@ export function Header({ crumbs }: { crumbs: Crumbs | null }) {
   );
 }
 
-function StatusPills({ s }: { s: HeaderStatus }) {
+function StatusPills({ s, advanced }: { s: HeaderStatus; advanced: boolean }) {
   const pct = confidencePercent(s.data_confidence);
+  const live = (
+    <Tooltip content={`${s.channels_live} kênh đang sống, ${s.groups_listening} nhóm đang lắng nghe`}>
+      <div tabIndex={0} className="hd-pill-focus">
+        <Pill live={s.channels_live > 0}>
+          {s.channels_live} kênh · {s.groups_listening} nhóm
+        </Pill>
+      </div>
+    </Tooltip>
+  );
+  if (!advanced) return live;
   return (
     <>
-      <Tooltip content={`${s.channels_live} kênh đang sống, ${s.groups_listening} nhóm đang lắng nghe`}>
-        <div tabIndex={0} className="hd-pill-focus">
-          <Pill live={s.channels_live > 0}>
-            {s.channels_live} kênh · {s.groups_listening} nhóm
-          </Pill>
-        </div>
-      </Tooltip>
+      {live}
       <Tooltip content={autonomyTooltip(s.autonomy_level)}>
         <div tabIndex={0} className="hd-pill-focus">
           <Pill icon="ph ph-sliders" iconColor="var(--color-accent-300)" mono>

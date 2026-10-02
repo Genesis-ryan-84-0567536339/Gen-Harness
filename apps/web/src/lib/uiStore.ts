@@ -10,8 +10,6 @@ export type ThemePref = 'system' | 'light' | 'dark';
 interface UiPrefs {
   /** Design prop `sidebarMode` — 244px full / 60px icon rail. */
   sidebarMode: SidebarMode;
-  /** Design prop `showEnglish` — English subtitle under parent-level titles. v0.1.28 (UX N5): mặc định TẮT. */
-  showEnglish: boolean;
   /** Explicit open/closed state per nav group (by group name); absent = auto. */
   navOpen: Record<string, boolean>;
   /** Lựa chọn giao diện gần nhất trên trình duyệt này (dùng cả trước khi đăng nhập — public/theme-init.js). */
@@ -32,7 +30,6 @@ interface UiPrefs {
   domainOpen: Record<string, boolean>;
   setSidebarMode: (m: SidebarMode) => void;
   toggleSidebarMode: () => void;
-  setShowEnglish: (v: boolean) => void;
   setNavOpen: (group: string, open: boolean) => void;
   setTheme: (theme: ThemePref, userId?: string | null) => void;
   setDrawerOpen: (open: boolean) => void;
@@ -58,7 +55,6 @@ export const useUiStore = create<UiPrefs>()(
   persist(
     (set) => ({
       sidebarMode: 'full',
-      showEnglish: false,
       navOpen: {},
       theme: 'system',
       themeByUser: {},
@@ -67,7 +63,6 @@ export const useUiStore = create<UiPrefs>()(
       followUpHiddenByUser: {},
       setSidebarMode: (sidebarMode) => set({ sidebarMode }),
       toggleSidebarMode: () => set((s) => ({ sidebarMode: s.sidebarMode === 'full' ? 'rail' : 'full' })),
-      setShowEnglish: (showEnglish) => set({ showEnglish }),
       setNavOpen: (group, open) => set((s) => ({ navOpen: { ...s.navOpen, [group]: open } })),
       setTheme: (theme, userId) =>
         set((s) => ({ theme, themeByUser: userId ? { ...s.themeByUser, [userId]: theme } : s.themeByUser })),
@@ -78,16 +73,16 @@ export const useUiStore = create<UiPrefs>()(
     {
       name: 'gh-ui',
       storage: safeStorage,
-      // v1 (v0.1.28): phụ đề tiếng Anh chuyển sang mặc định tắt — tắt một lần cho trình duyệt đã lưu bản cũ (true
-      // là mặc định cũ, không phải lựa chọn có chủ đích); người dùng bật lại ở menu tài khoản thì được giữ.
-      version: 1,
-      migrate: (persisted, version) => {
-        const s = (persisted ?? {}) as Partial<UiPrefs>;
-        return version < 1 ? { ...s, showEnglish: false } : s;
+      // v2 (v0.1.42, F-63): bỏ hẳn phụ đề tiếng Anh — xoá field `showEnglish` đã lưu ở mọi bản cũ (v0: mặc định bật,
+      // v1: mặc định tắt). Lựa chọn khác (thanh bên, giao diện, nhóm mở/đóng) giữ nguyên.
+      version: 2,
+      migrate: (persisted) => {
+        const s = { ...((persisted ?? {}) as Record<string, unknown>) };
+        delete s.showEnglish;
+        return s as Partial<UiPrefs>;
       },
       partialize: (s) => ({
         sidebarMode: s.sidebarMode,
-        showEnglish: s.showEnglish,
         navOpen: s.navOpen,
         theme: s.theme,
         themeByUser: s.themeByUser,
