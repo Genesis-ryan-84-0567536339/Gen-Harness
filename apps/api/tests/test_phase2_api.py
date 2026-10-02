@@ -117,10 +117,10 @@ async def test_setup_steps_4_to_7_and_finish(owner_api, db) -> None:  # type: ig
     r = await api.send("PUT", "/setup/steps/12", {})
     assert r.status_code == 200, r.text
     assert (await api.get("/setup/state")).json()["finished"]
-    # Sau Hoàn tất: bước "Để sau" vẫn làm tiếp được từ trang Hướng dẫn kết nối, bước bắt buộc/skip thì không.
+    # Sau Hoàn tất: bước "Để sau" vẫn làm tiếp được từ trang Hướng dẫn thiết lập, bước bắt buộc/skip thì không.
     items = {i["n"]: i for i in (await api.get("/setup/follow-up")).json()}
     # v0.1.29: bước 4 cũng là việc tiếp theo được ("Chưa có model") — ở đây đã có model nên đã xong.
-    assert set(items) == set(range(4, 12)) and items[4]["done"] and not items[11]["done"]
+    assert set(items) == set(range(4, 12)) | {13, 14} and items[4]["done"] and not items[11]["done"]
     r = await api.send("PUT", "/setup/steps/11", {"frequency": "daily", "time_of_day": "03:00"})
     assert r.status_code == 200, r.text
     assert r.json()["finished"] and r.json()["backup"]["time_of_day"] == "03:00"
@@ -153,10 +153,10 @@ async def test_setup_finishes_with_only_steps_1_to_4(owner_api, db) -> None:  # 
     r = await api.send("PUT", "/setup/steps/12", {})
     assert r.status_code == 200, r.text
     assert (await api.get("/setup/state")).json()["finished"]
-    # Sau Hoàn tất: bước "Để sau" vẫn làm tiếp được từ trang Hướng dẫn kết nối, bước bắt buộc/skip thì không.
+    # Sau Hoàn tất: bước "Để sau" vẫn làm tiếp được từ trang Hướng dẫn thiết lập, bước bắt buộc/skip thì không.
     items = {i["n"]: i for i in (await api.get("/setup/follow-up")).json()}
     # v0.1.28 (UX N3/N4): "Để sau" dùng mặc định — bước 7 có bộ quy tắc khởi đầu, bước 11 có lịch 02:00 hằng ngày.
-    assert set(items) == set(range(4, 12)) and items[4]["done"] and items[11]["done"] and items[7]["done"] \
+    assert set(items) == set(range(4, 12)) | {13, 14} and items[4]["done"] and items[11]["done"] and items[7]["done"] \
         and not items[10]["done"]
     r = await api.send("PUT", "/setup/steps/11", {"frequency": "daily", "time_of_day": "03:00"})
     assert r.status_code == 200, r.text
