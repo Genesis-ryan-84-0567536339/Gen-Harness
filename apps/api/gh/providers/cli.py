@@ -198,16 +198,39 @@ CODE_SCRUB_MIN = 8
 
 def scrub_codes(message: str, codes: list[str]) -> str:
     """Che mã đăng nhập Sếp đã dán khỏi một thông báo (v0.1.39): cả mã nguyên vẹn lẫn MỌI mảnh ≥ 8 ký tự của mã —
-    thông báo lỗi chỉ giữ đuôi bộ đệm (`buf[-300:]`, có thể cắt ngang mã) và TUI có thể ngắt dòng mã dài."""
+    thông báo lỗi chỉ giữ đuôi bộ đệm (`buf[-300:]`, có thể cắt ngang mã) và TUI có thể ngắt dòng mã dài.
+
+    Quét MỘT lượt: mọi cửa sổ 8 ký tự của thông báo trùng một mảnh 8 ký tự của mã đều bị che (mảnh dài hơn = chuỗi
+    cửa sổ liền nhau nên cũng bị che trọn). Chi phí O(tổng độ dài mã + độ dài thông báo), không phụ thuộc bình phương
+    độ dài mã (mã dài tới 500 ký tự, dán lại nhiều lần)."""
+    uniq = {c for c in codes if c}
+    if not uniq:
+        return message
     out = message
-    for c in sorted({c for c in codes if c}, key=len, reverse=True):
+    for c in sorted(uniq, key=len, reverse=True):
         out = out.replace(c, "***")
-        for n in range(len(c) - 1, CODE_SCRUB_MIN - 1, -1):
-            for i in range(len(c) - n + 1):
-                piece = c[i:i + n]
-                if piece in out:
-                    out = out.replace(piece, "***")
-    return out
+    n = CODE_SCRUB_MIN
+    grams = {c[i:i + n] for c in uniq for i in range(len(c) - n + 1)}
+    if not grams:
+        return out
+    mask = [False] * len(out)
+    for i in range(len(out) - n + 1):
+        if out[i:i + n] in grams:
+            for j in range(i, i + n):
+                mask[j] = True
+    if not any(mask):
+        return out
+    parts: list[str] = []
+    i = 0
+    while i < len(out):
+        if mask[i]:
+            while i < len(out) and mask[i]:
+                i += 1
+            parts.append("***")
+        else:
+            parts.append(out[i])
+            i += 1
+    return "".join(parts)
 
 
 def session_email(kind: str, raw: bytes) -> str | None:
@@ -647,6 +670,9 @@ class LoginSession:
     # v0.1.39 (F-77): DẠNG mã Sếp đã dán ({length, classes, symbols, has_space}) — không bao giờ giữ giá trị mã;
     # không có trong public() (chỉ ghi vào kết quả kiểm `<agy|claude>_login` + actionlog).
     code_shape: dict[str, Any] | None = None
+    # Hồ sơ mới đã commit vào CSDL (cuối `_finish`): từ đây khối finally KHÔNG được trả tệp phiên cũ về nữa, kể cả khi
+    # lượt bị huỷ/tắt trước khi kịp báo "done" (tệp phải khớp hồ sơ đang hoạt động trong CSDL).
+    committed: bool = False
 
     def public(self) -> dict[str, Any]:
         return {"login_id": self.id, "kind": self.kind, "status": self.status, "url": self.url,
@@ -838,7 +864,7 @@ class CliLogins:
                     await asyncio.wait_for(proc.wait(), 5)
             # Sau khi CLI đã tắt (không còn ghi tệp): xong → bỏ bản gửi tạm; lỗi/huỷ → trả tài khoản cũ về.
             with contextlib.suppress(OSError):
-                if s.status == "done":
+                if s.status == "done" or s.committed:
                     drop_parked_token(s.kind)
                 elif not unpark_token(s.kind) and path.exists() and path.stat().st_mtime > before:
                     # Chưa có tài khoản nào: bỏ tệp dở dang CLI để lại, để không thành "đã đăng nhập" giả.
@@ -896,11 +922,13 @@ class CliLogins:
                                    action="cli.logged_in", target_type="cli_profile", target_id=str(profile_id),
                                    target_label=ident["email"], detail=detail)
             await db.commit()
+            s.committed = True
             profs = await profiles(db, s.org_id, s.kind)
         s.profile = next((p for p in profs if p["id"] == str(profile_id)), None)
         # Ghi kết quả kiểm TRƯỚC khi báo "done" (web thấy "done" là tải lại ô kết quả ngay). `_boss_check` nuốt mọi lỗi
-        # (cả phần dựng detail) — hồ sơ mới đã commit, một lỗi ở đây không được đẩy lượt đăng nhập sang nhánh 'failed'
-        # (khối finally sẽ trả tệp phiên CŨ về đè lên tài khoản vừa đăng nhập).
+        # (cả phần dựng detail) — hồ sơ mới đã commit, một lỗi ở đây không được đẩy lượt đăng nhập sang nhánh 'failed'.
+        # Huỷ/tắt giữa chừng (CancelledError) vẫn an toàn: `s.committed` đã bật nên khối finally không trả tệp phiên CŨ
+        # về đè lên tài khoản vừa đăng nhập.
         await self._boss_check(s, ok=True, email=ident["email"])
         s.status, s.message = "done", None
         await self._emit(s, profile=s.profile)

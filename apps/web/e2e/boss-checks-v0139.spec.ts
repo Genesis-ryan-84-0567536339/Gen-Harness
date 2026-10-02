@@ -103,4 +103,22 @@ test.describe('Việc Sếp cần làm (v0.1.39)', () => {
     await expect(again.getByTestId('boss-result').nth(2)).toContainText('gọi thử chạy bằng b***@genesis.vn — khớp');
     await expect(again).toContainText('Đã đổi qua lại 2/2 lần');
   });
+
+  test('Claude: đã đăng nhập từ trước (chưa có bản đăng nhập) → Gọi thử đạt là dòng 4 Xong; tải lại vẫn còn', async ({ page }) => {
+    await p3Hook(page.request, 'bossChecks', 'seedClaude');
+    await loginAsOwner(page);
+    await page.goto('/guide/viec-sep');
+    const cl = row(page, 'Claude Code CLI');
+    const results = cl.getByTestId('boss-result');
+    await expect(results.nth(0)).toContainText('Đã có phiên (đăng nhập trước đây) — bấm Gọi thử để xác nhận');
+    await expect(cl.getByRole('button', { name: /Đăng nhập/ })).toHaveCount(0);
+    await cl.getByRole('button', { name: 'Gọi thử' }).click();
+    await expect(results.nth(1)).toContainText('Đạt · đang dùng ryan@claude.ai');
+    await expect(results.nth(0)).toContainText('Đạt · phiên có sẵn, đã xác nhận bằng Gọi thử');
+    await expect(cl).toContainText('Xong');
+    await page.reload();
+    const again = row(page, 'Claude Code CLI');
+    await expect(again).toContainText('Xong');
+    await expect(again.getByTestId('boss-result').nth(0)).toContainText('phiên có sẵn');
+  });
 });

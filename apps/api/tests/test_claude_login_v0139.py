@@ -115,3 +115,30 @@ async def test_claude_cli_missing_records_cli_missing(owner_api: Api, clis: Any,
     assert st["status"] == "failed"
     res = (await owner_api.get("/boss-checks")).json()["results"]["claude_login"]
     assert res["status"] == "fail" and res["error_code"] == "CLI_MISSING" and res["detail"] == {}
+
+
+async def test_existing_claude_session_counts_as_logged_in_after_call(owner_api: Api, clis: Any, app: Any,  # noqa: F811
+                                                                      tmp_path: Path) -> None:
+    """Phiên Claude có từ trước v0.1.39 (tự chuyển khi cập nhật): không có bản `claude_login` nào. Gọi thử ĐẠT → máy chủ
+    ghi `claude_login` 'pass' (login_source=existing_session) để dòng 4 thành "Xong" mà không bắt đăng nhập lại."""
+    api = owner_api
+    app.state.cli_logins.claude_argv = [_mode_wrapper(tmp_path, "claude-confirm", "FAKE_CLAUDE_CONFIRM=1")]
+    assert (await _start_and_submit(api, CODE))["status"] == "done"
+    async with admin_sessionmaker()() as db:   # như máy cập nhật từ bản cũ: chưa từng có bản ghi claude_login
+        await db.execute(text("DELETE FROM ops.boss_checks WHERE check_key = 'claude_login'"))
+        await db.commit()
+    ov = (await api.get("/boss-checks")).json()
+    assert ov["results"]["claude_login"] is None
+    assert next(r for r in ov["rows"] if r["key"] == "claude")["done"] is False
+    out = (await api.send("POST", "/boss-checks/claude_call/run", {})).json()
+    assert out["status"] == "pass", out
+    ov = (await api.get("/boss-checks")).json()
+    login = ov["results"]["claude_login"]
+    assert login["status"] == "pass" and login["runs"] == 1, login
+    assert login["detail"] == {"login_source": "existing_session", "account_masked": "b***@example.vn",
+                               "credentials_file": True}
+    assert next(r for r in ov["rows"] if r["key"] == "claude")["done"] is True
+    # Đã đạt rồi thì gọi thử lần nữa không ghi thêm bản đăng nhập.
+    assert (await api.send("POST", "/boss-checks/claude_call/run", {})).json()["status"] == "pass"
+    assert (await api.get("/boss-checks")).json()["results"]["claude_login"]["runs"] == 1
+    assert "boss-Ab9_x@example.vn" not in await _db_text("SELECT message, detail::text FROM ops.boss_checks")

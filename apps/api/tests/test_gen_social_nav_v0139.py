@@ -31,6 +31,16 @@ def test_validator_navigate_social() -> None:
     assert not Validator(_operator(), set(), "overview").check(nav).ok
 
 
+def test_boss_checks_screen_owner_only() -> None:
+    """F-74: Gen mở được trang "Việc Sếp cần làm" cho Owner; Vận hành thì không (trang chỉ Owner)."""
+    assert registry.load().screens["boss_checks"] == {"path": "/guide/viec-sep", "title": "Việc Sếp cần làm"}
+    assert "boss_checks" in {s["key"] for s in registry.visible_screens(_owner())}
+    assert "boss_checks" not in {s["key"] for s in registry.visible_screens(_operator())}
+    nav = envelope.Navigate(type="navigate", screen="boss_checks")
+    assert Validator(_owner(), set(), "overview").check(nav).ok
+    assert not Validator(_operator(), set(), "overview").check(nav).ok
+
+
 def test_facebook_card_target() -> None:
     t = registry.resolve_target("system.channels.facebook")
     assert t is not None

@@ -262,7 +262,7 @@ describe('v0.1.39 (F-31) — mạng công cộng bật sẵn, Kiểm tra tự l�
     const user = userEvent.setup();
     await user.click(await screen.findByRole('button', { name: 'Kiểm tra' }));
     const status = await screen.findByRole('status');
-    expect(status).toHaveTextContent("Bật 'Cho phép Gen-hub ở mạng công cộng' ngay trong thẻ này");
+    expect(status).toHaveTextContent("Bật 'Cho phép Gen-hub ở mạng công cộng' ngay trong thẻ này.");
     expect(status).toHaveTextContent('Chi tiết kỹ thuật');
     expect(status).toHaveTextContent('MCP_NETWORK_BLOCKED');
     expect(container.innerHTML).not.toContain('[object Object]');

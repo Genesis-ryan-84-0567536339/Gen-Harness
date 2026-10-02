@@ -70,7 +70,7 @@ async def test_switch_back_and_forth_calls_with_selected_account(owner_api: Api,
     assert out["status"] == "pass" and out["account"] == "an@example.vn", out
     assert out["detail"] == {"expected_masked": "a***@example.vn", "account_masked": "a***@example.vn",
                              "account_match": True, "latency_ms": out["detail"]["latency_ms"],
-                             "target_profile": an}
+                             "target_profile": an, "from_profile": binh}
     assert (await _run(api, "agy_call"))["account"] == "an@example.vn"
     assert (await _provider(api, AGY))["account_label"] == "an@example.vn"
 
@@ -189,6 +189,37 @@ async def test_switch_to_active_account_keeps_refreshed_session(owner_api: Api, 
     assert orjson.loads(path.read_bytes())["access_token"] == "tok-binh-lam-moi"
 
 
+async def test_noop_switch_to_active_account_is_not_counted(owner_api: Api, clis: Any) -> None:  # noqa: F811
+    """F-76: binh đang hoạt động, "đổi" sang binh (không đổi gì) rồi sang an → chỉ MỘT lần đổi thật."""
+    api = owner_api
+    await _login(api, AGY, "4/an")
+    await _login(api, AGY, "4/binh")
+    await verify_pin(api)
+    an, binh = await _profile_id(api, "an@example.vn"), await _profile_id(api, "binh@example.vn")
+    out = await _run(api, "agy_switch", {"profile_id": binh})
+    assert out["status"] == "pass" and out["detail"]["from_profile"] == binh, out
+    assert (await api.get("/boss-checks")).json()["switch_passes"] == 0
+    out = await _run(api, "agy_switch", {"profile_id": an})
+    assert out["status"] == "pass" and out["detail"]["from_profile"] == binh, out
+    ov = (await api.get("/boss-checks")).json()
+    assert ov["switch_passes"] == 1 and next(r for r in ov["rows"] if r["key"] == "agy")["done"] is False
+    await _run(api, "agy_switch", {"profile_id": binh})
+    assert (await api.get("/boss-checks")).json()["switch_passes"] == 2
+
+
+def test_scrub_codes_long_code_is_linear_and_masks_all() -> None:
+    import time
+
+    code = "".join(chr(0x41 + (i * 7) % 26) + str(i % 10) for i in range(250))   # 500 ký tự (giới hạn CodeIn)
+    msg = ("x" * 50 + code[123:400] + "\n" + code[:90]) * 3
+    t = time.perf_counter()
+    out = climod.scrub_codes(msg, [code, code[::-1], code[1:]])
+    assert time.perf_counter() - t < 0.5
+    for i in range(len(code) - 7):
+        assert code[i:i + 8] not in out
+    assert out.startswith("x" * 50)
+
+
 def test_scrub_codes_masks_cut_and_wrapped_pieces() -> None:
     code = "4/0AVGzR1A-abcdefghijklmnopqrstuvwxyz0123456789"
     # Đuôi bộ đệm cắt ngang mã + TUI ngắt dòng giữa mã: không mảnh ≥ 8 ký tự nào được lọt ra.
@@ -213,3 +244,30 @@ async def test_login_done_even_if_boss_check_raises(owner_api: Api, clis: Any, a
     monkeypatch.setattr(type(app.state.cli_logins), "_boss_check_record", boom)
     await _login(api, AGY, "4/binh")
     assert climod.file_email(climod.token_path(AGY).read_bytes()) == "binh@example.vn"
+
+
+async def test_cancel_after_profile_commit_keeps_new_session_file(owner_api: Api, clis: Any, app: Any,  # noqa: F811
+                                                                  monkeypatch: Any) -> None:
+    """Huỷ/tắt (CancelledError) SAU khi hồ sơ mới đã commit nhưng trước khi báo "done": khối finally không được trả tệp
+    phiên CŨ (an) về trong khi CSDL đã ghi binh là hồ sơ hoạt động."""
+    import asyncio
+
+    from tests.test_cli_models_v0131 import _wait
+
+    api = owner_api
+    await _login(api, AGY, "4/an")
+
+    async def cancelled(*a: Any, **k: Any) -> None:
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(type(app.state.cli_logins), "_boss_check_record", cancelled)
+    r = await api.send("POST", f"/cli/login?kind={AGY}")
+    login_id = r.json()["login_id"]
+    assert (await _wait(api, login_id, ("waiting_code", "failed", "done")))["status"] == "waiting_code"
+    await api.send("POST", f"/cli/login/{login_id}/code", {"code": "4/binh"})
+    await _wait(api, login_id, ("done", "failed"))
+    task = app.state.cli_logins.sessions[login_id].task
+    await asyncio.wait([task], timeout=10)             # khối finally (trả/bỏ tệp gửi tạm) đã chạy xong
+    assert climod.file_email(climod.token_path(AGY).read_bytes()) == "binh@example.vn"
+    profs = {p["email"]: p["active"] for p in (await api.get(f"/cli/profiles?kind={AGY}")).json()}
+    assert profs == {"an@example.vn": False, "binh@example.vn": True}

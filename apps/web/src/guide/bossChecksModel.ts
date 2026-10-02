@@ -20,7 +20,7 @@ export const BOSS_ERROR_TEXT: Record<string, string> = {
   HUB_LINK_NOT_CONFIGURED: 'Chưa nhập địa chỉ và token Gen-hub — điền rồi bấm Kiểm tra.',
   HUB_ENDPOINT_FORBIDDEN: 'Địa chỉ Gen-hub này không được phép gọi — kiểm tra lại địa chỉ.',
   HUB_ENDPOINT_INVALID: 'Địa chỉ Gen-hub không hợp lệ — sửa lại theo dạng https://hub.genos.top/mcp.',
-  MCP_NETWORK_BLOCKED: "Bật 'Cho phép Gen-hub ở mạng công cộng' ngay trong thẻ này",
+  MCP_NETWORK_BLOCKED: "Bật 'Cho phép Gen-hub ở mạng công cộng' ngay trong thẻ này.",
   HUB_TOKEN_REJECTED: 'Gen-hub từ chối token — token sai, hết hạn hoặc đã bị thu hồi. Tạo token mới rồi dán lại.',
   HUB_RATE_LIMITED: 'Gen-hub đang giới hạn số lần gọi — đợi vài phút rồi kiểm tra lại.',
   HUB_UNREACHABLE: 'Không gọi được Gen-hub — kiểm tra địa chỉ và mạng của máy chủ.',
@@ -35,6 +35,8 @@ export const BOSS_ERROR_TEXT: Record<string, string> = {
   SOCIAL_RATE_LIMIT: 'Đã đọc đủ số lần cho phép — đợi một lúc rồi bấm Đọc ngay lại.',
   SOCIAL_READ_FAILED: 'Đọc Facebook không thành công — mở trang Tài khoản mạng xã hội xem lý do.',
   SOCIAL_READ_HALTED: 'Đọc mạng xã hội đang bị dừng (Dừng tất cả) — bật lại ở trang Tài khoản mạng xã hội.',
+  SOCIAL_READ_CANCELLED: 'Lượt đọc Facebook đã bị huỷ — bấm Đọc ngay lần nữa.',
+  WORKER_TIMEOUT: 'Lượt đọc Facebook chạy quá lâu nên đã dừng — mở trang Tài khoản mạng xã hội xem rồi bấm Đọc ngay lần nữa.',
   SOCIAL_JOB_MISSING: 'Không thấy lượt đọc vừa chạy — bấm Đọc ngay lại.',
   AGY_NOT_LOGGED_IN: 'Chưa đăng nhập Google cho Antigravity — bấm Đăng nhập Google.',
   AGY_ACCOUNT_MISMATCH: 'Gọi thử vẫn chạy bằng tài khoản khác với tài khoản vừa chọn — bấm Đăng nhập lại và đăng nhập đúng tài khoản đó.',
@@ -102,6 +104,16 @@ export function accountOf(c: Pick<BossCheck, 'key' | 'checked_at' | 'account' | 
   if (fresh && fresh.key === c.key && fresh.checked_at === c.checked_at && typeof fresh.account === 'string' && fresh.account) return fresh.account;
   const m = c.detail?.account_masked;
   return typeof m === 'string' && m ? m : null;
+}
+
+/** Lượt đọc Facebook treo quá lâu (khớp `social.service.STALE_AFTER` = 15 phút): máy chủ đóng việc ở lần tải kế. */
+export const SOCIAL_STALE_MS = 15 * 60_000;
+
+/** Kết quả đang chạy đã quá `SOCIAL_STALE_MS` → web mở lại nút và chỉ sang trang Tài khoản mạng xã hội. */
+export function isStalePending(c: Pick<BossCheck, 'status' | 'checked_at'> | null | undefined, now: number = Date.now()): boolean {
+  if (!c || c.status !== 'pending') return false;
+  const t = Date.parse(c.checked_at);
+  return Number.isFinite(t) && now - t > SOCIAL_STALE_MS;
 }
 
 /** Có kết quả nào đang chạy → trang thăm lại. */

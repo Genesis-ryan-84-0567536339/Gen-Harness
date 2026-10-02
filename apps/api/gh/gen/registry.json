@@ -112,6 +112,10 @@
     "social": {
       "path": "/social",
       "title": "Tài khoản mạng xã hội"
+    },
+    "boss_checks": {
+      "path": "/guide/viec-sep",
+      "title": "Việc Sếp cần làm"
     }
   },
   "targets": [
@@ -263,7 +267,7 @@
       "id": "system.channels.facebook",
       "screen": "system",
       "label": "Thẻ Facebook",
-      "description": "Mở trang tài khoản mạng xã hội (chỉ Owner)",
+      "description": "Mở trang Tài khoản mạng xã hội (chỉ Owner)",
       "dynamic": null,
       "params": {
         "tab": "channels"
@@ -819,7 +823,7 @@
         "Bấm \"Đăng nhập\" — Sếp tự đăng nhập ngay trong app (mật khẩu, mã 2FA không lưu lại).",
         "Khi tài khoản báo Đang kết nối, bấm \"Đọc ngay\" để thử đọc thông báo."
       ],
-      "done_when": "Có tài khoản Facebook đã đăng nhập.",
+      "done_when": "Đã đăng nhập Facebook ít nhất một lần.",
       "console": {
         "label": "Tài khoản mạng xã hội",
         "to": "/social"

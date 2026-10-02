@@ -68,9 +68,14 @@ function JevStatus({ p, test, onFailed }: { p: Provider; test: TestMutation; onF
         <dd style={{ color: tone }}>{status.label}</dd>
       </dl>
       <div className="jev-actions">
-        {result ? (
+        {result?.ok ? (
           <span className="jev-note" role="status">
             <Icon name="ph ph-check-circle" size={12} /> Đã kiểm tra — không cần kiểm thêm
+          </span>
+        ) : result ? (
+          // Lỗi: không dùng dấu tích xanh (mâu thuẫn với ô lỗi đỏ ngay dưới) — Jev không bắt buộc nên bỏ qua được.
+          <span className="jev-note" role="status">
+            <Icon name="ph ph-info" size={12} /> Đã kiểm tra — Jev không bắt buộc, có thể bỏ qua
           </span>
         ) : (
           <Button

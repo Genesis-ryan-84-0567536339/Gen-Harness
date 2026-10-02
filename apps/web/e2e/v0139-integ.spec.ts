@@ -145,7 +145,7 @@ test.describe('v0.1.39 · nghiệm thu sau gộp', () => {
     await expect(sw).toHaveAttribute('aria-checked', 'false');
     await card.getByRole('button', { name: 'Lưu & kiểm tra' }).click();
     await enterPin(page);
-    await expect(card.getByRole('status')).toContainText("Bật 'Cho phép Gen-hub ở mạng công cộng' ngay trong thẻ này");
+    await expect(card.getByRole('status')).toContainText("Bật 'Cho phép Gen-hub ở mạng công cộng' ngay trong thẻ này.");
     await noObjectText(page);
   });
 

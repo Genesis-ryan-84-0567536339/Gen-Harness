@@ -136,12 +136,12 @@ describe('v0.1.39 — Gen điều hướng tới /social', () => {
 });
 
 describe('v0.1.39 — thẻ Facebook ở Hệ thống › Kênh', () => {
-  it('Owner: có thẻ Facebook, link "Mở trang tài khoản mạng xã hội" tới /social', async () => {
+  it('Owner: có thẻ Facebook, link "Mở trang Tài khoản mạng xã hội" tới /social', async () => {
     renderChannels(OWNER, { 'system.read': 'all', 'system.manage': 'all' });
     const card = await screen.findByRole('region', { name: 'Facebook' });
     expect(card).toHaveAttribute('data-gen-target', 'system.channels.facebook');
     expect(within(card).getByText('Đọc thông báo và tin nhắn — đăng nhập ngay trong app')).toBeInTheDocument();
-    const link = within(card).getByRole('link', { name: /Mở trang tài khoản mạng xã hội/ });
+    const link = within(card).getByRole('link', { name: /Mở trang Tài khoản mạng xã hội/ });
     expect(link).toHaveAttribute('href', '/social');
     await userEvent.setup().click(link);
     expect(screen.getByTestId('where')).toHaveTextContent('/social');

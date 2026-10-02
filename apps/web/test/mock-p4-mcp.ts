@@ -90,7 +90,7 @@ export function createMock(opts: P4McpOptions) {
       return { ok: false, error, error_code: code, latency_ms: 20, exposed_tools: [], missing_tools: [], link: hubLink };
     };
     if (!hubLink.configured) return fail('HUB_LINK_NOT_CONFIGURED', 'Chưa nhập địa chỉ và token Gen-hub');
-    if (publicHttps(hubLink.endpoint) && !hubLink.allow_public_network) return fail('MCP_NETWORK_BLOCKED', "Bật 'Cho phép Gen-hub ở mạng công cộng' ngay trong thẻ này");
+    if (publicHttps(hubLink.endpoint) && !hubLink.allow_public_network) return fail('MCP_NETWORK_BLOCKED', "Bật 'Cho phép Gen-hub ở mạng công cộng' ngay trong thẻ này.");
     if (hubTokenBad) return fail('HUB_TOKEN_REJECTED', '401: Token Gen-hub hết hạn hoặc đã bị thu hồi');
     hubLink = { ...hubLink, enabled: true, status: 'ok', last_ok_at: new Date().toISOString(), last_error: null, health: 'healthy' };
     return { ok: true, error: null, error_code: null, latency_ms: 240, exposed_tools: ['mcp-58450__kho_tom_tat', 'mcp-58450__kho_search', 'mcp-58450__kho_find_by_id'], missing_tools: [], link: hubLink };

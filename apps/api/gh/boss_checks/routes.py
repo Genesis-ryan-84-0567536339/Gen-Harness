@@ -172,7 +172,24 @@ async def _run_call(request: Request, db: AsyncSession, user: service.CurrentUse
                             user_id=user.id)
     if kind in climod.CLI_KINDS:
         out["account"] = result.get("account")
+    if key == "claude_call" and ok:
+        await _adopt_existing_claude_login(db, user, result)
     return out
+
+
+async def _adopt_existing_claude_login(db: AsyncSession, user: service.CurrentUser, result: dict[str, Any]) -> None:
+    """Phiên Claude Code có từ TRƯỚC v0.1.39 (tự chuyển khi cập nhật) không đi qua luồng đăng nhập nên không có bản
+    `claude_login`; lượt gọi thử vừa ĐẠT chứng minh phiên đang dùng được → ghi `claude_login` 'pass'
+    (`login_source: existing_session`) để dòng 4 thành "Xong" mà Sếp không phải đăng nhập lại. Chỉ ghi khi bản
+    `claude_login` mới nhất chưa đạt (chưa có, hoặc một lượt đăng nhập lại hỏng trong khi phiên cũ vẫn chạy)."""
+    last = (await boss.latest(db, user.org_id)).get("claude_login")
+    if last is not None and last["status"] == "pass":
+        return
+    detail: dict[str, Any] = {"login_source": "existing_session",
+                              "account_masked": boss.mask_email(result.get("account"))}
+    with contextlib.suppress(OSError):
+        detail["credentials_file"] = climod.token_path(climod.CLAUDE).exists()
+    await boss.record(db, user.org_id, "claude_login", "pass", detail=detail, user_id=user.id)
 
 
 async def _run_switch(request: Request, db: AsyncSession, user: service.CurrentUser,
@@ -192,6 +209,11 @@ async def _run_switch(request: Request, db: AsyncSession, user: service.CurrentU
 
     # Đổi tài khoản rồi gọi thử THẬT — kiểm hạn mức trước để không đổi mà không kiểm được.
     await _probe_budget(request.app.state.redis, user.org_id)
+    # Hồ sơ đang hoạt động TRƯỚC khi đổi: "đổi" sang chính nó không phải lần đổi thật (`boss.switch_passes`).
+    before = (await db.execute(text("""SELECT c.id FROM agent.cli_profiles c
+                                       JOIN agent.providers p ON p.id = c.provider_id
+                                       WHERE c.org_id = :o AND p.kind = :k AND c.is_active LIMIT 1"""),
+                               {"o": user.org_id, "k": climod.AGY})).scalar_one_or_none()
     out = await climod.activate(db, user.org_id, profile_id)
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                            action="cli.account_switched", target_type="cli_profile", target_id=out["id"],
@@ -206,7 +228,8 @@ async def _run_switch(request: Request, db: AsyncSession, user: service.CurrentU
     # Chỉ kết luận "lệch" khi có ĐỦ hai email và chúng khác nhau; thiếu một bên = không so được (None), không phải lệch.
     match: bool | None = (str(expected).lower() == str(actual).lower()) if expected and actual else None
     detail = {"expected_masked": boss.mask_email(expected), "account_masked": boss.mask_email(actual),
-              "account_match": match, "latency_ms": result.get("latency_ms"), "target_profile": str(profile_id)}
+              "account_match": match, "latency_ms": result.get("latency_ms"), "target_profile": str(profile_id),
+              "from_profile": str(before) if before else None}
     if not result["ok"]:
         status, code, msg = "fail", result.get("error_code") or "PROVIDER_ERROR", result.get("error")
     elif match is not False:

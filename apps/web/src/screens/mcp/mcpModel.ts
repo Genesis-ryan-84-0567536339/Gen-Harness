@@ -88,7 +88,7 @@ export function isoToDay(iso: string | null): string {
 }
 
 /** v0.1.39 (F-31): câu cố định khi máy chủ chặn Gen-hub ở mạng công cộng (`MCP_NETWORK_BLOCKED`). */
-export const PUBLIC_NET_HINT = "Bật 'Cho phép Gen-hub ở mạng công cộng' ngay trong thẻ này";
+export const PUBLIC_NET_HINT = "Bật 'Cho phép Gen-hub ở mạng công cộng' ngay trong thẻ này.";
 
 const PRIVATE_SUFFIXES = ['.localhost', '.local', '.lan', '.internal', '.home.arpa'];
 

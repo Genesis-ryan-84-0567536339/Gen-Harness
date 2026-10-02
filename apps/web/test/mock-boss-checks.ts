@@ -11,7 +11,11 @@
  * - `runs` = số bản ghi (cả lỗi); `switch_passes` = số lần đổi ĐẠT sang tài khoản khác lượt trước (như máy chủ).
  * - Lỗi tạm (SOCIAL_BUSY khi đang đọc) trả `transient: true`, không ghi.
  * - jev: theo nguồn `system_one` của `mock-phase2` (không có → JEV_NOT_CONFIGURED).
+ * - claude_call đạt mà claude_login chưa đạt (phiên có từ trước v0.1.39) → ghi claude_login 'pass'
+ *   (`login_source: existing_session`) như `_adopt_existing_claude_login` của api.
+ * - agy_switch: chỉ đếm khi hồ sơ đang dùng TRƯỚC khi đổi (`from_profile`) khác hồ sơ đích (đổi sang chính nó = 0).
  * Hook e2e `POST /api/v1/__mock/p3/bossChecks/seedAgy {}`: đặt sẵn 2 hồ sơ Google an@… (không dùng), binh@… (đang dùng).
+ * Hook e2e `POST /api/v1/__mock/p3/bossChecks/seedClaude {}`: một hồ sơ Claude đang dùng, CHƯA có bản claude_login.
  */
 import { randomUUID } from 'node:crypto';
 import type { BossCheck, BossCheckKey, BossOverview, BossRow, CliProfile, HubLink, Provider, SocialAccount } from '@gen-harness/contracts';
@@ -51,9 +55,8 @@ const ROWS: Array<Omit<BossRow, 'done'>> = [
 
 export function createMock(opts: Opts) {
   const results = Object.fromEntries(KEYS.map((k) => [k, null])) as Record<BossCheckKey, BossCheck | null>;
-  /** Số lần đổi tài khoản ĐẠT sang tài khoản khác lượt đạt trước (dòng 3 xong khi ≥ 2) — như `switch_passes` thật. */
+  /** Số lần đổi tài khoản THẬT đạt (hồ sơ trước khi đổi ≠ hồ sơ đích; dòng 3 xong khi ≥ 2) — như `switch_passes`. */
   let switchPasses = 0;
-  let lastSwitchTarget: string | null = null;
   let fbStartedAt = 0;
 
   const now = () => new Date().toISOString();
@@ -126,17 +129,20 @@ export function createMock(opts: Opts) {
       case 'agy_switch': {
         const p = opts.cliProfiles('antigravity_cli').find((x) => x.id === body.profile_id);
         if (!p) return null;
+        const from = activeOf('antigravity_cli')?.id ?? null;
         opts.activateCli(p.id);
-        if (p.id !== lastSwitchTarget) switchPasses += 1;
-        lastSwitchTarget = p.id;
+        if (from !== p.id) switchPasses += 1;
         return record('agy_switch', 'pass', {
           account: p.email,
-          detail: { expected_masked: mask(p.email), account_masked: mask(p.email), account_match: true, target_profile: p.id },
+          detail: { expected_masked: mask(p.email), account_masked: mask(p.email), account_match: true, target_profile: p.id, from_profile: from },
         });
       }
       case 'claude_call': {
         const a = activeOf('claude_code_cli');
-        return a ? record('claude_call', 'pass', { account: a.email, detail: { account_masked: mask(a.email) } }) : fail('claude_call', 'CLAUDE_NOT_LOGGED_IN', 'Chưa đăng nhập Claude Code');
+        if (!a) return fail('claude_call', 'CLAUDE_NOT_LOGGED_IN', 'Chưa đăng nhập Claude Code');
+        const out = record('claude_call', 'pass', { account: a.email, detail: { account_masked: mask(a.email) } });
+        if (!pass('claude_login')) record('claude_login', 'pass', { detail: { login_source: 'existing_session', account_masked: mask(a.email), credentials_file: true } });
+        return out;
       }
       case 'jev': {
         const jev = opts.providers().find((p) => p.kind === 'system_one');
@@ -176,5 +182,13 @@ export function createMock(opts: Opts) {
     return list;
   };
 
-  return { handle, hooks: { seedAgy, overview } as Record<string, (...args: never[]) => unknown>, dispose: () => {} };
+  /** Hook e2e: một hồ sơ Claude đang dùng, chưa có bản claude_login (như phiên có từ trước v0.1.39). */
+  const seedClaude = () => {
+    const list = opts.cliProfiles('claude_code_cli');
+    const exp = new Date(Date.now() + 5 * 86_400_000).toISOString();
+    list.splice(0, list.length, { id: randomUUID(), email: 'ryan@claude.ai', plan_label: 'Claude Max', active: true, expires_at: exp, state: 'ok' });
+    return list;
+  };
+
+  return { handle, hooks: { seedAgy, seedClaude, overview } as Record<string, (...args: never[]) => unknown>, dispose: () => {} };
 }

@@ -28,7 +28,7 @@ export function SetupFollowUp() {
   return (
     <Panel
       title="Việc thiết lập tiếp"
-      kicker={`${items.length} việc Sếp đã để sau — làm khi sẵn sàng, xong sẽ tự biến mất`}
+      kicker={`${items.length} việc thiết lập còn lại — làm khi sẵn sàng, xong sẽ tự biến mất`}
       label="Việc thiết lập tiếp"
       bodyClass="ov-followup"
       aside={

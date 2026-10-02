@@ -16,6 +16,8 @@ from gh.auth import rbac, service
 from gh.chassis import actionlog
 from gh.db import admin_sessionmaker, sessionmaker
 from gh.gen import envelope, store
+from gh.gen import registry as gen_registry
+from gh.gen import tools as gen_tools
 from gh.gen.tools import ToolRunner, collect_ids, compact
 from gh.gen.validator import Validator
 from gh.providers.router import ModelRouter, ModelUnavailable, Routed
@@ -248,6 +250,10 @@ async def test_tools_follow_rbac_of_asker(owner_api: Api, client: httpx.AsyncCli
         orun = ToolRunner(app, o, otok)
         g = await orun.run("guide.list", {})
         assert g.ok and {"5", "11"} <= orun.seen_ids and g.data[0]["n"] == 5
+        # Mọi việc vừa 4 KB KHÔNG bị cắt, còn dư địa cho việc mới (cả khi chưa xong việc nào → đủ phần bước).
+        assert g.data is not None and len(g.data) == len(gen_registry.load().guide)
+        assert len(g.text.encode()) <= 3600, len(g.text.encode())
+        assert all(len(x.get("steps", "")) <= gen_tools.GUIDE_STEPS_MAX for x in g.data)
         # Gen chưa mở cho vai trò khác Owner (quyết định §9.1).
         r = await operator.send("POST", "/gen/turns", {"text": "alo"})
         assert r.status_code == 403 and r.json()["code"] == "GEN_DISABLED"

@@ -16,7 +16,7 @@ from tests.test_hub_link import TOKEN, FakeHub, _pin, fake_hub  # noqa: F401 —
 def test_classify_network_blocked_public_points_to_card_switch() -> None:
     msg = "Máy chủ MCP ở mạng công cộng (8.8.8.8) — Owner chưa bật 'Cho phép máy chủ MCP ngoài mạng nội bộ'"
     assert hub._classify(msg, code="MCP_NETWORK_BLOCKED") == hub.PUBLIC_NET_HINT
-    assert hub.PUBLIC_NET_HINT == "Bật 'Cho phép Gen-hub ở mạng công cộng' ngay trong thẻ này"
+    assert hub.PUBLIC_NET_HINT == "Bật 'Cho phép Gen-hub ở mạng công cộng' ngay trong thẻ này."
 
 
 def test_classify_network_blocked_link_local_is_forbidden() -> None:

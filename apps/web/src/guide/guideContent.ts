@@ -144,7 +144,7 @@ export const GUIDE: GuideItem[] = [
       'Bấm "Đăng nhập" — Sếp tự đăng nhập ngay trong app (mật khẩu, mã 2FA không lưu lại).',
       'Khi tài khoản báo Đang kết nối, bấm "Đọc ngay" để thử đọc thông báo.',
     ],
-    doneWhen: 'Có tài khoản Facebook đã đăng nhập.',
+    doneWhen: 'Đã đăng nhập Facebook ít nhất một lần.',
     console: { label: 'Tài khoản mạng xã hội', to: '/social' },
     doTo: '/social',
     doLabel: 'Mở trang Tài khoản mạng xã hội',

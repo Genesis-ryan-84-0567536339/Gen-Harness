@@ -58,6 +58,10 @@ interface World {
   run: (key: string, body: Record<string, unknown>) => BossCheck;
   /** Gọi trước mỗi GET /boss-checks (đổi pending → pass). */
   onList?: (n: number) => void;
+  /** GET /providers trả lỗi. */
+  failProviders?: boolean;
+  /** GET /auth/me trả lỗi (dùng với `renderPage(role, false)`). */
+  failMe?: boolean;
 }
 
 function setup(w: Partial<World> = {}) {
@@ -95,16 +99,16 @@ function setup(w: Partial<World> = {}) {
       }
       if (path === '/social/accounts') return json(200, { items: world.accounts });
       if (path === '/cli/profiles') return json(200, u.searchParams.get('kind') === 'claude_code_cli' ? world.claude : world.agy);
-      if (path === '/providers') return json(200, world.providers);
-      if (path === '/auth/me') return json(200, me('owner'));
+      if (path === '/providers') return world.failProviders ? json(409, { code: 'PROVIDERS_DOWN', title: 'Không đọc được danh sách nguồn AI' }) : json(200, world.providers);
+      if (path === '/auth/me') return world.failMe ? json(409, { code: 'ME_DOWN', title: 'Không đọc được tài khoản' }) : json(200, me('owner'));
       return json(404, { code: 'NOT_FOUND', title: 'Không tồn tại' });
     }),
   );
   return { world, calls };
 }
 
-function renderPage(role = 'owner') {
-  queryClient.setQueryData(qk.me, me(role));
+function renderPage(role = 'owner', prefillMe = true) {
+  if (prefillMe) queryClient.setQueryData(qk.me, me(role));
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={['/guide/viec-sep']}>
@@ -179,7 +183,7 @@ describe('Việc Sếp cần làm (/guide/viec-sep)', () => {
       accounts: [FB],
       run: (key) => {
         fbRuns += 1;
-        return check(key as BossCheckKey, 'pending');
+        return check(key as BossCheckKey, 'pending', { checked_at: new Date().toISOString() });
       },
     });
     let pendingLists = 0;
@@ -196,11 +200,11 @@ describe('Việc Sếp cần làm (/guide/viec-sep)', () => {
     expect(calls.find((c) => c.path === '/boss-checks/facebook/run')!.body).toEqual({ account_id: 'fb-1' });
   }, 10_000);
 
-  it('Facebook chưa có tài khoản → nút mở trang tài khoản mạng xã hội', async () => {
+  it('Facebook chưa có tài khoản → nút mở trang Tài khoản mạng xã hội', async () => {
     setup();
     renderPage();
     const fb = await screen.findByRole('region', { name: 'Kết nối Facebook' });
-    expect(await within(fb).findByRole('link', { name: /Mở trang tài khoản mạng xã hội/ })).toHaveAttribute('href', '/social');
+    expect(await within(fb).findByRole('link', { name: /Mở trang Tài khoản mạng xã hội/ })).toHaveAttribute('href', '/social');
     expect(within(fb).getByText(/Đăng nhập ngay trong app/)).toBeInTheDocument();
     expect(within(fb).queryByRole('button', { name: 'Đọc ngay' })).toBeNull();
   });
@@ -322,7 +326,7 @@ describe('Việc Sếp cần làm (/guide/viec-sep)', () => {
   });
 
   it('Facebook: đang chạy → nút tắt; đã Đạt → "Đọc lại"', async () => {
-    setup({ accounts: [FB], results: { ...EMPTY, facebook: check('facebook', 'pending') } });
+    setup({ accounts: [FB], results: { ...EMPTY, facebook: check('facebook', 'pending', { checked_at: new Date().toISOString() }) } });
     const { unmount } = renderPage();
     const fb = await screen.findByRole('region', { name: 'Kết nối Facebook' });
     expect(await within(fb).findByRole('button', { name: 'Đọc ngay' })).toBeDisabled();
@@ -402,6 +406,80 @@ describe('Việc Sếp cần làm (/guide/viec-sep)', () => {
     expect(await within(hub2).findByText(/Cần địa chỉ http\(s\) và token ít nhất 8 ký tự/)).toBeInTheDocument();
     expect(within(hub2).getByRole('button', { name: 'Kiểm tra' })).toBeDisabled();
     expect(within(hub2).getByText(/Nhập địa chỉ Gen-hub/)).toBeInTheDocument();
+  });
+
+  it('Claude: đã có phiên từ trước (chưa có bản đăng nhập) → ô Đăng nhập nói "Đã có phiên", Gọi thử đạt → dòng thành Đạt', async () => {
+    const { world } = setup({
+      claude: [{ ...BINH, id: 'c1', email: 'ryan@claude.ai' }],
+      run: (key) => {
+        // Như máy chủ: Gọi thử đạt mà chưa có claude_login đạt → ghi claude_login 'pass' (phiên có sẵn).
+        if (key === 'claude_call') world.results.claude_login = check('claude_login', 'pass', { detail: { login_source: 'existing_session' } });
+        return check(key as BossCheckKey, 'pass');
+      },
+    });
+    renderPage();
+    const user = userEvent.setup();
+    const cl = await screen.findByRole('region', { name: 'Claude Code CLI' });
+    expect(await within(cl).findByText('Đã có phiên (đăng nhập trước đây) — bấm Gọi thử để xác nhận')).toBeInTheDocument();
+    expect(within(cl).queryByRole('button', { name: /Đăng nhập/ })).toBeNull();
+    await user.click(within(cl).getByRole('button', { name: 'Gọi thử' }));
+    expect(await within(cl).findByText(/Đạt · phiên có sẵn, đã xác nhận bằng Gọi thử/)).toBeInTheDocument();
+  });
+
+  it('Claude chưa có hồ sơ → "Gọi thử" tắt + gợi ý đăng nhập trước', async () => {
+    const { calls } = setup();
+    renderPage();
+    const cl = await screen.findByRole('region', { name: 'Claude Code CLI' });
+    expect(await within(cl).findByText('Đăng nhập trước rồi mới Gọi thử.')).toBeInTheDocument();
+    expect(within(cl).getByRole('button', { name: 'Gọi thử' })).toBeDisabled();
+    expect(calls.some((c) => c.path === '/boss-checks/claude_call/run')).toBe(false);
+  });
+
+  it('Google đã có hồ sơ mà chưa có bản đăng nhập → "Đã có phiên (đăng nhập trước đây)", không "Chưa kiểm"', async () => {
+    setup({ agy: [BINH] });
+    renderPage();
+    const agy = await screen.findByRole('region', { name: 'Google (Antigravity) — hai tài khoản' });
+    expect(await within(agy).findByText('Đã có phiên (đăng nhập trước đây)')).toBeInTheDocument();
+  });
+
+  it('Jev: GET /providers lỗi → báo lỗi + Thử lại, không mời "Nhập khoá Jev"', async () => {
+    setup({ failProviders: true });
+    renderPage();
+    const jev = await screen.findByRole('region', { name: 'Jev' });
+    expect(await within(jev).findByRole('button', { name: 'Thử lại' })).toBeInTheDocument();
+    expect(within(jev).getByText(/Không đọc được danh sách nguồn AI/)).toBeInTheDocument();
+    expect(within(jev).queryByRole('link', { name: /Nhập khoá Jev/ })).toBeNull();
+  });
+
+  it('không đọc được tài khoản (useMe lỗi) → báo lỗi + Thử lại, không khung chờ mãi', async () => {
+    setup({ failMe: true });
+    renderPage('owner', false);
+    expect(await screen.findByRole('button', { name: 'Thử lại' })).toBeInTheDocument();
+    expect(screen.getByText(/Không đọc được tài khoản/)).toBeInTheDocument();
+  });
+
+  it('Facebook đang chạy quá 15 phút → nút Đọc ngay mở lại + chỉ sang trang Tài khoản mạng xã hội', async () => {
+    const old = new Date(Date.now() - 16 * 60_000).toISOString();
+    setup({ accounts: [FB], results: { ...EMPTY, facebook: check('facebook', 'pending', { checked_at: old }) } });
+    renderPage();
+    const fb = await screen.findByRole('region', { name: 'Kết nối Facebook' });
+    expect(await within(fb).findByRole('button', { name: 'Đọc ngay' })).toBeEnabled();
+    expect(within(fb).getByTestId('boss-fb-stale')).toHaveTextContent('Lượt đọc chạy quá lâu');
+    expect(within(fb).getByRole('link', { name: 'trang Tài khoản mạng xã hội' })).toHaveAttribute('href', '/social');
+  });
+
+  it('Facebook bị huỷ lẻ / treo → câu riêng, không nói "Dừng tất cả"', async () => {
+    setup({ accounts: [FB], results: { ...EMPTY, facebook: check('facebook', 'fail', { error_code: 'SOCIAL_READ_CANCELLED' }) } });
+    const { unmount } = renderPage();
+    const fb = await screen.findByRole('region', { name: 'Kết nối Facebook' });
+    expect(await within(fb).findByText(/Lượt đọc Facebook đã bị huỷ — bấm Đọc ngay lần nữa/)).toBeInTheDocument();
+    expect(fb.textContent).not.toContain('Dừng tất cả');
+    unmount();
+    queryClient.clear();
+    setup({ accounts: [FB], results: { ...EMPTY, facebook: check('facebook', 'fail', { error_code: 'WORKER_TIMEOUT' }) } });
+    renderPage();
+    const fb2 = await screen.findByRole('region', { name: 'Kết nối Facebook' });
+    expect(await within(fb2).findByText(/chạy quá lâu nên đã dừng/)).toBeInTheDocument();
   });
 
   it('vai trò Vận hành → lời giải thích, không gọi /boss-checks', async () => {

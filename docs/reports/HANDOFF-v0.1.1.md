@@ -1941,7 +1941,7 @@ xuống, mỗi dòng bấm một nút:
 
 1. Lần đầu: nhập **địa chỉ Gen-hub** (vd `https://hub.genos.top/mcp`), tạo token **CHỈ ĐỌC 90 ngày** trong Gen-hub, dán
    vào ô Token, bấm **Kiểm tra**, nhập PIN. (Nút Kiểm tra chỉ bấm được khi đã có địa chỉ và token.)
-2. Bấm **Mở trang tài khoản mạng xã hội**, thêm Facebook, đăng nhập ngay trong cửa sổ của app, quay lại bấm **Đọc ngay**
+2. Bấm **Mở trang Tài khoản mạng xã hội**, thêm Facebook, đăng nhập ngay trong cửa sổ của app, quay lại bấm **Đọc ngay**
    (tài khoản chưa đăng nhập thì dòng này hiện nút **Đăng nhập ở trang Tài khoản mạng xã hội**).
 3. **Đăng nhập Google** bằng tài khoản của chính Sếp → **Gọi thử** → **Thêm tài khoản thứ hai** → bấm **Đổi sang…** qua
    lại 2 lần.
@@ -2005,6 +2005,29 @@ Không cần chụp màn hình hay gửi mã cho Claude — kết quả tự lư
   tiến độ dùng `total` của máy chủ; câu thân thiện cho `SOCIAL_BUSY/HALTED/NEEDS_LOGIN`, `CLI_PROFILE_NO_SESSION`;
   hướng dẫn việc 14 ghi "Lưu & kiểm tra"; mock e2e khớp máy chủ (ghi kết quả đăng nhập trong luồng đăng nhập, sau tải lại
   chỉ có email đã che, `runs` đếm mọi bản ghi).
+
+### Sửa sau review lần 2 (F-74, F-76, F-77, F-28, F-32)
+
+- **Claude Code đăng nhập từ trước không còn kẹt 3/4** — phiên có từ trước v0.1.39 (tự chuyển khi cập nhật) không đi qua
+  luồng đăng nhập nên chưa có bản `claude_login`. Nay Gọi thử ĐẠT mà `claude_login` chưa đạt → máy chủ ghi `claude_login`
+  'pass' (`login_source: existing_session`, email đã che, `credentials_file`). Ô "Đăng nhập" hiện "Đã có phiên (đăng nhập
+  trước đây) — bấm Gọi thử để xác nhận"; chưa có hồ sơ thì nút Gọi thử tắt kèm "Đăng nhập trước rồi mới Gọi thử".
+- **Đổi tài khoản "rỗng" không được tính** — mỗi lượt `agy_switch` ghi `from_profile` (hồ sơ đang dùng ngay trước khi
+  đổi); `switch_passes` chỉ đếm khi `from_profile` ≠ `target_profile` (bản ghi cũ không có `from_profile` giữ quy tắc cũ).
+- **Facebook không kẹt "Đang chạy…"** — `GET /boss-checks` tự đóng việc đọc treo quá 15 phút (như `social.active_job`:
+  failed + `WORKER_TIMEOUT`) và chốt ô Facebook là lỗi `WORKER_TIMEOUT` kèm câu thân thiện; web cũng mở lại nút "Đọc ngay"
+  và chỉ sang trang Tài khoản mạng xã hội nếu lượt chạy đã quá 15 phút. Việc bị huỷ lẻ có mã riêng
+  `SOCIAL_READ_CANCELLED` (không còn nói "Dừng tất cả").
+- **Dòng Jev / lỗi tải** — `GET /providers` lỗi → báo lỗi + Thử lại (không mời "Nhập khoá Jev" sai); không đọc được tài
+  khoản (`/auth/me`) → báo lỗi + Thử lại thay vì khung chờ mãi. Thẻ Jev kiểm lỗi không còn dấu tích xanh "không cần kiểm
+  thêm" mà là "Đã kiểm tra — Jev không bắt buộc, có thể bỏ qua".
+- **Đăng nhập CLI an toàn khi huỷ** — hồ sơ mới đã commit thì đánh dấu `committed`; huỷ/tắt trước khi báo "done" không còn
+  trả tệp phiên CŨ về đè. Che mã đăng nhập (`scrub_codes`) nay quét một lượt (cửa sổ 8 ký tự), không còn O(L²).
+- **Nhỏ** — Gen mở được trang "Việc Sếp cần làm" (`boss_checks` → `/guide/viec-sep`, chỉ Owner; registry.json sinh lại);
+  `guide.list` của Gen bỏ phần bước của việc đã xong và cắt 240 ký tự (dư địa trong 4 KB); dòng Google có hồ sơ cũ hiện
+  "Đã có phiên (đăng nhập trước đây)"; thẻ Tổng quan đổi thành "N việc thiết lập còn lại"; việc 13 ghi "Đã đăng nhập
+  Facebook ít nhất một lần" (khớp SQL); thống nhất "Tài khoản mạng xã hội" (tên trang) và thêm dấu chấm cuối câu
+  `MCP_NETWORK_BLOCKED`.
 
 ### Kiểm tra
 

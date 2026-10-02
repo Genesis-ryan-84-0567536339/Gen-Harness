@@ -23,7 +23,7 @@ export function SocialEntryCard() {
       <div className="pin-actions">
         <Link to="/social" className="gh-btn gh-btn--secondary">
           <Icon name="ph ph-facebook-logo" size={14} />
-          Mở trang tài khoản mạng xã hội
+          Mở trang Tài khoản mạng xã hội
         </Link>
       </div>
     </Panel>

@@ -201,6 +201,44 @@ async def test_facebook_no_account_pending_then_resolved(owner_api: Api, redis: 
     assert latest["facebook"] is not None and latest["facebook"]["error_code"] == "SOCIAL_JOB_MISSING"
 
 
+async def test_facebook_stale_job_closed_and_cancelled_has_own_code(owner_api: Api, redis: Redis) -> None:
+    """Việc đọc treo quá STALE_AFTER (worker trình duyệt chết/chưa chạy) → GET /boss-checks tự đóng việc (failed +
+    WORKER_TIMEOUT) và chốt ô Facebook là lỗi, không kẹt "Đang chạy…" mãi. Việc bị huỷ lẻ → SOCIAL_READ_CANCELLED
+    (không phải "Dừng tất cả")."""
+    acc = await social_add(owner_api)
+    await social_login(owner_api, redis, acc["id"])
+    out = (await _run(owner_api, "facebook", {"account_id": acc["id"]})).json()
+    assert out["status"] == "pending", out
+    async with admin_sessionmaker()() as db:   # mới 10 phút: vẫn đang chạy
+        await db.execute(text("UPDATE agent.browser_jobs SET status = 'running', "
+                              "created_at = now() - interval '10 minutes' WHERE kind = 'read'"))
+        await db.commit()
+    fb = (await owner_api.get("/boss-checks")).json()["results"]["facebook"]
+    assert fb["status"] == "pending" and fb["detail"]["job_status"] == "running"
+    async with admin_sessionmaker()() as db:
+        await db.execute(text("UPDATE agent.browser_jobs SET created_at = now() - interval '16 minutes' "
+                              "WHERE kind = 'read'"))
+        await db.commit()
+    fb = (await owner_api.get("/boss-checks")).json()["results"]["facebook"]
+    assert fb["status"] == "fail" and fb["error_code"] == "WORKER_TIMEOUT", fb
+    assert fb["message"] == boss.SOCIAL_TIMEOUT_MSG and fb["detail"]["job_status"] == "failed"
+    assert "WORKER_TIMEOUT" in await _db_text("SELECT status, error FROM agent.browser_jobs WHERE kind = 'read'")
+    # Lượt mới (lùi giờ lượt trước cho qua khoảng cách tối thiểu) rồi bị huỷ lẻ.
+    async with admin_sessionmaker()() as db:
+        await db.execute(text("UPDATE agent.browser_jobs SET created_at = now() - interval '2 days', "
+                              "finished_at = now() - interval '2 days' WHERE kind = 'read'"))
+        await db.commit()
+    out = (await _run(owner_api, "facebook", {"account_id": acc["id"]})).json()
+    assert out["status"] == "pending", out
+    async with admin_sessionmaker()() as db:
+        await db.execute(text("UPDATE agent.browser_jobs SET status = 'cancelled' "
+                              "WHERE kind = 'read' AND status = 'queued'"))
+        await db.commit()
+    fb = (await owner_api.get("/boss-checks")).json()["results"]["facebook"]
+    assert fb["status"] == "fail" and fb["error_code"] == "SOCIAL_READ_CANCELLED", fb
+    assert "Dừng tất cả" not in fb["message"]
+
+
 # ─── (f) tổng quan + quy tắc 'done' ─────────────────────────────────────────
 
 async def test_overview_rows_and_done_rules(owner_api: Api, db: Any) -> None:

@@ -36,10 +36,15 @@ REQUIRED_TOTAL = sum(1 for r in ROWS if not r["optional"])
 
 DETAIL_KEYS = frozenset({"latency_ms", "probe_model", "models_count", "models_source", "account_masked",
                          "expected_masked", "account_match", "code_shape", "credentials_file", "job_status",
-                         "exposed_tools", "missing_tools", "target_profile"})
+                         "exposed_tools", "missing_tools", "target_profile", "from_profile",
+                         "login_source"})
 
 SOCIAL_FAILED_MSG = "Lượt đọc Facebook chưa thành công — mở trang Mạng xã hội xem lý do rồi bấm Đọc ngay lần nữa"
-SOCIAL_HALTED_MSG = "Lượt đọc Facebook đã bị dừng hoặc huỷ — bấm Đọc ngay lần nữa"
+SOCIAL_HALTED_MSG = ("Đọc mạng xã hội đang bị dừng (Dừng tất cả) — bật lại ở trang Tài khoản mạng xã hội rồi bấm "
+                     "Đọc ngay")
+SOCIAL_CANCELLED_MSG = "Lượt đọc Facebook đã bị huỷ — bấm Đọc ngay lần nữa"
+SOCIAL_TIMEOUT_MSG = ("Lượt đọc Facebook chạy quá lâu nên đã dừng (trình duyệt nền không phản hồi) — mở trang "
+                      "Tài khoản mạng xã hội xem rồi bấm Đọc ngay lần nữa")
 SOCIAL_MISSING_MSG = "Không còn thấy lượt đọc Facebook này (có thể tài khoản đã bị gỡ) — bấm Đọc ngay lần nữa"
 
 
@@ -115,11 +120,25 @@ async def record(db: AsyncSession, org_id: uuid.UUID, key: str, status: str, *, 
 
 
 async def resolve_pending(db: AsyncSession, org_id: uuid.UUID) -> int:
-    """Bản ghi facebook 'pending' (ref_id = việc đọc) → đọc agent.browser_jobs: done → pass; failed/halted/cancelled
-    → fail; việc không còn → fail SOCIAL_JOB_MISSING. Cập nhật tại chỗ, trả số bản ghi đã chốt. Không commit.
+    """Bản ghi facebook 'pending' (ref_id = việc đọc) → đọc agent.browser_jobs: done → pass; failed → fail
+    (WORKER_TIMEOUT riêng); halted (Dừng tất cả) → SOCIAL_READ_HALTED; cancelled → SOCIAL_READ_CANCELLED; việc không
+    còn → fail SOCIAL_JOB_MISSING. Cập nhật tại chỗ, trả số bản ghi đã chốt. Không commit.
+
+    Việc còn 'queued'/'running' quá `social.service.STALE_AFTER` (worker trình duyệt chết/chưa chạy) được ĐÓNG ngay tại
+    đây giống `social.active_job` (failed + WORKER_TIMEOUT) — nếu không, ô Facebook kẹt "Đang chạy…" mãi vì nút Đọc ngay
+    bị tắt khi đang chờ và `active_job` chỉ chạy khi có lượt đọc mới.
     Không chép `job.error` thô (có thể mang dữ liệu trang) — chỉ câu thân thiện + mã."""
+    from gh.social.service import STALE_AFTER
+
+    await db.execute(text("""
+        UPDATE agent.browser_jobs j SET status = 'failed', error = 'WORKER_TIMEOUT', finished_at = now()
+        FROM ops.boss_checks b
+        WHERE b.org_id = :o AND b.check_key = 'facebook' AND b.status = 'pending' AND j.id = b.ref_id
+          AND j.org_id = b.org_id AND j.status IN ('queued', 'running')
+          AND j.created_at < now() - make_interval(secs => :s)"""),
+        {"o": org_id, "s": STALE_AFTER.total_seconds()})
     rows = (await db.execute(text("""
-        SELECT b.id, b.detail, j.status AS job_status, (j.id IS NOT NULL) AS has_job
+        SELECT b.id, b.detail, j.status AS job_status, j.error AS job_error, (j.id IS NOT NULL) AS has_job
         FROM ops.boss_checks b LEFT JOIN agent.browser_jobs j ON j.id = b.ref_id AND j.org_id = b.org_id
         WHERE b.org_id = :o AND b.check_key = 'facebook' AND b.status = 'pending' AND b.ref_id IS NOT NULL"""),
         {"o": org_id})).all()
@@ -132,10 +151,14 @@ async def resolve_pending(db: AsyncSession, org_id: uuid.UUID) -> int:
             status, code, msg = "fail", "SOCIAL_JOB_MISSING", SOCIAL_MISSING_MSG
         elif r.job_status == "done":
             status, code, msg = "pass", None, None
+        elif r.job_status == "failed" and r.job_error == "WORKER_TIMEOUT":
+            status, code, msg = "fail", "WORKER_TIMEOUT", SOCIAL_TIMEOUT_MSG
         elif r.job_status == "failed":
             status, code, msg = "fail", "SOCIAL_READ_FAILED", SOCIAL_FAILED_MSG
-        elif r.job_status in ("halted", "cancelled"):
+        elif r.job_status == "halted":
             status, code, msg = "fail", "SOCIAL_READ_HALTED", SOCIAL_HALTED_MSG
+        elif r.job_status == "cancelled":
+            status, code, msg = "fail", "SOCIAL_READ_CANCELLED", SOCIAL_CANCELLED_MSG
         else:
             # Còn đang xếp hàng/chạy: chỉ cập nhật trạng thái việc để web hiện "Đang chạy…".
             await db.execute(text("UPDATE ops.boss_checks SET detail = CAST(:d AS jsonb) WHERE id = :i"),
@@ -170,17 +193,25 @@ async def pass_count(db: AsyncSession, org_id: uuid.UUID, key: str) -> int:
 
 
 async def switch_passes(db: AsyncSession, org_id: uuid.UUID) -> int:
-    """Số lần ĐỔI THẬT đã đạt: các lượt `agy_switch` 'pass' theo thời gian, chỉ đếm lượt có tài khoản đích KHÁC lượt
-    đạt ngay trước (đổi sang chính tài khoản vừa đổi tới không chứng minh được gì). Tài khoản đích = `target_profile`
-    (hồ sơ), thiếu thì email đã che; không có cả hai (bản ghi cũ) → coi là khác."""
+    """Số lần ĐỔI THẬT đã đạt, theo thời gian:
+
+    - bản ghi có `from_profile` (hồ sơ đang hoạt động NGAY TRƯỚC khi đổi, từ v0.1.39 sau review): chỉ đếm khi
+      `from_profile` ≠ `target_profile` — "đổi" sang chính tài khoản đang dùng không đổi gì cả (F-76);
+    - bản ghi cũ không có `from_profile`: đếm khi tài khoản đích KHÁC lượt đạt ngay trước. Tài khoản đích =
+      `target_profile` (hồ sơ), thiếu thì email đã che; không có cả hai → coi là khác."""
     rows = (await db.execute(text("""
-        SELECT id, COALESCE(detail->>'target_profile', detail->>'expected_masked') AS target
+        SELECT id, COALESCE(detail->>'target_profile', detail->>'expected_masked') AS target,
+               detail->>'from_profile' AS source, (detail->'from_profile' IS NOT NULL) AS has_source
         FROM ops.boss_checks WHERE org_id = :o AND check_key = 'agy_switch' AND status = 'pass'
         ORDER BY checked_at, id"""), {"o": org_id})).all()
     n, prev = 0, None
     for r in rows:
         target = r.target or f"row:{r.id}"
-        if target != prev:
+        if r.has_source:
+            # from_profile null = chưa có hồ sơ nào hoạt động trước đó → vẫn là một lần đổi thật.
+            if r.source != target:
+                n += 1
+        elif target != prev:
             n += 1
         prev = target
     return n

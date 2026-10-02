@@ -231,7 +231,7 @@ async def _set_result(db: AsyncSession, org_id: uuid.UUID, *, ok: bool, error: s
                          {"e": error, "o": org_id})
 
 
-PUBLIC_NET_HINT = "Bật 'Cho phép Gen-hub ở mạng công cộng' ngay trong thẻ này"
+PUBLIC_NET_HINT = "Bật 'Cho phép Gen-hub ở mạng công cộng' ngay trong thẻ này."
 
 
 def _classify(message: str, code: str | None = None) -> str:

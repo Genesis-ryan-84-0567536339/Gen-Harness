@@ -30,7 +30,7 @@ test.describe('v0.1.39 · lối vào trang Tài khoản mạng xã hội', () =>
     const card = page.locator('[data-gen-target="system.channels.facebook"]');
     await expect(card).toBeVisible();
     await expect(card).toContainText('Đọc thông báo và tin nhắn — đăng nhập ngay trong app');
-    await card.getByRole('link', { name: 'Mở trang tài khoản mạng xã hội' }).click();
+    await card.getByRole('link', { name: 'Mở trang Tài khoản mạng xã hội' }).click();
     await expect(page).toHaveURL(/\/social$/);
     await expect(page.getByRole('heading', { level: 2, name: 'Tài khoản mạng xã hội' })).toBeVisible();
   });

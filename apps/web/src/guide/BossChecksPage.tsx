@@ -25,6 +25,7 @@ import {
   fmtCheckedAt,
   hasPending,
   hubTokenExpiry,
+  isStalePending,
   needsRelogin,
   resultOf,
   switchesOf,
@@ -75,6 +76,11 @@ export function BossChecksPage() {
             title="Việc kết nối do Owner làm"
             description="Nối Gen-hub, Facebook, tài khoản Google và Claude Code chỉ Owner làm được. Cần thêm gì, hãy nhắn Owner."
           />
+        </div>
+      ) : me.isError ? (
+        // Không đọc được vai trò → truy vấn bị tắt, `q.isPending` luôn đúng: báo lỗi + Thử lại thay vì khung chờ mãi.
+        <div className="gh-card">
+          <CardError error={me.error} onRetry={() => void me.refetch()} retrying={me.isFetching} />
         </div>
       ) : q.isPending ? (
         <div className="gh-card">
@@ -164,15 +170,18 @@ function Row({ n, title, optional, done, todo, children, results }: { n: number;
   );
 }
 
-/** Ô kết quả: Đạt (xanh) | Lỗi · câu thân thiện + Chi tiết kỹ thuật | Đang chạy… | Chưa kiểm. Chỉ render chuỗi. */
-function ResultCell({ label, check, okText, failText }: { label?: string; check: BossCheck | null; okText?: (c: BossCheck) => string; failText?: string }) {
+/**
+ * Ô kết quả: Đạt (xanh) | Lỗi · câu thân thiện + Chi tiết kỹ thuật | Đang chạy… | Chưa kiểm (hoặc `emptyText` khi chưa
+ * có bản ghi nhưng đã có sẵn trạng thái, vd phiên đăng nhập từ trước). Chỉ render chuỗi.
+ */
+function ResultCell({ label, check, okText, failText, emptyText }: { label?: string; check: BossCheck | null; okText?: (c: BossCheck) => string; failText?: string; emptyText?: string }) {
   const tz = useOrgTimezone();
   const state = check?.status ?? 'none';
   return (
     <div className={`boss-result boss-result--${state}`} data-testid="boss-result">
       {label ? <span className="boss-result__label">{label}</span> : null}
       {!check ? (
-        <span>Chưa kiểm</span>
+        <span>{emptyText ?? 'Chưa kiểm'}</span>
       ) : check.status === 'pending' ? (
         <span>
           <Icon name="ph ph-circle-notch" size={12} className="spin" /> Đang chạy…
@@ -312,7 +321,9 @@ function FacebookRow({ data, done }: { data: Results; done: boolean }) {
   const fb = (accounts.data?.items ?? []).filter((a) => a.platform.startsWith('facebook') && a.status !== 'revoked');
   const acc = fb.find((a) => a.status === 'active') ?? fb[0];
   const res = resultOf(data, 'facebook');
-  const running = res?.status === 'pending';
+  // Đang chạy quá lâu (worker trình duyệt treo): máy chủ tự chốt lỗi ở lần tải sau; phòng khi chưa kịp, mở lại nút.
+  const stale = isStalePending(res);
+  const running = res?.status === 'pending' && !stale;
   return (
     <Row
       n={2}
@@ -328,7 +339,7 @@ function FacebookRow({ data, done }: { data: Results; done: boolean }) {
       ) : !acc ? (
         <div className="boss-actions">
           <Link to="/social" className="gh-btn gh-btn--primary btn-27">
-            Mở trang tài khoản mạng xã hội
+            Mở trang Tài khoản mạng xã hội
             <Icon name="ph ph-arrow-right" size={13} />
           </Link>
           <span className="muted-note">Đăng nhập ngay trong app — mật khẩu, mã 2FA Sếp tự gõ, không lưu lại.</span>
@@ -358,6 +369,11 @@ function FacebookRow({ data, done }: { data: Results; done: boolean }) {
           <span className="muted-note">{running ? `${acc.label} · đang đọc, đợi xong rồi mới bấm lại được` : acc.label}</span>
         </div>
       )}
+      {stale ? (
+        <p className="muted-note" role="note" data-testid="boss-fb-stale">
+          Lượt đọc chạy quá lâu — có thể trình duyệt nền đang treo. Mở <Link to="/social">trang Tài khoản mạng xã hội</Link> xem, rồi bấm Đọc ngay lần nữa.
+        </p>
+      ) : null}
       {run.isError ? <InlineError>{errorText(run.error)}</InlineError> : null}
       <TransientNote check={run.data} />
     </Row>
@@ -388,7 +404,7 @@ function AgyRow({ data, done }: { data: Results; done: boolean }) {
       todo="Đăng nhập hai tài khoản Google, bấm Gọi thử, rồi đổi qua lại hai lần để chắc hệ thống dùng đúng tài khoản."
       results={
         <>
-          <ResultCell label="Đăng nhập" check={resultOf(data, 'agy_login')} />
+          <ResultCell label="Đăng nhập" check={resultOf(data, 'agy_login')} emptyText={list.length > 0 ? 'Đã có phiên (đăng nhập trước đây)' : undefined} />
           <ResultCell label="Gọi thử" check={resultOf(data, 'agy_call')} okText={(c) => `Đạt · đang dùng ${accountOf(c, call.data) ?? 'tài khoản Google'}`} />
           <ResultCell
             label="Đổi tài khoản"
@@ -468,6 +484,7 @@ function ClaudeRow({ data, done }: { data: Results; done: boolean }) {
   const profiles = useCliProfiles('claude_code_cli');
   const login = useCliLogin('claude_code_cli');
   const call = useRunCheck();
+  const tz = useOrgTimezone();
   const has = (profiles.data ?? []).length > 0;
   const relogin = has && (needsRelogin(resultOf(data, 'claude_call')) || (profiles.data ?? []).some((p) => p.active && p.state === 'expired'));
   return (
@@ -478,7 +495,13 @@ function ClaudeRow({ data, done }: { data: Results; done: boolean }) {
       todo="Đọc cảnh báo, đăng nhập tài khoản Claude của Sếp rồi bấm Gọi thử."
       results={
         <>
-          <ResultCell label="Đăng nhập" check={resultOf(data, 'claude_login')} />
+          <ResultCell
+            label="Đăng nhập"
+            check={resultOf(data, 'claude_login')}
+            // Phiên có từ trước v0.1.39: máy chủ ghi "Đạt" khi Gọi thử đạt (login_source = existing_session).
+            emptyText={has ? 'Đã có phiên (đăng nhập trước đây) — bấm Gọi thử để xác nhận' : undefined}
+            okText={(c) => `Đạt${c.detail?.login_source === 'existing_session' ? ' · phiên có sẵn, đã xác nhận bằng Gọi thử' : ''} · ${fmtCheckedAt(c.checked_at, tz)}`}
+          />
           <ResultCell label="Gọi thử" check={resultOf(data, 'claude_call')} okText={(c) => (accountOf(c, call.data) ? `Đạt · đang dùng ${accountOf(c, call.data)}` : `Đạt`)} />
         </>
       }
@@ -494,9 +517,10 @@ function ClaudeRow({ data, done }: { data: Results; done: boolean }) {
             Đăng nhập lại Claude Code
           </Button>
         ) : null}
-        <Button variant={has ? 'primary' : 'secondary'} className="btn-27" icon="ph ph-chat-circle-dots" loading={call.isPending} onClick={() => call.mutate({ key: 'claude_call' })}>
+        <Button variant={has ? 'primary' : 'secondary'} className="btn-27" icon="ph ph-chat-circle-dots" disabled={!has} loading={call.isPending} onClick={() => call.mutate({ key: 'claude_call' })}>
           Gọi thử
         </Button>
+        {!has && !profiles.isPending ? <span className="muted-note">Đăng nhập trước rồi mới Gọi thử.</span> : null}
       </div>
       <CliLoginPanel login={login} />
       {call.isError ? <InlineError>{errorText(call.error)}</InlineError> : null}
@@ -524,6 +548,8 @@ function JevRow({ data, done }: { data: Results; done: boolean }) {
     >
       {providers.isPending ? (
         <SkeletonLines rows={1} padding="0" />
+      ) : providers.isError ? (
+        <CardError error={providers.error} onRetry={() => void providers.refetch()} retrying={providers.isFetching} />
       ) : !jev ? (
         <div className="boss-actions">
           <Link to="/system?tab=brain" className="gh-btn gh-btn--secondary btn-27">

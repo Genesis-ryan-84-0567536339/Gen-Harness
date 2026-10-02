@@ -101,7 +101,8 @@ describe('v0.1.39 — Jev "Kiểm tra 1 lần" và thu vào "Nâng cao" khi lỗ
     // Mở "Nâng cao": vẫn còn kết quả của lần kiểm và dòng "Đã kiểm tra", không có nút kiểm lại.
     await userEvent.setup().click(summary);
     expect(screen.getByText(TITLE)).toBeVisible();
-    expect(screen.getByText(/Đã kiểm tra — không cần kiểm thêm/)).toBeVisible();
+    expect(screen.getByText(/Đã kiểm tra — Jev không bắt buộc, có thể bỏ qua/)).toBeVisible();
+    expect(screen.queryByText(/không cần kiểm thêm/)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Kiểm tra 1 lần/ })).not.toBeInTheDocument();
     expect(view.container.textContent).not.toContain('[object Object]');
   });
