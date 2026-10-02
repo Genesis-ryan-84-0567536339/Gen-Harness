@@ -28,6 +28,14 @@ export function accountStatus(a: Pick<SocialAccount, 'status' | 'pause_reason' |
     case 'pending_login':
       return { label: 'Chưa đăng nhập', tone: 'neutral', hint: 'Bấm Đăng nhập — Sếp tự đăng nhập trong cửa sổ trình duyệt.' };
     case 'needs_login':
+      // F-17 (v0.1.38): phiên đã lưu không mở được sau khi chuyển máy/đổi khoá.
+      if (a.pause_reason === 'key_changed') {
+        return {
+          label: 'Cần đăng nhập lại',
+          tone: 'warn',
+          hint: 'Phiên đã lưu không mở được trên máy này (chuyển máy hoặc đổi khoá) — bấm Đăng nhập lại.',
+        };
+      }
       return { label: 'Cần đăng nhập lại', tone: 'warn', hint: 'Phiên đã hết hoặc bị đăng xuất — bấm Đăng nhập lại.' };
     case 'paused':
       return a.pause_reason === 'checkpoint' || a.pause_reason === 'captcha'
