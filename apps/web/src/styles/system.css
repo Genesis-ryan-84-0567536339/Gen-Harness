@@ -1,4 +1,4 @@
-/* Điều khiển hệ thống › Kênh & đăng nhập, plus the channel/brain parts the
+/* Cài đặt, Kết nối (thẻ kênh), plus the channel/brain parts the
  * setup wizard reuses. Sizes copied from the design's inline styles. */
 
 .sys-tabs-panel { min-width: 0; }
@@ -425,3 +425,9 @@
 .ai-budget__price { width: 96px; height: 26px; font-size: 11.5px; font-family: var(--font-mono); }
 .ai-budget__sub { color: var(--color-neutral-400); font-style: italic; }
 .ai-budget__source[data-source='none'] { color: var(--color-warn); }
+
+/* v0.1.42: Cài đặt — liên kết nhanh ở đầu màn (Tài khoản & PIN, Trợ giúp, Hướng dẫn thiết lập). */
+.sys-links { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
+.sys-link { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--color-accent-300); text-decoration: none; }
+.sys-link:hover { text-decoration: underline; }
+.brain-cli-link { padding: 12px 16px; display: flex; align-items: center; }

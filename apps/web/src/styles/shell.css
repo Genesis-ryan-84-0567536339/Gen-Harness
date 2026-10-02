@@ -212,8 +212,8 @@
   .hd-titles { min-width: 0; }
   .hd-right { gap: 6px; }
   .content { padding: 14px 12px; }
-  /* Dải tab dài (Hộp thư, Điều khiển hệ thống …) cuộn ngang TRONG dải, không đẩy cả trang. */
-  .gh-tabs { overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
+  /* Dải tab dài (Hộp thư, Cài đặt …) cuộn ngang TRONG dải, không đẩy cả trang. */
+  .gh-tabs { flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
   .gh-tabs::-webkit-scrollbar { display: none; }
   .gh-tab { flex: none; }
 }

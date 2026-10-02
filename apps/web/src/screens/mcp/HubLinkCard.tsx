@@ -3,13 +3,16 @@ import type { HubLink } from '@gen-harness/contracts';
 import { Button, Icon, Switch, TextField } from '@gen-harness/ui';
 import { errorText } from '../../lib/errorText';
 import { useMe } from '../../lib/queries';
-import { CardError, FriendlyErrorText, InlineError, Panel, SkeletonLines, StateChip } from '../common';
+import { CardError, FriendlyErrorText, InlineError, Panel, SkeletonLines } from '../common';
+import { ConnectionStatusPill } from '../connections/ConnectionStatusPill';
+import { hubStatus } from '../connections/connectionsModel';
 import { HUB_STATUS_LABEL, PUBLIC_NET_HINT, expiryToIso, hubStatusTone, isPublicHttpsUrl, isoToDay } from './mcpModel';
 import { useHubLink, useTestHubLink, useUpdateHubLink } from './queries';
 
 const fmtTime = (iso: string | null) => (iso ? new Date(iso).toLocaleString('vi-VN') : '—');
 
 /**
+ * v0.1.42 (F-61): thẻ này chỉ render ở Kết nối (/connections#genhub) — MCP Hub chỉ còn dòng liên kết tới đây.
  * Gen-hub (v0.1.26, docs/design/gen-hub-link.md §3): Gen đọc Kho Ryan qua Gen-hub — chỉ đọc, chỉ Sếp (Owner).
  * Token là ô CHỈ GHI: API không bao giờ trả lại (chỉ biết "đã lưu"). Liên kết tắt tới khi bấm "Kiểm tra" xanh;
  * đổi địa chỉ/token thì tắt lại, phải kiểm tra lại. Lưu / Kiểm tra cần PIN (`hub.link`), ghi Nhật ký hành động.
@@ -23,11 +26,20 @@ export function HubLinkCard() {
   return (
     <Panel
       title="Gen-hub — Gen đọc Kho tri thức"
-      kicker="Chỉ đọc · chỉ Sếp · tắt tới khi Kiểm tra xanh"
+      kicker={
+        link.data ? (
+          <>
+            <span style={{ color: hubStatusTone(link.data.status) }}>{HUB_STATUS_LABEL[link.data.status]}</span> · chỉ đọc · chỉ Sếp · tắt tới khi
+            Kiểm tra xanh
+          </>
+        ) : (
+          'Chỉ đọc · chỉ Sếp · tắt tới khi Kiểm tra xanh'
+        )
+      }
       label="Gen-hub"
       genTarget="mcp.hub_link"
       bodyClass="hub-link"
-      aside={link.data ? <StateChip color={hubStatusTone(link.data.status)} dot>{HUB_STATUS_LABEL[link.data.status]}</StateChip> : undefined}
+      aside={link.data ? <ConnectionStatusPill status={hubStatus(link.data)} /> : undefined}
     >
       {link.isPending ? (
         <SkeletonLines rows={3} padding="0" />
@@ -161,6 +173,7 @@ function HubLinkBody({ link, isOwner }: { link: HubLink; isOwner: boolean }) {
               type="button"
               className="btn-27"
               icon="ph ph-pulse"
+              data-main-action
               disabled={dirty ? !valid : !link.configured}
               loading={test.isPending || (update.isPending && dirty)}
               data-gen-target="mcp.hub_link.test"

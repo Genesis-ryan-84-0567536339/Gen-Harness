@@ -19,6 +19,8 @@ import { SCREENS as P4_AGENTS } from './agents';
 import { SCREENS as P4_API } from './api';
 import { SCREENS as P4_MCP } from './mcp';
 import { SCREENS as P4_PLUGINS } from './plugins';
+import { SCREENS as CONNECTIONS } from './connections';
+import { SCREENS as TEAM } from './team';
 
 /** Screens built so far (phase 2, then each phase-3 cluster registers its own). Every other key keeps the placeholder. */
 const BUILT: Record<string, ComponentType> = {
@@ -37,6 +39,9 @@ const BUILT: Record<string, ComponentType> = {
   ...P4_API,
   ...P4_MCP,
   ...P4_PLUGINS,
+  // v0.1.42 (F-7): Kết nối, Đội ngũ.
+  ...CONNECTIONS,
+  ...TEAM,
 };
 
 /** Screen-title row: title 20px/500 + description 12.5px neutral-400 (docs/01 "Quy ước chung"). */

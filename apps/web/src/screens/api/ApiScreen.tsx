@@ -1,5 +1,5 @@
 import { useEffect, useState, type DragEvent } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import type { AgentBindingSlot, BindableModel, Provider, ProviderKind } from '@gen-harness/contracts';
 import { ApiError, SCREEN_BY_KEY } from '@gen-harness/contracts';
 import { Button, Dialog, EmptyState, Icon, SelectField, Switch, TextField } from '@gen-harness/ui';
@@ -9,7 +9,6 @@ import { detailToText } from '../../lib/friendlyError';
 import { useCan } from '../../lib/permissions';
 import { toast } from '../../lib/toast';
 import { CardError, FriendlyErrorText, InlineError, Panel, PinHint, PIN_ROUTE_CHANGE_TITLE, ScreenHead, SkeletonLines, StateChip } from '../common';
-import { CliCard } from '../system/CliCard';
 import { ModelPicker } from './ModelPicker';
 import { CliDiagnose } from '../system/CliDiagnose';
 import { AGY_SCOPE_TEXT } from '../system/systemModel';
@@ -120,8 +119,13 @@ export function ApiScreen() {
         <FailoverRulesPanel />
       </div>
 
-      <CliCard canManage={canManage} />
-      <CliCard canManage={canManage} kind="claude_code_cli" showCredentials={false} />
+      {/* v0.1.42 (F-61): thẻ tài khoản CLI chỉ ở một chỗ — Kết nối › Bộ não AI. */}
+      <div className="gh-card apm-cli-link">
+        <Link to="/connections#brain" className="sys-link">
+          <Icon name="ph ph-plugs-connected" size={13} />
+          Tài khoản Google / Claude CLI ở Kết nối
+        </Link>
+      </div>
 
       {addingProvider ? <AddProviderDialog initial={addInitial} onClose={() => setAddingProvider(false)} /> : null}
       {addingKeyFor ? <AddKeyDialog provider={addingKeyFor} onClose={() => setAddingKeyFor(null)} /> : null}
@@ -529,7 +533,7 @@ function PriorityChainPanel({ canManage }: { canManage: boolean }) {
   };
 
   return (
-    <Panel title="Chuỗi ưu tiên" kicker="Kéo để đổi thứ tự — hoặc dùng nút lên/xuống" bodyClass="apm-chain" label="Chuỗi ưu tiên nhà cung cấp">
+    <Panel title="Chuỗi chuyển hướng" kicker="Kéo để đổi thứ tự — hoặc dùng nút lên/xuống" bodyClass="apm-chain" label="Chuỗi chuyển hướng nhà cung cấp">
       {providers.isPending ? (
         <SkeletonLines rows={3} padding="10px 16px" />
       ) : providers.isError ? (
@@ -537,7 +541,7 @@ function PriorityChainPanel({ canManage }: { canManage: boolean }) {
       ) : list.length === 0 ? (
         <EmptyState icon="ph ph-arrows-down-up" title="Chưa có nhà cung cấp nào" />
       ) : (
-        <ol className="apm-chain-list" aria-label="Chuỗi ưu tiên nhà cung cấp">
+        <ol className="apm-chain-list" aria-label="Chuỗi chuyển hướng nhà cung cấp">
           {list.map((p, i) => (
             <li
               key={p.id}

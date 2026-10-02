@@ -9,6 +9,8 @@ import { qk } from '../lib/queries';
 import { queryClient } from '../lib/queryClient';
 import { toast } from '../lib/toast';
 import { CardError, SkeletonLines } from '../screens/common';
+import { PinHistoryDialog } from '../screens/system/PinCard';
+import { useCan } from '../lib/permissions';
 import { ScreenTitle } from '../screens/ScreenPage';
 import { useFieldErrors } from '../setup/useFieldErrors';
 import { roleLine } from '../shell/people';
@@ -164,6 +166,9 @@ function ProfileCard({ account }: { account: Account }) {
 const EMPTY_PIN: PinValues = { current_password: '', new_pin: '', new_pin_confirm: '' };
 
 function PinCard() {
+  // v0.1.42 (F-61): "Lịch sử nhập PIN" chuyển về đây (trước ở thẻ PIN của Điều khiển hệ thống).
+  const canAudit = useCan('audit.read');
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [v, setV] = useState<PinValues>(EMPTY_PIN);
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -221,8 +226,14 @@ function PinCard() {
           <Button variant="primary" type="submit" loading={busy} icon="ph ph-password">
             Đổi mã PIN
           </Button>
+          {canAudit ? (
+            <Button variant="secondary" icon="ph ph-clock-counter-clockwise" onClick={() => setHistoryOpen(true)}>
+              Lịch sử nhập PIN
+            </Button>
+          ) : null}
         </div>
       </form>
+      {canAudit ? <PinHistoryDialog open={historyOpen} onClose={() => setHistoryOpen(false)} /> : null}
     </Card>
   );
 }

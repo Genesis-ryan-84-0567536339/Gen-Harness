@@ -73,7 +73,9 @@ describe('Thẻ Gen-hub', () => {
       return json(404);
     });
     const { container } = renderCard(<HubLinkCard />);
-    expect(await screen.findByText('Chưa nối')).toBeInTheDocument();
+    expect(await screen.findByText('Chưa nối', { selector: 'dd' })).toBeInTheDocument();
+    // v0.1.42 (F-7): viên trạng thái chung của Kết nối; chữ chi tiết ("Đang tắt") ở dòng phụ.
+    expect(container.querySelector('.conn-pill')).toHaveAttribute('data-status', 'not_connected');
     expect(screen.getByText('Đang tắt')).toBeInTheDocument();
     const user = userEvent.setup();
     const save = screen.getByRole('button', { name: 'Lưu' });
