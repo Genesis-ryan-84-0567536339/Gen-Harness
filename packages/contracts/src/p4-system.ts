@@ -484,6 +484,58 @@ export interface RecoveryKit {
 /** `GET /system/offsite/portable` — tải bằng điều hướng trình duyệt (gói có thể rất lớn), KHÔNG fetch→blob. */
 export const OFFSITE_PORTABLE_URL = '/api/v1/system/offsite/portable';
 
+/**
+ * v0.1.41 (F-84): `GET /system/ai-cost?date=YYYY-MM-DD` (quyền `system.read`; ngày theo giờ VN) — chi phí AI trong ngày
+ * theo agent/model, trần ngân sách, 7 ngày gần nhất và đánh giá "Hữu ích" 7 ngày. Tiền là số nguyên VND; CLI trả theo gói
+ * nên `price_source='subscription'` và cost 0. Mọi trường là chuỗi/số/bool/null — web không render object.
+ */
+export interface AiCostAgent {
+  agent_key: string;
+  label: string;
+  calls: number;
+  tokens_in: number;
+  tokens_out: number;
+  cost_vnd: number;
+  unpriced_calls: number;
+}
+export type AiPriceSource = 'owner' | 'subscription' | 'none';
+export interface AiCostModel {
+  model_id: string;
+  provider_name: string;
+  provider_kind: string;
+  model_name: string;
+  in_vnd_per_mtok: number | null;
+  out_vnd_per_mtok: number | null;
+  price_source: AiPriceSource | string;
+  calls_today: number;
+}
+export interface AiCostFeedback {
+  helpful: number;
+  not_helpful: number;
+  briefing_helpful: number;
+  briefing_not_helpful: number;
+}
+export interface AiCost {
+  date: string;
+  timezone: string;
+  total_vnd: number;
+  /** null = chưa đặt trần (không giới hạn). */
+  budget_vnd: number | null;
+  over_budget: boolean;
+  unpriced_calls: number;
+  agents: AiCostAgent[];
+  models: AiCostModel[];
+  last_7_days: Array<{ date: string; total_vnd: number }>;
+  feedback_7d: AiCostFeedback;
+}
+export interface AiBudgetBody {
+  daily_budget_vnd: number | null;
+}
+export interface AiPriceBody {
+  in_vnd_per_mtok: number | null;
+  out_vnd_per_mtok: number | null;
+}
+
 const enc = encodeURIComponent;
 
 /** `/permissions`, `/listening-groups`, `/boundaries*`, `/audit-log*`, `/retention-policies`, `/persons/{id}/data-requests`. */
@@ -540,6 +592,14 @@ export function systemEndpoints(r: ApiClient['request']) {
     /** v0.1.36 (F-6): sức khoẻ hệ thống + sự cố cần Sếp xử lý. */
     systemHealth: {
       get: (signal?: AbortSignal) => r<SystemHealth>('/system/health', { signal }),
+    },
+    /** v0.1.41 (F-84): Chi phí AI hôm nay + trần ngân sách + giá model (sửa cần `system.manage`). */
+    aiCost: {
+      get: (date?: string, signal?: AbortSignal) =>
+        r<AiCost>('/system/ai-cost', { signal, ...(date ? { query: { date } } : {}) }),
+      setBudget: (body: AiBudgetBody) => r<AiCost>('/system/ai-cost/budget', { method: 'PUT', body }),
+      setPrice: (modelId: string, body: AiPriceBody) =>
+        r<AiCost>(`/system/ai-cost/prices/${enc(modelId)}`, { method: 'PUT', body }),
     },
     personDataRequests: {
       create: (personId: string, kind: DataRequestKind) =>

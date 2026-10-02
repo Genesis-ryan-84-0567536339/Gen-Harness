@@ -13,6 +13,7 @@ import { marketEndpoints } from './p3-market';
 import { peopleEndpoints } from './p3-people';
 import { agentsEndpoints } from './p4-agents';
 import { agentModelEndpoints } from './p4-api';
+import type { BackgroundSources, BackgroundSourcesBody } from './p4-api';
 import { mcpEndpoints } from './p4-mcp';
 import { bossChecksEndpoints } from './bossChecks';
 import { pluginsEndpoints } from './p4-plugins';
@@ -247,6 +248,11 @@ export function createEndpoints(client: ApiClient) {
       /** v0.1.32 (chỉ Owner): chẩn đoán nguồn CLI — phiên bản, liệt kê model, một lượt gọi rất ngắn; đầu ra thô đã che. */
       diagnose: (id: string) => r<ProviderDiagnosis>(`/providers/${enc(id)}/diagnose`, { method: 'POST' }),
       credentials: (signal?: AbortSignal) => r<Credential[]>('/providers/credentials', { signal }),
+      /** v0.1.41 (F-86): nguồn AI cho việc nền (`system.read`). */
+      background: (signal?: AbortSignal) => r<BackgroundSources>('/providers/background', { signal }),
+      /** v0.1.41 (F-86): chỉ Owner; thêm CLI cần PIN `ai.background_cli` + `accept_risk` (423/422), bỏ CLI không cần PIN. */
+      setBackground: (body: BackgroundSourcesBody) =>
+        r<BackgroundSources>('/providers/background', { method: 'PUT', body }),
     },
     cli: {
       profiles: (signal?: AbortSignal, kind: CliKind = 'antigravity_cli') =>
