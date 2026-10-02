@@ -50,6 +50,8 @@ async def _seed_agent(db, org, *, name: str = "Trợ lý thương mại", enable
 
 
 async def _seed_provider_model(api: Api, db) -> tuple[str, str]:  # type: ignore[no-untyped-def]
+    # v0.1.35 (F-20): tạo / sửa nhà cung cấp AI cần PIN `ai.route_change`.
+    await _pin(api)
     r = await api.send("POST", "/providers", {"kind": "gemini", "name": "Gemini test",
                                               "keys": ["AIza-test-key-0001"], "models": ["gemini-2.5-flash"]})
     assert r.status_code == 201, r.text

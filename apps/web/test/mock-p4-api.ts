@@ -124,6 +124,8 @@ export function createMock(opts: P4ApiOptions) {
 
     if (seg[0] === 'providers' && seg[2] === 'keys') {
       if (!has(ctx, 'system.manage')) return problem(403, 'FORBIDDEN', 'Vai trò không có quyền này');
+      // v0.1.35 (F-20): thêm khoá cần PIN `ai.route_change` (sau quyền, như API thật; detail null). Xoá khoá không cần.
+      if (seg.length === 3 && m === 'POST' && ctx.needPin()) return problem(423, 'PIN_REQUIRED', 'Thao tác này cần nhập mã PIN');
       const pv = opts.getProviders().find((x) => x.id === seg[1]);
       if (!pv) return problem(404, 'NOT_FOUND', 'Nhà cung cấp không tồn tại');
       if (seg.length === 3 && m === 'POST') {
@@ -144,6 +146,7 @@ export function createMock(opts: P4ApiOptions) {
 
     if (p === '/providers/chain' && m === 'PATCH') {
       if (!has(ctx, 'system.manage')) return problem(403, 'FORBIDDEN', 'Vai trò không có quyền này');
+      if (ctx.needPin()) return problem(423, 'PIN_REQUIRED', 'Thao tác này cần nhập mã PIN');
       const ids = Array.isArray((body as { provider_ids?: unknown }).provider_ids) ? ((body as { provider_ids: string[] }).provider_ids) : [];
       const uniqueIds = [...new Set(ids)];
       const providers = opts.getProviders();

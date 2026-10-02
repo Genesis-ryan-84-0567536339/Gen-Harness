@@ -284,6 +284,10 @@ function AddProvider({ onAdded }: { onAdded: (p: Provider) => void }) {
         <Button variant="secondary" icon="ph ph-plus" disabled={!valid} loading={add.isPending} onClick={() => add.mutate()}>
           Thêm & kiểm tra
         </Button>
+        {/* v0.1.35 (F-20): thêm nhà cung cấp AI cần phiên PIN `ai.route_change` — hộp PIN tự mở khi máy chủ trả 423. */}
+        <span className="muted-note" title="Thêm / sửa nhà cung cấp AI, khoá API, chuỗi chuyển hướng cần mã PIN">
+          <Icon name="ph ph-lock-simple" size={11} /> Cần mã PIN 6 số
+        </span>
         <span className="muted-note">Khoá được mã hoá khi lưu; Console chỉ hiện 4 ký tự cuối.</span>
       </div>
       {add.isError ? <InlineError>{errorText(add.error)}</InlineError> : null}

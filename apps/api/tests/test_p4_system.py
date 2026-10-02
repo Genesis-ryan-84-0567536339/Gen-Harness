@@ -41,6 +41,7 @@ async def _seed_person(db, org, *, name: str = "Chị Lan") -> uuid.UUID:  # typ
 
 
 async def _seed_provider(api: Api, name: str = "Gemini test") -> str:
+    await _pin(api)   # v0.1.35 (F-20): tạo nhà cung cấp AI cần PIN `ai.route_change`
     r = await api.send("POST", "/providers", {"kind": "gemini", "name": name, "keys": ["AIza-test-key-0001"],
                                                "models": ["gemini-2.5-flash"]})
     assert r.status_code == 201, r.text
@@ -232,10 +233,10 @@ async def test_system_audit_log_search_and_filters(owner_api) -> None:  # type: 
 
 async def test_system_audit_log_export_requires_manage_and_pin(owner_api, client, db) -> None:  # type: ignore[no-untyped-def]
     api: Api = owner_api
-    await _seed_provider(api, "Gemini")
     r = await api.get("/audit-log/export")
     assert r.status_code == 423
-    await _pin(api)
+    # v0.1.35 (F-20): tạo nhà cung cấp cần PIN → kiểm 423 của xuất nhật ký TRƯỚC khi mở phiên PIN.
+    await _seed_provider(api, "Gemini")
     r = await api.get("/audit-log/export")
     assert r.status_code == 200
     assert "text/csv" in r.headers["content-type"]

@@ -19,7 +19,7 @@ from gh.gen import envelope, store
 from gh.gen.tools import ToolRunner, collect_ids, compact
 from gh.gen.validator import Validator
 from gh.providers.router import ModelRouter, ModelUnavailable, Routed
-from tests.conftest import Api
+from tests.conftest import Api, verify_pin
 from tests.test_rbac_api import login_as
 
 
@@ -330,6 +330,8 @@ async def test_ws_gen_events_only_to_asker() -> None:
 
 
 async def test_system_one_provider_card_and_test(owner_api: Api, app: Any) -> None:
+    # v0.1.35 (F-20): tạo / sửa nhà cung cấp AI cần PIN `ai.route_change`.
+    await verify_pin(owner_api)
     r = await owner_api.send("POST", "/providers", {"kind": "system_one", "name": "Jev (System One)",
                                                     "keys": ["sk-or-v1-khoa-thu-nghiem"]})
     assert r.status_code == 201, r.text
@@ -436,6 +438,8 @@ async def test_sensitive_target_message_replaced_and_tool_result_wrapped(owner_a
 
 
 async def test_setup_step4_ignores_system_one(owner_api: Api) -> None:
+    # v0.1.35 (F-20): tạo / sửa nhà cung cấp AI cần PIN `ai.route_change`.
+    await verify_pin(owner_api)
     r = await owner_api.send("POST", "/providers", {"kind": "system_one", "name": "Jev", "keys": ["sk-or-v1-x-1234"]})
     pid = r.json()["id"]
     async with admin_sessionmaker()() as db:
