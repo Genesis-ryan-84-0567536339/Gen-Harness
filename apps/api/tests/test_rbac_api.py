@@ -48,17 +48,17 @@ def screens(nav: list[dict]) -> set[str]:  # type: ignore[type-arg]
 
 
 BIZ_EXTRA = {"tasks", "documents", "deals"}
+_MANAGER = BIZ_EXTRA | {"overview", "inbox", "workbench", "tasks", "directory", "documents", "profile", "opportunity",
+                        "deals", "search", "graph", "notebook", "supply", "system"}
+_OPERATOR = _MANAGER - {"system"}
 EXPECTED = {
     "owner": set(navigation.all_screen_keys()),
-    "manager": BIZ_EXTRA | {"overview", "inbox", "workbench", "directory", "graph", "profile", "notebook",
-                            "opportunity", "supply", "search", "system"},
-    "operator": BIZ_EXTRA | {"overview", "inbox", "workbench", "directory", "graph", "profile", "notebook",
-                             "opportunity", "supply", "search"},
-    "agent_staff": BIZ_EXTRA | {"inbox", "workbench", "directory", "graph", "profile", "notebook", "opportunity",
-                                "supply", "search"},
+    "manager": _MANAGER,
+    "operator": _OPERATOR,
+    "agent_staff": _OPERATOR - {"overview"},
     "auditor": BIZ_EXTRA | {"overview", "inbox", "directory", "graph", "profile", "notebook", "opportunity", "supply",
-                            "search", "raw", "rules", "clean", "identity", "agents", "api", "mcp", "plugins",
-                            "system"},
+                            "search", "connections", "raw", "rules", "clean", "identity", "agents", "api", "mcp",
+                            "plugins", "system"},
 }
 
 
@@ -77,7 +77,9 @@ async def test_navigation_filtered_by_role(owner_api, client, db, role: str) -> 
     assert screens(nav) == EXPECTED[role]
     assert "people" not in screens(nav) or role == "owner"
     if role == "owner":
-        assert [d["count"] for d in nav] == [14, 9]      # "11 màn" / "9 màn" của thiết kế + 3 màn spec bổ sung
+        # v0.1.42: số màn KHÔNG ẩn; DB test chưa có nhân viên ⇒ Đánh giá/Chăm sóc ẩn (14 → 12).
+        assert [d["count"] for d in nav] == [12, 10]
+    assert "team" not in screens(nav) or role == "owner"
 
 
 @pytest.mark.parametrize("role,audit,verify,plugins", [

@@ -289,7 +289,7 @@ async def call_kho(db: AsyncSession, redis: Any, client: McpClient, *, user: ser
         raise conflict("HUB_TOOL_NOT_ALLOWED", "Tool này không nằm trong danh sách đọc Kho được phép")
     link = await load(db, user.org_id)
     if link is None or link.server_id is None or not link.enabled:
-        raise conflict("HUB_LINK_OFF", "Chưa nối Gen-hub — Sếp cấu hình ở MCP Hub › thẻ Gen-hub rồi bấm Kiểm tra")
+        raise conflict("HUB_LINK_OFF", "Chưa nối Gen-hub — Sếp cấu hình ở Kết nối › thẻ Gen-hub rồi bấm Kiểm tra")
     key = cache_key(user.org_id, suffix, args)
     if redis is not None:
         raw = await redis.get(key)
@@ -542,9 +542,9 @@ async def expiry_scan(db: AsyncSession, redis: Any = None, now: datetime | None 
         expired = r.token_expires_at <= now
         title = "Token Gen-hub đã hết hạn" if expired else f"Token Gen-hub còn {max(days, 0)} ngày"
         body = ("Gen tạm không đọc được Kho. " if expired else "") + \
-            "Tạo token mới trong Gen-hub (agent gen-harness-…) rồi dán vào MCP Hub › thẻ Gen-hub, bấm Kiểm tra."
+            "Tạo token mới trong Gen-hub (agent gen-harness-…) rồi dán vào Kết nối › thẻ Gen-hub, bấm Kiểm tra."
         await notifications.notify(db, r.org_id, await notifications.owner_ids(db, r.org_id),
-                                   kind="hub.token_expiring", title=title, body=body, link="/mcp", redis=redis)
+                                   kind="hub.token_expiring", title=title, body=body, link="/connections", redis=redis)
         await db.execute(text("UPDATE agent.hub_links SET expiry_notified_at = :n WHERE org_id = :o"),
                          {"n": now, "o": r.org_id})
         await actionlog.record(db, org_id=r.org_id, actor_type="system", actor_id="system:worker",

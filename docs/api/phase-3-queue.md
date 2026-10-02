@@ -2,7 +2,7 @@
 
 Nền chung ở [`phase-3.md`](phase-3.md): hình dạng dùng chung (`PersonRef`, `GroupRef`, `Score`, `EvidenceRef`),
 phạm vi dữ liệu (`ScopeFilter`), chứng cứ (`GET /explain/{kind}/{id}`), góc nhìn đã lưu, Bàn làm việc (bản nháp).
-Cụm này phụ trách **Tổng quan điều hành** (`overview`), **Hộp thư ý nghĩa** (`inbox`), **Việc & Nhắc hẹn**
+Cụm này phụ trách **Hôm nay** (`overview`, trước là "Tổng quan điều hành"), **Hộp thư** (`inbox`), **Việc & Nhắc hẹn**
 (`tasks`, không có màn riêng trong thiết kế gốc — dựng theo `docs/handoff/01-ui-screens.md` §"Màn còn thiếu")
 và **cảnh báo sớm** (spec E9). Bàn làm việc (giao diện duyệt) đã có đủ ở `gh/biz/core`.
 
@@ -75,35 +75,45 @@ khác nhau) nên không cần cột phân biệt loại trong `assignments`.
 
 ## Endpoint
 
-### Tổng quan điều hành
+### Hôm nay (Tổng quan)
 
 `GET /overview` (`overview.read`) →
 
 ```json
-{"kpis": [{"key": "channels_live", "label": "Kênh sống", "value": 2, "unit": null, "row": 1, "status": "ok",
-           "sublabel": null, "pct": null, "filter": {"screen": "system", "filters": {}}}, "… 10 ô nữa"],
+{"kpis": [{"key": "opportunity_claim_rate", "label": "Tỉ lệ cơ hội được nhận", "value": 50.0, "unit": "%", "row": 1,
+           "status": "ok", "sublabel": null, "pct": null,
+           "filter": {"screen": "opportunity", "filters": {"owner": "none"}}}, "… 3 ô nữa"],
  "queue": [{"kind": "opportunity|alert|draft|due", "id", "code", "title", "priority", "at", "due_at"}],
  "spotlight": [{"person": PersonRef, "dimension": "heat|churn_risk", "value": 87.0, "at": "…"}],
  "signals": [{"topic": "thép cuộn", "count": 12, "delta_pct": 33.3}],
  "health": {"channels": [{"type": "zalo", "active": 1}], "plugins": {"healthy": 8, "degraded": 0, "isolated": 0},
-            "backlog_pending": 0},
+            "backlog_pending": 0,
+            "tech": {"channels_live": 2, "groups_listening": 5, "events_today": 340, "processing_latency_s": 1.2}},
  "dataQuality": {"missing_identity_pct": 4.2, "low_confidence_score_pct": 11.0, "unassigned_event_pct": 0.5},
  "hourly": [{"hour": "…", "count": 14}]}
 ```
 
-`kpis` có 11 ô: 6 ô `row=1` = đúng nhóm "Vận hành hệ thống" của spec F4 (kênh sống, nhóm đang lắng nghe, sự
-kiện/ngày, plugin healthy/degraded/isolated, độ trễ xử lý, tỉ lệ hành động chờ duyệt); 5 ô `row=2` = phần
-"bổ sung khi dựng" của `handoff/01-ui-screens.md` §overview (tín hiệu → tiếp cận, báo giá đã gửi, tỉ lệ cơ hội
-được nhận, độ trễ xử lý chassis, hồ sơ active — `chassis_latency` cố ý trùng số với `processing_latency` của hàng
-1, đúng như văn bản liệt kê hai lần). Mỗi ô có `filter: {screen, filters}` để web điều hướng sang danh sách đã
-lọc tương ứng (định nghĩa "xong" #1 của `PLAN.md`).
+**v0.1.42 (F-64):** `kpis` còn **đúng 4 ô kinh doanh**, tất cả `row=1`, theo thứ tự:
+
+| key | label | unit | filter |
+|---|---|---|---|
+| `opportunity_claim_rate` | Tỉ lệ cơ hội được nhận | `%` | `opportunity`, `{owner: "none"}` |
+| `time_to_contact` | Tín hiệu → tiếp cận (trung vị) | `phút` | `opportunity` |
+| `quotations_sent` | Báo giá đã gửi (30 ngày) | — | `workbench`, `{kind: "quotation"}` |
+| `pending_ratio` | Tỉ lệ chờ duyệt | `%` | `workbench`, `{status: "pending"}` |
+
+Đã bỏ khỏi `kpis`: `chassis_latency` (trùng `processing_latency`), `plugins_health` (màn Plugin đóng băng, F-41),
+`active_profiles`. Bốn số kỹ thuật (kênh sống, nhóm đang lắng nghe, sự kiện 24 giờ, độ trễ xử lý trung bình 20 lần
+sàng lọc gần nhất — giây, `null` khi chưa có) chuyển sang `health.tech` để phần "Nâng cao" dùng. Mỗi ô vẫn có
+`filter: {screen, filters}` để web điều hướng sang danh sách đã lọc tương ứng (định nghĩa "xong" #1 của `PLAN.md`).
+Web chỉ render mảng `kpis` và coi `health.tech` là tuỳ chọn ⇒ chạy được với cả API cũ lẫn mới.
 
 **Phạm vi theo vai trò**: theo PLAN §"Định nghĩa có giới hạn" ("Operator: khối Hàng đợi và KPI thuộc hàng đợi
 được giao"), chỉ khối `queue` lọc theo phạm vi của `overview.read` (Operator = `assigned`); `kpis`, `spotlight`,
 `signals`, `health`, `dataQuality`, `hourly` là số toàn tổ chức, không có gì nhạy cảm riêng cá nhân. Đây là quyết
 định tự đưa ra vì spec không liệt kê chính xác widget nào bị giới hạn.
 
-### Hộp thư ý nghĩa
+### Hộp thư
 
 `GET /inbox?tab=all|opportunity|alert|approval|reply|candidate&intent=&cursor=&limit=` (`queue.read`) →
 

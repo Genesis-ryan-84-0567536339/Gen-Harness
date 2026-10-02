@@ -296,7 +296,7 @@ async def handle_status(db: AsyncSession, redis: Redis, bus: EventBus, org_id: u
                 db, org_id, key=f"channel.down:{s.type}", kind="channel.down", severity="bad",
                 title=f"Kênh {name} đã ngắt kết nối",
                 body=f"{s.account_label or name}: {CHANNEL_DOWN_REASONS[reason]} — đăng nhập lại để tiếp tục nhận tin.",
-                link="/system?tab=channels", redis=redis)
+                link="/connections", redis=redis)
         await actionlog.record(db, org_id=org_id, actor_type="system", actor_id=f"bridge:{s.type}",
                                action="channel.session_ended", target_type="channel_session", target_id=str(s.id),
                                target_label=s.account_label, result="ok" if reason == "logged_out" else "failed",

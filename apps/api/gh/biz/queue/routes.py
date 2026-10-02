@@ -1,4 +1,4 @@
-"""API Hàng đợi & Hành động (docs/api/phase-3-queue.md): Tổng quan, Hộp thư ý nghĩa, Việc & Nhắc hẹn.
+"""API Hàng đợi & Hành động (docs/api/phase-3-queue.md): Tổng quan (Hôm nay), Hộp thư, Việc & Nhắc hẹn.
 
 Cảnh báo sớm (spec E9) dùng bảng `biz.alerts` đã có từ giai đoạn 1/2 (`gh.providers.router.raise_alert`, đã được
 `gh.refinery.runner` và `ModelRouter` gọi); cụm này đọc/hành động trên chúng qua Hộp thư và sinh thêm các loại
@@ -36,7 +36,7 @@ JUNK_SQL = "COALESCE(t_spam OR t_dup IS NOT NULL OR t_quality < :minq, false)"
 REPLY_EVENTS = list(qsvc.REPLY_EVENTS)
 
 
-# ─── Hộp thư ý nghĩa ────────────────────────────────────────────────────────
+# ─── Hộp thư ────────────────────────────────────────────────────────────────
 
 _ITEMS_CTE = """
 WITH items AS (
@@ -436,32 +436,22 @@ async def overview(user: service.CurrentUser = Depends(require("overview.read"))
         count(*) FILTER (WHERE owner_user_id IS NOT NULL) AS claimed
         FROM biz.opportunities WHERE org_id = :o AND closed_at IS NULL"""), {"o": org})).one()
     claim_rate = round(opp_claim.claimed / opp_claim.total * 100, 1) if opp_claim.total else 0.0
-    active_profiles = (await db.execute(text("""SELECT count(DISTINCT person_id) FROM clean.meaning_units
-        WHERE org_id = :o AND person_id IS NOT NULL AND observed_at > now() - interval '30 days'"""),
-        {"o": org})).scalar_one()
-
+    # F-64 (v0.1.42): "Hôm nay" chỉ còn 4 số kinh doanh, cùng một hàng. Số kỹ thuật (kênh sống, nhóm lắng nghe,
+    # sự kiện/ngày, độ trễ xử lý) chuyển sang health.tech để màn Nâng cao dùng; bỏ số trùng/đóng băng.
     kpis = [
-        _kpi("channels_live", "Kênh sống", channels_live, row=1, screen="system"),
-        _kpi("groups_listening", "Nhóm đang lắng nghe", groups_listening, row=1, screen="directory"),
-        _kpi("events_today", "Sự kiện / ngày", events_today, row=1, screen="raw"),
-        _kpi("plugins_health", "Plugin lành mạnh", health["plugins"]["healthy"], row=1, screen="plugins",
-             sublabel=f"suy giảm {health['plugins']['degraded']} · cách ly {health['plugins']['isolated']}",
-             status="warn" if health["plugins"]["isolated"] else "ok"),
-        _kpi("processing_latency", "Độ trễ xử lý", round(float(latency), 1) if latency is not None else None,
-             unit="giây", row=1, screen="rules"),
+        _kpi("opportunity_claim_rate", "Tỉ lệ cơ hội được nhận", claim_rate, unit="%", row=1, screen="opportunity",
+             filters={"owner": "none"}),
+        _kpi("time_to_contact", "Tín hiệu → tiếp cận (trung vị)",
+             round(float(time_to_contact), 1) if time_to_contact is not None else None, unit="phút", row=1,
+             screen="opportunity"),
+        _kpi("quotations_sent", "Báo giá đã gửi (30 ngày)", quotations_sent, row=1, screen="workbench",
+             filters={"kind": "quotation"}),
         _kpi("pending_ratio", "Tỉ lệ chờ duyệt", pending_ratio, unit="%", row=1, screen="workbench",
              filters={"status": "pending"}),
-        _kpi("time_to_contact", "Tín hiệu → tiếp cận (trung vị)",
-             round(float(time_to_contact), 1) if time_to_contact is not None else None, unit="phút", row=2,
-             screen="opportunity"),
-        _kpi("quotations_sent", "Báo giá đã gửi (30 ngày)", quotations_sent, row=2, screen="workbench",
-             filters={"kind": "quotation"}),
-        _kpi("opportunity_claim_rate", "Tỉ lệ cơ hội được nhận", claim_rate, unit="%", row=2, screen="opportunity",
-             filters={"owner": "none"}),
-        _kpi("chassis_latency", "Độ trễ xử lý của hệ thống", round(float(latency), 1) if latency is not None else None,
-             unit="giây", row=2, screen="rules"),
-        _kpi("active_profiles", "Hồ sơ hoạt động (30 ngày)", active_profiles, row=2, screen="directory"),
     ]
+    health["tech"] = {"channels_live": channels_live, "groups_listening": groups_listening,
+                      "events_today": events_today,
+                      "processing_latency_s": round(float(latency), 1) if latency is not None else None}
     return {"kpis": kpis, "queue": await _queue_widget(db, user, sc), "spotlight": await _spotlight(db, user, sc),
             "signals": await _signals(db, user, sc), "health": health, "dataQuality": await _data_quality(db, org),
             "hourly": await _hourly(db, org)}
