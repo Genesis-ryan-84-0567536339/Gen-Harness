@@ -102,6 +102,16 @@ export function ApiScreen() {
   );
 }
 
+/** v0.1.35 (F-20): thêm / sửa nhà cung cấp AI, khoá API, chuỗi chuyển hướng cần phiên PIN `ai.route_change` — hộp PIN
+ * tự mở khi máy chủ trả 423 (lib/api.ts + PinDialogHost); ở đây chỉ báo trước. */
+function PinHint() {
+  return (
+    <span className="muted-note" title="Thêm / sửa nhà cung cấp AI, khoá API, chuỗi chuyển hướng cần mã PIN">
+      <Icon name="ph ph-lock-simple" size={11} /> Cần mã PIN 6 số
+    </span>
+  );
+}
+
 function ProviderCardSkeleton() {
   return (
     <div className="apm-provider" aria-hidden>
@@ -181,6 +191,7 @@ function ProviderCard({ provider: p, canManage, onAddKey }: { provider: Provider
       {isCliKind(p.kind) ? <CliDiagnose provider={p} /> : null}
       {testErr ? <InlineError>{errorText(testErr)}</InlineError> : null}
       {remove.isError ? <InlineError>{errorText(remove.error)}</InlineError> : null}
+      {setEnabled.isError ? <InlineError>{errorText(setEnabled.error)}</InlineError> : null}
     </article>
   );
 }
@@ -463,6 +474,11 @@ function PriorityChainPanel({ canManage }: { canManage: boolean }) {
           ))}
         </ol>
       )}
+      {canManage && list.length > 1 ? (
+        <div style={{ padding: '6px 16px 0' }}>
+          <PinHint />
+        </div>
+      ) : null}
       {reorder.isError ? <InlineError>{errorText(reorder.error)}</InlineError> : null}
     </Panel>
   );
@@ -555,6 +571,7 @@ function AddProviderDialog({ onClose }: { onClose: () => void }) {
           <textarea id="apm-new-keys" className="gh-input" rows={2} value={keys} onChange={(e) => setKeys(e.target.value)} />
         </div>
         <TextField label="Model ban đầu (tuỳ chọn, cách nhau dấu phẩy)" value={models} onChange={(e) => setModels(e.target.value)} placeholder="gemini-2.5-flash" />
+        <PinHint />
         {create.isError ? <InlineError>{errorText(create.error)}</InlineError> : null}
       </form>
     </Dialog>
@@ -605,6 +622,7 @@ function AddKeyDialog({ provider, onClose }: { provider: Provider; onClose: () =
       >
         <TextField label="Khoá API mới" value={secret} onChange={(e) => setSecret(e.target.value)} revealable autoComplete="off" spellCheck={false} />
         <TextField label="Model đi kèm (tuỳ chọn)" value={modelName} onChange={(e) => setModelName(e.target.value)} placeholder="gemini-2.5-flash" />
+        <PinHint />
         {addKey.isError ? <InlineError>{errorText(addKey.error)}</InlineError> : null}
       </form>
     </Dialog>

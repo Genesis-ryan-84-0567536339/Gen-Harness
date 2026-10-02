@@ -1204,6 +1204,8 @@ export function createPhase2(opts: Phase2Options) {
       if (seg.length === 1 && m === 'GET') return reply(200, [...providers].sort((a, b) => a.failover_rank - b.failover_rank));
       if (seg.length === 1 && m === 'POST') {
         if (!need('system.manage')) return true;
+        // v0.1.35 (F-20): như API thật — PIN `ai.route_change` kiểm SAU quyền (403 trước 423), detail null.
+        if (ctx.needPin()) return problem(423, 'PIN_REQUIRED', 'Thao tác này cần nhập mã PIN');
         const keys = Array.isArray(body.keys) ? (body.keys as string[]) : [];
         if (!keys.length || keys.some((k) => String(k).length < 8)) return problem(422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors: { keys: 'Khoá API không hợp lệ' } });
         const kind = String(body.kind) as Provider['kind'];
@@ -1221,6 +1223,11 @@ export function createPhase2(opts: Phase2Options) {
         providers.push(pv);
         reply(201, stripSecret(pv));
         return true;
+      }
+      if (seg.length === 2 && m === 'PATCH') {
+        // v0.1.35 (F-20): bật/tắt, đổi thứ tự — PIN `ai.route_change` (sau quyền, trước 404 như phụ thuộc FastAPI).
+        if (!need('system.manage')) return true;
+        if (ctx.needPin()) return problem(423, 'PIN_REQUIRED', 'Thao tác này cần nhập mã PIN');
       }
       const pv = providers.find((x) => x.id === seg[1]);
       if (!pv) return problem(404, 'NOT_FOUND', 'Không tồn tại');

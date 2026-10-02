@@ -10,7 +10,7 @@ from gh.auth import service
 from gh.config import get_settings
 from gh.db import sessionmaker
 from gh.realtime import Hub
-from tests.conftest import OWNER, Api
+from tests.conftest import OWNER, Api, verify_pin
 from tests.phase2 import listen, msg, org_id, put
 from tests.test_rbac_api import login_as
 
@@ -66,6 +66,8 @@ async def test_setup_steps_4_to_7_and_finish(owner_api, db) -> None:  # type: ig
     org = await org_id(db)
     s = (await api.get("/setup/state")).json()
     assert s["console_ready"] and s["current_step"] == 4
+    # v0.1.35 (F-20): tạo / sửa nhà cung cấp AI cần PIN `ai.route_change`.
+    await verify_pin(api)
     r = await api.send("POST", "/providers", {"kind": "gemini", "name": "Gemini", "keys": ["AIza-test-key-1234"],
                                               "models": ["gemini-2.5-flash"]})
     assert r.status_code == 201, r.text
@@ -136,6 +138,8 @@ async def test_setup_finishes_with_only_steps_1_to_4(owner_api, db) -> None:  # 
     """Owner làm 1–4 (Owner, tổ chức, bộ não AI): bỏ qua 5–11 rồi hoàn tất — không bắt quét QR hay dựng agent.
     (v0.1.29: bước 4 cũng "Để sau" được — xem tests/test_setup_v0129.py.)"""
     api: Api = owner_api
+    # v0.1.35 (F-20): tạo / sửa nhà cung cấp AI cần PIN `ai.route_change`.
+    await verify_pin(api)
     r = await api.send("POST", "/providers", {"kind": "gemini", "name": "Gemini", "keys": ["AIza-test-key-1234"],
                                               "models": ["gemini-2.5-flash"]})
     pid = r.json()["id"]
