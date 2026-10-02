@@ -1635,3 +1635,71 @@ cần khôi phục — CSDL chưa bị đụng thì chỉ cần `docker compose 
 - Trợ giúp: hai dòng "phiên bản máy chủ" và "phiên bản công cụ cài đặt (genh)" (bỏ dòng "phiên bản" lặp); thông tin báo
   lỗi dùng cùng chữ. `genh status` mô tả là "dung lượng dữ liệu đang dùng" (không phải chỗ trống ổ đĩa).
 - "Việc nền bị lỗi: N việc" có câu hướng dẫn: thường tự hết, kéo dài thì gửi kèm khi Báo lỗi.
+
+## v0.1.37 — Cập nhật tự lành: không kẹt, không chết giữa chừng, tải chậm vẫn xong, máy tự lên lại (02/10/2026)
+
+### Boss cần làm gì
+
+**Không cần làm gì.** Sau khi máy tự cập nhật lên v0.1.37, nếu Console hiện **"Máy chủ chưa tự chạy lại Gen-Harness sau
+khi khởi động lại"** thì chép đúng lệnh trong dòng đó, dán vào cửa sổ dòng lệnh trên máy chủ **một lần** (máy sẽ hỏi mật
+khẩu đăng nhập máy).
+
+### Vì sao (kế hoạch tổng `docs/audit/2026-10-01/0-ke-hoach-tong.md`, mục v0.1.37)
+
+- **F-34**: không có khoá loại trừ trên máy chủ; trạng thái "running" có thể kẹt mãi; SIGTERM (tắt máy, `systemctl stop`)
+  giết genh giữa lúc migrate, không kịp quay về bản cũ.
+- **F-35 (phần còn lại)**: E2E chỉ kiểm nâng cấp từ bản liền trước — máy tắt vài ngày sẽ nhảy nhiều bản.
+- **F-72**: tải binary genh timeout 20 giây cho cả tệp — mạng chậm ⇒ tự cập nhật hỏng âm thầm.
+- **F-73**: không kiểm "tự lên sau khi bật lại máy" (`docker.service` enabled, linger) ngoài một cảnh báo lúc cài.
+
+### Thay đổi
+
+- **genh tự lành (F-34/F-35/F-72/F-73)** — bắt cả SIGTERM (`signalContext`); tiến trình ngoài chuyển tiếp SIGTERM cho con
+  sau tự cập nhật và vẫn chờ. Rollback chạy bằng `context.WithoutCancel` với hạn riêng `rollbackTimeout` (10 phút); bị dừng
+  giữa chừng ⇒ **GH-E94B**, KHÔNG ghi `update-blocked.json` (lịch đêm thử lại). Khoá loại trừ `<gốc cài>/genh.lock` (flock /
+  LockFileEx; cố ý không đặt trong `run/` 0777): lịch đêm bận ⇒ bỏ qua, thoát 0; gõ tay bận ⇒ **GH-E94A**, thoát 1; nút
+  Console (`--if-requested`) chờ tối đa 30 phút; `--self-updated` không lấy khoá; restore/import dùng chung khoá. Unit
+  systemd (lịch đêm + watcher yêu cầu) thêm `KillMode=mixed` + `TimeoutStopSec=900`, máy đã cài được ghi lại qua
+  `autoupdate.RefreshUnits` (không tự bật/tắt lịch). Nhịp sống `run/genh-heartbeat.json` {pid, op, boot_id, started_at,
+  at} mỗi 30 giây; `update-status.json` thêm pid + boot_id. `genh status`/`doctor` in mục "Tự chạy lại khi bật máy" và ghi
+  `run/autostart-status.json` {os, linger, linger_required, docker_enabled, docker_mode, checked_at}.
+- **Tải binary genh (F-72)** — `downloadWithRetry`: hỏng chỉ khi rảnh quá 60 giây (trần 30 phút/lần thử), thử lại tối đa 3
+  lần (chờ 5 s, 15 s) khi lỗi mạng/treo/đứt/5xx/408/429; 404/4xx khác, sai SHA-256, vượt kích thước, tín hiệu dừng trả
+  ngay (giữ binary cũ). `install.sh`: 3 lần, chờ 2 giây, `curl --speed-limit 1024 --speed-time 60` (mã 22 không thử lại).
+- **API + Console (F-34/F-73)** — `/system/update`: 'running' ⇒ **'stalled'** + `stalled_reason: 'process_gone'` khi
+  boot_id khác, hoặc chạy quá 60 phút mà nhịp sống thiếu/cũ hơn 5 phút/khác pid (Thử lại được, 202); yêu cầu quá 15 phút ⇒
+  `'not_picked_up'`; thời điểm không múi giờ/tệp rác trong `run/` không gây 500. `/system/health` thêm `update.stalled_reason`
+  và khối `autostart`; chuông `host.autostart` (warn, một lần, lệnh sửa ghép từ chuỗi cố định — không lấy từ tệp). Web:
+  thẻ "Cập nhật lên vX bị dừng giữa chừng" + Thử lại, lời dẫn GH-E94B/GH-E94A, dòng Sức khoẻ "Cập nhật bị dừng giữa chừng",
+  dải "Cần Sếp xử lý" có dòng `host.autostart` (nút "Xem cách bật").
+- **E2E (F-35)** — e2e-upgrade thành ma trận `upgrade_from`: ô `tags[1]` (bản liền trước) + ô `tags[3]` (nhảy nhiều bản);
+  thiếu bản cũ ⇒ ô `tags[3]` vắng, tóm tắt ghi "bỏ qua", không đỏ; `fail-fast: false`, ô nào đỏ ⇒ không promote
+  (`check_release_gate.py` giữ: ma trận, fail-fast, không continue-on-error, resolve có `tags[3]`). e2e-install (pr +
+  release, genh ≥ v0.1.37) kiểm khoá loại trừ (`flock <gốc cài>/genh.lock` ⇒ `genh update --yes` thoát 0, in "đang có một
+  lần cập nhật/khôi phục khác chạy", `update-status.json` không đổi) và `run/autostart-status.json`. `05-installer.md` sửa
+  đúng ma trận CI thật, khoá, tệp `run/` mới.
+
+### Kiểm tra
+
+- genh: `internal/hostlink/lock_test.go` (cùng/khác tiến trình, chờ khoá, ctx huỷ, symlink), `heartbeat_test.go`,
+  `internal/ops/update_test.go` (huỷ ctx ở migrate/ready ⇒ restore + `up -d --remove-orphans` vẫn chạy, GH-E94B, không
+  `update-blocked.json`; rollback treo bị cắt theo `rollbackTimeout`), `internal/ops/autostart_test.go` (system/rootless/
+  disabled/enabled-runtime/lỗi lệnh/macOS), `status_test.go`/`doctor_test.go`, `internal/autoupdate` (KillMode=mixed,
+  TimeoutStopSec=900, RefreshUnits), `internal/selfupdate/download_test.go` (httptest thật: chậm, treo, đứt, hỏng 3 lần,
+  404, huỷ ctx, vượt kích thước), `cmd/genh/main_test.go` (khoá lịch đêm/gõ tay/--if-requested/--self-updated, SIGTERM),
+  `installsh_unix_test.go` (curl 28 hai lần rồi cài tiếp, 404 một lần, shellcheck).
+- api: `tests/test_system_update.py` (stalled/process_gone, nhịp sống tươi vẫn 409, boot_id khác, not_picked_up, tệp rác),
+  `tests/test_health_v0137.py` (chuông `host.autostart` đúng 1 lần, đóng khi hết, body chuỗi cố định, khối autostart).
+- web: `test/unit/update-stalled-v0137.test.tsx`, e2e mock `e2e/update-stalled-v0137.spec.ts`.
+- Sửa khi tích hợp (F-73): thân chuông/dải `host.autostart` không còn dấu chấm dính sau lệnh (trước đây "… enable docker."
+  / "… enable-linger $USER." — Sếp chép nguyên dòng sẽ chạy lỗi), các câu nối bằng " · "; web thêm `host.autostart` vào
+  kind sự cố (biểu tượng chuông, làm mới `/system/health` ngay khi nhận chuông) và mock e2e. Test thêm:
+  `test_health_v0137.py` (không dấu chấm sau lệnh), `test/unit/needs-boss-autostart-v0137.test.tsx`, e2e mock
+  `update-stalled-v0137.spec.ts` thêm 5 kịch bản (not_picked_up chữ cũ, GH-E94B, GH-E94A, dòng Sức khoẻ "Cập nhật bị dừng
+  giữa chừng", dải có dòng `host.autostart` không nút).
+- Kết quả trên nhánh tích hợp (02/10): ruff + mypy sạch, alembic 1 head (0024); pytest 1254 passed (superuser) và 1254
+  passed (gh_app); web lint/typecheck sạch, check_no_fake_ids sạch, vitest 355 passed (47 tệp), build OK, bridge test OK;
+  Playwright mock 171 passed; browser 14 passed; genh gofmt sạch, `go vet` + `go test -count=1 ./...` 17 gói ok (412 test);
+  actionlint sạch (mọi workflow); `check_release_gate.py` thoát 0, unittest `.github/scripts` 28 OK.
+- Chờ sau phát hành (chế độ release): e2e-upgrade hai ô `tags[1]` (v0.1.36 → v0.1.37) và `tags[3]` (v0.1.34 → v0.1.37) có
+  dữ liệu xanh, promote; kiểm genh tải từ releases/latest (checksum + `genh version` = v0.1.37) rồi mới báo Boss.
