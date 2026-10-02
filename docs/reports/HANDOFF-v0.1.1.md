@@ -1866,6 +1866,12 @@ máy mà tài khoản Facebook báo **"Cần đăng nhập lại"** thì chỉ b
 - genh: `internal/ops/status_volumes_test.go` (`claude_state` trong `volumeBaseNames`, khớp compose).
 - web: `test/unit/agy-owner-only-v0138.test.tsx`, `test/unit/social-key-v0138.test.ts`, e2e mock
   `e2e/agy-owner-only-v0138.spec.ts`.
-- Kết quả trên nhánh tích hợp (02/10): KQ_TONG_HOP
+- Kết quả trên nhánh tích hợp (02/10): ruff + mypy sạch, alembic 1 head (0024); pytest 1296 passed (superuser) và
+  1296 passed (gh_app), không skip; web lint/typecheck sạch, check_no_fake_ids sạch, vitest 373 passed (49 tệp), build OK,
+  bridge test 50 pass; Playwright mock 175 passed; e2e thật rút gọn (live-ci) 5 passed; browser 14 passed; genh gofmt
+  sạch, `go vet` + `go test -count=1 ./...` 17 gói ok (438 test pass, 1 skip có sẵn cần certutil); actionlint sạch;
+  `check_release_gate.py` thoát 0, unittest `.github/scripts` 28 OK; canary offline với agy 1.2.9 thật: `khong_lo`.
+- Sửa khi tích hợp (test): `test_run_removes_cwd_even_on_timeout` dùng thư mục tạm riêng của test (trước đây so
+  `/tmp/gh-agy-*` dùng chung ⇒ đỏ khi hai lượt pytest chạy song song).
 - Chờ sau phát hành: e2e-install chế độ pr/release bước canary offline trên ảnh thật + e2e-upgrade chuyển tệp Claude cũ
   (v0.1.37 → v0.1.38); kiểm genh tải từ releases/latest (checksum + `genh version` = v0.1.38) rồi mới báo Boss.
