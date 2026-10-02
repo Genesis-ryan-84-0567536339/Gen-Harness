@@ -76,11 +76,19 @@ def pin_required() -> ApiError:
 MODEL_UNAVAILABLE_HINT = "Chưa có model AI nào hoạt động — vào Agent & Model (Hướng dẫn bước 4) để chọn hoặc sửa model."
 
 
-def model_unavailable(title: str, reasons: list[str]) -> ApiError:
+def model_unavailable(title: str, reasons: list[str], *, chain_reasons: list[str] | None = None) -> ApiError:
     """v0.1.30: 503 MODEL_UNAVAILABLE đúng khuôn lỗi chung — `detail` là CÂU CHỮ cho người đọc (web hiện thẳng),
     lý do kỹ thuật từng nhà cung cấp nằm ở `reasons` cấp ngoài cùng (chuỗi). Trước đây `detail={"reasons": …}` (đối
-    tượng) → web vẽ thẳng làm React child → sập màn (React error #31)."""
+    tượng) → web vẽ thẳng làm React child → sập màn (React error #31).
+
+    Review F-22: mọi lý do là luật owner-only của Antigravity CLI (`chain_reasons` = lý do đầy đủ khi `reasons` đã
+    bị lọc cho vai trò không phải Owner) ⇒ nói đúng nguyên nhân thay vì "chưa có model".
+    """
+    from gh.providers.router import AGY_ONLY_HINT, AGY_ONLY_TITLE, agy_only
+
     clean = [str(r) for r in reasons if str(r).strip()]
+    if agy_only([str(r) for r in (reasons if chain_reasons is None else chain_reasons)]):
+        return ApiError(503, "MODEL_UNAVAILABLE", AGY_ONLY_TITLE, AGY_ONLY_HINT, reasons=clean)
     return ApiError(503, "MODEL_UNAVAILABLE", title, MODEL_UNAVAILABLE_HINT, reasons=clean)
 
 

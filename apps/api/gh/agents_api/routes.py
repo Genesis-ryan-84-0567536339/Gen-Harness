@@ -162,8 +162,7 @@ async def _agent_key_label(db: AsyncSession, org_id: uuid.UUID, agent_key: str) 
 
 
 GEN_KEY = "core.gen"    # gh.gen.engine.AGENT_KEY — khoá DUY NHẤT được gán Antigravity CLI (F-22)
-AGY_GEN_ONLY_MSG = ("Antigravity CLI chỉ dùng được cho Gen của Sếp — sàng lọc tin và trực việc nhận nội dung của khách "
-                    "nên phải dùng nguồn khác (khoá API hoặc Claude Code CLI)")
+AGY_GEN_ONLY_MSG = AGY_OWNER_ONLY_REASON   # một câu duy nhất cho API, bộ định tuyến và Console (AGY_SCOPE_TEXT)
 
 
 def _binding_out(r: Any, agent_key: str) -> dict[str, Any]:

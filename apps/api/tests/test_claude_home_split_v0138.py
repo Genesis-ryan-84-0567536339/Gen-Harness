@@ -30,6 +30,8 @@ def homes(tmp_path, monkeypatch):  # type: ignore[no-untyped-def]
     monkeypatch.setenv("GH_CLAUDE_HOME", str(target))
     get_settings.cache_clear()
     legacy = agy_home / "claude" / ".claude"
+    monkeypatch.setenv("GH_CLAUDE_LEGACY_HOME", str(legacy))  # như api.Dockerfile
+    get_settings.cache_clear()
     legacy.mkdir(parents=True)
     (legacy / ".credentials.json").write_bytes(CRED)
     (legacy / ".claude.json").write_bytes(STATE)
@@ -69,6 +71,52 @@ async def test_newer_target_session_not_overwritten(homes) -> None:  # type: ign
     assert not (agy_home / "claude").exists()
 
 
+async def test_never_touches_siblings_of_legacy(homes) -> None:  # type: ignore[no-untyped-def]
+    """Review blocker: chỉ xoá đúng `.claude` cũ và `work`; thư mục khác cạnh nó (dự án của người dùng) giữ nguyên."""
+    agy_home, legacy, target = homes
+    (agy_home / "claude" / "other").mkdir()
+    (agy_home / "claude" / "src").mkdir()
+    (agy_home / "claude" / "src" / "main.py").write_text("print(1)\n")
+    await climod.restore_active(None)
+    assert (target / ".credentials.json").read_bytes() == CRED
+    assert not legacy.exists() and not (agy_home / "claude" / "work").exists()
+    assert (agy_home / "claude" / "other").is_dir()
+    assert (agy_home / "claude" / "src" / "main.py").read_text() == "print(1)\n"
+
+
+async def test_no_legacy_setting_is_noop(homes, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Dev/pytest không đặt GH_CLAUDE_LEGACY_HOME ⇒ `~/claude/.claude` (có thể là dự án thật) không bị đụng tới."""
+    agy_home, legacy, target = homes
+    monkeypatch.delenv("GH_CLAUDE_LEGACY_HOME")
+    get_settings.cache_clear()
+    assert climod.migrate_legacy_claude_home() == 0
+    await climod.restore_active(None)
+    assert (legacy / ".credentials.json").read_bytes() == CRED
+    assert (agy_home / "claude" / "work").is_dir()
+
+
+def test_failed_item_keeps_legacy_then_retries(homes, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Lỗi giữa chừng (vd. ENOSPC) ⇒ đích không có bản dở, thư mục cũ giữ nguyên; lần sau chuyển nốt rồi mới xoá."""
+    agy_home, legacy, target = homes
+    real = climod.shutil.copy2
+
+    def boom(src, dst, *a, **k):  # type: ignore[no-untyped-def]
+        if str(src).endswith(".credentials.json"):
+            Path(dst).write_bytes(b"do-dang")
+            raise OSError(28, "No space left on device")
+        return real(src, dst, *a, **k)
+
+    monkeypatch.setattr(climod.shutil, "copy2", boom)
+    assert climod.migrate_legacy_claude_home() == 1  # chỉ .claude.json
+    assert not (target / ".credentials.json").exists()
+    assert not list(target.glob("*.migrating"))
+    assert (legacy / ".credentials.json").read_bytes() == CRED
+    monkeypatch.setattr(climod.shutil, "copy2", real)
+    assert climod.migrate_legacy_claude_home() == 1
+    assert (target / ".credentials.json").read_bytes() == CRED
+    assert not (agy_home / "claude").exists()
+
+
 async def test_worker_does_not_migrate(homes) -> None:  # type: ignore[no-untyped-def]
     agy_home, legacy, target = homes
     await climod.restore_active(None, owns_logins=False)
@@ -101,6 +149,7 @@ def test_compose_and_dockerfile_split_claude_volume() -> None:
     assert "GH_CLAUDE_HOME=/var/lib/gh/claude/.claude" in dockerfile
     homes = re.findall(r"GH_CLAUDE_HOME=(\S+)", dockerfile)
     assert homes and all(not h.startswith("/var/lib/gh/agy") for h in homes)
+    assert "GH_CLAUDE_LEGACY_HOME=/var/lib/gh/agy/claude/.claude" in dockerfile
 
 
 async def test_shared_home_opens_incident_then_clears(owner_api, app, tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]

@@ -55,10 +55,12 @@ function renderWith(ui: ReactElement, qc: QueryClient) {
 }
 const freshClient = () => new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
-// Chuỗi THẬT của máy chủ: gh/providers/router.py::AGY_OWNER_ONLY_REASON và gh/agents_api/routes.py::AGY_GEN_ONLY_MSG.
-const AGY_REASON = 'Antigravity CLI: chỉ dùng cho Gen của Sếp (agy chưa tắt được công cụ đọc tệp — luật an toàn, không đổi được)';
-const AGY_REAL_TITLE =
-  'Antigravity CLI chỉ dùng được cho Gen của Sếp — sàng lọc tin và trực việc nhận nội dung của khách nên phải dùng nguồn khác (khoá API hoặc Claude Code CLI)';
+// Chuỗi THẬT của máy chủ: gh/providers/router.py::AGY_OWNER_ONLY_REASON = gh/agents_api/routes.py::AGY_GEN_ONLY_MSG
+// (một câu duy nhất — review F-22).
+const AGY_REASON =
+  'Antigravity CLI chỉ dùng cho Gen — trợ lý quản trị (Gen của Sếp). Sàng lọc tin và trực việc phải dùng nguồn khác (khoá API hoặc Claude Code CLI) — luật an toàn, không tắt được.';
+const AGY_REAL_TITLE = AGY_REASON;
+const SCOPE_RE = /Chỉ dùng cho Gen — trợ lý quản trị \(Gen của Sếp\)\. Sàng lọc tin và trực việc phải dùng nguồn khác/;
 const AGY_TITLE = 'Model của Antigravity CLI chỉ dùng cho Gen của Sếp. Sàng lọc tin và trực việc nên dùng khoá API hoặc Claude Code CLI.';
 
 const PROVIDERS: Provider[] = [
@@ -80,7 +82,8 @@ const BINDINGS: BindingsPage = {
       // Đúng hình dạng máy chủ (gh/agents_api/routes.py::_binding_out): blocked_reason nằm TRONG binding.
       binding: { model_id: 'm-agy', model_name: 'gemini-3-pro', provider_name: 'Antigravity CLI', temperature: 0.2, context_tokens: 64000, rule_codes: [], blocked_reason: AGY_REASON },
     },
-    { agent_key: 'core.gen', label: 'Gen của Sếp', binding: null },
+    { agent_key: 'core.gen', label: 'Gen — trợ lý quản trị', binding: null },
+    { agent_key: 'core.reply_fast', label: 'Trả lời nhanh', binding: null },
   ],
   models: [
     { id: 'm-agy', model_name: 'gemini-3-pro', provider_name: 'Antigravity CLI', enabled: true },
@@ -116,18 +119,46 @@ describe('v0.1.38 F-22 — Antigravity CLI chỉ dùng cho Gen của Sếp', () 
     );
     const agy = screen.getByTestId('cli-card-antigravity_cli');
     const claude = screen.getByTestId('cli-card-claude_code_cli');
-    expect(within(agy).getByText(/Chỉ dùng cho Gen của Sếp/)).toBeInTheDocument();
-    expect(within(claude).queryByText(/Chỉ dùng cho Gen của Sếp/)).toBeNull();
+    expect(within(agy).getByText(SCOPE_RE)).toBeInTheDocument();
+    expect(within(claude).queryByText(SCOPE_RE)).toBeNull();
   });
 
-  it('bảng gán model: slot core.refinery có binding.blocked_reason → nhãn "Không dùng được" kèm câu giải thích', async () => {
+  it('bảng gán model: slot core.refinery có binding.blocked_reason → nhãn "Chỉ cho Gen" + câu việc cần làm hiện thẳng', async () => {
     mockFetch((c) => apiHandler(c) ?? json(404));
     renderWith(<ApiScreen />, freshClient());
     const badge = await screen.findByTestId('binding-blocked-core.refinery');
-    expect(badge).toHaveTextContent('Không dùng được');
+    expect(badge).toHaveTextContent('Chỉ cho Gen');
     expect(badge).toHaveAttribute('title', AGY_REASON);
+    // Không chỉ tooltip (màn hình cảm ứng không xem được): câu hiện dưới dòng, nói việc cần làm.
+    expect(screen.getByTestId('binding-blocked-hint-core.refinery')).toHaveTextContent(
+      'Model này chỉ cho Gen — agent này bỏ qua nó. Chọn model khác hoặc bỏ gán.',
+    );
     expect(screen.queryByTestId('binding-blocked-core.gen')).toBeNull();
     expect(document.body.textContent).not.toContain('[object Object]');
+  });
+
+  it('slot chưa gán (khác Gen): ô chọn mặc định model KHÔNG phải agy; slot Gen giữ model đầu tiên', async () => {
+    const calls = mockFetch((c) => (c.method === 'PUT' ? json(200, { agent_key: 'core.reply_fast', binding: null }) : apiHandler(c) ?? json(404)));
+    renderWith(<ApiScreen />, freshClient());
+    const user = userEvent.setup();
+    const row = (await screen.findByText('Trả lời nhanh', { selector: '.apm-table__agent' })).closest('tr') as HTMLElement;
+    await user.click(within(row).getByRole('button', { name: /chưa gán/ }));
+    const dialog = await screen.findByRole('dialog');
+    await waitFor(() => expect(within(dialog).getByRole('option', { name: /chỉ cho Gen/ })).toBeInTheDocument());
+    expect((within(dialog).getByLabelText('Model') as HTMLSelectElement).value).toBe('m1');
+    await user.click(within(dialog).getByRole('button', { name: 'Lưu' }));
+    await waitFor(() => expect(calls.find((c) => c.method === 'PUT')?.body).toMatchObject({ model_id: 'm1' }));
+  });
+
+  it('slot Gen chưa gán: agy được chọn (model đầu tiên), không có chú thích "chỉ cho Gen"', async () => {
+    mockFetch((c) => apiHandler(c) ?? json(404));
+    renderWith(<ApiScreen />, freshClient());
+    const user = userEvent.setup();
+    const row = (await screen.findByText('Gen — trợ lý quản trị', { selector: '.apm-table__agent' })).closest('tr') as HTMLElement;
+    await user.click(within(row).getByRole('button', { name: /chưa gán/ }));
+    const dialog = await screen.findByRole('dialog');
+    expect((within(dialog).getByLabelText('Model') as HTMLSelectElement).value).toBe('m-agy');
+    expect(within(dialog).queryByRole('option', { name: /chỉ cho Gen/ })).toBeNull();
   });
 
   it('PUT 409 AGY_OWNER_GEN_ONLY → câu thân thiện, mã lỗi chỉ trong "Chi tiết kỹ thuật"', async () => {
@@ -213,7 +244,7 @@ describe('v0.1.38 F-22 — Antigravity CLI chỉ dùng cho Gen của Sếp', () 
       </QueryClientProvider>,
     );
     const scope = await screen.findByTestId('setup-cli-scope-antigravity_cli');
-    expect(scope).toHaveTextContent('Chỉ dùng cho Gen của Sếp');
+    expect(scope).toHaveTextContent(SCOPE_RE);
     expect(await screen.findByTestId('setup-agy-only-hint')).toHaveTextContent(
       'Gen dùng được ngay; muốn hệ thống tự sàng lọc tin và trực việc, thêm một khoá API hoặc Claude Code CLI',
     );

@@ -69,9 +69,11 @@ RUN useradd --system --uid 10001 --home-dir /home/gh --create-home gh \
 # HOME của Antigravity CLI là /var/lib/gh/agy và agy có công cụ đọc tệp, nên để `.credentials.json` của Claude dưới
 # HOME đó là cho agy đọc được phiên Claude. /var/lib/gh/claude/.claude tạo sẵn (chown gh:gh ở trên) để Docker chép
 # đúng quyền vào volume mới ở lần mount đầu. Tệp ở đường dẫn cũ do api tự chuyển khi khởi động
-# (gh/providers/cli.py::migrate_legacy_claude_home).
+# (gh/providers/cli.py::migrate_legacy_claude_home) — CHỈ khi GH_CLAUDE_LEGACY_HOME được đặt (chỉ ở đây; dev/test để
+# rỗng vì ngoài Docker HOME của agy là HOME thật của người dùng).
 ENV GH_CLI_HOME=/var/lib/gh/agy/.gemini/antigravity-cli GH_CLI_BINARY=agy AGY_CLI_DISABLE_AUTO_UPDATE=1 \
-    GH_CLAUDE_HOME=/var/lib/gh/claude/.claude GH_CLAUDE_BINARY=claude DISABLE_AUTOUPDATER=1
+    GH_CLAUDE_HOME=/var/lib/gh/claude/.claude GH_CLAUDE_BINARY=claude DISABLE_AUTOUPDATER=1 \
+    GH_CLAUDE_LEGACY_HOME=/var/lib/gh/agy/claude/.claude
 USER gh
 EXPOSE 8000
 HEALTHCHECK --interval=15s --timeout=3s --retries=5 \

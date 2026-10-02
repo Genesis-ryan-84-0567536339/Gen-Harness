@@ -17,6 +17,14 @@ export interface StatusView {
 }
 
 /** Trạng thái tài khoản → nhãn tiếng Việt + việc Owner cần làm (một nguồn cho thẻ, test, e2e). */
+/**
+ * Nhãn nút đăng nhập (review F-17): tài khoản `needs_login` (phiên không mở được sau chuyển máy/đổi khoá ⇒ máy chủ xoá
+ * phiên, `has_session=false`) vẫn là "Đăng nhập lại" — khớp gợi ý ở dòng trạng thái, chuông và hướng dẫn.
+ */
+export function loginLabel(a: Pick<SocialAccount, 'status' | 'has_session'>): 'Đăng nhập lại' | 'Đăng nhập' {
+  return a.has_session || a.status === 'needs_login' ? 'Đăng nhập lại' : 'Đăng nhập';
+}
+
 export function accountStatus(a: Pick<SocialAccount, 'status' | 'pause_reason' | 'active_job'>): StatusView {
   if (a.active_job) {
     const what = a.active_job.kind === 'login' ? 'Đang mở cửa sổ đăng nhập' : a.active_job.kind === 'read' ? 'Đang đọc' : 'Đang kiểm phiên';

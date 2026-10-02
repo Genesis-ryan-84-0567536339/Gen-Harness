@@ -1787,8 +1787,12 @@ lần** (máy sẽ hỏi mật khẩu đăng nhập máy), rồi chạy `genh st
 
 ### Boss cần làm gì
 
-**Không cần làm gì.** Nếu Sếp đã đăng nhập Claude Code CLI, phiên tự chuyển sang chỗ mới khi cập nhật. Nếu sau này chuyển
-máy mà tài khoản Facebook báo **"Cần đăng nhập lại"** thì chỉ bấm **Đăng nhập lại**.
+**Không cần làm gì**, trừ một trường hợp: nếu nguồn AI **chỉ có Antigravity CLI** thì thêm một nguồn khác (khoá API hoặc
+Claude Code CLI) ở màn API & Model — sàng lọc tin, trực việc và các câu Gen phải đọc tin khách/mạng xã hội/Kho không dùng
+agy (luật an toàn); chưa thêm thì Hộp thư có cảnh báo P2 "Sàng lọc/trực việc chưa có nguồn AI phù hợp".
+
+Nếu Sếp đã đăng nhập Claude Code CLI, phiên tự chuyển sang chỗ mới khi cập nhật. Nếu sau này chuyển máy mà tài khoản
+Facebook báo **"Cần đăng nhập lại"** thì chỉ bấm **Đăng nhập lại**.
 
 ### Vì sao (kế hoạch tổng `docs/audit/2026-10-01/0-ke-hoach-tong.md`, mục v0.1.38)
 
@@ -1812,7 +1816,7 @@ máy mà tài khoản Facebook báo **"Cần đăng nhập lại"** thì chỉ b
   bỏ qua nguồn agy với lý do "Antigravity CLI: chỉ dùng cho Gen của Sếp…" (sàng lọc `core.refinery`, trực việc
   `agent:<id>`, mọi purpose khác); chỉ lượt Gen của Owner truyền `allow_agy=True`; Gen của nhân viên mà chỉ có agy ⇒ câu
   "Gen chưa trả lời được…" (không gọi agy). `PUT /agents/bindings/<khoá khác core.gen>` với model agy ⇒ 409
-  `AGY_OWNER_GEN_ONLY`; bản cài cũ đã gán ⇒ `binding.blocked_reason` (Console hiện "Không dùng được"). Bước 4/tự gán chỉ
+  `AGY_OWNER_GEN_ONLY`; bản cài cũ đã gán ⇒ `binding.blocked_reason` (Console hiện "Chỉ cho Gen" + việc cần làm). Bước 4/tự gán chỉ
   gán agy cho `core.gen`. Web: thẻ CLI Antigravity + bước 4 ghi phạm vi, ô chọn model ghi "chỉ cho Gen", lỗi 409 là câu
   tiếng Việt + mã trong "Chi tiết kỹ thuật".
 - **Tách phiên Claude Code khỏi HOME agy (F-22)** — volume mới `claude_state` (`GH_CLAUDE_HOME=/var/lib/gh/claude/.claude`)
@@ -1832,6 +1836,36 @@ máy mà tài khoản Facebook báo **"Cần đăng nhập lại"** thì chỉ b
   dùng được" không bao giờ hiện trên máy thật (mock xanh). Hợp đồng `AgentBinding.blocked_reason`, web đọc
   `slot.binding.blocked_reason`; vitest + e2e mock dùng đúng hình dạng và chuỗi thật của máy chủ (409 chỉ có title).
 
+### Sửa sau review (F-22, F-17)
+
+- **Chuyển phiên Claude cũ không còn xoá nhầm (blocker)** — trước đây hàm xoá cả `<HOME agy>/claude`; ngoài Docker (dev,
+  pytest) HOME agy là HOME thật ⇒ `~/claude` (vd. thư mục dự án có `.claude/`) bị xoá. Giờ chỉ chạy khi
+  `GH_CLAUDE_LEGACY_HOME` được đặt (chỉ trong `api.Dockerfile` = `/var/lib/gh/agy/claude/.claude`); mỗi mục chép vào
+  `<tên>.migrating` rồi `os.replace` (hai volume khác nhau — không bao giờ để bản dở ở đích); chỉ khi mọi mục xong mới xoá
+  đúng `.claude` cũ + `work`, rồi `rmdir` thư mục cha nếu rỗng; có lỗi ⇒ giữ nguyên thư mục cũ, lần khởi động sau làm tiếp.
+  `tests/conftest.py` đặt `GH_CLI_HOME` vào `/tmp/gh-test-agy-<pid>` (không bao giờ là HOME thật).
+- **Nội dung bên ngoài không tới agy qua Gen** — kết quả công cụ của Gen (queue.*, draft.*, profile.*, social.*, hub.kho_*,
+  task/staff/audit…) chứa nguyên văn tin khách/mạng xã hội/Kho. Một khi lượt (hoặc lịch sử hội thoại gửi kèm) đã có kết quả
+  như vậy, các vòng sau gọi bộ định tuyến với `allow_agy=False` ⇒ dùng nguồn khác, hoặc báo Sếp "thêm khoá API hoặc Claude
+  Code CLI". Chỉ `screens.list`, `guide.list`, `system.health`, `refinery.summary` (số liệu/cấu hình nội bộ) giữ được agy.
+  Canary `--live` thêm phép thử `tiem_qua_cong_cu_khong_lo` (kết quả công cụ bọc như lượt Gen thật, "tin khách" ra lệnh
+  đọc tệp canary) — phải chạy trước khi Boss đăng nhập agy ở v0.1.39.
+- **Tiến trình con của agy bị giết cùng** — agy chạy trong nhóm tiến trình riêng (`start_new_session`); hết giờ/huỷ/xong
+  lượt ⇒ `killpg(SIGKILL)` cả nhóm (công cụ chạy lệnh không sống tiếp sau khi cwd đã xoá).
+- **Chuỗi chỉ có agy** — sàng lọc/trực việc hết chuỗi chỉ vì luật owner-only ⇒ cảnh báo riêng `model_chain_agy_only` P2,
+  tối đa 1 lần/ngày, "Sàng lọc/trực việc chưa có nguồn AI phù hợp" + "Thêm khoá API hoặc Claude Code CLI…" (không còn P1
+  "Hết chuỗi model" mỗi giờ với gợi ý sai "đăng nhập lại Antigravity CLI"; cảnh báo P1 thường cũng bỏ gợi ý đó). Thử trò
+  chuyện bước 8, dịch/soạn lại nháp ⇒ "Agent cần nguồn AI khác Antigravity CLI (chỉ dành cho Gen của Sếp)…" thay vì "Chưa
+  có model nào chạy được".
+- **Một câu duy nhất cho luật** — API (409 title), lý do của bộ định tuyến và `AGY_SCOPE_TEXT` của web: "…chỉ dùng cho Gen —
+  trợ lý quản trị (Gen của Sếp). Sàng lọc tin và trực việc **phải** dùng nguồn khác (khoá API hoặc Claude Code CLI) — luật an
+  toàn, không tắt được."
+- **Web** — slot chưa gán (khác Gen) mặc định chọn model không phải agy (trước đây chọn sẵn agy ⇒ bấm Lưu là 409); nhãn
+  "Không dùng được" đổi thành "Chỉ cho Gen" + câu hiện thẳng dưới dòng "Model này chỉ cho Gen — agent này bỏ qua nó. Chọn
+  model khác hoặc bỏ gán." (không chỉ tooltip); tài khoản mạng xã hội `needs_login` (kể cả không còn phiên) có nút
+  **Đăng nhập lại** khớp gợi ý; chuông `social.needs_login` có biểu tượng riêng. Mock dùng chung có slot `core.gen` (nhãn
+  thật), `blocked_reason` và 409; e2e `/social` cho tài khoản `key_changed`.
+
 ### Canary agy — kết quả (không chép nội dung bí mật/canary)
 
 - **Offline (agy 1.2.9 thật, tải đúng SHA-256 ghim trong `api.Dockerfile`, HOME tạm, chưa đăng nhập): "không lộ"** —
@@ -1850,6 +1884,9 @@ máy mà tài khoản Facebook báo **"Cần đăng nhập lại"** thì chỉ b
 
 - agy vẫn chạy cùng uid với api/worker: Gen của Sếp dùng agy thì prompt (do Sếp gõ + ngữ cảnh Gen) vẫn có thể khiến agy đọc
   tệp mà uid `gh` đọc được (vd `/run/secrets/*`) — cwd rỗng/env sạch chỉ là phòng thủ thêm. Chưa thử `--sandbox`.
+- Đường "khách → kết quả công cụ của Gen → agy" đã đóng (xem "Sửa sau review"), nhưng ngữ cảnh Gen gốc (gợi ý màn hình,
+  câu Sếp dán vào từ tin khách) vẫn tới agy; canary `--live` (gồm `tiem_qua_cong_cu_khong_lo`) chưa chạy — chạy ở v0.1.39
+  trước khi dùng agy thật.
 - Luật cứng dựa vào `allow_agy` ở mọi nơi gọi `ModelRouter.generate`; nơi gọi mới mặc định bị từ chối (an toàn mặc định).
 - Gói chuyển máy cũ (≤ v0.1.37) đã nhập trước đó: phiên mạng xã hội chỉ được phát hiện hỏng khi đọc/kiểm (409 + Cần đăng
   nhập lại), không tự sửa được — Sếp phải đăng nhập lại.

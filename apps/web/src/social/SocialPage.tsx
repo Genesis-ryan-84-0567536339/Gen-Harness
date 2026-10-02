@@ -15,7 +15,7 @@ import { useGenStore } from '../gen/genStore';
 import { CardError, SkeletonLines } from '../screens/common';
 import { ScreenTitle } from '../screens/ScreenPage';
 import { LoginViewer } from './LoginViewer';
-import { SOCIAL_KEY, accountStatus, parseTimes, qkSocial } from './socialModel';
+import { SOCIAL_KEY, accountStatus, loginLabel, parseTimes, qkSocial } from './socialModel';
 
 // Máy chủ báo tài khoản/việc đổi (đăng nhập xong, đọc xong, tự dừng…) → tải lại.
 onRealtimeEvent('social.update', (qc) => void qc.invalidateQueries({ queryKey: SOCIAL_KEY }));
@@ -269,7 +269,7 @@ function AccountRow({ account: a, halted }: { account: SocialAccount; halted: bo
       {a.active_job?.error_text ? <p className="muted-note">{a.active_job.error_text}</p> : null}
       <div className="social-row__actions">
         <Button variant={canLogin ? 'primary' : 'secondary'} size="sm" icon="ph ph-sign-in" disabled={busy} loading={login.isPending} onClick={() => login.mutate()}>
-          {a.has_session ? 'Đăng nhập lại' : 'Đăng nhập'}
+          {loginLabel(a)}
         </Button>
         <Button variant="secondary" size="sm" icon="ph ph-tray" disabled={busy || a.status !== 'active'} onClick={() => act.mutate('read')}>
           Đọc ngay

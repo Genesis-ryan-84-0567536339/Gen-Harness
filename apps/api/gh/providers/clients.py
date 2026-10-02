@@ -9,6 +9,7 @@ import contextlib
 import os
 import re
 import shutil
+import signal
 import tempfile
 import time
 from dataclasses import dataclass, field
@@ -339,19 +340,27 @@ class AgyClient:
                     self.binary, *args,
                     stdin=asyncio.subprocess.PIPE if stdin is not None else asyncio.subprocess.DEVNULL,
                     stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=cli_env(self.cli_home),
-                    cwd=work)
+                    cwd=work, start_new_session=True)
             except FileNotFoundError as e:
                 raise AuthFailed("Chưa cài Antigravity CLI trong worker") from e
             try:
                 out, err = await asyncio.wait_for(proc.communicate(stdin), self.timeout)
             except (TimeoutError, asyncio.CancelledError):
-                with contextlib.suppress(ProcessLookupError):
-                    proc.kill()
+                self._kill_group(proc.pid)
                 await proc.wait()
                 raise
+            # Tiến trình con agy để lại (công cụ chạy lệnh chạy nền) không được sống quá lượt gọi.
+            self._kill_group(proc.pid)
             return proc.returncode or 0, out, err
         finally:
             shutil.rmtree(work, ignore_errors=True)
+
+    @staticmethod
+    def _kill_group(pgid: int) -> None:
+        """Review F-22: agy chạy trong session/nhóm tiến trình riêng (`start_new_session`) ⇒ giết cả nhóm — gồm tiến
+        trình con agy sinh ra (công cụ chạy lệnh), không chỉ tiến trình agy chính."""
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(pgid, signal.SIGKILL)
 
     def model_args(self, model: str, effort: str | None = None) -> list[str]:
         """`--model=<model gốc> [--effort=<mức>]` (v0.1.32; dạng `=` từ v0.1.38). Tên biến thể cũ

@@ -139,6 +139,21 @@ describe('Màn Tài khoản mạng xã hội', () => {
     expect(calls.some((c) => c.method === 'POST' && c.url.endsWith('/social/accounts'))).toBe(true);
   });
 
+  it('F-17: needs_login + key_changed + has_session=false → nút "Đăng nhập lại" khớp gợi ý', async () => {
+    mockFetch((c) => {
+      if (c.url.endsWith('/social/status')) return json(200, STATUS);
+      if (c.url.endsWith('/social/platforms')) return json(200, PLATFORMS);
+      if (c.url.endsWith('/social/accounts')) {
+        return json(200, { items: [{ ...ACC, status: 'needs_login', pause_reason: 'key_changed', has_session: false }] });
+      }
+      return json(404, { code: 'NOT_FOUND', title: 'x', status: 404 });
+    });
+    renderPage(<SocialPage />);
+    expect(await screen.findByText('Phiên đã lưu không mở được trên máy này (chuyển máy hoặc đổi khoá) — bấm Đăng nhập lại.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Đăng nhập lại' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Đăng nhập' })).toBeNull();
+  });
+
   it('Dừng tất cả: hỏi xác nhận rồi POST /social/halt; đang dừng thì hiện dải đỏ + Bật lại', async () => {
     const user = userEvent.setup();
     let halted = false;

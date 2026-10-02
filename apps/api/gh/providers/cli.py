@@ -409,36 +409,84 @@ def _inside(path: Path, parent: Path) -> bool:
     return path == parent or parent in path.parents
 
 
+def _remove(p: Path) -> None:
+    if p.is_dir() and not p.is_symlink():
+        shutil.rmtree(p)
+    elif p.exists() or p.is_symlink():
+        p.unlink()
+
+
+def _copy_into(item: Path, dest: Path) -> None:
+    """Chép `item` sang `dest` an toàn khi đứt giữa chừng: chép vào `<dest>.migrating` rồi `os.replace` — đích không
+    bao giờ là bản dở. Hai volume khác nhau nên không dùng `rename`/`shutil.move` (= chép rồi xoá, không nguyên tử)."""
+    tmp = dest.with_name(dest.name + ".migrating")
+    _remove(tmp)
+    try:
+        if item.is_symlink():
+            os.symlink(os.readlink(item), tmp)
+        elif item.is_dir():
+            shutil.copytree(item, tmp, symlinks=True)
+            tmp.chmod(0o700)
+        else:
+            shutil.copy2(item, tmp)
+            tmp.chmod(0o600)
+        os.replace(tmp, dest)
+    except OSError:
+        with contextlib.suppress(OSError):
+            _remove(tmp)
+        raise
+
+
 def migrate_legacy_claude_home() -> int:
-    """F-22 (v0.1.38): chuyển phiên Claude Code từ đường dẫn cũ `<HOME agy>/claude/.claude` (≤ v0.1.37, nằm trong
+    """F-22 (v0.1.38): chuyển phiên Claude Code từ đường dẫn cũ (≤ v0.1.37: `/var/lib/gh/agy/claude/.claude`, nằm trong
     volume agy_state — agy có công cụ đọc tệp nên đọc được `.credentials.json`) sang GH_CLAUDE_HOME mới (volume
     claude_state). Trả số mục đã chuyển.
 
+    Đường dẫn cũ CHỈ lấy từ GH_CLAUDE_LEGACY_HOME (chỉ đặt trong api.Dockerfile). Rỗng (dev, pytest) ⇒ không làm gì:
+    ngoài Docker HOME của agy là HOME thật của người dùng, `~/claude/.claude` có thể là thư mục dự án của họ.
+
     Chỉ api gọi (đầu `restore_active`, `owns_logins=True`), trước khi trả bản gửi tạm/ghi lại phiên. Tệp/thư mục đã có
-    ở đích (vd. phiên mới hơn) KHÔNG bị bản cũ ghi đè. Xong thì xoá cả `<HOME agy>/claude` (gồm `claude/work`). Chạy
-    lại an toàn: không còn thư mục cũ ⇒ không làm gì. Lỗi OSError chỉ ghi cảnh báo (không làm sập api); tệp còn thiếu
-    thì `restore_active` ghi lại từ agent.cli_profiles nên không mất đăng nhập.
+    ở đích (vd. phiên mới hơn) KHÔNG bị bản cũ ghi đè. Mỗi mục chép vào tên tạm rồi `os.replace`; CHỈ khi mọi mục đều
+    xong mới xoá đúng thư mục cũ và `<cha>/work` (thư mục làm việc cũ của claude), rồi `rmdir` thư mục cha nếu đã rỗng —
+    không bao giờ xoá cả thư mục cha. Có lỗi ⇒ giữ nguyên thư mục cũ, lần khởi động sau làm tiếp. Chạy lại an toàn.
+    Lỗi OSError chỉ ghi cảnh báo (không làm sập api); tệp còn thiếu thì `restore_active` ghi lại từ agent.cli_profiles.
     Rollback về v0.1.37: bản cũ thấy thiếu tệp ở đường dẫn cũ ⇒ restore_active của nó ghi lại từ CSDL ⇒ vẫn an toàn.
     Không bao giờ log nội dung tệp — chỉ số mục."""
-    target = cli_home_dir(get_settings().claude_home)
-    legacy = _agy_home() / "claude" / ".claude"
+    s = get_settings()
+    if not s.claude_legacy_home.strip():
+        return 0
+    target = cli_home_dir(s.claude_home)
+    legacy = cli_home_dir(s.claude_legacy_home)
     moved = 0
     try:
-        if not legacy.is_dir():
+        if not legacy.is_dir() or legacy.is_symlink():
             return 0
         legacy_r, target_r = legacy.resolve(), target.resolve()
-        if legacy_r == target_r or _inside(target_r, legacy_r):
+        if legacy_r == target_r or _inside(target_r, legacy_r) or _inside(legacy_r, target_r):
             return 0
         target.mkdir(parents=True, exist_ok=True)
+        failed = 0
         for item in sorted(legacy.iterdir()):
+            if item.name.endswith(".migrating"):
+                continue
             dest = target / item.name
             if dest.exists() or dest.is_symlink():
                 continue
-            shutil.move(str(item), str(dest))
-            if not dest.is_symlink():
-                dest.chmod(0o700 if dest.is_dir() else 0o600)
-            moved += 1
-        shutil.rmtree(legacy.parent)
+            try:
+                _copy_into(item, dest)
+                moved += 1
+            except OSError as exc:
+                failed += 1
+                log.warning("Chuyển một mục phiên Claude Code lỗi (%s) — giữ thư mục cũ, thử lại lần khởi động sau",
+                            type(exc).__name__)
+        if failed:
+            return moved
+        shutil.rmtree(legacy)
+        work = legacy.parent / "work"
+        if work.is_dir() and not work.is_symlink():
+            shutil.rmtree(work)
+        with contextlib.suppress(OSError):
+            legacy.parent.rmdir()  # chỉ khi đã rỗng
         log.info("Đã chuyển %d mục phiên Claude Code sang thư mục riêng (F-22)", moved)
     except OSError as exc:
         log.warning("Chuyển phiên Claude Code sang thư mục riêng lỗi (%s) — sẽ ghi lại từ hồ sơ đã lưu",

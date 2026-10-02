@@ -111,6 +111,49 @@ async def test_run_removes_cwd_even_on_timeout(tmp_path: Path, agy: dict[str, An
     assert list(tmpd.iterdir()) == []
 
 
+def _alive(pid: int) -> bool:
+    """Còn chạy (zombie chờ init thu dọn coi như đã chết)."""
+    try:
+        state = Path(f"/proc/{pid}/status").read_text()
+    except OSError:
+        return False
+    return "\nState:\tZ" not in state and "\nState:\tX" not in state
+
+
+async def _wait_dead(pid: int) -> bool:
+    import asyncio
+
+    for _ in range(50):
+        if not _alive(pid):
+            return True
+        await asyncio.sleep(0.05)
+    return False
+
+
+async def test_timeout_kills_agy_children_too(tmp_path: Path, agy: dict[str, Any]) -> None:
+    """Review F-22: hết giờ ⇒ giết cả nhóm tiến trình — tiến trình con agy sinh ra (công cụ chạy lệnh) không sống
+    tiếp sau khi cwd đã bị xoá."""
+    kid = tmp_path / "kid.pid"
+    slow = tmp_path / "bin" / "agy-fork"
+    slow.write_text(f'#!/bin/sh\nsleep 60 >/dev/null 2>&1 &\necho $! > "{kid}"\nexec sleep 30\n')
+    slow.chmod(0o755)
+    c = AgyClient(str(slow), str(agy["home"]), timeout=2.0)
+    with pytest.raises(TimeoutError):
+        await c._run("--output-format", "json", stdin=b"hi")
+    assert await _wait_dead(int(kid.read_text().strip()))
+
+
+async def test_normal_exit_kills_leftover_children(tmp_path: Path, agy: dict[str, Any]) -> None:
+    kid = tmp_path / "kid.pid"
+    quick = tmp_path / "bin" / "agy-bg"
+    quick.write_text(f'#!/bin/sh\nsleep 60 >/dev/null 2>&1 &\necho $! > "{kid}"\necho ok\n')
+    quick.chmod(0o755)
+    c = AgyClient(str(quick), str(agy["home"]), timeout=20.0)
+    code, out, _err = await c._run("--output-format", "json", stdin=b"hi")
+    assert code == 0 and out.strip() == b"ok"
+    assert await _wait_dead(int(kid.read_text().strip()))
+
+
 # ─── (2) prompt qua stdin, cờ đúng ─────────────────────────────────────────
 
 async def test_generate_sends_prompt_via_stdin_not_argv(agy: dict[str, Any]) -> None:
@@ -200,13 +243,13 @@ async def test_hostile_agy_sees_no_canary(owner_api, app, clis, tmp_path, monkey
 
 # ─── (5) python -m gh.providers.agy_canary ─────────────────────────────────
 
-def _canary(tmp_path: Path, binary: str) -> subprocess.CompletedProcess[str]:
+def _canary(tmp_path: Path, binary: str, mode: str = "--offline") -> subprocess.CompletedProcess[str]:
     env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "GH_ENV": "test",
            "GH_CLI_BINARY": binary, "GH_CLI_HOME": str(tmp_path / "agy" / ".gemini" / "antigravity-cli"),
            "GH_CLAUDE_HOME": str(tmp_path / "claude" / ".claude"), "HOME": str(tmp_path / "runner"),
            "TMPDIR": str(tmp_path / "tmpc")}
     (tmp_path / "tmpc").mkdir(exist_ok=True)
-    return subprocess.run([sys.executable, "-m", "gh.providers.agy_canary", "--offline"], cwd=API_DIR, env=env,
+    return subprocess.run([sys.executable, "-m", "gh.providers.agy_canary", mode], cwd=API_DIR, env=env,
                           capture_output=True, text=True, timeout=120)
 
 
@@ -238,3 +281,21 @@ def test_canary_reports_loi_when_agy_missing(tmp_path: Path) -> None:
     res = _canary(tmp_path, str(tmp_path / "khong-co-agy"))
     out = orjson.loads(res.stdout.strip())
     assert out["result"] == "loi" and out["checks"]["chay_duoc"] is False and res.returncode == 1
+
+
+def test_canary_live_checks_injection_via_tool_output(tmp_path: Path) -> None:
+    """Review F-22: --live thử thêm đường khách → kết quả công cụ của Gen → agy đọc tệp; agy làm theo ⇒ "lo"."""
+    from gh.providers.agy_canary import injection_prompt
+    from gh.providers.clients import TOKEN_FILE
+
+    p = injection_prompt(Path("/run/secrets/x"))
+    assert "/run/secrets/x" in p and "<<<" in p  # bọc wrap_untrusted như lượt Gen thật
+    cli_home = tmp_path / "agy" / ".gemini" / "antigravity-cli"
+    cli_home.mkdir(parents=True)
+    (cli_home / TOKEN_FILE).write_text("{}")
+    hostile = _wrapper(tmp_path, "agy", FIX / "fake_agy_hostile.py")
+    res = _canary(tmp_path, hostile, "--live")
+    out = orjson.loads(res.stdout.strip().splitlines()[-1])
+    assert out["mode"] == "live" and out["checks"]["tiem_qua_cong_cu_khong_lo"] is False, out
+    assert out["result"] == "lo" and res.returncode == 1
+    assert "GHCANARY" not in res.stdout + res.stderr

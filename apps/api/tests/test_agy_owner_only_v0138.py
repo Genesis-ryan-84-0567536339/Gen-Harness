@@ -18,7 +18,7 @@ from gh.db import admin_sessionmaker, sessionmaker
 from gh.gen import store
 from gh.gen.engine import AGY_STAFF
 from gh.providers.clients import Message
-from gh.providers.router import AGY_OWNER_ONLY_REASON, ModelUnavailable
+from gh.providers.router import AGY_OWNER_ONLY_REASON, ModelRouter, ModelUnavailable, Routed
 from tests.conftest import Api
 from tests.test_cli_models_v0131 import (
     _login,
@@ -125,8 +125,9 @@ async def test_binding_agy_only_for_gen(owner_api, clis) -> None:  # type: ignor
     r = await api.send("PUT", "/agents/bindings/core.refinery", {"model_id": str(mid)})
     assert r.status_code == 409, r.text
     body = r.json()
-    assert body["code"] == "AGY_OWNER_GEN_ONLY" and "chỉ dùng được cho Gen của Sếp" in body["title"]
-    assert "sàng lọc tin" in body["title"] and "trực việc" in body["title"]
+    assert body["code"] == "AGY_OWNER_GEN_ONLY" and body["title"] == AGY_OWNER_ONLY_REASON
+    assert "chỉ dùng cho Gen — trợ lý quản trị (Gen của Sếp)" in body["title"] and "phải dùng" in body["title"]
+    assert "Sàng lọc tin" in body["title"] and "trực việc" in body["title"]
     r = await api.send("PUT", f"/agents/bindings/agent:{uuid.uuid4()}", {"model_id": str(mid)})
     assert r.status_code in (404, 409)
     r = await api.send("PUT", "/agents/bindings/core.gen", {"model_id": str(mid)})
@@ -207,3 +208,120 @@ async def test_add_agy_model_rejects_flag_like_name(owner_api, clis) -> None:  #
         assert r.status_code == 422, r.text
         assert r.json()["errors"]["model_name"] == "Tên model chỉ gồm chữ, số và . _ : - (tối đa 80 ký tự)"
     assert len(_calls(clis)) == n                                # không gọi thử CLI
+
+
+# ─── (7) review F-22: chuỗi chỉ có agy → cảnh báo/lỗi nói đúng nguyên nhân ─────
+
+async def test_agy_only_chain_raises_own_alert_not_p1(owner_api, app, db, clis) -> None:  # type: ignore[no-untyped-def]
+    from gh.providers.router import AGY_ADD_SOURCE
+
+    org, _pid, _mid = await _agy_only(owner_api)
+    for _ in range(2):
+        with pytest.raises(ModelUnavailable):
+            await app.state.model_router.generate(org, agent_key="core.refinery", purpose="refinery.extract",
+                                                  messages=[Message("user", "x")], json_mode=False)
+    rows = (await db.execute(text("""SELECT alert_type, priority, title, suggested_action FROM biz.alerts
+                                     WHERE org_id = :o AND alert_type LIKE 'model_chain%'"""), {"o": org})).all()
+    assert len(rows) == 1, rows                                        # một lần, không dội chuông mỗi giờ
+    a = rows[0]
+    assert a.alert_type == "model_chain_agy_only" and a.priority == "P2"
+    assert a.title == "Sàng lọc/trực việc chưa có nguồn AI phù hợp" and a.suggested_action == AGY_ADD_SOURCE
+    assert "đăng nhập lại" not in a.suggested_action
+
+
+async def test_mixed_chain_alert_drops_agy_relogin_advice(app, db, redis) -> None:  # type: ignore[no-untyped-def]
+    r = ModelRouter(sessionmaker(), redis)
+    org = (await db.execute(text("SELECT id FROM core.organizations LIMIT 1"))).scalar_one()
+    await r._chain_exhausted(org, [AGY_OWNER_ONLY_REASON, "alpha: 429"])
+    a = (await db.execute(text("""SELECT alert_type, priority, suggested_action FROM biz.alerts
+                                  WHERE alert_type LIKE 'model_chain%'"""))).one()
+    assert a.alert_type == "model_chain_exhausted" and a.priority == "P1"
+    assert "Antigravity" not in a.suggested_action
+
+
+def test_model_unavailable_agy_only_says_real_cause() -> None:
+    from gh.errors import MODEL_UNAVAILABLE_HINT, model_unavailable
+    from gh.providers.router import AGY_ONLY_HINT, AGY_ONLY_TITLE
+
+    e = model_unavailable("Chưa có model nào chạy được để thử trò chuyện", [AGY_OWNER_ONLY_REASON])
+    assert e.title == AGY_ONLY_TITLE and e.detail == AGY_ONLY_HINT
+    # Nhân viên: reasons đã lọc rỗng nhưng nguyên nhân vẫn đúng.
+    e = model_unavailable("Chưa có model nào chạy được để dịch", [], chain_reasons=[AGY_OWNER_ONLY_REASON])
+    assert e.title == AGY_ONLY_TITLE and e.extra["reasons"] == []
+    e = model_unavailable("Chưa có model nào chạy được để dịch", [AGY_OWNER_ONLY_REASON, "alpha: 429"])
+    assert e.title == "Chưa có model nào chạy được để dịch" and e.detail == MODEL_UNAVAILABLE_HINT
+
+
+async def test_step8_try_with_agy_only_explains_rule(owner_api, app, db, clis) -> None:  # type: ignore[no-untyped-def]
+    from gh.providers.router import AGY_ONLY_HINT
+
+    org, _pid, _mid = await _agy_only(owner_api)
+    await db.execute(text("UPDATE ops.setup_state SET completed = CAST(:c AS jsonb) WHERE org_id = :o"),
+                     {"c": '{"steps": {"1": "done", "2": "done", "3": "done", "4": "done", "5": "done", '
+                           '"6": "done", "7": "done"}}', "o": org})
+    await db.commit()
+    n = len(_calls(clis))
+    r = await owner_api.send("PUT", "/setup/steps/8", {"name": "Trợ lý Mai", "role_desc": "Chăm sóc khách hàng",
+                                                        "try_message": "Chào bạn"})
+    assert r.status_code == 200, r.text
+    agent = r.json()["agent"]
+    assert agent["try_error"] == AGY_ONLY_HINT and agent["try_reasons"] == [AGY_OWNER_ONLY_REASON]
+    assert len(_calls(clis)) == n
+
+
+# ─── (8) review F-22: kết quả công cụ (nội dung khách) không bao giờ tới agy ─────
+
+class _AgyRouter(ModelRouter):
+    """ModelRouter thật về kiểu (engine truyền allow_agy), giả về hành vi: chuỗi chỉ có agy — allow_agy=False ⇒
+    ModelUnavailable như bộ định tuyến thật; True ⇒ trả lần lượt các envelope kịch bản."""
+
+    def __init__(self, replies: list[dict[str, Any]]):  # không gọi super(): không cần CSDL/Redis
+        self.replies = list(replies)
+        self.allow: list[bool] = []
+        self.prompts: list[str] = []
+
+    async def generate(self, org_id: Any, *, agent_key: str, purpose: str, messages: list[Message],
+                       json_mode: bool = True, temperature: float = 0.2, allow_agy: bool = False) -> Routed:
+        self.allow.append(allow_agy)
+        if not allow_agy:
+            raise ModelUnavailable([AGY_OWNER_ONLY_REASON], no_chain=False)
+        self.prompts.append("\n".join(m.content for m in messages))
+        r = self.replies.pop(0) if self.replies else {"steps": [{"kind": "done"}]}
+        return Routed(json.dumps(r), "Antigravity CLI", "gemini-3.1-pro", 1, 1)
+
+
+async def _turn_with(api: Api, app: Any, router: Any, q: str, conversation_id: str | None = None) -> dict[str, Any]:
+    app.state.model_router = router
+    r = await api.send("POST", "/gen/turns", {"text": q, "conversation_id": conversation_id,
+                                              "context": {"route": "/overview", "screen_key": "overview"}})
+    assert r.status_code == 202, r.text
+    tid = r.json()["turn_id"]
+    for _ in range(300):
+        t: dict[str, Any] = (await api.get(f"/gen/turns/{tid}")).json()
+        if t["status"] != "running":
+            return t
+        await asyncio.sleep(0.02)
+    raise AssertionError("lượt Gen không kết thúc")
+
+
+async def test_gen_tool_output_never_reaches_agy(owner_api, app) -> None:  # type: ignore[no-untyped-def]
+    from gh.gen.engine import AGY_TAINTED
+
+    router = _AgyRouter([{"steps": [{"kind": "tool", "name": "queue.list", "args": {"tab": "all"}}]}])
+    t = await _turn_with(owner_api, app, router, "Hộp thư có gì?")
+    assert router.allow == [True, False]                 # vòng 2 (có kết quả công cụ) KHÔNG được dùng agy
+    assert len(router.prompts) == 1 and "[kết quả queue.list]" not in router.prompts[0]
+    assert any(AGY_TAINTED.split("{addr}")[0] in s for s in _says(t)), t
+
+    # Hỏi tiếp trong cùng hội thoại: lịch sử đã có kết quả công cụ bên ngoài ⇒ không gửi cho agy ngay từ vòng đầu.
+    router2 = _AgyRouter([])
+    await _turn_with(owner_api, app, router2, "Tóm tắt lại", conversation_id=t["conversation_id"])
+    assert router2.allow == [False] and router2.prompts == []
+
+
+async def test_gen_internal_tool_keeps_agy(owner_api, app) -> None:  # type: ignore[no-untyped-def]
+    router = _AgyRouter([{"steps": [{"kind": "tool", "name": "screens.list", "args": {}}]},
+                         {"steps": [{"kind": "say", "text": "Dạ."}, {"kind": "done"}]}])
+    t = await _turn_with(owner_api, app, router, "Có những màn nào?")
+    assert router.allow == [True, True] and t["status"] == "done"
+    assert "[kết quả screens.list]" in router.prompts[1]

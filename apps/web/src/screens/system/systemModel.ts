@@ -194,7 +194,7 @@ export function cliChip(active: CliProfile | undefined): { label: string; tone: 
  * `core.gen`, mã 409 AGY_OWNER_GEN_ONLY). Câu dùng chung cho thẻ CLI, bước thiết lập và ô chọn model.
  */
 export const AGY_SCOPE_TEXT =
-  'Chỉ dùng cho Gen của Sếp. Sàng lọc tin và trực việc nhận nội dung của khách nên dùng nguồn khác (khoá API hoặc Claude Code CLI) — luật an toàn, không tắt được.';
+  'Chỉ dùng cho Gen — trợ lý quản trị (Gen của Sếp). Sàng lọc tin và trực việc phải dùng nguồn khác (khoá API hoặc Claude Code CLI) — luật an toàn, không tắt được.';
 
 /** v0.1.31: chữ theo loại CLI — Antigravity (tài khoản Google) hay Claude Code (gói Claude Pro/Max). */
 export const CLI_TEXT: Record<CliKind, { title: string; kicker: string; account: string; login: string; add: string; empty: string; openLink: string; hint: string; scope: string | null }> = {

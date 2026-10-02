@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { accountStatus } from '../../src/social/socialModel';
+import { accountStatus, loginLabel } from '../../src/social/socialModel';
 
 /** F-17 (v0.1.38) — phiên mạng xã hội không mở được sau khi chuyển máy/đổi khoá → "Cần đăng nhập lại" có lý do. */
 describe('accountStatus — needs_login + key_changed', () => {
@@ -17,5 +17,13 @@ describe('accountStatus — needs_login + key_changed', () => {
       expect(v.tone).toBe('warn');
       expect(v.hint).toBe('Phiên đã hết hoặc bị đăng xuất — bấm Đăng nhập lại.');
     }
+  });
+});
+
+describe('loginLabel — khớp gợi ý "bấm Đăng nhập lại" (review F-17)', () => {
+  it('needs_login không còn phiên vẫn là "Đăng nhập lại"', () => {
+    expect(loginLabel({ status: 'needs_login', has_session: false })).toBe('Đăng nhập lại');
+    expect(loginLabel({ status: 'active', has_session: true })).toBe('Đăng nhập lại');
+    expect(loginLabel({ status: 'pending_login', has_session: false })).toBe('Đăng nhập');
   });
 });

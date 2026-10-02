@@ -29,7 +29,7 @@ from gh.gen import envelope, proposals, registry, store
 from gh.gen.tools import ToolRunner, tools_for
 from gh.gen.validator import Validator
 from gh.providers.clients import Message
-from gh.providers.router import AGY_OWNER_ONLY_REASON, ModelRouter, ModelUnavailable
+from gh.providers.router import ModelRouter, ModelUnavailable, agy_only
 
 log = logging.getLogger("gh.gen")
 
@@ -48,6 +48,16 @@ MODEL_DOWN = ("Gen chưa gọi được model lúc này (nguồn AI đang lỗi 
 # v0.1.38 (F-22): chuỗi model chỉ có Antigravity CLI mà người hỏi không phải Sếp.
 AGY_STAFF = ("Gen chưa trả lời được {addr}: nguồn AI hiện có là Antigravity CLI, chỉ dùng cho Gen của Sếp (luật an "
              "toàn). Nhờ Sếp thêm nguồn khác (khoá API hoặc Claude Code CLI) cho mục \"Gen — trợ lý quản trị\" nhé.")
+
+# Review F-22: công cụ chỉ trả số liệu/cấu hình nội bộ — mọi công cụ khác (queue.*, draft.*, profile.*, social.*,
+# hub.kho_*, task.list…) trả nội dung do người ngoài viết (tin khách, mạng xã hội, Kho). Một khi lượt (hoặc lịch sử hội
+# thoại gửi kèm) có nội dung đó thì KHÔNG gửi tiếp cho Antigravity CLI (công cụ đọc tệp chưa tắt được) — đường
+# prompt-injection khách → Gen → agy đọc bí mật.
+AGY_SAFE_TOOLS = frozenset({"screens.list", "guide.list", "system.health", "refinery.summary"})
+AGY_TAINTED = ("Dữ liệu này có nội dung từ bên ngoài (tin khách, mạng xã hội, Kho…), mà nguồn AI hiện có là "
+               "Antigravity CLI — không được đọc nội dung bên ngoài (luật an toàn). {addr} thêm nguồn khác (khoá "
+               "API hoặc Claude Code CLI) cho mục \"Gen — trợ lý quản trị\" ở màn API & Model để Gen xử lý câu hỏi "
+               "này nhé.")
 
 ACTION_NAMES = {"navigate": "gen.navigate", "highlight": "gen.highlight", "tour": "gen.tour"}
 
@@ -207,6 +217,22 @@ Mục tiêu làm sáng:
 Màn đang mở: {inp.screen_key or "không rõ"} ({inp.route}). Bây giờ: {now_text}.{hint}"""
 
 
+def _untrusted_tool(name: str) -> bool:
+    return name not in AGY_SAFE_TOOLS
+
+
+def _history_tainted(msgs: list[dict[str, Any]]) -> bool:
+    """Lịch sử gửi kèm có câu trả lời từng dùng công cụ trả nội dung bên ngoài ⇒ câu trả lời đó có thể chép lại nội dung
+    của khách — coi như không tin cậy với agy."""
+    for m in msgs[-HISTORY_MESSAGES:]:
+        if m["role"] == "user":
+            continue
+        for st in (m["content"] or {}).get("steps", []):
+            if isinstance(st, dict) and st.get("kind") == "tool" and _untrusted_tool(str(st.get("name", ""))):
+                return True
+    return False
+
+
 def _history_text(msgs: list[dict[str, Any]]) -> list[Message]:
     out: list[Message] = []
     for m in msgs[-HISTORY_MESSAGES:]:
@@ -296,7 +322,10 @@ async def _run(turn: Turn, *, app: Any, router: ModelRouter, session_token: str,
                 Message("user", inp.text[:4000])]
     # F-22: Antigravity CLI chỉ cho Gen của Sếp (luật cứng — gh.providers.router.AGY_OWNER_ONLY_REASON). Bộ định
     # tuyến giả (test, dữ liệu mẫu) không có tham số này và không bao giờ gọi agy → chỉ truyền cho ModelRouter thật.
-    route_kw = {"allow_agy": user.role_code == rbac.OWNER} if isinstance(router, ModelRouter) else {}
+    # Review F-22: nội dung bên ngoài (kết quả công cụ, hoặc lịch sử đã có) ⇒ không cho agy nữa (`tainted`).
+    tainted = _history_tainted(prior)
+    real = isinstance(router, ModelRouter)
+    route_kw = {"allow_agy": user.role_code == rbac.OWNER and not tainted} if real else {}
     retried = False
     for _ in range(MAX_ROUNDS):
         try:
@@ -304,8 +333,9 @@ async def _run(turn: Turn, *, app: Any, router: ModelRouter, session_token: str,
                                            json_mode=True, **route_kw)
         except ModelUnavailable as e:
             down = e.no_chain is False
-            only_agy = bool(e.reasons) and all(r == AGY_OWNER_ONLY_REASON for r in e.reasons)
-            msg = AGY_STAFF if only_agy else (MODEL_DOWN if down else NO_MODEL)
+            only_agy = agy_only(e.reasons)
+            msg = (AGY_TAINTED if tainted and user.role_code == rbac.OWNER else AGY_STAFF) if only_agy else (
+                MODEL_DOWN if down else NO_MODEL)
             await turn.emit({"kind": "say", "text": msg.format(addr=turn.addr)})
             await turn.log("gen.answer", result="failed", target_type="model", reasons=e.reasons[:5])
             if not down and registry.can_see(user.permissions, "api"):
@@ -339,6 +369,10 @@ async def _run(turn: Turn, *, app: Any, router: ModelRouter, session_token: str,
                                error=res.error)
                 await turn.emit({"kind": "tool", "name": step.name, "args": step.args})
                 observations.append(wrap_untrusted(step.name, res.text))
+                if _untrusted_tool(step.name):
+                    tainted = True
+                    if real:
+                        route_kw["allow_agy"] = False
             elif isinstance(step, envelope.Ui):
                 err = await _ui(turn, validator, step.action)
                 if err:

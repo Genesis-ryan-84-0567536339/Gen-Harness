@@ -249,10 +249,16 @@ function BindingsPanel({ canManage }: { canManage: boolean }) {
                     <span>{slot.binding?.model_name ?? 'chưa gán'}</span>
                   )}
                   {blockedReason(slot) ? (
-                    // v0.1.38 (F-22): API báo slot không dùng được model đang gán (vd agy chỉ cho Gen của Sếp).
-                    <span title={blockedReason(slot) ?? undefined} data-testid={`binding-blocked-${slot.agent_key}`} style={{ marginLeft: 6 }}>
-                      <StateChip color="var(--color-warn)">Không dùng được</StateChip>
-                    </span>
+                    // v0.1.38 (F-22): API báo agent này bỏ qua model đang gán (agy chỉ cho Gen của Sếp). Chữ hiện thẳng
+                    // dưới dòng (không chỉ tooltip — màn hình cảm ứng không xem được `title`), kèm việc cần làm.
+                    <>
+                      <span title={blockedReason(slot) ?? undefined} data-testid={`binding-blocked-${slot.agent_key}`} style={{ marginLeft: 6 }}>
+                        <StateChip color="var(--color-warn)">Chỉ cho Gen</StateChip>
+                      </span>
+                      <p className="muted-note" data-testid={`binding-blocked-hint-${slot.agent_key}`} style={{ margin: '4px 0 0' }}>
+                        {BLOCKED_HINT}
+                      </p>
+                    </>
                   ) : null}
                 </td>
                 <td className="mono">{slot.binding?.rule_codes.length ? slot.binding.rule_codes.join(', ') : '—'}</td>
@@ -275,6 +281,8 @@ function BindingsPanel({ canManage }: { canManage: boolean }) {
 
 /** Khoá agent Gen của Sếp — khoá duy nhất được dùng model của Antigravity CLI (v0.1.38, F-22). */
 const GEN_AGENT_KEY = 'core.gen';
+/** Câu hiện dưới dòng gán model bị bỏ qua (review F-22): agent vẫn chạy bằng nguồn khác trong chuỗi nếu có. */
+const BLOCKED_HINT = 'Model này chỉ cho Gen — agent này bỏ qua nó. Chọn model khác hoặc bỏ gán.';
 
 /**
  * `binding.blocked_reason` của slot dưới dạng chuỗi an toàn (máy chủ cũ không có trường này → null). Máy chủ đặt trường
@@ -318,7 +326,13 @@ function BindingEditDialog({ slot, models, onClose }: { slot: AgentBindingSlot; 
   // API (409 AGY_OWNER_GEN_ONLY) mới là chốt chặn cuối.
   const agyIds = new Set((providers.data ?? []).filter((p) => p.kind === 'antigravity_cli').flatMap((p) => p.models.map((m) => m.id)));
   const agyOnly = (m: BindableModel) => slot.agent_key !== GEN_AGENT_KEY && agyIds.has(m.id);
-  const [modelId, setModelId] = useState(slot.binding?.model_id ?? models[0]?.id ?? '');
+  // Review F-22: slot chưa gán (khác core.gen) mặc định chọn model đầu tiên KHÔNG phải agy — API xếp model theo tên nhà
+  // cung cấp nên "Antigravity CLI" thường đứng đầu, chọn sẵn nó thì bấm Lưu là gặp 409. Tính lại mỗi lần vẽ (danh sách
+  // nhà cung cấp có thể tới sau) cho tới khi Sếp tự chọn.
+  const preferred = slot.binding?.model_id ?? (models.find((m) => !agyOnly(m)) ?? models[0])?.id ?? '';
+  const [picked, setPicked] = useState<string | null>(null);
+  const modelId = picked ?? preferred;
+  const setModelId = setPicked;
   const [temperature, setTemperature] = useState(String(slot.binding?.temperature ?? 0.3));
   const [contextTokens, setContextTokens] = useState(String(slot.binding?.context_tokens ?? 8000));
   const [ruleCodes, setRuleCodes] = useState((slot.binding?.rule_codes ?? []).join(', '));
