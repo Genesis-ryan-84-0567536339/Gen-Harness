@@ -86,3 +86,55 @@ export function isoToDay(iso: string | null): string {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? '' : new Date(d.getTime() + 7 * 3600_000).toISOString().slice(0, 10);
 }
+
+/** v0.1.39 (F-31): câu cố định khi máy chủ chặn Gen-hub ở mạng công cộng (`MCP_NETWORK_BLOCKED`). */
+export const PUBLIC_NET_HINT = "Bật 'Cho phép Gen-hub ở mạng công cộng' ngay trong thẻ này";
+
+const PRIVATE_SUFFIXES = ['.localhost', '.local', '.lan', '.internal', '.home.arpa'];
+
+function privateIpv4(host: string): boolean | null {
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (!m) return null;
+  const a = Number(m[1]);
+  const b = Number(m[2]);
+  if (host === '0.0.0.0') return true;
+  return a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254);
+}
+
+function privateIpv6(host: string): boolean | null {
+  if (!host.includes(':')) return null;
+  if (host === '::1' || host === '::') return true;
+  // ::ffff:a.b.c.d (URL chuẩn hoá thành ::ffff:xxxx:yyyy) — xét như IPv4, khớp `_unmap` của máy chủ.
+  const mapped = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(host);
+  if (mapped) {
+    const hi = parseInt(mapped[1], 16);
+    const lo = parseInt(mapped[2], 16);
+    return privateIpv4(`${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`) ?? false;
+  }
+  const first = parseInt(host.split(':')[0] || '0', 16);
+  // fc00::/7 (ULA), fe80::/10 (link-local).
+  return (first & 0xfe00) === 0xfc00 || (first & 0xffc0) === 0xfe80;
+}
+
+/**
+ * v0.1.39 (F-31): địa chỉ là https VÀ trỏ ra Internet (không phải localhost/.local/.lan/.internal/.home.arpa, tên
+ * một nhãn, IP riêng/loopback/link-local) → thẻ Gen-hub bật sẵn "Cho phép Gen-hub ở mạng công cộng". 100.64/10 coi
+ * là công khai như `_is_public` của máy chủ.
+ */
+export function isPublicHttpsUrl(url: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(url.trim());
+  } catch {
+    return false;
+  }
+  if (u.protocol !== 'https:') return false;
+  const host = u.hostname.replace(/^\[|\]$/g, '').replace(/\.$/, '').toLowerCase();
+  if (!host) return false;
+  const v4 = privateIpv4(host);
+  if (v4 !== null) return !v4;
+  const v6 = privateIpv6(host);
+  if (v6 !== null) return !v6;
+  if (host === 'localhost' || !host.includes('.')) return false;
+  return !PRIVATE_SUFFIXES.some((s) => host.endsWith(s));
+}

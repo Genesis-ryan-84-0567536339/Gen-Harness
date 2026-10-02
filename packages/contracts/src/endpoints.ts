@@ -14,6 +14,7 @@ import { peopleEndpoints } from './p3-people';
 import { agentsEndpoints } from './p4-agents';
 import { agentModelEndpoints } from './p4-api';
 import { mcpEndpoints } from './p4-mcp';
+import { bossChecksEndpoints } from './bossChecks';
 import { pluginsEndpoints } from './p4-plugins';
 import { systemEndpoints } from './p4-system';
 import type { Step10Body, Step11Body, Step10Invited, BackupConfig, Step8Body, Step8Agent, Step9Body, SetupFollowUpItem } from './p4-system';
@@ -284,6 +285,8 @@ export function createEndpoints(client: ApiClient) {
     ...notificationsEndpoints(r),
     ...socialEndpoints(r),
     ...pickersEndpoints(r),
+    /** v0.1.39 (F-74): "Việc Sếp cần làm" — kết quả kiểm lưu ở máy chủ. */
+    bossChecks: bossChecksEndpoints(r),
   };
 }
 

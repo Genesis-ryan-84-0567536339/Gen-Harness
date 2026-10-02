@@ -42,13 +42,17 @@ describe('screen registry', () => {
         if (r.children) walk(r.children, r.id ? [...depth, r.id] : depth);
       });
     walk(routes, []);
-    // 21 màn thiết kế + 3 màn spec bổ sung (tasks, documents, deals) + Hướng dẫn kết nối (guide, guide/:n)
+    // 21 màn thiết kế + 3 màn spec bổ sung (tasks, documents, deals) + Hướng dẫn thiết lập (guide, guide/:n)
     // + Tài khoản của tôi (account, v0.1.19) + Trợ giúp (help, v0.1.22) + Tài khoản mạng xã hội (social, v0.1.29)
-    expect(paths).toHaveLength(29);
+    // + Việc Sếp cần làm (guide/viec-sep, v0.1.39)
+    expect(paths).toHaveLength(30);
     expect(paths).toContain('account');
     expect(paths).toContain('help');
     expect(paths).toContain('guide');
     expect(paths).toContain('guide/:n');
+    expect(paths).toContain('guide/viec-sep');
+    // `guide/viec-sep` phải đứng TRƯỚC `guide/:n` (không bị `:n` nuốt).
+    expect(paths.indexOf('guide/viec-sep')).toBeLessThan(paths.indexOf('guide/:n'));
     expect(paths).toContain('domain:business > group:Hàng đợi & Hành động > inbox');
     expect(paths).toContain('domain:business > graph');
     expect(paths).toContain('domain:business > group:Bản đồ quan hệ > profile');

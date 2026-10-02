@@ -33,12 +33,26 @@ function renderWith(items: SetupFollowUpItem[], me = ME('owner-1', 'owner')) {
 describe('Việc thiết lập tiếp (Tổng quan)', () => {
   beforeEach(() => useUiStore.setState({ followUpHiddenByUser: {} }));
 
-  it('liệt kê bước chưa xong, mỗi bước mở thẳng form làm việc đó, đầu thẻ dẫn tới hướng dẫn từng bước', () => {
+  it('liệt kê bước chưa xong, mỗi bước mở thẳng form làm việc đó, đầu thẻ dẫn tới Hướng dẫn thiết lập', () => {
     renderWith([item(5, false), item(8, false), item(11, false)]);
     expect(screen.getByText('Việc thiết lập tiếp')).toBeInTheDocument();
     const links = screen.getAllByRole('link', { name: /Làm ngay/ }).map((a) => a.getAttribute('href'));
     expect(links).toEqual(['/guide/5', '/guide/8', '/guide/11']);
-    expect(screen.getByRole('link', { name: /Hướng dẫn từng bước/ })).toHaveAttribute('href', '/guide');
+    expect(screen.getByRole('link', { name: /Hướng dẫn thiết lập/ })).toHaveAttribute('href', '/guide');
+    expect(screen.queryByRole('link', { name: /Hướng dẫn từng bước/ })).toBeNull();
+    expect(screen.getByText('Kết nối Zalo / WhatsApp')).toBeInTheDocument();
+  });
+
+  it('v0.1.39: Kết nối Facebook (13) và Nối Gen-hub (14) chưa xong → mở thẳng /social, /mcp; xong thì biến mất', () => {
+    const { unmount } = renderWith([item(5, true), item(13, false), item(14, false)]);
+    expect(screen.getByText('Kết nối Facebook')).toBeInTheDocument();
+    expect(screen.getByText('Nối Gen-hub')).toBeInTheDocument();
+    const links = screen.getAllByRole('link', { name: /Làm ngay/ }).map((a) => a.getAttribute('href'));
+    expect(links).toEqual(['/social', '/mcp']);
+    unmount();
+    renderWith([item(5, false), item(13, true), item(14, true)]);
+    expect(screen.queryByText('Kết nối Facebook')).not.toBeInTheDocument();
+    expect(screen.queryByText('Nối Gen-hub')).not.toBeInTheDocument();
     expect(screen.getByText('Kết nối Zalo / WhatsApp')).toBeInTheDocument();
   });
 

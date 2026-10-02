@@ -116,7 +116,7 @@ export function Step10Team({ meta, description, onBack, onSaved, formRef, onSkip
       <div className="setup-section">
         <div className="setup-section__title">Thành viên được mời</div>
         {rows.length === 0 ? (
-          <EmptyState icon="ph ph-users-three" title="Chưa mời ai" description="Bấm Thêm người để mời. Bỏ trống cũng được — mời sau ở Tổng quan › Hướng dẫn từng bước." />
+          <EmptyState icon="ph ph-users-three" title="Chưa mời ai" description="Bấm Thêm người để mời. Bỏ trống cũng được — mời sau ở Hướng dẫn thiết lập." />
         ) : (
           <div className="invite-rows">
             {rows.map((r) => (

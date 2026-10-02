@@ -157,8 +157,8 @@ test.describe('MCP Hub — thẻ Gen-hub', () => {
     const card = page.getByRole('region', { name: 'Gen-hub' });
     await expect(card).toContainText('Chưa nối');
     await expect(card).toContainText('Đang tắt');
-    const save = card.getByRole('button', { name: 'Lưu' });
-    const check = card.getByRole('button', { name: 'Kiểm tra' });
+    const save = card.getByRole('button', { name: 'Lưu', exact: true });
+    const check = card.getByRole('button', { name: 'Kiểm tra', exact: true });
     await expect(save).toBeDisabled();
     await expect(check).toBeDisabled();
     await expect(card.getByRole('button', { name: 'Tắt' })).toHaveCount(0);
@@ -170,7 +170,8 @@ test.describe('MCP Hub — thẻ Gen-hub', () => {
     await expect(save).toBeDisabled(); // token < 8 ký tự
     await token.fill(HUB_TOKEN);
     await card.getByLabel('Ngày hết hạn token').fill('2026-12-28');
-    await card.getByRole('switch', { name: 'Cho phép Gen-hub ở mạng công cộng' }).click();
+    // v0.1.39 (F-31): địa chỉ https công khai → công tắc "mạng công cộng" tự bật sẵn.
+    await expect(card.getByRole('switch', { name: 'Cho phép Gen-hub ở mạng công cộng' })).toHaveAttribute('aria-checked', 'true');
     await save.click();
     await enterPin(page);
     await expect(card).toContainText('Đã lưu (mã hoá, không hiện lại)');

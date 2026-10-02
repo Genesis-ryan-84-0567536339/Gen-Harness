@@ -183,6 +183,7 @@ export interface Step9Body {
 
 /** `GET /setup/follow-up` — bước tuỳ chọn chưa xong trong trình thiết lập; `done` suy từ dữ liệu thật. */
 export interface SetupFollowUpItem {
+  /** 4–11 = bước tuỳ chọn của trình thiết lập; v0.1.39: 13 Kết nối Facebook, 14 Nối Gen-hub (không phải bước). */
   n: number;
   key: string;
   title: string;

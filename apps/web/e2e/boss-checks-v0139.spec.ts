@@ -1,0 +1,103 @@
+import { expect, test, type Page } from '@playwright/test';
+import { OWNER, loginAsOwner, p3Hook, resetMock } from './support';
+
+/**
+ * v0.1.39 (F-74) — "Việc Sếp cần làm" (mock, tất định): thẻ ở đầu Hướng dẫn thiết lập → trang 5 dòng; Gen-hub nhập
+ * token → Kiểm tra (PIN một lần) → "Đạt" ngay cạnh dòng; Facebook "Đọc ngay" → "Đang chạy…" → "Đạt"; Google gọi thử +
+ * đổi qua lại hai tài khoản (PIN); tải lại trang kết quả vẫn còn (đọc từ API, không phải bộ nhớ trình duyệt).
+ */
+
+const HUB_TOKEN = 'ghtok_E2E_dung_0123456789';
+
+async function enterPin(page: Page) {
+  const dlg = page.getByRole('dialog', { name: 'Mã PIN xác nhận thao tác' });
+  await expect(dlg).toBeVisible();
+  await page.getByLabel('Mã PIN — chữ số 1/6').click();
+  await page.keyboard.type(OWNER.pin);
+  await expect(dlg).toBeHidden();
+}
+
+const row = (page: Page, name: string) => page.getByRole('region', { name, exact: true });
+
+test.describe('Việc Sếp cần làm (v0.1.39)', () => {
+  test.beforeEach(async ({ page }) => {
+    await resetMock(page.request, 'finished');
+    await page.setViewportSize({ width: 1440, height: 900 });
+  });
+
+  test('Owner: thẻ ở Hướng dẫn thiết lập → 5 dòng; Gen-hub PIN một lần → Đạt; Facebook Đọc ngay → Đang chạy… → Đạt', async ({ page }) => {
+    test.setTimeout(90_000);
+    await p3Hook(page.request, 'social', 'importKeyChanged', { label: 'Facebook của Sếp' });
+    let pinDialogs = 0;
+    page.on('response', (res) => {
+      if (res.url().includes('/api/v1/') && res.status() === 423) pinDialogs += 1;
+    });
+    await loginAsOwner(page);
+    await page.goto('/guide');
+    await expect(page.getByRole('heading', { name: 'Hướng dẫn thiết lập' })).toBeVisible();
+    const card = page.getByRole('link', { name: /Việc Sếp cần làm — kết nối chạy thật/ });
+    await expect(card).toContainText('Đã đạt 0/4 dòng bắt buộc');
+    await card.click();
+    await expect(page).toHaveURL(/\/guide\/viec-sep$/);
+    await expect(page.locator('.boss-row')).toHaveCount(5);
+    await expect(row(page, 'Jev')).toContainText('Không bắt buộc');
+    await expect(page.getByText('Kết quả được lưu lại — Claude tự đọc, Sếp không cần chụp màn hình.')).toBeVisible();
+
+    // 1. Gen-hub: địa chỉ https công khai → công tắc bật sẵn; Kiểm tra = lưu (PIN) rồi kiểm, không hỏi PIN lần hai.
+    const hub = row(page, 'Nối Gen-hub');
+    await expect(hub).toContainText('Chưa kiểm');
+    await hub.getByLabel('Địa chỉ Gen-hub').fill('https://hub.genos.top/mcp');
+    await hub.getByLabel('Token', { exact: true }).fill(HUB_TOKEN);
+    await expect(hub.getByRole('switch', { name: 'Cho phép Gen-hub ở mạng công cộng' })).toHaveAttribute('aria-checked', 'true');
+    await expect(hub.getByRole('note')).toContainText('Đã bật sẵn vì địa chỉ là https công khai');
+    await hub.getByRole('button', { name: 'Kiểm tra', exact: true }).click();
+    await enterPin(page);
+    await expect(hub.getByTestId('boss-result')).toContainText(/Đạt · \d\d:\d\d \d\d\/\d\d/);
+    expect(pinDialogs).toBe(1);
+    await expect(hub.getByLabel('Token mới (bỏ trống để giữ)')).toHaveValue('');
+    expect(await page.content()).not.toContain(HUB_TOKEN);
+
+    // 2. Facebook: Đọc ngay → Đang chạy… → Đạt (thăm lại 3 giây).
+    const fb = row(page, 'Kết nối Facebook');
+    await fb.getByRole('button', { name: 'Đọc ngay' }).click();
+    await expect(fb.getByTestId('boss-result')).toContainText('Đang chạy…');
+    await expect(fb.getByTestId('boss-result')).toContainText('Đạt ·', { timeout: 15_000 });
+    await expect(page.getByText('Đã đạt 2/4 dòng bắt buộc')).toBeVisible();
+
+    // Hướng dẫn thiết lập: việc "Nối Gen-hub" và "Kết nối Facebook" tự hiện Đã xong.
+    await page.goto('/guide');
+    await expect(page.locator('[data-gen-target="guide.item:14"]')).toContainText('Đã xong');
+    await expect(page.locator('[data-gen-target="guide.item:13"]')).toContainText('Đã xong');
+    await expect(page.getByRole('link', { name: /Việc Sếp cần làm/ })).toContainText('Đã đạt 2/4 dòng bắt buộc');
+  });
+
+  test('Google: Gọi thử báo binh@ → Đổi sang an@ (PIN) → Đổi sang binh@ → 2/2; tải lại vẫn còn kết quả', async ({ page }) => {
+    test.setTimeout(90_000);
+    await p3Hook(page.request, 'bossChecks', 'seedAgy');
+    await loginAsOwner(page);
+    await page.goto('/guide/viec-sep');
+    const agy = row(page, 'Google (Antigravity) — hai tài khoản');
+    const results = agy.getByTestId('boss-result');
+    await expect(results).toHaveCount(3);
+
+    await agy.getByRole('button', { name: 'Gọi thử' }).click();
+    await expect(results.nth(1)).toContainText('Đạt · đang dùng binh@genesis.vn');
+
+    await agy.getByRole('button', { name: 'Đổi sang an@genesis.vn' }).click();
+    await enterPin(page);
+    await expect(results.nth(2)).toContainText('Đã đổi · gọi thử chạy bằng an@genesis.vn — khớp');
+    await expect(agy).toContainText('Đã đổi qua lại 1/2 lần');
+
+    await agy.getByRole('button', { name: 'Đổi sang binh@genesis.vn' }).click();
+    await expect(results.nth(2)).toContainText('Đã đổi · gọi thử chạy bằng binh@genesis.vn — khớp');
+    await expect(agy).toContainText('Đã đổi qua lại 2/2 lần');
+    await expect(agy).toContainText('Xong');
+
+    // Tải lại: kết quả đọc lại từ API.
+    await page.reload();
+    const again = row(page, 'Google (Antigravity) — hai tài khoản');
+    await expect(again.getByTestId('boss-result').nth(1)).toContainText('Đạt · đang dùng binh@genesis.vn');
+    await expect(again.getByTestId('boss-result').nth(2)).toContainText('gọi thử chạy bằng binh@genesis.vn — khớp');
+    await expect(again).toContainText('Đã đổi qua lại 2/2 lần');
+  });
+});
