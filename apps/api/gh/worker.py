@@ -4,18 +4,30 @@
 - Giai đoạn 2: bộ kích hoạt sàng lọc (chu kỳ / ngưỡng / đường nhanh / chạy ngay), dò trùng định danh
   mỗi 10 phút, nén sổ tay hằng ngày.
 - Giai đoạn 3: hook sau sàng lọc và việc định kỳ của từng cụm màn (`gh.biz.*.jobs`), tự đăng ký.
+- v0.1.36 (F-45): lịch cron hiểu theo GIỜ VN (`WORKER_TZ`, không phụ thuộc múi giờ máy/ảnh Docker); job nặng
+  theo ngày dời về 04:20–05:10 — ngoài giờ làm việc 08:00–18:00 và ngoài cửa sổ cập nhật genh 02:30–03:30.
+- v0.1.36 (F-6): mọi cron được bọc `_tracked` — sau mỗi lần chạy ghi `gh:cron:last:<tên hàm>` = JSON
+  {"at": ISO UTC "Z", "ok": bool, "ms": int} (TTL 7 ngày) và `gh:worker:heartbeat` = ISO UTC (TTL 1 ngày; cũng
+  ghi lúc startup) — API đọc để dựng GET /system/health ("Bộ xử lý nền" im lặng / cron hỏng).
 """
 
 import asyncio
+import functools
 import logging
+import time
+from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
+import orjson
 from arq import cron
 from arq.connections import RedisSettings
+from arq.cron import CronJob as ArqCronJob
 from redis.asyncio import Redis
 from sqlalchemy import text
 
-from gh import biz, jobcodec, notifications
+from gh import __version__, biz, jobcodec, notifications
 from gh.app import build_plugin_manager, configure_logging
 from gh.auth import service as auth_service
 from gh.backup import FUNCTIONS as BACKUP_FUNCTIONS
@@ -37,6 +49,68 @@ from gh.refinery.scheduler import Scheduler
 from gh.social import service as social
 
 log = logging.getLogger("gh.worker")
+
+# v0.1.36 (F-45): cron của arq hiểu theo múi giờ này (WorkerSettings.timezone). Ảnh python:slim có thể thiếu
+# /usr/share/zoneinfo — gói `tzdata` (pyproject.toml) bảo đảm ZoneInfo nạp được.
+WORKER_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
+
+# v0.1.36 (F-6) — hợp đồng Redis với API (GET /system/health đọc).
+CRON_LAST_KEY = "gh:cron:last:{}"
+CRON_LAST_TTL = 7 * 86400
+HEARTBEAT_KEY = "gh:worker:heartbeat"
+HEARTBEAT_TTL = 86400
+
+
+def _utc_iso() -> str:
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
+
+def startup_message() -> str:
+    """Dòng log khởi động — có phiên bản và múi giờ để đối chiếu nhanh khi đọc log/`genh doctor`."""
+    return f"Worker sẵn sàng (phiên bản {__version__}, múi giờ {WORKER_TZ.key})"
+
+
+async def _beat(redis: Any) -> None:
+    """Ghi nhịp tim của Bộ xử lý nền; lỗi Redis chỉ log, không làm hỏng job."""
+    if redis is None:
+        return
+    try:
+        await redis.set(HEARTBEAT_KEY, _utc_iso(), ex=HEARTBEAT_TTL)
+    except Exception as exc:  # noqa: BLE001 — dấu sức khoẻ không được làm hỏng job
+        log.warning("Không ghi được nhịp tim worker: %s", exc)
+
+
+def _tracked(fn: Callable[[dict[str, Any]], Awaitable[Any]]) -> Callable[[dict[str, Any]], Awaitable[Any]]:
+    """v0.1.36 (F-6): bọc hàm cron — chạy `fn`, rồi (kể cả khi lỗi/bị huỷ) ghi dấu lần chạy cuối vào Redis.
+
+    Ngoại lệ của `fn` (kể cả CancelledError) luôn được ném lại nguyên vẹn; lỗi ghi Redis chỉ log.warning.
+    `functools.wraps` giữ `__qualname__` ⇒ tên CronJob của arq vẫn là `cron:<tên hàm>`.
+    """
+
+    @functools.wraps(fn)
+    async def wrapper(ctx: dict[str, Any]) -> Any:
+        started = time.monotonic()
+        ok = False
+        try:
+            result = await fn(ctx)
+            ok = True
+            return result
+        finally:
+            redis = ctx.get("redis")
+            if redis is not None:
+                payload = {"at": _utc_iso(), "ok": ok, "ms": int((time.monotonic() - started) * 1000)}
+                try:
+                    await redis.set(CRON_LAST_KEY.format(fn.__name__), orjson.dumps(payload), ex=CRON_LAST_TTL)
+                except Exception as exc:  # noqa: BLE001 — dấu sức khoẻ không được làm hỏng job
+                    log.warning("Không ghi được dấu cron %s: %s", fn.__name__, exc)
+                await _beat(redis)
+
+    return wrapper
+
+
+def _cron(fn: Callable[[dict[str, Any]], Awaitable[Any]], **kw: Any) -> ArqCronJob:
+    """`arq.cron` cho hàm đã bọc `_tracked` — truyền NGUYÊN mọi khoá (vd `timeout` của sao lưu)."""
+    return cron(_tracked(fn), **kw)  # type: ignore[arg-type]
 
 
 async def startup(ctx: dict[str, Any]) -> None:
@@ -61,7 +135,8 @@ async def startup(ctx: dict[str, Any]) -> None:
     ctx["hooks_stop"] = asyncio.Event()
     ctx["hooks"] = start_hooks(biz.hooks(), sm=sm, redis=ctx["redis_bus"], bus=bus, router=router,
                                stop=ctx["hooks_stop"])
-    log.info("Worker sẵn sàng")
+    await _beat(ctx.get("redis"))
+    log.info(startup_message())
 
 
 async def shutdown(ctx: dict[str, Any]) -> None:
@@ -188,17 +263,20 @@ class WorkerSettings:
                  purge_gen_conversations, purge_notifications, hub_token_expiry_scan, social_schedule,
                  *(fn for fn, _ in _BIZ_JOBS), *BACKUP_FUNCTIONS]
     health_check_interval = 30
+    # v0.1.36 (F-45): mọi giờ dưới đây là GIỜ VN (Asia/Ho_Chi_Minh). Job nặng theo ngày tránh 08:00–18:00 và cửa
+    # sổ cập nhật genh 03:00 ±30' (02:30–03:30).
+    timezone = WORKER_TZ
     cron_jobs = [
-        cron(verify_action_log, hour={2}, minute={30}),        # 02:30 hằng đêm
-        cron(partition_maintenance, minute={5}),                # mỗi giờ
-        cron(detect_identities, minute=set(range(0, 60, 10))),  # mỗi 10 phút
-        cron(compact_notebooks, hour={3}, minute={15}),         # 03:15 hằng ngày
-        cron(expire_sessions, minute={20}),                     # mỗi giờ — dọn core.sessions (0014_v011_db)
-        cron(purge_gen_conversations, hour={3}, minute={40}),   # 03:40 hằng ngày — hạn lưu hội thoại Gen
-        cron(purge_notifications, hour={3}, minute={45}),       # 03:45 hằng ngày — hạn lưu chuông thông báo
-        cron(hub_token_expiry_scan, hour={1}, minute={50}),     # 01:50 UTC (08:50 giờ VN) — nhắc token Gen-hub
-        cron(social_schedule, minute=set(range(60))),           # mỗi phút — lịch đọc mạng xã hội (tắt mặc định)
-        *(cron(fn, **kw) for fn, kw in _BIZ_JOBS),  # type: ignore[arg-type]
+        _cron(verify_action_log, hour={4}, minute={30}),         # 04:30 giờ VN hằng ngày — kiểm chuỗi Action Log
+        _cron(partition_maintenance, hour={4, 23}, minute={20}),  # 04:20 và 23:20 giờ VN — bảo trì pg_partman
+        _cron(detect_identities, minute=set(range(0, 60, 10))),  # mỗi 10 phút
+        _cron(compact_notebooks, hour={4}, minute={50}),         # 04:50 giờ VN hằng ngày — nén sổ tay
+        _cron(expire_sessions, minute={20}),                     # mỗi giờ — dọn core.sessions (0014_v011_db)
+        _cron(purge_gen_conversations, hour={5}, minute={0}),    # 05:00 giờ VN hằng ngày — hạn lưu hội thoại Gen
+        _cron(purge_notifications, hour={5}, minute={10}),       # 05:10 giờ VN hằng ngày — hạn lưu chuông
+        _cron(hub_token_expiry_scan, hour={8}, minute={50}),     # 08:50 giờ VN — nhắc token Gen-hub (nhẹ)
+        _cron(social_schedule, minute=set(range(60))),           # mỗi phút — lịch đọc mạng xã hội (tắt mặc định)
+        *(_cron(fn, **kw) for fn, kw in _BIZ_JOBS),              # biz + sao lưu: giữ NGUYÊN kw (kể cả timeout)
     ]
 
 

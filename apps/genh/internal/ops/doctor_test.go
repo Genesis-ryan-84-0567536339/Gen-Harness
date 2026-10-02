@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -123,4 +124,66 @@ func TestRunDoctor_ZipWriteFails_ReturnsOpError(t *testing.T) {
 	if opErr.Code != ErrCodeDoctorReportFailed {
 		t.Errorf("Code = %q, muốn %q", opErr.Code, ErrCodeDoctorReportFailed)
 	}
+}
+
+// v0.1.36 (F-4): log trong báo cáo doctor phải có dấu thời gian (`docker compose logs -t --tail=500`).
+func TestRunDoctor_LogsHaveTimestamps(t *testing.T) {
+	composePath := testComposePath(t, "")
+	env := testEnv(t, composePath)
+	outPath := filepath.Join(t.TempDir(), "report.zip")
+
+	logsMatch := fake.MatchArgsContain("logs", "-t", "--tail=500")
+	fr := &fake.Runner{Responses: []fake.Response{
+		{Match: fake.MatchArgsContain("version", "--format"), Output: []byte("27.1.0")},
+		{Match: fake.MatchArgsContain("system", "df", "-v"), Output: []byte("")},
+		{Match: logsMatch, Output: []byte("api  | 2026-10-02T01:02:03.000000000Z dòng có giờ\n")},
+	}}
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{"db": "ok", "redis": "ok", "objects": "skip", "bridge": "ok"})
+	}))
+	defer srv.Close()
+	deps := DoctorDeps{
+		Runner:  fr,
+		Client:  srv.Client(),
+		DialTCP: func(address string, timeout time.Duration) error { return nil },
+		DialTLS: func(address string, timeout time.Duration) (string, time.Time, error) {
+			return "CN=Gen-Harness Local CA", time.Now().Add(24 * time.Hour), nil
+		},
+	}
+	var out strings.Builder
+	if err := RunDoctor(context.Background(), env, outPath, deps, &out); err != nil {
+		t.Fatalf("RunDoctor: %v", err)
+	}
+
+	found := false
+	for _, c := range fr.Calls {
+		if logsMatch(c.Cmd) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("doctor phải gọi `docker compose logs -t --tail=500`, các lệnh đã gọi: %v", fr.Calls)
+	}
+
+	zr, err := zip.OpenReader(outPath)
+	if err != nil {
+		t.Fatalf("mở zip báo cáo: %v", err)
+	}
+	defer func() { _ = zr.Close() }()
+	for _, f := range zr.File {
+		if f.Name != "logs.txt" {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			t.Fatalf("mở logs.txt: %v", err)
+		}
+		b, _ := io.ReadAll(rc)
+		_ = rc.Close()
+		if !strings.Contains(string(b), "2026-10-02T01:02:03") {
+			t.Fatalf("logs.txt thiếu dấu thời gian: %q", b)
+		}
+		return
+	}
+	t.Fatal("zip thiếu logs.txt")
 }

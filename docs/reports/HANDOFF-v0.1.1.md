@@ -1511,3 +1511,61 @@ cần khôi phục — CSDL chưa bị đụng thì chỉ cần `docker compose 
   của cả nhóm khi chỉ đổi mức tự trị), không có gì để áp dụng thì nút tắt; hộp «Gán người xử lý» khoá nút khi đang lưu.
 - F-20: thống nhất chữ «chuỗi ưu tiên» (gợi ý PIN, Hướng dẫn bước 4, nhãn Action Log `ai.route_change`); bước 4 dùng
   chung `PinHint`.
+
+## v0.1.36 — Hệ thống tự báo khi hỏng (trong app) + sao lưu chắc (02/10/2026)
+
+### Boss cần làm gì
+
+**Không cần làm gì.** Sau khi cập nhật:
+- Khi có sự cố (kênh rớt, model hết hạn đăng nhập, cập nhật lỗi, sao lưu quá cũ, Bộ xử lý nền im lặng, đĩa sắp đầy), chuông
+  báo **một lần** kèm nút sửa, và đầu Tổng quan có dải **"Cần Sếp xử lý"**.
+- Điều khiển hệ thống › Dữ liệu & lưu trữ có thẻ **"Sức khoẻ hệ thống"**.
+- Việc dọn dẹp/bảo trì hằng ngày giờ chạy lúc 04:20–05:10 sáng (giờ VN), không còn rơi vào giờ làm việc.
+
+### Vì sao (kế hoạch tổng `docs/audit/2026-10-01/0-ke-hoach-tong.md`)
+
+- **F-6 (đỏ)**: hệ thống hỏng mà không báo ai. **F-3**: sao lưu theo lịch có thể chết âm thầm. **F-4**: log thiếu
+  traceback/thời gian. **F-2**: "Hạn lưu dữ liệu" trên giao diện chưa được thi hành. **F-45**: cron chạy theo UTC (job nặng
+  rơi vào giờ làm việc VN, trùng cửa sổ cập nhật 03:00). **F-46**: số phiên bản không thống nhất (`gh.__version__` = 0.1.0).
+
+### Thay đổi
+
+- **F-6 bước 1** — chuông `channel.down`, `model.auth_expired`, `update.failed`, `backup.stale` (P1, >36 giờ, tính cả bản
+  pre-update), `worker.silent` (>10 phút), `disk.low` (genh ghi `run/disk-status.json`); bảng `ops.health_alerts`
+  (migration 0024) khử trùng lặp — sự kiện lặp lại không sinh chuông thứ hai, hết sự cố thì đóng dòng. `GET /system/health`
+  (quyền `system.read`; KHÔNG thuộc `/ready` — genh dùng `/ready` để quyết rollback). Web: thẻ "Sức khoẻ hệ thống", dải
+  "Cần Sếp xử lý".
+- **F-3** — cron `scheduled_backup_scan` có `timeout` 3600; bị huỷ (CancelledError) ⇒ chuông `backup.failed` rồi ném lại,
+  `pg_dump` không mồ côi.
+- **F-4 bước 1** — log JSON có `ts`/`exc`/`stack`/`error_id`/method/path; `genh doctor` lấy `docker compose logs -t
+  --tail=500` (mỗi dòng log có dấu thời gian).
+- **F-2 (tạm)** — StorageTab ghi rõ "Chưa tự xoá — sẽ áp dụng ở bản sau" và khoá nút Sửa (job thật: v0.1.40).
+- **F-46** — `gh.__version__` đọc `GH_VERSION` (ảnh: `ARG VERSION` → `ENV GH_VERSION` + `LABEL
+  org.opencontainers.image.version`, release.yml truyền build-arg) › tệp `VERSION` của repo › `"dev"`. CI build ảnh api với
+  `--build-arg VERSION` và kiểm `gh.__version__` + LABEL khớp tệp VERSION. `GET /system/about` thêm `image_version`,
+  `genh_version`; `version` = genh_version ?? image_version (giữ khoá cũ). Log khởi động: "Gen-Harness API <bản> sẵn sàng",
+  "Worker sẵn sàng (phiên bản <bản>, múi giờ Asia/Ho_Chi_Minh)".
+- **F-45** — `WorkerSettings.timezone = Asia/Ho_Chi_Minh` (+ phụ thuộc `tzdata`). Bảng giờ mới (giờ VN; tránh 08:00–18:00 và
+  02:30–03:30):
+
+  | Job | Trước | Sau (giờ VN) |
+  |---|---|---|
+  | `partition_maintenance` | mỗi giờ (:05) | 04:20 và 23:20 |
+  | `verify_action_log` | 02:30 | 04:30 |
+  | `people_review_recompute` | 02:30 | 04:40 |
+  | `compact_notebooks` | 03:15 | 04:50 |
+  | `purge_gen_conversations` | 03:40 | 05:00 |
+  | `purge_notifications` | 03:45 | 05:10 |
+  | `hub_token_expiry_scan` | 01:50 UTC (08:50 VN) | 08:50 (nhẹ, chỉ nhắc) |
+  | `expire_sessions`, `detect_identities`, `social_schedule`, cron biz/sao lưu theo phút | giữ nhịp lặp | giữ nhịp lặp |
+
+- **Hợp đồng Redis worker → API** (mọi cron bọc `_tracked` trong `gh/worker.py`): `gh:cron:last:<tên hàm>` = JSON
+  `{"at": ISO UTC "Z", "ok": bool, "ms": int}`, TTL 7 ngày, ghi sau MỖI lần chạy (kể cả lỗi/bị huỷ — ngoại lệ vẫn ném lại);
+  `gh:worker:heartbeat` = ISO UTC, TTL 1 ngày, ghi lúc startup và sau mỗi cron. Tên cron (`cron:<tên>`) và tên job enqueue
+  không đổi.
+
+### Kiểm tra
+
+- api: `tests/test_worker_schedule_v0136.py`, `tests/test_version_v0136.py` (+ toàn bộ pytest, ruff, mypy).
+- genh: `internal/ops/doctor_test.go` — `TestRunDoctor_LogsHaveTimestamps` (`logs -t --tail=500`); `go vet` + `go test ./...`.
+- (Người điều phối bổ sung kết quả kiểm trên nhánh tích hợp sau khi gộp các gói.)
