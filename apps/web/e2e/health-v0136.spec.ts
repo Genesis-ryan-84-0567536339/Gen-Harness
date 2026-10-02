@@ -4,7 +4,7 @@ import { AUDITOR, MANAGER, loginAs, loginAsOwner, mockHook, resetMock } from './
 /**
  * v0.1.36 (F-6, F-2, F-46) — Sếp thấy ngay việc cần tự tay làm: dải "Cần Sếp xử lý" đầu Tổng quan (sự cố từ
  * `GET /system/health`), thẻ "Sức khoẻ hệ thống" ở Điều khiển hệ thống › Dữ liệu & lưu trữ, chuông có kind sự cố mới,
- * "Hạn lưu dữ liệu" nói rõ chưa tự xoá, Trợ giúp hiện phiên bản máy chủ + phiên bản công cụ cài đặt (genh).
+ * "Hạn lưu dữ liệu" (v0.1.40: sửa được — việc nền dọn thật), Trợ giúp hiện phiên bản máy chủ + phiên bản công cụ cài đặt (genh).
  */
 test.describe('v0.1.36 — Cần Sếp xử lý & Sức khoẻ hệ thống', () => {
   test.beforeEach(async ({ page }) => {
@@ -156,24 +156,38 @@ test.describe('v0.1.36 — Cần Sếp xử lý & Sức khoẻ hệ thống', ()
     await expect(page.getByText('[object Object]')).toHaveCount(0);
   });
 
-  test('Hạn lưu dữ liệu: "Chưa tự xoá — sẽ áp dụng ở bản sau", nút Sửa bị khoá', async ({ page }) => {
-    const patches: string[] = [];
+  // v0.1.40 (F-2): việc nền dọn theo hạn lưu đã chạy thật — bỏ nhãn tạm "Chưa tự xoá", nút Sửa hoạt động (PIN như cũ).
+  test('Hạn lưu dữ liệu: nút Sửa hoạt động (PIN), Nhật ký hành động "Không áp dụng", không còn nhãn "Chưa tự xoá"', async ({ page }) => {
+    const patches: unknown[] = [];
     page.on('request', (r) => {
-      if (r.method() === 'PATCH' && r.url().includes('/retention-policies')) patches.push(r.url());
+      if (r.method() === 'PATCH' && r.url().includes('/retention-policies')) patches.push(r.postDataJSON());
     });
     await page.goto('/system?tab=storage');
     const panel = page.getByRole('region', { name: 'Hạn lưu dữ liệu' });
-    await expect(panel.getByText('Chưa tự xoá — sẽ áp dụng ở bản sau')).toBeVisible();
-    await expect(panel.getByRole('note')).toContainText('Hệ thống CHƯA tự xoá dữ liệu theo các hạn này');
-    const edits = panel.getByRole('button', { name: 'Sửa' });
-    await expect(edits.first()).toBeDisabled();
-    expect(await edits.count()).toBeGreaterThan(0);
-    for (const b of await edits.all()) await expect(b).toBeDisabled();
-    // Bấm cố vào nút khoá cũng không gửi PATCH /retention-policies.
-    await edits.first().click({ force: true });
-    await page.waitForTimeout(300);
-    expect(patches).toEqual([]);
-    await expect(panel.getByRole('button', { name: 'Lưu' })).toHaveCount(0);
+    await expect(panel.getByText('Mỗi tập dữ liệu một hạn — đổi cần mã PIN')).toBeVisible();
+    await expect(page.getByText(/Chưa tự xoá/)).toHaveCount(0);
+    await expect(panel.getByRole('columnheader', { name: 'Ẩn danh sau' })).toHaveCount(0);
+    const logRow = panel.locator('tr', { has: page.getByText('Nhật ký hành động', { exact: true }) });
+    await expect(logRow.getByText('Không áp dụng')).toBeVisible();
+    await expect(logRow.getByRole('button', { name: /Sửa/ })).toHaveCount(0);
+    await expect(panel.locator('tr', { has: page.getByText('agent.browser_jobs.result') }).getByText('14 ngày (cố định)')).toBeVisible();
+
+    const rawRow = panel.locator('tr', { has: page.getByText('Kho thô') });
+    await expect(rawRow.getByText(/Lần dọn gần nhất: .* · đã xoá 0/)).toBeVisible();
+    const edit = rawRow.getByRole('button', { name: /Sửa/ });
+    await expect(edit).toBeEnabled();
+    await edit.click();
+    await rawRow.getByLabel(/Giữ trong \(ngày\)/).fill('400');
+    await rawRow.getByRole('button', { name: 'Lưu', exact: true }).click();
+    const pin = page.getByRole('dialog', { name: 'Mã PIN xác nhận thao tác' });
+    await expect(pin).toBeVisible();
+    await page.getByLabel('Mã PIN — chữ số 1/6').click();
+    await page.keyboard.type('246810');
+    await expect(pin).toBeHidden();
+    await expect(rawRow.getByText('400 ngày')).toBeVisible();
+    await expect(panel.getByRole('button', { name: 'Lưu', exact: true })).toHaveCount(0);
+    expect(patches.at(-1)).toEqual({ dataset: 'raw.events', keep_days: 400, anonymize_after_days: null });
+    await expect(page.getByText('[object Object]')).toHaveCount(0);
   });
 
   test('chuông: kind channel.down mới ⇒ tăng 1, dải tự hiện không cần tải lại, bấm mở tab Kênh', async ({ page }) => {

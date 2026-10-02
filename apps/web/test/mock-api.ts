@@ -272,6 +272,11 @@ const HEALTH_KIND_DEFAULTS: Record<string, Omit<HealthIssue, 'raised_at' | 'body
   'disk.low': { key: 'disk.low', kind: 'disk.low', severity: 'bad', title: 'Ổ đĩa sắp hết chỗ', body: 'Còn 3,0 GB trống, cần tối thiểu 5,0 GB — cập nhật tự động đang tạm dừng.', link: '/system?tab=storage', action: 'Xem cách giải phóng' },
   // v0.1.37 (F-73) — gh/health.py _eval_autostart (AUTOSTART_TITLE/AUTOSTART_FIX/AUTOSTART_DONE): đích là thẻ Sức khoẻ
   // (hướng dẫn từng bước, lệnh dạng mã) — cả dòng dải lẫn chuông.
+  // v0.1.40 (F-12, F-2) — gh/health.py: bản sao ngoài máy quá 7 ngày (bad khi > 30 ngày) / lần gần nhất lỗi; việc nền
+  // chạy quá giờ (key `job.timeout:<tên hàm>`, worker mở/đóng). Đích offsite là thẻ "Bản sao ngoài máy" (focus=offsite).
+  'offsite.stale': { key: 'offsite.stale', kind: 'offsite.stale', severity: 'warn', title: 'Đã hơn 7 ngày chưa có bản sao ngoài máy', body: 'Hỏng ổ đĩa là mất hết dữ liệu. Cắm ổ USB/NAS vào máy chủ rồi bấm Sao lưu ra ổ ngoài ngay.', link: '/system?tab=storage&focus=offsite', action: 'Mở Bản sao ngoài máy' },
+  'offsite.failed': { key: 'offsite.failed', kind: 'offsite.failed', severity: 'warn', title: 'Sao lưu ra ổ ngoài chưa thành công', body: 'Chưa thấy ổ USB/NAS — cắm ổ vào máy chủ rồi thử lại.', link: '/system?tab=storage&focus=offsite', action: 'Mở Bản sao ngoài máy' },
+  'job.timeout': { key: 'job.timeout:retention_sweep', kind: 'job.timeout', severity: 'warn', title: 'Việc nền "dọn dữ liệu theo hạn lưu" chạy quá giờ', body: 'Việc đã bị dừng và sẽ chạy lại ở lần sau. Lặp lại nhiều lần thì gửi kèm khi báo lỗi.', link: '/system?tab=storage', action: 'Xem sức khoẻ' },
   'host.autostart': { key: 'host.autostart', kind: 'host.autostart', severity: 'warn', title: 'Máy chủ có thể không tự chạy lại Gen-Harness khi bật lại máy', body: 'Docker chưa bật tự chạy khi mở máy — chạy một lần trên máy chủ: sudo systemctl enable docker · Lịch tự cập nhật và nút Cập nhật ngay chỉ chạy khi có người đăng nhập — chạy một lần: sudo loginctl enable-linger $USER · Chạy xong thì chạy genh status để cảnh báo tự hết', link: '/system?tab=storage', action: 'Xem cách bật' },
 };
 
@@ -283,6 +288,8 @@ export interface MockHealthOverride {
   update?: Partial<SystemHealth['update']>;
   /** v0.1.37 (F-73): khối `autostart` (thiếu ⇒ không có khối, như api không có hộp thư với genh). */
   autostart?: SystemHealth['autostart'];
+  /** v0.1.40 (F-12): ghi đè khối `offsite` (mặc định suy từ mock Bản sao ngoài máy); `null` = bỏ khối. */
+  offsite?: SystemHealth['offsite'] | null;
 }
 
 /** gh/health.py WORKER_SILENT_MINUTES. */
@@ -454,6 +461,12 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     } else if (update.failed) derived.push({ kind: 'update.failed', title: `Cập nhật lên ${sysUpdate.to ?? 'bản mới'} chưa thành công` });
     if (disk.state === 'low') derived.push({ kind: 'disk.low', body: `Còn ${gb(disk.free_bytes)} GB trống, cần tối thiểu ${gb(disk.min_bytes)} GB — cập nhật tự động đang tạm dừng.` });
     if (o.autostart?.state === 'warn') derived.push({ kind: 'host.autostart' });
+    // v0.1.40 (F-12): như gh/health._eval_offsite — chỉ khi đã chọn nơi lưu; > 30 ngày ⇒ bad.
+    const offsite = o.offsite === null ? undefined : (o.offsite ?? (phase3.system.offsiteHealth() as SystemHealth['offsite']));
+    if (offsite?.configured && (offsite.state === 'failed' || offsite.state === 'not_mounted')) derived.push({ kind: 'offsite.failed' });
+    else if (offsite?.configured && offsite.stale) {
+      derived.push({ kind: 'offsite.stale', severity: offsite.age_days != null && offsite.age_days > 30 ? 'bad' : 'warn' });
+    }
     const issues: HealthIssue[] = [];
     for (const i of [...(o.issues ?? []), ...derived].map((x) => healthIssue(x, now))) if (!issues.some((y) => y.key === i.key)) issues.push(i);
     const overall = issues.some((i) => i.severity === 'bad') ? 'bad' : issues.length ? 'warn' : 'ok';
@@ -468,6 +481,7 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
       ],
       backup, update, disk, issues,
       ...(o.autostart ? { autostart: o.autostart } : {}),
+      ...(offsite ? { offsite } : {}),
     };
   };
   const notify = (userId: string, kind: string, title: string, body = '', link: string | null = null) => {
@@ -1180,7 +1194,7 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
  *   /api/v1/__mock/scan     {"type":"zalo"} simulates the phone scanning the QR
  *   /api/v1/__mock/simulate {"on":bool} toggles the background simulation
  *   /api/v1/__mock/bridge   {"online":bool} makes channel login answer 503 BRIDGE_OFFLINE
- *   /api/v1/__mock/health  {"issues"?,"worker"?,"backup"?,"disk"?,"update"?} ghi đè `GET /system/health` (v0.1.36;
+ *   /api/v1/__mock/health  {"issues"?,"worker"?,"backup"?,"disk"?,"update"?,"autostart"?,"offsite"?} ghi đè `GET /system/health` (v0.1.36;
  *                           `issues` chỉ cần `kind` — nhãn/nút/đường dẫn mặc định theo kind; reset khôi phục khoẻ)
  *   /api/v1/__mock/p3/{cụm}/{hook}  body → `phase3[cụm].hooks[hook](body)`; trả JSON kết quả (404 nếu không có)
  */

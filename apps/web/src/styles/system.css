@@ -118,7 +118,6 @@
 .health-card__tech-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .health-card__tech-list li { display: flex; justify-content: space-between; gap: 10px; font-size: 11px; }
 .health-card__tech-list code { color: var(--color-neutral-300); overflow-wrap: anywhere; }
-.retention-note { display: flex; align-items: flex-start; gap: 6px; margin: 0 16px 8px; }
 
 .risk-list { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 5px; font-size: 11.5px; color: var(--color-neutral-300); line-height: 1.5; }
 
@@ -274,6 +273,9 @@
 .retention-table td { padding: 10px 16px; font-size: 11.5px; color: var(--color-neutral-400); border-top: 1px solid var(--color-divider); vertical-align: top; }
 .retention-table__name { font-size: 12px; color: var(--color-text); }
 .retention-table__code { font-size: 10px; color: var(--color-neutral-500); margin-top: 2px; }
+/* v0.1.40 (F-2): cách dọn + lần dọn gần nhất dưới tên tập dữ liệu. */
+.retention-table__note, .retention-table__last { font-size: 10.5px; color: var(--color-neutral-400); margin-top: 3px; line-height: 1.45; }
+.retention-table__last { color: var(--color-neutral-500); }
 .retention-table__actions { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
 .data-request { padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
 .data-request__picker { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
@@ -331,4 +333,53 @@
     content: attr(data-label); font-size: 10.5px; color: var(--color-neutral-500); text-align: left; flex: 1; min-width: 0;
   }
   .retention-table__actions { flex-wrap: wrap; white-space: normal; }
+}
+
+/* ── v0.1.40 (F-12): Bản sao ngoài máy + Bộ khôi phục ───────────────────────── */
+.offsite { padding: 12px 16px 14px; display: flex; flex-direction: column; gap: 10px; min-width: 0; font-size: 12.5px; }
+.offsite-latest { margin: 0; display: flex; align-items: flex-start; gap: 8px; color: var(--color-text); line-height: 1.5; }
+.offsite-latest .ph { margin-top: 2px; flex: none; color: var(--color-neutral-400); }
+.offsite-warn { display: flex; align-items: flex-start; gap: 8px; padding: 9px 12px; border-radius: var(--radius-md, 8px); line-height: 1.5;
+  border: 1px solid var(--color-warn); background: color-mix(in srgb, var(--color-warn) 8%, transparent); color: var(--color-text); }
+.offsite-warn .ph { flex: none; margin-top: 2px; color: var(--color-warn); }
+.offsite-warn[data-tone='bad'] { border-color: var(--color-bad); background: color-mix(in srgb, var(--color-bad) 9%, transparent); }
+.offsite-warn[data-tone='bad'] .ph { color: var(--color-bad); }
+.offsite-error { display: flex; flex-direction: column; gap: 4px; color: var(--color-bad); }
+.offsite-error code { color: var(--color-neutral-300); }
+.offsite-req { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: var(--radius-md, 8px); border: 1px solid var(--color-accent); color: var(--color-neutral-300); }
+.offsite-req--stalled { border-color: var(--color-warn); color: var(--color-text); }
+.offsite-meta { margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px 16px; }
+.offsite-meta div { min-width: 0; }
+.offsite-meta dt { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--color-neutral-500); }
+.offsite-meta dd { margin: 2px 0 0; color: var(--color-text); overflow-wrap: anywhere; }
+.offsite-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.offsite-note { margin: 0; }
+.offsite-cmd { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--color-neutral-300); margin-top: 8px; }
+.offsite-cmd__row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.offsite-cmd__row code { flex: 1; min-width: 0; padding: 8px 10px; border-radius: 6px; background: var(--color-neutral-900, rgba(0,0,0,.3)); color: var(--color-accent-300); overflow-x: auto; white-space: nowrap; }
+.offsite-dialog__lead { margin: 0 0 10px; font-size: 12.5px; color: var(--color-text); }
+.offsite-hints { margin: 10px 0; padding-left: 18px; font-size: 12px; line-height: 1.7; color: var(--color-neutral-300); }
+.offsite-hints__os { color: var(--color-text); }
+
+.rk-body { display: flex; flex-direction: column; gap: 12px; }
+.rk-key-row { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+.rk-key-col { flex: 1; min-width: 220px; display: flex; flex-direction: column; gap: 6px; }
+.rk-label { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--color-neutral-500); }
+.rk-key { font-size: 20px; font-weight: 600; letter-spacing: .04em; line-height: 1.4; color: var(--color-text); overflow-wrap: anywhere; user-select: all; }
+.rk-keyid { font-size: 11.5px; color: var(--color-neutral-400); }
+.rk-qr { flex: none; border-radius: 6px; background: #fff; }
+.rk-warn { display: flex; align-items: flex-start; gap: 8px; padding: 9px 12px; border-radius: var(--radius-md, 8px); line-height: 1.5;
+  border: 1px solid var(--color-warn); background: color-mix(in srgb, var(--color-warn) 8%, transparent); font-size: 12.5px; color: var(--color-text); }
+.rk-warn .ph { flex: none; margin-top: 2px; color: var(--color-warn); }
+.rk-steps { margin: 0; padding-left: 18px; font-size: 12.5px; line-height: 1.7; color: var(--color-neutral-300); }
+
+/* In Bộ khôi phục: chỉ in hộp này (lớp rk-open đặt trên body khi hộp mở). */
+@media print {
+  body.rk-open > *:not(.gh-dialog-backdrop) { display: none !important; }
+  body.rk-open * { visibility: hidden; }
+  body.rk-open .rk-dialog, body.rk-open .rk-dialog * { visibility: visible; }
+  body.rk-open .gh-dialog-backdrop { position: static; background: none; backdrop-filter: none; }
+  body.rk-open .rk-dialog { position: absolute; left: 0; top: 0; width: 100% !important; box-shadow: none; border: none; background: #fff; color: #000; }
+  body.rk-open .rk-dialog .gh-dialog__actions, body.rk-open .rk-dialog .gh-dialog__close { display: none; }
+  body.rk-open .rk-dialog .rk-key, body.rk-open .rk-dialog .rk-steps, body.rk-open .rk-dialog .rk-warn, body.rk-open .rk-dialog .gh-card__title { color: #000; }
 }

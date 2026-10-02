@@ -14,10 +14,11 @@ import type {
   GroupKind,
   ListenMode,
   PermScope,
+  RetentionPolicy,
   ViewScope,
 } from '@gen-harness/contracts';
 import { ApiError, PinCancelledError } from '@gen-harness/contracts';
-import { countWord, fmtHM, fmtInt, fmtLatency, fmtPct, fmtRemaining, fmtSessionAge } from '../../lib/format';
+import { DEFAULT_TZ, countWord, fmtDM, fmtHM, fmtInt, fmtLatency, fmtPct, fmtRemaining, fmtSessionAge } from '../../lib/format';
 import { ACC3, BAD, N3, N4, N5, N8, OK, TXT, WARN, channelIcon, channelTone } from '../data/dataModel';
 
 export const CHANNEL_STATE: Record<ChannelState, { label: string; tone: string }> = {
@@ -342,7 +343,46 @@ export const RETENTION_LABEL: Record<string, string> = {
   'ops.action_log': 'Nhật ký hành động',
   'memory.entries': 'Sổ tay nhận thức',
   'agent.model_calls': 'Lượt gọi model',
+  'agent.browser_jobs.result': 'Kết quả việc trình duyệt nền',
 };
+
+/** Câu mặc định theo cách dọn khi API không gửi `note` (v0.1.40, F-2). */
+const RETENTION_MODE_NOTE: Record<string, string> = {
+  partition: 'Xoá theo cả tháng khi cả tháng đã quá hạn',
+  batch: 'Xoá dần các dòng quá hạn mỗi đêm',
+  not_applicable: 'Nhật ký hành động chỉ ghi thêm — không xoá theo hạn',
+};
+
+export interface RetentionRowView {
+  /** Ô "Giữ trong". */
+  keep: string;
+  /** false ⇒ "Không áp dụng" (chữ thường, không mono). */
+  applicable: boolean;
+  /** Có nút Sửa. */
+  editable: boolean;
+  note: string | null;
+  /** "Lần dọn gần nhất: … · đã xoá N"; null = chưa dọn. */
+  lastRun: string | null;
+}
+
+/** v0.1.40 (F-2): một dòng bảng "Hạn lưu dữ liệu" — mọi giá trị là chuỗi/bool. */
+export function retentionRowView(r: RetentionPolicy, tz = DEFAULT_TZ): RetentionRowView {
+  const notApplicable = r.mode === 'not_applicable';
+  const fixed = r.dataset === 'agent.browser_jobs.result';
+  const note = typeof r.note === 'string' && r.note.trim() ? r.note.trim() : r.mode ? (RETENTION_MODE_NOTE[r.mode] ?? null) : null;
+  const keep = notApplicable
+    ? 'Không áp dụng'
+    : fixed
+      ? `${r.keep_days ?? 14} ngày (cố định)`
+      : r.keep_days != null
+        ? `${r.keep_days} ngày`
+        : 'mãi mãi';
+  const lastRun =
+    r.last_run_at && !notApplicable
+      ? `Lần dọn gần nhất: ${fmtDM(r.last_run_at, tz)} ${fmtHM(r.last_run_at, tz)}${typeof r.last_deleted === 'number' ? ` · đã xoá ${fmtInt(r.last_deleted)}` : ''}`
+      : null;
+  return { keep, applicable: !notApplicable, editable: !notApplicable && !fixed && r.editable !== false, note, lastRun };
+}
 
 export const DATA_REQUEST_KIND: Record<string, { label: string; icon: string; tone: string }> = {
   export: { label: 'Xuất dữ liệu', icon: 'ph ph-download-simple', tone: N3 },
