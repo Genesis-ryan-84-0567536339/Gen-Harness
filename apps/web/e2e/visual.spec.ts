@@ -357,7 +357,8 @@ const outDir = join(resultsDir, 'visual');
 
 /** Màn spec bổ sung (quyết định Q5) không có trong thiết kế: ẩn khỏi danh mục khi so ảnh. */
 // v0.1.30: 'guide' = mục "Hướng dẫn thiết lập" (Owner) dưới Điều khiển hệ thống — thiết kế gốc không có.
-const EXTRA_SCREENS = ['tasks', 'documents', 'deals', 'guide'];
+// v0.1.39 (F-32): 'social' = mục "Mạng xã hội" (Owner) ngay dưới Hướng dẫn thiết lập — thiết kế gốc không có.
+const EXTRA_SCREENS = ['tasks', 'documents', 'deals', 'guide', 'social'];
 
 /**
  * Nút header thêm SAU thiết kế gốc: Gen ✦ (v0.1.21), chuông thông báo + sáng/tối (v0.1.23, B6–B7). Thiết kế không vẽ

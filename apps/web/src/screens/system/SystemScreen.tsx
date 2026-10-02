@@ -11,6 +11,7 @@ import { LogTab } from './LogTab';
 import { OrgTab } from './OrgTab';
 import { PinCard } from './PinCard';
 import { RolesTab } from './RolesTab';
+import { SocialEntryCard } from './SocialEntryCard';
 import { StorageTab } from './StorageTab';
 import { UsersTab } from './UsersTab';
 
@@ -105,6 +106,7 @@ function ChannelsTabBody() {
       </div>
       <div className="side-col">
         <PinCard />
+        <SocialEntryCard />
         <CliCard canManage={canManage} />
       </div>
     </div>
