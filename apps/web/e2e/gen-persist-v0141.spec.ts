@@ -39,10 +39,26 @@ test.describe('v0.1.41 — Gen giữ hội thoại, Hội thoại cũ, Bản tin
     await expect(panel(page)).toContainText('Chào Gen, giới thiệu đi');
     await expect(panel(page)).toContainText('Dạ, em là Gen');
 
+    // F-84/F-86: "Hữu ích" trên câu trả lời thường — lưu máy chủ (PUT), tải lại vẫn chọn, bấm lại ⇒ bỏ (DELETE).
+    const good = () => panel(page).locator('.gen-msg--gen').last().getByRole('button', { name: 'Hữu ích', exact: true });
+    await expect(good()).toHaveAttribute('aria-pressed', 'false');
+    const put = page.waitForResponse((r) => r.url().endsWith('/api/v1/gen/feedback') && r.request().method() === 'PUT');
+    await good().click();
+    expect((await put).status()).toBe(200);
+    await expect(good()).toHaveAttribute('aria-pressed', 'true');
+
     await page.reload();
     await expect(panel(page)).toBeVisible();
     await expect(panel(page)).toContainText('Chào Gen, giới thiệu đi');
     await expect(panel(page)).toContainText('Dạ, em là Gen');
+    await expect(good()).toHaveAttribute('aria-pressed', 'true');
+    const del = page.waitForResponse((r) => /\/api\/v1\/gen\/feedback\/[^/]+$/.test(r.url()) && r.request().method() === 'DELETE');
+    await good().click();
+    expect((await del).status()).toBe(204);
+    await expect(good()).toHaveAttribute('aria-pressed', 'false');
+    await page.reload();
+    await expect(panel(page)).toContainText('Dạ, em là Gen');
+    await expect(good()).toHaveAttribute('aria-pressed', 'false');
 
     // Hội thoại thứ hai.
     await panel(page).getByRole('button', { name: 'Hội thoại mới' }).click();
@@ -77,6 +93,9 @@ test.describe('v0.1.41 — Gen giữ hội thoại, Hội thoại cũ, Bản tin
     const msg = panel(page).locator('.gen-msg--briefing');
     await expect(msg).toContainText('Bản tin');
     await expect(msg).toContainText('Đã tra việc, khách, nháp, sự cố…');
+    await expect(msg).toContainText('Việc tới hạn hôm nay (2)');
+    await expect(msg).toContainText('Khách đang nóng (1)');
+    await expect(msg).toContainText('Nháp chờ duyệt (1)');
     await expect(msg.getByRole('button', { name: 'Dán khoá OpenRouter/Gemini để Gen tóm tắt' })).toBeVisible();
 
     const good = msg.getByRole('button', { name: 'Hữu ích', exact: true });
@@ -97,6 +116,41 @@ test.describe('v0.1.41 — Gen giữ hội thoại, Hội thoại cũ, Bản tin
     await expect(page.getByRole('dialog', { name: 'Hội thoại cũ' }).locator('.gen-badge')).toHaveText('Bản tin');
     await page.keyboard.press('Escape');
     await expect(page.getByRole('dialog', { name: 'Hội thoại cũ' })).toHaveCount(0);
+
+    // Bản tin không có khoá API: nút gợi ý mở Bộ não AI.
+    await panel(page).locator('.gen-msg--briefing').getByRole('button', { name: 'Dán khoá OpenRouter/Gemini để Gen tóm tắt' }).click();
+    await expect(page).toHaveURL(/\/system\?tab=brain$/);
+    await noObjectText(page);
+  });
+
+  test('hội thoại đã bị xoá (404) ⇒ khung Gen trống, không báo lỗi đỏ', async ({ page }) => {
+    await loginAsOwner(page);
+    await page.goto('/overview');
+    await openGen(page);
+    await ask(page, 'Câu sẽ bị xoá');
+    const first = (await apiCall(page, 'GET', '/gen/conversations')) as Array<{ id: string; title: string }>;
+    const gone = first.find((c) => c.title.startsWith('Câu sẽ bị xoá'));
+    expect(gone).toBeTruthy();
+    // Hội thoại bị xoá (quá hạn lưu / máy khác xoá) ⇒ máy chủ trả 404 cho tin nhắn và không còn trong danh sách.
+    await page.route(`**/api/v1/gen/conversations/${gone!.id}/messages`, (route) =>
+      route.fulfill({ status: 404, contentType: 'application/problem+json', body: JSON.stringify({ status: 404, code: 'NOT_FOUND', title: 'Không tồn tại' }) }),
+    );
+    await page.reload();
+    await expect(panel(page)).toBeVisible();
+    await expect(panel(page).locator('.gen-empty')).toBeVisible();
+    await expect(panel(page)).not.toContainText('Câu sẽ bị xoá');
+    await expect(panel(page)).not.toContainText('Chưa tải lại được');
+    await expect(panel(page).getByRole('alert')).toHaveCount(0);
+    await expect(page.locator('.toast[data-tone="bad"]')).toHaveCount(0);
+
+    // Chọn hội thoại đó từ "Hội thoại cũ" (danh sách cũ còn ghi) ⇒ chỉ nhắc nhẹ, khung vẫn trống, không lỗi đỏ.
+    await panel(page).getByRole('button', { name: 'Hội thoại cũ' }).click();
+    const list = page.getByRole('dialog', { name: 'Hội thoại cũ' });
+    await list.getByRole('button', { name: /Câu sẽ bị xoá/ }).click();
+    await expect(page.locator('.toast[data-tone="warn"]')).toContainText('Hội thoại này không còn');
+    await expect(page.locator('.toast[data-tone="bad"]')).toHaveCount(0);
+    await expect(panel(page).locator('.gen-empty')).toBeVisible();
+    await expect(panel(page).getByRole('alert')).toHaveCount(0);
     await noObjectText(page);
   });
 });

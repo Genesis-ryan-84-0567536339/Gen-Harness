@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { ApiError } from '@gen-harness/contracts';
 import type { BackgroundSources } from '@gen-harness/contracts';
 import { Button, Dialog, Icon, Switch } from '@gen-harness/ui';
-import { errorText } from '../../lib/errorText';
+import { errorDetail, errorText } from '../../lib/errorText';
 import { detailToText } from '../../lib/friendlyError';
 import { useCan } from '../../lib/permissions';
 import { useMe } from '../../lib/queries';
@@ -14,16 +14,23 @@ import { useBackgroundSources, useSetBackgroundSources } from './queries';
 /** Nguồn CLI duy nhất Owner được bật cho việc nền (QD-12). Antigravity CLI KHÔNG BAO GIỜ chạy việc nền (F-22). */
 const CLAUDE_CLI = 'claude_code_cli';
 
-/** Tên mục đích việc nền cho người đọc (purpose của máy chủ). */
+/**
+ * Tên mục đích việc nền cho người đọc. Máy chủ trả nhãn ("Sàng lọc tin", "Trực việc (agent soạn nháp)", "Bản tin Gen" —
+ * gh/providers/router.py BACKGROUND_PURPOSE_LABELS); mã purpose (refinery…) vẫn nhận để tương thích.
+ */
 const PURPOSE_LABEL: Record<string, string> = {
   refinery: 'sàng lọc tin',
   duty_decide: 'trực việc',
   'gen.briefing': 'Bản tin Gen',
+  'Sàng lọc tin': 'sàng lọc tin',
+  'Trực việc (agent soạn nháp)': 'trực việc',
+  'Bản tin Gen': 'Bản tin Gen',
 };
+const DEFAULT_PURPOSES = ['refinery', 'duty_decide', 'gen.briefing'];
 
 /** Câu đầu thẻ: "sàng lọc tin, trực việc, Bản tin Gen" — theo `purposes` của máy chủ, thiếu thì dùng bộ mặc định. */
 function purposesText(p: unknown): string {
-  const list = Array.isArray(p) && p.length ? p.filter((x): x is string => typeof x === 'string') : Object.keys(PURPOSE_LABEL);
+  const list = Array.isArray(p) && p.length ? p.filter((x): x is string => typeof x === 'string') : DEFAULT_PURPOSES;
   return list.map((x) => PURPOSE_LABEL[x] ?? x).join(', ');
 }
 
@@ -130,7 +137,7 @@ function BackgroundBody({ data }: { data: BackgroundSources }) {
           </div>
           {cliOn ? <p className="muted-note">Sếp đã chấp nhận rủi ro — có thể tắt bất cứ lúc nào.</p> : null}
           {!isOwner ? <p className="muted-note">Chỉ Sếp (Owner) thay đổi được nguồn AI cho việc nền.</p> : null}
-          {save.isError && !confirmOpen ? <InlineError>{fieldError(save.error)}</InlineError> : null}
+          {save.isError && !confirmOpen ? <InlineError detail={errorDetail(save.error)}>{fieldError(save.error)}</InlineError> : null}
         </div>
       ) : null}
       <p className="muted-note">Antigravity CLI chỉ dùng khi Sếp hỏi Gen trực tiếp — không bao giờ chạy việc nền.</p>
@@ -190,7 +197,7 @@ function ConfirmCliDialog({
           <span>Tôi đã đọc cảnh báo và tự chịu rủi ro</span>
         </label>
         <PinHint />
-        {save.isError ? <InlineError>{fieldError(save.error)}</InlineError> : null}
+        {save.isError ? <InlineError detail={errorDetail(save.error)}>{fieldError(save.error)}</InlineError> : null}
       </div>
     </Dialog>
   );

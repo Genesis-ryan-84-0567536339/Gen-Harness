@@ -108,6 +108,36 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('<BackgroundSourcesCard> Nguồn AI cho việc nền', () => {
+  it('máy chủ trả nhãn mục đích (BACKGROUND_PURPOSE_LABELS) ⇒ câu đầu thẻ vẫn gọn, không lặp nhãn thô', async () => {
+    mockFetch((c) =>
+      c.url.endsWith('/providers/background')
+        ? json(200, bg({ purposes: ['Sàng lọc tin', 'Trực việc (agent soạn nháp)', 'Bản tin Gen'] }))
+        : c.url.includes('/system/ai-cost')
+          ? json(200, cost())
+          : undefined,
+    );
+    renderCards();
+    const panel = await screen.findByRole('region', { name: 'Nguồn AI cho việc nền' });
+    await waitFor(() => expect(panel).toHaveTextContent('Dùng cho sàng lọc tin, trực việc, Bản tin Gen'));
+  });
+
+  it('lỗi tải thẻ ⇒ câu tiếng Việt + "Chi tiết kỹ thuật" (mã HTTP/mã lỗi), không "[object Object]"', async () => {
+    mockFetch((c) =>
+      c.url.endsWith('/providers/background')
+        ? json(500, { status: 500, code: 'INTERNAL', title: 'Hệ thống gặp lỗi khi xử lý yêu cầu', error_id: 'err-123', detail: { x: 1 } })
+        : c.url.includes('/system/ai-cost')
+          ? json(200, cost())
+          : undefined,
+    );
+    renderCards();
+    const panel = await screen.findByRole('region', { name: 'Nguồn AI cho việc nền' });
+    const alert = await within(panel).findByRole('alert');
+    expect(alert).toHaveTextContent('Hệ thống gặp lỗi khi xử lý yêu cầu');
+    expect(within(alert).getByText('Chi tiết kỹ thuật')).toBeInTheDocument();
+    expect(alert).toHaveTextContent('HTTP 500 · INTERNAL · error_id err-123');
+    expect(document.body).not.toHaveTextContent('[object Object]');
+  });
+
   it('liệt kê nguồn theo chuỗi với viên trạng thái + lý do; không có lựa chọn bật Antigravity CLI', async () => {
     mockFetch((c) => (c.url.endsWith('/providers/background') ? json(200, bg()) : c.url.includes('/system/ai-cost') ? json(200, cost()) : undefined));
     renderCards();

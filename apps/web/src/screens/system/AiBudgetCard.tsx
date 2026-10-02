@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { AiCost, AiCostModel } from '@gen-harness/contracts';
 import { Button, TextField } from '@gen-harness/ui';
-import { errorText } from '../../lib/errorText';
+import { errorDetail, errorText } from '../../lib/errorText';
 import { fmtInt } from '../../lib/format';
 import { useCan } from '../../lib/permissions';
 import { toast } from '../../lib/toast';
@@ -89,7 +89,7 @@ function AiBudgetBody({ data }: { data: AiCost }) {
         {data.budget_vnd == null ? 'Chưa đặt trần — không giới hạn.' : `Trần hiện tại ${fmtInt(data.budget_vnd)} ₫ mỗi ngày.`} Vượt trần thì
         Gen báo chuông, không tự dừng.
       </p>
-      {setBudget.isError ? <InlineError>{errorText(setBudget.error)}</InlineError> : null}
+      {setBudget.isError ? <InlineError detail={errorDetail(setBudget.error)}>{errorText(setBudget.error)}</InlineError> : null}
 
       {models.length === 0 ? (
         <p className="muted-note">Chưa có model nào.</p>
@@ -199,7 +199,7 @@ function PriceRow({ m, canManage }: { m: AiCostModel; canManage: boolean }) {
             Lưu
           </Button>
           {bad ? <InlineError>Giá là số tiền nguyên (₫), không âm.</InlineError> : null}
-          {setPrice.isError ? <InlineError>{errorText(setPrice.error)}</InlineError> : null}
+          {setPrice.isError ? <InlineError detail={errorDetail(setPrice.error)}>{errorText(setPrice.error)}</InlineError> : null}
         </td>
       ) : null}
     </tr>

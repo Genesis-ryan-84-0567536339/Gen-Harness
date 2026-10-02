@@ -74,8 +74,9 @@ export const AGY_OWNER_ONLY_REASON =
  * `risk_text` của `GET /providers/background` ở API thật).
  */
 export const BACKGROUND_RISK_TEXT =
-  'Claude Code CLI đăng nhập bằng gói Claude (Free/Pro/Max) dành cho cá nhân. Cho Gen-Harness tự động gọi CLI cho việc nền (sàng lọc tin, trực việc, Bản tin Gen) có thể trái điều khoản của Anthropic và khiến tài khoản bị hạn chế hoặc khoá. Sếp tự chịu rủi ro; muốn an toàn, dùng khoá API (OpenRouter/Gemini).';
-const BACKGROUND_PURPOSES = ['refinery', 'duty_decide', 'gen.briefing'];
+  'Claude Code CLI dùng gói Claude Pro/Max cá nhân của Sếp. Cho nó chạy việc nền tự động (sàng lọc tin, trực việc, bản tin) có thể trái điều khoản gói và tài khoản có thể bị hạn chế hoặc khoá. Đây là quyết định và rủi ro của Sếp (QD-12). Cách an toàn: dán khoá API OpenRouter hoặc Gemini.';
+/** Như `BACKGROUND_PURPOSE_LABELS` của API thật — nhãn, không phải mã purpose. */
+const BACKGROUND_PURPOSES = ['Sàng lọc tin', 'Trực việc (agent soạn nháp)', 'Bản tin Gen'];
 const API_KINDS = new Set(['gemini', 'deepseek', 'openai_compat']);
 
 interface BindingState {
@@ -104,10 +105,10 @@ export function createMock(opts: P4ApiOptions) {
     const list = [...opts.getProviders()].filter((x) => x.kind !== 'system_one').sort((a, b) => a.failover_rank - b.failover_rank);
     const sources = list.map((pv) => {
       let reason: string | null = null;
-      if (pv.kind === 'antigravity_cli') reason = 'Antigravity CLI chỉ dùng khi Sếp hỏi Gen trực tiếp — không chạy việc nền';
-      else if (pv.kind === 'claude_code_cli') reason = background.allow_cli.includes('claude_code_cli') ? null : 'Chưa cho phép — Sếp bật ở công tắc bên dưới';
+      if (pv.kind === 'antigravity_cli') reason = 'Antigravity CLI chỉ dùng cho Gen — trợ lý quản trị (Gen của Sếp). Sàng lọc tin và trực việc phải dùng nguồn khác (khoá API hoặc Claude Code CLI) — luật an toàn, không tắt được.';
+      else if (pv.kind === 'claude_code_cli') reason = background.allow_cli.includes('claude_code_cli') ? null : 'Claude Code CLI (gói Pro/Max của Sếp) mặc định chỉ dùng khi Sếp hỏi Gen trực tiếp — việc nền dùng khoá API';
       else if (!API_KINDS.has(pv.kind)) reason = 'Không phải nguồn sinh chữ';
-      if (!reason && !pv.enabled) reason = 'Đã tắt';
+      if (!reason && !pv.enabled) reason = 'Nguồn đang tắt';
       if (!reason && API_KINDS.has(pv.kind) && !pv.keys.some((k) => k.enabled)) reason = 'Chưa có khoá API';
       return { provider_id: pv.id, name: pv.name, kind: pv.kind, used: reason === null, reason };
     });

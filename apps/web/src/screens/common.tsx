@@ -1,7 +1,7 @@
 import type { CSSProperties, ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { ErrorState, Icon, Skeleton, cx } from '@gen-harness/ui';
-import { errorReasons, errorText, isAgyOnlyUnavailable, isModelUnavailable } from '../lib/errorText';
+import { errorDetail, errorReasons, errorText, isAgyOnlyUnavailable, isModelUnavailable } from '../lib/errorText';
 import { AGY_ONLY_TEXT, MODEL_UNAVAILABLE_TEXT, agyOnlyReasons, friendlyError, isAgyOnlyText } from '../lib/friendlyError';
 
 /** Mô tả chung: thao tác nhà cung cấp AI nào cần phiên PIN `ai.route_change` (v0.1.35, F-20). */
@@ -139,7 +139,7 @@ export function SkeletonLines({ rows = 4, padding = '14px 16px', gap = 12 }: { r
 export function CardError({ error, onRetry, retrying }: { error: unknown; onRetry?: () => void; retrying?: boolean }) {
   if (isAgyOnlyUnavailable(error)) return <ModelUnavailableNotice reasons={errorReasons(error)} message={errorText(error)} agyOnly />;
   if (isModelUnavailable(error)) return <ModelUnavailableNotice reasons={errorReasons(error)} />;
-  return <ErrorState message={errorText(error)} onRetry={onRetry} retrying={retrying} />;
+  return <ErrorState message={errorText(error)} detail={errorDetail(error)} onRetry={onRetry} retrying={retrying} />;
 }
 
 /**
@@ -196,10 +196,16 @@ export function ActionError({ error }: { error: unknown }) {
 }
 
 /** Inline form/action error line (11px BAD). */
-export function InlineError({ children }: { children?: ReactNode }) {
+export function InlineError({ children, detail }: { children?: ReactNode; detail?: string | null }) {
   return (
     <div className="inline-error" role="alert" aria-live="assertive">
       {children}
+      {typeof detail === 'string' && detail ? (
+        <details className="tech-detail">
+          <summary>Chi tiết kỹ thuật</summary>
+          <code>{detail}</code>
+        </details>
+      ) : null}
     </div>
   );
 }
