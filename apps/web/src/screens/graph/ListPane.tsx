@@ -4,12 +4,12 @@ import type { ChannelType, DirRelation, GraphHeatBand, GraphState, GraphValueBan
 import { EmptyState, FilterSelect, Icon } from '@gen-harness/ui';
 import { Bar, CardError, SkeletonLines } from '../common';
 import { fmtAgo, fmtInt } from '../../lib/format';
+import { useAssignees } from '../../lib/pickers';
 import { useUrlState } from '../../lib/uiStore';
 import {
   CHANNEL_OPTIONS,
   HEAT_OPTIONS,
   N4,
-  OWNER_OPTIONS,
   PERSON_TYPE_LABEL,
   RELATION_LABEL,
   RELATION_OPTIONS,
@@ -50,6 +50,12 @@ export function ListPane() {
     [type, channel, heat, potential, risk, owner, state, relation],
   );
   const list = useGraphList(query);
+  // Người phụ trách THẬT (v0.1.35) — 403/lỗi/đang tải → chỉ còn 'Tất cả', không chặn màn.
+  const { options: assignees } = useAssignees();
+  const ownerOptions = useMemo(
+    () => [{ value: '', label: 'Tất cả' }, ...assignees.map((u) => ({ value: u.id, label: u.label }))],
+    [assignees],
+  );
 
   return (
     <div className="gp-list">
@@ -59,7 +65,7 @@ export function ListPane() {
         <FilterSelect label="Độ nóng" value={heat} onChange={setHeat} options={HEAT_OPTIONS} />
         <FilterSelect label="Tiềm năng" value={potential} onChange={setPotential} options={VALUE_OPTIONS} />
         <FilterSelect label="Rủi ro" value={risk} onChange={setRisk} options={VALUE_OPTIONS} />
-        <FilterSelect label="Phụ trách" value={owner} onChange={setOwner} options={OWNER_OPTIONS} />
+        <FilterSelect label="Phụ trách" value={owner} onChange={setOwner} options={ownerOptions} />
         <FilterSelect label="Chạm gần nhất" value={state} onChange={setState} options={STATE_OPTIONS} />
         <FilterSelect label="Giai đoạn" value={relation} onChange={setRelation} options={RELATION_OPTIONS} />
         <span className="gp-filters__spacer" />

@@ -407,3 +407,9 @@ async def agent_decisions(agent_id: uuid.UUID | None = None, decision: str | Non
              for r in rows[:limit]]
     return {"items": items, "next_cursor": iso(rows[limit - 1].at) if len(rows) > limit else None, "total": total}
 
+
+
+# ─── ô chọn người / trợ lý (v0.1.35, F-1) ─────────────────────────────────────
+from gh.biz.core import pickers  # noqa: E402
+
+router.include_router(pickers.router)

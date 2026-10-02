@@ -17,6 +17,7 @@
 import { randomUUID } from 'node:crypto';
 import type { GenProposal, GenStep } from '../../../packages/contracts/src/gen';
 import type { P2Ctx } from './mock-phase2';
+import { USER_IDS } from './mock-ids';
 
 export interface MockGenOptions {
   emit: (type: string, data: unknown) => void;
@@ -41,7 +42,7 @@ interface Conversation {
   messages: Array<{ id: string; role: 'user' | 'assistant'; turn_id: string | null; content: { text?: string; steps?: GenStep[] }; created_at: string }>;
 }
 
-const OWNER_ID = 'u-owner';
+const OWNER_ID = USER_IDS.owner;
 
 export function script(q: string): GenStep[] {
   const t = q.toLowerCase();
@@ -201,7 +202,7 @@ export function createMock(opts: MockGenOptions) {
     }
     if (seg[1] === 'turns' && seg[3] === 'ack' && m === 'POST') return reply(204);
     if (seg[1] === 'assignees' && m === 'GET') {
-      return reply(200, { items: [{ id: OWNER_ID, name: 'Sếp', role: 'Owner — Sếp', me: true }, { id: 'u-lan', name: 'Chị Lan', role: 'Vận hành', me: false }] });
+      return reply(200, { items: [{ id: OWNER_ID, name: 'Sếp', role: 'Owner — Sếp', me: true }, { id: USER_IDS.lan, name: 'Chị Lan', role: 'Vận hành', me: false }] });
     }
     if (seg[1] === 'proposals' && m === 'POST' && (seg[3] === 'confirm' || seg[3] === 'cancel')) {
       const pr = proposals.get(seg[2]);

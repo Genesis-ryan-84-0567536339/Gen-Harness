@@ -19,6 +19,7 @@ import type {
   SearchFacetValue,
 } from '@gen-harness/contracts';
 import { BAO, GROUP_TP, registerExplain } from './mock-p3-core';
+import { USER_IDS, rejectNonUuid } from './mock-ids';
 import { maskText, type P2Ctx } from './mock-phase2';
 
 /**
@@ -35,6 +36,8 @@ export interface P3Options {
   emit: (type: string, data: unknown) => void;
   /** Tạo bản nháp thật ở cụm nền chung (Bàn làm việc) — dùng khi "Giới thiệu hai bên". */
   pushDraft?: (d: DraftDetail) => unknown;
+  /** v0.1.35: người dùng đang hoạt động theo id (mock-api `users`) — gán người xử lý kiểm như API (UUID lạ → 404). */
+  findUser?: (id: string) => { id: string; display_name: string } | undefined;
 }
 
 const ago = (min: number) => new Date(Date.now() - min * 60_000).toISOString();
@@ -227,7 +230,7 @@ function seedCases(): CaseItem[] {
   return [
     {
       id: 'case-18', code: 'CAS-0018', kind: 'complaint', priority: 'P1', title: 'Giao hàng trễ hẹn 3 ngày, khách đang gay gắt',
-      status: 'in_progress', assignee: { id: 'u-lan', name: 'Chị Lan Phạm' }, subject: BAO, opened_at: ago(300), resolved_at: null, updated_at: ago(60),
+      status: 'in_progress', assignee: { id: USER_IDS.lan, name: 'Chị Lan Phạm' }, subject: BAO, opened_at: ago(300), resolved_at: null, updated_at: ago(60),
     },
     {
       id: 'case-17', code: 'CAS-0017', kind: 'complaint', priority: 'P2', title: 'Sai quy cách ván MDF so với báo giá',
@@ -235,7 +238,7 @@ function seedCases(): CaseItem[] {
     },
     {
       id: 'case-15', code: 'CAS-0015', kind: 'complaint', priority: 'P3', title: 'Hoá đơn ghi sai địa chỉ công ty',
-      status: 'resolved', assignee: { id: 'u-me', name: 'Anh Cơ La (Ryan)' }, subject: MINH, opened_at: ago(6000), resolved_at: ago(5000), updated_at: ago(5000),
+      status: 'resolved', assignee: { id: USER_IDS.owner, name: 'Anh Cơ La (Ryan)' }, subject: MINH, opened_at: ago(6000), resolved_at: ago(5000), updated_at: ago(5000),
     },
   ];
 }
@@ -297,7 +300,7 @@ export function createMock(opts: P3Options) {
       kind_label: target ? 'Tin nhắn' : 'Báo cáo',
       title: `Giới thiệu nguồn cung cho ${person?.name ?? m.demand.group?.name ?? 'khách'}`,
       agent: null,
-      created_by: { id: 'u-me', name: 'Anh Cơ La (Ryan)' },
+      created_by: { id: USER_IDS.owner, name: 'Anh Cơ La (Ryan)' },
       created_at: new Date().toISOString(),
       status: 'pending',
       hold_reason: null,
@@ -600,6 +603,17 @@ export function createMock(opts: P3Options) {
 
     // ── Vụ việc ──
     if (seg[0] === 'cases') {
+      // Như gh.biz.market.routes._ensure_assignee (v0.1.35): không phải UUID → 422; UUID lạ → 404 'Người dùng'.
+      // Trả `false` khi đã trả lời lỗi.
+      const assigneeRef = (id: unknown): { id: string; name: string } | false => {
+        if (rejectNonUuid(problem, 'assignee_user_id', id)) return false;
+        const u = opts.findUser?.(String(id));
+        if (!u) {
+          problem(404, 'NOT_FOUND', 'Người dùng không tồn tại hoặc ngoài phạm vi của bạn');
+          return false;
+        }
+        return { id: u.id, name: u.display_name };
+      };
       if (!has(ctx, 'opportunity.read')) return problem(403, 'FORBIDDEN', 'Vai trò không có quyền này');
       if (seg.length === 1 && m === 'GET') {
         const status = url.searchParams.get('status');
@@ -615,6 +629,8 @@ export function createMock(opts: P3Options) {
         if (!has(ctx, 'opportunity.write')) return problem(403, 'FORBIDDEN', 'Vai trò không có quyền này');
         const b = body as { title: string; priority?: CaseItem['priority']; subject?: { type: 'person' | 'group'; id: string }; assignee_user_id?: string };
         if (!b.title?.trim()) return problem(422, 'VALIDATION', 'Cần tiêu đề vụ việc', { errors: { title: 'Không được để trống' } });
+        const assignee = b.assignee_user_id == null ? null : assigneeRef(b.assignee_user_id);
+        if (assignee === false) return true;
         const c: CaseItem = {
           id: `case-new-${Date.now()}`,
           code: `CAS-00${18 + cases.length + 1}`,
@@ -622,7 +638,7 @@ export function createMock(opts: P3Options) {
           priority: b.priority ?? 'P2',
           title: b.title,
           status: 'open',
-          assignee: b.assignee_user_id ? { id: b.assignee_user_id, name: 'Chị Lan Phạm' } : null,
+          assignee,
           subject: b.subject?.type === 'person' ? BAO : null,
           opened_at: new Date().toISOString(),
           resolved_at: null,
@@ -640,11 +656,13 @@ export function createMock(opts: P3Options) {
         if (!has(ctx, 'opportunity.write')) return problem(403, 'FORBIDDEN', 'Vai trò không có quyền này');
         if (!row) return problem(404, 'NOT_FOUND', 'Vụ việc không tồn tại hoặc ngoài phạm vi của bạn');
         const b = body as { status?: CaseItem['status']; assignee_user_id?: string | null; priority?: CaseItem['priority'] };
+        const assignee = 'assignee_user_id' in b && b.assignee_user_id != null ? assigneeRef(b.assignee_user_id) : null;
+        if (assignee === false) return true;
         if (b.status !== undefined) {
           row.status = b.status;
           row.resolved_at = b.status === 'resolved' || b.status === 'closed' ? new Date().toISOString() : null;
         }
-        if ('assignee_user_id' in b) row.assignee = b.assignee_user_id ? { id: b.assignee_user_id, name: 'Chị Lan Phạm' } : null;
+        if ('assignee_user_id' in b) row.assignee = assignee;
         if (b.priority !== undefined) row.priority = b.priority;
         row.updated_at = new Date().toISOString();
         return reply(200, row);

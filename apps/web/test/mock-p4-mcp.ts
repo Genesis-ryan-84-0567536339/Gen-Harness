@@ -9,6 +9,7 @@
 import { randomUUID } from 'node:crypto';
 import type { AgentIdentity, HubLink, McpCall, McpCallOutcome, McpServer, McpTool } from '@gen-harness/contracts';
 import type { P2Ctx } from './mock-phase2';
+import { AGENT_IDS } from './mock-ids';
 
 export interface P4McpOptions {
   fresh: boolean;
@@ -33,11 +34,11 @@ function seedServers(): { servers: MockServer[]; tools: MockTool[] } {
     { id: 'mcp-hrm', name: 'HRM', transport: 'http+sse', endpoint: 'https://hrm.genesis.internal/mcp · v0.9', is_enabled: true, health: 'error', note: 'Dữ liệu nhân sự bị khoá ở mức Owner — không mở cho agent nào.', allow_public_network: false, _authToken: 'hrm-token-expired' },
   ];
   const tools: MockTool[] = [
-    { id: 'tool-inv-check', server_id: 'mcp-erp', server_name: 'ERP Genesis', name: 'inventory.check', access: 'read', is_exposed: true, schema: {}, grants: ['agent:agent-tls'] },
+    { id: 'tool-inv-check', server_id: 'mcp-erp', server_name: 'ERP Genesis', name: 'inventory.check', access: 'read', is_exposed: true, schema: {}, grants: [`agent:${AGENT_IDS.tls}`] },
     { id: 'tool-order-lookup', server_id: 'mcp-erp', server_name: 'ERP Genesis', name: 'order.lookup', access: 'read', is_exposed: true, schema: {}, grants: [] },
     { id: 'tool-order-draft', server_id: 'mcp-erp', server_name: 'ERP Genesis', name: 'order.createDraft', access: 'write', is_exposed: false, schema: {}, grants: [] },
-    { id: 'tool-contact-get', server_id: 'mcp-crm', server_name: 'CRM Genesis', name: 'contact.get', access: 'read', is_exposed: true, schema: {}, grants: ['agent:agent-tls'] },
-    { id: 'tool-deal-upsert', server_id: 'mcp-crm', server_name: 'CRM Genesis', name: 'deal.upsert', access: 'write', is_exposed: true, schema: {}, grants: ['agent:agent-tls'] },
+    { id: 'tool-contact-get', server_id: 'mcp-crm', server_name: 'CRM Genesis', name: 'contact.get', access: 'read', is_exposed: true, schema: {}, grants: [`agent:${AGENT_IDS.tls}`] },
+    { id: 'tool-deal-upsert', server_id: 'mcp-crm', server_name: 'CRM Genesis', name: 'deal.upsert', access: 'write', is_exposed: true, schema: {}, grants: [`agent:${AGENT_IDS.tls}`] },
     { id: 'tool-event-list', server_id: 'mcp-cal', server_name: 'Lịch & Họp', name: 'event.list', access: 'read', is_exposed: false, schema: {}, grants: [] },
     { id: 'tool-freebusy', server_id: 'mcp-cal', server_name: 'Lịch & Họp', name: 'freebusy.query', access: 'read', is_exposed: false, schema: {}, grants: [] },
   ];
@@ -46,9 +47,9 @@ function seedServers(): { servers: MockServer[]; tools: MockTool[] } {
 
 function seedCalls(): McpCall[] {
   return [
-    { id: 'call-1', at: ago(6), tool_id: 'tool-inv-check', tool_name: 'inventory.check', access: 'read', server_name: 'ERP Genesis', agent_key: 'agent:agent-tls', args: { sku: 'MDF-E1-17' }, result_summary: 'kho Bình Dương → còn 6 container', latency_ms: 412, outcome: 'ok', draft_id: null },
-    { id: 'call-2', at: ago(11), tool_id: 'tool-deal-upsert', tool_name: 'deal.upsert', access: 'write', server_name: 'CRM Genesis', agent_key: 'agent:agent-tls', args: { code: 'OPP-1815' }, result_summary: 'Chờ duyệt ở Bàn làm việc', latency_ms: null, outcome: 'held_for_approval', draft_id: 'draft-mcp-seed-1' },
-    { id: 'call-3', at: ago(18), tool_id: 'tool-order-draft', tool_name: 'order.createDraft', access: 'write', server_name: 'ERP Genesis', agent_key: 'agent:agent-hc', args: {}, result_summary: 'Bị chặn: tool chưa được Owner mở', latency_ms: null, outcome: 'blocked', draft_id: null },
+    { id: 'call-1', at: ago(6), tool_id: 'tool-inv-check', tool_name: 'inventory.check', access: 'read', server_name: 'ERP Genesis', agent_key: `agent:${AGENT_IDS.tls}`, args: { sku: 'MDF-E1-17' }, result_summary: 'kho Bình Dương → còn 6 container', latency_ms: 412, outcome: 'ok', draft_id: null },
+    { id: 'call-2', at: ago(11), tool_id: 'tool-deal-upsert', tool_name: 'deal.upsert', access: 'write', server_name: 'CRM Genesis', agent_key: `agent:${AGENT_IDS.tls}`, args: { code: 'OPP-1815' }, result_summary: 'Chờ duyệt ở Bàn làm việc', latency_ms: null, outcome: 'held_for_approval', draft_id: 'draft-mcp-seed-1' },
+    { id: 'call-3', at: ago(18), tool_id: 'tool-order-draft', tool_name: 'order.createDraft', access: 'write', server_name: 'ERP Genesis', agent_key: `agent:${AGENT_IDS.hc}`, args: {}, result_summary: 'Bị chặn: tool chưa được Owner mở', latency_ms: null, outcome: 'blocked', draft_id: null },
   ];
 }
 

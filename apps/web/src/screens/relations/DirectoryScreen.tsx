@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import type { DirGroup, DirHeatBand, DirPerson, DirPriority, DirRelation, DirValueBand } from '@gen-harness/contracts';
+import type { AgentRef, DirGroup, DirHeatBand, DirPerson, DirPriority, DirRelation, DirValueBand } from '@gen-harness/contracts';
 import { Bar, CardError, InlineError, ScreenHead, SkeletonLines } from '../common';
 import { Button, Dialog, EmptyState, Icon, Tabs, type FilterOption, type TabItem } from '@gen-harness/ui';
 import { errorText } from '../../lib/errorText';
 import { fmtInt } from '../../lib/format';
+import { EMPTY_AGENTS_TEXT, useAgentOptions } from '../../lib/pickers';
 import { useUrlState } from '../../lib/uiStore';
 import {
   CHANNEL_LABEL,
@@ -25,13 +26,51 @@ import {
 } from './relationsModel';
 import { useDirChannels, useDirGroups, useDirPeople, useSetGroupBot, useSetPersonBot } from './queries';
 
-/** Đội ngũ agent tạm để gán BOT — chưa có màn Danh tính Agent (giai đoạn 4), giống TEAMMATES của Hộp thư ý nghĩa. */
-const AGENTS = [
-  { id: 'agent-tls', name: 'Trợ lý thương mại' },
-  { id: 'agent-ka', name: 'Key Account junior' },
-  { id: 'agent-hc', name: 'Admin hậu cần' },
-  { id: 'agent-thk', name: 'Thư ký cá nhân' },
-];
+/** Danh sách chọn trợ lý (agent THẬT từ `/pickers/agents`, v0.1.35) dùng chung cho 3 hộp gán BOT. BOT hiện tại đã
+ * bị tắt (không còn trong danh sách) vẫn hiện một dòng "<tên> (đã tắt)" được đánh dấu chọn. */
+function AgentChoices({
+  value,
+  onChange,
+  current,
+  noneLabel = 'Chưa gán',
+}: {
+  value: string;
+  onChange: (id: string) => void;
+  current?: AgentRef | null;
+  noneLabel?: string;
+}) {
+  const { options, query } = useAgentOptions();
+  const missing = current && query.isSuccess && !options.some((a) => a.id === current.id) ? current : null;
+  return (
+    <div className="dlg-list" role="list">
+      <button type="button" className="sv-open" aria-pressed={value === ''} onClick={() => onChange('')}>
+        <span className="sv-open__name">{noneLabel}</span>
+        {value === '' ? <Icon name="ph ph-check" size={14} /> : null}
+      </button>
+      {query.isPending ? (
+        <SkeletonLines rows={3} />
+      ) : query.isError ? (
+        <InlineError>{errorText(query.error)}</InlineError>
+      ) : (
+        <>
+          {missing ? (
+            <button type="button" className="sv-open" aria-pressed={value === missing.id} onClick={() => onChange(missing.id)}>
+              <span className="sv-open__name">{`${missing.name || 'Trợ lý'} (đã tắt)`}</span>
+              {value === missing.id ? <Icon name="ph ph-check" size={14} /> : null}
+            </button>
+          ) : null}
+          {options.map((a) => (
+            <button key={a.id} type="button" className="sv-open" aria-pressed={value === a.id} onClick={() => onChange(a.id)}>
+              <span className="sv-open__name">{a.label}</span>
+              {value === a.id ? <Icon name="ph ph-check" size={14} /> : null}
+            </button>
+          ))}
+          {options.length === 0 ? <p className="muted-note">{EMPTY_AGENTS_TEXT}</p> : null}
+        </>
+      )}
+    </div>
+  );
+}
 
 type DirTab = 'groups' | 'people';
 
@@ -175,18 +214,7 @@ function GroupBotDialog({ group, onClose }: { group: DirGroup; onClose: () => vo
         </>
       }
     >
-      <div className="dlg-list" role="list">
-        <button type="button" className="sv-open" aria-pressed={agentId === ''} onClick={() => setAgentId('')}>
-          <span className="sv-open__name">Chưa gán</span>
-          {agentId === '' ? <Icon name="ph ph-check" size={14} /> : null}
-        </button>
-        {AGENTS.map((a) => (
-          <button key={a.id} type="button" className="sv-open" aria-pressed={agentId === a.id} onClick={() => setAgentId(a.id)}>
-            <span className="sv-open__name">{a.name}</span>
-            {agentId === a.id ? <Icon name="ph ph-check" size={14} /> : null}
-          </button>
-        ))}
-      </div>
+      <AgentChoices value={agentId} onChange={setAgentId} current={group.bot} />
       {setBot.isError ? <InlineError>{errorText(setBot.error)}</InlineError> : null}
     </Dialog>
   );
@@ -395,18 +423,7 @@ function PersonBotDialog({ person, onClose }: { person: DirPerson; onClose: () =
       }
     >
       <div className="dlg-fields">
-        <div className="dlg-list" role="list">
-          <button type="button" className="sv-open" aria-pressed={agentId === ''} onClick={() => setAgentId('')}>
-            <span className="sv-open__name">Chưa gán</span>
-            {agentId === '' ? <Icon name="ph ph-check" size={14} /> : null}
-          </button>
-          {AGENTS.map((a) => (
-            <button key={a.id} type="button" className="sv-open" aria-pressed={agentId === a.id} onClick={() => setAgentId(a.id)}>
-              <span className="sv-open__name">{a.name}</span>
-              {agentId === a.id ? <Icon name="ph ph-check" size={14} /> : null}
-            </button>
-          ))}
-        </div>
+        <AgentChoices value={agentId} onChange={setAgentId} current={person.bot} />
         <AutonomySelect value={autonomy} onChange={setAutonomy} />
         {setBot.isError ? <InlineError>{errorText(setBot.error)}</InlineError> : null}
       </div>
@@ -454,18 +471,7 @@ function BulkBotDialog({ ids, onClose }: { ids: string[]; onClose: () => void })
       }
     >
       <div className="dlg-fields">
-        <div className="dlg-list" role="list">
-          <button type="button" className="sv-open" aria-pressed={agentId === ''} onClick={() => setAgentId('')}>
-            <span className="sv-open__name">Chưa gán (gỡ BOT)</span>
-            {agentId === '' ? <Icon name="ph ph-check" size={14} /> : null}
-          </button>
-          {AGENTS.map((a) => (
-            <button key={a.id} type="button" className="sv-open" aria-pressed={agentId === a.id} onClick={() => setAgentId(a.id)}>
-              <span className="sv-open__name">{a.name}</span>
-              {agentId === a.id ? <Icon name="ph ph-check" size={14} /> : null}
-            </button>
-          ))}
-        </div>
+        <AgentChoices value={agentId} onChange={setAgentId} noneLabel="Chưa gán (gỡ BOT)" />
         <AutonomySelect value={autonomy} onChange={setAutonomy} />
         {error ? <InlineError>{errorText(error)}</InlineError> : null}
       </div>

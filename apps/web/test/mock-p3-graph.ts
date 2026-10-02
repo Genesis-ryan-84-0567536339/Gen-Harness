@@ -10,6 +10,7 @@
  * dòng ở đây mở đúng Hồ sơ sống của cụm `relations`.
  */
 import type { GraphGroupEdge, GraphGroupNode, GraphListItem, GraphPersonEdge, GraphPersonNode, GraphState, PersonType } from '@gen-harness/contracts';
+import { USER_IDS, rejectNonUuid } from './mock-ids';
 import type { P2Ctx } from './mock-phase2';
 
 export interface P3Options {
@@ -30,17 +31,17 @@ interface PersonSeed {
 }
 const PEOPLE: PersonSeed[] = [
   { id: 'p-hau', code: 'PER-0311', name: 'Trần Văn Hậu', org: 'Xưởng gỗ Bình Dương', type: 'customer', channels: ['zalo'], relation: 'direct', heat: 91, potential: 88, risk: 22, ownerUserId: null, lastAt: ago(18) },
-  { id: 'p-bao', code: 'PER-0042', name: 'Nguyễn Văn Bảo', org: 'Công ty in Thành Phát', type: 'customer', channels: ['zalo', 'whatsapp'], relation: 'direct', heat: 87, potential: 58, risk: 84, ownerUserId: 'u-ha', lastAt: ago(120) },
+  { id: 'p-bao', code: 'PER-0042', name: 'Nguyễn Văn Bảo', org: 'Công ty in Thành Phát', type: 'customer', channels: ['zalo', 'whatsapp'], relation: 'direct', heat: 87, potential: 58, risk: 84, ownerUserId: USER_IDS.lan, lastAt: ago(120) },
   { id: 'p-duoc', code: 'PER-0402', name: 'Lâm Văn Được', org: 'Kho ván Bình Dương', type: 'supplier', channels: ['zalo'], relation: 'stranger', heat: 84, potential: null, risk: null, ownerUserId: null, lastAt: ago(60 * 24 * 5) },
-  { id: 'p-lan', code: 'PER-0119', name: 'Hoàng Thị Lan', org: 'An Khang Logistics', type: 'partner', channels: ['zalo', 'whatsapp'], relation: 'via_staff', heat: 78, potential: 61, risk: 52, ownerUserId: 'u-khoa', lastAt: ago(60 * 4) },
+  { id: 'p-lan', code: 'PER-0119', name: 'Hoàng Thị Lan', org: 'An Khang Logistics', type: 'partner', channels: ['zalo', 'whatsapp'], relation: 'via_staff', heat: 78, potential: 61, risk: 52, ownerUserId: USER_IDS.minh, lastAt: ago(60 * 4) },
   { id: 'p-son', code: 'PER-0619', name: 'Võ Thanh Sơn', org: 'Ứng viên · Key Account ngành lạnh', type: 'candidate', channels: ['zalo'], relation: 'stranger', heat: 74, potential: null, risk: null, ownerUserId: null, lastAt: ago(60 * 6) },
-  { id: 'p-minh', code: 'PER-0512', name: 'Phạm Quốc Minh', org: 'Nội thất Minh Long', type: 'customer', channels: ['zalo'], relation: 'via_staff', heat: 64, potential: 55, risk: 48, ownerUserId: 'u-khoa', lastAt: ago(60 * 24) },
+  { id: 'p-minh', code: 'PER-0512', name: 'Phạm Quốc Minh', org: 'Nội thất Minh Long', type: 'customer', channels: ['zalo'], relation: 'via_staff', heat: 64, potential: 55, risk: 48, ownerUserId: USER_IDS.minh, lastAt: ago(60 * 24) },
   { id: 'p-bich', code: 'PER-0844', name: 'Lê Thị Bích', org: 'Kho lạnh Tân Cảng', type: 'customer', channels: ['whatsapp'], relation: 'stranger', heat: 58, potential: null, risk: 18, ownerUserId: null, lastAt: ago(60 * 24 * 2) },
   { id: 'p-ha', code: 'PER-0007', name: 'Nguyễn Thu Hà', org: 'Nội bộ · Trưởng ban Tài chính', type: 'staff', channels: ['zalo', 'whatsapp'], relation: 'staff', heat: 62, potential: null, risk: null, ownerUserId: null, lastAt: ago(35) },
   { id: 'p-khoa', code: 'PER-0003', name: 'Trần Minh Khoa', org: 'Nội bộ · Giám đốc vận hành', type: 'staff', channels: ['zalo', 'whatsapp'], relation: 'staff', heat: 71, potential: null, risk: null, ownerUserId: null, lastAt: ago(12) },
   { id: 'p-thang', code: 'PER-0733', name: 'Bùi Đức Thắng', org: 'Gỗ Trường Thành Mới', type: 'customer', channels: ['zalo'], relation: 'stranger', heat: 72, potential: 70, risk: 45, ownerUserId: null, lastAt: ago(60 * 24 * 3) },
-  { id: 'p-duyen', code: 'PER-0951', name: 'Trịnh Mỹ Duyên', org: 'Bao bì Sài Gòn Mới', type: 'customer', channels: ['zalo', 'whatsapp'], relation: 'via_staff', heat: 18, potential: 30, risk: 78, ownerUserId: 'u-khoa', lastAt: ago(60 * 24 * 41) },
-  { id: 'p-tri', code: 'PER-0688', name: 'Đặng Hữu Trí', org: 'Gỗ Đông Phương', type: 'customer', channels: ['zalo'], relation: 'via_staff', heat: 22, potential: 35, risk: 74, ownerUserId: 'u-khoa', lastAt: ago(60 * 24 * 74) },
+  { id: 'p-duyen', code: 'PER-0951', name: 'Trịnh Mỹ Duyên', org: 'Bao bì Sài Gòn Mới', type: 'customer', channels: ['zalo', 'whatsapp'], relation: 'via_staff', heat: 18, potential: 30, risk: 78, ownerUserId: USER_IDS.minh, lastAt: ago(60 * 24 * 41) },
+  { id: 'p-tri', code: 'PER-0688', name: 'Đặng Hữu Trí', org: 'Gỗ Đông Phương', type: 'customer', channels: ['zalo'], relation: 'via_staff', heat: 22, potential: 35, risk: 74, ownerUserId: USER_IDS.minh, lastAt: ago(60 * 24 * 74) },
 ];
 const P = Object.fromEntries(PEOPLE.map((p) => [p.id, p]));
 
@@ -221,6 +222,8 @@ export function createMock(opts: P3Options) {
       const potential = url.searchParams.get('potential');
       const risk = url.searchParams.get('risk');
       const ownerUserId = url.searchParams.get('owner_user_id');
+      // Như API (`owner_user_id: uuid.UUID | None`): không phải UUID → 422 VALIDATION (v0.1.35).
+      if (ownerUserId && rejectNonUuid(problem, 'owner_user_id', ownerUserId)) return true;
       const state = url.searchParams.get('state');
       const relation = url.searchParams.get('relation');
       const limit = Number(url.searchParams.get('limit') ?? 50);

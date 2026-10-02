@@ -840,6 +840,16 @@ async def get_case(case_id: uuid.UUID, user: service.CurrentUser = Depends(READ)
     return _case_item(r, owner=user.role_code == rbac.OWNER)
 
 
+async def _ensure_assignee(db: AsyncSession, org_id: uuid.UUID, assignee: uuid.UUID | None) -> None:
+    """UUID người xử lý phải là người dùng đang hoạt động cùng org — không để khoá ngoại nổ thành 500 (F-1)."""
+    if assignee is None:
+        return
+    ok = (await db.execute(text("SELECT 1 FROM core.users WHERE id = :u AND org_id = :o AND is_active"),
+                           {"u": assignee, "o": org_id})).first()
+    if ok is None:
+        raise not_found("Người dùng")
+
+
 class CaseIn(BaseModel):
     title: str = Field(min_length=1, max_length=500)
     priority: Literal["P1", "P2", "P3"] = "P2"
@@ -862,6 +872,7 @@ async def create_case(body: CaseIn, user: service.CurrentUser = Depends(WRITE),
             await ensure_person(db, sc, subject_id)
         else:
             await ensure_group(db, sc, subject_id)
+    await _ensure_assignee(db, user.org_id, body.assignee_user_id)
     code = (await db.execute(text("SELECT core.next_code('CAS')"))).scalar_one()
     row = (await db.execute(text("""
         INSERT INTO biz.cases (org_id, code, kind, priority, subject_type, subject_id, title, status,
@@ -894,6 +905,7 @@ async def patch_case(case_id: uuid.UUID, body: CasePatch, user: service.CurrentU
     fields = body.model_fields_set
     detail: dict[str, Any] = {}
     if "assignee_user_id" in fields:
+        await _ensure_assignee(db, user.org_id, body.assignee_user_id)
         await db.execute(text("UPDATE biz.cases SET assignee_user_id = :a, updated_at = now() WHERE id = :i"),
                          {"a": body.assignee_user_id, "i": case_id})
         detail["assignee_user_id"] = str(body.assignee_user_id) if body.assignee_user_id else None

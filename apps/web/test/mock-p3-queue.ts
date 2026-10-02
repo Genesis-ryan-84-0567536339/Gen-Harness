@@ -16,11 +16,14 @@ import type {
   Task,
 } from '@gen-harness/contracts';
 import { BAO, GROUP_TP, registerExplain } from './mock-p3-core';
+import { AGENT_IDS, USER_IDS, rejectNonUuid } from './mock-ids';
 import type { P2Ctx } from './mock-phase2';
 
 export interface P3Options {
   fresh: boolean;
   emit: (type: string, data: unknown) => void;
+  /** v0.1.35: người dùng đang hoạt động theo id (mock-api `users`) — giao việc kiểm như API (UUID lạ → 404). */
+  findUser?: (id: string) => { id: string; display_name: string } | undefined;
 }
 
 const ago = (min: number) => new Date(Date.now() - min * 60_000).toISOString();
@@ -62,7 +65,7 @@ function seedInboxItems(): InboxRow[] {
       id: 'draft-ACT-0231', code: 'ACT-0231', item_type: 'draft', tab: 'approval',
       title: 'Báo giá', summary: 'Bản nháp báo giá 84.000.000 ₫ cho hợp đồng in ấn quý 4 đã soạn xong.',
       priority: 'P1', created_at: ago(47), score: null, confidence_band: null,
-      subject: BAO, group: GROUP_TP, agent: { id: 'agent-tls', name: 'Trợ lý thương mại' },
+      subject: BAO, group: GROUP_TP, agent: { id: AGENT_IDS.tls, name: 'Trợ lý thương mại' },
       alert_type: null, alert_type_label: null, suggested_action: 'Xem bản nháp và duyệt',
       status: 'pending', kind: 'quotation',
     },
@@ -108,7 +111,7 @@ function seedInboxItems(): InboxRow[] {
       id: 'draft-ACT-0234', code: 'ACT-0234', item_type: 'draft', tab: 'approval',
       title: 'Hợp đồng', summary: 'Biên bản đàm phán tuyến lạnh An Khang vòng ba đã soạn xong.',
       priority: 'P2', created_at: ago(120), score: null, confidence_band: null,
-      subject: KHANG, group: null, agent: { id: 'agent-hc', name: 'Admin hậu cần' },
+      subject: KHANG, group: null, agent: { id: AGENT_IDS.hc, name: 'Admin hậu cần' },
       alert_type: null, alert_type_label: null, suggested_action: 'Xem bản nháp và duyệt',
       status: 'pending', kind: 'contract',
     },
@@ -119,13 +122,13 @@ function seedTasks(): Task[] {
   return [
     {
       id: 't-412', code: 'TSK-0412', title: 'Lịch giao ban thứ Hai chưa có nội dung, hệ thống đã soạn nháp',
-      priority: 'P3', status: 'todo', assignee: { id: 'u-me', name: 'Nhóm Điều hành' },
+      priority: 'P3', status: 'todo', assignee: { id: USER_IDS.owner, name: 'Nhóm Điều hành' },
       subject: null, due_at: inMin(24 * 60), remind_at: null, overdue: false,
       source: 'manual', created_at: ago(24 * 60), completed_at: null,
     },
     {
       id: 't-410', code: 'TSK-0410', title: 'Gửi hợp đồng in ấn quý 4 đã ký cho Thành Phát',
-      priority: 'P1', status: 'doing', assignee: { id: 'u-me', name: 'Anh Cơ La (Ryan)' },
+      priority: 'P1', status: 'doing', assignee: { id: USER_IDS.owner, name: 'Anh Cơ La (Ryan)' },
       subject: BAO, due_at: ago(90), remind_at: null, overdue: true,
       source: 'draft', created_at: ago(300), completed_at: null,
     },
@@ -137,7 +140,7 @@ function seedTasks(): Task[] {
     },
     {
       id: 't-406', code: 'TSK-0406', title: 'Đã gọi xác nhận đơn hàng với Thành Phát',
-      priority: 'P3', status: 'done', assignee: { id: 'u-me', name: 'Anh Cơ La (Ryan)' },
+      priority: 'P3', status: 'done', assignee: { id: USER_IDS.owner, name: 'Anh Cơ La (Ryan)' },
       subject: BAO, due_at: ago(1440), remind_at: null, overdue: false,
       source: 'manual', created_at: ago(2000), completed_at: ago(1000),
     },
@@ -364,14 +367,19 @@ export function createMock(opts: P3Options) {
           const draft = { id: `draft-from-${row.id}`, code: `ACT-0${240 + items.length}`, status: 'pending' };
           opts.emit('draft.new', {
             id: draft.id, code: draft.code, kind: 'message', kind_label: 'Tin nhắn', title: `Trả lời ${row.title}`,
-            agent: null, created_by: { id: 'u-me', name: ctx.userLabel }, created_at: new Date().toISOString(),
+            agent: null, created_by: { id: USER_IDS.owner, name: ctx.userLabel }, created_at: new Date().toISOString(),
             status: 'pending', hold_reason: null, subject: row.subject,
           });
           return reply(200, { ok: true, draft });
         }
         if (action === 'assign') {
-          const b = body as { user_id: string };
-          return reply(200, { ok: true, assigned_to: { id: b.user_id, name: 'Chị Lan Phạm' } });
+          // Như gh.biz.queue.routes.assign_inbox_item: `user_id: uuid.UUID` (không phải UUID → 422), người dùng
+          // phải đang hoạt động cùng tổ chức (không có → 404 'Người dùng').
+          const b = body as { user_id?: unknown };
+          if (rejectNonUuid(problem, 'user_id', b.user_id)) return true;
+          const target = opts.findUser?.(String(b.user_id));
+          if (!target) return problem(404, 'NOT_FOUND', 'Người dùng không tồn tại hoặc ngoài phạm vi của bạn');
+          return reply(200, { ok: true, assigned_to: { id: target.id, name: target.display_name } });
         }
         if (action === 'silence') {
           const b = body as { reason?: string | null; until?: string | null };

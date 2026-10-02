@@ -5,6 +5,7 @@ import { Button, Dialog, EmptyState, Icon, Tabs, type FilterOption, type TabItem
 import { api } from '../../lib/api';
 import { errorText } from '../../lib/errorText';
 import { fmtDM, fmtInt } from '../../lib/format';
+import { EMPTY_USERS_TEXT, useAssignees } from '../../lib/pickers';
 import { useUrlState } from '../../lib/uiStore';
 import { CardError, InlineError, ScreenHead, SkeletonLines } from '../common';
 import {
@@ -17,13 +18,6 @@ import {
   priorityTone,
 } from './marketModel';
 import { useCases, useDeals, useOpportunities, usePatchCase, usePatchDeal } from './queries';
-
-/** Đội ngũ tạm để gán người xử lý — chưa có màn Danh mục người dùng (GĐ 4), giống Hộp thư ý nghĩa. */
-const TEAMMATES = [
-  { id: 'u-lan', name: 'Chị Lan Phạm' },
-  { id: 'u-minh', name: 'Anh Minh Kiểm' },
-  { id: 'u-me', name: 'Tôi' },
-];
 
 type DealsTab = 'deals' | 'cases';
 
@@ -219,6 +213,7 @@ function CasesPane() {
 
 function AssigneeDialog({ c, onClose }: { c: CaseItem; onClose: () => void }) {
   const patch = usePatchCase();
+  const { options, hasOthers, query: people } = useAssignees();
   return (
     <Dialog
       open
@@ -236,12 +231,21 @@ function AssigneeDialog({ c, onClose }: { c: CaseItem; onClose: () => void }) {
         <button type="button" className="sv-open" onClick={() => patch.mutate({ id: c.id, body: { assignee_user_id: null } }, { onSuccess: onClose })}>
           <span className="sv-open__name">Chưa gán</span>
         </button>
-        {TEAMMATES.map((u) => (
-          <button key={u.id} type="button" className="sv-open" aria-pressed={c.assignee?.id === u.id} onClick={() => patch.mutate({ id: c.id, body: { assignee_user_id: u.id } }, { onSuccess: onClose })}>
-            <span className="sv-open__name">{u.name}</span>
-            {c.assignee?.id === u.id ? <Icon name="ph ph-check" size={14} /> : null}
-          </button>
-        ))}
+        {people.isPending ? (
+          <SkeletonLines rows={3} />
+        ) : people.isError ? (
+          <InlineError>{errorText(people.error)}</InlineError>
+        ) : (
+          <>
+            {options.map((u) => (
+              <button key={u.id} type="button" className="sv-open" aria-pressed={c.assignee?.id === u.id} onClick={() => patch.mutate({ id: c.id, body: { assignee_user_id: u.id } }, { onSuccess: onClose })}>
+                <span className="sv-open__name">{u.label}</span>
+                {c.assignee?.id === u.id ? <Icon name="ph ph-check" size={14} /> : null}
+              </button>
+            ))}
+            {!hasOthers ? <p className="muted-note">{EMPTY_USERS_TEXT}</p> : null}
+          </>
+        )}
       </div>
       {patch.isError ? <InlineError>{errorText(patch.error)}</InlineError> : null}
     </Dialog>

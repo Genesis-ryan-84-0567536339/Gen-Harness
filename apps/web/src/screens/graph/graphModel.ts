@@ -94,14 +94,6 @@ export const STATE_OPTIONS: { value: GraphState | ''; label: string }[] = [
   { value: 'active', label: 'Đang hoạt động' },
   { value: 'cold', label: 'Đang lạnh (> 30 ngày)' },
 ];
-/** Chưa có màn Danh tính người dùng để liệt kê — danh sách người phụ trách tạm cố định ở đây, giống `AGENTS`
- * trong `relations/DirectoryScreen.tsx` cho BOT trực. */
-export const OWNER_OPTIONS: { value: string; label: string }[] = [
-  { value: '', label: 'Tất cả' },
-  { value: 'u-ha', label: 'Nguyễn Thu Hà' },
-  { value: 'u-khoa', label: 'Trần Minh Khoa' },
-];
-
 export type GraphModeKey = 'list' | 'people' | 'groups' | 'topics';
 export const MODE_OPTIONS: { value: GraphModeKey; label: string; icon: string }[] = [
   { value: 'list', label: 'Danh sách', icon: 'ph ph-rows' },

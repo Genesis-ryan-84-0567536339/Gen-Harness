@@ -19,11 +19,15 @@ import type {
   Profile,
 } from '@gen-harness/contracts';
 import { BAO, GROUP_TP, registerExplain } from './mock-p3-core';
+import { AGENT_IDS, STAFF_IDS, rejectNonUuid } from './mock-ids';
 import type { P2Ctx } from './mock-phase2';
 
 export interface P3Options {
   fresh: boolean;
   emit: (type: string, data: unknown) => void;
+  /** v0.1.35: agent theo id ở Danh tính Agent (mock-p4-agents, đọc chung — không copy). Gán BOT kiểm như API:
+   * không phải UUID → 422; UUID không thuộc tổ chức → 404 'Agent'. */
+  findAgent?: (id: string) => { id: string; name: string } | undefined;
 }
 
 const ago = (min: number) => new Date(Date.now() - min * 60_000).toISOString();
@@ -67,11 +71,11 @@ function seedGroups(): DirGroup[] {
     li: { type: 'linkedin', name: 'LinkedIn' },
   };
   const BOT_FOR: Record<string, string | null> = {
-    'g-zl-0114': 'agent-tls', 'g-zl-0231': 'agent-ka', 'g-zl-0174': 'agent-hc',
-    'g-zl-0356': null, 'g-zl-0489': 'agent-tls', 'g-zl-0502': null,
-    'g-wa-0007': 'agent-tls', 'g-wa-0011': 'agent-ka', 'g-li-0001': null,
+    'g-zl-0114': AGENT_IDS.tls, 'g-zl-0231': AGENT_IDS.ka, 'g-zl-0174': AGENT_IDS.hc,
+    'g-zl-0356': null, 'g-zl-0489': AGENT_IDS.tls, 'g-zl-0502': null,
+    'g-wa-0007': AGENT_IDS.tls, 'g-wa-0011': AGENT_IDS.ka, 'g-li-0001': null,
   };
-  const BOT_NAME: Record<string, string> = { 'agent-tls': 'Trợ lý thương mại', 'agent-ka': 'Key Account junior', 'agent-hc': 'Admin hậu cần' };
+  const BOT_NAME: Record<string, string> = { [AGENT_IDS.tls]: 'Trợ lý thương mại', [AGENT_IDS.ka]: 'Key Account junior', [AGENT_IDS.hc]: 'Admin hậu cần' };
   return rows.map(([id, code, name, kindLabel, members, msgs, heat, modeLabel]) => {
     const chPrefix = code.split('-')[1].toLowerCase();
     const agentId = BOT_FOR[id];
@@ -102,22 +106,22 @@ interface PersonSeed {
   agentId: string | null; autonomy: number | null; ownerUserId: string | null;
 }
 const AGENT_NAME: Record<string, string> = {
-  'agent-tls': 'Trợ lý thương mại', 'agent-ka': 'Key Account junior', 'agent-hc': 'Admin hậu cần',
-  'agent-thk': 'Thư ký cá nhân', 'agent-rc': 'Recruiter',
+  [AGENT_IDS.tls]: 'Trợ lý thương mại', [AGENT_IDS.ka]: 'Key Account junior', [AGENT_IDS.hc]: 'Admin hậu cần',
+  [AGENT_IDS.thk]: 'Thư ký cá nhân', [AGENT_IDS.rc]: 'Recruiter',
 };
 function seedPeople(): PersonSeed[] {
   return [
-    { id: 'p-hau', code: 'PER-0311', name: 'Trần Văn Hậu', org: 'Xưởng gỗ Bình Dương', type: 'customer', ch: ['zalo'], relation: 'Trực tiếp với Sếp', heat: 91, valueVnd: 1_200_000_000, priority: 'P1', agentId: 'agent-ka', autonomy: 3, ownerUserId: null },
-    { id: 'p-bao', code: 'PER-0042', name: 'Nguyễn Văn Bảo', org: 'Công ty in Thành Phát', type: 'customer', ch: ['zalo', 'whatsapp'], relation: 'Trực tiếp với Sếp', heat: 87, valueVnd: 84_000_000, priority: 'P1', agentId: 'agent-tls', autonomy: 3, ownerUserId: null },
+    { id: 'p-hau', code: 'PER-0311', name: 'Trần Văn Hậu', org: 'Xưởng gỗ Bình Dương', type: 'customer', ch: ['zalo'], relation: 'Trực tiếp với Sếp', heat: 91, valueVnd: 1_200_000_000, priority: 'P1', agentId: AGENT_IDS.ka, autonomy: 3, ownerUserId: null },
+    { id: 'p-bao', code: 'PER-0042', name: 'Nguyễn Văn Bảo', org: 'Công ty in Thành Phát', type: 'customer', ch: ['zalo', 'whatsapp'], relation: 'Trực tiếp với Sếp', heat: 87, valueVnd: 84_000_000, priority: 'P1', agentId: AGENT_IDS.tls, autonomy: 3, ownerUserId: null },
     { id: 'p-duoc', code: 'PER-0402', name: 'Lâm Văn Được', org: 'Kho ván Bình Dương', type: 'supplier', ch: ['zalo'], relation: 'Người lạ có tín hiệu', heat: 84, valueVnd: null, priority: 'P1', agentId: null, autonomy: null, ownerUserId: null },
-    { id: 'p-lan', code: 'PER-0119', name: 'Hoàng Thị Lan', org: 'An Khang Logistics', type: 'partner', ch: ['zalo', 'whatsapp'], relation: 'Qua Trần Minh Khoa', heat: 78, valueVnd: 128_000_000, priority: 'P2', agentId: 'agent-tls', autonomy: 4, ownerUserId: null },
+    { id: 'p-lan', code: 'PER-0119', name: 'Hoàng Thị Lan', org: 'An Khang Logistics', type: 'partner', ch: ['zalo', 'whatsapp'], relation: 'Qua Trần Minh Khoa', heat: 78, valueVnd: 128_000_000, priority: 'P2', agentId: AGENT_IDS.tls, autonomy: 4, ownerUserId: null },
     { id: 'p-son', code: 'PER-0619', name: 'Võ Thanh Sơn', org: 'Ứng viên · Key Account ngành lạnh', type: 'candidate', ch: ['zalo'], relation: 'Người lạ có tín hiệu', heat: 74, valueVnd: null, priority: 'P2', agentId: null, autonomy: 2, ownerUserId: null },
-    { id: 'p-minh', code: 'PER-0512', name: 'Phạm Quốc Minh', org: 'Nội thất Minh Long', type: 'customer', ch: ['zalo'], relation: 'Qua Vũ Hải Đăng', heat: 64, valueVnd: 310_000_000, priority: 'P2', agentId: 'agent-ka', autonomy: 3, ownerUserId: null },
+    { id: 'p-minh', code: 'PER-0512', name: 'Phạm Quốc Minh', org: 'Nội thất Minh Long', type: 'customer', ch: ['zalo'], relation: 'Qua Vũ Hải Đăng', heat: 64, valueVnd: 310_000_000, priority: 'P2', agentId: AGENT_IDS.ka, autonomy: 3, ownerUserId: null },
     { id: 'p-bich', code: 'PER-0844', name: 'Lê Thị Bích', org: 'Kho lạnh Tân Cảng', type: 'customer', ch: ['whatsapp'], relation: 'Người lạ có tín hiệu', heat: 58, valueVnd: null, priority: 'P2', agentId: null, autonomy: null, ownerUserId: null },
-    { id: 'p-ha', code: 'PER-0007', name: 'Nguyễn Thu Hà', org: 'Nội bộ · Trưởng ban Tài chính', type: 'staff', ch: ['zalo', 'whatsapp'], relation: 'Nhân sự của Sếp', heat: 62, valueVnd: null, priority: 'P1', agentId: 'agent-hc', autonomy: 5, ownerUserId: null },
-    { id: 'p-khoa', code: 'PER-0003', name: 'Trần Minh Khoa', org: 'Nội bộ · Giám đốc vận hành', type: 'staff', ch: ['zalo', 'whatsapp'], relation: 'Nhân sự của Sếp', heat: 71, valueVnd: null, priority: 'P1', agentId: 'agent-thk', autonomy: 5, ownerUserId: null },
-    { id: 'p-thang', code: 'PER-0733', name: 'Bùi Đức Thắng', org: 'Gỗ Trường Thành Mới', type: 'customer', ch: ['zalo'], relation: 'Người lạ có tín hiệu', heat: 72, valueVnd: 880_000_000, priority: 'P2', agentId: 'agent-ka', autonomy: 3, ownerUserId: null },
-    { id: 'p-duyen', code: 'PER-0951', name: 'Trịnh Mỹ Duyên', org: 'Bao bì Sài Gòn Mới', type: 'customer', ch: ['zalo', 'whatsapp'], relation: 'Qua Đỗ Thanh Mai', heat: 18, valueVnd: 510_000_000, priority: 'P3', agentId: 'agent-tls', autonomy: 3, ownerUserId: null },
+    { id: 'p-ha', code: 'PER-0007', name: 'Nguyễn Thu Hà', org: 'Nội bộ · Trưởng ban Tài chính', type: 'staff', ch: ['zalo', 'whatsapp'], relation: 'Nhân sự của Sếp', heat: 62, valueVnd: null, priority: 'P1', agentId: AGENT_IDS.hc, autonomy: 5, ownerUserId: null },
+    { id: 'p-khoa', code: 'PER-0003', name: 'Trần Minh Khoa', org: 'Nội bộ · Giám đốc vận hành', type: 'staff', ch: ['zalo', 'whatsapp'], relation: 'Nhân sự của Sếp', heat: 71, valueVnd: null, priority: 'P1', agentId: AGENT_IDS.thk, autonomy: 5, ownerUserId: null },
+    { id: 'p-thang', code: 'PER-0733', name: 'Bùi Đức Thắng', org: 'Gỗ Trường Thành Mới', type: 'customer', ch: ['zalo'], relation: 'Người lạ có tín hiệu', heat: 72, valueVnd: 880_000_000, priority: 'P2', agentId: AGENT_IDS.ka, autonomy: 3, ownerUserId: null },
+    { id: 'p-duyen', code: 'PER-0951', name: 'Trịnh Mỹ Duyên', org: 'Bao bì Sài Gòn Mới', type: 'customer', ch: ['zalo', 'whatsapp'], relation: 'Qua Đỗ Thanh Mai', heat: 18, valueVnd: 510_000_000, priority: 'P3', agentId: AGENT_IDS.tls, autonomy: 3, ownerUserId: null },
     { id: 'p-tri', code: 'PER-0688', name: 'Đặng Hữu Trí', org: 'Gỗ Đông Phương', type: 'customer', ch: ['zalo'], relation: 'Qua Vũ Hải Đăng', heat: 22, valueVnd: 540_000_000, priority: 'P3', agentId: null, autonomy: null, ownerUserId: null },
   ];
 }
@@ -184,8 +188,8 @@ function profileFor(person: PersonSeed): Profile {
       : [],
     touchpoints: isBao
       ? [
-          { id: 'u-ha', name: 'Nguyễn Thu Hà' }, { id: 'u-khoa', name: 'Trần Minh Khoa' },
-          { id: 'agent-tls', name: 'Agent Trợ lý thương mại' },
+          { id: STAFF_IDS.ha, name: 'Nguyễn Thu Hà' }, { id: STAFF_IDS.khoa, name: 'Trần Minh Khoa' },
+          { id: AGENT_IDS.tls, name: 'Agent Trợ lý thương mại' },
         ]
       : [],
     merge_history: [],
@@ -397,6 +401,20 @@ export function createMock(opts: P3Options) {
     return rest;
   }
 
+  /** Như gh.biz.relations.service._ensure_agent (v0.1.35): `agent_id` không phải UUID → 422; không thuộc tổ chức
+   * (không có ở Danh tính Agent, cũng không phải BOT cũ của dữ liệu mẫu) → 404 'Agent'. `false` = đã trả lỗi. */
+  function agentRef(ctx: P2Ctx, id: unknown): { id: string; name: string } | false {
+    if (rejectNonUuid(ctx.problem, 'agent_id', id)) return false;
+    const found = opts.findAgent?.(String(id));
+    const name = found?.name ?? AGENT_NAME[String(id)];
+    if (!name) {
+      ctx.problem(404, 'NOT_FOUND', 'Agent không tồn tại hoặc ngoài phạm vi của bạn');
+      return false;
+    }
+    AGENT_NAME[String(id)] = name;
+    return { id: String(id), name };
+  }
+
   function handle(ctx: P2Ctx): boolean {
     const { method: m, path: p, url, body, reply, problem, text } = ctx;
     const seg = p.split('/').filter(Boolean);
@@ -423,7 +441,9 @@ export function createMock(opts: P3Options) {
         const g = groups.find((x) => x.id === seg[2]);
         if (!g) return problem(404, 'NOT_FOUND', 'Nhóm không tồn tại hoặc ngoài phạm vi của bạn');
         const b = body as { agent_id?: string | null; autonomy_level?: number | null };
-        if ('agent_id' in b) g.bot = b.agent_id ? { id: b.agent_id, name: AGENT_NAME[b.agent_id] ?? 'Agent' } : null;
+        const agent = b.agent_id != null ? agentRef(ctx, b.agent_id) : null;
+        if (agent === false) return true;
+        if ('agent_id' in b) g.bot = agent;
         return reply(200, g);
       }
     }
@@ -451,7 +471,9 @@ export function createMock(opts: P3Options) {
       const person = findPerson(decodeURIComponent(peopleBot[1]));
       if (!person) return problem(404, 'NOT_FOUND', 'Người không tồn tại hoặc ngoài phạm vi của bạn');
       const b = body as { agent_id?: string | null; autonomy_level?: number | null };
-      if ('agent_id' in b) person.agentId = b.agent_id ?? null;
+      const agent = b.agent_id != null ? agentRef(ctx, b.agent_id) : null;
+      if (agent === false) return true;
+      if ('agent_id' in b) person.agentId = agent ? agent.id : null;
       if ('autonomy_level' in b) person.autonomy = b.autonomy_level ?? null;
       return reply(200, toDirPerson(person));
     }

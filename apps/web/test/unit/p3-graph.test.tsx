@@ -8,6 +8,7 @@ import type { GraphListPage, GraphPeopleResult, GraphTopicsPage } from '@gen-har
 import { GraphScreen } from '../../src/screens/graph/GraphScreen';
 import { queryClient } from '../../src/lib/queryClient';
 import { useUrlStateStore } from '../../src/lib/uiStore';
+import { USER_IDS } from '../mock-ids';
 
 const json = (status: number, body?: unknown) => new Response(body === undefined ? null : JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
@@ -44,7 +45,7 @@ const LIST_PAGE: GraphListPage = {
   items: [
     {
       id: 'p-bao', code: 'PER-0042', name: 'Nguyễn Văn Bảo', type: 'customer', org_name: 'Công ty in Thành Phát', relation: 'direct',
-      channels: ['zalo'], heat: 87, potential: 58, risk: 84, owner_user_id: 'u-ha', last_interaction_at: '2026-09-24T02:00:00Z',
+      channels: ['zalo'], heat: 87, potential: 58, risk: 84, owner_user_id: USER_IDS.lan, last_interaction_at: '2026-09-24T02:00:00Z',
       state: 'active', degree: 3, total_weight: 42.5, bridge_score: 0,
     },
     {

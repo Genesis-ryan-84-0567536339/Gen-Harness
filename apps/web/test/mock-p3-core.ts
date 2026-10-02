@@ -6,6 +6,7 @@
  */
 import type { DraftDetail, DraftItem, Explain, ExplainUnit, SavedView } from '@gen-harness/contracts';
 import seed from '../../../docs/design/seed-data.json';
+import { USER_IDS, agentIdByName } from './mock-ids';
 import type { P2Ctx } from './mock-phase2';
 
 export interface P3Options {
@@ -126,7 +127,7 @@ function seedDrafts(): DraftDetail[] {
       kind,
       kind_label: d.kind,
       title: d.title,
-      agent: { id: `agent-${d.agent}`, name: d.agent },
+      agent: { id: agentIdByName(d.agent), name: d.agent },
       created_by: null,
       created_at: ago(AGE_MIN[d.age] ?? 30),
       status: 'pending',
@@ -219,7 +220,7 @@ export function createMock(opts: P3Options) {
       d.paragraphs = body.text.split(/\n\s*\n/).filter(Boolean);
     }
     d.decision = {
-      by: { id: 'u-me', name: ctx.userLabel },
+      by: { id: USER_IDS.owner, name: ctx.userLabel },
       at: new Date().toISOString(),
       reason: body.reason ?? null,
     };
@@ -346,7 +347,7 @@ export function createMock(opts: P3Options) {
           text: b.text,
           paragraphs: b.text.split(/\n\s*\n/),
           agent: null,
-          created_by: { id: 'u-me', name: ctx.userLabel },
+          created_by: { id: USER_IDS.owner, name: ctx.userLabel },
           created_at: new Date().toISOString(),
         };
         drafts = [d, ...drafts];
