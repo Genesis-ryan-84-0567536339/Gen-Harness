@@ -76,6 +76,8 @@ async def about(user: service.CurrentUser = Depends(current_user), db: AsyncSess
                             {"o": user.org_id})).one()
     genh_version = update.running_version()
     image_version = gh.__version__
-    return {"version": genh_version or image_version, "image_version": image_version,
+    # Bản phát triển (không build-arg, không tệp VERSION ⇒ "dev"): `version` null để web hiện "bản phát triển".
+    legacy = genh_version or (image_version if image_version != "dev" else None)
+    return {"version": legacy, "image_version": image_version,
             "genh_version": genh_version, "org_name": org.name,
             "timezone": org.timezone, "role": {"code": user.role_code, "name": user.role_name}}

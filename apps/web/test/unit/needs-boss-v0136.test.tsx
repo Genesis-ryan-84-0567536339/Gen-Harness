@@ -5,7 +5,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import type { HealthIssue, Overview, SystemHealth } from '@gen-harness/contracts';
 import { OverviewScreen } from '../../src/screens/queue/OverviewScreen';
-import { healthRows, sortIssues } from '../../src/screens/system/healthModel';
+import { healthRows, healthTips, sortIssues } from '../../src/screens/system/healthModel';
+import { HealthCard } from '../../src/screens/system/HealthCard';
 import { UpdateCard } from '../../src/update/UpdateCard';
 import { qk } from '../../src/lib/queries';
 import { queryClient as appQueryClient } from '../../src/lib/queryClient';
@@ -145,6 +146,17 @@ describe('v0.1.36 — dải "Cần Sếp xử lý" đầu Tổng quan', () => {
     expect(within(noModel).getByRole('link', { name: /Chọn model/ })).toHaveAttribute('href', '/guide/4');
   });
 
+  it('(d2) Auditor (system.read, không system.manage) ⇒ không gọi /system/health từ Tổng quan, không có dải/nút hành động', async () => {
+    const calls = mockFetch(route({ step4Done: true, health: () => json(200, health({ overall: 'bad', issues: [CHANNEL_DOWN] })) }));
+    const { container } = renderUi(<OverviewScreen />, { 'overview.read': 'all', 'system.read': 'all' });
+    await screen.findByText('Kênh sống');
+    await new Promise((r) => setTimeout(r, 30));
+    expect(calls.some((c) => c.url.includes('/system/health'))).toBe(false);
+    expect(screen.queryByTestId('needs-boss')).toBeNull();
+    expect(container.textContent).not.toContain('Cần Sếp');
+    expect(screen.queryByRole('link', { name: 'Đăng nhập lại' })).toBeNull();
+  });
+
   it('(d) vai trò không có system.read ⇒ không gọi /system/health', async () => {
     const calls = mockFetch(route({ step4Done: true }));
     renderUi(<OverviewScreen />, { 'overview.read': 'all' });
@@ -173,17 +185,63 @@ describe('v0.1.36 — dải "Cần Sếp xử lý" đầu Tổng quan', () => {
 describe('v0.1.36 — healthModel (thẻ "Sức khoẻ hệ thống")', () => {
   const byKey = (h: SystemHealth) => Object.fromEntries(healthRows(h, NOW).map((r) => [r.key, r]));
 
-  it('(f) Bộ xử lý nền im 14 phút ⇒ "Im 14 phút" (bad); sao lưu quá hạn ⇒ "Quá 36 giờ chưa sao lưu" (bad)', () => {
+  it('(f) Bộ xử lý nền ngừng 14 phút ⇒ "Đã ngừng 14 phút" (bad); sao lưu quá hạn ⇒ "Quá 36 giờ chưa sao lưu" (bad)', () => {
     const rows = byKey(
       health({
         worker: { state: 'silent', alive: false, last_seen_at: new Date(NOW - 14 * 60_000).toISOString(), silent_minutes: 14 },
         backup: { configured: true, latest_at: new Date(NOW - 40 * 3_600_000).toISOString(), age_hours: 40, stale: true },
       }),
     );
-    expect(rows.worker.value).toBe('Im 14 phút');
+    expect(rows.worker.value).toBe('Đã ngừng 14 phút');
     expect(rows.worker.tone).toBe('bad');
     expect(rows.backup.value).toBe('Quá 36 giờ chưa sao lưu');
     expect(rows.backup.tone).toBe('bad');
+  });
+
+  it('sao lưu hằng tuần quá hạn ⇒ chữ theo hạn API trả ("Quá một tuần chưa sao lưu")', () => {
+    const rows = byKey(health({ backup: { configured: true, latest_at: new Date(NOW - 9 * 86_400_000).toISOString(), age_hours: 216, stale: true, frequency: 'weekly', stale_after: 'một tuần' } }));
+    expect(rows.backup.value).toBe('Quá một tuần chưa sao lưu');
+  });
+
+  it('cập nhật lỗi đã quá 24 giờ (API trả failed=false, state vẫn failed) ⇒ "Bình thường", không còn báo lỗi', () => {
+    const rows = byKey(health({ update: { state: 'failed', failed: false, blocked_version: null, finished_at: new Date(NOW - 25 * 3_600_000).toISOString() } }));
+    expect(rows.update.value).toBe('Bình thường');
+    expect(rows.update.tone).toBe('ok');
+  });
+
+  it('nhãn "Việc nền bị lỗi" (không lộ "DLQ" ở dòng chính), trình duyệt nền ngừng ⇒ "Ngừng từ …"', () => {
+    const rows = byKey(health({ queues: [{ stream: 'gh:raw', dlq: 2 }], browser: { state: 'silent', last_heartbeat_at: new Date(NOW - 5 * 60_000).toISOString() } }));
+    expect(rows.dlq.label).toBe('Việc nền bị lỗi');
+    expect(rows.dlq.value).toBe('2 việc');
+    expect(rows.browser.value).toBe('Ngừng từ 5 phút trước');
+  });
+
+  it('healthTips: ổ đĩa sắp đầy ⇒ hướng dẫn giải phóng kèm lệnh + cảnh báo không xoá volume; Bộ xử lý nền ngừng ⇒ lệnh khởi động lại', () => {
+    expect(healthTips(health())).toEqual([]);
+    const tips = healthTips(
+      health({
+        disk: { state: 'low', free_bytes: 2 * 1024 ** 3, min_bytes: 5 * 1024 ** 3, checked_at: null },
+        worker: { state: 'silent', alive: false, last_seen_at: null, silent_minutes: 20 },
+      }),
+    );
+    expect(tips.map((t) => t.key)).toEqual(['disk', 'worker']);
+    expect(tips[0].steps.map((s) => s.cmd).filter(Boolean)).toEqual(['genh status', 'docker system prune']);
+    expect(tips[0].steps.some((s) => s.text.includes('5,0 GB'))).toBe(true);
+    expect(tips[0].warning).toContain('volume');
+    expect(tips[1].steps.map((s) => s.cmd).filter(Boolean)).toEqual(['genh stop', 'genh start', 'genh logs worker']);
+  });
+
+  it('HealthCard: ổ đĩa sắp đầy ⇒ thẻ có mục "Cách giải phóng chỗ trống" (đích của nút "Xem cách giải phóng")', async () => {
+    mockFetch((c) =>
+      c.url.includes('/system/health')
+        ? json(200, health({ overall: 'bad', disk: { state: 'low', free_bytes: 2 * 1024 ** 3, min_bytes: 5 * 1024 ** 3, checked_at: null } }))
+        : json(404),
+    );
+    renderUi(<HealthCard />);
+    const tip = await screen.findByTestId('health-tip-disk');
+    expect(tip).toHaveTextContent('Cách giải phóng chỗ trống');
+    expect(within(tip).getByText('docker system prune')).toBeInTheDocument();
+    expect(screen.queryByTestId('health-tip-worker')).toBeNull();
   });
 
   it('khoẻ: "Đang chạy · lần cuối …", sao lưu "Bản mới nhất …", ổ đĩa "Còn … GB trống", hàng lỗi 0', () => {
@@ -212,6 +270,7 @@ describe('v0.1.36 — healthModel (thẻ "Sức khoẻ hệ thống")', () => {
     expect(rows.dlq.value).toContain('3');
     expect(rows.dlq.tone).toBe('warn');
     expect(rows.update.value).toBe('Lần cập nhật gần nhất lỗi');
+    expect(rows.dlq.label).toBe('Việc nền bị lỗi');
     expect(rows.disk.value).toMatch(/^Sắp hết chỗ/);
     expect(rows.disk.tone).toBe('bad');
     expect(rows.backup.value).toBe('Chưa cấu hình');
@@ -282,6 +341,25 @@ describe('v0.1.36 — thẻ cập nhật ở Tổng quan', () => {
     await screen.findByText('Kênh sống');
     await new Promise((r) => setTimeout(r, 50));
     expect(screen.getAllByText(/Cập nhật lên v0.1.36 chưa thành công/)).toHaveLength(1);
+  });
+
+  it('(k) Tổng quan: /system/health đang tải lần đầu ⇒ chưa vẽ thẻ cập nhật lỗi (không nhảy bố cục); tải xong không có dòng ⇒ thẻ hiện', async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const calls = mockFetch((c) => {
+      if (c.url.includes('/system/update')) return json(200, failed);
+      if (c.url.includes('/system/health')) return gate.then(() => json(200, health()));
+      return route({ step4Done: true })(c);
+    });
+    renderUi(<OverviewScreen />);
+    await screen.findByText('Kênh sống');
+    await waitFor(() => expect(calls.some((c) => c.url.includes('/system/update'))).toBe(true));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByText(/Cập nhật lên v0.1.36 chưa thành công/)).toBeNull();
+    release();
+    expect(await screen.findByText(/Cập nhật lên v0.1.36 chưa thành công/)).toBeInTheDocument();
   });
 
   it('(j) Tổng quan: /system/health lỗi 500 ⇒ thẻ cập nhật lỗi vẫn hiện (không mất cảnh báo)', async () => {

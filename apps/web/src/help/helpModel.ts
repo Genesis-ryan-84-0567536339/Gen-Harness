@@ -7,7 +7,10 @@ export const GENH_COMMANDS: Array<{ cmd: string; what: string }> = [
   { cmd: 'genh reset-password', what: 'Quên mật khẩu Owner: in ra mật khẩu tạm, đăng nhập rồi đặt mật khẩu mới.' },
   { cmd: 'genh trust-ca', what: 'Trình duyệt báo "không an toàn": cho máy này tin chứng chỉ HTTPS nội bộ.' },
   { cmd: 'genh backup', what: 'Sao lưu ngay (thêm --to <thư mục> để chép ra ngoài). Trong Console: Dữ liệu & lưu trữ › Sao lưu ngay.' },
-  { cmd: 'genh status', what: 'Xem các dịch vụ đang chạy và phiên bản.' },
+  { cmd: 'genh status', what: 'Xem các dịch vụ đang chạy, phiên bản và dung lượng ổ đĩa.' },
+  { cmd: 'genh stop', what: 'Dừng toàn bộ dịch vụ (không mất dữ liệu). Chạy tiếp genh start để khởi động lại (vd. khi Bộ xử lý nền đã ngừng).' },
+  { cmd: 'genh start', what: 'Bật lại toàn bộ dịch vụ sau genh stop.' },
+  { cmd: 'genh logs worker', what: 'Xem lỗi gần nhất của Bộ xử lý nền (đổi "worker" thành api, bridge… cho dịch vụ khác).' },
 ];
 
 /** Nội dung "Báo lỗi" — không có bí mật (không cookie, không khoá), chỉ đủ để dev tái hiện. */

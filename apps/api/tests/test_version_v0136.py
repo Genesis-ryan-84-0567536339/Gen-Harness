@@ -67,6 +67,15 @@ async def test_about_versions(owner_api: Api, tmp_path: Path, monkeypatch: pytes
     assert body["image_version"] == VERSION
 
 
+async def test_about_dev_build_version_is_null(owner_api: Api, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from gh.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "host_link_dir", str(tmp_path))
+    monkeypatch.setattr(gh, "__version__", "dev")
+    body = (await owner_api.get("/system/about")).json()
+    assert body["version"] is None and body["image_version"] == "dev" and body["genh_version"] is None
+
+
 async def test_api_startup_log_has_version(info_logs: pytest.LogCaptureFixture, app: Any) -> None:
     recs = [r for r in info_logs.get_records("setup") if r.name == "gh.app"]
     assert any(VERSION in r.getMessage() for r in recs), [r.getMessage() for r in recs]

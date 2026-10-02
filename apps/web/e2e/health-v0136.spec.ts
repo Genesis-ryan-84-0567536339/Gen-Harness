@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { MANAGER, loginAs, loginAsOwner, mockHook, resetMock } from './support';
+import { AUDITOR, MANAGER, loginAs, loginAsOwner, mockHook, resetMock } from './support';
 
 /**
  * v0.1.36 (F-6, F-2, F-46) — Sếp thấy ngay việc cần tự tay làm: dải "Cần Sếp xử lý" đầu Tổng quan (sự cố từ
@@ -22,7 +22,7 @@ test.describe('v0.1.36 — Cần Sếp xử lý & Sức khoẻ hệ thống', ()
     const rows = strip.getByTestId('needs-boss-row');
     await expect(rows).toHaveCount(2);
     await expect(rows.nth(0)).toContainText('Kênh Zalo đã ngắt kết nối');
-    await expect(rows.nth(1)).toContainText('Lần cập nhật gần nhất lỗi');
+    await expect(rows.nth(1)).toContainText('Cập nhật lên bản mới chưa thành công');
     for (const r of await rows.all()) await expect(r).toHaveAttribute('data-severity', 'bad');
     // Dải đứng ĐẦU trang: phần tử đầu tiên của màn Tổng quan.
     await expect(page.locator('.screen > :first-child')).toHaveAttribute('data-testid', 'needs-boss');
@@ -81,7 +81,7 @@ test.describe('v0.1.36 — Cần Sếp xử lý & Sức khoẻ hệ thống', ()
     await page.goto('/overview');
     const strip = page.getByRole('region', { name: 'Cần Sếp xử lý' });
     await expect(strip.getByTestId('needs-boss-row')).toHaveCount(1);
-    await expect(strip).toContainText('Lần cập nhật gần nhất lỗi');
+    await expect(strip).toContainText('Cập nhật lên bản mới chưa thành công');
     await expect(page.locator('[data-gen-target="overview.kpis"]')).toBeVisible();
     await expect(page.getByText('Cập nhật lên v0.1.36 chưa thành công')).toHaveCount(0);
     await expect(page.getByRole('button', { name: /Thử lại/ })).toHaveCount(0);
@@ -101,7 +101,7 @@ test.describe('v0.1.36 — Cần Sếp xử lý & Sức khoẻ hệ thống', ()
     await expect(page.getByTestId('needs-boss')).toHaveCount(0);
   });
 
-  test('thẻ "Sức khoẻ hệ thống": đang chạy; Bộ xử lý nền im 14 phút ⇒ "Im 14 phút" + dòng trong dải Tổng quan', async ({ page }) => {
+  test('thẻ "Sức khoẻ hệ thống": đang chạy; Bộ xử lý nền ngừng 14 phút ⇒ "Đã ngừng 14 phút" + cách khởi động lại + dòng trong dải Tổng quan', async ({ page }) => {
     await page.goto('/system?tab=storage');
     const card = page.getByRole('region', { name: 'Sức khoẻ hệ thống' });
     await expect(card).toBeVisible();
@@ -113,12 +113,28 @@ test.describe('v0.1.36 — Cần Sếp xử lý & Sức khoẻ hệ thống', ()
 
     await mockHook(page.request, 'health', { worker: { state: 'silent', alive: false, silent_minutes: 14, last_seen_at: new Date(Date.now() - 14 * 60_000).toISOString() } });
     await page.reload();
-    await expect(page.getByRole('region', { name: 'Sức khoẻ hệ thống' }).getByTestId('health-worker')).toHaveText(/Im 14 phút/);
+    const card2 = page.getByRole('region', { name: 'Sức khoẻ hệ thống' });
+    await expect(card2.getByTestId('health-worker')).toHaveText(/Đã ngừng 14 phút/);
+    await expect(card2.getByTestId('health-tip-worker')).toContainText('genh start');
     await page.goto('/overview');
     const strip = page.getByRole('region', { name: 'Cần Sếp xử lý' });
     await expect(strip.getByTestId('needs-boss-row')).toHaveCount(1);
-    await expect(strip).toContainText('Bộ xử lý nền đã ngừng');
+    await expect(strip).toContainText('Bộ xử lý nền đã ngừng 14 phút');
     await expect(strip.getByRole('link', { name: 'Xem sức khoẻ' })).toHaveAttribute('href', '/system?tab=storage');
+  });
+
+  test('ổ đĩa sắp đầy: "Xem cách giải phóng" mở thẻ có hướng dẫn giải phóng kèm lệnh', async ({ page }) => {
+    await mockHook(page.request, 'health', { disk: { state: 'low', free_bytes: 3 * 1024 ** 3, min_bytes: 5 * 1024 ** 3 } });
+    await page.goto('/overview');
+    const strip = page.getByRole('region', { name: 'Cần Sếp xử lý' });
+    await expect(strip).toContainText('Ổ đĩa sắp hết chỗ');
+    await expect(strip).toContainText('Còn 3 GB trống, cần tối thiểu 5 GB');
+    await strip.getByRole('link', { name: 'Xem cách giải phóng' }).click();
+    await expect(page).toHaveURL(/\/system\?tab=storage$/);
+    const tip = page.getByRole('region', { name: 'Sức khoẻ hệ thống' }).getByTestId('health-tip-disk');
+    await expect(tip).toContainText('Cách giải phóng chỗ trống');
+    await expect(tip.getByText('docker system prune')).toBeVisible();
+    await expect(tip).toContainText('Không xoá thư mục cài Gen-Harness');
   });
 
   test('Hạn lưu dữ liệu: "Chưa tự xoá — sẽ áp dụng ở bản sau", nút Sửa bị khoá', async ({ page }) => {
@@ -164,7 +180,7 @@ test.describe('v0.1.36 — Cần Sếp xử lý & Sức khoẻ hệ thống', ()
   test('Trợ giúp hiện phiên bản ảnh và genh', async ({ page }) => {
     await page.goto('/help');
     const about = page.locator('[data-gen-target="help.version"]');
-    await expect(about.getByText('Phiên bản ảnh')).toBeVisible();
+    await expect(about.getByText('phiên bản máy chủ')).toBeVisible();
     await expect(about.getByTestId('about-image-version')).toHaveText(/^v\d+\.\d+\.\d+/);
     await expect(about.getByText('genh', { exact: true })).toBeVisible();
   });
@@ -186,6 +202,21 @@ test.describe('v0.1.36 — Cần Sếp xử lý & Sức khoẻ hệ thống', ()
     await expect(page.locator('[data-gen-target="help.version"]')).toBeVisible();
     await page.waitForTimeout(300);
     expect(healthCalls).toEqual([]);
+    await expect(page.getByText('[object Object]')).toHaveCount(0);
+  });
+
+  test('Auditor (chỉ đọc hệ thống): không có dải "Cần Sếp xử lý", không có nút hành động; thẻ Sức khoẻ vẫn xem được', async ({ page }) => {
+    await mockHook(page.request, 'health', { issues: [{ kind: 'channel.down' }, { kind: 'backup.stale' }] });
+    await page.context().clearCookies();
+    await loginAs(page, AUDITOR.email);
+    await page.goto('/overview');
+    await expect(page.locator('[data-gen-target="overview.kpis"]')).toBeVisible();
+    await page.waitForTimeout(500);
+    await expect(page.getByTestId('needs-boss')).toHaveCount(0);
+    await expect(page.getByText('Cần Sếp', { exact: false })).toHaveCount(0);
+    for (const name of ['Sao lưu ngay', 'Đăng nhập lại', 'Xem & thử lại']) await expect(page.getByRole('link', { name })).toHaveCount(0);
+    await page.goto('/system?tab=storage');
+    await expect(page.getByRole('region', { name: 'Sức khoẻ hệ thống' }).getByTestId('health-backup')).toBeVisible();
     await expect(page.getByText('[object Object]')).toHaveCount(0);
   });
 

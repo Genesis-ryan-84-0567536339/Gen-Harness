@@ -10,7 +10,8 @@ cả chuông (core.notifications) lẫn dải "Cần Sếp xử lý" ở Tổng 
   `/ready` để quyết rollback (apps/genh/internal/ops/update.go) — bộ xử lý nền im không được làm hỏng một bản cập
   nhật tốt.
 - `evaluate` + `watch_loop` (chạy trong api, `Settings.health_watch_seconds`): mỗi phút tính lại các sự cố theo dõi
-  định kỳ (cập nhật lỗi, quá 36 giờ chưa sao lưu, bộ xử lý nền im, ổ đĩa sắp đầy) và dọn dòng sự kiện cũ.
+  định kỳ (cập nhật lỗi trong 24 giờ, quá hạn sao lưu theo tần suất bước 11, bộ xử lý nền im, ổ đĩa sắp đầy, model
+  đang hết đăng nhập) và dọn dòng sự kiện cũ.
 
 Hợp đồng Redis với worker (gh/worker.py ghi): `gh:cron:last:<tên hàm>` = JSON {"at": ISO UTC 'Z', "ok": bool,
 "ms": int}; `gh:worker:heartbeat` = ISO UTC. Mọi chuỗi hiện cho người dùng là tiếng Việt thân thiện, không đường dẫn
@@ -32,13 +33,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger("gh.health")
 
+#: Quá hạn sao lưu theo `settings->'backup'->>'frequency'` (bước 11 / PUT /backups/schedule): một chu kỳ + 12 giờ
+#: dư (hằng ngày giữ mốc 36 giờ cũ). Giá trị lạ ⇒ như hằng ngày (khớp `gh.backup.is_due`).
 BACKUP_STALE_HOURS = 36
+BACKUP_STALE_LIMITS: dict[str, tuple[timedelta, str]] = {
+    "daily": (timedelta(hours=BACKUP_STALE_HOURS), f"{BACKUP_STALE_HOURS} giờ"),
+    "weekly": (timedelta(days=7, hours=12), "một tuần"),
+    "monthly": (timedelta(days=31, hours=12), "một tháng"),
+}
+#: Cập nhật lỗi chỉ còn là sự cố trong 24 giờ sau khi xong — khớp thẻ cập nhật ở web (updateModel.ts RECENT_MS):
+#: quá hạn thì thẻ không còn lỗi để xem/thử lại, dải "Cần Sếp xử lý" cũng thôi báo.
+UPDATE_FAILED_RECENT = timedelta(hours=24)
 WORKER_SILENT_MINUTES = 10
 HEARTBEAT_KEY = "gh:worker:heartbeat"
 CRON_LAST_PREFIX = "gh:cron:last:"
 WATCH_LOCK_KEY = "gh:health:tick"
-#: browser-worker ghi nhịp mỗi 15 giây (TTL 45 giây) — quá 60 giây coi như im.
-BROWSER_SILENT_SECONDS = 60
+#: browser-worker ghi nhịp mỗi 15 giây (TTL 45 giây — apps/browser/ghb/worker.py) — quá 40 giây coi như im. Ngưỡng
+#: phải DƯỚI TTL: quá TTL khoá biến mất và trạng thái thành 'off' (không phân biệt được với chưa bật).
+BROWSER_SILENT_SECONDS = 40
 
 STORAGE_LINK = "/system?tab=storage"
 
@@ -187,7 +199,8 @@ def _gb(n: Any) -> str:
 
 
 async def _org_backup_cfg(db: AsyncSession, org_id: uuid.UUID) -> Any:
-    return (await db.execute(text("""SELECT settings ? 'backup' AS configured, created_at, timezone
+    return (await db.execute(text("""SELECT settings ? 'backup' AS configured, created_at, timezone,
+                                            settings->'backup'->>'frequency' AS frequency
                                      FROM core.organizations WHERE id = :o"""), {"o": org_id})).one_or_none()
 
 
@@ -198,8 +211,14 @@ async def _latest_backup() -> datetime | None:
     return entries[0].taken_at if entries else None
 
 
-def _backup_stale(configured: bool, latest: datetime | None, org_created: datetime | None, now: datetime) -> bool:
-    limit = timedelta(hours=BACKUP_STALE_HOURS)
+def backup_stale_limit(frequency: str | None) -> tuple[timedelta, str]:
+    """(hạn, chữ hiện cho Sếp) theo tần suất sao lưu đã cấu hình — giá trị lạ/thiếu ⇒ hằng ngày."""
+    return BACKUP_STALE_LIMITS.get(frequency or "daily", BACKUP_STALE_LIMITS["daily"])
+
+
+def _backup_stale(configured: bool, latest: datetime | None, org_created: datetime | None, now: datetime,
+                  frequency: str | None = None) -> bool:
+    limit, _ = backup_stale_limit(frequency)
     if not configured:
         return False
     if latest is not None:
@@ -249,14 +268,17 @@ async def collect(db: AsyncSession, redis: Any, org_id: uuid.UUID, *, now: datet
     except Exception:  # noqa: BLE001
         log.warning("Không đọc được hàng đợi lỗi (DLQ)", exc_info=True)
 
-    backup: dict[str, Any] = {"configured": False, "latest_at": None, "age_hours": None, "stale": False}
+    backup: dict[str, Any] = {"configured": False, "latest_at": None, "age_hours": None, "stale": False,
+                              "frequency": None, "stale_after": None}
     try:
         cfg = await _org_backup_cfg(db, org_id)
         configured = bool(cfg and cfg.configured)
+        frequency = cfg.frequency if cfg and cfg.frequency in BACKUP_STALE_LIMITS else ("daily" if configured else None)
         latest = await _latest_backup()
         backup = {"configured": configured, "latest_at": _iso(latest),
                   "age_hours": round((now - latest).total_seconds() / 3600, 1) if latest else None,
-                  "stale": _backup_stale(configured, latest, cfg.created_at if cfg else None, now)}
+                  "stale": _backup_stale(configured, latest, cfg.created_at if cfg else None, now, frequency),
+                  "frequency": frequency, "stale_after": backup_stale_limit(frequency)[1] if configured else None}
     except Exception:  # noqa: BLE001
         log.warning("Không đọc được danh mục sao lưu", exc_info=True)
 
@@ -267,7 +289,7 @@ async def collect(db: AsyncSession, redis: Any, org_id: uuid.UUID, *, now: datet
 
         if _host_dir().is_dir():
             st = upd._state()
-            update = {"state": str(st.get("state") or "unknown"), "failed": st.get("state") == "failed",
+            update = {"state": str(st.get("state") or "unknown"), "failed": _update_failed_recent(st, now),
                       "blocked_version": st.get("blocked_version"), "finished_at": st.get("finished_at")}
             ds = _disk_status() or {}
             disk_state = str(ds.get("state")) if ds.get("state") in ("ok", "low") else "unknown"
@@ -304,14 +326,23 @@ async def collect(db: AsyncSession, redis: Any, org_id: uuid.UUID, *, now: datet
 
 # ─── vòng theo dõi: mở/đóng sự cố định kỳ ────────────────────────────────────────────────────────────────────
 
-async def _eval_update(db: AsyncSession, org_id: uuid.UUID, redis: Any) -> None:
+def _update_failed_recent(st: dict[str, Any], now: datetime) -> bool:
+    """Lần cập nhật lỗi còn là sự cố: state 'failed' VÀ `finished_at` trong 24 giờ — cùng điều kiện với thẻ cập nhật
+    ở web (updateModel.ts `recent`): thiếu/hỏng `finished_at` ⇒ không tính."""
+    if st.get("state") != "failed":
+        return False
+    finished = _parse_ts(st.get("finished_at"))
+    return finished is not None and now - finished < UPDATE_FAILED_RECENT
+
+
+async def _eval_update(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: datetime) -> None:
     from gh.system_api import update as upd
 
     if not _host_dir().is_dir():
         return
     st = upd._state()
     state = st.get("state")
-    if state == "failed":
+    if _update_failed_recent(st, now):
         target = st.get("to") or "bản mới"
         if st.get("blocked_rollback_failed") is True:
             body = "Tự quay về bản cũ cũng lỗi — cần hỗ trợ ngay."
@@ -322,7 +353,7 @@ async def _eval_update(db: AsyncSession, org_id: uuid.UUID, redis: Any) -> None:
         await raise_once(db, org_id, key="update.failed", kind="update.failed", severity="bad",
                          title=f"Cập nhật lên {target} chưa thành công", body=body, link=STORAGE_LINK,
                          fingerprint=f"{st.get('finished_at') or ''}|{st.get('to') or ''}", redis=redis)
-    elif state in ("done", "idle"):
+    elif state in ("done", "idle", "failed"):  # 'failed' quá 24 giờ: thẻ cập nhật đã thôi báo ⇒ đóng sự cố
         await clear(db, org_id, "update.failed")
 
 
@@ -334,7 +365,8 @@ async def _eval_backup(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: dat
         await clear(db, org_id, "backup.stale")
         return
     latest = await _latest_backup()
-    if not _backup_stale(True, latest, cfg.created_at, now):
+    limit_text = backup_stale_limit(cfg.frequency)[1]
+    if not _backup_stale(True, latest, cfg.created_at, now, cfg.frequency):
         await clear(db, org_id, "backup.stale")
         return
     if latest is not None:
@@ -346,7 +378,7 @@ async def _eval_backup(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: dat
     else:
         last = "Chưa có bản nào."
     await raise_once(db, org_id, key="backup.stale", kind="backup.stale", severity="bad",
-                     title=f"Đã hơn {BACKUP_STALE_HOURS} giờ chưa có bản sao lưu mới",
+                     title=f"Đã hơn {limit_text} chưa có bản sao lưu mới",
                      body=f"{last} Bấm Sao lưu ngay để giữ an toàn dữ liệu.", link=STORAGE_LINK, redis=redis)
 
 
@@ -357,7 +389,7 @@ async def _eval_worker(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: dat
         await raise_once(db, org_id, key="worker.silent", kind="worker.silent", severity="bad",
                          title=f"Bộ xử lý nền đã ngừng {minutes} phút",
                          body="Sàng lọc tin, nhắc việc và sao lưu theo lịch đang dừng. "
-                              "Thử khởi động lại máy chủ Gen-Harness.", link=STORAGE_LINK, redis=redis)
+                              "Bấm để xem cách khởi động lại.", link=STORAGE_LINK, redis=redis)
     elif state == "ok":
         await clear(db, org_id, "worker.silent")
 
@@ -372,6 +404,27 @@ async def _eval_disk(db: AsyncSession, org_id: uuid.UUID, redis: Any) -> None:
                               " — cập nhật tự động đang tạm dừng.", link=STORAGE_LINK, redis=redis)
     elif ds.get("state") == "ok":
         await clear(db, org_id, "disk.low")
+
+
+async def raise_model_expired(db: AsyncSession, org_id: uuid.UUID, provider_id: uuid.UUID, name: str, *,
+                              redis: Any = None) -> bool:
+    """Sự cố "model cần đăng nhập lại" — một khoá mỗi nhà cung cấp (`model.auth_expired:<uuid>`)."""
+    return await raise_once(
+        db, org_id, key=f"model.auth_expired:{provider_id}", kind="model.auth_expired", severity="warn",
+        title=f"Model {name} cần đăng nhập lại",
+        body="Gen và sàng lọc tin có thể dừng nếu không còn model khác. Bấm để đăng nhập lại.",
+        link="/system?tab=brain", redis=redis)
+
+
+async def _eval_models(db: AsyncSession, org_id: uuid.UUID, redis: Any) -> None:
+    """Model đang bật mà 'expired' nhưng chưa có sự cố — vd. đã hết hạn TRƯỚC khi lên v0.1.36, hoặc nút "Gọi thử"
+    đổi sang 'expired' (lần 401 sau đó không đổi trạng thái nên `_set_auth_state` không mở). Khoá khử trùng lặp ⇒
+    sự cố đang mở thì không chuông thêm."""
+    rows = (await db.execute(text("""SELECT id, name FROM agent.providers
+                                     WHERE org_id = :o AND is_enabled AND auth_state = 'expired'"""),
+                             {"o": org_id})).all()
+    for r in rows:
+        await raise_model_expired(db, org_id, r.id, r.name, redis=redis)
 
 
 async def _eval_events(db: AsyncSession, org_id: uuid.UUID) -> None:
@@ -406,10 +459,11 @@ async def evaluate(db: AsyncSession, redis: Any, org_id: uuid.UUID, *, now: date
 
     Mỗi phần chạy trong savepoint riêng: một nguồn lỗi (tệp hỏng, Redis tạm mất) không chặn các phần còn lại."""
     parts = (
-        ("update.failed", lambda: _eval_update(db, org_id, redis)),
+        ("update.failed", lambda: _eval_update(db, org_id, redis, now)),
         ("backup.stale", lambda: _eval_backup(db, org_id, redis, now)),
         ("worker.silent", lambda: _eval_worker(db, org_id, redis, now, started_at)),
         ("disk.low", lambda: _eval_disk(db, org_id, redis)),
+        ("models", lambda: _eval_models(db, org_id, redis)),
         ("events", lambda: _eval_events(db, org_id)),
     )
     from gh import notifications

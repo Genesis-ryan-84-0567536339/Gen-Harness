@@ -53,6 +53,7 @@ export const GEN_SCREEN_BY_KEY: Record<string, GenScreen> = Object.fromEntries(G
 
 export const GEN_TARGETS: GenTarget[] = [
   // ── Tổng quan ──
+  { id: 'overview.needs_boss', screen: 'overview', label: 'Dải "Cần Sếp xử lý"', description: 'Đầu Tổng quan: các sự cố Sếp cần tự tay xử lý (kênh rớt, model hết đăng nhập, cập nhật lỗi, sao lưu quá hạn…)', permission: 'system.manage' },
   { id: 'overview.kpis', screen: 'overview', label: 'Hàng chỉ số chính', description: 'Các ô số liệu đầu trang Tổng quan (cơ hội, cảnh báo, chờ duyệt…)' },
   { id: 'overview.queue', screen: 'overview', label: 'Hàng đợi cần xử lý', description: 'Khung liệt kê cơ hội, cảnh báo, bản nháp chờ duyệt, việc đến hạn' },
   { id: 'overview.queue.row', screen: 'overview', label: 'Một dòng hàng đợi', description: 'Một mục cụ thể trong Hàng đợi cần xử lý', dynamic: 'row' },

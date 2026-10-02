@@ -316,7 +316,19 @@ export interface SystemHealth {
   /** `stream` là tên stream gốc (không có `.dlq`). */
   queues: Array<{ stream: string; dlq: number }>;
   crons: Array<{ name: string; last_at: string | null; ok: boolean | null }>;
-  backup: { configured: boolean; latest_at: string | null; age_hours: number | null; stale: boolean };
+  /**
+   * `frequency`/`stale_after` (v0.1.36): hạn sao lưu theo tần suất bước 11 — `stale_after` là chữ hiện cho Sếp ("36 giờ",
+   * "một tuần", "một tháng"); null khi chưa cấu hình.
+   */
+  backup: {
+    configured: boolean;
+    latest_at: string | null;
+    age_hours: number | null;
+    stale: boolean;
+    frequency?: 'daily' | 'weekly' | 'monthly' | null;
+    stale_after?: string | null;
+  };
+  /** `failed` = lần cập nhật lỗi trong 24 giờ qua (cùng điều kiện thẻ cập nhật) — quá hạn thì false dù `state` vẫn 'failed'. */
   update: { state: SystemUpdateState | 'unknown' | string; failed: boolean; blocked_version: string | null; finished_at: string | null };
   disk: { state: 'ok' | 'low' | 'unknown'; free_bytes: number | null; min_bytes: number | null; checked_at: string | null };
   issues: HealthIssue[];

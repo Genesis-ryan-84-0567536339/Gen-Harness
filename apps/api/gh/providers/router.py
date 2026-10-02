@@ -241,11 +241,7 @@ class ModelRouter:
                                             WHERE id = :i AND auth_state <> :s RETURNING org_id, name"""),
                                     {"s": state, "i": p.id})).one_or_none()
             if row is not None and state == "expired":
-                await health.raise_once(
-                    db, row.org_id, key=f"model.auth_expired:{p.id}", kind="model.auth_expired", severity="warn",
-                    title=f"Model {row.name} cần đăng nhập lại",
-                    body="Gen và sàng lọc tin có thể dừng nếu không còn model khác. Bấm để đăng nhập lại.",
-                    link="/system?tab=brain", redis=self.redis)
+                await health.raise_model_expired(db, row.org_id, p.id, row.name, redis=self.redis)
             elif row is not None and state == "ok":
                 await health.clear(db, row.org_id, f"model.auth_expired:{p.id}")
             await db.commit()

@@ -68,8 +68,8 @@ export function HelpPage() {
             <div className="summary help-about">
               <span className="summary__k">phiên bản</span>
               <span className="summary__v mono">{about.data.version ?? 'bản phát triển'}</span>
-              {/* v0.1.36 (F-46): ảnh đang chạy và genh có thể lệch nhau — hiện cả hai. */}
-              <span className="summary__k">Phiên bản ảnh</span>
+              {/* v0.1.36 (F-46): bản máy chủ (ảnh Docker) đang chạy và genh có thể lệch nhau — hiện cả hai. */}
+              <span className="summary__k">phiên bản máy chủ</span>
               <span className="summary__v mono" data-testid="about-image-version">{about.data.image_version || '—'}</span>
               <span className="summary__k">genh</span>
               <span className="summary__v mono">{about.data.genh_version ?? '—'}</span>

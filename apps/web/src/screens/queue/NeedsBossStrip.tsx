@@ -14,18 +14,21 @@ import { WARN } from './queueModel';
  * - "Chưa có model" (bước 4 của việc thiết lập tiếp chưa xong — API `GET /setup/follow-up` chỉ trả cho Owner);
  * - sự cố đang mở của `GET /system/health` (`issues` — kênh rớt, model hết đăng nhập, cập nhật lỗi, sao lưu quá hạn,
  *   Bộ xử lý nền im, ổ đĩa sắp đầy), 'bad' trước 'warn', mỗi dòng một nút đi thẳng tới chỗ sửa.
+ * Chỉ vai trò có `system.manage` (Owner): mọi nút ở đây dẫn tới chỗ CHỈ người quản lý hệ thống làm được (Sao lưu ngay,
+ * đăng nhập lại kênh/model, thử lại cập nhật). Vai trò chỉ có `system.read` (Auditor) không thấy dải — tình trạng vẫn
+ * xem được ở thẻ "Sức khoẻ hệ thống" (Dữ liệu & lưu trữ), không có nút chết.
  * Không có gì ⇒ không vẽ gì. Lỗi tải sức khoẻ không chặn Tổng quan: bỏ qua phần đó (thẻ "Sức khoẻ hệ thống" ở
  * Dữ liệu & lưu trữ báo lỗi kèm "Chi tiết kỹ thuật").
  */
 export function NeedsBossStrip() {
   const followUp = useQuery({ queryKey: FOLLOW_UP_KEY, queryFn: ({ signal }) => api.setup.followUp(signal) });
-  const health = useSystemHealth(useCan('system.read'));
+  const health = useSystemHealth(useCan('system.manage'));
   const step4 = Array.isArray(followUp.data) ? followUp.data.find((s) => s.n === 4) : undefined;
   const noModel = !!step4 && !step4.done;
   const issues = Array.isArray(health.data?.issues) ? sortIssues(health.data.issues) : [];
   if (!noModel && issues.length === 0) return null;
   return (
-    <section className="needs-boss" aria-label="Cần Sếp xử lý" data-testid="needs-boss" data-gen-target="overview.needs-boss">
+    <section className="needs-boss" aria-label="Cần Sếp xử lý" data-testid="needs-boss" data-gen-target="overview.needs_boss">
       <h2 className="needs-boss__title">
         <Icon name="ph ph-hand-palm" size={14} />
         Cần Sếp xử lý

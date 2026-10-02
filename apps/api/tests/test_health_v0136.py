@@ -154,6 +154,21 @@ async def test_model_auth_expired_rings_once(owner_api: Api, app, db, redis) -> 
     assert await health.active_issues(db, org) == []
 
 
+async def test_model_already_expired_is_picked_up_by_watch(owner_api: Api, app, db, redis) -> None:  # type: ignore[no-untyped-def]
+    """Nhà cung cấp đã 'expired' từ trước v0.1.36 (hoặc do nút "Gọi thử") — vòng theo dõi vẫn mở sự cố, một chuông."""
+    org = await org_id(db)
+    pid = (await db.execute(text("""INSERT INTO agent.providers (org_id, kind, name, endpoint, failover_rank,
+                                                                 auth_state)
+                                    VALUES (:o, 'openai_compat', 'Beta', 'https://beta.test/v1', 1, 'expired')
+                                    RETURNING id"""), {"o": org})).scalar_one()
+    await db.commit()
+    await evaluate(redis, org)
+    await evaluate(redis, org)
+    rows = await bells(db, "model.auth_expired")
+    assert len(rows) == 1 and rows[0].title == "Model Beta cần đăng nhập lại"
+    assert [i["key"] for i in await health.active_issues(db, org)] == [f"model.auth_expired:{pid}"]
+
+
 # ─── evaluate: ổ đĩa, cập nhật ─────────────────────────────────────────────────────────────────────────────
 
 async def test_disk_low_rings_once_then_clears(owner_api: Api, app, db, redis, link: Path) -> None:  # type: ignore[no-untyped-def]
@@ -181,7 +196,8 @@ async def test_update_failed_rings_per_attempt(owner_api: Api, app, db, redis, l
     org = await org_id(db)
     status_file = link / "update-status.json"
     status_file.write_text(json.dumps({"state": "failed", "from": "v0.1.35", "to": "v0.1.36",
-                                       "finished_at": "2026-10-01T01:00:00Z", "message": "lỗi migrate"}))
+                                       "finished_at": _iso(datetime.now(UTC) - timedelta(hours=3)),
+                                       "message": "lỗi migrate"}))
     (link / "update-blocked.json").write_text(json.dumps({"version": "v0.1.36"}))
     await evaluate(redis, org)
     await evaluate(redis, org)
@@ -191,7 +207,7 @@ async def test_update_failed_rings_per_attempt(owner_api: Api, app, db, redis, l
     assert rows[0].body == "Hệ thống đã tự quay về bản cũ, dữ liệu an toàn. Bấm để xem và thử lại."
     # lần thử khác (finished_at mới) ⇒ thêm đúng 1 chuông
     status_file.write_text(json.dumps({"state": "failed", "from": "v0.1.35", "to": "v0.1.36",
-                                       "finished_at": "2026-10-02T01:00:00Z"}))
+                                       "finished_at": _iso(datetime.now(UTC) - timedelta(hours=1))}))
     (link / "update-blocked.json").write_text(json.dumps({"version": "v0.1.36", "rollback_failed": True}))
     await evaluate(redis, org)
     await evaluate(redis, org)
@@ -202,6 +218,25 @@ async def test_update_failed_rings_per_attempt(owner_api: Api, app, db, redis, l
     await evaluate(redis, org)
     await db.commit()
     assert await health.active_issues(db, org) == []
+
+
+async def test_update_failed_older_than_24h_is_not_an_issue(owner_api: Api, app, db, redis, link: Path) -> None:  # type: ignore[no-untyped-def]
+    """Thẻ cập nhật ở web thôi báo lỗi sau 24 giờ (updateModel.ts RECENT_MS) ⇒ dải/chuông/thẻ Sức khoẻ cũng vậy."""
+    org = await org_id(db)
+    status_file = link / "update-status.json"
+    status_file.write_text(json.dumps({"state": "failed", "from": "v0.1.35", "to": "v0.1.36",
+                                       "finished_at": _iso(datetime.now(UTC) - timedelta(hours=23))}))
+    await evaluate(redis, org)
+    assert [i["key"] for i in await health.active_issues(db, org)] == ["update.failed"]
+    # cùng lần lỗi đó, giờ đã 25 giờ ⇒ đóng sự cố, /system/health không còn báo lỗi
+    status_file.write_text(json.dumps({"state": "failed", "from": "v0.1.35", "to": "v0.1.36",
+                                       "finished_at": _iso(datetime.now(UTC) - timedelta(hours=25))}))
+    await evaluate(redis, org)
+    await db.commit()
+    assert await health.active_issues(db, org) == []
+    body = (await owner_api.get("/system/health")).json()
+    assert body["update"]["state"] == "failed" and body["update"]["failed"] is False
+    assert len(await bells(db, "update.failed")) == 1
 
 
 # ─── F-3: quá 36 giờ chưa sao lưu ──────────────────────────────────────────────────────────────────────────
@@ -239,6 +274,36 @@ async def test_backup_stale_rings_and_clears(owner_api: Api, app, db, redis, sto
     r = await owner_api.get("/system/health")
     b = r.json()["backup"]
     assert b["configured"] is True and b["stale"] is False and b["age_hours"] == pytest.approx(2, abs=0.2)
+    assert b["frequency"] == "daily" and b["stale_after"] == "36 giờ"
+
+
+async def test_backup_stale_follows_weekly_frequency(owner_api: Api, app, db, redis, store) -> None:  # type: ignore[no-untyped-def]
+    """Lịch hằng tuần: bản gần nhất 3 ngày trước là bình thường; quá một tuần + 12 giờ mới báo."""
+    org = await org_id(db)
+    await db.execute(text("""UPDATE core.organizations SET settings = settings ||
+                             '{"backup": {"frequency": "weekly", "time_of_day": "02:00"}}'::jsonb WHERE id = :o"""),
+                     {"o": org})
+    await db.commit()
+    await backup._write_manifest(store, [_entry(72, "scheduled")])
+    await evaluate(redis, org)
+    assert await bells(db, "backup.stale") == []
+    b = (await owner_api.get("/system/health")).json()["backup"]
+    assert b["stale"] is False and b["frequency"] == "weekly" and b["stale_after"] == "một tuần"
+
+    await backup._write_manifest(store, [_entry(8 * 24 + 1, "scheduled")])
+    await evaluate(redis, org)
+    rows = await bells(db, "backup.stale")
+    assert len(rows) == 1 and rows[0].title == "Đã hơn một tuần chưa có bản sao lưu mới"
+    assert (await owner_api.get("/system/health")).json()["backup"]["stale"] is True
+
+
+def test_backup_stale_limits_per_frequency() -> None:
+    now = datetime.now(UTC)
+    assert not health._backup_stale(True, now - timedelta(days=20), None, now, "monthly")
+    assert health._backup_stale(True, now - timedelta(days=32), None, now, "monthly")
+    assert health._backup_stale(True, now - timedelta(hours=37), None, now, "daily")
+    assert health._backup_stale(True, now - timedelta(hours=37), None, now, "khác")  # giá trị lạ ⇒ hằng ngày
+    assert not health._backup_stale(True, now - timedelta(hours=37), None, now, "weekly")
 
 
 # ─── bộ xử lý nền + GET /system/health ─────────────────────────────────────────────────────────────────────

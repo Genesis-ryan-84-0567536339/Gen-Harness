@@ -261,12 +261,14 @@ function seedAuditLog(audit: AuditRow[], fresh: boolean) {
  * `__mock/health` chỉ cần đưa `kind` (+ tuỳ chọn title/body/key) là ra đúng khuôn `HealthIssue`.
  */
 const HEALTH_KIND_DEFAULTS: Record<string, Omit<HealthIssue, 'raised_at' | 'body'> & { body: string }> = {
-  'channel.down': { key: 'channel.down:zalo', kind: 'channel.down', severity: 'bad', title: 'Kênh Zalo đã ngắt kết nối', body: 'Tin nhắn mới không về kho thô tới khi Sếp đăng nhập lại.', link: '/system?tab=channels', action: 'Đăng nhập lại' },
-  'model.auth_expired': { key: 'model.auth_expired:claude', kind: 'model.auth_expired', severity: 'warn', title: 'Model hết phiên đăng nhập', body: 'Gen và sàng lọc đang dùng model dự phòng.', link: '/system?tab=brain', action: 'Đăng nhập lại model' },
-  'update.failed': { key: 'update.failed', kind: 'update.failed', severity: 'bad', title: 'Lần cập nhật gần nhất lỗi', body: 'Hệ thống đã tự quay về bản đang dùng — dữ liệu giữ nguyên.', link: '/system?tab=storage', action: 'Xem & thử lại' },
-  'backup.stale': { key: 'backup.stale', kind: 'backup.stale', severity: 'bad', title: 'Quá 36 giờ chưa sao lưu', body: 'Bản sao lưu gần nhất đã cũ — nên sao lưu ngay.', link: '/system?tab=storage', action: 'Sao lưu ngay' },
-  'worker.silent': { key: 'worker.silent', kind: 'worker.silent', severity: 'bad', title: 'Bộ xử lý nền đã ngừng chạy', body: 'Sàng lọc, nhắc việc và sao lưu theo lịch đang dừng.', link: '/system?tab=storage', action: 'Xem sức khoẻ' },
-  'disk.low': { key: 'disk.low', kind: 'disk.low', severity: 'bad', title: 'Ổ đĩa máy chủ sắp hết chỗ', body: 'Cập nhật và sao lưu có thể thất bại khi ổ đầy.', link: '/system?tab=storage', action: 'Xem cách giải phóng' },
+  // Chữ/khoá chép đúng từ API: gh/data/ingest.py (channel.down), gh/health.py (raise_model_expired, _eval_update,
+  // _eval_backup, _eval_worker, _eval_disk). Phần có số (phút, GB, bản) do healthView tính khi suy từ trạng thái.
+  'channel.down': { key: 'channel.down:zalo', kind: 'channel.down', severity: 'bad', title: 'Kênh Zalo đã ngắt kết nối', body: 'Zalo Sếp: phiên đã hết hạn — đăng nhập lại để tiếp tục nhận tin.', link: '/system?tab=channels', action: 'Đăng nhập lại' },
+  'model.auth_expired': { key: 'model.auth_expired:7d1c3a52-5b0e-4c1f-9a8e-2f6b1d4c9e03', kind: 'model.auth_expired', severity: 'warn', title: 'Model Claude cần đăng nhập lại', body: 'Gen và sàng lọc tin có thể dừng nếu không còn model khác. Bấm để đăng nhập lại.', link: '/system?tab=brain', action: 'Đăng nhập lại model' },
+  'update.failed': { key: 'update.failed', kind: 'update.failed', severity: 'bad', title: 'Cập nhật lên bản mới chưa thành công', body: 'Hệ thống đã tự quay về bản cũ, dữ liệu an toàn. Bấm để xem và thử lại.', link: '/system?tab=storage', action: 'Xem & thử lại' },
+  'backup.stale': { key: 'backup.stale', kind: 'backup.stale', severity: 'bad', title: 'Đã hơn 36 giờ chưa có bản sao lưu mới', body: 'Chưa có bản nào. Bấm Sao lưu ngay để giữ an toàn dữ liệu.', link: '/system?tab=storage', action: 'Sao lưu ngay' },
+  'worker.silent': { key: 'worker.silent', kind: 'worker.silent', severity: 'bad', title: 'Bộ xử lý nền đã ngừng 12 phút', body: 'Sàng lọc tin, nhắc việc và sao lưu theo lịch đang dừng. Bấm để xem cách khởi động lại.', link: '/system?tab=storage', action: 'Xem sức khoẻ' },
+  'disk.low': { key: 'disk.low', kind: 'disk.low', severity: 'bad', title: 'Ổ đĩa sắp hết chỗ', body: 'Còn 3 GB trống, cần tối thiểu 5 GB — cập nhật tự động đang tạm dừng.', link: '/system?tab=storage', action: 'Xem cách giải phóng' },
 };
 
 export interface MockHealthOverride {
@@ -276,6 +278,9 @@ export interface MockHealthOverride {
   disk?: Partial<SystemHealth['disk']>;
   update?: Partial<SystemHealth['update']>;
 }
+
+/** gh/health.py WORKER_SILENT_MINUTES. */
+const WORKER_SILENT_MIN = 10;
 
 function healthIssue(i: Partial<HealthIssue>, now: string): HealthIssue {
   const d = HEALTH_KIND_DEFAULTS[String(i.kind ?? '')] ?? { key: String(i.kind ?? 'other'), kind: String(i.kind ?? 'other'), severity: 'warn' as const, title: 'Sự cố', body: '', link: null, action: 'Xem' };
@@ -393,14 +398,20 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     const latest = phase3.system.latestBackupAt();
     const configured = phase3.system.backupConfigured();
     const age = latest ? Math.max(0, Math.round(((nowMs - new Date(latest).getTime()) / 3_600_000) * 10) / 10) : null;
-    const backup: SystemHealth['backup'] = { configured, latest_at: latest, age_hours: age, stale: configured && age != null && age > 36, ...o.backup };
-    const update: SystemHealth['update'] = { state: sysUpdate.state, failed: sysUpdate.state === 'failed', blocked_version: null, finished_at: sysUpdate.finished_at, ...o.update };
+    const backup: SystemHealth['backup'] = {
+      configured, latest_at: latest, age_hours: age, stale: configured && age != null && age > 36,
+      frequency: configured ? 'daily' : null, stale_after: configured ? '36 giờ' : null, ...o.backup,
+    };
+    // Như gh/health._update_failed_recent: lỗi chỉ còn là sự cố trong 24 giờ sau finished_at.
+    const recentFail = sysUpdate.state === 'failed' && !!sysUpdate.finished_at && nowMs - Date.parse(sysUpdate.finished_at) < 24 * 3_600_000;
+    const update: SystemHealth['update'] = { state: sysUpdate.state, failed: recentFail, blocked_version: null, finished_at: sysUpdate.finished_at, ...o.update };
     const disk: SystemHealth['disk'] = { state: 'ok', free_bytes: 42 * 1024 ** 3, min_bytes: 5 * 1024 ** 3, checked_at: new Date(nowMs - 5 * 60_000).toISOString(), ...o.disk };
     const derived: Array<Partial<HealthIssue>> = [];
-    if (worker.state === 'silent') derived.push({ kind: 'worker.silent', body: `Im ${worker.silent_minutes ?? '?'} phút — sàng lọc, nhắc việc và sao lưu theo lịch đang dừng.` });
-    if (backup.stale) derived.push({ kind: 'backup.stale' });
-    if (update.failed) derived.push({ kind: 'update.failed' });
-    if (disk.state === 'low') derived.push({ kind: 'disk.low' });
+    const gb = (n: number | null) => (n == null ? '?' : (n / 1024 ** 3).toFixed(1).replace('.', ',').replace(/,0$/, ''));
+    if (worker.state === 'silent') derived.push({ kind: 'worker.silent', title: `Bộ xử lý nền đã ngừng ${worker.silent_minutes ?? WORKER_SILENT_MIN} phút` });
+    if (backup.stale) derived.push({ kind: 'backup.stale', title: `Đã hơn ${backup.stale_after ?? '36 giờ'} chưa có bản sao lưu mới` });
+    if (update.failed) derived.push({ kind: 'update.failed', title: `Cập nhật lên ${sysUpdate.to ?? 'bản mới'} chưa thành công` });
+    if (disk.state === 'low') derived.push({ kind: 'disk.low', body: `Còn ${gb(disk.free_bytes)} GB trống, cần tối thiểu ${gb(disk.min_bytes)} GB — cập nhật tự động đang tạm dừng.` });
     const issues: HealthIssue[] = [];
     for (const i of [...(o.issues ?? []), ...derived].map((x) => healthIssue(x, now))) if (!issues.some((y) => y.key === i.key)) issues.push(i);
     const overall = issues.some((i) => i.severity === 'bad') ? 'bad' : issues.length ? 'warn' : 'ok';

@@ -112,6 +112,15 @@
   },
   "targets": [
     {
+      "id": "overview.needs_boss",
+      "screen": "overview",
+      "label": "Dải \"Cần Sếp xử lý\"",
+      "description": "Đầu Tổng quan: các sự cố Sếp cần tự tay xử lý (kênh rớt, model hết đăng nhập, cập nhật lỗi, sao lưu quá hạn…)",
+      "dynamic": null,
+      "params": null,
+      "permission": "system.manage"
+    },
+    {
       "id": "overview.kpis",
       "screen": "overview",
       "label": "Hàng chỉ số chính",

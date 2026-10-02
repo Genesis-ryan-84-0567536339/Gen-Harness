@@ -37,7 +37,7 @@ export function healthRows(h: SystemHealth, now = Date.now(), tz = DEFAULT_TZ): 
     w.state === 'ok'
       ? { key: 'worker', label: 'Bộ xử lý nền', value: w.last_seen_at ? `Đang chạy · lần cuối ${fmtAgo(w.last_seen_at, now, tz)}` : 'Đang chạy', tone: 'ok' }
       : w.state === 'silent'
-        ? { key: 'worker', label: 'Bộ xử lý nền', value: w.silent_minutes != null ? `Im ${fmtInt(w.silent_minutes)} phút` : 'Đang im — chưa thấy chạy lại', tone: 'bad' }
+        ? { key: 'worker', label: 'Bộ xử lý nền', value: w.silent_minutes != null ? `Đã ngừng ${fmtInt(w.silent_minutes)} phút` : 'Đã ngừng — chưa thấy chạy lại', tone: 'bad' }
         : { key: 'worker', label: 'Bộ xử lý nền', value: 'Chưa có tín hiệu', tone: 'warn' },
   );
 
@@ -46,19 +46,20 @@ export function healthRows(h: SystemHealth, now = Date.now(), tz = DEFAULT_TZ): 
     b.state === 'ok'
       ? { key: 'browser', label: 'Trình duyệt nền', value: b.last_heartbeat_at ? `Đang chạy · lần cuối ${fmtAgo(b.last_heartbeat_at, now, tz)}` : 'Đang chạy', tone: 'ok' }
       : b.state === 'silent'
-        ? { key: 'browser', label: 'Trình duyệt nền', value: b.last_heartbeat_at ? `Im từ ${fmtAgo(b.last_heartbeat_at, now, tz)}` : 'Đang im', tone: 'warn' }
+        ? { key: 'browser', label: 'Trình duyệt nền', value: b.last_heartbeat_at ? `Ngừng từ ${fmtAgo(b.last_heartbeat_at, now, tz)}` : 'Đã ngừng', tone: 'warn' }
         : { key: 'browser', label: 'Trình duyệt nền', value: 'Chưa bật', tone: 'muted' },
   );
 
   const dlq = h.queues.reduce((sum, q) => sum + (Number.isFinite(q.dlq) ? q.dlq : 0), 0);
-  rows.push({ key: 'dlq', label: 'Hàng lỗi (DLQ)', value: dlq > 0 ? `${fmtInt(dlq)} việc lỗi chờ xem` : 'Không có', tone: dlq > 0 ? 'warn' : 'ok' });
+  // Thuật ngữ "DLQ" chỉ ở "Chi tiết kỹ thuật" (healthTechRows); chưa có màn xem từng việc lỗi ⇒ chỉ báo số lượng.
+  rows.push({ key: 'dlq', label: 'Việc nền bị lỗi', value: dlq > 0 ? `${fmtInt(dlq)} việc` : 'Không có', tone: dlq > 0 ? 'warn' : 'ok' });
 
   const bk = h.backup;
   rows.push(
     !bk.configured
       ? { key: 'backup', label: 'Sao lưu', value: 'Chưa cấu hình', tone: 'warn' }
       : bk.stale
-        ? { key: 'backup', label: 'Sao lưu', value: 'Quá 36 giờ chưa sao lưu', tone: 'bad' }
+        ? { key: 'backup', label: 'Sao lưu', value: `Quá ${bk.stale_after || '36 giờ'} chưa sao lưu`, tone: 'bad' }
         : bk.latest_at
           ? { key: 'backup', label: 'Sao lưu', value: `Bản mới nhất ${fmtAgo(bk.latest_at, now, tz)}`, tone: 'ok' }
           : { key: 'backup', label: 'Sao lưu', value: 'Chưa có bản nào', tone: 'warn' },
@@ -66,7 +67,8 @@ export function healthRows(h: SystemHealth, now = Date.now(), tz = DEFAULT_TZ): 
 
   const u = h.update;
   rows.push(
-    u.failed || u.state === 'failed'
+    // `failed` = lỗi trong 24 giờ qua (cùng điều kiện thẻ cập nhật) — quá hạn thì API trả false dù state vẫn 'failed'.
+    u.failed
       ? { key: 'update', label: 'Cập nhật', value: u.blocked_version ? `Lần cập nhật gần nhất lỗi (${u.blocked_version})` : 'Lần cập nhật gần nhất lỗi', tone: 'bad' }
       : u.state === 'stalled'
         ? { key: 'update', label: 'Cập nhật', value: 'Máy chủ chưa nhận yêu cầu cập nhật', tone: 'warn' }
@@ -86,6 +88,53 @@ export function healthRows(h: SystemHealth, now = Date.now(), tz = DEFAULT_TZ): 
         : { key: 'disk', label: 'Ổ đĩa', value: 'Chưa đo', tone: 'muted' },
   );
   return rows;
+}
+
+export interface HealthTipStep {
+  text: string;
+  /** Lệnh chạy trên máy chủ (cửa sổ dòng lệnh) — hiện dạng mã, có thể chép. */
+  cmd?: string;
+}
+export interface HealthTip {
+  key: 'disk' | 'worker';
+  title: string;
+  steps: HealthTipStep[];
+  /** Cảnh báo rủi ro (Sếp tự quyết, nhưng phải thấy rõ). */
+  warning?: string;
+}
+
+/**
+ * Hướng dẫn tự xử lý ngay trong thẻ — đích của nút "Xem cách giải phóng" (disk.low) và "Xem sức khoẻ" (worker.silent)
+ * ở dải "Cần Sếp xử lý": nút hứa gì thì trang đích phải có đúng cái đó.
+ */
+export function healthTips(h: SystemHealth): HealthTip[] {
+  const tips: HealthTip[] = [];
+  if (h.disk.state === 'low') {
+    const need = h.disk.min_bytes != null ? fmtGb(h.disk.min_bytes) : null;
+    tips.push({
+      key: 'disk',
+      title: 'Cách giải phóng chỗ trống',
+      steps: [
+        { text: 'Trên máy chủ, xem dịch vụ và dung lượng đang dùng:', cmd: 'genh status' },
+        { text: 'Xoá container đã dừng, ảnh Docker không gắn tên và bộ nhớ đệm build không còn dùng (không đụng dữ liệu Gen-Harness):', cmd: 'docker system prune' },
+        { text: 'Chép bản sao lưu cũ, video, tệp tải về… sang ổ khác rồi xoá khỏi máy chủ.' },
+        { text: need ? `Còn trống từ ${need} trở lên thì cập nhật tự động chạy lại (thẻ này tự cập nhật mỗi phút).` : 'Đủ chỗ trống thì cập nhật tự động chạy lại (thẻ này tự cập nhật mỗi phút).' },
+      ],
+      warning: 'Không xoá thư mục cài Gen-Harness hay volume Docker (không dùng "docker volume prune" hoặc cờ --volumes) — đó là dữ liệu của Sếp.',
+    });
+  }
+  if (h.worker.state === 'silent') {
+    tips.push({
+      key: 'worker',
+      title: 'Cách khởi động lại Bộ xử lý nền',
+      steps: [
+        { text: 'Trên máy chủ, dừng rồi bật lại toàn bộ dịch vụ (không mất dữ liệu, Console tạm gián đoạn khoảng 1 phút):', cmd: 'genh stop' },
+        { text: 'Rồi:', cmd: 'genh start' },
+        { text: 'Vẫn ngừng thì xem lỗi của Bộ xử lý nền và gửi kèm khi báo lỗi (Trợ giúp › Báo lỗi):', cmd: 'genh logs worker' },
+      ],
+    });
+  }
+  return tips;
 }
 
 /** "Chi tiết kỹ thuật": lịch chạy (tên hàm + giờ chạy cuối theo múi giờ tổ chức) và từng hàng lỗi `<stream>.dlq`. */

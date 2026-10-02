@@ -2,7 +2,7 @@ import type { SystemHealth } from '@gen-harness/contracts';
 import { useCan, useOrgTimezone } from '../../lib/permissions';
 import { useNow } from '../../lib/useNow';
 import { CardError, Panel, SkeletonLines } from '../common';
-import { TONE_COLOR, healthRows, healthTechRows } from './healthModel';
+import { TONE_COLOR, healthRows, healthTechRows, healthTips } from './healthModel';
 import { useSystemHealth } from './queries';
 
 /**
@@ -32,6 +32,7 @@ export function HealthCard() {
 function HealthBody({ data, now, tz }: { data: SystemHealth; now: number; tz: string }) {
   const rows = healthRows(data, now, tz);
   const tech = healthTechRows(data, tz);
+  const tips = healthTips(data);
   return (
     <>
       <ul className="health-card__rows">
@@ -45,6 +46,25 @@ function HealthBody({ data, now, tz }: { data: SystemHealth; now: number; tz: st
           </li>
         ))}
       </ul>
+      {tips.map((t) => (
+        <div className="health-card__tip" key={t.key} data-testid={`health-tip-${t.key}`} role="note" aria-label={t.title}>
+          <div className="health-card__tip-title">{t.title}</div>
+          <ol className="health-card__tip-steps">
+            {t.steps.map((st, i) => (
+              <li key={i}>
+                {st.text}
+                {st.cmd ? (
+                  <>
+                    {' '}
+                    <code className="mono">{st.cmd}</code>
+                  </>
+                ) : null}
+              </li>
+            ))}
+          </ol>
+          {t.warning ? <p className="health-card__tip-warn">{t.warning}</p> : null}
+        </div>
+      ))}
       <details className="tech-detail health-card__tech">
         <summary>Chi tiết kỹ thuật</summary>
         <div className="health-card__tech-title">Lịch chạy</div>
@@ -60,7 +80,7 @@ function HealthBody({ data, now, tz }: { data: SystemHealth; now: number; tz: st
             ))}
           </ul>
         )}
-        <div className="health-card__tech-title">Hàng lỗi</div>
+        <div className="health-card__tech-title">Hàng lỗi (DLQ)</div>
         {tech.queues.length === 0 ? (
           <p className="muted-note">Không có hàng lỗi.</p>
         ) : (

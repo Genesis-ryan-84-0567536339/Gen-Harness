@@ -1411,12 +1411,15 @@ cần khôi phục — CSDL chưa bị đụng thì chỉ cần `docker compose 
 ### Boss cần làm gì
 
 **Không cần làm gì.** Sau khi cập nhật:
-- Khi kênh Zalo rớt / model hết hạn đăng nhập / cập nhật lỗi / sao lưu quá 36 giờ / Bộ xử lý nền im / ổ đĩa sắp đầy, Sếp
-  thấy **MỘT** chuông kèm nút sửa; bấm nút là tới đúng chỗ xử lý.
-- Mở Tổng quan: nếu có sự cố sẽ thấy dải **"Cần Sếp xử lý"** ở đầu trang, mỗi dòng có nút sửa. Điều khiển hệ thống › Dữ
-  liệu & lưu trữ có thẻ **"Sức khoẻ hệ thống"**.
-- Việc dọn dẹp/tính toán nặng chạy lúc 04:20–05:10 sáng giờ VN, không còn chạy giữa giờ làm việc; trang Trợ giúp hiện
-  đúng số phiên bản.
+- Ô "Giao cho người khác", "Gán người xử lý" hiện đúng người trong công ty (Sếp là "Tôi"); ô "Gán BOT trực nhóm" hiện các trợ
+  lý đang bật. Danh sách trống nghĩa là chưa mời người dùng / chưa tạo trợ lý.
+- Khi thêm hoặc sửa nhà cung cấp AI, thêm khoá API, bật/tắt nhà cung cấp hay đổi thứ tự chuỗi ưu tiên nhà cung cấp, hệ thống
+  hỏi **mã PIN 6 số** (mã đặt lúc thiết lập). Nhập một lần dùng được 30 phút. Đổi/chọn model mặc định ("Dùng model này")
+  **chưa** hỏi PIN (để bản v0.1.45).
+- Tài liệu không phải PDF/ảnh (vd .html, .txt, .docx) giờ bấm vào sẽ **tải về máy** thay vì mở thẳng trong trình duyệt — chủ
+  ý để chặn mã độc.
+- Khi có lỗi lạ, màn hình hiện câu dễ hiểu kèm "Mã lỗi xxxxxxxx" — Sếp chỉ cần chép mã đó gửi Claude. PIN bị khoá do nhập
+  sai nhiều lần thì hiện rõ "Mã PIN đang bị khoá…" kèm giờ mở khoá theo giờ Việt Nam.
 
 ### Vì sao (kế hoạch tổng `docs/audit/2026-10-01/0-ke-hoach-tong.md`)
 
@@ -1518,6 +1521,11 @@ cần khôi phục — CSDL chưa bị đụng thì chỉ cần `docker compose 
   báo **một lần** kèm nút sửa, và đầu Tổng quan có dải **"Cần Sếp xử lý"**.
 - Điều khiển hệ thống › Dữ liệu & lưu trữ có thẻ **"Sức khoẻ hệ thống"**.
 - Việc dọn dẹp/bảo trì hằng ngày giờ chạy lúc 04:20–05:10 sáng (giờ VN), không còn rơi vào giờ làm việc.
+- Ô **"Hạn lưu dữ liệu"** (Dữ liệu & lưu trữ) ghi "Chưa tự xoá — sẽ áp dụng ở bản sau"; nút **Sửa** tạm khoá tới khi hệ
+  thống thật sự tự xoá theo hạn.
+- Dải "Cần Sếp xử lý" chỉ hiện với Owner (vai trò Auditor không thấy nút hành động). Báo sao lưu quá hạn theo đúng lịch đã
+  chọn (hằng ngày: 36 giờ, hằng tuần: một tuần, hằng tháng: một tháng). Cập nhật lỗi chỉ được báo trong 24 giờ.
+- Ổ đĩa sắp đầy hoặc Bộ xử lý nền đã ngừng: thẻ "Sức khoẻ hệ thống" có sẵn các bước + lệnh cần chạy trên máy chủ.
 
 ### Vì sao (kế hoạch tổng `docs/audit/2026-10-01/0-ke-hoach-tong.md`)
 
@@ -1587,3 +1595,21 @@ cần khôi phục — CSDL chưa bị đụng thì chỉ cần `docker compose 
   passed (gh_app) + 2 test tích hợp mới xanh cả hai vai; web lint/typecheck sạch, vitest 338 passed, build OK, bridge test OK; Playwright mock 162 passed;
   browser 14 passed; genh `go vet` + `go test ./...` 15 gói ok; cổng phát hành OK. Ảnh api (GH_VERSION/LABEL) kiểm ở CI
   job `images` (máy tích hợp không có Docker daemon).
+
+### Sửa sau review (v0.1.36, trước merge)
+
+- `backup.stale` theo tần suất bước 11 (`settings->'backup'->>'frequency'`): hằng ngày 36 giờ, hằng tuần 7 ngày 12 giờ,
+  hằng tháng 31 ngày 12 giờ; tiêu đề chuông/dải và dòng "Sao lưu" của thẻ Sức khoẻ lấy đúng hạn đó (`/system/health`
+  thêm `backup.frequency`, `backup.stale_after`).
+- `update.failed` chỉ mở/giữ khi `finished_at` trong 24 giờ — cùng điều kiện với thẻ cập nhật (`updateModel.ts`
+  `RECENT_MS`); quá hạn ⇒ đóng sự cố, `update.failed=false`.
+- Dải "Cần Sếp xử lý" chỉ cho vai trò có `system.manage` (Auditor không thấy nút chết); e2e thêm kịch bản AUDITOR. Tổng
+  quan tạm ẩn thẻ cập nhật lỗi khi `/system/health` đang tải lần đầu (không nhảy bố cục).
+- Thẻ Sức khoẻ có hướng dẫn tự xử lý: ổ đĩa sắp đầy (`genh status`, `docker system prune`, cảnh báo không xoá volume) và
+  Bộ xử lý nền ngừng (`genh stop` → `genh start`, `genh logs worker`); Trợ giúp thêm các lệnh này.
+- Vòng theo dõi quét nhà cung cấp AI đang `expired` (hết hạn từ trước khi nâng cấp, hoặc do nút "Gọi thử") ⇒ mở sự cố
+  `model.auth_expired`, một chuông. Nhịp trình duyệt nền: im khi quá 40 giây (dưới TTL 45 giây của khoá).
+- Nhỏ: `/system/about` `version` null cho bản phát triển (`dev`); Trợ giúp "phiên bản máy chủ"; chữ thẻ Sức khoẻ thống
+  nhất "Đã ngừng N phút", "Việc nền bị lỗi" (DLQ chỉ ở Chi tiết kỹ thuật); mock e2e chép đúng chữ/khoá của API; Gen
+  target `overview.needs_boss` (test gen-targets nhận cả id có gạch nối).
+- Chưa làm: cache mốc sao lưu mới nhất trong Redis (vẫn đọc manifest mỗi phút và mỗi lần mở thẻ) — để bản sau.
