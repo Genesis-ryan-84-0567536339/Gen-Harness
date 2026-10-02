@@ -124,6 +124,23 @@ def friendly_probe_error(e: Exception, model: str, effort: str | None = None) ->
     return f"Gọi thử chưa được: {str(e)[:160]}"
 
 
+def probe_error_code(e: BaseException) -> str:
+    """Mã lỗi thống nhất của "Gọi thử" (v0.1.39) cho trang "Việc Sếp cần làm"."""
+    from gh.gen.jev import JevError
+
+    if isinstance(e, FileNotFoundError) or isinstance(e.__cause__, FileNotFoundError):
+        return "CLI_MISSING"   # AgyClient/ClaudeCodeClient bọc "chưa cài CLI" thành AuthFailed
+    if isinstance(e, AuthFailed):
+        return "AUTH_EXPIRED"
+    if isinstance(e, ModelRejected):
+        return "MODEL_REJECTED"
+    if isinstance(e, TimeoutError | asyncio.TimeoutError):
+        return "TIMEOUT"
+    if isinstance(e, JevError) or isinstance(e.__cause__, JevError):
+        return "JEV_ERROR"
+    return "PROVIDER_ERROR"
+
+
 class ModelUnavailable(Exception):  # noqa: N818
     def __init__(self, reasons: list[str], *, no_chain: bool | None = None):
         super().__init__("; ".join(reasons) or "Chưa cấu hình model")
@@ -560,11 +577,22 @@ class ModelRouter:
             result["error"] = (friendly_probe_error(e, result.get("probe_model") or "")
                                if p.kind in CLI_KINDS else str(e)[:300])
             result["error_detail"] = error_detail(e)
+            result["error_code"] = probe_error_code(e)
             if p.kind in CLI_KINDS and not result.get("model_groups"):
                 from gh.providers import catalog
 
                 # Vẫn cho Console thấy danh sách (dự phòng) để Owner biết sẽ chọn được gì sau khi đăng nhập lại.
                 result.update(catalog.build(p.kind, None))
+        result.setdefault("error_code", None)
+        if p.kind in CLI_KINDS:
+            # v0.1.39 (F-76): email của tệp phiên CLI VỪA dùng cho lượt gọi thật (None nếu chưa đăng nhập) — để kiểm
+            # "đổi tài khoản" thật sự đổi (không chỉ cờ trong CSDL). Không bí mật → lưu cả vào last_test.
+            from gh.providers import cli as climod
+
+            raw = None
+            with contextlib.suppress(OSError):
+                raw = climod.read_session(p.kind)
+            result["account"] = climod.session_email(p.kind, raw) if raw else None
         result["latency_ms"] = int((time.monotonic() - started) * 1000)
         result["at"] = datetime.now(UTC).isoformat()   # Console hiện giờ của lần gọi thật gần nhất (v0.1.32)
         err = result["error"] or ""

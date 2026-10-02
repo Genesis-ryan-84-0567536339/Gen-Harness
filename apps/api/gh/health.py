@@ -415,6 +415,21 @@ async def collect(db: AsyncSession, redis: Any, org_id: uuid.UUID, *, now: datet
     except Exception:  # noqa: BLE001
         log.warning("Không đọc được sự cố đang mở", exc_info=True)
 
+    # v0.1.39: kết quả kiểm thật "Việc Sếp cần làm" (mới nhất mỗi mục) — chỉ để xem, KHÔNG tính vào 'overall'.
+    # Đọc thuần (không chốt việc đọc Facebook đang chờ — việc đó ở GET /boss-checks). SAVEPOINT: lỗi đọc không làm
+    # hỏng transaction của request.
+    boss_checks: list[dict[str, Any]] = []
+    try:
+        from gh.boss_checks import service as boss_service
+
+        async with db.begin_nested():
+            checks = await boss_service.latest(db, org_id)
+        boss_checks = [{"key": k, "status": v["status"], "error_code": v["error_code"],
+                        "checked_at": v["checked_at"], "detail": v["detail"]}
+                       for k, v in checks.items() if v is not None]
+    except Exception:  # noqa: BLE001
+        log.warning("Không đọc được kết quả kiểm Việc Sếp cần làm", exc_info=True)
+
     bad = (any(i["severity"] == "bad" for i in issues) or worker["state"] == "silent"
            or (update["failed"] and not update["interrupted"]) or disk["state"] == "low" or backup["stale"])
     warn = (any(i["severity"] == "warn" for i in issues) or browser["state"] == "silent" or update["failed"]
@@ -432,6 +447,9 @@ async def collect(db: AsyncSession, redis: Any, org_id: uuid.UUID, *, now: datet
         "disk": disk,
         "issues": issues,
     }
+    if boss_checks:
+        # Chỉ khi đã có ít nhất một lần kiểm (như 'autostart': khuôn cũ giữ nguyên khi chưa có gì để xem).
+        out["boss_checks"] = boss_checks
     if autostart is not None:
         out["autostart"] = autostart
     return out

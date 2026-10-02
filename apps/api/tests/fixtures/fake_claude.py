@@ -8,6 +8,9 @@
   result, usage, api_error_status}. Model ngoài bí danh → is_error + 404 "There's an issue with the selected model".
   Thiếu `--tools ""` (công cụ chưa tắt), `--safe-mode`/`--strict-mcp-config`, hoặc lời nhắn hệ thống nằm trên dòng
   lệnh (phải qua `--system-prompt-file`, tệp 0600) → lỗi, để test bắt được nếu client quên.
+- v0.1.39: `FAKE_CLAUDE_CONFIRM=1` — sau khi nhận mã in "Login successful. Press Enter to continue…" và CHỈ ghi
+  `.credentials.json` sau khi nhận Enter (bước cuối của CLI thật). `FAKE_CLAUDE_FAIL=1` — in lại mã trong câu lỗi rồi
+  thoát 1 (CLI thoát sớm).
 """
 
 import json
@@ -94,6 +97,19 @@ if args[:2] == ["auth", "login"]:
             sys.exit(3)
         data += os.read(0, 1024)
     code = data.split(b"\r")[0].decode().strip()
+    if os.environ.get("FAKE_CLAUDE_FAIL") == "1":
+        # v0.1.39: CLI từ chối mã và THOÁT (in lại mã như CLI thật hay làm) — app phải che mã khỏi log/thông báo.
+        out(f"\r\nOAuth error: Invalid code {code}\r\n")
+        sys.exit(1)
+    if os.environ.get("FAKE_CLAUDE_CONFIRM") == "1":
+        # v0.1.39 (F-77): bước cuối như claude thật — báo thành công rồi CHỜ Enter; chỉ ghi tệp phiên sau Enter.
+        out("\r\nLogin successful. Press Enter to continue…\r\n")
+        rest = data.split(b"\r", 1)[1]
+        while b"\r" not in rest:
+            r, _, _ = select.select([0], [], [], 30)
+            if not r:
+                sys.exit(4)
+            rest += os.read(0, 1024)
     name = code.split("/", 1)[-1] or "boss"
     CONF.mkdir(parents=True, exist_ok=True)
     state = json.loads(STATE.read_text()) if STATE.exists() else {}
