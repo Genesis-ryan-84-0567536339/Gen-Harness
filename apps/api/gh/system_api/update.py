@@ -40,6 +40,12 @@ CHECK_LOCK_KEY = "gh:update:check-lock"
 CHECK_MIN_INTERVAL_SECONDS = 30
 # Yêu cầu nằm quá lâu mà trạng thái không đổi ⇒ watcher không chạy (máy chủ tắt watcher, linger…) — cho bấm lại.
 STALE_REQUEST_SECONDS = 15 * 60
+# v0.1.37 (F-34): 'running' mà tiến trình genh đã chết (máy tắt/khởi động lại, bị kill) ⇒ 'stalled' để Console cho
+# bấm Thử lại. Container api không thấy PID máy chủ — "còn sống" suy từ nhịp sống `run/genh-heartbeat.json` (genh
+# ghi mỗi 30 giây khi giữ khoá loại trừ) và boot_id (container dùng chung nhân với máy chủ Linux).
+RUNNING_STALL_SECONDS = 60 * 60
+HEARTBEAT_STALE_SECONDS = 5 * 60
+BOOT_ID_PATH = Path("/proc/sys/kernel/random/boot_id")
 _SEMVER = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
 # v0.1.33: dấu job `promote` (e2e-install.yml) ghi vào ghi chú Release lúc nâng bản thử thành bản chính thức — cùng
 # định dạng với apps/genh/internal/selfupdate PromotedMarker. Thời gian chín 24 giờ của lịch đêm tính từ dấu này
@@ -127,10 +133,41 @@ async def _latest(request: Request, *, force: bool = False) -> dict[str, Any] | 
 
 
 def _age_seconds(iso: str | None) -> float | None:
+    # Hỏng/thiếu múi giờ ⇒ None: trừ datetime không múi giờ sẽ ném TypeError — dữ liệu run/ không tin cậy, không 500.
+    t = _ts(iso)
+    return (datetime.now(UTC) - t).total_seconds() if t is not None else None
+
+
+def _boot_id() -> str | None:
+    """boot_id của nhân đang chạy — trong container trùng với máy chủ Linux. Lỗi/không phải Linux ⇒ None."""
     try:
-        return (datetime.now(UTC) - datetime.fromisoformat(str(iso).replace("Z", "+00:00"))).total_seconds()
-    except ValueError:
+        v = BOOT_ID_PATH.read_text(encoding="ascii").strip()
+    except (OSError, ValueError):
         return None
+    return v or None
+
+
+def _process_gone(status: dict[str, Any], d: Path) -> bool:
+    """'running' nhưng tiến trình genh không còn: máy đã khởi động lại (boot_id khác), hoặc chạy quá
+    `RUNNING_STALL_SECONDS` mà nhịp sống thiếu / cũ hơn `HEARTBEAT_STALE_SECONDS` / khác pid. Mọi giá trị đọc từ run/
+    (0777) là dữ liệu không tin cậy — chỉ nhận đúng kiểu, không đưa vào thông điệp."""
+    status_boot = status.get("boot_id")
+    here = _boot_id()
+    if isinstance(status_boot, str) and status_boot and here and status_boot != here:
+        return True
+    started = status.get("started_at")
+    age = _age_seconds(started) if isinstance(started, str) and started else None
+    if age is None or age <= RUNNING_STALL_SECONDS:
+        return False
+    pid = status.get("pid")
+    pid = pid if isinstance(pid, int) and not isinstance(pid, bool) else None
+    hb = _read_json(d / "genh-heartbeat.json") or {}
+    hb_at = hb.get("at")
+    hb_age = _age_seconds(hb_at) if isinstance(hb_at, str) and hb_at else None
+    hb_pid = hb.get("pid")
+    hb_pid = hb_pid if isinstance(hb_pid, int) and not isinstance(hb_pid, bool) else None
+    alive = hb_age is not None and hb_age <= HEARTBEAT_STALE_SECONDS and (pid is None or hb_pid == pid)
+    return not alive
 
 
 def running_version() -> str | None:
@@ -145,9 +182,15 @@ def _state() -> dict[str, Any]:
     status = _read_json(d / "update-status.json") or {}
     request = _read_json(d / "request" / "update.json")
     state = status.get("state") or "idle"
+    stalled_reason: str | None = None
+    if state == "running" and _process_gone(status, d):
+        state, stalled_reason = "stalled", "process_gone"
     if request is not None:
         age = _age_seconds(request.get("requested_at"))
-        state = "stalled" if age is not None and age > STALE_REQUEST_SECONDS else "requested"
+        if age is not None and age > STALE_REQUEST_SECONDS:
+            state, stalled_reason = "stalled", "not_picked_up"
+        else:
+            state, stalled_reason = "requested", None
     updater = info.get("updater") or None
     # v0.1.33: genh ghi trạng thái lịch tự cập nhật đêm (cài/update/`genh auto-update enable|disable`); genh cũ chưa
     # ghi hoặc giá trị lạ ⇒ None — Console không hứa "Tự cài đêm …".
@@ -167,6 +210,7 @@ def _state() -> dict[str, Any]:
         "linked": d.is_dir(),
         "can_request": bool(updater) and os.access(d / "request", os.W_OK),
         "state": state,
+        "stalled_reason": stalled_reason,
         "message": status.get("message") or None,
         "from": status.get("from") or None,
         "to": status.get("to") or None,

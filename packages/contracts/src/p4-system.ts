@@ -193,6 +193,7 @@ export interface SetupFollowUpItem {
 
 /** `GET/POST /system/update` — nút "Cập nhật ngay" (genh trên máy chủ làm việc thật, xem gh/system_api/update.py). */
 export type SystemUpdateState = 'idle' | 'requested' | 'running' | 'done' | 'failed' | 'stalled';
+export type SystemUpdateStalledReason = 'not_picked_up' | 'process_gone' | null;
 export interface SystemUpdate {
   /** Phiên bản đang chạy (genh ghi vào hộp thư); null ở dev/test. */
   current: string | null;
@@ -204,6 +205,12 @@ export interface SystemUpdate {
   linked: boolean;
   can_request: boolean;
   state: SystemUpdateState;
+  /**
+   * v0.1.37 (F-34): lý do 'stalled' — `not_picked_up` = yêu cầu nằm quá 15 phút (watcher không chạy); `process_gone` =
+   * 'running' mà tiến trình genh đã chết (máy khởi động lại / quá 60 phút không còn nhịp sống). null khi không 'stalled';
+   * thiếu ở api cũ.
+   */
+  stalled_reason?: SystemUpdateStalledReason;
   message: string | null;
   from: string | null;
   to: string | null;
@@ -329,9 +336,27 @@ export interface SystemHealth {
     stale_after?: string | null;
   };
   /** `failed` = lần cập nhật lỗi trong 24 giờ qua (cùng điều kiện thẻ cập nhật) — quá hạn thì false dù `state` vẫn 'failed'. */
-  update: { state: SystemUpdateState | 'unknown' | string; failed: boolean; blocked_version: string | null; finished_at: string | null };
+  update: {
+    state: SystemUpdateState | 'unknown' | string;
+    stalled_reason?: SystemUpdateStalledReason;
+    failed: boolean;
+    blocked_version: string | null;
+    finished_at: string | null;
+  };
   disk: { state: 'ok' | 'low' | 'unknown'; free_bytes: number | null; min_bytes: number | null; checked_at: string | null };
   issues: HealthIssue[];
+  /**
+   * v0.1.37 (F-73): máy chủ có tự chạy lại Gen-Harness khi bật máy không (genh ghi run/autostart-status.json). Chỉ có
+   * khi api có hộp thư với genh; 'warn' khi Docker chưa bật tự chạy hoặc thiếu linger (kèm sự cố host.autostart).
+   */
+  autostart?: {
+    state: 'ok' | 'warn' | 'unknown';
+    linger: 'yes' | 'no' | 'unknown' | 'not_applicable';
+    linger_required: boolean | null;
+    docker_enabled: 'yes' | 'no' | 'unknown' | 'not_applicable';
+    docker_mode: 'system' | 'rootless' | 'desktop' | 'unknown';
+    checked_at: string | null;
+  };
 }
 
 const enc = encodeURIComponent;

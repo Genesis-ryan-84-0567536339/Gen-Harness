@@ -97,6 +97,22 @@ function failedCopy(
     };
   }
   const rolledBack = /đã tự quay về/i.test(msg);
+  if (code === 'GH-E94B') {
+    // v0.1.37: genh nhận tín hiệu dừng (SIGINT/SIGTERM — máy tắt, bị kill) giữa chừng — không phải bản mới hỏng, lịch
+    // đêm vẫn thử lại bản này.
+    return {
+      tone: 'warn', kicker: 'Cập nhật bị dừng giữa chừng',
+      body: rolledBack
+        ? `Hệ thống đã tự quay về bản đang dùng, dữ liệu giữ nguyên. Đây không phải lỗi của bản mới — ${retry} để chạy lại từ đầu, hoặc đợi lịch đêm tự thử lại.`
+        : `Đây không phải lỗi của bản mới. Xem Chi tiết kỹ thuật (hoặc logs/auto-update.log trên máy chủ) để biết máy đang ở bản nào, rồi ${retry} — lịch đêm cũng sẽ tự thử lại.`,
+    };
+  }
+  if (code === 'GH-E94A') {
+    return {
+      tone: 'warn', kicker: 'Đang có một lần cập nhật/khôi phục khác chạy — chờ xong rồi thử lại',
+      body: `Chưa đụng gì — bản đang dùng vẫn chạy bình thường. Đợi lần đang chạy xong (vài phút), rồi ${retry}.`,
+    };
+  }
   if ((code === 'GH-E945' || code === 'GH-E949') && rolledBack) {
     return {
       tone: 'bad', kicker: 'Hệ thống đã tự quay về bản đang dùng — dữ liệu giữ nguyên',
@@ -150,6 +166,15 @@ export function updateView(
   }
   if (d.state === 'running') {
     return { kind: 'working', tone: 'accent', title: `Đang cập nhật lên ${target}`, kicker: 'Mất khoảng 2–5 phút — trang tự tải lại khi xong', steps: steps(1) };
+  }
+  if (d.state === 'stalled' && d.stalled_reason === 'process_gone') {
+    // v0.1.37 (F-34): 'running' mà tiến trình genh trên máy chủ không còn (máy tắt/khởi động lại, bị dừng).
+    return {
+      kind: 'stalled', tone: 'warn', title: `Cập nhật lên ${target} bị dừng giữa chừng`,
+      kicker: 'Tiến trình cập nhật trên máy chủ không còn chạy — có thể máy vừa tắt hoặc khởi động lại',
+      body: 'Bấm Thử lại để chạy lại từ đầu (genh tự sao lưu trước khi làm). Lỗi lặp lại thì xem logs/auto-update.log trên máy chủ.',
+      showCommand: !d.can_request, steps: [],
+    };
   }
   if (d.state === 'stalled') {
     return {
