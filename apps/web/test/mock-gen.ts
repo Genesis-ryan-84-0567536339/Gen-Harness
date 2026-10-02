@@ -13,10 +13,14 @@
  *
  * Hook e2e (v0.1.27): `POST /api/v1/__mock/p3/gen/fireReminders` = worker `task_reminder_scan` tới giờ — mỗi
  * nhắc việc đã xác nhận → chuông `task.reminder` cho các Owner (một lần).
+ * v0.1.41 (F-8, F-86): `POST /api/v1/gen/__mock/briefing` (hoặc `__mock/p3/gen/briefing`) {"slot"?: "sang"|"chieu",
+ * "needs_api_key"?: bool} = worker Bản tin Gen tới giờ — tạo hội thoại bản tin (content đúng hợp đồng) + chuông
+ * `gen.briefing` link `/overview?gen=<id>`, trả {conversation_id}. `PUT /gen/feedback`, `DELETE /gen/feedback/{turn}`
+ * lưu đánh giá; tin trong `messages` có `feedback`, mục trong `conversations` có `kind`.
  *   còn lại                        → lời chào + gợi ý
  */
 import { randomUUID } from 'node:crypto';
-import type { GenProposal, GenStep } from '../../../packages/contracts/src/gen';
+import type { GenBriefingSection, GenMessage, GenProposal, GenRating, GenStep } from '../../../packages/contracts/src/gen';
 import type { P2Ctx } from './mock-phase2';
 import { USER_IDS } from './mock-ids';
 
@@ -40,7 +44,30 @@ interface Conversation {
   title: string;
   created_at: string;
   last_at: string;
-  messages: Array<{ id: string; role: 'user' | 'assistant'; turn_id: string | null; content: { text?: string; steps?: GenStep[] }; created_at: string }>;
+  kind: 'chat' | 'briefing';
+  messages: Array<Omit<GenMessage, 'feedback'>>;
+}
+
+/** v0.1.41 (F-8): nội dung Bản tin Gen đúng hợp đồng (bước tool `briefing.sources` đứng đầu). */
+export function briefingContent(slotLabel: string, slotIso: string, needsApiKey: boolean): GenMessage['content'] {
+  const sections: GenBriefingSection[] = [
+    { key: 'tasks_due', title: 'Việc tới hạn hôm nay', count: 2, lines: ['TSK-0998 · Gọi lại anh Bảo (P1)', 'TSK-0999 · Gửi báo giá MDF (P2)'], link: '/tasks' },
+    { key: 'hot_customers', title: 'Khách đang nóng', count: 1, lines: ['Anh Bảo — hỏi giá ván MDF E1 17mm'], link: '/inbox' },
+    { key: 'drafts_pending', title: 'Nháp chờ duyệt', count: 1, lines: ['Báo giá ván MDF — chờ Sếp duyệt'], link: '/workbench' },
+    { key: 'incidents', title: 'Sự cố', count: 0, lines: [], link: '/system' },
+  ];
+  const steps: GenStep[] = [
+    { kind: 'tool', name: 'briefing.sources' },
+    { kind: 'say', text: `Bản tin ${slotLabel}: 2 việc tới hạn, 1 khách đang nóng, 1 nháp chờ duyệt, không có sự cố.` },
+    ...sections.filter((x) => x.count > 0).map((x): GenStep => ({ kind: 'say', text: `${x.title} (${x.count}): ${x.lines.join('; ')}` })),
+  ];
+  if (needsApiKey) {
+    steps.push({
+      kind: 'suggest',
+      items: [{ label: 'Dán khoá OpenRouter/Gemini để Gen tóm tắt', action: { type: 'navigate', screen: 'system', params: { tab: 'brain' } } }],
+    });
+  }
+  return { kind: 'briefing', slot: slotIso, slot_label: slotLabel, summary_source: needsApiKey ? 'none' : 'model', needs_api_key: needsApiKey, sections, steps };
 }
 
 const OWNER_ID = USER_IDS.owner;
@@ -140,6 +167,31 @@ export function createMock(opts: MockGenOptions) {
   const turns = new Map<string, Turn>();
   const proposals = new Map<string, GenProposal>();
   const reminders: Array<{ title: string; code: string; priority: string; fired: boolean }> = [];
+  /** v0.1.41 (F-86): đánh giá theo lượt (turn_id → rating). */
+  const feedback = new Map<string, GenRating>();
+
+  /** Worker Bản tin Gen tới giờ: một hội thoại bản tin + chuông `gen.briefing` cho các Owner. */
+  function makeBriefing(b: { slot?: unknown; needs_api_key?: unknown }): { conversation_id: string } {
+    const afternoon = b.slot === 'chieu';
+    const now = new Date();
+    const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' }).format(now); // YYYY-MM-DD
+    const dm = `${ymd.slice(8, 10)}/${ymd.slice(5, 7)}`;
+    const slotLabel = `${afternoon ? 'chiều' : 'sáng'} ${dm}`;
+    const slotIso = `${ymd}T${afternoon ? '17:30' : '07:30'}:00+07:00`;
+    const iso = now.toISOString();
+    const conv: Conversation = { id: randomUUID(), title: `Bản tin Gen · ${slotLabel}`, created_at: iso, last_at: iso, kind: 'briefing', messages: [] };
+    conv.messages.push({ id: randomUUID(), role: 'assistant', turn_id: randomUUID(), content: briefingContent(slotLabel, slotIso, b.needs_api_key !== false), created_at: iso });
+    conversations.set(conv.id, conv);
+    opts.notifyOwners?.('gen.briefing', `Bản tin Gen ${slotLabel}`, '2 việc tới hạn · 1 khách đang nóng · 1 nháp chờ duyệt', `/overview?gen=${conv.id}`);
+    return { conversation_id: conv.id };
+  }
+  const findTurn = (turnId: string) => {
+    for (const c of conversations.values()) {
+      const m = c.messages.find((x) => x.role === 'assistant' && x.turn_id === turnId);
+      if (m) return { conv: c, msg: m };
+    }
+    return null;
+  };
   let taskSeq = 998;
   const timers = new Set<ReturnType<typeof setTimeout>>();
 
@@ -176,12 +228,29 @@ export function createMock(opts: MockGenOptions) {
       return reply(200, { ...settings, available: settings.enabled && settings.roles.includes(ctx.role), decider: 'llm' });
     }
     if (!available) return problem(403, 'GEN_DISABLED', 'Gen chưa bật cho vai trò này');
+    if (seg[1] === '__mock' && seg[2] === 'briefing' && m === 'POST') return reply(200, makeBriefing(body));
+    if (seg[1] === 'feedback' && seg.length === 2 && m === 'PUT') {
+      const rating = body.rating;
+      if (rating !== 'helpful' && rating !== 'not_helpful') {
+        return problem(422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors: { rating: 'Chọn Hữu ích hoặc Không hữu ích' } });
+      }
+      const hit = findTurn(String(body.turn_id ?? ''));
+      if (!hit || hit.conv.id !== String(body.conversation_id ?? '')) return problem(404, 'NOT_FOUND', 'Không tồn tại');
+      feedback.set(String(body.turn_id), rating);
+      return reply(200, { turn_id: body.turn_id, rating, kind: hit.conv.kind === 'briefing' ? 'briefing' : 'reply' });
+    }
+    if (seg[1] === 'feedback' && seg.length === 3 && m === 'DELETE') {
+      feedback.delete(seg[2]);
+      return reply(204);
+    }
     if (seg[1] === 'conversations' && seg.length === 2 && m === 'GET') {
       return reply(200, [...conversations.values()].map(({ messages: _m, ...c }) => c).sort((a, b) => b.last_at.localeCompare(a.last_at)));
     }
     if (seg[1] === 'conversations' && seg[3] === 'messages' && m === 'GET') {
       const c = conversations.get(seg[2]);
-      return c ? reply(200, c.messages) : problem(404, 'NOT_FOUND', 'Không tồn tại');
+      return c
+        ? reply(200, c.messages.map((x) => ({ ...x, feedback: x.role === 'assistant' && x.turn_id ? (feedback.get(x.turn_id) ?? null) : null })))
+        : problem(404, 'NOT_FOUND', 'Không tồn tại');
     }
     if (seg[1] === 'conversations' && seg.length === 3 && m === 'DELETE') {
       conversations.delete(seg[2]);
@@ -194,7 +263,7 @@ export function createMock(opts: MockGenOptions) {
       let conv = body.conversation_id ? conversations.get(String(body.conversation_id)) : undefined;
       if (body.conversation_id && !conv) return problem(404, 'NOT_FOUND', 'Không tồn tại');
       if (!conv) {
-        conv = { id: randomUUID(), title: text.slice(0, 60), created_at: now, last_at: now, messages: [] };
+        conv = { id: randomUUID(), title: text.slice(0, 60), created_at: now, last_at: now, kind: 'chat', messages: [] };
         conversations.set(conv.id, conv);
       }
       const turn: Turn = { turn_id: randomUUID(), conversation_id: conv.id, status: 'running', steps: [] };
@@ -239,6 +308,8 @@ export function createMock(opts: MockGenOptions) {
     hooks: {
       settings: () => settings,
       script: (b: unknown) => script(String((b as { text?: string })?.text ?? '')),
+      /** v0.1.41 (F-8): worker Bản tin Gen tới giờ (như `POST /gen/__mock/briefing`). */
+      briefing: (b: unknown) => makeBriefing((b ?? {}) as { slot?: unknown; needs_api_key?: unknown }),
       /** Worker nhắc việc tới giờ: chuông cho Owner, mỗi nhắc một lần. */
       fireReminders: () => {
         let n = 0;

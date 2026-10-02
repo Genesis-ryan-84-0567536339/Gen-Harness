@@ -37,6 +37,10 @@ const KIND_ICON: Record<string, string> = {
   'offsite.stale': 'ph ph-hard-drives',
   'offsite.failed': 'ph ph-warning-circle',
   'job.timeout': 'ph ph-hourglass-high',
+  // v0.1.41 (F-8, F-86): Bản tin Gen sáng/chiều; vượt trần chi phí AI; việc nền không có nguồn AI dùng được.
+  'gen.briefing': 'ph ph-newspaper',
+  'ai.budget_exceeded': 'ph ph-currency-circle-dollar',
+  'ai.background_no_source': 'ph ph-brain',
 };
 
 /**

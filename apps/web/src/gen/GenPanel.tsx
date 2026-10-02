@@ -3,7 +3,8 @@ import { GEN_SCREEN_BY_KEY, GEN_TARGET_BY_ID, splitTargetId, type GenStep, type 
 import { Icon, IconButton } from '@gen-harness/ui';
 import { useMe } from '../lib/queries';
 import { closeSpotlight, executeUiAction } from './director';
-import { sendQuestion } from './genClient';
+import { restoreIfNeeded, sendFeedback, sendQuestion } from './genClient';
+import { GenHistory } from './GenHistory';
 import { ProposalCard } from './ProposalCard';
 import { useGenStore, type GenChatMessage } from './genStore';
 
@@ -30,6 +31,8 @@ const TOOL_LABEL: Record<string, string> = {
   'hub.kho_get': 'Kho tri thức (Gen-hub)',
   'social.accounts': 'tài khoản mạng xã hội',
   'social.read': 'đọc mạng xã hội',
+  // v0.1.41 (F-8): bước đầu của Bản tin Gen.
+  'briefing.sources': 'việc, khách, nháp, sự cố…',
 };
 
 function targetLabel(id: string): string {
@@ -76,11 +79,31 @@ function Step({ step, turnId }: { step: GenStep; turnId?: string }) {
   return null;
 }
 
+/** v0.1.41 (F-86): Hữu ích / Không hữu ích cho một câu trả lời đã xong (bấm lại nút đang chọn ⇒ bỏ đánh giá). */
+function Feedback({ m }: { m: GenChatMessage }) {
+  return (
+    <div className="gen-rate" role="group" aria-label="Đánh giá câu trả lời">
+      <button type="button" className="gen-rate__btn" aria-pressed={m.feedback === 'helpful'} onClick={() => void sendFeedback(m, 'helpful')}>
+        <Icon name={m.feedback === 'helpful' ? 'ph-fill ph-thumbs-up' : 'ph ph-thumbs-up'} size={12} /> Hữu ích
+      </button>
+      <button type="button" className="gen-rate__btn" aria-pressed={m.feedback === 'not_helpful'} onClick={() => void sendFeedback(m, 'not_helpful')}>
+        <Icon name={m.feedback === 'not_helpful' ? 'ph-fill ph-thumbs-down' : 'ph ph-thumbs-down'} size={12} /> Không hữu ích
+      </button>
+    </div>
+  );
+}
+
 function Message({ m }: { m: GenChatMessage }) {
   if (m.role === 'user') return <div className="gen-msg gen-msg--user">{m.text}</div>;
   const steps = m.steps.filter(Boolean);
+  const rateable = m.status === 'done' && !!m.turnId;
   return (
-    <div className="gen-msg gen-msg--gen" aria-busy={m.status === 'running' || undefined}>
+    <div className={m.kind === 'briefing' ? 'gen-msg gen-msg--gen gen-msg--briefing' : 'gen-msg gen-msg--gen'} aria-busy={m.status === 'running' || undefined}>
+      {m.kind === 'briefing' ? (
+        <span className="gen-badge">
+          <Icon name="ph ph-newspaper" size={11} /> Bản tin
+        </span>
+      ) : null}
       {steps.map((s, i) => (
         <Step key={i} step={s} turnId={m.turnId} />
       ))}
@@ -91,6 +114,7 @@ function Message({ m }: { m: GenChatMessage }) {
           <span /> Gen đang nghĩ…
         </span>
       ) : null}
+      {rateable ? <Feedback m={m} /> : null}
     </div>
   );
 }
@@ -107,8 +131,20 @@ export function GenPanel({ userId }: { userId: string }) {
   const reset = useGenStore((s) => s.reset);
   const addr = useAddressing();
   const [text, setText] = useState('');
+  const [historyOpen, setHistoryOpen] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const historyBtnRef = useRef<HTMLButtonElement>(null);
+
+  // v0.1.41 (F-8a): tải lại trang ⇒ mở lại hội thoại đã lưu (một lần; đang trả lời thì không đụng).
+  useEffect(() => {
+    if (!useGenStore.getState().busy) void restoreIfNeeded(userId);
+  }, [userId]);
+
+  const closeHistory = () => {
+    setHistoryOpen(false);
+    historyBtnRef.current?.focus();
+  };
 
   useEffect(() => {
     const el = listRef.current;
@@ -124,7 +160,7 @@ export function GenPanel({ userId }: { userId: string }) {
     setText('');
     // v0.1.28 (UX V12): câu hỏi mới → dừng lượt dẫn đường cũ (ô khoanh sáng không còn đè màn hình).
     if (useGenStore.getState().spotlight) closeSpotlight();
-    void sendQuestion(q);
+    void sendQuestion(q, userId);
   };
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -145,9 +181,18 @@ export function GenPanel({ userId }: { userId: string }) {
           <div className="gen-panel__title">Gen</div>
           <div className="gen-panel__sub">Trợ lý quản trị · dẫn đường &amp; đề xuất có xác nhận</div>
         </div>
+        <IconButton
+          ref={historyBtnRef}
+          icon="ph ph-clock-counter-clockwise"
+          label="Hội thoại cũ"
+          aria-expanded={historyOpen}
+          aria-pressed={historyOpen}
+          onClick={() => setHistoryOpen((v) => !v)}
+        />
         <IconButton icon="ph ph-plus" label="Hội thoại mới" onClick={reset} disabled={busy} />
         <IconButton icon="ph ph-x" label="Đóng khung Gen" onClick={() => setOpen(userId, false)} />
       </div>
+      {historyOpen ? <GenHistory userId={userId} onClose={closeHistory} /> : null}
       <div className="gen-panel__list" ref={listRef} aria-live="polite">
         {messages.length === 0 ? (
           <div className="gen-empty">

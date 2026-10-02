@@ -27,7 +27,9 @@ export type DataToolName =
   | 'hub.kho_search'
   | 'hub.kho_get'
   | 'social.accounts'
-  | 'social.read';
+  | 'social.read'
+  /** v0.1.41 (F-8): bước đầu của Bản tin Gen — đánh dấu nội dung ngoài (việc, khách, nháp, sự cố…). */
+  | 'briefing.sources';
 
 export type UiAction =
   | { type: 'navigate'; screen: string; params?: Record<string, string> }
@@ -124,7 +126,7 @@ export interface GenAssignee {
 
 export type GenStep =
   | { kind: 'say'; text: string }
-  | { kind: 'tool'; name: DataToolName; args: Record<string, unknown> }
+  | { kind: 'tool'; name: DataToolName; args?: Record<string, unknown> }
   | { kind: 'ui'; action: UiAction }
   | { kind: 'suggest'; items: Suggestion[] }
   | { kind: 'proposal'; proposal: GenProposal }
@@ -170,15 +172,43 @@ export interface GenConversation {
   title: string;
   created_at: string;
   last_at: string;
+  /** v0.1.41 (F-8): `briefing` = hội thoại Bản tin Gen (07:30 / 17:30 giờ VN); máy chủ cũ không gửi ⇒ coi là `chat`. */
+  kind?: 'chat' | 'briefing';
+}
+
+/** v0.1.41 (F-86): đánh giá câu trả lời / bản tin của Gen. */
+export type GenRating = 'helpful' | 'not_helpful';
+
+/** v0.1.41 (F-8): một mục của Bản tin Gen (việc tới hạn, khách nóng, nháp chờ duyệt, sự cố…). */
+export interface GenBriefingSection {
+  key: string;
+  title: string;
+  count: number;
+  lines: string[];
+  link: string;
 }
 
 export interface GenMessage {
   id: string;
   role: 'user' | 'assistant';
   turn_id: string | null;
-  /** user: `{text}`; assistant: `{steps: GenStep[]}`. */
-  content: { text?: string; steps?: GenStep[] };
+  /**
+   * user: `{text}`; assistant: `{steps: GenStep[]}`. v0.1.41 (F-8): bản tin thêm `kind: 'briefing'`, `slot_label`,
+   * `needs_api_key`, `sections` (bước vẫn ở `steps`, bước tool `briefing.sources` đứng đầu).
+   */
+  content: {
+    text?: string;
+    steps?: GenStep[];
+    kind?: 'briefing';
+    slot?: string;
+    slot_label?: string;
+    summary_source?: 'model' | 'none';
+    needs_api_key?: boolean;
+    sections?: GenBriefingSection[];
+  };
   created_at: string;
+  /** v0.1.41 (F-86): đánh giá của chính người xem cho lượt này (máy chủ cũ không gửi). */
+  feedback?: GenRating | null;
 }
 
 export interface GenSettings {
@@ -214,6 +244,10 @@ export function genEndpoints(r: ApiClient['request']) {
       confirmProposal: (id: string, fields: Record<string, unknown> = {}) =>
         r<GenProposal>(`/gen/proposals/${encodeURIComponent(id)}/confirm`, { method: 'POST', body: { fields } }),
       cancelProposal: (id: string) => r<GenProposal>(`/gen/proposals/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
+      /** v0.1.41 (F-86): Hữu ích / Không hữu ích cho một lượt trả lời hoặc bản tin. */
+      feedback: (body: { conversation_id: string; turn_id: string; rating: GenRating }) =>
+        r<{ turn_id: string; rating: GenRating; kind: 'reply' | 'briefing' }>('/gen/feedback', { method: 'PUT', body }),
+      clearFeedback: (turnId: string) => r<void>(`/gen/feedback/${encodeURIComponent(turnId)}`, { method: 'DELETE' }),
     },
   };
 }

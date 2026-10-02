@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from 'react';
-import { Navigate, Outlet, useLocation, useMatches } from 'react-router-dom';
+import { Navigate, Outlet, useLocation, useMatches, useNavigate } from 'react-router-dom';
 import { DOMAINS, SCREEN_BY_KEY, type DomainId } from '@gen-harness/contracts';
 import { useActiveScreenKey, type RouteHandle } from './routeHandles';
 import { useMe, useNavigation } from '../lib/queries';
@@ -12,7 +12,32 @@ import { ErrorBoundary } from './ErrorPage';
 import { GenPanel } from '../gen/GenPanel';
 import { Spotlight } from '../gen/Spotlight';
 import { useGenStore } from '../gen/genStore';
-import '../gen/genClient';
+import { loadConversation } from '../gen/genClient';
+import { toast } from '../lib/toast';
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * v0.1.41 (F-8): mở Bản tin Gen từ chuông — link `/overview?gen=<conversation_id>`. Mở khung Gen, tải hội thoại rồi
+ * bỏ tham số `gen` khỏi địa chỉ (replace — nút Lùi không mở lại). Mã sai dạng ⇒ bỏ qua (chỉ gỡ tham số).
+ */
+function useOpenGenFromUrl(userId: string | null, genOn: boolean): void {
+  const { pathname, search } = useLocation();
+  const navigate = useNavigate();
+  useEffect(() => {
+    if (!userId || !genOn) return;
+    const params = new URLSearchParams(search);
+    const cid = params.get('gen');
+    if (cid === null) return;
+    params.delete('gen');
+    const rest = params.toString();
+    navigate(pathname + (rest ? `?${rest}` : ''), { replace: true });
+    if (!UUID_RE.test(cid)) return;
+    useGenStore.getState().setOpen(userId, true);
+    const fail = () => toast('Không mở được bản tin — có thể đã quá hạn lưu', 'bad');
+    loadConversation(cid, userId).then((ok) => (ok ? undefined : fail()), fail);
+  }, [userId, genOn, pathname, search, navigate]);
+}
 
 function useCrumbs(activeKey: string | null): Crumbs | null {
   const matches = useMatches();
@@ -67,6 +92,7 @@ export function AppShell() {
   const genOpen = useGenStore((s) => (me.data ? !!s.openByUser[me.data.id] : false)) && genOn;
   // Điện thoại: khung Gen phủ cả màn — khi Gen đang chỉ vào một phần tử thì tạm ẩn khung để thấy phần tử (gen.css).
   const spotting = useGenStore((s) => !!s.spotlight);
+  useOpenGenFromUrl(me.data?.id ?? null, genOn);
   // v0.1.19: mật khẩu tạm (genh reset-password) → mọi màn Console chuyển về "Đặt mật khẩu mới".
   if (me.data?.must_change_password) return <Navigate to="/change-password" replace />;
   return (
