@@ -189,8 +189,15 @@ export function cliChip(active: CliProfile | undefined): { label: string; tone: 
   return { label: 'Đang hoạt động', tone: OK };
 }
 
+/**
+ * v0.1.38 (F-22): luật cứng — model của Antigravity CLI chỉ dùng cho Gen của Sếp (API từ chối gán cho khoá khác
+ * `core.gen`, mã 409 AGY_OWNER_GEN_ONLY). Câu dùng chung cho thẻ CLI, bước thiết lập và ô chọn model.
+ */
+export const AGY_SCOPE_TEXT =
+  'Chỉ dùng cho Gen của Sếp. Sàng lọc tin và trực việc nhận nội dung của khách nên dùng nguồn khác (khoá API hoặc Claude Code CLI) — luật an toàn, không tắt được.';
+
 /** v0.1.31: chữ theo loại CLI — Antigravity (tài khoản Google) hay Claude Code (gói Claude Pro/Max). */
-export const CLI_TEXT: Record<CliKind, { title: string; kicker: string; account: string; login: string; add: string; empty: string; openLink: string; hint: string }> = {
+export const CLI_TEXT: Record<CliKind, { title: string; kicker: string; account: string; login: string; add: string; empty: string; openLink: string; hint: string; scope: string | null }> = {
   antigravity_cli: {
     title: 'Tài khoản Antigravity CLI',
     kicker: 'Tài khoản Google dùng cho AI',
@@ -200,6 +207,7 @@ export const CLI_TEXT: Record<CliKind, { title: string; kicker: string; account:
     empty: 'Đăng nhập Google để hệ thống dùng AI qua Antigravity CLI',
     openLink: 'Mở trang đăng nhập Google',
     hint: 'Đăng nhập đúng tài khoản Google muốn dùng; trang Google sẽ hiện một mã — chép mã đó dán vào ô bên dưới.',
+    scope: AGY_SCOPE_TEXT,
   },
   claude_code_cli: {
     title: 'Tài khoản Claude Code CLI',
@@ -210,6 +218,7 @@ export const CLI_TEXT: Record<CliKind, { title: string; kicker: string; account:
     empty: 'Chưa bật — đăng nhập gói Claude (Pro/Max) nếu Sếp muốn AI dùng thêm model Claude',
     openLink: 'Mở trang đăng nhập Claude',
     hint: 'Đăng nhập đúng tài khoản Claude muốn dùng, bấm cho phép; trang sẽ hiện một mã — chép mã đó dán vào ô bên dưới.',
+    scope: null,
   },
 };
 
