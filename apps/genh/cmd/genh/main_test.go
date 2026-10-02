@@ -1,11 +1,16 @@
 package main
 
 import (
+	"context"
 	"errors"
+	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -308,5 +313,362 @@ func TestChildUpdateArgs_PassesConsumedRequest(t *testing.T) {
 	parsed, err := parseUpdateFlags(got)
 	if err != nil || !parsed.ifRequested || !parsed.yes {
 		t.Errorf("args con phải parse được --yes --if-requested: %+v %v", parsed, err)
+	}
+}
+
+// ─── v0.1.37: tín hiệu dừng + khoá loại trừ ─────────────────────────────────
+
+// signalContext phải huỷ khi nhận SIGTERM (systemd tắt máy), không chỉ Ctrl-C.
+func TestSignalContext_HuyKhiNhanSIGTERM(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows không gửi được SIGTERM")
+	}
+	ctx, stop := signalContext()
+	defer stop()
+	p, err := os.FindProcess(os.Getpid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-ctx.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("signalContext không huỷ khi nhận SIGTERM")
+	}
+	if !errors.Is(context.Cause(ctx), ops.ErrShutdownSignal) {
+		t.Errorf("SIGTERM phải để nguyên nhân ops.ErrShutdownSignal (rollback không khôi phục CSDL lúc máy tắt), được %v", context.Cause(ctx))
+	}
+}
+
+func TestSignalCause_PhanBietSIGTERMVaCtrlC(t *testing.T) {
+	if !errors.Is(signalCause(syscall.SIGTERM), ops.ErrShutdownSignal) || !errors.Is(signalCause(os.Interrupt), ops.ErrInterruptSignal) {
+		t.Fatal("SIGTERM → ErrShutdownSignal, Ctrl-C → ErrInterruptSignal")
+	}
+	ctx, cancel := context.WithCancelCause(context.Background())
+	cancel(ops.ErrInterruptSignal)
+	if forwardSignal(ctx) != os.Interrupt {
+		t.Error("Ctrl-C phải chuyển tiếp SIGINT cho con")
+	}
+	ctx2, cancel2 := context.WithCancelCause(context.Background())
+	cancel2(ops.ErrShutdownSignal)
+	if forwardSignal(ctx2) != syscall.SIGTERM {
+		t.Error("SIGTERM phải chuyển tiếp SIGTERM cho con")
+	}
+}
+
+// captureStd chạy f với os.Stdout/os.Stderr chuyển hướng, trả nội dung.
+func captureStd(t *testing.T, f func()) (stdout, stderr string) {
+	t.Helper()
+	oldOut, oldErr := os.Stdout, os.Stderr
+	ro, wo, _ := os.Pipe()
+	re, we, _ := os.Pipe()
+	os.Stdout, os.Stderr = wo, we
+	outC, errC := make(chan string), make(chan string)
+	go func() { b, _ := io.ReadAll(ro); outC <- string(b) }()
+	go func() { b, _ := io.ReadAll(re); errC <- string(b) }()
+	defer func() { os.Stdout, os.Stderr = oldOut, oldErr }()
+	f()
+	_ = wo.Close()
+	_ = we.Close()
+	return <-outC, <-errC
+}
+
+// lockTestInstall dựng gốc cài đặt tạm có compose.yaml GENH QUẢN LÝ (để không
+// dò lên compose.yaml của repo), một yêu cầu "Cập nhật ngay" và update-status.json.
+func lockTestInstall(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "deploy"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "deploy", "compose.yaml"), []byte("name: gen-harness\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GENH_COMPOSE_FILE", filepath.Join(dir, "deploy", "compose.yaml"))
+	if err := hostlink.EnsureDir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hostlink.RequestPath(dir), []byte(`{"by":"owner"}`), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	if err := hostlink.Start(dir, "v0.1.35"); err != nil {
+		t.Fatal(err)
+	}
+	if err := hostlink.Finish(dir, "done", "v0.1.36", ""); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func readFileStr(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("đọc %s: %v", path, err)
+	}
+	return string(b)
+}
+
+func TestRunUpdate_KhoaBan_LichDem_BoQuaThoat0_KhongDungHopThu(t *testing.T) {
+	dir := lockTestInstall(t)
+	held, err := hostlink.AcquireLock(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Release()
+	stopBeat := hostlink.StartHeartbeat(dir, "update") // "lần khác" đang chạy
+	defer stopBeat()
+	statusBefore := readFileStr(t, filepath.Join(hostlink.Dir(dir), hostlink.StatusFile))
+	reqBefore := readFileStr(t, hostlink.RequestPath(dir))
+
+	var code int
+	out, _ := captureStd(t, func() {
+		code = runUpdate([]string{"--yes", "--quiet", "--no-self-update", "--install-dir", dir})
+	})
+	if code != 0 {
+		t.Fatalf("lịch đêm gặp khoá bận phải thoát 0, được %d", code)
+	}
+	want := fmt.Sprintf("genh: đang có một lần cập nhật/khôi phục khác chạy (PID %d) — lần này bỏ qua.", os.Getpid())
+	if !strings.Contains(out, want) {
+		t.Fatalf("stdout (cả khi --quiet) phải có %q, được %q", want, out)
+	}
+	if got := readFileStr(t, filepath.Join(hostlink.Dir(dir), hostlink.StatusFile)); got != statusBefore {
+		t.Errorf("update-status.json bị đổi:\n%s\n---\n%s", statusBefore, got)
+	}
+	if got := readFileStr(t, hostlink.RequestPath(dir)); got != reqBefore {
+		t.Errorf("request/update.json bị đổi/xoá")
+	}
+}
+
+func TestRunUpdate_KhoaBan_GoTay_Thoat1_GHE94A(t *testing.T) {
+	dir := lockTestInstall(t)
+	held, err := hostlink.AcquireLock(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Release()
+	statusBefore := readFileStr(t, filepath.Join(hostlink.Dir(dir), hostlink.StatusFile))
+
+	var code int
+	_, errOut := captureStd(t, func() {
+		code = runUpdate([]string{"--no-self-update", "--install-dir", dir})
+	})
+	if code != 1 {
+		t.Fatalf("gõ tay gặp khoá bận phải thoát 1, được %d", code)
+	}
+	for _, want := range []string{"đang có một lần cập nhật/khôi phục khác chạy", ops.ErrCodeUpdateLocked, "rồi chạy lại"} {
+		if !strings.Contains(errOut, want) {
+			t.Errorf("stderr thiếu %q: %q", want, errOut)
+		}
+	}
+	if got := readFileStr(t, filepath.Join(hostlink.Dir(dir), hostlink.StatusFile)); got != statusBefore {
+		t.Error("gõ tay gặp khoá bận không được đụng hộp thư")
+	}
+	if !hostlink.HasRequest(dir) {
+		t.Error("không được nuốt yêu cầu của Console")
+	}
+}
+
+// Nút Console (--if-requested): chờ lần khác nhả khoá rồi chạy (nuốt yêu cầu,
+// báo running → kết quả).
+func TestRunUpdate_IfRequested_ChoKhoaNhaRoiChay(t *testing.T) {
+	old := requestLockWait
+	requestLockWait = 20 * time.Second
+	defer func() { requestLockWait = old }()
+	dir := lockTestInstall(t)
+	held, err := hostlink.AcquireLock(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	released := make(chan time.Time, 1)
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		released <- time.Now()
+		held.Release()
+	}()
+
+	var code int
+	out, _ := captureStd(t, func() {
+		code = runUpdate([]string{"--yes", "--if-requested", "--no-self-update", "--install-dir", dir})
+	})
+	releasedAt := <-released
+	if time.Now().Before(releasedAt) {
+		t.Fatal("không được chạy trước khi khoá nhả")
+	}
+	if strings.Contains(out, "lần này bỏ qua") {
+		t.Fatalf("--if-requested phải CHỜ, không bỏ qua: %q", out)
+	}
+	if hostlink.HasRequest(dir) {
+		t.Error("chờ được khoá rồi thì phải xử lý (nuốt) yêu cầu")
+	}
+	st, err := hostlink.ReadStatus(dir)
+	if err != nil || st.State == "done" && st.To == "v0.1.36" {
+		t.Fatalf("phải đã chạy (ghi trạng thái mới): %+v %v (code=%d)", st, err, code)
+	}
+	if st.PID != os.Getpid() {
+		t.Errorf("update-status.json phải ghi PID tiến trình ngoài cùng: %+v", st)
+	}
+	if _, err := os.Stat(hostlink.HeartbeatPath(dir)); !os.IsNotExist(err) {
+		t.Errorf("xong thì phải xoá genh-heartbeat.json: %v", err)
+	}
+	// Khoá đã được nhả lại (cả khoá người chờ).
+	l, err := hostlink.AcquireLock(dir)
+	if err != nil {
+		t.Fatalf("runUpdate xong phải nhả khoá: %v", err)
+	}
+	l.Release()
+	w, err := hostlink.AcquireWaitLock(dir)
+	if err != nil {
+		t.Fatalf("chờ xong phải nhả khoá người chờ: %v", err)
+	}
+	w.Release()
+}
+
+// Khoá chính bận VÀ đã có một người chờ (watcher crontab kích mỗi phút): lần
+// này thoát NGAY (0), không chờ, không nuốt yêu cầu — không chồng ~30 genh chờ.
+func TestRunUpdate_IfRequested_DaCoNguoiCho_ThoatNgay(t *testing.T) {
+	dir := lockTestInstall(t)
+	held, err := hostlink.AcquireLock(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Release()
+	waiter, err := hostlink.AcquireWaitLock(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer waiter.Release()
+
+	start := time.Now()
+	var code int
+	out, _ := captureStd(t, func() {
+		code = runUpdate([]string{"--yes", "--if-requested", "--no-self-update", "--install-dir", dir})
+	})
+	if code != 0 || time.Since(start) > 5*time.Second {
+		t.Fatalf("phải thoát 0 ngay, được code=%d sau %v", code, time.Since(start))
+	}
+	if !strings.Contains(out, "đã có một tiến trình khác đang chờ") {
+		t.Errorf("thiếu dòng log người chờ: %q", out)
+	}
+	if !hostlink.HasRequest(dir) {
+		t.Error("không được nuốt yêu cầu — người chờ kia sẽ làm")
+	}
+}
+
+// Chờ được khoá mà yêu cầu đã bị lần trước nuốt → thoát 0, không làm gì.
+func TestAcquireOpLock_IfRequested_YeuCauDaBiNuot(t *testing.T) {
+	dir := t.TempDir()
+	var out, errOut strings.Builder
+	l, code, ok := acquireOpLock(context.Background(), dir, lockRequested, func() bool { return false }, &out, &errOut)
+	if ok || code != 0 || l != nil {
+		t.Fatalf("yêu cầu đã hết: ok=%v code=%d", ok, code)
+	}
+	l2, err := hostlink.AcquireLock(dir)
+	if err != nil {
+		t.Fatalf("phải nhả khoá khi không làm gì: %v", err)
+	}
+	l2.Release()
+}
+
+// Tiến trình con --self-updated KHÔNG lấy khoá (cha đang giữ).
+func TestRunUpdate_SelfUpdated_KhongLayKhoa(t *testing.T) {
+	dir := lockTestInstall(t)
+	held, err := hostlink.AcquireLock(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Release()
+	_ = hostlink.Start(dir, "v0.1.36") // tiến trình cha đã báo running
+
+	out, errOut := captureStd(t, func() {
+		_ = runUpdate([]string{"--yes", "--quiet", "--self-updated", "--install-dir", dir})
+	})
+	if strings.Contains(out+errOut, "đang có một lần cập nhật/khôi phục khác chạy") {
+		t.Fatalf("--self-updated không được kiểm khoá: %q %q", out, errOut)
+	}
+	st, _ := hostlink.ReadStatus(dir)
+	if st.State == "running" {
+		t.Fatalf("tiến trình con phải chạy tiếp và ghi kết quả: %+v", st)
+	}
+	if !hostlink.HasRequest(dir) {
+		t.Error("tiến trình con không nuốt hộp thư (việc của tiến trình ngoài)")
+	}
+}
+
+// restore gõ tay / import khi khoá bận: thoát 1, GH-E94A.
+func TestRunRestoreImport_KhoaBan_GoTay_Thoat1(t *testing.T) {
+	dir := lockTestInstall(t)
+	held, err := hostlink.AcquireLock(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Release()
+	for name, f := range map[string]func() int{
+		"restore": func() int { return runRestore([]string{"--install-dir", dir, "backups/k.enc"}) },
+		"import": func() int {
+			return runImport([]string{"--install-dir", dir, "--yes", filepath.Join(dir, "x.ghbundle")})
+		},
+	} {
+		var code int
+		_, errOut := captureStd(t, func() { code = f() })
+		if code != 1 || !strings.Contains(errOut, ops.ErrCodeUpdateLocked) || !strings.Contains(errOut, "đang có một lần cập nhật/khôi phục khác chạy") {
+			t.Errorf("%s: muốn thoát 1 + GH-E94A, được %d %q", name, code, errOut)
+		}
+	}
+}
+
+// Tín hiệu dừng tới TRƯỚC khi chạy con: không chạy con (con chưa kịp bắt tín
+// hiệu sẽ bị giết ngay, không ghi kết quả).
+func TestRunChildForwardingSignal_DaHuyTruoc_KhongChayCon(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	marker := filepath.Join(t.TempDir(), "ran")
+	child := exec.Command("sh", "-c", "touch "+marker)
+	if err := runChildForwardingSignal(ctx, child); !errors.Is(err, errStoppedBeforeReExec) {
+		t.Fatalf("muốn errStoppedBeforeReExec, được %v", err)
+	}
+	if child.Process != nil {
+		t.Error("không được Start tiến trình con")
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Error("tiến trình con đã chạy")
+	}
+}
+
+// Đang chờ tiến trình con (sau tự cập nhật) mà nhận tín hiệu dừng: chuyển tiếp
+// SIGTERM cho con và CHỜ con tự kết thúc (con quay về bản cũ) — không Kill.
+func TestRunChildForwardingSignal_ChuyenTiepSIGTERM_VanCho(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows không chuyển tiếp được SIGTERM")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	child := exec.Command("sh", "-c", "trap 'sleep 0.3; exit 7' TERM; while :; do sleep 0.05; done")
+	go func() { time.Sleep(200 * time.Millisecond); cancel() }()
+	err := runChildForwardingSignal(ctx, child)
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 7 {
+		t.Fatalf("con phải nhận SIGTERM, tự dọn rồi thoát 7 (không bị Kill), được %v", err)
+	}
+}
+
+// Tín hiệu dừng tới ngay sau lúc tải genh mới (chưa chạy con): Console phải
+// nhận GH-E94B "chưa đụng gì" — không phải thông điệp không mã (rơi vào thẻ đỏ
+// "đã tự quay về").
+func TestChildFailedMessage_DungTruocCon_GHE94BChuaDungGi(t *testing.T) {
+	msg := childFailedMessage(true, ops.ErrShutdownSignal)
+	if !strings.Contains(msg, "("+ops.ErrCodeUpdateInterrupted+")") || !strings.Contains(msg, "chưa đụng gì") {
+		t.Errorf("muốn GH-E94B \"chưa đụng gì\", được %q", msg)
+	}
+	if strings.Contains(msg, "đã tự quay về") || strings.Contains(msg, "`") {
+		t.Errorf("không nói \"đã tự quay về\", không có dấu `: %q", msg)
+	}
+	if m := childFailedMessage(true, nil); !strings.Contains(m, ops.ErrCodeUpdateInterrupted) {
+		t.Errorf("cause nil vẫn phải có GH-E94B: %q", m)
+	}
+	if m := childFailedMessage(false, nil); strings.Contains(m, "GH-E") {
+		t.Errorf("con chết giữa chừng (không do dừng trước khi chạy) giữ thông điệp cũ: %q", m)
 	}
 }

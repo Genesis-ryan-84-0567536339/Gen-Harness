@@ -36,6 +36,8 @@ const (
 	ErrCodeUpdateComposeSyncFailed    = "GH-E947" // đồng bộ compose.yaml với bản genh mới thất bại SAU KHI backup đã xong — chưa đụng migrate/restart
 	ErrCodeUpdateDiskLow              = "GH-E948" // ổ đĩa không đủ chỗ (sau khi đã dọn ảnh cũ) — dừng TRƯỚC khi tải, chưa đụng gì
 	ErrCodeUpdateBlocked              = "GH-E949" // bản này đã lỗi từ bước migrate trở đi ở lần trước (có hoặc không đụng CSDL) — lịch đêm không thử lại; chỉ dùng cho thông điệp/log, không phải lỗi thoát
+	ErrCodeUpdateLocked               = "GH-E94A" // đang có một lần cập nhật/khôi phục khác giữ khoá loại trừ (<gốc cài đặt>/genh.lock) — gõ tay thì thoát 1, lịch đêm thì bỏ qua (thoát 0)
+	ErrCodeUpdateInterrupted          = "GH-E94B" // genh nhận tín hiệu dừng giữa chừng (máy tắt/khởi động lại/Ctrl-C) — đã quay về bản cũ nếu kịp (máy tắt sau khi đã đụng CSDL: giữ bản mới để `genh update` đi tiếp); KHÔNG ghi update-blocked.json (bản không hỏng) trừ khi quay về chưa trọn, lịch đêm thử lại
 
 	// 95x — genh backup / genh restore.
 	ErrCodeBackupFailed  = "GH-E950"

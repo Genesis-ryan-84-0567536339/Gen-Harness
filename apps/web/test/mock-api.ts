@@ -269,6 +269,9 @@ const HEALTH_KIND_DEFAULTS: Record<string, Omit<HealthIssue, 'raised_at' | 'body
   'backup.stale': { key: 'backup.stale', kind: 'backup.stale', severity: 'bad', title: 'Đã hơn 36 giờ chưa có bản sao lưu mới', body: 'Chưa có bản nào. Mở mục Sao lưu và bấm Sao lưu ngay để giữ an toàn dữ liệu.', link: '/system?tab=storage&focus=backup', action: 'Mở mục Sao lưu' },
   'worker.silent': { key: 'worker.silent', kind: 'worker.silent', severity: 'bad', title: 'Bộ xử lý nền đã ngừng 12 phút', body: 'Sàng lọc tin, nhắc việc và sao lưu theo lịch đang dừng. Bấm để xem cách khởi động lại.', link: '/system?tab=storage', action: 'Xem sức khoẻ' },
   'disk.low': { key: 'disk.low', kind: 'disk.low', severity: 'bad', title: 'Ổ đĩa sắp hết chỗ', body: 'Còn 3,0 GB trống, cần tối thiểu 5,0 GB — cập nhật tự động đang tạm dừng.', link: '/system?tab=storage', action: 'Xem cách giải phóng' },
+  // v0.1.37 (F-73) — gh/health.py _eval_autostart (AUTOSTART_TITLE/AUTOSTART_FIX/AUTOSTART_DONE): đích là thẻ Sức khoẻ
+  // (hướng dẫn từng bước, lệnh dạng mã) — cả dòng dải lẫn chuông.
+  'host.autostart': { key: 'host.autostart', kind: 'host.autostart', severity: 'warn', title: 'Máy chủ có thể không tự chạy lại Gen-Harness khi bật lại máy', body: 'Docker chưa bật tự chạy khi mở máy — chạy một lần trên máy chủ: sudo systemctl enable docker · Lịch tự cập nhật và nút Cập nhật ngay chỉ chạy khi có người đăng nhập — chạy một lần: sudo loginctl enable-linger $USER · Chạy xong thì chạy genh status để cảnh báo tự hết', link: '/system?tab=storage', action: 'Xem cách bật' },
 };
 
 export interface MockHealthOverride {
@@ -277,6 +280,8 @@ export interface MockHealthOverride {
   backup?: Partial<SystemHealth['backup']>;
   disk?: Partial<SystemHealth['disk']>;
   update?: Partial<SystemHealth['update']>;
+  /** v0.1.37 (F-73): khối `autostart` (thiếu ⇒ không có khối, như api không có hộp thư với genh). */
+  autostart?: SystemHealth['autostart'];
 }
 
 /** gh/health.py WORKER_SILENT_MINUTES. */
@@ -410,8 +415,17 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     const gb = (n: number | null) => (n == null ? '?' : (n / 1024 ** 3).toFixed(1).replace('.', ','));
     if (worker.state === 'silent') derived.push({ kind: 'worker.silent', title: `Bộ xử lý nền đã ngừng ${worker.silent_minutes ?? WORKER_SILENT_MIN} phút` });
     if (backup.stale) derived.push({ kind: 'backup.stale', title: `Đã hơn ${backup.stale_after ?? '36 giờ'} chưa có bản sao lưu mới` });
-    if (update.failed) derived.push({ kind: 'update.failed', title: `Cập nhật lên ${sysUpdate.to ?? 'bản mới'} chưa thành công` });
+    // Như gh/health._eval_update: GH-E94B dừng gọn (`interrupted`) ⇒ 'warn' "bị dừng giữa chừng", không đỏ.
+    if (update.failed && update.interrupted) {
+      derived.push({
+        kind: 'update.failed', severity: 'warn', title: `Cập nhật lên ${sysUpdate.to ?? 'bản mới'} bị dừng giữa chừng`,
+        body: update.interrupted === 'resume'
+          ? 'Máy tắt giữa lúc cập nhật — cần chạy lại để hoàn tất. Bấm để thử lại ngay.'
+          : 'Bản đang dùng vẫn chạy bình thường — lịch đêm sẽ tự thử lại, hoặc bấm để thử lại ngay.',
+      });
+    } else if (update.failed) derived.push({ kind: 'update.failed', title: `Cập nhật lên ${sysUpdate.to ?? 'bản mới'} chưa thành công` });
     if (disk.state === 'low') derived.push({ kind: 'disk.low', body: `Còn ${gb(disk.free_bytes)} GB trống, cần tối thiểu ${gb(disk.min_bytes)} GB — cập nhật tự động đang tạm dừng.` });
+    if (o.autostart?.state === 'warn') derived.push({ kind: 'host.autostart' });
     const issues: HealthIssue[] = [];
     for (const i of [...(o.issues ?? []), ...derived].map((x) => healthIssue(x, now))) if (!issues.some((y) => y.key === i.key)) issues.push(i);
     const overall = issues.some((i) => i.severity === 'bad') ? 'bad' : issues.length ? 'warn' : 'ok';
@@ -425,6 +439,7 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
         { name: 'health_watch', last_at: new Date(nowMs - 60_000).toISOString(), ok: true },
       ],
       backup, update, disk, issues,
+      ...(o.autostart ? { autostart: o.autostart } : {}),
     };
   };
   const notify = (userId: string, kind: string, title: string, body = '', link: string | null = null) => {

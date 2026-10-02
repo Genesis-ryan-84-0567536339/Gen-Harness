@@ -70,13 +70,25 @@ type Options struct {
 	// khi test bước so sánh).
 	ExecutablePath string
 
-	// Client là *http.Client dùng cho mọi request — nil dùng
-	// http.DefaultClient với Timeout riêng theo HTTPTimeout.
+	// Client là *http.Client dùng cho mọi request — nil thì metadata dùng
+	// client riêng có Timeout theo HTTPTimeout, còn tải asset/checksums.txt
+	// dùng client KHÔNG có Timeout tổng (xem download.go). Khác nil (test)
+	// thì dùng nó cho cả hai, đồng hồ rảnh IdleTimeout vẫn áp khi tải.
 	Client *http.Client
-	// HTTPTimeout áp cho từng request (metadata lẫn tải asset) khi Client
-	// nil — mặc định 20s, đủ cho asset genh (vài chục MB) qua mạng chậm mà
-	// không treo `genh update` vô thời hạn nếu mạng đứt giữa chừng.
+	// HTTPTimeout CHỈ áp cho request metadata (/releases/latest) khi Client
+	// nil — mặc định 20s. KHÔNG áp cho tải asset/checksums.txt (asset vài
+	// chục MB qua mạng chậm sẽ quá giờ dù dữ liệu vẫn đều đặn về).
 	HTTPTimeout time.Duration
+
+	// IdleTimeout là thời gian rảnh khi tải asset/checksums.txt: không nhận
+	// được byte nào trong khoảng này ⇒ coi lần thử là hỏng — mặc định 60s.
+	IdleTimeout time.Duration
+	// DownloadAttempts là số lần thử tối đa mỗi tệp tải (lỗi tạm thời: mạng,
+	// hết thời gian rảnh, đứt giữa chừng, HTTP 5xx/408/429) — mặc định 3.
+	DownloadAttempts int
+	// RetryDelays là thời gian chờ trước lần thử lại thứ 1, 2… (hết danh
+	// sách dùng phần tử cuối) — mặc định 5s, 15s; test đặt mili giây.
+	RetryDelays []time.Duration
 
 	// APIBase mặc định "https://api.github.com" — tiêm httptest.Server.URL
 	// khi test.
@@ -387,11 +399,12 @@ func formatDurationVi(d time.Duration) string {
 
 // downloadVerified tải asset + checksums.txt của đúng tag, kiểm SHA-256
 // BẮT BUỘC (giống install.sh verify_checksum) trước khi trả bytes — không
-// bao giờ trả bytes chưa kiểm.
+// bao giờ trả bytes chưa kiểm. Cả hai tệp tải qua downloadWithRetry (thời
+// gian rảnh + thử lại); sai checksum thì KHÔNG thử lại.
 func downloadVerified(ctx context.Context, opts Options, tag, asset string) ([]byte, error) {
 	base := fmt.Sprintf("%s/%s/%s/releases/download/%s", opts.downloadBase(), opts.Owner, opts.Repo, tag)
 
-	sums, err := fetchBytes(ctx, opts, base+"/checksums.txt")
+	sums, err := downloadWithRetry(ctx, opts, base+"/checksums.txt", maxChecksumsBytes)
 	if err != nil {
 		return nil, fmt.Errorf("tải checksums.txt: %w", err)
 	}
@@ -400,7 +413,7 @@ func downloadVerified(ctx context.Context, opts Options, tag, asset string) ([]b
 		return nil, err
 	}
 
-	data, err := fetchBytes(ctx, opts, base+"/"+asset)
+	data, err := downloadWithRetry(ctx, opts, base+"/"+asset, maxAssetBytes)
 	if err != nil {
 		return nil, fmt.Errorf("tải %s: %w", asset, err)
 	}
@@ -410,26 +423,6 @@ func downloadVerified(ctx context.Context, opts Options, tag, asset string) ([]b
 		return nil, fmt.Errorf("SHA-256 của %s không khớp checksums.txt (muốn %s, được %s) — từ chối, không thay binary", asset, want, got)
 	}
 	return data, nil
-}
-
-func fetchBytes(ctx context.Context, opts Options, url string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("User-Agent", "gen-harness-genh")
-
-	resp, err := opts.client().Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, fmt.Errorf("GET %s: %s — %s", url, resp.Status, strings.TrimSpace(string(body)))
-	}
-	return io.ReadAll(resp.Body)
 }
 
 // sha256Hex trả về SHA-256 của data dạng chuỗi hex thường (khớp định dạng

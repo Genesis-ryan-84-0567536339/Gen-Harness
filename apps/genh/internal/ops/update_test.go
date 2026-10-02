@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1348,5 +1349,451 @@ func TestPruneOldImages_OnlyKeptRepos(t *testing.T) {
 	ri := callIndex(fr, exactArgs("rmi"))
 	if fr.Calls[ri].Cmd.Args[1] != "ghcr.io/acme/gen-harness-api@sha256:a1" {
 		t.Errorf("chỉ được rmi ảnh cũ cùng repo bản giữ: %+v", fr.Calls)
+	}
+}
+
+// ─── v0.1.37 F-34: tín hiệu dừng giữa chừng ─────────────────────────────────
+
+// ctxCall ghi một lệnh cùng ctx.Err() ĐÚNG LÚC lệnh được gọi.
+type ctxCall struct {
+	cmd         dockercli.Cmd
+	ctxErr      error
+	hasDeadline bool
+}
+
+// ctxRecRunner bọc fake.Runner: ghi ctx.Err() của từng lệnh; before (nếu có)
+// chạy trước khi giao cho fake — trả lỗi khác nil thì lệnh "lỗi" bằng lỗi đó
+// (dùng để giả lập SIGTERM: gọi cancel() rồi trả context.Canceled).
+type ctxRecRunner struct {
+	*fake.Runner
+	mu     sync.Mutex
+	calls  []ctxCall
+	before func(dockercli.Cmd) error
+}
+
+func (r *ctxRecRunner) rec(ctx context.Context, cmd dockercli.Cmd) error {
+	r.mu.Lock()
+	_, dl := ctx.Deadline()
+	r.calls = append(r.calls, ctxCall{cmd: cmd, ctxErr: ctx.Err(), hasDeadline: dl})
+	r.mu.Unlock()
+	if r.before != nil {
+		return r.before(cmd)
+	}
+	return nil
+}
+
+func (r *ctxRecRunner) Output(ctx context.Context, cmd dockercli.Cmd) ([]byte, error) {
+	if err := r.rec(ctx, cmd); err != nil {
+		return nil, err
+	}
+	return r.Runner.Output(ctx, cmd)
+}
+
+func (r *ctxRecRunner) Stream(ctx context.Context, cmd dockercli.Cmd, onLine func(string)) error {
+	if err := r.rec(ctx, cmd); err != nil {
+		return err
+	}
+	return r.Runner.Stream(ctx, cmd, onLine)
+}
+
+// indexAfter: chỉ số lệnh đầu tiên SAU from khớp match (-1 nếu không có).
+func (r *ctxRecRunner) indexAfter(from int, match func(dockercli.Cmd) bool) int {
+	for i := from + 1; i < len(r.calls); i++ {
+		if match(r.calls[i].cmd) {
+			return i
+		}
+	}
+	return -1
+}
+
+func (r *ctxRecRunner) count(match func(dockercli.Cmd) bool) int {
+	n := 0
+	for _, c := range r.calls {
+		if match(c.cmd) {
+			n++
+		}
+	}
+	return n
+}
+
+// cancelOn: before-hook huỷ ctx và trả context.Canceled ở lệnh khớp match.
+func cancelOn(match func(dockercli.Cmd) bool, cancel context.CancelFunc) func(dockercli.Cmd) error {
+	return func(cmd dockercli.Cmd) error {
+		if match(cmd) {
+			cancel()
+			return context.Canceled
+		}
+		return nil
+	}
+}
+
+func TestRunUpdate_CtxHuyOMigrate_RollbackVanChayRestoreVaUp(t *testing.T) {
+	composePath := testComposePath(t, updateTestComposeYAML)
+	env := testEnv(t, composePath)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	rr := &ctxRecRunner{Runner: updateFakeRunner(pendingMigration)}
+	rr.before = cancelOn(matchMigrate, cancel)
+
+	var out strings.Builder
+	err := RunUpdate(ctx, env, UpdateOptions{Version: testVersion}, fastUpdateDeps(rr), &out)
+	opErr := asOpError(t, err)
+	if opErr.Code != ErrCodeUpdateInterrupted {
+		t.Fatalf("Code = %q, muốn %q (%v)\n%s", opErr.Code, ErrCodeUpdateInterrupted, err, out.String())
+	}
+	if !strings.Contains(opErr.What, "dừng giữa chừng") || !strings.Contains(opErr.What, "đã tự quay về bản cũ") {
+		t.Errorf("What phải nói dừng giữa chừng + đã quay về: %q", opErr.What)
+	}
+	mi := rr.indexAfter(-1, matchMigrate)
+	if mi < 0 {
+		t.Fatal("chưa chạy migrate")
+	}
+	ri := rr.indexAfter(mi, matchRestore)
+	if ri < 0 {
+		t.Fatalf("huỷ ở migrate vẫn phải chạy `gh.backup restore`: %+v", rr.calls)
+	}
+	if !hasExactArgs(rr.calls[ri].cmd.Args, "restore", "--key", updateTestBackupKey) {
+		t.Errorf("restore phải dùng đúng --key bản sao lưu: %v", rr.calls[ri].cmd.Args)
+	}
+	if rr.calls[ri].ctxErr != nil {
+		t.Errorf("restore phải chạy bằng ngữ cảnh KHÔNG bị huỷ, ctx.Err()=%v", rr.calls[ri].ctxErr)
+	}
+	ui := rr.indexAfter(ri, matchFullUp)
+	if ui < 0 || rr.calls[ui].ctxErr != nil {
+		t.Fatalf("phải `up -d --remove-orphans` sau restore bằng ngữ cảnh không bị huỷ: %+v", rr.calls)
+	}
+	for i := mi + 1; i < len(rr.calls); i++ {
+		if rr.calls[i].ctxErr != nil {
+			t.Errorf("lệnh quay về %v chạy với ctx đã huỷ", rr.calls[i].cmd.Args)
+		}
+	}
+	if blockedExists(t, env.InstallDir) {
+		t.Error("bị dừng do tín hiệu thì KHÔNG ghi update-blocked.json (lịch đêm phải thử lại)")
+	}
+	if hostlink.UpdateInProgressExists(env.InstallDir) {
+		t.Error("quay về ổn thì update-inprogress.json phải được xoá")
+	}
+}
+
+// listenHandlerServer như listenReadyServer nhưng nhận handler tuỳ ý.
+func listenHandlerServer(t *testing.T, h http.HandlerFunc) int {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("net.Listen: %v", err)
+	}
+	srv := httptest.NewUnstartedServer(h)
+	srv.Listener = ln
+	srv.TLS = &tls.Config{}
+	srv.StartTLS()
+	t.Cleanup(srv.Close)
+	return ln.Addr().(*net.TCPAddr).Port
+}
+
+func TestRunUpdate_CtxHuyOReady_KhongDungCsdl_VanUp(t *testing.T) {
+	composePath := testComposePath(t, updateTestComposeYAML)
+	env := testEnv(t, composePath)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	env.Port = listenHandlerServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		cancel() // SIGTERM tới đúng lúc đang chờ sẵn sàng
+		w.WriteHeader(http.StatusServiceUnavailable)
+	})
+	rr := &ctxRecRunner{Runner: updateFakeRunner()} // không có migration chờ ⇒ dbTouched=false
+
+	deps := fastUpdateDeps(rr)
+	deps.Timeout = 5 * time.Second
+	var out strings.Builder
+	err := RunUpdate(ctx, env, UpdateOptions{Version: testVersion}, deps, &out)
+	opErr := asOpError(t, err)
+	if opErr.Code != ErrCodeUpdateInterrupted {
+		t.Fatalf("Code = %q, muốn %q (%v)\n%s", opErr.Code, ErrCodeUpdateInterrupted, err, out.String())
+	}
+	if rr.count(matchRestore) != 0 {
+		t.Error("CSDL chưa bị đụng — KHÔNG được khôi phục")
+	}
+	upIdx := -1
+	for i, c := range rr.calls {
+		if matchFullUp(c.cmd) {
+			upIdx = i
+		}
+	}
+	if rr.count(matchFullUp) < 2 || upIdx < 0 || rr.calls[upIdx].ctxErr != nil {
+		t.Fatalf("phải `up -d` lại bằng compose cũ với ngữ cảnh không bị huỷ: %+v", rr.calls)
+	}
+	if b, _ := os.ReadFile(composePath); string(b) != updateTestComposeYAML {
+		t.Error("compose.yaml phải được trả về bản cũ")
+	}
+	if blockedExists(t, env.InstallDir) {
+		t.Error("bị dừng do tín hiệu thì KHÔNG ghi update-blocked.json")
+	}
+}
+
+// Ctrl-C: bước NHẸ (`up -d`) treo thì có hạn riêng — không treo mãi.
+func TestRollback_CoHanRieng(t *testing.T) {
+	old := rollbackTimeout
+	rollbackTimeout = 50 * time.Millisecond
+	defer func() { rollbackTimeout = old }()
+
+	composePath := testComposePath(t, updateTestComposeYAML)
+	fr := updateFakeRunner(fake.Response{Match: matchFullUp, WaitCtx: true})
+	plan := rollbackPlan{runner: fr, composePath: composePath, dir: filepath.Dir(composePath),
+		key: updateTestBackupKey, dbTouched: true, versionBroken: true, installDir: t.TempDir(), version: testVersion}
+	// Hạn riêng chỉ áp cho rollback vì tín hiệu dừng (Ctrl-C).
+	ctx, cancel := context.WithCancelCause(context.Background())
+	cancel(ErrInterruptSignal)
+	var out strings.Builder
+	start := time.Now()
+	err := rollbackAndWrap(ctx, plan, &out, &OpError{Code: ErrCodeUpdateMigrateFailed, What: "migrate lỗi"})
+	if d := time.Since(start); d >= time.Second {
+		t.Fatalf("bước nhẹ của rollback phải có hạn riêng — mất %v", d)
+	}
+	opErr := asOpError(t, err)
+	if !strings.Contains(out.String(), "ROLLBACK THẤT BẠI") || opErr.Code != ErrCodeUpdateInterrupted || !strings.Contains(opErr.What, "CHƯA trọn") {
+		t.Errorf("up treo quá hạn phải báo ROLLBACK THẤT BẠI / quay về CHƯA trọn: %q / %s %q", out.String(), opErr.Code, opErr.What)
+	}
+	b, ok, _ := hostlink.ReadUpdateBlocked(plan.installDir)
+	if !ok || !b.RollbackFailed || b.BackupKey != updateTestBackupKey {
+		t.Errorf("bị dừng mà quay về chưa trọn phải ghi update-blocked.json (rollback_failed + backup_key): %+v ok=%v", b, ok)
+	}
+}
+
+// slowRestoreRunner: `gh.backup restore` (restoreInContainer gọi qua Output)
+// chạy lâu (delay) — trả lỗi nếu ctx bị huỷ/hết hạn trước khi xong (giả lập
+// CommandContext giết docker CLI).
+type slowRestoreRunner struct {
+	dockercli.Runner
+	delay       time.Duration
+	restoreDone bool
+	restoreErr  error
+}
+
+func (r *slowRestoreRunner) Output(ctx context.Context, cmd dockercli.Cmd) ([]byte, error) {
+	if matchRestore(cmd) {
+		select {
+		case <-ctx.Done():
+			r.restoreErr = ctx.Err()
+			return nil, ctx.Err()
+		case <-time.After(r.delay):
+			r.restoreDone = true
+		}
+	}
+	return r.Runner.Output(ctx, cmd)
+}
+
+// Ctrl-C + đã đụng CSDL + pg_restore chạy LÂU HƠN rollbackTimeout: khôi phục
+// KHÔNG bị cắt (cắt giữa chừng sau DROP DATABASE = CSDL trống/dở).
+func TestRollback_SIGINT_KhoiPhucLauHonHan_VanChayXong(t *testing.T) {
+	old := rollbackTimeout
+	rollbackTimeout = 30 * time.Millisecond
+	defer func() { rollbackTimeout = old }()
+
+	composePath := testComposePath(t, updateTestComposeYAML)
+	installDir := t.TempDir()
+	rr := &slowRestoreRunner{Runner: updateFakeRunner(), delay: 200 * time.Millisecond}
+	plan := rollbackPlan{runner: rr, composePath: composePath, dir: filepath.Dir(composePath),
+		key: updateTestBackupKey, dbTouched: true, versionBroken: true, installDir: installDir, version: testVersion}
+	ctx, cancel := context.WithCancelCause(context.Background())
+	cancel(ErrInterruptSignal)
+	var out strings.Builder
+	err := rollbackAndWrap(ctx, plan, &out, &OpError{Code: ErrCodeUpdateMigrateFailed, What: "migrate lỗi"})
+	if rr.restoreErr != nil || !rr.restoreDone {
+		t.Fatalf("restore phải chạy xong dù lâu hơn rollbackTimeout: done=%v err=%v\n%s", rr.restoreDone, rr.restoreErr, out.String())
+	}
+	opErr := asOpError(t, err)
+	if opErr.Code != ErrCodeUpdateInterrupted || !strings.Contains(opErr.What, "đã tự quay về bản cũ") {
+		t.Errorf("muốn GH-E94B đã quay về, được %s %q", opErr.Code, opErr.What)
+	}
+	if blockedExists(t, installDir) {
+		t.Error("quay về ổn sau Ctrl-C thì KHÔNG ghi update-blocked.json")
+	}
+}
+
+// Rollback vì lỗi thường (không có tín hiệu dừng): KHÔNG có hạn — pg_restore
+// trên CSDL lớn/đĩa chậm phải được chạy xong.
+func TestRollback_KhongBiDung_KhoiPhucKhongCoHan(t *testing.T) {
+	old := rollbackTimeout
+	rollbackTimeout = 50 * time.Millisecond
+	defer func() { rollbackTimeout = old }()
+
+	composePath := testComposePath(t, updateTestComposeYAML)
+	rr := &ctxRecRunner{Runner: updateFakeRunner()}
+	plan := rollbackPlan{runner: rr, composePath: composePath, dir: filepath.Dir(composePath),
+		key: updateTestBackupKey, dbTouched: true, versionBroken: true, installDir: t.TempDir(), version: testVersion}
+	err := rollbackAndWrap(context.Background(), plan, &strings.Builder{}, &OpError{Code: ErrCodeUpdateMigrateFailed, What: "migrate lỗi"})
+	if opErr := asOpError(t, err); opErr.Code != ErrCodeUpdateRolledBack || !strings.Contains(opErr.What, "đã tự quay về") {
+		t.Fatalf("muốn GH-E945 đã quay về, được %s %q", opErr.Code, opErr.What)
+	}
+	ri := rr.indexAfter(-1, matchRestore)
+	if ri < 0 {
+		t.Fatalf("phải khôi phục: %+v", rr.calls)
+	}
+	if rr.calls[ri].hasDeadline {
+		t.Error("rollback không do tín hiệu dừng: restore KHÔNG được có hạn")
+	}
+	if ui := rr.indexAfter(ri, matchFullUp); ui < 0 || rr.calls[ui].hasDeadline {
+		t.Errorf("up -d sau restore cũng không có hạn: %+v", rr.calls)
+	}
+}
+
+// Bị dừng (Ctrl-C) + đã đụng CSDL + khôi phục LỖI (vd pg_restore bị cắt sau
+// DROP DATABASE): PHẢI ghi update-blocked.json — lịch đêm không được chạy lại
+// `genh update` đè lên CSDL trống/dở.
+func TestRollback_BiDung_KhoiPhucLoi_VanGhiBlocked(t *testing.T) {
+	composePath := testComposePath(t, updateTestComposeYAML)
+	installDir := t.TempDir()
+	if err := hostlink.MarkUpdateInProgress(installDir, hostlink.UpdateInProgress{}); err != nil {
+		t.Fatal(err)
+	}
+	fr := updateFakeRunner(fake.Response{Match: matchRestore, Err: errors.New("pg_restore: bị giết")})
+	plan := rollbackPlan{runner: fr, composePath: composePath, dir: filepath.Dir(composePath),
+		key: updateTestBackupKey, dbTouched: true, versionBroken: true, installDir: installDir, version: testVersion}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var out strings.Builder
+	err := rollbackAndWrap(ctx, plan, &out, &OpError{Code: ErrCodeUpdateMigrateFailed, What: "migrate lỗi"})
+	opErr := asOpError(t, err)
+	if opErr.Code != ErrCodeUpdateInterrupted || strings.Contains(opErr.What, "đã tự quay về") {
+		t.Fatalf("muốn GH-E94B chưa quay về, được %s %q", opErr.Code, opErr.What)
+	}
+	b, ok, rerr := hostlink.ReadUpdateBlocked(installDir)
+	if rerr != nil || !ok {
+		t.Fatalf("phải ghi update-blocked.json: ok=%v err=%v", ok, rerr)
+	}
+	if !b.RollbackFailed || b.BackupKey != updateTestBackupKey || b.Version != testVersion || !b.DBTouched {
+		t.Errorf("update-blocked.json phải có rollback_failed + backup_key + version: %+v", b)
+	}
+	if !hostlink.UpdateInProgressExists(installDir) {
+		t.Error("quay về chưa trọn thì GIỮ update-inprogress.json")
+	}
+}
+
+// Bị dừng + CSDL chưa đụng + bản hỏng (versionBroken) + up -d lại LỖI: vẫn
+// chặn lịch đêm (rollback_failed, không có backup_key).
+func TestRollback_BiDung_KhongDungCsdl_UpLoi_GhiBlocked(t *testing.T) {
+	composePath := testComposePath(t, updateTestComposeYAML)
+	installDir := t.TempDir()
+	fr := updateFakeRunner(fake.Response{Match: matchFullUp, Err: errors.New("docker đang dừng")})
+	plan := rollbackPlan{runner: fr, composePath: composePath, dir: filepath.Dir(composePath),
+		key: updateTestBackupKey, dbTouched: false, versionBroken: true, installDir: installDir, version: testVersion}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := rollbackAndWrap(ctx, plan, &strings.Builder{}, &OpError{Code: ErrCodeUpdateNotReady, What: "chưa sẵn sàng"})
+	if opErr := asOpError(t, err); opErr.Code != ErrCodeUpdateInterrupted {
+		t.Fatalf("muốn GH-E94B, được %s", opErr.Code)
+	}
+	b, ok, _ := hostlink.ReadUpdateBlocked(installDir)
+	if !ok || !b.RollbackFailed || b.BackupKey != "" || b.DBTouched {
+		t.Errorf("phải ghi update-blocked.json rollback_failed, KHÔNG backup_key: %+v ok=%v", b, ok)
+	}
+}
+
+// SIGTERM (máy tắt) sau khi đã đụng CSDL: KHÔNG khôi phục (không dừng dịch
+// vụ, không DROP/pg_restore, không up), KHÔNG trả compose.yaml về bản cũ (CSDL
+// đã migrate chỉ khớp compose mới), KHÔNG ghi update-blocked.json, GIỮ
+// update-inprogress.json — sau khi bật lại máy `genh update` đi tiếp lên bản mới.
+func TestRollback_SIGTERM_DaDungCsdl_GiuBanMoiDeDiTiep(t *testing.T) {
+	const newCompose = "services: {}\n"
+	composePath := testComposePath(t, newCompose) // compose MỚI đang nằm trên đĩa
+	installDir := t.TempDir()
+	if err := hostlink.MarkUpdateInProgress(installDir, hostlink.UpdateInProgress{}); err != nil {
+		t.Fatal(err)
+	}
+	fr := updateFakeRunner()
+	plan := rollbackPlan{runner: fr, composePath: composePath, dir: filepath.Dir(composePath),
+		key: updateTestBackupKey, dbTouched: true, versionBroken: true, installDir: installDir, version: testVersion,
+		oldCompose: []byte(updateTestComposeYAML)}
+	ctx, cancel := context.WithCancelCause(context.Background())
+	cancel(ErrShutdownSignal)
+	var out strings.Builder
+	err := rollbackAndWrap(ctx, plan, &out, &OpError{Code: ErrCodeUpdateMigrateFailed, What: "migrate lỗi"})
+	opErr := asOpError(t, err)
+	if opErr.Code != ErrCodeUpdateInterrupted || !strings.Contains(opErr.What, updateShutdownForwardMarker) {
+		t.Fatalf("muốn GH-E94B %q, được %s %q", updateShutdownForwardMarker, opErr.Code, opErr.What)
+	}
+	if strings.Contains(opErr.What, "chưa trọn") || strings.Contains(opErr.What, "CHƯA trọn") {
+		t.Errorf("không được nói \"quay về chưa trọn\" (Console sẽ bảo xử lý tay/khôi phục): %q", opErr.What)
+	}
+	if !strings.Contains(opErr.Next, "genh update") || strings.Contains(opErr.Next, "restore --key") {
+		t.Errorf("Next phải bảo chạy lại `genh update`, KHÔNG bảo khôi phục bản sao lưu cũ: %q", opErr.Next)
+	}
+	if len(fr.Calls) != 0 {
+		t.Errorf("máy đang tắt: KHÔNG chạy lệnh docker nào (stop/restore/up): %+v", fr.Calls)
+	}
+	if b, _ := os.ReadFile(composePath); string(b) != newCompose {
+		t.Error("compose.yaml phải GIỮ bản mới (khớp CSDL đã migrate)")
+	}
+	if blockedExists(t, installDir) {
+		t.Error("KHÔNG ghi update-blocked.json (không đẩy Owner đi khôi phục bản sao lưu cũ)")
+	}
+	if !hostlink.UpdateInProgressExists(installDir) {
+		t.Error("GIỮ update-inprogress.json để lần chạy sau coi \"chưa khớp\" và đi tiếp")
+	}
+}
+
+func TestRunUpdate_HuyTruocSaoLuu_ChuaDungGi(t *testing.T) {
+	composePath := testComposePath(t, updateTestComposeYAML)
+	env := testEnv(t, composePath)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	rr := &ctxRecRunner{Runner: updateFakeRunner()}
+	rr.before = cancelOn(matchPull, cancel)
+
+	err := RunUpdate(ctx, env, UpdateOptions{Version: testVersion}, fastUpdateDeps(rr), &strings.Builder{})
+	opErr := asOpError(t, err)
+	if opErr.Code != ErrCodeUpdateInterrupted || !strings.Contains(opErr.What, "chưa đụng gì") {
+		t.Fatalf("muốn GH-E94B \"chưa đụng gì\", được %s %q", opErr.Code, opErr.What)
+	}
+	if rr.count(matchBackupRun) != 0 || rr.count(matchRestore) != 0 || rr.count(matchUp) != 0 || rr.count(matchMigrate) != 0 {
+		t.Errorf("huỷ lúc tải: không sao lưu/khôi phục/up/migrate: %+v", rr.calls)
+	}
+	if rr.count(matchPull) != 1 {
+		t.Errorf("huỷ thì không thử tải lại: %d lần", rr.count(matchPull))
+	}
+	if b, _ := os.ReadFile(composePath); string(b) != updateTestComposeYAML {
+		t.Error("compose.yaml phải giữ nguyên")
+	}
+	if blockedExists(t, env.InstallDir) {
+		t.Error("không ghi update-blocked.json")
+	}
+}
+
+func TestRunUpdate_SaoLuuLoiDoHuy_VanBatLaiWorkerBridge(t *testing.T) {
+	composePath := testComposePath(t, updateTestComposeYAML)
+	env := testEnv(t, composePath)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	rr := &ctxRecRunner{Runner: updateFakeRunner(pendingMigration)}
+	rr.before = cancelOn(matchBackupRun, cancel)
+
+	err := RunUpdate(ctx, env, UpdateOptions{Version: testVersion}, fastUpdateDeps(rr), &strings.Builder{})
+	opErr := asOpError(t, err)
+	if opErr.Code != ErrCodeUpdateInterrupted {
+		t.Fatalf("muốn %s, được %v", ErrCodeUpdateInterrupted, err)
+	}
+	bi := rr.indexAfter(-1, matchBackupRun)
+	si := rr.indexAfter(bi, matchStart)
+	if bi < 0 || si < 0 {
+		t.Fatalf("sao lưu lỗi do huỷ vẫn phải `start worker bridge`: %+v", rr.calls)
+	}
+	if !strings.HasSuffix(strings.Join(rr.calls[si].cmd.Args, " "), "start worker bridge") || rr.calls[si].ctxErr != nil {
+		t.Errorf("`start worker bridge` phải chạy bằng ngữ cảnh không bị huỷ: %v ctxErr=%v", rr.calls[si].cmd.Args, rr.calls[si].ctxErr)
+	}
+	if rr.count(matchRestore) != 0 || rr.count(matchUp) != 0 || rr.count(matchMigrate) != 0 {
+		t.Error("sao lưu lỗi thì không restore/up/migrate")
+	}
+}
+
+// Dòng thử lại tải giữ đúng chuỗi E2E grep "thử lại lần %d/%d".
+func TestPullWithRetry_DongThuLai(t *testing.T) {
+	fr := &fake.Runner{Responses: []fake.Response{{Match: matchPull, ErrSeq: []error{errors.New("mạng"), nil}}}}
+	var out strings.Builder
+	n, err := pullWithRetry(context.Background(), fr, dockercli.Cmd{Name: "docker", Args: []string{"compose", "pull"}},
+		UpdateDeps{PullAttempts: 3, PullBackoff: []time.Duration{0}, PullTimeout: time.Second}, &out)
+	if err != nil || n != 2 {
+		t.Fatalf("n=%d err=%v", n, err)
+	}
+	if !strings.Contains(out.String(), "thử lại lần 2/3") {
+		t.Errorf("thiếu dòng \"thử lại lần 2/3\": %q", out.String())
 	}
 }

@@ -2,6 +2,7 @@ package autoupdate
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -59,6 +60,80 @@ func enableLinux(ctx context.Context, deps Deps) (string, error) {
 		return "", fmt.Errorf("cài crontab: %w", err)
 	}
 	return "Đã bật tự cập nhật hằng đêm lúc ~03:00 (crontab — máy này không có systemd --user) — tắt bằng `genh auto-update disable`", nil
+}
+
+// refreshUnitsLinux bổ sung KillMode=mixed / TimeoutStopSec (v0.1.37 — unit
+// chỉ được ghi lúc install/enable, máy cài từ bản cũ thiếu) vào unit lịch đêm
+// ĐÃ CÀI rồi `systemctl --user daemon-reload`. CHỈ thêm dòng còn thiếu
+// (patchServiceUnit): giữ nguyên mọi dòng khác — sửa tay của Owner
+// (Environment=, Nice=, KillMode khác…) và ExecStart cũ (chạy `genh update` từ
+// đường dẫn khác không được trỏ lịch đêm sang binary đó). Chưa có unit (lịch
+// đêm tắt, hoặc dùng crontab) → không làm gì; KHÔNG enable/disable gì. Trả
+// true nếu đã ghi lại.
+func refreshUnitsLinux(ctx context.Context, deps Deps) (bool, error) {
+	home, err := deps.homeDir()
+	if err != nil {
+		return false, fmt.Errorf("không xác định được thư mục home: %w", err)
+	}
+	path := serviceUnitPath(home)
+	cur, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("đọc %s: %w", path, err)
+	}
+	want, changed := patchServiceUnit(string(cur))
+	if !changed {
+		return false, nil
+	}
+	if err := os.WriteFile(path, []byte(want), 0o644); err != nil {
+		return false, fmt.Errorf("ghi %s: %w", path, err)
+	}
+	if _, err := deps.runner().Output(ctx, "systemctl", []string{"--user", "daemon-reload"}); err != nil {
+		return true, fmt.Errorf("systemctl --user daemon-reload: %w", err)
+	}
+	return true, nil
+}
+
+// stopDirectives: các dòng [Service] v0.1.37 cần có (xem SystemdServiceUnit).
+var stopDirectives = []struct{ key, line string }{
+	{"KillMode", "KillMode=mixed"},
+	{"TimeoutStopSec", "TimeoutStopSec=900"},
+}
+
+// patchServiceUnit thêm các dòng stopDirectives CÒN THIẾU ngay sau dòng
+// [Service] (khoá đã có — kể cả giá trị khác do Owner đặt — thì giữ nguyên).
+// Không có mục [Service] → thêm mục đó ở cuối. changed=false nếu đủ cả.
+func patchServiceUnit(cur string) (string, bool) {
+	lines := strings.Split(cur, "\n")
+	has := func(key string) bool {
+		for _, l := range lines {
+			if strings.HasPrefix(strings.TrimSpace(l), key+"=") {
+				return true
+			}
+		}
+		return false
+	}
+	var add []string
+	for _, d := range stopDirectives {
+		if !has(d.key) {
+			add = append(add, d.line)
+		}
+	}
+	if len(add) == 0 {
+		return cur, false
+	}
+	for i, l := range lines {
+		if strings.TrimSpace(l) == "[Service]" {
+			out := append(append(append([]string{}, lines[:i+1]...), add...), lines[i+1:]...)
+			return strings.Join(out, "\n"), true
+		}
+	}
+	if cur != "" && !strings.HasSuffix(cur, "\n") {
+		cur += "\n"
+	}
+	return cur + "\n[Service]\n" + strings.Join(add, "\n") + "\n", true
 }
 
 func disableLinux(ctx context.Context, deps Deps) (string, error) {

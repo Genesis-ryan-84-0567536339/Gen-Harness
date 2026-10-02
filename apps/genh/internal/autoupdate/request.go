@@ -43,7 +43,9 @@ func updateRequestCmd(genhPath string, port int) string {
 }
 
 // SystemdRequestServiceUnit: chạy `genh handle-requests` một lần (genh tự xoá
-// tệp yêu cầu trước khi làm nên path unit không kích lặp).
+// tệp yêu cầu trước khi làm nên path unit không kích lặp). KillMode=mixed +
+// TimeoutStopSec=900: như SystemdServiceUnit (lúc tắt máy giới hạn thật vẫn là
+// ~120 giây của user@.service — xem chú thích ở đó).
 func SystemdRequestServiceUnit(genhPath, logFile string, rp RequestPaths) string {
 	env := ""
 	for _, kv := range rp.env() {
@@ -56,6 +58,8 @@ Description=Gen-Harness — cap nhat/khoi phuc khi Owner bam nut trong Console
 [Service]
 Type=oneshot
 %sExecStart=%s
+KillMode=mixed
+TimeoutStopSec=900
 StandardOutput=append:%s
 StandardError=append:%s
 `, env, updateRequestCmd(genhPath, port), logFile, logFile)

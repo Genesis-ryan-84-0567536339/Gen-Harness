@@ -29,6 +29,10 @@ type DoctorDeps struct {
 	// TLS có phục vụ được, không xác minh CA), trả về mô tả chứng chỉ nhận
 	// được — nil dùng tls.DialWithDialer thật.
 	DialTLS func(address string, timeout time.Duration) (subject string, notAfter time.Time, err error)
+	// GOOS/UID cho phần "Tự chạy lại khi bật máy" (CheckAutostart) — rỗng dùng
+	// runtime.GOOS / os.Getuid().
+	GOOS string
+	UID  string
 }
 
 func realDialTCP(address string, timeout time.Duration) error {
@@ -161,9 +165,15 @@ func RunDoctor(ctx context.Context, env *Env, outPath string, deps DoctorDeps, o
 		lines = append(lines, diagLine{"Kết nối kênh (bridge)", bridgeStatus == "ok", "bridge: " + bridgeStatus})
 	}
 
+	// 7–8. Tự chạy lại khi bật máy (v0.1.37, F-73): Docker + linger — ghi kèm
+	// run/autostart-status.json cho Console.
+	as := CheckAutostart(ctx, AutostartDeps{Runner: runner, GOOS: deps.GOOS, UID: deps.UID})
+	lines = append(lines, autostartLines(as)...)
+
 	for _, l := range lines {
 		_, _ = fmt.Fprintln(out, l.String())
 	}
+	writeAutostartStatus(env, as, out)
 
 	// Xuất báo cáo zip: report.txt (các dòng trên, đầy đủ) + logs.txt
 	// (`docker compose logs -t --tail=500` mọi service; `-t` = dấu thời gian

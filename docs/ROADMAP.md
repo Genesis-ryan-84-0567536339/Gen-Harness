@@ -63,6 +63,12 @@ v0.1.36: hệ thống tự báo khi hỏng (F-6 bước 1, F-3, F-4 bước 1, F
 3600 giây, bị huỷ thì báo chuông; log JSON có ts + traceback + error_id; cron theo giờ VN (job nặng 04:20–05:10); một số
 phiên bản từ build-arg (`gh.__version__`, LABEL ảnh, Trợ giúp hiện "phiên bản máy chủ" + "phiên bản công cụ cài đặt (genh)"). Còn: F-2 job tự xoá theo hạn lưu
 (v0.1.40 — hiện khoá nút Sửa, ghi "Chưa tự xoá"), F-6/F-4 các bước sau.
+v0.1.37: cập nhật tự lành (F-34, F-35 phần còn lại, F-72, F-73) — khoá loại trừ `<gốc cài>/genh.lock` (lịch đêm bận
+bỏ qua, gõ tay bận GH-E94A), bắt SIGTERM + rollback không bị huỷ (hạn riêng 10 phút, dừng giữa chừng GH-E94B, lịch đêm thử
+lại), unit systemd `KillMode=mixed`/`TimeoutStopSec=900`, nhịp sống `run/genh-heartbeat.json` ⇒ Console hiện "bị dừng giữa
+chừng" + Thử lại thay vì kẹt "đang cập nhật"; tải binary genh theo thời gian rảnh + thử lại 3 lần (cả `install.sh`);
+`genh status/doctor` kiểm linger + `docker.service` enabled, chuông `host.autostart` kèm lệnh sửa; E2E nâng cấp có dữ liệu
+thêm ô `tags[3]` (nhảy nhiều bản) + kiểm khoá/tự chạy lại khi bật máy.
 
 ## Đợt A — Gen v1 (thiết kế: docs/design/gen-v1.md)
 - ✅ A1 Khung chat phải + Gen trả lời/tóm tắt (chỉ đọc), lưu hội thoại, Nhật ký hành động — v0.1.21.

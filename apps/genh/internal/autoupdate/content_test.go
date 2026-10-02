@@ -1,6 +1,9 @@
 package autoupdate
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestSystemdServiceUnit_ContainsGenhPathAndLogFile(t *testing.T) {
 	unit := SystemdServiceUnit("/home/o/.gen-harness/bin/genh", "/home/o/.gen-harness/logs/auto-update.log")
@@ -156,4 +159,19 @@ func countOccurrences(haystack, needle string) int {
 		}
 	}
 	return count
+}
+
+// v0.1.37 (F-34): tắt máy giữa chừng — systemd chỉ SIGTERM tiến trình chính và
+// chờ 15 phút cho phần quay về bản cũ.
+func TestSystemdServiceUnits_KillModeMixed_TimeoutStop900(t *testing.T) {
+	units := map[string]string{
+		"lịch đêm":        SystemdServiceUnit("/g/genh", "/g/log"),
+		"watcher yêu cầu": SystemdRequestServiceUnit("/g/genh", "/g/log", RequestPaths{InstallDir: "/r", RequestFile: "/r/run/request/update.json"}),
+	}
+	for name, u := range units {
+		svc := u[strings.Index(u, "[Service]"):]
+		if !strings.Contains(svc, "KillMode=mixed\n") || !strings.Contains(svc, "TimeoutStopSec=900\n") {
+			t.Errorf("%s: [Service] phải có KillMode=mixed và TimeoutStopSec=900:\n%s", name, u)
+		}
+	}
 }

@@ -92,3 +92,9 @@ func TestEnsureRequestWatcher_WindowsUnsupported(t *testing.T) {
 		t.Fatal("Windows chưa hỗ trợ — phải trả lỗi để Console hiện lệnh tay")
 	}
 }
+
+func TestSystemdRequestServiceUnit_KillModeMixed(t *testing.T) {
+	unit := SystemdRequestServiceUnit("/g/genh", "/g/log", RequestPaths{InstallDir: "/r"})
+	mustContain(t, unit, "KillMode=mixed")
+	mustContain(t, unit, "TimeoutStopSec=900")
+}

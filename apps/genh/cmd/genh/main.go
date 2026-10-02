@@ -23,6 +23,8 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -177,6 +179,133 @@ theo kênh — xem docs/handoff/05-installer.md).
 `)
 }
 
+// signalContext là ngữ cảnh bị huỷ khi genh nhận tín hiệu dừng: Ctrl-C
+// (os.Interrupt) HOẶC SIGTERM — systemd gửi SIGTERM khi máy tắt/khởi động lại
+// hoặc `systemctl stop` (v0.1.37, F-34: trước đây chỉ bắt Ctrl-C nên SIGTERM
+// giết genh ngay giữa lúc migrate, không kịp quay về bản cũ). syscall.SIGTERM có
+// trên mọi hệ điều hành Go hỗ trợ (Windows: chỉ là hằng, không bao giờ tới).
+//
+// Nguyên nhân huỷ (context.Cause) nói tín hiệu nào: SIGTERM → ops.ErrShutdownSignal
+// (máy tắt — rollback không bắt đầu khôi phục CSDL trong khung ~2 phút trước
+// SIGKILL), Ctrl-C → ops.ErrInterruptSignal. Như signal.NotifyContext, sau tín
+// hiệu đầu genh VẪN bắt tín hiệu (không chết vì tín hiệu thứ hai) cho tới stop.
+func signalContext() (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancelCause(context.Background())
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
+	done := make(chan struct{})
+	go func() {
+		select {
+		case sig := <-ch:
+			cancel(signalCause(sig))
+		case <-done:
+		}
+	}()
+	var once sync.Once
+	return ctx, func() {
+		once.Do(func() {
+			signal.Stop(ch)
+			close(done)
+			cancel(context.Canceled)
+		})
+	}
+}
+
+// signalCause: nguyên nhân huỷ ngữ cảnh ứng với tín hiệu nhận được.
+func signalCause(sig os.Signal) error {
+	if sig == syscall.SIGTERM {
+		return ops.ErrShutdownSignal
+	}
+	return ops.ErrInterruptSignal
+}
+
+// forwardSignal: tín hiệu chuyển cho tiến trình con theo nguyên nhân huỷ ctx —
+// giữ đúng loại (Ctrl-C vẫn là SIGINT để con khôi phục như thường, SIGTERM vẫn
+// là SIGTERM để con không bắt đầu khôi phục lúc máy đang tắt).
+func forwardSignal(ctx context.Context) os.Signal {
+	if errors.Is(context.Cause(ctx), ops.ErrInterruptSignal) {
+		return os.Interrupt
+	}
+	return syscall.SIGTERM
+}
+
+// lockMode: cách lấy khoá loại trừ (<gốc cài đặt>/genh.lock) theo cách genh
+// được gọi.
+type lockMode int
+
+const (
+	// lockManual: Owner gõ tay — bận ⇒ in lý do ra stderr, thoát 1 (GH-E94A).
+	lockManual lockMode = iota
+	// lockScheduled: lịch đêm — bận ⇒ in một dòng ra stdout (vào log), thoát 0,
+	// KHÔNG đụng hộp thư Console.
+	lockScheduled
+	// lockRequested: nút trong Console (watcher, --if-requested) — CHỜ tối đa
+	// requestLockWait: thoát ngay khi tệp yêu cầu còn đó thì path unit systemd
+	// sẽ kích lặp liên tục.
+	lockRequested
+)
+
+// requestLockWait: thời gian tối đa --if-requested chờ lần khác nhả khoá (biến
+// gói để test đặt ngắn).
+var requestLockWait = 30 * time.Minute
+
+// lockBusyLine: dòng log khi khoá bận (E2E grep "đang có một lần cập
+// nhật/khôi phục khác chạy").
+func lockBusyLine(err error) string {
+	if pid := hostlink.BusyPID(err); pid > 0 {
+		return fmt.Sprintf("genh: đang có một lần cập nhật/khôi phục khác chạy (PID %d) — lần này bỏ qua.", pid)
+	}
+	return "genh: đang có một lần cập nhật/khôi phục khác chạy — lần này bỏ qua."
+}
+
+// acquireOpLock lấy khoá loại trừ cho update/restore/import ở tiến trình NGOÀI
+// CÙNG, TRƯỚC khi đụng hộp thư Console. ok=false ⇒ caller trả ngay exitCode.
+// stillWanted (lockRequested): kiểm lại yêu cầu sau khi chờ được khoá — lần
+// chạy trước (vd lịch đêm) có thể đã nuốt nó. Lỗi khác "bận" (không mở được
+// genh.lock…) chỉ cảnh báo rồi chạy tiếp không khoá — không chặn bản vá vì một
+// tệp khoá hỏng.
+func acquireOpLock(ctx context.Context, installDir string, mode lockMode, stillWanted func() bool, stdout, stderr io.Writer) (lock *hostlink.Lock, exitCode int, ok bool) {
+	lock, err := hostlink.AcquireLock(installDir)
+	if mode == lockRequested && errors.Is(err, hostlink.ErrLockBusy) {
+		// Chỉ MỘT người chờ cùng lúc (watcher crontab kích mỗi phút — xem
+		// hostlink.WaitLockFile); người chờ đó sẽ làm yêu cầu, lần này thoát.
+		waiter, werr := hostlink.AcquireWaitLock(installDir)
+		if errors.Is(werr, hostlink.ErrLockBusy) {
+			_, _ = fmt.Fprintln(stdout, "genh: đã có một tiến trình khác đang chờ để làm yêu cầu từ Console — lần này bỏ qua.")
+			return nil, 0, false
+		}
+		_, _ = fmt.Fprintf(stdout, "genh: chờ lần cập nhật/khôi phục đang chạy xong (tối đa %s) rồi làm tiếp yêu cầu từ Console…\n", requestLockWait)
+		lock, err = hostlink.AcquireLockWait(ctx, installDir, requestLockWait)
+		waiter.Release()
+	}
+	switch {
+	case err == nil:
+	case errors.Is(err, hostlink.ErrLockBusy):
+		if mode == lockManual {
+			_, _ = fmt.Fprintln(stderr, lockBusyLine(err))
+			_, _ = fmt.Fprint(stderr, (&ops.OpError{
+				Code: ops.ErrCodeUpdateLocked,
+				What: "Chưa chạy lệnh này — đang có một lần cập nhật/khôi phục khác",
+				Why:  err.Error(),
+				Next: "Đợi lần đó chạy xong (xem `genh status` hoặc logs/auto-update.log) rồi chạy lại lệnh này.",
+			}).Report())
+			return nil, 1, false
+		}
+		_, _ = fmt.Fprintln(stdout, lockBusyLine(err))
+		return nil, 0, false
+	case ctx.Err() != nil:
+		_, _ = fmt.Fprintln(stderr, "genh: nhận tín hiệu dừng khi đang chờ lần cập nhật/khôi phục khác chạy xong — không làm gì.")
+		return nil, 1, false
+	default:
+		_, _ = fmt.Fprintf(stderr, "genh: cảnh báo — không lấy được khoá loại trừ (%v); vẫn chạy tiếp.\n", err)
+	}
+	if mode == lockRequested && stillWanted != nil && !stillWanted() {
+		lock.Release()
+		return nil, 0, false
+	}
+	return lock, 0, true
+}
+
 // opsFlagSet dựng flag.FlagSet chung cho mọi lệnh vận hành (--port/
 // --install-dir, cùng mặc định với runInstall) — trả về FlagSet CHƯA Parse
 // (caller tự thêm cờ riêng của lệnh trước khi gọi fs.Parse) cùng 2 con trỏ
@@ -252,7 +381,7 @@ func runLogs(args []string) int {
 	if !ok {
 		return 1
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signalContext()
 	defer stop()
 	opts := ops.LogsOptions{Services: fs.Args(), Follow: *follow}
 	if err := ops.RunLogs(ctx, env, opts, nil, os.Stdout, os.Stderr, os.Stdin); err != nil {
@@ -312,6 +441,35 @@ func runUpdate(args []string) int {
 		return 1
 	}
 
+	// Tín hiệu dừng (Ctrl-C/SIGTERM) bắt từ ĐẦU — kể cả lúc tự cập nhật binary
+	// và lúc chờ tiến trình con (trySelfUpdateAndReExec chuyển tiếp cho con).
+	ctx, stop := signalContext()
+	defer stop()
+
+	// Khoá loại trừ (v0.1.37, F-35): tiến trình NGOÀI CÙNG lấy khoá TRƯỚC khi đụng
+	// hộp thư Console — hai genh update/restore chạy chồng nhau (lịch đêm + nút
+	// Console + gõ tay) sẽ sao lưu/migrate/khôi phục giẫm lên nhau. Tiến trình
+	// con --self-updated BỎ QUA (cha đang giữ khoá; fd khoá không kế thừa).
+	if !f.selfUpdated {
+		if f.ifRequested && !hostlink.HasRequest(env.InstallDir) {
+			return 0
+		}
+		mode := lockManual
+		switch {
+		case f.ifRequested:
+			mode = lockRequested
+		case f.yes:
+			mode = lockScheduled
+		}
+		lock, code, ok := acquireOpLock(ctx, env.InstallDir, mode, func() bool { return hostlink.HasRequest(env.InstallDir) }, os.Stdout, os.Stderr)
+		if !ok {
+			return code
+		}
+		defer lock.Release()
+		stopBeat := hostlink.StartHeartbeat(env.InstallDir, "update")
+		defer stopBeat()
+	}
+
 	// Hộp thư Console (internal/hostlink): tiến trình NGOÀI CÙNG (không phải bản
 	// re-exec sau tự cập nhật) xoá yêu cầu "Cập nhật ngay" TRƯỚC khi chạy — để
 	// watcher không kích lặp — rồi báo "running" cho Console hiện tiến trình.
@@ -324,9 +482,6 @@ func runUpdate(args []string) int {
 	var statusSnap []byte
 	hadStatus, hadRequest := false, false
 	if !f.selfUpdated {
-		if f.ifRequested && !hostlink.HasRequest(env.InstallDir) {
-			return 0
-		}
 		statusSnap, hadStatus = hostlink.SnapshotStatus(env.InstallDir)
 		hadRequest = hostlink.ConsumeRequest(env.InstallDir)
 		_ = hostlink.Start(env.InstallDir, version)
@@ -340,13 +495,18 @@ func runUpdate(args []string) int {
 	// vô hạn tự-tải-tự-re-exec nếu có gì đó luôn báo "mới hơn" sai).
 	deferred := false
 	if !f.noSelfUpdate && !f.selfUpdated {
-		code, ok, d := trySelfUpdateAndReExec(childUpdateArgs(args, f.ifRequested, requested), f.quiet, minAge)
+		code, ok, d := trySelfUpdateAndReExec(ctx, childUpdateArgs(args, f.ifRequested, requested), f.quiet, minAge)
 		deferred = d
 		if ok {
 			// Bản mới (tiến trình con) tự ghi kết quả; con chết giữa chừng thì
 			// trạng thái vẫn "running" — báo lỗi thay nó để Console không chờ mãi.
+			// Không chạy được con vì tín hiệu dừng tới ngay sau khi tải genh mới
+			// (code == exitStoppedBeforeReExec): chưa đụng gì — GH-E94B.
 			if st, err := hostlink.ReadStatus(env.InstallDir); code != 0 && err == nil && st.State == "running" {
-				_ = hostlink.Finish(env.InstallDir, "failed", "", "Cập nhật dừng giữa chừng — xem logs/auto-update.log")
+				_ = hostlink.Finish(env.InstallDir, "failed", "", childFailedMessage(code == exitStoppedBeforeReExec, context.Cause(ctx)))
+			}
+			if code == exitStoppedBeforeReExec {
+				return 1
 			}
 			return code
 		}
@@ -378,8 +538,6 @@ func runUpdate(args []string) int {
 		return 0
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
 	out := io.Writer(os.Stdout)
 	if f.quiet {
 		out = io.Discard
@@ -567,7 +725,12 @@ func selfUpdateMinAge(yes, ifRequested bool) time.Duration {
 // selfUpdateMinAge) — bản chưa đủ chín: Run trả Skipped/Deferred, hàm này
 // trả (0, false, true): caller chạy phần dịch vụ như khi đã mới nhất nhưng
 // biết là có bản mới đang đợi (dòng kết không được nói "cập nhật xong").
-func trySelfUpdateAndReExec(originalArgs []string, quiet bool, minAge time.Duration) (exitCode int, reExeced bool, deferred bool) {
+//
+// ctx (signalContext của tiến trình ngoài): tự cập nhật dừng theo tín hiệu; khi
+// đang chờ tiến trình con mà ctx bị huỷ (systemd KillMode=mixed chỉ gửi SIGTERM
+// cho tiến trình CHÍNH) thì chuyển tiếp SIGTERM cho con và TIẾP TỤC chờ con
+// quay về bản cũ xong — không Kill con.
+func trySelfUpdateAndReExec(ctx context.Context, originalArgs []string, quiet bool, minAge time.Duration) (exitCode int, reExeced bool, deferred bool) {
 	execPath, err := os.Executable()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "genh: không tự cập nhật binary được (không xác định được đường dẫn của chính nó): %v — tiếp tục với bản hiện tại.\n", err)
@@ -575,7 +738,7 @@ func trySelfUpdateAndReExec(originalArgs []string, quiet bool, minAge time.Durat
 	}
 	execPath, _ = filepath.Abs(execPath)
 
-	res, err := selfupdate.Run(context.Background(), selfupdate.Options{
+	res, err := selfupdate.Run(ctx, selfupdate.Options{
 		Owner: selfupdateOwner, Repo: selfupdateRepo,
 		CurrentVersion: version,
 		GOOS:           runtime.GOOS, GOARCH: runtime.GOARCH,
@@ -599,7 +762,11 @@ func trySelfUpdateAndReExec(originalArgs []string, quiet bool, minAge time.Durat
 	child.Stdin = os.Stdin
 	child.Stdout = os.Stdout
 	child.Stderr = os.Stderr
-	if err := child.Run(); err != nil {
+	if err := runChildForwardingSignal(ctx, child); err != nil {
+		if errors.Is(err, errStoppedBeforeReExec) {
+			fmt.Fprintf(os.Stderr, "genh: nhận tín hiệu dừng ngay sau khi tải genh %s — chưa đụng gì tới dịch vụ; lần sau (lịch đêm hoặc genh update) sẽ làm tiếp.\n", res.To)
+			return exitStoppedBeforeReExec, true, false
+		}
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			return exitErr.ExitCode(), true, false
@@ -608,6 +775,59 @@ func trySelfUpdateAndReExec(originalArgs []string, quiet bool, minAge time.Durat
 		return 1, true, false
 	}
 	return 0, true, false
+}
+
+// exitStoppedBeforeReExec: mã nội bộ trySelfUpdateAndReExec trả khi KHÔNG chạy
+// được genh bản mới vì tín hiệu dừng (errStoppedBeforeReExec) — caller ghi
+// Console GH-E94B "chưa đụng gì" rồi thoát mã 1 (không lộ mã này ra ngoài).
+const exitStoppedBeforeReExec = -2
+
+// childFailedMessage: thông điệp Console khi tiến trình con (genh bản mới) không
+// ghi được kết quả. stoppedBeforeChild: tín hiệu dừng tới trước khi chạy con —
+// chưa đụng gì (GH-E94B, Console hiện thẻ "dừng giữa chừng — chưa đụng gì",
+// không phải thẻ lỗi đỏ "đã tự quay về").
+func childFailedMessage(stoppedBeforeChild bool, cause error) string {
+	if stoppedBeforeChild {
+		if cause == nil {
+			cause = errStoppedBeforeReExec
+		}
+		return consoleUpdateMessage(ops.InterruptedBeforeTouch(cause))
+	}
+	return "Cập nhật dừng giữa chừng — xem logs/auto-update.log"
+}
+
+// errStoppedBeforeReExec: tín hiệu dừng tới trước khi kịp chạy genh bản mới.
+var errStoppedBeforeReExec = errors.New("nhận tín hiệu dừng trước khi chạy genh bản mới")
+
+// runChildForwardingSignal chạy child và chờ nó xong; trong lúc chờ, ctx bị huỷ
+// (tín hiệu dừng tới tiến trình này) ⇒ chuyển tiếp SIGTERM cho con một lần rồi
+// VẪN chờ (con tự quay về bản cũ — xem ops.rollbackAndWrap). Windows không gửi
+// được SIGTERM/Interrupt cho tiến trình khác ⇒ chỉ ghi log (con cùng console
+// vẫn nhận Ctrl-C của chính nó). ctx ĐÃ bị huỷ trước khi chạy ⇒ KHÔNG chạy con
+// (con chưa kịp cài bộ bắt tín hiệu sẽ bị giết ngay, không ghi được kết quả) —
+// trả errStoppedBeforeReExec.
+func runChildForwardingSignal(ctx context.Context, child *exec.Cmd) error {
+	if ctx.Err() != nil {
+		return errStoppedBeforeReExec
+	}
+	if err := child.Start(); err != nil {
+		return err
+	}
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-done:
+		case <-ctx.Done():
+			if runtime.GOOS == "windows" {
+				fmt.Fprintln(os.Stderr, "genh: nhận tín hiệu dừng — đang chờ genh bản mới chạy xong (Windows không chuyển tiếp được tín hiệu).")
+				return
+			}
+			fmt.Fprintln(os.Stderr, "genh: nhận tín hiệu dừng — chuyển cho genh bản mới để quay về bản cũ rồi dừng…")
+			_ = child.Process.Signal(forwardSignal(ctx))
+		}
+	}()
+	return child.Wait()
 }
 
 func runAutoUpdate(args []string) int {
@@ -632,7 +852,7 @@ func runAutoUpdate(args []string) int {
 	execPath, _ = filepath.Abs(execPath)
 	logFile := filepath.Join(config.New(env.InstallDir).LogsDir(), "auto-update.log")
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signalContext()
 	defer stop()
 	deps := autoupdate.Deps{GenhPath: execPath, LogFile: logFile}
 
@@ -688,7 +908,7 @@ func runBackup(args []string) int {
 	if !ok {
 		return 1
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signalContext()
 	defer stop()
 	if err := ops.RunBackup(ctx, env, *to, nil, os.Stdout); err != nil {
 		reportOpErr(err)
@@ -711,8 +931,24 @@ func runRestore(args []string) int {
 	if !ok {
 		return 1
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signalContext()
 	defer stop()
+	// Khoá loại trừ (v0.1.37): cùng khoá với update/import — --if-requested chờ
+	// tối đa requestLockWait, gõ tay bận ⇒ thoát 1 (GH-E94A).
+	mode := lockManual
+	if *ifRequested {
+		if !hostlink.HasRestoreRequest(env.InstallDir) {
+			return 0
+		}
+		mode = lockRequested
+	}
+	lock, code, ok := acquireOpLock(ctx, env.InstallDir, mode, func() bool { return hostlink.HasRestoreRequest(env.InstallDir) }, os.Stdout, os.Stderr)
+	if !ok {
+		return code
+	}
+	defer lock.Release()
+	stopBeat := hostlink.StartHeartbeat(env.InstallDir, "restore")
+	defer stopBeat()
 	if *ifRequested {
 		handled, err := ops.RunRestoreRequest(ctx, env, ops.RestoreDeps{}, os.Stdout)
 		if err != nil {
@@ -733,7 +969,8 @@ func runRestore(args []string) int {
 
 // runHandleRequests là lệnh watcher trên máy chủ gọi (internal/autoupdate):
 // đọc hộp thư run/request và chuyển sang đúng lệnh — cập nhật trước (tự sao
-// lưu), khôi phục sau. Hộp thư trống thì thoát ngay.
+// lưu), khôi phục sau. Hộp thư trống thì thoát ngay. KHÔNG tự lấy khoá loại
+// trừ: runUpdate/runRestore bên trong lấy (chờ tối đa requestLockWait).
 func runHandleRequests(args []string) int {
 	fs, port, installDir := opsFlagSet("handle-requests")
 	quiet := fs.Bool("quiet", false, "chỉ in các dòng quan trọng")
@@ -778,7 +1015,7 @@ func runDoctor(args []string) int {
 	if !ok {
 		return 1
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signalContext()
 	defer stop()
 	if err := ops.RunDoctor(ctx, env, *outPath, ops.DoctorDeps{}, os.Stdout); err != nil {
 		reportOpErr(err)
@@ -814,7 +1051,7 @@ func runResetPassword(args []string) int {
 	if !ok {
 		return 1
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signalContext()
 	defer stop()
 	if err := ops.RunResetPassword(ctx, env, nil, os.Stdout); err != nil {
 		reportOpErr(err)
@@ -832,7 +1069,7 @@ func runTrustCA(args []string) int {
 	if !ok {
 		return 1
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signalContext()
 	defer stop()
 	// interactive: Owner đang ngồi trước máy — macOS/Windows được phép bật hộp thoại xác nhận.
 	if err := ops.RunTrustCA(ctx, env, true, ops.TrustCADeps{}, os.Stdout); err != nil {
@@ -919,7 +1156,7 @@ func runExport(args []string) int {
 	if !ok {
 		return 1
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signalContext()
 	defer stop()
 	if err := ops.RunExport(ctx, env, *to, ops.ExportDeps{}, os.Stdout); err != nil {
 		reportOpErr(err)
@@ -942,8 +1179,16 @@ func runImport(args []string) int {
 	if !ok {
 		return 1
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signalContext()
 	defer stop()
+	// Khoá loại trừ (v0.1.37): import ghi đè CSDL — không chạy chồng update/restore.
+	lock, code, ok := acquireOpLock(ctx, env.InstallDir, lockManual, nil, os.Stdout, os.Stderr)
+	if !ok {
+		return code
+	}
+	defer lock.Release()
+	stopBeat := hostlink.StartHeartbeat(env.InstallDir, "import")
+	defer stopBeat()
 	opts := ops.ImportOptions{AutoApprove: *yes}
 	if err := ops.RunImport(ctx, env, fs.Arg(0), opts, ops.ImportDeps{}, os.Stdin, os.Stdout); err != nil {
 		reportOpErr(err)
@@ -995,7 +1240,7 @@ func runInstall(args []string) int {
 	env := &install.Env{InstallDir: dir, Port: *port, AutoApprove: *yes}
 	runner := install.NewRunner(env, install.Registry())
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signalContext()
 	defer stop()
 
 	var runErr error
@@ -1074,6 +1319,13 @@ func publishHostInfo(installDir string, port int) {
 			rp.Env = append(rp.Env, compose.EnvOverrideVar+"="+v)
 		}
 		deps := autoupdate.Deps{GenhPath: execPath, LogFile: logFile}
+		// v0.1.37: unit lịch đêm chỉ được ghi lúc install/enable — máy cài từ bản
+		// cũ cần ghi lại để có KillMode=mixed/TimeoutStopSec (không bật/tắt gì).
+		if changed, err := autoupdate.RefreshUnits(ctx, deps); err != nil {
+			fmt.Fprintf(os.Stderr, "genh: cảnh báo — không làm mới được unit lịch tự cập nhật: %v\n", err)
+		} else if changed {
+			fmt.Println("genh: đã thêm KillMode=mixed/TimeoutStopSec vào unit lịch tự cập nhật (~/.config/systemd/user/" + autoupdate.TaskName + ".service) — các dòng khác giữ nguyên.")
+		}
 		if u, err := autoupdate.EnsureRequestWatcher(ctx, deps, rp); err == nil {
 			updater = u
 		}
@@ -1084,6 +1336,13 @@ func publishHostInfo(installDir string, port int) {
 		}
 	}
 	_ = hostlink.WriteInfo(installDir, version, updater, autoUpdate)
+
+	// v0.1.37 (F-73): làm mới run/autostart-status.json để Console nhắc Owner
+	// khi Docker/linger không tự chạy lại sau khởi động — lịch đêm cũng gọi tới
+	// đây nên Owner không phải chạy `genh status`. Lỗi bỏ qua.
+	actx, acancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer acancel()
+	_ = hostlink.WriteAutostartStatus(installDir, ops.CheckAutostart(actx, ops.AutostartDeps{}))
 }
 
 // programObserver chuyển install.Snapshot thành tui.SnapshotMsg gửi vào

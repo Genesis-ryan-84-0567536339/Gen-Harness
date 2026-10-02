@@ -96,6 +96,58 @@ const defaultPullTimeout = 20 * time.Minute
 
 var defaultPullBackoff = []time.Duration{20 * time.Second, 60 * time.Second}
 
+// rollbackTimeout giới hạn MỖI bước NHẸ của phần quay về bản cũ (`up -d`,
+// `stop`, dọn ảnh) CHỈ khi nó chạy vì tín hiệu dừng (Ctrl-C/SIGTERM): phần này
+// chạy bằng ngữ cảnh KHÔNG bị huỷ theo tín hiệu (context.WithoutCancel) nhưng
+// các bước nhẹ vẫn có hạn để không treo mãi. Khôi phục CSDL (pg_restore) và
+// chép lại dữ liệu di trú KHÔNG BAO GIỜ có hạn — kể cả sau Ctrl-C (Owner đang
+// ngồi trước máy, không có SIGKILL nào sắp tới): CSDL lớn/đĩa chậm thì
+// pg_restore cần bao lâu cũng phải để nó chạy xong, cắt giữa chừng là để CSDL
+// khôi phục dở (container `run --rm` có thể vẫn restore ngầm). SIGTERM + đã đụng
+// CSDL không khôi phục gì (deferRestoreOnShutdown). Biến gói để test đặt ngắn.
+var rollbackTimeout = 10 * time.Minute
+
+// ErrShutdownSignal là nguyên nhân (context.Cause) khi genh bị huỷ vì SIGTERM —
+// máy tắt/khởi động lại, `systemctl stop`, kill. Lúc máy tắt, systemd chỉ cho
+// user manager (user@.service, TimeoutStopSec=120s mặc định) khoảng 2 phút rồi
+// SIGKILL cả cgroup — TimeoutStopSec của chính unit genh KHÔNG nới được giới hạn
+// này — và docker.service (unit hệ thống) có thể đang dừng song song. Vì vậy
+// rollbackAndWrap KHÔNG bắt đầu khôi phục CSDL (DROP DATABASE + pg_restore) khi
+// nhận SIGTERM: giữ nguyên CSDL đã migrate + compose.yaml mới, để `genh update`
+// đi tiếp sau khi máy bật lại (deferRestoreOnShutdown), không làm dở dang trong
+// một khung thời gian sắp bị cắt.
+var ErrShutdownSignal = errors.New("nhận SIGTERM (máy tắt/khởi động lại hoặc tiến trình bị dừng)")
+
+// ErrInterruptSignal là nguyên nhân khi genh bị huỷ vì Ctrl-C (SIGINT) — Owner
+// đang ngồi trước terminal, không có hạn cắt: quay về bản cũ (kể cả khôi phục
+// CSDL — không hạn) như thường; chỉ bước nhẹ có hạn rollbackTimeout.
+var ErrInterruptSignal = errors.New("nhận Ctrl-C (SIGINT)")
+
+// updateInterruptedWhat: mở đầu thông điệp GH-E94B (genh nhận tín hiệu dừng
+// giữa chừng — SIGINT/SIGTERM).
+const updateInterruptedWhat = "Cập nhật bị dừng giữa chừng (máy tắt, khởi động lại hoặc bị dừng tay)"
+
+// updateInterruptedNext: hướng dẫn khi đã dừng gọn (chưa đụng gì / đã quay về).
+const updateInterruptedNext = "Không cần làm gì — lịch đêm sẽ tự thử lại; muốn chạy ngay thì `genh update`."
+
+// InterruptedBeforeTouch: như interruptedBeforeTouch — cho cmd/genh dùng khi
+// tín hiệu dừng tới ngay sau lúc tự tải genh mới, trước khi chạy tiến trình con
+// (chưa đụng gì tới dịch vụ): Console hiện đúng thẻ GH-E94B "chưa đụng gì".
+func InterruptedBeforeTouch(cause error) *OpError { return interruptedBeforeTouch(cause) }
+
+// interruptedBeforeTouch: tín hiệu dừng tới TRƯỚC khi sao lưu xong — CHƯA đụng
+// gì (compose.yaml, CSDL giữ nguyên), không ghi update-blocked.json: lịch đêm
+// thử lại như thường.
+func interruptedBeforeTouch(cause error) *OpError {
+	return &OpError{
+		Code: ErrCodeUpdateInterrupted,
+		What: updateInterruptedWhat + " — chưa đụng gì (CSDL, compose.yaml giữ nguyên)",
+		Why:  cause.Error(),
+		Next: updateInterruptedNext,
+		Err:  cause,
+	}
+}
+
 // UpdateNeeded báo dịch vụ đã khớp bản genh đang chạy chưa: compose.yaml GENH
 // QUẢN LÝ + Caddyfile trùng bản nhúng (compose.InSyncWithEmbedded) VÀ không còn
 // dấu cập nhật dở (run/update-inprogress.json — lần trước đã ghi compose.yaml
@@ -140,6 +192,12 @@ func UpdateNeeded(env *Env) (inSync bool, err error) {
 // compose.yaml + up -d (KHÔNG khôi phục — worker/bridge/api vẫn ghi suốt lúc đó,
 // khôi phục sẽ làm mất các ghi đó); có migration chờ → khôi phục bản sao lưu
 // bằng ảnh CŨ. Cả hai đều ghi run/update-blocked.json — xem rollbackAndWrap.
+//
+// Tín hiệu dừng (ctx bị huỷ — SIGTERM/Ctrl-C, v0.1.37): trước khi sao lưu xong
+// → GH-E94B "chưa đụng gì" (bật lại worker/bridge nếu đã dừng); sau đó → quay
+// về bản cũ bằng ngữ cảnh không bị huỷ, GH-E94B, không chặn lịch đêm (trừ khi
+// quay về chưa trọn, hoặc SIGTERM sau khi đã đụng CSDL — không khôi phục lúc máy
+// đang tắt, ghi update-blocked.json để xử lý sau khi bật lại).
 //
 // GIỚI HẠN: chưa có pipeline phát hành thật gắn image theo Channel (xem
 // UpdateOptions.Channel). Các service dùng "build:" cục bộ được báo RÕ RÀNG là
@@ -211,12 +269,21 @@ func RunUpdate(ctx context.Context, env *Env, opts UpdateOptions, deps UpdateDep
 		bak = b
 	}
 
+	if err := ctx.Err(); err != nil {
+		return interruptedBeforeTouch(err)
+	}
 	_, _ = fmt.Fprintf(out, "Cập nhật Gen-Harness (kênh %s)\n", channel)
 
 	// 1. Kiểm chỗ trống trên đĩa (F-11).
 	_, _ = fmt.Fprintln(out, "1/7 Kiểm chỗ trống trên đĩa…")
 	if opErr := ensureDiskSpace(ctx, runner, env, deps, [][]byte{oldCompose, bak, target}, out); opErr != nil {
+		if err := ctx.Err(); err != nil {
+			return interruptedBeforeTouch(err)
+		}
 		return opErr
+	}
+	if err := ctx.Err(); err != nil {
+		return interruptedBeforeTouch(err)
 	}
 
 	// 2. Tải bản mới TRƯỚC khi sao lưu (F-10).
@@ -252,6 +319,9 @@ func RunUpdate(ctx context.Context, env *Env, opts UpdateOptions, deps UpdateDep
 	if len(pullable) > 0 {
 		pullArgs := compose.BaseArgs(pullPath, append([]string{"pull"}, pullable...)...)
 		attempts, err := pullWithRetry(ctx, runner, dockercli.Cmd{Name: "docker", Args: pullArgs, Env: envOverlay, Dir: dir}, deps, out)
+		if err != nil && ctx.Err() != nil {
+			return interruptedBeforeTouch(err)
+		}
 		if err != nil {
 			return &OpError{
 				Code: ErrCodeUpdatePullFailed,
@@ -270,6 +340,9 @@ func RunUpdate(ctx context.Context, env *Env, opts UpdateOptions, deps UpdateDep
 	writersStopped := false
 	oldWriters := servicesPresent(oldCompose, updateWriterServices)
 	migrationPending := needsMigration(ctx, runner, pullPath, envOverlay, dir)
+	if err := ctx.Err(); err != nil {
+		return interruptedBeforeTouch(err)
+	}
 	if migrationPending {
 		if len(oldWriters) > 0 {
 			_, _ = fmt.Fprintln(out, "Bản mới có thay đổi CSDL — tạm dừng worker và bridge (nguồn ghi) trước khi sao lưu…")
@@ -291,10 +364,17 @@ func RunUpdate(ctx context.Context, env *Env, opts UpdateOptions, deps UpdateDep
 	key, err := runBackupInContainer(ctx, runner, composePath, envOverlay, dir, BackupTriggerPreUpdate)
 	if err != nil {
 		if writersStopped {
+			// Ngữ cảnh KHÔNG bị huỷ theo tín hiệu dừng: sao lưu lỗi VÌ tín hiệu
+			// (máy tắt, Ctrl-C) thì worker/bridge vẫn phải được bật lại.
+			sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
 			startArgs := compose.BaseArgs(composePath, append([]string{"start"}, oldWriters...)...)
-			if _, serr := runner.Output(ctx, dockercli.Cmd{Name: "docker", Args: startArgs, Env: envOverlay, Dir: dir}); serr != nil {
+			if _, serr := runner.Output(sctx, dockercli.Cmd{Name: "docker", Args: startArgs, Env: envOverlay, Dir: dir}); serr != nil {
 				_, _ = fmt.Fprintf(out, "     (không bật lại được %s — %v; chạy tay `docker compose start %s`)\n", strings.Join(oldWriters, ", "), serr, strings.Join(oldWriters, " "))
 			}
+			cancel()
+		}
+		if ctx.Err() != nil {
+			return interruptedBeforeTouch(err)
 		}
 		return &OpError{
 			Code: ErrCodeUpdateBackupFailed,
@@ -368,6 +448,17 @@ func RunUpdate(ctx context.Context, env *Env, opts UpdateOptions, deps UpdateDep
 	// chỉ coi là đã bị đụng khi thật sự có migration chờ (bước 3) — không có
 	// thì worker/bridge chưa từng dừng, khôi phục bản sao lưu sẽ xoá mất mọi
 	// ghi chép từ lúc sao lưu tới giờ.
+	if err := ctx.Err(); err != nil {
+		// Tín hiệu dừng tới trước migrate: CSDL chưa bị đụng — chỉ trả
+		// compose.yaml về bản cũ + up -d (bật lại worker/bridge nếu đã dừng).
+		return rollbackAndWrap(ctx, plan, out, &OpError{
+			Code: ErrCodeUpdateInterrupted,
+			What: updateInterruptedWhat + " trước khi migrate",
+			Why:  err.Error(),
+			Next: updateInterruptedNext,
+			Err:  err,
+		})
+	}
 	_, _ = fmt.Fprintln(out, "5/7 Tạo cấu trúc dữ liệu (migrate)…")
 	plan.versionBroken = true
 	plan.dbTouched = migrationPending
@@ -533,7 +624,7 @@ func pullWithRetry(ctx context.Context, runner dockercli.Runner, cmd dockercli.C
 				}
 				wait = backoff[idx]
 			}
-			_, _ = fmt.Fprintf(out, "     tải lỗi (lần %d/%d: %v) — thử lại sau %s…\n", i, attempts, lastErr, wait)
+			_, _ = fmt.Fprintf(out, "     tải lỗi (%v) — thử lại lần %d/%d sau %s…\n", lastErr, i+1, attempts, wait)
 			if wait > 0 {
 				select {
 				case <-ctx.Done():
@@ -713,12 +804,48 @@ type rollbackPlan struct {
 //	   (CẢ khi rollback thất bại, kèm rollback_failed) để lịch đêm không thử lại
 //	   đúng bản này; quay về ổn + compose.yaml đã trả về → xoá
 //	   update-inprogress.json như b); trả GH-E945.
+//	d) ctx ĐÃ bị huỷ (tín hiệu dừng — máy tắt/khởi động lại/Ctrl-C, v0.1.37
+//	   F-34): vẫn làm đúng b)/c) nhưng mọi lệnh chạy bằng ngữ cảnh không bị huỷ
+//	   (bước nhẹ có hạn riêng rollbackTimeout; khôi phục CSDL không hạn); trả GH-E94B. Quay về ỔN → KHÔNG ghi
+//	   update-blocked.json (bản không hỏng — lịch đêm thử lại). Quay về CHƯA
+//	   trọn → VẪN ghi (rollback_failed, kèm bản sao lưu nếu đã đụng CSDL): lịch
+//	   đêm không được chạy lại `genh update` đè lên CSDL trống/khôi phục dở (nó
+//	   sẽ sao lưu chính CSDL hỏng đó rồi migrate — mất dữ liệu âm thầm).
+//	   SIGTERM (ErrShutdownSignal) + đã đụng CSDL: KHÔNG khôi phục, KHÔNG trả
+//	   compose.yaml về bản cũ (máy đang tắt — sẽ bị SIGKILL sau ~2 phút; CSDL đã
+//	   migrate chỉ khớp compose mới), KHÔNG ghi update-blocked.json, giữ
+//	   update-inprogress.json: sau khi bật lại máy, `genh update` đi tiếp lên bản
+//	   mới (deferRestoreOnShutdown).
 func rollbackAndWrap(ctx context.Context, p rollbackPlan, out io.Writer, original *OpError) error {
 	runner := p.runner
+	// Tín hiệu dừng (SIGTERM lúc máy tắt/khởi động lại, Ctrl-C) đã huỷ ctx: bản
+	// mới KHÔNG hỏng, chỉ bị dừng — vẫn quay về bản cũ như thường nhưng không
+	// chặn lịch đêm (không ghi update-blocked.json — trừ khi quay về chưa trọn) và
+	// trả GH-E94B. Mọi lệnh quay về chạy bằng rctx: không bị huỷ theo tín hiệu.
+	interrupted := ctx.Err() != nil
+	shutdown := interrupted && errors.Is(context.Cause(ctx), ErrShutdownSignal)
+	// rctx: không bị huỷ theo tín hiệu, KHÔNG có hạn — dùng cho khôi phục CSDL
+	// và chép dữ liệu di trú (xem rollbackTimeout). lightCtx: bước nhẹ (up/stop/
+	// dọn ảnh) — có hạn riêng CHỈ khi bị dừng do tín hiệu.
+	rctx := context.WithoutCancel(ctx)
+	lightCtx := func() (context.Context, context.CancelFunc) {
+		if interrupted {
+			return context.WithTimeout(rctx, rollbackTimeout)
+		}
+		return context.WithCancel(rctx)
+	}
 	up := func() error {
+		lctx, lcancel := lightCtx()
+		defer lcancel()
 		upArgs := compose.BaseArgs(p.composePath, "up", "-d", "--remove-orphans")
-		_, err := runner.Output(ctx, dockercli.Cmd{Name: "docker", Args: upArgs, Env: p.envOverlay, Dir: p.dir})
+		_, err := runner.Output(lctx, dockercli.Cmd{Name: "docker", Args: upArgs, Env: p.envOverlay, Dir: p.dir})
 		return err
+	}
+
+	// SIGTERM (máy tắt) sau khi đã đụng CSDL: KHÔNG trả compose.yaml về bản cũ —
+	// xem deferRestoreOnShutdown.
+	if shutdown && p.dbTouched {
+		return p.deferRestoreOnShutdown(out, original)
 	}
 
 	if !p.dbTouched {
@@ -764,6 +891,15 @@ func rollbackAndWrap(ctx context.Context, p rollbackPlan, out io.Writer, origina
 		} else {
 			_, _ = fmt.Fprintln(out, "Rollback xong: đã trả về bản cũ và khởi động lại dịch vụ (dữ liệu không đổi).")
 		}
+		if interrupted {
+			if ok {
+				next = updateInterruptedNext
+			} else if p.versionBroken {
+				// Chưa quay về được: không để lịch đêm chạy lại đè lên máy đang dở.
+				p.writeBlocked(out, original, true)
+			}
+			return interruptedRollbackError(original, ok, next)
+		}
 		if !p.versionBroken {
 			return &OpError{Code: original.Code, What: what, Why: original.Why, Next: next, Err: original.Err}
 		}
@@ -776,9 +912,9 @@ func rollbackAndWrap(ctx context.Context, p rollbackPlan, out io.Writer, origina
 		return &OpError{Code: ErrCodeUpdateRolledBack, What: what, Why: original.Why, Next: next, Err: original.Err}
 	}
 
-	// c) Đã đụng CSDL.
+	// c) Đã đụng CSDL (không phải lúc máy tắt — nhánh đó đã rẽ ở trên).
 	if p.objectsHostDir != "" {
-		if err := seedObjectsVolume(ctx, runner, p.composePath, p.envOverlay, p.dir, p.objectsHostDir); err != nil {
+		if err := seedObjectsVolume(rctx, runner, p.composePath, p.envOverlay, p.dir, p.objectsHostDir); err != nil {
 			_, _ = fmt.Fprintf(out, "     (không chép lại được dữ liệu di trú vào volume trước khi khôi phục — %v; dữ liệu THÔ vẫn còn tại %s)\n", err, p.objectsHostDir)
 		}
 	}
@@ -791,7 +927,10 @@ func rollbackAndWrap(ctx context.Context, p rollbackPlan, out io.Writer, origina
 	}
 	if stop := servicesPresent(current, rollbackStopServices); len(stop) > 0 {
 		stopArgs := compose.BaseArgs(p.composePath, append([]string{"stop"}, stop...)...)
-		if _, err := runner.Output(ctx, dockercli.Cmd{Name: "docker", Args: stopArgs, Env: p.envOverlay, Dir: p.dir}); err != nil {
+		sctx, scancel := lightCtx()
+		_, err := runner.Output(sctx, dockercli.Cmd{Name: "docker", Args: stopArgs, Env: p.envOverlay, Dir: p.dir})
+		scancel()
+		if err != nil {
 			_, _ = fmt.Fprintf(out, "     (không dừng được %s trước khi khôi phục — %v; vẫn khôi phục tiếp)\n", strings.Join(stop, ", "), err)
 		}
 	}
@@ -801,23 +940,29 @@ func rollbackAndWrap(ctx context.Context, p rollbackPlan, out io.Writer, origina
 		// ảnh CŨ và chờ healthy TRƯỚC khi khôi phục, để pg_restore tạo extension
 		// đúng phiên bản của ảnh db sẽ chạy tiếp. Có giới hạn thời gian; lỗi →
 		// vẫn khôi phục tiếp (best-effort).
-		dbCtx, cancel := context.WithTimeout(ctx, rollbackDBWait)
+		dbCtx, dbCancel := context.WithTimeout(rctx, rollbackDBWait)
 		dbArgs := compose.BaseArgs(p.composePath, "up", "-d", "--wait", "--no-deps", "db")
 		if _, err := runner.Output(dbCtx, dockercli.Cmd{Name: "docker", Args: dbArgs, Env: p.envOverlay, Dir: p.dir}); err != nil {
 			_, _ = fmt.Fprintf(out, "     (không dựng lại được db bằng bản cũ trước khi khôi phục — %v; vẫn khôi phục tiếp)\n", err)
 		}
-		cancel()
+		dbCancel()
 	}
 
-	restoreErr := restoreInContainer(ctx, runner, p.composePath, p.envOverlay, p.dir, p.key, true)
+	restoreErr := restoreInContainer(rctx, runner, p.composePath, p.envOverlay, p.dir, p.key, true)
 	restartErr := up()
 	rolledBackOK := restoreErr == nil && restartErr == nil
 
-	if n, err := pruneOldImages(ctx, runner, [][]byte{current, p.target}, out); err == nil && n > 0 {
+	pctx, pcancel := lightCtx()
+	if n, err := pruneOldImages(pctx, runner, [][]byte{current, p.target}, out); err == nil && n > 0 {
 		_, _ = fmt.Fprintf(out, "     đã dọn %d ảnh cũ.\n", n)
 	}
+	pcancel()
 
-	p.writeBlocked(out, original, !rolledBackOK)
+	if !interrupted || !rolledBackOK {
+		// Bị dừng mà quay về CHƯA trọn (vd pg_restore bị cắt sau DROP DATABASE):
+		// VẪN chặn — lịch đêm chạy lại sẽ sao lưu CSDL trống/dở rồi migrate.
+		p.writeBlocked(out, original, !rolledBackOK)
+	}
 	if rolledBackOK && p.oldCompose != nil && p.installDir != "" {
 		// Như nhánh b): compose.yaml đã về bản cũ, dịch vụ chạy lại bằng nó.
 		if err := hostlink.ClearUpdateInProgress(p.installDir); err != nil {
@@ -842,6 +987,14 @@ func rollbackAndWrap(ctx context.Context, p rollbackPlan, out io.Writer, origina
 		next.WriteString("chạy tay `docker compose run --rm --no-deps -T api python -m gh.backup restore --key " + p.key + "` rồi `docker compose up -d --remove-orphans`.")
 	}
 
+	if interrupted {
+		n := next.String()
+		if rolledBackOK {
+			n = "Đã khôi phục " + p.key + " và khởi động lại bằng bản cũ. " + updateInterruptedNext
+		}
+		return interruptedRollbackError(original, rolledBackOK, n)
+	}
+
 	what := original.What
 	if rolledBackOK {
 		what += " — đã tự quay về bản cũ (khôi phục bản sao lưu)"
@@ -855,6 +1008,66 @@ func rollbackAndWrap(ctx context.Context, p rollbackPlan, out io.Writer, origina
 		Why:  original.Why,
 		Next: next.String(),
 		Err:  original.Err,
+	}
+}
+
+// interruptedRollbackError: lỗi trả về khi tín hiệu dừng làm hỏng một bước SAU
+// sao lưu và rollbackAndWrap đã quay về bản cũ (ok) hoặc chưa trọn. Không ghi
+// update-blocked.json (bản không hỏng — lịch đêm thử lại). next: hướng dẫn tiếp
+// (chưa trọn → giữ nguyên hướng dẫn chạy tay của nhánh quay về). Lỗi gốc của
+// bước bị dừng đi vào Why (chi tiết kỹ thuật).
+func interruptedRollbackError(original *OpError, ok bool, next string) *OpError {
+	what := updateInterruptedWhat
+	if ok {
+		what += " — đã tự quay về bản cũ"
+	} else {
+		what += " — quay về bản cũ CHƯA trọn"
+	}
+	why := original.What
+	if original.Why != "" {
+		why += ": " + original.Why
+	}
+	if original.Code != "" && original.Code != ErrCodeUpdateInterrupted {
+		why += " (" + original.Code + ")"
+	}
+	return &OpError{Code: ErrCodeUpdateInterrupted, What: what, Why: why, Next: next, Err: original.Err}
+}
+
+// updateShutdownForwardMarker: cụm chữ cố định trong What của nhánh "máy tắt
+// sau khi đã đụng CSDL" — Console (updateModel.ts) dò cụm này để nói "chạy lại
+// để đi tiếp", KHÔNG đẩy Owner đi khôi phục bản sao lưu cũ.
+const updateShutdownForwardMarker = "CSDL đã sang bản mới, cần chạy tiếp"
+
+// deferRestoreOnShutdown: SIGTERM (máy tắt/khởi động lại) tới SAU khi CSDL đã
+// bị đụng. KHÔNG khôi phục: DROP DATABASE + pg_restore trong khung ~2 phút
+// trước SIGKILL (và Docker có thể đang dừng) dễ để lại CSDL trống/dở. Cũng KHÔNG
+// trả compose.yaml về bản cũ: CSDL đã migrate + container bản mới (nếu đã lên)
+// chỉ khớp compose.yaml MỚI — để compose cũ thì một lần `docker compose up -d`
+// bất kỳ sẽ dựng ảnh cũ trên CSDL mới. Hướng đi đúng sau khi bật lại máy là ĐI
+// TIẾP về bản mới: chạy lại `genh update` (sao lưu lại CSDL hiện tại — gồm cả
+// dữ liệu ghi từ lúc bật lại máy — rồi migrate/up bản mới). GIỮ
+// update-inprogress.json để UpdateNeeded coi "chưa khớp" (lịch đêm, nếu bật,
+// cũng sẽ đi tiếp); KHÔNG ghi update-blocked.json — bản không hỏng, và chặn kèm
+// backup_key sẽ đẩy Owner đi khôi phục bản sao lưu cũ (mất mọi ghi mới).
+func (p rollbackPlan) deferRestoreOnShutdown(out io.Writer, original *OpError) error {
+	_, _ = fmt.Fprintln(out, "Máy đang tắt/khởi động lại giữa lúc cập nhật đã đổi CSDL — KHÔNG khôi phục, KHÔNG trả compose.yaml về bản cũ; sau khi bật lại máy chạy lại `genh update` để đi tiếp lên bản mới.")
+	var next strings.Builder
+	next.WriteString("Dữ liệu vẫn còn nguyên trong CSDL (bản sao lưu trước cập nhật: " + p.key + "). ")
+	if p.objectsHostDir != "" {
+		next.WriteString("Dữ liệu tệp di trú vẫn còn tại " + p.objectsHostDir + ". ")
+	}
+	next.WriteString("Sau khi máy bật lại: chạy `genh update` để đi tiếp lên bản mới (genh tự sao lưu lại CSDL hiện tại trước); lịch đêm, nếu bật, cũng sẽ tự làm. KHÔNG khôi phục bản sao lưu cũ — sẽ mất dữ liệu ghi sau lúc đó.")
+	why := original.What
+	if original.Why != "" {
+		why += ": " + original.Why
+	}
+	if original.Code != "" && original.Code != ErrCodeUpdateInterrupted {
+		why += " (" + original.Code + ")"
+	}
+	return &OpError{
+		Code: ErrCodeUpdateInterrupted,
+		What: updateInterruptedWhat + " — " + updateShutdownForwardMarker,
+		Why:  why, Next: next.String(), Err: original.Err,
 	}
 }
 

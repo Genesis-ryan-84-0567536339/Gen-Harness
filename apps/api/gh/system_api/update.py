@@ -40,6 +40,13 @@ CHECK_LOCK_KEY = "gh:update:check-lock"
 CHECK_MIN_INTERVAL_SECONDS = 30
 # Yêu cầu nằm quá lâu mà trạng thái không đổi ⇒ watcher không chạy (máy chủ tắt watcher, linger…) — cho bấm lại.
 STALE_REQUEST_SECONDS = 15 * 60
+# v0.1.37 (F-34): 'running' mà tiến trình genh đã chết (máy tắt/khởi động lại, bị kill) ⇒ 'stalled' để Console cho
+# bấm Thử lại. Container api không thấy PID máy chủ — "còn sống" suy từ nhịp sống `run/genh-heartbeat.json` (genh
+# ghi mỗi 30 giây khi giữ khoá loại trừ); boot_id chỉ phụ (container chỉ trùng nhân máy chủ khi Docker chạy thẳng trên
+# Linux — Docker Desktop chạy trong VM).
+RUNNING_STALL_SECONDS = 60 * 60
+HEARTBEAT_STALE_SECONDS = 5 * 60
+BOOT_ID_PATH = Path("/proc/sys/kernel/random/boot_id")
 _SEMVER = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
 # v0.1.33: dấu job `promote` (e2e-install.yml) ghi vào ghi chú Release lúc nâng bản thử thành bản chính thức — cùng
 # định dạng với apps/genh/internal/selfupdate PromotedMarker. Thời gian chín 24 giờ của lịch đêm tính từ dấu này
@@ -127,10 +134,85 @@ async def _latest(request: Request, *, force: bool = False) -> dict[str, Any] | 
 
 
 def _age_seconds(iso: str | None) -> float | None:
+    # Hỏng/thiếu múi giờ ⇒ None: trừ datetime không múi giờ sẽ ném TypeError — dữ liệu run/ không tin cậy, không 500.
+    t = _ts(iso)
+    return (datetime.now(UTC) - t).total_seconds() if t is not None else None
+
+
+def _boot_id() -> str | None:
+    """boot_id của nhân đang chạy — trong container trùng với máy chủ Linux. Lỗi/không phải Linux ⇒ None."""
     try:
-        return (datetime.now(UTC) - datetime.fromisoformat(str(iso).replace("Z", "+00:00"))).total_seconds()
-    except ValueError:
+        v = BOOT_ID_PATH.read_text(encoding="ascii").strip()
+    except (OSError, ValueError):
         return None
+    return v or None
+
+
+def _int(value: Any) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _str(value: Any) -> str | None:
+    return value if isinstance(value, str) and value else None
+
+
+def _heartbeat(d: Path) -> tuple[bool, int | None, str | None]:
+    """(nhịp tươi ≤ `HEARTBEAT_STALE_SECONDS`, pid, boot_id) từ `run/genh-heartbeat.json` — sai kiểu ⇒ None."""
+    hb = _read_json(d / "genh-heartbeat.json") or {}
+    at = _str(hb.get("at"))
+    age = _age_seconds(at) if at else None
+    return age is not None and age <= HEARTBEAT_STALE_SECONDS, _int(hb.get("pid")), _str(hb.get("boot_id"))
+
+
+def _process_gone(status: dict[str, Any], d: Path) -> bool:
+    """'running' nhưng tiến trình genh không còn. Nhịp sống là nguồn CHÍNH: tươi và đúng pid ⇒ còn sống — KHÔNG xét
+    boot_id của container (Docker Desktop for Linux chạy container trong VM: boot_id container ≠ máy chủ dù genh vẫn
+    chạy). Ngoài ra:
+      - boot_id lúc bắt đầu (update-status.json) ≠ boot_id của nhịp sống (cả hai do genh ghi) ⇒ máy đã khởi động lại;
+      - nhịp cũ/thiếu và boot_id lúc bắt đầu ≠ boot_id container ⇒ máy đã khởi động lại (dừng ngay, không chờ 60 phút);
+      - còn lại: chạy quá `RUNNING_STALL_SECONDS` mà không có nhịp sống đúng pid ⇒ đã chết.
+    Mọi giá trị đọc từ run/ (0777) là dữ liệu không tin cậy — chỉ nhận đúng kiểu, không đưa vào thông điệp."""
+    pid = _int(status.get("pid"))
+    fresh, hb_pid, hb_boot = _heartbeat(d)
+    if fresh and (pid is None or hb_pid == pid):
+        return False
+    status_boot = _str(status.get("boot_id"))
+    if status_boot and hb_boot and status_boot != hb_boot:
+        return True
+    here = _boot_id()
+    if not fresh and status_boot and here and status_boot != here:
+        return True
+    started = _str(status.get("started_at"))
+    age = _age_seconds(started) if started else None
+    return age is not None and age > RUNNING_STALL_SECONDS
+
+
+def _host_busy(d: Path) -> bool:
+    """Một tiến trình genh đang giữ khoá loại trừ (update/restore/import — vd lịch đêm) và còn sống: nhịp sống
+    `run/genh-heartbeat.json` tươi (≤ `HEARTBEAT_STALE_SECONDS`) là đủ — không so boot_id container (Docker Desktop
+    chạy container trong VM). Yêu cầu "Cập nhật ngay" nằm lâu trong lúc này là đang XẾP HÀNG sau lần đó (genh
+    --if-requested chờ khoá), không phải watcher không chạy."""
+    return _heartbeat(d)[0]
+
+
+#: Mã genh (GH-E9xx) cuối thông điệp hộp thư — cùng cách đọc với web (updateModel.ts `updateErrorCode`).
+_GH_CODE = re.compile(r"GH-E[0-9A-F]{3}")
+#: Dấu "quay về chưa trọn / cần xử lý tay" trong thông điệp genh — cùng mẫu với web (updateModel.ts `failedCopy`).
+_MANUAL = re.compile(r"CŨNG THẤT BẠI|chưa trọn|can thiệp tay|xử lý tay", re.IGNORECASE)
+#: Cụm cố định genh ghi khi máy tắt SAU lúc đã đổi CSDL (ops.updateShutdownForwardMarker): giữ bản mới, cần chạy tiếp.
+SHUTDOWN_FORWARD_MARKER = "CSDL đã sang bản mới, cần chạy tiếp"
+
+
+def _interrupted(state: str, message: Any, rollback_failed: bool) -> str | None:
+    """v0.1.37: lần cập nhật 'failed' do genh nhận TÍN HIỆU DỪNG (GH-E94B — máy tắt/khởi động lại/bị dừng tay) mà KHÔNG
+    để máy dở dang ⇒ không phải bản mới hỏng. 'rolled_back' (chưa đụng gì / đã tự quay về), 'resume' (máy tắt sau khi
+    đã đổi CSDL — giữ bản mới, chạy lại để đi tiếp); quay về chưa trọn hoặc không phải GH-E94B ⇒ None."""
+    if state != "failed" or not isinstance(message, str) or rollback_failed:
+        return None
+    codes = _GH_CODE.findall(message)
+    if not codes or codes[-1] != "GH-E94B" or _MANUAL.search(message):
+        return None
+    return "resume" if SHUTDOWN_FORWARD_MARKER in message else "rolled_back"
 
 
 def running_version() -> str | None:
@@ -145,9 +227,17 @@ def _state() -> dict[str, Any]:
     status = _read_json(d / "update-status.json") or {}
     request = _read_json(d / "request" / "update.json")
     state = status.get("state") or "idle"
+    stalled_reason: str | None = None
+    if state == "running" and _process_gone(status, d):
+        state, stalled_reason = "stalled", "process_gone"
+    host_busy = False
     if request is not None:
         age = _age_seconds(request.get("requested_at"))
-        state = "stalled" if age is not None and age > STALE_REQUEST_SECONDS else "requested"
+        host_busy = _host_busy(d)
+        if age is not None and age > STALE_REQUEST_SECONDS and not host_busy:
+            state, stalled_reason = "stalled", "not_picked_up"
+        else:
+            state, stalled_reason = "requested", None
     updater = info.get("updater") or None
     # v0.1.33: genh ghi trạng thái lịch tự cập nhật đêm (cài/update/`genh auto-update enable|disable`); genh cũ chưa
     # ghi hoặc giá trị lạ ⇒ None — Console không hứa "Tự cài đêm …".
@@ -158,6 +248,7 @@ def _state() -> dict[str, Any]:
     blocked_ok = isinstance(blocked, str) and bool(blocked)
     # Trường có cấu trúc (genh ghi): tự quay về bản cũ CŨNG thất bại — Console dùng thay vì dò chữ trong thông điệp.
     rollback_failed = blocked_file.get("rollback_failed")
+    rb_failed = rollback_failed is True and blocked_ok and blocked == status.get("to")
     return {
         "current": info.get("version") or None,
         "updater": updater,
@@ -167,7 +258,13 @@ def _state() -> dict[str, Any]:
         "linked": d.is_dir(),
         "can_request": bool(updater) and os.access(d / "request", os.W_OK),
         "state": state,
+        "stalled_reason": stalled_reason,
+        # v0.1.37: yêu cầu đang chờ một lần cập nhật/khôi phục khác (vd lịch đêm) chạy xong — không phải "chưa nhận".
+        "host_busy": host_busy,
         "message": status.get("message") or None,
+        # v0.1.37: 'failed' vì tín hiệu dừng (GH-E94B) mà không dở dang — Console/chuông báo "bị dừng giữa chừng"
+        # (vàng), không phải "chưa thành công" (đỏ).
+        "interrupted": _interrupted(str(state), status.get("message"), rb_failed),
         "from": status.get("from") or None,
         "to": status.get("to") or None,
         "started_at": status.get("started_at") or None,

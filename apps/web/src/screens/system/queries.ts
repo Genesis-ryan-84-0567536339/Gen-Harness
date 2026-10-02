@@ -21,7 +21,7 @@ export const qkSystem = {
  * v0.1.36 (F-6): kind chuông là sự cố sức khoẻ — chuông nhận `notification.new` thuộc nhóm này thì làm mới
  * `['system','health']` để dải "Cần Sếp xử lý" và thẻ "Sức khoẻ hệ thống" đổi ngay, không chờ 60 giây.
  */
-export const HEALTH_KINDS: ReadonlySet<string> = new Set(['channel.down', 'model.auth_expired', 'update.failed', 'backup.stale', 'worker.silent', 'disk.low']);
+export const HEALTH_KINDS: ReadonlySet<string> = new Set(['channel.down', 'model.auth_expired', 'update.failed', 'backup.stale', 'worker.silent', 'disk.low', 'host.autostart']);
 
 /** v0.1.36 (F-6): `GET /system/health` — chỉ gọi khi vai trò có `system.read` (`enabled`); tự hỏi lại mỗi 60 giây. */
 export const useSystemHealth = (enabled: boolean) =>

@@ -69,7 +69,30 @@ ACTIONS = {
     "backup.stale": "Mở mục Sao lưu",
     "worker.silent": "Xem sức khoẻ",
     "disk.low": "Xem cách giải phóng",
+    "host.autostart": "Xem cách bật",
 }
+
+#: v0.1.37 (F-73): `run/autostart-status.json` (genh ghi) — chỉ nhận giá trị trong các tập này, còn lại 'unknown'.
+AUTOSTART_YES_NO = ("yes", "no", "unknown", "not_applicable")
+AUTOSTART_DOCKER_MODES = ("system", "rootless", "desktop", "unknown")
+#: Lệnh sửa do API tự ghép từ chuỗi cố định — KHÔNG lấy lệnh/chữ từ tệp (run/ là 0777, không tin cậy).
+AUTOSTART_FIX = {
+    "docker_system": "Docker chưa bật tự chạy khi mở máy — chạy một lần trên máy chủ: sudo systemctl enable docker",
+    "docker_rootless": "Docker chưa bật tự chạy khi mở máy — chạy một lần trên máy chủ: systemctl --user enable docker",
+    "linger": "Lịch tự cập nhật và nút Cập nhật ngay chỉ chạy khi có người đăng nhập — chạy một lần: "
+              "sudo loginctl enable-linger $USER",
+    # Docker rootless chạy dưới user manager của người dùng ⇒ thiếu linger thì CẢ Docker cũng không tự lên khi bật máy.
+    "linger_rootless": "Docker rootless, lịch tự cập nhật và nút Cập nhật ngay chỉ chạy khi có người đăng nhập — chạy "
+                       "một lần: sudo loginctl enable-linger $USER",
+}
+#: Câu cuối của thân cảnh báo: genh chỉ ghi lại `run/autostart-status.json` khi chạy `genh status`/`genh doctor` hoặc
+#: lần cập nhật kế tiếp (lịch đêm) — chạy xong lệnh sửa mà không biết điều này, Sếp sẽ tưởng lệnh không có tác dụng.
+#: KHÔNG hứa "đợi tới đêm": thiếu linger thì lịch đêm không chạy, tắt tự cập nhật thì không có lần chạy đêm nào.
+AUTOSTART_DONE = "Chạy xong thì chạy genh status để cảnh báo tự hết"
+#: Tiêu đề cảnh báo phòng trước (máy VẪN đang chạy — chỉ là khi bật lại sẽ không tự lên); cùng câu ở tài liệu/web/test.
+AUTOSTART_TITLE = "Máy chủ có thể không tự chạy lại Gen-Harness khi bật lại máy"
+#: Mỗi câu kết thúc bằng lệnh — KHÔNG thêm dấu chấm sau lệnh (Sếp chép nguyên dòng: "docker." / "$USER." chạy sẽ lỗi).
+AUTOSTART_SEP = " · "
 
 
 def _iso(dt: datetime | None) -> str | None:
@@ -228,6 +251,45 @@ def _disk_status() -> dict[str, Any] | None:
     return update._read_json(d / "disk-status.json")
 
 
+def _autostart_status() -> dict[str, Any]:
+    """Khối `autostart` của /system/health từ `run/autostart-status.json`: mọi giá trị ngoài tập cho phép ⇒ 'unknown'.
+    `state`: 'warn' khi (linger_required và linger 'no') hoặc docker_enabled 'no'; 'ok' khi không vấn đề, docker_enabled
+    yes/not_applicable và linger yes/not_applicable/không cần; còn lại (kể cả tệp thiếu/hỏng) ⇒ 'unknown'."""
+    from gh.system_api import update
+
+    d = _host_dir()
+    raw = update._read_json(d / "autostart-status.json") if d.is_dir() else None
+    if raw is None:
+        return {"state": "unknown", "linger": "unknown", "linger_required": None, "docker_enabled": "unknown",
+                "docker_mode": "unknown", "checked_at": None}
+    linger = _pick(raw.get("linger"), AUTOSTART_YES_NO)
+    required = raw.get("linger_required") if isinstance(raw.get("linger_required"), bool) else None
+    docker = _pick(raw.get("docker_enabled"), AUTOSTART_YES_NO)
+    mode = _pick(raw.get("docker_mode"), AUTOSTART_DOCKER_MODES)
+    checked = _parse_ts(raw.get("checked_at"))
+    problems = _autostart_problems(linger, required, docker, mode)
+    # 'ok' chỉ khi Docker CHẮC tự chạy (yes/not_applicable) và linger ổn (có / không cần) — linger 'yes' một mình
+    # không kéo lên 'ok' khi Docker còn 'unknown' (vd macOS Colima, docker info lỗi). Cùng điều kiện đóng sự cố.
+    good = docker in ("yes", "not_applicable") and (linger in ("yes", "not_applicable") or required is False)
+    state = "warn" if problems else ("ok" if good else "unknown")
+    return {"state": state, "linger": linger, "linger_required": required, "docker_enabled": docker,
+            "docker_mode": mode, "checked_at": _iso(checked)}
+
+
+def _pick(value: Any, allowed: tuple[str, ...]) -> str:
+    return value if isinstance(value, str) and value in allowed else "unknown"
+
+
+def _autostart_problems(linger: str, required: bool | None, docker: str, mode: str) -> list[str]:
+    """Khoá của AUTOSTART_FIX cho từng vấn đề (đã lọc giá trị)."""
+    problems: list[str] = []
+    if docker == "no":
+        problems.append("docker_rootless" if mode == "rootless" else "docker_system")
+    if required is True and linger == "no":
+        problems.append("linger_rootless" if mode == "rootless" else "linger")
+    return problems
+
+
 def _gb(n: Any) -> str:
     try:
         v = float(n) / (1 << 30)
@@ -318,14 +380,18 @@ async def collect(db: AsyncSession, redis: Any, org_id: uuid.UUID, *, now: datet
     except Exception:  # noqa: BLE001
         log.warning("Không đọc được danh mục sao lưu", exc_info=True)
 
-    update: dict[str, Any] = {"state": "unknown", "failed": False, "blocked_version": None, "finished_at": None}
+    update: dict[str, Any] = {"state": "unknown", "stalled_reason": None, "failed": False, "interrupted": None,
+                              "blocked_version": None, "finished_at": None}
     disk: dict[str, Any] = {"state": "unknown", "free_bytes": None, "min_bytes": None, "checked_at": None}
     try:
         from gh.system_api import update as upd
 
         if _host_dir().is_dir():
             st = upd._state()
-            update = {"state": str(st.get("state") or "unknown"), "failed": _update_failed_recent(st, now),
+            update = {"state": str(st.get("state") or "unknown"), "stalled_reason": st.get("stalled_reason"),
+                      "failed": _update_failed_recent(st, now),
+                      # GH-E94B dừng gọn (không dở dang): thẻ Sức khoẻ hiện "bị dừng giữa chừng" (vàng), không đỏ.
+                      "interrupted": st.get("interrupted") if _update_failed_recent(st, now) else None,
                       "blocked_version": st.get("blocked_version"), "finished_at": st.get("finished_at")}
             ds = _disk_status() or {}
             disk_state = str(ds.get("state")) if ds.get("state") in ("ok", "low") else "unknown"
@@ -336,17 +402,25 @@ async def collect(db: AsyncSession, redis: Any, org_id: uuid.UUID, *, now: datet
     except Exception:  # noqa: BLE001
         log.warning("Không đọc được hộp thư với genh", exc_info=True)
 
+    autostart: dict[str, Any] | None = None
+    try:
+        if _host_dir().is_dir():  # bản phát triển không có hộp thư với genh ⇒ không có khối này
+            autostart = _autostart_status()
+    except Exception:  # noqa: BLE001
+        log.warning("Không đọc được trạng thái tự chạy lại khi bật máy", exc_info=True)
+
     issues: list[dict[str, Any]] = []
     try:
         issues = await active_issues(db, org_id)
     except Exception:  # noqa: BLE001
         log.warning("Không đọc được sự cố đang mở", exc_info=True)
 
-    bad = (any(i["severity"] == "bad" for i in issues) or worker["state"] == "silent" or update["failed"]
-           or disk["state"] == "low" or backup["stale"])
-    warn = (any(i["severity"] == "warn" for i in issues) or browser["state"] == "silent"
-            or any(q["dlq"] > 0 for q in queues) or any(c["ok"] is False for c in crons))
-    return {
+    bad = (any(i["severity"] == "bad" for i in issues) or worker["state"] == "silent"
+           or (update["failed"] and not update["interrupted"]) or disk["state"] == "low" or backup["stale"])
+    warn = (any(i["severity"] == "warn" for i in issues) or browser["state"] == "silent" or update["failed"]
+            or any(q["dlq"] > 0 for q in queues) or any(c["ok"] is False for c in crons)
+            or (autostart is not None and autostart["state"] == "warn"))
+    out: dict[str, Any] = {
         "checked_at": _iso(now),
         "overall": "bad" if bad else ("warn" if warn else "ok"),
         "worker": worker,
@@ -358,6 +432,9 @@ async def collect(db: AsyncSession, redis: Any, org_id: uuid.UUID, *, now: datet
         "disk": disk,
         "issues": issues,
     }
+    if autostart is not None:
+        out["autostart"] = autostart
+    return out
 
 
 # ─── vòng theo dõi: mở/đóng sự cố định kỳ ────────────────────────────────────────────────────────────────────
@@ -380,6 +457,21 @@ async def _eval_update(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: dat
     state = st.get("state")
     if _update_failed_recent(st, now):
         target = st.get("to") or "bản mới"
+        fingerprint = f"{st.get('finished_at') or ''}|{st.get('to') or ''}"
+        interrupted = st.get("interrupted")
+        if interrupted:
+            # GH-E94B (máy tắt/khởi động lại/bị dừng tay) mà không dở dang: không phải bản mới hỏng ⇒ 'warn', không
+            # gióng chuông đỏ "chưa thành công" trái với thẻ cập nhật ("Đây không phải lỗi của bản mới").
+            if interrupted == "resume":
+                body = "Máy tắt giữa lúc cập nhật — cần chạy lại để hoàn tất. Bấm để thử lại ngay."
+            elif st.get("auto_update_enabled") is True:
+                body = "Bản đang dùng vẫn chạy bình thường — lịch đêm sẽ tự thử lại, hoặc bấm để thử lại ngay."
+            else:
+                body = "Bản đang dùng vẫn chạy bình thường — bấm để thử lại."
+            await raise_once(db, org_id, key="update.failed", kind="update.failed", severity="warn",
+                             title=f"Cập nhật lên {target} bị dừng giữa chừng", body=body, link=STORAGE_LINK,
+                             fingerprint=fingerprint, redis=redis)
+            return
         if st.get("blocked_rollback_failed") is True:
             body = "Tự quay về bản cũ cũng lỗi — cần hỗ trợ ngay."
         elif st.get("blocked_version"):
@@ -388,7 +480,7 @@ async def _eval_update(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: dat
             body = "Bấm để xem chi tiết và thử lại."
         await raise_once(db, org_id, key="update.failed", kind="update.failed", severity="bad",
                          title=f"Cập nhật lên {target} chưa thành công", body=body, link=STORAGE_LINK,
-                         fingerprint=f"{st.get('finished_at') or ''}|{st.get('to') or ''}", redis=redis)
+                         fingerprint=fingerprint, redis=redis)
     elif state in ("done", "idle", "failed"):  # 'failed' quá 24 giờ: thẻ cập nhật đã thôi báo ⇒ đóng sự cố
         await clear(db, org_id, "update.failed")
 
@@ -441,6 +533,25 @@ async def _eval_disk(db: AsyncSession, org_id: uuid.UUID, redis: Any) -> None:
                               " — cập nhật tự động đang tạm dừng.", link=STORAGE_LINK, redis=redis)
     elif ds.get("state") == "ok":
         await clear(db, org_id, "disk.low")
+
+
+async def _eval_autostart(db: AsyncSession, org_id: uuid.UUID, redis: Any) -> None:
+    """F-73: máy chủ chưa tự chạy lại Gen-Harness khi bật máy (Docker chưa enable / thiếu linger). Thân thông báo chỉ
+    ghép từ chuỗi cố định AUTOSTART_FIX; fingerprint = tập vấn đề (đổi vấn đề ⇒ chuông mới). 'unknown' ⇒ để nguyên."""
+    st = _autostart_status()
+    problems = _autostart_problems(st["linger"], st["linger_required"], st["docker_enabled"], st["docker_mode"])
+    if problems:
+        # Đích: thẻ "Sức khoẻ hệ thống" (Dữ liệu & lưu trữ) — hướng dẫn từng bước, lệnh dạng mã chép được (thân chuông
+        # bị cắt còn 2 dòng, không đủ chỗ cho lệnh). Câu cuối nói cách làm cảnh báo tự hết.
+        body = AUTOSTART_SEP.join([*(AUTOSTART_FIX[p] for p in problems), AUTOSTART_DONE])
+        await raise_once(db, org_id, key="host.autostart", kind="host.autostart", severity="warn",
+                         title=AUTOSTART_TITLE, body=body, link=STORAGE_LINK,
+                         fingerprint="|".join(sorted(problems)), redis=redis)
+        return
+    good = ("yes", "not_applicable")
+    linger_ok = st["linger"] in good or st["linger_required"] is False
+    if st["docker_enabled"] in good and linger_ok:  # đã biết chắc không còn vấn đề; còn 'unknown' ⇒ để nguyên
+        await clear(db, org_id, "host.autostart")
 
 
 async def raise_model_expired(db: AsyncSession, org_id: uuid.UUID, provider_id: uuid.UUID, name: str, *,
@@ -505,6 +616,7 @@ async def evaluate(db: AsyncSession, redis: Any, org_id: uuid.UUID, *, now: date
         ("backup.stale", lambda: _eval_backup(db, org_id, redis, now)),
         ("worker.silent", lambda: _eval_worker(db, org_id, redis, now, started_at)),
         ("disk.low", lambda: _eval_disk(db, org_id, redis)),
+        ("host.autostart", lambda: _eval_autostart(db, org_id, redis)),
         ("models", lambda: _eval_models(db, org_id, redis)),
         ("events", lambda: _eval_events(db, org_id)),
     )
