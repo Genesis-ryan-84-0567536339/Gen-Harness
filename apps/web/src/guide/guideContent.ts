@@ -1,9 +1,9 @@
 /**
- * Hướng dẫn kết nối từng bước cho các việc tuỳ chọn 5–11 của trình thiết lập. Chữ viết cho Owner không rành kỹ
+ * Hướng dẫn thiết lập: các việc tuỳ chọn 5–11 của trình thiết lập + (v0.1.39) 13 Kết nối Facebook, 14 Nối Gen-hub. Chữ viết cho Owner không rành kỹ
  * thuật: vì sao cần, chuẩn bị gì, bấm gì theo đúng nhãn nút trên màn hình, và làm sao biết đã xong. Nút "Làm bước
  * này" mở đúng form của trình thiết lập ngay trong Console (`/guide/:n`), kể cả sau khi đã bấm Hoàn tất.
  */
-/** Khoá cache của `GET /setup/follow-up` — dùng chung cho thẻ Tổng quan và trang Hướng dẫn. */
+/** Khoá cache của `GET /setup/follow-up` — dùng chung cho thẻ Tổng quan và trang Hướng dẫn thiết lập. */
 export const FOLLOW_UP_KEY = ['setup', 'follow-up'] as const;
 
 export interface GuideItem {
@@ -21,6 +21,10 @@ export interface GuideItem {
   console: { label: string; to: string };
   /** Việc nên làm trước (số bước). */
   after?: number;
+  /** v0.1.39: việc không có form trình thiết lập — nút chính mở thẳng màn này (không mở `/guide/:n`). */
+  doTo?: string;
+  /** Nhãn nút chính khi có `doTo`. */
+  doLabel?: string;
 }
 
 export const GUIDE: GuideItem[] = [
@@ -44,7 +48,7 @@ export const GUIDE: GuideItem[] = [
     n: 6,
     title: 'Chọn nhóm cho agent lắng nghe',
     why: 'Mọi nhóm mới đều ở chế độ Không nghe để bảo vệ riêng tư — Sếp chọn nhóm nào agent được nghe.',
-    prepare: ['Đã kết nối ít nhất một kênh (việc 05) và đồng bộ xong danh sách nhóm.'],
+    prepare: ['Đã kết nối ít nhất một kênh (việc 01) và đồng bộ xong danh sách nhóm.'],
     steps: [
       'Bấm "Làm bước này".',
       'Trong bảng nhóm, ở cột "Chế độ lắng nghe" của nhóm muốn theo dõi, chọn một chế độ: "Chỉ khi được tag" (an toàn nhất), "Lắng nghe im lặng" (ghi nhận, không trả lời) hoặc "Chủ động bắt tín hiệu".',
@@ -88,7 +92,7 @@ export const GUIDE: GuideItem[] = [
     n: 9,
     title: 'Đặt mức tự trị cho agent',
     why: 'Quyết định agent được tự làm tới đâu: chỉ gợi ý, hay soạn sẵn chờ Sếp duyệt rồi mới gửi.',
-    prepare: ['Đã có agent (việc 08).'],
+    prepare: ['Đã có agent (việc 04).'],
     steps: [
       'Bấm "Làm bước này".',
       'Ở "Mức tự trị", chọn 4 (agent soạn sẵn, Sếp duyệt rồi mới gửi — khuyên dùng) hoặc 3 (agent chỉ gợi ý).',
@@ -112,7 +116,7 @@ export const GUIDE: GuideItem[] = [
       'Bấm "Đã lưu, sang bước sau".',
     ],
     doneWhen: 'Có thêm ít nhất một tài khoản ngoài Sếp.',
-    console: { label: 'Điều khiển hệ thống › Quyền hạn', to: '/system?tab=roles' },
+    console: { label: 'Điều khiển hệ thống › Người dùng', to: '/system?tab=users' },
   },
   {
     n: 11,
@@ -127,6 +131,39 @@ export const GUIDE: GuideItem[] = [
     ],
     doneWhen: 'Đã có lịch sao lưu.',
     console: { label: 'Điều khiển hệ thống › Dữ liệu & lưu trữ', to: '/system?tab=storage' },
+  },
+  {
+    n: 13,
+    title: 'Kết nối Facebook',
+    why: 'Để Gen đọc thông báo và tin nhắn Facebook của Sếp — chỉ đọc, không đăng bài hay trả lời thay Sếp.',
+    prepare: ['Tài khoản Facebook thật của chính Sếp (không dùng tài khoản phụ hay nick ảo).', 'Điện thoại để nhận mã xác minh nếu Facebook hỏi.'],
+    steps: [
+      'Bấm "Mở trang Tài khoản mạng xã hội" bên dưới.',
+      'Bấm "Thêm tài khoản", đặt tên dễ nhận ra.',
+      'Đọc kỹ cảnh báo rủi ro, tích hai ô xác nhận rồi lưu.',
+      'Bấm "Đăng nhập" — Sếp tự đăng nhập ngay trong app (mật khẩu, mã 2FA không lưu lại).',
+      'Khi tài khoản báo Đang kết nối, bấm "Đọc ngay" để thử đọc thông báo.',
+    ],
+    doneWhen: 'Đã đăng nhập Facebook ít nhất một lần.',
+    console: { label: 'Tài khoản mạng xã hội', to: '/social' },
+    doTo: '/social',
+    doLabel: 'Mở trang Tài khoản mạng xã hội',
+  },
+  {
+    n: 14,
+    title: 'Nối Gen-hub',
+    why: 'Để Gen đọc Kho tri thức của Sếp trên Gen-hub (chỉ đọc) — trả lời có căn cứ từ việc, quyết định, bài học đã ghi.',
+    prepare: ['Tài khoản Gen-hub của Sếp.', 'Địa chỉ Gen-hub (ví dụ https://hub.genos.top/mcp).'],
+    steps: [
+      'Trong Gen-hub: tạo trợ lý mới, chọn thẻ truy cập (token) 90 ngày, chỉ bật quyền ĐỌC Kho.',
+      'Chép token vừa tạo.',
+      'Bấm "Mở thẻ Gen-hub" bên dưới, dán địa chỉ và token vào thẻ Gen-hub.',
+      'Bấm "Lưu & kiểm tra" (nhập PIN khi được hỏi) và chờ báo Đã nối Kho.',
+    ],
+    doneWhen: 'Kiểm tra xanh ít nhất một lần.',
+    console: { label: 'Kết nối MCP › Gen-hub', to: '/mcp' },
+    doTo: '/mcp',
+    doLabel: 'Mở thẻ Gen-hub',
   },
 ];
 
@@ -149,6 +186,12 @@ export const MODEL_GUIDE: GuideItem = {
 };
 
 export const GUIDE_BY_N: Record<number, GuideItem> = Object.fromEntries([MODEL_GUIDE, ...GUIDE].map((g) => [g.n, g]));
+
+/** v0.1.39: số thứ tự hiển thị (01, 02…) của việc n trong danh sách Hướng dẫn thiết lập — không phải số bước. */
+export function guideOrdinal(n: number): string {
+  const i = GUIDE.findIndex((g) => g.n === n);
+  return String(i >= 0 ? i + 1 : n).padStart(2, '0');
+}
 
 /** v0.1.30: thẻ ẩn khi người dùng đã bấm "Ẩn" và KHÔNG có bước dở nào mới so với lúc ẩn. */
 export function followUpHidden(pending: number[], hidden: number[] | undefined): boolean {

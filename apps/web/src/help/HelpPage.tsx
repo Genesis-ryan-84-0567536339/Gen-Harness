@@ -96,10 +96,10 @@ export function HelpPage() {
         {canGuide ? <UpdateCard always /> : null}
 
         {canGuide ? (
-          <Card title="Hướng dẫn kết nối" kicker="Kênh, nhóm, sàng lọc, agent, đội ngũ, sao lưu">
+          <Card title="Hướng dẫn thiết lập" kicker="Kênh, nhóm, sàng lọc, agent, đội ngũ, sao lưu, Facebook, Gen-hub">
             <p className="help-text">Các việc thiết lập Sếp đã để sau — từng bước, làm lúc nào cũng được.</p>
             <Link className="gh-btn gh-btn--secondary help-link" to="/guide" data-gen-target="help.guide">
-              <Icon name="ph ph-map-trifold" size={14} /> Mở Hướng dẫn kết nối
+              <Icon name="ph ph-map-trifold" size={14} /> Mở Hướng dẫn thiết lập
             </Link>
           </Card>
         ) : null}

@@ -118,6 +118,7 @@ def endpoint_forbidden(endpoint: str) -> bool:
 
 
 ENDPOINT_FORBIDDEN_MSG = "Địa chỉ Gen-hub trỏ tới vùng mạng bị cấm (link-local/siêu dữ liệu đám mây)"
+ENDPOINT_INVALID_MSG = "Địa chỉ Gen-hub không hợp lệ — kiểm tra lại (dạng https://hub.genos.top/mcp)"
 
 
 def _summary(suffix: str, result: Any) -> str:
@@ -230,8 +231,21 @@ async def _set_result(db: AsyncSession, org_id: uuid.UUID, *, ok: bool, error: s
                          {"e": error, "o": org_id})
 
 
-def _classify(message: str) -> str:
-    """Lỗi McpClient dạng "<mã HTTP>: …" / "mạng: …" → câu ngắn tiếng Việt, giữ mã đầu dòng cho `status_of`."""
+PUBLIC_NET_HINT = "Bật 'Cho phép Gen-hub ở mạng công cộng' ngay trong thẻ này."
+
+
+def _classify(message: str, code: str | None = None) -> str:
+    """Lỗi McpClient dạng "<mã HTTP>: …" / "mạng: …" → câu ngắn tiếng Việt, giữ mã đầu dòng cho `status_of`.
+
+    v0.1.39 (F-31): guard mạng MCP Hub (`MCP_NETWORK_BLOCKED`) chặn vì địa chỉ ở mạng công cộng → chỉ đúng công tắc
+    trong thẻ Gen-hub (server KHÔNG tự bật); chặn vì link-local/siêu dữ liệu → câu vùng mạng bị cấm; địa chỉ sai dạng
+    (scheme lạ, cổng ngoài 0–65535) → câu "không hợp lệ" riêng (trước đây bị gán nhầm "vùng mạng bị cấm")."""
+    if code == "MCP_NETWORK_BLOCKED":
+        if "mạng công cộng" in message:
+            return PUBLIC_NET_HINT
+        if "vùng mạng bị cấm" in message:
+            return ENDPOINT_FORBIDDEN_MSG
+        return ENDPOINT_INVALID_MSG
     head = message.split(":", 1)[0].strip()
     if head in ("401", "403"):
         return f"{head}: Token Gen-hub hết hạn hoặc đã bị thu hồi — tạo token mới trong Gen-hub rồi dán lại"
@@ -240,6 +254,26 @@ def _classify(message: str) -> str:
     if head == "mạng":
         return "Không kết nối được Gen-hub (mạng/timeout)"
     return message
+
+
+def _error_code(msg: str, *, code: str | None = None, missing: bool = False) -> str:
+    """Mã lỗi thống nhất cho trang "Việc Sếp cần làm" (v0.1.39) — đọc từ câu đã phân loại."""
+    if msg == ENDPOINT_FORBIDDEN_MSG:
+        return "HUB_ENDPOINT_FORBIDDEN"
+    if msg == ENDPOINT_INVALID_MSG:
+        return "HUB_ENDPOINT_INVALID"
+    if msg == PUBLIC_NET_HINT or code == "MCP_NETWORK_BLOCKED":
+        return "MCP_NETWORK_BLOCKED"
+    if missing:
+        return "HUB_TOOLS_MISSING"
+    head = msg.split(":", 1)[0].strip()
+    if head in ("401", "403"):
+        return "HUB_TOKEN_REJECTED"
+    if head == "429":
+        return "HUB_RATE_LIMITED"
+    if msg.startswith("Không kết nối được Gen-hub"):
+        return "HUB_UNREACHABLE"
+    return "HUB_ERROR"
 
 
 def client_for(transport: Any) -> McpClient:
@@ -425,23 +459,24 @@ async def test_link(db: AsyncSession, redis: Any, client: McpClient, *, user: se
     token = await invoke.auth_token(db, link.server_id)
     started = time.monotonic()
 
-    async def fail(msg: str, **extra: Any) -> dict[str, Any]:
+    async def fail(msg: str, *, code: str | None = None, tools_missing: bool = False, **extra: Any) -> dict[str, Any]:
+        error_code = _error_code(msg, code=code, missing=tools_missing)
         msg = scrub(msg, token)
         await _set_result(db, user.org_id, ok=False, error=msg)
         await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                                action="hub.link_tested", target_type="hub_link", target_id=str(link.server_id),
                                target_label=SERVER_NAME, result="failed", detail={"error": msg, **extra}, ip=user.ip)
         await db.commit()
-        return {"ok": False, "error": msg, "latency_ms": int((time.monotonic() - started) * 1000),
-                "exposed_tools": [], "missing_tools": list(extra.get("missing_tools", [])),
-                "link": link_out(await load(db, user.org_id))}
+        return {"ok": False, "error": msg, "error_code": error_code,
+                "latency_ms": int((time.monotonic() - started) * 1000), "exposed_tools": [],
+                "missing_tools": list(extra.get("missing_tools", [])), "link": link_out(await load(db, user.org_id))}
 
     if endpoint_forbidden(server.endpoint or ""):
         return await fail(ENDPOINT_FORBIDDEN_MSG)
     try:
         found = await invoke.discover(db, redis, client, org_id=user.org_id, server=server, actor=user)
     except ApiError as e:
-        return await fail(_classify(str(e.title)))
+        return await fail(_classify(str(e.title), code=e.code), code=e.code)
     exposed: list[str] = []
     write_kho: list[str] = []
     have: set[str] = set()
@@ -472,7 +507,7 @@ async def test_link(db: AsyncSession, redis: Any, client: McpClient, *, user: se
     missing = [s for s in REQUIRED_SUFFIXES if s not in have]
     if "kho_tom_tat" in missing:
         return await fail(f"Gen-hub chưa cấp tool đọc Kho: {', '.join(missing)}", missing_tools=missing,
-                          write_tools=write_kho)
+                          write_tools=write_kho, tools_missing=True)
     tool = await find_tool(db, user.org_id, link.server_id, "kho_tom_tat")
     try:
         await invoke.invoke_tool(db, redis, client, org_id=user.org_id, tool=tool, agent_key=AGENT_KEY, args={},
@@ -480,7 +515,7 @@ async def test_link(db: AsyncSession, redis: Any, client: McpClient, *, user: se
     except invoke.McpCallFailed as e:
         return await fail(_classify(str(e.cause)), missing_tools=missing)
     except ApiError as e:
-        return await fail(str(e.detail or e.title), missing_tools=missing)
+        return await fail(_classify(str(e.detail or e.title), code=e.code), code=e.code, missing_tools=missing)
     await _set_result(db, user.org_id, ok=True, enable=True)
     await clear_cache(redis, user.org_id)
     latency = int((time.monotonic() - started) * 1000)
@@ -489,8 +524,8 @@ async def test_link(db: AsyncSession, redis: Any, client: McpClient, *, user: se
                            target_label=SERVER_NAME, detail={"exposed": exposed, "missing_tools": missing,
                                                              "write_tools": write_kho, "latency_ms": latency},
                            ip=user.ip)
-    return {"ok": True, "error": None, "latency_ms": latency, "exposed_tools": exposed, "missing_tools": missing,
-            "link": link_out(await load(db, user.org_id))}
+    return {"ok": True, "error": None, "error_code": None, "latency_ms": latency, "exposed_tools": exposed,
+            "missing_tools": missing, "link": link_out(await load(db, user.org_id))}
 
 
 # ─── nhắc token sắp hết hạn (worker, hằng ngày) ───────────────────────────────

@@ -3,7 +3,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import type { SetupFollowUpItem, SetupState } from '@gen-harness/contracts';
+import type { BossOverview, SetupFollowUpItem, SetupState } from '@gen-harness/contracts';
 import { GuidePage } from '../../src/guide/GuidePage';
 import { GuideStepPage } from '../../src/guide/GuideStepPage';
 import { GUIDE } from '../../src/guide/guideContent';
@@ -22,28 +22,43 @@ const finished = (done: number[] = [], skipped: number[] = []): SetupState => ({
 });
 
 function followUp(done: number[]): SetupFollowUpItem[] {
-  return [5, 6, 7, 8, 9, 10, 11].map((n) => ({ n, key: `k${n}`, title: `Bước ${n}`, status: done.includes(n) ? 'done' : 'skipped', done: done.includes(n) }));
+  return [5, 6, 7, 8, 9, 10, 11, 13, 14].map((n) => ({ n, key: `k${n}`, title: `Bước ${n}`, status: done.includes(n) ? 'done' : n > 12 ? 'todo' : 'skipped', done: done.includes(n) }));
 }
 
-describe('Hướng dẫn kết nối (/guide)', () => {
-  it('mỗi việc 5–11 có chuẩn bị, các bước đánh số, dấu hiệu xong và nút mở đúng form', () => {
+const BOSS: BossOverview = {
+  rows: [],
+  results: { hub: null, facebook: null, agy_login: null, agy_call: null, agy_switch: null, claude_login: null, claude_call: null, jev: null },
+  required_done: 1,
+  required_total: 4,
+  switch_passes: 0,
+};
+
+function renderGuide(done: number[]) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+  qc.setQueryData(['setup', 'follow-up'], followUp(done));
+  qc.setQueryData(['boss-checks'], BOSS);
+  return render(
+    <QueryClientProvider client={qc}>
+      <MemoryRouter>
+        <GuidePage />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
+describe('Hướng dẫn thiết lập (/guide)', () => {
+  it('mỗi việc có chuẩn bị, các bước đánh số, dấu hiệu xong và nút mở đúng form', () => {
     for (const g of GUIDE) {
       expect(g.steps.length).toBeGreaterThanOrEqual(3);
       expect(g.prepare.length).toBeGreaterThan(0);
       expect(g.doneWhen).not.toBe('');
     }
-    expect(GUIDE.map((g) => g.n)).toEqual([5, 6, 7, 8, 9, 10, 11]);
+    expect(GUIDE.map((g) => g.n)).toEqual([5, 6, 7, 8, 9, 10, 11, 13, 14]);
 
-    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
-    qc.setQueryData(['setup', 'follow-up'], followUp([5, 7]));
-    render(
-      <QueryClientProvider client={qc}>
-        <MemoryRouter>
-          <GuidePage />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
-    expect(screen.getByText('Đã xong 2/7 việc')).toBeInTheDocument();
+    renderGuide([5, 7]);
+    expect(screen.getByRole('heading', { name: 'Hướng dẫn thiết lập' })).toBeInTheDocument();
+    expect(document.title).toBe('Hướng dẫn thiết lập · Gen-Harness');
+    expect(screen.getByText('Đã xong 2/9 việc')).toBeInTheDocument();
     expect(screen.getAllByText('Đã xong')).toHaveLength(2);
     // Việc chưa xong đầu tiên (06) mở sẵn; việc đã xong thì nút đổi thành "Làm lại / chỉnh".
     const cards = screen.getAllByRole('listitem').filter((li) => li.classList.contains('guide-card'));
@@ -52,8 +67,38 @@ describe('Hướng dẫn kết nối (/guide)', () => {
     expect(within(cards[1]).getByRole('link', { name: /Làm bước này/ })).toHaveAttribute('href', '/guide/6');
     expect(within(cards[0]).getByRole('link', { name: /Làm lại/ })).toHaveAttribute('href', '/guide/5');
     expect(within(cards[1]).getByRole('link', { name: /Hoặc làm ở Nhóm & Con người/ })).toHaveAttribute('href', '/directory');
-    // Việc 09 cần agent (việc 08) chưa có → nhắc làm 08 trước.
-    expect(within(cards[4]).getByText(/Nên làm việc 08 trước/)).toBeInTheDocument();
+    // Đặt agent (thứ tự 05) cần agent (thứ tự 04) chưa có → nhắc theo SỐ THỨ TỰ trong danh sách.
+    expect(within(cards[4]).getByText(/Nên làm việc 04 trước/)).toBeInTheDocument();
+  });
+
+  it('v0.1.39: 9 việc đánh số 01…09; Mời người trong đội → Người dùng; Facebook, Gen-hub mở thẳng màn làm việc', () => {
+    renderGuide([13, 14]);
+    const cards = screen.getAllByRole('listitem').filter((li) => li.classList.contains('guide-card'));
+    expect(cards).toHaveLength(9);
+    expect(cards.map((c) => c.querySelector('.guide-card__num')?.textContent)).toEqual(['01', '02', '03', '04', '05', '06', '07', '08', '09']);
+    // data-gen-target vẫn theo số bước.
+    expect(cards[7]).toHaveAttribute('data-gen-target', 'guide.item:13');
+    const team = cards.find((c) => within(c).queryByText('Mời người trong đội'))!;
+    expect(within(team).getByRole('link', { name: /Hoặc làm ở Điều khiển hệ thống › Người dùng/ })).toHaveAttribute('href', '/system?tab=users');
+    const fb = cards[7];
+    expect(within(fb).getByText('Kết nối Facebook')).toBeInTheDocument();
+    expect(within(fb).getByRole('link', { name: /Mở trang Tài khoản mạng xã hội/ })).toHaveAttribute('href', '/social');
+    expect(within(fb).getByText('Đã xong')).toBeInTheDocument();
+    const hub = cards[8];
+    expect(within(hub).getByText('Nối Gen-hub')).toBeInTheDocument();
+    expect(within(hub).getByRole('link', { name: /Mở thẻ Gen-hub/ })).toHaveAttribute('href', '/mcp');
+    expect(within(hub).getByText('Đã xong')).toBeInTheDocument();
+    expect(screen.getByText('Đã xong 2/9 việc')).toBeInTheDocument();
+  });
+
+  it('v0.1.39: thẻ "Việc Sếp cần làm" ở đầu trang dẫn tới /guide/viec-sep, kèm tiến độ dòng bắt buộc', () => {
+    renderGuide([]);
+    const link = screen.getByRole('link', { name: /Việc Sếp cần làm — kết nối chạy thật \(~20 phút\)/ });
+    expect(link).toHaveAttribute('href', '/guide/viec-sep');
+    expect(link).toHaveTextContent('Đã đạt 1/4 dòng bắt buộc');
+    // Đứng trước danh sách việc.
+    const list = document.querySelector('.guide-list')!;
+    expect(link.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
 
@@ -95,7 +140,7 @@ describe('Làm một việc từ hướng dẫn (/guide/:n) — sau khi đã Ho�
     await user.type(time, '03:30');
     await user.click(screen.getByRole('button', { name: /Tiếp tục/ }));
     await waitFor(() => expect(saved).toMatchObject({ frequency: 'daily', time_of_day: '03:30' }));
-    expect(await screen.findByText('Đã xong 1/7 việc')).toBeInTheDocument();
+    expect(await screen.findByText('Đã xong 1/9 việc')).toBeInTheDocument();
   });
 
   it('số việc không có trong hướng dẫn thì về trang hướng dẫn', async () => {
@@ -110,6 +155,24 @@ describe('Làm một việc từ hướng dẫn (/guide/:n) — sau khi đã Ho�
         </MemoryRouter>
       </QueryClientProvider>,
     );
-    expect(await screen.findByText('Đã xong 0/7 việc')).toBeInTheDocument();
+    expect(await screen.findByText('Đã xong 0/9 việc')).toBeInTheDocument();
+  });
+
+  it('v0.1.39: /guide/13 và /guide/14 mở thẳng màn làm việc (không có form trình thiết lập)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(followUp([])), { status: 200, headers: { 'Content-Type': 'application/json' } })));
+    for (const [n, to] of [[13, '/social'], [14, '/mcp']] as const) {
+      const { unmount } = render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter initialEntries={[`/guide/${n}`]}>
+            <Routes>
+              <Route path="/guide/:n" element={<GuideStepPage />} />
+              <Route path={to} element={<p>Đã tới {to}</p>} />
+            </Routes>
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+      expect(await screen.findByText(`Đã tới ${to}`)).toBeInTheDocument();
+      unmount();
+    }
   });
 });

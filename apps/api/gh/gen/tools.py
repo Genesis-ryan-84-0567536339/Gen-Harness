@@ -140,6 +140,9 @@ def _shrink(data: Any, rows: int, text_len: int) -> Any:
     return data
 
 
+GUIDE_STEPS_MAX = 240
+
+
 def compact(data: Any) -> tuple[Any, str]:
     """Cắt gọn ≤ MAX_BYTES / MAX_ROWS — giảm dần số dòng và độ dài chuỗi tới khi vừa."""
     for rows, text_len in ((MAX_ROWS, 300), (10, 200), (5, 120), (3, 80)):
@@ -214,9 +217,11 @@ class ToolRunner:
                 status, follow = await self._get("/setup/follow-up", {})
                 done = {i.get("n"): i.get("done") for i in follow} if status == 200 and isinstance(follow, list) \
                     else {}
-                # Gọn cho đủ 7 việc trong 4 KB: các bước nối thành một dòng, cắt 320 ký tự.
-                data = [{"n": g["n"], "title": g["title"], "done": bool(done.get(g["n"])),
-                         "steps": " / ".join(g["steps"])[:320]} for g in registry.load().guide]
+                # Gọn cho đủ mọi việc (9 việc ở v0.1.39) trong 4 KB không bị cắt: việc đã xong bỏ phần bước, việc còn
+                # lại nối các bước thành một dòng, cắt GUIDE_STEPS_MAX ký tự (test_gen đo kích thước có dư địa).
+                data = [{"n": g["n"], "title": g["title"], "done": bool(done.get(g["n"]))}
+                        | ({} if done.get(g["n"]) else {"steps": " / ".join(g["steps"])[:GUIDE_STEPS_MAX]})
+                        for g in registry.load().guide]
             else:
                 path, query = _build_request(tool, args)
                 status, data = await self._get(path, query)

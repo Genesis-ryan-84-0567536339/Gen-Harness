@@ -193,6 +193,46 @@ def write_session(kind: str, raw: bytes) -> None:
     _atomic_write(state_path, orjson.dumps(state))
 
 
+CODE_SCRUB_MIN = 8
+
+
+def scrub_codes(message: str, codes: list[str]) -> str:
+    """Che mã đăng nhập Sếp đã dán khỏi một thông báo (v0.1.39): cả mã nguyên vẹn lẫn MỌI mảnh ≥ 8 ký tự của mã —
+    thông báo lỗi chỉ giữ đuôi bộ đệm (`buf[-300:]`, có thể cắt ngang mã) và TUI có thể ngắt dòng mã dài.
+
+    Quét MỘT lượt: mọi cửa sổ 8 ký tự của thông báo trùng một mảnh 8 ký tự của mã đều bị che (mảnh dài hơn = chuỗi
+    cửa sổ liền nhau nên cũng bị che trọn). Chi phí O(tổng độ dài mã + độ dài thông báo), không phụ thuộc bình phương
+    độ dài mã (mã dài tới 500 ký tự, dán lại nhiều lần)."""
+    uniq = {c for c in codes if c}
+    if not uniq:
+        return message
+    out = message
+    for c in sorted(uniq, key=len, reverse=True):
+        out = out.replace(c, "***")
+    n = CODE_SCRUB_MIN
+    grams = {c[i:i + n] for c in uniq for i in range(len(c) - n + 1)}
+    if not grams:
+        return out
+    mask = [False] * len(out)
+    for i in range(len(out) - n + 1):
+        if out[i:i + n] in grams:
+            for j in range(i, i + n):
+                mask[j] = True
+    if not any(mask):
+        return out
+    parts: list[str] = []
+    i = 0
+    while i < len(out):
+        if mask[i]:
+            while i < len(out) and mask[i]:
+                i += 1
+            parts.append("***")
+        else:
+            parts.append(out[i])
+            i += 1
+    return "".join(parts)
+
+
 def session_email(kind: str, raw: bytes) -> str | None:
     if kind != CLAUDE:
         return file_email(raw)
@@ -361,12 +401,17 @@ async def activate(db: AsyncSession, org_id: uuid.UUID, profile_id: uuid.UUID) -
         # Trước đây: chỉ đổi cờ trong CSDL, tệp phiên giữ nguyên → UI báo "đã đổi" mà AI vẫn chạy tài khoản cũ.
         raise conflict("CLI_PROFILE_NO_SESSION",
                        "Tài khoản này chưa có phiên đăng nhập đã lưu — bấm “Thêm tài khoản” để đăng nhập lại")
+    # v0.1.39 (F-76): lưu tệp đang dùng vào hồ sơ đang hoạt động TRƯỚC rồi mới đọc phiên của hồ sơ đích. Trước đây đọc
+    # trước → "đổi" sang chính tài khoản đang dùng (hoặc bấm lại khi đã đổi xong) ghi bản CŨ trong CSDL đè lên tệp CLI
+    # vừa tự làm mới token (refresh token đã xoay vòng ⇒ phiên hỏng, "Hết hạn" ngay sau khi đổi).
+    await save_current_back(db, org_id, row.kind)
+    enc = (await db.execute(text("SELECT token_enc FROM agent.cli_profiles WHERE id = :i"),
+                            {"i": row.id})).scalar_one_or_none()
     try:
-        token = crypto.decrypt(bytes(row.token_enc), CLI_AAD)
+        token = crypto.decrypt(bytes(enc if enc is not None else row.token_enc), CLI_AAD)
     except Exception as exc:  # noqa: BLE001 — khoá master đổi / dữ liệu hỏng
         raise conflict("CLI_PROFILE_NO_SESSION",
                        "Không mở được phiên đã lưu của tài khoản này — hãy đăng nhập lại tài khoản đó") from exc
-    await save_current_back(db, org_id, row.kind)
     await db.execute(text("UPDATE agent.cli_profiles SET is_active = false WHERE provider_id = :p AND is_active"),
                      {"p": row.provider_id})
     await db.execute(text("UPDATE agent.cli_profiles SET is_active = true, updated_at = now() WHERE id = :i"),
@@ -622,6 +667,12 @@ class LoginSession:
     task: asyncio.Task[None] | None = None
     pid: int | None = None
     profile: dict[str, Any] | None = None
+    # v0.1.39 (F-77): DẠNG mã Sếp đã dán ({length, classes, symbols, has_space}) — không bao giờ giữ giá trị mã;
+    # không có trong public() (chỉ ghi vào kết quả kiểm `<agy|claude>_login` + actionlog).
+    code_shape: dict[str, Any] | None = None
+    # Hồ sơ mới đã commit vào CSDL (cuối `_finish`): từ đây khối finally KHÔNG được trả tệp phiên cũ về nữa, kể cả khi
+    # lượt bị huỷ/tắt trước khi kịp báo "done" (tệp phải khớp hồ sơ đang hoạt động trong CSDL).
+    committed: bool = False
 
     def public(self) -> dict[str, Any]:
         return {"login_id": self.id, "kind": self.kind, "status": self.status, "url": self.url,
@@ -677,6 +728,9 @@ class CliLogins:
         return s if s is not None and s.org_id == org_id else None
 
     async def submit(self, s: LoginSession, code: str) -> None:
+        from gh.boss_checks import service as boss_checks
+
+        s.code_shape = boss_checks.code_shape(code)
         await s.code.put(code.strip())
 
     def cancel(self, login_id: str) -> None:
@@ -711,6 +765,7 @@ class CliLogins:
         buf = ""
         raw = ""
         answered: set[str] = set()
+        typed: list[str] = []   # mã đã ghi vào CLI — che khỏi thông báo lỗi/actionlog nếu CLI in lại (echo)
         try:
             await self._emit(s)
             proc = await asyncio.create_subprocess_exec(*self.login_argv(s.kind), stdin=slave, stdout=slave,
@@ -773,6 +828,7 @@ class CliLogins:
                     if code_task is None:
                         code_task = asyncio.create_task(s.code.get())
                     if code_task.done():
+                        typed.append(code_task.result())
                         os.write(master, code_task.result().encode() + b"\r")
                         code_task = None
                         s.status, s.message = "verifying", None
@@ -783,12 +839,16 @@ class CliLogins:
             await self._emit(s)
             raise
         except Exception as exc:  # noqa: BLE001 — báo lỗi lên Console, không làm sập api
-            log.warning("Đăng nhập CLI lỗi: %s", exc)
+            # v0.1.39: CLI in lại mã (echo) → không để mã (kể cả mảnh bị cắt/ngắt dòng) lọt vào log/Console.
+            err = scrub_codes(str(exc), typed)
+            log.warning("Đăng nhập CLI lỗi: %s", err[:300])
+            # Ghi kết quả kiểm trước khi báo "failed" — web thấy "failed" là tải lại ô kết quả ngay.
+            await self._boss_check(s, ok=False, exc=exc)
             # v0.1.28 (UX N2): không đưa lỗi hệ điều hành ("[Errno 2] No such file or directory") thẳng lên Console.
             s.status = "failed"
-            s.message = (sp.missing if isinstance(exc, FileNotFoundError) else str(exc)[:300])
+            s.message = (sp.missing if isinstance(exc, FileNotFoundError) else err[:300])
             await self._emit(s)
-            await self._log(s, "failed", {"error": str(exc)[:300]})
+            await self._log(s, "failed", {"error": err[:300]})
         finally:
             with contextlib.suppress(Exception):
                 loop.remove_reader(master)
@@ -804,7 +864,7 @@ class CliLogins:
                     await asyncio.wait_for(proc.wait(), 5)
             # Sau khi CLI đã tắt (không còn ghi tệp): xong → bỏ bản gửi tạm; lỗi/huỷ → trả tài khoản cũ về.
             with contextlib.suppress(OSError):
-                if s.status == "done":
+                if s.status == "done" or s.committed:
                     drop_parked_token(s.kind)
                 elif not unpark_token(s.kind) and path.exists() and path.stat().st_mtime > before:
                     # Chưa có tài khoản nào: bỏ tệp dở dang CLI để lại, để không thành "đã đăng nhập" giả.
@@ -855,14 +915,54 @@ class CliLogins:
             await db.execute(text("""UPDATE agent.providers SET account_label = :e, auth_state = 'ok',
                                      auth_expires_at = :x WHERE id = :p"""),
                              {"e": ident["email"], "x": ident["expires_at"], "p": provider_id})
+            detail: dict[str, Any] = {"kind": s.kind}
+            if s.code_shape is not None:
+                detail["code_shape"] = s.code_shape
             await actionlog.record(db, org_id=s.org_id, actor_type="user", actor_id=f"user:{s.user_id}",
                                    action="cli.logged_in", target_type="cli_profile", target_id=str(profile_id),
-                                   target_label=ident["email"], detail={"kind": s.kind})
+                                   target_label=ident["email"], detail=detail)
             await db.commit()
+            s.committed = True
             profs = await profiles(db, s.org_id, s.kind)
-        s.status, s.message = "done", None
         s.profile = next((p for p in profs if p["id"] == str(profile_id)), None)
+        # Ghi kết quả kiểm TRƯỚC khi báo "done" (web thấy "done" là tải lại ô kết quả ngay). `_boss_check` nuốt mọi lỗi
+        # (cả phần dựng detail) — hồ sơ mới đã commit, một lỗi ở đây không được đẩy lượt đăng nhập sang nhánh 'failed'.
+        # Huỷ/tắt giữa chừng (CancelledError) vẫn an toàn: `s.committed` đã bật nên khối finally không trả tệp phiên CŨ
+        # về đè lên tài khoản vừa đăng nhập.
+        await self._boss_check(s, ok=True, email=ident["email"])
+        s.status, s.message = "done", None
         await self._emit(s, profile=s.profile)
+
+    async def _boss_check(self, s: LoginSession, *, ok: bool, exc: BaseException | None = None,
+                          email: str | None = None) -> None:
+        """v0.1.39 (F-77): ghi kết quả kiểm `<agy|claude>_login` cho trang "Việc Sếp cần làm" — chỉ DẠNG mã, email đã
+        che. Lỗi ghi không bao giờ làm hỏng luồng đăng nhập."""
+        with contextlib.suppress(Exception):   # cả phần dựng detail: không ngoại lệ nào thoát ra luồng đăng nhập
+            await self._boss_check_record(s, ok=ok, exc=exc, email=email)
+
+    async def _boss_check_record(self, s: LoginSession, *, ok: bool, exc: BaseException | None,
+                                 email: str | None) -> None:
+        from gh.boss_checks import service as boss_checks
+
+        key = "claude_login" if s.kind == CLAUDE else "agy_login"
+        detail: dict[str, Any] = {}
+        if s.code_shape is not None:
+            detail["code_shape"] = s.code_shape
+        if ok:
+            detail["credentials_file"] = token_path(s.kind).exists()
+            detail["account_masked"] = boss_checks.mask_email(email if isinstance(email, str) else None)
+            code, message = None, None
+        elif isinstance(exc, FileNotFoundError):
+            code, message = "CLI_MISSING", spec(s.kind).missing
+        elif isinstance(exc, TimeoutError):
+            code, message = "CLI_LOGIN_TIMEOUT", "Quá 10 phút chưa hoàn tất đăng nhập — bấm Đăng nhập lại để thử lại"
+        else:
+            code, message = "CLI_LOGIN_FAILED", ("Đăng nhập chưa xong — CLI dừng trước khi lưu phiên. Bấm Đăng nhập "
+                                                 "lại, mở link mới và dán đúng mã vừa nhận")
+        async with self.sm() as db:
+            await boss_checks.record(db, s.org_id, key, "pass" if ok else "fail", error_code=code,
+                                     message=message, detail=detail, user_id=s.user_id)
+            await db.commit()
 
     async def _log(self, s: LoginSession, result: str, detail: dict[str, Any]) -> None:
         with contextlib.suppress(Exception):

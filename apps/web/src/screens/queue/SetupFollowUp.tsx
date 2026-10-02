@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Icon } from '@gen-harness/ui';
-import { FOLLOW_UP_KEY, GUIDE_BY_N, followUpHidden } from '../../guide/guideContent';
+import { FOLLOW_UP_KEY, GUIDE_BY_N, followUpHidden, guideOrdinal } from '../../guide/guideContent';
 import { api } from '../../lib/api';
 import { useMe } from '../../lib/queries';
 import { useUiStore } from '../../lib/uiStore';
@@ -9,8 +9,8 @@ import { Panel } from '../common';
 
 
 /**
- * "Việc thiết lập tiếp": các việc tuỳ chọn 5–11 chưa xong. Mỗi mục mở thẳng form làm việc đó (`/guide/:n`), đầu
- * thẻ dẫn tới trang Hướng dẫn kết nối từng bước. Xong hay chưa do API suy từ dữ liệu thật (`GET /setup/follow-up`)
+ * "Việc thiết lập tiếp": các việc tuỳ chọn 5–11 (+ 13 Facebook, 14 Gen-hub từ v0.1.39) chưa xong. Mỗi mục mở thẳng
+ * form/màn làm việc đó (`/guide/:n` hoặc `doTo`), đầu thẻ dẫn tới trang Hướng dẫn thiết lập. Xong hay chưa do API suy từ dữ liệu thật (`GET /setup/follow-up`)
  * — làm xong ở form hướng dẫn hay ở màn Console thì mục cũng tự biến mất, không cần bấm tay.
  */
 export function SetupFollowUp() {
@@ -28,14 +28,14 @@ export function SetupFollowUp() {
   return (
     <Panel
       title="Việc thiết lập tiếp"
-      kicker={`${items.length} việc Sếp đã để sau — làm khi sẵn sàng, xong sẽ tự biến mất`}
+      kicker={`${items.length} việc thiết lập còn lại — làm khi sẵn sàng, xong sẽ tự biến mất`}
       label="Việc thiết lập tiếp"
       bodyClass="ov-followup"
       aside={
         <span className="ov-followup__aside">
           <Link to="/guide" className="gh-btn gh-btn--primary btn-24">
             <Icon name="ph ph-list-checks" size={12} />
-            Hướng dẫn từng bước
+            Hướng dẫn thiết lập
           </Link>
           <button
             type="button"
@@ -51,12 +51,12 @@ export function SetupFollowUp() {
       <ul className="ov-followup__list">
         {items.map((s) => (
           <li key={s.n} className="ov-followup__item">
-            <span className="ov-followup__num mono">{String(s.n).padStart(2, '0')}</span>
+            <span className="ov-followup__num mono">{guideOrdinal(s.n)}</span>
             <div className="ov-followup__body">
               <div className="ov-followup__title">{GUIDE_BY_N[s.n].title}</div>
               <div className="ov-followup__hint">{GUIDE_BY_N[s.n].why}</div>
             </div>
-            <Link to={`/guide/${s.n}`} className="gh-btn gh-btn--secondary btn-24">
+            <Link to={GUIDE_BY_N[s.n].doTo ?? `/guide/${s.n}`} className="gh-btn gh-btn--secondary btn-24">
               Làm ngay
               <Icon name="ph ph-arrow-right" size={12} />
             </Link>

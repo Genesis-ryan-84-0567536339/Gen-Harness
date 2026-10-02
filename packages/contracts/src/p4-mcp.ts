@@ -133,6 +133,8 @@ export interface HubLinkPatchBody {
 export interface HubLinkTestResult {
   ok: boolean;
   error: string | null;
+  /** v0.1.39: mã lỗi thống nhất (MCP_NETWORK_BLOCKED, HUB_TOKEN_REJECTED…) — null khi ok. */
+  error_code?: string | null;
   latency_ms: number;
   exposed_tools: string[];
   missing_tools: string[];

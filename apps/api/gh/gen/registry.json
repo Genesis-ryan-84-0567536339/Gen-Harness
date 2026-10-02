@@ -99,7 +99,7 @@
     },
     "guide": {
       "path": "/guide",
-      "title": "Hướng dẫn kết nối"
+      "title": "Hướng dẫn thiết lập"
     },
     "account": {
       "path": "/account",
@@ -108,6 +108,14 @@
     "help": {
       "path": "/help",
       "title": "Trợ giúp"
+    },
+    "social": {
+      "path": "/social",
+      "title": "Tài khoản mạng xã hội"
+    },
+    "boss_checks": {
+      "path": "/guide/viec-sep",
+      "title": "Việc Sếp cần làm"
     }
   },
   "targets": [
@@ -256,6 +264,17 @@
       "safe_message": "Đây là thao tác nhạy cảm — Sếp tự xem kỹ và tự quyết định, Gen không làm thay."
     },
     {
+      "id": "system.channels.facebook",
+      "screen": "system",
+      "label": "Thẻ Facebook",
+      "description": "Mở trang Tài khoản mạng xã hội (chỉ Owner)",
+      "dynamic": null,
+      "params": {
+        "tab": "channels"
+      },
+      "permission": "roles.manage"
+    },
+    {
       "id": "system.brain.quota",
       "screen": "system",
       "label": "Hạn mức theo model",
@@ -298,8 +317,8 @@
     {
       "id": "system.brain.jev.test",
       "screen": "system",
-      "label": "Nút \"Kiểm tra\" Jev",
-      "description": "Gọi thử Jev để biết khoá và địa chỉ đúng chưa",
+      "label": "Nút \"Kiểm tra 1 lần\" Jev",
+      "description": "Gọi thử Jev một lần để biết khoá và địa chỉ đúng chưa",
       "dynamic": null,
       "params": {
         "tab": "brain"
@@ -574,7 +593,7 @@
     {
       "id": "help.guide",
       "screen": "help",
-      "label": "Nút \"Mở Hướng dẫn kết nối\"",
+      "label": "Nút \"Mở Hướng dẫn thiết lập\"",
       "description": "Sang trang hướng dẫn các việc thiết lập để sau (Owner)",
       "dynamic": null,
       "params": null
@@ -773,8 +792,8 @@
       ],
       "done_when": "Có thêm ít nhất một tài khoản ngoài Sếp.",
       "console": {
-        "label": "Điều khiển hệ thống › Quyền hạn",
-        "to": "/system?tab=roles"
+        "label": "Điều khiển hệ thống › Người dùng",
+        "to": "/system?tab=users"
       }
     },
     {
@@ -791,6 +810,39 @@
       "console": {
         "label": "Điều khiển hệ thống › Dữ liệu & lưu trữ",
         "to": "/system?tab=storage"
+      }
+    },
+    {
+      "n": 13,
+      "title": "Kết nối Facebook",
+      "why": "Để Gen đọc thông báo và tin nhắn Facebook của Sếp — chỉ đọc, không đăng bài hay trả lời thay Sếp.",
+      "steps": [
+        "Bấm \"Mở trang Tài khoản mạng xã hội\" bên dưới.",
+        "Bấm \"Thêm tài khoản\", đặt tên dễ nhận ra.",
+        "Đọc kỹ cảnh báo rủi ro, tích hai ô xác nhận rồi lưu.",
+        "Bấm \"Đăng nhập\" — Sếp tự đăng nhập ngay trong app (mật khẩu, mã 2FA không lưu lại).",
+        "Khi tài khoản báo Đang kết nối, bấm \"Đọc ngay\" để thử đọc thông báo."
+      ],
+      "done_when": "Đã đăng nhập Facebook ít nhất một lần.",
+      "console": {
+        "label": "Tài khoản mạng xã hội",
+        "to": "/social"
+      }
+    },
+    {
+      "n": 14,
+      "title": "Nối Gen-hub",
+      "why": "Để Gen đọc Kho tri thức của Sếp trên Gen-hub (chỉ đọc) — trả lời có căn cứ từ việc, quyết định, bài học đã ghi.",
+      "steps": [
+        "Trong Gen-hub: tạo trợ lý mới, chọn thẻ truy cập (token) 90 ngày, chỉ bật quyền ĐỌC Kho.",
+        "Chép token vừa tạo.",
+        "Bấm \"Mở thẻ Gen-hub\" bên dưới, dán địa chỉ và token vào thẻ Gen-hub.",
+        "Bấm \"Lưu & kiểm tra\" (nhập PIN khi được hỏi) và chờ báo Đã nối Kho."
+      ],
+      "done_when": "Kiểm tra xanh ít nhất một lần.",
+      "console": {
+        "label": "Kết nối MCP › Gen-hub",
+        "to": "/mcp"
       }
     }
   ]

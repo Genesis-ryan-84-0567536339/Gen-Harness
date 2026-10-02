@@ -16,9 +16,11 @@ REGISTRY_PATH = Path(__file__).with_name("registry.json")
 
 # Trang ngoài danh mục màn (rbac.SCREEN_PERMISSION): quyền cần có để Gen được mở/chỉ vào.
 EXTRA_SCREEN_PERMISSION: dict[str, tuple[str, ...] | None] = {
-    "guide": ("system.manage",),  # Hướng dẫn kết nối = việc thiết lập của Owner
+    "guide": ("system.manage",),  # Hướng dẫn thiết lập = việc thiết lập của Owner
     "account": None,  # ai đăng nhập cũng có "Tài khoản của tôi"
     "help": None,  # Trợ giúp / Giới thiệu (v0.1.22) — mọi vai trò
+    "social": ("system.manage",),  # v0.1.39 (F-32): Tài khoản mạng xã hội — chỉ Owner
+    "boss_checks": ("system.manage",),  # v0.1.39 (F-74): Việc Sếp cần làm (/guide/viec-sep) — chỉ Owner
 }
 
 

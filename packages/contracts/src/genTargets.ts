@@ -39,9 +39,13 @@ export interface GenScreen {
 
 /** Trang ngoài screens.ts mà Gen cũng mở được. */
 const EXTRA_SCREENS: GenScreen[] = [
-  { key: 'guide', path: '/guide', title: 'Hướng dẫn kết nối' },
+  { key: 'guide', path: '/guide', title: 'Hướng dẫn thiết lập' },
   { key: 'account', path: '/account', title: 'Tài khoản của tôi' },
   { key: 'help', path: '/help', title: 'Trợ giúp' },
+  // v0.1.39 (F-32): trang Tài khoản mạng xã hội (Facebook) — chỉ Owner, có mục riêng trên thanh bên.
+  { key: 'social', path: '/social', title: 'Tài khoản mạng xã hội' },
+  // v0.1.39 (F-74): "Việc Sếp cần làm" — 5 dòng kết nối chạy thật (trang con của Hướng dẫn thiết lập) — chỉ Owner.
+  { key: 'boss_checks', path: '/guide/viec-sep', title: 'Việc Sếp cần làm' },
 ];
 
 export const GEN_SCREENS: GenScreen[] = [
@@ -60,7 +64,7 @@ export const GEN_TARGETS: GenTarget[] = [
   { id: 'overview.queue.open_inbox', screen: 'overview', label: 'Nút "Mở hộp thư ý nghĩa"', description: 'Mở Hộp thư ý nghĩa để xem toàn bộ hàng đợi' },
   { id: 'overview.spotlight', screen: 'overview', label: '5 đối tượng đáng chú ý', description: 'Năm người/khách nổi bật nhất hôm nay' },
   { id: 'overview.health', screen: 'overview', label: 'Sức khoẻ hệ thống', description: 'Tình trạng kênh và backlog sàng lọc' },
-  // ── Hướng dẫn kết nối ──
+  // ── Hướng dẫn thiết lập ──
   { id: 'guide.progress', screen: 'guide', label: 'Thanh tiến độ', description: 'Bao nhiêu việc thiết lập đã xong' },
   { id: 'guide.item', screen: 'guide', label: 'Một việc thiết lập', description: 'Thẻ một việc thiết lập (theo số việc n)', dynamic: 'row' },
   { id: 'guide.item.do', screen: 'guide', label: 'Nút "Làm bước này"', description: 'Mở form làm việc thiết lập n', dynamic: 'row' },
@@ -72,11 +76,12 @@ export const GEN_TARGETS: GenTarget[] = [
   { id: 'system.tab.storage', screen: 'system', label: 'Tab "Dữ liệu & lưu trữ"', description: 'Chuyển sang tab hạn lưu, sao lưu & khôi phục' },
   { id: 'system.channels.list', screen: 'system', label: 'Danh sách kênh', description: 'Thẻ các kênh Zalo/WhatsApp và nút tạo mã QR', params: { tab: 'channels' } },
   { id: 'system.channels.pin', screen: 'system', label: 'Thẻ mã PIN', description: 'Đổi mã PIN, xem lịch sử nhập PIN', params: { tab: 'channels' }, sensitive: true },
+  { id: 'system.channels.facebook', screen: 'system', label: 'Thẻ Facebook', description: 'Mở trang Tài khoản mạng xã hội (chỉ Owner)', params: { tab: 'channels' }, permission: 'roles.manage' },
   { id: 'system.brain.quota', screen: 'system', label: 'Hạn mức theo model', description: 'Bảng dùng trong ngày / còn lại của từng model', params: { tab: 'brain' } },
   { id: 'system.brain.chain', screen: 'system', label: 'Chuỗi chuyển hướng', description: 'Thứ tự nhà cung cấp model khi một nơi lỗi', params: { tab: 'brain' } },
   { id: 'system.brain.open_api', screen: 'system', label: 'Nút "Mở API & Model"', description: 'Sang màn thêm nhà cung cấp, khoá API, gán model', params: { tab: 'brain' } },
   { id: 'system.brain.jev', screen: 'system', label: 'Thẻ Jev (System One)', description: 'Cấu hình nguồn model quyết định nhanh Jev', params: { tab: 'brain' } },
-  { id: 'system.brain.jev.test', screen: 'system', label: 'Nút "Kiểm tra" Jev', description: 'Gọi thử Jev để biết khoá và địa chỉ đúng chưa', params: { tab: 'brain' } },
+  { id: 'system.brain.jev.test', screen: 'system', label: 'Nút "Kiểm tra 1 lần" Jev', description: 'Gọi thử Jev một lần để biết khoá và địa chỉ đúng chưa', params: { tab: 'brain' } },
   { id: 'system.brain.triage', screen: 'system', label: 'Thẻ "Lọc đầu Hộp thư"', description: 'Bật/tắt lọc trùng & rác, ngưỡng điểm chất lượng, dùng Jev để chấm (chỉ Owner sửa)', params: { tab: 'brain' } },
   { id: 'system.storage.health', screen: 'system', label: 'Sức khoẻ hệ thống', description: 'Bộ xử lý nền, Trình duyệt nền, hàng lỗi, sao lưu, cập nhật, ổ đĩa; chi tiết kỹ thuật lịch chạy', params: { tab: 'storage' } },
   { id: 'system.storage.retention', screen: 'system', label: 'Hạn lưu dữ liệu', description: 'Mỗi tập dữ liệu giữ bao lâu', params: { tab: 'storage' } },
@@ -109,7 +114,7 @@ export const GEN_TARGETS: GenTarget[] = [
   // ── Trợ giúp ──
   { id: 'help.version', screen: 'help', label: 'Phiên bản đang chạy', description: 'Phiên bản Gen-Harness, tổ chức, múi giờ, vai trò' },
   { id: 'help.ask_gen', screen: 'help', label: 'Cách hỏi Gen', description: 'Hướng dẫn mở khung Gen và câu hỏi mẫu' },
-  { id: 'help.guide', screen: 'help', label: 'Nút "Mở Hướng dẫn kết nối"', description: 'Sang trang hướng dẫn các việc thiết lập để sau (Owner)' },
+  { id: 'help.guide', screen: 'help', label: 'Nút "Mở Hướng dẫn thiết lập"', description: 'Sang trang hướng dẫn các việc thiết lập để sau (Owner)' },
   { id: 'help.genh', screen: 'help', label: 'Lệnh genh hay dùng', description: 'genh update, reset-password, trust-ca, backup, status — chạy trên máy chủ' },
   { id: 'help.report', screen: 'help', label: 'Nút "Báo lỗi"', description: 'Chép thông tin chẩn đoán (phiên bản, trang, trình duyệt) để gửi người hỗ trợ' },
   // ── Quy tắc sàng lọc ──

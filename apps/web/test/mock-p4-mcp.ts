@@ -69,6 +69,32 @@ export function createMock(opts: P4McpOptions) {
     configured: false, enabled: false, status: 'off', server_id: null, endpoint: null, has_token: false,
     allow_public_network: false, token_expires_at: null, days_left: null, last_ok_at: null, last_error: null, health: null,
   };
+  /** v0.1.39: token mock chứa "sai" → Gen-hub từ chối (HUB_TOKEN_REJECTED). Chỉ giữ cờ, không giữ token. */
+  let hubTokenBad = false;
+  /** v0.1.39 (F-31): như máy chủ — địa chỉ https công khai mà chưa bật "mạng công cộng" thì bị chặn. */
+  const publicHttps = (url: string | null) => {
+    try {
+      const u = new URL(url ?? '');
+      const h = u.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+      if (u.protocol !== 'https:' || !h.includes('.') || /^(10|127)\.|^192\.168\.|^172\.(1[6-9]|2\d|3[01])\.|^169\.254\./.test(h)) return false;
+      return !/(^|\.)(localhost|local|lan|internal|home\.arpa)$/.test(h);
+    } catch {
+      return false;
+    }
+  };
+  type HubTestOut = { ok: boolean; error: string | null; error_code: string | null; latency_ms: number; exposed_tools: string[]; missing_tools: string[]; link: HubLink };
+  /** Một lượt "Kiểm tra" Gen-hub — dùng chung cho `POST /hub/link/test` và `POST /boss-checks/hub/run`. */
+  const hubTest = (): HubTestOut => {
+    const fail = (code: string, error: string): HubTestOut => {
+      hubLink = { ...hubLink, enabled: false, status: 'error', last_error: error, health: 'error' };
+      return { ok: false, error, error_code: code, latency_ms: 20, exposed_tools: [], missing_tools: [], link: hubLink };
+    };
+    if (!hubLink.configured) return fail('HUB_LINK_NOT_CONFIGURED', 'Chưa nhập địa chỉ và token Gen-hub');
+    if (publicHttps(hubLink.endpoint) && !hubLink.allow_public_network) return fail('MCP_NETWORK_BLOCKED', "Bật 'Cho phép Gen-hub ở mạng công cộng' ngay trong thẻ này.");
+    if (hubTokenBad) return fail('HUB_TOKEN_REJECTED', '401: Token Gen-hub hết hạn hoặc đã bị thu hồi');
+    hubLink = { ...hubLink, enabled: true, status: 'ok', last_ok_at: new Date().toISOString(), last_error: null, health: 'healthy' };
+    return { ok: true, error: null, error_code: null, latency_ms: 240, exposed_tools: ['mcp-58450__kho_tom_tat', 'mcp-58450__kho_search', 'mcp-58450__kho_find_by_id'], missing_tools: [], link: hubLink };
+  };
 
   const has = (ctx: P2Ctx, perm: string) => !!ctx.perms[perm] && ctx.perms[perm] !== 'none';
   const pin = (ctx: P2Ctx, operation: string) => {
@@ -113,6 +139,7 @@ export function createMock(opts: P4McpOptions) {
         const b = body as { endpoint?: string; token?: string; token_expires_at?: string | null; allow_public_network?: boolean; enabled?: boolean };
         if (!hubLink.configured && (!b.endpoint || !b.token)) return problem(422, 'VALIDATION', 'Dữ liệu chưa hợp lệ', { errors: { endpoint: 'Cần địa chỉ Gen-hub và token cho lần nối đầu' } });
         const relink = (b.endpoint !== undefined && b.endpoint !== hubLink.endpoint) || !!b.token;
+        if (b.token) hubTokenBad = b.token.includes('sai');
         hubLink = {
           ...hubLink, configured: true, server_id: hubLink.server_id ?? 'mcp-genhub', endpoint: b.endpoint ?? hubLink.endpoint,
           has_token: hubLink.has_token || !!b.token, allow_public_network: b.allow_public_network ?? hubLink.allow_public_network,
@@ -122,8 +149,7 @@ export function createMock(opts: P4McpOptions) {
         return reply(200, hubLink);
       }
       if (!hubLink.configured) return problem(409, 'HUB_LINK_NOT_CONFIGURED', 'Chưa nhập địa chỉ và token Gen-hub');
-      hubLink = { ...hubLink, enabled: true, status: 'ok', last_ok_at: new Date().toISOString(), last_error: null, health: 'healthy' };
-      return reply(200, { ok: true, error: null, latency_ms: 240, exposed_tools: ['mcp-58450__kho_tom_tat', 'mcp-58450__kho_search', 'mcp-58450__kho_find_by_id'], missing_tools: [], link: hubLink });
+      return reply(200, hubTest());
     }
     return false;
   }
@@ -290,6 +316,9 @@ export function createMock(opts: P4McpOptions) {
     hooks: {
       servers: () => servers,
       tools: () => tools,
+      /** v0.1.39 — cho `mock-boss-checks.ts` và `/setup/follow-up` (việc 14). */
+      hubLink: () => hubLink,
+      hubTest,
     } as Record<string, (...args: never[]) => unknown>,
     dispose: () => {},
   };

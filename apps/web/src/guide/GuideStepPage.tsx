@@ -33,7 +33,7 @@ const STEPS: Record<number, (p: StepProps) => JSX.Element> = {
 
 /**
  * `/guide/:n` — mở đúng form của trình thiết lập cho việc n (5–11) ngay trong Console, kể cả sau Hoàn tất (API cho
- * phép lưu lại các bước tuỳ chọn). Lưu xong quay về trang Hướng dẫn, việc đó tự hiện "Đã xong".
+ * phép lưu lại các bước tuỳ chọn). Lưu xong quay về trang Hướng dẫn thiết lập, việc đó tự hiện "Đã xong".
  */
 export function GuideStepPage() {
   const n = Number(useParams().n);
@@ -43,14 +43,16 @@ export function GuideStepPage() {
   const guide = GUIDE_BY_N[n];
 
   useEffect(() => {
-    if (guide) document.title = `${guide.title} · Hướng dẫn kết nối · Gen-Harness`;
+    if (guide) document.title = `${guide.title} · Hướng dẫn thiết lập · Gen-Harness`;
   }, [guide]);
 
   const Step = STEPS[n];
+  // v0.1.39: việc không có form trình thiết lập (13 Facebook, 14 Gen-hub) → mở thẳng màn làm việc đó.
+  if (guide?.doTo) return <Navigate to={guide.doTo} replace />;
   if (!Step || !guide) return <Navigate to="/guide" replace />;
 
   // Bước 4 (chọn model) mở từ dải "Chưa có model" ở Tổng quan — quay về đó.
-  const home = n === 4 ? { to: '/overview', label: 'Tổng quan điều hành' } : { to: '/guide', label: 'Hướng dẫn kết nối' };
+  const home = n === 4 ? { to: '/overview', label: 'Tổng quan điều hành' } : { to: '/guide', label: 'Hướng dẫn thiết lập' };
   const back = () => navigate(home.to);
   const meta = mergeSteps(state.data).find((s) => s.n === n)!;
 

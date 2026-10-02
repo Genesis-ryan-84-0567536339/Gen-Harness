@@ -810,6 +810,16 @@ FOLLOW_UP_SQL: dict[int, str] = {
     11: "SELECT (SELECT settings ? 'backup' FROM core.organizations WHERE id = :o)",
 }
 
+# v0.1.39 (F-28): hai việc KHÔNG thuộc trình thiết lập (không có trong STEPS, không chặn bước 12) nhưng nằm trong
+# "Hướng dẫn thiết lập" — xong theo dữ liệu thật: Facebook đã từng đăng nhập; Gen-hub đã Kiểm tra xanh ít nhất một lần.
+FOLLOW_UP_EXTRA: tuple[tuple[int, str, str, str], ...] = (
+    (13, "social", "Kết nối Facebook",
+     "SELECT EXISTS (SELECT 1 FROM core.social_accounts WHERE org_id = :o AND platform LIKE 'facebook%' "
+     "AND status IN ('active', 'paused', 'needs_login'))"),
+    (14, "hub", "Nối Gen-hub",
+     "SELECT EXISTS (SELECT 1 FROM agent.hub_links WHERE org_id = :o AND last_ok_at IS NOT NULL)"),
+)
+
 
 @router.get("/hard-boundaries")
 async def hard_boundaries(db: AsyncSession = DB,
@@ -822,7 +832,8 @@ async def hard_boundaries(db: AsyncSession = DB,
 @router.get("/follow-up")
 async def follow_up(db: AsyncSession = DB,
                     user: service.CurrentUser | None = Depends(optional_user)) -> list[dict[str, Any]]:
-    """Việc thiết lập tiếp (thẻ ở Tổng quan + trang Hướng dẫn kết nối): MỌI bước tuỳ chọn 5–11, `done` khi đã xong
+    """Việc thiết lập tiếp (thẻ ở Tổng quan + trang Hướng dẫn thiết lập): MỌI bước tuỳ chọn 5–11 (+ 13 Facebook,
+    14 Gen-hub từ v0.1.39), `done` khi đã xong
     trong trình thiết lập HOẶC dữ liệu thật cho thấy đã làm ở Console — không phải bấm tay. Thẻ Tổng quan chỉ hiện
     mục chưa xong; trang Hướng dẫn hiện đủ để thấy tiến độ."""
     row = await _row(db)
@@ -836,6 +847,9 @@ async def follow_up(db: AsyncSession = DB,
         # Bước 4 chỉ theo dữ liệu thật: xoá nguồn (gỡ gán model) sau khi đã xong bước 4 thì lại "Chưa có model".
         done = real if n == 4 else status.get(str(n)) == "done" or real
         out.append({"n": n, "key": key, "title": title, "status": status.get(str(n), "todo"), "done": done})
+    for n, key, title, sql in FOLLOW_UP_EXTRA:
+        done = bool((await db.execute(text(sql), {"o": row.org_id})).scalar())
+        out.append({"n": n, "key": key, "title": title, "status": "todo", "done": done})
     return out
 
 

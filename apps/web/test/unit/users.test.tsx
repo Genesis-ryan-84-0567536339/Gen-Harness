@@ -190,7 +190,7 @@ describe('OrgTab', () => {
 });
 
 describe('HelpPage', () => {
-  it('hiện phiên bản, lệnh genh, Hướng dẫn kết nối; Báo lỗi chép thông tin chẩn đoán', async () => {
+  it('hiện phiên bản, lệnh genh, Hướng dẫn thiết lập; Báo lỗi chép thông tin chẩn đoán', async () => {
     stubApi((_m, url) => (url.endsWith('/system/about') ? { status: 200, body: { version: 'v0.1.22', org_name: 'Genesis Trading', timezone: 'Asia/Ho_Chi_Minh', role: { code: 'owner', name: 'Owner — Sếp' } } } : undefined));
     const user = userEvent.setup(); // cài clipboard giả của user-event — thay SAU đó
     const writeText = vi.fn(async (_t: string) => {});
@@ -199,7 +199,7 @@ describe('HelpPage', () => {
     expect(await screen.findByText('v0.1.22')).toBeInTheDocument();
     for (const c of ['genh update', 'genh reset-password', 'genh trust-ca', 'genh backup']) expect(screen.getByText(c)).toBeInTheDocument();
     expect(GENH_COMMANDS.length).toBeGreaterThanOrEqual(4);
-    expect(await screen.findByRole('link', { name: /Mở Hướng dẫn kết nối/ })).toHaveAttribute('href', '/guide');
+    expect(await screen.findByRole('link', { name: /Mở Hướng dẫn thiết lập/ })).toHaveAttribute('href', '/guide');
     await user.click(screen.getByRole('button', { name: /Báo lỗi/ }));
     await waitFor(() => expect(writeText).toHaveBeenCalled());
     const text = writeText.mock.calls[0][0];
@@ -208,7 +208,7 @@ describe('HelpPage', () => {
     expect(text).not.toMatch(/gh_session|csrf/i);
   });
 
-  it('v0.1.28 (UX N9): Operator không thấy lệnh genh, Gen hay Hướng dẫn kết nối — thấy cách nhờ Owner', async () => {
+  it('v0.1.28 (UX N9): Operator không thấy lệnh genh, Gen hay Hướng dẫn thiết lập — thấy cách nhờ Owner', async () => {
     const opMe = { ...me({ 'queue.read': 'all' }, { code: 'operator', name: 'Operator' }), features: { gen: false } };
     stubApi((_m, url) => (url.endsWith('/system/about') ? { status: 200, body: { version: 'v0.1.28', org_name: 'Genesis Trading', timezone: 'Asia/Ho_Chi_Minh', role: { code: 'operator', name: 'Operator' } } } : undefined), opMe);
     wrap(<HelpPage />);
@@ -216,7 +216,7 @@ describe('HelpPage', () => {
     expect(screen.getByText(/nhờ Owner vào Điều khiển hệ thống › Người dùng › Đặt lại mật khẩu/)).toBeInTheDocument();
     expect(screen.queryByText('genh update')).toBeNull();
     expect(screen.queryByText('Hỏi Gen')).toBeNull();
-    expect(screen.queryByRole('link', { name: /Mở Hướng dẫn kết nối/ })).toBeNull();
+    expect(screen.queryByRole('link', { name: /Mở Hướng dẫn thiết lập/ })).toBeNull();
     expect(await screen.findByText('Vận hành')).toBeInTheDocument(); // tên vai trò tiếng Việt
   });
 

@@ -9,6 +9,7 @@
  *   "sao lưu" / "backup"          → mở Dữ liệu & lưu trữ, làm sáng nút "Sao lưu ngay"
  *   "nhắc"                         → v2 (A4): thẻ đề xuất "Tạo nhắc việc" (Xác nhận / Sửa / Huỷ)
  *   "nháp"                         → v2 (A4): thẻ "Soạn nháp tin" CẦN PIN (xác nhận → 423 → hỏi PIN → gửi lại)
+ *   "mạng xã hội" / "facebook"     → v0.1.39 (F-32): mở trang Tài khoản mạng xã hội (`navigate social`)
  *
  * Hook e2e (v0.1.27): `POST /api/v1/__mock/p3/gen/fireReminders` = worker `task_reminder_scan` tới giờ — mỗi
  * nhắc việc đã xác nhận → chuông `task.reminder` cho các Owner (một lần).
@@ -46,6 +47,12 @@ const OWNER_ID = USER_IDS.owner;
 
 export function script(q: string): GenStep[] {
   const t = q.toLowerCase();
+  if (/mạng xã hội|facebook/.test(t)) {
+    return [
+      { kind: 'say', text: 'Dạ, em mở trang Tài khoản mạng xã hội — Sếp thêm và đăng nhập Facebook ngay trong app.' },
+      { kind: 'ui', action: { type: 'navigate', screen: 'social' } },
+    ];
+  }
   if (/nháp/.test(t)) {
     const proposal: GenProposal = {
       id: randomUUID(),

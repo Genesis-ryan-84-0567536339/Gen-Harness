@@ -839,8 +839,13 @@ export function createPhase2(opts: Phase2Options) {
   };
 
   // CLI login
+  /** v0.1.39 — `mock-boss-checks` ghi kết quả "Đăng nhập" trong LUỒNG đăng nhập (như `_boss_check` của api thật). */
+  let cliLoginListener: ((kind: string, ok: boolean, email: string | null) => void) | null = null;
   const cliEmit = (e: CliLoginEvent) => {
-    cliLogins.set(e.login_id, e);
+    const kind = e.kind ?? cliLogins.get(e.login_id)?.kind ?? 'antigravity_cli';
+    // Như api thật: kết quả kiểm được ghi TRƯỚC khi phiên báo done/failed.
+    if (e.status === 'done' || e.status === 'failed') cliLoginListener?.(kind, e.status === 'done', e.profile?.email ?? null);
+    cliLogins.set(e.login_id, { ...e, kind });
     emit('cli.login', e);
   };
 
@@ -1565,6 +1570,20 @@ export function createPhase2(opts: Phase2Options) {
       channels: () => channels,
       /** PLAN 4.5 — cho `mock-p4-system.ts` đọc `/listening-groups` trên chính mảng dùng chung này. */
       groups: () => groups,
+      /** v0.1.39 — cho `mock-boss-checks.ts`: nghe lượt đăng nhập CLI kết thúc (done/failed). */
+      onCliLogin: (fn: (kind: string, ok: boolean, email: string | null) => void) => {
+        cliLoginListener = fn;
+      },
+      /** v0.1.39 — cho `mock-boss-checks.ts`: chính mảng hồ sơ CLI dùng chung (sửa tại chỗ = đổi luôn `/cli/profiles`). */
+      cliProfiles: (kind: string | null = 'antigravity_cli') => profilesOf(kind),
+      /** v0.1.39 — như `POST /cli/profiles/{id}/activate` (không PIN — mock-boss-checks tự gác PIN); false nếu không có. */
+      activateCli: (id: string) => {
+        const list = cliProfiles.some((x) => x.id === id) ? cliProfiles : claudeProfiles;
+        const pr = list.find((x) => x.id === id);
+        if (!pr) return false;
+        list.forEach((x) => (x.active = x.id === pr.id));
+        return true;
+      },
     },
     dispose: () => {
       setSimulation(false);

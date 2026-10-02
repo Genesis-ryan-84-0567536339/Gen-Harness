@@ -76,6 +76,15 @@ chuyển tệp cũ); **luật cứng: agy chỉ dùng cho Gen của Sếp** (sà
 hoá lại phiên mạng xã hội; phiên không mở được → 409 `SOCIAL_NEEDS_LOGIN` + "Cần đăng nhập lại"; lịch đọc cô lập lỗi từng
 tài khoản; test quét mọi cột `*_enc`. Còn: canary `--live` có đăng nhập (v0.1.39, sau khi Boss đăng nhập agy) — chỉ nới
 luật cứng khi live "không lộ".
+v0.1.39: kết nối chạy thật cùng Boss (F-74, F-76, F-77, F-78, F-31, F-32, F-28) — trang **"Việc Sếp cần làm"**
+(`/guide/viec-sep`, chỉ Owner): 5 dòng Gen-hub, Facebook, Google/agy (2 tài khoản, đổi qua lại 2 lần kiểm bằng lượt gọi
+thật), Claude Code CLI, Jev (không bắt buộc, kiểm 1 lần); mỗi lần bấm ghi vào `ops.boss_checks` (migration 0025, không lưu
+token/mật khẩu/email đầy đủ/giá trị mã — mã đăng nhập chỉ lưu dạng `code_shape`), `GET /boss-checks` + khối `boss_checks`
+ở `/system/health` để Claude tự đọc. Gen-hub: địa chỉ https công khai tự bật "mạng công cộng", lỗi có mã thống nhất
+(`HUB_TOKEN_REJECTED`, `MCP_NETWORK_BLOCKED`…). Mục "Mạng xã hội" trên thanh bên + thẻ Facebook ở Hệ thống › Kênh + Gen mở
+`/social`; một tên "Hướng dẫn thiết lập" (9 việc, thêm Facebook/Gen-hub, việc 10 trỏ `/system?tab=users`, xong theo dữ liệu
+thật). Còn: nghiệm thu thật với tài khoản của Boss (kết quả tự ghi ở `ops.boss_checks`), canary `--live` agy sau khi Boss
+đăng nhập, đối chiếu `code_shape` với regex F-56 (v0.1.45); Telegram trong hướng dẫn hoãn.
 
 ## Đợt A — Gen v1 (thiết kế: docs/design/gen-v1.md)
 - ✅ A1 Khung chat phải + Gen trả lời/tóm tắt (chỉ đọc), lưu hội thoại, Nhật ký hành động — v0.1.21.

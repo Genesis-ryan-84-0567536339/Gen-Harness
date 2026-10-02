@@ -24,6 +24,7 @@ from gh.auth.account import router as account_router
 from gh.auth.routes import router as auth_router
 from gh.auth.users import router as users_router
 from gh.bootstrap import bootstrap
+from gh.boss_checks.routes import router as boss_checks_router
 from gh.chassis.bus import BRIDGE_DIRECTORY, BRIDGE_INBOUND, BRIDGE_STATUS, EventBus
 from gh.chassis.plugins import Manifest, PluginManager
 from gh.config import get_settings
@@ -221,7 +222,7 @@ def create_app(*, with_lifespan: bool = True, expose_docs: bool | None = None) -
     app.add_exception_handler(Exception, unhandled_error_handler)
     for r in (auth_router, account_router, users_router, setup_router, shell_router, audit_router, plugins_router,
              mcp_router, data_router, system_router, update_router, backups_router, org_router, gen_router,
-             notifications_router, triage_router, hub_router, social_router, health_router):
+             notifications_router, triage_router, hub_router, social_router, health_router, boss_checks_router):
         app.include_router(r, prefix="/api/v1")
     for r in biz.routers():
         app.include_router(r, prefix="/api/v1")
