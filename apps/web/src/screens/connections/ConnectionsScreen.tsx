@@ -39,7 +39,7 @@ export function ConnectionsScreen() {
     <div className="screen">
       <ScreenHead title={meta.title} description={meta.description} maxWidth={meta.descMaxWidth} />
 
-      <section id="brain" className="conn-section" aria-label="Bộ não AI và tài khoản CLI">
+      <section id="brain" className="conn-section" aria-label="Nguồn AI và tài khoản CLI">
         <div className="conn-grid">
           <BrainCard />
           {/* Nơi DUY NHẤT render thẻ tài khoản CLI (v0.1.42, F-61). */}
@@ -52,7 +52,7 @@ export function ConnectionsScreen() {
         <ChannelCards canManage={canManage} />
       </section>
 
-      <section className="conn-section" aria-label="Facebook, Gen-hub và MCP">
+      <section className="conn-section" aria-label="Mạng xã hội và công cụ ngoài">
         <div className="conn-grid">
           <SocialEntryCard />
           <div id="genhub" className="conn-anchor">
