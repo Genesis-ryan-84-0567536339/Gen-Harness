@@ -97,7 +97,7 @@ async def test_verify_wrong_password_exit_2(exported: Path) -> None:
 
 
 async def test_verify_tampered_ciphertext_exit_2(exported: Path, tmp_path: Path) -> None:
-    raw = bytearray(exported.read_bytes())
+    raw = bytearray(exported.read_bytes())  # noqa: ASYNC240
     raw[-10] ^= 1
     bad = tmp_path / "hong.ghbundle"
     bad.write_bytes(bytes(raw))
@@ -157,4 +157,4 @@ async def test_verify_does_not_touch_database(exported: Path, tmp_path: Path, mo
         out = await bundle._verify(str(exported))
     get_settings.cache_clear()
     assert out["ok"] is True and out["objects"] == 1
-    assert not list(tmp_path.glob("gh-bundle-verify-*"))
+    assert not list(tmp_path.glob("gh-bundle-verify-*"))  # noqa: ASYNC240
