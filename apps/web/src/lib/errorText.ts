@@ -71,3 +71,24 @@ export function errorReasons(e: unknown): string | null {
   if (e instanceof ApiError && e.reasons.length) return e.reasons.join('; ');
   return null;
 }
+
+/**
+ * v0.1.41: dòng kỹ thuật cho "Chi tiết kỹ thuật" dưới câu lỗi thân thiện — mã HTTP, mã lỗi, mã nhật ký, lý do. Luôn là
+ * chuỗi (hoặc null khi không có gì để thêm, vd Sếp tự huỷ PIN); không bao giờ mang đối tượng thô.
+ */
+export function errorDetail(e: unknown): string | null {
+  if (e instanceof PinCancelledError) return null;
+  if (e instanceof ApiError) {
+    const parts = [e.status === 0 ? 'Không có phản hồi HTTP' : `HTTP ${e.status}`];
+    if (typeof e.code === 'string' && e.code) parts.push(e.code);
+    const id = (e.problem as { error_id?: unknown }).error_id;
+    if (typeof id === 'string' && id) parts.push(`error_id ${id}`);
+    if (e.reasons.length) parts.push(e.reasons.join('; '));
+    return parts.join(' · ');
+  }
+  if (e instanceof Error) {
+    const m = detailToText(e.message);
+    return m ? `${e.name}: ${m}` : e.name || null;
+  }
+  return null;
+}

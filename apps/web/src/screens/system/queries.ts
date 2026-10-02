@@ -4,7 +4,19 @@
  * và `useFailoverRules` (`screens/api/queries.ts`) — không có hook riêng ở đây.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { Boundary, BoundaryPatchBody, DataRequestKind, PermissionPatchBody, RetentionPatchBody, SystemAuditQuery } from '@gen-harness/contracts';
+import type {
+  AiBudgetBody,
+  AiCost,
+  AiPriceBody,
+  BackgroundSources,
+  BackgroundSourcesBody,
+  Boundary,
+  BoundaryPatchBody,
+  DataRequestKind,
+  PermissionPatchBody,
+  RetentionPatchBody,
+  SystemAuditQuery,
+} from '@gen-harness/contracts';
 import { api } from '../../lib/api';
 
 export const qkSystem = {
@@ -15,6 +27,11 @@ export const qkSystem = {
   retention: ['system', 'retention'] as const,
   dataRequests: (personId: string) => ['system', 'data-requests', personId] as const,
   health: ['system', 'health'] as const,
+  /** v0.1.41 (F-84): `['system','ai-cost']` (+ ngày) — prefix dùng để làm mới mọi ngày. */
+  aiCost: ['system', 'ai-cost'] as const,
+  aiCostDay: (date: string) => ['system', 'ai-cost', date] as const,
+  /** v0.1.41 (F-86): nguồn AI cho việc nền. */
+  backgroundSources: ['providers', 'background'] as const,
 };
 
 /**
@@ -25,6 +42,8 @@ export const HEALTH_KINDS: ReadonlySet<string> = new Set([
   'channel.down', 'model.auth_expired', 'update.failed', 'backup.stale', 'worker.silent', 'disk.low', 'host.autostart',
   // v0.1.40 (F-12, F-2): bản sao ngoài máy quá hạn/lỗi; việc nền chạy quá giờ.
   'offsite.stale', 'offsite.failed', 'job.timeout',
+  // v0.1.41 (F-84, F-86): vượt trần chi phí AI trong ngày; việc nền không còn nguồn AI nào.
+  'ai.budget_exceeded', 'ai.background_no_source',
 ]);
 
 /** v0.1.36 (F-6): `GET /system/health` — chỉ gọi khi vai trò có `system.read` (`enabled`); tự hỏi lại mỗi 60 giây. */
@@ -82,5 +101,50 @@ export const useCreateDataRequest = () => {
   return useMutation({
     mutationFn: ({ personId, kind }: { personId: string; kind: DataRequestKind }) => api.personDataRequests.create(personId, kind),
     onSuccess: (_r, { personId }) => void qc.invalidateQueries({ queryKey: qkSystem.dataRequests(personId) }),
+  });
+};
+
+/** v0.1.41 (F-84): `GET /system/ai-cost` (hôm nay khi `date` rỗng) — chỉ gọi khi có `system.read`. */
+export const useAiCost = (enabled: boolean, date = '') =>
+  useQuery({
+    queryKey: qkSystem.aiCostDay(date),
+    queryFn: ({ signal }) => api.aiCost.get(date || undefined, signal),
+    refetchInterval: 5 * 60_000,
+    enabled,
+  });
+
+/** Cùng dạng GET ⇒ ghi thẳng vào bộ đệm "hôm nay" và làm mới mọi ngày khác. */
+function useAiCostWrite<V>(fn: (v: V) => Promise<AiCost>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: (data) => {
+      qc.setQueryData(qkSystem.aiCostDay(''), data);
+      void qc.invalidateQueries({ queryKey: qkSystem.aiCost });
+      // Vượt/hết vượt trần mở/đóng sự cố ai.budget_exceeded ⇒ dải "Cần Sếp xử lý" đổi ngay.
+      void qc.invalidateQueries({ queryKey: qkSystem.health });
+    },
+  });
+}
+
+export const useSetAiBudget = () => useAiCostWrite((body: AiBudgetBody) => api.aiCost.setBudget(body));
+
+export const useSetModelPrice = () =>
+  useAiCostWrite(({ modelId, body }: { modelId: string; body: AiPriceBody }) => api.aiCost.setPrice(modelId, body));
+
+/** v0.1.41 (F-86): `GET /providers/background` (system.read). */
+export const useBackgroundSources = (enabled = true) =>
+  useQuery({ queryKey: qkSystem.backgroundSources, queryFn: ({ signal }) => api.providers.background(signal), enabled });
+
+/** Chỉ Owner; thêm CLI ⇒ 423 PIN (hộp PIN tự mở qua lib/api.ts rồi gửi lại) / 422 accept_risk. */
+export const useSetBackgroundSources = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: BackgroundSourcesBody) => api.providers.setBackground(body),
+    onSuccess: (data: BackgroundSources) => {
+      qc.setQueryData(qkSystem.backgroundSources, data);
+      void qc.invalidateQueries({ queryKey: qkSystem.backgroundSources });
+      void qc.invalidateQueries({ queryKey: qkSystem.health });
+    },
   });
 };

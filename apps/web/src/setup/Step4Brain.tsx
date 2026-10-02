@@ -7,9 +7,9 @@ import { qk2, useCliProfiles, useProviders } from '../lib/dataQueries';
 import { emailInitials, fmtDMClock, fmtInt, fmtLatency } from '../lib/format';
 import { queryClient } from '../lib/queryClient';
 import { useNow } from '../lib/useNow';
-import { errorText } from '../lib/errorText';
+import { errorDetail, errorText } from '../lib/errorText';
 import { CardError, FriendlyErrorText, InlineError, PinHint, SkeletonLines, StateChip } from '../screens/common';
-import { PROVIDER_KIND_LABEL, choiceText, isCliKind, providerStatus, testOkText } from '../screens/api/apiModel';
+import { PROVIDER_KIND_LABEL, PROVIDER_PRESETS, choiceText, isCliKind, providerStatus, testOkText } from '../screens/api/apiModel';
 import { ModelPicker } from '../screens/api/ModelPicker';
 import { ClaudeRiskNotice, CliLoginPanel } from '../screens/system/CliCard';
 import { CliDiagnose } from '../screens/system/CliDiagnose';
@@ -19,10 +19,13 @@ import { providerHasModel, providerReady, testedModels } from './phase2Model';
 import { StepFrame } from './StepFrame';
 import { describeError, type StepProps } from './types';
 
-const KINDS: Array<{ value: Exclude<ProviderKind, CliKind | 'system_one'>; label: string; name: string }> = [
-  { value: 'gemini', label: 'Gemini API', name: 'Gemini API' },
-  { value: 'deepseek', label: 'DeepSeek API', name: 'DeepSeek API' },
-  { value: 'openai_compat', label: 'Tương thích OpenAI', name: '' },
+type ApiKind = Exclude<ProviderKind, CliKind | 'system_one'>;
+/** `value` là lựa chọn ở ô "Loại"; `kind` là loại gửi lên máy chủ — v0.1.41 (F-84): thêm mẫu dựng sẵn (OpenRouter). */
+const KINDS: Array<{ value: string; kind: ApiKind; label: string; name: string; endpoint: string; keyHint: string | null; modelHint: string | null }> = [
+  { value: 'gemini', kind: 'gemini', label: 'Gemini API', name: 'Gemini API', endpoint: '', keyHint: null, modelHint: null },
+  { value: 'deepseek', kind: 'deepseek', label: 'DeepSeek API', name: 'DeepSeek API', endpoint: '', keyHint: null, modelHint: null },
+  { value: 'openai_compat', kind: 'openai_compat', label: 'Tương thích OpenAI', name: '', endpoint: '', keyHint: null, modelHint: null },
+  ...PROVIDER_PRESETS.map((p) => ({ value: p.id, kind: p.kind, label: p.label, name: p.name, endpoint: p.endpoint, keyHint: p.keyHint, modelHint: p.modelHint })),
 ];
 
 const N8 = 'var(--color-neutral-800)';
@@ -216,7 +219,7 @@ export function Step4Brain({ meta, description, onBack, onSaved, formRef, onSkip
             })}
           </div>
         )}
-        {remove.isError ? <InlineError>{errorText(remove.error)}</InlineError> : null}
+        {remove.isError ? <InlineError detail={errorDetail(remove.error)}>{errorText(remove.error)}</InlineError> : null}
         <AddProvider onAdded={(p) => test.mutate(p.id)} />
       </div>
     </StepFrame>
@@ -224,7 +227,9 @@ export function Step4Brain({ meta, description, onBack, onSaved, formRef, onSkip
 }
 
 function AddProvider({ onAdded }: { onAdded: (p: Provider) => void }) {
-  const [kind, setKind] = useState<(typeof KINDS)[number]['value']>('gemini');
+  const [choice, setChoice] = useState<string>('gemini');
+  const opt = KINDS.find((k) => k.value === choice) ?? KINDS[0];
+  const kind = opt.kind;
   const [name, setName] = useState('Gemini API');
   const [endpoint, setEndpoint] = useState('');
   const [key, setKey] = useState('');
@@ -232,7 +237,7 @@ function AddProvider({ onAdded }: { onAdded: (p: Provider) => void }) {
     mutationFn: () =>
       api.providers.create({
         kind,
-        name: name.trim() || KINDS.find((k) => k.value === kind)!.label,
+        name: name.trim() || opt.label,
         ...(kind === 'openai_compat' ? { endpoint: endpoint.trim() } : {}),
         keys: [key.trim()],
       }),
@@ -250,12 +255,13 @@ function AddProvider({ onAdded }: { onAdded: (p: Provider) => void }) {
       <div className="prov-add">
         <SelectField
           label="Loại"
-          value={kind}
+          value={choice}
           options={KINDS.map((k) => ({ value: k.value, label: k.label }))}
           onChange={(e) => {
-            const k = e.target.value as typeof kind;
-            setKind(k);
-            setName(KINDS.find((x) => x.value === k)!.name);
+            const next = KINDS.find((x) => x.value === e.target.value) ?? KINDS[0];
+            setChoice(next.value);
+            setName(next.name);
+            setEndpoint(next.endpoint);
           }}
         />
         <TextField label="Tên hiển thị" value={name} onChange={(e) => setName(e.target.value)} />
@@ -283,6 +289,17 @@ function AddProvider({ onAdded }: { onAdded: (p: Provider) => void }) {
           }}
         />
       </div>
+      {opt.keyHint ? (
+        <p className="muted-note" data-testid="setup-provider-preset-hint">
+          {opt.keyHint}
+          {opt.modelHint ? (
+            <>
+              {' '}
+              · Gợi ý model: <span className="mono">{opt.modelHint}</span> (sau khi kiểm tra, bấm "Dùng model này" cho model đó)
+            </>
+          ) : null}
+        </p>
+      ) : null}
       <div className="dlg-row">
         <Button variant="secondary" icon="ph ph-plus" disabled={!valid} loading={add.isPending} onClick={() => add.mutate()}>
           Thêm & kiểm tra
@@ -291,7 +308,7 @@ function AddProvider({ onAdded }: { onAdded: (p: Provider) => void }) {
         <PinHint />
         <span className="muted-note">Khoá được mã hoá khi lưu; Console chỉ hiện 4 ký tự cuối.</span>
       </div>
-      {add.isError ? <InlineError>{errorText(add.error)}</InlineError> : null}
+      {add.isError ? <InlineError detail={errorDetail(add.error)}>{errorText(add.error)}</InlineError> : null}
     </div>
   );
 }

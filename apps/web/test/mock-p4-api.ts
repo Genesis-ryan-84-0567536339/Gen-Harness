@@ -29,6 +29,7 @@ interface MockProvider {
   id: string;
   kind: string;
   name: string;
+  endpoint?: string | null;
   failover_rank: number;
   enabled: boolean;
   auth_state: string;
@@ -68,6 +69,16 @@ const GEN_KEY = 'core.gen';
 export const AGY_OWNER_ONLY_REASON =
   'Antigravity CLI chỉ dùng cho Gen — trợ lý quản trị (Gen của Sếp). Sàng lọc tin và trực việc phải dùng nguồn khác (khoá API hoặc Claude Code CLI) — luật an toàn, không tắt được.';
 
+/**
+ * v0.1.41 (F-86, QD-12): câu cảnh báo khi Owner cho Claude Code CLI chạy việc nền — web hiện NGUYÊN VĂN (như
+ * `risk_text` của `GET /providers/background` ở API thật).
+ */
+export const BACKGROUND_RISK_TEXT =
+  'Claude Code CLI dùng gói Claude Pro/Max cá nhân của Sếp. Cho nó chạy việc nền tự động (sàng lọc tin, trực việc, bản tin) có thể trái điều khoản gói và tài khoản có thể bị hạn chế hoặc khoá. Đây là quyết định và rủi ro của Sếp (QD-12). Cách an toàn: dán khoá API OpenRouter hoặc Gemini.';
+/** Như `BACKGROUND_PURPOSE_LABELS` của API thật — nhãn, không phải mã purpose. */
+const BACKGROUND_PURPOSES = ['Sàng lọc tin', 'Trực việc (agent soạn nháp)', 'Bản tin Gen'];
+const API_KINDS = new Set(['gemini', 'deepseek', 'openai_compat']);
+
 interface BindingState {
   model_id: string;
   model_name: string;
@@ -86,6 +97,30 @@ export function createMock(opts: P4ApiOptions) {
         ],
   );
   const has = (ctx: P2Ctx, perm: string) => !!ctx.perms[perm] && ctx.perms[perm] !== 'none';
+  // v0.1.41 (F-86): nguồn AI cho việc nền — mặc định chỉ khoá API (CLI TẮT).
+  const background: { allow_cli: string[]; accepted_at: string | null } = { allow_cli: [], accepted_at: null };
+
+  /** Như API thật: chuỗi theo `failover_rank` (bỏ Jev), mỗi nguồn có dùng cho việc nền không + lý do. */
+  function backgroundView() {
+    const list = [...opts.getProviders()].filter((x) => x.kind !== 'system_one').sort((a, b) => a.failover_rank - b.failover_rank);
+    const sources = list.map((pv) => {
+      let reason: string | null = null;
+      if (pv.kind === 'antigravity_cli') reason = 'Antigravity CLI chỉ dùng cho Gen — trợ lý quản trị (Gen của Sếp). Sàng lọc tin và trực việc phải dùng nguồn khác (khoá API hoặc Claude Code CLI) — luật an toàn, không tắt được.';
+      else if (pv.kind === 'claude_code_cli') reason = background.allow_cli.includes('claude_code_cli') ? null : 'Claude Code CLI (gói Pro/Max của Sếp) mặc định chỉ dùng khi Sếp hỏi Gen trực tiếp — việc nền dùng khoá API';
+      else if (!API_KINDS.has(pv.kind)) reason = 'Không phải nguồn sinh chữ';
+      if (!reason && !pv.enabled) reason = 'Nguồn đang tắt';
+      if (!reason && API_KINDS.has(pv.kind) && !pv.keys.some((k) => k.enabled)) reason = 'Chưa có khoá API';
+      return { provider_id: pv.id, name: pv.name, kind: pv.kind, used: reason === null, reason };
+    });
+    return {
+      allow_cli: [...background.allow_cli],
+      accepted_at: background.accepted_at,
+      risk_text: BACKGROUND_RISK_TEXT,
+      purposes: [...BACKGROUND_PURPOSES],
+      has_api_source: sources.some((x) => x.used && API_KINDS.has(x.kind)),
+      sources,
+    };
+  }
 
   function findModel(modelId: string): { model_name: string; provider_name: string } | null {
     for (const p of opts.getProviders()) {
@@ -133,6 +168,33 @@ export function createMock(opts: P4ApiOptions) {
     if (p === '/failover-rules' && m === 'GET') {
       if (!has(ctx, 'system.read')) return problem(403, 'FORBIDDEN', 'Vai trò không có quyền này');
       return reply(200, FAILOVER_RULES);
+    }
+
+    // v0.1.41 (F-86): `/providers/background` — mock-phase2.ts nhường đường này (đứng TRƯỚC mẫu `/providers/{id}`).
+    if (p === '/providers/background') {
+      if (m === 'GET') {
+        if (!has(ctx, 'system.read')) return problem(403, 'FORBIDDEN', 'Vai trò không có quyền này');
+        return reply(200, backgroundView());
+      }
+      if (m === 'PUT') {
+        if (ctx.role !== 'owner') return problem(403, 'FORBIDDEN', 'Chỉ Owner đổi nguồn AI cho việc nền');
+        const b = body as { allow_cli?: unknown; accept_risk?: unknown };
+        const allow = Array.isArray(b.allow_cli) ? b.allow_cli.map(String) : null;
+        if (!allow) return problem(422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors: { allow_cli: 'Danh sách CLI không hợp lệ' } });
+        if (allow.includes('antigravity_cli')) {
+          return problem(422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors: { allow_cli: 'Antigravity CLI chỉ dùng cho lượt Gen của Sếp — không chạy việc nền' } });
+        }
+        if (allow.some((k) => k !== 'claude_code_cli')) return problem(422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors: { allow_cli: 'Chỉ Claude Code CLI được cho chạy việc nền' } });
+        const adding = allow.includes('claude_code_cli') && !background.allow_cli.includes('claude_code_cli');
+        if (adding) {
+          if (ctx.needPin()) return problem(423, 'PIN_REQUIRED', 'Thao tác này cần nhập mã PIN', { detail: { operation: 'ai.background_cli' } });
+          if (b.accept_risk !== true) return problem(422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors: { accept_risk: 'Sếp cần tích xác nhận đã đọc cảnh báo' } });
+          background.accepted_at = new Date().toISOString();
+        }
+        background.allow_cli = [...new Set(allow)];
+        if (!background.allow_cli.length) background.accepted_at = null;
+        return reply(200, backgroundView());
+      }
     }
 
     if (seg[0] === 'providers' && seg[2] === 'keys') {
@@ -221,7 +283,23 @@ export function createMock(opts: P4ApiOptions) {
 
   return {
     handle,
-    hooks: {} as Record<string, (...args: never[]) => unknown>,
+    hooks: {
+      /**
+       * v0.1.41 (F-86): `__mock/p3/api/background` {claude?: true, allow_cli?: string[]} — thêm nguồn Claude Code CLI (đã
+       * đăng nhập) vào chuỗi để e2e bật được "Cho Claude Code CLI chạy việc nền"; đặt thẳng allow_cli.
+       */
+      background: (b: { claude?: boolean; allow_cli?: string[] }) => {
+        const list = opts.getProviders();
+        if (b?.claude && !list.some((x) => x.kind === 'claude_code_cli')) {
+          list.push({ id: randomUUID(), kind: 'claude_code_cli', name: 'Claude Code CLI', endpoint: null, failover_rank: list.length + 1, enabled: true, auth_state: 'ok', keys: [], models: [] });
+        }
+        if (Array.isArray(b?.allow_cli)) {
+          background.allow_cli = b.allow_cli.map(String);
+          background.accepted_at = background.allow_cli.length ? new Date().toISOString() : null;
+        }
+        return backgroundView();
+      },
+    } as unknown as Record<string, (...args: never[]) => unknown>,
     dispose: () => {},
   };
 }

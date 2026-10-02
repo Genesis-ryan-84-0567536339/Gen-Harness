@@ -3,12 +3,15 @@
  * song song hỏi `GET /gen/turns/{id}` mỗi 1,2 s tới khi xong — WS rớt thì câu trả lời vẫn tới. Hai nguồn ghép theo
  * `seq`, bước `ui` chỉ thực thi MỘT lần và tuần tự (mở trang xong mới làm sáng).
  */
-import { ApiError, type GenDoneEvent, GenStep, GenStepEvent, GenTurn } from '@gen-harness/contracts';
+import { ApiError, type GenDoneEvent, type GenMessage, type GenRating, GenStep, GenStepEvent, GenTurn } from '@gen-harness/contracts';
 import { api } from '../lib/api';
-import { errorText } from '../lib/errorText';
+import { errorDetail, errorText } from '../lib/errorText';
+import { qk } from '../lib/queries';
+import { queryClient } from '../lib/queryClient';
 import { onRealtimeEvent } from '../lib/realtime';
+import { toast } from '../lib/toast';
 import { currentScreenKey, executeUiAction, visibleTargets } from './director';
-import { mergeStep, useGenStore } from './genStore';
+import { mergeStep, useGenStore, type GenChatMessage } from './genStore';
 
 export const POLL_MS = 1200;
 
@@ -62,7 +65,16 @@ async function poll(turnId: string): Promise<void> {
   }
 }
 
-export async function sendQuestion(text: string): Promise<void> {
+/** Id người đang đăng nhập (đã có trong cache `/auth/me` khi khung Gen hiện). */
+function currentUserId(): string | null {
+  return queryClient.getQueryData<{ id?: string }>(qk.me)?.id ?? null;
+}
+
+/**
+ * Gửi câu hỏi. v0.1.41 (F-8a): mã hội thoại server trả về được lưu máy kèm `userId` (chủ hội thoại) để tải lại trang
+ * vẫn mở đúng hội thoại của đúng người.
+ */
+export async function sendQuestion(text: string, userId: string | null = currentUserId()): Promise<void> {
   const q = text.trim();
   if (!q) return;
   const st = useGenStore.getState();
@@ -76,6 +88,7 @@ export async function sendQuestion(text: string): Promise<void> {
     });
     useGenStore.setState((s) => ({
       conversationId: res.conversation_id,
+      conversationOwner: userId,
       messages: [...s.messages, { id: `a-${res.turn_id}`, role: 'assistant', turnId: res.turn_id, steps: [], status: 'running' }],
     }));
     for (const ev of early.get(res.turn_id) ?? []) applyStep(ev);
@@ -95,14 +108,166 @@ export async function sendQuestion(text: string): Promise<void> {
   }
 }
 
-/** Mở lại một hội thoại cũ (chỉ hiển thị, không chạy lại hành động UI). */
-export async function loadConversation(id: string): Promise<void> {
-  const msgs = await api.gen.messages(id);
-  useGenStore.setState({
-    conversationId: id,
-    busy: false,
-    messages: msgs.map((m) => ({ id: m.id, role: m.role, text: m.content.text, steps: m.content.steps ?? [], turnId: m.turn_id ?? undefined, status: 'done' as const })),
-  });
+function toChat(m: GenMessage): GenChatMessage {
+  const c = m.content ?? {};
+  return {
+    id: m.id,
+    role: m.role,
+    text: c.text,
+    steps: c.steps ?? [],
+    turnId: m.turn_id ?? undefined,
+    status: 'done' as const,
+    feedback: m.feedback ?? null,
+    kind: c.kind === 'briefing' ? 'briefing' : undefined,
+  };
+}
+
+/** Lần mở hội thoại mới nhất (mở từ chuông giữa lúc đang tải lại hội thoại cũ ⇒ chỉ lần sau cùng được hiện). */
+let loadSeq = 0;
+let loading = 0;
+
+/** Kết quả mở hội thoại: đã mở · không còn (404) · bỏ qua vì Gen đang trả lời câu khác (không đè lượt đang chạy). */
+export type LoadResult = 'opened' | 'missing' | 'busy';
+
+/** Gen đang trả lời (cờ busy hoặc còn tin "đang nghĩ") ⇒ không được thay danh sách tin. */
+export function genBusy(): boolean {
+  const st = useGenStore.getState();
+  return st.busy || st.messages.some((m) => m.status === 'running');
+}
+
+/**
+ * Mở lại một hội thoại cũ (chỉ hiển thị, không chạy lại hành động UI). v0.1.41 (F-8a): 404 (hội thoại đã bị xoá / quá
+ * hạn lưu) ⇒ bỏ mã đã lưu, trả `'missing'` không ném; lỗi khác ném lại để nơi gọi báo bằng `errorText`. Trong lúc chờ
+ * server mà Sếp đã gửi câu hỏi mới (Gen đang trả lời) ⇒ KHÔNG đè tin/busy, trả `'busy'` — lượt đang chạy vẫn nhận bước.
+ */
+export async function loadConversation(id: string, userId: string | null = currentUserId()): Promise<LoadResult> {
+  if (genBusy()) return 'busy';
+  const seq = ++loadSeq;
+  loading += 1;
+  useGenStore.setState({ loadingConversation: true });
+  let msgs: GenMessage[];
+  try {
+    msgs = await api.gen.messages(id);
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) {
+      if (seq === loadSeq && !genBusy() && useGenStore.getState().conversationId === id) useGenStore.getState().reset();
+      return 'missing';
+    }
+    throw e;
+  } finally {
+    loading -= 1;
+    if (loading === 0) useGenStore.setState({ loadingConversation: false });
+  }
+  if (seq !== loadSeq) return 'opened'; // đã có lần mở khác mới hơn
+  if (genBusy()) {
+    // Câu hỏi mới gửi vào CHÍNH hội thoại này trong lúc chờ ⇒ chèn các tin cũ lên trước, giữ nguyên lượt đang chạy.
+    useGenStore.setState((s) => {
+      if (s.conversationId !== id) return {};
+      const live = new Set(s.messages.map((m) => m.turnId).filter(Boolean));
+      let older = msgs.filter((m) => !(m.turn_id && live.has(m.turn_id)));
+      // Tin hỏi vừa gửi có thể đã là tin cuối của bản server (POST xong trước GET) ⇒ bỏ bản trùng.
+      const last = older[older.length - 1];
+      if (last?.role === 'user' && s.messages.some((m) => m.role === 'user' && m.id.startsWith('u-') && m.text === last.content?.text)) {
+        older = older.slice(0, -1);
+      }
+      return { messages: [...older.map(toChat), ...s.messages.filter((m) => !m.retryConversation)] };
+    });
+    return 'busy';
+  }
+  useGenStore.setState({ conversationId: id, conversationOwner: userId, busy: false, messages: msgs.map(toChat) });
+  return 'opened';
+}
+
+let restoring: Promise<void> | null = null;
+
+/** Chỉ còn tin báo lỗi tải lại (hoặc trống) ⇒ được thay bằng kết quả tải lại / tin báo mới. */
+function onlyRestoreErrors(msgs: GenChatMessage[]): boolean {
+  return msgs.every((m) => !!m.retryConversation);
+}
+
+function runRestore(id: string, userId: string): Promise<void> {
+  if (restoring) return restoring;
+  useGenStore.setState({ restoring: true });
+  restoring = loadConversation(id, userId)
+    .then(() => undefined)
+    .catch((e: unknown) => {
+      useGenStore.setState((s) =>
+        !onlyRestoreErrors(s.messages) || genBusy()
+          ? {}
+          : {
+              // Bỏ mã đang lưu: câu hỏi kế tiếp mở hội thoại MỚI (không rơi vào hội thoại Sếp không nhìn thấy);
+              // "Thử lại" mở lại đúng mã cũ.
+              conversationId: s.conversationId === id ? null : s.conversationId,
+              conversationOwner: s.conversationId === id ? null : s.conversationOwner,
+              messages: [
+                {
+                  id: `e-restore-${id}`,
+                  role: 'assistant',
+                  status: 'failed',
+                  steps: [{ kind: 'say', text: 'Chưa tải lại được hội thoại trước — Sếp thử lại sau ít phút.' }],
+                  detail: errorDetail(e) ?? errorText(e),
+                  retryConversation: id,
+                },
+              ],
+            },
+      );
+    })
+    .finally(() => {
+      restoring = null;
+      useGenStore.setState({ restoring: false });
+    });
+  return restoring;
+}
+
+/**
+ * v0.1.41 (F-8a): mở khung Gen sau khi tải lại trang ⇒ tải lại hội thoại đã lưu (một lần). Mã thuộc người khác
+ * (đổi tài khoản trên cùng máy) ⇒ bỏ, không gọi API. 404 ⇒ bỏ im lặng; lỗi khác ⇒ một dòng báo trong khung kèm
+ * "Chi tiết kỹ thuật" và nút "Thử lại".
+ */
+export function restoreIfNeeded(userId: string): Promise<void> {
+  const st = useGenStore.getState();
+  if (!st.conversationId) return Promise.resolve();
+  if (st.conversationOwner !== userId) {
+    st.reset();
+    return Promise.resolve();
+  }
+  if (st.messages.length > 0 || genBusy()) return Promise.resolve();
+  if (restoring) return restoring;
+  if (loading > 0) return Promise.resolve(); // đang mở hội thoại khác (vd bản tin từ chuông)
+  return runRestore(st.conversationId, userId);
+}
+
+/** Nút "Thử lại" trên dòng báo lỗi tải lại hội thoại. */
+export function retryRestore(id: string, userId: string): Promise<void> {
+  if (genBusy() || !onlyRestoreErrors(useGenStore.getState().messages)) return Promise.resolve();
+  return runRestore(id, userId);
+}
+
+function setFeedback(turnId: string, feedback: GenRating | null): void {
+  useGenStore.setState((s) => ({
+    messages: s.messages.map((m) => (m.role === 'assistant' && m.turnId === turnId ? { ...m, feedback } : m)),
+  }));
+}
+
+/**
+ * v0.1.41 (F-86): Hữu ích / Không hữu ích — đổi ngay trên màn (lạc quan), lỗi thì hoàn tác + báo. Bấm lại đúng nút
+ * đang chọn ⇒ bỏ đánh giá (`DELETE /gen/feedback/{turn_id}`).
+ */
+export async function sendFeedback(m: GenChatMessage, rating: GenRating): Promise<void> {
+  const turnId = m.turnId;
+  const conversationId = useGenStore.getState().conversationId;
+  if (!turnId || !conversationId) return;
+  const prev = useGenStore.getState().messages.find((x) => x.role === 'assistant' && x.turnId === turnId)?.feedback ?? null;
+  const next = prev === rating ? null : rating;
+  setFeedback(turnId, next);
+  try {
+    if (next) await api.gen.feedback({ conversation_id: conversationId, turn_id: turnId, rating: next });
+    else await api.gen.clearFeedback(turnId);
+  } catch (e) {
+    setFeedback(turnId, prev);
+    const d = errorDetail(e);
+    toast(`${errorText(e) || 'Chưa lưu được đánh giá — thử lại sau.'}${d ? ` (Chi tiết kỹ thuật: ${d})` : ''}`, 'bad');
+  }
 }
 
 export function stopAll(): void {

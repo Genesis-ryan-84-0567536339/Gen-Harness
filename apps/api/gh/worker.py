@@ -15,6 +15,9 @@
 - v0.1.40 (F-16): `job_timeout` tường minh (JOB_TIMEOUT = 300 giây như mặc định arq). `_tracked` nhận ra lần chạy
   bị cắt vì quá giờ (payload thêm "timeout": bool, bộ đếm `gh:cron:timeouts:<tên>`); quá giờ 2 lần liền ⇒ sự cố
   `job.timeout:<tên>` (ops.health_alerts + chuông cho Owner), tự đóng khi lần chạy sau thành công.
+- v0.1.41 (F-8b): `gen_briefing` — Bản tin Gen 07:30 / 17:30 giờ VN (`gh.gen.briefing`); cron chạy thêm 08:30, 09:30,
+  18:30, 19:30 chỉ để bù khi worker lỡ giờ (idempotent theo khung giờ — không gửi lần hai; quá 3 giờ thì bỏ).
+  Việc nền (sàng lọc, trực việc, bản tin) mặc định chỉ dùng khoá API (F-86, gh.providers.router).
 """
 
 import asyncio
@@ -43,6 +46,7 @@ from gh.chassis import actionlog
 from gh.chassis.bus import EventBus
 from gh.config import get_settings
 from gh.db import admin_sessionmaker, dispose_engine, sessionmaker
+from gh.gen import briefing
 from gh.hub_link import service as hub_link
 from gh.identity import service as identity
 from gh.memory import notebook
@@ -84,6 +88,7 @@ JOB_LABELS = {
     "social_schedule": "Lịch đọc mạng xã hội",
     "people_review_recompute": "Tính lại đánh giá nhân sự",
     "scheduled_backup_scan": "Sao lưu theo lịch",
+    "gen_briefing": "Bản tin Gen",
 }
 
 
@@ -345,6 +350,11 @@ async def social_schedule(ctx: dict[str, Any]) -> int:
     return n
 
 
+async def gen_briefing(ctx: dict[str, Any]) -> dict[str, Any]:
+    """v0.1.41 (F-8b): Bản tin Gen 07:30 / 17:30 giờ VN cho Owner — xem `gh.gen.briefing.run_briefing`."""
+    return await briefing.run_briefing(sessionmaker(), ctx["redis_bus"], ctx["model_router"])
+
+
 _BIZ_JOBS = [*biz.jobs(), *BACKUP_JOBS]  # PLAN §5.6 — gh.backup.scheduled_backup_scan cùng mẫu CronJob
 
 
@@ -357,7 +367,7 @@ class WorkerSettings:
     on_shutdown = shutdown
     functions = [verify_action_log, partition_maintenance, detect_identities, compact_notebooks, expire_sessions,
                  purge_gen_conversations, purge_notifications, retention_sweep, hub_token_expiry_scan,
-                 social_schedule,
+                 social_schedule, gen_briefing,
                  *(fn for fn, _ in _BIZ_JOBS), *BACKUP_FUNCTIONS]
     health_check_interval = 30
     job_timeout = JOB_TIMEOUT  # v0.1.40 (F-16): tường minh — `_cron` dùng cùng giá trị để nhận ra lần quá giờ
@@ -373,6 +383,8 @@ class WorkerSettings:
         _cron(retention_sweep, hour={5}, minute={0}, timeout=1800),  # 05:00 giờ VN — dọn dữ liệu quá hạn (F-2)
         _cron(hub_token_expiry_scan, hour={8}, minute={50}),     # 08:50 giờ VN — nhắc token Gen-hub (nhẹ)
         _cron(social_schedule, minute=set(range(60))),           # mỗi phút — lịch đọc mạng xã hội (tắt mặc định)
+        # 07:30 / 17:30 giờ VN — Bản tin Gen (F-8b); các lượt sau trong 3 giờ chỉ bù khi lỡ giờ (idempotent)
+        _cron(gen_briefing, hour={7, 8, 9, 17, 18, 19}, minute={30}),
         *(_cron(fn, **kw) for fn, kw in _BIZ_JOBS),              # biz + sao lưu: giữ NGUYÊN kw (kể cả timeout)
     ]
 

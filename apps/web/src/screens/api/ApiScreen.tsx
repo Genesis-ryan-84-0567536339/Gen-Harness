@@ -1,9 +1,10 @@
-import { useState, type DragEvent } from 'react';
+import { useEffect, useState, type DragEvent } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import type { AgentBindingSlot, BindableModel, Provider, ProviderKind } from '@gen-harness/contracts';
 import { ApiError, SCREEN_BY_KEY } from '@gen-harness/contracts';
 import { Button, Dialog, EmptyState, Icon, SelectField, Switch, TextField } from '@gen-harness/ui';
 import { useProviders } from '../../lib/dataQueries';
-import { errorReasons, errorText } from '../../lib/errorText';
+import { errorDetail, errorReasons, errorText } from '../../lib/errorText';
 import { detailToText } from '../../lib/friendlyError';
 import { useCan } from '../../lib/permissions';
 import { toast } from '../../lib/toast';
@@ -12,7 +13,7 @@ import { CliCard } from '../system/CliCard';
 import { ModelPicker } from './ModelPicker';
 import { CliDiagnose } from '../system/CliDiagnose';
 import { AGY_SCOPE_TEXT } from '../system/systemModel';
-import { PROVIDER_ICON, PROVIDER_KIND_LABEL, choiceText, fmtContextTokens, fmtQuota, fmtTemperature, isCliKind, providerStatus } from './apiModel';
+import { PROVIDER_ICON, PROVIDER_KIND_LABEL, PROVIDER_PRESETS, choiceText, findPreset, fmtContextTokens, fmtQuota, fmtTemperature, isCliKind, providerStatus } from './apiModel';
 import {
   useAddModel,
   useAddProviderKey,
@@ -33,7 +34,28 @@ export function ApiScreen() {
   const providers = useProviders();
   const testAll = useTestProvider();
   const [addingProvider, setAddingProvider] = useState(false);
+  const [addInitial, setAddInitial] = useState<AddChoice>('gemini');
   const [addingKeyFor, setAddingKeyFor] = useState<Provider | null>(null);
+  const [params, setParams] = useSearchParams();
+  const addParam = params.get('add');
+
+  // `/api?add=openrouter` (nút "Thêm nhà cung cấp" ở thẻ "Nguồn AI cho việc nền") ⇒ mở thẳng hộp Thêm, chọn sẵn mẫu;
+  // xoá tham số khỏi URL để tải lại/quay lại không mở lại hộp.
+  useEffect(() => {
+    if (addParam === null) return;
+    if (canManage) {
+      setAddInitial(isAddChoice(addParam) ? addParam : 'gemini');
+      setAddingProvider(true);
+    }
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('add');
+        return next;
+      },
+      { replace: true },
+    );
+  }, [addParam, canManage, setParams]);
 
   const testAllConnections = async () => {
     const list = (providers.data ?? []).filter((p) => !isCliKind(p.kind) && p.kind !== 'system_one');
@@ -55,7 +77,10 @@ export function ApiScreen() {
         Kiểm tra kết nối
       </Button>
       {canManage ? (
-        <Button variant="primary" icon="ph ph-plus" className="btn-30" data-gen-target="api.add_provider" onClick={() => setAddingProvider(true)}>
+        <Button variant="primary" icon="ph ph-plus" className="btn-30" data-gen-target="api.add_provider" onClick={() => {
+            setAddInitial('gemini');
+            setAddingProvider(true);
+          }}>
           Thêm nhà cung cấp
         </Button>
       ) : null}
@@ -98,7 +123,7 @@ export function ApiScreen() {
       <CliCard canManage={canManage} />
       <CliCard canManage={canManage} kind="claude_code_cli" showCredentials={false} />
 
-      {addingProvider ? <AddProviderDialog onClose={() => setAddingProvider(false)} /> : null}
+      {addingProvider ? <AddProviderDialog initial={addInitial} onClose={() => setAddingProvider(false)} /> : null}
       {addingKeyFor ? <AddKeyDialog provider={addingKeyFor} onClose={() => setAddingKeyFor(null)} /> : null}
     </div>
   );
@@ -183,9 +208,9 @@ function ProviderCard({ provider: p, canManage, onAddKey }: { provider: Provider
       ) : null}
       {canManage && p.kind !== 'system_one' ? <ModelPicker provider={p} test={lastResult ?? p.last_test} /> : null}
       {isCliKind(p.kind) ? <CliDiagnose provider={p} /> : null}
-      {testErr ? <InlineError>{errorText(testErr)}</InlineError> : null}
-      {remove.isError ? <InlineError>{errorText(remove.error)}</InlineError> : null}
-      {setEnabled.isError ? <InlineError>{errorText(setEnabled.error)}</InlineError> : null}
+      {testErr ? <InlineError detail={errorDetail(testErr)}>{errorText(testErr)}</InlineError> : null}
+      {remove.isError ? <InlineError detail={errorDetail(remove.error)}>{errorText(remove.error)}</InlineError> : null}
+      {setEnabled.isError ? <InlineError detail={errorDetail(setEnabled.error)}>{errorText(setEnabled.error)}</InlineError> : null}
     </article>
   );
 }
@@ -557,7 +582,7 @@ function PriorityChainPanel({ canManage }: { canManage: boolean }) {
           <PinHint />
         </div>
       ) : null}
-      {reorder.isError ? <InlineError>{errorText(reorder.error)}</InlineError> : null}
+      {reorder.isError ? <InlineError detail={errorDetail(reorder.error)}>{errorText(reorder.error)}</InlineError> : null}
     </Panel>
   );
 }
@@ -582,13 +607,39 @@ function FailoverRulesPanel() {
   );
 }
 
-function AddProviderDialog({ onClose }: { onClose: () => void }) {
+/** Lựa chọn ô "Loại": loại thật hoặc mẫu dựng sẵn (v0.1.41, F-84 — `PROVIDER_PRESETS`). */
+type AddChoice = 'gemini' | 'deepseek' | 'openai_compat' | (typeof PROVIDER_PRESETS)[number]['id'];
+
+function isAddChoice(v: string): v is AddChoice {
+  return v === 'gemini' || v === 'deepseek' || v === 'openai_compat' || Boolean(findPreset(v));
+}
+
+function AddProviderDialog({ onClose, initial = 'gemini' }: { onClose: () => void; initial?: AddChoice }) {
   const create = useCreateProvider();
-  const [kind, setKind] = useState<'gemini' | 'deepseek' | 'openai_compat'>('gemini');
-  const [name, setName] = useState('');
-  const [endpoint, setEndpoint] = useState('');
+  const initialPreset = findPreset(initial);
+  const [choice, setChoice] = useState<AddChoice>(initial);
+  const preset = findPreset(choice);
+  const kind: ProviderKind = preset ? preset.kind : (choice as ProviderKind);
+  const [name, setName] = useState(initialPreset?.name ?? '');
+  const [endpoint, setEndpoint] = useState(initialPreset?.endpoint ?? '');
   const [keys, setKeys] = useState('');
-  const [models, setModels] = useState('');
+  const [models, setModels] = useState(initialPreset?.modelHint ?? '');
+  const onChoice = (next: AddChoice) => {
+    const prev = findPreset(choice);
+    const p = findPreset(next);
+    setChoice(next);
+    // Mẫu điền sẵn Tên + Endpoint + model gợi ý THẬT (vẫn sửa được — để trống thì việc nền báo "Chưa chọn model");
+    // rời mẫu thì xoá phần mẫu đã điền nếu Sếp chưa sửa.
+    if (p) {
+      setName(p.name);
+      setEndpoint(p.endpoint);
+      if (!models.trim() || (prev && models === prev.modelHint)) setModels(p.modelHint);
+    } else if (prev) {
+      if (name === prev.name) setName('');
+      if (endpoint === prev.endpoint) setEndpoint('');
+      if (models === prev.modelHint) setModels('');
+    }
+  };
   const submit = () => {
     const keyList = keys.split('\n').map((k) => k.trim()).filter(Boolean);
     if (!name.trim() || !keyList.length || (kind === 'openai_compat' && !endpoint.trim())) return;
@@ -596,7 +647,7 @@ function AddProviderDialog({ onClose }: { onClose: () => void }) {
       {
         kind,
         name: name.trim(),
-        endpoint: endpoint.trim() || undefined,
+        endpoint: kind === 'openai_compat' ? endpoint.trim() || undefined : undefined,
         keys: keyList,
         models: models
           .split(',')
@@ -632,14 +683,20 @@ function AddProviderDialog({ onClose }: { onClose: () => void }) {
       >
         <SelectField
           label="Loại"
-          value={kind}
-          onChange={(e) => setKind(e.target.value as typeof kind)}
+          value={choice}
+          onChange={(e) => onChoice(e.target.value as AddChoice)}
           options={[
             { value: 'gemini', label: 'Gemini API' },
             { value: 'deepseek', label: 'DeepSeek API' },
             { value: 'openai_compat', label: 'API tương thích OpenAI' },
+            ...PROVIDER_PRESETS.map((p) => ({ value: p.id, label: p.label })),
           ]}
         />
+        {preset ? (
+          <p className="muted-note" data-testid="provider-preset-hint">
+            {preset.keyHint}
+          </p>
+        ) : null}
         <TextField label="Tên hiển thị" value={name} onChange={(e) => setName(e.target.value)} maxLength={80} />
         {kind === 'openai_compat' ? <TextField label="Địa chỉ gọi (Endpoint)" value={endpoint} onChange={(e) => setEndpoint(e.target.value)} placeholder="https://…" /> : null}
         <div className="gh-field">
@@ -648,9 +705,15 @@ function AddProviderDialog({ onClose }: { onClose: () => void }) {
           </label>
           <textarea id="apm-new-keys" className="gh-input" rows={2} value={keys} onChange={(e) => setKeys(e.target.value)} />
         </div>
-        <TextField label="Model ban đầu (tuỳ chọn, cách nhau dấu phẩy)" value={models} onChange={(e) => setModels(e.target.value)} placeholder="gemini-2.5-flash" />
+        <TextField
+          label="Model ban đầu (tuỳ chọn, cách nhau dấu phẩy)"
+          value={models}
+          onChange={(e) => setModels(e.target.value)}
+          placeholder={preset ? preset.modelHint : 'gemini-2.5-flash'}
+        />
+        {preset ? <p className="muted-note">Gợi ý model: <span className="mono">{preset.modelHint}</span></p> : null}
         <PinHint />
-        {create.isError ? <InlineError>{errorText(create.error)}</InlineError> : null}
+        {create.isError ? <InlineError detail={errorDetail(create.error)}>{errorText(create.error)}</InlineError> : null}
       </form>
     </Dialog>
   );
@@ -701,7 +764,7 @@ function AddKeyDialog({ provider, onClose }: { provider: Provider; onClose: () =
         <TextField label="Khoá API mới" value={secret} onChange={(e) => setSecret(e.target.value)} revealable autoComplete="off" spellCheck={false} />
         <TextField label="Model đi kèm (tuỳ chọn)" value={modelName} onChange={(e) => setModelName(e.target.value)} placeholder="gemini-2.5-flash" />
         <PinHint />
-        {addKey.isError ? <InlineError>{errorText(addKey.error)}</InlineError> : null}
+        {addKey.isError ? <InlineError detail={errorDetail(addKey.error)}>{errorText(addKey.error)}</InlineError> : null}
       </form>
     </Dialog>
   );

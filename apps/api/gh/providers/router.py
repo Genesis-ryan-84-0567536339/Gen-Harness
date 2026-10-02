@@ -7,6 +7,12 @@ Theo `failoverRules` của thiết kế (ARCHITECTURE §11):
 - hết chuỗi → ném ModelUnavailable (việc nằm chờ) và báo Sếp qua hàng đợi (tối đa 1 lần / giờ).
 - còn < 20% hạn mức ở bất kỳ model nào → cảnh báo (1 lần / ngày / model).
 Mọi lượt gọi (thành công hay không) ghi `agent.model_calls`.
+
+v0.1.41 (F-86) — việc nền (`BACKGROUND_PURPOSES`: sàng lọc tin, trực việc, Bản tin Gen) mặc định CHỈ dùng khoá API:
+Claude Code CLI (gói Pro/Max cá nhân của Sếp) bị bỏ qua trừ khi Owner cho phép (cảnh báo + xác nhận + PIN, lưu ở
+`core.organizations.settings->'ai'->'background_cli'`). Antigravity CLI không bao giờ chạy việc nền (F-22). Việc nền
+hết chuỗi vì chỉ có CLI ⇒ sự cố sức khoẻ `ai.background_no_source` (một chuông), tự đóng khi việc nền chạy lại được.
+'Đọc theo lịch' mạng xã hội (gh.social) không gọi model — không thuộc diện này.
 """
 
 import asyncio
@@ -93,6 +99,90 @@ def agy_only(reasons: list[str]) -> bool:
     return bool(reasons) and all(r == AGY_OWNER_ONLY_REASON for r in reasons)
 
 PROBE_TIMEOUT_S = 90.0
+
+# ─── v0.1.41 (F-86): việc nền dùng khoá API ──────────────────────────────────
+
+#: Việc tự động không có Sếp ngồi trước màn hình (khớp gh/refinery/runner.py purpose="refinery",
+#: gh/biz/duty/engine.py PURPOSE="duty_decide", gh/gen/briefing.py). So khớp bằng nhau hoặc tiền tố "<p>.".
+BACKGROUND_PURPOSES = ("refinery", "duty_decide", "gen.briefing")
+#: CLI Owner được phép cho chạy việc nền (QD-12). agy KHÔNG BAO GIỜ (luật cứng F-22) — không có trong danh sách.
+BACKGROUND_CLI_KINDS_ALLOWED = ("claude_code_cli",)
+BACKGROUND_CLI_REASON = ("Claude Code CLI (gói Pro/Max của Sếp) mặc định chỉ dùng khi Sếp hỏi Gen trực tiếp — việc nền "
+                         "dùng khoá API")
+#: Nguồn sự thật DUY NHẤT cho câu cảnh báo trên UI (GET /providers/background → risk_text).
+BACKGROUND_CLI_RISK = ("Claude Code CLI dùng gói Claude Pro/Max cá nhân của Sếp. Cho nó chạy việc nền tự động "
+                       "(sàng lọc tin, trực việc, bản tin) có thể trái điều khoản gói và tài khoản có thể bị hạn chế "
+                       "hoặc khoá. Đây là quyết định và rủi ro của Sếp (QD-12). Cách an toàn: dán khoá API OpenRouter "
+                       "hoặc Gemini.")
+BACKGROUND_PURPOSE_LABELS = ("Sàng lọc tin", "Trực việc (agent soạn nháp)", "Bản tin Gen")
+BG_NO_SOURCE_KEY = "ai.background_no_source"
+BG_NO_SOURCE_FLAG = "gh:bg_nosrc:{}"
+BG_NO_SOURCE_FLAG_TTL = 30 * 86400
+#: Ngưỡng ghi DB của `_background_no_source`: mỗi lượt việc nền hết chuỗi (mỗi lô sàng lọc) KHÔNG mở phiên DB — tối đa
+#: một lần / 10 phút / tổ chức (SET NX). Xoá cùng cờ khi sự cố đóng ⇒ lần thiếu nguồn kế tiếp báo ngay.
+BG_NO_SOURCE_TRY = "gh:bg_nosrc_try:{}"
+BG_NO_SOURCE_TRY_TTL = 600
+API_KINDS = ("gemini", "deepseek", "openai_compat")
+
+
+def is_background(purpose: str) -> bool:
+    return any(purpose == p or purpose.startswith(p + ".") for p in BACKGROUND_PURPOSES)
+
+
+def background_cli_only(reasons: list[str]) -> bool:
+    """Việc nền hết chuỗi chỉ vì luật CLI (F-86/F-22) — chuỗi chỉ có CLI, chưa có khoá API dùng được."""
+    return (BACKGROUND_CLI_REASON in reasons
+            and all(r in (BACKGROUND_CLI_REASON, AGY_OWNER_ONLY_REASON) for r in reasons))
+
+
+async def background_cli_allowed(db: AsyncSession, org_id: uuid.UUID) -> set[str]:
+    """CLI Owner đã cho chạy việc nền. Thiếu khoá ⇒ rỗng = mặc định chỉ khoá API. Giá trị lạ (kể cả agy) bị bỏ."""
+    raw = (await db.execute(text("SELECT settings->'ai'->'background_cli' FROM core.organizations WHERE id = :o"),
+                            {"o": org_id})).scalar_one_or_none()
+    if not isinstance(raw, list):
+        return set()
+    return {str(k) for k in raw if k in BACKGROUND_CLI_KINDS_ALLOWED}
+
+
+async def has_api_source(db: AsyncSession, org_id: uuid.UUID) -> bool:
+    """Có ít nhất một nguồn khoá API đang bật, có khoá bật và có model (không phải embedding) bật."""
+    return bool((await db.execute(text("""
+        SELECT EXISTS (
+          SELECT 1 FROM agent.providers p
+          WHERE p.org_id = :o AND p.is_enabled AND p.kind = ANY(:k)
+            AND EXISTS (SELECT 1 FROM agent.provider_keys k WHERE k.provider_id = p.id AND k.is_enabled)
+            AND EXISTS (SELECT 1 FROM agent.models m WHERE m.provider_id = p.id AND m.is_enabled
+                        AND m.model_name NOT ILIKE '%embedding%'))"""),
+        {"o": org_id, "k": list(API_KINDS)})).scalar_one())
+
+
+async def background_sources(db: AsyncSession, org_id: uuid.UUID) -> list[dict[str, Any]]:
+    """Các nguồn theo thứ tự chuỗi, kèm việc nền có dùng được không và vì sao (mọi giá trị là chuỗi/bool/null — web
+    không render object). Jev (`system_one`) và nguồn embedding không sinh văn bản ⇒ bỏ khỏi danh sách."""
+    allowed = await background_cli_allowed(db, org_id)
+    rows = (await db.execute(text("""
+        SELECT p.id, p.name, p.kind, p.is_enabled,
+               EXISTS (SELECT 1 FROM agent.provider_keys k WHERE k.provider_id = p.id AND k.is_enabled) AS has_key,
+               EXISTS (SELECT 1 FROM agent.models m WHERE m.provider_id = p.id AND m.is_enabled
+                       AND m.model_name NOT ILIKE '%embedding%') AS has_model
+        FROM agent.providers p WHERE p.org_id = :o AND p.kind NOT IN ('embedding', 'system_one')
+        ORDER BY p.failover_rank NULLS LAST, p.created_at"""), {"o": org_id})).all()
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        reason: str | None = None
+        if not r.is_enabled:
+            reason = "Nguồn đang tắt"
+        elif r.kind == "antigravity_cli":
+            reason = AGY_OWNER_ONLY_REASON
+        elif r.kind in CLI_KINDS and r.kind not in allowed:
+            reason = BACKGROUND_CLI_REASON
+        elif r.kind not in CLI_KINDS and not r.has_key:
+            reason = "Chưa có khoá API"
+        elif not r.has_model:
+            reason = "Chưa chọn model"
+        out.append({"provider_id": str(r.id), "name": str(r.name), "kind": str(r.kind), "used": reason is None,
+                    "reason": reason})
+    return out
 
 
 def error_detail(e: BaseException | None) -> str | None:
@@ -320,15 +410,26 @@ class ModelRouter:
 
     async def generate(self, org_id: uuid.UUID, *, agent_key: str, purpose: str, messages: list[Message],
                        json_mode: bool = True, temperature: float = 0.2, allow_agy: bool = False) -> Routed:
-        """`allow_agy` (F-22): mặc định TỪ CHỐI Antigravity CLI — chỉ lượt Gen của Owner truyền True."""
+        """`allow_agy` (F-22): mặc định TỪ CHỐI Antigravity CLI — chỉ lượt Gen của Owner truyền True.
+
+        v0.1.41 (F-86): việc nền (`is_background(purpose)`) bỏ qua Claude Code CLI trừ khi Owner đã cho phép
+        (`background_cli_allowed`); agy không bao giờ chạy việc nền dù bên gọi truyền gì."""
+        background = is_background(purpose)
         async with self.sm() as db:
             chain = await self._chain(db, org_id, agent_key)
+            bg_cli = await background_cli_allowed(db, org_id) if background else set()
+        if background:
+            allow_agy = False
         reasons: list[str] = []
         for link in chain:
             p, m = link["provider"], link["model"]
             if p.kind == "antigravity_cli" and not allow_agy:
                 if AGY_OWNER_ONLY_REASON not in reasons:
                     reasons.append(AGY_OWNER_ONLY_REASON)
+                continue
+            if background and p.kind == "claude_code_cli" and p.kind not in bg_cli:
+                if BACKGROUND_CLI_REASON not in reasons:
+                    reasons.append(BACKGROUND_CLI_REASON)
                 continue
             if await self.redis.exists(breaker_key(p.id)):
                 reasons.append(f"{p.name}: đang ngắt mạch")
@@ -395,12 +496,60 @@ class ModelRouter:
                     # CLI vừa gọi được thật (token đã tự làm mới) → bỏ nhãn "Hết hạn" cũ (một sự thật, v0.1.31).
                     await self._set_auth_state(p, "ok")
                 await self._count_use(org_id, p, m)
+                if background:
+                    await self._background_ok(org_id)
                 return Routed(c.text, p.name, m.model_name, c.tokens_in, c.tokens_out, reasons)
         await self._chain_exhausted(org_id, reasons, agent_key=agent_key, purpose=purpose)
         raise ModelUnavailable(reasons, no_chain=not chain)
 
+    async def _background_no_source(self, org_id: uuid.UUID) -> None:
+        """v0.1.41 (F-86): việc nền chỉ còn nguồn CLI ⇒ sự cố `ai.background_no_source` + MỘT chuông (raise_once không
+        dội chuông lần hai khi sự cố đang mở). Savepoint riêng như `_set_auth_state`: lỗi chuông chỉ ghi log."""
+        from gh import health, notifications
+
+        async with self.sm() as db:
+            mark = notifications.pending_mark(db)
+            try:
+                async with db.begin_nested():
+                    await health.raise_once(
+                        db, org_id, key=BG_NO_SOURCE_KEY, kind=BG_NO_SOURCE_KEY, severity="warn",
+                        title="Việc nền (sàng lọc, trực việc, bản tin) chưa có khoá API",
+                        body=("Dán khoá OpenRouter hoặc Gemini ở API & Model (Thêm nhà cung cấp), hoặc cho phép "
+                              "Claude Code CLI chạy việc nền ở Bộ não AI (có cảnh báo điều khoản)."),
+                        link="/system?tab=brain", redis=self.redis)
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001 — chuông lỗi không được làm hỏng định tuyến
+                notifications.pending_reset(db, mark)
+                log.warning("Không mở được sự cố việc nền thiếu khoá API (%s)", org_id, exc_info=True)
+            await db.commit()
+        await self.redis.set(BG_NO_SOURCE_FLAG.format(org_id), "1", ex=BG_NO_SOURCE_FLAG_TTL)
+
+    async def _background_ok(self, org_id: uuid.UUID) -> None:
+        """Việc nền vừa chạy được ⇒ đóng sự cố thiếu nguồn — chỉ khi cờ Redis còn (không UPDATE mỗi lượt)."""
+        from gh import health
+
+        flag = BG_NO_SOURCE_FLAG.format(org_id)
+        try:
+            if not await self.redis.exists(flag):
+                return
+            async with self.sm() as db:
+                await health.clear(db, org_id, BG_NO_SOURCE_KEY)
+                await db.commit()
+            await self.redis.delete(flag, BG_NO_SOURCE_TRY.format(org_id))
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 — kết quả model đã có; đóng sự cố lỗi thì lượt sau thử lại
+            log.warning("Không đóng được sự cố việc nền thiếu khoá API (%s)", org_id, exc_info=True)
+
     async def _chain_exhausted(self, org_id: uuid.UUID, reasons: list[str], *, agent_key: str = "",
                                purpose: str = "") -> None:
+        if is_background(purpose) and background_cli_only(reasons):
+            # v0.1.41 (F-86): sự cố sức khoẻ (dải "Cần Sếp xử lý" + chuông), KHÔNG dùng biz.alerts. Có ngưỡng: lô
+            # sàng lọc / trực việc kế tiếp trong 10 phút không mở phiên DB thêm lần nữa.
+            if await self.redis.set(BG_NO_SOURCE_TRY.format(org_id), "1", nx=True, ex=BG_NO_SOURCE_TRY_TTL):
+                await self._background_no_source(org_id)
+            return
         if agy_only(reasons):
             # Review F-22: chỉ có agy mà việc không phải Gen của Sếp ⇒ đăng nhập lại không giúp gì; cảnh báo riêng,
             # P2, tối đa một lần / ngày (không dội chuông mỗi giờ).

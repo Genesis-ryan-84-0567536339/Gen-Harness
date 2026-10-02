@@ -251,7 +251,11 @@ def _history_text(msgs: list[dict[str, Any]]) -> list[Message]:
                             f"[đề xuất {s['proposal'].get('status', 'pending')}: {s['proposal'].get('summary', '')}]"
                             for s in c.get("steps", []) if s.get("kind") == "say"
                             or (s.get("kind") == "proposal" and isinstance(s.get("proposal"), dict)))
-            if said:
+            if said and c.get("kind") == "briefing":
+                # Bản tin chép nguyên văn tên khách / lý do giữ nháp / tiêu đề sự cố (nguồn ngoài) ⇒ bọc như kết quả
+                # tool, model không coi đó là lời của chính nó hay lệnh.
+                out.append(Message("assistant", wrap_untrusted("briefing.sources", said[:1500])))
+            elif said:
                 out.append(Message("assistant", said[:1500]))
     return out
 

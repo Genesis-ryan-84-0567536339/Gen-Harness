@@ -23,7 +23,8 @@ from gh.backup import JOBS as BACKUP_JOBS
 from gh.backup import scheduled_backup_scan
 from gh.worker import WorkerSettings
 
-LIGHT_ALLOWLIST = {"hub_token_expiry_scan"}  # nhẹ, chỉ nhắc — được chạy trong giờ làm việc
+# nhẹ, chỉ nhắc — được chạy trong giờ làm việc. v0.1.41 (F-8b): Bản tin Gen 07:30/17:30 (+ lượt bù) chủ ý trong giờ.
+LIGHT_ALLOWLIST = {"hub_token_expiry_scan", "gen_briefing"}
 DAILY = {"partition_maintenance", "verify_action_log", "compact_notebooks", "retention_sweep",
          "people_review_recompute"}
 

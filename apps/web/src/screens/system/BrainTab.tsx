@@ -10,6 +10,8 @@ import { N4, OK, WARN } from '../data/dataModel';
 import { CliCard } from './CliCard';
 import { JevCard } from './JevCard';
 import { TriageCard } from './TriageCard';
+import { BackgroundSourcesCard } from './BackgroundSourcesCard';
+import { AiBudgetCard } from './AiBudgetCard';
 import { useCan } from '../../lib/permissions';
 
 /**
@@ -155,6 +157,12 @@ export function BrainTab() {
           jevCard
         )}
         <CliCard canManage={canManage} showCredentials={false} />
+      </div>
+
+      {/* v0.1.41 (F-86, F-84): nguồn AI cho việc nền (khoá API mặc định; Claude Code CLI cần cảnh báo + PIN) và chi phí. */}
+      <div className="sys-grid2">
+        <BackgroundSourcesCard />
+        <AiBudgetCard />
       </div>
 
       <div className="sys-grid2">

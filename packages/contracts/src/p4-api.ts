@@ -42,6 +42,33 @@ export interface FailoverRule {
   value: string;
 }
 
+/**
+ * v0.1.41 (F-86, QD-12): `GET/PUT /providers/background` — "Nguồn AI cho việc nền" (sàng lọc tin, trực việc, Bản tin Gen;
+ * purpose ∈ refinery/duty_decide/gen.briefing). Mặc định chỉ khoá API; Owner có thể cho Claude Code CLI chạy việc nền
+ * (cảnh báo + xác nhận + PIN `ai.background_cli`). Antigravity CLI KHÔNG BAO GIỜ chạy việc nền (F-22).
+ */
+export interface BackgroundSource {
+  provider_id: string;
+  name: string;
+  kind: string;
+  used: boolean;
+  /** Lý do không dùng (chuỗi cho người đọc); null khi đang dùng. */
+  reason: string | null;
+}
+export interface BackgroundSources {
+  allow_cli: string[];
+  accepted_at: string | null;
+  /** Câu cảnh báo — web hiện NGUYÊN VĂN trong hộp xác nhận. */
+  risk_text: string;
+  purposes: string[];
+  has_api_source: boolean;
+  sources: BackgroundSource[];
+}
+export interface BackgroundSourcesBody {
+  allow_cli: string[];
+  accept_risk: boolean;
+}
+
 const enc = encodeURIComponent;
 
 /** `agent.bindings` (`/agents/bindings*`) + `/failover-rules` (chỉ đọc, ARCHITECTURE §11). */

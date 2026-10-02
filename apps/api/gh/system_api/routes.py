@@ -23,10 +23,11 @@ from gh.chassis.bus import BRIDGE_CONTROL
 from gh.data.common import CHANNEL_NAME, LISTENING_MODES, iso, org_settings
 from gh.data.ingest import sync_listen_sets, uptime_pct
 from gh.db import DB
-from gh.errors import ApiError, conflict, field_errors, forbidden, not_found
+from gh.errors import ApiError, conflict, field_errors, forbidden, not_found, pin_required
 from gh.gen import jev
 from gh.providers import catalog
 from gh.providers import cli as climod
+from gh.providers import router as mrouter
 from gh.providers.clients import AGY_MODEL_RE
 from gh.providers.router import KEY_AAD, cooldown_key, quota_key
 from gh.shell.routes import publish_header
@@ -387,6 +388,65 @@ async def create_provider(body: ProviderIn, request: Request, user: service.Curr
                            target_label=body.name, detail={"kind": body.kind, "keys": len(body.keys),
                                                            "models": body.models}, ip=user.ip)
     return await _one_provider(db, request.app.state.redis, user.org_id, pid)
+
+
+# ─── v0.1.41 (F-86): Nguồn AI cho việc nền ───────────────────────────────────
+# ĐĂNG KÝ TRƯỚC các route `/providers/{pid}` (xem chú thích `patch_chain`).
+
+async def _background_payload(db: AsyncSession, org_id: uuid.UUID) -> dict[str, Any]:
+    """Mọi giá trị là chuỗi/bool/null hoặc danh sách của chúng (web không render object)."""
+    ai = (await org_settings(db, org_id)).get("ai") or {}
+    allow = sorted(await mrouter.background_cli_allowed(db, org_id))
+    accepted = ai.get("background_cli_accepted_at") if allow else None
+    return {"allow_cli": allow, "accepted_at": str(accepted) if accepted else None,
+            "risk_text": mrouter.BACKGROUND_CLI_RISK, "purposes": list(mrouter.BACKGROUND_PURPOSE_LABELS),
+            "has_api_source": await mrouter.has_api_source(db, org_id),
+            "sources": await mrouter.background_sources(db, org_id)}
+
+
+@router.get("/providers/background")
+async def get_background(user: service.CurrentUser = Depends(READ), db: AsyncSession = DB) -> dict[str, Any]:
+    """Nguồn AI cho việc nền (sàng lọc tin, trực việc, Bản tin Gen): mặc định chỉ khoá API."""
+    return await _background_payload(db, user.org_id)
+
+
+class BackgroundIn(BaseModel):
+    allow_cli: list[Literal["claude_code_cli", "antigravity_cli"]] = Field(default_factory=list, max_length=2)
+    accept_risk: bool = False
+
+
+@router.put("/providers/background")
+async def put_background(body: BackgroundIn, user: service.CurrentUser = Depends(require_owner),
+                         db: AsyncSession = DB) -> dict[str, Any]:
+    """Cho / thôi cho Claude Code CLI chạy việc nền — quyền và rủi ro của Owner (QD-12).
+
+    Thứ tự kiểm: Owner (403) → agy không bao giờ (422 errors.allow_cli, luật cứng F-22) → THÊM CLI cần phiên PIN
+    `ai.background_cli` (423, kiểm trong hàm — bỏ CLI không cần PIN) rồi tích xác nhận (422 errors.accept_risk).
+    Thu hẹp (bỏ CLI) không cần PIN/xác nhận."""
+    if "antigravity_cli" in body.allow_cli:
+        raise field_errors({"allow_cli": mrouter.AGY_OWNER_ONLY_REASON})
+    new = sorted(set(body.allow_cli))
+    current = await mrouter.background_cli_allowed(db, user.org_id)
+    adding = set(new) - current
+    if adding:
+        if not user.pin_active():
+            raise pin_required()
+        if not body.accept_risk:
+            raise field_errors({"accept_risk": "Cần tích “Tôi đã đọc cảnh báo và tự chịu rủi ro”"})
+    patch: dict[str, Any] = {"background_cli": new}
+    if adding:
+        patch |= {"background_cli_accepted_at": datetime.now(UTC).isoformat(),
+                  "background_cli_accepted_by": str(user.id)}
+    await db.execute(text("""
+        UPDATE core.organizations
+        SET settings = jsonb_set(COALESCE(settings, '{}'::jsonb), '{ai}',
+                                 COALESCE(settings->'ai', '{}'::jsonb) || CAST(:p AS jsonb), true)
+        WHERE id = :o"""), {"o": user.org_id, "p": orjson.dumps(patch).decode()})
+    await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
+                           action="ai.background_cli_changed", target_type="organization",
+                           target_id=str(user.org_id),
+                           detail={"allow_cli": new, "accept_risk": body.accept_risk}, ip=user.ip)
+    return await _background_payload(db, user.org_id)
 
 
 class ChainIn(BaseModel):
