@@ -7,11 +7,20 @@
 - Lời nhắc agent trực kênh (`gh.biz.duty.engine.messages`, có "Ngữ cảnh (mỗi dòng: mã rồi JSON):"): tin được TAG
   → "draft" (soạn sẵn một câu trả lời ngắn, chỉ trích C1, không bịa số/ID ngoài ngữ cảnh); còn lại → "silent".
   Dùng cho giai đoạn 5.3 luồng 5 (`live-phase3.spec.ts`) — agent đọc ngữ cảnh thật, soạn nháp thật.
+- Lời nhắc Gen (`gh.gen.engine.system_prompt`, tin system bắt đầu "Bạn là Gen — trợ lý quản trị"; v0.1.35 F-14,
+  `live-ci.spec.ts` luồng d): chế độ JSON `{"steps": [...]}`. Vòng chưa có kết quả `staff.list` → gọi tool đó; chưa
+  có kết quả `queue.list` → gọi tool đó; đủ cả hai → lấy id người (tên khớp câu hỏi) và id mục Hộp thư ĐÚNG TỪ KẾT
+  QUẢ TOOL (server chỉ nhận id vừa thấy trong lượt — `gh.gen.proposals.id_errors`) rồi trả say + propose assign
+  + done. Không bịa id: thiếu dữ liệu thì chỉ "say" lý do rồi "done".
 """
 import json, re
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 DUTY_MARK = "Ngữ cảnh (mỗi dòng: mã rồi JSON):"
+GEN_MARK = "Bạn là Gen — trợ lý quản trị"
+GEN_RESULTS = "Kết quả / phản hồi của hệ thống:"
+# Khối kết quả tool do `gh.gen.engine.wrap_untrusted` bọc: "[kết quả <tool>]\n<<<…>>>\n<json>\n<<<HẾT…>>>".
+GEN_TOOL_BLOCK = re.compile(r"\[kết quả ([\w.]+)\]\n<<<[^\n]*>>>\n(.*?)\n<<<HẾT[^\n]*>>>", re.S)
 REFINERY_MARK = "Tin nhắn (mỗi dòng một JSON):\n"
 
 
@@ -26,8 +35,11 @@ class H(BaseHTTPRequestHandler):
 
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["content-length"])))
-        user = body["messages"][-1]["content"]
-        if DUTY_MARK in user:
+        msgs = body["messages"]
+        user = msgs[-1]["content"]
+        if any(m["role"] == "system" and m["content"].startswith(GEN_MARK) for m in msgs):
+            self._send(self._gen(msgs))
+        elif DUTY_MARK in user:
             self._send(self._duty_decide(user))
         else:
             self._send(self._refine(user))
@@ -68,6 +80,40 @@ class H(BaseHTTPRequestHandler):
             decision = {"decision": "silent", "rationale": "Không được tag, chưa cần phản hồi.", "context_refs": []}
         return {"choices": [{"message": {"content": json.dumps(decision, ensure_ascii=False)}}],
                 "usage": {"prompt_tokens": 120, "completion_tokens": 40}}
+
+    def _gen(self, msgs: list) -> dict:
+        """Một vòng Gen (xem docstring đầu tệp). Câu hỏi = tin user cuối KHÔNG phải phản hồi hệ thống."""
+        question = next((m["content"] for m in reversed(msgs) if m["role"] == "user"
+                         and not m["content"].startswith((GEN_RESULTS, "JSON sai schema"))), "")
+        results: dict = {}
+        for m in msgs:
+            if m["role"] == "user" and m["content"].startswith(GEN_RESULTS):
+                for name, raw in GEN_TOOL_BLOCK.findall(m["content"]):
+                    try:
+                        results[name] = json.loads(raw)
+                    except ValueError:
+                        results[name] = None
+        if "staff.list" not in results:
+            steps = [{"kind": "tool", "name": "staff.list", "args": {}}]
+        elif "queue.list" not in results:
+            steps = [{"kind": "tool", "name": "queue.list", "args": {"tab": "all"}}]
+        else:
+            staff = (results["staff.list"] or {}).get("items") or []
+            inbox = (results["queue.list"] or {}).get("items") or []
+            q = question.lower()
+            person = next((p for p in staff if not p.get("me") and p.get("name") and p["name"].lower() in q), None)
+            item = inbox[0] if inbox else None
+            if person is None or item is None:
+                steps = [{"kind": "say", "text": "Em chưa tìm thấy " + ("người được nhắc" if person is None
+                                                                        else "mục nào trong Hộp thư") + " ạ."},
+                         {"kind": "done"}]
+            else:
+                steps = [{"kind": "say", "text": f"Em đề xuất giao mục này cho {person['name']} ạ."},
+                         {"kind": "propose", "proposal": {"type": "assign", "fields": {
+                             "item_type": "inbox", "item_id": item["id"], "user_id": person["id"]}}},
+                         {"kind": "done"}]
+        return {"choices": [{"message": {"content": json.dumps({"steps": steps}, ensure_ascii=False)}}],
+                "usage": {"prompt_tokens": 200, "completion_tokens": 40}}
 
     def log_message(self, *a): pass
 
