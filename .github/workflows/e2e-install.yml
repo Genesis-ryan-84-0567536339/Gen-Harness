@@ -1718,7 +1718,7 @@ jobs:
 
   # ── promote ──────────────────────────────────────────────────────────────
   # Nâng tag thành BẢN CHÍNH THỨC (latest) — chỉ khi resolve bảo promote VÀ
-  # (e2e-install xanh VÀ e2e-rollback xanh VÀ e2e-upgrade xanh/bỏ qua), hoặc khi Owner chạy tay
+  # (e2e-install xanh VÀ e2e-rollback xanh VÀ e2e-offsite xanh VÀ e2e-upgrade xanh/bỏ qua), hoặc khi Owner chạy tay
   # với skip_e2e=true (promote tay, có cảnh báo). always() để job vẫn được
   # xét khi e2e-upgrade bị bỏ qua (chưa có bản chính thức cũ hơn).
   # Không bao giờ hạ cấp: latest hiện tại mới hơn thì chỉ cảnh báo.

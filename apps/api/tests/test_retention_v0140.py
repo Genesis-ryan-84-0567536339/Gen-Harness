@@ -8,9 +8,11 @@
 """
 
 from collections import Counter
+from pathlib import Path
 from typing import Any
 
 import orjson
+import psycopg
 import pytest
 from redis.asyncio import Redis
 from sqlalchemy import event, text
@@ -19,8 +21,25 @@ from gh import retention
 from gh.chassis import objects
 from gh.db import admin_sessionmaker, get_engine
 from gh.memory import notebook
-from tests.conftest import Api, verify_pin
+from tests.conftest import PG, Api, verify_pin
 from tests.phase2 import org_id
+
+SQL_0026 = Path(__file__).resolve().parents[3] / "db" / "sql" / "0026_v0140_retention_jobs.sql"
+
+
+async def test_migration_0026_is_rerunnable(fresh_db: str) -> None:
+    """Migration 0026 chạy lại (lần 2, lần 3 sau khi alembic đã chạy lần 1) không lỗi, không nhân đôi policy/chỉ mục."""
+    sql = SQL_0026.read_text(encoding="utf-8")
+    with psycopg.connect(f"{PG}/{fresh_db}", autocommit=True) as c:
+        c.execute(sql)  # type: ignore[call-overload]
+        c.execute(sql)  # type: ignore[call-overload]
+        pol = c.execute("""SELECT count(*) FROM pg_policies
+                           WHERE schemaname = 'ops' AND tablename = 'job_watermarks'""").fetchone()
+        idx = c.execute("""SELECT count(*) FROM pg_indexes WHERE indexname IN ('persons_lower_name_trgm_idx',
+                           'browser_jobs_finished_result_idx', 'memory_entries_archived_idx',
+                           'attachments_event_received_idx')""").fetchone()
+    assert pol is not None and pol[0] == 1
+    assert idx is not None and idx[0] == 4
 
 
 async def _part_config(table: str) -> Any:
