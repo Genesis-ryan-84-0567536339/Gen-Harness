@@ -2192,10 +2192,11 @@ Không cần chụp màn hình hay gửi mã cho Claude — kết quả tự lư
    Gen"** — bấm vào là mở Gen đúng bản tin đó. Chưa dán khoá OpenRouter/Gemini thì bản tin vẫn tới, kèm dòng **"Dán khoá
    OpenRouter/Gemini để Gen tóm tắt"**.
 2. **Lưu ý:** nếu trước giờ máy chỉ có Claude Code CLI thì sàng lọc tin / trực việc sẽ **tạm dừng** và dải "Cần Sếp xử
-   lý" báo **"Việc nền chưa có khoá API"**. Sếp chọn MỘT:
+   lý" báo **"Việc nền (sàng lọc, trực việc, bản tin) chưa có khoá API"**. Sếp chọn MỘT:
    - (khuyên) tạo khoá: openrouter.ai đăng nhập → Keys → Create key → copy. Trong Console: **API & Model › Thêm nhà cung
-     cấp** → Loại **"OpenRouter"** → dán khoá → gõ tên model (vd `google/gemini-2.5-flash`) → **Thêm** (nhập PIN) → bấm
-     **Gọi thử**; hoặc
+     cấp** → ô Loại chọn **"OpenRouter (nhiều model, một khoá)"** → dán khoá → ô model đã điền sẵn
+     `google/gemini-2.5-flash` (giữ nguyên hoặc sửa) → **Thêm** (nhập PIN) → bấm **Kiểm tra kết nối** trên thẻ
+     OpenRouter; hoặc
    - bật **"Cho Claude Code CLI chạy việc nền"** ở Điều khiển hệ thống › Bộ não AI, đọc cảnh báo, tích xác nhận, nhập
      PIN — chỉ khi Sếp chấp nhận rủi ro gói Pro/Max bị hạn chế.
 3. Tuỳ chọn: ở **Điều khiển hệ thống › Bộ não AI › Chi phí & trần ngân sách**, nhập giá model đang dùng (₫ cho 1 triệu
@@ -2217,7 +2218,7 @@ Không cần chụp màn hình hay gửi mã cho Claude — kết quả tự lư
   18:30, 19:30; quá 3 giờ thì bỏ khung). 6 mục: việc đến hạn, khách nóng, nháp chờ duyệt, sự cố cần Sếp, Facebook mới,
   Kho có gì mới. Mỗi Owner một hội thoại `kind=briefing` + MỘT chuông `gen.briefing` link `/overview?gen=<id>`, idempotent
   theo khung giờ (chạy lại không gửi lần hai). Tóm tắt bằng nguồn khoá API; không có ⇒ vẫn gửi phần không cần model +
-  dòng "Dán khoá OpenRouter/Gemini để Gen tóm tắt" (gợi ý mở Bộ não AI), không gọi CLI.
+  dòng "Dán khoá OpenRouter/Gemini để Gen tóm tắt" (nút "Mở nơi dán khoá" ⇒ API & Model), không gọi CLI.
 - **API — nguồn AI cho việc nền (F-86)**: bộ định tuyến cho sàng lọc / trực việc / bản tin bỏ qua Claude Code CLI trừ khi
   Owner bật; Antigravity CLI không bao giờ. Chỉ còn CLI ⇒ sự cố `ai.background_no_source` (một chuông), tự đóng khi việc
   nền chạy lại được. `GET /providers/background` (`system.read`: chuỗi nguồn + dùng/không + lý do + `risk_text`), `PUT`
@@ -2237,6 +2238,14 @@ Không cần chụp màn hình hay gửi mã cho Claude — kết quả tự lư
   chỉ hiểu mã `refinery`… của mock ⇒ câu đầu thẻ lệch); mock `/providers/background` đổi theo API thật (nhãn, `risk_text`,
   lý do). Lỗi ở các thẻ tải dữ liệu (`CardError`/`ErrorState`) và lỗi lưu ở hai thẻ mới giờ có **"Chi tiết kỹ thuật"**
   (mã HTTP · mã lỗi · error_id) dưới câu tiếng Việt (`errorDetail`, luôn là chuỗi). e2e mock bổ sung đủ tiêu chí nghiệm thu.
+- **Sửa sau review (F-8a, F-8, F-84, F-86)**: tải lại hội thoại không còn xoá câu trả lời đang viết (Gen đang trả lời ⇒
+  không đè tin/`busy`; câu hỏi gửi trong lúc tải ⇒ chèn tin cũ lên trước); lúc tải hiện "Đang mở lại hội thoại…" (không
+  hiện lời chào/ví dụ, chưa cho gửi); tải lỗi ⇒ câu thân thiện + "Chi tiết kỹ thuật" + "Thử lại", bỏ mã cũ để câu hỏi mới
+  không rơi vào hội thoại Sếp không thấy. Mở bản tin từ chuông lúc Gen đang trả lời ⇒ giữ `?gen=` và mở khi xong; lỗi
+  khác 404 không còn báo "quá hạn lưu". Lịch sử gửi model bọc nội dung Bản tin là dữ liệu không tin cậy. Sự cố
+  `ai.background_no_source` tự đóng ở lượt theo dõi sức khoẻ kế tiếp khi đã có khoá API / cho phép CLI. Giá model nhận
+  phần lẻ ("0,5" không còn thành 5), không làm tròn giá đã lưu. Tổng quan có thẻ chi phí ⇒ lưới 2×2. Auditor không thấy
+  nút/link dẫn tới chỗ không sửa được. "Hữu ích 7 ngày: chưa có đánh giá" thay "0/0". Mẫu OpenRouter điền sẵn model thật.
 
 ### Kiểm tra
 

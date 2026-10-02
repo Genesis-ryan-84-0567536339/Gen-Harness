@@ -96,7 +96,8 @@ test.describe('v0.1.41 — Gen giữ hội thoại, Hội thoại cũ, Bản tin
     await expect(msg).toContainText('Việc tới hạn hôm nay (2)');
     await expect(msg).toContainText('Khách đang nóng (1)');
     await expect(msg).toContainText('Nháp chờ duyệt (1)');
-    await expect(msg.getByRole('button', { name: 'Dán khoá OpenRouter/Gemini để Gen tóm tắt' })).toBeVisible();
+    await expect(msg.getByText('Dán khoá OpenRouter/Gemini để Gen tóm tắt')).toHaveCount(1);
+    await expect(msg.getByRole('button', { name: 'Mở nơi dán khoá' })).toBeVisible();
 
     const good = msg.getByRole('button', { name: 'Hữu ích', exact: true });
     await expect(good).toHaveAttribute('aria-pressed', 'false');
@@ -117,9 +118,9 @@ test.describe('v0.1.41 — Gen giữ hội thoại, Hội thoại cũ, Bản tin
     await page.keyboard.press('Escape');
     await expect(page.getByRole('dialog', { name: 'Hội thoại cũ' })).toHaveCount(0);
 
-    // Bản tin không có khoá API: nút gợi ý mở Bộ não AI.
-    await panel(page).locator('.gen-msg--briefing').getByRole('button', { name: 'Dán khoá OpenRouter/Gemini để Gen tóm tắt' }).click();
-    await expect(page).toHaveURL(/\/system\?tab=brain$/);
+    // Bản tin không có khoá API: nút gợi ý mở thẳng API & Model (nơi "Thêm nhà cung cấp").
+    await panel(page).locator('.gen-msg--briefing').getByRole('button', { name: 'Mở nơi dán khoá' }).click();
+    await expect(page).toHaveURL(/\/api$/);
     await noObjectText(page);
   });
 

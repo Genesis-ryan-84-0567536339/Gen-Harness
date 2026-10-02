@@ -137,6 +137,36 @@ async def test_cli_only_opens_incident_once_and_closes(owner_api, db, redis) -> 
     assert not await redis.exists(BG_NO_SOURCE_FLAG.format(org))
 
 
+@pytest.mark.parametrize("fix", ["api_key", "allow_cli"])
+async def test_incident_closes_on_health_evaluate_without_background_call(owner_api, db, redis, fix) -> None:  # type: ignore[no-untyped-def]
+    """Sếp thêm khoá API / cho phép CLI lúc không có việc nền nào chạy ⇒ lượt theo dõi sức khoẻ kế tiếp đóng sự cố
+    (không đợi tới bản tin 07:30/17:30)."""
+    from datetime import UTC, datetime
+
+    from gh import health
+
+    org = await org_id(db)
+    await cli_provider(db, org, "claude_code_cli", 1)
+    r = make_router(redis, FakeCli("claude"))
+    with pytest.raises(ModelUnavailable):
+        await r.generate(org, agent_key="core.refinery", purpose="refinery", messages=MSGS)
+    assert (await _health(db, org)).cleared_at is None
+    # Chưa có nguồn ⇒ evaluate KHÔNG đóng.
+    await health.evaluate(db, redis, org, now=datetime.now(UTC), started_at=None)
+    await db.commit()
+    assert (await _health(db, org)).cleared_at is None
+
+    if fix == "api_key":
+        await api_provider(db, org, "alpha", 2, [FAKE_KEY])
+    else:
+        await set_background_cli(db, org, ["claude_code_cli"])
+    await health.evaluate(db, redis, org, now=datetime.now(UTC), started_at=None)
+    await db.commit()
+    h = await _health(db, org)
+    assert h is not None and h.cleared_at is not None
+    assert not await redis.exists(BG_NO_SOURCE_FLAG.format(org))
+
+
 async def test_opt_in_claude_cli_but_never_agy(app, db, redis) -> None:  # type: ignore[no-untyped-def]
     org = await org_id(db)
     await cli_provider(db, org, "antigravity_cli", 1)

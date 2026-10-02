@@ -4,12 +4,13 @@
  */
 import { StrictMode, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, RouterProvider, createMemoryRouter } from 'react-router-dom';
 import type { GenConversation, GenMessage } from '@gen-harness/contracts';
 import { GenPanel } from '../../src/gen/GenPanel';
+import { sendQuestion, stopAll } from '../../src/gen/genClient';
 import { useGenStore } from '../../src/gen/genStore';
 import { setNavigator } from '../../src/lib/navigation';
 import { qk } from '../../src/lib/queries';
@@ -41,7 +42,7 @@ const LIST: GenConversation[] = [
 ];
 
 type Reply = { status: number; body?: unknown };
-type Handler = (url: string, method: string, body: unknown) => Reply | undefined;
+type Handler = (url: string, method: string, body: unknown) => Reply | Promise<Reply> | undefined;
 const calls: Array<{ method: string; url: string; body: unknown }> = [];
 let handler: Handler = () => undefined;
 
@@ -63,7 +64,7 @@ function stubApi() {
       const method = (init?.method ?? 'GET').toUpperCase();
       const body = init?.body ? JSON.parse(String(init.body)) : null;
       calls.push({ method, url, body });
-      const r = handler(url, method, body) ?? defaults(url, method) ?? { status: 404, body: { status: 404, code: 'NOT_FOUND', title: 'Không tồn tại' } };
+      const r = (await handler(url, method, body)) ?? defaults(url, method) ?? { status: 404, body: { status: 404, code: 'NOT_FOUND', title: 'Không tồn tại' } };
       if (r.status === 204) return new Response(null, { status: 204 });
       return new Response(JSON.stringify(r.body ?? {}), {
         status: r.status,
@@ -83,12 +84,13 @@ beforeEach(() => {
   handler = () => undefined;
   window.localStorage.clear();
   useToasts.setState({ toasts: [] });
-  useGenStore.setState({ openByUser: {}, conversationId: null, conversationOwner: null, messages: [], busy: false, spotlight: null });
+  useGenStore.setState({ openByUser: {}, conversationId: null, conversationOwner: null, messages: [], busy: false, restoring: false, spotlight: null });
   setNavigator((to) => navigations.push(to));
   vi.stubGlobal('WebSocket', undefined);
   stubApi();
 });
 afterEach(() => {
+  stopAll();
   cleanup();
   vi.unstubAllGlobals();
 });
@@ -134,12 +136,71 @@ describe('Giữ hội thoại qua tải lại trang (F-8a)', () => {
     expect(screen.getByText(/Chào Sếp, em là Gen/)).toBeInTheDocument();
   });
 
-  it('lỗi khác ⇒ một dòng báo thân thiện, không phải object', async () => {
-    handler = (url) => (url.endsWith(`/gen/conversations/${CID}/messages`) ? { status: 500, body: { status: 500, code: 'INTERNAL', title: 'Hệ thống gặp lỗi', error_id: 'E-1' } } : undefined);
+  it('lỗi khác ⇒ câu thân thiện + Chi tiết kỹ thuật + Thử lại; câu hỏi mới không rơi vào hội thoại cũ', async () => {
+    let fail = true;
+    handler = (url) =>
+      url.endsWith(`/gen/conversations/${CID}/messages`) && fail
+        ? { status: 500, body: { status: 500, code: 'INTERNAL', title: 'Hệ thống gặp lỗi', error_id: 'E-1' } }
+        : undefined;
     useGenStore.setState({ conversationId: CID, conversationOwner: 'u1' });
     wrap(<GenPanel userId="u1" />);
-    expect(await screen.findByText(/Chưa tải lại được hội thoại trước/)).toBeInTheDocument();
+    expect(await screen.findByText('Chưa tải lại được hội thoại trước — Sếp thử lại sau ít phút.')).toBeInTheDocument();
+    expect(screen.getByText('Chi tiết kỹ thuật')).toBeInTheDocument();
+    expect(screen.getByText(/HTTP 500 · INTERNAL · error_id E-1/)).toBeInTheDocument();
     expect(document.body.textContent).not.toContain('[object Object]');
+    // Mã cũ được bỏ ⇒ câu hỏi kế tiếp mở hội thoại mới (không vào hội thoại Sếp không thấy).
+    expect(useGenStore.getState().conversationId).toBeNull();
+    fail = false;
+    await userEvent.click(screen.getByRole('button', { name: /Thử lại/ }));
+    expect(await screen.findByText('Có 3 việc cần Sếp xem.')).toBeInTheDocument();
+    expect(screen.queryByText(/Chưa tải lại được/)).toBeNull();
+    expect(useGenStore.getState().conversationId).toBe(CID);
+    expect(messageCalls(CID)).toHaveLength(2);
+  });
+
+  it('đang tải lại ⇒ hiện "Đang mở lại hội thoại…", không hiện lời chào/ví dụ, chưa cho gửi', async () => {
+    let release!: () => void;
+    handler = (url) =>
+      url.endsWith(`/gen/conversations/${CID}/messages`)
+        ? new Promise<Reply>((r) => {
+            release = () => r({ status: 200, body: CHAT });
+          })
+        : undefined;
+    useGenStore.setState({ conversationId: CID, conversationOwner: 'u1' });
+    wrap(<GenPanel userId="u1" />);
+    expect(await screen.findByText('Đang mở lại hội thoại…')).toBeInTheDocument();
+    expect(screen.queryByText(/Chào Sếp, em là Gen/)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Hôm nay có gì cần tôi xử lý?' })).toBeNull();
+    await waitFor(() => expect(release).toBeTypeOf('function'));
+    act(() => release());
+    expect(await screen.findByText('Có 3 việc cần Sếp xem.')).toBeInTheDocument();
+    expect(useGenStore.getState().restoring).toBe(false);
+  });
+
+  it('tải lại còn chờ ⇒ gửi câu hỏi ⇒ tải xong KHÔNG xoá câu trả lời đang viết, busy vẫn true', async () => {
+    let release!: () => void;
+    handler = (url, method) => {
+      if (url.endsWith(`/gen/conversations/${CID}/messages`))
+        return new Promise<Reply>((r) => {
+          release = () => r({ status: 200, body: CHAT });
+        });
+      if (url.endsWith('/gen/turns') && method === 'POST') return { status: 202, body: { turn_id: 't2', conversation_id: CID } };
+      if (url.endsWith('/gen/turns/t2')) return { status: 200, body: { turn_id: 't2', status: 'running', steps: [] } };
+      return undefined;
+    };
+    useGenStore.setState({ conversationId: CID, conversationOwner: 'u1' });
+    wrap(<GenPanel userId="u1" />);
+    await waitFor(() => expect(release).toBeTypeOf('function'));
+    await act(() => sendQuestion('Còn gì nữa?', 'u1'));
+    expect(useGenStore.getState().messages.some((m) => m.turnId === 't2' && m.status === 'running')).toBe(true);
+    act(() => release());
+    await waitFor(() => expect(useGenStore.getState().restoring).toBe(false));
+    const st = useGenStore.getState();
+    expect(st.busy).toBe(true);
+    expect(st.messages.find((m) => m.turnId === 't2' && m.role === 'assistant')?.status).toBe('running');
+    // Tin cũ được chèn lên trước, câu vừa hỏi vẫn ở cuối.
+    expect(st.messages.map((m) => m.text ?? m.steps[0]?.kind)).toEqual(['Hôm nay có gì gấp?', 'say', 'Còn gì nữa?', undefined]);
+    expect(await screen.findByText('Có 3 việc cần Sếp xem.')).toBeInTheDocument();
   });
 
   it('câu hỏi mới lưu chủ hội thoại = người hỏi', async () => {
@@ -195,6 +256,7 @@ describe('Hội thoại cũ (F-8a)', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Hội thoại cũ' }));
     expect(await screen.findByText(/Chưa tải được danh sách hội thoại/)).toBeInTheDocument();
     expect(screen.getByText('Chi tiết kỹ thuật')).toBeInTheDocument();
+    expect(screen.getByText(/HTTP 503 · UNAVAILABLE/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Thử lại/ })).toBeInTheDocument();
     expect(document.body.textContent).not.toContain('[object Object]');
   });
@@ -246,7 +308,7 @@ describe('Hữu ích / Không hữu ích (F-86)', () => {
 });
 
 describe('Bản tin Gen (F-8)', () => {
-  it('tin bản tin: nhãn Bản tin, chip nguồn, nút dán khoá mở Bộ não AI', async () => {
+  it('tin bản tin: nhãn Bản tin, chip nguồn, câu nhắc dán khoá 1 lần, nút mở API & Model', async () => {
     const user = userEvent.setup();
     useGenStore.setState({ conversationId: BID, conversationOwner: 'u1' });
     wrap(<GenPanel userId="u1" />);
@@ -254,8 +316,9 @@ describe('Bản tin Gen (F-8)', () => {
     const msg = document.querySelector('.gen-msg--briefing') as HTMLElement;
     expect(msg).not.toBeNull();
     expect(within(msg).getByText('Bản tin')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Dán khoá OpenRouter/Gemini để Gen tóm tắt' }));
-    expect(navigations).toContain('/system?tab=brain');
+    expect(screen.getAllByText('Dán khoá OpenRouter/Gemini để Gen tóm tắt')).toHaveLength(1);
+    await user.click(screen.getByRole('button', { name: 'Mở nơi dán khoá' }));
+    expect(navigations).toContain('/api');
     expect(screen.getByRole('button', { name: 'Hữu ích' })).toBeInTheDocument();
   });
 });
@@ -289,6 +352,29 @@ describe('AppShell ?gen=<id> (mở bản tin từ chuông)', () => {
     handler = (url) => (url.endsWith(`/gen/conversations/${BID}/messages`) ? { status: 404, body: { status: 404, code: 'NOT_FOUND', title: 'Không tồn tại' } } : undefined);
     renderShell(`/overview?gen=${BID}`);
     await waitFor(() => expect(useToasts.getState().toasts.map((t) => t.text)).toContain('Không mở được bản tin — có thể đã quá hạn lưu'));
+  });
+
+  it('Gen đang trả lời ⇒ giữ ?gen, không đè câu trả lời; xong lượt mới mở bản tin', async () => {
+    const running = [{ id: 'a-t5', role: 'assistant' as const, turnId: 't5', steps: [], status: 'running' as const }];
+    useGenStore.setState({ conversationId: CID, conversationOwner: 'u1', busy: true, messages: running });
+    const router = renderShell(`/overview?gen=${BID}`);
+    await waitFor(() => expect(useToasts.getState().toasts.map((t) => t.text)).toContain('Gen đang trả lời — bản tin sẽ mở khi xong'));
+    expect(router.state.location.search).toBe(`?gen=${BID}`);
+    expect(messageCalls(BID)).toHaveLength(0);
+    expect(useGenStore.getState().messages).toEqual(running);
+    act(() => useGenStore.setState({ busy: false, messages: [{ ...running[0], status: 'done' }] }));
+    await waitFor(() => expect(useGenStore.getState().conversationId).toBe(BID));
+    expect(router.state.location.search).toBe('');
+    expect(messageCalls(BID)).toHaveLength(1);
+  });
+
+  it('lỗi khác 404 ⇒ toast nêu lỗi + chi tiết kỹ thuật, không nói "quá hạn lưu"', async () => {
+    handler = (url) => (url.endsWith(`/gen/conversations/${BID}/messages`) ? { status: 500, body: { status: 500, code: 'INTERNAL', title: 'Hệ thống gặp lỗi', error_id: 'E-7' } } : undefined);
+    renderShell(`/overview?gen=${BID}`);
+    await waitFor(() => expect(useToasts.getState().toasts.some((t) => t.text.startsWith('Không mở được bản tin — Hệ thống gặp lỗi'))).toBe(true));
+    const t = useToasts.getState().toasts.map((x) => x.text).join('\n');
+    expect(t).toContain('HTTP 500');
+    expect(t).not.toContain('quá hạn lưu');
   });
 
   it('?gen=abc ⇒ bỏ qua (không mở khung, không gọi API)', async () => {

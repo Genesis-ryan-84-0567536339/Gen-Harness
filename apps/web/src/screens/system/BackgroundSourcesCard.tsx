@@ -69,6 +69,7 @@ export function BackgroundSourcesCard() {
 
 function BackgroundBody({ data }: { data: BackgroundSources }) {
   const isOwner = useMe().data?.role?.code === 'owner';
+  const canManage = useCan('system.manage');
   const save = useSetBackgroundSources();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const sources = Array.isArray(data.sources) ? data.sources : [];
@@ -109,12 +110,16 @@ function BackgroundBody({ data }: { data: BackgroundSources }) {
           <div className="risk-box__text">
             <div className="risk-box__title">Chưa có khoá API — dán khoá OpenRouter/Gemini để việc nền chạy</div>
             Bản tin Gen vẫn gửi đúng giờ phần không cần model; sàng lọc tin và trực việc cần một nguồn AI bằng khoá API.
-            <div className="bg-src__cta">
-              <Link to="/api" className="gh-btn gh-btn--secondary btn-27">
-                <Icon name="ph ph-plus" size={13} />
-                Thêm nhà cung cấp
-              </Link>
-            </div>
+            {canManage ? (
+              <div className="bg-src__cta">
+                <Link to="/api" className="gh-btn gh-btn--secondary btn-27">
+                  <Icon name="ph ph-plus" size={13} />
+                  Thêm nhà cung cấp
+                </Link>
+              </div>
+            ) : (
+              <div className="bg-src__cta">Báo Owner thêm khoá API ở API &amp; Model.</div>
+            )}
           </div>
         </div>
       ) : null}

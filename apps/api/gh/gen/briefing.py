@@ -46,6 +46,7 @@ PURPOSE = "gen.briefing"
 MODEL_TIMEOUT_S = 60.0
 SOURCES_STEP = "briefing.sources"
 KEY_HINT = "Dán khoá OpenRouter/Gemini để Gen tóm tắt"
+KEY_BUTTON = "Mở nơi dán khoá"
 NOTHING = "Không có việc gì cần Sếp xử lý lúc này."
 SECTION_ERROR = "Chưa đọc được mục này lần này"
 SUMMARY_FAILED = "Lần này Gen chưa tóm tắt được (nguồn AI lỗi) — các mục bên dưới vẫn đầy đủ."
@@ -254,8 +255,9 @@ def build_content(slot: Slot, sections: list[dict[str, Any]], *, summary: str | 
         steps.append({"kind": "say", "text": NOTHING})
     if needs_api_key:
         steps.append({"kind": "say", "text": KEY_HINT})
-        steps.append({"kind": "suggest", "items": [{"label": KEY_HINT, "action": {
-            "type": "navigate", "screen": "system", "params": {"tab": "brain"}}}]})
+        # Nút ngắn (không lặp lại câu trên), đưa thẳng tới API & Model — nơi có "Thêm nhà cung cấp" để dán khoá.
+        steps.append({"kind": "suggest", "items": [{"label": KEY_BUTTON, "action": {
+            "type": "navigate", "screen": "api"}}]})
     return {"kind": "briefing", "slot": slot.at.isoformat(), "slot_label": slot.label,
             "summary_source": summary_source, "needs_api_key": needs_api_key, "sections": sections, "steps": steps}
 

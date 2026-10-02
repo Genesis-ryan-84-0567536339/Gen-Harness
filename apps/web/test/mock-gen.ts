@@ -62,9 +62,10 @@ export function briefingContent(slotLabel: string, slotIso: string, needsApiKey:
     ...sections.filter((x) => x.count > 0).map((x): GenStep => ({ kind: 'say', text: `${x.title} (${x.count}): ${x.lines.join('; ')}` })),
   ];
   if (needsApiKey) {
+    steps.push({ kind: 'say', text: 'Dán khoá OpenRouter/Gemini để Gen tóm tắt' });
     steps.push({
       kind: 'suggest',
-      items: [{ label: 'Dán khoá OpenRouter/Gemini để Gen tóm tắt', action: { type: 'navigate', screen: 'system', params: { tab: 'brain' } } }],
+      items: [{ label: 'Mở nơi dán khoá', action: { type: 'navigate', screen: 'api' } }],
     });
   }
   return { kind: 'briefing', slot: slotIso, slot_label: slotLabel, summary_source: needsApiKey ? 'none' : 'model', needs_api_key: needsApiKey, sections, steps };

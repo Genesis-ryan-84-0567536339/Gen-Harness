@@ -54,6 +54,7 @@ export function AiCostPanel() {
 }
 
 function AiCostBody({ d }: { d: AiCost }) {
+  const canManage = useCan('system.manage');
   const over = !!d.over_budget;
   const pct = d.budget_vnd ? Math.min(100, (d.total_vnd * 100) / d.budget_vnd) : 0;
   const agents = [...(Array.isArray(d.agents) ? d.agents : [])].sort((a, b) => b.cost_vnd - a.cost_vnd || b.calls - a.calls);
@@ -112,12 +113,13 @@ function AiCostBody({ d }: { d: AiCost }) {
       ))}
       {d.unpriced_calls > 0 ? (
         <p className="ov-ai-cost__note ov-ai-cost__note--warn">
-          {fmtInt(d.unpriced_calls)} lượt gọi chưa có giá — <Link to="/system?tab=brain">nhập giá ở Bộ não AI</Link>
+          {fmtInt(d.unpriced_calls)} lượt gọi chưa có giá —{' '}
+          {canManage ? <Link to="/system?tab=brain">nhập giá ở Bộ não AI</Link> : 'báo Owner nhập giá ở Bộ não AI'}
         </p>
       ) : null}
       {fb ? (
         <p className="ov-ai-cost__note">
-          Hữu ích 7 ngày: {fmtInt(fb.helpful)}/{fmtInt(rated)}
+          {rated > 0 ? `Hữu ích 7 ngày: ${fmtInt(fb.helpful)}/${fmtInt(rated)}` : 'Hữu ích 7 ngày: chưa có đánh giá'}
           {ratedBriefing > 0 ? ` · Bản tin Gen ${fmtInt(fb.briefing_helpful)}/${fmtInt(ratedBriefing)}` : ''}
         </p>
       ) : null}

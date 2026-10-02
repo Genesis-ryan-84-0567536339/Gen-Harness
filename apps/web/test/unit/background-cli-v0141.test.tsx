@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 import type { AiCost, BackgroundSources } from '@gen-harness/contracts';
 import { BackgroundSourcesCard } from '../../src/screens/system/BackgroundSourcesCard';
 import { AiBudgetCard } from '../../src/screens/system/AiBudgetCard';
+import { parseVnd, priceStr } from '../../src/screens/system/moneyInput';
 import { PinDialogHost } from '../../src/shell/PinDialogHost';
 import { queryClient } from '../../src/lib/queryClient';
 import { qk } from '../../src/lib/queries';
@@ -247,6 +248,22 @@ describe('<BackgroundSourcesCard> Nguồn AI cho việc nền', () => {
     expect(screen.queryByRole('switch', { name: 'Cho Claude Code CLI chạy việc nền' })).toBeNull();
   });
 
+  it('Auditor + chưa có khoá API ⇒ không có nút Thêm nhà cung cấp (ngõ cụt), chỉ câu báo Owner', async () => {
+    mockFetch(
+      (c) =>
+        c.url.endsWith('/providers/background')
+          ? json(200, bg({ has_api_source: false, sources: [bg().sources[0]] }))
+          : c.url.includes('/system/ai-cost')
+            ? json(200, cost())
+            : undefined,
+      'auditor',
+    );
+    renderCards('auditor');
+    const box = await screen.findByTestId('bg-src-no-key');
+    expect(within(box).queryByRole('link')).toBeNull();
+    expect(box).toHaveTextContent('Báo Owner thêm khoá API ở API & Model.');
+  });
+
   it('người không phải Owner chỉ đọc: công tắc bị khoá, có câu "Chỉ Sếp (Owner)…"', async () => {
     const calls = mockFetch((c) => (c.url.endsWith('/providers/background') ? json(200, bg()) : c.url.includes('/system/ai-cost') ? json(200, cost()) : undefined), 'manager');
     const user = userEvent.setup();
@@ -303,6 +320,32 @@ describe('<AiBudgetCard> Chi phí & trần ngân sách', () => {
     expect(put).toMatchObject({ method: 'PUT', body: { in_vnd_per_mtok: 14000, out_vnd_per_mtok: 55000 } });
   });
 
+  it('giá có phần lẻ: "0,5"/"2.5" lưu đúng 0.5/2.5 (không gấp 10); giá đã lưu 0.75 hiện "0,75", không bị coi là đã sửa', async () => {
+    const base = cost();
+    const withDec = cost({
+      models: base.models.map((m) => (m.model_id === 'm-gem' ? { ...m, in_vnd_per_mtok: 0.75, out_vnd_per_mtok: 2.5 } : m)),
+    });
+    const calls = mockFetch((c) => {
+      if (c.url.endsWith('/providers/background')) return json(200, bg());
+      if (c.url.includes('/system/ai-cost/prices/') && c.method === 'PUT') return json(200, withDec);
+      if (c.url.includes('/system/ai-cost')) return json(200, withDec);
+      return undefined;
+    });
+    const user = userEvent.setup();
+    renderCards();
+    const panel = await screen.findByRole('region', { name: 'Chi phí & trần ngân sách' });
+    const gin = await within(panel).findByLabelText('Giá token vào của gemini-2.5-flash (₫/1M token)');
+    expect(gin).toHaveValue('0,75');
+    expect(within(panel).getByLabelText('Giá token ra của gemini-2.5-flash (₫/1M token)')).toHaveValue('2,5');
+    expect(within(panel).getByRole('button', { name: 'Lưu giá gemini-2.5-flash' })).toBeDisabled();
+
+    await user.type(within(panel).getByLabelText('Giá token vào của deepseek-reasoner (₫/1M token)'), '0,5');
+    await user.type(within(panel).getByLabelText('Giá token ra của deepseek-reasoner (₫/1M token)'), '2.5');
+    await user.click(within(panel).getByRole('button', { name: 'Lưu giá deepseek-reasoner' }));
+    await waitFor(() => expect(calls.filter((c) => c.url.includes('/system/ai-cost/prices/'))).toHaveLength(1));
+    expect(calls.find((c) => c.url.includes('/prices/'))!.body).toEqual({ in_vnd_per_mtok: 0.5, out_vnd_per_mtok: 2.5 });
+  });
+
   it('không có system.manage ⇒ chỉ đọc (không ô giá, không nút Lưu)', async () => {
     mockFetch((c) => (c.url.endsWith('/providers/background') ? json(200, bg()) : c.url.includes('/system/ai-cost') ? json(200, cost()) : undefined), 'auditor');
     renderCards('auditor');
@@ -311,5 +354,24 @@ describe('<AiBudgetCard> Chi phí & trần ngân sách', () => {
     expect(within(panel).queryByRole('button', { name: 'Lưu trần' })).toBeNull();
     expect(within(panel).queryByRole('button', { name: /Lưu giá/ })).toBeNull();
     expect(within(panel).getByTestId('ai-price-m-gem')).toHaveTextContent('7.500 ₫');
+  });
+});
+
+describe('parseVnd / priceStr', () => {
+  it('phân cách nghìn đúng nhóm 3 số; phần lẻ chỉ khi cho phép; "0.5" không thành 5', () => {
+    expect(parseVnd('12.500')).toBe(12500);
+    expect(parseVnd('1,250,000 ₫')).toBe(1250000);
+    expect(parseVnd('')).toBeNull();
+    expect(parseVnd('0.5')).toBeUndefined();
+    expect(parseVnd('-3')).toBeUndefined();
+    expect(parseVnd('0,5', 2)).toBe(0.5);
+    expect(parseVnd('2.5', 2)).toBe(2.5);
+    expect(parseVnd('1.250,75', 2)).toBe(1250.75);
+    expect(parseVnd('12.500', 2)).toBe(12500);
+    expect(parseVnd('1.2.3', 2)).toBeUndefined();
+    expect(parseVnd('0,123', 2)).toBeUndefined();
+    expect(priceStr(0.75)).toBe('0,75');
+    expect(priceStr(14000)).toBe('14000');
+    expect(priceStr(null)).toBe('');
   });
 });

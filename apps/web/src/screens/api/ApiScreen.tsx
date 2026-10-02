@@ -598,13 +598,16 @@ function AddProviderDialog({ onClose }: { onClose: () => void }) {
     const prev = findPreset(choice);
     const p = findPreset(next);
     setChoice(next);
-    // Mẫu điền sẵn Tên + Endpoint (vẫn sửa được); rời mẫu thì xoá phần mẫu đã điền nếu Sếp chưa sửa.
+    // Mẫu điền sẵn Tên + Endpoint + model gợi ý THẬT (vẫn sửa được — để trống thì việc nền báo "Chưa chọn model");
+    // rời mẫu thì xoá phần mẫu đã điền nếu Sếp chưa sửa.
     if (p) {
       setName(p.name);
       setEndpoint(p.endpoint);
+      if (!models.trim() || (prev && models === prev.modelHint)) setModels(p.modelHint);
     } else if (prev) {
       if (name === prev.name) setName('');
       if (endpoint === prev.endpoint) setEndpoint('');
+      if (models === prev.modelHint) setModels('');
     }
   };
   const submit = () => {

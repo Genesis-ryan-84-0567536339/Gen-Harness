@@ -22,6 +22,10 @@ export interface GenChatMessage {
   feedback?: GenRating | null;
   /** v0.1.41 (F-8): tin Bản tin Gen (hiện nhãn "Bản tin"). */
   kind?: 'briefing';
+  /** v0.1.41: dòng lỗi có "Chi tiết kỹ thuật" (luôn là chuỗi). */
+  detail?: string | null;
+  /** v0.1.41 (F-8a): tin báo "chưa tải lại được hội thoại" — mã hội thoại để nút "Thử lại" mở lại. */
+  retryConversation?: string;
 }
 
 export interface SpotlightState {
@@ -41,6 +45,8 @@ interface GenState {
   conversationOwner: string | null;
   messages: GenChatMessage[];
   busy: boolean;
+  /** v0.1.41 (F-8a): đang tải lại hội thoại đã lưu sau khi tải lại trang (hiện "Đang mở lại hội thoại…"). */
+  restoring: boolean;
   spotlight: SpotlightState | null;
   setOpen: (userId: string, open: boolean) => void;
   /** v0.1.41 (F-8a): ghi hội thoại đang mở kèm chủ của nó (được lưu máy để tải lại trang). */
@@ -102,6 +108,7 @@ export const useGenStore = create<GenState>()(
       conversationOwner: null,
       messages: [],
       busy: false,
+      restoring: false,
       spotlight: null,
       setOpen: (userId, open) => set((s) => ({ openByUser: { ...s.openByUser, [userId]: open } })),
       setConversation: (userId, id) => set({ conversationId: id, conversationOwner: id ? userId : null }),

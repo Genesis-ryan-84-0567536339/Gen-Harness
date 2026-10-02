@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { GEN_SCREEN_BY_KEY, GEN_TARGET_BY_ID, splitTargetId, type GenStep, type UiAction } from '@gen-harness/contracts';
-import { Icon, IconButton } from '@gen-harness/ui';
+import { Button, Icon, IconButton } from '@gen-harness/ui';
 import { useMe } from '../lib/queries';
 import { closeSpotlight, executeUiAction } from './director';
-import { restoreIfNeeded, sendFeedback, sendQuestion } from './genClient';
+import { restoreIfNeeded, retryRestore, sendFeedback, sendQuestion } from './genClient';
 import { GenHistory } from './GenHistory';
 import { ProposalCard } from './ProposalCard';
 import { useGenStore, type GenChatMessage } from './genStore';
@@ -93,7 +93,7 @@ function Feedback({ m }: { m: GenChatMessage }) {
   );
 }
 
-function Message({ m }: { m: GenChatMessage }) {
+function Message({ m, userId }: { m: GenChatMessage; userId?: string }) {
   if (m.role === 'user') return <div className="gen-msg gen-msg--user">{m.text}</div>;
   const steps = m.steps.filter(Boolean);
   const rateable = m.status === 'done' && !!m.turnId;
@@ -107,6 +107,17 @@ function Message({ m }: { m: GenChatMessage }) {
       {steps.map((s, i) => (
         <Step key={i} step={s} turnId={m.turnId} />
       ))}
+      {typeof m.detail === 'string' && m.detail ? (
+        <details className="tech-detail">
+          <summary>Chi tiết kỹ thuật</summary>
+          <code>{m.detail}</code>
+        </details>
+      ) : null}
+      {m.retryConversation && userId ? (
+        <Button variant="secondary" size="sm" icon="ph ph-arrow-clockwise" onClick={() => void retryRestore(m.retryConversation as string, userId)}>
+          Thử lại
+        </Button>
+      ) : null}
       {m.status === 'running' ? (
         <span className="gen-thinking" role="status">
           <span />
@@ -127,6 +138,7 @@ function Message({ m }: { m: GenChatMessage }) {
 export function GenPanel({ userId }: { userId: string }) {
   const messages = useGenStore((s) => s.messages);
   const busy = useGenStore((s) => s.busy);
+  const restoring = useGenStore((s) => s.restoring);
   const setOpen = useGenStore((s) => s.setOpen);
   const reset = useGenStore((s) => s.reset);
   const addr = useAddressing();
@@ -156,7 +168,7 @@ export function GenPanel({ userId }: { userId: string }) {
   }, []);
 
   const submit = (q = text) => {
-    if (!q.trim() || busy) return;
+    if (!q.trim() || busy || useGenStore.getState().restoring) return;
     setText('');
     // v0.1.28 (UX V12): câu hỏi mới → dừng lượt dẫn đường cũ (ô khoanh sáng không còn đè màn hình).
     if (useGenStore.getState().spotlight) closeSpotlight();
@@ -189,12 +201,16 @@ export function GenPanel({ userId }: { userId: string }) {
           aria-pressed={historyOpen}
           onClick={() => setHistoryOpen((v) => !v)}
         />
-        <IconButton icon="ph ph-plus" label="Hội thoại mới" onClick={reset} disabled={busy} />
+        <IconButton icon="ph ph-plus" label="Hội thoại mới" onClick={reset} disabled={busy || restoring} />
         <IconButton icon="ph ph-x" label="Đóng khung Gen" onClick={() => setOpen(userId, false)} />
       </div>
       {historyOpen ? <GenHistory userId={userId} onClose={closeHistory} /> : null}
       <div className="gen-panel__list" ref={listRef} aria-live="polite">
-        {messages.length === 0 ? (
+        {messages.length === 0 && restoring ? (
+          <p className="gen-empty" role="status">
+            Đang mở lại hội thoại…
+          </p>
+        ) : messages.length === 0 ? (
           <div className="gen-empty">
             <p>
               Chào {addr}, em là Gen. {addr} hỏi về tình hình hôm nay, nhờ em chỉ chỗ bấm, hoặc nhờ em soạn nháp tin, đặt
@@ -209,7 +225,7 @@ export function GenPanel({ userId }: { userId: string }) {
             </div>
           </div>
         ) : (
-          messages.map((m) => <Message key={m.id} m={m} />)
+          messages.map((m) => <Message key={m.id} m={m} userId={userId} />)
         )}
       </div>
       <form
@@ -230,7 +246,7 @@ export function GenPanel({ userId }: { userId: string }) {
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKey}
         />
-        <IconButton icon="ph ph-paper-plane-right" label="Gửi" variant="primary" type="submit" disabled={busy || !text.trim()} />
+        <IconButton icon="ph ph-paper-plane-right" label="Gửi" variant="primary" type="submit" disabled={busy || restoring || !text.trim()} />
       </form>
     </aside>
   );

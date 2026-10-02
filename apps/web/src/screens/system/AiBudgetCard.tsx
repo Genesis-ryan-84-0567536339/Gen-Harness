@@ -4,18 +4,10 @@ import { Button, TextField } from '@gen-harness/ui';
 import { errorDetail, errorText } from '../../lib/errorText';
 import { fmtInt } from '../../lib/format';
 import { useCan } from '../../lib/permissions';
+import { parseVnd, priceStr } from './moneyInput';
 import { toast } from '../../lib/toast';
 import { CardError, InlineError, Panel, SkeletonLines } from '../common';
 import { useAiCost, useSetAiBudget, useSetModelPrice } from './queries';
-
-/** "12500" → 12500; '' → null; không hợp lệ (âm, không phải số nguyên) → undefined. */
-function parseVnd(raw: string): number | null | undefined {
-  const t = raw.replace(/[.\s₫]/g, '').trim();
-  if (t === '') return null;
-  if (!/^\d+$/.test(t)) return undefined;
-  const n = Number(t);
-  return Number.isSafeInteger(n) ? n : undefined;
-}
 
 const PRICE_SOURCE_LABEL: Record<string, string> = {
   owner: 'Sếp nhập',
@@ -23,8 +15,11 @@ const PRICE_SOURCE_LABEL: Record<string, string> = {
   none: 'Chưa có giá',
 };
 
-/** Ô giá (₫/1M token) → chuỗi trong ô sửa: null → ''. */
-const priceStr = (n: number | null) => (n == null ? '' : String(Math.round(n)));
+/** Hiện giá chỉ đọc: số nguyên có phân cách nghìn, có phần lẻ thì giữ (dấu phẩy). */
+const fmtPrice = (n: number) => (Number.isInteger(Math.round(n * 100) / 100) ? fmtInt(n) : priceStr(n));
+
+/** So giá ở cùng độ chính xác lưu trữ (numeric(14,2)). */
+const samePrice = (a: number | null, b: number | null) => (a == null || b == null ? a === b : Math.round(a * 100) === Math.round(b * 100));
 
 /**
  * v0.1.41 (F-84): "Chi phí & trần ngân sách" ở Bộ não AI — trần chi phí mỗi ngày (₫, trống = không giới hạn) và bảng giá
@@ -142,10 +137,10 @@ function PriceRow({ m, canManage }: { m: AiCostModel; canManage: boolean }) {
       </tr>
     );
   }
-  const vin = parseVnd(pin);
-  const vout = parseVnd(pout);
+  const vin = parseVnd(pin, 2);
+  const vout = parseVnd(pout, 2);
   const bad = vin === undefined || vout === undefined;
-  const changed = !bad && (vin !== (m.in_vnd_per_mtok ?? null) || vout !== (m.out_vnd_per_mtok ?? null));
+  const changed = !bad && (!samePrice(vin, m.in_vnd_per_mtok ?? null) || !samePrice(vout, m.out_vnd_per_mtok ?? null));
   return (
     <tr data-testid={`ai-price-${m.model_id}`}>
       <td>{m.provider_name}</td>
@@ -154,26 +149,26 @@ function PriceRow({ m, canManage }: { m: AiCostModel; canManage: boolean }) {
         {canManage ? (
           <input
             className="gh-input ai-budget__price"
-            inputMode="numeric"
+            inputMode="decimal"
             aria-label={`Giá token vào của ${m.model_name} (₫/1M token)`}
             value={pin}
             onChange={(e) => setPin(e.target.value)}
           />
         ) : (
-          <span className="mono">{m.in_vnd_per_mtok == null ? '—' : `${fmtInt(m.in_vnd_per_mtok)} ₫`}</span>
+          <span className="mono">{m.in_vnd_per_mtok == null ? '—' : `${fmtPrice(m.in_vnd_per_mtok)} ₫`}</span>
         )}
       </td>
       <td>
         {canManage ? (
           <input
             className="gh-input ai-budget__price"
-            inputMode="numeric"
+            inputMode="decimal"
             aria-label={`Giá token ra của ${m.model_name} (₫/1M token)`}
             value={pout}
             onChange={(e) => setPout(e.target.value)}
           />
         ) : (
-          <span className="mono">{m.out_vnd_per_mtok == null ? '—' : `${fmtInt(m.out_vnd_per_mtok)} ₫`}</span>
+          <span className="mono">{m.out_vnd_per_mtok == null ? '—' : `${fmtPrice(m.out_vnd_per_mtok)} ₫`}</span>
         )}
       </td>
       <td>
@@ -198,7 +193,7 @@ function PriceRow({ m, canManage }: { m: AiCostModel; canManage: boolean }) {
           >
             Lưu
           </Button>
-          {bad ? <InlineError>Giá là số tiền nguyên (₫), không âm.</InlineError> : null}
+          {bad ? <InlineError>Giá là số tiền ₫ không âm; phần lẻ tối đa 2 số, dùng dấu phẩy (vd 0,5).</InlineError> : null}
           {setPrice.isError ? <InlineError detail={errorDetail(setPrice.error)}>{errorText(setPrice.error)}</InlineError> : null}
         </td>
       ) : null}

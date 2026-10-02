@@ -755,6 +755,22 @@ async def _eval_budget(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: dat
                           "đổi trần ở Bộ não AI.", link=AI_COST_LINK, redis=redis)
 
 
+async def _eval_background_source(db: AsyncSession, org_id: uuid.UUID, redis: Any) -> None:
+    """v0.1.41 (F-86): sự cố `ai.background_no_source` đang mở mà Sếp đã thêm khoá API (có model) hoặc đã cho Claude
+    Code CLI chạy việc nền ⇒ đóng ngay, không đợi một lượt việc nền chạy được (refinery rảnh / trực việc tắt thì có
+    thể tới bản tin kế tiếp mới có lượt). Chỉ truy vấn nguồn khi sự cố đang mở."""
+    from gh.providers.router import BG_NO_SOURCE_FLAG, BG_NO_SOURCE_KEY, background_cli_allowed, has_api_source
+
+    open_ = (await db.execute(text("""SELECT 1 FROM ops.health_alerts
+                                      WHERE org_id = :o AND key = :k AND cleared_at IS NULL"""),
+                              {"o": org_id, "k": BG_NO_SOURCE_KEY})).first()
+    if open_ is None:
+        return
+    if await has_api_source(db, org_id) or await background_cli_allowed(db, org_id):
+        await clear(db, org_id, BG_NO_SOURCE_KEY)
+        await redis.delete(BG_NO_SOURCE_FLAG.format(org_id))
+
+
 async def _eval_events(db: AsyncSession, org_id: uuid.UUID) -> None:
     """Dọn dòng sự kiện cũ: kênh đã đăng nhập lại (hoặc không còn kênh loại đó dùng được — bị xoá, plugin cầu nối bị
     tắt) / model đã ổn (hoặc bị tắt, bị xoá) ⇒ đóng sự cố."""
@@ -801,6 +817,7 @@ async def evaluate(db: AsyncSession, redis: Any, org_id: uuid.UUID, *, now: date
         ("models", lambda: _eval_models(db, org_id, redis)),
         ("events", lambda: _eval_events(db, org_id)),
         ("ai.budget", lambda: _eval_budget(db, org_id, redis, now)),
+        ("ai.background_source", lambda: _eval_background_source(db, org_id, redis)),
     )
     from gh import notifications
 

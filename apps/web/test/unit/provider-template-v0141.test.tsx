@@ -88,6 +88,8 @@ describe('Mẫu OpenRouter (F-84)', () => {
     expect(within(dlg).getByLabelText('Địa chỉ gọi (Endpoint)')).toHaveValue('https://openrouter.ai/api/v1');
     expect(within(dlg).getByTestId('provider-preset-hint')).toHaveTextContent('Tạo khoá ở openrouter.ai › Keys rồi dán vào đây');
     expect(dlg).toHaveTextContent('google/gemini-2.5-flash');
+    // Model gợi ý là GIÁ TRỊ thật (không chỉ placeholder) ⇒ để nguyên vẫn gửi model.
+    expect(within(dlg).getByLabelText('Model ban đầu (tuỳ chọn, cách nhau dấu phẩy)')).toHaveValue('google/gemini-2.5-flash');
     // Vẫn sửa được tên.
     const name = within(dlg).getByLabelText('Tên hiển thị');
     await user.clear(name);
@@ -96,7 +98,7 @@ describe('Mẫu OpenRouter (F-84)', () => {
     await user.click(within(dlg).getByRole('button', { name: 'Thêm' }));
     await waitFor(() => expect(calls.filter((c) => c.url.endsWith('/providers') && c.method === 'POST')).toHaveLength(1));
     expect(calls.find((c) => c.method === 'POST')!.body).toMatchObject({
-      kind: 'openai_compat', name: 'OpenRouter', endpoint: 'https://openrouter.ai/api/v1', keys: ['sk-test-or-0001'],
+      kind: 'openai_compat', name: 'OpenRouter', endpoint: 'https://openrouter.ai/api/v1', keys: ['sk-test-or-0001'], models: ['google/gemini-2.5-flash'],
     });
   });
 
@@ -116,6 +118,7 @@ describe('Mẫu OpenRouter (F-84)', () => {
     await user.selectOptions(within(dlg).getByLabelText('Loại'), 'gemini');
     expect(within(dlg).getByLabelText('Tên hiển thị')).toHaveValue('');
     expect(within(dlg).queryByLabelText('Địa chỉ gọi (Endpoint)')).toBeNull();
+    expect(within(dlg).getByLabelText('Model ban đầu (tuỳ chọn, cách nhau dấu phẩy)')).toHaveValue('');
     await user.type(within(dlg).getByLabelText('Tên hiển thị'), 'Gemini API');
     await user.type(within(dlg).getByLabelText('Khoá API (mỗi dòng một khoá)'), 'AIza-test-0001');
     await user.click(within(dlg).getByRole('button', { name: 'Thêm' }));
@@ -149,7 +152,12 @@ describe('Mẫu OpenRouter (F-84)', () => {
     await user.selectOptions(kind, 'openrouter');
     expect(screen.getByLabelText('Tên hiển thị')).toHaveValue('OpenRouter');
     expect(screen.getByLabelText('Địa chỉ gọi (Endpoint)')).toHaveValue('https://openrouter.ai/api/v1');
-    expect(screen.getByTestId('setup-provider-preset-hint')).toHaveTextContent('Tạo khoá ở openrouter.ai › Keys rồi dán vào đây');
+    const hint = screen.getByTestId('setup-provider-preset-hint');
+    expect(hint).toHaveTextContent('Tạo khoá ở openrouter.ai › Keys rồi dán vào đây');
+    expect(hint).toHaveTextContent('Gợi ý model: google/gemini-2.5-flash');
+    // Gợi ý nằm TRÊN nút "Thêm & kiểm tra" (đọc trước khi bấm).
+    const btn = screen.getByRole('button', { name: /Thêm & kiểm tra/ });
+    expect(hint.compareDocumentPosition(btn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     await user.type(screen.getByLabelText('Khoá API'), 'sk-test-or-0002');
     await user.click(screen.getByRole('button', { name: /Thêm & kiểm tra/ }));
     await waitFor(() => expect(calls.filter((c) => c.url.endsWith('/providers') && c.method === 'POST')).toHaveLength(1));

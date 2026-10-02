@@ -74,7 +74,7 @@ afterEach(() => vi.unstubAllGlobals());
 describe('<AiCostPanel> Chi phí AI hôm nay', () => {
   it('hiện tổng 12.500 ₫, trần, Vượt trần, bảng agent sắp giảm dần, dòng chưa có giá, Hữu ích 7 ngày, CLI trả theo gói', async () => {
     const urls = mockFetch((u) => (u.includes('/system/ai-cost') ? json(200, cost()) : undefined));
-    renderPanel();
+    renderPanel({ 'system.read': 'all', 'system.manage': 'all' });
     const panel = await screen.findByRole('region', { name: 'Chi phí AI hôm nay' });
     expect(await within(panel).findByTestId('ai-cost-total')).toHaveTextContent('12.500 ₫');
     expect(panel).toHaveTextContent('12.500 ₫ / trần 10.000 ₫');
@@ -88,6 +88,26 @@ describe('<AiCostPanel> Chi phí AI hôm nay', () => {
     expect(panel).toHaveTextContent('Claude Code CLI: 5 lượt — trả theo gói (0 ₫)');
     expect(within(panel).getByRole('progressbar')).toHaveAttribute('aria-valuenow', '100');
     expect(urls.some((u) => u.includes('/system/ai-cost'))).toBe(true);
+  });
+
+  it('Auditor (system.read, không system.manage) ⇒ không có link nhập giá (ngõ cụt), chỉ câu báo Owner', async () => {
+    mockFetch((u) => (u.includes('/system/ai-cost') ? json(200, cost()) : undefined));
+    renderPanel({ 'system.read': 'all' });
+    const panel = await screen.findByRole('region', { name: 'Chi phí AI hôm nay' });
+    await within(panel).findByTestId('ai-cost-total');
+    expect(panel).toHaveTextContent('3 lượt gọi chưa có giá — báo Owner nhập giá ở Bộ não AI');
+    expect(within(panel).queryByRole('link')).toBeNull();
+  });
+
+  it('chưa ai đánh giá ⇒ "Hữu ích 7 ngày: chưa có đánh giá" (không "0/0")', async () => {
+    mockFetch((u) =>
+      u.includes('/system/ai-cost') ? json(200, cost({ feedback_7d: { helpful: 0, not_helpful: 0, briefing_helpful: 0, briefing_not_helpful: 0 } })) : undefined,
+    );
+    renderPanel();
+    const panel = await screen.findByRole('region', { name: 'Chi phí AI hôm nay' });
+    await within(panel).findByTestId('ai-cost-total');
+    expect(panel).toHaveTextContent('Hữu ích 7 ngày: chưa có đánh giá');
+    expect(panel).not.toHaveTextContent('0/0');
   });
 
   it('chưa đặt trần ⇒ "chưa đặt trần", không thanh tiến độ, không Vượt trần', async () => {

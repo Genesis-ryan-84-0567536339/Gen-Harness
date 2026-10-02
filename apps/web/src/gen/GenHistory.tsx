@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Button, Icon } from '@gen-harness/ui';
 import { api } from '../lib/api';
-import { errorText } from '../lib/errorText';
+import { errorDetail, errorText } from '../lib/errorText';
 import { fmtAgo } from '../lib/format';
 import { toast } from '../lib/toast';
 import { loadConversation } from './genClient';
@@ -35,14 +35,16 @@ export function GenHistory({ userId, onClose }: { userId: string; onClose: () =>
   const open = async (id: string) => {
     onClose();
     try {
-      const ok = await loadConversation(id, userId);
-      if (!ok) toast('Hội thoại này không còn — có thể đã bị xoá hoặc quá hạn lưu.', 'warn');
+      const r = await loadConversation(id, userId);
+      if (r === 'missing') toast('Hội thoại này không còn — có thể đã bị xoá hoặc quá hạn lưu.', 'warn');
+      else if (r === 'busy') toast('Gen đang trả lời — đợi xong rồi mở hội thoại cũ nhé.', 'warn');
     } catch (e) {
       toast(errorText(e) || 'Không mở được hội thoại — thử lại sau.', 'bad');
     }
   };
 
   const now = Date.now();
+  const historyDetail = q.isError ? errorDetail(q.error) : null;
   return (
     <div
       className="gen-history"
@@ -68,10 +70,12 @@ export function GenHistory({ userId, onClose }: { userId: string; onClose: () =>
       ) : q.isError ? (
         <div className="gen-history__state gen-history__state--error" role="alert">
           <p>Chưa tải được danh sách hội thoại — Sếp thử lại sau ít phút.</p>
-          <details className="tech-detail">
-            <summary>Chi tiết kỹ thuật</summary>
-            <code>{errorText(q.error)}</code>
-          </details>
+          {historyDetail ? (
+            <details className="tech-detail">
+              <summary>Chi tiết kỹ thuật</summary>
+              <code>{historyDetail}</code>
+            </details>
+          ) : null}
           <Button variant="secondary" size="sm" icon="ph ph-arrow-clockwise" onClick={() => void q.refetch()} loading={q.isFetching}>
             Thử lại
           </Button>

@@ -21,11 +21,11 @@ import { describeError, type StepProps } from './types';
 
 type ApiKind = Exclude<ProviderKind, CliKind | 'system_one'>;
 /** `value` là lựa chọn ở ô "Loại"; `kind` là loại gửi lên máy chủ — v0.1.41 (F-84): thêm mẫu dựng sẵn (OpenRouter). */
-const KINDS: Array<{ value: string; kind: ApiKind; label: string; name: string; endpoint: string; keyHint: string | null }> = [
-  { value: 'gemini', kind: 'gemini', label: 'Gemini API', name: 'Gemini API', endpoint: '', keyHint: null },
-  { value: 'deepseek', kind: 'deepseek', label: 'DeepSeek API', name: 'DeepSeek API', endpoint: '', keyHint: null },
-  { value: 'openai_compat', kind: 'openai_compat', label: 'Tương thích OpenAI', name: '', endpoint: '', keyHint: null },
-  ...PROVIDER_PRESETS.map((p) => ({ value: p.id, kind: p.kind, label: p.label, name: p.name, endpoint: p.endpoint, keyHint: p.keyHint })),
+const KINDS: Array<{ value: string; kind: ApiKind; label: string; name: string; endpoint: string; keyHint: string | null; modelHint: string | null }> = [
+  { value: 'gemini', kind: 'gemini', label: 'Gemini API', name: 'Gemini API', endpoint: '', keyHint: null, modelHint: null },
+  { value: 'deepseek', kind: 'deepseek', label: 'DeepSeek API', name: 'DeepSeek API', endpoint: '', keyHint: null, modelHint: null },
+  { value: 'openai_compat', kind: 'openai_compat', label: 'Tương thích OpenAI', name: '', endpoint: '', keyHint: null, modelHint: null },
+  ...PROVIDER_PRESETS.map((p) => ({ value: p.id, kind: p.kind, label: p.label, name: p.name, endpoint: p.endpoint, keyHint: p.keyHint, modelHint: p.modelHint })),
 ];
 
 const N8 = 'var(--color-neutral-800)';
@@ -289,6 +289,17 @@ function AddProvider({ onAdded }: { onAdded: (p: Provider) => void }) {
           }}
         />
       </div>
+      {opt.keyHint ? (
+        <p className="muted-note" data-testid="setup-provider-preset-hint">
+          {opt.keyHint}
+          {opt.modelHint ? (
+            <>
+              {' '}
+              · Gợi ý model: <span className="mono">{opt.modelHint}</span> (sau khi kiểm tra, bấm "Dùng model này" cho model đó)
+            </>
+          ) : null}
+        </p>
+      ) : null}
       <div className="dlg-row">
         <Button variant="secondary" icon="ph ph-plus" disabled={!valid} loading={add.isPending} onClick={() => add.mutate()}>
           Thêm & kiểm tra
@@ -297,11 +308,6 @@ function AddProvider({ onAdded }: { onAdded: (p: Provider) => void }) {
         <PinHint />
         <span className="muted-note">Khoá được mã hoá khi lưu; Console chỉ hiện 4 ký tự cuối.</span>
       </div>
-      {opt.keyHint ? (
-        <p className="muted-note" data-testid="setup-provider-preset-hint">
-          {opt.keyHint}
-        </p>
-      ) : null}
       {add.isError ? <InlineError>{errorText(add.error)}</InlineError> : null}
     </div>
   );
