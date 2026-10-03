@@ -72,7 +72,7 @@ test.describe('v0.1.39 · nghiệm thu sau gộp', () => {
     await expect(page.locator('[data-gen-target="guide.item:13"]')).toContainText('Kết nối Facebook');
     await expect(page.locator('[data-gen-target="guide.item.do:13"]')).toHaveAttribute('href', '/social');
     await expect(page.locator('[data-gen-target="guide.item:14"]')).toContainText('Nối Gen-hub');
-    await expect(page.locator('[data-gen-target="guide.item.do:14"]')).toHaveAttribute('href', '/connections');
+    await expect(page.locator('[data-gen-target="guide.item.do:14"]')).toHaveAttribute('href', '/connections#genhub');
     for (const path of ['/guide', '/help', '/overview', '/guide/viec-sep']) {
       await page.goto(path);
       await expect(page.locator('main, .screen').first()).toBeVisible();
