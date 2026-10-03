@@ -2277,3 +2277,12 @@ Không cần chụp màn hình hay gửi mã cho Claude — kết quả tự lư
   mypy sạch); genh `go vet` + `go test ./...` 15 gói ok; `check_release_gate.py` thoát 0, unittest `.github/scripts` 30 OK.
 - Chờ sau phát hành (người điều phối): kiểm genh tải từ Release đúng checksum + `genh version` = v0.1.41; E2E release
   xanh rồi mới promote; sau đó Boss làm các bước ở đầu mục này.
+
+### Sửa phát hành lại v0.1.41 (F-13, 02/10)
+
+- Release v0.1.41 đỏ (run 37075832890, 23:05 UTC): 2 test prune trong `apps/api/tests/test_backup.py` vì bản vá
+  d3a0118 (neo `_seed_old_entries` lúc 12:00 UTC) chỉ có ở `claude/v0134` sau khi `claude/v0135` đã tách nhánh;
+  merge "giữ nguyên cây" (`-s ours`) của v0.1.35 làm mất nó. Đã khôi phục (cherry-pick d3a0118).
+- Rà toàn bộ v0.1.34→v0.1.42: commit đẩy lên nhánh cũ sau khi nhánh mới tách chỉ có d3a0118 (mất, nay khôi phục) và
+  1f3ae4b/23fa7a5/73d15e7 của v0140 (đã khôi phục ở c384e1b, có trong main). Không còn tệp nào bị bản sau hoàn tác.
+- VERSION giữ v0.1.41 (chưa có tag v0.1.41) ⇒ merge xong release chạy lại cho đúng bản này.
