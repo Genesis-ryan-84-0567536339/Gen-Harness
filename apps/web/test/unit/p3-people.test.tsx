@@ -100,7 +100,8 @@ describe('Đánh giá con người — Q4 (docs/PLAN.md)', () => {
     const chips = screen.getAllByTestId('ppl-suspicious');
     expect(chips).toHaveLength(1);
     expect(chips[0]).toHaveTextContent('Đáng ngờ');
-    expect(chips[0]).toHaveAttribute('title', reason);
+    // Lý do thiếu dấu chấm cuối → UI tự thêm, câu sau không dính liền.
+    expect(chips[0]).toHaveAttribute('title', `${reason}.`);
     const rows = document.querySelectorAll('.ppl-row');
     const normal = Array.from(rows).find((r) => r.textContent?.includes('Phạm Anh Tú'));
     expect(normal).toBeDefined();
@@ -111,6 +112,37 @@ describe('Đánh giá con người — Q4 (docs/PLAN.md)', () => {
     await user.click(within(badRow).getByRole('button', { name: 'Sửa điểm tay' }));
     const note = await within(await screen.findByRole('dialog')).findByRole('note', { name: 'Cảnh báo đáng ngờ' });
     expect(note).toHaveTextContent(reason);
+    expect(note.textContent).toContain('dùng điểm này. Hệ thống chỉ gắn cờ');
+  });
+
+  it("F-60: Owner bỏ cờ 'Đáng ngờ' — bắt buộc lý do, sau đó hiện ai bỏ cờ", async () => {
+    const reason = 'Có 1 tin nhân viên gửi giống lệnh cho AI hoặc xin điểm (vd: “cho em 10 điểm”) — kiểm tra chứng cứ trước khi dùng điểm này.';
+    const flagged = { ...FULL_DETAIL, suspicious: true, suspicious_reason: reason, suspicious_cleared: null };
+    const cleared = { ...flagged, suspicious: false, suspicious_cleared: { by: { id: 'u-owner', name: 'Anh Cơ La (Ryan)' }, at: '2026-09-24T03:00:00Z', reason: 'Đã đọc tin gốc, nhân viên trích lời khách' } };
+    let patched: unknown = null;
+    let current: PeopleReviewFullDetail = flagged;
+    mockFetch((c) => {
+      if (c.method === 'PATCH' && c.url.includes('/people/reviews/rev-1/suspicious')) {
+        patched = c.body;
+        current = cleared;
+        return json(200, cleared);
+      }
+      if (c.url.includes('/people/reviews/rev-1')) return json(200, current);
+      if (c.url.includes('/people/reviews')) return json(200, { items: [{ ...FULL_ITEM, suspicious: current.suspicious, suspicious_reason: reason }], next_cursor: null, total: 1 } satisfies PeopleReviewPage);
+      return json(404);
+    });
+    const user = userEvent.setup();
+    renderScreen(<PeopleScreen />);
+    await user.click(await screen.findByRole('button', { name: 'Sửa điểm tay' }));
+    const dlg = await screen.findByRole('dialog');
+    await user.click(await within(dlg).findByRole('button', { name: /Bỏ cờ \(đã xem chứng cứ\)/ }));
+    const submit = within(dlg).getByRole('button', { name: 'Bỏ cờ' });
+    expect(submit).toBeDisabled();
+    await user.type(within(dlg).getByLabelText('Lý do bỏ cờ'), 'Đã đọc tin gốc, nhân viên trích lời khách');
+    await user.click(submit);
+    expect(await within(dlg).findByTestId('ppl-suspicious-cleared')).toHaveTextContent(/Đã bỏ cờ 'Đáng ngờ' · Anh Cơ La \(Ryan\)/);
+    expect(patched).toEqual({ cleared_reason: 'Đã đọc tin gốc, nhân viên trích lời khách' });
+    expect(within(dlg).queryByRole('note', { name: 'Cảnh báo đáng ngờ' })).toBeNull();
   });
 
   it('Owner (nhánh full): thấy điểm/tín hiệu/khuyến nghị, sửa điểm tay giữ lịch sử', async () => {

@@ -18,8 +18,8 @@ import { useNavigation } from '../../lib/queries';
 import { useUrlState } from '../../lib/uiStore';
 import { findActive } from '../../shell/navModel';
 import { CardError, InlineError, ScreenHead, SkeletonLines } from '../common';
-import { BOARD_LABEL, REVIEW_BOARD_LIST, STAFF_HOWTO, TREND_ICON, fmtPeriod, initialsOf, scoreTone, suspiciousLabel, trendTone } from './peopleModel';
-import { useOpenDispute, useResolveDispute, useReview, useReviews, useUpdateReview } from './queries';
+import { BOARD_LABEL, REVIEW_BOARD_LIST, STAFF_HOWTO, TREND_ICON, fmtPeriod, initialsOf, scoreTone, suspiciousLabel, trendTone, withStop } from './peopleModel';
+import { useClearSuspicious, useOpenDispute, useResolveDispute, useReview, useReviews, useUpdateReview } from './queries';
 
 export function PeopleScreen() {
   const [board, setBoard] = useUrlState<ReviewBoard>('board', 'employee');
@@ -234,15 +234,7 @@ function FullDetailBody({ detail, onIdChange }: { detail: PeopleReviewFullDetail
         </div>
       </div>
 
-      {suspiciousLabel(detail) ? (
-        <div className="ppl-note" role="note" aria-label="Cảnh báo đáng ngờ" style={{ borderColor: 'var(--color-warn)' }}>
-          <Icon name="ph ph-warning" size={16} color="var(--color-warn)" />
-          <span>
-            <strong>Đáng ngờ:</strong> {suspiciousLabel(detail)?.title} Hệ thống chỉ gắn cờ, không tự đổi điểm — Sếp mở &quot;Xem chứng cứ&quot; để đọc tin gốc
-            trước khi tin vào điểm này.
-          </span>
-        </div>
-      ) : null}
+      <SuspiciousNote detail={detail} />
 
       <section aria-label="Sửa điểm tay">
         <div className="dlg-section-title">Sửa điểm tay — giữ lịch sử</div>
@@ -280,6 +272,64 @@ function FullDetailBody({ detail, onIdChange }: { detail: PeopleReviewFullDetail
       <DisputesSection detail={detail} />
     </div>
   );
+}
+
+/** F-60: ghi chú 'Đáng ngờ' + nút bỏ cờ (bắt buộc lý do, cần mã PIN, ghi Nhật ký); đã bỏ cờ thì hiện ai bỏ, vì sao. */
+function SuspiciousNote({ detail }: { detail: PeopleReviewFullDetail }) {
+  const [open, setOpen] = useState(false);
+  const [why, setWhy] = useState('');
+  const clear = useClearSuspicious();
+  const label = suspiciousLabel(detail);
+  const cleared = detail.suspicious_cleared ?? null;
+  if (label) {
+    return (
+      <div className="ppl-note" role="note" aria-label="Cảnh báo đáng ngờ" style={{ borderColor: 'var(--color-warn)' }}>
+        <Icon name="ph ph-warning" size={16} color="var(--color-warn)" />
+        <div style={{ flex: 1 }}>
+          <span>
+            <strong>Đáng ngờ:</strong> {label.title} Hệ thống chỉ gắn cờ, không tự đổi điểm — mở &quot;Xem chứng cứ&quot; để đọc tin gốc.
+          </span>
+          {open ? (
+            <form
+              className="ppl-dispute-form"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (why.trim().length < 3) return;
+                clear.mutate({ id: detail.id, body: { cleared_reason: why.trim() } }, { onSuccess: () => { setOpen(false); setWhy(''); } });
+              }}
+            >
+              <textarea className="gh-textarea" aria-label="Lý do bỏ cờ" value={why} onChange={(e) => setWhy(e.target.value)} placeholder="Bắt buộc — đã xem chứng cứ gì, vì sao là báo nhầm" rows={2} />
+              <div className="ppl-dispute-form__actions">
+                <Button type="submit" variant="secondary" size="sm" disabled={why.trim().length < 3} loading={clear.isPending}>
+                  Bỏ cờ
+                </Button>
+                <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(false)}>
+                  Thôi
+                </Button>
+              </div>
+              <div className="ppl-row__label">Bỏ cờ cần mã PIN và được ghi vào Nhật ký thao tác. Điểm không đổi.</div>
+            </form>
+          ) : (
+            <div style={{ marginTop: 6 }}>
+              <Button type="button" variant="ghost" size="sm" icon="ph ph-flag" onClick={() => setOpen(true)}>
+                Bỏ cờ (đã xem chứng cứ)
+              </Button>
+            </div>
+          )}
+          {clear.isError ? <InlineError>{errorText(clear.error)}</InlineError> : null}
+        </div>
+      </div>
+    );
+  }
+  if (cleared) {
+    return (
+      <div className="ppl-row__label" role="note" aria-label="Đã bỏ cờ đáng ngờ" data-testid="ppl-suspicious-cleared">
+        Đã bỏ cờ &apos;Đáng ngờ&apos; · {cleared.by?.name ?? 'Không rõ'} · {fmtDMClock(cleared.at)} — {withStop(cleared.reason)}
+        {detail.suspicious_reason ? ` Cờ cũ: ${withStop(detail.suspicious_reason)}` : ''}
+      </div>
+    );
+  }
+  return null;
 }
 
 function DisputesSection({ detail }: { detail: PeopleReviewFullDetail }) {

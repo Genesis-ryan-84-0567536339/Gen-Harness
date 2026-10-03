@@ -22,9 +22,11 @@
     đúng kỳ đó (`ON CONFLICT` trên chỉ mục riêng phần `people_reviews_system_period`) — không sinh thêm lịch sử
     mỗi lần chạy lại, và không bao giờ đè lên một bản Owner đã sửa tay (`gh/biz/people/routes.py`).
   - v0.1.45 (F-60) cờ **'Đáng ngờ'**: nhân viên có thể chèn câu lệnh cho AI / xin điểm vào tin nhắn để lách điểm.
-    Job quét tối đa `MAX_SCAN_TEXTS` tin đi do chính nhân viên gửi + tin đến trong các luồng đã ghép của họ bằng
-    `gh.suspicious.REVIEW_MANIPULATION`; khớp → `suspicious = true` kèm lý do ngắn (chỉ đoạn khớp ≤ 60 ký tự, không
-    chép nguyên tin). KHÔNG đổi điểm — chỉ gắn cờ để Sếp xem chứng cứ trước khi dùng.
+    Job quét tối đa `MAX_SCAN_TEXTS` tin ĐI do chính nhân viên gửi (KHÔNG quét tin khách — nhân viên không bị gắn
+    cờ vì chữ khách gõ) bằng `gh.suspicious.REVIEW_MANIPULATION`; khớp → `suspicious = true` kèm lý do ngắn (chỉ
+    đoạn khớp ≤ 60 ký tự, không chép nguyên tin). KHÔNG đổi điểm — chỉ gắn cờ để Sếp xem chứng cứ trước khi dùng.
+    Owner bỏ cờ được (`PATCH /people/reviews/{id}/suspicious`, có lý do, ghi Nhật ký); chạy lại job KHÔNG gắn lại
+    cờ đã được bỏ (giữ nguyên `suspicious_cleared_*`).
   - **Không có hành động kỷ luật tự động** (PLAN §3.11, khoá cứng 2): job chỉ ghi điểm + tín hiệu + khuyến nghị
     coaching bằng chữ; không tạo cảnh báo, không đổi quyền, không đổi trạng thái công việc của ai.
 
@@ -115,28 +117,35 @@ async def _evidence_units(db: AsyncSession, org_id: uuid.UUID, staff_id: uuid.UU
     return [{"type": "meaning_unit", "id": str(r.id)} for r in rows]
 
 
-async def _suspicious(db: AsyncSession, org_id: uuid.UUID, staff_id: uuid.UUID, df: datetime,
-                      dt: datetime) -> tuple[bool, str | None]:
-    """Cờ 'Đáng ngờ' (F-60): tin giống lệnh cho AI hoặc xin điểm, do nhân viên gửi hoặc nằm trong luồng của họ."""
-    texts = (await db.execute(text(PAIR_CTE + """
-        , own AS (
-          SELECT e.body_text FROM raw.events e
+async def _outbound_texts_by_staff(db: AsyncSession, org_id: uuid.UUID, staff_ids: list[uuid.UUID], df: datetime,
+                                   dt: datetime) -> dict[uuid.UUID, list[str]]:
+    """Tối đa `MAX_SCAN_TEXTS` tin ĐI mới nhất do CHÍNH từng nhân viên gửi trong kỳ — một truy vấn cho cả tổ chức
+    (không chạy lại lưới ghép cho từng người). Không lấy tin khách: nhân viên không bị gắn cờ vì chữ khách gõ."""
+    if not staff_ids:
+        return {}
+    rows = (await db.execute(text("""
+        SELECT person_id, body_text FROM (
+          SELECT pi.person_id, e.body_text,
+                 row_number() OVER (PARTITION BY pi.person_id ORDER BY e.occurred_at DESC) AS rn
+          FROM raw.events e
           JOIN core.person_identities pi ON pi.id = e.sender_identity_id
-          WHERE e.org_id = :o AND e.direction = 'outbound' AND pi.person_id = :sid AND e.body_text IS NOT NULL
-            AND e.occurred_at >= :df AND e.occurred_at <= :dt
-          ORDER BY e.occurred_at DESC LIMIT :n
-        ), threads AS (
-          SELECT e.body_text FROM paired p JOIN raw.events e ON e.id = p.id
-          WHERE p.staff_id = :sid AND e.org_id = :o AND e.body_text IS NOT NULL
-          ORDER BY e.occurred_at DESC LIMIT :n
-        )
-        SELECT body_text FROM own UNION ALL SELECT body_text FROM threads"""),
-        {"o": org_id, "df": df, "dt": dt, "sid": staff_id, "n": MAX_SCAN_TEXTS})).scalars().all()
+          WHERE e.org_id = :o AND e.direction = 'outbound' AND e.body_text IS NOT NULL
+            AND e.occurred_at >= :df AND e.occurred_at <= :dt AND pi.person_id = ANY(:ids)
+        ) t WHERE rn <= :n"""),
+        {"o": org_id, "df": df, "dt": dt, "ids": staff_ids, "n": MAX_SCAN_TEXTS})).all()
+    out: dict[uuid.UUID, list[str]] = {}
+    for r in rows:
+        out.setdefault(r.person_id, []).append(r.body_text)
+    return out
+
+
+def _suspicious(texts: list[str]) -> tuple[bool, str | None]:
+    """Cờ 'Đáng ngờ' (F-60): tin nhân viên gửi giống lệnh cho AI hoặc xin điểm."""
     hits, sample = scan_texts(texts)
     if hits == 0:
         return False, None
-    return True, (f"Có {hits} tin giống lệnh cho AI hoặc xin điểm (vd: “{sample}”) — "
-                  "kiểm tra trước khi dùng điểm này")
+    return True, (f"Có {hits} tin nhân viên gửi giống lệnh cho AI hoặc xin điểm (vd: “{sample}”) — "
+                  "kiểm tra chứng cứ trước khi dùng điểm này.")
 
 
 async def recompute_people_reviews_org(db: AsyncSession, org_id: uuid.UUID, *, today: date | None = None) -> int:
@@ -152,6 +161,7 @@ async def recompute_people_reviews_org(db: AsyncSession, org_id: uuid.UUID, *, t
         SELECT promiser_person_id, count(*) AS n FROM biz.promises
         WHERE org_id = :o AND broken = true AND due_at >= :df AND due_at <= :dt
         GROUP BY promiser_person_id"""), {"o": org_id, "df": df, "dt": dt})).all()}
+    texts_by = await _outbound_texts_by_staff(db, org_id, [r.staff_id for r in rows], df, dt)
 
     n = 0
     for r in rows:
@@ -161,7 +171,7 @@ async def recompute_people_reviews_org(db: AsyncSession, org_id: uuid.UUID, *, t
         broken = broken_by.get(r.staff_id, 0)
         score, signal = _score_and_signal(r.fast, r.normal, r.slow, broken)
         trend = await _trend(db, org_id, r.staff_id, period_start, score)
-        suspicious, reason = await _suspicious(db, org_id, r.staff_id, df, dt)
+        suspicious, reason = _suspicious(texts_by.get(r.staff_id, []))
         await db.execute(text("""
             INSERT INTO biz.people_reviews (org_id, person_id, period_start, period_end, score, trend, signal,
                                             recommendation, evidence, visibility, suspicious, suspicious_reason)

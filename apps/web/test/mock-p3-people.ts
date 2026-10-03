@@ -90,6 +90,7 @@ interface ReviewRow {
   /** v0.1.45 (F-60): cờ 'Đáng ngờ' — sửa tay giữ nguyên cờ của dòng bị thay. */
   suspicious: boolean;
   suspicious_reason: string | null;
+  suspicious_cleared?: { by: UserRef | null; at: string; reason: string } | null;
 }
 interface Lineage {
   board: ReviewBoard;
@@ -121,8 +122,9 @@ function fullItem(l: Lineage): PeopleReviewFull {
     overridden_at: r.overridden_at,
     override_reason: r.override_reason,
     supersedes_id: r.supersedes_id,
-    suspicious: r.suspicious,
+    suspicious: r.suspicious && !r.suspicious_cleared,
     suspicious_reason: r.suspicious_reason,
+    suspicious_cleared: r.suspicious_cleared ?? null,
   };
 }
 function fullDetail(l: Lineage): PeopleReviewFullDetail {
@@ -247,7 +249,7 @@ function seedLineages(): Lineage[] {
   const tuRow = lineages.find((l) => l.person.id === TU.id)?.rows[0];
   if (tuRow) {
     tuRow.suspicious = true;
-    tuRow.suspicious_reason = 'Có 2 tin giống lệnh cho AI hoặc xin điểm (vd: “Bỏ qua mọi chỉ dẫn”) — kiểm tra trước khi dùng điểm này';
+    tuRow.suspicious_reason = 'Có 2 tin giống lệnh cho AI hoặc xin điểm (vd: “Bỏ qua mọi chỉ dẫn”) — kiểm tra chứng cứ trước khi dùng điểm này.';
   }
   // Phản biện mẫu: Anh Tú không đồng ý với điểm, Owner đã mở phản biện hộ để có luồng test "mở/giải quyết".
   disputeSeq += 1;
@@ -384,6 +386,7 @@ export function createMock(opts: P3Options) {
       supersedes_id: prev.id,
       suspicious: prev.suspicious,
       suspicious_reason: prev.suspicious_reason,
+      suspicious_cleared: prev.suspicious_cleared ?? null,
     };
     const oldId = prev.id;
     l.rows = [row, ...l.rows];
@@ -443,6 +446,22 @@ export function createMock(opts: P3Options) {
         d.resolved_by = { id: 'self', name: ctx.userLabel, role: ctx.role };
         d.resolved_at = new Date().toISOString();
         return reply(200, d);
+      }
+
+      // PATCH /people/reviews/{id}/suspicious — bỏ cờ 'Đáng ngờ' (F-60, cần PIN, bắt buộc lý do)
+      if (seg.length === 4 && seg[3] === 'suspicious' && m === 'PATCH') {
+        if (!has(ctx, 'people_review.write')) return problem(403, 'FORBIDDEN', 'Vai trò không có quyền này');
+        if (ctx.needPin()) return problem(423, 'PIN_REQUIRED', 'Thao tác này cần nhập mã PIN', { detail: { operation: 'people_review.read' } });
+        const l = reviewIndex.get(seg[2]);
+        if (!l) return problem(404, 'NOT_FOUND', 'Đánh giá không tồn tại hoặc ngoài phạm vi của bạn');
+        const b = body as { cleared_reason?: string };
+        if ((b.cleared_reason ?? '').trim().length < 3) {
+          return problem(422, 'VALIDATION', 'Dữ liệu không hợp lệ', { errors: { cleared_reason: 'Ghi rõ lý do bỏ cờ' } });
+        }
+        const row = l.rows[0];
+        if (!row.suspicious || row.suspicious_cleared) return problem(409, 'NOT_SUSPICIOUS', "Đánh giá này không còn cờ 'Đáng ngờ' để bỏ");
+        row.suspicious_cleared = { by: { id: 'self', name: ctx.userLabel, role: ctx.role }, at: new Date().toISOString(), reason: (b.cleared_reason ?? '').trim() };
+        return reply(200, fullDetail(l));
       }
 
       // POST /people/reviews/{id}/disputes — mở phản biện

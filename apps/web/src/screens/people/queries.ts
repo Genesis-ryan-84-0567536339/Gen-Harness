@@ -7,6 +7,7 @@ import type {
   DisputeResolveBody,
   PeopleReviewPatchBody,
   PeopleReviewQuery,
+  PeopleReviewSuspiciousClearBody,
 } from '@gen-harness/contracts';
 import { api } from '../../lib/api';
 
@@ -44,6 +45,15 @@ export const useUpdateReview = () => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, body }: { id: string; body: PeopleReviewPatchBody }) => api.people.reviews.update(id, body),
+    onSuccess: () => invalidateReviews(qc),
+  });
+};
+
+/** F-60: bỏ cờ 'Đáng ngờ' sau khi đã xem chứng cứ (bắt buộc lý do, cần mã PIN, ghi Nhật ký). */
+export const useClearSuspicious = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: PeopleReviewSuspiciousClearBody }) => api.people.reviews.clearSuspicious(id, body),
     onSuccess: () => invalidateReviews(qc),
   });
 };

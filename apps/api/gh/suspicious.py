@@ -3,7 +3,8 @@
 - `SUSPICIOUS`: chữ thường gặp trong lừa đảo/tấn công prompt trên trang mạng xã hội (chuyển từ gh.social.service —
   hành vi không đổi). Chỉ để gắn cờ, nội dung vẫn là dữ liệu.
 - `REVIEW_MANIPULATION`: câu lệnh cho AI hoặc xin điểm mà nhân viên có thể chèn vào tin nhắn để lách điểm đánh giá
-  nhân sự. Job tính điểm chỉ GẮN CỜ 'Đáng ngờ' — không đổi điểm, không kỷ luật tự động (khoá cứng 2).
+  nhân sự. Job tính điểm chỉ quét tin ĐI do chính nhân viên gửi (không quét tin khách) và chỉ GẮN CỜ 'Đáng ngờ' —
+  không đổi điểm, không kỷ luật tự động (khoá cứng 2).
 """
 
 import re
@@ -14,13 +15,17 @@ SUSPICIOUS = re.compile(
     r"mã (otp|xác (minh|nhận))|\botp\b|chuyển (tiền|khoản)|mật khẩu|password|gửi (mã|tiền)|click (vào )?link)",
     re.IGNORECASE)
 
+# Hẹp có chủ ý (sửa review v0.1.45): chỉ bắt câu NHẮM VÀO bộ chấm điểm — lệnh cho AI, hoặc xin điểm có chữ "điểm".
+# KHÔNG bắt câu bán hàng thường ngày: "cho em 10 cái áo", "chị cho em tốt nhé", "em đánh giá cao sản phẩm",
+# "bạn là ai vậy?", "chị đánh giá shop 5 sao giúp em" (test_people_suspicious_v0145 giữ danh sách câu không được khớp).
 REVIEW_MANIPULATION = re.compile(
     r"(bỏ qua (mọi |các |tất cả )?(chỉ dẫn|hướng dẫn|lệnh)"
     r"|ignore (all |previous |the above |all previous )?(instructions|prompts?)"
     r"|system prompt|prompt hệ thống"
-    r"|(chấm|cho|đánh giá) (tôi |em |mình |anh |chị )?(điểm )?(tôi |em |mình )?(cao|tốt|tối đa|10|100)\b"
-    r"|rate me|give (me )?(a )?(high|perfect|full|10|100) (score|rating)"
-    r"|bạn là (một )?(ai|trợ lý)\b|you are (an? )?(ai|assistant|language model))",
+    r"|(chấm|cho|đánh giá) (tôi |em |mình |anh |chị )?điểm (tôi |em |mình )?(thật )?(cao|tốt|tối đa|10|100)\b"
+    r"|(chấm|cho) (tôi|em|mình) (10|100) điểm"
+    r"|rate me\b|give (me )?(a )?(high|perfect|full|10|100) (score|rating)"
+    r"|you are (an? )?(ai|language model)\b)",
     re.IGNORECASE)
 
 SNIPPET_MAX = 60

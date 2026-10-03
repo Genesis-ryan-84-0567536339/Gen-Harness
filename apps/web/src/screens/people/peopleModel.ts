@@ -61,5 +61,10 @@ export const SUSPICIOUS_FALLBACK =
   'Có tin giống lệnh cho AI hoặc xin điểm — Sếp xem chứng cứ trước khi dùng điểm này.';
 export function suspiciousLabel(item: Pick<PeopleReviewFull, 'suspicious' | 'suspicious_reason'>): { text: string; title: string } | null {
   if (!item.suspicious) return null;
-  return { text: 'Đáng ngờ', title: item.suspicious_reason?.trim() || SUSPICIOUS_FALLBACK };
+  return { text: 'Đáng ngờ', title: withStop(item.suspicious_reason?.trim() || SUSPICIOUS_FALLBACK) };
+}
+
+/** Lý do từ máy chủ cũ có thể thiếu dấu chấm cuối — thêm vào để câu ghép phía sau không dính liền. */
+export function withStop(s: string): string {
+  return /[.!?…]$/.test(s) ? s : `${s}.`;
 }
