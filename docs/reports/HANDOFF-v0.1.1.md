@@ -2392,3 +2392,56 @@ Không cần chụp màn hình hay gửi mã cho Claude — kết quả tự lư
     Console". Crumbs/RouteHandle bỏ trường phụ đề tiếng Anh.
   - e2e 22 mới: Auditor — "/" → Hôm nay, Kết nối chỉ xem (không Facebook, không lỗi, không nút thao tác), Cài đặt 5 tab,
     `?tab=users` ở lại Cài đặt, `?tab=channels` → Kết nối.
+
+## v0.1.43 — Bỏ lời hứa không thật & chữ khó hiểu (03/10/2026)
+
+### Boss cần làm gì
+
+1. Không cần làm gì. Sau khi lên bản: thang tự trị chỉ còn 3 lựa chọn (**Chỉ ghi nhận · Gợi ý · Soạn sẵn chờ duyệt**);
+   Cài đặt › Bộ não AI có thẻ **Lọc tin Thấp/Vừa/Cao**; màn chưa có dữ liệu chỉ đường "Nối Zalo" / "Chọn nhóm để nghe".
+
+### Vì sao (kế hoạch tổng `docs/audit/2026-10-01/0-ke-hoach-tong.md`, mục v0.1.43)
+
+- **F-23** 🟡: "Dùng dữ liệu mẫu" ở bước 1 không làm gì. **F-25** 🟡: bảng gán model có 3 dòng agent lõi không ai dùng.
+- **F-29** 🟡: màn trống không dẫn đường. **F-30** 🟡: quá nhiều khái niệm AI/lọc tin (thang 0–6, độ tin cậy, Jev,
+  trọng số). **F-62** 🟡: tiếng Anh và chữ kỹ thuật còn sót. **F-38** 🟡: lọc quy tắc chuẩn hoá NFKD, lọc trùng NFD —
+  cùng một câu có thể bỏ dấu khác nhau. **F-24** (bị bác, chỉ sửa chữ): thẻ nháp tin của Gen ghi "Đã xác nhận" dễ hiểu
+  nhầm là đã gửi.
+
+### Thay đổi
+
+- **Thiết lập & agent (F-23, F-25)**: bước 1 bỏ fieldset "Cách bắt đầu", luôn gửi `mode: 'empty'`. `CORE_AGENT_KEYS` chỉ
+  còn `core.refinery`, `core.reply` ("Soạn lại / dịch nháp"), `core.gen`; `PUT /agents/bindings/core.intent` → 422; bước 4
+  chỉ gán 3 khoá lõi; dịch/soạn lại nháp không có agent dùng `core.reply` (trước là `core.reply_fast`).
+- **Chuẩn hoá chữ (F-38)**: `gh/textnorm.py` dùng chung cho quy tắc và lọc trùng (NFC/NFD, toàn chiều rộng, m², Ð ra cùng
+  kết quả; NFC và NFD cùng `text_hash`). Web: `initialsOf`/`fmtVnd` chỉ ở `lib/format.ts`, các model re-export.
+- **Trạng thái trống (F-29)**: `DataEmptyState` đọc `GET /header` — chưa nối kênh → "Nối Zalo" (`/guide/5`), chưa nghe nhóm →
+  `/guide/6`, vai trò khác Owner thấy "Nhờ Owner…" không có nút. Áp cho Hộp thư, Việc, Bàn làm việc, Khách & Nhóm, Cơ hội.
+- **Tự trị 3 mức (F-30, chỉ giao diện)**: `AutonomySelect` dùng chung (0–2 → Chỉ ghi nhận ghi 0, 3 → Gợi ý, 4 → Soạn sẵn chờ
+  duyệt ghi 4; 5–6 chỉ đặt ở "Nâng cao" và hiện "Tự làm (đặt ở Nâng cao)"); chỉ gửi `autonomy_level` khi Sếp chọn mức
+  khác — mở/đóng không ghi. Header (màn Nâng cao) hiện nhãn 3 mức thay "tự trị 4". Backend giữ thang 0–6.
+- **Lọc tin (F-30)**: thẻ "Lọc tin" Thấp/Vừa/Cao (`min_score` 15/30/50), ngưỡng số + Jev vào "Nâng cao" (JevCard luôn trong
+  Nâng cao); bước 7 gập trọng số vào "Nâng cao"; thẻ Hộp thư ẩn "độ tin cậy" (chỉ thấy khi rê huy hiệu ưu tiên); ví dụ Gen
+  ở khung Gen và Trợ giúp là "Khách nào hỏi giá hôm nay?" (bỏ "khoá Jev").
+- **Chữ (F-62)**: tooltip thanh bên không còn tiếng Anh; nút kính lúp tên "Kho hội thoại"; "Kho sạch SSOT"/"đơn vị ý
+  nghĩa" Việt hoá; ghi chú phát hành bỏ tiền tố `feat(...)`/`fix:`.
+- **Gen nháp tin (F-24)**: thẻ sau Xác nhận ghi "Đã lưu nháp — chưa gửi" (bỏ máy bay giấy) + nút "Duyệt & gửi" mở
+  `/workbench?id=<id>` đúng nháp (dùng luồng gửi sẵn có).
+- **Tích hợp**: gộp 3 gói không xung đột; sửa test cũ theo nhãn mới (`shell.test` tooltip, `pickers-v0135` chọn "Soạn sẵn
+  chờ duyệt"); `needs-boss-v0136` bỏ mốc `finished_at` viết cứng (tự hết hạn sau 24 giờ ⇒ đỏ theo ngày); thêm kiểm ví dụ
+  Gen (`gen.test`, `users.test`) và trọng số bước 7 trong "Nâng cao" (`phase2.spec`).
+
+### Kiểm tra
+
+- api: `test_bindings_v0143.py`, `test_textnorm.py`, `test_triage` cũ, `test_p4_agents`.
+- web vitest: `setup.test` (bước 1), `autonomy-select-v0143`, `data-empty-state-v0143`, `format-v0143`,
+  `triage-level-v0143`, `wording-v0143`, `gen-proposals`, `jev-once-v0139`, `p3-queue`, `p3-relations`, `shell`.
+- e2e mock: `empty-state-v0143.spec.ts`, `gen-draft-approve-v0143.spec.ts`, `menu-v0142`/`flows`/`coverage`/`phase2`/`visual`
+  theo nhãn mới.
+- Kết quả trên nhánh tích hợp (03/10): ruff + mypy sạch (139 tệp), alembic 1 head (0027);
+  pytest 1500 passed mỗi lượt (superuser và gh_app, 3 deselected `slow` như CI); web lint/typecheck sạch,
+  check_no_fake_ids sạch, vitest 659 passed (74 tệp), build OK, bridge test 50 pass; Playwright mock 232 passed (không
+  skip; gồm `empty-state-v0143` 5, `gen-draft-approve-v0143` 1); browser 14 passed (ruff + mypy sạch); genh `go vet` +
+  `go test ./...` ok; `check_release_gate.py` thoát 0, unittest `.github/scripts` 30 OK.
+- Chờ sau phát hành (người điều phối): kiểm genh tải từ Release đúng checksum + `genh version` = v0.1.43; E2E release
+  xanh rồi mới promote.
