@@ -157,7 +157,8 @@ async def test_owner_clears_flag_with_reason_and_log(world, owner_api: Api, db) 
     cl = d["suspicious_cleared"]
     assert cl["reason"].startswith("Đã xem tin") and cl["by"]["id"] and cl["at"]
     assert d["score"] == float(bad.score)  # bỏ cờ không đổi điểm
-    log = (await db.execute(text("""SELECT count(*) FROM ops.action_log WHERE action = 'people_review.suspicious_cleared'
+    log = (await db.execute(text("""SELECT count(*) FROM ops.action_log
+                                    WHERE action = 'people_review.suspicious_cleared'
                                     AND target_id = :t"""), {"t": str(bad.id)})).scalar_one()
     assert log == 1
     # Bỏ lần 2 → 409; job chạy lại không gắn lại cờ đã bỏ.

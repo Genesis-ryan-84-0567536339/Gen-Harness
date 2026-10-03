@@ -1,4 +1,4 @@
-"""v0.1.45 — cờ "Đáng ngờ" cho điểm đánh giá nhân sự (biz.people_reviews.suspicious, suspicious_reason) (F-60).
+"""v0.1.45 — cờ "Đáng ngờ" cho điểm đánh giá nhân sự (biz.people_reviews.suspicious*, bỏ cờ: suspicious_cleared_*) (F-60).
 
 Revision ID: 0030
 Revises: 0029

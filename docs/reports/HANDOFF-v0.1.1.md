@@ -2607,11 +2607,14 @@ Không cần chụp màn hình hay gửi mã cho Claude — kết quả tự lư
 Không cần làm gì. Lưu ý nhỏ:
 - Từ bản này, khi Sếp đổi **mức tự trị / điều cấm / giới hạn / phạm vi kênh** của agent, **thêm tài khoản CLI**, đổi tool
   MCP từ ghi sang đọc, hay sửa Hướng dẫn việc 9/10 (có mời người) sau khi đã thiết lập xong, Console hỏi **mã PIN 6 số**
-  một lần. Đổi tên/mô tả agent, cập nhật hệ thống, Sao lưu ngay thì không hỏi.
-- Nếu Sếp từng thêm máy chủ MCP dùng địa chỉ `http://` kèm token, Console sẽ báo cần đổi sang `https://` khi gọi tool đó.
+  một lần. Đổi tên/mô tả agent, cập nhật hệ thống, Sao lưu ngay thì không hỏi. Bước 4 "Bộ não AI" lúc thiết lập
+  lần đầu và nút **"Đăng nhập lại"** tài khoản CLI hết hạn cũng hỏi mã PIN. Mở lại bước 9 chỉ để xem ranh giới (không đổi
+  mức) thì không hỏi.
+- Máy chủ MCP / Gen-hub / nhà cung cấp AI ở **mạng công cộng** mà dùng `http://` kèm token/khoá: Console báo cần đổi sang
+  `https://`. Máy trong mạng nội bộ (192.168.x, 10.x, cùng máy — vd Ollama, Gen-hub trong LAN) dùng `http://` vẫn chạy.
 - Bản cập nhật tự khoá hộp thư `run/` trên máy chủ (chỉ genh và Console ghi được); nút Cập nhật/Khôi phục dùng như cũ.
 - Có thể mở **Trợ giúp** xem đoạn "Mã PIN bảo vệ được gì"; dòng điểm nhân sự có nhãn **"Đáng ngờ"** thì xem chứng cứ
-  trước khi tin điểm.
+  trước khi tin điểm — xem xong thấy báo nhầm thì bấm **"Bỏ cờ (đã xem chứng cứ)"** (ghi lý do, cần PIN).
 
 ### Vì sao (kế hoạch tổng `docs/audit/2026-10-01/0-ke-hoach-tong.md`, mục v0.1.45)
 
@@ -2664,3 +2667,42 @@ nhân sự bị lách.
   nhà cung cấp); `test_bundle_telegram_v0144` hạ revision từ 0030.
 - Chờ sau phát hành (người điều phối): genh tải từ Release đúng checksum + `genh version` = v0.1.45; E2E cài thật xanh
   (gồm `stat -c %a run` = 2770 nhóm 10001, nút Cập nhật ngay/Khôi phục/Gói chẩn đoán vẫn chạy) rồi mới promote.
+
+### Sửa sau review trước merge (03/10)
+
+- **F-60 — cờ "Đáng ngờ" (blocker)**: mẫu `REVIEW_MANIPULATION` hẹp lại — bỏ `bạn là ai/trợ lý`, `đánh giá cao`, `cho em
+  10/100/tốt` trần; vế xin điểm phải có chữ "điểm" (`cho em điểm cao`, `chấm điểm tối đa`, `cho em 10 điểm`). Job chỉ quét
+  tin ĐI do chính nhân viên gửi (không quét tin khách), gom một truy vấn cho cả tổ chức (hết O(nhân viên × tin đến)). Lý do
+  cờ kết thúc bằng dấu chấm. **Bỏ cờ**: `PATCH /people/reviews/{id}/suspicious {cleared_reason}` (people_review.write +
+  PIN, ghi Nhật ký `people_review.suspicious_cleared`, không đổi điểm); migration **0030** thêm `suspicious_cleared_by/
+  _at/_reason` (vẫn chạy lại an toàn); job chạy lại không gắn lại cờ đã bỏ, sửa điểm tay mang theo dấu đã bỏ; web hiện
+  nút "Bỏ cờ (đã xem chứng cứ)" + dòng "Đã bỏ cờ · ai · lúc · lý do".
+- **F-49 — một quy tắc token qua http**: `pin_endpoint` chỉ chặn token/khoá + `http://` khi phân giải ra **IP công cộng**
+  (LAN/loopback/`host.docker.internal` vẫn được) — áp chung cho máy chủ MCP, Gen-hub và nhà cung cấp AI, cả lúc ghi lẫn
+  lúc gọi. Gen-hub: `http://` công cộng kèm token bị chặn ngay lúc lưu (422), link LAN cũ chạy như v0.1.44. Nhà cung cấp
+  AI: Ollama/LM Studio `http://192.168.x` kèm khoá giả tạo được; câu lỗi + gợi ý ở bước 4 khớp quy tắc. Lúc gọi, nhà cung
+  cấp AI vẫn không ép (dòng cũ không gãy) — như trước.
+- **F-52 — genh chạy root**: `EnsureRunPerms` cũng hỏi container phụ (kiểm ảnh api có gid 10001) trước khi siết; ảnh cũ
+  (quay về 0.1.44 sau cập nhật lỗi) ⇒ mở 0777 thay vì khoá api cũ ngoài `run/`; không có docker/ảnh hoặc container phụ lỗi
+  ⇒ chown trực tiếp như trước.
+- **F-58**: web `can()` chỉ coi `system.manage` là có khi phạm vi `all` (gương `deps.ALL_ONLY` qua `ALL_ONLY_PERMS` trong
+  contracts) — vai trò có `system.manage` = team không còn thấy nút chết 403; ô ma trận (nếu sau này có cột này) chỉ cho
+  "Tất cả"/"Không".
+- **F-60 — Trợ giúp**: thẻ "Mã PIN bảo vệ được gì" theo vai trò — Owner như cũ; vai trò khác gọi "bạn", KHÔNG có câu về cách
+  lách điểm; chỉ vai trò xem được đánh giá nhân sự thấy lưu ý cờ "Đáng ngờ".
+- **F-20 — bước 9 mở lại sau Hoàn tất**: `GET /setup/steps/9` trả agent của bước 8 (`completed.setup_agent_id`; bản cài cũ
+  ⇒ agent tạo sớm nhất) + mức hiện tại; form điền sẵn, hiện tên agent; chỉ hỏi PIN khi mức KHÁC giá trị đang lưu (gửi lại
+  đúng mức / `null` = giữ nguyên ⇒ không PIN); không còn đổi nhầm agent mới tạo gần nhất.
+- Nhỏ: 429 phân loại hết hạn mức ngày trên thân đã che 4000 ký tự (Gemini `…PerDay…` nằm sâu); dấu "đã đổi" tham số MCP
+  chặt (đúng 3 khoá sha256/keys/bytes); `libpq_conn` mã hoá khoảng trắng `%20`; lời nhắc PIN CLI "Đăng nhập / thêm tài khoản
+  cần mã PIN" (cả "Đăng nhập lại" và bước 4); WS 4403 `origin` hiện toast kèm Mã lỗi + gửi `/client-errors`; MCP: lời nhắc
+  PIN một lần cho cả bảng, ghi → đọc hỏi xác nhận rồi toast "Đã chuyển … sang Chỉ đọc".
+- Test mới: `test_people_suspicious_v0145` (câu bán hàng không khớp, tin khách không gắn cờ, bỏ cờ + Nhật ký + 409),
+  `test_hub_link::test_lan_http_with_token_ok_public_http_rejected`, `test_provider_endpoint_v0145` (http LAN + khoá ⇒ 201),
+  `test_mcp_ssrf_v0145` (LAN + token), `test_pin_barriers_v0145` (bước 9 cùng mức không PIN, đúng agent), genh
+  `TestEnsureRunPermsRootOldImageReopens`; vitest `system-manage-scope-v0145`, `step9-prefill-v0145`,
+  `ws-forbidden-v0145`, `help-pin-v0145`, `p3-people` (bỏ cờ); e2e `v0145-integ` (huỷ PIN MCP, ghi chú + bỏ cờ trong chi
+  tiết, /guide/10 mời 1 người → PIN, nhân viên ở /help, manager system.manage=team ở /mcp), `pin-barriers-v0145`
+  (/guide/9 không đổi mức không PIN).
+- Chưa sửa (ghi lại): genh ở Docker rootless mà container phụ lỗi (chế độ mở) vẫn chỉ tin uid genh/APIUID mặc định 10001
+  cho tệp yêu cầu — cần dò uid api theo cách khác (`docker top`), để đợt sau.
