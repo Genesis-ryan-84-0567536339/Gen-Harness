@@ -5,11 +5,14 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/compose"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/dockercli"
+	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/hostlink"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/machine"
 )
 
@@ -54,6 +57,35 @@ type servicesStep struct {
 	client    *http.Client
 	timeout   time.Duration
 	pollEvery time.Duration
+	// ensureRunPerms siết hộp thư run/ (v0.1.45) SAU `docker compose up` — nil
+	// dùng ensureRunDirPerms (hostlink.EnsureRunPerms + ghi run_mode vào genh.json).
+	ensureRunPerms func(ctx context.Context, runner dockercli.Runner, installDir, composePath string, envOverlay []string) (string, error)
+}
+
+// ensureRunDirPerms siết hộp thư run/ về 2770 nhóm 10001 (ảnh api vừa lên đã có
+// gid 10001) — như ops.EnsureRunDirPerms (internal/ops import install nên không
+// gọi ngược được). Thất bại → run/ mở 0777 như cũ, mode "open" + lỗi.
+func ensureRunDirPerms(ctx context.Context, runner dockercli.Runner, installDir, composePath string, envOverlay []string) (string, error) {
+	if installDir == "" {
+		return hostlink.RunModeNA, nil
+	}
+	spec := hostlink.RunPermSpec{
+		InstallDir: installDir,
+		PsArgs:     compose.BaseArgs(composePath, "ps", "-q", "api"),
+		Env:        envOverlay,
+		Dir:        filepath.Dir(composePath),
+		Runner:     runner,
+	}
+	if data, err := os.ReadFile(composePath); err == nil {
+		if cf, err := compose.Parse(data); err == nil {
+			if img := cf.Services["api"].Image; !strings.Contains(img, "$") {
+				spec.Image = img
+			}
+		}
+	}
+	mode, err := hostlink.EnsureRunPerms(ctx, spec)
+	_ = hostlink.SetRunMode(installDir, mode)
+	return mode, err
 }
 
 func (servicesStep) ID() StepID   { return StepStartServices }
@@ -150,6 +182,20 @@ func (s servicesStep) Run(ctx context.Context, env *Env, rep Reporter) error {
 		}
 		rep.Report(Progress{Status: StatusError, Percent: 100, Err: se})
 		return se
+	}
+
+	// v0.1.45: ảnh api mới (nhóm gid 10001) đã lên — siết hộp thư run/ về 2770.
+	// Không siết được thì run/ mở như cũ, chỉ cảnh báo (không chặn cài đặt).
+	ensurePerms := s.ensureRunPerms
+	if ensurePerms == nil {
+		ensurePerms = ensureRunDirPerms
+	}
+	if mode, err := ensurePerms(ctx, runner, installDir, composePath, envOverlay); mode == hostlink.RunModeOpen {
+		detail := "Cảnh báo: run/ vẫn mở cho mọi người dùng trên máy — `genh doctor` thử siết lại"
+		if err != nil {
+			detail += " (" + err.Error() + ")"
+		}
+		rep.Report(Progress{Status: StatusRunning, Percent: 15, Detail: detail})
 	}
 
 	rep.Report(Progress{Status: StatusRunning, Percent: 20, Detail: "đang chờ " + readyPath})

@@ -72,12 +72,12 @@ func HasDoctorRequest(installDir string) bool {
 	return err == nil
 }
 
-// ConsumeDoctorRequest đọc AN TOÀN rồi XOÁ yêu cầu (xoá cả khi hỏng — watcher
+// ConsumeDoctorRequest đọc AN TOÀN (readRequestFile — đúng chủ sở hữu) rồi XOÁ yêu cầu (xoá cả khi hỏng — watcher
 // không kích lặp); trả ErrBadDoctorRequest khi request_id không khớp ^[a-f0-9]{16}$.
 func ConsumeDoctorRequest(installDir string) (DoctorRequest, error) {
 	var r DoctorRequest
 	path := DoctorRequestPath(installDir)
-	b, err := readStateFile(path, false)
+	b, err := readRequestFile(installDir, path)
 	_ = os.Remove(path)
 	if err != nil {
 		return r, err
@@ -115,7 +115,7 @@ func ReadDoctorStatus(installDir string) (DoctorStatus, error) {
 var errUnsafeDiagDir = errors.New("run/diagnostics không an toàn (symlink/không phải thư mục/không thuộc người chạy genh)")
 
 // EnsureDiagnosticsDir tạo (nếu chưa có) run/diagnostics 0755 và KIỂM nó là
-// thư mục thật thuộc người chạy genh — run/ 0777, api ghi được nên có thể cài
+// thư mục thật thuộc người chạy genh — api ghi được run/ nên có thể cài
 // sẵn symlink/thư mục của nó để genh ghi zip ra chỗ khác. Bên gọi ghi zip qua
 // tệp tạm O_EXCL (os.CreateTemp) trong thư mục này rồi rename.
 func EnsureDiagnosticsDir(installDir string) (string, error) {

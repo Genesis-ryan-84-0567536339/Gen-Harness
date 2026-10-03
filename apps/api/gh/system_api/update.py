@@ -21,16 +21,17 @@ import httpx
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gh.auth import service
+from gh.auth import rbac, service
 from gh.auth.deps import require
 from gh.chassis import actionlog
 from gh.config import get_settings
 from gh.db import DB
 from gh.errors import conflict
+from gh.hostlink_io import read_state, write_request
 
 log = logging.getLogger(__name__)
 router = APIRouter(tags=["system"])
-MANAGE = require("system.manage")
+MANAGE = require("system.manage", rbac.ALL)
 
 LATEST_CACHE_KEY = "gh:update:latest"
 # v0.1.30: 1 giờ → 10 phút (Boss thấy "mất nút update" gần 1 giờ sau khi v0.1.29 đã phát hành).
@@ -59,11 +60,10 @@ def _dir() -> Path:
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    return data if isinstance(data, dict) else None
+    """Đọc AN TOÀN một tệp JSON trong hộp thư (gh.hostlink_io.read_state: không theo symlink, không treo ở FIFO,
+    1 liên kết, ≤ 64 KiB, chủ = chủ run/). Tệp trong run/request/ do chính api ghi nên chấp nhận thêm uid của api.
+    Tệp thiếu/bẫy/hỏng ⇒ None (API trả "không rõ", không 500)."""
+    return read_state(path, allow_self=path.parent.name == "request")
 
 
 def _parse(v: str | None) -> tuple[int, int, int] | None:
@@ -313,10 +313,7 @@ async def request_update(request: Request, db: AsyncSession = DB,
     if restoring or (d / "request" / "restore.json").exists():
         raise conflict("RESTORE_IN_PROGRESS", "Đang khôi phục dữ liệu — chờ xong rồi thử lại")
     req = {"id": str(uuid.uuid4()), "requested_at": datetime.now(UTC).isoformat(), "by": user.actor_id}
-    target = _dir() / "request" / "update.json"
-    tmp = target.with_suffix(".tmp")
-    tmp.write_text(json.dumps(req), encoding="utf-8")
-    tmp.replace(target)
+    write_request(_dir() / "request", "update.json", req)
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                            action="system.update_requested", target_type="system", target_id="update",
                            target_label=s["current"], detail={"request_id": req["id"]}, ip=user.ip)

@@ -96,6 +96,8 @@ func (d diagLine) String() string {
 func RunDoctor(ctx context.Context, env *Env, outPath string, deps DoctorDeps, out io.Writer) error {
 	runner := deps.runner()
 	lines, as := collectDoctorLines(ctx, env, deps, runner)
+	// v0.1.45: tự chữa quyền hộp thư run/ (2770 nhóm 10001) + một dòng trạng thái.
+	lines = append(lines, runDirPermsDiagLine(ctx, env, runner))
 	for _, l := range lines {
 		_, _ = fmt.Fprintln(out, l.String())
 	}
@@ -116,6 +118,16 @@ func RunDoctor(ctx context.Context, env *Env, outPath string, deps DoctorDeps, o
 	}
 	_, _ = fmt.Fprintln(out, "\nBáo cáo đầy đủ (đã lọc bí mật): "+outPath)
 	return nil
+}
+
+// runDirPermsDiagLine siết lại quyền run/ (EnsureRunDirPerms) và trả dòng trạng thái.
+func runDirPermsDiagLine(ctx context.Context, env *Env, runner dockercli.Runner) diagLine {
+	mode, err := EnsureRunDirPerms(ctx, env, runner)
+	ok, text := RunDirPermsLine(mode)
+	if !ok && err != nil {
+		text += " (" + err.Error() + ")"
+	}
+	return diagLine{"Hộp thư run/", ok, text}
 }
 
 // collectDoctorLines chạy các mục chẩn đoán (không in, không ghi gì).

@@ -63,8 +63,16 @@ func TestRoundTrip(t *testing.T) {
 		t.Fatalf("info = %+v, %v", info, err)
 	}
 	st, _ := os.Stat(Dir(root))
-	if st.Mode().Perm() != 0o777 {
-		t.Fatalf("run dir perm = %v, want 0777 (api container ghi yêu cầu)", st.Mode().Perm())
+	switch runtime.GOOS {
+	case "linux":
+		// v0.1.45: tạo 0770 — EnsureRunPerms (sau compose up) mới đặt nhóm 10001 + 2770.
+		if st.Mode().Perm()&0o007 != 0 {
+			t.Fatalf("run dir perm = %v, không được mở cho người dùng khác", st.Mode().Perm())
+		}
+	case "darwin":
+		if st.Mode().Perm() != 0o777 {
+			t.Fatalf("run dir perm = %v, want 0777 (macOS giữ như cũ)", st.Mode().Perm())
+		}
 	}
 
 	if HasRequest(root) || ConsumeRequest(root) {

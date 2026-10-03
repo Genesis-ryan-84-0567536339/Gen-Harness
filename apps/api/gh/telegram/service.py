@@ -36,6 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gh import crypto
 from gh.config import get_settings
 from gh.errors import ApiError, field_errors
+from gh.hostlink_io import write_request
 from gh.telegram import client as tg
 
 log = logging.getLogger("gh.telegram")
@@ -221,15 +222,9 @@ def host_dir() -> Path:
 
 
 def write_json_atomic(path: Path, data: dict[str, Any], mode: int = 0o644) -> None:
-    """Ghi nguyên tử: tệp tạm cùng thư mục → chmod → rename (genh không bao giờ đọc tệp viết dở)."""
-    tmp = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex[:6]}.tmp")
-    try:
-        tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-        os.chmod(tmp, mode)
-        tmp.replace(path)
-    finally:
-        if tmp.exists():
-            tmp.unlink(missing_ok=True)
+    """Ghi nguyên tử vào hộp thư (gh.hostlink_io.write_request: mkstemp O_EXCL → fchmod → fsync → os.replace) —
+    genh không bao giờ đọc tệp viết dở, không ai cài sẵn symlink ở tên tạm được."""
+    write_request(path.parent, path.name, data, mode=mode)
 
 
 def host_payload(row: Any) -> dict[str, Any]:

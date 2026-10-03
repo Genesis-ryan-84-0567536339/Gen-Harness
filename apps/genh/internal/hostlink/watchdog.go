@@ -23,7 +23,7 @@ import (
 //	run/request/watchdog.json  ← api ghi khi Owner bấm "Gửi thử"; genh XOÁ trước khi làm
 //
 // State chống spam KHÔNG nằm ở đây mà ở <gốc cài đặt>/config/watchdog-state.json
-// (0600, chỉ genh đọc) — run/ 0777 nên mọi thứ đọc từ run/ đều KHÔNG tin cậy.
+// (0600, chỉ genh đọc) — api ghi được run/ nên mọi thứ đọc từ run/ đều KHÔNG tin cậy.
 
 // Tên tệp trong run/ (hợp đồng với apps/api — giữ đúng chữ).
 const (
@@ -288,7 +288,7 @@ func HasWatchdogRequest(installDir string) bool {
 func ConsumeWatchdogRequest(installDir string) (WatchdogRequest, error) {
 	var r WatchdogRequest
 	path := WatchdogRequestPath(installDir)
-	b, err := readStateFile(path, false)
+	b, err := readRequestFile(installDir, path)
 	_ = os.Remove(path)
 	if err != nil {
 		return r, err
