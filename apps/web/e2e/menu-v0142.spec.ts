@@ -405,9 +405,9 @@ test.describe('v0.1.42 · nghiệm thu sau tích hợp', () => {
 
   test('19. Header gọn ngoài Nâng cao; logo phiên bản thật; menu tài khoản không còn Phụ đề tiếng Anh', async ({ page }) => {
     await loginAsOwner(page);
-    const about = page.waitForResponse((r) => r.url().endsWith('/api/v1/system/about') && r.ok());
+    // Đọc phiên bản bằng gọi API thẳng: body của response trang đã điều hướng có thể bị trình duyệt bỏ (flake CI).
+    const ver = ((await apiCall(page, 'GET', '/system/about')) as { version: string }).version;
     await page.goto('/overview');
-    const ver = ((await (await about).json()) as { version: string }).version;
     const hd = page.locator('header.hd');
     await expect(hd.getByText(/\d+ kênh · \d+ nhóm/)).toBeVisible();
     await expect(hd.getByText(/^tự trị/)).toHaveCount(0);
