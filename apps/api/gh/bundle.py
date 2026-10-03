@@ -149,6 +149,9 @@ REENCRYPT_TARGETS: list[ReencryptTarget] = [
     # lượt nhập (phiên chỉ là cookie, đăng nhập lại là lấy lại được).
     ReencryptTarget("core.social_accounts", "id", "state_enc", _social_state_aad, extra_cols=("org_id",),
                     on_fail="needs_login"),
+    # v0.1.44 (F-8c): token bot Telegram "Báo động & bản tin" — gh/telegram/service.py::TOKEN_AAD. Sau nhập gói,
+    # lifespan api đồng bộ lại run/telegram.json (AAD b"telegram_notify") bằng khoá master mới.
+    ReencryptTarget("ops.notify_channels", "org_id", "token_enc", b"telegram_token"),
 ]
 
 SOCIAL_KEY_CHANGED_REASON = "key_changed"
@@ -535,6 +538,12 @@ async def _reencrypt_secrets(old_master_key: bytes) -> None:
     needs_login = 0
     async with sm() as db:
         for t in REENCRYPT_TARGETS:
+            # Gói CŨ hơn bản này (vd xuất trước migration 0029 — chưa có ops.notify_channels): bảng chưa tồn tại lúc
+            # mã hoá lại (genh chạy `alembic upgrade heads` SAU khi nhập) ⇒ bỏ qua bảng đó, không làm hỏng cả lượt
+            # (lỗi ở đây cuộn lại mọi bảng khác và tệp keys.json tạm đã bị xoá ⇒ bí mật kẹt ở khoá cũ vĩnh viễn).
+            if (await db.execute(text("SELECT to_regclass(:t)"), {"t": t.table})).scalar() is None:
+                log.info("Bảng %s chưa có trong gói (gói từ bản cũ hơn) — bỏ qua bước mã hoá lại bảng này", t.table)
+                continue
             cols = ", ".join((t.id_col, t.secret_col, *t.extra_cols))
             rows = (await db.execute(
                 text(f"SELECT {cols} FROM {t.table} WHERE {t.secret_col} IS NOT NULL"))).mappings().all()  # noqa: S608

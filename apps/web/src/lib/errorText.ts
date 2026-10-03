@@ -45,10 +45,13 @@ export function errorText(e: unknown, tz: string = DEFAULT_TZ): string {
     if (isAgyOnlyUnavailable(e)) return agyOnlyText(e);
     if (isModelUnavailable(e)) return MODEL_UNAVAILABLE_TEXT;
     // v0.1.35: 500 INTERNAL — câu dễ hiểu (title) KÈM mã lỗi; `detail` chỉ có mã nên không được thay chỗ title.
+    // v0.1.44 (F-4b): kèm "Mã yêu cầu" (X-Request-ID) cạnh mã lỗi để người hỗ trợ đối chiếu nhật ký.
     if (e.code === 'INTERNAL') {
       const id = (e.problem as { error_id?: unknown }).error_id;
       const title = titleOf(e, INTERNAL_FALLBACK_TITLE);
-      return typeof id === 'string' && id ? `${title}. Mã lỗi ${id} — gửi mã này cho người hỗ trợ.` : title;
+      const codes = [typeof id === 'string' && id ? `Mã lỗi ${id}` : '', e.requestId ? `Mã yêu cầu ${e.requestId}` : ''].filter(Boolean);
+      if (!codes.length) return title;
+      return `${title}. ${codes.join(' · ')} — gửi ${codes.length > 1 ? 'các mã' : 'mã'} này cho người hỗ trợ.`;
     }
     // v0.1.35: PIN_LOCKED — nói rõ PIN bị khoá, giờ mở khoá theo múi giờ tổ chức (không phải ISO UTC thô).
     if (e.code === 'PIN_LOCKED') {
@@ -73,7 +76,8 @@ export function errorReasons(e: unknown): string | null {
 }
 
 /**
- * v0.1.41: dòng kỹ thuật cho "Chi tiết kỹ thuật" dưới câu lỗi thân thiện — mã HTTP, mã lỗi, mã nhật ký, lý do. Luôn là
+ * v0.1.41: dòng kỹ thuật cho "Chi tiết kỹ thuật" dưới câu lỗi thân thiện — mã HTTP, mã lỗi, mã nhật ký, mã yêu cầu
+ * (v0.1.44, X-Request-ID), lý do. Luôn là
  * chuỗi (hoặc null khi không có gì để thêm, vd Sếp tự huỷ PIN); không bao giờ mang đối tượng thô.
  */
 export function errorDetail(e: unknown): string | null {
@@ -83,6 +87,7 @@ export function errorDetail(e: unknown): string | null {
     if (typeof e.code === 'string' && e.code) parts.push(e.code);
     const id = (e.problem as { error_id?: unknown }).error_id;
     if (typeof id === 'string' && id) parts.push(`error_id ${id}`);
+    if (e.requestId) parts.push(`request_id ${e.requestId}`);
     if (e.reasons.length) parts.push(e.reasons.join('; '));
     return parts.join(' · ');
   }

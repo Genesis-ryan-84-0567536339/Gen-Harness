@@ -8,8 +8,10 @@ export const GENH_COMMANDS: Array<{ cmd: string; what: string }> = [
   { cmd: 'genh trust-ca', what: 'Trình duyệt báo "không an toàn": cho máy này tin chứng chỉ HTTPS nội bộ.' },
   { cmd: 'genh backup', what: 'Sao lưu ngay (thêm --to <thư mục> để chép ra ngoài). Trong Console: Cài đặt › Sao lưu & cập nhật › Sao lưu ngay.' },
   { cmd: 'genh status', what: 'Xem các dịch vụ đang chạy, phiên bản và dung lượng dữ liệu đang dùng.' },
-  { cmd: 'genh stop', what: 'Dừng toàn bộ dịch vụ (không mất dữ liệu). Chạy tiếp genh start để khởi động lại (vd. khi Bộ xử lý nền đã ngừng).' },
-  { cmd: 'genh start', what: 'Bật lại toàn bộ dịch vụ sau genh stop.' },
+  { cmd: 'genh stop', what: 'Dừng toàn bộ dịch vụ (không mất dữ liệu); trực canh máy chủ tạm nghỉ (không tự khởi động lại, không báo Telegram) tới khi genh start. Chạy tiếp genh start để khởi động lại (vd. khi Bộ xử lý nền đã ngừng).' },
+  { cmd: 'genh start', what: 'Bật lại toàn bộ dịch vụ sau genh stop (trực canh máy chủ chạy lại).' },
+  { cmd: 'genh doctor', what: 'Tạo gói chẩn đoán đã lọc bí mật để gửi người hỗ trợ (trong Console: Trợ giúp › Gói chẩn đoán).' },
+  { cmd: 'genh watchdog status', what: 'Xem trực canh máy chủ: lịch, lần chạy gần nhất, sự cố đang mở.' },
   { cmd: 'genh logs worker', what: 'Xem lỗi gần nhất của Bộ xử lý nền (đổi "worker" thành api, bridge… cho dịch vụ khác).' },
 ];
 

@@ -104,6 +104,8 @@ func run(args []string) int {
 		return runExport(args[1:])
 	case "offsite":
 		return runOffsite(args[1:])
+	case "watchdog":
+		return runWatchdogCmd(args[1:])
 	case "import":
 		return runImport(args[1:])
 	case "version", "-v", "--version":
@@ -154,15 +156,28 @@ Lệnh vận hành (cờ chung mọi lệnh dưới đây: --port N, --install-d
                                           (lỗi → quay về bản an toàn; chưa nhận file host tuỳ ý)
   genh handle-requests                   (watcher gọi) làm yêu cầu Console để lại trong hộp thư
                                           run/request: update.json → cập nhật, restore.json → khôi phục,
-                                          offsite.json → bản sao ngoài máy (thứ tự update > restore > offsite)
+                                          offsite.json → bản sao ngoài máy, doctor.json → gói chẩn đoán,
+                                          watchdog.json → gửi thử báo động
+                                          (thứ tự update > restore > offsite > doctor > watchdog)
   genh doctor [--out report.zip]         chẩn đoán runtime/cổng/chứng chỉ/dung lượng/đồng hồ/
-                                          kết nối kênh, xuất báo cáo zip
+                                          kết nối kênh, xuất báo cáo zip (đã lọc bí mật)
+  genh doctor --notify [--quiet] [--test]
+                                          trực canh máy chủ MỘT lượt (lịch 12 phút gọi): đo dịch vụ,
+                                          tự khởi động lại dịch vụ chết (≤ 1 lần/giờ), báo Telegram
+                                          ("Báo động & bản tin" trong Console) — chỉ báo sự cố MỚI và
+                                          sự cố ĐÃ ỔN; --test gửi thêm một tin thử; không tạo zip
+  genh doctor --if-requested             (watcher gọi) làm gói chẩn đoán Console yêu cầu
+                                          (run/request/doctor.json) vào run/diagnostics/
+  genh watchdog enable|disable|status    bật/tắt/xem lịch trực canh máy chủ mỗi 12 phút (mặc định
+                                          BẬT sau install/update, kể cả khi --no-auto-update);
+                                          status in cơ chế, lần chạy gần nhất, sự cố đang mở
   genh reset-setup [--yes]               sinh mã thiết lập mới (hỏi xác nhận trừ khi --yes)
   genh reset-password                    quên mật khẩu Owner: in email + mật khẩu tạm mới
                                           (giữ nguyên dữ liệu, đăng xuất các phiên cũ)
   genh trust-ca                          tin cậy lại CA nội bộ cho trình duyệt/hệ điều hành
                                           (hết cảnh báo "Not secure"; genh update tự làm)
-  genh stop                              dừng toàn bộ dịch vụ (giữ dữ liệu)
+  genh stop                              dừng toàn bộ dịch vụ (giữ dữ liệu) — trực canh tạm nghỉ
+                                          (không tự khởi động lại, không báo động) tới khi genh start
   genh start                             khởi động lại toàn bộ dịch vụ
   genh uninstall [--delete-data] [--yes] gỡ container/lối tắt/PATH/lịch — mặc định GIỮ dữ liệu
                                           (volume Docker); --delete-data mới xoá dữ liệu (gõ
@@ -559,6 +574,8 @@ func runUpdate(args []string) int {
 		return 1
 	}
 	_ = hostlink.Finish(env.InstallDir, "done", version, "")
+	// Cập nhật xong = dịch vụ đã khởi động lại ⇒ bỏ đánh dấu "Owner chủ động dừng".
+	_ = ops.ClearOwnerPause(env.InstallDir)
 	publishHostInfo(env.InstallDir, env.Port)
 	if deferred {
 		fmt.Println(deferredAfterRunLine)
@@ -1000,10 +1017,27 @@ func runHandleRequests(args []string) int {
 		return runRestore(append([]string{"--if-requested"}, pass...))
 	case "offsite":
 		return runOffsite(append(handleRequestOffsiteArgs(*quiet), pass...))
+	case "doctor":
+		return runDoctor(append(handleRequestDoctorArgs(), pass...))
+	case "watchdog":
+		// Xoá yêu cầu TRƯỚC khi làm (watcher không kích lặp); tệp hỏng/action lạ ⇒ bỏ.
+		if _, err := hostlink.ConsumeWatchdogRequest(dir); err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "genh: bỏ yêu cầu gửi thử không hợp lệ: %v\n", err)
+			return 0
+		}
+		return runDoctor(append(handleRequestWatchdogArgs(), pass...))
 	default:
 		return 0
 	}
 }
+
+// handleRequestDoctorArgs: run/request/doctor.json → `genh doctor --if-requested`
+// (gói chẩn đoán vào run/diagnostics/, genh tự xoá tệp yêu cầu trước khi làm).
+func handleRequestDoctorArgs() []string { return []string{"--if-requested"} }
+
+// handleRequestWatchdogArgs: run/request/watchdog.json ("Gửi thử") → một lượt
+// trực canh kèm tin thử.
+func handleRequestWatchdogArgs() []string { return []string{"--notify", "--test", "--quiet"} }
 
 // handleRequestOffsiteArgs: cờ runHandleRequests chuyển cho runOffsite khi
 // Console để lại run/request/offsite.json — lệnh con "run" + --if-requested:
@@ -1139,23 +1173,170 @@ func handleRequestUpdateArgs(quiet bool) []string {
 	return upd
 }
 
-func runDoctor(args []string) int {
+// doctorFlags là cờ của `genh doctor` sau khi Parse.
+type doctorFlags struct {
+	port        int
+	installDir  string
+	out         string
+	notify      bool
+	quiet       bool
+	test        bool
+	ifRequested bool
+}
+
+// parseDoctorFlags: `genh doctor [--out f] | --notify [--quiet] [--test] | --if-requested`.
+func parseDoctorFlags(args []string) (doctorFlags, error) {
 	fs, port, installDir := opsFlagSet("doctor")
-	outPath := fs.String("out", "genh-doctor-report.zip", "đường dẫn tệp báo cáo zip xuất ra")
+	fs.SetOutput(io.Discard)
+	out := fs.String("out", "genh-doctor-report.zip", "đường dẫn tệp báo cáo zip xuất ra")
+	notify := fs.Bool("notify", false, "trực canh máy chủ một lượt: đo, tự khởi động lại dịch vụ chết, báo Telegram (không tạo zip)")
+	quiet := fs.Bool("quiet", false, "kèm --notify: chỉ in khi có thay đổi (lịch 12 phút dùng cờ này)")
+	test := fs.Bool("test", false, "kèm --notify: gửi thêm một tin thử qua Telegram")
+	ifReq := fs.Bool("if-requested", false, "làm gói chẩn đoán Console yêu cầu (run/request/doctor.json — watcher gọi); không có thì thoát ngay")
 	if err := fs.Parse(args); err != nil {
+		return doctorFlags{}, err
+	}
+	if fs.NArg() != 0 {
+		return doctorFlags{}, fmt.Errorf("genh doctor không nhận đối số %q", fs.Arg(0))
+	}
+	f := doctorFlags{port: *port, installDir: *installDir, out: *out, notify: *notify, quiet: *quiet, test: *test, ifRequested: *ifReq}
+	if f.test && !f.notify {
+		return doctorFlags{}, errors.New("--test chỉ dùng cùng --notify")
+	}
+	if f.notify && f.ifRequested {
+		return doctorFlags{}, errors.New("--notify và --if-requested không dùng chung")
+	}
+	return f, nil
+}
+
+func runDoctor(args []string) int {
+	f, err := parseDoctorFlags(args)
+	if err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "genh: %v\n", err)
+		_, _ = fmt.Fprintln(os.Stderr, "cách dùng: genh doctor [--out report.zip] | --notify [--quiet] [--test] | --if-requested")
+		return 2
+	}
+	env, ok := resolveOpsEnv(f.port, f.installDir)
+	if !ok {
+		return 1
+	}
+	ctx, stop := signalContext()
+	defer stop()
+	switch {
+	case f.notify:
+		// Mã thoát: luôn 0 trừ lỗi cấu hình nghiêm trọng — sự cố của máy chủ đã
+		// báo qua Telegram/watchdog-status.json, timer không được "đỏ" vì chúng.
+		if err := ops.RunWatchdog(ctx, env, ops.WatchdogOptions{Quiet: f.quiet, Test: f.test}, ops.WatchdogDeps{}, os.Stdout); err != nil {
+			reportOpErr(err)
+			return 1
+		}
+		return 0
+	case f.ifRequested:
+		if !hostlink.HasDoctorRequest(env.InstallDir) {
+			return 0
+		}
+		if err := ops.RunDoctorRequest(ctx, env, ops.DoctorDeps{}, os.Stdout); err != nil {
+			reportOpErr(err)
+			return 1
+		}
+		return 0
+	}
+	if err := ops.RunDoctor(ctx, env, f.out, ops.DoctorDeps{}, os.Stdout); err != nil {
+		reportOpErr(err)
+		return 1
+	}
+	return 0
+}
+
+// runWatchdogCmd: `genh watchdog enable|disable|status` (v0.1.44, F-6b).
+func runWatchdogCmd(args []string) int {
+	if len(args) == 0 {
+		_, _ = fmt.Fprintln(os.Stderr, "genh: cách dùng: genh watchdog enable|disable|status")
+		return 2
+	}
+	fs, port, installDir := opsFlagSet("watchdog " + args[0])
+	if err := fs.Parse(args[1:]); err != nil {
 		return 2
 	}
 	env, ok := resolveOpsEnv(*port, *installDir)
 	if !ok {
 		return 1
 	}
-	ctx, stop := signalContext()
-	defer stop()
-	if err := ops.RunDoctor(ctx, env, *outPath, ops.DoctorDeps{}, os.Stdout); err != nil {
-		reportOpErr(err)
-		return 1
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	sched := ops.NewWatchdogScheduler(env)
+	switch args[0] {
+	case "enable":
+		msg, mech, err := sched.Enable(ctx)
+		if err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "genh: bật trực canh máy chủ thất bại: %v\n", err)
+			return 1
+		}
+		if err := ops.SetWatchdogOptOut(env.InstallDir, false, time.Now()); err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "genh: cảnh báo — không xoá được %s: %v (lần cập nhật sau vẫn coi như Owner đã tắt)\n",
+				ops.WatchdogOptOutPath(env.InstallDir), err)
+		}
+		_ = hostlink.SetWatchdogSchedule(env.InstallDir, mech)
+		fmt.Println(msg)
+		return 0
+	case "disable":
+		msg, err := sched.Disable(ctx)
+		if err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "genh: tắt trực canh máy chủ thất bại: %v\n", err)
+			return 1
+		}
+		// Ghi nhớ lựa chọn của Owner: install/update (kể cả lịch đêm) không bật lại.
+		if err := ops.SetWatchdogOptOut(env.InstallDir, true, time.Now()); err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "genh: cảnh báo — không ghi được %s: %v (lần cập nhật sau có thể bật lại trực canh)\n",
+				ops.WatchdogOptOutPath(env.InstallDir), err)
+		}
+		_ = hostlink.SetWatchdogSchedule(env.InstallDir, "")
+		fmt.Println(msg)
+		return 0
+	case "status":
+		ss, err := sched.Status(ctx)
+		if err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "genh: kiểm lịch trực canh thất bại: %v\n", err)
+			return 1
+		}
+		ws, werr := hostlink.ReadWatchdogStatus(env.InstallDir)
+		fmt.Print(watchdogStatusText(ss, ws, werr, ops.WatchdogOptedOut(env.InstallDir)))
+		return 0
+	default:
+		_, _ = fmt.Fprintf(os.Stderr, "genh: lệnh con watchdog không rõ %q (dùng enable|disable|status)\n", args[0])
+		return 2
 	}
-	return 0
+}
+
+// watchdogStatusText: cơ chế lịch + lần chạy gần nhất + sự cố đang mở.
+func watchdogStatusText(ss autoupdate.WatchdogSchedule, ws hostlink.WatchdogStatus, werr error, optedOut bool) string {
+	var b strings.Builder
+	state := "TẮT"
+	if ss.Enabled {
+		state = "BẬT (" + ss.Mechanism + ")"
+	} else if optedOut {
+		state = "TẮT — Owner đã tắt bằng `genh watchdog disable` (cập nhật không tự bật lại; bật lại: genh watchdog enable)"
+	}
+	_, _ = fmt.Fprintf(&b, "Trực canh máy chủ: %s\n  %s\n", state, ss.Detail)
+	if werr != nil || ws.LastRunAt == "" {
+		b.WriteString("Lần chạy gần nhất: chưa có\n")
+		return b.String()
+	}
+	_, _ = fmt.Fprintf(&b, "Lần chạy gần nhất: %s (%s)\n", ws.LastRunAt, ws.State)
+	tg := ws.Telegram
+	if ws.TelegramErrorCode != "" {
+		tg += " — " + ws.TelegramErrorCode
+	}
+	_, _ = fmt.Fprintf(&b, "Telegram: %s\n", tg)
+	if len(ws.Incidents) == 0 {
+		b.WriteString("Sự cố đang mở: không có\n")
+		return b.String()
+	}
+	_, _ = fmt.Fprintf(&b, "Sự cố đang mở (%d):\n", len(ws.Incidents))
+	for _, i := range ws.Incidents {
+		_, _ = fmt.Fprintf(&b, "  • %s — %s (từ %s)\n", i.Key, i.Title, i.Since)
+	}
+	return b.String()
 }
 
 func runResetSetup(args []string) int {
@@ -1404,6 +1585,7 @@ func runInstall(args []string) int {
 	if !*noAutoUpdate {
 		enableAutoUpdateAfterInstall(dir)
 	}
+	_ = ops.ClearOwnerPause(dir)
 	publishHostInfo(dir, *port)
 
 	return 0
@@ -1449,7 +1631,8 @@ func publishHostInfo(installDir string, port int) {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
 		rp := autoupdate.RequestPaths{InstallDir: installDir, RequestDir: hostlink.RequestDirPath(installDir), RequestFile: hostlink.RequestPath(installDir),
-			RestoreFile: hostlink.RestoreRequestPath(installDir), OffsiteFile: hostlink.OffsiteRequestPath(installDir)}
+			RestoreFile: hostlink.RestoreRequestPath(installDir), OffsiteFile: hostlink.OffsiteRequestPath(installDir),
+			DoctorFile: hostlink.DoctorRequestPath(installDir), WatchdogFile: hostlink.WatchdogRequestPath(installDir)}
 		if port != machine.DefaultPort {
 			rp.Port = port
 		}
@@ -1472,6 +1655,10 @@ func publishHostInfo(installDir string, port int) {
 		if _, err := ops.RefreshOffsiteSchedule(ctx, &ops.Env{InstallDir: installDir, Port: port}, ops.OffsiteDeps{}); err != nil {
 			fmt.Fprintf(os.Stderr, "genh: cảnh báo — không làm mới được lịch sao lưu ra ổ ngoài: %v\n", err)
 		}
+		// v0.1.44 (F-6b): lịch trực canh máy chủ mỗi 12 phút — idempotent, KHÔNG phụ
+		// thuộc --no-auto-update (trực canh không đổi gì trên máy ngoài tự khởi động
+		// lại dịch vụ đã chết). Lỗi chỉ cảnh báo.
+		enableWatchdogSchedule(ctx, installDir, port)
 		// v0.1.33: Console chỉ hứa "Tự cài đêm …" khi lịch đêm thật sự đang bật.
 		if st, err := autoupdate.GetStatus(ctx, deps); err == nil {
 			enabled := st.Enabled
@@ -1486,6 +1673,25 @@ func publishHostInfo(installDir string, port int) {
 	actx, acancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer acancel()
 	_ = hostlink.WriteAutostartStatus(installDir, ops.CheckAutostart(actx, ops.AutostartDeps{}))
+}
+
+// enableWatchdogSchedule bật (idempotent) lịch trực canh và ghi cơ chế vào
+// run/watchdog-status.json ("schedule") — in một dòng khi lần đầu bật. Owner đã
+// `genh watchdog disable` (config/watchdog-disabled.json) ⇒ không làm gì.
+func enableWatchdogSchedule(ctx context.Context, installDir string, port int) {
+	if ops.WatchdogOptedOut(installDir) { // Owner đã chủ động tắt — không ghi đè lựa chọn đó
+		return
+	}
+	msg, mech, err := ops.NewWatchdogScheduler(&ops.Env{InstallDir: installDir, Port: port}).Enable(ctx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "genh: cảnh báo — không bật được trực canh máy chủ: %v (thử lại: genh watchdog enable)\n", err)
+		return
+	}
+	prev, perr := hostlink.ReadWatchdogStatus(installDir)
+	if perr != nil || prev.Schedule != mech {
+		_ = hostlink.SetWatchdogSchedule(installDir, mech)
+		fmt.Println(msg)
+	}
 }
 
 // programObserver chuyển install.Snapshot thành tui.SnapshotMsg gửi vào

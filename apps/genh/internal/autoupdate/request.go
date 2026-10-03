@@ -29,7 +29,8 @@ const (
 // requestArgs là đối số watcher: `genh handle-requests` tự chọn việc theo tệp
 // trong hộp thư (update.json → `genh update --if-requested`, restore.json →
 // `genh restore --if-requested`, offsite.json (v0.1.40) → `genh offsite
-// … --if-requested`). Port > 0 (bản cài không dùng cổng mặc định)
+// … --if-requested`, doctor.json (v0.1.44) → `genh doctor --if-requested`,
+// watchdog.json (v0.1.44) → `genh doctor --notify --test`). Port > 0 (bản cài không dùng cổng mặc định)
 // được truyền theo để bước kiểm /ready gọi đúng cổng.
 func requestArgs(port int) []string {
 	args := []string{"handle-requests", "--quiet"}
@@ -158,6 +159,10 @@ type RequestPaths struct {
 	RestoreFile string
 	// OffsiteFile là tệp yêu cầu bản sao ngoài máy (v0.1.40; rỗng = không nhận).
 	OffsiteFile string
+	// DoctorFile là tệp yêu cầu gói chẩn đoán (v0.1.44; rỗng = không nhận).
+	DoctorFile string
+	// WatchdogFile là tệp yêu cầu "Gửi thử" của trực canh (v0.1.44; rỗng = không nhận).
+	WatchdogFile string
 	// Port là cổng HTTPS của bản cài khi KHÁC mặc định (0 = mặc định).
 	Port int
 	// Env là biến môi trường "KEY=VALUE" cần mang theo (ví dụ GENH_COMPOSE_FILE
@@ -173,6 +178,12 @@ func (rp RequestPaths) files() []string {
 	}
 	if rp.OffsiteFile != "" {
 		out = append(out, rp.OffsiteFile)
+	}
+	if rp.DoctorFile != "" {
+		out = append(out, rp.DoctorFile)
+	}
+	if rp.WatchdogFile != "" {
+		out = append(out, rp.WatchdogFile)
 	}
 	return out
 }

@@ -120,3 +120,28 @@ func TestSystemdRequestServiceUnit_KillModeMixed(t *testing.T) {
 	mustContain(t, unit, "KillMode=mixed")
 	mustContain(t, unit, "TimeoutStopSec=900")
 }
+
+// v0.1.44: watcher nhận cả yêu cầu gói chẩn đoán (doctor.json) và "Gửi thử" (watchdog.json).
+func TestRequestWatcher_DoctorVaWatchdogFile(t *testing.T) {
+	rp := testRP
+	rp.OffsiteFile = "/home/u/.gen-harness/run/request/offsite.json"
+	rp.DoctorFile = "/home/u/.gen-harness/run/request/doctor.json"
+	rp.WatchdogFile = "/home/u/.gen-harness/run/request/watchdog.json"
+	path := SystemdRequestPathUnit(rp.files()...)
+	mustContain(t, path, "PathExists="+rp.DoctorFile)
+	mustContain(t, path, "PathExists="+rp.WatchdogFile)
+	line := CrontabRequestLine("/g/genh", "/g/log", rp)
+	mustContain(t, line, "[ -f "+rp.OffsiteFile+" ] || [ -f "+rp.DoctorFile+" ] || [ -f "+rp.WatchdogFile+" ]; } && ")
+	// launchd QueueDirectories theo dõi cả thư mục request/ ⇒ đã bao hai tệp mới.
+	mustContain(t, LaunchdRequestPlist("/g/genh", "/g/log", rp), "<string>"+rp.RequestDir+"</string>")
+
+	home := t.TempDir()
+	deps := Deps{Runner: newFakeRunner(), GenhPath: "/g/genh", LogFile: "/g/log", HomeDir: home, GOOS: "linux",
+		LookPath: func(string) (string, error) { return "/usr/bin/systemctl", nil }}
+	if got, err := EnsureRequestWatcher(context.Background(), deps, rp); err != nil || got != UpdaterSystemd {
+		t.Fatalf("EnsureRequestWatcher = %q, %v", got, err)
+	}
+	b, _ := os.ReadFile(filepath.Join(home, ".config", "systemd", "user", RequestTaskName+".path"))
+	mustContain(t, string(b), "PathExists="+rp.DoctorFile)
+	mustContain(t, string(b), "PathExists="+rp.WatchdogFile)
+}

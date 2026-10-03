@@ -229,6 +229,9 @@ describe('HelpPage', () => {
     expect(text).toContain('Phiên bản máy chủ: v0.1.36 · phiên bản công cụ cài đặt (genh): v0.1.35');
     expect(text).not.toContain('Phiên bản ảnh');
     expect(GENH_COMMANDS.find((c) => c.cmd === 'genh status')?.what).not.toContain('ổ đĩa');
+    // v0.1.44: genh stop cũng tạm dừng trực canh; thẻ Gói chẩn đoán/khối Trực canh bảo chạy genh doctor.
+    expect(GENH_COMMANDS.find((c) => c.cmd === 'genh stop')?.what).toContain('trực canh máy chủ tạm nghỉ');
+    expect(GENH_COMMANDS.map((c) => c.cmd)).toEqual(expect.arrayContaining(['genh doctor', 'genh watchdog status']));
   });
 
   it('diagnosticText: bản phát triển khi không có phiên bản', () => {

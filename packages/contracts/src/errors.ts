@@ -33,6 +33,15 @@ export class ApiError extends Error {
     return Array.isArray(raw) ? raw.filter((r): r is string => typeof r === 'string' && r.trim() !== '') : [];
   }
 
+  /**
+   * v0.1.44 (F-4b): "Mã yêu cầu" (X-Request-ID) để đối chiếu nhật ký máy chủ — `request_id` trong thân problem+json,
+   * hoặc (client gắn vào problem) header `X-Request-ID` khi thân không có/không phải JSON (vd 502 từ proxy).
+   */
+  get requestId(): string | null {
+    const v = (this.problem as { request_id?: unknown }).request_id;
+    return typeof v === 'string' && v.trim() ? v.trim() : null;
+  }
+
   /** 401 PIN_INVALID → attempts left before lock. */
   get attemptsLeft(): number | null {
     const v = this.problem.attempts_left;

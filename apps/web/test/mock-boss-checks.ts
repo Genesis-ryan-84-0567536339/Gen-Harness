@@ -13,6 +13,8 @@
  * - jev: theo nguồn `system_one` của `mock-phase2` (không có → JEV_NOT_CONFIGURED).
  * - claude_call đạt mà claude_login chưa đạt (phiên có từ trước v0.1.39) → ghi claude_login 'pass'
  *   (`login_source: existing_session`) như `_adopt_existing_claude_login` của api.
+ * - telegram (v0.1.44, dòng 6, bắt buộc ⇒ required_total 5): Gửi thử của `mock-telegram` (chưa cấu hình →
+ *   TELEGRAM_NOT_CONFIGURED; TELEGRAM_RATE_LIMITED tạm, không ghi); phản hồi `run` kèm `host_requested`.
  * - agy_switch: chỉ đếm khi hồ sơ đang dùng TRƯỚC khi đổi (`from_profile`) khác hồ sơ đích (đổi sang chính nó = 0).
  * Hook e2e `POST /api/v1/__mock/p3/bossChecks/seedAgy {}`: đặt sẵn 2 hồ sơ Google an@… (không dùng), binh@… (đang dùng).
  * Hook e2e `POST /api/v1/__mock/p3/bossChecks/seedClaude {}`: một hồ sơ Claude đang dùng, CHƯA có bản claude_login.
@@ -20,6 +22,7 @@
 import { randomUUID } from 'node:crypto';
 import type { BossCheck, BossCheckKey, BossOverview, BossRow, CliProfile, HubLink, Provider, SocialAccount } from '@gen-harness/contracts';
 import type { P2Ctx } from './mock-phase2';
+import type { TelegramOutcome } from './mock-telegram';
 
 interface Opts {
   fresh: boolean;
@@ -31,6 +34,8 @@ interface Opts {
   activateCli: (id: string) => boolean;
   providers: () => Provider[];
   onCliLogin: (fn: (kind: string, ok: boolean, email: string | null) => void) => void;
+  /** v0.1.44 (F-8c): một lượt Gửi thử Telegram của mock-telegram. */
+  telegramTest: () => TelegramOutcome;
 }
 
 /** Như `boss.mask_email` của api: 'binh@x.vn' → 'b***@x.vn'. */
@@ -40,8 +45,8 @@ const mask = (email: string | null | undefined): string | null => {
   return i > 0 ? `${email[0]}***@${email.slice(i + 1)}` : null;
 };
 
-const KEYS: BossCheckKey[] = ['hub', 'facebook', 'agy_login', 'agy_call', 'agy_switch', 'claude_login', 'claude_call', 'jev'];
-const RUNNABLE = new Set<BossCheckKey>(['hub', 'facebook', 'agy_call', 'agy_switch', 'claude_call', 'jev']);
+const KEYS: BossCheckKey[] = ['hub', 'facebook', 'agy_login', 'agy_call', 'agy_switch', 'claude_login', 'claude_call', 'jev', 'telegram'];
+const RUNNABLE = new Set<BossCheckKey>(['hub', 'facebook', 'agy_call', 'agy_switch', 'claude_call', 'jev', 'telegram']);
 const NEEDS_PIN = new Set<BossCheckKey>(['hub', 'agy_switch']);
 const FB_READ_MS = 1500;
 
@@ -51,6 +56,7 @@ const ROWS: Array<Omit<BossRow, 'done'>> = [
   { row: 3, key: 'agy', title: 'Google (Antigravity) — hai tài khoản', optional: false, checks: ['agy_login', 'agy_call', 'agy_switch'] },
   { row: 4, key: 'claude', title: 'Claude Code CLI', optional: false, checks: ['claude_login', 'claude_call'] },
   { row: 5, key: 'jev', title: 'Jev', optional: true, checks: ['jev'] },
+  { row: 6, key: 'telegram', title: 'Telegram (báo động & bản tin)', optional: false, checks: ['telegram'] },
 ];
 
 export function createMock(opts: Opts) {
@@ -92,6 +98,18 @@ export function createMock(opts: Opts) {
     }
   };
 
+  /** Gửi thử Telegram: lỗi tạm (TELEGRAM_RATE_LIMITED) không ghi; còn lại ghi như máy chủ, kèm `host_requested`. */
+  const recordTelegram = (o: TelegramOutcome): BossCheck => {
+    const { transient: isTransient, host_requested, ...rest } = o;
+    if (isTransient) return { ...transient('telegram', o.error_code ?? 'TELEGRAM_RATE_LIMITED', o.message ?? ''), detail: rest.detail, host_requested } as BossCheck;
+    return { ...record('telegram', rest.status, { error_code: rest.error_code, message: rest.message, detail: rest.detail }), host_requested } as BossCheck;
+  };
+
+  /** Như `telegram.service.forget_tests` của api: đổi token/chat_id hoặc Tắt Telegram ⇒ dòng 6 về "Chưa kiểm". */
+  const forgetTelegram = () => {
+    results.telegram = null;
+  };
+
   const pass = (k: BossCheckKey) => results[k]?.status === 'pass';
   const overview = (): BossOverview => {
     syncLogins();
@@ -101,9 +119,10 @@ export function createMock(opts: Opts) {
       3: pass('agy_call') && switchPasses >= 2,
       4: pass('claude_login') && pass('claude_call'),
       5: pass('jev'),
+      6: pass('telegram'),
     };
     const rows = ROWS.map((r) => ({ ...r, done: done[r.row] }));
-    return { rows, results: { ...results }, required_done: rows.filter((r) => !r.optional && r.done).length, required_total: 4, switch_passes: switchPasses };
+    return { rows, results: { ...results }, required_done: rows.filter((r) => !r.optional && r.done).length, required_total: 5, switch_passes: switchPasses };
   };
 
   const run = (key: BossCheckKey, body: { profile_id?: string; account_id?: string }): BossCheck | null => {
@@ -144,6 +163,8 @@ export function createMock(opts: Opts) {
         if (!pass('claude_login')) record('claude_login', 'pass', { detail: { login_source: 'existing_session', account_masked: mask(a.email), credentials_file: true } });
         return out;
       }
+      case 'telegram':
+        return recordTelegram(opts.telegramTest());
       case 'jev': {
         const jev = opts.providers().find((p) => p.kind === 'system_one');
         return jev ? record('jev', 'pass') : fail('jev', 'JEV_NOT_CONFIGURED', 'Chưa nhập khoá Jev');
@@ -190,5 +211,5 @@ export function createMock(opts: Opts) {
     return list;
   };
 
-  return { handle, hooks: { seedAgy, seedClaude, overview } as Record<string, (...args: never[]) => unknown>, dispose: () => {} };
+  return { handle, hooks: { seedAgy, seedClaude, overview, recordTelegram, forgetTelegram } as Record<string, (...args: never[]) => unknown>, dispose: () => {} };
 }

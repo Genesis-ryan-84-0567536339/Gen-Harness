@@ -100,7 +100,7 @@ chuông mở đúng bản tin, không có khoá API vẫn gửi kèm dòng "Dán
 chỉ dùng khoá API** — Claude Code CLI chỉ khi Owner bật (cảnh báo nguyên văn + tích + PIN, QD-12), chỉ còn CLI ⇒ chuông
 `ai.background_no_source`; nút **Hữu ích / Không hữu ích**; **chi phí AI ₫/ngày theo agent** (giá model, trần mỗi ngày +
 chuông vượt trần) ở Tổng quan; mẫu nhà cung cấp **OpenRouter**. Migration 0027. Còn: F-8 (c) gửi bản tin qua Telegram
-(v0.1.44); F-84 phần khác (duyệt nháp, đề xuất Deal/Vụ việc, vai trò khác, stream) hoãn; bộ 10–15 câu hỏi chuẩn + quyết
+(✅ xong ở v0.1.44); F-84 phần khác (duyệt nháp, đề xuất Deal/Vụ việc, vai trò khác, stream) hoãn; bộ 10–15 câu hỏi chuẩn + quyết
 định giữ/bỏ Jev chạy song song sau bản này.
 v0.1.42: "Chế độ Boss" = MỘT menu gọn theo việc (F-7, F-26, F-61, F-63–F-67, F-41) — thanh bên Hôm nay · Hộp thư & Việc ·
 Khách & Cơ hội · Kết nối · Đội ngũ · Cài đặt + "Nâng cao" thu gọn (không có công tắc, không có cây menu thứ hai); trang
@@ -114,6 +114,13 @@ không còn "Dùng dữ liệu mẫu"; gán model chỉ 3 khoá lõi (`core.refi
 kênh"/"Quét lại QR"/"Chọn nhóm để nghe"; thang tự trị 3 mức ở giao diện (5–6 ở Nâng cao, backend giữ 0–6); Lọc tin Thấp/Vừa/Cao, Jev +
 trọng số vào Nâng cao; ẩn độ tin cậy trên thẻ Hộp thư; `gh/textnorm.py` + `lib/format.ts` dùng chung; nháp tin Gen "Đã lưu
 nháp — chưa gửi" + "Mở để duyệt và gửi". Còn: F-38 phần còn lại (gom khi chạm vào code).
+v0.1.44: kênh Telegram tới Sếp + Trực canh máy chủ + Gói chẩn đoán (F-6 bước 2, F-8 c, F-4 bước 2) — genh tự cài lịch
+`gen-harness-watchdog` mỗi 12 phút (`genh doctor --notify`): đo dịch vụ/api/đĩa/sao lưu/nhịp worker-bridge, tự khởi động lại
+dịch vụ chết, báo Telegram chống spam (1 tin CẢNH BÁO + 1 tin ĐÃ ỔN mỗi lượt), chạy được cả khi api chết; bot Telegram của
+Sếp ở **Kết nối › Telegram** (token mã hoá, `REENCRYPT_TARGETS`, migration 0029), bản tin 07:30/17:30 + nhắc việc đi một chiều
+qua hộp thư đi (không qua bridge); dòng 6 "Telegram" ở Việc Sếp cần làm; `X-Request-ID` ở header/problem+json/log + "Mã yêu
+cầu" cạnh mã ERR, `POST /client-errors`; **Gói chẩn đoán** ở Trợ giúp (genh tạo zip đã lọc bí mật). Còn: Sếp nhắn lại Gen
+qua Telegram (2 chiều) hoãn; F-28 Telegram làm kênh khách hoãn; watchdog ghi sự cố vào Kho hoãn.
 
 ## Đợt A — Gen v1 (thiết kế: docs/design/gen-v1.md)
 - ✅ A1 Khung chat phải + Gen trả lời/tóm tắt (chỉ đọc), lưu hội thoại, Nhật ký hành động — v0.1.21.

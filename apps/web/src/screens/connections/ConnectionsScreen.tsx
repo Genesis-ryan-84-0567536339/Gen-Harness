@@ -15,6 +15,7 @@ import { ChannelCard } from '../system/ChannelCard';
 import { CliCard } from '../system/CliCard';
 import { SocialEntryCard } from '../system/SocialEntryCard';
 import { ConnectionStatusPill } from './ConnectionStatusPill';
+import { TelegramCard } from './TelegramCard';
 import { activeCliState, brainStatus, mcpEnabledCount, mcpStatus, orderChannels } from './connectionsModel';
 
 /**
@@ -25,9 +26,10 @@ import { activeCliState, brainStatus, mcpEnabledCount, mcpStatus, orderChannels 
 export function ConnectionsScreen() {
   const meta = SCREEN_BY_KEY.connections;
   const canManage = useCan('system.manage');
+  const isOwner = useMe().data?.role?.code === 'owner';
   const { hash } = useLocation();
 
-  // /connections#brain, #genhub (link từ Cài đặt › Bộ não AI, MCP Hub, chuông, Bản tin Gen) → cuộn tới thẻ. Cuộn lại khi
+  // /connections#brain, #genhub, #telegram (link từ Cài đặt › Bộ não AI, MCP Hub, chuông, Bản tin Gen) → cuộn tới thẻ. Cuộn lại khi
   // danh sách kênh tải xong (thẻ kênh nằm trên Gen-hub — khung chờ thấp hơn thẻ thật làm lệch vị trí).
   const channelsReady = !useChannels().isPending;
   useEffect(() => {
@@ -35,7 +37,7 @@ export function ConnectionsScreen() {
     const id = hash.slice(1);
     const t = window.setTimeout(() => document.getElementById(id)?.scrollIntoView?.({ block: 'start' }), 50);
     return () => window.clearTimeout(t);
-  }, [hash, channelsReady]);
+  }, [hash, channelsReady, isOwner]);
 
   return (
     <div className="screen">
@@ -53,6 +55,15 @@ export function ConnectionsScreen() {
       <section className="conn-section" aria-label="Kênh nhắn tin">
         <ChannelCards canManage={canManage} />
       </section>
+
+      {/* v0.1.44 (F-8c): Telegram nhận báo động sự cố (Trực canh máy chủ) + bản tin — chỉ Owner; neo #telegram. */}
+      {isOwner ? (
+        <section id="telegram" className="conn-section" aria-label="Báo động & bản tin">
+          <div className="conn-grid">
+            <TelegramCard />
+          </div>
+        </section>
+      ) : null}
 
       <section className="conn-section" aria-label="Mạng xã hội và công cụ ngoài">
         <div className="conn-grid">

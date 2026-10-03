@@ -1,6 +1,8 @@
 import { Component, useEffect, useMemo, type ErrorInfo, type ReactNode } from 'react';
 import { isRouteErrorResponse, useLocation, useNavigate, useRouteError } from 'react-router-dom';
+import { ApiError } from '@gen-harness/contracts';
 import { Icon } from '@gen-harness/ui';
+import { reportClientError } from '../lib/clientErrors';
 import { newErrorId } from '../lib/errorId';
 
 /**
@@ -10,6 +12,8 @@ import { newErrorId } from '../lib/errorId';
  *   được), đặt lại khi đổi trang. Ở gốc (main.tsx) nó là lưới an toàn cuối cùng.
  * - `RouteErrorPage`: `errorElement` của router (react-router tự bắt lỗi vẽ trong route, không để lọt ra ngoài).
  * - Mỗi lỗi có một mã (`ERR-…`) hiện cho người dùng và ghi kèm vào console — Báo lỗi (trang Trợ giúp) dán mã này.
+ * - v0.1.44 (F-4b): lỗi gửi về máy chủ (`reportClientError`, khử trùng theo mã) để tra theo mã Sếp gửi; lỗi API có
+ *   "Mã yêu cầu" (X-Request-ID) thì hiện ngay cạnh mã lỗi.
  */
 
 function describe(error: unknown): string {
@@ -32,6 +36,7 @@ interface ErrorViewProps {
 
 export function ErrorView({ errorId, error, variant = 'page', onRetry }: ErrorViewProps) {
   const detail = error === undefined ? null : describe(error);
+  const requestId = error instanceof ApiError ? error.requestId : null;
   return (
     <div className={variant === 'page' ? 'err-page' : 'err-inline'} role="alert">
       <div className="err-card">
@@ -45,6 +50,11 @@ export function ErrorView({ errorId, error, variant = 'page', onRetry }: ErrorVi
         </p>
         <div className="err-card__id">
           Mã lỗi: <code data-testid="error-id">{errorId}</code>
+          {requestId ? (
+            <>
+              {' · '}Mã yêu cầu: <code data-testid="request-id">{requestId}</code>
+            </>
+          ) : null}
         </div>
         <div className="err-card__actions">
           {onRetry ? (
@@ -97,6 +107,7 @@ export class ErrorBoundary extends Component<BoundaryProps, BoundaryState> {
 
   componentDidCatch(error: unknown, info: ErrorInfo): void {
     console.error(`[Gen-Harness] ${this.state.errorId ?? 'ERR'} — lỗi giao diện`, error, info.componentStack);
+    if (this.state.errorId) reportClientError({ errorId: this.state.errorId, error, componentStack: info.componentStack });
   }
 
   private retry = () => this.setState({ error: null, errorId: null });
@@ -115,6 +126,8 @@ export function RouteErrorPage() {
   const errorId = useMemo(() => newErrorId(), []);
   useEffect(() => {
     console.error(`[Gen-Harness] ${errorId} — lỗi route`, error);
+    // 404 của router không phải lỗi giao diện — không báo về máy chủ.
+    if (!(isRouteErrorResponse(error) && error.status === 404)) reportClientError({ errorId, error });
   }, [error, errorId]);
   if (isRouteErrorResponse(error) && error.status === 404) return <NotFoundPage variant="page" />;
   return <ErrorView errorId={errorId} error={error} variant="page" />;

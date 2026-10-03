@@ -47,6 +47,9 @@ PIN_OPERATIONS: dict[str, str] = {
     "offsite.portable": "Tải gói mang đi",
     # v0.1.41 (F-86): gói Claude Pro/Max cá nhân chạy việc nền tự động là rủi ro điều khoản của Sếp (QD-12).
     "ai.background_cli": "Cho Claude Code CLI chạy việc nền",
+    # v0.1.44 (F-8c, F-4b): nơi nhận báo động/bản tin (token bot Telegram) và gói chẩn đoán (log máy chủ).
+    "notify.change": "Đổi nơi nhận báo động (Telegram)",
+    "diagnostics.download": "Tải gói chẩn đoán",
 }
 
 

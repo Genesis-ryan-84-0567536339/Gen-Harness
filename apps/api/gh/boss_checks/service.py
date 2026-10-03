@@ -16,8 +16,9 @@ import orjson
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-CHECK_KEYS = ("hub", "facebook", "agy_login", "agy_call", "agy_switch", "claude_login", "claude_call", "jev")
-RUNNABLE = ("hub", "facebook", "agy_call", "agy_switch", "claude_call", "jev")
+CHECK_KEYS = ("hub", "facebook", "agy_login", "agy_call", "agy_switch", "claude_login", "claude_call", "jev",
+              "telegram")
+RUNNABLE = ("hub", "facebook", "agy_call", "agy_switch", "claude_call", "jev", "telegram")
 STATUSES = ("pass", "fail", "pending")
 KEEP_PER_KEY = 50
 MESSAGE_MAX = 300
@@ -31,13 +32,16 @@ ROWS: tuple[dict[str, Any], ...] = (
     {"row": 4, "key": "claude", "title": "Claude Code CLI", "optional": False,
      "checks": ["claude_login", "claude_call"]},
     {"row": 5, "key": "jev", "title": "Jev", "optional": True, "checks": ["jev"]},
+    # v0.1.44 (F-8c): kênh "Báo động & bản tin" — đạt khi lần Gửi thử gần nhất tới được Telegram của Sếp.
+    {"row": 6, "key": "telegram", "title": "Telegram (báo động & bản tin)", "optional": False,
+     "checks": ["telegram"]},
 )
 REQUIRED_TOTAL = sum(1 for r in ROWS if not r["optional"])
 
 DETAIL_KEYS = frozenset({"latency_ms", "probe_model", "models_count", "models_source", "account_masked",
                          "expected_masked", "account_match", "code_shape", "credentials_file", "job_status",
                          "exposed_tools", "missing_tools", "target_profile", "from_profile",
-                         "login_source"})
+                         "login_source", "bot_username", "chat_masked"})
 
 SOCIAL_FAILED_MSG = "Lượt đọc Facebook chưa thành công — mở trang Mạng xã hội xem lý do rồi bấm Đọc ngay lần nữa"
 SOCIAL_HALTED_MSG = ("Đọc mạng xã hội đang bị dừng (Dừng tất cả) — bật lại ở trang Tài khoản mạng xã hội rồi bấm "

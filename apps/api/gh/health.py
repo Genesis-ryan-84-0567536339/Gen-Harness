@@ -90,11 +90,17 @@ ACTIONS = {
     "ai.budget_exceeded": "Xem chi phí AI",
     # v0.1.41: việc nền không còn nguồn AI dùng được — do gói bản tin/nguồn nền mở/đóng, chỉ khai nhãn ở đây.
     "ai.background_no_source": "Mở Bộ não AI",
+    # v0.1.44 (F-8c): hộp thư đi Telegram hỏng vì cấu hình — do gh.telegram.service mở/đóng.
+    "telegram.failed": "Mở cấu hình Telegram",
 }
 #: Nhãn cho người KHÔNG phải Owner khi nút ở nhãn gốc chỉ Owner có (vd "Chọn nơi lưu" — Manager không có nút đó).
 NON_OWNER_ACTIONS = {
     "offsite.stale": "Xem bản sao ngoài máy",
+    "telegram.failed": "Nhờ Owner xử lý",
 }
+#: Sự cố mà đích nút chỉ Owner mở được (thẻ Telegram chỉ dựng cho Owner) ⇒ người khác không nhận link (không nút chết).
+NON_OWNER_NO_LINK = frozenset({"telegram.failed"})
+_TELEGRAM_NON_OWNER = "Kênh Telegram của Owner đang lỗi — nhờ Owner mở Kết nối › Telegram"
 #: Thân sự cố cho người KHÔNG phải Owner khi thân gốc bảo bấm nút chỉ Owner có ("Chọn nơi lưu…"). Khoá = (kind, mã) —
 #: mã là fingerprint (offsite.stale) hoặc mã genh ở cuối fingerprint (offsite.failed: "<lần thử>|<mã>").
 NON_OWNER_BODIES = {
@@ -102,6 +108,11 @@ NON_OWNER_BODIES = {
                                          "sao ngoài máy",
     ("offsite.failed", "GH-EB00"): "Chưa chọn nơi lưu — nhờ Owner cắm ổ USB/NAS và chọn nơi lưu bản sao ngoài máy",
     ("offsite.failed", "GH-EB07"): "Nơi lưu không hợp lệ — nhờ Owner chọn lại thư mục trên ổ USB/NAS",
+    # v0.1.44 (F-8c): fingerprint = mã lỗi Telegram (gh/telegram/client.py).
+    ("telegram.failed", "TELEGRAM_TOKEN_REJECTED"): f"{_TELEGRAM_NON_OWNER} và dán lại token bot.",
+    ("telegram.failed", "TELEGRAM_CHAT_NOT_FOUND"): f"{_TELEGRAM_NON_OWNER} và chọn lại chat_id.",
+    ("telegram.failed", "TELEGRAM_BOT_BLOCKED"): f"{_TELEGRAM_NON_OWNER}; Owner mở bot trên Telegram, bấm Bắt đầu "
+                                                 "(Start) rồi bấm Gửi thử.",
 }
 
 
@@ -207,7 +218,8 @@ async def active_issues(db: AsyncSession, org_id: uuid.UUID, *, is_owner: bool =
         ORDER BY (severity = 'bad') DESC, raised_at DESC"""), {"o": org_id})).all()
     return [{"key": r.key, "kind": r.kind, "severity": r.severity, "title": r.title,
              "body": _viewer_body(r.kind, r.fingerprint, r.body, is_owner),
-             "link": r.link, "action": labels.get(r.kind, "Xem chi tiết"), "raised_at": _iso(r.raised_at)}
+             "link": None if not is_owner and r.kind in NON_OWNER_NO_LINK else r.link,
+             "action": labels.get(r.kind, "Xem chi tiết"), "raised_at": _iso(r.raised_at)}
             for r in rows]
 
 
@@ -839,10 +851,60 @@ async def evaluate(db: AsyncSession, redis: Any, org_id: uuid.UUID, *, now: date
             log.exception("Theo dõi sức khoẻ: phần %s lỗi", name)
 
 
+# ─── ảnh chụp sức khoẻ cho Trực canh máy chủ (v0.1.44, F-6b) ────────────────────────────────────────────────
+
+#: run/api-health.json — genh watchdog đọc (tươi khi written_at ≤ 10 phút) để gửi cảnh báo Telegram cả những sự cố chỉ
+#: api thấy (channel.down, model.auth_expired, telegram.failed…). api KHÔNG gửi Telegram cho sự cố (tránh gửi đôi).
+API_HEALTH_FILE = "api-health.json"
+
+
+async def write_host_snapshot(db: AsyncSession, org_id: uuid.UUID, *, now: datetime) -> bool:
+    """Ghi nguyên tử run/api-health.json: {schema, written_at, version, public_url, alerts[key, kind, severity, title,
+    body, fingerprint, raised_at], latest_backup_at, backup_stale_limit_hours}. Không có hộp thư ⇒ bỏ qua. Lỗi chỉ
+    log, không ném."""
+    from gh import __version__
+    from gh.config import get_settings
+    from gh.telegram.service import write_json_atomic
+
+    try:
+        d = _host_dir()
+        if not d.is_dir():
+            return False
+        rows = (await db.execute(text("""
+            SELECT key, kind, severity, title, body, fingerprint, raised_at FROM ops.health_alerts
+            WHERE org_id = :o AND cleared_at IS NULL
+            ORDER BY (severity = 'bad') DESC, raised_at DESC"""), {"o": org_id})).all()
+        cfg = await _org_backup_cfg(db, org_id)
+        latest: datetime | None = None
+        try:
+            latest = await _latest_backup()
+        except Exception:  # noqa: BLE001 — danh mục sao lưu lỗi ⇒ null, vẫn ghi phần còn lại
+            log.warning("Ảnh chụp sức khoẻ: không đọc được danh mục sao lưu", exc_info=True)
+        limit, _ = backup_stale_limit(cfg.frequency if cfg else None)
+        data = {
+            "schema": 1,
+            "written_at": _iso(now),
+            "version": __version__,
+            "public_url": get_settings().public_url.rstrip("/"),
+            "alerts": [{"key": r.key, "kind": r.kind, "severity": r.severity, "title": r.title, "body": r.body,
+                        "fingerprint": r.fingerprint or "", "raised_at": _iso(r.raised_at)} for r in rows],
+            "latest_backup_at": _iso(latest),
+            "backup_stale_limit_hours": int(limit.total_seconds() // 3600),
+        }
+        write_json_atomic(d / API_HEALTH_FILE, data)
+        return True
+    except asyncio.CancelledError:
+        raise
+    except Exception:  # noqa: BLE001 — ảnh chụp là phụ, không làm hỏng vòng theo dõi
+        log.warning("Không ghi được run/%s", API_HEALTH_FILE, exc_info=True)
+        return False
+
+
 async def watch_loop(sm: Any, redis: Any, stop: asyncio.Event, *, interval: float, started_at: datetime) -> None:
     """Vòng theo dõi chạy trong api: chờ `interval` giây đầu rồi mỗi `interval` giây gọi `evaluate` cho từng tổ chức.
     Nhiều tiến trình api ⇒ khoá Redis `WATCH_LOCK_KEY` để chỉ một bản chạy mỗi lượt. Không chết vì một lượt lỗi
-    (khuôn `gh.app._permit_sweep_loop`)."""
+    (khuôn `gh.app._permit_sweep_loop`). v0.1.44 (F-6b): sau mỗi lượt (đang giữ khoá) ghi run/api-health.json cho
+    tổ chức đầu tiên (`write_host_snapshot`)."""
     while not stop.is_set():
         with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(stop.wait(), timeout=interval)
@@ -858,6 +920,10 @@ async def watch_loop(sm: Any, redis: Any, stop: asyncio.Event, *, interval: floa
                 async with sm() as db:
                     await evaluate(db, redis, org_id, now=datetime.now(UTC), started_at=started_at)
                     await db.commit()
+            if orgs:
+                async with sm() as db:
+                    await write_host_snapshot(db, orgs[0], now=datetime.now(UTC))
+                    await db.rollback()
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001 — vòng theo dõi không được chết vì một lượt lỗi
