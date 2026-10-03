@@ -2286,3 +2286,70 @@ Không cần chụp màn hình hay gửi mã cho Claude — kết quả tự lư
 - Rà toàn bộ v0.1.34→v0.1.42: commit đẩy lên nhánh cũ sau khi nhánh mới tách chỉ có d3a0118 (mất, nay khôi phục) và
   1f3ae4b/23fa7a5/73d15e7 của v0140 (đã khôi phục ở c384e1b, có trong main). Không còn tệp nào bị bản sau hoàn tác.
 - VERSION giữ v0.1.41 (chưa có tag v0.1.41) ⇒ merge xong release chạy lại cho đúng bản này.
+
+## v0.1.42 — "Chế độ Boss": một menu gọn theo việc (03/10/2026)
+
+### Boss cần làm gì
+
+1. Không cần làm gì. Sau khi lên bản: mở Console, thanh bên chỉ còn **Hôm nay · Hộp thư & Việc · Khách & Cơ hội · Kết
+   nối · Đội ngũ · Cài đặt** và **"Nâng cao"** (thu gọn). Zalo, Facebook, Gen-hub, tài khoản Google/Claude giờ đều ở
+   trang **Kết nối**; **Sao lưu & cập nhật** ở **Cài đặt**.
+2. Đây chính là **"Chế độ Boss"** — không có công tắc nào phải bật. Sếp xem thử và nói nếu chỗ nào khó tìm.
+
+### Vì sao (kế hoạch tổng `docs/audit/2026-10-01/0-ke-hoach-tong.md`, mục v0.1.42)
+
+- **F-7** 🟠: menu xếp theo kiến trúc kỹ thuật, việc quản trị của Boss nằm trong "Kỹ thuật · Backend". Không làm công tắc
+  hai cây menu (thêm chỗ lệch) — sắp lại MỘT menu, đồng thời ở API (`gh/shell/navigation.py`) và `screens.ts`.
+- **F-26** 🟡: người không phải Owner vẫn gặp ngõ cụt (Agent NV đăng nhập là gặp ổ khoá Tổng quan).
+- **F-61** 🟡: cùng một thẻ (Cập nhật, tài khoản CLI, PIN) và thang tự trị khai ở nhiều nơi. **F-64** 🟡: Tổng quan 11
+  số, 2 thẻ độ trễ trùng. **F-63, F-65, F-66, F-67, F-41** 🟡: phụ đề tiếng Anh, "Hồ sơ sống" trong menu, `/guide` không
+  có tiêu đề, dải tab tràn ở 1440px + header nhiều viên kỹ thuật, nền tảng plugin không có plugin thật.
+
+### Thay đổi
+
+- **API — danh mục (F-7, F-41, F-65)**: `GET /navigation` cây chuẩn "Việc hằng ngày" (Hôm nay · Hộp thư & Việc · Khách &
+  Cơ hội · Kết nối · Đội ngũ · Cài đặt) + "Nâng cao" (`collapsed`, gập sẵn); node ẩn có `hidden: true` (Hồ sơ sống, Plugin
+  — đóng băng, API `/plugins` giữ nguyên); Đánh giá con người / Chất lượng chăm sóc chỉ hiện khi đã có ít nhất 1 nhân
+  viên. Quyền màn mới: `connections` (system.read), `team` (roles.manage).
+- **API — Tổng quan (F-64)**: `kpis` còn đúng 4 số kinh doanh; số kỹ thuật sang `health.tech`; bỏ `chassis_latency`,
+  `plugins_health`, `active_profiles`. Chữ/đường dẫn: "Hộp thư ý nghĩa" → "Hộp thư"; chuông kênh rớt, token Gen-hub, mục
+  Kho của bản tin trỏ `/connections`.
+- **Web — menu & trang chủ (F-7, F-26, F-66)**: thanh bên 6 mục + "Nâng cao" thu gọn (mở trang lại là thu gọn; đang ở
+  màn Nâng cao thì tự mở); `HomeRedirect`: `/` về màn đầu tiên của vai trò (giữ `?gen=`), dùng cho đăng nhập, đổi mật
+  khẩu, thiết lập; `/guide`, `/guide/:n` có tiêu đề + breadcrumb.
+- **Web — Kết nối, Đội ngũ, Cài đặt (F-7, F-61)**: `/connections` một trang — Bộ não AI (+ 2 thẻ tài khoản CLI), Zalo,
+  WhatsApp, Telegram, Facebook, Gen-hub, MCP; mỗi thẻ MỘT viên trạng thái (Đang chạy · Cần Sếp xử lý · Chưa nối) + MỘT nút
+  chính; Telegram chưa cài không còn dẫn tới Plugin. `/team` người dùng + lối vào Đánh giá/Chăm sóc. `/system` = Cài đặt:
+  5 tab lọc theo quyền (Quản lý chỉ thấy Nhật ký, không gọi `/providers`), tab mặc định "Sao lưu & cập nhật"; link cũ
+  `?tab=channels` → `/connections`, `?tab=users` → `/team`, `?tab=storage&focus=…` giữ nguyên.
+- **Mỗi thẻ một chỗ (F-61)**: thẻ Cập nhật chỉ ở Cài đặt (Tổng quan/Trợ giúp chỉ có liên kết), PIN chỉ ở Tài khoản của
+  tôi, thẻ CLI và Gen-hub chỉ ở Kết nối; thang tự trị 0–6 khai một nơi (`packages/contracts/src/autonomy.ts`, test chéo với
+  `gh.chassis.policy.LEVELS`); "Chuỗi chuyển hướng" một tên. NoModelBanner chỉ chạy khi là Owner; Hồ sơ sống chưa chọn có
+  nút "Mở Khách & Nhóm".
+- **Web — Hôm nay, header (F-64, F-67, F-63)**: một hàng 4 số; Sức khoẻ hệ thống có 4 số kỹ thuật; không còn thẻ độ trễ
+  trùng. Viên "tự trị", khiên % và "Góc nhìn đã lưu" chỉ hiện ở màn Nâng cao; logo hiện phiên bản thật (`/system/about`,
+  bỏ "v2.2"); bỏ "Phụ đề tiếng Anh"; dải tab Cài đặt không tràn/cắt chữ ở 1440px và không cuộn ngang ở 375px.
+- **Gen**: target theo chỗ mới (Kết nối, Đội ngũ), giữ id cũ; `registry.json` khớp.
+- **Tích hợp**: gộp 3 gói không xung đột; thêm e2e nghiệm thu sau tích hợp (mục 12–21 của `menu-v0142.spec.ts`).
+
+### Kiểm tra
+
+- api: `test_navigation_v0142.py` (cây 6 mục + Nâng cao, node ẩn, staff/không staff, count, quyền mới, 4 KPI), cùng
+  `test_rbac_api`, `test_plugins*`, `test_p3_queue`, `test_gen*`, `test_briefing_v0141`, `test_hub_link`.
+- web: vitest `nav`, `shell`/`shell-v0142`, `home-redirect-v0142`, `system-screen-v0142`, `connections-v0142`,
+  `single-card-v0142` (UpdateCard/CliCard/PinCard mỗi thứ 1 màn), `overview-v0142`, `gen-targets` (registry.json khớp),
+  `autonomy-v0142`, `setup-v0129`, `profile-empty-v0142`.
+- e2e mock `menu-v0142.spec.ts` (21 test): `/` theo vai trò (Owner → Hôm nay, Agent NV → Hộp thư, Quản lý), ≤ 7 mục cấp 1,
+  Nâng cao thu/mở/tự mở; 5 việc chính ≤ 2 cú bấm (Cần Sếp xử lý 0 cú; Hộp thư; chuông → Bản tin Gen đúng hội thoại;
+  Cài đặt → Sao lưu & cập nhật; Kết nối 7 thẻ, viên `data-status` hợp lệ + 1 nút chính); staff false/true; Quản lý
+  `/system` 1 tab, không lỗi đỏ, không gọi `/providers`; link cũ + `focus=backup` cuộn tới Sao lưu + `?gen=`; Zalo hết
+  phiên ⇒ "Cần Sếp xử lý"; dải tab không tràn/cắt ở 1440px; header/logo/menu tài khoản; 4 ô số; chữ cũ không còn, mỗi thẻ
+  một chỗ. `visual.spec`/`phase2.spec`: sidebar/header/overview/system ở mức kiểm khói, màn không đổi vẫn so pixel.
+- Kết quả trên nhánh tích hợp (03/10): ruff + mypy sạch (138 tệp), alembic 1 head (0027);
+  pytest 1483 passed mỗi lượt (superuser và gh_app, 3 deselected `slow` như CI; `test_backup.py` chạy lại 28/28 ở cả hai vai sau khi gộp
+  bản vá neo GFS 12:00 UTC của v0.1.41); web lint/typecheck sạch, check_no_fake_ids sạch, vitest 585 passed (68 tệp), build OK,
+  bridge test 50 pass; Playwright mock 225 passed (gồm `menu-v0142.spec.ts` 21); e2e thật rút gọn (live-ci) 6 passed;
+  browser 14 passed (ruff + mypy sạch); genh `go vet` + `go test ./...` 15 gói ok; `check_release_gate.py` thoát 0,
+  unittest `.github/scripts` OK.
+- Chờ sau phát hành (người điều phối): kiểm genh tải từ Release đúng checksum + `genh version` = v0.1.42; E2E release
+  xanh rồi mới promote; sau đó Boss xem menu mới như mục đầu.

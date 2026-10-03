@@ -102,6 +102,13 @@ chỉ dùng khoá API** — Claude Code CLI chỉ khi Owner bật (cảnh báo n
 chuông vượt trần) ở Tổng quan; mẫu nhà cung cấp **OpenRouter**. Migration 0027. Còn: F-8 (c) gửi bản tin qua Telegram
 (v0.1.44); F-84 phần khác (duyệt nháp, đề xuất Deal/Vụ việc, vai trò khác, stream) hoãn; bộ 10–15 câu hỏi chuẩn + quyết
 định giữ/bỏ Jev chạy song song sau bản này.
+v0.1.42: "Chế độ Boss" = MỘT menu gọn theo việc (F-7, F-26, F-61, F-63–F-67, F-41) — thanh bên Hôm nay · Hộp thư & Việc ·
+Khách & Cơ hội · Kết nối · Đội ngũ · Cài đặt + "Nâng cao" thu gọn (không có công tắc, không có cây menu thứ hai); trang
+**Kết nối** một trang (Bộ não AI + tài khoản CLI, Zalo, WhatsApp, Telegram, Facebook, Gen-hub, MCP — viên Đang chạy / Cần
+Sếp xử lý / Chưa nối + một nút chính); **Đội ngũ** (Đánh giá/Chăm sóc chỉ khi đã có nhân viên); **Cài đặt** lọc tab theo
+quyền; `/` về màn đầu tiên của vai trò (Agent NV → Hộp thư); mỗi thẻ một chỗ (Cập nhật · PIN · CLI · Gen-hub; thang tự trị
+khai một nơi); Hôm nay một hàng 4 số; header gọn ngoài Nâng cao, logo phiên bản thật, bỏ phụ đề tiếng Anh; Plugin ẩn &
+đóng băng, Hồ sơ sống chỉ mở từ danh sách. Link cũ (`/system?tab=channels|users`) tự chuyển.
 
 ## Đợt A — Gen v1 (thiết kế: docs/design/gen-v1.md)
 - ✅ A1 Khung chat phải + Gen trả lời/tóm tắt (chỉ đọc), lưu hội thoại, Nhật ký hành động — v0.1.21.
