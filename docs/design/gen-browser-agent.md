@@ -81,6 +81,12 @@ apps/api  gh/social/ (routes, service, adapters API) ── arq queue "gh:browse
 - Mạng: chỉ vào mạng nội bộ (redis) + một **proxy ra ngoài** chỉ cho phép tên miền của nền tảng đã bật
   (vd `facebook.com`, `fbcdn.net`, `messenger.com`); chặn IP nội bộ/riêng (giống ghim DNS Gen-hub v0.1.27).
 - Mỗi việc mở **ngữ cảnh trình duyệt mới** từ phiên đã lưu, xong thì đóng; không giữ profile trên đĩa.
+- **Sandbox trình duyệt** ("vùng cách ly của trình duyệt") — F-85: ưu tiên **bật** sandbox Chromium bằng user namespace
+  không đặc quyền + hồ sơ seccomp riêng (`cap_drop ALL`, chạy non-root). Chế độ `auto` thử bật; máy chủ không cho (kernel,
+  AppArmor, userns bị hạn chế) thì **tự lùi về tắt và báo thật** (nhịp tim `sandbox.enabled=false` + lý do) chứ không
+  im lặng. Gửi lên Facebook chỉ **mở** khi sandbox đang bật HOẶC Owner đã bấm **"Tôi hiểu rủi ro và đồng ý"** ở trang
+  cảnh báo `/social/ghi-facebook` (QD-12: ghi lại thời điểm, người, phiên bản cảnh báo; **"Rút lại đồng ý"** khoá lại
+  ngay). Đọc không bị ảnh hưởng. Trạng thái thật xem ở `GET /social/write-gate`.
 
 ### 3.2 Đăng nhập (Boss tự làm)
 1. Boss bấm **Thêm tài khoản** → chọn nền tảng → đọc cảnh báo điều khoản → bấm **Tôi chấp nhận rủi ro** (lưu
@@ -93,7 +99,7 @@ apps/api  gh/social/ (routes, service, adapters API) ── arq queue "gh:browse
 4. Khi nhận ra đã vào trang chủ (quy tắc DOM của adapter) → worker lấy `storageState` (cookie + localStorage + IndexedDB),
    mã hoá bằng khoá truyền → API giải mã, **mã hoá phong bì bằng khoá master** (`gh/crypto.encrypt`, AAD =
    `org_id:account_id`) lưu `core.social_accounts.state_enc`. Phiên đăng nhập hết giờ sau 10 phút nếu Boss bỏ dở.
-- **Kiểm sức khoẻ phiên**: job `social_health` 1 lần/ngày + trước mỗi việc: mở trang nhẹ, kiểm dấu hiệu đã đăng nhập.
+- **Kiểm sức khoẻ phiên**: việc `health` mở trang nhẹ, kiểm dấu hiệu đã đăng nhập; chạy hằng ngày 09:10 giờ VN (xem 3.8).
   Hết hạn → trạng thái `needs_login`, chuông báo Boss, nút **Đăng nhập lại** (lặp bước 2–4).
 - **Thu hồi**: nút **Gỡ tài khoản** (PIN) → xoá `state_enc`, huỷ việc đang chờ, ghi Action Log; nhắc Boss tự bấm
   "đăng xuất mọi thiết bị" trên nền tảng nếu muốn chắc chắn.
@@ -103,23 +109,43 @@ apps/api  gh/social/ (routes, service, adapters API) ── arq queue "gh:browse
   `post`, `reply_comment`, `send_dm`, `like`, `follow` (ghi chỉ từ v0.1.30).
 - **Mỗi tài khoản chạy tối đa 1 việc cùng lúc**: khoá Redis `gh:browser:lock:<account_id>` (SET NX, hết hạn theo trần
   thời gian việc); việc sau xếp hàng.
-- Mỗi việc lưu **ảnh chụp** các bước chính + **Playwright trace** (zip) vào `gh/chassis/objects` (volume `gh_objects`
-  qua API — worker gửi về, không tự ghi); giữ 14 ngày (job dọn).
+- Việc đọc lưu kết quả đã làm sạch; việc **ghi** lưu **ảnh chụp bằng chứng** (JPEG ≤ 2 MB, mã hoá bằng khoá master khi lưu,
+  giữ 90 ngày) + **trace bước** (`[{step, ms, ok}]`, không có nội dung trang). **Không dùng Playwright tracing** — gói
+  trace chứa cookie/phiên.
 
 ### 3.4 Giới hạn tốc độ (dùng ít, lịch sự)
-- Mặc định mỗi tài khoản: đọc ≤ 6 lượt/ngày, ≤ 40 trang mở/lượt; nghỉ ngẫu nhiên 2–6 giây giữa thao tác; ghi ≤ 20/ngày,
-  ≥ 60 giây giữa 2 lần ghi; không chạy 23:00–06:00. Owner chỉnh được **xuống**, không vượt trần cứng trong code.
+- Mặc định mỗi tài khoản: đọc ≤ 6 lượt/ngày, ≤ 40 trang mở/lượt; **trễ CỐ ĐỊNH 3 giây** giữa các thao tác
+  (`GH_BROWSER_DELAY`, không ngẫu nhiên); **Giới hạn gửi/ngày** mặc định 10, Owner chỉnh trong 1–20, **trần cứng 20**
+  (đếm cửa sổ 24 giờ, không tính việc đã huỷ); không chạy lịch tự động 23:00–06:00. Owner chỉnh được **xuống**, không vượt
+  trần cứng trong code.
+- **Vì sao có trễ (F-59)**: trễ giữa thao tác là để **lịch sự với nền tảng** (giữ tốc độ thấp, như một người dùng bình
+  thường không dồn dập yêu cầu) — là *giới hạn tốc độ*, không phải để qua mặt hệ thống chống bot. Vì vậy nay là
+  **hằng số cố định** 3 giây, không còn khoảng ngẫu nhiên (ngẫu nhiên dễ bị hiểu là giả hành vi người).
+- **Vì sao chạy CÓ giao diện (Xvfb)**: để Owner **tự đăng nhập** trong cửa sổ từ xa (3.2) — gõ mật khẩu, 2FA, xử lý
+  xác minh bằng chính tay mình. Không phải để giả người; không có stealth, không giả vân tay, không xoay proxy, không
+  giải CAPTCHA (luật cứng, mục 1).
 - Đọc chỉ khi Boss hỏi Gen hoặc theo lịch Boss bật — không quét liên tục.
 
-### 3.5 Ghi = đề xuất (tái dùng A4)
-- Gen trả `{"kind":"propose","proposal":{"type":"social_post|social_reply|social_dm|social_like|social_follow", …}}` →
-  `gh/gen/proposals.py` thêm các loại này; target registry `social.accounts` đánh dấu `sensitive` → **luôn cần PIN**.
-- Thẻ đề xuất do hệ thống viết: tài khoản nào, gửi cho ai/bài nào, nguyên văn nội dung. Boss Xác nhận/Sửa/Huỷ.
-- Xác nhận → API ký **permit** (như bridge): `{nonce, account_id, action, target_url_hash, body_sha256, exp}`; worker chỉ
-  làm khi chữ ký đúng, chưa hết hạn, nội dung khớp hash, nonce dùng một lần. Không permit = không ghi, kể cả khi model
-  bị lừa.
-- Action Log: `social.read` (actor agent/gen, on_behalf_of), `gen.proposal_confirmed` với `detail.via="gen"`,
-  `social.write` (kết quả + id ảnh chụp sau khi gửi).
+### 3.5 Ghi = đề xuất → Xác nhận + PIN → permit → worker (lát 1: Trả lời bình luận, Nhắn tin)
+Luồng thật, theo thứ tự:
+1. **Đề xuất của Gen**: `social_reply` (→ việc `reply_comment`) hoặc `social_dm` (→ `send_message`) với
+   `{account_id, target_url, text}`. Chỉ nhắm vào mục Gen **đã đọc được** từ chính tài khoản đó (trong 7 ngày). Thẻ do hệ
+   thống viết (tài khoản, đích, nguyên văn); chỉ `text` sửa được; nội dung nghi lừa đảo gắn cờ "đáng ngờ".
+2. **Thẻ Xác nhận + mã PIN**: Boss đọc kỹ thẻ, bấm **Xác nhận và gửi**, nhập mã PIN (thao tác `social.write`).
+3. **Endpoint write** (`POST /social/accounts/{id}/write`): kiểm **Giới hạn gửi/ngày**, **cổng F-85** (sandbox bật hoặc
+   Owner đã đồng ý rủi ro — nếu không: 409 `SOCIAL_WRITE_LOCKED`), **Dừng tất cả** (409 `SOCIAL_HALTED`), tài khoản bận.
+4. **Permit**: API ký bằng khoá browser — TTL **5 phút**, `nonce` dùng **một lần**, gắn **hash nội dung + hash đích**,
+   người xác nhận; không permit hợp lệ = không ghi, kể cả khi model bị lừa.
+5. **Worker** kiểm permit **trước khi mở trình duyệt** (chữ ký, hạn, khớp job/tài khoản/hash, nonce); mở trang đích, gõ
+   nội dung bằng **một lần chèn** (`insert_text`, không mô phỏng gõ phím), rồi **kiểm Dừng tất cả lần cuối ngay trước khi
+   bấm gửi**. Gặp checkpoint/CAPTCHA → dừng, không gửi.
+6. **Bằng chứng**: chụp ảnh sau khi gửi (mã hoá, giữ 90 ngày; nút **Xem ảnh chụp**) + trace bước. Đã bấm gửi thì vẫn chụp và
+   báo hoàn tất kể cả khi Dừng tất cả vừa bật (kết quả ghi `after_halt`).
+7. **Action Log + chuông**: `social.write` (chỉ sha256 của đích và nội dung — không lưu nguyên văn), chuông cho người xác nhận.
+- Mã lỗi thân thiện + "Chi tiết kỹ thuật": `PERMIT_INVALID`, `TARGET_NOT_FOUND`, `SEND_UNCONFIRMED`, `PROOF_MISSING` và các
+  mã cũ (`CHECKPOINT`, `CAPTCHA`, `LOGGED_OUT`, `HALTED`, `BLOCKED_URL`, `SELECTOR`, `BUSY`, `ERROR`).
+- **Đăng bài (`post`) để lát 2.** Lát 1 không có đường đăng bài; `like`/`follow` chưa làm.
+- Selector ghi Facebook mới kiểm trên trang mẫu; nghiệm thu thật do Boss làm (dòng 8 "Facebook trả lời" ở Việc Sếp cần làm).
 
 ### 3.6 Chống prompt injection từ nội dung trang
 - Adapter trích **văn bản có cấu trúc** bằng selector cố định (người gửi, thời gian, nội dung, link) — không đưa HTML thô.
@@ -130,10 +156,22 @@ apps/api  gh/social/ (routes, service, adapters API) ── arq queue "gh:browse
 
 ### 3.7 Công tắc dừng khẩn
 - Nút **Dừng tất cả** (Owner, PIN) ở màn Tài khoản mạng xã hội + lệnh Gen: đặt `gh:browser:halt`; worker kiểm cờ trước
-  **mỗi bước**, huỷ việc, đóng mọi trình duyệt; hàng đợi không nhận việc mới tới khi Owner bật lại.
+  **mỗi bước**, huỷ việc, đóng mọi trình duyệt; hàng đợi không nhận việc mới tới khi Owner bật lại. Công tắc này **chặn cả
+  việc ghi**: API từ chối nhận việc ghi mới, và worker kiểm lại ngay trước khi bấm gửi.
 - Dừng từng tài khoản: trạng thái `paused`.
 - **Tự dừng**: phát hiện checkpoint/CAPTCHA/cảnh báo bất thường/đăng xuất bất ngờ, hoặc 3 lỗi liên tiếp → tài khoản
   `paused` + chuông báo Boss. Cờ tổng `social.enabled` (tắt mặc định).
+
+### 3.8 Kiểm phiên hằng ngày (F-83)
+- Mỗi ngày **09:10 giờ VN** (ngoài giờ yên lặng 23:00–06:00 của tổ chức), cron `social_session_check` xếp một việc `health`
+  (`via=schedule`, chỉ đọc) cho từng tài khoản `active` có phiên. Bỏ qua tài khoản vừa được kiểm (việc `health`/`read`
+  xong trong 20 giờ qua), đang bận, hoặc đã đạt trần kiểm/ngày; không chạy khi **Dừng tất cả**. Action Log:
+  `social.session_check` (actor `system:social-session-check`).
+- Phiên hết/bị hỏi xác minh (`needs_login`, hoặc `paused` vì `checkpoint`/`captcha`) → mở sự cố
+  `social.session:<account_id>` (loại `social.session_expired`): **một chuông** cho Owner ("Facebook “…”: phiên đăng nhập đã
+  hết", nút **Đăng nhập lại**) và hiện ở dải "Cần Sếp xử lý". Đăng nhập lại xong hoặc gỡ tài khoản → sự cố tự đóng.
+- **Telegram**: sự cố nằm trong `run/api-health.json`, và genh watchdog (Trực canh máy chủ) gửi Telegram cho MỌI sự cố đang mở
+  của api. API **không** ghi `ops.telegram_outbox` cho sự cố (tránh gửi đôi).
 
 ## 4. Chọn model (Jev vs model chính)
 

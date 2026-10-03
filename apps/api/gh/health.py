@@ -94,15 +94,19 @@ ACTIONS = {
     "telegram.failed": "Mở cấu hình Telegram",
     # v0.1.46 (F-21): cổng đang mở cho cả mạng (bản cài cũ) — `_eval_network`.
     "network.open_lan": "Chọn cách truy cập",
+    # v0.1.47 (F-83): phiên Facebook đã hết / bị yêu cầu xác minh — gh.social.session_watch mở/đóng.
+    "social.session_expired": "Đăng nhập lại",
 }
 #: Nhãn cho người KHÔNG phải Owner khi nút ở nhãn gốc chỉ Owner có (vd "Chọn nơi lưu" — Manager không có nút đó).
 NON_OWNER_ACTIONS = {
     "offsite.stale": "Xem bản sao ngoài máy",
     "telegram.failed": "Nhờ Owner xử lý",
     "network.open_lan": "Nhờ Owner xử lý",
+    "social.session_expired": "Nhờ Owner xử lý",
 }
 #: Sự cố mà đích nút chỉ Owner mở được (thẻ Telegram chỉ dựng cho Owner) ⇒ người khác không nhận link (không nút chết).
-NON_OWNER_NO_LINK = frozenset({"telegram.failed"})
+#: (trang /social chỉ Owner mở được ⇒ social.session_expired cũng không có link cho người khác.)
+NON_OWNER_NO_LINK = frozenset({"telegram.failed", "social.session_expired"})
 _TELEGRAM_NON_OWNER = "Kênh Telegram của Owner đang lỗi — nhờ Owner mở Kết nối › Telegram"
 #: Thân sự cố cho người KHÔNG phải Owner khi thân gốc bảo bấm nút chỉ Owner có ("Chọn nơi lưu…"). Khoá = (kind, mã) —
 #: mã là fingerprint (offsite.stale) hoặc mã genh ở cuối fingerprint (offsite.failed: "<lần thử>|<mã>").
@@ -868,8 +872,10 @@ async def evaluate(db: AsyncSession, redis: Any, org_id: uuid.UUID, *, now: date
         ("ai.budget", lambda: _eval_budget(db, org_id, redis, now)),
         ("ai.background_source", lambda: _eval_background_source(db, org_id, redis)),
         ("network", lambda: _eval_network(db, org_id, redis)),
+        ("social.session", lambda: session_watch.evaluate_alerts(db, org_id, redis)),
     )
     from gh import notifications
+    from gh.social import session_watch  # nạp trễ: session_watch import gh.health
 
     for name, run in parts:
         mark = notifications.pending_mark(db)

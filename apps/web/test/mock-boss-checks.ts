@@ -20,6 +20,8 @@
  *   REMOTE_NOT_CONFIGURED; host local → REMOTE_OPENED_ON_SERVER; còn lại Đạt (`detail.opened_from`, `access_mode`).
  * - agy_switch: chỉ đếm khi hồ sơ đang dùng TRƯỚC khi đổi (`from_profile`) khác hồ sơ đích (đổi sang chính nó = 0).
  * Hook e2e `POST /api/v1/__mock/p3/bossChecks/seedAgy {}`: đặt sẵn 2 hồ sơ Google an@… (không dùng), binh@… (đang dùng).
+ * - facebook_reply (v0.1.47, F-79, dòng 8, KHÔNG bắt buộc ⇒ required_total vẫn 6): không có nút chạy (POST run → 404);
+ *   hook `seedFacebookReply {}` ghi 'pass'.
  * Hook e2e `POST /api/v1/__mock/p3/bossChecks/seedClaude {}`: một hồ sơ Claude đang dùng, CHƯA có bản claude_login.
  */
 import { randomUUID } from 'node:crypto';
@@ -56,7 +58,7 @@ export function isLocalHost(host: string): boolean {
   return !!v4 && (Number(v4[1]) === 127 || v4.slice(1).every((x) => Number(x) === 0));
 }
 
-const KEYS: BossCheckKey[] = ['hub', 'facebook', 'agy_login', 'agy_call', 'agy_switch', 'claude_login', 'claude_call', 'jev', 'telegram', 'remote_access'];
+const KEYS: BossCheckKey[] = ['hub', 'facebook', 'agy_login', 'agy_call', 'agy_switch', 'claude_login', 'claude_call', 'jev', 'telegram', 'remote_access', 'facebook_reply'];
 const RUNNABLE = new Set<BossCheckKey>(['hub', 'facebook', 'agy_call', 'agy_switch', 'claude_call', 'jev', 'telegram', 'remote_access']);
 const NEEDS_PIN = new Set<BossCheckKey>(['hub', 'agy_switch']);
 const FB_READ_MS = 1500;
@@ -69,6 +71,8 @@ const ROWS: Array<Omit<BossRow, 'done'>> = [
   { row: 5, key: 'jev', title: 'Jev', optional: true, checks: ['jev'] },
   { row: 6, key: 'telegram', title: 'Telegram (báo động & bản tin)', optional: false, checks: ['telegram'] },
   { row: 7, key: 'remote', title: 'Truy cập từ xa', optional: false, checks: ['remote_access'] },
+  // v0.1.47 (F-79): không bắt buộc, không có nút chạy (RUNNABLE không có) — Đạt do hook seedFacebookReply / gửi thật.
+  { row: 8, key: 'facebook_reply', title: 'Facebook trả lời', optional: true, checks: ['facebook_reply'] },
 ];
 
 export function createMock(opts: Opts) {
@@ -133,6 +137,7 @@ export function createMock(opts: Opts) {
       5: pass('jev'),
       6: pass('telegram'),
       7: pass('remote_access'),
+      8: pass('facebook_reply'),
     };
     const rows = ROWS.map((r) => ({ ...r, done: done[r.row] }));
     return { rows, results: { ...results }, required_done: rows.filter((r) => !r.optional && r.done).length, required_total: 6, switch_passes: switchPasses };
@@ -237,5 +242,8 @@ export function createMock(opts: Opts) {
     return list;
   };
 
-  return { handle, hooks: { seedAgy, seedClaude, overview, recordTelegram, forgetTelegram, recordRemote } as Record<string, (...args: never[]) => unknown>, dispose: () => {} };
+  /** Hook e2e: dòng 8 'Facebook trả lời' đạt (như sau một lần gửi thật được xác nhận). */
+  const seedFacebookReply = () => record('facebook_reply', 'pass', { detail: { action: 'reply_comment' } });
+
+  return { handle, hooks: { seedAgy, seedClaude, seedFacebookReply, overview, recordTelegram, forgetTelegram, recordRemote } as Record<string, (...args: never[]) => unknown>, dispose: () => {} };
 }

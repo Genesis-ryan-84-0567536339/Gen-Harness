@@ -2863,3 +2863,67 @@ chỉ `localhost` (nhân viên mở không được), đăng nhập không giớ
 - Không có nút một chạm "Chỉ cho máy này" trong Console (tránh Owner tự cắt truy cập khi đang dùng điện thoại): đổi chế độ bằng `genh remote` trên máy chủ.
 - Máy cài từ bản cũ vẫn mở 0.0.0.0 cho tới khi Owner chọn cách truy cập (chuông nhắc, không tự đóng để không cắt người đang dùng).
 - Redis lỗi ⇒ giới hạn đăng nhập tạm không áp (ưu tiên đăng nhập được); TOTP để đợt sau.
+
+## v0.1.47 — Facebook ghi, lát 1 (03/10/2026)
+
+**Vì sao:** Gen mới chỉ đọc Facebook. Lát này cho Gen **Trả lời bình luận** và **Nhắn tin** thay Sếp — nhưng mỗi lần gửi phải do
+Sếp xác nhận bằng mã PIN, có bằng chứng bằng ảnh chụp, và dừng được ngay. Đăng bài để lát 2.
+
+### Boss cần làm gì
+
+1. **Mở trang Tài khoản mạng xã hội → "Ghi lên Facebook" (`/social/ghi-facebook`)** và xem trạng thái "vùng cách ly của trình
+   duyệt" (sandbox). Nếu **đã bật** — không cần làm gì thêm. Nếu **chưa bật** (máy chủ không cho), gửi lên Facebook đang khoá:
+   đọc cảnh báo, rồi chỉ bấm **"Tôi hiểu rủi ro và đồng ý"** (nhập PIN) nếu Sếp chấp nhận; bấm **"Rút lại đồng ý"** để khoá lại.
+2. **Thử một lần thật** (Hướng dẫn › Việc Sếp cần làm › dòng 8 "Facebook trả lời", không bắt buộc): 1) Hỏi Gen "đọc Facebook"
+   2) Hỏi Gen "trả lời bình luận của <tên> trên bài của tôi: …" 3) Đọc kỹ thẻ, bấm **Xác nhận và gửi**, nhập mã PIN 4) Đợi
+   "Đã gửi", bấm **Xem ảnh chụp**, mở Facebook xem lại. Có gì lạ (không tìm thấy bình luận, nút bấm sai chỗ) — báo lại để chỉnh.
+3. **Giới hạn gửi/ngày** mặc định 10 (Sếp hạ được 1–20) — chỉnh ở thẻ tài khoản nếu muốn chặt hơn.
+4. Chuông mới "Facebook “…”: phiên đăng nhập đã hết" (kèm tin Telegram) — bấm **Đăng nhập lại** như thường. Còn lại không cần làm gì.
+
+### Thay đổi (theo mã)
+
+- **F-79 — Ghi Facebook, lát 1**: việc `write` (`reply_comment` | `send_message`); đề xuất Gen `social_reply` / `social_dm`
+  (chỉ sửa được `text`) → thẻ **Xác nhận và gửi** + PIN `social.write` → `POST /social/accounts/{id}/write` → **permit** ký
+  khoá browser (TTL 5 phút, nonce dùng một lần, hash nội dung + đích) → worker kiểm permit trước khi mở trình duyệt, kiểm
+  **Dừng tất cả** lần cuối ngay trước khi bấm gửi → ảnh chụp bằng chứng mã hoá + trace bước → Action Log (chỉ sha256) + chuông.
+  Chỉ trả lời/nhắn vào mục đã đọc được từ chính tài khoản (7 ngày). Chi tiết: `docs/api/browser-protocol.md` (mục "Ghi"),
+  `docs/design/gen-browser-agent.md` §3.5.
+- **F-85 — Sandbox trình duyệt**: ưu tiên bật bằng user namespace + hồ sơ seccomp riêng (cap_drop ALL, non-root); chế độ `auto`
+  tự lùi và báo thật qua nhịp tim (`sandbox`). Gửi chỉ mở khi sandbox bật HOẶC Owner đã đồng ý (`ops.risk_consents`: thời điểm,
+  người, phiên bản cảnh báo `2026-10-03`); `GET /social/write-gate`. Lỗi `SOCIAL_WRITE_LOCKED` có câu thân thiện + "Chi tiết kỹ thuật".
+- **F-83 (phần mạng xã hội) — kiểm phiên hằng ngày**: cron `social_session_check` 09:10 giờ VN (nhãn "Kiểm phiên mạng xã hội")
+  → `gh/social/session_watch.py::daily_check` xếp việc `health` (`via=schedule`) cho tài khoản `active` có phiên; bỏ qua nếu vừa
+  kiểm trong 20 giờ, đang bận, đạt trần kiểm/ngày, Dừng tất cả, hoặc giờ yên lặng. Phiên hết (`needs_login`) hay bị hỏi xác minh
+  (`paused` vì checkpoint/CAPTCHA) → `evaluate_alerts` (một phần của vòng `health.evaluate`) mở sự cố `social.session:<id>` loại
+  `social.session_expired` (nút "Đăng nhập lại"; người không phải Owner: "Nhờ Owner xử lý", không link) + đúng một chuông; đăng
+  nhập lại hoặc gỡ tài khoản thì đóng. Action Log `social.session_check` (actor `system:social-session-check`).
+- **Web**: dòng 8 "Facebook trả lời (không bắt buộc)" ở Việc Sếp cần làm (hướng dẫn 4 bước; chưa đạt → nút "Mở Tài khoản mạng xã
+  hội"; không có nút chạy kiểm; chỉ hiện khi máy chủ trả dòng 8; `required_total` vẫn 6).
+- **F-92**: bỏ số phiên bản khỏi chú thích "chỗ cắm"; `apps/api/tests/test_plug_comments_v0147.py` quét tệp được git theo dõi dưới
+  `apps/`, `packages/`, `deploy/` (bỏ `node_modules`, `docs/audit`) và chặn chú thích kiểu cũ quay lại.
+- **F-59**: ghi lý do vào thiết kế (§3.4) — trễ là để lịch sự với nền tảng, chạy có giao diện là để Owner tự đăng nhập; trễ nay cố định.
+
+### Quyết định kỹ thuật
+
+- **Telegram cho sự cố phiên hết hạn đi qua genh watchdog, KHÔNG qua `ops.telegram_outbox`.** Theo thiết kế v0.1.44
+  (`gh/telegram/service.py`, `gh/health.py::write_host_snapshot`), watchdog đọc `run/api-health.json` — gộp MỌI sự cố đang mở
+  của api — và là đường báo sự cố qua Telegram duy nhất ("api không gửi Telegram cho sự cố, tránh gửi đôi"). Ghi thêm hàng
+  outbox sẽ gửi đôi. Tiêu chí "phiên hết → raise_once + Telegram" được kiểm bằng: đúng 1 sự cố mở + có trong
+  `api-health.json` + `ops.telegram_outbox` không có hàng mới (`test_social_session_watch_v0147.py`).
+- **Trễ cố định 3 giây** (`GH_BROWSER_DELAY`) thay khoảng ngẫu nhiên 2–6 giây — tránh bị hiểu là né chống bot (F-59).
+- **Giới hạn gửi/ngày** mặc định 10, Owner hạ 1..20, **trần cứng 20** (cửa sổ 24 giờ, không tính việc đã huỷ).
+- **Ảnh chụp bằng chứng**: JPEG ≤ 2 MB, mã hoá bằng khoá master khi lưu, giữ 90 ngày; không dùng Playwright tracing (chứa cookie).
+- **Sandbox**: kết quả thực tế trên CI và trên máy Boss do người điều phối điền khi phát hành — nếu CI/máy chủ không cho user
+  namespace thì ghi rõ lý do (kernel/AppArmor/seccomp) và gửi vẫn khoá tới khi Owner đồng ý rủi ro. *(Gói này chỉ làm phần
+  kiểm phiên, web và tài liệu — chưa đo sandbox.)*
+- Chuông phiên hết dùng `health.raise_once` (khử trùng lặp theo `social.session:<id>` + fingerprint `pause_reason`/`status`).
+
+### Rủi ro / giới hạn
+
+- **Selector ghi Facebook chưa kiểm thật** — mới kiểm trên trang mẫu; nghiệm thu thật do Boss làm (dòng 8). Facebook đổi giao
+  diện có thể làm `TARGET_NOT_FOUND`/`SELECTOR` (lỗi an toàn: không gửi gì).
+- **Chuông trong app có thể hiện hai lần khi phiên hết**: `social.paused` cũ (từ `_on_failure`) + sự cố mới
+  `social.session_expired`. Chấp nhận ở lát này; gộp ở bản sau nếu Sếp thấy phiền.
+- Telegram báo phiên hết chậm tới một nhịp watchdog (tệp `api-health.json` tươi ≤ 10 phút).
+- Đăng bài (`post`), `like`, `follow` chưa có (lát 2).
+- Test kiểm phiên dùng worker giả như `test_social.py` — không có Chromium/sandbox thật trong gói này.
