@@ -10,7 +10,7 @@ import { render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AUTONOMY_LEVELS, AUTONOMY_MAX, autonomyLabel } from '@gen-harness/contracts';
 import { autonomyTooltip } from '../../src/shell/headerModel';
-import { AUTONOMY_OPTIONS, AUTONOMY_LEVELS as AGENT_LEVELS } from '../../src/screens/agents/agentsModel';
+import { AUTONOMY_LEVELS as AGENT_LEVELS } from '../../src/screens/agents/agentsModel';
 import { Step9Autonomy } from '../../src/setup/Step9Autonomy';
 import { SETUP_STEPS } from '../../src/setup/steps';
 
@@ -53,19 +53,18 @@ describe('Thang tự trị — một nguồn', () => {
 });
 
 describe('Nơi dùng giữ nguyên hành vi', () => {
-  it('tooltip header không đổi', () => {
-    expect(autonomyTooltip(4)).toBe('Mức tự trị hiện tại — mức 4: soạn sẵn chờ duyệt (thang 0–6)');
-    expect(autonomyTooltip(9)).toBe('Mức tự trị hiện tại — mức 9 (thang 0–6)');
+  it('tooltip header: nhãn 3 mức + mức thật trên thang 0–6 (v0.1.43, F-30)', () => {
+    expect(autonomyTooltip(4)).toBe('Mức tự trị chung: Soạn sẵn chờ duyệt (mức 4/6)');
+    expect(autonomyTooltip(6)).toBe('Mức tự trị chung: Tự làm (đặt ở Nâng cao) (mức 6/6)');
+    expect(autonomyTooltip(9)).toBe('Mức tự trị chung: mức 9 (ngoài thang 0–6)');
   });
 
-  it('Danh tính Agent: 7 lựa chọn "n — nhãn"', () => {
-    expect(AUTONOMY_OPTIONS).toHaveLength(7);
-    expect(AUTONOMY_OPTIONS[0]).toEqual({ value: '0', label: '0 — Chỉ ghi nhận' });
-    expect(AUTONOMY_OPTIONS.map((o) => o.label)).toEqual(AUTONOMY_LEVELS.map((l, n) => `${n} — ${l}`));
+  it('Danh tính Agent: bảng nhãn 0–6 vẫn dẫn xuất từ contracts (title của viên tự trị)', () => {
+    expect(Object.keys(AGENT_LEVELS)).toHaveLength(7);
     expect(AGENT_LEVELS[3]).toBe('Gợi ý hành động');
   });
 
-  it('bước 9 vẫn chỉ cho chọn mức 3 hoặc 4', () => {
+  it('bước 9 vẫn chỉ cho chọn mức 3 hoặc 4 (nhãn 3 mức, không tiền tố số)', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('[]', { status: 200, headers: { 'Content-Type': 'application/json' } })));
     const meta = SETUP_STEPS.find((s) => s.n === 9)!;
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -86,6 +85,7 @@ describe('Nơi dùng giữ nguyên hành vi', () => {
       ),
     );
     const radios = screen.getAllByRole('radio').map((r) => r.textContent?.trim());
-    expect(radios).toEqual(['3 · Gợi ý hành động', '4 · Soạn sẵn chờ duyệt']);
+    expect(radios).toEqual(['Gợi ý', 'Soạn sẵn chờ duyệt']);
+    expect(screen.getAllByRole('radio').map((r) => r.getAttribute('aria-checked'))).toEqual(['false', 'true']);
   });
 });

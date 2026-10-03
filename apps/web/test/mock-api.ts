@@ -362,6 +362,8 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
   // v0.1.21 Gen: kịch bản cố định (test/mock-gen.ts); `features.gen` của /auth/me đọc cờ ở đây.
   const genMock = createGen({
     emit: broadcast,
+    // v0.1.43 (F-24): xác nhận nháp tin của Gen tạo nháp thật ở Bàn làm việc.
+    pushDraft: p3Core.hooks.push as (d: unknown) => unknown,
     notifyOwners: (kind, title, body, link) => {
       for (const u of users.filter((x) => x.role.code === 'owner')) notify(u.id, kind, title, body, link);
     },
@@ -1183,7 +1185,7 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
       return reply(200, { items });
     }
     if (path === '/header' && method === 'GET') {
-      return reply(200, { channels_live: 4, groups_listening: 42, autonomy_level: 4, data_confidence: 0.78 });
+      return reply(200, { channels_live: 4, channels_connected: 4, groups_listening: 42, autonomy_level: 4, data_confidence: 0.78 });
     }
     if (path === '/audit' && method === 'GET') {
       if (permissionsOf(user.role.code)['audit.read'] === 'none') return problem(res, 403, 'FORBIDDEN', 'Vai trò không có quyền này');

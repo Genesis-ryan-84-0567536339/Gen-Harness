@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { SCREEN_BY_KEY } from '@gen-harness/contracts';
+import { SCREEN_BY_KEY, autonomyChoice, autonomyPatch } from '@gen-harness/contracts';
 import type { AgentRef, DirGroup, DirHeatBand, DirPerson, DirPriority, DirRelation, DirValueBand } from '@gen-harness/contracts';
 import { Bar, CardError, InlineError, ScreenHead, SkeletonLines } from '../common';
 import { Button, Dialog, EmptyState, Icon, Tabs, type FilterOption, type TabItem } from '@gen-harness/ui';
@@ -9,6 +9,8 @@ import { fmtInt } from '../../lib/format';
 import { useCan } from '../../lib/permissions';
 import { useAgentOptions, useEmptyAgentsText } from '../../lib/pickers';
 import { useUrlState } from '../../lib/uiStore';
+import { AutonomySelect } from '../AutonomySelect';
+import { DataEmptyState } from '../DataEmptyState';
 import {
   CHANNEL_LABEL,
   CHANNEL_STATE_LABEL,
@@ -118,7 +120,7 @@ function GroupsPane() {
   if (channels.isPending || groups.isPending) return <SkeletonLines rows={6} />;
   if (channels.isError) return <CardError error={channels.error} onRetry={() => void channels.refetch()} retrying={channels.isFetching} />;
   if (groups.isError) return <CardError error={groups.error} onRetry={() => void groups.refetch()} retrying={groups.isFetching} />;
-  if (channels.data.length === 0) return <EmptyState icon="ph ph-broadcast" title="Chưa có kênh nào kết nối" />;
+  if (channels.data.length === 0) return <DataEmptyState fallback={<EmptyState icon="ph ph-broadcast" title="Chưa có kênh nào kết nối" />} />;
 
   const byChannel = (type: string) => groups.data.items.filter((g) => g.channel.type === type);
 
@@ -300,7 +302,10 @@ function PeoplePane() {
         ) : people.isError ? (
           <CardError error={people.error} onRetry={() => void people.refetch()} retrying={people.isFetching} />
         ) : people.data.items.length === 0 ? (
-          <EmptyState icon="ph ph-address-book" title="Không có ai khớp bộ lọc" />
+          <DataEmptyState
+            filtered={Boolean(relation || heat || value || priority || bot)}
+            fallback={<EmptyState icon="ph ph-address-book" title="Không có ai khớp bộ lọc" />}
+          />
         ) : (
           <div className="gh-table-scroll">
             <table className="gh-table w920" aria-label="Con người">
@@ -366,7 +371,7 @@ function PeoplePane() {
                         ) : null}
                       </div>
                     </td>
-                    <td className="td-id">{p.autonomy_level !== null ? `mức ${p.autonomy_level}` : '—'}</td>
+                    <td className="td-id">{autonomyChoice(p.autonomy_level)?.label ?? '—'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -396,28 +401,11 @@ function FilterRow({ label, value, onChange, options }: { label: string; value: 
   );
 }
 
-function AutonomySelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  return (
-    <div className="dlg-fields">
-      <span className="dir-filter-row__label">Mức tự trị (không bắt buộc)</span>
-      <div className="dir-filter-row__opts" role="group" aria-label="Mức tự trị">
-        <button type="button" className="dir-filter-row__opt" aria-pressed={value === ''} onClick={() => onChange('')}>
-          Giữ nguyên
-        </button>
-        {Array.from({ length: 7 }, (_, i) => String(i)).map((n) => (
-          <button key={n} type="button" className="dir-filter-row__opt" aria-pressed={value === n} onClick={() => onChange(n)}>
-            {n}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function PersonBotDialog({ person, onClose }: { person: DirPerson; onClose: () => void }) {
   const setBot = useSetPersonBot();
   const [agentId, setAgentId] = useState(person.bot?.id ?? '');
-  const [autonomy, setAutonomy] = useState(person.autonomy_level !== null ? String(person.autonomy_level) : '');
+  // F-30: `null` = giữ nguyên mức đang lưu — Lưu không gửi lại autonomy_level nếu Sếp không chọn mức khác.
+  const [picked, setPicked] = useState<number | null>(null);
   return (
     <Dialog
       open
@@ -436,7 +424,7 @@ function PersonBotDialog({ person, onClose }: { person: DirPerson; onClose: () =
             loading={setBot.isPending}
             onClick={() =>
               setBot.mutate(
-                { id: person.id, body: { agent_id: agentId || null, ...(autonomy !== '' ? { autonomy_level: Number(autonomy) } : {}) } },
+                { id: person.id, body: { agent_id: agentId || null, ...autonomyPatch(person.autonomy_level, picked) } },
                 { onSuccess: onClose },
               )
             }
@@ -448,7 +436,7 @@ function PersonBotDialog({ person, onClose }: { person: DirPerson; onClose: () =
     >
       <div className="dlg-fields">
         <AgentChoices value={agentId} onChange={setAgentId} current={person.bot} />
-        <AutonomySelect value={autonomy} onChange={setAutonomy} />
+        <AutonomySelect current={person.autonomy_level} value={picked} onChange={setPicked} />
         {setBot.isError ? <InlineError>{errorText(setBot.error)}</InlineError> : null}
       </div>
     </Dialog>
@@ -459,9 +447,9 @@ function BulkBotDialog({ ids, onClose }: { ids: string[]; onClose: () => void })
   const setBot = useSetPersonBot();
   // Mặc định GIỮ NGUYÊN BOT: người chỉ muốn đổi mức tự trị không vô tình gỡ BOT của cả nhóm đã lọc.
   const [agentId, setAgentId] = useState(KEEP_BOT);
-  const [autonomy, setAutonomy] = useState('');
+  const [picked, setPicked] = useState<number | null>(null);
   const keepBot = agentId === KEEP_BOT;
-  const nothingToApply = keepBot && autonomy === '';
+  const nothingToApply = keepBot && picked === null;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const apply = async () => {
@@ -472,7 +460,7 @@ function BulkBotDialog({ ids, onClose }: { ids: string[]; onClose: () => void })
         // tuần tự (không await-in-loop song song) để không vượt giới hạn tốc độ API mock
         await setBot.mutateAsync({
           id,
-          body: { ...(keepBot ? {} : { agent_id: agentId || null }), ...(autonomy !== '' ? { autonomy_level: Number(autonomy) } : {}) },
+          body: { ...(keepBot ? {} : { agent_id: agentId || null }), ...autonomyPatch(null, picked) },
         });
       }
       onClose();
@@ -502,7 +490,7 @@ function BulkBotDialog({ ids, onClose }: { ids: string[]; onClose: () => void })
     >
       <div className="dlg-fields">
         <AgentChoices value={agentId} onChange={setAgentId} noneLabel="Chưa gán (gỡ BOT)" keepLabel="Giữ nguyên BOT hiện tại" />
-        <AutonomySelect value={autonomy} onChange={setAutonomy} />
+        <AutonomySelect current={null} value={picked} onChange={setPicked} keepLabel="Giữ nguyên" />
         {error ? <InlineError>{errorText(error)}</InlineError> : null}
       </div>
     </Dialog>

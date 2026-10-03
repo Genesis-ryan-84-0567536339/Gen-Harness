@@ -5,7 +5,7 @@ import { useHeaderStatus } from '../lib/queries';
 import { SavedViewsButton } from '../screens/core/SavedViews';
 import { useViews } from '../screens/core/queries';
 import { useUiStore } from '../lib/uiStore';
-import { autonomyTooltip, confidencePercent, showSavedViews } from './headerModel';
+import { autonomyPillText, autonomyTooltip, confidencePercent, showSavedViews } from './headerModel';
 import { GenToggle } from '../gen/GenToggle';
 import { NotificationBell } from './NotificationBell';
 import { ThemeToggle } from './ThemeToggle';
@@ -100,7 +100,7 @@ export function Header({
         <GenToggle />
         <NotificationBell />
         <ThemeToggle />
-        <IconButton icon="ph ph-magnifying-glass" label="Tìm theo ý định" variant="primary" onClick={() => navigate('/search')} />
+        <IconButton icon="ph ph-magnifying-glass" label="Kho hội thoại" variant="primary" onClick={() => navigate('/search')} />
       </div>
     </header>
   );
@@ -123,9 +123,7 @@ function StatusPills({ s, advanced }: { s: HeaderStatus; advanced: boolean }) {
       {live}
       <Tooltip content={autonomyTooltip(s.autonomy_level)}>
         <div tabIndex={0} className="hd-pill-focus">
-          <Pill icon="ph ph-sliders" iconColor="var(--color-accent-300)" mono>
-            tự trị {s.autonomy_level}
-          </Pill>
+          <Pill icon="ph ph-sliders" iconColor="var(--color-accent-300)">{autonomyPillText(s.autonomy_level)}</Pill>
         </div>
       </Tooltip>
       <Tooltip

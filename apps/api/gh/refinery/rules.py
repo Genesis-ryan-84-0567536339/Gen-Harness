@@ -9,6 +9,8 @@ import unicodedata
 from dataclasses import dataclass, field
 from typing import Any
 
+from gh.textnorm import collapse_lower, strip_accents
+
 ENTITY_TYPES = ("qty", "price", "budget", "phone", "product", "date")
 CONDITION_TYPES = ("keyword_any", "keyword_all", "regex", "has_entity", "min_words", "max_words", "is_question",
                    "kind_in", "repeat_unanswered", "llm")
@@ -38,21 +40,18 @@ _WORD = re.compile(r"\w+", re.U)
 _NUM_WORDS = {"hai": 2, "ba": 3, "bốn": 4, "năm": 5, "mấy": 2, "nhiều": 3}
 
 
-def strip_accents(s: str) -> str:
-    s = unicodedata.normalize("NFD", s.replace("đ", "d").replace("Đ", "D"))
-    return "".join(ch for ch in s if unicodedata.category(ch) != "Mn")
-
-
 def _plain_re(r: re.Pattern[str]) -> re.Pattern[str]:
     return re.compile(strip_accents(r.pattern), r.flags)
 
 
 def normalize(s: str) -> str:
-    return re.sub(r"\s+", " ", unicodedata.normalize("NFC", s or "")).strip().lower()
+    return collapse_lower(s)
 
 
 def has_accents(s: str) -> bool:
-    return strip_accents(s) != s
+    # So với dạng NFKC (không phải chính chuỗi): strip_accents (gh.textnorm, NFKD) còn quy ký tự tương thích ('…',
+    # 'm²', chữ toàn chiều rộng) về dạng thường — các ký tự đó không phải dấu tiếng Việt, không được tính là "có dấu".
+    return strip_accents(s) != unicodedata.normalize("NFKC", s)
 
 
 def entities(text: str) -> dict[str, list[str]]:

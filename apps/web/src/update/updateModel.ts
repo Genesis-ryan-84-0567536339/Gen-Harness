@@ -261,6 +261,9 @@ export function updateView(
   return { kind: 'hidden' };
 }
 
+/** v0.1.43 (F-62): tiền tố conventional commit đầu dòng/gạch đầu dòng; nhóm 2 = chữ đầu phần còn lại. */
+const COMMIT_PREFIX = /^(\s*[-*]\s+)?(?:feat|fix|chore|docs|refactor|perf|test|ci|build|style|revert)(?:\([^)]*\))?!?:\s*(\S)/u;
+
 /**
  * v0.1.28 (UX V11): ghi chú phát hành lấy từ GitHub có phần tự sinh bằng tiếng Anh ("What's Changed", "Full
  * Changelog", "by @x in https://…/pull/12") — bỏ phần đó, giữ phần mô tả; dịch tiêu đề thường gặp.
@@ -277,6 +280,8 @@ export function readableNotes(md: string | null | undefined): string {
       .replace(/\s+by @[\w-]+(\[bot\])?\s+in\s+https?:\/\/\S+/gi, '')
       .replace(/\s*\(#\d+\)\s*$/, '')
       .replace(/https?:\/\/github\.com\/\S+/gi, '')
+      // v0.1.43 (F-62): bỏ tiền tố conventional commit ("feat(x): …") ở đầu dòng/gạch đầu dòng, viết hoa chữ đầu.
+      .replace(COMMIT_PREFIX, (_m, bullet: string | undefined, first: string) => (bullet ?? '') + first.toLocaleUpperCase('vi'))
       .trimEnd();
     out.push(l);
   }

@@ -185,14 +185,18 @@ describe('<SetupPage>', () => {
     expect(await screen.findByText(/Nhập mã thiết lập/)).toBeInTheDocument();
 
     await user.type(token, 'GH-SETUP-7Q4K');
-    await user.click(screen.getByLabelText(/Dùng dữ liệu mẫu/));
     // v0.1.28 (UX V3): không còn lựa chọn English (chưa có bản dịch) — luôn gửi "vi".
     expect(screen.queryByRole('radio', { name: 'English' })).toBeNull();
+    // v0.1.43 (F-23): bỏ hẳn 'Cách bắt đầu' (dữ liệu mẫu) — luôn bắt đầu trống.
+    expect(screen.queryByText('Cách bắt đầu')).toBeNull();
+    expect(screen.queryByRole('radio', { name: /Dùng dữ liệu mẫu/ })).toBeNull();
+    expect(screen.queryByRole('radio', { name: /Bắt đầu trống/ })).toBeNull();
+    expect(screen.queryAllByRole('radio')).toHaveLength(0);
     await user.click(next);
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Bước 2' })).toBeInTheDocument());
     const put = fetchSpy.mock.calls.find(([u, i]) => String(u).endsWith('/setup/steps/1') && i?.method === 'PUT')!;
-    expect(JSON.parse(String(put[1]!.body))).toEqual({ token: 'GH-SETUP-7Q4K', language: 'vi', mode: 'sample' });
+    expect(JSON.parse(String(put[1]!.body))).toEqual({ token: 'GH-SETUP-7Q4K', language: 'vi', mode: 'empty' });
     expect(sessionStorage.getItem('gh_setup_token')).toBe('GH-SETUP-7Q4K');
   });
 

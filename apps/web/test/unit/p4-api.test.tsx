@@ -67,6 +67,8 @@ const PROVIDERS: Provider[] = [
 const BINDINGS: BindingsPage = {
   items: [
     { agent_key: 'core.refinery', label: 'Sàng lọc & suy luận chính', binding: { model_id: 'm1', model_name: 'gemini-2.5-flash', provider_name: 'Gemini API', temperature: 0.2, context_tokens: 64000, rule_codes: ['R-01', 'R-02'] } },
+    // v0.1.43 (F-25): core.reply = 'Soạn lại / dịch nháp' (bỏ core.intent/scoring/indexing).
+    { agent_key: 'core.reply', label: 'Soạn lại / dịch nháp', binding: null },
     { agent_key: 'agent:agent-tls', label: 'Trợ lý thương mại', binding: null },
   ],
   models: [
@@ -113,6 +115,8 @@ describe('API & Model', () => {
     expect(screen.getByText('DeepSeek API', { selector: '.apm-provider__name' })).toBeInTheDocument();
     expect(screen.getByText(/GEM-KEY-01 ····9f2a/)).toBeInTheDocument();
     expect(screen.getByText('Sàng lọc & suy luận chính')).toBeInTheDocument();
+    expect(screen.getByText('Soạn lại / dịch nháp', { selector: '.apm-table__agent' })).toBeInTheDocument();
+    expect(screen.queryByText('Trả lời nhanh trong nhóm')).toBeNull();
     expect(screen.getByText('Trợ lý thương mại', { selector: '.apm-table__agent' })).toBeInTheDocument();
     expect(screen.getByText('hết hạn mức')).toBeInTheDocument();
   });

@@ -306,8 +306,8 @@
     {
       "id": "system.brain.triage",
       "screen": "system",
-      "label": "Thẻ \"Lọc đầu Hộp thư\"",
-      "description": "Bật/tắt lọc trùng & rác, ngưỡng điểm chất lượng, dùng Jev để chấm (chỉ Owner sửa)",
+      "label": "Thẻ \"Lọc tin\"",
+      "description": "Bật/tắt lọc tin, chọn mức Thấp/Vừa/Cao; Jev và ngưỡng số ở Nâng cao (chỉ Owner sửa)",
       "dynamic": null,
       "params": {
         "tab": "brain"

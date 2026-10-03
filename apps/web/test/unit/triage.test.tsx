@@ -70,9 +70,9 @@ function page(items: InboxItem[], hidden = 0): InboxPage {
 describe('Lọc đầu Hộp thư — huy hiệu', () => {
   it('Trùng / Rác / điểm, không dấu → không huy hiệu', () => {
     expect(triageBadges(null)).toEqual([]);
-    expect(triageBadges(GOOD.triage).map((b) => b.label)).toEqual(['Lọc đầu 82']);
+    expect(triageBadges(GOOD.triage).map((b) => b.label)).toEqual(['Điểm lọc 82']);
     const junk = triageBadges(JUNK.triage);
-    expect(junk.map((b) => b.label)).toEqual(['Trùng', 'Rác', 'Lọc đầu 5']);
+    expect(junk.map((b) => b.label)).toEqual(['Trùng', 'Rác', 'Điểm lọc 5']);
     expect(junk[0].title).toContain('y hệt');
     expect(junk[2].title).toContain('quy tắc');
   });
@@ -87,7 +87,7 @@ describe('Hộp thư — "Ẩn rác & trùng"', () => {
     renderScreen(<InboxScreen />);
     expect(await screen.findByText('Rác')).toBeInTheDocument();
     expect(screen.getByText('Trùng')).toBeInTheDocument();
-    expect(screen.getByText('Lọc đầu 82')).toBeInTheDocument();
+    expect(screen.getByText('Điểm lọc 82')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('switch', { name: 'Ẩn rác & trùng' }));
     await waitFor(() => expect(calls.some((c) => c.url.includes('hide_junk=true'))).toBe(true));
     expect(await screen.findByText(/Đã ẩn 1 mục/)).toBeInTheDocument();
@@ -113,18 +113,20 @@ function triageHandler(role: string) {
   };
 }
 
-describe('Điều khiển hệ thống — thẻ Lọc đầu', () => {
-  it('Owner đổi ngưỡng điểm và tắt/bật được', async () => {
+describe('Điều khiển hệ thống — thẻ Lọc tin', () => {
+  it('Owner đổi ngưỡng điểm (Nâng cao) và tắt/bật được', async () => {
     const calls = mockFetch(triageHandler('owner'));
     renderScreen(<TriageCard />);
     expect(await screen.findByText(/12 mục đã lọc · 2 trùng · 1 rác/)).toBeInTheDocument();
+    await userEvent.click(screen.getByText('Nâng cao — Jev và ngưỡng điểm'));
+    expect(screen.getByText(/Jev 4 lượt, ~420 ms/)).toBeVisible();
     const input = await screen.findByLabelText('Ngưỡng điểm (0–100)');
     await waitFor(() => expect(input).not.toBeDisabled());
     await userEvent.clear(input);
     await userEvent.type(input, '45');
     await userEvent.click(screen.getByRole('button', { name: 'Lưu ngưỡng' }));
     await waitFor(() => expect(calls.some((c) => c.method === 'PATCH' && (c.body as { min_score?: number })?.min_score === 45)).toBe(true));
-    await userEvent.click(screen.getByRole('switch', { name: 'Bật lọc đầu' }));
+    await userEvent.click(screen.getByRole('switch', { name: 'Bật lọc tin' }));
     await waitFor(() => expect(calls.some((c) => c.method === 'PATCH' && (c.body as { enabled?: boolean })?.enabled === false)).toBe(true));
   });
 
@@ -133,7 +135,7 @@ describe('Điều khiển hệ thống — thẻ Lọc đầu', () => {
     renderScreen(<TriageCard />);
     expect(await screen.findByText(/Chỉ Sếp \(Owner\)/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Lưu ngưỡng' })).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole('switch', { name: 'Bật lọc đầu' }));
+    await userEvent.click(screen.getByRole('switch', { name: 'Bật lọc tin' }));
     expect(calls.some((c) => c.method === 'PATCH')).toBe(false);
   });
 });

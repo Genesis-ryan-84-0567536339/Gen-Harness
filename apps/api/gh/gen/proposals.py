@@ -324,5 +324,10 @@ def result_of(call: Call, fields: dict[str, Any], body: Any) -> dict[str, Any]:
     if call.result_type == "inbox_item":
         return {"type": "inbox_item", "id": fields["item_id"], "screen": "inbox"}
     rid = b.get("id")
-    return {"type": call.result_type, "id": str(rid) if rid else None, "code": b.get("code"),
-            "screen": "workbench" if call.result_type == "draft" else "tasks"}
+    out = {"type": call.result_type, "id": str(rid) if rid else None, "code": b.get("code"),
+           "screen": "workbench" if call.result_type == "draft" else "tasks"}
+    if call.result_type == "draft":
+        # v0.1.43 (F-24): nháp chỉ GỬI ĐƯỢC khi có nơi gửi (hiện chỉ đối tượng là NHÓM mới gắn target — plan_call).
+        # Không có target thì duyệt ở Bàn làm việc sẽ NO_TARGET ⇒ web không được hứa "Duyệt & gửi".
+        out["sendable"] = bool(call.body.get("target"))
+    return out

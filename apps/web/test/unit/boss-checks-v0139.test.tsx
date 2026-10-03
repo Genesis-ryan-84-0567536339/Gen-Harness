@@ -257,7 +257,7 @@ describe('Việc Sếp cần làm (/guide/viec-sep)', () => {
     setup();
     const { unmount } = renderPage();
     const jev = await screen.findByRole('region', { name: 'Jev' });
-    expect(await within(jev).findByRole('link', { name: /Nhập khoá Jev/ })).toHaveAttribute('href', '/system?tab=brain');
+    expect(await within(jev).findByRole('link', { name: /Nhập khoá Jev/ })).toHaveAttribute('href', '/system?tab=brain#jev');
     unmount();
     queryClient.clear();
 

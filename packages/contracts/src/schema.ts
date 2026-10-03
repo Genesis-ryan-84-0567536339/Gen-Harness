@@ -76,6 +76,8 @@ export interface components {
     };
     HeaderStatus: {
       channels_live: number;
+      /** v0.1.43: kênh đã từng đăng nhập thành công (kể cả khi phiên đã hết hạn) — tách "chưa nối" với "mất phiên". */
+      channels_connected?: number;
       groups_listening: number;
       autonomy_level: number;
       /** 0–1 fraction or 0–100 percent; `null` while there is no data yet. */

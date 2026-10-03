@@ -140,7 +140,7 @@ export function pipelineCards(p: Pipeline, screen: DataScreen): PipelineCard[] {
     },
     {
       step: 4,
-      name: 'Kho sạch SSOT',
+      name: 'Kho sạch',
       icon: 'ph ph-check-circle',
       value: fmtInt(p.clean_total),
       unit: 'bản ghi',

@@ -423,7 +423,7 @@ describe('Nhóm & Con người › Thiết lập BOT cho nhóm đã lọc', () =
     expect(within(dlg).getByText('Giữ nguyên BOT hiện tại').closest('button')).toHaveAttribute('aria-pressed', 'true');
     const apply = within(dlg).getByRole('button', { name: /Áp dụng cho 2 người/ });
     expect(apply).toBeDisabled(); // chưa chọn gì để đổi
-    await user.click(within(within(dlg).getByRole('group', { name: 'Mức tự trị' })).getByRole('button', { name: '4' }));
+    await user.click(within(within(dlg).getByRole('group', { name: 'Mức tự trị' })).getByRole('button', { name: 'Soạn sẵn chờ duyệt' }));
     expect(apply).toBeEnabled();
     await user.click(apply);
     await waitFor(() => expect(calls.filter((c) => c.method === 'POST' && c.url.includes('/bot')).length).toBe(2));

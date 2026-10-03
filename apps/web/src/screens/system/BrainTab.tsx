@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { EmptyState, Icon } from '@gen-harness/ui';
 import { qk2, useProviders } from '../../lib/dataQueries';
@@ -40,6 +40,13 @@ export function BrainTabBody() {
   const providers = useProviders();
   const rules = useFailoverRules();
   const qc = useQueryClient();
+  const jevHash = useLocation().hash === '#jev';
+  // v0.1.43: "Nhập khoá Jev" (Kiểm tra của Boss) dẫn tới #jev — thẻ ở lưới dưới, mở sẵn rồi cuộn tới (giống Kết nối).
+  useEffect(() => {
+    if (!jevHash) return;
+    const t = window.setTimeout(() => document.getElementById('jev')?.scrollIntoView?.({ block: 'start' }), 50);
+    return () => window.clearTimeout(t);
+  }, [jevHash]);
   // v0.1.39 (F-78): Jev không bắt buộc — kiểm tra lỗi thì thu thẻ vào "Nâng cao" thay vì để lỗi đỏ giữa tab.
   // Mutation giữ ở đây để kết quả "Kiểm tra 1 lần" còn nguyên khi thẻ chuyển chỗ.
   const jevTest = useTestProvider();
@@ -51,6 +58,7 @@ export function BrainTabBody() {
     setJevFailedNow(true);
     void qc.invalidateQueries({ queryKey: qk2.providers });
   };
+  // Một phần tử duy nhất trong <details> — đổi summary không gỡ thẻ nên kết quả kiểm tra không mất.
   const jevCard = <JevCard test={jevTest} onFailed={onJevFailed} />;
   // Jev (system_one) không nằm trong chuỗi sinh chữ — hiện riêng ở thẻ Jev.
   const sorted = [...(providers.data ?? [])].filter((p) => p.kind !== 'system_one').sort((a, b) => a.failover_rank - b.failover_rank);
@@ -163,14 +171,11 @@ export function BrainTabBody() {
       </div>
 
       <div className="sys-grid2">
-        {jevFailed ? (
-          <details className="brain-advanced">
-            <summary>Nâng cao — Jev (đã ẩn vì kiểm tra lỗi, không bắt buộc)</summary>
-            {jevCard}
-          </details>
-        ) : (
-          jevCard
-        )}
+        {/* v0.1.43 (F-30): Jev không bắt buộc — luôn nằm trong "Nâng cao"; tới bằng `#jev` (vd từ Kiểm tra của Boss) thì mở sẵn. */}
+        <details className="brain-advanced" id="jev" open={jevHash || undefined}>
+          <summary>{jevFailed ? 'Nâng cao — Jev (đã ẩn vì kiểm tra lỗi, không bắt buộc)' : 'Nâng cao — Jev (không bắt buộc)'}</summary>
+          {jevCard}
+        </details>
         {/* v0.1.42 (F-61): thẻ tài khoản CLI chỉ ở một chỗ — Kết nối › Bộ não AI. */}
         <div className="gh-card brain-cli-link">
           <Link to="/connections#brain" className="sys-link">

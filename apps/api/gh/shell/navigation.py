@@ -57,9 +57,9 @@ NAV: list[dict[str, Any]] = [
      "collapsed": True,
      "groups": [
          _g("Tầng dữ liệu", "ph ph-database", [
-             _s("raw", "ph ph-database", "Kho dữ liệu thô", "Tin gốc bridge gom về", WARN),
+             _s("raw", "ph ph-database", "Kho dữ liệu thô", "Tin gốc các kênh gom về", WARN),
              _s("rules", "ph ph-funnel", "Quy tắc sàng lọc", "Lọc, phân loại, chấm điểm"),
-             _s("clean", "ph ph-check-circle", "Kho sạch SSOT", "Dữ liệu đã lọc & bộ nhớ làm việc"),
+             _s("clean", "ph ph-check-circle", "Kho sạch", "Dữ liệu đã lọc & bộ nhớ làm việc"),
              _s("identity", "ph ph-git-merge", "Hợp nhất danh tính", "Gộp một người nhiều tài khoản", WARN),
          ]),
          _g("Agent & Model", "ph ph-robot", [

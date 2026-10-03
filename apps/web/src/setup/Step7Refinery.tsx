@@ -44,6 +44,13 @@ export function Step7Refinery({ meta, description, onBack, onSaved, formRef, onS
   const ws = weights ?? [];
   const wMsg = weights ? weightsMessage(ws) : null;
   const canContinue = !!weights && weightsValid(ws) && (picked?.length ?? 0) > 0;
+  // Trọng số lỗi tải hoặc tổng ≠ 100% thì "Tiếp tục" bị tắt — mở sẵn "Nâng cao" để lý do + nút Thử lại không bị khuất.
+  // Chốt mở (không tự gập lại khi Sếp vừa sửa xong tổng) để khối không nhảy dưới tay.
+  const weightsBlocked = weightsQ.isError || !!wMsg;
+  const [advOpen, setAdvOpen] = useState(false);
+  useEffect(() => {
+    if (weightsBlocked) setAdvOpen(true);
+  }, [weightsBlocked]);
 
   const save = async () => {
     setBusy(true);
@@ -72,6 +79,11 @@ export function Step7Refinery({ meta, description, onBack, onSaved, formRef, onS
       description={description}
       formRef={formRef}
       canContinue={canContinue}
+      blockedHint={
+        weightsQ.isError
+          ? 'Chưa tải được trọng số chấm điểm — bấm Thử lại ở mục "Nâng cao" bên dưới.'
+          : wMsg ?? (picked && picked.length === 0 ? 'Chọn ít nhất một quy tắc.' : null)
+      }
       busy={busy}
       onContinue={() => void save()}
       onBack={onBack}
@@ -161,7 +173,9 @@ export function Step7Refinery({ meta, description, onBack, onSaved, formRef, onS
         {picked && picked.length === 0 ? <p className="inline-error">Chọn ít nhất một quy tắc.</p> : null}
       </div>
 
-      <div className="setup-section">
+      {/* v0.1.43 (F-30): trọng số là tinh chỉnh — gập vào "Nâng cao", giá trị và kiểm tổng 100% giữ nguyên. */}
+      <details className="setup-section brain-advanced" open={advOpen || weightsBlocked || undefined}>
+        <summary>Nâng cao — trọng số chấm điểm</summary>
         <div className="setup-section__title">Trọng số chấm điểm · tổng 100%</div>
         {weightsQ.isPending ? (
           <SkeletonLines rows={6} padding="0" />
@@ -179,7 +193,7 @@ export function Step7Refinery({ meta, description, onBack, onSaved, formRef, onS
             </span>
           </div>
         )}
-      </div>
+      </details>
     </StepFrame>
   );
 }

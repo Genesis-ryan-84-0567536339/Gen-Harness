@@ -15,7 +15,7 @@ export interface StepMeta {
 export const SETUP_STEPS: StepMeta[] = [
   {
     n: 1, key: 'welcome', title: 'Chào mừng', required: true, built: true,
-    content: 'Nhập mã thiết lập từ trình cài (tự điền nếu có trong đường dẫn), chọn ngôn ngữ giao diện, và chọn bắt đầu trống hoặc dùng dữ liệu mẫu.',
+    content: 'Nhập mã thiết lập từ trình cài (tự điền nếu có trong đường dẫn).',
     doneWhen: 'Mã hợp lệ',
   },
   {
@@ -55,7 +55,7 @@ export const SETUP_STEPS: StepMeta[] = [
   },
   {
     n: 9, key: 'autonomy', title: 'Tự trị & ranh giới', required: false, built: true,
-    content: 'Thang tự trị 0–6, mặc định 4. Ngưỡng tiền phải duyệt (mặc định 50.000.000 ₫). Danh sách ranh giới có trách nhiệm; mục khoá hiện công tắc mờ kèm lý do không tắt được.',
+    content: 'Chọn mức tự trị (Gợi ý hoặc Soạn sẵn chờ duyệt), mặc định Soạn sẵn chờ duyệt. Ngưỡng tiền phải duyệt (mặc định 50.000.000 ₫). Danh sách ranh giới có trách nhiệm; mục khoá hiện công tắc mờ kèm lý do không tắt được.',
     doneWhen: 'Lưu · hoặc Để sau (hiện ở "Việc thiết lập tiếp" trên Hôm nay)',
   },
   {
@@ -77,7 +77,7 @@ export const SETUP_STEPS: StepMeta[] = [
 
 /** Description line under each step title (right pane). */
 export const STEP_DESCRIPTIONS: Record<number, string> = {
-  1: 'Mã thiết lập chứng minh Sếp là người vừa chạy trình cài trên máy này. Chọn ngôn ngữ và cách bắt đầu.',
+  1: 'Mã thiết lập chứng minh Sếp là người vừa chạy trình cài trên máy này.',
   2: 'Tài khoản Owner thấy toàn cảnh. Mật khẩu để đăng nhập, mã PIN để xác nhận thao tác nhạy cảm.',
   3: 'Thông tin tổ chức và cách agent xưng hô với Sếp trong mọi tin nhắn.',
   4: 'Hệ thống cần ít nhất một nguồn AI để đọc và hiểu tin nhắn: đăng nhập tài khoản Google (Antigravity CLI) hoặc dán khoá API. Bấm Kiểm tra, chọn model, rồi xếp thứ tự dùng khi một nguồn hết hạn mức. Để sau được, nhưng khi chưa có model thì Gen và sàng lọc tin chưa chạy.',

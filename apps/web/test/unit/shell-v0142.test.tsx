@@ -66,7 +66,10 @@ describe('Header (F-67, F-63)', () => {
   it('ngoài Nâng cao: chỉ viên "N kênh · M nhóm"; không tự trị, khiên, Góc nhìn đã lưu, phụ đề tiếng Anh', async () => {
     renderWith(<Header crumbs={CRUMBS} />);
     expect(await screen.findByText(/2 kênh · 5 nhóm/)).toBeInTheDocument();
-    expect(screen.queryByText(/tự trị 4/)).toBeNull();
+    expect(screen.queryByText('Soạn sẵn chờ duyệt')).toBeNull();
+    // v0.1.43 (F-62): nút kính lúp cùng tên với màn /search.
+    expect(screen.getByRole('button', { name: 'Kho hội thoại' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Tìm theo ý định' })).toBeNull();
     expect(screen.queryByText('78%')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Góc nhìn đã lưu' })).toBeNull();
     expect(screen.queryByText('Cần Sếp xử lý · 4 số chính')).toBeNull();
@@ -75,7 +78,9 @@ describe('Header (F-67, F-63)', () => {
   it('màn Nâng cao: có tự trị, khiên %, Góc nhìn đã lưu', async () => {
     renderWith(<Header crumbs={{ ...CRUMBS, domain: 'NÂNG CAO', title: 'Kho dữ liệu thô' }} advanced />);
     expect(await screen.findByText(/2 kênh · 5 nhóm/)).toBeInTheDocument();
-    expect(screen.getByText(/tự trị 4/)).toBeInTheDocument();
+    // v0.1.43 (F-30): viên tự trị hiện nhãn 3 mức thay vì "tự trị 4".
+    expect(screen.getByText('Soạn sẵn chờ duyệt')).toBeInTheDocument();
+    expect(screen.queryByText(/tự trị 4/)).toBeNull();
     expect(screen.getByText('78%')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Góc nhìn đã lưu' })).toBeInTheDocument();
   });

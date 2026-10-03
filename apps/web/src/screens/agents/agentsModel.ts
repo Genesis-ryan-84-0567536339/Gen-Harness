@@ -9,9 +9,11 @@ export const ACC3 = 'var(--color-accent-300)';
 export const N4 = 'var(--color-neutral-400)';
 export const N5 = 'var(--color-neutral-500)';
 
-/** ARCHITECTURE §7 — thang tự trị 0–6 cố định; dẫn xuất từ nguồn duy nhất `@gen-harness/contracts` (khớp `gh.chassis.policy.LEVELS`). */
+/**
+ * ARCHITECTURE §7 — thang tự trị 0–6 cố định; dẫn xuất từ nguồn duy nhất `@gen-harness/contracts` (khớp
+ * `gh.chassis.policy.LEVELS`). v0.1.43 (F-30): ô chọn 7 mức đã thay bằng `AutonomySelect` 3 mức.
+ */
 export const AUTONOMY_LEVELS: Record<number, string> = Object.fromEntries(CONTRACT_AUTONOMY_LEVELS.map((label, n) => [n, label]));
-export const AUTONOMY_OPTIONS = CONTRACT_AUTONOMY_LEVELS.map((label, n) => ({ value: String(n), label: `${n} — ${label}` }));
 
 /** Icon + tone theo mẫu (spec E13); agent tự đặt tay (`template: null`) dùng icon trung tính. */
 const TEMPLATE_ICON: Record<string, { icon: string; tone: string }> = {

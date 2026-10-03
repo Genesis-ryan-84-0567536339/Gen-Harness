@@ -175,6 +175,50 @@ describe('Hồ sơ sống', () => {
     expect(screen.getByText('Complained')).toBeInTheDocument();
     expect(screen.getByText(/Thích nói chuyện thẳng/)).toBeInTheDocument();
   });
+
+  it('vai trò chỉ đọc (không có profile.write) → không có nút "Đổi mức tự trị"', async () => {
+    queryClient.setQueryData(qk.me, { id: 'u', permissions: { 'profile.read': 'all' } });
+    mockFetch((c) => (c.url.includes('/profile/p1') ? json(200, PROFILE) : json(404)));
+    seedUrl({ id: 'p1' });
+    renderScreen(<ProfileScreen />);
+    expect(await screen.findByText('Đang đặt: Gợi ý.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Đổi mức tự trị' })).toBeNull();
+  });
+
+  it('v0.1.43 (F-30): mức tự trị 3 mức; dialog không đổi gì → Lưu tắt, không PATCH; chọn mức khác → PATCH đúng mức', async () => {
+    queryClient.setQueryData(qk.me, { id: 'u', permissions: { 'profile.read': 'all', 'profile.write': 'all' } });
+    const calls = mockFetch((c) => {
+      if (c.method === 'PATCH' && c.url.includes('/profile/p1')) return json(200, { ...PROFILE, autonomy_level: 4 });
+      return c.url.includes('/profile/p1') ? json(200, PROFILE) : json(404);
+    });
+    const user = userEvent.setup();
+    seedUrl({ id: 'p1' });
+    renderScreen(<ProfileScreen />);
+    expect(await screen.findByText('Đang đặt: Gợi ý.')).toBeInTheDocument();
+    expect(screen.queryByText(/Thang 0–6/)).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'Đổi mức tự trị' }));
+    let dlg = await screen.findByRole('dialog', { name: 'Mức tự trị với đối tượng này' });
+    const group = within(dlg).getByRole('group', { name: 'Mức tự trị' });
+    expect(within(group).getByRole('button', { name: 'Gợi ý' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(dlg).getByRole('button', { name: 'Lưu' })).toBeDisabled();
+    await user.click(within(dlg).getByRole('button', { name: 'Huỷ' }));
+    expect(calls.filter((c) => c.method === 'PATCH')).toHaveLength(0);
+
+    await user.click(screen.getByRole('button', { name: 'Đổi mức tự trị' }));
+    dlg = await screen.findByRole('dialog', { name: 'Mức tự trị với đối tượng này' });
+    await user.click(within(within(dlg).getByRole('group', { name: 'Mức tự trị' })).getByRole('button', { name: 'Soạn sẵn chờ duyệt' }));
+    await user.click(within(dlg).getByRole('button', { name: 'Lưu' }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true));
+    expect(calls.find((c) => c.method === 'PATCH')!.body).toEqual({ autonomy_level: 4 });
+  });
+
+  it('v0.1.43 (F-62): chưa có tóm tắt → câu "tin nhắn có nội dung"', async () => {
+    mockFetch((c) => (c.url.includes('/profile/p1') ? json(200, { ...PROFILE, summary: [] }) : json(404)));
+    seedUrl({ id: 'p1' });
+    renderScreen(<ProfileScreen />);
+    expect(await screen.findByText('Cần thêm tin nhắn có nội dung để hệ thống tóm tắt.')).toBeInTheDocument();
+  });
 });
 
 // ─── Sổ tay nhận thức ────────────────────────────────────────────────────────

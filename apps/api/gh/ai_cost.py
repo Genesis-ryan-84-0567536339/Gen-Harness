@@ -29,6 +29,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gh.agents_api.routes import CORE_AGENT_KEYS
 from gh.providers.cli import CLI_KINDS
 
+# F-25: khoá cũ đã đổi tên — chi phí đã ghi theo khoá cũ vẫn hiện nhãn tiếng Việt, không hiện mã thô. Khoá cũ
+# core.intent/core.scoring/core.indexing (không còn dùng) giữ fallback: hiện chính khoá.
+# Nhãn có hậu tố "(cũ)" để ngày nâng cấp không có hai dòng cùng nhãn trong bảng chi phí (day_cost gộp theo agent_key).
+LEGACY_AGENT_LABELS: dict[str, str] = {"core.reply_fast": "Soạn lại / dịch nháp (cũ)"}
+
 VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 TIMEZONE = "Asia/Ho_Chi_Minh"
 #: Giới hạn trần/giá nhận từ API (chặn số vô lý gõ nhầm).
@@ -98,7 +103,7 @@ async def _labels(db: AsyncSession, org_id: uuid.UUID, keys: list[str]) -> dict[
         rows = (await db.execute(text("SELECT id, name FROM agent.identities WHERE org_id = :o AND id = ANY(:i)"),
                                  {"o": org_id, "i": list(ids)})).all()
         names = {ids[r.id]: str(r.name) for r in rows}
-    return {k: CORE_AGENT_KEYS.get(k) or names.get(k) or k for k in keys}
+    return {k: CORE_AGENT_KEYS.get(k) or LEGACY_AGENT_LABELS.get(k) or names.get(k) or k for k in keys}
 
 
 async def day_cost(db: AsyncSession, org_id: uuid.UUID, d: date) -> dict[str, Any]:

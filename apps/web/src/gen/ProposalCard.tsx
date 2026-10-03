@@ -19,11 +19,12 @@ import { api } from '../lib/api';
 import { errorText } from '../lib/errorText';
 import { fmtDMClock } from '../lib/format';
 import { navigateTo } from '../lib/navigation';
+import { useCan } from '../lib/permissions';
 import { patchProposal } from './genStore';
 import { changedFields, fromLocalInput, initialDraft, PROPOSAL_TITLE, type Draft } from './proposalModel';
 
 const PROPOSAL_ICON: Record<GenProposal['type'], string> = {
-  draft_message: 'ph ph-paper-plane-tilt',
+  draft_message: 'ph ph-note-pencil',
   reminder: 'ph ph-alarm',
   assign: 'ph ph-user-switch',
 };
@@ -160,6 +161,16 @@ export function ProposalCard({ proposal: p }: { proposal: GenProposal }) {
 
   const title = PROPOSAL_TITLE[p.type];
   const resultScreen = p.result ? GEN_SCREEN_BY_KEY[p.result.screen] : undefined;
+  // v0.1.43 (F-24): nháp tin chỉ được LƯU, chưa gửi — nói rõ và dẫn thẳng tới đúng nháp ở Bàn làm việc để duyệt/gửi.
+  const isDraft = p.type === 'draft_message';
+  const draftId = isDraft && p.result?.type === 'draft' && p.result.id ? p.result.id : null;
+  // Chỉ hứa "Mở để duyệt và gửi" khi nháp gửi được THẬT (API báo có nơi gửi) VÀ người bấm có quyền duyệt; còn lại chỉ mở nháp.
+  // `sendable` thiếu (kết quả lưu trước v0.1.43) = không rõ → chỉ chip "Mở nháp" trung tính, KHÔNG khẳng định "chưa có nơi gửi".
+  const canApprove = useCan('action.approve');
+  const sendable = p.result?.sendable === true;
+  const noTarget = p.result?.sendable === false;
+  const draftNote = !draftId ? null : noTarget ? 'Nháp chưa có nơi gửi' : sendable && !canApprove ? 'Chờ Sếp duyệt rồi mới gửi' : null;
+  const code = p.result?.code ? ` · ${p.result.code}` : '';
   return (
     <div className="gen-prop" data-status={p.status} role="group" aria-label={`Đề xuất: ${title}`}>
       <div className="gen-prop__head">
@@ -201,8 +212,27 @@ export function ProposalCard({ proposal: p }: { proposal: GenProposal }) {
         </div>
       ) : p.status === 'confirmed' ? (
         <div className="gen-prop__done">
-          <Icon name="ph-fill ph-check-circle" size={13} /> Đã xác nhận{p.result?.code ? ` · ${p.result.code}` : ''}
-          {resultScreen ? (
+          {isDraft ? (
+            <>
+              <Icon name="ph ph-floppy-disk" size={13} /> Đã lưu nháp — chưa gửi{code}
+            </>
+          ) : (
+            <>
+              <Icon name="ph-fill ph-check-circle" size={13} /> Đã xác nhận{code}
+            </>
+          )}
+          {draftId && sendable && canApprove ? (
+            <Button variant="primary" className="btn-27" icon="ph ph-arrow-square-out" onClick={() => navigateTo(`/workbench?id=${encodeURIComponent(draftId)}`)}>
+              Mở để duyệt và gửi
+            </Button>
+          ) : draftId ? (
+            <>
+              {draftNote ? <span className="gen-prop__note">{draftNote}</span> : null}
+              <button type="button" className="gen-chip gen-chip--btn" onClick={() => navigateTo(`/workbench?id=${encodeURIComponent(draftId)}`)}>
+                <Icon name="ph ph-arrow-square-out" size={11} /> {noTarget ? 'Mở nháp ở Bàn làm việc' : 'Mở nháp'}
+              </button>
+            </>
+          ) : resultScreen ? (
             <button type="button" className="gen-chip gen-chip--btn" onClick={() => navigateTo(resultScreen.path)}>
               <Icon name="ph ph-arrow-square-out" size={11} /> Mở {resultScreen.title}
             </button>

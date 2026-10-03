@@ -57,7 +57,7 @@ Lỗi theo RFC 7807: `{"type": "...", "title": "...", "status": 4xx, "code": "PI
   `core.persons` `person_type='staff'` chưa xoá, chưa gộp). `count` = số khoá màn **không ẩn** trong domain (mọi cấp):
   Owner chưa có nhân viên `[12, 10]`, có nhân viên `[14, 10]`. Màn mới: `connections` "Kết nối" (quyền `system.read`),
   `team` "Đội ngũ" (quyền `roles.manage`); `system` đổi tên "Cài đặt" (quyền `system.read` hoặc `audit.read`).
-- `GET /header` → `{"channels_live": 0, "groups_listening": 0, "autonomy_level": 4, "data_confidence": null}`.
+- `GET /header` → `{"channels_live": 0, "channels_connected": 0, "groups_listening": 0, "autonomy_level": 4, "data_confidence": null}`. `channels_connected` (v0.1.43): số kênh đã từng đăng nhập thành công, kể cả khi phiên đã hết hạn.
 - `GET /health` → `{"status": "ok"}`; `GET /ready` → `{"db": "ok", "redis": "ok", "objects": "ok"|"skip", "bridge": "ok"|"down"}`.
 - `GET /system/health` (v0.1.36, F-6; quyền `system.read`) — thẻ "Sức khoẻ hệ thống" và dải "Cần Sếp xử lý". Đọc thuần,
   không gửi chuông; **KHÔNG thuộc `/ready`** (genh dùng `/ready` để quyết rollback — bộ xử lý nền im không được làm

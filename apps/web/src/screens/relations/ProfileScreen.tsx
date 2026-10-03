@@ -1,10 +1,12 @@
 import { useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { AUTONOMY_LEVELS, type Profile } from '@gen-harness/contracts';
+import { AUTONOMY_AUTO_LABEL, AUTONOMY_CHOICES, AUTONOMY_LEVELS, autonomyChoice, autonomyPatch, type Profile } from '@gen-harness/contracts';
 import { Button, Card, Dialog, EmptyState, Icon, TextField } from '@gen-harness/ui';
 import { fmtDMClock } from '../../lib/format';
+import { useCan } from '../../lib/permissions';
 import { useUrlState } from '../../lib/uiStore';
 import { CardError, InlineError, Panel, SkeletonLines } from '../common';
+import { AutonomySelect } from '../AutonomySelect';
 import { WhyButton } from '../core/Evidence';
 import { errorText } from '../../lib/errorText';
 import { SUMMARY_TONE, channelIcon, channelTone, eventTone, fmtBytes, initialsOf } from './relationsModel';
@@ -53,6 +55,8 @@ export function ProfileScreen() {
 function ProfileBody({ id, p }: { id: string; p: Profile }) {
   const [noteOpen, setNoteOpen] = useState(false);
   const [autonomyOpen, setAutonomyOpen] = useState(false);
+  // Đổi mức tự trị cần profile.write — vai trò chỉ đọc (Auditor) không thấy nút (mở ra chỉ gặp 403), như Danh bạ.
+  const canWrite = useCan('profile.write');
 
   return (
     <div className="screen">
@@ -115,7 +119,7 @@ function ProfileBody({ id, p }: { id: string; p: Profile }) {
         <div className="pf-col">
           <Panel title="Hệ thống hiểu gì về đối tượng này" kicker="Tóm tắt tự cập nhật">
             {p.summary.length === 0 ? (
-              <EmptyState icon="ph ph-brain" title="Chưa có tóm tắt" description="Cần thêm đơn vị ý nghĩa để hệ thống tổng hợp." />
+              <EmptyState icon="ph ph-brain" title="Chưa có tóm tắt" description="Cần thêm tin nhắn có nội dung để hệ thống tóm tắt." />
             ) : (
               <div className="pf-summary">
                 {p.summary.map((ln, i) => (
@@ -151,19 +155,19 @@ function ProfileBody({ id, p }: { id: string; p: Profile }) {
         </div>
 
         <div className="pf-col">
-          <Panel title="Mức tự trị với đối tượng này" kicker={`Thang 0–6 · đang đặt mức ${p.autonomy_level ?? '—'}`}>
+          <Panel title="Mức tự trị với đối tượng này" kicker="Trợ lý được làm tới đâu với người này">
             <div className="pf-autonomy">
-              <div className="pf-autonomy__steps">
-                {AUTONOMY_LEVELS.map((title, n) => (
-                  <span key={n} className="pf-autonomy__step" data-on={p.autonomy_level !== null && n <= p.autonomy_level} title={`Mức ${n} — ${title}`}>
-                    {n}
-                  </span>
-                ))}
-              </div>
-              <p className="pf-autonomy__desc">{p.autonomy_level !== null ? `Mức ${p.autonomy_level} — ${AUTONOMY_LEVELS[p.autonomy_level]}.` : 'Chưa đặt mức tự trị riêng cho đối tượng này — dùng mức mặc định.'}</p>
-              <Button variant="ghost" size="sm" icon="ph ph-sliders-horizontal" onClick={() => setAutonomyOpen(true)}>
-                Đổi mức tự trị
-              </Button>
+              <AutonomySteps level={p.autonomy_level} />
+              <p className="pf-autonomy__desc">
+                {autonomyChoice(p.autonomy_level)
+                  ? `Đang đặt: ${autonomyChoice(p.autonomy_level)?.label}.`
+                  : 'Chưa đặt mức tự trị riêng cho đối tượng này — dùng mức mặc định.'}
+              </p>
+              {canWrite ? (
+                <Button variant="ghost" size="sm" icon="ph ph-sliders-horizontal" onClick={() => setAutonomyOpen(true)}>
+                  Đổi mức tự trị
+                </Button>
+              ) : null}
             </div>
           </Panel>
 
@@ -207,31 +211,52 @@ function ProfileBody({ id, p }: { id: string; p: Profile }) {
       </div>
 
       {noteOpen ? <NoteDialog id={id} p={p} onClose={() => setNoteOpen(false)} /> : null}
-      {autonomyOpen ? <AutonomyDialog id={id} p={p} onClose={() => setAutonomyOpen(false)} /> : null}
+      {autonomyOpen && canWrite ? <AutonomyDialog id={id} p={p} onClose={() => setAutonomyOpen(false)} /> : null}
+    </div>
+  );
+}
+
+/** F-30: 3 bước theo AUTONOMY_CHOICES (bước đã đạt tô sáng) + bước "Tự làm" khi mức đang lưu là 5/6. */
+function AutonomySteps({ level }: { level: number | null }) {
+  const active = autonomyChoice(level);
+  const idx = active ? (active.key === 'auto' ? AUTONOMY_CHOICES.length : AUTONOMY_CHOICES.findIndex((c) => c.key === active.key)) : -1;
+  const stepStyle = { height: 'auto', minHeight: 22, padding: '3px 4px', textAlign: 'center' as const, lineHeight: 1.25, fontFamily: 'inherit' };
+  return (
+    <div className="pf-autonomy__steps" role="list" aria-label="Các mức tự trị">
+      {AUTONOMY_CHOICES.map((c, i) => (
+        <span key={c.key} role="listitem" className="pf-autonomy__step" style={stepStyle} data-on={i <= idx} aria-current={active?.key === c.key || undefined} title={c.hint}>
+          {c.label}
+        </span>
+      ))}
+      {active?.key === 'auto' ? (
+        <span role="listitem" className="pf-autonomy__step" style={stepStyle} data-on aria-current title={`Mức ${level} — ${AUTONOMY_LEVELS[level ?? 0]}`}>
+          {AUTONOMY_AUTO_LABEL}
+        </span>
+      ) : null}
     </div>
   );
 }
 
 function AutonomyDialog({ id, p, onClose }: { id: string; p: Profile; onClose: () => void }) {
   const update = useUpdateProfile();
-  const [level, setLevel] = useState(p.autonomy_level ?? 3);
+  // F-30: `null` = giữ nguyên — không đổi thì nút Lưu tắt, không phát PATCH.
+  const [picked, setPicked] = useState<number | null>(null);
+  const patch = autonomyPatch(p.autonomy_level, picked);
+  const changed = 'autonomy_level' in patch;
   return (
     <DialogShell
       title="Mức tự trị với đối tượng này"
       kicker={p.person.name}
       onClose={onClose}
       busy={update.isPending}
+      saveDisabled={!changed}
       error={update.isError ? update.error : null}
-      onSave={() => update.mutate({ id, body: { autonomy_level: level } }, { onSuccess: onClose })}
+      onSave={() => {
+        if (!changed) return onClose();
+        update.mutate({ id, body: patch }, { onSuccess: onClose });
+      }}
     >
-      <div className="pf-autonomy__steps">
-        {AUTONOMY_LEVELS.map((title, n) => (
-          <button key={n} type="button" className="pf-autonomy__step pf-autonomy__step--btn" data-on={n <= level} aria-pressed={n === level} title={title} onClick={() => setLevel(n)}>
-            {n}
-          </button>
-        ))}
-      </div>
-      <p className="pf-autonomy__desc">Mức {level} — {AUTONOMY_LEVELS[level]}.</p>
+      <AutonomySelect current={p.autonomy_level} value={picked} onChange={setPicked} />
     </DialogShell>
   );
 }
@@ -254,9 +279,10 @@ function NoteDialog({ id, p, onClose }: { id: string; p: Profile; onClose: () =>
 }
 
 function DialogShell({
-  title, kicker, onClose, onSave, busy, error, children,
+  title, kicker, onClose, onSave, busy, error, children, saveDisabled = false,
 }: {
   title: string; kicker: string; onClose: () => void; onSave: () => void; busy: boolean; error: unknown; children: ReactNode;
+  saveDisabled?: boolean;
 }) {
   return (
     <Dialog
@@ -270,7 +296,7 @@ function DialogShell({
           <Button variant="secondary" onClick={onClose}>
             Huỷ
           </Button>
-          <Button variant="primary" icon="ph ph-check" loading={busy} onClick={onSave}>
+          <Button variant="primary" icon="ph ph-check" loading={busy} disabled={saveDisabled} onClick={onSave}>
             Lưu
           </Button>
         </>

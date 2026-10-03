@@ -1,15 +1,15 @@
 import { useMemo, useState } from 'react';
 import type { AgentDecision, AgentIdentity, AgentTemplate } from '@gen-harness/contracts';
-import { SCREEN_BY_KEY } from '@gen-harness/contracts';
+import { SCREEN_BY_KEY, autonomyChoice, autonomyPatch } from '@gen-harness/contracts';
 import { Button, Dialog, EmptyState, Icon, SelectField, Switch, TextField } from '@gen-harness/ui';
 import { useChannels } from '../../lib/dataQueries';
 import { fmtDMClock } from '../../lib/format';
 import { useCan } from '../../lib/permissions';
 import { errorText } from '../../lib/errorText';
+import { AutonomySelect } from '../AutonomySelect';
 import { CardError, InlineError, Panel, ScreenHead, SkeletonLines, StateChip } from '../common';
 import {
   AUTONOMY_LEVELS,
-  AUTONOMY_OPTIONS,
   agentIcon,
   decisionTone,
   decisionWhat,
@@ -131,8 +131,8 @@ function AgentCard({
       </div>
       <div className="ag-card__rule" aria-hidden />
       <div className="ag-card__foot">
-        <span className="ag-autonomy" title={AUTONOMY_LEVELS[agent.autonomy_level]}>
-          tự trị {agent.autonomy_level}
+        <span className="ag-autonomy" title={`Mức ${agent.autonomy_level} — ${AUTONOMY_LEVELS[agent.autonomy_level] ?? ''}`}>
+          {autonomyChoice(agent.autonomy_level)?.label ?? `mức ${agent.autonomy_level}`}
         </span>
         <span className="ag-card__spoke">{lastSpoke(agent.id, decisions)}</span>
         <Button variant="ghost" className="btn-22" onClick={onEdit} aria-label={`${canManage ? 'Sửa' : 'Xem'} agent ${agent.name}`}>
@@ -218,6 +218,12 @@ function TemplatesPanel({ canManage, onUseTemplate }: { canManage: boolean; onUs
   );
 }
 
+/**
+ * Mức tự trị mặc định khi tạo agent mới mà Sếp chưa chọn: giữ mức 2 của form cũ (trước v0.1.43). KHÁC `DEFAULT_AUTONOMY`
+ * phía API (= 4, mặc định của AgentIn khi body không có `autonomy_level`) — form luôn gửi giá trị này nên API không áp mặc định.
+ */
+const DEFAULT_NEW_AGENT_AUTONOMY = 2;
+
 function AgentFormDialog({ agent, template, onClose }: { agent: AgentIdentity | null; template: AgentTemplate | null; onClose: () => void }) {
   const create = useCreateAgent();
   const update = useUpdateAgent();
@@ -227,7 +233,8 @@ function AgentFormDialog({ agent, template, onClose }: { agent: AgentIdentity | 
   const [voice, setVoice] = useState(agent?.voice ?? template?.voice ?? '');
   const [speakWhen, setSpeakWhen] = useState(agent?.speak_when ?? template?.speak_when ?? '');
   const [forbidden, setForbidden] = useState((agent?.forbidden ?? template?.forbidden ?? []).join('\n'));
-  const [autonomy, setAutonomy] = useState(String(agent?.autonomy_level ?? 2));
+  // F-30: `null` = giữ nguyên mức đang lưu — sửa agent không gửi lại autonomy_level nếu Sếp không chọn mức khác.
+  const [picked, setPicked] = useState<number | null>(null);
   const [scopeIds, setScopeIds] = useState<Set<string>>(new Set(agent?.channel_scopes.map((s) => s.channel_id) ?? []));
   const installed = (channels.data ?? []).filter((c) => c.installed && c.id);
 
@@ -239,7 +246,8 @@ function AgentFormDialog({ agent, template, onClose }: { agent: AgentIdentity | 
       role_desc: roleDesc.trim(),
       voice: voice.trim(),
       speak_when: speakWhen.trim(),
-      autonomy_level: Number(autonomy),
+      // Tạo mới: chưa chọn thì giữ mức mặc định cũ (2) như trước. Sửa: chỉ gửi khi Sếp chọn mức khác mức đang lưu.
+      ...(agent ? autonomyPatch(agent.autonomy_level, picked) : { autonomy_level: picked ?? DEFAULT_NEW_AGENT_AUTONOMY }),
       forbidden: forbidden
         .split('\n')
         .map((s) => s.trim())
@@ -286,7 +294,8 @@ function AgentFormDialog({ agent, template, onClose }: { agent: AgentIdentity | 
           </label>
           <textarea id="ag-forbidden" className="gh-input" rows={2} value={forbidden} onChange={(e) => setForbidden(e.target.value)} />
         </div>
-        <SelectField label="Mức tự trị" value={autonomy} onChange={(e) => setAutonomy(e.target.value)} options={AUTONOMY_OPTIONS} />
+        {/* Tạo mới: current=null để bấm "Chỉ ghi nhận" ghi đúng mức 0 (không bị coi là "giữ" mức mặc định 2). */}
+        <AutonomySelect current={agent ? agent.autonomy_level : null} value={picked} onChange={setPicked} />
         <fieldset className="ag-scope-fields">
           <legend className="gh-field__label">Phạm vi kênh được xuất hiện</legend>
           {installed.length === 0 ? (

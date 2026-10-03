@@ -105,7 +105,9 @@ describe('Danh tính Agent', () => {
 
     expect(await screen.findByText('Trợ lý thương mại', { selector: '.ag-card__name' })).toBeInTheDocument();
     expect(screen.getByText('Bé Heo', { selector: '.ag-card__name' })).toBeInTheDocument();
-    expect(screen.getByText('tự trị 4')).toBeInTheDocument();
+    // v0.1.43 (F-30): viên tự trị hiện nhãn 3 mức; title giữ mức thật trên thang 0–6.
+    expect(screen.getByText('Soạn sẵn chờ duyệt', { selector: '.ag-autonomy' })).toHaveAttribute('title', 'Mức 4 — Soạn sẵn chờ duyệt');
+    expect(screen.queryByText('tự trị 4')).toBeNull();
     // Bé Heo tắt mặc định (spec E13) — thẻ mờ đi (data-off) chứ không xoá khỏi danh mục.
     const heoCard = screen.getByText('Bé Heo', { selector: '.ag-card__name' }).closest('.ag-card');
     expect(heoCard).toHaveAttribute('data-off');

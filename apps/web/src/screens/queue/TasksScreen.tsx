@@ -6,6 +6,7 @@ import { fmtDMClock, fmtInt } from '../../lib/format';
 import { useUrlState } from '../../lib/uiStore';
 import { CardError, InlineError, Panel, ScreenHead, SkeletonLines } from '../common';
 import { WhyButton } from '../core/Evidence';
+import { DataEmptyState } from '../DataEmptyState';
 import { TASK_STATUS_LABEL, taskPriorityTone, taskStatusTone } from './queueModel';
 import { useCreateTask, useKeepPromise, usePromises, useTasks, useUpdateTask } from './queries';
 
@@ -70,7 +71,9 @@ export function TasksScreen() {
           ) : tasks.isError ? (
             <CardError error={tasks.error} onRetry={() => void tasks.refetch()} retrying={tasks.isFetching} />
           ) : tasks.data.items.length === 0 ? (
-            <EmptyState icon="ph ph-check-square" title="Không có việc nào khớp bộ lọc" />
+            <DataEmptyState
+              filtered={status !== '' || priority !== '' || overdue !== ''}
+              fallback={<EmptyState icon="ph ph-check-square" title="Không có việc nào khớp bộ lọc" />} />
           ) : (
             tasks.data.items.map((t) => (
               <TaskRow
@@ -138,7 +141,7 @@ function PromisesPanel() {
       ) : promises.isError ? (
         <CardError error={promises.error} onRetry={() => void promises.refetch()} retrying={promises.isFetching} />
       ) : promises.data.items.length === 0 ? (
-        <EmptyState icon="ph ph-handshake" title="Không có lời hứa nào ở mục này" />
+        <DataEmptyState filtered={tab !== 'upcoming' && tab !== 'all'} fallback={<EmptyState icon="ph ph-handshake" title="Không có lời hứa nào ở mục này" />} />
       ) : (
         promises.data.items.map((p) => (
           <div key={p.id} className={cx('tk-promise', p.broken && 'tk-promise--broken')}>

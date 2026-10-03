@@ -46,19 +46,19 @@ test.describe('v0.1.42 · menu', () => {
     await expect(nav(page).getByRole('button', { name: /Nâng cao/ })).toHaveAttribute('aria-expanded', 'true');
     await expect(nav(page).getByRole('link', { name: /Kho dữ liệu thô/ })).toHaveAttribute('aria-current', 'page');
     const hd = page.locator('header.hd');
-    await expect(hd.getByText('tự trị 4')).toBeVisible();
+    await expect(hd.getByText('Soạn sẵn chờ duyệt', { exact: true })).toBeVisible();
     await expect(hd.getByRole('button', { name: 'Góc nhìn đã lưu' })).toBeVisible();
     await expect(page.locator('.hd-chip')).toHaveText('NÂNG CAO');
     await page.goto('/overview');
     await expect(hd.getByText(/\d+ kênh · \d+ nhóm/)).toBeVisible();
-    await expect(hd.getByText('tự trị 4')).toHaveCount(0);
+    await expect(hd.getByText('Soạn sẵn chờ duyệt', { exact: true })).toHaveCount(0);
     await expect(hd.getByRole('button', { name: 'Góc nhìn đã lưu' })).toHaveCount(0);
     await expect(page.locator('.hd-chip')).toHaveText('HẰNG NGÀY');
     // Màn nghiệp vụ có bộ lọc: vẫn mở/lưu được góc nhìn, nhưng không có viên tự trị.
     for (const path of ['/inbox', '/directory', '/search', '/people', '/care']) {
       await page.goto(path);
       await expect(hd.getByRole('button', { name: 'Góc nhìn đã lưu' }), path).toBeVisible();
-      await expect(hd.getByText('tự trị 4'), path).toHaveCount(0);
+      await expect(hd.getByText('Soạn sẵn chờ duyệt', { exact: true }), path).toHaveCount(0);
     }
     // Màn không có bộ lọc: không có nút — trừ khi Sếp đã lưu góc nhìn ở đó từ trước (vẫn mở/xoá được).
     await page.goto('/opportunity');
@@ -410,7 +410,7 @@ test.describe('v0.1.42 · nghiệm thu sau tích hợp', () => {
     await page.goto('/overview');
     const hd = page.locator('header.hd');
     await expect(hd.getByText(/\d+ kênh · \d+ nhóm/)).toBeVisible();
-    await expect(hd.getByText(/^tự trị/)).toHaveCount(0);
+    await expect(hd.getByText('Soạn sẵn chờ duyệt', { exact: true })).toHaveCount(0);
     await expect(shield(page)).toHaveCount(0);
     await expect(hd.getByRole('button', { name: 'Góc nhìn đã lưu' })).toHaveCount(0);
     await expect(page.locator('.sb-logo__sub')).toContainText(ver);
@@ -421,7 +421,7 @@ test.describe('v0.1.42 · nghiệm thu sau tích hợp', () => {
     await expect(menu).not.toContainText('Phụ đề tiếng Anh');
     await page.keyboard.press('Escape');
     await page.goto('/raw');
-    await expect(hd.getByText(/^tự trị/)).toBeVisible();
+    await expect(hd.getByText('Soạn sẵn chờ duyệt', { exact: true })).toBeVisible();
     await expect(shield(page)).toHaveCount(1);
     await expect(hd.getByRole('button', { name: 'Góc nhìn đã lưu' })).toBeVisible();
   });

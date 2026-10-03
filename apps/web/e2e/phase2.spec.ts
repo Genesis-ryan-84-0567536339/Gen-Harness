@@ -64,7 +64,7 @@ interface VisualCase {
 const CASES: VisualCase[] = [
   { key: 'raw', clicks: ['Tầng dữ liệu', 'Kho dữ liệu thô'], until: '.screen-desc', pixel: true },
   { key: 'rules', clicks: ['Tầng dữ liệu', 'Quy tắc sàng lọc'], until: '.rule-card >> nth=0', pixel: true },
-  { key: 'clean', clicks: ['Tầng dữ liệu', 'Kho sạch SSOT'], until: '.screen-desc', pixel: true },
+  { key: 'clean', clicks: ['Tầng dữ liệu', 'Kho sạch'], until: '.screen-desc', pixel: true },
   { key: 'identity', clicks: ['Tầng dữ liệu', 'Hợp nhất danh tính'], until: '.id-stats', pixel: true },
   { key: 'system', clicks: ['Điều khiển hệ thống'], until: '[role="tablist"]', pixel: false },
 ];
@@ -374,6 +374,12 @@ test('setup steps 4–7 and 12 against the mock', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Sàng lọc dữ liệu' })).toBeVisible();
   await expect(page.getByText('R-06').first()).toBeVisible();
   await page.screenshot({ path: join(outDir, 'setup-step7-1440.png'), fullPage: true });
+  // v0.1.43 (F-30): trọng số gập trong "Nâng cao" — đóng sẵn, mở ra mới thấy; vẫn lưu được không cần mở.
+  const weightsAdv = page.locator('details', { has: page.getByText('Nâng cao — trọng số chấm điểm') });
+  await expect(weightsAdv).not.toHaveAttribute('open', /.*/);
+  await expect(page.getByText('Trọng số chấm điểm · tổng 100%')).toBeHidden();
+  await page.getByText('Nâng cao — trọng số chấm điểm').click();
+  await expect(page.getByText('Trọng số chấm điểm · tổng 100%')).toBeVisible();
   await expect(next).toBeEnabled();
   await next.click();
 

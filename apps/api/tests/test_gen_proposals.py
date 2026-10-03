@@ -130,6 +130,9 @@ async def test_draft_proposal_needs_pin_and_stays_pending(owner_api: Api, app: A
     assert r.status_code == 200, r.text
     draft = (await owner_api.get(f"/drafts/{r.json()['result']['id']}")).json()
     assert draft["status"] == "pending" and draft["title"] == "Báo giá ván MDF"  # chờ duyệt, KHÔNG gửi
+    # Không có đối tượng ⇒ không có nơi gửi: web không được hứa "Duyệt & gửi" (duyệt sẽ NO_TARGET).
+    assert r.json()["result"]["sendable"] is False
+    assert draft["target"] is None and draft["approve_label"] == "Duyệt và thực hiện"
     row = (await _log("gen.proposal_confirmed"))[0]
     assert row.target_type == "draft" and row.detail["via"] == "gen" and row.detail["endpoint"] == "POST /drafts"
 
@@ -337,3 +340,17 @@ async def test_confirm_failure_passes_error_id_and_pin_lock(owner_api: Api, app:
     r = await owner_api.send("POST", f"/gen/proposals/{p['id']}/confirm", {})
     assert r.status_code == 401 and r.json()["attempts_left"] == 2
     assert (await proposals.load(app.state.redis, p["id"]))["status"] == "pending"
+
+
+def test_result_of_draft_sendable_only_with_target() -> None:
+    """v0.1.43 (F-24): `sendable` theo đúng body gửi /drafts — chỉ nháp cho NHÓM (có target) mới gửi được."""
+    from gh.gen.proposals import Call, result_of
+
+    group = Call("POST", "/drafts", {"kind": "message", "title": "x", "text": "y",
+                                     "subject": {"type": "group", "id": "g"},
+                                     "target": {"channel": "zalo", "thread_type": "group", "group_id": "g"}}, "draft")
+    person = Call("POST", "/drafts", {"kind": "message", "title": "x", "text": "y",
+                                      "subject": {"type": "person", "id": "p"}}, "draft")
+    assert result_of(group, {}, {"id": "d1", "code": "ACT-1"})["sendable"] is True
+    assert result_of(person, {}, {"id": "d2", "code": "ACT-2"})["sendable"] is False
+    assert "sendable" not in result_of(Call("POST", "/tasks", {}, "task"), {}, {"id": "t1"})

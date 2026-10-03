@@ -475,9 +475,7 @@ async def _bind_core_agents(db: AsyncSession, org_id: uuid.UUID, model_id: uuid.
     agy = await _is_agy_model(db, model_id)
     if agy and await _is_agy_model(db, other_id):
         other_id = None
-    for key in CORE_AGENT_KEYS:
-        if key == "core.indexing":   # embedding — model sinh chữ không dùng được
-            continue
+    for key in CORE_AGENT_KEYS:   # core.refinery, core.reply, core.gen (F-25)
         mid = model_id if (not agy or key == GEN_KEY) else other_id
         if mid is None:
             continue

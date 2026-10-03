@@ -1,14 +1,15 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { InboxItem, InboxTab } from '@gen-harness/contracts';
-import { Button, Card, Dialog, EmptyState, FilterSelect, Skeleton, Switch, Tabs, Tag, TextField, type TabItem } from '@gen-harness/ui';
+import { Button, Card, Dialog, EmptyState, FilterSelect, Skeleton, Switch, Tabs, Tag, TextField, Tooltip, type TabItem } from '@gen-harness/ui';
 import { WhyButton } from '../core/Evidence';
+import { DataEmptyState } from '../DataEmptyState';
 import { errorText } from '../../lib/errorText';
 import { fmtAgo } from '../../lib/format';
 import { useUrlState } from '../../lib/uiStore';
 import { TRUNCATED_USERS_TEXT, useAssignees, useEmptyUsersText } from '../../lib/pickers';
 import { CardError, InlineError, ScreenHead, SkeletonLines } from '../common';
-import { confidenceTone, itemTag, itemTagTone, priorityTone, triageBadges } from './queueModel';
+import { itemTag, itemTagTone, priorityTone, triageBadges } from './queueModel';
 import { useInbox, useInboxAct, useInboxAssign, useInboxSilence } from './queries';
 
 const INTENT_OPTIONS = [
@@ -47,7 +48,7 @@ export function InboxScreen() {
     <div className="screen">
       <ScreenHead
         title="Hộp thư"
-        description="Không phải tin nhắn thô. Mỗi dòng là một đơn vị ý nghĩa đã được cấu trúc: nguồn, đối tượng, điểm số, tóm tắt hai câu, hành động đề xuất và chứng cứ gốc."
+        description="Không phải tin nhắn thô. Mỗi dòng là một ý chính rút ra từ tin nhắn: nguồn, người liên quan, điểm ưu tiên, tóm tắt hai câu, gợi ý việc nên làm và tin gốc làm chứng cứ."
         maxWidth={700}
         actions={
           <>
@@ -84,10 +85,9 @@ export function InboxScreen() {
       ) : q.isError ? (
         <CardError error={q.error} onRetry={() => void q.refetch()} retrying={q.isFetching} />
       ) : q.data.items.length === 0 ? (
-        <EmptyState
-          icon="ph ph-tray"
-          title="Hộp thư đang trống"
-          description="Không có đơn vị ý nghĩa, cảnh báo hay bản nháp nào khớp bộ lọc hiện tại."
+        <DataEmptyState
+          filtered={tab !== 'all' || intent !== '' || hide === '1'}
+          fallback={<EmptyState icon="ph ph-tray" title="Hộp thư đang trống" description="Không có tin, cảnh báo hay bản nháp nào khớp bộ lọc hiện tại." />}
         />
       ) : (
         <div className="ib-list">
@@ -124,9 +124,24 @@ function InboxCard({ item, onAssign, onSilence }: { item: InboxItem; onAssign: (
   return (
     <article className="ib-card" aria-label={item.title} data-gen-target={`inbox.row:${item.id}`}>
       <div className="ib-card__head">
-        <span className="ib-card__prio" style={{ color: priorityTone(item.priority) }}>
-          {item.priority}
-        </span>
+        {/* v0.1.43 (F-30): độ tin cậy không hiện thường trực — rê chuột/focus huy hiệu ưu tiên mới thấy. */}
+        {item.confidence_band ? (
+          <Tooltip content={`Độ tin cậy: ${item.confidence_band}`}>
+            <span
+              className="ib-card__prio"
+              style={{ color: priorityTone(item.priority) }}
+              tabIndex={0}
+              aria-label={`Ưu tiên ${item.priority} · Độ tin cậy: ${item.confidence_band}`}
+              data-confidence={item.confidence_band}
+            >
+              {item.priority}
+            </span>
+          </Tooltip>
+        ) : (
+          <span className="ib-card__prio" style={{ color: priorityTone(item.priority) }}>
+            {item.priority}
+          </span>
+        )}
         {/* v0.1.28 (UX V8): mục nghi rác không còn mang nhãn "Cơ hội" cùng lúc với "Rác". */}
         <span
           className="ib-card__tag"
@@ -148,11 +163,6 @@ function InboxCard({ item, onAssign, onSilence }: { item: InboxItem; onAssign: (
         {item.score !== null ? (
           <span className="ib-card__score" title="Độ ưu tiên: mức đáng xử lý trước, 0–100">
             ưu tiên <b>{Math.round(item.score * 100)}</b>/100
-          </span>
-        ) : null}
-        {item.confidence_band ? (
-          <span className="ib-card__conf" style={{ color: confidenceTone(item.confidence_band) }}>
-            độ tin cậy {item.confidence_band}
           </span>
         ) : null}
       </div>

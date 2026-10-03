@@ -117,6 +117,9 @@ describe('GenPanel', () => {
     document.body.appendChild(host);
     wrap(<GenPanel userId="u1" />);
     expect(screen.getByText(/Chào Sếp, em là Gen/)).toBeInTheDocument();
+    // v0.1.43 (F-30): ví dụ là câu hỏi việc thật, không còn gợi ý "khoá Jev".
+    expect(screen.getByRole('button', { name: 'Khách nào hỏi giá hôm nay?' })).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/khoá Jev/i);
     await userEvent.type(screen.getByLabelText('Câu hỏi cho Gen'), 'Hôm nay có gì gấp?{Enter}');
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.url.endsWith('/gen/turns'))).toBe(true));
     const post = calls.find((c) => c.method === 'POST')!;
@@ -160,6 +163,23 @@ describe('Spotlight', () => {
     expect(navigations).toEqual([]); // đã ở đúng màn
     await userEvent.keyboard('{Escape}');
     expect(screen.queryByRole('dialog', { name: 'Gen đang chỉ' })).toBeNull();
+  });
+
+  it('v0.1.43: target inside closed <details> (lồng nhiều cấp) → mở các khối gập rồi mới đo', async () => {
+    const outer = document.createElement('details');
+    const inner = document.createElement('details');
+    const b = document.createElement('button');
+    b.setAttribute('data-gen-target', 'system.brain.jev');
+    inner.appendChild(b);
+    outer.appendChild(inner);
+    document.body.appendChild(outer);
+    expect(outer.open || inner.open).toBe(false);
+    wrap(<Spotlight />);
+    await act(() => executeUiAction({ type: 'highlight', target: 'system.brain.jev', message: 'Thẻ Jev' }));
+    expect(await screen.findByRole('dialog', { name: 'Gen đang chỉ' })).toHaveTextContent('Thẻ Jev');
+    expect(outer.open).toBe(true);
+    expect(inner.open).toBe(true);
+    outer.remove();
   });
 
   it('navigates to the screen/tab a target needs, then says when it is missing', async () => {

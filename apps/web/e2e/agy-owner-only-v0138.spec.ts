@@ -49,10 +49,10 @@ test.describe('v0.1.38 · Antigravity CLI chỉ dùng cho Gen của Sếp', () =
     await expect(refineryRow.getByTestId('binding-blocked-core.refinery')).toHaveAttribute('title', AGY_OWNER_ONLY_REASON);
     await expect(refineryRow.getByTestId('binding-blocked-hint-core.refinery')).toHaveText(BLOCKED_HINT);
 
-    // Slot chưa gán (Trả lời nhanh): ô chọn mặc định model không phải agy.
-    const replyRow = table.locator('tr', { hasText: 'Trả lời nhanh trong nhóm' });
+    // Slot chưa gán (Soạn lại / dịch nháp): ô chọn mặc định model không phải agy.
+    const replyRow = table.locator('tr', { hasText: 'Soạn lại / dịch nháp' });
     await replyRow.locator('.apm-model-pill').click();
-    let dlg = page.getByRole('dialog', { name: /Trả lời nhanh trong nhóm/ });
+    let dlg = page.getByRole('dialog', { name: /Soạn lại \/ dịch nháp/ });
     await expect(dlg.locator('option', { hasText: 'chỉ cho Gen' }).first()).toBeAttached();
     const chosen = await dlg.getByLabel('Model').inputValue();
     expect(agyModels.some((m) => m.id === chosen)).toBe(false);

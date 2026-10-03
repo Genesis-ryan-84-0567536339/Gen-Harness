@@ -9,6 +9,7 @@ import { useUrlState } from '../../lib/uiStore';
 import { ActionError, CardError, InlineError, Panel, SkeletonLines } from '../common';
 import { WhyButton } from '../core/Evidence';
 import { qk3, useDraft, useDrafts } from '../core/queries';
+import { DataEmptyState } from '../DataEmptyState';
 
 const KIND_TONE: Record<DraftItem['kind'], Tone> = {
   quotation: 'bad',
@@ -41,7 +42,7 @@ export function WorkbenchScreen() {
       <div className="wb-grid">
         <Panel
           title="Chờ Sếp duyệt"
-          kicker={list.data ? `${fmtInt(list.data.total)} bản nháp · tự trị mức 4` : 'Đang tải…'}
+          kicker={list.data ? `${fmtInt(list.data.total)} bản nháp` : 'Đang tải…'}
           bodyClass="wb-list"
           genTarget="workbench.drafts"
         >
@@ -50,7 +51,7 @@ export function WorkbenchScreen() {
           ) : list.isError ? (
             <CardError error={list.error} onRetry={() => void list.refetch()} retrying={list.isFetching} />
           ) : list.data.items.length === 0 ? (
-            <EmptyState icon="ph ph-tray" title="Không có bản nháp nào chờ duyệt" />
+            <DataEmptyState fallback={<EmptyState icon="ph ph-tray" title="Không có bản nháp nào chờ duyệt" />} />
           ) : (
             list.data.items.map((d) => (
               <button key={d.id} type="button" className="wb-list__row" aria-pressed={d.id === id} onClick={() => setId(d.id)}>

@@ -1,5 +1,7 @@
 /** Presentation helpers dùng chung cho 4 màn của cụm Hàng đợi & Hành động. */
 import type { InboxItemType, InboxTab, InboxTriage, QueueWidgetKind, TaskPriority, TaskStatus } from '@gen-harness/contracts';
+// F-38 (v0.1.43): định nghĩa duy nhất ở lib/format.ts — re-export để các màn không phải đổi import.
+export { initialsOf } from '../../lib/format';
 
 export const OK = 'var(--color-ok)';
 export const WARN = 'var(--color-warn)';
@@ -97,13 +99,6 @@ export function taskPriorityTone(p: TaskPriority): string {
   return priorityTone(p);
 }
 
-export function initialsOf(name: string): string {
-  const parts = name.trim().split(/\s+/);
-  const last = parts.at(-1)?.[0] ?? '';
-  const first = parts[0]?.[0] ?? '';
-  return (first + last).toLocaleUpperCase('vi').slice(0, 2) || '·';
-}
-
 export const SPOTLIGHT_DIMENSION_LABEL: Record<string, string> = {
   heat: 'Độ nóng',
   churn_risk: 'Rủi ro mất khách',
@@ -131,8 +126,8 @@ export function triageBadges(t: InboxTriage | null | undefined): TriageBadge[] {
   const via = t.source === 'jev' ? 'Jev + quy tắc' : 'quy tắc';
   out.push({
     key: 'score',
-    // v0.1.28 (UX V8): "Lọc đầu" (điểm chất lượng tin 0–100) — khác "Độ ưu tiên" bên phải thẻ.
-    label: `Lọc đầu ${t.score}`,
+    // v0.1.28 (UX V8): điểm chất lượng tin 0–100 — khác "Độ ưu tiên" bên phải thẻ. v0.1.43: "Điểm lọc" theo thẻ "Lọc tin".
+    label: `Điểm lọc ${t.score}`,
     tone: t.spam || t.low_score ? 'neutral' : t.score >= 70 ? 'ok' : 'warn',
     title: `${t.reason} (${via})`,
   });

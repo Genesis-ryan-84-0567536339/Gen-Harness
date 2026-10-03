@@ -21,7 +21,6 @@ import asyncio
 import hashlib
 import logging
 import re
-import unicodedata
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -33,6 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from gh.biz.hooks import CronJob, Hook, HookCtx
 from gh.gen import decider as decmod
+from gh.textnorm import strip_accents  # F-38: bỏ dấu dùng chung (NFKD — giữ text_hash đã lưu)
 
 log = logging.getLogger("gh.refinery.triage")
 
@@ -83,11 +83,6 @@ SPAM_WORDS = (
 
 
 # ─── chuẩn hoá + băm ───────────────────────────────────────────────────────────
-
-def strip_accents(s: str) -> str:
-    s = unicodedata.normalize("NFKD", s.replace("đ", "d").replace("Đ", "D"))
-    return "".join(ch for ch in s if not unicodedata.combining(ch))
-
 
 def normalize(s: str) -> str:
     """Chữ thường, bỏ dấu, bỏ đường link, gộp mọi ký tự không phải chữ/số thành một khoảng trắng."""
