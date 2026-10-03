@@ -31,6 +31,7 @@ import { createMock as createP4Mcp } from './mock-p4-mcp';
 import { createMock as createSocial } from './mock-social';
 import { createMock as createBossChecks } from './mock-boss-checks';
 import { createMock as createTelegram, type TelegramOutcome } from './mock-telegram';
+import { createMock as createDiagnostics } from './mock-diagnostics';
 import { createMock as createP4Plugins } from './mock-p4-plugins';
 import { createMock as createP4System } from './mock-p4-system';
 import { createMock as createGen } from './mock-gen';
@@ -416,6 +417,8 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     bossChecks,
     // v0.1.44 (F-8c) — Kết nối › Telegram ("Báo động & bản tin"), chỉ Owner; PIN cho Lưu/Tắt.
     telegram,
+    // v0.1.44 (F-4b) — Gói chẩn đoán (chỉ Owner, PIN) + POST /client-errors (gọi trước cổng đăng nhập).
+    diagnostics: createDiagnostics({ fresh: opts.setup === 'fresh', emit: broadcast }),
     // agents TRƯỚC core: `GET /agents/decisions` cần trả dữ liệu thật ("agent đã nói gì") — core.handle() có
     // một stub rỗng cho cùng đường (chưa màn nào dùng tới trước giai đoạn 4) nên phải chặn trước nó.
     agents: p4Agents,
@@ -683,8 +686,14 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     }
   }
 
+  /** v0.1.44 (F-4b): "Mã yêu cầu" của từng phản hồi (header X-Request-ID + `request_id` trong mọi problem+json). */
+  const requestIds = new WeakMap<ServerResponse, string>();
+  const requestIdOf = (res: ServerResponse) => requestIds.get(res) ?? null;
+
   function send(res: ServerResponse, status: number, body?: unknown, cookies: string[] = []) {
     const headers: Record<string, string | string[]> = { 'Cache-Control': 'no-store' };
+    const rid = requestIdOf(res);
+    if (rid) headers['X-Request-ID'] = rid;
     if (cookies.length) headers['Set-Cookie'] = cookies;
     if (status === 204 || body === undefined) {
       res.writeHead(status, headers);
@@ -696,7 +705,7 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     res.end(JSON.stringify(body));
   }
   const problem = (res: ServerResponse, status: number, code: string, title: string, extra: Record<string, unknown> = {}) =>
-    send(res, status, { type: `https://gen-harness.local/errors/${code.toLowerCase()}`, title, status, code, ...extra });
+    send(res, status, { type: `https://gen-harness.local/errors/${code.toLowerCase()}`, title, status, code, ...extra, request_id: requestIdOf(res) ?? undefined });
 
   function me(user: User, pinUntil: number | null) {
     return {
@@ -814,6 +823,11 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     if (!url.pathname.startsWith('/api/v1/')) return next();
     if (latency) await new Promise((r) => setTimeout(r, latency));
     const path = url.pathname.slice('/api/v1'.length);
+    // v0.1.44 (F-4b): mọi phản hồi có X-Request-ID (nhận của client nếu đúng khuôn, không thì sinh 16 hex) — như api.
+    const incoming = String(req.headers['x-request-id'] ?? '');
+    const rid = /^[A-Za-z0-9_-]{8,64}$/.test(incoming) ? incoming : randomUUID().replace(/-/g, '').slice(0, 16);
+    requestIds.set(res, rid);
+    res.setHeader('X-Request-ID', rid);
     // Như proxy Caddy (`?X-Frame-Options DENY` + CSP `frame-ancestors 'none'` khi upstream chưa đặt) và api
     // (gh.middleware.SameOriginFrame: riêng gói mang đi cho khung cùng gốc) — e2e bắt được trang lỗi bị chặn trong khung.
     const framable = path === '/system/offsite/portable';
@@ -848,6 +862,12 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     // ── health / setup (no auth) ──
     if (path === '/health') return reply(200, { status: 'ok' });
     if (path === '/ready') return reply(200, { db: 'ok', redis: 'ok', objects: 'skip', bridge: 'down' });
+    // v0.1.44 (F-4b): báo lỗi giao diện — không cần đăng nhập, miễn cổng thiết lập (như api).
+    if (path === '/client-errors' && method === 'POST') {
+      const r = phase3.diagnostics.recordClientError(body);
+      if (r.status >= 400) return problem(res, r.status, String(r.body.code), String(r.body.title), r.body);
+      return reply(r.status, r.body);
+    }
     if (path === '/setup/state' && method === 'GET') return reply(200, stateView());
     if (path.startsWith('/setup/')) {
       if (path === '/setup/rule-presets' && method === 'GET') return reply(200, phase2.rulePresets());

@@ -25,3 +25,4 @@ export * from './pickers';
 export * from './bossChecks';
 export * from './autonomy';
 export * from './telegram';
+export * from './diagnostics';

@@ -57,6 +57,28 @@ export function readCookie(name: string, cookieString?: string): string | null {
   return null;
 }
 
+/** v0.1.44 (F-4b): header "Mã yêu cầu" mọi phản hồi của api (nhận cả khuôn client gửi `^[A-Za-z0-9_-]{8,64}$`). */
+export const REQUEST_ID_HEADER = 'X-Request-ID';
+const REQUEST_ID_RE = /^[A-Za-z0-9_-]{8,64}$/;
+
+/**
+ * Gắn header `X-Request-ID` vào problem khi thân không có `request_id` — kể cả thân rỗng/không phải JSON (502 từ
+ * proxy). Header sai khuôn thì bỏ qua (không đưa chuỗi lạ lên giao diện).
+ */
+function withRequestId(problem: Partial<Problem> | null, res: Response): Partial<Problem> | null {
+  const current = problem ? (problem as { request_id?: unknown }).request_id : undefined;
+  if (typeof current === 'string' && current) return problem;
+  let header: string | null = null;
+  try {
+    header = res.headers?.get?.(REQUEST_ID_HEADER) ?? null;
+  } catch {
+    header = null;
+  }
+  const rid = header?.trim();
+  if (!rid || !REQUEST_ID_RE.test(rid)) return problem;
+  return { ...(problem ?? {}), request_id: rid } as Partial<Problem>;
+}
+
 function defaultIdempotencyKey(): string {
   const c = (globalThis as { crypto?: Crypto }).crypto;
   if (c?.randomUUID) return c.randomUUID();
@@ -156,7 +178,7 @@ export function createApiClient(config: ApiClientConfig = {}): ApiClient {
         return (text ? JSON.parse(text) : undefined) as T;
       }
 
-      const err = new ApiError(res.status, await parseProblem(res), res.statusText);
+      const err = new ApiError(res.status, withRequestId(await parseProblem(res), res), res.statusText);
 
       if (res.status === 423 && err.code === 'PIN_REQUIRED' && !options.skipPinFlow && pinPrompts < maxPinPrompts) {
         pinPrompts += 1;

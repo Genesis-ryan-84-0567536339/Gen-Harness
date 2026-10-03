@@ -17,6 +17,7 @@ import type { BackgroundSources, BackgroundSourcesBody } from './p4-api';
 import { mcpEndpoints } from './p4-mcp';
 import { bossChecksEndpoints } from './bossChecks';
 import { telegramEndpoints } from './telegram';
+import { diagnosticsEndpoints } from './diagnostics';
 import { pluginsEndpoints } from './p4-plugins';
 import { systemEndpoints } from './p4-system';
 import type { Step10Body, Step11Body, Step10Invited, BackupConfig, Step8Body, Step8Agent, Step9Body, SetupFollowUpItem } from './p4-system';
@@ -296,6 +297,8 @@ export function createEndpoints(client: ApiClient) {
     bossChecks: bossChecksEndpoints(r),
     /** v0.1.44 (F-8c): Kết nối › Telegram ("Báo động & bản tin") — chỉ Owner. */
     notify: telegramEndpoints(r),
+    /** v0.1.44 (F-4b): Gói chẩn đoán cho người hỗ trợ — chỉ Owner. */
+    diagnostics: diagnosticsEndpoints(r),
   };
 }
 
