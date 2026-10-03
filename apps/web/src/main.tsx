@@ -30,11 +30,31 @@ import './styles/notifications.css';
 import './styles/social.css';
 import './styles/errors.css';
 import './styles/theme.css';
+import { reportClientError } from './lib/clientErrors';
+import { newErrorId } from './lib/errorId';
 import { queryClient } from './lib/queryClient';
 import { createAppRouter } from './router';
 import { ErrorBoundary } from './shell/ErrorPage';
 
 const router = createAppRouter();
+
+// v0.1.44 (F-4b): lỗi JS ngoài React (sự kiện, hẹn giờ, promise bị từ chối không ai bắt) cũng báo về máy chủ — mỗi
+// sự kiện một mã ERR-… riêng; reportClientError tự khử trùng, giới hạn 5 lần/phút và không bao giờ ném. Hoãn một nhịp
+// để lỗi ErrorBoundary đã bắt (React bản dev cũng phát sự kiện "error") được báo trước bằng đúng mã đang hiện cho Sếp.
+window.addEventListener('error', (ev) => {
+  const error: unknown = ev.error ?? ev.message;
+  window.setTimeout(() => {
+    const errorId = newErrorId();
+    if (reportClientError({ errorId, error })) console.error(`[Gen-Harness] ${errorId} — lỗi chưa bắt`, error);
+  }, 0);
+});
+window.addEventListener('unhandledrejection', (ev) => {
+  const error: unknown = ev.reason;
+  window.setTimeout(() => {
+    const errorId = newErrorId();
+    if (reportClientError({ errorId, error })) console.error(`[Gen-Harness] ${errorId} — promise bị từ chối chưa bắt`, error);
+  }, 0);
+});
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

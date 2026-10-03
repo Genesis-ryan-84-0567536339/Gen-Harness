@@ -5,6 +5,7 @@
 import type { BossCheck, BossCheckKey, BossOverview } from '@gen-harness/contracts';
 import { friendlyError } from '../lib/friendlyError';
 import { DEFAULT_TZ, fmtDM, fmtHM } from '../lib/format';
+import { TELEGRAM_ERROR_TEXT } from '../screens/connections/telegramModel';
 
 /** Khoá cache của `GET /boss-checks`. */
 export const BOSS_CHECKS_KEY = ['boss-checks'] as const;
@@ -53,6 +54,8 @@ export const BOSS_ERROR_TEXT: Record<string, string> = {
   PROBE_RATE_LIMITED: 'Vừa gọi thử quá nhiều lần — đợi một phút rồi thử lại.',
   JEV_NOT_CONFIGURED: 'Chưa nhập khoá Jev.',
   JEV_ERROR: 'Thẻ Jev sẽ ẩn, không cần làm thêm.',
+  // v0.1.44 (F-8c): dòng 6 Telegram — cùng câu với thẻ Kết nối › Telegram.
+  ...TELEGRAM_ERROR_TEXT,
 };
 
 /** Lỗi chỉ sửa được bằng ĐĂNG NHẬP LẠI (đổi lại hay gọi thử lại chỉ lặp lại lỗi) → dòng hiện nút "Đăng nhập lại". */

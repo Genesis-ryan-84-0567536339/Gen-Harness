@@ -9,6 +9,7 @@ import { useMe } from '../lib/queries';
 import { toast } from '../lib/toast';
 import { CardError, SkeletonLines } from '../screens/common';
 import { ScreenTitle } from '../screens/ScreenPage';
+import { DiagnosticsCard } from './DiagnosticsCard';
 import { GENH_COMMANDS, GENH_VERSION_LABEL, SERVER_VERSION_LABEL, diagnosticText, withVersions } from './helpModel';
 import { roleLabel } from '../screens/system/systemModel';
 
@@ -129,6 +130,9 @@ export function HelpPage() {
             </ul>
           </Card>
         )}
+
+        {/* v0.1.44 (F-4b): gói chẩn đoán (genh doctor) — chỉ Owner (cần PIN, đọc nhật ký máy chủ). */}
+        {isOwner ? <DiagnosticsCard /> : null}
 
         <Card title="Báo lỗi" kicker="Chép thông tin chẩn đoán — không kèm mật khẩu hay khoá">
           <p className="help-text">

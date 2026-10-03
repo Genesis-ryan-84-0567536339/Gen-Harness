@@ -6,7 +6,7 @@
 import type { ApiClient } from './client';
 
 /** `agy_login` / `claude_login` do luồng đăng nhập CLI tự ghi — không chạy được bằng `run`. */
-export type BossCheckKey = 'hub' | 'facebook' | 'agy_login' | 'agy_call' | 'agy_switch' | 'claude_login' | 'claude_call' | 'jev';
+export type BossCheckKey = 'hub' | 'facebook' | 'agy_login' | 'agy_call' | 'agy_switch' | 'claude_login' | 'claude_call' | 'jev' | 'telegram';
 
 export type BossCheckStatus = 'pass' | 'fail' | 'pending';
 
@@ -56,7 +56,10 @@ export interface BossCheckRunBody {
 
 const enc = encodeURIComponent;
 
-/** `GET /boss-checks`, `POST /boss-checks/{key}/run` (423 PIN_REQUIRED cho hub/agy_switch). */
+/**
+ * `GET /boss-checks`, `POST /boss-checks/{key}/run` (423 PIN_REQUIRED cho hub/agy_switch). v0.1.44 (F-8c): dòng 6
+ * "telegram" (bắt buộc ⇒ `required_total` 5); `run('telegram')` trả thêm `host_requested`.
+ */
 export function bossChecksEndpoints(r: ApiClient['request']) {
   return {
     list: (signal?: AbortSignal) => r<BossOverview>('/boss-checks', { signal }),
