@@ -27,7 +27,7 @@ from gh.crypto import hash_secret, token_digest
 from gh.crypto import temp_password as new_temp_password
 from gh.data_api.routes import RuleIn, ScheduleIn, create_rule, save_schedule, save_weights
 from gh.db import DB
-from gh.errors import ApiError, conflict, field_errors, forbidden, unauthenticated
+from gh.errors import ApiError, conflict, field_errors, forbidden, pin_required, unauthenticated
 from gh.refinery import presets
 from gh.refinery.runner import load_schedule
 from gh.system_api.routes import GroupPatch, update_group
@@ -687,7 +687,10 @@ async def step9(body: Step9In, request: Request, db: AsyncSession = DB,
     """Tự trị & ranh giới: đặt mức tự trị (3 hoặc 4 — spec H1 cho phép cả hai, mặc định 4) cho agent vừa tạo ở
     bước 8, và bắt Owner xác nhận đã đọc danh sách ranh giới khoá cứng (`HARD_BOUNDARIES`, ARCHITECTURE §7.4).
     Các ranh giới đó **không tắt được** ở đây hay bất cứ đâu trong hệ thống — xác nhận chỉ để Owner biết trước
-    khi vào Console, không phải một cài đặt."""
+    khi vào Console, không phải một cài đặt.
+
+    v0.1.45 (F-20): SAU Hoàn tất (mở lại từ trang Hướng dẫn) đổi mức tự trị cần phiên PIN `policy.change` (423);
+    đang thiết lập lần đầu (chưa Hoàn tất) giữ nguyên — không đòi PIN. Thứ tự: 401/403 → 422 → 423."""
     row, owner = await _owner_step(db, user, after_finish=True)
     if not body.ack_boundaries:
         raise field_errors({"ack_boundaries": "Cần xác nhận đã đọc ranh giới khoá cứng trước khi tiếp tục"})
@@ -695,6 +698,8 @@ async def step9(body: Step9In, request: Request, db: AsyncSession = DB,
                                    "ORDER BY created_at DESC LIMIT 1"), {"o": row.org_id})).one_or_none()
     if agent is None:
         raise incomplete("Chưa có agent nào — hoàn thành bước 8 trước")
+    if row.finished_at is not None and not owner.pin_active():
+        raise pin_required()
     await db.execute(text("UPDATE agent.identities SET autonomy_level = :a, updated_at = now() WHERE id = :i"),
                      {"a": body.autonomy_level, "i": agent.id})
     state = await _mark_done(db, request, row, owner, 9,
@@ -723,8 +728,13 @@ async def step10(body: Step10In, request: Request, db: AsyncSession = DB,
     """Mời đội ngũ: bước tuỳ chọn, tạo tài khoản + mật khẩu tạm cho từng người (chưa có SMTP thật gửi lời mời —
     mật khẩu tạm trả thẳng về đây để Owner tự gửi qua kênh riêng). Danh sách rỗng vẫn đánh dấu xong được (Owner
     có thể mời sau ở trang Hướng dẫn kết nối — bước này vẫn mở sau khi Hoàn tất); gọi
-    `POST /setup/steps/10/skip` nếu muốn bỏ qua hẳn."""
+    `POST /setup/steps/10/skip` nếu muốn bỏ qua hẳn.
+
+    v0.1.45 (F-20): SAU Hoàn tất, danh sách mời KHÁC RỖNG (tạo tài khoản + mật khẩu tạm) cần phiên PIN
+    `user.manage` (423); danh sách rỗng, hoặc đang thiết lập lần đầu, không đòi PIN."""
     row, owner = await _owner_step(db, user, after_finish=True)
+    if body.invites and row.finished_at is not None and not owner.pin_active():
+        raise pin_required()
     errors: dict[str, str] = {}
     seen: set[str] = set()
     created: list[dict[str, Any]] = []

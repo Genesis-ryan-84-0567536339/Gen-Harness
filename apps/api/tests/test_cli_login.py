@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 from gh.providers import cli as climod
+from tests.conftest import verify_pin
 
 FAKE = Path(__file__).parent / "fixtures" / "fake_agy.py"
 
@@ -35,6 +36,7 @@ async def test_console_login_with_real_cli_behaviour(owner_api, app, tmp_path, m
     logins = app.state.cli_logins
     logins.argv = [sys.executable, str(FAKE)]
 
+    await verify_pin(owner_api)  # v0.1.45 (F-20): thêm tài khoản CLI cần PIN
     r = await owner_api.send("POST", "/cli/login")
     assert r.status_code == 202, r.text
     login_id = r.json()["login_id"]
@@ -67,6 +69,7 @@ async def test_without_terminal_replies_cli_never_shows_link(owner_api, app, tmp
     get_settings.cache_clear()
     logins = app.state.cli_logins
     logins.argv = [sys.executable, str(FAKE)]
+    await verify_pin(owner_api)  # v0.1.45 (F-20): thêm tài khoản CLI cần PIN
     r = await owner_api.send("POST", "/cli/login")
     assert r.status_code == 202, r.text
     s = next(iter(logins.sessions.values()))

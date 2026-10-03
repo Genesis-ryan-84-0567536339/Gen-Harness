@@ -15,7 +15,7 @@ import pytest
 
 from gh.providers import cli as climod
 from gh.providers.clients import AgyClient, Message
-from tests.conftest import OWNER
+from tests.conftest import OWNER, verify_pin
 
 FAKE = Path(__file__).parent / "fixtures" / "fake_agy_multi.py"
 
@@ -45,6 +45,7 @@ async def _wait(api: Any, login_id: str, until: tuple[str, ...]) -> dict[str, An
 
 
 async def _login(api: Any, name: str) -> dict[str, Any]:
+    await verify_pin(api)  # v0.1.45 (F-20): thêm tài khoản CLI cần PIN
     r = await api.send("POST", "/cli/login")
     assert r.status_code == 202, r.text
     login_id = r.json()["login_id"]
@@ -56,6 +57,17 @@ async def _login(api: Any, name: str) -> dict[str, Any]:
     st = await _wait(api, login_id, ("done", "failed"))
     assert st["status"] == "done", st
     return st
+
+
+async def _end_pin() -> None:
+    """v0.1.45: thêm tài khoản (POST /cli/login) mở phiên PIN — cho phiên PIN hết hạn để kiểm lại PIN của bước đổi."""
+    from sqlalchemy import text
+
+    from gh.db import admin_sessionmaker
+
+    async with admin_sessionmaker()() as s:
+        await s.execute(text("UPDATE core.sessions SET pin_verified_until = NULL"))
+        await s.commit()
 
 
 async def _whoami(home: Path) -> str:
@@ -83,6 +95,7 @@ async def test_add_second_account_then_switch_back_and_forth(owner_api, cli_home
     assert not list(cli_home.glob("*.before-login"))
 
     an = next(p for p in profs if p["email"] == "an@example.vn")
+    await _end_pin()   # phiên PIN của lượt thêm tài khoản đã hết → đổi tài khoản phải hỏi lại PIN
     r = await api.send("POST", f"/cli/profiles/{an['id']}/activate")
     assert r.status_code == 423 and r.json()["code"] == "PIN_REQUIRED"
     await api.send("POST", "/auth/pin/verify", {"pin": OWNER["pin"]})
@@ -104,6 +117,7 @@ async def test_add_second_account_then_switch_back_and_forth(owner_api, cli_home
 async def test_cancelled_add_account_keeps_current_account(owner_api, app, cli_home) -> None:  # type: ignore[no-untyped-def]
     api = owner_api
     await _login(api, "an")
+    await verify_pin(api)  # v0.1.45 (F-20): thêm tài khoản CLI cần PIN
     r = await api.send("POST", "/cli/login")
     login_id = r.json()["login_id"]
     st = await _wait(api, login_id, ("waiting_code", "failed", "done"))
@@ -150,6 +164,7 @@ async def test_old_bug_without_parking_cli_never_asks_for_the_new_account(owner_
     mới token bị hiểu là "đăng nhập xong" → Console báo xong với CHÍNH tài khoản cũ, tài khoản mới không bao giờ có."""
     await _login(owner_api, "an")
     monkeypatch.setattr(climod, "park_token", lambda *a: None)
+    await verify_pin(owner_api)  # v0.1.45 (F-20): thêm tài khoản CLI cần PIN
     r = await owner_api.send("POST", "/cli/login")
     st = await _wait(owner_api, r.json()["login_id"], ("waiting_code", "done", "failed"))
     assert st["status"] == "done" and st["url"] is None

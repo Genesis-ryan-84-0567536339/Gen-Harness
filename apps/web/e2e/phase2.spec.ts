@@ -260,6 +260,11 @@ test.describe('Kết nối › kênh & đăng nhập', () => {
     await expect(cli).toContainText('ryan.genesis@gmail.com');
     await cli.getByRole('button', { name: /Đổi tài khoản/ }).click();
     await page.getByRole('button', { name: 'Thêm tài khoản Google' }).click();
+    // v0.1.45 (F-20): thêm tài khoản CLI cần mã PIN (`cli.switch_account`).
+    const pin = page.getByRole('dialog', { name: 'Mã PIN xác nhận thao tác' });
+    await expect(pin).toBeVisible();
+    await page.keyboard.type(OWNER.pin);
+    await expect(pin).toBeHidden();
     const link = cli.getByRole('link', { name: 'Mở trang đăng nhập Google' });
     await expect(link).toBeVisible({ timeout: 5000 });
     await expect(link).toHaveAttribute('target', '_blank');
@@ -336,6 +341,9 @@ test('setup steps 4–7 and 12 against the mock', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Bộ não AI' })).toBeVisible();
   await expect(next).toBeDisabled();
   await page.getByRole('button', { name: 'Đăng nhập', exact: true }).click();
+  // v0.1.45 (F-20): thêm tài khoản CLI cần mã PIN (`cli.switch_account`).
+  await expect(page.getByRole('dialog', { name: 'Mã PIN xác nhận thao tác' })).toBeVisible();
+  await page.keyboard.type(OWNER.pin);
   await expect(page.getByRole('link', { name: 'Mở trang đăng nhập Google' })).toBeVisible({ timeout: 5000 });
   await page.getByLabel('Mã xác thực').fill('4/0AbCd-EfGh');
   await page.getByRole('button', { name: 'Xác nhận' }).click();
@@ -343,6 +351,8 @@ test('setup steps 4–7 and 12 against the mock', async ({ page }) => {
   await page.screenshot({ path: join(outDir, 'setup-step4-1440.png'), fullPage: true });
   await expect(next).toBeEnabled();
   await next.click();
+  // Phiên PIN của bước 4 hết hạn → bước 5 vẫn phải hỏi PIN cho đăng nhập kênh.
+  await page.request.post('/api/v1/__mock/pin_expire', { data: {} });
 
   // Bước 5 — risk warning, PIN, QR, scan.
   await expect(page.getByRole('heading', { name: 'Kết nối kênh' })).toBeVisible();

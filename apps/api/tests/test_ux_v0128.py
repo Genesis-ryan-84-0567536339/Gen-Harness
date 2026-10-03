@@ -20,7 +20,7 @@ async def _provider(api: Api, db, name: str, *, ok: bool, models: list[str] | No
                     tested: list[str] | None = None) -> str:
     # v0.1.35 (F-20): tạo / sửa nhà cung cấp AI cần PIN `ai.route_change`.
     await verify_pin(api)
-    r = await api.send("POST", "/providers", {"kind": "openai_compat", "name": name, "endpoint": "http://127.0.0.1:9/v1",
+    r = await api.send("POST", "/providers", {"kind": "openai_compat", "name": name, "endpoint": "https://127.0.0.1:9/v1",
                                               "keys": ["sk-test-key-123456"], "models": models or []})
     assert r.status_code == 201, r.text
     pid = r.json()["id"]

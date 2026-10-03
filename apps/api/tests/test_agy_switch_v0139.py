@@ -261,6 +261,7 @@ async def test_cancel_after_profile_commit_keeps_new_session_file(owner_api: Api
         raise asyncio.CancelledError
 
     monkeypatch.setattr(type(app.state.cli_logins), "_boss_check_record", cancelled)
+    await verify_pin(api)  # v0.1.45 (F-20): thêm tài khoản CLI cần PIN
     r = await api.send("POST", f"/cli/login?kind={AGY}")
     login_id = r.json()["login_id"]
     assert (await _wait(api, login_id, ("waiting_code", "failed", "done")))["status"] == "waiting_code"

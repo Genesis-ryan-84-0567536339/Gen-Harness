@@ -10,10 +10,17 @@ export const PIN_ROUTE_CHANGE_TITLE = 'cần mã PIN 6 số (bật/tắt, thêm/
 /** v0.1.35 (F-20): thêm / sửa / bật-tắt nhà cung cấp AI, khoá API, chuỗi chuyển hướng cần phiên PIN `ai.route_change`
  * — hộp PIN tự mở khi máy chủ trả 423 (lib/api.ts + PinDialogHost); ở đây chỉ báo trước. Dùng chung cho Agent & Model
  * thẻ Jev (Điều khiển hệ thống) và Hướng dẫn bước 4 — một nguồn chữ duy nhất. */
-export function PinHint() {
+export function PinHint({
+  text = 'Cần mã PIN 6 số',
+  title = 'Thêm / sửa nhà cung cấp AI, khoá API, chuỗi chuyển hướng cần mã PIN',
+}: {
+  /** v0.1.45: chữ hiển thị cho thao tác khác (agent, tài khoản CLI, Hướng dẫn sau Hoàn tất). */
+  text?: string;
+  title?: string;
+} = {}) {
   return (
-    <span className="muted-note" title="Thêm / sửa nhà cung cấp AI, khoá API, chuỗi chuyển hướng cần mã PIN">
-      <Icon name="ph ph-lock-simple" size={11} /> Cần mã PIN 6 số
+    <span className="muted-note" title={title}>
+      <Icon name="ph ph-lock-simple" size={11} /> {text}
     </span>
   );
 }

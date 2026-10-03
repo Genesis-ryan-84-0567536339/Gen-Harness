@@ -108,7 +108,7 @@ async def test_create_rejects_unknown_template_and_bad_scope(owner_api, db) -> N
 
 # ─── liệt kê / sửa (không cần PIN) ────────────────────────────────────────────
 
-async def test_list_and_patch_replaces_scope_without_pin(owner_api, db) -> None:  # type: ignore[no-untyped-def]
+async def test_list_and_patch_replaces_scope_with_pin(owner_api, db) -> None:  # type: ignore[no-untyped-def]
     org, ch, gid = await _channel_group(db)
     gid2 = await listen(db, org, "g2")
     aid = await _seed_agent(db, org)
@@ -125,9 +125,15 @@ async def test_list_and_patch_replaces_scope_without_pin(owner_api, db) -> None:
     detail = await api.get(f"/agents/{aid}")
     assert detail.status_code == 200 and detail.json()["name"] == "Trợ lý thương mại"
 
-    r = await api.send("PATCH", f"/agents/{aid}",
-                       {"autonomy_level": 3, "limits": {"decisions_per_min": 5},
-                        "channel_scopes": [{"channel_id": str(ch), "group_id": str(gid2)}]})
+    body = {"autonomy_level": 3, "limits": {"decisions_per_min": 5},
+            "channel_scopes": [{"channel_id": str(ch), "group_id": str(gid2)}]}
+    # v0.1.45 (F-20): đổi rào chắn (mức tự trị/giới hạn/phạm vi kênh) cần PIN policy.change; đổi tên thì không.
+    r = await api.send("PATCH", f"/agents/{aid}", body)
+    assert r.status_code == 423 and r.json()["code"] == "PIN_REQUIRED", r.text
+    r = await api.send("PATCH", f"/agents/{aid}", {"name": "Trợ lý thương mại"})
+    assert r.status_code == 200, r.text
+    await _pin(api)
+    r = await api.send("PATCH", f"/agents/{aid}", body)
     assert r.status_code == 200, r.text
     out = r.json()
     assert out["autonomy_level"] == 3
