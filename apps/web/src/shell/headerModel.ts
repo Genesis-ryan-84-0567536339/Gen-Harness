@@ -1,9 +1,14 @@
-import { autonomyLabel } from '@gen-harness/contracts';
+import { autonomyChoice } from '@gen-harness/contracts';
+
+/** v0.1.43 (F-30): viên header hiện nhãn 3 mức ("Soạn sẵn chờ duyệt"…); mức lạ ngoài thang hiện "mức n". */
+export function autonomyPillText(level: number): string {
+  return autonomyChoice(level)?.label ?? `mức ${level}`;
+}
 
 export function autonomyTooltip(level: number): string {
-  const name = autonomyLabel(level);
-  const lower = name ? name.charAt(0).toLocaleLowerCase('vi') + name.slice(1) : '';
-  return `Mức tự trị hiện tại — mức ${level}${lower ? `: ${lower}` : ''} (thang 0–6)`;
+  const choice = autonomyChoice(level);
+  if (!choice) return `Mức tự trị chung: mức ${level} (ngoài thang 0–6 — đổi ở Cài đặt)`;
+  return `Mức tự trị chung: ${choice.label} (mức ${level} trên thang 0–6 — đổi ở Cài đặt)`;
 }
 
 /** data_confidence may arrive as a 0–1 fraction or a 0–100 percent. */

@@ -109,6 +109,32 @@ describe('Hộp thư ý nghĩa', () => {
     expect(await screen.findByText(/Khách nhắn ba lần/)).toBeInTheDocument();
     expect(screen.queryByText(/Xưởng gỗ Bình Dương hỏi giá/)).not.toBeInTheDocument();
   });
+
+  it('v0.1.43 (F-30, F-62): độ tin cậy không hiện thường trực — rê chuột huy hiệu ưu tiên mới thấy; câu mô tả mới', async () => {
+    mockFetch((c) => (c.url.includes('/inbox') ? json(200, inboxPage('all')) : json(404)));
+    const user = userEvent.setup();
+    renderScreen(<InboxScreen />);
+
+    const card = (await screen.findByText(/Xưởng gỗ Bình Dương hỏi giá/)).closest('article') as HTMLElement;
+    expect(card.textContent).not.toMatch(/độ tin cậy/i);
+    expect(
+      screen.getByText(
+        'Không phải tin nhắn thô. Mỗi dòng là một ý chính rút ra từ tin nhắn: nguồn, người liên quan, điểm ưu tiên, tóm tắt hai câu, gợi ý việc nên làm và tin gốc làm chứng cứ.',
+      ),
+    ).toBeInTheDocument();
+
+    const prio = within(card).getByLabelText('Ưu tiên P1 · Độ tin cậy: cao');
+    expect(prio).toHaveAttribute('title', 'Độ tin cậy: cao');
+    await user.hover(prio);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('Độ tin cậy: cao');
+  });
+
+  it('v0.1.43 (F-62): danh sách trống, header lỗi → trạng thái trống cũ với câu mới', async () => {
+    mockFetch((c) => (c.url.includes('/inbox') ? json(200, { ...inboxPage('all'), items: [] }) : json(404)));
+    renderScreen(<InboxScreen />);
+    expect(await screen.findByText('Hộp thư đang trống')).toBeInTheDocument();
+    expect(screen.getByText('Không có tin, cảnh báo hay bản nháp nào khớp bộ lọc hiện tại.')).toBeInTheDocument();
+  });
 });
 
 const TASKS: TaskPage = {
