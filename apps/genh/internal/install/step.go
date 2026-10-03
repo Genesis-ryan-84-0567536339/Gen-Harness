@@ -169,6 +169,12 @@ type Env struct {
 	// tránh phải mở trình duyệt lần thứ hai từ main.go (Bước 8 đã mở đúng
 	// một lần, main.go chỉ cần biết kết quả).
 	BrowserOpened bool
+
+	// FreshInstall (v0.1.46, F-21): true khi config/secrets.json CHƯA tồn tại
+	// trước Bước 4 — cài mới thật sự. Bước 5 dùng để ghi .env cho cài mới là
+	// 127.0.0.1/local (cài lại/tiếp tục bản dở giữ lựa chọn cũ hoặc lan_legacy).
+	// Không dựa vào GeneratedNew: nó cũng true khi chỉ bổ sung trường thiếu.
+	FreshInstall bool
 }
 
 // Step là đơn vị công việc của một trong 8 bước cài đặt. Mỗi Step biết

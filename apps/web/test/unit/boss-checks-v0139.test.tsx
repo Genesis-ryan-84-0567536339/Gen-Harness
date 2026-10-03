@@ -11,7 +11,7 @@ import { TELEGRAM_KEY } from '../../src/screens/connections/telegramModel';
 
 /**
  * v0.1.39 (F-74) — trang "Việc Sếp cần làm": ô kết quả ngay cạnh, kết quả đọc từ `GET /boss-checks`. v0.1.44 (F-8c):
- * thêm dòng 6 Telegram (bắt buộc) ⇒ 6 dòng, đếm x/5.
+ * thêm dòng 6 Telegram (bắt buộc) ⇒ 6 dòng, đếm x/5. v0.1.46 (F-21): dòng 7 Truy cập từ xa (bắt buộc) ⇒ 7 dòng, đếm x/6.
  */
 
 const json = (status: number, body?: unknown) =>
@@ -30,7 +30,7 @@ const me = (role: string) => ({
   permissions: { 'system.read': 'all', 'system.manage': role === 'owner' ? 'all' : 'none' },
 });
 
-const EMPTY = { hub: null, facebook: null, agy_login: null, agy_call: null, agy_switch: null, claude_login: null, claude_call: null, jev: null, telegram: null };
+const EMPTY = { hub: null, facebook: null, agy_login: null, agy_call: null, agy_switch: null, claude_login: null, claude_call: null, jev: null, telegram: null, remote_access: null };
 const ROWS: BossOverview['rows'] = [
   { row: 1, key: 'hub', title: 'Nối Gen-hub', optional: false, checks: ['hub'], done: false },
   { row: 2, key: 'facebook', title: 'Kết nối Facebook', optional: false, checks: ['facebook'], done: false },
@@ -38,6 +38,7 @@ const ROWS: BossOverview['rows'] = [
   { row: 4, key: 'claude', title: 'Claude Code', optional: false, checks: ['claude_login', 'claude_call'], done: false },
   { row: 5, key: 'jev', title: 'Jev', optional: true, checks: ['jev'], done: false },
   { row: 6, key: 'telegram', title: 'Telegram (báo động & bản tin)', optional: false, checks: ['telegram'], done: false },
+  { row: 7, key: 'remote', title: 'Truy cập từ xa', optional: false, checks: ['remote_access'], done: false },
 ];
 const SAVED: HubLink = {
   configured: true, enabled: false, status: 'off', server_id: 's1', endpoint: 'https://hub.genos.top/mcp', has_token: true,
@@ -86,7 +87,7 @@ function setup(w: Partial<World> = {}) {
       calls.push({ path, method, body });
       if (path === '/boss-checks' && method === 'GET') {
         world.onList?.(++lists);
-        return json(200, { rows: ROWS, results: world.results, required_done: 0, required_total: 5, switch_passes: world.switchPasses });
+        return json(200, { rows: ROWS, results: world.results, required_done: 0, required_total: 6, switch_passes: world.switchPasses });
       }
       const run = /^\/boss-checks\/([a-z_]+)\/run$/.exec(path);
       if (run && method === 'POST') {
@@ -132,11 +133,11 @@ afterEach(() => {
 });
 
 describe('Việc Sếp cần làm (/guide/viec-sep)', () => {
-  it('đúng 6 dòng: 5 bắt buộc + Jev "Không bắt buộc"; mỗi dòng có ô kết quả "Chưa kiểm"', async () => {
+  it('đúng 7 dòng: 6 bắt buộc + Jev "Không bắt buộc"; mỗi dòng có ô kết quả "Chưa kiểm"', async () => {
     setup();
     renderPage();
-    expect(await screen.findByText('Đã đạt 0/5 dòng bắt buộc')).toBeInTheDocument();
-    const names = ['Nối Gen-hub', 'Kết nối Facebook', 'Google (Antigravity) — hai tài khoản', 'Claude Code CLI', 'Jev', 'Telegram (báo động & bản tin)'];
+    expect(await screen.findByText('Đã đạt 0/6 dòng bắt buộc')).toBeInTheDocument();
+    const names = ['Nối Gen-hub', 'Kết nối Facebook', 'Google (Antigravity) — hai tài khoản', 'Claude Code CLI', 'Jev', 'Telegram (báo động & bản tin)', 'Truy cập từ xa'];
     expect(screen.getAllByRole('region').map((r) => r.getAttribute('aria-label'))).toEqual(names);
     for (const n of names.filter((x) => x !== 'Jev')) expect(within(row(n)).queryByText('Không bắt buộc')).toBeNull();
     expect(within(row('Jev')).getByText('Không bắt buộc')).toBeInTheDocument();
@@ -486,6 +487,29 @@ describe('Việc Sếp cần làm (/guide/viec-sep)', () => {
     renderPage();
     const fb2 = await screen.findByRole('region', { name: 'Kết nối Facebook' });
     expect(await within(fb2).findByText(/chạy quá lâu nên đã dừng/)).toBeInTheDocument();
+  });
+
+  it('Truy cập từ xa (dòng 7): Kiểm tra → POST /boss-checks/remote_access/run; lỗi → câu hướng dẫn theo mã; gợi ý bấm trên điện thoại', async () => {
+    const { calls } = setup({
+      run: (key) => check(key as BossCheckKey, 'fail', { error_code: 'REMOTE_OPENED_ON_SERVER', message: 'Đang mở trên chính máy chủ' }),
+    });
+    const { container } = renderPage();
+    const user = userEvent.setup();
+    const r = await screen.findByRole('region', { name: 'Truy cập từ xa' });
+    expect(within(r).getByText(/Bấm nút này TRÊN ĐIỆN THOẠI sau khi mở Console bằng địa chỉ từ xa/)).toBeInTheDocument();
+    expect(within(r).getByText('Chưa kiểm')).toBeInTheDocument();
+    await user.click(within(r).getByRole('button', { name: 'Kiểm tra' }));
+    expect(await within(r).findByText(/^Lỗi · Đang mở trên chính máy chủ — mở Console trên điện thoại/)).toBeInTheDocument();
+    expect(within(r).getByText('Mã lỗi REMOTE_OPENED_ON_SERVER')).toBeInTheDocument();
+    expect(calls.filter((c) => c.method === 'POST').map((c) => c.path)).toEqual(['/boss-checks/remote_access/run']);
+    expect(container.innerHTML).not.toContain('[object Object]');
+  });
+
+  it('Truy cập từ xa: Đạt → "đã mở Console từ <tên miền>"', async () => {
+    setup({ results: { ...EMPTY, remote_access: check('remote_access', 'pass', { detail: { opened_from: 'gen.tail1234.ts.net', access_mode: 'tailscale' } }) } });
+    renderPage();
+    const r = await screen.findByRole('region', { name: 'Truy cập từ xa' });
+    expect(await within(r).findByText(/Đạt · đã mở Console từ gen\.tail1234\.ts\.net/)).toBeInTheDocument();
   });
 
   it('Telegram (dòng 6): Gửi thử → POST /boss-checks/telegram/run; chưa cấu hình → câu theo mã + "Mở hướng dẫn" tới /connections#telegram', async () => {

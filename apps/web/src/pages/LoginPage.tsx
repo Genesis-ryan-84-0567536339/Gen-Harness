@@ -11,6 +11,17 @@ import { safeNext } from '../lib/safeNext';
 
 const RESET_PASSWORD_COMMAND = '~/.gen-harness/bin/genh reset-password';
 
+/** v0.1.46: lời nhắc khi đăng nhập sai quá nhiều lần — nói đúng cách gỡ theo bộ đếm đã chạm ngưỡng (api trả `scope`).
+ * scope "ip": bộ đếm chung cả mạng (sau docker-proxy/Tailscale Serve mọi người chung một IP) — Owner bấm "Đặt lại mật
+ * khẩu" cho nhân viên KHÔNG gỡ được, nên không hứa điều đó. */
+function rateLimitMessage(retryAfterS: number, scope: 'ip' | 'email'): string {
+  const minutes = Number.isFinite(retryAfterS) && retryAfterS > 0 ? Math.ceil(retryAfterS / 60) : 15;
+  if (scope === 'ip') {
+    return `Có quá nhiều lần đăng nhập sai từ cùng mạng. Đợi khoảng ${minutes} phút rồi thử lại. Owner: có thể gỡ ngay bằng lệnh ${RESET_PASSWORD_COMMAND} trên máy chủ (lệnh này cấp mật khẩu tạm MỚI cho Owner và đăng xuất mọi phiên Owner).`;
+  }
+  return `Đăng nhập sai quá nhiều lần. Đợi khoảng ${minutes} phút rồi thử lại. Nhân viên: nhờ Owner bấm "Đặt lại mật khẩu" ở Đội ngũ › Người dùng. Owner: chạy ${RESET_PASSWORD_COMMAND} trên máy chủ (lệnh này cấp mật khẩu tạm MỚI cho Owner).`;
+}
+
 export function LoginPage() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
@@ -18,6 +29,7 @@ export function LoginPage() {
   const [password, setPassword] = useState('');
   const [touched, setTouched] = useState<{ email?: boolean; password?: boolean }>({});
   const [formError, setFormError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -34,12 +46,17 @@ export function LoginPage() {
     if (!canSubmit) return;
     setBusy(true);
     setFormError(null);
+    setErrorCode(null);
     try {
       const me = await api.auth.login({ email: email.trim(), password });
       queryClient.setQueryData(qk.me, me);
       navigate(safeNext(params.get('next')), { replace: true });
     } catch (err) {
-      if (err instanceof ApiError && err.code === 'INVALID_CREDENTIALS') setFormError('Email hoặc mật khẩu không đúng.');
+      if (err instanceof ApiError && err.code === 'LOGIN_RATE_LIMITED') {
+        const p = err.problem as { retry_after_s?: unknown; scope?: unknown };
+        setFormError(rateLimitMessage(Number(p.retry_after_s), p.scope === 'ip' ? 'ip' : 'email'));
+        setErrorCode(p.scope === 'ip' || p.scope === 'email' ? `LOGIN_RATE_LIMITED (${p.scope})` : 'LOGIN_RATE_LIMITED');
+      } else if (err instanceof ApiError && err.code === 'INVALID_CREDENTIALS') setFormError('Email hoặc mật khẩu không đúng.');
       else if (err instanceof ApiError && err.status === 0) setFormError('Không kết nối được máy chủ. Kiểm tra dịch vụ api rồi thử lại.');
       else if (err instanceof ApiError && err.status === 428) setFormError('Hệ thống chưa thiết lập xong — đang chuyển tới trình thiết lập.');
       else setFormError(err instanceof Error ? err.message : 'Đăng nhập không thành công.');
@@ -85,6 +102,12 @@ export function LoginPage() {
           <div className="login-card__error" role="alert" aria-live="assertive">
             {formError}
           </div>
+          {errorCode && (
+            <details className="tech-detail">
+              <summary>Chi tiết kỹ thuật</summary>
+              <code className="mono">{errorCode}</code>
+            </details>
+          )}
           <Button variant="primary" type="submit" block loading={busy} disabled={!canSubmit && !busy} iconRight="ph ph-arrow-right">
             Đăng nhập
           </Button>

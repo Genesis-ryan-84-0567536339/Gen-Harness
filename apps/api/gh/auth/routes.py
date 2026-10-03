@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gh.auth import service
+from gh.auth import login_guard, service
 from gh.auth.deps import client_ip, current_user, require_pin
 from gh.chassis import actionlog
 from gh.config import get_settings
@@ -84,12 +84,41 @@ def _pin_locked(locked_until: datetime | None) -> ApiError:
                     locked_until=until)
 
 
+#: Đường dẫn đầy đủ (genh có thể không nằm trong PATH) — khớp RESET_PASSWORD_COMMAND của apps/web LoginPage.
+RESET_PASSWORD_COMMAND = "~/.gen-harness/bin/genh reset-password"
+
+
 @router.post("/login")
 async def login(body: LoginIn, request: Request, response: Response,
                 db: AsyncSession = DB) -> dict[str, Any]:
-    found = await service.login(db, body.email, body.password)
     ip = client_ip(request)
+    redis = request.app.state.redis
+    hit = await login_guard.blocked(redis, ip, body.email)
+    if hit is not None:
+        retry, scope = hit
+        org_id = (await db.execute(text("SELECT id FROM core.organizations ORDER BY created_at LIMIT 1"))).scalar()
+        if org_id is not None and await login_guard.log_once(redis, body.email):
+            await actionlog.record(db, org_id=org_id, actor_type="system", actor_id="system:auth",
+                                   action="auth.login_rate_limited", result="blocked",
+                                   detail={"email_masked": _mask_email(body.email), "scope": scope}, ip=ip)
+            await db.commit()
+        minutes = max(1, -(-retry // 60))
+        if scope == "ip":
+            # Bộ đếm IP chung cả mạng (docker-proxy/Tailscale Serve): Owner bấm Đặt lại mật khẩu cho nhân viên KHÔNG
+            # gỡ được — chỉ đợi, hoặc Owner chạy genh reset-password (xoá mọi bộ đếm IP).
+            raise ApiError(429, "LOGIN_RATE_LIMITED",
+                           f"Có quá nhiều lần đăng nhập sai từ cùng mạng — đợi khoảng {minutes} phút rồi thử lại",
+                           f"Đợi khoảng {minutes} phút. Owner: có thể gỡ ngay bằng lệnh {RESET_PASSWORD_COMMAND} trên "
+                           "máy chủ (lệnh này cấp mật khẩu tạm MỚI cho Owner và đăng xuất mọi phiên Owner).",
+                           retry_after_s=retry, scope=scope)
+        raise ApiError(429, "LOGIN_RATE_LIMITED",
+                       f"Đăng nhập sai quá nhiều lần — đợi khoảng {minutes} phút rồi thử lại",
+                       "Nhân viên: nhờ Owner bấm Đặt lại mật khẩu. Owner: chạy "
+                       f"{RESET_PASSWORD_COMMAND} trên máy chủ (lệnh này cấp mật khẩu tạm MỚI cho Owner).",
+                       retry_after_s=retry, scope=scope)
+    found = await service.login(db, body.email, body.password)
     if found is None:
+        await login_guard.record_failure(redis, ip, body.email)
         org_id = (await db.execute(text("SELECT id FROM core.organizations ORDER BY created_at LIMIT 1"))).scalar()
         if org_id is not None:
             await actionlog.record(db, org_id=org_id, actor_type="system", actor_id="system:auth",
@@ -97,6 +126,7 @@ async def login(body: LoginIn, request: Request, response: Response,
                                    detail={"email_masked": _mask_email(body.email)}, ip=ip)
             await db.commit()
         raise ApiError(401, "INVALID_CREDENTIALS", "Email hoặc mật khẩu không đúng")
+    await login_guard.clear_email(redis, body.email)
     new = await service.create_session(db, found["id"], ip=ip, user_agent=request.headers.get("user-agent"))
     user = await service.load_session(db, new.token)
     assert user is not None

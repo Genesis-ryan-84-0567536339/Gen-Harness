@@ -50,7 +50,7 @@ var doctorGenhLogs = []string{"auto-update.log", "offsite.log", "watchdog.log"}
 // doctorHostFiles là tệp trạng thái trong run/ đưa vào gói (đọc an toàn).
 // KHÔNG có telegram.json (token mã hoá), api-health.json (không cần).
 var doctorHostFiles = []string{"update-status", "restore-status", "disk-status", "autostart-status", "offsite-status",
-	"genh", "update-blocked", "watchdog-status", "doctor-status"}
+	"genh", "update-blocked", "watchdog-status", "doctor-status", "network-status"}
 
 var doctorZipRe = regexp.MustCompile(`^genh-doctor-\d{8}T\d{6}Z\.zip$`)
 

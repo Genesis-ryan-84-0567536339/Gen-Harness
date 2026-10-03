@@ -3,6 +3,8 @@ package install
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -30,6 +32,19 @@ func testEnvWithSecrets(t *testing.T) *Env {
 	return &Env{Secrets: res}
 }
 
+// tempComposeLocator trả hàm locate trỏ tới compose.yaml trong t.TempDir():
+// từ v0.1.46 dataStep ghi .env cạnh compose.yaml (access.Ensure), nên không
+// được dùng đường dẫn cứng "/tmp/compose.yaml" — trên Windows "\tmp" không
+// tồn tại (GH-E010), trên Linux test sẽ ghi bậy vào /tmp/.env thật của máy.
+func tempComposeLocator(t *testing.T) func(string) (string, error) {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "compose.yaml")
+	if err := os.WriteFile(p, []byte("services: {}\n"), 0o600); err != nil {
+		t.Fatalf("ghi compose.yaml tạm: %v", err)
+	}
+	return func(string) (string, error) { return p, nil }
+}
+
 func TestDataStep_HappyPath_UpThenHealthy(t *testing.T) {
 	fr := &fake.Runner{Responses: []fake.Response{
 		{Match: fake.MatchArgsContain("up", "-d"), Output: []byte("")},
@@ -45,13 +60,20 @@ func TestDataStep_HappyPath_UpThenHealthy(t *testing.T) {
 	origInterval := speedUpComposePolling(time.Millisecond)
 	defer origInterval()
 
-	step := dataStep{runner: fr, locate: func(string) (string, error) { return "/tmp/compose.yaml", nil }, timeout: time.Second}
+	locate := tempComposeLocator(t)
+	composePath, _ := locate("")
+	step := dataStep{runner: fr, locate: locate, timeout: time.Second}
 
 	var progresses []Progress
 	rep := ReporterFunc(func(p Progress) { progresses = append(progresses, p) })
 
 	if err := step.Run(context.Background(), testEnvWithSecrets(t), rep); err != nil {
 		t.Fatalf("Run: %v", err)
+	}
+
+	// .env phải được ghi cạnh compose.yaml tạm (không phải /tmp/.env thật).
+	if _, err := os.Stat(filepath.Join(filepath.Dir(composePath), ".env")); err != nil {
+		t.Errorf("muốn .env cạnh compose.yaml tạm: %v", err)
 	}
 
 	last := progresses[len(progresses)-1]
@@ -86,7 +108,7 @@ func TestDataStep_ComposeUpFails_ReturnsStructuredError(t *testing.T) {
 		{Match: fake.MatchArgsContain("up", "-d"), Err: errors.New("cổng đã dùng")},
 	}}
 
-	step := dataStep{runner: fr, locate: func(string) (string, error) { return "/tmp/compose.yaml", nil }}
+	step := dataStep{runner: fr, locate: tempComposeLocator(t)}
 	err := step.Run(context.Background(), testEnvWithSecrets(t), ReporterFunc(func(Progress) {}))
 
 	se, ok := err.(*StepError)
@@ -100,7 +122,7 @@ func TestDataStep_ComposeUpFails_ReturnsStructuredError(t *testing.T) {
 
 func TestDataStep_MissingSecrets_ReturnsStructuredError(t *testing.T) {
 	fr := &fake.Runner{}
-	step := dataStep{runner: fr, locate: func(string) (string, error) { return "/tmp/compose.yaml", nil }}
+	step := dataStep{runner: fr, locate: tempComposeLocator(t)}
 
 	err := step.Run(context.Background(), &Env{}, ReporterFunc(func(Progress) {}))
 	if err == nil {
@@ -120,7 +142,7 @@ func TestDataStep_HealthTimeout_ReturnsStructuredError(t *testing.T) {
 	origInterval := speedUpComposePolling(time.Millisecond)
 	defer origInterval()
 
-	step := dataStep{runner: fr, locate: func(string) (string, error) { return "/tmp/compose.yaml", nil }, timeout: 20 * time.Millisecond}
+	step := dataStep{runner: fr, locate: tempComposeLocator(t), timeout: 20 * time.Millisecond}
 	err := step.Run(context.Background(), testEnvWithSecrets(t), ReporterFunc(func(Progress) {}))
 
 	se, ok := err.(*StepError)

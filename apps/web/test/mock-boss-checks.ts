@@ -15,6 +15,9 @@
  *   (`login_source: existing_session`) như `_adopt_existing_claude_login` của api.
  * - telegram (v0.1.44, dòng 6, bắt buộc ⇒ required_total 5): Gửi thử của `mock-telegram` (chưa cấu hình →
  *   TELEGRAM_NOT_CONFIGURED; TELEGRAM_RATE_LIMITED tạm, không ghi); phản hồi `run` kèm `host_requested`.
+ * - remote_access (v0.1.46, F-21, dòng 7, bắt buộc ⇒ required_total 6; KHÔNG PIN): quyết theo hostname của header Origin
+ *   (mock-api.ts chặn `POST /boss-checks/remote_access/run` rồi gọi hook `recordRemote`): public_url local →
+ *   REMOTE_NOT_CONFIGURED; host local → REMOTE_OPENED_ON_SERVER; còn lại Đạt (`detail.opened_from`, `access_mode`).
  * - agy_switch: chỉ đếm khi hồ sơ đang dùng TRƯỚC khi đổi (`from_profile`) khác hồ sơ đích (đổi sang chính nó = 0).
  * Hook e2e `POST /api/v1/__mock/p3/bossChecks/seedAgy {}`: đặt sẵn 2 hồ sơ Google an@… (không dùng), binh@… (đang dùng).
  * Hook e2e `POST /api/v1/__mock/p3/bossChecks/seedClaude {}`: một hồ sơ Claude đang dùng, CHƯA có bản claude_login.
@@ -45,8 +48,16 @@ const mask = (email: string | null | undefined): string | null => {
   return i > 0 ? `${email[0]}***@${email.slice(i + 1)}` : null;
 };
 
-const KEYS: BossCheckKey[] = ['hub', 'facebook', 'agy_login', 'agy_call', 'agy_switch', 'claude_login', 'claude_call', 'jev', 'telegram'];
-const RUNNABLE = new Set<BossCheckKey>(['hub', 'facebook', 'agy_call', 'agy_switch', 'claude_call', 'jev', 'telegram']);
+/** Như `access.is_local_url` của api, cho một hostname trần. */
+export function isLocalHost(host: string): boolean {
+  const h = host.trim().toLowerCase().replace(/^\[|\]$/g, '');
+  if (!h || h === 'localhost' || h.endsWith('.localhost') || h === '::1' || h === '::') return true;
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
+  return !!v4 && (Number(v4[1]) === 127 || v4.slice(1).every((x) => Number(x) === 0));
+}
+
+const KEYS: BossCheckKey[] = ['hub', 'facebook', 'agy_login', 'agy_call', 'agy_switch', 'claude_login', 'claude_call', 'jev', 'telegram', 'remote_access'];
+const RUNNABLE = new Set<BossCheckKey>(['hub', 'facebook', 'agy_call', 'agy_switch', 'claude_call', 'jev', 'telegram', 'remote_access']);
 const NEEDS_PIN = new Set<BossCheckKey>(['hub', 'agy_switch']);
 const FB_READ_MS = 1500;
 
@@ -57,6 +68,7 @@ const ROWS: Array<Omit<BossRow, 'done'>> = [
   { row: 4, key: 'claude', title: 'Claude Code CLI', optional: false, checks: ['claude_login', 'claude_call'] },
   { row: 5, key: 'jev', title: 'Jev', optional: true, checks: ['jev'] },
   { row: 6, key: 'telegram', title: 'Telegram (báo động & bản tin)', optional: false, checks: ['telegram'] },
+  { row: 7, key: 'remote', title: 'Truy cập từ xa', optional: false, checks: ['remote_access'] },
 ];
 
 export function createMock(opts: Opts) {
@@ -120,9 +132,10 @@ export function createMock(opts: Opts) {
       4: pass('claude_login') && pass('claude_call'),
       5: pass('jev'),
       6: pass('telegram'),
+      7: pass('remote_access'),
     };
     const rows = ROWS.map((r) => ({ ...r, done: done[r.row] }));
-    return { rows, results: { ...results }, required_done: rows.filter((r) => !r.optional && r.done).length, required_total: 5, switch_passes: switchPasses };
+    return { rows, results: { ...results }, required_done: rows.filter((r) => !r.optional && r.done).length, required_total: 6, switch_passes: switchPasses };
   };
 
   const run = (key: BossCheckKey, body: { profile_id?: string; account_id?: string }): BossCheck | null => {
@@ -165,6 +178,8 @@ export function createMock(opts: Opts) {
       }
       case 'telegram':
         return recordTelegram(opts.telegramTest());
+      case 'remote_access':
+        return recordRemote('localhost', true, 'unknown'); // chỉ khi bị gọi không qua mock-api (không có Origin)
       case 'jev': {
         const jev = opts.providers().find((p) => p.kind === 'system_one');
         return jev ? record('jev', 'pass') : fail('jev', 'JEV_NOT_CONFIGURED', 'Chưa nhập khoá Jev');
@@ -192,6 +207,17 @@ export function createMock(opts: Opts) {
     return false;
   }
 
+  /** v0.1.46 (F-21): như `_run_remote` của api — `host` = hostname của Origin (hoặc Host), `publicLocal` = GH_PUBLIC_URL local. */
+  const recordRemote = (host: string, publicLocal: boolean, mode: string): BossCheck => {
+    if (publicLocal) {
+      return fail('remote_access', 'REMOTE_NOT_CONFIGURED', 'Chưa chọn cách truy cập từ xa — trên máy chủ chạy genh remote tailscale (khuyên dùng) hoặc genh remote --lan');
+    }
+    if (isLocalHost(host)) {
+      return fail('remote_access', 'REMOTE_OPENED_ON_SERVER', 'Đang mở trên chính máy chủ — mở Console trên điện thoại bằng địa chỉ ở Cài đặt › Sao lưu & cập nhật › Truy cập từ xa rồi bấm Kiểm tra từ đó');
+    }
+    return record('remote_access', 'pass', { detail: { opened_from: host, access_mode: mode } });
+  };
+
   /** Hook e2e: hai hồ sơ Google an@ (không dùng) và binh@ (đang dùng) cho kịch bản đổi qua lại. */
   const seedAgy = () => {
     const list = opts.cliProfiles('antigravity_cli');
@@ -211,5 +237,5 @@ export function createMock(opts: Opts) {
     return list;
   };
 
-  return { handle, hooks: { seedAgy, seedClaude, overview, recordTelegram, forgetTelegram } as Record<string, (...args: never[]) => unknown>, dispose: () => {} };
+  return { handle, hooks: { seedAgy, seedClaude, overview, recordTelegram, forgetTelegram, recordRemote } as Record<string, (...args: never[]) => unknown>, dispose: () => {} };
 }

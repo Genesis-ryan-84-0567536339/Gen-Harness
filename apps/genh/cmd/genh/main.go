@@ -94,6 +94,8 @@ func run(args []string) int {
 		return runResetPassword(args[1:])
 	case "trust-ca":
 		return runTrustCA(args[1:])
+	case "remote", "set-address":
+		return runRemote(args[1:])
 	case "stop":
 		return runStop(args[1:])
 	case "start":
@@ -174,6 +176,11 @@ Lệnh vận hành (cờ chung mọi lệnh dưới đây: --port N, --install-d
   genh reset-setup [--yes]               sinh mã thiết lập mới (hỏi xác nhận trừ khi --yes)
   genh reset-password                    quên mật khẩu Owner: in email + mật khẩu tạm mới
                                           (giữ nguyên dữ liệu, đăng xuất các phiên cũ)
+  genh remote [status]                   xem cách truy cập từ xa hiện tại (và 4 cách đổi); set-address = bí danh
+  genh remote tailscale [--yes]          mở qua Tailscale (khuyên dùng — không mở cổng ra mạng)
+  genh remote cloudflare --hostname <tên> [--yes]   mở qua Cloudflare Tunnel
+  genh remote lan [--name <tên|IP>] [--yes]         mở cho mạng nội bộ (LAN) — cảnh báo, cần cài CA (= --lan)
+  genh remote local [--yes]              chỉ máy này (= --local)
   genh trust-ca                          tin cậy lại CA nội bộ cho trình duyệt/hệ điều hành
                                           (hết cảnh báo "Not secure"; genh update tự làm)
   genh stop                              dừng toàn bộ dịch vụ (giữ dữ liệu) — trực canh tạm nghỉ
@@ -1390,6 +1397,57 @@ func runTrustCA(args []string) int {
 	if err := ops.RunTrustCA(ctx, env, true, ops.TrustCADeps{}, os.Stdout); err != nil {
 		reportOpErr(err)
 		return 1
+	}
+	return 0
+}
+
+// runRemote: `genh remote [status|tailscale|cloudflare|lan|local] [cờ]` (v0.1.46).
+// Go flag dừng ở đối số đầu không phải cờ, nên tách lệnh con trước khi Parse.
+func runRemote(args []string) int {
+	sub := ""
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		sub, args = args[0], args[1:]
+	}
+	fs, port, installDir := opsFlagSet("remote")
+	yes := fs.Bool("yes", false, "bỏ qua hỏi xác nhận")
+	hostname := fs.String("hostname", "", "tên miền Cloudflare Tunnel (cloudflare)")
+	name := fs.String("name", "", "tên máy hoặc IP trong mạng LAN (lan)")
+	lan := fs.Bool("lan", false, "như `genh remote lan`")
+	local := fs.Bool("local", false, "như `genh remote local`")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *lan {
+		if sub != "" && sub != "lan" || *local {
+			_, _ = fmt.Fprintln(os.Stderr, "genh remote: chỉ chọn MỘT cách truy cập.")
+			return 2
+		}
+		sub = "lan"
+	}
+	if *local {
+		if sub != "" && sub != "local" {
+			_, _ = fmt.Fprintln(os.Stderr, "genh remote: chỉ chọn MỘT cách truy cập.")
+			return 2
+		}
+		sub = "local"
+	}
+	env, ok := resolveOpsEnv(*port, *installDir)
+	if !ok {
+		return 1
+	}
+	ctx, stop := signalContext()
+	defer stop()
+	renderer := lipgloss.NewRenderer(os.Stdout)
+	red := renderer.NewStyle().Foreground(lipgloss.Color("9")).Bold(true)
+	deps := ops.RemoteDeps{
+		Interactive: tui.IsTerminal(os.Stdin) && tui.IsTerminal(os.Stdout),
+		In:          bufio.NewReader(os.Stdin),
+		Warn:        func(s string) string { return red.Render(s) },
+	}
+	opts := ops.RemoteOptions{Action: sub, Hostname: *hostname, Name: *name, Yes: *yes}
+	if err := ops.RunRemote(ctx, env, opts, deps, os.Stdout); err != nil {
+		reportOpErr(err)
+		return ops.RemoteExitCode(err)
 	}
 	return 0
 }

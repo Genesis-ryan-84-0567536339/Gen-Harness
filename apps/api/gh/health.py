@@ -92,11 +92,14 @@ ACTIONS = {
     "ai.background_no_source": "Mở Bộ não AI",
     # v0.1.44 (F-8c): hộp thư đi Telegram hỏng vì cấu hình — do gh.telegram.service mở/đóng.
     "telegram.failed": "Mở cấu hình Telegram",
+    # v0.1.46 (F-21): cổng đang mở cho cả mạng (bản cài cũ) — `_eval_network`.
+    "network.open_lan": "Chọn cách truy cập",
 }
 #: Nhãn cho người KHÔNG phải Owner khi nút ở nhãn gốc chỉ Owner có (vd "Chọn nơi lưu" — Manager không có nút đó).
 NON_OWNER_ACTIONS = {
     "offsite.stale": "Xem bản sao ngoài máy",
     "telegram.failed": "Nhờ Owner xử lý",
+    "network.open_lan": "Nhờ Owner xử lý",
 }
 #: Sự cố mà đích nút chỉ Owner mở được (thẻ Telegram chỉ dựng cho Owner) ⇒ người khác không nhận link (không nút chết).
 NON_OWNER_NO_LINK = frozenset({"telegram.failed"})
@@ -113,6 +116,8 @@ NON_OWNER_BODIES = {
     ("telegram.failed", "TELEGRAM_CHAT_NOT_FOUND"): f"{_TELEGRAM_NON_OWNER} và chọn lại chat_id.",
     ("telegram.failed", "TELEGRAM_BOT_BLOCKED"): f"{_TELEGRAM_NON_OWNER}; Owner mở bot trên Telegram, bấm Bắt đầu "
                                                  "(Start) rồi bấm Gửi thử.",
+    # v0.1.46 (F-21): fingerprint cố định "lan_legacy"; người không phải Owner không chạy được `genh remote`.
+    ("network.open_lan", "lan_legacy"): "Cổng Console đang mở cho cả mạng — nhờ Owner chọn cách truy cập từ xa.",
 }
 
 
@@ -647,6 +652,32 @@ async def _eval_autostart(db: AsyncSession, org_id: uuid.UUID, redis: Any) -> No
         await clear(db, org_id, "host.autostart")
 
 
+ACCESS_LINK = "/system?tab=storage&focus=access"
+OPEN_LAN_TITLE = "Cổng đang mở cho cả mạng"
+# Thẻ đích chỉ có LỆNH chạy trên máy chủ (không có nút chọn một chạm) ⇒ "Bấm để xem lệnh…", không hứa "Bấm để chọn".
+OPEN_LAN_BODY = ("Mọi máy cùng mạng (Wi-Fi văn phòng, khách…) đều thấy trang đăng nhập Gen-Harness. Bấm để xem lệnh "
+                 "chọn cách truy cập (chạy trên máy chủ): Tailscale (khuyên dùng), chỉ máy này, hoặc giữ mở cho mạng "
+                 "nội bộ.")
+
+
+async def _eval_network(db: AsyncSession, org_id: uuid.UUID, redis: Any) -> None:
+    """v0.1.46 (F-21): bản cài cũ chưa chọn cách truy cập (`run/network-status.json` mode lan_legacy + bind 0.0.0.0) ⇒
+    MỘT chuông 'Cổng đang mở cho cả mạng' (fingerprint cố định ⇒ không lặp). Tệp hợp lệ báo chế độ khác (kể cả 'lan' do
+    Owner tự chọn) ⇒ đóng; tệp thiếu/hỏng/chế độ lạ ⇒ để nguyên. Không có nút 'bỏ qua': Owner chấp nhận bằng
+    `genh remote --lan`."""
+    from gh.system_api import access
+
+    st = access.network_status()
+    if st is None or st["mode"] == "unknown":
+        return
+    if st["mode"] == "lan_legacy" and st["bind_addr"] == "0.0.0.0":
+        await raise_once(db, org_id, key="network.open_lan", kind="network.open_lan", severity="warn",
+                         title=OPEN_LAN_TITLE, body=OPEN_LAN_BODY, link=ACCESS_LINK, fingerprint="lan_legacy",
+                         redis=redis)
+    else:
+        await clear(db, org_id, "network.open_lan")
+
+
 def _offsite_stale(st: dict[str, Any], org_created: datetime | None, now: datetime) -> bool:
     """Bản sao ngoài máy đáng nhắc: chưa có lần thành công / cũ hơn `OFFSITE_STALE_AFTER` (7 ngày + ân hạn) — nhưng tổ
     chức mới tạo chưa có lần nào thì chưa nhắc trong cùng khoảng đó (vừa cài xong, chưa kịp cắm ổ)."""
@@ -836,6 +867,7 @@ async def evaluate(db: AsyncSession, redis: Any, org_id: uuid.UUID, *, now: date
         ("events", lambda: _eval_events(db, org_id)),
         ("ai.budget", lambda: _eval_budget(db, org_id, redis, now)),
         ("ai.background_source", lambda: _eval_background_source(db, org_id, redis)),
+        ("network", lambda: _eval_network(db, org_id, redis)),
     )
     from gh import notifications
 

@@ -514,6 +514,126 @@ jobs:
             exit 1
           fi
 
+      # v0.1.46 (F-27/F-21): cổng mặc định chỉ nghe 127.0.0.1; `genh remote` đổi chế độ. Chỉ kiểm khi genh có lệnh
+      # `genh remote` (genh help) — chạy tay workflow cho tag cũ không bị đỏ vì tính năng bản đó chưa có.
+      - name: genh có lệnh remote chưa (v0.1.46+)
+        id: v146
+        run: |
+          set -euo pipefail
+          if "$GENH" help 2>&1 | grep -q 'genh remote'; then
+            echo "run=true" >>"$GITHUB_OUTPUT"
+            echo "genh có lệnh remote — kiểm 2 chế độ cổng (local mặc định, lan)."
+          else
+            echo "run=false" >>"$GITHUB_OUTPUT"
+            echo "::notice::genh chưa có lệnh remote (< v0.1.46) — bỏ qua các bước kiểm cổng."
+          fi
+
+      - name: Cổng mặc định chỉ nghe 127.0.0.1 (v0.1.46+)
+        if: steps.v146.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          # Thư mục compose THẬT genh dùng: pr ⇒ GENH_COMPOSE_FILE (deploy/ của checkout); release ⇒ $GEN_HARNESS_HOME/deploy.
+          if [ -n "${GENH_COMPOSE_FILE:-}" ]; then cdir="$(dirname "$GENH_COMPOSE_FILE")"; cfile="$GENH_COMPOSE_FILE"; else cdir="$GEN_HARNESS_HOME/deploy"; cfile="$cdir/compose.yaml"; fi
+          echo "compose genh dùng: $cfile ; .env: $cdir/.env"
+          if [ "$MODE" = "pr" ]; then
+            emb="$GITHUB_WORKSPACE/apps/genh/internal/compose/embedded_compose.yaml"
+            if ! grep -q 'GH_BIND_ADDR' "$emb"; then
+              echo "::notice::Bước '(pr) Ghim compose.yaml đã publish vào binary' ghi đè compose nhúng bằng compose.release.yaml của $TAG (chưa có GH_BIND_ADDR). Không sao vì GENH_COMPOSE_FILE trỏ deploy/compose.yaml của checkout — kiểm trên compose thật genh dùng."
+            fi
+          fi
+          grep -q 'GH_BIND_ADDR' "$cfile" || { echo "::error::compose genh đang dùng ($cfile) không có GH_BIND_ADDR — genh chạy compose cũ, cổng không thể chỉ nghe 127.0.0.1." >&2; exit 1; }
+          proxy="$(docker ps --format '{{.Names}}' --filter label=com.docker.compose.project=gen-harness --filter label=com.docker.compose.service=proxy | head -1)"
+          [ -n "$proxy" ] || { echo "::error::không thấy container proxy đang chạy" >&2; exit 1; }
+          bind="$(docker port "$proxy" 8443/tcp)"
+          echo "docker port $proxy 8443/tcp:"; echo "$bind"
+          [ -n "$bind" ] || { echo "::error::proxy không công bố cổng 8443" >&2; exit 1; }
+          if echo "$bind" | grep -vq "^127\.0\.0\.1:${GH_PORT}\$"; then
+            echo "::error::cổng proxy phải CHỈ là 127.0.0.1:${GH_PORT} (đang: $bind)" >&2; exit 1
+          fi
+          ss -ltnH "sport = :${GH_PORT}" | tee "$RUNNER_TEMP/ss-local.txt"
+          [ -s "$RUNNER_TEMP/ss-local.txt" ] || { echo "::error::ss không thấy ai nghe cổng ${GH_PORT}" >&2; exit 1; }
+          if awk '{print $4}' "$RUNNER_TEMP/ss-local.txt" | grep -Eq '^(0\.0\.0\.0|\*|\[::\]):'; then
+            echo "::error::cổng ${GH_PORT} đang nghe trên 0.0.0.0/[::] — phải chỉ 127.0.0.1" >&2; exit 1
+          fi
+          ip="$(hostname -I | awk '{print $1}')"
+          [ -n "$ip" ] || { echo "::error::không lấy được IP của runner" >&2; exit 1; }
+          if curl -k -sS --max-time 10 -o /dev/null "https://$ip:${GH_PORT}/api/v1/ready"; then
+            echo "::error::kết nối tới https://$ip:${GH_PORT} (IP mạng của runner) THÀNH CÔNG — cổng đang mở cho cả mạng" >&2; exit 1
+          fi
+          echo "OK: https://$ip:${GH_PORT} bị từ chối như mong đợi."
+          envf="$cdir/.env"
+          [ -f "$envf" ] || { echo "::error::không thấy $envf (genh phải ghi GH_BIND_ADDR/GH_ACCESS_MODE)" >&2; exit 1; }
+          grep -E '^GH_(BIND_ADDR|ACCESS_MODE|SITE_ADDRESS|PUBLIC_URL)=' "$envf" || true
+          grep -qx 'GH_BIND_ADDR=127.0.0.1' "$envf" || { echo "::error::$envf thiếu GH_BIND_ADDR=127.0.0.1" >&2; exit 1; }
+          grep -qx 'GH_ACCESS_MODE=local' "$envf" || { echo "::error::$envf thiếu GH_ACCESS_MODE=local" >&2; exit 1; }
+          curl -k -fsS -o /dev/null "https://localhost:${GH_PORT}/api/v1/ready"
+          echo "OK: cài mới ở chế độ local — chỉ nghe 127.0.0.1, localhost vẫn ready."
+
+      # Mặc định `genh remote lan` (không --name) tự dò IPv4 LAN và đặt GH_SITE_ADDRESS = IP đó. Trình duyệt mở bằng IP
+      # KHÔNG gửi SNI — curl cũng vậy khi URL là IP và không có --resolve: kiểm đúng đường điện thoại đi (Caddyfile cần
+      # default_sni, genh phải bỏ qua docker0/br-*/veth*/virbr*).
+      - name: genh remote lan (không --name) → mở bằng IP tự dò, không SNI (v0.1.46+)
+        if: steps.v146.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          if [ -n "${GENH_COMPOSE_FILE:-}" ]; then cdir="$(dirname "$GENH_COMPOSE_FILE")"; else cdir="$GEN_HARNESS_HOME/deploy"; fi
+          "$GENH" remote lan --yes --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT"
+          ip="$(sed -n 's/^GH_SITE_ADDRESS=//p' "$cdir/.env" | tail -1)"
+          echo "IP genh tự dò: $ip"
+          echo "$ip" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' || { echo "::error::GH_SITE_ADDRESS sau remote lan không phải IPv4 ('$ip')" >&2; exit 1; }
+          case "$ip" in 172.17.*) echo "::error::genh chọn nhầm IP docker0 ($ip)" >&2; exit 1 ;; esac
+          code=""
+          for _ in $(seq 1 20); do
+            code="$(curl -k -sS -o /dev/null -w '%{http_code}' --max-time 10 "https://${ip}:${GH_PORT}/api/v1/ready" || true)"
+            [ "$code" = "200" ] && break
+            sleep 3
+          done
+          [ "$code" = "200" ] || { echo "::error::https://${ip}:${GH_PORT}/api/v1/ready (không SNI) trả '$code' (cần 200 — Caddyfile thiếu default_sni?)" >&2; exit 1; }
+          echo "OK: remote lan không --name — mở bằng IP $ip (không SNI) vẫn ready."
+
+      - name: genh remote --lan → 0.0.0.0 và vẫn qua ready (v0.1.46+)
+        if: steps.v146.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          if [ -n "${GENH_COMPOSE_FILE:-}" ]; then cdir="$(dirname "$GENH_COMPOSE_FILE")"; else cdir="$GEN_HARNESS_HOME/deploy"; fi
+          "$GENH" remote --lan --name gh-e2e.local --yes --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT"
+          proxy="$(docker ps --format '{{.Names}}' --filter label=com.docker.compose.project=gen-harness --filter label=com.docker.compose.service=proxy | head -1)"
+          bind="$(docker port "$proxy" 8443/tcp)"
+          echo "$bind"
+          echo "$bind" | grep -q "^0\.0\.0\.0:${GH_PORT}\$" || { echo "::error::sau remote --lan proxy phải nghe 0.0.0.0:${GH_PORT} (đang: $bind)" >&2; exit 1; }
+          ip="$(hostname -I | awk '{print $1}')"
+          [ -n "$ip" ] || { echo "::error::không lấy được IP của runner" >&2; exit 1; }
+          code=""
+          for _ in $(seq 1 20); do
+            code="$(curl -k -sS -o /dev/null -w '%{http_code}' --max-time 10 --resolve "gh-e2e.local:${GH_PORT}:$ip" "https://gh-e2e.local:${GH_PORT}/api/v1/ready" || true)"
+            [ "$code" = "200" ] && break
+            sleep 3
+          done
+          [ "$code" = "200" ] || { echo "::error::https://gh-e2e.local:${GH_PORT}/api/v1/ready trả '$code' (cần 200)" >&2; exit 1; }
+          code="$(curl -k -sS -o /dev/null -w '%{http_code}' --max-time 10 "https://localhost:${GH_PORT}/api/v1/ready" || true)"
+          [ "$code" = "200" ] || { echo "::error::https://localhost:${GH_PORT}/api/v1/ready trả '$code' sau khi đặt GH_SITE_ADDRESS (cần 200 — Caddyfile phải giữ localhost)" >&2; exit 1; }
+          python3 - "$GEN_HARNESS_HOME/run/network-status.json" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1], encoding="utf-8"))
+          print(d)
+          assert d.get("mode") == "lan", "network-status.json mode=%r (cần lan)" % d.get("mode")
+          assert d.get("bind_addr") == "0.0.0.0", "bind_addr=%r" % d.get("bind_addr")
+          PY
+          envf="$cdir/.env"
+          grep -E '^GH_(BIND_ADDR|ACCESS_MODE|SITE_ADDRESS|PUBLIC_URL)=' "$envf" || true
+          grep -qx 'GH_SITE_ADDRESS=gh-e2e.local' "$envf" || { echo "::error::$envf thiếu GH_SITE_ADDRESS=gh-e2e.local" >&2; exit 1; }
+          grep -qx "GH_PUBLIC_URL=https://gh-e2e.local:${GH_PORT}" "$envf" || { echo "::error::$envf thiếu GH_PUBLIC_URL=https://gh-e2e.local:${GH_PORT}" >&2; exit 1; }
+          pub=""
+          for _ in $(seq 1 20); do
+            api="$(docker ps --format '{{.Names}}' --filter label=com.docker.compose.project=gen-harness --filter label=com.docker.compose.service=api | head -1)"
+            pub="$(docker exec "$api" printenv GH_PUBLIC_URL 2>/dev/null || true)"
+            [ "$pub" = "https://gh-e2e.local:${GH_PORT}" ] && break
+            sleep 3
+          done
+          [ "$pub" = "https://gh-e2e.local:${GH_PORT}" ] || { echo "::error::api chưa thấy GH_PUBLIC_URL mới (đang: '$pub')" >&2; exit 1; }
+          echo "::notice::GH_SITE_ADDRESS=gh-e2e.local được GIỮ NGUYÊN cho các bước sau (genh update --yes, Cập nhật ngay, Khôi phục, gói chẩn đoán): chứng minh tự cập nhật vẫn xanh khi đã đặt GH_SITE_ADDRESS."
+          echo "OK: chế độ lan — 0.0.0.0, ready qua gh-e2e.local và localhost, api thấy GH_PUBLIC_URL."
+
       # v0.1.45 (F-52): hộp thư run/ (+ run/request) phải là 2770 nhóm 10001 (chỉ genh + api ghi được), không còn 0777.
       # Chỉ kiểm khi genh.json có run_mode (genh v0.1.45+) — chạy tay workflow cho tag cũ không bị đỏ. Các bước
       # "Cập nhật ngay" / "Khôi phục" / "Gói chẩn đoán" phía sau kiểm genh vẫn nhận yêu cầu do api ghi.
@@ -982,6 +1102,39 @@ jobs:
           "$GENH" auto-update status --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT"
           "$GENH" auto-update disable --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT"
 
+      - name: genh remote --local → về 127.0.0.1 và vẫn ready (v0.1.46+)
+        if: steps.v146.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          if [ -n "${GENH_COMPOSE_FILE:-}" ]; then cdir="$(dirname "$GENH_COMPOSE_FILE")"; else cdir="$GEN_HARNESS_HOME/deploy"; fi
+          "$GENH" remote --local --yes --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT"
+          proxy="$(docker ps --format '{{.Names}}' --filter label=com.docker.compose.project=gen-harness --filter label=com.docker.compose.service=proxy | head -1)"
+          bind="$(docker port "$proxy" 8443/tcp)"
+          echo "$bind"
+          if echo "$bind" | grep -vq "^127\.0\.0\.1:${GH_PORT}\$"; then
+            echo "::error::sau remote --local proxy phải CHỈ nghe 127.0.0.1:${GH_PORT} (đang: $bind)" >&2; exit 1
+          fi
+          code=""
+          for _ in $(seq 1 20); do
+            code="$(curl -k -sS -o /dev/null -w '%{http_code}' --max-time 10 "https://localhost:${GH_PORT}/api/v1/ready" || true)"
+            [ "$code" = "200" ] && break
+            sleep 3
+          done
+          [ "$code" = "200" ] || { echo "::error::ready trả '$code' sau remote --local (cần 200)" >&2; exit 1; }
+          ip="$(hostname -I | awk '{print $1}')"
+          if curl -k -sS --max-time 10 -o /dev/null "https://$ip:${GH_PORT}/api/v1/ready"; then
+            echo "::error::sau remote --local vẫn kết nối được qua IP mạng $ip" >&2; exit 1
+          fi
+          python3 - "$GEN_HARNESS_HOME/run/network-status.json" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1], encoding="utf-8"))
+          assert d.get("mode") == "local", "mode=%r (cần local)" % d.get("mode")
+          assert d.get("bind_addr") == "127.0.0.1", "bind_addr=%r" % d.get("bind_addr")
+          PY
+          grep -qx 'GH_BIND_ADDR=127.0.0.1' "$cdir/.env" || { echo "::error::$cdir/.env thiếu GH_BIND_ADDR=127.0.0.1" >&2; exit 1; }
+          grep -qx 'GH_ACCESS_MODE=local' "$cdir/.env" || { echo "::error::$cdir/.env thiếu GH_ACCESS_MODE=local" >&2; exit 1; }
+          echo "OK: về lại chế độ local."
+
       - name: genh uninstall --yes --delete-data (không tương tác, dọn sạch cả dữ liệu)
         # v0.1.40: uninstall mặc định GIỮ dữ liệu — dọn sạch phải kèm --delete-data.
         # genh cũ (< v0.1.40, chạy tay workflow cho tag cũ) không biết cờ này: khi đó
@@ -1198,6 +1351,70 @@ jobs:
             [ "$SECONDS" -lt "$deadline" ] || { echo "::error::ready không xanh sau update" >&2; exit 1; }
             sleep 3
           done
+
+      # v0.1.46 (F-27/F-21b): nâng cấp từ bản cũ (không có GH_BIND_ADDR) PHẢI giữ hành vi cũ (0.0.0.0, lan_legacy) và
+      # nhắc Owner đúng 1 chuông "Cổng đang mở cho cả mạng". Chỉ kiểm khi genh mới có lệnh `genh remote`.
+      - name: Nâng cấp giữ cổng 0.0.0.0 + đúng 1 chuông network.open_lan (v0.1.46+, tối đa ~8 phút)
+        if: matrix.broken != 'true'
+        run: |
+          set -euo pipefail
+          GENH_NEW="$GEN_HARNESS_HOME/bin/genh"
+          if ! "$GENH_NEW" help 2>&1 | grep -q 'genh remote'; then
+            echo "::notice::genh $TAG chưa có lệnh remote (< v0.1.46) — bỏ qua kiểm cổng/chuông."; exit 0
+          fi
+          cdir="$GEN_HARNESS_HOME/deploy"
+          proxy="$(docker ps --format '{{.Names}}' --filter label=com.docker.compose.project=gen-harness --filter label=com.docker.compose.service=proxy | head -1)"
+          bind="$(docker port "$proxy" 8443/tcp)"
+          echo "docker port: $bind"
+          echo "$bind" | grep -q "^0\.0\.0\.0:${GH_PORT}\$" || { echo "::error::sau nâng cấp từ bản cũ proxy phải VẪN nghe 0.0.0.0:${GH_PORT} (giữ hành vi cũ) — đang: $bind" >&2; exit 1; }
+          grep -E '^GH_(BIND_ADDR|ACCESS_MODE)=' "$cdir/.env" || true
+          grep -qx 'GH_BIND_ADDR=0.0.0.0' "$cdir/.env" || { echo "::error::$cdir/.env thiếu GH_BIND_ADDR=0.0.0.0" >&2; exit 1; }
+          grep -qx 'GH_ACCESS_MODE=lan_legacy' "$cdir/.env" || { echo "::error::$cdir/.env thiếu GH_ACCESS_MODE=lan_legacy" >&2; exit 1; }
+          python3 - "$GEN_HARNESS_HOME/run/network-status.json" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1], encoding="utf-8"))
+          print(d)
+          assert d.get("mode") == "lan_legacy", "mode=%r (cần lan_legacy)" % d.get("mode")
+          assert d.get("bind_addr") == "0.0.0.0", "bind_addr=%r" % d.get("bind_addr")
+          PY
+          dbc="$(docker ps -q --filter label=com.docker.compose.project=gen-harness --filter label=com.docker.compose.service=db | head -1)"
+          [ -n "$dbc" ] || { echo "::error::không thấy container db" >&2; exit 1; }
+          q() {
+            # $1 là đối số vị trí của sh -c — không nội suy vào chuỗi lệnh. $POSTGRES_USER/$POSTGRES_DB mở rộng trong container.
+            # shellcheck disable=SC2016
+            docker exec "$dbc" sh -c 'psql -v ON_ERROR_STOP=1 -U "${POSTGRES_USER:-gh}" -d "${POSTGRES_DB:-gen_harness}" -tAc "$1"' psql "$1"
+          }
+          orgs="$(q "SELECT count(*) FROM core.organizations")"
+          if [ "$orgs" = "0" ]; then
+            echo "::error::dữ liệu mẫu của bản cũ chưa có tổ chức nào (core.organizations rỗng) — không thể kiểm chuông network.open_lan; sửa bước nạp dữ liệu mẫu, không bỏ qua." >&2; exit 1
+          fi
+          alerts_sql="SELECT count(*) FROM ops.health_alerts WHERE key='network.open_lan' AND cleared_at IS NULL"
+          owners_sql="SELECT count(DISTINCT u.id) FROM core.users u JOIN core.user_roles ur ON ur.user_id=u.id JOIN core.roles r ON r.id=ur.role_id WHERE u.is_active AND u.deleted_at IS NULL AND r.code='owner'"
+          bells_sql="SELECT count(*) FROM core.notifications WHERE kind='network.open_lan'"
+          # Vòng sức khoẻ của api chạy mỗi 60 giây — chờ tối đa 3 phút.
+          deadline=$((SECONDS + 180))
+          a=0
+          while :; do
+            a="$(q "$alerts_sql")"
+            [ "$a" = "1" ] && break
+            [ "$SECONDS" -lt "$deadline" ] || { echo "::error::sau 3 phút ops.health_alerts chưa có đúng 1 dòng network.open_lan đang mở (đang $a)" >&2; exit 1; }
+            sleep 5
+          done
+          owners="$(q "$owners_sql")"
+          [ "$owners" -ge 1 ] || { echo "::error::dữ liệu mẫu không có Owner nào đang hoạt động — không kiểm được chuông" >&2; exit 1; }
+          bells="$(q "$bells_sql")"
+          echo "sự cố mở=$a, Owner=$owners, chuông network.open_lan=$bells"
+          [ "$bells" = "$owners" ] || { echo "::error::số chuông network.open_lan ($bells) phải bằng số Owner ($owners)" >&2; exit 1; }
+          # Cập nhật lại khi dịch vụ đã khớp (bỏ qua) rồi đợi thêm 2 phút: vẫn đúng ngần ấy chuông (raise_once, không nhắc lại).
+          "$GENH_NEW" update --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes --no-self-update
+          sleep 120
+          a="$(q "$alerts_sql")"; bells2="$(q "$bells_sql")"
+          echo "sau 2 phút: sự cố mở=$a, chuông=$bells2"
+          [ "$a" = "1" ] || { echo "::error::sau update lại, sự cố network.open_lan đang mở = $a (cần 1)" >&2; exit 1; }
+          [ "$bells2" = "$owners" ] || { echo "::error::chuông network.open_lan thay đổi sau update lại ($bells → $bells2, Owner=$owners) — phải đúng $owners" >&2; exit 1; }
+          bind="$(docker port "$(docker ps --format '{{.Names}}' --filter label=com.docker.compose.project=gen-harness --filter label=com.docker.compose.service=proxy | head -1)" 8443/tcp)"
+          echo "$bind" | grep -q "^0\.0\.0\.0:${GH_PORT}\$" || { echo "::error::sau update lại proxy không còn 0.0.0.0 (đang: $bind)" >&2; exit 1; }
+          echo "OK: giữ 0.0.0.0/lan_legacy và đúng $owners chuông network.open_lan."
 
       - name: Phiên Claude cũ đã chuyển sang claude_state + canary offline (F-22)
         if: steps.claude_probe.outputs.run == 'true'
