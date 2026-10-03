@@ -90,6 +90,11 @@ export interface GenProposalResult {
   code?: string | null;
   /** Màn xem kết quả (khoá GEN_SCREENS). */
   screen: string;
+  /**
+   * v0.1.43: chỉ với `type: 'draft'` — nháp có nơi gửi (target) nên duyệt ở Bàn làm việc sẽ gửi đi thật. Hiện API chỉ
+   * gắn nơi gửi khi đối tượng là NHÓM; thiếu/false ⇒ web không ghi "Duyệt & gửi".
+   */
+  sendable?: boolean;
 }
 
 interface GenProposalBase {

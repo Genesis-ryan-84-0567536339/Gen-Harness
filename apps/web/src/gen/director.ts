@@ -14,6 +14,18 @@ export function targetSelector(id: string): string {
   return `[data-gen-target="${id.replace(/["\\]/g, '\\$&')}"]`;
 }
 
+/**
+ * v0.1.43: phần tử đích nằm trong `<details>` đang gập (vd thẻ Jev trong "Nâng cao" của Bộ não AI) có khung 0×0 —
+ * vòng sáng sẽ lệch về góc màn. Mở mọi `<details>` tổ tiên (lặp qua các cấp) trước khi đo.
+ */
+export function revealTarget(el: Element): void {
+  let d = el.parentElement?.closest('details') ?? null;
+  while (d) {
+    if (!d.open) d.open = true;
+    d = d.parentElement?.closest('details') ?? null;
+  }
+}
+
 /** Chờ phần tử có `data-gen-target=id` xuất hiện trong `root`; hết giờ → null. */
 export function waitForTarget(id: string, timeoutMs = WAIT_MS, root: ParentNode = document): Promise<Element | null> {
   const sel = targetSelector(id);

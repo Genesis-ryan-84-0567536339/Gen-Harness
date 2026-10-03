@@ -22,7 +22,7 @@
 import { randomUUID } from 'node:crypto';
 import type { GenBriefingSection, GenMessage, GenProposal, GenRating, GenStep } from '../../../packages/contracts/src/gen';
 import type { DraftDetail } from '../../../packages/contracts/src/p3-core';
-import { BAO } from './mock-p3-core';
+import { BAO, GROUP_TP } from './mock-p3-core';
 import type { P2Ctx } from './mock-phase2';
 import { USER_IDS } from './mock-ids';
 
@@ -89,10 +89,23 @@ export function script(q: string): GenStep[] {
     ];
   }
   if (/nháp/.test(t)) {
-    const proposal: GenProposal = {
+    // Như API thật (`plan_call`): đối tượng là NHÓM thì nháp có nơi gửi; là NGƯỜI thì chưa (duyệt sẽ NO_TARGET).
+    const toGroup = /nhóm/.test(t);
+    const proposal: GenProposal = toGroup
+      ? {
+          id: randomUUID(),
+          type: 'draft_message',
+          fields: { title: 'Báo giá ván MDF cho nhóm', text: 'Chào cả nhà, bên em gửi báo giá ván MDF E1 17mm ạ.', subject: { type: 'group', id: GROUP_TP.id } },
+          summary: `Soạn nháp tin \u201cBáo giá ván MDF cho nhóm\u201d gửi nhóm ${GROUP_TP.name} — vào Bàn làm việc chờ duyệt, không gửi ngay.`,
+          labels: { subject: GROUP_TP.name },
+          target: 'workbench.drafts',
+          requires_pin: true,
+          status: 'pending',
+        }
+      : {
       id: randomUUID(),
       type: 'draft_message',
-      fields: { title: 'Báo giá ván MDF', text: 'Chào anh Bảo, bên em gửi báo giá ván MDF E1 17mm như anh hỏi ạ.' },
+      fields: { title: 'Báo giá ván MDF', text: 'Chào anh Bảo, bên em gửi báo giá ván MDF E1 17mm như anh hỏi ạ.', subject: { type: 'person', id: BAO.id } },
       summary: 'Soạn nháp tin \u201cBáo giá ván MDF\u201d gửi anh Bảo — vào Bàn làm việc chờ duyệt, không gửi ngay.',
       labels: { subject: 'Anh Bảo' },
       target: 'workbench.drafts',
@@ -168,18 +181,22 @@ export function script(q: string): GenStep[] {
   ];
 }
 
-/** Nháp tin Gen soạn sau khi Sếp xác nhận — dạng như `POST /drafts` (kind message, chờ duyệt, gửi Zalo cho anh Bảo). */
-function makeGenDraft(code: string, title: string, text: string, userLabel: string): DraftDetail {
+/**
+ * Nháp tin Gen soạn sau khi Sếp xác nhận — dạng như `POST /drafts` (kind message, chờ duyệt). Như API thật: chỉ đối tượng
+ * là NHÓM mới có nơi gửi (target + "Duyệt và gửi qua Zalo"); đối tượng là người → target null, "Duyệt và thực hiện".
+ */
+function makeGenDraft(code: string, title: string, text: string, userLabel: string, subject?: { type: 'person' | 'group'; id: string } | null): DraftDetail {
   const paragraphs = text.split(/\n\s*\n/);
+  const toGroup = subject?.type === 'group';
   return {
     id: `draft-gen-${randomUUID()}`, code, kind: 'message', kind_label: 'Tin nhắn', title,
     agent: null, created_by: { id: OWNER_ID, name: userLabel }, created_at: new Date().toISOString(),
-    status: 'pending', hold_reason: 'ghi ra ngoài', subject: BAO,
+    status: 'pending', hold_reason: 'ghi ra ngoài', subject: subject?.type === 'person' ? BAO : toGroup ? GROUP_TP : null,
     paragraphs, text, lang: 'vi',
-    target: { channel: 'zalo', thread_type: 'user', group: null, person: BAO },
+    target: toGroup ? { channel: 'zalo', thread_type: 'group', group: GROUP_TP, person: null } : null,
     amount_vnd: null, autonomy_level: 4,
     flags: { writes_external: true, personnel_related: false, over_threshold: false },
-    approve_label: 'Duyệt và gửi qua Zalo',
+    approve_label: toGroup ? 'Duyệt và gửi qua Zalo' : 'Duyệt và thực hiện',
     sources: [{ label: 'Gen soạn theo yêu cầu của Sếp', ref: null }],
     context: [], side_actions: [], decision: null, send_result: null, versions: [],
   };
@@ -318,10 +335,10 @@ export function createMock(opts: MockGenOptions) {
       let result: NonNullable<GenProposal['result']> = { type: 'task', id: randomUUID(), code, screen: 'tasks' };
       if (seg[3] === 'confirm' && pr.type === 'draft_message') {
         // v0.1.43 (F-24): nháp THẬT ở Bàn làm việc (chờ duyệt, chưa gửi) — `result.id` mở đúng nháp qua /workbench?id=.
-        const f = fields as { title: string; text: string };
-        const draft = makeGenDraft(code, f.title, f.text, ctx.userLabel);
+        const f = fields as { title: string; text: string; subject?: { type: 'person' | 'group'; id: string } | null };
+        const draft = makeGenDraft(code, f.title, f.text, ctx.userLabel, f.subject);
         opts.pushDraft?.(draft);
-        result = { type: 'draft', id: draft.id, code, screen: 'workbench' };
+        result = { type: 'draft', id: draft.id, code, screen: 'workbench', sendable: draft.target !== null };
       }
       const next: GenProposal =
         seg[3] === 'cancel'

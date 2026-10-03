@@ -71,9 +71,11 @@ describe('screen registry', () => {
 });
 
 describe('header + footer helpers', () => {
-  // v0.1.43 (F-30): viên header hiện nhãn 3 mức; tooltip nói rõ đây là mức CHUNG, mức số và chỗ đổi (thay câu thiết kế cũ).
-  it('autonomy tooltip shows the 3-level label, the 0–6 level and where to change it', () => {
-    expect(autonomyTooltip(4)).toBe('Mức tự trị chung: Soạn sẵn chờ duyệt (mức 4 trên thang 0–6 — đổi ở Cài đặt)');
+  // v0.1.43 (F-30): viên header hiện nhãn 3 mức; tooltip nói rõ đây là mức CHUNG và mức số (thay câu thiết kế cũ).
+  it('autonomy tooltip shows the 3-level label and the 0–6 level', () => {
+    expect(autonomyTooltip(4)).toBe('Mức tự trị chung: Soạn sẵn chờ duyệt (mức 4/6)');
+    // Không chỉ tới chỗ không có thật: Cài đặt không có chỗ đổi mức tự trị chung của tổ chức.
+    expect(autonomyTooltip(4)).not.toContain('Cài đặt');
   });
   it('data confidence accepts a fraction or a percent', () => {
     expect(confidencePercent(0.78)).toBe(78);

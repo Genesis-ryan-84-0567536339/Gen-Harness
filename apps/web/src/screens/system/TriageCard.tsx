@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Button, Switch, TextField } from '@gen-harness/ui';
 import { errorText } from '../../lib/errorText';
 import { useMe } from '../../lib/queries';
@@ -34,7 +35,7 @@ export function TriageCard() {
   };
 
   return (
-    <Panel title="Lọc tin" kicker="Ẩn tin trùng, tin rác và tin điểm thấp khỏi Hộp thư" label="Lọc tin" genTarget="system.brain.triage" bodyClass="jev-body">
+    <Panel title="Lọc tin" kicker="Đánh dấu tin trùng, rác, điểm thấp — bật 'Ẩn rác & trùng' ở Hộp thư để ẩn" label="Lọc tin" genTarget="system.brain.triage" bodyClass="jev-body">
       {settings.isPending ? (
         <SkeletonLines rows={3} padding="0" />
       ) : settings.isError ? (
@@ -66,6 +67,13 @@ export function TriageCard() {
               </Button>
             ))}
           </div>
+          {/* Lọc chỉ ĐÁNH DẤU; Hộp thư chỉ ẩn khi bật công tắc "Ẩn rác & trùng" (mặc định tắt) — dẫn thẳng tới đó. */}
+          <p className="muted-note">
+            Lọc tin chỉ đánh dấu, không tự ẩn.{' '}
+            <Link to="/inbox?hide=1" className="sys-link">
+              Mở Hộp thư với "Ẩn rác &amp; trùng" đang bật
+            </Link>
+          </p>
           {level === 'custom' ? (
             <p className="muted-note">Đang dùng ngưỡng tuỳ chỉnh ({settings.data.min_score} điểm) — xem Nâng cao</p>
           ) : null}

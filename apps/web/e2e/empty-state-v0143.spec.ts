@@ -8,9 +8,9 @@ import { MANAGER, loginAs, loginAsOwner, resetMock } from './support';
 const EMPTY_PAGE = { items: [], next_cursor: null, total: 0 };
 const EMPTY_INBOX = { ...EMPTY_PAGE, counts: { all: 0, opportunity: 0, alert: 0, approval: 0, reply: 0, candidate: 0 } };
 
-async function fakeHeader(page: Page, channels_live: number, groups_listening: number) {
+async function fakeHeader(page: Page, channels_live: number, groups_listening: number, channels_connected = channels_live) {
   await page.route(/\/api\/v1\/header(\?|$)/, (route) =>
-    route.fulfill({ json: { channels_live, groups_listening, autonomy_level: 4, data_confidence: null } }),
+    route.fulfill({ json: { channels_live, channels_connected, groups_listening, autonomy_level: 4, data_confidence: null } }),
   );
 }
 
@@ -32,7 +32,7 @@ test.describe('v0.1.43 · DataEmptyState (F-29)', () => {
     await resetMock(page.request, 'finished');
   });
 
-  test('Hộp thư trống + chưa nối kênh → "Nối Zalo" dẫn /guide/5', async ({ page }) => {
+  test('Hộp thư trống + chưa nối kênh → "Nối kênh" dẫn /guide/5', async ({ page }) => {
     await loginAsOwner(page);
     await fakeHeader(page, 0, 0);
     await emptyLists(page);
@@ -40,7 +40,7 @@ test.describe('v0.1.43 · DataEmptyState (F-29)', () => {
     const empty = page.getByTestId('data-empty-state');
     await expect(empty).toHaveAttribute('data-reason', 'no-channel');
     await expect(empty.getByText('Chưa có dữ liệu vì chưa nối kênh')).toBeVisible();
-    await empty.getByRole('link', { name: 'Nối Zalo' }).click();
+    await empty.getByRole('link', { name: 'Nối kênh' }).click();
     await expect(page).toHaveURL(/\/guide\/5$/);
   });
 
@@ -65,7 +65,7 @@ test.describe('v0.1.43 · DataEmptyState (F-29)', () => {
       const empty = page.getByTestId('data-empty-state').first();
       await expect(empty, path).toBeVisible();
       await expect(empty, path).toHaveAttribute('data-reason', 'no-channel');
-      await expect(empty.getByRole('link', { name: 'Nối Zalo' }), path).toHaveAttribute('href', '/guide/5');
+      await expect(empty.getByRole('link', { name: 'Nối kênh' }), path).toHaveAttribute('href', '/guide/5');
     }
   });
 
@@ -79,13 +79,37 @@ test.describe('v0.1.43 · DataEmptyState (F-29)', () => {
     await expect(page.getByTestId('data-empty-state')).toHaveCount(0);
   });
 
+  test('kênh đã nối nhưng mất phiên → "Quét lại QR" dẫn /connections', async ({ page }) => {
+    await loginAsOwner(page);
+    await fakeHeader(page, 0, 3, 1);
+    await emptyLists(page);
+    await page.goto('/inbox');
+    const empty = page.getByTestId('data-empty-state');
+    await expect(empty).toHaveAttribute('data-reason', 'channel-down');
+    await expect(empty.getByText('Kênh mất kết nối — quét lại QR')).toBeVisible();
+    await expect(empty.getByRole('link', { name: 'Quét lại QR' })).toHaveAttribute('href', '/connections');
+  });
+
+  test('đang lọc (tab/bộ lọc) + chưa có kênh sống: vẫn báo "không khớp bộ lọc", không dẫn nối kênh', async ({ page }) => {
+    await loginAsOwner(page);
+    await fakeHeader(page, 0, 0);
+    await emptyLists(page);
+    await page.goto('/inbox?tab=alert');
+    await expect(page.getByText('Hộp thư đang trống')).toBeVisible();
+    await expect(page.getByTestId('data-empty-state')).toHaveCount(0);
+    await page.goto('/tasks?status=done');
+    await expect(page.getByText('Không có việc nào khớp bộ lọc')).toBeVisible();
+    await page.goto('/directory?dt=people&heat=high');
+    await expect(page.getByText('Không có ai khớp bộ lọc')).toBeVisible();
+  });
+
   test('vai trò khác Owner: "Nhờ Owner …", không có nút dẫn đường', async ({ page }) => {
     await loginAs(page, MANAGER.email);
     await fakeHeader(page, 0, 0);
     await emptyLists(page);
     await page.goto('/inbox');
     const empty = page.getByTestId('data-empty-state');
-    await expect(empty.getByText(/Nhờ Owner nối Zalo/)).toBeVisible();
+    await expect(empty.getByText(/Nhờ Owner nối kênh/)).toBeVisible();
     await expect(empty.getByRole('link')).toHaveCount(0);
   });
 });

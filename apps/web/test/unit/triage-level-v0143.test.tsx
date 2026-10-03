@@ -74,6 +74,13 @@ describe('triageLevelOf', () => {
 });
 
 describe('<TriageCard> mức lọc', () => {
+  it('nói đúng: lọc chỉ ĐÁNH DẤU, ẩn khỏi Hộp thư cần bật "Ẩn rác & trùng" — có link /inbox?hide=1', async () => {
+    setup('owner', 30);
+    expect(await screen.findByText(/Đánh dấu tin trùng, rác, điểm thấp/)).toBeInTheDocument();
+    expect(screen.queryByText(/Ẩn tin trùng, tin rác và tin điểm thấp khỏi Hộp thư/)).toBeNull();
+    expect(await screen.findByRole('link', { name: /Ẩn rác & trùng/ })).toHaveAttribute('href', '/inbox?hide=1');
+  });
+
   it('Owner, min_score=30: "Vừa" nhấn; bấm "Cao" → PATCH { min_score: 50 }', async () => {
     const { writes } = setup('owner', 30);
     expect(await screen.findByText('Lọc tin')).toBeInTheDocument();

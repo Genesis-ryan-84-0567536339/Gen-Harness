@@ -9,13 +9,15 @@
 """
 
 import uuid
+from pathlib import Path
 
+import psycopg
 from sqlalchemy import text
 
 from gh.ai_cost import _labels
 from gh.providers.clients import Message
 from gh.providers.router import Routed
-from tests.conftest import Api
+from tests.conftest import PG, Api
 from tests.phase2 import org_id
 from tests.test_p4_agents import _seed_agent, _seed_provider_model
 from tests.test_ux_v0128 import _provider
@@ -93,5 +95,24 @@ async def test_translate_and_regenerate_without_agent_use_core_reply(owner_api, 
 
 async def test_cost_labels_map_legacy_reply_fast(db) -> None:  # type: ignore[no-untyped-def]
     got = await _labels(db, uuid.uuid4(), ["core.reply", "core.reply_fast", "core.scoring"])
-    assert got == {"core.reply": "Soạn lại / dịch nháp", "core.reply_fast": "Soạn lại / dịch nháp",
+    assert got == {"core.reply": "Soạn lại / dịch nháp", "core.reply_fast": "Soạn lại / dịch nháp (cũ)",
                    "core.scoring": "core.scoring"}
+
+
+SQL_0028 = Path(__file__).resolve().parents[3] / "db" / "sql" / "0028_v0143_drop_dead_bindings.sql"
+
+
+async def test_migration_0028_drops_dead_bindings_and_is_rerunnable(owner_api, db, fresh_db: str) -> None:  # type: ignore[no-untyped-def]
+    """Hàng gán model mồ côi của khoá đã bỏ (bước 4 trước v0.1.43 tự tạo) bị dọn; khoá đang dùng giữ nguyên."""
+    org = await org_id(db)
+    _pid, mid = await _seed_provider_model(owner_api, db)
+    for key in [*sorted(DEAD), "core.reply"]:
+        await db.execute(text("""INSERT INTO agent.bindings (org_id, agent_key, model_id, context_tokens)
+                                 VALUES (:o, :k, :m, 6000)"""), {"o": org, "k": key, "m": mid})
+    await db.commit()
+    sql = SQL_0028.read_text(encoding="utf-8")
+    with psycopg.connect(f"{PG}/{fresh_db}", autocommit=True) as c:
+        c.execute(sql)  # type: ignore[call-overload]
+        c.execute(sql)  # type: ignore[call-overload]
+        rows = c.execute("SELECT agent_key FROM agent.bindings ORDER BY agent_key").fetchall()
+    assert [r[0] for r in rows] == ["core.reply"]

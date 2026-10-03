@@ -86,6 +86,7 @@ export function InboxScreen() {
         <CardError error={q.error} onRetry={() => void q.refetch()} retrying={q.isFetching} />
       ) : q.data.items.length === 0 ? (
         <DataEmptyState
+          filtered={tab !== 'all' || intent !== '' || hide === '1'}
           fallback={<EmptyState icon="ph ph-tray" title="Hộp thư đang trống" description="Không có tin, cảnh báo hay bản nháp nào khớp bộ lọc hiện tại." />}
         />
       ) : (
@@ -131,7 +132,6 @@ function InboxCard({ item, onAssign, onSilence }: { item: InboxItem; onAssign: (
               style={{ color: priorityTone(item.priority) }}
               tabIndex={0}
               aria-label={`Ưu tiên ${item.priority} · Độ tin cậy: ${item.confidence_band}`}
-              title={`Độ tin cậy: ${item.confidence_band}`}
               data-confidence={item.confidence_band}
             >
               {item.priority}

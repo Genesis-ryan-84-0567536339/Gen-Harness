@@ -41,7 +41,7 @@ function jev(lastTest: ProviderTestResult | null, auth: Provider['auth_state'] =
 const FAIL: ProviderTestResult = { ok: false, latency_ms: null, models: [], error: 'JEV_ERROR: 401 khoá sai' };
 const OK: ProviderTestResult = { ok: true, latency_ms: 420, models: ['typesafe/jev-1.13'], error: null };
 
-function setup(initial: Provider, afterTest?: { result: ProviderTestResult; provider: Provider }) {
+function setup(initial: Provider, afterTest?: { result: ProviderTestResult; provider: Provider }, entry = '/system?tab=brain') {
   let current = initial;
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -63,7 +63,7 @@ function setup(initial: Provider, afterTest?: { result: ProviderTestResult; prov
   qc.setQueryData(qk.me, me);
   const view = render(
     <QueryClientProvider client={qc}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[entry]}>
         <BrainTab />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -129,5 +129,12 @@ describe('v0.1.39 — Jev "Kiểm tra 1 lần" và thu vào "Nâng cao" khi lỗ
     await waitFor(() => expect(screen.getByText(/Jev trả lời được/)).toBeVisible());
     expect(screen.queryByRole('button', { name: /Kiểm tra 1 lần/ })).not.toBeInTheDocument();
     expect(screen.getByText('Nâng cao — Jev (không bắt buộc)')).toBeInTheDocument();
+  });
+
+  it('v0.1.43: tới bằng /system?tab=brain#jev (nút "Nhập khoá Jev") → khối "Nâng cao" mở sẵn, thấy thẻ Jev', async () => {
+    setup(jev(OK), undefined, '/system?tab=brain#jev');
+    const summary = await screen.findByText('Nâng cao — Jev (không bắt buộc)');
+    expect(summary.closest('details')).toHaveAttribute('open');
+    expect(screen.getByText(TITLE)).toBeVisible();
   });
 });

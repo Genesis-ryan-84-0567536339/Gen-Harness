@@ -31,7 +31,8 @@ from gh.providers.cli import CLI_KINDS
 
 # F-25: khoá cũ đã đổi tên — chi phí đã ghi theo khoá cũ vẫn hiện nhãn tiếng Việt, không hiện mã thô. Khoá cũ
 # core.intent/core.scoring/core.indexing (không còn dùng) giữ fallback: hiện chính khoá.
-LEGACY_AGENT_LABELS: dict[str, str] = {"core.reply_fast": "Soạn lại / dịch nháp"}
+# Nhãn có hậu tố "(cũ)" để ngày nâng cấp không có hai dòng cùng nhãn trong bảng chi phí (day_cost gộp theo agent_key).
+LEGACY_AGENT_LABELS: dict[str, str] = {"core.reply_fast": "Soạn lại / dịch nháp (cũ)"}
 
 VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 TIMEZONE = "Asia/Ho_Chi_Minh"

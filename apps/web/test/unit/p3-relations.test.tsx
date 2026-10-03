@@ -176,7 +176,17 @@ describe('Hồ sơ sống', () => {
     expect(screen.getByText(/Thích nói chuyện thẳng/)).toBeInTheDocument();
   });
 
+  it('vai trò chỉ đọc (không có profile.write) → không có nút "Đổi mức tự trị"', async () => {
+    queryClient.setQueryData(qk.me, { id: 'u', permissions: { 'profile.read': 'all' } });
+    mockFetch((c) => (c.url.includes('/profile/p1') ? json(200, PROFILE) : json(404)));
+    seedUrl({ id: 'p1' });
+    renderScreen(<ProfileScreen />);
+    expect(await screen.findByText('Đang đặt: Gợi ý.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Đổi mức tự trị' })).toBeNull();
+  });
+
   it('v0.1.43 (F-30): mức tự trị 3 mức; dialog không đổi gì → Lưu tắt, không PATCH; chọn mức khác → PATCH đúng mức', async () => {
+    queryClient.setQueryData(qk.me, { id: 'u', permissions: { 'profile.read': 'all', 'profile.write': 'all' } });
     const calls = mockFetch((c) => {
       if (c.method === 'PATCH' && c.url.includes('/profile/p1')) return json(200, { ...PROFILE, autonomy_level: 4 });
       return c.url.includes('/profile/p1') ? json(200, PROFILE) : json(404);

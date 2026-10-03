@@ -135,7 +135,7 @@ def _check_limits(v: dict[str, int]) -> dict[str, int]:
 #   core.gen      — gh.gen.engine.AGENT_KEY (Gen — trợ lý quản trị trong Console).
 # Ngoài ra mỗi agent identity có khoá riêng `agent:<id>` (gh.biz.duty.engine.agent_key) — danh sách động, ghép ở
 # list_bindings(). Bỏ core.intent/core.scoring/core.indexing (không nơi nào gọi model bằng các khoá đó); hàng
-# agent.bindings cũ của chúng để nguyên trong DB (vô hại) — list_bindings tự ẩn, PUT/DELETE trả 422.
+# agent.bindings cũ của chúng do migration 0028 dọn — list_bindings vẫn tự ẩn nếu còn, PUT/DELETE trả 422.
 CORE_AGENT_KEYS: dict[str, str] = {
     "core.refinery": "Sàng lọc & suy luận chính",
     "core.reply": "Soạn lại / dịch nháp",
@@ -232,8 +232,8 @@ async def set_binding(agent_key: str, body: BindingIn, user: service.CurrentUser
 @router.delete("/bindings/{agent_key}", status_code=204)
 async def delete_binding(agent_key: str, user: service.CurrentUser = Depends(MANAGE),
                          db: AsyncSession = DB) -> Response:
-    # F-25: khoá lõi đã bỏ (core.intent/scoring/indexing) → 422 như PUT; hàng cũ để nguyên. agent:<id> không tra
-    # agent.identities ở đây — gỡ được gán model của agent đã xoá.
+    # F-25: khoá lõi đã bỏ (core.intent/scoring/indexing) → 422 như PUT; hàng cũ do migration 0028 dọn.
+    # agent:<id> không tra agent.identities ở đây — gỡ được gán model của agent đã xoá.
     if agent_key not in CORE_AGENT_KEYS and not agent_key.startswith("agent:"):
         raise field_errors({"agent_key": "agent_key phải là mục dùng chung (core.*) hoặc agent:<id>"})
     row = (await db.execute(text("DELETE FROM agent.bindings WHERE org_id = :o AND agent_key = :k "

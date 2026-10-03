@@ -552,7 +552,7 @@ function JevRow({ data, done }: { data: Results; done: boolean }) {
         <CardError error={providers.error} onRetry={() => void providers.refetch()} retrying={providers.isFetching} />
       ) : !jev ? (
         <div className="boss-actions">
-          <Link to="/system?tab=brain" className="gh-btn gh-btn--secondary btn-27">
+          <Link to="/system?tab=brain#jev" className="gh-btn gh-btn--secondary btn-27">
             Nhập khoá Jev
             <Icon name="ph ph-arrow-right" size={13} />
           </Link>

@@ -1,5 +1,6 @@
 /**
- * v0.1.43 (F-29) — danh sách trống vì chưa có nguồn dữ liệu thì dẫn đường: chưa nối kênh → "Nối Zalo" (/guide/5),
+ * v0.1.43 (F-29) — danh sách trống vì chưa có nguồn dữ liệu thì dẫn đường: chưa nối kênh → "Nối kênh" (/guide/5),
+ * kênh đã nối nhưng mất phiên → "Quét lại QR" (/connections),
  * đã nối nhưng chưa nghe nhóm → "Chọn nhóm để nghe" (/guide/6). Vai trò khác Owner: "Nhờ Owner …", không nút.
  */
 import type { ReactElement } from 'react';
@@ -24,9 +25,13 @@ function me(code: string) {
   };
 }
 
-function renderWith(ui: ReactElement, header: { channels_live: number; groups_listening: number } | null, role = 'owner') {
+function renderWith(
+  ui: ReactElement,
+  header: { channels_live: number; channels_connected?: number; groups_listening: number } | null,
+  role: string | null = 'owner',
+) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
-  qc.setQueryData(qk.me, me(role));
+  if (role) qc.setQueryData(qk.me, me(role));
   if (header) qc.setQueryData(qk.header, { ...header, autonomy_level: 4, data_confidence: null });
   return render(
     <QueryClientProvider client={qc}>
@@ -51,17 +56,42 @@ describe('dataEmptyReason', () => {
     expect(dataEmptyReason({ channels_live: 2, groups_listening: 0 })).toBe('no-group');
     expect(dataEmptyReason({ channels_live: 1, groups_listening: 1 })).toBeNull();
     expect(dataEmptyReason({ channels_live: 4, groups_listening: 42 })).toBeNull();
+    // Đã từng nối nhưng phiên không còn sống → mất kết nối (quét lại QR), không phải "chưa nối kênh".
+    expect(dataEmptyReason({ channels_live: 0, channels_connected: 1, groups_listening: 3 })).toBe('channel-down');
+    expect(dataEmptyReason({ channels_live: 0, channels_connected: 0, groups_listening: 0 })).toBe('no-channel');
   });
 });
 
 describe('<DataEmptyState>', () => {
-  it('header {0,0} + Owner → "Nối Zalo" dẫn /guide/5', () => {
+  it('header {0,0} + Owner → "Nối kênh" dẫn /guide/5', () => {
     renderWith(<DataEmptyState fallback={FALLBACK} />, { channels_live: 0, groups_listening: 0 });
     expect(screen.getByTestId('data-empty-state')).toHaveAttribute('data-reason', 'no-channel');
     expect(screen.getByText('Chưa có dữ liệu vì chưa nối kênh')).toBeInTheDocument();
-    expect(screen.getByText('Nối Zalo để tin nhắn bắt đầu về đây.')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Nối Zalo' })).toHaveAttribute('href', '/guide/5');
+    expect(screen.getByText('Nối Zalo hoặc WhatsApp để tin nhắn bắt đầu về đây.')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Nối kênh' })).toHaveAttribute('href', '/guide/5');
     expect(screen.queryByText('Trạng thái trống cũ')).toBeNull();
+  });
+
+  it('kênh đã nối nhưng mất phiên + Owner → "Quét lại QR" dẫn /connections', () => {
+    renderWith(<DataEmptyState fallback={FALLBACK} />, { channels_live: 0, channels_connected: 1, groups_listening: 5 });
+    expect(screen.getByTestId('data-empty-state')).toHaveAttribute('data-reason', 'channel-down');
+    expect(screen.getByText('Kênh mất kết nối — quét lại QR')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Quét lại QR' })).toHaveAttribute('href', '/connections');
+    expect(screen.queryByText('Chưa có dữ liệu vì chưa nối kênh')).toBeNull();
+  });
+
+  it('đang lọc + chưa có kênh sống → fallback "không khớp bộ lọc", không dẫn nối kênh', () => {
+    renderWith(<DataEmptyState filtered fallback={FALLBACK} />, { channels_live: 0, groups_listening: 0 });
+    expect(screen.getByText('Trạng thái trống cũ')).toBeInTheDocument();
+    expect(screen.queryByTestId('data-empty-state')).toBeNull();
+    expect(screen.queryByRole('link')).toBeNull();
+  });
+
+  it('me đang tải → fallback (Owner không thấy thoáng "Nhờ Owner …")', () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => {})));
+    renderWith(<DataEmptyState fallback={FALLBACK} />, { channels_live: 0, groups_listening: 0 }, null);
+    expect(screen.getByText('Trạng thái trống cũ')).toBeInTheDocument();
+    expect(screen.queryByText(/Nhờ Owner/)).toBeNull();
   });
 
   it('header {2,0} + Owner → "Chọn nhóm để nghe" dẫn /guide/6', () => {
@@ -99,7 +129,7 @@ describe('<DataEmptyState>', () => {
 });
 
 describe('Áp vào màn', () => {
-  it('Hộp thư trống + chưa nối kênh → dẫn "Nối Zalo"', async () => {
+  it('Hộp thư trống + chưa nối kênh → dẫn "Nối kênh"', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: RequestInfo | URL) =>
@@ -109,7 +139,7 @@ describe('Áp vào màn', () => {
       ),
     );
     renderWith(<InboxScreen />, { channels_live: 0, groups_listening: 0 });
-    expect(await screen.findByRole('link', { name: 'Nối Zalo' })).toHaveAttribute('href', '/guide/5');
+    expect(await screen.findByRole('link', { name: 'Nối kênh' })).toHaveAttribute('href', '/guide/5');
     expect(screen.queryByText('Hộp thư đang trống')).toBeNull();
   });
 

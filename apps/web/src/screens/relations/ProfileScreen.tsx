@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { AUTONOMY_AUTO_LABEL, AUTONOMY_CHOICES, AUTONOMY_LEVELS, autonomyChoice, autonomyPatch, type Profile } from '@gen-harness/contracts';
 import { Button, Card, Dialog, EmptyState, Icon, TextField } from '@gen-harness/ui';
 import { fmtDMClock } from '../../lib/format';
+import { useCan } from '../../lib/permissions';
 import { useUrlState } from '../../lib/uiStore';
 import { CardError, InlineError, Panel, SkeletonLines } from '../common';
 import { AutonomySelect } from '../AutonomySelect';
@@ -54,6 +55,8 @@ export function ProfileScreen() {
 function ProfileBody({ id, p }: { id: string; p: Profile }) {
   const [noteOpen, setNoteOpen] = useState(false);
   const [autonomyOpen, setAutonomyOpen] = useState(false);
+  // Đổi mức tự trị cần profile.write — vai trò chỉ đọc (Auditor) không thấy nút (mở ra chỉ gặp 403), như Danh bạ.
+  const canWrite = useCan('profile.write');
 
   return (
     <div className="screen">
@@ -160,9 +163,11 @@ function ProfileBody({ id, p }: { id: string; p: Profile }) {
                   ? `Đang đặt: ${autonomyChoice(p.autonomy_level)?.label}.`
                   : 'Chưa đặt mức tự trị riêng cho đối tượng này — dùng mức mặc định.'}
               </p>
-              <Button variant="ghost" size="sm" icon="ph ph-sliders-horizontal" onClick={() => setAutonomyOpen(true)}>
-                Đổi mức tự trị
-              </Button>
+              {canWrite ? (
+                <Button variant="ghost" size="sm" icon="ph ph-sliders-horizontal" onClick={() => setAutonomyOpen(true)}>
+                  Đổi mức tự trị
+                </Button>
+              ) : null}
             </div>
           </Panel>
 
@@ -206,7 +211,7 @@ function ProfileBody({ id, p }: { id: string; p: Profile }) {
       </div>
 
       {noteOpen ? <NoteDialog id={id} p={p} onClose={() => setNoteOpen(false)} /> : null}
-      {autonomyOpen ? <AutonomyDialog id={id} p={p} onClose={() => setAutonomyOpen(false)} /> : null}
+      {autonomyOpen && canWrite ? <AutonomyDialog id={id} p={p} onClose={() => setAutonomyOpen(false)} /> : null}
     </div>
   );
 }

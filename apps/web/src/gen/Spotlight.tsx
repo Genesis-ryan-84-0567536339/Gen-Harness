@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { Button, Icon } from '@gen-harness/ui';
-import { closeSpotlight, targetSelector, tourBack, tourNext } from './director';
+import { closeSpotlight, revealTarget, targetSelector, tourBack, tourNext } from './director';
 import { useGenStore } from './genStore';
 
 interface Box {
@@ -37,12 +37,18 @@ export function Spotlight() {
       return;
     }
     let el: Element | null = null;
+    let revealed: Element | null = null;
     let raf = 0;
     const measure = () => {
       el = document.querySelector(targetSelector(spot.target));
       if (!el) {
         setBox(null);
         return;
+      }
+      // Mở <details> đang gập chứa đích MỘT lần cho mỗi phần tử (Sếp gập lại sau đó thì không ép mở nữa).
+      if (revealed !== el) {
+        revealTarget(el);
+        revealed = el;
       }
       const r = el.getBoundingClientRect();
       setBox((b) =>

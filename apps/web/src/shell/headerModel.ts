@@ -7,8 +7,8 @@ export function autonomyPillText(level: number): string {
 
 export function autonomyTooltip(level: number): string {
   const choice = autonomyChoice(level);
-  if (!choice) return `Mức tự trị chung: mức ${level} (ngoài thang 0–6 — đổi ở Cài đặt)`;
-  return `Mức tự trị chung: ${choice.label} (mức ${level} trên thang 0–6 — đổi ở Cài đặt)`;
+  if (!choice) return `Mức tự trị chung: mức ${level} (ngoài thang 0–6)`;
+  return `Mức tự trị chung: ${choice.label} (mức ${level}/6)`;
 }
 
 /** data_confidence may arrive as a 0–1 fraction or a 0–100 percent. */

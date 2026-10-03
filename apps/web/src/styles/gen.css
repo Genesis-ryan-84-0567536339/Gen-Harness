@@ -84,6 +84,7 @@
 .gen-prop__error { margin: 0; font-size: 11.5px; color: var(--color-bad); }
 .gen-prop__done { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 11.5px; color: var(--color-ok); }
 .gen-prop__done--off { color: var(--color-neutral-400); }
+.gen-prop__note { color: var(--color-neutral-500); }
 
 /* ── Lớp phủ làm sáng ── */
 .gen-spot { position: fixed; inset: 0; z-index: 900; pointer-events: none; }

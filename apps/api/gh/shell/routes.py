@@ -39,13 +39,18 @@ async def header_payload(db: AsyncSession, org_id: Any) -> dict[str, Any]:
     channels_live = (await db.execute(text("""
         SELECT count(DISTINCT c.id) FROM core.channels c JOIN core.channel_sessions s ON s.channel_id = c.id
         WHERE c.org_id = :o AND s.state = 'active' AND s.ended_at IS NULL"""), {"o": org_id})).scalar_one()
+    # v0.1.43 (F-29): kênh ĐÃ TỪNG đăng nhập thành công (phiên có started_at) — tách "chưa nối kênh" với "kênh mất
+    # phiên, cần quét lại QR" ở trạng thái trống. Dòng core.channels luôn có sẵn từ bootstrap nên không đếm bảng đó.
+    channels_connected = (await db.execute(text("""
+        SELECT count(DISTINCT c.id) FROM core.channels c JOIN core.channel_sessions s ON s.channel_id = c.id
+        WHERE c.org_id = :o AND s.started_at IS NOT NULL"""), {"o": org_id})).scalar_one()
     groups = (await db.execute(text("""
         SELECT count(*) FROM core.groups WHERE org_id = :o AND listen_mode IN ('tagged_only','silent','proactive')"""),
         {"o": org_id})).scalar_one()
     org = (await db.execute(text("SELECT settings, timezone FROM core.organizations WHERE id = :o"),
                             {"o": org_id})).one()
     settings = org.settings or {}
-    return {"channels_live": channels_live, "groups_listening": groups,
+    return {"channels_live": channels_live, "channels_connected": channels_connected, "groups_listening": groups,
             "autonomy_level": int(settings.get("autonomy_level", policy.DEFAULT_AUTONOMY)),
             "data_confidence": await data_confidence_today(db, org_id, org.timezone)}
 

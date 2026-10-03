@@ -302,7 +302,10 @@ function PeoplePane() {
         ) : people.isError ? (
           <CardError error={people.error} onRetry={() => void people.refetch()} retrying={people.isFetching} />
         ) : people.data.items.length === 0 ? (
-          <DataEmptyState fallback={<EmptyState icon="ph ph-address-book" title="Không có ai khớp bộ lọc" />} />
+          <DataEmptyState
+            filtered={Boolean(relation || heat || value || priority || bot)}
+            fallback={<EmptyState icon="ph ph-address-book" title="Không có ai khớp bộ lọc" />}
+          />
         ) : (
           <div className="gh-table-scroll">
             <table className="gh-table w920" aria-label="Con người">

@@ -124,7 +124,7 @@ describe('Hộp thư ý nghĩa', () => {
     ).toBeInTheDocument();
 
     const prio = within(card).getByLabelText('Ưu tiên P1 · Độ tin cậy: cao');
-    expect(prio).toHaveAttribute('title', 'Độ tin cậy: cao');
+    expect(prio).not.toHaveAttribute('title'); // chỉ Tooltip — không có tooltip trình duyệt chồng lên
     await user.hover(prio);
     expect(await screen.findByRole('tooltip')).toHaveTextContent('Độ tin cậy: cao');
   });

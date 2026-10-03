@@ -54,9 +54,9 @@ describe('Thang tự trị — một nguồn', () => {
 
 describe('Nơi dùng giữ nguyên hành vi', () => {
   it('tooltip header: nhãn 3 mức + mức thật trên thang 0–6 (v0.1.43, F-30)', () => {
-    expect(autonomyTooltip(4)).toBe('Mức tự trị chung: Soạn sẵn chờ duyệt (mức 4 trên thang 0–6 — đổi ở Cài đặt)');
-    expect(autonomyTooltip(6)).toBe('Mức tự trị chung: Tự làm (đặt ở Nâng cao) (mức 6 trên thang 0–6 — đổi ở Cài đặt)');
-    expect(autonomyTooltip(9)).toBe('Mức tự trị chung: mức 9 (ngoài thang 0–6 — đổi ở Cài đặt)');
+    expect(autonomyTooltip(4)).toBe('Mức tự trị chung: Soạn sẵn chờ duyệt (mức 4/6)');
+    expect(autonomyTooltip(6)).toBe('Mức tự trị chung: Tự làm (đặt ở Nâng cao) (mức 6/6)');
+    expect(autonomyTooltip(9)).toBe('Mức tự trị chung: mức 9 (ngoài thang 0–6)');
   });
 
   it('Danh tính Agent: bảng nhãn 0–6 vẫn dẫn xuất từ contracts (title của viên tự trị)', () => {

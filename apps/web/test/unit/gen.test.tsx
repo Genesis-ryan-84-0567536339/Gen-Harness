@@ -165,6 +165,23 @@ describe('Spotlight', () => {
     expect(screen.queryByRole('dialog', { name: 'Gen đang chỉ' })).toBeNull();
   });
 
+  it('v0.1.43: target inside closed <details> (lồng nhiều cấp) → mở các khối gập rồi mới đo', async () => {
+    const outer = document.createElement('details');
+    const inner = document.createElement('details');
+    const b = document.createElement('button');
+    b.setAttribute('data-gen-target', 'system.brain.jev');
+    inner.appendChild(b);
+    outer.appendChild(inner);
+    document.body.appendChild(outer);
+    expect(outer.open || inner.open).toBe(false);
+    wrap(<Spotlight />);
+    await act(() => executeUiAction({ type: 'highlight', target: 'system.brain.jev', message: 'Thẻ Jev' }));
+    expect(await screen.findByRole('dialog', { name: 'Gen đang chỉ' })).toHaveTextContent('Thẻ Jev');
+    expect(outer.open).toBe(true);
+    expect(inner.open).toBe(true);
+    outer.remove();
+  });
+
   it('navigates to the screen/tab a target needs, then says when it is missing', async () => {
     wrap(<Spotlight />);
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });

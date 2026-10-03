@@ -4,7 +4,9 @@ Trước v0.1.43 `gh.refinery.rules` (NFD, bỏ ký tự loại Mn) và `gh.refi
 nơi có một bản `strip_accents` riêng, lệch nhau ở chữ toàn chiều rộng, 'm²', '…'. Nay cả hai import từ đây.
 
 Giữ NFKD (đúng bản của triage): `refinery.item_marks.text_hash` đã lưu băm trên chuỗi NFKD — đổi sang NFD sẽ làm lọc
-trùng 'exact' lệch với các dấu đã lưu. Hàm thuần, không I/O.
+trùng 'exact' lệch với các dấu đã lưu. Ngoại lệ có chủ ý: thêm 'Ð' (U+00D0) → 'D' (bản cũ của triage không đổi) nên
+`text_hash` chỉ khác với dấu đã lưu ở tin có chứa 'Ð' — lọc trùng 'exact' bỏ sót đúng một lần với các tin đó. Hàm thuần,
+không I/O.
 """
 
 import re

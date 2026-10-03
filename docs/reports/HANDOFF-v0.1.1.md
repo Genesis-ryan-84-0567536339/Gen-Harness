@@ -2398,7 +2398,8 @@ Không cần chụp màn hình hay gửi mã cho Claude — kết quả tự lư
 ### Boss cần làm gì
 
 1. Không cần làm gì. Sau khi lên bản: thang tự trị chỉ còn 3 lựa chọn (**Chỉ ghi nhận · Gợi ý · Soạn sẵn chờ duyệt**);
-   Cài đặt › Bộ não AI có thẻ **Lọc tin Thấp/Vừa/Cao**; màn chưa có dữ liệu chỉ đường "Nối Zalo" / "Chọn nhóm để nghe".
+   Cài đặt › Bộ não AI có thẻ **Lọc tin Thấp/Vừa/Cao**; màn chưa có dữ liệu chỉ đường "Nối kênh" / "Quét lại QR" /
+   "Chọn nhóm để nghe".
 
 ### Vì sao (kế hoạch tổng `docs/audit/2026-10-01/0-ke-hoach-tong.md`, mục v0.1.43)
 
@@ -2431,9 +2432,34 @@ Không cần chụp màn hình hay gửi mã cho Claude — kết quả tự lư
   chờ duyệt"); `needs-boss-v0136` bỏ mốc `finished_at` viết cứng (tự hết hạn sau 24 giờ ⇒ đỏ theo ngày); thêm kiểm ví dụ
   Gen (`gen.test`, `users.test`) và trọng số bước 7 trong "Nâng cao" (`phase2.spec`).
 
+- **Sửa sau review (F-24, F-25, F-29, F-30, F-38)**:
+  - F-24: thẻ nháp Gen chỉ ghi "Duyệt & gửi" khi nháp gửi được THẬT (`result.sendable` — API chỉ gắn nơi gửi khi đối tượng
+    là NHÓM) và người bấm có `action.approve`; nháp cho một người → "Nháp chưa có nơi gửi" + chip "Mở nháp ở Bàn làm
+    việc"; Operator/Agent NV → "Chờ Sếp duyệt rồi mới gửi" + "Mở nháp". Mock Gen theo đúng API (nháp cho người: target
+    null, "Duyệt và thực hiện").
+  - F-29: `DataEmptyState` có prop `filtered` — Hộp thư (tab/ý định/ẩn rác), Việc (bộ lọc), Lời hứa (tab ≠ Tất cả), Con
+    người (bộ lọc) đang lọc thì giữ câu "không khớp bộ lọc". `GET /header` thêm `channels_connected` (kênh đã từng đăng
+    nhập) ⇒ kênh mất phiên hiện "Kênh mất kết nối — quét lại QR" dẫn `/connections`, không còn "chưa nối kênh". CTA đổi
+    "Nối kênh"; `me` đang tải thì hiện trạng thái trống cũ (Owner không thấy thoáng "Nhờ Owner…").
+  - F-30: tooltip mức tự trị bỏ "đổi ở Cài đặt" (không có chỗ đổi đó); Spotlight của Gen mở mọi `<details>` tổ tiên trước
+    khi đo (tour tới thẻ Jev trong "Nâng cao"); `/system?tab=brain#jev` mở sẵn "Nâng cao" (nút "Nhập khoá Jev" ở Kiểm tra
+    của Boss dẫn tới đây); thẻ Lọc tin nói đúng "Đánh dấu…" + link `/inbox?hide=1`; bước 7 tự mở "Nâng cao" và có lý do
+    cạnh "Tiếp tục" khi trọng số lỗi tải/tổng ≠ 100%. Huy hiệu ưu tiên Hộp thư bỏ `title` trùng Tooltip; Hồ sơ ẩn nút
+    "Đổi mức tự trị" khi thiếu `profile.write`.
+  - F-25: migration **0028** xoá `agent.bindings` mồ côi của `core.intent/core.scoring/core.indexing` (chạy lại an toàn);
+    nhãn chi phí khoá cũ `core.reply_fast` → "Soạn lại / dịch nháp (cũ)" để không trùng dòng.
+  - F-38: `initialsOf` tên một từ lấy 2 ký tự đầu ("Lan" → "LA"); docstring `textnorm` ghi rõ `text_hash` chỉ đổi với tin có 'Ð'.
+  - F-23: không đổi API — `mode` ở bước 1 chỉ được LƯU làm nhãn, API không tạo dữ liệu mẫu nào (không có mã ghi
+    raw.events theo `mode`), nên chỉ ẩn ở giao diện là đủ.
+
 ### Kiểm tra
 
-- api: `test_bindings_v0143.py`, `test_textnorm.py`, `test_triage` cũ, `test_p4_agents`.
+- api: `test_bindings_v0143.py`, `test_textnorm.py`, `test_triage` cũ, `test_p4_agents`, `test_header_v0143.py`,
+  `test_gen_proposals.py` (sendable).
+- web (sửa sau review): `data-empty-state-v0143` (lọc, mất phiên, me đang tải), `gen-proposals` (không nơi gửi, không quyền
+  duyệt), `gen.test` (Spotlight trong details), `jev-once-v0139` (`#jev`), `step7-weights-v0143`, `triage-level-v0143`,
+  `format-v0143`, `p3-relations` (Auditor); e2e `empty-state-v0143` (+ mất phiên, + đang lọc), `gen-draft-approve-v0143`
+  (nhóm → "Duyệt & gửi"; người → chỉ mở nháp).
 - web vitest: `setup.test` (bước 1), `autonomy-select-v0143`, `data-empty-state-v0143`, `format-v0143`,
   `triage-level-v0143`, `wording-v0143`, `gen-proposals`, `jev-once-v0139`, `p3-queue`, `p3-relations`, `shell`.
 - e2e mock: `empty-state-v0143.spec.ts`, `gen-draft-approve-v0143.spec.ts`, `menu-v0142`/`flows`/`coverage`/`phase2`/`visual`

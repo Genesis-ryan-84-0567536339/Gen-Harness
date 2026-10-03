@@ -19,7 +19,7 @@ import { queryClient } from '../../src/lib/queryClient';
 const ME = {
   id: 'u1', email: 'owner@genesis.local', display_name: 'Anh Cơ La', role: { code: 'owner', name: 'Owner — Sếp' },
   org: { id: 'o1', name: 'Genesis', timezone: 'Asia/Ho_Chi_Minh', currency: 'VND' },
-  addressing: { self: 'Anh', bot_calls_me: 'Sếp' }, pin_verified_until: null, permissions: {}, must_change_password: false,
+  addressing: { self: 'Anh', bot_calls_me: 'Sếp' }, pin_verified_until: null, permissions: { 'action.approve': 'all' }, must_change_password: false,
   features: { gen: true },
 };
 
@@ -51,6 +51,7 @@ type Call = { method: string; url: string; body: unknown };
 const calls: Call[] = [];
 let confirmReply: { status: number; body: unknown } | null = null;
 let draftResultId: string | null = 'd-7f/1';
+let draftSendable = true;
 const navigations: string[] = [];
 
 function stubApi() {
@@ -72,7 +73,7 @@ function stubApi() {
         const result =
           m[1] === 'p1'
             ? { type: 'task', id: 't9', code: 'TSK-0412', screen: 'tasks' }
-            : { type: 'draft', id: draftResultId, code: 'ACT-0999', screen: 'workbench' };
+            : { type: 'draft', id: draftResultId, code: 'ACT-0999', screen: 'workbench', sendable: draftSendable };
         return json(200, { ...base, fields: { ...base.fields, ...(body?.fields ?? {}) }, status: 'confirmed', result });
       }
       return json(404, { status: 404, code: 'NOT_FOUND', title: 'Không tồn tại' });
@@ -110,6 +111,7 @@ beforeEach(() => {
   navigations.length = 0;
   confirmReply = null;
   draftResultId = 'd-7f/1';
+  draftSendable = true;
   useGenStore.setState({ openByUser: {}, conversationId: 'c1', messages: [], busy: false, spotlight: null });
   setNavigator((to) => navigations.push(to));
   stubApi();
@@ -208,6 +210,32 @@ describe('Gen proposal card', () => {
     expect(navigations).toEqual([`/workbench?id=${encodeURIComponent('d-7f/1')}`]);
     expect(writes()).toHaveLength(1); // điều hướng thôi — không gửi gì thêm
     expect(container.textContent).not.toContain('[object Object]');
+  });
+
+  it('v0.1.43 (F-24): nháp không có nơi gửi (đối tượng là người/không có) → không hứa "Duyệt & gửi", chỉ mở nháp', async () => {
+    draftSendable = false;
+    renderPanel();
+    showProposal(DRAFT);
+    const card = screen.getByRole('group', { name: 'Đề xuất: Soạn nháp tin gửi đi' });
+    await userEvent.click(within(card).getByRole('button', { name: 'Xác nhận' }));
+    await waitFor(() => expect(card).toHaveTextContent('Đã lưu nháp — chưa gửi'));
+    expect(within(card).queryByRole('button', { name: 'Duyệt & gửi' })).toBeNull();
+    expect(card).toHaveTextContent('Nháp chưa có nơi gửi');
+    await userEvent.click(within(card).getByRole('button', { name: /Mở nháp ở Bàn làm việc/ }));
+    expect(navigations).toEqual([`/workbench?id=${encodeURIComponent('d-7f/1')}`]);
+  });
+
+  it('v0.1.43 (F-24): vai trò không có quyền duyệt (Operator) → "Mở nháp" + "Chờ Sếp duyệt rồi mới gửi"', async () => {
+    queryClient.setQueryData(qk.me, { ...ME, role: { code: 'operator', name: 'Vận hành' }, permissions: { 'action.draft': 'all' } });
+    renderPanel();
+    showProposal(DRAFT);
+    const card = screen.getByRole('group', { name: 'Đề xuất: Soạn nháp tin gửi đi' });
+    await userEvent.click(within(card).getByRole('button', { name: 'Xác nhận' }));
+    await waitFor(() => expect(card).toHaveTextContent('Đã lưu nháp — chưa gửi'));
+    expect(within(card).queryByRole('button', { name: 'Duyệt & gửi' })).toBeNull();
+    expect(card).toHaveTextContent('Chờ Sếp duyệt rồi mới gửi');
+    await userEvent.click(within(card).getByRole('button', { name: 'Mở nháp' }));
+    expect(navigations).toEqual([`/workbench?id=${encodeURIComponent('d-7f/1')}`]);
   });
 
   it('v0.1.43 (F-24): nháp tin không có id kết quả → giữ nút "Mở Bàn làm việc"', async () => {

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { EmptyState, Icon } from '@gen-harness/ui';
 import { qk2, useProviders } from '../../lib/dataQueries';
@@ -40,6 +40,7 @@ export function BrainTabBody() {
   const providers = useProviders();
   const rules = useFailoverRules();
   const qc = useQueryClient();
+  const jevHash = useLocation().hash === '#jev';
   // v0.1.39 (F-78): Jev không bắt buộc — kiểm tra lỗi thì thu thẻ vào "Nâng cao" thay vì để lỗi đỏ giữa tab.
   // Mutation giữ ở đây để kết quả "Kiểm tra 1 lần" còn nguyên khi thẻ chuyển chỗ.
   const jevTest = useTestProvider();
@@ -164,8 +165,8 @@ export function BrainTabBody() {
       </div>
 
       <div className="sys-grid2">
-        {/* v0.1.43 (F-30): Jev không bắt buộc — luôn nằm trong "Nâng cao". */}
-        <details className="brain-advanced">
+        {/* v0.1.43 (F-30): Jev không bắt buộc — luôn nằm trong "Nâng cao"; tới bằng `#jev` (vd từ Kiểm tra của Boss) thì mở sẵn. */}
+        <details className="brain-advanced" id="jev" open={jevHash || undefined}>
           <summary>{jevFailed ? 'Nâng cao — Jev (đã ẩn vì kiểm tra lỗi, không bắt buộc)' : 'Nâng cao — Jev (không bắt buộc)'}</summary>
           {jevCard}
         </details>

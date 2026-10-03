@@ -1185,7 +1185,7 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
       return reply(200, { items });
     }
     if (path === '/header' && method === 'GET') {
-      return reply(200, { channels_live: 4, groups_listening: 42, autonomy_level: 4, data_confidence: 0.78 });
+      return reply(200, { channels_live: 4, channels_connected: 4, groups_listening: 42, autonomy_level: 4, data_confidence: 0.78 });
     }
     if (path === '/audit' && method === 'GET') {
       if (permissionsOf(user.role.code)['audit.read'] === 'none') return problem(res, 403, 'FORBIDDEN', 'Vai trò không có quyền này');

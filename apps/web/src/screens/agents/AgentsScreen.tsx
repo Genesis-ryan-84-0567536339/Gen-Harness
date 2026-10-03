@@ -218,7 +218,10 @@ function TemplatesPanel({ canManage, onUseTemplate }: { canManage: boolean; onUs
   );
 }
 
-/** Mức tự trị mặc định khi tạo agent mới mà Sếp chưa chọn (giữ như trước v0.1.43; khớp `DEFAULT_AUTONOMY` phía API). */
+/**
+ * Mức tự trị mặc định khi tạo agent mới mà Sếp chưa chọn: giữ mức 2 của form cũ (trước v0.1.43). KHÁC `DEFAULT_AUTONOMY`
+ * phía API (= 4, mặc định của AgentIn khi body không có `autonomy_level`) — form luôn gửi giá trị này nên API không áp mặc định.
+ */
 const DEFAULT_NEW_AGENT_AUTONOMY = 2;
 
 function AgentFormDialog({ agent, template, onClose }: { agent: AgentIdentity | null; template: AgentTemplate | null; onClose: () => void }) {

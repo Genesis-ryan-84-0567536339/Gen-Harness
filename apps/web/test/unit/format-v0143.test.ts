@@ -16,6 +16,10 @@ describe('lib/format — initialsOf, fmtVnd (F-38)', () => {
     expect(initialsOf('  đặng   thị  ánh ')).toBe('ĐÁ');
     expect(initialsOf('  ')).toBe('·');
     expect(initialsOf('')).toBe('·');
+    // Tên một từ (tên Zalo hay gặp): 2 ký tự đầu, không lặp chữ ("LL").
+    expect(initialsOf('Lan')).toBe('LA');
+    expect(initialsOf(' minh ')).toBe('MI');
+    expect(initialsOf('Á')).toBe('Á');
   });
 
   it('fmtVnd: null/undefined → "—", còn lại phân cách nghìn kiểu Việt + " ₫"', () => {
