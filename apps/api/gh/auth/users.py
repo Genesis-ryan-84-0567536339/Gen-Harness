@@ -19,7 +19,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gh import notifications
-from gh.auth import rbac, service
+from gh.auth import login_guard, rbac, service
 from gh.auth.account import EMAIL_RE
 from gh.auth.deps import require, require_pin
 from gh.chassis import actionlog
@@ -213,6 +213,7 @@ async def reset_password(user_id: uuid.UUID, request: Request, me: service.Curre
     await db.execute(text("UPDATE core.users SET password_hash = :h, must_change_password = true, "
                           "updated_at = now() WHERE id = :u"), {"h": hash_secret(temp_password), "u": row.id})
     revoked = await _revoke_all(db, row.id)
+    await login_guard.clear_email(request.app.state.redis, row.email)  # v0.1.46: gỡ khoá đăng nhập (best-effort)
     await _log(db, me, "user.password_reset", row, {"sessions_revoked": revoked})
     await notifications.notify(db, me.org_id, [row.id], kind="user.password_reset", title="Mật khẩu đã được đặt lại",
                                body=f"{me.display_name} đã đặt lại mật khẩu của bạn. Nếu không phải bạn yêu cầu, "

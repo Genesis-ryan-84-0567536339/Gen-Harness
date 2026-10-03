@@ -57,9 +57,14 @@ class Settings(BaseSettings):
     # động. CHỈ đặt trong api.Dockerfile; rỗng (dev/test) ⇒ không chuyển/xoá gì (gh/providers/cli.py).
     claude_legacy_home: str = ""
 
-    # Phiên đăng nhập 7 ngày, trượt (gia hạn khi còn dưới nửa — gh/auth/service.py::load_session): app tự host,
-    # một Owner, không nên bắt đăng nhập lại mỗi ngày.
+    # Phiên đăng nhập 7 ngày, trượt (gia hạn khi còn dưới nửa — gh/auth/service.py::load_session) nhưng không quá
+    # session_absolute_days kể từ lúc đăng nhập: app tự host, một Owner, không nên bắt đăng nhập lại mỗi ngày.
     session_ttl_hours: int = 168
+    # v0.1.46: phiên sống tối đa bấy nhiêu ngày kể từ lúc đăng nhập, dù dùng đều đặn (hết hạn tuyệt đối).
+    session_absolute_days: int = 30
+    # v0.1.46: sai quá ngần này lần trong cửa sổ (giây) theo IP hoặc email → 429 (gh/auth/login_guard.py).
+    login_fail_limit: int = 10
+    login_fail_window_seconds: int = 900
     pin_session_minutes: int = 30
     pin_max_attempts: int = 5
     pin_lock_minutes: int = 15

@@ -18,6 +18,7 @@ export function LoginPage() {
   const [password, setPassword] = useState('');
   const [touched, setTouched] = useState<{ email?: boolean; password?: boolean }>({});
   const [formError, setFormError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -34,12 +35,18 @@ export function LoginPage() {
     if (!canSubmit) return;
     setBusy(true);
     setFormError(null);
+    setErrorCode(null);
     try {
       const me = await api.auth.login({ email: email.trim(), password });
       queryClient.setQueryData(qk.me, me);
       navigate(safeNext(params.get('next')), { replace: true });
     } catch (err) {
-      if (err instanceof ApiError && err.code === 'INVALID_CREDENTIALS') setFormError('Email hoặc mật khẩu không đúng.');
+      if (err instanceof ApiError && err.code === 'LOGIN_RATE_LIMITED') {
+        const secs = Number((err.problem as { retry_after_s?: unknown }).retry_after_s);
+        const minutes = Number.isFinite(secs) && secs > 0 ? Math.ceil(secs / 60) : 15;
+        setFormError(`Đăng nhập sai quá nhiều lần. Đợi khoảng ${minutes} phút rồi thử lại, hoặc nhờ Owner đặt lại mật khẩu.`);
+        setErrorCode('LOGIN_RATE_LIMITED');
+      } else if (err instanceof ApiError && err.code === 'INVALID_CREDENTIALS') setFormError('Email hoặc mật khẩu không đúng.');
       else if (err instanceof ApiError && err.status === 0) setFormError('Không kết nối được máy chủ. Kiểm tra dịch vụ api rồi thử lại.');
       else if (err instanceof ApiError && err.status === 428) setFormError('Hệ thống chưa thiết lập xong — đang chuyển tới trình thiết lập.');
       else setFormError(err instanceof Error ? err.message : 'Đăng nhập không thành công.');
@@ -85,6 +92,12 @@ export function LoginPage() {
           <div className="login-card__error" role="alert" aria-live="assertive">
             {formError}
           </div>
+          {errorCode && (
+            <details className="login-card__tech">
+              <summary>Chi tiết kỹ thuật</summary>
+              <code className="mono">{errorCode}</code>
+            </details>
+          )}
           <Button variant="primary" type="submit" block loading={busy} disabled={!canSubmit && !busy} iconRight="ph ph-arrow-right">
             Đăng nhập
           </Button>

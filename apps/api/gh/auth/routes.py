@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gh.auth import service
+from gh.auth import login_guard, service
 from gh.auth.deps import client_ip, current_user, require_pin
 from gh.chassis import actionlog
 from gh.config import get_settings
@@ -87,9 +87,24 @@ def _pin_locked(locked_until: datetime | None) -> ApiError:
 @router.post("/login")
 async def login(body: LoginIn, request: Request, response: Response,
                 db: AsyncSession = DB) -> dict[str, Any]:
-    found = await service.login(db, body.email, body.password)
     ip = client_ip(request)
+    redis = request.app.state.redis
+    retry = await login_guard.blocked(redis, ip, body.email)
+    if retry is not None:
+        org_id = (await db.execute(text("SELECT id FROM core.organizations ORDER BY created_at LIMIT 1"))).scalar()
+        if org_id is not None and await login_guard.log_once(redis, body.email):
+            await actionlog.record(db, org_id=org_id, actor_type="system", actor_id="system:auth",
+                                   action="auth.login_rate_limited", result="blocked",
+                                   detail={"email_masked": _mask_email(body.email)}, ip=ip)
+            await db.commit()
+        minutes = max(1, -(-retry // 60))
+        raise ApiError(429, "LOGIN_RATE_LIMITED",
+                       f"Đăng nhập sai quá nhiều lần — đợi khoảng {minutes} phút rồi thử lại",
+                       "Nhân viên: nhờ Owner bấm Đặt lại mật khẩu. Owner: chạy genh reset-password trên máy chủ.",
+                       retry_after_s=retry)
+    found = await service.login(db, body.email, body.password)
     if found is None:
+        await login_guard.record_failure(redis, ip, body.email)
         org_id = (await db.execute(text("SELECT id FROM core.organizations ORDER BY created_at LIMIT 1"))).scalar()
         if org_id is not None:
             await actionlog.record(db, org_id=org_id, actor_type="system", actor_id="system:auth",
@@ -97,6 +112,7 @@ async def login(body: LoginIn, request: Request, response: Response,
                                    detail={"email_masked": _mask_email(body.email)}, ip=ip)
             await db.commit()
         raise ApiError(401, "INVALID_CREDENTIALS", "Email hoặc mật khẩu không đúng")
+    await login_guard.clear_email(redis, body.email)
     new = await service.create_session(db, found["id"], ip=ip, user_agent=request.headers.get("user-agent"))
     user = await service.load_session(db, new.token)
     assert user is not None
