@@ -569,6 +569,28 @@ jobs:
           curl -k -fsS -o /dev/null "https://localhost:${GH_PORT}/api/v1/ready"
           echo "OK: cài mới ở chế độ local — chỉ nghe 127.0.0.1, localhost vẫn ready."
 
+      # Mặc định `genh remote lan` (không --name) tự dò IPv4 LAN và đặt GH_SITE_ADDRESS = IP đó. Trình duyệt mở bằng IP
+      # KHÔNG gửi SNI — curl cũng vậy khi URL là IP và không có --resolve: kiểm đúng đường điện thoại đi (Caddyfile cần
+      # default_sni, genh phải bỏ qua docker0/br-*/veth*/virbr*).
+      - name: genh remote lan (không --name) → mở bằng IP tự dò, không SNI (v0.1.46+)
+        if: steps.v146.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          if [ -n "${GENH_COMPOSE_FILE:-}" ]; then cdir="$(dirname "$GENH_COMPOSE_FILE")"; else cdir="$GEN_HARNESS_HOME/deploy"; fi
+          "$GENH" remote lan --yes --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT"
+          ip="$(sed -n 's/^GH_SITE_ADDRESS=//p' "$cdir/.env" | tail -1)"
+          echo "IP genh tự dò: $ip"
+          echo "$ip" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' || { echo "::error::GH_SITE_ADDRESS sau remote lan không phải IPv4 ('$ip')" >&2; exit 1; }
+          case "$ip" in 172.17.*) echo "::error::genh chọn nhầm IP docker0 ($ip)" >&2; exit 1 ;; esac
+          code=""
+          for _ in $(seq 1 20); do
+            code="$(curl -k -sS -o /dev/null -w '%{http_code}' --max-time 10 "https://${ip}:${GH_PORT}/api/v1/ready" || true)"
+            [ "$code" = "200" ] && break
+            sleep 3
+          done
+          [ "$code" = "200" ] || { echo "::error::https://${ip}:${GH_PORT}/api/v1/ready (không SNI) trả '$code' (cần 200 — Caddyfile thiếu default_sni?)" >&2; exit 1; }
+          echo "OK: remote lan không --name — mở bằng IP $ip (không SNI) vẫn ready."
+
       - name: genh remote --lan → 0.0.0.0 và vẫn qua ready (v0.1.46+)
         if: steps.v146.outputs.run == 'true'
         run: |

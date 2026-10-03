@@ -17,9 +17,15 @@ export function modeLabel(mode: string | null | undefined): string {
 export interface AccessCommand {
   key: string;
   title: string;
+  /** Lệnh hiển thị (có thể kèm chỗ trống <…> cho Sếp thay). */
   cmd: string;
+  /** Chuỗi nút "Chép" đưa vào bộ nhớ tạm — không chứa chỗ trống <…> (dán vào bash thì `<` là chuyển hướng đầu vào, lệnh hỏng). */
+  copy: string;
   note: string;
 }
+
+/** Câu báo khi không chép được — dùng chung cho hộp mời và thẻ Truy cập từ xa (cùng câu, cùng mức 'warn'). */
+export const COPY_FAILED_TEXT = 'Không chép được — hãy bôi đen và chép tay.';
 
 /** Lệnh Owner chạy TRÊN MÁY CHỦ để đổi cách truy cập (Console không có nút đổi — tránh tự cắt truy cập). */
 export const ACCESS_COMMANDS: readonly AccessCommand[] = [
@@ -27,15 +33,17 @@ export const ACCESS_COMMANDS: readonly AccessCommand[] = [
     key: 'tailscale',
     title: 'Tailscale (khuyên dùng)',
     cmd: 'genh remote tailscale',
+    copy: 'genh remote tailscale',
     note: 'Khoảng 5 phút: cài app Tailscale trên điện thoại và đăng nhập cùng tài khoản.',
   },
-  { key: 'local', title: 'Chỉ máy này', cmd: 'genh remote --local', note: 'Chỉ mở được trên chính máy chủ — điện thoại và máy khác không vào được.' },
-  { key: 'lan', title: 'Mạng nội bộ (LAN)', cmd: 'genh remote --lan', note: 'Máy cùng Wi-Fi/mạng vào được — phải cài Chứng chỉ CA cho từng điện thoại.' },
+  { key: 'local', title: 'Chỉ máy này', cmd: 'genh remote --local', copy: 'genh remote --local', note: 'Chỉ mở được trên chính máy chủ — điện thoại và máy khác không vào được.' },
+  { key: 'lan', title: 'Mạng nội bộ (LAN)', cmd: 'genh remote --lan', copy: 'genh remote --lan', note: 'Máy cùng Wi-Fi/mạng vào được — phải cài Chứng chỉ CA cho từng điện thoại.' },
   {
     key: 'cloudflare',
     title: 'Cloudflare Tunnel',
     cmd: 'genh remote cloudflare --hostname <tên-miền>',
-    note: 'Dùng tên miền của Sếp qua Cloudflare.',
+    copy: 'genh remote cloudflare --hostname ',
+    note: 'Dùng tên miền của Sếp qua Cloudflare. Nút Chép chỉ chép phần đầu lệnh — dán vào rồi gõ tiếp tên miền, ví dụ gen.congty.vn.',
   },
 ];
 

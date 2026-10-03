@@ -156,7 +156,7 @@ func validateState(st State) error {
 			return err
 		}
 	}
-	if !strings.HasPrefix(st.PublicURL, "https://") || strings.ContainsAny(st.PublicURL, " \t\r\n\"'$`\\#") {
+	if !validPublicURL(st.PublicURL) {
 		return fmt.Errorf("GH_PUBLIC_URL %q không hợp lệ", st.PublicURL)
 	}
 	return nil
@@ -307,8 +307,27 @@ func defaultState(fresh bool) State {
 	return State{Mode: ModeLANLegacy, BindAddr: BindAll, PublicURL: PublicURL(ModeLANLegacy, "", DefaultPort)}
 }
 
+func validPublicURL(u string) bool {
+	return strings.HasPrefix(u, "https://") && len(u) > len("https://") && !strings.ContainsAny(u, " \t\r\n\"'$`\\#")
+}
+
+// upgradeState là trạng thái cho máy cài từ trước v0.1.46 (.env chưa có GH_BIND_ADDR): vẫn nghe mọi giao diện như
+// cũ (QD-12) nhưng GIỮ GH_SITE_ADDRESS / GH_PUBLIC_URL Owner đã tự đặt trong .env — mất chúng thì Caddy thôi khớp
+// Host của Owner và link mời/Telegram trỏ về localhost. Có tên site hợp lệ ⇒ chế độ lan (0.0.0.0 + tên đó).
+func upgradeState(old State) State {
+	ns := defaultState(false)
+	if old.SiteAddress != "" && ValidateSiteAddress(old.SiteAddress) == nil {
+		ns = State{Mode: ModeLAN, BindAddr: BindAll, SiteAddress: old.SiteAddress, PublicURL: PublicURL(ModeLAN, old.SiteAddress, DefaultPort)}
+	}
+	if validPublicURL(old.PublicURL) {
+		ns.PublicURL = old.PublicURL
+	}
+	return ns
+}
+
 // Ensure đảm bảo .env có GH_BIND_ADDR. Chưa có → fresh ? local/127.0.0.1 :
-// lan_legacy/0.0.0.0. Đã có → không đổi gì (changed=false).
+// lan_legacy/0.0.0.0 (giữ GH_SITE_ADDRESS/GH_PUBLIC_URL Owner đã đặt — upgradeState).
+// Đã có → không đổi gì (changed=false).
 func Ensure(composePath string, fresh bool) (State, bool, error) {
 	st, err := Read(composePath)
 	if err != nil {
@@ -317,7 +336,10 @@ func Ensure(composePath string, fresh bool) (State, bool, error) {
 	if st.BindAddr != "" {
 		return st, false, nil
 	}
-	ns := defaultState(fresh)
+	ns := defaultState(true)
+	if !fresh {
+		ns = upgradeState(st)
+	}
 	if err := Write(composePath, ns); err != nil {
 		return State{}, false, err
 	}

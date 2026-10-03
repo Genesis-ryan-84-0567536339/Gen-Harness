@@ -89,19 +89,27 @@ async def login(body: LoginIn, request: Request, response: Response,
                 db: AsyncSession = DB) -> dict[str, Any]:
     ip = client_ip(request)
     redis = request.app.state.redis
-    retry = await login_guard.blocked(redis, ip, body.email)
-    if retry is not None:
+    hit = await login_guard.blocked(redis, ip, body.email)
+    if hit is not None:
+        retry, scope = hit
         org_id = (await db.execute(text("SELECT id FROM core.organizations ORDER BY created_at LIMIT 1"))).scalar()
         if org_id is not None and await login_guard.log_once(redis, body.email):
             await actionlog.record(db, org_id=org_id, actor_type="system", actor_id="system:auth",
                                    action="auth.login_rate_limited", result="blocked",
-                                   detail={"email_masked": _mask_email(body.email)}, ip=ip)
+                                   detail={"email_masked": _mask_email(body.email), "scope": scope}, ip=ip)
             await db.commit()
         minutes = max(1, -(-retry // 60))
+        if scope == "ip":
+            # Bộ đếm IP chung cả mạng (docker-proxy/Tailscale Serve): Owner bấm Đặt lại mật khẩu cho nhân viên KHÔNG
+            # gỡ được — chỉ đợi, hoặc Owner chạy genh reset-password (xoá mọi bộ đếm IP).
+            raise ApiError(429, "LOGIN_RATE_LIMITED",
+                           f"Có quá nhiều lần đăng nhập sai từ cùng mạng — đợi khoảng {minutes} phút rồi thử lại",
+                           f"Đợi khoảng {minutes} phút. Owner: có thể gỡ ngay bằng lệnh genh reset-password trên "
+                           "máy chủ.", retry_after_s=retry, scope=scope)
         raise ApiError(429, "LOGIN_RATE_LIMITED",
                        f"Đăng nhập sai quá nhiều lần — đợi khoảng {minutes} phút rồi thử lại",
                        "Nhân viên: nhờ Owner bấm Đặt lại mật khẩu. Owner: chạy genh reset-password trên máy chủ.",
-                       retry_after_s=retry)
+                       retry_after_s=retry, scope=scope)
     found = await service.login(db, body.email, body.password)
     if found is None:
         await login_guard.record_failure(redis, ip, body.email)

@@ -125,6 +125,9 @@ async def test_open_lan_rings_once_and_closes(owner_api: Api, app, db, redis, li
     assert issue["action"] == "Chọn cách truy cập"
     [non_owner] = [i for i in await health.active_issues(db, org, is_owner=False) if i["kind"] == KIND]
     assert non_owner["action"] == "Nhờ Owner xử lý"
+    # Owner: thẻ đích chỉ có lệnh chạy trên máy chủ ⇒ không hứa "Bấm để chọn"; người khác: câu nhờ Owner.
+    assert "Bấm để chọn" not in issue["body"] and "chạy trên máy chủ" in issue["body"]
+    assert non_owner["body"] == "Cổng Console đang mở cho cả mạng — nhờ Owner chọn cách truy cập từ xa."
     # Owner tự chọn LAN (genh remote --lan) ⇒ đóng, không chuông mới.
     write_net(link, mode="lan", bind_addr="0.0.0.0")
     await evaluate(redis, org)

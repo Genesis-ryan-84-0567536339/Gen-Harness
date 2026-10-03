@@ -192,24 +192,32 @@ func (d RemoteDeps) readyURL(env *Env) string {
 	return localURL(env.Port, readyPath)
 }
 
+// undo (có thể nil) hoàn tác việc người gọi đã làm TRƯỚC applyAccess (vd đã bật `tailscale serve`): gọi ở MỌI
+// đường lỗi — kể cả lỗi sớm trước khi ghi .env — để "chưa đổi gì" là thật.
 func applyAccess(ctx context.Context, env *Env, deps RemoteDeps, ns access.State, out io.Writer, undo func()) error {
+	early := func(e error) error {
+		if undo != nil {
+			undo()
+		}
+		return e
+	}
 	composePath, err := env.LocatePath()
 	if err != nil {
-		return err
+		return early(err)
 	}
 	bundle, err := env.LoadSecrets()
 	if err != nil {
-		return err
+		return early(err)
 	}
 	overlay := EnvOverlay(bundle)
 	dir := composeDir(composePath)
 	prev, _ := access.Read(composePath)
 	snap, err := access.Take(composePath)
 	if err != nil {
-		return &OpError{Code: ErrCodeAccessWriteFailed, What: "Không đọc được cấu hình truy cập (.env)", Why: err.Error(), Next: "Kiểm quyền đọc thư mục " + dir + ".", Err: err}
+		return early(&OpError{Code: ErrCodeAccessWriteFailed, What: "Không đọc được cấu hình truy cập (.env)", Why: err.Error(), Next: "Kiểm quyền đọc thư mục " + dir + ".", Err: err})
 	}
 	if err := access.Write(composePath, ns); err != nil {
-		return &OpError{Code: ErrCodeAccessWriteFailed, What: "Không ghi được cấu hình truy cập (.env)", Why: err.Error(), Next: "Kiểm quyền ghi thư mục " + dir + " rồi thử lại.", Err: err}
+		return early(&OpError{Code: ErrCodeAccessWriteFailed, What: "Không ghi được cấu hình truy cập (.env)", Why: err.Error(), Next: "Kiểm quyền ghi thư mục " + dir + " rồi thử lại.", Err: err})
 	}
 	_ = writeNetworkStatus(env, ns, out)
 
@@ -383,22 +391,65 @@ func runRemoteCloudflare(ctx context.Context, env *Env, opts RemoteOptions, deps
 
 // ─── LAN ─────────────────────────────────────────────────────────────────
 
-// privateIPv4 trả IPv4 riêng (RFC1918) đầu tiên của máy.
+// lanIface là một card mạng cùng các địa chỉ của nó (tách khỏi net.Interface để test được).
+type lanIface struct {
+	Name  string
+	Up    bool
+	Loop  bool
+	Addrs []net.Addr
+}
+
+// virtualIfacePrefixes: card ảo của Docker/libvirt/k8s — có IP RFC1918 nhưng điện thoại trong LAN không tới được.
+var virtualIfacePrefixes = []string{"docker", "br-", "veth", "virbr", "cni", "flannel", "kube", "podman", "lxc", "lxd", "vmnet", "vboxnet"}
+
+// pickLANIPv4 chọn IPv4 riêng (RFC1918) đầu tiên trên card thật đang bật — bỏ card tắt, loopback và card ảo
+// (docker0, br-*, veth*, virbr*…): chọn nhầm IP 172.17.x của docker0 thì điện thoại không vào được.
+func pickLANIPv4(ifaces []lanIface) (string, bool) {
+	for _, it := range ifaces {
+		if !it.Up || it.Loop {
+			continue
+		}
+		virtual := false
+		for _, p := range virtualIfacePrefixes {
+			if strings.HasPrefix(it.Name, p) {
+				virtual = true
+				break
+			}
+		}
+		if virtual {
+			continue
+		}
+		for _, a := range it.Addrs {
+			ipn, ok := a.(*net.IPNet)
+			if !ok {
+				continue
+			}
+			if ip4 := ipn.IP.To4(); ip4 != nil && ip4.IsPrivate() {
+				return ip4.String(), true
+			}
+		}
+	}
+	return "", false
+}
+
+// privateIPv4 trả IPv4 riêng (RFC1918) đầu tiên của máy trên card mạng thật đang bật (pickLANIPv4).
 func privateIPv4() (string, error) {
-	addrs, err := net.InterfaceAddrs()
+	nifs, err := net.Interfaces()
 	if err != nil {
 		return "", err
 	}
-	for _, a := range addrs {
-		ipn, ok := a.(*net.IPNet)
-		if !ok {
+	ifaces := make([]lanIface, 0, len(nifs))
+	for _, ni := range nifs {
+		addrs, err := ni.Addrs()
+		if err != nil {
 			continue
 		}
-		if ip4 := ipn.IP.To4(); ip4 != nil && ip4.IsPrivate() {
-			return ip4.String(), nil
-		}
+		ifaces = append(ifaces, lanIface{Name: ni.Name, Up: ni.Flags&net.FlagUp != 0, Loop: ni.Flags&net.FlagLoopback != 0, Addrs: addrs})
 	}
-	return "", errors.New("không thấy địa chỉ IPv4 riêng (192.168.x.x / 10.x.x.x) nào")
+	if ip, ok := pickLANIPv4(ifaces); ok {
+		return ip, nil
+	}
+	return "", errors.New("không thấy địa chỉ IPv4 riêng (192.168.x.x / 10.x.x.x) nào trên card mạng đang bật (đã bỏ qua card ảo của Docker/VM)")
 }
 
 func runRemoteLAN(ctx context.Context, env *Env, opts RemoteOptions, deps RemoteDeps, out io.Writer) error {
@@ -483,14 +534,16 @@ func runRemoteLocal(ctx context.Context, env *Env, opts RemoteOptions, deps Remo
 			return &OpError{Code: ErrCodeRemoteNeedConfirm, What: "Đã huỷ — không đổi cách truy cập", Next: "Chạy lại `genh remote local --yes` khi chắc chắn."}
 		}
 	}
+	ns := access.State{Mode: access.ModeLocal, BindAddr: access.BindLocal, PublicURL: access.PublicURL(access.ModeLocal, "", port)}
+	if err := applyAccess(ctx, env, deps, ns, out, nil); err != nil {
+		return err
+	}
+	// Tắt `tailscale serve` CHỈ SAU KHI đã áp dụng xong: lỗi giữa chừng thì revert trả .env tailscale về và serve vẫn
+	// chạy — "đã trả về như cũ" là thật, không cắt truy cập từ xa.
 	if prev.Mode == access.ModeTailscale {
 		if err := runTailscaleServe(ctx, deps, []string{"serve", "--https=443", "off"}); err != nil {
 			_, _ = fmt.Fprintf(out, "  (cảnh báo: không tắt được `tailscale serve` — %v; tự tắt bằng `tailscale serve --https=443 off`)\n", err)
 		}
-	}
-	ns := access.State{Mode: access.ModeLocal, BindAddr: access.BindLocal, PublicURL: access.PublicURL(access.ModeLocal, "", port)}
-	if err := applyAccess(ctx, env, deps, ns, out, nil); err != nil {
-		return err
 	}
 	_, _ = fmt.Fprintf(out, "Xong. Chỉ máy này truy cập được: %s\n", ns.PublicURL)
 	return nil

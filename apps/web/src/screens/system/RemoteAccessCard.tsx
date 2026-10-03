@@ -5,18 +5,18 @@ import { Button } from '@gen-harness/ui';
 import { useCan } from '../../lib/permissions';
 import { toast } from '../../lib/toast';
 import { CardError, InlineError, Panel, SkeletonLines } from '../common';
-import { ACCESS_COMMANDS, modeLabel, modeWarning } from './accessModel';
+import { ACCESS_COMMANDS, COPY_FAILED_TEXT, modeLabel, modeWarning } from './accessModel';
 import { useAccess } from './queries';
 
 function copyText(text: string, ok: string) {
   // Console mở qua http (không an toàn) ⇒ không có navigator.clipboard — vẫn phải báo, không im lặng.
   if (!navigator.clipboard?.writeText) {
-    toast('Không chép được — bôi đen rồi chép tay.', 'bad');
+    toast(COPY_FAILED_TEXT, 'warn');
     return;
   }
   navigator.clipboard.writeText(text).then(
     () => toast(ok, 'ok'),
-    () => toast('Không chép được — bôi đen rồi chép tay.', 'bad'),
+    () => toast(COPY_FAILED_TEXT, 'warn'),
   );
 }
 
@@ -76,6 +76,17 @@ function AccessBody({ data }: { data: AccessInfo }) {
           </Button>
         </li>
       </ul>
+      {data.mode === 'unknown' ? (
+        <p className="muted-note" role="note" data-testid="access-unknown">
+          {data.can_manage ? (
+            <>
+              Chưa đọc được chế độ hiện tại — chạy <code className="mono">genh remote status</code> trên máy chủ để cập nhật.
+            </>
+          ) : (
+            'Chưa đọc được chế độ hiện tại — nhờ Owner kiểm tra trên máy chủ.'
+          )}
+        </p>
+      ) : null}
       {warning ? (
         danger ? (
           <InlineError>{warning}</InlineError>
@@ -94,7 +105,7 @@ function AccessBody({ data }: { data: AccessInfo }) {
                 <span>{c.title}</span>
                 <span className="offsite-cmd__row">
                   <code className="mono">{c.cmd}</code>
-                  <Button variant="ghost" className="btn-27" icon="ph ph-copy" onClick={() => copyText(c.cmd, 'Đã chép lệnh.')} aria-label={`Chép lệnh ${c.cmd}`}>
+                  <Button variant="ghost" className="btn-27" icon="ph ph-copy" onClick={() => copyText(c.copy, c.copy === c.cmd ? 'Đã chép lệnh.' : 'Đã chép phần đầu lệnh — gõ tiếp tên miền rồi chạy.')} aria-label={`Chép lệnh ${c.cmd}`}>
                     Chép
                   </Button>
                 </span>

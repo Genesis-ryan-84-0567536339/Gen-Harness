@@ -3,6 +3,7 @@ import type { TempPasswordResult } from '@gen-harness/contracts';
 import { Button, Dialog, Icon } from '@gen-harness/ui';
 import { errorDetail } from '../../lib/errorText';
 import { toast } from '../../lib/toast';
+import { COPY_FAILED_TEXT } from './accessModel';
 import { useAccess } from './queries';
 import { inviteMessage } from './usersModel';
 
@@ -13,14 +14,22 @@ import { inviteMessage } from './usersModel';
  */
 export function TempPasswordDialog({ title, result, onClose }: { title: string; result: TempPasswordResult; onClose: () => void }) {
   const [copied, setCopied] = useState(false);
-  const access = useAccess();
+  const access = useAccess({ pollWhileLocalMs: 5_000 });
   const loginUrl = access.data?.login_url ?? null;
   const copy = async () => {
+    // Địa chỉ còn là localhost (hoặc chưa đọc được) ⇒ đọc lại NGAY lúc chép: Owner vừa chạy `genh remote …` theo cảnh
+    // báo đỏ thì bản trong bộ nhớ đệm (30 giây) còn cũ — chép bản cũ là gửi nhân viên địa chỉ không mở được. Địa chỉ đã là
+    // từ xa thì chép ngay (không chờ mạng: Safari chỉ cho chép khi còn trong lượt bấm).
+    let url = loginUrl;
+    if (!access.data || access.data.public_url_local) {
+      const fresh = await access.refetch();
+      url = fresh.data?.login_url ?? loginUrl;
+    }
     try {
-      await navigator.clipboard.writeText(inviteMessage(result, loginUrl));
+      await navigator.clipboard.writeText(inviteMessage(result, url));
       setCopied(true);
     } catch {
-      toast('Không chép được — hãy bôi đen và chép tay.', 'warn');
+      toast(COPY_FAILED_TEXT, 'warn');
     }
   };
   return (

@@ -640,7 +640,7 @@ function RemoteRow({ data, done }: { data: Results; done: boolean }) {
       n={7}
       title="Truy cập từ xa"
       done={done}
-      todo="Trên máy chủ chạy genh remote tailscale (khuyên dùng), mở Console trên điện thoại bằng địa chỉ ở Cài đặt › Sao lưu & cập nhật › Truy cập từ xa, rồi bấm Kiểm tra ở đó."
+      todo="Trên máy chủ chạy genh remote tailscale (khuyên dùng). Trên điện thoại mở địa chỉ ở Cài đặt › Sao lưu & cập nhật › Truy cập từ xa, đăng nhập, vào Hướng dẫn › Việc Sếp cần làm rồi bấm Kiểm tra ở dòng này."
       results={<ResultCell check={res} okText={okText} />}
     >
       <div className="boss-actions">
@@ -648,7 +648,7 @@ function RemoteRow({ data, done }: { data: Results; done: boolean }) {
           Kiểm tra
         </Button>
       </div>
-      <p className="muted-note">Bấm nút này TRÊN ĐIỆN THOẠI sau khi mở Console bằng địa chỉ từ xa</p>
+      <p className="muted-note">Bấm nút này TRÊN ĐIỆN THOẠI sau khi mở Console bằng địa chỉ từ xa.</p>
       {run.isError ? <InlineError detail={errorDetail(run.error)}>{errorText(run.error)}</InlineError> : null}
       <TransientNote check={run.data} />
     </Row>

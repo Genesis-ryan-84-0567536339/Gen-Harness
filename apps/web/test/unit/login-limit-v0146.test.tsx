@@ -24,12 +24,31 @@ describe('LoginPage giới hạn đăng nhập', () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it('429 LOGIN_RATE_LIMITED: câu thân thiện, số phút và mã lỗi trong Chi tiết kỹ thuật', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => problem(429, { status: 429, code: 'LOGIN_RATE_LIMITED', title: 'x', retry_after_s: 600 })));
+    vi.stubGlobal('fetch', vi.fn(async () => problem(429, { status: 429, code: 'LOGIN_RATE_LIMITED', title: 'x', retry_after_s: 600, scope: 'email' })));
     submit();
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('Đăng nhập sai quá nhiều lần'));
     expect(screen.getByRole('alert').textContent).toContain('10 phút');
     const details = screen.getByText('Chi tiết kỹ thuật').closest('details');
     expect(details?.textContent).toContain('LOGIN_RATE_LIMITED');
+    expect(details?.className).toBe('tech-detail');
+  });
+
+  it('scope=email: Owner được chỉ chạy genh reset-password, nhân viên nhờ Owner Đặt lại mật khẩu', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => problem(429, { status: 429, code: 'LOGIN_RATE_LIMITED', title: 'x', retry_after_s: 600, scope: 'email' })));
+    submit();
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('Owner: chạy genh reset-password trên máy chủ'));
+    expect(screen.getByRole('alert').textContent).toContain('Nhân viên: nhờ Owner bấm "Đặt lại mật khẩu"');
+  });
+
+  it('scope=ip: nói "từ cùng mạng", không hứa Owner đặt lại mật khẩu sẽ gỡ được', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => problem(429, { status: 429, code: 'LOGIN_RATE_LIMITED', title: 'x', retry_after_s: 120, scope: 'ip' })));
+    submit();
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('từ cùng mạng'));
+    const text = screen.getByRole('alert').textContent ?? '';
+    expect(text).toContain('2 phút');
+    expect(text).not.toContain('Đặt lại mật khẩu');
+    expect(text).toContain('genh reset-password');
+    expect(screen.getByText('Chi tiết kỹ thuật').closest('details')?.textContent).toContain('LOGIN_RATE_LIMITED (ip)');
   });
 
   it('INVALID_CREDENTIALS giữ câu cũ, không có Chi tiết kỹ thuật', async () => {

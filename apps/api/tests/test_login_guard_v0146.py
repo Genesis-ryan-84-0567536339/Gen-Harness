@@ -1,4 +1,5 @@
-"""v0.1.46: giới hạn đăng nhập sai (10 lần / 15 phút theo IP và email), argon2 giả, fail-open khi Redis lỗi."""
+"""v0.1.46: giới hạn đăng nhập sai (10 lần / 15 phút theo email, 100 theo IP — chống dội), argon2 giả, fail-open khi
+Redis lỗi."""
 
 import hashlib
 from typing import Any
@@ -10,6 +11,7 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 from sqlalchemy import text
 
 from gh.auth import login_guard
+from gh.config import get_settings
 from gh.db import admin_sessionmaker
 from tests.conftest import OWNER, Api, verify_pin
 
@@ -33,15 +35,50 @@ async def test_eleventh_attempt_blocked_even_with_correct_password(owner_api: Ap
     r = await _login(app, OWNER["email"], OWNER["password"], IP_A)
     assert r.status_code == 429, r.text
     body = r.json()
-    assert body["code"] == "LOGIN_RATE_LIMITED" and body["retry_after_s"] > 0
-    assert isinstance(body["detail"], str)
+    assert body["code"] == "LOGIN_RATE_LIMITED" and body["retry_after_s"] > 0 and body["scope"] == "email"
+    assert isinstance(body["detail"], str) and "genh reset-password" in body["detail"]
 
 
-async def test_ip_limit_across_unknown_emails(owner_api: Api, app: object) -> None:
-    for i in range(10):
+async def test_ip_limit_across_unknown_emails(owner_api: Api, app: object, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ngưỡng IP (chống dội) vẫn chặn khi vượt — hạ ngưỡng xuống 12 để test nhanh (mặc định 100)."""
+    monkeypatch.setattr(get_settings(), "login_ip_fail_limit", 12)
+    for i in range(12):
         assert (await _login(app, f"khong{i}@example.vn", "x" * 12, IP_A)).status_code == 401
-    r = await _login(app, "khong10@example.vn", "x" * 12, IP_A)
+    r = await _login(app, "khong12@example.vn", "x" * 12, IP_A)
     assert r.status_code == 429 and r.json()["code"] == "LOGIN_RATE_LIMITED"
+    assert r.json()["scope"] == "ip"
+    # Câu cho scope=ip không hứa "nhờ Owner bấm Đặt lại mật khẩu" (không gỡ được bộ đếm IP chung).
+    assert "Đặt lại mật khẩu" not in r.json()["detail"] and "genh reset-password" in r.json()["detail"]
+    assert (await _login(app, "khong12@example.vn", "x" * 12, IP_B)).status_code == 401
+
+
+async def test_shared_ip_failures_on_one_account_do_not_block_another(owner_api: Api, app: object) -> None:
+    """Sau docker-proxy/Tailscale Serve mọi người chung một IP: 10 lần sai ở tài khoản A từ IP X không được chặn mật
+    khẩu đúng của tài khoản B (Owner) từ chính IP X."""
+    await verify_pin(owner_api)
+    r = await owner_api.send("POST", "/users", {"display_name": "Lan", "email": "lan@example.vn", "role": "operator"})
+    assert r.status_code == 201, r.text
+    for _ in range(10):
+        assert (await _login(app, "lan@example.vn", "sai-mat-khau", IP_A)).status_code == 401
+    r = await _login(app, "lan@example.vn", "sai-mat-khau", IP_A)
+    assert r.status_code == 429 and r.json()["scope"] == "email"
+    assert (await _login(app, OWNER["email"], OWNER["password"], IP_A)).status_code == 200
+
+
+async def test_counter_keys_always_have_ttl(owner_api: Api, app: object, redis: Redis) -> None:
+    await _login(app, "ai-do@example.vn", "x" * 12, IP_A)
+    for k in (login_guard.email_key("ai-do@example.vn"), login_guard.ip_key("203.0.113.7")):
+        assert 0 < await redis.ttl(k) <= get_settings().login_fail_window_seconds
+
+
+async def test_blocked_restores_missing_ttl(redis: Redis) -> None:
+    """Khoá lỡ mất TTL (tiến trình chết giữa chừng ở bản cũ) không được khoá vĩnh viễn."""
+    k = login_guard.email_key("mat-ttl@example.vn")
+    await redis.set(k, 10)
+    assert await redis.ttl(k) == -1
+    hit = await login_guard.blocked(redis, None, "mat-ttl@example.vn")
+    assert hit is not None and hit[1] == "email"
+    assert 0 < await redis.ttl(k) <= get_settings().login_fail_window_seconds
 
 
 async def test_email_limit_holds_across_ips(owner_api: Api, app: object) -> None:
@@ -143,12 +180,14 @@ async def test_rate_limited_actionlog_single_row(owner_api: Api, app: object) ->
     assert n == 1
 
 
-async def test_genh_reset_password_unblocks_owner_shared_ip(owner_api: Api, app: object, redis: Redis) -> None:
-    """Sau Tailscale Serve mọi người chung một IP: 10 lần sai của nhân viên khoá luôn Owner theo IP — `genh
-    reset-password` phải gỡ cả bộ đếm IP (không chỉ email Owner), không động tới khoá khác trong Redis."""
+async def test_genh_reset_password_unblocks_owner_shared_ip(owner_api: Api, app: object, redis: Redis,
+                                                         monkeypatch: pytest.MonkeyPatch) -> None:
+    """Sau Tailscale Serve mọi người chung một IP: đủ lần sai của nhiều người chạm ngưỡng IP (chống dội) khoá luôn
+    Owner — `genh reset-password` phải gỡ cả bộ đếm IP (không chỉ email Owner), không động tới khoá khác trong Redis."""
     from gh.auth.reset_owner import _clear_login_counter
 
-    for i in range(10):
+    monkeypatch.setattr(get_settings(), "login_ip_fail_limit", 12)
+    for i in range(12):
         assert (await _login(app, f"nv{i}@example.vn", "x" * 12, IP_A)).status_code == 401
     for _ in range(3):
         await _login(app, OWNER["email"], "sai-mat-khau", IP_B)

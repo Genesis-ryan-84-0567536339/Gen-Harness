@@ -2778,7 +2778,8 @@ chỉ `localhost` (nhân viên mở không được), đăng nhập không giớ
 - **API**: `GET /system/access` (public_url, login_url, public_url_local, mode, bind_addr, site_address, checked_at, can_manage); boss check
   `remote_access` (ROWS dòng 7, "Truy cập từ xa", **bắt buộc** ⇒ `required_total` = 6; lỗi `REMOTE_NOT_CONFIGURED`, `REMOTE_OPENED_ON_SERVER`;
   quyết định theo header Origin). Web: thẻ "Truy cập từ xa" trong Cài đặt › Sao lưu & cập nhật; hộp mời hiện cảnh báo đỏ khi địa chỉ chỉ mở trên máy chủ.
-- **Giới hạn đăng nhập**: 10 lần sai/15 phút theo IP và theo email (429 `LOGIN_RATE_LIMITED`, `retry_after_s`); kiểm trước khi kiểm mật khẩu;
+- **Giới hạn đăng nhập**: 10 lần sai/15 phút theo email, 100 lần sai/15 phút theo IP (chống dội — sau docker-proxy/Tailscale Serve mọi
+  người chung một IP nguồn) (429 `LOGIN_RATE_LIMITED`, `retry_after_s`, `scope` = `email`|`ip`); kiểm trước khi kiểm mật khẩu;
   đúng mật khẩu chỉ xoá bộ đếm email; **Redis lỗi ⇒ fail-open** (có log). Email không tồn tại/bị khoá vẫn chạy argon2 với hash giả
   (không lộ qua thời gian). Phiên có hạn tuyệt đối 30 ngày từ lúc tạo (trượt 7 ngày bên trong). TOTP để sau.
 - **Sửa khi tích hợp (F-1):** `genh reset-password` trước chỉ xoá bộ đếm email Owner — sau Tailscale Serve mọi người chung
@@ -2792,6 +2793,30 @@ chỉ `localhost` (nhân viên mở không được), đăng nhập không giớ
   trước uninstall chạy `genh remote --local`. E2E-upgrade: từ bản cũ lên vẫn 0.0.0.0/lan_legacy, đúng 1 chuông mỗi Owner, update lại + chờ 2 phút không thêm chuông.
   CI `images`: `host_ip` compose = 127.0.0.1 (và 0.0.0.0 khi `GH_BIND_ADDR=0.0.0.0`), `caddy validate` với 3 giá trị `GH_SITE_ADDRESS`.
   Mọi bước mới gate theo `genh help | grep 'genh remote'` nên chạy tay cho tag cũ không đỏ.
+
+### Sửa sau review (trước merge)
+
+- **CI windows-2022 đỏ**: 2 test mới kiểm quyền 0644 (`hostlink/network_test.go`, `access/access_test.go`) nay bỏ qua trên Windows
+  (Windows báo 0666) như các test quyền khác.
+- **Bộ đếm IP chung khoá cả tổ chức**: ngưỡng IP tách riêng `login_ip_fail_limit` = 100 (email vẫn 10); 10 lần sai ở tài khoản A từ IP X
+  không chặn mật khẩu đúng của tài khoản B từ IP X (pytest). Khoá đếm luôn có TTL (`SET NX EX` trước `INCR`; `blocked()` đặt lại TTL nếu mất).
+  429 trả `scope`; màn đăng nhập nói đúng cách gỡ: `email` → "Nhân viên: nhờ Owner bấm Đặt lại mật khẩu… Owner: chạy genh reset-password";
+  `ip` → "nhiều lần sai từ cùng mạng — đợi N phút" (không hứa Owner đặt lại mật khẩu gỡ được). "Chi tiết kỹ thuật" dùng `.tech-detail`.
+- **LAN mở bằng IP không vào được**: trình duyệt không gửi SNI khi mở bằng IP ⇒ Caddy (cả bản repo và bản nhúng) thêm
+  `default_sni {$GH_SITE_ADDRESS:localhost}` (nhãn `gh.caddyfile-sha` = `cc05c7586654`; đã thử caddy v2.10.2: không SNI trước lỗi `internal error`,
+  nay bắt tay được). `genh remote lan` tự dò IP bỏ qua card tắt, loopback, card ảo (docker*, br-*, veth*, virbr*…). E2E-install thêm bước
+  `genh remote lan --yes` (không `--name`) rồi curl `https://<IP>:<cổng>/api/v1/ready` không `--resolve`.
+- **Nâng cấp giữ địa chỉ Owner tự đặt**: máy cũ có `GH_SITE_ADDRESS`/`GH_PUBLIC_URL` trong `.env` (chưa có `GH_BIND_ADDR`) nay giữ nguyên hai dòng
+  (có site hợp lệ ⇒ chế độ `lan`, 0.0.0.0); trước đây bị xoá/ghi đè về localhost ở lần chạy genh đầu tiên sau nâng cấp.
+- **Hộp mời**: bấm "Chép lời nhắn" luôn đọc lại địa chỉ mới (không dùng bộ nhớ đệm 30 giây) và hỏi lại mỗi 5 giây khi địa chỉ còn là localhost —
+  chạy `genh remote tailscale` rồi chép lại là ra địa chỉ Tailscale, cảnh báo đỏ tự tắt.
+- **Chữ**: Hướng dẫn bước 10 chỉ đúng chỗ có lời nhắn + cảnh báo (Đội ngũ › Người dùng › "Mời người dùng"/"Đặt lại mật khẩu");
+  chuông "Cổng đang mở cho cả mạng": Owner "Bấm để xem lệnh… (chạy trên máy chủ)", người khác "nhờ Owner chọn cách truy cập từ xa";
+  dòng 7 Việc Sếp cần làm nói rõ bấm Kiểm tra ở chính dòng này trên điện thoại; thẻ Truy cập từ xa: chế độ "Chưa rõ" chỉ `genh remote status`,
+  nút Chép lệnh Cloudflare không chép `<tên-miền>`; câu "không chép được" thống nhất.
+- **`genh remote`**: `local` chỉ tắt `tailscale serve` SAU khi áp dụng xong (lỗi giữa chừng thì serve vẫn chạy như cũ); `tailscale` lỗi sớm
+  (chưa ghi được `.env`) thì tắt lại serve vừa bật.
+- Chưa đổi: dòng 7 "Truy cập từ xa" vẫn **bắt buộc** (6 dòng) — Owner chỉ dùng trên máy chủ sẽ không đạt đủ; để người điều phối quyết.
 
 ### Kiểm tra
 
@@ -2808,8 +2833,10 @@ chỉ `localhost` (nhân viên mở không được), đăng nhập không giớ
 
 ### Rủi ro / giới hạn
 
-- Sau Tailscale Serve hoặc Docker rootless, nhiều người có thể **chung IP nguồn** ⇒ bộ đếm IP chung: một người gõ sai nhiều lần có thể khoá cả nhóm
-  15 phút. Owner gỡ bằng `genh reset-password` (xoá cả bộ đếm email Owner lẫn MỌI bộ đếm IP — sửa khi tích hợp) hoặc đợi 15 phút.
+- Sau docker-proxy (mặc định 127.0.0.1), Tailscale Serve hoặc cloudflared, mọi người **chung IP nguồn** ⇒ bộ đếm IP là bộ đếm chung cả tổ chức;
+  vì vậy ngưỡng IP là 100 (chỉ chống dội), lớp chính là 10 lần/email. Vượt 100 lần sai/15 phút từ cùng mạng thì cả nhóm bị chặn tạm — Owner gỡ
+  bằng `genh reset-password` (xoá bộ đếm email Owner lẫn MỌI bộ đếm IP) hoặc đợi. Ở Cloudflare, người lạ vẫn khoá được MỘT tài khoản bằng 10 lần
+  sai (khoá theo email) — Owner gỡ cho nhân viên bằng "Đặt lại mật khẩu", cho mình bằng `genh reset-password`.
 - Nhân viên dùng Tailscale phải được mời vào mạng Tailscale của Sếp.
 - Chế độ LAN cần cài CA trên từng điện thoại và (Fedora Server) mở firewalld cho cổng đã chọn.
 - Không có nút một chạm "Chỉ cho máy này" trong Console (tránh Owner tự cắt truy cập khi đang dùng điện thoại): đổi chế độ bằng `genh remote` trên máy chủ.

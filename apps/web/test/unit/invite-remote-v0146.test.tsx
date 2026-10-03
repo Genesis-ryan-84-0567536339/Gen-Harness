@@ -103,6 +103,24 @@ describe('TempPasswordDialog', () => {
     expect(msg).toContain('abcd-efgh-jkmn');
   });
 
+  it('Owner chạy genh remote rồi bấm chép lại → lời nhắn lấy địa chỉ MỚI (không dùng bộ nhớ đệm), cảnh báo đỏ tắt', async () => {
+    let current: AccessInfo = ACCESS_LOCAL;
+    stubAccess(() => json(200, current));
+    const writeText = vi.fn(async () => {});
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
+    renderDialog();
+    await screen.findByTestId('invite-local-warning');
+    const btn = screen.getByRole('button', { name: /Chép lời nhắn gửi nhân viên/ });
+    fireEvent.click(btn);
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    expect(String((writeText.mock.calls[0] as unknown[])[0])).toContain('Địa chỉ: https://localhost:8443/login');
+    current = ACCESS_TS; // Owner vừa chạy `genh remote tailscale` trên máy chủ
+    fireEvent.click(screen.getByRole('button', { name: /Đã chép|Chép lời nhắn gửi nhân viên/ }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(2));
+    expect(String((writeText.mock.calls[1] as unknown[])[0])).toContain('Địa chỉ: https://gen.tail1234.ts.net/login');
+    await waitFor(() => expect(screen.queryByTestId('invite-local-warning')).toBeNull());
+  });
+
   it('lỗi tải access → cảnh báo đỏ + Chi tiết kỹ thuật, không render object; lời nhắn bỏ dòng địa chỉ', async () => {
     stubAccess(() => json(409, { code: 'ACCESS_DOWN', title: 'Không đọc được địa chỉ' }));
     const writeText = vi.fn(async () => {});
@@ -156,6 +174,26 @@ describe('RemoteAccessCard', () => {
     const card = await screen.findByRole('region', { name: 'Truy cập từ xa' });
     expect(await within(card).findByText('Đang mở cho cả mạng (bản cài cũ)')).toBeInTheDocument();
     expect(within(card).getByRole('alert')).toHaveTextContent('Mọi máy cùng mạng');
+  });
+
+  it('Cloudflare: nút Chép không chép chỗ trống <tên-miền> (dán vào bash `<` là chuyển hướng, lệnh hỏng)', async () => {
+    const writeText = vi.fn(async () => {});
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
+    renderCard('owner', ACCESS_TS);
+    const card = await screen.findByRole('region', { name: 'Truy cập từ xa' });
+    fireEvent.click(await within(card).findByRole('button', { name: 'Chép lệnh genh remote cloudflare --hostname <tên-miền>' }));
+    await waitFor(() => expect(writeText).toHaveBeenCalled());
+    const copied = String((writeText.mock.calls[0] as unknown[])[0]);
+    expect(copied).toBe('genh remote cloudflare --hostname ');
+    expect(copied).not.toContain('<');
+    expect(within(card).getByText(/gõ tiếp tên miền, ví dụ gen\.congty\.vn/)).toBeInTheDocument();
+  });
+
+  it('chế độ "Chưa rõ" (thiếu run/network-status.json): Owner được chỉ chạy genh remote status', async () => {
+    renderCard('owner', { ...ACCESS_LOCAL, mode: 'unknown' });
+    const card = await screen.findByRole('region', { name: 'Truy cập từ xa' });
+    expect(await within(card).findByText('Chưa rõ')).toBeInTheDocument();
+    expect(within(card).getByTestId('access-unknown')).toHaveTextContent('chạy genh remote status trên máy chủ để cập nhật');
   });
 
   it('lỗi tải → CardError, không render object', async () => {

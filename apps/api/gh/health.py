@@ -116,6 +116,8 @@ NON_OWNER_BODIES = {
     ("telegram.failed", "TELEGRAM_CHAT_NOT_FOUND"): f"{_TELEGRAM_NON_OWNER} và chọn lại chat_id.",
     ("telegram.failed", "TELEGRAM_BOT_BLOCKED"): f"{_TELEGRAM_NON_OWNER}; Owner mở bot trên Telegram, bấm Bắt đầu "
                                                  "(Start) rồi bấm Gửi thử.",
+    # v0.1.46 (F-21): fingerprint cố định "lan_legacy"; người không phải Owner không chạy được `genh remote`.
+    ("network.open_lan", "lan_legacy"): "Cổng Console đang mở cho cả mạng — nhờ Owner chọn cách truy cập từ xa.",
 }
 
 
@@ -652,8 +654,10 @@ async def _eval_autostart(db: AsyncSession, org_id: uuid.UUID, redis: Any) -> No
 
 ACCESS_LINK = "/system?tab=storage&focus=access"
 OPEN_LAN_TITLE = "Cổng đang mở cho cả mạng"
-OPEN_LAN_BODY = ("Mọi máy cùng mạng (Wi-Fi văn phòng, khách…) đều thấy trang đăng nhập Gen-Harness. Bấm để chọn: chỉ "
-                 "cho máy này, dùng Tailscale (khuyên dùng) hoặc giữ mở cho mạng nội bộ.")
+# Thẻ đích chỉ có LỆNH chạy trên máy chủ (không có nút chọn một chạm) ⇒ "Bấm để xem lệnh…", không hứa "Bấm để chọn".
+OPEN_LAN_BODY = ("Mọi máy cùng mạng (Wi-Fi văn phòng, khách…) đều thấy trang đăng nhập Gen-Harness. Bấm để xem lệnh "
+                 "chọn cách truy cập (chạy trên máy chủ): Tailscale (khuyên dùng), chỉ máy này, hoặc giữ mở cho mạng "
+                 "nội bộ.")
 
 
 async def _eval_network(db: AsyncSession, org_id: uuid.UUID, redis: Any) -> None:

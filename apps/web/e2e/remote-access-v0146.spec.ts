@@ -81,6 +81,9 @@ test.describe('Truy cập từ xa (v0.1.46)', () => {
     const rows = strip.getByTestId('needs-boss-row');
     await expect(rows).toHaveCount(1);
     await expect(rows.first()).toContainText('Cổng đang mở cho cả mạng');
+    // Thẻ đích chỉ có lệnh chạy trên máy chủ ⇒ không hứa "Bấm để chọn".
+    await expect(rows.first()).toContainText('Bấm để xem lệnh chọn cách truy cập (chạy trên máy chủ)');
+    await expect(rows.first()).not.toContainText('Bấm để chọn');
     await rows.first().getByRole('link', { name: 'Chọn cách truy cập' }).click();
     await expect(page).toHaveURL(/\/system\?tab=storage&focus=access$/);
     const card = page.getByRole('region', { name: 'Truy cập từ xa' });
@@ -107,6 +110,8 @@ test.describe('Truy cập từ xa (v0.1.46)', () => {
       await page.goto('/overview');
       const row = page.getByRole('region', { name: 'Cần Sếp xử lý' }).getByTestId('needs-boss-row').filter({ hasText: 'Cổng đang mở cho cả mạng' });
       await expect(row).toHaveCount(1);
+      await expect(row).toContainText('Cổng Console đang mở cho cả mạng — nhờ Owner chọn cách truy cập từ xa.');
+      await expect(row).not.toContainText('Bấm để');
       await row.getByRole('link', { name: 'Nhờ Owner xử lý' }).click();
       await expect(page).toHaveURL(/\/system\?tab=storage&focus=access$/);
       const card = page.getByRole('region', { name: 'Truy cập từ xa' });
@@ -145,6 +150,37 @@ test.describe('Truy cập từ xa (v0.1.46)', () => {
     await expect(row.getByTestId('boss-result')).toContainText('Đạt · đã mở Console từ gen-harness.tail1234.ts.net');
     await expect(row).toContainText('Xong');
     await expect(page.getByText('Đã đạt 1/6 dòng bắt buộc')).toBeVisible();
+    await expect(page.getByText('[object Object]')).toHaveCount(0);
+  });
+
+  test('đăng nhập bị giới hạn (429 LOGIN_RATE_LIMITED): câu thân thiện theo scope + Chi tiết kỹ thuật', async ({ page, context }) => {
+    await context.clearCookies();
+    let scope = 'email';
+    await page.route('**/api/v1/auth/login', (route) =>
+      route.fulfill({
+        status: 429,
+        contentType: 'application/problem+json',
+        body: JSON.stringify({ status: 429, code: 'LOGIN_RATE_LIMITED', title: 'Đăng nhập sai quá nhiều lần', retry_after_s: 540, scope }),
+      }),
+    );
+    await page.goto('/login');
+    await page.getByLabel('Email').fill(OWNER.email);
+    await page.getByLabel('Mật khẩu', { exact: true }).fill('mat-khau-sai-123');
+    await page.getByRole('button', { name: /Đăng nhập/ }).click();
+    const alert = page.getByRole('alert').filter({ hasText: 'Đăng nhập sai quá nhiều lần' });
+    await expect(alert).toContainText('Đợi khoảng 9 phút');
+    await expect(alert).toContainText('Owner: chạy genh reset-password trên máy chủ');
+    const tech = page.locator('details.tech-detail', { hasText: 'Chi tiết kỹ thuật' });
+    await expect(tech).toBeVisible();
+    await tech.locator('summary').click();
+    await expect(tech).toContainText('LOGIN_RATE_LIMITED');
+    // Bộ đếm chung cả mạng: không hứa "Owner đặt lại mật khẩu" gỡ được.
+    scope = 'ip';
+    await page.getByLabel('Mật khẩu', { exact: true }).fill('mat-khau-sai-123');
+    await page.getByRole('button', { name: /Đăng nhập/ }).click();
+    const ipAlert = page.getByRole('alert').filter({ hasText: 'từ cùng mạng' });
+    await expect(ipAlert).toBeVisible();
+    await expect(ipAlert).not.toContainText('Đặt lại mật khẩu');
     await expect(page.getByText('[object Object]')).toHaveCount(0);
   });
 });

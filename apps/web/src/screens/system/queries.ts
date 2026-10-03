@@ -60,8 +60,15 @@ export const useSystemHealth = (enabled: boolean) =>
   });
 
 /** v0.1.46 (F-21): `GET /system/access` (`system.read`) — hộp mời và thẻ "Truy cập từ xa". */
-export const useAccess = () =>
-  useQuery({ queryKey: qkSystem.access, queryFn: ({ signal }) => api.system.access(signal), staleTime: 30_000 });
+export const useAccess = (opts?: { pollWhileLocalMs?: number }) =>
+  useQuery({
+    queryKey: qkSystem.access,
+    queryFn: ({ signal }) => api.system.access(signal),
+    staleTime: 30_000,
+    // v0.1.46: hộp mời báo đỏ "địa chỉ chỉ mở được trên máy chủ" — Owner chạy `genh remote …` rồi quay lại; hỏi lại
+    // định kỳ để cảnh báo tự tắt khi địa chỉ đã đổi (không có refetchOnWindowFocus).
+    refetchInterval: opts?.pollWhileLocalMs ? (q) => (q.state.data?.public_url_local ? opts.pollWhileLocalMs : false) : undefined,
+  });
 
 export const usePermissions = () => useQuery({ queryKey: qkSystem.permissions, queryFn: ({ signal }) => api.permissions.get(signal) });
 

@@ -3,6 +3,7 @@ package ops
 import (
 	"context"
 	"errors"
+	"net"
 	"os"
 	"strings"
 	"testing"
@@ -333,4 +334,80 @@ func mustRead(t *testing.T, p string) string {
 		t.Fatal(err)
 	}
 	return string(b)
+}
+
+func TestPickLANIPv4_SkipsVirtualAndDownInterfaces(t *testing.T) {
+	ipn := func(c string) net.Addr {
+		ip, n, err := net.ParseCIDR(c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		n.IP = ip
+		return n
+	}
+	ifaces := []lanIface{
+		{Name: "lo", Up: true, Loop: true, Addrs: []net.Addr{ipn("127.0.0.1/8")}},
+		{Name: "docker0", Up: true, Addrs: []net.Addr{ipn("172.17.0.1/16")}},
+		{Name: "br-3f2a", Up: true, Addrs: []net.Addr{ipn("172.18.0.1/16")}},
+		{Name: "veth12ab", Up: true, Addrs: []net.Addr{ipn("172.17.0.5/16")}},
+		{Name: "virbr0", Up: true, Addrs: []net.Addr{ipn("192.168.122.1/24")}},
+		{Name: "eth1", Up: false, Addrs: []net.Addr{ipn("10.0.0.9/24")}},
+		{Name: "tailscale0", Up: true, Addrs: []net.Addr{ipn("100.101.102.103/32")}},
+		{Name: "wlan0", Up: true, Addrs: []net.Addr{ipn("fe80::1/64"), ipn("192.168.1.20/24")}},
+	}
+	if got, ok := pickLANIPv4(ifaces); !ok || got != "192.168.1.20" {
+		t.Fatalf("pickLANIPv4 = %q %v, muốn 192.168.1.20", got, ok)
+	}
+	if _, ok := pickLANIPv4(ifaces[:6]); ok {
+		t.Fatal("chỉ có card ảo/tắt mà vẫn chọn được IP")
+	}
+}
+
+// `genh remote local` từ tailscale mà `up -d` lỗi: revert trả .env tailscale về — serve KHÔNG được tắt trước đó, nếu
+// không truy cập từ xa bị cắt trong khi genh báo "đã trả về như cũ".
+func TestRemoteLocal_UpFails_KeepsTailscaleServe(t *testing.T) {
+	env, cp := remoteEnv(t)
+	if err := access.Write(cp, access.State{Mode: access.ModeTailscale, BindAddr: access.BindLocal, SiteAddress: "gen.ts.net", PublicURL: "https://gen.ts.net"}); err != nil {
+		t.Fatal(err)
+	}
+	before := mustRead(t, access.EnvPath(cp))
+	fr := &fake.Runner{Responses: []fake.Response{
+		{Match: cmdNamed("tailscale"), Output: []byte("")},
+		{Match: matchUp, Err: errors.New("cổng bận")},
+	}}
+	err := RunRemote(context.Background(), env, RemoteOptions{Action: "local", Yes: true}, remoteDeps(t, fr, true), &strings.Builder{})
+	if oe := asOpError(t, err); oe.Code != ErrCodeRemoteUpFailed {
+		t.Errorf("code = %s", oe.Code)
+	}
+	if callIndex(fr, exactArgs("serve", "--https=443", "off")) >= 0 {
+		t.Error("không được tắt tailscale serve khi chưa áp dụng xong chế độ local")
+	}
+	if mustRead(t, access.EnvPath(cp)) != before {
+		t.Error(".env không được khôi phục")
+	}
+}
+
+// `genh remote tailscale`: serve đã bật mà applyAccess lỗi SỚM (chưa ghi .env) ⇒ vẫn phải tắt serve lại.
+func TestRemoteTailscale_EarlyApplyError_TurnsServeOff(t *testing.T) {
+	env, cp := remoteEnv(t)
+	if err := os.Mkdir(access.EnvPath(cp), 0o755); err != nil { // .env là thư mục ⇒ không đọc/ghi được
+		t.Fatal(err)
+	}
+	fr := &fake.Runner{Responses: []fake.Response{
+		{Match: exactArgs("status", "--json"), Output: tsStatusJSON("Running", "gen.tail1234.ts.net.", "gen.tail1234.ts.net")},
+		{Match: cmdNamed("tailscale"), Output: []byte("")},
+		{Match: matchUp, Output: []byte("")},
+	}}
+	err := RunRemote(context.Background(), env, RemoteOptions{Action: "tailscale", Yes: true}, remoteDeps(t, fr, true), &strings.Builder{})
+	if oe := asOpError(t, err); oe.Code != ErrCodeAccessWriteFailed {
+		t.Errorf("code = %s", oe.Code)
+	}
+	on := callIndex(fr, exactArgs("serve", "--bg", "--https=443", "https+insecure://localhost:8443"))
+	off := callIndex(fr, exactArgs("serve", "--https=443", "off"))
+	if on < 0 || off < on {
+		t.Errorf("serve phải được bật rồi tắt lại (on=%d off=%d): %+v", on, off, fr.Calls)
+	}
+	if callIndex(fr, matchUp) >= 0 {
+		t.Error("không được chạy up khi chưa ghi được .env")
+	}
 }

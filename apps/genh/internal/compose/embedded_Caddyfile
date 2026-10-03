@@ -1,6 +1,9 @@
 # Cổng duy nhất ra ngoài: 8443 (HTTPS, chứng chỉ nội bộ). api/web/db/redis chỉ nằm trong mạng compose.
 {
 	auto_https disable_redirects
+	# Trình duyệt mở bằng IP (vd https://192.168.1.20:8443 — `genh remote lan` không --name) KHÔNG gửi SNI; thiếu dòng
+	# này certmagic lấy IP cục bộ của kết nối (IP container 172.x) để chọn chứng chỉ ⇒ không khớp, bắt tay TLS hỏng.
+	default_sni {$GH_SITE_ADDRESS:localhost}
 }
 
 # Giữ `localhost`: genh gọi proxy bằng https://localhost:<cổng> (ops.ProxyHost — ready, tự cập nhật, trực canh).

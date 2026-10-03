@@ -311,7 +311,7 @@ const HEALTH_KIND_DEFAULTS: Record<string, Omit<HealthIssue, 'raised_at' | 'body
   'offsite.failed': { key: 'offsite.failed', kind: 'offsite.failed', severity: 'warn', title: 'Sao lưu ra ổ ngoài chưa thành công', body: "Chưa thấy ổ USB/NAS — cắm lại ổ rồi bấm 'Sao lưu ra ổ ngoài ngay'", link: '/system?tab=storage&focus=offsite', action: 'Xem bản sao ngoài máy' },
   'job.timeout': { key: 'job.timeout:retention_sweep', kind: 'job.timeout', severity: 'warn', title: 'Việc nền "dọn dữ liệu theo hạn lưu" chạy quá giờ', body: 'Việc đã bị dừng và sẽ chạy lại ở lần sau. Lặp lại nhiều lần thì gửi kèm khi báo lỗi.', link: '/system?tab=storage', action: 'Xem sức khoẻ' },
   // v0.1.46 (F-21) — gh/health.py _eval_network: chép đúng OPEN_LAN_TITLE/OPEN_LAN_BODY/ACCESS_LINK; thẻ đích focus=access.
-  'network.open_lan': { key: 'network.open_lan', kind: 'network.open_lan', severity: 'warn', title: 'Cổng đang mở cho cả mạng', body: 'Mọi máy cùng mạng (Wi-Fi văn phòng, khách…) đều thấy trang đăng nhập Gen-Harness. Bấm để chọn: chỉ cho máy này, dùng Tailscale (khuyên dùng) hoặc giữ mở cho mạng nội bộ.', link: '/system?tab=storage&focus=access', action: 'Chọn cách truy cập' },
+  'network.open_lan': { key: 'network.open_lan', kind: 'network.open_lan', severity: 'warn', title: 'Cổng đang mở cho cả mạng', body: 'Mọi máy cùng mạng (Wi-Fi văn phòng, khách…) đều thấy trang đăng nhập Gen-Harness. Bấm để xem lệnh chọn cách truy cập (chạy trên máy chủ): Tailscale (khuyên dùng), chỉ máy này, hoặc giữ mở cho mạng nội bộ.', link: '/system?tab=storage&focus=access', action: 'Chọn cách truy cập' },
   'host.autostart': { key: 'host.autostart', kind: 'host.autostart', severity: 'warn', title: 'Máy chủ có thể không tự chạy lại Gen-Harness khi bật lại máy', body: 'Docker chưa bật tự chạy khi mở máy — chạy một lần trên máy chủ: sudo systemctl enable docker · Lịch tự cập nhật và nút Cập nhật ngay chỉ chạy khi có người đăng nhập — chạy một lần: sudo loginctl enable-linger $USER · Chạy xong thì chạy genh status để cảnh báo tự hết', link: '/system?tab=storage', action: 'Xem cách bật' },
 };
 
@@ -568,7 +568,12 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     const issues: HealthIssue[] = [];
     for (const i of [...(o.issues ?? []), ...derived].map((x) => healthIssue(x, now))) if (!issues.some((y) => y.key === i.key)) issues.push(i);
     // v0.1.46 (F-21): như gh/health.NON_OWNER_ACTIONS — người không phải Owner không có lệnh `genh remote` ⇒ "Nhờ Owner xử lý".
-    if (!isOwner) for (const i of issues) if (i.kind === 'network.open_lan') i.action = 'Nhờ Owner xử lý';
+    if (!isOwner)
+      for (const i of issues)
+        if (i.kind === 'network.open_lan') {
+          i.action = 'Nhờ Owner xử lý';
+          i.body = 'Cổng Console đang mở cho cả mạng — nhờ Owner chọn cách truy cập từ xa.'; // = gh/health.NON_OWNER_BODIES
+        }
     const overall = issues.some((i) => i.severity === 'bad') ? 'bad' : issues.length ? 'warn' : 'ok';
     return {
       checked_at: now, overall, worker,

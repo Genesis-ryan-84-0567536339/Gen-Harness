@@ -11,6 +11,17 @@ import { safeNext } from '../lib/safeNext';
 
 const RESET_PASSWORD_COMMAND = '~/.gen-harness/bin/genh reset-password';
 
+/** v0.1.46: lời nhắc khi đăng nhập sai quá nhiều lần — nói đúng cách gỡ theo bộ đếm đã chạm ngưỡng (api trả `scope`).
+ * scope "ip": bộ đếm chung cả mạng (sau docker-proxy/Tailscale Serve mọi người chung một IP) — Owner bấm "Đặt lại mật
+ * khẩu" cho nhân viên KHÔNG gỡ được, nên không hứa điều đó. */
+function rateLimitMessage(retryAfterS: number, scope: 'ip' | 'email'): string {
+  const minutes = Number.isFinite(retryAfterS) && retryAfterS > 0 ? Math.ceil(retryAfterS / 60) : 15;
+  if (scope === 'ip') {
+    return `Có quá nhiều lần đăng nhập sai từ cùng mạng. Đợi khoảng ${minutes} phút rồi thử lại. Owner: có thể gỡ ngay bằng lệnh genh reset-password trên máy chủ.`;
+  }
+  return `Đăng nhập sai quá nhiều lần. Đợi khoảng ${minutes} phút rồi thử lại. Nhân viên: nhờ Owner bấm "Đặt lại mật khẩu" ở Đội ngũ › Người dùng. Owner: chạy genh reset-password trên máy chủ.`;
+}
+
 export function LoginPage() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
@@ -42,10 +53,9 @@ export function LoginPage() {
       navigate(safeNext(params.get('next')), { replace: true });
     } catch (err) {
       if (err instanceof ApiError && err.code === 'LOGIN_RATE_LIMITED') {
-        const secs = Number((err.problem as { retry_after_s?: unknown }).retry_after_s);
-        const minutes = Number.isFinite(secs) && secs > 0 ? Math.ceil(secs / 60) : 15;
-        setFormError(`Đăng nhập sai quá nhiều lần. Đợi khoảng ${minutes} phút rồi thử lại, hoặc nhờ Owner đặt lại mật khẩu.`);
-        setErrorCode('LOGIN_RATE_LIMITED');
+        const p = err.problem as { retry_after_s?: unknown; scope?: unknown };
+        setFormError(rateLimitMessage(Number(p.retry_after_s), p.scope === 'ip' ? 'ip' : 'email'));
+        setErrorCode(p.scope === 'ip' || p.scope === 'email' ? `LOGIN_RATE_LIMITED (${p.scope})` : 'LOGIN_RATE_LIMITED');
       } else if (err instanceof ApiError && err.code === 'INVALID_CREDENTIALS') setFormError('Email hoặc mật khẩu không đúng.');
       else if (err instanceof ApiError && err.status === 0) setFormError('Không kết nối được máy chủ. Kiểm tra dịch vụ api rồi thử lại.');
       else if (err instanceof ApiError && err.status === 428) setFormError('Hệ thống chưa thiết lập xong — đang chuyển tới trình thiết lập.');
@@ -93,7 +103,7 @@ export function LoginPage() {
             {formError}
           </div>
           {errorCode && (
-            <details className="login-card__tech">
+            <details className="tech-detail">
               <summary>Chi tiết kỹ thuật</summary>
               <code className="mono">{errorCode}</code>
             </details>

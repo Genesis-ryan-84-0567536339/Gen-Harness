@@ -62,8 +62,10 @@ class Settings(BaseSettings):
     session_ttl_hours: int = 168
     # v0.1.46: phiên sống tối đa bấy nhiêu ngày kể từ lúc đăng nhập, dù dùng đều đặn (hết hạn tuyệt đối).
     session_absolute_days: int = 30
-    # v0.1.46: sai quá ngần này lần trong cửa sổ (giây) theo IP hoặc email → 429 (gh/auth/login_guard.py).
+    # v0.1.46: sai quá ngần này lần trong cửa sổ (giây) theo email → 429 (gh/auth/login_guard.py). Theo IP chỉ là
+    # chống dội với ngưỡng cao hơn hẳn: sau docker-proxy/Tailscale Serve mọi người chung một IP nguồn.
     login_fail_limit: int = 10
+    login_ip_fail_limit: int = 100
     login_fail_window_seconds: int = 900
     pin_session_minutes: int = 30
     pin_max_attempts: int = 5

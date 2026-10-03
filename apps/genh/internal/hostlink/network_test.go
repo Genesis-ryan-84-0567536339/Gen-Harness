@@ -3,6 +3,7 @@ package hostlink
 import (
 	"encoding/json"
 	"os"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -36,8 +37,11 @@ func TestWriteNetworkStatus_Contract(t *testing.T) {
 	if _, err := time.Parse(time.RFC3339, m["checked_at"].(string)); err != nil {
 		t.Errorf("checked_at không RFC3339: %v", err)
 	}
-	if fi, _ := os.Stat(NetworkStatusPath(dir)); fi.Mode().Perm() != 0o644 {
-		t.Errorf("quyền = %v", fi.Mode().Perm())
+	// Windows không có bit quyền POSIX (file ghi được báo 0666).
+	if runtime.GOOS != "windows" {
+		if fi, _ := os.Stat(NetworkStatusPath(dir)); fi.Mode().Perm() != 0o644 {
+			t.Errorf("quyền = %v", fi.Mode().Perm())
+		}
 	}
 
 	// site_address rỗng vẫn có mặt (chuỗi rỗng, không bỏ khoá).

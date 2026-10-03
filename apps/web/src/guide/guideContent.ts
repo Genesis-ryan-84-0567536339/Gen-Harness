@@ -113,7 +113,7 @@ export const GUIDE: GuideItem[] = [
       'Bấm "Thêm người", điền "Tên hiển thị", "Email" và chọn "Vai trò" (Quản lý, Vận hành, Nhân viên phụ trách, Kiểm soát).',
       'Thêm đủ người rồi bấm "Tiếp tục".',
       'Hệ thống hiện mật khẩu tạm của từng người — chép lại và tự gửi cho họ qua Zalo/email riêng (chưa có gửi thư tự động).',
-      'Nhân viên ở máy khác hoặc dùng điện thoại cần Truy cập từ xa: Sếp chạy genh remote tailscale (khuyên dùng) trên máy chủ trước, rồi mới chép lời nhắn — hộp mời sẽ cảnh báo đỏ nếu địa chỉ chỉ mở được trên máy chủ.',
+      'Nhân viên ở máy khác hoặc dùng điện thoại cần Truy cập từ xa: Sếp chạy genh remote tailscale (khuyên dùng) trên máy chủ trước khi gửi. Lời nhắn kèm địa chỉ đăng nhập có ở Đội ngũ › Người dùng (nút "Mời người dùng" hoặc "Đặt lại mật khẩu") — hộp đó cảnh báo đỏ nếu địa chỉ chỉ mở được trên máy chủ.',
       'Bấm "Đã lưu, sang bước sau".',
     ],
     doneWhen: 'Có thêm ít nhất một tài khoản ngoài Sếp.',
