@@ -284,6 +284,9 @@ export const SCOPE_OPTIONS: Array<{ value: PermScope; label: string }> = [
   { value: 'none', label: 'Không' },
 ];
 
+/** v0.1.45 (F-20): "Đăng nhập", "Đăng nhập lại" và thêm tài khoản CLI đều gọi POST /cli/login — cùng cần phiên PIN. */
+export const CLI_ADD_PIN_TEXT = 'Đăng nhập / thêm tài khoản cần mã PIN';
+
 /** F-58: quyền chỉ-toàn-tổ-chức (system.manage) chỉ có "Tất cả" / "Không"; giá trị cũ team/assigned (không có tác dụng)
  *  vẫn hiện để ô chọn không trống, kèm ghi chú, và không chọn lại được. */
 export function scopeOptionsFor(permission: string, current: PermScope): Array<{ value: PermScope; label: string; disabled?: boolean }> {

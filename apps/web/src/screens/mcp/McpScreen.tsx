@@ -225,6 +225,13 @@ function ServerCard({ server: s, tools, canManage, onEdit, onTest }: { server: M
       {update.isError ? <InlineError>{errorText(update.error)}</InlineError> : null}
 
       {tools.length ? (
+        <>
+        {canManage && tools.some((t) => t.access === 'write') ? (
+          // Sửa review v0.1.45: lời nhắc PIN một lần cho cả bảng (không lặp dưới từng tool ghi).
+          <p id={`mcp-access-hint-${s.id}`} className="muted-note" style={{ padding: '6px 15px 0', fontSize: 11 }}>
+            <Icon name="ph ph-lock-simple" size={11} /> {ACCESS_PIN_HINT}
+          </p>
+        ) : null}
         <table className="mcp-tool-table">
           <thead>
             <tr>
@@ -237,10 +244,11 @@ function ServerCard({ server: s, tools, canManage, onEdit, onTest }: { server: M
           </thead>
           <tbody>
             {tools.map((t) => (
-              <ToolRow key={t.id} tool={t} canManage={canManage} onTest={() => onTest(t)} />
+              <ToolRow key={t.id} tool={t} canManage={canManage} hintId={`mcp-access-hint-${s.id}`} onTest={() => onTest(t)} />
             ))}
           </tbody>
         </table>
+        </>
       ) : (
         <p className="muted-note" style={{ padding: '10px 15px' }}>
           Chưa khám phá tool nào — bấm &quot;Khám phá tool&quot;.
@@ -281,11 +289,22 @@ function useSetToolAccess() {
   });
 }
 
-function ToolRow({ tool: t, canManage, onTest }: { tool: McpTool; canManage: boolean; onTest: () => void }) {
+function ToolRow({ tool: t, canManage, hintId, onTest }: { tool: McpTool; canManage: boolean; hintId: string; onTest: () => void }) {
   const expose = useExposeTool();
   const setAccess = useSetToolAccess();
-  const hintId = `mcp-access-hint-${t.id}`;
   const needsPin = accessChangeNeedsPin(t.access, 'read');
+  // Ghi → đọc bỏ bước duyệt của tool: hỏi lại trước khi gửi (một cú chọn nhầm không lặng lẽ bỏ duyệt).
+  const [confirmRead, setConfirmRead] = useState(false);
+  const apply = (access: McpToolAccess) =>
+    setAccess.mutate(
+      { id: t.id, access },
+      {
+        onSuccess: () => {
+          setConfirmRead(false);
+          if (access === 'read') toast(`Đã chuyển ${t.name} sang ${ACCESS_LABEL.read} — tool chạy không qua duyệt.`);
+        },
+      },
+    );
   return (
     <tr data-tool={t.name} data-exposed={t.is_exposed ? '' : undefined}>
       <td className="mcp-tool-table__name mono">{t.name}</td>
@@ -299,7 +318,11 @@ function ToolRow({ tool: t, canManage, onTest }: { tool: McpTool; canManage: boo
               title={needsPin ? ACCESS_PIN_HINT : undefined}
               value={t.access}
               disabled={setAccess.isPending}
-              onChange={(e) => setAccess.mutate({ id: t.id, access: e.target.value as McpToolAccess })}
+              onChange={(e) => {
+                const next = e.target.value as McpToolAccess;
+                if (accessChangeNeedsPin(t.access, next)) setConfirmRead(true);
+                else apply(next);
+              }}
             >
               {ACCESS_KINDS.map((a) => (
                 <option key={a} value={a}>
@@ -308,12 +331,30 @@ function ToolRow({ tool: t, canManage, onTest }: { tool: McpTool; canManage: boo
                 </option>
               ))}
             </select>
-            {needsPin ? (
-              <span id={hintId} className="muted-note" style={{ display: 'block', fontSize: 11 }}>
-                {ACCESS_PIN_HINT}
-              </span>
+            {setAccess.isError && !confirmRead ? <InlineError>{errorText(setAccess.error)}</InlineError> : null}
+            {confirmRead ? (
+              <Dialog
+                open
+                onClose={() => setConfirmRead(false)}
+                width={460}
+                title={`Chuyển ${t.name} sang ${ACCESS_LABEL.read}?`}
+                actions={
+                  <>
+                    <Button variant="secondary" onClick={() => setConfirmRead(false)}>
+                      Giữ nguyên
+                    </Button>
+                    <Button variant="primary" loading={setAccess.isPending} onClick={() => apply('read')}>
+                      Chuyển sang {ACCESS_LABEL.read}
+                    </Button>
+                  </>
+                }
+              >
+                <p className="muted-note">
+                  Tool đọc chạy KHÔNG qua bước duyệt. Chỉ chuyển khi chắc tool này không ghi/sửa/xoá dữ liệu ở hệ thống bên ngoài. Cần mã PIN.
+                </p>
+                {setAccess.isError ? <InlineError>{errorText(setAccess.error)}</InlineError> : null}
+              </Dialog>
             ) : null}
-            {setAccess.isError ? <InlineError>{errorText(setAccess.error)}</InlineError> : null}
           </>
         ) : (
           <StateChip color={t.access === 'write' ? WARN : N5}>{ACCESS_LABEL[t.access]}</StateChip>

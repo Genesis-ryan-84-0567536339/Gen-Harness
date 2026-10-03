@@ -80,7 +80,7 @@ test.describe('v0.1.45 — PIN đúng chỗ hạ rào', () => {
     await page.goto('/connections#brain');
     const card = page.getByTestId('cli-card-claude_code_cli');
     await expect(card).toBeVisible();
-    await expect(card.getByText('Thêm tài khoản cần mã PIN')).toBeVisible();
+    await expect(card.getByText('Đăng nhập / thêm tài khoản cần mã PIN')).toBeVisible();
     await card.getByRole('button', { name: 'Đăng nhập Claude' }).click();
     await enterOwnerPin(page);
     await expect(card.getByRole('link', { name: /Mở trang đăng nhập Claude/ })).toHaveAttribute('href', /^https:\/\/claude\.com\//);

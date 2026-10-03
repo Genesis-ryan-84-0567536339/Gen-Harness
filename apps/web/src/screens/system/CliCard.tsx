@@ -15,6 +15,7 @@ import { cliConnStatus } from '../connections/connectionsModel';
 import {
   CLAUDE_CONSUMER_TERMS_URL,
   CLAUDE_TERMS_URL,
+  CLI_ADD_PIN_TEXT,
   CLI_LOGIN_TEXT,
   CLI_TEXT,
   cliAccountLabel,
@@ -26,7 +27,6 @@ import {
 import { useCliLogin, type CliLogin } from './useCliLogin';
 
 /** v0.1.45 (F-20): thêm tài khoản CLI (POST /cli/login) cần phiên PIN `cli.switch_account`. */
-const CLI_ADD_PIN_TEXT = 'Thêm tài khoản cần mã PIN';
 
 export function CliLoginPanel({ login }: { login: CliLogin }) {
   const [code, setCode] = useState('');

@@ -14,10 +14,13 @@ import {
   type RealtimeEvent,
   type RefineryRun,
 } from '@gen-harness/contracts';
+import { reportClientError } from './clientErrors';
 import { qk2 } from './dataQueries';
+import { newErrorId } from './errorId';
 import { currentPath, navigateTo } from './navigation';
 import { qk } from './queries';
 import { queryClient } from './queryClient';
+import { useToasts } from './toast';
 
 // ── transport ─────────────────────────────────────────────────────────────
 
@@ -43,7 +46,8 @@ export interface RealtimeOptions {
   onUnauthenticated?: () => void;
   /** Close 4428 — setup not finished. The client stops. */
   onSetupRequired?: () => void;
-  /** Close 4403 — Origin sai hoặc cần đổi mật khẩu. The client stops for good (no reconnect loop). */
+  /** Close 4403 — Origin sai (`origin`) hoặc lúc kết nối phải đổi mật khẩu (`password_change_required`). The client
+   *  stops for good (no reconnect loop). */
   onForbidden?: (reason?: string) => void;
   onStatus?: (s: RealtimeStatus) => void;
   factory?: SocketFactory;
@@ -395,6 +399,20 @@ let users = 0;
 
 const PUBLIC_PREFIXES = ['/login', '/setup'];
 
+export const WS_ORIGIN_TEXT = 'Không nhận được cập nhật trực tiếp — mở Console đúng địa chỉ cài đặt (tên miền/cổng lúc cài) rồi tải lại trang.';
+
+/**
+ * 4403 (client đã dừng hẳn). `origin`: mở Console qua tên miền/proxy khác địa chỉ cài đặt — báo Sếp bằng toast kèm Mã lỗi
+ * và gửi báo lỗi về máy chủ (tra theo Mã lỗi), không im lặng. `password_change_required` (lúc kết nối; đang kết nối
+ * mà phải đổi mật khẩu thì máy chủ đóng 4401): lời gọi HTTP kế tiếp tự đưa tới màn đổi mật khẩu — không cần báo thêm.
+ */
+export function handleWsForbidden(reason?: string): void {
+  if (reason !== 'origin') return;
+  const errorId = newErrorId();
+  reportClientError({ errorId, error: new Error(`WebSocket 4403 origin — trang mở ở ${window.location.origin}`) });
+  useToasts.getState().push(`${WS_ORIGIN_TEXT} Mã lỗi: ${errorId}`, 'warn', 15000);
+}
+
 function sharedClient(): RealtimeClient {
   if (!client) {
     client = new RealtimeClient({
@@ -409,9 +427,7 @@ function sharedClient(): RealtimeClient {
         if (window.location.pathname.startsWith('/setup')) return;
         navigateTo('/setup', { replace: true });
       },
-      // 4403: Origin sai hoặc cần đổi mật khẩu — client đã dừng hẳn. Trường hợp đổi mật khẩu, lời gọi HTTP kế tiếp
-      // tự đưa Sếp tới màn đổi mật khẩu; tải lại trang (sau khi đổi) sẽ mở kết nối mới.
-      onForbidden: () => {},
+      onForbidden: handleWsForbidden,
     });
   }
   return client;

@@ -124,6 +124,12 @@ export const MATRIX: Record<string, [string, string, string, string, string]> = 
   'system.manage': ['all', 'none', 'none', 'none', 'none'],
   'roles.manage': ['all', 'none', 'none', 'none', 'none'],
 };
+/** Bản gốc của MATRIX — `__mock/reset` khôi phục (ma trận sửa ở màn Quyền hạn / `__mock/perm` không rò sang test sau). */
+const MATRIX_DEFAULT: Record<string, [string, string, string, string, string]> = JSON.parse(JSON.stringify(MATRIX));
+function restoreMatrix(): void {
+  for (const k of Object.keys(MATRIX)) if (!(k in MATRIX_DEFAULT)) delete MATRIX[k];
+  for (const [k, v] of Object.entries(MATRIX_DEFAULT)) MATRIX[k] = [...v] as [string, string, string, string, string];
+}
 const SCREEN_PERMISSION: Record<string, string[]> = {
   overview: ['overview.read'], inbox: ['queue.read'], workbench: ['action.draft', 'action.approve'],
   directory: ['profile.read'], graph: ['profile.read'], profile: ['profile.read'], notebook: ['profile.read'],
@@ -1297,6 +1303,7 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
  *   /api/v1/__mock/simulate {"on":bool} toggles the background simulation
  *   /api/v1/__mock/bridge   {"online":bool} makes channel login answer 503 BRIDGE_OFFLINE
  *   /api/v1/__mock/pin_expire {} ends every PIN session (v0.1.45 — kiểm lại hộp PIN của thao tác kế tiếp)
+ *   /api/v1/__mock/perm    {"role","permission","scope"} đặt một ô MATRIX (kể cả cột không sửa được ở Quyền hạn, vd system.manage)
  *   /api/v1/__mock/health  {"issues"?,"worker"?,"backup"?,"disk"?,"update"?,"autostart"?,"offsite"?} ghi đè `GET /system/health` (v0.1.36;
  *                           `issues` chỉ cần `kind` — nhãn/nút/đường dẫn mặc định theo kind; reset khôi phục khoẻ)
  *   /api/v1/__mock/p3/{cụm}/{hook}  body → `phase3[cụm].hooks[hook](body)`; trả JSON kết quả (404 nếu không có)
@@ -1358,8 +1365,18 @@ export function createMockApi(opts: MockOptions = {}) {
           for (const m of Object.values(current.phase3)) m.dispose();
           for (const ws of clients) ws.close(4401, 'reset');
           clients.clear();
+          restoreMatrix();
           current = createMockState({ ...opts, ...(body as MockOptions) }, broadcast);
           return done(res);
+        case 'perm': {
+          const i = ROLE_ORDER.indexOf(String(body.role) as RoleCode);
+          const row = MATRIX[String(body.permission)];
+          if (i < 0 || !row) return done(res, 404);
+          row[i] = String(body.scope);
+          // Danh mục màn của vai trò đó tính lại theo ma trận mới (như `hiddenScreens` lúc tạo người dùng).
+          for (const u of current.users) if (u.role.code === ROLE_ORDER[i]) u.hidden = hiddenScreens(ROLE_ORDER[i]);
+          return done(res);
+        }
         case 'emit':
           broadcast(String(body.type), body.data);
           return done(res);
