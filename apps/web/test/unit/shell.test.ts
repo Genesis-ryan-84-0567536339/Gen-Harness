@@ -71,8 +71,9 @@ describe('screen registry', () => {
 });
 
 describe('header + footer helpers', () => {
-  it('autonomy tooltip mirrors the design text', () => {
-    expect(autonomyTooltip(4)).toBe('Mức tự trị hiện tại — mức 4: soạn sẵn chờ duyệt (thang 0–6)');
+  // v0.1.43 (F-30): viên header hiện nhãn 3 mức; tooltip nói rõ đây là mức CHUNG, mức số và chỗ đổi (thay câu thiết kế cũ).
+  it('autonomy tooltip shows the 3-level label, the 0–6 level and where to change it', () => {
+    expect(autonomyTooltip(4)).toBe('Mức tự trị chung: Soạn sẵn chờ duyệt (mức 4 trên thang 0–6 — đổi ở Cài đặt)');
   });
   it('data confidence accepts a fraction or a percent', () => {
     expect(confidencePercent(0.78)).toBe(78);

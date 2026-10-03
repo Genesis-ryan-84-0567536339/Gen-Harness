@@ -198,6 +198,9 @@ describe('HelpPage', () => {
     wrap(<HelpPage />);
     expect(await screen.findByText('v0.1.22')).toBeInTheDocument();
     for (const c of ['genh update', 'genh reset-password', 'genh trust-ca', 'genh backup']) expect(screen.getByText(c)).toBeInTheDocument();
+    // v0.1.43 (F-30): ví dụ Gen ở Trợ giúp là câu hỏi việc thật, không còn "khoá Jev".
+    expect(screen.getByText('“Khách nào hỏi giá hôm nay?”')).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/khoá Jev/i);
     expect(GENH_COMMANDS.length).toBeGreaterThanOrEqual(4);
     expect(await screen.findByRole('link', { name: /Mở Hướng dẫn thiết lập/ })).toHaveAttribute('href', '/guide');
     await user.click(screen.getByRole('button', { name: /Báo lỗi/ }));

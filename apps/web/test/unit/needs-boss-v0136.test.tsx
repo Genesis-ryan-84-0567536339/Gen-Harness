@@ -290,9 +290,12 @@ describe('v0.1.36 — healthModel (thẻ "Sức khoẻ hệ thống")', () => {
 });
 
 describe('v0.1.36 — thẻ cập nhật ở Tổng quan', () => {
+  // v0.1.43: UpdateCard so finished_at với Date.now() thật (lỗi chỉ hiện trong 24 giờ) — mốc viết cứng
+  // '2026-10-02T02:00:00Z' tự hết hạn sau một ngày làm test đỏ; lấy mốc 1 giờ trước lúc chạy test.
   const failed = {
     current: 'v0.1.35', latest: 'v0.1.36', update_available: true, updater: 'systemd', linked: true, can_request: true,
-    state: 'failed', message: 'lỗi (GH-E945)', from: 'v0.1.35', to: 'v0.1.36', started_at: null, finished_at: '2026-10-02T02:00:00Z',
+    state: 'failed', message: 'lỗi (GH-E945)', from: 'v0.1.35', to: 'v0.1.36', started_at: null,
+    finished_at: new Date(Date.now() - 3_600_000).toISOString(),
     requested_at: null, release_url: null, release_notes: null,
   };
 

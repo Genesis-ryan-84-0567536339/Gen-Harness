@@ -117,6 +117,9 @@ describe('GenPanel', () => {
     document.body.appendChild(host);
     wrap(<GenPanel userId="u1" />);
     expect(screen.getByText(/Chào Sếp, em là Gen/)).toBeInTheDocument();
+    // v0.1.43 (F-30): ví dụ là câu hỏi việc thật, không còn gợi ý "khoá Jev".
+    expect(screen.getByRole('button', { name: 'Khách nào hỏi giá hôm nay?' })).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/khoá Jev/i);
     await userEvent.type(screen.getByLabelText('Câu hỏi cho Gen'), 'Hôm nay có gì gấp?{Enter}');
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.url.endsWith('/gen/turns'))).toBe(true));
     const post = calls.find((c) => c.method === 'POST')!;
