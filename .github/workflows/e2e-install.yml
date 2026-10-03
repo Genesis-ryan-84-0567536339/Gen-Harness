@@ -1410,6 +1410,16 @@ jobs:
           alerts_sql="SELECT count(*) FROM ops.health_alerts WHERE key='network.open_lan' AND cleared_at IS NULL"
           owners_sql="SELECT count(DISTINCT u.id) FROM core.users u JOIN core.user_roles ur ON ur.user_id=u.id JOIN core.roles r ON r.id=ur.role_id WHERE u.is_active AND u.deleted_at IS NULL AND r.code='owner'"
           bells_sql="SELECT count(*) FROM core.notifications WHERE kind='network.open_lan'"
+          # Dữ liệu mẫu (gh.seed_demo) chỉ tạo tổ chức + vai trò, KHÔNG có người dùng (Owner chỉ sinh ra ở trình thiết lập
+          # thật). Chuông network.open_lan gửi cho Owner (notifications.owner_ids) nên phải có ít nhất 1 Owner mới kiểm
+          # được. Chèn 1 Owner mẫu (mật khẩu băm giả, không đăng nhập được) rồi xoá sự cố đang mở (nếu api đã mở lúc
+          # chưa có Owner) để raise_once mở lại trong vòng sức khoẻ kế tiếp và gửi chuông cho đúng số Owner.
+          if [ "$(q "$owners_sql")" = "0" ]; then
+            q "WITH u AS (INSERT INTO core.users (org_id, email, display_name, password_hash) SELECT o.id, 'e2e-owner@example.test', 'E2E Owner', 'x' FROM core.organizations o ORDER BY o.created_at LIMIT 1 RETURNING id, org_id) INSERT INTO core.user_roles (user_id, role_id) SELECT u.id, r.id FROM u JOIN core.roles r ON r.org_id = u.org_id AND r.code = 'owner'"
+            q "DELETE FROM ops.health_alerts WHERE key = 'network.open_lan'"
+            q "DELETE FROM core.notifications WHERE kind = 'network.open_lan'"
+            echo "đã chèn 1 Owner mẫu để kiểm chuông (Owner=$(q "$owners_sql"))"
+          fi
           # Vòng sức khoẻ của api chạy mỗi 60 giây — chờ tối đa 3 phút.
           deadline=$((SECONDS + 180))
           a=0
