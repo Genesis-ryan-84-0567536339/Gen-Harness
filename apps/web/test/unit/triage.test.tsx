@@ -113,18 +113,20 @@ function triageHandler(role: string) {
   };
 }
 
-describe('Điều khiển hệ thống — thẻ Lọc đầu', () => {
-  it('Owner đổi ngưỡng điểm và tắt/bật được', async () => {
+describe('Điều khiển hệ thống — thẻ Lọc tin', () => {
+  it('Owner đổi ngưỡng điểm (Nâng cao) và tắt/bật được', async () => {
     const calls = mockFetch(triageHandler('owner'));
     renderScreen(<TriageCard />);
     expect(await screen.findByText(/12 mục đã lọc · 2 trùng · 1 rác/)).toBeInTheDocument();
+    await userEvent.click(screen.getByText('Nâng cao — Jev và ngưỡng điểm'));
+    expect(screen.getByText(/Jev 4 lượt, ~420 ms/)).toBeVisible();
     const input = await screen.findByLabelText('Ngưỡng điểm (0–100)');
     await waitFor(() => expect(input).not.toBeDisabled());
     await userEvent.clear(input);
     await userEvent.type(input, '45');
     await userEvent.click(screen.getByRole('button', { name: 'Lưu ngưỡng' }));
     await waitFor(() => expect(calls.some((c) => c.method === 'PATCH' && (c.body as { min_score?: number })?.min_score === 45)).toBe(true));
-    await userEvent.click(screen.getByRole('switch', { name: 'Bật lọc đầu' }));
+    await userEvent.click(screen.getByRole('switch', { name: 'Bật lọc tin' }));
     await waitFor(() => expect(calls.some((c) => c.method === 'PATCH' && (c.body as { enabled?: boolean })?.enabled === false)).toBe(true));
   });
 
@@ -133,7 +135,7 @@ describe('Điều khiển hệ thống — thẻ Lọc đầu', () => {
     renderScreen(<TriageCard />);
     expect(await screen.findByText(/Chỉ Sếp \(Owner\)/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Lưu ngưỡng' })).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole('switch', { name: 'Bật lọc đầu' }));
+    await userEvent.click(screen.getByRole('switch', { name: 'Bật lọc tin' }));
     expect(calls.some((c) => c.method === 'PATCH')).toBe(false);
   });
 });

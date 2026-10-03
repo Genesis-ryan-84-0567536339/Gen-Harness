@@ -51,6 +51,7 @@ export function BrainTabBody() {
     setJevFailedNow(true);
     void qc.invalidateQueries({ queryKey: qk2.providers });
   };
+  // Một phần tử duy nhất trong <details> — đổi summary không gỡ thẻ nên kết quả kiểm tra không mất.
   const jevCard = <JevCard test={jevTest} onFailed={onJevFailed} />;
   // Jev (system_one) không nằm trong chuỗi sinh chữ — hiện riêng ở thẻ Jev.
   const sorted = [...(providers.data ?? [])].filter((p) => p.kind !== 'system_one').sort((a, b) => a.failover_rank - b.failover_rank);
@@ -163,14 +164,11 @@ export function BrainTabBody() {
       </div>
 
       <div className="sys-grid2">
-        {jevFailed ? (
-          <details className="brain-advanced">
-            <summary>Nâng cao — Jev (đã ẩn vì kiểm tra lỗi, không bắt buộc)</summary>
-            {jevCard}
-          </details>
-        ) : (
-          jevCard
-        )}
+        {/* v0.1.43 (F-30): Jev không bắt buộc — luôn nằm trong "Nâng cao". */}
+        <details className="brain-advanced">
+          <summary>{jevFailed ? 'Nâng cao — Jev (đã ẩn vì kiểm tra lỗi, không bắt buộc)' : 'Nâng cao — Jev (không bắt buộc)'}</summary>
+          {jevCard}
+        </details>
         {/* v0.1.42 (F-61): thẻ tài khoản CLI chỉ ở một chỗ — Kết nối › Bộ não AI. */}
         <div className="gh-card brain-cli-link">
           <Link to="/connections#brain" className="sys-link">

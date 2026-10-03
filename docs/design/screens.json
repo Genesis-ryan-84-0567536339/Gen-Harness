@@ -105,7 +105,7 @@
     "domain": "Nâng cao",
     "parent": "Tầng dữ liệu",
     "name": "Kho dữ liệu thô",
-    "en": "Tin gốc bridge gom về",
+    "en": "Tin gốc các kênh gom về",
     "title": "Kho dữ liệu thô",
     "subtitle": "Raw Lake · mọi bridge gom hết về đây trước khi phân loại",
     "badge": "18k"
@@ -124,10 +124,10 @@
     "key": "clean",
     "domain": "Nâng cao",
     "parent": "Tầng dữ liệu",
-    "name": "Kho sạch SSOT",
+    "name": "Kho sạch",
     "en": "Dữ liệu đã lọc & bộ nhớ làm việc",
     "title": "Kho sạch & Trí nhớ",
-    "subtitle": "Clean SSOT · dữ liệu đã phân loại và trí nhớ tạm theo ID",
+    "subtitle": "Dữ liệu đã phân loại và trí nhớ tạm theo ID",
     "badge": null
   },
   {
