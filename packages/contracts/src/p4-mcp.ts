@@ -69,6 +69,13 @@ export interface McpDiscoverResult {
   tools: McpDiscoveredTool[];
 }
 
+/** Dấu vết tham số lượt gọi tool (v0.1.45): sha256 của JSON sắp khoá, tên khoá cấp 1 (≤ 20), số byte. */
+export interface McpArgsDigest {
+  sha256: string;
+  keys: string[];
+  bytes: number;
+}
+
 export interface McpCall {
   id: string;
   at: string;
@@ -77,7 +84,9 @@ export interface McpCall {
   access: McpToolAccess;
   server_name: string;
   agent_key: string;
-  args: Record<string, unknown>;
+  /** v0.1.45 (F-57): máy chủ chỉ lưu DẤU VẾT tham số (không nguyên văn); dòng rất cũ chưa qua job dọn dẹp có thể
+   *  còn dạng object tự do. */
+  args: McpArgsDigest | Record<string, unknown>;
   result_summary: string;
   latency_ms: number | null;
   outcome: McpCallOutcome;

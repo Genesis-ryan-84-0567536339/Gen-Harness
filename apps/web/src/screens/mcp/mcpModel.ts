@@ -1,5 +1,14 @@
 /** Presentation logic for MCP Hub — cùng khuôn `apiModel.ts`/`pluginsModel.ts`. */
-import { ApiError, type HubLinkStatus, type McpCallOutcome, type McpTool, type McpTransport } from '@gen-harness/contracts';
+import {
+  ApiError,
+  type HubLinkStatus,
+  type McpArgsDigest,
+  type McpCall,
+  type McpCallOutcome,
+  type McpTool,
+  type McpToolAccess,
+  type McpTransport,
+} from '@gen-harness/contracts';
 import { errorText } from '../../lib/errorText';
 
 export const OK = 'var(--color-ok)';
@@ -137,4 +146,27 @@ export function isPublicHttpsUrl(url: string): boolean {
   if (v6 !== null) return !v6;
   if (host === 'localhost' || !host.includes('.')) return false;
   return !PRIVATE_SUFFIXES.some((s) => host.endsWith(s));
+}
+
+/** v0.1.45 (F-20): đổi tool ghi → đọc là bỏ qua duyệt (tool đọc chạy ngay) ⇒ máy chủ đòi mã PIN (423 → hộp PIN). */
+export const ACCESS_PIN_HINT = 'Chuyển tool ghi sang đọc cần mã PIN (tool đọc chạy không qua duyệt)';
+
+/** Có hiện gợi ý PIN khi đổi loại tool không: chỉ ghi → đọc; đọc → ghi (chặt hơn) và giữ nguyên thì không. */
+export function accessChangeNeedsPin(from: McpToolAccess, to: McpToolAccess): boolean {
+  return from === 'write' && to === 'read';
+}
+
+export function isArgsDigest(args: McpCall['args']): args is McpArgsDigest {
+  const a = args as Partial<McpArgsDigest>;
+  return typeof a.sha256 === 'string' && Array.isArray(a.keys) && typeof a.bytes === 'number';
+}
+
+/** v0.1.45 (F-57): nhật ký MCP chỉ lưu dấu vết tham số {sha256, keys, bytes} — tóm tắt ngắn để hiển thị. */
+export function describeCallArgs(args: McpCall['args']): string {
+  if (isArgsDigest(args)) {
+    const keys = args.keys.length ? args.keys.join(', ') : 'không có tham số';
+    return `${keys} · ${args.bytes} byte · ${args.sha256.slice(0, 8)}`;
+  }
+  const keys = Object.keys(args);
+  return keys.length ? keys.join(', ') : 'không có tham số';
 }

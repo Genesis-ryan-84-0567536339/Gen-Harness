@@ -14,6 +14,7 @@ from sqlalchemy import text
 
 from gh import notifications
 from gh.biz.queue.jobs import due_reminders
+from gh.chassis import mcp_client
 from gh.chassis.mcp_client import McpBlockedNetwork, McpClient, pin_endpoint
 from gh.db import sessionmaker
 from gh.hub_link import service as hub
@@ -43,13 +44,14 @@ def _fake_resolver(monkeypatch: pytest.MonkeyPatch, answers: list[list[str]]) ->
     """Mỗi lần phân giải trả phần tử kế tiếp của `answers` (giả DNS rebinding: lần sau đổi IP)."""
     asked: list[str] = []
 
-    async def fake(self: Any, host: str, port: Any, *a: Any, **kw: Any) -> list[Any]:
+    async def fake(host: str, port: Any) -> list[Any]:
         asked.append(host)
         ips = answers[min(len(asked) - 1, len(answers) - 1)]
         return [(socket.AF_INET6 if ":" in ip else socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, port))
                 for ip in ips]
 
-    monkeypatch.setattr(type(asyncio.get_running_loop()), "getaddrinfo", fake)
+    # v0.1.45: `pin_endpoint` phân giải qua `mcp_client._getaddrinfo` (conftest thay mặc định bằng DNS giả).
+    monkeypatch.setattr(mcp_client, "_getaddrinfo", fake)
     return asked
 
 
@@ -97,8 +99,8 @@ async def test_pinned_client_connects_to_checked_ip_not_rebound(monkeypatch: pyt
     with pytest.raises(McpBlockedNetwork):
         await client.call_tool(server, "kho_tom_tat", {}, TOKEN)
     assert len(seen) == 1
-    # Client thường (không ghim) giữ hành vi cũ; client của liên kết Gen-hub luôn ghim.
-    assert McpClient()._pin is False and hub.client_for(None)._pin is True
+    # v0.1.45 (F-49): mọi McpClient mặc định ghim DNS; client của liên kết Gen-hub luôn ghim.
+    assert McpClient()._pin is True and hub.client_for(None)._pin is True
 
 
 # ─── 1b: last_error chỉ Owner ─────────────────────────────────────────────────

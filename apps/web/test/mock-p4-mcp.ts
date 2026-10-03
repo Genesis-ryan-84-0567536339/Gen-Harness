@@ -6,10 +6,24 @@
  * Chỉ mô phỏng đúng các route CÓ THẬT ở `apps/api/gh/mcp_api/routes.py` — không có `/mcp/stats`, `/mcp/guards`,
  * `/mcp/market` (những route đó chưa từng được cài, xem ghi chú đầu `packages/contracts/src/p4-mcp.ts`).
  */
-import { randomUUID } from 'node:crypto';
-import type { AgentIdentity, HubLink, McpCall, McpCallOutcome, McpServer, McpTool } from '@gen-harness/contracts';
+import { createHash, randomUUID } from 'node:crypto';
+import type { AgentIdentity, HubLink, McpArgsDigest, McpCall, McpCallOutcome, McpServer, McpTool } from '@gen-harness/contracts';
 import type { P2Ctx } from './mock-phase2';
 import { AGENT_IDS } from './mock-ids';
+
+/** v0.1.45 (F-57): như `gh.mcp_api.invoke.args_digest` — nhật ký chỉ lưu dấu vết tham số, không nguyên văn. */
+function sortKeys(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(sortKeys);
+  if (v && typeof v === 'object') {
+    return Object.fromEntries(Object.keys(v as Record<string, unknown>).sort().map((k) => [k, sortKeys((v as Record<string, unknown>)[k])]));
+  }
+  return v;
+}
+
+export function argsDigest(args: Record<string, unknown>): McpArgsDigest {
+  const raw = Buffer.from(JSON.stringify(sortKeys(args)));
+  return { sha256: createHash('sha256').update(raw).digest('hex'), keys: Object.keys(args).sort().slice(0, 20), bytes: raw.length };
+}
 
 export interface P4McpOptions {
   fresh: boolean;
@@ -47,9 +61,9 @@ function seedServers(): { servers: MockServer[]; tools: MockTool[] } {
 
 function seedCalls(): McpCall[] {
   return [
-    { id: 'call-1', at: ago(6), tool_id: 'tool-inv-check', tool_name: 'inventory.check', access: 'read', server_name: 'ERP Genesis', agent_key: `agent:${AGENT_IDS.tls}`, args: { sku: 'MDF-E1-17' }, result_summary: 'kho Bình Dương → còn 6 container', latency_ms: 412, outcome: 'ok', draft_id: null },
-    { id: 'call-2', at: ago(11), tool_id: 'tool-deal-upsert', tool_name: 'deal.upsert', access: 'write', server_name: 'CRM Genesis', agent_key: `agent:${AGENT_IDS.tls}`, args: { code: 'OPP-1815' }, result_summary: 'Chờ duyệt ở Bàn làm việc', latency_ms: null, outcome: 'held_for_approval', draft_id: 'draft-mcp-seed-1' },
-    { id: 'call-3', at: ago(18), tool_id: 'tool-order-draft', tool_name: 'order.createDraft', access: 'write', server_name: 'ERP Genesis', agent_key: `agent:${AGENT_IDS.hc}`, args: {}, result_summary: 'Bị chặn: tool chưa được Owner mở', latency_ms: null, outcome: 'blocked', draft_id: null },
+    { id: 'call-1', at: ago(6), tool_id: 'tool-inv-check', tool_name: 'inventory.check', access: 'read', server_name: 'ERP Genesis', agent_key: `agent:${AGENT_IDS.tls}`, args: argsDigest({ sku: 'MDF-E1-17' }), result_summary: 'kho Bình Dương → còn 6 container', latency_ms: 412, outcome: 'ok', draft_id: null },
+    { id: 'call-2', at: ago(11), tool_id: 'tool-deal-upsert', tool_name: 'deal.upsert', access: 'write', server_name: 'CRM Genesis', agent_key: `agent:${AGENT_IDS.tls}`, args: argsDigest({ code: 'OPP-1815' }), result_summary: 'Chờ duyệt ở Bàn làm việc', latency_ms: null, outcome: 'held_for_approval', draft_id: 'draft-mcp-seed-1' },
+    { id: 'call-3', at: ago(18), tool_id: 'tool-order-draft', tool_name: 'order.createDraft', access: 'write', server_name: 'ERP Genesis', agent_key: `agent:${AGENT_IDS.hc}`, args: argsDigest({}), result_summary: 'Bị chặn: tool chưa được Owner mở', latency_ms: null, outcome: 'blocked', draft_id: null },
   ];
 }
 
@@ -118,7 +132,7 @@ export function createMock(opts: P4McpOptions) {
   }
 
   function logCall(toolId: string, agentKey: string, args: Record<string, unknown>, outcome: McpCallOutcome, summary: string, latencyMs: number | null, draftId: string | null = null): McpCall {
-    const item: McpCall = { id: randomUUID(), at: new Date().toISOString(), tool_id: toolId, tool_name: tools.find((t) => t.id === toolId)?.name ?? '?', access: tools.find((t) => t.id === toolId)?.access ?? 'read', server_name: tools.find((t) => t.id === toolId)?.server_name ?? '?', agent_key: agentKey, args, result_summary: summary, latency_ms: latencyMs, outcome, draft_id: draftId };
+    const item: McpCall = { id: randomUUID(), at: new Date().toISOString(), tool_id: toolId, tool_name: tools.find((t) => t.id === toolId)?.name ?? '?', access: tools.find((t) => t.id === toolId)?.access ?? 'read', server_name: tools.find((t) => t.id === toolId)?.server_name ?? '?', agent_key: agentKey, args: argsDigest(args), result_summary: summary, latency_ms: latencyMs, outcome, draft_id: draftId };
     calls = [item, ...calls];
     opts.emit('mcp.call', item);
     return item;
@@ -236,6 +250,8 @@ export function createMock(opts: P4McpOptions) {
         if (!tool) return problem(404, 'NOT_FOUND', 'Tool MCP không tồn tại');
         const access = String((body as { access?: string }).access ?? '');
         if (!['read', 'write'].includes(access)) return problem(422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors: { access: 'Chỉ nhận read, write' } });
+        // v0.1.45 (F-20): ghi → đọc là bỏ qua duyệt ⇒ cần phiên PIN `mcp.expose` (đọc → ghi thì không).
+        if (tool.access === 'write' && access === 'read' && !pin(ctx, 'mcp.expose')) return true;
         tool.access = access as MockTool['access'];
         return reply(200, toolOut(tool));
       }
