@@ -15,15 +15,20 @@ Mã thoát: 0 xong · 2 chưa có Owner (chưa qua bước 2 trình thiết lậ
 import argparse
 import asyncio
 import json
+import logging
 import sys
 from dataclasses import dataclass
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gh.auth import login_guard
 from gh.chassis import actionlog
+from gh.config import get_settings
 from gh.crypto import hash_secret, new_token
 from gh.db import admin_sessionmaker, dispose_engine
+
+log = logging.getLogger("gh.auth.reset_owner")
 
 MIN_PASSWORD_LEN = 12  # cùng ngưỡng bước 2 trình thiết lập (gh/setup/routes.py)
 
@@ -64,6 +69,20 @@ async def reset_owner_password(db: AsyncSession, password: str | None = None) ->
     return ResetResult(email=row.email, temp_password=temp, sessions_revoked=revoked)
 
 
+async def _clear_login_counter(email: str) -> None:
+    """v0.1.46: gỡ khoá đăng nhập theo email Owner. Best-effort — Redis lỗi chỉ log, không làm hỏng lệnh."""
+    from redis.asyncio import Redis
+
+    try:
+        r = Redis.from_url(get_settings().redis_url)
+        try:
+            await login_guard.clear_email(r, email)
+        finally:
+            await r.aclose()
+    except Exception as e:  # noqa: BLE001 — best-effort
+        log.warning("Không xoá được bộ đếm đăng nhập (%s)", type(e).__name__)
+
+
 async def _main() -> int:
     parser = argparse.ArgumentParser(description="Đặt lại mật khẩu Owner (không mất dữ liệu)")
     parser.add_argument("--password-stdin", action="store_true", help="đọc mật khẩu mới từ 1 dòng stdin")
@@ -82,6 +101,7 @@ async def _main() -> int:
                 print("Chưa có tài khoản Owner — hãy hoàn tất bước 2 trình thiết lập", file=sys.stderr)
                 return 2
             await db.commit()
+        await _clear_login_counter(result.email)
     finally:
         await dispose_engine()
     print(json.dumps({"email": result.email, "temp_password": result.temp_password}, ensure_ascii=False))

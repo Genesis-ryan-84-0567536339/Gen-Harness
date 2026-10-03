@@ -3,6 +3,7 @@
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from functools import lru_cache
 from typing import Any
 
 from sqlalchemy import text
@@ -96,7 +97,7 @@ async def create_session(db: AsyncSession, user_id: uuid.UUID, *, ip: str | None
                          pin_verified: bool = False) -> NewSession:
     s = get_settings()
     token, csrf = new_token(), new_token(16)
-    expires = now() + timedelta(hours=s.session_ttl_hours)
+    expires = min(now() + timedelta(hours=s.session_ttl_hours), now() + timedelta(days=s.session_absolute_days))
     await db.execute(text("""
         INSERT INTO core.sessions (user_id, token_hash, csrf_hash, ip, user_agent, expires_at, last_seen_at,
                                    pin_verified_until)
@@ -107,12 +108,22 @@ async def create_session(db: AsyncSession, user_id: uuid.UUID, *, ip: str | None
     return NewSession(token=token, csrf=csrf, expires_at=expires)
 
 
+@lru_cache(maxsize=1)
+def _dummy_hash() -> str:
+    """Hash giả (cùng tham số argon2 như hash thật) để email không tồn tại cũng tốn thời gian xác minh như email thật
+    — không lộ email nào có tài khoản qua thời gian phản hồi. Sinh một lần mỗi tiến trình."""
+    return hash_secret(new_token())
+
+
 async def login(db: AsyncSession, email: str, password: str) -> dict[str, Any] | None:
     row = (await db.execute(text("""
         SELECT id, org_id, password_hash FROM core.users
         WHERE lower(email) = lower(:e) AND is_active AND deleted_at IS NULL"""),
         {"e": email.strip().lower()})).one_or_none()
-    if row is None or not verify_secret(row.password_hash, password):
+    if row is None:
+        verify_secret(_dummy_hash(), password)
+        return None
+    if not verify_secret(row.password_hash, password):
         return None
     return {"id": row.id, "org_id": row.org_id}
 
@@ -121,7 +132,8 @@ async def load_session(db: AsyncSession, token: str, *, renew: bool = True) -> C
     """Nạp phiên từ token cookie. `renew=False` (v0.1.45, WS nạp lại định kỳ): chỉ ĐỌC — không gia hạn phiên trượt,
     không gia hạn phiên PIN, không cập nhật last_seen_at (tab để mở không được giữ phiên/PIN sống mãi)."""
     row = (await db.execute(text("""
-        SELECT s.id AS sid, s.pin_verified_until, s.expires_at, u.id, u.org_id, u.email, u.display_name, u.addressing,
+        SELECT s.id AS sid, s.pin_verified_until, s.expires_at, s.created_at, u.id, u.org_id, u.email, u.display_name,
+               u.addressing,
                u.must_change_password,
                r.id AS role_id, r.code AS role_code, r.name AS role_name, ur.team_id
         FROM core.sessions s
@@ -129,8 +141,10 @@ async def load_session(db: AsyncSession, token: str, *, renew: bool = True) -> C
         JOIN core.user_roles ur ON ur.user_id = u.id
         JOIN core.roles r ON r.id = ur.role_id
         WHERE s.token_hash = :h AND s.revoked_at IS NULL AND s.expires_at > now()
+          AND s.created_at > now() - make_interval(days => :abs)
           AND u.is_active AND u.deleted_at IS NULL
-        ORDER BY r.code LIMIT 1"""), {"h": token_digest(token)})).one_or_none()
+        ORDER BY r.code LIMIT 1"""), {"h": token_digest(token),
+                                      "abs": get_settings().session_absolute_days})).one_or_none()
     if row is None:
         return None
     perms = {r.permission_code: r.scope for r in (await db.execute(text(
@@ -138,12 +152,15 @@ async def load_session(db: AsyncSession, token: str, *, renew: bool = True) -> C
     pin_until = row.pin_verified_until
     # Phiên đăng nhập trượt: còn dưới nửa TTL thì gia hạn thêm đủ một TTL tính từ bây giờ — Owner dùng đều đặn
     # thì không bị đăng xuất; bỏ không quá TTL thì hết hạn như cũ. Phiên PIN tách riêng (bên dưới).
+    # v0.1.46: trượt nhưng không quá session_absolute_days kể từ created_at (hết hạn tuyệt đối).
     ttl = timedelta(hours=get_settings().session_ttl_hours)
     expires_at, renewed = row.expires_at, False
     if renew and expires_at - now() < ttl / 2:
-        expires_at, renewed = now() + ttl, True
-        await db.execute(text("UPDATE core.sessions SET expires_at = :e, last_seen_at = now() WHERE id = :sid"),
-                         {"e": expires_at, "sid": row.sid})
+        new_exp = min(now() + ttl, row.created_at + timedelta(days=get_settings().session_absolute_days))
+        if new_exp > expires_at:
+            expires_at, renewed = new_exp, True
+            await db.execute(text("UPDATE core.sessions SET expires_at = :e, last_seen_at = now() WHERE id = :sid"),
+                             {"e": expires_at, "sid": row.sid})
     # Phiên PIN trượt: hết hạn sau 30 phút KHÔNG thao tác.
     if renew and pin_until is not None and pin_until > now():
         new_until = now() + timedelta(minutes=get_settings().pin_session_minutes)
