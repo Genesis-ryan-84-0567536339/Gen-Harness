@@ -19,6 +19,9 @@ import type { GroupKind, ListenMode, ViewScope } from './phase2';
 
 export type PermScope = 'all' | 'team' | 'assigned' | 'none';
 
+/** F-58 (v0.1.45): quyền chỉ có nghĩa ở phạm vi `all` (gương `gh.auth.deps.ALL_ONLY`) — team/assigned coi như không có. */
+export const ALL_ONLY_PERMS: readonly string[] = ['system.manage'];
+
 export interface PermissionColumn {
   key: string;
   label: string;

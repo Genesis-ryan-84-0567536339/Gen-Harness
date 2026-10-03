@@ -7,7 +7,7 @@ import { useCan } from '../../lib/permissions';
 import { errorText } from '../../lib/errorText';
 import { CardError, InlineError, Panel, SkeletonLines } from '../common';
 import { BAD, N5, OK, WARN } from '../data/dataModel';
-import { BOUNDARY_ICON, GROUP_KIND_LABEL, LISTEN_MODES, ROLE_LABEL, SCOPE_CELL, SCOPE_OPTIONS, VIEW_SCOPES, boundaryTone, cellLocked, listenTone } from './systemModel';
+import { BOUNDARY_ICON, GROUP_KIND_LABEL, LISTEN_MODES, ROLE_LABEL, SCOPE_CELL, VIEW_SCOPES, boundaryTone, cellLocked, listenTone, scopeOptionsFor } from './systemModel';
 import { useBoundaries, useListeningGroups, usePatchBoundary, usePatchPermission, usePermissions } from './queries';
 
 /** Quyền hạn — ma trận vai trò, nhóm đang lắng nghe, ranh giới có trách nhiệm (PLAN 4.5). */
@@ -115,8 +115,8 @@ function PermissionMatrix() {
                           disabled={busyCell === key}
                           onChange={(e) => onChange(role.code, primary, e.target.value as PermScope)}
                         >
-                          {SCOPE_OPTIONS.map((o) => (
-                            <option key={o.value} value={o.value}>
+                          {scopeOptionsFor(primary, scope).map((o) => (
+                            <option key={o.value} value={o.value} disabled={o.disabled}>
                               {o.label}
                             </option>
                           ))}
