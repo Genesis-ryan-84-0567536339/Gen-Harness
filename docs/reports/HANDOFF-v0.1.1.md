@@ -2931,7 +2931,24 @@ Sếp xác nhận bằng mã PIN, có bằng chứng bằng ảnh chụp, và d�
 
 - Tích hợp 5 gói (api-ghi-mxh, ghb-ghi, sandbox-chromium, web-de-xuat-dong-y, ops-phien-docs) — không xung đột; sửa sau gộp:
   `shell.test.ts` đếm 33 route (thêm `social/ghi-facebook`), `v0139-integ.spec.ts` đếm 8 dòng Việc Sếp cần làm (thêm dòng 8).
-- KQ_KIEM_TRA
+- Sửa thêm: `test_worker_schedule_v0136.py` cho `social_session_check` (09:10) vào nhóm job nhẹ được chạy trong giờ làm việc.
+- api: ruff + mypy sạch (151 tệp), alembic 1 head (0031); pytest đầy đủ **1802 passed** (superuser) và **1802 passed** dưới role
+  gh_app (gồm migration 0031 chạy lại lần 2, 423 PIN_REQUIRED, permit PERMIT_EXPIRED/MISMATCH/BAD_SIG, 409 SOCIAL_HALTED,
+  429 SOCIAL_WRITE_LIMIT / PATCH >20 → 422, cổng F-85 409 SOCIAL_WRITE_LOCKED ↔ đồng ý/rút lại/nhịp tim sandbox, ảnh chụp mã
+  hoá + `/proof` image/jpeg no-store, dòng 8 `facebook_reply` = pass, kiểm phiên 09:10 + sự cố `social.session:<id>` một lần,
+  không còn "CHỖ CẮM v<số>"); e2e-live `live-ci` 7 passed.
+- browser: ruff + mypy sạch; pytest **34 passed** với `GH_BROWSER_TESTS_REQUIRED=1 GH_BROWSER_SANDBOX_REQUIRED=1` (Chromium thật,
+  người dùng thường: trả lời bình luận + nhắn tin trên trang mẫu, permit hỏng/hết hạn/dùng lại, Dừng tất cả giữa chừng, huỷ sau
+  khi bấm gửi, checkpoint/CAPTCHA, TARGET_NOT_FOUND, sandbox bật thật); chạy bằng root (không bắt buộc sandbox) cũng 34 passed
+  — chế độ auto lùi êm.
+- Docker: ảnh `gh-browser` dựng từ `deploy/images/browser.Dockerfile` (máy tích hợp chỉ thêm CA của proxy mạng nội bộ vào bản sao tạm, Dockerfile trong repo không đổi); `ghb.sandbox --probe` trong container `--user pwuser
+  --cap-drop ALL --security-opt no-new-privileges:true --security-opt seccomp=deploy/browser/chromium-seccomp.json --read-only`
+  ⇒ **enabled=true**; `docker compose config` hợp lệ, đường dẫn seccomp tương đối được giải theo thư mục compose. (Bốn ảnh còn lại
+  không đổi ở đợt này — để job `images` của CI dựng.)
+- web: lint + F-1 + typecheck sạch; vitest **823 passed** (90 tệp); build xanh; bridge 50 passed; Playwright mock **273/273** (272 xanh lượt đầu + `v0139-integ` sửa đếm dòng rồi chạy lại xanh)
+  (gồm `social-write-v0147` và dòng 8 ở `boss-checks-v0139`).
+- genh: `go vet` (linux/windows/darwin) + `go test ./...` xanh (bản nhúng `chromium-seccomp.json`/`compose.yaml` khớp `deploy/`).
+- Workflow: YAML hợp lệ, `bash -n` 154 khối `run:` của ci/e2e-install/release sạch.
 
 ### Rủi ro / giới hạn
 
