@@ -8,12 +8,14 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/dockercli/fake"
+	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/hostlink"
 )
 
 func TestRunDoctor_HappyPath_WritesZipWithReportAndLogs(t *testing.T) {
@@ -24,7 +26,7 @@ func TestRunDoctor_HappyPath_WritesZipWithReportAndLogs(t *testing.T) {
 	fr := &fake.Runner{Responses: []fake.Response{
 		{Match: fake.MatchArgsContain("version", "--format"), Output: []byte("27.1.0")},
 		{Match: fake.MatchArgsContain("system", "df", "-v"), Output: []byte("VOLUME NAME\ngen-harness_pg_data 1 10MB\n")},
-		{Match: fake.MatchArgsContain("logs", "--tail=500"), Output: []byte("api log line 1\ndb log line 1\n")},
+		{Match: fake.MatchArgsContain("logs", "--tail=2000"), Output: []byte("api log line 1\ndb log line 1\n")},
 	}}
 
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -75,7 +77,7 @@ func TestRunDoctor_PortDialFails_ReportedButNotFatal(t *testing.T) {
 	fr := &fake.Runner{Responses: []fake.Response{
 		{Match: fake.MatchArgsContain("version", "--format"), Output: []byte("27.1.0")},
 		{Match: fake.MatchArgsContain("system", "df", "-v"), Output: []byte("")},
-		{Match: fake.MatchArgsContain("logs", "--tail=500"), Output: []byte("")},
+		{Match: fake.MatchArgsContain("logs", "--tail=2000"), Output: []byte("")},
 	}}
 
 	deps := DoctorDeps{
@@ -108,7 +110,7 @@ func TestRunDoctor_ZipWriteFails_ReturnsOpError(t *testing.T) {
 	fr := &fake.Runner{Responses: []fake.Response{
 		{Match: fake.MatchArgsContain("version", "--format"), Output: []byte("27.1.0")},
 		{Match: fake.MatchArgsContain("system", "df", "-v"), Output: []byte("")},
-		{Match: fake.MatchArgsContain("logs", "--tail=500"), Output: []byte("")},
+		{Match: fake.MatchArgsContain("logs", "--tail=2000"), Output: []byte("")},
 	}}
 	deps := DoctorDeps{
 		Runner:  fr,
@@ -126,13 +128,13 @@ func TestRunDoctor_ZipWriteFails_ReturnsOpError(t *testing.T) {
 	}
 }
 
-// v0.1.36 (F-4): log trong báo cáo doctor phải có dấu thời gian (`docker compose logs -t --tail=500`).
+// v0.1.36 (F-4) / v0.1.44 (F-4b — 2000 dòng): log trong báo cáo doctor phải có dấu thời gian (`docker compose logs -t --tail=2000`).
 func TestRunDoctor_LogsHaveTimestamps(t *testing.T) {
 	composePath := testComposePath(t, "")
 	env := testEnv(t, composePath)
 	outPath := filepath.Join(t.TempDir(), "report.zip")
 
-	logsMatch := fake.MatchArgsContain("logs", "-t", "--tail=500")
+	logsMatch := fake.MatchArgsContain("logs", "-t", "--tail=2000")
 	fr := &fake.Runner{Responses: []fake.Response{
 		{Match: fake.MatchArgsContain("version", "--format"), Output: []byte("27.1.0")},
 		{Match: fake.MatchArgsContain("system", "df", "-v"), Output: []byte("")},
@@ -162,7 +164,7 @@ func TestRunDoctor_LogsHaveTimestamps(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatalf("doctor phải gọi `docker compose logs -t --tail=500`, các lệnh đã gọi: %v", fr.Calls)
+		t.Fatalf("doctor phải gọi `docker compose logs -t --tail=2000`, các lệnh đã gọi: %v", fr.Calls)
 	}
 
 	zr, err := zip.OpenReader(outPath)
@@ -196,7 +198,7 @@ func TestRunDoctor_TuChayLaiKhiBatMay(t *testing.T) {
 	fr := &fake.Runner{Responses: append([]fake.Response{
 		{Match: fake.MatchArgsContain("version", "--format"), Output: []byte("27.1.0")},
 		{Match: fake.MatchArgsContain("system", "df", "-v"), Output: []byte("VOLUME NAME\n")},
-		{Match: fake.MatchArgsContain("logs", "--tail=500"), Output: []byte("")},
+		{Match: fake.MatchArgsContain("logs", "--tail=2000"), Output: []byte("")},
 	}, autostartFakeResponses()...)}
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer srv.Close()
@@ -231,5 +233,98 @@ func TestRunDoctor_TuChayLaiKhiBatMay(t *testing.T) {
 	}
 	if raw := checkAutostartFile(t, env.InstallDir); raw["linger"] != "not_applicable" || raw["docker_mode"] != "desktop" {
 		t.Errorf("darwin: %v", raw)
+	}
+}
+
+// ─── v0.1.44 (F-4b): gói chẩn đoán qua hộp thư ──────────────────────────────
+
+func writeDoctorRequest(t *testing.T, installDir, body string) {
+	t.Helper()
+	if err := os.WriteFile(hostlink.DoctorRequestPath(installDir), []byte(body), 0o666); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRunDoctorRequest_DoneGiu3Zip0644(t *testing.T) {
+	env, lits := doctorInstall(t)
+	base := time.Date(2026, 10, 3, 10, 0, 0, 0, time.UTC)
+	for i := 0; i < 4; i++ {
+		writeDoctorRequest(t, env.InstallDir, `{"schema":1,"request_id":"0123456789abcde`+string(rune('0'+i))+`","requested_at":"x"}`)
+		now := base.Add(time.Duration(i) * time.Minute)
+		if err := RunDoctorRequest(context.Background(), env, doctorTestDeps(doctorRunner(lits), now), &strings.Builder{}); err != nil {
+			t.Fatalf("lần %d: %v", i, err)
+		}
+		if hostlink.HasDoctorRequest(env.InstallDir) {
+			t.Fatal("phải xoá tệp yêu cầu")
+		}
+	}
+	dir := hostlink.DiagnosticsDirPath(env.InstallDir)
+	ents, _ := os.ReadDir(dir)
+	var zips []string
+	for _, e := range ents {
+		zips = append(zips, e.Name())
+	}
+	if len(zips) != 3 || zips[0] != "genh-doctor-20261003T100100Z.zip" || zips[2] != "genh-doctor-20261003T100300Z.zip" {
+		t.Fatalf("chỉ giữ 3 zip mới nhất, được %v", zips)
+	}
+	if fi, _ := os.Stat(dir); fi.Mode().Perm() != 0o755 {
+		t.Fatalf("thư mục diagnostics %v, muốn 0755", fi.Mode().Perm())
+	}
+	st, err := hostlink.ReadDoctorStatus(env.InstallDir)
+	if err != nil || st.State != "done" || st.RequestID != "0123456789abcde3" || st.File != "genh-doctor-20261003T100300Z.zip" ||
+		st.StartedAt == "" || st.FinishedAt == "" || st.ErrorCode != "" {
+		t.Fatalf("doctor-status = %+v, %v", st, err)
+	}
+	path := filepath.Join(dir, st.File)
+	fi, err := os.Stat(path)
+	if err != nil || fi.Mode().Perm() != 0o644 || fi.Size() != st.SizeBytes {
+		t.Fatalf("zip %v (size %d, status %d), muốn 0644", fi.Mode().Perm(), fi.Size(), st.SizeBytes)
+	}
+	sum, _, _ := fileSHA256(path)
+	if sum != st.SHA256 || len(st.SHA256) != 64 {
+		t.Fatalf("sha256 lệch: %s vs %s", sum, st.SHA256)
+	}
+}
+
+func TestRunDoctorRequest_Failed_DiagnosticsLaSymlink(t *testing.T) {
+	env, lits := doctorInstall(t)
+	target := t.TempDir()
+	if err := os.Symlink(target, hostlink.DiagnosticsDirPath(env.InstallDir)); err != nil {
+		t.Fatal(err)
+	}
+	writeDoctorRequest(t, env.InstallDir, `{"schema":1,"request_id":"aaaaaaaaaaaaaaaa"}`)
+	err := RunDoctorRequest(context.Background(), env, doctorTestDeps(doctorRunner(lits), time.Now()), &strings.Builder{})
+	var oe *OpError
+	if !errors.As(err, &oe) || oe.Code != ErrCodeDoctorBundleFailed {
+		t.Fatalf("muốn GH-E962, được %v", err)
+	}
+	st, _ := hostlink.ReadDoctorStatus(env.InstallDir)
+	if st.State != "failed" || st.ErrorCode != ErrCodeDoctorBundleFailed || st.Message == "" || strings.Contains(st.Message, "`") {
+		t.Fatalf("doctor-status = %+v", st)
+	}
+	if ents, _ := os.ReadDir(target); len(ents) != 0 {
+		t.Fatalf("không được ghi qua symlink: %v", ents)
+	}
+}
+
+func TestRunDoctorRequest_RequestIDSaiDang_BiBo(t *testing.T) {
+	env, lits := doctorInstall(t)
+	fr := doctorRunner(lits)
+	writeDoctorRequest(t, env.InstallDir, `{"schema":1,"request_id":"../../../etc/passwd"}`)
+	if err := RunDoctorRequest(context.Background(), env, doctorTestDeps(fr, time.Now()), &strings.Builder{}); err != nil {
+		t.Fatal(err)
+	}
+	if hostlink.HasDoctorRequest(env.InstallDir) {
+		t.Fatal("tệp yêu cầu sai dạng vẫn phải bị xoá")
+	}
+	if _, err := hostlink.ReadDoctorStatus(env.InstallDir); err == nil {
+		t.Fatal("request_id sai dạng: không ghi doctor-status.json")
+	}
+	if len(fr.Calls) != 0 {
+		t.Fatalf("không chạy chẩn đoán: %v", fr.Calls)
+	}
+	// Không có yêu cầu ⇒ nil, không làm gì.
+	if err := RunDoctorRequest(context.Background(), env, doctorTestDeps(fr, time.Now()), &strings.Builder{}); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -514,6 +514,115 @@ jobs:
             exit 1
           fi
 
+      # v0.1.44 (F-6b/F-4b): trực canh máy chủ + gói chẩn đoán qua hộp thư. Chỉ chạy khi genh có lệnh
+      # `watchdog` (genh help) — chạy tay workflow cho tag cũ không bị đỏ vì tính năng bản đó chưa có.
+      - name: genh có trực canh máy chủ chưa (v0.1.44+)
+        id: v144
+        run: |
+          set -euo pipefail
+          if "$GENH" help 2>&1 | grep watchdog >/dev/null; then
+            echo "run=true" >>"$GITHUB_OUTPUT"
+            echo "genh có lệnh watchdog — kiểm trực canh máy chủ + gói chẩn đoán."
+          else
+            echo "run=false" >>"$GITHUB_OUTPUT"
+            echo "::notice::genh chưa có trực canh máy chủ (< v0.1.44) — bỏ qua."
+          fi
+
+      - name: Trực canh máy chủ (v0.1.44+)
+        if: steps.v144.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          run="$GEN_HARNESS_HOME/run"
+          st="$run/watchdog-status.json"
+          python3 - "$run/genh.json" <<'PY'
+          import json, sys
+          i = json.load(open(sys.argv[1], encoding="utf-8"))
+          assert "watchdog" in (i.get("requests") or []), "genh.json thiếu 'watchdog' trong requests: %s" % i
+          PY
+          # Lịch trực canh đã cài (systemd --user timer, hoặc crontab khi runner không có systemd --user).
+          if systemctl --user is-enabled gen-harness-watchdog.timer >/dev/null 2>&1; then
+            echo "lịch trực canh: systemd --user timer"
+          elif crontab -l 2>/dev/null | grep gen-harness-watchdog >/dev/null; then
+            echo "lịch trực canh: crontab"
+          else
+            echo "::error::genh install không cài lịch trực canh máy chủ (gen-harness-watchdog)" >&2; exit 1
+          fi
+          "$GENH" watchdog status --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT"
+          # Tắt lịch trong lúc kiểm để lượt tự động không chen ngang (bật lại khi xong); chờ lượt đang chạy (nếu có) xong.
+          "$GENH" watchdog disable --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT"
+          # Bot API giả (không cần Telegram thật): ghi mọi POST ra tệp, luôn trả ok.
+          cat >"$RUNNER_TEMP/tg_fake.py" <<'PY'
+          import http.server, sys
+          class H(http.server.BaseHTTPRequestHandler):
+              def do_POST(self):
+                  n = int(self.headers.get("Content-Length") or 0)
+                  self.rfile.read(n)
+                  with open(sys.argv[2], "a", encoding="utf-8") as f:
+                      f.write(self.path.split("/bot")[0] + "/bot***/sendMessage\n")
+                  self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers()
+                  self.wfile.write(b'{"ok":true,"result":{}}')
+              def log_message(self, *a):
+                  pass
+          http.server.HTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()
+          PY
+          python3 "$RUNNER_TEMP/tg_fake.py" 18765 "$RUNNER_TEMP/tg_posts.txt" &
+          tgpid=$!
+          cleanup() {
+            kill "$tgpid" 2>/dev/null || true
+            "$GENH" watchdog enable --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          export GENH_TELEGRAM_API_BASE=http://127.0.0.1:18765
+          wd() {
+            flock -w 300 "$GEN_HARNESS_HOME/watchdog.lock" true
+            "$GENH" doctor --notify --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT"
+          }
+          check() { # $1 = mốc giây unix trước lượt chạy; in incidents
+            python3 - "$st" "$1" "$run/telegram.json" <<'PY'
+          import json, os, sys, datetime
+          d = json.load(open(sys.argv[1], encoding="utf-8"))
+          for k in ("schema", "last_run_at", "state", "incidents", "telegram", "telegram_error_code", "last_sent_at", "schedule", "test"):
+              assert k in d, "watchdog-status.json thiếu khoá %r: %s" % (k, d)
+          at = datetime.datetime.fromisoformat(d["last_run_at"].replace("Z", "+00:00")).timestamp()
+          assert at >= float(sys.argv[2]) - 1, "last_run_at không mới: %s" % d["last_run_at"]
+          if not os.path.exists(sys.argv[3]):
+              assert d["telegram"] == "not_configured", "chưa cấu hình Telegram mà telegram=%r" % d["telegram"]
+          print("state=%s telegram=%s incidents=%s" % (d["state"], d["telegram"], [i["key"] for i in d["incidents"]]))
+          PY
+          }
+          # Lượt 1: máy khoẻ.
+          t0=$(date -u +%s); wd; check "$t0"
+          # Lượt 2: dừng api ⇒ api.down + tự khởi động lại api.
+          api="$(docker ps --format '{{.Names}}' | grep -E '^gen-harness-api-[0-9]+$' | head -1)"
+          [ -n "$api" ] || { echo "::error::không thấy container api" >&2; exit 1; }
+          docker stop "$api" >/dev/null
+          t1=$(date -u +%s); wd; check "$t1"
+          python3 -c "import json,sys; d=json.load(open(sys.argv[1])); ks=[i['key'] for i in d['incidents']]; assert 'api.down' in ks, 'api dừng mà không có api.down: %s' % ks" "$st"
+          [ "$(docker inspect -f '{{.State.Running}}' "$api")" = "true" ] \
+            || { echo "::error::trực canh không tự khởi động lại api" >&2; docker ps -a; exit 1; }
+          echo "OK: api.down được ghi nhận và api đã tự khởi động lại."
+          deadline=$((SECONDS + 300))
+          until curl -k -fsS -o /dev/null "https://localhost:${GH_PORT}/api/v1/ready"; do
+            [ "$SECONDS" -lt "$deadline" ] || { echo "::error::/api/v1/ready không xanh lại sau khi trực canh khởi động lại api" >&2; exit 1; }
+            sleep 3
+          done
+          # Lượt 3: đã ổn ⇒ không còn sự cố genh đo (api.down/docker.down/service.unhealthy:*).
+          t2=$(date -u +%s); wd; check "$t2"
+          python3 - "$st" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1], encoding="utf-8"))
+          bad = [i["key"] for i in d["incidents"] if i["key"] in ("api.down", "docker.down") or i["key"].startswith("service.unhealthy:")]
+          assert not bad, "lượt sau khi api lên lại vẫn còn sự cố: %s" % bad
+          other = [i["key"] for i in d["incidents"]]
+          if other:
+              print("::notice::sự cố khác đang mở (không do bước này): %s" % other)
+          PY
+          if [ -f "$run/telegram.json" ]; then
+            echo "Bot API giả nhận $(wc -l <"$RUNNER_TEMP/tg_posts.txt" 2>/dev/null || echo 0) POST."
+          else
+            echo "Telegram chưa cấu hình — bỏ qua phần gửi tin (đã kiểm telegram=not_configured)."
+          fi
+
       # v0.1.38 (F-22): phiên Claude Code ở volume claude_state riêng (/var/lib/gh/claude/.claude), không còn trong HOME
       # của Antigravity CLI (/var/lib/gh/agy, agy_state); agy chạy cô lập (canary offline phải "khong_lo").
       - name: Cô lập agy — canary offline (F-22)
@@ -779,6 +888,62 @@ jobs:
           done
           cat "$run/restore-status.json"
           until curl -k -fsS -o /dev/null "https://localhost:${GH_PORT}/api/v1/ready"; do sleep 3; done
+
+      - name: Gói chẩn đoán qua hộp thư — không chứa bí mật (v0.1.44+, tối đa 5 phút)
+        if: steps.v144.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          run="$GEN_HARNESS_HOME/run"
+          python3 -c "import json,sys; i=json.load(open(sys.argv[1])); assert 'doctor' in (i.get('requests') or []), 'genh.json thiếu doctor trong requests: %s' % i" "$run/genh.json"
+          api="$(docker ps --format '{{.Names}}' | grep -E '^gen-harness-api-[0-9]+$' | head -1)"
+          # Như nút "Gói chẩn đoán" trong Console: chính container api ghi yêu cầu qua bind mount.
+          docker exec "$api" python -c "import json,datetime; open('/var/lib/gh/host/request/doctor.json','w').write(json.dumps({'schema': 1, 'request_id': '0123456789abcdef', 'requested_at': datetime.datetime.now(datetime.timezone.utc).isoformat()}))"
+          deadline=$((SECONDS + 300))
+          while :; do
+            st="$(python3 -c "import json;d=json.load(open('$run/doctor-status.json'));print(d.get('state',''), d.get('request_id',''))" 2>/dev/null || true)"
+            state="${st%% *}"; rid="${st#* }"
+            if [ "$rid" = "0123456789abcdef" ] && [ "$state" = "done" ]; then break; fi
+            if [ "$rid" = "0123456789abcdef" ] && [ "$state" = "failed" ]; then
+              cat "$run/doctor-status.json"; echo "::error::genh báo tạo gói chẩn đoán lỗi" >&2; exit 1
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              ls -la "$run" "$run/request"; cat "$run/doctor-status.json" 2>/dev/null || true
+              echo "::error::watcher không tạo gói chẩn đoán trong 5 phút" >&2; exit 1
+            fi
+            sleep 5
+          done
+          cat "$run/doctor-status.json"; echo
+          f="$run/diagnostics/$(python3 -c "import json;print(json.load(open('$run/doctor-status.json'))['file'])")"
+          unzip -l "$f" | tee "$RUNNER_TEMP/diag-list.txt"
+          for e in logs.txt versions.txt host/update-status.json manifest.json; do
+            grep -q " $e\$" "$RUNNER_TEMP/diag-list.txt" || { echo "::error::gói chẩn đoán thiếu $e" >&2; exit 1; }
+          done
+          unzip -p "$f" >"$RUNNER_TEMP/diag-all.txt"
+          # Mọi giá trị trong config/secrets.json và secrets/* KHÔNG được xuất hiện (không in giá trị ra log).
+          python3 - "$GEN_HARNESS_HOME" "$RUNNER_TEMP/diag-all.txt" <<'PY'
+          import json, os, sys
+          home, dump = sys.argv[1], open(sys.argv[2], encoding="utf-8", errors="replace").read()
+          vals = []
+          for k, v in json.load(open(os.path.join(home, "config", "secrets.json"), encoding="utf-8")).items():
+              if isinstance(v, str) and len(v.strip()) >= 8 and k != "created_at":
+                  vals.append((k, v.strip()))
+          sd = os.path.join(home, "secrets")
+          if os.path.isdir(sd):
+              for n in sorted(os.listdir(sd)):
+                  p = os.path.join(sd, n)
+                  if os.path.isfile(p):
+                      v = open(p, encoding="utf-8", errors="replace").read().strip()
+                      if len(v) >= 8:
+                          vals.append(("secrets/" + n, v))
+                          if "-" in v:
+                              vals.append(("secrets/" + n + " (bỏ -)", v.replace("-", "")))
+          leaked = [k for k, v in vals if v in dump]
+          print("đã kiểm %d giá trị bí mật trong %d byte nội dung gói" % (len(vals), len(dump)))
+          if leaked:
+              print("::error::gói chẩn đoán LỘ bí mật: %s" % leaked, file=sys.stderr)
+              sys.exit(1)
+          PY
+          echo "OK: gói chẩn đoán đủ mục và không chứa bí mật."
 
       - name: genh auto-update enable → status → disable
         run: |
