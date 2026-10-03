@@ -21,6 +21,7 @@ import {
   BOSS_CHECKS_KEY,
   BOSS_CHECKS_POLL_MS,
   HUB_ADDRESS_CODES,
+  FACEBOOK_REPLY_STEPS,
   accountOf,
   bossErrorText,
   fmtCheckedAt,
@@ -56,6 +57,8 @@ export function BossChecksPage() {
   }, []);
 
   const data = q.data;
+  // Dòng 8 chỉ hiện khi máy chủ có dòng đó (bản api cũ không có — không hiện dòng chết).
+  const hasReplyRow = !!data?.rows?.some((r) => r.row === 8);
   const rowDone = (n: number) => !!data?.rows?.find((r) => r.row === n)?.done;
   const total = data?.required_total ?? 6;
   const done = data?.required_done ?? 0;
@@ -107,6 +110,7 @@ export function BossChecksPage() {
             <JevRow data={data} done={rowDone(5)} />
             <TelegramRow data={data} done={rowDone(6)} />
             <RemoteRow data={data} done={rowDone(7)} />
+            {hasReplyRow ? <FacebookReplyRow data={data} done={rowDone(8)} /> : null}
           </ol>
           <p className="boss-foot muted-note">
             <Icon name="ph ph-floppy-disk" size={13} /> Kết quả được lưu lại — Claude tự đọc, Sếp không cần chụp màn hình.
@@ -651,6 +655,39 @@ function RemoteRow({ data, done }: { data: Results; done: boolean }) {
       <p className="muted-note">Bấm nút này TRÊN ĐIỆN THOẠI sau khi mở Console bằng địa chỉ từ xa.</p>
       {run.isError ? <InlineError detail={errorDetail(run.error)}>{errorText(run.error)}</InlineError> : null}
       <TransientNote check={run.data} />
+    </Row>
+  );
+}
+
+// ── 8. Facebook trả lời (không bắt buộc) ────────────────────────────────────────────────────────────────
+/**
+ * v0.1.47 (F-79): thử gửi một câu trả lời bình luận THẬT. Không có nút chạy kiểm — Đạt khi máy chủ ghi 'pass' sau một
+ * lần gửi đã xác nhận; chưa đạt thì chỉ có nút mở trang Tài khoản mạng xã hội. Selector Facebook chỉ nghiệm thu được ở đây.
+ */
+function FacebookReplyRow({ data, done }: { data: Results; done: boolean }) {
+  const res = resultOf(data, 'facebook_reply');
+  const passed = res?.status === 'pass';
+  return (
+    <Row
+      n={8}
+      title="Facebook trả lời (không bắt buộc)"
+      done={done || passed}
+      todo="Không bắt buộc. Thử một lần để chắc Gen trả lời được bình luận trên Facebook của Sếp:"
+      results={<ResultCell check={res} />}
+    >
+      <ol className="boss-steps" data-testid="boss-reply-steps" style={{ margin: "0 0 8px", paddingLeft: 20 }}>
+        {FACEBOOK_REPLY_STEPS.map((s) => (
+          <li key={s}>{s}</li>
+        ))}
+      </ol>
+      {!passed ? (
+        <div className="boss-actions">
+          <Link to="/social" className="gh-btn gh-btn--secondary btn-27">
+            Mở Tài khoản mạng xã hội
+            <Icon name="ph ph-arrow-right" size={13} />
+          </Link>
+        </div>
+      ) : null}
     </Row>
   );
 }

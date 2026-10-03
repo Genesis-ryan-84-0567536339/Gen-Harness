@@ -25,7 +25,7 @@ test.describe('Việc Sếp cần làm (v0.1.39)', () => {
     await page.setViewportSize({ width: 1440, height: 900 });
   });
 
-  test('Owner: thẻ ở Hướng dẫn thiết lập → 7 dòng; Gen-hub PIN một lần → Đạt; Facebook Đọc ngay → Đang chạy… → Đạt', async ({ page }) => {
+  test('Owner: thẻ ở Hướng dẫn thiết lập → 8 dòng; Gen-hub PIN một lần → Đạt; Facebook Đọc ngay → Đang chạy… → Đạt', async ({ page }) => {
     test.setTimeout(90_000);
     await p3Hook(page.request, 'social', 'seedActive', { label: 'Facebook của Sếp' });
     let pinDialogs = 0;
@@ -39,7 +39,7 @@ test.describe('Việc Sếp cần làm (v0.1.39)', () => {
     await expect(card).toContainText('Đã đạt 0/6 dòng bắt buộc');
     await card.click();
     await expect(page).toHaveURL(/\/guide\/viec-sep$/);
-    await expect(page.locator('.boss-row')).toHaveCount(7);
+    await expect(page.locator('.boss-row')).toHaveCount(8);
     await expect(row(page, 'Jev')).toContainText('Không bắt buộc');
     await expect(page.getByText('Kết quả được lưu lại — Claude tự đọc, Sếp không cần chụp màn hình.')).toBeVisible();
 
@@ -141,5 +141,24 @@ test.describe('Việc Sếp cần làm (v0.1.39)', () => {
     await tg.getByRole('link', { name: /Mở hướng dẫn/ }).click();
     await expect(page).toHaveURL(/\/connections#telegram$/);
     await expect(page.getByRole('region', { name: 'Telegram — báo động & bản tin' })).toBeVisible();
+  });
+
+  test('Facebook trả lời (dòng 8, v0.1.47): không bắt buộc, 4 bước, nút mở Tài khoản mạng xã hội; đạt → Đạt, vẫn 0/6 bắt buộc', async ({ page }) => {
+    await loginAsOwner(page);
+    await page.goto('/guide/viec-sep');
+    const fr = row(page, 'Facebook trả lời (không bắt buộc)');
+    await expect(fr.getByTestId('boss-result')).toContainText('Chưa kiểm');
+    await expect(fr.getByRole('listitem')).toHaveCount(4);
+    await expect(fr.getByRole('button')).toHaveCount(0);
+    await expect(page.getByText('Đã đạt 0/6 dòng bắt buộc')).toBeVisible();
+    await fr.getByRole('link', { name: /Mở Tài khoản mạng xã hội/ }).click();
+    await expect(page).toHaveURL(/\/social$/);
+
+    await p3Hook(page.request, 'bossChecks', 'seedFacebookReply');
+    await page.goto('/guide/viec-sep');
+    const again = row(page, 'Facebook trả lời (không bắt buộc)');
+    await expect(again.getByTestId('boss-result')).toContainText(/Đạt · \d\d:\d\d \d\d\/\d\d/);
+    await expect(again).toContainText('Xong');
+    await expect(page.getByText('Đã đạt 0/6 dòng bắt buộc')).toBeVisible();   // không bắt buộc ⇒ không tính
   });
 });
