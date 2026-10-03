@@ -89,6 +89,9 @@ def test_libpq_conn_strips_password_and_unquotes() -> None:
     assert url == "postgresql://gh@db/gen" and env == {}
     url, env = backup.libpq_conn("postgresql://db/gen?user=u&password=p%26q")
     assert url == "postgresql://db/gen?user=u" and env == {"PGPASSWORD": "p&q"}
+    # Tham số khác giữ nguyên giá trị: khoảng trắng → %20 (libpq không giải '+' thành khoảng trắng).
+    url, env = backup.libpq_conn("postgresql://db/gen?options=-c%20search_path%3Dx&password=p")
+    assert url == "postgresql://db/gen?options=-c%20search_path%3Dx" and env == {"PGPASSWORD": "p"}
 
 
 async def test_run_backup_and_restore_keep_password_off_argv(admin_env: _Recorder, tmp_path: Path,

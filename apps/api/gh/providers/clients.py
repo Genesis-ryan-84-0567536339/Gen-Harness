@@ -164,9 +164,12 @@ def _raise_for(resp: httpx.Response) -> None:
     if resp.status_code < 400:
         return
     # v0.1.45: thân lỗi có thể phản chiếu header (khoá) / dữ liệu — che rồi cắt 200 ký tự trước khi vào lỗi/log.
-    body = redact(resp.text[:4000])[:200]
+    # Phân loại 429 trên thân ĐÃ CHE đủ 4000 ký tự (Gemini để dấu "…PerDay…" sâu trong JSON), chỉ cắt cho thông điệp.
+    body_full = redact(resp.text[:4000])
+    body = body_full[:200]
     if resp.status_code == 429:
-        if "quota" in body.lower() and "day" in body.lower():
+        low = body_full.lower()
+        if "quota" in low and "day" in low:
             raise QuotaExhausted(f"429 hết hạn mức: {body}")
         raise RateLimited(f"429: {body}", _retry_after(resp))
     if resp.status_code in (401, 403):

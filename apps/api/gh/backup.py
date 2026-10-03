@@ -139,7 +139,7 @@ def libpq_conn(database_url: str, *, database: str | None = None) -> tuple[str, 
         kept = [(k, v) for k, v in pairs if k != "password"]
         if len(kept) != len(pairs):
             password = password if password is not None else next(v for k, v in pairs if k == "password")
-            query = urlencode(kept)
+            query = urlencode(kept, quote_via=quote)  # khoảng trắng → %20 (libpq không giải '+')
     env = {"PGPASSWORD": password} if password else {}
     return urlunsplit(parts._replace(netloc=netloc, query=query)), env
 

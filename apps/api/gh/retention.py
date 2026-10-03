@@ -183,7 +183,8 @@ MCP_ARGS_DIGEST = "agent.mcp_calls.args"
 async def digest_mcp_call_args(db: AsyncSession, deadline: float) -> int:
     """v0.1.45 (F-57): dòng `agent.mcp_calls` cũ (trước v0.1.45) lưu NGUYÊN VĂN tham số tool → đổi sang dấu vết
     {sha256, keys, bytes} như `gh.mcp_api.invoke.args_digest` (sha256 tính trên `args::text` của Postgres). Idempotent:
-    dòng đã có khoá `sha256` bị bỏ qua — chạy lại không đổi gì. Không cần migration (bảng phân vùng, chạy theo lô)."""
+    dòng đã đúng dạng dấu vết (đúng 3 khoá sha256/keys/bytes, `keys` là mảng) bị bỏ qua — chạy lại không đổi gì; tham
+    số tool thật tình cờ có khoá `sha256` vẫn được đổi. Không cần migration (bảng phân vùng, chạy theo lô)."""
     return await _batched(db, """
         UPDATE agent.mcp_calls SET args = jsonb_build_object(
             'sha256', encode(sha256(convert_to(args::text, 'UTF8')), 'hex'),
@@ -192,7 +193,9 @@ async def digest_mcp_call_args(db: AsyncSession, deadline: float) -> int:
             'bytes', length(args::text))
         WHERE (id, at) IN (
           SELECT id, at FROM agent.mcp_calls
-          WHERE jsonb_typeof(args) = 'object' AND NOT args ? 'sha256'
+          WHERE jsonb_typeof(args) = 'object' AND NOT (
+            args ?& array['sha256', 'keys', 'bytes'] AND jsonb_typeof(args->'keys') = 'array'
+            AND (SELECT count(*) FROM jsonb_object_keys(args)) = 3)
           LIMIT :lim)""", {}, deadline)
 
 

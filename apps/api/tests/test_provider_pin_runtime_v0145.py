@@ -11,7 +11,7 @@ from sqlalchemy import text
 from gh import crypto
 from gh.db import admin_sessionmaker, sessionmaker
 from gh.gen import jev
-from gh.providers.clients import BadRequest, Message, OpenAICompatClient
+from gh.providers.clients import BadRequest, Message, OpenAICompatClient, QuotaExhausted, RateLimited, _raise_for
 from gh.providers.router import KEY_AAD, ModelRouter, ModelUnavailable
 from tests.conftest import FAKE_PUBLIC_IP, Api
 from tests.phase2 import org_id
@@ -121,3 +121,15 @@ async def test_jev_pinned() -> None:
     ok = jev.JevClient("https://openrouter.ai/api/v1", KEY, transport=httpx.MockTransport(handle))
     assert (await ok.ping()).label == "có"
     assert rec[0].url.host == FAKE_PUBLIC_IP and rec[0].headers["host"] == "openrouter.ai"
+
+
+def test_quota_marker_deep_in_429_body_is_classified() -> None:
+    """Gemini để dấu hết hạn mức ngày ("…PerDay…") sâu trong JSON — phân loại trên thân đủ 4000 ký tự (đã che),
+    chỉ cắt 200 ký tự cho thông điệp."""
+    body = ('{"error": {"code": 429, "message": "Resource exhausted", "details": [' + " " * 400
+            + '{"quotaId": "GenerateRequestsPerDayPerProjectPerModel"}]}}')
+    with pytest.raises(QuotaExhausted) as e:
+        _raise_for(httpx.Response(429, text=body))
+    assert len(str(e.value)) < 260
+    with pytest.raises(RateLimited):
+        _raise_for(httpx.Response(429, text='{"error": "slow down"}'))

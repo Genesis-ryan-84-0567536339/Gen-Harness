@@ -130,7 +130,8 @@ async def test_retention_converts_legacy_rows(owner_api: Api, app: Any, db: Any)
     tool, _ = await _exposed_tool(owner_api, app, "get_status", grant_to="core.reply")
     org = await org_id(db)
     async with admin_sessionmaker()() as adb:
-        for args in (SECRET_ARGS, {"b": 1, "a": [1, 2]}, {}):
+        # Tham số tool thật có khoá `sha256` ở cấp đầu vẫn phải được đổi (dấu "đã đổi" chặt: đúng 3 khoá).
+        for args in (SECRET_ARGS, {"b": 1, "a": [1, 2]}, {}, {"sha256": "khong-phai-dau-vet", "q": "x"}):
             await adb.execute(text("""INSERT INTO agent.mcp_calls (org_id, tool_id, agent_key, args, outcome)
                                       VALUES (:o, :t, 'core.reply', CAST(:a AS jsonb), 'ok')"""),
                               {"o": org, "t": tool["id"], "a": orjson.dumps(args).decode()})
@@ -141,12 +142,12 @@ async def test_retention_converts_legacy_rows(owner_api: Api, app: Any, db: Any)
         await adb.commit()
     async with sessionmaker()() as s1:
         n = await retention.digest_mcp_call_args(s1, time.monotonic() + 60)
-    assert n == 3
+    assert n == 4
     rows = (await db.execute(text("SELECT args FROM agent.mcp_calls"))).scalars().all()
     assert all(set(a) == {"sha256", "keys", "bytes"} for a in rows)
     _no_leak(orjson.dumps(rows).decode())
     keys = sorted(tuple(a["keys"]) for a in rows)
-    assert keys == [(), ("a", "b"), ("email", "so_tk", "token"), ("x",)]
+    assert keys == [(), ("a", "b"), ("email", "so_tk", "token"), ("q", "sha256"), ("x",)]
     before = orjson.dumps(sorted(rows, key=lambda a: a["sha256"])).decode()
     async with sessionmaker()() as s2:
         assert await retention.digest_mcp_call_args(s2, time.monotonic() + 60) == 0
