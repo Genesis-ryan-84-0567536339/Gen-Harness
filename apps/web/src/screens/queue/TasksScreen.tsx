@@ -141,7 +141,7 @@ function PromisesPanel() {
       ) : promises.isError ? (
         <CardError error={promises.error} onRetry={() => void promises.refetch()} retrying={promises.isFetching} />
       ) : promises.data.items.length === 0 ? (
-        <DataEmptyState filtered={tab !== 'all'} fallback={<EmptyState icon="ph ph-handshake" title="Không có lời hứa nào ở mục này" />} />
+        <DataEmptyState filtered={tab !== 'upcoming' && tab !== 'all'} fallback={<EmptyState icon="ph ph-handshake" title="Không có lời hứa nào ở mục này" />} />
       ) : (
         promises.data.items.map((p) => (
           <div key={p.id} className={cx('tk-promise', p.broken && 'tk-promise--broken')}>

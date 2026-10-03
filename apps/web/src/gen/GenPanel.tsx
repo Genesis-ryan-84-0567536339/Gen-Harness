@@ -25,7 +25,7 @@ const TOOL_LABEL: Record<string, string> = {
   'screens.list': 'danh mục màn',
   'task.list': 'việc & nhắc hẹn',
   'staff.list': 'danh sách người',
-  'refinery.summary': 'lọc đầu Hộp thư',
+  'refinery.summary': 'lọc tin',
   'hub.kho_summary': 'Kho tri thức (Gen-hub)',
   'hub.kho_search': 'Kho tri thức (Gen-hub)',
   'hub.kho_get': 'Kho tri thức (Gen-hub)',

@@ -3,7 +3,7 @@ import { OWNER, apiCall, loginAsOwner, resetMock } from './support';
 
 /**
  * v0.1.43 (F-24): nháp tin của Gen chỉ được LƯU — thẻ nói rõ "Đã lưu nháp — chưa gửi". Chỉ khi nháp có NƠI GỬI thật
- * (API chỉ gắn khi đối tượng là NHÓM) thì nút chính mới là "Duyệt & gửi"; nháp cho một người (chưa có nơi gửi) chỉ có
+ * (API chỉ gắn khi đối tượng là NHÓM) thì nút chính mới là "Mở để duyệt và gửi"; nháp cho một người (chưa có nơi gửi) chỉ có
  * "Mở nháp ở Bàn làm việc" + "Nháp chưa có nơi gửi" — Bàn làm việc hiện "Duyệt và thực hiện", không hứa gửi.
  */
 
@@ -53,9 +53,9 @@ test.beforeEach(async ({ page }) => {
   await page.goto('/overview');
 });
 
-test('nháp cho NHÓM (có nơi gửi) → "Duyệt & gửi" mở đúng nháp, Bàn làm việc có "Duyệt và gửi qua Zalo"', async ({ page }) => {
+test('nháp cho NHÓM (có nơi gửi) → "Mở để duyệt và gửi" mở đúng nháp, Bàn làm việc có "Duyệt và gửi qua Zalo"', async ({ page }) => {
   const card = await askAndConfirm(page, 'soạn nháp tin báo giá cho nhóm Thành Phát', 'Báo giá ván MDF cho nhóm');
-  const go = card.getByRole('button', { name: 'Duyệt & gửi' });
+  const go = card.getByRole('button', { name: 'Mở để duyệt và gửi' });
   await expect(go).toBeVisible();
   await go.click();
 
@@ -66,9 +66,9 @@ test('nháp cho NHÓM (có nơi gửi) → "Duyệt & gửi" mở đúng nháp, 
   expect(saved).toMatchObject({ status: 'pending', title: 'Báo giá ván MDF cho nhóm' });
 });
 
-test('nháp cho một NGƯỜI (chưa có nơi gửi) → không hứa "Duyệt & gửi", chỉ "Mở nháp ở Bàn làm việc"', async ({ page }) => {
+test('nháp cho một NGƯỜI (chưa có nơi gửi) → không hứa "Mở để duyệt và gửi", chỉ "Mở nháp ở Bàn làm việc"', async ({ page }) => {
   const card = await askAndConfirm(page, 'soạn nháp tin báo giá cho anh Bảo', 'Báo giá ván MDF');
-  await expect(card.getByRole('button', { name: 'Duyệt & gửi' })).toHaveCount(0);
+  await expect(card.getByRole('button', { name: 'Mở để duyệt và gửi' })).toHaveCount(0);
   await expect(card).toContainText('Nháp chưa có nơi gửi');
   await card.getByRole('button', { name: /Mở nháp ở Bàn làm việc/ }).click();
 

@@ -69,6 +69,16 @@ test.describe('v0.1.43 · DataEmptyState (F-29)', () => {
     }
   });
 
+  test('/tasks: Lời hứa ở tab mặc định "Sắp tới" cũng dẫn "Nối kênh" (tab mặc định không phải bộ lọc)', async ({ page }) => {
+    await loginAsOwner(page);
+    await fakeHeader(page, 0, 0);
+    await emptyLists(page);
+    await page.goto('/tasks');
+    const promises = page.locator('.tk-promises');
+    await expect(promises.getByTestId('data-empty-state')).toHaveAttribute('data-reason', 'no-channel');
+    await expect(promises.getByRole('link', { name: 'Nối kênh' })).toHaveAttribute('href', '/guide/5');
+  });
+
   test('đã có kênh + nhóm: giữ trạng thái trống cũ của màn', async ({ page }) => {
     await loginAsOwner(page);
     await fakeHeader(page, 4, 42);

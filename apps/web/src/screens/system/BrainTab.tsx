@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { EmptyState, Icon } from '@gen-harness/ui';
@@ -41,6 +41,12 @@ export function BrainTabBody() {
   const rules = useFailoverRules();
   const qc = useQueryClient();
   const jevHash = useLocation().hash === '#jev';
+  // v0.1.43: "Nhập khoá Jev" (Kiểm tra của Boss) dẫn tới #jev — thẻ ở lưới dưới, mở sẵn rồi cuộn tới (giống Kết nối).
+  useEffect(() => {
+    if (!jevHash) return;
+    const t = window.setTimeout(() => document.getElementById('jev')?.scrollIntoView?.({ block: 'start' }), 50);
+    return () => window.clearTimeout(t);
+  }, [jevHash]);
   // v0.1.39 (F-78): Jev không bắt buộc — kiểm tra lỗi thì thu thẻ vào "Nâng cao" thay vì để lỗi đỏ giữa tab.
   // Mutation giữ ở đây để kết quả "Kiểm tra 1 lần" còn nguyên khi thẻ chuyển chỗ.
   const jevTest = useTestProvider();

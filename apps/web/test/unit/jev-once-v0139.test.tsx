@@ -131,10 +131,20 @@ describe('v0.1.39 — Jev "Kiểm tra 1 lần" và thu vào "Nâng cao" khi lỗ
     expect(screen.getByText('Nâng cao — Jev (không bắt buộc)')).toBeInTheDocument();
   });
 
-  it('v0.1.43: tới bằng /system?tab=brain#jev (nút "Nhập khoá Jev") → khối "Nâng cao" mở sẵn, thấy thẻ Jev', async () => {
-    setup(jev(OK), undefined, '/system?tab=brain#jev');
-    const summary = await screen.findByText('Nâng cao — Jev (không bắt buộc)');
-    expect(summary.closest('details')).toHaveAttribute('open');
-    expect(screen.getByText(TITLE)).toBeVisible();
+  it('v0.1.43: tới bằng /system?tab=brain#jev (nút "Nhập khoá Jev") → khối "Nâng cao" mở sẵn, thấy thẻ Jev, cuộn tới', async () => {
+    const scrolled: Element[] = [];
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (this: Element) {
+      scrolled.push(this);
+    };
+    try {
+      setup(jev(OK), undefined, '/system?tab=brain#jev');
+      const summary = await screen.findByText('Nâng cao — Jev (không bắt buộc)');
+      expect(summary.closest('details')).toHaveAttribute('open');
+      expect(screen.getByText(TITLE)).toBeVisible();
+      await waitFor(() => expect(scrolled.map((el) => el.id)).toContain('jev'));
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
   });
 });

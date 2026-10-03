@@ -111,9 +111,9 @@ khai một nơi); Hôm nay một hàng 4 số; header gọn ngoài Nâng cao, lo
 đóng băng, Hồ sơ sống chỉ mở từ danh sách. Link cũ (`/system?tab=channels|users`) tự chuyển.
 v0.1.43: bỏ lời hứa không thật & chữ khó hiểu (F-23, F-25, F-29, F-30, F-38 phần logic, F-62, F-24 chỉ chữ) — bước 1
 không còn "Dùng dữ liệu mẫu"; gán model chỉ 3 khoá lõi (`core.refinery`, `core.reply`, `core.gen`); màn trống dẫn "Nối
-Zalo"/"Chọn nhóm để nghe"; thang tự trị 3 mức ở giao diện (5–6 ở Nâng cao, backend giữ 0–6); Lọc tin Thấp/Vừa/Cao, Jev +
+kênh"/"Quét lại QR"/"Chọn nhóm để nghe"; thang tự trị 3 mức ở giao diện (5–6 ở Nâng cao, backend giữ 0–6); Lọc tin Thấp/Vừa/Cao, Jev +
 trọng số vào Nâng cao; ẩn độ tin cậy trên thẻ Hộp thư; `gh/textnorm.py` + `lib/format.ts` dùng chung; nháp tin Gen "Đã lưu
-nháp — chưa gửi" + "Duyệt & gửi". Còn: F-38 phần còn lại (gom khi chạm vào code).
+nháp — chưa gửi" + "Mở để duyệt và gửi". Còn: F-38 phần còn lại (gom khi chạm vào code).
 
 ## Đợt A — Gen v1 (thiết kế: docs/design/gen-v1.md)
 - ✅ A1 Khung chat phải + Gen trả lời/tóm tắt (chỉ đọc), lưu hội thoại, Nhật ký hành động — v0.1.21.

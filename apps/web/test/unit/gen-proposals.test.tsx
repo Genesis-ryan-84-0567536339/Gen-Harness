@@ -51,7 +51,7 @@ type Call = { method: string; url: string; body: unknown };
 const calls: Call[] = [];
 let confirmReply: { status: number; body: unknown } | null = null;
 let draftResultId: string | null = 'd-7f/1';
-let draftSendable = true;
+let draftSendable: boolean | undefined = true;
 const navigations: string[] = [];
 
 function stubApi() {
@@ -73,7 +73,7 @@ function stubApi() {
         const result =
           m[1] === 'p1'
             ? { type: 'task', id: 't9', code: 'TSK-0412', screen: 'tasks' }
-            : { type: 'draft', id: draftResultId, code: 'ACT-0999', screen: 'workbench', sendable: draftSendable };
+            : { type: 'draft', id: draftResultId, code: 'ACT-0999', screen: 'workbench', ...(draftSendable === undefined ? {} : { sendable: draftSendable }) };
         return json(200, { ...base, fields: { ...base.fields, ...(body?.fields ?? {}) }, status: 'confirmed', result });
       }
       return json(404, { status: 404, code: 'NOT_FOUND', title: 'Không tồn tại' });
@@ -193,7 +193,7 @@ describe('Gen proposal card', () => {
     expect(within(card).getByRole('button', { name: 'Xác nhận' })).toBeEnabled(); // vẫn chờ, thử lại được
   });
 
-  it('v0.1.43 (F-24): nháp tin đã xác nhận → "Đã lưu nháp — chưa gửi" + nút "Duyệt & gửi" tới đúng nháp', async () => {
+  it('v0.1.43 (F-24): nháp tin đã xác nhận → "Đã lưu nháp — chưa gửi" + nút "Mở để duyệt và gửi" tới đúng nháp', async () => {
     const { container } = renderPanel();
     showProposal(DRAFT);
     const card = screen.getByRole('group', { name: 'Đề xuất: Soạn nháp tin gửi đi' });
@@ -206,22 +206,37 @@ describe('Gen proposal card', () => {
     expect(card.querySelector('[data-icon="paper-plane-tilt"]')).toBeNull();
     expect(within(card).queryByRole('button', { name: /Mở Bàn làm việc/ })).toBeNull();
     expect(writes()).toHaveLength(1);
-    await userEvent.click(within(card).getByRole('button', { name: 'Duyệt & gửi' }));
+    await userEvent.click(within(card).getByRole('button', { name: 'Mở để duyệt và gửi' }));
     expect(navigations).toEqual([`/workbench?id=${encodeURIComponent('d-7f/1')}`]);
     expect(writes()).toHaveLength(1); // điều hướng thôi — không gửi gì thêm
     expect(container.textContent).not.toContain('[object Object]');
   });
 
-  it('v0.1.43 (F-24): nháp không có nơi gửi (đối tượng là người/không có) → không hứa "Duyệt & gửi", chỉ mở nháp', async () => {
+  it('v0.1.43 (F-24): nháp không có nơi gửi (đối tượng là người/không có) → không hứa "Mở để duyệt và gửi", chỉ mở nháp', async () => {
     draftSendable = false;
     renderPanel();
     showProposal(DRAFT);
     const card = screen.getByRole('group', { name: 'Đề xuất: Soạn nháp tin gửi đi' });
     await userEvent.click(within(card).getByRole('button', { name: 'Xác nhận' }));
     await waitFor(() => expect(card).toHaveTextContent('Đã lưu nháp — chưa gửi'));
-    expect(within(card).queryByRole('button', { name: 'Duyệt & gửi' })).toBeNull();
+    expect(within(card).queryByRole('button', { name: 'Mở để duyệt và gửi' })).toBeNull();
     expect(card).toHaveTextContent('Nháp chưa có nơi gửi');
     await userEvent.click(within(card).getByRole('button', { name: /Mở nháp ở Bàn làm việc/ }));
+    expect(navigations).toEqual([`/workbench?id=${encodeURIComponent('d-7f/1')}`]);
+  });
+
+  it('v0.1.43 (F-24): kết quả cũ không có `sendable` → chỉ chip "Mở nháp", không khẳng định "chưa có nơi gửi"', async () => {
+    draftSendable = undefined;
+    renderPanel();
+    showProposal(DRAFT);
+    const card = screen.getByRole('group', { name: 'Đề xuất: Soạn nháp tin gửi đi' });
+    await userEvent.click(within(card).getByRole('button', { name: 'Xác nhận' }));
+    await waitFor(() => expect(card).toHaveTextContent('Đã lưu nháp — chưa gửi'));
+    expect(within(card).queryByRole('button', { name: 'Mở để duyệt và gửi' })).toBeNull();
+    expect(card).not.toHaveTextContent('Nháp chưa có nơi gửi');
+    expect(card).not.toHaveTextContent('Chờ Sếp duyệt rồi mới gửi');
+    expect(card.querySelector('.gen-prop__note')).toBeNull();
+    await userEvent.click(within(card).getByRole('button', { name: 'Mở nháp' }));
     expect(navigations).toEqual([`/workbench?id=${encodeURIComponent('d-7f/1')}`]);
   });
 
@@ -232,7 +247,7 @@ describe('Gen proposal card', () => {
     const card = screen.getByRole('group', { name: 'Đề xuất: Soạn nháp tin gửi đi' });
     await userEvent.click(within(card).getByRole('button', { name: 'Xác nhận' }));
     await waitFor(() => expect(card).toHaveTextContent('Đã lưu nháp — chưa gửi'));
-    expect(within(card).queryByRole('button', { name: 'Duyệt & gửi' })).toBeNull();
+    expect(within(card).queryByRole('button', { name: 'Mở để duyệt và gửi' })).toBeNull();
     expect(card).toHaveTextContent('Chờ Sếp duyệt rồi mới gửi');
     await userEvent.click(within(card).getByRole('button', { name: 'Mở nháp' }));
     expect(navigations).toEqual([`/workbench?id=${encodeURIComponent('d-7f/1')}`]);
@@ -245,7 +260,7 @@ describe('Gen proposal card', () => {
     const card = screen.getByRole('group', { name: 'Đề xuất: Soạn nháp tin gửi đi' });
     await userEvent.click(within(card).getByRole('button', { name: 'Xác nhận' }));
     await waitFor(() => expect(card).toHaveTextContent('Đã lưu nháp — chưa gửi'));
-    expect(within(card).queryByRole('button', { name: 'Duyệt & gửi' })).toBeNull();
+    expect(within(card).queryByRole('button', { name: 'Mở để duyệt và gửi' })).toBeNull();
     await userEvent.click(within(card).getByRole('button', { name: /Mở Bàn làm việc/ }));
     expect(navigations).toEqual(['/workbench']);
   });

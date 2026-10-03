@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { SCREENS, type NavItem } from '@gen-harness/contracts';
+import { GEN_TARGETS, SCREENS, type NavItem } from '@gen-harness/contracts';
+import { triageBadges } from '../../src/screens/queue/queueModel';
 import { itemTitle } from '../../src/shell/navModel';
 import { readableNotes } from '../../src/update/updateModel';
 import { buildNavigation } from '../mock-api';
+import { SETUP_STEPS, STEP_DESCRIPTIONS } from '../../src/setup/steps';
 
 /**
  * v0.1.43 (F-62): tooltip thanh bên ("tên — mô tả") và nhãn màn phải tiếng Việt — không còn từ tiếng Anh nội bộ
@@ -117,5 +119,33 @@ describe('readableNotes bỏ tiền tố conventional commit (F-62)', () => {
     expect(readableNotes("## What's Changed\n- feat(web): lọc tin by @a in https://github.com/x/y/pull/3\n- chore: dọn dẹp")).toBe(
       '## Điểm mới\n- Lọc tin\n- Dọn dẹp',
     );
+  });
+});
+
+describe('thiết lập không hứa điều không còn (F-23)', () => {
+  it('mô tả bước 1 không còn nhắc ô ngôn ngữ / "cách bắt đầu" đã gỡ', () => {
+    expect(STEP_DESCRIPTIONS[1]).toBe('Mã thiết lập chứng minh Sếp là người vừa chạy trình cài trên máy này.');
+    expect(STEP_DESCRIPTIONS[1]).not.toMatch(/cách bắt đầu|ngôn ngữ/i);
+  });
+
+  it('nội dung bước 9 nói theo thang 3 mức, không còn "0–6, mặc định 4"', () => {
+    const step9 = SETUP_STEPS.find((s) => s.n === 9)!;
+    expect(step9.content).not.toMatch(/0–6|mặc định 4/);
+    expect(step9.content).toMatch(/Gợi ý hoặc Soạn sẵn chờ duyệt/);
+  });
+});
+
+describe('thẻ "Lọc tin" — Gen và huy hiệu dùng đúng tên mới', () => {
+  it('đích Gen system.brain.triage, nhãn công cụ Gen và huy hiệu Hộp thư không còn "Lọc đầu"', () => {
+    const t = GEN_TARGETS.find((x) => x.id === 'system.brain.triage')!;
+    expect(t.label).toBe('Thẻ "Lọc tin"');
+    expect(t.description).toMatch(/Thấp\/Vừa\/Cao/);
+    expect(t.description).not.toMatch(/ngưỡng điểm chất lượng, dùng Jev/);
+    const badges = triageBadges({ duplicate_of: null, duplicate_kind: null, spam: false, spam_reason: null, score: 82, low_score: false, reason: 'ok', source: 'rules' } as never);
+    expect(badges.map((b) => b.label)).toEqual(['Điểm lọc 82']);
+    const panel = readFileSync(resolve(__dirname, '../../src/gen/GenPanel.tsx'), 'utf8');
+    expect(panel).toContain("'refinery.summary': 'lọc tin'");
+    const tools = readFileSync(resolve(__dirname, '../../../api/gh/gen/tools.py'), 'utf8');
+    expect(tools).not.toMatch(/Lọc đầu Hộp thư/);
   });
 });

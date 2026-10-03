@@ -42,7 +42,7 @@ export function WorkbenchScreen() {
       <div className="wb-grid">
         <Panel
           title="Chờ Sếp duyệt"
-          kicker={list.data ? `${fmtInt(list.data.total)} bản nháp chờ Sếp duyệt` : 'Đang tải…'}
+          kicker={list.data ? `${fmtInt(list.data.total)} bản nháp` : 'Đang tải…'}
           bodyClass="wb-list"
           genTarget="workbench.drafts"
         >

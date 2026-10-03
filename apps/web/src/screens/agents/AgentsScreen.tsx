@@ -294,7 +294,8 @@ function AgentFormDialog({ agent, template, onClose }: { agent: AgentIdentity | 
           </label>
           <textarea id="ag-forbidden" className="gh-input" rows={2} value={forbidden} onChange={(e) => setForbidden(e.target.value)} />
         </div>
-        <AutonomySelect current={agent ? agent.autonomy_level : DEFAULT_NEW_AGENT_AUTONOMY} value={picked} onChange={setPicked} />
+        {/* Tạo mới: current=null để bấm "Chỉ ghi nhận" ghi đúng mức 0 (không bị coi là "giữ" mức mặc định 2). */}
+        <AutonomySelect current={agent ? agent.autonomy_level : null} value={picked} onChange={setPicked} />
         <fieldset className="ag-scope-fields">
           <legend className="gh-field__label">Phạm vi kênh được xuất hiện</legend>
           {installed.length === 0 ? (

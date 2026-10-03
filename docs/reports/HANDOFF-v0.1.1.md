@@ -2416,8 +2416,8 @@ Không cần chụp màn hình hay gửi mã cho Claude — kết quả tự lư
   chỉ gán 3 khoá lõi; dịch/soạn lại nháp không có agent dùng `core.reply` (trước là `core.reply_fast`).
 - **Chuẩn hoá chữ (F-38)**: `gh/textnorm.py` dùng chung cho quy tắc và lọc trùng (NFC/NFD, toàn chiều rộng, m², Ð ra cùng
   kết quả; NFC và NFD cùng `text_hash`). Web: `initialsOf`/`fmtVnd` chỉ ở `lib/format.ts`, các model re-export.
-- **Trạng thái trống (F-29)**: `DataEmptyState` đọc `GET /header` — chưa nối kênh → "Nối Zalo" (`/guide/5`), chưa nghe nhóm →
-  `/guide/6`, vai trò khác Owner thấy "Nhờ Owner…" không có nút. Áp cho Hộp thư, Việc, Bàn làm việc, Khách & Nhóm, Cơ hội.
+- **Trạng thái trống (F-29)**: `DataEmptyState` đọc `GET /header` — chưa nối kênh → "Nối kênh" (`/guide/5`), mất phiên →
+  "Quét lại QR" (`/connections`), chưa nghe nhóm → "Chọn nhóm để nghe" (`/guide/6`), vai trò khác Owner thấy "Nhờ Owner…" không có nút. Áp cho Hộp thư, Việc, Bàn làm việc, Khách & Nhóm, Cơ hội.
 - **Tự trị 3 mức (F-30, chỉ giao diện)**: `AutonomySelect` dùng chung (0–2 → Chỉ ghi nhận ghi 0, 3 → Gợi ý, 4 → Soạn sẵn chờ
   duyệt ghi 4; 5–6 chỉ đặt ở "Nâng cao" và hiện "Tự làm (đặt ở Nâng cao)"); chỉ gửi `autonomy_level` khi Sếp chọn mức
   khác — mở/đóng không ghi. Header (màn Nâng cao) hiện nhãn 3 mức thay "tự trị 4". Backend giữ thang 0–6.
@@ -2437,7 +2437,7 @@ Không cần chụp màn hình hay gửi mã cho Claude — kết quả tự lư
     là NHÓM) và người bấm có `action.approve`; nháp cho một người → "Nháp chưa có nơi gửi" + chip "Mở nháp ở Bàn làm
     việc"; Operator/Agent NV → "Chờ Sếp duyệt rồi mới gửi" + "Mở nháp". Mock Gen theo đúng API (nháp cho người: target
     null, "Duyệt và thực hiện").
-  - F-29: `DataEmptyState` có prop `filtered` — Hộp thư (tab/ý định/ẩn rác), Việc (bộ lọc), Lời hứa (tab ≠ Tất cả), Con
+  - F-29: `DataEmptyState` có prop `filtered` — Hộp thư (tab/ý định/ẩn rác), Việc (bộ lọc), Lời hứa (tab Quá hạn/Đã giữ — "Sắp tới" mặc định không tính là lọc), Con
     người (bộ lọc) đang lọc thì giữ câu "không khớp bộ lọc". `GET /header` thêm `channels_connected` (kênh đã từng đăng
     nhập) ⇒ kênh mất phiên hiện "Kênh mất kết nối — quét lại QR" dẫn `/connections`, không còn "chưa nối kênh". CTA đổi
     "Nối kênh"; `me` đang tải thì hiện trạng thái trống cũ (Owner không thấy thoáng "Nhờ Owner…").
@@ -2452,6 +2452,22 @@ Không cần chụp màn hình hay gửi mã cho Claude — kết quả tự lư
   - F-23: không đổi API — `mode` ở bước 1 chỉ được LƯU làm nhãn, API không tạo dữ liệu mẫu nào (không có mã ghi
     raw.events theo `mode`), nên chỉ ẩn ở giao diện là đủ.
 
+- **Sửa sau review lượt 2 (F-23, F-24, F-29, F-30)**:
+  - F-30 (tự trị): tạo agent mới truyền `current=null` cho `AutonomySelect` ⇒ bấm "Chỉ ghi nhận" ghi đúng mức **0** (không
+    chọn gì thì vẫn gửi mặc định 2). Mức 1/2 đang lưu (agent, người): bấm "Chỉ ghi nhận" GHI 0 thật (trước coi là "giữ
+    nguyên"); khi chưa chọn, gợi ý nói đúng mức thật ("Đang ở mức 2 · Chấm điểm + giải thích — vẫn gọi được công cụ…",
+    `autonomyLegacyHint`) vì MCP chỉ chặn ở mức ≤ 1. Gợi ý "Chỉ ghi nhận" ghi rõ "Mức 0: chỉ đọc… không gọi công cụ".
+  - F-30 (Lọc tin): đích Gen `system.brain.triage` → 'Thẻ "Lọc tin"' (mức Thấp/Vừa/Cao; Jev và ngưỡng số ở Nâng cao),
+    xuất lại `registry.json`; nhãn công cụ Gen "lọc tin", mô tả `refinery.summary` "Lọc tin Hộp thư…"; huy hiệu Hộp thư
+    "Điểm lọc {điểm}" (trước "Lọc đầu {điểm}"). `/system?tab=brain#jev` mở sẵn "Nâng cao" VÀ cuộn tới thẻ Jev.
+  - F-23: mô tả bước 1 bỏ "Chọn ngôn ngữ và cách bắt đầu"; nội dung bước 9 nói thang 3 mức (Gợi ý hoặc Soạn sẵn chờ
+    duyệt) thay "0–6, mặc định 4" (`wording-v0143` kiểm).
+  - F-24: nút chính thẻ nháp Gen đổi "Mở để duyệt và gửi" (chỉ mở màn duyệt, cùng chữ "và" với Bàn làm việc). Kết quả
+    lưu trước v0.1.43 không có `sendable` ⇒ chỉ chip "Mở nháp", không khẳng định "Nháp chưa có nơi gửi" (chỉ khi
+    `sendable === false`).
+  - F-29: panel Lời hứa coi tab mặc định "Sắp tới" là không lọc ⇒ chưa nối kênh cũng dẫn "Nối kênh" (chỉ "Đã giữ"/"Quá
+    hạn"… mới là đang lọc). Kicker Bàn làm việc chỉ còn "N bản nháp" (tiêu đề đã ghi "Chờ Sếp duyệt").
+
 ### Kiểm tra
 
 - api: `test_bindings_v0143.py`, `test_textnorm.py`, `test_triage` cũ, `test_p4_agents`, `test_header_v0143.py`,
@@ -2459,15 +2475,18 @@ Không cần chụp màn hình hay gửi mã cho Claude — kết quả tự lư
 - web (sửa sau review): `data-empty-state-v0143` (lọc, mất phiên, me đang tải), `gen-proposals` (không nơi gửi, không quyền
   duyệt), `gen.test` (Spotlight trong details), `jev-once-v0139` (`#jev`), `step7-weights-v0143`, `triage-level-v0143`,
   `format-v0143`, `p3-relations` (Auditor); e2e `empty-state-v0143` (+ mất phiên, + đang lọc), `gen-draft-approve-v0143`
-  (nhóm → "Duyệt & gửi"; người → chỉ mở nháp).
+  (nhóm → "Mở để duyệt và gửi"; người → chỉ mở nháp).
 - web vitest: `setup.test` (bước 1), `autonomy-select-v0143`, `data-empty-state-v0143`, `format-v0143`,
   `triage-level-v0143`, `wording-v0143`, `gen-proposals`, `jev-once-v0139`, `p3-queue`, `p3-relations`, `shell`.
 - e2e mock: `empty-state-v0143.spec.ts`, `gen-draft-approve-v0143.spec.ts`, `menu-v0142`/`flows`/`coverage`/`phase2`/`visual`
   theo nhãn mới.
-- Kết quả trên nhánh tích hợp (03/10): ruff + mypy sạch (139 tệp), alembic 1 head (0027);
-  pytest 1500 passed mỗi lượt (superuser và gh_app, 3 deselected `slow` như CI); web lint/typecheck sạch,
-  check_no_fake_ids sạch, vitest 659 passed (74 tệp), build OK, bridge test 50 pass; Playwright mock 232 passed (không
-  skip; gồm `empty-state-v0143` 5, `gen-draft-approve-v0143` 1); browser 14 passed (ruff + mypy sạch); genh `go vet` +
+- Kết quả chạy lại sau review lượt 2 (03/10, trên bản sửa của d8e728e): ruff + mypy sạch (139 tệp), alembic 1 head
+  (**0028**); pytest 1503 passed mỗi lượt (superuser và gh_app, 3 deselected `slow` như CI); web lint/typecheck sạch,
+  check_no_fake_ids sạch, vitest 677 passed (75 tệp), build OK, bridge test 50 pass; Playwright mock 236 passed (không
+  skip; gồm `empty-state-v0143` 8, `gen-draft-approve-v0143` 2); browser 14 passed (ruff + mypy sạch); genh `go vet` +
   `go test ./...` ok; `check_release_gate.py` thoát 0, unittest `.github/scripts` 30 OK.
+- Test thêm ở lượt 2: `autonomy-select-v0143` (tạo agent chọn "Chỉ ghi nhận" → 0, không chọn → 2; mức 1/2 → ghi 0;
+  gợi ý mức thật), `wording-v0143` (mô tả bước 1, nội dung bước 9, đích Gen/huy hiệu "Lọc tin"), `gen-proposals` (kết
+  quả cũ thiếu `sendable`), `jev-once-v0139` (`#jev` cuộn tới thẻ), e2e `empty-state-v0143` (Lời hứa tab mặc định).
 - Chờ sau phát hành (người điều phối): kiểm genh tải từ Release đúng checksum + `genh version` = v0.1.43; E2E release
   xanh rồi mới promote.

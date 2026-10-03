@@ -12,6 +12,7 @@ import {
   AUTONOMY_AUTO_LABEL,
   AUTONOMY_CHOICES,
   autonomyChoice,
+  autonomyLegacyHint,
   autonomyPatch,
   type AgentIdentity,
   type DirCursorPage,
@@ -95,21 +96,42 @@ describe('autonomyChoice / autonomyPatch', () => {
 });
 
 describe('AutonomySelect', () => {
-  it('current=2, bấm "Soạn sẵn chờ duyệt" → onChange(4); current=1 bấm "Chỉ ghi nhận" → onChange(null)', async () => {
+  it('current=2, bấm "Soạn sẵn chờ duyệt" → onChange(4); current=1/2 bấm "Chỉ ghi nhận" → onChange(0) (hạ thật về 0)', async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     const { unmount } = render(<AutonomySelect current={2} value={null} onChange={onChange} />);
     const group = screen.getByRole('group', { name: 'Mức tự trị' });
     expect(pressed(group, 'Chỉ ghi nhận')).toBe('true');
+    // Mức 2 không hứa "chỉ đọc": nói đúng mức thật và việc vẫn gọi được công cụ.
+    expect(screen.getByText(/Đang ở mức 2 · Chấm điểm \+ giải thích — vẫn gọi được công cụ/)).toBeInTheDocument();
+    expect(screen.queryByText(/chỉ đọc/i)).toBeNull();
+    await user.click(within(group).getByRole('button', { name: 'Chỉ ghi nhận' }));
+    expect(onChange).toHaveBeenLastCalledWith(0);
     await user.click(within(group).getByRole('button', { name: 'Soạn sẵn chờ duyệt' }));
     expect(onChange).toHaveBeenLastCalledWith(4);
     unmount();
 
     const onChange2 = vi.fn();
-    render(<AutonomySelect current={1} value={null} onChange={onChange2} />);
+    const r2 = render(<AutonomySelect current={1} value={null} onChange={onChange2} />);
     await user.click(within(screen.getByRole('group', { name: 'Mức tự trị' })).getByRole('button', { name: 'Chỉ ghi nhận' }));
     expect(onChange2).toHaveBeenCalledTimes(1);
-    expect(onChange2).toHaveBeenLastCalledWith(null);
+    expect(onChange2).toHaveBeenLastCalledWith(0);
+    r2.unmount();
+
+    // Đúng mức 0 đang lưu → giữ nguyên; gợi ý mức 0 mới được nói "chỉ đọc".
+    const onChange3 = vi.fn();
+    render(<AutonomySelect current={0} value={null} onChange={onChange3} />);
+    expect(screen.getByText(/Mức 0: chỉ đọc và ghi lại/)).toBeInTheDocument();
+    await user.click(within(screen.getByRole('group', { name: 'Mức tự trị' })).getByRole('button', { name: 'Chỉ ghi nhận' }));
+    expect(onChange3).toHaveBeenLastCalledWith(null);
+  });
+
+  it('autonomyLegacyHint chỉ cho mức 1/2', () => {
+    expect(autonomyLegacyHint(0)).toBeNull();
+    expect(autonomyLegacyHint(3)).toBeNull();
+    expect(autonomyLegacyHint(null)).toBeNull();
+    expect(autonomyLegacyHint(1)).not.toMatch(/gọi được công cụ/);
+    expect(autonomyLegacyHint(2)).toMatch(/vẫn gọi được công cụ/);
   });
 
   it('current=5: viên "Tự làm (đặt ở Nâng cao)" đang nhấn, không bấm được; "Soạn sẵn chờ duyệt" KHÔNG nhấn', () => {
@@ -216,6 +238,40 @@ describe('Danh tính Agent — sửa không ghi lại mức tự trị', () => {
   });
 });
 
+describe('Danh tính Agent — tạo mới', () => {
+  const createHandler = (c: Call): Response => {
+    if (c.url.endsWith('/agents') && c.method === 'POST') return json(201, { ...AGENT, ...c.body, id: 'agent-new' });
+    return agentsHandler(c);
+  };
+  const openCreate = async (user: ReturnType<typeof userEvent.setup>) => {
+    await user.click(await screen.findByRole('button', { name: 'Tạo agent mới' }));
+    const dlg = await screen.findByRole('dialog', { name: 'Tạo agent mới' });
+    for (const [label, v] of [['Tên hiển thị', 'Ghi chép'], ['Vai trò', 'Ghi lại'], ['Giọng / persona', 'Ngắn'], ['Khi nào được nói', 'Không bao giờ']]) {
+      await user.type(within(dlg).getByLabelText(label), v);
+    }
+    return dlg;
+  };
+
+  it('chọn "Chỉ ghi nhận" → autonomy_level 0 (không phải mặc định 2); không chọn → giữ mặc định 2', async () => {
+    const calls = mockFetch(createHandler);
+    const user = userEvent.setup();
+    renderScreen(<AgentsScreen />);
+    const posts = () => calls.filter((c) => c.method === 'POST' && c.url.endsWith('/agents'));
+
+    let dlg = await openCreate(user);
+    await user.click(within(within(dlg).getByRole('group', { name: 'Mức tự trị' })).getByRole('button', { name: 'Chỉ ghi nhận' }));
+    await user.click(within(dlg).getByRole('button', { name: 'Tạo agent' }));
+    await waitFor(() => expect(posts()).toHaveLength(1));
+    expect(posts()[0].body).toMatchObject({ autonomy_level: 0 });
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+
+    dlg = await openCreate(user);
+    await user.click(within(dlg).getByRole('button', { name: 'Tạo agent' }));
+    await waitFor(() => expect(posts()).toHaveLength(2));
+    expect(posts()[1].body).toMatchObject({ autonomy_level: 2 });
+  });
+});
+
 const PEOPLE: DirCursorPage<DirPerson> = {
   items: [
     {
@@ -234,7 +290,7 @@ const PEOPLE: DirCursorPage<DirPerson> = {
 };
 
 describe('Nhóm & Con người — PersonBotDialog', () => {
-  it('cột Tự trị hiện nhãn 3 mức; người mức 1, Lưu không đổi gì → body không có autonomy_level', async () => {
+  it('cột Tự trị hiện nhãn 3 mức; người mức 1 bấm "Chỉ ghi nhận" → ghi mức 0 thật', async () => {
     const calls = mockFetch((c) => {
       if (c.url.includes('/pickers/agents')) return json(200, { items: [{ id: AGENT_IDS.tls, name: 'Trợ lý thương mại' }] });
       if (c.url.match(/\/directory\/people\/p1\/bot$/)) return json(200, PEOPLE.items[0]);
@@ -253,11 +309,11 @@ describe('Nhóm & Con người — PersonBotDialog', () => {
 
     await user.click(within(row).getByRole('button', { name: 'Đổi' }));
     const dlg = await screen.findByRole('dialog', { name: 'Thiết lập BOT + tự trị' });
-    // Bấm lại đúng nhóm của mức đang lưu (1 → "Chỉ ghi nhận") cũng không ghi đè thành 0.
+    // Mức 1 hiện trong nhóm "Chỉ ghi nhận"; bấm "Chỉ ghi nhận" hạ thật về 0.
     await user.click(within(within(dlg).getByRole('group', { name: 'Mức tự trị' })).getByRole('button', { name: 'Chỉ ghi nhận' }));
     await user.click(within(dlg).getByRole('button', { name: 'Lưu' }));
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.url.includes('/directory/people/p1/bot'))).toBe(true));
     const call = calls.find((c) => c.method === 'POST' && c.url.includes('/directory/people/p1/bot'))!;
-    expect(call.body).toEqual({ agent_id: AGENT_IDS.tls });
+    expect(call.body).toEqual({ agent_id: AGENT_IDS.tls, autonomy_level: 0 });
   });
 });

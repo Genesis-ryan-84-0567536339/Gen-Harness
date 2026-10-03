@@ -164,10 +164,12 @@ export function ProposalCard({ proposal: p }: { proposal: GenProposal }) {
   // v0.1.43 (F-24): nháp tin chỉ được LƯU, chưa gửi — nói rõ và dẫn thẳng tới đúng nháp ở Bàn làm việc để duyệt/gửi.
   const isDraft = p.type === 'draft_message';
   const draftId = isDraft && p.result?.type === 'draft' && p.result.id ? p.result.id : null;
-  // Chỉ hứa "Duyệt & gửi" khi nháp gửi được THẬT (API báo có nơi gửi) VÀ người bấm có quyền duyệt; còn lại chỉ mở nháp.
+  // Chỉ hứa "Mở để duyệt và gửi" khi nháp gửi được THẬT (API báo có nơi gửi) VÀ người bấm có quyền duyệt; còn lại chỉ mở nháp.
+  // `sendable` thiếu (kết quả lưu trước v0.1.43) = không rõ → chỉ chip "Mở nháp" trung tính, KHÔNG khẳng định "chưa có nơi gửi".
   const canApprove = useCan('action.approve');
   const sendable = p.result?.sendable === true;
-  const draftNote = !draftId ? null : !sendable ? 'Nháp chưa có nơi gửi' : !canApprove ? 'Chờ Sếp duyệt rồi mới gửi' : null;
+  const noTarget = p.result?.sendable === false;
+  const draftNote = !draftId ? null : noTarget ? 'Nháp chưa có nơi gửi' : sendable && !canApprove ? 'Chờ Sếp duyệt rồi mới gửi' : null;
   const code = p.result?.code ? ` · ${p.result.code}` : '';
   return (
     <div className="gen-prop" data-status={p.status} role="group" aria-label={`Đề xuất: ${title}`}>
@@ -221,13 +223,13 @@ export function ProposalCard({ proposal: p }: { proposal: GenProposal }) {
           )}
           {draftId && sendable && canApprove ? (
             <Button variant="primary" className="btn-27" icon="ph ph-arrow-square-out" onClick={() => navigateTo(`/workbench?id=${encodeURIComponent(draftId)}`)}>
-              Duyệt &amp; gửi
+              Mở để duyệt và gửi
             </Button>
           ) : draftId ? (
             <>
-              <span className="gen-prop__note">{draftNote}</span>
+              {draftNote ? <span className="gen-prop__note">{draftNote}</span> : null}
               <button type="button" className="gen-chip gen-chip--btn" onClick={() => navigateTo(`/workbench?id=${encodeURIComponent(draftId)}`)}>
-                <Icon name="ph ph-arrow-square-out" size={11} /> {sendable ? 'Mở nháp' : 'Mở nháp ở Bàn làm việc'}
+                <Icon name="ph ph-arrow-square-out" size={11} /> {noTarget ? 'Mở nháp ở Bàn làm việc' : 'Mở nháp'}
               </button>
             </>
           ) : resultScreen ? (
