@@ -12,7 +12,7 @@ endpoint, `jobs.py` hook ghi tín hiệu + việc chấm lại điểm định k
 ## Bảng gốc đã có sẵn — không phải bảng mới
 
 `biz.opportunities` + `biz.opportunity_stage_history`, `biz.market_signals` + `biz.matches`, `biz.deals`,
-`biz.cases` đều đã có từ giai đoạn 1 (`docs/handoff/schema.sql`). Cụm này chỉ `ALTER` cột còn thiếu
+`biz.cases` đều đã có từ giai đoạn 1 (`db/sql/0001_baseline.sql`; `docs/handoff/schema.sql` gốc đã bỏ ở v0.1.48). Cụm này chỉ `ALTER` cột còn thiếu
 (`created_at`/`updated_at` trên `deals`, `updated_at` trên `cases`/`matches`) và thêm chỉ mục.
 
 `biz.cases` **khác** `biz.alerts` (cụm `queue` dùng `biz.alerts` cho cảnh báo sớm spec E9) — trước cụm này chưa

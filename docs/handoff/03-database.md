@@ -1,6 +1,6 @@
 # 03 · Database
 
-**PostgreSQL 16** là SSOT duy nhất. Tệp khởi điểm: `db/schema.sql`. Mọi thay đổi đi qua migration có phiên bản (Alembic nếu backend Python), chạy tự động khi container `api` khởi động và được trình cài gọi lúc cài/cập nhật.
+**PostgreSQL 16** là SSOT duy nhất. Tệp khởi điểm gốc `db/schema.sql` đã bỏ ở v0.1.48 (xem lịch sử git); lược đồ hiện hành = `db/sql/0001_baseline.sql` + các migration sau (`apps/api/migrations`). Mọi thay đổi đi qua migration có phiên bản (Alembic nếu backend Python), chạy tự động khi container `api` khởi động và được trình cài gọi lúc cài/cập nhật.
 
 ## Mục tiêu
 

@@ -3004,3 +3004,12 @@ Sếp xác nhận bằng mã PIN, có bằng chứng bằng ảnh chụp, và d�
   Ghi chú "không chụp được ảnh" dựa trên `proof_error` (ảnh xoá theo hạn lưu 90 ngày không còn bị gắn nhãn sai);
   `/social/writes` trả thêm `started_at`, `proof_error`. Không lặp "Hỏi Gen…" hai lần. Gửi muộn sau khi gỡ tài khoản có chuông
   báo + làm mới thẻ. "Hệ thống sẽ làm" thêm "gửi" vào câu Nhật ký; mock `WRITE_RISK` chép nguyên văn API.
+
+## v0.1.48 — Bản build tái lập & pipeline gọn (03/10/2026)
+
+- **Việc đã làm**: F-19/F-36/F-71 (gói `anh-tai-lap`: ảnh build tái lập, ghim digest, lock) và F-13/F-44 (gói này): `.github/scripts/scan_summary.py` tóm tắt quét bảo mật dạng báo cáo (không chặn, luôn exit 0, `::warning::` cho lỗ mức cao); `.github/scripts/check_embedded_sync.py` đỏ khi bản nhúng genh (compose, Caddyfile, seccomp) lệch `deploy/`; test `test_scan_summary.py`, `test_check_embedded_sync.py`, `test_no_stale_schema_sql.py`; `docs/handoff/05-installer.md` mục Phát hành cập nhật (ảnh chỉ `:<version>` + `:sha-<commit>`, không còn `:latest`).
+- **Quyết định `docs/handoff/schema.sql` = BỎ**: lược đồ thật là `db/sql/*.sql` + `apps/api/migrations` (đã có kiểm alembic 1 head + pytest migrate thật); sinh bằng pg_dump trong CI vừa nặng vừa không tất định (pg_partman tạo phân vùng theo ngày). Các tài liệu trỏ tới nó đã sửa; `db/sql/*.sql` và `apps/api/migrations/versions/*.py` KHÔNG sửa (đã chạy trên máy Boss, dòng nhắc `schema.sql` trong đó chỉ là chú thích lịch sử).
+- **Hợp đồng**: uv 0.12.23 ở mọi nơi; venv `/opt/venv` (api: `python`, browser: `python3` trên PATH); dự án lock `gen-harness-api`, `gen-harness-browser`; script `check_embedded_sync.py [--root]` (0/1), `scan_summary.py --kind {pip-audit,npm-audit,govulncheck} --title <t> <json>` (0, 2 khi sai tham số), `check_image_lock.py`, `check_workflow_hygiene.py`.
+- **Bảng đã kiểm** (giá trị, nguồn, lệnh, thời điểm): [anh-tai-lap-da-kiem.md](v0.1.48/anh-tai-lap-da-kiem.md) · [pipeline-da-kiem.md](v0.1.48/pipeline-da-kiem.md) (do 2 gói kia tạo).
+- **Hạn chế còn lại**: gói apt trong Dockerfile chưa ghim phiên bản; Renovate cần cài GitHub App.
+- **Boss: không cần làm gì — tuỳ chọn cài Renovate App (https://github.com/apps/renovate → Install → chọn repo Gen-Harness, 1 phút).**

@@ -8,10 +8,10 @@
 |---|---|---|
 | 1 | `docs/Gen-Harness-Product-Spec-LOCKED.md` (v2.2) | Mục đích, nghiệp vụ, thực thể, quyền, nguyên tắc có trách nhiệm. Thắng mọi mâu thuẫn. |
 | 2 | `docs/design/Gen-Harness Console.dc.html` (+ `screens.json`, `seed-data.json`, `tokens.json`, `_ds/…/styles.css`) | Giao diện 21 màn, dữ liệu mẫu. Dựng lại pixel-perfect ở 1440px/1280px, không "cải tiến". |
-| 3 | `docs/handoff/` (01–07, `schema.sql`) | Đặc tả kỹ thuật đi kèm thiết kế: màn hình, token, database, kiến trúc, trình cài, thiết lập Owner, nghiệm thu. |
+| 3 | `docs/handoff/` (01–07) | Đặc tả kỹ thuật đi kèm thiết kế: màn hình, token, database, kiến trúc, trình cài, thiết lập Owner, nghiệm thu. |
 | 4 | `docs/github.md` | Ánh xạ màn ↔ mục spec ↔ mã repo cũ `heo-harness` (chỉ tham khảo bridge Zalo/WhatsApp và chassis plugin). |
 
-Trong repo, gói bàn giao được xếp lại: `spec/` → `docs/`, `design/` → `docs/design/`, `docs/01–07` và `db/schema.sql` → `docs/handoff/` (đường dẫn trong `docs/handoff/README.md` là đường dẫn gốc của gói).
+Trong repo, gói bàn giao được xếp lại: `spec/` → `docs/`, `design/` → `docs/design/`, `docs/01–07` → `docs/handoff/` (đường dẫn trong `docs/handoff/README.md` là đường dẫn gốc của gói). Lược đồ hiện hành nằm ở `db/sql/0001_baseline.sql` + các migration sau (`apps/api/migrations`) (`schema.sql` gốc của gói bàn giao đã bỏ ở v0.1.48, xem lịch sử git).
 
 Tài liệu này **không chép lại** `docs/handoff/`; nó chốt các quyết định kiến trúc, lấp chỗ trống, và ghi rõ **chỗ lệch** so với handoff kèm lý do (§14). Quyết định của chủ dự án nằm ở `docs/PLAN.md` §Quyết định.
 
@@ -48,7 +48,7 @@ Ràng buộc bắt buộc và nơi hiện thực:
 | Hợp đồng API | OpenAPI tự sinh từ FastAPI → client TS (`openapi-typescript`) | Không viết tay kiểu dữ liệu ở frontend; đổi API là lỗi biên dịch, không phải lỗi runtime. |
 | API | Python 3.12, FastAPI, Pydantic v2, SQLAlchemy 2 (async), Alembic | Theo gợi ý; tái dùng tư duy chassis Python repo cũ. |
 | Worker | Cùng mã với api, tiến trình riêng; lịch + job bằng **arq** (Redis) | Tách tải nặng (sàng lọc, LLM, chấm điểm, nén sổ tay, làm mới MV, partman, backup) khỏi API. arq nhẹ, async-native, có cron. |
-| CSDL | PostgreSQL 16 + pgvector + pg_partman + pg_trgm | SSOT duy nhất (spec G4). Khởi điểm là `docs/handoff/schema.sql`. |
+| CSDL | PostgreSQL 16 + pgvector + pg_partman + pg_trgm | SSOT duy nhất (spec G4). Lược đồ hiện hành: `db/sql/0001_baseline.sql` + các migration sau (`apps/api/migrations`) (`schema.sql` gốc của gói bàn giao đã bỏ ở v0.1.48, xem lịch sử git). |
 | Bus & realtime | Redis 7: **Streams** cho event bus (consumer group, ack, phát lại), **pub/sub** cho đẩy realtime tới WebSocket, khoá phân tán, rate-limit, bộ đếm hạn mức | Streams bền: consumer chết không mất sự kiện (ưu tiên 2). |
 | Bridge | Node 20 + TypeScript; Zalo `zca-js`, WhatsApp `@whiskeysockets/baileys`; mỗi kênh một adapter | Theo gợi ý; hai thư viện đã chạy trong `heo-harness/bridge`. Viết lại gọn, không mang persona/tên cũ. |
 | Tệp | MinIO (S3-compatible) | Tài liệu, tệp đính kèm, lưu trữ lạnh Parquet, backup (handoff 03/04). |
@@ -304,7 +304,7 @@ Mã hoá phong bì AES-256-GCM cho khoá API, phiên kênh, TOTP, auth MCP (`byt
 
 ## 12. Mô hình dữ liệu
 
-Khởi điểm: `docs/handoff/schema.sql` (9 schema: `core, raw, refinery, clean, memory, biz, agent, ops, analytics`), giữ nguyên mọi quy ước của `docs/handoff/03-database.md`: khoá UUIDv7 (`core.uuid_v7()`), mã công khai ở cột `code` (`GRP-ZL-0114`, `PER-0042`, `OPP-1842`, `ACT-0231`…), mọi bảng có `org_id`, `timestamptz` UTC hiển thị theo `organizations.timezone`, tiền `bigint` đồng, `core.lookup` thay ENUM, `attrs jsonb`, xoá mềm/`merged_into_id`, phân vùng tháng bằng pg_partman, lớp `analytics` materialized view làm mới `CONCURRENTLY`.
+Lược đồ hiện hành: `db/sql/0001_baseline.sql` + các migration sau (`apps/api/migrations`) (`schema.sql` gốc của gói bàn giao đã bỏ ở v0.1.48, xem lịch sử git) (9 schema: `core, raw, refinery, clean, memory, biz, agent, ops, analytics`), giữ nguyên mọi quy ước của `docs/handoff/03-database.md`: khoá UUIDv7 (`core.uuid_v7()`), mã công khai ở cột `code` (`GRP-ZL-0114`, `PER-0042`, `OPP-1842`, `ACT-0231`…), mọi bảng có `org_id`, `timestamptz` UTC hiển thị theo `organizations.timezone`, tiền `bigint` đồng, `core.lookup` thay ENUM, `attrs jsonb`, xoá mềm/`merged_into_id`, phân vùng tháng bằng pg_partman, lớp `analytics` materialized view làm mới `CONCURRENTLY`.
 
 Thực thể spec G1 → bảng:
 

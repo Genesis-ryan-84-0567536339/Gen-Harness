@@ -33,7 +33,7 @@ Mục tiêu: `docker compose up` dựng toàn bộ; Owner đầu tiên tạo qua
 | # | Hạng mục | Quy mô | Kiểm được khi |
 |---|---|---|---|
 | 1.1 | Monorepo theo ARCHITECTURE §3; `deploy/compose.yaml` 8 dịch vụ + healthcheck; `.env.example`; Makefile; CI | M | `docker compose up` → mọi dịch vụ healthy, chỉ cổng 8443 mở |
-| 1.2 | Đưa `handoff/schema.sql` vào Alembic (tách theo schema), extension, pg_partman, trigger chỉ-INSERT, `core.uuid_v7`, `core.next_code`, `core.lookup` seed | L | Migration lên/xuống sạch trên DB trống; `UPDATE raw.events` lỗi |
+| 1.2 | Đưa lược đồ khởi điểm (`schema.sql` gốc của gói bàn giao, đã bỏ ở v0.1.48) vào Alembic (tách theo schema), extension, pg_partman, trigger chỉ-INSERT, `core.uuid_v7`, `core.next_code`, `core.lookup` seed | L | Migration lên/xuống sạch trên DB trống; `UPDATE raw.events` lỗi |
 | 1.3 | Auth: đăng nhập, phiên cookie băm, đăng xuất, thu hồi, CSRF, Idempotency-Key, TOTP tuỳ chọn | M | Test sai mật khẩu, phiên hết hạn/thu hồi, CSRF thiếu |
 | 1.4 | PIN: đặt/đổi, phiên PIN 30 phút, `423 PIN_REQUIRED`, khoá 15 phút sau 5 lần sai, danh mục thao tác cần PIN ở một chỗ | M | Test đủ nhánh; mọi lần nhập vào log |
 | 1.5 | RBAC: 5 vai trò, ma trận 7 cột × 5 hàng của thiết kế, `require()` + `ScopeFilter` ở tầng service, `core.assignments` | L | Test ma trận: mỗi endpoint × mỗi vai trò × trong/ngoài phạm vi |
