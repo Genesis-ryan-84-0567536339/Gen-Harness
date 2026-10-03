@@ -16,7 +16,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { randomUUID } from 'node:crypto';
-import type { AgentIdentity, BossCheck, HealthIssue, HubLink, SocialAccount, SystemHealth } from '@gen-harness/contracts';
+import type { AccessInfo, AgentIdentity, BossCheck, HealthIssue, HubLink, SocialAccount, SystemHealth } from '@gen-harness/contracts';
 import { createPhase2, maskText, seedRows, type P2Ctx } from './mock-phase2';
 import { createMock as createP3Core } from './mock-p3-core';
 import { createMock as createP3Queue } from './mock-p3-queue';
@@ -29,7 +29,7 @@ import { AGENT_IDS, USER_IDS } from './mock-ids';
 import { createMock as createP4Api } from './mock-p4-api';
 import { createMock as createP4Mcp } from './mock-p4-mcp';
 import { createMock as createSocial } from './mock-social';
-import { createMock as createBossChecks } from './mock-boss-checks';
+import { createMock as createBossChecks, isLocalHost } from './mock-boss-checks';
 import { createMock as createTelegram, type TelegramOutcome } from './mock-telegram';
 import { createMock as createDiagnostics } from './mock-diagnostics';
 import { createMock as createP4Plugins } from './mock-p4-plugins';
@@ -310,8 +310,28 @@ const HEALTH_KIND_DEFAULTS: Record<string, Omit<HealthIssue, 'raised_at' | 'body
   'offsite.stale': { key: 'offsite.stale', kind: 'offsite.stale', severity: 'warn', title: 'Bản sao ngoài máy đã cũ 8 ngày', body: "Cắm ổ USB/NAS rồi bấm 'Sao lưu ra ổ ngoài ngay' để có bản sao mới ngoài máy chủ", link: '/system?tab=storage&focus=offsite', action: 'Chọn nơi lưu / sao lưu ngay' },
   'offsite.failed': { key: 'offsite.failed', kind: 'offsite.failed', severity: 'warn', title: 'Sao lưu ra ổ ngoài chưa thành công', body: "Chưa thấy ổ USB/NAS — cắm lại ổ rồi bấm 'Sao lưu ra ổ ngoài ngay'", link: '/system?tab=storage&focus=offsite', action: 'Xem bản sao ngoài máy' },
   'job.timeout': { key: 'job.timeout:retention_sweep', kind: 'job.timeout', severity: 'warn', title: 'Việc nền "dọn dữ liệu theo hạn lưu" chạy quá giờ', body: 'Việc đã bị dừng và sẽ chạy lại ở lần sau. Lặp lại nhiều lần thì gửi kèm khi báo lỗi.', link: '/system?tab=storage', action: 'Xem sức khoẻ' },
+  // v0.1.46 (F-21) — gh/health.py _eval_network: chép đúng OPEN_LAN_TITLE/OPEN_LAN_BODY/ACCESS_LINK; thẻ đích focus=access.
+  'network.open_lan': { key: 'network.open_lan', kind: 'network.open_lan', severity: 'warn', title: 'Cổng đang mở cho cả mạng', body: 'Mọi máy cùng mạng (Wi-Fi văn phòng, khách…) đều thấy trang đăng nhập Gen-Harness. Bấm để chọn: chỉ cho máy này, dùng Tailscale (khuyên dùng) hoặc giữ mở cho mạng nội bộ.', link: '/system?tab=storage&focus=access', action: 'Chọn cách truy cập' },
   'host.autostart': { key: 'host.autostart', kind: 'host.autostart', severity: 'warn', title: 'Máy chủ có thể không tự chạy lại Gen-Harness khi bật lại máy', body: 'Docker chưa bật tự chạy khi mở máy — chạy một lần trên máy chủ: sudo systemctl enable docker · Lịch tự cập nhật và nút Cập nhật ngay chỉ chạy khi có người đăng nhập — chạy một lần: sudo loginctl enable-linger $USER · Chạy xong thì chạy genh status để cảnh báo tự hết', link: '/system?tab=storage', action: 'Xem cách bật' },
 };
+
+/** Hostname của một URL (rỗng/hỏng ⇒ ''). */
+function hostOfUrl(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return '';
+  }
+}
+
+/** v0.1.46 (F-21): `__mock/access` ghi đè `GET /system/access` (mặc định như GH_PUBLIC_URL compose: localhost, chế độ 'local'). */
+export interface MockAccessOverride {
+  public_url?: string;
+  mode?: AccessInfo['mode'];
+  bind_addr?: AccessInfo['bind_addr'];
+  site_address?: string | null;
+  checked_at?: string | null;
+}
 
 export interface MockHealthOverride {
   issues?: Array<Partial<HealthIssue>>;
@@ -347,6 +367,16 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
   };
   /** v0.1.36 (F-6): `__mock/health` ghi đè trạng thái `/system/health` (mặc định khoẻ; `__mock/reset` khôi phục). */
   let healthOverride: MockHealthOverride = {};
+  /** v0.1.46 (F-21): `__mock/access` ghi đè `/system/access` (reset tạo lại state ⇒ khôi phục mặc định). */
+  let accessOverride: MockAccessOverride = {};
+  const accessView = (isOwner: boolean): AccessInfo => {
+    const publicUrl = (accessOverride.public_url ?? 'https://localhost:8443').replace(/\/+$/, '');
+    return {
+      public_url: publicUrl, login_url: `${publicUrl}/login`, public_url_local: isLocalHost(hostOfUrl(publicUrl)),
+      mode: accessOverride.mode ?? 'local', bind_addr: accessOverride.bind_addr === undefined ? '127.0.0.1' : accessOverride.bind_addr,
+      site_address: accessOverride.site_address ?? null, checked_at: accessOverride.checked_at ?? null, can_manage: isOwner,
+    };
+  };
   const phase2 = createPhase2({
     fresh: opts.setup === 'fresh',
     simulate: opts.simulate ?? process.env.MOCK_SIMULATE !== '0',
@@ -1095,6 +1125,22 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
       if ((permissionsOf(user.role.code)['system.read'] ?? 'none') === 'none') return problem(res, 403, 'FORBIDDEN', 'Không có quyền');
       return reply(200, healthView(user.role.code === 'owner'));
     }
+    // v0.1.46 (F-21): Truy cập từ xa — cùng quyền `system.read`.
+    if (path === '/system/access' && method === 'GET') {
+      if ((permissionsOf(user.role.code)['system.read'] ?? 'none') === 'none') return problem(res, 403, 'FORBIDDEN', 'Không có quyền');
+      return reply(200, accessView(user.role.code === 'owner'));
+    }
+    // v0.1.46 (F-21): dòng 7 "Truy cập từ xa" quyết theo header Origin (POST luôn có; không có thì Host) — chặn ở đây vì
+    // `P2Ctx` không mang header. Chỉ Owner (như mock-boss-checks).
+    if (path === '/boss-checks/remote_access/run' && method === 'POST') {
+      if (user.role.code !== 'owner') return problem(res, 403, 'FORBIDDEN', 'Vai trò của bạn không có quyền thao tác này');
+      const origin = String(req.headers.origin ?? '');
+      const host = hostOfUrl(origin && origin !== 'null' ? origin : `http://${String(req.headers.host ?? '')}`);
+      const a = accessView(true);
+      const c = (phase3.bossChecks.hooks.recordRemote as (h: string, l: boolean, m: string) => BossCheck)(host, a.public_url_local, a.mode);
+      broadcast('boss_checks.update', { key: 'remote_access' });
+      return reply(200, c);
+    }
     if (path === '/system/org') {
       if ((permissionsOf(user.role.code)['system.read'] ?? 'none') === 'none') return problem(res, 403, 'FORBIDDEN', 'Không có quyền');
       const view = () => ({ org_name: setup.org.name, timezone: setup.org.timezone, currency: setup.org.currency, self_name: setup.addressing.self,
@@ -1290,7 +1336,10 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
   const setHealth = (o: MockHealthOverride) => {
     healthOverride = { ...healthOverride, ...o };
   };
-  return { middleware, setup, users, sessions, phase2, phase3, sessionUser, notify, setHealth };
+  const setAccess = (o: MockAccessOverride) => {
+    accessOverride = { ...accessOverride, ...o };
+  };
+  return { middleware, setup, users, sessions, phase2, phase3, sessionUser, notify, setHealth, setAccess };
 }
 
 /**
@@ -1304,6 +1353,7 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
  *   /api/v1/__mock/bridge   {"online":bool} makes channel login answer 503 BRIDGE_OFFLINE
  *   /api/v1/__mock/pin_expire {} ends every PIN session (v0.1.45 — kiểm lại hộp PIN của thao tác kế tiếp)
  *   /api/v1/__mock/perm    {"role","permission","scope"} đặt một ô MATRIX (kể cả cột không sửa được ở Quyền hạn, vd system.manage)
+ *   /api/v1/__mock/access  {"public_url"?,"mode"?,"bind_addr"?,"site_address"?} ghi đè `GET /system/access` (v0.1.46; reset khôi phục localhost/'local')
  *   /api/v1/__mock/health  {"issues"?,"worker"?,"backup"?,"disk"?,"update"?,"autostart"?,"offsite"?} ghi đè `GET /system/health` (v0.1.36;
  *                           `issues` chỉ cần `kind` — nhãn/nút/đường dẫn mặc định theo kind; reset khôi phục khoẻ)
  *   /api/v1/__mock/p3/{cụm}/{hook}  body → `phase3[cụm].hooks[hook](body)`; trả JSON kết quả (404 nếu không có)
@@ -1390,6 +1440,10 @@ export function createMockApi(opts: MockOptions = {}) {
         }
         case 'health':
           current.setHealth(body as MockHealthOverride);
+          return done(res);
+        case 'access':
+          // v0.1.46 (F-21): {public_url?, mode?, bind_addr?, site_address?} — ghi đè GET /system/access; reset khôi phục.
+          current.setAccess(body as MockAccessOverride);
           return done(res);
         case 'raw':
           return done(res, 200, current.phase2.hooks.pushRaw());

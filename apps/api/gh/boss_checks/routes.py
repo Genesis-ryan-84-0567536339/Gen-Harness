@@ -2,7 +2,10 @@
 
 - `GET /boss-checks` — chốt các lượt đọc Facebook đang chờ rồi trả {rows, results, required_done, required_total}.
 - `POST /boss-checks/{key}/run` — chạy một mục kiểm (`hub`, `facebook`, `agy_call`, `agy_switch`, `claude_call`, `jev`,
-  `telegram` — v0.1.44, Gửi thử như POST /notify/telegram/test)
+  `telegram` — v0.1.44, Gửi thử như POST /notify/telegram/test; `remote_access` — v0.1.46, không cần PIN: quyết theo
+  hostname của header Origin (trình duyệt luôn gửi Origin với POST; không có thì Host — KHÔNG tin Host trước vì proxy
+  ngoài có thể đổi Host) và Settings.public_url: chưa chọn cách truy cập từ xa → REMOTE_NOT_CONFIGURED, đang mở trên
+  chính máy chủ → REMOTE_OPENED_ON_SERVER, còn lại Đạt)
   và GHI kết quả. Lỗi nghiệp vụ (chưa cấu hình, 409/429 từ dịch vụ, gọi thử lỗi) vẫn 200 với `status: 'fail'` + mã lỗi
   thống nhất; chỉ 401/403/422/423 mới ném. `hub` và `agy_switch` cần phiên PIN (423 → web hỏi PIN rồi gửi lại).
 - Phản hồi cho Owner được kèm email ĐẦY ĐỦ (`account`); CSDL chỉ lưu email đã che.
@@ -79,6 +82,8 @@ async def run_check(key: str, request: Request, body: BossRunIn | None = None,
         if key == "agy_switch":
             assert body.profile_id is not None
             return await _run_switch(request, db, user, body.profile_id)
+        if key == "remote_access":
+            return await _run_remote(request, db, user)
         if key == "telegram":
             # v0.1.44 (F-8c): cùng hàm với POST /notify/telegram/test (ghi bản kiểm + yêu cầu genh gửi thử).
             from gh.telegram.routes import run_test as telegram_test
@@ -131,6 +136,42 @@ async def _run_facebook(request: Request, db: AsyncSession, user: service.Curren
                                             via="user", user=user)
     return await boss.record(db, user.org_id, "facebook", "pending", detail={"job_status": job["status"]},
                              ref_id=uuid.UUID(job["id"]), user_id=user.id)
+
+
+REMOTE_NOT_CONFIGURED_MSG = ("Chưa chọn cách truy cập từ xa — trên máy chủ chạy genh remote tailscale (khuyên dùng) "
+                             "hoặc genh remote --lan")
+REMOTE_ON_SERVER_MSG = ("Đang mở trên chính máy chủ — mở Console trên điện thoại bằng địa chỉ ở Cài đặt › Sao lưu & "
+                        "cập nhật › Truy cập từ xa rồi bấm Kiểm tra từ đó")
+
+
+def _opened_host(request: Request) -> str:
+    """Hostname trình duyệt đã dùng: ưu tiên Origin (POST luôn có), 'null'/thiếu → Host."""
+    from urllib.parse import urlparse
+
+    origin = request.headers.get("origin", "").strip()
+    if origin and origin != "null":
+        with contextlib.suppress(ValueError):
+            host = urlparse(origin).hostname
+            if host:
+                return host
+    return (request.headers.get("host", "") or "").rsplit(":", 1)[0].strip("[]")
+
+
+async def _run_remote(request: Request, db: AsyncSession, user: service.CurrentUser) -> dict[str, Any]:
+    from gh.config import get_settings
+    from gh.system_api import access
+
+    if access.is_local_url(get_settings().public_url):
+        return await boss.record(db, user.org_id, "remote_access", "fail", error_code="REMOTE_NOT_CONFIGURED",
+                                 message=REMOTE_NOT_CONFIGURED_MSG, user_id=user.id)
+    host = _opened_host(request)
+    if access.is_local_url(host):
+        return await boss.record(db, user.org_id, "remote_access", "fail", error_code="REMOTE_OPENED_ON_SERVER",
+                                 message=REMOTE_ON_SERVER_MSG, user_id=user.id)
+    net = access.network_status()
+    return await boss.record(db, user.org_id, "remote_access", "pass", message=None,
+                             detail={"opened_from": host, "access_mode": (net or {}).get("mode", "unknown")},
+                             user_id=user.id)
 
 
 async def _provider(db: AsyncSession, org_id: uuid.UUID, kind: str) -> Any:

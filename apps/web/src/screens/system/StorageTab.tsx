@@ -12,6 +12,7 @@ import { UpdateCard } from '../../update/UpdateCard';
 import { BackupPanel } from './BackupPanel';
 import { OffsitePanel } from './OffsitePanel';
 import { HealthCard } from './HealthCard';
+import { RemoteAccessCard } from './RemoteAccessCard';
 import { DATA_REQUEST_KIND, RETENTION_LABEL, RETENTION_OWNER_ONLY_REASON, retentionConfirmText, retentionDeletes, retentionOwnerOnly, retentionRowView } from './systemModel';
 import { useCreateDataRequest, usePatchRetention, usePersonDataRequests, useRetentionPolicies } from './queries';
 
@@ -31,6 +32,8 @@ export function StorageTab() {
     <div className="sys-tabs-col">
       {/* v0.1.36 (F-6): sức khoẻ hệ thống đứng đầu — Bộ xử lý nền, sao lưu, cập nhật, ổ đĩa. */}
       <HealthCard />
+      {/* v0.1.46 (F-21): Truy cập từ xa — địa chỉ đăng nhập cho nhân viên, cảnh báo cổng mở cho cả mạng. */}
+      <RemoteAccessCard />
       {/* v0.1.30: mục cập nhật cố định — thẻ Tổng quan chỉ hiện khi đã biết có bản mới. */}
       {canManage ? <UpdateCard always /> : null}
       <BackupPanel />

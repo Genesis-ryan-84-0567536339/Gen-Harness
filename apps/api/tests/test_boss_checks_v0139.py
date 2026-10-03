@@ -243,14 +243,14 @@ async def test_facebook_stale_job_closed_and_cancelled_has_own_code(owner_api: A
 
 async def test_overview_rows_and_done_rules(owner_api: Api, db: Any) -> None:
     ov = (await owner_api.get("/boss-checks")).json()
-    assert [r["row"] for r in ov["rows"]] == [1, 2, 3, 4, 5, 6]
-    assert [r["key"] for r in ov["rows"]] == ["hub", "facebook", "agy", "claude", "jev", "telegram"]
+    assert [r["row"] for r in ov["rows"]] == [1, 2, 3, 4, 5, 6, 7]
+    assert [r["key"] for r in ov["rows"]] == ["hub", "facebook", "agy", "claude", "jev", "telegram", "remote"]
     assert ov["rows"][2]["title"] == "Google / Antigravity" and ov["rows"][2]["checks"] == [
         "agy_login", "agy_call", "agy_switch"]
     # v0.1.44 (F-8c): dòng 6 Telegram (báo động & bản tin) — bắt buộc.
     assert ov["rows"][5]["title"] == "Telegram (báo động & bản tin)" and ov["rows"][5]["checks"] == ["telegram"]
-    assert [r["optional"] for r in ov["rows"]] == [False, False, False, False, True, False]
-    assert ov["required_total"] == 5 and ov["required_done"] == 0
+    assert [r["optional"] for r in ov["rows"]] == [False, False, False, False, True, False, False]
+    assert ov["required_total"] == 6 and ov["required_done"] == 0
     assert set(ov["results"]) == set(boss.CHECK_KEYS) and all(v is None for v in ov["results"].values())
     org = await org_id(db)
 
