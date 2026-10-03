@@ -2736,3 +2736,65 @@ nhân sự bị lách.
   `test_provider_pin_runtime_v0145` (sai dạng), `test_mcp_log_digest_v0145` (cờ đã xong), `test_people_suspicious_v0145`
   (dòng sửa tay nhận cờ mới); vitest `step9-prefill-v0145`, `p3-people` (quyền xem, Thôi), `p4-mcp` (Giữ nguyên),
   `p4-agents`, `cli-switch`; e2e `v0145-integ` (manager people_review.read=team), `pin-barriers-v0145`.
+
+## v0.1.46 — Nhân viên & điện thoại vào được (03/10/2026)
+
+### Boss cần làm gì
+
+Cần chọn **một cách cho nhân viên và điện thoại vào Console** (máy chủ mới cài mặc định **chỉ mở trên chính máy đó**):
+
+1. **Tailscale (khuyên dùng, ~5 phút)**: trên máy chủ gõ `genh remote tailscale`, làm theo hướng dẫn đăng nhập Tailscale.
+   Mời nhân viên vào mạng Tailscale của Sếp (họ cài app Tailscale trên điện thoại/máy tính).
+2. Cách khác: tên miền riêng qua Cloudflare (`genh remote cloudflare --hostname <tên>`) hoặc mạng nội bộ
+   (`genh remote lan`, phải cài Chứng chỉ CA trên từng điện thoại).
+3. Xong, **mở thử Console trên điện thoại** bằng địa chỉ đăng nhập mà genh in ra (hoặc xem ở Cài đặt › Sao lưu & cập nhật ›
+   **Truy cập từ xa**), rồi vào **Việc Sếp cần làm** bấm **Kiểm tra** ở dòng "Truy cập từ xa".
+4. Nếu máy chủ đã chạy từ bản cũ: Console sẽ có chuông **"Cổng đang mở cho cả mạng"** (vẫn như cũ, ai cùng mạng cũng thử
+   đăng nhập được). Chọn cách trên rồi bấm `genh remote local` nếu muốn đóng lại.
+5. **Cần kiểm trên máy Fedora thật** (firewalld, Docker rootless, Tailscale): CI chỉ kiểm được cổng và chuông, không kiểm được điện thoại thật.
+
+### Thay đổi (theo mã)
+
+- **F-27 — Cổng mặc định chỉ nghe 127.0.0.1**: compose `proxy.ports` = `"${GH_BIND_ADDR:-127.0.0.1}:${GH_PORT:-8443}:8443"`,
+  proxy nhận `GH_SITE_ADDRESS` (mặc định 127.0.0.1); Caddyfile `localhost:8443, {$GH_SITE_ADDRESS:127.0.0.1}:8443` (giữ `localhost`
+  vì `ops.ProxyHost` = localhost). Tailscale Serve trỏ `https+insecure://localhost:<cổng>`.
+- **F-21a — `genh remote`**: `genh remote [status]`, `genh remote tailscale [--yes]`, `genh remote cloudflare --hostname <tên> [--yes]`,
+  `genh remote lan [--name <tên|IP>] [--yes]` (≡ `--lan`), `genh remote local [--yes]` (≡ `--local`); `genh set-address` là bí danh
+  của `genh remote`; cờ chung `--install-dir`, `--port`. `--lan` không có TTY mà thiếu `--yes` thoát 2, không đổi gì. Thoát 0 chỉ khi
+  `/api/v1/ready` xanh.
+- **Tệp `.env` genh quản lý** (cạnh compose.yaml; Compose tự nạp; không chứa bí mật, không đưa vào gói chẩn đoán), đúng 4 khoá:
+  `GH_ACCESS_MODE` (local/lan/lan_legacy/tailscale/cloudflare), `GH_BIND_ADDR` (127.0.0.1/0.0.0.0), `GH_SITE_ADDRESS`, `GH_PUBLIC_URL`.
+  Thiếu `GH_BIND_ADDR`: cài mới → 127.0.0.1/local; mọi đường khác (update, start, status, trực canh…) → 0.0.0.0/lan_legacy (giữ hành vi cũ, QD-12).
+- **`run/network-status.json`** (genh ghi, api đọc): `schema, mode, bind_addr, site_address, public_url, port, checked_at`.
+- **F-21b — Chuông `network.open_lan`** ("Cổng đang mở cho cả mạng", warn, fingerprint `lan_legacy`, nút "Chọn cách truy cập"; người không phải
+  Owner: "Nhờ Owner xử lý"): chỉ mở khi mode=lan_legacy và bind 0.0.0.0; đóng khi tệp hợp lệ báo chế độ khác; tệp thiếu/hỏng thì giữ nguyên;
+  đúng 1 chuông nhờ `raise_once`.
+- **API**: `GET /system/access` (public_url, login_url, public_url_local, mode, bind_addr, site_address, checked_at, can_manage); boss check
+  `remote_access` (ROWS dòng 7, "Truy cập từ xa", **bắt buộc** ⇒ `required_total` = 6; lỗi `REMOTE_NOT_CONFIGURED`, `REMOTE_OPENED_ON_SERVER`;
+  quyết định theo header Origin). Web: thẻ "Truy cập từ xa" trong Cài đặt › Sao lưu & cập nhật; hộp mời hiện cảnh báo đỏ khi địa chỉ chỉ mở trên máy chủ.
+- **Giới hạn đăng nhập**: 10 lần sai/15 phút theo IP và theo email (429 `LOGIN_RATE_LIMITED`, `retry_after_s`); kiểm trước khi kiểm mật khẩu;
+  đúng mật khẩu chỉ xoá bộ đếm email; **Redis lỗi ⇒ fail-open** (có log). Email không tồn tại/bị khoá vẫn chạy argon2 với hash giả
+  (không lộ qua thời gian). Phiên có hạn tuyệt đối 30 ngày từ lúc tạo (trượt 7 ngày bên trong). TOTP để sau.
+- **Không có migration** (core.sessions đã có created_at; kind chuông và check_key không ràng buộc danh sách). Head vẫn 0030.
+- **Workflow**: E2E-install (pr + release) kiểm cài mới chỉ nghe 127.0.0.1 (docker port, `ss`, curl IP runner bị từ chối, `.env`), rồi
+  `genh remote --lan --name gh-e2e.local` → 0.0.0.0, ready qua `gh-e2e.local` và `localhost`, `network-status.json`, api thấy `GH_PUBLIC_URL`;
+  `GH_SITE_ADDRESS` được **giữ nguyên** cho `genh update --yes`, "Cập nhật ngay", "Khôi phục", gói chẩn đoán (chứng minh tự cập nhật vẫn xanh);
+  trước uninstall chạy `genh remote --local`. E2E-upgrade: từ bản cũ lên vẫn 0.0.0.0/lan_legacy, đúng 1 chuông mỗi Owner, update lại + chờ 2 phút không thêm chuông.
+  CI `images`: `host_ip` compose = 127.0.0.1 (và 0.0.0.0 khi `GH_BIND_ADDR=0.0.0.0`), `caddy validate` với 3 giá trị `GH_SITE_ADDRESS`.
+  Mọi bước mới gate theo `genh help | grep 'genh remote'` nên chạy tay cho tag cũ không đỏ.
+
+### Kiểm tra
+
+- Gói workflow: YAML hợp lệ (python `yaml.safe_load`), `bash -n` các khối `run:` mới. Nghiệm thu thật chạy trên PR/release: e2e-install (pr) 2 chế độ bind,
+  e2e-upgrade (release) 0.0.0.0 + đúng 1 chuông, ci `images` xanh. Chờ sau phát hành (người điều phối): genh tải từ Release đúng checksum +
+  `genh version` = v0.1.46 trước khi báo Sếp.
+
+### Rủi ro / giới hạn
+
+- Sau Tailscale Serve hoặc Docker rootless, nhiều người có thể **chung IP nguồn** ⇒ bộ đếm IP chung: một người gõ sai nhiều lần có thể khoá cả nhóm
+  15 phút. Owner gỡ bằng `genh reset-password` hoặc đợi 15 phút.
+- Nhân viên dùng Tailscale phải được mời vào mạng Tailscale của Sếp.
+- Chế độ LAN cần cài CA trên từng điện thoại và (Fedora Server) mở firewalld cho cổng đã chọn.
+- Không có nút một chạm "Chỉ cho máy này" trong Console (tránh Owner tự cắt truy cập khi đang dùng điện thoại): đổi chế độ bằng `genh remote` trên máy chủ.
+- Máy cài từ bản cũ vẫn mở 0.0.0.0 cho tới khi Owner chọn cách truy cập (chuông nhắc, không tự đóng để không cắt người đang dùng).
+- Redis lỗi ⇒ giới hạn đăng nhập tạm không áp (ưu tiên đăng nhập được); TOTP để đợt sau.

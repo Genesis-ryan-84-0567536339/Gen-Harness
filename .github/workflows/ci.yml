@@ -245,6 +245,29 @@ jobs:
           docker run --rm --entrypoint agy gh-api --version
           docker run --rm --init --read-only --tmpfs /tmp --cap-drop ALL gh-browser python3 -c "import ghb.worker, ghb.egress"
           docker compose -f deploy/compose.yaml --env-file .env config -q
+      - name: Cổng proxy mặc định chỉ nghe 127.0.0.1 (v0.1.46 F-27)
+        run: |
+          set -euo pipefail
+          # Dùng .env do bước "Kiểm tra compose" tạo; GH_BIND_ADDR lấy từ môi trường (không có trong .env.example).
+          got="$(env -u GH_BIND_ADDR docker compose -f deploy/compose.yaml --env-file .env config --format json | jq -r '.services.proxy.ports[0].host_ip')"
+          echo "host_ip mặc định: $got"
+          [ "$got" = "127.0.0.1" ] || { echo "::error::cổng proxy mặc định phải là 127.0.0.1 (đang '$got') — kiểm GH_BIND_ADDR trong deploy/compose.yaml" >&2; exit 1; }
+          got="$(GH_BIND_ADDR=0.0.0.0 docker compose -f deploy/compose.yaml --env-file .env config --format json | jq -r '.services.proxy.ports[0].host_ip')"
+          echo "host_ip với GH_BIND_ADDR=0.0.0.0: $got"
+          [ "$got" = "0.0.0.0" ] || { echo "::error::GH_BIND_ADDR=0.0.0.0 phải cho host_ip 0.0.0.0 (đang '$got')" >&2; exit 1; }
+      - name: Caddyfile hợp lệ với 3 giá trị GH_SITE_ADDRESS (v0.1.46 F-27)
+        run: |
+          set -euo pipefail
+          validate() {
+            docker run --rm "$@" -v "$PWD/deploy/proxy/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine \
+              caddy validate --adapter caddyfile --config /etc/caddy/Caddyfile
+          }
+          echo "== GH_SITE_ADDRESS chưa đặt (mặc định 127.0.0.1)"
+          validate
+          for addr in gen-harness.tail1234.ts.net 192.168.1.20; do
+            echo "== GH_SITE_ADDRESS=$addr"
+            validate -e "GH_SITE_ADDRESS=$addr"
+          done
 
   # ── ci-ok ────────────────────────────────────────────────────────────────
   # v0.1.33 (F-9/F-13) — job tổng: required check DUY NHẤT của branch protection. Luôn chạy (if: always(),
