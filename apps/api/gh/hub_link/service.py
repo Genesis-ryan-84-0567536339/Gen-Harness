@@ -27,8 +27,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gh import notifications
 from gh.auth import rbac, service
 from gh.chassis import actionlog
-from gh.chassis.mcp_client import McpClient
-from gh.data.common import iso, mask_text
+from gh.chassis.masking import _RE_SECRET, MASK, mask_for_model
+from gh.chassis.mcp_client import McpClient, always_forbidden, forbidden_host
+from gh.data.common import iso
 from gh.errors import ApiError, conflict
 from gh.mcp_api import invoke
 
@@ -45,61 +46,18 @@ CALL_TIMEOUT_S = 10.0
 
 
 # ─── che dữ liệu trước khi sang model (gen-v1 §9.2) ───────────────────────────
-
-_RE_LONGNUM = re.compile(r"(?<!\d)(\d[\d .-]{7,22}\d)(?!\d)")
-_RE_DATE = re.compile(r"\d{4}-\d{1,2}-\d{1,2}(?: \d{1,2})?|\d{1,2}[.-]\d{1,2}[.-]\d{4}")
-_RE_EMAIL = re.compile(r"\b([A-Za-z0-9._%+-])[A-Za-z0-9._%+-]*@([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b")
-_RE_SECRET = re.compile(
-    r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{8,}"
-    r"|\b(?:sk|pk|rk|ghp|gho|ghs|ghu|github_pat|xox[abprs]|glpat|AIza|ya29|ghh|gha)[-_.][A-Za-z0-9._-]{8,}"
-    r"|\bAIza[A-Za-z0-9_-]{20,}"
-    r"|\b[A-Za-z0-9_-]{40,}\b")
-_SECRET_KEYS = re.compile(
-    r"(?i)(?:^|[_\s-])(?:password|passwd|mat_?khau|mật khẩu|secret|token|api_?key|pin)(?:$|[_\s-])")
-MASK = "[đã che]"
-
-
-def _mask_str(s: str, extra: tuple[str, ...]) -> str:
-    for secret in extra:
-        if secret:
-            s = s.replace(secret, MASK)
-    s = _RE_SECRET.sub(MASK, s)
-    s = _RE_EMAIL.sub(lambda m: f"{m.group(1)}•••@{m.group(2)}", s)
-
-    def num(m: re.Match[str]) -> str:
-        whole = m.group(1)
-        if _RE_DATE.fullmatch(whole.strip()):
-            return whole  # ngày tháng không phải dữ liệu nhạy cảm — Kho dùng rất nhiều
-        return mask_text(whole, False) or whole
-
-    return _RE_LONGNUM.sub(num, s)
-
-
-def mask_for_model(data: Any, *, secrets: tuple[str, ...] = ()) -> Any:
-    """Che đệ quy mọi chuỗi: số dài ≥ 8 chữ số (tài khoản, thẻ, SĐT — trừ ngày), email, khoá/token; giá trị của
-    khoá có tên kiểu mật khẩu/token bị thay hẳn. `secrets` = chuỗi phải xoá tuyệt đối (token của chính liên kết)."""
-    if isinstance(data, str):
-        return _mask_str(data, secrets)
-    if isinstance(data, list):
-        return [mask_for_model(v, secrets=secrets) for v in data]
-    if isinstance(data, dict):
-        out: dict[str, Any] = {}
-        for k, v in data.items():
-            key = str(k)
-            if _SECRET_KEYS.search(key) and isinstance(v, str | int) and not isinstance(v, bool) and v != "":
-                out[key] = MASK
-            else:
-                out[key] = mask_for_model(v, secrets=secrets)
-        return out
-    return data
+# Lớp che chuyển sang `gh.chassis.masking` (v0.1.45, F-57); `mask_for_model`/`MASK` vẫn re-export ở đây.
 
 
 def endpoint_forbidden(endpoint: str) -> bool:
-    """Chống SSRF tới dịch vụ siêu dữ liệu đám mây / địa chỉ đặc biệt: host phân giải ra link-local (169.254.x,
-    fe80::), unspecified (0.0.0.0) hay multicast → cấm, bất kể công tắc mạng công cộng. LAN/loopback vẫn theo guard
-    MCP Hub sẵn có (Gen-hub có thể chạy cùng mạng nội bộ)."""
+    """Chống SSRF tới dịch vụ siêu dữ liệu đám mây / địa chỉ đặc biệt / dịch vụ nội bộ của Gen-Harness: tên dịch vụ
+    compose (`db`, `redis`, `gen-harness-api-1`…) hay host phân giải ra link-local (169.254.x, fe80::), unspecified
+    (0.0.0.0) hoặc multicast → cấm, bất kể công tắc mạng công cộng. Dùng chung `forbidden_host` + `always_forbidden`
+    với MCP Hub (v0.1.45). LAN/loopback vẫn theo guard MCP Hub sẵn có (Gen-hub có thể chạy cùng mạng nội bộ)."""
     host = urlparse(endpoint).hostname
     if not host:
+        return True
+    if forbidden_host(host):
         return True
     try:
         infos = socket.getaddrinfo(host, None)
@@ -110,9 +68,7 @@ def endpoint_forbidden(endpoint: str) -> bool:
             ip = ipaddress.ip_address(str(info[4][0]).split("%", 1)[0])
         except ValueError:
             continue
-        if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
-            ip = ip.ipv4_mapped
-        if ip.is_link_local or ip.is_unspecified or ip.is_multicast:
+        if always_forbidden(ip):
             return True
     return False
 

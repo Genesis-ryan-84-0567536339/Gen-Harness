@@ -7,18 +7,27 @@ trong phạm vi cụm này; gọi `list_tools`/`call_tool` với transport này 
 trong nhật ký, không thử chạy mã không kiểm soát).
 
 Guard "Cho phép máy chủ MCP ngoài mạng nội bộ" (mặc định tắt — `agent.mcp_servers.allow_public_network`,
-ARCHITECTURE §10): trước MỌI lời gọi mạng, `check_network_guard` phân giải host, chặn nếu ra IP công khai và cờ
-đang tắt. Áp dụng ở đây (không chỉ ở tầng route) để không có đường nào gọi thẳng bỏ qua guard.
+ARCHITECTURE §10): trước MỌI lời gọi mạng, `pin_endpoint` phân giải host MỘT lần, chặn nếu ra IP công khai và cờ
+đang tắt, rồi kết nối thẳng IP đã kiểm. Áp dụng ở đây (không chỉ ở tầng route) để không có đường nào gọi thẳng bỏ
+qua guard.
+
+v0.1.45 (F-49): MỌI lời gọi MCP đều ghim DNS (trước đây chỉ Gen-hub); cấm luôn tên dịch vụ compose của chính
+Gen-Harness (`db`, `redis`, `gen-harness-api-1`…) trước cả khi phân giải; có token thì phải `https://` (trừ loopback).
+`pinned_request` dùng chung cho nhà cung cấp AI lúc gọi (gh.providers.clients, gh.gen.jev).
 """
 
 import asyncio
 import ipaddress
+import re
 import socket
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
 from urllib.parse import urlparse, urlunparse
 
 import httpx
+
+from gh.chassis.masking import mask_error
 
 HTTP_TRANSPORTS = ("http+sse", "streamable_http")
 
@@ -81,6 +90,27 @@ def _unmap(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> ipaddress.IPv4A
     return ip
 
 
+# Tên dịch vụ trong deploy/compose.yaml — trong mạng docker, tên này phân giải ra container NỘI BỘ của Gen-Harness
+# (Postgres, Redis, api…) và không bao giờ là máy chủ MCP / nhà cung cấp AI hợp lệ. Thêm service vào compose.yaml thì
+# PHẢI thêm tên ở đây (kèm tên container mặc định `gen-harness-<svc>-<n>` được nhận ra theo mẫu bên dưới).
+COMPOSE_SERVICE_NAMES = frozenset({"proxy", "web", "migrate", "api", "worker", "bridge", "browser", "browser-redis",
+                                   "browser-egress", "db", "redis"})
+_CONTAINER_RE = re.compile(r"^gen-harness[-_](?P<svc>[a-z0-9-]+?)[-_]\d+$")
+
+
+def forbidden_host(host: str) -> bool:
+    """True nếu `host` là tên dịch vụ nội bộ của Gen-Harness: tên service compose (`db`, `redis`…), tên container
+    (`gen-harness-api-1`, `gen-harness_db_1`) hoặc `localhost.localdomain`. KHÔNG cấm `localhost`/127.x/LAN — Gen-hub,
+    Ollama trong LAN vẫn hợp lệ."""
+    h = (host or "").strip().rstrip(".").lower()
+    if h.startswith("[") and h.endswith("]"):
+        h = h[1:-1]
+    if h in COMPOSE_SERVICE_NAMES or h == "localhost.localdomain":
+        return True
+    m = _CONTAINER_RE.match(h)
+    return bool(m and m.group("svc") in COMPOSE_SERVICE_NAMES)
+
+
 def always_forbidden(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     """Địa chỉ không bao giờ được gọi khi ghim DNS (siêu dữ liệu đám mây 169.254.x / fe80::, 0.0.0.0, multicast)."""
     if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
@@ -98,10 +128,33 @@ class PinnedTarget:
     fallbacks: tuple[str, ...] = ()
 
 
-async def pin_endpoint(endpoint: str, allow_public_network: bool) -> PinnedTarget:
+async def _default_getaddrinfo(host: str, port: int) -> list[Any]:
+    return await asyncio.get_running_loop().getaddrinfo(host, port, type=socket.SOCK_STREAM)
+
+
+# Điểm phân giải DUY NHẤT của `pin_endpoint` — test thay bằng hàm giả (tests/conftest.py) để không phụ thuộc DNS thật.
+_getaddrinfo: Callable[[str, int], Awaitable[list[Any]]] = _default_getaddrinfo
+
+FORBIDDEN_SERVICE_MSG = "Địa chỉ trỏ vào tên dịch vụ nội bộ của Gen-Harness"
+HTTPS_REQUIRED_MSG = "Có token thì máy chủ phải dùng https://"
+
+
+def _loopback_host(host: str) -> bool:
+    if host.lower().rstrip(".") == "localhost":
+        return True
+    try:
+        return _unmap(ipaddress.ip_address(host)).is_loopback
+    except ValueError:
+        return False
+
+
+async def pin_endpoint(endpoint: str, allow_public_network: bool, *, has_token: bool = False) -> PinnedTarget:
     """Chống DNS rebinding (v0.1.27): phân giải host MỘT lần, kiểm TẤT CẢ IP (cấm link-local/0.0.0.0/multicast;
     IP công cộng khi công tắc mạng công cộng tắt), rồi kết nối thẳng tới IP đã kiểm — không có lần phân giải thứ
-    hai giữa lúc kiểm và lúc kết nối. TLS vẫn xác thực chứng chỉ theo tên máy gốc (SNI + kiểm hostname)."""
+    hai giữa lúc kiểm và lúc kết nối. TLS vẫn xác thực chứng chỉ theo tên máy gốc (SNI + kiểm hostname).
+
+    v0.1.45 (F-49): tên dịch vụ nội bộ (`forbidden_host`) bị cấm TRƯỚC khi phân giải; `has_token` (gửi kèm token /
+    header Authorization) mà không phải `https://` → chặn (token đi rõ trên mạng) — trừ loopback (không rời máy)."""
     u = urlparse(endpoint)
     host = u.hostname
     if not host or u.scheme not in ("http", "https"):
@@ -110,13 +163,17 @@ async def pin_endpoint(endpoint: str, allow_public_network: bool) -> PinnedTarge
         port = u.port or (443 if u.scheme == "https" else 80)
     except ValueError as e:  # cổng ngoài 0–65535
         raise McpBlockedNetwork("Địa chỉ máy chủ MCP không hợp lệ") from e
+    if forbidden_host(host):
+        raise McpBlockedNetwork(f"{FORBIDDEN_SERVICE_MSG} ({host}) — vùng mạng bị cấm")
+    if has_token and u.scheme != "https" and not _loopback_host(host):
+        raise McpBlockedNetwork(HTTPS_REQUIRED_MSG)
     literal = True
     try:
         ips: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = [_unmap(ipaddress.ip_address(host))]
     except ValueError:
         literal = False
         try:
-            infos = await asyncio.get_running_loop().getaddrinfo(host, port, type=socket.SOCK_STREAM)
+            infos = await _getaddrinfo(host, port)
         except OSError as e:
             raise McpError(f"mạng: không phân giải được {host}") from e
         ips = []
@@ -148,7 +205,37 @@ async def pin_endpoint(endpoint: str, allow_public_network: bool) -> PinnedTarge
                         fallbacks=tuple(url_for(ip) for ip in ips[1:]))
 
 
+async def pinned_request(client: httpx.AsyncClient, method: str, url: str, *, allow_public_network: bool = True,
+                         has_token: bool = False, headers: dict[str, str] | None = None,
+                         extensions: dict[str, Any] | None = None, **kw: Any) -> httpx.Response:
+    """Một request HTTP ghim DNS (v0.1.45, dùng chung MCP + nhà cung cấp AI): `pin_endpoint` (ném `McpBlockedNetwork`
+    / `McpError`) rồi gửi thẳng tới IP đã kiểm với Host gốc + `sni_hostname`; IP đầu không kết nối được → thử IP kế
+    (đã kiểm cùng lượt). `client` phải tạo với `trust_env=False` + `follow_redirects=False` (`pinned_client`): proxy
+    môi trường sẽ tự phân giải lại tên máy — mất tác dụng ghim (cùng hành vi Gen-hub v0.1.27)."""
+    target = await pin_endpoint(url, allow_public_network, has_token=has_token)
+    hdrs = {k: v for k, v in (headers or {}).items() if k.lower() != "host"}
+    hdrs["host"] = target.host
+    ext = dict(extensions or {})
+    if target.sni:
+        ext["sni_hostname"] = target.sni
+    urls = [target.url, *target.fallbacks]
+    for i, u in enumerate(urls):
+        try:
+            return await client.request(method, u, headers=hdrs, extensions=ext or None, **kw)
+        except httpx.ConnectError:
+            if i == len(urls) - 1:
+                raise
+    raise AssertionError("unreachable")  # pragma: no cover
+
+
+def pinned_client(transport: httpx.AsyncBaseTransport | None, timeout: float) -> httpx.AsyncClient:
+    """Client cho `pinned_request`: không đọc proxy môi trường (HTTPS_PROXY/HTTP_PROXY/ALL_PROXY), không tự theo
+    chuyển hướng (đích mới chưa qua kiểm IP)."""
+    return httpx.AsyncClient(transport=transport, timeout=timeout, trust_env=False, follow_redirects=False)
+
+
 def check_network_guard(endpoint: str, allow_public_network: bool) -> None:
+    """Giữ cho tương thích import (v0.1.45: McpClient luôn ghim DNS qua `pin_endpoint`, không còn gọi hàm này)."""
     if allow_public_network:
         return
     host = urlparse(endpoint).hostname or endpoint
@@ -161,44 +248,42 @@ class McpClient:
     """Transport HTTP tiêm được (`transport=httpx.MockTransport(...)` trong test), cùng cách gh.providers làm."""
 
     def __init__(self, transport: httpx.AsyncBaseTransport | None = None, timeout: float = 20.0,
-                 pin_dns: bool = False):
-        """`pin_dns=True` (liên kết Gen-hub, v0.1.27): phân giải một lần + kết nối thẳng IP đã kiểm (`pin_endpoint`),
-        bỏ qua proxy môi trường (proxy sẽ tự phân giải lại tên máy — mất tác dụng ghim)."""
+                 pin_dns: bool = True):
+        """Ghim DNS (v0.1.27 cho Gen-hub; v0.1.45 mặc định cho MỌI máy chủ MCP): phân giải một lần + kết nối thẳng IP
+        đã kiểm (`pin_endpoint`), bỏ qua proxy môi trường (proxy sẽ tự phân giải lại tên máy — mất tác dụng ghim).
+        Có proxy HTTPS_PROXY/HTTP_PROXY/ALL_PROXY thì vẫn kiểm `pin_endpoint` (cấm vùng xấu) và vẫn đi thẳng như hub.
+        `pin_dns=False` chỉ còn cho tương thích: vẫn kiểm `pin_endpoint` nhưng kết nối theo tên máy."""
         self._transport, self._timeout, self._pin = transport, timeout, pin_dns
 
     async def _rpc(self, server: ServerLike, method: str, params: dict[str, Any],
                    headers: dict[str, str]) -> Any:
         body = {"jsonrpc": "2.0", "id": "gh-1", "method": method, "params": params}
-        url = server.endpoint
         hdrs = {**headers, "content-type": "application/json"}
-        extensions: dict[str, Any] = {}
-        urls = [url]
-        if self._pin:
-            target = await pin_endpoint(server.endpoint, server.allow_public_network)
-            urls, hdrs["host"] = [target.url, *target.fallbacks], target.host
-            if target.sni:
-                extensions["sni_hostname"] = target.sni
+        has_token = any(k.lower() == "authorization" and v for k, v in headers.items())
+        token = next((v.split(" ", 1)[-1] for k, v in headers.items() if k.lower() == "authorization" and v), "")
         try:
-            # Không bao giờ tự theo chuyển hướng (httpx mặc định) — đích mới chưa qua kiểm IP.
-            async with httpx.AsyncClient(transport=self._transport, timeout=self._timeout,
-                                         trust_env=not self._pin, follow_redirects=False) as c:
-                for i, u in enumerate(urls):
-                    try:
-                        resp = await c.post(u, json=body, headers=hdrs, extensions=extensions or None)
-                        break
-                    except httpx.ConnectError:
-                        if i == len(urls) - 1:
-                            raise
+            if self._pin:
+                async with pinned_client(self._transport, self._timeout) as c:
+                    resp = await pinned_request(c, "POST", server.endpoint, json=body, headers=hdrs,
+                                                allow_public_network=server.allow_public_network,
+                                                has_token=has_token)
+            else:
+                await pin_endpoint(server.endpoint, server.allow_public_network, has_token=has_token)
+                async with httpx.AsyncClient(transport=self._transport, timeout=self._timeout,
+                                             trust_env=False, follow_redirects=False) as c:
+                    resp = await c.post(server.endpoint, json=body, headers=hdrs)
         except httpx.HTTPError as e:
-            raise McpError(f"mạng: {e}") from e
+            raise McpError(f"mạng: {mask_error(str(e), secrets=(token,))}") from e
+        secrets = (token,) if token else ()
         if resp.status_code >= 400:
-            raise McpError(f"{resp.status_code}: {resp.text[:300]}")
+            # Thân lỗi có thể phản chiếu header/tham số — che + cắt 200 ký tự trước khi vào McpError (log, WS).
+            raise McpError(f"{resp.status_code}: {mask_error(resp.text, secrets=secrets)}")
         try:
             data = resp.json()
         except ValueError as e:
-            raise McpError(f"phản hồi không phải JSON: {resp.text[:200]}") from e
+            raise McpError(f"phản hồi không phải JSON: {mask_error(resp.text, secrets=secrets)}") from e
         if isinstance(data, dict) and data.get("error"):
-            raise McpError(str(data["error"])[:300])
+            raise McpError(mask_error(str(data["error"]), secrets=secrets, limit=300))
         return data.get("result") if isinstance(data, dict) else data
 
     def _headers(self, server: ServerLike, auth_token: str | None) -> dict[str, str]:
@@ -208,8 +293,6 @@ class McpClient:
         if server.transport not in HTTP_TRANSPORTS:
             raise McpTransportUnsupported(
                 f"Transport '{server.transport}' chưa hỗ trợ gọi trực tiếp trong phạm vi này")
-        if not self._pin:  # ghim DNS: `pin_endpoint` kiểm ngay trong `_rpc` trên đúng IP sẽ kết nối
-            check_network_guard(server.endpoint, server.allow_public_network)
 
     async def list_tools(self, server: ServerLike, auth_token: str | None = None) -> list[ToolSpec]:
         self._check(server)
@@ -230,5 +313,6 @@ class McpClient:
         return result if isinstance(result, dict) else {"result": result}
 
 
-__all__ = ["McpClient", "McpError", "McpBlockedNetwork", "McpTransportUnsupported", "PinnedTarget", "ToolSpec",
-           "always_forbidden", "check_network_guard", "pin_endpoint", "resolves_public"]
+__all__ = ["COMPOSE_SERVICE_NAMES", "McpClient", "McpError", "McpBlockedNetwork", "McpTransportUnsupported",
+           "PinnedTarget", "ToolSpec", "always_forbidden", "check_network_guard", "forbidden_host", "pin_endpoint",
+           "pinned_client", "pinned_request", "resolves_public"]

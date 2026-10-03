@@ -24,6 +24,9 @@ from urllib.parse import urlparse
 import httpx
 import orjson
 
+from gh.chassis.masking import mask_error
+from gh.chassis.mcp_client import McpBlockedNetwork, McpError, pinned_client, pinned_request
+
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 TYPESAFE_BASE_URL = "https://api.typesafe.ai"
 DEFAULT_MODEL = "typesafe/jev-1.13"
@@ -133,12 +136,17 @@ class JevClient:
         url, payload = self.build_request(question, options, context)
         started = time.monotonic()
         try:
-            async with httpx.AsyncClient(transport=self.transport, timeout=self.timeout) as c:
-                resp = await c.post(url, json=payload, headers=self._headers())
+            # v0.1.45 (F-49): ghim DNS như nhà cung cấp AI (gh.providers.clients.HttpClient) — cấm vùng mạng xấu.
+            async with pinned_client(self.transport, self.timeout) as c:
+                resp = await pinned_request(c, "POST", url, json=payload, headers=self._headers())
+        except McpBlockedNetwork as e:
+            raise JevError(f"Địa chỉ nhà cung cấp trỏ vào vùng mạng bị cấm: {e}") from e
+        except McpError as e:
+            raise JevError(str(e)) from e
         except httpx.HTTPError as e:
             raise JevError(f"mạng: {type(e).__name__}") from e
         if resp.status_code >= 400:
-            raise JevError(f"HTTP {resp.status_code}: {resp.text[:200]}")
+            raise JevError(f"HTTP {resp.status_code}: {mask_error(resp.text, secrets=(self.api_key,))}")
         try:
             body = resp.json()
         except ValueError as e:

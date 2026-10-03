@@ -19,6 +19,8 @@ from typing import Any
 import httpx
 import orjson
 
+from gh.chassis.mcp_client import McpBlockedNetwork, McpError, pinned_client, pinned_request
+
 EMBED_DIM = 768
 DEFAULT_ENDPOINT = {
     "gemini": "https://generativelanguage.googleapis.com/v1beta",
@@ -161,7 +163,8 @@ def _retry_after(resp: httpx.Response) -> float | None:
 def _raise_for(resp: httpx.Response) -> None:
     if resp.status_code < 400:
         return
-    body = resp.text[:300]
+    # v0.1.45: thân lỗi có thể phản chiếu header (khoá) / dữ liệu — che rồi cắt 200 ký tự trước khi vào lỗi/log.
+    body = redact(resp.text[:4000])[:200]
     if resp.status_code == 429:
         if "quota" in body.lower() and "day" in body.lower():
             raise QuotaExhausted(f"429 hết hạn mức: {body}")
@@ -175,29 +178,37 @@ def _raise_for(resp: httpx.Response) -> None:
     raise ProviderError(f"{resp.status_code}: {body}")
 
 
+PROVIDER_FORBIDDEN_MSG = "Địa chỉ nhà cung cấp trỏ vào vùng mạng bị cấm"
+
+
 class HttpClient:
+    """v0.1.45 (F-49): mọi lời gọi ghim DNS (`gh.chassis.mcp_client.pinned_request`) — phân giải MỘT lần, cấm
+    link-local/siêu dữ liệu, 0.0.0.0, multicast và tên dịch vụ compose của Gen-Harness, rồi kết nối thẳng IP đã kiểm
+    (Host + SNI theo tên gốc). Nhà cung cấp luôn được ra mạng công cộng; KHÔNG ép https lúc gọi (ép ở bước ghi cấu
+    hình). Không đọc proxy môi trường (proxy tự phân giải lại tên máy — mất tác dụng ghim), như Gen-hub v0.1.27."""
+
     def __init__(self, transport: httpx.AsyncBaseTransport | None = None, timeout: float = 60.0):
         self._transport = transport
         self._timeout = timeout
 
-    def _client(self) -> httpx.AsyncClient:
-        return httpx.AsyncClient(transport=self._transport, timeout=self._timeout)
+    async def _request(self, method: str, url: str, headers: dict[str, str], **kw: Any) -> httpx.Response:
+        try:
+            async with pinned_client(self._transport, self._timeout) as c:
+                return await pinned_request(c, method, url, headers=headers, **kw)
+        except McpBlockedNetwork as e:
+            raise BadRequest(f"{PROVIDER_FORBIDDEN_MSG}: {e}") from e
+        except McpError as e:   # không phân giải được tên máy — tạm thời (DNS chập chờn)
+            raise ProviderError(str(e)) from e
+        except httpx.HTTPError as e:
+            raise ProviderError(f"mạng: {redact(str(e), 300)}") from e
 
     async def _post(self, url: str, json: dict[str, Any], headers: dict[str, str]) -> dict[str, Any]:
-        try:
-            async with self._client() as c:
-                resp = await c.post(url, json=json, headers=headers)
-        except httpx.HTTPError as e:
-            raise ProviderError(f"mạng: {e}") from e
+        resp = await self._request("POST", url, headers, json=json)
         _raise_for(resp)
         return resp.json()  # type: ignore[no-any-return]
 
     async def _get(self, url: str, headers: dict[str, str]) -> dict[str, Any]:
-        try:
-            async with self._client() as c:
-                resp = await c.get(url, headers=headers)
-        except httpx.HTTPError as e:
-            raise ProviderError(f"mạng: {e}") from e
+        resp = await self._request("GET", url, headers)
         _raise_for(resp)
         return resp.json()  # type: ignore[no-any-return]
 

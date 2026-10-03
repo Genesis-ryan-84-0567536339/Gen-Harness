@@ -177,6 +177,25 @@ async def purge_browser_results(db: AsyncSession, deadline: float) -> int:
           LIMIT :lim)""", {"d": BROWSER_RESULT_DAYS}, deadline)
 
 
+MCP_ARGS_DIGEST = "agent.mcp_calls.args"
+
+
+async def digest_mcp_call_args(db: AsyncSession, deadline: float) -> int:
+    """v0.1.45 (F-57): dòng `agent.mcp_calls` cũ (trước v0.1.45) lưu NGUYÊN VĂN tham số tool → đổi sang dấu vết
+    {sha256, keys, bytes} như `gh.mcp_api.invoke.args_digest` (sha256 tính trên `args::text` của Postgres). Idempotent:
+    dòng đã có khoá `sha256` bị bỏ qua — chạy lại không đổi gì. Không cần migration (bảng phân vùng, chạy theo lô)."""
+    return await _batched(db, """
+        UPDATE agent.mcp_calls SET args = jsonb_build_object(
+            'sha256', encode(sha256(convert_to(args::text, 'UTF8')), 'hex'),
+            'keys', (SELECT coalesce(jsonb_agg(k ORDER BY k), '[]'::jsonb)
+                     FROM (SELECT k FROM jsonb_object_keys(args) k ORDER BY k LIMIT 20) ks),
+            'bytes', length(args::text))
+        WHERE (id, at) IN (
+          SELECT id, at FROM agent.mcp_calls
+          WHERE jsonb_typeof(args) = 'object' AND NOT args ? 'sha256'
+          LIMIT :lim)""", {}, deadline)
+
+
 async def purge_orphan_attachments(db: AsyncSession, keep_days: int | None, deadline: float,
                                    store: Any = None) -> int:
     """Tệp đính kèm có sự kiện thô đã bị partman xoá theo tháng (cũ hơn hạn, sự kiện không còn) ⇒ xoá dòng + object
@@ -349,6 +368,7 @@ async def retention_sweep(ctx: dict[str, Any]) -> dict[str, Any]:
 
     await part("memory.entries", "batch", in_session(lambda db: purge_memory_entries(db, deadline)))
     await part(BROWSER_RESULT, "batch", in_session(lambda db: purge_browser_results(db, deadline)))
+    await part(MCP_ARGS_DIGEST, "batch", in_session(lambda db: digest_mcp_call_args(db, deadline)))
     if "raw.events" in keeps:
         raw_keep = keeps["raw.events"]
     else:  # partman lỗi — vẫn tính hạn từ bảng chính sách (chỉ đọc)
@@ -375,5 +395,5 @@ async def retention_sweep(ctx: dict[str, Any]) -> dict[str, Any]:
 
 
 __all__ = ["BATCH", "CONFIRM_KIND", "DATASETS", "ENFORCED", "FIXED", "LAST_KEY", "PARTITIONED", "effective_keep_days",
-           "clear_partman_retention", "drop_expired_partitions", "ensure_leakproof", "notify_unconfirmed",
-           "partman_keeps", "read_last", "retention_sweep", "unconfirmed_orgs"]
+           "clear_partman_retention", "digest_mcp_call_args", "drop_expired_partitions", "ensure_leakproof",
+           "notify_unconfirmed", "partman_keeps", "read_last", "retention_sweep", "unconfirmed_orgs"]

@@ -15,11 +15,13 @@ tạo role `gh_app` LOGIN được ngay cả khi không bật GH_TEST_APP_ROLE �
 
 import asyncio
 import os
+import socket
 import subprocess
 import sys
 import uuid
 from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import Any
 
 import httpx
 import psycopg
@@ -46,6 +48,24 @@ os.environ.setdefault("GH_MASTER_KEY", "")
 GH_APP_DB_PASSWORD = os.environ.setdefault("GH_APP_DB_PASSWORD", "gh-app-test-only-pw-1")
 APP_ROLE = os.environ.get("GH_TEST_APP_ROLE") == "1"
 APP_PG = os.environ.get("GH_TEST_APP_PG", f"postgresql://gh_app:{GH_APP_DB_PASSWORD}@localhost:5432")
+
+
+# v0.1.45 (F-49): mọi lời gọi MCP / nhà cung cấp AI ghim DNS qua `gh.chassis.mcp_client._getaddrinfo`. Test không
+# phụ thuộc DNS thật: tên máy (không phải IP literal) phân giải ra một IP công cộng giả cố định; `localhost` →
+# 127.0.0.1. Tên dịch vụ compose (`db`, `redis`…) vẫn bị `forbidden_host` cấm TRƯỚC khi phân giải. Test cần hành vi
+# thật (không phân giải được, DNS rebinding) tự `monkeypatch.setattr(mcp_client, "_getaddrinfo", …)` đè lên.
+FAKE_PUBLIC_IP = "93.184.216.34"
+
+
+@pytest.fixture(autouse=True)
+def _fake_dns(monkeypatch: pytest.MonkeyPatch) -> None:
+    from gh.chassis import mcp_client
+
+    async def fake(host: str, port: int) -> list[Any]:
+        ip = "127.0.0.1" if host.lower().rstrip(".") == "localhost" else FAKE_PUBLIC_IP
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, port))]
+
+    monkeypatch.setattr(mcp_client, "_getaddrinfo", fake)
 
 
 def _admin(sql: str) -> None:
