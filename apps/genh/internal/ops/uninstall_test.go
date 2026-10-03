@@ -49,6 +49,49 @@ func (f *fakeOffsiteScheduler) Status(context.Context) (autoupdate.OffsiteSchedu
 	return autoupdate.OffsiteScheduleStatus{Enabled: true, Mechanism: f.mechanism, Detail: "giả"}, nil
 }
 
+// fakeWatchdogScheduler ghi lại lời gọi gỡ lịch trực canh (không đụng systemd/cron thật).
+type fakeWatchdogScheduler struct {
+	disables int
+	err      error
+}
+
+func (f *fakeWatchdogScheduler) Enable(context.Context) (string, string, error) {
+	return "Đã bật trực canh (giả)", autoupdate.ScheduleCron, nil
+}
+
+func (f *fakeWatchdogScheduler) Disable(context.Context) (string, error) {
+	f.disables++
+	if f.err != nil {
+		return "", f.err
+	}
+	return "Đã tắt trực canh máy chủ (giả).", nil
+}
+
+func (f *fakeWatchdogScheduler) Status(context.Context) (autoupdate.WatchdogSchedule, error) {
+	return autoupdate.WatchdogSchedule{}, nil
+}
+
+// v0.1.44 (F-6b): uninstall gỡ lịch trực canh cạnh lịch tuần offsite — lỗi chỉ cảnh báo.
+func TestRunUninstall_GoLichTrucCanh(t *testing.T) {
+	env := testEnv(t, testComposePath(t, ""))
+	wd := &fakeWatchdogScheduler{}
+	var out strings.Builder
+	if err := RunUninstall(context.Background(), env, UninstallOptions{AutoApprove: true, Watchdog: wd, Offsite: &fakeOffsiteScheduler{}}, downRunner(), strings.NewReader(""), &out); err != nil {
+		t.Fatal(err)
+	}
+	if wd.disables != 1 || !strings.Contains(out.String(), "Đã tắt trực canh máy chủ (giả).") {
+		t.Fatalf("phải gỡ lịch trực canh: %d lần, out=%q", wd.disables, out.String())
+	}
+	wd2 := &fakeWatchdogScheduler{err: errors.New("crontab hỏng")}
+	out.Reset()
+	if err := RunUninstall(context.Background(), env, UninstallOptions{AutoApprove: true, Watchdog: wd2, Offsite: &fakeOffsiteScheduler{}}, downRunner(), strings.NewReader(""), &out); err != nil {
+		t.Fatalf("gỡ lịch trực canh lỗi không được làm hỏng uninstall: %v", err)
+	}
+	if !strings.Contains(out.String(), "Không gỡ được lịch trực canh máy chủ") {
+		t.Fatalf("thiếu cảnh báo: %q", out.String())
+	}
+}
+
 func hasVolumes(args []string) bool {
 	for _, a := range args {
 		if a == "--volumes" {
@@ -68,7 +111,7 @@ func TestRunUninstall_MacDinh_GiuDuLieu_KhongVolumes(t *testing.T) {
 	fr := downRunner()
 	sched := &fakeOffsiteScheduler{enabled: true, mechanism: "cron"}
 	var out strings.Builder
-	if err := RunUninstall(context.Background(), env, UninstallOptions{AutoApprove: true, Offsite: sched}, fr, strings.NewReader(""), &out); err != nil {
+	if err := RunUninstall(context.Background(), env, UninstallOptions{AutoApprove: true, Watchdog: &fakeWatchdogScheduler{}, Offsite: sched}, fr, strings.NewReader(""), &out); err != nil {
 		t.Fatalf("RunUninstall: %v", err)
 	}
 	if len(fr.Calls) != 1 || hasVolumes(fr.Calls[0].Cmd.Args) {
@@ -91,7 +134,7 @@ func TestRunUninstall_MacDinh_GiuDuLieu_KhongVolumes(t *testing.T) {
 func TestRunUninstall_KeepData_VanHopLe(t *testing.T) {
 	env := testEnv(t, testComposePath(t, ""))
 	fr := downRunner()
-	if err := RunUninstall(context.Background(), env, UninstallOptions{KeepData: true, AutoApprove: true, Offsite: &fakeOffsiteScheduler{}}, fr, strings.NewReader(""), &strings.Builder{}); err != nil {
+	if err := RunUninstall(context.Background(), env, UninstallOptions{KeepData: true, AutoApprove: true, Watchdog: &fakeWatchdogScheduler{}, Offsite: &fakeOffsiteScheduler{}}, fr, strings.NewReader(""), &strings.Builder{}); err != nil {
 		t.Fatalf("RunUninstall: %v", err)
 	}
 	if hasVolumes(fr.Calls[0].Cmd.Args) {
@@ -104,7 +147,7 @@ func TestRunUninstall_DeleteData_Yes_CoVolumesVaCanhBao(t *testing.T) {
 	env := testEnv(t, testComposePath(t, ""))
 	fr := downRunner()
 	var out strings.Builder
-	if err := RunUninstall(context.Background(), env, UninstallOptions{DeleteData: true, AutoApprove: true, Offsite: &fakeOffsiteScheduler{}}, fr, strings.NewReader(""), &out); err != nil {
+	if err := RunUninstall(context.Background(), env, UninstallOptions{DeleteData: true, AutoApprove: true, Watchdog: &fakeWatchdogScheduler{}, Offsite: &fakeOffsiteScheduler{}}, fr, strings.NewReader(""), &out); err != nil {
 		t.Fatalf("RunUninstall: %v", err)
 	}
 	if !hasVolumes(fr.Calls[0].Cmd.Args) {
@@ -120,7 +163,7 @@ func TestRunUninstall_DeleteData_Yes_CoVolumesVaCanhBao(t *testing.T) {
 		t.Fatal(err)
 	}
 	out.Reset()
-	if err := RunUninstall(context.Background(), env, UninstallOptions{DeleteData: true, AutoApprove: true, Offsite: &fakeOffsiteScheduler{}, Now: func() time.Time { return now }},
+	if err := RunUninstall(context.Background(), env, UninstallOptions{DeleteData: true, AutoApprove: true, Watchdog: &fakeWatchdogScheduler{}, Offsite: &fakeOffsiteScheduler{}, Now: func() time.Time { return now }},
 		downRunner(), strings.NewReader(""), &out); err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +173,7 @@ func TestRunUninstall_DeleteData_Yes_CoVolumesVaCanhBao(t *testing.T) {
 	// Quá 7 ngày → cảnh báo lại.
 	out.Reset()
 	later := func() time.Time { return now.Add(9 * 24 * time.Hour) }
-	if err := RunUninstall(context.Background(), env, UninstallOptions{DeleteData: true, AutoApprove: true, Offsite: &fakeOffsiteScheduler{}, Now: later},
+	if err := RunUninstall(context.Background(), env, UninstallOptions{DeleteData: true, AutoApprove: true, Watchdog: &fakeWatchdogScheduler{}, Offsite: &fakeOffsiteScheduler{}, Now: later},
 		downRunner(), strings.NewReader(""), &out); err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +187,7 @@ func TestRunUninstall_DeleteData_PhaiGoDungCumTu(t *testing.T) {
 	env := testEnv(t, testComposePath(t, ""))
 	for _, typed := range []string{"y\n", "yes\n", "xoá dữ liệu\n", "\n"} {
 		fr := &fake.Runner{}
-		err := RunUninstall(context.Background(), env, UninstallOptions{DeleteData: true, Offsite: &fakeOffsiteScheduler{}}, fr, strings.NewReader(typed), &strings.Builder{})
+		err := RunUninstall(context.Background(), env, UninstallOptions{DeleteData: true, Watchdog: &fakeWatchdogScheduler{}, Offsite: &fakeOffsiteScheduler{}}, fr, strings.NewReader(typed), &strings.Builder{})
 		var opErr *OpError
 		if !errors.As(err, &opErr) || opErr.Code != ErrCodeUninstallCancelled || len(fr.Calls) != 0 {
 			t.Fatalf("gõ %q phải huỷ, không gọi docker: err=%v calls=%d", typed, err, len(fr.Calls))
@@ -152,7 +195,7 @@ func TestRunUninstall_DeleteData_PhaiGoDungCumTu(t *testing.T) {
 	}
 	for _, typed := range []string{"XOÁ DỮ LIỆU\n", "  XÓA DỮ LIỆU  \n"} {
 		fr := downRunner()
-		if err := RunUninstall(context.Background(), env, UninstallOptions{DeleteData: true, Offsite: &fakeOffsiteScheduler{}}, fr, strings.NewReader(typed), &strings.Builder{}); err != nil {
+		if err := RunUninstall(context.Background(), env, UninstallOptions{DeleteData: true, Watchdog: &fakeWatchdogScheduler{}, Offsite: &fakeOffsiteScheduler{}}, fr, strings.NewReader(typed), &strings.Builder{}); err != nil {
 			t.Fatalf("gõ %q phải chạy: %v", typed, err)
 		}
 		if !hasVolumes(fr.Calls[0].Cmd.Args) {
@@ -164,7 +207,7 @@ func TestRunUninstall_DeleteData_PhaiGoDungCumTu(t *testing.T) {
 func TestRunUninstall_KeepVaDeleteMauThuan(t *testing.T) {
 	env := testEnv(t, testComposePath(t, ""))
 	fr := &fake.Runner{}
-	err := RunUninstall(context.Background(), env, UninstallOptions{DeleteData: true, KeepData: true, AutoApprove: true, Offsite: &fakeOffsiteScheduler{}}, fr, strings.NewReader(""), &strings.Builder{})
+	err := RunUninstall(context.Background(), env, UninstallOptions{DeleteData: true, KeepData: true, AutoApprove: true, Watchdog: &fakeWatchdogScheduler{}, Offsite: &fakeOffsiteScheduler{}}, fr, strings.NewReader(""), &strings.Builder{})
 	var opErr *OpError
 	if !errors.As(err, &opErr) || len(fr.Calls) != 0 {
 		t.Fatalf("hai cờ mâu thuẫn phải dừng trước khi gọi docker: %v", err)
@@ -177,7 +220,7 @@ func TestRunUninstall_NoConfirmation_Cancels_DoesNotCallDown(t *testing.T) {
 	fr := &fake.Runner{}
 	sched := &fakeOffsiteScheduler{}
 
-	err := RunUninstall(context.Background(), env, UninstallOptions{Offsite: sched}, fr, strings.NewReader("n\n"), &strings.Builder{})
+	err := RunUninstall(context.Background(), env, UninstallOptions{Watchdog: &fakeWatchdogScheduler{}, Offsite: sched}, fr, strings.NewReader("n\n"), &strings.Builder{})
 	opErr, ok := err.(*OpError)
 	if !ok {
 		t.Fatalf("lỗi phải là *OpError, được %T", err)
@@ -190,7 +233,7 @@ func TestRunUninstall_NoConfirmation_Cancels_DoesNotCallDown(t *testing.T) {
 	}
 	// Giữ dữ liệu (mặc định): "y" là đủ.
 	fr2 := downRunner()
-	if err := RunUninstall(context.Background(), env, UninstallOptions{Offsite: sched}, fr2, strings.NewReader("y\n"), &strings.Builder{}); err != nil {
+	if err := RunUninstall(context.Background(), env, UninstallOptions{Watchdog: &fakeWatchdogScheduler{}, Offsite: sched}, fr2, strings.NewReader("y\n"), &strings.Builder{}); err != nil {
 		t.Fatalf("giữ dữ liệu + y phải chạy: %v", err)
 	}
 }
@@ -200,7 +243,7 @@ func TestRunUninstall_DownFails_ReturnsOpError(t *testing.T) {
 	env := testEnv(t, composePath)
 	fr := &fake.Runner{Responses: []fake.Response{{Match: fake.MatchArgsContain("down"), Err: errors.New("boom")}}}
 
-	err := RunUninstall(context.Background(), env, UninstallOptions{AutoApprove: true, Offsite: &fakeOffsiteScheduler{}}, fr, strings.NewReader(""), &strings.Builder{})
+	err := RunUninstall(context.Background(), env, UninstallOptions{AutoApprove: true, Watchdog: &fakeWatchdogScheduler{}, Offsite: &fakeOffsiteScheduler{}}, fr, strings.NewReader(""), &strings.Builder{})
 	opErr, ok := err.(*OpError)
 	if !ok {
 		t.Fatalf("lỗi phải là *OpError, được %T", err)
@@ -240,7 +283,7 @@ func TestRunUninstall_RemovesShortcutAndPathLine_Linux(t *testing.T) {
 	}
 
 	var out strings.Builder
-	if err := RunUninstall(context.Background(), env, UninstallOptions{AutoApprove: true, Offsite: &fakeOffsiteScheduler{}}, fr, strings.NewReader(""), &out); err != nil {
+	if err := RunUninstall(context.Background(), env, UninstallOptions{AutoApprove: true, Watchdog: &fakeWatchdogScheduler{}, Offsite: &fakeOffsiteScheduler{}}, fr, strings.NewReader(""), &out); err != nil {
 		t.Fatalf("RunUninstall: %v", err)
 	}
 

@@ -786,3 +786,95 @@ func TestChildFailedMessage_DungTruocCon_GHE94BChuaDungGi(t *testing.T) {
 		t.Errorf("con chết giữa chừng (không do dừng trước khi chạy) giữ thông điệp cũ: %q", m)
 	}
 }
+
+// v0.1.44: cờ của `genh doctor` — --notify/--quiet/--test (trực canh).
+func TestParseDoctorFlags(t *testing.T) {
+	f, err := parseDoctorFlags([]string{"--notify", "--quiet", "--install-dir", "/i", "--port", "9443"})
+	if err != nil || !f.notify || !f.quiet || f.test || f.installDir != "/i" || f.port != 9443 {
+		t.Fatalf("--notify --quiet = %+v, %v", f, err)
+	}
+	f, err = parseDoctorFlags([]string{"--out", "x.zip"})
+	if err != nil || f.notify || f.out != "x.zip" {
+		t.Fatalf("--out = %+v, %v", f, err)
+	}
+	for _, bad := range [][]string{{"--test"}, {"thừa"}, {"--lạ"}} {
+		if _, err := parseDoctorFlags(bad); err == nil {
+			t.Errorf("%v phải lỗi", bad)
+		}
+	}
+	// Đúng cờ lịch 12 phút truyền (internal/autoupdate) parse được bằng bộ cờ của doctor.
+	line := autoupdate.WatchdogCrontabLine("/g/genh", "/g/log", autoupdate.WatchdogJob{InstallDir: "/i", Port: 9443})
+	fields := strings.Fields(line)
+	var args []string
+	for i, fd := range fields {
+		if fd == "/g/genh" {
+			for _, a := range fields[i+1:] {
+				if a == ">>" {
+					break
+				}
+				args = append(args, a)
+			}
+			break
+		}
+	}
+	if len(args) == 0 || args[0] != "doctor" {
+		t.Fatalf("dòng cron không gọi doctor: %q", line)
+	}
+	f, err = parseDoctorFlags(args[1:])
+	if err != nil || !f.notify || !f.quiet || f.installDir != "/i" || f.port != 9443 {
+		t.Fatalf("cờ lịch trực canh = %+v, %v", f, err)
+	}
+}
+
+// handle-requests: watchdog.json → xoá yêu cầu rồi `doctor --notify --test --quiet`;
+// yêu cầu gửi thử hỏng ⇒ bỏ, thoát 0.
+func TestHandleRequests_Watchdog(t *testing.T) {
+	f, err := parseDoctorFlags(append(handleRequestWatchdogArgs(), "--port", "8443", "--install-dir", "/i"))
+	if err != nil || !f.notify || !f.test || !f.quiet {
+		t.Fatalf("handle-requests → watchdog = %+v, %v", f, err)
+	}
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "deploy"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "deploy", "compose.yaml"), []byte("name: gen-harness\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GENH_COMPOSE_FILE", filepath.Join(dir, "deploy", "compose.yaml"))
+	if err := hostlink.EnsureDir(dir); err != nil {
+		t.Fatal(err)
+	}
+	// Yêu cầu hỏng: bỏ, xoá tệp, thoát 0.
+	_ = os.WriteFile(hostlink.WatchdogRequestPath(dir), []byte(`{"action":"xoá hết"}`), 0o666)
+	var code int
+	captureStd(t, func() { code = runHandleRequests([]string{"--quiet", "--install-dir", dir}) })
+	if code != 0 || hostlink.HasWatchdogRequest(dir) {
+		t.Fatalf("yêu cầu hỏng: thoát %d, còn tệp %v", code, hostlink.HasWatchdogRequest(dir))
+	}
+	// Yêu cầu đúng: xoá tệp rồi chạy trực canh (bản cài chưa có bí mật ⇒ lỗi cấu
+	// hình, state=error — KHÔNG gọi docker).
+	_ = os.WriteFile(hostlink.WatchdogRequestPath(dir), []byte(`{"schema":1,"action":"test"}`), 0o666)
+	captureStd(t, func() { code = runHandleRequests([]string{"--quiet", "--install-dir", dir}) })
+	if hostlink.HasWatchdogRequest(dir) {
+		t.Fatal("phải xoá run/request/watchdog.json trước khi làm")
+	}
+	st, err := hostlink.ReadWatchdogStatus(dir)
+	if err != nil || st.State != hostlink.WatchdogStateError || code != 1 {
+		t.Fatalf("chưa cài: muốn state=error, thoát 1 — được %+v, %v, %d", st, err, code)
+	}
+}
+
+func TestWatchdogStatusText(t *testing.T) {
+	txt := watchdogStatusText(autoupdate.WatchdogSchedule{Enabled: true, Mechanism: "cron", Detail: "crontab"},
+		hostlink.WatchdogStatus{LastRunAt: "2026-10-03T10:00:00Z", State: "issues", Telegram: "failed", TelegramErrorCode: "TELEGRAM_BOT_BLOCKED",
+			Incidents: []hostlink.WatchdogIncident{{Key: "api.down", Title: "Máy chủ ứng dụng (api) không chạy", Since: "2026-10-03T09:48:00Z"}}}, nil)
+	for _, want := range []string{"Trực canh máy chủ: BẬT (cron)", "Lần chạy gần nhất: 2026-10-03T10:00:00Z (issues)", "TELEGRAM_BOT_BLOCKED", "Sự cố đang mở (1):", "api.down"} {
+		if !strings.Contains(txt, want) {
+			t.Errorf("thiếu %q:\n%s", want, txt)
+		}
+	}
+	if txt := watchdogStatusText(autoupdate.WatchdogSchedule{Detail: "chưa bật"}, hostlink.WatchdogStatus{}, os.ErrNotExist); !strings.Contains(txt, "TẮT") || !strings.Contains(txt, "chưa có") {
+		t.Errorf("%s", txt)
+	}
+}

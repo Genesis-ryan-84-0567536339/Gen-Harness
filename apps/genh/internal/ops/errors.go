@@ -45,6 +45,7 @@ const (
 
 	// 96x — genh doctor.
 	ErrCodeDoctorReportFailed = "GH-E960"
+	ErrCodeWatchdogFailed     = "GH-E961" // v0.1.44 (F-6b): `genh doctor --notify` không chạy được (chưa cài/không thấy compose.yaml/không ghi được tệp trạng thái) — sự cố của máy chủ KHÔNG dùng mã này (đã báo qua Telegram/status)
 
 	// 97x — genh reset-setup.
 	ErrCodeResetSetupFailed    = "GH-E970"

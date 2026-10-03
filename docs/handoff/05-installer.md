@@ -139,8 +139,9 @@ Mọi bước **idempotent**: chạy lại `genh install` sau lỗi tiếp tục
 | `genh export --to <file>` / `genh import <file> [--yes]` | Gói hồ sơ Owner `.ghbundle` (CSDL + object + bí mật, mã hoá) — chuyển sang máy khác (v0.1.1 §1b/2b, `docs/reports/HANDOFF-v0.1.1.md`) |
 | `genh doctor` | Chẩn đoán: runtime, cổng, chứng chỉ, dung lượng, đồng hồ, kết nối kênh — xuất báo cáo zip để gửi hỗ trợ. **v0.1.37 (F-73):** kiểm thêm "Tự chạy lại khi bật máy" (linger + Docker bật cùng máy) kèm lệnh sửa, ghi `run/autostart-status.json` như `genh status` |
 | `genh reset-setup` | Sinh mã thiết lập mới (cần xác nhận) |
-| `genh stop` / `genh start` | |
-| `genh uninstall [--delete-data] [--yes]` | Gỡ container, lối tắt, PATH, lịch tự cập nhật/watcher/lịch bản sao ngoài máy. **v0.1.40 (F-12): mặc định GIỮ dữ liệu** (volume Docker còn nguyên — cài lại là thấy). `--delete-data` mới xoá dữ liệu: không có `--yes` thì phải gõ đúng `XOÁ DỮ LIỆU`; có `--yes` thì xoá luôn (CI). Không có bản sao ngoài máy thành công trong 7 ngày thì in cảnh báo đỏ "Chưa có bản sao ngoài máy gần đây". `--keep-data` vẫn nhận (không làm gì thêm — giữ tương thích script cũ). Không gỡ Docker/runtime |
+| `genh doctor --notify [--quiet] [--test]` · `genh watchdog enable\|disable\|status` | **v0.1.44 (F-6b) — Trực canh máy chủ** mỗi 12 phút: đo dịch vụ, tự khởi động lại dịch vụ chết, báo Telegram chống spam (xem mục "Trực canh máy chủ" dưới bảng) |
+| `genh stop` / `genh start` | **v0.1.44:** `genh stop` ghi `config/paused-by-owner.json` ⇒ trực canh máy chủ tạm nghỉ (không tự khởi động lại, không báo động); `genh start` (và update/install thành công) xoá |
+| `genh uninstall [--delete-data] [--yes]` | Gỡ container, lối tắt, PATH, lịch tự cập nhật/watcher/lịch bản sao ngoài máy/lịch trực canh (v0.1.44). **v0.1.40 (F-12): mặc định GIỮ dữ liệu** (volume Docker còn nguyên — cài lại là thấy). `--delete-data` mới xoá dữ liệu: không có `--yes` thì phải gõ đúng `XOÁ DỮ LIỆU`; có `--yes` thì xoá luôn (CI). Không có bản sao ngoài máy thành công trong 7 ngày thì in cảnh báo đỏ "Chưa có bản sao ngoài máy gần đây". `--keep-data` vẫn nhận (không làm gì thêm — giữ tương thích script cũ). Không gỡ Docker/runtime |
 | `genh offsite set [--allow-same-disk] [--no-run] <thư mục>` | **v0.1.40 (F-12) — Bản sao ngoài máy.** Chọn thư mục trên ổ USB/NAS đã mount: phải tuyệt đối, ĐÃ tồn tại (genh không bao giờ tạo đích gốc), ghi được, không nằm trong thư mục cài, và **khác ổ** với thư mục cài (Unix: thiết bị; Windows: tên ổ, UNC `\\NAS\share` coi là khác). Cùng ổ chỉ được khi Owner tự gõ `--allow-same-disk` (in cảnh báo "Bản sao nằm cùng ổ với máy chủ — hỏng ổ là mất cả hai"; Console không bao giờ đặt được). Lưu `<gốc cài>/config/offsite.json` (0600), bật lịch mỗi Chủ nhật ~05:30 rồi xuất bản đầu tiên ngay (trừ `--no-run`) |
 | `genh offsite run [--quiet]` | Xuất `<đích>/gen-harness-offsite/gen-harness-YYYYMMDDTHHMMSSZ.ghbundle` (mật khẩu = Khoá khôi phục `secrets/gh_offsite_key`, chỉ qua biến môi trường), **tự kiểm gói** bằng `gh.bundle verify` (giải mã + `pg_restore --list`) — lỗi thì xoá tệp, coi như CHƯA có bản sao (GH-EB03). Giữ 4 gói mới nhất đúng mẫu tên. Đích chưa mount/USB rút ra (thư mục rỗng nằm lại trên ổ chính) ⇒ GH-EB01 "Chưa thấy ổ USB/NAS", không ghi gì. Ghi `run/offsite-status.json` cho Console |
 | `genh offsite status` / `genh offsite disable` | In nơi lưu, bản sao gần nhất, lịch đang bật bằng cơ chế nào, mã nhận diện khoá (`key_id`) / tắt lịch (giữ cấu hình, đánh dấu tắt) |
@@ -215,6 +216,62 @@ Trước khi đụng dịch vụ, `cmd/genh` (`decideServiceUpdate`) quyết đ�
 **Mã lỗi mới:** **GH-E94A** (v0.1.37) — đang có lần cập nhật/khôi phục khác giữ khoá loại trừ (gõ tay). **GH-E94B** (v0.1.37) — bị dừng giữa chừng do tín hiệu (SIGINT/SIGTERM); không ghi `update-blocked.json` (trừ khi quay về chưa trọn), lịch đêm được thử lại. API đưa ra `interrupted` (`rolled_back` = chưa đụng gì/đã tự quay về; `resume` = máy tắt sau khi đổi CSDL, cần chạy tiếp) ⇒ chuông/dải/thẻ Sức khoẻ báo **vàng** "Cập nhật lên vX bị dừng giữa chừng", không phải "chưa thành công" đỏ. **GH-E948** — ổ đĩa không đủ chỗ (sau khi đã dọn ảnh cũ), dừng trước khi tải, chưa đụng gì. **GH-E949** — bản đã quay về bản cũ, lịch đêm không thử lại (chỉ dùng cho thông điệp/log, không phải lỗi thoát). GH-E941 nay nghĩa là "tải thất bại, chưa đụng gì"; GH-E945 = bản mới lỗi từ bước migrate trở đi và genh đã tự quay về bản cũ (khôi phục CSDL chỉ khi có migration chờ).
 
 **Ghi tệp trong `run/`:** qua tệp tạm tên ngẫu nhiên (`os.CreateTemp`, O_EXCL) + rename — `run/` để 0777 và bind-mount vào api, tên tạm cố định sẽ cho phép cài sẵn symlink để genh ghi đè tệp ngoài.
+
+### Trực canh máy chủ (v0.1.44, F-6b)
+
+Owner chỉ biết máy chủ "chết" khi tự mở Console. Từ v0.1.44 genh **tự trực canh** mỗi 12 phút và báo qua Telegram
+("Báo động & bản tin" trong Console) — chạy được cả khi api đã chết, vì genh đo trên máy chủ chứ không gọi api.
+
+- **Lịch** (`internal/autoupdate/watchdog*.go`, tên `gen-harness-watchdog`): systemd `--user` `.service` (Type=oneshot,
+  `Nice=10`, `TimeoutStartSec=300`, log nối `logs/watchdog.log`) + `.timer` (`OnBootSec=5min`, `OnUnitActiveSec=12min`,
+  `AccuracySec=1min`); fallback crontab `*/12 * * * *` với marker riêng `# gen-harness-watchdog (genh) — KHONG sua tay`;
+  macOS LaunchAgent `com.gen-harness.watchdog` `StartInterval=720`; Windows `schtasks /SC MINUTE /MO 12 /RL LIMITED`.
+  `genh install`/`genh update` bật **mặc định, idempotent, KHÔNG phụ thuộc `--no-auto-update`** và ghi cơ chế vào
+  `run/watchdog-status.json` ("schedule"); lỗi chỉ cảnh báo. `genh watchdog enable|disable|status` bật/tắt/xem (status in
+  cơ chế, lần chạy gần nhất, sự cố đang mở). `genh uninstall` gỡ lịch.
+- **Một lượt** = `genh doctor --notify --quiet` (`ops.RunWatchdog`, toàn lượt ≤ 4 phút, mỗi lệnh docker ≤ 30 giây; mã
+  thoát luôn 0 trừ lỗi cấu hình nghiêm trọng GH-E961 — timer không "đỏ" vì sự cố của máy chủ):
+  1. Khoá riêng `<gốc cài>/watchdog.lock` (lượt khác đang chạy ⇒ thoát 0). Khoá loại trừ `genh.lock` đang bị
+     update/restore/import giữ ⇒ `state=skipped_busy`, không đo, không gửi. Có `config/paused-by-owner.json`
+     (`genh stop` ghi, `genh start` và update/install thành công xoá) ⇒ `state=paused`, không tự khởi động lại, không báo.
+  2. **Đo** (chỉ docker + tệp, `/api/v1/ready` là phép thử sống duy nhất): `docker compose ps --all --format json` lỗi ⇒
+     `docker.down`; api không chạy, hoặc `/ready` không 200 ở 2 lần thử cách 10 giây ⇒ `api.down`; dịch vụ dài hạn
+     (trừ `migrate`) `exited/dead` hoặc `unhealthy` ⇒ `service.unhealthy:<svc>`; `update-status.json` `failed` trong 24 giờ
+     ⇒ `update.failed`; chỗ trống đĩa (gốc cài + DockerRootDir, như `genh update`) < ngưỡng tối thiểu ⇒ `disk.low` (ghi lại
+     `disk-status.json`); `redis-cli MGET gh:worker:heartbeat gh:bridge:heartbeat`: nhịp worker cũ > 10 phút ⇒
+     `worker.silent`, bridge chạy > 2 phút mà mất khoá ⇒ `bridge.silent`; bản sao lưu mới nhất (từ `api-health.json` còn
+     tươi, nếu không thì `docker compose exec -T worker python -m gh.backup list`) cũ hơn `backup_stale_limit_hours`
+     (mặc định 36 giờ) ⇒ `backup.stale`; `offsite-status.json` `configured` mà thành công gần nhất cũ hơn 7 ngày 12 giờ ⇒
+     `offsite.stale`, `state=failed` ⇒ `offsite.failed`. Không đo được ⇒ **không mở cũng không đóng** khoá đó.
+  3. **Tự khởi động lại**: `exited` ⇒ `docker compose up -d --no-deps <svc>`, `unhealthy` ⇒ `docker compose restart <svc>`;
+     tối đa **1 lần/dịch vụ/60 phút** (ghi trong state); tin nói rõ "Đã tự khởi động lại <svc> lúc HH:MM".
+  4. **Gộp sự cố phía api** từ `run/api-health.json` còn tươi (≤ 10 phút; cùng không gian khoá: `channel.down:zalo`,
+     `model.auth_expired:<id>`, …). Khoá trùng ⇒ **số đo của genh thắng**. `api-health.json` không tươi (api chết) ⇒ khoá
+     chỉ đến từ api **giữ nguyên** trạng thái cũ (không "đã ổn" giả).
+- **Chống spam** — state ở `<gốc cài>/config/watchdog-state.json` (0600, **không** trong `run/`):
+  `{schema, boot_id, last_run_at, incidents{key:{fingerprint,title,body,severity,first_seen,notified_at}}, resolved_pending[], restarts{svc:ts}}`.
+  Mỗi lượt tối đa **1 tin CẢNH BÁO** (gộp mọi sự cố mới hoặc đổi fingerprint) + **1 tin ĐÃ ỔN** (gộp sự cố đã báo mà nay
+  hết); sự cố còn mở không báo lại. Gửi lỗi/429 ⇒ không đánh dấu đã báo, lượt sau thử lại. `boot_id` đổi và lần chạy trước
+  cách > 30 phút ⇒ thêm tin "Máy chủ vừa khởi động lại (tắt khoảng X)".
+- **Tin Telegram**: văn bản thường, không emoji, không `parse_mode`, không bí mật: dòng 1 `Gen-Harness · CẢNH BÁO` /
+  `Gen-Harness · ĐÃ ỔN`, dòng 2 tên máy, mỗi sự cố `• <tiêu đề>: <nội dung>`, cuối `Mở Console: <public_url hoặc
+  https://localhost:<cổng>>/system?tab=storage&focus=health` + "(Tin tự động từ trực canh máy chủ — mọi thao tác Sếp xác
+  nhận trong Console.)". Không có nút/hành động trong Telegram, không nhận tin từ Owner, không đi qua bridge Zalo.
+- **Cấu hình Telegram** do api ghi `run/telegram.json` (`{schema:1, enabled, enc, briefing, reminders, updated_at}`), token
+  **mã hoá phong bì GH1** (`gh.crypto.encrypt`, AAD `telegram_notify`) — genh giải bằng `secrets/gh_master_key`
+  (`internal/notify`, vector cố định dùng chung pytest/go test). Chưa cấu hình/tắt ⇒ vẫn đo + ghi status
+  (`telegram=not_configured|disabled`); giải mã lỗi (khoá master đổi) ⇒ `telegram=key_mismatch`. Lỗi gửi (`*SendError`)
+  mang mã `TELEGRAM_TOKEN_REJECTED|CHAT_NOT_FOUND|BOT_BLOCKED|RATE_LIMITED|UNREACHABLE` và **không bao giờ chứa token**
+  (lỗi mạng `url.Error` mang URL có token ⇒ bọc lại + che). Biến `GENH_TELEGRAM_API_BASE` chỉ cho test/e2e.
+- **"Gửi thử"**: api ghi `run/request/watchdog.json` `{schema:1, action:"test"}` → watcher `genh handle-requests` (xoá tệp
+  trước) → `genh doctor --notify --test --quiet` gửi "Gen-Harness · Tin thử từ trực canh máy chủ", ghi `test:{at,ok,error_code}`.
+- **`run/watchdog-status.json`** (genh ghi nguyên tử mỗi lượt): `{schema:1, last_run_at, state: ok|issues|paused|skipped_busy|error,
+  incidents:[{key,severity,title,since}], telegram: ok|not_configured|disabled|failed|key_mismatch, telegram_error_code,
+  last_sent_at, schedule, test:{at,ok,error_code}|null}`. `logs/watchdog.log` xoay sang `.1` khi > 5 MB.
+- **Giới hạn**: máy chủ **tắt hẳn** (mất điện, treo cứng) thì không có gì để chạy trực canh — Owner chỉ nhận tin khi máy bật
+  lại (kèm "Máy chủ vừa khởi động lại"). Thiếu linger (Linux) ⇒ timer `--user` chỉ chạy khi đang đăng nhập (genh in cảnh
+  báo kèm lệnh `sudo loginctl enable-linger $USER`). Trực canh không giữ khoá loại trừ khi đo (chỉ thử rồi nhả ngay) để
+  không chặn lịch đêm.
 
 ## Phát hành
 

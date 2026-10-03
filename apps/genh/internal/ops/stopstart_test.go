@@ -3,6 +3,7 @@ package ops
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 
@@ -61,5 +62,40 @@ func TestRunStart_Fails_ReturnsOpError(t *testing.T) {
 	}
 	if opErr.Code != ErrCodeStartFailed {
 		t.Errorf("Code = %q, muốn %q", opErr.Code, ErrCodeStartFailed)
+	}
+}
+
+// v0.1.44 (F-6b): genh stop ghi đánh dấu "Owner chủ động dừng" (trực canh không
+// tự khởi động lại), genh start xoá; stop lỗi thì không ghi.
+func TestStopStart_DanhDauTamDung(t *testing.T) {
+	composePath := testComposePath(t, "")
+	env := testEnv(t, composePath)
+	bad := &fake.Runner{Responses: []fake.Response{{Match: fake.MatchArgsContain("stop"), Err: errors.New("boom")}}}
+	_ = RunStop(context.Background(), env, bad, &strings.Builder{})
+	if OwnerPaused(env.InstallDir) {
+		t.Fatal("stop lỗi không được ghi đánh dấu tạm dừng")
+	}
+	fr := &fake.Runner{Responses: []fake.Response{{Output: []byte("")}}}
+	if err := RunStop(context.Background(), env, fr, &strings.Builder{}); err != nil {
+		t.Fatal(err)
+	}
+	if !OwnerPaused(env.InstallDir) {
+		t.Fatal("genh stop phải ghi config/paused-by-owner.json")
+	}
+	b, err := os.ReadFile(OwnerPausePath(env.InstallDir))
+	if err != nil || !strings.Contains(string(b), `"at"`) {
+		t.Fatalf("nội dung %s, %v", b, err)
+	}
+	if fi, _ := os.Stat(OwnerPausePath(env.InstallDir)); fi.Mode().Perm() != 0o600 {
+		t.Fatalf("quyền %v, muốn 0600", fi.Mode().Perm())
+	}
+	if err := RunStart(context.Background(), env, fr, &strings.Builder{}); err != nil {
+		t.Fatal(err)
+	}
+	if OwnerPaused(env.InstallDir) {
+		t.Fatal("genh start phải xoá đánh dấu tạm dừng")
+	}
+	if err := ClearOwnerPause(env.InstallDir); err != nil {
+		t.Fatalf("xoá lần hai không lỗi: %v", err)
 	}
 }

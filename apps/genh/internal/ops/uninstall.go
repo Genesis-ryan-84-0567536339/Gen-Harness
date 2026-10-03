@@ -30,6 +30,8 @@ type UninstallOptions struct {
 	AutoApprove bool
 	// Offsite gỡ lịch tuần bản sao ngoài máy (nil = lịch thật theo hệ điều hành).
 	Offsite OffsiteScheduler
+	// Watchdog gỡ lịch trực canh máy chủ (v0.1.44; nil = lịch thật theo hệ điều hành).
+	Watchdog WatchdogScheduler
 	// Now cho test (nil = time.Now) — để cảnh báo "Chưa có bản sao ngoài máy gần đây".
 	Now func() time.Time
 }
@@ -56,7 +58,7 @@ func confirmDeletePhrase(in io.Reader) bool {
 
 // RunUninstall gỡ container (+ volume CHỈ khi --delete-data, v0.1.40) + lối tắt
 // desktop + dòng PATH mà install.sh/install.ps1 đã thêm + lịch tuần bản sao
-// ngoài máy.
+// ngoài máy + lịch trực canh máy chủ (v0.1.44).
 //
 // GIỚI HẠN QUAN TRỌNG (đọc kỹ trước khi coi lệnh này "gỡ sạch"): tài liệu
 // nói "Gỡ sạch container, runtime do genh cài, lối tắt, PATH". internal/
@@ -160,6 +162,19 @@ func RunUninstall(ctx context.Context, env *Env, opts UninstallOptions, runner d
 		_, _ = fmt.Fprintln(out, msg)
 	}
 	ocancel()
+
+	// Gỡ lịch trực canh máy chủ (v0.1.44) — không để lịch 12 phút gọi bản cài đã gỡ.
+	watchdog := opts.Watchdog
+	if watchdog == nil {
+		watchdog = NewWatchdogScheduler(env)
+	}
+	wctx, wcancel := context.WithTimeout(ctx, 20*time.Second)
+	if msg, err := watchdog.Disable(wctx); err != nil {
+		_, _ = fmt.Fprintln(out, "Không gỡ được lịch trực canh máy chủ: "+err.Error())
+	} else {
+		_, _ = fmt.Fprintln(out, msg)
+	}
+	wcancel()
 
 	if path, err := browseropen.ShortcutPath(); err == nil {
 		if rmErr := os.Remove(path); rmErr == nil {
