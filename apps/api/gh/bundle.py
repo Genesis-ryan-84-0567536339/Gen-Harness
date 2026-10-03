@@ -149,6 +149,9 @@ REENCRYPT_TARGETS: list[ReencryptTarget] = [
     # lượt nhập (phiên chỉ là cookie, đăng nhập lại là lấy lại được).
     ReencryptTarget("core.social_accounts", "id", "state_enc", _social_state_aad, extra_cols=("org_id",),
                     on_fail="needs_login"),
+    # v0.1.44 (F-8c): token bot Telegram "Báo động & bản tin" — gh/telegram/service.py::TOKEN_AAD. Sau nhập gói,
+    # lifespan api đồng bộ lại run/telegram.json (AAD b"telegram_notify") bằng khoá master mới.
+    ReencryptTarget("ops.notify_channels", "org_id", "token_enc", b"telegram_token"),
 ]
 
 SOCIAL_KEY_CHANGED_REASON = "key_changed"

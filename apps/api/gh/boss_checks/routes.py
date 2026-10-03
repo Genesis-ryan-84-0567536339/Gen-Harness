@@ -1,7 +1,8 @@
 """/boss-checks — kiểm thật từng dòng trang "Việc Sếp cần làm" (v0.1.39). CHỈ Owner (+ `system.manage`).
 
 - `GET /boss-checks` — chốt các lượt đọc Facebook đang chờ rồi trả {rows, results, required_done, required_total}.
-- `POST /boss-checks/{key}/run` — chạy một mục kiểm (`hub`, `facebook`, `agy_call`, `agy_switch`, `claude_call`, `jev`)
+- `POST /boss-checks/{key}/run` — chạy một mục kiểm (`hub`, `facebook`, `agy_call`, `agy_switch`, `claude_call`, `jev`,
+  `telegram` — v0.1.44, Gửi thử như POST /notify/telegram/test)
   và GHI kết quả. Lỗi nghiệp vụ (chưa cấu hình, 409/429 từ dịch vụ, gọi thử lỗi) vẫn 200 với `status: 'fail'` + mã lỗi
   thống nhất; chỉ 401/403/422/423 mới ném. `hub` và `agy_switch` cần phiên PIN (423 → web hỏi PIN rồi gửi lại).
 - Phản hồi cho Owner được kèm email ĐẦY ĐỦ (`account`); CSDL chỉ lưu email đã che.
@@ -42,7 +43,7 @@ NOT_READY = {
             "Chưa thêm Jev — mục này không bắt buộc; thêm khoá Jev ở Cài đặt › Bộ não AI nếu Sếp cần"),
 }
 TRANSIENT_CODES = frozenset({"SOCIAL_BUSY", "SOCIAL_RATE_LIMIT", "PROBE_RATE_LIMITED", "HUB_RATE_LIMITED",
-                             "CLI_LOGIN_IN_PROGRESS"})
+                             "CLI_LOGIN_IN_PROGRESS", "TELEGRAM_RATE_LIMITED"})
 SOCIAL_NO_ACCOUNT_MSG = "Chưa có tài khoản Facebook — mở trang Tài khoản mạng xã hội để thêm và đăng nhập"
 
 
@@ -78,6 +79,11 @@ async def run_check(key: str, request: Request, body: BossRunIn | None = None,
         if key == "agy_switch":
             assert body.profile_id is not None
             return await _run_switch(request, db, user, body.profile_id)
+        if key == "telegram":
+            # v0.1.44 (F-8c): cùng hàm với POST /notify/telegram/test (ghi bản kiểm + yêu cầu genh gửi thử).
+            from gh.telegram.routes import run_test as telegram_test
+
+            return await telegram_test(request, db, user)
         return await _run_call(request, db, user, key)
     except ApiError as e:
         if e.status in RAISE_STATUSES:

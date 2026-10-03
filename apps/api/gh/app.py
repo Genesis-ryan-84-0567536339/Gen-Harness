@@ -61,6 +61,8 @@ from gh.system_api.offsite import router as offsite_router
 from gh.system_api.org import router as org_router
 from gh.system_api.routes import router as system_router
 from gh.system_api.update import router as update_router
+from gh.telegram import service as telegram_service
+from gh.telegram.routes import router as telegram_router
 
 log = logging.getLogger("gh.app")
 
@@ -158,12 +160,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         result = await bootstrap(db)
         await db.commit()
     app.state.org_id = result.org_id
+    # v0.1.44 (F-8c): đồng bộ run/telegram.json cho Trực canh máy chủ (sau nhập gói/đổi khoá vẫn khớp) — best-effort.
+    await telegram_service.sync_host_file(sessionmaker())
     app.state.console_ready = None
     app.state.redis = Redis.from_url(s.redis_url, decode_responses=False)
     app.state.bus = EventBus(app.state.redis, s.stream_maxlen)
     # Transport HTTP tiêm được cho McpClient (gh.chassis.mcp_client) — None = httpx thật; test thay bằng
     # httpx.MockTransport trên chính app.state sau khi app dựng xong (cùng cách gh.providers.router làm).
     app.state.mcp_transport = None
+    # v0.1.44 (F-8c): transport HTTP tiêm được cho Telegram Bot API (gh.telegram.client) — cùng cách mcp_transport.
+    app.state.telegram_transport = None
     app.state.plugins = await build_plugin_manager(app.state.bus, app.state.redis)
     app.state.plugins.start_control_listener()
     sm = sessionmaker()
@@ -224,7 +230,7 @@ def create_app(*, with_lifespan: bool = True, expose_docs: bool | None = None) -
     for r in (auth_router, account_router, users_router, setup_router, shell_router, audit_router, plugins_router,
              mcp_router, data_router, system_router, update_router, backups_router, offsite_router, org_router,
              gen_router, notifications_router, triage_router, hub_router, social_router, health_router,
-             boss_checks_router):
+             boss_checks_router, telegram_router):
         app.include_router(r, prefix="/api/v1")
     for r in biz.routers():
         app.include_router(r, prefix="/api/v1")
@@ -253,6 +259,8 @@ _LOG_REDACT: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"((?:access_token|refresh_token|id_token|token|api[_-]?key|apikey|password|passwd|secret|"
                 r"client_secret)\s*[=:]\s*['\"]?)[^\s&'\",;}]+", re.I), r"\1***"),
     (re.compile(r"([?&]code=)[^\s&'\"]+"), r"\1***"),                                            # mã OAuth
+    # v0.1.44 (F-8c): token bot Telegram (`123456789:AA…`, cả dạng `/bot<token>/` trong URL Bot API).
+    (re.compile(r"(?:bot)?\d{5,12}:[A-Za-z0-9_-]{30,}"), "***"),
 )
 
 
@@ -287,8 +295,31 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(out, ensure_ascii=False, default=str)
 
 
+class RedactFilter(logging.Filter):
+    """v0.1.44 (F-8c): che bí mật (`_LOG_REDACT` — gồm token bot Telegram) trong thông điệp và traceback của MỌI bản
+    ghi, kể cả formatter dev (dạng chữ) — JsonFormatter vẫn che thêm mọi trường chuỗi."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            msg = record.getMessage()
+        except Exception:  # noqa: BLE001 — thông điệp hỏng: để formatter tự báo
+            return True
+        clean = _redact_log(msg)
+        if clean != msg:
+            record.msg, record.args = clean, ()
+        if record.exc_info and record.exc_info[0] is not None and not record.exc_text:
+            record.exc_text = _redact_log(logging.Formatter().formatException(record.exc_info))
+        elif record.exc_text:
+            record.exc_text = _redact_log(record.exc_text)
+        return True
+
+
 def configure_logging() -> None:
     handler = logging.StreamHandler()
     handler.setFormatter(JsonFormatter() if get_settings().is_production else logging.Formatter(
         "%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    handler.addFilter(RedactFilter())
     logging.basicConfig(level=logging.INFO, handlers=[handler], force=True)
+    # httpx ghi URL đầy đủ ở mức INFO — URL Bot API Telegram chứa token (`/bot<token>/sendMessage`).
+    for name in ("httpx", "httpcore"):
+        logging.getLogger(name).setLevel(logging.WARNING)

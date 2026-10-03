@@ -12,6 +12,8 @@ việc nền — gh.providers.router F-86), rồi ghi một hội thoại "Bản
 - Máy tắt cả buổi (now − mốc > 3 giờ) ⇒ bỏ, không gửi bản tin cũ.
 - Bước đầu tiên của tin luôn là `{"kind": "tool", "name": "briefing.sources"}` — nội dung có chữ của khách/Kho, để
   `gh.gen.engine._history_tainted` coi hội thoại này là có nội dung ngoài (agy không đọc, F-22).
+- v0.1.44 (F-8c): cùng lúc xếp MỘT tin vào hộp thư đi Telegram của tổ chức (gh.telegram.service.enqueue) — văn bản
+  thường, kèm "Mở Console" và câu "mọi thao tác Sếp xác nhận trong Console".
 - Mục Kho: không có hàm sẵn trong gh.auth.service để dựng CurrentUser của Owner ngoài phiên đăng nhập ⇒ không gọi
   `gh.hub_link.service.call_kho`; chỉ ghi trạng thái lần đọc Kho gần nhất + gợi ý hỏi Gen.
 """
@@ -34,6 +36,7 @@ from gh.gen import store
 from gh.gen.engine import wrap_untrusted
 from gh.providers.clients import Message
 from gh.providers.router import ModelRouter, background_sources, has_api_source
+from gh.telegram import service as telegram
 
 log = logging.getLogger("gh.gen.briefing")
 
@@ -327,6 +330,10 @@ async def _one_org(sm: async_sessionmaker[AsyncSession], redis: Any, router: Mod
         await actionlog.record(db, org_id=org, actor_type="system", actor_id="system:worker", action=JOB,
                                detail={"slot": slot.at.isoformat(), "counts": counts,
                                        "summary_source": content["summary_source"]})
+        # v0.1.44 (F-8c): MỘT tin Telegram mỗi tổ chức (không mỗi Owner) — cùng transaction với cổng khung giờ;
+        # chỉ khi Sếp đã nối Telegram và bật bản tin. Worker `telegram_flush` gửi (không qua bridge/Zalo).
+        await telegram.enqueue(db, org, "briefing", telegram.briefing_text(slot.label, summary, sections),
+                               dedupe_key=f"briefing:{slot.at.isoformat()}")
         await db.commit()
     return "sent"
 

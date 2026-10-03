@@ -90,6 +90,8 @@ ACTIONS = {
     "ai.budget_exceeded": "Xem chi phí AI",
     # v0.1.41: việc nền không còn nguồn AI dùng được — do gói bản tin/nguồn nền mở/đóng, chỉ khai nhãn ở đây.
     "ai.background_no_source": "Mở Bộ não AI",
+    # v0.1.44 (F-8c): hộp thư đi Telegram hỏng vì cấu hình — do gh.telegram.service mở/đóng.
+    "telegram.failed": "Mở cấu hình Telegram",
 }
 #: Nhãn cho người KHÔNG phải Owner khi nút ở nhãn gốc chỉ Owner có (vd "Chọn nơi lưu" — Manager không có nút đó).
 NON_OWNER_ACTIONS = {
