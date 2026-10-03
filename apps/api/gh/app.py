@@ -16,6 +16,7 @@ from fastapi.exceptions import RequestValidationError
 from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from gh import __version__, biz, health, realtime
 from gh.agents_api.routes import router as agents_router
@@ -37,15 +38,17 @@ from gh.errors import (
     JsonResponse,
     api_error_handler,
     db_error_handler,
+    http_error_handler,
     infra_error_handler,
     os_error_handler,
+    request_id_var,
     unhandled_error_handler,
     validation_error_handler,
 )
 from gh.gen.routes import router as gen_router
 from gh.hub_link.routes import router as hub_router
 from gh.mcp_api.routes import router as mcp_router
-from gh.middleware import ActionLogGuard, SameOriginFrame, SessionCookieRenewal, SetupGate
+from gh.middleware import ActionLogGuard, RequestIdMiddleware, SameOriginFrame, SessionCookieRenewal, SetupGate
 from gh.notifications import router as notifications_router
 from gh.plugins_api.routes import router as plugins_router
 from gh.providers import cli as climod
@@ -56,6 +59,8 @@ from gh.shell.routes import router as shell_router
 from gh.social import service as social_service
 from gh.social.routes import router as social_router
 from gh.system_api.backups import router as backups_router
+from gh.system_api.client_errors import router as client_errors_router
+from gh.system_api.diagnostics import router as diagnostics_router
 from gh.system_api.health import router as health_router
 from gh.system_api.offsite import router as offsite_router
 from gh.system_api.org import router as org_router
@@ -220,6 +225,8 @@ def create_app(*, with_lifespan: bool = True, expose_docs: bool | None = None) -
                   openapi_url="/api/v1/openapi.json" if expose else None, redoc_url=None)
     app.add_exception_handler(ApiError, api_error_handler)
     app.add_exception_handler(RequestValidationError, validation_error_handler)
+    # v0.1.44 (F-4b): 404/405 của router cũng là problem+json (có request_id), không {"detail": "Not Found"}.
+    app.add_exception_handler(StarletteHTTPException, http_error_handler)
     app.add_exception_handler(DBAPIError, db_error_handler)
     # Starlette chọn handler theo MRO: lớp con mất kết nối (ConnectionError/TimeoutError/redis) thắng OSError chung.
     for exc_cls in INFRA_ERRORS:
@@ -230,7 +237,7 @@ def create_app(*, with_lifespan: bool = True, expose_docs: bool | None = None) -
     for r in (auth_router, account_router, users_router, setup_router, shell_router, audit_router, plugins_router,
              mcp_router, data_router, system_router, update_router, backups_router, offsite_router, org_router,
              gen_router, notifications_router, triage_router, hub_router, social_router, health_router,
-             boss_checks_router, telegram_router):
+             boss_checks_router, telegram_router, diagnostics_router, client_errors_router):
         app.include_router(r, prefix="/api/v1")
     for r in biz.routers():
         app.include_router(r, prefix="/api/v1")
@@ -242,7 +249,9 @@ def create_app(*, with_lifespan: bool = True, expose_docs: bool | None = None) -
     app.add_middleware(SessionCookieRenewal)
     app.add_middleware(ActionLogGuard)
     app.add_middleware(SetupGate)
-    app.add_middleware(SameOriginFrame)  # ngoài cùng: cả 428 của SetupGate cũng mang header khung cùng gốc
+    app.add_middleware(SameOriginFrame)  # cả 428 của SetupGate cũng mang header khung cùng gốc
+    # v0.1.44 (F-4b) NGOÀI CÙNG: Mã yêu cầu cho mọi phản hồi (kể cả 428/423/500) + lưới 500 problem+json.
+    app.add_middleware(RequestIdMiddleware)
     return app
 
 
@@ -270,6 +279,11 @@ def _redact_log(text: str) -> str:
     return text
 
 
+def _record_request_id(record: logging.LogRecord) -> str | None:
+    rid = getattr(record, "request_id", None)
+    return rid if isinstance(rid, str) and rid not in ("", "-") else request_id_var.get()
+
+
 class JsonFormatter(logging.Formatter):
     """v0.1.36 (F-4): một dòng JSON mỗi bản ghi log (production) — tra được theo thời điểm/mã lỗi.
 
@@ -279,7 +293,9 @@ class JsonFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         ts = datetime.fromtimestamp(record.created, UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
-        out: dict[str, Any] = {"ts": ts, "level": record.levelname, "logger": record.name, "msg": record.getMessage()}
+        out: dict[str, Any] = {"ts": ts, "level": record.levelname, "logger": record.name, "msg": record.getMessage(),
+                               # v0.1.44 (F-4b): mọi dòng có khoá request_id (null ngoài request).
+                               "request_id": _record_request_id(record)}
         if record.exc_info and record.exc_info[0] is not None:
             out["exc"] = self.formatException(record.exc_info)
         elif record.exc_text:
@@ -293,6 +309,16 @@ class JsonFormatter(logging.Formatter):
             if isinstance(v, str) and k not in ("ts", "level", "logger"):
                 out[k] = _redact_log(v)
         return json.dumps(out, ensure_ascii=False, default=str)
+
+
+class RequestIdFilter(logging.Filter):
+    """v0.1.44 (F-4b): gắn `record.request_id` (Mã yêu cầu của request đang xử lý, từ contextvar) — đặt trên MỌI
+    handler; formatter dev in `[rid]`, JsonFormatter in khoá `request_id`."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if not getattr(record, "request_id", None):
+            record.request_id = request_id_var.get() or "-"
+        return True
 
 
 class RedactFilter(logging.Filter):
@@ -317,7 +343,8 @@ class RedactFilter(logging.Filter):
 def configure_logging() -> None:
     handler = logging.StreamHandler()
     handler.setFormatter(JsonFormatter() if get_settings().is_production else logging.Formatter(
-        "%(asctime)s %(levelname)s %(name)s: %(message)s"))
+        "%(asctime)s %(levelname)s %(name)s [%(request_id)s]: %(message)s"))
+    handler.addFilter(RequestIdFilter())
     handler.addFilter(RedactFilter())
     logging.basicConfig(level=logging.INFO, handlers=[handler], force=True)
     # httpx ghi URL đầy đủ ở mức INFO — URL Bot API Telegram chứa token (`/bot<token>/sendMessage`).

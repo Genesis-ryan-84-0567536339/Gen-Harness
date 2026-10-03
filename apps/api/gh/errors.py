@@ -3,6 +3,7 @@
 import errno
 import logging
 import socket
+from contextvars import ContextVar
 from typing import Any
 from uuid import uuid4
 
@@ -14,6 +15,10 @@ from redis import exceptions as redis_exc
 from sqlalchemy.exc import InterfaceError, OperationalError
 
 log = logging.getLogger("gh.errors")
+
+#: v0.1.44 (F-4b): Mã yêu cầu (X-Request-ID) của request đang xử lý — gh.middleware.RequestIdMiddleware đặt; mọi
+#: problem+json (`_body`) và mọi dòng log (gh.app.RequestIdFilter / JsonFormatter) mang giá trị này.
+request_id_var: ContextVar[str | None] = ContextVar("gh_request_id", default=None)
 
 #: v0.1.35 (F-43): lớp lỗi "mất kết nối hạ tầng" → 503 SERVICE_UNAVAILABLE. redis-py có ConnectionError/TimeoutError
 #: riêng (không phải lớp con OSError) nên phải liệt kê thêm. `socket.gaierror` (lớp con OSError trực tiếp, không phải
@@ -105,8 +110,12 @@ def _body(status: int, code: str, title: str, detail: Any, extra: dict[str, Any]
                     type(detail).__name__)
         extra.setdefault("context", detail)
         detail = None
-    return {"type": f"https://gen-harness.local/errors/{code.lower()}", "title": title,
+    body = {"type": f"https://gen-harness.local/errors/{code.lower()}", "title": title,
             "status": status, "code": code, "detail": detail, **extra}
+    rid = request_id_var.get()
+    if rid and "request_id" not in body:
+        body["request_id"] = rid
+    return body
 
 
 def _problem(status: int, code: str, title: str, detail: str | None = None, **extra: Any) -> JsonResponse:
@@ -190,6 +199,20 @@ async def unhandled_error_handler(request: Request, exc: Exception) -> JsonRespo
     `Exception` nên Starlette gắn vào ServerErrorMiddleware: phản hồi là problem+json 500 INTERNAL kèm `error_id`,
     stack trace chỉ nằm trong log server."""
     return _internal(request, f"Lỗi không mong đợi ({type(exc).__name__})")
+
+
+#: v0.1.44 (F-4b): lỗi HTTP của Starlette (route không tồn tại, sai phương thức) cũng là problem+json có request_id.
+_HTTP_CODES = {404: ("NOT_FOUND", "Đường dẫn không tồn tại"),
+               405: ("METHOD_NOT_ALLOWED", "Phương thức không được hỗ trợ cho đường dẫn này")}
+
+
+async def http_error_handler(_: Request, exc: Exception) -> JsonResponse:
+    from starlette.exceptions import HTTPException
+
+    assert isinstance(exc, HTTPException)
+    code, title = _HTTP_CODES.get(exc.status_code, (f"HTTP_{exc.status_code}", "Yêu cầu không hợp lệ"))
+    return JsonResponse(_body(exc.status_code, code, title, None, {}), status_code=exc.status_code,
+                        media_type="application/problem+json", headers=dict(exc.headers or {}))
 
 
 async def validation_error_handler(_: Request, exc: Exception) -> JsonResponse:
