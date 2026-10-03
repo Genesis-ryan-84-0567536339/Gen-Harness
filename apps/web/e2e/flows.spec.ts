@@ -581,7 +581,9 @@ test.describe('giai đoạn 4: Agent + API & Model', () => {
     await expect(page.getByRole('heading', { name: 'Danh tính Agent', level: 2 })).toBeVisible();
     const tlsCard = page.getByRole('listitem', { name: 'Trợ lý thương mại', exact: true });
     await expect(tlsCard).toBeVisible();
-    await expect(tlsCard).toContainText('tự trị 4');
+    // v0.1.43 (F-30): viên tự trị hiện nhãn 3 mức (mức 4 → "Soạn sẵn chờ duyệt").
+    await expect(tlsCard).toContainText('Soạn sẵn chờ duyệt');
+    await expect(tlsCard).not.toContainText('tự trị 4');
 
     // Bé Heo — mẫu tắt mặc định (spec E13) — vẫn liệt kê, chỉ mờ đi.
     const mascotCard = page.locator('.ag-card', { hasText: 'Bé Heo' });

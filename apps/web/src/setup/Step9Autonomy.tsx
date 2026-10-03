@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { AUTONOMY_LEVELS } from '@gen-harness/contracts';
+import { AUTONOMY_CHOICES } from '@gen-harness/contracts';
 import { Icon, Segmented } from '@gen-harness/ui';
 import { api } from '../lib/api';
 import { StepFrame } from './StepFrame';
 import { describeError, type StepProps } from './types';
 
-const LEVEL_OPTIONS = [3, 4].map((n) => ({ value: String(n), label: `${n} · ${AUTONOMY_LEVELS[n]}` }));
+// F-30: nhãn 3 mức (không tiền tố số); giá trị gửi vẫn là 3/4 trên thang 0–6.
+const LEVEL_OPTIONS = AUTONOMY_CHOICES.filter((c) => c.level === 3 || c.level === 4).map((c) => ({ value: String(c.level), label: c.label }));
 
 /** Bước 9 — Tự trị & ranh giới: mức 3 hoặc 4 cho agent vừa tạo, xác nhận đã đọc ranh giới khoá cứng (không tắt được). */
 export function Step9Autonomy({ meta, description, onBack, onSaved, formRef, onSkip, skipping, skipError }: StepProps) {
@@ -45,7 +46,7 @@ export function Step9Autonomy({ meta, description, onBack, onSaved, formRef, onS
       <div className="setup-section">
         <div className="setup-section__title">Mức tự trị của agent</div>
         <Segmented label="Mức tự trị" value={level} onChange={setLevel} options={LEVEL_OPTIONS} />
-        <p className="muted-note">Mức 4: agent soạn sẵn, Sếp duyệt rồi mới gửi. Mức 3: agent chỉ gợi ý. Đổi lại bất cứ lúc nào ở màn Danh tính Agent.</p>
+        <p className="muted-note">Soạn sẵn chờ duyệt: agent soạn sẵn, Sếp duyệt rồi mới gửi. Gợi ý: agent chỉ gợi ý việc nên làm. Đổi lại bất cứ lúc nào ở màn Danh tính Agent.</p>
       </div>
       <div className="setup-section">
         <div className="setup-section__title">Ranh giới khoá cứng — không tắt được</div>
