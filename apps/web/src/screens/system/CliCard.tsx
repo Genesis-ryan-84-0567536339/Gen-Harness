@@ -9,7 +9,7 @@ import { queryClient } from '../../lib/queryClient';
 import { toast } from '../../lib/toast';
 import { useNow } from '../../lib/useNow';
 import { errorText } from '../../lib/errorText';
-import { CardError, InlineError, SkeletonLines, StateChip } from '../common';
+import { CardError, InlineError, PinHint, SkeletonLines, StateChip } from '../common';
 import { ConnectionStatusPill } from '../connections/ConnectionStatusPill';
 import { cliConnStatus } from '../connections/connectionsModel';
 import {
@@ -24,6 +24,9 @@ import {
   credTone,
 } from './systemModel';
 import { useCliLogin, type CliLogin } from './useCliLogin';
+
+/** v0.1.45 (F-20): thêm tài khoản CLI (POST /cli/login) cần phiên PIN `cli.switch_account`. */
+const CLI_ADD_PIN_TEXT = 'Thêm tài khoản cần mã PIN';
 
 export function CliLoginPanel({ login }: { login: CliLogin }) {
   const [code, setCode] = useState('');
@@ -224,6 +227,10 @@ export function CliCard({ canManage, showCredentials = true, kind = 'antigravity
               </Button>
             ) : null}
           </div>
+          {canManage && !login.active ? (
+            // v0.1.45 (F-20): bắt đầu đăng nhập (thêm tài khoản) cần phiên PIN `cli.switch_account` — hộp PIN tự mở khi gặp 423.
+            <PinHint text={CLI_ADD_PIN_TEXT} title={CLI_ADD_PIN_TEXT} />
+          ) : null}
           </>
         )}
         <CliLoginPanel login={login} />
@@ -328,7 +335,7 @@ function ProfilesDialog({
       onClose={onClose}
       width={480}
       title={`Đổi tài khoản ${txt.account} cho AI`}
-      kicker="Đổi hoặc xoá tài khoản cần mã PIN"
+      kicker="Thêm, đổi hoặc xoá tài khoản cần mã PIN"
       actions={
         <>
           <Button variant="secondary" onClick={onClose}>

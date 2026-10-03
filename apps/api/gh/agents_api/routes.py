@@ -35,7 +35,7 @@ from gh.chassis import actionlog
 from gh.chassis.policy import DEFAULT_AUTONOMY
 from gh.data.common import iso
 from gh.db import DB
-from gh.errors import conflict, field_errors, not_found
+from gh.errors import conflict, field_errors, not_found, pin_required
 from gh.providers.router import AGY_OWNER_ONLY_REASON
 
 router = APIRouter(prefix="/agents", tags=["agents"])
@@ -416,17 +416,49 @@ async def get_agent(agent_id: uuid.UUID, user: service.CurrentUser = Depends(REA
 _PATCH_COLS = ("name", "role_desc", "voice", "speak_when", "template", "autonomy_level", "addressing", "forbidden",
               "limits")
 
+# v0.1.45 (F-20): các trường "rào chắn" của agent — đổi giá trị (hạ hoặc nâng rào) cần phiên PIN `policy.change`.
+GUARDED_FIELDS = ("autonomy_level", "forbidden", "limits", "channel_scopes")
+
+
+def _norm_forbidden(items: list[str] | None) -> list[str]:
+    """Chuẩn hoá danh sách điều cấm: bỏ khoảng trắng hai đầu, bỏ dòng rỗng (dùng cả khi so lẫn khi lưu)."""
+    return [s.strip() for s in (items or []) if s and s.strip()]
+
+
+async def _barrier_changed(db: AsyncSession, cur: Any, body: "AgentPatch") -> bool:
+    """Có trường rào chắn nào được gửi (khác None) VÀ khác giá trị đang lưu không. Gửi lại đúng giá trị cũ ⇒ False."""
+    sent = body.model_dump(exclude_unset=True)
+    if sent.get("autonomy_level") is not None and int(sent["autonomy_level"]) != int(cur.autonomy_level):
+        return True
+    if body.forbidden is not None and _norm_forbidden(body.forbidden) != _norm_forbidden(list(cur.forbidden or [])):
+        return True
+    if body.limits is not None and {**DEFAULT_LIMITS, **(cur.limits or {})} != {**DEFAULT_LIMITS, **body.limits}:
+        return True
+    if body.channel_scopes is not None:
+        have = {(s["channel_id"], s["group_id"]) for s in await _scopes_of(db, cur.id)}
+        want = {(str(s.channel_id), str(s.group_id) if s.group_id else None) for s in body.channel_scopes}
+        if have != want:
+            return True
+    return False
+
 
 @router.patch("/{agent_id}")
 async def patch_agent(agent_id: uuid.UUID, body: AgentPatch, user: service.CurrentUser = Depends(MANAGE),
                       db: AsyncSession = DB) -> dict[str, Any]:
+    """Sửa agent. v0.1.45 (F-20): PIN policy.change chỉ khi đổi autonomy_level/forbidden/limits/channel_scopes
+    (khác giá trị đang lưu) — đổi tên, mô tả, giọng, lúc lên tiếng, mẫu, xưng hô không bao giờ đòi PIN; gửi lại đúng
+    giá trị cũ của trường rào chắn cũng không đòi PIN (không hạ rào). Thứ tự: 403 → 404 → 422 → 423."""
     cur = (await db.execute(text(AGENT_SELECT + " WHERE id = :i AND org_id = :o"),
                             {"i": agent_id, "o": user.org_id})).one_or_none()
     if cur is None:
         raise not_found("Agent")
     if body.channel_scopes is not None:
         await _validate_scopes(db, user.org_id, body.channel_scopes)
+    if not user.pin_active() and await _barrier_changed(db, cur, body):
+        raise pin_required()
     fields = body.model_dump(exclude_unset=True, exclude={"channel_scopes"})
+    if fields.get("forbidden") is not None:
+        fields["forbidden"] = _norm_forbidden(fields["forbidden"])
     changes: dict[str, Any] = {}
     for k in _PATCH_COLS:
         if k not in fields or fields[k] is None:

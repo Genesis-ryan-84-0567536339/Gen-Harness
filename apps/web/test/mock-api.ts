@@ -855,6 +855,8 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     const sid = cookies.gh_session;
     const session = sid ? sessions.get(sid) : undefined;
     const user = session ? users.find((u) => u.id === session.userId) : undefined;
+    // v0.1.45 (F-20): Hướng dẫn bước 9/10 sau Hoàn tất cần phiên PIN (như API thật).
+    const setupNeedPin = () => !session?.pinUntil || session.pinUntil < Date.now();
     const login = (u: User) => {
       const id = randomUUID();
       const now = new Date().toISOString();
@@ -963,6 +965,8 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
           }
           if (setup.steps[7].status !== 'done') return problem(res, 409, 'STEP_INCOMPLETE', 'Cần hoàn thành bước 8 trước');
           if (!body.ack_boundaries) return problem(res, 422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors: { ack_boundaries: 'Cần xác nhận đã đọc ranh giới' } });
+          // v0.1.45 (F-20): như API — sau Hoàn tất đổi mức tự trị cần phiên PIN `policy.change` (đang thiết lập thì không).
+          if (setup.finished && setupNeedPin()) return problem(res, 423, 'PIN_REQUIRED', 'Thao tác này cần nhập mã PIN', { detail: { operation: 'policy.change' } });
           advance(9, 'done');
           return reply(200, { ...stateView(), hard_boundaries: MOCK_HARD_BOUNDARIES });
         }
@@ -970,6 +974,11 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
           // Như `_owner_step` thật (khác `_owner_step_after` của bước 8–9): không đòi các bước trước phải xong.
           if (!user) return problem(res, 401, 'UNAUTHENTICATED', 'Chưa đăng nhập');
           if (n === 10) {
+            // v0.1.45 (F-20): sau Hoàn tất, mời người (danh sách khác rỗng) cần phiên PIN `user.manage`.
+            const invites = Array.isArray(body.invites) ? body.invites : [];
+            if (setup.finished && invites.length > 0 && setupNeedPin()) {
+              return problem(res, 423, 'PIN_REQUIRED', 'Thao tác này cần nhập mã PIN', { detail: { operation: 'user.manage' } });
+            }
             const r = phase3.system.step10(body, new Set(users.map((u) => u.email)));
             if (!r.ok) return problem(res, r.status, r.code, r.title, r.extra ?? {});
             for (const inv of r.value.invited) {
@@ -1278,6 +1287,7 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
  *   /api/v1/__mock/scan     {"type":"zalo"} simulates the phone scanning the QR
  *   /api/v1/__mock/simulate {"on":bool} toggles the background simulation
  *   /api/v1/__mock/bridge   {"online":bool} makes channel login answer 503 BRIDGE_OFFLINE
+ *   /api/v1/__mock/pin_expire {} ends every PIN session (v0.1.45 — kiểm lại hộp PIN của thao tác kế tiếp)
  *   /api/v1/__mock/health  {"issues"?,"worker"?,"backup"?,"disk"?,"update"?,"autostart"?,"offsite"?} ghi đè `GET /system/health` (v0.1.36;
  *                           `issues` chỉ cần `kind` — nhãn/nút/đường dẫn mặc định theo kind; reset khôi phục khoẻ)
  *   /api/v1/__mock/p3/{cụm}/{hook}  body → `phase3[cụm].hooks[hook](body)`; trả JSON kết quả (404 nếu không có)
@@ -1364,6 +1374,10 @@ export function createMockApi(opts: MockOptions = {}) {
           return done(res);
         case 'bridge':
           current.phase2.hooks.setBridge(Boolean(body.online));
+          return done(res);
+        case 'pin_expire':
+          // v0.1.45: cho mọi phiên PIN hết hạn (như hết 30 phút) — e2e kiểm lại hộp PIN của thao tác sau.
+          for (const s of current.sessions.values()) s.pinUntil = null;
           return done(res);
         default:
           return done(res, 404);

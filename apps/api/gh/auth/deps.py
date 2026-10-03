@@ -63,8 +63,18 @@ async def current_user(request: Request,
     return user
 
 
+# F-58 (v0.1.45): quyền cấp hệ thống không có nghĩa "theo phạm vi được giao" — cấu hình hệ thống (nhà cung cấp AI,
+# kênh, ranh giới, lưu giữ, sao lưu, cập nhật, MCP, plugin, agent…) là của cả tổ chức. Vai trò chỉ có
+# `system.manage` = team/assigned/own KHÔNG được ghi; `require()` luôn ép phạm vi ALL cho các quyền này, bất kể nơi
+# gọi truyền gì (kể cả mặc định ASSIGNED) — thống nhất mọi route mà không phải sửa từng file.
+ALL_ONLY: frozenset[str] = frozenset({"system.manage"})
+
+
 def require(permission: str, scope: str = rbac.ASSIGNED) -> Callable[..., Awaitable[service.CurrentUser]]:
-    """Cần quyền `permission` với phạm vi tối thiểu `scope`. Lọc dữ liệu theo phạm vi làm ở tầng service."""
+    """Cần quyền `permission` với phạm vi tối thiểu `scope`. Lọc dữ liệu theo phạm vi làm ở tầng service.
+    Quyền thuộc `ALL_ONLY` luôn cần phạm vi ALL (F-58)."""
+    if permission in ALL_ONLY:
+        scope = rbac.ALL
 
     async def dep(user: service.CurrentUser = Depends(current_user)) -> service.CurrentUser:
         have = user.permissions.get(permission, rbac.NONE)

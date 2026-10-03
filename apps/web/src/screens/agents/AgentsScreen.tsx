@@ -1,16 +1,17 @@
 import { useMemo, useState } from 'react';
 import type { AgentDecision, AgentIdentity, AgentTemplate } from '@gen-harness/contracts';
-import { SCREEN_BY_KEY, autonomyChoice, autonomyPatch } from '@gen-harness/contracts';
+import { SCREEN_BY_KEY, autonomyChoice } from '@gen-harness/contracts';
 import { Button, Dialog, EmptyState, Icon, SelectField, Switch, TextField } from '@gen-harness/ui';
 import { useChannels } from '../../lib/dataQueries';
 import { fmtDMClock } from '../../lib/format';
 import { useCan } from '../../lib/permissions';
 import { errorText } from '../../lib/errorText';
 import { AutonomySelect } from '../AutonomySelect';
-import { CardError, InlineError, Panel, ScreenHead, SkeletonLines, StateChip } from '../common';
+import { CardError, InlineError, Panel, PinHint, ScreenHead, SkeletonLines, StateChip } from '../common';
 import {
   AUTONOMY_LEVELS,
   agentIcon,
+  agentPatchBody,
   decisionTone,
   decisionWhat,
   lastSpoke,
@@ -224,6 +225,9 @@ function TemplatesPanel({ canManage, onUseTemplate }: { canManage: boolean; onUs
  */
 const DEFAULT_NEW_AGENT_AUTONOMY = 2;
 
+/** v0.1.45 (F-20): máy chủ đòi phiên PIN `policy.change` khi rào chắn của agent đổi — hộp PIN tự mở khi gặp 423. */
+const AGENT_PIN_TEXT = 'Đổi mức tự trị, điều cấm, giới hạn hay phạm vi kênh cần mã PIN';
+
 function AgentFormDialog({ agent, template, onClose }: { agent: AgentIdentity | null; template: AgentTemplate | null; onClose: () => void }) {
   const create = useCreateAgent();
   const update = useUpdateAgent();
@@ -241,22 +245,27 @@ function AgentFormDialog({ agent, template, onClose }: { agent: AgentIdentity | 
   const mutation = agent ? update : create;
   const submit = () => {
     if (!name.trim() || !roleDesc.trim() || !voice.trim() || !speakWhen.trim()) return;
+    if (agent) {
+      // v0.1.45 (F-20): chỉ gửi rào chắn (mức tự trị / điều cấm / phạm vi kênh) khi đổi — sửa tên không hỏi PIN.
+      const patch = agentPatchBody(agent, { name, roleDesc, voice, speakWhen, forbidden, picked, scopeIds });
+      update.mutate({ id: agent.id, body: patch }, { onSuccess: onClose });
+      return;
+    }
     const body = {
       name: name.trim(),
       role_desc: roleDesc.trim(),
       voice: voice.trim(),
       speak_when: speakWhen.trim(),
-      // Tạo mới: chưa chọn thì giữ mức mặc định cũ (2) như trước. Sửa: chỉ gửi khi Sếp chọn mức khác mức đang lưu.
-      ...(agent ? autonomyPatch(agent.autonomy_level, picked) : { autonomy_level: picked ?? DEFAULT_NEW_AGENT_AUTONOMY }),
+      // Tạo mới: chưa chọn thì giữ mức mặc định cũ (2) như trước (sửa agent: xem agentPatchBody ở trên).
+      autonomy_level: picked ?? DEFAULT_NEW_AGENT_AUTONOMY,
       forbidden: forbidden
         .split('\n')
         .map((s) => s.trim())
         .filter(Boolean),
-      template: agent ? agent.template : (template?.code ?? null),
+      template: template?.code ?? null,
       channel_scopes: [...scopeIds].map((channel_id) => ({ channel_id })),
     };
-    if (agent) update.mutate({ id: agent.id, body }, { onSuccess: onClose });
-    else create.mutate(body, { onSuccess: onClose });
+    create.mutate(body, { onSuccess: onClose });
   };
 
   return (
@@ -294,6 +303,7 @@ function AgentFormDialog({ agent, template, onClose }: { agent: AgentIdentity | 
           </label>
           <textarea id="ag-forbidden" className="gh-input" rows={2} value={forbidden} onChange={(e) => setForbidden(e.target.value)} />
         </div>
+        {agent ? <PinHint text={AGENT_PIN_TEXT} title={AGENT_PIN_TEXT} /> : null}
         {/* Tạo mới: current=null để bấm "Chỉ ghi nhận" ghi đúng mức 0 (không bị coi là "giữ" mức mặc định 2). */}
         <AutonomySelect current={agent ? agent.autonomy_level : null} value={picked} onChange={setPicked} />
         <fieldset className="ag-scope-fields">

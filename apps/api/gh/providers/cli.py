@@ -58,6 +58,11 @@ AGY = "antigravity_cli"
 CLAUDE = "claude_code_cli"
 CLI_KINDS = (AGY, CLAUDE)
 
+# v0.1.45 (F-56): mã đăng nhập CLI dán từ trình duyệt — Google '4/0AbC…-_', Claude Code '<mã>#<state>' (chữ, số,
+# '-', '_'). Chỉ nhận đúng lớp ký tự này (sau khi bỏ khoảng trắng hai đầu): không khoảng trắng giữa, không ký tự
+# điều khiển (ESC, CR/LF…) ⇒ không thể gõ thêm lệnh/phím vào PTY của CLI. Dùng chung cho API (CodeIn) và submit().
+CLI_CODE_RE = re.compile(r"^[A-Za-z0-9._~#/+=-]{4,500}$")
+
 
 @dataclass(frozen=True)
 class CliSpec:
@@ -731,7 +736,11 @@ class CliLogins:
         from gh.boss_checks import service as boss_checks
 
         s.code_shape = boss_checks.code_shape(code)
-        await s.code.put(code.strip())
+        clean = code.strip()
+        # Phòng thủ lớp 2 (F-56): chỉ mã đã kiểm mới vào hàng đợi → os.write(master, mã + b"\r") ở _run.
+        if not CLI_CODE_RE.fullmatch(clean):
+            raise ValueError("Mã đăng nhập chứa ký tự không hợp lệ")
+        await s.code.put(clean)
 
     def cancel(self, login_id: str) -> None:
         s = self.sessions.get(login_id)

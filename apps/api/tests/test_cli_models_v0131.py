@@ -19,7 +19,7 @@ from gh import crypto
 from gh.providers import catalog
 from gh.providers import cli as climod
 from gh.providers.clients import AgyClient, ClaudeCodeClient, Message
-from tests.conftest import OWNER
+from tests.conftest import OWNER, verify_pin
 
 FIX = Path(__file__).parent / "fixtures"
 
@@ -68,6 +68,7 @@ async def _wait(api: Any, login_id: str, until: tuple[str, ...]) -> dict[str, An
 
 
 async def _login(api: Any, kind: str, code: str) -> dict[str, Any]:
+    await verify_pin(api)  # v0.1.45 (F-20): thêm tài khoản CLI cần PIN
     r = await api.send("POST", f"/cli/login?kind={kind}")
     assert r.status_code == 202, r.text
     login_id = r.json()["login_id"]
@@ -194,6 +195,7 @@ async def test_claude_code_login_models_switch_and_invoke(owner_api, app, clis) 
     assert (await api.get("/cli/profiles?kind=claude_code_cli")).json() == []
     # Chưa đăng nhập: chưa có nguồn Claude Code nào (tắt tới khi Owner đăng nhập).
     assert not [p for p in (await api.get("/providers")).json() if p["kind"] == "claude_code_cli"]
+    await verify_pin(api)  # v0.1.45 (F-20): thêm tài khoản CLI cần PIN
     r = await api.send("POST", "/cli/login?kind=claude_code_cli")
     login_id = r.json()["login_id"]
     st = await _wait(api, login_id, ("waiting_code", "failed"))
@@ -258,6 +260,7 @@ async def test_claude_code_not_logged_in_is_auth_failure(clis) -> None:  # type:
 
 async def test_claude_code_cli_missing_shows_friendly_message(owner_api, app, clis) -> None:  # type: ignore[no-untyped-def]
     app.state.cli_logins.claude_argv = ["/khong/co/claude"]
+    await verify_pin(owner_api)  # v0.1.45 (F-20): thêm tài khoản CLI cần PIN
     r = await owner_api.send("POST", "/cli/login?kind=claude_code_cli")
     st = await _wait(owner_api, r.json()["login_id"], ("failed", "done"))
     assert st["status"] == "failed" and "chưa cài Claude Code CLI" in st["message"]

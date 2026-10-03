@@ -14,7 +14,7 @@ from sqlalchemy import text
 
 from gh.boss_checks import service as boss
 from gh.db import admin_sessionmaker
-from tests.conftest import Api
+from tests.conftest import Api, verify_pin
 from tests.test_cli_models_v0131 import FIX, _wait, clis  # noqa: F401 — fixture dùng lại
 
 CLAUDE = "claude_code_cli"
@@ -35,6 +35,7 @@ async def _db_text(sql: str) -> str:
 
 
 async def _start_and_submit(api: Api, code: str) -> dict[str, Any]:
+    await verify_pin(api)  # v0.1.45 (F-20): thêm tài khoản CLI cần PIN
     r = await api.send("POST", f"/cli/login?kind={CLAUDE}")
     assert r.status_code == 202, r.text
     login_id = r.json()["login_id"]
@@ -110,6 +111,7 @@ async def test_claude_cli_exits_early_records_fail_with_shape(owner_api: Api, cl
 async def test_claude_cli_missing_records_cli_missing(owner_api: Api, clis: Any, app: Any,  # noqa: F811
                                                        tmp_path: Path) -> None:
     app.state.cli_logins.claude_argv = [str(tmp_path / "khong-co-claude")]
+    await verify_pin(owner_api)  # v0.1.45 (F-20): thêm tài khoản CLI cần PIN
     r = await owner_api.send("POST", f"/cli/login?kind={CLAUDE}")
     st = await _wait(owner_api, r.json()["login_id"], ("failed", "done"))
     assert st["status"] == "failed"
