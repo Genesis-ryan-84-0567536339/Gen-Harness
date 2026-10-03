@@ -360,8 +360,9 @@ def incomplete(msg: str) -> ApiError:
 
 
 async def _mark_done(db: AsyncSession, request: Request, row: Any, owner: service.CurrentUser, n: int,
-                     detail: dict[str, Any] | None = None) -> dict[str, Any]:
+                     detail: dict[str, Any] | None = None, *, remember: dict[str, Any] | None = None) -> dict[str, Any]:
     completed = dict(row.completed or {})
+    completed.update(remember or {})
     done = dict(completed.get("steps", {}))
     done[str(n)] = "done"
     completed["steps"] = done
@@ -670,42 +671,75 @@ async def step8(body: Step8In, request: Request, db: AsyncSession = DB,
         try_error = e.detail if isinstance(e.detail, str) and e.detail else e.title
         try_error_code = e.code
         try_reasons = [str(r) for r in e.extra.get("reasons") or []]
-    state = await _mark_done(db, request, row, owner, 8, {"agent_id": str(agent_id), "name": name})
+    # Nhớ agent của bước 8 — bước 9 đặt mức tự trị cho ĐÚNG agent này (không phải agent mới tạo gần nhất).
+    state = await _mark_done(db, request, row, owner, 8, {"agent_id": str(agent_id), "name": name},
+                             remember={"setup_agent_id": str(agent_id)})
     state["agent"] = {"id": str(agent_id), "name": name, "try_reply": try_reply, "try_error": try_error,
                       "try_error_code": try_error_code, "try_reasons": try_reasons}
     return state
 
 
 class Step9In(BaseModel):
-    autonomy_level: Literal[3, 4] = policy.DEFAULT_AUTONOMY  # type: ignore[assignment]
+    # None = giữ nguyên mức hiện tại (mở lại sau Hoàn tất chỉ để xác nhận ranh giới, hoặc agent đang ở mức khác 3/4).
+    autonomy_level: Literal[3, 4] | None = policy.DEFAULT_AUTONOMY  # type: ignore[assignment]
     ack_boundaries: bool = False
+
+
+async def _setup_agent(db: AsyncSession, row: Any) -> Any:
+    """Agent của bước 9: agent tạo ở bước 8 (`completed.setup_agent_id`); bản cài trước khi có trường này (hoặc
+    agent đó đã bị xoá) → agent tạo sớm nhất còn lại — agent thiết lập luôn là agent đầu tiên, KHÔNG phải agent mới
+    tạo gần nhất ở màn Danh tính Agent."""
+    aid = (row.completed or {}).get("setup_agent_id")
+    if aid:
+        agent = (await db.execute(text("SELECT id, name, autonomy_level FROM agent.identities "
+                                       "WHERE org_id = :o AND id = CAST(:i AS uuid)"),
+                                  {"o": row.org_id, "i": aid})).one_or_none()
+        if agent is not None:
+            return agent
+    return (await db.execute(text("SELECT id, name, autonomy_level FROM agent.identities WHERE org_id = :o "
+                                  "ORDER BY created_at ASC LIMIT 1"), {"o": row.org_id})).one_or_none()
+
+
+@router.get("/steps/9")
+async def step9_get(db: AsyncSession = DB,
+                    user: service.CurrentUser | None = Depends(optional_user)) -> dict[str, Any]:
+    """Agent bước 9 sẽ đặt mức tự trị + mức hiện tại — form điền sẵn, mở lại sau Hoàn tất không đổi nhầm mức."""
+    row = await _row(db)
+    _owner_of(row, user)
+    agent = await _setup_agent(db, row)
+    if agent is None:
+        return {"agent": None}
+    return {"agent": {"id": str(agent.id), "name": agent.name, "autonomy_level": agent.autonomy_level}}
 
 
 @router.put("/steps/9")
 async def step9(body: Step9In, request: Request, db: AsyncSession = DB,
                 user: service.CurrentUser | None = Depends(optional_user)) -> dict[str, Any]:
-    """Tự trị & ranh giới: đặt mức tự trị (3 hoặc 4 — spec H1 cho phép cả hai, mặc định 4) cho agent vừa tạo ở
-    bước 8, và bắt Owner xác nhận đã đọc danh sách ranh giới khoá cứng (`HARD_BOUNDARIES`, ARCHITECTURE §7.4).
-    Các ranh giới đó **không tắt được** ở đây hay bất cứ đâu trong hệ thống — xác nhận chỉ để Owner biết trước
-    khi vào Console, không phải một cài đặt.
+    """Tự trị & ranh giới: đặt mức tự trị (3 hoặc 4 — spec H1 cho phép cả hai, mặc định 4) cho agent tạo ở bước 8
+    (`_setup_agent`), và bắt Owner xác nhận đã đọc danh sách ranh giới khoá cứng (`HARD_BOUNDARIES`,
+    ARCHITECTURE §7.4). Các ranh giới đó **không tắt được** ở đây hay bất cứ đâu trong hệ thống — xác nhận chỉ để
+    Owner biết trước khi vào Console, không phải một cài đặt.
 
-    v0.1.45 (F-20): SAU Hoàn tất (mở lại từ trang Hướng dẫn) đổi mức tự trị cần phiên PIN `policy.change` (423);
-    đang thiết lập lần đầu (chưa Hoàn tất) giữ nguyên — không đòi PIN. Thứ tự: 401/403 → 422 → 423."""
+    v0.1.45 (F-20): SAU Hoàn tất (mở lại từ trang Hướng dẫn) ĐỔI mức tự trị cần phiên PIN `policy.change` (423);
+    gửi lại đúng mức đang có (hoặc `autonomy_level = null` — giữ nguyên) không đòi PIN, như PATCH agent. Đang thiết
+    lập lần đầu (chưa Hoàn tất) không đòi PIN. Thứ tự: 401/403 → 422 → 423."""
     row, owner = await _owner_step(db, user, after_finish=True)
     if not body.ack_boundaries:
         raise field_errors({"ack_boundaries": "Cần xác nhận đã đọc ranh giới khoá cứng trước khi tiếp tục"})
-    agent = (await db.execute(text("SELECT id, name FROM agent.identities WHERE org_id = :o "
-                                   "ORDER BY created_at DESC LIMIT 1"), {"o": row.org_id})).one_or_none()
+    agent = await _setup_agent(db, row)
     if agent is None:
         raise incomplete("Chưa có agent nào — hoàn thành bước 8 trước")
-    if row.finished_at is not None and not owner.pin_active():
+    level = agent.autonomy_level if body.autonomy_level is None else body.autonomy_level
+    changed = level != agent.autonomy_level
+    if changed and row.finished_at is not None and not owner.pin_active():
         raise pin_required()
-    await db.execute(text("UPDATE agent.identities SET autonomy_level = :a, updated_at = now() WHERE id = :i"),
-                     {"a": body.autonomy_level, "i": agent.id})
+    if changed:
+        await db.execute(text("UPDATE agent.identities SET autonomy_level = :a, updated_at = now() WHERE id = :i"),
+                         {"a": level, "i": agent.id})
     state = await _mark_done(db, request, row, owner, 9,
-                             {"agent_id": str(agent.id), "autonomy_level": body.autonomy_level,
+                             {"agent_id": str(agent.id), "autonomy_level": level, "changed": changed,
                               "hard_boundaries": list(HARD_BOUNDARIES)})
-    state["agent"] = {"id": str(agent.id), "name": agent.name, "autonomy_level": body.autonomy_level}
+    state["agent"] = {"id": str(agent.id), "name": agent.name, "autonomy_level": level}
     state["hard_boundaries"] = list(HARD_BOUNDARIES)
     return state
 

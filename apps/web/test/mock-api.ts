@@ -25,7 +25,7 @@ import { createMock as createP3Graph } from './mock-p3-graph';
 import { createMock as createP3Market } from './mock-p3-market';
 import { createMock as createP3People } from './mock-p3-people';
 import { createMock as createP4Agents } from './mock-p4-agents';
-import { USER_IDS } from './mock-ids';
+import { AGENT_IDS, USER_IDS } from './mock-ids';
 import { createMock as createP4Api } from './mock-p4-api';
 import { createMock as createP4Mcp } from './mock-p4-mcp';
 import { createMock as createSocial } from './mock-social';
@@ -596,6 +596,9 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     org: { name: 'Genesis Trading', timezone: 'Asia/Ho_Chi_Minh', currency: 'VND' },
     addressing: { self: 'Anh', bot_calls_me: 'Sếp' },
   };
+  // Agent của bước 8 — bước 9 đặt mức tự trị cho ĐÚNG agent này (như `_setup_agent` của API thật).
+  let setupAgent: { id: string; name: string; autonomy_level: number } | null =
+    opts.setup === 'fresh' ? null : { id: AGENT_IDS.tls, name: 'Trợ lý thương mại', autonomy_level: 4 };
   if (opts.startAtStep && opts.startAtStep > 1) {
     const n = Math.min(12, Math.max(2, opts.startAtStep));
     setup.finished = false;
@@ -879,6 +882,7 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
       if (path === '/setup/rule-presets' && method === 'GET') return reply(200, phase2.rulePresets());
       if (path === '/setup/first-run' && method === 'GET') return reply(200, phase2.firstRunView());
       if (path === '/setup/hard-boundaries' && method === 'GET') return reply(200, MOCK_HARD_BOUNDARIES);
+      if (path === '/setup/steps/9' && method === 'GET') return reply(200, { agent: setupAgent });
       if (path === '/setup/follow-up' && method === 'GET') {
         // Như API thật: mọi bước tuỳ chọn 5–11; `done` = đã xong trong trình thiết lập (dữ liệu thật: mock bỏ qua).
         // v0.1.29: bước 4 cũng có ("Chưa có model") — xong theo dữ liệu thật: có nguồn dùng được đang có model.
@@ -961,12 +965,17 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
             }
             advance(8, 'done');
             const agent = { id: randomUUID(), name: String(body.name), try_reply: `Chào Sếp, tôi là ${String(body.name)}.`, try_error: null };
+            setupAgent = { id: agent.id, name: agent.name, autonomy_level: 4 };
             return reply(200, { ...stateView(), agent });
           }
           if (setup.steps[7].status !== 'done') return problem(res, 409, 'STEP_INCOMPLETE', 'Cần hoàn thành bước 8 trước');
           if (!body.ack_boundaries) return problem(res, 422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors: { ack_boundaries: 'Cần xác nhận đã đọc ranh giới' } });
-          // v0.1.45 (F-20): như API — sau Hoàn tất đổi mức tự trị cần phiên PIN `policy.change` (đang thiết lập thì không).
-          if (setup.finished && setupNeedPin()) return problem(res, 423, 'PIN_REQUIRED', 'Thao tác này cần nhập mã PIN', { detail: { operation: 'policy.change' } });
+          // v0.1.45 (F-20): như API — sau Hoàn tất ĐỔI mức tự trị cần phiên PIN `policy.change` (đang thiết lập thì không);
+          // gửi lại đúng mức đang có / null (giữ nguyên) thì không hỏi PIN.
+          const cur = setupAgent?.autonomy_level ?? 4;
+          const level = typeof body.autonomy_level === 'number' ? body.autonomy_level : cur;
+          if (setup.finished && level !== cur && setupNeedPin()) return problem(res, 423, 'PIN_REQUIRED', 'Thao tác này cần nhập mã PIN', { detail: { operation: 'policy.change' } });
+          if (setupAgent) setupAgent.autonomy_level = level;
           advance(9, 'done');
           return reply(200, { ...stateView(), hard_boundaries: MOCK_HARD_BOUNDARIES });
         }

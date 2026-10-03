@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { AUTONOMY_CHOICES, PinCancelledError } from '@gen-harness/contracts';
+import { AUTONOMY_CHOICES, PinCancelledError, autonomyChoice } from '@gen-harness/contracts';
 import { Icon, Segmented } from '@gen-harness/ui';
 import { api } from '../lib/api';
 import { errorText } from '../lib/errorText';
@@ -13,11 +13,20 @@ import { describeError, type StepProps } from './types';
 const LEVEL_OPTIONS = AUTONOMY_CHOICES.filter((c) => c.level === 3 || c.level === 4).map((c) => ({ value: String(c.level), label: c.label }));
 
 const PIN_TEXT = 'Sau Hoàn tất, đổi mức tự trị cần mã PIN';
+const levelLabel = (n: number) => autonomyChoice(n)?.label ?? `mức ${n}`;
 
-/** Bước 9 — Tự trị & ranh giới: mức 3 hoặc 4 cho agent vừa tạo, xác nhận đã đọc ranh giới khoá cứng (không tắt được). */
+/** Bước 9 — Tự trị & ranh giới: mức 3 hoặc 4 cho agent tạo ở bước 8, xác nhận đã đọc ranh giới khoá cứng (không tắt được).
+ *  Mở lại sau Hoàn tất: điền sẵn mức hiện tại của agent; bấm Tiếp tục mà không đổi mức thì giữ nguyên (không hỏi PIN). */
 export function Step9Autonomy({ meta, description, onBack, onSaved, formRef, onSkip, skipping, skipError }: StepProps) {
   const boundaries = useQuery({ queryKey: ['setup', 'hard-boundaries'], queryFn: ({ signal }) => api.setup.hardBoundaries(signal) });
+  const target = useQuery({ queryKey: ['setup', 'step9'], queryFn: ({ signal }) => api.setup.step9State(signal) });
+  const agent = target.data?.agent ?? null;
   const [level, setLevel] = useState('4');
+  const [touched, setTouched] = useState(false);
+  useEffect(() => {
+    if (agent && !touched) setLevel(String(agent.autonomy_level));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- chỉ điền sẵn khi dữ liệu agent về, không đè lựa chọn của Sếp.
+  }, [agent?.id, agent?.autonomy_level]);
   const [ack, setAck] = useState(false);
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -28,7 +37,9 @@ export function Step9Autonomy({ meta, description, onBack, onSaved, formRef, onS
     setBusy(true);
     setFormError(null);
     try {
-      onSaved(await api.setup.step9({ autonomy_level: level === '3' ? 3 : 4, ack_boundaries: ack }));
+      // Mức hiện tại ngoài 3/4 (đã đổi ở màn Danh tính Agent) và Sếp không chọn lại → null = giữ nguyên.
+      const chosen = level === '3' ? 3 : level === '4' ? 4 : null;
+      onSaved(await api.setup.step9({ autonomy_level: chosen, ack_boundaries: ack }));
     } catch (e) {
       // v0.1.45: huỷ hộp PIN → câu chung 'Đã huỷ — thao tác cần mã PIN.' (errorText), lỗi khác như cũ.
       setFormError(e instanceof PinCancelledError ? errorText(e) : describeError(e));
@@ -53,8 +64,21 @@ export function Step9Autonomy({ meta, description, onBack, onSaved, formRef, onS
     >
       <div className="setup-section">
         <div className="setup-section__title">Mức tự trị của agent</div>
-        <Segmented label="Mức tự trị" value={level} onChange={setLevel} options={LEVEL_OPTIONS} />
-        {finished ? <PinHint text={PIN_TEXT} title={PIN_TEXT} /> : null}
+        {agent ? (
+          <p className="muted-note" data-testid="step9-agent">
+            Agent: <strong>{agent.name}</strong> · mức hiện tại: {levelLabel(agent.autonomy_level)}
+          </p>
+        ) : null}
+        <Segmented
+          label="Mức tự trị"
+          value={level}
+          onChange={(v) => {
+            setTouched(true);
+            setLevel(v);
+          }}
+          options={LEVEL_OPTIONS}
+        />
+        {finished && agent && level !== String(agent.autonomy_level) ? <PinHint text={PIN_TEXT} title={PIN_TEXT} /> : null}
         <p className="muted-note">Soạn sẵn chờ duyệt: agent soạn sẵn, Sếp duyệt rồi mới gửi. Gợi ý: agent chỉ gợi ý việc nên làm. Đổi lại bất cứ lúc nào ở màn Danh tính Agent.</p>
       </div>
       <div className="setup-section">

@@ -159,6 +159,36 @@ async def test_setup_9_10_after_finish_need_pin(owner_api: Api, db) -> None:  # 
     assert [i["email"] for i in r.json()["invited"]] == ["lan@example.vn"]
 
 
+async def test_setup_9_after_finish_same_level_no_pin_and_targets_setup_agent(owner_api: Api, db) -> None:  # type: ignore[no-untyped-def]
+    """Sửa review v0.1.45: mở lại bước 9 chỉ để xác nhận ranh giới (mức không đổi / null) KHÔNG đòi PIN và KHÔNG đổi
+    agent khác; bước 9 nhắm đúng agent của bước 8, không phải agent mới tạo gần nhất."""
+    s = await _seed(db)
+    org = s["org"]
+    await db.execute(text("""UPDATE ops.setup_state SET completed = jsonb_set(completed, '{setup_agent_id}',
+                                    to_jsonb(CAST(:a AS text))) WHERE org_id = :o"""), {"a": str(s["agent"]), "o": org})
+    newer = (await db.execute(text("""
+        INSERT INTO agent.identities (org_id, name, role_desc, template, addressing, voice, speak_when, forbidden,
+                                      autonomy_level, is_enabled, created_at)
+        VALUES (:o, 'Agent mới', 'Khác', 'commercial', '{}'::jsonb, 'lễ phép', 'khi được hỏi', ARRAY[]::text[], 1, true,
+                now() + interval '1 minute') RETURNING id"""), {"o": org})).scalar_one()
+    await db.commit()
+    await _finish(owner_api)
+
+    r = await owner_api.get("/setup/steps/9")
+    assert r.status_code == 200, r.text
+    assert r.json()["agent"] == {"id": str(s["agent"]), "name": "Trợ lý thương mại", "autonomy_level": 4}
+    for body in ({"autonomy_level": 4, "ack_boundaries": True}, {"autonomy_level": None, "ack_boundaries": True}):
+        r = await owner_api.send("PUT", "/setup/steps/9", body)
+        assert r.status_code == 200, (body, r.text)
+        assert r.json()["agent"]["id"] == str(s["agent"]) and r.json()["agent"]["autonomy_level"] == 4
+    lv = dict((await db.execute(text("SELECT id, autonomy_level FROM agent.identities WHERE org_id = :o"),
+                                {"o": org})).all())
+    assert lv[s["agent"]] == 4 and lv[newer] == 1
+    # Đổi mức thật → vẫn cần PIN.
+    r = await owner_api.send("PUT", "/setup/steps/9", {"autonomy_level": 3, "ack_boundaries": True})
+    assert r.status_code == 423, r.text
+
+
 async def test_setup_9_10_before_finish_no_pin(owner_api: Api, db) -> None:  # type: ignore[no-untyped-def]
     """Đang thiết lập lần đầu (chưa Hoàn tất): hành vi cũ, không đòi PIN."""
     await _seed(db)

@@ -20,7 +20,7 @@ import { telegramEndpoints } from './telegram';
 import { diagnosticsEndpoints } from './diagnostics';
 import { pluginsEndpoints } from './p4-plugins';
 import { systemEndpoints } from './p4-system';
-import type { Step10Body, Step11Body, Step10Invited, BackupConfig, Step8Body, Step8Agent, Step9Body, SetupFollowUpItem } from './p4-system';
+import type { Step10Body, Step11Body, Step10Invited, BackupConfig, Step8Body, Step8Agent, Step9Body, Step9State, SetupFollowUpItem } from './p4-system';
 import type {
   AuditPage,
   AuditVerify,
@@ -137,6 +137,8 @@ export function createEndpoints(client: ApiClient) {
       /** Bước 9 "Tự trị & ranh giới" — mức 3 hoặc 4, bắt xác nhận đã đọc ranh giới khoá cứng. */
       step9: (body: Step9Body) =>
         r<SetupState & { hard_boundaries: string[] }>('/setup/steps/9', { method: 'PUT', body, skipSetupRedirect: true }),
+      /** Agent của bước 9 + mức tự trị hiện tại — form điền sẵn (mở lại sau Hoàn tất không đổi nhầm mức). */
+      step9State: (signal?: AbortSignal) => r<Step9State>('/setup/steps/9', { signal, skipSetupRedirect: true }),
       hardBoundaries: (signal?: AbortSignal) => r<string[]>('/setup/hard-boundaries', { signal, skipSetupRedirect: true }),
       followUp: (signal?: AbortSignal) => r<SetupFollowUpItem[]>('/setup/follow-up', { signal }),
       /** Bước 10 "Mời đội ngũ" (tuỳ chọn, GĐ 4.6) — trả kèm `invited` (mật khẩu tạm, chưa có SMTP thật). */

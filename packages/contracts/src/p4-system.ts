@@ -215,8 +215,14 @@ export interface Step8Agent {
 }
 
 export interface Step9Body {
-  autonomy_level: 3 | 4;
+  /** null = giữ nguyên mức hiện tại của agent (mở lại sau Hoàn tất chỉ để xác nhận ranh giới — không đòi PIN). */
+  autonomy_level: 3 | 4 | null;
   ack_boundaries: boolean;
+}
+
+/** `GET /setup/steps/9` — agent tạo ở bước 8 (bước 9 đặt mức cho đúng agent này) + mức tự trị hiện tại. */
+export interface Step9State {
+  agent: { id: string; name: string; autonomy_level: number } | null;
 }
 
 /** `GET /setup/follow-up` — bước tuỳ chọn chưa xong trong trình thiết lập; `done` suy từ dữ liệu thật. */

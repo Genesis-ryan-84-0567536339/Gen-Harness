@@ -86,9 +86,25 @@ test.describe('v0.1.45 — PIN đúng chỗ hạ rào', () => {
     await expect(card.getByRole('link', { name: /Mở trang đăng nhập Claude/ })).toHaveAttribute('href', /^https:\/\/claude\.com\//);
   });
 
-  test('/guide/9 sau Hoàn tất: hỏi PIN rồi lưu', async ({ page }) => {
+  test('/guide/9 sau Hoàn tất: không đổi mức thì không hỏi PIN', async ({ page }) => {
     await page.goto('/guide/9');
     await expect(page.getByRole('heading', { name: 'Tự trị & ranh giới' })).toBeVisible();
+    await expect(page.getByTestId('step9-agent')).toContainText('Trợ lý thương mại');
+    await expect(page.getByRole('radio', { name: 'Soạn sẵn chờ duyệt' })).toHaveAttribute('aria-checked', 'true');
+    await expect(page.getByText('Sau Hoàn tất, đổi mức tự trị cần mã PIN')).toHaveCount(0);
+    await page.getByLabel('Tôi đã đọc các ranh giới trên').check();
+    const req = page.waitForResponse((r) => r.url().includes('/setup/steps/9') && r.request().method() === 'PUT' && r.ok());
+    await page.getByRole('button', { name: 'Tiếp tục', exact: true }).click();
+    await req;
+    await expect(page.getByRole('dialog', { name: 'Mã PIN xác nhận thao tác' })).toHaveCount(0);
+    await expect(page).toHaveURL(/\/guide$/);
+  });
+
+  test('/guide/9 sau Hoàn tất: đổi mức thì hỏi PIN rồi lưu', async ({ page }) => {
+    await page.goto('/guide/9');
+    await expect(page.getByRole('heading', { name: 'Tự trị & ranh giới' })).toBeVisible();
+    await expect(page.getByTestId('step9-agent')).toBeVisible();
+    await page.getByRole('radio', { name: 'Gợi ý' }).click();
     await expect(page.getByText('Sau Hoàn tất, đổi mức tự trị cần mã PIN')).toBeVisible();
     await page.getByLabel('Tôi đã đọc các ranh giới trên').check();
     const req = page.waitForResponse((r) => r.url().includes('/setup/steps/9') && r.request().method() === 'PUT' && r.ok());
