@@ -1,19 +1,24 @@
-"""Middleware ASGI: chặn Console khi chưa thiết lập (428), bảo đảm mọi request ghi có dòng Action Log."""
+"""Middleware ASGI: Mã yêu cầu (X-Request-ID), chặn Console khi chưa thiết lập (428), bảo đảm mọi request ghi có dòng
+Action Log."""
 
 import logging
+import re
+import uuid
 from typing import Any
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from gh.chassis import actionlog
 from gh.db import sessionmaker
-from gh.errors import ApiError, _body
+from gh.errors import ApiError, _body, request_id_var
 
 log = logging.getLogger("gh.http")
 
 API_PREFIX = "/api/v1"
 # /auth/me KHÔNG được miễn: trước khi thiết lập xong, câu trả lời đúng là 428 (đi tới /setup), không phải 401.
-SETUP_EXEMPT = ("/setup", "/auth/login", "/auth/logout", "/auth/pin", "/health", "/ready", "/docs", "/openapi.json")
+# v0.1.44 (F-4b): /client-errors nhận báo lỗi giao diện cả khi chưa thiết lập xong (màn thiết lập cũng có thể lỗi).
+SETUP_EXEMPT = ("/setup", "/auth/login", "/auth/logout", "/auth/pin", "/health", "/ready", "/docs", "/openapi.json",
+                "/client-errors")
 WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 
@@ -24,6 +29,61 @@ WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 FRAMABLE_PATHS = frozenset({API_PREFIX + "/system/offsite/portable"})
 FRAMABLE_HEADERS = [(b"x-frame-options", b"SAMEORIGIN"),
                     (b"content-security-policy", b"default-src 'none'; frame-ancestors 'self'")]
+
+
+#: Mã yêu cầu client gửi vào chỉ được nhận khi đúng dạng — còn lại sinh mới (không để chuỗi lạ chui vào log/header).
+REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
+REQUEST_ID_HEADER = b"x-request-id"
+
+
+def new_request_id() -> str:
+    return uuid.uuid4().hex[:16]
+
+
+class RequestIdMiddleware:
+    """v0.1.44 (F-4b) — NGOÀI CÙNG: gán Mã yêu cầu cho mọi request http.
+
+    - Nhận `X-Request-ID` vào nếu khớp `REQUEST_ID_RE`, ngược lại sinh 16 hex; đặt `request_id_var` (problem+json, log)
+      và `scope['state']['request_id']`.
+    - Thêm header `x-request-id` vào MỌI phản hồi (kể cả 428 của SetupGate, 423, 500).
+    - Ngoại lệ chưa xử lý tới đây TRƯỚC ServerErrorMiddleware của Starlette: chưa gửi phản hồi ⇒ trả 500 INTERNAL
+      problem+json (error_id + request_id + header), ghi log khi Mã yêu cầu còn hiệu lực — không để Starlette trả
+      text/plain không mã."""
+
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        incoming = next((v for k, v in scope.get("headers", []) if k.lower() == REQUEST_ID_HEADER), b"")
+        raw = incoming.decode("latin-1")
+        rid = raw if REQUEST_ID_RE.fullmatch(raw) else new_request_id()
+        scope.setdefault("state", {})["request_id"] = rid
+        token = request_id_var.set(rid)
+        started = False
+
+        async def send_with_id(message: Message) -> None:
+            nonlocal started
+            if message["type"] == "http.response.start":
+                started = True
+                headers = [(k, v) for k, v in message.get("headers", []) if k.lower() != REQUEST_ID_HEADER]
+                message = {**message, "headers": [*headers, (REQUEST_ID_HEADER, rid.encode())]}
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_with_id)
+        except Exception as exc:
+            if started:
+                raise
+            from starlette.requests import Request
+
+            from gh.errors import _internal
+
+            response = _internal(Request(scope), f"Lỗi không mong đợi ({type(exc).__name__})")
+            await response(scope, receive, send_with_id)
+        finally:
+            request_id_var.reset(token)
 
 
 class SameOriginFrame:

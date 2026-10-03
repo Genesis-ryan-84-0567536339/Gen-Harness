@@ -18,6 +18,7 @@
 - v0.1.41 (F-8b): `gen_briefing` — Bản tin Gen 07:30 / 17:30 giờ VN (`gh.gen.briefing`); cron chạy thêm 08:30, 09:30,
   18:30, 19:30 chỉ để bù khi worker lỡ giờ (idempotent theo khung giờ — không gửi lần hai; quá 3 giờ thì bỏ).
   Việc nền (sàng lọc, trực việc, bản tin) mặc định chỉ dùng khoá API (F-86, gh.providers.router).
+- v0.1.44 (F-8c): `telegram_flush` mỗi phút gửi hộp thư đi Telegram (bản tin + nhắc việc của Owner).
 """
 
 import asyncio
@@ -55,6 +56,7 @@ from gh.providers.router import ModelRouter
 from gh.refinery.runner import Refinery
 from gh.refinery.scheduler import Scheduler
 from gh.social import service as social
+from gh.telegram import service as telegram
 
 log = logging.getLogger("gh.worker")
 
@@ -89,7 +91,10 @@ JOB_LABELS = {
     "people_review_recompute": "Tính lại đánh giá nhân sự",
     "scheduled_backup_scan": "Sao lưu theo lịch",
     "gen_briefing": "Bản tin Gen",
+    "telegram_flush": "Gửi tin Telegram",
 }
+#: v0.1.44 (F-8c): lượt gửi hộp thư đi Telegram ngắn (≤ 20 tin, ngân sách 60 giây — gh.telegram.service).
+TELEGRAM_FLUSH_TIMEOUT = 90
 
 
 def _utc_iso() -> str:
@@ -355,6 +360,12 @@ async def gen_briefing(ctx: dict[str, Any]) -> dict[str, Any]:
     return await briefing.run_briefing(sessionmaker(), ctx["redis_bus"], ctx["model_router"])
 
 
+async def telegram_flush(ctx: dict[str, Any]) -> dict[str, int]:
+    """v0.1.44 (F-8c): gửi bản tin/nhắc việc đang chờ trong ops.telegram_outbox — mỗi phút (Telegram Bot API, một
+    chiều, không qua bridge/Zalo). Lỗi cấu hình ⇒ sự cố telegram.failed (chuông Owner một lần)."""
+    return await telegram.flush_outbox(sessionmaker(), redis=ctx.get("redis_bus"))
+
+
 _BIZ_JOBS = [*biz.jobs(), *BACKUP_JOBS]  # PLAN §5.6 — gh.backup.scheduled_backup_scan cùng mẫu CronJob
 
 
@@ -367,7 +378,7 @@ class WorkerSettings:
     on_shutdown = shutdown
     functions = [verify_action_log, partition_maintenance, detect_identities, compact_notebooks, expire_sessions,
                  purge_gen_conversations, purge_notifications, retention_sweep, hub_token_expiry_scan,
-                 social_schedule, gen_briefing,
+                 social_schedule, gen_briefing, telegram_flush,
                  *(fn for fn, _ in _BIZ_JOBS), *BACKUP_FUNCTIONS]
     health_check_interval = 30
     job_timeout = JOB_TIMEOUT  # v0.1.40 (F-16): tường minh — `_cron` dùng cùng giá trị để nhận ra lần quá giờ
@@ -385,6 +396,8 @@ class WorkerSettings:
         _cron(social_schedule, minute=set(range(60))),           # mỗi phút — lịch đọc mạng xã hội (tắt mặc định)
         # 07:30 / 17:30 giờ VN — Bản tin Gen (F-8b); các lượt sau trong 3 giờ chỉ bù khi lỡ giờ (idempotent)
         _cron(gen_briefing, hour={7, 8, 9, 17, 18, 19}, minute={30}),
+        # mỗi phút — gửi hộp thư đi Telegram (bản tin + nhắc việc của Owner, F-8c); lượt ngắn
+        _cron(telegram_flush, minute=set(range(60)), timeout=TELEGRAM_FLUSH_TIMEOUT),
         *(_cron(fn, **kw) for fn, kw in _BIZ_JOBS),              # biz + sao lưu: giữ NGUYÊN kw (kể cả timeout)
     ]
 
