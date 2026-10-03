@@ -103,7 +103,8 @@ func RunPermCommand(runDir, image string) []string {
 // được. GỌI SAU `docker compose up` (ảnh mới đã có gid 10001).
 //
 //   - không phải Linux (s.GOOS): RunModeNA, không đổi gì.
-//   - genh chạy bằng root: os.Chown(nhóm 10001) + chmod 02770 trực tiếp, không gọi docker.
+//   - genh chạy bằng root: có docker + ảnh api → container phụ như dưới (kiểm ảnh cũ);
+//     không có docker/ảnh → os.Chown(nhóm 10001) + chmod 02770 trực tiếp.
 //   - còn lại: một container phụ bằng ảnh api (RunPermCommand) — Docker rootless
 //     tự đúng vì container phụ chạy cùng user namespace; dò uid thật của api.
 //
@@ -132,6 +133,19 @@ func EnsureRunPerms(ctx context.Context, s RunPermSpec) (string, error) {
 	}
 
 	if getuid() == 0 {
+		// Sửa review v0.1.45: root CŨNG phải kiểm ảnh api đang chạy có gid 10001 không — quay về ảnh cũ
+		// (rollbackAndWrap sau cập nhật lỗi 0.1.44→0.1.45) mà vẫn khoá 2770 nhóm 10001 thì api cũ hết đọc/ghi
+		// run/ (Console cập nhật/khôi phục/chẩn đoán chết). Có docker + xác định được ảnh → đi đường container phụ
+		// (báo GH_RUNPERM_OLD_IMAGE ⇒ mở 0777); không có docker/ảnh hoặc container phụ lỗi → siết trực tiếp.
+		if s.Runner != nil {
+			if image, err := resolveAPIImage(ctx, s); err == nil {
+				mode, herr := runPermViaHelper(ctx, s, dirs, image)
+				if mode == RunModeRestricted || errors.Is(herr, errRunPermOldImage) {
+					return mode, herr
+				}
+				// Container phụ lỗi (không phải "ảnh cũ") → root siết trực tiếp như trước.
+			}
+		}
 		for _, d := range dirs {
 			if err := chown(d, -1, APIGID); err != nil {
 				return openRunDirs(dirs), fmt.Errorf("đổi nhóm %s: %w", d, err)
@@ -150,6 +164,11 @@ func EnsureRunPerms(ctx context.Context, s RunPermSpec) (string, error) {
 	if err != nil {
 		return keepOrOpen(dirs, err)
 	}
+	return runPermViaHelper(ctx, s, dirs, image)
+}
+
+// runPermViaHelper: container phụ bằng ảnh api siết run/ (RunPermCommand) — ảnh cũ (không có gid 10001) ⇒ mở 0777.
+func runPermViaHelper(ctx context.Context, s RunPermSpec, dirs []string, image string) (string, error) {
 	out, err := s.Runner.Output(ctx, dockerCmd(RunPermCommand(Dir(s.InstallDir), image), s))
 	if err != nil {
 		return keepOrOpen(dirs, fmt.Errorf("container phụ siết quyền run/: %w", err))

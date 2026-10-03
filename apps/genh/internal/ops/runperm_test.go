@@ -135,8 +135,9 @@ func TestEnsureRunDirPermsRootChownsDirectly(t *testing.T) {
 	if mode != hostlink.RunModeRestricted || err != nil {
 		t.Fatalf("root: %q, %v", mode, err)
 	}
-	if len(r.Calls) != 0 {
-		t.Fatalf("root không được gọi docker, có %d lệnh", len(r.Calls))
+	// Sửa review v0.1.45: root vẫn hỏi container phụ (kiểm ảnh cũ) trước; container phụ lỗi → chown trực tiếp.
+	if len(r.Calls) != 1 || r.Calls[0].Cmd.Args[0] != "run" {
+		t.Fatalf("root phải thử container phụ đúng 1 lần, có %+v", r.Calls)
 	}
 	want := []call{
 		{hostlink.Dir(env.InstallDir), -1, hostlink.APIGID},

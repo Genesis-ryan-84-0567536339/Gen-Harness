@@ -20,9 +20,10 @@ var (
 
 // EnsureRunDirPerms siết quyền hộp thư run/ (v0.1.45) về 2770 nhóm 10001 — chỉ
 // genh và container api ghi được (hostlink.EnsureRunPerms). GỌI SAU `docker
-// compose up` (ảnh api mới đã có nhóm gid 10001). Linux: genh chạy root →
-// Chown trực tiếp; không thì một container phụ bằng ảnh api (--network none,
-// --user 0:0). Thất bại → chmod 0777 như cũ, mode "open" kèm lỗi (bên gọi in
+// compose up` (ảnh api mới đã có nhóm gid 10001). Linux: một container phụ bằng
+// ảnh api (--network none, --user 0:0) kiểm ảnh có gid 10001 rồi siết (ảnh cũ ⇒
+// mở 0777); genh chạy root mà không có docker/ảnh hoặc container phụ lỗi → Chown
+// trực tiếp. Thất bại → chmod 0777 như cũ, mode "open" kèm lỗi (bên gọi in
 // cảnh báo, KHÔNG làm hỏng thao tác chính). macOS/Windows: "n/a". Ghi run_mode
 // vào genh.json.
 func EnsureRunDirPerms(ctx context.Context, env *Env, runner dockercli.Runner) (mode string, err error) {

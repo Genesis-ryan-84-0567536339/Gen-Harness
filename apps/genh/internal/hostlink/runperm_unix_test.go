@@ -375,3 +375,42 @@ func TestEnsureRunPermsOldImageReopens(t *testing.T) {
 		t.Fatalf("ảnh cũ phải mở lại 0777, có %v", fi.Mode())
 	}
 }
+
+// Sửa review v0.1.45: genh chạy bằng root + ảnh api cũ (vd quay về 0.1.44 sau cập nhật lỗi) → vẫn hỏi container
+// phụ, ảnh báo GH_RUNPERM_OLD_IMAGE ⇒ mở 0777, KHÔNG chown nhóm 10001.
+func TestEnsureRunPermsRootOldImageReopens(t *testing.T) {
+	root := t.TempDir()
+	if err := EnsureDir(root); err != nil {
+		t.Fatal(err)
+	}
+	r := &fake.Runner{Responses: []fake.Response{{Match: func(c dockercli.Cmd) bool { return c.Args[0] == "run" }, Output: []byte(runPermOldImage)}}}
+	chowned := 0
+	mode, err := EnsureRunPerms(context.Background(), RunPermSpec{
+		InstallDir: root, Image: "ghcr.io/o/gen-harness-api:v0.1.44", Runner: r, GOOS: "linux",
+		Getuid: func() int { return 0 },
+		Chown:  func(string, int, int) error { chowned++; return nil },
+	})
+	if mode != RunModeOpen || !errors.Is(err, errRunPermOldImage) {
+		t.Fatalf("root + ảnh cũ: %q, %v", mode, err)
+	}
+	if chowned != 0 || len(r.Calls) != 1 {
+		t.Fatalf("root + ảnh cũ: không được chown (%d lần), phải gọi container phụ đúng 1 lần (%d)", chowned, len(r.Calls))
+	}
+	if fi, _ := os.Stat(Dir(root)); fi.Mode().Perm() != 0o777 {
+		t.Fatalf("ảnh cũ phải mở lại 0777, có %v", fi.Mode())
+	}
+}
+
+// root không có docker (không xác định được ảnh) → siết trực tiếp như trước: chown nhóm 10001 + 2770.
+func TestEnsureRunPermsRootWithoutDockerChownsDirectly(t *testing.T) {
+	root := t.TempDir()
+	var gids []int
+	mode, err := EnsureRunPerms(context.Background(), RunPermSpec{
+		InstallDir: root, GOOS: "linux",
+		Getuid: func() int { return 0 },
+		Chown:  func(_ string, _ int, gid int) error { gids = append(gids, gid); return nil },
+	})
+	if mode != RunModeRestricted || err != nil || len(gids) != 2 || gids[0] != APIGID {
+		t.Fatalf("root không docker: %q, %v, gids=%v", mode, err, gids)
+	}
+}
