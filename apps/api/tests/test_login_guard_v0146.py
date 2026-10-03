@@ -48,7 +48,8 @@ async def test_ip_limit_across_unknown_emails(owner_api: Api, app: object, monke
     assert r.status_code == 429 and r.json()["code"] == "LOGIN_RATE_LIMITED"
     assert r.json()["scope"] == "ip"
     # Câu cho scope=ip không hứa "nhờ Owner bấm Đặt lại mật khẩu" (không gỡ được bộ đếm IP chung).
-    assert "Đặt lại mật khẩu" not in r.json()["detail"] and "~/.gen-harness/bin/genh reset-password" in r.json()["detail"]
+    assert "Đặt lại mật khẩu" not in r.json()["detail"]
+    assert "~/.gen-harness/bin/genh reset-password" in r.json()["detail"]
     assert "mật khẩu tạm MỚI" in r.json()["detail"]
     assert (await _login(app, "khong12@example.vn", "x" * 12, IP_B)).status_code == 401
 
