@@ -21,6 +21,8 @@
  */
 import { randomUUID } from 'node:crypto';
 import type { GenBriefingSection, GenMessage, GenProposal, GenRating, GenStep } from '../../../packages/contracts/src/gen';
+import type { DraftDetail } from '../../../packages/contracts/src/p3-core';
+import { BAO } from './mock-p3-core';
 import type { P2Ctx } from './mock-phase2';
 import { USER_IDS } from './mock-ids';
 
@@ -30,6 +32,11 @@ export interface MockGenOptions {
   stepMs?: number;
   /** Chuông cho mọi Owner (như `notifications.notify` + `owner_ids` ở API thật). */
   notifyOwners?: (kind: string, title: string, body: string, link: string | null) => void;
+  /**
+   * v0.1.43 (F-24): kho nháp của Bàn làm việc (mock-p3-core `hooks.push` — cùng cơ chế `create_draft` dùng chung).
+   * Xác nhận nháp tin tạo nháp THẬT ở đây (chờ duyệt) và trả `result.id` = id nháp đó.
+   */
+  pushDraft?: (d: DraftDetail) => unknown;
 }
 
 interface Turn {
@@ -161,6 +168,23 @@ export function script(q: string): GenStep[] {
   ];
 }
 
+/** Nháp tin Gen soạn sau khi Sếp xác nhận — dạng như `POST /drafts` (kind message, chờ duyệt, gửi Zalo cho anh Bảo). */
+function makeGenDraft(code: string, title: string, text: string, userLabel: string): DraftDetail {
+  const paragraphs = text.split(/\n\s*\n/);
+  return {
+    id: `draft-gen-${randomUUID()}`, code, kind: 'message', kind_label: 'Tin nhắn', title,
+    agent: null, created_by: { id: OWNER_ID, name: userLabel }, created_at: new Date().toISOString(),
+    status: 'pending', hold_reason: 'ghi ra ngoài', subject: BAO,
+    paragraphs, text, lang: 'vi',
+    target: { channel: 'zalo', thread_type: 'user', group: null, person: BAO },
+    amount_vnd: null, autonomy_level: 4,
+    flags: { writes_external: true, personnel_related: false, over_threshold: false },
+    approve_label: 'Duyệt và gửi qua Zalo',
+    sources: [{ label: 'Gen soạn theo yêu cầu của Sếp', ref: null }],
+    context: [], side_actions: [], decision: null, send_result: null, versions: [],
+  };
+}
+
 export function createMock(opts: MockGenOptions) {
   const stepMs = opts.stepMs ?? 350;
   const settings = { enabled: true, roles: ['owner'], retention_days: 90 };
@@ -290,11 +314,19 @@ export function createMock(opts: MockGenOptions) {
         return problem(423, 'PIN_REQUIRED', 'Thao tác này cần nhập mã PIN', { detail: { operation: 'draft.create' } });
       }
       const code = pr.type === 'draft_message' ? 'ACT-0999' : `TSK-${String(++taskSeq).padStart(4, '0')}`;
-      const result = pr.type === 'draft_message' ? { type: 'draft' as const, id: randomUUID(), code, screen: 'workbench' } : { type: 'task' as const, id: randomUUID(), code, screen: 'tasks' };
+      const fields = { ...pr.fields, ...((body.fields as object) ?? {}) };
+      let result: NonNullable<GenProposal['result']> = { type: 'task', id: randomUUID(), code, screen: 'tasks' };
+      if (seg[3] === 'confirm' && pr.type === 'draft_message') {
+        // v0.1.43 (F-24): nháp THẬT ở Bàn làm việc (chờ duyệt, chưa gửi) — `result.id` mở đúng nháp qua /workbench?id=.
+        const f = fields as { title: string; text: string };
+        const draft = makeGenDraft(code, f.title, f.text, ctx.userLabel);
+        opts.pushDraft?.(draft);
+        result = { type: 'draft', id: draft.id, code, screen: 'workbench' };
+      }
       const next: GenProposal =
         seg[3] === 'cancel'
           ? { ...pr, status: 'cancelled' }
-          : ({ ...pr, fields: { ...pr.fields, ...((body.fields as object) ?? {}) }, status: 'confirmed', result } as GenProposal);
+          : ({ ...pr, fields, status: 'confirmed', result } as GenProposal);
       proposals.set(pr.id, next);
       if (next.status === 'confirmed' && next.type === 'reminder') {
         reminders.push({ title: next.fields.title, code, priority: next.fields.priority ?? 'P2', fired: false });

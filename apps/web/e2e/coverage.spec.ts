@@ -86,7 +86,7 @@ test.describe('Gen — thẻ đề xuất có xác nhận', () => {
     await expect(card).toContainText('Anh Bảo');
     await card.getByRole('button', { name: 'Xác nhận' }).click();
     await enterPin(page);
-    await expect(card).toContainText('Đã xác nhận · ACT-0999');
+    await expect(card).toContainText('Đã lưu nháp — chưa gửi · ACT-0999');
     await expect(card.getByText('Cần mã PIN')).toHaveCount(0);
   });
 

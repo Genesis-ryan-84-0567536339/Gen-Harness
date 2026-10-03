@@ -23,7 +23,7 @@ import { patchProposal } from './genStore';
 import { changedFields, fromLocalInput, initialDraft, PROPOSAL_TITLE, type Draft } from './proposalModel';
 
 const PROPOSAL_ICON: Record<GenProposal['type'], string> = {
-  draft_message: 'ph ph-paper-plane-tilt',
+  draft_message: 'ph ph-note-pencil',
   reminder: 'ph ph-alarm',
   assign: 'ph ph-user-switch',
 };
@@ -160,6 +160,10 @@ export function ProposalCard({ proposal: p }: { proposal: GenProposal }) {
 
   const title = PROPOSAL_TITLE[p.type];
   const resultScreen = p.result ? GEN_SCREEN_BY_KEY[p.result.screen] : undefined;
+  // v0.1.43 (F-24): nháp tin chỉ được LƯU, chưa gửi — nói rõ và dẫn thẳng tới đúng nháp ở Bàn làm việc để duyệt/gửi.
+  const isDraft = p.type === 'draft_message';
+  const draftId = isDraft && p.result?.type === 'draft' && p.result.id ? p.result.id : null;
+  const code = p.result?.code ? ` · ${p.result.code}` : '';
   return (
     <div className="gen-prop" data-status={p.status} role="group" aria-label={`Đề xuất: ${title}`}>
       <div className="gen-prop__head">
@@ -201,8 +205,20 @@ export function ProposalCard({ proposal: p }: { proposal: GenProposal }) {
         </div>
       ) : p.status === 'confirmed' ? (
         <div className="gen-prop__done">
-          <Icon name="ph-fill ph-check-circle" size={13} /> Đã xác nhận{p.result?.code ? ` · ${p.result.code}` : ''}
-          {resultScreen ? (
+          {isDraft ? (
+            <>
+              <Icon name="ph ph-floppy-disk" size={13} /> Đã lưu nháp — chưa gửi{code}
+            </>
+          ) : (
+            <>
+              <Icon name="ph-fill ph-check-circle" size={13} /> Đã xác nhận{code}
+            </>
+          )}
+          {draftId ? (
+            <Button variant="primary" className="btn-27" icon="ph ph-arrow-square-out" onClick={() => navigateTo(`/workbench?id=${encodeURIComponent(draftId)}`)}>
+              Duyệt &amp; gửi
+            </Button>
+          ) : resultScreen ? (
             <button type="button" className="gen-chip gen-chip--btn" onClick={() => navigateTo(resultScreen.path)}>
               <Icon name="ph ph-arrow-square-out" size={11} /> Mở {resultScreen.title}
             </button>
