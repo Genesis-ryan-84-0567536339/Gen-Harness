@@ -29,6 +29,10 @@ concurrency:
   group: ${{ inputs.from_release && format('installer-matrix-release-{0}-{1}', github.sha, github.run_id) || format('installer-matrix-{0}', github.ref) }}
   cancel-in-progress: ${{ !inputs.from_release }}
 
+# v0.1.48 (F-71): quyền tối thiểu cho mọi job (chỉ đọc mã nguồn).
+permissions:
+  contents: read
+
 jobs:
   # Ma trận đúng tài liệu: Ubuntu 22.04/24.04, macOS 14 arm64, Windows 11
   # (runner GitHub-hosted gần nhất: windows-2022). Build genh TỪ SOURCE ngay
@@ -41,9 +45,8 @@ jobs:
       matrix:
         os: [ubuntu-22.04, ubuntu-24.04, macos-14, windows-2022]
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version: "1.24.0"
 
@@ -59,6 +62,19 @@ jobs:
         working-directory: apps/genh
         shell: bash
         run: go test -count=1 ./...
+
+      # v0.1.48 (F-13) — quét bảo mật (báo cáo, không chặn), chỉ một ô để khỏi lặp. govulncheck v1.8.0 yêu cầu
+      # Go 1.26 trong go.mod; GOTOOLCHAIN=auto để Go 1.24 tự tải toolchain phù hợp (không đổi bản Go dùng build genh).
+      - name: Quét bảo mật govulncheck (báo cáo, không chặn)
+        if: matrix.os == 'ubuntu-24.04'
+        continue-on-error: true
+        working-directory: apps/genh
+        shell: bash
+        env:
+          GOTOOLCHAIN: auto
+        run: |
+          go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 -format json ./... > govulncheck.json || true
+          python3 ../../.github/scripts/scan_summary.py --kind govulncheck --title 'govulncheck (apps/genh)' govulncheck.json >> "$GITHUB_STEP_SUMMARY"
 
       - name: Build genh từ mã nguồn (native GOOS/GOARCH của runner)
         working-directory: apps/genh

@@ -204,6 +204,37 @@ class ReleaseGateTest(unittest.TestCase):
         errs = gate.check_e2e(gate.load(ROOT, gate.E2E_PATH))
         self.assertEqual([e for e in errs if gate.UPGRADE_JOB in e or "upgrade_from" in e or "tags[3]" in e], [])
 
+    # ── v0.1.48 (F-36): build ảnh thử lại 1 lần + cache gha ───────────────────
+    def test_build1_khong_continue_on_error(self) -> None:
+        old = "        id: build1\n        continue-on-error: true\n"
+        code, err = self.run_gate(self.replace(gate.RELEASE_PATH, old, "        id: build1\n"))
+        self.assertEqual(code, 1)
+        self.assertIn("build1", err)
+        self.assertIn("continue-on-error", err)
+
+    def test_thieu_buoc_build2(self) -> None:
+        code, err = self.run_gate(self.replace(gate.RELEASE_PATH, "        id: build2\n", "        id: build-khac\n"))
+        self.assertEqual(code, 1)
+        self.assertIn("build2", err)
+
+    def test_build2_khong_chay_khi_build1_loi(self) -> None:
+        old = "        if: steps.build1.outcome == 'failure'\n        id: build2\n"
+        code, err = self.run_gate(self.replace(gate.RELEASE_PATH, old, "        id: build2\n"))
+        self.assertEqual(code, 1)
+        self.assertIn("steps.build1.outcome == 'failure'", err)
+
+    def test_build_images_thieu_cache_gha(self) -> None:
+        old = "cache-from: type=gha,scope=${{ matrix.service }}"
+        code, err = self.run_gate(self.replace(gate.RELEASE_PATH, old, "cache-from: type=registry,ref=x"))
+        self.assertEqual(code, 1)
+        self.assertIn("type=gha", err)
+
+    def test_nhan_dang_softprops_khi_ghim_sha(self) -> None:
+        # Ghim SHA (`softprops/action-gh-release@<sha> # vX`) vẫn nhận ra bằng startswith → bỏ prerelease vẫn bị bắt.
+        code, err = self.run_gate(self.replace(gate.RELEASE_PATH, 'make_latest: "false"', 'make_latest: "true"'))
+        self.assertEqual(code, 1)
+        self.assertIn("make_latest", err)
+
 
 if __name__ == "__main__":
     unittest.main()
