@@ -787,17 +787,17 @@ func TestChildFailedMessage_DungTruocCon_GHE94BChuaDungGi(t *testing.T) {
 	}
 }
 
-// v0.1.44: cờ của `genh doctor` — --notify/--quiet/--test (trực canh).
+// v0.1.44: cờ của `genh doctor` — --notify/--quiet/--test (trực canh) và --if-requested (gói chẩn đoán).
 func TestParseDoctorFlags(t *testing.T) {
 	f, err := parseDoctorFlags([]string{"--notify", "--quiet", "--install-dir", "/i", "--port", "9443"})
-	if err != nil || !f.notify || !f.quiet || f.test || f.installDir != "/i" || f.port != 9443 {
+	if err != nil || !f.notify || !f.quiet || f.test || f.ifRequested || f.installDir != "/i" || f.port != 9443 {
 		t.Fatalf("--notify --quiet = %+v, %v", f, err)
 	}
 	f, err = parseDoctorFlags([]string{"--out", "x.zip"})
 	if err != nil || f.notify || f.out != "x.zip" {
 		t.Fatalf("--out = %+v, %v", f, err)
 	}
-	for _, bad := range [][]string{{"--test"}, {"thừa"}, {"--lạ"}} {
+	for _, bad := range [][]string{{"--test"}, {"--notify", "--if-requested"}, {"thừa"}, {"--lạ"}} {
 		if _, err := parseDoctorFlags(bad); err == nil {
 			t.Errorf("%v phải lỗi", bad)
 		}
@@ -826,10 +826,14 @@ func TestParseDoctorFlags(t *testing.T) {
 	}
 }
 
-// handle-requests: watchdog.json → xoá yêu cầu rồi `doctor --notify --test --quiet`;
-// yêu cầu gửi thử hỏng ⇒ bỏ, thoát 0.
-func TestHandleRequests_Watchdog(t *testing.T) {
-	f, err := parseDoctorFlags(append(handleRequestWatchdogArgs(), "--port", "8443", "--install-dir", "/i"))
+// handle-requests: doctor.json → `doctor --if-requested`; watchdog.json → xoá yêu cầu
+// rồi `doctor --notify --test --quiet`; yêu cầu gửi thử hỏng ⇒ bỏ, thoát 0.
+func TestHandleRequests_DoctorVaWatchdog(t *testing.T) {
+	f, err := parseDoctorFlags(append(handleRequestDoctorArgs(), "--port", "8443", "--install-dir", "/i"))
+	if err != nil || !f.ifRequested || f.notify {
+		t.Fatalf("handle-requests → doctor = %+v, %v", f, err)
+	}
+	f, err = parseDoctorFlags(append(handleRequestWatchdogArgs(), "--port", "8443", "--install-dir", "/i"))
 	if err != nil || !f.notify || !f.test || !f.quiet {
 		t.Fatalf("handle-requests → watchdog = %+v, %v", f, err)
 	}
@@ -862,6 +866,11 @@ func TestHandleRequests_Watchdog(t *testing.T) {
 	st, err := hostlink.ReadWatchdogStatus(dir)
 	if err != nil || st.State != hostlink.WatchdogStateError || code != 1 {
 		t.Fatalf("chưa cài: muốn state=error, thoát 1 — được %+v, %v, %d", st, err, code)
+	}
+	// Không có yêu cầu doctor ⇒ `doctor --if-requested` thoát 0 ngay.
+	captureStd(t, func() { code = runDoctor([]string{"--if-requested", "--install-dir", dir}) })
+	if code != 0 {
+		t.Fatalf("không có yêu cầu thì thoát 0, được %d", code)
 	}
 }
 

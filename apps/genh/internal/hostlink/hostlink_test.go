@@ -94,9 +94,9 @@ func TestRestoreRequestRoundTrip(t *testing.T) {
 	if err := WriteInfo(root, "v0.1.20", "cron", nil); err != nil {
 		t.Fatal(err)
 	}
-	if info, _ := ReadInfo(root); len(info.Requests) != 4 || info.Requests[1] != "restore" || info.Requests[2] != "offsite" ||
-		info.Requests[3] != "watchdog" {
-		t.Fatalf("genh.json phải báo watcher nhận update, restore, offsite (v0.1.40), watchdog (v0.1.44): %+v", info)
+	if info, _ := ReadInfo(root); len(info.Requests) != 5 || info.Requests[1] != "restore" || info.Requests[2] != "offsite" ||
+		info.Requests[3] != "doctor" || info.Requests[4] != "watchdog" {
+		t.Fatalf("genh.json phải báo watcher nhận update, restore, offsite (v0.1.40), doctor, watchdog (v0.1.44): %+v", info)
 	}
 	if err := WriteInfo(root, "v0.1.20", "", nil); err != nil {
 		t.Fatal(err)
@@ -148,14 +148,18 @@ func TestPendingDispatch(t *testing.T) {
 	if got := Pending(root); got != "" {
 		t.Fatalf("hộp thư trống, Pending = %q", got)
 	}
-	// v0.1.44: thứ tự update > restore > offsite > watchdog.
+	// v0.1.44: thứ tự update > restore > offsite > doctor > watchdog.
 	_ = os.WriteFile(WatchdogRequestPath(root), []byte(`{"action":"test"}`), 0o666)
 	if got := Pending(root); got != "watchdog" {
 		t.Fatalf("Pending = %q, muốn watchdog", got)
 	}
+	_ = os.WriteFile(DoctorRequestPath(root), []byte(`{}`), 0o666)
+	if got := Pending(root); got != "doctor" {
+		t.Fatalf("Pending = %q, muốn doctor (trước watchdog)", got)
+	}
 	_ = os.WriteFile(OffsiteRequestPath(root), []byte(`{"action":"run"}`), 0o666)
 	if got := Pending(root); got != "offsite" {
-		t.Fatalf("Pending = %q, muốn offsite (trước watchdog)", got)
+		t.Fatalf("Pending = %q, muốn offsite (trước doctor)", got)
 	}
 	_ = os.WriteFile(RestoreRequestPath(root), []byte(`{"key":"k"}`), 0o666)
 	if got := Pending(root); got != "restore" {

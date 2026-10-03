@@ -1,20 +1,18 @@
 package ops
 
 import (
-	"archive/zip"
 	"context"
 	"crypto/tls"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/compose"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/dockercli"
+	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/hostlink"
 )
 
 // DoctorDeps cho phép tiêm mọi phụ thuộc I/O thật (Docker CLI, TCP, TLS,
@@ -33,6 +31,24 @@ type DoctorDeps struct {
 	// runtime.GOOS / os.Getuid().
 	GOOS string
 	UID  string
+	// Version là phiên bản genh ghi vào versions.txt của gói chẩn đoán (v0.1.44).
+	Version string
+	// Now cho test (nil = time.Now) — tên tệp zip/thời điểm trong doctor-status.json.
+	Now func() time.Time
+}
+
+func (d DoctorDeps) runner() dockercli.Runner {
+	if d.Runner == nil {
+		return dockercli.ExecRunner{}
+	}
+	return d.Runner
+}
+
+func (d DoctorDeps) now() time.Time {
+	if d.Now != nil {
+		return d.Now().UTC()
+	}
+	return time.Now().UTC()
 }
 
 func realDialTCP(address string, timeout time.Duration) error {
@@ -73,14 +89,37 @@ func (d diagLine) String() string {
 }
 
 // RunDoctor chẩn đoán runtime/cổng/chứng chỉ/dung lượng/đồng hồ/kết nối
-// kênh, in tóm tắt ra out, và xuất báo cáo đầy đủ (report.txt +
-// `docker compose logs -t --tail=500`, mỗi dòng log có dấu thời gian —
-// v0.1.36 F-4) vào một tệp zip tại outPath.
+// kênh, in tóm tắt ra out, và xuất gói chẩn đoán ĐÃ LỌC BÍ MẬT (v0.1.44,
+// F-4b — xem doctor_bundle.go: report.txt, logs.txt `docker compose logs -t
+// --tail=2000`, genh-logs/, host/*.json, versions.txt, manifest.json) vào một
+// tệp zip tại outPath.
 func RunDoctor(ctx context.Context, env *Env, outPath string, deps DoctorDeps, out io.Writer) error {
-	runner := deps.Runner
-	if runner == nil {
-		runner = dockercli.ExecRunner{}
+	runner := deps.runner()
+	lines, as := collectDoctorLines(ctx, env, deps, runner)
+	for _, l := range lines {
+		_, _ = fmt.Fprintln(out, l.String())
 	}
+	writeAutostartStatus(env, as, out)
+
+	composePath, _ := env.LocatePath()
+	red := doctorRedactor(env, composePath)
+	now := deps.now()
+	entries := collectBundle(ctx, env, runner, deps, lines, now)
+	if err := writeDoctorBundleFile(outPath, 0o600, entries, red, now); err != nil {
+		return &OpError{
+			Code: ErrCodeDoctorReportFailed,
+			What: "Không ghi được báo cáo chẩn đoán ra " + outPath,
+			Why:  err.Error(),
+			Next: "Kiểm quyền ghi thư mục đích rồi thử lại.",
+			Err:  err,
+		}
+	}
+	_, _ = fmt.Fprintln(out, "\nBáo cáo đầy đủ (đã lọc bí mật): "+outPath)
+	return nil
+}
+
+// collectDoctorLines chạy các mục chẩn đoán (không in, không ghi gì).
+func collectDoctorLines(ctx context.Context, env *Env, deps DoctorDeps, runner dockercli.Runner) ([]diagLine, hostlink.AutostartStatus) {
 	client := deps.Client
 	if client == nil {
 		client = insecureLocalClient(5 * time.Second)
@@ -166,87 +205,10 @@ func RunDoctor(ctx context.Context, env *Env, outPath string, deps DoctorDeps, o
 	}
 
 	// 7–8. Tự chạy lại khi bật máy (v0.1.37, F-73): Docker + linger — ghi kèm
-	// run/autostart-status.json cho Console.
+	// run/autostart-status.json cho Console (bên gọi ghi).
 	as := CheckAutostart(ctx, AutostartDeps{Runner: runner, GOOS: deps.GOOS, UID: deps.UID})
 	lines = append(lines, autostartLines(as)...)
-
-	for _, l := range lines {
-		_, _ = fmt.Fprintln(out, l.String())
-	}
-	writeAutostartStatus(env, as, out)
-
-	// Xuất báo cáo zip: report.txt (các dòng trên, đầy đủ) + logs.txt
-	// (`docker compose logs -t --tail=500` mọi service; `-t` = dấu thời gian
-	// đầu mỗi dòng để đối chiếu sự cố theo giờ — v0.1.36 F-4).
-	composePath, locErr := env.LocatePath()
-	var logsOut []byte
-	var logsErr error
-	if locErr == nil {
-		bundle, secErr := env.LoadSecrets()
-		if secErr == nil {
-			logsArgs := compose.BaseArgs(composePath, "logs", "-t", "--tail=500")
-			logsOut, logsErr = runner.Output(ctx, dockercli.Cmd{Name: "docker", Args: logsArgs, Env: EnvOverlay(bundle), Dir: composeDir(composePath)})
-		} else {
-			logsErr = secErr
-		}
-	} else {
-		logsErr = locErr
-	}
-
-	if err := writeDoctorZip(outPath, lines, logsOut, logsErr); err != nil {
-		return &OpError{
-			Code: ErrCodeDoctorReportFailed,
-			What: "Không ghi được báo cáo chẩn đoán ra " + outPath,
-			Why:  err.Error(),
-			Next: "Kiểm quyền ghi thư mục đích rồi thử lại.",
-			Err:  err,
-		}
-	}
-	_, _ = fmt.Fprintln(out, "\nBáo cáo đầy đủ: "+outPath)
-	return nil
-}
-
-func writeDoctorZip(outPath string, lines []diagLine, logsOut []byte, logsErr error) error {
-	if err := os.MkdirAll(mustAbsDir(outPath), 0o755); err != nil {
-		return err
-	}
-	f, err := os.Create(outPath)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = f.Close() }()
-
-	zw := zip.NewWriter(f)
-	defer func() { _ = zw.Close() }()
-
-	var report strings.Builder
-	report.WriteString("Gen-Harness — báo cáo chẩn đoán (genh doctor)\n")
-	report.WriteString("Sinh lúc: " + time.Now().UTC().Format(time.RFC3339) + "\n\n")
-	for _, l := range lines {
-		report.WriteString(l.String() + "\n")
-	}
-
-	rw, err := zw.Create("report.txt")
-	if err != nil {
-		return err
-	}
-	if _, err := rw.Write([]byte(report.String())); err != nil {
-		return err
-	}
-
-	lw, err := zw.Create("logs.txt")
-	if err != nil {
-		return err
-	}
-	if logsErr != nil {
-		if _, err := lw.Write([]byte("không lấy được log: " + logsErr.Error() + "\n")); err != nil {
-			return err
-		}
-	} else if _, err := lw.Write(logsOut); err != nil {
-		return err
-	}
-
-	return nil
+	return lines, as
 }
 
 // mustAbsDir trả về Dir(path) — nếu path chỉ là tên tệp (không có thư mục

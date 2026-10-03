@@ -889,6 +889,62 @@ jobs:
           cat "$run/restore-status.json"
           until curl -k -fsS -o /dev/null "https://localhost:${GH_PORT}/api/v1/ready"; do sleep 3; done
 
+      - name: Gói chẩn đoán qua hộp thư — không chứa bí mật (v0.1.44+, tối đa 5 phút)
+        if: steps.v144.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          run="$GEN_HARNESS_HOME/run"
+          python3 -c "import json,sys; i=json.load(open(sys.argv[1])); assert 'doctor' in (i.get('requests') or []), 'genh.json thiếu doctor trong requests: %s' % i" "$run/genh.json"
+          api="$(docker ps --format '{{.Names}}' | grep -E '^gen-harness-api-[0-9]+$' | head -1)"
+          # Như nút "Gói chẩn đoán" trong Console: chính container api ghi yêu cầu qua bind mount.
+          docker exec "$api" python -c "import json,datetime; open('/var/lib/gh/host/request/doctor.json','w').write(json.dumps({'schema': 1, 'request_id': '0123456789abcdef', 'requested_at': datetime.datetime.now(datetime.timezone.utc).isoformat()}))"
+          deadline=$((SECONDS + 300))
+          while :; do
+            st="$(python3 -c "import json;d=json.load(open('$run/doctor-status.json'));print(d.get('state',''), d.get('request_id',''))" 2>/dev/null || true)"
+            state="${st%% *}"; rid="${st#* }"
+            if [ "$rid" = "0123456789abcdef" ] && [ "$state" = "done" ]; then break; fi
+            if [ "$rid" = "0123456789abcdef" ] && [ "$state" = "failed" ]; then
+              cat "$run/doctor-status.json"; echo "::error::genh báo tạo gói chẩn đoán lỗi" >&2; exit 1
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              ls -la "$run" "$run/request"; cat "$run/doctor-status.json" 2>/dev/null || true
+              echo "::error::watcher không tạo gói chẩn đoán trong 5 phút" >&2; exit 1
+            fi
+            sleep 5
+          done
+          cat "$run/doctor-status.json"; echo
+          f="$run/diagnostics/$(python3 -c "import json;print(json.load(open('$run/doctor-status.json'))['file'])")"
+          unzip -l "$f" | tee "$RUNNER_TEMP/diag-list.txt"
+          for e in logs.txt versions.txt host/update-status.json manifest.json; do
+            grep -q " $e\$" "$RUNNER_TEMP/diag-list.txt" || { echo "::error::gói chẩn đoán thiếu $e" >&2; exit 1; }
+          done
+          unzip -p "$f" >"$RUNNER_TEMP/diag-all.txt"
+          # Mọi giá trị trong config/secrets.json và secrets/* KHÔNG được xuất hiện (không in giá trị ra log).
+          python3 - "$GEN_HARNESS_HOME" "$RUNNER_TEMP/diag-all.txt" <<'PY'
+          import json, os, sys
+          home, dump = sys.argv[1], open(sys.argv[2], encoding="utf-8", errors="replace").read()
+          vals = []
+          for k, v in json.load(open(os.path.join(home, "config", "secrets.json"), encoding="utf-8")).items():
+              if isinstance(v, str) and len(v.strip()) >= 8 and k != "created_at":
+                  vals.append((k, v.strip()))
+          sd = os.path.join(home, "secrets")
+          if os.path.isdir(sd):
+              for n in sorted(os.listdir(sd)):
+                  p = os.path.join(sd, n)
+                  if os.path.isfile(p):
+                      v = open(p, encoding="utf-8", errors="replace").read().strip()
+                      if len(v) >= 8:
+                          vals.append(("secrets/" + n, v))
+                          if "-" in v:
+                              vals.append(("secrets/" + n + " (bỏ -)", v.replace("-", "")))
+          leaked = [k for k, v in vals if v in dump]
+          print("đã kiểm %d giá trị bí mật trong %d byte nội dung gói" % (len(vals), len(dump)))
+          if leaked:
+              print("::error::gói chẩn đoán LỘ bí mật: %s" % leaked, file=sys.stderr)
+              sys.exit(1)
+          PY
+          echo "OK: gói chẩn đoán đủ mục và không chứa bí mật."
+
       - name: genh auto-update enable → status → disable
         run: |
           set -euo pipefail

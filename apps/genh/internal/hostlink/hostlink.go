@@ -20,6 +20,9 @@
 //	  request/offsite.json       ← api ghi (v0.1.40) khi Owner chọn nơi lưu / bấm "Sao lưu ra ổ
 //	                               ngoài ngay" / tắt bản sao ngoài máy; genh xoá trước khi làm
 //	  offsite-status.json        ← genh ghi (v0.1.40): trạng thái bản sao ngoài máy (offsite.go)
+//	  request/doctor.json        ← api ghi (v0.1.44) khi Owner bấm "Gói chẩn đoán" (doctor.go)
+//	  doctor-status.json         ← genh ghi (v0.1.44): running → done/failed + tệp zip
+//	  diagnostics/               ← genh ghi (v0.1.44): zip gói chẩn đoán ĐÃ LỌC BÍ MẬT, giữ 3 bản
 //	  telegram.json              ← api ghi (v0.1.44): "Báo động & bản tin", token MÃ HOÁ (watchdog.go)
 //	  api-health.json            ← api ghi (v0.1.44) mỗi ~60 giây: sự cố phía api cho trực canh
 //	  watchdog-status.json       ← genh ghi (v0.1.44) mỗi lượt trực canh máy chủ (12 phút)
@@ -62,8 +65,8 @@ const (
 
 // Requests là các loại yêu cầu watcher hiện tại nhận (ghi vào genh.json để
 // Console biết nút nào bấm được — watcher cũ v0.1.19 chỉ nhận "update";
-// "offsite" từ v0.1.40; "watchdog" từ v0.1.44).
-var Requests = []string{"update", "restore", "offsite", "watchdog"}
+// "offsite" từ v0.1.40; "doctor", "watchdog" từ v0.1.44).
+var Requests = []string{"update", "restore", "offsite", "doctor", "watchdog"}
 
 // Dir là thư mục hộp thư dưới gốc cài đặt.
 func Dir(installDir string) string { return filepath.Join(installDir, "run") }
@@ -372,7 +375,8 @@ func ReadRestoreStatus(installDir string) (RestoreStatus, error) {
 
 // Pending cho biết watcher cần làm việc gì: "update" (ưu tiên — cập nhật đã
 // tự sao lưu trước), "restore", "offsite" (v0.1.40 — bản sao ngoài máy),
-// "watchdog" (v0.1.44 — "Gửi thử", làm sau cùng), hoặc "" khi hộp thư trống.
+// "doctor" (v0.1.44 — gói chẩn đoán), "watchdog" (v0.1.44 — "Gửi thử", làm sau
+// cùng), hoặc "" khi hộp thư trống.
 func Pending(installDir string) string {
 	switch {
 	case HasRequest(installDir):
@@ -381,6 +385,8 @@ func Pending(installDir string) string {
 		return "restore"
 	case HasOffsiteRequest(installDir):
 		return "offsite"
+	case HasDoctorRequest(installDir):
+		return "doctor"
 	case HasWatchdogRequest(installDir):
 		return "watchdog"
 	default:

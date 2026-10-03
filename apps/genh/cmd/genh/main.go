@@ -156,15 +156,18 @@ Lệnh vận hành (cờ chung mọi lệnh dưới đây: --port N, --install-d
                                           (lỗi → quay về bản an toàn; chưa nhận file host tuỳ ý)
   genh handle-requests                   (watcher gọi) làm yêu cầu Console để lại trong hộp thư
                                           run/request: update.json → cập nhật, restore.json → khôi phục,
-                                          offsite.json → bản sao ngoài máy, watchdog.json → gửi thử báo động
-                                          (thứ tự update > restore > offsite > watchdog)
+                                          offsite.json → bản sao ngoài máy, doctor.json → gói chẩn đoán,
+                                          watchdog.json → gửi thử báo động
+                                          (thứ tự update > restore > offsite > doctor > watchdog)
   genh doctor [--out report.zip]         chẩn đoán runtime/cổng/chứng chỉ/dung lượng/đồng hồ/
-                                          kết nối kênh, xuất báo cáo zip
+                                          kết nối kênh, xuất báo cáo zip (đã lọc bí mật)
   genh doctor --notify [--quiet] [--test]
                                           trực canh máy chủ MỘT lượt (lịch 12 phút gọi): đo dịch vụ,
                                           tự khởi động lại dịch vụ chết (≤ 1 lần/giờ), báo Telegram
                                           ("Báo động & bản tin" trong Console) — chỉ báo sự cố MỚI và
                                           sự cố ĐÃ ỔN; --test gửi thêm một tin thử; không tạo zip
+  genh doctor --if-requested             (watcher gọi) làm gói chẩn đoán Console yêu cầu
+                                          (run/request/doctor.json) vào run/diagnostics/
   genh watchdog enable|disable|status    bật/tắt/xem lịch trực canh máy chủ mỗi 12 phút (mặc định
                                           BẬT sau install/update, kể cả khi --no-auto-update);
                                           status in cơ chế, lần chạy gần nhất, sự cố đang mở
@@ -1014,6 +1017,8 @@ func runHandleRequests(args []string) int {
 		return runRestore(append([]string{"--if-requested"}, pass...))
 	case "offsite":
 		return runOffsite(append(handleRequestOffsiteArgs(*quiet), pass...))
+	case "doctor":
+		return runDoctor(append(handleRequestDoctorArgs(), pass...))
 	case "watchdog":
 		// Xoá yêu cầu TRƯỚC khi làm (watcher không kích lặp); tệp hỏng/action lạ ⇒ bỏ.
 		if _, err := hostlink.ConsumeWatchdogRequest(dir); err != nil {
@@ -1025,6 +1030,10 @@ func runHandleRequests(args []string) int {
 		return 0
 	}
 }
+
+// handleRequestDoctorArgs: run/request/doctor.json → `genh doctor --if-requested`
+// (gói chẩn đoán vào run/diagnostics/, genh tự xoá tệp yêu cầu trước khi làm).
+func handleRequestDoctorArgs() []string { return []string{"--if-requested"} }
 
 // handleRequestWatchdogArgs: run/request/watchdog.json ("Gửi thử") → một lượt
 // trực canh kèm tin thử.
@@ -1166,15 +1175,16 @@ func handleRequestUpdateArgs(quiet bool) []string {
 
 // doctorFlags là cờ của `genh doctor` sau khi Parse.
 type doctorFlags struct {
-	port       int
-	installDir string
-	out        string
-	notify     bool
-	quiet      bool
-	test       bool
+	port        int
+	installDir  string
+	out         string
+	notify      bool
+	quiet       bool
+	test        bool
+	ifRequested bool
 }
 
-// parseDoctorFlags: `genh doctor [--out f] | --notify [--quiet] [--test]`.
+// parseDoctorFlags: `genh doctor [--out f] | --notify [--quiet] [--test] | --if-requested`.
 func parseDoctorFlags(args []string) (doctorFlags, error) {
 	fs, port, installDir := opsFlagSet("doctor")
 	fs.SetOutput(io.Discard)
@@ -1182,15 +1192,19 @@ func parseDoctorFlags(args []string) (doctorFlags, error) {
 	notify := fs.Bool("notify", false, "trực canh máy chủ một lượt: đo, tự khởi động lại dịch vụ chết, báo Telegram (không tạo zip)")
 	quiet := fs.Bool("quiet", false, "kèm --notify: chỉ in khi có thay đổi (lịch 12 phút dùng cờ này)")
 	test := fs.Bool("test", false, "kèm --notify: gửi thêm một tin thử qua Telegram")
+	ifReq := fs.Bool("if-requested", false, "làm gói chẩn đoán Console yêu cầu (run/request/doctor.json — watcher gọi); không có thì thoát ngay")
 	if err := fs.Parse(args); err != nil {
 		return doctorFlags{}, err
 	}
 	if fs.NArg() != 0 {
 		return doctorFlags{}, fmt.Errorf("genh doctor không nhận đối số %q", fs.Arg(0))
 	}
-	f := doctorFlags{port: *port, installDir: *installDir, out: *out, notify: *notify, quiet: *quiet, test: *test}
+	f := doctorFlags{port: *port, installDir: *installDir, out: *out, notify: *notify, quiet: *quiet, test: *test, ifRequested: *ifReq}
 	if f.test && !f.notify {
 		return doctorFlags{}, errors.New("--test chỉ dùng cùng --notify")
+	}
+	if f.notify && f.ifRequested {
+		return doctorFlags{}, errors.New("--notify và --if-requested không dùng chung")
 	}
 	return f, nil
 }
@@ -1199,7 +1213,7 @@ func runDoctor(args []string) int {
 	f, err := parseDoctorFlags(args)
 	if err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "genh: %v\n", err)
-		_, _ = fmt.Fprintln(os.Stderr, "cách dùng: genh doctor [--out report.zip] | --notify [--quiet] [--test]")
+		_, _ = fmt.Fprintln(os.Stderr, "cách dùng: genh doctor [--out report.zip] | --notify [--quiet] [--test] | --if-requested")
 		return 2
 	}
 	env, ok := resolveOpsEnv(f.port, f.installDir)
@@ -1208,10 +1222,20 @@ func runDoctor(args []string) int {
 	}
 	ctx, stop := signalContext()
 	defer stop()
-	if f.notify {
+	switch {
+	case f.notify:
 		// Mã thoát: luôn 0 trừ lỗi cấu hình nghiêm trọng — sự cố của máy chủ đã
 		// báo qua Telegram/watchdog-status.json, timer không được "đỏ" vì chúng.
 		if err := ops.RunWatchdog(ctx, env, ops.WatchdogOptions{Quiet: f.quiet, Test: f.test}, ops.WatchdogDeps{}, os.Stdout); err != nil {
+			reportOpErr(err)
+			return 1
+		}
+		return 0
+	case f.ifRequested:
+		if !hostlink.HasDoctorRequest(env.InstallDir) {
+			return 0
+		}
+		if err := ops.RunDoctorRequest(ctx, env, ops.DoctorDeps{}, os.Stdout); err != nil {
 			reportOpErr(err)
 			return 1
 		}
@@ -1597,7 +1621,7 @@ func publishHostInfo(installDir string, port int) {
 		defer cancel()
 		rp := autoupdate.RequestPaths{InstallDir: installDir, RequestDir: hostlink.RequestDirPath(installDir), RequestFile: hostlink.RequestPath(installDir),
 			RestoreFile: hostlink.RestoreRequestPath(installDir), OffsiteFile: hostlink.OffsiteRequestPath(installDir),
-			WatchdogFile: hostlink.WatchdogRequestPath(installDir)}
+			DoctorFile: hostlink.DoctorRequestPath(installDir), WatchdogFile: hostlink.WatchdogRequestPath(installDir)}
 		if port != machine.DefaultPort {
 			rp.Port = port
 		}

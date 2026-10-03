@@ -137,7 +137,7 @@ Mọi bước **idempotent**: chạy lại `genh install` sau lỗi tiếp tục
 | `genh auto-update enable\|disable\|status` | **v0.1.5:** bật/tắt/kiểm lịch tự chạy `genh update --yes --quiet` mỗi đêm ~03:00 giờ máy (`internal/autoupdate`) — systemd `--user` timer (fallback crontab) trên Linux, LaunchAgent trên macOS, Task Scheduler trên Windows. `genh install` tự bật mặc định (tắt bằng `--no-auto-update`) |
 | `genh backup [--to path]` / `genh restore <file>` | Chạy trong container |
 | `genh export --to <file>` / `genh import <file> [--yes]` | Gói hồ sơ Owner `.ghbundle` (CSDL + object + bí mật, mã hoá) — chuyển sang máy khác (v0.1.1 §1b/2b, `docs/reports/HANDOFF-v0.1.1.md`) |
-| `genh doctor` | Chẩn đoán: runtime, cổng, chứng chỉ, dung lượng, đồng hồ, kết nối kênh — xuất báo cáo zip để gửi hỗ trợ. **v0.1.37 (F-73):** kiểm thêm "Tự chạy lại khi bật máy" (linger + Docker bật cùng máy) kèm lệnh sửa, ghi `run/autostart-status.json` như `genh status` |
+| `genh doctor` | Chẩn đoán: runtime, cổng, chứng chỉ, dung lượng, đồng hồ, kết nối kênh — xuất báo cáo zip để gửi hỗ trợ — **v0.1.44 (F-4b): ĐÃ LỌC BÍ MẬT**, thêm log genh, tệp trạng thái, phiên bản/digest (xem mục "Gói chẩn đoán"); `--if-requested` làm yêu cầu từ Console. **v0.1.37 (F-73):** kiểm thêm "Tự chạy lại khi bật máy" (linger + Docker bật cùng máy) kèm lệnh sửa, ghi `run/autostart-status.json` như `genh status` |
 | `genh reset-setup` | Sinh mã thiết lập mới (cần xác nhận) |
 | `genh doctor --notify [--quiet] [--test]` · `genh watchdog enable\|disable\|status` | **v0.1.44 (F-6b) — Trực canh máy chủ** mỗi 12 phút: đo dịch vụ, tự khởi động lại dịch vụ chết, báo Telegram chống spam (xem mục "Trực canh máy chủ" dưới bảng) |
 | `genh stop` / `genh start` | **v0.1.44:** `genh stop` ghi `config/paused-by-owner.json` ⇒ trực canh máy chủ tạm nghỉ (không tự khởi động lại, không báo động); `genh start` (và update/install thành công) xoá |
@@ -272,6 +272,29 @@ Owner chỉ biết máy chủ "chết" khi tự mở Console. Từ v0.1.44 genh 
   lại (kèm "Máy chủ vừa khởi động lại"). Thiếu linger (Linux) ⇒ timer `--user` chỉ chạy khi đang đăng nhập (genh in cảnh
   báo kèm lệnh `sudo loginctl enable-linger $USER`). Trực canh không giữ khoá loại trừ khi đo (chỉ thử rồi nhả ngay) để
   không chặn lịch đêm.
+
+### Gói chẩn đoán (v0.1.44, F-4b)
+
+`genh doctor [--out f.zip]` (gõ tay) và nút **"Gói chẩn đoán"** trong Console (api ghi `run/request/doctor.json`
+`{schema:1, request_id:"<16 hex>", requested_at}` → watcher → `genh doctor --if-requested`) tạo cùng một gói zip
+(`internal/ops/doctor_bundle.go`):
+
+- **Nội dung**: `report.txt` (các dòng chẩn đoán như cũ), `logs.txt` (`docker compose logs -t --tail=2000`),
+  `genh-logs/{auto-update,offsite,watchdog}.log` (đuôi ≤ 1 MiB), `host/{update-status,restore-status,disk-status,
+  autostart-status,offsite-status,genh,update-blocked,watchdog-status,doctor-status}.json` (đọc an toàn — không theo symlink,
+  ≤ 64 KiB), `versions.txt` (genh, `docker version`, `docker compose version`, revision alembic qua `psql` trong `db` — lỗi
+  thì ghi lý do, digest ảnh: ảnh khai trong compose.yaml + `docker compose ps` → `docker image inspect --format
+  '{{json .RepoDigests}}'`), `manifest.json` (danh sách tệp + **số chỗ đã che**, không kèm giá trị).
+- **Lọc bí mật** (`internal/redact`): MỌI mục văn bản đi qua Redactor — literal từ `config/secrets.json` (master key, mật khẩu
+  CSDL, khoá sao lưu, mã thiết lập), `secrets/{gh_master_key,gh_bridge_key,gh_browser_key,gh_offsite_key}` (Khoá khôi phục
+  che cả dạng bỏ dấu `-`), token Telegram giải mã được; rồi mẫu: token bot `\d{5,12}:[A-Za-z0-9_-]{30,}` (cả `/bot<token>/`),
+  `Bearer …`, `scheme://user:pass@`, `password=|token=|secret=|api_key=…`, `sk-…`, `AIza…` ⇒ `***`. **Không bao giờ** đưa vào:
+  `secrets/`, `config/secrets.json`, `.env`, `run/telegram.json`, `config/offsite.json`.
+- **Qua hộp thư**: genh đọc an toàn rồi **xoá** yêu cầu (request_id sai dạng `^[a-f0-9]{16}$` ⇒ bỏ, không ghi gì), ghi
+  `run/doctor-status.json` `{schema:1, request_id, state: running|done|failed, started_at, finished_at, file, size_bytes,
+  sha256, error_code, message}`, zip vào `run/diagnostics/genh-doctor-<UTC yyyymmddThhmmssZ>.zip` (thư mục 0755 phải là thư
+  mục thật thuộc người chạy genh — symlink ⇒ failed; tệp 0644 ghi qua tệp tạm O_EXCL + rename để api đọc), **giữ 3 zip mới
+  nhất**. Lỗi ⇒ `failed` + `error_code` **GH-E962** + câu thân thiện. Doctor **không** lấy khoá loại trừ (chỉ đọc).
 
 ## Phát hành
 
