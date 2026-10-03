@@ -15,6 +15,21 @@ export const GENH_COMMANDS: Array<{ cmd: string; what: string }> = [
   { cmd: 'genh logs worker', what: 'Xem lỗi gần nhất của Bộ xử lý nền (đổi "worker" thành api, bridge… cho dịch vụ khác).' },
 ];
 
+/**
+ * v0.1.45 (F-60): nói rõ giới hạn của mã PIN — PIN chặn người ngồi nhờ máy/phiên đang mở, KHÔNG phải lớp bảo vệ thứ
+ * hai (ai biết mật khẩu đăng nhập thì đặt lại được PIN); kèm lưu ý điểm đánh giá nhân sự có thể bị lách.
+ */
+export const PIN_LIMITS: { title: string; kicker: string; points: string[] } = {
+  title: 'Mã PIN bảo vệ được gì',
+  kicker: 'Giới hạn của mã PIN — đọc một lần cho chắc',
+  points: [
+    'Mã PIN chặn người nhờ máy hoặc phiên đăng nhập đang mở của Sếp để đổi cấu hình nhạy cảm: mức tự trị, tool MCP, tài khoản CLI, nhà cung cấp AI, mời người.',
+    'Mã PIN KHÔNG phải lớp bảo vệ thứ hai: ai biết mật khẩu đăng nhập thì đặt lại được PIN.',
+    'Vì vậy hãy giữ mật khẩu đăng nhập riêng, không dùng chung với chỗ khác, và đăng xuất ngay khi dùng xong trên máy lạ; nghi lộ mật khẩu thì đổi mật khẩu ngay.',
+    "Điểm đánh giá nhân sự có thể bị nhân viên lách bằng cách chèn câu lệnh cho AI hoặc câu xin điểm vào tin nhắn — dòng có chip 'Đáng ngờ' cần Sếp xem chứng cứ trước khi tin.",
+  ],
+};
+
 /** Nội dung "Báo lỗi" — không có bí mật (không cookie, không khoá), chỉ đủ để dev tái hiện. */
 export function diagnosticText(about: AboutInfo | undefined, me: Me | undefined, now = new Date()): string {
   const w = typeof window !== 'undefined' ? window : undefined;

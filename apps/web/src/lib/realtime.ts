@@ -43,6 +43,8 @@ export interface RealtimeOptions {
   onUnauthenticated?: () => void;
   /** Close 4428 — setup not finished. The client stops. */
   onSetupRequired?: () => void;
+  /** Close 4403 — Origin sai hoặc cần đổi mật khẩu. The client stops for good (no reconnect loop). */
+  onForbidden?: (reason?: string) => void;
   onStatus?: (s: RealtimeStatus) => void;
   factory?: SocketFactory;
   /** Ping interval (ms). Default 25 s. */
@@ -53,6 +55,9 @@ export interface RealtimeOptions {
 }
 
 const OPEN = 1;
+
+/** v0.1.45 (F-55): server từ chối — Origin sai hoặc cần đổi mật khẩu (`password_change_required`). */
+export const WS_CLOSE_FORBIDDEN = 4403;
 
 /** Exponential backoff 1 s, 2 s, 4 s … capped at 30 s, ±20 % jitter. */
 export function backoffDelay(attempt: number, random: () => number = Math.random): number {
@@ -66,7 +71,11 @@ export function wsUrl(loc: Pick<Location, 'protocol' | 'host'> = window.location
 
 /**
  * `/api/v1/ws` client: reconnects with backoff, pings, and hands every server
- * frame to `onEvent`. Close 4401 → login, 4428 → setup; neither reconnects.
+ * frame to `onEvent`. Server close codes (none of these reconnects):
+ * - 4401 — phiên hết hạn/bị thu hồi (server nạp lại phiên mỗi ≤ 60 s) → trang đăng nhập;
+ * - 4403 — Origin sai hoặc cần đổi mật khẩu → dừng hẳn (kết nối lại cũng bị từ chối);
+ * - 4428 — chưa thiết lập → trình thiết lập.
+ * Mọi mã khác (1006, 1011, 4000 stale…) → kết nối lại với backoff.
  */
 export class RealtimeClient {
   private socket: SocketLike | null = null;
@@ -160,10 +169,10 @@ export class RealtimeClient {
     socket.onerror = () => {
       /* onclose follows */
     };
-    socket.onclose = (ev) => this.handleClose(ev.code);
+    socket.onclose = (ev) => this.handleClose(ev.code, ev.reason);
   }
 
-  private handleClose(code: number) {
+  private handleClose(code: number, reason?: string) {
     if (!this.socket) return;
     const s = this.socket;
     s.onclose = null;
@@ -182,6 +191,13 @@ export class RealtimeClient {
       this.running = false;
       this.setStatus('stopped');
       this.opts.onSetupRequired?.();
+      return;
+    }
+    if (code === WS_CLOSE_FORBIDDEN) {
+      // Origin sai hoặc cần đổi mật khẩu: thử lại cũng bị từ chối — dừng hẳn, không vòng kết nối lại.
+      this.running = false;
+      this.setStatus('stopped');
+      this.opts.onForbidden?.(reason);
       return;
     }
     this.scheduleReconnect();
@@ -393,6 +409,9 @@ function sharedClient(): RealtimeClient {
         if (window.location.pathname.startsWith('/setup')) return;
         navigateTo('/setup', { replace: true });
       },
+      // 4403: Origin sai hoặc cần đổi mật khẩu — client đã dừng hẳn. Trường hợp đổi mật khẩu, lời gọi HTTP kế tiếp
+      // tự đưa Sếp tới màn đổi mật khẩu; tải lại trang (sau khi đổi) sẽ mở kết nối mới.
+      onForbidden: () => {},
     });
   }
   return client;

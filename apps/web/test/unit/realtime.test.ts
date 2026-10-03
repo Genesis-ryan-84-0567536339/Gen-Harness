@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { QueryClient, type InfiniteData } from '@tanstack/react-query';
 import type { Channel, CliLoginEvent, CursorPage, Pipeline, RawItem, RealtimeEvent, RefineryRun } from '@gen-harness/contracts';
-import { RealtimeClient, applyEvent, backoffDelay, parseFrame, rawMatches, wsUrl, type SocketLike } from '../../src/lib/realtime';
+import { RealtimeClient, WS_CLOSE_FORBIDDEN, applyEvent, backoffDelay, parseFrame, rawMatches, wsUrl, type SocketLike } from '../../src/lib/realtime';
 import { qk2 } from '../../src/lib/dataQueries';
 
 class FakeSocket implements SocketLike {
@@ -26,9 +26,9 @@ class FakeSocket implements SocketLike {
   message(frame: unknown) {
     this.onmessage?.({ data: JSON.stringify(frame) });
   }
-  serverClose(code: number) {
+  serverClose(code: number, reason?: string) {
     this.readyState = 3;
-    this.onclose?.({ code });
+    this.onclose?.({ code, reason });
   }
 }
 
@@ -106,6 +106,43 @@ describe('RealtimeClient', () => {
     expect(onSetupRequired).toHaveBeenCalledOnce();
     vi.advanceTimersByTime(60_000);
     expect(sockets).toHaveLength(2);
+  });
+
+  it('close 4403 (Origin sai / cần đổi mật khẩu) → dừng hẳn, không tạo socket mới', () => {
+    const onForbidden = vi.fn();
+    const onUnauthenticated = vi.fn();
+    const c = new RealtimeClient({ url: () => 'u', onEvent: () => {}, factory, onForbidden, onUnauthenticated, random: () => 0.5 });
+    c.start();
+    sockets[0].open();
+    sockets[0].serverClose(WS_CLOSE_FORBIDDEN, 'origin');
+    expect(c.status).toBe('stopped');
+    expect(onForbidden).toHaveBeenCalledWith('origin');
+    expect(onUnauthenticated).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(10 * 60_000);
+    expect(sockets).toHaveLength(1);
+  });
+
+  it('close 4401 giữa chừng (phiên bị thu hồi) → gọi chuyển trang đăng nhập, không kết nối lại', () => {
+    const onUnauthenticated = vi.fn();
+    const c = new RealtimeClient({ url: () => 'u', onEvent: () => {}, factory, onUnauthenticated, random: () => 0.5 });
+    c.start();
+    sockets[0].open();
+    sockets[0].message({ type: 'header', data: {} });
+    sockets[0].serverClose(4401, 'session_revoked');
+    expect(onUnauthenticated).toHaveBeenCalledOnce();
+    expect(c.status).toBe('stopped');
+    vi.advanceTimersByTime(10 * 60_000);
+    expect(sockets).toHaveLength(1);
+  });
+
+  it('close 1011 (lỗi máy chủ) vẫn kết nối lại', () => {
+    const c = new RealtimeClient({ url: () => 'u', onEvent: () => {}, factory, random: () => 0.5 });
+    c.start();
+    sockets[0].open();
+    sockets[0].serverClose(1011);
+    vi.advanceTimersByTime(1000);
+    expect(sockets).toHaveLength(2);
+    c.stop();
   });
 
   it('drops a stale connection that stopped answering pings', () => {

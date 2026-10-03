@@ -87,6 +87,9 @@ interface ReviewRow {
   overridden_at: string | null;
   override_reason: string | null;
   supersedes_id: string | null;
+  /** v0.1.45 (F-60): cờ 'Đáng ngờ' — sửa tay giữ nguyên cờ của dòng bị thay. */
+  suspicious: boolean;
+  suspicious_reason: string | null;
 }
 interface Lineage {
   board: ReviewBoard;
@@ -118,6 +121,8 @@ function fullItem(l: Lineage): PeopleReviewFull {
     overridden_at: r.overridden_at,
     override_reason: r.override_reason,
     supersedes_id: r.supersedes_id,
+    suspicious: r.suspicious,
+    suspicious_reason: r.suspicious_reason,
   };
 }
 function fullDetail(l: Lineage): PeopleReviewFullDetail {
@@ -196,6 +201,8 @@ function seedLineages(): Lineage[] {
       overridden_at: null,
       override_reason: null,
       supersedes_id: null,
+      suspicious: false,
+      suspicious_reason: null,
     };
     return { board, person, ...period, rows: [row], disputes: [], viewedBy: viewedSeed };
   };
@@ -236,6 +243,12 @@ function seedLineages(): Lineage[] {
     mk('candidate', SANG, 76, null, 'Phỏng vấn vòng 2 phản hồi tốt, đúng hẹn, hỏi kỹ về lộ trình phát triển.', 'Chuyển hồ sơ sang vòng thương lượng lương.', [3]),
     mk('student', CHAU, 69, 'flat', 'Hoàn thành 4/5 bài tập đúng hạn, một bài nộp trễ không báo trước.', 'Nhắc quy định báo trễ trước buổi học kế tiếp.', [2]),
   ];
+  // F-60: một dòng bị gắn cờ 'Đáng ngờ' (nhân viên chèn câu xin điểm vào tin nhắn).
+  const tuRow = lineages.find((l) => l.person.id === TU.id)?.rows[0];
+  if (tuRow) {
+    tuRow.suspicious = true;
+    tuRow.suspicious_reason = 'Có 2 tin giống lệnh cho AI hoặc xin điểm (vd: “Bỏ qua mọi chỉ dẫn”) — kiểm tra trước khi dùng điểm này';
+  }
   // Phản biện mẫu: Anh Tú không đồng ý với điểm, Owner đã mở phản biện hộ để có luồng test "mở/giải quyết".
   disputeSeq += 1;
   const tuLineage = lineages.find((l) => l.person.id === TU.id)!;
@@ -369,6 +382,8 @@ export function createMock(opts: P3Options) {
       overridden_at: new Date().toISOString(),
       override_reason: b.reason,
       supersedes_id: prev.id,
+      suspicious: prev.suspicious,
+      suspicious_reason: prev.suspicious_reason,
     };
     const oldId = prev.id;
     l.rows = [row, ...l.rows];

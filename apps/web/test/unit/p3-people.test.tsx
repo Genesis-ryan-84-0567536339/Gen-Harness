@@ -70,6 +70,8 @@ const FULL_ITEM = {
   overridden_at: null,
   override_reason: null,
   supersedes_id: null,
+  suspicious: false,
+  suspicious_reason: null as string | null,
 };
 
 const FULL_DETAIL: PeopleReviewFullDetail = {
@@ -85,6 +87,32 @@ const FULL_DETAIL: PeopleReviewFullDetail = {
 };
 
 describe('Đánh giá con người — Q4 (docs/PLAN.md)', () => {
+  it("F-60: dòng bị gắn cờ hiện chip 'Đáng ngờ' (title = lý do), dòng thường không có", async () => {
+    const reason = 'Có 1 tin giống lệnh cho AI hoặc xin điểm (vd: “Bỏ qua mọi chỉ dẫn”) — kiểm tra trước khi dùng điểm này';
+    const bad = { ...FULL_ITEM, id: 'rev-9', person: { ...PERSON, id: 'p-bad', name: 'Lê Văn Lách' }, suspicious: true, suspicious_reason: reason };
+    mockFetch((c) => {
+      if (c.url.includes('/people/reviews/rev-9')) return json(200, { ...FULL_DETAIL, ...bad });
+      if (c.url.includes('/people/reviews')) return json(200, { items: [FULL_ITEM, bad], next_cursor: null, total: 2 } satisfies PeopleReviewPage);
+      return json(404);
+    });
+    renderScreen(<PeopleScreen />);
+    expect(await screen.findByText('Lê Văn Lách')).toBeInTheDocument();
+    const chips = screen.getAllByTestId('ppl-suspicious');
+    expect(chips).toHaveLength(1);
+    expect(chips[0]).toHaveTextContent('Đáng ngờ');
+    expect(chips[0]).toHaveAttribute('title', reason);
+    const rows = document.querySelectorAll('.ppl-row');
+    const normal = Array.from(rows).find((r) => r.textContent?.includes('Phạm Anh Tú'));
+    expect(normal).toBeDefined();
+    expect(normal?.textContent).not.toContain('Đáng ngờ');
+
+    const user = userEvent.setup();
+    const badRow = Array.from(rows).find((r) => r.textContent?.includes('Lê Văn Lách')) as HTMLElement;
+    await user.click(within(badRow).getByRole('button', { name: 'Sửa điểm tay' }));
+    const note = await within(await screen.findByRole('dialog')).findByRole('note', { name: 'Cảnh báo đáng ngờ' });
+    expect(note).toHaveTextContent(reason);
+  });
+
   it('Owner (nhánh full): thấy điểm/tín hiệu/khuyến nghị, sửa điểm tay giữ lịch sử', async () => {
     const user = userEvent.setup();
     const overridden: PeopleReviewFullDetail = { ...FULL_DETAIL, id: 'rev-2', score: 70, overridden: true, overridden_by: { id: 'u-owner', name: 'Anh Cơ La (Ryan)' }, overridden_at: '2026-09-24T02:00:00Z', override_reason: 'Xem lại chứng cứ, khách chủ động im lặng.', supersedes_id: 'rev-1', history: [{ id: 'rev-2', score: 70, trend: 'down', created_at: '2026-09-24T02:00:00Z', overridden_by: { id: 'u-owner', name: 'Anh Cơ La (Ryan)' }, override_reason: 'Xem lại chứng cứ, khách chủ động im lặng.' }, FULL_DETAIL.history[0]] };

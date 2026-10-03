@@ -10,7 +10,7 @@ import { toast } from '../lib/toast';
 import { CardError, SkeletonLines } from '../screens/common';
 import { ScreenTitle } from '../screens/ScreenPage';
 import { DiagnosticsCard } from './DiagnosticsCard';
-import { GENH_COMMANDS, GENH_VERSION_LABEL, SERVER_VERSION_LABEL, diagnosticText, withVersions } from './helpModel';
+import { GENH_COMMANDS, GENH_VERSION_LABEL, PIN_LIMITS, SERVER_VERSION_LABEL, diagnosticText, withVersions } from './helpModel';
 import { roleLabel } from '../screens/system/systemModel';
 
 const GEN_EXAMPLES = ['Hôm nay có gì gấp?', 'Khách nào hỏi giá hôm nay?', 'Sao lưu ở đâu?', 'Mời nhân viên mới thế nào?'];
@@ -130,6 +130,23 @@ export function HelpPage() {
             </ul>
           </Card>
         )}
+
+        {/* v0.1.45 (F-60): giới hạn của mã PIN — ai cũng thấy (mỗi người tự giữ mật khẩu của mình). */}
+        <Card
+          title={
+            <h2 className="help-h2" style={{ font: 'inherit', margin: 0 }}>
+              {PIN_LIMITS.title}
+            </h2>
+          }
+          kicker={PIN_LIMITS.kicker}
+          data-testid="help-pin-limits"
+        >
+          <ul className="help-examples">
+            {PIN_LIMITS.points.map((t) => (
+              <li key={t}>{t}</li>
+            ))}
+          </ul>
+        </Card>
 
         {/* v0.1.44 (F-4b): gói chẩn đoán (genh doctor) — chỉ Owner (cần PIN, đọc nhật ký máy chủ). */}
         {isOwner ? <DiagnosticsCard /> : null}

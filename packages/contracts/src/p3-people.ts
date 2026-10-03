@@ -28,6 +28,10 @@ export interface PeopleReviewFull {
   overridden_at: string | null;
   override_reason: string | null;
   supersedes_id: string | null;
+  /** v0.1.45 (F-60): tin giống lệnh cho AI / xin điểm → cờ 'Đáng ngờ' (chỉ cảnh báo, điểm không đổi). */
+  suspicious: boolean;
+  /** Lý do ngắn (không chứa nguyên tin) — null khi không gắn cờ. */
+  suspicious_reason: string | null;
 }
 export interface PeopleReviewHistoryItem {
   id: string;

@@ -9,18 +9,26 @@ import contextlib
 import logging
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlsplit
 
 import orjson
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from redis.asyncio import Redis
 
 from gh.auth import rbac, service
+from gh.config import get_settings
 from gh.db import sessionmaker
 
 log = logging.getLogger("gh.ws")
 router = APIRouter()
 
 CHANNEL = "gh.ws"
+
+# v0.1.45 (F-55): kết nối WS nạp lại phiên định kỳ — phiên bị thu hồi/hết hạn, người dùng bị khoá/xoá hoặc phải đổi
+# mật khẩu thì socket bị đóng trong ≤ SESSION_RECHECK_SECONDS; đổi vai trò/quyền có hiệu lực từ lượt nạp sau.
+# Mã đóng: 4401 phiên hết/thu hồi · 4403 Origin sai hoặc phải đổi mật khẩu · 4428 chưa thiết lập · 1011 lỗi DB kéo dài.
+SESSION_RECHECK_SECONDS: float = 60
+SESSION_RECHECK_MAX_ERRORS = 3
 
 # type → quyền cần có (None = mọi người đã đăng nhập).
 EVENT_PERMISSION: dict[str, str | None] = {
@@ -78,7 +86,58 @@ def allowed(permissions: dict[str, str], type: str) -> bool:
     if type not in EVENT_PERMISSION:
         return False
     need = EVENT_PERMISSION[type]
-    return need is None or permissions.get(need, rbac.NONE) != rbac.NONE
+    if need is None:
+        return True
+    have = permissions.get(need, rbac.NONE)
+    if need == "system.manage":
+        # F-58 (đồng bộ với gh.auth.deps): quản trị hệ thống chỉ dành cho phạm vi ALL.
+        return rbac.at_least(have, rbac.ALL)
+    return have != rbac.NONE
+
+
+_DEFAULT_PORTS = {"https": 443, "http": 80, "wss": 443, "ws": 80}
+
+
+def _origin_key(url: str) -> tuple[str, str, int] | None:
+    try:
+        parts = urlsplit(url.strip())
+        scheme, host, port = parts.scheme.lower(), (parts.hostname or "").lower(), parts.port
+    except ValueError:
+        return None
+    if not scheme or not host:
+        return None
+    return scheme, host, port if port is not None else _DEFAULT_PORTS.get(scheme, 0)
+
+
+def _netloc_key(netloc: str, default_port: int) -> tuple[str, int] | None:
+    try:
+        parts = urlsplit(f"//{netloc.strip()}")
+        host, port = (parts.hostname or "").lower(), parts.port
+    except ValueError:
+        return None
+    if not host:
+        return None
+    return host, port if port is not None else default_port
+
+
+def origin_allowed(origin: str | None, host: str | None, public_url: str) -> bool:
+    """F-55: chặn trang lạ mở WS bằng cookie của Sếp (Cross-Site WebSocket Hijacking).
+
+    Hợp lệ khi Origin trùng gốc của `public_url`, HOẶC host:port của Origin trùng header Host của chính yêu cầu WS
+    (cùng gốc — Console mở bằng IP LAN vẫn chạy; trình duyệt không cho trang lạ giả Host). Thiếu Origin → từ chối.
+    """
+    if not origin or origin.strip().lower() == "null":
+        return False
+    o = _origin_key(origin)
+    if o is None:
+        return False
+    if o == _origin_key(public_url):
+        return True
+    if host:
+        h = _netloc_key(host, o[2])
+        if h is not None and h == (o[1], o[2]):
+            return True
+    return False
 
 
 class Hub:
@@ -139,10 +198,54 @@ class Hub:
                 self.clients.pop(ws, None)
 
 
+async def _close(ws: WebSocket, code: int, reason: str) -> None:
+    with contextlib.suppress(Exception):
+        await ws.close(code=code, reason=reason)
+
+
+async def _watch_session(ws: WebSocket, token: str, hub: "Hub") -> None:
+    """Nạp lại phiên mỗi SESSION_RECHECK_SECONDS (chỉ đọc — `renew=False` không gia hạn phiên/PIN).
+
+    Mất phiên → rời hub + đóng 4401; còn hợp lệ → cập nhật người dùng (vai trò/quyền mới). Lỗi DB tạm thời giữ kết nối
+    và thử lại lượt sau; SESSION_RECHECK_MAX_ERRORS lượt lỗi liên tiếp → đóng 1011.
+    """
+    errors = 0
+    while True:
+        await asyncio.sleep(SESSION_RECHECK_SECONDS)
+        try:
+            async with sessionmaker()() as db:
+                user = await service.load_session(db, token, renew=False)
+                await db.rollback()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 — lỗi DB tạm thời: không đóng nhầm
+            errors += 1
+            log.warning("ws nạp lại phiên lỗi (%d/%d): %s", errors, SESSION_RECHECK_MAX_ERRORS,
+                        type(exc).__name__)
+            if errors >= SESSION_RECHECK_MAX_ERRORS:
+                hub.clients.pop(ws, None)
+                await _close(ws, 1011, "session_check_failed")
+                return
+            continue
+        errors = 0
+        if user is None or user.must_change_password:
+            hub.clients.pop(ws, None)
+            await _close(ws, 4401, "session_revoked")
+            return
+        if ws in hub.clients:
+            hub.clients[ws] = user
+
+
 @router.websocket("/ws")
 async def ws_endpoint(ws: WebSocket) -> None:
     from gh.setup.routes import console_ready
 
+    origin = ws.headers.get("origin")
+    if not origin_allowed(origin, ws.headers.get("host"), get_settings().public_url):
+        log.warning("ws từ chối Origin không hợp lệ: %r", (origin or "")[:200])
+        await ws.accept()
+        await ws.close(code=4403, reason="origin")
+        return
     token = ws.cookies.get(service.SESSION_COOKIE)
     async with sessionmaker()() as db:
         ready = await console_ready(db)
@@ -151,11 +254,15 @@ async def ws_endpoint(ws: WebSocket) -> None:
     if not ready:
         await ws.close(code=4428)
         return
-    if user is None:
+    if user is None or token is None:
         await ws.close(code=4401)
+        return
+    if user.must_change_password:
+        await ws.close(code=4403, reason="password_change_required")
         return
     hub: Hub = ws.app.state.ws_hub
     hub.clients[ws] = user
+    watcher = asyncio.create_task(_watch_session(ws, token, hub), name="ws-session-watch")
     try:
         while True:
             raw = await ws.receive_text()
@@ -166,7 +273,10 @@ async def ws_endpoint(ws: WebSocket) -> None:
             if isinstance(msg, dict) and msg.get("type") == "ping":
                 await ws.send_text(orjson.dumps({"type": "pong", "data": {},
                                                  "at": datetime.now(UTC).isoformat()}).decode())
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, RuntimeError):
         pass
     finally:
+        watcher.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await watcher
         hub.clients.pop(ws, None)
