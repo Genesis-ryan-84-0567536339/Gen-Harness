@@ -26,8 +26,6 @@ import {
 } from './systemModel';
 import { useCliLogin, type CliLogin } from './useCliLogin';
 
-/** v0.1.45 (F-20): thêm tài khoản CLI (POST /cli/login) cần phiên PIN `cli.switch_account`. */
-
 export function CliLoginPanel({ login }: { login: CliLogin }) {
   const [code, setCode] = useState('');
   const { event, status } = login;
@@ -169,6 +167,9 @@ export function CliCard({ canManage, showCredentials = true, kind = 'antigravity
   const list = profiles.data ?? [];
   const active = list.find((p) => p.active);
   const others = list.filter((p) => !p.active).length;
+  // Nút chính gọi login.start: "Đăng nhập lại" (phiên hết hạn) hoặc chưa có tài khoản nào — chỉ khi đó nhắc cần PIN
+  // ("Đổi tài khoản" mở hộp thoại tự nói cần PIN).
+  const loginIsMain = canManage && active?.state === 'expired' && !login.active;
   const chip = cliChip(active);
   const startLogin = () => {
     setSwitchOpen(false);
@@ -213,7 +214,7 @@ export function CliCard({ canManage, showCredentials = true, kind = 'antigravity
                     : txt.empty}
               </div>
             </div>
-            {canManage && active?.state === 'expired' && !login.active ? (
+            {loginIsMain ? (
               <Button variant="primary" className="btn-28" icon="ph ph-sign-in" onClick={() => login.start.mutate()} loading={login.start.isPending} data-main-action>
                 Đăng nhập lại
               </Button>
@@ -227,8 +228,9 @@ export function CliCard({ canManage, showCredentials = true, kind = 'antigravity
               </Button>
             ) : null}
           </div>
-          {canManage && !login.active ? (
+          {loginIsMain || (canManage && list.length === 0 && !login.active) ? (
             // v0.1.45 (F-20): bắt đầu đăng nhập (thêm tài khoản) cần phiên PIN `cli.switch_account` — hộp PIN tự mở khi gặp 423.
+            // Chỉ nhắc khi nút chính đang là nút đăng nhập; 'Đổi tài khoản' mở hộp thoại tự nói cần PIN.
             <PinHint text={CLI_ADD_PIN_TEXT} title={CLI_ADD_PIN_TEXT} />
           ) : null}
           </>

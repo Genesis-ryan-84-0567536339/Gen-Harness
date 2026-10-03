@@ -58,7 +58,7 @@ export const STAFF_HOWTO =
  * (không chứa nguyên tin); thiếu lý do thì dùng câu mặc định.
  */
 export const SUSPICIOUS_FALLBACK =
-  'Có tin giống lệnh cho AI hoặc xin điểm — Sếp xem chứng cứ trước khi dùng điểm này.';
+  'Có tin giống lệnh cho AI hoặc xin điểm — xem chứng cứ trước khi dùng điểm này.';
 export function suspiciousLabel(item: Pick<PeopleReviewFull, 'suspicious' | 'suspicious_reason'>): { text: string; title: string } | null {
   if (!item.suspicious) return null;
   return { text: 'Đáng ngờ', title: withStop(item.suspicious_reason?.trim() || SUSPICIOUS_FALLBACK) };

@@ -40,10 +40,10 @@ export interface P3Options {
 const ago = (min: number) => new Date(Date.now() - min * 60_000).toISOString();
 const has = (ctx: P2Ctx, perm: string) => !!ctx.perms[perm] && ctx.perms[perm] !== 'none';
 
-/** owner (mặc định) → `full`; auditor → `log`; còn lại (manager/operator/agent_staff) → `none` (403, ẩn hẳn).
- * Owner có thể tự cấp thêm cho vai trò khác trong Quyền hạn (GĐ 4) — chưa dựng ở mock này. */
+/** Như `gh.biz.people.routes._access_mode`: `people_review.read` khác `none` → `full` (Owner mặc định; vai trò khác
+ * khi Owner cấp trong Quyền hạn); auditor → `log`; còn lại (manager/operator/agent_staff mặc định) → `none` (403). */
 function accessMode(ctx: P2Ctx): ReviewAccessMode {
-  if (ctx.role === 'owner') return 'full';
+  if (ctx.role === 'owner' || has(ctx, 'people_review.read')) return 'full';
   if (ctx.role === 'auditor') return 'log';
   return 'none';
 }

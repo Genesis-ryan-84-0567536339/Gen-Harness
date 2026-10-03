@@ -6,6 +6,8 @@ export const qk = {
   navigation: ['shell', 'navigation'] as const,
   header: ['shell', 'header'] as const,
   setupState: ['setup', 'state'] as const,
+  /** Agent + mức tự trị hiện tại của bước 9 — lưu bước 9 / sửa agent phải cập nhật (form điền sẵn không được cũ). */
+  setupStep9: ['setup', 'step9'] as const,
   /** v0.1.23 (B6): chuông thông báo — `notification.new` qua WS chèn thẳng vào đây (lib/realtime.ts). */
   notifications: ['notifications'] as const,
 };

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { OWNER, loginAs, loginAsOwner, mockHook, resetMock } from './support';
+import { MANAGER, OWNER, loginAs, loginAsOwner, mockHook, resetMock } from './support';
 
 /**
  * v0.1.45 — nghiệm thu sau khi gộp 4 gói (pin-rbac-cli, mcp-ssrf-log, run-pg-secrets, ws-people-help), phần mock:
@@ -96,6 +96,8 @@ test.describe('v0.1.45 — nghiệm thu sau gộp (mock)', () => {
     await expect(confirm.getByText('Đã huỷ — thao tác cần mã PIN.')).toBeVisible();
     await confirm.getByRole('button', { name: 'Giữ nguyên' }).click();
     await expect(sel).toHaveValue('write');
+    // Giữ nguyên là lựa chọn có chủ ý — lỗi 'Đã huỷ' không ở lại trong ô.
+    await expect(crm.getByText('Đã huỷ — thao tác cần mã PIN.')).toHaveCount(0);
     await expectNoRawError(page);
   });
 
@@ -170,5 +172,26 @@ test.describe('v0.1.45 — vai trò khác Owner (mock)', () => {
     await expect(page.getByRole('button', { name: 'Thêm máy chủ' })).toHaveCount(0);
     await expect(page.getByLabel('Loại tool deal.upsert')).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Xoá' })).toHaveCount(0);
+  });
+
+  test("Manager có people_review.read = team, write = none: thấy cờ 'Đáng ngờ' nhưng không có nút Bỏ cờ / Sửa điểm (không nút chết 403)", async ({ page }) => {
+    await mockHook(page.request, 'perm', { role: 'manager', permission: 'people_review.read', scope: 'team' });
+    await loginAs(page, MANAGER.email);
+    await page.goto('/people');
+    const pin = page.getByRole('dialog', { name: PIN_DIALOG });
+    await expect(pin).toBeVisible();
+    await page.getByLabel('Mã PIN — chữ số 1/6').click();
+    await page.keyboard.type(MANAGER.pin);
+    await expect(pin).toBeHidden();
+    const row = page.locator('.ppl-row', { has: page.getByTestId('ppl-suspicious') }).first();
+    await expect(row).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Sửa điểm tay' })).toHaveCount(0);
+    await row.getByRole('button', { name: 'Xem chi tiết' }).click();
+    const dlg = page.getByRole('dialog');
+    await expect(dlg.getByRole('note', { name: 'Cảnh báo đáng ngờ' })).toBeVisible();
+    await expect(dlg.getByTestId('ppl-read-only')).toHaveText('Chỉ người có quyền sửa đánh giá mới sửa điểm hoặc bỏ cờ được — nhờ Owner.');
+    await expect(dlg.getByRole('button', { name: /Bỏ cờ/ })).toHaveCount(0);
+    await expect(dlg.getByRole('button', { name: 'Lưu điểm mới' })).toHaveCount(0);
+    await expectNoRawError(page);
   });
 });

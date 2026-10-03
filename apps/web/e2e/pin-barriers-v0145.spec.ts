@@ -37,7 +37,7 @@ test.describe('v0.1.45 — PIN đúng chỗ hạ rào', () => {
 
   test('sửa agent chỉ đổi tên: không hỏi PIN, lưu xong', async ({ page }) => {
     const dlg = await openEdit(page);
-    await expect(dlg.getByText('Đổi mức tự trị, điều cấm, giới hạn hay phạm vi kênh cần mã PIN')).toBeVisible();
+    await expect(dlg.getByText('Đổi mức tự trị, điều cấm hay phạm vi kênh cần mã PIN')).toBeVisible();
     await dlg.getByLabel('Tên hiển thị').fill('Trợ lý thương mại 2');
     const req = page.waitForResponse((r) => r.url().includes('/agents/') && r.request().method() === 'PATCH');
     await dlg.getByRole('button', { name: 'Lưu thay đổi' }).click();

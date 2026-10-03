@@ -140,6 +140,9 @@ describe('Danh tính Agent', () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'Tạo agent mới' }));
     const dialog = await screen.findByRole('dialog');
+    // Tạo agent luôn cần PIN agent.manage — báo trước; không nhắc 'giới hạn' (form không có trường này).
+    expect(within(dialog).getByText('Tạo agent cần mã PIN')).toBeInTheDocument();
+    expect(within(dialog).queryByText(/giới hạn/)).toBeNull();
     await user.type(within(dialog).getByLabelText('Tên hiển thị'), 'Recruiter mới');
     await user.type(within(dialog).getByLabelText('Vai trò'), 'Sàng lọc ứng viên');
     await user.type(within(dialog).getByLabelText('Giọng / persona'), 'Chuyên nghiệp');
@@ -162,6 +165,7 @@ describe('Danh tính Agent', () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'Nhân bản' }));
     const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText('Nhân bản agent cần mã PIN')).toBeInTheDocument();
     await user.type(within(dialog).getByLabelText('Tên agent mới'), 'Trợ lý thương mại (bản sao)');
     await user.click(within(dialog).getByRole('button', { name: 'Nhân bản' }));
     await waitFor(() => expect(calls.some((c) => c.url.includes('/clone') && c.method === 'POST')).toBe(true));

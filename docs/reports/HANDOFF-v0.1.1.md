@@ -2706,3 +2706,33 @@ nhân sự bị lách.
   (/guide/9 không đổi mức không PIN).
 - Chưa sửa (ghi lại): genh ở Docker rootless mà container phụ lỗi (chế độ mở) vẫn chỉ tin uid genh/APIUID mặc định 10001
   cho tệp yêu cầu — cần dò uid api theo cách khác (`docker top`), để đợt sau.
+
+### Sửa sau review lượt 2 (03/10)
+
+- **CI macOS (blocker)**: 2 test genh kiểm siết `run/` về 2770 (`TestEnsureRunDirPermsHelperContainer`,
+  `…RootChownsDirectly`) chỉ chạy trên Linux/Windows — trên macOS `EnsureDir`/`SetRunMode` chmod lại 0777 theo
+  `runtime.GOOS` thật (đúng hành vi máy Mac), không giả Linux được. Hành vi sản phẩm không đổi.
+- **Hộp thư `run/`**: api nhận thêm tệp trạng thái do **root** sở hữu (`sudo genh doctor/start/update` ghi lại genh.json,
+  update-status.json…) — chỉ root mới tạo được tệp như vậy nên không nới mô hình tin cậy. Trước đây Console mất phiên
+  bản/nút Cập nhật cho tới khi genh chạy lại bằng user thường.
+- **F-49**: quy tắc "có token thì phải https" chỉ áp IP định tuyến toàn cầu — Tailscale/CGNAT `100.64.0.0/10` (`*.ts.net`)
+  dùng `http://` + token được như LAN. Chặn tên nội bộ thêm `db.<project>_default` (DNS nhúng Docker) và tên container
+  của project khác `gen-harness` (`myproj-db-1`); vẫn chỉ chặn theo tên (IP 172.x của container vẫn đi qua — mạng nội bộ
+  được phép theo thiết kế). Địa chỉ sai dạng (`http://`, cổng ngoài 0–65535) báo "Địa chỉ không hợp lệ" ở nhà cung cấp AI,
+  không còn nhầm "vùng mạng bị cấm" hay lộ chữ "máy chủ MCP".
+- **F-57**: đổi tham số MCP cũ chạy SAU các phần xoá quá hạn và có cờ Redis `gh:retention:mcp_args_digested` (7 ngày)
+  khi một lượt chạy trọn — không quét lại cả `agent.mcp_calls` mỗi đêm.
+- **F-60**: job cập nhật cờ "Đáng ngờ" lên cả dòng sửa tay cùng kỳ (giữ dấu đã bỏ cờ). Người chỉ có `people_review.read`
+  không còn thấy nút "Bỏ cờ" / form "Sửa điểm tay" (nút chết 403) — thay bằng câu "Chỉ người có quyền sửa đánh giá mới
+  sửa điểm hoặc bỏ cờ được — nhờ Owner."; nút trên dòng thành "Xem chi tiết". "Thôi" xoá lý do + lỗi cũ; câu cờ mặc định
+  trung tính (không gọi "Sếp").
+- **F-20**: bước 9 cập nhật bộ nhớ đệm sau khi lưu và luôn đọc lại khi mở (sửa/tạo agent cũng làm mới) — Quay lại hay
+  mở lại `/guide/9` không còn điền mức cũ rồi âm thầm gửi ngược; đang tải ⇒ khung chờ, lỗi ⇒ thẻ lỗi + Thử lại (không cho
+  Tiếp tục); mức ngoài 3/4 có câu "Không chọn = giữ nguyên mức hiện tại.". Lời nhắc PIN agent bỏ chữ "giới hạn"; tạo /
+  nhân bản agent có lời nhắc "cần mã PIN". MCP: "Giữ nguyên" xoá lỗi cũ trong ô. CLI: lời nhắc PIN chỉ hiện khi nút chính
+  là nút đăng nhập.
+- Test: genh `go test` (Linux; biên dịch test darwin/windows); pytest `test_hostlink_io_v0145` (tệp root),
+  `test_mcp_ssrf_v0145` (100.x + token, 8.8.8.8 + token, tên docker), `test_provider_endpoint_v0145` /
+  `test_provider_pin_runtime_v0145` (sai dạng), `test_mcp_log_digest_v0145` (cờ đã xong), `test_people_suspicious_v0145`
+  (dòng sửa tay nhận cờ mới); vitest `step9-prefill-v0145`, `p3-people` (quyền xem, Thôi), `p4-mcp` (Giữ nguyên),
+  `p4-agents`, `cli-switch`; e2e `v0145-integ` (manager people_review.read=team), `pin-barriers-v0145`.

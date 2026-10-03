@@ -136,7 +136,7 @@ export function createEndpoints(client: ApiClient) {
         r<SetupState & { agent: Step8Agent }>('/setup/steps/8', { method: 'PUT', body, skipSetupRedirect: true }),
       /** Bước 9 "Tự trị & ranh giới" — mức 3 hoặc 4, bắt xác nhận đã đọc ranh giới khoá cứng. */
       step9: (body: Step9Body) =>
-        r<SetupState & { hard_boundaries: string[] }>('/setup/steps/9', { method: 'PUT', body, skipSetupRedirect: true }),
+        r<SetupState & { hard_boundaries: string[]; agent?: Step9State['agent'] }>('/setup/steps/9', { method: 'PUT', body, skipSetupRedirect: true }),
       /** Agent của bước 9 + mức tự trị hiện tại — form điền sẵn (mở lại sau Hoàn tất không đổi nhầm mức). */
       step9State: (signal?: AbortSignal) => r<Step9State>('/setup/steps/9', { signal, skipSetupRedirect: true }),
       hardBoundaries: (signal?: AbortSignal) => r<string[]>('/setup/hard-boundaries', { signal, skipSetupRedirect: true }),

@@ -164,4 +164,34 @@ describe('CLI — đổi tài khoản Google', () => {
     expect(await screen.findByRole('button', { name: 'Chọn tài khoản' })).toBeInTheDocument();
     expect(screen.getByTestId('cli-current')).toHaveTextContent('2 tài khoản đã lưu');
   });
+
+  it("PIN hint chỉ đi cùng nút đăng nhập: có tài khoản đã lưu ('Đổi tài khoản') thì không hiện", async () => {
+    const PIN_HINT = 'Đăng nhập / thêm tài khoản cần mã PIN';
+    mockFetch((c) => {
+      if (c.url.endsWith('/cli/profiles')) return json(200, [prof({ id: 'a', active: true })]);
+      return json(200, {});
+    });
+    const view = renderCard();
+    expect(await screen.findByRole('button', { name: 'Đổi tài khoản' })).toBeInTheDocument();
+    expect(screen.queryByText(PIN_HINT)).toBeNull();
+    view.unmount();
+
+    queryClient.clear();
+    mockFetch((c) => {
+      if (c.url.endsWith('/cli/profiles')) return json(200, [prof({ id: 'a', active: true, state: 'expired' })]);
+      return json(200, {});
+    });
+    const expired = renderCard();
+    expect(await screen.findByRole('button', { name: 'Đăng nhập lại' })).toBeInTheDocument();
+    expect(screen.getByText(PIN_HINT)).toBeInTheDocument();
+    expired.unmount();
+
+    queryClient.clear();
+    mockFetch((c) => {
+      if (c.url.endsWith('/cli/profiles')) return json(200, []);
+      return json(200, {});
+    });
+    renderCard();
+    expect(await screen.findByText(PIN_HINT)).toBeInTheDocument();
+  });
 });

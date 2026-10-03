@@ -225,8 +225,11 @@ function TemplatesPanel({ canManage, onUseTemplate }: { canManage: boolean; onUs
  */
 const DEFAULT_NEW_AGENT_AUTONOMY = 2;
 
-/** v0.1.45 (F-20): máy chủ đòi phiên PIN `policy.change` khi rào chắn của agent đổi — hộp PIN tự mở khi gặp 423. */
-const AGENT_PIN_TEXT = 'Đổi mức tự trị, điều cấm, giới hạn hay phạm vi kênh cần mã PIN';
+/** v0.1.45 (F-20): máy chủ đòi phiên PIN `policy.change` khi rào chắn của agent đổi — hộp PIN tự mở khi gặp 423.
+ *  Giới hạn (limits) không sửa ở form này nên không nhắc. Tạo / nhân bản agent luôn cần PIN `agent.manage`. */
+const AGENT_PIN_TEXT = 'Đổi mức tự trị, điều cấm hay phạm vi kênh cần mã PIN';
+const AGENT_CREATE_PIN_TEXT = 'Tạo agent cần mã PIN';
+const AGENT_CLONE_PIN_TEXT = 'Nhân bản agent cần mã PIN';
 
 function AgentFormDialog({ agent, template, onClose }: { agent: AgentIdentity | null; template: AgentTemplate | null; onClose: () => void }) {
   const create = useCreateAgent();
@@ -303,7 +306,7 @@ function AgentFormDialog({ agent, template, onClose }: { agent: AgentIdentity | 
           </label>
           <textarea id="ag-forbidden" className="gh-input" rows={2} value={forbidden} onChange={(e) => setForbidden(e.target.value)} />
         </div>
-        {agent ? <PinHint text={AGENT_PIN_TEXT} title={AGENT_PIN_TEXT} /> : null}
+        {agent ? <PinHint text={AGENT_PIN_TEXT} title={AGENT_PIN_TEXT} /> : <PinHint text={AGENT_CREATE_PIN_TEXT} title={AGENT_CREATE_PIN_TEXT} />}
         {/* Tạo mới: current=null để bấm "Chỉ ghi nhận" ghi đúng mức 0 (không bị coi là "giữ" mức mặc định 2). */}
         <AutonomySelect current={agent ? agent.autonomy_level : null} value={picked} onChange={setPicked} />
         <fieldset className="ag-scope-fields">
@@ -380,6 +383,7 @@ function CloneAgentDialog({ agents, onClose }: { agents: AgentIdentity[]; onClos
           <input type="checkbox" checked={copyScopes} onChange={(e) => setCopyScopes(e.target.checked)} />
           Sao chép luôn phạm vi kênh
         </label>
+        <PinHint text={AGENT_CLONE_PIN_TEXT} title={AGENT_CLONE_PIN_TEXT} />
         {clone.isError ? <InlineError>{errorText(clone.error)}</InlineError> : null}
       </form>
     </Dialog>

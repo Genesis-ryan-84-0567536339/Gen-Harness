@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AUTONOMY_CHOICES, PinCancelledError, autonomyChoice } from '@gen-harness/contracts';
 import { Icon, Segmented } from '@gen-harness/ui';
 import { api } from '../lib/api';
 import { errorText } from '../lib/errorText';
 import { qk } from '../lib/queries';
-import { PinHint } from '../screens/common';
+import { CardError, PinHint, SkeletonLines } from '../screens/common';
 import { StepFrame } from './StepFrame';
 import { describeError, type StepProps } from './types';
 
@@ -19,7 +19,9 @@ const levelLabel = (n: number) => autonomyChoice(n)?.label ?? `mức ${n}`;
  *  Mở lại sau Hoàn tất: điền sẵn mức hiện tại của agent; bấm Tiếp tục mà không đổi mức thì giữ nguyên (không hỏi PIN). */
 export function Step9Autonomy({ meta, description, onBack, onSaved, formRef, onSkip, skipping, skipError }: StepProps) {
   const boundaries = useQuery({ queryKey: ['setup', 'hard-boundaries'], queryFn: ({ signal }) => api.setup.hardBoundaries(signal) });
-  const target = useQuery({ queryKey: ['setup', 'step9'], queryFn: ({ signal }) => api.setup.step9State(signal) });
+  const qc = useQueryClient();
+  // refetchOnMount 'always': mở lại bước 9 luôn đọc mức hiện tại (không tin bộ nhớ đệm 30 s — có thể vừa đổi ở nơi khác).
+  const target = useQuery({ queryKey: qk.setupStep9, queryFn: ({ signal }) => api.setup.step9State(signal), refetchOnMount: 'always' });
   const agent = target.data?.agent ?? null;
   const [level, setLevel] = useState('4');
   const [touched, setTouched] = useState(false);
@@ -39,7 +41,11 @@ export function Step9Autonomy({ meta, description, onBack, onSaved, formRef, onS
     try {
       // Mức hiện tại ngoài 3/4 (đã đổi ở màn Danh tính Agent) và Sếp không chọn lại → null = giữ nguyên.
       const chosen = level === '3' ? 3 : level === '4' ? 4 : null;
-      onSaved(await api.setup.step9({ autonomy_level: chosen, ack_boundaries: ack }));
+      const state = await api.setup.step9({ autonomy_level: chosen, ack_boundaries: ack });
+      // Ghi mức vừa lưu vào bộ nhớ đệm — Quay lại / mở lại bước 9 không điền mức cũ rồi gửi ngược về.
+      if (state.agent) qc.setQueryData(qk.setupStep9, { agent: state.agent });
+      else void qc.invalidateQueries({ queryKey: qk.setupStep9 });
+      onSaved(state);
     } catch (e) {
       // v0.1.45: huỷ hộp PIN → câu chung 'Đã huỷ — thao tác cần mã PIN.' (errorText), lỗi khác như cũ.
       setFormError(e instanceof PinCancelledError ? errorText(e) : describeError(e));
@@ -54,7 +60,7 @@ export function Step9Autonomy({ meta, description, onBack, onSaved, formRef, onS
       title={meta.title}
       description={description}
       formRef={formRef}
-      canContinue={ack}
+      canContinue={ack && target.isSuccess}
       busy={busy}
       onContinue={() => void save()}
       onBack={onBack}
@@ -64,20 +70,33 @@ export function Step9Autonomy({ meta, description, onBack, onSaved, formRef, onS
     >
       <div className="setup-section">
         <div className="setup-section__title">Mức tự trị của agent</div>
-        {agent ? (
-          <p className="muted-note" data-testid="step9-agent">
-            Agent: <strong>{agent.name}</strong> · mức hiện tại: {levelLabel(agent.autonomy_level)}
-          </p>
-        ) : null}
-        <Segmented
-          label="Mức tự trị"
-          value={level}
-          onChange={(v) => {
-            setTouched(true);
-            setLevel(v);
-          }}
-          options={LEVEL_OPTIONS}
-        />
+        {target.isPending ? (
+          <SkeletonLines rows={1} padding="0" />
+        ) : target.isError ? (
+          <CardError error={target.error} onRetry={() => void target.refetch()} retrying={target.isFetching} />
+        ) : (
+          <>
+            {agent ? (
+              <p className="muted-note" data-testid="step9-agent">
+                Agent: <strong>{agent.name}</strong> · mức hiện tại: {levelLabel(agent.autonomy_level)}
+              </p>
+            ) : null}
+            <Segmented
+              label="Mức tự trị"
+              value={level}
+              onChange={(v) => {
+                setTouched(true);
+                setLevel(v);
+              }}
+              options={LEVEL_OPTIONS}
+            />
+            {agent && !touched && agent.autonomy_level !== 3 && agent.autonomy_level !== 4 ? (
+              <p className="muted-note" data-testid="step9-keep">
+                Không chọn = giữ nguyên mức hiện tại.
+              </p>
+            ) : null}
+          </>
+        )}
         {finished && agent && level !== String(agent.autonomy_level) ? <PinHint text={PIN_TEXT} title={PIN_TEXT} /> : null}
         <p className="muted-note">Soạn sẵn chờ duyệt: agent soạn sẵn, Sếp duyệt rồi mới gửi. Gợi ý: agent chỉ gợi ý việc nên làm. Đổi lại bất cứ lúc nào ở màn Danh tính Agent.</p>
       </div>

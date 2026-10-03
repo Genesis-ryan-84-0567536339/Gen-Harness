@@ -983,7 +983,7 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
           if (setup.finished && level !== cur && setupNeedPin()) return problem(res, 423, 'PIN_REQUIRED', 'Thao tác này cần nhập mã PIN', { detail: { operation: 'policy.change' } });
           if (setupAgent) setupAgent.autonomy_level = level;
           advance(9, 'done');
-          return reply(200, { ...stateView(), hard_boundaries: MOCK_HARD_BOUNDARIES });
+          return reply(200, { ...stateView(), hard_boundaries: MOCK_HARD_BOUNDARIES, agent: setupAgent });
         }
         if (n === 10 || n === 11) {
           // Như `_owner_step` thật (khác `_owner_step_after` của bước 8–9): không đòi các bước trước phải xong.

@@ -64,7 +64,7 @@ describe('Nơi dùng giữ nguyên hành vi', () => {
     expect(AGENT_LEVELS[3]).toBe('Gợi ý hành động');
   });
 
-  it('bước 9 vẫn chỉ cho chọn mức 3 hoặc 4 (nhãn 3 mức, không tiền tố số)', () => {
+  it('bước 9 vẫn chỉ cho chọn mức 3 hoặc 4 (nhãn 3 mức, không tiền tố số)', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('[]', { status: 200, headers: { 'Content-Type': 'application/json' } })));
     const meta = SETUP_STEPS.find((s) => s.n === 9)!;
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -84,7 +84,8 @@ describe('Nơi dùng giữ nguyên hành vi', () => {
         }),
       ),
     );
-    const radios = screen.getAllByRole('radio').map((r) => r.textContent?.trim());
+    // Ô chọn mức hiện sau khi đọc xong mức hiện tại của agent (GET /setup/steps/9).
+    const radios = (await screen.findAllByRole('radio')).map((r) => r.textContent?.trim());
     expect(radios).toEqual(['Gợi ý', 'Soạn sẵn chờ duyệt']);
     expect(screen.getAllByRole('radio').map((r) => r.getAttribute('aria-checked'))).toEqual(['false', 'true']);
   });

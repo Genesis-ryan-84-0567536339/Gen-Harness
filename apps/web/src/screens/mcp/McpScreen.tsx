@@ -305,6 +305,11 @@ function ToolRow({ tool: t, canManage, hintId, onTest }: { tool: McpTool; canMan
         },
       },
     );
+  // Giữ nguyên là lựa chọn có chủ ý — bỏ lỗi cũ (vd 'Đã huỷ — thao tác cần mã PIN.') khỏi ô.
+  const keepAccess = () => {
+    setConfirmRead(false);
+    setAccess.reset();
+  };
   return (
     <tr data-tool={t.name} data-exposed={t.is_exposed ? '' : undefined}>
       <td className="mcp-tool-table__name mono">{t.name}</td>
@@ -335,12 +340,12 @@ function ToolRow({ tool: t, canManage, hintId, onTest }: { tool: McpTool; canMan
             {confirmRead ? (
               <Dialog
                 open
-                onClose={() => setConfirmRead(false)}
+                onClose={keepAccess}
                 width={460}
                 title={`Chuyển ${t.name} sang ${ACCESS_LABEL.read}?`}
                 actions={
                   <>
-                    <Button variant="secondary" onClick={() => setConfirmRead(false)}>
+                    <Button variant="secondary" onClick={keepAccess}>
                       Giữ nguyên
                     </Button>
                     <Button variant="primary" loading={setAccess.isPending} onClick={() => apply('read')}>
