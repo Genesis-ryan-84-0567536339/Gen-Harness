@@ -141,3 +141,22 @@ async def test_rate_limited_actionlog_single_row(owner_api: Api, app: object) ->
         n = (await db.execute(text("SELECT count(*) FROM ops.action_log WHERE action = 'auth.login_rate_limited'"))
              ).scalar()
     assert n == 1
+
+
+async def test_genh_reset_password_unblocks_owner_shared_ip(owner_api: Api, app: object, redis: Redis) -> None:
+    """Sau Tailscale Serve mọi người chung một IP: 10 lần sai của nhân viên khoá luôn Owner theo IP — `genh
+    reset-password` phải gỡ cả bộ đếm IP (không chỉ email Owner), không động tới khoá khác trong Redis."""
+    from gh.auth.reset_owner import _clear_login_counter
+
+    for i in range(10):
+        assert (await _login(app, f"nv{i}@example.vn", "x" * 12, IP_A)).status_code == 401
+    for _ in range(3):
+        await _login(app, OWNER["email"], "sai-mat-khau", IP_B)
+    assert (await _login(app, OWNER["email"], OWNER["password"], IP_A)).status_code == 429
+    await redis.set("gh:khac:giu-nguyen", "1")
+    await _clear_login_counter(OWNER["email"])
+    assert await _count(redis, login_guard.ip_key("203.0.113.7")) == 0
+    assert await _count(redis, login_guard.ip_key("203.0.113.8")) == 0
+    assert await _count(redis, login_guard.email_key(OWNER["email"])) == 0
+    assert await redis.get("gh:khac:giu-nguyen") == b"1"
+    assert (await _login(app, OWNER["email"], OWNER["password"], IP_A)).status_code == 200

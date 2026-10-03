@@ -2739,19 +2739,25 @@ nhân sự bị lách.
 
 ## v0.1.46 — Nhân viên & điện thoại vào được (03/10/2026)
 
+**Vì sao:** máy cài mới mở cổng Console cho cả mạng (ai cùng Wi-Fi cũng thấy trang đăng nhập), lời mời nhân viên chép địa
+chỉ `localhost` (nhân viên mở không được), đăng nhập không giới hạn số lần đoán mật khẩu và phiên dùng đều thì sống mãi.
+
 ### Boss cần làm gì
 
-Cần chọn **một cách cho nhân viên và điện thoại vào Console** (máy chủ mới cài mặc định **chỉ mở trên chính máy đó**):
-
-1. **Tailscale (khuyên dùng, ~5 phút)**: trên máy chủ gõ `genh remote tailscale`, làm theo hướng dẫn đăng nhập Tailscale.
-   Mời nhân viên vào mạng Tailscale của Sếp (họ cài app Tailscale trên điện thoại/máy tính).
-2. Cách khác: tên miền riêng qua Cloudflare (`genh remote cloudflare --hostname <tên>`) hoặc mạng nội bộ
-   (`genh remote lan`, phải cài Chứng chỉ CA trên từng điện thoại).
-3. Xong, **mở thử Console trên điện thoại** bằng địa chỉ đăng nhập mà genh in ra (hoặc xem ở Cài đặt › Sao lưu & cập nhật ›
-   **Truy cập từ xa**), rồi vào **Việc Sếp cần làm** bấm **Kiểm tra** ở dòng "Truy cập từ xa".
-4. Nếu máy chủ đã chạy từ bản cũ: Console sẽ có chuông **"Cổng đang mở cho cả mạng"** (vẫn như cũ, ai cùng mạng cũng thử
-   đăng nhập được). Chọn cách trên rồi bấm `genh remote local` nếu muốn đóng lại.
-5. **Cần kiểm trên máy Fedora thật** (firewalld, Docker rootless, Tailscale): CI chỉ kiểm được cổng và chuông, không kiểm được điện thoại thật.
+1. **Truy cập từ xa (trên máy Fedora thật):** sau khi máy tự cập nhật lên v0.1.46, Console vẫn vào được như cũ (cổng vẫn
+   mở cho cả mạng) và có **một** chuông "Cổng đang mở cho cả mạng". Cách khuyên dùng (~5 phút): trên máy chủ chạy
+   `sudo dnf install tailscale`, `sudo systemctl enable --now tailscaled`, `sudo tailscale up` (đăng nhập),
+   `sudo tailscale set --operator=$USER`; vào trang quản trị Tailscale bật **MagicDNS** + **HTTPS Certificates**; rồi chạy
+   `genh remote tailscale`. Trên điện thoại cài app Tailscale, đăng nhập cùng tài khoản, mở địa chỉ genh in ra.
+   Nếu thích dùng mạng nội bộ: `genh remote --lan` rồi cài chứng chỉ CA lên điện thoại theo hướng dẫn genh in.
+   Chỉ dùng trên máy chủ: `genh remote --local`.
+2. **Kiểm từ điện thoại:** mở Console trên điện thoại → Hướng dẫn › Việc Sếp cần làm → dòng "Truy cập từ xa" → bấm
+   **Kiểm tra NGAY TRÊN ĐIỆN THOẠI** (phải ra "Đạt").
+3. **Mời thử một nhân viên:** hộp mời không còn khung đỏ cảnh báo, bấm "Chép lời nhắn" gửi qua Zalo; nhân viên mở được link
+   trên máy họ (nếu dùng Tailscale, nhân viên cũng cài app Tailscale và được Sếp mời vào mạng Tailscale).
+4. **Đăng nhập — không cần làm gì.** Lưu ý: gõ sai mật khẩu 10 lần trong 15 phút sẽ bị chặn tạm 15 phút (Owner quên mật
+   khẩu thì chạy `genh reset-password` như cũ — lệnh này cũng gỡ chặn); mỗi 30 ngày phải đăng nhập lại một lần dù dùng đều.
+5. Kiểm thử E2E cài đặt tự động — không cần làm gì.
 
 ### Thay đổi (theo mã)
 
@@ -2775,6 +2781,10 @@ Cần chọn **một cách cho nhân viên và điện thoại vào Console** (m
 - **Giới hạn đăng nhập**: 10 lần sai/15 phút theo IP và theo email (429 `LOGIN_RATE_LIMITED`, `retry_after_s`); kiểm trước khi kiểm mật khẩu;
   đúng mật khẩu chỉ xoá bộ đếm email; **Redis lỗi ⇒ fail-open** (có log). Email không tồn tại/bị khoá vẫn chạy argon2 với hash giả
   (không lộ qua thời gian). Phiên có hạn tuyệt đối 30 ngày từ lúc tạo (trượt 7 ngày bên trong). TOTP để sau.
+- **Sửa khi tích hợp (F-1):** `genh reset-password` trước chỉ xoá bộ đếm email Owner — sau Tailscale Serve mọi người chung
+  một IP nên Owner vẫn bị khoá theo IP; nay xoá thêm mọi khoá `gh:login:fail:ip:*` (`login_guard.clear_for_owner_reset`,
+  pytest `test_genh_reset_password_unblocks_owner_shared_ip`). Mock e2e: chuông `network.open_lan` cho người không phải Owner
+  đổi nhãn nút thành "Nhờ Owner xử lý" như `gh/health.NON_OWNER_ACTIONS`.
 - **Không có migration** (core.sessions đã có created_at; kind chuông và check_key không ràng buộc danh sách). Head vẫn 0030.
 - **Workflow**: E2E-install (pr + release) kiểm cài mới chỉ nghe 127.0.0.1 (docker port, `ss`, curl IP runner bị từ chối, `.env`), rồi
   `genh remote --lan --name gh-e2e.local` → 0.0.0.0, ready qua `gh-e2e.local` và `localhost`, `network-status.json`, api thấy `GH_PUBLIC_URL`;
@@ -2792,7 +2802,7 @@ Cần chọn **một cách cho nhân viên và điện thoại vào Console** (m
 ### Rủi ro / giới hạn
 
 - Sau Tailscale Serve hoặc Docker rootless, nhiều người có thể **chung IP nguồn** ⇒ bộ đếm IP chung: một người gõ sai nhiều lần có thể khoá cả nhóm
-  15 phút. Owner gỡ bằng `genh reset-password` hoặc đợi 15 phút.
+  15 phút. Owner gỡ bằng `genh reset-password` (xoá cả bộ đếm email Owner lẫn MỌI bộ đếm IP — sửa khi tích hợp) hoặc đợi 15 phút.
 - Nhân viên dùng Tailscale phải được mời vào mạng Tailscale của Sếp.
 - Chế độ LAN cần cài CA trên từng điện thoại và (Fedora Server) mở firewalld cho cổng đã chọn.
 - Không có nút một chạm "Chỉ cho máy này" trong Console (tránh Owner tự cắt truy cập khi đang dùng điện thoại): đổi chế độ bằng `genh remote` trên máy chủ.

@@ -6,7 +6,8 @@ Mật khẩu đúng chỉ xoá bộ đếm email (`clear_email`), KHÔNG xoá b�
 xoá bộ đếm IP của mình để dò tiếp tài khoản khác.
 
 Rủi ro đã biết: sau Tailscale Serve / Docker rootless mọi người dùng có thể chung một IP nguồn ⇒ bộ đếm IP thành
-chung cho cả nhóm; giới hạn theo email là lớp chính. Owner gỡ khoá bằng `genh reset-password` hoặc đợi 15 phút.
+chung cho cả nhóm; giới hạn theo email là lớp chính. Owner gỡ khoá bằng `genh reset-password` (xoá bộ đếm email
+Owner VÀ mọi bộ đếm IP — `clear_for_owner_reset`) hoặc đợi 15 phút.
 
 Redis lỗi → fail-open (log một dòng, không kèm email, cho đăng nhập tiếp): app do Owner tự host; Redis chết thì api
 đã báo sức khoẻ, không nên khoá Owner ra ngoài vì hạ tầng.
@@ -76,6 +77,19 @@ async def clear_email(redis: Any, email: str) -> None:
         await redis.delete(email_key(email))
     except _FAIL_OPEN as e:
         log.warning("Redis lỗi khi xoá bộ đếm đăng nhập (%s)", type(e).__name__)
+
+
+async def clear_for_owner_reset(redis: Any, email: str) -> None:
+    """`genh reset-password` (chạy trên máy chủ ⇒ Owner thật): xoá bộ đếm email Owner và MỌI bộ đếm IP — sau
+    Tailscale Serve/Docker rootless mọi người chung một IP nguồn, chỉ xoá email thì Owner vẫn bị khoá theo IP.
+    Redis lỗi chỉ log."""
+    try:
+        doomed = [email_key(email)]
+        async for k in redis.scan_iter(match="gh:login:fail:ip:*", count=500):
+            doomed.append(k)
+        await redis.delete(*doomed)
+    except _FAIL_OPEN as e:
+        log.warning("Redis lỗi khi gỡ khoá đăng nhập (%s)", type(e).__name__)
 
 
 async def log_once(redis: Any, email: str) -> bool:

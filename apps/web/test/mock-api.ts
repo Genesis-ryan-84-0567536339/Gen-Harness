@@ -567,6 +567,8 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     }
     const issues: HealthIssue[] = [];
     for (const i of [...(o.issues ?? []), ...derived].map((x) => healthIssue(x, now))) if (!issues.some((y) => y.key === i.key)) issues.push(i);
+    // v0.1.46 (F-21): như gh/health.NON_OWNER_ACTIONS — người không phải Owner không có lệnh `genh remote` ⇒ "Nhờ Owner xử lý".
+    if (!isOwner) for (const i of issues) if (i.kind === 'network.open_lan') i.action = 'Nhờ Owner xử lý';
     const overall = issues.some((i) => i.severity === 'bad') ? 'bad' : issues.length ? 'warn' : 'ok';
     return {
       checked_at: now, overall, worker,

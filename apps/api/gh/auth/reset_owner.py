@@ -70,13 +70,14 @@ async def reset_owner_password(db: AsyncSession, password: str | None = None) ->
 
 
 async def _clear_login_counter(email: str) -> None:
-    """v0.1.46: gỡ khoá đăng nhập theo email Owner. Best-effort — Redis lỗi chỉ log, không làm hỏng lệnh."""
+    """v0.1.46: gỡ khoá đăng nhập — bộ đếm email Owner và mọi bộ đếm IP (người dùng chung IP sau Tailscale Serve).
+    Best-effort — Redis lỗi chỉ log, không làm hỏng lệnh."""
     from redis.asyncio import Redis
 
     try:
         r = Redis.from_url(get_settings().redis_url)
         try:
-            await login_guard.clear_email(r, email)
+            await login_guard.clear_for_owner_reset(r, email)
         finally:
             await r.aclose()
     except Exception as e:  # noqa: BLE001 — best-effort

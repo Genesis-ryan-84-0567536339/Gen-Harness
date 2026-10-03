@@ -129,6 +129,12 @@ cấp AI ghim DNS, cấm link-local/0.0.0.0/tên dịch vụ compose, có token 
 pg_dump/pg_restore qua `PGPASSWORD`; WebSocket kiểm Origin (4403) + nạp lại phiên ≤ 60 giây (thu hồi ⇒ 4401); mã đăng nhập
 CLI theo regex (đã đối chiếu dạng mã thật của F-77); cờ "Đáng ngờ" cho điểm nhân sự (migration 0030) + đoạn "Mã PIN bảo vệ
 được gì" ở Trợ giúp. Đóng F-20 phần còn lại (từ v0.1.35) và việc đối chiếu `code_shape` với regex F-56 (từ v0.1.39).
+v0.1.46: nhân viên & điện thoại vào được, đăng nhập an toàn (F-21, F-27, F-1, F-3) — cài mới cổng chỉ nghe 127.0.0.1,
+máy cũ giữ 0.0.0.0 (`lan_legacy`) + đúng 1 chuông "Cổng đang mở cho cả mạng"; `genh remote tailscale|cloudflare|--lan|--local`
+ghi `.env` (GH_BIND_ADDR/GH_SITE_ADDRESS/GH_PUBLIC_URL); lời mời lấy địa chỉ theo GH_PUBLIC_URL + cảnh báo đỏ khi chỉ mở trên
+máy chủ; thẻ "Truy cập từ xa" ở Cài đặt, dòng 7 "Truy cập từ xa" ở Việc Sếp cần làm (bắt buộc ⇒ 6 dòng); 10 lần sai/15 phút
+theo IP và email (429), argon2 giả cho email lạ, phiên tối đa 30 ngày. Còn: TOTP (hoãn); nút đổi chế độ trong Console (không
+làm — tránh tự cắt truy cập); kiểm Tailscale/điện thoại trên máy Fedora thật của Boss.
 
 ## Đợt A — Gen v1 (thiết kế: docs/design/gen-v1.md)
 - ✅ A1 Khung chat phải + Gen trả lời/tóm tắt (chỉ đọc), lưu hội thoại, Nhật ký hành động — v0.1.21.
