@@ -270,7 +270,7 @@ function AddProvider({ onAdded }: { onAdded: (p: Provider) => void }) {
             label="Địa chỉ gọi (Endpoint)"
             placeholder="https://…/v1"
             value={endpoint}
-            error={endpointBad ? 'Địa chỉ cần bắt đầu bằng https:// (hoặc http://)' : null}
+            error={endpointBad ? 'Địa chỉ cần bắt đầu bằng https:// (http:// chỉ dùng với máy trong mạng nội bộ, vd Ollama)' : null}
             onChange={(e) => setEndpoint(e.target.value)}
           />
         ) : null}

@@ -1,6 +1,7 @@
 """v0.1.45 (F-49, phần ghi) — địa chỉ nhà cung cấp AI được kiểm lúc GHI (POST /providers, thêm khoá).
 
-Có khoá ⇒ phải https://; vùng mạng cấm (169.254.x siêu dữ liệu đám mây, 0.0.0.0) ⇒ 422 qua
+Có khoá + http:// tới IP công cộng ⇒ 422 (phải https://); http:// trong mạng nội bộ / cùng máy (Ollama, LM Studio)
+vẫn được — cùng quy tắc với máy chủ MCP và Gen-hub; vùng mạng cấm (169.254.x siêu dữ liệu đám mây, 0.0.0.0) ⇒ 422 qua
 `mcp_client.pin_endpoint(endpoint, True)`; không phân giải được lúc ghi ⇒ cho qua (kiểm lại lúc gọi)."""
 
 import pytest
@@ -18,7 +19,7 @@ def _body(endpoint: str, keys: list[str] | None = None) -> dict[str, object]:
 
 
 @pytest.mark.parametrize(("endpoint", "needle"), [
-    ("http://169.254.169.254/v1", "https://"),
+    ("http://169.254.169.254/v1", "vùng mạng bị cấm"),
     ("https://169.254.169.254/v1", "vùng mạng bị cấm"),
     ("https://0.0.0.0/v1", "vùng mạng bị cấm"),
     ("http://example.com/v1", "https://"),
@@ -37,6 +38,16 @@ async def test_create_provider_https_public_ok(owner_api: Api) -> None:
     r = await owner_api.send("POST", "/providers", _body("https://example.com/v1"))
     assert r.status_code == 201, r.text
     assert r.json()["endpoint"] == "https://example.com/v1"
+
+
+@pytest.mark.parametrize("endpoint", ["http://10.0.0.7:11434/v1", "http://192.168.1.20:1234/v1",
+                                      "http://localhost:11434/v1"])
+async def test_create_provider_http_lan_with_key_ok(owner_api: Api, endpoint: str) -> None:
+    """Sửa review v0.1.45: LLM trong LAN (Ollama/LM Studio/vLLM) qua http:// kèm khoá giả vẫn tạo được."""
+    await verify_pin(owner_api)
+    r = await owner_api.send("POST", "/providers", _body(endpoint))
+    assert r.status_code == 201, r.text
+    assert r.json()["endpoint"] == endpoint
 
 
 async def test_add_key_to_legacy_http_provider_rejected(owner_api: Api) -> None:

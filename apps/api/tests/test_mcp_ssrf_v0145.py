@@ -72,6 +72,11 @@ async def test_pin_endpoint_rules_v0145() -> None:
         await pin_endpoint("http://mcp.example.com/rpc", True, has_token=True)
     # Loopback không rời máy — http + token vẫn được (Gen-hub/MCP chạy cùng máy).
     assert (await pin_endpoint("http://127.0.0.1:9911/mcp", False, has_token=True)).ip == "127.0.0.1"
+    # Mạng nội bộ (LAN, host.docker.internal) — http + token vẫn được; công cộng thì không (kể cả công tắc bật).
+    assert (await pin_endpoint("http://10.1.2.3:8080/mcp", False, has_token=True)).ip == "10.1.2.3"
+    assert (await pin_endpoint("http://192.168.1.9/mcp", True, has_token=True)).ip == "192.168.1.9"
+    with pytest.raises(McpBlockedNetwork, match="https"):
+        await pin_endpoint("http://93.184.216.34/mcp", True, has_token=True)
     t = await pin_endpoint("https://mcp.example.com/rpc", True, has_token=True)
     assert t.ip == FAKE_PUBLIC_IP and t.host == "mcp.example.com" and t.sni == "mcp.example.com"
 
@@ -97,6 +102,9 @@ async def test_create_server_token_requires_https(owner_api: Api, rec: Recorder)
     assert r.status_code == 201, r.text
     # Không token thì http vẫn được (máy chủ MCP trong LAN không cần xác thực).
     r = await _post_server(owner_api, "http://mcp.example.com/rpc")
+    assert r.status_code == 201, r.text
+    # Có token + http trong mạng nội bộ → được (token không ra Internet).
+    r = await _post_server(owner_api, "http://10.0.0.9:8811/rpc", token=TOKEN)
     assert r.status_code == 201, r.text
 
 

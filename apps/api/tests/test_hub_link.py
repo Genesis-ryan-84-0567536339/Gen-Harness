@@ -357,3 +357,21 @@ async def test_mcp_calls_summary_has_no_kho_content(owner_api: Api, fake_hub: Fa
     assert (await owner_api.get("/hub/kho/summary")).status_code == 200
     rows = await _db_text("SELECT result_summary FROM agent.mcp_calls WHERE outcome = 'ok'")
     assert "VIEC-3" not in rows and "Tuấn" not in rows and "nội dung không lưu" in rows
+
+
+async def test_lan_http_with_token_ok_public_http_rejected(owner_api: Api, fake_hub: FakeHub) -> None:
+    """Sửa review v0.1.45: một quy tắc cho cả lúc lưu và lúc gọi — Gen-hub trong LAN qua http:// + token vẫn chạy
+    (Kiểm tra + đọc Kho); http:// tới IP công cộng bị chặn NGAY lúc lưu (422), không đợi "Kiểm tra"."""
+    await _pin(owner_api)
+    r = await owner_api.send("PATCH", "/hub/link", {"endpoint": "http://10.20.30.40:9911/mcp", "token": TOKEN})
+    assert r.status_code == 200, r.text
+    r = await owner_api.send("POST", "/hub/link/test", {})
+    assert r.status_code == 200 and r.json()["ok"] is True, r.text
+    assert (await owner_api.get("/hub/kho/summary")).status_code == 200
+    assert fake_hub.auth_seen[-1] == f"Bearer {TOKEN}"
+    # Đổi sang http công cộng (token đã lưu) → 422 trên endpoint, cấu hình giữ nguyên.
+    r = await owner_api.send("PATCH", "/hub/link", {"endpoint": "http://hub.example.com/mcp"})
+    assert r.status_code == 422 and "https://" in r.json()["errors"]["endpoint"], r.text
+    assert (await owner_api.get("/hub/link")).json()["endpoint"] == "http://10.20.30.40:9911/mcp"
+    r = await owner_api.send("PATCH", "/hub/link", {"endpoint": "https://hub.example.com/mcp"})
+    assert r.status_code == 200, r.text

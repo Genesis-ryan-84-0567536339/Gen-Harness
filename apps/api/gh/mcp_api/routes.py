@@ -67,7 +67,8 @@ async def _check_server_endpoint(endpoint: str, transport: str, *, has_token: bo
         if "không hợp lệ" in msg:
             msg = "Địa chỉ máy chủ MCP không hợp lệ — dạng https://<máy chủ>/mcp"
         elif "https://" in msg:
-            msg = "Có token thì máy chủ MCP phải dùng https:// (token không được đi rõ trên mạng)"
+            msg = ("Có token mà máy chủ MCP ở mạng công cộng thì phải dùng https:// (token không được đi rõ trên "
+                   "Internet; http:// chỉ dùng được trong mạng nội bộ)")
         else:
             msg = ("Địa chỉ máy chủ MCP trỏ vào vùng mạng bị cấm (siêu dữ liệu đám mây, 0.0.0.0, multicast hoặc dịch "
                    "vụ nội bộ của Gen-Harness)")

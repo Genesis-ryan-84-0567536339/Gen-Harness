@@ -136,7 +136,8 @@ async def _default_getaddrinfo(host: str, port: int) -> list[Any]:
 _getaddrinfo: Callable[[str, int], Awaitable[list[Any]]] = _default_getaddrinfo
 
 FORBIDDEN_SERVICE_MSG = "Địa chỉ trỏ vào tên dịch vụ nội bộ của Gen-Harness"
-HTTPS_REQUIRED_MSG = "Có token thì máy chủ phải dùng https://"
+HTTPS_REQUIRED_MSG = ("Có token mà máy chủ ở mạng công cộng thì phải dùng https:// (http:// chỉ dùng được với máy "
+                      "trong mạng nội bộ hoặc cùng máy)")
 
 
 def _loopback_host(host: str) -> bool:
@@ -154,7 +155,9 @@ async def pin_endpoint(endpoint: str, allow_public_network: bool, *, has_token: 
     hai giữa lúc kiểm và lúc kết nối. TLS vẫn xác thực chứng chỉ theo tên máy gốc (SNI + kiểm hostname).
 
     v0.1.45 (F-49): tên dịch vụ nội bộ (`forbidden_host`) bị cấm TRƯỚC khi phân giải; `has_token` (gửi kèm token /
-    header Authorization) mà không phải `https://` → chặn (token đi rõ trên mạng) — trừ loopback (không rời máy)."""
+    header Authorization) qua `http://` tới một IP CÔNG CỘNG → chặn (token đi rõ trên Internet). Loopback và mạng
+    nội bộ (10.x, 192.168.x, 172.16–31.x, `host.docker.internal`…) vẫn được — cùng quy tắc cho máy chủ MCP, liên kết
+    Gen-hub và nhà cung cấp AI (Ollama/LM Studio trong LAN)."""
     u = urlparse(endpoint)
     host = u.hostname
     if not host or u.scheme not in ("http", "https"):
@@ -165,8 +168,6 @@ async def pin_endpoint(endpoint: str, allow_public_network: bool, *, has_token: 
         raise McpBlockedNetwork("Địa chỉ máy chủ MCP không hợp lệ") from e
     if forbidden_host(host):
         raise McpBlockedNetwork(f"{FORBIDDEN_SERVICE_MSG} ({host}) — vùng mạng bị cấm")
-    if has_token and u.scheme != "https" and not _loopback_host(host):
-        raise McpBlockedNetwork(HTTPS_REQUIRED_MSG)
     literal = True
     try:
         ips: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = [_unmap(ipaddress.ip_address(host))]
@@ -189,6 +190,8 @@ async def pin_endpoint(endpoint: str, allow_public_network: bool, *, has_token: 
     for ip in ips:
         if always_forbidden(ip):
             raise McpBlockedNetwork(f"Máy chủ MCP ({host}) phân giải ra vùng mạng bị cấm (link-local/siêu dữ liệu)")
+    if has_token and u.scheme != "https" and not _loopback_host(host) and any(_is_public(ip) for ip in ips):
+        raise McpBlockedNetwork(HTTPS_REQUIRED_MSG)
     if not allow_public_network and any(_is_public(ip) for ip in ips):
         raise McpBlockedNetwork(
             f"Máy chủ MCP ở mạng công cộng ({host}) — Owner chưa bật 'Cho phép máy chủ MCP ngoài mạng nội bộ'")

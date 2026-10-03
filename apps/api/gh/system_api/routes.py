@@ -336,21 +336,22 @@ async def provider_payloads(db: AsyncSession, redis: Any, org_id: uuid.UUID) -> 
 
 async def _check_provider_endpoint(endpoint: str | None, *, has_key: bool) -> None:
     """v0.1.45 (F-49): kiểm địa chỉ nhà cung cấp AI lúc GHI cấu hình. Rỗng ⇒ dùng mặc định https của
-    gemini/deepseek. Có khoá ⇒ bắt buộc https (khoá không đi qua http thường). Phân giải tên một lần qua
-    `mcp_client.pin_endpoint` (cho phép mạng công cộng): vùng cấm (169.254.x siêu dữ liệu đám mây, 0.0.0.0…) ⇒ 422;
-    không phân giải được lúc này ⇒ cho qua (kiểm lại lúc gọi)."""
+    gemini/deepseek. Phân giải tên một lần qua `mcp_client.pin_endpoint` (cho phép mạng công cộng) với CÙNG quy tắc
+    như máy chủ MCP / Gen-hub: có khoá + `http://` tới IP công cộng ⇒ 422 (khoá đi rõ trên Internet); `http://` trong
+    mạng nội bộ / cùng máy (Ollama, LM Studio, vLLM ở 192.168.x, 10.x, localhost) vẫn được. Vùng cấm (169.254.x
+    siêu dữ liệu đám mây, 0.0.0.0, dịch vụ nội bộ) ⇒ 422; không phân giải được lúc này ⇒ cho qua (kiểm lại lúc gọi)."""
     if not endpoint or not endpoint.strip():
         return
     endpoint = endpoint.strip()
     scheme = endpoint.split("://", 1)[0].lower() if "://" in endpoint else ""
     if scheme not in ("http", "https"):
-        raise field_errors({"endpoint": "Địa chỉ phải bắt đầu bằng https:// (hoặc http:// khi không dùng khoá)"})
-    if has_key and scheme != "https":
-        raise field_errors({"endpoint": "Có khoá API thì địa chỉ phải là https:// (khoá không được gửi qua http "
-                                        "thường)"})
+        raise field_errors({"endpoint": "Địa chỉ phải bắt đầu bằng https:// (hoặc http:// với máy trong mạng nội bộ)"})
     try:
-        await pin_endpoint(endpoint, True)
+        await pin_endpoint(endpoint, True, has_token=has_key)
     except McpBlockedNetwork as e:
+        if "https://" in str(e):
+            raise field_errors({"endpoint": "Có khoá API mà máy chủ ở mạng công cộng thì địa chỉ phải là https:// "
+                                            "(http:// chỉ dùng được với máy trong mạng nội bộ)"}) from e
         raise field_errors({"endpoint": "Địa chỉ trỏ vào vùng mạng bị cấm (siêu dữ liệu đám mây 169.254.x, 0.0.0.0, "
                                         "dịch vụ nội bộ)"}) from e
     except McpError:
