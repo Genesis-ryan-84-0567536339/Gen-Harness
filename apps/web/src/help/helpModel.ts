@@ -18,6 +18,8 @@ export const GENH_COMMANDS: Array<{ cmd: string; what: string }> = [
 /**
  * v0.1.45 (F-60): nói rõ giới hạn của mã PIN — PIN chặn người ngồi nhờ máy/phiên đang mở, KHÔNG phải lớp bảo vệ thứ
  * hai (ai biết mật khẩu đăng nhập thì đặt lại được PIN); kèm lưu ý điểm đánh giá nhân sự có thể bị lách.
+ * `PIN_LIMITS` là bản cho Owner (gọi "Sếp"); vai trò khác dùng `pinLimitsFor` (gọi "bạn"), và chỉ người xem được
+ * đánh giá nhân sự mới thấy câu về cờ 'Đáng ngờ' — không chỉ cho nhân viên cách lách điểm.
  */
 export const PIN_LIMITS: { title: string; kicker: string; points: string[] } = {
   title: 'Mã PIN bảo vệ được gì',
@@ -29,6 +31,22 @@ export const PIN_LIMITS: { title: string; kicker: string; points: string[] } = {
     "Điểm đánh giá nhân sự có thể bị nhân viên lách bằng cách chèn câu lệnh cho AI hoặc câu xin điểm vào tin nhắn — dòng có chip 'Đáng ngờ' cần Sếp xem chứng cứ trước khi tin.",
   ],
 };
+
+const PIN_POINTS_MEMBER = [
+  'Mã PIN chặn người nhờ máy hoặc phiên đăng nhập đang mở của bạn để làm các thao tác nhạy cảm mà vai trò của bạn được phép.',
+  'Mã PIN KHÔNG phải lớp bảo vệ thứ hai: ai biết mật khẩu đăng nhập thì đặt lại được PIN.',
+  'Vì vậy hãy giữ mật khẩu đăng nhập riêng, không dùng chung với chỗ khác, và đăng xuất ngay khi dùng xong trên máy lạ; nghi lộ mật khẩu thì đổi mật khẩu ngay hoặc báo Owner.',
+];
+const PIN_POINT_REVIEWER = "Dòng đánh giá nhân sự có chip 'Đáng ngờ' cần xem chứng cứ trước khi tin vào điểm.";
+
+/** Thẻ "Mã PIN bảo vệ được gì" theo vai trò: Owner → `PIN_LIMITS`; vai trò khác gọi "bạn", câu về cờ 'Đáng ngờ'
+ *  chỉ hiện khi vai trò xem được đánh giá nhân sự (`people_review.read` khác `none`). */
+export function pinLimitsFor(me: Pick<Me, 'role' | 'permissions'> | undefined | null): { title: string; kicker: string; points: string[] } {
+  if (me?.role?.code === 'owner') return PIN_LIMITS;
+  const review = me?.permissions?.['people_review.read'];
+  const canReview = !!review && review !== 'none';
+  return { ...PIN_LIMITS, points: canReview ? [...PIN_POINTS_MEMBER, PIN_POINT_REVIEWER] : PIN_POINTS_MEMBER };
+}
 
 /** Nội dung "Báo lỗi" — không có bí mật (không cookie, không khoá), chỉ đủ để dev tái hiện. */
 export function diagnosticText(about: AboutInfo | undefined, me: Me | undefined, now = new Date()): string {
