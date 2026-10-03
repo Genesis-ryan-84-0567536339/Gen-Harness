@@ -8,6 +8,8 @@ import { qk } from '../../src/lib/queries';
 import { TempPasswordDialog } from '../../src/screens/system/TempPasswordDialog';
 import { RemoteAccessCard } from '../../src/screens/system/RemoteAccessCard';
 import { inviteMessage, isLocalAddress } from '../../src/screens/system/usersModel';
+import { COPY_FAILED_TEXT } from '../../src/screens/system/accessModel';
+import { useToasts } from '../../src/lib/toast';
 
 /**
  * v0.1.46 (F-21) — hộp mời dùng `login_url` của `GET /system/access` (không dùng window.location.origin), cảnh báo đỏ
@@ -119,6 +121,65 @@ describe('TempPasswordDialog', () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(2));
     expect(String((writeText.mock.calls[1] as unknown[])[0])).toContain('Địa chỉ: https://gen.tail1234.ts.net/login');
     await waitFor(() => expect(screen.queryByTestId('invite-local-warning')).toBeNull());
+  });
+
+  it('Safari: địa chỉ localhost → clipboard.write gọi ĐỒNG BỘ trong lượt bấm (không chờ mạng), nội dung lấy địa chỉ MỚI', async () => {
+    let current: AccessInfo = ACCESS_LOCAL;
+    stubAccess(() => json(200, current));
+    const items: Array<Record<string, Promise<Blob>>> = [];
+    class FakeClipboardItem {
+      constructor(data: Record<string, Promise<Blob>>) {
+        items.push(data);
+      }
+    }
+    vi.stubGlobal('ClipboardItem', FakeClipboardItem);
+    const write = vi.fn(async () => {});
+    const writeText = vi.fn(async () => {});
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { write, writeText } });
+    renderDialog();
+    await screen.findByTestId('invite-local-warning');
+    current = ACCESS_TS; // Owner vừa chạy `genh remote tailscale`; bộ nhớ đệm còn localhost
+    fireEvent.click(screen.getByRole('button', { name: /Chép lời nhắn gửi nhân viên/ }));
+    // Ngay trong handler bấm (chưa có await nào): đã gọi clipboard.write — Safari giữ quyền chép.
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(writeText).not.toHaveBeenCalled();
+    const blob = await items[0]['text/plain'];
+    // jsdom chưa có Blob.text() — đọc bằng FileReader.
+    const text = await new Promise<string>((resolve) => {
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result));
+      r.readAsText(blob);
+    });
+    expect(text).toContain('Địa chỉ: https://gen.tail1234.ts.net/login');
+    expect(text).toContain('abcd-efgh-jkmn');
+    await screen.findByRole('button', { name: /Đã chép/ });
+  });
+
+  it('trình duyệt không nhận Promise trong ClipboardItem → rơi về writeText với địa chỉ mới', async () => {
+    stubAccess(() => json(200, ACCESS_LOCAL));
+    vi.stubGlobal('ClipboardItem', class {});
+    const write = vi.fn(async () => {
+      throw new TypeError('không hỗ trợ');
+    });
+    const writeText = vi.fn(async () => {});
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { write, writeText } });
+    renderDialog();
+    await screen.findByTestId('invite-local-warning');
+    fireEvent.click(screen.getByRole('button', { name: /Chép lời nhắn gửi nhân viên/ }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    expect(String((writeText.mock.calls[0] as unknown[])[0])).toContain('Địa chỉ: https://localhost:8443/login');
+    await screen.findByRole('button', { name: /Đã chép/ });
+  });
+
+  it('không có navigator.clipboard (trang không HTTPS) → toast "Không chép được", không ném lỗi', async () => {
+    stubAccess(() => json(200, ACCESS_TS));
+    vi.stubGlobal('navigator', { ...navigator, clipboard: undefined });
+    renderDialog();
+    const btn = screen.getByRole('button', { name: /Chép lời nhắn gửi nhân viên/ });
+    await waitFor(() => expect(btn).toBeEnabled());
+    fireEvent.click(btn);
+    await waitFor(() => expect(useToasts.getState().toasts.map((t) => t.text)).toContain(COPY_FAILED_TEXT));
+    expect(screen.queryByRole('button', { name: /Đã chép/ })).toBeNull();
   });
 
   it('lỗi tải access → cảnh báo đỏ + Chi tiết kỹ thuật, không render object; lời nhắn bỏ dòng địa chỉ', async () => {

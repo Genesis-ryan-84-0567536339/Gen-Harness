@@ -11,6 +11,10 @@ name: gen-harness
 x-app-env: &app-env
   GH_ENV: ${GH_ENV:-production}
   GH_PUBLIC_URL: ${GH_PUBLIC_URL:-https://localhost:8443}
+  # v0.1.46 (F-21): cùng nguồn .env với cổng proxy bên dưới — api chỉ tin IP do proxy cục bộ (cloudflared/tailscaled)
+  # báo khi cổng nghe 127.0.0.1 (gh/auth/deps.py::client_ip).
+  GH_ACCESS_MODE: ${GH_ACCESS_MODE:-}
+  GH_BIND_ADDR: ${GH_BIND_ADDR:-127.0.0.1}
   GH_REDIS_URL: redis://redis:6379/0
   GH_OBJECTS_DIR: /var/lib/gh/objects
   GH_MASTER_KEY_FILE: /run/secrets/gh_master_key
@@ -43,7 +47,7 @@ services:
     # Đổi Caddyfile ⇒ đổi nhãn ⇒ compose tạo lại proxy (không thì container cũ giữ CSP cũ).
     # Giá trị = 12 ký tự đầu sha256(deploy/proxy/Caddyfile); tests/test_proxy_csp_v0135.py canh.
     labels:
-      gh.caddyfile-sha: "cc05c7586654"
+      gh.caddyfile-sha: "9de1bb28d817"
     environment:
       GH_SITE_ADDRESS: ${GH_SITE_ADDRESS:-127.0.0.1}
     volumes:

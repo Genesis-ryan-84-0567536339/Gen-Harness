@@ -399,8 +399,12 @@ type lanIface struct {
 	Addrs []net.Addr
 }
 
-// virtualIfacePrefixes: card ảo của Docker/libvirt/k8s — có IP RFC1918 nhưng điện thoại trong LAN không tới được.
-var virtualIfacePrefixes = []string{"docker", "br-", "veth", "virbr", "cni", "flannel", "kube", "podman", "lxc", "lxd", "vmnet", "vboxnet"}
+// virtualIfacePrefixes: card ảo của Docker/libvirt/k8s/VPN — có IP RFC1918 nhưng điện thoại trong LAN không tới được.
+// So khớp KHÔNG phân biệt hoa thường. Windows: "vEthernet (WSL…)"/"vEthernet (Default Switch)" của Hyper-V/WSL2/Docker
+// Desktop (khớp "veth"); macOS: bridge100+ / vmenet* (Parallels/VMware/Docker Desktop), utun* (VPN); ZeroTier zt*,
+// WireGuard wg*.
+var virtualIfacePrefixes = []string{"docker", "br-", "veth", "virbr", "cni", "flannel", "kube", "podman", "lxc", "lxd",
+	"vmnet", "vboxnet", "vethernet", "bridge1", "vmenet", "utun", "zt", "wg"}
 
 // pickLANIPv4 chọn IPv4 riêng (RFC1918) đầu tiên trên card thật đang bật — bỏ card tắt, loopback và card ảo
 // (docker0, br-*, veth*, virbr*…): chọn nhầm IP 172.17.x của docker0 thì điện thoại không vào được.
@@ -411,7 +415,7 @@ func pickLANIPv4(ifaces []lanIface) (string, bool) {
 		}
 		virtual := false
 		for _, p := range virtualIfacePrefixes {
-			if strings.HasPrefix(it.Name, p) {
+			if strings.HasPrefix(strings.ToLower(it.Name), p) {
 				virtual = true
 				break
 			}

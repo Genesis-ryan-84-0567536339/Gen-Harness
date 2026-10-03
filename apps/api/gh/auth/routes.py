@@ -84,6 +84,10 @@ def _pin_locked(locked_until: datetime | None) -> ApiError:
                     locked_until=until)
 
 
+#: Đường dẫn đầy đủ (genh có thể không nằm trong PATH) — khớp RESET_PASSWORD_COMMAND của apps/web LoginPage.
+RESET_PASSWORD_COMMAND = "~/.gen-harness/bin/genh reset-password"
+
+
 @router.post("/login")
 async def login(body: LoginIn, request: Request, response: Response,
                 db: AsyncSession = DB) -> dict[str, Any]:
@@ -104,11 +108,13 @@ async def login(body: LoginIn, request: Request, response: Response,
             # gỡ được — chỉ đợi, hoặc Owner chạy genh reset-password (xoá mọi bộ đếm IP).
             raise ApiError(429, "LOGIN_RATE_LIMITED",
                            f"Có quá nhiều lần đăng nhập sai từ cùng mạng — đợi khoảng {minutes} phút rồi thử lại",
-                           f"Đợi khoảng {minutes} phút. Owner: có thể gỡ ngay bằng lệnh genh reset-password trên "
-                           "máy chủ.", retry_after_s=retry, scope=scope)
+                           f"Đợi khoảng {minutes} phút. Owner: có thể gỡ ngay bằng lệnh {RESET_PASSWORD_COMMAND} trên "
+                           "máy chủ (lệnh này cấp mật khẩu tạm MỚI cho Owner và đăng xuất mọi phiên Owner).",
+                           retry_after_s=retry, scope=scope)
         raise ApiError(429, "LOGIN_RATE_LIMITED",
                        f"Đăng nhập sai quá nhiều lần — đợi khoảng {minutes} phút rồi thử lại",
-                       "Nhân viên: nhờ Owner bấm Đặt lại mật khẩu. Owner: chạy genh reset-password trên máy chủ.",
+                       "Nhân viên: nhờ Owner bấm Đặt lại mật khẩu. Owner: chạy "
+                       f"{RESET_PASSWORD_COMMAND} trên máy chủ (lệnh này cấp mật khẩu tạm MỚI cho Owner).",
                        retry_after_s=retry, scope=scope)
     found = await service.login(db, body.email, body.password)
     if found is None:

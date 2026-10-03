@@ -169,7 +169,8 @@ test.describe('Truy cập từ xa (v0.1.46)', () => {
     await page.getByRole('button', { name: /Đăng nhập/ }).click();
     const alert = page.getByRole('alert').filter({ hasText: 'Đăng nhập sai quá nhiều lần' });
     await expect(alert).toContainText('Đợi khoảng 9 phút');
-    await expect(alert).toContainText('Owner: chạy genh reset-password trên máy chủ');
+    await expect(alert).toContainText('Owner: chạy ~/.gen-harness/bin/genh reset-password trên máy chủ');
+    await expect(alert).toContainText('cấp mật khẩu tạm MỚI cho Owner');
     const tech = page.locator('details.tech-detail', { hasText: 'Chi tiết kỹ thuật' });
     await expect(tech).toBeVisible();
     await tech.locator('summary').click();
@@ -181,6 +182,9 @@ test.describe('Truy cập từ xa (v0.1.46)', () => {
     const ipAlert = page.getByRole('alert').filter({ hasText: 'từ cùng mạng' });
     await expect(ipAlert).toBeVisible();
     await expect(ipAlert).not.toContainText('Đặt lại mật khẩu');
+    // Lệnh gỡ ngay ghi đủ đường dẫn và báo trước là cấp mật khẩu tạm mới cho Owner.
+    await expect(ipAlert).toContainText('~/.gen-harness/bin/genh reset-password');
+    await expect(ipAlert).toContainText('cấp mật khẩu tạm MỚI cho Owner');
     await expect(page.getByText('[object Object]')).toHaveCount(0);
   });
 });

@@ -36,7 +36,8 @@ describe('LoginPage giới hạn đăng nhập', () => {
   it('scope=email: Owner được chỉ chạy genh reset-password, nhân viên nhờ Owner Đặt lại mật khẩu', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => problem(429, { status: 429, code: 'LOGIN_RATE_LIMITED', title: 'x', retry_after_s: 600, scope: 'email' })));
     submit();
-    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('Owner: chạy genh reset-password trên máy chủ'));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('Owner: chạy ~/.gen-harness/bin/genh reset-password trên máy chủ'));
+    expect(screen.getByRole('alert').textContent).toContain('cấp mật khẩu tạm MỚI cho Owner');
     expect(screen.getByRole('alert').textContent).toContain('Nhân viên: nhờ Owner bấm "Đặt lại mật khẩu"');
   });
 
@@ -47,7 +48,8 @@ describe('LoginPage giới hạn đăng nhập', () => {
     const text = screen.getByRole('alert').textContent ?? '';
     expect(text).toContain('2 phút');
     expect(text).not.toContain('Đặt lại mật khẩu');
-    expect(text).toContain('genh reset-password');
+    expect(text).toContain('~/.gen-harness/bin/genh reset-password');
+    expect(text).toContain('cấp mật khẩu tạm MỚI cho Owner và đăng xuất mọi phiên Owner');
     expect(screen.getByText('Chi tiết kỹ thuật').closest('details')?.textContent).toContain('LOGIN_RATE_LIMITED (ip)');
   });
 

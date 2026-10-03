@@ -2803,19 +2803,37 @@ chỉ `localhost` (nhân viên mở không được), đăng nhập không giớ
   429 trả `scope`; màn đăng nhập nói đúng cách gỡ: `email` → "Nhân viên: nhờ Owner bấm Đặt lại mật khẩu… Owner: chạy genh reset-password";
   `ip` → "nhiều lần sai từ cùng mạng — đợi N phút" (không hứa Owner đặt lại mật khẩu gỡ được). "Chi tiết kỹ thuật" dùng `.tech-detail`.
 - **LAN mở bằng IP không vào được**: trình duyệt không gửi SNI khi mở bằng IP ⇒ Caddy (cả bản repo và bản nhúng) thêm
-  `default_sni {$GH_SITE_ADDRESS:localhost}` (nhãn `gh.caddyfile-sha` = `cc05c7586654`; đã thử caddy v2.10.2: không SNI trước lỗi `internal error`,
+  `default_sni {$GH_SITE_ADDRESS:localhost}` (nhãn `gh.caddyfile-sha` lúc đó = `cc05c7586654`, nay `9de1bb28d817` — xem vòng 2; đã thử caddy v2.10.2: không SNI trước lỗi `internal error`,
   nay bắt tay được). `genh remote lan` tự dò IP bỏ qua card tắt, loopback, card ảo (docker*, br-*, veth*, virbr*…). E2E-install thêm bước
   `genh remote lan --yes` (không `--name`) rồi curl `https://<IP>:<cổng>/api/v1/ready` không `--resolve`.
 - **Nâng cấp giữ địa chỉ Owner tự đặt**: máy cũ có `GH_SITE_ADDRESS`/`GH_PUBLIC_URL` trong `.env` (chưa có `GH_BIND_ADDR`) nay giữ nguyên hai dòng
   (có site hợp lệ ⇒ chế độ `lan`, 0.0.0.0); trước đây bị xoá/ghi đè về localhost ở lần chạy genh đầu tiên sau nâng cấp.
-- **Hộp mời**: bấm "Chép lời nhắn" luôn đọc lại địa chỉ mới (không dùng bộ nhớ đệm 30 giây) và hỏi lại mỗi 5 giây khi địa chỉ còn là localhost —
-  chạy `genh remote tailscale` rồi chép lại là ra địa chỉ Tailscale, cảnh báo đỏ tự tắt.
+- **Hộp mời**: khi địa chỉ còn là localhost/chưa đọc được thì đọc lại trước khi chép (địa chỉ đã là từ xa thì chép ngay bản đang hiện), và hỏi
+  lại mỗi 5 giây khi địa chỉ còn là localhost — chạy `genh remote tailscale` rồi chép lại là ra địa chỉ Tailscale, cảnh báo đỏ tự tắt.
 - **Chữ**: Hướng dẫn bước 10 chỉ đúng chỗ có lời nhắn + cảnh báo (Đội ngũ › Người dùng › "Mời người dùng"/"Đặt lại mật khẩu");
   chuông "Cổng đang mở cho cả mạng": Owner "Bấm để xem lệnh… (chạy trên máy chủ)", người khác "nhờ Owner chọn cách truy cập từ xa";
   dòng 7 Việc Sếp cần làm nói rõ bấm Kiểm tra ở chính dòng này trên điện thoại; thẻ Truy cập từ xa: chế độ "Chưa rõ" chỉ `genh remote status`,
   nút Chép lệnh Cloudflare không chép `<tên-miền>`; câu "không chép được" thống nhất.
 - **`genh remote`**: `local` chỉ tắt `tailscale serve` SAU khi áp dụng xong (lỗi giữa chừng thì serve vẫn chạy như cũ); `tailscale` lỗi sớm
   (chưa ghi được `.env`) thì tắt lại serve vừa bật.
+- **Vòng 2 (sau review lần 2)**:
+  - **CI windows-2022 còn đỏ**: 3 test `dataStep` (`install/steps_data_test.go`) cứng `locate` = `/tmp/compose.yaml`; từ v0.1.46 bước dữ liệu ghi
+    `.env` cạnh compose.yaml ⇒ Windows lỗi `\tmp\.env… (GH-E010)`, Linux ghi bậy vào `/tmp/.env` thật. Nay mọi test dùng compose.yaml trong
+    `t.TempDir()` (và kiểm `.env` nằm cạnh đó); `GOOS=windows go vet` sạch.
+  - **Người lạ trên Internet khoá cả Console (gốc rễ)**: Caddy không tin proxy nào nên ghi đè X-Forwarded-For bằng IP gateway docker-proxy ⇒
+    bộ đếm IP chung cả tổ chức. Nay Caddy chép nguyên XFF khách gửi sang `X-Gh-Upstream-Xff` (ghi đè giá trị khách tự đặt), compose truyền
+    `GH_ACCESS_MODE`/`GH_BIND_ADDR` (cùng nguồn `.env` với cổng proxy) cho api; `client_ip` CHỈ khi cổng nghe 127.0.0.1 (chỉ tiến trình trên
+    máy chủ tới được Caddy) mới tin: `Cf-Connecting-IP` ở chế độ cloudflare, phần tử phải nhất của XFF gốc (do tailscaled/cloudflared nối vào)
+    ở chế độ khác. LAN (0.0.0.0) / chạy ngoài compose giữ như cũ. Người lạ chạm ngưỡng IP chỉ khoá IP của chính họ; Owner tại máy chủ và người
+    khác vẫn đăng nhập được (pytest). Nhãn `gh.caddyfile-sha` = `9de1bb28d817`.
+  - Ghi bộ đếm: `SET NX EX` + `INCR` + `EXPIRE NX` trong một MULTI/EXEC (không thể mất TTL giữa chừng rồi đếm dồn nhiều ngày).
+  - Hộp mời trên Safari: bản trước `await` đọc lại địa chỉ rồi mới `writeText` ⇒ Safari mất lượt bấm, luôn "Không chép được". Nay gọi
+    `clipboard.write([new ClipboardItem({'text/plain': Promise<Blob>})])` ngay trong lượt bấm (nội dung tới sau); trình duyệt không nhận
+    Promise thì rơi về `writeText`; thiếu `navigator.clipboard` thì báo toast (vitest).
+  - Câu 429 (api + màn đăng nhập) ghi đủ đường dẫn `~/.gen-harness/bin/genh reset-password` và báo trước lệnh này cấp mật khẩu tạm MỚI cho
+    Owner (scope `ip`: kèm "đăng xuất mọi phiên Owner").
+  - `genh remote lan` dò IP: bỏ thêm card ảo Windows/macOS/VPN (`vEthernet (WSL…)`, `bridge1xx`, `vmenet*`, `utun*`, `zt*`, `wg*`; so không
+    phân biệt hoa thường).
 - Chưa đổi: dòng 7 "Truy cập từ xa" vẫn **bắt buộc** (6 dòng) — Owner chỉ dùng trên máy chủ sẽ không đạt đủ; để người điều phối quyết.
 
 ### Kiểm tra
@@ -2833,10 +2851,13 @@ chỉ `localhost` (nhân viên mở không được), đăng nhập không giớ
 
 ### Rủi ro / giới hạn
 
-- Sau docker-proxy (mặc định 127.0.0.1), Tailscale Serve hoặc cloudflared, mọi người **chung IP nguồn** ⇒ bộ đếm IP là bộ đếm chung cả tổ chức;
-  vì vậy ngưỡng IP là 100 (chỉ chống dội), lớp chính là 10 lần/email. Vượt 100 lần sai/15 phút từ cùng mạng thì cả nhóm bị chặn tạm — Owner gỡ
-  bằng `genh reset-password` (xoá bộ đếm email Owner lẫn MỌI bộ đếm IP) hoặc đợi. Ở Cloudflare, người lạ vẫn khoá được MỘT tài khoản bằng 10 lần
-  sai (khoá theo email) — Owner gỡ cho nhân viên bằng "Đặt lại mật khẩu", cho mình bằng `genh reset-password`.
+- Bộ đếm IP: ở chế độ cloudflare/tailscale (cổng 127.0.0.1) api lấy IP thật do proxy cục bộ báo (vòng 2) — người lạ trên Internet chỉ khoá
+  được IP của chính họ. Vẫn **chung IP** khi: Owner ngồi tại máy chủ (mọi trình duyệt tại máy chung IP gateway), LAN qua Docker rootless/Docker
+  Desktop (không giữ IP nguồn). Ngưỡng IP vì vậy vẫn là 100 (chống dội), lớp chính 10 lần/email. Ở tailscale, người TRONG tailnet có thể giả
+  phần bên trái XFF nhưng không giả được phần tailscaled nối vào; ở cloudflare, `Cf-Connecting-IP` do Cloudflare đặt.
+- **Cloudflare — rủi ro còn lại**: người lạ biết email Owner vẫn khoá được TÀI KHOẢN đó bằng 10 lần sai/15 phút (khoá theo email, cố ý — chặn dò
+  mật khẩu), lặp lại được từ nhiều IP. Owner gỡ cho nhân viên bằng "Đặt lại mật khẩu", cho mình bằng `~/.gen-harness/bin/genh reset-password`
+  (lệnh này cấp mật khẩu tạm MỚI cho Owner) hoặc đợi; muốn tránh hẳn thì đặt Cloudflare Access trước Console hoặc dùng Tailscale.
 - Nhân viên dùng Tailscale phải được mời vào mạng Tailscale của Sếp.
 - Chế độ LAN cần cài CA trên từng điện thoại và (Fedora Server) mở firewalld cho cổng đã chọn.
 - Không có nút một chạm "Chỉ cho máy này" trong Console (tránh Owner tự cắt truy cập khi đang dùng điện thoại): đổi chế độ bằng `genh remote` trên máy chủ.

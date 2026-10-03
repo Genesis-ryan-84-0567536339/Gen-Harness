@@ -16,21 +16,45 @@ export function TempPasswordDialog({ title, result, onClose }: { title: string; 
   const [copied, setCopied] = useState(false);
   const access = useAccess({ pollWhileLocalMs: 5_000 });
   const loginUrl = access.data?.login_url ?? null;
-  const copy = async () => {
-    // Địa chỉ còn là localhost (hoặc chưa đọc được) ⇒ đọc lại NGAY lúc chép: Owner vừa chạy `genh remote …` theo cảnh
-    // báo đỏ thì bản trong bộ nhớ đệm (30 giây) còn cũ — chép bản cũ là gửi nhân viên địa chỉ không mở được. Địa chỉ đã là
-    // từ xa thì chép ngay (không chờ mạng: Safari chỉ cho chép khi còn trong lượt bấm).
-    let url = loginUrl;
-    if (!access.data || access.data.public_url_local) {
-      const fresh = await access.refetch();
-      url = fresh.data?.login_url ?? loginUrl;
+  const copy = () => {
+    const done = () => setCopied(true);
+    const fail = () => toast(COPY_FAILED_TEXT, 'warn');
+    // navigator.clipboard thiếu (trang không phải HTTPS) ⇒ ném đồng bộ — đổi thành Promise bị từ chối để báo toast.
+    const writeText = (t: string): Promise<void> => {
+      try {
+        return navigator.clipboard.writeText(t);
+      } catch (e) {
+        return Promise.reject(e);
+      }
+    };
+    // Địa chỉ đã là từ xa ⇒ chép ngay bản đang hiện, không chờ mạng.
+    if (access.data && !access.data.public_url_local) {
+      writeText(inviteMessage(result, loginUrl)).then(done, fail);
+      return;
     }
-    try {
-      await navigator.clipboard.writeText(inviteMessage(result, url));
-      setCopied(true);
-    } catch {
-      toast(COPY_FAILED_TEXT, 'warn');
+    // Địa chỉ còn là localhost (hoặc chưa đọc được) ⇒ đọc lại lúc chép: Owner vừa chạy `genh remote …` theo cảnh báo đỏ
+    // thì bản trong bộ nhớ đệm còn cũ — chép bản cũ là gửi nhân viên địa chỉ không mở được.
+    const text = access.refetch().then(
+      (fresh) => inviteMessage(result, fresh.data?.login_url ?? loginUrl),
+      () => inviteMessage(result, loginUrl),
+    );
+    // Safari/WebKit chỉ cho chép khi lệnh chép được gọi NGAY trong lượt bấm — `await` mạng xong mới writeText là bị
+    // NotAllowedError. ClipboardItem nhận Promise<Blob> ⇒ gọi clipboard.write đồng bộ ở đây, nội dung tới sau.
+    if (typeof ClipboardItem !== 'undefined' && typeof navigator.clipboard?.write === 'function') {
+      let item: ClipboardItem;
+      try {
+        item = new ClipboardItem({ 'text/plain': text.then((t) => new Blob([t], { type: 'text/plain' })) });
+      } catch {
+        void text.then(writeText).then(done, fail);
+        return;
+      }
+      navigator.clipboard.write([item]).then(done, () => {
+        // Trình duyệt cũ không nhận Promise trong ClipboardItem — thử writeText (Chrome/Firefox còn cho trong vài giây).
+        void text.then(writeText).then(done, fail);
+      });
+      return;
     }
+    void text.then(writeText).then(done, fail);
   };
   return (
     <Dialog
@@ -42,7 +66,7 @@ export function TempPasswordDialog({ title, result, onClose }: { title: string; 
       kicker="Mật khẩu tạm chỉ hiện MỘT lần"
       actions={
         <>
-          <Button variant="secondary" icon={copied ? 'ph ph-check' : 'ph ph-copy'} disabled={access.isPending} onClick={() => void copy()}>
+          <Button variant="secondary" icon={copied ? 'ph ph-check' : 'ph ph-copy'} disabled={access.isPending} onClick={copy}>
             {copied ? 'Đã chép' : 'Chép lời nhắn gửi nhân viên'}
           </Button>
           <Button variant="primary" onClick={onClose}>

@@ -17,9 +17,9 @@ const RESET_PASSWORD_COMMAND = '~/.gen-harness/bin/genh reset-password';
 function rateLimitMessage(retryAfterS: number, scope: 'ip' | 'email'): string {
   const minutes = Number.isFinite(retryAfterS) && retryAfterS > 0 ? Math.ceil(retryAfterS / 60) : 15;
   if (scope === 'ip') {
-    return `Có quá nhiều lần đăng nhập sai từ cùng mạng. Đợi khoảng ${minutes} phút rồi thử lại. Owner: có thể gỡ ngay bằng lệnh genh reset-password trên máy chủ.`;
+    return `Có quá nhiều lần đăng nhập sai từ cùng mạng. Đợi khoảng ${minutes} phút rồi thử lại. Owner: có thể gỡ ngay bằng lệnh ${RESET_PASSWORD_COMMAND} trên máy chủ (lệnh này cấp mật khẩu tạm MỚI cho Owner và đăng xuất mọi phiên Owner).`;
   }
-  return `Đăng nhập sai quá nhiều lần. Đợi khoảng ${minutes} phút rồi thử lại. Nhân viên: nhờ Owner bấm "Đặt lại mật khẩu" ở Đội ngũ › Người dùng. Owner: chạy genh reset-password trên máy chủ.`;
+  return `Đăng nhập sai quá nhiều lần. Đợi khoảng ${minutes} phút rồi thử lại. Nhân viên: nhờ Owner bấm "Đặt lại mật khẩu" ở Đội ngũ › Người dùng. Owner: chạy ${RESET_PASSWORD_COMMAND} trên máy chủ (lệnh này cấp mật khẩu tạm MỚI cho Owner).`;
 }
 
 export function LoginPage() {

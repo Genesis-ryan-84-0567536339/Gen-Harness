@@ -25,7 +25,12 @@ localhost:8443, {$GH_SITE_ADDRESS:127.0.0.1}:8443 {
 	}
 
 	handle /api/* {
-		reverse_proxy api:8000
+		reverse_proxy api:8000 {
+			# Caddy không tin proxy nào ⇒ tự ghi đè X-Forwarded-For bằng IP kết nối (cổng 127.0.0.1: IP gateway chung
+			# cả tổ chức). Chép nguyên XFF khách gửi sang header riêng (ghi đè giá trị khách tự đặt) để api lấy IP
+			# thật do tailscaled/cloudflared nối vào — api CHỈ tin khi GH_BIND_ADDR=127.0.0.1 (gh/auth/deps.py).
+			header_up X-Gh-Upstream-Xff {http.request.header.X-Forwarded-For}
+		}
 	}
 	handle {
 		# Bỏ CSP của nginx (web) để trình duyệt chỉ nhận MỘT CSP — của Caddy (lớp quyết định, có wss://host).

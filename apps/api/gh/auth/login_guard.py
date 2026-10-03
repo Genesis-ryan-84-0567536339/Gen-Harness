@@ -8,9 +8,11 @@ Quá ngưỡng → 429 LOGIN_RATE_LIMITED, kể cả khi mật khẩu đúng; `b
 
 Vì sao ngưỡng IP cao hơn hẳn: ở chế độ local/tailscale/cloudflare cổng chỉ nghe 127.0.0.1 — mọi người (Tailscale
 Serve, cloudflared, Owner ngồi tại máy chủ) tới Caddy qua docker-proxy từ CÙNG một IP gateway, nên bộ đếm IP thực
-chất là bộ đếm chung cả tổ chức. Nếu nó cũng dừng ở 10 thì vài lần gõ nhầm mật khẩu tạm của nhân viên khoá luôn Owner,
-và ai đó trên Internet (Cloudflare) giữ được cả Console bị khoá. 10 lần sai ở tài khoản A từ IP X KHÔNG được chặn
-mật khẩu đúng của tài khoản B từ IP X.
+chất là bộ đếm chung cả tổ chức. Từ v0.1.46 (sau review) `client_ip` lấy IP thật do proxy cục bộ báo khi cổng nghe
+127.0.0.1 (Cf-Connecting-IP ở chế độ cloudflare, phần tử phải nhất X-Forwarded-For của tailscaled — gh/auth/deps.py),
+nên người lạ trên Internet chỉ khoá được IP của chính họ; ngưỡng cao vẫn giữ cho trường hợp còn chung IP (Owner ngồi
+tại máy chủ, LAN qua Docker rootless/Docker Desktop). 10 lần sai ở tài khoản A từ IP X KHÔNG được chặn mật khẩu đúng
+của tài khoản B từ IP X.
 
 Khoá: `gh:login:fail:ip:<ip>` và `gh:login:fail:email:<sha256(email chuẩn hoá)[:32]>` — không lưu email thô.
 Mật khẩu đúng chỉ xoá bộ đếm email (`clear_email`), KHÔNG xoá bộ đếm IP: kẻ có một tài khoản thật không được tự
@@ -18,8 +20,8 @@ xoá bộ đếm IP của mình để dò tiếp tài khoản khác. Owner gỡ 
 VÀ mọi bộ đếm IP — `clear_for_owner_reset`) hoặc đợi hết cửa sổ. Owner bấm "Đặt lại mật khẩu" cho nhân viên chỉ xoá
 bộ đếm email của nhân viên đó.
 
-Mỗi khoá luôn có TTL: tạo bằng `SET NX EX` TRƯỚC khi INCR (tiến trình chết giữa chừng vẫn không để lại khoá vĩnh
-viễn); khoá nào lỡ mất TTL (-1) thì `blocked()` đặt lại.
+Mỗi khoá luôn có TTL: `SET NX EX` + `INCR` + `EXPIRE NX` trong một MULTI/EXEC (không thể hết hạn chen giữa, tiến
+trình chết giữa chừng không để lại khoá vĩnh viễn); khoá nào lỡ mất TTL (-1, bản cũ) thì `blocked()` đặt lại.
 
 Redis lỗi → fail-open (log một dòng, không kèm email, cho đăng nhập tiếp): app do Owner tự host; Redis chết thì api
 đã báo sức khoẻ, không nên khoá Owner ra ngoài vì hạ tầng.
@@ -91,10 +93,14 @@ async def blocked(redis: Any, ip: str | None, email: str) -> tuple[int, str] | N
 async def record_failure(redis: Any, ip: str | None, email: str) -> None:
     window = get_settings().login_fail_window_seconds
     try:
-        for k in keys(ip, email):
-            # Tạo khoá kèm TTL trước (nguyên tử), rồi mới tăng: không bao giờ có khoá đếm thiếu TTL.
-            await redis.set(k, 0, nx=True, ex=window)
-            await redis.incr(k)
+        # Một MULTI/EXEC cho mọi khoá: SET NX EX + INCR + EXPIRE NX chạy liền khối — khoá không thể hết hạn giữa SET và
+        # INCR (INCR tạo lại khoá KHÔNG TTL ⇒ đếm dồn nhiều ngày); EXPIRE NX (Redis ≥ 7) chốt lại TTL nếu vẫn thiếu.
+        async with redis.pipeline(transaction=True) as pipe:
+            for k in keys(ip, email):
+                pipe.set(k, 0, nx=True, ex=window)
+                pipe.incr(k)
+                pipe.expire(k, window, nx=True)
+            await pipe.execute()
     except _FAIL_OPEN as e:
         log.warning("Redis lỗi khi ghi lần đăng nhập sai (%s)", type(e).__name__)
 

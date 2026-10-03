@@ -36,7 +36,7 @@ async def test_eleventh_attempt_blocked_even_with_correct_password(owner_api: Ap
     assert r.status_code == 429, r.text
     body = r.json()
     assert body["code"] == "LOGIN_RATE_LIMITED" and body["retry_after_s"] > 0 and body["scope"] == "email"
-    assert isinstance(body["detail"], str) and "genh reset-password" in body["detail"]
+    assert isinstance(body["detail"], str) and "~/.gen-harness/bin/genh reset-password" in body["detail"]
 
 
 async def test_ip_limit_across_unknown_emails(owner_api: Api, app: object, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -48,7 +48,8 @@ async def test_ip_limit_across_unknown_emails(owner_api: Api, app: object, monke
     assert r.status_code == 429 and r.json()["code"] == "LOGIN_RATE_LIMITED"
     assert r.json()["scope"] == "ip"
     # Câu cho scope=ip không hứa "nhờ Owner bấm Đặt lại mật khẩu" (không gỡ được bộ đếm IP chung).
-    assert "Đặt lại mật khẩu" not in r.json()["detail"] and "genh reset-password" in r.json()["detail"]
+    assert "Đặt lại mật khẩu" not in r.json()["detail"] and "~/.gen-harness/bin/genh reset-password" in r.json()["detail"]
+    assert "mật khẩu tạm MỚI" in r.json()["detail"]
     assert (await _login(app, "khong12@example.vn", "x" * 12, IP_B)).status_code == 401
 
 
@@ -139,6 +140,9 @@ async def test_redis_down_fails_open(owner_api: Api, app: object) -> None:
 
         incr = ttl = expire = delete = set = get
 
+        def pipeline(self, *a: Any, **k: Any) -> Any:
+            raise RedisConnectionError("down")
+
     real = app.state.redis  # type: ignore[attr-defined]
     app.state.redis = Broken()  # type: ignore[attr-defined]
     try:
@@ -199,3 +203,70 @@ async def test_genh_reset_password_unblocks_owner_shared_ip(owner_api: Api, app:
     assert await _count(redis, login_guard.email_key(OWNER["email"])) == 0
     assert await redis.get("gh:khac:giu-nguyen") == b"1"
     assert (await _login(app, OWNER["email"], OWNER["password"], IP_A)).status_code == 200
+
+
+async def test_record_failure_restores_missing_ttl_atomically(redis: Redis) -> None:
+    """Review v0.1.46 (nit): SET NX EX + INCR + EXPIRE NX trong một MULTI — khoá đếm lỡ mất TTL (bản cũ) được chốt lại
+    TTL ngay lần sai kế tiếp, không đếm dồn qua nhiều ngày."""
+    k = login_guard.email_key("dem-don@example.vn")
+    await redis.set(k, 3)
+    assert await redis.ttl(k) == -1
+    await login_guard.record_failure(redis, None, "dem-don@example.vn")
+    assert await _count(redis, k) == 4
+    assert 0 < await redis.ttl(k) <= get_settings().login_fail_window_seconds
+
+
+def _req(headers: dict[str, str], client: str = "172.18.0.1") -> Any:
+    from starlette.requests import Request
+
+    raw = [(k.lower().encode(), v.encode()) for k, v in headers.items()]
+    return Request({"type": "http", "method": "POST", "path": "/", "headers": raw, "client": (client, 1234),
+                    "query_string": b""})
+
+
+@pytest.mark.parametrize(("mode", "bind", "headers", "want"), [
+    # Cổng nghe 127.0.0.1 + Cloudflare: Cf-Connecting-IP là IP khách thật.
+    ("cloudflare", "127.0.0.1", {"Cf-Connecting-IP": "198.51.100.9", "X-Forwarded-For": "172.18.0.1"},
+     "198.51.100.9"),
+    # Cloudflare nhưng Cf-Connecting-IP hỏng → phần tử PHẢI NHẤT chuỗi XFF gốc (proxy cục bộ nối vào).
+    ("cloudflare", "127.0.0.1", {"Cf-Connecting-IP": "khong-phai-ip", "X-Gh-Upstream-Xff": "1.2.3.4, 198.51.100.9",
+                                 "X-Forwarded-For": "172.18.0.1"}, "198.51.100.9"),
+    # Tailscale: phần tử phải nhất (tailscaled nối vào); bên trái do khách tự gửi — không tin.
+    ("tailscale", "127.0.0.1", {"X-Gh-Upstream-Xff": "10.9.9.9, 100.64.0.7", "X-Forwarded-For": "172.18.0.1"},
+     "100.64.0.7"),
+    # Tailscale KHÔNG tin Cf-Connecting-IP (người trong tailnet tự đặt được).
+    ("tailscale", "127.0.0.1", {"Cf-Connecting-IP": "198.51.100.9", "X-Forwarded-For": "172.18.0.1"}, "172.18.0.1"),
+    # Owner ngồi tại máy chủ (không header proxy) → IP Caddy báo.
+    ("local", "127.0.0.1", {"X-Gh-Upstream-Xff": "", "X-Forwarded-For": "172.18.0.1"}, "172.18.0.1"),
+    # LAN (0.0.0.0): ai trong mạng cũng gửi được header tuỳ ý → bỏ qua cả hai.
+    ("lan", "0.0.0.0", {"Cf-Connecting-IP": "198.51.100.9", "X-Gh-Upstream-Xff": "198.51.100.9",
+                        "X-Forwarded-For": "192.168.1.20"}, "192.168.1.20"),
+    # Chạy ngoài compose (không có GH_BIND_ADDR) → như cũ.
+    ("", "", {"Cf-Connecting-IP": "198.51.100.9", "X-Forwarded-For": "203.0.113.7"}, "203.0.113.7"),
+])
+def test_client_ip_trusts_local_proxy_only_when_bound_to_loopback(monkeypatch: pytest.MonkeyPatch, mode: str,
+                                                                  bind: str, headers: dict[str, str],
+                                                                  want: str) -> None:
+    from gh.auth.deps import client_ip
+
+    monkeypatch.setattr(get_settings(), "access_mode", mode)
+    monkeypatch.setattr(get_settings(), "bind_addr", bind)
+    assert client_ip(_req(headers)) == want
+
+
+async def test_cloudflare_stranger_cannot_lock_out_owner(owner_api: Api, app: object,
+                                                         monkeypatch: pytest.MonkeyPatch) -> None:
+    """Review v0.1.46 (should-fix): chế độ Cloudflare, cổng 127.0.0.1 — người lạ trên Internet gửi đủ lần sai để chạm
+    ngưỡng IP chỉ khoá IP của chính họ; Owner tại máy chủ (và người khác qua Cloudflare) vẫn đăng nhập được."""
+    monkeypatch.setattr(get_settings(), "access_mode", "cloudflare")
+    monkeypatch.setattr(get_settings(), "bind_addr", "127.0.0.1")
+    monkeypatch.setattr(get_settings(), "login_ip_fail_limit", 12)
+    gw = {"X-Forwarded-For": "172.18.0.1"}  # Caddy luôn ghi đè XFF bằng IP gateway docker-proxy
+    attacker = gw | {"Cf-Connecting-IP": "198.51.100.66", "X-Gh-Upstream-Xff": "198.51.100.66"}
+    for i in range(12):
+        assert (await _login(app, f"do{i}@example.vn", "x" * 12, attacker)).status_code == 401
+    r = await _login(app, "do12@example.vn", "x" * 12, attacker)
+    assert r.status_code == 429 and r.json()["scope"] == "ip"
+    assert (await _login(app, OWNER["email"], OWNER["password"], gw)).status_code == 200
+    other = gw | {"Cf-Connecting-IP": "203.0.113.50", "X-Gh-Upstream-Xff": "203.0.113.50"}
+    assert (await _login(app, OWNER["email"], OWNER["password"], other)).status_code == 200

@@ -67,6 +67,12 @@ class Settings(BaseSettings):
     login_fail_limit: int = 10
     login_ip_fail_limit: int = 100
     login_fail_window_seconds: int = 900
+    # v0.1.46 (F-21): compose chuyển từ .env do genh ghi (cùng nguồn với cổng proxy). bind_addr="127.0.0.1" ⇒ chỉ tiến
+    # trình trên máy chủ (cloudflared/tailscaled/trình duyệt tại máy) tới được Caddy, nên client_ip được tin
+    # Cf-Connecting-IP (chỉ chế độ cloudflare) và IP do proxy cục bộ nối vào X-Forwarded-For (gh/auth/deps.py).
+    # Rỗng/khác (chạy ngoài compose, LAN) ⇒ không tin thêm header nào.
+    access_mode: str = ""
+    bind_addr: str = ""
     pin_session_minutes: int = 30
     pin_max_attempts: int = 5
     pin_lock_minutes: int = 15

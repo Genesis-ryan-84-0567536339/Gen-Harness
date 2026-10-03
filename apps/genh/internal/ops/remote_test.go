@@ -363,6 +363,45 @@ func TestPickLANIPv4_SkipsVirtualAndDownInterfaces(t *testing.T) {
 	}
 }
 
+// Windows (WSL2/Docker Desktop) và macOS (Parallels/VMware/VPN): card ảo đứng trước Wi-Fi không được chọn.
+func TestPickLANIPv4_SkipsWindowsAndMacVirtualInterfaces(t *testing.T) {
+	ipn := func(c string) net.Addr {
+		ip, n, err := net.ParseCIDR(c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		n.IP = ip
+		return n
+	}
+	cases := []struct {
+		name   string
+		ifaces []lanIface
+		want   string
+	}{
+		{"windows", []lanIface{
+			{Name: "vEthernet (WSL (Hyper-V firewall))", Up: true, Addrs: []net.Addr{ipn("172.29.144.1/20")}},
+			{Name: "vEthernet (Default Switch)", Up: true, Addrs: []net.Addr{ipn("172.20.0.1/20")}},
+			{Name: "Wi-Fi", Up: true, Addrs: []net.Addr{ipn("192.168.1.31/24")}},
+		}, "192.168.1.31"},
+		{"macos", []lanIface{
+			{Name: "bridge100", Up: true, Addrs: []net.Addr{ipn("192.168.64.1/24")}},
+			{Name: "vmenet0", Up: true, Addrs: []net.Addr{ipn("192.168.65.1/24")}},
+			{Name: "utun3", Up: true, Addrs: []net.Addr{ipn("10.8.0.2/24")}},
+			{Name: "en0", Up: true, Addrs: []net.Addr{ipn("192.168.0.12/24")}},
+		}, "192.168.0.12"},
+		{"vpn", []lanIface{
+			{Name: "zt7nnig26", Up: true, Addrs: []net.Addr{ipn("10.147.17.5/24")}},
+			{Name: "wg0", Up: true, Addrs: []net.Addr{ipn("10.6.0.2/24")}},
+			{Name: "enp3s0", Up: true, Addrs: []net.Addr{ipn("10.0.0.40/24")}},
+		}, "10.0.0.40"},
+	}
+	for _, c := range cases {
+		if got, ok := pickLANIPv4(c.ifaces); !ok || got != c.want {
+			t.Errorf("%s: pickLANIPv4 = %q %v, muốn %s", c.name, got, ok, c.want)
+		}
+	}
+}
+
 // `genh remote local` từ tailscale mà `up -d` lỗi: revert trả .env tailscale về — serve KHÔNG được tắt trước đó, nếu
 // không truy cập từ xa bị cắt trong khi genh báo "đã trả về như cũ".
 func TestRemoteLocal_UpFails_KeepsTailscaleServe(t *testing.T) {
