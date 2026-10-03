@@ -27,7 +27,7 @@ function followUp(done: number[]): SetupFollowUpItem[] {
 
 const BOSS: BossOverview = {
   rows: [],
-  results: { hub: null, facebook: null, agy_login: null, agy_call: null, agy_switch: null, claude_login: null, claude_call: null, jev: null },
+  results: { hub: null, facebook: null, agy_login: null, agy_call: null, agy_switch: null, claude_login: null, claude_call: null, jev: null, telegram: null },
   required_done: 1,
   required_total: 4,
   switch_passes: 0,

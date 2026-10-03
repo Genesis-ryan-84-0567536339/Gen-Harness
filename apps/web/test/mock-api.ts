@@ -16,7 +16,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { randomUUID } from 'node:crypto';
-import type { AgentIdentity, HealthIssue, HubLink, SocialAccount, SystemHealth } from '@gen-harness/contracts';
+import type { AgentIdentity, BossCheck, HealthIssue, HubLink, SocialAccount, SystemHealth } from '@gen-harness/contracts';
 import { createPhase2, maskText, seedRows, type P2Ctx } from './mock-phase2';
 import { createMock as createP3Core } from './mock-p3-core';
 import { createMock as createP3Queue } from './mock-p3-queue';
@@ -30,6 +30,7 @@ import { createMock as createP4Api } from './mock-p4-api';
 import { createMock as createP4Mcp } from './mock-p4-mcp';
 import { createMock as createSocial } from './mock-social';
 import { createMock as createBossChecks } from './mock-boss-checks';
+import { createMock as createTelegram, type TelegramOutcome } from './mock-telegram';
 import { createMock as createP4Plugins } from './mock-p4-plugins';
 import { createMock as createP4System } from './mock-p4-system';
 import { createMock as createGen } from './mock-gen';
@@ -391,20 +392,30 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     pushDraft: p3Core.hooks.push as (d: Record<string, unknown>) => unknown,
   });
   const hubLinkOf = mcp.hooks.hubLink as () => HubLink;
+  // v0.1.44 (F-8c) — Kết nối › Telegram; Gửi thử ghi vào boss_checks (gắn sau khi tạo bossChecks bên dưới).
+  let recordTelegram: (o: TelegramOutcome) => BossCheck = () => {
+    throw new Error('bossChecks chưa sẵn sàng');
+  };
+  const telegram = createTelegram({ fresh: opts.setup === 'fresh', emit: broadcast, record: (o) => recordTelegram(o) });
+  const bossChecks = createBossChecks({
+    fresh: opts.setup === 'fresh', emit: broadcast,
+    hubLink: hubLinkOf,
+    hubTest: mcp.hooks.hubTest as () => { ok: boolean; error: string | null; error_code: string | null },
+    socialAccounts,
+    cliProfiles: phase2.hooks.cliProfiles,
+    activateCli: phase2.hooks.activateCli,
+    providers: phase2.hooks.providers,
+    onCliLogin: phase2.hooks.onCliLogin as (fn: (kind: string, ok: boolean, email: string | null) => void) => void,
+    telegramTest: telegram.runTest,
+  });
+  recordTelegram = bossChecks.hooks.recordTelegram as (o: TelegramOutcome) => BossCheck;
   const phase3 = {
     gen: genMock,
     social,
-    // v0.1.39 (F-74) — "Việc Sếp cần làm" (chỉ Owner; PIN cho hub/agy_switch).
-    bossChecks: createBossChecks({
-      fresh: opts.setup === 'fresh', emit: broadcast,
-      hubLink: hubLinkOf,
-      hubTest: mcp.hooks.hubTest as () => { ok: boolean; error: string | null; error_code: string | null },
-      socialAccounts,
-      cliProfiles: phase2.hooks.cliProfiles,
-      activateCli: phase2.hooks.activateCli,
-      providers: phase2.hooks.providers,
-      onCliLogin: phase2.hooks.onCliLogin as (fn: (kind: string, ok: boolean, email: string | null) => void) => void,
-    }),
+    // v0.1.39 (F-74) — "Việc Sếp cần làm" (chỉ Owner; PIN cho hub/agy_switch). v0.1.44: dòng 6 Telegram.
+    bossChecks,
+    // v0.1.44 (F-8c) — Kết nối › Telegram ("Báo động & bản tin"), chỉ Owner; PIN cho Lưu/Tắt.
+    telegram,
     // agents TRƯỚC core: `GET /agents/decisions` cần trả dữ liệu thật ("agent đã nói gì") — core.handle() có
     // một stub rỗng cho cùng đường (chưa màn nào dùng tới trước giai đoạn 4) nên phải chặn trước nó.
     agents: p4Agents,

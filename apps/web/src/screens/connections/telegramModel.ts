@@ -1,0 +1,117 @@
+import type { TelegramConfig, TelegramHostStatus } from '@gen-harness/contracts';
+import { friendlyError } from '../../lib/friendlyError';
+
+/**
+ * v0.1.44 (F-8c): Kết nối › Telegram ("Báo động & bản tin") — chữ, câu lỗi theo mã, kiểm định dạng token. Hàm thuần,
+ * không gọi API. Câu lỗi dùng lại ở "Việc Sếp cần làm" (bossChecksModel.BOSS_ERROR_TEXT).
+ */
+
+/** Khoá cache của `GET /notify/telegram`. */
+export const TELEGRAM_KEY = ['notify', 'telegram'] as const;
+
+/** Neo trong trang Kết nối (`/connections#telegram`). */
+export const TELEGRAM_GUIDE_PATH = '/connections#telegram';
+
+/** Token BotFather: `<số bot>:<chuỗi 30–64 ký tự>` — kiểm phía web trước khi gửi (máy chủ kiểm lại). */
+export const TELEGRAM_TOKEN_RE = /^\d{5,12}:[A-Za-z0-9_-]{30,64}$/;
+
+export const TOKEN_FORMAT_ERROR =
+  'Token chưa đúng dạng — token BotFather gửi có dạng 123456789:AAH… (dãy số, dấu hai chấm rồi một chuỗi dài). Chép lại nguyên dòng, không thêm khoảng trắng.';
+
+/** Câu lỗi cho ô token (null = hợp lệ hoặc còn trống). */
+export function tokenFormatError(token: string): string | null {
+  const t = token.trim();
+  if (!t) return null;
+  return TELEGRAM_TOKEN_RE.test(t) ? null : TOKEN_FORMAT_ERROR;
+}
+
+/** Câu cho Sếp theo mã lỗi Telegram của máy chủ. */
+export const TELEGRAM_ERROR_TEXT: Record<string, string> = {
+  TELEGRAM_NOT_CONFIGURED: 'Chưa nối Telegram — làm theo hướng dẫn ở Kết nối › Telegram rồi bấm Lưu.',
+  TELEGRAM_TOKEN_REJECTED: 'Token sai hoặc bot đã bị xoá — tạo lại bằng BotFather rồi dán token mới',
+  TELEGRAM_CHAT_NOT_FOUND: 'Không tìm thấy chat — mở bot, bấm Bắt đầu rồi bấm Tìm chat_id lại',
+  TELEGRAM_BOT_BLOCKED: 'Sếp đã chặn bot hoặc chưa bấm Bắt đầu — mở bot trên Telegram, bấm Bắt đầu',
+  TELEGRAM_RATE_LIMITED: 'Telegram đang giới hạn số tin — đợi một phút rồi bấm Gửi thử lại.',
+  TELEGRAM_UNREACHABLE: 'Máy chủ không ra được Internet tới Telegram — kiểm tra mạng',
+};
+
+/** Câu thân thiện theo mã (mã lạ → câu máy chủ đã lọc qua friendlyError). Luôn là chuỗi. */
+export function telegramErrorText(code: string | null | undefined, message?: string | null): string {
+  if (code && TELEGRAM_ERROR_TEXT[code]) return TELEGRAM_ERROR_TEXT[code];
+  return friendlyError(message ?? null, 'Chưa gửi được — thử lại sau ít phút.').message;
+}
+
+/** Dòng "Chi tiết kỹ thuật" của một lượt Gửi thử / Tìm chat_id — chỉ chuỗi. */
+export function telegramTechDetail(x: { error_code?: string | null; message?: string | null; checked_at?: string | null }): string {
+  const parts: string[] = [];
+  if (x.error_code) parts.push(`Mã lỗi ${x.error_code}`);
+  if (typeof x.message === 'string' && x.message.trim()) parts.push(x.message.trim());
+  if (x.checked_at) parts.push(x.checked_at);
+  return parts.join(' · ');
+}
+
+/** Sáu bước tạo bot bằng BotFather (đánh số trên giao diện). */
+export const BOTFATHER_STEPS: readonly string[] = [
+  'Mở Telegram trên điện thoại, tìm @BotFather (có dấu tích xanh) và bấm Bắt đầu.',
+  'Gửi lệnh /newbot cho BotFather.',
+  'Đặt tên hiển thị cho bot, vd "Gen-Harness của Sếp".',
+  'Đặt tên đăng nhập cho bot, phải kết thúc bằng "bot", vd genharness_sep_bot.',
+  'BotFather gửi lại token dạng 123456789:AAH… — chép nguyên dòng, dán vào ô Token bên dưới.',
+  'Mở bot vừa tạo, bấm Bắt đầu và gửi một tin bất kỳ, rồi bấm "Tìm chat_id".',
+];
+
+/** Câu cảnh báo cố định của thẻ. */
+export const TELEGRAM_WARNING =
+  'Token là chìa khoá của bot — không gửi cho ai. Gen-Harness lưu mã hoá; tin chỉ đi một chiều, mọi thao tác Sếp vẫn xác nhận trong Console.';
+
+export const TEST_OK_TEXT = 'Đã gửi — kiểm tra Telegram trên điện thoại (sẽ có thêm 1 tin từ trực canh máy chủ trong ~1 phút)';
+export const TEST_OK_NO_HOST_TEXT = 'Đã gửi — kiểm tra Telegram trên điện thoại';
+
+/** Câu kết quả Gửi thử ĐẠT: có nhờ Trực canh máy chủ gửi thêm ⇒ nói thêm tin thứ hai. */
+export function testOkText(r: { host_requested?: boolean } | null | undefined): string {
+  return r?.host_requested === false ? TEST_OK_NO_HOST_TEXT : TEST_OK_TEXT;
+}
+
+export const FIND_CHAT_EMPTY = 'Chưa thấy tin nào — mở bot, bấm Bắt đầu và gửi một tin rồi bấm lại';
+
+export const HOST_KEY_MISMATCH_TEXT = 'Máy chủ không đọc được cấu hình — bấm Lưu lại một lần';
+export const HOST_UNSUPPORTED_TEXT = 'Cập nhật genh để bật trực canh';
+
+/** Cảnh báo của khối "Trực canh máy chủ" (null = không có gì để cảnh báo). */
+export function hostWarning(host: Pick<TelegramHostStatus, 'supported' | 'telegram'> | null | undefined): string | null {
+  if (!host) return null;
+  if (host.supported === false) return HOST_UNSUPPORTED_TEXT;
+  if (host.telegram === 'key_mismatch') return HOST_KEY_MISMATCH_TEXT;
+  return null;
+}
+
+export const SCHEDULE_LABEL: Record<string, string> = {
+  systemd: 'systemd (Linux)',
+  cron: 'cron',
+  launchd: 'launchd (macOS)',
+  schtasks: 'Task Scheduler (Windows)',
+};
+
+export function scheduleText(s: string | null | undefined): string {
+  if (!s) return 'Chưa đặt lịch — chạy "genh update" một lần trên máy chủ';
+  return SCHEDULE_LABEL[s] ?? s;
+}
+
+export const HOST_STATE_LABEL: Record<string, string> = {
+  ok: 'ổn',
+  issues: 'có sự cố',
+  paused: 'đang tạm dừng (genh stop)',
+  skipped_busy: 'bỏ qua lượt vì máy chủ đang bận',
+  error: 'lỗi khi chạy',
+};
+
+/** Dữ liệu `GET /notify/telegram` có đúng khuôn (phòng phản hồi lạ — không vẽ object). */
+export function asTelegramConfig(x: unknown): TelegramConfig | null {
+  if (!x || typeof x !== 'object' || Array.isArray(x)) return null;
+  const t = x as Partial<TelegramConfig>;
+  if (typeof t.configured !== 'boolean') return null;
+  return t as TelegramConfig;
+}
+
+/** Chỉ chuỗi — tránh vẽ object từ phản hồi lạ. */
+export const str = (v: unknown): string | null => (typeof v === 'string' && v ? v : null);

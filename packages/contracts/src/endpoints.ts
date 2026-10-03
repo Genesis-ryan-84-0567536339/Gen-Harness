@@ -16,6 +16,7 @@ import { agentModelEndpoints } from './p4-api';
 import type { BackgroundSources, BackgroundSourcesBody } from './p4-api';
 import { mcpEndpoints } from './p4-mcp';
 import { bossChecksEndpoints } from './bossChecks';
+import { telegramEndpoints } from './telegram';
 import { pluginsEndpoints } from './p4-plugins';
 import { systemEndpoints } from './p4-system';
 import type { Step10Body, Step11Body, Step10Invited, BackupConfig, Step8Body, Step8Agent, Step9Body, SetupFollowUpItem } from './p4-system';
@@ -293,6 +294,8 @@ export function createEndpoints(client: ApiClient) {
     ...pickersEndpoints(r),
     /** v0.1.39 (F-74): "Việc Sếp cần làm" — kết quả kiểm lưu ở máy chủ. */
     bossChecks: bossChecksEndpoints(r),
+    /** v0.1.44 (F-8c): Kết nối › Telegram ("Báo động & bản tin") — chỉ Owner. */
+    notify: telegramEndpoints(r),
   };
 }
 

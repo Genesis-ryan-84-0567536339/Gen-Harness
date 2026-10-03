@@ -5,7 +5,7 @@ import type { BossCheck, BossCheckKey, BossCheckRunBody, BossOverview, CliProfil
 import { Button, EmptyState, Icon, Switch, TextField } from '@gen-harness/ui';
 import { api } from '../lib/api';
 import { cliProfilesKey, useCliProfiles, useProviders } from '../lib/dataQueries';
-import { errorText } from '../lib/errorText';
+import { errorDetail, errorText } from '../lib/errorText';
 import { useOrgTimezone } from '../lib/permissions';
 import { useMe } from '../lib/queries';
 import { queryClient } from '../lib/queryClient';
@@ -16,6 +16,7 @@ import { useHubLink, useUpdateHubLink } from '../screens/mcp/queries';
 import { ClaudeRiskNotice, CliLoginPanel } from '../screens/system/CliCard';
 import { useCliLogin } from '../screens/system/useCliLogin';
 import { accountStatus, qkSocial } from '../social/socialModel';
+import { TELEGRAM_GUIDE_PATH } from '../screens/connections/telegramModel';
 import {
   BOSS_CHECKS_KEY,
   BOSS_CHECKS_POLL_MS,
@@ -35,7 +36,7 @@ import {
 type Results = BossOverview | undefined;
 
 /**
- * v0.1.39 (F-74) — "Việc Sếp cần làm" (`/guide/viec-sep`): 5 dòng kết nối chạy thật (4 bắt buộc + Jev tuỳ chọn). Mỗi
+ * v0.1.39 (F-74) — "Việc Sếp cần làm" (`/guide/viec-sep`): 6 dòng kết nối chạy thật (5 bắt buộc + Jev tuỳ chọn). Mỗi
  * dòng có việc phải làm bằng lời thường, nút hành động và Ô KẾT QUẢ ngay cạnh. Kết quả lưu ở máy chủ
  * (`GET /boss-checks`) — tải lại trang vẫn còn, Claude tự đọc, Sếp không cần chụp màn hình. Chỉ Owner.
  */
@@ -56,7 +57,7 @@ export function BossChecksPage() {
 
   const data = q.data;
   const rowDone = (n: number) => !!data?.rows?.find((r) => r.row === n)?.done;
-  const total = data?.required_total ?? 4;
+  const total = data?.required_total ?? 5;
   const done = data?.required_done ?? 0;
 
   return (
@@ -66,7 +67,7 @@ export function BossChecksPage() {
       </Link>
       <ScreenTitle
         title="Việc Sếp cần làm"
-        description="Năm việc để hệ thống kết nối chạy thật (khoảng 20 phút). Làm từng dòng: bấm nút, xem ô kết quả ngay bên cạnh."
+        description="Sáu việc để hệ thống kết nối chạy thật (khoảng 25 phút). Làm từng dòng: bấm nút, xem ô kết quả ngay bên cạnh."
         maxWidth={640}
       />
       {nonOwner ? (
@@ -74,7 +75,7 @@ export function BossChecksPage() {
           <EmptyState
             icon="ph ph-lock-simple"
             title="Việc kết nối do Owner làm"
-            description="Nối Gen-hub, Facebook, tài khoản Google và Claude Code chỉ Owner làm được. Cần thêm gì, hãy nhắn Owner."
+            description="Nối Gen-hub, Facebook, tài khoản Google, Claude Code và Telegram chỉ Owner làm được. Cần thêm gì, hãy nhắn Owner."
           />
         </div>
       ) : me.isError ? (
@@ -104,6 +105,7 @@ export function BossChecksPage() {
             <AgyRow data={data} done={rowDone(3)} />
             <ClaudeRow data={data} done={rowDone(4)} />
             <JevRow data={data} done={rowDone(5)} />
+            <TelegramRow data={data} done={rowDone(6)} />
           </ol>
           <p className="boss-foot muted-note">
             <Icon name="ph ph-floppy-disk" size={13} /> Kết quả được lưu lại — Claude tự đọc, Sếp không cần chụp màn hình.
@@ -565,6 +567,49 @@ function JevRow({ data, done }: { data: Results; done: boolean }) {
         </div>
       ) : null}
       {run.isError ? <InlineError>{errorText(run.error)}</InlineError> : null}
+      <TransientNote check={run.data} />
+    </Row>
+  );
+}
+
+// ── 6. Telegram (báo động & bản tin) ─────────────────────────────────────────────────────────────────────
+/**
+ * v0.1.44 (F-8c): cấu hình bot ở Kết nối › Telegram (`/connections#telegram`); ở đây chỉ "Gửi thử" (máy chủ gửi một
+ * tin và nhờ Trực canh máy chủ gửi thêm một tin). Lỗi tạm (TELEGRAM_RATE_LIMITED) báo cạnh nút, không thay ô kết quả.
+ */
+function TelegramRow({ data, done }: { data: Results; done: boolean }) {
+  const run = useRunCheck();
+  const tz = useOrgTimezone();
+  const res = resultOf(data, 'telegram');
+  const okText = (c: BossCheck) => {
+    const bot = typeof c.detail?.bot_username === 'string' && c.detail.bot_username ? `@${c.detail.bot_username}` : null;
+    const chat = typeof c.detail?.chat_masked === 'string' && c.detail.chat_masked ? c.detail.chat_masked : null;
+    return bot || chat ? `Đạt · đã gửi tới ${bot ?? 'bot'} → chat ${chat ?? '•••'}` : `Đạt · ${fmtCheckedAt(c.checked_at, tz)}`;
+  };
+  return (
+    <Row
+      n={6}
+      title="Telegram (báo động & bản tin)"
+      done={done}
+      todo="Tạo bot bằng BotFather, dán token và chọn chat ở Kết nối › Telegram, rồi bấm Gửi thử — điện thoại nhận được tin là xong."
+      results={<ResultCell check={res} okText={okText} />}
+    >
+      <div className="boss-actions">
+        <Button
+          variant={res?.status === 'pass' ? 'secondary' : 'primary'}
+          className="btn-27"
+          icon="ph ph-paper-plane-tilt"
+          loading={run.isPending}
+          onClick={() => run.mutate({ key: 'telegram' })}
+        >
+          Gửi thử
+        </Button>
+        <Link to={TELEGRAM_GUIDE_PATH} className="gh-btn gh-btn--secondary btn-27">
+          Mở hướng dẫn
+          <Icon name="ph ph-arrow-right" size={13} />
+        </Link>
+      </div>
+      {run.isError ? <InlineError detail={errorDetail(run.error)}>{errorText(run.error)}</InlineError> : null}
       <TransientNote check={run.data} />
     </Row>
   );

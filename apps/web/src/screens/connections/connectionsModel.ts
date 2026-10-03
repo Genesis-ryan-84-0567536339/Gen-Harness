@@ -1,4 +1,4 @@
-import type { Channel, CliProfile, HubLink, McpServer, Provider, SocialAccount } from '@gen-harness/contracts';
+import type { Channel, CliProfile, HubLink, McpServer, Provider, SocialAccount, TelegramHostStatus, TelegramLastTest } from '@gen-harness/contracts';
 
 /**
  * v0.1.42 (F-7): Kết nối — mỗi thứ một thẻ, CÙNG một kiểu trạng thái (viên trạng thái):
@@ -113,6 +113,29 @@ export function mcpStatus(servers: Pick<McpServer, 'is_enabled' | 'health'>[] | 
 /** Số máy chủ MCP đang bật (dòng meta của thẻ MCP). */
 export function mcpEnabledCount(servers: Pick<McpServer, 'is_enabled'>[] | undefined): number {
   return (servers ?? []).filter((s) => s.is_enabled).length;
+}
+
+/**
+ * v0.1.44 (F-8c) — Telegram ("Báo động & bản tin"): chưa cấu hình → Chưa nối; đã cấu hình mà Gửi thử lỗi, hoặc Trực
+ * canh máy chủ báo gửi lỗi / không đọc được cấu hình (failed | key_mismatch) → Cần Sếp xử lý; đã cấu hình + bật + Gửi
+ * thử đạt → Đang chạy; còn lại (chưa Gửi thử, đang tắt) → Cần Sếp xử lý (việc Sếp đang làm dở).
+ */
+export function telegramConnStatus(
+  t:
+    | {
+        configured?: boolean;
+        enabled?: boolean;
+        last_test?: Pick<TelegramLastTest, 'status'> | null;
+        host?: Pick<TelegramHostStatus, 'telegram'> | null;
+      }
+    | null
+    | undefined,
+): ConnStatus {
+  if (!t || t.configured !== true) return 'not_connected';
+  const host = t.host?.telegram;
+  if (t.last_test?.status === 'fail' || host === 'failed' || host === 'key_mismatch') return 'needs_boss';
+  if (t.enabled && t.last_test?.status === 'pass') return 'running';
+  return 'needs_boss';
 }
 
 /** Thứ tự thẻ kênh: Zalo · WhatsApp · Telegram, rồi các kênh khác API trả (giữ thứ tự API). */

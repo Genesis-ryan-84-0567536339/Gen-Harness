@@ -8,7 +8,10 @@ import { BossChecksPage } from '../../src/guide/BossChecksPage';
 import { queryClient } from '../../src/lib/queryClient';
 import { qk } from '../../src/lib/queries';
 
-/** v0.1.39 (F-74) — trang "Việc Sếp cần làm": 5 dòng, ô kết quả ngay cạnh, kết quả đọc từ `GET /boss-checks`. */
+/**
+ * v0.1.39 (F-74) — trang "Việc Sếp cần làm": ô kết quả ngay cạnh, kết quả đọc từ `GET /boss-checks`. v0.1.44 (F-8c):
+ * thêm dòng 6 Telegram (bắt buộc) ⇒ 6 dòng, đếm x/5.
+ */
 
 const json = (status: number, body?: unknown) =>
   new Response(body === undefined ? null : JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -26,13 +29,14 @@ const me = (role: string) => ({
   permissions: { 'system.read': 'all', 'system.manage': role === 'owner' ? 'all' : 'none' },
 });
 
-const EMPTY = { hub: null, facebook: null, agy_login: null, agy_call: null, agy_switch: null, claude_login: null, claude_call: null, jev: null };
+const EMPTY = { hub: null, facebook: null, agy_login: null, agy_call: null, agy_switch: null, claude_login: null, claude_call: null, jev: null, telegram: null };
 const ROWS: BossOverview['rows'] = [
   { row: 1, key: 'hub', title: 'Nối Gen-hub', optional: false, checks: ['hub'], done: false },
   { row: 2, key: 'facebook', title: 'Kết nối Facebook', optional: false, checks: ['facebook'], done: false },
   { row: 3, key: 'agy', title: 'Google', optional: false, checks: ['agy_login', 'agy_call', 'agy_switch'], done: false },
   { row: 4, key: 'claude', title: 'Claude Code', optional: false, checks: ['claude_login', 'claude_call'], done: false },
   { row: 5, key: 'jev', title: 'Jev', optional: true, checks: ['jev'], done: false },
+  { row: 6, key: 'telegram', title: 'Telegram (báo động & bản tin)', optional: false, checks: ['telegram'], done: false },
 ];
 const SAVED: HubLink = {
   configured: true, enabled: false, status: 'off', server_id: 's1', endpoint: 'https://hub.genos.top/mcp', has_token: true,
@@ -81,7 +85,7 @@ function setup(w: Partial<World> = {}) {
       calls.push({ path, method, body });
       if (path === '/boss-checks' && method === 'GET') {
         world.onList?.(++lists);
-        return json(200, { rows: ROWS, results: world.results, required_done: 0, required_total: 4, switch_passes: world.switchPasses });
+        return json(200, { rows: ROWS, results: world.results, required_done: 0, required_total: 5, switch_passes: world.switchPasses });
       }
       const run = /^\/boss-checks\/([a-z_]+)\/run$/.exec(path);
       if (run && method === 'POST') {
@@ -127,13 +131,13 @@ afterEach(() => {
 });
 
 describe('Việc Sếp cần làm (/guide/viec-sep)', () => {
-  it('đúng 5 dòng: 4 bắt buộc + Jev "Không bắt buộc"; mỗi dòng có ô kết quả "Chưa kiểm"', async () => {
+  it('đúng 6 dòng: 5 bắt buộc + Jev "Không bắt buộc"; mỗi dòng có ô kết quả "Chưa kiểm"', async () => {
     setup();
     renderPage();
-    expect(await screen.findByText('Đã đạt 0/4 dòng bắt buộc')).toBeInTheDocument();
-    const names = ['Nối Gen-hub', 'Kết nối Facebook', 'Google (Antigravity) — hai tài khoản', 'Claude Code CLI', 'Jev'];
+    expect(await screen.findByText('Đã đạt 0/5 dòng bắt buộc')).toBeInTheDocument();
+    const names = ['Nối Gen-hub', 'Kết nối Facebook', 'Google (Antigravity) — hai tài khoản', 'Claude Code CLI', 'Jev', 'Telegram (báo động & bản tin)'];
     expect(screen.getAllByRole('region').map((r) => r.getAttribute('aria-label'))).toEqual(names);
-    for (const n of names.slice(0, 4)) expect(within(row(n)).queryByText('Không bắt buộc')).toBeNull();
+    for (const n of names.filter((x) => x !== 'Jev')) expect(within(row(n)).queryByText('Không bắt buộc')).toBeNull();
     expect(within(row('Jev')).getByText('Không bắt buộc')).toBeInTheDocument();
     expect(within(row('Nối Gen-hub')).getByText('Chưa kiểm')).toBeInTheDocument();
     expect(screen.getByText('Kết quả được lưu lại — Claude tự đọc, Sếp không cần chụp màn hình.')).toBeInTheDocument();
@@ -481,6 +485,42 @@ describe('Việc Sếp cần làm (/guide/viec-sep)', () => {
     renderPage();
     const fb2 = await screen.findByRole('region', { name: 'Kết nối Facebook' });
     expect(await within(fb2).findByText(/chạy quá lâu nên đã dừng/)).toBeInTheDocument();
+  });
+
+  it('Telegram (dòng 6): Gửi thử → POST /boss-checks/telegram/run; chưa cấu hình → câu theo mã + "Mở hướng dẫn" tới /connections#telegram', async () => {
+    const { calls } = setup({
+      run: (key) => check(key as BossCheckKey, 'fail', { error_code: 'TELEGRAM_NOT_CONFIGURED', message: 'Chưa cấu hình Telegram' }),
+    });
+    const { container } = renderPage();
+    const user = userEvent.setup();
+    const tg = await screen.findByRole('region', { name: 'Telegram (báo động & bản tin)' });
+    expect(within(tg).getByRole('link', { name: /Mở hướng dẫn/ })).toHaveAttribute('href', '/connections#telegram');
+    expect(within(tg).getByText('Chưa kiểm')).toBeInTheDocument();
+    await user.click(within(tg).getByRole('button', { name: 'Gửi thử' }));
+    expect(await within(tg).findByText(/^Lỗi · Chưa nối Telegram/)).toBeInTheDocument();
+    expect(within(tg).getByText('Mã lỗi TELEGRAM_NOT_CONFIGURED')).toBeInTheDocument();
+    expect(calls.filter((c) => c.method === 'POST').map((c) => c.path)).toEqual(['/boss-checks/telegram/run']);
+    expect(container.innerHTML).not.toContain('[object Object]');
+  });
+
+  it('Telegram: Đạt → "đã gửi tới @bot → chat •••…"; BOT_BLOCKED → hướng dẫn bấm Bắt đầu; RATE_LIMITED tạm → báo cạnh nút, giữ kết quả', async () => {
+    setup({
+      results: { ...EMPTY, telegram: check('telegram', 'pass', { detail: { bot_username: 'gen_harness_sep_bot', chat_masked: '•••4321' } }) },
+      run: (key) => check(key as BossCheckKey, 'fail', { error_code: 'TELEGRAM_RATE_LIMITED', message: 'retry after 30', transient: true, runs: 0 }),
+    });
+    const { unmount } = renderPage();
+    const user = userEvent.setup();
+    const tg = await screen.findByRole('region', { name: 'Telegram (báo động & bản tin)' });
+    expect(await within(tg).findByText('Đạt · đã gửi tới @gen_harness_sep_bot → chat •••4321')).toBeInTheDocument();
+    await user.click(within(tg).getByRole('button', { name: 'Gửi thử' }));
+    expect(await within(tg).findByTestId('boss-transient')).toHaveTextContent('Telegram đang giới hạn số tin');
+    expect(within(tg).getByTestId('boss-result')).toHaveTextContent('Đạt · đã gửi tới');
+    unmount();
+    queryClient.clear();
+    setup({ results: { ...EMPTY, telegram: check('telegram', 'fail', { error_code: 'TELEGRAM_BOT_BLOCKED' }) } });
+    renderPage();
+    const tg2 = await screen.findByRole('region', { name: 'Telegram (báo động & bản tin)' });
+    expect(await within(tg2).findByText(/Lỗi · Sếp đã chặn bot hoặc chưa bấm Bắt đầu — mở bot trên Telegram, bấm Bắt đầu/)).toBeInTheDocument();
   });
 
   it('vai trò Vận hành → lời giải thích, không gọi /boss-checks', async () => {
