@@ -126,9 +126,29 @@ class ProposeAssign(_M):
     fields: AssignFields
 
 
-ProposalIn = Annotated[ProposeDraft | ProposeReminder | ProposeAssign, Field(discriminator="type")]
+class SocialWriteFields(_M):
+    """Trả lời bình luận / nhắn tin Facebook: đích PHẢI là link của mục vừa đọc được (gh.gen.proposals kiểm)."""
+    account_id: str = Field(min_length=1, max_length=64)
+    target_url: str = Field(min_length=12, max_length=300)
+    text: str = Field(min_length=1, max_length=2000)
+
+
+class ProposeSocialReply(_M):
+    type: Literal["social_reply"]
+    fields: SocialWriteFields
+
+
+class ProposeSocialDm(_M):
+    type: Literal["social_dm"]
+    fields: SocialWriteFields
+
+
+ProposalIn = Annotated[
+    ProposeDraft | ProposeReminder | ProposeAssign | ProposeSocialReply | ProposeSocialDm,
+    Field(discriminator="type")]
 PROPOSAL_FIELDS: dict[str, type[_M]] = {"draft_message": DraftMessageFields, "reminder": ReminderFields,
-                                        "assign": AssignFields}
+                                        "assign": AssignFields, "social_reply": SocialWriteFields,
+                                        "social_dm": SocialWriteFields}
 
 
 class Propose(_M):

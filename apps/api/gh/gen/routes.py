@@ -297,20 +297,20 @@ async def confirm_proposal(pid: uuid.UUID, request: Request, body: ConfirmIn | N
     except ValueError as e:
         raise field_errors({"fields": str(e)}) from e
     target = proposals.target_of(ptype, fields)
-    err = proposals.permission_error(user.permissions, ptype, target)
+    err = proposals.permission_error(user.permissions, ptype, target, user.role_code)
     if err:
         await _log_apart(user, "gen.proposal_confirmed", "blocked", p, reason=err)
         raise forbidden(err)
     if proposals.requires_pin(target) and not user.pin_active():
         raise pin_required()
     try:
-        lab = await proposals.labels(db, user, ptype, fields)
+        lab = await proposals.labels(db, user, ptype, fields, redis)
     except ValueError as e:
         raise field_errors({"fields": str(e)}) from e
     if not await redis.set(proposals.claim_key(pid), "1", nx=True, ex=proposals.CLAIM_TTL_S):
         raise conflict("GEN_PROPOSAL_BUSY", "Đề xuất đang được thực hiện")
     try:
-        call = await proposals.plan_call(db, user, ptype, fields)
+        call = await proposals.plan_call(db, user, ptype, fields, p["id"])
         # Đóng transaction của request ngoài TRƯỚC khi gọi nội bộ: request ngoài có thể đang giữ khoá dòng
         # core.sessions (gia hạn phiên / trượt phiên PIN trong load_session) mà request nội bộ cũng UPDATE → hai bên
         # chờ nhau (Postgres không thấy vòng chờ qua ứng dụng). Commit cũng trả connection về pool trong lúc chờ.
