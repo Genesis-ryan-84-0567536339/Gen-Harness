@@ -1,5 +1,7 @@
 /** Presentation helpers dùng chung cho 4 màn của cụm Hàng đợi & Hành động. */
 import type { InboxItemType, InboxTab, InboxTriage, QueueWidgetKind, TaskPriority, TaskStatus } from '@gen-harness/contracts';
+// F-38 (v0.1.43): định nghĩa duy nhất ở lib/format.ts — re-export để các màn không phải đổi import.
+export { initialsOf } from '../../lib/format';
 
 export const OK = 'var(--color-ok)';
 export const WARN = 'var(--color-warn)';
@@ -95,13 +97,6 @@ export function taskStatusTone(s: TaskStatus): string {
 }
 export function taskPriorityTone(p: TaskPriority): string {
   return priorityTone(p);
-}
-
-export function initialsOf(name: string): string {
-  const parts = name.trim().split(/\s+/);
-  const last = parts.at(-1)?.[0] ?? '';
-  const first = parts[0]?.[0] ?? '';
-  return (first + last).toLocaleUpperCase('vi').slice(0, 2) || '·';
 }
 
 export const SPOTLIGHT_DIMENSION_LABEL: Record<string, string> = {

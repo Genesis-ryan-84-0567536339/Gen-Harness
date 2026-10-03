@@ -1,5 +1,7 @@
 /** Presentation helpers dùng chung cho 2 màn của cụm Con người & Chất lượng. */
 import type { CareScenarioStatus, ReviewBoard, Trend } from '@gen-harness/contracts';
+// F-38 (v0.1.43): định nghĩa duy nhất ở lib/format.ts — re-export để các màn không phải đổi import.
+export { initialsOf, fmtVnd } from '../../lib/format';
 
 export const OK = 'var(--color-ok)';
 export const WARN = 'var(--color-warn)';
@@ -24,12 +26,6 @@ export function trendTone(t: Trend | null): string {
   return t === 'up' ? OK : t === 'down' ? BAD : N4;
 }
 
-export function initialsOf(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length >= 2) return (parts[parts.length - 2][0] + parts[parts.length - 1][0]).toUpperCase();
-  return name.slice(0, 2).toUpperCase();
-}
-
 /** "2026-09-17" → "17/09" — period là ngày thô (không giờ), không cần đổi múi giờ. */
 function shortDate(d: string): string {
   const [, mm, dd] = d.split('-');
@@ -49,11 +45,6 @@ export const ISSUE_KIND_LABEL: Record<string, string> = {
   broken_promise: 'Hứa rồi quên',
   abandoned_customer: 'Khách bị bỏ rơi',
 };
-
-const VND = new Intl.NumberFormat('vi-VN');
-export function fmtVnd(n: number | null): string {
-  return n === null ? '—' : `${VND.format(n)} ₫`;
-}
 
 /**
  * v0.1.42: cách một người thành "nhân viên" (core.persons.person_type = 'staff') — chưa có ô sửa ở hồ sơ, chỉ qua

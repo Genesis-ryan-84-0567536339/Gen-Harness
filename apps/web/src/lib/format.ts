@@ -161,3 +161,21 @@ export function emailInitials(email: string | null | undefined): string {
   const local = (email ?? '').split('@')[0]?.replace(/[^\p{L}\p{N}]/gu, '') ?? '';
   return (local.slice(0, 2) || '·').toLocaleUpperCase('vi');
 }
+
+/**
+ * F-38 (v0.1.43): định nghĩa DUY NHẤT (các *Model.ts chỉ re-export).
+ * Chữ viết tắt avatar: chữ đầu của từ đầu + từ cuối ("Nguyễn Văn An" → "NA"), tối đa 2 ký tự; rỗng → "·".
+ */
+export function initialsOf(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  const last = parts.at(-1)?.[0] ?? '';
+  const first = parts[0]?.[0] ?? '';
+  return (first + last).toLocaleUpperCase('vi').slice(0, 2) || '·';
+}
+
+const vndFmt = new Intl.NumberFormat(LOCALE);
+
+/** 1500000 → "1.500.000 ₫"; null/undefined → "—". */
+export function fmtVnd(n: number | null | undefined): string {
+  return n === null || n === undefined ? '—' : `${vndFmt.format(n)} ₫`;
+}
