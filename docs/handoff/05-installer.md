@@ -271,7 +271,10 @@ Owner chỉ biết máy chủ "chết" khi tự mở Console. Từ v0.1.44 genh 
 - **Giới hạn**: máy chủ **tắt hẳn** (mất điện, treo cứng) thì không có gì để chạy trực canh — Owner chỉ nhận tin khi máy bật
   lại (kèm "Máy chủ vừa khởi động lại"). Thiếu linger (Linux) ⇒ timer `--user` chỉ chạy khi đang đăng nhập (genh in cảnh
   báo kèm lệnh `sudo loginctl enable-linger $USER`). Trực canh không giữ khoá loại trừ khi đo (chỉ thử rồi nhả ngay) để
-  không chặn lịch đêm.
+  không chặn lịch đêm. `genh stop`/`genh uninstall` ghi `config/paused-by-owner.json` **trước** khi dừng/gỡ container và chờ lượt trực canh
+  đang chạy xong (`watchdog.lock`); trực canh **không** tự `up -d` khi không có container api (bản cài đã gỡ), chỉ báo. Trạng
+  thái `restarting` (docker đang tự thử lại) / `created` / `paused` cũng là sự cố (không restart chồng). "Gửi thử" chờ lượt
+  định kỳ đang chạy xong thay vì bỏ qua.
 
 ### Gói chẩn đoán (v0.1.44, F-4b)
 
@@ -294,7 +297,9 @@ Owner chỉ biết máy chủ "chết" khi tự mở Console. Từ v0.1.44 genh 
   `run/doctor-status.json` `{schema:1, request_id, state: running|done|failed, started_at, finished_at, file, size_bytes,
   sha256, error_code, message}`, zip vào `run/diagnostics/genh-doctor-<UTC yyyymmddThhmmssZ>.zip` (thư mục 0755 phải là thư
   mục thật thuộc người chạy genh — symlink ⇒ failed; tệp 0644 ghi qua tệp tạm O_EXCL + rename để api đọc), **giữ 3 zip mới
-  nhất**. Lỗi ⇒ `failed` + `error_code` **GH-E962** + câu thân thiện. Doctor **không** lấy khoá loại trừ (chỉ đọc).
+  nhất, xoá zip quá 24 giờ** (lần tạo sau và mỗi lượt trực canh 12 phút đều dọn). **Rủi ro còn lại:** zip chứa log đầy đủ
+  mọi dịch vụ (có thể có dữ liệu khách) và phải 0644 để api (uid khác) đọc ⇒ người dùng khác trên CÙNG máy chủ đọc được
+  trong tối đa 24 giờ — máy chủ nhiều người dùng thì tải về xong nên xoá tay `run/diagnostics/*.zip`. Lỗi ⇒ `failed` + `error_code` **GH-E962** + câu thân thiện. Doctor **không** lấy khoá loại trừ (chỉ đọc).
 
 ## Phát hành
 

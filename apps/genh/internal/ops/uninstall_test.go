@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/autoupdate"
+	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/dockercli"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/dockercli/fake"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/hostlink"
 )
@@ -89,6 +90,29 @@ func TestRunUninstall_GoLichTrucCanh(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "Không gỡ được lịch trực canh máy chủ") {
 		t.Fatalf("thiếu cảnh báo: %q", out.String())
+	}
+}
+
+// Đánh dấu tạm dừng phải có TRƯỚC `docker compose down` — lượt trực canh rơi
+// vào khe giữa down và gỡ lịch không được `up -d` lại api.
+func TestRunUninstall_TamDungTrucCanhTruocKhiDown(t *testing.T) {
+	env := testEnv(t, testComposePath(t, ""))
+	pausedAtDown := false
+	fr := &fake.Runner{Responses: []fake.Response{{Match: func(cmd dockercli.Cmd) bool {
+		if strings.Contains(strings.Join(cmd.Args, " "), "down") {
+			pausedAtDown = OwnerPaused(env.InstallDir)
+			return true
+		}
+		return false
+	}}}}
+	if err := RunUninstall(context.Background(), env, UninstallOptions{AutoApprove: true, Watchdog: &fakeWatchdogScheduler{}, Offsite: &fakeOffsiteScheduler{}}, fr, strings.NewReader(""), &strings.Builder{}); err != nil {
+		t.Fatal(err)
+	}
+	if !pausedAtDown {
+		t.Fatal("phải ghi paused-by-owner.json trước `docker compose down`")
+	}
+	if !OwnerPaused(env.InstallDir) {
+		t.Fatal("sau khi gỡ, đánh dấu tạm dừng phải còn (lịch sót lại không dựng lại api)")
 	}
 }
 

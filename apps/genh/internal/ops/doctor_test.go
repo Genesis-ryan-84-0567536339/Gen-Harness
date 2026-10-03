@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -267,7 +268,8 @@ func TestRunDoctorRequest_DoneGiu3Zip0644(t *testing.T) {
 	if len(zips) != 3 || zips[0] != "genh-doctor-20261003T100100Z.zip" || zips[2] != "genh-doctor-20261003T100300Z.zip" {
 		t.Fatalf("chỉ giữ 3 zip mới nhất, được %v", zips)
 	}
-	if fi, _ := os.Stat(dir); fi.Mode().Perm() != 0o755 {
+	// Windows không có bit quyền POSIX (Perm() luôn 0666/0777) — chỉ kiểm trên Unix.
+	if fi, _ := os.Stat(dir); runtime.GOOS != "windows" && fi.Mode().Perm() != 0o755 {
 		t.Fatalf("thư mục diagnostics %v, muốn 0755", fi.Mode().Perm())
 	}
 	st, err := hostlink.ReadDoctorStatus(env.InstallDir)
@@ -277,7 +279,7 @@ func TestRunDoctorRequest_DoneGiu3Zip0644(t *testing.T) {
 	}
 	path := filepath.Join(dir, st.File)
 	fi, err := os.Stat(path)
-	if err != nil || fi.Mode().Perm() != 0o644 || fi.Size() != st.SizeBytes {
+	if err != nil || (runtime.GOOS != "windows" && fi.Mode().Perm() != 0o644) || fi.Size() != st.SizeBytes {
 		t.Fatalf("zip %v (size %d, status %d), muốn 0644", fi.Mode().Perm(), fi.Size(), st.SizeBytes)
 	}
 	sum, _, _ := fileSHA256(path)
@@ -287,6 +289,9 @@ func TestRunDoctorRequest_DoneGiu3Zip0644(t *testing.T) {
 }
 
 func TestRunDoctorRequest_Failed_DiagnosticsLaSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("os.Symlink trên Windows cần quyền đặc biệt — lối chặn symlink kiểm trên Unix")
+	}
 	env, lits := doctorInstall(t)
 	target := t.TempDir()
 	if err := os.Symlink(target, hostlink.DiagnosticsDirPath(env.InstallDir)); err != nil {
@@ -326,5 +331,28 @@ func TestRunDoctorRequest_RequestIDSaiDang_BiBo(t *testing.T) {
 	// Không có yêu cầu ⇒ nil, không làm gì.
 	if err := RunDoctorRequest(context.Background(), env, doctorTestDeps(fr, time.Now()), &strings.Builder{}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Zip chẩn đoán (0644, log đầy đủ) không được nằm quá 24 giờ — lượt trực canh dọn.
+func TestPruneDiagnostics_XoaZipQua24Gio(t *testing.T) {
+	root := t.TempDir()
+	dir, err := hostlink.EnsureDiagnosticsDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []string{"genh-doctor-20261001T090000Z.zip", "genh-doctor-20261003T090000Z.zip", "ghi-chu.txt"} {
+		if err := os.WriteFile(filepath.Join(dir, n), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	PruneDiagnostics(root, time.Date(2026, 10, 3, 10, 0, 0, 0, time.UTC))
+	ents, _ := os.ReadDir(dir)
+	var got []string
+	for _, e := range ents {
+		got = append(got, e.Name())
+	}
+	if strings.Join(got, ",") != "genh-doctor-20261003T090000Z.zip,ghi-chu.txt" {
+		t.Fatalf("chỉ xoá zip quá 24 giờ, còn %v", got)
 	}
 }

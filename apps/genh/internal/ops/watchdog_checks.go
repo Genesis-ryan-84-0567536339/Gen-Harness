@@ -194,6 +194,10 @@ func (w *wdRun) hhmm() string { return w.now.Local().Format("15:04") }
 // state): exited/dead ⇒ `up -d --no-deps`, unhealthy ⇒ `restart`. Trả câu thêm
 // vào nội dung tin ("" nếu không khởi động lại lượt này).
 func (w *wdRun) maybeRestart(ctx context.Context, m *wdMeasure, svc string, exited bool) string {
+	// Owner vừa `genh stop`/`genh uninstall` giữa lượt ⇒ không khởi động lại.
+	if OwnerPaused(w.env.InstallDir) {
+		return ""
+	}
 	if last, ok := w.state.Restarts[svc]; ok {
 		if t, err := time.Parse(time.RFC3339, last); err == nil && w.now.Sub(t) < watchdogRestartEvery && w.now.Sub(t) > -time.Hour {
 			return ""
@@ -306,7 +310,12 @@ func (w *wdRun) checkServices(ctx context.Context, m *wdMeasure) ([]psRow, bool)
 		if ok {
 			state = api.State
 		}
-		note := w.maybeRestart(ctx, m, "api", true)
+		// Không có container api ⇒ KHÔNG tự `up -d` (bản cài đã gỡ/chưa dựng —
+		// tạo lại sẽ ra container/volume rỗng); chỉ báo cho Owner.
+		note := " Không tự tạo lại container — chạy `genh start` nếu muốn bật lại."
+		if ok {
+			note = w.maybeRestart(ctx, m, "api", true)
+		}
 		m.add(wdIncident{Key: incAPIDown, Severity: severityBad, Title: "Máy chủ ứng dụng (api) không chạy",
 			Body: "api đang ở trạng thái " + state + "." + note, Fingerprint: incAPIDown + "|stopped"})
 	default:
@@ -337,6 +346,14 @@ func (w *wdRun) checkServices(ctx context.Context, m *wdMeasure) ([]psRow, bool)
 			note := w.maybeRestart(ctx, m, r.Service, true)
 			m.add(wdIncident{Key: incServicePrefix + r.Service, Severity: severityBad, Title: "Dịch vụ " + r.Service + " đã dừng",
 				Body: "Trạng thái: " + r.State + "." + note, Fingerprint: incServicePrefix + r.Service + "|stopped"})
+		case strings.EqualFold(r.State, "restarting"):
+			// Docker đang tự thử lại (restart: unless-stopped) ⇒ chỉ báo, không restart chồng.
+			m.add(wdIncident{Key: incServicePrefix + r.Service, Severity: severityBad, Title: "Dịch vụ " + r.Service + " khởi động lại liên tục",
+				Body:        "Docker đang tự khởi động lại " + r.Service + " nhiều lần (lỗi lặp). Xem `genh logs " + r.Service + "`.",
+				Fingerprint: incServicePrefix + r.Service + "|restarting"})
+		case strings.EqualFold(r.State, "created") || strings.EqualFold(r.State, "paused"):
+			m.add(wdIncident{Key: incServicePrefix + r.Service, Severity: severityWarn, Title: "Dịch vụ " + r.Service + " chưa chạy",
+				Body: "Trạng thái: " + r.State + ". Chạy `genh start` để bật lại.", Fingerprint: incServicePrefix + r.Service + "|" + strings.ToLower(r.State)})
 		case strings.EqualFold(r.Health, "unhealthy"):
 			note := w.maybeRestart(ctx, m, r.Service, false)
 			m.add(wdIncident{Key: incServicePrefix + r.Service, Severity: severityBad, Title: "Dịch vụ " + r.Service + " không khoẻ",

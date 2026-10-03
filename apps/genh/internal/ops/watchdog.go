@@ -228,9 +228,6 @@ func rotateWatchdogLog(installDir string) {
 // trọng (chưa cài, không thấy compose.yaml) — sự cố của máy chủ đã báo qua
 // Telegram/status, lịch không được "đỏ" vì chúng.
 func RunWatchdog(ctx context.Context, env *Env, opts WatchdogOptions, deps WatchdogDeps, out io.Writer) error {
-	ctx, cancel := context.WithTimeout(ctx, watchdogRunTimeout)
-	defer cancel()
-	now := deps.now()
 	if deps.Runner == nil {
 		deps.Runner = dockercli.ExecRunner{}
 	}
@@ -239,8 +236,16 @@ func RunWatchdog(ctx context.Context, env *Env, opts WatchdogOptions, deps Watch
 	}
 	rotateWatchdogLog(env.InstallDir)
 
-	// a) Khoá riêng — lượt khác đang chạy ⇒ thoát êm.
-	lock, err := hostlink.AcquireWatchdogLock(env.InstallDir)
+	// a) Khoá riêng — lượt khác đang chạy ⇒ thoát êm. "Gửi thử" (Owner bấm
+	// trong Console, tệp yêu cầu đã bị tiêu thụ) thì CHỜ lượt kia xong, không
+	// được mất tin thử thứ hai.
+	var lock *hostlink.Lock
+	var err error
+	if opts.Test {
+		lock, err = hostlink.AcquireWatchdogLockWait(ctx, env.InstallDir, watchdogRunTimeout+30*time.Second)
+	} else {
+		lock, err = hostlink.AcquireWatchdogLock(env.InstallDir)
+	}
 	if err != nil {
 		if errors.Is(err, hostlink.ErrLockBusy) {
 			if !opts.Quiet {
@@ -252,6 +257,10 @@ func RunWatchdog(ctx context.Context, env *Env, opts WatchdogOptions, deps Watch
 			Next: "Kiểm thư mục cài đặt (--install-dir) và quyền ghi của nó.", Err: err}
 	}
 	defer lock.Release()
+	ctx, cancel := context.WithTimeout(ctx, watchdogRunTimeout)
+	defer cancel()
+	now := deps.now()
+	PruneDiagnostics(env.InstallDir, now)
 
 	st := loadWatchdogState(env.InstallDir)
 	prevStatus, _ := hostlink.ReadWatchdogStatus(env.InstallDir)

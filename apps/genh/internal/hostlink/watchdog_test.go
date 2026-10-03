@@ -1,6 +1,7 @@
 package hostlink
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 )
 
@@ -160,4 +162,27 @@ func TestWatchdogLock_KhongChongNhau(t *testing.T) {
 	if !ExclusiveLockBusy(root) {
 		t.Fatal("genh.lock đang bị giữ phải báo bận")
 	}
+}
+
+func TestAcquireWatchdogLockWait_ChoLuotDangChay(t *testing.T) {
+	old := lockRetryEvery
+	lockRetryEvery = 10 * time.Millisecond
+	defer func() { lockRetryEvery = old }()
+	root := t.TempDir()
+	held, err := AcquireWatchdogLock(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AcquireWatchdogLockWait(context.Background(), root, 30*time.Millisecond); !errors.Is(err, ErrLockBusy) {
+		t.Fatalf("hết hạn chờ phải trả bận: %v", err)
+	}
+	go func() {
+		time.Sleep(40 * time.Millisecond)
+		held.Release()
+	}()
+	l, err := AcquireWatchdogLockWait(context.Background(), root, 5*time.Second)
+	if err != nil {
+		t.Fatalf("lượt kia nhả khoá thì phải lấy được: %v", err)
+	}
+	l.Release()
 }

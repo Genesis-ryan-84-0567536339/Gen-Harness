@@ -12,6 +12,7 @@ import (
 
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/compose"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/dockercli"
+	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/hostlink"
 )
 
 // OwnerPauseFile (v0.1.44, F-6b): <gốc cài đặt>/config/paused-by-owner.json —
@@ -50,9 +51,32 @@ func ClearOwnerPause(installDir string) error {
 	return nil
 }
 
-// RunStop chạy `docker compose stop` (KHÔNG rebuild, KHÔNG xoá gì) cho toàn
-// bộ service, rồi ghi đánh dấu "Owner chủ động dừng" (trực canh không tự khởi
-// động lại, không báo động).
+// watchdogQuiesceWait: genh stop/uninstall chờ tối đa chừng này cho lượt trực
+// canh ĐANG chạy (bắt đầu trước khi có đánh dấu tạm dừng) xong hẳn.
+var watchdogQuiesceWait = watchdogRunTimeout + 30*time.Second
+
+// pauseWatchdog ghi đánh dấu "Owner chủ động dừng" TRƯỚC khi dừng/gỡ container
+// rồi chờ lượt trực canh đang chạy (nếu có) xong — lượt mới thấy đánh dấu nên
+// không đo, không `up -d` lại; lượt cũ không còn giữa chừng. Trả wasPaused (đã
+// có đánh dấu từ trước) để người gọi biết có nên xoá lại khi thất bại.
+func pauseWatchdog(ctx context.Context, installDir string, out io.Writer) (wasPaused bool, err error) {
+	wasPaused = OwnerPaused(installDir)
+	if err := WriteOwnerPause(installDir, time.Now()); err != nil {
+		return wasPaused, err
+	}
+	lock, lerr := hostlink.AcquireWatchdogLockWait(ctx, installDir, watchdogQuiesceWait)
+	if lerr != nil {
+		_, _ = fmt.Fprintln(out, "Cảnh báo: chưa chờ được lượt trực canh đang chạy ("+lerr.Error()+") — tiếp tục dừng.")
+		return wasPaused, nil
+	}
+	lock.Release()
+	return wasPaused, nil
+}
+
+// RunStop ghi đánh dấu "Owner chủ động dừng" (trực canh không tự khởi động
+// lại, không báo động) và chờ lượt trực canh đang chạy xong, RỒI MỚI chạy
+// `docker compose stop` (KHÔNG rebuild, KHÔNG xoá gì). Stop lỗi ⇒ xoá lại đánh
+// dấu (nếu trước đó chưa có) để trực canh tiếp tục canh.
 func RunStop(ctx context.Context, env *Env, runner dockercli.Runner, out io.Writer) error {
 	if runner == nil {
 		runner = dockercli.ExecRunner{}
@@ -65,8 +89,15 @@ func RunStop(ctx context.Context, env *Env, runner dockercli.Runner, out io.Writ
 	if err != nil {
 		return err
 	}
+	wasPaused, perr := pauseWatchdog(ctx, env.InstallDir, out)
+	if perr != nil {
+		_, _ = fmt.Fprintln(out, "Cảnh báo: không ghi được đánh dấu tạm dừng ("+perr.Error()+") — trực canh máy chủ có thể tự khởi động lại dịch vụ.")
+	}
 	args := compose.BaseArgs(composePath, "stop")
 	if _, err := runner.Output(ctx, dockercli.Cmd{Name: "docker", Args: args, Env: EnvOverlay(bundle), Dir: composeDir(composePath)}); err != nil {
+		if !wasPaused {
+			_ = ClearOwnerPause(env.InstallDir)
+		}
 		return &OpError{
 			Code: ErrCodeStopFailed,
 			What: "`docker compose stop` thất bại",
@@ -74,9 +105,6 @@ func RunStop(ctx context.Context, env *Env, runner dockercli.Runner, out io.Writ
 			Next: "Xem log ở trên rồi thử lại — dữ liệu không bị mất (chỉ dừng container).",
 			Err:  err,
 		}
-	}
-	if err := WriteOwnerPause(env.InstallDir, time.Now()); err != nil {
-		_, _ = fmt.Fprintln(out, "Cảnh báo: không ghi được đánh dấu tạm dừng ("+err.Error()+") — trực canh máy chủ có thể tự khởi động lại dịch vụ.")
 	}
 	_, _ = fmt.Fprintln(out, "Đã dừng Gen-Harness (dữ liệu giữ nguyên). Trực canh máy chủ tạm nghỉ cho tới khi `genh start`.")
 	return nil

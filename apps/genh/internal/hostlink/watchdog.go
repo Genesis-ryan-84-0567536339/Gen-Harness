@@ -1,12 +1,14 @@
 package hostlink
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 )
@@ -318,6 +320,34 @@ func AcquireWatchdogLock(installDir string) (*Lock, error) {
 		return nil, &LockBusyError{}
 	}
 	return &Lock{f: f}, nil
+}
+
+// AcquireWatchdogLockWait thử lấy khoá trực canh mỗi lockRetryEvery cho tới khi
+// được, hết max (trả lỗi bận) hoặc ctx bị huỷ (trả ctx.Err()). Dùng khi việc
+// Owner chủ động (genh stop/uninstall, "Gửi thử") phải chờ lượt đang chạy xong
+// thay vì bỏ qua.
+func AcquireWatchdogLockWait(ctx context.Context, installDir string, max time.Duration) (*Lock, error) {
+	deadline := time.Now().Add(max)
+	for {
+		l, err := AcquireWatchdogLock(installDir)
+		if err == nil || !errors.Is(err, ErrLockBusy) {
+			return l, err
+		}
+		wait := time.Until(deadline)
+		if wait <= 0 {
+			return nil, err
+		}
+		if wait > lockRetryEvery {
+			wait = lockRetryEvery
+		}
+		t := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			return nil, ctx.Err()
+		case <-t.C:
+		}
+	}
 }
 
 // ExclusiveLockBusy báo khoá loại trừ chung (genh.lock — update/restore/import)

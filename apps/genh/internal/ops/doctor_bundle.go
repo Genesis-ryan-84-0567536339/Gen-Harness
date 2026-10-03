@@ -36,6 +36,10 @@ const (
 	doctorLogsTail      = "--tail=2000"
 	doctorGenhLogMax    = 1 << 20
 	doctorKeepZips      = 3
+	// doctorZipMaxAge: zip (log đầy đủ mọi dịch vụ, có thể chứa dữ liệu khách)
+	// phải 0644 để api (uid khác) đọc — nên không để lâu: quá hạn này thì xoá
+	// (lượt trực canh 12 phút và lần tạo gói sau đều dọn).
+	doctorZipMaxAge = 24 * time.Hour
 	doctorZipPrefix     = "genh-doctor-"
 	doctorRequestTimout = 10 * time.Minute
 )
@@ -333,7 +337,7 @@ func RunDoctorRequest(ctx context.Context, env *Env, deps DoctorDeps, out io.Wri
 	if err != nil {
 		return fail(err)
 	}
-	pruneDoctorZips(dir, doctorKeepZips)
+	pruneDoctorZips(dir, doctorKeepZips, now)
 	st.State, st.FinishedAt = "done", deps.now().Format(time.RFC3339)
 	st.File, st.SizeBytes, st.SHA256 = name, size, sum
 	if err := hostlink.WriteDoctorStatus(env.InstallDir, st); err != nil {
@@ -358,8 +362,12 @@ func fileSHA256(path string) (string, int64, error) {
 }
 
 // pruneDoctorZips chỉ giữ keep zip mới nhất (tên chứa thời điểm UTC ⇒ sắp xếp
-// theo tên là theo thời gian).
-func pruneDoctorZips(dir string, keep int) {
+// theo tên là theo thời gian) và xoá zip cũ hơn doctorZipMaxAge. Thư mục là
+// symlink/không phải thư mục thật ⇒ không đụng.
+func pruneDoctorZips(dir string, keep int, now time.Time) {
+	if fi, err := os.Lstat(dir); err != nil || !fi.IsDir() {
+		return
+	}
 	ents, err := os.ReadDir(dir)
 	if err != nil {
 		return
@@ -372,8 +380,17 @@ func pruneDoctorZips(dir string, keep int) {
 	}
 	sort.Sort(sort.Reverse(sort.StringSlice(names)))
 	for i, n := range names {
-		if i >= keep {
+		old := false
+		if t, err := time.Parse("20060102T150405Z", strings.TrimSuffix(strings.TrimPrefix(n, doctorZipPrefix), ".zip")); err == nil {
+			old = now.Sub(t) > doctorZipMaxAge
+		}
+		if i >= keep || old {
 			_ = os.Remove(filepath.Join(dir, n))
 		}
 	}
+}
+
+// PruneDiagnostics dọn zip chẩn đoán quá hạn (gọi từ lượt trực canh định kỳ).
+func PruneDiagnostics(installDir string, now time.Time) {
+	pruneDoctorZips(hostlink.DiagnosticsDirPath(installDir), doctorKeepZips, now)
 }

@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -35,6 +36,7 @@ type wdFakeRunner struct {
 	backup    string
 	backupErr error
 	calls     []string
+	onPS      func()
 }
 
 func (r *wdFakeRunner) Output(_ context.Context, cmd dockercli.Cmd) ([]byte, error) {
@@ -44,6 +46,9 @@ func (r *wdFakeRunner) Output(_ context.Context, cmd dockercli.Cmd) ([]byte, err
 	r.calls = append(r.calls, joined)
 	switch {
 	case strings.Contains(joined, "ps --all --format json"):
+		if r.onPS != nil {
+			r.onPS()
+		}
 		return []byte(r.ps), r.psErr
 	case strings.Contains(joined, "redis-cli"):
 		return []byte(r.mget), r.mgetErr
@@ -703,7 +708,7 @@ func TestWatchdog_StatusHopDong_VaKhongLoToken(t *testing.T) {
 		}
 	}
 	state, _ := os.ReadFile(WatchdogStatePath(h.env.InstallDir))
-	if fi, _ := os.Stat(WatchdogStatePath(h.env.InstallDir)); fi.Mode().Perm() != 0o600 {
+	if fi, _ := os.Stat(WatchdogStatePath(h.env.InstallDir)); runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600 {
 		t.Fatalf("watchdog-state.json phải 0600, được %v", fi.Mode().Perm())
 	}
 	var sm map[string]any
@@ -765,5 +770,73 @@ func TestUpFor(t *testing.T) {
 	}
 	if _, ok := upFor("Exited (0) 2 hours ago"); ok {
 		t.Error("Exited không phải Up")
+	}
+}
+
+// Không có container api (đã gỡ) ⇒ không tự `up -d` (tạo lại container/volume
+// rỗng); chỉ báo.
+func TestWatchdog_KhongCoContainerAPI_KhongTaoLai(t *testing.T) {
+	h := newWDHarness(t, true)
+	var rows []psRow
+	for _, r := range healthyRows {
+		if r.Service != "api" {
+			rows = append(rows, r)
+		}
+	}
+	h.runner.ps = psJSON(rows...)
+	h.readyOK = false
+	h.mustRun(WatchdogOptions{Quiet: true})
+	if n := h.runner.count("up -d"); n != 0 {
+		t.Fatalf("không được tạo lại api: %v", h.runner.calls)
+	}
+	if !hasIncident(h.status(), "api.down") {
+		t.Fatal("vẫn phải báo api.down")
+	}
+	if sent := h.tg.sent(); len(sent) != 1 || !strings.Contains(sent[0], "genh start") {
+		t.Fatalf("tin phải dặn chạy genh start: %q", sent)
+	}
+}
+
+// Owner `genh stop` giữa lượt (sau khi lượt đã qua kiểm tạm dừng) ⇒ không restart.
+func TestWatchdog_TamDungGiuaLuot_KhongRestart(t *testing.T) {
+	h := newWDHarness(t, true)
+	h.runner.ps = psJSON(rowsWith(psRow{Service: "api", State: "exited"}, psRow{Service: "worker", State: "exited"})...)
+	h.readyOK = false
+	h.runner.onPS = func() { _ = WriteOwnerPause(h.env.InstallDir, h.now) }
+	h.mustRun(WatchdogOptions{Quiet: true})
+	if n := h.runner.count("up -d"); n != 0 {
+		t.Fatalf("đã tạm dừng thì không được up -d: %v", h.runner.calls)
+	}
+}
+
+// restarting/created/paused cũng là sự cố; restarting không restart chồng.
+func TestWatchdog_RestartingCreated_LaSuCo(t *testing.T) {
+	h := newWDHarness(t, true)
+	h.runner.ps = psJSON(rowsWith(psRow{Service: "worker", State: "restarting", Status: "Restarting (1) 5 seconds ago"},
+		psRow{Service: "bridge", State: "created", Status: "Created"})...)
+	h.mustRun(WatchdogOptions{Quiet: true})
+	st := h.status()
+	if !hasIncident(st, "service.unhealthy:worker") || !hasIncident(st, "service.unhealthy:bridge") {
+		t.Fatalf("thiếu sự cố restarting/created: %+v", st.Incidents)
+	}
+	if h.runner.count("restart worker") != 0 || h.runner.count("up -d") != 0 {
+		t.Fatalf("không restart chồng khi docker đang tự thử lại: %v", h.runner.calls)
+	}
+}
+
+// "Gửi thử" khi lượt định kỳ đang giữ khoá ⇒ chờ rồi gửi, không mất tin thử.
+func TestWatchdog_GuiThu_ChoLuotDangChay(t *testing.T) {
+	h := newWDHarness(t, true)
+	held, err := hostlink.AcquireWatchdogLock(h.env.InstallDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		held.Release()
+	}()
+	h.mustRun(WatchdogOptions{Quiet: true, Test: true})
+	if st := h.status(); st.Test == nil || !st.Test.OK {
+		t.Fatalf("gửi thử phải chờ khoá rồi gửi: %+v", st.Test)
 	}
 }

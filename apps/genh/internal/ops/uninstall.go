@@ -131,6 +131,14 @@ func RunUninstall(ctx context.Context, env *Env, opts UninstallOptions, runner d
 		}
 		downArgs := compose.BaseArgs(composePath, sub...)
 
+		// Đánh dấu tạm dừng + chờ lượt trực canh đang chạy TRƯỚC khi down: lượt
+		// rơi vào khe giữa down và gỡ lịch không được `up -d` lại api (tạo lại
+		// container/volume rỗng sau khi gỡ). Đánh dấu nằm trong config/ — còn
+		// lại sau khi gỡ, cài lại/`genh start` sẽ xoá.
+		if _, perr := pauseWatchdog(ctx, env.InstallDir, out); perr != nil {
+			_, _ = fmt.Fprintln(out, "Cảnh báo: không ghi được đánh dấu tạm dừng trực canh ("+perr.Error()+").")
+		}
+
 		var envOverlay []string
 		if bundle, secErr := env.LoadSecrets(); secErr == nil {
 			envOverlay = EnvOverlay(bundle)
