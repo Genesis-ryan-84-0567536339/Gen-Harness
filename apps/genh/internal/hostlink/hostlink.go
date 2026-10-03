@@ -27,6 +27,8 @@
 //	  api-health.json            ← api ghi (v0.1.44) mỗi ~60 giây: sự cố phía api cho trực canh
 //	  watchdog-status.json       ← genh ghi (v0.1.44) mỗi lượt trực canh máy chủ (12 phút)
 //	  request/watchdog.json      ← api ghi (v0.1.44) khi Owner bấm "Gửi thử"
+//	  network-status.json        ← genh ghi (v0.1.46): chế độ truy cập từ xa {schema, mode, bind_addr,
+//	                               site_address, public_url, port, checked_at} (network.go)
 //
 // Khoá loại trừ (lock.go) KHÔNG nằm trong run/ mà ở <gốc cài đặt>/genh.lock —
 // run/ bind-mount vào api, ai ghi được run/ sẽ xoá/thay/giữ được khoá.

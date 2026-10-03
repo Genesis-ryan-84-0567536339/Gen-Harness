@@ -24,7 +24,9 @@ func insecureLocalClient(timeout time.Duration) *http.Client {
 
 // ProxyHost là tên máy genh dùng để gọi proxy Caddy trên chính máy này.
 // PHẢI là "localhost", không phải "127.0.0.1": Caddyfile khai site
-// `{$GH_SITE_ADDRESS:localhost}:8443` với `tls internal` — gọi bằng IP thì Go
+// `localhost:8443, {$GH_SITE_ADDRESS:127.0.0.1}:8443` với `tls internal` (v0.1.46:
+// luôn giữ localhost cho genh — ready/tự cập nhật/trực canh; GH_SITE_ADDRESS là
+// tên Tailscale/Cloudflare/LAN thêm vào) — gọi bằng IP thì Go
 // không gửi SNI, Caddy không có chứng chỉ cho yêu cầu đó và từ chối bắt tay
 // TLS, Host cũng không khớp site (phát hiện ở e2e cài thật: /api/v1/ready
 // không bao giờ trả 200 dù api healthy).

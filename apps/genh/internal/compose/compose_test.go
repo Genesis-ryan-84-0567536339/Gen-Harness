@@ -174,6 +174,36 @@ func TestEmbeddedComposeMatchesRepo(t *testing.T) {
 	}
 }
 
+// v0.1.46 (F-21/F-27): cổng chỉ nghe 127.0.0.1 theo mặc định; Caddyfile giữ
+// localhost (ops.ProxyHost) cộng GH_SITE_ADDRESS. Canh cả bản repo lẫn bản nhúng.
+func TestCompose_PortsBindAddrAndCaddySiteLine(t *testing.T) {
+	const wantPorts = `ports: ["${GH_BIND_ADDR:-127.0.0.1}:${GH_PORT:-8443}:8443"]`
+	const wantSite = `localhost:8443, {$GH_SITE_ADDRESS:127.0.0.1}:8443`
+	repoCaddy, err := os.ReadFile(filepath.Join(filepath.Dir(repoComposePath()), "proxy", "Caddyfile"))
+	if err != nil {
+		t.Fatalf("đọc deploy/proxy/Caddyfile: %v", err)
+	}
+	cases := []struct {
+		name    string
+		compose []byte
+		caddy   []byte
+	}{
+		{"repo", readRepoCompose(t), repoCaddy},
+		{"nhúng", embeddedComposeYAML, embeddedCaddyfile},
+	}
+	for _, c := range cases {
+		if !strings.Contains(string(c.compose), wantPorts) {
+			t.Errorf("%s: compose thiếu dòng %s", c.name, wantPorts)
+		}
+		if !strings.Contains(string(c.compose), "GH_SITE_ADDRESS: ${GH_SITE_ADDRESS:-127.0.0.1}") {
+			t.Errorf("%s: GH_SITE_ADDRESS mặc định phải là 127.0.0.1", c.name)
+		}
+		if !strings.Contains(string(c.caddy), wantSite) {
+			t.Errorf("%s: Caddyfile thiếu %s", c.name, wantSite)
+		}
+	}
+}
+
 func TestDeployCompose_WebHealthcheckUsesHealthz(t *testing.T) {
 	web, ok := composeServices(t, readRepoCompose(t))["web"].(map[string]any)
 	if !ok {

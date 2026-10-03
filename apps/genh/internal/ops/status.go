@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/access"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/compose"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/dockercli"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/hostlink"
@@ -90,6 +91,12 @@ func RunStatus(ctx context.Context, env *Env, version string, deps StatusDeps, o
 	sort.Slice(statuses, func(i, j int) bool { return statuses[i].Service < statuses[j].Service })
 
 	_, _ = fmt.Fprintf(out, "Gen-Harness %s\n\n", version)
+	// v0.1.46 (F-21/F-27): cách truy cập hiện tại + ghi lại run/network-status.json.
+	if acc, aerr := access.Read(composePath); aerr == nil && acc.Mode != "" {
+		printAccessLine(out, acc, env.Port)
+		_ = writeNetworkStatus(env, acc, out)
+		_, _ = fmt.Fprintln(out)
+	}
 	_, _ = fmt.Fprintf(out, "%-10s %-10s %s\n", "DỊCH VỤ", "TRẠNG THÁI", "HEALTH")
 	for _, s := range statuses {
 		health := s.Health

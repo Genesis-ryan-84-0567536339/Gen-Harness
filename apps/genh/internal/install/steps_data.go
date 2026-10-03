@@ -7,6 +7,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/access"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/compose"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/dockercli"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/pgtune"
@@ -59,6 +60,27 @@ func (s dataStep) Run(ctx context.Context, env *Env, rep Reporter) error {
 			Why:  err.Error(),
 			Next: "Đặt biến GENH_COMPOSE_FILE trỏ tới compose.yaml rồi bấm r.",
 			Err:  err,
+		}
+		rep.Report(Progress{Status: StatusError, Percent: 100, Err: se})
+		return se
+	}
+
+	// v0.1.46 (F-21): .env phải có GH_BIND_ADDR TRƯỚC `docker compose up` đầu
+	// tiên (compose.yaml mới nghe 127.0.0.1 theo mặc định). Cài mới → chỉ máy
+	// này; cài lại/tiếp tục → giữ lựa chọn cũ, thiếu thì lan_legacy (QD-12).
+	var accessErr error
+	if env != nil && env.FreshInstall {
+		_, _, accessErr = access.EnsureFresh(composePath)
+	} else {
+		_, _, accessErr = access.Ensure(composePath, false)
+	}
+	if accessErr != nil {
+		se := &StepError{
+			Code: ErrCodeSecretsWriteFailed,
+			What: "Không ghi được cấu hình truy cập (.env)",
+			Why:  accessErr.Error(),
+			Next: "Kiểm quyền ghi thư mục " + filepath.Dir(composePath) + " rồi bấm r.",
+			Err:  accessErr,
 		}
 		rep.Report(Progress{Status: StatusError, Percent: 100, Err: se})
 		return se
