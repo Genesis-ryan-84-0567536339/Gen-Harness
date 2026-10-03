@@ -71,16 +71,21 @@ class Runner:
         await self.redis.publish(protocol.FRAMES_PREFIX + ticket, orjson.dumps(signed))
 
     # ─── kiểm dừng / nghỉ ───────────────────────────────────────────────────────
-    async def check(self, cancel: asyncio.Event) -> None:
+    async def check(self, cancel: asyncio.Event, job_id: str | None = None) -> None:
+        """Dừng nếu: lệnh huỷ đã tới, Dừng tất cả đang bật, hoặc api đã huỷ RIÊNG việc này (khoá CANCELLED_PREFIX —
+        lệnh pub/sub `cancel` gửi lúc việc còn trong hàng đợi không tới được `running`)."""
         if cancel.is_set() or await self.redis.exists(protocol.HALT_KEY):
             raise Halted()
+        if job_id and await self.redis.exists(protocol.CANCELLED_PREFIX + job_id):
+            cancel.set()
+            raise Halted()
 
-    async def pause(self, cancel: asyncio.Event) -> None:
+    async def pause(self, cancel: asyncio.Event, job_id: str | None = None) -> None:
         d = self.cfg.delay
         if d > 0:
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(cancel.wait(), timeout=d)
-        await self.check(cancel)
+        await self.check(cancel, job_id)
 
     # ─── ngữ cảnh ─────────────────────────────────────────────────────────────
     async def new_context(self, job: dict[str, Any], state: dict[str, Any] | None) -> tuple[Any, list[str]]:
@@ -125,7 +130,7 @@ class Runner:
         try:
             if adapter is None:
                 raise JobError("ERROR", "nền tảng chưa có adapter")
-            await self.check(cancel)
+            await self.check(cancel, str(job.get("id") or ""))
             kind = job.get("kind")
             if kind == "login":
                 await self._login(job, adapter, cancel, ctx_box)
@@ -249,15 +254,16 @@ class Runner:
             step("page_state", False)
             raise                                   # checkpoint / CAPTCHA / đăng xuất → dừng, KHÔNG gửi
         step("page_state")
-        await self.pause(cancel)
+        job_id = str(job["id"])
+        await self.pause(cancel, job_id)
         try:
             await adapter.compose(page, action, text, target_url)
         except TargetNotFound as e:
             step("compose", False)
             raise JobError("TARGET_NOT_FOUND") from e
         step("compose")
-        await self.pause(cancel)
-        await self.check(cancel)                    # KIỂM DỪNG LẦN CUỐI ngay trước khi gửi
+        await self.pause(cancel, job_id)
+        await self.check(cancel, job_id)            # KIỂM DỪNG LẦN CUỐI ngay trước khi gửi (kể cả việc đã bị api huỷ)
         committed.set()
         step("halt_check")
         # ─── từ đây coi như ĐÃ GỬI: không bỏ dở, luôn chụp ảnh và báo 'done' ───

@@ -27,16 +27,22 @@ const RISK_VERSION = '2026-09-30';
 const WRITE_RISK_VERSION = '2026-10-03';
 const WRITES_PER_DAY_MAX = 20;
 const WRITE_RISK = [
-  'Trình duyệt nền của hệ thống chưa chạy được trong sandbox (vùng cách ly của trình duyệt): một trang web độc hại có thể lợi dụng lỗi trình duyệt để chạm tới máy chủ.',
-  'Gửi tự động có thể bị Facebook coi là hành vi bất thường: tài khoản có thể bị xác minh, hạn chế hoặc khoá.',
-  'Tin đã gửi lên Facebook thì hệ thống không tự thu hồi được.',
+  // Chép NGUYÊN VĂN apps/api/gh/social/platforms.py::WRITE_RISK.
+  'Khi trình duyệt nền chạy KHÔNG có lớp cách ly (sandbox) của Chromium (xem ô "Sandbox" ngay trên trang này), nếu một trang web độc khai thác được lỗi của trình duyệt, kẻ xấu có thể chiếm container trình duyệt đó.',
+  'Container trình duyệt vẫn bị cách ly với phần còn lại: không thấy cơ sở dữ liệu, khoá chính hay mạng nội bộ. Nhưng kẻ xấu có thể dùng phiên Facebook đang mở trong đó.',
+  'Điều khoản của Meta (Facebook) hạn chế việc tự động hoá; gửi trả lời hay tin nhắn bằng trình duyệt tự động có thể khiến tài khoản bị hạn chế hoặc khoá.',
+  'Sếp tự quyết định có chấp nhận hay không (quyết định QD-12). Nếu không đồng ý, việc gửi lên Facebook giữ nguyên trạng thái khoá; chỉ đọc vẫn dùng bình thường.',
+  'Sếp rút lại đồng ý được bất cứ lúc nào — việc gửi khoá lại ngay.',
 ];
 const ERROR_TEXT: Record<string, string> = {
   // Chép NGUYÊN VĂN apps/api/gh/social/service.py::ERROR_TEXT.
   TARGET_NOT_FOUND: 'Không tìm thấy đúng bình luận/hội thoại trên trang — không gửi gì. Hỏi Gen đọc lại rồi soạn lại nếu muốn gửi lần nữa.',
   PERMIT_INVALID: 'Giấy phép gửi không hợp lệ hoặc đã quá 5 phút — không gửi gì. Hỏi Gen soạn lại để gửi lần nữa.',
   LOGGED_OUT: 'Phiên đăng nhập đã hết — bấm Đăng nhập lại.',
+  WORKER_TIMEOUT: 'Trình duyệt không phản hồi (dịch vụ browser chưa chạy?) — thử lại sau.',
 };
+// Chép NGUYÊN VĂN apps/api/gh/social/service.py::WRITE_UNKNOWN_TEXT.
+const WRITE_UNKNOWN_TEXT = 'Không rõ tin đã đi hay chưa (trình duyệt mất liên lạc giữa chừng) — mở Facebook kiểm tra trước khi gửi lại.';
 const HARD_RULES = [
   'Không tạo tài khoản giả, tài khoản phụ hay nick ảo; chỉ tài khoản thật do chính Sếp đăng nhập.',
   'Không lách chống bot: không plugin ẩn danh (stealth), không giả vân tay trình duyệt, không đổi IP/xoay proxy, không giải CAPTCHA tự động.',
@@ -188,8 +194,8 @@ export function createMock(opts: Opts) {
       .map((j) => ({
         job_id: j.id, account_id: j.account_id, account_label: accounts.find((a) => a.id === j.account_id)?.label ?? '—',
         action: (j.action ?? 'reply_comment') as SocialWriteAction, target_url: j.result?.target_url ?? null, text: j.result?.text ?? null,
-        status: j.status, error: j.error, error_text: j.error_text, created_at: j.created_at, finished_at: j.finished_at,
-        has_proof: !!j.has_proof, confirmed: j.status === 'done' ? (j.result?.confirmed ?? null) : null, after_halt: !!j.result?.after_halt,
+        status: j.status, error: j.error, error_text: j.error_text, created_at: j.created_at, started_at: j.started_at, finished_at: j.finished_at,
+        has_proof: !!j.has_proof, proof_error: j.result?.proof_error ?? null, confirmed: j.status === 'done' ? (j.result?.confirmed ?? null) : null, after_halt: !!j.result?.after_halt,
         after_cancel: !!j.result?.after_cancel, send_error: !!j.result?.send_error,
       }));
 
@@ -452,7 +458,8 @@ export function createMock(opts: Opts) {
       j.status = 'failed';
       j.finished_at = now();
       j.error = o.error ?? 'TARGET_NOT_FOUND';
-      j.error_text = ERROR_TEXT[j.error] ?? 'Việc gửi gặp lỗi — chưa có gì được gửi đi.';
+      // Như service.error_text: việc GỬI đã chạy rồi quá giờ → có thể đã đi, không bảo "thử lại".
+      j.error_text = j.error === 'WORKER_TIMEOUT' && j.started_at ? WRITE_UNKNOWN_TEXT : (ERROR_TEXT[j.error] ?? 'Việc gửi gặp lỗi — chưa có gì được gửi đi.');
     }
     opts.emit('social.update', { account_id: j.account_id });
     return j;

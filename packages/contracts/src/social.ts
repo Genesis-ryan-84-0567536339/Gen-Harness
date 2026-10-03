@@ -153,8 +153,12 @@ export interface SocialWriteItem {
   error: string | null;
   error_text: string | null;
   created_at: string;
+  /** Việc đã chạy trên trình duyệt (huỷ/dừng/quá giờ lúc đó ⇒ tin CÓ THỂ đã đi). */
+  started_at?: string | null;
   finished_at: string | null;
   has_proof: boolean;
+  /** 'PROOF_MISSING' = gửi xong mà không chụp được ảnh (khác ảnh đã xoá theo hạn lưu). */
+  proof_error?: string | null;
   confirmed: boolean | null;
   after_halt: boolean;
   after_cancel?: boolean;

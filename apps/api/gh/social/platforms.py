@@ -81,7 +81,7 @@ PLATFORMS: dict[str, Platform] = {p.key: p for p in (
             "độ), không phải để giả người; mỗi lần một việc cho mỗi tài khoản.",
             "Chỉ TRẢ LỜI bình luận / NHẮN TIN khi Gen đề xuất và chính Sếp bấm Xác nhận + nhập mã PIN; mỗi lần gửi có "
             "ảnh chụp làm bằng chứng; mặc định 10 lượt gửi/ngày/tài khoản (Sếp chỉnh 1–20; trần cứng 20).",
-            "Ghi mọi lần kết nối, đăng nhập, đọc, gỡ vào Nhật ký hành động.",
+            "Ghi mọi lần kết nối, đăng nhập, đọc, gửi, gỡ vào Nhật ký hành động.",
         ),
         wont_do=(
             "Không đăng bài, không thích, không kết bạn ở bản này.",

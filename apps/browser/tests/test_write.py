@@ -161,6 +161,32 @@ async def test_kill_switch_after_compose_sends_nothing(redis: Redis, chromium: A
     assert "submit" not in spy.calls and "confirm_sent" not in spy.calls
 
 
+async def test_api_cancel_marker_after_compose_sends_nothing(redis: Redis, chromium: Any, site: FakeSite,
+                                                             monkeypatch: pytest.MonkeyPatch) -> None:
+    """Owner rút đồng ý / tạm dừng tài khoản khi việc đang soạn: api đặt khoá CANCELLED_PREFIX → kiểm cuối trước khi
+    gửi phải thấy và dừng (không chỉ dựa vào pub/sub `cancel`)."""
+    spy = Spy(monkeypatch)
+    j = write_job()
+
+    async def mark() -> None:
+        await redis.set(protocol.CANCELLED_PREFIX + j["id"], "1", ex=60)
+
+    spy.hooks["compose"] = mark
+    await runner(redis, chromium, site).run(j, asyncio.Event())
+    r = await one(redis)
+    assert r["type"] == "halted" and "proof" not in r["data"]
+    assert "submit" not in spy.calls and "confirm_sent" not in spy.calls
+
+
+async def test_api_cancel_marker_before_start_opens_no_page(redis: Redis, chromium: Any, site: FakeSite) -> None:
+    j = write_job()
+    await redis.set(protocol.CANCELLED_PREFIX + j["id"], "1", ex=60)
+    await runner(redis, chromium, site).run(j, asyncio.Event())
+    r = await one(redis)
+    assert r["type"] == "halted"
+    assert site.seen == []
+
+
 async def test_cancel_after_submit_still_reports_done(redis: Redis, chromium: Any, site: FakeSite,
                                                       monkeypatch: pytest.MonkeyPatch) -> None:
     spy = Spy(monkeypatch)
@@ -235,6 +261,24 @@ async def test_reply_uses_comment_id_of_target_not_page_url(redis: Redis, chromi
     # câu trả lời nằm ngay sau bình luận của Minh (comment_id=2), không phải của Lan
     order = spy.body.index("Còn hàng không ạ?") < spy.body.index(TEXT) < spy.body.index("Bình luận đã khoá")
     assert order
+
+
+LONG_CID = "Y29tbWVudDoxMjM0NTY3ODkwMTIzNDU2Xzk4NzY1NDMyMTA5ODc2NTQz%3D%3D"
+
+
+async def test_reply_matches_long_base64_comment_id(redis: Redis, chromium: Any, site: FakeSite,
+                                                    monkeypatch: pytest.MonkeyPatch) -> None:
+    """comment_id base64 của Facebook dài 50+ ký tự (trước đây cắt [:40] nên không bao giờ khớp → TARGET_NOT_FOUND).
+    Vẫn phải chọn ĐÚNG bình luận của Thu, không nhầm sang Tú (id dài hơn, cùng tiền tố)."""
+    from ghb.adapters.facebook import comment_id
+
+    url = f"https://www.facebook.com/permalink.php?story_fbid=1&comment_id={LONG_CID}"
+    assert len(comment_id(url)) > 40
+    spy = Spy(monkeypatch)
+    await runner(redis, chromium, site).run(write_job(target=url), asyncio.Event())
+    r = await one(redis)
+    assert r["type"] == "done" and r["data"]["confirmed"] is True, r
+    assert spy.body.index("Ship về Đà Nẵng") < spy.body.index(TEXT) < spy.body.index("Có size XL")
 
 
 async def test_error_after_submit_still_reports_done(redis: Redis, chromium: Any, site: FakeSite,

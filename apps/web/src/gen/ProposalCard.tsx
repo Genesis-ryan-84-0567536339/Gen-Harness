@@ -23,7 +23,7 @@ import { navigateTo } from '../lib/navigation';
 import { useCan } from '../lib/permissions';
 import { useNow } from '../lib/useNow';
 import { ErrorWithDetail, WriteProofDialog } from '../social/WriteProofDialog';
-import { PROOF_MISSING_TEXT, WRITE_RISK_PATH, qkSocial, writeStatusView } from '../social/socialModel';
+import { PROOF_MISSING_TEXT, WRITE_RISK_PATH, proofMissing, qkSocial, writeStatusView } from '../social/socialModel';
 import { patchProposal } from './genStore';
 import {
   SOCIAL_SUSPICIOUS_WARNING,
@@ -209,7 +209,7 @@ function WriteProgress({ jobId, initial }: { jobId: string; initial?: string }) 
           Xem ảnh chụp
         </Button>
       ) : null}
-      {status === 'done' && job?.has_proof === false ? (
+      {status === 'done' && job && proofMissing(job) ? (
         <ErrorWithDetail text={PROOF_MISSING_TEXT} detail={job.result?.proof_error ? `Mã lỗi ${job.result.proof_error}` : null} className="write-error gen-prop__proof-missing" />
       ) : null}
       {timedOut ? (

@@ -34,12 +34,34 @@ type WriteLike = Pick<BrowserJob, 'status'> & {
   after_cancel?: boolean | null;
   send_error?: boolean | null;
   has_proof?: boolean | null;
+  /** Mã lỗi (vd WORKER_TIMEOUT) + câu giải thích của API. */
+  error?: string | null;
+  error_text?: string | null;
+  /** Có = việc đã chạy trên trình duyệt: huỷ/dừng/quá giờ lúc đó thì tin CÓ THỂ đã đi. */
+  started_at?: string | null;
+  /** 'PROOF_MISSING' = gửi xong mà không chụp được ảnh (KHÁC ảnh đã xoá theo hạn lưu — khi đó has_proof cũng false). */
+  proof_error?: string | null;
   result?: BrowserJob['result'];
 };
 
 export const PROOF_MISSING_TEXT = 'Đã gửi nhưng không chụp được ảnh bằng chứng — mở Facebook để kiểm tra.';
 export const SEND_ERROR_TEXT = 'Có lỗi ngay sau khi bấm gửi — tin có thể đã đi. Mở Facebook kiểm tra trước khi gửi lại.';
 export const RETRY_HINT = 'Hỏi Gen soạn lại nếu muốn gửi lần nữa.';
+/** Huỷ/dừng khi việc ĐANG chạy: API vẫn nhận 'done' đến muộn (tin kịp đi) — không khẳng định "chưa gửi gì". */
+export const MAYBE_SENT_NOTE = 'Nếu tin kịp đi trước khi dừng, mục này sẽ tự chuyển sang "Đã gửi". Mở Facebook kiểm tra trước khi gửi lại.';
+
+/** Việc gửi đã có kết luận PROOF_MISSING (không suy từ has_proof: ảnh quá hạn lưu bị xoá cũng làm has_proof=false). */
+export function proofMissing(j: Pick<WriteLike, 'proof_error' | 'result'>): boolean {
+  return (j.proof_error ?? j.result?.proof_error) === 'PROOF_MISSING';
+}
+
+/**
+ * Lỗi mà gửi lại là AN TOÀN (chắc chắn chưa gửi gì). WORKER_TIMEOUT sau khi đã chạy: trình duyệt có thể chết SAU khi bấm
+ * Enter — bảo "soạn lại / thử lại" là khiến Sếp gửi hai lần.
+ */
+export function writeOutcomeUnknown(j: Pick<WriteLike, 'status' | 'error' | 'started_at'>): boolean {
+  return j.status === 'failed' && j.error === 'WORKER_TIMEOUT' && !!j.started_at;
+}
 
 /** Trạng thái việc gửi → chữ tiếng Việt (một nguồn cho thẻ đề xuất và danh sách "Lần gửi gần đây"). */
 export function writeStatusView(j: WriteLike): WriteStatusView {
@@ -47,6 +69,7 @@ export function writeStatusView(j: WriteLike): WriteStatusView {
   const afterHalt = j.after_halt || j.result?.after_halt;
   const afterCancel = j.after_cancel || j.result?.after_cancel;
   const sendError = j.send_error || j.result?.send_error;
+  const wasRunning = !!j.started_at;
   switch (j.status) {
     case 'queued':
       return { label: 'Đang chờ trình duyệt…', chip: 'Đang chờ', tone: 'neutral', notes: [], terminal: false };
@@ -57,16 +80,25 @@ export function writeStatusView(j: WriteLike): WriteStatusView {
       if (afterHalt) notes.push('Đã gửi trước khi kịp dừng');
       if (afterCancel) notes.push('Đã gửi trước khi kịp huỷ / tạm dừng');
       if (sendError) notes.push(SEND_ERROR_TEXT);
-      else if (confirmed === false) notes.push(j.has_proof === false ? 'Đã bấm gửi nhưng chưa thấy hiện trên trang' : 'Đã bấm gửi nhưng chưa thấy hiện trên trang — xem ảnh chụp');
-      if (j.has_proof === false) notes.push(PROOF_MISSING_TEXT);
+      else if (confirmed === false) notes.push(j.has_proof !== false ? 'Đã bấm gửi nhưng chưa thấy hiện trên trang — xem ảnh chụp' : 'Đã bấm gửi nhưng chưa thấy hiện trên trang');
+      if (proofMissing(j)) notes.push(PROOF_MISSING_TEXT);
       return { label: 'Đã gửi', chip: 'Đã gửi', tone: confirmed === false || sendError ? 'warn' : 'ok', notes, terminal: true };
     }
     case 'halted':
-      return { label: 'Đã dừng bằng Dừng tất cả — chưa gửi gì', chip: 'Đã dừng', tone: 'warn', notes: [], terminal: true };
+      return wasRunning
+        ? { label: 'Đã dừng bằng Dừng tất cả', chip: 'Đã dừng', tone: 'warn', notes: [MAYBE_SENT_NOTE], terminal: true }
+        : { label: 'Đã dừng bằng Dừng tất cả — chưa gửi gì', chip: 'Đã dừng', tone: 'warn', notes: [], terminal: true };
     case 'cancelled':
-      return { label: 'Đã huỷ — chưa gửi gì', chip: 'Đã huỷ', tone: 'neutral', notes: [], terminal: true };
+      return wasRunning
+        ? { label: 'Đã huỷ', chip: 'Đã huỷ', tone: 'warn', notes: [MAYBE_SENT_NOTE], terminal: true }
+        : { label: 'Đã huỷ — chưa gửi gì', chip: 'Đã huỷ', tone: 'neutral', notes: [], terminal: true };
     default:
-      return { label: 'Gửi không thành công', chip: 'Lỗi', tone: 'bad', notes: [RETRY_HINT], terminal: true };
+      if (writeOutcomeUnknown(j)) {
+        // error_text của API đã nói rõ "mở Facebook kiểm tra trước khi gửi lại" — KHÔNG thêm gợi ý soạn lại.
+        return { label: 'Không rõ tin đã đi hay chưa', chip: 'Không rõ', tone: 'warn', notes: [], terminal: true };
+      }
+      // Câu lỗi của API đã có "Hỏi Gen …" (PERMIT_INVALID / TARGET_NOT_FOUND) → không lặp lại.
+      return { label: 'Gửi không thành công', chip: 'Lỗi', tone: 'bad', notes: j.error_text?.includes('Hỏi Gen') ? [] : [RETRY_HINT], terminal: true };
   }
 }
 

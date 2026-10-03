@@ -22,7 +22,7 @@ from sqlalchemy.exc import IntegrityError
 from gh import crypto
 from gh.chassis.objects import ObjectNotFound, get_object_store
 from gh.db import admin_sessionmaker
-from gh.social import permit, platforms, protocol
+from gh.social import permit, platforms, protocol, service
 from tests.conftest import PG, Api
 from tests.phase2 import org_id
 from tests.test_social import STATE, _add, _db_text, _deliver, _jobs, _login, _pin, _result
@@ -458,12 +458,18 @@ async def test_late_done_after_pause_or_timeout_is_logged_and_counted(owner_api:
     await _deliver(redis, _result(job, "started"))
     if closer == "pause":
         assert (await owner_api.send("POST", f"/social/accounts/{acc_id}/pause", {})).status_code == 200
+        assert await redis.exists(protocol.CANCELLED_PREFIX + job["id"])      # worker kiểm trước khi gửi
         want = "cancelled"
     else:
         await db.execute(text("""UPDATE agent.browser_jobs SET status = 'failed', error = 'WORKER_TIMEOUT',
                                         finished_at = now() WHERE id = :i"""), {"i": job["id"]})
         await db.commit()
         want = "failed"
+        # Đã chạy rồi mất liên lạc: tin CÓ THỂ đã đi — không bảo "thử lại" (Owner gửi lại thành hai lần).
+        got = (await owner_api.get(f"/social/jobs/{job['id']}")).json()
+        assert got["error_text"] == service.WRITE_UNKNOWN_TEXT and "thử lại" not in got["error_text"]
+        item = (await owner_api.get("/social/writes")).json()["items"][0]
+        assert item["error_text"] == service.WRITE_UNKNOWN_TEXT and item["started_at"]
     await db.rollback()
     assert (await db.execute(text("SELECT status FROM agent.browser_jobs WHERE id = :i"),
                              {"i": job["id"]})).scalar_one() == want
@@ -499,6 +505,9 @@ async def test_late_done_after_revoke_logs_without_storing(owner_api: Api, redis
         detail = (await adb.execute(text("SELECT detail FROM ops.action_log WHERE action = 'social.write'"))
                   ).scalar_one()
     assert detail["account_revoked"] is True and detail["sent"] is True
+    # thẻ đề xuất đã dừng ở "Đã huỷ" → phải có chuông báo tin THỰC SỰ đã đi
+    notes = (await owner_api.get("/notifications")).json()["items"]
+    assert any(n["kind"] == "social.write" and "trước khi kịp gỡ" in n["title"] for n in notes), notes
 
 
 async def test_send_error_after_submit_is_done_with_warning(owner_api: Api, redis: Redis, db: Any) -> None:
@@ -543,3 +552,38 @@ async def test_withdrawing_consent_cancels_queued_writes(owner_api: Api, redis: 
         detail = (await adb.execute(text("""SELECT detail FROM ops.action_log
                                             WHERE action = 'social.write_risk_revoked'"""))).scalar_one()
     assert detail["writes_cancelled"] == 1
+    # Việc còn trong hàng đợi (worker bận) không nhận được pub/sub `cancel` → api phải đặt khoá huỷ để worker nhận
+    # việc sau đó KHÔNG gửi (permit còn hạn tới 5 phút). TTL ≥ hạn việc trong hàng đợi.
+    from gh.social.service import JOB_TTL_S
+    assert await redis.get(protocol.CANCELLED_PREFIX + job["id"]) == b"1"
+    assert await redis.ttl(protocol.CANCELLED_PREFIX + job["id"]) >= JOB_TTL_S
+
+
+async def test_worker_timeout_before_start_is_safe_to_retry(owner_api: Api, redis: Redis, db: Any) -> None:
+    """Việc GỬI chưa từng chạy (không có 'started') rồi quá giờ: chắc chắn chưa gửi — giữ câu "thử lại" thường."""
+    acc_id = await _ready(owner_api, redis)
+    jid = (await _write(owner_api, acc_id)).json()["id"]
+    await db.execute(text("""UPDATE agent.browser_jobs SET status = 'failed', error = 'WORKER_TIMEOUT',
+                                    finished_at = now() WHERE id = :i"""), {"i": jid})
+    await db.commit()
+    got = (await owner_api.get(f"/social/jobs/{jid}")).json()
+    assert got["started_at"] is None and got["error_text"] == service.ERROR_TEXT["WORKER_TIMEOUT"]
+    item = (await owner_api.get("/social/writes")).json()["items"][0]
+    assert item["started_at"] is None and item["error_text"] == service.ERROR_TEXT["WORKER_TIMEOUT"]
+
+
+async def test_writes_list_proof_error_not_inferred_from_purged_proof(owner_api: Api, redis: Redis, db: Any) -> None:
+    """has_proof=false có hai nghĩa: không chụp được (proof_error PROOF_MISSING) hoặc ảnh đã xoá theo hạn lưu 90 ngày
+    (proof_error null) — web chỉ cảnh báo "không chụp được ảnh" ở trường hợp đầu."""
+    acc_id = await _ready(owner_api, redis)
+    j1 = (await _write(owner_api, acc_id)).json()["id"]
+    await _deliver(redis, _write_done((await _write_jobs(redis))[-1], proof=False))
+    await _pin(owner_api)
+    j2 = (await _write(owner_api, acc_id)).json()["id"]
+    await _deliver(redis, _write_done((await _write_jobs(redis))[-1]))
+    await db.execute(text("UPDATE agent.browser_jobs SET proof_key = NULL, proof_sha256 = NULL WHERE id = :i"),
+                     {"i": j2})                                     # như retention.purge_browser_proofs
+    await db.commit()
+    items = {i["job_id"]: i for i in (await owner_api.get("/social/writes")).json()["items"]}
+    assert items[j1]["has_proof"] is False and items[j1]["proof_error"] == "PROOF_MISSING"
+    assert items[j2]["has_proof"] is False and items[j2]["proof_error"] is None

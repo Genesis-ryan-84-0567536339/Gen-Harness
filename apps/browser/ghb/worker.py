@@ -118,6 +118,10 @@ class Worker:
         if await self.redis.exists(protocol.HALT_KEY):
             await self.runner.publish(env, "halted")
             return
+        if await self.redis.exists(protocol.CANCELLED_PREFIX + job_id):
+            # api đã huỷ việc này khi nó còn trong hàng đợi (tạm dừng/gỡ tài khoản, rút đồng ý gửi) → không chạy.
+            await self.runner.publish(env, "halted")
+            return
         ttl = int((env.get("payload") or {}).get("timeout_s", 300)) + LOCK_EXTRA_S
         lock = protocol.LOCK_PREFIX + str(env["account_id"])
         if not await self.redis.set(lock, job_id, nx=True, ex=ttl):

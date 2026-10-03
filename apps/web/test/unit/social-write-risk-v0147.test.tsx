@@ -13,7 +13,7 @@ import type { SocialAccount, SocialPlatforms, SocialWriteGate, SocialWriteItem }
 import { SocialPage } from '../../src/social/SocialPage';
 import { SocialWriteRiskPage } from '../../src/social/SocialWriteRiskPage';
 import { qk } from '../../src/lib/queries';
-import { fmtConsentTime, shortTarget, writeStatusView } from '../../src/social/socialModel';
+import { MAYBE_SENT_NOTE, RETRY_HINT, fmtConsentTime, shortTarget, writeStatusView } from '../../src/social/socialModel';
 
 const json = (status: number, body?: unknown) =>
   new Response(body === undefined ? null : JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -180,8 +180,13 @@ describe('socialModel — trạng thái việc gửi', () => {
       'Đã gửi trước khi kịp dừng',
       'Đã bấm gửi nhưng chưa thấy hiện trên trang — xem ảnh chụp',
     ]);
-    expect(writeStatusView({ status: 'done', confirmed: true, after_cancel: true, has_proof: false }).notes).toEqual([
+    expect(writeStatusView({ status: 'done', confirmed: true, after_cancel: true, has_proof: false, proof_error: 'PROOF_MISSING' }).notes).toEqual([
       'Đã gửi trước khi kịp huỷ / tạm dừng',
+      'Đã gửi nhưng không chụp được ảnh bằng chứng — mở Facebook để kiểm tra.',
+    ]);
+    // ảnh đã xoá theo hạn lưu (has_proof=false, KHÔNG có proof_error) → không gắn nhãn sai "không chụp được ảnh"
+    expect(writeStatusView({ status: 'done', confirmed: true, has_proof: false }).notes).toEqual([]);
+    expect(writeStatusView({ status: 'done', confirmed: true, has_proof: false, result: { proof_error: 'PROOF_MISSING' } }).notes).toEqual([
       'Đã gửi nhưng không chụp được ảnh bằng chứng — mở Facebook để kiểm tra.',
     ]);
     expect(writeStatusView({ status: 'done', confirmed: false, send_error: true })).toMatchObject({
@@ -189,7 +194,29 @@ describe('socialModel — trạng thái việc gửi', () => {
       notes: ['Có lỗi ngay sau khi bấm gửi — tin có thể đã đi. Mở Facebook kiểm tra trước khi gửi lại.'],
     });
     expect(writeStatusView({ status: 'halted' }).label).toBe('Đã dừng bằng Dừng tất cả — chưa gửi gì');
+    expect(writeStatusView({ status: 'cancelled' }).label).toBe('Đã huỷ — chưa gửi gì');
     expect(writeStatusView({ status: 'failed' })).toMatchObject({ tone: 'bad', chip: 'Lỗi', notes: ['Hỏi Gen soạn lại nếu muốn gửi lần nữa.'] });
+  });
+  it('huỷ / dừng khi việc ĐANG chạy → không khẳng định "chưa gửi gì" (API vẫn nhận "done" đến muộn)', () => {
+    const halted = writeStatusView({ status: 'halted', started_at: '2026-10-03T01:00:00Z' });
+    expect(halted.label).not.toContain('chưa gửi gì');
+    expect(halted.notes).toEqual([MAYBE_SENT_NOTE]);
+    const cancelled = writeStatusView({ status: 'cancelled', started_at: '2026-10-03T01:00:00Z' });
+    expect(cancelled).toMatchObject({ label: 'Đã huỷ', tone: 'warn', notes: [MAYBE_SENT_NOTE] });
+  });
+  it('WORKER_TIMEOUT sau khi đã chạy → "Không rõ", KHÔNG gợi ý soạn lại/gửi lại (tránh gửi hai lần)', () => {
+    const v = writeStatusView({ status: 'failed', error: 'WORKER_TIMEOUT', started_at: '2026-10-03T01:00:00Z', error_text: 'Không rõ tin đã đi hay chưa …' });
+    expect(v).toMatchObject({ label: 'Không rõ tin đã đi hay chưa', chip: 'Không rõ', tone: 'warn', notes: [] });
+    expect(v.notes).not.toContain(RETRY_HINT);
+    // chưa từng chạy (còn trong hàng đợi rồi hết hạn) → chắc chắn chưa gửi: gợi ý soạn lại như lỗi thường
+    expect(writeStatusView({ status: 'failed', error: 'WORKER_TIMEOUT', started_at: null }).notes).toEqual([RETRY_HINT]);
+  });
+  it('câu lỗi của API đã có "Hỏi Gen …" → không lặp RETRY_HINT ngay bên dưới', () => {
+    const v = writeStatusView({
+      status: 'failed', error: 'PERMIT_INVALID',
+      error_text: 'Giấy phép gửi không hợp lệ hoặc đã quá 5 phút — không gửi gì. Hỏi Gen soạn lại để gửi lần nữa.',
+    });
+    expect(v.notes).toEqual([]);
     expect(shortTarget(null)).toBe('(đã xoá theo hạn lưu)');
   });
   it('định dạng thời điểm đồng ý HH:mm dd/MM/yyyy theo múi giờ tổ chức', () => {
@@ -266,10 +293,36 @@ describe('SocialPage — thẻ "Gửi trả lời & tin nhắn"', () => {
     renderPage(<SocialPage />);
     const recent = await screen.findByRole('list', { name: 'Lần gửi gần đây' });
     expect(recent).toHaveTextContent('(đã xoá theo hạn lưu)');
-    expect(recent).toHaveTextContent('Đã gửi nhưng không chụp được ảnh bằng chứng — mở Facebook để kiểm tra.');
+    // ảnh quá 90 ngày bị xoá (has_proof=false, không proof_error) ≠ "không chụp được ảnh"
+    expect(recent).not.toHaveTextContent('Đã gửi nhưng không chụp được ảnh bằng chứng');
     expect(recent).toHaveTextContent('Đã gửi trước khi kịp dừng');
     expect(recent).toHaveTextContent('Đã bấm gửi nhưng chưa thấy hiện trên trang — xem ảnh chụp');
     expect(screen.getByTestId('social-kill-switch')).toBeInTheDocument();       // "Dừng tất cả" vẫn còn
+  });
+
+  it('không chụp được ảnh (proof_error PROOF_MISSING) / không rõ đã gửi (WORKER_TIMEOUT sau khi chạy) / lỗi đã có "Hỏi Gen"', async () => {
+    stubSocial({
+      writes: [
+        { ...WRITES[1], job_id: 'nocap', has_proof: false, proof_error: 'PROOF_MISSING' },
+        {
+          ...WRITES[2], job_id: 'lost', status: 'failed', error: 'WORKER_TIMEOUT', started_at: '2026-10-03T02:00:01Z', confirmed: null,
+          has_proof: false, error_text: 'Không rõ tin đã đi hay chưa (trình duyệt mất liên lạc giữa chừng) — mở Facebook kiểm tra trước khi gửi lại.',
+        },
+        {
+          ...WRITES[0], job_id: 'permit', error: 'PERMIT_INVALID',
+          error_text: 'Giấy phép gửi không hợp lệ hoặc đã quá 5 phút — không gửi gì. Hỏi Gen soạn lại để gửi lần nữa.',
+        },
+      ],
+    });
+    renderPage(<SocialPage />);
+    const recent = await screen.findByRole('list', { name: 'Lần gửi gần đây' });
+    expect(recent).toHaveTextContent('Đã gửi nhưng không chụp được ảnh bằng chứng — mở Facebook để kiểm tra.');
+    const [, lost, permit] = within(recent).getAllByRole('listitem');
+    expect(lost).toHaveTextContent('Không rõ');
+    expect(lost).toHaveTextContent('mở Facebook kiểm tra trước khi gửi lại');
+    expect(lost).not.toHaveTextContent('Hỏi Gen');
+    expect(lost).not.toHaveTextContent('thử lại');
+    expect(permit.textContent?.match(/Hỏi Gen/g)).toHaveLength(1);
   });
 
   it('cổng Mở (đã đồng ý) → "Mở"', async () => {

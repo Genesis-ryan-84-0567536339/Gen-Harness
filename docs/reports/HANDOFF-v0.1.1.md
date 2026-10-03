@@ -2990,3 +2990,17 @@ Sếp xác nhận bằng mã PIN, có bằng chứng bằng ảnh chụp, và d�
   browser (ký cũng không giúp vì container bị chiếm giữ chính khoá) — cổng F-85 là gợi ý UX, không phải ranh giới an toàn.
 - e2e `social-write-v0147`: `enterPinIfAsked` chờ thật hộp PIN (trước dùng `isVisible({timeout})` — Playwright bỏ qua timeout,
   test chập chờn ~1/6 lượt cả trên nhánh gốc).
+
+### Sửa sau review lượt 2 (v0.1.47)
+
+- **comment_id dài**: bỏ cắt 40 ký tự (nay 128, giống nhau ở API và worker); JS so khớp sau khi chuẩn hoá y hệt Python (giải
+  mã `%xx`, bỏ ký tự lạ) — link thông báo dạng base64 (`Y29tbWVudDo…%3D%3D`, 50+ ký tự) không còn luôn `TARGET_NOT_FOUND`.
+- **Huỷ việc còn trong hàng đợi**: tạm dừng / gỡ tài khoản / rút đồng ý rủi ro giờ đặt thêm khoá `gh:browser:cancelled:<job>`
+  (TTL > hạn việc) bên cạnh pub/sub `cancel`. Worker kiểm khoá trước khi chạy và NGAY trước khi bấm gửi → việc xếp hàng lúc worker
+  bận không còn gửi đi sau khi Sếp đã rút đồng ý (permit còn hạn 5 phút).
+- **WORKER_TIMEOUT sau khi việc gửi đã chạy**: API trả "Không rõ tin đã đi hay chưa (trình duyệt mất liên lạc giữa chừng) — mở
+  Facebook kiểm tra trước khi gửi lại."; web hiện "Không rõ", không gợi ý soạn lại/thử lại (tránh gửi hai lần).
+- Nhãn "Đã dừng/Đã huỷ — chưa gửi gì" chỉ khi việc chưa chạy; đã chạy thì ghi "nếu tin kịp đi, mục này sẽ tự chuyển sang Đã gửi".
+  Ghi chú "không chụp được ảnh" dựa trên `proof_error` (ảnh xoá theo hạn lưu 90 ngày không còn bị gắn nhãn sai);
+  `/social/writes` trả thêm `started_at`, `proof_error`. Không lặp "Hỏi Gen…" hai lần. Gửi muộn sau khi gỡ tài khoản có chuông
+  báo + làm mới thẻ. "Hệ thống sẽ làm" thêm "gửi" vào câu Nhật ký; mock `WRITE_RISK` chép nguyên văn API.

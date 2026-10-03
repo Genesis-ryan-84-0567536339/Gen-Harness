@@ -73,6 +73,8 @@ ARTICLE = '[role="article"]'
 TEXTBOX = '[contenteditable="true"][role="textbox"]'
 MESSAGE_ROW = '[role="main"] [role="row"]'
 TARGET_ATTR = "data-ghb-target"
+# comment_id dạng base64 của Facebook (Y29tbWVudDo…%3D%3D) thường dài 50+ ký tự — cắt 40 thì không bao giờ khớp.
+COMMENT_ID_MAX = 128
 
 # Chọn bình luận đích: bài viết ARIA có aria-label bắt đầu "Bình luận"/"Comment" có link chứa ĐÚNG comment_id của
 # target_url (đã ký trong permit). Không thấy → 0 (TargetNotFound): KHÔNG đoán sang bình luận được làm nổi hay bình luận
@@ -83,15 +85,18 @@ MARK_COMMENT_JS = """(commentId) => {
   if (!commentId) return 0;
   const arts = Array.from(document.querySelectorAll('[role="article"]'))
     .filter((a) => re.test(a.getAttribute('aria-label') || ''));
-  const want = 'comment_id=' + commentId;
-  const pick = arts.find((a) => Array.from(a.querySelectorAll('a[href*="comment_id="]')).some((l) => {
-    const m = (l.getAttribute('href') || '').match(/[?&]comment_id=([0-9A-Za-z_]+)/);
-    return !!m && ('comment_id=' + m[1]) === want;
-  }));
+  // Chuẩn hoá GIỐNG comment_id() bên Python: giải mã %xx, bỏ ký tự ngoài [0-9A-Za-z_], cắt COMMENT_ID_MAX.
+  const norm = (href) => {
+    let v = null;
+    try { v = new URL(href, location.href).searchParams.get('comment_id'); } catch (e) { return ''; }
+    return (v || '').replace(/[^0-9A-Za-z_]/g, '').slice(0, COMMENT_ID_MAX);
+  };
+  const pick = arts.find((a) => Array.from(a.querySelectorAll('a[href*="comment_id="]'))
+    .some((l) => norm(l.getAttribute('href') || '') === commentId));
   if (!pick) return 0;
   pick.setAttribute('data-ghb-target', '1');
   return arts.length;
-}"""
+}""".replace("COMMENT_ID_MAX", str(COMMENT_ID_MAX))
 
 COUNT_JS = """([sel, text]) => Array.from(document.querySelectorAll(sel))
   .filter((e) => !e.querySelector('[contenteditable="true"]') && (e.innerText || '').includes(text)).length"""
@@ -105,7 +110,7 @@ def comment_id(url: str) -> str:
     from urllib.parse import parse_qs, urlsplit
 
     vals = parse_qs(urlsplit(url).query).get("comment_id") or []
-    return re.sub(r"[^0-9A-Za-z_]", "", vals[0])[:40] if vals else ""
+    return re.sub(r"[^0-9A-Za-z_]", "", vals[0])[:COMMENT_ID_MAX] if vals else ""
 
 
 def _lines(text: str) -> list[str]:

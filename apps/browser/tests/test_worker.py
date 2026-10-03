@@ -137,6 +137,22 @@ async def test_one_job_per_account_and_halt(redis: Redis) -> None:
     assert hb["version"] and "running" in hb
 
 
+async def test_queued_job_cancelled_by_api_never_runs(redis: Redis) -> None:
+    """Việc GỬI còn nằm trong hàng đợi khi Owner rút đồng ý: pub/sub `cancel` bị bỏ qua (chưa có trong `running`)
+    nhưng khoá CANCELLED_PREFIX api đặt vẫn chặn — worker nhận việc sau đó KHÔNG chạy (không gửi gì)."""
+    fr = FakeRunner(redis)
+    w = Worker(cfg(), redis, fr)  # type: ignore[arg-type]
+    j = job("write", {})
+    assert w.on_control(orjson.dumps(protocol.sign(KEY, protocol.P_CONTROL,
+                                                   {"type": "cancel", "job_id": j["id"], "ts": 1}))) == "ignored"
+    await redis.set(protocol.CANCELLED_PREFIX + j["id"], "1", ex=60)
+    await w.execute(j)
+    assert fr.ran == []
+    kinds = [(r["job_id"], r["type"]) for r in await results(redis)]
+    assert kinds == [(j["id"], "halted")]
+    assert await redis.get(protocol.LOCK_PREFIX + ACC) is None
+
+
 async def test_idle_closes_browser_only_when_no_job_running(redis: Redis) -> None:
     closed: list[float] = []
 

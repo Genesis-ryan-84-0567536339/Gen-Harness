@@ -371,10 +371,24 @@ JOB_COLS = ("id, account_id, kind, action, status, via, requested_by, result, er
             "started_at, finished_at")
 
 
+# Việc GỬI đã chạy (có 'started') rồi quá giờ WORKER_TIMEOUT: worker có thể chết SAU khi bấm Enter — tin có thể đã đi.
+# KHÔNG được bảo "thử lại" (Owner gửi lại thành hai lần); bảo kiểm tra trên Facebook trước.
+WRITE_UNKNOWN_TEXT = ("Không rõ tin đã đi hay chưa (trình duyệt mất liên lạc giữa chừng) — mở Facebook kiểm tra trước "
+                      "khi gửi lại.")
+
+
+def error_text(kind: str | None, error: str | None, started_at: Any) -> str | None:
+    if not error:
+        return None
+    if kind == "write" and error == "WORKER_TIMEOUT" and started_at is not None:
+        return WRITE_UNKNOWN_TEXT
+    return ERROR_TEXT.get(error, error)
+
+
 def job_out(r: Any, *, with_result: bool = True) -> dict[str, Any]:
     return {"id": str(r.id), "account_id": str(r.account_id), "kind": r.kind, "action": r.action,
             "has_proof": bool(r.proof_key), "status": r.status, "via": r.via,
-            "error": r.error, "error_text": ERROR_TEXT.get(r.error or "", r.error) if r.error else None,
+            "error": r.error, "error_text": error_text(r.kind, r.error, r.started_at),
             "result": r.result if with_result else None, "created_at": _iso(r.created_at),
             "started_at": _iso(r.started_at), "finished_at": _iso(r.finished_at)}
 
@@ -437,14 +451,22 @@ async def list_jobs(db: AsyncSession, org_id: uuid.UUID, account_id: uuid.UUID,
     return [job_out(r, with_result=False) for r in rows]
 
 
+async def _signal_cancel(redis: Redis, ids: Any) -> None:
+    """Báo worker huỷ các việc `ids`: đặt khoá CANCELLED_PREFIX (worker kiểm trước khi chạy và ngay trước khi gửi —
+    việc còn trong hàng đợi không nhận được pub/sub) rồi phát `cancel` cho việc đang chạy. TTL > hạn việc trong hàng
+    đợi (JOB_TTL_S) nên khoá còn khi worker nhận việc muộn nhất."""
+    key = crypto.browser_key()
+    for jid in ids:
+        await bus(redis).set(protocol.CANCELLED_PREFIX + str(jid), "1", ex=JOB_TTL_S + 300)
+        await bus(redis).publish(protocol.CONTROL_CHANNEL, orjson.dumps(protocol.sign(
+            key, protocol.P_CONTROL, {"type": "cancel", "job_id": str(jid), "ts": int(_now().timestamp())})))
+
+
 async def _cancel_active(db: AsyncSession, redis: Redis, account_id: uuid.UUID, status: str) -> None:
     ids = (await db.execute(text("""UPDATE agent.browser_jobs SET status = :s, finished_at = now(), error = 'CANCELLED'
                                     WHERE account_id = :a AND status IN ('queued', 'running') RETURNING id"""),
                             {"a": account_id, "s": status})).scalars().all()
-    key = crypto.browser_key()
-    for jid in ids:
-        await bus(redis).publish(protocol.CONTROL_CHANNEL, orjson.dumps(protocol.sign(
-            key, protocol.P_CONTROL, {"type": "cancel", "job_id": str(jid), "ts": int(_now().timestamp())})))
+    await _signal_cancel(redis, ids)
 
 
 async def _cancel_org_writes(db: AsyncSession, redis: Redis, org_id: uuid.UUID) -> int:
@@ -453,10 +475,7 @@ async def _cancel_org_writes(db: AsyncSession, redis: Redis, org_id: uuid.UUID) 
                                            error = 'CANCELLED'
                                     WHERE org_id = :o AND kind = 'write' AND status IN ('queued', 'running')
                                     RETURNING id"""), {"o": org_id})).scalars().all()
-    key = crypto.browser_key()
-    for jid in ids:
-        await bus(redis).publish(protocol.CONTROL_CHANNEL, orjson.dumps(protocol.sign(
-            key, protocol.P_CONTROL, {"type": "cancel", "job_id": str(jid), "ts": int(_now().timestamp())})))
+    await _signal_cancel(redis, ids)
     return len(ids)
 
 
@@ -727,7 +746,8 @@ async def handle_result(db: AsyncSession, redis: Redis, raw: Any) -> str:
         return "closed"
     if acc.status == "revoked":
         if late_write and isinstance(msg.get("data"), dict):
-            await _late_write_revoked(db, job, acc, msg["data"])
+            await _late_write_revoked(db, redis, job, acc, msg["data"])
+            await _push(redis, job.org_id, acc.id)
             return "ok"
         return "revoked"
     if typ == "started":
@@ -964,6 +984,9 @@ _ITEM_KIND = {"reply_comment": "notification", "send_message": "inbox"}
 REPLY_NO_COMMENT = ("Thông báo này không trỏ tới một bình luận cụ thể (thích, sinh nhật, bài viết…) — chỉ trả lời được "
                     "vào thông báo về bình luận.")
 
+# Phải trùng ghb.adapters.facebook.COMMENT_ID_MAX: comment_id base64 của Facebook dài 50+ ký tự.
+COMMENT_ID_MAX = 128
+
 
 def comment_id(url: str) -> str:
     """comment_id trong đường dẫn ('' nếu không có). Worker chọn ĐÚNG bình luận theo mã này — không có thì không trả
@@ -974,7 +997,7 @@ def comment_id(url: str) -> str:
         vals = parse_qs(urlsplit(url or "").query).get("comment_id") or []
     except ValueError:
         return ""
-    return re.sub(r"[^0-9A-Za-z_]", "", vals[0])[:40] if vals else ""
+    return re.sub(r"[^0-9A-Za-z_]", "", vals[0])[:COMMENT_ID_MAX] if vals else ""
 
 
 def write_target_ok(action: str, target_url: str) -> bool:
@@ -1095,7 +1118,7 @@ async def _save_proof(job: Any, data: dict[str, Any]) -> tuple[str | None, str |
     return key, sha
 
 
-async def _late_write_revoked(db: AsyncSession, job: Any, acc: Any, data: dict[str, Any]) -> None:
+async def _late_write_revoked(db: AsyncSession, redis: Redis, job: Any, acc: Any, data: dict[str, Any]) -> None:
     """Tài khoản đã bị gỡ khi việc gửi đang chạy mà tin vẫn đi: KHÔNG lưu phiên/ảnh (đã xoá theo ý Owner) nhưng PHẢI
     có nhật ký hành động + tính vào trần gửi/ngày."""
     await db.execute(text("""UPDATE agent.browser_jobs SET status = 'done', finished_at = now(),
@@ -1103,6 +1126,13 @@ async def _late_write_revoked(db: AsyncSession, job: Any, acc: Any, data: dict[s
     await _system_log(db, job, acc, "social.write",
                       detail={"action": job.action, "proof_sha256": None, "confirmed": bool(data.get("confirmed")),
                               "sent": bool(data.get("sent")), "after_cancel": True, "account_revoked": True})
+    # Thẻ đề xuất đã dừng ở "Đã huỷ — chưa gửi gì": báo chuông để Owner biết tin THỰC SỰ đã đi dưới tên mình.
+    await notifications.notify(
+        db, job.org_id, await _recipients(db, job), kind="social.write", redis=redis,
+        title=f"{acc.label}: tin đã đi trước khi kịp gỡ tài khoản",
+        body="Tin đã được gửi trên Facebook ngay trước khi tài khoản bị gỡ — không còn ảnh chụp bằng chứng. Mở "
+             "Facebook để kiểm tra nếu cần.",
+        link="/social")
 
 
 async def _finish_write(db: AsyncSession, redis: Redis, job: Any, acc: Any, data: dict[str, Any], *,
@@ -1158,7 +1188,8 @@ async def list_writes(db: AsyncSession, org_id: uuid.UUID, account_id: uuid.UUID
     if account_id is not None:
         await _account(db, org_id, account_id)
     rows = (await db.execute(text("""
-        SELECT j.id, j.account_id, a.label, j.action, j.status, j.error, j.created_at, j.finished_at, j.result,
+        SELECT j.id, j.account_id, a.label, j.action, j.status, j.error, j.created_at, j.started_at, j.finished_at,
+               j.result,
                (j.proof_key IS NOT NULL) AS has_proof
         FROM agent.browser_jobs j JOIN core.social_accounts a ON a.id = j.account_id
         WHERE j.org_id = :o AND j.kind = 'write' AND a.status <> 'revoked'
@@ -1172,9 +1203,13 @@ async def list_writes(db: AsyncSession, org_id: uuid.UUID, account_id: uuid.UUID
                     "action": r.action, "target_url": _str_or_none(res.get("target_url")),
                     "text": _str_or_none(res.get("text")),
                     "status": r.status, "error": r.error,
-                    "error_text": ERROR_TEXT.get(r.error or "", r.error) if r.error else None,
-                    "created_at": _iso(r.created_at), "finished_at": _iso(r.finished_at),
-                    "has_proof": bool(r.has_proof), "confirmed": res.get("confirmed"),
+                    "error_text": error_text("write", r.error, r.started_at),
+                    # started_at: việc đã chạy trên trình duyệt — huỷ/dừng/quá giờ lúc đó thì tin CÓ THỂ đã đi.
+                    "created_at": _iso(r.created_at), "started_at": _iso(r.started_at),
+                    "finished_at": _iso(r.finished_at),
+                    # proof_error (không suy từ has_proof: ảnh quá hạn lưu bị xoá cũng làm has_proof=false).
+                    "has_proof": bool(r.has_proof), "proof_error": _str_or_none(res.get("proof_error")),
+                    "confirmed": res.get("confirmed"),
                     "after_halt": bool(res.get("after_halt")), "after_cancel": bool(res.get("after_cancel")),
                     "send_error": bool(res.get("send_error"))})
     return out

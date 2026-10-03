@@ -309,7 +309,8 @@ describe('Thẻ đề xuất gửi Facebook (v0.1.47)', () => {
     expect(within(card).getByText('Chi tiết kỹ thuật')).toBeInTheDocument();
     expect(card).toHaveTextContent('Mã lỗi PERMIT_INVALID');
     // Không còn nút Xác nhận ⇒ chỉ đường làm lại bằng Gen, không bảo "Bấm Xác nhận lại".
-    expect(card).toHaveTextContent('Hỏi Gen soạn lại nếu muốn gửi lần nữa.');
+    expect(card).toHaveTextContent('Hỏi Gen soạn lại để gửi lần nữa.');
+    expect(card.textContent?.match(/Hỏi Gen/g)).toHaveLength(1);              // không lặp lời khuyên hai lần liền
     expect(card).not.toHaveTextContent('Xác nhận lại');
     expect(within(card).queryByRole('button', { name: 'Xác nhận và gửi' })).toBeNull();
 
@@ -323,5 +324,46 @@ describe('Thẻ đề xuất gửi Facebook (v0.1.47)', () => {
     await userEvent.click(within(card).getByRole('button', { name: 'Xác nhận và gửi' }));
     await waitFor(() => expect(card).toHaveTextContent('Đã dừng bằng Dừng tất cả — chưa gửi gì'));
     expect(within(card).queryByRole('button', { name: 'Xem ảnh chụp' })).toBeNull();
+  });
+
+  it('WORKER_TIMEOUT sau khi đã chạy → "Không rõ tin đã đi hay chưa", bảo kiểm tra Facebook, KHÔNG bảo soạn lại/thử lại', async () => {
+    jobReplies = [{
+      status: 'failed', error: 'WORKER_TIMEOUT', started_at: '2026-10-03T01:00:05Z',
+      error_text: 'Không rõ tin đã đi hay chưa (trình duyệt mất liên lạc giữa chừng) — mở Facebook kiểm tra trước khi gửi lại.',
+    }];
+    renderPanel();
+    showProposal(REPLY);
+    const card = cardOf('Trả lời bình luận Facebook');
+    await userEvent.click(within(card).getByRole('button', { name: 'Xác nhận và gửi' }));
+    const st = await within(card).findByTestId('gen-write-status');
+    await waitFor(() => expect(st).toHaveAttribute('data-status', 'failed'));
+    expect(st).toHaveTextContent('Không rõ tin đã đi hay chưa');
+    expect(st).toHaveTextContent('mở Facebook kiểm tra trước khi gửi lại');
+    expect(st).not.toHaveTextContent('Hỏi Gen');
+    expect(st).not.toHaveTextContent('thử lại');
+  });
+
+  it('dừng khi việc đang chạy → không khẳng định "chưa gửi gì"; ảnh đã xoá theo hạn lưu ≠ "không chụp được ảnh"', async () => {
+    jobReplies = [{ status: 'cancelled', error: 'CANCELLED', started_at: '2026-10-03T01:00:05Z' }];
+    renderPanel();
+    showProposal(REPLY);
+    let card = cardOf('Trả lời bình luận Facebook');
+    await userEvent.click(within(card).getByRole('button', { name: 'Xác nhận và gửi' }));
+    let st = await within(card).findByTestId('gen-write-status');
+    await waitFor(() => expect(st).toHaveAttribute('data-status', 'cancelled'));
+    expect(st).not.toHaveTextContent('chưa gửi gì');
+    expect(st).toHaveTextContent('Nếu tin kịp đi trước khi dừng, mục này sẽ tự chuyển sang "Đã gửi"');
+
+    cleanup();
+    queryClient.clear();
+    queryClient.setQueryData(qk.me, ME);
+    jobReplies = [{ status: 'done', has_proof: false, result: { sent: true, confirmed: true } }];
+    renderPanel();
+    showProposal({ ...REPLY, id: 'w6' } as GenProposal);
+    card = cardOf('Trả lời bình luận Facebook');
+    await userEvent.click(within(card).getByRole('button', { name: 'Xác nhận và gửi' }));
+    st = await within(card).findByTestId('gen-write-status');
+    await waitFor(() => expect(st).toHaveAttribute('data-status', 'done'));
+    expect(st).not.toHaveTextContent('không chụp được ảnh');
   });
 });

@@ -25,6 +25,10 @@ HALT_KEY = "gh:browser:halt"
 HEARTBEAT_KEY = "gh:browser:heartbeat"
 LOCK_PREFIX = "gh:browser:lock:"
 NONCE_PREFIX = "gh:browser:nonce:"
+# api đặt khi huỷ một việc (Owner tạm dừng/gỡ tài khoản, rút đồng ý gửi): việc còn nằm trong hàng đợi thì worker
+# chưa có nó trong `running` nên lệnh pub/sub `cancel` bị bỏ qua — worker kiểm khoá này trước khi chạy và
+# ngay trước khi gửi.
+CANCELLED_PREFIX = "gh:browser:cancelled:"
 PERMIT_NONCE_PREFIX = "gh:browser:permit:"
 FRAMES_PREFIX = "gh:browser:frames:"
 INPUT_PREFIX = "gh:browser:input:"
