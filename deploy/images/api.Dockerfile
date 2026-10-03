@@ -62,7 +62,11 @@ LABEL org.opencontainers.image.version=${VERSION}
 # đầu tiên, nên phải có sẵn ở đây với đúng chủ sở hữu gh:gh — nếu không,
 # volume sẽ được tạo với quyền root, tiến trình chạy dưới USER gh (dòng dưới)
 # sẽ không ghi được tài liệu/backup.
-RUN useradd --system --uid 10001 --home-dir /home/gh --create-home gh \
+# v0.1.45: nhóm gh CỐ ĐỊNH gid 10001 (trước đây useradd --system tự chọn gid hệ thống) — hộp thư run/ trên máy chủ
+# để 2770 nhóm 10001 (genh: ops.EnsureRunDirPerms), nên api/worker/migrate (chung image) phải chạy `id` = 10001:10001.
+# Tệp cũ trong volume vẫn thuộc uid 10001 nên không ảnh hưởng.
+RUN groupadd --system --gid 10001 gh \
+    && useradd --system --uid 10001 --gid 10001 --home-dir /home/gh --create-home gh \
     && mkdir -p /var/lib/gh/agy/.gemini/antigravity-cli /var/lib/gh/claude/.claude /var/lib/gh/objects \
     && chown -R gh:gh /var/lib/gh
 # F-22 (v0.1.38): phiên Claude Code nằm ở volume RIÊNG claude_state (/var/lib/gh/claude), KHÔNG còn trong agy_state —

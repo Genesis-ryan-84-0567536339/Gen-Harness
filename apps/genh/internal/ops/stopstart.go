@@ -167,6 +167,8 @@ func RunStart(ctx context.Context, env *Env, runner dockercli.Runner, out io.Wri
 			Err:  err,
 		}
 	}
+	// v0.1.45: siết hộp thư run/ (2770 nhóm 10001) sau khi api đã lên.
+	reportRunDirPerms(ctx, runner, env.InstallDir, composePath, EnvOverlay(bundle), out)
 	if err := ClearOwnerPause(env.InstallDir); err != nil {
 		_, _ = fmt.Fprintln(out, "Cảnh báo: không xoá được "+OwnerPausePath(env.InstallDir)+": "+err.Error())
 	}
