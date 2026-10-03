@@ -2871,14 +2871,18 @@ Sếp xác nhận bằng mã PIN, có bằng chứng bằng ảnh chụp, và d�
 
 ### Boss cần làm gì
 
-1. **Mở trang Tài khoản mạng xã hội → "Ghi lên Facebook" (`/social/ghi-facebook`)** và xem trạng thái "vùng cách ly của trình
-   duyệt" (sandbox). Nếu **đã bật** — không cần làm gì thêm. Nếu **chưa bật** (máy chủ không cho), gửi lên Facebook đang khoá:
-   đọc cảnh báo, rồi chỉ bấm **"Tôi hiểu rủi ro và đồng ý"** (nhập PIN) nếu Sếp chấp nhận; bấm **"Rút lại đồng ý"** để khoá lại.
-2. **Thử một lần thật** (Hướng dẫn › Việc Sếp cần làm › dòng 8 "Facebook trả lời", không bắt buộc): 1) Hỏi Gen "đọc Facebook"
-   2) Hỏi Gen "trả lời bình luận của <tên> trên bài của tôi: …" 3) Đọc kỹ thẻ, bấm **Xác nhận và gửi**, nhập mã PIN 4) Đợi
-   "Đã gửi", bấm **Xem ảnh chụp**, mở Facebook xem lại. Có gì lạ (không tìm thấy bình luận, nút bấm sai chỗ) — báo lại để chỉnh.
-3. **Giới hạn gửi/ngày** mặc định 10 (Sếp hạ được 1–20) — chỉnh ở thẻ tài khoản nếu muốn chặt hơn.
-4. Chuông mới "Facebook “…”: phiên đăng nhập đã hết" (kèm tin Telegram) — bấm **Đăng nhập lại** như thường. Còn lại không cần làm gì.
+1. **Sau khi máy tự cập nhật lên v0.1.47:** mở Console › **Tài khoản mạng xã hội**, xem thẻ **"Gửi trả lời & tin nhắn"**.
+   - Thẻ ghi **"Mở · Trình duyệt chạy trong sandbox"** → không cần làm gì thêm.
+   - Thẻ ghi **"Khoá"** (chưa bật được sandbox — máy chủ không cho) → bấm **"Đọc cảnh báo rủi ro & đồng ý"**, đọc trang cảnh
+     báo (1 trang) rồi tự quyết: bấm **"Tôi hiểu rủi ro và đồng ý"** (nhập PIN), hoặc để nguyên chờ bản sau. Đổi ý thì bấm
+     **"Rút lại đồng ý"** (khoá lại ngay, không cần PIN).
+2. **Nghiệm thu thật (một lần, không bắt buộc — Hướng dẫn › Việc Sếp cần làm › dòng 8 "Facebook trả lời"):** 1) Hỏi Gen "đọc
+   Facebook" 2) Hỏi Gen "trả lời bình luận của <tên> trên bài của tôi: …" (bài của chính Sếp) 3) Đọc kỹ thẻ, bấm **Xác nhận và
+   gửi**, nhập mã PIN 4) Đợi **"Đã gửi"**, bấm **Xem ảnh chụp**, mở Facebook xem câu trả lời đã hiện. Dòng 8 tự chuyển "Đạt".
+   Có gì lạ (không tìm thấy bình luận, nút bấm sai chỗ) — báo lại để chỉnh.
+3. **Khi phiên Facebook hết hạn:** sẽ có chuông trong Console và tin Telegram — mở **Tài khoản mạng xã hội**, bấm **Đăng nhập
+   lại** và tự đăng nhập. Ngoài ra không cần làm gì (Giới hạn gửi/ngày mặc định 10, chỉnh 1–20 ở thẻ "Gửi trả lời & tin nhắn"
+   nếu muốn chặt hơn).
 
 ### Thay đổi (theo mã)
 
@@ -2913,10 +2917,21 @@ Sếp xác nhận bằng mã PIN, có bằng chứng bằng ảnh chụp, và d�
 - **Trễ cố định 3 giây** (`GH_BROWSER_DELAY`) thay khoảng ngẫu nhiên 2–6 giây — tránh bị hiểu là né chống bot (F-59).
 - **Giới hạn gửi/ngày** mặc định 10, Owner hạ 1..20, **trần cứng 20** (cửa sổ 24 giờ, không tính việc đã huỷ).
 - **Ảnh chụp bằng chứng**: JPEG ≤ 2 MB, mã hoá bằng khoá master khi lưu, giữ 90 ngày; không dùng Playwright tracing (chứa cookie).
-- **Sandbox**: kết quả thực tế trên CI và trên máy Boss do người điều phối điền khi phát hành — nếu CI/máy chủ không cho user
-  namespace thì ghi rõ lý do (kernel/AppArmor/seccomp) và gửi vẫn khoá tới khi Owner đồng ý rủi ro. *(Gói này chỉ làm phần
-  kiểm phiên, web và tài liệu — chưa đo sandbox.)*
+- **Sandbox (đo khi tích hợp)**: trên máy tích hợp (kernel 6.18, user namespace không bị chặn) Chromium chạy bằng người dùng
+  thường → `probe` **enabled=true**: tiến trình chính không có `--no-sandbox`, renderer Seccomp 2 + user namespace riêng
+  (`GH_BROWSER_SANDBOX_REQUIRED=1`, 34/34 test browser xanh). Chạy bằng **root** thì Chromium từ chối sandbox → chế độ `auto` lùi
+  êm, báo `enabled=false` + lý do "Máy chủ không cho Chromium tạo vùng cách ly…" (đúng thiết kế; container browser chạy `pwuser`,
+  không root). Runner CI: `sysctl kernel.apparmor_restrict_unprivileged_userns=0` rồi kiểm cả trên runner lẫn trong container
+  (`--cap-drop ALL`, `no-new-privileges`, seccomp `deploy/browser/chromium-seccomp.json`) — job `browser`/`images` đỏ nếu không
+  bật được. Trên máy Fedora của Boss: xem thẻ "Gửi trả lời & tin nhắn" (bước 1 ở trên); không bật được thì gửi vẫn khoá tới khi
+  Owner đồng ý rủi ro.
 - Chuông phiên hết dùng `health.raise_once` (khử trùng lặp theo `social.session:<id>` + fingerprint `pause_reason`/`status`).
+
+### Kiểm tra
+
+- Tích hợp 5 gói (api-ghi-mxh, ghb-ghi, sandbox-chromium, web-de-xuat-dong-y, ops-phien-docs) — không xung đột; sửa sau gộp:
+  `shell.test.ts` đếm 33 route (thêm `social/ghi-facebook`), `v0139-integ.spec.ts` đếm 8 dòng Việc Sếp cần làm (thêm dòng 8).
+- KQ_KIEM_TRA
 
 ### Rủi ro / giới hạn
 

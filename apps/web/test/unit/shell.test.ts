@@ -47,7 +47,9 @@ describe('screen registry', () => {
     // 21 màn thiết kế + 3 màn spec bổ sung (tasks, documents, deals) + Hướng dẫn thiết lập (guide, guide/:n)
     // + Tài khoản của tôi (account, v0.1.19) + Trợ giúp (help, v0.1.22) + Tài khoản mạng xã hội (social, v0.1.29)
     // + Việc Sếp cần làm (guide/viec-sep, v0.1.39) + Kết nối, Đội ngũ (v0.1.42)
-    expect(paths).toHaveLength(32);
+    // + Trang cảnh báo gửi Facebook (social/ghi-facebook, v0.1.47)
+    expect(paths).toHaveLength(33);
+    expect(paths).toContain('social/ghi-facebook');
     expect(paths).toContain('domain:business > connections');
     expect(paths).toContain('domain:business > team');
     expect(paths).toContain('domain:business > group:Đội ngũ > people');
