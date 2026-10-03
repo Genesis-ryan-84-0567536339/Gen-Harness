@@ -156,6 +156,8 @@ async def test_owner_sees_full_content_with_pin(world, owner_api: Api) -> None: 
     item = next(i for i in body["items"] if i["id"] == str(world["review_id"]))
     assert item["person"]["id"] == str(world["p_an"]) and item["score"] is not None
     assert item["evidence"]
+    # v0.1.45 (F-60): tin bình thường → không gắn cờ 'Đáng ngờ'.
+    assert item["suspicious"] is False and item["suspicious_reason"] is None
 
     detail = await owner_api.get(f"/people/reviews/{world['review_id']}")
     assert detail.status_code == 200

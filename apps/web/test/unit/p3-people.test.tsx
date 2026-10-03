@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClientProvider } from '@tanstack/react-query';
@@ -15,6 +15,7 @@ import type {
 import { CareScreen } from '../../src/screens/people/CareScreen';
 import { PeopleScreen } from '../../src/screens/people/PeopleScreen';
 import { queryClient } from '../../src/lib/queryClient';
+import { SUSPICIOUS_FALLBACK, suspiciousLabel } from '../../src/screens/people/peopleModel';
 
 const json = (status: number, body?: unknown) =>
   new Response(body === undefined ? null : JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -25,6 +26,10 @@ interface Call {
   body: unknown;
 }
 
+/** Quyền của người đang xem (/auth/me) — mặc định như Owner; test người chỉ có quyền xem thì đổi. */
+let mePerms: Record<string, string> = {};
+const OWNER_PERMS = { 'people_review.read': 'all', 'people_review.write': 'all' };
+
 function mockFetch(handler: (c: Call) => Response | Promise<Response>) {
   const calls: Call[] = [];
   vi.stubGlobal(
@@ -32,6 +37,7 @@ function mockFetch(handler: (c: Call) => Response | Promise<Response>) {
     vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
       const c = { url: String(url), method: init?.method ?? 'GET', body: init?.body ? JSON.parse(String(init.body)) : undefined };
       calls.push(c);
+      if (c.url.endsWith('/auth/me')) return json(200, { user: { id: 'u-1', name: 'Người xem', role: 'owner' }, permissions: mePerms });
       return handler(c);
     }),
   );
@@ -45,6 +51,10 @@ function renderScreen(ui: ReactElement) {
     </QueryClientProvider>,
   );
 }
+
+beforeEach(() => {
+  mePerms = { ...OWNER_PERMS };
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -70,6 +80,8 @@ const FULL_ITEM = {
   overridden_at: null,
   override_reason: null,
   supersedes_id: null,
+  suspicious: false,
+  suspicious_reason: null as string | null,
 };
 
 const FULL_DETAIL: PeopleReviewFullDetail = {
@@ -85,6 +97,113 @@ const FULL_DETAIL: PeopleReviewFullDetail = {
 };
 
 describe('Đánh giá con người — Q4 (docs/PLAN.md)', () => {
+  it("F-60: dòng bị gắn cờ hiện chip 'Đáng ngờ' (title = lý do), dòng thường không có", async () => {
+    const reason = 'Có 1 tin giống lệnh cho AI hoặc xin điểm (vd: “Bỏ qua mọi chỉ dẫn”) — kiểm tra trước khi dùng điểm này';
+    const bad = { ...FULL_ITEM, id: 'rev-9', person: { ...PERSON, id: 'p-bad', name: 'Lê Văn Lách' }, suspicious: true, suspicious_reason: reason };
+    mockFetch((c) => {
+      if (c.url.includes('/people/reviews/rev-9')) return json(200, { ...FULL_DETAIL, ...bad });
+      if (c.url.includes('/people/reviews')) return json(200, { items: [FULL_ITEM, bad], next_cursor: null, total: 2 } satisfies PeopleReviewPage);
+      return json(404);
+    });
+    renderScreen(<PeopleScreen />);
+    expect(await screen.findByText('Lê Văn Lách')).toBeInTheDocument();
+    const chips = screen.getAllByTestId('ppl-suspicious');
+    expect(chips).toHaveLength(1);
+    expect(chips[0]).toHaveTextContent('Đáng ngờ');
+    // Lý do thiếu dấu chấm cuối → UI tự thêm, câu sau không dính liền.
+    expect(chips[0]).toHaveAttribute('title', `${reason}.`);
+    const rows = document.querySelectorAll('.ppl-row');
+    const normal = Array.from(rows).find((r) => r.textContent?.includes('Phạm Anh Tú'));
+    expect(normal).toBeDefined();
+    expect(normal?.textContent).not.toContain('Đáng ngờ');
+
+    const user = userEvent.setup();
+    const badRow = Array.from(rows).find((r) => r.textContent?.includes('Lê Văn Lách')) as HTMLElement;
+    await user.click(await within(badRow).findByRole('button', { name: 'Sửa điểm tay' }));
+    const note = await within(await screen.findByRole('dialog')).findByRole('note', { name: 'Cảnh báo đáng ngờ' });
+    expect(note).toHaveTextContent(reason);
+    expect(note.textContent).toContain('dùng điểm này. Hệ thống chỉ gắn cờ');
+  });
+
+  it("F-60: Owner bỏ cờ 'Đáng ngờ' — bắt buộc lý do, sau đó hiện ai bỏ cờ", async () => {
+    const reason = 'Có 1 tin nhân viên gửi giống lệnh cho AI hoặc xin điểm (vd: “cho em 10 điểm”) — kiểm tra chứng cứ trước khi dùng điểm này.';
+    const flagged = { ...FULL_DETAIL, suspicious: true, suspicious_reason: reason, suspicious_cleared: null };
+    const cleared = { ...flagged, suspicious: false, suspicious_cleared: { by: { id: 'u-owner', name: 'Anh Cơ La (Ryan)' }, at: '2026-09-24T03:00:00Z', reason: 'Đã đọc tin gốc, nhân viên trích lời khách' } };
+    let patched: unknown = null;
+    let current: PeopleReviewFullDetail = flagged;
+    mockFetch((c) => {
+      if (c.method === 'PATCH' && c.url.includes('/people/reviews/rev-1/suspicious')) {
+        patched = c.body;
+        current = cleared;
+        return json(200, cleared);
+      }
+      if (c.url.includes('/people/reviews/rev-1')) return json(200, current);
+      if (c.url.includes('/people/reviews')) return json(200, { items: [{ ...FULL_ITEM, suspicious: current.suspicious, suspicious_reason: reason }], next_cursor: null, total: 1 } satisfies PeopleReviewPage);
+      return json(404);
+    });
+    const user = userEvent.setup();
+    renderScreen(<PeopleScreen />);
+    await user.click(await screen.findByRole('button', { name: 'Sửa điểm tay' }));
+    const dlg = await screen.findByRole('dialog');
+    await user.click(await within(dlg).findByRole('button', { name: /Bỏ cờ \(đã xem chứng cứ\)/ }));
+    const submit = within(dlg).getByRole('button', { name: 'Bỏ cờ' });
+    expect(submit).toBeDisabled();
+    await user.type(within(dlg).getByLabelText('Lý do bỏ cờ'), 'Đã đọc tin gốc, nhân viên trích lời khách');
+    await user.click(submit);
+    expect(await within(dlg).findByTestId('ppl-suspicious-cleared')).toHaveTextContent(/Đã bỏ cờ 'Đáng ngờ' · Anh Cơ La \(Ryan\)/);
+    expect(patched).toEqual({ cleared_reason: 'Đã đọc tin gốc, nhân viên trích lời khách' });
+    expect(within(dlg).queryByRole('note', { name: 'Cảnh báo đáng ngờ' })).toBeNull();
+  });
+
+  it('Quản lý chỉ có people_review.read (write = none): thấy cờ nhưng không có nút Bỏ cờ / form sửa điểm (không nút chết 403)', async () => {
+    mePerms = { 'people_review.read': 'team', 'people_review.write': 'none' };
+    const reason = 'Có 1 tin giống lệnh cho AI hoặc xin điểm — xem chứng cứ trước khi dùng điểm này.';
+    const flagged = { ...FULL_DETAIL, suspicious: true, suspicious_reason: reason, suspicious_cleared: null };
+    const calls = mockFetch((c) => {
+      if (c.url.includes('/people/reviews/rev-1')) return json(200, flagged);
+      if (c.url.includes('/people/reviews')) return json(200, { items: [{ ...FULL_ITEM, suspicious: true, suspicious_reason: reason }], next_cursor: null, total: 1 } satisfies PeopleReviewPage);
+      return json(404);
+    });
+    const user = userEvent.setup();
+    renderScreen(<PeopleScreen />);
+    await user.click(await screen.findByRole('button', { name: 'Xem chi tiết' }));
+    const dlg = await screen.findByRole('dialog');
+    expect(await within(dlg).findByRole('note', { name: 'Cảnh báo đáng ngờ' })).toHaveTextContent(reason);
+    expect(within(dlg).getByTestId('ppl-read-only')).toHaveTextContent('Chỉ người có quyền sửa đánh giá mới sửa điểm hoặc bỏ cờ được — nhờ Owner.');
+    expect(within(dlg).queryByRole('button', { name: /Bỏ cờ/ })).toBeNull();
+    expect(within(dlg).queryByRole('region', { name: 'Sửa điểm tay' })).toBeNull();
+    expect(within(dlg).queryByRole('button', { name: 'Lưu điểm mới' })).toBeNull();
+    expect(calls.filter((c) => c.method === 'PATCH')).toEqual([]);
+  });
+
+  it("'Thôi' khi bỏ cờ: xoá lý do đã gõ và lỗi cũ", async () => {
+    const reason = 'Có 1 tin giống lệnh cho AI hoặc xin điểm — xem chứng cứ trước khi dùng điểm này.';
+    const flagged = { ...FULL_DETAIL, suspicious: true, suspicious_reason: reason, suspicious_cleared: null };
+    mockFetch((c) => {
+      if (c.method === 'PATCH') return json(409, { status: 409, code: 'CONFLICT', title: 'Cờ đã được bỏ trước đó' });
+      if (c.url.includes('/people/reviews/rev-1')) return json(200, flagged);
+      if (c.url.includes('/people/reviews')) return json(200, { items: [{ ...FULL_ITEM, suspicious: true, suspicious_reason: reason }], next_cursor: null, total: 1 } satisfies PeopleReviewPage);
+      return json(404);
+    });
+    const user = userEvent.setup();
+    renderScreen(<PeopleScreen />);
+    await user.click(await screen.findByRole('button', { name: 'Sửa điểm tay' }));
+    const dlg = await screen.findByRole('dialog');
+    await user.click(await within(dlg).findByRole('button', { name: /Bỏ cờ \(đã xem chứng cứ\)/ }));
+    await user.type(within(dlg).getByLabelText('Lý do bỏ cờ'), 'Thử bỏ cờ');
+    await user.click(within(dlg).getByRole('button', { name: 'Bỏ cờ' }));
+    expect(await within(dlg).findByText('Cờ đã được bỏ trước đó')).toBeInTheDocument();
+    await user.click(within(dlg).getByRole('button', { name: 'Thôi' }));
+    expect(within(dlg).queryByText('Cờ đã được bỏ trước đó')).toBeNull();
+    await user.click(within(dlg).getByRole('button', { name: /Bỏ cờ \(đã xem chứng cứ\)/ }));
+    expect(within(dlg).getByLabelText('Lý do bỏ cờ')).toHaveValue('');
+  });
+
+  it('câu mặc định của cờ trung tính (người xem không chỉ là Sếp)', () => {
+    expect(SUSPICIOUS_FALLBACK).not.toContain('Sếp');
+    expect(suspiciousLabel({ suspicious: true, suspicious_reason: null })?.title).toBe(SUSPICIOUS_FALLBACK);
+  });
+
   it('Owner (nhánh full): thấy điểm/tín hiệu/khuyến nghị, sửa điểm tay giữ lịch sử', async () => {
     const user = userEvent.setup();
     const overridden: PeopleReviewFullDetail = { ...FULL_DETAIL, id: 'rev-2', score: 70, overridden: true, overridden_by: { id: 'u-owner', name: 'Anh Cơ La (Ryan)' }, overridden_at: '2026-09-24T02:00:00Z', override_reason: 'Xem lại chứng cứ, khách chủ động im lặng.', supersedes_id: 'rev-1', history: [{ id: 'rev-2', score: 70, trend: 'down', created_at: '2026-09-24T02:00:00Z', overridden_by: { id: 'u-owner', name: 'Anh Cơ La (Ryan)' }, override_reason: 'Xem lại chứng cứ, khách chủ động im lặng.' }, FULL_DETAIL.history[0]] };
@@ -102,7 +221,7 @@ describe('Đánh giá con người — Q4 (docs/PLAN.md)', () => {
     expect(screen.getByText('54')).toBeInTheDocument();
     expect(screen.getByText(/Hai lần hứa mốc giao hàng/)).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Sửa điểm tay' }));
+    await user.click(await screen.findByRole('button', { name: 'Sửa điểm tay' }));
     expect(await screen.findByRole('dialog')).toBeInTheDocument();
     // Lịch sử đã có sẵn bản hệ thống.
     expect(within(screen.getByRole('dialog')).getByText('tự động (rules+model)')).toBeInTheDocument();

@@ -10,7 +10,7 @@ import { toast } from '../lib/toast';
 import { CardError, SkeletonLines } from '../screens/common';
 import { ScreenTitle } from '../screens/ScreenPage';
 import { DiagnosticsCard } from './DiagnosticsCard';
-import { GENH_COMMANDS, GENH_VERSION_LABEL, SERVER_VERSION_LABEL, diagnosticText, withVersions } from './helpModel';
+import { GENH_COMMANDS, GENH_VERSION_LABEL, SERVER_VERSION_LABEL, diagnosticText, pinLimitsFor, withVersions } from './helpModel';
 import { roleLabel } from '../screens/system/systemModel';
 
 const GEN_EXAMPLES = ['Hôm nay có gì gấp?', 'Khách nào hỏi giá hôm nay?', 'Sao lưu ở đâu?', 'Mời nhân viên mới thế nào?'];
@@ -31,6 +31,7 @@ export function HelpPage() {
   // v0.1.28 (UX N9): trang theo vai trò — lệnh genh chạy trên máy chủ chỉ dành cho Owner (người cài), Gen chỉ hiện
   // khi vai trò có Gen; vai trò khác thấy cách nhờ Owner (đặt lại mật khẩu, mở quyền).
   const isOwner = me.data?.role?.code === 'owner';
+  const pinLimits = pinLimitsFor(me.data);
 
   const copyDiagnostics = async () => {
     try {
@@ -130,6 +131,23 @@ export function HelpPage() {
             </ul>
           </Card>
         )}
+
+        {/* v0.1.45 (F-60): giới hạn của mã PIN — ai cũng thấy (mỗi người tự giữ mật khẩu của mình); lời lẽ theo vai trò. */}
+        <Card
+          title={
+            <h2 className="help-h2" style={{ font: 'inherit', margin: 0 }}>
+              {pinLimits.title}
+            </h2>
+          }
+          kicker={pinLimits.kicker}
+          data-testid="help-pin-limits"
+        >
+          <ul className="help-examples">
+            {pinLimits.points.map((t) => (
+              <li key={t}>{t}</li>
+            ))}
+          </ul>
+        </Card>
 
         {/* v0.1.44 (F-4b): gói chẩn đoán (genh doctor) — chỉ Owner (cần PIN, đọc nhật ký máy chủ). */}
         {isOwner ? <DiagnosticsCard /> : null}

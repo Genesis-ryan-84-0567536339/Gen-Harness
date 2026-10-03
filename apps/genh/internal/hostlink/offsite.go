@@ -14,8 +14,8 @@ import (
 //	                            ngay" / tắt; genh XOÁ trước khi làm
 //
 // Cấu hình thật (đường dẫn đích, allow_same_disk) KHÔNG nằm ở đây mà ở
-// <gốc cài đặt>/config/offsite.json (0600, chỉ genh đọc) — run/ 0777 nên mọi thứ
-// đọc từ run/ đều coi là KHÔNG tin cậy.
+// <gốc cài đặt>/config/offsite.json (0600, chỉ genh đọc) — api ghi được run/ nên
+// mọi thứ đọc từ run/ đều coi là KHÔNG tin cậy.
 
 // OffsiteStatusFile là tệp trạng thái bản sao ngoài máy trong hộp thư.
 const OffsiteStatusFile = "offsite-status.json"
@@ -82,7 +82,7 @@ func ReadOffsiteStatus(installDir string) (OffsiteStatus, error) {
 }
 
 // OffsiteRequest là nội dung run/request/offsite.json do api ghi. MỌI trường
-// đều không tin cậy (run/ 0777) — genh kiểm lại path bằng đúng bộ kiểm của CLI.
+// đều không tin cậy (api ghi được run/) — genh kiểm lại path bằng đúng bộ kiểm của CLI.
 type OffsiteRequest struct {
 	ID          string `json:"id,omitempty"`
 	Action      string `json:"action"` // set | run | disable
@@ -103,11 +103,11 @@ func HasOffsiteRequest(installDir string) bool {
 	return err == nil
 }
 
-// ReadOffsiteRequest đọc run/request/offsite.json AN TOÀN (readStateFile). Lỗi
-// nếu thiếu, không phải tệp thường, quá lớn hoặc JSON hỏng.
+// ReadOffsiteRequest đọc run/request/offsite.json AN TOÀN (readRequestFile). Lỗi
+// nếu thiếu, không phải tệp thường, quá lớn, sai chủ sở hữu hoặc JSON hỏng.
 func ReadOffsiteRequest(installDir string) (OffsiteRequest, error) {
 	var r OffsiteRequest
-	b, err := readStateFile(OffsiteRequestPath(installDir), false)
+	b, err := readRequestFile(installDir, OffsiteRequestPath(installDir))
 	if err != nil {
 		return r, err
 	}

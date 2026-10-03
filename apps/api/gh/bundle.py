@@ -85,7 +85,7 @@ from sqlalchemy import text
 
 from gh import crypto
 from gh import db as dbmod
-from gh.backup import database_name, libpq_url, recreate_database
+from gh.backup import database_name, libpq_conn, libpq_url, recreate_database, redact_secrets
 from gh.chassis.objects import LocalObjectStore, ObjectStore, get_object_store
 from gh.config import get_settings
 from gh.social import protocol as social_protocol
@@ -280,7 +280,8 @@ async def _export(out: str) -> None:
         tmp = Path(tmp_s)
         dump_path = tmp / "db.dump"
         log.info("pg_dump -Fc CSDL %s …", database_name(admin_url))
-        await _run(["pg_dump", "--format=custom", "--no-owner", "--file", str(dump_path), libpq_url(admin_url)])
+        src, pg_env = libpq_conn(admin_url)  # v0.1.45 (F-54): mật khẩu qua PGPASSWORD, không trên argv
+        await _run(["pg_dump", "--format=custom", "--no-owner", "--file", str(dump_path), src], env=pg_env)
         dump_sha256 = _sha256_file(dump_path)
 
         objects_dir = tmp / "objects"
@@ -430,7 +431,8 @@ async def _import(inp: str) -> None:
         # gh.backup.recreate_database (bảng phân vùng làm --clean lỗi hàng loạt).
         await asyncio.to_thread(recreate_database, libpq_url(admin_url))
         log.info("pg_restore vào CSDL %s …", database_name(admin_url))
-        await _run(["pg_restore", "--no-owner", "--dbname", libpq_url(admin_url), str(dump_path)])
+        dest, pg_env = libpq_conn(admin_url)
+        await _run(["pg_restore", "--no-owner", "--dbname", dest, str(dump_path)], env=pg_env)
 
         store = get_object_store()
         objects_dir = extract_dir / "objects"
@@ -577,12 +579,14 @@ async def _reencrypt_secrets(old_master_key: bytes) -> None:
 # ─── tiến trình con thật (giống gh/backup.py) ─────────────────────────────────────────────────────────────────
 
 async def _run(cmd: list[str], *, env: dict[str, str] | None = None) -> None:
+    """Mật khẩu (PGPASSWORD) đi qua `env`, không trên argv; thông báo lỗi đã che mật khẩu (v0.1.45, F-54)."""
     full_env = {**os.environ, **env} if env else None
     proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                                                 env=full_env)
     _out, err = await proc.communicate()
     if proc.returncode != 0:
-        raise RuntimeError(f"{cmd[0]} thất bại (mã {proc.returncode}): {err.decode(errors='replace')[-4000:]}")
+        tail = redact_secrets(err.decode(errors="replace"), (env or {}).values())[-4000:]
+        raise RuntimeError(f"{cmd[0]} thất bại (mã {proc.returncode}): {tail}")
 
 
 # ─── ngắt kết nối khác tới CSDL đích trước `pg_restore --clean` (HANDOFF-v0.1.2 mục 2) ─────────────────────────

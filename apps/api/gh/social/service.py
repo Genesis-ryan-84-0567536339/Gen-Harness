@@ -32,6 +32,7 @@ from gh.chassis import actionlog
 from gh.config import get_settings
 from gh.errors import ApiError, conflict, field_errors, not_found
 from gh.social import platforms, protocol
+from gh.suspicious import SUSPICIOUS
 
 log = logging.getLogger("gh.social")
 
@@ -54,10 +55,7 @@ EVENT = "social.update"
 realtime.register_event(EVENT, "system.manage")
 
 # Chữ trên trang thường gặp trong lừa đảo/tấn công prompt — vẫn chỉ là dữ liệu, chỉ gắn cờ để Gen/Owner để ý.
-SUSPICIOUS = re.compile(
-    r"(bỏ qua (mọi |các )?(chỉ dẫn|hướng dẫn|lệnh)|ignore (all |previous |the above )?instructions|system prompt|"
-    r"mã (otp|xác (minh|nhận))|\botp\b|chuyển (tiền|khoản)|mật khẩu|password|gửi (mã|tiền)|click (vào )?link)",
-    re.IGNORECASE)
+# v0.1.45: mẫu chuyển sang gh.suspicious (dùng chung với cờ "Đáng ngờ" của điểm nhân sự).
 CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f​-‏‪-‮⁦-⁩]")
 
 

@@ -10,7 +10,8 @@ from typing import Any, Literal
 
 import orjson
 from fastapi import APIRouter, Depends, Query, Request, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+from pydantic_core import PydanticCustomError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,6 +21,7 @@ from gh.auth import rbac, service
 from gh.auth.deps import require, require_owner, require_pin
 from gh.chassis import actionlog
 from gh.chassis.bus import BRIDGE_CONTROL
+from gh.chassis.mcp_client import McpBlockedNetwork, McpError, pin_endpoint
 from gh.data.common import CHANNEL_NAME, LISTENING_MODES, iso, org_settings
 from gh.data.ingest import sync_listen_sets, uptime_pct
 from gh.db import DB
@@ -35,7 +37,7 @@ from gh.shell.routes import publish_header
 log = logging.getLogger("gh.system")
 router = APIRouter(tags=["system"])
 READ = require("system.read")
-MANAGE = require("system.manage")
+MANAGE = require("system.manage", rbac.ALL)   # F-58: system.manage luôn cần phạm vi ALL (xem deps.ALL_ONLY)
 ROLES_MANAGE = require("roles.manage")
 AUDIT_READ = require("audit.read")
 DATA_MANAGE = require("data.manage")
@@ -332,6 +334,33 @@ async def provider_payloads(db: AsyncSession, redis: Any, org_id: uuid.UUID) -> 
     return out
 
 
+async def _check_provider_endpoint(endpoint: str | None, *, has_key: bool) -> None:
+    """v0.1.45 (F-49): kiểm địa chỉ nhà cung cấp AI lúc GHI cấu hình. Rỗng ⇒ dùng mặc định https của
+    gemini/deepseek. Phân giải tên một lần qua `mcp_client.pin_endpoint` (cho phép mạng công cộng) với CÙNG quy tắc
+    như máy chủ MCP / Gen-hub: có khoá + `http://` tới IP công cộng ⇒ 422 (khoá đi rõ trên Internet); `http://` trong
+    mạng nội bộ / cùng máy (Ollama, LM Studio, vLLM ở 192.168.x, 10.x, localhost) vẫn được. Vùng cấm (169.254.x
+    siêu dữ liệu đám mây, 0.0.0.0, dịch vụ nội bộ) ⇒ 422; không phân giải được lúc này ⇒ cho qua (kiểm lại lúc gọi)."""
+    if not endpoint or not endpoint.strip():
+        return
+    endpoint = endpoint.strip()
+    scheme = endpoint.split("://", 1)[0].lower() if "://" in endpoint else ""
+    if scheme not in ("http", "https"):
+        raise field_errors({"endpoint": "Địa chỉ phải bắt đầu bằng https:// (hoặc http:// với máy trong mạng nội bộ)"})
+    try:
+        await pin_endpoint(endpoint, True, has_token=has_key)
+    except McpBlockedNetwork as e:
+        if "không hợp lệ" in str(e):
+            raise field_errors({"endpoint": "Địa chỉ không hợp lệ — dạng https://<máy chủ>/v1 (hoặc http:// với máy "
+                                            "trong mạng nội bộ)"}) from e
+        if "https://" in str(e):
+            raise field_errors({"endpoint": "Có khoá API mà máy chủ ở mạng công cộng thì địa chỉ phải là https:// "
+                                            "(http:// chỉ dùng được với máy trong mạng nội bộ)"}) from e
+        raise field_errors({"endpoint": "Địa chỉ trỏ vào vùng mạng bị cấm (siêu dữ liệu đám mây 169.254.x, 0.0.0.0, "
+                                        "dịch vụ nội bộ)"}) from e
+    except McpError:
+        return
+
+
 async def _provider(db: AsyncSession, org_id: uuid.UUID, pid: uuid.UUID) -> Any:
     r = (await db.execute(text("SELECT * FROM agent.providers WHERE id = :i AND org_id = :o"),
                           {"i": pid, "o": org_id})).one_or_none()
@@ -357,8 +386,8 @@ async def create_provider(body: ProviderIn, request: Request, user: service.Curr
     """v0.1.35 (F-20): thêm / đổi tên nhà cung cấp AI (kể cả nhánh CLI) cần phiên PIN `ai.route_change` — kiểm SAU
     quyền (vai trò thiếu quyền nhận 403 trước 423). Phạm vi PIN đợt này chỉ gồm 4 route ghi chuỗi chuyển hướng:
     POST /providers, PATCH /providers/chain, PATCH /providers/{id}, POST /providers/{id}/keys. KHÔNG đòi PIN: GET,
-    DELETE nhà cung cấp/khoá (chỉ thu hẹp đường đi), /test, /diagnose, /models. Phần còn lại (setup bước 4–11 sau
-    Hoàn tất, cli_login, MCP, agents patch) làm ở v0.1.45."""
+    DELETE nhà cung cấp/khoá (chỉ thu hẹp đường đi), /test, /diagnose, /models.
+    v0.1.45 (F-49): endpoint nhà cung cấp (không phải CLI) được kiểm lúc GHI — xem `_check_provider_endpoint`."""
     if body.kind == "openai_compat" and not body.endpoint:
         raise field_errors({"endpoint": "Cần endpoint cho API tương thích OpenAI"})
     if body.kind not in CLI_KINDS and not body.keys:
@@ -368,6 +397,8 @@ async def create_provider(body: ProviderIn, request: Request, user: service.Curr
         if not body.endpoint.startswith("https://"):
             raise field_errors({"endpoint": "Địa chỉ Jev phải bắt đầu bằng https://"})
         body.models = body.models or [jev.DEFAULT_MODEL]
+    if body.kind not in CLI_KINDS:
+        await _check_provider_endpoint(body.endpoint, has_key=bool(body.keys))
     if body.kind in CLI_KINDS:
         pid = await climod.cli_provider_id(db, user.org_id, body.kind)
         await db.execute(text("UPDATE agent.providers SET name = :n WHERE id = :i"), {"n": body.name, "i": pid})
@@ -528,6 +559,7 @@ async def add_key(pid: uuid.UUID, body: KeyIn, request: Request, user: service.C
     p = await _provider(db, user.org_id, pid)
     if p.kind in CLI_KINDS:
         raise conflict("CLI_NO_KEYS", f"{climod.spec(p.kind).name} dùng phiên đăng nhập, không dùng khoá API")
+    await _check_provider_endpoint(p.endpoint, has_key=True)   # F-49: khoá chỉ gắn vào địa chỉ https hợp lệ
     await _add_key(db, pid, p.kind, body.secret)
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                            action="provider.key_added",
@@ -702,7 +734,17 @@ async def _profile_kind(db: AsyncSession, org_id: uuid.UUID, profile_id: uuid.UU
 
 
 class CodeIn(BaseModel):
-    code: str = Field(min_length=4, max_length=500)
+    code: str = Field(min_length=4, max_length=520)
+
+    @field_validator("code")
+    @classmethod
+    def _v_code(cls, v: str) -> str:
+        """v0.1.45 (F-56): bỏ khoảng trắng hai đầu (dán kèm xuống dòng) rồi khớp đúng `CLI_CODE_RE`."""
+        v = v.strip()
+        if not climod.CLI_CODE_RE.fullmatch(v):
+            raise PydanticCustomError("cli_code", "Mã đăng nhập chỉ gồm chữ, số và các ký hiệu . _ ~ # / + = - "
+                                                  "(không có khoảng trắng hay ký tự lạ)")
+        return v
 
 
 @router.get("/cli/profiles")
@@ -713,7 +755,10 @@ async def cli_profiles(kind: CliKind = "antigravity_cli", user: service.CurrentU
 
 @router.post("/cli/login", status_code=202)
 async def cli_login(request: Request, kind: CliKind = "antigravity_cli", user: service.CurrentUser = Depends(MANAGE),
+                    _pin: Any = Depends(require_pin("cli.switch_account")),
                     db: AsyncSession = DB) -> dict[str, Any]:
+    """Thêm tài khoản CLI. v0.1.45 (F-20): cần phiên PIN `cli.switch_account` — kiểm SAU quyền (403 trước 423),
+    trước khi ghi nhật ký/khởi động CLI. GET trạng thái, /code, /cancel của CÙNG phiên không đòi PIN lại."""
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                            action="cli.login_started", target_type="cli", detail={"kind": kind}, ip=user.ip)
     await db.commit()

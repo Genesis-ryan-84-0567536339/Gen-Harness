@@ -9,12 +9,13 @@ import { queryClient } from '../../lib/queryClient';
 import { toast } from '../../lib/toast';
 import { useNow } from '../../lib/useNow';
 import { errorText } from '../../lib/errorText';
-import { CardError, InlineError, SkeletonLines, StateChip } from '../common';
+import { CardError, InlineError, PinHint, SkeletonLines, StateChip } from '../common';
 import { ConnectionStatusPill } from '../connections/ConnectionStatusPill';
 import { cliConnStatus } from '../connections/connectionsModel';
 import {
   CLAUDE_CONSUMER_TERMS_URL,
   CLAUDE_TERMS_URL,
+  CLI_ADD_PIN_TEXT,
   CLI_LOGIN_TEXT,
   CLI_TEXT,
   cliAccountLabel,
@@ -166,6 +167,9 @@ export function CliCard({ canManage, showCredentials = true, kind = 'antigravity
   const list = profiles.data ?? [];
   const active = list.find((p) => p.active);
   const others = list.filter((p) => !p.active).length;
+  // Nút chính gọi login.start: "Đăng nhập lại" (phiên hết hạn) hoặc chưa có tài khoản nào — chỉ khi đó nhắc cần PIN
+  // ("Đổi tài khoản" mở hộp thoại tự nói cần PIN).
+  const loginIsMain = canManage && active?.state === 'expired' && !login.active;
   const chip = cliChip(active);
   const startLogin = () => {
     setSwitchOpen(false);
@@ -210,7 +214,7 @@ export function CliCard({ canManage, showCredentials = true, kind = 'antigravity
                     : txt.empty}
               </div>
             </div>
-            {canManage && active?.state === 'expired' && !login.active ? (
+            {loginIsMain ? (
               <Button variant="primary" className="btn-28" icon="ph ph-sign-in" onClick={() => login.start.mutate()} loading={login.start.isPending} data-main-action>
                 Đăng nhập lại
               </Button>
@@ -224,6 +228,11 @@ export function CliCard({ canManage, showCredentials = true, kind = 'antigravity
               </Button>
             ) : null}
           </div>
+          {loginIsMain || (canManage && list.length === 0 && !login.active) ? (
+            // v0.1.45 (F-20): bắt đầu đăng nhập (thêm tài khoản) cần phiên PIN `cli.switch_account` — hộp PIN tự mở khi gặp 423.
+            // Chỉ nhắc khi nút chính đang là nút đăng nhập; 'Đổi tài khoản' mở hộp thoại tự nói cần PIN.
+            <PinHint text={CLI_ADD_PIN_TEXT} title={CLI_ADD_PIN_TEXT} />
+          ) : null}
           </>
         )}
         <CliLoginPanel login={login} />
@@ -328,7 +337,7 @@ function ProfilesDialog({
       onClose={onClose}
       width={480}
       title={`Đổi tài khoản ${txt.account} cho AI`}
-      kicker="Đổi hoặc xoá tài khoản cần mã PIN"
+      kicker="Thêm, đổi hoặc xoá tài khoản cần mã PIN"
       actions={
         <>
           <Button variant="secondary" onClick={onClose}>

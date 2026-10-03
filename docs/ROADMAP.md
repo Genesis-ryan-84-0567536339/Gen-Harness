@@ -56,7 +56,7 @@ mẫu + đếm dòng và job bản hỏng cố ý (promote đòi xanh).
 v0.1.35: sửa lỗi đỏ trong ứng dụng (F-1, F-5, F-14, F-15, F-20 phần gấp, F-43) — giao việc / gán người / gán BOT dùng
 người và trợ lý thật (`/pickers/*`, CI cấm ID giả), Tài liệu không phải PDF/ảnh buộc tải xuống + CSP sandbox, Sổ tay theo
 quyền Kho, PIN cho nhà cung cấp AI / khoá / chuỗi ưu tiên, lỗi thân thiện có mã (không lộ SQL, tắt /docs production), e2e
-thật rút gọn 4 luồng trong CI. Còn: F-20 phần còn lại (v0.1.45), sinh type từ OpenAPI (hoãn).
+thật rút gọn 4 luồng trong CI. Còn: F-20 phần còn lại (✅ xong ở v0.1.45), sinh type từ OpenAPI (hoãn).
 v0.1.36: hệ thống tự báo khi hỏng (F-6 bước 1, F-3, F-4 bước 1, F-45, F-46, F-2 tạm) — chuông khử trùng lặp
 (`ops.health_alerts`) cho kênh rớt / model hết hạn / cập nhật lỗi / sao lưu quá 36 giờ / Bộ xử lý nền im / ổ đĩa sắp đầy,
 `GET /system/health` (không đụng `/ready`), dải "Cần Sếp xử lý" đầu Tổng quan + thẻ "Sức khoẻ hệ thống"; sao lưu timeout
@@ -84,7 +84,7 @@ token/mật khẩu/email đầy đủ/giá trị mã — mã đăng nhập chỉ
 (`HUB_TOKEN_REJECTED`, `MCP_NETWORK_BLOCKED`…). Mục "Mạng xã hội" trên thanh bên + thẻ Facebook ở Hệ thống › Kênh + Gen mở
 `/social`; một tên "Hướng dẫn thiết lập" (9 việc, thêm Facebook/Gen-hub, việc 10 trỏ `/system?tab=users`, xong theo dữ liệu
 thật). Còn: nghiệm thu thật với tài khoản của Boss (kết quả tự ghi ở `ops.boss_checks`), canary `--live` agy sau khi Boss
-đăng nhập, đối chiếu `code_shape` với regex F-56 (v0.1.45); Telegram trong hướng dẫn hoãn.
+đăng nhập, đối chiếu `code_shape` với regex F-56 (✅ xong ở v0.1.45); Telegram trong hướng dẫn hoãn.
 v0.1.40: dữ liệu an toàn (F-12, F-2, F-16) — **bản sao ngoài máy**: `genh offsite set|run|status|disable`, lịch tuần Chủ
 nhật (systemd/cron/launchd/schtasks) xuất gói mã hoá ra ổ USB/NAS Owner chọn, tự kiểm gói (`gh.bundle verify`), xoay vòng 4
 gói, đích chưa mount ⇒ GH-EB01 không ghi gì; khoá khôi phục riêng + "Bộ khôi phục" (in/QR), "Tải gói mang đi" (Owner + PIN),
@@ -121,6 +121,14 @@ Sếp ở **Kết nối › Telegram** (token mã hoá, `REENCRYPT_TARGETS`, mig
 qua hộp thư đi (không qua bridge); dòng 6 "Telegram" ở Việc Sếp cần làm; `X-Request-ID` ở header/problem+json/log + "Mã yêu
 cầu" cạnh mã ERR, `POST /client-errors`; **Gói chẩn đoán** ở Trợ giúp (genh tạo zip đã lọc bí mật). Còn: Sếp nhắn lại Gen
 qua Telegram (2 chiều) hoãn; F-28 Telegram làm kênh khách hoãn; watchdog ghi sự cố vào Kho hoãn.
+v0.1.45: khoá cấu hình nhạy cảm & vệ sinh bảo mật (F-20 phần còn lại, F-49, F-52, F-54, F-55, F-56, F-57, F-58, F-60) —
+PIN chỉ ở đúng đường hạ rào (đổi mức tự trị/điều cấm/giới hạn/phạm vi kênh của agent, tool MCP ghi → đọc, thêm tài khoản CLI,
+Hướng dẫn việc 9/10 sau Hoàn tất; cập nhật và sao lưu không hỏi PIN); `system.manage` luôn cần phạm vi ALL; MCP và nhà cung
+cấp AI ghim DNS, cấm link-local/0.0.0.0/tên dịch vụ compose, có token thì phải https; nhật ký MCP chỉ lưu dấu vết tham số
+(sha256/keys/bytes) và che kết quả; hộp thư `run/` 2770 nhóm 10001, genh bỏ qua symlink/tệp của uid lạ; mật khẩu
+pg_dump/pg_restore qua `PGPASSWORD`; WebSocket kiểm Origin (4403) + nạp lại phiên ≤ 60 giây (thu hồi ⇒ 4401); mã đăng nhập
+CLI theo regex (đã đối chiếu dạng mã thật của F-77); cờ "Đáng ngờ" cho điểm nhân sự (migration 0030) + đoạn "Mã PIN bảo vệ
+được gì" ở Trợ giúp. Đóng F-20 phần còn lại (từ v0.1.35) và việc đối chiếu `code_shape` với regex F-56 (từ v0.1.39).
 
 ## Đợt A — Gen v1 (thiết kế: docs/design/gen-v1.md)
 - ✅ A1 Khung chat phải + Gen trả lời/tóm tắt (chỉ đọc), lưu hội thoại, Nhật ký hành động — v0.1.21.

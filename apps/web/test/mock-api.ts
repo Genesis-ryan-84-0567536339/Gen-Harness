@@ -25,7 +25,7 @@ import { createMock as createP3Graph } from './mock-p3-graph';
 import { createMock as createP3Market } from './mock-p3-market';
 import { createMock as createP3People } from './mock-p3-people';
 import { createMock as createP4Agents } from './mock-p4-agents';
-import { USER_IDS } from './mock-ids';
+import { AGENT_IDS, USER_IDS } from './mock-ids';
 import { createMock as createP4Api } from './mock-p4-api';
 import { createMock as createP4Mcp } from './mock-p4-mcp';
 import { createMock as createSocial } from './mock-social';
@@ -124,6 +124,12 @@ export const MATRIX: Record<string, [string, string, string, string, string]> = 
   'system.manage': ['all', 'none', 'none', 'none', 'none'],
   'roles.manage': ['all', 'none', 'none', 'none', 'none'],
 };
+/** Bản gốc của MATRIX — `__mock/reset` khôi phục (ma trận sửa ở màn Quyền hạn / `__mock/perm` không rò sang test sau). */
+const MATRIX_DEFAULT: Record<string, [string, string, string, string, string]> = JSON.parse(JSON.stringify(MATRIX));
+function restoreMatrix(): void {
+  for (const k of Object.keys(MATRIX)) if (!(k in MATRIX_DEFAULT)) delete MATRIX[k];
+  for (const [k, v] of Object.entries(MATRIX_DEFAULT)) MATRIX[k] = [...v] as [string, string, string, string, string];
+}
 const SCREEN_PERMISSION: Record<string, string[]> = {
   overview: ['overview.read'], inbox: ['queue.read'], workbench: ['action.draft', 'action.approve'],
   directory: ['profile.read'], graph: ['profile.read'], profile: ['profile.read'], notebook: ['profile.read'],
@@ -596,6 +602,9 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     org: { name: 'Genesis Trading', timezone: 'Asia/Ho_Chi_Minh', currency: 'VND' },
     addressing: { self: 'Anh', bot_calls_me: 'Sếp' },
   };
+  // Agent của bước 8 — bước 9 đặt mức tự trị cho ĐÚNG agent này (như `_setup_agent` của API thật).
+  let setupAgent: { id: string; name: string; autonomy_level: number } | null =
+    opts.setup === 'fresh' ? null : { id: AGENT_IDS.tls, name: 'Trợ lý thương mại', autonomy_level: 4 };
   if (opts.startAtStep && opts.startAtStep > 1) {
     const n = Math.min(12, Math.max(2, opts.startAtStep));
     setup.finished = false;
@@ -855,6 +864,8 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     const sid = cookies.gh_session;
     const session = sid ? sessions.get(sid) : undefined;
     const user = session ? users.find((u) => u.id === session.userId) : undefined;
+    // v0.1.45 (F-20): Hướng dẫn bước 9/10 sau Hoàn tất cần phiên PIN (như API thật).
+    const setupNeedPin = () => !session?.pinUntil || session.pinUntil < Date.now();
     const login = (u: User) => {
       const id = randomUUID();
       const now = new Date().toISOString();
@@ -877,6 +888,7 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
       if (path === '/setup/rule-presets' && method === 'GET') return reply(200, phase2.rulePresets());
       if (path === '/setup/first-run' && method === 'GET') return reply(200, phase2.firstRunView());
       if (path === '/setup/hard-boundaries' && method === 'GET') return reply(200, MOCK_HARD_BOUNDARIES);
+      if (path === '/setup/steps/9' && method === 'GET') return reply(200, { agent: setupAgent });
       if (path === '/setup/follow-up' && method === 'GET') {
         // Như API thật: mọi bước tuỳ chọn 5–11; `done` = đã xong trong trình thiết lập (dữ liệu thật: mock bỏ qua).
         // v0.1.29: bước 4 cũng có ("Chưa có model") — xong theo dữ liệu thật: có nguồn dùng được đang có model.
@@ -959,17 +971,29 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
             }
             advance(8, 'done');
             const agent = { id: randomUUID(), name: String(body.name), try_reply: `Chào Sếp, tôi là ${String(body.name)}.`, try_error: null };
+            setupAgent = { id: agent.id, name: agent.name, autonomy_level: 4 };
             return reply(200, { ...stateView(), agent });
           }
           if (setup.steps[7].status !== 'done') return problem(res, 409, 'STEP_INCOMPLETE', 'Cần hoàn thành bước 8 trước');
           if (!body.ack_boundaries) return problem(res, 422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors: { ack_boundaries: 'Cần xác nhận đã đọc ranh giới' } });
+          // v0.1.45 (F-20): như API — sau Hoàn tất ĐỔI mức tự trị cần phiên PIN `policy.change` (đang thiết lập thì không);
+          // gửi lại đúng mức đang có / null (giữ nguyên) thì không hỏi PIN.
+          const cur = setupAgent?.autonomy_level ?? 4;
+          const level = typeof body.autonomy_level === 'number' ? body.autonomy_level : cur;
+          if (setup.finished && level !== cur && setupNeedPin()) return problem(res, 423, 'PIN_REQUIRED', 'Thao tác này cần nhập mã PIN', { detail: { operation: 'policy.change' } });
+          if (setupAgent) setupAgent.autonomy_level = level;
           advance(9, 'done');
-          return reply(200, { ...stateView(), hard_boundaries: MOCK_HARD_BOUNDARIES });
+          return reply(200, { ...stateView(), hard_boundaries: MOCK_HARD_BOUNDARIES, agent: setupAgent });
         }
         if (n === 10 || n === 11) {
           // Như `_owner_step` thật (khác `_owner_step_after` của bước 8–9): không đòi các bước trước phải xong.
           if (!user) return problem(res, 401, 'UNAUTHENTICATED', 'Chưa đăng nhập');
           if (n === 10) {
+            // v0.1.45 (F-20): sau Hoàn tất, mời người (danh sách khác rỗng) cần phiên PIN `user.manage`.
+            const invites = Array.isArray(body.invites) ? body.invites : [];
+            if (setup.finished && invites.length > 0 && setupNeedPin()) {
+              return problem(res, 423, 'PIN_REQUIRED', 'Thao tác này cần nhập mã PIN', { detail: { operation: 'user.manage' } });
+            }
             const r = phase3.system.step10(body, new Set(users.map((u) => u.email)));
             if (!r.ok) return problem(res, r.status, r.code, r.title, r.extra ?? {});
             for (const inv of r.value.invited) {
@@ -1278,6 +1302,8 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
  *   /api/v1/__mock/scan     {"type":"zalo"} simulates the phone scanning the QR
  *   /api/v1/__mock/simulate {"on":bool} toggles the background simulation
  *   /api/v1/__mock/bridge   {"online":bool} makes channel login answer 503 BRIDGE_OFFLINE
+ *   /api/v1/__mock/pin_expire {} ends every PIN session (v0.1.45 — kiểm lại hộp PIN của thao tác kế tiếp)
+ *   /api/v1/__mock/perm    {"role","permission","scope"} đặt một ô MATRIX (kể cả cột không sửa được ở Quyền hạn, vd system.manage)
  *   /api/v1/__mock/health  {"issues"?,"worker"?,"backup"?,"disk"?,"update"?,"autostart"?,"offsite"?} ghi đè `GET /system/health` (v0.1.36;
  *                           `issues` chỉ cần `kind` — nhãn/nút/đường dẫn mặc định theo kind; reset khôi phục khoẻ)
  *   /api/v1/__mock/p3/{cụm}/{hook}  body → `phase3[cụm].hooks[hook](body)`; trả JSON kết quả (404 nếu không có)
@@ -1339,8 +1365,18 @@ export function createMockApi(opts: MockOptions = {}) {
           for (const m of Object.values(current.phase3)) m.dispose();
           for (const ws of clients) ws.close(4401, 'reset');
           clients.clear();
+          restoreMatrix();
           current = createMockState({ ...opts, ...(body as MockOptions) }, broadcast);
           return done(res);
+        case 'perm': {
+          const i = ROLE_ORDER.indexOf(String(body.role) as RoleCode);
+          const row = MATRIX[String(body.permission)];
+          if (i < 0 || !row) return done(res, 404);
+          row[i] = String(body.scope);
+          // Danh mục màn của vai trò đó tính lại theo ma trận mới (như `hiddenScreens` lúc tạo người dùng).
+          for (const u of current.users) if (u.role.code === ROLE_ORDER[i]) u.hidden = hiddenScreens(ROLE_ORDER[i]);
+          return done(res);
+        }
         case 'emit':
           broadcast(String(body.type), body.data);
           return done(res);
@@ -1364,6 +1400,10 @@ export function createMockApi(opts: MockOptions = {}) {
           return done(res);
         case 'bridge':
           current.phase2.hooks.setBridge(Boolean(body.online));
+          return done(res);
+        case 'pin_expire':
+          // v0.1.45: cho mọi phiên PIN hết hạn (như hết 30 phút) — e2e kiểm lại hộp PIN của thao tác sau.
+          for (const s of current.sessions.values()) s.pinUntil = null;
           return done(res);
         default:
           return done(res, 404);

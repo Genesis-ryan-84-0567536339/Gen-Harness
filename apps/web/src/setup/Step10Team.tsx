@@ -1,6 +1,11 @@
 import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Button, EmptyState, Icon, SelectField, TextField } from '@gen-harness/ui';
+import { PinCancelledError } from '@gen-harness/contracts';
 import { api } from '../lib/api';
+import { errorText } from '../lib/errorText';
+import { qk } from '../lib/queries';
+import { PinHint } from '../screens/common';
 import { StepFrame } from './StepFrame';
 import { describeError, type StepProps } from './types';
 
@@ -29,8 +34,12 @@ interface InvitedRow {
   temp_password: string;
 }
 
+const PIN_TEXT = 'Sau Hoàn tất, mời thêm người (tạo tài khoản) cần mã PIN';
+
 /** Bước 10 — Mời đội ngũ (tuỳ chọn, PLAN 4.6). Danh sách rỗng vẫn lưu được ("Owner mời sau ở Quyền hạn"). */
 export function Step10Team({ meta, description, onBack, onSaved, formRef, onSkip, skipping, skipError }: StepProps) {
+  // v0.1.45 (F-20): mở lại từ trang Hướng dẫn SAU Hoàn tất → mời người cần phiên PIN `user.manage` (hộp PIN tự mở).
+  const finished = useQuery({ queryKey: qk.setupState, queryFn: ({ signal }) => api.setup.state(signal) }).data?.finished === true;
   const [rows, setRows] = useState<Row[]>([]);
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -60,7 +69,8 @@ export function Step10Team({ meta, description, onBack, onSaved, formRef, onSkip
         onSaved(state);
       }
     } catch (e) {
-      setFormError(describeError(e));
+      // v0.1.45: huỷ hộp PIN → câu chung 'Đã huỷ — thao tác cần mã PIN.' (errorText), lỗi khác như cũ.
+      setFormError(e instanceof PinCancelledError ? errorText(e) : describeError(e));
     } finally {
       setBusy(false);
     }
@@ -115,6 +125,7 @@ export function Step10Team({ meta, description, onBack, onSaved, formRef, onSkip
     >
       <div className="setup-section">
         <div className="setup-section__title">Thành viên được mời</div>
+        {finished ? <PinHint text={PIN_TEXT} title={PIN_TEXT} /> : null}
         {rows.length === 0 ? (
           <EmptyState icon="ph ph-users-three" title="Chưa mời ai" description="Bấm Thêm người để mời. Bỏ trống cũng được — mời sau ở Hướng dẫn thiết lập." />
         ) : (

@@ -1,15 +1,33 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import type { McpServer, McpServerCreateBody, McpTool, McpTransport } from '@gen-harness/contracts';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import type { McpServer, McpServerCreateBody, McpTool, McpToolAccess, McpTransport } from '@gen-harness/contracts';
 import { SCREEN_BY_KEY } from '@gen-harness/contracts';
 import { Button, Dialog, EmptyState, Icon, SelectField, Switch, TextField } from '@gen-harness/ui';
 import { useBindings } from '../api/queries';
+import { api } from '../../lib/api';
 import { errorText } from '../../lib/errorText';
 import { useCan } from '../../lib/permissions';
 import { toast } from '../../lib/toast';
 import { CardError, InlineError, Panel, ScreenHead, SkeletonLines, StateChip } from '../common';
-import { ACCESS_LABEL, N5, OK, OUTCOME_LABEL, TRANSPORT_LABEL, WARN, fmtLatency, healthLabel, healthTone, mcpErrorText, outcomeTone } from './mcpModel';
 import {
+  ACCESS_LABEL,
+  ACCESS_PIN_HINT,
+  N5,
+  OK,
+  OUTCOME_LABEL,
+  TRANSPORT_LABEL,
+  WARN,
+  accessChangeNeedsPin,
+  describeCallArgs,
+  fmtLatency,
+  healthLabel,
+  healthTone,
+  mcpErrorText,
+  outcomeTone,
+} from './mcpModel';
+import {
+  qkMcp,
   useCallTool,
   useCreateServer,
   useDeleteServer,
@@ -24,6 +42,7 @@ import {
 } from './queries';
 
 const TRANSPORTS: McpTransport[] = ['stdio', 'http+sse', 'streamable_http'];
+const ACCESS_KINDS: McpToolAccess[] = ['read', 'write'];
 
 export function McpScreen() {
   const meta = SCREEN_BY_KEY.mcp;
@@ -206,6 +225,13 @@ function ServerCard({ server: s, tools, canManage, onEdit, onTest }: { server: M
       {update.isError ? <InlineError>{errorText(update.error)}</InlineError> : null}
 
       {tools.length ? (
+        <>
+        {canManage && tools.some((t) => t.access === 'write') ? (
+          // Sửa review v0.1.45: lời nhắc PIN một lần cho cả bảng (không lặp dưới từng tool ghi).
+          <p id={`mcp-access-hint-${s.id}`} className="muted-note" style={{ padding: '6px 15px 0', fontSize: 11 }}>
+            <Icon name="ph ph-lock-simple" size={11} /> {ACCESS_PIN_HINT}
+          </p>
+        ) : null}
         <table className="mcp-tool-table">
           <thead>
             <tr>
@@ -218,10 +244,11 @@ function ServerCard({ server: s, tools, canManage, onEdit, onTest }: { server: M
           </thead>
           <tbody>
             {tools.map((t) => (
-              <ToolRow key={t.id} tool={t} canManage={canManage} onTest={() => onTest(t)} />
+              <ToolRow key={t.id} tool={t} canManage={canManage} hintId={`mcp-access-hint-${s.id}`} onTest={() => onTest(t)} />
             ))}
           </tbody>
         </table>
+        </>
       ) : (
         <p className="muted-note" style={{ padding: '10px 15px' }}>
           Chưa khám phá tool nào — bấm &quot;Khám phá tool&quot;.
@@ -253,13 +280,90 @@ function ServerCard({ server: s, tools, canManage, onEdit, onTest }: { server: M
   );
 }
 
-function ToolRow({ tool: t, canManage, onTest }: { tool: McpTool; canManage: boolean; onTest: () => void }) {
+/** v0.1.45 (F-20): đổi loại tool qua apiClient — ghi → đọc bị máy chủ đòi mã PIN (423 tự mở hộp PIN). */
+function useSetToolAccess() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, access }: { id: string; access: McpToolAccess }) => api.mcp.tools.setAccess(id, access),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: qkMcp.tools }),
+  });
+}
+
+function ToolRow({ tool: t, canManage, hintId, onTest }: { tool: McpTool; canManage: boolean; hintId: string; onTest: () => void }) {
   const expose = useExposeTool();
+  const setAccess = useSetToolAccess();
+  const needsPin = accessChangeNeedsPin(t.access, 'read');
+  // Ghi → đọc bỏ bước duyệt của tool: hỏi lại trước khi gửi (một cú chọn nhầm không lặng lẽ bỏ duyệt).
+  const [confirmRead, setConfirmRead] = useState(false);
+  const apply = (access: McpToolAccess) =>
+    setAccess.mutate(
+      { id: t.id, access },
+      {
+        onSuccess: () => {
+          setConfirmRead(false);
+          if (access === 'read') toast(`Đã chuyển ${t.name} sang ${ACCESS_LABEL.read} — tool chạy không qua duyệt.`);
+        },
+      },
+    );
+  // Giữ nguyên là lựa chọn có chủ ý — bỏ lỗi cũ (vd 'Đã huỷ — thao tác cần mã PIN.') khỏi ô.
+  const keepAccess = () => {
+    setConfirmRead(false);
+    setAccess.reset();
+  };
   return (
     <tr data-tool={t.name} data-exposed={t.is_exposed ? '' : undefined}>
       <td className="mcp-tool-table__name mono">{t.name}</td>
       <td>
-        <StateChip color={t.access === 'write' ? WARN : N5}>{ACCESS_LABEL[t.access]}</StateChip>
+        {canManage ? (
+          <>
+            <select
+              className="gh-input mcp-access-select"
+              aria-label={`Loại tool ${t.name}`}
+              aria-describedby={needsPin ? hintId : undefined}
+              title={needsPin ? ACCESS_PIN_HINT : undefined}
+              value={t.access}
+              disabled={setAccess.isPending}
+              onChange={(e) => {
+                const next = e.target.value as McpToolAccess;
+                if (accessChangeNeedsPin(t.access, next)) setConfirmRead(true);
+                else apply(next);
+              }}
+            >
+              {ACCESS_KINDS.map((a) => (
+                <option key={a} value={a}>
+                  {ACCESS_LABEL[a]}
+                  {accessChangeNeedsPin(t.access, a) ? ' (cần mã PIN)' : ''}
+                </option>
+              ))}
+            </select>
+            {setAccess.isError && !confirmRead ? <InlineError>{errorText(setAccess.error)}</InlineError> : null}
+            {confirmRead ? (
+              <Dialog
+                open
+                onClose={keepAccess}
+                width={460}
+                title={`Chuyển ${t.name} sang ${ACCESS_LABEL.read}?`}
+                actions={
+                  <>
+                    <Button variant="secondary" onClick={keepAccess}>
+                      Giữ nguyên
+                    </Button>
+                    <Button variant="primary" loading={setAccess.isPending} onClick={() => apply('read')}>
+                      Chuyển sang {ACCESS_LABEL.read}
+                    </Button>
+                  </>
+                }
+              >
+                <p className="muted-note">
+                  Tool đọc chạy KHÔNG qua bước duyệt. Chỉ chuyển khi chắc tool này không ghi/sửa/xoá dữ liệu ở hệ thống bên ngoài. Cần mã PIN.
+                </p>
+                {setAccess.isError ? <InlineError>{errorText(setAccess.error)}</InlineError> : null}
+              </Dialog>
+            ) : null}
+          </>
+        ) : (
+          <StateChip color={t.access === 'write' ? WARN : N5}>{ACCESS_LABEL[t.access]}</StateChip>
+        )}
       </td>
       <td>
         {canManage ? (
@@ -363,7 +467,7 @@ function CallLogPanel({ calls }: { calls: ReturnType<typeof useMcpCalls> }) {
                   </StateChip>
                 </td>
                 <td className="mono">{fmtLatency(c.latency_ms)}</td>
-                <td className="mcp-log__detail" title={c.result_summary}>
+                <td className="mcp-log__detail" title={`${c.result_summary}\nTham số: ${describeCallArgs(c.args)}`}>
                   {c.result_summary}
                 </td>
               </tr>

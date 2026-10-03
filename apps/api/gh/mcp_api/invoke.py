@@ -6,8 +6,14 @@ MCP thứ hai. Thứ tự kiểm không cài đặt nào tắt được:
 máy chủ đang bật → mở (`is_exposed`) → được cấp (`agent.mcp_grants`) → guard mạng công cộng → `access`:
 `write` luôn tạo `biz.action_drafts(kind='mcp_write')` rồi DỪNG (không gọi ra ngoài); `read` gọi ngay nếu mức tự trị
 hiệu lực > 1. Mọi nhánh — kể cả bị chặn — ghi một dòng `agent.mcp_calls` và một dòng Action Log.
+
+v0.1.45 (F-57): `agent.mcp_calls.args` và sự kiện WS `mcp.call` (đi tới mọi vai trò `system.read`) chỉ còn DẤU VẾT
+tham số (`args_digest`: sha256 + tên khoá cấp 1 + số byte) — không lưu nguyên văn; `result_summary` và lỗi đi qua
+`gh.chassis.masking.mask_for_model` (che số dài, email, khoá/token). Bản nháp `mcp_write` giữ tham số (người duyệt cần
+thấy) nhưng cũng qua lớp che.
 """
 
+import hashlib
 import time
 import uuid
 from collections.abc import Callable
@@ -21,6 +27,7 @@ from gh import crypto, realtime
 from gh.auth import service
 from gh.biz.core.drafts import create_draft, effective_level
 from gh.chassis import actionlog
+from gh.chassis.masking import mask_for_model
 from gh.chassis.mcp_client import McpBlockedNetwork, McpClient, McpError, McpTransportUnsupported
 from gh.data.common import iso
 from gh.errors import ApiError, conflict, not_found
@@ -79,18 +86,32 @@ async def set_health(db: AsyncSession, redis: Any, org_id: uuid.UUID, server_id:
                                org_id=org_id)
 
 
+DIGEST_MAX_KEYS = 20
+
+
+def args_digest(args: Any) -> dict[str, Any]:
+    """Dấu vết tham số thay nguyên văn (v0.1.45, F-57): `sha256` của JSON sắp khoá (đối chiếu được hai lần gọi cùng
+    tham số), `keys` = tên khoá cấp 1 (tối đa 20, khoá kiểu bí mật vẫn hiện TÊN — giá trị không bao giờ lưu),
+    `bytes` = độ dài JSON."""
+    raw = orjson.dumps(args, option=orjson.OPT_SORT_KEYS)
+    keys = sorted(str(k) for k in args)[:DIGEST_MAX_KEYS] if isinstance(args, dict) else []
+    return {"sha256": hashlib.sha256(raw).hexdigest(), "keys": keys, "bytes": len(raw)}
+
+
 async def log_call(db: AsyncSession, redis: Any, *, org_id: uuid.UUID, tool_id: uuid.UUID, agent_key: str,
                    args: dict[str, Any], outcome: str, result_summary: str, latency_ms: int,
                    draft_id: uuid.UUID | None = None) -> dict[str, Any]:
+    """Ghi `agent.mcp_calls` + phát WS `mcp.call`. `args` chỉ lưu DẤU VẾT (`args_digest`) — mọi nhánh."""
+    digest = args_digest(args)
     row = (await db.execute(text("""
         INSERT INTO agent.mcp_calls (org_id, tool_id, agent_key, args, result_summary, latency_ms, outcome,
                                      draft_id)
         VALUES (:o, :t, :a, CAST(:args AS jsonb), :rs, :lat, :out, :d)
         RETURNING id, at"""),
-        {"o": org_id, "t": tool_id, "a": agent_key, "args": orjson.dumps(args).decode(), "rs": result_summary,
+        {"o": org_id, "t": tool_id, "a": agent_key, "args": orjson.dumps(digest).decode(), "rs": result_summary,
          "lat": latency_ms, "out": outcome, "d": draft_id})).one()
     item = {"id": str(row.id), "at": iso(row.at), "tool_id": str(tool_id), "agent_key": agent_key,
-            "outcome": outcome, "result_summary": result_summary, "latency_ms": latency_ms,
+            "args": digest, "outcome": outcome, "result_summary": result_summary, "latency_ms": latency_ms,
             "draft_id": str(draft_id) if draft_id else None}
     if redis is not None:
         await realtime.publish(redis, "mcp.call", item, org_id=org_id)
@@ -119,17 +140,23 @@ def redact(message: str, token: str | None) -> str:
     return message.replace(token, "[đã che]") if token else message
 
 
-def _default_summary(result: Any) -> str:
-    return orjson.dumps(result).decode()[:500]
+def _default_summary(result: Any, token: str | None = None) -> str:
+    """`result_summary` mặc định: kết quả ĐÃ CHE (số dài, email, khoá/token, token máy chủ), cắt 500 ký tự."""
+    return orjson.dumps(mask_for_model(result, secrets=(token,) if token else ())).decode()[:500]
+
+
+def _mask_err(message: str, token: str | None) -> str:
+    return str(mask_for_model(redact(message, token), secrets=(token,) if token else ()))
 
 
 async def invoke_tool(db: AsyncSession, redis: Any, client: McpClient, *, org_id: uuid.UUID, tool: Any,
                       agent_key: str, args: dict[str, Any], actor: service.CurrentUser,
-                      summarize: Callable[[Any], str] = _default_summary) -> dict[str, Any]:
+                      summarize: Callable[[Any], str] | None = None) -> dict[str, Any]:
     """Gọi `tool` (dòng từ `get_tool`) nhân danh `agent_key`. Trả `{"outcome": "ok", "result", "call"}` hoặc
     `{"outcome": "held_for_approval"|"blocked", "draft", "call"}` (tool ghi); ném `ApiError` 403 khi bị chặn (đã
     COMMIT log trước khi ném — `DB` rollback cả phiên khi route ném lỗi) và `McpCallFailed` khi máy chủ lỗi.
-    `summarize` quyết định chuỗi lưu ở `mcp_calls.result_summary` (hub link truyền bản đã che)."""
+    `summarize` quyết định chuỗi lưu ở `mcp_calls.result_summary` (hub link truyền bản chỉ siêu dữ liệu); mặc định
+    là kết quả đã qua `mask_for_model`."""
     t = tool
     tool_id = t.id
     started = time.monotonic()
@@ -158,7 +185,7 @@ async def invoke_tool(db: AsyncSession, redis: Any, client: McpClient, *, org_id
     if t.access == "write":
         draft = await create_draft(db, org_id=org_id, kind="mcp_write", title=f"Gọi tool {t.name}",
                                    body_text=f"Gọi tool MCP ghi '{t.name}' trên máy chủ '{t.server_name}' với "
-                                   f"tham số {orjson.dumps(args).decode()}", action_key="mcp.write",
+                                   f"tham số {orjson.dumps(mask_for_model(args)).decode()}", action_key="mcp.write",
                                    agent_id=agent_uuid(agent_key),
                                    sources=[{"label": t.server_name, "ref": {"type": "mcp_server",
                                             "id": str(t.server_id)}}], redis=redis)
@@ -181,7 +208,7 @@ async def invoke_tool(db: AsyncSession, redis: Any, client: McpClient, *, org_id
     except McpTransportUnsupported as e:
         raise await blocked("MCP_TRANSPORT_UNSUPPORTED", str(e)) from e
     except McpError as e:
-        err = redact(str(e), token)
+        err = _mask_err(str(e), token)
         await set_health(db, redis, org_id, server.id, "error")
         await log_call(db, redis, org_id=org_id, tool_id=tool_id, agent_key=agent_key, args=args, outcome="error",
                        result_summary=err[:500], latency_ms=elapsed())
@@ -193,7 +220,8 @@ async def invoke_tool(db: AsyncSession, redis: Any, client: McpClient, *, org_id
         raise McpCallFailed(e, err) from e
     await set_health(db, redis, org_id, server.id, "healthy")
     item = await log_call(db, redis, org_id=org_id, tool_id=tool_id, agent_key=agent_key, args=args, outcome="ok",
-                          result_summary=summarize(result), latency_ms=elapsed())
+                          result_summary=(summarize(result) if summarize is not None
+                                          else _default_summary(result, token)), latency_ms=elapsed())
     await actionlog.record(db, org_id=org_id, actor_type="user", actor_id=actor.actor_id, action="mcp.call_ok",
                            target_type="mcp_tool", target_id=str(tool_id), target_label=f"{t.server_name} · {t.name}",
                            detail={"agent_key": agent_key}, ip=actor.ip)
@@ -218,7 +246,7 @@ async def discover(db: AsyncSession, redis: Any, client: McpClient, *, org_id: u
     except McpError as e:
         await set_health(db, redis, org_id, server.id, "error")
         await db.commit()
-        raise conflict("MCP_DISCOVER_FAILED", redact(str(e), token)) from e
+        raise conflict("MCP_DISCOVER_FAILED", _mask_err(str(e), token)) from e
     found = []
     for t in tools:
         row = (await db.execute(text("""
@@ -238,5 +266,5 @@ async def discover(db: AsyncSession, redis: Any, client: McpClient, *, org_id: u
     return found
 
 
-__all__ = ["MCP_AAD", "McpCallFailed", "agent_uuid", "auth_token", "discover", "encrypt_token", "get_server",
-           "get_tool", "grants_of", "invoke_tool", "log_call", "redact", "set_health"]
+__all__ = ["MCP_AAD", "McpCallFailed", "agent_uuid", "args_digest", "auth_token", "discover", "encrypt_token",
+           "get_server", "get_tool", "grants_of", "invoke_tool", "log_call", "redact", "set_health"]

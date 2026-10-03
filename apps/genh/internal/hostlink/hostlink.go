@@ -29,24 +29,37 @@
 //	  request/watchdog.json      ← api ghi (v0.1.44) khi Owner bấm "Gửi thử"
 //
 // Khoá loại trừ (lock.go) KHÔNG nằm trong run/ mà ở <gốc cài đặt>/genh.lock —
-// run/ 0777 và bind-mount vào api, ai ghi được run/ sẽ xoá/thay/giữ được khoá.
+// run/ bind-mount vào api, ai ghi được run/ sẽ xoá/thay/giữ được khoá.
 //
 // Bên máy chủ, một "watcher" (systemd path unit / crontab mỗi phút / launchd
 // QueueDirectories — xem internal/autoupdate) chạy `genh handle-requests`
 // khi thấy request/update.json hoặc request/restore.json — genh tự chọn việc
 // (cập nhật trước, khôi phục sau) (thư mục riêng để launchd
-// QueueDirectories chỉ chạy khi thư mục này có tệp). Container api chạy dưới uid
-// khác người dùng máy chủ nên thư mục run để 0777: trong đó chỉ có vài tệp
-// trạng thái nhỏ, không có bí mật — và vì ai cũng ghi được, genh không tin tệp
-// nào ở đây khi đọc (readStateFile: không theo symlink, giới hạn kích thước).
+// QueueDirectories chỉ chạy khi thư mục này có tệp).
+//
+// Quyền (v0.1.45, Linux): container api chạy uid/gid 10001 — khác người dùng máy
+// chủ. run/ và run/request là 2770, chủ = người chạy genh, nhóm 10001 (ảnh api
+// tạo nhóm gh gid 10001): chỉ genh và api ghi được, người dùng khác trên máy
+// không vào được (EnsureRunPerms, gọi sau `docker compose up`; không siết được
+// thì mở lại 0777 như cũ và genh.json ghi run_mode "open"). Tệp genh ghi 0644
+// (api đọc qua bit nhóm/khác). Vì api ghi được, genh vẫn không tin tệp nào ở
+// đây khi đọc (readStateFile: không theo symlink, 1 liên kết, giới hạn kích
+// thước) và tệp YÊU CẦU phải do api hoặc chính genh sở hữu (readRequestFile).
+// macOS/Windows: Docker Desktop tự ánh xạ quyền — giữ như cũ (run_mode "n/a").
 package hostlink
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
+
+	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/dockercli"
 )
 
 // EnvDir là biến môi trường genh đặt cho docker compose: đường dẫn hộp thư trên
@@ -79,19 +92,120 @@ func RequestPath(installDir string) string {
 	return filepath.Join(RequestDirPath(installDir), RequestFile)
 }
 
-// EnsureDir tạo thư mục run (0777 để container api ghi được yêu cầu) —
-// PHẢI chạy trước `docker compose up`, nếu không Docker tự tạo thư mục bind
-// mount với chủ root và api không ghi được.
+// EnsureDir tạo thư mục run + run/request nếu chưa có — PHẢI chạy trước
+// `docker compose up`, nếu không Docker tự tạo thư mục bind mount với chủ root.
+// Linux (v0.1.45): tạo 0770 và KHÔNG chmod lại thư mục đã có (không mở lại 0777
+// thư mục EnsureRunPerms đã siết 2770); macOS/Windows giữ 0777 như cũ.
 func EnsureDir(installDir string) error {
-	for _, d := range []string{Dir(installDir), RequestDirPath(installDir)} {
-		if err := os.MkdirAll(d, 0o777); err != nil {
-			return err
-		}
-		if err := os.Chmod(d, 0o777); err != nil {
-			return err
+	return ensureRunDirs([]string{Dir(installDir), RequestDirPath(installDir)})
+}
+
+// ─── Quyền hộp thư run/ (v0.1.45) ───────────────────────────────────────────
+
+// Giá trị run_mode trong genh.json.
+const (
+	RunModeRestricted = "restricted" // 2770 nhóm 10001: chỉ genh + api
+	RunModeOpen       = "open"       // 0777: siết không được (docker lỗi, ảnh api cũ)
+	RunModeNA         = "n/a"        // macOS/Windows: Docker Desktop tự ánh xạ quyền
+)
+
+// APIGID là gid nhóm gh trong ảnh api (deploy/images/api.Dockerfile).
+const APIGID = 10001
+
+// DefaultAPIUID là uid tiến trình api trong container (USER gh).
+const DefaultAPIUID = 10001
+
+// EnvAPIUID ghi đè uid tiến trình api nhìn từ máy chủ (Docker rootless).
+const EnvAPIUID = "GENH_API_UID"
+
+// HostlinkConfigFile: <gốc cài đặt>/config/hostlink.json (0600, KHÔNG ở run/) —
+// uid thật của api dò được (Docker rootless ánh xạ 10001 sang subuid).
+const HostlinkConfigFile = "hostlink.json"
+
+type hostlinkConfig struct {
+	APIUID uint32 `json:"api_uid"`
+}
+
+func hostlinkConfigPath(installDir string) string {
+	return filepath.Join(installDir, "config", HostlinkConfigFile)
+}
+
+// APIUID là uid chủ các tệp api ghi vào hộp thư, nhìn từ máy chủ: GENH_API_UID
+// nếu đặt, không thì giá trị đã dò lưu ở config/hostlink.json, mặc định 10001.
+func APIUID(installDir string) uint32 {
+	if v := strings.TrimSpace(os.Getenv(EnvAPIUID)); v != "" {
+		if n, err := strconv.ParseUint(v, 10, 32); err == nil {
+			return uint32(n)
 		}
 	}
-	return nil
+	if b, err := readStateFile(hostlinkConfigPath(installDir), true); err == nil {
+		var c hostlinkConfig
+		if json.Unmarshal(b, &c) == nil && c.APIUID != 0 {
+			return c.APIUID
+		}
+	}
+	return DefaultAPIUID
+}
+
+// WriteAPIUID lưu uid thật của api vào config/hostlink.json (0600).
+func WriteAPIUID(installDir string, uid uint32) error {
+	path := hostlinkConfigPath(installDir)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(hostlinkConfig{APIUID: uid}, "", "  ")
+	if err != nil {
+		return err
+	}
+	return writeFileAtomicMode(path, append(b, '\n'), 0o600)
+}
+
+// RunPermSpec là đầu vào EnsureRunPerms.
+type RunPermSpec struct {
+	InstallDir string
+	// Image là ảnh api (compose "image:"); rỗng → hỏi docker container api đang
+	// chạy (PsArgs rồi `docker inspect`).
+	Image string
+	// PsArgs: tham số `docker` liệt kê ID container api (vd compose -f X ps -q api).
+	PsArgs []string
+	Env    []string // biến môi trường thêm cho lệnh docker (compose cần mật khẩu)
+	Dir    string   // thư mục làm việc lệnh docker
+	Runner dockercli.Runner
+	// Cho test: GOOS ("" = runtime.GOOS), Getuid (nil = os.Getuid), Chown (nil = os.Chown).
+	GOOS   string
+	Getuid func() int
+	Chown  func(name string, uid, gid int) error
+}
+
+func dockerCmd(args []string, s RunPermSpec) dockercli.Cmd {
+	return dockercli.Cmd{Name: "docker", Args: args, Env: s.Env, Dir: s.Dir}
+}
+
+// resolveAPIImage: ảnh compose khai báo, không có thì ảnh của container api đang chạy.
+func resolveAPIImage(ctx context.Context, s RunPermSpec) (string, error) {
+	if s.Image != "" {
+		return s.Image, nil
+	}
+	if len(s.PsArgs) == 0 {
+		return "", errors.New("không xác định được ảnh api")
+	}
+	out, err := s.Runner.Output(ctx, dockerCmd(s.PsArgs, s))
+	if err != nil {
+		return "", fmt.Errorf("tìm container api: %w", err)
+	}
+	id := strings.TrimSpace(strings.SplitN(strings.TrimSpace(string(out)), "\n", 2)[0])
+	if id == "" {
+		return "", errors.New("container api chưa chạy")
+	}
+	img, err := s.Runner.Output(ctx, dockerCmd([]string{"inspect", "--format", "{{.Image}}", id}, s))
+	if err != nil {
+		return "", fmt.Errorf("đọc ảnh container api: %w", err)
+	}
+	ref := strings.TrimSpace(string(img))
+	if ref == "" {
+		return "", errors.New("không đọc được ảnh container api")
+	}
+	return ref, nil
 }
 
 // Info là nội dung genh.json.
@@ -106,8 +220,11 @@ type Info struct {
 	// tắt — ghi lúc cài/update và khi `genh auto-update enable|disable`. nil
 	// (không có khoá) = không rõ (genh cũ / không đọc được) ⇒ Console không
 	// hứa "Tự cài đêm …".
-	AutoUpdateEnabled *bool  `json:"auto_update_enabled,omitempty"`
-	WrittenAt         string `json:"written_at"`
+	AutoUpdateEnabled *bool `json:"auto_update_enabled,omitempty"`
+	// RunMode (v0.1.45): quyền hộp thư run/ — "restricted" (2770 nhóm 10001),
+	// "open" (0777, siết không được) hoặc "n/a" (macOS/Windows). Rỗng = chưa rõ.
+	RunMode   string `json:"run_mode,omitempty"`
+	WrittenAt string `json:"written_at"`
 }
 
 // Status là nội dung update-status.json.
@@ -137,11 +254,15 @@ func writeJSON(path string, v any) error {
 }
 
 // writeFileAtomic ghi data ra path qua tệp tạm TÊN NGẪU NHIÊN (os.CreateTemp —
-// O_EXCL, không đi theo symlink) rồi rename. Thư mục run/ để 0777 và được
-// bind-mount vào container api: tên tạm cố định (<tệp>.tmp) cho phép ai ghi
-// được run/ cài sẵn symlink để genh (có thể chạy bằng root) ghi đè tệp ngoài.
+// O_EXCL, không đi theo symlink) rồi rename, quyền 0644. Thư mục run/ được
+// bind-mount vào container api (ghi được): tên tạm cố định (<tệp>.tmp) cho phép
+// api cài sẵn symlink để genh (có thể chạy bằng root) ghi đè tệp ngoài.
 // rename thay chính đường dẫn đích (kể cả khi đích là symlink) chứ không đi theo.
 func writeFileAtomic(path string, data []byte) error {
+	return writeFileAtomicMode(path, data, 0o644)
+}
+
+func writeFileAtomicMode(path string, data []byte, mode os.FileMode) error {
 	f, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
 	if err != nil {
 		return err
@@ -157,8 +278,8 @@ func writeFileAtomic(path string, data []byte) error {
 		_ = f.Close()
 		return err
 	}
-	// CreateTemp tạo 0600 — api (uid khác) phải đọc được tệp trạng thái.
-	if err := f.Chmod(0o644); err != nil {
+	// CreateTemp tạo 0600 — api (uid khác) phải đọc được tệp trạng thái (0644).
+	if err := f.Chmod(mode); err != nil {
 		_ = f.Close()
 		return err
 	}
@@ -179,6 +300,9 @@ func WriteInfo(installDir, version, updater string, autoUpdate *bool) error {
 		return err
 	}
 	info := Info{Version: version, Updater: updater, AutoUpdateEnabled: autoUpdate, WrittenAt: now()}
+	if old, err := ReadInfo(installDir); err == nil {
+		info.RunMode = old.RunMode // giữ kết quả siết quyền run/ lần gần nhất
+	}
 	if updater != "" {
 		info.Requests = Requests
 	}
@@ -201,25 +325,75 @@ func SetAutoUpdate(installDir, version string, enabled bool) error {
 	return writeJSON(filepath.Join(Dir(installDir), InfoFile), info)
 }
 
-// ReadInfo đọc genh.json (lỗi nếu chưa có).
+// SetRunMode ghi run_mode (quyền hộp thư run/) vào genh.json, giữ nguyên các
+// trường khác; chưa có genh.json (hoặc hỏng) thì ghi mới chỉ với run_mode.
+func SetRunMode(installDir, mode string) error {
+	if err := EnsureDir(installDir); err != nil {
+		return err
+	}
+	info, err := ReadInfo(installDir)
+	if err != nil {
+		info = Info{}
+	}
+	info.RunMode = mode
+	info.WrittenAt = now()
+	return writeJSON(filepath.Join(Dir(installDir), InfoFile), info)
+}
+
+// ReadInfo đọc genh.json (lỗi nếu chưa có) — AN TOÀN (readStateFile).
 func ReadInfo(installDir string) (Info, error) {
 	var i Info
-	b, err := os.ReadFile(filepath.Join(Dir(installDir), InfoFile))
+	b, err := readStateFile(filepath.Join(Dir(installDir), InfoFile), false)
 	if err != nil {
 		return i, err
 	}
 	return i, json.Unmarshal(b, &i)
 }
 
-// HasRequest báo Console có đang yêu cầu cập nhật không.
+// BadUpdateRequestMessage là thông điệp update-status "failed" khi request/
+// update.json là tệp lạ (symlink, nhiều liên kết, quá lớn, sai chủ sở hữu).
+const BadUpdateRequestMessage = "Yêu cầu cập nhật không hợp lệ (tệp lạ trong hộp thư)"
+
+// checkUpdateRequest: present = có gì ở request/update.json (Lstat — symlink cũng
+// tính); valid = tệp thường, 1 liên kết, nhỏ, do api hoặc genh sở hữu.
+func checkUpdateRequest(installDir string) (present, valid bool) {
+	fi, err := os.Lstat(RequestPath(installDir))
+	if err != nil {
+		return false, false
+	}
+	return true, requestInfoOK(installDir, fi)
+}
+
+// rejectUpdateRequest xoá tệp yêu cầu lạ (Remove không theo symlink) và báo
+// update-status "failed" — yêu cầu bị BỎ QUA.
+func rejectUpdateRequest(installDir string) {
+	_ = os.Remove(RequestPath(installDir))
+	_ = Finish(installDir, "failed", "", BadUpdateRequestMessage)
+}
+
+// HasRequest báo Console có đang yêu cầu cập nhật không. Tệp lạ (v0.1.45) bị
+// xoá, ghi update-status failed và coi như KHÔNG có yêu cầu.
 func HasRequest(installDir string) bool {
-	_, err := os.Stat(RequestPath(installDir))
-	return err == nil
+	present, valid := checkUpdateRequest(installDir)
+	if present && !valid {
+		rejectUpdateRequest(installDir)
+		return false
+	}
+	return present
 }
 
 // ConsumeRequest xoá tệp yêu cầu (gọi khi bắt đầu cập nhật) — trả true nếu
-// trước đó có yêu cầu. Xoá TRƯỚC khi chạy để watcher không kích lặp lại.
+// trước đó có yêu cầu hợp lệ. Xoá TRƯỚC khi chạy để watcher không kích lặp lại.
+// Tệp lạ: xoá, ghi update-status failed, trả false (bỏ qua yêu cầu).
 func ConsumeRequest(installDir string) bool {
+	present, valid := checkUpdateRequest(installDir)
+	if !present {
+		return false
+	}
+	if !valid {
+		rejectUpdateRequest(installDir)
+		return false
+	}
 	err := os.Remove(RequestPath(installDir))
 	return err == nil || !errors.Is(err, os.ErrNotExist)
 }
@@ -248,7 +422,7 @@ func Finish(installDir, state, to, message string) error {
 
 // SnapshotStatus chụp update-status.json hiện có (ok=false nếu chưa có, hoặc
 // tệp không an toàn/hỏng) — để RestoreStatusSnapshot trả hộp thư về như cũ.
-// KHÔNG chép nguyên byte: run/ 0777 (container api ghi được) nên tệp có thể là
+// KHÔNG chép nguyên byte: run/ container api ghi được nên tệp có thể là
 // symlink/hard link tới bí mật của người chạy genh hoặc /dev/zero — chỉ đọc tệp
 // thường nhỏ (readStateFile), parse thành Status rồi ghi lại đúng các trường
 // đó (cùng định dạng writeJSON — tệp genh tự ghi thì trùng từng byte).
@@ -320,22 +494,27 @@ type RestoreStatus struct {
 	FinishedAt string `json:"finished_at,omitempty"`
 }
 
-// HasRestoreRequest báo Console có đang yêu cầu khôi phục không.
+// HasRestoreRequest báo Console có đang yêu cầu khôi phục không (Lstat —
+// symlink cũng tính để genh dọn nó đi).
 func HasRestoreRequest(installDir string) bool {
-	_, err := os.Stat(RestoreRequestPath(installDir))
+	_, err := os.Lstat(RestoreRequestPath(installDir))
 	return err == nil
 }
 
-// ConsumeRestoreRequest đọc rồi XOÁ yêu cầu khôi phục (xoá trước khi chạy để
-// watcher không kích lặp). Tệp hỏng vẫn bị xoá, trả lỗi.
+// ConsumeRestoreRequest đọc AN TOÀN (readRequestFile — không theo symlink, đúng
+// chủ sở hữu) rồi XOÁ yêu cầu khôi phục (xoá trước khi chạy để watcher không
+// kích lặp). Tệp hỏng/lạ vẫn bị xoá, trả lỗi.
 func ConsumeRestoreRequest(installDir string) (RestoreRequest, error) {
 	var r RestoreRequest
 	path := RestoreRequestPath(installDir)
-	b, err := os.ReadFile(path)
-	if err != nil {
+	b, err := readRequestFile(installDir, path)
+	if err != nil && errors.Is(err, os.ErrNotExist) {
 		return r, err
 	}
 	_ = os.Remove(path)
+	if err != nil {
+		return r, err
+	}
 	if err := json.Unmarshal(b, &r); err != nil {
 		return r, err
 	}
@@ -366,7 +545,7 @@ func FinishRestore(installDir, state, safetyKey, message string) error {
 // ReadRestoreStatus đọc restore-status.json.
 func ReadRestoreStatus(installDir string) (RestoreStatus, error) {
 	var s RestoreStatus
-	b, err := os.ReadFile(filepath.Join(Dir(installDir), RestoreStatusFile))
+	b, err := readStateFile(filepath.Join(Dir(installDir), RestoreStatusFile), false)
 	if err != nil {
 		return s, err
 	}

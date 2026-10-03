@@ -28,6 +28,22 @@ export interface PeopleReviewFull {
   overridden_at: string | null;
   override_reason: string | null;
   supersedes_id: string | null;
+  /** v0.1.45 (F-60): tin nhân viên gửi giống lệnh cho AI / xin điểm → cờ 'Đáng ngờ' ĐANG hiệu lực (chỉ cảnh báo,
+   *  điểm không đổi). Owner đã bỏ cờ → false (xem `suspicious_cleared`). */
+  suspicious: boolean;
+  /** Lý do ngắn lúc gắn cờ (không chứa nguyên tin) — null khi chưa từng gắn cờ; giữ lại cả khi đã bỏ cờ. */
+  suspicious_reason: string | null;
+  /** Ai bỏ cờ, lúc nào, vì sao — null khi chưa bỏ. Optional để tương thích máy chủ cũ. */
+  suspicious_cleared?: PeopleReviewSuspiciousCleared | null;
+}
+export interface PeopleReviewSuspiciousCleared {
+  by: UserRef | null;
+  at: string;
+  reason: string;
+}
+/** PATCH /people/reviews/{id}/suspicious — bỏ cờ 'Đáng ngờ' sau khi đã xem chứng cứ (cần mã PIN, ghi Nhật ký). */
+export interface PeopleReviewSuspiciousClearBody {
+  cleared_reason: string;
 }
 export interface PeopleReviewHistoryItem {
   id: string;
@@ -210,6 +226,8 @@ export function peopleEndpoints(r: ApiClient['request']) {
       list: (q: PeopleReviewQuery = {}, signal?: AbortSignal) => r<PeopleReviewPage>('/people/reviews', { query: q as Q, signal }),
       get: (id: string, signal?: AbortSignal) => r<PeopleReviewDetail>(`/people/reviews/${enc(id)}`, { signal }),
       update: (id: string, body: PeopleReviewPatchBody) => r<PeopleReviewFullDetail>(`/people/reviews/${enc(id)}`, { method: 'PATCH', body }),
+      clearSuspicious: (id: string, body: PeopleReviewSuspiciousClearBody) =>
+        r<PeopleReviewFullDetail>(`/people/reviews/${enc(id)}/suspicious`, { method: 'PATCH', body }),
       disputes: {
         create: (reviewId: string, body: DisputeCreateBody) =>
           r<PeopleReviewDisputeItem>(`/people/reviews/${enc(reviewId)}/disputes`, { method: 'POST', body }),

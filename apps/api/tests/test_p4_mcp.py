@@ -206,7 +206,7 @@ async def test_read_tool_blocked_when_autonomy_too_low(owner_api, app, db) -> No
 
 async def test_public_network_blocked_by_default(owner_api, app, db) -> None:  # type: ignore[no-untyped-def]
     api: Api = owner_api
-    s = await _create_server(api, endpoint="http://8.8.8.8/rpc", allow_public_network=False)
+    s = await _create_server(api, endpoint="https://8.8.8.8/rpc", allow_public_network=False)  # token ⇒ https
     app.state.mcp_transport = _mock_transport()
     r = await api.send("POST", f"/mcp/servers/{s['id']}/discover", {})
     assert r.status_code == 409 and r.json()["code"] == "MCP_NETWORK_BLOCKED"
@@ -216,7 +216,7 @@ async def test_public_network_blocked_by_default(owner_api, app, db) -> None:  #
 
 async def test_owner_can_allow_public_network_per_server(owner_api, app) -> None:  # type: ignore[no-untyped-def]
     api: Api = owner_api
-    s = await _create_server(api, endpoint="http://8.8.8.8/rpc", allow_public_network=False)
+    s = await _create_server(api, endpoint="https://8.8.8.8/rpc", allow_public_network=False)  # token ⇒ https
     r = await api.send("PATCH", f"/mcp/servers/{s['id']}", {"allow_public_network": True})
     assert r.status_code == 200 and r.json()["allow_public_network"] is True
     out = await _discover(api, app, s["id"])   # không còn bị chặn

@@ -19,7 +19,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
-import json
 import logging
 import os
 import re
@@ -40,18 +39,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.types import Receive, Scope, Send
 
 from gh import health
-from gh.auth import service
+from gh.auth import rbac, service
 from gh.auth.deps import require, require_owner, require_pin
 from gh.chassis import actionlog
 from gh.config import get_settings, offsite_key
 from gh.db import DB
 from gh.errors import ApiError, conflict, field_errors
+from gh.hostlink_io import write_request
 from gh.system_api import update as upd
 
 log = logging.getLogger(__name__)
 router = APIRouter(tags=["system"])
 READ = require("system.read")
-MANAGE = require("system.manage")
+MANAGE = require("system.manage", rbac.ALL)
 
 STATUS_FILE = "offsite-status.json"
 REQUEST_FILE = "offsite.json"
@@ -279,10 +279,7 @@ def _guard(d: Path, *, action: str, path: str | None = None) -> None:
 
 
 def _write_request(d: Path, req: dict[str, Any]) -> None:
-    target = d / "request" / REQUEST_FILE
-    tmp = target.with_suffix(".tmp")
-    tmp.write_text(json.dumps(req, ensure_ascii=False), encoding="utf-8")
-    tmp.replace(target)
+    write_request(d / "request", REQUEST_FILE, req)
 
 
 async def _request(db: AsyncSession, user: service.CurrentUser, action: str, log_action: str,

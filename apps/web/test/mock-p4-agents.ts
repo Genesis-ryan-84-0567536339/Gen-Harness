@@ -132,6 +132,28 @@ function seedDecisions(agents: AgentIdentity[]): DecisionRow[] {
   ];
 }
 
+const normForbidden = (v: unknown): string[] =>
+  (Array.isArray(v) ? (v as unknown[]) : []).map((x) => String(x).trim()).filter(Boolean);
+const sameJson = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+
+/** v0.1.45 (F-20): gương `gh.agents_api.routes._barrier_changed` — gửi lại đúng giá trị cũ thì không coi là đổi. */
+function barrierChanged(target: AgentIdentity, b: Record<string, unknown>): boolean {
+  if (typeof b.autonomy_level === 'number' && b.autonomy_level !== target.autonomy_level) return true;
+  if (Array.isArray(b.forbidden) && !sameJson(normForbidden(b.forbidden), normForbidden(target.forbidden))) return true;
+  if (b.limits && typeof b.limits === 'object') {
+    const cur = { ...target.limits };
+    const next = { ...target.limits, ...(b.limits as Record<string, number>) };
+    if (Object.keys(next).some((k) => next[k] !== cur[k])) return true;
+  }
+  if (Array.isArray(b.channel_scopes)) {
+    const key = (s: { channel_id: string; group_id?: string | null }) => `${s.channel_id}|${s.group_id ?? ''}`;
+    const want = new Set((b.channel_scopes as Array<{ channel_id: string; group_id?: string | null }>).map(key));
+    const have = new Set(target.channel_scopes.map(key));
+    if (want.size !== have.size || [...want].some((k) => !have.has(k))) return true;
+  }
+  return false;
+}
+
 export function createMock(opts: P4Options) {
   let agents: AgentIdentity[] = opts.fresh ? [] : seedAgents();
   const decisions: DecisionRow[] = opts.fresh ? [] : seedDecisions(agents);
@@ -222,6 +244,8 @@ export function createMock(opts: P4Options) {
       if (!has(ctx, 'system.manage')) return problem(403, 'FORBIDDEN', 'Vai trò không có quyền này');
       if (!target) return problem(404, 'NOT_FOUND', 'Agent không tồn tại');
       const b = body as Record<string, unknown>;
+      // v0.1.45 (F-20): như API — PIN `policy.change` chỉ khi rào chắn (mức tự trị/điều cấm/giới hạn/phạm vi kênh) đổi giá trị.
+      if (barrierChanged(target, b) && !pin(ctx, 'policy.change')) return true;
       if (typeof b.name === 'string' && b.name.trim()) target.name = b.name.trim();
       if (typeof b.role_desc === 'string' && b.role_desc.trim()) target.role_desc = b.role_desc.trim();
       if (typeof b.voice === 'string' && b.voice.trim()) target.voice = b.voice.trim();

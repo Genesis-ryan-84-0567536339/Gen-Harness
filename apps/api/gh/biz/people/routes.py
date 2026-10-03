@@ -64,12 +64,16 @@ _REVIEW_SELECT_BASE = """
 SELECT DISTINCT ON (r.person_id, r.period_start, r.period_end)
     r.id, r.person_id, r.period_start, r.period_end, r.score, r.trend, r.signal, r.recommendation, r.evidence,
     r.visibility, r.created_at, r.overridden_by, r.overridden_at, r.override_reason, r.supersedes_id,
+    r.suspicious, r.suspicious_reason, r.suspicious_cleared_by, r.suspicious_cleared_at, r.suspicious_cleared_reason,
+    cb.display_name AS cb_name, cbr.code AS cb_role,
     p.id AS p_id, p.code AS p_code, p.display_name AS p_name, p.person_type AS p_type,
     p.organization_name AS p_org, ob.display_name AS ob_name, obr.code AS ob_role
 FROM biz.people_reviews r
 JOIN core.persons p ON p.id = r.person_id
 LEFT JOIN core.users ob ON ob.id = r.overridden_by
-""" + psvc.USER_ROLE_JOIN.format(alias="ob", out="obr") + "\n"
+""" + psvc.USER_ROLE_JOIN.format(alias="ob", out="obr") + """
+LEFT JOIN core.users cb ON cb.id = r.suspicious_cleared_by
+""" + psvc.USER_ROLE_JOIN.format(alias="cb", out="cbr") + "\n"
 
 _DISPUTE_SELECT = """
 SELECT d.id, d.review_id, d.raised_by, d.body, d.status, d.resolution, d.resolved_by, d.resolved_at, d.created_at,
@@ -94,7 +98,14 @@ def _review_item(r: Any) -> dict[str, Any]:
             "created_at": iso(r.created_at), "overridden": r.overridden_by is not None,
             "overridden_by": psvc.user_ref(r.overridden_by, r.ob_name, r.ob_role),
             "overridden_at": iso(r.overridden_at), "override_reason": r.override_reason,
-            "supersedes_id": str(r.supersedes_id) if r.supersedes_id else None}
+            "supersedes_id": str(r.supersedes_id) if r.supersedes_id else None,
+            # v0.1.45 (F-60): cờ 'Đáng ngờ' — chỉ cảnh báo, không đổi điểm. `suspicious` là cờ ĐANG hiệu lực (đã bỏ
+            # cờ → false); `suspicious_cleared` cho biết ai bỏ cờ, lúc nào, vì sao (lý do quét gốc vẫn giữ).
+            "suspicious": bool(r.suspicious) and r.suspicious_cleared_at is None,
+            "suspicious_reason": r.suspicious_reason,
+            "suspicious_cleared": None if r.suspicious_cleared_at is None else {
+                "by": psvc.user_ref(r.suspicious_cleared_by, r.cb_name, r.cb_role),
+                "at": iso(r.suspicious_cleared_at), "reason": r.suspicious_cleared_reason}}
 
 
 def _dispute_item(r: Any) -> dict[str, Any]:
@@ -290,19 +301,54 @@ async def edit_review_score(review_id: uuid.UUID, body: ReviewEditIn,
     new_id = (await db.execute(text("""
         INSERT INTO biz.people_reviews (org_id, person_id, period_start, period_end, score, trend, signal,
                                         recommendation, evidence, visibility, supersedes_id, overridden_by,
-                                        overridden_at, override_reason)
-        VALUES (:o, :p, :ps, :pe, :sc, :tr, :sig, :rec, CAST(:ev AS jsonb), :vis, :sup, :by, now(), :reason)
+                                        overridden_at, override_reason, suspicious, suspicious_reason,
+                                        suspicious_cleared_by, suspicious_cleared_at, suspicious_cleared_reason)
+        VALUES (:o, :p, :ps, :pe, :sc, :tr, :sig, :rec, CAST(:ev AS jsonb), :vis, :sup, :by, now(), :reason,
+                :sus, :sus_r, :cl_by, :cl_at, :cl_r)
         RETURNING id"""),
         {"o": user.org_id, "p": old.person_id, "ps": old.period_start, "pe": old.period_end, "sc": body.score,
          "tr": body.trend or old.trend, "sig": body.signal or old.signal,
          "rec": body.recommendation or old.recommendation, "ev": orjson.dumps(body.evidence).decode(),
-         "vis": old.visibility, "sup": review_id, "by": user.id, "reason": body.reason})).scalar_one()
+         "vis": old.visibility, "sup": review_id, "by": user.id, "reason": body.reason,
+         # Sửa tay không xoá cờ 'Đáng ngờ' của dòng bị thay (F-60) — bỏ cờ là thao tác riêng có lý do; đã bỏ thì
+         # bản sửa tay mang theo dấu "đã bỏ cờ".
+         "sus": bool(old.suspicious), "sus_r": old.suspicious_reason, "cl_by": old.suspicious_cleared_by,
+         "cl_at": old.suspicious_cleared_at, "cl_r": old.suspicious_cleared_reason})).scalar_one()
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                            action="people_review.score_edited", target_type="people_review", target_id=str(new_id),
                            target_label=f"{old.p_name} · {old.period_start}–{old.period_end}", result="ok",
                            detail={"from_score": float(old.score), "to_score": body.score, "reason": body.reason,
                                   "previous_review_id": str(review_id)}, ip=user.ip)
     return await get_review(new_id, user, db)
+
+
+class SuspiciousClearIn(BaseModel):
+    cleared_reason: str = Field(min_length=3, max_length=1000)
+
+
+@router.patch("/people/reviews/{review_id}/suspicious")
+async def clear_review_suspicious(review_id: uuid.UUID, body: SuspiciousClearIn,
+                                  user: service.CurrentUser = Depends(require("people_review.write")),
+                                  _pin: service.CurrentUser = Depends(require_pin(PIN_OP)),
+                                  db: AsyncSession = DB) -> dict[str, Any]:
+    """Bỏ cờ 'Đáng ngờ' sau khi đã xem chứng cứ (F-60) — bắt buộc có lý do, ghi Nhật ký; giữ lý do quét gốc và ghi
+    ai bỏ cờ. Không đổi điểm. Job chạy lại không gắn lại cờ đã bỏ."""
+    reason = body.cleared_reason.strip()
+    if len(reason) < 3:
+        raise field_errors({"cleared_reason": "Ghi rõ lý do bỏ cờ (đã xem chứng cứ gì)"})
+    sc = await scope_for(db, user, "people_review.write")
+    row = await _review_or_404(db, sc, user.org_id, review_id)
+    if not row.suspicious or row.suspicious_cleared_at is not None:
+        raise ApiError(409, "NOT_SUSPICIOUS", "Đánh giá này không còn cờ 'Đáng ngờ' để bỏ")
+    await db.execute(text("""UPDATE biz.people_reviews SET suspicious_cleared_by = :u, suspicious_cleared_at = now(),
+                                    suspicious_cleared_reason = :r WHERE id = :i AND org_id = :o"""),
+                     {"u": user.id, "r": reason, "i": review_id, "o": user.org_id})
+    await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
+                           action="people_review.suspicious_cleared", target_type="people_review",
+                           target_id=str(review_id),
+                           target_label=f"{row.p_name} · {row.period_start}–{row.period_end}", result="ok",
+                           detail={"reason": reason, "flag_reason": row.suspicious_reason}, ip=user.ip)
+    return await get_review(review_id, user, db)
 
 
 class DisputeIn(BaseModel):

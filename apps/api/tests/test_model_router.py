@@ -9,6 +9,7 @@ from gh import crypto
 from gh.db import sessionmaker
 from gh.providers.clients import Message
 from gh.providers.router import KEY_AAD, ModelRouter, ModelUnavailable, breaker_key, cooldown_key
+from tests.conftest import FAKE_PUBLIC_IP
 from tests.phase2 import org_id
 
 MSGS = [Message("user", "xin chào")]
@@ -36,8 +37,11 @@ def transport(behaviour):  # type: ignore[no-untyped-def]
 
     def handler(req: httpx.Request) -> httpx.Response:
         key = req.headers["authorization"].removeprefix("Bearer ")
-        seen.append((req.url.host, key))
-        status, body = behaviour(req.url.host, key)
+        # v0.1.45 (F-49): nhà cung cấp gọi qua IP đã ghim — tên máy gốc nằm ở header Host.
+        host = req.headers["host"].split(":")[0]
+        assert req.url.host == FAKE_PUBLIC_IP, req.url
+        seen.append((host, key))
+        status, body = behaviour(host, key)
         return httpx.Response(status, json=body)
     t = httpx.MockTransport(handler)
     t.seen = seen  # type: ignore[attr-defined]

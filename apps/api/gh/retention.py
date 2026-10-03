@@ -177,6 +177,51 @@ async def purge_browser_results(db: AsyncSession, deadline: float) -> int:
           LIMIT :lim)""", {"d": BROWSER_RESULT_DAYS}, deadline)
 
 
+MCP_ARGS_DIGEST = "agent.mcp_calls.args"
+# Đã đổi hết dòng cũ trong một lượt trọn (không chạm hạn thời gian) ⇒ bỏ qua phần này tới khi cờ hết hạn — tránh mỗi
+# đêm quét lại cả agent.mcp_calls (điều kiện jsonb không có chỉ mục). TTL 7 ngày: quay về bản cũ (ghi nguyên văn) rồi
+# nâng lại thì vẫn được đổi trong vòng một tuần.
+MCP_ARGS_DONE_KEY = "gh:retention:mcp_args_digested"
+MCP_ARGS_DONE_TTL = 7 * 86400
+
+
+async def digest_mcp_call_args(db: AsyncSession, deadline: float) -> int:
+    """v0.1.45 (F-57): dòng `agent.mcp_calls` cũ (trước v0.1.45) lưu NGUYÊN VĂN tham số tool → đổi sang dấu vết
+    {sha256, keys, bytes} như `gh.mcp_api.invoke.args_digest` (sha256 tính trên `args::text` của Postgres). Idempotent:
+    dòng đã đúng dạng dấu vết (đúng 3 khoá sha256/keys/bytes, `keys` là mảng) bị bỏ qua — chạy lại không đổi gì; tham
+    số tool thật tình cờ có khoá `sha256` vẫn được đổi. Không cần migration (bảng phân vùng, chạy theo lô)."""
+    return await _batched(db, """
+        UPDATE agent.mcp_calls SET args = jsonb_build_object(
+            'sha256', encode(sha256(convert_to(args::text, 'UTF8')), 'hex'),
+            'keys', (SELECT coalesce(jsonb_agg(k ORDER BY k), '[]'::jsonb)
+                     FROM (SELECT k FROM jsonb_object_keys(args) k ORDER BY k LIMIT 20) ks),
+            'bytes', length(args::text))
+        WHERE (id, at) IN (
+          SELECT id, at FROM agent.mcp_calls
+          WHERE jsonb_typeof(args) = 'object' AND NOT (
+            args ?& array['sha256', 'keys', 'bytes'] AND jsonb_typeof(args->'keys') = 'array'
+            AND (SELECT count(*) FROM jsonb_object_keys(args)) = 3)
+          LIMIT :lim)""", {}, deadline)
+
+
+async def digest_mcp_call_args_once(db: AsyncSession, deadline: float, redis: Any = None) -> int:
+    """`digest_mcp_call_args` có cờ Redis "đã xong": cờ còn ⇒ 0 (không quét); một lượt chạy trọn trước hạn thời gian
+    ⇒ đặt cờ. Không có Redis / Redis lỗi ⇒ vẫn chạy như cũ."""
+    if redis is not None:
+        try:
+            if await redis.get(MCP_ARGS_DONE_KEY):
+                return 0
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Không đọc được %s: %s", MCP_ARGS_DONE_KEY, exc)
+    n = await digest_mcp_call_args(db, deadline)
+    if redis is not None and time.monotonic() < deadline:
+        try:
+            await redis.set(MCP_ARGS_DONE_KEY, "1", ex=MCP_ARGS_DONE_TTL)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Không ghi được %s: %s", MCP_ARGS_DONE_KEY, exc)
+    return n
+
+
 async def purge_orphan_attachments(db: AsyncSession, keep_days: int | None, deadline: float,
                                    store: Any = None) -> int:
     """Tệp đính kèm có sự kiện thô đã bị partman xoá theo tháng (cũ hơn hạn, sự kiện không còn) ⇒ xoá dòng + object
@@ -357,6 +402,10 @@ async def retention_sweep(ctx: dict[str, Any]) -> dict[str, Any]:
     await part("raw.attachments", "batch", in_session(lambda db: purge_orphan_attachments(db, raw_keep, deadline)))
     await part("agent.gen_conversations", "batch", in_session(purge_gen))
     await part("core.notifications", "batch", in_session(purge_notifications))
+    # Đổi dòng nhật ký MCP cũ chạy SAU các phần xoá quá hạn — lần đầu sau nâng cấp (bảng lớn) không ăn hết thời gian
+    # của chúng.
+    await part(MCP_ARGS_DIGEST, "batch",
+               in_session(lambda db: digest_mcp_call_args_once(db, deadline, ctx.get("redis"))))
     try:  # hạn lưu đặt trước v0.1.40 chưa xác nhận ⇒ không xoá, chỉ nhắc Owner
         async with sm() as db:
             await notify_unconfirmed(db, ctx.get("redis"))
@@ -375,5 +424,6 @@ async def retention_sweep(ctx: dict[str, Any]) -> dict[str, Any]:
 
 
 __all__ = ["BATCH", "CONFIRM_KIND", "DATASETS", "ENFORCED", "FIXED", "LAST_KEY", "PARTITIONED", "effective_keep_days",
-           "clear_partman_retention", "drop_expired_partitions", "ensure_leakproof", "notify_unconfirmed",
-           "partman_keeps", "read_last", "retention_sweep", "unconfirmed_orgs"]
+           "clear_partman_retention", "digest_mcp_call_args", "digest_mcp_call_args_once", "drop_expired_partitions",
+           "ensure_leakproof", "notify_unconfirmed", "partman_keeps", "read_last", "retention_sweep",
+           "unconfirmed_orgs"]

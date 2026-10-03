@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { AgentCloneBody, AgentCreateBody, AgentPatchBody } from '@gen-harness/contracts';
 import { api } from '../../lib/api';
+import { qk } from '../../lib/queries';
 
 export const qkAgents = {
   list: ['agents', 'list'] as const,
@@ -21,6 +22,8 @@ export const useAgentDecisions = (agentId?: string, decision?: string, limit = 8
 
 function invalidateAgents(qc: ReturnType<typeof useQueryClient>) {
   void qc.invalidateQueries({ queryKey: qkAgents.list });
+  // Bước 9 (Hướng dẫn) điền sẵn mức tự trị của agent thiết lập — sửa/tạo agent ở đây thì đọc lại.
+  void qc.invalidateQueries({ queryKey: qk.setupStep9 });
 }
 
 export const useCreateAgent = () => {

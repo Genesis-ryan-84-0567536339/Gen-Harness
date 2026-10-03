@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { loginAsOwner, resetMock } from './support';
+import { OWNER, loginAsOwner, resetMock } from './support';
 
 /**
  * v0.1.31 — Boss 01/10: bước 4 "Bộ não AI" không thấy model / nhóm model nào để chọn; chưa có Claude Code CLI.
@@ -34,6 +34,12 @@ test.describe('v0.1.31 — model CLI theo nhóm + Claude Code CLI', () => {
     await expect(section).toContainText('Claude Code CLI · gói Claude (tuỳ chọn)');
     await expect(section.getByTestId('claude-risk')).toContainText('Sếp tự quyết rủi ro');
     await section.getByRole('button', { name: 'Đăng nhập Claude' }).click();
+    // v0.1.45 (F-20): thêm tài khoản CLI cần mã PIN (`cli.switch_account`).
+    const pin = page.getByRole('dialog', { name: 'Mã PIN xác nhận thao tác' });
+    await expect(pin).toBeVisible();
+    await page.getByLabel('Mã PIN — chữ số 1/6').click();
+    await page.keyboard.type(OWNER.pin);
+    await expect(pin).toBeHidden();
     await expect(section.getByRole('link', { name: /Mở trang đăng nhập Claude/ })).toHaveAttribute('href', /^https:\/\/claude\.com\/cai\/oauth\/authorize/);
     await section.getByLabel('Mã xác thực').fill('abcd#efgh');
     await section.getByRole('button', { name: 'Xác nhận' }).click();

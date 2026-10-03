@@ -43,6 +43,7 @@ import asyncio
 import contextlib
 import logging
 import os
+import re
 import tempfile
 import uuid
 from collections.abc import Iterable
@@ -50,7 +51,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
-from urllib.parse import SplitResult, urlsplit, urlunsplit
+from urllib.parse import SplitResult, parse_qsl, quote, unquote, urlencode, urlsplit, urlunsplit
 
 import orjson
 import psycopg
@@ -115,6 +116,47 @@ def libpq_url(database_url: str, *, database: str | None = None) -> str:
     if database is not None:
         parts = parts._replace(path=f"/{database}")
     return urlunsplit(parts)
+
+
+def libpq_conn(database_url: str, *, database: str | None = None) -> tuple[str, dict[str, str]]:
+    """v0.1.45 (F-54): (URL libpq KHÔNG có mật khẩu, biến môi trường {"PGPASSWORD": …}) cho `pg_dump`/`pg_restore`.
+
+    Mật khẩu superuser không được nằm trên argv (ai trên máy/trong container cũng đọc được qua `ps`/`/proc/*/cmdline`)
+    ⇒ bỏ khỏi netloc (giữ user/host/port/db và query) và cả tham số `?password=` nếu có, chuyển sang PGPASSWORD (đã
+    unquote, vd `%40` → `@`). Không có mật khẩu ⇒ env rỗng."""
+    parts: SplitResult = urlsplit(libpq_url(database_url, database=database))
+    password: str | None = None
+    netloc = parts.netloc
+    if "@" in netloc:
+        userinfo, hostport = netloc.rsplit("@", 1)
+        user, sep, raw_pw = userinfo.partition(":")
+        if sep:
+            password = unquote(raw_pw)
+        netloc = f"{user}@{hostport}" if user else hostport
+    query = parts.query
+    if query:
+        pairs = parse_qsl(query, keep_blank_values=True)
+        kept = [(k, v) for k, v in pairs if k != "password"]
+        if len(kept) != len(pairs):
+            password = password if password is not None else next(v for k, v in pairs if k == "password")
+            query = urlencode(kept, quote_via=quote)  # khoảng trắng → %20 (libpq không giải '+')
+    env = {"PGPASSWORD": password} if password else {}
+    return urlunsplit(parts._replace(netloc=netloc, query=query)), env
+
+
+_URL_PASSWORD = re.compile(r"(?P<pre>[a-z][a-z0-9+.-]*://[^:/@\s]*:)[^@\s]+@", re.IGNORECASE)
+
+
+def redact_secrets(message: str, secrets: Iterable[str] = ()) -> str:
+    """Che mật khẩu trong thông báo lỗi pg_* trước khi ném/log: mọi giá trị trong `secrets` (cả dạng URL-encode) và
+    phần mật khẩu của mọi URL `scheme://user:mật-khẩu@…` ⇒ `***`."""
+    out = message
+    for s in sorted({x for x in secrets if x}, key=len, reverse=True):
+        out = out.replace(s, "***")
+        enc = quote(s, safe="")
+        if enc != s:
+            out = out.replace(enc, "***")
+    return _URL_PASSWORD.sub(lambda m: m.group("pre") + "***@", out)
 
 
 def database_name(database_url: str) -> str:
@@ -229,10 +271,15 @@ async def list_backups(*, store: ObjectStore | None = None) -> list[BackupEntry]
 
 # ─── chạy tiến trình con thật ───────────────────────────────────────────────────────────────────────────────
 
-async def _run(cmd: list[str]) -> None:
+async def _run(cmd: list[str], *, env_extra: dict[str, str] | None = None) -> None:
     """Chạy `pg_dump`/`pg_restore`. v0.1.36 (F-3): job bị huỷ (quá giờ arq, worker tắt) ⇒ giết tiến trình con rồi mới
-    ném lại `CancelledError` — không để pg_dump/pg_restore mồ côi chạy tiếp, giữ khoá CSDL/ghi đĩa không ai đợi."""
-    proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    ném lại `CancelledError` — không để pg_dump/pg_restore mồ côi chạy tiếp, giữ khoá CSDL/ghi đĩa không ai đợi.
+
+    v0.1.45 (F-54): mật khẩu đi qua `env_extra` (PGPASSWORD — xem `libpq_conn`), KHÔNG trên argv; thông báo lỗi đã
+    che mật khẩu trước khi ném."""
+    env = {**os.environ, **env_extra} if env_extra else None
+    proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                                                env=env)
     try:
         _out, err = await proc.communicate()
     except asyncio.CancelledError:
@@ -242,7 +289,8 @@ async def _run(cmd: list[str]) -> None:
             await asyncio.wait_for(proc.wait(), 5)
         raise
     if proc.returncode != 0:
-        raise RuntimeError(f"{cmd[0]} thất bại (mã {proc.returncode}): {err.decode(errors='replace')[-4000:]}")
+        tail = redact_secrets(err.decode(errors="replace"), (env_extra or {}).values())[-4000:]
+        raise RuntimeError(f"{cmd[0]} thất bại (mã {proc.returncode}): {tail}")
 
 
 # ─── backup / prune / restore ──────────────────────────────────────────────────────────────────────────────
@@ -256,13 +304,13 @@ async def run_backup(*, database_url: str | None = None, store: ObjectStore | No
     # pg_dump cần đọc (vd. large object, một số catalog) — dump/restore luôn qua vai trò quản trị.
     database_url = database_url or get_settings().effective_admin_database_url
     store = store or get_object_store()
-    src = libpq_url(database_url)
+    src, pg_env = libpq_conn(database_url)
     db_name = database_name(database_url)
     taken_at = datetime.now(UTC)
 
     with tempfile.TemporaryDirectory(prefix="gh-backup-") as tmp:
         dump_path = Path(tmp) / "dump.pgcustom"
-        await _run(["pg_dump", "--format=custom", "--no-owner", "--file", str(dump_path), src])
+        await _run(["pg_dump", "--format=custom", "--no-owner", "--file", str(dump_path), src], env_extra=pg_env)
         raw = dump_path.read_bytes()
 
     bkey = _backup_key()
@@ -319,13 +367,15 @@ async def restore_backup(key: str, *, database_url: str | None = None, target_da
     entry = next((e for e in await _read_manifest(store) if e.key == key), None)
     dkey = _backup_key() if (entry is not None and entry.key_id == "backup") else None
     raw = crypto.decrypt(enc, associated=BACKUP_AAD, key=dkey)
+    # recreate_database chạy psycopg TRONG tiến trình ⇒ dùng URL đầy đủ; pg_restore (tiến trình con) ⇒ PGPASSWORD.
     dest = libpq_url(database_url, database=target_database) if target_database else libpq_url(database_url)
+    dest_nopw, pg_env = libpq_conn(database_url, database=target_database)
 
     with tempfile.TemporaryDirectory(prefix="gh-restore-") as tmp:
         dump_path = Path(tmp) / "dump.pgcustom"
         dump_path.write_bytes(raw)
         await asyncio.to_thread(recreate_database, dest)
-        await _run(["pg_restore", "--no-owner", "--dbname", dest, str(dump_path)])
+        await _run(["pg_restore", "--no-owner", "--dbname", dest_nopw, str(dump_path)], env_extra=pg_env)
     log.info("Đã khôi phục %s vào %s", key, target_database or database_name(database_url))
 
 

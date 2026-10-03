@@ -1,5 +1,5 @@
 /** Presentation helpers dùng chung cho 2 màn của cụm Con người & Chất lượng. */
-import type { CareScenarioStatus, ReviewBoard, Trend } from '@gen-harness/contracts';
+import type { CareScenarioStatus, PeopleReviewFull, ReviewBoard, Trend } from '@gen-harness/contracts';
 // F-38 (v0.1.43): định nghĩa duy nhất ở lib/format.ts — re-export để các màn không phải đổi import.
 export { initialsOf, fmtVnd } from '../../lib/format';
 
@@ -52,3 +52,19 @@ export const ISSUE_KIND_LABEL: Record<string, string> = {
  */
 export const STAFF_HOWTO =
   'Một người thành nhân viên khi có loại "staff": tạo quy tắc ở Nâng cao › Tầng dữ liệu › Quy tắc sàng lọc với kết quả "person_type = staff" cho tin của nhân viên.';
+
+/**
+ * v0.1.45 (F-60): nhãn cờ 'Đáng ngờ' của một dòng điểm — null khi không gắn cờ. `title` là lý do ngắn từ máy chủ
+ * (không chứa nguyên tin); thiếu lý do thì dùng câu mặc định.
+ */
+export const SUSPICIOUS_FALLBACK =
+  'Có tin giống lệnh cho AI hoặc xin điểm — xem chứng cứ trước khi dùng điểm này.';
+export function suspiciousLabel(item: Pick<PeopleReviewFull, 'suspicious' | 'suspicious_reason'>): { text: string; title: string } | null {
+  if (!item.suspicious) return null;
+  return { text: 'Đáng ngờ', title: withStop(item.suspicious_reason?.trim() || SUSPICIOUS_FALLBACK) };
+}
+
+/** Lý do từ máy chủ cũ có thể thiếu dấu chấm cuối — thêm vào để câu ghép phía sau không dính liền. */
+export function withStop(s: string): string {
+  return /[.!?…]$/.test(s) ? s : `${s}.`;
+}

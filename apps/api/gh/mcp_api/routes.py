@@ -3,11 +3,14 @@
 Khoá cứng #4 (ARCHITECTURE §7.4): tool ghi (`access='write'`) luôn qua `biz.action_drafts` trước khi thực thi
 thật (tái dùng `gh.biz.core.drafts.create_draft`, KHÔNG viết lại luồng duyệt); agent chỉ gọi được tool đã được
 Owner mở (`is_exposed=true`, cần PIN `mcp.expose`) VÀ được cấp (`agent.mcp_grants`) — gọi tool chưa mở/chưa cấp
-luôn bị chặn và ghi vào `agent.mcp_calls`, không có cài đặt nào tắt được kiểm tra này.
+luôn bị chặn và ghi vào `agent.mcp_calls`, không có cài đặt nào tắt được kiểm tra này. v0.1.45 (F-20): đổi tool
+ghi → đọc cũng cần PIN `mcp.expose` (tool đọc chạy KHÔNG qua duyệt — đổi loại = bỏ qua khoá cứng #4).
 
 Guard mạng: `agent.mcp_servers.allow_public_network` (mặc định `false` theo cột DB) — Owner bật được TỪNG máy
 chủ (không phải một trong 8 khoá cứng liệt kê ở §7.4, nên không dùng `ops.policy_boundaries`); mọi lời gọi
-mạng thật (khám phá tool, gọi tool đọc) đi qua `gh.chassis.mcp_client.check_network_guard` trước khi ra ngoài.
+mạng thật (khám phá tool, gọi tool đọc) ghim DNS qua `gh.chassis.mcp_client.pin_endpoint` trước khi ra ngoài.
+v0.1.45 (F-49): lúc GHI cấu hình (tạo/sửa máy chủ) cũng kiểm `pin_endpoint` — cấm link-local/siêu dữ liệu,
+0.0.0.0, multicast, tên dịch vụ compose của Gen-Harness; có token thì phải `https://` (422 trên trường `endpoint`).
 
 Không thuộc `gh/biz/*` — quyền theo vai trò hệ thống `system.read` / `system.manage`, cùng cách
 `gh.agents_api.routes` / `gh.plugins_api.routes` dùng.
@@ -26,10 +29,10 @@ from gh import realtime
 from gh.auth import rbac, service
 from gh.auth.deps import require, require_pin
 from gh.chassis import actionlog
-from gh.chassis.mcp_client import McpClient
+from gh.chassis.mcp_client import HTTP_TRANSPORTS, McpBlockedNetwork, McpClient, McpError, pin_endpoint
 from gh.data.common import iso
 from gh.db import DB
-from gh.errors import field_errors
+from gh.errors import field_errors, pin_required
 from gh.hub_link import service as hub
 from gh.mcp_api import invoke
 
@@ -50,6 +53,29 @@ def _client(request: Request) -> McpClient:
 
 
 # ─── máy chủ MCP ──────────────────────────────────────────────────────────────
+
+async def _check_server_endpoint(endpoint: str, transport: str, *, has_token: bool) -> None:
+    """v0.1.45 (F-49): kiểm địa chỉ lúc GHI cấu hình — cùng `pin_endpoint` như lúc gọi. `allow_public_network=True`
+    ở đây: công tắc mạng công cộng vẫn chỉ áp lúc gọi (không đổi hành vi tạo máy chủ). Không phân giải được → cho
+    qua (máy chủ có thể chưa chạy); lúc gọi sẽ kiểm lại trên đúng IP kết nối."""
+    if transport not in HTTP_TRANSPORTS:
+        return
+    try:
+        await pin_endpoint(endpoint, True, has_token=has_token)
+    except McpBlockedNetwork as e:
+        msg = str(e)
+        if "không hợp lệ" in msg:
+            msg = "Địa chỉ máy chủ MCP không hợp lệ — dạng https://<máy chủ>/mcp"
+        elif "https://" in msg:
+            msg = ("Có token mà máy chủ MCP ở mạng công cộng thì phải dùng https:// (token không được đi rõ trên "
+                   "Internet; http:// chỉ dùng được trong mạng nội bộ)")
+        else:
+            msg = ("Địa chỉ máy chủ MCP trỏ vào vùng mạng bị cấm (siêu dữ liệu đám mây, 0.0.0.0, multicast hoặc dịch "
+                   "vụ nội bộ của Gen-Harness)")
+        raise field_errors({"endpoint": msg}) from e
+    except McpError:
+        return
+
 
 class ServerIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
@@ -97,6 +123,7 @@ async def list_servers(user: service.CurrentUser = Depends(READ), db: AsyncSessi
 async def create_server(body: ServerIn, user: service.CurrentUser = Depends(MANAGE),
                         db: AsyncSession = DB) -> dict[str, Any]:
     body.check()
+    await _check_server_endpoint(body.endpoint.strip(), body.transport, has_token=bool(body.auth_token))
     auth_enc = invoke.encrypt_token(body.auth_token) if body.auth_token else None
     sid = (await db.execute(text("""
         INSERT INTO agent.mcp_servers (org_id, name, transport, endpoint, auth_enc, allow_public_network, note)
@@ -115,6 +142,10 @@ async def patch_server(server_id: uuid.UUID, body: ServerPatch, user: service.Cu
                        db: AsyncSession = DB) -> dict[str, Any]:
     cur = await _server(db, user.org_id, server_id)
     await hub.guard_server_admin(db, user=user, server_id=server_id, action="update")
+    if body.endpoint is not None or body.auth_token:
+        has_token = bool(body.auth_token) if body.auth_token is not None else cur.auth_enc is not None
+        endpoint = body.endpoint.strip() if body.endpoint is not None else cur.endpoint
+        await _check_server_endpoint(endpoint, cur.transport, has_token=has_token)
     sets: list[str] = []
     params: dict[str, Any] = {"i": server_id}
     changed: dict[str, Any] = {}
@@ -201,9 +232,14 @@ class ToolAccessPatch(BaseModel):
 @router.patch("/tools/{tool_id}")
 async def patch_tool_access(tool_id: uuid.UUID, body: ToolAccessPatch, user: service.CurrentUser = Depends(MANAGE),
                             db: AsyncSession = DB) -> dict[str, Any]:
+    """Đổi loại tool. v0.1.45 (F-20): đổi `write` → `read` là bỏ qua duyệt (tool đọc gọi ngay, không qua bản nháp —
+    khoá cứng #4) nên cần phiên PIN `mcp.expose` (423 PIN_REQUIRED nếu chưa). `read` → `write` (chặt hơn) và giữ
+    nguyên loại không cần PIN. Thứ tự: 403 (MANAGE) → 404 → 422 → 423."""
     if body.access not in ACCESS_KINDS:
         raise field_errors({"access": f"Chỉ nhận {', '.join(ACCESS_KINDS)}"})
     cur = await _tool(db, user.org_id, tool_id)
+    if cur.access == "write" and body.access == "read" and not user.pin_active():
+        raise pin_required()
     await db.execute(text("UPDATE agent.mcp_tools SET access = :a WHERE id = :i"), {"a": body.access, "i": tool_id})
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                            action="mcp.tool_access_changed", target_type="mcp_tool", target_id=str(tool_id),

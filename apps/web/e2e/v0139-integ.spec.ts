@@ -160,6 +160,7 @@ test.describe('v0.1.39 · nghiệm thu sau gộp', () => {
     await page.goto('/guide/viec-sep');
     const cl = row(page, 'Claude Code CLI');
     await cl.getByRole('button', { name: 'Đăng nhập Claude Code' }).click();
+    await enterPin(page); // v0.1.45 (F-20): thêm tài khoản CLI cần mã PIN
     const code = cl.getByLabel('Mã xác thực');
     await expect(code).toBeVisible({ timeout: 10_000 });
     await code.fill('abcd-EFGH-1234');

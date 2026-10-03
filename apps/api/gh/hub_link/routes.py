@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gh.auth import rbac, service
 from gh.auth.deps import require, require_owner, require_pin
+from gh.chassis.mcp_client import HTTPS_REQUIRED_MSG, McpBlockedNetwork, McpError, pin_endpoint
 from gh.db import DB
 from gh.errors import field_errors
 from gh.hub_link import service as hub
@@ -66,6 +67,20 @@ async def patch_link(body: LinkPatch, request: Request, _m: service.CurrentUser 
         errors["token_expires_at"] = "Cần kèm múi giờ (ISO 8601)"
     if errors:
         raise field_errors(errors)
+    # Sửa review v0.1.45: CÙNG quy tắc với lúc gọi (`pin_endpoint`) — Gen-hub luôn dùng token, nên http:// chỉ hợp lệ
+    # khi máy Gen-hub ở cùng máy hoặc trong mạng nội bộ (10.x, 192.168.x, host.docker.internal…); http:// tới IP
+    # công cộng ⇒ 422 ngay lúc lưu thay vì lưu được rồi "Kiểm tra" mới báo lỗi. Không phân giải được ⇒ cho qua.
+    cur = await hub.load(db, user.org_id)
+    eff_endpoint = endpoint or (cur.endpoint if cur is not None else None)
+    if eff_endpoint and urlparse(eff_endpoint).scheme == "http" and (token or (cur is not None and cur.has_token)):
+        try:
+            await pin_endpoint(eff_endpoint, True, has_token=True)
+        except McpBlockedNetwork as e:
+            if str(e) == HTTPS_REQUIRED_MSG:
+                raise field_errors({"endpoint": "Gen-hub ở mạng công cộng phải dùng https:// (http:// chỉ dùng được "
+                                                "khi Gen-hub cùng máy hoặc trong mạng nội bộ)"}) from e
+        except McpError:
+            pass
     row = await hub.upsert(db, request.app.state.redis, user=user, endpoint=endpoint, token=token or None,
                            token_expires_at=body.token_expires_at,
                            set_expiry="token_expires_at" in body.model_fields_set,

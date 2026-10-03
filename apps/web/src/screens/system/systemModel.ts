@@ -17,7 +17,7 @@ import type {
   RetentionPolicy,
   ViewScope,
 } from '@gen-harness/contracts';
-import { ApiError, PinCancelledError } from '@gen-harness/contracts';
+import { ALL_ONLY_PERMS, ApiError, PinCancelledError } from '@gen-harness/contracts';
 import { DEFAULT_TZ, countWord, fmtDM, fmtHM, fmtInt, fmtLatency, fmtPct, fmtRemaining, fmtSessionAge } from '../../lib/format';
 import { ACC3, BAD, N3, N4, N5, N8, OK, TXT, WARN, channelIcon, channelTone } from '../data/dataModel';
 
@@ -283,6 +283,21 @@ export const SCOPE_OPTIONS: Array<{ value: PermScope; label: string }> = [
   { value: 'assigned', label: 'Khách được phân' },
   { value: 'none', label: 'Không' },
 ];
+
+/** v0.1.45 (F-20): "Đăng nhập", "Đăng nhập lại" và thêm tài khoản CLI đều gọi POST /cli/login — cùng cần phiên PIN. */
+export const CLI_ADD_PIN_TEXT = 'Đăng nhập / thêm tài khoản cần mã PIN';
+
+/** F-58: quyền chỉ-toàn-tổ-chức (system.manage) chỉ có "Tất cả" / "Không"; giá trị cũ team/assigned (không có tác dụng)
+ *  vẫn hiện để ô chọn không trống, kèm ghi chú, và không chọn lại được. */
+export function scopeOptionsFor(permission: string, current: PermScope): Array<{ value: PermScope; label: string; disabled?: boolean }> {
+  if (!ALL_ONLY_PERMS.includes(permission)) return SCOPE_OPTIONS;
+  const opts: Array<{ value: PermScope; label: string; disabled?: boolean }> = SCOPE_OPTIONS.filter((o) => o.value === 'all' || o.value === 'none');
+  if (current !== 'all' && current !== 'none') {
+    const old = SCOPE_OPTIONS.find((o) => o.value === current);
+    opts.push({ value: current, label: `${old?.label ?? current} (không có tác dụng)`, disabled: true });
+  }
+  return opts;
+}
 
 /** v0.1.28 (UX N7): tên vai trò tiếng Việt trên giao diện (mã vai trò và tên lưu ở máy chủ giữ nguyên). */
 export const ROLE_LABEL: Record<string, { name: string; meta: string }> = {

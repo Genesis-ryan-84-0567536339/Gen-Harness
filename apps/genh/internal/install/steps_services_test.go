@@ -8,10 +8,13 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/dockercli"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/dockercli/fake"
+	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/hostlink"
 )
 
 // tlsReadyServer dựng một httptest.Server TLS giả lập proxy thật — trả 200
@@ -157,6 +160,67 @@ func TestServicesStep_ReadyTimeout_ReturnsStructuredError(t *testing.T) {
 	}
 	if se.Code != ErrCodeServiceNotReady {
 		t.Errorf("Code = %q, muốn %q", se.Code, ErrCodeServiceNotReady)
+	}
+}
+
+// v0.1.45: siết hộp thư run/ (EnsureRunPerms) chạy SAU `docker compose up`
+// thành công, TRƯỚC khi chờ /api/v1/ready; siết không được chỉ cảnh báo.
+func TestServicesStep_EnsureRunPermsAfterUp(t *testing.T) {
+	composePath := testComposePath(t)
+	srv, readyCalls := tlsReadyServer(t, 0)
+	fr := &fake.Runner{Responses: []fake.Response{
+		{Match: fake.MatchArgsContain("up", "-d"), Output: []byte("")},
+	}}
+	type seen struct {
+		dockerCalls, readyCalls int
+		installDir, composePath string
+		envOverlay              int
+	}
+	var got []seen
+	step := servicesStep{
+		runner:    fr,
+		locate:    func(string) (string, error) { return composePath, nil },
+		client:    insecureClient(),
+		timeout:   time.Second,
+		pollEvery: time.Millisecond,
+		ensureRunPerms: func(_ context.Context, _ dockercli.Runner, installDir, cp string, overlay []string) (string, error) {
+			got = append(got, seen{len(fr.Calls), *readyCalls, installDir, cp, len(overlay)})
+			return hostlink.RunModeOpen, errors.New("docker lỗi")
+		},
+	}
+	env := testEnvWithSecrets(t)
+	env.InstallDir = t.TempDir()
+	env.Port = portFromServerURL(t, srv)
+	var progresses []Progress
+	if err := step.Run(context.Background(), env, ReporterFunc(func(p Progress) { progresses = append(progresses, p) })); err != nil {
+		t.Fatalf("siết quyền run/ thất bại không được chặn cài đặt: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("EnsureRunPerms phải được gọi đúng 1 lần, có %d", len(got))
+	}
+	if got[0].dockerCalls != 1 || got[0].readyCalls != 0 {
+		t.Fatalf("EnsureRunPerms phải chạy ngay sau up, trước khi chờ ready: %+v", got[0])
+	}
+	if got[0].installDir != env.InstallDir || got[0].composePath != composePath || got[0].envOverlay == 0 {
+		t.Fatalf("tham số EnsureRunPerms = %+v", got[0])
+	}
+	warned := false
+	for _, p := range progresses {
+		if strings.Contains(p.Detail, "run/ vẫn mở cho mọi người dùng trên máy") {
+			warned = true
+		}
+	}
+	if !warned {
+		t.Fatal("mode open phải hiện cảnh báo")
+	}
+
+	// up thất bại → không siết.
+	got = nil
+	fr2 := &fake.Runner{Responses: []fake.Response{{Match: fake.MatchArgsContain("up", "-d"), Err: errors.New("x")}}}
+	step.runner = fr2
+	_ = step.Run(context.Background(), env, ReporterFunc(func(Progress) {}))
+	if len(got) != 0 {
+		t.Fatal("up lỗi thì không được siết quyền run/")
 	}
 }
 

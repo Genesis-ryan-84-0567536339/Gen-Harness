@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import type {
   PeopleReviewDisputeItem,
+  PeopleReviewFull,
   PeopleReviewFullDetail,
   PeopleReviewItem,
   PeopleReviewLogItem,
@@ -9,16 +10,17 @@ import type {
   ReviewBoard,
 } from '@gen-harness/contracts';
 import { isFullReview } from '@gen-harness/contracts';
-import { Button, Dialog, EmptyState, Icon, Tabs, type TabItem } from '@gen-harness/ui';
+import { Button, Chip, Dialog, EmptyState, Icon, Tabs, type TabItem } from '@gen-harness/ui';
 import { WhyButton } from '../core/Evidence';
 import { errorText } from '../../lib/errorText';
 import { fmtDMClock } from '../../lib/format';
+import { useCan } from '../../lib/permissions';
 import { useNavigation } from '../../lib/queries';
 import { useUrlState } from '../../lib/uiStore';
 import { findActive } from '../../shell/navModel';
 import { CardError, InlineError, ScreenHead, SkeletonLines } from '../common';
-import { BOARD_LABEL, REVIEW_BOARD_LIST, STAFF_HOWTO, TREND_ICON, fmtPeriod, initialsOf, scoreTone, trendTone } from './peopleModel';
-import { useOpenDispute, useResolveDispute, useReview, useReviews, useUpdateReview } from './queries';
+import { BOARD_LABEL, REVIEW_BOARD_LIST, STAFF_HOWTO, TREND_ICON, fmtPeriod, initialsOf, scoreTone, suspiciousLabel, trendTone, withStop } from './peopleModel';
+import { useClearSuspicious, useOpenDispute, useResolveDispute, useReview, useReviews, useUpdateReview } from './queries';
 
 export function PeopleScreen() {
   const [board, setBoard] = useUrlState<ReviewBoard>('board', 'employee');
@@ -80,6 +82,7 @@ export function PeopleScreen() {
 }
 
 function ReviewRow({ item, onOpen }: { item: PeopleReviewItem; onOpen: () => void }) {
+  const canWrite = useCan('people_review.write');
   if (!isFullReview(item)) {
     // Nhánh log (Auditor, Q4): KHÔNG hiện điểm/nội dung — chỉ "đã có đánh giá" + số phản biện.
     return (
@@ -119,6 +122,7 @@ function ReviewRow({ item, onOpen }: { item: PeopleReviewItem; onOpen: () => voi
         <span style={{ color: scoreTone(item.score) }}>{Math.round(item.score)}</span>
         {item.trend ? <Icon name={TREND_ICON[item.trend]} size={14} color={trendTone(item.trend)} /> : null}
         {item.overridden ? <span className="ppl-row__overridden">sửa tay</span> : null}
+        <SuspiciousChip item={item} />
       </div>
       <div className="ppl-row__signal">
         <div className="ppl-row__label">Tín hiệu nổi bật tuần này</div>
@@ -133,10 +137,23 @@ function ReviewRow({ item, onOpen }: { item: PeopleReviewItem; onOpen: () => voi
           Xem chứng cứ
         </WhyButton>
         <Button variant="ghost" size="sm" onClick={onOpen}>
-          Sửa điểm tay
+          {canWrite ? 'Sửa điểm tay' : 'Xem chi tiết'}
         </Button>
       </div>
     </div>
+  );
+}
+
+/** F-60: chip cảnh báo 'Đáng ngờ' — rê chuột xem lý do (title). */
+function SuspiciousChip({ item }: { item: Pick<PeopleReviewFull, 'suspicious' | 'suspicious_reason'> }) {
+  const label = suspiciousLabel(item);
+  if (!label) return null;
+  return (
+    <span className="ppl-row__suspicious" title={label.title} data-testid="ppl-suspicious">
+      <Chip tone="warn" dot>
+        <Icon name="ph ph-warning" size={12} /> {label.text}
+      </Chip>
+    </span>
   );
 }
 
@@ -189,23 +206,12 @@ function LogDetailBody({ item }: { item: PeopleReviewLogItem }) {
   );
 }
 
-function FullDetailBody({ detail, onIdChange }: { detail: PeopleReviewFullDetail; onIdChange: (id: string) => void }) {
-  const [score, setScore] = useState(String(Math.round(detail.score)));
-  const [reason, setReason] = useState('');
-  const update = useUpdateReview();
-  useEffect(() => {
-    setScore(String(Math.round(detail.score)));
-    setReason('');
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- chỉ đặt lại khi đổi SANG bản khác (id đổi); detail.score đổi cùng lúc với id (PATCH luôn sinh id mới), không cần lặp lại đây.
-  }, [detail.id]);
+/** Câu hiện thay nút/form sửa khi chỉ có quyền xem (people_review.read) mà không có people_review.write. */
+const READ_ONLY_TEXT = 'Chỉ người có quyền sửa đánh giá mới sửa điểm hoặc bỏ cờ được — nhờ Owner.';
 
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    const n = Number(score);
-    if (Number.isNaN(n) || !reason.trim()) return;
-    const body: PeopleReviewPatchBody = { score: n, reason: reason.trim(), evidence: detail.evidence, trend: detail.trend, signal: detail.signal, recommendation: detail.recommendation };
-    update.mutate({ id: detail.id, body }, { onSuccess: (row) => onIdChange(row.id) });
-  };
+function FullDetailBody({ detail, onIdChange }: { detail: PeopleReviewFullDetail; onIdChange: (id: string) => void }) {
+  // Máy chủ đòi people_review.write cho sửa điểm / bỏ cờ — người chỉ có quyền xem không thấy nút chết (403).
+  const canWrite = useCan('people_review.write');
 
   return (
     <div className="dlg-fields">
@@ -219,23 +225,15 @@ function FullDetailBody({ detail, onIdChange }: { detail: PeopleReviewFullDetail
         </div>
       </div>
 
-      <section aria-label="Sửa điểm tay">
-        <div className="dlg-section-title">Sửa điểm tay — giữ lịch sử</div>
-        <form className="ppl-edit-form" onSubmit={submit}>
-          <label className="gh-field">
-            <span className="gh-field__label">Điểm mới (0–100)</span>
-            <input className="gh-input" type="number" min={0} max={100} value={score} onChange={(e) => setScore(e.target.value)} style={{ width: 96 }} />
-          </label>
-          <label className="gh-field" style={{ flex: 1 }}>
-            <span className="gh-field__label">Lý do sửa</span>
-            <textarea className="gh-textarea" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Bắt buộc — ghi rõ vì sao sửa điểm" rows={2} />
-          </label>
-          <Button type="submit" variant="primary" size="sm" disabled={!reason.trim() || score === ''} loading={update.isPending}>
-            Lưu điểm mới
-          </Button>
-        </form>
-        {update.isError ? <InlineError>{errorText(update.error)}</InlineError> : null}
-      </section>
+      <SuspiciousNote detail={detail} canWrite={canWrite} />
+
+      {canWrite ? (
+        <EditScoreSection detail={detail} onIdChange={onIdChange} />
+      ) : (
+        <div className="ppl-row__label" data-testid="ppl-read-only">
+          {READ_ONLY_TEXT}
+        </div>
+      )}
 
       {detail.history.length > 0 ? (
         <section aria-label="Lịch sử điểm">
@@ -255,6 +253,113 @@ function FullDetailBody({ detail, onIdChange }: { detail: PeopleReviewFullDetail
       <DisputesSection detail={detail} />
     </div>
   );
+}
+
+/** Sửa điểm tay — giữ lịch sử (cần people_review.write + mã PIN). */
+function EditScoreSection({ detail, onIdChange }: { detail: PeopleReviewFullDetail; onIdChange: (id: string) => void }) {
+  const [score, setScore] = useState(String(Math.round(detail.score)));
+  const [reason, setReason] = useState('');
+  const update = useUpdateReview();
+  useEffect(() => {
+    setScore(String(Math.round(detail.score)));
+    setReason('');
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- chỉ đặt lại khi đổi SANG bản khác (id đổi); detail.score đổi cùng lúc với id (PATCH luôn sinh id mới), không cần lặp lại đây.
+  }, [detail.id]);
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    const n = Number(score);
+    if (Number.isNaN(n) || !reason.trim()) return;
+    const body: PeopleReviewPatchBody = { score: n, reason: reason.trim(), evidence: detail.evidence, trend: detail.trend, signal: detail.signal, recommendation: detail.recommendation };
+    update.mutate({ id: detail.id, body }, { onSuccess: (row) => onIdChange(row.id) });
+  };
+
+  return (
+    <section aria-label="Sửa điểm tay">
+      <div className="dlg-section-title">Sửa điểm tay — giữ lịch sử</div>
+      <form className="ppl-edit-form" onSubmit={submit}>
+        <label className="gh-field">
+          <span className="gh-field__label">Điểm mới (0–100)</span>
+          <input className="gh-input" type="number" min={0} max={100} value={score} onChange={(e) => setScore(e.target.value)} style={{ width: 96 }} />
+        </label>
+        <label className="gh-field" style={{ flex: 1 }}>
+          <span className="gh-field__label">Lý do sửa</span>
+          <textarea className="gh-textarea" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Bắt buộc — ghi rõ vì sao sửa điểm" rows={2} />
+        </label>
+        <Button type="submit" variant="primary" size="sm" disabled={!reason.trim() || score === ''} loading={update.isPending}>
+          Lưu điểm mới
+        </Button>
+      </form>
+      {update.isError ? <InlineError>{errorText(update.error)}</InlineError> : null}
+    </section>
+  );
+}
+
+/** F-60: ghi chú 'Đáng ngờ' + nút bỏ cờ (bắt buộc lý do, cần mã PIN, ghi Nhật ký); đã bỏ cờ thì hiện ai bỏ, vì sao. */
+function SuspiciousNote({ detail, canWrite }: { detail: PeopleReviewFullDetail; canWrite: boolean }) {
+  const [open, setOpen] = useState(false);
+  const [why, setWhy] = useState('');
+  const clear = useClearSuspicious();
+  const label = suspiciousLabel(detail);
+  const cleared = detail.suspicious_cleared ?? null;
+  if (label) {
+    return (
+      <div className="ppl-note" role="note" aria-label="Cảnh báo đáng ngờ" style={{ borderColor: 'var(--color-warn)' }}>
+        <Icon name="ph ph-warning" size={16} color="var(--color-warn)" />
+        <div style={{ flex: 1 }}>
+          <span>
+            <strong>Đáng ngờ:</strong> {label.title} Hệ thống chỉ gắn cờ, không tự đổi điểm — mở &quot;Xem chứng cứ&quot; để đọc tin gốc.
+          </span>
+          {!canWrite ? null : open ? (
+            <form
+              className="ppl-dispute-form"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (why.trim().length < 3) return;
+                clear.mutate({ id: detail.id, body: { cleared_reason: why.trim() } }, { onSuccess: () => { setOpen(false); setWhy(''); } });
+              }}
+            >
+              <textarea className="gh-textarea" aria-label="Lý do bỏ cờ" value={why} onChange={(e) => setWhy(e.target.value)} placeholder="Bắt buộc — đã xem chứng cứ gì, vì sao là báo nhầm" rows={2} />
+              <div className="ppl-dispute-form__actions">
+                <Button type="submit" variant="secondary" size="sm" disabled={why.trim().length < 3} loading={clear.isPending}>
+                  Bỏ cờ
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setOpen(false);
+                    setWhy('');
+                    clear.reset();
+                  }}
+                >
+                  Thôi
+                </Button>
+              </div>
+              <div className="ppl-row__label">Bỏ cờ cần mã PIN và được ghi vào Nhật ký thao tác. Điểm không đổi.</div>
+            </form>
+          ) : (
+            <div style={{ marginTop: 6 }}>
+              <Button type="button" variant="ghost" size="sm" icon="ph ph-flag" onClick={() => setOpen(true)}>
+                Bỏ cờ (đã xem chứng cứ)
+              </Button>
+            </div>
+          )}
+          {clear.isError ? <InlineError>{errorText(clear.error)}</InlineError> : null}
+        </div>
+      </div>
+    );
+  }
+  if (cleared) {
+    return (
+      <div className="ppl-row__label" role="note" aria-label="Đã bỏ cờ đáng ngờ" data-testid="ppl-suspicious-cleared">
+        Đã bỏ cờ &apos;Đáng ngờ&apos; · {cleared.by?.name ?? 'Không rõ'} · {fmtDMClock(cleared.at)} — {withStop(cleared.reason)}
+        {detail.suspicious_reason ? ` Cờ cũ: ${withStop(detail.suspicious_reason)}` : ''}
+      </div>
+    );
+  }
+  return null;
 }
 
 function DisputesSection({ detail }: { detail: PeopleReviewFullDetail }) {

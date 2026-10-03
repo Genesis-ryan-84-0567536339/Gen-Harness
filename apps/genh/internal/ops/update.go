@@ -486,6 +486,8 @@ func RunUpdate(ctx context.Context, env *Env, opts UpdateOptions, deps UpdateDep
 			Err:  err,
 		})
 	}
+	// v0.1.45: ảnh api mới (nhóm gid 10001) đã lên — siết hộp thư run/ về 2770.
+	reportRunDirPerms(ctx, runner, env.InstallDir, composePath, envOverlay, out)
 
 	// 9. Chờ sẵn sàng.
 	_, _ = fmt.Fprintln(out, "7/7 Chờ dịch vụ sẵn sàng…")
@@ -839,6 +841,11 @@ func rollbackAndWrap(ctx context.Context, p rollbackPlan, out io.Writer, origina
 		defer lcancel()
 		upArgs := compose.BaseArgs(p.composePath, "up", "-d", "--remove-orphans")
 		_, err := runner.Output(lctx, dockercli.Cmd{Name: "docker", Args: upArgs, Env: p.envOverlay, Dir: p.dir})
+		if err == nil {
+			// v0.1.45: quyền run/ theo ảnh api vừa dựng lại — ảnh cũ chưa có
+			// nhóm gid 10001 thì EnsureRunPerms tự mở lại 0777 cho api ghi được.
+			reportRunDirPerms(lctx, runner, p.installDir, p.composePath, p.envOverlay, out)
+		}
 		return err
 	}
 

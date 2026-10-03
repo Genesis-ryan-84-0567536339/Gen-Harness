@@ -105,6 +105,25 @@ describe('MCP Hub', () => {
     await waitFor(() => expect(calls.some((c) => c.url.includes('/expose') && (c.body as { is_exposed: boolean }).is_exposed === true)).toBe(true));
   });
 
+  it("đổi ghi → đọc lỗi rồi bấm 'Giữ nguyên': lỗi không ở lại trong ô", async () => {
+    mockFetch((c) => {
+      if (c.url.includes('/mcp/tools/tool-write') && c.method === 'PATCH') {
+        return json(409, { status: 409, code: 'CONFLICT', title: 'Tool đang bận, thử lại sau' });
+      }
+      return baseHandler(c) ?? json(404);
+    });
+    renderScreen(<McpScreen />);
+    await screen.findByText('ERP Genesis', { selector: '.mcp-server__name' });
+    const user = userEvent.setup();
+    await user.selectOptions(screen.getByLabelText('Loại tool order.createDraft'), 'read');
+    const dlg = await screen.findByRole('dialog', { name: 'Chuyển order.createDraft sang Chỉ đọc?' });
+    await user.click(within(dlg).getByRole('button', { name: 'Chuyển sang Chỉ đọc' }));
+    expect(await within(dlg).findByText('Tool đang bận, thử lại sau')).toBeInTheDocument();
+    await user.click(within(dlg).getByRole('button', { name: 'Giữ nguyên' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(screen.queryByText('Tool đang bận, thử lại sau')).toBeNull();
+  });
+
   it('ma trận cấp quyền: tick ô agent × tool gọi POST /mcp/tools/{id}/grants', async () => {
     const calls = mockFetch((c) => {
       if (c.url.includes('/mcp/tools/tool-write/grants') && c.method === 'POST') return json(201, { ...TOOLS[1], grants: ['agent:agent-tls'] });

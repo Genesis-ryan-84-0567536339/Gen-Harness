@@ -14,7 +14,7 @@ import { ModelPicker } from '../screens/api/ModelPicker';
 import { ClaudeRiskNotice, CliLoginPanel } from '../screens/system/CliCard';
 import { CliDiagnose } from '../screens/system/CliDiagnose';
 import { useCliLogin } from '../screens/system/useCliLogin';
-import { CLI_TEXT, cliAccountLabel, cliChip, cliMeta } from '../screens/system/systemModel';
+import { CLI_ADD_PIN_TEXT, CLI_TEXT, cliAccountLabel, cliChip, cliMeta } from '../screens/system/systemModel';
 import { providerHasModel, providerReady, testedModels } from './phase2Model';
 import { StepFrame } from './StepFrame';
 import { describeError, type StepProps } from './types';
@@ -270,7 +270,7 @@ function AddProvider({ onAdded }: { onAdded: (p: Provider) => void }) {
             label="Địa chỉ gọi (Endpoint)"
             placeholder="https://…/v1"
             value={endpoint}
-            error={endpointBad ? 'Địa chỉ cần bắt đầu bằng https:// (hoặc http://)' : null}
+            error={endpointBad ? 'Địa chỉ cần bắt đầu bằng https:// (http:// chỉ dùng với máy trong mạng nội bộ, vd Ollama)' : null}
             onChange={(e) => setEndpoint(e.target.value)}
           />
         ) : null}
@@ -405,6 +405,8 @@ function CliAccountSection({ kind, onlyAgyReady = false }: { kind: CliKind; only
               {active?.state === 'expired' ? 'Đăng nhập lại' : active ? txt.add : txt.login}
             </Button>
           ) : null}
+          {/* v0.1.45 (F-20): POST /cli/login cần phiên PIN — báo trước, hộp PIN tự mở khi gặp 423. */}
+          {!login.active ? <PinHint text={CLI_ADD_PIN_TEXT} title={CLI_ADD_PIN_TEXT} /> : null}
         </div>
       )}
       <CliLoginPanel login={login} />

@@ -1359,7 +1359,8 @@ export function createPhase2(opts: Phase2Options) {
         return true;
       }
       if (seg[1] === 'login' && seg.length === 2 && m === 'POST') {
-        if (!need('system.manage')) return true;
+        // v0.1.45 (F-20): như API — thêm tài khoản CLI cần phiên PIN `cli.switch_account` (403 trước 423).
+        if (!need('system.manage') || !pin('cli.switch_account')) return true;
         const loginId = randomUUID();
         const kind = q.get('kind') === 'claude_code_cli' ? 'claude_code_cli' : 'antigravity_cli';
         cliLogins.set(loginId, { login_id: loginId, kind, status: 'starting' });
