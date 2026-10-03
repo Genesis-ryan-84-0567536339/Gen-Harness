@@ -5,7 +5,33 @@ export const PROPOSAL_TITLE: Record<GenProposal['type'], string> = {
   draft_message: 'Soạn nháp tin gửi đi',
   reminder: 'Tạo nhắc việc',
   assign: 'Giao người phụ trách',
+  social_reply: 'Trả lời bình luận Facebook',
+  social_dm: 'Nhắn tin Facebook',
 };
+
+/** v0.1.47 (F-79): đề xuất gửi lên Facebook (trả lời bình luận / nhắn tin) — gửi NGAY khi xác nhận, cần PIN. */
+export function isSocialWrite(p: GenProposal): p is Extract<GenProposal, { type: 'social_reply' | 'social_dm' }> {
+  return p.type === 'social_reply' || p.type === 'social_dm';
+}
+
+/** Dòng cảnh báo cố định trên mọi thẻ gửi Facebook. */
+export const SOCIAL_WRITE_WARNING = 'Bấm Xác nhận là GỬI NGAY lên Facebook của Sếp (cần mã PIN). Hệ thống không tự thu hồi được.';
+export const SOCIAL_SUSPICIOUS_WARNING = 'Mục này có dấu hiệu lừa đảo — đọc kỹ trước khi trả lời.';
+/** Thời gian tối đa theo dõi một việc gửi (ms) và nhịp hỏi. */
+export const WRITE_POLL_MS = 2000;
+export const WRITE_POLL_MAX_MS = 4 * 60 * 1000;
+export const WRITE_MAX_TEXT = 2000;
+
+const TERMINAL = new Set(['done', 'failed', 'halted', 'cancelled']);
+export const isTerminalJob = (status: string | undefined): boolean => !!status && TERMINAL.has(status);
+
+/** Câu thân thiện cho lỗi khi xác nhận gửi (title lấy từ API nếu có). */
+export function writeErrorKind(code: string | undefined): 'halted' | 'locked' | 'limit' | null {
+  if (code === 'SOCIAL_HALTED') return 'halted';
+  if (code === 'SOCIAL_WRITE_LOCKED') return 'locked';
+  if (code === 'SOCIAL_WRITE_LIMIT') return 'limit';
+  return null;
+}
 
 /** ISO → giá trị ô `datetime-local` theo giờ máy. */
 export function toLocalInput(iso?: string | null): string {
@@ -34,6 +60,7 @@ export function initialDraft(p: GenProposal): Draft {
       priority: p.fields.priority,
       assignee_user_id: p.fields.assignee_user_id ?? '',
     };
+  if (p.type === 'social_reply' || p.type === 'social_dm') return { text: p.fields.text };
   return { user_id: p.fields.user_id };
 }
 

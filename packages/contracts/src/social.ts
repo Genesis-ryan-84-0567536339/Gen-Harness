@@ -6,7 +6,9 @@
 import type { ApiClient } from './client';
 
 export type SocialAccountStatus = 'pending_login' | 'active' | 'needs_login' | 'paused' | 'revoked';
-export type BrowserJobKind = 'login' | 'health' | 'read';
+export type BrowserJobKind = 'login' | 'health' | 'read' | 'write';
+/** v0.1.47 (F-79): trả lời bình luận / nhắn tin. */
+export type SocialWriteAction = 'reply_comment' | 'send_message';
 export type BrowserJobStatus = 'queued' | 'running' | 'done' | 'failed' | 'halted' | 'cancelled';
 
 export interface SocialPlatform {
@@ -46,9 +48,23 @@ export interface BrowserJob {
   kind: BrowserJobKind;
   status: BrowserJobStatus;
   via: 'gen' | 'user' | 'schedule';
+  /** v0.1.47: chỉ việc `write`. */
+  action?: SocialWriteAction | null;
+  /** v0.1.47: việc `write` đã có ảnh chụp bằng chứng (xem `proofUrl`). */
+  has_proof?: boolean;
   error: string | null;
   error_text: string | null;
   result: {
+    action?: SocialWriteAction;
+    target_url?: string;
+    text?: string;
+    sent?: boolean;
+    /** Đã thấy nội dung hiện trên trang sau khi gửi. */
+    confirmed?: boolean;
+    trace?: Array<{ step: string; ms: number; ok: boolean }>;
+    /** Đã bấm gửi trước khi lệnh Dừng tất cả tới nơi. */
+    after_halt?: boolean;
+    proof_error?: string | null;
     items?: SocialItem[];
     counts?: { notifications: number; inbox: number; unread: number; suspicious: number };
     pages?: number;
@@ -80,6 +96,9 @@ export interface SocialAccount {
   risk_version: string | null;
   schedule: SocialSchedule;
   daily_read_limit: number;
+  /** v0.1.47: giới hạn gửi/ngày (1–20, mặc định 10) và số lần đã gửi trong 24 giờ qua (máy chủ cũ không gửi hai trường này). */
+  daily_write_limit?: number;
+  writes_today?: number;
   last_read_at: string | null;
   created_at: string;
   active_job: BrowserJob | null;
@@ -105,6 +124,34 @@ export interface SocialAccountPatch {
   label?: string;
   schedule?: SocialSchedule;
   daily_read_limit?: number;
+  daily_write_limit?: number;
+}
+
+/** v0.1.47 (F-85): cổng ghi Facebook — mở khi sandbox trình duyệt bật HOẶC Sếp đã đồng ý rủi ro. */
+export interface SocialWriteGate {
+  sandbox: { enabled: boolean | null; reason: string | null; checked_at: string | null };
+  worker_online: boolean;
+  consent: { accepted_at: string; accepted_by_name: string; version: string } | null;
+  open: boolean;
+  risk: string[];
+  version: string;
+}
+
+export interface SocialWriteItem {
+  job_id: string;
+  account_id: string;
+  account_label: string;
+  action: SocialWriteAction;
+  target_url: string;
+  text: string;
+  status: BrowserJobStatus;
+  error: string | null;
+  error_text: string | null;
+  created_at: string;
+  finished_at: string | null;
+  has_proof: boolean;
+  confirmed: boolean | null;
+  after_halt: boolean;
 }
 
 export interface SocialLoginTicket {
@@ -149,6 +196,20 @@ export function socialEndpoints(r: ApiClient['request']) {
         latest: (id: string, signal?: AbortSignal) =>
           r<{ job: BrowserJob | null }>(`/social/accounts/${enc(id)}/latest`, { signal }),
       },
+      writeGate: (signal?: AbortSignal) => r<SocialWriteGate>('/social/write-gate', { signal }),
+      acceptWriteRisk: (version: string) =>
+        r<SocialWriteGate>('/social/write-consent', { method: 'POST', body: { version } }),
+      revokeWriteRisk: () => r<SocialWriteGate>('/social/write-consent', { method: 'DELETE' }),
+      writes: (q: { account_id?: string; limit?: number } = {}, signal?: AbortSignal) => {
+        const qs = new URLSearchParams();
+        if (q.account_id) qs.set('account_id', q.account_id);
+        if (q.limit) qs.set('limit', String(q.limit));
+        const s = qs.toString();
+        return r<{ items: SocialWriteItem[] }>(`/social/writes${s ? `?${s}` : ''}`, { signal });
+      },
+      job: (id: string, signal?: AbortSignal) => r<BrowserJob>(`/social/jobs/${enc(id)}`, { signal }),
+      /** Ảnh chụp bằng chứng (JPEG, no-store) — dùng làm `src` của <img>. */
+      proofUrl: (jobId: string) => `/api/v1/social/jobs/${enc(jobId)}/proof`,
       halt: () => r<SocialStatus>('/social/halt', { method: 'POST' }),
       release: () => r<SocialStatus>('/social/halt', { method: 'DELETE' }),
     },

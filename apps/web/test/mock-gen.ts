@@ -10,6 +10,11 @@
  *   "nhắc"                         → v2 (A4): thẻ đề xuất "Tạo nhắc việc" (Xác nhận / Sửa / Huỷ)
  *   "nháp"                         → v2 (A4): thẻ "Soạn nháp tin" CẦN PIN (xác nhận → 423 → hỏi PIN → gửi lại)
  *   "mạng xã hội" / "facebook"     → v0.1.39 (F-32): mở trang Tài khoản mạng xã hội (`navigate social`)
+ *   "trả lời bình luận"            → v0.1.47 (F-79): thẻ `social_reply` CẦN PIN (nhãn account/target/write_gate; thêm "đáng ngờ" →
+ *                                    suspicious='1'); "nhắn tin facebook" → thẻ `social_dm`. Xác nhận: 423 khi chưa PIN, rồi gọi
+ *                                    mock-social `createWrite` (409 SOCIAL_HALTED / SOCIAL_WRITE_LOCKED, 429 SOCIAL_WRITE_LIMIT…) →
+ *                                    `result {type:'social_write', id: job_id, screen:'social', status}`. Chưa có tài khoản đăng nhập
+ *                                    → Gen chỉ mở trang Tài khoản mạng xã hội.
  *
  * Hook e2e (v0.1.27): `POST /api/v1/__mock/p3/gen/fireReminders` = worker `task_reminder_scan` tới giờ — mỗi
  * nhắc việc đã xác nhận → chuông `task.reminder` cho các Owner (một lần).
@@ -21,6 +26,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import type { GenBriefingSection, GenMessage, GenProposal, GenRating, GenStep } from '../../../packages/contracts/src/gen';
+import type { WriteOutcome, WriteRequest } from './mock-social';
 import type { DraftDetail } from '../../../packages/contracts/src/p3-core';
 import { BAO, GROUP_TP } from './mock-p3-core';
 import type { P2Ctx } from './mock-phase2';
@@ -37,6 +43,11 @@ export interface MockGenOptions {
    * Xác nhận nháp tin tạo nháp THẬT ở đây (chờ duyệt) và trả `result.id` = id nháp đó.
    */
   pushDraft?: (d: DraftDetail) => unknown;
+  /** v0.1.47 (F-79): nối sang mock-social — tài khoản đăng nhập đầu tiên + cổng ghi, và tạo việc gửi khi xác nhận. */
+  social?: {
+    writeContext: () => { account_id: string; account_label: string; gate: 'open' | 'locked' } | null;
+    createWrite: (req: WriteRequest) => WriteOutcome;
+  };
 }
 
 interface Turn {
@@ -80,8 +91,44 @@ export function briefingContent(slotLabel: string, slotIso: string, needsApiKey:
 
 const OWNER_ID = USER_IDS.owner;
 
-export function script(q: string): GenStep[] {
+/** Thẻ gửi Facebook (v0.1.47): trả lời bình luận hoặc nhắn tin; `suspicious` → nhãn cảnh báo lừa đảo. */
+export function socialWriteProposal(
+  kind: 'social_reply' | 'social_dm',
+  w: { account_id: string; account_label: string; gate: 'open' | 'locked' },
+  suspicious: boolean,
+): GenProposal {
+  const reply = kind === 'social_reply';
+  const target = reply ? 'Bình luận của chị Lan: "Giá bao nhiêu vậy anh?"' : 'Cuộc trò chuyện với Shop Mai';
+  return {
+    id: randomUUID(),
+    type: kind,
+    fields: {
+      account_id: w.account_id,
+      target_url: reply ? 'https://www.facebook.com/permalink.php?story_fbid=1&comment_id=2' : 'https://www.facebook.com/messages/t/1001/',
+      text: reply ? 'Cảm ơn bạn! Bên em báo giá chi tiết qua tin nhắn ngay ạ.' : 'Dạ em cảm ơn chị Mai, em xác nhận lịch giao hàng ạ.',
+    },
+    summary: `${reply ? 'Trả lời bình luận' : 'Nhắn tin'} trên Facebook (${w.account_label}) — gửi ngay khi Sếp xác nhận và nhập mã PIN.`,
+    labels: { account: w.account_label, target, write_gate: w.gate, ...(suspicious ? { suspicious: '1' } : {}) },
+    target: `social.write:${w.account_id}`,
+    requires_pin: true,
+    status: 'pending',
+  };
+}
+
+export function script(q: string, write?: { account_id: string; account_label: string; gate: 'open' | 'locked' } | null): GenStep[] {
   const t = q.toLowerCase();
+  if (/trả lời bình luận|nhắn tin facebook/.test(t)) {
+    if (!write) {
+      return [
+        { kind: 'say', text: 'Dạ, Sếp chưa có tài khoản Facebook nào đã đăng nhập — em mở trang Tài khoản mạng xã hội để Sếp kết nối trước.' },
+        { kind: 'ui', action: { type: 'navigate', screen: 'social' } },
+      ];
+    }
+    return [
+      { kind: 'say', text: 'Dạ, em soạn sẵn nội dung — Sếp đọc kỹ, bấm Xác nhận và gửi (cần mã PIN) thì mới gửi lên Facebook nhé.' },
+      { kind: 'proposal', proposal: socialWriteProposal(/nhắn tin/.test(t) ? 'social_dm' : 'social_reply', write, /đáng ngờ|lừa đảo/.test(t)) },
+    ];
+  }
   if (/mạng xã hội|facebook/.test(t)) {
     return [
       { kind: 'say', text: 'Dạ, em mở trang Tài khoản mạng xã hội — Sếp thêm và đăng nhập Facebook ngay trong app.' },
@@ -311,7 +358,7 @@ export function createMock(opts: MockGenOptions) {
       const turn: Turn = { turn_id: randomUUID(), conversation_id: conv.id, status: 'running', steps: [] };
       conv.messages.push({ id: randomUUID(), role: 'user', turn_id: turn.turn_id, content: { text }, created_at: now });
       turns.set(turn.turn_id, turn);
-      run(turn, conv, script(text));
+      run(turn, conv, script(text, opts.social?.writeContext()));
       return reply(202, { turn_id: turn.turn_id, conversation_id: conv.id });
     }
     if (seg[1] === 'turns' && seg.length === 3 && m === 'GET') {
@@ -328,7 +375,22 @@ export function createMock(opts: MockGenOptions) {
       if (pr.status !== 'pending') return problem(409, 'GEN_PROPOSAL_DECIDED', 'Đề xuất này đã được xác nhận hoặc đã huỷ');
       // Như API thật: thao tác nhạy cảm (nháp tin) → 423, web hỏi PIN rồi gửi lại.
       if (seg[3] === 'confirm' && pr.requires_pin && ctx.needPin()) {
-        return problem(423, 'PIN_REQUIRED', 'Thao tác này cần nhập mã PIN', { detail: { operation: 'draft.create' } });
+        return problem(423, 'PIN_REQUIRED', 'Thao tác này cần nhập mã PIN', { detail: { operation: pr.type === 'social_reply' || pr.type === 'social_dm' ? 'social.write' : 'draft.create' } });
+      }
+      if (seg[3] === 'confirm' && (pr.type === 'social_reply' || pr.type === 'social_dm')) {
+        if (ctx.needPin()) return problem(423, 'PIN_REQUIRED', 'Thao tác này cần nhập mã PIN', { detail: { operation: 'social.write' } });
+        // Chỉ ô Nội dung sửa được; còn lại giữ nguyên như lúc đề xuất.
+        const text = typeof (body.fields as { text?: unknown } | undefined)?.text === 'string' ? String((body.fields as { text: string }).text) : pr.fields.text;
+        const fields = { ...pr.fields, text };
+        const r = opts.social?.createWrite({
+          account_id: fields.account_id, action: pr.type === 'social_reply' ? 'reply_comment' : 'send_message',
+          target_url: fields.target_url, text, proposal_id: pr.id,
+        });
+        if (!r) return problem(503, 'SERVICE_UNAVAILABLE', 'Dịch vụ mạng xã hội chưa sẵn sàng');
+        if ('error' in r) return problem(r.error.status, r.error.code, r.error.title, r.error.errors ? { errors: r.error.errors } : undefined);
+        const done: GenProposal = { ...pr, fields, status: 'confirmed', result: { type: 'social_write', id: r.job.id, screen: 'social', status: r.job.status } };
+        proposals.set(pr.id, done);
+        return reply(200, done);
       }
       const code = pr.type === 'draft_message' ? 'ACT-0999' : `TSK-${String(++taskSeq).padStart(4, '0')}`;
       const fields = { ...pr.fields, ...((body.fields as object) ?? {}) };
