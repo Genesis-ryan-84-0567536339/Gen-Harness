@@ -2795,9 +2795,16 @@ chỉ `localhost` (nhân viên mở không được), đăng nhập không giớ
 
 ### Kiểm tra
 
+- Tích hợp (4 gói, không xung đột): api ruff + mypy sạch, alembic 1 head (0030); pytest đầy đủ 1760 passed (superuser) và
+  1760 passed dưới role gh_app; web lint/typecheck/F-1 sạch, vitest 790 passed (87 tệp), build xanh, bridge 50 passed;
+  Playwright mock 267 passed (gồm `remote-access-v0146` 4 kịch bản); e2e-live `live-ci` 7 passed (Owner mời → mật khẩu tạm →
+  đổi mật khẩu → màn đầu vai trò → mật khẩu tạm 401); browser 14 passed; genh `go vet` + `go test ./...` xanh, gofmt sạch;
+  `docker compose config` host_ip mặc định 127.0.0.1 / 0.0.0.0 khi GH_BIND_ADDR=0.0.0.0; `caddy validate` (v2.10.2) xanh với
+  GH_SITE_ADDRESS mặc định / `gen-harness.tail1234.ts.net` / `192.168.1.20`; workflow YAML + `bash -n` mọi khối `run:`.
 - Gói workflow: YAML hợp lệ (python `yaml.safe_load`), `bash -n` các khối `run:` mới. Nghiệm thu thật chạy trên PR/release: e2e-install (pr) 2 chế độ bind,
   e2e-upgrade (release) 0.0.0.0 + đúng 1 chuông, ci `images` xanh. Chờ sau phát hành (người điều phối): genh tải từ Release đúng checksum +
-  `genh version` = v0.1.46 trước khi báo Sếp.
+  `genh version` = v0.1.46 trước khi báo Sếp. Ngoài CI: Boss kiểm trên máy Fedora thật — `genh remote tailscale`, Console + WebSocket
+  (thông báo thời gian thực) chạy trên điện thoại, dòng "Truy cập từ xa" Đạt khi bấm từ điện thoại.
 
 ### Rủi ro / giới hạn
 
