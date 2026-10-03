@@ -247,9 +247,14 @@ func (s finalizeStep) Run(ctx context.Context, env *Env, rep Reporter) error {
 		browserSummary(browserErr, setupURL),
 	)
 
-	rep.Report(Progress{Status: finalStatus, Percent: 100, Detail: summary})
+	// v0.1.46 (F-21/F-27): cổng mặc định chỉ máy này — nhắc cách mở từ điện thoại.
+	summary += " · " + RemoteHint
+	rep.Report(Progress{Status: finalStatus, Percent: 100, Detail: summary, SubLines: []string{RemoteHint}})
 	return nil
 }
+
+// RemoteHint là dòng nhắc trên màn Hoàn tất về truy cập từ xa.
+const RemoteHint = "Mở trên điện thoại / máy khác: chạy genh remote (khuyên dùng Tailscale)"
 
 func caSummary(trusted, browserTrusted, autoApprove bool) string {
 	switch {

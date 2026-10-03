@@ -30,6 +30,8 @@ func (s secretsStep) Run(ctx context.Context, env *Env, rep Reporter) error {
 		return se
 	}
 
+	// Phải stat TRƯỚC Ensure (Ensure tạo secrets.json) — xem Env.FreshInstall.
+	fresh := !secretgen.Exists(dir)
 	res, err := secretgen.Ensure(dir)
 	if err != nil {
 		se := &StepError{
@@ -45,6 +47,7 @@ func (s secretsStep) Run(ctx context.Context, env *Env, rep Reporter) error {
 
 	if env != nil {
 		env.Secrets = res
+		env.FreshInstall = fresh
 	}
 
 	if res.GeneratedNew {

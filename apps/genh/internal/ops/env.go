@@ -1,8 +1,10 @@
 package ops
 
 import (
+	"os"
 	"path/filepath"
 
+	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/access"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/compose"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/config"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/machine"
@@ -73,7 +75,36 @@ func (e *Env) LocatePath() (string, error) {
 			Err:  err,
 		}
 	}
+	if err := e.ensureAccess(path); err != nil {
+		return "", err
+	}
 	return path, ensureAuxSecretsOp(path)
+}
+
+// ensureAccess đảm bảo .env cạnh compose.yaml có GH_BIND_ADDR (v0.1.46, F-21):
+// compose.yaml mới nghe `${GH_BIND_ADDR:-127.0.0.1}` nên máy cũ PHẢI được ghi
+// 0.0.0.0/lan_legacy TRƯỚC khi compose.yaml mới được dùng cho `up` (nếu không
+// cập nhật âm thầm đóng cổng LAN mà Owner đang dùng — QD-12). Mọi đường
+// (kể cả LocatePath, chạy đầu RunUpdate, trước LocatePathSync) đều qua đây.
+// Thay đổi thì ghi run/network-status.json cho Console (lỗi ghi chỉ bỏ qua).
+func (e *Env) ensureAccess(composePath string) error {
+	if fi, serr := os.Stat(composeDir(composePath)); serr != nil || !fi.IsDir() {
+		return nil // chưa có thư mục compose thì cũng chưa có gì để `up`
+	}
+	st, changed, err := access.Ensure(composePath, false)
+	if err != nil {
+		return &OpError{
+			Code: ErrCodeAccessWriteFailed,
+			What: "Không ghi được cấu hình truy cập (.env)",
+			Why:  err.Error(),
+			Next: "Kiểm quyền ghi thư mục " + composeDir(composePath) + " rồi thử lại.",
+			Err:  err,
+		}
+	}
+	if changed {
+		_ = writeNetworkStatus(e, st, nil)
+	}
+	return nil
 }
 
 // LocatePathSync tìm deploy/compose.yaml thật NHƯ LocatePath, nhưng qua
@@ -99,6 +130,9 @@ func (e *Env) LocatePathSync() (string, error) {
 			Next: "Đặt biến GENH_COMPOSE_FILE trỏ tới compose.yaml, hoặc chạy `genh install` trước.",
 			Err:  err,
 		}
+	}
+	if err := e.ensureAccess(path); err != nil {
+		return "", err
 	}
 	return path, ensureAuxSecretsOp(path)
 }

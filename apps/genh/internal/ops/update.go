@@ -237,6 +237,12 @@ func RunUpdate(ctx context.Context, env *Env, opts UpdateOptions, deps UpdateDep
 	// LocatePath (KHÔNG LocatePathSync): mọi bước trước sao lưu dùng ĐÚNG
 	// compose.yaml đang có trên đĩa (bản container hiện tại được dựng lên) —
 	// đồng bộ chỉ chạy ở bước 5, SAU sao lưu (mục #3 v0.1.2).
+	//
+	// THỨ TỰ SỐNG CÒN (v0.1.46, F-21): LocatePath gọi access.Ensure ghi .env
+	// (GH_BIND_ADDR=0.0.0.0 + lan_legacy cho máy cũ chưa có) NGAY ĐÂY, trước
+	// LocatePathSync (bước 5) và mọi `docker compose up` — compose.yaml mới nghe
+	// ${GH_BIND_ADDR:-127.0.0.1}, thiếu .env thì cập nhật âm thầm đóng cổng LAN.
+	// Rollback về compose.yaml.bak cũ vẫn 0.0.0.0 (compose cũ bỏ qua biến này).
 	composePath, err := env.LocatePath()
 	if err != nil {
 		return err
@@ -408,6 +414,8 @@ func RunUpdate(ctx context.Context, env *Env, opts UpdateOptions, deps UpdateDep
 			_, _ = fmt.Fprintf(out, "     (không ghi được %s — %v)\n", hostlink.UpdateInProgressFile, err)
 		}
 	}
+	// .env (GH_BIND_ADDR) đã có từ LocatePath đầu hàm — xem ghi chú ở đó; test
+	// TestRunUpdate_WritesBindAddrBeforeFirstUp khoá thứ tự.
 	syncedPath, err := env.LocatePathSync()
 	if err != nil {
 		return rollbackAndWrap(ctx, plan, out, &OpError{
