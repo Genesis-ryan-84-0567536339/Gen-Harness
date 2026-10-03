@@ -8,7 +8,7 @@ import { fmtDMClock } from '../lib/format';
 import { queryClient } from '../lib/queryClient';
 import { Panel, SkeletonLines } from '../screens/common';
 import { toast } from '../lib/toast';
-import { UPDATED_FLAG, UPDATE_COMMAND, UPDATE_KEY, readableNotes, updateView } from './updateModel';
+import { UPDATED_FLAG, UPDATE_COMMAND, UPDATE_KEY, readableNotes, updatePollMs, updateView } from './updateModel';
 
 /**
  * Thẻ "Có bản mới" ở Tổng quan: bấm "Cập nhật ngay" để genh trên máy chủ tự sao lưu → tải bản mới → khởi động lại
@@ -26,7 +26,7 @@ export function UpdateCard({ always = false, hideFailed = false }: { always?: bo
     retry: false,
     refetchInterval: (query) => {
       const s = query.state.data?.state;
-      return waitingFor || s === 'requested' || s === 'running' ? 4000 : false;
+      return waitingFor ? 4000 : updatePollMs(s);
     },
   });
   const request = useMutation({

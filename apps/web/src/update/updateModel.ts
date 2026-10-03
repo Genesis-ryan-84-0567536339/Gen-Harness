@@ -3,6 +3,11 @@ import type { SystemUpdate } from '@gen-harness/contracts';
 export const UPDATE_COMMAND = '~/.gen-harness/bin/genh update';
 export const UPDATE_KEY = ['system', 'update'] as const;
 
+/** v0.1.42: khi đang cập nhật (requested/running) hỏi lại mỗi 4 giây — dòng báo ở Hôm nay tự đổi sang xong/lỗi. */
+export function updatePollMs(state: string | null | undefined): number | false {
+  return state === 'requested' || state === 'running' ? 4000 : false;
+}
+
 type StepState = 'done' | 'active' | 'todo';
 export type UpdateView =
   | { kind: 'hidden' }

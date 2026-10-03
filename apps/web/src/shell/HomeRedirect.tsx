@@ -58,7 +58,7 @@ export function HomeRedirect() {
           <EmptyState
             icon="ph ph-user-circle"
             title="Vai trò này chưa được cấp màn hình nào"
-            description="Nhờ Owner cấp thêm quyền ở Đội ngũ. Thông tin tài khoản của bạn vẫn xem được."
+            description="Nhờ Owner đổi vai trò ở Đội ngũ hoặc mở quyền ở Cài đặt › Quyền hạn. Thông tin tài khoản của bạn vẫn xem được."
             actions={<Link to="/account">Tài khoản của tôi</Link>}
           />
         </Card>

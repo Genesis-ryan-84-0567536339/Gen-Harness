@@ -132,7 +132,11 @@ export function AppShell() {
       <Sidebar activeKey={navKey} />
       {drawerOpen ? <div className="sb-backdrop" aria-hidden onClick={() => setDrawerOpen(false)} /> : null}
       <main className="main" id="main" tabIndex={-1}>
-        <Header crumbs={crumbs} advanced={!!activeKey && SCREEN_BY_KEY[activeKey]?.domain === 'tech'} />
+        <Header
+          crumbs={crumbs}
+          advanced={!!activeKey && SCREEN_BY_KEY[activeKey]?.domain === 'tech'}
+          screenKey={activeKey}
+        />
         <div className="content">
           {/* B5: màn lỗi chỉ thay vùng nội dung — thanh bên/header vẫn dùng được; đổi trang là thử vẽ lại. */}
           <ErrorBoundary variant="inline" resetKey={pathname}>

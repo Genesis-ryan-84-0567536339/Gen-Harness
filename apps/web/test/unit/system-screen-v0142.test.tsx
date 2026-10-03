@@ -3,7 +3,7 @@
  * Bộ não AI không gọi /providers khi vai trò không có system.read.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, RouterProvider, createMemoryRouter, useLocation } from 'react-router-dom';
 import { BrainTab } from '../../src/screens/system/BrainTab';
@@ -110,6 +110,26 @@ describe('Cài đặt — tab theo quyền', () => {
     r1.dispose();
     const r2 = renderSystem('owner', '/system?tab=users');
     await waitFor(() => expect(r2.state.location.pathname).toBe('/team'));
+  });
+
+  it('link cũ giữ tham số khác (?gen=…), bỏ tab', async () => {
+    const r = renderSystem('owner', '/system?tab=channels&gen=c-1');
+    await waitFor(() => expect(r.state.location.pathname).toBe('/connections'));
+    expect(r.state.location.search).toBe('?gen=c-1');
+  });
+
+  it('link cũ khi vai trò không mở được trang đích → ở lại Cài đặt, tab đầu tiên được phép', async () => {
+    // Manager chỉ có audit.read: không vào được Kết nối (system.read) hay Đội ngũ (roles.manage).
+    for (const path of ['/system?tab=channels', '/system?tab=users']) {
+      const r = renderSystem('manager', path);
+      const tabs = await screen.findAllByRole('tab');
+      expect(tabs).toHaveLength(1);
+      expect(tabs[0]).toHaveTextContent('Nhật ký');
+      expect(tabs[0]).toHaveAttribute('aria-selected', 'true');
+      expect(r.state.location.pathname).toBe('/system');
+      r.dispose();
+      cleanup();
+    }
   });
 
   it('?tab=storage&focus=health giữ nguyên (link chuông / sức khoẻ cũ)', async () => {

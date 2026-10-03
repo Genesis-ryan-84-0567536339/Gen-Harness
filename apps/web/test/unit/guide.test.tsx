@@ -66,7 +66,7 @@ describe('Hướng dẫn thiết lập (/guide)', () => {
     expect(cards[0].querySelector('details')).not.toHaveAttribute('open');
     expect(within(cards[1]).getByRole('link', { name: /Làm bước này/ })).toHaveAttribute('href', '/guide/6');
     expect(within(cards[0]).getByRole('link', { name: /Làm lại/ })).toHaveAttribute('href', '/guide/5');
-    expect(within(cards[1]).getByRole('link', { name: /Hoặc làm ở Nhóm & Con người/ })).toHaveAttribute('href', '/directory');
+    expect(within(cards[1]).getByRole('link', { name: /Hoặc làm ở Khách & Cơ hội › Khách & Nhóm/ })).toHaveAttribute('href', '/directory');
     // Đặt agent (thứ tự 05) cần agent (thứ tự 04) chưa có → nhắc theo SỐ THỨ TỰ trong danh sách.
     expect(within(cards[4]).getByText(/Nên làm việc 04 trước/)).toBeInTheDocument();
   });
@@ -88,7 +88,7 @@ describe('Hướng dẫn thiết lập (/guide)', () => {
     const hub = cards[8];
     expect(within(hub).getByText('Nối Gen-hub')).toBeInTheDocument();
     // v0.1.42 (F-61): thẻ Gen-hub chỉ ở Kết nối.
-    expect(within(hub).getByRole('link', { name: /Mở thẻ Gen-hub/ })).toHaveAttribute('href', '/connections');
+    expect(within(hub).getByRole('link', { name: /Mở thẻ Gen-hub/ })).toHaveAttribute('href', '/connections#genhub');
     expect(within(hub).getByText('Đã xong')).toBeInTheDocument();
     expect(screen.getByText('Đã xong 2/9 việc')).toBeInTheDocument();
   });

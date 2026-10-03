@@ -175,6 +175,6 @@ func checkBackupExists(ctx context.Context, runner dockercli.Runner, composePath
 		Code: ErrCodeRestoreFailed,
 		What: "Không tìm thấy bản sao lưu " + key + " — DỪNG LẠI, chưa đụng gì",
 		Why:  "khoá không có trong `python -m gh.backup list` (có thể đã bị dọn theo vòng đời)",
-		Next: "Chọn lại bản sao lưu trong Console (Điều khiển hệ thống › Dữ liệu & lưu trữ).",
+		Next: "Chọn lại bản sao lưu trong Console (Cài đặt › Sao lưu & cập nhật).",
 	}
 }

@@ -1,7 +1,7 @@
-import { Link, Navigate } from 'react-router-dom';
+import { Link, Navigate, useLocation } from 'react-router-dom';
 import { SCREEN_BY_KEY } from '@gen-harness/contracts';
 import { EmptyState, Icon, Tabs } from '@gen-harness/ui';
-import { useCan } from '../../lib/permissions';
+import { can, useCan } from '../../lib/permissions';
 import { useMe } from '../../lib/queries';
 import { useUrlState } from '../../lib/uiStore';
 import { ScreenHead, SkeletonLines } from '../common';
@@ -10,13 +10,15 @@ import { LogTab } from './LogTab';
 import { OrgTab } from './OrgTab';
 import { RolesTab } from './RolesTab';
 import { StorageTab } from './StorageTab';
+import { movedTabTarget } from './settingsModel';
 
 type SysTab = 'storage' | 'org' | 'brain' | 'roles' | 'log';
 
 /**
  * v0.1.42 (F-7): Cài đặt — 5 tab theo thứ tự, mỗi tab có quyền riêng; chỉ hiện tab vai trò được xem (Manager chỉ có
  * `audit.read` ⇒ đúng 1 tab Nhật ký, không gọi /providers). Kênh & đăng nhập chuyển sang Kết nối (/connections),
- * Người dùng sang Đội ngũ (/team) — link cũ `?tab=channels`, `?tab=users` tự chuyển tới đó.
+ * Người dùng sang Đội ngũ (/team) — link cũ `?tab=channels`, `?tab=users` tự chuyển tới đó khi vai trò mở được trang
+ * đích (giữ các tham số khác, vd `?gen=`); không thì ở lại Cài đặt, tab đầu tiên được phép (settingsModel).
  */
 const TABS: Array<{ key: SysTab; label: string; count?: string; genTarget?: string; perm: 'system.read' | 'audit.read' }> = [
   { key: 'storage', label: 'Sao lưu & cập nhật', count: 'sao lưu · bản mới', genTarget: 'system.tab.storage', perm: 'system.read' },
@@ -25,9 +27,6 @@ const TABS: Array<{ key: SysTab; label: string; count?: string; genTarget?: stri
   { key: 'roles', label: 'Quyền hạn', count: 'vai trò', perm: 'system.read' },
   { key: 'log', label: 'Nhật ký', count: '30 ngày', perm: 'audit.read' },
 ];
-
-/** Tab cũ (trước v0.1.42) → trang mới. */
-const MOVED: Record<string, string> = { channels: '/connections', users: '/team' };
 
 export function SystemScreen() {
   const meta = SCREEN_BY_KEY.system;
@@ -38,7 +37,9 @@ export function SystemScreen() {
   const allowed = TABS.filter((t) => (t.perm === 'audit.read' ? canAudit : canSystem));
   const fallback: SysTab = allowed[0]?.key ?? 'storage';
   const [tab, setTab] = useUrlState<string>('tab', fallback);
-  if (MOVED[tab]) return <Navigate to={MOVED[tab]} replace />;
+  const { search } = useLocation();
+  const moved = me.data ? movedTabTarget(search, (perm) => can(me.data, perm)) : null;
+  if (moved) return <Navigate to={moved} replace />;
   const current = allowed.find((t) => t.key === tab)?.key ?? fallback;
   const head = (
     <ScreenHead

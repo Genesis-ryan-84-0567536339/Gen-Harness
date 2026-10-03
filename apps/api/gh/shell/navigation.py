@@ -33,23 +33,23 @@ NAV: list[dict[str, Any]] = [
          _s("overview", "ph ph-sun-horizon", "Hôm nay", "Cần Sếp xử lý · 4 số chính", BAD),
          _g("Hộp thư & Việc", "ph ph-tray", [
              _s("inbox", "ph ph-tray", "Hộp thư", "Tin quan trọng đã được sắp xếp", WARN),
-             _s("workbench", "ph ph-pen-nib", "Bàn làm việc", "Workbench — soạn & duyệt", WARN),
-             _s("tasks", "ph ph-check-square", "Việc & Nhắc hẹn", "Tasks & Reminders", BAD),
+             _s("workbench", "ph ph-pen-nib", "Bàn làm việc", "Soạn & duyệt tin trả lời", WARN),
+             _s("tasks", "ph ph-check-square", "Việc & Nhắc hẹn", "Việc cần làm và lời nhắc", BAD),
          ]),
          _g("Khách & Cơ hội", "ph ph-address-book", [
-             _s("directory", "ph ph-address-book", "Khách & Nhóm", "Groups by channel · people filters"),
-             _s("opportunity", "ph ph-target", "Bảng cơ hội", "Opportunity Board", OK),
-             _s("deals", "ph ph-handshake", "Deal & Vụ việc", "Deals & Cases"),
-             _s("documents", "ph ph-files", "Tài liệu", "Documents"),
-             _s("search", "ph ph-brain", "Kho hội thoại", "Knowledge & Search"),
+             _s("directory", "ph ph-address-book", "Khách & Nhóm", "Nhóm theo kênh · lọc khách"),
+             _s("opportunity", "ph ph-target", "Bảng cơ hội", "Cơ hội bán hàng đang theo", OK),
+             _s("deals", "ph ph-handshake", "Deal & Vụ việc", "Thương vụ và vụ việc"),
+             _s("documents", "ph ph-files", "Tài liệu", "Báo giá, hợp đồng, tệp"),
+             _s("search", "ph ph-brain", "Kho hội thoại", "Tìm trong mọi hội thoại"),
              # F-65: Hồ sơ sống mở từ danh sách, không còn là mục thanh bên.
-             _s("profile", "ph ph-identification-card", "Hồ sơ sống", "Living Profile — mở từ danh sách",
+             _s("profile", "ph ph-identification-card", "Hồ sơ sống", "Hồ sơ một người — mở từ danh sách",
                 hidden=True),
          ]),
          _s("connections", "ph ph-plugs-connected", "Kết nối", "Bộ não AI, Zalo, Facebook, Gen-hub…"),
          _s("team", "ph ph-users", "Đội ngũ", "Người dùng, đánh giá, chăm sóc", children=[
-             _s("people", "ph ph-users-three", "Đánh giá con người", "People Review", needs_staff=True),
-             _s("care", "ph ph-heartbeat", "Chất lượng chăm sóc", "Care Quality", needs_staff=True),
+             _s("people", "ph ph-users-three", "Đánh giá con người", "Điểm nhân viên có chứng cứ", needs_staff=True),
+             _s("care", "ph ph-heartbeat", "Chất lượng chăm sóc", "Cách nhân viên chăm khách", needs_staff=True),
          ]),
          _s("system", "ph ph-gear-six", "Cài đặt", "Sao lưu, cập nhật, tổ chức, bộ não AI, quyền, nhật ký"),
      ]},
@@ -57,22 +57,22 @@ NAV: list[dict[str, Any]] = [
      "collapsed": True,
      "groups": [
          _g("Tầng dữ liệu", "ph ph-database", [
-             _s("raw", "ph ph-database", "Kho dữ liệu thô", "Raw Lake — bridge gom về", WARN),
-             _s("rules", "ph ph-funnel", "Quy tắc sàng lọc", "Refinery Rules"),
-             _s("clean", "ph ph-check-circle", "Kho sạch SSOT", "Clean store & working memory"),
-             _s("identity", "ph ph-git-merge", "Hợp nhất danh tính", "Identity Resolution", WARN),
+             _s("raw", "ph ph-database", "Kho dữ liệu thô", "Tin gốc bridge gom về", WARN),
+             _s("rules", "ph ph-funnel", "Quy tắc sàng lọc", "Lọc, phân loại, chấm điểm"),
+             _s("clean", "ph ph-check-circle", "Kho sạch SSOT", "Dữ liệu đã lọc & bộ nhớ làm việc"),
+             _s("identity", "ph ph-git-merge", "Hợp nhất danh tính", "Gộp một người nhiều tài khoản", WARN),
          ]),
          _g("Agent & Model", "ph ph-robot", [
-             _s("agents", "ph ph-user-focus", "Danh tính Agent", "Agent Identity"),
-             _s("api", "ph ph-plugs", "API & Model", "AI agent API settings"),
-             _s("mcp", "ph ph-plugs-connected", "MCP Hub", "External MCP servers", OK),
+             _s("agents", "ph ph-user-focus", "Danh tính Agent", "Tên, giọng, phạm vi trợ lý"),
+             _s("api", "ph ph-plugs", "API & Model", "Khoá API và model cho trợ lý"),
+             _s("mcp", "ph ph-plugs-connected", "MCP Hub", "Máy chủ MCP bên ngoài", OK),
          ]),
-         _s("graph", "ph ph-graph", "Bản đồ quan hệ", "Relationship Map", children=[
-             _s("notebook", "ph ph-notebook", "Sổ tay nhận thức", "Assistant notebook per ID"),
+         _s("graph", "ph ph-graph", "Bản đồ quan hệ", "Ai quen ai, qua đâu", children=[
+             _s("notebook", "ph ph-notebook", "Sổ tay nhận thức", "Ghi chú trợ lý theo từng người"),
          ]),
-         _s("supply", "ph ph-arrows-left-right", "Cung ↔ Cầu", "Supply & Demand", OK),
+         _s("supply", "ph ph-arrows-left-right", "Cung ↔ Cầu", "Ghép người cần với người có", OK),
          # F-41: đóng băng — route và API /plugins giữ nguyên, không hiện thanh bên.
-         _s("plugins", "ph ph-puzzle-piece", "Plugin & Tiện ích", "DSH base plugins & external add-ons", OK,
+         _s("plugins", "ph ph-puzzle-piece", "Plugin & Tiện ích", "Plugin nền và plugin cài thêm", OK,
             hidden=True),
      ]},
 ]

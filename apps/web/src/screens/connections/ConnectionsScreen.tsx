@@ -27,13 +27,15 @@ export function ConnectionsScreen() {
   const canManage = useCan('system.manage');
   const { hash } = useLocation();
 
-  // /connections#brain, #genhub (link từ Cài đặt › Bộ não AI, MCP Hub) → cuộn tới thẻ.
+  // /connections#brain, #genhub (link từ Cài đặt › Bộ não AI, MCP Hub, chuông, Bản tin Gen) → cuộn tới thẻ. Cuộn lại khi
+  // danh sách kênh tải xong (thẻ kênh nằm trên Gen-hub — khung chờ thấp hơn thẻ thật làm lệch vị trí).
+  const channelsReady = !useChannels().isPending;
   useEffect(() => {
     if (!hash) return;
     const id = hash.slice(1);
     const t = window.setTimeout(() => document.getElementById(id)?.scrollIntoView?.({ block: 'start' }), 50);
     return () => window.clearTimeout(t);
-  }, [hash]);
+  }, [hash, channelsReady]);
 
   return (
     <div className="screen">

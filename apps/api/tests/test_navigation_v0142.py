@@ -1,6 +1,8 @@
 """v0.1.42 (F-7, F-41, F-65): cây danh mục 6 mục "Việc hằng ngày" + "Nâng cao"; màn ẩn; Đánh giá/Chăm sóc theo
 nhân viên (core.persons person_type='staff' còn hiệu lực)."""
 
+import re
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import text
@@ -118,3 +120,52 @@ def test_hidden_screens_never_have_badges() -> None:
     shown = by_key(navigation.build(owner, badges, has_staff=True))
     assert shown["people"]["badge"] == {"value": "7", "tone": "ok"}
     assert shown["plugins"]["badge"] is None
+
+
+# ── Cây Python (navigation.NAV) phải trùng packages/contracts/src/screens.ts (nit review v0.1.42) ──────────────────
+SCREENS_TS = Path(__file__).resolve().parents[3] / "packages" / "contracts" / "src" / "screens.ts"
+
+
+def _str_field(block: str, field: str) -> str | None:
+    m = re.search(rf"\b{field}: (?:'((?:[^'\\]|\\.)*)'|null)", block)
+    return m.group(1) if m else None
+
+
+def _ts_tree() -> dict[str, Any]:
+    src = SCREENS_TS.read_text("utf-8")
+    body = src.split("export const SCREENS: ScreenMeta[] = [", 1)[1].split("\n];", 1)[0]
+    screens: dict[str, dict[str, Any]] = {}
+    for block in re.findall(r"\{(.*?)\n  \}", body, flags=re.S):
+        key = _str_field(block, "key")
+        assert key, block
+        screens[key] = {"domain": _str_field(block, "domain"), "parent": _str_field(block, "parent"),
+                        "icon": _str_field(block, "icon"), "name": _str_field(block, "name"),
+                        "en": _str_field(block, "en"), "hidden": "navHidden: true" in block,
+                        "needs_staff": "needsStaff: true" in block}
+    order_src = src.split("export const NAV_ORDER", 1)[1].split("};", 1)[0]
+    order = {m.group(1): re.findall(r"'([^']+)'", m.group(2))
+             for m in re.finditer(r"^\s*(\w+): \[(.*)\],?$", order_src, flags=re.M)}
+    collapsed = {d: c == "true" for d, c in re.findall(r"(\w+): \{ id: '\w+'.*?collapsedByDefault: (\w+)", src)}
+    group_icons = dict(re.findall(r"'([^']+)': '(ph [^']+)'", src.split("GROUP_ICONS", 1)[1].split("};", 1)[0]))
+    return {"screens": screens, "order": order, "collapsed": collapsed, "group_icons": group_icons}
+
+
+def test_python_nav_matches_web_screens_ts() -> None:
+    ts = _ts_tree()
+    assert len(ts["screens"]) >= 25 and set(ts["order"]) == {"business", "tech"}
+    py_screens: dict[str, dict[str, Any]] = {}
+
+    def collect(nodes: list[dict[str, Any]], parent: str | None, domain: str) -> None:
+        for n in nodes:
+            if n["key"] is None:
+                assert n["icon"] == ts["group_icons"][n["name"]], n["name"]
+            else:
+                py_screens[n["key"]] = {"domain": domain, "parent": parent, "icon": n["icon"], "name": n["name"],
+                                        "en": n["en"], "hidden": n["hidden"], "needs_staff": n["needs_staff"]}
+            collect(n["children"], n["name"], domain)
+
+    for dom in navigation.NAV:
+        assert dom["collapsed"] == ts["collapsed"][dom["domain"]], dom["domain"]
+        assert [n["key"] or n["name"] for n in dom["groups"]] == ts["order"][dom["domain"]], dom["domain"]
+        collect(dom["groups"], None, dom["domain"])
+    assert py_screens == ts["screens"]

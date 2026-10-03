@@ -30,6 +30,12 @@ export function channelConnStatus(c: Pick<Channel, 'state'>): ConnStatus {
 /** Trạng thái tài khoản CLI đang dùng (null = chưa có tài khoản nào). */
 export type CliState = CliProfile['state'] | null;
 
+/** Thẻ tài khoản CLI: chưa có tài khoản đang dùng → Chưa nối; còn hạn / sắp hết hạn → Đang chạy; hết hạn → Cần Sếp xử lý. */
+export function cliConnStatus(active: Pick<CliProfile, 'state'> | undefined): ConnStatus {
+  if (!active) return 'not_connected';
+  return active.state === 'ok' || active.state === 'expiring' ? 'running' : 'needs_boss';
+}
+
 /** Hồ sơ CLI đang dùng → trạng thái gọn cho `brainStatus`. */
 export function activeCliState(profiles: CliProfile[] | undefined): CliState {
   return profiles?.find((p) => p.active)?.state ?? null;
@@ -79,9 +85,12 @@ export function facebookStatus({
   return fb.some((a) => a.status === 'active') ? 'running' : 'not_connected';
 }
 
-/** Gen-hub: đang nối → Đang chạy; token sắp/đã hết hạn hoặc lỗi → Cần Sếp xử lý; tắt → Chưa nối. */
+/**
+ * Gen-hub: đang nối → Đang chạy; token sắp/đã hết hạn hoặc lỗi → Cần Sếp xử lý; chưa điền địa chỉ/token → Chưa nối.
+ * Đã điền (configured) mà còn tắt (vd vừa sửa địa chỉ/token, chờ "Kiểm tra") → Cần Sếp xử lý — việc Sếp đang làm dở.
+ */
 export function hubStatus(link: Pick<HubLink, 'status' | 'configured'> | undefined): ConnStatus {
-  if (!link) return 'not_connected';
+  if (!link || !link.configured) return 'not_connected';
   switch (link.status) {
     case 'ok':
       return 'running';
@@ -90,7 +99,7 @@ export function hubStatus(link: Pick<HubLink, 'status' | 'configured'> | undefin
     case 'error':
       return 'needs_boss';
     default:
-      return 'not_connected';
+      return 'needs_boss';
   }
 }
 

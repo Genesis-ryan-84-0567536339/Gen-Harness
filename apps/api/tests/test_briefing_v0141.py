@@ -178,7 +178,7 @@ async def test_sections_complete(owner_api, db, redis) -> None:  # type: ignore[
     assert secs["incidents"]["link"] == "/system?tab=storage&focus=health"
     assert secs["facebook"]["count"] == 5 and secs["facebook"]["link"] == "/social"
     assert "Hỏi Gen “Kho có gì mới” để xem" in secs["kho"]["lines"]
-    assert secs["kho"]["link"] == "/connections"                      # v0.1.42: Gen-hub nằm ở Kết nối
+    assert secs["kho"]["link"] == "/connections#genhub"                     # v0.1.42: Gen-hub nằm ở Kết nối
     assert "Việc đến hạn (1): " in _says(c)
     bell = (await _bells(db))[0]
     assert bell.body.startswith("1 việc đến hạn · 1 khách nóng · 1 nháp chờ duyệt · 1 sự cố")

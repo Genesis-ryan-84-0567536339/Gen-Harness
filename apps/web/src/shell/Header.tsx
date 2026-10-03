@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useHeaderStatus } from '../lib/queries';
 import { SavedViewsButton } from '../screens/core/SavedViews';
 import { useUiStore } from '../lib/uiStore';
-import { autonomyTooltip, confidencePercent } from './headerModel';
+import { autonomyTooltip, confidencePercent, showSavedViews } from './headerModel';
 import { GenToggle } from '../gen/GenToggle';
 import { NotificationBell } from './NotificationBell';
 import { ThemeToggle } from './ThemeToggle';
@@ -20,10 +20,19 @@ export interface Crumbs {
 }
 
 /**
- * v0.1.42 (F-67): viên "tự trị", khiên độ tin cậy và nút "Góc nhìn đã lưu" chỉ hiện khi màn đang mở thuộc Nâng cao
- * (`advanced`); viên "N kênh · M nhóm" luôn hiện. F-63: bỏ dòng phụ đề tiếng Anh.
+ * v0.1.42 (F-67): viên "tự trị" và khiên độ tin cậy chỉ hiện khi màn đang mở thuộc Nâng cao (`advanced`); nút "Góc
+ * nhìn đã lưu" hiện ở Nâng cao và ở các màn nghiệp vụ có bộ lọc (SAVED_VIEW_SCREENS); viên "N kênh · M nhóm" luôn
+ * hiện. F-63: bỏ dòng phụ đề tiếng Anh.
  */
-export function Header({ crumbs, advanced = false }: { crumbs: Crumbs | null; advanced?: boolean }) {
+export function Header({
+  crumbs,
+  advanced = false,
+  screenKey = null,
+}: {
+  crumbs: Crumbs | null;
+  advanced?: boolean;
+  screenKey?: string | null;
+}) {
   const status = useHeaderStatus();
   const navigate = useNavigate();
   const drawerOpen = useUiStore((s) => s.drawerOpen);
@@ -83,7 +92,7 @@ export function Header({ crumbs, advanced = false }: { crumbs: Crumbs | null; ad
             <StatusPills s={status.data} advanced={advanced} />
           )}
         </div>
-        {advanced ? <SavedViewsButton /> : null}
+        {showSavedViews(screenKey, advanced) ? <SavedViewsButton /> : null}
         <GenToggle />
         <NotificationBell />
         <ThemeToggle />

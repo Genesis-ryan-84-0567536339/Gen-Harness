@@ -40,7 +40,7 @@ test.describe('v0.1.42 · menu', () => {
     await expect(nav(page).getByRole('button', { name: /Nâng cao/ })).toHaveAttribute('aria-expanded', 'false');
   });
 
-  test('3. Màn Nâng cao: tự mở, header có tự trị + khiên + Góc nhìn đã lưu; ngoài Nâng cao thì không', async ({ page }) => {
+  test('3. Màn Nâng cao: tự mở, header có tự trị + khiên + Góc nhìn đã lưu; màn có bộ lọc giữ Góc nhìn đã lưu', async ({ page }) => {
     await loginAsOwner(page);
     await page.goto('/raw');
     await expect(nav(page).getByRole('button', { name: /Nâng cao/ })).toHaveAttribute('aria-expanded', 'true');
@@ -54,6 +54,12 @@ test.describe('v0.1.42 · menu', () => {
     await expect(hd.getByText('tự trị 4')).toHaveCount(0);
     await expect(hd.getByRole('button', { name: 'Góc nhìn đã lưu' })).toHaveCount(0);
     await expect(page.locator('.hd-chip')).toHaveText('HẰNG NGÀY');
+    // Màn nghiệp vụ có bộ lọc: vẫn mở/lưu được góc nhìn, nhưng không có viên tự trị.
+    for (const path of ['/inbox', '/opportunity', '/directory']) {
+      await page.goto(path);
+      await expect(hd.getByRole('button', { name: 'Góc nhìn đã lưu' }), path).toBeVisible();
+      await expect(hd.getByText('tự trị 4'), path).toHaveCount(0);
+    }
   });
 
   test('4. Logo hiện phiên bản thật (GET /system/about), không còn "v2.2"', async ({ page }) => {
@@ -85,6 +91,8 @@ test.describe('v0.1.42 · menu', () => {
       page.locator('[data-gen-target="system.channels.facebook"]'),
       page.locator('[data-gen-target="mcp.hub_link"]'),
       page.getByRole('region', { name: 'MCP', exact: true }),
+      page.getByTestId('cli-card-antigravity_cli'),
+      page.getByTestId('cli-card-claude_code_cli'),
     ];
     for (const c of cards) {
       await expect(c).toBeVisible();
@@ -259,6 +267,8 @@ test.describe('v0.1.42 · nghiệm thu sau tích hợp', () => {
       page.locator('[data-gen-target="system.channels.facebook"]'),
       page.locator('[data-gen-target="mcp.hub_link"]'),
       page.getByRole('region', { name: 'MCP', exact: true }),
+      page.getByTestId('cli-card-antigravity_cli'),
+      page.getByTestId('cli-card-claude_code_cli'),
     ];
     for (const c of cards) {
       await expect(c).toBeVisible();
@@ -411,8 +421,30 @@ test.describe('v0.1.42 · nghiệm thu sau tích hợp', () => {
 
   test('21. Chữ cũ không còn; PIN chỉ ở Tài khoản; tài khoản CLI chỉ ở Kết nối; thẻ Cập nhật chỉ ở Cài đặt', async ({ page }) => {
     await loginAsOwner(page);
-    const OLD = ['Hộp thư ý nghĩa', 'Kỹ thuật · Backend', 'Chuỗi ưu tiên'];
-    const screens = ['/overview', '/inbox', '/connections', '/team', '/system', '/system?tab=brain', '/system?tab=org', '/account', '/help', '/guide', '/raw'];
+    const OLD = [
+      'Hộp thư ý nghĩa',
+      'Kỹ thuật · Backend',
+      'Chuỗi ưu tiên',
+      'Điều khiển hệ thống',
+      'Dữ liệu & lưu trữ',
+      'Tổng quan điều hành',
+      'Nhóm & Con người',
+    ];
+    const screens = [
+      '/overview',
+      '/inbox',
+      '/directory',
+      '/connections',
+      '/team',
+      '/system',
+      '/system?tab=brain',
+      '/system?tab=org',
+      '/account',
+      '/help',
+      '/guide',
+      '/guide/4',
+      '/raw',
+    ];
     for (const path of screens) {
       await page.goto(path);
       await expect(page.locator('.content')).not.toBeEmpty();
@@ -429,6 +461,13 @@ test.describe('v0.1.42 · nghiệm thu sau tích hợp', () => {
       if (path === '/system') await expect(upd).toHaveCount(1);
       else await expect(upd, `${path}: có thẻ Cập nhật`).toHaveCount(0);
     }
+    // Tiêu đề màn Khách & Nhóm trùng tên mục thanh bên.
+    await page.goto('/directory');
+    await expect(page.getByRole('heading', { level: 2, name: 'Khách & Nhóm' })).toBeVisible();
+    await expect(page.locator('.hd-title')).toHaveText('Khách & Nhóm');
+    // Bảng lệnh genh ở Trợ giúp chỉ đúng menu mới.
+    await page.goto('/help');
+    await expect(page.locator('.content')).toContainText('Cài đặt › Sao lưu & cập nhật › Sao lưu ngay');
     // Trợ giúp chỉ có liên kết tới Cài đặt › Sao lưu & cập nhật.
     await page.goto('/help');
     await expect(page.getByTestId('help-update-link')).toHaveAttribute('href', '/system?tab=storage');

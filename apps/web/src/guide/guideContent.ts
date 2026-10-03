@@ -56,7 +56,7 @@ export const GUIDE: GuideItem[] = [
       'Bấm "Tiếp tục".',
     ],
     doneWhen: 'Có ít nhất một nhóm không còn ở chế độ Không nghe.',
-    console: { label: 'Nhóm & Con người', to: '/directory' },
+    console: { label: 'Khách & Cơ hội › Khách & Nhóm', to: '/directory' },
     after: 5,
   },
   {
@@ -161,8 +161,8 @@ export const GUIDE: GuideItem[] = [
       'Bấm "Lưu & kiểm tra" (nhập PIN khi được hỏi) và chờ báo Đã nối Kho.',
     ],
     doneWhen: 'Kiểm tra xanh ít nhất một lần.',
-    console: { label: 'Kết nối › Gen-hub', to: '/connections' },
-    doTo: '/connections',
+    console: { label: 'Kết nối › Gen-hub', to: '/connections#genhub' },
+    doTo: '/connections#genhub',
     doLabel: 'Mở thẻ Gen-hub',
   },
 ];

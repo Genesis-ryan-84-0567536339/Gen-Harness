@@ -60,3 +60,34 @@ describe('thuật ngữ mới', () => {
     expect(where(/hộp thư ý nghĩa/i, CONTRACTS)).toEqual([]);
   });
 });
+
+/** Bỏ comment dòng và comment khối (kể cả trong JSX) — chỉ còn chữ app hiện ra và mã. */
+function stripComments(src: string): string {
+  return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
+}
+
+/** Các file có `needle` trong phần KHÔNG phải comment. */
+function whereInCode(needle: string, root = SRC): string[] {
+  return files(root)
+    .filter((f) => stripComments(readFileSync(f, 'utf8')).includes(needle))
+    .map((f) => relative(root, f).split('\\').join('/'))
+    .sort();
+}
+
+describe('tên menu cũ không còn trong chữ của app (review v0.1.42)', () => {
+  const OLD = ['Điều khiển hệ thống', 'Dữ liệu & lưu trữ', 'Tổng quan điều hành', 'Nhóm & Con người'];
+  for (const t of OLD) {
+    it(`"${t}"`, () => {
+      expect(whereInCode(t)).toEqual([]);
+      expect(whereInCode(t, CONTRACTS)).toEqual([]);
+    });
+  }
+
+  it('bộ lọc comment không nuốt chữ thật', () => {
+    expect(stripComments("const a = 'x'; // Dữ liệu & lưu trữ\n/* Điều khiển hệ thống */ const b = 'Nhóm & Con người';")).toBe(
+      "const a = 'x'; \n const b = 'Nhóm & Con người';",
+    );
+    expect(stripComments("const u = 'https://a.b/c';")).toBe("const u = 'https://a.b/c';");
+  });
+});
+

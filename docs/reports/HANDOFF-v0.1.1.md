@@ -2353,3 +2353,24 @@ Không cần chụp màn hình hay gửi mã cho Claude — kết quả tự lư
   unittest `.github/scripts` OK.
 - Chờ sau phát hành (người điều phối): kiểm genh tải từ Release đúng checksum + `genh version` = v0.1.42; E2E release
   xanh rồi mới promote; sau đó Boss xem menu mới như mục đầu.
+
+### Sửa sau review (trước khi gộp)
+
+- **Góc nhìn đã lưu** (F-67): nút ở header hiện lại ở các màn có bộ lọc (Hộp thư, Bàn làm việc, Việc & Nhắc hẹn, Khách &
+  Nhóm, Bảng cơ hội, Deal & Vụ việc, Tài liệu) và màn Nâng cao — góc nhìn Sếp đã lưu trước đây vẫn mở/xoá được; chỉ viên
+  tự trị + khiên % là riêng Nâng cao (`headerModel.showSavedViews`).
+- **Tên menu cũ** (F-7): tiêu đề màn Khách & Nhóm lấy từ `SCREEN_BY_KEY`; chữ trỏ menu cũ đổi hết — "Điều khiển hệ
+  thống", "Dữ liệu & lưu trữ", "Tổng quan điều hành", "Nhóm & Con người" không còn trong chữ của web, API (tin sao lưu,
+  bước 11) và genh (gợi ý khôi phục); "trên Tổng quan" → "trên Hôm nay". Chặn tái phát: pytest
+  `test_old_menu_names_v0142.py` (chuỗi Python/JSON của API + chuỗi Go của genh), vitest `single-card-v0142` (bỏ
+  comment rồi quét `apps/web/src`, `packages/contracts/src`), e2e mục 21 thêm 4 tên cũ và `/directory`, `/guide/4`.
+- **F-63**: mô tả mục thanh bên (`en`) Việt hoá ở `screens.ts`, `navigation.py`, `docs/design/screens.json`; pytest
+  `test_python_nav_matches_web_screens_ts` so cây Python với `screens.ts` (key, cha, thứ tự, icon, tên, mô tả, ẩn,
+  cần nhân viên, thu gọn).
+- **Kết nối**: thẻ tài khoản CLI dùng viên trạng thái chung + một nút chính (e2e 6, 13 thêm 2 thẻ CLI); Gen-hub đã điền
+  địa chỉ/token mà còn tắt → "Cần Sếp xử lý"; mọi link tới Gen-hub (việc 14, chuông token, Bản tin mục Kho) có
+  `#genhub` và trang cuộn lại khi danh sách kênh tải xong.
+- **Link cũ `/system?tab=channels|users`**: chỉ chuyển khi vai trò mở được trang đích (không thì ở lại Cài đặt, tab
+  đầu tiên được phép), giữ tham số khác (`?gen=`).
+- Dòng báo cập nhật ở Hôm nay tự hỏi lại mỗi 4 giây khi đang cập nhật; trang chủ của vai trò chưa có màn nào chỉ đúng
+  chỗ: "đổi vai trò ở Đội ngũ hoặc mở quyền ở Cài đặt › Quyền hạn".

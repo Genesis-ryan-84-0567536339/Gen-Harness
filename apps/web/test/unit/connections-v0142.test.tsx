@@ -71,6 +71,9 @@ describe('connectionsModel', () => {
     expect(hubStatus({ status: 'expired', configured: true })).toBe('needs_boss');
     expect(hubStatus({ status: 'error', configured: true })).toBe('needs_boss');
     expect(hubStatus({ status: 'off', configured: false })).toBe('not_connected');
+    // Đã điền địa chỉ/token nhưng còn tắt (chờ Kiểm tra) → việc Sếp đang làm dở.
+    expect(hubStatus({ status: 'off', configured: true })).toBe('needs_boss');
+    expect(hubStatus({ status: 'ok', configured: false })).toBe('not_connected');
   });
 
   it('mcpStatus: không máy chủ bật / có máy lỗi / ổn; đếm máy chủ đang bật', () => {

@@ -16,3 +16,21 @@ export function confidencePercent(v: number | null | undefined): number | null {
 export function badgeText(n: number): string {
   return n > 9 ? '9+' : String(n);
 }
+
+/**
+ * Màn nghiệp vụ có bộ lọc trên URL — vẫn giữ nút "Góc nhìn đã lưu" ở header (góc nhìn đã lưu trước v0.1.42 cho các màn
+ * này vẫn mở/xoá được). Màn Nâng cao (`tech`) luôn có nút.
+ */
+export const SAVED_VIEW_SCREENS: ReadonlySet<string> = new Set([
+  'inbox',
+  'workbench',
+  'tasks',
+  'directory',
+  'opportunity',
+  'deals',
+  'documents',
+]);
+
+export function showSavedViews(key: string | null | undefined, advanced: boolean): boolean {
+  return advanced || (!!key && SAVED_VIEW_SCREENS.has(key));
+}

@@ -129,7 +129,7 @@ describe('GenPanel', () => {
     ws({ turn_id: 't1', conversation_id: 'c1', seq: 2, step: { kind: 'suggest', items: [{ label: 'Mở hộp thư', action: { type: 'navigate', screen: 'inbox' } }] } });
     expect(screen.getByText('Có 3 việc cần Sếp xem.')).toBeInTheDocument();
     expect(screen.queryByText('trùng seq — bỏ qua')).toBeNull();
-    expect(screen.getByText(/Đã tra Tổng quan/)).toBeInTheDocument();
+    expect(screen.getByText(/Đã tra Hôm nay/)).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Mở hộp thư' }));
     expect(navigations).toContain('/inbox');
     turnReply = { turn_id: 't1', conversation_id: 'c1', status: 'done', steps: [] };

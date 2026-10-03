@@ -544,7 +544,8 @@ async def expiry_scan(db: AsyncSession, redis: Any = None, now: datetime | None 
         body = ("Gen tạm không đọc được Kho. " if expired else "") + \
             "Tạo token mới trong Gen-hub (agent gen-harness-…) rồi dán vào Kết nối › thẻ Gen-hub, bấm Kiểm tra."
         await notifications.notify(db, r.org_id, await notifications.owner_ids(db, r.org_id),
-                                   kind="hub.token_expiring", title=title, body=body, link="/connections", redis=redis)
+                                   kind="hub.token_expiring", title=title, body=body, link="/connections#genhub",
+                                   redis=redis)
         await db.execute(text("UPDATE agent.hub_links SET expiry_notified_at = :n WHERE org_id = :o"),
                          {"n": now, "o": r.org_id})
         await actionlog.record(db, org_id=r.org_id, actor_type="system", actor_id="system:worker",

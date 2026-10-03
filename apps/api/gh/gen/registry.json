@@ -763,7 +763,7 @@
       ],
       "done_when": "Có ít nhất một nhóm không còn ở chế độ Không nghe.",
       "console": {
-        "label": "Nhóm & Con người",
+        "label": "Khách & Cơ hội › Khách & Nhóm",
         "to": "/directory"
       }
     },
@@ -879,7 +879,7 @@
       "done_when": "Kiểm tra xanh ít nhất một lần.",
       "console": {
         "label": "Kết nối › Gen-hub",
-        "to": "/connections"
+        "to": "/connections#genhub"
       }
     }
   ]

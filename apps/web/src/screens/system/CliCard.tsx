@@ -10,6 +10,8 @@ import { toast } from '../../lib/toast';
 import { useNow } from '../../lib/useNow';
 import { errorText } from '../../lib/errorText';
 import { CardError, InlineError, SkeletonLines, StateChip } from '../common';
+import { ConnectionStatusPill } from '../connections/ConnectionStatusPill';
+import { cliConnStatus } from '../connections/connectionsModel';
 import {
   CLAUDE_CONSUMER_TERMS_URL,
   CLAUDE_TERMS_URL,
@@ -145,7 +147,11 @@ export function ClaudeRiskNotice() {
   );
 }
 
-/** Tài khoản CLI (Antigravity hoặc Claude Code) + "Khoá & phiên" rows (design CLI card + `creds`). */
+/**
+ * Tài khoản CLI (Antigravity hoặc Claude Code) + "Khoá & phiên" rows (design CLI card + `creds`). Chỉ render ở Kết nối
+ * (v0.1.42, F-61): viên trạng thái chung (ConnectionStatusPill) + đúng một nút chính (`data-main-action`); trạng thái chi
+ * tiết (Đang hoạt động / Sắp hết hạn / Hết hạn) nằm ở dòng meta.
+ */
 export function CliCard({ canManage, showCredentials = true, kind = 'antigravity_cli' }: { canManage: boolean; showCredentials?: boolean; kind?: CliKind }) {
   const profiles = useCliProfiles(kind);
   const txt = CLI_TEXT[kind];
@@ -180,11 +186,7 @@ export function CliCard({ canManage, showCredentials = true, kind = 'antigravity
             </div>
           ) : null}
         </div>
-        {profiles.data ? (
-          <StateChip color={chip.tone} border={chip.tone === 'var(--color-neutral-400)' ? 'var(--color-neutral-800)' : chip.tone} size="md" dot>
-            {chip.label}
-          </StateChip>
-        ) : null}
+        {profiles.data ? <ConnectionStatusPill status={cliConnStatus(active)} /> : null}
       </div>
       <div className="cli-body">
         {profiles.isPending ? (
@@ -202,22 +204,22 @@ export function CliCard({ canManage, showCredentials = true, kind = 'antigravity
               <div className="cli-email">{active ? cliAccountLabel(active) : `Chưa chọn tài khoản ${txt.account}`}</div>
               <div className="cli-meta">
                 {active
-                  ? `Đang dùng · ${cliMeta(active, now)}${others ? ` · ${others} tài khoản khác đã lưu` : ''}`
+                  ? `${chip.label} · ${cliMeta(active, now)}${others ? ` · ${others} tài khoản khác đã lưu` : ''}`
                   : list.length
                     ? `${list.length} tài khoản đã lưu — chọn một tài khoản để AI dùng`
                     : txt.empty}
               </div>
             </div>
             {canManage && active?.state === 'expired' && !login.active ? (
-              <Button variant="primary" className="btn-28" icon="ph ph-sign-in" onClick={() => login.start.mutate()} loading={login.start.isPending}>
+              <Button variant="primary" className="btn-28" icon="ph ph-sign-in" onClick={() => login.start.mutate()} loading={login.start.isPending} data-main-action>
                 Đăng nhập lại
               </Button>
             ) : canManage && list.length ? (
-              <Button variant={active ? 'secondary' : 'primary'} className="btn-28" icon="ph ph-user-switch" onClick={() => setSwitchOpen(true)}>
+              <Button variant={active ? 'secondary' : 'primary'} className="btn-28" icon="ph ph-user-switch" onClick={() => setSwitchOpen(true)} data-main-action>
                 {active ? 'Đổi tài khoản' : 'Chọn tài khoản'}
               </Button>
             ) : canManage && !login.active ? (
-              <Button variant="primary" className="btn-28" icon="ph ph-sign-in" onClick={() => login.start.mutate()} loading={login.start.isPending}>
+              <Button variant="primary" className="btn-28" icon="ph ph-sign-in" onClick={() => login.start.mutate()} loading={login.start.isPending} data-main-action>
                 {txt.login}
               </Button>
             ) : null}

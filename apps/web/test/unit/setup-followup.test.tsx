@@ -48,7 +48,7 @@ describe('Việc thiết lập tiếp (Tổng quan)', () => {
     expect(screen.getByText('Kết nối Facebook')).toBeInTheDocument();
     expect(screen.getByText('Nối Gen-hub')).toBeInTheDocument();
     const links = screen.getAllByRole('link', { name: /Làm ngay/ }).map((a) => a.getAttribute('href'));
-    expect(links).toEqual(['/social', '/connections']);
+    expect(links).toEqual(['/social', '/connections#genhub']);
     unmount();
     renderWith([item(5, false), item(13, true), item(14, true)]);
     expect(screen.queryByText('Kết nối Facebook')).not.toBeInTheDocument();
