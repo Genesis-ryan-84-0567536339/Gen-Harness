@@ -12,7 +12,7 @@ import { ScreenTitle } from '../screens/ScreenPage';
 import { GENH_COMMANDS, GENH_VERSION_LABEL, SERVER_VERSION_LABEL, diagnosticText, withVersions } from './helpModel';
 import { roleLabel } from '../screens/system/systemModel';
 
-const GEN_EXAMPLES = ['Hôm nay có gì gấp?', 'Chỉ em chỗ thêm khoá Jev', 'Sao lưu ở đâu?', 'Mời nhân viên mới thế nào?'];
+const GEN_EXAMPLES = ['Hôm nay có gì gấp?', 'Khách nào hỏi giá hôm nay?', 'Sao lưu ở đâu?', 'Mời nhân viên mới thế nào?'];
 
 /** Trợ giúp / Giới thiệu (`/help`, v0.1.22 — Đợt B3). Ai đăng nhập cũng mở được. */
 export function HelpPage() {

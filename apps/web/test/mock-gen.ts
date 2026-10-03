@@ -156,7 +156,7 @@ export function script(q: string): GenStep[] {
     ];
   }
   return [
-    { kind: 'say', text: 'Dạ, em là Gen. Sếp có thể hỏi "hôm nay có gì gấp?", hoặc nhờ em chỉ chỗ bấm, ví dụ "chỉ tôi cách thêm khoá Jev".' },
+    { kind: 'say', text: 'Dạ, em là Gen. Sếp có thể hỏi "hôm nay có gì gấp?", hoặc nhờ em chỉ chỗ bấm, ví dụ "chỉ tôi chỗ sao lưu".' },
     { kind: 'suggest', items: [{ label: 'Mở Tổng quan', action: { type: 'navigate', screen: 'overview' } }] },
   ];
 }

@@ -10,7 +10,15 @@ import { qk } from '../../src/lib/queries';
 /**
  * v0.1.39 (F-78): Jev không bắt buộc — nút "Kiểm tra 1 lần" (có kết quả thì ẩn), kiểm tra lỗi thì thẻ thu vào
  * "Nâng cao" thay vì để lỗi đỏ giữa tab Bộ não AI.
+ * v0.1.43 (F-30): thẻ Jev LUÔN nằm trong "Nâng cao — Jev (không bắt buộc)"; lỗi kiểm tra thì summary đổi chữ.
  */
+
+async function openAdvanced(): Promise<HTMLElement> {
+  const summary = await screen.findByText(/Nâng cao — Jev/);
+  const details = summary.closest('details')!;
+  if (!details.hasAttribute('open')) await userEvent.setup().click(summary);
+  return summary;
+}
 
 const TITLE = 'Jev — quyết định nhanh cho Gen';
 
@@ -81,25 +89,31 @@ describe('v0.1.39 — Jev "Kiểm tra 1 lần" và thu vào "Nâng cao" khi lỗ
     expect(view.container.textContent).not.toContain('[object Object]');
   });
 
-  it('Jev khoẻ: thẻ hiện thẳng, không có "Nâng cao", nút là "Kiểm tra 1 lần"', async () => {
+  it('Jev khoẻ: thẻ vẫn trong "Nâng cao — Jev (không bắt buộc)" (đóng sẵn); mở ra thấy nút "Kiểm tra 1 lần"', async () => {
     setup(jev(OK));
+    const summary = await screen.findByText('Nâng cao — Jev (không bắt buộc)');
+    const details = summary.closest('details')!;
+    expect(details).toHaveClass('brain-advanced');
+    expect(details).not.toHaveAttribute('open');
+    expect(screen.queryByText(TITLE)).not.toBeVisible();
+    await openAdvanced();
     expect(await screen.findByRole('button', { name: /Kiểm tra 1 lần/ })).toBeVisible();
     expect(screen.getByText(TITLE)).toBeVisible();
-    expect(screen.queryByText(/Nâng cao — Jev/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/đã ẩn vì kiểm tra lỗi/)).not.toBeInTheDocument();
   });
 
   it('bấm "Kiểm tra 1 lần" ra lỗi: nút biến mất, thẻ tự thu vào "Nâng cao"', async () => {
     const { fetchMock, view } = setup(jev(null), { result: FAIL, provider: jev(FAIL, 'error') });
+    const summary = await openAdvanced();
     const btn = await screen.findByRole('button', { name: /Kiểm tra 1 lần/ });
     await userEvent.setup().click(btn);
-    const summary = await screen.findByText(/Nâng cao — Jev/);
+    await screen.findByText('Nâng cao — Jev (đã ẩn vì kiểm tra lỗi, không bắt buộc)');
     expect(screen.queryByRole('button', { name: /Kiểm tra 1 lần/ })).not.toBeInTheDocument();
-    expect(screen.queryByText(TITLE)).not.toBeVisible();
     // Danh sách providers được tải lại sau khi kiểm.
     const listCalls = fetchMock.mock.calls.filter(([u, i]) => String(u).endsWith('/providers') && (i?.method ?? 'GET') === 'GET');
     expect(listCalls.length).toBeGreaterThanOrEqual(2);
-    // Mở "Nâng cao": vẫn còn kết quả của lần kiểm và dòng "Đã kiểm tra", không có nút kiểm lại.
-    await userEvent.setup().click(summary);
+    // "Nâng cao" vẫn mở: còn kết quả của lần kiểm và dòng "Đã kiểm tra", không có nút kiểm lại.
+    expect(summary.closest('details')).toHaveAttribute('open');
     expect(screen.getByText(TITLE)).toBeVisible();
     expect(screen.getByText(/Đã kiểm tra — Jev không bắt buộc, có thể bỏ qua/)).toBeVisible();
     expect(screen.queryByText(/không cần kiểm thêm/)).not.toBeInTheDocument();
@@ -107,12 +121,13 @@ describe('v0.1.39 — Jev "Kiểm tra 1 lần" và thu vào "Nâng cao" khi lỗ
     expect(view.container.textContent).not.toContain('[object Object]');
   });
 
-  it('bấm "Kiểm tra 1 lần" thành công: nút đổi thành "Đã kiểm tra", thẻ vẫn hiện thẳng', async () => {
+  it('bấm "Kiểm tra 1 lần" thành công: nút đổi thành "Đã kiểm tra", summary không báo lỗi', async () => {
     setup(jev(null), { result: OK, provider: jev(OK) });
+    await openAdvanced();
     await userEvent.setup().click(await screen.findByRole('button', { name: /Kiểm tra 1 lần/ }));
     expect(await screen.findByText(/Đã kiểm tra — không cần kiểm thêm/)).toBeVisible();
     await waitFor(() => expect(screen.getByText(/Jev trả lời được/)).toBeVisible());
     expect(screen.queryByRole('button', { name: /Kiểm tra 1 lần/ })).not.toBeInTheDocument();
-    expect(screen.queryByText(/Nâng cao — Jev/)).not.toBeInTheDocument();
+    expect(screen.getByText('Nâng cao — Jev (không bắt buộc)')).toBeInTheDocument();
   });
 });

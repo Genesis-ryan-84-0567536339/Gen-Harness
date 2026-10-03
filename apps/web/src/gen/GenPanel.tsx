@@ -8,7 +8,7 @@ import { GenHistory } from './GenHistory';
 import { ProposalCard } from './ProposalCard';
 import { useGenStore, type GenChatMessage } from './genStore';
 
-const EXAMPLES = ['Hôm nay có gì cần tôi xử lý?', 'Nhắc tôi gọi lại khách lúc 3 giờ chiều', 'Chỉ tôi cách thêm khoá Jev'];
+const EXAMPLES = ['Hôm nay có gì cần tôi xử lý?', 'Khách nào hỏi giá hôm nay?', 'Nhắc tôi gọi lại khách lúc 3 giờ chiều'];
 
 const TOOL_LABEL: Record<string, string> = {
   'overview.summary': 'Hôm nay',

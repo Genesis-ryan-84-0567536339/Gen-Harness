@@ -161,7 +161,9 @@ export function Step7Refinery({ meta, description, onBack, onSaved, formRef, onS
         {picked && picked.length === 0 ? <p className="inline-error">Chọn ít nhất một quy tắc.</p> : null}
       </div>
 
-      <div className="setup-section">
+      {/* v0.1.43 (F-30): trọng số là tinh chỉnh — gập vào "Nâng cao", giá trị và kiểm tổng 100% giữ nguyên. */}
+      <details className="setup-section brain-advanced">
+        <summary>Nâng cao — trọng số chấm điểm</summary>
         <div className="setup-section__title">Trọng số chấm điểm · tổng 100%</div>
         {weightsQ.isPending ? (
           <SkeletonLines rows={6} padding="0" />
@@ -179,7 +181,7 @@ export function Step7Refinery({ meta, description, onBack, onSaved, formRef, onS
             </span>
           </div>
         )}
-      </div>
+      </details>
     </StepFrame>
   );
 }
