@@ -58,10 +58,14 @@ async def _post_server(api: Api, endpoint: str, *, token: str | None = None, pub
 
 def test_forbidden_host_names() -> None:
     for h in ("db", "redis", "API", "browser-redis", "browser-egress", "db.", "gen-harness-api-1",
-              "gen-harness_db_1", "gen-harness-browser-redis-2", "localhost.localdomain"):
+              "gen-harness_db_1", "gen-harness-browser-redis-2", "localhost.localdomain",
+              # Tên kèm mạng docker và project khác `gen-harness` (review v0.1.45).
+              "db.gen-harness_default", "redis.myproj_default", "gen-harness-api-1.gen-harness_default",
+              "myproj-db-1", "other_redis_1"):
         assert forbidden_host(h), h
     for h in ("localhost", "127.0.0.1", "10.0.0.5", "hub.genos.top", "mcp.example.com", "dbx", "gen-harness-foo-1",
-              "ollama.lan"):
+              "ollama.lan", "api.openai.com", "web.example.com", "db.example.com", "redis.corp.lan",
+              "mcp-db-1.example.com"):
         assert not forbidden_host(h), h
 
 
@@ -77,6 +81,10 @@ async def test_pin_endpoint_rules_v0145() -> None:
     assert (await pin_endpoint("http://192.168.1.9/mcp", True, has_token=True)).ip == "192.168.1.9"
     with pytest.raises(McpBlockedNetwork, match="https"):
         await pin_endpoint("http://93.184.216.34/mcp", True, has_token=True)
+    # Tailscale / CGNAT 100.64.0.0/10 — đường riêng của Owner (WireGuard): http + token vẫn được khi bật mạng công cộng.
+    assert (await pin_endpoint("http://100.101.102.103:8080/mcp", True, has_token=True)).ip == "100.101.102.103"
+    with pytest.raises(McpBlockedNetwork, match="https"):
+        await pin_endpoint("http://8.8.8.8/mcp", True, has_token=True)
     t = await pin_endpoint("https://mcp.example.com/rpc", True, has_token=True)
     assert t.ip == FAKE_PUBLIC_IP and t.host == "mcp.example.com" and t.sni == "mcp.example.com"
 

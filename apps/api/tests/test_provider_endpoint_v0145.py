@@ -24,6 +24,8 @@ def _body(endpoint: str, keys: list[str] | None = None) -> dict[str, object]:
     ("https://0.0.0.0/v1", "vùng mạng bị cấm"),
     ("http://example.com/v1", "https://"),
     ("ftp://example.com/v1", "https://"),
+    ("http://", "không hợp lệ"),
+    ("https://example.com:99999/v1", "không hợp lệ"),
 ])
 async def test_create_provider_rejects_bad_endpoint(owner_api: Api, endpoint: str, needle: str) -> None:
     await verify_pin(owner_api)

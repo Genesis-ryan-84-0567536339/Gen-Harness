@@ -349,6 +349,9 @@ async def _check_provider_endpoint(endpoint: str | None, *, has_key: bool) -> No
     try:
         await pin_endpoint(endpoint, True, has_token=has_key)
     except McpBlockedNetwork as e:
+        if "không hợp lệ" in str(e):
+            raise field_errors({"endpoint": "Địa chỉ không hợp lệ — dạng https://<máy chủ>/v1 (hoặc http:// với máy "
+                                            "trong mạng nội bộ)"}) from e
         if "https://" in str(e):
             raise field_errors({"endpoint": "Có khoá API mà máy chủ ở mạng công cộng thì địa chỉ phải là https:// "
                                             "(http:// chỉ dùng được với máy trong mạng nội bộ)"}) from e

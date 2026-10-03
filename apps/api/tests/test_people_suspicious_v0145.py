@@ -108,6 +108,29 @@ async def test_api_returns_flag_and_manual_edit_keeps_it(world, owner_api: Api, 
     assert r.json()["suspicious"] is True and r.json()["suspicious_reason"] == bad.suspicious_reason
 
 
+async def test_recompute_refreshes_flag_on_manual_row(world, owner_api: Api, db) -> None:  # type: ignore[no-untyped-def]
+    """Tin đáng ngờ phát sinh SAU khi sửa điểm tay → lượt chạy job sau vẫn gắn cờ lên dòng sửa tay (dòng đang hiện)."""
+    p_tam = await _seed_bad_staff(world, db)
+    bad = await _row(db, p_tam)
+    await _pin(owner_api)
+    r = await owner_api.send("PATCH", f"/people/reviews/{bad.id}",
+                             {"score": 60, "reason": "Sửa tay", "evidence": [{"type": "meaning_unit",
+                                                                                "id": str(bad.id)}]})
+    assert r.status_code == 200, r.text
+    manual_id = r.json()["id"]
+    # Giả lúc sửa tay chưa có tin đáng ngờ: bản chép cờ trên dòng sửa tay = không cờ.
+    await db.execute(text("UPDATE biz.people_reviews SET suspicious = false, suspicious_reason = NULL "
+                          "WHERE person_id = :p"), {"p": p_tam})
+    await db.commit()
+    await recompute_people_reviews_org(db, world["org"], today=BASE_DATE + timedelta(days=1))
+    await db.commit()
+    row = (await db.execute(text("SELECT suspicious, suspicious_reason, score FROM biz.people_reviews "
+                                 "WHERE id = :i"), {"i": manual_id})).one()
+    assert row.suspicious is True and row.suspicious_reason == bad.suspicious_reason and row.score == 60
+    d = (await owner_api.get(f"/people/reviews/{manual_id}")).json()
+    assert d["suspicious"] is True
+
+
 async def test_migration_0030_is_rerunnable(fresh_db: str) -> None:
     sql = SQL_FILE.read_text(encoding="utf-8")
     with psycopg.connect(f"{PG}/{fresh_db}", autocommit=True) as c:

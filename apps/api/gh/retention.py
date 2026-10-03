@@ -178,6 +178,11 @@ async def purge_browser_results(db: AsyncSession, deadline: float) -> int:
 
 
 MCP_ARGS_DIGEST = "agent.mcp_calls.args"
+# Đã đổi hết dòng cũ trong một lượt trọn (không chạm hạn thời gian) ⇒ bỏ qua phần này tới khi cờ hết hạn — tránh mỗi
+# đêm quét lại cả agent.mcp_calls (điều kiện jsonb không có chỉ mục). TTL 7 ngày: quay về bản cũ (ghi nguyên văn) rồi
+# nâng lại thì vẫn được đổi trong vòng một tuần.
+MCP_ARGS_DONE_KEY = "gh:retention:mcp_args_digested"
+MCP_ARGS_DONE_TTL = 7 * 86400
 
 
 async def digest_mcp_call_args(db: AsyncSession, deadline: float) -> int:
@@ -197,6 +202,24 @@ async def digest_mcp_call_args(db: AsyncSession, deadline: float) -> int:
             args ?& array['sha256', 'keys', 'bytes'] AND jsonb_typeof(args->'keys') = 'array'
             AND (SELECT count(*) FROM jsonb_object_keys(args)) = 3)
           LIMIT :lim)""", {}, deadline)
+
+
+async def digest_mcp_call_args_once(db: AsyncSession, deadline: float, redis: Any = None) -> int:
+    """`digest_mcp_call_args` có cờ Redis "đã xong": cờ còn ⇒ 0 (không quét); một lượt chạy trọn trước hạn thời gian
+    ⇒ đặt cờ. Không có Redis / Redis lỗi ⇒ vẫn chạy như cũ."""
+    if redis is not None:
+        try:
+            if await redis.get(MCP_ARGS_DONE_KEY):
+                return 0
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Không đọc được %s: %s", MCP_ARGS_DONE_KEY, exc)
+    n = await digest_mcp_call_args(db, deadline)
+    if redis is not None and time.monotonic() < deadline:
+        try:
+            await redis.set(MCP_ARGS_DONE_KEY, "1", ex=MCP_ARGS_DONE_TTL)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Không ghi được %s: %s", MCP_ARGS_DONE_KEY, exc)
+    return n
 
 
 async def purge_orphan_attachments(db: AsyncSession, keep_days: int | None, deadline: float,
@@ -371,7 +394,6 @@ async def retention_sweep(ctx: dict[str, Any]) -> dict[str, Any]:
 
     await part("memory.entries", "batch", in_session(lambda db: purge_memory_entries(db, deadline)))
     await part(BROWSER_RESULT, "batch", in_session(lambda db: purge_browser_results(db, deadline)))
-    await part(MCP_ARGS_DIGEST, "batch", in_session(lambda db: digest_mcp_call_args(db, deadline)))
     if "raw.events" in keeps:
         raw_keep = keeps["raw.events"]
     else:  # partman lỗi — vẫn tính hạn từ bảng chính sách (chỉ đọc)
@@ -380,6 +402,10 @@ async def retention_sweep(ctx: dict[str, Any]) -> dict[str, Any]:
     await part("raw.attachments", "batch", in_session(lambda db: purge_orphan_attachments(db, raw_keep, deadline)))
     await part("agent.gen_conversations", "batch", in_session(purge_gen))
     await part("core.notifications", "batch", in_session(purge_notifications))
+    # Đổi dòng nhật ký MCP cũ chạy SAU các phần xoá quá hạn — lần đầu sau nâng cấp (bảng lớn) không ăn hết thời gian
+    # của chúng.
+    await part(MCP_ARGS_DIGEST, "batch",
+               in_session(lambda db: digest_mcp_call_args_once(db, deadline, ctx.get("redis"))))
     try:  # hạn lưu đặt trước v0.1.40 chưa xác nhận ⇒ không xoá, chỉ nhắc Owner
         async with sm() as db:
             await notify_unconfirmed(db, ctx.get("redis"))
@@ -398,5 +424,6 @@ async def retention_sweep(ctx: dict[str, Any]) -> dict[str, Any]:
 
 
 __all__ = ["BATCH", "CONFIRM_KIND", "DATASETS", "ENFORCED", "FIXED", "LAST_KEY", "PARTITIONED", "effective_keep_days",
-           "clear_partman_retention", "digest_mcp_call_args", "drop_expired_partitions", "ensure_leakproof",
-           "notify_unconfirmed", "partman_keeps", "read_last", "retention_sweep", "unconfirmed_orgs"]
+           "clear_partman_retention", "digest_mcp_call_args", "digest_mcp_call_args_once", "drop_expired_partitions",
+           "ensure_leakproof", "notify_unconfirmed", "partman_keeps", "read_last", "retention_sweep",
+           "unconfirmed_orgs"]

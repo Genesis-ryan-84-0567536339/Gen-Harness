@@ -77,8 +77,9 @@ def read_state(path: Path, max_bytes: int = MAX_STATE_BYTES, *, allow_self: bool
     """Đọc một tệp JSON trong hộp thư AN TOÀN. None khi thiếu, không an toàn (symlink, FIFO, thiết bị, nhiều hard
     link, quá lớn, sai chủ) hoặc JSON hỏng/không phải object.
 
-    Chủ hợp lệ: chủ thư mục gốc `run/` (genh) — `root` mặc định Settings.host_link_dir; `allow_self` thêm uid của
-    chính tiến trình api (tệp yêu cầu api tự ghi)."""
+    Chủ hợp lệ: chủ thư mục gốc `run/` (genh) — `root` mặc định Settings.host_link_dir; uid 0 (genh chạy bằng
+    `sudo` ghi lại trạng thái — chỉ root mới tạo được tệp do root sở hữu nên không nới mô hình tin cậy);
+    `allow_self` thêm uid của chính tiến trình api (tệp yêu cầu api tự ghi)."""
     path = Path(path)
     nofollow = getattr(os, "O_NOFOLLOW", 0)
     try:
@@ -108,7 +109,7 @@ def read_state(path: Path, max_bytes: int = MAX_STATE_BYTES, *, allow_self: bool
         elif st.st_size > max_bytes:
             reason = "quá lớn"
         else:
-            owners = {_owner_uid(root)}
+            owners = {_owner_uid(root), 0}
             if allow_self:
                 owners.add(os.geteuid())
             if st.st_uid not in owners:

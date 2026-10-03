@@ -129,20 +129,38 @@ def test_read_state_rejects_foreign_owner(run_dir: Path, monkeypatch: pytest.Mon
 
 
 def test_read_state_owner_is_run_root_or_self(run_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # uid giả (≠ 0) để test đúng cả khi CI chạy bằng root: tệp do api (5001) ghi, run/ thuộc genh (5002).
     p = _ok(run_dir / "request", "update.json", {"id": "x"})
-    real_stat = os.stat
+    real_stat, real_fstat = os.stat, os.fstat
 
-    def stat_root_other_uid(path: object, *a: object, **kw: object) -> os.stat_result:
+    def with_uid(st: os.stat_result, uid: int) -> os.stat_result:
+        lst = list(st)
+        lst[stat.ST_UID] = uid
+        return os.stat_result(lst)
+
+    def fake_stat(path: object, *a: object, **kw: object) -> os.stat_result:
         st = real_stat(path, *a, **kw)  # type: ignore[arg-type]
-        if Path(str(path)) == run_dir:
-            lst = list(st)
-            lst[stat.ST_UID] = st.st_uid + 1
-            return os.stat_result(lst)
-        return st
+        return with_uid(st, 5002) if Path(str(path)) == run_dir else st
 
-    monkeypatch.setattr(os, "stat", stat_root_other_uid)
+    monkeypatch.setattr(os, "stat", fake_stat)
+    monkeypatch.setattr(os, "fstat", lambda fd: with_uid(real_fstat(fd), 5001))
+    monkeypatch.setattr(os, "geteuid", lambda: 5001)
     assert read_state(p, root=run_dir) is None  # chủ run/ (genh) khác ⇒ tệp lạ
     assert read_state(p, root=run_dir, allow_self=True) == {"id": "x"}  # tệp yêu cầu do chính api ghi
+
+
+def test_read_state_accepts_root_owned(run_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`sudo genh doctor/start/update` ghi lại genh.json, update-status.json… với chủ uid 0 — vẫn phải đọc được."""
+    p = _ok(run_dir)
+    real_fstat = os.fstat
+
+    def fstat_root_owned(fd: int) -> os.stat_result:
+        st = list(real_fstat(fd))
+        st[stat.ST_UID] = 0
+        return os.stat_result(st)
+
+    monkeypatch.setattr(os, "fstat", fstat_root_owned)
+    assert read_state(p, root=run_dir) is not None
 
 
 # ─── API: tệp hợp lệ ⇒ bình thường; tệp bẫy ⇒ "không rõ", không 500 ─────────────────────────────────────────

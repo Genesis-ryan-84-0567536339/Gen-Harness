@@ -38,11 +38,23 @@ func runPermEnv(t *testing.T, uid int, chown func(string, int, int) error) (*Env
 	return env, composePath
 }
 
+// skipOnDarwin: các test kiểm chế độ 2770 dựa vào nhánh Linux của
+// hostlink.ensureRunDirs (theo runtime.GOOS thật, không theo runPermGOOS) — trên
+// macOS EnsureDir/SetRunMode chmod lại 0777 nên không thể giả Linux ở đây.
+// Windows vẫn chạy để kiểm nhánh "n/a".
+func skipOnDarwin(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS != "linux" && runtime.GOOS != "windows" {
+		t.Skipf("kiểm siết 2770 chỉ có nghĩa trên Linux (GOOS=%s)", runtime.GOOS)
+	}
+}
+
 func isRunPermCmd(c dockercli.Cmd) bool {
 	return len(c.Args) > 0 && c.Args[0] == "run" && strings.Contains(strings.Join(c.Args, " "), ":/r")
 }
 
 func TestEnsureRunDirPermsHelperContainer(t *testing.T) {
+	skipOnDarwin(t)
 	env, _ := runPermEnv(t, 1000, nil)
 	r := &fake.Runner{Responses: []fake.Response{{Match: isRunPermCmd, Output: []byte("GH_RUNPERM_OK\n")}}}
 	if runtime.GOOS != "windows" {
@@ -115,6 +127,7 @@ func TestEnsureRunDirPermsDockerErrorFallsBackOpen(t *testing.T) {
 }
 
 func TestEnsureRunDirPermsRootChownsDirectly(t *testing.T) {
+	skipOnDarwin(t)
 	type call struct {
 		path     string
 		uid, gid int

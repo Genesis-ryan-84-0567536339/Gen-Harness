@@ -156,3 +156,14 @@ async def test_retention_converts_legacy_rows(owner_api: Api, app: Any, db: Any)
     assert orjson.dumps(sorted(after, key=lambda a: a["sha256"])).decode() == before
     out = await retention.retention_sweep({"redis": app.state.redis})
     assert out["datasets"][retention.MCP_ARGS_DIGEST] == {"mode": "batch", "deleted": 0, "ok": True}
+    # Lượt trọn ⇒ cờ "đã xong"; có cờ thì lượt sau KHÔNG quét (dòng cũ chèn sau vẫn nguyên tới khi cờ hết hạn).
+    assert await app.state.redis.get(retention.MCP_ARGS_DONE_KEY)
+    async with admin_sessionmaker()() as adb:
+        await adb.execute(text("""INSERT INTO agent.mcp_calls (org_id, tool_id, agent_key, args, outcome)
+                                  VALUES (:o, :t, 'core.reply', CAST(:a AS jsonb), 'ok')"""),
+                          {"o": org, "t": tool["id"], "a": orjson.dumps({"q": "y"}).decode()})
+        await adb.commit()
+    async with sessionmaker()() as s3:
+        assert await retention.digest_mcp_call_args_once(s3, time.monotonic() + 60, app.state.redis) == 0
+        await app.state.redis.delete(retention.MCP_ARGS_DONE_KEY)
+        assert await retention.digest_mcp_call_args_once(s3, time.monotonic() + 60, app.state.redis) == 1

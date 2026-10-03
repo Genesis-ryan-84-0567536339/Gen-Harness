@@ -183,6 +183,15 @@ async def recompute_people_reviews_org(db: AsyncSession, org_id: uuid.UUID, *, t
             {"o": org_id, "p": r.staff_id, "ps": period_start, "pe": period_end, "sc": score, "tr": trend,
              "sig": signal, "rec": _recommendation(score), "ev": orjson.dumps(evidence).decode(),
              "sus": suspicious, "sus_r": reason})
+        # Dòng sửa tay cùng kỳ (dòng Sếp đang xem) cũng nhận cờ mới — tin đáng ngờ phát sinh SAU lúc sửa tay vẫn hiện
+        # cờ. Giữ nguyên suspicious_cleared_* (đã bỏ cờ thì vẫn là đã bỏ).
+        await db.execute(text("""
+            UPDATE biz.people_reviews SET suspicious = :sus, suspicious_reason = :sus_r
+            WHERE org_id = :o AND person_id = :p AND period_start = :ps AND period_end = :pe
+              AND overridden_by IS NOT NULL
+              AND (suspicious IS DISTINCT FROM :sus OR suspicious_reason IS DISTINCT FROM :sus_r)"""),
+            {"o": org_id, "p": r.staff_id, "ps": period_start, "pe": period_end, "sus": suspicious,
+             "sus_r": reason})
         n += 1
     return n
 

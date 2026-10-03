@@ -94,6 +94,11 @@ async def test_http_provider_not_forced_https_and_lan_ok() -> None:
     assert (await c2.list_models()) == ["m1"]
     with pytest.raises(BadRequest, match="vùng mạng bị cấm"):
         await OpenAICompatClient("http://redis:6379/v1", KEY, transport=httpx.MockTransport(rec.handle)).list_models()
+    # Sai dạng (cổng ngoài 0–65535) → "không hợp lệ", không gán nhầm "vùng mạng bị cấm" hay lộ chữ "máy chủ MCP".
+    with pytest.raises(BadRequest, match="không hợp lệ") as bad:
+        await OpenAICompatClient("http://10.0.0.7:99999/v1", KEY,
+                                 transport=httpx.MockTransport(rec.handle)).list_models()
+    assert "vùng mạng bị cấm" not in str(bad.value) and "MCP" not in str(bad.value)
     assert len(rec.seen) == 2
 
 

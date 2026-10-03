@@ -199,6 +199,8 @@ class HttpClient:
             async with pinned_client(self._transport, self._timeout) as c:
                 return await pinned_request(c, method, url, headers=headers, **kw)
         except McpBlockedNetwork as e:
+            if "không hợp lệ" in str(e):   # sai dạng (thiếu tên máy, cổng lạ) — không phải "vùng mạng bị cấm"
+                raise BadRequest("Địa chỉ nhà cung cấp không hợp lệ (cần dạng https://<máy chủ>/v1)") from e
             raise BadRequest(f"{PROVIDER_FORBIDDEN_MSG}: {e}") from e
         except McpError as e:   # không phân giải được tên máy — tạm thời (DNS chập chờn)
             raise ProviderError(str(e)) from e

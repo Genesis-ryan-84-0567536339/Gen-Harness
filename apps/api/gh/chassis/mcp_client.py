@@ -82,6 +82,12 @@ def _is_public(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     return not (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast)
 
 
+def _token_needs_https(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """Quy tắc "có token thì phải https" chỉ áp cho IP định tuyến TOÀN CẦU (`is_global`): 100.64.0.0/10 (CGNAT /
+    Tailscale — đường đã mã hoá WireGuard, `*.ts.net`) là mạng riêng của Owner nên http + token vẫn được."""
+    return ip.is_global and not ip.is_multicast
+
+
 def _unmap(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
     """`::ffff:a.b.c.d` → `a.b.c.d`: Python 3.11 coi mọi IPv4-mapped là "private" — không chuẩn hoá thì
     `[::ffff:8.8.8.8]` lọt qua công tắc mạng công cộng."""
@@ -95,20 +101,32 @@ def _unmap(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> ipaddress.IPv4A
 # PHẢI thêm tên ở đây (kèm tên container mặc định `gen-harness-<svc>-<n>` được nhận ra theo mẫu bên dưới).
 COMPOSE_SERVICE_NAMES = frozenset({"proxy", "web", "migrate", "api", "worker", "bridge", "browser", "browser-redis",
                                    "browser-egress", "db", "redis"})
-_CONTAINER_RE = re.compile(r"^gen-harness[-_](?P<svc>[a-z0-9-]+?)[-_]\d+$")
+# Tên container compose `<project>-<svc>-<n>` (v2) / `<project>_<svc>_<n>` (v1) — với MỌI tên project
+# (COMPOSE_PROJECT_NAME có thể khác `gen-harness`); chỉ áp cho tên MỘT nhãn (không có dấu chấm — chỉ DNS nhúng của
+# Docker mới phân giải được).
+_CONTAINER_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*[-_](?:"
+                           + "|".join(re.escape(n) for n in sorted(COMPOSE_SERVICE_NAMES, key=len, reverse=True))
+                           + r")[-_]\d+$")
 
 
 def forbidden_host(host: str) -> bool:
     """True nếu `host` là tên dịch vụ nội bộ của Gen-Harness: tên service compose (`db`, `redis`…), tên container
-    (`gen-harness-api-1`, `gen-harness_db_1`) hoặc `localhost.localdomain`. KHÔNG cấm `localhost`/127.x/LAN — Gen-hub,
-    Ollama trong LAN vẫn hợp lệ."""
+    (`gen-harness-api-1`, `gen-harness_db_1`, `<project>-db-1`), tên kèm mạng docker (`db.gen-harness_default` —
+    DNS nhúng của Docker phân giải `<container>.<network>`; tên mạng compose có `_`, không phải tên miền công cộng)
+    hoặc `localhost.localdomain`. KHÔNG cấm `localhost`/127.x/LAN — Gen-hub, Ollama trong LAN vẫn hợp lệ.
+
+    Chỉ chặn THEO TÊN: IP riêng 172.x của container vẫn đi qua (mạng nội bộ được phép theo thiết kế)."""
     h = (host or "").strip().rstrip(".").lower()
     if h.startswith("[") and h.endswith("]"):
         h = h[1:-1]
     if h in COMPOSE_SERVICE_NAMES or h == "localhost.localdomain":
         return True
-    m = _CONTAINER_RE.match(h)
-    return bool(m and m.group("svc") in COMPOSE_SERVICE_NAMES)
+    first, dot, rest = h.partition(".")
+    if dot and "_" in rest and (first in COMPOSE_SERVICE_NAMES or forbidden_host(first)):
+        return True
+    if dot:
+        return False
+    return bool(_CONTAINER_RE.match(h))
 
 
 def always_forbidden(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
@@ -135,6 +153,8 @@ async def _default_getaddrinfo(host: str, port: int) -> list[Any]:
 # Điểm phân giải DUY NHẤT của `pin_endpoint` — test thay bằng hàm giả (tests/conftest.py) để không phụ thuộc DNS thật.
 _getaddrinfo: Callable[[str, int], Awaitable[list[Any]]] = _default_getaddrinfo
 
+# Trung tính (dùng chung MCP, Gen-hub, nhà cung cấp AI) — bên gọi nhận ra qua "không hợp lệ".
+INVALID_ENDPOINT_MSG = "Địa chỉ không hợp lệ (cần dạng http(s)://<máy chủ>)"
 FORBIDDEN_SERVICE_MSG = "Địa chỉ trỏ vào tên dịch vụ nội bộ của Gen-Harness"
 HTTPS_REQUIRED_MSG = ("Có token mà máy chủ ở mạng công cộng thì phải dùng https:// (http:// chỉ dùng được với máy "
                       "trong mạng nội bộ hoặc cùng máy)")
@@ -161,11 +181,11 @@ async def pin_endpoint(endpoint: str, allow_public_network: bool, *, has_token: 
     u = urlparse(endpoint)
     host = u.hostname
     if not host or u.scheme not in ("http", "https"):
-        raise McpBlockedNetwork("Địa chỉ máy chủ MCP không hợp lệ")
+        raise McpBlockedNetwork(INVALID_ENDPOINT_MSG)
     try:
         port = u.port or (443 if u.scheme == "https" else 80)
     except ValueError as e:  # cổng ngoài 0–65535
-        raise McpBlockedNetwork("Địa chỉ máy chủ MCP không hợp lệ") from e
+        raise McpBlockedNetwork(INVALID_ENDPOINT_MSG) from e
     if forbidden_host(host):
         raise McpBlockedNetwork(f"{FORBIDDEN_SERVICE_MSG} ({host}) — vùng mạng bị cấm")
     literal = True
@@ -190,7 +210,7 @@ async def pin_endpoint(endpoint: str, allow_public_network: bool, *, has_token: 
     for ip in ips:
         if always_forbidden(ip):
             raise McpBlockedNetwork(f"Máy chủ MCP ({host}) phân giải ra vùng mạng bị cấm (link-local/siêu dữ liệu)")
-    if has_token and u.scheme != "https" and not _loopback_host(host) and any(_is_public(ip) for ip in ips):
+    if has_token and u.scheme != "https" and not _loopback_host(host) and any(_token_needs_https(ip) for ip in ips):
         raise McpBlockedNetwork(HTTPS_REQUIRED_MSG)
     if not allow_public_network and any(_is_public(ip) for ip in ips):
         raise McpBlockedNetwork(

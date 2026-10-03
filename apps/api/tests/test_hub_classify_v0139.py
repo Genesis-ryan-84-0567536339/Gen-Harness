@@ -7,6 +7,7 @@ from typing import Any
 
 from sqlalchemy import text
 
+from gh.chassis import mcp_client
 from gh.db import admin_sessionmaker
 from gh.hub_link import service as hub
 from tests.conftest import Api
@@ -26,7 +27,7 @@ def test_classify_network_blocked_link_local_is_forbidden() -> None:
 
 
 def test_classify_network_blocked_invalid_endpoint_is_not_forbidden() -> None:
-    msg = "Địa chỉ máy chủ MCP không hợp lệ"
+    msg = mcp_client.INVALID_ENDPOINT_MSG
     got = hub._classify(msg, code="MCP_NETWORK_BLOCKED")
     assert got == hub.ENDPOINT_INVALID_MSG and got != hub.ENDPOINT_FORBIDDEN_MSG
     assert hub._error_code(got, code="MCP_NETWORK_BLOCKED") == "HUB_ENDPOINT_INVALID"

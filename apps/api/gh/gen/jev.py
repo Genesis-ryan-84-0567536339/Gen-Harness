@@ -140,6 +140,8 @@ class JevClient:
             async with pinned_client(self.transport, self.timeout) as c:
                 resp = await pinned_request(c, "POST", url, json=payload, headers=self._headers())
         except McpBlockedNetwork as e:
+            if "không hợp lệ" in str(e):
+                raise JevError("Địa chỉ nhà cung cấp không hợp lệ") from e
             raise JevError(f"Địa chỉ nhà cung cấp trỏ vào vùng mạng bị cấm: {e}") from e
         except McpError as e:
             raise JevError(str(e)) from e
