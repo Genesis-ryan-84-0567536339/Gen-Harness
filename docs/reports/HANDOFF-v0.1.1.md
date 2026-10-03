@@ -2356,9 +2356,10 @@ Không cần chụp màn hình hay gửi mã cho Claude — kết quả tự lư
 
 ### Sửa sau review (trước khi gộp)
 
-- **Góc nhìn đã lưu** (F-67): nút ở header hiện lại ở các màn có bộ lọc (Hộp thư, Bàn làm việc, Việc & Nhắc hẹn, Khách &
-  Nhóm, Bảng cơ hội, Deal & Vụ việc, Tài liệu) và màn Nâng cao — góc nhìn Sếp đã lưu trước đây vẫn mở/xoá được; chỉ viên
-  tự trị + khiên % là riêng Nâng cao (`headerModel.showSavedViews`).
+- **Góc nhìn đã lưu** (F-67): nút ở header hiện ở các màn có bộ lọc trên URL (Hộp thư, Bàn làm việc, Việc & Nhắc hẹn,
+  Khách & Nhóm, Deal & Vụ việc, Tài liệu, Kho hội thoại, Đánh giá con người, Chất lượng chăm sóc), ở màn Nâng cao, và ở
+  mọi màn khác mà Sếp đã có góc nhìn lưu từ trước (header hỏi `GET /views?screen=`) — nên góc nhìn cũ vẫn mở/xoá được;
+  chỉ viên tự trị + khiên % là riêng Nâng cao (`headerModel.showSavedViews`).
 - **Tên menu cũ** (F-7): tiêu đề màn Khách & Nhóm lấy từ `SCREEN_BY_KEY`; chữ trỏ menu cũ đổi hết — "Điều khiển hệ
   thống", "Dữ liệu & lưu trữ", "Tổng quan điều hành", "Nhóm & Con người" không còn trong chữ của web, API (tin sao lưu,
   bước 11) và genh (gợi ý khôi phục); "trên Tổng quan" → "trên Hôm nay". Chặn tái phát: pytest
@@ -2374,3 +2375,20 @@ Không cần chụp màn hình hay gửi mã cho Claude — kết quả tự lư
   đầu tiên được phép), giữ tham số khác (`?gen=`).
 - Dòng báo cập nhật ở Hôm nay tự hỏi lại mỗi 4 giây khi đang cập nhật; trang chủ của vai trò chưa có màn nào chỉ đúng
   chỗ: "đổi vai trò ở Đội ngũ hoặc mở quyền ở Cài đặt › Quyền hạn".
+- **Sửa sau review lần 2** (F-7, F-41, F-61, F-63, F-64, F-67):
+  - Góc nhìn đã lưu: thêm Kho hội thoại / Đánh giá / Chăm sóc; bỏ Bảng cơ hội (không có bộ lọc URL) nhưng màn nào đã có
+    góc nhìn cũ vẫn hiện nút (vitest + e2e 3).
+  - Thẻ kênh chưa có (Telegram, LinkedIn chưa cài): dòng phụ "Kênh này chưa có trong bản đang chạy", nút chính "Chưa có
+    trong bản này" — hết chữ "chợ tiện ích"/"Cài plugin"; bước 5 và mô tả bước 5 không còn trỏ Plugin & Tiện ích (e2e 18).
+  - Đội ngũ chưa có nhân viên: vẫn giữ link Đánh giá/Chăm sóc (chỉ thanh bên ẩn), ghi chú nói cách đánh dấu nhân viên
+    (Quy tắc sàng lọc, kết quả `person_type = staff`) kèm link; trạng thái trống ở Đánh giá (bảng Nhân viên) và Chăm
+    sóc nói như vậy; Đội ngũ có khung chờ/thẻ lỗi khi tải menu (vitest + e2e 10).
+  - Logo: theo thứ tự `version` (genh trước) như `org.py`, bản phát triển không hiện "· dev".
+  - `GET /overview` không còn đếm `ops.plugins` (`health.plugins` bỏ); "Sự kiện hôm nay" → "Sự kiện 24 giờ qua".
+  - Chữ "Tổng quan" còn sót → "Hôm nay": tin chuông chi phí AI, cột ma trận Quyền hạn, mô tả đích Gen (registry.json
+    sinh lại); pytest `test_old_menu_names_v0142` chặn thêm "Tổng quan ›", "trang Tổng quan", "Đầu Tổng quan".
+  - Tài khoản: nút "Lịch sử nhập PIN (cả tổ chức)" (là nhật ký toàn tổ chức). Kết nối: Bộ não AI không hiện viên cho
+    vai trò không phải Owner (không biết "chưa chọn model"), kicker "tài khoản CLI ở thẻ riêng". Bước 12: "Nút Vào
+    Console". Crumbs/RouteHandle bỏ trường phụ đề tiếng Anh.
+  - e2e 22 mới: Auditor — "/" → Hôm nay, Kết nối chỉ xem (không Facebook, không lỗi, không nút thao tác), Cài đặt 5 tab,
+    `?tab=users` ở lại Cài đặt, `?tab=channels` → Kết nối.

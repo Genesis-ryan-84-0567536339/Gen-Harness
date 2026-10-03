@@ -248,7 +248,7 @@ export function OverviewScreen() {
               <>
                 <TechRow label="Kênh đang sống" value={fmtInt(tech.channels_live)} ok={tech.channels_live > 0} />
                 <TechRow label="Nhóm đang lắng nghe" value={fmtInt(tech.groups_listening)} ok={tech.groups_listening > 0} />
-                <TechRow label="Sự kiện hôm nay" value={fmtInt(tech.events_today)} ok />
+                <TechRow label="Sự kiện 24 giờ qua" value={fmtInt(tech.events_today)} ok />
                 <TechRow
                   label="Độ trễ xử lý"
                   value={tech.processing_latency_s === null ? 'chưa đủ dữ liệu' : `${fmtDec(tech.processing_latency_s, 1)} giây`}

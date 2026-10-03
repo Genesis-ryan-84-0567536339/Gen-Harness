@@ -20,7 +20,9 @@ export function Sidebar({ activeKey }: { activeKey: string | null }) {
   const nav = useNavigation();
   // v0.1.42 (F-67): phiên bản thật dưới logo — cùng khoá truy vấn với Trợ giúp (HelpPage).
   const about = useQuery({ queryKey: ['system', 'about'], queryFn: ({ signal }) => api.about(signal), staleTime: 5 * 60_000, retry: false });
-  const version = about.data ? about.data.image_version || about.data.version : null;
+  // Thứ tự như system_api/org.py: `version` (genh trước, rồi ảnh); bản phát triển ("dev") thì bỏ dòng phiên bản.
+  const img = about.data?.image_version;
+  const version = about.data ? about.data.version || (img && img !== 'dev' ? img : null) : null;
 
   return (
     <aside className="sb" id="app-sidebar" data-mode={mode} aria-label="Thanh bên">

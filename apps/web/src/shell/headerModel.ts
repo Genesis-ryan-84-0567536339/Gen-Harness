@@ -18,19 +18,22 @@ export function badgeText(n: number): string {
 }
 
 /**
- * Màn nghiệp vụ có bộ lọc trên URL — vẫn giữ nút "Góc nhìn đã lưu" ở header (góc nhìn đã lưu trước v0.1.42 cho các màn
- * này vẫn mở/xoá được). Màn Nâng cao (`tech`) luôn có nút.
+ * Màn nghiệp vụ có bộ lọc trên URL (gọi `useUrlState`) — giữ nút "Góc nhìn đã lưu" ở header. Màn Nâng cao luôn có
+ * nút. Màn khác (vd Bảng cơ hội, Cài đặt) vẫn hiện nút khi Sếp đã lưu góc nhìn ở đó từ trước (`savedCount > 0`) để
+ * mở/xoá được.
  */
 export const SAVED_VIEW_SCREENS: ReadonlySet<string> = new Set([
   'inbox',
   'workbench',
   'tasks',
   'directory',
-  'opportunity',
   'deals',
   'documents',
+  'search',
+  'people',
+  'care',
 ]);
 
-export function showSavedViews(key: string | null | undefined, advanced: boolean): boolean {
-  return advanced || (!!key && SAVED_VIEW_SCREENS.has(key));
+export function showSavedViews(key: string | null | undefined, advanced: boolean, savedCount = 0): boolean {
+  return advanced || (!!key && (SAVED_VIEW_SCREENS.has(key) || savedCount > 0));
 }

@@ -12,9 +12,16 @@ import { itemTitle } from '../../src/shell/navModel';
 
 describe('Góc nhìn đã lưu', () => {
   it('hiện ở Nâng cao và ở các màn nghiệp vụ có bộ lọc; không ở Hôm nay/Kết nối/Cài đặt', () => {
-    for (const k of ['inbox', 'workbench', 'tasks', 'directory', 'opportunity', 'deals']) expect(showSavedViews(k, false)).toBe(true);
-    for (const k of ['overview', 'connections', 'team', 'system', null]) expect(showSavedViews(k, false)).toBe(false);
+    for (const k of ['inbox', 'workbench', 'tasks', 'directory', 'deals', 'documents', 'search', 'people', 'care'])
+      expect(showSavedViews(k, false), k).toBe(true);
+    for (const k of ['overview', 'connections', 'team', 'system', 'opportunity', null]) expect(showSavedViews(k, false)).toBe(false);
     expect(showSavedViews('raw', true)).toBe(true);
+  });
+
+  it('màn ngoài danh sách vẫn hiện nút khi đã có góc nhìn lưu từ trước', () => {
+    expect(showSavedViews('system', false, 2)).toBe(true);
+    expect(showSavedViews('opportunity', false, 1)).toBe(true);
+    expect(showSavedViews(null, false, 3)).toBe(false);
   });
 
   it('mọi khoá trong danh sách là màn có thật', () => {

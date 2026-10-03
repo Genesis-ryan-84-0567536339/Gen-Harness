@@ -195,7 +195,8 @@ describe('channels model', () => {
     expect(channelAction(channel({})).label).toBe('Đăng xuất');
     expect(channelAction(channel({ type: 'whatsapp', state: 'expired' })).label).toBe('Quét lại QR');
     expect(channelAction(channel({ state: 'logged_out' })).label).toBe('Tạo mã QR');
-    expect(channelAction(channel({ type: 'telegram', state: 'not_installed' })).label).toBe('Cài plugin');
+    expect(channelAction(channel({ type: 'telegram', state: 'not_installed' }))).toMatchObject({ action: 'unavailable', label: 'Chưa có trong bản này' });
+    expect(channelMeta(channel({ type: 'telegram', state: 'not_installed' })).before).toBe('Kênh này chưa có trong bản đang chạy');
     expect(channelAction(channel({ type: 'linkedin', state: 'identity_only' })).label).toBe('Cấu hình');
   });
 

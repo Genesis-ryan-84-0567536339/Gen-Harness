@@ -86,8 +86,7 @@ khác nhau) nên không cần cột phân biệt loại trong `assignments`.
  "queue": [{"kind": "opportunity|alert|draft|due", "id", "code", "title", "priority", "at", "due_at"}],
  "spotlight": [{"person": PersonRef, "dimension": "heat|churn_risk", "value": 87.0, "at": "…"}],
  "signals": [{"topic": "thép cuộn", "count": 12, "delta_pct": 33.3}],
- "health": {"channels": [{"type": "zalo", "active": 1}], "plugins": {"healthy": 8, "degraded": 0, "isolated": 0},
-            "backlog_pending": 0,
+ "health": {"channels": [{"type": "zalo", "active": 1}], "backlog_pending": 0,
             "tech": {"channels_live": 2, "groups_listening": 5, "events_today": 340, "processing_latency_s": 1.2}},
  "dataQuality": {"missing_identity_pct": 4.2, "low_confidence_score_pct": 11.0, "unassigned_event_pct": 0.5},
  "hourly": [{"hour": "…", "count": 14}]}
@@ -103,7 +102,7 @@ khác nhau) nên không cần cột phân biệt loại trong `assignments`.
 | `pending_ratio` | Tỉ lệ chờ duyệt | `%` | `workbench`, `{status: "pending"}` |
 
 Đã bỏ khỏi `kpis`: `chassis_latency` (trùng `processing_latency`), `plugins_health` (màn Plugin đóng băng, F-41),
-`active_profiles`. Bốn số kỹ thuật (kênh sống, nhóm đang lắng nghe, sự kiện 24 giờ, độ trễ xử lý trung bình 20 lần
+`active_profiles`; `health.plugins` cũng không còn gửi (không truy vấn `ops.plugins` mỗi lần mở Hôm nay). Bốn số kỹ thuật (kênh sống, nhóm đang lắng nghe, sự kiện 24 giờ, độ trễ xử lý trung bình 20 lần
 sàng lọc gần nhất — giây, `null` khi chưa có) chuyển sang `health.tech` để phần "Nâng cao" dùng. Mỗi ô vẫn có
 `filter: {screen, filters}` để web điều hướng sang danh sách đã lọc tương ứng (định nghĩa "xong" #1 của `PLAN.md`).
 Web chỉ render mảng `kpis` và coi `health.tech` là tuỳ chọn ⇒ chạy được với cả API cũ lẫn mới.

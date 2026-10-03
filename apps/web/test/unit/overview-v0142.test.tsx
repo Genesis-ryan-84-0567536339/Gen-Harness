@@ -99,7 +99,7 @@ describe('Hôm nay — hàng số chính và Sức khoẻ hệ thống', () => {
     expect(tech.map((r) => r.textContent)).toEqual([
       expect.stringContaining('Kênh đang sống4'),
       expect.stringContaining('Nhóm đang lắng nghe42'),
-      expect.stringContaining('Sự kiện hôm nay3.184'),
+      expect.stringContaining('Sự kiện 24 giờ qua3.184'),
       expect.stringContaining('Độ trễ xử lý1,2 giây'),
     ]);
     expect(card.textContent).not.toMatch(/khoẻ · .* suy giảm|cách ly|plugin/i);

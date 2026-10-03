@@ -350,19 +350,12 @@ async def _health(db: AsyncSession, org_id: uuid.UUID) -> dict[str, Any]:
         SELECT c.type, count(*) FILTER (WHERE s.state = 'active') AS active
         FROM core.channels c LEFT JOIN core.channel_sessions s ON s.channel_id = c.id AND s.ended_at IS NULL
         WHERE c.org_id = :o GROUP BY c.type"""), {"o": org_id})).all()
-    plugins = (await db.execute(text("""
-        SELECT count(*) FILTER (WHERE b.state IS NULL OR b.state = 'closed') AS healthy,
-               count(*) FILTER (WHERE b.state = 'half_open') AS degraded,
-               count(*) FILTER (WHERE b.state = 'open') AS isolated
-        FROM ops.plugins p LEFT JOIN LATERAL (
-          SELECT state FROM ops.breaker_events WHERE plugin_id = p.id ORDER BY at DESC LIMIT 1) b ON true
-        WHERE p.is_enabled"""))).one()
     backlog = (await db.execute(text("""SELECT count(*) FROM refinery.event_state
                                         WHERE org_id = :o AND state = 'pending'
                                           AND updated_at < now() - interval '10 minutes'"""),
                                 {"o": org_id})).scalar_one()
+    # v0.1.42 (F-41/F-64): bỏ đếm ops.plugins — Console không còn đọc `health.plugins` (trường tuỳ chọn trong hợp đồng).
     return {"channels": [{"type": c.type, "active": c.active} for c in channels],
-            "plugins": {"healthy": plugins.healthy, "degraded": plugins.degraded, "isolated": plugins.isolated},
             "backlog_pending": backlog}
 
 

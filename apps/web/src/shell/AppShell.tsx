@@ -66,7 +66,7 @@ function useCrumbs(activeKey: string | null): Crumbs | null {
   return useMemo(() => {
     if (!activeKey) {
       const page = [...matches].reverse().map((m) => (m.handle as RouteHandle | undefined)?.page).find(Boolean);
-      return page ? { domain: page.domain, group: null, title: page.title, subtitle: page.subtitle } : null;
+      return page ? { domain: page.domain, group: null, title: page.title } : null;
     }
     const meta = SCREEN_BY_KEY[activeKey];
     let domainId: DomainId | undefined;
@@ -82,7 +82,6 @@ function useCrumbs(activeKey: string | null): Crumbs | null {
       domain: hit?.domain.crumb ?? (domainId ? DOMAINS[domainId].crumb : ''),
       group: hit ? (hit.isChild ? hit.group.name : null) : group,
       title: meta?.title ?? hit?.item.name ?? activeKey,
-      subtitle: meta?.subtitle ?? hit?.item.en ?? '',
     };
   }, [activeKey, matches, nav.data]);
 }

@@ -44,7 +44,7 @@ class Tool:
 
 
 TOOLS: dict[str, Tool] = {t.name: t for t in (
-    Tool("overview.summary", "Số liệu Tổng quan hôm nay + hàng đợi cần xử lý (cơ hội, cảnh báo, chờ duyệt, đến hạn)",
+    Tool("overview.summary", "Số liệu Hôm nay + hàng đợi cần xử lý (cơ hội, cảnh báo, chờ duyệt, đến hạn)",
          ("overview.read",), "/overview"),
     Tool("queue.list", "Hộp thư; args.tab ∈ all|opportunity|alert|approval|reply|candidate",
          ("queue.read",), "/inbox",

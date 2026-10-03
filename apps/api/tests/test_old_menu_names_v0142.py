@@ -10,7 +10,9 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
-OLD = ("Điều khiển hệ thống", "Dữ liệu & lưu trữ", "Tổng quan điều hành", "Nhóm & Con người")
+OLD = ("Điều khiển hệ thống", "Dữ liệu & lưu trữ", "Tổng quan điều hành", "Nhóm & Con người",
+       # Menu "Tổng quan" đổi tên thành "Hôm nay" (review v0.1.42): đường dẫn chữ trỏ tới menu cũ.
+       "Tổng quan ›", "trang Tổng quan", "Đầu Tổng quan")
 GO_STRING = re.compile(r'"(?:[^"\\\n]|\\.)*"|`[^`]*`')
 
 

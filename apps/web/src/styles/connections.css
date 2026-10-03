@@ -18,7 +18,7 @@
 .conn-pill[data-tone='warn'] { color: var(--color-warn); background: color-mix(in srgb, var(--color-warn) 8%, transparent); }
 .conn-pill[data-tone='neutral'] { color: var(--color-neutral-400); border-color: var(--color-neutral-700); }
 
-/* Thẻ kênh: chữ trạng thái chi tiết đầu dòng meta; "Chưa có trong bản này" thay nút Cài plugin. */
+/* Thẻ kênh: chữ trạng thái chi tiết đầu dòng meta; "Chưa có trong bản này" thay nút chính. */
 .ch-meta__state { font-weight: 500; }
 .ch-note { display: inline-flex; align-items: center; gap: 5px; flex: none; font-size: 11.5px; color: var(--color-neutral-400); }
 

@@ -35,7 +35,7 @@ export const SETUP_STEPS: StepMeta[] = [
   },
   {
     n: 5, key: 'channels', title: 'Kết nối kênh', required: false, built: true,
-    content: 'Thẻ từng kênh. Zalo/WhatsApp: tạo mã QR, đếm ngược 60 giây tự làm mới, chờ quét → đã quét → đồng bộ danh sách nhóm. Cảnh báo rủi ro tài khoản cá nhân trước khi hiện QR. Telegram và kênh khác: cài plugin từ chợ.',
+    content: 'Thẻ từng kênh. Zalo/WhatsApp: tạo mã QR, đếm ngược 60 giây tự làm mới, chờ quét → đã quét → đồng bộ danh sách nhóm. Cảnh báo rủi ro tài khoản cá nhân trước khi hiện QR. Telegram và kênh khác chưa có trong bản này — thẻ ghi rõ, không có nút cài.',
     doneWhen: 'Ít nhất một kênh đang hoạt động · hoặc Để sau (hiện ở "Việc thiết lập tiếp" trên Hôm nay)',
   },
   {
@@ -70,7 +70,7 @@ export const SETUP_STEPS: StepMeta[] = [
   },
   {
     n: 12, key: 'finish', title: 'Hoàn tất', required: true, built: true,
-    content: 'Tóm tắt những gì đã bật. Tiến độ lần sàng lọc đầu tiên theo thời gian thực: bản ghi thô đã gom · đang phân loại · đã vào kho sạch. Nút Mở Hôm nay.',
+    content: 'Tóm tắt những gì đã bật. Tiến độ lần sàng lọc đầu tiên theo thời gian thực: bản ghi thô đã gom · đang phân loại · đã vào kho sạch. Nút Vào Console (mở trang chủ theo vai trò — Owner là Hôm nay).',
     doneWhen: 'Bấm nút',
   },
 ];

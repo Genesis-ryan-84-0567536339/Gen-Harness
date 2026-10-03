@@ -60,9 +60,9 @@ export const GEN_SCREENS: GenScreen[] = [
 export const GEN_SCREEN_BY_KEY: Record<string, GenScreen> = Object.fromEntries(GEN_SCREENS.map((s) => [s.key, s]));
 
 export const GEN_TARGETS: GenTarget[] = [
-  // ── Tổng quan ──
-  { id: 'overview.needs_boss', screen: 'overview', label: 'Dải "Cần Sếp xử lý"', description: 'Đầu Tổng quan: các sự cố Sếp cần tự tay xử lý (kênh rớt, model hết đăng nhập, cập nhật lỗi, sao lưu quá hạn…)', permission: 'system.manage' },
-  { id: 'overview.kpis', screen: 'overview', label: 'Hàng chỉ số chính', description: 'Các ô số liệu đầu trang Tổng quan (cơ hội, cảnh báo, chờ duyệt…)' },
+  // ── Hôm nay (overview) ──
+  { id: 'overview.needs_boss', screen: 'overview', label: 'Dải "Cần Sếp xử lý"', description: 'Đầu trang Hôm nay: các sự cố Sếp cần tự tay xử lý (kênh rớt, model hết đăng nhập, cập nhật lỗi, sao lưu quá hạn…)', permission: 'system.manage' },
+  { id: 'overview.kpis', screen: 'overview', label: 'Hàng chỉ số chính', description: 'Các ô số liệu đầu trang Hôm nay (cơ hội, cảnh báo, chờ duyệt…)' },
   { id: 'overview.queue', screen: 'overview', label: 'Hàng đợi cần xử lý', description: 'Khung liệt kê cơ hội, cảnh báo, bản nháp chờ duyệt, việc đến hạn' },
   { id: 'overview.queue.row', screen: 'overview', label: 'Một dòng hàng đợi', description: 'Một mục cụ thể trong Hàng đợi cần xử lý', dynamic: 'row' },
   { id: 'overview.queue.open_inbox', screen: 'overview', label: 'Nút "Mở hộp thư"', description: 'Mở Hộp thư để xem toàn bộ hàng đợi' },

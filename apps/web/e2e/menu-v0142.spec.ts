@@ -4,7 +4,7 @@
  * header gọn ngoài Nâng cao, logo hiện phiên bản thật, Hôm nay một hàng 4 số, dải tab không tràn ở 1440px.
  */
 import { expect, test, type Page } from '@playwright/test';
-import { MANAGER, OWNER, apiCall, loginAs, loginAsOwner, mockHook, resetMock } from './support';
+import { AUDITOR, MANAGER, OWNER, apiCall, loginAs, loginAsOwner, mockHook, resetMock } from './support';
 
 const nav = (page: Page) => page.getByRole('navigation', { name: 'Danh mục màn hình' });
 const LEVEL1 = ['Hôm nay', 'Hộp thư & Việc', 'Khách & Cơ hội', 'Kết nối', 'Đội ngũ', 'Cài đặt', 'Nâng cao'];
@@ -55,11 +55,19 @@ test.describe('v0.1.42 · menu', () => {
     await expect(hd.getByRole('button', { name: 'Góc nhìn đã lưu' })).toHaveCount(0);
     await expect(page.locator('.hd-chip')).toHaveText('HẰNG NGÀY');
     // Màn nghiệp vụ có bộ lọc: vẫn mở/lưu được góc nhìn, nhưng không có viên tự trị.
-    for (const path of ['/inbox', '/opportunity', '/directory']) {
+    for (const path of ['/inbox', '/directory', '/search', '/people', '/care']) {
       await page.goto(path);
       await expect(hd.getByRole('button', { name: 'Góc nhìn đã lưu' }), path).toBeVisible();
       await expect(hd.getByText('tự trị 4'), path).toHaveCount(0);
     }
+    // Màn không có bộ lọc: không có nút — trừ khi Sếp đã lưu góc nhìn ở đó từ trước (vẫn mở/xoá được).
+    await page.goto('/opportunity');
+    await expect(page.locator('.hd-chip')).toBeVisible();
+    await expect(hd.getByRole('button', { name: 'Góc nhìn đã lưu' })).toHaveCount(0);
+    await apiCall(page, 'POST', '/views', { screen: 'opportunity', name: 'Góc nhìn cũ', filters: {} });
+    await page.reload();
+    await hd.getByRole('button', { name: 'Góc nhìn đã lưu' }).click();
+    await expect(page.getByRole('dialog').getByText('Góc nhìn cũ')).toBeVisible();
   });
 
   test('4. Logo hiện phiên bản thật (GET /system/about), không còn "v2.2"', async ({ page }) => {
@@ -153,14 +161,18 @@ test.describe('v0.1.42 · menu', () => {
     await expect(page.getByRole('link', { name: /Hướng dẫn thiết lập/ })).toHaveCount(0);
   });
 
-  test('10. Chưa có nhân viên: Đội ngũ không có Đánh giá/Chăm sóc trên thanh bên, có ghi chú', async ({ page }) => {
+  test('10. Chưa có nhân viên: thanh bên ẩn Đánh giá/Chăm sóc; Đội ngũ vẫn có link + cách đánh dấu nhân viên', async ({ page }) => {
     await resetMock(page.request, 'finished', { staff: false });
     await loginAsOwner(page);
     await page.goto('/team');
     await expect(nav(page).getByRole('link', { name: /Đội ngũ/ })).toHaveAttribute('aria-current', 'page');
     await expect(nav(page).getByText('Đánh giá con người')).toHaveCount(0);
     await expect(nav(page).getByText('Chất lượng chăm sóc')).toHaveCount(0);
-    await expect(page.getByText('Đánh giá và Chăm sóc hiện khi đã có ít nhất 1 nhân viên.', { exact: true }).last()).toBeVisible();
+    const note = page.getByRole('note').filter({ hasText: 'Chưa có nhân viên nào' });
+    await expect(note).toContainText('person_type = staff');
+    await expect(note.getByRole('link', { name: 'Mở Quy tắc sàng lọc' })).toHaveAttribute('href', '/rules');
+    await expect(page.locator('.team-links').getByRole('link', { name: /Đánh giá con người/ })).toHaveAttribute('href', '/people');
+    await expect(page.locator('.team-links').getByRole('link', { name: /Chất lượng chăm sóc/ })).toHaveAttribute('href', '/care');
     // Màn vẫn có route.
     await page.goto('/people');
     await expect(page.locator('.content')).not.toBeEmpty();
@@ -289,7 +301,7 @@ test.describe('v0.1.42 · nghiệm thu sau tích hợp', () => {
     const care = nav(page).getByRole('link', { name: /Chất lượng chăm sóc/ });
     await expect(people).toBeVisible();
     await expect(care).toBeVisible();
-    await expect(page.getByText('Đánh giá và Chăm sóc hiện khi đã có ít nhất 1 nhân viên.', { exact: true })).toHaveCount(0);
+    await expect(page.getByRole('note').filter({ hasText: 'Chưa có nhân viên nào' })).toHaveCount(0);
     await people.click();
     await expect(page).toHaveURL(/\/people$/);
     await expect(page.locator('.content')).not.toBeEmpty();
@@ -384,6 +396,10 @@ test.describe('v0.1.42 · nghiệm thu sau tích hợp', () => {
     const tg = page.getByRole('article', { name: 'Kênh Telegram' });
     await expect(tg.locator('[data-status]')).toHaveAttribute('data-status', 'not_connected');
     await expect(tg.locator('a[href^="/plugins"]')).toHaveCount(0);
+    await expect(tg).not.toContainText('chợ tiện ích');
+    await expect(tg).not.toContainText('Cài plugin');
+    await expect(tg).toContainText('Kênh này chưa có trong bản đang chạy');
+    await expect(tg.locator('[data-main-action]')).toHaveText('Chưa có trong bản này');
     await expect(page.locator('a[href^="/plugins"]')).toHaveCount(0);
   });
 
@@ -471,5 +487,29 @@ test.describe('v0.1.42 · nghiệm thu sau tích hợp', () => {
     // Trợ giúp chỉ có liên kết tới Cài đặt › Sao lưu & cập nhật.
     await page.goto('/help');
     await expect(page.getByTestId('help-update-link')).toHaveAttribute('href', '/system?tab=storage');
+  });
+
+  test('22. Auditor (system.read, không system.manage/roles.manage): "/" → Hôm nay; Kết nối chỉ xem; Cài đặt 5 tab; ?tab=users ở lại', async ({ page }) => {
+    await loginAs(page, AUDITOR.email);
+    await page.goto('/');
+    await expect(page).toHaveURL(/\/overview$/);
+    await page.goto('/connections');
+    await expect(page.getByRole('article', { name: 'Kênh Zalo' })).toBeVisible();
+    await expect(page.locator('.content [aria-busy="true"]')).toHaveCount(0);
+    await expect(page.locator('[aria-label="Facebook"]')).toHaveCount(0);
+    await expect(page.locator('.gh-state--error')).toHaveCount(0);
+    // Không có nút thao tác kênh (Quét lại QR / Tạo mã QR / Đăng xuất / Cấu hình).
+    await expect(page.getByRole('button', { name: /Quét lại QR|Tạo mã QR|Đăng xuất|Cấu hình/ })).toHaveCount(0);
+    // Bộ não AI: Auditor không đọc được "chưa chọn model" ⇒ không có viên trạng thái.
+    await expect(page.getByRole('region', { name: 'Bộ não AI' }).locator('[data-status]')).toHaveCount(0);
+    await page.goto('/system');
+    const tabs = page.getByRole('tablist', { name: 'Cài đặt' }).getByRole('tab');
+    await expect(tabs).toHaveCount(5);
+    await expect(page.getByRole('link', { name: /Hướng dẫn thiết lập/ })).toHaveCount(0);
+    await page.goto('/system?tab=users');
+    await expect(page).toHaveURL(/\/system/);
+    await expect(page.getByRole('tablist', { name: 'Cài đặt' })).toBeVisible();
+    await page.goto('/system?tab=channels');
+    await expect(page).toHaveURL(/\/connections$/);
   });
 });

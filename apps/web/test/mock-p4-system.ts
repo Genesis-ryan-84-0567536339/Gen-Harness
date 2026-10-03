@@ -68,7 +68,7 @@ export interface P4SystemOptions {
 
 // 7 cột ma trận thiết kế → các quyền thuộc cột đó (`gh.system_api.routes.PERMISSION_COLUMNS`, y hệt thứ tự).
 const PERMISSION_COLUMNS: Array<[string, string, string[]]> = [
-  ['overview', 'Tổng quan', ['overview.read']],
+  ['overview', 'Hôm nay', ['overview.read']],
   ['queue', 'Hàng đợi', ['queue.read', 'queue.act']],
   ['profile', 'Hồ sơ khách', ['profile.read', 'profile.write']],
   ['people_review', 'Đánh giá nhân sự', ['people_review.read', 'people_review.write', 'care.read']],

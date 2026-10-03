@@ -206,9 +206,12 @@ describe('Trang Kết nối', () => {
     expect(document.body.textContent).not.toContain('[object Object]');
   });
 
-  it('Auditor (không phải Owner): không có thẻ Facebook; kênh không có nút thao tác', async () => {
+  it('Auditor (không phải Owner): không có thẻ Facebook; kênh không có nút thao tác; Bộ não AI không có viên trạng thái', async () => {
     renderPage('auditor');
-    await card('Bộ não AI');
+    const brain = await card('Bộ não AI');
+    // Auditor không đọc được follow-up (chưa chọn model) ⇒ không hiện viên để khỏi báo "Đang chạy" sai.
+    expect(brain.querySelectorAll('[data-status]')).toHaveLength(0);
+    expect(brain).not.toHaveTextContent('bên dưới');
     await card('Kênh Zalo');
     expect(screen.queryByRole('region', { name: 'Facebook' })).not.toBeInTheDocument();
     const zalo = await card('Kênh Zalo');

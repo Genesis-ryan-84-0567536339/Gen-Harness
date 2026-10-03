@@ -7,7 +7,7 @@ export interface RouteHandle {
   group?: string;
   screen?: string;
   /** Trang ngoài danh mục màn (vd. Tài khoản của tôi) — breadcrumb cố định. */
-  page?: { domain: string; title: string; subtitle: string };
+  page?: { domain: string; title: string };
   /**
    * v0.1.42: trang ngoài danh mục màn tô sáng mục nào trên thanh bên (social → 'connections'; guide, account, help →
    * 'system').
@@ -15,12 +15,13 @@ export interface RouteHandle {
   navKey?: string;
 }
 
-export const ACCOUNT_CRUMBS = { domain: 'TÀI KHOẢN', title: 'Tài khoản của tôi', subtitle: 'My account' };
-export const HELP_CRUMBS = { domain: 'TRỢ GIÚP', title: 'Trợ giúp', subtitle: 'Help & about' };
-export const SOCIAL_CRUMBS = { domain: 'KẾT NỐI', title: 'Tài khoản mạng xã hội', subtitle: 'Social accounts' };
+/** F-63: header không còn phụ đề — crumbs chỉ có miền + tiêu đề tiếng Việt (không mang chữ tiếng Anh). */
+export const ACCOUNT_CRUMBS = { domain: 'TÀI KHOẢN', title: 'Tài khoản của tôi' };
+export const HELP_CRUMBS = { domain: 'TRỢ GIÚP', title: 'Trợ giúp' };
+export const SOCIAL_CRUMBS = { domain: 'KẾT NỐI', title: 'Tài khoản mạng xã hội' };
 /** v0.1.42 (F-66): Hướng dẫn thiết lập có breadcrumb riêng (trước đây trống). */
-export const GUIDE_CRUMBS = { domain: 'CÀI ĐẶT', title: 'Hướng dẫn thiết lập', subtitle: '' };
-export const BOSS_CHECKS_CRUMBS = { domain: 'CÀI ĐẶT', title: 'Việc Sếp cần làm', subtitle: '' };
+export const GUIDE_CRUMBS = { domain: 'CÀI ĐẶT', title: 'Hướng dẫn thiết lập' };
+export const BOSS_CHECKS_CRUMBS = { domain: 'CÀI ĐẶT', title: 'Việc Sếp cần làm' };
 
 export function useActiveScreenKey(): string | null {
   const matches = useMatches();

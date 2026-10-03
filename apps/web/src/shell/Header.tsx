@@ -3,6 +3,7 @@ import { Icon, IconButton, Pill, Skeleton, Tooltip } from '@gen-harness/ui';
 import { useNavigate } from 'react-router-dom';
 import { useHeaderStatus } from '../lib/queries';
 import { SavedViewsButton } from '../screens/core/SavedViews';
+import { useViews } from '../screens/core/queries';
 import { useUiStore } from '../lib/uiStore';
 import { autonomyTooltip, confidencePercent, showSavedViews } from './headerModel';
 import { GenToggle } from '../gen/GenToggle';
@@ -15,13 +16,12 @@ export interface Crumbs {
   /** Parent group name when the screen is a child. */
   group: string | null;
   title: string;
-  /** English subtitle (TITLES[1]). */
-  subtitle: string;
 }
 
 /**
  * v0.1.42 (F-67): viên "tự trị" và khiên độ tin cậy chỉ hiện khi màn đang mở thuộc Nâng cao (`advanced`); nút "Góc
- * nhìn đã lưu" hiện ở Nâng cao và ở các màn nghiệp vụ có bộ lọc (SAVED_VIEW_SCREENS); viên "N kênh · M nhóm" luôn
+ * nhìn đã lưu" hiện ở Nâng cao, ở các màn nghiệp vụ có bộ lọc (SAVED_VIEW_SCREENS) và ở màn đã có góc nhìn lưu từ
+ * trước; viên "N kênh · M nhóm" luôn
  * hiện. F-63: bỏ dòng phụ đề tiếng Anh.
  */
 export function Header({
@@ -37,6 +37,10 @@ export function Header({
   const navigate = useNavigate();
   const drawerOpen = useUiStore((s) => s.drawerOpen);
   const setDrawerOpen = useUiStore((s) => s.setDrawerOpen);
+  // Màn ngoài danh sách: chỉ hỏi GET /views?screen= để giữ đường mở/xoá góc nhìn đã lưu từ trước.
+  const listed = showSavedViews(screenKey, advanced);
+  const legacyViews = useViews(screenKey ?? undefined, !!screenKey && !listed);
+  const savedCount = legacyViews.data?.length ?? 0;
 
   return (
     <header className="hd">
@@ -92,7 +96,7 @@ export function Header({
             <StatusPills s={status.data} advanced={advanced} />
           )}
         </div>
-        {showSavedViews(screenKey, advanced) ? <SavedViewsButton /> : null}
+        {listed || showSavedViews(screenKey, advanced, savedCount) ? <SavedViewsButton /> : null}
         <GenToggle />
         <NotificationBell />
         <ThemeToggle />

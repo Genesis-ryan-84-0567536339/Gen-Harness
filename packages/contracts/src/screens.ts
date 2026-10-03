@@ -147,7 +147,7 @@ export const SCREENS: ScreenMeta[] = [
     key: 'team', domain: 'business', parent: null, icon: 'ph ph-users', extra: true,
     name: 'Đội ngũ', en: 'Người dùng, đánh giá, chăm sóc',
     title: 'Đội ngũ', subtitle: 'Team · người dùng, đánh giá, chăm sóc',
-    description: 'Người dùng Console: mời, đổi vai trò, khoá. Đánh giá và Chăm sóc nhân viên hiện khi đã có ít nhất 1 nhân viên.',
+    description: 'Người dùng Console: mời, đổi vai trò, khoá. Lối vào Đánh giá và Chăm sóc nhân viên (thanh bên hiện khi đã có ít nhất 1 nhân viên).',
     descMaxWidth: 700, designTitleRow: true,
   },
   {

@@ -5,7 +5,7 @@ import { EmptyState, Icon, Segmented } from '@gen-harness/ui';
 import { fmtDMClock, fmtDec, fmtInt } from '../../lib/format';
 import { useUrlState } from '../../lib/uiStore';
 import { CardError, Panel, ScreenHead, SkeletonLines, StateChip } from '../common';
-import { BAD, ISSUE_KIND_LABEL, OK, SCENARIO_LABEL, WARN, fmtVnd, minuteBandTone } from './peopleModel';
+import { BAD, ISSUE_KIND_LABEL, OK, SCENARIO_LABEL, STAFF_HOWTO, WARN, fmtVnd, minuteBandTone } from './peopleModel';
 import { useCareIssues, useCareResponseTimes, useCareScenarios } from './queries';
 
 export function CareScreen() {
@@ -78,7 +78,7 @@ export function CareScreen() {
           ) : response.isError ? (
             <CardError error={response.error} onRetry={() => void response.refetch()} retrying={response.isFetching} />
           ) : response.data.items.length === 0 ? (
-            <EmptyState icon="ph ph-chat-circle-dots" title="Chưa có dữ liệu phản hồi" />
+            <EmptyState icon="ph ph-chat-circle-dots" title="Chưa có dữ liệu phản hồi" description={`Lưới tính theo nhân viên trả lời khách. ${STAFF_HOWTO}`} />
           ) : (
             <ResponseGrid items={response.data.items} />
           )}

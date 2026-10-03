@@ -78,7 +78,8 @@ function BrainCard() {
   const noModel = !!step4 && !step4.done;
   const gen = (providers.data ?? []).filter((p) => p.kind !== 'system_one');
   const enabled = gen.filter((p) => p.enabled).length;
-  const status = providers.data
+  // Chỉ Owner biết "chưa chọn model" (follow-up) — vai trò khác không có viên, tránh hiện "Đang chạy" sai.
+  const status = isOwner && providers.data
     ? brainStatus({ providers: providers.data, cliStatus: [activeCliState(agy.data), activeCliState(claude.data)], noModel })
     : null;
   return (
@@ -90,7 +91,7 @@ function BrainCard() {
         providers.data
           ? noModel
             ? 'Chưa chọn model cho Gen và Sàng lọc'
-            : `${enabled}/${gen.length} nguồn khoá API đang bật · tài khoản CLI bên dưới`
+            : `${enabled}/${gen.length} nguồn khoá API đang bật · tài khoản CLI ở thẻ riêng`
           : 'Model, khoá API và tài khoản CLI'
       }
       aside={status ? <ConnectionStatusPill status={status} /> : undefined}

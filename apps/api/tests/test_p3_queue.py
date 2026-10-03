@@ -208,6 +208,7 @@ async def test_overview_kpis_cover_f4_and_link_to_filtered_lists(world, owner_ap
     by_key = {k["key"]: k for k in body["kpis"]}
     assert by_key["opportunity_claim_rate"]["filter"] == {"screen": "opportunity", "filters": {"owner": "none"}}
     assert by_key["quotations_sent"]["filter"] == {"screen": "workbench", "filters": {"kind": "quotation"}}
+    assert "plugins" not in body["health"]                          # F-41: không đếm ops.plugins nữa
     tech = body["health"]["tech"]
     assert set(tech) == {"channels_live", "groups_listening", "events_today", "processing_latency_s"}
     assert tech["groups_listening"] == 1

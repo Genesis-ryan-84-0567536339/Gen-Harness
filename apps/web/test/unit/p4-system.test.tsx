@@ -64,7 +64,7 @@ afterEach(() => {
 
 const PERMISSIONS_PAGE: PermissionsPage = {
   columns: [
-    { key: 'overview', label: 'Tổng quan', permissions: ['overview.read'] },
+    { key: 'overview', label: 'Hôm nay', permissions: ['overview.read'] },
     { key: 'queue', label: 'Hàng đợi', permissions: ['queue.read', 'queue.act'] },
     { key: 'profile', label: 'Hồ sơ khách', permissions: ['profile.read', 'profile.write'] },
     { key: 'people_review', label: 'Đánh giá nhân sự', permissions: ['people_review.read', 'people_review.write', 'care.read'] },

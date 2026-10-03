@@ -81,12 +81,12 @@ export function ChannelCard({ channel: c, canManage, large }: { channel: Channel
   const showQr = isQrChannel(c) && (!!c.qr || awaitingQr);
 
   let button = null;
-  if (act.action === 'install') {
+  if (act.action === 'unavailable') {
     // v0.1.42 (F-41): Plugin đóng băng — không còn dẫn tới /plugins; kênh này chưa có trong bản đang chạy.
     button = (
       <span className="ch-note" data-main-action>
-        <Icon name="ph ph-info" size={13} />
-        Chưa có trong bản này
+        <Icon name={act.icon} size={13} />
+        {act.label}
       </span>
     );
   } else if (act.action && canManage) {

@@ -51,7 +51,7 @@ export function Step5Channels({ meta, description, onBack, onSaved, formRef, onS
         </div>
       ) : channels.data.length === 0 ? (
         <div className="gh-card">
-          <EmptyState icon="ph ph-plugs" title="Chưa có kênh nào" description="Cài plugin kênh ở Plugin & Tiện ích." />
+          <EmptyState icon="ph ph-plugs" title="Chưa có kênh nào" description="Bản đang chạy chưa có kênh nhắn tin nào để kết nối." />
         </div>
       ) : (
         channels.data.map((c) => <ChannelCard key={c.type} channel={c} canManage large />)
