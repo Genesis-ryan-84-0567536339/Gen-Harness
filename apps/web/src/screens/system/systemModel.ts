@@ -340,7 +340,7 @@ export function auditActorTone(actorType: string): string {
 // ── Dữ liệu & lưu trữ (spec I) ───────────────────────────────────────────────
 export const RETENTION_LABEL: Record<string, string> = {
   'raw.events': 'Kho thô — tin nhắn nguyên bản',
-  'clean.meaning_units': 'Kho sạch — đơn vị ý nghĩa',
+  'clean.meaning_units': 'Kho sạch — ý chính từ tin nhắn',
   'ops.action_log': 'Nhật ký hành động',
   'memory.entries': 'Sổ tay nhận thức',
   'agent.model_calls': 'Lượt gọi model',

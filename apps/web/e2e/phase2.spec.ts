@@ -64,7 +64,7 @@ interface VisualCase {
 const CASES: VisualCase[] = [
   { key: 'raw', clicks: ['Tầng dữ liệu', 'Kho dữ liệu thô'], until: '.screen-desc', pixel: true },
   { key: 'rules', clicks: ['Tầng dữ liệu', 'Quy tắc sàng lọc'], until: '.rule-card >> nth=0', pixel: true },
-  { key: 'clean', clicks: ['Tầng dữ liệu', 'Kho sạch SSOT'], until: '.screen-desc', pixel: true },
+  { key: 'clean', clicks: ['Tầng dữ liệu', 'Kho sạch'], until: '.screen-desc', pixel: true },
   { key: 'identity', clicks: ['Tầng dữ liệu', 'Hợp nhất danh tính'], until: '.id-stats', pixel: true },
   { key: 'system', clicks: ['Điều khiển hệ thống'], until: '[role="tablist"]', pixel: false },
 ];

@@ -8,7 +8,7 @@ const TARGET: Record<number, string> = { 1: '/connections', 2: '/raw', 3: '/rule
 
 /**
  * Dải pipeline dùng chung cho Kho thô · Quy tắc · Kho sạch (design `pipeline`):
- * Bridge lắng nghe → Kho thô → Core agent sàng lọc → Kho sạch SSOT. The
+ * Bridge lắng nghe → Kho thô → Core agent sàng lọc → Kho sạch. The
  * current screen's step(s) get the accent border.
  */
 export function PipelineStrip({ screen }: { screen: DataScreen }) {

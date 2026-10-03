@@ -79,7 +79,7 @@ export const SCREENS: ScreenMeta[] = [
     key: 'inbox', domain: 'business', parent: 'Hộp thư & Việc', icon: 'ph ph-tray',
     name: 'Hộp thư', en: 'Tin quan trọng đã được sắp xếp',
     title: 'Hộp thư', subtitle: 'Tin quan trọng đã được sắp xếp · cái gì quan trọng nhất lúc này',
-    description: 'Không phải tin nhắn thô. Mỗi dòng là một đơn vị ý nghĩa đã được cấu trúc: nguồn, đối tượng, điểm số, tóm tắt hai câu, hành động đề xuất và chứng cứ gốc.',
+    description: 'Không phải tin nhắn thô. Mỗi dòng là một ý chính rút ra từ tin nhắn: nguồn, người liên quan, điểm ưu tiên, tóm tắt hai câu, gợi ý việc nên làm và tin gốc làm chứng cứ.',
     descMaxWidth: 700, designTitleRow: true,
   },
   {
@@ -173,9 +173,9 @@ export const SCREENS: ScreenMeta[] = [
   },
   {
     key: 'raw', domain: 'tech', parent: 'Tầng dữ liệu', icon: 'ph ph-database',
-    name: 'Kho dữ liệu thô', en: 'Tin gốc bridge gom về',
+    name: 'Kho dữ liệu thô', en: 'Tin gốc các kênh gom về',
     title: 'Kho dữ liệu thô', subtitle: 'Raw Lake · mọi bridge gom hết về đây trước khi phân loại',
-    description: 'Mọi bridge lắng nghe gom hết về đây nguyên trạng, không xử lý gì. Core agent lấy từ kho này ra phân loại theo chu kỳ hoặc theo ngưỡng số lượng, rồi ghi kết quả sang kho sạch.',
+    description: 'Mọi kênh đang nghe gom hết về đây nguyên trạng, không xử lý gì. Core agent lấy từ kho này ra phân loại theo chu kỳ hoặc theo ngưỡng số lượng, rồi ghi kết quả sang kho sạch.',
     descMaxWidth: 760, designTitleRow: true,
   },
   {
@@ -187,8 +187,8 @@ export const SCREENS: ScreenMeta[] = [
   },
   {
     key: 'clean', domain: 'tech', parent: 'Tầng dữ liệu', icon: 'ph ph-check-circle',
-    name: 'Kho sạch SSOT', en: 'Dữ liệu đã lọc & bộ nhớ làm việc',
-    title: 'Kho sạch & Trí nhớ', subtitle: 'Clean SSOT · dữ liệu đã phân loại và trí nhớ tạm theo ID',
+    name: 'Kho sạch', en: 'Dữ liệu đã lọc & bộ nhớ làm việc',
+    title: 'Kho sạch & Trí nhớ', subtitle: 'Dữ liệu đã phân loại và trí nhớ tạm theo ID',
     description: 'Dữ liệu đã được core agent phân loại, gắn về ID nhóm và ID người. Agent trực kênh chỉ đọc từ đây cộng với trí nhớ tạm để quyết định nội dung phản hồi, rồi ghi kết quả trở lại.',
     descMaxWidth: 760, designTitleRow: true,
   },

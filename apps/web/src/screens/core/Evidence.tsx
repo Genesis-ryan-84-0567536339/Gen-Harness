@@ -65,7 +65,7 @@ export function WhyButton({
   );
 }
 
-/** Chuỗi chứng cứ: điểm → đơn vị ý nghĩa → trích dẫn → bản ghi thô. */
+/** Chuỗi chứng cứ: điểm → ý chính → trích dẫn → bản ghi thô. */
 export function EvidenceDialog({ kind, id, onClose }: { kind: string; id: string; onClose: () => void }) {
   const q = useExplain(kind, id);
   const d = q.data;
@@ -109,12 +109,12 @@ export function EvidenceDialog({ kind, id, onClose }: { kind: string; id: string
             </section>
           ) : null}
           <section className="ev-section" aria-label="Chứng cứ">
-            <div className="dlg-section-title">Chứng cứ · {d.units.length} đơn vị ý nghĩa</div>
+            <div className="dlg-section-title">Chứng cứ · {d.units.length} ý chính</div>
             {d.units.length === 0 ? (
               <EmptyState
                 icon="ph ph-quotes"
                 title="Chưa có chứng cứ"
-                description="Hệ thống chưa có đơn vị ý nghĩa nào làm căn cứ cho kết luận này."
+                description="Hệ thống chưa có tin nào làm căn cứ cho kết luận này."
               />
             ) : (
               <div className="dlg-list">
