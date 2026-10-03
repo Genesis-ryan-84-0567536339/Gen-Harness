@@ -3,6 +3,7 @@ import type { Opportunity, OppStage } from '@gen-harness/contracts';
 import { OPP_STAGES } from '@gen-harness/contracts';
 import { Dialog, EmptyState, Icon } from '@gen-harness/ui';
 import { CardError, InlineError, ScreenHead, SkeletonLines } from '../common';
+import { DataEmptyState } from '../DataEmptyState';
 import { errorText } from '../../lib/errorText';
 import { fmtInt } from '../../lib/format';
 import { CONFIDENCE_LABEL, STAGE_LABEL, STAGE_TONE, confidenceTone, fmtVnd, heatTone } from './marketModel';
@@ -43,7 +44,9 @@ export function OpportunityScreen() {
       ) : list.isError ? (
         <CardError error={list.error} onRetry={() => void list.refetch()} retrying={list.isFetching} />
       ) : list.data.items.length === 0 ? (
-        <EmptyState icon="ph ph-kanban" title="Chưa có cơ hội nào" description="Cơ hội mở tự động từ tín hiệu cầu trong hội thoại, hoặc mở tay khi biết tin ngoài luồng chat." />
+        <DataEmptyState
+          fallback={<EmptyState icon="ph ph-kanban" title="Chưa có cơ hội nào" description="Cơ hội mở tự động từ tín hiệu cầu trong hội thoại, hoặc mở tay khi biết tin ngoài luồng chat." />}
+        />
       ) : (
         <div className="opp-board" role="group" aria-label="Bảng cơ hội theo giai đoạn">
           {pipeline.isError ? <InlineError>{errorText(pipeline.error)}</InlineError> : null}
