@@ -74,19 +74,21 @@ TEXTBOX = '[contenteditable="true"][role="textbox"]'
 MESSAGE_ROW = '[role="main"] [role="row"]'
 TARGET_ATTR = "data-ghb-target"
 
-# Chọn bình luận đích: bài viết ARIA có aria-label bắt đầu "Bình luận"/"Comment"; ưu tiên cái được làm nổi / có link
-# chứa đúng comment_id của URL. Đánh dấu bằng thuộc tính để lấy locator — chỉ đọc cấu trúc, không bấm.
+# Chọn bình luận đích: bài viết ARIA có aria-label bắt đầu "Bình luận"/"Comment" có link chứa ĐÚNG comment_id của
+# target_url (đã ký trong permit). Không thấy → 0 (TargetNotFound): KHÔNG đoán sang bình luận được làm nổi hay bình luận
+# đầu tiên — trả lời nhầm người là gửi thật dưới tên Owner. Đánh dấu bằng thuộc tính để lấy locator (chỉ đọc).
 MARK_COMMENT_JS = """(commentId) => {
   const re = /^(bình luận|comment)/i;
+  document.querySelectorAll('[data-ghb-target]').forEach((e) => e.removeAttribute('data-ghb-target'));
+  if (!commentId) return 0;
   const arts = Array.from(document.querySelectorAll('[role="article"]'))
     .filter((a) => re.test(a.getAttribute('aria-label') || ''));
-  document.querySelectorAll('[data-ghb-target]').forEach((e) => e.removeAttribute('data-ghb-target'));
-  if (!arts.length) return 0;
-  let pick = null;
-  if (commentId) {
-    pick = arts.find((a) => a.querySelector('a[href*="comment_id=' + commentId + '"]')) || null;
-  }
-  pick = pick || arts.find((a) => a.matches('[aria-current], [data-highlighted="true"]')) || arts[0];
+  const want = 'comment_id=' + commentId;
+  const pick = arts.find((a) => Array.from(a.querySelectorAll('a[href*="comment_id="]')).some((l) => {
+    const m = (l.getAttribute('href') || '').match(/[?&]comment_id=([0-9A-Za-z_]+)/);
+    return !!m && ('comment_id=' + m[1]) === want;
+  }));
+  if (!pick) return 0;
   pick.setAttribute('data-ghb-target', '1');
   return arts.length;
 }"""
@@ -98,7 +100,8 @@ WAIT_NEW_JS = """([sel, text, base]) => Array.from(document.querySelectorAll(sel
   .filter((e) => !e.querySelector('[contenteditable="true"]') && (e.innerText || '').includes(text)).length > base"""
 
 
-def _comment_id(url: str) -> str:
+def comment_id(url: str) -> str:
+    """comment_id trong URL đích ('' nếu không có) — trả lời bình luận BẮT BUỘC có, không đoán."""
     from urllib.parse import parse_qs, urlsplit
 
     vals = parse_qs(urlsplit(url).query).get("comment_id") or []
@@ -184,9 +187,13 @@ class FacebookAdapter(Adapter):
         else:
             await page.wait_for_selector(f'[role="main"] {TEXTBOX}, [role="main"]', timeout=15_000)
 
-    async def compose(self, page: Any, action: str, text: str) -> None:
+    async def compose(self, page: Any, action: str, text: str, target_url: str = "") -> None:
         if action == "reply_comment":
-            if not await page.evaluate(MARK_COMMENT_JS, _comment_id(page.url)):
+            # comment_id lấy từ target_url đã ký trong permit — KHÔNG từ page.url (chuyển hướng có thể làm mất).
+            cid = comment_id(target_url)
+            if not cid:
+                raise TargetNotFound("đường dẫn đích không có comment_id")
+            if not await page.evaluate(MARK_COMMENT_JS, cid):
                 raise TargetNotFound("không thấy bình luận đích")
             target = page.locator(f"[{TARGET_ATTR}]")
             btn = target.locator('[role="button"]').filter(has_text=re.compile(r"^\s*(Phản hồi|Reply)\s*$", re.I))

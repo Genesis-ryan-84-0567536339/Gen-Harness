@@ -251,7 +251,7 @@ class Runner:
         step("page_state")
         await self.pause(cancel)
         try:
-            await adapter.compose(page, action, text)
+            await adapter.compose(page, action, text, target_url)
         except TargetNotFound as e:
             step("compose", False)
             raise JobError("TARGET_NOT_FOUND") from e
@@ -261,10 +261,22 @@ class Runner:
         committed.set()
         step("halt_check")
         # ─── từ đây coi như ĐÃ GỬI: không bỏ dở, luôn chụp ảnh và báo 'done' ───
-        await adapter.submit(page, action)
-        step("submit")
-        confirmed = await adapter.confirm_sent(page, action, text, CONFIRM_TIMEOUT_MS)
-        step("confirm", confirmed)
+        # Bất kỳ lỗi nào sau điểm này (bấm Enter lỗi giữa chừng, trang đóng…) KHÔNG được báo 'failed'/'halted': phím
+        # có thể đã gửi đi — báo 'failed' khiến Owner bấm gửi lại và tin bị gửi HAI lần. Báo 'done' với confirmed=False
+        # + send_error để api nói rõ "chưa chắc đã gửi — mở Facebook kiểm tra trước khi gửi lại".
+        confirmed = False
+        send_error = False
+        submitted = False
+        try:
+            await adapter.submit(page, action)
+            submitted = True
+            step("submit")
+            confirmed = await adapter.confirm_sent(page, action, text, CONFIRM_TIMEOUT_MS)
+            step("confirm", confirmed)
+        except Exception as e:  # noqa: BLE001 — xem chú thích trên
+            send_error = True
+            step("confirm" if submitted else "submit", False)
+            log.warning("việc %s lỗi sau khi bấm gửi: %s", job.get("id"), type(e).__name__)
         shot = await self._screenshot(page)
         step("screenshot", shot is not None)
         new_state = None
@@ -276,10 +288,13 @@ class Runner:
             aad = f"{job['org_id']}:{job['account_id']}:proof:{job['id']}"
             proof = protocol.seal(self.cfg.key, shot, aad)
             proof_sha = hashlib.sha256(shot).hexdigest()
-        await self.publish(job, "done", {
+        data: dict[str, Any] = {
             "action": action, "sent": True, "confirmed": confirmed, "proof": proof, "proof_sha256": proof_sha,
             "trace": trace, "cost": {"ms": int((time.monotonic() - started) * 1000), "pages": pages,
-                                     "blocked": len(blocked)}}, state=new_state)
+                                     "blocked": len(blocked)}}
+        if send_error:
+            data["send_error"] = True
+        await self.publish(job, "done", data, state=new_state)
 
     async def _login(self, job: dict[str, Any], adapter: Adapter, cancel: asyncio.Event, box: list[Any]) -> None:
         p = job.get("payload") or {}

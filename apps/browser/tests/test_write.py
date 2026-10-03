@@ -201,6 +201,61 @@ async def test_comment_without_reply_button_is_target_not_found(redis: Redis, ch
     assert "submit" not in spy.calls
 
 
+@pytest.mark.parametrize("url", [
+    "https://www.facebook.com/permalink.php?story_fbid=1&comment_id=99",     # comment_id không có trên trang
+    "https://www.facebook.com/permalink.php?story_fbid=1",                   # thông báo không có comment_id
+    "https://www.facebook.com/permalink.php?story_fbid=1&comment_id=10",     # chỉ trùng tiền tố với comment_id=1
+])
+async def test_reply_never_falls_back_to_another_comment(redis: Redis, chromium: Any, site: FakeSite,
+                                                         monkeypatch: pytest.MonkeyPatch, url: str) -> None:
+    """Không thấy ĐÚNG bình luận của target_url → TARGET_NOT_FOUND, không gõ, không gửi (trước đây rơi về bình luận
+    đầu tiên = trả lời nhầm người dưới tên Owner)."""
+    spy = Spy(monkeypatch)
+    await runner(redis, chromium, site).run(write_job(target=url), asyncio.Event())
+    r = await one(redis)
+    assert (r["type"], r["data"]["code"]) == ("failed", "TARGET_NOT_FOUND"), r
+    assert "submit" not in spy.calls and "confirm_sent" not in spy.calls
+
+
+async def test_reply_uses_comment_id_of_target_not_page_url(redis: Redis, chromium: Any, site: FakeSite,
+                                                            monkeypatch: pytest.MonkeyPatch) -> None:
+    """Facebook chuyển hướng làm mất comment_id trên page.url: vẫn chọn đúng bình luận theo target_url đã ký."""
+    spy = Spy(monkeypatch)
+    orig_open = FacebookAdapter.open_target
+
+    async def open_then_redirect(self_: Any, page: Any, action: str, target_url: str) -> None:
+        await orig_open(self_, page, action, target_url)
+        await page.evaluate("() => history.replaceState(null, '', '/permalink.php?story_fbid=1')")
+
+    monkeypatch.setattr(FacebookAdapter, "open_target", open_then_redirect)
+    await runner(redis, chromium, site).run(write_job(), asyncio.Event())
+    r = await one(redis)
+    assert r["type"] == "done" and r["data"]["confirmed"] is True, r
+    assert "submit" in spy.calls
+    # câu trả lời nằm ngay sau bình luận của Minh (comment_id=2), không phải của Lan
+    order = spy.body.index("Còn hàng không ạ?") < spy.body.index(TEXT) < spy.body.index("Bình luận đã khoá")
+    assert order
+
+
+async def test_error_after_submit_still_reports_done(redis: Redis, chromium: Any, site: FakeSite,
+                                                     monkeypatch: pytest.MonkeyPatch) -> None:
+    """Lỗi SAU khi đã bấm gửi: vẫn báo 'done' (sent, chưa xác nhận, send_error) + ảnh chụp — KHÔNG báo 'failed' để
+    Owner không bấm gửi lại thành hai lần."""
+    async def boom(self_: Any, page: Any, action: str) -> None:
+        await page.keyboard.press("Enter")
+        raise RuntimeError("Target page, context or browser has been closed")
+
+    monkeypatch.setattr(FacebookAdapter, "submit", boom)
+    j = write_job()
+    await runner(redis, chromium, site).run(j, asyncio.Event())
+    r = await one(redis)
+    assert r["type"] == "done", r
+    d = r["data"]
+    assert d["sent"] is True and d["confirmed"] is False and d["send_error"] is True
+    assert protocol.unseal(KEY, d["proof"], f"{ORG}:{ACC}:proof:{j['id']}")[:3] == b"\xff\xd8\xff"
+    assert ("submit", False) in [(t["step"], t["ok"]) for t in d["trace"]]
+
+
 async def test_foreign_target_is_blocked(redis: Redis, chromium: Any, site: FakeSite) -> None:
     await runner(redis, chromium, site).run(write_job(target="https://evil.example.com/x?comment_id=2"),
                                             asyncio.Event())

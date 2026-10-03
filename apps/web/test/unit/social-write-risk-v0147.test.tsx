@@ -13,7 +13,7 @@ import type { SocialAccount, SocialPlatforms, SocialWriteGate, SocialWriteItem }
 import { SocialPage } from '../../src/social/SocialPage';
 import { SocialWriteRiskPage } from '../../src/social/SocialWriteRiskPage';
 import { qk } from '../../src/lib/queries';
-import { fmtConsentTime, writeStatusView } from '../../src/social/socialModel';
+import { fmtConsentTime, shortTarget, writeStatusView } from '../../src/social/socialModel';
 
 const json = (status: number, body?: unknown) =>
   new Response(body === undefined ? null : JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -31,9 +31,9 @@ const me = (role: string) => ({
   permissions: { 'system.read': 'all', 'system.manage': 'all' },
 });
 
-function renderPage(ui: ReactElement, role = 'owner') {
+function renderPage(ui: ReactElement, role: string | null = 'owner') {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  qc.setQueryData(qk.me, me(role));
+  if (role) qc.setQueryData(qk.me, me(role));
   return render(
     <QueryClientProvider client={qc}>
       <MemoryRouter>{ui}</MemoryRouter>
@@ -156,6 +156,19 @@ describe('SocialWriteRiskPage', () => {
     renderPage(<SocialWriteRiskPage />, 'manager');
     expect(await screen.findByText('Chỉ Owner dùng được')).toBeInTheDocument();
   });
+
+  it('/auth/me lỗi (mạng/5xx) → thẻ lỗi có nút thử lại, KHÔNG báo "Chỉ Owner dùng được"', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json(503, { status: 503, code: 'UNAVAILABLE', title: 'Máy chủ đang bận' })));
+    renderPage(<SocialWriteRiskPage />, null);
+    expect(await screen.findByRole('button', { name: /Thử lại/ })).toBeInTheDocument();
+    expect(screen.queryByText('Chỉ Owner dùng được')).toBeNull();
+  });
+
+  it('sandbox bật → ghi chú rủi ro thiếu sandbox không áp dụng (không mâu thuẫn ô "Sandbox: Đã bật")', async () => {
+    stub({ gate: gate({ sandbox: { enabled: true, reason: null, checked_at: '2026-10-03T01:00:00Z' }, open: true }) });
+    renderPage(<SocialWriteRiskPage />);
+    expect(await screen.findByTestId('write-risk-sandbox-note')).toHaveTextContent('rủi ro về việc thiếu sandbox bên dưới hiện không áp dụng');
+  });
 });
 
 describe('socialModel — trạng thái việc gửi', () => {
@@ -167,8 +180,17 @@ describe('socialModel — trạng thái việc gửi', () => {
       'Đã gửi trước khi kịp dừng',
       'Đã bấm gửi nhưng chưa thấy hiện trên trang — xem ảnh chụp',
     ]);
+    expect(writeStatusView({ status: 'done', confirmed: true, after_cancel: true, has_proof: false }).notes).toEqual([
+      'Đã gửi trước khi kịp huỷ / tạm dừng',
+      'Đã gửi nhưng không chụp được ảnh bằng chứng — mở Facebook để kiểm tra.',
+    ]);
+    expect(writeStatusView({ status: 'done', confirmed: false, send_error: true })).toMatchObject({
+      tone: 'warn',
+      notes: ['Có lỗi ngay sau khi bấm gửi — tin có thể đã đi. Mở Facebook kiểm tra trước khi gửi lại.'],
+    });
     expect(writeStatusView({ status: 'halted' }).label).toBe('Đã dừng bằng Dừng tất cả — chưa gửi gì');
-    expect(writeStatusView({ status: 'failed' }).tone).toBe('bad');
+    expect(writeStatusView({ status: 'failed' })).toMatchObject({ tone: 'bad', chip: 'Lỗi', notes: ['Hỏi Gen soạn lại nếu muốn gửi lần nữa.'] });
+    expect(shortTarget(null)).toBe('(đã xoá theo hạn lưu)');
   });
   it('định dạng thời điểm đồng ý HH:mm dd/MM/yyyy theo múi giờ tổ chức', () => {
     expect(fmtConsentTime('2026-10-03T01:30:00Z', 'Asia/Ho_Chi_Minh')).toBe('08:30 03/10/2026');
@@ -184,11 +206,11 @@ describe('SocialPage — thẻ "Gửi trả lời & tin nhắn"', () => {
   };
   const WRITES: SocialWriteItem[] = Array.from({ length: 10 }, (_, i) => ({
     job_id: `j${i}`, account_id: 'a1', account_label: 'Facebook của Sếp', action: i % 2 ? 'send_message' : 'reply_comment',
-    target_url: `https://www.facebook.com/permalink.php?story_fbid=${i}`, text: 'x', status: i === 0 ? 'failed' : 'done', error: i === 0 ? 'SEND_UNCONFIRMED' : null,
-    error_text: i === 0 ? 'Chưa thấy nội dung hiện trên trang.' : null, created_at: `2026-10-03T0${i}:00:00Z`, finished_at: null, has_proof: i > 0, confirmed: true, after_halt: false,
+    target_url: `https://www.facebook.com/permalink.php?story_fbid=${i}`, text: 'x', status: i === 0 ? 'failed' : 'done', error: i === 0 ? 'TARGET_NOT_FOUND' : null,
+    error_text: i === 0 ? 'Không tìm thấy đúng bình luận/hội thoại trên trang — không gửi gì.' : null, created_at: `2026-10-03T0${i}:00:00Z`, finished_at: null, has_proof: i > 0, confirmed: true, after_halt: false,
   }));
 
-  function stubSocial(over: { gate?: SocialWriteGate } = {}) {
+  function stubSocial(over: { gate?: SocialWriteGate; writes?: SocialWriteItem[] } = {}) {
     const calls: Call[] = [];
     vi.stubGlobal(
       'fetch',
@@ -201,7 +223,7 @@ describe('SocialPage — thẻ "Gửi trả lời & tin nhắn"', () => {
         if (u.endsWith('/social/platforms')) return json(200, PLATFORMS);
         if (u.endsWith('/social/accounts') && c.method === 'GET') return json(200, { items: [ACC] });
         if (u.endsWith('/social/write-gate')) return json(200, over.gate ?? gate());
-        if (/\/social\/writes/.test(u)) return json(200, { items: WRITES });
+        if (/\/social\/writes/.test(u)) return json(200, { items: over.writes ?? WRITES });
         if (/\/social\/accounts\/a1$/.test(u) && c.method === 'PATCH') return json(200, { ...ACC, daily_write_limit: (c.body as { daily_write_limit: number }).daily_write_limit });
         return json(404, { status: 404, code: 'NOT_FOUND', title: 'Không tồn tại' });
       }),
@@ -209,7 +231,7 @@ describe('SocialPage — thẻ "Gửi trả lời & tin nhắn"', () => {
     return calls;
   }
 
-  it('cổng Khoá + lý do, link trang cảnh báo, "Hôm nay đã gửi x/y", chọn giới hạn → PATCH, 10 lần gửi gần đây có "Xem ảnh chụp"; mô tả công tắc dừng', async () => {
+  it('cổng Khoá + lý do, link trang cảnh báo, "Đã dùng x/y lượt gửi (24 giờ qua)", chọn giới hạn → PATCH, 10 lần gửi gần đây có "Xem ảnh chụp"; mô tả công tắc dừng', async () => {
     const calls = stubSocial();
     renderPage(<SocialPage />);
     const card = await screen.findByTestId('social-write-gate');
@@ -217,11 +239,12 @@ describe('SocialPage — thẻ "Gửi trả lời & tin nhắn"', () => {
     expect(state).toHaveTextContent('Khoá');
     expect(state).toHaveTextContent('Máy chủ không cho bật vùng cách ly của trình duyệt.');
     expect(within(card).getByRole('link', { name: /Đọc cảnh báo rủi ro/ })).toHaveAttribute('href', '/social/ghi-facebook');
-    expect(await within(card).findByText('Hôm nay đã gửi 3/10')).toBeInTheDocument();
+    expect(await within(card).findByText('Đã dùng 3/10 lượt gửi (24 giờ qua)')).toBeInTheDocument();
     const recent = await within(card).findByRole('list', { name: 'Lần gửi gần đây' });
     expect(within(recent).getAllByRole('listitem')).toHaveLength(10);
     expect(within(recent).getAllByRole('button', { name: 'Xem ảnh chụp' })).toHaveLength(9);
-    expect(recent).toHaveTextContent('Chưa thấy nội dung hiện trên trang.');
+    expect(recent).toHaveTextContent('Không tìm thấy đúng bình luận/hội thoại trên trang — không gửi gì.');
+    expect(recent).toHaveTextContent('Hỏi Gen soạn lại nếu muốn gửi lần nữa.');
     expect(screen.getByTestId('social-kill-switch')).toHaveTextContent('Đóng ngay mọi trình duyệt nền, chặn cả ĐỌC và GỬI. Bật lại cần mã PIN.');
 
     const select = within(card).getByLabelText('Giới hạn gửi/ngày');
@@ -231,6 +254,22 @@ describe('SocialPage — thẻ "Gửi trả lời & tin nhắn"', () => {
 
     await userEvent.click(within(recent).getAllByRole('button', { name: 'Xem ảnh chụp' })[0]);
     expect(await screen.findByAltText('Ảnh chụp bằng chứng lần gửi')).toHaveAttribute('src', '/api/v1/social/jobs/j1/proof');
+  });
+
+  it('lần gửi đã bị dọn theo hạn lưu (target_url/text null) và ghi chú trạng thái → trang không vỡ, hiện ghi chú', async () => {
+    stubSocial({
+      writes: [
+        { ...WRITES[1], job_id: 'old', target_url: null, text: null, has_proof: false },
+        { ...WRITES[2], job_id: 'late', confirmed: false, after_halt: true, has_proof: true },
+      ],
+    });
+    renderPage(<SocialPage />);
+    const recent = await screen.findByRole('list', { name: 'Lần gửi gần đây' });
+    expect(recent).toHaveTextContent('(đã xoá theo hạn lưu)');
+    expect(recent).toHaveTextContent('Đã gửi nhưng không chụp được ảnh bằng chứng — mở Facebook để kiểm tra.');
+    expect(recent).toHaveTextContent('Đã gửi trước khi kịp dừng');
+    expect(recent).toHaveTextContent('Đã bấm gửi nhưng chưa thấy hiện trên trang — xem ảnh chụp');
+    expect(screen.getByTestId('social-kill-switch')).toBeInTheDocument();       // "Dừng tất cả" vẫn còn
   });
 
   it('cổng Mở (đã đồng ý) → "Mở"', async () => {

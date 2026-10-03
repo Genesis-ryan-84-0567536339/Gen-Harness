@@ -198,6 +198,9 @@ async def social_labels(db: AsyncSession, user: service.CurrentUser, ptype: str,
                               {"i": fields["account_id"], "o": user.org_id})).scalar_one_or_none()
     if label is None:
         raise ValueError("tài khoản mạng xã hội không tồn tại")
+    if not social.write_target_ok(permit.PROPOSAL_ACTION[ptype], fields["target_url"]):
+        raise ValueError("target_url không trỏ tới một bình luận cụ thể (không có comment_id) — chỉ trả lời được vào "
+                         "thông báo về bình luận")
     item = await social.find_read_item(db, user.org_id, uuid.UUID(fields["account_id"]),
                                        permit.PROPOSAL_ACTION[ptype], fields["target_url"])
     if item is None:

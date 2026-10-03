@@ -73,7 +73,7 @@ Khoá 1 việc / tài khoản: `SET gh:browser:lock:<account_id> <job_id> NX EX 
 | `login.done` | `{handle}` + `state` |
 | `done` | read: `{items:[{kind, who, text, time, unread, link}], pages, page_state, cost}` + `state` (phiên làm mới) |
 | `done` | write: `{action, sent, confirmed, proof, proof_sha256, trace[≤30], cost}` + `state` (xem mục "Ghi") |
-| `failed` / `login.failed` | `{code: CHECKPOINT|CAPTCHA|LOGGED_OUT|BLOCKED_URL|SELECTOR|LOGIN_TIMEOUT|CANCELLED|BUSY|ERROR` (việc write thêm `PERMIT_INVALID|TARGET_NOT_FOUND|SEND_UNCONFIRMED|PROOF_MISSING`)}` |
+| `failed` / `login.failed` | `{code: CHECKPOINT|CAPTCHA|LOGGED_OUT|BLOCKED_URL|SELECTOR|LOGIN_TIMEOUT|CANCELLED|BUSY|ERROR` (việc write thêm `PERMIT_INVALID|TARGET_NOT_FOUND|WRITE_UNSUPPORTED` — chỉ TRƯỚC khi bấm gửi)}` |
 | `halted` | — |
 
 API: việc đã đóng (huỷ/dừng/hết hạn) → bỏ kết quả đến muộn (kể cả phiên). `CHECKPOINT`/`CAPTCHA` → tài khoản `paused`
@@ -125,16 +125,19 @@ Dừng tất cả) → **permit** ký bằng khoá browser (`gh/social/permit.py
 1. Kiểm permit **TRƯỚC khi mở trình duyệt**: chữ ký, `exp`, `job_id`/`org_id`/`account_id`/`action` khớp việc,
    `sha256(target_url)` và `sha256(text)` khớp payload, nonce chưa dùng. Sai bất kỳ ⇒ `failed` `PERMIT_INVALID`
    (chưa mở trình duyệt, chưa chạm nền tảng).
-2. Mở trang đích từ phiên đã lưu; không thấy mục ⇒ `TARGET_NOT_FOUND`; checkpoint/CAPTCHA ⇒ dừng, không gửi.
+2. Mở trang đích từ phiên đã lưu; không thấy mục ⇒ `TARGET_NOT_FOUND`; checkpoint/CAPTCHA ⇒ dừng, không gửi. Trả lời bình
+   luận chọn bình luận theo `comment_id` của `target_url` (đã ký) — KHÔNG từ `page.url`; thiếu `comment_id` hoặc không thấy
+   đúng bình luận ⇒ `TARGET_NOT_FOUND` (không đoán sang bình luận khác). API cũng từ chối đích trả lời không có `comment_id`.
 3. Gõ `text` bằng MỘT lần chèn (`insert_text`); trễ cố định 3 giây giữa các thao tác (`GH_BROWSER_DELAY`).
-4. **Kiểm Dừng tất cả lần cuối NGAY TRƯỚC bấm gửi** (cờ `gh:browser:halt` + `control`). Bấm xong không xác nhận được ⇒
-   `SEND_UNCONFIRMED`.
+4. **Kiểm Dừng tất cả lần cuối NGAY TRƯỚC bấm gửi** (cờ `gh:browser:halt` + `control`). Từ lúc bấm gửi, MỌI kết cục đều
+   là `done` (không bao giờ `failed`/`halted` — tránh Owner gửi lại thành hai lần): không thấy nội dung hiện ra ⇒
+   `confirmed: false`; lỗi ngay sau khi bấm ⇒ thêm `send_error: true`.
 5. Chụp ảnh sau khi gửi (không dùng Playwright tracing). Đã gửi mà không có ảnh ⇒ vẫn báo `done` với `proof: null`
    (api ghi `proof_error`); mã `PROOF_MISSING` báo việc kết thúc mà không có ảnh bằng chứng.
 
 ### Kết quả `done` của write
 
-`data = {action, sent, confirmed, proof, proof_sha256, trace, cost}`:
+`data = {action, sent, confirmed, proof, proof_sha256, trace, cost, send_error?}`:
 
 - `proof` = `seal(key, jpeg, aad=f"{org_id}:{account_id}:proof:{job_id}")` hoặc `null`; ảnh JPEG ≤ 2 MB. API giải, **mã hoá
   lại bằng khoá master** khi lưu, kiểm `proof_sha256`; giữ 90 ngày; phục vụ ở `GET /social/jobs/{id}/proof`
@@ -142,5 +145,7 @@ Dừng tất cả) → **permit** ký bằng khoá browser (`gh/social/permit.py
 - `trace` = `[{step, ms, ok}]`, tối đa 30 phần tử; không chứa nội dung trang/cookie.
 - `sent` = đã bấm gửi; `confirmed` = thấy nội dung xuất hiện sau khi gửi.
 - Đã bấm gửi thì vẫn chụp và báo `done` **kể cả khi Dừng tất cả vừa bật**: api chấp nhận `done` muộn của việc `write` đã
-  đóng `halted` và đặt `after_halt = true` (các kết quả muộn khác vẫn bị bỏ).
+  đóng `halted` (đặt `after_halt = true`) hoặc `cancelled`/`failed` — tạm dừng, gỡ tài khoản, `WORKER_TIMEOUT` (đặt
+  `after_cancel = true`); vẫn ghi Action Log + ảnh và tính vào trần gửi/ngày. Tài khoản đã gỡ: chỉ ghi Action Log. Các kết quả
+  muộn khác vẫn bị bỏ.
 - Action Log chỉ lưu sha256 của đích và nội dung — không lưu nguyên văn, không lưu permit.

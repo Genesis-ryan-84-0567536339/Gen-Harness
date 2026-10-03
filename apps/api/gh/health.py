@@ -123,6 +123,12 @@ NON_OWNER_BODIES = {
     # v0.1.46 (F-21): fingerprint cố định "lan_legacy"; người không phải Owner không chạy được `genh remote`.
     ("network.open_lan", "lan_legacy"): "Cổng Console đang mở cho cả mạng — nhờ Owner chọn cách truy cập từ xa.",
 }
+#: Thân cho người KHÔNG phải Owner theo `kind` (mọi fingerprint) — dùng khi không có mục riêng (kind, mã) ở trên.
+#: v0.1.47 (F-83): sự cố phiên Facebook có nhiều fingerprint (needs_login, key_changed, checkpoint, captcha…) — mọi
+#: trường hợp chỉ Owner tự đăng nhập lại được ở trang /social.
+NON_OWNER_KIND_BODIES = {
+    "social.session_expired": "Phiên Facebook của Owner đã hết — nhờ Owner mở Tài khoản mạng xã hội và đăng nhập lại.",
+}
 
 
 def _viewer_body(kind: str, fingerprint: str | None, body: str, is_owner: bool) -> str:
@@ -131,7 +137,7 @@ def _viewer_body(kind: str, fingerprint: str | None, body: str, is_owner: bool) 
         return body
     fp = fingerprint or ""
     code = fp.rpartition("|")[2] if kind == "offsite.failed" else fp
-    return NON_OWNER_BODIES.get((kind, code), body)
+    return NON_OWNER_BODIES.get((kind, code)) or NON_OWNER_KIND_BODIES.get(kind, body)
 
 #: v0.1.37 (F-73): `run/autostart-status.json` (genh ghi) — chỉ nhận giá trị trong các tập này, còn lại 'unknown'.
 AUTOSTART_YES_NO = ("yes", "no", "unknown", "not_applicable")

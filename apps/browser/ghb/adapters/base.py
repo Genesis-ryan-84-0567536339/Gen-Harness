@@ -31,8 +31,9 @@ class Adapter:
     async def open_target(self, page: Any, action: str, target_url: str) -> None:
         raise NotImplementedError
 
-    async def compose(self, page: Any, action: str, text: str) -> None:
-        """Điền nội dung bằng MỘT lần chèn; ném TargetNotFound nếu không thấy ô trả lời / ô soạn."""
+    async def compose(self, page: Any, action: str, text: str, target_url: str = "") -> None:
+        """Điền nội dung bằng MỘT lần chèn; ném TargetNotFound nếu không thấy ô trả lời / ô soạn / đích đúng
+        `target_url` (đã ký trong permit)."""
         raise NotImplementedError
 
     async def submit(self, page: Any, action: str) -> None:

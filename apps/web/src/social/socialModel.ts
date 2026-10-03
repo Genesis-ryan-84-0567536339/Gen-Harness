@@ -20,35 +20,53 @@ export const WRITE_LIMIT_MAX = 20;
 
 export interface WriteStatusView {
   label: string;
+  /** Nhãn ngắn cho chip ở danh sách "Lần gửi gần đây" (cùng nguồn với `label`). */
+  chip: string;
   tone: Tone;
   /** Chữ phụ (vd cảnh báo "chưa thấy hiện trên trang"). */
   notes: string[];
   terminal: boolean;
 }
 
-type WriteLike = Pick<BrowserJob, 'status'> & { confirmed?: boolean | null; after_halt?: boolean | null; result?: BrowserJob['result'] };
+type WriteLike = Pick<BrowserJob, 'status'> & {
+  confirmed?: boolean | null;
+  after_halt?: boolean | null;
+  after_cancel?: boolean | null;
+  send_error?: boolean | null;
+  has_proof?: boolean | null;
+  result?: BrowserJob['result'];
+};
+
+export const PROOF_MISSING_TEXT = 'Đã gửi nhưng không chụp được ảnh bằng chứng — mở Facebook để kiểm tra.';
+export const SEND_ERROR_TEXT = 'Có lỗi ngay sau khi bấm gửi — tin có thể đã đi. Mở Facebook kiểm tra trước khi gửi lại.';
+export const RETRY_HINT = 'Hỏi Gen soạn lại nếu muốn gửi lần nữa.';
 
 /** Trạng thái việc gửi → chữ tiếng Việt (một nguồn cho thẻ đề xuất và danh sách "Lần gửi gần đây"). */
 export function writeStatusView(j: WriteLike): WriteStatusView {
   const confirmed = j.confirmed ?? j.result?.confirmed;
-  const afterHalt = j.after_halt ?? j.result?.after_halt;
+  const afterHalt = j.after_halt || j.result?.after_halt;
+  const afterCancel = j.after_cancel || j.result?.after_cancel;
+  const sendError = j.send_error || j.result?.send_error;
   switch (j.status) {
     case 'queued':
-      return { label: 'Đang chờ trình duyệt…', tone: 'neutral', notes: [], terminal: false };
+      return { label: 'Đang chờ trình duyệt…', chip: 'Đang chờ', tone: 'neutral', notes: [], terminal: false };
     case 'running':
-      return { label: 'Đang gửi trên Facebook…', tone: 'accent', notes: [], terminal: false };
+      return { label: 'Đang gửi trên Facebook…', chip: 'Đang gửi', tone: 'accent', notes: [], terminal: false };
     case 'done': {
       const notes: string[] = [];
       if (afterHalt) notes.push('Đã gửi trước khi kịp dừng');
-      if (confirmed === false) notes.push('Đã bấm gửi nhưng chưa thấy hiện trên trang — xem ảnh chụp');
-      return { label: 'Đã gửi', tone: confirmed === false ? 'warn' : 'ok', notes, terminal: true };
+      if (afterCancel) notes.push('Đã gửi trước khi kịp huỷ / tạm dừng');
+      if (sendError) notes.push(SEND_ERROR_TEXT);
+      else if (confirmed === false) notes.push(j.has_proof === false ? 'Đã bấm gửi nhưng chưa thấy hiện trên trang' : 'Đã bấm gửi nhưng chưa thấy hiện trên trang — xem ảnh chụp');
+      if (j.has_proof === false) notes.push(PROOF_MISSING_TEXT);
+      return { label: 'Đã gửi', chip: 'Đã gửi', tone: confirmed === false || sendError ? 'warn' : 'ok', notes, terminal: true };
     }
     case 'halted':
-      return { label: 'Đã dừng bằng Dừng tất cả — chưa gửi gì', tone: 'warn', notes: [], terminal: true };
+      return { label: 'Đã dừng bằng Dừng tất cả — chưa gửi gì', chip: 'Đã dừng', tone: 'warn', notes: [], terminal: true };
     case 'cancelled':
-      return { label: 'Đã huỷ — chưa gửi gì', tone: 'neutral', notes: [], terminal: true };
+      return { label: 'Đã huỷ — chưa gửi gì', chip: 'Đã huỷ', tone: 'neutral', notes: [], terminal: true };
     default:
-      return { label: 'Gửi không thành công', tone: 'bad', notes: [], terminal: true };
+      return { label: 'Gửi không thành công', chip: 'Lỗi', tone: 'bad', notes: [RETRY_HINT], terminal: true };
   }
 }
 
@@ -57,7 +75,8 @@ export function writeActionLabel(a: SocialWriteAction | null | undefined): strin
 }
 
 /** Đích gửi hiển thị gọn: bỏ giao thức, cắt dài. */
-export function shortTarget(url: string, max = 48): string {
+export function shortTarget(url: string | null | undefined, max = 48): string {
+  if (!url) return '(đã xoá theo hạn lưu)';
   const t = url.replace(/^https?:\/\/(www\.)?/, '');
   return t.length > max ? `${t.slice(0, max - 1)}…` : t;
 }

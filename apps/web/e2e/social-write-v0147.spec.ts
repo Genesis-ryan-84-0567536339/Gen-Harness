@@ -27,7 +27,12 @@ async function enterPin(page: Page) {
 /** PIN có thể còn hiệu lực từ thao tác trước — chỉ nhập khi hộp PIN hiện. */
 async function enterPinIfAsked(page: Page) {
   const dlg = page.getByRole('dialog', { name: 'Mã PIN xác nhận thao tác' });
-  if (await dlg.isVisible({ timeout: 2500 }).catch(() => false)) await enterPin(page);
+  // `isVisible` KHÔNG chờ (bỏ qua timeout) → hộp PIN hiện sau vòng 423 bị bỏ sót (test chập chờn). Chờ thật tối đa 2,5 giây.
+  const shown = await dlg
+    .waitFor({ state: 'visible', timeout: 2500 })
+    .then(() => true)
+    .catch(() => false);
+  if (shown) await enterPin(page);
 }
 
 async function openGen(page: Page): Promise<Locator> {
@@ -86,10 +91,10 @@ test('Gen đề xuất trả lời bình luận → Xác nhận và gửi (PIN) 
   await expect.poll(() => img.evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth > 0)).toBe(true);
   await page.getByRole('dialog', { name: 'Ảnh chụp bằng chứng lần gửi' }).getByRole('button', { name: 'Đóng', exact: true }).last().click();
 
-  // Trang Tài khoản mạng xã hội: "Hôm nay đã gửi 1/10" + dòng trong "Lần gửi gần đây" có "Xem ảnh chụp".
+  // Trang Tài khoản mạng xã hội: "Đã dùng 1/10 lượt gửi (24 giờ qua)" + dòng trong "Lần gửi gần đây" có "Xem ảnh chụp".
   await page.goto('/social');
   await expect(page.getByTestId('social-write-gate-state')).toContainText('Mở');
-  await expect(page.getByText('Hôm nay đã gửi 1/10')).toBeVisible();
+  await expect(page.getByText('Đã dùng 1/10 lượt gửi (24 giờ qua)')).toBeVisible();
   const recent = page.getByRole('list', { name: 'Lần gửi gần đây' });
   await expect(recent.getByRole('listitem')).toHaveCount(1);
   await expect(recent).toContainText('Trả lời bình luận');
@@ -162,8 +167,31 @@ test('vượt giới hạn gửi/ngày → câu báo giới hạn (không tạo 
   await second.getByRole('button', { name: 'Xác nhận và gửi' }).click();
   await enterPinIfAsked(page);
   const alert = second.getByRole('alert');
-  await expect(alert).toContainText('Hôm nay đã gửi đủ 1 lần');
+  // Câu NGUYÊN VĂN của API (mock chép đúng title thật).
+  await expect(alert).toContainText('Đã gửi 1 lượt trong 24 giờ (giới hạn để giảm rủi ro khoá tài khoản) — thử lại sau hoặc nâng Giới hạn gửi/ngày');
   await expect(alert).toContainText('SOCIAL_WRITE_LIMIT');
   const writes = (await apiCall(page, 'GET', '/social/writes')) as { items: unknown[] };
   expect(writes.items).toHaveLength(1);
+});
+
+test('gửi xong mà không chụp được ảnh → câu thân thiện + "Chi tiết kỹ thuật"; không còn chip "Cần mã PIN"', async ({ page }) => {
+  test.setTimeout(90_000);
+  await hook(page, 'setGate', { consent: true });
+  await page.goto('/overview');
+  const card = await ask(page, 'trả lời bình luận của chị Lan');
+  await card.getByRole('button', { name: 'Xác nhận và gửi' }).click();
+  await enterPinIfAsked(page);
+  const status = card.getByTestId('gen-write-status');
+  await expect(status).toContainText('Đang chờ trình duyệt…');
+  await expect(card).not.toContainText('Cần mã PIN');
+  await hook(page, 'advanceWrite', { to: 'running' });
+  await hook(page, 'advanceWrite', { to: 'done', proof: false });
+  await expect(status).toContainText('Đã gửi nhưng không chụp được ảnh bằng chứng — mở Facebook để kiểm tra.', { timeout: 10_000 });
+  await expect(status.getByRole('button', { name: 'Xem ảnh chụp' })).toHaveCount(0);
+  await expect(status.getByText('Mã lỗi PROOF_MISSING')).toBeHidden();
+  await status.getByText('Chi tiết kỹ thuật').click();
+  await expect(status.getByText('Mã lỗi PROOF_MISSING')).toBeVisible();
+  await page.goto('/social');
+  const recent = page.getByRole('list', { name: 'Lần gửi gần đây' });
+  await expect(recent).toContainText('không chụp được ảnh bằng chứng');
 });

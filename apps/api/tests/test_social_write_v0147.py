@@ -28,7 +28,7 @@ from tests.phase2 import org_id
 from tests.test_social import STATE, _add, _db_text, _deliver, _jobs, _login, _pin, _result
 
 SQL = Path(__file__).resolve().parents[3] / "db" / "sql" / "0031_v0147_social_write.sql"
-COMMENT_URL = "https://www.facebook.com/permalink/123"
+COMMENT_URL = "https://www.facebook.com/permalink.php?story_fbid=123&comment_id=456"
 DM_URL = "https://www.facebook.com/messages/t/777"
 READ_ITEMS = [
     {"kind": "notification", "who": "Chị Lan", "text": "Chị Lan đã bình luận: \"Giá bao nhiêu?\"", "time": "5 phút",
@@ -366,7 +366,7 @@ async def test_proof_unreadable_after_key_change(owner_api: Api, redis: Redis, d
 async def test_write_errors_do_not_count_as_account_failures(owner_api: Api, redis: Redis, db: Any) -> None:
     acc_id = await _ready(owner_api, redis)
     await owner_api.send("PATCH", f"/social/accounts/{acc_id}", {"daily_write_limit": 20})
-    for code in ("PERMIT_INVALID", "TARGET_NOT_FOUND", "SEND_UNCONFIRMED", "BLOCKED_URL"):
+    for code in ("PERMIT_INVALID", "TARGET_NOT_FOUND", "BLOCKED_URL"):
         assert (await _write(owner_api, acc_id)).status_code == 201
         job = (await _write_jobs(redis))[-1]
         assert await _deliver(redis, _result(job, "failed", {"code": code})) == "ok"
@@ -376,7 +376,11 @@ async def test_write_errors_do_not_count_as_account_failures(owner_api: Api, red
         assert row.status == "active" and row.fail_streak == 0, code
         got = (await owner_api.get(f"/social/jobs/{job['id']}")).json()
         assert got["status"] == "failed" and got["error"] == code and got["error_text"]
-    assert "Giấy phép gửi không hợp lệ" in (await owner_api.get("/social/writes")).text
+        # Thất bại KHÔNG xoá đích + nội dung lưu lúc xếp việc (trang /social cần để hiện "Lần gửi gần đây").
+        assert got["result"]["target_url"] == COMMENT_URL and got["result"]["text"] == REPLY, code
+    writes = (await owner_api.get("/social/writes")).json()["items"]
+    assert "Giấy phép gửi không hợp lệ" in str(writes) and "Hỏi Gen soạn lại" in str(writes)
+    assert all(w["target_url"] == COMMENT_URL and w["text"] == REPLY for w in writes)
     # CHECKPOINT thì vẫn dừng tài khoản như cũ.
     assert (await _write(owner_api, acc_id)).status_code == 201
     await _deliver(redis, _result((await _write_jobs(redis))[-1], "failed", {"code": "CHECKPOINT"}))
@@ -424,3 +428,118 @@ async def test_retention_drops_old_proofs(owner_api: Api, redis: Redis, db: Any)
     assert row.proof_key is None and row.status == "done"
     with pytest.raises(ObjectNotFound):
         await get_object_store().get(key)
+
+
+# ─── review v0.1.47: đích bình luận, kết quả muộn, lỗi sau khi gửi, hạn lưu ──────────────────────────────────────
+
+async def test_reply_to_notification_without_comment_id_is_refused(owner_api: Api, redis: Redis, db: Any) -> None:
+    """Thông báo thích/sinh nhật/bài viết (không có comment_id) không phải đích trả lời — không xếp việc nào."""
+    like_url = "https://www.facebook.com/photo/?fbid=42"
+    acc = await _add(owner_api)
+    acc_id = str(acc["id"])
+    await _login(owner_api, redis, acc_id)
+    await _read_done(owner_api, redis, acc_id, [*READ_ITEMS, {
+        "kind": "notification", "who": None, "text": "Minh đã thích ảnh của bạn", "time": "1 giờ", "unread": True,
+        "link": like_url}])
+    await _heartbeat(redis, {"enabled": True, "mode": "auto", "reason": None, "checked_at": "2026-10-03T01:00:00Z"})
+    await _pin(owner_api)
+    r = await _write(owner_api, acc_id, target_url=like_url)
+    assert r.status_code == 422 and "bình luận" in r.json()["errors"]["target_url"], r.text
+    assert len(await _write_jobs(redis)) == 0
+    assert (await _write(owner_api, acc_id)).status_code == 201          # thông báo có comment_id vẫn trả lời được
+
+
+@pytest.mark.parametrize("closer", ["pause", "timeout"])
+async def test_late_done_after_pause_or_timeout_is_logged_and_counted(owner_api: Api, redis: Redis, db: Any,
+                                                                      closer: str) -> None:
+    acc_id = await _ready(owner_api, redis)
+    assert (await _write(owner_api, acc_id)).status_code == 201
+    job = (await _write_jobs(redis))[-1]
+    await _deliver(redis, _result(job, "started"))
+    if closer == "pause":
+        assert (await owner_api.send("POST", f"/social/accounts/{acc_id}/pause", {})).status_code == 200
+        want = "cancelled"
+    else:
+        await db.execute(text("""UPDATE agent.browser_jobs SET status = 'failed', error = 'WORKER_TIMEOUT',
+                                        finished_at = now() WHERE id = :i"""), {"i": job["id"]})
+        await db.commit()
+        want = "failed"
+    await db.rollback()
+    assert (await db.execute(text("SELECT status FROM agent.browser_jobs WHERE id = :i"),
+                             {"i": job["id"]})).scalar_one() == want
+    assert await _deliver(redis, _write_done(job)) == "ok"          # tin ĐÃ đi: phải ghi nhận
+    await db.rollback()
+    got = (await owner_api.get(f"/social/jobs/{job['id']}")).json()
+    assert got["status"] == "done" and got["error"] is None and got["has_proof"] is True
+    assert got["result"]["after_cancel"] is True and got["result"]["text"] == REPLY
+    async with admin_sessionmaker()() as adb:
+        detail = (await adb.execute(text("SELECT detail FROM ops.action_log WHERE action = 'social.write'"))
+                  ).scalar_one()
+    assert detail["after_cancel"] is True and detail["sent"] is True
+    assert (await owner_api.get(f"/social/accounts/{acc_id}")).json()["writes_today"] == 1
+    item = (await owner_api.get("/social/writes")).json()["items"][0]
+    assert item["after_cancel"] is True and item["status"] == "done"
+
+
+async def test_late_done_after_revoke_logs_without_storing(owner_api: Api, redis: Redis, db: Any) -> None:
+    acc_id = await _ready(owner_api, redis)
+    assert (await _write(owner_api, acc_id)).status_code == 201
+    job = (await _write_jobs(redis))[-1]
+    await _deliver(redis, _result(job, "started"))
+    await _pin(owner_api)
+    assert (await owner_api.send("DELETE", f"/social/accounts/{acc_id}")).status_code == 204
+    assert await _deliver(redis, _write_done(job)) == "ok"
+    await db.rollback()
+    row = (await db.execute(text("SELECT status, proof_key, result FROM agent.browser_jobs WHERE id = :i"),
+                            {"i": job["id"]})).one()
+    assert row.status == "done" and row.proof_key is None and row.result is None       # không lưu lại gì đã xoá
+    assert (await db.execute(text("SELECT state_enc FROM core.social_accounts WHERE id = :i"),
+                             {"i": acc_id})).scalar_one() is None
+    async with admin_sessionmaker()() as adb:
+        detail = (await adb.execute(text("SELECT detail FROM ops.action_log WHERE action = 'social.write'"))
+                  ).scalar_one()
+    assert detail["account_revoked"] is True and detail["sent"] is True
+
+
+async def test_send_error_after_submit_is_done_with_warning(owner_api: Api, redis: Redis, db: Any) -> None:
+    acc_id = await _ready(owner_api, redis)
+    assert (await _write(owner_api, acc_id)).status_code == 201
+    job = (await _write_jobs(redis))[-1]
+    res = _write_done(job, confirmed=False)
+    res["data"]["send_error"] = True
+    assert await _deliver(redis, protocol.sign(crypto.browser_key(), protocol.P_RESULT, res)) == "ok"
+    await db.rollback()
+    got = (await owner_api.get(f"/social/jobs/{job['id']}")).json()
+    assert got["status"] == "done" and got["result"]["send_error"] is True and got["result"]["confirmed"] is False
+    assert (await owner_api.get("/social/writes")).json()["items"][0]["send_error"] is True
+    notes = (await owner_api.get("/notifications")).json()["items"]
+    assert any(n["kind"] == "social.write" and "trước khi gửi lại" in (n["body"] or "") for n in notes)
+
+
+async def test_writes_list_survives_purged_result(owner_api: Api, redis: Redis, db: Any) -> None:
+    acc_id = await _ready(owner_api, redis)
+    jid = (await _write(owner_api, acc_id)).json()["id"]
+    await _deliver(redis, _write_done((await _write_jobs(redis))[-1]))
+    await db.execute(text("UPDATE agent.browser_jobs SET result = NULL WHERE id = :i"), {"i": jid})   # như hạn lưu
+    await db.commit()
+    r = await owner_api.get("/social/writes")
+    assert r.status_code == 200
+    item = r.json()["items"][0]
+    assert item["target_url"] is None and item["text"] is None and item["status"] == "done"
+
+
+async def test_withdrawing_consent_cancels_queued_writes(owner_api: Api, redis: Redis, db: Any) -> None:
+    acc_id = await _ready(owner_api, redis, gate=False)
+    await _heartbeat(redis, {"enabled": False, "mode": "auto", "reason": None, "checked_at": None})
+    r = await owner_api.send("POST", "/social/write-consent", {"version": platforms.WRITE_RISK_VERSION})
+    assert r.status_code == 200 and r.json()["open"] is True
+    assert (await _write(owner_api, acc_id)).status_code == 201
+    job = (await _write_jobs(redis))[-1]
+    assert (await owner_api.send("DELETE", "/social/write-consent")).json()["open"] is False
+    await db.rollback()
+    assert (await db.execute(text("SELECT status FROM agent.browser_jobs WHERE id = :i"),
+                             {"i": job["id"]})).scalar_one() == "cancelled"
+    async with admin_sessionmaker()() as adb:
+        detail = (await adb.execute(text("""SELECT detail FROM ops.action_log
+                                            WHERE action = 'social.write_risk_revoked'"""))).scalar_one()
+    assert detail["writes_cancelled"] == 1

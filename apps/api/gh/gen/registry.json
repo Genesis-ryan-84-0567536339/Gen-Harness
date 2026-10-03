@@ -853,7 +853,7 @@
     {
       "n": 13,
       "title": "Kết nối Facebook",
-      "why": "Để Gen đọc thông báo và tin nhắn Facebook của Sếp — chỉ đọc, không đăng bài hay trả lời thay Sếp.",
+      "why": "Để Gen đọc thông báo, tin nhắn và — khi Sếp bấm Xác nhận + nhập PIN — trả lời bình luận / nhắn tin thay Sếp; không đăng bài.",
       "steps": [
         "Bấm \"Mở trang Tài khoản mạng xã hội\" bên dưới.",
         "Bấm \"Thêm tài khoản\", đặt tên dễ nhận ra.",

@@ -22,6 +22,13 @@ export function SocialWriteRiskPage() {
     document.title = 'Gửi trả lời & tin nhắn Facebook · Gen-Harness';
   }, []);
   if (me.isPending) return <div className="screen"><SkeletonLines rows={4} /></div>;
+  // Lỗi tải /auth/me (mạng, 5xx) KHÔNG có nghĩa là "không phải Owner" — báo lỗi tải kèm nút thử lại.
+  if (me.isError && !me.data)
+    return (
+      <div className="screen">
+        <CardError error={me.error} onRetry={() => void me.refetch()} retrying={me.isFetching} />
+      </div>
+    );
   if (me.data?.role?.code !== 'owner') {
     return (
       <div className="screen">
@@ -82,6 +89,11 @@ function RiskBody() {
           <>
             <SandboxBox gate={g} />
             <Card title="Rủi ro" kicker="Sếp tự quyết có cho gửi hay không">
+              {g.sandbox.enabled === true ? (
+                <p className="muted-note" data-testid="write-risk-sandbox-note">
+                  <Icon name="ph-fill ph-shield-check" size={14} color="var(--color-ok)" /> Trình duyệt nền đang chạy trong sandbox — rủi ro về việc thiếu sandbox bên dưới hiện không áp dụng.
+                </p>
+              ) : null}
               <ul className="risk-list" aria-label="Rủi ro khi gửi lên Facebook">
                 {g.risk.map((r) => (
                   <li key={r}>{r}</li>

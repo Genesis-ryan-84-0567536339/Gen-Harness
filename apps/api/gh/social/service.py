@@ -6,9 +6,9 @@ browser-worker (container riêng, không DB, không khoá master) chạy Playwri
 consumer trong api (`consume_results`) cập nhật DB, lưu phiên (mã hoá phong bì bằng khoá master), báo chuông Owner.
 
 Giới hạn (trần cứng trong code — Owner chỉ chỉnh XUỐNG): đọc ≤ 6 lượt/ngày/tài khoản, cách nhau ≥ 10 phút; mỗi tài
-tài khoản tối đa 1 việc cùng lúc (ở đây + khoá Redis ở worker); lịch tự động không chạy 23:00–06:00. Gửi: ≤ 20 lượt/ngày
-(trần cứng, Owner hạ được), cổng F-85 (sandbox trình duyệt bật HOẶC Owner đã đồng ý rủi ro). Công tắc "Dừng tất cả"
-(`gh:browser:halt`) chặn việc mới (cả gửi) và báo worker đóng mọi trình duyệt ngay.
+tài khoản tối đa 1 việc cùng lúc (ở đây + khoá Redis ở worker); lịch tự động không chạy 23:00–06:00. Gửi: mặc định
+10 lượt/ngày, Owner chỉnh 1–20 (trần cứng 20), cổng F-85 (sandbox trình duyệt bật HOẶC Owner đã đồng ý rủi ro). Công
+tắc "Dừng tất cả" (`gh:browser:halt`) chặn việc mới (cả gửi) và báo worker đóng mọi trình duyệt ngay.
 """
 
 import asyncio
@@ -45,7 +45,7 @@ READS_PER_DAY_MAX = 6
 READ_MIN_INTERVAL = timedelta(minutes=10)
 LOGINS_PER_DAY_MAX = 6
 HEALTH_PER_DAY_MAX = 8
-WRITES_PER_DAY_MAX = 20            # trần cứng lượt GỬI/ngày/tài khoản — Owner chỉ chỉnh xuống (daily_write_limit)
+WRITES_PER_DAY_MAX = 20            # trần cứng GỬI/ngày/tài khoản; Owner chỉnh 1..20 (daily_write_limit, mặc định 10)
 WRITE_TIMEOUT_S = 180
 WRITE_TEXT_MAX = 2000
 WRITE_TARGET_WINDOW = timedelta(days=7)
@@ -328,12 +328,14 @@ async def revoke(db: AsyncSession, redis: Redis, user: auth_service.CurrentUser,
                                {"i": r.id})).scalars().all()
     await db.execute(text("""UPDATE agent.browser_jobs SET proof_key = NULL, proof_sha256 = NULL
                              WHERE account_id = :i AND proof_key IS NOT NULL"""), {"i": r.id})
+    await _log(db, user, "social.revoked", r, detail={"session_wiped": bool(r.has_session), "results_wiped": wiped,
+                                                      "proofs_wiped": len(proofs)})
+    # Xoá ảnh SAU khi commit: commit lỗi/rollback thì dòng vẫn còn proof_key trỏ tới ảnh còn nguyên (không 404).
+    await db.commit()
     store = get_object_store()
     for key in proofs:
         with contextlib.suppress(Exception):          # best-effort — dòng đã bỏ khoá, retention không quét lại
             await store.delete(key)
-    await _log(db, user, "social.revoked", r, detail={"session_wiped": bool(r.has_session), "results_wiped": wiped,
-                                                      "proofs_wiped": len(proofs)})
     await _push(redis, user.org_id, r.id)
 
 
@@ -391,15 +393,19 @@ ERROR_TEXT = {
     "SELECTOR": "Giao diện nền tảng đã đổi, chưa đọc được — cần cập nhật bộ đọc.",
     "BUSY": "Tài khoản đang có việc khác chạy — thử lại sau ít phút.",
     "ERROR": "Lỗi trình duyệt — thử lại sau.",
-    "PERMIT_INVALID": "Giấy phép gửi không hợp lệ hoặc đã quá 5 phút — không gửi gì. Bấm Xác nhận lại.",
-    "TARGET_NOT_FOUND": "Không tìm thấy bình luận/hội thoại trên trang — không gửi gì.",
-    "SEND_UNCONFIRMED": "Đã bấm gửi nhưng chưa thấy nội dung hiện trên trang — xem ảnh chụp để kiểm tra.",
-    "PROOF_MISSING": "Đã gửi nhưng không chụp được ảnh bằng chứng.",
+    "PERMIT_INVALID": "Giấy phép gửi không hợp lệ hoặc đã quá 5 phút — không gửi gì. Hỏi Gen soạn lại để gửi lần "
+                      "nữa.",
+    "TARGET_NOT_FOUND": "Không tìm thấy đúng bình luận/hội thoại trên trang — không gửi gì. Hỏi Gen đọc lại rồi soạn "
+                        "lại nếu muốn gửi lần nữa.",
+    "PROOF_MISSING": "Đã gửi nhưng không chụp được ảnh bằng chứng — mở Facebook để kiểm tra.",
     "WRITE_UNSUPPORTED": "Nền tảng này chưa hỗ trợ kiểu gửi này.",
 }
 # Lỗi của việc GỬI do chính việc đó (không phải tài khoản hỏng): không tính vào fail_streak, không đổi trạng thái
 # tài khoản.
-WRITE_NEUTRAL_ERRORS = ("PERMIT_INVALID", "TARGET_NOT_FOUND", "SEND_UNCONFIRMED", "BLOCKED_URL", "WRITE_UNSUPPORTED")
+# (Lỗi SAU khi đã bấm gửi không bao giờ là 'failed': worker báo 'done' kèm confirmed=False / send_error — tránh Owner
+# gửi lại thành hai lần.)
+WRITE_NEUTRAL_ERRORS = ("PERMIT_INVALID", "TARGET_NOT_FOUND", "BLOCKED_URL", "WRITE_UNSUPPORTED")
+SEND_ERROR_TEXT = "Có lỗi ngay sau khi bấm gửi — tin có thể đã đi. Mở Facebook kiểm tra trước khi gửi lại."
 
 
 async def active_job(db: AsyncSession, account_id: uuid.UUID) -> Any:
@@ -439,6 +445,19 @@ async def _cancel_active(db: AsyncSession, redis: Redis, account_id: uuid.UUID, 
     for jid in ids:
         await bus(redis).publish(protocol.CONTROL_CHANNEL, orjson.dumps(protocol.sign(
             key, protocol.P_CONTROL, {"type": "cancel", "job_id": str(jid), "ts": int(_now().timestamp())})))
+
+
+async def _cancel_org_writes(db: AsyncSession, redis: Redis, org_id: uuid.UUID) -> int:
+    """Huỷ mọi việc GỬI đang chờ/chạy của tổ chức (Owner rút đồng ý rủi ro → khoá NGAY, không đợi permit 5 phút hết)."""
+    ids = (await db.execute(text("""UPDATE agent.browser_jobs SET status = 'cancelled', finished_at = now(),
+                                           error = 'CANCELLED'
+                                    WHERE org_id = :o AND kind = 'write' AND status IN ('queued', 'running')
+                                    RETURNING id"""), {"o": org_id})).scalars().all()
+    key = crypto.browser_key()
+    for jid in ids:
+        await bus(redis).publish(protocol.CONTROL_CHANNEL, orjson.dumps(protocol.sign(
+            key, protocol.P_CONTROL, {"type": "cancel", "job_id": str(jid), "ts": int(_now().timestamp())})))
+    return len(ids)
 
 
 async def _count_today(db: AsyncSession, account_id: uuid.UUID, kind: str) -> int:
@@ -699,12 +718,17 @@ async def handle_result(db: AsyncSession, redis: Redis, raw: Any) -> str:
                             {"i": job.account_id})).one()
     typ = msg.get("type")
     data: dict[str, Any] = msg["data"] if isinstance(msg.get("data"), dict) else {}
-    # Việc GỬI đã bị đóng 'halted' (Dừng tất cả) mà worker báo 'done': đã bấm gửi trước khi kịp dừng — chấp nhận, đánh
-    # dấu after_halt (ảnh chụp + nhật ký vẫn phải có). Mọi kết quả muộn khác của việc đã đóng bị bỏ, kể cả phiên.
-    late_write = job.kind == "write" and job.status == "halted" and msg.get("type") == "done"
+    # Việc GỬI đã bị đóng (Dừng tất cả → 'halted'; Owner tạm dừng/gỡ tài khoản → 'cancelled'; quá giờ WORKER_TIMEOUT →
+    # 'failed') mà worker báo 'done': tin ĐÃ được gửi trước khi kịp dừng — chấp nhận, đánh dấu after_halt/after_cancel
+    # (nhật ký + ảnh chụp vẫn phải có, và lượt này phải tính vào trần gửi/ngày). Kết quả muộn khác bị bỏ, kể cả phiên.
+    late_write = (job.kind == "write" and job.status in ("failed", "halted", "cancelled")
+                  and msg.get("type") == "done")
     if job.status in ("done", "failed", "halted", "cancelled") and not late_write:
         return "closed"
     if acc.status == "revoked":
+        if late_write and isinstance(msg.get("data"), dict):
+            await _late_write_revoked(db, job, acc, msg["data"])
+            return "ok"
         return "revoked"
     if typ == "started":
         await db.execute(text("UPDATE agent.browser_jobs SET status = 'running', started_at = now() WHERE id = :i"),
@@ -726,7 +750,7 @@ async def handle_result(db: AsyncSession, redis: Redis, raw: Any) -> str:
         await _close_job(db, job.id, "done", result={"logged_in": True})
         await _system_log(db, job, acc, "social.login_ok")
     elif typ == "done" and job.kind == "write":
-        await _finish_write(db, redis, job, acc, data, after_halt=late_write)
+        await _finish_write(db, redis, job, acc, data, late_from=job.status if late_write else None)
     elif typ == "done":
         result: dict[str, Any] = {"page_state": _clean_text(data.get("page_state"), 20) or "ok"}
         if job.kind == "read":
@@ -791,8 +815,11 @@ async def _store_state(db: AsyncSession, org_id: uuid.UUID, account_id: uuid.UUI
 
 async def _close_job(db: AsyncSession, job_id: uuid.UUID, status: str, *, result: dict[str, Any] | None = None,
                      error: str | None = None, cost: Any = None) -> None:
+    """Đóng việc. `result=None` GIỮ kết quả đang có (việc gửi lưu sẵn đích + nội dung lúc xếp — thất bại không được xoá
+    mất, trang /social cần để hiện "Lần gửi gần đây")."""
     await db.execute(text("""UPDATE agent.browser_jobs SET status = :s, finished_at = now(),
-                                    started_at = COALESCE(started_at, now()), result = CAST(:r AS jsonb), error = :e,
+                                    started_at = COALESCE(started_at, now()),
+                                    result = COALESCE(CAST(:r AS jsonb), result), error = :e,
                                     cost = CAST(:c AS jsonb) WHERE id = :i"""),
                      {"s": status, "i": job_id, "r": orjson.dumps(result).decode() if result is not None else None,
                       "e": error, "c": orjson.dumps(cost).decode() if isinstance(cost, dict) else None})
@@ -875,7 +902,13 @@ def _sha(v: str) -> str:
 
 async def write_gate(db: AsyncSession, redis: Redis, org_id: uuid.UUID) -> dict[str, Any]:
     """Cổng F-85: gửi lên mạng xã hội chỉ MỞ khi trình duyệt nền báo sandbox đang bật (nhịp tim còn sống) HOẶC Owner đã
-    đồng ý rủi ro (đúng phiên bản cảnh báo, chưa rút lại)."""
+    đồng ý rủi ro (đúng phiên bản cảnh báo, chưa rút lại).
+
+    GIỚI HẠN (thành thật): `sandbox.enabled` là lời TỰ KHAI của container browser trong nhịp tim — ký nhịp tim cũng
+    không giúp vì container bị chiếm giữ chính khoá ký (và đã cầm phiên đăng nhập). Cổng này là gợi ý HIỂN THỊ/UX để
+    Owner biết rủi ro, KHÔNG phải ranh giới an toàn: ranh giới của đường gửi bình thường là Xác nhận + PIN
+    `social.write` + permit ký một lần (5 phút, đúng việc/đích/nội dung); với container đã bị chiếm thì không cổng nào
+    ở đây chặn được — đó chính là rủi ro trang cảnh báo F-85 nói rõ."""
     worker = await worker_state(redis)
     sandbox = (worker or {}).get("sandbox") or {"enabled": None, "reason": None, "checked_at": None}
     if worker is None:
@@ -915,15 +948,38 @@ async def revoke_write_risk(db: AsyncSession, redis: Redis, user: auth_service.C
                                   WHERE org_id = :o AND topic = :t AND revoked_at IS NULL RETURNING version"""),
                           {"o": user.org_id, "t": platforms.WRITE_RISK_TOPIC, "u": user.id})).scalar_one_or_none()
     if n is not None:
+        cancelled = 0
+        if not (await write_gate(db, redis, user.org_id))["open"]:
+            cancelled = await _cancel_org_writes(db, redis, user.org_id)
         await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                                action="social.write_risk_revoked", target_type="risk_consent",
                                target_id=platforms.WRITE_RISK_TOPIC,
-                               detail={"topic": platforms.WRITE_RISK_TOPIC, "version": n}, ip=user.ip)
+                               detail={"topic": platforms.WRITE_RISK_TOPIC, "version": n,
+                                       "writes_cancelled": cancelled}, ip=user.ip)
     await realtime.publish(redis, EVENT, {"write_gate": True}, org_id=user.org_id)
     return await write_gate(db, redis, user.org_id)
 
 
 _ITEM_KIND = {"reply_comment": "notification", "send_message": "inbox"}
+REPLY_NO_COMMENT = ("Thông báo này không trỏ tới một bình luận cụ thể (thích, sinh nhật, bài viết…) — chỉ trả lời được "
+                    "vào thông báo về bình luận.")
+
+
+def comment_id(url: str) -> str:
+    """comment_id trong đường dẫn ('' nếu không có). Worker chọn ĐÚNG bình luận theo mã này — không có thì không trả
+    lời (không đoán sang bình luận khác)."""
+    from urllib.parse import parse_qs, urlsplit
+
+    try:
+        vals = parse_qs(urlsplit(url or "").query).get("comment_id") or []
+    except ValueError:
+        return ""
+    return re.sub(r"[^0-9A-Za-z_]", "", vals[0])[:40] if vals else ""
+
+
+def write_target_ok(action: str, target_url: str) -> bool:
+    """Trả lời bình luận chỉ hợp lệ khi đích có comment_id (thông báo thích/sinh nhật/bài viết thì không)."""
+    return action != "reply_comment" or bool(comment_id(target_url))
 
 
 async def find_read_item(db: AsyncSession, org_id: uuid.UUID, account_id: uuid.UUID, action: str,
@@ -931,7 +987,7 @@ async def find_read_item(db: AsyncSession, org_id: uuid.UUID, account_id: uuid.U
     """Mục (đã làm sạch) trong kết quả các lượt đọc 'done' của CHÍNH tài khoản này trong 7 ngày có link == target_url
     và đúng loại (bình luận ↔ thông báo, tin nhắn ↔ hộp thư). Không có ⇒ Gen/Owner không được trả lời vào đó."""
     kind = _ITEM_KIND.get(action)
-    if kind is None or not target_url:
+    if kind is None or not target_url or not write_target_ok(action, target_url):
         return None
     rows = (await db.execute(text("""SELECT result FROM agent.browser_jobs
                                      WHERE org_id = :o AND account_id = :a AND kind = 'read' AND status = 'done'
@@ -967,8 +1023,9 @@ async def request_write(db: AsyncSession, redis: Redis, user: auth_service.Curre
     limit = min(int(r.daily_write_limit or WRITES_PER_DAY_MAX), WRITES_PER_DAY_MAX)
     used = await _count_today(db, r.id, "write")
     if used >= limit:
+        more = " hoặc nâng Giới hạn gửi/ngày ở trang Tài khoản mạng xã hội" if limit < WRITES_PER_DAY_MAX else ""
         raise ApiError(429, "SOCIAL_WRITE_LIMIT", f"Đã gửi {used} lượt trong 24 giờ (giới hạn để giảm rủi ro khoá tài "
-                                                  "khoản) — thử lại sau")
+                                                  f"khoản) — thử lại sau{more}")
     body = clean_write_text(text)
     errors: dict[str, str] = {}
     if not body:
@@ -977,6 +1034,8 @@ async def request_write(db: AsyncSession, redis: Redis, user: auth_service.Curre
         errors["text"] = f"Tối đa {WRITE_TEXT_MAX} ký tự"
     if _clean_link(target_url, p.domains) is None or len(target_url) > 300:
         errors["target_url"] = "Chỉ trả lời/nhắn vào mục Gen vừa đọc từ tài khoản của Sếp — đọc lại rồi thử."
+    elif not write_target_ok(action, target_url):
+        errors["target_url"] = REPLY_NO_COMMENT
     elif await find_read_item(db, user.org_id, r.id, action, target_url) is None:
         errors["target_url"] = "Chỉ trả lời/nhắn vào mục Gen vừa đọc từ tài khoản của Sếp — đọc lại rồi thử."
     if errors:
@@ -1036,17 +1095,34 @@ async def _save_proof(job: Any, data: dict[str, Any]) -> tuple[str | None, str |
     return key, sha
 
 
+async def _late_write_revoked(db: AsyncSession, job: Any, acc: Any, data: dict[str, Any]) -> None:
+    """Tài khoản đã bị gỡ khi việc gửi đang chạy mà tin vẫn đi: KHÔNG lưu phiên/ảnh (đã xoá theo ý Owner) nhưng PHẢI
+    có nhật ký hành động + tính vào trần gửi/ngày."""
+    await db.execute(text("""UPDATE agent.browser_jobs SET status = 'done', finished_at = now(),
+                                    started_at = COALESCE(started_at, now()) WHERE id = :i"""), {"i": job.id})
+    await _system_log(db, job, acc, "social.write",
+                      detail={"action": job.action, "proof_sha256": None, "confirmed": bool(data.get("confirmed")),
+                              "sent": bool(data.get("sent")), "after_cancel": True, "account_revoked": True})
+
+
 async def _finish_write(db: AsyncSession, redis: Redis, job: Any, acc: Any, data: dict[str, Any], *,
-                        after_halt: bool) -> None:
+                        late_from: str | None = None) -> None:
+    """`late_from`: trạng thái việc đã đóng trước khi 'done' tới ('halted' → after_halt; 'cancelled'/'failed' →
+    after_cancel)."""
     prev = job.result if isinstance(job.result, dict) else {}
     action = job.action or str(data.get("action") or "")
     text_ = str(prev.get("text") or "")
     sent, confirmed = bool(data.get("sent")), bool(data.get("confirmed"))
+    after_halt, after_cancel = late_from == "halted", late_from in ("cancelled", "failed")
     proof_key, proof_sha = await _save_proof(job, data)
     result: dict[str, Any] = {"action": action, "target_url": prev.get("target_url"), "text": prev.get("text"),
                               "sent": sent, "confirmed": confirmed, "trace": _clean_trace(data.get("trace"))}
     if after_halt:
         result["after_halt"] = True
+    if after_cancel:
+        result["after_cancel"] = True
+    if data.get("send_error"):
+        result["send_error"] = True
     if proof_key is None:
         result["proof_error"] = "PROOF_MISSING"
     await db.execute(text("""UPDATE core.social_accounts SET fail_streak = 0, last_health = CAST(:lh AS jsonb)
@@ -1057,18 +1133,24 @@ async def _finish_write(db: AsyncSession, redis: Redis, job: Any, acc: Any, data
     await _close_job(db, job.id, "done", result=result, cost=data.get("cost"))
     await _system_log(db, job, acc, "social.write",
                       detail={"action": action, "text_sha256": _sha(text_), "proof_sha256": proof_sha,
-                              "confirmed": confirmed, "after_halt": after_halt, "sent": sent})
+                              "confirmed": confirmed, "after_halt": after_halt, "after_cancel": after_cancel,
+                              "sent": sent})
     what = "đã gửi trả lời" if action == "reply_comment" else "đã gửi tin nhắn"
     await notifications.notify(
         db, job.org_id, await _recipients(db, job), kind="social.write", redis=redis,
         title=f"{acc.label}: {what}" if confirmed else f"{acc.label}: đã bấm gửi — kiểm ảnh chụp",
-        body="Mở Tài khoản mạng xã hội để xem ảnh chụp bằng chứng." if proof_key
-        else ERROR_TEXT["PROOF_MISSING"], link="/social")
+        body=(SEND_ERROR_TEXT + " " if data.get("send_error") else "")
+        + ("Mở Tài khoản mạng xã hội để xem ảnh chụp bằng chứng." if proof_key else ERROR_TEXT["PROOF_MISSING"]),
+        link="/social")
     if action == "reply_comment" and sent:
         from gh.boss_checks import service as boss_checks
 
         await boss_checks.record(db, job.org_id, "facebook_reply", "pass", detail={"job_status": "done"},
                                  user_id=job.requested_by, ref_id=job.id)
+
+
+def _str_or_none(v: Any) -> str | None:
+    return v if isinstance(v, str) else None
 
 
 async def list_writes(db: AsyncSession, org_id: uuid.UUID, account_id: uuid.UUID | None,
@@ -1086,12 +1168,15 @@ async def list_writes(db: AsyncSession, org_id: uuid.UUID, account_id: uuid.UUID
     for r in rows:
         res = r.result if isinstance(r.result, dict) else {}
         out.append({"job_id": str(r.id), "account_id": str(r.account_id), "account_label": r.label,
-                    "action": r.action, "target_url": res.get("target_url"), "text": res.get("text"),
+                    # Có thể NULL: kết quả đã bị dọn theo hạn lưu (retention) — web hiện "(đã xoá theo hạn lưu)".
+                    "action": r.action, "target_url": _str_or_none(res.get("target_url")),
+                    "text": _str_or_none(res.get("text")),
                     "status": r.status, "error": r.error,
                     "error_text": ERROR_TEXT.get(r.error or "", r.error) if r.error else None,
                     "created_at": _iso(r.created_at), "finished_at": _iso(r.finished_at),
                     "has_proof": bool(r.has_proof), "confirmed": res.get("confirmed"),
-                    "after_halt": bool(res.get("after_halt"))})
+                    "after_halt": bool(res.get("after_halt")), "after_cancel": bool(res.get("after_cancel")),
+                    "send_error": bool(res.get("send_error"))})
     return out
 
 

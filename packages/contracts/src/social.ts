@@ -64,6 +64,10 @@ export interface BrowserJob {
     trace?: Array<{ step: string; ms: number; ok: boolean }>;
     /** Đã bấm gửi trước khi lệnh Dừng tất cả tới nơi. */
     after_halt?: boolean;
+    /** Đã bấm gửi trước khi lệnh huỷ / tạm dừng / hết giờ tới nơi (kết quả 'done' đến muộn). */
+    after_cancel?: boolean;
+    /** Có lỗi ngay SAU khi bấm gửi — tin có thể đã đi, Owner kiểm tra trước khi gửi lại. */
+    send_error?: boolean;
     proof_error?: string | null;
     items?: SocialItem[];
     counts?: { notifications: number; inbox: number; unread: number; suspicious: number };
@@ -142,8 +146,9 @@ export interface SocialWriteItem {
   account_id: string;
   account_label: string;
   action: SocialWriteAction;
-  target_url: string;
-  text: string;
+  /** null khi kết quả đã bị dọn theo hạn lưu. */
+  target_url: string | null;
+  text: string | null;
   status: BrowserJobStatus;
   error: string | null;
   error_text: string | null;
@@ -152,6 +157,8 @@ export interface SocialWriteItem {
   has_proof: boolean;
   confirmed: boolean | null;
   after_halt: boolean;
+  after_cancel?: boolean;
+  send_error?: boolean;
 }
 
 export interface SocialLoginTicket {

@@ -2899,7 +2899,8 @@ Sếp xác nhận bằng mã PIN, có bằng chứng bằng ảnh chụp, và d�
   → `gh/social/session_watch.py::daily_check` xếp việc `health` (`via=schedule`) cho tài khoản `active` có phiên; bỏ qua nếu vừa
   kiểm trong 20 giờ, đang bận, đạt trần kiểm/ngày, Dừng tất cả, hoặc giờ yên lặng. Phiên hết (`needs_login`) hay bị hỏi xác minh
   (`paused` vì checkpoint/CAPTCHA) → `evaluate_alerts` (một phần của vòng `health.evaluate`) mở sự cố `social.session:<id>` loại
-  `social.session_expired` (nút "Đăng nhập lại"; người không phải Owner: "Nhờ Owner xử lý", không link) + đúng một chuông; đăng
+  `social.session_expired` (nút "Đăng nhập lại"; người không phải Owner: nút "Nhờ Owner xử lý", không link, thân "Phiên Facebook
+  của Owner đã hết — nhờ Owner mở Tài khoản mạng xã hội và đăng nhập lại." cho mọi fingerprint) + đúng một chuông; đăng
   nhập lại hoặc gỡ tài khoản thì đóng. Action Log `social.session_check` (actor `system:social-session-check`).
 - **Web**: dòng 8 "Facebook trả lời (không bắt buộc)" ở Việc Sếp cần làm (hướng dẫn 4 bước; chưa đạt → nút "Mở Tài khoản mạng xã
   hội"; không có nút chạy kiểm; chỉ hiện khi máy chủ trả dòng 8; `required_total` vẫn 6).
@@ -2915,7 +2916,8 @@ Sếp xác nhận bằng mã PIN, có bằng chứng bằng ảnh chụp, và d�
   outbox sẽ gửi đôi. Tiêu chí "phiên hết → raise_once + Telegram" được kiểm bằng: đúng 1 sự cố mở + có trong
   `api-health.json` + `ops.telegram_outbox` không có hàng mới (`test_social_session_watch_v0147.py`).
 - **Trễ cố định 3 giây** (`GH_BROWSER_DELAY`) thay khoảng ngẫu nhiên 2–6 giây — tránh bị hiểu là né chống bot (F-59).
-- **Giới hạn gửi/ngày** mặc định 10, Owner hạ 1..20, **trần cứng 20** (cửa sổ 24 giờ, không tính việc đã huỷ).
+- **Giới hạn gửi/ngày** mặc định 10, Owner chỉnh 1–20 (nâng hoặc hạ), **trần cứng 20** (cửa sổ 24 giờ trượt, không tính việc
+  đã huỷ; Console ghi "Đã dùng x/y lượt gửi (24 giờ qua)").
 - **Ảnh chụp bằng chứng**: JPEG ≤ 2 MB, mã hoá bằng khoá master khi lưu, giữ 90 ngày; không dùng Playwright tracing (chứa cookie).
 - **Sandbox (đo khi tích hợp)**: trên máy tích hợp (kernel 6.18, user namespace không bị chặn) Chromium chạy bằng người dùng
   thường → `probe` **enabled=true**: tiến trình chính không có `--no-sandbox`, renderer Seccomp 2 + user namespace riêng
@@ -2959,3 +2961,32 @@ Sếp xác nhận bằng mã PIN, có bằng chứng bằng ảnh chụp, và d�
 - Telegram báo phiên hết chậm tới một nhịp watchdog (tệp `api-health.json` tươi ≤ 10 phút).
 - Đăng bài (`post`), `like`, `follow` chưa có (lát 2).
 - Test kiểm phiên dùng worker giả như `test_social.py` — không có Chromium/sandbox thật trong gói này.
+
+### Sửa sau review (v0.1.47, trước merge)
+
+- **Trả lời nhầm bình luận (blocker)**: worker chọn bình luận theo `comment_id` của `target_url` ĐÃ KÝ trong permit (không lấy từ
+  `page.url` — Facebook chuyển hướng có thể làm mất); không thấy đúng bình luận → `TARGET_NOT_FOUND`, không gõ, không gửi (bỏ
+  đường lùi "bình luận được làm nổi / bình luận đầu tiên"). API (`request_write`, `find_read_item`) và thẻ đề xuất Gen
+  (`social_labels`) từ chối trả lời vào thông báo không có `comment_id` (thích, sinh nhật, bài viết…).
+- **Trang /social vỡ khi một lần gửi thất bại (blocker)**: `_close_job` giữ `result` cũ khi đóng việc không kèm kết quả (đích +
+  nội dung lưu lúc xếp việc không còn bị xoá); `/social/writes` trả `target_url`/`text` = `null` khi kết quả đã bị dọn theo hạn
+  lưu, web hiện "(đã xoá theo hạn lưu)".
+- **Kết quả "done" đến muộn**: việc gửi đã đóng `cancelled` (tạm dừng/gỡ tài khoản), `failed` (WORKER_TIMEOUT) hay `halted` mà
+  worker báo đã gửi → vẫn ghi Action Log `social.write` + ảnh chụp, đánh dấu `after_cancel`/`after_halt`, tính vào trần gửi/ngày;
+  tài khoản đã gỡ thì chỉ ghi Action Log (không lưu lại phiên/ảnh đã xoá).
+- **Lỗi sau khi đã bấm gửi**: worker không còn báo `failed` (Sếp sẽ gửi lại thành hai lần) — luôn chụp ảnh và báo `done` với
+  `confirmed=false` + `send_error`; Console/chuông ghi "Có lỗi ngay sau khi bấm gửi — tin có thể đã đi. Mở Facebook kiểm tra
+  trước khi gửi lại." Bỏ mã `SEND_UNCONFIRMED` (không còn nơi nào sinh ra).
+- **Chữ cho Sếp**: không ảnh chụp → "Đã gửi nhưng không chụp được ảnh bằng chứng — mở Facebook để kiểm tra." (mã nằm trong "Chi
+  tiết kỹ thuật"); `PERMIT_INVALID`/`TARGET_NOT_FOUND` và mọi lần gửi lỗi chỉ đường "Hỏi Gen soạn lại nếu muốn gửi lần nữa" (không
+  còn bảo "Bấm Xác nhận lại" khi không có nút); hết 4 phút theo dõi có nút "Mở Tài khoản mạng xã hội"; chip "Cần mã PIN" chỉ hiện
+  khi thẻ còn chờ; danh sách "Lần gửi gần đây" hiện ghi chú (gửi muộn, chưa thấy trên trang, thiếu ảnh) và dùng chung nhãn với
+  thẻ; hướng dẫn bước 13 + `registry.json` nói đúng là Gen trả lời/nhắn tin khi Sếp Xác nhận + PIN; "Hệ thống sẽ làm" ghi "mặc
+  định 10 lượt gửi/ngày/tài khoản (Sếp chỉnh 1–20; trần cứng 20)"; rủi ro thiếu sandbox viết dạng điều kiện + ghi chú khi sandbox
+  đã bật; trang cảnh báo báo lỗi tải (có Thử lại) khi `/auth/me` lỗi thay vì "Chỉ Owner dùng được"; câu 429 gợi ý nâng Giới hạn
+  gửi/ngày (mock chép nguyên văn API).
+- **Rút lại đồng ý rủi ro** khi sandbox chưa bật → huỷ ngay các việc gửi đang chờ/chạy của tổ chức (đúng câu "việc gửi khoá lại
+  ngay"). **Gỡ tài khoản** xoá ảnh chụp SAU khi commit. Ghi rõ trong `write_gate`: `sandbox.enabled` là lời tự khai của container
+  browser (ký cũng không giúp vì container bị chiếm giữ chính khoá) — cổng F-85 là gợi ý UX, không phải ranh giới an toàn.
+- e2e `social-write-v0147`: `enterPinIfAsked` chờ thật hộp PIN (trước dùng `isVisible({timeout})` — Playwright bỏ qua timeout,
+  test chập chờn ~1/6 lượt cả trên nhánh gốc).

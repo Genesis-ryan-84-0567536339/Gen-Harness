@@ -238,9 +238,9 @@ describe('Thẻ đề xuất gửi Facebook (v0.1.47)', () => {
     await userEvent.click(within(card).getByRole('button', { name: 'Đọc cảnh báo & đồng ý' }));
     expect(navigations).toEqual(['/social/ghi-facebook']);
 
-    confirmReply = { status: 429, body: { status: 429, code: 'SOCIAL_WRITE_LIMIT', title: 'Hôm nay đã gửi đủ 10 lần (giới hạn gửi/ngày)' } };
+    confirmReply = { status: 429, body: { status: 429, code: 'SOCIAL_WRITE_LIMIT', title: 'Đã gửi 10 lượt trong 24 giờ (giới hạn để giảm rủi ro khoá tài khoản) — thử lại sau hoặc nâng Giới hạn gửi/ngày ở trang Tài khoản mạng xã hội' } };
     await userEvent.click(within(card).getByRole('button', { name: 'Xác nhận và gửi' }));
-    await waitFor(() => expect(card).toHaveTextContent('Hôm nay đã gửi đủ 10 lần'));
+    await waitFor(() => expect(card).toHaveTextContent('Đã gửi 10 lượt trong 24 giờ'));
     expect(card).toHaveTextContent('SOCIAL_WRITE_LIMIT');
     expect(within(card).queryByRole('button', { name: 'Đọc cảnh báo & đồng ý' })).toBeNull();
   });
@@ -271,6 +271,23 @@ describe('Thẻ đề xuất gửi Facebook (v0.1.47)', () => {
     expect(card).toHaveTextContent('Đã bấm gửi nhưng chưa thấy hiện trên trang — xem ảnh chụp');
   });
 
+  it('done nhưng không có ảnh chụp → câu thân thiện, mã PROOF_MISSING chỉ trong "Chi tiết kỹ thuật"; hết chip "Cần mã PIN"', async () => {
+    jobReplies = [{ status: 'done', has_proof: false, result: { sent: true, confirmed: true, proof_error: 'PROOF_MISSING' } }];
+    renderPanel();
+    showProposal(REPLY);
+    const card = cardOf('Trả lời bình luận Facebook');
+    expect(card).toHaveTextContent('Cần mã PIN');
+    await userEvent.click(within(card).getByRole('button', { name: 'Xác nhận và gửi' }));
+    const st = await within(card).findByTestId('gen-write-status');
+    await waitFor(() => expect(st).toHaveAttribute('data-status', 'done'));
+    expect(st).toHaveTextContent('Đã gửi nhưng không chụp được ảnh bằng chứng — mở Facebook để kiểm tra.');
+    expect(st).not.toHaveTextContent('Không có ảnh chụp: PROOF_MISSING');
+    expect(within(st).getByText('Chi tiết kỹ thuật')).toBeInTheDocument();
+    expect(within(st).getByText('Mã lỗi PROOF_MISSING').closest('details')).not.toBeNull();
+    expect(within(st).queryByRole('button', { name: 'Xem ảnh chụp' })).toBeNull();
+    expect(card).not.toHaveTextContent('Cần mã PIN');
+  });
+
   it('queued → "Đang chờ trình duyệt…", running → "Đang gửi trên Facebook…" (hỏi lại mỗi 2 giây)', async () => {
     jobReplies = [{ status: 'queued' }, { status: 'running' }];
     renderPanel();
@@ -283,14 +300,18 @@ describe('Thẻ đề xuất gửi Facebook (v0.1.47)', () => {
   }, 15_000);
 
   it('failed → câu lỗi của việc + "Chi tiết kỹ thuật" (mã); halted → "Đã dừng bằng Dừng tất cả — chưa gửi gì"', async () => {
-    jobReplies = [{ status: 'failed', error: 'SEND_UNCONFIRMED', error_text: 'Đã bấm gửi nhưng chưa thấy nội dung hiện trên trang.' }];
+    jobReplies = [{ status: 'failed', error: 'PERMIT_INVALID', error_text: 'Giấy phép gửi không hợp lệ hoặc đã quá 5 phút — không gửi gì. Hỏi Gen soạn lại để gửi lần nữa.' }];
     renderPanel();
     showProposal(REPLY);
     let card = cardOf('Trả lời bình luận Facebook');
     await userEvent.click(within(card).getByRole('button', { name: 'Xác nhận và gửi' }));
-    await waitFor(() => expect(card).toHaveTextContent('Đã bấm gửi nhưng chưa thấy nội dung hiện trên trang.'));
+    await waitFor(() => expect(card).toHaveTextContent('Giấy phép gửi không hợp lệ hoặc đã quá 5 phút — không gửi gì.'));
     expect(within(card).getByText('Chi tiết kỹ thuật')).toBeInTheDocument();
-    expect(card).toHaveTextContent('Mã lỗi SEND_UNCONFIRMED');
+    expect(card).toHaveTextContent('Mã lỗi PERMIT_INVALID');
+    // Không còn nút Xác nhận ⇒ chỉ đường làm lại bằng Gen, không bảo "Bấm Xác nhận lại".
+    expect(card).toHaveTextContent('Hỏi Gen soạn lại nếu muốn gửi lần nữa.');
+    expect(card).not.toHaveTextContent('Xác nhận lại');
+    expect(within(card).queryByRole('button', { name: 'Xác nhận và gửi' })).toBeNull();
 
     cleanup();
     queryClient.clear();

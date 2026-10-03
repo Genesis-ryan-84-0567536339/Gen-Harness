@@ -270,12 +270,17 @@ function WriteGateCard({ accounts }: { accounts: SocialAccount[] }) {
                 <div className="write-recent__top">
                   <span className="muted-note">{fmtDMClock(w.created_at, tz)}</span>
                   <strong>{writeActionLabel(w.action)}</strong>
-                  <Chip tone={st.tone}>{w.status === 'done' ? 'Đã gửi' : w.status === 'failed' ? 'Lỗi' : w.status === 'halted' ? 'Đã dừng' : w.status === 'cancelled' ? 'Đã huỷ' : w.status === 'running' ? 'Đang gửi' : 'Đang chờ'}</Chip>
+                  <Chip tone={st.tone}>{st.chip}</Chip>
                 </div>
-                <div className="muted-note write-recent__target" title={w.target_url}>
+                <div className="muted-note write-recent__target" title={w.target_url ?? undefined}>
                   {w.account_label} · {shortTarget(w.target_url)}
                 </div>
                 {w.status === 'failed' && w.error_text ? <div className="muted-note">{w.error_text}</div> : null}
+                {st.notes.map((n) => (
+                  <div key={n} className="muted-note write-recent__note">
+                    {n}
+                  </div>
+                ))}
                 {w.has_proof ? (
                   <Button variant="ghost" size="sm" icon="ph ph-image" onClick={() => setProofFor(w.job_id)}>
                     Xem ảnh chụp
@@ -306,7 +311,7 @@ function WriteLimitRow({ account: a }: { account: SocialAccount }) {
     <li className="write-accounts__row" data-testid={`social-write-limit-${a.id}`}>
       <div className="write-accounts__name">{a.label}</div>
       <div className="muted-note">
-        Hôm nay đã gửi {a.writes_today ?? 0}/{limit}
+        Đã dùng {a.writes_today ?? 0}/{limit} lượt gửi (24 giờ qua)
       </div>
       <SelectField label="Giới hạn gửi/ngày" value={String(limit)} options={options} disabled={save.isPending} onChange={(e) => save.mutate(Number(e.target.value))} />
       {save.isError ? <ErrorWithDetail error={save.error} /> : null}

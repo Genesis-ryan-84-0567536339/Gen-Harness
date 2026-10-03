@@ -17,8 +17,8 @@ RISK_VERSION = "2026-09-30"
 WRITE_RISK_VERSION = "2026-10-03"
 WRITE_RISK_TOPIC = "chromium_no_sandbox"
 WRITE_RISK: tuple[str, ...] = (
-    "Trình duyệt nền hiện chạy KHÔNG có lớp cách ly (sandbox) của Chromium. Nếu một trang web độc khai thác được lỗi "
-    "của trình duyệt, kẻ xấu có thể chiếm container trình duyệt đó.",
+    "Khi trình duyệt nền chạy KHÔNG có lớp cách ly (sandbox) của Chromium (xem ô \"Sandbox\" ngay trên trang này), "
+    "nếu một trang web độc khai thác được lỗi của trình duyệt, kẻ xấu có thể chiếm container trình duyệt đó.",
     "Container trình duyệt vẫn bị cách ly với phần còn lại: không thấy cơ sở dữ liệu, khoá chính hay mạng nội bộ. "
     "Nhưng kẻ xấu có thể dùng phiên Facebook đang mở trong đó.",
     "Điều khoản của Meta (Facebook) hạn chế việc tự động hoá; gửi trả lời hay tin nhắn bằng trình duyệt tự động có thể "
@@ -80,7 +80,7 @@ PLATFORMS: dict[str, Platform] = {p.key: p for p in (
             "Đọc tối đa 6 lượt/ngày, nghỉ CỐ ĐỊNH 3 giây giữa các thao tác — để lịch sự với nền tảng (giới hạn tốc "
             "độ), không phải để giả người; mỗi lần một việc cho mỗi tài khoản.",
             "Chỉ TRẢ LỜI bình luận / NHẮN TIN khi Gen đề xuất và chính Sếp bấm Xác nhận + nhập mã PIN; mỗi lần gửi có "
-            "ảnh chụp làm bằng chứng; tối đa 10 lượt gửi/ngày/tài khoản (Sếp hạ được).",
+            "ảnh chụp làm bằng chứng; mặc định 10 lượt gửi/ngày/tài khoản (Sếp chỉnh 1–20; trần cứng 20).",
             "Ghi mọi lần kết nối, đăng nhập, đọc, gỡ vào Nhật ký hành động.",
         ),
         wont_do=(

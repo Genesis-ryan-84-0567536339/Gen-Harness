@@ -23,7 +23,7 @@ import { navigateTo } from '../lib/navigation';
 import { useCan } from '../lib/permissions';
 import { useNow } from '../lib/useNow';
 import { ErrorWithDetail, WriteProofDialog } from '../social/WriteProofDialog';
-import { WRITE_RISK_PATH, qkSocial, writeStatusView } from '../social/socialModel';
+import { PROOF_MISSING_TEXT, WRITE_RISK_PATH, qkSocial, writeStatusView } from '../social/socialModel';
 import { patchProposal } from './genStore';
 import {
   SOCIAL_SUSPICIOUS_WARNING,
@@ -194,21 +194,32 @@ function WriteProgress({ jobId, initial }: { jobId: string; initial?: string }) 
         <Icon name={icon} size={13} />
         <span>{view.label}</span>
       </div>
-      {view.notes.map((n) => (
-        <p key={n} className="gen-prop__note">
-          {n}
-        </p>
-      ))}
       {status === 'failed' ? (
         <ErrorWithDetail text={job?.error_text || 'Việc gửi gặp lỗi — chưa có gì được gửi đi.'} detail={job?.error ? `Mã lỗi ${job.error}` : null} />
       ) : null}
+      {view.notes
+        .filter((n) => n !== PROOF_MISSING_TEXT)
+        .map((n) => (
+          <p key={n} className="gen-prop__note">
+            {n}
+          </p>
+        ))}
       {status === 'done' && job?.has_proof !== false ? (
         <Button variant="secondary" className="btn-27" icon="ph ph-image" onClick={() => setProof(true)}>
           Xem ảnh chụp
         </Button>
       ) : null}
-      {status === 'done' && job?.has_proof === false && job.result?.proof_error ? <p className="gen-prop__note">Không có ảnh chụp: {job.result.proof_error}</p> : null}
-      {timedOut ? <p className="gen-prop__note">Chưa thấy kết quả sau 4 phút — Sếp xem ở trang Tài khoản mạng xã hội (Lần gửi gần đây).</p> : null}
+      {status === 'done' && job?.has_proof === false ? (
+        <ErrorWithDetail text={PROOF_MISSING_TEXT} detail={job.result?.proof_error ? `Mã lỗi ${job.result.proof_error}` : null} className="write-error gen-prop__proof-missing" />
+      ) : null}
+      {timedOut ? (
+        <>
+          <p className="gen-prop__note">Chưa thấy kết quả sau 4 phút — Sếp xem ở trang Tài khoản mạng xã hội (Lần gửi gần đây).</p>
+          <Button variant="secondary" className="btn-27" icon="ph ph-arrow-square-out" onClick={() => navigateTo('/social')}>
+            Mở Tài khoản mạng xã hội
+          </Button>
+        </>
+      ) : null}
       {q.isError && !job ? <ErrorWithDetail error={q.error} /> : null}
       {proof ? <WriteProofDialog jobId={jobId} open onClose={() => setProof(false)} /> : null}
     </div>
@@ -277,7 +288,7 @@ export function ProposalCard({ proposal: p }: { proposal: GenProposal }) {
       <div className="gen-prop__head">
         <Icon name={PROPOSAL_ICON[p.type]} size={13} />
         <span className="gen-prop__title">Đề xuất · {title}</span>
-        {(p.requires_pin && p.status === 'pending') || (social && p.status !== 'cancelled') ? (
+        {p.requires_pin && p.status === 'pending' ? (
           <span className="gen-prop__pin" title="Thao tác nhạy cảm — hỏi mã PIN khi xác nhận">
             <Icon name="ph ph-lock-simple" size={11} /> Cần mã PIN
           </span>

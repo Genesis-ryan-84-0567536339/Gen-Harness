@@ -57,9 +57,6 @@ export const BOSS_ERROR_TEXT: Record<string, string> = {
   // v0.1.44 (F-8c): dòng 6 Telegram — cùng câu với thẻ Kết nối › Telegram.
   ...TELEGRAM_ERROR_TEXT,
   // v0.1.46 (F-21): dòng 7 Truy cập từ xa.
-  // v0.1.47 (F-79): dòng 8 Facebook trả lời — gửi thật nằm ở trang Tài khoản mạng xã hội.
-  SOCIAL_WRITE_LOCKED: 'Gửi lên Facebook đang khoá — mở Tài khoản mạng xã hội, đọc cảnh báo và quyết định.',
-  SOCIAL_WRITE_LIMIT: 'Đã gửi đủ số lần cho phép hôm nay — đợi sang hôm sau hoặc nâng Giới hạn gửi/ngày.',
   REMOTE_NOT_CONFIGURED: 'Chưa chọn cách truy cập từ xa — trên máy chủ chạy genh remote tailscale (khuyên dùng) hoặc genh remote --lan.',
   REMOTE_OPENED_ON_SERVER:
     'Đang mở trên chính máy chủ — mở Console trên điện thoại bằng địa chỉ ở Cài đặt › Sao lưu & cập nhật › Truy cập từ xa rồi bấm Kiểm tra từ đó.',

@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 from redis.asyncio import Redis
 from sqlalchemy import text
@@ -21,6 +22,7 @@ from gh.social import session_watch
 from gh.worker import JOB_LABELS, WorkerSettings
 from tests.conftest import Api
 from tests.phase2 import org_id
+from tests.test_rbac_api import login_as
 from tests.test_social import _add, _deliver, _jobs, _login, _result
 
 NOON_VN = datetime(2026, 10, 1, 2, 10, tzinfo=UTC)      # 09:10 giờ VN
@@ -191,6 +193,37 @@ async def test_checkpoint_and_captcha_open_incident_relogin_and_revoke_close(own
     await db.commit()
     await _evaluate(redis)
     assert await _alerts(db) == []
+
+
+async def test_manager_sees_ask_owner_body_for_every_fingerprint(owner_api: Api, client: httpx.AsyncClient,
+                                                                 redis: Redis, db: Any) -> None:
+    """Người không phải Owner không mở được /social ⇒ thân sự cố phải bảo nhờ Owner (mọi fingerprint: needs_login,
+    key_changed, checkpoint, captcha…), không bảo "bấm Đăng nhập lại"."""
+    accs = [await _add(owner_api, f"FB {i}") for i in range(3)]
+    for a in accs:
+        await _login(owner_api, redis, a["id"])
+    for a, (st, reason) in zip(accs, (("needs_login", "key_changed"), ("paused", "checkpoint"),
+                                      ("paused", "captcha")), strict=True):
+        await db.execute(text("UPDATE core.social_accounts SET status = :s, pause_reason = :r WHERE id = :i"),
+                         {"s": st, "r": reason, "i": a["id"]})
+    await db.commit()
+    await _evaluate(redis)
+    issues = (await owner_api.get("/system/health")).json()["issues"]
+    owner = [i for i in issues if i["kind"] == "social.session_expired"]
+    assert len(owner) == 3 and all("bấm Đăng nhập lại" in i["body"] for i in owner)
+    await db.execute(text("""INSERT INTO core.role_permissions (role_id, permission_code, scope)
+                             SELECT id, 'system.read', 'all' FROM core.roles WHERE code = 'manager'
+                             ON CONFLICT (role_id, permission_code) DO UPDATE SET scope = 'all'"""))
+    await db.commit()
+    manager = await login_as(client, db, "manager")
+    r = await manager.get("/system/health")
+    assert r.status_code == 200, r.text
+    mine = [i for i in r.json()["issues"] if i["kind"] == "social.session_expired"]
+    assert len(mine) == 3
+    for i in mine:
+        assert i["body"] == health.NON_OWNER_KIND_BODIES["social.session_expired"]
+        assert i["link"] is None and i["action"] == "Nhờ Owner xử lý"
+        assert "bấm Đăng nhập lại" not in i["body"] and "nhờ Owner" in i["body"]
 
 
 def test_worker_has_session_check_cron_and_label() -> None:

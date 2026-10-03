@@ -142,7 +142,7 @@ Luồng thật, theo thứ tự:
 6. **Bằng chứng**: chụp ảnh sau khi gửi (mã hoá, giữ 90 ngày; nút **Xem ảnh chụp**) + trace bước. Đã bấm gửi thì vẫn chụp và
    báo hoàn tất kể cả khi Dừng tất cả vừa bật (kết quả ghi `after_halt`).
 7. **Action Log + chuông**: `social.write` (chỉ sha256 của đích và nội dung — không lưu nguyên văn), chuông cho người xác nhận.
-- Mã lỗi thân thiện + "Chi tiết kỹ thuật": `PERMIT_INVALID`, `TARGET_NOT_FOUND`, `SEND_UNCONFIRMED`, `PROOF_MISSING` và các
+- Mã lỗi thân thiện + "Chi tiết kỹ thuật": `PERMIT_INVALID`, `TARGET_NOT_FOUND`, `PROOF_MISSING` (đã gửi, thiếu ảnh) và các
   mã cũ (`CHECKPOINT`, `CAPTCHA`, `LOGGED_OUT`, `HALTED`, `BLOCKED_URL`, `SELECTOR`, `BUSY`, `ERROR`).
 - **Đăng bài (`post`) để lát 2.** Lát 1 không có đường đăng bài; `like`/`follow` chưa làm.
 - Selector ghi Facebook mới kiểm trên trang mẫu; nghiệm thu thật do Boss làm (dòng 8 "Facebook trả lời" ở Việc Sếp cần làm).

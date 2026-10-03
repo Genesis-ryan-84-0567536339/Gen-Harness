@@ -175,9 +175,28 @@ async def test_confirm_locked_gate_is_passed_through_as_409(owner_api: Api, app:
     assert (await proposals.load(app.state.redis, p["id"]))["status"] == "pending" and await _writes() == 0
 
 
+async def test_reply_proposal_needs_comment_id(owner_api: Api, app: Any, redis: Any) -> None:
+    """Thông báo không trỏ tới bình luận cụ thể (thích, sinh nhật, bài viết…) → không thành thẻ đề xuất trả lời."""
+    acc = await _ready(owner_api, redis)
+    like = "https://www.facebook.com/photo/?fbid=42"
+    from tests.test_social_write_v0147 import _deliver, _result
+
+    async with admin_sessionmaker()() as db:
+        await db.execute(text("UPDATE agent.browser_jobs SET created_at = now() - interval '2 hours'"))
+        await db.commit()
+    assert (await owner_api.send("POST", f"/social/accounts/{acc}/read", {})).status_code == 200
+    job = (await _jobs(redis))[-1]
+    await _deliver(redis, _result(job, "done", {"items": [
+        {"kind": "notification", "who": None, "text": "Minh đã thích ảnh của bạn", "link": like, "unread": True}]}))
+    t = await ask(owner_api, app, FakeRouter([_propose("social_reply", acc, like, "Cảm ơn Minh")]), "trả lời")
+    assert _proposals(t) == []
+    blocked = [r for r in await _log("gen.propose") if r.result == "blocked"]
+    assert len(blocked) == 1
+
+
 async def test_suspicious_item_is_flagged_on_card(owner_api: Api, app: Any, redis: Any) -> None:
     acc = await _ready(owner_api, redis)
-    bad = "https://www.facebook.com/permalink/555"
+    bad = "https://www.facebook.com/permalink.php?story_fbid=555&comment_id=556"
     from tests.test_social_write_v0147 import _deliver, _result
 
     # Một lượt đọc mới (đã quá 10 phút so với lượt trước) có mục đáng ngờ.
