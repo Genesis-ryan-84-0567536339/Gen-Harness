@@ -1,8 +1,10 @@
-FROM node:22-slim
+# syntax=docker/dockerfile:1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
+# ghim digest (F-19) — Renovate tự nâng
+FROM node:22-slim@sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddfe4238355d3a30b772c
 ENV NODE_ENV=production
 WORKDIR /app
 COPY apps/bridge/package.json apps/bridge/package-lock.json ./
-RUN npm ci --omit=dev --no-audit --no-fund
+RUN --mount=type=cache,target=/root/.npm npm ci --omit=dev --no-audit --no-fund --fetch-retries=5 --fetch-retry-mintimeout=20000 --fetch-retry-maxtimeout=120000
 COPY apps/bridge/src ./src
 USER node
 EXPOSE 3100
