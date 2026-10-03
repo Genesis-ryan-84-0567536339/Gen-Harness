@@ -64,6 +64,7 @@ _REVIEW_SELECT_BASE = """
 SELECT DISTINCT ON (r.person_id, r.period_start, r.period_end)
     r.id, r.person_id, r.period_start, r.period_end, r.score, r.trend, r.signal, r.recommendation, r.evidence,
     r.visibility, r.created_at, r.overridden_by, r.overridden_at, r.override_reason, r.supersedes_id,
+    r.suspicious, r.suspicious_reason,
     p.id AS p_id, p.code AS p_code, p.display_name AS p_name, p.person_type AS p_type,
     p.organization_name AS p_org, ob.display_name AS ob_name, obr.code AS ob_role
 FROM biz.people_reviews r
@@ -94,7 +95,9 @@ def _review_item(r: Any) -> dict[str, Any]:
             "created_at": iso(r.created_at), "overridden": r.overridden_by is not None,
             "overridden_by": psvc.user_ref(r.overridden_by, r.ob_name, r.ob_role),
             "overridden_at": iso(r.overridden_at), "override_reason": r.override_reason,
-            "supersedes_id": str(r.supersedes_id) if r.supersedes_id else None}
+            "supersedes_id": str(r.supersedes_id) if r.supersedes_id else None,
+            # v0.1.45 (F-60): cờ 'Đáng ngờ' — chỉ cảnh báo, không đổi điểm.
+            "suspicious": bool(r.suspicious), "suspicious_reason": r.suspicious_reason}
 
 
 def _dispute_item(r: Any) -> dict[str, Any]:
@@ -290,13 +293,16 @@ async def edit_review_score(review_id: uuid.UUID, body: ReviewEditIn,
     new_id = (await db.execute(text("""
         INSERT INTO biz.people_reviews (org_id, person_id, period_start, period_end, score, trend, signal,
                                         recommendation, evidence, visibility, supersedes_id, overridden_by,
-                                        overridden_at, override_reason)
-        VALUES (:o, :p, :ps, :pe, :sc, :tr, :sig, :rec, CAST(:ev AS jsonb), :vis, :sup, :by, now(), :reason)
+                                        overridden_at, override_reason, suspicious, suspicious_reason)
+        VALUES (:o, :p, :ps, :pe, :sc, :tr, :sig, :rec, CAST(:ev AS jsonb), :vis, :sup, :by, now(), :reason,
+                :sus, :sus_r)
         RETURNING id"""),
         {"o": user.org_id, "p": old.person_id, "ps": old.period_start, "pe": old.period_end, "sc": body.score,
          "tr": body.trend or old.trend, "sig": body.signal or old.signal,
          "rec": body.recommendation or old.recommendation, "ev": orjson.dumps(body.evidence).decode(),
-         "vis": old.visibility, "sup": review_id, "by": user.id, "reason": body.reason})).scalar_one()
+         "vis": old.visibility, "sup": review_id, "by": user.id, "reason": body.reason,
+         # Sửa tay không xoá cờ 'Đáng ngờ' của dòng bị thay (F-60).
+         "sus": bool(old.suspicious), "sus_r": old.suspicious_reason})).scalar_one()
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                            action="people_review.score_edited", target_type="people_review", target_id=str(new_id),
                            target_label=f"{old.p_name} · {old.period_start}–{old.period_end}", result="ok",

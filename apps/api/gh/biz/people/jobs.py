@@ -21,6 +21,10 @@
   - Chạy lại (cron mỗi ngày, hoặc gọi tay) chỉ UPDATE tại-chỗ dòng **hệ thống** (`overridden_by IS NULL`) của
     đúng kỳ đó (`ON CONFLICT` trên chỉ mục riêng phần `people_reviews_system_period`) — không sinh thêm lịch sử
     mỗi lần chạy lại, và không bao giờ đè lên một bản Owner đã sửa tay (`gh/biz/people/routes.py`).
+  - v0.1.45 (F-60) cờ **'Đáng ngờ'**: nhân viên có thể chèn câu lệnh cho AI / xin điểm vào tin nhắn để lách điểm.
+    Job quét tối đa `MAX_SCAN_TEXTS` tin đi do chính nhân viên gửi + tin đến trong các luồng đã ghép của họ bằng
+    `gh.suspicious.REVIEW_MANIPULATION`; khớp → `suspicious = true` kèm lý do ngắn (chỉ đoạn khớp ≤ 60 ký tự, không
+    chép nguyên tin). KHÔNG đổi điểm — chỉ gắn cờ để Sếp xem chứng cứ trước khi dùng.
   - **Không có hành động kỷ luật tự động** (PLAN §3.11, khoá cứng 2): job chỉ ghi điểm + tín hiệu + khuyến nghị
     coaching bằng chữ; không tạo cảnh báo, không đổi quyền, không đổi trạng thái công việc của ai.
 
@@ -37,12 +41,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gh.biz.hooks import CronJob, Hook
 from gh.biz.people.service import BUCKET_SELECT, PAIR_CTE
+from gh.suspicious import scan_texts
 
 PERIOD_DAYS = 7
 MAX_BROKEN_PENALTY = 20.0
 FAST_WEIGHT, SLOW_WEIGHT, BROKEN_WEIGHT = 25.0, 15.0, 7.0
 TREND_EPSILON = 2.0
 MAX_EVIDENCE_UNITS = 5
+MAX_SCAN_TEXTS = 2000
 
 HOOKS: list[Hook] = []
 
@@ -109,6 +115,30 @@ async def _evidence_units(db: AsyncSession, org_id: uuid.UUID, staff_id: uuid.UU
     return [{"type": "meaning_unit", "id": str(r.id)} for r in rows]
 
 
+async def _suspicious(db: AsyncSession, org_id: uuid.UUID, staff_id: uuid.UUID, df: datetime,
+                      dt: datetime) -> tuple[bool, str | None]:
+    """Cờ 'Đáng ngờ' (F-60): tin giống lệnh cho AI hoặc xin điểm, do nhân viên gửi hoặc nằm trong luồng của họ."""
+    texts = (await db.execute(text(PAIR_CTE + """
+        , own AS (
+          SELECT e.body_text FROM raw.events e
+          JOIN core.person_identities pi ON pi.id = e.sender_identity_id
+          WHERE e.org_id = :o AND e.direction = 'outbound' AND pi.person_id = :sid AND e.body_text IS NOT NULL
+            AND e.occurred_at >= :df AND e.occurred_at <= :dt
+          ORDER BY e.occurred_at DESC LIMIT :n
+        ), threads AS (
+          SELECT e.body_text FROM paired p JOIN raw.events e ON e.id = p.id
+          WHERE p.staff_id = :sid AND e.org_id = :o AND e.body_text IS NOT NULL
+          ORDER BY e.occurred_at DESC LIMIT :n
+        )
+        SELECT body_text FROM own UNION ALL SELECT body_text FROM threads"""),
+        {"o": org_id, "df": df, "dt": dt, "sid": staff_id, "n": MAX_SCAN_TEXTS})).scalars().all()
+    hits, sample = scan_texts(texts)
+    if hits == 0:
+        return False, None
+    return True, (f"Có {hits} tin giống lệnh cho AI hoặc xin điểm (vd: “{sample}”) — "
+                  "kiểm tra trước khi dùng điểm này")
+
+
 async def recompute_people_reviews_org(db: AsyncSession, org_id: uuid.UUID, *, today: date | None = None) -> int:
     period_start, period_end = period_for(today or datetime.now(UTC).date())
     df = datetime.combine(period_start, time.min, tzinfo=UTC)
@@ -131,15 +161,18 @@ async def recompute_people_reviews_org(db: AsyncSession, org_id: uuid.UUID, *, t
         broken = broken_by.get(r.staff_id, 0)
         score, signal = _score_and_signal(r.fast, r.normal, r.slow, broken)
         trend = await _trend(db, org_id, r.staff_id, period_start, score)
+        suspicious, reason = await _suspicious(db, org_id, r.staff_id, df, dt)
         await db.execute(text("""
             INSERT INTO biz.people_reviews (org_id, person_id, period_start, period_end, score, trend, signal,
-                                            recommendation, evidence, visibility)
-            VALUES (:o, :p, :ps, :pe, :sc, :tr, :sig, :rec, CAST(:ev AS jsonb), 'owner')
+                                            recommendation, evidence, visibility, suspicious, suspicious_reason)
+            VALUES (:o, :p, :ps, :pe, :sc, :tr, :sig, :rec, CAST(:ev AS jsonb), 'owner', :sus, :sus_r)
             ON CONFLICT (org_id, person_id, period_start, period_end) WHERE overridden_by IS NULL
             DO UPDATE SET score = EXCLUDED.score, trend = EXCLUDED.trend, signal = EXCLUDED.signal,
-                          recommendation = EXCLUDED.recommendation, evidence = EXCLUDED.evidence"""),
+                          recommendation = EXCLUDED.recommendation, evidence = EXCLUDED.evidence,
+                          suspicious = EXCLUDED.suspicious, suspicious_reason = EXCLUDED.suspicious_reason"""),
             {"o": org_id, "p": r.staff_id, "ps": period_start, "pe": period_end, "sc": score, "tr": trend,
-             "sig": signal, "rec": _recommendation(score), "ev": orjson.dumps(evidence).decode()})
+             "sig": signal, "rec": _recommendation(score), "ev": orjson.dumps(evidence).decode(),
+             "sus": suspicious, "sus_r": reason})
         n += 1
     return n
 

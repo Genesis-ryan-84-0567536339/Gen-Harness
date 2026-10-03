@@ -117,7 +117,9 @@ async def login(db: AsyncSession, email: str, password: str) -> dict[str, Any] |
     return {"id": row.id, "org_id": row.org_id}
 
 
-async def load_session(db: AsyncSession, token: str) -> CurrentUser | None:
+async def load_session(db: AsyncSession, token: str, *, renew: bool = True) -> CurrentUser | None:
+    """Nạp phiên từ token cookie. `renew=False` (v0.1.45, WS nạp lại định kỳ): chỉ ĐỌC — không gia hạn phiên trượt,
+    không gia hạn phiên PIN, không cập nhật last_seen_at (tab để mở không được giữ phiên/PIN sống mãi)."""
     row = (await db.execute(text("""
         SELECT s.id AS sid, s.pin_verified_until, s.expires_at, u.id, u.org_id, u.email, u.display_name, u.addressing,
                u.must_change_password,
@@ -138,12 +140,12 @@ async def load_session(db: AsyncSession, token: str) -> CurrentUser | None:
     # thì không bị đăng xuất; bỏ không quá TTL thì hết hạn như cũ. Phiên PIN tách riêng (bên dưới).
     ttl = timedelta(hours=get_settings().session_ttl_hours)
     expires_at, renewed = row.expires_at, False
-    if expires_at - now() < ttl / 2:
+    if renew and expires_at - now() < ttl / 2:
         expires_at, renewed = now() + ttl, True
         await db.execute(text("UPDATE core.sessions SET expires_at = :e, last_seen_at = now() WHERE id = :sid"),
                          {"e": expires_at, "sid": row.sid})
     # Phiên PIN trượt: hết hạn sau 30 phút KHÔNG thao tác.
-    if pin_until is not None and pin_until > now():
+    if renew and pin_until is not None and pin_until > now():
         new_until = now() + timedelta(minutes=get_settings().pin_session_minutes)
         if (new_until - pin_until).total_seconds() > 60:
             await db.execute(text("UPDATE core.sessions SET pin_verified_until = :p, last_seen_at = now() "

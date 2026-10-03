@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import type {
   PeopleReviewDisputeItem,
+  PeopleReviewFull,
   PeopleReviewFullDetail,
   PeopleReviewItem,
   PeopleReviewLogItem,
@@ -9,7 +10,7 @@ import type {
   ReviewBoard,
 } from '@gen-harness/contracts';
 import { isFullReview } from '@gen-harness/contracts';
-import { Button, Dialog, EmptyState, Icon, Tabs, type TabItem } from '@gen-harness/ui';
+import { Button, Chip, Dialog, EmptyState, Icon, Tabs, type TabItem } from '@gen-harness/ui';
 import { WhyButton } from '../core/Evidence';
 import { errorText } from '../../lib/errorText';
 import { fmtDMClock } from '../../lib/format';
@@ -17,7 +18,7 @@ import { useNavigation } from '../../lib/queries';
 import { useUrlState } from '../../lib/uiStore';
 import { findActive } from '../../shell/navModel';
 import { CardError, InlineError, ScreenHead, SkeletonLines } from '../common';
-import { BOARD_LABEL, REVIEW_BOARD_LIST, STAFF_HOWTO, TREND_ICON, fmtPeriod, initialsOf, scoreTone, trendTone } from './peopleModel';
+import { BOARD_LABEL, REVIEW_BOARD_LIST, STAFF_HOWTO, TREND_ICON, fmtPeriod, initialsOf, scoreTone, suspiciousLabel, trendTone } from './peopleModel';
 import { useOpenDispute, useResolveDispute, useReview, useReviews, useUpdateReview } from './queries';
 
 export function PeopleScreen() {
@@ -119,6 +120,7 @@ function ReviewRow({ item, onOpen }: { item: PeopleReviewItem; onOpen: () => voi
         <span style={{ color: scoreTone(item.score) }}>{Math.round(item.score)}</span>
         {item.trend ? <Icon name={TREND_ICON[item.trend]} size={14} color={trendTone(item.trend)} /> : null}
         {item.overridden ? <span className="ppl-row__overridden">sửa tay</span> : null}
+        <SuspiciousChip item={item} />
       </div>
       <div className="ppl-row__signal">
         <div className="ppl-row__label">Tín hiệu nổi bật tuần này</div>
@@ -137,6 +139,19 @@ function ReviewRow({ item, onOpen }: { item: PeopleReviewItem; onOpen: () => voi
         </Button>
       </div>
     </div>
+  );
+}
+
+/** F-60: chip cảnh báo 'Đáng ngờ' — rê chuột xem lý do (title). */
+function SuspiciousChip({ item }: { item: Pick<PeopleReviewFull, 'suspicious' | 'suspicious_reason'> }) {
+  const label = suspiciousLabel(item);
+  if (!label) return null;
+  return (
+    <span className="ppl-row__suspicious" title={label.title} data-testid="ppl-suspicious">
+      <Chip tone="warn" dot>
+        <Icon name="ph ph-warning" size={12} /> {label.text}
+      </Chip>
+    </span>
   );
 }
 
@@ -218,6 +233,16 @@ function FullDetailBody({ detail, onIdChange }: { detail: PeopleReviewFullDetail
           ) : null}
         </div>
       </div>
+
+      {suspiciousLabel(detail) ? (
+        <div className="ppl-note" role="note" aria-label="Cảnh báo đáng ngờ" style={{ borderColor: 'var(--color-warn)' }}>
+          <Icon name="ph ph-warning" size={16} color="var(--color-warn)" />
+          <span>
+            <strong>Đáng ngờ:</strong> {suspiciousLabel(detail)?.title} Hệ thống chỉ gắn cờ, không tự đổi điểm — Sếp mở &quot;Xem chứng cứ&quot; để đọc tin gốc
+            trước khi tin vào điểm này.
+          </span>
+        </div>
+      ) : null}
 
       <section aria-label="Sửa điểm tay">
         <div className="dlg-section-title">Sửa điểm tay — giữ lịch sử</div>
