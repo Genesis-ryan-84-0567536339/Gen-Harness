@@ -5,7 +5,7 @@
  * `POST /gen/proposals/{id}/confirm` (server thực hiện nhân danh người bấm qua endpoint sẵn có, đúng quyền + PIN).
  * **Sửa** mở form để chỉnh trường được phép; **Huỷ** bỏ đề xuất. Cần PIN → API trả 423, client tự hỏi PIN rồi gửi lại.
  */
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   GEN_SCREEN_BY_KEY,
@@ -13,6 +13,7 @@ import {
   type DraftMessageFields,
   type GenProposal,
   type ReminderFields,
+  type SocialWriteFields,
 } from '@gen-harness/contracts';
 import { Button, Icon, SelectField, TextField } from '@gen-harness/ui';
 import { api } from '../lib/api';
@@ -20,13 +21,32 @@ import { errorText } from '../lib/errorText';
 import { fmtDMClock } from '../lib/format';
 import { navigateTo } from '../lib/navigation';
 import { useCan } from '../lib/permissions';
+import { useNow } from '../lib/useNow';
+import { ErrorWithDetail, WriteProofDialog } from '../social/WriteProofDialog';
+import { WRITE_RISK_PATH, qkSocial, writeStatusView } from '../social/socialModel';
 import { patchProposal } from './genStore';
-import { changedFields, fromLocalInput, initialDraft, PROPOSAL_TITLE, type Draft } from './proposalModel';
+import {
+  SOCIAL_SUSPICIOUS_WARNING,
+  SOCIAL_WRITE_WARNING,
+  WRITE_MAX_TEXT,
+  WRITE_POLL_MAX_MS,
+  WRITE_POLL_MS,
+  changedFields,
+  fromLocalInput,
+  initialDraft,
+  isSocialWrite,
+  isTerminalJob,
+  PROPOSAL_TITLE,
+  writeErrorKind,
+  type Draft,
+} from './proposalModel';
 
 const PROPOSAL_ICON: Record<GenProposal['type'], string> = {
   draft_message: 'ph ph-note-pencil',
   reminder: 'ph ph-alarm',
   assign: 'ph ph-user-switch',
+  social_reply: 'ph ph-chat-circle-text',
+  social_dm: 'ph ph-paper-plane-tilt',
 };
 
 const PRIORITIES = [
@@ -69,6 +89,18 @@ function Summary({ p }: { p: GenProposal }) {
       </dl>
     );
   }
+  if (p.type === 'social_reply' || p.type === 'social_dm') {
+    const f: SocialWriteFields = p.fields;
+    return (
+      <dl className="gen-prop__dl gen-prop__dl--social">
+        <Row label="Tài khoản">{p.labels.account ?? f.account_id}</Row>
+        <Row label={p.type === 'social_reply' ? 'Trả lời vào' : 'Nhắn cho'}>{p.labels.target ?? f.target_url}</Row>
+        <Row label="Nội dung">
+          <span className="gen-prop__text">{f.text}</span>
+        </Row>
+      </dl>
+    );
+  }
   const f: AssignFields = p.fields;
   return (
     <dl className="gen-prop__dl">
@@ -79,7 +111,7 @@ function Summary({ p }: { p: GenProposal }) {
 }
 
 function EditForm({ p, draft, set }: { p: GenProposal; draft: Draft; set: (k: string, v: string) => void }) {
-  const needsPeople = p.type !== 'draft_message';
+  const needsPeople = p.type === 'reminder' || p.type === 'assign';
   const people = useQuery({
     queryKey: ['gen', 'assignees'],
     queryFn: ({ signal }) => api.gen.assignees(signal),
@@ -92,6 +124,17 @@ function EditForm({ p, draft, set }: { p: GenProposal; draft: Draft; set: (k: st
   ];
   if (currentUserId && !peopleOptions.some((o) => o.value === currentUserId)) peopleOptions.unshift({ value: currentUserId, label: p.labels.user ?? currentUserId });
 
+  if (p.type === 'social_reply' || p.type === 'social_dm')
+    return (
+      <div className="gen-prop__form">
+        <div className="gh-field">
+          <label className="gh-field__label" htmlFor={`gen-prop-text-${p.id}`}>
+            Nội dung
+          </label>
+          <textarea id={`gen-prop-text-${p.id}`} className="gh-input" rows={5} maxLength={WRITE_MAX_TEXT} value={draft.text} onChange={(e) => set('text', e.target.value)} />
+        </div>
+      </div>
+    );
   if (p.type === 'draft_message')
     return (
       <div className="gen-prop__form">
@@ -124,7 +167,52 @@ function EditForm({ p, draft, set }: { p: GenProposal; draft: Draft; set: (k: st
 function valid(p: GenProposal, d: Draft): boolean {
   if (p.type === 'draft_message') return !!d.title?.trim() && !!d.text?.trim();
   if (p.type === 'reminder') return !!d.title?.trim() && !!fromLocalInput(d.remind_at);
+  if (isSocialWrite(p)) return !!d.text?.trim() && d.text.length <= WRITE_MAX_TEXT;
   return !!d.user_id;
+}
+
+/** Theo dõi việc gửi (poll mỗi 2 giây, dừng khi xong, tối đa 4 phút): chờ → đang gửi → đã gửi (+ ảnh chụp) / lỗi / đã dừng. */
+function WriteProgress({ jobId, initial }: { jobId: string; initial?: string }) {
+  const started = useRef(Date.now());
+  const now = useNow(5000);
+  const [proof, setProof] = useState(false);
+  const q = useQuery({
+    queryKey: qkSocial.job(jobId),
+    queryFn: ({ signal }) => api.social.job(jobId, signal),
+    refetchInterval: (query) =>
+      isTerminalJob(query.state.data?.status) || Date.now() - started.current > WRITE_POLL_MAX_MS ? false : WRITE_POLL_MS,
+  });
+  const job = q.data;
+  const status = job?.status ?? (initial as 'queued' | undefined) ?? 'queued';
+  const view = writeStatusView(job ?? { status: status as 'queued' });
+  const timedOut = !view.terminal && now - started.current > WRITE_POLL_MAX_MS;
+  const icon =
+    status === 'done' ? 'ph-fill ph-check-circle' : status === 'failed' ? 'ph ph-warning-circle' : status === 'halted' || status === 'cancelled' ? 'ph ph-hand-palm' : 'ph ph-circle-notch';
+  return (
+    <div className="gen-prop__write" data-testid="gen-write-status" data-status={status} aria-live="polite">
+      <div className="gen-prop__write-line" data-tone={view.tone}>
+        <Icon name={icon} size={13} />
+        <span>{view.label}</span>
+      </div>
+      {view.notes.map((n) => (
+        <p key={n} className="gen-prop__note">
+          {n}
+        </p>
+      ))}
+      {status === 'failed' ? (
+        <ErrorWithDetail text={job?.error_text || 'Việc gửi gặp lỗi — chưa có gì được gửi đi.'} detail={job?.error ? `Mã lỗi ${job.error}` : null} />
+      ) : null}
+      {status === 'done' && job?.has_proof !== false ? (
+        <Button variant="secondary" className="btn-27" icon="ph ph-image" onClick={() => setProof(true)}>
+          Xem ảnh chụp
+        </Button>
+      ) : null}
+      {status === 'done' && job?.has_proof === false && job.result?.proof_error ? <p className="gen-prop__note">Không có ảnh chụp: {job.result.proof_error}</p> : null}
+      {timedOut ? <p className="gen-prop__note">Chưa thấy kết quả sau 4 phút — Sếp xem ở trang Tài khoản mạng xã hội (Lần gửi gần đây).</p> : null}
+      {q.isError && !job ? <ErrorWithDetail error={q.error} /> : null}
+      {proof ? <WriteProofDialog jobId={jobId} open onClose={() => setProof(false)} /> : null}
+    </div>
+  );
 }
 
 export function ProposalCard({ proposal: p }: { proposal: GenProposal }) {
@@ -132,17 +220,30 @@ export function ProposalCard({ proposal: p }: { proposal: GenProposal }) {
   const [draft, setDraft] = useState<Draft>(() => initialDraft(p));
   const [busy, setBusy] = useState<'confirm' | 'cancel' | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [errorRaw, setErrorRaw] = useState<unknown>(null);
+  const social = isSocialWrite(p);
+  // Cổng ghi: nhãn lúc đề xuất có thể đã cũ (Sếp vừa đồng ý ở trang cảnh báo) → hỏi lại cổng khi thẻ còn chờ và đang khoá.
+  const labelLocked = social && p.labels.write_gate === 'locked';
+  const gate = useQuery({
+    queryKey: qkSocial.writeGate,
+    queryFn: ({ signal }) => api.social.writeGate(signal),
+    enabled: labelLocked && p.status === 'pending',
+    retry: false,
+  });
+  const locked = labelLocked && !gate.data?.open;
   const set = (k: string, v: string) => setDraft((d) => ({ ...d, [k]: v }));
 
   const confirm = async () => {
     setBusy('confirm');
     setError(null);
+    setErrorRaw(null);
     try {
       const next = await api.gen.confirmProposal(p.id, editing ? changedFields(p, draft) : {});
       setEditing(false);
       patchProposal(next);
     } catch (e) {
       setError(errorText(e));
+      setErrorRaw(e);
     } finally {
       setBusy(null);
     }
@@ -176,7 +277,7 @@ export function ProposalCard({ proposal: p }: { proposal: GenProposal }) {
       <div className="gen-prop__head">
         <Icon name={PROPOSAL_ICON[p.type]} size={13} />
         <span className="gen-prop__title">Đề xuất · {title}</span>
-        {p.requires_pin && p.status === 'pending' ? (
+        {(p.requires_pin && p.status === 'pending') || (social && p.status !== 'cancelled') ? (
           <span className="gen-prop__pin" title="Thao tác nhạy cảm — hỏi mã PIN khi xác nhận">
             <Icon name="ph ph-lock-simple" size={11} /> Cần mã PIN
           </span>
@@ -184,16 +285,47 @@ export function ProposalCard({ proposal: p }: { proposal: GenProposal }) {
       </div>
       <p className="gen-prop__summary">{p.summary}</p>
       {editing && p.status === 'pending' ? <EditForm p={p} draft={draft} set={set} /> : <Summary p={p} />}
-      {error ? (
+      {social && p.status === 'pending' ? (
+        <>
+          <p className="gen-prop__warn gen-prop__warn--send" role="note">
+            <Icon name="ph ph-warning" size={13} /> {SOCIAL_WRITE_WARNING}
+          </p>
+          {p.labels.suspicious === '1' ? (
+            <p className="gen-prop__warn gen-prop__warn--yellow" role="note" data-testid="gen-write-suspicious">
+              <Icon name="ph ph-seal-warning" size={13} /> {SOCIAL_SUSPICIOUS_WARNING}
+            </p>
+          ) : null}
+          {locked ? (
+            <p className="gen-prop__warn" role="note" data-testid="gen-write-locked">
+              <Icon name="ph ph-lock-simple" size={13} /> Gửi lên Facebook đang khoá — Sếp cần đọc cảnh báo và đồng ý (hoặc bật sandbox) trước.
+            </p>
+          ) : null}
+        </>
+      ) : null}
+      {error && social ? (
+        <>
+          <ErrorWithDetail error={errorRaw} text={error} className="gen-prop__error write-error" />
+          {writeErrorKind((errorRaw as { code?: string } | null)?.code) === 'locked' ? (
+            <Button variant="secondary" className="btn-27" icon="ph ph-shield-warning" onClick={() => navigateTo(WRITE_RISK_PATH)}>
+              Đọc cảnh báo & đồng ý
+            </Button>
+          ) : null}
+        </>
+      ) : error ? (
         <p className="gen-prop__error" role="alert">
           {error}
         </p>
       ) : null}
       {p.status === 'pending' ? (
         <div className="gen-prop__actions">
-          <Button variant="primary" className="btn-27" icon="ph ph-check" loading={busy === 'confirm'} disabled={busy !== null || (editing && !valid(p, draft))} onClick={() => void confirm()}>
-            Xác nhận
+          <Button variant="primary" className="btn-27" icon="ph ph-check" loading={busy === 'confirm'} disabled={busy !== null || locked || (editing && !valid(p, draft))} onClick={() => void confirm()}>
+            {social ? 'Xác nhận và gửi' : 'Xác nhận'}
           </Button>
+          {locked ? (
+            <Button variant="secondary" className="btn-27" icon="ph ph-shield-warning" disabled={busy !== null} onClick={() => navigateTo(WRITE_RISK_PATH)}>
+              Đọc cảnh báo & đồng ý
+            </Button>
+          ) : null}
           <Button
             variant="secondary"
             className="btn-27"
@@ -210,6 +342,8 @@ export function ProposalCard({ proposal: p }: { proposal: GenProposal }) {
             Huỷ
           </Button>
         </div>
+      ) : p.status === 'confirmed' && social && p.result?.type === 'social_write' && p.result.id ? (
+        <WriteProgress jobId={p.result.id} initial={p.result.status} />
       ) : p.status === 'confirmed' ? (
         <div className="gen-prop__done">
           {isDraft ? (

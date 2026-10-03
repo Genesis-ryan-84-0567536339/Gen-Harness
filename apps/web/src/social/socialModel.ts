@@ -1,4 +1,4 @@
-import type { SocialAccount, SocialLiveInput } from '@gen-harness/contracts';
+import type { BrowserJob, SocialAccount, SocialLiveInput, SocialWriteAction, SocialWriteItem } from '@gen-harness/contracts';
 import type { Tone } from '@gen-harness/ui';
 
 /** Khoá bộ đệm dùng chung — sự kiện WS `social.update` làm mới cả nhóm. */
@@ -8,7 +8,72 @@ export const qkSocial = {
   platforms: ['social', 'platforms'] as const,
   accounts: ['social', 'accounts'] as const,
   latest: (id: string) => ['social', 'latest', id] as const,
+  writeGate: ['social', 'write-gate'] as const,
+  writes: ['social', 'writes'] as const,
+  job: (id: string) => ['social', 'job', id] as const,
 };
+
+/** Route trang cảnh báo rủi ro gửi Facebook (v0.1.47). */
+export const WRITE_RISK_PATH = '/social/ghi-facebook';
+export const WRITE_LIMIT_MIN = 1;
+export const WRITE_LIMIT_MAX = 20;
+
+export interface WriteStatusView {
+  label: string;
+  tone: Tone;
+  /** Chữ phụ (vd cảnh báo "chưa thấy hiện trên trang"). */
+  notes: string[];
+  terminal: boolean;
+}
+
+type WriteLike = Pick<BrowserJob, 'status'> & { confirmed?: boolean | null; after_halt?: boolean | null; result?: BrowserJob['result'] };
+
+/** Trạng thái việc gửi → chữ tiếng Việt (một nguồn cho thẻ đề xuất và danh sách "Lần gửi gần đây"). */
+export function writeStatusView(j: WriteLike): WriteStatusView {
+  const confirmed = j.confirmed ?? j.result?.confirmed;
+  const afterHalt = j.after_halt ?? j.result?.after_halt;
+  switch (j.status) {
+    case 'queued':
+      return { label: 'Đang chờ trình duyệt…', tone: 'neutral', notes: [], terminal: false };
+    case 'running':
+      return { label: 'Đang gửi trên Facebook…', tone: 'accent', notes: [], terminal: false };
+    case 'done': {
+      const notes: string[] = [];
+      if (afterHalt) notes.push('Đã gửi trước khi kịp dừng');
+      if (confirmed === false) notes.push('Đã bấm gửi nhưng chưa thấy hiện trên trang — xem ảnh chụp');
+      return { label: 'Đã gửi', tone: confirmed === false ? 'warn' : 'ok', notes, terminal: true };
+    }
+    case 'halted':
+      return { label: 'Đã dừng bằng Dừng tất cả — chưa gửi gì', tone: 'warn', notes: [], terminal: true };
+    case 'cancelled':
+      return { label: 'Đã huỷ — chưa gửi gì', tone: 'neutral', notes: [], terminal: true };
+    default:
+      return { label: 'Gửi không thành công', tone: 'bad', notes: [], terminal: true };
+  }
+}
+
+export function writeActionLabel(a: SocialWriteAction | null | undefined): string {
+  return a === 'send_message' ? 'Nhắn tin' : 'Trả lời bình luận';
+}
+
+/** Đích gửi hiển thị gọn: bỏ giao thức, cắt dài. */
+export function shortTarget(url: string, max = 48): string {
+  const t = url.replace(/^https?:\/\/(www\.)?/, '');
+  return t.length > max ? `${t.slice(0, max - 1)}…` : t;
+}
+
+export function sortWrites(items: SocialWriteItem[]): SocialWriteItem[] {
+  return [...items].sort((a, b) => b.created_at.localeCompare(a.created_at));
+}
+
+/** "HH:mm dd/MM/yyyy" theo múi giờ tổ chức. */
+export function fmtConsentTime(iso: string, tz = 'Asia/Ho_Chi_Minh'): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const out: Record<string, string> = {};
+  for (const p of new Intl.DateTimeFormat('en-GB', { timeZone: tz, hourCycle: 'h23', hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' }).formatToParts(d)) out[p.type] = p.value;
+  return `${out.hour}:${out.minute} ${out.day}/${out.month}/${out.year}`;
+}
 
 export interface StatusView {
   label: string;
@@ -27,7 +92,7 @@ export function loginLabel(a: Pick<SocialAccount, 'status' | 'has_session'>): '�
 /** Trạng thái tài khoản → nhãn tiếng Việt + việc Owner cần làm (một nguồn cho thẻ, test, e2e). */
 export function accountStatus(a: Pick<SocialAccount, 'status' | 'pause_reason' | 'active_job'>): StatusView {
   if (a.active_job) {
-    const what = a.active_job.kind === 'login' ? 'Đang mở cửa sổ đăng nhập' : a.active_job.kind === 'read' ? 'Đang đọc' : 'Đang kiểm phiên';
+    const what = a.active_job.kind === 'login' ? 'Đang mở cửa sổ đăng nhập' : a.active_job.kind === 'read' ? 'Đang đọc' : a.active_job.kind === 'write' ? 'Đang gửi' : 'Đang kiểm phiên';
     return { label: what, tone: 'accent', hint: 'Mỗi tài khoản chỉ chạy một việc một lúc.' };
   }
   switch (a.status) {

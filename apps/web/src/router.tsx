@@ -16,6 +16,7 @@ import { AppShell } from './shell/AppShell';
 import { ACCOUNT_CRUMBS, BOSS_CHECKS_CRUMBS, GUIDE_CRUMBS, HELP_CRUMBS, SOCIAL_CRUMBS, type RouteHandle } from './shell/routeHandles';
 import { HomeRedirect } from './shell/HomeRedirect';
 import { SocialPage } from './social/SocialPage';
+import { SocialWriteRiskPage } from './social/SocialWriteRiskPage';
 import { RootLayout } from './RootLayout';
 
 /**
@@ -85,6 +86,12 @@ export const routes: RouteObject[] = [
           { path: 'help', handle: { page: HELP_CRUMBS, navKey: 'system' } satisfies RouteHandle, element: <HelpPage /> },
           // Tài khoản mạng xã hội (v0.1.29, chỉ Owner) — mở từ thẻ Facebook ở Kết nối và menu tài khoản.
           { path: 'social', handle: { page: SOCIAL_CRUMBS, navKey: 'connections' } satisfies RouteHandle, element: <SocialPage /> },
+          // v0.1.47 (F-79/F-85): cảnh báo rủi ro + đồng ý gửi trả lời/tin nhắn Facebook (chỉ Owner), tô sáng Kết nối.
+          {
+            path: 'social/ghi-facebook',
+            handle: { page: { domain: 'KẾT NỐI', title: 'Tài khoản mạng xã hội › Gửi trả lời & tin nhắn' }, navKey: 'connections' } satisfies RouteHandle,
+            element: <SocialWriteRiskPage />,
+          },
           // B5: trang 404 trong khung Console (thanh bên vẫn dùng được).
           { path: '*', element: <NotFoundPage /> },
         ],

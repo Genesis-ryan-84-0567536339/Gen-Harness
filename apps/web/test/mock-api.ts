@@ -400,6 +400,8 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
   // v0.1.21 Gen: kịch bản cố định (test/mock-gen.ts); `features.gen` của /auth/me đọc cờ ở đây.
   const genMock = createGen({
     emit: broadcast,
+    // v0.1.47 (F-79): xác nhận đề xuất gửi Facebook tạo việc `write` ở mock-social (khai báo bên dưới — gọi lúc chạy).
+    social: { writeContext: () => social.writeContext(), createWrite: (req) => social.createWrite(req, 'gen') },
     // v0.1.43 (F-24): xác nhận nháp tin của Gen tạo nháp thật ở Bàn làm việc.
     pushDraft: p3Core.hooks.push as (d: unknown) => unknown,
     notifyOwners: (kind, title, body, link) => {
@@ -1295,6 +1297,16 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
         .sort((a, b) => a.name.localeCompare(b.name, 'vi'))
         .map((a) => ({ id: a.id, name: a.name }));
       return reply(200, { items });
+    }
+    // v0.1.47 (F-79): ảnh chụp bằng chứng — JPEG nhị phân, no-store, chỉ Owner (mock-social giữ trạng thái).
+    const proof = /^\/social\/jobs\/([^/]+)\/proof$/.exec(path);
+    if (proof && method === 'GET') {
+      if (user.role.code !== 'owner') return problem(res, 403, 'FORBIDDEN', 'Vai trò của bạn không có quyền thao tác này');
+      const jpeg = social.proofOf(proof[1]);
+      if (!jpeg) return problem(res, 404, 'NOT_FOUND', 'Không có ảnh chụp cho việc này');
+      res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'no-store' });
+      res.end(jpeg);
+      return;
     }
     if (path === '/header' && method === 'GET') {
       return reply(200, { channels_live: 4, channels_connected: 4, groups_listening: 42, autonomy_level: 4, data_confidence: 0.78 });

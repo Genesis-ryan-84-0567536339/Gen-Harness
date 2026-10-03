@@ -6,6 +6,7 @@
  * `to_user`), kết thúc bằng `gen.done`. `GET /gen/turns/{id}` là đường dự phòng (polling) khi WS rớt.
  */
 import type { ApiClient } from './client';
+import type { BrowserJobStatus } from './social';
 
 export type DataToolName =
   | 'overview.summary'
@@ -54,7 +55,7 @@ export interface Suggestion {
  * `POST /gen/proposals/{id}/confirm` và server thực hiện nhân danh người đó qua endpoint sẵn có (Action Log
  * actor=user, via=gen). `requires_pin` = mục tiêu registry nhạy cảm → API trả 423, client tự hỏi PIN rồi gửi lại.
  */
-export type GenProposalType = 'draft_message' | 'reminder' | 'assign';
+export type GenProposalType = 'draft_message' | 'reminder' | 'assign' | 'social_reply' | 'social_dm';
 export type GenProposalStatus = 'pending' | 'confirmed' | 'cancelled';
 
 export interface GenSubjectRef {
@@ -84,8 +85,19 @@ export interface AssignFields {
   user_id: string;
 }
 
+/**
+ * v0.1.47 (F-79): gửi trả lời bình luận / nhắn tin Facebook. Gen KHÔNG tự gửi: chỉ khi Sếp bấm Xác nhận (+ mã PIN) máy chủ
+ * mới xếp một việc `write` cho trình duyệt nền; `text` là nguyên văn sẽ được gửi.
+ */
+export interface SocialWriteFields {
+  account_id: string;
+  target_url: string;
+  text: string;
+}
+
 export interface GenProposalResult {
-  type: 'draft' | 'task' | 'inbox_item';
+  /** v0.1.47: `social_write` — `id` = job_id của việc gửi; web theo dõi qua `GET /social/jobs/{id}`. */
+  type: 'draft' | 'task' | 'inbox_item' | 'social_write';
   id: string | null;
   code?: string | null;
   /** Màn xem kết quả (khoá GEN_SCREENS). */
@@ -95,13 +107,18 @@ export interface GenProposalResult {
    * gắn nơi gửi khi đối tượng là NHÓM; thiếu/false ⇒ web không ghi "Duyệt & gửi".
    */
   sendable?: boolean;
+  /** v0.1.47: chỉ với `social_write` — trạng thái việc gửi lúc xác nhận (thường `queued`). */
+  status?: BrowserJobStatus;
 }
 
 interface GenProposalBase {
   id: string;
   /** Tóm tắt do HỆ THỐNG viết từ các trường đã kiểm (không phải lời model). */
   summary: string;
-  /** Nhãn hiển thị: `user` (người được giao), `item` (việc/mục), `subject` (đối tượng). */
+  /**
+   * Nhãn hiển thị: `user` (người được giao), `item` (việc/mục), `subject` (đối tượng). v0.1.47 (gửi Facebook): `account`
+   * (tên tài khoản), `target` (bình luận/người nhận), `write_gate` (`open`|`locked`), `suspicious` (`'1'` = mục có dấu hiệu lừa đảo).
+   */
   labels: Record<string, string>;
   /** Mục tiêu registry gắn với đề xuất (quyền + cờ nhạy cảm lấy từ đây). */
   target: string;
@@ -113,13 +130,17 @@ interface GenProposalBase {
 export type GenProposal =
   | (GenProposalBase & { type: 'draft_message'; fields: DraftMessageFields })
   | (GenProposalBase & { type: 'reminder'; fields: ReminderFields })
-  | (GenProposalBase & { type: 'assign'; fields: AssignFields });
+  | (GenProposalBase & { type: 'assign'; fields: AssignFields })
+  | (GenProposalBase & { type: 'social_reply'; fields: SocialWriteFields })
+  | (GenProposalBase & { type: 'social_dm'; fields: SocialWriteFields });
 
 /** Trường người dùng được sửa trên thẻ trước khi xác nhận (còn lại giữ nguyên như lúc đề xuất). */
 export const GEN_PROPOSAL_EDITABLE: Record<GenProposalType, readonly string[]> = {
   draft_message: ['title', 'text'],
   reminder: ['title', 'remind_at', 'due_at', 'priority', 'assignee_user_id'],
   assign: ['user_id'],
+  social_reply: ['text'],
+  social_dm: ['text'],
 };
 
 export interface GenAssignee {

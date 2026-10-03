@@ -1,4 +1,9 @@
 /**
+ * v0.1.47 (F-79/F-85) — thêm ghi Facebook: cổng ghi (`/social/write-gate`, đồng ý rủi ro, PIN social.manage), việc `write`
+ * (`POST /social/accounts/{id}/write`, PIN social.write) xếp `queued` rồi do hook e2e chuyển queued → running → done, giới hạn
+ * gửi/ngày (429 SOCIAL_WRITE_LIMIT), Dừng tất cả chặn cả ghi (409 SOCIAL_HALTED), `GET /social/writes`, `GET /social/jobs/{id}`,
+ * ảnh chụp bằng chứng (JPEG nhỏ cố định, mock-api phát nhị phân qua `proofOf`). Gen xác nhận đề xuất gọi `createWrite`.
+ *
  * Mock `/api/v1/social/*` (v0.1.29) — như `apps/api/gh/social/routes.py`: CHỈ Owner, PIN khi thêm/đăng nhập/gỡ/bật lại,
  * bắt buộc tích chấp nhận rủi ro, 1 việc/tài khoản, Dừng tất cả, lượt đọc trả mục mẫu (có một mục đáng ngờ).
  * Cửa sổ đăng nhập: WS `/api/v1/social/login/{ticket}` (xem `liveSocket` — mock-api gọi khi upgrade) gửi một khung
@@ -11,11 +16,27 @@ import type {
   SocialItem,
   SocialPlatform,
   SocialStatus,
+  SocialWriteAction,
+  SocialWriteGate,
+  SocialWriteItem,
 } from '@gen-harness/contracts';
 import type { P2Ctx } from './mock-phase2';
 import type { MockSocket } from './mock-ws';
 
 const RISK_VERSION = '2026-09-30';
+const WRITE_RISK_VERSION = '2026-10-03';
+const WRITES_PER_DAY_MAX = 20;
+const WRITE_RISK = [
+  'Trình duyệt nền của hệ thống chưa chạy được trong sandbox (vùng cách ly của trình duyệt): một trang web độc hại có thể lợi dụng lỗi trình duyệt để chạm tới máy chủ.',
+  'Gửi tự động có thể bị Facebook coi là hành vi bất thường: tài khoản có thể bị xác minh, hạn chế hoặc khoá.',
+  'Tin đã gửi lên Facebook thì hệ thống không tự thu hồi được.',
+];
+const ERROR_TEXT: Record<string, string> = {
+  SEND_UNCONFIRMED: 'Đã bấm gửi nhưng chưa thấy nội dung hiện trên trang — Sếp xem ảnh chụp rồi kiểm tra trực tiếp trên Facebook.',
+  TARGET_NOT_FOUND: 'Không tìm thấy bình luận hoặc cuộc trò chuyện cần gửi vào — mục có thể đã bị xoá.',
+  PERMIT_INVALID: 'Giấy phép gửi không hợp lệ hoặc đã hết hạn — chưa gửi gì. Sếp xác nhận lại.',
+  LOGGED_OUT: 'Phiên đăng nhập đã hết — bấm Đăng nhập lại.',
+};
 const HARD_RULES = [
   'Không tạo tài khoản giả, tài khoản phụ hay nick ảo; chỉ tài khoản thật do chính Sếp đăng nhập.',
   'Không lách chống bot: không plugin ẩn danh (stealth), không giả vân tay trình duyệt, không đổi IP/xoay proxy, không giải CAPTCHA tự động.',
@@ -27,13 +48,17 @@ const FACEBOOK: SocialPlatform = {
   name: 'Facebook cá nhân',
   mode: 'browser',
   read_kinds: ['notifications', 'inbox'],
-  write_kinds: [],
+  write_kinds: ['reply_comment', 'send_message'],
   risk: [
     'Điều khoản của Meta (Facebook) không cho phép truy cập bằng phương tiện tự động khi chưa được phép — kể cả khi đã đăng nhập. Dùng tính năng này là Sếp tự chấp nhận rủi ro đó.',
     'Facebook có thể hỏi xác minh (checkpoint), bắt giải CAPTCHA, tạm khoá hoặc hạn chế tài khoản.',
   ],
-  will_do: ['Mở cửa sổ trình duyệt từ xa để CHÍNH Sếp đăng nhập.', 'Chỉ ĐỌC thông báo và danh sách hội thoại.'],
-  wont_do: ['Không đăng bài, không trả lời, không nhắn tin ở bản này.', 'Không tạo tài khoản giả, không lách chống bot.'],
+  will_do: [
+    'Mở cửa sổ trình duyệt từ xa để CHÍNH Sếp đăng nhập.',
+    'ĐỌC thông báo và danh sách hội thoại.',
+    'Trả lời bình luận / nhắn tin CHỈ sau khi Sếp bấm Xác nhận và nhập mã PIN, rồi chụp ảnh bằng chứng.',
+  ],
+  wont_do: ['Không đăng bài (để bản sau).', 'Không tạo tài khoản giả, không lách chống bot.'],
   risk_version: RISK_VERSION,
 };
 export const MOCK_SOCIAL_ITEMS: SocialItem[] = [
@@ -50,17 +75,48 @@ interface Opts {
   emit: (type: string, data: unknown) => void;
 }
 
+/** Việc gửi Gen/Web yêu cầu — dùng chung cho `POST /social/accounts/{id}/write` và xác nhận đề xuất của Gen. */
+export interface WriteRequest {
+  account_id: string;
+  action: SocialWriteAction;
+  target_url: string;
+  text: string;
+  proposal_id?: string | null;
+}
+export type WriteOutcome = { job: BrowserJob } | { error: { status: number; code: string; title: string; errors?: Record<string, string> } };
+/** JPEG 1×1 cố định làm "ảnh chụp bằng chứng". */
+export const PROOF_JPEG = Buffer.from(
+  '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACP/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AVN//2Q==',
+  'base64',
+);
+
 export function createMock(opts: Opts) {
   const accounts: SocialAccount[] = [];
   const jobs: BrowserJob[] = [];
   const tickets = new Map<string, string>(); // ticket → account id
   let halted = false;
+  // Cổng ghi (v0.1.47): mặc định KHOÁ — sandbox chưa bật được, Sếp chưa đồng ý. Hook `setGate` đổi.
+  const gateState = {
+    sandbox: { enabled: false as boolean | null, reason: 'Máy chủ không cho bật vùng cách ly của trình duyệt (thiếu user namespace).' as string | null },
+    workerOnline: true,
+    consent: null as SocialWriteGate['consent'],
+  };
+  const gateOut = (): SocialWriteGate => ({
+    sandbox: { enabled: gateState.sandbox.enabled, reason: gateState.sandbox.reason, checked_at: now() },
+    worker_online: gateState.workerOnline,
+    consent: gateState.consent,
+    open: gateState.sandbox.enabled === true || gateState.consent !== null,
+    risk: WRITE_RISK,
+    version: WRITE_RISK_VERSION,
+  });
+  const writesToday = (accountId: string) =>
+    jobs.filter((j) => j.kind === 'write' && j.account_id === accountId && j.status !== 'cancelled' && Date.now() - Date.parse(j.created_at) < 24 * 3600 * 1000).length;
   const timers = new Set<ReturnType<typeof setTimeout>>();
 
   const now = () => new Date().toISOString();
-  const pin = (ctx: P2Ctx) => {
+  const pin = (ctx: P2Ctx, operation = 'social.manage') => {
     if (!ctx.needPin()) return true;
-    ctx.problem(423, 'PIN_REQUIRED', 'Thao tác này cần nhập mã PIN', { detail: { operation: 'social.manage' } });
+    ctx.problem(423, 'PIN_REQUIRED', 'Thao tác này cần nhập mã PIN', { detail: { operation } });
     return false;
   };
   const statusOut = (): SocialStatus => ({
@@ -71,9 +127,9 @@ export function createMock(opts: Opts) {
     limits: { reads_per_day_max: 6, read_min_interval_minutes: 10, quiet_hours: [23, 6], concurrency_per_account: 1 },
   });
   const active = (id: string) => jobs.find((j) => j.account_id === id && (j.status === 'queued' || j.status === 'running')) ?? null;
-  const out = (a: SocialAccount): SocialAccount => ({ ...a, active_job: active(a.id) });
+  const out = (a: SocialAccount): SocialAccount => ({ ...a, writes_today: writesToday(a.id), active_job: active(a.id) });
   const newJob = (a: SocialAccount, kind: BrowserJob['kind']): BrowserJob => {
-    const j: BrowserJob = { id: randomUUID(), account_id: a.id, kind, status: 'running', via: 'user', error: null, error_text: null, result: null, created_at: now(), started_at: now(), finished_at: null };
+    const j: BrowserJob = { id: randomUUID(), account_id: a.id, kind, action: null, has_proof: false, status: 'running', via: 'user', error: null, error_text: null, result: null, created_at: now(), started_at: now(), finished_at: null };
     jobs.unshift(j);
     return j;
   };
@@ -84,12 +140,84 @@ export function createMock(opts: Opts) {
     opts.emit('social.update', { account_id: j.account_id });
   };
 
+  /** Tạo việc gửi (đã qua PIN): kiểm Dừng tất cả → cổng → dữ liệu → giới hạn/ngày → bận. Việc `queued` chờ hook chuyển tiếp. */
+  function createWrite(req: WriteRequest, via: BrowserJob['via'] = 'user'): WriteOutcome {
+    if (halted) return { error: { status: 409, code: 'SOCIAL_HALTED', title: 'Đang dừng tất cả việc trình duyệt — Owner bấm "Bật lại" trước' } };
+    const a = accounts.find((x) => x.id === req.account_id && x.status !== 'revoked');
+    if (!a) return { error: { status: 404, code: 'NOT_FOUND', title: 'Tài khoản mạng xã hội không tồn tại' } };
+    if (!gateOut().open) {
+      return {
+        error: {
+          status: 409,
+          code: 'SOCIAL_WRITE_LOCKED',
+          title: 'Gửi lên Facebook đang khoá: trình duyệt chưa bật được sandbox và Sếp chưa đồng ý rủi ro — mở trang cảnh báo để đọc và quyết định',
+        },
+      };
+    }
+    const errors: Record<string, string> = {};
+    if (req.action !== 'reply_comment' && req.action !== 'send_message') errors.action = 'Loại gửi chưa hỗ trợ';
+    if (!/^https:\/\/(www\.|m\.)?facebook\.com\//.test(req.target_url ?? '')) errors.target_url = 'Địa chỉ đích phải là một đường dẫn facebook.com';
+    if (!req.text?.trim()) errors.text = 'Nhập nội dung cần gửi';
+    else if (req.text.length > 2000) errors.text = 'Nội dung tối đa 2000 ký tự';
+    if (Object.keys(errors).length) return { error: { status: 422, code: 'VALIDATION', title: 'Dữ liệu chưa hợp lệ', errors } };
+    if (a.status !== 'active') return { error: { status: 409, code: 'SOCIAL_NOT_ACTIVE', title: 'Tài khoản chưa đăng nhập — bấm Đăng nhập trước' } };
+    const limit = Math.min(a.daily_write_limit ?? 10, WRITES_PER_DAY_MAX);
+    if (writesToday(a.id) >= limit) {
+      return { error: { status: 429, code: 'SOCIAL_WRITE_LIMIT', title: `Hôm nay đã gửi đủ ${limit} lần (giới hạn gửi/ngày) — thử lại sau 24 giờ hoặc nâng giới hạn` } };
+    }
+    if (active(a.id)) return { error: { status: 409, code: 'SOCIAL_BUSY', title: 'Tài khoản này đang có một việc chạy — mỗi tài khoản chỉ chạy một việc một lúc' } };
+    const j: BrowserJob = {
+      id: randomUUID(), account_id: a.id, kind: 'write', action: req.action, has_proof: false, status: 'queued', via: via === 'user' ? 'user' : via,
+      error: null, error_text: null,
+      result: { action: req.action, target_url: req.target_url, text: req.text, sent: false, confirmed: false, trace: [] },
+      created_at: now(), started_at: null, finished_at: null,
+    };
+    jobs.unshift(j);
+    opts.emit('social.update', { account_id: a.id });
+    return { job: j };
+  }
+  const writeItems = (accountId?: string | null, limit = 20): SocialWriteItem[] =>
+    jobs
+      .filter((j) => j.kind === 'write' && (!accountId || j.account_id === accountId))
+      .slice(0, limit)
+      .map((j) => ({
+        job_id: j.id, account_id: j.account_id, account_label: accounts.find((a) => a.id === j.account_id)?.label ?? '—',
+        action: (j.action ?? 'reply_comment') as SocialWriteAction, target_url: j.result?.target_url ?? '', text: j.result?.text ?? '',
+        status: j.status, error: j.error, error_text: j.error_text, created_at: j.created_at, finished_at: j.finished_at,
+        has_proof: !!j.has_proof, confirmed: j.status === 'done' ? (j.result?.confirmed ?? null) : null, after_halt: !!j.result?.after_halt,
+      }));
+
   function handle(ctx: P2Ctx): boolean {
     const { method: m, path: p, body, reply, problem } = ctx;
     if (!p.startsWith('/social/')) return false;
     if (ctx.role !== 'owner') return problem(403, 'FORBIDDEN', 'Vai trò của bạn không có quyền thao tác này');
     if (p === '/social/status' && m === 'GET') return reply(200, statusOut());
     if (p === '/social/platforms' && m === 'GET') return reply(200, { items: [FACEBOOK], hard_rules: HARD_RULES, risk_version: RISK_VERSION });
+    if (p === '/social/write-gate' && m === 'GET') return reply(200, gateOut());
+    if (p === '/social/write-consent') {
+      if (m === 'POST') {
+        if (!pin(ctx)) return true;
+        if ((body as { version?: string }).version !== WRITE_RISK_VERSION) {
+          return problem(409, 'SOCIAL_CONSENT_VERSION', 'Cảnh báo rủi ro đã được cập nhật — tải lại trang rồi đọc lại');
+        }
+        gateState.consent = { accepted_at: now(), accepted_by_name: ctx.userLabel, version: WRITE_RISK_VERSION };
+        opts.emit('social.update', {});
+        return reply(200, gateOut());
+      }
+      if (m === 'DELETE') {
+        gateState.consent = null;
+        opts.emit('social.update', {});
+        return reply(200, gateOut());
+      }
+    }
+    if (p === '/social/writes' && m === 'GET') {
+      return reply(200, { items: writeItems(ctx.url.searchParams.get('account_id'), Math.min(Number(ctx.url.searchParams.get('limit') ?? 20) || 20, 50)) });
+    }
+    const jm = /^\/social\/jobs\/([^/]+)$/.exec(p);
+    if (jm && m === 'GET') {
+      const j = jobs.find((x) => x.id === jm[1]);
+      return j ? reply(200, j) : problem(404, 'NOT_FOUND', 'Việc không tồn tại');
+    }
     if (p === '/social/halt') {
       if (m === 'POST') {
         halted = true;
@@ -117,7 +245,7 @@ export function createMock(opts: Opts) {
         id: randomUUID(), platform: FACEBOOK.key, platform_name: FACEBOOK.name, mode: 'browser', label: b.label!.trim(),
         external_handle: null, status: 'pending_login', pause_reason: null, has_session: false, session_updated_at: null,
         last_health: null, risk_accepted_at: now(), risk_version: RISK_VERSION, schedule: { enabled: false, times: ['08:00', '17:00'] },
-        daily_read_limit: 6, last_read_at: null, created_at: now(), active_job: null,
+        daily_read_limit: 6, daily_write_limit: 10, writes_today: 0, last_read_at: null, created_at: now(), active_job: null,
       };
       accounts.push(a);
       return reply(201, out(a));
@@ -129,7 +257,14 @@ export function createMock(opts: Opts) {
       const action = mm[2];
       if (!action && m === 'GET') return reply(200, out(a));
       if (!action && m === 'PATCH') {
-        const b = body as { schedule?: { enabled: boolean; times: string[] }; label?: string };
+        const b = body as { schedule?: { enabled: boolean; times: string[] }; label?: string; daily_write_limit?: number };
+        if (b.daily_write_limit !== undefined) {
+          const n = b.daily_write_limit;
+          if (!Number.isInteger(n) || n < 1 || n > WRITES_PER_DAY_MAX) {
+            return problem(422, 'VALIDATION', 'Dữ liệu chưa hợp lệ', { errors: { daily_write_limit: `Giới hạn gửi/ngày từ 1 đến ${WRITES_PER_DAY_MAX}` } });
+          }
+          a.daily_write_limit = n;
+        }
         if (b.schedule) a.schedule = { enabled: !!b.schedule.enabled, times: [...b.schedule.times].sort() };
         if (b.label) a.label = b.label;
         return reply(200, out(a));
@@ -144,6 +279,12 @@ export function createMock(opts: Opts) {
       }
       if (action === 'latest' && m === 'GET') {
         return reply(200, { job: jobs.find((j) => j.account_id === a.id && j.kind === 'read' && j.status === 'done') ?? null });
+      }
+      if (action === 'write' && m === 'POST') {
+        if (!pin(ctx, 'social.write')) return true;
+        const r = createWrite({ ...(body as unknown as WriteRequest), account_id: a.id });
+        if ('error' in r) return problem(r.error.status, r.error.code, r.error.title, r.error.errors ? { errors: r.error.errors } : undefined);
+        return reply(201, r.job);
       }
       if (m === 'POST' && ['login', 'read', 'check', 'pause', 'resume'].includes(action ?? '')) {
         if (action === 'pause') {
@@ -234,7 +375,7 @@ export function createMock(opts: Opts) {
       id: randomUUID(), platform: FACEBOOK.key, platform_name: FACEBOOK.name, mode: 'browser', label,
       external_handle: null, status: 'needs_login', pause_reason: 'key_changed', has_session: false, session_updated_at: null,
       last_health: null, risk_accepted_at: now(), risk_version: RISK_VERSION, schedule: { enabled: false, times: ['08:00', '17:00'] },
-      daily_read_limit: 6, last_read_at: null, created_at: now(), active_job: null,
+      daily_read_limit: 6, daily_write_limit: 10, writes_today: 0, last_read_at: null, created_at: now(), active_job: null,
     };
     accounts.push(a);
     return out(a);
@@ -250,11 +391,71 @@ export function createMock(opts: Opts) {
       id: randomUUID(), platform: FACEBOOK.key, platform_name: FACEBOOK.name, mode: 'browser', label,
       external_handle: null, status: 'active', pause_reason: null, has_session: true, session_updated_at: now(),
       last_health: null, risk_accepted_at: now(), risk_version: RISK_VERSION, schedule: { enabled: false, times: ['08:00', '17:00'] },
-      daily_read_limit: 6, last_read_at: null, created_at: now(), active_job: null,
+      daily_read_limit: 6, daily_write_limit: 10, writes_today: 0, last_read_at: null, created_at: now(), active_job: null,
     };
     accounts.push(a);
     return out(a);
   };
 
-  return { handle, liveSocket, liveInput, hooks: { importKeyChanged, seedActive }, dispose };
+  /**
+   * v0.1.47 — hook e2e `POST /api/v1/__mock/p3/social/setGate {sandbox?: boolean|null, reason?, consent?: boolean, worker_online?}`:
+   * đặt trạng thái sandbox / đồng ý rủi ro / trình duyệt nền. Trả cổng hiện tại.
+   */
+  const setGate = (b: unknown) => {
+    const o = (b ?? {}) as { sandbox?: boolean | null; reason?: string | null; consent?: boolean; worker_online?: boolean };
+    if ('sandbox' in o) {
+      gateState.sandbox.enabled = o.sandbox ?? null;
+      gateState.sandbox.reason = o.sandbox === true ? null : (o.reason ?? gateState.sandbox.reason);
+    }
+    if (o.consent !== undefined) {
+      gateState.consent = o.consent ? { accepted_at: now(), accepted_by_name: 'Anh Cơ La', version: WRITE_RISK_VERSION } : null;
+    }
+    if (o.worker_online !== undefined) gateState.workerOnline = o.worker_online;
+    opts.emit('social.update', {});
+    return gateOut();
+  };
+
+  /**
+   * v0.1.47 — hook e2e `POST /api/v1/__mock/p3/social/advanceWrite {job_id?, to?: 'running'|'done'|'failed', confirmed?, after_halt?,
+   * error?}`: worker nhận việc (queued → running) rồi gửi xong (running → done, có ảnh chụp) hoặc lỗi. Mặc định: việc gửi mới
+   * nhất còn dở, sang bước kế. Việc đã đóng `halted` nhận `done` muộn (after_halt = true) như API thật.
+   */
+  const advanceWrite = (b: unknown) => {
+    const o = (b ?? {}) as { job_id?: string; to?: 'running' | 'done' | 'failed'; confirmed?: boolean; after_halt?: boolean; error?: string };
+    const j = jobs.find((x) => x.kind === 'write' && (o.job_id ? x.id === o.job_id : x.status === 'queued' || x.status === 'running'));
+    if (!j) return null;
+    const to = o.to ?? (j.status === 'queued' ? 'running' : 'done');
+    const late = j.status === 'halted';
+    if (to === 'running') {
+      j.status = 'running';
+      j.started_at = now();
+    } else if (to === 'done') {
+      j.status = 'done';
+      j.finished_at = now();
+      j.has_proof = true;
+      j.result = {
+        ...j.result,
+        sent: true,
+        confirmed: o.confirmed ?? true,
+        ...(o.after_halt || late ? { after_halt: true } : {}),
+        trace: [{ step: 'open', ms: 900, ok: true }, { step: 'insert_text', ms: 120, ok: true }, { step: 'send', ms: 300, ok: true }, { step: 'proof', ms: 200, ok: true }],
+      };
+    } else {
+      j.status = 'failed';
+      j.finished_at = now();
+      j.error = o.error ?? 'SEND_UNCONFIRMED';
+      j.error_text = ERROR_TEXT[j.error] ?? 'Việc gửi gặp lỗi — chưa có gì được gửi đi.';
+    }
+    opts.emit('social.update', { account_id: j.account_id });
+    return j;
+  };
+
+  /** Ngữ cảnh cho Gen (mock-gen): tài khoản đã đăng nhập đầu tiên + cổng ghi mở/khoá. null = chưa có tài khoản dùng được. */
+  const writeContext = (): { account_id: string; account_label: string; gate: 'open' | 'locked' } | null => {
+    const a = accounts.find((x) => x.status === 'active' && x.has_session);
+    return a ? { account_id: a.id, account_label: a.label, gate: gateOut().open ? 'open' : 'locked' } : null;
+  };
+  const proofOf = (jobId: string): Buffer | null => (jobs.find((j) => j.id === jobId)?.has_proof ? PROOF_JPEG : null);
+
+  return { handle, liveSocket, liveInput, createWrite, writeContext, proofOf, hooks: { importKeyChanged, seedActive, setGate, advanceWrite }, dispose };
 }
