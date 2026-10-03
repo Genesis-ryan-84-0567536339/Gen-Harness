@@ -774,7 +774,7 @@ class Step11In(BaseModel):
     time_of_day: str = Field(default="02:00", max_length=5)
     retention_count: int = Field(default=7, ge=1, le=365)
     # v0.1.40 (F-12): chỉ 'local' — chưa có đường sao lưu S3/MinIO thật; bản sao ngoài máy (ổ USB/NAS) chọn ở
-    # Dữ liệu & lưu trữ › Bản sao ngoài máy (genh chép gói ra ổ ngoài), không qua trường này.
+    # Cài đặt › Sao lưu & cập nhật › Bản sao ngoài máy (genh chép gói ra ổ ngoài), không qua trường này.
     destination: Literal["local"] = "local"
 
     @field_validator("destination", mode="before")
@@ -783,8 +783,8 @@ class Step11In(BaseModel):
         if v != "local":
             raise PydanticCustomError(
                 "destination_local_only",
-                "Hiện chỉ sao lưu trên máy chủ này — bản sao ngoài máy (ổ USB/NAS) chọn ở Dữ liệu & lưu trữ sau "
-                "khi thiết lập xong")
+                "Hiện chỉ sao lưu trên máy chủ này — bản sao ngoài máy (ổ USB/NAS) chọn ở Cài đặt › Sao lưu & cập nhật "
+                "sau khi thiết lập xong")
         return v
 
 

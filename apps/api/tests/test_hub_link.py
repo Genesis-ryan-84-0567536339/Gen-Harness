@@ -296,7 +296,7 @@ async def test_expiry_status_and_reminder(owner_api: Api, fake_hub: FakeHub, db:
     await db.commit()
     rows = (await owner_api.get("/notifications")).json()
     items = rows["items"] if isinstance(rows, dict) else rows
-    assert any(i["kind"] == "hub.token_expiring" and i["link"] == "/mcp" for i in items)
+    assert any(i["kind"] == "hub.token_expiring" and i["link"] == "/connections#genhub" for i in items)
     # Đổi hạn (token mới) → nhắc lại được.
     await owner_api.send("PATCH", "/hub/link", {"token_expires_at": (datetime.now(UTC) - timedelta(days=1))
                                                 .isoformat()})

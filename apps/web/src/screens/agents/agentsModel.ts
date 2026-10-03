@@ -1,5 +1,5 @@
 /** Presentation logic for the Agent Identity cluster — mirrors `dataModel.ts` conventions (token colours only). */
-import type { AgentChannelScope, AgentDecision, AgentIdentity } from '@gen-harness/contracts';
+import { AUTONOMY_LEVELS as CONTRACT_AUTONOMY_LEVELS, type AgentChannelScope, type AgentDecision, type AgentIdentity } from '@gen-harness/contracts';
 import { fmtAgo } from '../../lib/format';
 
 export const OK = 'var(--color-ok)';
@@ -9,17 +9,9 @@ export const ACC3 = 'var(--color-accent-300)';
 export const N4 = 'var(--color-neutral-400)';
 export const N5 = 'var(--color-neutral-500)';
 
-/** ARCHITECTURE §7 — thang tự trị 0–6 cố định (`gh.chassis.policy.LEVELS`). */
-export const AUTONOMY_LEVELS: Record<number, string> = {
-  0: 'Chỉ ghi nhận',
-  1: 'Tóm tắt',
-  2: 'Chấm điểm + giải thích',
-  3: 'Gợi ý hành động',
-  4: 'Soạn sẵn chờ duyệt',
-  5: 'Tự làm việc thấp rủi ro',
-  6: 'Tự làm việc đã whitelist',
-};
-export const AUTONOMY_OPTIONS = Object.entries(AUTONOMY_LEVELS).map(([v, label]) => ({ value: v, label: `${v} — ${label}` }));
+/** ARCHITECTURE §7 — thang tự trị 0–6 cố định; dẫn xuất từ nguồn duy nhất `@gen-harness/contracts` (khớp `gh.chassis.policy.LEVELS`). */
+export const AUTONOMY_LEVELS: Record<number, string> = Object.fromEntries(CONTRACT_AUTONOMY_LEVELS.map((label, n) => [n, label]));
+export const AUTONOMY_OPTIONS = CONTRACT_AUTONOMY_LEVELS.map((label, n) => ({ value: String(n), label: `${n} — ${label}` }));
 
 /** Icon + tone theo mẫu (spec E13); agent tự đặt tay (`template: null`) dùng icon trung tính. */
 const TEMPLATE_ICON: Record<string, { icon: string; tone: string }> = {

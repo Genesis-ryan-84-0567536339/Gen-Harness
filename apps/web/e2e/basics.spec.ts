@@ -71,7 +71,7 @@ test.describe('B4 — điện thoại 375px', () => {
     await page.screenshot({ path: join(shots, 'phone-drawer.png') });
     // Ngăn kéo luôn hiện đủ tên mục (không phải rail icon).
     await expect(sidebar).toHaveAttribute('data-mode', 'full');
-    await sidebar.getByRole('link', { name: /Điều khiển hệ thống/ }).click();
+    await sidebar.getByRole('link', { name: /Cài đặt/ }).click();
     await expect(page).toHaveURL(/\/system$/);
     await expect(sidebar).toBeHidden();
 

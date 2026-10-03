@@ -111,16 +111,20 @@ describe('V4 — mời người dùng', () => {
   });
 });
 
-describe('N5 — phụ đề tiếng Anh mặc định tắt', () => {
-  it('trình duyệt đã lưu bản cũ (version 0, true mặc định) được tắt một lần', async () => {
+describe('N5 → v0.1.42 (F-63): bỏ hẳn phụ đề tiếng Anh', () => {
+  it('trình duyệt đã lưu bản cũ (version 0 hoặc 1, có showEnglish) — bỏ field, giữ các lựa chọn khác', async () => {
     const persist = useUiStore.persist;
-    localStorage.setItem('gh-ui', JSON.stringify({ state: { sidebarMode: 'full', showEnglish: true, navOpen: {} }, version: 0 }));
-    await persist.rehydrate();
-    expect(useUiStore.getState().showEnglish).toBe(false);
-    // Người dùng bật lại (đã lưu version 1) thì giữ.
-    localStorage.setItem('gh-ui', JSON.stringify({ state: { sidebarMode: 'full', showEnglish: true, navOpen: {} }, version: 1 }));
-    await persist.rehydrate();
-    expect(useUiStore.getState().showEnglish).toBe(true);
+    for (const version of [0, 1]) {
+      localStorage.setItem('gh-ui', JSON.stringify({ state: { sidebarMode: 'rail', showEnglish: true, navOpen: { 'Hộp thư & Việc': true } }, version }));
+      await persist.rehydrate();
+      const s = useUiStore.getState() as unknown as Record<string, unknown>;
+      expect('showEnglish' in s, `version ${version}`).toBe(false);
+      expect(s.sidebarMode).toBe('rail');
+      expect(s.navOpen).toEqual({ 'Hộp thư & Việc': true });
+    }
+    expect(persist.getOptions().version).toBe(2);
+    expect(JSON.stringify(persist.getOptions().partialize!(useUiStore.getState()))).not.toContain('showEnglish');
     localStorage.removeItem('gh-ui');
+    useUiStore.setState({ sidebarMode: 'full', navOpen: {} });
   });
 });

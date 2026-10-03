@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import type { Boundary, PermissionsPage, PermScope, RetentionPolicy } from '@gen-harness/contracts';
 import { SystemScreen } from '../../src/screens/system/SystemScreen';
+import { LogTab } from '../../src/screens/system/LogTab';
 import { retentionRowView } from '../../src/screens/system/systemModel';
 import { PinDialogHost } from '../../src/shell/PinDialogHost';
 import { qk } from '../../src/lib/queries';
@@ -63,7 +64,7 @@ afterEach(() => {
 
 const PERMISSIONS_PAGE: PermissionsPage = {
   columns: [
-    { key: 'overview', label: 'Tổng quan', permissions: ['overview.read'] },
+    { key: 'overview', label: 'Hôm nay', permissions: ['overview.read'] },
     { key: 'queue', label: 'Hàng đợi', permissions: ['queue.read', 'queue.act'] },
     { key: 'profile', label: 'Hồ sơ khách', permissions: ['profile.read', 'profile.write'] },
     { key: 'people_review', label: 'Đánh giá nhân sự', permissions: ['people_review.read', 'people_review.write', 'care.read'] },
@@ -195,8 +196,15 @@ describe('Điều khiển hệ thống › Nhật ký', () => {
 
   it('vai trò không có audit.read thấy thông báo khoá, không thấy bảng', async () => {
     mockFetch(() => json(404));
-    renderScreen(<SystemScreen />, { 'system.read': 'all' }, 'log');
+    renderScreen(<LogTab />, { 'system.read': 'all' }, 'log');
     expect(await screen.findByText('Vai trò của bạn không xem được Nhật ký')).toBeInTheDocument();
+  });
+
+  it('v0.1.42: Cài đặt không hiện tab Nhật ký cho vai trò không có audit.read (?tab=log → tab đầu tiên)', async () => {
+    mockFetch(() => json(404));
+    renderScreen(<SystemScreen />, { 'system.read': 'all' }, 'log');
+    expect(await screen.findByRole('tab', { name: /Sao lưu & cập nhật/ })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.queryByRole('tab', { name: /Nhật ký/ })).not.toBeInTheDocument();
   });
 });
 

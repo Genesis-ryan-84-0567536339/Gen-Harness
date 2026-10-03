@@ -60,7 +60,7 @@ SECTION_META: dict[str, tuple[str, str]] = {
     "drafts_pending": ("Nháp chờ duyệt", "/workbench"),
     "incidents": ("Sự cố cần Sếp", "/system?tab=storage&focus=health"),
     "facebook": ("Facebook mới", "/social"),
-    "kho": ("Kho có gì mới", "/mcp"),
+    "kho": ("Kho có gì mới", "/connections#genhub"),
 }
 #: Đơn vị trong thân chuông ("3 việc đến hạn · 2 khách nóng …").
 BODY_UNITS = {"tasks_due": "việc đến hạn", "hot_customers": "khách nóng", "drafts_pending": "nháp chờ duyệt",

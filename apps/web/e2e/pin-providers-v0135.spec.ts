@@ -85,7 +85,7 @@ test.describe('PIN nhà cung cấp AI v0.1.35', () => {
     await page.goto('/api');
     const chain = page.locator('.apm-chain-list');
     await expect(chain.locator('.apm-chain-row').nth(2)).toContainText('DeepSeek API');
-    await expect(page.getByRole('region', { name: 'Chuỗi ưu tiên nhà cung cấp' }).getByText('Cần mã PIN 6 số')).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Chuỗi chuyển hướng nhà cung cấp' }).getByText('Cần mã PIN 6 số')).toBeVisible();
 
     await page.getByRole('button', { name: 'Đưa DeepSeek API lên trước' }).click();
     await enterOwnerPin(page);

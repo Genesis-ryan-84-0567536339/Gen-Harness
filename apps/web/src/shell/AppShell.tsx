@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { Navigate, Outlet, useLocation, useMatches, useNavigate } from 'react-router-dom';
 import { DOMAINS, SCREEN_BY_KEY, type DomainId } from '@gen-harness/contracts';
-import { useActiveScreenKey, type RouteHandle } from './routeHandles';
+import { useActiveNavKey, useActiveScreenKey, type RouteHandle } from './routeHandles';
 import { useMe, useNavigation } from '../lib/queries';
 import { useRealtime } from '../lib/realtime';
 import { useUiStore } from '../lib/uiStore';
@@ -66,7 +66,7 @@ function useCrumbs(activeKey: string | null): Crumbs | null {
   return useMemo(() => {
     if (!activeKey) {
       const page = [...matches].reverse().map((m) => (m.handle as RouteHandle | undefined)?.page).find(Boolean);
-      return page ? { domain: page.domain, group: null, title: page.title, subtitle: page.subtitle } : null;
+      return page ? { domain: page.domain, group: null, title: page.title } : null;
     }
     const meta = SCREEN_BY_KEY[activeKey];
     let domainId: DomainId | undefined;
@@ -82,7 +82,6 @@ function useCrumbs(activeKey: string | null): Crumbs | null {
       domain: hit?.domain.crumb ?? (domainId ? DOMAINS[domainId].crumb : ''),
       group: hit ? (hit.isChild ? hit.group.name : null) : group,
       title: meta?.title ?? hit?.item.name ?? activeKey,
-      subtitle: meta?.subtitle ?? hit?.item.en ?? '',
     };
   }, [activeKey, matches, nav.data]);
 }
@@ -90,6 +89,8 @@ function useCrumbs(activeKey: string | null): Crumbs | null {
 export function AppShell() {
   const mode = useUiStore((s) => s.sidebarMode);
   const activeKey = useActiveScreenKey();
+  // v0.1.42: trang ngoài danh mục (social, guide, account, help) tô sáng mục thanh bên theo `navKey`.
+  const navKey = useActiveNavKey();
   const crumbs = useCrumbs(activeKey);
   const me = useMe();
   const { pathname } = useLocation();
@@ -127,10 +128,14 @@ export function AppShell() {
       <a className="skip-link" href="#main">
         Bỏ qua tới nội dung
       </a>
-      <Sidebar activeKey={activeKey} />
+      <Sidebar activeKey={navKey} />
       {drawerOpen ? <div className="sb-backdrop" aria-hidden onClick={() => setDrawerOpen(false)} /> : null}
       <main className="main" id="main" tabIndex={-1}>
-        <Header crumbs={crumbs} />
+        <Header
+          crumbs={crumbs}
+          advanced={!!activeKey && SCREEN_BY_KEY[activeKey]?.domain === 'tech'}
+          screenKey={activeKey}
+        />
         <div className="content">
           {/* B5: màn lỗi chỉ thay vùng nội dung — thanh bên/header vẫn dùng được; đổi trang là thử vẽ lại. */}
           <ErrorBoundary variant="inline" resetKey={pathname}>

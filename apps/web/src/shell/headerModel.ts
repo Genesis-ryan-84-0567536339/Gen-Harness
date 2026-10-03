@@ -1,16 +1,7 @@
-/** Level names from the design's autonomy scale (profile › autonomySteps). */
-export const AUTONOMY_LEVELS = [
-  'Chỉ ghi nhận',
-  'Tóm tắt',
-  'Chấm điểm + giải thích',
-  'Gợi ý hành động',
-  'Soạn sẵn chờ duyệt',
-  'Tự làm việc thấp rủi ro',
-  'Tự làm việc đã whitelist',
-];
+import { autonomyLabel } from '@gen-harness/contracts';
 
 export function autonomyTooltip(level: number): string {
-  const name = AUTONOMY_LEVELS[level];
+  const name = autonomyLabel(level);
   const lower = name ? name.charAt(0).toLocaleLowerCase('vi') + name.slice(1) : '';
   return `Mức tự trị hiện tại — mức ${level}${lower ? `: ${lower}` : ''} (thang 0–6)`;
 }
@@ -24,4 +15,25 @@ export function confidencePercent(v: number | null | undefined): number | null {
 /** "9+" khi quá 9 — huy hiệu giữ gọn trong nút 32px. */
 export function badgeText(n: number): string {
   return n > 9 ? '9+' : String(n);
+}
+
+/**
+ * Màn nghiệp vụ có bộ lọc trên URL (gọi `useUrlState`) — giữ nút "Góc nhìn đã lưu" ở header. Màn Nâng cao luôn có
+ * nút. Màn khác (vd Bảng cơ hội, Cài đặt) vẫn hiện nút khi Sếp đã lưu góc nhìn ở đó từ trước (`savedCount > 0`) để
+ * mở/xoá được.
+ */
+export const SAVED_VIEW_SCREENS: ReadonlySet<string> = new Set([
+  'inbox',
+  'workbench',
+  'tasks',
+  'directory',
+  'deals',
+  'documents',
+  'search',
+  'people',
+  'care',
+]);
+
+export function showSavedViews(key: string | null | undefined, advanced: boolean, savedCount = 0): boolean {
+  return advanced || (!!key && (SAVED_VIEW_SCREENS.has(key) || savedCount > 0));
 }

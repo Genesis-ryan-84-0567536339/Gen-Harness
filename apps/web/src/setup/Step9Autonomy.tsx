@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { AUTONOMY_LEVELS } from '@gen-harness/contracts';
 import { Icon, Segmented } from '@gen-harness/ui';
 import { api } from '../lib/api';
-import { AUTONOMY_LEVELS } from '../shell/headerModel';
 import { StepFrame } from './StepFrame';
 import { describeError, type StepProps } from './types';
 

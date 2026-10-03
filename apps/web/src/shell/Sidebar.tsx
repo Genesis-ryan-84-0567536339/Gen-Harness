@@ -1,13 +1,15 @@
-import { Fragment, type CSSProperties } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { type CSSProperties } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import type { NavDomain, NavItem } from '@gen-harness/contracts';
 import { ErrorState, Icon, Skeleton, Tooltip, toneColor, toneTint } from '@gen-harness/ui';
-import { useMe, useNavigation } from '../lib/queries';
+import { useQuery } from '@tanstack/react-query';
+import { api } from '../lib/api';
+import { useNavigation } from '../lib/queries';
 import { useUiStore } from '../lib/uiStore';
 import { useIsMobile } from '../lib/useMediaQuery';
 import { AccountFooter } from './AccountFooter';
 import { Logo } from './Logo';
-import { domainColor, groupAction, groupView, itemTitle } from './navModel';
+import { domainColor, domainOpen, groupAction, groupView, itemTitle, visibleChildren, visibleGroups } from './navModel';
 
 export function Sidebar({ activeKey }: { activeKey: string | null }) {
   const stored = useUiStore((s) => s.sidebarMode);
@@ -16,10 +18,15 @@ export function Sidebar({ activeKey }: { activeKey: string | null }) {
   const mode = mobile ? 'full' : stored;
   const wide = mode === 'full';
   const nav = useNavigation();
+  // v0.1.42 (F-67): phiên bản thật dưới logo — cùng khoá truy vấn với Trợ giúp (HelpPage).
+  const about = useQuery({ queryKey: ['system', 'about'], queryFn: ({ signal }) => api.about(signal), staleTime: 5 * 60_000, retry: false });
+  // Thứ tự như system_api/org.py: `version` (genh trước, rồi ảnh); bản phát triển ("dev") thì bỏ dòng phiên bản.
+  const img = about.data?.image_version;
+  const version = about.data ? about.data.version || (img && img !== 'dev' ? img : null) : null;
 
   return (
     <aside className="sb" id="app-sidebar" data-mode={mode} aria-label="Thanh bên">
-      <Logo wide={wide} />
+      <Logo wide={wide} version={version} />
       <div className="sb-rule" aria-hidden />
       <nav className="sb-nav" aria-label="Danh mục màn hình">
         {nav.isPending ? (
@@ -53,106 +60,68 @@ export function Sidebar({ activeKey }: { activeKey: string | null }) {
 
 function Domain({ dm, index, wide, activeKey }: { dm: NavDomain; index: number; wide: boolean; activeKey: string | null }) {
   const color = domainColor(dm.tone);
-  return (
-    <div className="sb-domain" role="group" aria-label={dm.label}>
-      {wide ? (
-        <div className="sb-domain__label">
-          <Icon name={dm.icon} size={12} color={color} />
-          <span className="sb-domain__name" style={{ color }}>
-            {dm.label}
-          </span>
-          <span className="sb-domain__rule" aria-hidden />
-          <span className="sb-domain__count">{dm.count} màn</span>
-        </div>
-      ) : index > 0 ? (
-        <div className="sb-rail-rule" aria-hidden />
-      ) : null}
-      {dm.groups.map((g) => (
-        <Fragment key={g.key ?? g.name}>
-          <Group g={g} wide={wide} activeKey={activeKey} />
-          {g.key === 'system' ? (
-            <>
-              <GuideNavItem wide={wide} />
-              <SocialNavItem wide={wide} />
-            </>
-          ) : null}
-        </Fragment>
-      ))}
-    </div>
-  );
-}
-
-/**
- * v0.1.30: lối vào cố định tới "Hướng dẫn thiết lập" (/guide) ngay dưới Điều khiển hệ thống — chỉ Owner (API
- * /setup/* chỉ cho Owner). Trước đây chỉ vào được qua Trợ giúp hoặc thẻ "Việc thiết lập tiếp" (có lúc ẩn).
- */
-function GuideNavItem({ wide }: { wide: boolean }) {
-  return (
-    <OwnerNavLink
-      wide={wide}
-      to="/guide"
-      screen="guide"
-      icon="ph ph-list-checks"
-      label="Hướng dẫn thiết lập"
-      title="Hướng dẫn thiết lập — các bước kết nối còn lại"
-    />
-  );
-}
-
-/**
- * v0.1.39 (F-32): lối vào cố định tới "Tài khoản mạng xã hội" (/social) ngay cạnh Hướng dẫn thiết lập — chỉ Owner.
- * Trước đây chỉ vào được qua menu tài khoản (AccountFooter, vẫn giữ nguyên).
- */
-function SocialNavItem({ wide }: { wide: boolean }) {
-  return (
-    <OwnerNavLink
-      wide={wide}
-      to="/social"
-      screen="social"
-      icon="ph ph-facebook-logo"
-      label="Mạng xã hội"
-      title="Tài khoản mạng xã hội — Facebook, đọc thông báo và tin nhắn"
-    />
-  );
-}
-
-function OwnerNavLink({
-  wide,
-  to,
-  screen,
-  icon,
-  label,
-  title,
-}: {
-  wide: boolean;
-  to: string;
-  screen: string;
-  icon: string;
-  label: string;
-  title: string;
-}) {
-  const me = useMe();
-  const { pathname } = useLocation();
-  if (me.data?.role?.code !== 'owner') return null;
-  const on = pathname === to || pathname.startsWith(`${to}/`);
-  const el = (
-    <Link
-      to={to}
-      className="sb-item"
-      data-on={on || undefined}
-      data-self={on || undefined}
-      aria-current={on ? 'page' : undefined}
-      aria-label={wide ? undefined : label}
-      title={wide ? title : undefined}
+  const override = useUiStore((s) => s.domainOpen[dm.domain]);
+  const setDomainOpen = useUiStore((s) => s.setDomainOpen);
+  const groups = visibleGroups(dm);
+  if (!groups.length) return null;
+  const collapsible = !!dm.collapsed;
+  const items = groups.map((g) => <Group key={g.key ?? g.name} g={g} wide={wide} activeKey={activeKey} level1={!collapsible} />);
+  if (!collapsible) {
+    return (
+      <div className="sb-domain" role="group" aria-label={dm.label}>
+        {wide ? (
+          <div className="sb-domain__label">
+            <Icon name={dm.icon} size={12} color={color} />
+            <span className="sb-domain__name" style={{ color }}>
+              {dm.label}
+            </span>
+            <span className="sb-domain__rule" aria-hidden />
+            <span className="sb-domain__count">{dm.count} màn</span>
+          </div>
+        ) : index > 0 ? (
+          <div className="sb-rail-rule" aria-hidden />
+        ) : null}
+        {items}
+      </div>
+    );
+  }
+  // v0.1.42: domain thu gọn (Nâng cao) — một nút đầu mục, mặc định đóng trừ khi màn đang mở thuộc domain này.
+  const open = domainOpen(dm, activeKey, override);
+  const listId = `sb-domain-${dm.domain}`;
+  const toggle = (
+    <button
+      type="button"
+      className="sb-item sb-domain-toggle"
+      data-level1
+      aria-expanded={open}
+      aria-controls={open ? listId : undefined}
+      aria-label={wide ? undefined : dm.label}
+      onClick={() => setDomainOpen(dm.domain, !open)}
     >
       <span className="sb-item__bar" aria-hidden />
-      <Icon name={icon} size={16} />
-      {wide ? <span className="sb-item__name">{label}</span> : null}
-    </Link>
+      <Icon name={dm.icon} size={16} color={color} />
+      {wide ? <span className="sb-item__name">{dm.label}</span> : null}
+      {wide ? <span className="sb-domain__count">{dm.count} màn</span> : null}
+      {wide ? <Icon className="sb-item__caret" name={open ? 'ph ph-caret-down' : 'ph ph-caret-right'} size={12} /> : null}
+    </button>
   );
   return (
-    <div className="sb-group" data-screen={screen}>
-      {wide ? el : <Tooltip content={label} placement="right" delay={150}>{el}</Tooltip>}
+    <div className="sb-domain sb-domain--collapsible" role="group" aria-label={dm.label} data-open={open || undefined}>
+      {!wide && index > 0 ? <div className="sb-rail-rule" aria-hidden /> : null}
+      <div className="sb-group" data-domain={dm.domain}>
+        {wide ? (
+          toggle
+        ) : (
+          <Tooltip content={dm.label} sub={open ? 'Bấm để thu gọn' : 'Bấm để mở'} placement="right" delay={150}>
+            {toggle}
+          </Tooltip>
+        )}
+      </div>
+      {open ? (
+        <div className="sb-domain__items" id={listId}>
+          {items}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -170,14 +139,14 @@ function Badge({ it }: { it: NavItem }) {
   );
 }
 
-function Group({ g, wide, activeKey }: { g: NavItem; wide: boolean; activeKey: string | null }) {
+function Group({ g, wide, activeKey, level1 }: { g: NavItem; wide: boolean; activeKey: string | null; level1: boolean }) {
   const navOpen = useUiStore((s) => s.navOpen);
   const setNavOpen = useUiStore((s) => s.setNavOpen);
   const navigate = useNavigate();
   const view = groupView(g, activeKey, navOpen, wide);
   const action = groupAction(g, activeKey, navOpen, wide);
   const isPureGroup = !g.key;
-  const kids = g.children ?? [];
+  const kids = visibleChildren(g);
 
   const inner = (
     <>
@@ -193,6 +162,7 @@ function Group({ g, wide, activeKey }: { g: NavItem; wide: boolean; activeKey: s
 
   const common = {
     className: 'sb-item',
+    'data-level1': level1 || undefined,
     'data-on': view.on || undefined,
     'data-self': view.self || undefined,
     title: wide ? (isPureGroup ? g.name : itemTitle(g)) : undefined,
@@ -263,7 +233,7 @@ function Group({ g, wide, activeKey }: { g: NavItem; wide: boolean; activeKey: s
 }
 
 function NavSkeleton({ wide }: { wide: boolean }) {
-  const rows = [6, 4];
+  const rows = [6, 1];
   return (
     <div aria-busy="true" aria-label="Đang tải danh mục">
       {rows.map((n, d) => (

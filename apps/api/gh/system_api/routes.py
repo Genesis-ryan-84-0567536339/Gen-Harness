@@ -1,4 +1,4 @@
-"""Điều khiển hệ thống › Kênh & đăng nhập; nhà cung cấp model, khoá; hồ sơ Antigravity CLI (docs/api/phase-2.md)."""
+"""Kết nối (kênh & đăng nhập); nhà cung cấp model, khoá; hồ sơ Antigravity CLI (docs/api/phase-2.md)."""
 
 import csv
 import io
@@ -800,7 +800,7 @@ async def failover_rules(user: service.CurrentUser = Depends(READ)) -> list[dict
 # 7 cột của ma trận thiết kế (`permCols`) → các quyền (`core.permissions`) thuộc cột đó. `data.*`/`system.*`/
 # `roles.manage` nằm NGOÀI ma trận thiết kế (rbac.py) nên không sửa được qua đây — chỉ Owner có, không cấu hình.
 PERMISSION_COLUMNS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
-    ("overview", "Tổng quan", ("overview.read",)),
+    ("overview", "Hôm nay", ("overview.read",)),
     ("queue", "Hàng đợi", ("queue.read", "queue.act")),
     ("profile", "Hồ sơ khách", ("profile.read", "profile.write")),
     ("people_review", "Đánh giá nhân sự", ("people_review.read", "people_review.write", "care.read")),

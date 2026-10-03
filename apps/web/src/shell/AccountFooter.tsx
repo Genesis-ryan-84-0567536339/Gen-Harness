@@ -82,8 +82,6 @@ export function AccountFooter({ wide }: { wide: boolean }) {
 function AccountMenu({ email, isOwner, onClose }: { email?: string; isOwner?: boolean; onClose: (refocus: boolean) => void }) {
   const mode = useUiStore((s) => s.sidebarMode);
   const toggleSidebar = useUiStore((s) => s.toggleSidebarMode);
-  const showEnglish = useUiStore((s) => s.showEnglish);
-  const setShowEnglish = useUiStore((s) => s.setShowEnglish);
   const navigate = useNavigate();
   const menu = useRef<HTMLDivElement>(null);
   const [busy, setBusy] = useState(false);
@@ -184,20 +182,6 @@ function AccountMenu({ email, isOwner, onClose }: { email?: string; isOwner?: bo
       >
         <Icon name="ph ph-sidebar-simple" size={15} />
         {mode === 'full' ? 'Thu gọn thanh bên' : 'Mở rộng thanh bên'}
-      </button>
-      <button
-        type="button"
-        role="menuitemcheckbox"
-        aria-checked={showEnglish}
-        className="sb-menu__item"
-        onClick={() => {
-          setShowEnglish(!showEnglish);
-          onClose(true);
-        }}
-      >
-        <Icon name="ph ph-translate" size={15} />
-        Phụ đề tiếng Anh
-        <span className="sb-menu__check">{showEnglish ? <Icon name="ph ph-check" size={13} /> : null}</span>
       </button>
       <div className="sb-menu__sep" role="separator" />
       <button type="button" role="menuitem" className="sb-menu__item" onClick={() => void logout()} disabled={busy}>

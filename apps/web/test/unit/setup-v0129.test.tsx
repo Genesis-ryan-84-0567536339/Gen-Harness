@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
@@ -20,6 +20,13 @@ function renderUi(ui: JSX.Element) {
     </QueryClientProvider>,
   );
 }
+
+/** `/auth/me` tối thiểu — NoModelBanner chỉ xem `role.code`. */
+const meAs = (code: string) => ({
+  id: 'u1', email: `${code}@genesis.local`, display_name: code, role: { code, name: code },
+  org: { id: 'o1', name: 'Genesis', timezone: 'Asia/Ho_Chi_Minh', currency: 'VND' },
+  addressing: { self: 'Anh', bot_calls_me: 'Sếp' }, pin_verified_until: null, permissions: {}, must_change_password: false,
+});
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -45,7 +52,14 @@ describe('Bước 4 để sau', () => {
 
   it('dải "Chưa có model" ở Tổng quan khi mục 4 chưa xong, nút mở /guide/4; có model thì ẩn', async () => {
     let done = false;
-    vi.stubGlobal('fetch', vi.fn(async () => json(200, [{ n: 4, key: 'brain', title: 'Bộ não AI', status: 'skipped', done }])));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) =>
+        String(input).includes('/auth/me')
+          ? json(200, meAs('owner'))
+          : json(200, [{ n: 4, key: 'brain', title: 'Bộ não AI', status: 'skipped', done }]),
+      ),
+    );
     const { unmount } = renderUi(<NoModelBanner />);
     const banner = await screen.findByTestId('no-model');
     expect(banner).toHaveTextContent('Chưa có model');
@@ -56,12 +70,26 @@ describe('Bước 4 để sau', () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(screen.queryByTestId('no-model')).toBeNull();
   });
+
+  it('v0.1.42 (F-26): vai trò không phải Owner → không gọi /setup/follow-up, không render gì', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) =>
+      String(input).includes('/auth/me')
+        ? json(200, meAs('operator'))
+        : json(200, [{ n: 4, key: 'brain', title: 'Bộ não AI', status: 'skipped', done: false }]),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const { container } = renderUi(<NoModelBanner />);
+    await waitFor(() => expect(fetchMock.mock.calls.some(([u]) => String(u).includes('/auth/me'))).toBe(true));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(fetchMock.mock.calls.some(([u]) => String(u).includes('/setup/follow-up'))).toBe(false);
+    expect(container).toBeEmptyDOMElement();
+  });
 });
 
 describe('v0.1.40 — bước 11 Sao lưu', () => {
   it('không còn hứa nơi lưu S3 (API chỉ nhận local); nhắc bản sao ra ổ USB/NAS', () => {
     const backup = SETUP_STEPS.find((s) => s.key === 'backup');
     expect(backup?.content).not.toMatch(/S3/);
-    expect(backup?.content).toContain('nơi lưu trên máy chủ (bản sao ra ổ USB/NAS chọn ở Dữ liệu & lưu trữ)');
+    expect(backup?.content).toContain('nơi lưu trên máy chủ (bản sao ra ổ USB/NAS chọn ở Cài đặt › Sao lưu & cập nhật)');
   });
 });

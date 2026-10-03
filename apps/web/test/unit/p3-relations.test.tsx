@@ -104,6 +104,8 @@ describe('Nhóm & Con người', () => {
     const user = userEvent.setup();
     renderScreen(<DirectoryScreen />);
 
+    // v0.1.42: tiêu đề màn trùng tên mục thanh bên / breadcrumb.
+    expect(screen.getByRole('heading', { level: 2, name: 'Khách & Nhóm' })).toBeInTheDocument();
     expect(await screen.findByText('Vận hành Genesis — Quý 4')).toBeInTheDocument();
     expect(screen.getByText('GRP-ZL-0114')).toBeInTheDocument();
     expect(screen.getByText('Trợ lý thương mại')).toBeInTheDocument();

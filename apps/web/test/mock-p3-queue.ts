@@ -173,20 +173,15 @@ interface KpiSeed {
   sublabel?: string;
   filters?: Record<string, string>;
 }
+/**
+ * v0.1.42 (F-64, hợp đồng gói menu-api): đúng 4 ô số row=1 theo thứ tự này; số kỹ thuật (kênh sống, nhóm lắng nghe,
+ * sự kiện/ngày, độ trễ) chuyển xuống `health.tech`; bỏ plugins_health, chassis_latency, active_profiles.
+ */
 const KPI_ROW1: KpiSeed[] = [
-  { key: 'channels_live', label: 'Kênh sống', value: 4, unit: null, screen: 'system' },
-  { key: 'groups_listening', label: 'Nhóm đang lắng nghe', value: 42, unit: null, screen: 'directory' },
-  { key: 'events_today', label: 'Sự kiện / ngày', value: 3184, unit: null, screen: 'raw' },
-  { key: 'plugins_health', label: 'Plugin lành mạnh', value: 9, unit: null, screen: 'plugins', sublabel: 'suy giảm 2 · cách ly 0' },
-  { key: 'processing_latency', label: 'Độ trễ xử lý', value: 1.2, unit: 'giây', screen: 'rules' },
-  { key: 'pending_ratio', label: 'Tỉ lệ chờ duyệt', value: 42.9, unit: '%', screen: 'workbench', filters: { status: 'pending' } },
-];
-const KPI_ROW2: KpiSeed[] = [
+  { key: 'opportunity_claim_rate', label: 'Tỉ lệ cơ hội được nhận', value: 71.4, unit: '%', screen: 'opportunity', filters: { owner: 'none' } },
   { key: 'time_to_contact', label: 'Tín hiệu → tiếp cận (trung vị)', value: 18.4, unit: 'phút', screen: 'opportunity' },
   { key: 'quotations_sent', label: 'Báo giá đã gửi (30 ngày)', value: 24, unit: null, screen: 'workbench', filters: { kind: 'quotation' } },
-  { key: 'opportunity_claim_rate', label: 'Tỉ lệ cơ hội được nhận', value: 71.4, unit: '%', screen: 'opportunity', filters: { owner: 'none' } },
-  { key: 'chassis_latency', label: 'Độ trễ xử lý của hệ thống', value: 1.2, unit: 'giây', screen: 'rules' },
-  { key: 'active_profiles', label: 'Hồ sơ hoạt động (30 ngày)', value: 214, unit: null, screen: 'directory' },
+  { key: 'pending_ratio', label: 'Tỉ lệ chờ duyệt', value: 42.9, unit: '%', screen: 'workbench', filters: { status: 'pending' } },
 ];
 
 function overviewPayload(items: InboxRow[], silenced: Set<string>, tasks: Task[]): Overview {
@@ -216,11 +211,6 @@ function overviewPayload(items: InboxRow[], silenced: Set<string>, tasks: Task[]
         sublabel: k.sublabel ?? null, pct: null,
         filter: { screen: k.screen, filters: k.filters ?? {} },
       })),
-      ...KPI_ROW2.map((k) => ({
-        key: k.key, label: k.label, value: k.value, unit: k.unit, row: 2 as const, status: 'ok' as const,
-        sublabel: k.sublabel ?? null, pct: null,
-        filter: { screen: k.screen, filters: k.filters ?? {} },
-      })),
     ],
     queue,
     spotlight: [
@@ -242,8 +232,8 @@ function overviewPayload(items: InboxRow[], silenced: Set<string>, tasks: Task[]
         { type: 'zalo', active: 1 },
         { type: 'whatsapp', active: 0 },
       ],
-      plugins: { healthy: 9, degraded: 2, isolated: 0 },
       backlog_pending: 3,
+      tech: { channels_live: 4, groups_listening: 42, events_today: 3184, processing_latency_s: 1.2 },
     },
     dataQuality: { missing_identity_pct: 12, low_confidence_score_pct: 9, unassigned_event_pct: 4 },
     hourly: Array.from({ length: 24 }, (_, h) => ({

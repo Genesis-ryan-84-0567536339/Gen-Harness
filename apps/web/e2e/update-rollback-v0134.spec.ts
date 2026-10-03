@@ -56,12 +56,12 @@ test.describe('v0.1.34 — cập nhật lỗi tự quay về bản cũ', () => {
       if (method === 'GET') return route.fulfill({ json: state });
       return route.fallback();
     });
-    await page.goto('/help');
+    await page.goto('/system?tab=storage'); // v0.1.42 (F-61): thẻ cập nhật chỉ ở Cài đặt › Sao lưu & cập nhật
     await expect(page.getByText('Cập nhật lên v0.1.34 chưa thành công')).toBeVisible();
     await expect(page.getByText('Hệ thống đã tự quay về bản đang dùng — dữ liệu giữ nguyên')).toBeVisible();
     await expect(page.getByText(/lịch đêm sẽ không tự cài lại bản này/)).toBeVisible();
     // Nguyên văn genh (mã lỗi, bản sao lưu) nằm trong "Chi tiết kỹ thuật".
-    await page.getByText('Chi tiết kỹ thuật').click();
+    await page.getByRole('region', { name: 'Cập nhật phần mềm' }).getByText('Chi tiết kỹ thuật').click();
     await expect(page.getByText(/GH-E945/)).toBeVisible();
     await expect(page.getByText(/backups\/20260930T030000Z-ab12cd34/)).toBeVisible();
     // Không màn hình lỗi chung, không render đối tượng thô.
@@ -77,12 +77,12 @@ test.describe('v0.1.34 — cập nhật lỗi tự quay về bản cũ', () => {
     await page.route('**/api/v1/system/update', (route) =>
       route.request().method() === 'GET' ? route.fulfill({ json: disk }) : route.fallback(),
     );
-    await page.goto('/help');
+    await page.goto('/system?tab=storage'); // v0.1.42 (F-61): thẻ cập nhật chỉ ở Cài đặt › Sao lưu & cập nhật
     await expect(page.getByText('Cập nhật lên v0.1.34 chưa thành công')).toBeVisible();
     await expect(page.getByText('Ổ đĩa máy chủ sắp đầy — chưa đụng gì, bản đang dùng vẫn chạy bình thường')).toBeVisible();
     await expect(page.getByText(/Cần giải phóng ổ đĩa trên máy chủ/)).toBeVisible();
     await expect(page.getByText(/quay về bản đang dùng/)).toHaveCount(0);
-    await page.getByText('Chi tiết kỹ thuật').click();
+    await page.getByRole('region', { name: 'Cập nhật phần mềm' }).getByText('Chi tiết kỹ thuật').click();
     await expect(page.getByText(/còn 1\.2 GB trống/)).toBeVisible();
     await expect(page.getByText(/GH-E948/)).toBeVisible();
     await expect(page.getByText('[object Object]')).toHaveCount(0);
@@ -93,7 +93,7 @@ test.describe('v0.1.34 — cập nhật lỗi tự quay về bản cũ', () => {
     await page.route('**/api/v1/system/update', (route) =>
       route.request().method() === 'GET' ? route.fulfill({ json: noWatcher }) : route.fallback(),
     );
-    await page.goto('/help');
+    await page.goto('/system?tab=storage'); // v0.1.42 (F-61): thẻ cập nhật chỉ ở Cài đặt › Sao lưu & cập nhật
     await expect(page.getByText('Cập nhật lên v0.1.34 chưa thành công')).toBeVisible();
     await expect(page.getByText(/chạy lệnh bên dưới trên máy chủ/)).toBeVisible();
     await expect(page.getByText(/bấm Thử lại/)).toHaveCount(0);
@@ -109,7 +109,7 @@ test.describe('v0.1.34 — cập nhật lỗi tự quay về bản cũ', () => {
     await page.route('**/api/v1/system/update', (route) =>
       route.request().method() === 'GET' ? route.fulfill({ json: failed }) : route.fallback(),
     );
-    await page.goto('/help');
+    await page.goto('/system?tab=storage'); // v0.1.42 (F-61): thẻ cập nhật chỉ ở Cài đặt › Sao lưu & cập nhật
     await expect(page.getByText('Cần xử lý tay — tự quay về bản cũ chưa trọn')).toBeVisible();
     await expect(page.getByText(/bản sao lưu cần khôi phục/)).toHaveCount(0);
     await expect(page.getByText(/dữ liệu giữ nguyên/)).toHaveCount(0);
@@ -123,7 +123,7 @@ test.describe('v0.1.34 — cập nhật lỗi tự quay về bản cũ', () => {
     await page.route('**/api/v1/system/update', (route) =>
       route.request().method() === 'GET' ? route.fulfill({ json: old }) : route.fallback(),
     );
-    await page.goto('/help');
+    await page.goto('/system?tab=storage'); // v0.1.42 (F-61): thẻ cập nhật chỉ ở Cài đặt › Sao lưu & cập nhật
     await expect(page.getByText('Có bản mới v0.1.34')).toBeVisible();
     await expect(page.getByText(/lịch đêm không tự cài lại — bấm Cập nhật ngay để thử lại/)).toBeVisible();
     await expect(page.getByText(/Tự cài đêm/)).toHaveCount(0);
@@ -134,7 +134,7 @@ test.describe('v0.1.34 — cập nhật lỗi tự quay về bản cũ', () => {
     await page.route('**/api/v1/system/update', (route) =>
       route.request().method() === 'GET' ? route.fulfill({ json: old }) : route.fallback(),
     );
-    await page.goto('/help');
+    await page.goto('/system?tab=storage'); // v0.1.42 (F-61): thẻ cập nhật chỉ ở Cài đặt › Sao lưu & cập nhật
     await expect(page.getByText('Có bản mới v0.1.34')).toBeVisible();
     await expect(page.getByText(/chưa thành công/)).toHaveCount(0);
     await expect(page.getByRole('button', { name: /Cập nhật ngay/ })).toBeVisible();

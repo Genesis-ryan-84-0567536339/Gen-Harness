@@ -2148,7 +2148,7 @@
     {
       "name": "Telegram",
       "state": "Chưa cài",
-      "meta": "Plugin @gen/channel-telegram có trong chợ tiện ích, chưa cài đặt",
+      "meta": "Kênh này chưa có trong bản đang chạy",
       "btn": "Cài plugin",
       "needsQr": false,
       "stats": [

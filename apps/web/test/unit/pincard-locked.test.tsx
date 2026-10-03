@@ -2,23 +2,33 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { PinCard } from '../../src/screens/system/PinCard';
+import { MemoryRouter } from 'react-router-dom';
+import { AccountPage } from '../../src/account/AccountPage';
 import { qk } from '../../src/lib/queries';
 
-/** v0.1.35: «Đổi mã PIN» khi PIN đang bị khoá — nói rõ bị khoá + giờ địa phương, không hiện ISO UTC thô. */
+/**
+ * v0.1.35: «Đổi mã PIN» khi PIN đang bị khoá — nói rõ bị khoá + giờ địa phương, không hiện ISO UTC thô.
+ * v0.1.42 (F-61): thẻ mã PIN chỉ còn ở Tài khoản của tôi (AccountPage) — kiểm trên đúng chỗ đó.
+ */
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('<PinCard> khi PIN bị khoá', () => {
-  it('PUT /auth/pin → 423 PIN_LOCKED: hiện title + giờ theo múi giờ tổ chức', async () => {
+const ACCOUNT = {
+  display_name: 'Owner', email: 'owner@genesis.local', role: { code: 'owner', name: 'Owner' },
+  created_at: '2026-05-04T02:15:00Z', must_change_password: false, has_pin: true, sessions: [],
+};
+
+describe('<PinCard> (Tài khoản của tôi) khi PIN bị khoá', () => {
+  it('POST /account/pin → 423 PIN_LOCKED: hiện title + giờ theo múi giờ tổ chức', async () => {
     const user = userEvent.setup();
     vi.stubGlobal('WebSocket', undefined);
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        if (String(input).endsWith('/auth/pin') && init?.method === 'PUT') {
+        const url = String(input);
+        if (url.endsWith('/account/pin') && init?.method === 'POST') {
           return new Response(
             JSON.stringify({
               type: 'https://gen-harness.local/errors/pin_locked',
@@ -31,6 +41,7 @@ describe('<PinCard> khi PIN bị khoá', () => {
             { status: 423, headers: { 'Content-Type': 'application/problem+json' } },
           );
         }
+        if (url.endsWith('/account')) return new Response(JSON.stringify(ACCOUNT), { status: 200, headers: { 'Content-Type': 'application/json' } });
         return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
       }),
     );
@@ -42,23 +53,22 @@ describe('<PinCard> khi PIN bị khoá', () => {
     });
     render(
       <QueryClientProvider client={qc}>
-        <PinCard />
+        <MemoryRouter>
+          <AccountPage />
+        </MemoryRouter>
       </QueryClientProvider>,
     );
-    await user.click(screen.getByRole('button', { name: /Đổi mã PIN/ }));
-    const dlg = await screen.findByRole('dialog', { name: /Đổi mã PIN/ });
-    const d = within(dlg);
-    await user.click(d.getByLabelText('PIN hiện tại — chữ số 1/6'));
-    await user.keyboard('111111');
-    await user.click(d.getByLabelText('PIN mới — chữ số 1/6'));
+    const form = await screen.findByRole('form', { name: 'Đổi mã PIN' });
+    const f = within(form);
+    await user.type(f.getByLabelText('Mật khẩu hiện tại'), 'mat-khau-dang-nhap');
+    await user.click(f.getByLabelText('Mã PIN mới — chữ số 1/6'));
     await user.keyboard('246810');
-    await user.click(d.getByLabelText('Nhập lại PIN mới — chữ số 1/6'));
+    await user.click(f.getByLabelText('Nhập lại mã PIN mới — chữ số 1/6'));
     await user.keyboard('246810');
-    await waitFor(() => expect(d.getByRole('button', { name: /Lưu mã mới/ })).toBeEnabled());
-    await user.click(d.getByRole('button', { name: /Lưu mã mới/ }));
+    await user.click(f.getByRole('button', { name: /Đổi mã PIN/ }));
     await waitFor(() =>
-      expect(d.getByText('Mã PIN đang bị khoá do nhập sai nhiều lần. Thử lại sau 02/10 15:15:00.')).toBeInTheDocument(),
+      expect(f.getByText('Mã PIN đang bị khoá do nhập sai nhiều lần. Thử lại sau 02/10 15:15:00.')).toBeInTheDocument(),
     );
-    expect(dlg.textContent).not.toContain('2026-10-02T08:15');
+    expect(form.textContent).not.toContain('2026-10-02T08:15');
   });
 });

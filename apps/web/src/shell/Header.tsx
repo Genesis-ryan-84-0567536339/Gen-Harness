@@ -3,8 +3,9 @@ import { Icon, IconButton, Pill, Skeleton, Tooltip } from '@gen-harness/ui';
 import { useNavigate } from 'react-router-dom';
 import { useHeaderStatus } from '../lib/queries';
 import { SavedViewsButton } from '../screens/core/SavedViews';
+import { useViews } from '../screens/core/queries';
 import { useUiStore } from '../lib/uiStore';
-import { autonomyTooltip, confidencePercent } from './headerModel';
+import { autonomyTooltip, confidencePercent, showSavedViews } from './headerModel';
 import { GenToggle } from '../gen/GenToggle';
 import { NotificationBell } from './NotificationBell';
 import { ThemeToggle } from './ThemeToggle';
@@ -15,17 +16,31 @@ export interface Crumbs {
   /** Parent group name when the screen is a child. */
   group: string | null;
   title: string;
-  /** English subtitle (TITLES[1]). */
-  subtitle: string;
 }
 
-export function Header({ crumbs }: { crumbs: Crumbs | null }) {
-  const showEnglish = useUiStore((s) => s.showEnglish);
+/**
+ * v0.1.42 (F-67): viên "tự trị" và khiên độ tin cậy chỉ hiện khi màn đang mở thuộc Nâng cao (`advanced`); nút "Góc
+ * nhìn đã lưu" hiện ở Nâng cao, ở các màn nghiệp vụ có bộ lọc (SAVED_VIEW_SCREENS) và ở màn đã có góc nhìn lưu từ
+ * trước; viên "N kênh · M nhóm" luôn
+ * hiện. F-63: bỏ dòng phụ đề tiếng Anh.
+ */
+export function Header({
+  crumbs,
+  advanced = false,
+  screenKey = null,
+}: {
+  crumbs: Crumbs | null;
+  advanced?: boolean;
+  screenKey?: string | null;
+}) {
   const status = useHeaderStatus();
   const navigate = useNavigate();
   const drawerOpen = useUiStore((s) => s.drawerOpen);
   const setDrawerOpen = useUiStore((s) => s.setDrawerOpen);
-  const hasSub = !!crumbs && showEnglish && !crumbs.group && !!crumbs.subtitle;
+  // Màn ngoài danh sách: chỉ hỏi GET /views?screen= để giữ đường mở/xoá góc nhìn đã lưu từ trước.
+  const listed = showSavedViews(screenKey, advanced);
+  const legacyViews = useViews(screenKey ?? undefined, !!screenKey && !listed);
+  const savedCount = legacyViews.data?.length ?? 0;
 
   return (
     <header className="hd">
@@ -52,7 +67,6 @@ export function Header({ crumbs }: { crumbs: Crumbs | null }) {
             <Icon className="hd-caret" name="ph ph-caret-right" size={11} />
             <div className="hd-titles">
               <h1 className="hd-title">{crumbs.title}</h1>
-              {hasSub ? <div className="hd-sub">{crumbs.subtitle}</div> : null}
             </div>
           </>
         ) : null}
@@ -63,8 +77,12 @@ export function Header({ crumbs }: { crumbs: Crumbs | null }) {
           {status.isPending ? (
             <>
               <Skeleton width={118} height={28} radius={999} />
-              <Skeleton width={78} height={28} radius={999} />
-              <Skeleton width={62} height={28} radius={999} />
+              {advanced ? (
+                <>
+                  <Skeleton width={78} height={28} radius={999} />
+                  <Skeleton width={62} height={28} radius={999} />
+                </>
+              ) : null}
             </>
           ) : status.isError ? (
             <Tooltip content="Không tải được trạng thái — bấm để thử lại">
@@ -75,10 +93,10 @@ export function Header({ crumbs }: { crumbs: Crumbs | null }) {
               </button>
             </Tooltip>
           ) : (
-            <StatusPills s={status.data} />
+            <StatusPills s={status.data} advanced={advanced} />
           )}
         </div>
-        <SavedViewsButton />
+        {listed || showSavedViews(screenKey, advanced, savedCount) ? <SavedViewsButton /> : null}
         <GenToggle />
         <NotificationBell />
         <ThemeToggle />
@@ -88,17 +106,21 @@ export function Header({ crumbs }: { crumbs: Crumbs | null }) {
   );
 }
 
-function StatusPills({ s }: { s: HeaderStatus }) {
+function StatusPills({ s, advanced }: { s: HeaderStatus; advanced: boolean }) {
   const pct = confidencePercent(s.data_confidence);
+  const live = (
+    <Tooltip content={`${s.channels_live} kênh đang sống, ${s.groups_listening} nhóm đang lắng nghe`}>
+      <div tabIndex={0} className="hd-pill-focus">
+        <Pill live={s.channels_live > 0}>
+          {s.channels_live} kênh · {s.groups_listening} nhóm
+        </Pill>
+      </div>
+    </Tooltip>
+  );
+  if (!advanced) return live;
   return (
     <>
-      <Tooltip content={`${s.channels_live} kênh đang sống, ${s.groups_listening} nhóm đang lắng nghe`}>
-        <div tabIndex={0} className="hd-pill-focus">
-          <Pill live={s.channels_live > 0}>
-            {s.channels_live} kênh · {s.groups_listening} nhóm
-          </Pill>
-        </div>
-      </Tooltip>
+      {live}
       <Tooltip content={autonomyTooltip(s.autonomy_level)}>
         <div tabIndex={0} className="hd-pill-focus">
           <Pill icon="ph ph-sliders" iconColor="var(--color-accent-300)" mono>

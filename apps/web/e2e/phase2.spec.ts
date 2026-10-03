@@ -7,7 +7,7 @@ import { AUDITOR, OWNER, SETUP_TOKEN, apiCall, loginAs, loginAsOwner, mockHook, 
 
 /**
  * Phase 2 against the mock (`npm run dev:mock`, simulation off):
- * the data screens and System › Kênh & đăng nhập next to the design at 1440
+ * the data screens and System (v0.1.42: Cài đặt — smoke only) next to the design at 1440
  * and 1280, then the behaviours — live raw rows over /api/v1/ws, rules, PIN on
  * 423, risk warning before the QR, CLI URL + code login, read-only auditor,
  * and setup steps 4–7 and 12.
@@ -51,16 +51,22 @@ test.beforeAll(() => mkdirSync(outDir, { recursive: true }));
 
 interface VisualCase {
   key: string;
+  /** Nhãn bấm trong file THIẾT KẾ (thanh bên của thiết kế gốc — không phải của app). */
   clicks: string[];
   /** App element whose bottom edge ends the compared region (pipeline strip + title + first row of content). */
   until: string;
+  /**
+   * v0.1.42 (F-7): Cài đặt (/system) đã khác thiết kế gốc (5 tab theo quyền, liên kết đầu màn) — chỉ kiểm khói (vẽ
+   * được, không tràn ngang), vẫn chụp ảnh lưu test-results để xem lại. Màn dữ liệu giữ so pixel.
+   */
+  pixel: boolean;
 }
 const CASES: VisualCase[] = [
-  { key: 'raw', clicks: ['Tầng dữ liệu', 'Kho dữ liệu thô'], until: '.screen-desc' },
-  { key: 'rules', clicks: ['Tầng dữ liệu', 'Quy tắc sàng lọc'], until: '.rule-card >> nth=0' },
-  { key: 'clean', clicks: ['Tầng dữ liệu', 'Kho sạch SSOT'], until: '.screen-desc' },
-  { key: 'identity', clicks: ['Tầng dữ liệu', 'Hợp nhất danh tính'], until: '.id-stats' },
-  { key: 'system', clicks: ['Điều khiển hệ thống'], until: '[role="tablist"]' },
+  { key: 'raw', clicks: ['Tầng dữ liệu', 'Kho dữ liệu thô'], until: '.screen-desc', pixel: true },
+  { key: 'rules', clicks: ['Tầng dữ liệu', 'Quy tắc sàng lọc'], until: '.rule-card >> nth=0', pixel: true },
+  { key: 'clean', clicks: ['Tầng dữ liệu', 'Kho sạch SSOT'], until: '.screen-desc', pixel: true },
+  { key: 'identity', clicks: ['Tầng dữ liệu', 'Hợp nhất danh tính'], until: '.id-stats', pixel: true },
+  { key: 'system', clicks: ['Điều khiển hệ thống'], until: '[role="tablist"]', pixel: false },
 ];
 
 function crop(png: PNG, x: number, y: number, w: number, h: number): PNG {
@@ -79,7 +85,7 @@ for (const vp of [
   { width: 1280, height: 800 },
 ]) {
   for (const c of CASES) {
-    test(`${c.key} matches the design · ${vp.width}`, async ({ browser, baseURL }) => {
+    test(`${c.key} ${c.pixel ? 'matches the design' : 'renders (smoke)'} · ${vp.width}`, async ({ browser, baseURL }) => {
       const context = await browser.newContext({ viewport: vp, deviceScaleFactor: 1, baseURL });
       const designPage = await context.newPage();
       await openDesign(designPage, { clicks: c.clicks });
@@ -112,7 +118,7 @@ for (const vp of [
       const report = { region: [x, y, w, h], pixelmatch: n, shiftTolerant: tolerant, ratio };
       writeFileSync(join(outDir, `report-${c.key}-${vp.width}.json`), JSON.stringify(report, null, 2));
       console.log(`visual ${c.key}-${vp.width}: ${JSON.stringify(report)}`);
-      expect.soft(ratio, `${c.key} @${vp.width}: ${tolerant} px differ`).toBeLessThanOrEqual(MAX_DIFF_RATIO);
+      if (c.pixel) expect.soft(ratio, `${c.key} @${vp.width}: ${tolerant} px differ`).toBeLessThanOrEqual(MAX_DIFF_RATIO);
       await context.close();
     });
   }
@@ -188,7 +194,8 @@ test.describe('data screens', () => {
   });
 });
 
-test.describe('system › Kênh & đăng nhập', () => {
+// v0.1.42 (F-7): kênh, đăng nhập CLI ở Kết nối (/connections); mã PIN ở Tài khoản của tôi.
+test.describe('Kết nối › kênh & đăng nhập', () => {
   test.beforeEach(async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await resetMock(page.request, 'finished');
@@ -196,7 +203,7 @@ test.describe('system › Kênh & đăng nhập', () => {
   });
 
   test('risk warning comes before the QR; scan → Đang kết nối', async ({ page }) => {
-    await page.goto('/system');
+    await page.goto('/connections');
     const wa = page.getByRole('article', { name: 'Kênh WhatsApp' });
     await expect(wa).toContainText('Phiên hết hạn');
     await wa.getByRole('button', { name: /Quét lại QR/ }).click();
@@ -221,7 +228,7 @@ test.describe('system › Kênh & đăng nhập', () => {
 
   test('bridge offline: login shows a clear error in the card', async ({ page }) => {
     await mockHook(page.request, 'bridge', { online: false });
-    await page.goto('/system');
+    await page.goto('/connections');
     // A fresh PIN session so only the 503 is in play.
     await apiCall(page, 'POST', '/auth/pin/verify', { pin: OWNER.pin });
     const wa = page.getByRole('article', { name: 'Kênh WhatsApp' });
@@ -233,7 +240,7 @@ test.describe('system › Kênh & đăng nhập', () => {
   });
 
   test('groups dialog edits listen mode; 1-1 listening is PIN-gated', async ({ page }) => {
-    await page.goto('/system');
+    await page.goto('/connections');
     const zalo = page.getByRole('article', { name: 'Kênh Zalo' });
     await zalo.getByRole('button', { name: /38 nhóm lắng nghe/ }).click();
     const dlg = page.getByRole('dialog', { name: 'Nhóm Zalo' });
@@ -248,7 +255,7 @@ test.describe('system › Kênh & đăng nhập', () => {
   });
 
   test('CLI login: open the URL, paste the code, done', async ({ page }) => {
-    await page.goto('/system');
+    await page.goto('/connections');
     const cli = page.getByRole('region', { name: 'Tài khoản Antigravity CLI' });
     await expect(cli).toContainText('ryan.genesis@gmail.com');
     await cli.getByRole('button', { name: /Đổi tài khoản/ }).click();
@@ -265,7 +272,7 @@ test.describe('system › Kênh & đăng nhập', () => {
   });
 
   test('CLI switch account: PIN, then the chosen Google account is in use (v0.1.30)', async ({ page }) => {
-    await page.goto('/system');
+    await page.goto('/connections');
     const cli = page.getByRole('region', { name: 'Tài khoản Antigravity CLI' });
     await expect(cli.getByTestId('cli-current')).toContainText('ryan.genesis@gmail.com');
     await cli.getByRole('button', { name: /Đổi tài khoản/ }).click();
@@ -281,11 +288,15 @@ test.describe('system › Kênh & đăng nhập', () => {
     await expect(cli.getByTestId('cli-current')).toContainText('ops.genesis@gmail.com');
   });
 
-  test('change PIN rejects a wrong current PIN', async ({ page }) => {
-    await page.goto('/system');
-    await page.getByRole('button', { name: /Đổi mã PIN/ }).click();
-    const dlg = page.getByRole('dialog', { name: /Đổi mã PIN/ });
-    await expect(dlg).toBeVisible();
+  test('mã PIN chỉ ở Tài khoản của tôi: form Đổi mã PIN + Lịch sử nhập PIN', async ({ page }) => {
+    await page.goto('/account');
+    const form = page.getByRole('form', { name: 'Đổi mã PIN' });
+    await expect(form).toBeVisible();
+    await form.getByRole('button', { name: /Lịch sử nhập PIN/ }).click();
+    await expect(page.getByRole('dialog', { name: /Lịch sử nhập PIN/ })).toBeVisible();
+    await page.goto('/connections');
+    await expect(page.getByRole('article', { name: 'Kênh Zalo' })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Đổi mã PIN/ })).toHaveCount(0);
   });
 });
 
@@ -302,7 +313,7 @@ test('auditor is read-only', async ({ page }) => {
   await expect(page.getByRole('button', { name: /^Gộp/ })).toHaveCount(0);
   await page.goto('/raw');
   await expect(page.getByRole('button', { name: /Xuất tập thô/ })).toHaveCount(0);
-  await page.goto('/system');
+  await page.goto('/connections');
   await expect(page.getByRole('article', { name: 'Kênh Zalo' })).toBeVisible();
   await expect(page.getByRole('button', { name: /Đăng xuất/ })).toHaveCount(0);
   await expect(page.getByRole('button', { name: /Quét lại QR/ })).toHaveCount(0);
@@ -393,7 +404,7 @@ test('setup steps 4–7 and 12 against the mock', async ({ page }) => {
   await expect(page.getByText(/Còn bước bắt buộc chưa xong/)).toHaveCount(0);
   await expect(page.getByText('Lần sàng lọc đầu tiên đã xong.')).toBeVisible({ timeout: 15_000 });
   await page.screenshot({ path: join(outDir, 'setup-step12-1440.png'), fullPage: true });
-  await page.getByRole('button', { name: /Mở Tổng quan điều hành/ }).click();
+  await page.getByRole('button', { name: /Vào Console/ }).click();
   await expect(page).toHaveURL(/\/overview/);
   const state = await apiCall(page, 'GET', '/setup/state');
   expect(state.finished).toBe(true);

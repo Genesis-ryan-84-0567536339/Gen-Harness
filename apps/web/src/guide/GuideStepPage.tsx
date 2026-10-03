@@ -52,7 +52,7 @@ export function GuideStepPage() {
   if (!Step || !guide) return <Navigate to="/guide" replace />;
 
   // Bước 4 (chọn model) mở từ dải "Chưa có model" ở Tổng quan — quay về đó.
-  const home = n === 4 ? { to: '/overview', label: 'Tổng quan điều hành' } : { to: '/guide', label: 'Hướng dẫn thiết lập' };
+  const home = n === 4 ? { to: '/overview', label: 'Hôm nay' } : { to: '/guide', label: 'Hướng dẫn thiết lập' };
   const back = () => navigate(home.to);
   const meta = mergeSteps(state.data).find((s) => s.n === n)!;
 

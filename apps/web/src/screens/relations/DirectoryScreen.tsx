@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { SCREEN_BY_KEY } from '@gen-harness/contracts';
 import type { AgentRef, DirGroup, DirHeatBand, DirPerson, DirPriority, DirRelation, DirValueBand } from '@gen-harness/contracts';
 import { Bar, CardError, InlineError, ScreenHead, SkeletonLines } from '../common';
 import { Button, Dialog, EmptyState, Icon, Tabs, type FilterOption, type TabItem } from '@gen-harness/ui';
@@ -97,7 +98,7 @@ export function DirectoryScreen() {
   return (
     <div className="screen">
       <ScreenHead
-        title="Nhóm & Con người"
+        title={SCREEN_BY_KEY.directory.title}
         description="Danh sách nhóm tách theo từng kênh, và danh sách con người lọc được theo mức liên quan với Sếp, độ nhiệt, giá trị và mức ưu tiên — từ đó gán agent trực tương ứng."
         maxWidth={760}
         actions={<Tabs items={items} value={tab} onChange={setTab} label="Tab nhóm & con người" idPrefix="dir-tab" />}

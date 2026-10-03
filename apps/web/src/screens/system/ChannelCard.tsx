@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
 import { ApiError, type Channel, type ChannelGroup, type ListenMode, type ViewScope } from '@gen-harness/contracts';
 import { Button, Dialog, EmptyState, Icon, Switch, TextField } from '@gen-harness/ui';
@@ -11,7 +10,9 @@ import { queryClient } from '../../lib/queryClient';
 import { toast } from '../../lib/toast';
 import { useNow } from '../../lib/useNow';
 import { errorText } from '../../lib/errorText';
-import { Bar, CardError, InlineError, SkeletonLines, StateChip } from '../common';
+import { Bar, CardError, InlineError, SkeletonLines } from '../common';
+import { ConnectionStatusPill } from '../connections/ConnectionStatusPill';
+import { channelConnStatus } from '../connections/connectionsModel';
 import {
   LISTEN_MODES,
   VIEW_SCOPES,
@@ -80,12 +81,13 @@ export function ChannelCard({ channel: c, canManage, large }: { channel: Channel
   const showQr = isQrChannel(c) && (!!c.qr || awaitingQr);
 
   let button = null;
-  if (act.action === 'install') {
+  if (act.action === 'unavailable') {
+    // v0.1.42 (F-41): Plugin đóng băng — không còn dẫn tới /plugins; kênh này chưa có trong bản đang chạy.
     button = (
-      <Link to="/plugins" className="gh-btn gh-btn--secondary ch-btn">
-        <Icon name={act.icon} size={14} />
+      <span className="ch-note" data-main-action>
+        <Icon name={act.icon} size={13} />
         {act.label}
-      </Link>
+      </span>
     );
   } else if (act.action && canManage) {
     const onClick =
@@ -96,6 +98,7 @@ export function ChannelCard({ channel: c, canManage, large }: { channel: Channel
           : () => setRiskOpen(true);
     button = (
       <Button
+        data-main-action
         variant={act.accent ? 'primary' : 'secondary'}
         className="ch-btn"
         icon={act.icon}
@@ -116,11 +119,14 @@ export function ChannelCard({ channel: c, canManage, large }: { channel: Channel
         <div style={{ flex: 1, minWidth: 0 }}>
           <div className="ch-titleline">
             <span className="ch-name">{c.name}</span>
-            <StateChip color={st.tone} border={st.border} size="md" dot>
-              {st.label}
-            </StateChip>
+            {/* v0.1.42 (F-7): một kiểu viên trạng thái cho mọi thẻ Kết nối; chữ chi tiết chuyển xuống dòng meta. */}
+            <ConnectionStatusPill status={channelConnStatus(c)} />
           </div>
           <div className="ch-meta">
+            <span className="ch-meta__state" style={{ color: st.tone }}>
+              {st.label}
+            </span>
+            {meta.before || meta.groups ? ' · ' : null}
             {meta.before}
             {meta.groups ? (
               // A span (not <button>) so the text wraps inside the sentence exactly like the design.

@@ -11,8 +11,8 @@ import { useGenStore, type GenChatMessage } from './genStore';
 const EXAMPLES = ['Hôm nay có gì cần tôi xử lý?', 'Nhắc tôi gọi lại khách lúc 3 giờ chiều', 'Chỉ tôi cách thêm khoá Jev'];
 
 const TOOL_LABEL: Record<string, string> = {
-  'overview.summary': 'Tổng quan',
-  'queue.list': 'Hộp thư ý nghĩa',
+  'overview.summary': 'Hôm nay',
+  'queue.list': 'Hộp thư',
   'draft.list': 'bản nháp',
   'draft.get': 'bản nháp',
   'profile.search': 'tìm kiếm',

@@ -56,7 +56,7 @@ test.describe('v0.1.37 — cập nhật bị dừng giữa chừng', () => {
       if (method === 'GET') return route.fulfill({ json: state });
       return route.fallback();
     });
-    await page.goto('/help');
+    await page.goto('/system?tab=storage'); // v0.1.42 (F-61): thẻ cập nhật chỉ ở Cài đặt › Sao lưu & cập nhật
     await expect(page.getByText('Cập nhật lên v0.1.37 bị dừng giữa chừng')).toBeVisible();
     await expect(page.getByText(/Tiến trình cập nhật trên máy chủ không còn chạy/)).toBeVisible();
     await expect(page.getByText('Máy chủ chưa nhận yêu cầu cập nhật')).toHaveCount(0);
@@ -69,7 +69,7 @@ test.describe('v0.1.37 — cập nhật bị dừng giữa chừng', () => {
   test('not_picked_up: giữ chữ cũ "Máy chủ chưa nhận yêu cầu cập nhật"', async ({ page }) => {
     const state = updateState({ stalled_reason: 'not_picked_up', started_at: null, requested_at: new Date(Date.now() - 20 * 60_000).toISOString() });
     await page.route('**/api/v1/system/update', (route) => (route.request().method() === 'GET' ? route.fulfill({ json: state }) : route.fallback()));
-    await page.goto('/help');
+    await page.goto('/system?tab=storage'); // v0.1.42 (F-61): thẻ cập nhật chỉ ở Cài đặt › Sao lưu & cập nhật
     await expect(page.getByText('Máy chủ chưa nhận yêu cầu cập nhật')).toBeVisible();
     await expect(page.getByText(/bị dừng giữa chừng/)).toHaveCount(0);
     await expect(page.getByText('[object Object]')).toHaveCount(0);
@@ -91,10 +91,10 @@ test.describe('v0.1.37 — cập nhật bị dừng giữa chừng', () => {
     test(`${c.code}: lời dẫn riêng, nguyên văn ở "Chi tiết kỹ thuật"`, async ({ page }) => {
       const state = updateState({ state: 'failed', stalled_reason: null, message: c.message, finished_at: new Date(Date.now() - 10 * 60_000).toISOString() });
       await page.route('**/api/v1/system/update', (route) => (route.request().method() === 'GET' ? route.fulfill({ json: state }) : route.fallback()));
-      await page.goto('/help');
+      await page.goto('/system?tab=storage'); // v0.1.42 (F-61): thẻ cập nhật chỉ ở Cài đặt › Sao lưu & cập nhật
       await expect(page.getByText(c.kicker, { exact: true }).first()).toBeVisible();
-      await page.getByText('Chi tiết kỹ thuật').first().click();
-      await expect(page.getByText(c.message).first()).toBeVisible();
+      await page.getByRole('region', { name: 'Cập nhật phần mềm' }).getByText('Chi tiết kỹ thuật').click();
+      await expect(page.getByRole('region', { name: 'Cập nhật phần mềm' }).getByText(c.message)).toBeVisible();
       await expect(page.getByText('[object Object]')).toHaveCount(0);
     });
   }

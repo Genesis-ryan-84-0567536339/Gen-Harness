@@ -238,7 +238,12 @@ export function RawScreen() {
               <EmptyState
                 icon="ph ph-database"
                 title="Chưa có bản ghi thô nào khớp bộ lọc"
-                description="Bridge gom tin từ các nhóm đang lắng nghe về đây. Nới bộ lọc hoặc bật thêm nhóm ở Điều khiển hệ thống."
+                description={
+                  <>
+                    Bridge gom tin từ các nhóm đang lắng nghe về đây. Nới bộ lọc hoặc bật thêm nhóm ở{' '}
+                    <Link to="/connections">Kết nối</Link>.
+                  </>
+                }
               />
             ) : null}
             <div ref={sentinel} aria-hidden style={{ height: 1 }} />

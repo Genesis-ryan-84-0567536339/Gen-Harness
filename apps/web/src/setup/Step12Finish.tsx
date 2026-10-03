@@ -91,7 +91,7 @@ export function Step12Finish({ meta, description, onBack, onSaved, formRef }: St
       onContinue={() => void finish()}
       onBack={onBack}
       formError={formError}
-      continueLabel="Mở Tổng quan điều hành"
+      continueLabel="Vào Console"
     >
       {missing.length ? (
         <div className="setup-section">
@@ -103,8 +103,8 @@ export function Step12Finish({ meta, description, onBack, onSaved, formRef }: St
               </div>
               <p className="risk-box__text">
                 Cần xong {missing.map((m) => m.title).join(', ')} trước khi hoàn tất thiết lập. Các bước khác Sếp đã để sau sẽ hiện ở
-                "Việc thiết lập tiếp" trên Tổng quan.{' '}
-                <Link to="/overview">Vào Console</Link>
+                "Việc thiết lập tiếp" trên Hôm nay.{' '}
+                <Link to="/">Vào Console</Link>
               </p>
             </div>
           </div>
@@ -134,7 +134,7 @@ export function Step12Finish({ meta, description, onBack, onSaved, formRef }: St
               ) : (
                 <p className="risk-box__text">Model AI, kênh, nhóm lắng nghe, quy tắc sàng lọc và sao lưu đều đã bật.</p>
               )}
-              {gaps.length ? <p className="risk-box__text">Có thể hoàn tất ngay và làm tiếp sau ở "Việc thiết lập tiếp" trên Tổng quan.</p> : null}
+              {gaps.length ? <p className="risk-box__text">Có thể hoàn tất ngay và làm tiếp sau ở "Việc thiết lập tiếp" trên Hôm nay.</p> : null}
             </div>
           </div>
         </div>

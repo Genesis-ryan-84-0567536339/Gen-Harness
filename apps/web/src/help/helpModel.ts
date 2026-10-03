@@ -6,7 +6,7 @@ export const GENH_COMMANDS: Array<{ cmd: string; what: string }> = [
   { cmd: 'genh update', what: 'Cập nhật lên bản mới nhất (tự sao lưu trước, lỗi thì tự quay lại). Trong Console có nút "Cập nhật ngay".' },
   { cmd: 'genh reset-password', what: 'Quên mật khẩu Owner: in ra mật khẩu tạm, đăng nhập rồi đặt mật khẩu mới.' },
   { cmd: 'genh trust-ca', what: 'Trình duyệt báo "không an toàn": cho máy này tin chứng chỉ HTTPS nội bộ.' },
-  { cmd: 'genh backup', what: 'Sao lưu ngay (thêm --to <thư mục> để chép ra ngoài). Trong Console: Dữ liệu & lưu trữ › Sao lưu ngay.' },
+  { cmd: 'genh backup', what: 'Sao lưu ngay (thêm --to <thư mục> để chép ra ngoài). Trong Console: Cài đặt › Sao lưu & cập nhật › Sao lưu ngay.' },
   { cmd: 'genh status', what: 'Xem các dịch vụ đang chạy, phiên bản và dung lượng dữ liệu đang dùng.' },
   { cmd: 'genh stop', what: 'Dừng toàn bộ dịch vụ (không mất dữ liệu). Chạy tiếp genh start để khởi động lại (vd. khi Bộ xử lý nền đã ngừng).' },
   { cmd: 'genh start', what: 'Bật lại toàn bộ dịch vụ sau genh stop.' },

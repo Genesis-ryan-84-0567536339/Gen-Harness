@@ -1,4 +1,4 @@
-"""Hàng đợi & Hành động: Tổng quan (KPI F4), Hộp thư ý nghĩa (ưu tiên, tab, giao, im lặng, phạm vi), Việc & Nhắc
+"""Hàng đợi & Hành động: Tổng quan (KPI F4), Hộp thư (ưu tiên, tab, giao, im lặng, phạm vi), Việc & Nhắc
 hẹn (hạn quá đỏ, lời hứa), cảnh báo sớm (quét ngưỡng, chống trùng)."""
 
 import uuid
@@ -97,7 +97,7 @@ async def world(app, db, redis, owner_api):  # type: ignore[no-untyped-def]
             "draft": draft["id"], "overdue_task": overdue_task, "soon_task": soon_task, "promise": promise_id}
 
 
-# ─── Hộp thư ý nghĩa ────────────────────────────────────────────────────────
+# ─── Hộp thư ────────────────────────────────────────────────────────────────
 
 async def test_inbox_priority_tab_and_counts(world, owner_api: Api) -> None:  # type: ignore[no-untyped-def]
     r = await owner_api.get("/inbox?tab=all")
@@ -197,16 +197,22 @@ async def test_overview_kpis_cover_f4_and_link_to_filtered_lists(world, owner_ap
     r = await owner_api.get("/overview")
     assert r.status_code == 200, r.text
     body = r.json()
+    # F-64 (v0.1.42): đúng 4 số kinh doanh, một hàng, đúng thứ tự.
+    assert [k["key"] for k in body["kpis"]] == ["opportunity_claim_rate", "time_to_contact", "quotations_sent",
+                                                "pending_ratio"]
+    assert all(k["row"] == 1 for k in body["kpis"])
     keys = {k["key"] for k in body["kpis"]}
-    assert keys == {"channels_live", "groups_listening", "events_today", "plugins_health", "processing_latency",
-                    "pending_ratio", "time_to_contact", "quotations_sent", "opportunity_claim_rate",
-                    "chassis_latency", "active_profiles"}
-    rows = {k["key"]: k["row"] for k in body["kpis"]}
-    assert sum(1 for v in rows.values() if v == 1) == 6 and sum(1 for v in rows.values() if v == 2) == 5
+    assert not keys & {"chassis_latency", "plugins_health", "active_profiles", "channels_live"}
     for k in body["kpis"]:
         assert k["filter"] and k["filter"]["screen"]                # mỗi ô dẫn tới màn đã lọc
     by_key = {k["key"]: k for k in body["kpis"]}
-    assert by_key["groups_listening"]["value"] == 1
+    assert by_key["opportunity_claim_rate"]["filter"] == {"screen": "opportunity", "filters": {"owner": "none"}}
+    assert by_key["quotations_sent"]["filter"] == {"screen": "workbench", "filters": {"kind": "quotation"}}
+    assert "plugins" not in body["health"]                          # F-41: không đếm ops.plugins nữa
+    tech = body["health"]["tech"]
+    assert set(tech) == {"channels_live", "groups_listening", "events_today", "processing_latency_s"}
+    assert tech["groups_listening"] == 1
+    assert isinstance(tech["channels_live"], int) and isinstance(tech["events_today"], int)
     pending = by_key["pending_ratio"]["value"]
     assert pending == 100.0                                          # 1 bản nháp, đang pending
     kinds = {i["kind"] for i in body["queue"]}

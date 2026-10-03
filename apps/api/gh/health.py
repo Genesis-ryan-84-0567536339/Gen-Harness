@@ -731,7 +731,7 @@ async def _eval_models(db: AsyncSession, org_id: uuid.UUID, redis: Any) -> None:
         await raise_model_expired(db, org_id, r.id, r.name, redis=redis)
 
 
-#: v0.1.41 (F-84): đích chuông "Chi phí AI hôm nay vượt trần" — thẻ chi phí AI ở Tổng quan › Sức khoẻ.
+#: v0.1.41 (F-84): đích chuông "Chi phí AI hôm nay vượt trần" — thẻ chi phí AI ở Hôm nay (dưới Sức khoẻ hệ thống).
 AI_COST_LINK = "/overview?focus=ai-cost"
 
 
@@ -751,7 +751,7 @@ async def _eval_budget(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: dat
         return
     await raise_once(db, org_id, key="ai.budget", kind="ai.budget_exceeded", severity="warn",
                      fingerprint=day.isoformat(), title=f"Chi phí AI hôm nay vượt trần {ai_cost.fmt_vnd(budget)}",
-                     body=f"Đã dùng {ai_cost.fmt_vnd(total)}. Xem agent nào tốn nhiều ở Tổng quan › Sức khoẻ; "
+                     body=f"Đã dùng {ai_cost.fmt_vnd(total)}. Xem agent nào tốn nhiều ở Hôm nay › Chi phí AI hôm nay; "
                           "đổi trần ở Bộ não AI.", link=AI_COST_LINK, redis=redis)
 
 

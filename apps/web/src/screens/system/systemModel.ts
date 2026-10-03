@@ -47,7 +47,7 @@ export function channelTileTone(c: Pick<Channel, 'type' | 'state'>): string {
 
 export { channelIcon };
 
-/** Channels that log in with a QR (Zalo, WhatsApp); Telegram needs its plugin, LinkedIn is identity-only. */
+/** Channels that log in with a QR (Zalo, WhatsApp); Telegram is not in this build, LinkedIn is identity-only. */
 export const isQrChannel = (c: Pick<Channel, 'type' | 'state'>) =>
   c.state !== 'not_installed' && c.state !== 'identity_only' && (c.type === 'zalo' || c.type === 'whatsapp');
 
@@ -71,7 +71,8 @@ export function channelMeta(c: Channel, now = Date.now(), tz?: string): { before
         ? { before: 'Đã đăng xuất · ', groups, after: '' }
         : { before: 'Chưa đăng nhập — tạo mã QR để bắt đầu nhận tin', groups: null, after: '' };
     case 'not_installed':
-      return { before: `Plugin @gen/channel-${c.type} có trong chợ tiện ích, chưa cài đặt`, groups: null, after: '' };
+      // v0.1.42 (F-41): Plugin đóng băng — không còn trỏ tới chợ tiện ích.
+      return { before: 'Kênh này chưa có trong bản đang chạy', groups: null, after: '' };
     case 'identity_only':
       return { before: 'Dùng để hợp nhất danh tính, không nhận tin nhắn', groups: null, after: '' };
     default:
@@ -79,7 +80,7 @@ export function channelMeta(c: Channel, now = Date.now(), tz?: string): { before
   }
 }
 
-export type ChannelAction = 'logout' | 'rescan' | 'login' | 'install' | 'configure' | null;
+export type ChannelAction = 'logout' | 'rescan' | 'login' | 'unavailable' | 'configure' | null;
 
 export function channelAction(c: Pick<Channel, 'type' | 'state'>): { action: ChannelAction; label: string; icon: string; accent: boolean } {
   switch (c.state) {
@@ -92,7 +93,7 @@ export function channelAction(c: Pick<Channel, 'type' | 'state'>): { action: Cha
     case 'logged_out':
       return { action: 'login', label: 'Tạo mã QR', icon: 'ph ph-qr-code', accent: true };
     case 'not_installed':
-      return { action: 'install', label: 'Cài plugin', icon: 'ph ph-plus', accent: false };
+      return { action: 'unavailable', label: 'Chưa có trong bản này', icon: 'ph ph-info', accent: false };
     case 'identity_only':
       return { action: 'configure', label: 'Cấu hình', icon: 'ph ph-gear', accent: false };
     default:

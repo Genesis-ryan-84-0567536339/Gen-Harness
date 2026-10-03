@@ -11,6 +11,8 @@ import { useMe } from '../../src/lib/queries';
 import { queryClient } from '../../src/lib/queryClient';
 import { useToasts } from '../../src/lib/toast';
 import { AppShell } from '../../src/shell/AppShell';
+import { HomeRedirect } from '../../src/shell/HomeRedirect';
+import { buildNavigation } from '../mock-api';
 
 const ME = {
   id: 'u1', email: 'owner@genesis.local', display_name: 'Anh Cơ La (Ryan)', role: { code: 'owner', name: 'Owner — Sếp' },
@@ -203,6 +205,7 @@ describe('buộc đổi mật khẩu (must_change_password)', () => {
     let mustChange = true;
     stubApi((url) => {
       if (url.endsWith('/auth/me')) return { status: 200, body: { ...ME, must_change_password: mustChange } };
+      if (url.endsWith('/navigation')) return { status: 200, body: buildNavigation() };
       if (url.endsWith('/account/password')) {
         mustChange = false;
         return { status: 200, body: { sessions_revoked: 0 } };
@@ -215,6 +218,8 @@ describe('buộc đổi mật khẩu (must_change_password)', () => {
         path: '/',
         element: <AppShell />,
         children: [
+          // v0.1.42 (F-26): đổi xong → "/" → màn đầu tiên của vai trò (HomeRedirect).
+          { index: true, element: <HomeRedirect /> },
           { path: 'inbox', element: <div>Hộp việc</div> },
           { path: 'overview', element: <div>Tổng quan</div> },
         ],
@@ -232,10 +237,13 @@ describe('buộc đổi mật khẩu (must_change_password)', () => {
     expect(router.state.location.pathname).toBe('/overview');
   });
 
-  it('không bị buộc thì trang /change-password tự về Tổng quan', async () => {
-    stubApi((url) => (url.endsWith('/auth/me') ? { status: 200, body: ME } : undefined));
+  it('không bị buộc thì trang /change-password tự về "/" rồi màn đầu tiên (Tổng quan)', async () => {
+    stubApi((url) =>
+      url.endsWith('/auth/me') ? { status: 200, body: ME } : url.endsWith('/navigation') ? { status: 200, body: buildNavigation() } : undefined,
+    );
     const router = renderAt('/change-password', [
       { path: '/change-password', element: <ForcePasswordPage /> },
+      { path: '/', element: <HomeRedirect /> },
       { path: '/overview', element: <div>Tổng quan</div> },
     ]);
     expect(await screen.findByText('Tổng quan')).toBeInTheDocument();

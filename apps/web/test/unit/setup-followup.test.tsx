@@ -43,12 +43,12 @@ describe('Việc thiết lập tiếp (Tổng quan)', () => {
     expect(screen.getByText('Kết nối Zalo / WhatsApp')).toBeInTheDocument();
   });
 
-  it('v0.1.39: Kết nối Facebook (13) và Nối Gen-hub (14) chưa xong → mở thẳng /social, /mcp; xong thì biến mất', () => {
+  it('v0.1.39: Kết nối Facebook (13) và Nối Gen-hub (14) chưa xong → mở thẳng /social, /connections (v0.1.42); xong thì biến mất', () => {
     const { unmount } = renderWith([item(5, true), item(13, false), item(14, false)]);
     expect(screen.getByText('Kết nối Facebook')).toBeInTheDocument();
     expect(screen.getByText('Nối Gen-hub')).toBeInTheDocument();
     const links = screen.getAllByRole('link', { name: /Làm ngay/ }).map((a) => a.getAttribute('href'));
-    expect(links).toEqual(['/social', '/mcp']);
+    expect(links).toEqual(['/social', '/connections#genhub']);
     unmount();
     renderWith([item(5, false), item(13, true), item(14, true)]);
     expect(screen.queryByText('Kết nối Facebook')).not.toBeInTheDocument();

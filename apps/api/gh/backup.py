@@ -473,7 +473,7 @@ async def backup_now(ctx: dict[str, Any], trigger: str = "manual") -> dict[str, 
     size_mb = max(entry.size_bytes, 0) / 1_048_576
     size = f"{size_mb:.1f}".replace(".", ",")
     await _notify_owners(redis, ok=True,
-                         message=f"Đã sao lưu ({size} MB) — tải về hoặc khôi phục ở Dữ liệu & lưu trữ.")
+                         message=f"Đã sao lưu ({size} MB) — tải về hoặc khôi phục ở Cài đặt › Sao lưu & cập nhật.")
     return {"ran": entry.key}
 
 

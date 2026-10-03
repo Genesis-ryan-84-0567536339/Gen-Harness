@@ -54,3 +54,10 @@ const VND = new Intl.NumberFormat('vi-VN');
 export function fmtVnd(n: number | null): string {
   return n === null ? '—' : `${VND.format(n)} ₫`;
 }
+
+/**
+ * v0.1.42: cách một người thành "nhân viên" (core.persons.person_type = 'staff') — chưa có ô sửa ở hồ sơ, chỉ qua
+ * Quy tắc sàng lọc. Dùng ở Đội ngũ và ở trạng thái trống của Đánh giá con người / Chất lượng chăm sóc.
+ */
+export const STAFF_HOWTO =
+  'Một người thành nhân viên khi có loại "staff": tạo quy tắc ở Nâng cao › Tầng dữ liệu › Quy tắc sàng lọc với kết quả "person_type = staff" cho tin của nhân viên.';

@@ -152,7 +152,7 @@ func RunRestore(ctx context.Context, env *Env, key string, deps RestoreDeps, out
 			Code: ErrCodeRestoreFailed,
 			What: "Khoá bản sao lưu không hợp lệ",
 			Why:  fmt.Sprintf("%q không có dạng backups/<thời điểm>-<mã>.pgcustom.enc", key),
-			Next: "Chọn bản sao lưu từ danh sách trong Console (Điều khiển hệ thống › Dữ liệu & lưu trữ).",
+			Next: "Chọn bản sao lưu từ danh sách trong Console (Cài đặt › Sao lưu & cập nhật).",
 		}
 	}
 

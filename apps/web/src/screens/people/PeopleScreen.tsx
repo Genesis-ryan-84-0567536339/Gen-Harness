@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
+import { Link } from 'react-router-dom';
 import type {
   PeopleReviewDisputeItem,
   PeopleReviewFullDetail,
@@ -12,14 +13,17 @@ import { Button, Dialog, EmptyState, Icon, Tabs, type TabItem } from '@gen-harne
 import { WhyButton } from '../core/Evidence';
 import { errorText } from '../../lib/errorText';
 import { fmtDMClock } from '../../lib/format';
+import { useNavigation } from '../../lib/queries';
 import { useUrlState } from '../../lib/uiStore';
+import { findActive } from '../../shell/navModel';
 import { CardError, InlineError, ScreenHead, SkeletonLines } from '../common';
-import { BOARD_LABEL, REVIEW_BOARD_LIST, TREND_ICON, fmtPeriod, initialsOf, scoreTone, trendTone } from './peopleModel';
+import { BOARD_LABEL, REVIEW_BOARD_LIST, STAFF_HOWTO, TREND_ICON, fmtPeriod, initialsOf, scoreTone, trendTone } from './peopleModel';
 import { useOpenDispute, useResolveDispute, useReview, useReviews, useUpdateReview } from './queries';
 
 export function PeopleScreen() {
   const [board, setBoard] = useUrlState<ReviewBoard>('board', 'employee');
   const q = useReviews({ board, limit: 100 });
+  const canRules = !!findActive(useNavigation().data, 'rules');
   const [detailId, setDetailId] = useState<string | null>(null);
 
   const tabs: TabItem<ReviewBoard>[] = REVIEW_BOARD_LIST.map((b) => ({ key: b, label: BOARD_LABEL[b] }));
@@ -44,7 +48,16 @@ export function PeopleScreen() {
       ) : q.isError ? (
         <CardError error={q.error} onRetry={() => void q.refetch()} retrying={q.isFetching} />
       ) : q.data.items.length === 0 ? (
-        <EmptyState icon="ph ph-users-three" title="Chưa có đánh giá nào" description="Đánh giá tự động chấm hằng ngày cho người có trả lời tin trong kỳ 7 ngày gần nhất đã trọn vẹn." />
+        <EmptyState
+          icon="ph ph-users-three"
+          title="Chưa có đánh giá nào"
+          description={
+            board === 'employee'
+              ? `Đánh giá tự động chấm hằng ngày cho nhân viên có trả lời tin trong kỳ 7 ngày gần nhất đã trọn vẹn. ${STAFF_HOWTO}`
+              : 'Đánh giá tự động chấm hằng ngày cho người có trả lời tin trong kỳ 7 ngày gần nhất đã trọn vẹn.'
+          }
+          actions={board === 'employee' && canRules ? <Link to="/rules">Mở Quy tắc sàng lọc</Link> : null}
+        />
       ) : (
         <div className="ppl-rows">
           {q.data.items.map((item) => (

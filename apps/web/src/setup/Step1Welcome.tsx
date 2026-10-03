@@ -17,7 +17,7 @@ const MODES: Array<{ value: Step1Values['mode']; title: string; desc: string; ic
   {
     value: 'sample',
     title: 'Dùng dữ liệu mẫu',
-    desc: 'Nạp dữ liệu mẫu để xem Console vận hành; xoá được sau ở Điều khiển hệ thống.',
+    desc: 'Nạp dữ liệu mẫu để xem Console vận hành; xoá được sau ở Cài đặt.',
     icon: 'ph ph-database',
   },
 ];

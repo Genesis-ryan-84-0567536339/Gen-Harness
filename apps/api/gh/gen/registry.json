@@ -3,11 +3,11 @@
   "screens": {
     "overview": {
       "path": "/overview",
-      "title": "Tổng quan điều hành"
+      "title": "Hôm nay"
     },
     "inbox": {
       "path": "/inbox",
-      "title": "Hộp thư ý nghĩa"
+      "title": "Hộp thư"
     },
     "workbench": {
       "path": "/workbench",
@@ -19,39 +19,35 @@
     },
     "directory": {
       "path": "/directory",
-      "title": "Nhóm & Con người"
-    },
-    "documents": {
-      "path": "/documents",
-      "title": "Tài liệu"
-    },
-    "graph": {
-      "path": "/graph",
-      "title": "Bản đồ quan hệ"
-    },
-    "profile": {
-      "path": "/profile",
-      "title": "Hồ sơ sống"
-    },
-    "notebook": {
-      "path": "/notebook",
-      "title": "Sổ tay nhận thức"
+      "title": "Khách & Nhóm"
     },
     "opportunity": {
       "path": "/opportunity",
       "title": "Bảng cơ hội"
     },
-    "supply": {
-      "path": "/supply",
-      "title": "Cung ↔ Cầu"
+    "deals": {
+      "path": "/deals",
+      "title": "Deal & Vụ việc"
+    },
+    "documents": {
+      "path": "/documents",
+      "title": "Tài liệu"
     },
     "search": {
       "path": "/search",
       "title": "Kho hội thoại"
     },
-    "deals": {
-      "path": "/deals",
-      "title": "Deal & Vụ việc"
+    "profile": {
+      "path": "/profile",
+      "title": "Hồ sơ sống"
+    },
+    "connections": {
+      "path": "/connections",
+      "title": "Kết nối"
+    },
+    "team": {
+      "path": "/team",
+      "title": "Đội ngũ"
     },
     "people": {
       "path": "/people",
@@ -60,6 +56,10 @@
     "care": {
       "path": "/care",
       "title": "Chất lượng chăm sóc"
+    },
+    "system": {
+      "path": "/system",
+      "title": "Cài đặt"
     },
     "raw": {
       "path": "/raw",
@@ -89,13 +89,17 @@
       "path": "/mcp",
       "title": "MCP Hub"
     },
-    "plugins": {
-      "path": "/plugins",
-      "title": "Plugin & Tiện ích"
+    "graph": {
+      "path": "/graph",
+      "title": "Bản đồ quan hệ"
     },
-    "system": {
-      "path": "/system",
-      "title": "Điều khiển hệ thống"
+    "notebook": {
+      "path": "/notebook",
+      "title": "Sổ tay nhận thức"
+    },
+    "supply": {
+      "path": "/supply",
+      "title": "Cung ↔ Cầu"
     },
     "guide": {
       "path": "/guide",
@@ -123,7 +127,7 @@
       "id": "overview.needs_boss",
       "screen": "overview",
       "label": "Dải \"Cần Sếp xử lý\"",
-      "description": "Đầu Tổng quan: các sự cố Sếp cần tự tay xử lý (kênh rớt, model hết đăng nhập, cập nhật lỗi, sao lưu quá hạn…)",
+      "description": "Đầu trang Hôm nay: các sự cố Sếp cần tự tay xử lý (kênh rớt, model hết đăng nhập, cập nhật lỗi, sao lưu quá hạn…)",
       "dynamic": null,
       "params": null,
       "permission": "system.manage"
@@ -132,7 +136,7 @@
       "id": "overview.kpis",
       "screen": "overview",
       "label": "Hàng chỉ số chính",
-      "description": "Các ô số liệu đầu trang Tổng quan (cơ hội, cảnh báo, chờ duyệt…)",
+      "description": "Các ô số liệu đầu trang Hôm nay (cơ hội, cảnh báo, chờ duyệt…)",
       "dynamic": null,
       "params": null
     },
@@ -155,8 +159,8 @@
     {
       "id": "overview.queue.open_inbox",
       "screen": "overview",
-      "label": "Nút \"Mở hộp thư ý nghĩa\"",
-      "description": "Mở Hộp thư ý nghĩa để xem toàn bộ hàng đợi",
+      "label": "Nút \"Mở hộp thư\"",
+      "description": "Mở Hộp thư để xem toàn bộ hàng đợi",
       "dynamic": null,
       "params": null
     },
@@ -172,7 +176,7 @@
       "id": "overview.health",
       "screen": "overview",
       "label": "Sức khoẻ hệ thống",
-      "description": "Tình trạng kênh và backlog sàng lọc",
+      "description": "Tình trạng kênh, nhóm lắng nghe, sự kiện hôm nay, độ trễ xử lý và tin chờ sàng lọc",
       "dynamic": null,
       "params": null
     },
@@ -201,29 +205,12 @@
       "params": null
     },
     {
-      "id": "system.tab.channels",
-      "screen": "system",
-      "label": "Tab \"Kênh & đăng nhập\"",
-      "description": "Chuyển sang tab kênh Zalo/WhatsApp, PIN, CLI",
-      "dynamic": null,
-      "params": null
-    },
-    {
       "id": "system.tab.brain",
       "screen": "system",
       "label": "Tab \"Bộ não AI\"",
       "description": "Chuyển sang tab nhà cung cấp model, hạn mức, Jev",
       "dynamic": null,
       "params": null
-    },
-    {
-      "id": "system.tab.users",
-      "screen": "system",
-      "label": "Tab \"Người dùng\"",
-      "description": "Chuyển sang tab mời người dùng, đổi vai trò, khoá tài khoản (chỉ Owner)",
-      "dynamic": null,
-      "params": null,
-      "permission": "roles.manage"
     },
     {
       "id": "system.tab.org",
@@ -236,43 +223,35 @@
     {
       "id": "system.tab.storage",
       "screen": "system",
-      "label": "Tab \"Dữ liệu & lưu trữ\"",
-      "description": "Chuyển sang tab hạn lưu, sao lưu & khôi phục",
+      "label": "Tab \"Sao lưu & cập nhật\"",
+      "description": "Chuyển sang tab sao lưu & khôi phục, cập nhật phần mềm, hạn lưu dữ liệu",
       "dynamic": null,
       "params": null
     },
     {
       "id": "system.channels.list",
-      "screen": "system",
+      "screen": "connections",
       "label": "Danh sách kênh",
-      "description": "Thẻ các kênh Zalo/WhatsApp và nút tạo mã QR",
+      "description": "Thẻ các kênh Zalo/WhatsApp/Telegram và nút tạo mã QR",
       "dynamic": null,
-      "params": {
-        "tab": "channels"
-      }
-    },
-    {
-      "id": "system.channels.pin",
-      "screen": "system",
-      "label": "Thẻ mã PIN",
-      "description": "Đổi mã PIN, xem lịch sử nhập PIN",
-      "dynamic": null,
-      "params": {
-        "tab": "channels"
-      },
-      "sensitive": true,
-      "safe_message": "Đây là thao tác nhạy cảm — Sếp tự xem kỹ và tự quyết định, Gen không làm thay."
+      "params": null
     },
     {
       "id": "system.channels.facebook",
-      "screen": "system",
+      "screen": "connections",
       "label": "Thẻ Facebook",
       "description": "Mở trang Tài khoản mạng xã hội (chỉ Owner)",
       "dynamic": null,
-      "params": {
-        "tab": "channels"
-      },
+      "params": null,
       "permission": "roles.manage"
+    },
+    {
+      "id": "connections.brain",
+      "screen": "connections",
+      "label": "Thẻ \"Bộ não AI\"",
+      "description": "Trạng thái bộ não AI (model, khoá API, tài khoản CLI) và nút mở Bộ não AI ở Cài đặt",
+      "dynamic": null,
+      "params": null
     },
     {
       "id": "system.brain.quota",
@@ -456,37 +435,31 @@
     },
     {
       "id": "system.users.list",
-      "screen": "system",
+      "screen": "team",
       "label": "Danh sách người dùng",
       "description": "Tên, email, vai trò, trạng thái, lần đăng nhập gần nhất; nút đặt lại mật khẩu, khoá/mở khoá",
       "dynamic": null,
-      "params": {
-        "tab": "users"
-      },
+      "params": null,
       "permission": "roles.manage",
       "sensitive": true,
       "safe_message": "Đây là thao tác nhạy cảm — Sếp tự xem kỹ và tự quyết định, Gen không làm thay."
     },
     {
       "id": "system.users.invite",
-      "screen": "system",
+      "screen": "team",
       "label": "Nút \"Mời người dùng\"",
       "description": "Tạo tài khoản mới với mật khẩu tạm (cần mã PIN)",
       "dynamic": null,
-      "params": {
-        "tab": "users"
-      },
+      "params": null,
       "permission": "roles.manage"
     },
     {
       "id": "system.users.temp_password",
-      "screen": "system",
+      "screen": "team",
       "label": "Mật khẩu tạm vừa tạo",
       "description": "Hộp hiện mật khẩu tạm một lần sau khi mời / đặt lại mật khẩu",
       "dynamic": null,
-      "params": {
-        "tab": "users"
-      },
+      "params": null,
       "permission": "roles.manage",
       "sensitive": true,
       "safe_message": "Đây là thao tác nhạy cảm — Sếp tự xem kỹ và tự quyết định, Gen không làm thay."
@@ -540,7 +513,7 @@
       "id": "inbox.row",
       "screen": "inbox",
       "label": "Một mục hộp thư",
-      "description": "Một thẻ trong Hộp thư ý nghĩa (theo id mục)",
+      "description": "Một thẻ trong Hộp thư (theo id mục)",
       "dynamic": "row",
       "params": null
     },
@@ -573,7 +546,7 @@
     },
     {
       "id": "mcp.hub_link",
-      "screen": "mcp",
+      "screen": "connections",
       "label": "Thẻ \"Gen-hub\"",
       "description": "Nối Gen-hub để Gen đọc Kho Ryan (chỉ đọc, chỉ Sếp): địa chỉ, token, hạn token, trạng thái",
       "dynamic": null,
@@ -582,7 +555,7 @@
     },
     {
       "id": "mcp.hub_link.token",
-      "screen": "mcp",
+      "screen": "connections",
       "label": "Ô \"Token Gen-hub\"",
       "description": "Dán token agent tạo trong Gen-hub (chỉ ghi — không bao giờ hiện lại)",
       "dynamic": null,
@@ -593,7 +566,7 @@
     },
     {
       "id": "mcp.hub_link.test",
-      "screen": "mcp",
+      "screen": "connections",
       "label": "Nút \"Kiểm tra\" Gen-hub",
       "description": "Thử kết nối, mở đúng tool đọc Kho cho Gen rồi bật liên kết (cần PIN)",
       "dynamic": null,
@@ -774,8 +747,8 @@
       ],
       "done_when": "Có ít nhất một kênh ở trạng thái Đang kết nối.",
       "console": {
-        "label": "Điều khiển hệ thống › Kênh",
-        "to": "/system?tab=channels"
+        "label": "Kết nối",
+        "to": "/connections"
       }
     },
     {
@@ -790,7 +763,7 @@
       ],
       "done_when": "Có ít nhất một nhóm không còn ở chế độ Không nghe.",
       "console": {
-        "label": "Nhóm & Con người",
+        "label": "Khách & Cơ hội › Khách & Nhóm",
         "to": "/directory"
       }
     },
@@ -856,8 +829,8 @@
       ],
       "done_when": "Có thêm ít nhất một tài khoản ngoài Sếp.",
       "console": {
-        "label": "Điều khiển hệ thống › Người dùng",
-        "to": "/system?tab=users"
+        "label": "Đội ngũ › Người dùng",
+        "to": "/team"
       }
     },
     {
@@ -872,7 +845,7 @@
       ],
       "done_when": "Đã có lịch sao lưu.",
       "console": {
-        "label": "Điều khiển hệ thống › Dữ liệu & lưu trữ",
+        "label": "Cài đặt › Sao lưu & cập nhật",
         "to": "/system?tab=storage"
       }
     },
@@ -905,8 +878,8 @@
       ],
       "done_when": "Kiểm tra xanh ít nhất một lần.",
       "console": {
-        "label": "Kết nối MCP › Gen-hub",
-        "to": "/mcp"
+        "label": "Kết nối › Gen-hub",
+        "to": "/connections#genhub"
       }
     }
   ]
