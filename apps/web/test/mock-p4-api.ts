@@ -57,10 +57,8 @@ const FAILOVER_RULES: FailoverRule[] = [
 /** `gh.agents_api.routes.CORE_AGENT_KEYS`. */
 const CORE_AGENT_KEYS: Record<string, string> = {
   'core.refinery': 'Sàng lọc & suy luận chính',
-  'core.reply': 'Trả lời nhanh trong nhóm',
-  'core.intent': 'Tách ý định / phân loại',
-  'core.scoring': 'Chấm điểm suy luận dài',
-  'core.indexing': 'Đánh chỉ mục / embedding',
+  // v0.1.43 (F-25): bỏ core.intent/core.scoring/core.indexing (không nơi nào dùng); core.reply = soạn lại / dịch nháp.
+  'core.reply': 'Soạn lại / dịch nháp',
   // v0.1.21: Gen — trợ lý quản trị (gh.gen.engine.AGENT_KEY); v0.1.38 (F-22): khoá DUY NHẤT được gán Antigravity CLI.
   'core.gen': 'Gen — trợ lý quản trị',
 };

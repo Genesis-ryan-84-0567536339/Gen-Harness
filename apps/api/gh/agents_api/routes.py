@@ -129,18 +129,16 @@ def _check_limits(v: dict[str, int]) -> dict[str, int]:
 
 # ─── gán model theo agent/mục đích (agent.bindings) ─────────────────────────────
 
-# Mục đích dùng chung (ARCHITECTURE §11: "core agent suy luận chính, trả lời nhanh trong nhóm, tách ý định/phân
-# loại, chấm điểm suy luận dài, đánh chỉ mục"). Ngoài ra mỗi agent identity có khoá riêng `agent:<id>`
-# (gh.biz.duty.engine.agent_key) — danh sách động, ghép ở list_bindings(). Hiện tại chỉ `core.refinery`
-# (gh.refinery.runner.AGENT_KEY) và `agent:<id>` thật sự được ModelRouter dùng khi gọi model; các mục còn lại là
-# chỗ cấu hình trước cho lộ trình nối dây tiếp — không tự xưng đã nối dây đủ 5 mục đích.
+# Mục đích dùng chung — v0.1.43 (F-25): chỉ còn ba khoá và cả ba đều được ModelRouter dùng thật:
+#   core.refinery — gh.refinery.runner.AGENT_KEY (sàng lọc & suy luận chính);
+#   core.reply    — gh.biz.core.routes._agent_key (soạn lại / dịch nháp không gắn agent);
+#   core.gen      — gh.gen.engine.AGENT_KEY (Gen — trợ lý quản trị trong Console).
+# Ngoài ra mỗi agent identity có khoá riêng `agent:<id>` (gh.biz.duty.engine.agent_key) — danh sách động, ghép ở
+# list_bindings(). Bỏ core.intent/core.scoring/core.indexing (không nơi nào gọi model bằng các khoá đó); hàng
+# agent.bindings cũ của chúng để nguyên trong DB (vô hại) — list_bindings tự ẩn, PUT/DELETE trả 422.
 CORE_AGENT_KEYS: dict[str, str] = {
     "core.refinery": "Sàng lọc & suy luận chính",
-    "core.reply": "Trả lời nhanh trong nhóm",
-    "core.intent": "Tách ý định / phân loại",
-    "core.scoring": "Chấm điểm suy luận dài",
-    "core.indexing": "Đánh chỉ mục / embedding",
-    # v0.1.21: Gen — trợ lý quản trị trong Console (gh.gen.engine.AGENT_KEY), dùng chuỗi Bộ não AI như mọi agent.
+    "core.reply": "Soạn lại / dịch nháp",
     "core.gen": "Gen — trợ lý quản trị",
 }
 
@@ -234,6 +232,10 @@ async def set_binding(agent_key: str, body: BindingIn, user: service.CurrentUser
 @router.delete("/bindings/{agent_key}", status_code=204)
 async def delete_binding(agent_key: str, user: service.CurrentUser = Depends(MANAGE),
                          db: AsyncSession = DB) -> Response:
+    # F-25: khoá lõi đã bỏ (core.intent/scoring/indexing) → 422 như PUT; hàng cũ để nguyên. agent:<id> không tra
+    # agent.identities ở đây — gỡ được gán model của agent đã xoá.
+    if agent_key not in CORE_AGENT_KEYS and not agent_key.startswith("agent:"):
+        raise field_errors({"agent_key": "agent_key phải là mục dùng chung (core.*) hoặc agent:<id>"})
     row = (await db.execute(text("DELETE FROM agent.bindings WHERE org_id = :o AND agent_key = :k "
                                  "RETURNING agent_key"), {"o": user.org_id, "k": agent_key})).one_or_none()
     if row is None:

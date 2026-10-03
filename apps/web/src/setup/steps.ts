@@ -15,7 +15,7 @@ export interface StepMeta {
 export const SETUP_STEPS: StepMeta[] = [
   {
     n: 1, key: 'welcome', title: 'Chào mừng', required: true, built: true,
-    content: 'Nhập mã thiết lập từ trình cài (tự điền nếu có trong đường dẫn), chọn ngôn ngữ giao diện, và chọn bắt đầu trống hoặc dùng dữ liệu mẫu.',
+    content: 'Nhập mã thiết lập từ trình cài (tự điền nếu có trong đường dẫn).',
     doneWhen: 'Mã hợp lệ',
   },
   {
