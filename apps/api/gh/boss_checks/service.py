@@ -17,7 +17,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 CHECK_KEYS = ("hub", "facebook", "agy_login", "agy_call", "agy_switch", "claude_login", "claude_call", "jev",
-              "telegram", "remote_access")
+              "telegram", "remote_access", "facebook_reply")
 RUNNABLE = ("hub", "facebook", "agy_call", "agy_switch", "claude_call", "jev", "telegram", "remote_access")
 STATUSES = ("pass", "fail", "pending")
 KEEP_PER_KEY = 50
@@ -37,6 +37,9 @@ ROWS: tuple[dict[str, Any], ...] = (
      "checks": ["telegram"]},
     # v0.1.46 (F-21): Console mở được từ máy khác (điện thoại) bằng địa chỉ từ xa — kiểm theo Origin của lần bấm.
     {"row": 7, "key": "remote", "title": "Truy cập từ xa", "optional": False, "checks": ["remote_access"]},
+    # v0.1.47 (F-79): Facebook trả lời — đạt khi một lượt trả lời bình luận thật đã gửi xong (không bắt buộc; không có
+    # nút "Kiểm tra" riêng vì mỗi lần gửi phải do chính Sếp xác nhận + nhập PIN).
+    {"row": 8, "key": "facebook_reply", "title": "Facebook trả lời", "optional": True, "checks": ["facebook_reply"]},
 )
 REQUIRED_TOTAL = sum(1 for r in ROWS if not r["optional"])
 

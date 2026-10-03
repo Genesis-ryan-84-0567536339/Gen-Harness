@@ -8,6 +8,7 @@ giới hạn tốc độ + 1 việc/tài khoản, checkpoint → dừng + chuôn
 """
 
 import asyncio
+import hashlib
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
@@ -121,16 +122,34 @@ def test_protocol_vectors() -> None:
         protocol.unseal(key, blob, "org:khac")
 
 
-def test_input_filter_and_write_stub() -> None:
+def test_protocol_vectors_permit() -> None:
+    """Vectơ P_PERMIT dùng chung với apps/browser/tests/test_worker.py — hai literal chữ ký phải GIỐNG HỆT nhau."""
+    key = bytes(range(32))
+    obj = {"v": 1, "nonce": "00112233445566778899aabbccddeeff", "job_id": "0190a000-0000-7000-8000-0000000000j1",
+           "org_id": "0190a000-0000-7000-8000-000000000001",
+           "account_id": "0190a000-0000-7000-8000-0000000000aa", "action": "reply_comment",
+           "target_url_sha256": hashlib.sha256(
+               b"https://www.facebook.com/permalink.php?story_fbid=1&comment_id=2").hexdigest(),
+           "body_sha256": hashlib.sha256("Cảm ơn bạn!".encode()).hexdigest(), "iat": 1700000000, "exp": 1700000300,
+           "confirmed_by": "0190a000-0000-7000-8000-0000000000u1"}
+    assert protocol.signature(key, protocol.P_PERMIT, obj) == "8yjIbFDVot8HRqGMFe3JMbTbPG9E5w_ajEISGa2sLTA"
+    assert protocol.verify(key, protocol.P_JOB, protocol.sign(key, protocol.P_PERMIT, obj)) is None
+    assert protocol.P_PERMIT == "permit" and protocol.PERMIT_NONCE_PREFIX == "gh:browser:permit:"
+
+
+def test_input_filter_and_write_kinds() -> None:
     assert clean_input({"type": "mouse", "action": "click", "x": 99999, "y": -5}) == \
         {"type": "mouse", "action": "click", "x": 1280, "y": 0, "button": "left"}
     assert clean_input({"type": "key", "action": "press", "key": "Enter"}) is not None
     assert clean_input({"type": "key", "action": "press", "key": "F12"}) is None            # phím lạ bị bỏ
     assert clean_input({"type": "eval", "js": "alert(1)"}) is None
     assert clean_input({"type": "text", "text": "x" * 300}) is None
-    with pytest.raises(permit.WriteNotEnabled):
-        permit.issue(account_id="x", action="post")
-    assert platforms.PLATFORMS["facebook_personal"].write_kinds == ()
+    assert platforms.PLATFORMS["facebook_personal"].write_kinds == permit.WRITE_KINDS == \
+        ("reply_comment", "send_message")
+    assert permit.PROPOSAL_ACTION == {"social_reply": "reply_comment", "social_dm": "send_message"}
+    with pytest.raises(ValueError):
+        permit.issue(job_id="j", org_id="o", account_id="a", action="post", target_url="u", text="t",
+                     confirmed_by="u")
 
 
 # ─── quyền: chỉ Owner ────────────────────────────────────────────────────────────

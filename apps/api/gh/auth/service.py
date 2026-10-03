@@ -18,6 +18,7 @@ CSRF_COOKIE = "gh_csrf"
 
 # Thao tác cần phiên PIN (một chỗ duy nhất; backend kiểm, UI chỉ bật hộp nhập).
 PIN_OPERATIONS: dict[str, str] = {
+    "social.write": "Gửi trả lời / tin nhắn mạng xã hội",
     "channel.logout": "Đăng xuất kênh",
     "channel.login": "Đăng nhập kênh (quét QR)",
     "cli.switch_account": "Đổi tài khoản Antigravity CLI",

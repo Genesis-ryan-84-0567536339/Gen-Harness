@@ -7,7 +7,10 @@
 - `POST /social/accounts/{id}/check|read|pause|resume` · `DELETE /social/accounts/{id}` (PIN — gỡ, xoá phiên).
 - `GET /social/accounts/{id}/jobs|latest` · `GET /social/jobs/{id}`
 - `POST /social/halt` (Dừng tất cả — KHÔNG cần PIN để dừng được ngay) · `DELETE /social/halt` (Bật lại — PIN).
-Ghi (đăng/trả lời/nhắn) KHÔNG có ở bản này — xem `gh.social.permit` (chỗ cắm v0.1.30).
+- Gửi (trả lời bình luận / nhắn tin; KHÔNG đăng bài): `POST /social/accounts/{id}/write` (PIN `social.write`, thường qua
+  đề xuất của Gen) · `GET /social/writes` · `GET /social/jobs/{id}/proof` (ảnh chụp bằng chứng, mã hoá khi lưu).
+- Cổng F-85: `GET /social/write-gate` · `POST /social/write-consent` (PIN `social.manage`) ·
+  `DELETE /social/write-consent` (rút lại, không cần PIN).
 """
 
 import asyncio
@@ -17,7 +20,7 @@ import uuid
 from typing import Any, Literal
 
 import orjson
-from fastapi import APIRouter, Depends, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Request, Response, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -91,6 +94,7 @@ class AccountPatch(BaseModel):
     label: str | None = Field(default=None, max_length=80)
     schedule: ScheduleIn | None = None
     daily_read_limit: int | None = None
+    daily_write_limit: int | None = None
 
 
 @router.patch("/accounts/{account_id}")
@@ -99,7 +103,8 @@ async def patch_account(account_id: uuid.UUID, body: AccountPatch, request: Requ
                         db: AsyncSession = DB) -> dict[str, Any]:
     return await social.update_account(db, _redis(request), user, account_id, label=body.label,
                                        schedule=body.schedule.model_dump() if body.schedule else None,
-                                       daily_read_limit=body.daily_read_limit)
+                                       daily_read_limit=body.daily_read_limit,
+                                       daily_write_limit=body.daily_write_limit)
 
 
 @router.post("/accounts/{account_id}/login")
@@ -163,6 +168,64 @@ async def latest(account_id: uuid.UUID, _m: service.CurrentUser = Depends(MANAGE
 async def job(job_id: uuid.UUID, _m: service.CurrentUser = Depends(MANAGE),
               user: service.CurrentUser = Depends(require_owner), db: AsyncSession = DB) -> dict[str, Any]:
     return await social.get_job(db, user.org_id, job_id)
+
+
+class WriteIn(BaseModel):
+    action: Literal["reply_comment", "send_message"]
+    target_url: str = Field(max_length=300)
+    text: str = Field(max_length=2000)
+    proposal_id: uuid.UUID | None = None
+
+
+@router.post("/accounts/{account_id}/write", status_code=201)
+async def write(account_id: uuid.UUID, body: WriteIn, request: Request, _m: service.CurrentUser = Depends(MANAGE),
+                _o: service.CurrentUser = Depends(require_owner),
+                user: service.CurrentUser = Depends(require_pin("social.write")),
+                db: AsyncSession = DB) -> dict[str, Any]:
+    """Gửi trả lời / tin nhắn — Gen chỉ đề xuất; việc này chỉ chạy khi chính Owner xác nhận và nhập PIN."""
+    return await social.request_write(db, _redis(request), user, account_id=account_id, action=body.action,
+                                      target_url=body.target_url, text=body.text, proposal_id=body.proposal_id,
+                                      via="gen" if body.proposal_id else "user")
+
+
+@router.get("/writes")
+async def writes(account_id: uuid.UUID | None = None, limit: int = 20, _m: service.CurrentUser = Depends(MANAGE),
+                 user: service.CurrentUser = Depends(require_owner), db: AsyncSession = DB) -> dict[str, Any]:
+    return {"items": await social.list_writes(db, user.org_id, account_id, limit)}
+
+
+@router.get("/jobs/{job_id}/proof")
+async def proof(job_id: uuid.UUID, _m: service.CurrentUser = Depends(MANAGE),
+                user: service.CurrentUser = Depends(require_owner), db: AsyncSession = DB) -> Response:
+    data = await social.proof_image(db, user.org_id, job_id)
+    return Response(content=data, media_type="image/jpeg",
+                    headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
+
+
+@router.get("/write-gate")
+async def get_write_gate(request: Request, _m: service.CurrentUser = Depends(MANAGE),
+                         user: service.CurrentUser = Depends(require_owner), db: AsyncSession = DB) -> dict[str, Any]:
+    return await social.write_gate(db, _redis(request), user.org_id)
+
+
+class ConsentIn(BaseModel):
+    version: str = Field(max_length=20)
+
+
+@router.post("/write-consent")
+async def accept_write_consent(body: ConsentIn, request: Request, _m: service.CurrentUser = Depends(MANAGE),
+                               _o: service.CurrentUser = Depends(require_owner),
+                               user: service.CurrentUser = Depends(require_pin("social.manage")),
+                               db: AsyncSession = DB) -> dict[str, Any]:
+    return await social.accept_write_risk(db, _redis(request), user, body.version)
+
+
+@router.delete("/write-consent")
+async def revoke_write_consent(request: Request, _m: service.CurrentUser = Depends(MANAGE),
+                               user: service.CurrentUser = Depends(require_owner),
+                               db: AsyncSession = DB) -> dict[str, Any]:
+    """Rút lại đồng ý — KHÔNG cần PIN (rút lại phải dễ)."""
+    return await social.revoke_write_risk(db, _redis(request), user)
 
 
 @router.post("/halt")

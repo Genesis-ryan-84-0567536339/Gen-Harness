@@ -49,6 +49,8 @@ PARTITIONED = tuple(d for d, v in DATASETS.items() if v["mode"] == "partition")
 #: Mục cố định (không sửa được): nội dung đã đọc của việc trình duyệt giữ 14 ngày.
 BROWSER_RESULT = "agent.browser_jobs.result"
 BROWSER_RESULT_DAYS = 14
+# v0.1.47 (F-79): ảnh chụp bằng chứng của việc GỬI (đã mã hoá ở object store) giữ 90 ngày — lâu hơn nội dung đã đọc.
+PROOF_DAYS = 90
 FIXED: dict[str, dict[str, Any]] = {BROWSER_RESULT: {"mode": "batch", "keep_days": BROWSER_RESULT_DAYS,
                                                      "editable": False}}
 
@@ -56,7 +58,8 @@ NOTES = {
     "partition": "Xoá theo tháng: cả tháng quá hạn mới bị xoá",
     "memory.entries": "Chỉ xoá mục sổ tay đã nén; mục ghim giữ mãi",
     "ops.action_log": "Không áp dụng — nhật ký chống sửa được giữ nguyên",
-    BROWSER_RESULT: "Nội dung đã đọc của việc trình duyệt giữ 14 ngày; dòng việc vẫn giữ",
+    BROWSER_RESULT: "Nội dung đã đọc của việc trình duyệt giữ 14 ngày (ảnh chụp bằng chứng khi gửi: 90 ngày); "
+               "dòng việc vẫn giữ",
 }
 NOT_APPLICABLE_ERROR = "Nhật ký hành động chưa áp dụng hạn lưu (chuỗi chống sửa)"
 
@@ -175,6 +178,44 @@ async def purge_browser_results(db: AsyncSession, deadline: float) -> int:
           SELECT id FROM agent.browser_jobs
           WHERE result IS NOT NULL AND finished_at < now() - make_interval(days => :d)
           LIMIT :lim)""", {"d": BROWSER_RESULT_DAYS}, deadline)
+
+
+async def purge_browser_proofs(db: AsyncSession, deadline: float, store: Any = None) -> int:
+    """Ảnh chụp bằng chứng quá `PROOF_DAYS` (theo `created_at` của việc): bỏ cột proof_key/proof_sha256 rồi xoá object
+    (best-effort: lỗi chỉ đếm, cột đã bỏ để không quét lại mãi). Kết quả `result` vẫn theo luật 14 ngày."""
+    if store is None:
+        from gh.chassis.objects import get_object_store
+
+        store = get_object_store()
+    total, failed = 0, 0
+    while True:
+        rows = (await db.execute(text("""
+            WITH old AS (
+              SELECT id, proof_key FROM agent.browser_jobs
+              WHERE proof_key IS NOT NULL AND created_at < now() - make_interval(days => :d)
+              LIMIT :lim FOR UPDATE)
+            UPDATE agent.browser_jobs j SET proof_key = NULL, proof_sha256 = NULL
+            FROM old WHERE j.id = old.id RETURNING old.proof_key"""), {"d": PROOF_DAYS, "lim": BATCH})).scalars().all()
+        await db.commit()
+        for key in rows:
+            try:
+                await store.delete(key)
+            except Exception:  # noqa: BLE001 — best-effort
+                failed += 1
+        total += len(rows)
+        if len(rows) < BATCH or time.monotonic() >= deadline:
+            break
+    if total:
+        log.info("Dọn ảnh chụp bằng chứng quá hạn: %d ảnh (%d object không xoá được)", total, failed)
+    return total
+
+
+async def purge_browser_data(db: AsyncSession, deadline: float) -> int:
+    """Phần `agent.browser_jobs.result` (14 ngày) + ảnh chụp bằng chứng (90 ngày); trả số `result` đã bỏ."""
+    n = await purge_browser_results(db, deadline)
+    await db.commit()
+    await purge_browser_proofs(db, deadline)
+    return n
 
 
 MCP_ARGS_DIGEST = "agent.mcp_calls.args"
@@ -393,7 +434,7 @@ async def retention_sweep(ctx: dict[str, Any]) -> dict[str, Any]:
         return run
 
     await part("memory.entries", "batch", in_session(lambda db: purge_memory_entries(db, deadline)))
-    await part(BROWSER_RESULT, "batch", in_session(lambda db: purge_browser_results(db, deadline)))
+    await part(BROWSER_RESULT, "batch", in_session(lambda db: purge_browser_data(db, deadline)))
     if "raw.events" in keeps:
         raw_keep = keeps["raw.events"]
     else:  # partman lỗi — vẫn tính hạn từ bảng chính sách (chỉ đọc)
