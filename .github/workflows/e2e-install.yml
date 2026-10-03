@@ -514,6 +514,29 @@ jobs:
             exit 1
           fi
 
+      # v0.1.45 (F-52): hộp thư run/ (+ run/request) phải là 2770 nhóm 10001 (chỉ genh + api ghi được), không còn 0777.
+      # Chỉ kiểm khi genh.json có run_mode (genh v0.1.45+) — chạy tay workflow cho tag cũ không bị đỏ. Các bước
+      # "Cập nhật ngay" / "Khôi phục" / "Gói chẩn đoán" phía sau kiểm genh vẫn nhận yêu cầu do api ghi.
+      - name: Hộp thư run/ 2770 nhóm 10001 (v0.1.45+)
+        run: |
+          set -euo pipefail
+          run="$GEN_HARNESS_HOME/run"
+          mode="$(python3 -c "import json,sys;print(json.load(open(sys.argv[1])).get('run_mode',''))" "$run/genh.json")"
+          if [ -z "$mode" ]; then
+            echo "::notice::genh chưa ghi run_mode (< v0.1.45) — bỏ qua."
+            exit 0
+          fi
+          for d in "$run" "$run/request"; do
+            perm="$(stat -c %a "$d")"; grp="$(stat -c %g "$d")"
+            echo "$d: quyền $perm, nhóm $grp"
+            if [ "$perm" != "2770" ] || [ "$grp" != "10001" ]; then
+              ls -la "$run"
+              echo "::error::$d phải là 2770 nhóm 10001 (đang $perm nhóm $grp, run_mode=$mode)" >&2
+              exit 1
+            fi
+          done
+          [ "$mode" = "restricted" ] || { echo "::error::run_mode=$mode, cần restricted" >&2; exit 1; }
+
       # v0.1.44 (F-6b/F-4b): trực canh máy chủ + gói chẩn đoán qua hộp thư. Chỉ chạy khi genh có lệnh
       # `watchdog` (genh help) — chạy tay workflow cho tag cũ không bị đỏ vì tính năng bản đó chưa có.
       - name: genh có trực canh máy chủ chưa (v0.1.44+)

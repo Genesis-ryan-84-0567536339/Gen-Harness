@@ -21,7 +21,7 @@ from gh.gen import tools as gen_tools
 from gh.gen.tools import ToolRunner, collect_ids, compact
 from gh.gen.validator import Validator
 from gh.providers.router import ModelRouter, ModelUnavailable, Routed
-from tests.conftest import Api, verify_pin
+from tests.conftest import FAKE_PUBLIC_IP, Api, verify_pin
 from tests.test_rbac_api import login_as
 
 
@@ -364,7 +364,9 @@ async def test_system_one_provider_card_and_test(owner_api: Api, app: Any) -> No
     app.state.model_router.transport = httpx.MockTransport(handler)
     r = await owner_api.send("POST", f"/providers/{p['id']}/test", None)
     assert r.status_code == 200 and r.json()["ok"] is True, r.text
-    assert str(seen[0].url) == "https://openrouter.ai/api/v1/chat/completions"
+    # v0.1.45 (F-49): gọi qua IP đã ghim (DNS giả của conftest) — tên máy gốc nằm ở header Host.
+    assert str(seen[0].url) == f"https://{FAKE_PUBLIC_IP}/api/v1/chat/completions"
+    assert seen[0].headers["host"] == "openrouter.ai"
     assert seen[0].headers["authorization"] == "Bearer sk-or-v1-khoa-thu-nghiem"
     assert orjson.loads(seen[0].content)["model"] == "typesafe/jev-1.13"
     app.state.model_router.transport = httpx.MockTransport(lambda req: httpx.Response(401, text="bad key"))

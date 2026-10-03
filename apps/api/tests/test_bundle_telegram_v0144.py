@@ -75,7 +75,8 @@ async def test_import_old_bundle_without_notify_channels(owner_api: Api, redis: 
                         {"e": crypto.encrypt(totp, b"totp_secret"), "i": user})
         # Mô phỏng CSDL ở revision 0028: chưa có các bảng của migration 0029.
         await s.execute(text("DROP TABLE ops.telegram_outbox, ops.notify_channels"))
-        await s.execute(text("UPDATE alembic_version SET version_num = '0028' WHERE version_num = '0029'"))
+        # Từ v0.1.45 head là 0030 (chạy lại an toàn) — hạ mọi revision sau 0028 về 0028.
+        await s.execute(text("UPDATE alembic_version SET version_num = '0028' WHERE version_num > '0028'"))
         await s.commit()
     target_db, _key_b = await _migrate(monkeypatch, tmp_path)
     try:

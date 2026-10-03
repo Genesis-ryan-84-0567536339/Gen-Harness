@@ -2599,3 +2599,68 @@ Không cần chụp màn hình hay gửi mã cho Claude — kết quả tự lư
   bằng O_NOFOLLOW rồi mở tệp theo `dir_fd` (hết khe tráo symlink). Gói chẩn đoán "đang tạo" quá 3 phút ⇒ thêm lệnh
   `genh doctor` chạy tay; lỗi tải cũ biến mất khi tạo gói mới. Trợ giúp: `genh stop` nói rõ trực canh tạm nghỉ; thêm
   `genh doctor`, `genh watchdog status`.
+
+## v0.1.45 — Khoá cấu hình nhạy cảm & vệ sinh bảo mật (03/10/2026)
+
+### Boss cần làm gì
+
+Không cần làm gì. Lưu ý nhỏ:
+- Từ bản này, khi Sếp đổi **mức tự trị / điều cấm / giới hạn / phạm vi kênh** của agent, **thêm tài khoản CLI**, đổi tool
+  MCP từ ghi sang đọc, hay sửa Hướng dẫn việc 9/10 (có mời người) sau khi đã thiết lập xong, Console hỏi **mã PIN 6 số**
+  một lần. Đổi tên/mô tả agent, cập nhật hệ thống, Sao lưu ngay thì không hỏi.
+- Nếu Sếp từng thêm máy chủ MCP dùng địa chỉ `http://` kèm token, Console sẽ báo cần đổi sang `https://` khi gọi tool đó.
+- Bản cập nhật tự khoá hộp thư `run/` trên máy chủ (chỉ genh và Console ghi được); nút Cập nhật/Khôi phục dùng như cũ.
+- Có thể mở **Trợ giúp** xem đoạn "Mã PIN bảo vệ được gì"; dòng điểm nhân sự có nhãn **"Đáng ngờ"** thì xem chứng cứ
+  trước khi tin điểm.
+
+### Vì sao (kế hoạch tổng `docs/audit/2026-10-01/0-ke-hoach-tong.md`, mục v0.1.45)
+
+Phiên Owner lỡ bị lấy cũng không hạ rào được (đổi tự trị, đổi tool MCP, gắn tài khoản lạ), và vá các lỗ nhỏ đã biết:
+F-20 (phần còn lại), F-49 SSRF từ cấu hình, F-52 hộp thư `run/` 0777, F-54 mật khẩu trên dòng lệnh, F-55 WebSocket, F-56
+mã CLI ghi thẳng vào PTY, F-57 nhật ký MCP lưu dữ liệu thô, F-58 `system.manage` phạm vi lệch, F-60 giới hạn PIN + điểm
+nhân sự bị lách.
+
+### Thay đổi
+
+- **F-20 — PIN đúng chỗ hạ rào**: `PATCH /agents/{id}` chỉ đòi PIN `policy.change` khi autonomy_level/forbidden/limits/
+  channel_scopes KHÁC giá trị đang lưu; `POST /cli/login` PIN `cli.switch_account`; Hướng dẫn bước 9 (và 10 có lời mời)
+  sau Hoàn tất PIN `policy.change`/`user.manage`; `PATCH /mcp/tools/{id}` ghi → đọc PIN `mcp.expose`. Cập nhật và sao lưu
+  không gắn PIN. Vai trò không đủ quyền ⇒ 403 trước 423; dữ liệu sai ⇒ 422 trước 423. Web chỉ gửi trường rào chắn khi đổi; 423 tự mở hộp PIN rồi gửi lại.
+- **F-58**: `require()` ép phạm vi ALL cho `system.manage` (`deps.ALL_ONLY`) ở mọi route + WS.
+- **F-49**: MCP và nhà cung cấp AI ghim DNS mọi lời gọi (kết nối thẳng IP đã kiểm, chặn DNS rebinding); luôn cấm
+  link-local/169.254.x, 0.0.0.0/::, multicast và tên dịch vụ compose (`db`, `redis`, `api`, `gen-harness-db-1`…); có
+  token/khoá ⇒ bắt buộc https; kiểm cả lúc ghi (422) lẫn lúc gọi (dòng cũ trong DB bị chặn, không request nào ra ngoài).
+- **F-57**: `agent.mcp_calls.args` chỉ lưu `{sha256, keys, bytes}`; `result_summary` + sự kiện WS `mcp.call` che số dài/
+  email/token (`gh/chassis/masking.py`); job dọn dẹp chuyển dòng cũ (chạy lại không đổi).
+- **F-52**: ảnh api nhóm cố định gid 10001; genh siết `run/` + `run/request` về **2770 nhóm 10001** sau compose up
+  (install/update/rollback/start/doctor), ghi `run_mode` vào `genh.json`; tệp yêu cầu phải là tệp thường do api/genh sở
+  hữu (symlink/uid lạ bị bỏ qua); api ghi yêu cầu bằng tệp tạm O_EXCL + `os.replace`, đọc trạng thái bằng O_NOFOLLOW.
+- **F-54**: pg_dump/pg_restore (sao lưu, khôi phục, xuất/nhập gói) nhận mật khẩu qua `PGPASSWORD`, argv không có mật khẩu;
+  lỗi pg_* che mật khẩu.
+- **F-55**: WS `/api/v1/ws` kiểm Origin (sai ⇒ 4403), nạp lại phiên mỗi ≤ 60 giây (thu hồi/khoá ⇒ 4401, đổi vai trò có
+  hiệu lực ở lượt nạp lại); web dừng hẳn sau 4403 (không vòng kết nối lại).
+- **F-56**: mã đăng nhập CLI phải khớp `^[A-Za-z0-9._~#/+=-]{4,500}$` (nhận `c/boss-Ab9_x`, `4/0AbCdEf-12_xyZ`,
+  `<mã>#<state>` — đã đối chiếu dạng mã thật F-77); khoảng trắng giữa/ký tự điều khiển ⇒ 422, không ghi gì vào PTY.
+- **F-60**: migration **0030** `biz.people_reviews.suspicious/suspicious_reason` (chạy lại an toàn); job tính điểm chỉ
+  GẮN CỜ khi tin nhắn giống lệnh cho AI/xin điểm (không đổi điểm), sửa tay giữ cờ; chip "Đáng ngờ" (rê chuột xem lý do) +
+  ghi chú trong chi tiết; Trợ giúp thêm thẻ "Mã PIN bảo vệ được gì".
+- **Tích hợp**: gộp 4 gói (pin-rbac-cli, mcp-ssrf-log, run-pg-secrets, ws-people-help) không xung đột. Sửa test
+  `test_bundle_telegram_v0144` (head đã thành 0030 — hạ mọi revision sau 0028). Thêm `tests/test_v0145_integ.py` (POST
+  /providers `https://db|redis|api/v1` + khoá ⇒ 422; route mới PATCH /mcp/tools theo luật system.manage=ALL, Auditor 403
+  trước 423), e2e mock `v0145-integ.spec.ts` (MCP ghi → đọc hỏi PIN, chip "Đáng ngờ", thẻ PIN ở Trợ giúp, không lỗi 423
+  thô/`[object Object]`), bước E2E-install kiểm `run/` 2770 nhóm 10001.
+
+### Kiểm tra
+
+- Kết quả chạy tích hợp (03/10): ruff + mypy sạch (148 tệp), alembic 1 head (**0030**); pytest đầy đủ superuser 1707
+  passed, dưới gh_app 1706 passed + `test_gen` (sửa sau lượt) passed (3 deselected `slow` như CI) — gồm
+  `test_pin_barriers_v0145`, `test_rbac_system_manage_v0145`, `test_mcp_ssrf_v0145`, `test_provider_endpoint_v0145`,
+  `test_provider_pin_runtime_v0145`, `test_mcp_log_digest_v0145`, `test_pg_secret_argv_v0145`, `test_hostlink_io_v0145`,
+  `test_ws_session_v0145`, `test_cli_code_v0145`, `test_people_suspicious_v0145`, `test_v0145_integ`; web lint/typecheck/
+  check_no_fake_ids sạch, vitest 746 passed (82 tệp), build OK, bridge test 0 fail; Playwright mock 256 passed (không skip,
+  không flaky) — gồm `pin-barriers-v0145`, `v0145-integ`; browser 14 passed (ruff + mypy sạch); genh `go vet` + `go test
+  ./...` ok (Linux), build + biên dịch test Windows/macOS ok; `check_release_gate.py` thoát 0, unittest `.github/scripts` 30 OK.
+- Sửa khi gộp: `test_gen::test_system_one_provider_card_and_test` kiểm URL theo IP đã ghim + header Host (F-49 ghim DNS
+  nhà cung cấp); `test_bundle_telegram_v0144` hạ revision từ 0030.
+- Chờ sau phát hành (người điều phối): genh tải từ Release đúng checksum + `genh version` = v0.1.45; E2E cài thật xanh
+  (gồm `stat -c %a run` = 2770 nhóm 10001, nút Cập nhật ngay/Khôi phục/Gói chẩn đoán vẫn chạy) rồi mới promote.
