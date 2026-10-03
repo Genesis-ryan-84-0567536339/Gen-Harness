@@ -25,11 +25,13 @@ HALT_KEY = "gh:browser:halt"
 HEARTBEAT_KEY = "gh:browser:heartbeat"
 LOCK_PREFIX = "gh:browser:lock:"
 NONCE_PREFIX = "gh:browser:nonce:"
+PERMIT_NONCE_PREFIX = "gh:browser:permit:"
 FRAMES_PREFIX = "gh:browser:frames:"
 INPUT_PREFIX = "gh:browser:input:"
 RESULTS_GROUP = "api"
 
 P_JOB, P_RESULT, P_CONTROL, P_INPUT, P_FRAME, P_TRANSPORT = "job", "result", "control", "input", "frame", "transport"
+P_PERMIT = "permit"
 
 
 def subkey(key: bytes, purpose: str) -> bytes:

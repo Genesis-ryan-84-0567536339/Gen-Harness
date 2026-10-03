@@ -6,14 +6,18 @@ dẫn `/checkpoint/`, link thông báo có `notif_id=`/`notif_t=`, link hội th
 kiểm trên TRANG MẪU lưu sẵn (tests/fixtures) — CHƯA kiểm trên Facebook thật. Giao diện đổi → việc báo lỗi `SELECTOR`
 rõ ràng thay vì đoán; Owner nghiệm thu bằng một lần đăng nhập + đọc thật.
 
-KHÔNG có: đăng, trả lời, nhắn, thích, kết bạn (v0.1.30 — qua đề xuất + permit); không lách chống bot; gặp checkpoint /
-CAPTCHA thì trả trạng thái để worker DỪNG, không vượt.
+GHI (trả lời bình luận, nhắn tin): chỉ khi có permit hợp lệ (ghb.permit). THÀNH THẬT: bộ chọn ghi kiểm trên TRANG
+MẪU, CHƯA kiểm trên Facebook thật — Owner nghiệm thu bằng một lần trả lời thật. Nội dung được chèn MỘT lần
+(`insert_text`), không mô phỏng gõ phím người.
+
+KHÔNG có: đăng bài, thích, kết bạn; không lách chống bot; gặp checkpoint / CAPTCHA thì trả trạng thái để worker DỪNG,
+không vượt.
 """
 
 import re
 from typing import Any
 
-from ghb.adapters.base import Adapter, PageState
+from ghb.adapters.base import Adapter, PageState, TargetNotFound
 
 HOME = "https://www.facebook.com/"
 NOTIFICATIONS = "https://www.facebook.com/notifications"
@@ -65,6 +69,42 @@ CAPTCHA_SELECTORS = ('iframe[src*="recaptcha"]', 'iframe[src*="captcha"]', 'ifra
                      '#captcha', '[id*="captcha" i]')
 
 
+ARTICLE = '[role="article"]'
+TEXTBOX = '[contenteditable="true"][role="textbox"]'
+MESSAGE_ROW = '[role="main"] [role="row"]'
+TARGET_ATTR = "data-ghb-target"
+
+# Chọn bình luận đích: bài viết ARIA có aria-label bắt đầu "Bình luận"/"Comment"; ưu tiên cái được làm nổi / có link
+# chứa đúng comment_id của URL. Đánh dấu bằng thuộc tính để lấy locator — chỉ đọc cấu trúc, không bấm.
+MARK_COMMENT_JS = """(commentId) => {
+  const re = /^(bình luận|comment)/i;
+  const arts = Array.from(document.querySelectorAll('[role="article"]'))
+    .filter((a) => re.test(a.getAttribute('aria-label') || ''));
+  document.querySelectorAll('[data-ghb-target]').forEach((e) => e.removeAttribute('data-ghb-target'));
+  if (!arts.length) return 0;
+  let pick = null;
+  if (commentId) {
+    pick = arts.find((a) => a.querySelector('a[href*="comment_id=' + commentId + '"]')) || null;
+  }
+  pick = pick || arts.find((a) => a.matches('[aria-current], [data-highlighted="true"]')) || arts[0];
+  pick.setAttribute('data-ghb-target', '1');
+  return arts.length;
+}"""
+
+COUNT_JS = """([sel, text]) => Array.from(document.querySelectorAll(sel))
+  .filter((e) => !e.querySelector('[contenteditable="true"]') && (e.innerText || '').includes(text)).length"""
+
+WAIT_NEW_JS = """([sel, text, base]) => Array.from(document.querySelectorAll(sel))
+  .filter((e) => !e.querySelector('[contenteditable="true"]') && (e.innerText || '').includes(text)).length > base"""
+
+
+def _comment_id(url: str) -> str:
+    from urllib.parse import parse_qs, urlsplit
+
+    vals = parse_qs(urlsplit(url).query).get("comment_id") or []
+    return re.sub(r"[^0-9A-Za-z_]", "", vals[0])[:40] if vals else ""
+
+
 def _lines(text: str) -> list[str]:
     return [ln.strip() for ln in text.splitlines() if ln.strip() and ln.strip() not in ("·", "•")]
 
@@ -98,6 +138,7 @@ def parse_conversation(raw: dict[str, Any]) -> dict[str, Any] | None:
 class FacebookAdapter(Adapter):
     key = "facebook_personal"
     home = HOME
+    write_kinds = ("reply_comment", "send_message")
 
     async def page_state(self, page: Any, context: Any) -> PageState:
         url = (page.url or "").lower()
@@ -134,3 +175,50 @@ class FacebookAdapter(Adapter):
         else:
             raise ValueError(f"không đọc được mục {what}")
         return [x for x in (parse(r) for r in raws if isinstance(r, dict)) if x is not None]
+
+    # ─── ghi (selector cố định; chỉ chạy sau ghb.permit.check) ──────────────────────────────────────────────
+    async def open_target(self, page: Any, action: str, target_url: str) -> None:
+        await page.goto(target_url, wait_until="domcontentloaded")
+        if action == "reply_comment":
+            await page.wait_for_selector(ARTICLE, timeout=15_000)
+        else:
+            await page.wait_for_selector(f'[role="main"] {TEXTBOX}, [role="main"]', timeout=15_000)
+
+    async def compose(self, page: Any, action: str, text: str) -> None:
+        if action == "reply_comment":
+            if not await page.evaluate(MARK_COMMENT_JS, _comment_id(page.url)):
+                raise TargetNotFound("không thấy bình luận đích")
+            target = page.locator(f"[{TARGET_ATTR}]")
+            btn = target.locator('[role="button"]').filter(has_text=re.compile(r"^\s*(Phản hồi|Reply)\s*$", re.I))
+            if await btn.count() == 0:
+                raise TargetNotFound("bình luận không có nút Phản hồi")
+            await btn.first.click()
+            box = target.locator(TEXTBOX)
+            try:
+                await box.first.wait_for(state="visible", timeout=5_000)
+            except Exception as e:  # noqa: BLE001
+                raise TargetNotFound("không thấy ô trả lời") from e
+            sel = ARTICLE
+        elif action == "send_message":
+            box = page.locator(f'[role="main"] {TEXTBOX}')
+            if await box.count() == 0:
+                raise TargetNotFound("không thấy ô soạn tin")
+            sel = MESSAGE_ROW
+        else:
+            raise TargetNotFound("hành động lạ")
+        base = await page.evaluate(COUNT_JS, [sel, text])
+        await page.evaluate("(n) => { window.__ghbBase = n; }", base)
+        await box.first.focus()
+        await page.keyboard.insert_text(text)       # MỘT lần chèn — không gõ từng phím
+
+    async def submit(self, page: Any, action: str) -> None:
+        await page.keyboard.press("Enter")
+
+    async def confirm_sent(self, page: Any, action: str, text: str, timeout_ms: int) -> bool:
+        sel = ARTICLE if action == "reply_comment" else MESSAGE_ROW
+        try:
+            base = await page.evaluate("() => window.__ghbBase || 0")
+            await page.wait_for_function(WAIT_NEW_JS, arg=[sel, text, base], timeout=timeout_ms)
+            return True
+        except Exception:  # noqa: BLE001 — hết giờ / trang đóng: không xác nhận được
+            return False
