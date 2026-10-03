@@ -1,5 +1,7 @@
+# syntax=docker/dockerfile:1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
 # Một image cho api, worker và bước migrate. Build từ gốc repo: docker build -f deploy/images/api.Dockerfile .
-FROM python:3.11-slim
+# ghim digest (F-19) — Renovate tự nâng
+FROM python:3.11-slim@sha256:bab1b7ef4b450c81002278d035eff85ebe394ae94df904f7a3ba14f7e16e487b
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 WORKDIR /app/apps/api
 
@@ -44,9 +46,13 @@ RUN set -eux; \
     apt-get update; apt-get install -y --no-install-recommends postgresql-client-16; \
     pg_dump --version; \
     apt-get purge -y curl; apt-get autoremove -y; rm -rf /var/lib/apt/lists/*
-COPY apps/api/pyproject.toml ./
+# F-36 (v0.1.48): cài từ uv.lock (uv sync --frozen) vào /opt/venv; uv chỉ gắn tạm lúc build, KHÔNG nằm lại trong ảnh.
+# PATH đặt bằng ENV: alembic, arq, gh-api, `python` đều ra /opt/venv/bin.
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never UV_PYTHON=/usr/local/bin/python3.11 PATH=/opt/venv/bin:$PATH
+COPY apps/api/pyproject.toml apps/api/uv.lock ./
+RUN --mount=from=ghcr.io/astral-sh/uv:0.12.23@sha256:61d393e44e249f2e4b526b6c7ddcecce245946826e608e11c93ad4f5bba55b21,source=/uv,target=/usr/local/bin/uv --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev --no-install-project
 COPY apps/api/gh ./gh
-RUN pip install .
+RUN --mount=from=ghcr.io/astral-sh/uv:0.12.23@sha256:61d393e44e249f2e4b526b6c7ddcecce245946826e608e11c93ad4f5bba55b21,source=/uv,target=/usr/local/bin/uv --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev --no-editable
 COPY apps/api/alembic.ini ./
 COPY apps/api/migrations ./migrations
 COPY db/sql /app/db/sql

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
@@ -171,6 +173,81 @@ func TestEmbeddedCompose_EveryServiceHasLogLimits(t *testing.T) {
 func TestEmbeddedComposeMatchesRepo(t *testing.T) {
 	if !bytes.Equal(readRepoCompose(t), embeddedComposeYAML) {
 		t.Fatal("apps/genh/internal/compose/embedded_compose.yaml lệch deploy/compose.yaml — chép lại cho khớp")
+	}
+}
+
+// F-19 (v0.1.48): mọi ảnh dựng sẵn phải GHIM DIGEST (<tag>@sha256:<64 hex>); service không có image: thì
+// bắt buộc có build: (bản phát hành bị release.yml ghi đè bằng compose.release.yaml toàn image: ghcr.io/...@sha256:).
+var imagePinRE = regexp.MustCompile(`^[a-z0-9][a-z0-9._/:-]*@sha256:[0-9a-f]{64}$`)
+
+func imagePinErrors(data []byte) []string {
+	var doc map[string]any
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return []string{"YAML không đọc được: " + err.Error()}
+	}
+	services, ok := doc["services"].(map[string]any)
+	if !ok || len(services) == 0 {
+		return []string{"compose không có khối services"}
+	}
+	var errs []string
+	for name, raw := range services {
+		svc, _ := raw.(map[string]any)
+		image, hasImage := svc["image"]
+		if !hasImage {
+			if _, hasBuild := svc["build"]; !hasBuild {
+				errs = append(errs, "service "+name+" thiếu cả image: lẫn build:")
+			}
+			continue
+		}
+		str, _ := image.(string)
+		if !imagePinRE.MatchString(str) {
+			errs = append(errs, "service "+name+" image "+str+" chưa ghim digest (<tag>@sha256:<64 hex>)")
+		}
+	}
+	sort.Strings(errs)
+	return errs
+}
+
+func assertEveryImagePinned(t *testing.T, label string, data []byte) {
+	t.Helper()
+	for _, e := range imagePinErrors(data) {
+		t.Errorf("%s: %s (F-19)", label, e)
+	}
+}
+
+func TestDeployCompose_EveryImagePinnedByDigest(t *testing.T) {
+	assertEveryImagePinned(t, "deploy/compose.yaml", readRepoCompose(t))
+}
+
+func TestEmbeddedCompose_EveryImagePinnedByDigest(t *testing.T) {
+	assertEveryImagePinned(t, "embedded_compose.yaml", embeddedComposeYAML)
+}
+
+func TestImagePinErrors_RejectsTagOnly(t *testing.T) {
+	hex64 := strings.Repeat("ab", 32)
+	tagOnly := "services:\n  proxy:\n    image: caddy:2-alpine\n"
+	if len(imagePinErrors([]byte(tagOnly))) == 0 {
+		t.Error("image: caddy:2-alpine (không digest) phải bị báo lỗi")
+	}
+	pinned := "services:\n  proxy:\n    image: caddy:2-alpine@sha256:" + hex64 + "\n"
+	if errs := imagePinErrors([]byte(pinned)); len(errs) != 0 {
+		t.Errorf("ảnh đã ghim digest không được báo lỗi: %v", errs)
+	}
+	release := "services:\n  api:\n    image: ghcr.io/o/gen-harness-api@sha256:" + hex64 + "\n"
+	if errs := imagePinErrors([]byte(release)); len(errs) != 0 {
+		t.Errorf("ca phát hành ghcr.io/...@sha256 không được báo lỗi: %v", errs)
+	}
+	build := "services:\n  api:\n    build: { context: .., dockerfile: deploy/images/api.Dockerfile }\n"
+	if errs := imagePinErrors([]byte(build)); len(errs) != 0 {
+		t.Errorf("service chỉ có build: không được báo lỗi: %v", errs)
+	}
+	neither := "services:\n  api:\n    restart: always\n"
+	if len(imagePinErrors([]byte(neither))) == 0 {
+		t.Error("service thiếu cả image lẫn build phải bị báo lỗi")
+	}
+	badDigest := "services:\n  api:\n    image: redis:7@sha256:abc\n"
+	if len(imagePinErrors([]byte(badDigest))) == 0 {
+		t.Error("digest không đủ 64 hex phải bị báo lỗi")
 	}
 }
 

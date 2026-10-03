@@ -1,0 +1,68 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", "docker:pinDigests", "helpers:pinGitHubActionDigests"],
+  "timezone": "Asia/Ho_Chi_Minh",
+  "schedule": ["before 6am on monday"],
+  "prConcurrentLimit": 5,
+  "labels": ["phụ thuộc"],
+  "osvVulnerabilityAlerts": true,
+  "vulnerabilityAlerts": { "enabled": true },
+  "lockFileMaintenance": { "enabled": true },
+  "docker-compose": {
+    "managerFilePatterns": ["/(^|/)(?:docker-)?compose[^/]*\\.ya?ml$/", "/(^|/)embedded_compose\\.yaml$/"]
+  },
+  "packageRules": [
+    {
+      "description": "F-19: nâng nhỏ/digest/ghim tự merge squash khi MỌI check xanh (platformAutomerge=false để chờ cả E2E cài thật, không chỉ ci-ok).",
+      "matchUpdateTypes": ["minor", "patch", "digest", "pin", "pinDigest"],
+      "automerge": true,
+      "automergeType": "pr",
+      "automergeStrategy": "squash",
+      "platformAutomerge": false
+    },
+    {
+      "description": "Nâng major luôn cần người duyệt.",
+      "matchUpdateTypes": ["major"],
+      "automerge": false
+    },
+    {
+      "description": "playwright (pip) và ảnh mcr playwright/python phải nâng cùng nhau, không tự merge.",
+      "groupName": "playwright",
+      "matchPackageNames": ["playwright", "mcr.microsoft.com/playwright/python"],
+      "automerge": false
+    },
+    {
+      "description": "Giữ python ảnh slim ở 3.11.x (api cần >=3.11, ảnh/CI cố định 3.11).",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["python"],
+      "allowedVersions": "<3.12"
+    },
+    {
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["node"],
+      "allowedVersions": "<23"
+    },
+    {
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["redis"],
+      "allowedVersions": "<8"
+    },
+    {
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["caddy"],
+      "allowedVersions": "<3"
+    },
+    {
+      "description": "pgvector bám tag pg16: chỉ nâng digest.",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["pgvector/pgvector"],
+      "matchUpdateTypes": ["major", "minor", "patch"],
+      "enabled": false
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["digest", "minor", "patch"],
+      "automerge": true
+    }
+  ]
+}
