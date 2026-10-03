@@ -14,6 +14,7 @@ import {
   DIAGNOSTICS_KEY,
   DIAG_FILTERED_TEXT,
   DIAG_POLL_MS,
+  DIAG_STALE_TEXT,
   DIAG_UNSUPPORTED_TEXT,
   DIAG_WORKING_TEXT,
   diagApiErrorText,
@@ -71,12 +72,17 @@ export function DiagnosticsCard() {
         ) : q.isError || !d ? (
           <CardError error={q.error} onRetry={() => void q.refetch()} retrying={q.isFetching} />
         ) : phase === 'unsupported' ? (
-          <CommandBlock command={typeof d.command === 'string' && d.command ? d.command : 'genh doctor'} />
+          <CommandBlock text={DIAG_UNSUPPORTED_TEXT} command={commandOf(d)} />
         ) : (
           <>
             <p className="help-text">
               Người hỗ trợ cần xem máy chủ? Bấm Tạo gói chẩn đoán, đợi xong rồi tải tệp .zip gửi cho họ — không cần mở dòng lệnh.
             </p>
+            {phase === 'stale' ? (
+              <div className="muted-note friendly-error" role="alert" data-testid="diagnostics-stale">
+                <CommandBlock text={DIAG_STALE_TEXT} command={commandOf(d)} testId="diagnostics-stale-command" />
+              </div>
+            ) : null}
             {phase === 'working' ? (
               <p className="muted-note" role="status" data-testid="diagnostics-working">
                 <Icon name="ph ph-circle-notch" size={12} className="spin" /> {DIAG_WORKING_TEXT}
@@ -142,7 +148,9 @@ export function DiagnosticsCard() {
   );
 }
 
-function CommandBlock({ command }: { command: string }) {
+const commandOf = (d: DiagnosticsState) => (typeof d.command === 'string' && d.command ? d.command : 'genh doctor');
+
+function CommandBlock({ text, command, testId = 'diagnostics-command' }: { text: string; command: string; testId?: string }) {
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     try {
@@ -154,8 +162,8 @@ function CommandBlock({ command }: { command: string }) {
     }
   };
   return (
-    <div className="offsite-cmd" data-testid="diagnostics-command">
-      <span>{DIAG_UNSUPPORTED_TEXT}</span>
+    <div className="offsite-cmd" data-testid={testId}>
+      <span>{text}</span>
       <div className="offsite-cmd__row">
         <code className="mono">{command}</code>
         <Button variant="ghost" className="btn-27" icon={copied ? 'ph ph-check' : 'ph ph-copy'} onClick={() => void copy()} aria-label="Chép lệnh">

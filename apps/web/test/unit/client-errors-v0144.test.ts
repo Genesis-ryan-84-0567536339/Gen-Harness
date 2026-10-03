@@ -3,7 +3,7 @@
  * errorId, tối đa 5 lần/phút, fetch lỗi không bao giờ ném; không đi qua apiClient (không chuyển /login khi 401).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiError } from '@gen-harness/contracts';
+import { ApiError, CLIENT_ERROR_LIMITS } from '@gen-harness/contracts';
 import {
   CLIENT_ERRORS_PER_MINUTE,
   MAX_MESSAGE,
@@ -65,6 +65,13 @@ describe('reportClientError', () => {
     const b = clientErrorBody({ errorId: 'ERR-ABCDE-0002', error: e, path: '/' + 'p'.repeat(1000) });
     expect(b.message.length).toBe(MAX_MESSAGE);
     expect(b.stack!.length).toBe(MAX_STACK);
+    // Không vượt giới hạn server (ClientErrorIn: stack ≤ 4000) — vượt là 422, mất cả báo lỗi.
+    expect(MAX_STACK).toBe(CLIENT_ERROR_LIMITS.stack);
+    expect(b.stack!.length).toBeLessThanOrEqual(4000);
+    for (const [k, n] of Object.entries(CLIENT_ERROR_LIMITS)) {
+      const v = (b as unknown as Record<string, unknown>)[k];
+      if (typeof v === 'string') expect(v.length, k).toBeLessThanOrEqual(n);
+    }
     expect(b.path.length).toBeLessThanOrEqual(300);
     // Không phải Error: chuỗi / đối tượng → message là chuỗi.
     expect(clientErrorBody({ errorId: 'ERR-A-0003', error: 'hỏng', path: '/' }).message).toBe('hỏng');

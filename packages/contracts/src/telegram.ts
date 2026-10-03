@@ -53,10 +53,13 @@ export interface TelegramConfig {
   host: TelegramHostStatus;
 }
 
-/** `PUT /notify/telegram` (PIN `notify.change`). Bỏ `token` = giữ token đã lưu. */
+/**
+ * `PUT /notify/telegram` (PIN `notify.change`). Đã cấu hình: bỏ `token`/`chat_id` (hoặc để trống) = giữ giá trị đã lưu;
+ * `{}` = "Lưu lại" (máy chủ ghi lại run/telegram.json bằng khoá hiện tại). Chưa cấu hình: cần cả hai.
+ */
 export interface TelegramSaveBody {
   token?: string;
-  chat_id: string;
+  chat_id?: string;
   enabled?: boolean;
   briefing?: boolean;
   reminders?: boolean;

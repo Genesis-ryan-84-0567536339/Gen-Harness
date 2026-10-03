@@ -43,6 +43,21 @@ test.describe('Gói chẩn đoán (v0.1.44)', () => {
     await expect(page.locator('body')).not.toContainText('[object Object]');
   });
 
+  test('genh không nhận yêu cầu quá 15 phút (stale) → câu "Máy chủ chưa nhận" + lệnh tay + Tạo gói lại được', async ({ page }) => {
+    await p3Hook(page.request, 'diagnostics', 'seed', { diag: 'stale' });
+    await loginAsOwner(page);
+    await page.goto('/help');
+    const card = page.getByTestId('diagnostics-card');
+    const stale = card.getByTestId('diagnostics-stale');
+    await expect(stale).toContainText('Máy chủ chưa nhận yêu cầu tạo gói');
+    await expect(stale).toContainText('genh doctor');
+    await expect(card.getByTestId('diagnostics-working')).toHaveCount(0);
+    await card.getByRole('button', { name: 'Tạo gói chẩn đoán' }).click();
+    await enterPin(page);
+    await expect(card.getByRole('link', { name: /^Tải gói chẩn đoán/ })).toBeVisible({ timeout: 15_000 });
+    await expect(card.getByTestId('diagnostics-stale')).toHaveCount(0);
+  });
+
   test('genh cũ → hiện lệnh "genh doctor" để chạy trên máy chủ; vai trò khác Owner không thấy thẻ', async ({ page }) => {
     await p3Hook(page.request, 'diagnostics', 'seed', { diag: 'unsupported' });
     await loginAsOwner(page);

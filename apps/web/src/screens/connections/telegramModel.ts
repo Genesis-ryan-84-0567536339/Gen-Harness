@@ -28,11 +28,12 @@ export function tokenFormatError(token: string): string | null {
 /** Câu cho Sếp theo mã lỗi Telegram của máy chủ. */
 export const TELEGRAM_ERROR_TEXT: Record<string, string> = {
   TELEGRAM_NOT_CONFIGURED: 'Chưa nối Telegram — làm theo hướng dẫn ở Kết nối › Telegram rồi bấm Lưu.',
-  TELEGRAM_TOKEN_REJECTED: 'Token sai hoặc bot đã bị xoá — tạo lại bằng BotFather rồi dán token mới',
-  TELEGRAM_CHAT_NOT_FOUND: 'Không tìm thấy chat — mở bot, bấm Bắt đầu rồi bấm Tìm chat_id lại',
-  TELEGRAM_BOT_BLOCKED: 'Sếp đã chặn bot hoặc chưa bấm Bắt đầu — mở bot trên Telegram, bấm Bắt đầu',
+  TELEGRAM_TOKEN_REJECTED: 'Token sai hoặc bot đã bị xoá — tạo lại bằng BotFather rồi dán token mới.',
+  TELEGRAM_CHAT_NOT_FOUND: 'Không tìm thấy chat — mở bot, bấm Bắt đầu rồi bấm Tìm chat_id lại.',
+  TELEGRAM_BOT_BLOCKED: 'Sếp đã chặn bot hoặc chưa bấm Bắt đầu — mở bot trên Telegram, bấm Bắt đầu.',
   TELEGRAM_RATE_LIMITED: 'Telegram đang giới hạn số tin — đợi một phút rồi bấm Gửi thử lại.',
-  TELEGRAM_UNREACHABLE: 'Máy chủ không ra được Internet tới Telegram — kiểm tra mạng',
+  TELEGRAM_UNREACHABLE: 'Máy chủ không ra được Internet tới Telegram — kiểm tra mạng.',
+  TELEGRAM_KEY_MISMATCH: 'Máy chủ không đọc được cấu hình Telegram — bấm Lưu lại một lần.',
 };
 
 /** Câu thân thiện theo mã (mã lạ → câu máy chủ đã lọc qua friendlyError). Luôn là chuỗi. */
@@ -67,22 +68,47 @@ export const TELEGRAM_WARNING =
 export const TEST_OK_TEXT = 'Đã gửi — kiểm tra Telegram trên điện thoại (sẽ có thêm 1 tin từ trực canh máy chủ trong ~1 phút)';
 export const TEST_OK_NO_HOST_TEXT = 'Đã gửi — kiểm tra Telegram trên điện thoại';
 
-/** Câu kết quả Gửi thử ĐẠT: có nhờ Trực canh máy chủ gửi thêm ⇒ nói thêm tin thứ hai. */
-export function testOkText(r: { host_requested?: boolean } | null | undefined): string {
-  return r?.host_requested === false ? TEST_OK_NO_HOST_TEXT : TEST_OK_TEXT;
+/**
+ * Câu kết quả Gửi thử ĐẠT: có nhờ Trực canh máy chủ gửi thêm VÀ khối trực canh không đang báo lỗi (key_mismatch,
+ * gửi lỗi, genh cũ) ⇒ mới hứa tin thứ hai.
+ */
+export function testOkText(
+  r: { host_requested?: boolean } | null | undefined,
+  host?: Pick<TelegramHostStatus, 'supported' | 'telegram' | 'telegram_error_code'> | null,
+): string {
+  if (r?.host_requested === false || hostWarning(host)) return TEST_OK_NO_HOST_TEXT;
+  return TEST_OK_TEXT;
 }
 
 export const FIND_CHAT_EMPTY = 'Chưa thấy tin nào — mở bot, bấm Bắt đầu và gửi một tin rồi bấm lại';
 
-export const HOST_KEY_MISMATCH_TEXT = 'Máy chủ không đọc được cấu hình — bấm Lưu lại một lần';
-export const HOST_UNSUPPORTED_TEXT = 'Cập nhật genh để bật trực canh';
+export const HOST_KEY_MISMATCH_TEXT = 'Máy chủ không đọc được cấu hình — bấm Lưu lại một lần.';
+export const HOST_UNSUPPORTED_TEXT = 'Cập nhật genh để bật trực canh.';
+export const HOST_FAILED_PREFIX = 'Trực canh máy chủ chưa gửi được tin Telegram:';
 
 /** Cảnh báo của khối "Trực canh máy chủ" (null = không có gì để cảnh báo). */
-export function hostWarning(host: Pick<TelegramHostStatus, 'supported' | 'telegram'> | null | undefined): string | null {
+export function hostWarning(host: Pick<TelegramHostStatus, 'supported' | 'telegram' | 'telegram_error_code'> | null | undefined): string | null {
   if (!host) return null;
   if (host.supported === false) return HOST_UNSUPPORTED_TEXT;
   if (host.telegram === 'key_mismatch') return HOST_KEY_MISMATCH_TEXT;
+  if (host.telegram === 'failed') return `${HOST_FAILED_PREFIX} ${telegramErrorText(str(host.telegram_error_code))}`;
   return null;
+}
+
+/** "Chi tiết kỹ thuật" của cảnh báo trực canh gửi lỗi (mã lỗi genh) — chỉ chuỗi, rỗng khi không có. */
+export function hostWarningDetail(host: Pick<TelegramHostStatus, 'telegram' | 'telegram_error_code'> | null | undefined): string {
+  if (!host || host.telegram !== 'failed') return '';
+  const code = str(host.telegram_error_code);
+  return code ? `Mã lỗi ${code} · trực canh máy chủ (genh)` : 'trực canh máy chủ (genh) báo gửi lỗi, không kèm mã';
+}
+
+/** Dòng kết quả tin thử thứ hai (do trực canh máy chủ gửi): "Tin thử từ máy chủ: Đạt · 03/10 08:05". null = chưa có. */
+export function hostTestText(test: TelegramHostStatus['test'] | null | undefined, fmtTime: (iso: string) => string): string | null {
+  if (!test || typeof test !== 'object' || typeof test.ok !== 'boolean') return null;
+  const at = str(test.at);
+  const when = at ? ` · ${fmtTime(at)}` : '';
+  if (test.ok) return `Tin thử từ máy chủ: Đạt${when}`;
+  return `Tin thử từ máy chủ: Lỗi · ${telegramErrorText(str(test.error_code))}${when}`;
 }
 
 export const SCHEDULE_LABEL: Record<string, string> = {

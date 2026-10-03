@@ -2,7 +2,8 @@
 
 - `GET` — cấu hình (KHÔNG BAO GIỜ có token; chat_id dạng che), lần Gửi thử gần nhất, trạng thái Trực canh máy chủ
   (run/watchdog-status.json do genh ghi).
-- `PUT` (PIN `notify.change`) — lưu token (tuỳ chọn khi đã có) + chat_id + cờ; token mới được kiểm bằng getMe.
+- `PUT` (PIN `notify.change`) — lưu token + chat_id (cả hai tuỳ chọn khi đã có — trống ⇒ giữ) + cờ; token mới được
+  kiểm bằng getMe. `{}` = "Lưu lại" (ghi lại run/telegram.json bằng khoá master hiện tại).
 - `DELETE` (PIN) — gỡ cấu hình; run/telegram.json chuyển sang enabled=false.
 - `POST /find-chat` — đọc getUpdates (token trong thân hoặc token đã lưu; token trong thân KHÔNG được lưu).
 - `POST /test` — Gửi thử bằng cấu hình đã lưu, ghi boss_checks 'telegram', và để lại run/request/watchdog.json cho
@@ -29,7 +30,8 @@ MANAGE = require("system.manage", rbac.ALL)
 
 class TelegramIn(BaseModel):
     token: str | None = Field(None, max_length=128)
-    chat_id: str = Field(max_length=32)
+    #: Bỏ trống khi đã cấu hình ⇒ giữ chat_id cũ (như token).
+    chat_id: str | None = Field(None, max_length=32)
     enabled: bool | None = None
     briefing: bool | None = None
     reminders: bool | None = None
@@ -110,8 +112,8 @@ async def find_chat(request: Request, body: FindChatIn | None = None, _m: servic
         return {"chats": [], "error_code": e.code, "message": tsvc.message_for(e.code)}
     if not chats:
         return {"chats": [], "error_code": None,
-                "message": "Chưa thấy tin nào — Sếp mở bot trên Telegram, bấm Start (hoặc nhắn một chữ bất kỳ) rồi "
-                           "bấm Tìm chat_id lần nữa"}
+                "message": "Chưa thấy tin nào — Sếp mở bot trên Telegram, bấm Bắt đầu (Start) hoặc nhắn "
+                           "một chữ bất kỳ, rồi bấm Tìm chat_id lần nữa"}
     return {"chats": chats, "error_code": None, "message": None}
 
 

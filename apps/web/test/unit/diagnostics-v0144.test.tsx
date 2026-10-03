@@ -10,7 +10,7 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { DIAGNOSTICS_DOWNLOAD_URL, type DiagnosticsState } from '@gen-harness/contracts';
 import { DiagnosticsCard } from '../../src/help/DiagnosticsCard';
-import { DIAG_FILTERED_TEXT, DIAG_WORKING_TEXT, diagPhase, downloadLabel, fmtBytes } from '../../src/help/diagnosticsModel';
+import { DIAG_FILTERED_TEXT, DIAG_STALE_TEXT, DIAG_WORKING_TEXT, diagPhase, downloadLabel, fmtBytes } from '../../src/help/diagnosticsModel';
 import { usePinStore } from '../../src/lib/pinStore';
 import { queryClient } from '../../src/lib/queryClient';
 import { qk } from '../../src/lib/queries';
@@ -106,6 +106,9 @@ describe('diagnosticsModel', () => {
     expect(diagPhase({ supported: true, state: 'running' })).toBe('working');
     expect(diagPhase({ supported: true, state: 'failed' })).toBe('failed');
     expect(diagPhase(undefined)).toBe('idle');
+    expect(diagPhase({ supported: true, state: 'pending', stale: true })).toBe('stale');
+    expect(diagPhase({ supported: true, state: 'running', stale: true })).toBe('stale');
+    expect(diagPhase({ supported: true, state: 'pending', stale: false })).toBe('working');
     expect(fmtBytes(512)).toBe('512 B');
     expect(fmtBytes(48_213)).toBe('47 KB');
     expect(fmtBytes(1_300_000)).toBe('1,2 MB');
@@ -143,6 +146,19 @@ describe('Gói chẩn đoán cho người hỗ trợ', () => {
     expect(await screen.findByTestId('diagnostics-working')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Tạo gói chẩn đoán' })).toBeNull();
   });
+
+  it('pending quá 15 phút (stale) → câu "Máy chủ chưa nhận", lệnh genh doctor, nút Tạo gói lại; thôi thăm lại', async () => {
+    const { calls } = setup([{ ...IDLE, state: 'pending', request_id: '0123456789abcdef', requested_at: '2026-10-03T01:00:00Z', stale: true }]);
+    renderCard();
+    const stale = await screen.findByTestId('diagnostics-stale');
+    expect(stale).toHaveTextContent(DIAG_STALE_TEXT);
+    expect(within(stale).getByText('genh doctor')).toBeInTheDocument();
+    expect(screen.queryByTestId('diagnostics-working')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Tạo gói chẩn đoán' })).toBeInTheDocument();
+    const gets = calls.filter((c) => c.method === 'GET').length;
+    await new Promise((r) => setTimeout(r, 3500));
+    expect(calls.filter((c) => c.method === 'GET').length).toBe(gets);
+  }, 8000);
 
   it('done → nút "Tải gói chẩn đoán (47 KB)" là liên kết cùng gốc đúng href; dòng đã lọc; mã yêu cầu + giờ; bấm tải = fetch blob', async () => {
     const { calls } = setup([DONE]);

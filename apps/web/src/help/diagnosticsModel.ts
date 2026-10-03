@@ -14,6 +14,8 @@ export const DIAG_FILTERED_TEXT = 'Đã lọc mật khẩu/khoá/token trước 
 export const DIAG_WORKING_TEXT = 'Đang tạo gói chẩn đoán trên máy chủ… thường xong trong 1–2 phút.';
 export const DIAG_UNSUPPORTED_TEXT =
   'Công cụ genh trên máy chủ chưa tạo được gói từ Console. Chạy lệnh dưới đây trên máy chủ, rồi gửi tệp .zip nó tạo cho người hỗ trợ:';
+export const DIAG_STALE_TEXT =
+  'Máy chủ chưa nhận yêu cầu tạo gói (đã hơn 15 phút) — có thể công cụ genh trên máy chủ đang tạm dừng hoặc chưa chạy nền. Bấm Tạo gói chẩn đoán để thử lại, hoặc chạy lệnh dưới đây trên máy chủ rồi gửi tệp .zip nó tạo cho người hỗ trợ:';
 export const DIAG_FAILED_TEXT = 'Chưa tạo được gói chẩn đoán — bấm Tạo gói chẩn đoán lần nữa; vẫn lỗi thì chạy "genh doctor" trên máy chủ.';
 
 export const DIAG_ERROR_TEXT: Record<string, string> = {
@@ -23,15 +25,16 @@ export const DIAG_ERROR_TEXT: Record<string, string> = {
   DIAG_FILE_UNSAFE: 'Tệp gói chẩn đoán trên máy chủ không an toàn để tải — bấm Tạo gói chẩn đoán lần nữa.',
 };
 
-export type DiagPhase = 'unsupported' | 'idle' | 'working' | 'done' | 'failed';
+/** `stale` — đang chờ/chạy quá 15 phút (máy chủ báo `stale`): thôi thăm lại, cho tạo lại + hiện lệnh chạy tay. */
+export type DiagPhase = 'unsupported' | 'idle' | 'working' | 'stale' | 'done' | 'failed';
 
-export function diagPhase(d: Pick<DiagnosticsState, 'supported' | 'state'> | null | undefined): DiagPhase {
+export function diagPhase(d: (Pick<DiagnosticsState, 'supported' | 'state'> & Partial<Pick<DiagnosticsState, 'stale'>>) | null | undefined): DiagPhase {
   if (!d) return 'idle';
   if (d.supported === false) return 'unsupported';
   switch (d.state) {
     case 'pending':
     case 'running':
-      return 'working';
+      return d.stale === true ? 'stale' : 'working';
     case 'done':
       return 'done';
     case 'failed':

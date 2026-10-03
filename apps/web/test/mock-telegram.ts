@@ -4,7 +4,8 @@
  * Token KHÔNG BAO GIỜ có trong phản hồi. (Gói chẩn đoán + `POST /client-errors` của F-4b ở `mock-diagnostics.ts`.)
  *
  * Mặc định: chưa cấu hình; Trực canh máy chủ được hỗ trợ (systemd, chạy 40 giây trước).
- * - PUT: token sai dạng → 422 `errors.token`; token chứa "REJECT" → 409 TELEGRAM_TOKEN_REJECTED; chat_id sai → 422.
+ * - PUT: token sai dạng → 422 `errors.token`; token chứa "REJECT" → 409 TELEGRAM_TOKEN_REJECTED; chat_id sai (máy chủ
+ *   chỉ nhận dãy số `^-?\d{1,20}$`) → 422. Đã cấu hình: token/chat_id trống = giữ; `{}` = "Lưu lại".
  * - find-chat: mặc định một chat (987654321 · "Ryan Cơ"); `seed {findChats:'none'}` → rỗng; token chứa "REJECT" →
  *   `error_code` TELEGRAM_TOKEN_REJECTED; không token + chưa cấu hình → TELEGRAM_NOT_CONFIGURED.
  * - Gửi thử (`/notify/telegram/test`, `/boss-checks/telegram/run`): chưa cấu hình → TELEGRAM_NOT_CONFIGURED; `seed
@@ -109,7 +110,7 @@ export function createMock(opts: Opts) {
     s.lastTest = { status: 'pass', error_code: null, message: null, checked_at: now() };
     // Trực canh máy chủ (genh) gửi thêm một tin trong ~1 phút — mock ghi luôn kết quả của genh.
     const host = s.host !== 'unsupported';
-    if (host) s.hostTest = { at: now(), ok: true, error_code: null };
+    if (host) s.hostTest = s.host === 'failed' ? { at: now(), ok: false, error_code: 'TELEGRAM_BOT_BLOCKED' } : { at: now(), ok: true, error_code: null };
     return { status: 'pass', error_code: null, message: null, detail, host_requested: host };
   };
 
@@ -127,13 +128,15 @@ export function createMock(opts: Opts) {
       const token = typeof body.token === 'string' ? body.token.trim() : '';
       const chatId = typeof body.chat_id === 'string' ? body.chat_id.trim() : '';
       const errors: Record<string, string> = {};
-      if (token && !TELEGRAM_TOKEN_RE.test(token)) errors.token = 'Token chưa đúng dạng';
-      if (!token && !s.configured) errors.token = 'Cần token của bot';
-      if (!/^-?\d{3,20}$|^@\w{4,}$/.test(chatId)) errors.chat_id = 'chat_id chưa đúng dạng';
+      if (token && !TELEGRAM_TOKEN_RE.test(token)) errors.token = 'Token bot không đúng dạng — chép nguyên dòng BotFather gửi (dạng 123456789:AA…)';
+      if (!token && !s.configured) errors.token = 'Dán token bot lấy từ BotFather';
+      const nextChat = chatId || (s.configured ? (s.chatId ?? '') : '');
+      // Đúng CHAT_RE của máy chủ (service.py): chỉ dãy số, có thể có dấu trừ.
+      if (!/^-?\d{1,20}$/.test(nextChat)) errors.chat_id = 'chat_id là một dãy số — bấm Tìm chat_id sau khi Sếp đã nhắn bot';
       if (Object.keys(errors).length) return problem(422, 'VALIDATION', 'Dữ liệu chưa hợp lệ', { errors });
       if (token.includes('REJECT')) return problem(409, 'TELEGRAM_TOKEN_REJECTED', 'Telegram từ chối token');
       if (token) s.token = token;
-      s.chatId = chatId;
+      s.chatId = nextChat;
       s.configured = true;
       s.enabled = body.enabled !== false;
       if (typeof body.briefing === 'boolean') s.briefing = body.briefing;

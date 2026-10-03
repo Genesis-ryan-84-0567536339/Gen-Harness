@@ -2559,3 +2559,22 @@ Không cần chụp màn hình hay gửi mã cho Claude — kết quả tự lư
   sạch); genh `go vet` + `go test ./...` ok; `check_release_gate.py` thoát 0, unittest `.github/scripts` 30 OK.
 - Chờ sau phát hành (người điều phối): genh tải từ Release đúng checksum + `genh version` = v0.1.44; E2E release xanh rồi
   mới promote.
+
+### Sửa sau review trước merge (03/10)
+
+- **CI Windows (blocker)**: test genh kiểm bit quyền POSIX (0755/0644/0600) và `os.Symlink` chỉ chạy trên Unix (Windows
+  `Perm()` luôn 0666/0777) — `doctor_test`, `watchdog_test`, `stopstart_test`.
+- **F-6b — trực canh không dựng lại dịch vụ Sếp đã dừng/gỡ**: `genh stop`/`genh uninstall` ghi `paused-by-owner.json`
+  **trước** `compose stop/down` và chờ lượt trực canh đang chạy xong (`watchdog.lock`); stop lỗi ⇒ xoá lại đánh dấu (nếu
+  trước đó chưa có). Trực canh: không có container api ⇒ chỉ báo, **không** `up -d` (tránh tạo lại container/volume rỗng sau
+  khi gỡ); Sếp dừng giữa lượt ⇒ không restart; `restarting`/`created`/`paused` là sự cố; "Gửi thử" chờ lượt định kỳ xong.
+- **F-4b**: web cắt thân báo lỗi theo `CLIENT_ERROR_LIMITS` (contracts, stack 4000 = server) — trước đây 8000 ⇒ 422 mất
+  cả báo lỗi; test api đọc khối hằng số trong contracts để so với `ClientErrorIn`. Gói chẩn đoán: máy chủ trả `stale` khi
+  chờ/chạy quá 15 phút ⇒ web thôi thăm lại, hiện "Máy chủ chưa nhận yêu cầu" + lệnh `genh doctor` + nút tạo lại. Zip quá
+  24 giờ bị dọn (lượt trực canh); rủi ro 0644 ghi ở `docs/handoff/05-installer.md`.
+- **F-8c — Telegram**: `PUT /notify/telegram` nhận `chat_id` trống khi đã cấu hình (giữ chat cũ); "Lưu lại" (key_mismatch)
+  là một lần bấm `PUT {}` qua PIN; khối Trực canh hiện lỗi gửi của genh (câu theo mã + Chi tiết kỹ thuật) và dòng "Tin thử
+  từ máy chủ"; Gửi thử chỉ hứa tin thứ hai khi khối trực canh không báo lỗi. `flush_outbox` khoá + commit từng tin (lỗi sau
+  khi gửi không làm gửi trùng). Chữ: "Bắt đầu (Start)", thân sự cố nói đủ bước (Đổi token/chat_id → Lưu → Gửi thử), câu lỗi
+  có dấu chấm cuối; mock nhận chat_id đúng như máy chủ (chỉ số).
+- Nhỏ: Hướng dẫn "(~25 phút)" + Telegram; Kết nối cuộn tới `#telegram` cả khi `me` về sau danh sách kênh.

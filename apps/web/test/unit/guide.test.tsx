@@ -95,7 +95,7 @@ describe('Hướng dẫn thiết lập (/guide)', () => {
 
   it('v0.1.39: thẻ "Việc Sếp cần làm" ở đầu trang dẫn tới /guide/viec-sep, kèm tiến độ dòng bắt buộc', () => {
     renderGuide([]);
-    const link = screen.getByRole('link', { name: /Việc Sếp cần làm — kết nối chạy thật \(~20 phút\)/ });
+    const link = screen.getByRole('link', { name: /Việc Sếp cần làm — kết nối chạy thật \(~25 phút\)/ });
     expect(link).toHaveAttribute('href', '/guide/viec-sep');
     expect(link).toHaveTextContent('Đã đạt 1/4 dòng bắt buộc');
     // Đứng trước danh sách việc.

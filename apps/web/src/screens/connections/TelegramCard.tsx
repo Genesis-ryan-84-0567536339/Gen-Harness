@@ -20,7 +20,9 @@ import {
   TELEGRAM_KEY,
   TELEGRAM_WARNING,
   asTelegramConfig,
+  hostTestText,
   hostWarning,
+  hostWarningDetail,
   scheduleText,
   str,
   telegramErrorText,
@@ -57,7 +59,7 @@ export function TelegramCard() {
       ) : (
         <SetupForm t={t} onDone={() => setEditing(false)} onCancel={t?.configured ? () => setEditing(false) : undefined} />
       )}
-      {t ? <HostBlock t={t} onResave={t.configured && !editing ? () => setEditing(true) : undefined} /> : null}
+      {t ? <HostBlock t={t} canResave={t.configured && !editing} /> : null}
       <p className="muted-note" role="note" data-testid="telegram-warning">
         <Icon name="ph ph-shield-warning" size={12} /> {TELEGRAM_WARNING}
       </p>
@@ -120,9 +122,12 @@ function SetupForm({ t, onDone, onCancel }: { t: TelegramConfig | null; onDone: 
   const onSave = () => {
     const tok = checkToken();
     const cid = chatId.trim();
-    setChatError(cid ? null : 'Chọn một chat ở "Tìm chat_id" hoặc nhập chat_id.');
-    if (tok === false || !cid) return;
-    const body: TelegramSaveBody = { chat_id: cid, enabled: true, briefing, reminders };
+    // Đã cấu hình: chat_id trống = giữ chat cũ (Sếp chỉ thấy dạng che •••1234, không phải tìm lại).
+    const needChat = !configured && !cid;
+    setChatError(needChat ? 'Chọn một chat ở "Tìm chat_id" hoặc nhập chat_id.' : null);
+    if (tok === false || needChat) return;
+    const body: TelegramSaveBody = { enabled: true, briefing, reminders };
+    if (cid) body.chat_id = cid;
     if (tok) body.token = tok;
     save.mutate(body);
   };
@@ -165,7 +170,7 @@ function SetupForm({ t, onDone, onCancel }: { t: TelegramConfig | null; onDone: 
       {find.isError ? <InlineError detail={errorDetail(find.error)}>{errorText(find.error)}</InlineError> : null}
       {found ? <FoundChats result={found} selected={chatId} onPick={(c) => setChatId(c.chat_id)} /> : null}
       <TextField
-        label="chat_id"
+        label={configured ? `chat_id mới (bỏ trống để giữ ${str(t?.chat_id_masked) ?? 'chat đã lưu'})` : 'chat_id'}
         inputMode="text"
         autoComplete="off"
         value={chatId}
@@ -278,7 +283,7 @@ function ConfiguredView({ t, onEdit }: { t: TelegramConfig; onEdit: () => void }
         </Button>
       </div>
       {test.data ? (
-        <TestResult r={test.data} />
+        <TestResult r={test.data} host={t.host && typeof t.host === 'object' ? t.host : null} />
       ) : last ? (
         <div className="muted-note" data-testid="telegram-last-test">
           {last.status === 'pass' ? (
@@ -302,11 +307,11 @@ function ConfiguredView({ t, onEdit }: { t: TelegramConfig; onEdit: () => void }
   );
 }
 
-function TestResult({ r }: { r: TelegramTestResult }) {
+function TestResult({ r, host }: { r: TelegramTestResult; host: TelegramConfig['host'] | null }) {
   if (r.status === 'pass') {
     return (
       <div className="muted-note" role="status" data-testid="telegram-test-result" data-status="pass">
-        <Icon name="ph ph-check-circle" size={12} /> {testOkText(r)}
+        <Icon name="ph ph-check-circle" size={12} /> {testOkText(r, host)}
       </div>
     );
   }
@@ -356,29 +361,48 @@ function DisableDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
-/** Khối "Trực canh máy chủ": lần chạy gần nhất, lịch, sự cố đang mở, cảnh báo key_mismatch / genh cũ. */
-function HostBlock({ t, onResave }: { t: TelegramConfig; onResave?: () => void }) {
+/**
+ * Khối "Trực canh máy chủ": lần chạy gần nhất, lịch, sự cố đang mở, tin thử từ máy chủ; cảnh báo key_mismatch (nút
+ * "Lưu lại" gửi PUT {} qua PIN — giữ token và chat_id), gửi lỗi (câu theo mã + Chi tiết kỹ thuật), genh cũ.
+ */
+function HostBlock({ t, canResave }: { t: TelegramConfig; canResave: boolean }) {
   const tz = useOrgTimezone();
   const host = t.host && typeof t.host === 'object' ? t.host : null;
   const warn = hostWarning(host);
+  const warnDetail = hostWarningDetail(host);
   const incidents = Array.isArray(host?.incidents) ? host.incidents.filter((i) => i && typeof i.title === 'string') : [];
   const state = str(host?.state);
+  const hostTest = hostTestText(host?.test, (iso) => fmtDMClock(iso, tz));
+  const resave = useMutation({
+    mutationFn: () => api.notify.saveTelegram({}),
+    onSuccess: (c) => {
+      applyConfig(c);
+      toast('Đã lưu lại cấu hình Telegram cho máy chủ.', 'ok');
+    },
+  });
   return (
     <div className="telegram-host" data-testid="telegram-host" aria-label="Trực canh máy chủ" role="group">
       <div className="gh-card__kicker">Trực canh máy chủ</div>
       {warn ? (
         <div className="muted-note friendly-error" role="alert" data-testid="telegram-host-warning">
           <Icon name="ph ph-warning" size={12} /> {warn}
-          {onResave && host?.telegram === 'key_mismatch' ? (
+          {canResave && host?.telegram === 'key_mismatch' ? (
             <>
               {' '}
-              <Button variant="secondary" className="btn-27" onClick={onResave}>
+              <Button variant="secondary" className="btn-27" loading={resave.isPending} onClick={() => resave.mutate()}>
                 Lưu lại
               </Button>
             </>
           ) : null}
+          {warnDetail ? (
+            <details className="tech-detail">
+              <summary>Chi tiết kỹ thuật</summary>
+              <code>{warnDetail}</code>
+            </details>
+          ) : null}
         </div>
       ) : null}
+      {resave.isError ? <InlineError detail={errorDetail(resave.error)}>{errorText(resave.error)}</InlineError> : null}
       {host?.supported !== false ? (
         <ul className="muted-note" style={{ margin: 0, paddingLeft: 18 }}>
           <li>{`Lần chạy gần nhất: ${str(host?.last_run_at) ? fmtDMClock(host?.last_run_at, tz) : 'chưa chạy'}${state ? ` · ${HOST_STATE_LABEL[state] ?? state}` : ''}`}</li>
@@ -388,6 +412,7 @@ function HostBlock({ t, onResave }: { t: TelegramConfig; onResave?: () => void }
               ? `Sự cố đang mở: ${incidents.map((i) => `${i.title}${str(i.since) ? ` (từ ${fmtDMClock(i.since, tz)})` : ''}`).join('; ')}`
               : 'Không có sự cố đang mở'}
           </li>
+          {hostTest ? <li data-testid="telegram-host-test">{hostTest}</li> : null}
         </ul>
       ) : null}
     </div>

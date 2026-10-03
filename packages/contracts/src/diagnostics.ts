@@ -24,6 +24,11 @@ export interface DiagnosticsState {
   message: string | null;
   /** Lệnh chạy tay trên máy chủ ("genh doctor"). */
   command: string;
+  /**
+   * Đang chờ/chạy nhưng đã quá 15 phút (genh trên máy chủ không nhận yêu cầu: watcher không chạy, thiếu linger,
+   * `genh stop`…) ⇒ Console thôi chờ, cho tạo lại và hiện lệnh chạy tay. Máy chủ cũ không có trường này.
+   */
+  stale?: boolean;
 }
 
 /** `GET /system/diagnostics/download` (PIN `diagnostics.download`) — tải bằng điều hướng trình duyệt (cùng gốc). */
@@ -52,5 +57,19 @@ export interface ClientErrorBody {
   request_id?: string;
   app_version?: string;
 }
+
+/**
+ * Độ dài tối đa từng trường của `ClientErrorBody` — PHẢI trùng `ClientErrorIn` (apps/api/gh/system_api/client_errors.py,
+ * `max_length`); test api `test_client_error_limits_match_contracts` đọc chính khối này để so. Vượt ⇒ server 422 và mất
+ * cả báo lỗi.
+ */
+export const CLIENT_ERROR_LIMITS = {
+  message: 1000,
+  name: 100,
+  stack: 4000,
+  component_stack: 4000,
+  path: 300,
+  app_version: 40,
+} as const;
 
 export const CLIENT_ERRORS_URL = '/api/v1/client-errors';

@@ -132,12 +132,32 @@ async def test_put_needs_pin_and_stores_token_encrypted(owner_api: Api, fake_tg:
     assert len(fake_tg.calls) == n and r.json()["chat_id_masked"] == "•••6789" and r.json()["briefing"] is False
 
 
+async def test_put_keeps_chat_id_when_blank(owner_api: Api, fake_tg: FakeTelegram) -> None:
+    """Đã cấu hình: bỏ trống chat_id (Sếp chỉ thấy •••4321) ⇒ giữ chat_id cũ; `{}` = "Lưu lại" (key_mismatch)."""
+    await verify_pin(owner_api)
+    assert (await _save(owner_api)).status_code == 200
+    n = len(fake_tg.calls)
+    r = await owner_api.send("PUT", "/notify/telegram", {"briefing": False})
+    assert r.status_code == 200, r.text
+    assert r.json()["chat_id_masked"] == "•••4321" and r.json()["briefing"] is False
+    r = await owner_api.send("PUT", "/notify/telegram", {"chat_id": "  "})
+    assert r.status_code == 200 and r.json()["chat_id_masked"] == "•••4321"
+    r = await owner_api.send("PUT", "/notify/telegram", {})
+    assert r.status_code == 200 and r.json()["configured"] is True and r.json()["briefing"] is False
+    assert len(fake_tg.calls) == n  # không gọi getMe khi không đổi token
+    async with admin_sessionmaker()() as s:
+        assert (await s.execute(text("SELECT chat_id FROM ops.notify_channels"))).scalar_one() == CHAT
+
+
 async def test_put_validation_and_rejected_token(owner_api: Api, fake_tg: FakeTelegram) -> None:
     await verify_pin(owner_api)
     r = await owner_api.send("PUT", "/notify/telegram", {"token": "abc", "chat_id": "x12"})
     assert r.status_code == 422 and set(r.json()["errors"]) == {"token", "chat_id"}
     r = await owner_api.send("PUT", "/notify/telegram", {"chat_id": CHAT})
     assert r.status_code == 422 and "token" in r.json()["errors"]
+    # Chưa cấu hình: chat_id bắt buộc.
+    r = await owner_api.send("PUT", "/notify/telegram", {"token": TOKEN})
+    assert r.status_code == 422 and set(r.json()["errors"]) == {"chat_id"}
     fake_tg.me = (401, {"ok": False, "error_code": 401, "description": "Unauthorized"})
     r = await _save(owner_api)
     assert r.status_code == 409 and r.json()["code"] == "TELEGRAM_TOKEN_REJECTED"

@@ -163,3 +163,22 @@ async def test_failed_state_and_staff_forbidden(owner_api: Api, host: Path, clie
     assert (await staff.get("/system/diagnostics")).status_code == 403
     assert (await staff.send("POST", "/system/diagnostics")).status_code == 403
     assert (await staff.get("/system/diagnostics/download")).status_code == 403
+
+
+async def test_stale_when_genh_never_picks_up(owner_api: Api, host: Path) -> None:
+    """Yêu cầu nằm > 15 phút (watcher không chạy) ⇒ stale=True để Console thôi chờ, cho tạo lại + hiện lệnh tay."""
+    _supported(host)
+    f = host / "request" / "doctor.json"
+    f.write_text(json.dumps({"schema": 1, "request_id": "0123456789abcdef", "requested_at": _iso(datetime.now(UTC))}))
+    g = (await owner_api.get("/system/diagnostics")).json()
+    assert g["state"] == "pending" and g["stale"] is False
+    f.write_text(json.dumps({"schema": 1, "request_id": "0123456789abcdef",
+                             "requested_at": _iso(datetime.now(UTC) - timedelta(minutes=16))}))
+    g = (await owner_api.get("/system/diagnostics")).json()
+    assert g["state"] == "pending" and g["stale"] is True
+    await verify_pin(owner_api)
+    r = await owner_api.send("POST", "/system/diagnostics")
+    assert r.status_code == 202 and r.json()["stale"] is False
+    _done(host)
+    f.unlink()
+    assert (await owner_api.get("/system/diagnostics")).json()["stale"] is False

@@ -1,4 +1,4 @@
-import { ApiError, CLIENT_ERRORS_URL, CSRF_COOKIE, CSRF_HEADER, readCookie, type ClientErrorBody } from '@gen-harness/contracts';
+import { ApiError, CLIENT_ERROR_LIMITS, CLIENT_ERRORS_URL, CSRF_COOKIE, CSRF_HEADER, readCookie, type ClientErrorBody } from '@gen-harness/contracts';
 
 /**
  * v0.1.44 (F-4b) — báo lỗi giao diện về máy chủ (`POST /api/v1/client-errors`, không cần đăng nhập) để Claude/người
@@ -10,10 +10,11 @@ import { ApiError, CLIENT_ERRORS_URL, CSRF_COOKIE, CSRF_HEADER, readCookie, type
  */
 
 export const CLIENT_ERRORS_PER_MINUTE = 5;
-export const MAX_MESSAGE = 1000;
-export const MAX_STACK = 8000;
-export const MAX_COMPONENT_STACK = 4000;
-export const MAX_PATH = 300;
+// Theo đúng giới hạn server (`ClientErrorIn`) — vượt là 422, mất cả báo lỗi.
+export const MAX_MESSAGE = CLIENT_ERROR_LIMITS.message;
+export const MAX_STACK = CLIENT_ERROR_LIMITS.stack;
+export const MAX_COMPONENT_STACK = CLIENT_ERROR_LIMITS.component_stack;
+export const MAX_PATH = CLIENT_ERROR_LIMITS.path;
 const MAX_REMEMBERED = 200;
 
 export interface ClientErrorReport {
@@ -60,7 +61,7 @@ function textOf(error: unknown): { name?: string; message: string; stack?: strin
 function appVersion(): string | undefined {
   try {
     const v = (import.meta.env as Record<string, unknown> | undefined)?.VITE_APP_VERSION;
-    return typeof v === 'string' && v ? cut(v, 40) : undefined;
+    return typeof v === 'string' && v ? cut(v, CLIENT_ERROR_LIMITS.app_version) : undefined;
   } catch {
     return undefined;
   }
@@ -82,7 +83,7 @@ export function clientErrorBody(r: ClientErrorReport): ClientErrorBody {
     message: cut(t.message || t.name || 'Lỗi không xác định', MAX_MESSAGE),
     path: cut(r.path ?? currentPath(), MAX_PATH),
   };
-  if (t.name) body.name = cut(t.name, 100);
+  if (t.name) body.name = cut(t.name, CLIENT_ERROR_LIMITS.name);
   if (t.stack) body.stack = cut(t.stack, MAX_STACK);
   if (typeof r.componentStack === 'string' && r.componentStack) body.component_stack = cut(r.componentStack, MAX_COMPONENT_STACK);
   if (r.error instanceof ApiError && r.error.requestId) body.request_id = r.error.requestId;

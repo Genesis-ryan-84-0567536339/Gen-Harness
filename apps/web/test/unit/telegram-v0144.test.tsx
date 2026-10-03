@@ -13,12 +13,17 @@ import { telegramConnStatus } from '../../src/screens/connections/connectionsMod
 import {
   BOTFATHER_STEPS,
   FIND_CHAT_EMPTY,
+  HOST_FAILED_PREFIX,
   HOST_KEY_MISMATCH_TEXT,
   HOST_UNSUPPORTED_TEXT,
   TELEGRAM_ERROR_TEXT,
   TELEGRAM_WARNING,
+  TEST_OK_NO_HOST_TEXT,
   TEST_OK_TEXT,
   TOKEN_FORMAT_ERROR,
+  hostTestText,
+  hostWarning,
+  testOkText,
   tokenFormatError,
 } from '../../src/screens/connections/telegramModel';
 import { BOSS_ERROR_TEXT } from '../../src/guide/bossChecksModel';
@@ -76,7 +81,16 @@ function setup(w: Partial<World> = {}) {
       if (path === '/notify/telegram' && (method === 'PUT' || method === 'DELETE')) {
         if (world.pin && !pinOk) return json(423, { status: 423, code: 'PIN_REQUIRED', title: 'Cần PIN', request_id: 'req0123456789abc' });
         if (method === 'PUT' && world.saveError) return json(world.saveError.status, { status: world.saveError.status, ...world.saveError.body });
-        world.config = method === 'PUT' ? { ...SAVED, chat_id_masked: `•••${String(body.chat_id).slice(-4)}` } : EMPTY;
+        world.config =
+          method === 'PUT'
+            ? {
+                ...SAVED,
+                briefing: typeof body.briefing === 'boolean' ? body.briefing : world.config.briefing,
+                reminders: typeof body.reminders === 'boolean' ? body.reminders : world.config.reminders,
+                // chat_id bỏ trống ⇒ máy chủ giữ chat cũ.
+                chat_id_masked: body.chat_id ? `•••${String(body.chat_id).slice(-4)}` : world.config.chat_id_masked,
+              }
+            : EMPTY;
         return json(200, world.config);
       }
       if (path === '/notify/telegram/find-chat') return json(200, { chats: world.chats, error_code: null, message: null });
@@ -272,18 +286,71 @@ describe('Kết nối › Telegram (thẻ)', () => {
     expect(TELEGRAM_ERROR_TEXT.TELEGRAM_BOT_BLOCKED).toMatch(/bấm Bắt đầu/);
   });
 
-  it('Trực canh máy chủ: key_mismatch → "bấm Lưu lại một lần" (+ nút Lưu lại mở form); genh cũ → "Cập nhật genh"', async () => {
-    go({ config: { ...SAVED, host: { ...HOST, telegram: 'key_mismatch' } } });
+  it('Trực canh máy chủ: key_mismatch → "bấm Lưu lại một lần" — một lần bấm = PUT {} (PIN), giữ token + chat_id; genh cũ → "Cập nhật genh"', async () => {
+    const { calls } = go({ config: { ...SAVED, host: { ...HOST, telegram: 'key_mismatch' } } });
     const { unmount } = renderCard();
     expect(await screen.findByTestId('telegram-host-warning')).toHaveTextContent(HOST_KEY_MISMATCH_TEXT);
     expect(screen.getByText('Cần Sếp xử lý')).toBeInTheDocument();
     await userEvent.setup().click(screen.getByRole('button', { name: 'Lưu lại' }));
-    expect(screen.getByLabelText('Token mới (bỏ trống để giữ)')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByTestId('telegram-host-warning')).toBeNull());
+    const puts = calls.filter((c) => c.method === 'PUT');
+    expect(puts).toHaveLength(2); // 423 PIN rồi gửi lại
+    expect(puts[1].body).toEqual({});
+    expect(screen.queryByLabelText(/Token mới/)).toBeNull(); // không mở form, không đòi tìm lại chat_id
+    expect(screen.getByTestId('telegram-target')).toHaveTextContent('chat •••4321');
     unmount();
     queryClient.clear();
     go({ config: { ...SAVED, host: { ...HOST, supported: false, schedule: null, last_run_at: null, state: null, telegram: null } } });
     renderCard();
     expect(await screen.findByTestId('telegram-host-warning')).toHaveTextContent(HOST_UNSUPPORTED_TEXT);
+  });
+
+  it('Đổi token/chat_id: bỏ trống chat_id = giữ chat cũ; chỉ tắt bản tin cũng lưu được (không đòi Tìm chat_id)', async () => {
+    const { calls } = go({ config: SAVED });
+    renderCard();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Đổi token/chat_id' }));
+    expect(screen.getByLabelText('chat_id mới (bỏ trống để giữ •••4321)')).toHaveValue('');
+    await user.click(screen.getByRole('switch', { name: 'Gửi bản tin 07:30/17:30' }));
+    await user.click(screen.getByRole('button', { name: 'Lưu' }));
+    expect(await screen.findByTestId('telegram-target')).toHaveTextContent('chat •••4321');
+    const puts = calls.filter((c) => c.method === 'PUT');
+    expect(puts[puts.length - 1].body).toEqual({ enabled: true, briefing: false, reminders: true });
+  });
+
+  it('Trực canh máy chủ gửi lỗi (failed) → câu theo mã + Chi tiết kỹ thuật; dòng tin thử từ máy chủ; Gửi thử không hứa tin thứ hai', async () => {
+    go({
+      config: {
+        ...SAVED,
+        last_test: { status: 'pass', error_code: null, message: null, checked_at: '2026-10-03T01:00:00Z' },
+        host: { ...HOST, telegram: 'failed', telegram_error_code: 'TELEGRAM_BOT_BLOCKED', test: { at: '2026-10-03T01:01:00Z', ok: false, error_code: 'TELEGRAM_BOT_BLOCKED' } },
+      },
+    });
+    const { container } = renderCard();
+    const warn = await screen.findByTestId('telegram-host-warning');
+    expect(warn).toHaveTextContent(HOST_FAILED_PREFIX);
+    expect(warn).toHaveTextContent(TELEGRAM_ERROR_TEXT.TELEGRAM_BOT_BLOCKED);
+    expect(within(warn).getByText('Chi tiết kỹ thuật')).toBeInTheDocument();
+    expect(warn.querySelector('code')!.textContent).toContain('Mã lỗi TELEGRAM_BOT_BLOCKED');
+    expect(within(warn).queryByRole('button', { name: 'Lưu lại' })).toBeNull();
+    expect(screen.getByTestId('telegram-host-test')).toHaveTextContent(`Tin thử từ máy chủ: Lỗi · ${TELEGRAM_ERROR_TEXT.TELEGRAM_BOT_BLOCKED} · 03/10 08:01`);
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Gửi thử' }));
+    expect(await screen.findByTestId('telegram-test-result')).toHaveTextContent(TEST_OK_NO_HOST_TEXT);
+    expect(screen.getByTestId('telegram-test-result')).not.toHaveTextContent('trực canh');
+    expect(container.textContent).not.toContain('[object Object]');
+  });
+
+  it('hostWarning / hostTestText / testOkText', () => {
+    const fmt = (iso: string) => iso.slice(11, 16);
+    expect(hostWarning({ ...HOST, telegram: 'ok' })).toBeNull();
+    expect(hostWarning({ ...HOST, telegram: 'failed', telegram_error_code: null })).toMatch(/^Trực canh máy chủ chưa gửi được tin Telegram: /);
+    expect(hostTestText(null, fmt)).toBeNull();
+    expect(hostTestText({ at: '2026-10-03T01:05:00Z', ok: true, error_code: null }, fmt)).toBe('Tin thử từ máy chủ: Đạt · 01:05');
+    expect(testOkText({ host_requested: true }, { ...HOST, telegram: 'ok' })).toBe(TEST_OK_TEXT);
+    expect(testOkText({ host_requested: true }, { ...HOST, telegram: 'key_mismatch' })).toBe(TEST_OK_NO_HOST_TEXT);
+    expect(testOkText({ host_requested: false }, { ...HOST, telegram: 'ok' })).toBe(TEST_OK_NO_HOST_TEXT);
+    // Mọi câu lỗi Telegram kết thúc bằng dấu chấm (như các câu BOSS_ERROR_TEXT khác).
+    for (const text of Object.values(TELEGRAM_ERROR_TEXT)) expect(text.endsWith('.'), text).toBe(true);
   });
 
   it('Trực canh máy chủ: lịch, lần chạy gần nhất (giờ tổ chức), sự cố đang mở', async () => {

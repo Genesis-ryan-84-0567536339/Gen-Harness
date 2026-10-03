@@ -65,18 +65,20 @@ VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 MESSAGES: dict[str, str] = {
     NOT_CONFIGURED: "Chưa nối Telegram — làm theo hướng dẫn ở Kết nối › Telegram",
     tg.TOKEN_REJECTED: "Telegram từ chối token bot — chép lại token từ BotFather rồi lưu lại",
-    tg.CHAT_NOT_FOUND: "Không tìm thấy chat_id này — Sếp mở bot trên Telegram, bấm Start (Bắt đầu) rồi bấm Tìm chat_id",
-    tg.BOT_BLOCKED: "Bot chưa được phép nhắn Sếp (bị chặn hoặc chưa bấm Start) — mở bot trên Telegram và bấm Start",
+    tg.CHAT_NOT_FOUND: "Không tìm thấy chat_id này — Sếp mở bot trên Telegram, bấm Bắt đầu (Start) rồi bấm Tìm chat_id",
+    tg.BOT_BLOCKED: "Bot chưa được phép nhắn Sếp (bị chặn hoặc chưa bấm Bắt đầu) — mở bot trên Telegram và bấm Bắt đầu "
+                    "(Start)",
     tg.RATE_LIMITED: "Telegram đang giới hạn tốc độ gửi — thử lại sau ít phút",
     tg.UNREACHABLE: "Không kết nối được tới Telegram — kiểm tra mạng của máy chủ rồi thử lại",
     tg.BAD_REQUEST: "Telegram không nhận tin này — thử lại; nếu vẫn lỗi, gửi Gói chẩn đoán cho người hỗ trợ",
 }
 ALERT_BODIES: dict[str, str] = {
     tg.TOKEN_REJECTED: "Telegram từ chối token bot (có thể bot đã bị xoá hoặc token bị đổi). Mở Kết nối › Telegram, "
-                       "dán token mới rồi bấm Gửi thử.",
-    tg.CHAT_NOT_FOUND: "Không tìm thấy chat_id đã lưu. Mở Kết nối › Telegram, bấm Tìm chat_id rồi bấm Gửi thử.",
-    tg.BOT_BLOCKED: "Bot đang bị chặn hoặc chưa được bấm Start. Mở bot trên Telegram, bấm Start rồi bấm Gửi thử "
-                    "ở Kết nối › Telegram.",
+                       "bấm Đổi token/chat_id, dán token mới, bấm Lưu rồi bấm Gửi thử.",
+    tg.CHAT_NOT_FOUND: "Không tìm thấy chat_id đã lưu. Mở Kết nối › Telegram, bấm Đổi token/chat_id, bấm Tìm chat_id, "
+                       "chọn chat, bấm Lưu rồi bấm Gửi thử.",
+    tg.BOT_BLOCKED: "Bot đang bị chặn hoặc chưa được bấm Bắt đầu (Start). Mở bot trên Telegram, bấm Bắt đầu rồi bấm "
+                    "Gửi thử ở Kết nối › Telegram.",
 }
 
 
@@ -129,13 +131,18 @@ def validate_token(token: str) -> str:
     return token
 
 
-async def save_config(db: AsyncSession, org_id: uuid.UUID, token: str | None, chat_id: str, *,
+async def save_config(db: AsyncSession, org_id: uuid.UUID, token: str | None, chat_id: str | None, *,
                       enabled: bool | None, briefing: bool | None, reminders: bool | None, user_id: uuid.UUID | None,
                       client: tg.TelegramClient) -> Any:
-    """Kiểm dạng; token mới ⇒ hỏi getMe (lưu bot_username), mã hoá `TOKEN_AAD`. Không commit."""
+    """Kiểm dạng; token mới ⇒ hỏi getMe (lưu bot_username), mã hoá `TOKEN_AAD`. Token/chat_id trống khi đã có cấu
+    hình ⇒ giữ giá trị cũ (Sếp chỉ thấy chat_id dạng che, không phải tìm lại chỉ để bật/tắt bản tin hay "Lưu lại").
+    Không commit."""
     errors: dict[str, str] = {}
+    existing = await get_config(db, org_id)
     chat_id = (chat_id or "").strip()
-    if not CHAT_RE.fullmatch(chat_id):
+    if not chat_id and existing is not None:
+        chat_id = existing.chat_id
+    if not CHAT_RE.fullmatch(chat_id or ""):
         errors["chat_id"] = "chat_id là một dãy số — bấm Tìm chat_id sau khi Sếp đã nhắn bot"
     clean_token: str | None = None
     if token is not None and token.strip():
@@ -143,7 +150,6 @@ async def save_config(db: AsyncSession, org_id: uuid.UUID, token: str | None, ch
             errors["token"] = "Token bot không đúng dạng — chép nguyên dòng BotFather gửi (dạng 123456789:AA…)"
         else:
             clean_token = token.strip()
-    existing = await get_config(db, org_id)
     if existing is None and clean_token is None and "token" not in errors:
         errors["token"] = "Dán token bot lấy từ BotFather"
     if errors:
@@ -426,10 +432,11 @@ async def _org_token(db: AsyncSession, org_id: uuid.UUID) -> tuple[str, str] | N
 
 
 async def flush_outbox(sm: Any, *, transport: Any = None, redis: Any = None) -> dict[str, int]:
-    """Gửi ≤ `FLUSH_BATCH` tin đang chờ (FOR UPDATE SKIP LOCKED — hai worker không gửi trùng; tạo trong 24 giờ, thử
-    < 5 lần, tới giờ thử). Thành công ⇒ `sent_at` (+ đóng sự cố telegram.failed); 429 ⇒ lùi `retry_after` giây;
-    mạng ⇒ attempts+1, lùi 2^attempts phút; lỗi cấu hình ⇒ `failed_code` + sự cố telegram.failed (chuông Owner một
-    lần). Dọn tin quá 7 ngày. Không ném vì một tin lỗi."""
+    """Gửi ≤ `FLUSH_BATCH` tin đang chờ (tạo trong 24 giờ, thử < 5 lần, tới giờ thử). Mỗi tin: khoá riêng dòng đó
+    (FOR UPDATE SKIP LOCKED — hai worker không gửi trùng), gửi, ghi kết quả rồi COMMIT ngay — lỗi/huỷ giữa lượt không
+    xoá `sent_at` của tin đã tới tay Sếp (không gửi trùng lượt sau). Thành công ⇒ `sent_at` (+ đóng sự cố
+    telegram.failed); 429 ⇒ lùi `retry_after` giây; mạng ⇒ attempts+1, lùi 2^attempts phút; lỗi cấu hình ⇒
+    `failed_code` + sự cố telegram.failed (chuông Owner một lần). Dọn tin quá 7 ngày. Không ném vì một tin lỗi."""
     from gh import health
 
     client = tg.client_for(transport)
@@ -440,11 +447,22 @@ async def flush_outbox(sm: Any, *, transport: Any = None, redis: Any = None) -> 
             SELECT id, org_id, text, attempts FROM ops.telegram_outbox
             WHERE sent_at IS NULL AND failed_code IS NULL AND created_at > now() - make_interval(secs => :w)
               AND attempts < :a AND next_attempt_at <= now()
-            ORDER BY created_at LIMIT :n FOR UPDATE SKIP LOCKED"""),
+            ORDER BY created_at LIMIT :n"""),
             {"w": FLUSH_WINDOW.total_seconds(), "a": FLUSH_MAX_ATTEMPTS, "n": FLUSH_BATCH})).all()
+        await db.commit()
         creds: dict[uuid.UUID, tuple[str, str] | None] = {}
         blocked: dict[uuid.UUID, str] = {}   # tổ chức đã gặp lỗi cấu hình/429 trong lượt này ⇒ không gửi tiếp
         delivered: set[uuid.UUID] = set()
+
+        async def side_effect(what: str, fn: Any) -> None:
+            """Sự cố/chuông sau khi đã COMMIT kết quả gửi — lỗi ở đây không được làm mất `sent_at`."""
+            try:
+                await fn()
+                await db.commit()
+            except Exception:  # noqa: BLE001
+                await db.rollback()
+                log.warning("Telegram: %s thất bại", what, exc_info=True)
+
         for r in rows:
             if r.org_id not in creds:
                 try:
@@ -454,15 +472,23 @@ async def flush_outbox(sm: Any, *, transport: Any = None, redis: Any = None) -> 
                     creds[r.org_id] = None
             cred = creds[r.org_id]
             if cred is None:
-                await db.execute(text("UPDATE ops.telegram_outbox SET failed_code = :c WHERE id = :i"),
-                                 {"c": NOT_CONFIGURED, "i": r.id})
+                await db.execute(text("""UPDATE ops.telegram_outbox SET failed_code = :c
+                                         WHERE id = :i AND sent_at IS NULL"""), {"c": NOT_CONFIGURED, "i": r.id})
+                await db.commit()
                 stats["failed"] += 1
                 continue
             if r.org_id in blocked or time.monotonic() - started > FLUSH_BUDGET_S:
                 continue  # để lượt sau
+            mine = (await db.execute(text("""SELECT id FROM ops.telegram_outbox
+                                             WHERE id = :i AND sent_at IS NULL AND failed_code IS NULL
+                                             FOR UPDATE SKIP LOCKED"""), {"i": r.id})).first()
+            if mine is None:  # worker khác đang gửi / đã gửi tin này
+                await db.rollback()
+                continue
             try:
                 await client.send_message(cred[0], cred[1], r.text)
             except tg.TelegramError as e:
+                fatal = False
                 if e.code == tg.RATE_LIMITED:
                     await db.execute(text("""UPDATE ops.telegram_outbox
                                              SET next_attempt_at = now() + make_interval(secs => :s) WHERE id = :i"""),
@@ -475,25 +501,29 @@ async def flush_outbox(sm: Any, *, transport: Any = None, redis: Any = None) -> 
                     stats["failed"] += 1
                     if e.code in FATAL_CODES:
                         blocked[r.org_id] = e.code
-                        await health.raise_once(db, r.org_id, key=ALERT_KEY, kind=ALERT_KEY, severity="warn",
-                                                title=ALERT_TITLE, body=ALERT_BODIES[e.code], link=ALERT_LINK,
-                                                fingerprint=e.code, redis=redis)
+                        fatal = True
                 else:
                     n = int(r.attempts) + 1
                     await db.execute(text("""UPDATE ops.telegram_outbox SET attempts = :n,
                                                     next_attempt_at = now() + make_interval(mins => :m)
                                              WHERE id = :i"""), {"n": n, "m": 2 ** n, "i": r.id})
                     stats["retry"] += 1
+                await db.commit()
+                if fatal:
+                    code, org = e.code, r.org_id
+                    await side_effect("ghi sự cố telegram.failed", lambda code=code, org=org: health.raise_once(
+                        db, org, key=ALERT_KEY, kind=ALERT_KEY, severity="warn", title=ALERT_TITLE,
+                        body=ALERT_BODIES[code], link=ALERT_LINK, fingerprint=code, redis=redis))
                 continue
             await db.execute(text("UPDATE ops.telegram_outbox SET sent_at = now() WHERE id = :i"), {"i": r.id})
+            await db.commit()
             delivered.add(r.org_id)
             stats["sent"] += 1
         for org in delivered:
-            await health.clear(db, org, ALERT_KEY)
+            await side_effect("đóng sự cố telegram.failed", lambda org=org: health.clear(db, org, ALERT_KEY))
         await db.execute(text("""DELETE FROM ops.telegram_outbox
                                  WHERE (sent_at IS NOT NULL AND sent_at < now() - make_interval(secs => :k))
                                     OR created_at < now() - make_interval(secs => :k)"""),
                          {"k": KEEP_SENT.total_seconds()})
         await db.commit()
     return stats
-

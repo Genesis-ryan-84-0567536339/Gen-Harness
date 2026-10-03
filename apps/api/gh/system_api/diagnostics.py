@@ -4,7 +4,8 @@ Container api không chạy được `genh doctor` (cần docker/hệ thống m�
 chung `<gốc cài đặt>/run` (như cập nhật/khôi phục): genh handle-requests thấy `request/doctor.json` thì chạy
 `genh doctor` (đã lọc bí mật), ghi tiến trình vào `doctor-status.json` và tệp zip vào `run/diagnostics/` (giữ 3 bản).
 
-- `GET` — trạng thái (idle|pending|running|done|failed) + tệp mới nhất; `supported` khi genh.json có 'doctor'.
+- `GET` — trạng thái (idle|pending|running|done|failed) + tệp mới nhất; `supported` khi genh.json có 'doctor'; `stale`
+  khi đang chờ/chạy đã quá 15 phút (genh không nhận yêu cầu) — Console thôi chờ, cho tạo lại + hiện lệnh chạy tay.
 - `POST` (PIN `diagnostics.download`) — ghi `request/doctor.json` {schema:1, request_id: 16 hex, requested_at}; genh
   chưa hỗ trợ ⇒ 409 DIAG_UNSUPPORTED; đang chờ/chạy < 15 phút ⇒ 409 DIAG_BUSY.
 - `GET /download` (PIN) — chỉ phục vụ tên `genh-doctor-YYYYMMDDTHHMMSSZ.zip` (tên đọc từ doctor-status.json — dữ liệu
@@ -110,10 +111,22 @@ def _busy(s: dict[str, Any]) -> bool:
     return age is None or age < BUSY_SECONDS
 
 
+def _stale(s: dict[str, Any]) -> bool:
+    """Đang chờ/chạy nhưng quá BUSY_SECONDS ⇒ genh trên máy chủ không nhận/làm xong (watcher không chạy, máy thiếu
+    linger, genh stop…). Console thôi chờ, cho tạo lại và hiện lệnh chạy tay."""
+    return s["state"] in ("pending", "running") and not _busy(s)
+
+
+def _view() -> dict[str, Any]:
+    s = _state()
+    s["stale"] = _stale(s)
+    return s
+
+
 @router.get("")
 async def get_diagnostics(_m: service.CurrentUser = Depends(MANAGE),
                           user: service.CurrentUser = Depends(require_owner)) -> dict[str, Any]:
-    return _state()
+    return _view()
 
 
 @router.post("", status_code=202)
@@ -135,7 +148,7 @@ async def request_diagnostics(_m: service.CurrentUser = Depends(MANAGE),
                            action="system.diagnostics.request", target_type="system", target_id="diagnostics",
                            detail={"request_id": rid}, ip=user.ip)
     await db.commit()
-    return _state()
+    return _view()
 
 
 def _not_ready() -> ApiError:

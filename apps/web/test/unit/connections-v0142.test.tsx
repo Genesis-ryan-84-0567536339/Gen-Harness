@@ -3,7 +3,7 @@
  * nối), đúng một nút chính; hàm thuần trong connectionsModel.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import type { Channel, ChannelState } from '@gen-harness/contracts';
@@ -237,5 +237,49 @@ describe('Trang Kết nối', () => {
     expect(await screen.findByText(/Lỗi máy chủ/)).toBeInTheDocument();
     expect(screen.getAllByText('Chi tiết kỹ thuật').length).toBeGreaterThan(0);
     expect(document.body.textContent).not.toContain('[object Object]');
+  });
+});
+
+// v0.1.44: thẻ #telegram chỉ có khi đã biết là Owner — `me` về SAU danh sách kênh vẫn phải cuộn tới thẻ.
+describe('Kết nối #telegram', () => {
+  it('me về sau danh sách kênh → vẫn cuộn tới thẻ Telegram', async () => {
+    const scrolled: string[] = [];
+    const orig = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (this: Element) {
+      scrolled.push(this.id);
+    };
+    let releaseMe: () => void = () => {};
+    const meReady = new Promise<void>((r) => {
+      releaseMe = r;
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes('/auth/me')) await meReady;
+        const data = url.includes('/auth/me') ? me('owner') : url.includes('/notify/telegram') ? { configured: false } : body(url);
+        return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }),
+    );
+    try {
+      const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+      render(
+        <QueryClientProvider client={qc}>
+          <MemoryRouter initialEntries={['/connections#telegram']}>
+            <ConnectionsScreen />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+      await card('Kênh Zalo'); // danh sách kênh đã tải xong
+      await new Promise((r) => setTimeout(r, 120));
+      expect(document.getElementById('telegram')).toBeNull();
+      await act(async () => {
+        releaseMe();
+      });
+      await waitFor(() => expect(document.getElementById('telegram')).not.toBeNull());
+      await waitFor(() => expect(scrolled).toContain('telegram'));
+    } finally {
+      Element.prototype.scrollIntoView = orig;
+    }
   });
 });

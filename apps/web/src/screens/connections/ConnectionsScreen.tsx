@@ -37,7 +37,7 @@ export function ConnectionsScreen() {
     const id = hash.slice(1);
     const t = window.setTimeout(() => document.getElementById(id)?.scrollIntoView?.({ block: 'start' }), 50);
     return () => window.clearTimeout(t);
-  }, [hash, channelsReady]);
+  }, [hash, channelsReady, isOwner]);
 
   return (
     <div className="screen">

@@ -230,6 +230,25 @@ async def test_flush_send_retry_and_failure(owner_api: Any, db: Any) -> None:
     assert cleared is not None
 
 
+async def test_flush_error_after_send_keeps_sent_at(owner_api: Any, db: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Lỗi sau khi gửi (đóng sự cố hỏng) không được xoá `sent_at` của tin đã tới tay Sếp — lượt sau không gửi trùng."""
+    from gh import health
+
+    org = await _configure(db)
+    await _enqueue(db, org, 3)
+
+    async def broken_clear(*_a: Any, **_k: Any) -> bool:
+        raise RuntimeError("CSDL hỏng giữa lượt")
+
+    monkeypatch.setattr(health, "clear", broken_clear)
+    sink = Sink()
+    out = await tsvc.flush_outbox(sessionmaker(), transport=httpx.MockTransport(sink.handle))
+    assert out["sent"] == 3 and len(sink.sent) == 3
+    assert all(r.sent_at is not None for r in await _outbox(db))
+    assert (await tsvc.flush_outbox(sessionmaker(), transport=httpx.MockTransport(sink.handle)))["sent"] == 0
+    assert len(sink.sent) == 3
+
+
 async def test_flush_skips_old_and_cleans(owner_api: Any, db: Any) -> None:
     org = await _configure(db)
     await _enqueue(db, org, 2)

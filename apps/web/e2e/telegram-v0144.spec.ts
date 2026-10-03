@@ -88,15 +88,49 @@ test.describe('Kết nối › Telegram (v0.1.44)', () => {
     await expect(tg.locator('.conn-pill')).toHaveText('Chưa nối');
   });
 
-  test('Trực canh máy chủ: key_mismatch → "bấm Lưu lại một lần"; Tìm chat_id không có tin → hướng dẫn gửi tin', async ({ page }) => {
-    await p3Hook(page.request, 'telegram', 'seed', { configured: true, host: 'key_mismatch', findChats: 'none' });
+  test('Trực canh máy chủ: key_mismatch → "Lưu lại" một lần bấm (PIN) → cảnh báo biến mất, giữ chat cũ', async ({ page }) => {
+    await p3Hook(page.request, 'telegram', 'seed', { configured: true, host: 'key_mismatch' });
     await loginAsOwner(page);
     await page.goto('/connections#telegram');
     const tg = card(page);
     await expect(tg.getByTestId('telegram-host-warning')).toContainText('Máy chủ không đọc được cấu hình — bấm Lưu lại một lần');
+    await expect(tg.locator('.conn-pill')).toHaveText('Cần Sếp xử lý');
     await tg.getByRole('button', { name: 'Lưu lại' }).click();
+    await enterPin(page);
+    await expect(tg.getByTestId('telegram-host-warning')).toHaveCount(0);
+    await expect(tg.getByTestId('telegram-target')).toContainText('chat •••4321');
+    await expect(tg.getByLabel(/Token mới/)).toHaveCount(0);
+  });
+
+  test('Đổi token/chat_id: Tìm chat_id không có tin → hướng dẫn; bỏ trống chat_id, chỉ tắt bản tin → Lưu giữ chat cũ', async ({ page }) => {
+    await p3Hook(page.request, 'telegram', 'seed', { configured: true, findChats: 'none' });
+    await loginAsOwner(page);
+    await page.goto('/connections#telegram');
+    const tg = card(page);
+    await tg.getByRole('button', { name: 'Đổi token/chat_id' }).click();
     await tg.getByRole('button', { name: 'Tìm chat_id' }).click();
     await expect(tg.getByTestId('telegram-find-empty')).toContainText('Chưa thấy tin nào — mở bot, bấm Bắt đầu và gửi một tin rồi bấm lại');
+    await expect(tg.getByLabel('chat_id mới (bỏ trống để giữ •••4321)')).toHaveValue('');
+    await tg.getByRole('switch', { name: 'Gửi bản tin 07:30/17:30' }).click();
+    await tg.getByRole('button', { name: 'Lưu', exact: true }).click();
+    await enterPin(page);
+    await expect(tg.getByTestId('telegram-target')).toContainText('chat •••4321');
+    await expect(tg.getByTestId('telegram-target')).not.toContainText('bản tin');
+  });
+
+  test('Trực canh máy chủ gửi lỗi (failed) → câu theo mã + Chi tiết kỹ thuật; Gửi thử không hứa tin thứ hai', async ({ page }) => {
+    await p3Hook(page.request, 'telegram', 'seed', { configured: true, host: 'failed' });
+    await loginAsOwner(page);
+    await page.goto('/connections#telegram');
+    const tg = card(page);
+    const warn = tg.getByTestId('telegram-host-warning');
+    await expect(warn).toContainText('Trực canh máy chủ chưa gửi được tin Telegram: Sếp đã chặn bot hoặc chưa bấm Bắt đầu');
+    await warn.getByText('Chi tiết kỹ thuật').click();
+    await expect(warn).toContainText('Mã lỗi TELEGRAM_BOT_BLOCKED');
+    await tg.getByRole('button', { name: 'Gửi thử' }).click();
+    await expect(tg.getByTestId('telegram-test-result')).toHaveText(/Đã gửi — kiểm tra Telegram trên điện thoại$/);
+    await expect(tg.getByTestId('telegram-host-test')).toContainText('Tin thử từ máy chủ: Lỗi · Sếp đã chặn bot');
+    await expect(page.locator('body')).not.toContainText('[object Object]');
   });
 
   test('vai trò khác Owner không thấy thẻ Telegram', async ({ page }) => {

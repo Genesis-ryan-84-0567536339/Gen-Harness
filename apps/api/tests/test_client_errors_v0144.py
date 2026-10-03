@@ -2,12 +2,15 @@
 
 import json
 import logging
+import re
+from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
 
 from gh.app import JsonFormatter, RequestIdFilter
+from gh.system_api.client_errors import ClientErrorIn
 from tests.conftest import Api
 
 TOKEN = "123456789:AAFakeTokenForTestOnly_abcdefghijkl"
@@ -71,3 +74,30 @@ async def test_works_before_setup_and_anonymous(client: httpx.AsyncClient, caplo
     assert r.status_code == 202, r.text
     [rec] = [x for x in caplog.records if x.name == "gh.client"]
     assert not hasattr(rec, "user_id") and rec.client_request_id is None  # type: ignore[attr-defined]
+
+
+# ── Hợp đồng độ dài: web cắt theo CLIENT_ERROR_LIMITS (packages/contracts) — phải trùng max_length của server ──────
+DIAG_TS = Path(__file__).resolve().parents[3] / "packages" / "contracts" / "src" / "diagnostics.ts"
+
+
+def _ts_limits() -> dict[str, int]:
+    block = DIAG_TS.read_text("utf-8").split("export const CLIENT_ERROR_LIMITS = {", 1)[1].split("}", 1)[0]
+    return {k: int(v) for k, v in re.findall(r"(\w+): (\d+)", block)}
+
+
+def test_client_error_limits_match_contracts() -> None:
+    limits = _ts_limits()
+    assert set(limits) == {"message", "name", "stack", "component_stack", "path", "app_version"}
+    for field, n in limits.items():
+        meta = [m for m in ClientErrorIn.model_fields[field].metadata if hasattr(m, "max_length")]
+        assert meta and meta[0].max_length == n, field
+
+
+async def test_max_length_body_from_web_is_accepted(owner_api: Api) -> None:
+    """Thân dài tối đa mà web có thể gửi (cắt đúng CLIENT_ERROR_LIMITS) phải qua được ClientErrorIn."""
+    lim = _ts_limits()
+    body = _body(message="m" * lim["message"], name="n" * lim["name"], stack="s" * lim["stack"],
+                 component_stack="c" * lim["component_stack"], path="/" + "p" * (lim["path"] - 1),
+                 app_version="v" * lim["app_version"])
+    r = await _post(owner_api.c, body, ip="10.9.9.9")
+    assert r.status_code == 202, r.text
