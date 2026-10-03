@@ -13,7 +13,9 @@ thật đúng tag → job `promote` nâng thành bản chính thức (latest). S
     needs `ci` + `installer`; bước `tag-guard` đứng TRƯỚC softprops (tag đã
     có mà trỏ commit khác / Release đã promote ⇒ dừng); bước softprops/action-gh-release tạo prerelease: true và
     make_latest: "false"; build-images KHÔNG gắn tag ảnh `:latest` (chạy
-    trước E2E — `:latest` chỉ gắn ở promote).
+    trước E2E; từ v0.1.48 F-36 `:latest` không còn ở đâu cả — promote không gắn nữa, máy Owner dùng
+    digest ghim) và build thử lại 1 lần: bước `id: build1` (`continue-on-error: true`) + bước `id: build2`
+    (`if` chứa `steps.build1.outcome == 'failure'`), cả hai có `cache-from` kiểu `type=gha`.
   - e2e-install.yml: job `promote` có permissions.contents == write, needs
     e2e-install + e2e-upgrade + e2e-rollback và `if` đòi e2e-install.result == 'success' VÀ
     e2e-rollback.result == 'success' (v0.1.34, F-35: job `e2e-rollback` phải tồn tại — bản hỏng cố ý chứng minh
@@ -185,9 +187,10 @@ def check_release(rel: dict[Any, Any]) -> list[str]:
             if any(t.strip().endswith(":latest") for t in tags.splitlines()):
                 errs.append(
                     f"{RELEASE_PATH}: build-images gắn tag ảnh `:latest` — job này chạy trước CI/E2E nên ai kéo "
-                    "`gen-harness-*:latest` sẽ nhận ảnh chưa qua cổng; chỉ đẩy `:<version>`, `:latest` gắn ở job "
-                    "promote (e2e-install.yml)."
+                    "`gen-harness-*:latest` sẽ nhận ảnh chưa qua cổng; chỉ đẩy `:<version>` và `:sha-<commit>` "
+                    "(không có `:latest` ở đâu cả — máy Owner dùng digest ghim trong compose.release.yaml)."
                 )
+        errs += check_build_retry(build_images)
 
     release_job = jobs.get("release")
     if not isinstance(release_job, dict):
@@ -232,6 +235,30 @@ def check_release(rel: dict[Any, Any]) -> list[str]:
             errs.append(
                 f'{RELEASE_PATH}: bước softprops/action-gh-release phải có `make_latest: "false"` '
                 f"(hiện: {w.get('make_latest')!r}) — không được đổi bản chính thức (latest) trước khi E2E xanh."
+            )
+    return errs
+
+
+def check_build_retry(job: dict[Any, Any]) -> list[str]:
+    """build-images build thử lại 1 lần (F-36): build1 continue-on-error + build2 chạy khi build1 lỗi, cả hai có cache gha."""
+    errs: list[str] = []
+    steps = {st.get("id"): st for st in job.get("steps") or [] if isinstance(st, dict) and st.get("id")}
+    b1, b2 = steps.get("build1"), steps.get("build2")
+    if b1 is None or not is_true(b1.get("continue-on-error")):
+        errs.append(
+            f"{RELEASE_PATH}: build-images thiếu bước `id: build1` với `continue-on-error: true` — một lỗi mạng "
+            "tạm thời khi kéo ảnh gốc làm hỏng cả bản phát hành; build lần 1 phải cho phép lỗi để bước build2 thử lại."
+        )
+    if b2 is None or "steps.build1.outcome == 'failure'" not in str(b2.get("if", "")):
+        errs.append(
+            f"{RELEASE_PATH}: build-images thiếu bước `id: build2` có `if: steps.build1.outcome == 'failure'` — "
+            "không có lần build thử lại nên lỗi mạng tạm thời làm hỏng cả bản phát hành."
+        )
+    for name, st in (("build1", b1), ("build2", b2)):
+        if st is not None and "type=gha" not in str((st.get("with") or {}).get("cache-from", "")):
+            errs.append(
+                f"{RELEASE_PATH}: bước `{name}` của build-images thiếu `cache-from: type=gha,scope=…` — "
+                "bản build chậm và dễ lỗi mạng hơn; thêm cache-from/cache-to kiểu type=gha theo từng dịch vụ."
             )
     return errs
 
