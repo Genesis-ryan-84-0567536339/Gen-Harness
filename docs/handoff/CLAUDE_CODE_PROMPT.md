@@ -12,7 +12,7 @@ Thư mục hiện tại là gói bàn giao. Đọc theo đúng thứ tự trong 
 - spec/Gen-Harness-Product-Spec-LOCKED.md — SSOT mục đích & nghiệp vụ. Thắng mọi thứ khi mâu thuẫn.
 - design/Gen-Harness Console.dc.html — SSOT giao diện (21 màn). Mở bằng trình duyệt để xem; logic dữ liệu ở khối <script data-dc-script> cuối tệp.
 - docs/01…07 — màn hình, token, database, kiến trúc, trình cài, thiết lập Owner, tiêu chí nghiệm thu.
-- db/schema.sql — lược đồ khởi điểm. Được chỉnh, nhưng giữ nguyên các quy ước trong docs/03.
+- db/schema.sql — lược đồ khởi điểm (đường dẫn gốc của gói, đã bỏ ở v0.1.48; nay dùng db/sql/0001_baseline.sql + apps/api/migrations). Được chỉnh, nhưng giữ nguyên các quy ước trong docs/03.
 - design/seed-data.json, design/screens.json — dữ liệu mẫu và danh mục màn hình để seed và dựng routing.
 Tên cũ Heo-Harness và persona "Bé Heo" đã bị bỏ. Repo cũ Genesis-ryan-84-0567536339/heo-harness chỉ để tham khảo logic bridge Zalo/WhatsApp và chassis plugin.
 

@@ -3,7 +3,8 @@ giá con người, cách ghép "tin đến → tin đi cùng luồng" dùng chun
 tự động (`people`).
 
 `core.persons.person_type` đã có sẵn (`customer | partner | staff | candidate | learner | supplier | unknown`,
-`docs/handoff/schema.sql`); F2 §6 gọi 4 board bằng tên khác — `BOARD_PERSON_TYPE` ánh xạ qua lại.
+`db/sql/0001_baseline.sql`; `schema.sql` gốc của gói bàn giao đã bỏ ở v0.1.48);
+F2 §6 gọi 4 board bằng tên khác — `BOARD_PERSON_TYPE` ánh xạ qua lại.
 """
 
 import uuid

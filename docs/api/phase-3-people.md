@@ -12,7 +12,7 @@ Mã: `apps/api/gh/biz/people/` (`service.py` hình dạng + ghép "tin đến �
 
 ## Bảng gốc đã có sẵn — không phải bảng mới
 
-`biz.people_reviews`, `biz.review_disputes`, `biz.promises` đều đã có từ giai đoạn 1 (`docs/handoff/schema.sql`).
+`biz.people_reviews`, `biz.review_disputes`, `biz.promises` đều đã có từ giai đoạn 1 (`db/sql/0001_baseline.sql`; `docs/handoff/schema.sql` gốc đã bỏ ở v0.1.48).
 Cụm này chỉ `ALTER` cột còn thiếu (lịch sử sửa tay + PIN xem trên `people_reviews`, người giải quyết trên
 `review_disputes`) và thêm chỉ mục — không tạo lại bảng nào.
 
