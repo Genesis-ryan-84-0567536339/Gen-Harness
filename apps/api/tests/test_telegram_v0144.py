@@ -31,9 +31,9 @@ TOKEN2 = "987654321:BBOtherFakeTokenOnly_zyxwvutsrqponm"
 CHAT = "987654321"
 # Vector cố định chung với `go test` của genh — chống lệch định dạng phong bì GH1.
 VECTOR_KEY = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
-VECTOR_BLOB = ("R0gxAQEBAQEBAQEBAQEBcDa822qwcq3EjBvydVHl/Eae0cnW0+lWvy+7VUcXKoAnR65d/L2duDWg+nq0YHK+AgICAgICAgICAgIC4Apt1NK8"
-               "X3nxp5PKAE3vJSvRllbVFT6QKTuFbBwOJ4S/iowHbEK8trUT3dCImyr9FL5k9CzCtEYg8CnafG0xPbjhaU8GEmin34k+9X0cd0uL5rEA"
-               "fHt9yDbxIe8FrQ4=")
+VECTOR_BLOB = ("R0gxAQEBAQEBAQEBAQEBcDa822qwcq3EjBvydVHl/Eae0cnW0+lWvy+7VUcXKoAnR65d/L2duDWg+nq0YHK+"
+               "AgICAgICAgICAgIC4Apt1NK8X3nxp5PKAE3vJSvRllbVFT6QKTuFbBwOJ4S/iowHbEK8trUT3dCImyr9FL5k9CzC"
+               "tEYg8CnafG0xPbjhaU8GEmin34k+9X0cd0uL5rEAfHt9yDbxIe8FrQ4=")
 VECTOR_PLAIN = b'{"token":"123456789:AAFakeTokenForTestOnly_abcdefghijkl","chat_id":"987654321"}'
 
 
@@ -83,7 +83,8 @@ async def _db_dump() -> str:
     async with admin_sessionmaker()() as s:
         rows = []
         for sql in ("SELECT * FROM ops.action_log", "SELECT * FROM ops.boss_checks",
-                    "SELECT * FROM ops.telegram_outbox", "SELECT org_id, chat_id, bot_username FROM ops.notify_channels"):
+                    "SELECT * FROM ops.telegram_outbox",
+                    "SELECT org_id, chat_id, bot_username FROM ops.notify_channels"):
             rows.append((await s.execute(text(sql))).all())
         return orjson.dumps(rows, default=str).decode()
 
@@ -231,7 +232,7 @@ async def test_token_never_leaks(owner_api: Api, fake_tg: FakeTelegram, caplog: 
     fmt = JsonFormatter()
     logs = [fmt.format(rec) for rec in caplog.records] + [rec.getMessage() for rec in caplog.records]
     dump = await _db_dump()
-    host_files = "".join(p.read_text() for p in host.rglob("*.json"))
+    host_files = "".join(p.read_text() for p in host.rglob("*.json"))  # noqa: ASYNC240
     for secret in (TOKEN, TOKEN2, TOKEN.split(":")[1], TOKEN2.split(":")[1]):
         assert all(secret not in t for t in texts), secret
         assert all(secret not in line for line in logs), secret
@@ -264,7 +265,7 @@ async def test_host_file_contract(owner_api: Api, fake_tg: FakeTelegram, host: P
     plain = crypto.decrypt(base64.b64decode(data["enc"]), b"telegram_notify")
     assert json.loads(plain) == {"token": TOKEN, "chat_id": CHAT}
     assert plain == json.dumps({"token": TOKEN, "chat_id": CHAT}, separators=(",", ":")).encode()
-    assert not list(host.glob(".*.tmp"))
+    assert not list(host.glob(".*.tmp"))  # noqa: ASYNC240
     # Tắt ⇒ enabled=false (không enc).
     assert (await owner_api.send("PUT", "/notify/telegram", {"chat_id": CHAT, "enabled": False})).status_code == 200
     data = json.loads(f.read_text())
@@ -333,8 +334,8 @@ async def test_find_chat(owner_api: Api, fake_tg: FakeTelegram) -> None:
     fake_tg.updates = [
         {"update_id": 1, "message": {"chat": {"id": 111, "type": "private", "first_name": "Cũ"}}},
         {"update_id": 2, "message": {"chat": {"id": -100, "type": "group", "title": "Nhóm"}}},
-        {"update_id": 3, "message": {"chat": {"id": int(CHAT), "type": "private", "first_name": "Anh", "last_name": "Cơ",
-                                              "username": "anhco"}}},
+        {"update_id": 3, "message": {"chat": {"id": int(CHAT), "type": "private", "first_name": "Anh",
+                                              "last_name": "Cơ", "username": "anhco"}}},
     ]
     r = await owner_api.send("POST", "/notify/telegram/find-chat", {"token": TOKEN})
     assert r.status_code == 200, r.text

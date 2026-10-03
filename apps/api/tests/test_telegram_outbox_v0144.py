@@ -233,9 +233,11 @@ async def test_flush_send_retry_and_failure(owner_api: Any, db: Any) -> None:
 async def test_flush_skips_old_and_cleans(owner_api: Any, db: Any) -> None:
     org = await _configure(db)
     await _enqueue(db, org, 2)
-    await db.execute(text("UPDATE ops.telegram_outbox SET created_at = now() - interval '2 days' WHERE dedupe_key = 'thu:0'"))
+    await db.execute(text("""UPDATE ops.telegram_outbox SET created_at = now() - interval '2 days'
+                             WHERE dedupe_key = 'thu:0'"""))
     await db.execute(text("""INSERT INTO ops.telegram_outbox (org_id, kind, dedupe_key, text, sent_at, created_at)
-                             VALUES (:o, 'reminder', 'cu', 'cũ', now() - interval '8 days', now() - interval '8 days')"""),
+                             VALUES (:o, 'reminder', 'cu', 'cũ', now() - interval '8 days',
+                                     now() - interval '8 days')"""),
                      {"o": org})
     await db.commit()
     sink = Sink()

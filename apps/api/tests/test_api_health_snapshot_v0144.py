@@ -68,7 +68,7 @@ async def test_snapshot_contract(owner_api: Any, db: Any, host: Path, backup_at:
     for a in data["alerts"]:
         assert set(a) == ALERT_KEYS and a["raised_at"].endswith("Z")
     assert data["alerts"][1]["fingerprint"] == "TELEGRAM_BOT_BLOCKED" and data["alerts"][0]["fingerprint"] == ""
-    assert not [p for p in host.iterdir() if p.name.endswith(".tmp")]
+    assert not [p for p in host.iterdir() if p.name.endswith(".tmp")]  # noqa: ASYNC240
     # Đóng sự cố ⇒ lần ghi sau không còn.
     await health.clear(db, org, "channel.down:zalo")
     await db.commit()
