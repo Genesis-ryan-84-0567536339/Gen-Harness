@@ -66,6 +66,40 @@ class ScanSummary(unittest.TestCase):
             r = run("pip-audit", content)
             self.assertEqual(r.returncode, 0)
             self.assertIn("Không chạy được quét", r.stdout)
+            self.assertIn("::warning::", r.stderr)
+
+    def test_govulncheck_incomplete_is_not_clean(self):
+        # Luồng thật khi không tải được vuln.go.dev: config + SBOM + "Fetching…" rồi dừng (exit 1).
+        objs = [
+            {"config": {"scanner_name": "govulncheck"}},
+            {"SBOM": {"go_version": "go1.26", "modules": [{"path": "m/x"}]}},
+            {"progress": {"message": "Fetching vulnerabilities from the database..."}},
+        ]
+        r = run("govulncheck", "\n".join(json.dumps(o) for o in objs))
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("Không chạy được quét", r.stdout)
+        self.assertNotIn("✅", r.stdout)
+        self.assertIn("::warning::", r.stderr)
+
+    def test_govulncheck_complete_clean(self):
+        objs = [
+            {"config": {"scanner_name": "govulncheck"}},
+            {"progress": {"message": "Fetching vulnerabilities from the database..."}},
+            {"progress": {"message": "Checking the code against the vulnerabilities..."}},
+        ]
+        r = run("govulncheck", "\n".join(json.dumps(o) for o in objs))
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("✅", r.stdout)
+        self.assertNotIn("::warning::", r.stderr)
+
+    def test_tool_error_json_is_not_clean(self):
+        # npm audit mất mạng vẫn in JSON {"error": …}; pip-audit lỗi không có "dependencies".
+        for kind, data in (("npm-audit", {"error": {"code": "ENOTFOUND", "summary": "x"}}),
+                           ("pip-audit", {"fixes": []})):
+            r = run(kind, json.dumps(data))
+            self.assertEqual(r.returncode, 0)
+            self.assertIn("Không chạy được quét", r.stdout)
+            self.assertNotIn("✅", r.stdout)
 
     def test_bad_kind(self):
         self.assertEqual(run("khac", "{}").returncode, 2)

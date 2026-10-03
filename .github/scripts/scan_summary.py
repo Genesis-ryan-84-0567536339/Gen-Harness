@@ -79,9 +79,18 @@ def render_npm(title: str, data: dict) -> str:
     return "\n".join(out)
 
 
-def render_govuln(title: str, objs: list) -> str:
+# govulncheck in tiến trình này SAU khi tải xong CSDL lỗ (internal/vulncheck: checkingSrcVulnsMessage /
+# checkingBinVulnsMessage). Luồng thiếu nó = quét dừng giữa chừng (vd không tải được vuln.go.dev) dù JSON vẫn hợp lệ.
+GOVULN_CHECKED_PREFIX = "Checking the "
+
+
+def render_govuln(title: str, objs: list) -> str | None:
     found: dict[str, dict] = {}
+    checked = False
     for o in objs:
+        prog = o.get("progress") if isinstance(o, dict) else None
+        if isinstance(prog, dict) and str(prog.get("message", "")).startswith(GOVULN_CHECKED_PREFIX):
+            checked = True
         f = o.get("finding") if isinstance(o, dict) else None
         if not f:
             continue
@@ -92,6 +101,8 @@ def render_govuln(title: str, objs: list) -> str:
         if trace and trace[0].get("module"):
             rec["mods"].add(f"{trace[0]['module']}@{trace[0].get('version', '?')}")
         rec["fixed"] = rec["fixed"] or f.get("fixed_version", "")
+    if not found and not checked:
+        return None  # quét chưa chạy xong — KHÔNG được báo "không thấy lỗ"
     out = [f"### Quét bảo mật: {title}", ""]
     if not found:
         return "\n".join(out + ["✅ Không thấy lỗ đã biết", ""])
@@ -108,23 +119,34 @@ def render_govuln(title: str, objs: list) -> str:
     return "\n".join(out + [""])
 
 
+def _complete(kind: str, data: dict) -> bool:
+    """JSON hợp lệ nhưng là báo lỗi của công cụ (mất mạng, sai tham số…) thì KHÔNG phải kết quả quét."""
+    if kind == "pip-audit":
+        return isinstance(data.get("dependencies"), list)
+    return "error" not in data and isinstance(data.get("metadata"), dict)
+
+
 def build(kind: str, title: str, path: Path) -> str:
-    miss = f"⚠️ Không chạy được quét {title} (thiếu kết quả) — xem log bước trước"
+    miss = f"### Quét bảo mật: {title}\n\n⚠️ Không chạy được quét {title} (thiếu kết quả) — xem log bước trước\n"
     try:
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
+        text = ""
+    out: str | None = None
+    if text.strip():
+        try:
+            if kind == "govulncheck":
+                out = render_govuln(title, parse_stream(text))
+            else:
+                data = json.loads(text)
+                if isinstance(data, dict) and _complete(kind, data):
+                    out = render_pip(title, data) if kind == "pip-audit" else render_npm(title, data)
+        except (ValueError, AttributeError, TypeError):
+            out = None
+    if out is None:
+        _warn(f"Không chạy được quét {title} (thiếu kết quả) — xem log bước quét")
         return miss
-    if not text.strip():
-        return miss
-    try:
-        if kind == "govulncheck":
-            return render_govuln(title, parse_stream(text))
-        data = json.loads(text)
-        if not isinstance(data, dict):
-            return miss
-        return render_pip(title, data) if kind == "pip-audit" else render_npm(title, data)
-    except (ValueError, AttributeError, TypeError):
-        return miss
+    return out
 
 
 def main(argv: list[str] | None = None) -> int:

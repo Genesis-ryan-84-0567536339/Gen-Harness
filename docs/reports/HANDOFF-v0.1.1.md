@@ -3007,9 +3007,34 @@ Sếp xác nhận bằng mã PIN, có bằng chứng bằng ảnh chụp, và d�
 
 ## v0.1.48 — Bản build tái lập & pipeline gọn (03/10/2026)
 
-- **Việc đã làm**: F-19/F-36/F-71 (gói `anh-tai-lap`: ảnh build tái lập, ghim digest, lock) và F-13/F-44 (gói này): `.github/scripts/scan_summary.py` tóm tắt quét bảo mật dạng báo cáo (không chặn, luôn exit 0, `::warning::` cho lỗ mức cao); `.github/scripts/check_embedded_sync.py` đỏ khi bản nhúng genh (compose, Caddyfile, seccomp) lệch `deploy/`; test `test_scan_summary.py`, `test_check_embedded_sync.py`, `test_no_stale_schema_sql.py`; `docs/handoff/05-installer.md` mục Phát hành cập nhật (ảnh chỉ `:<version>` + `:sha-<commit>`, không còn `:latest`).
-- **Quyết định `docs/handoff/schema.sql` = BỎ**: lược đồ thật là `db/sql/*.sql` + `apps/api/migrations` (đã có kiểm alembic 1 head + pytest migrate thật); sinh bằng pg_dump trong CI vừa nặng vừa không tất định (pg_partman tạo phân vùng theo ngày). Các tài liệu trỏ tới nó đã sửa; `db/sql/*.sql` và `apps/api/migrations/versions/*.py` KHÔNG sửa (đã chạy trên máy Boss, dòng nhắc `schema.sql` trong đó chỉ là chú thích lịch sử).
-- **Hợp đồng**: uv 0.12.23 ở mọi nơi; venv `/opt/venv` (api: `python`, browser: `python3` trên PATH); dự án lock `gen-harness-api`, `gen-harness-browser`; script `check_embedded_sync.py [--root]` (0/1), `scan_summary.py --kind {pip-audit,npm-audit,govulncheck} --title <t> <json>` (0, 2 khi sai tham số), `check_image_lock.py`, `check_workflow_hygiene.py`.
-- **Bảng đã kiểm** (giá trị, nguồn, lệnh, thời điểm): [anh-tai-lap-da-kiem.md](v0.1.48/anh-tai-lap-da-kiem.md) · [pipeline-da-kiem.md](v0.1.48/pipeline-da-kiem.md) (do 2 gói kia tạo).
-- **Hạn chế còn lại**: gói apt trong Dockerfile chưa ghim phiên bản; Renovate cần cài GitHub App.
-- **Boss: không cần làm gì — tuỳ chọn cài Renovate App (https://github.com/apps/renovate → Install → chọn repo Gen-Harness, 1 phút).**
+- **Vì sao**: ảnh dựng từ tag trôi (`python:3.11-slim`, `caddy:2-alpine`…) và `pip install` không khoá ⇒ cùng một VERSION có
+  thể ra hai ảnh khác nhau; action GitHub ghim theo tag (có thể bị đổi ngầm); ảnh GHCR `:latest` cho máy chưa có Release kéo
+  bản chưa qua E2E; không có quét lỗ bảo mật phụ thuộc; bản nhúng trong genh có thể lệch `deploy/` mà CI không biết.
+- **Thay đổi** (3 gói `anh-tai-lap`, `pipeline-ci`, `quet-dong-bo-tai-lieu`):
+  - F-19/F-36 ảnh tái lập: mọi ảnh nền + caddy/redis ghim **digest danh sách đa kiến trúc** (amd64 + arm64); api/browser cài
+    từ `uv.lock` (`uv sync --frozen`, venv `/opt/venv`, uv 0.12.23 chỉ gắn lúc build); `fastapi>=0.121` (lock 0.142.2);
+    `renovate.json` (Renovate tự mở PR nâng, gồm cả bản nhúng `embedded_compose.yaml`; `platformAutomerge=false` để chờ cả
+    E2E). Test Go: mọi ảnh trong compose (repo + bản nhúng) phải có digest.
+  - F-71/F-36 pipeline: 4 workflow ghim action bằng SHA + `# vX.Y.Z`; quyền mặc định `contents: read`; promote không còn
+    `packages: write`/GHCR; ảnh phát hành chỉ `:<version>` + `:sha-<commit>` (bỏ `:latest`); build-images `build1` → chờ 30 giây
+    → `build2` + cache gha; job images của CI build thử lại 1 lần và kiểm **tái lập** (`check_image_lock.py`: gói trong ảnh khớp
+    `uv.lock` qua 2 lần build, lần 2 `--no-cache`); `check_workflow_hygiene.py` giữ các bất biến này.
+  - F-13 quét bảo mật dạng báo cáo (không chặn): pip-audit (api, browser), npm audit (web, bridge), govulncheck (genh, ô
+    ubuntu-24.04) → step summary qua `scan_summary.py`, lỗ mức cao ⇒ `::warning::`. Lúc tích hợp sửa thêm: công cụ quét chạy
+    dở (vd không tải được CSDL lỗ — govulncheck chỉ in `config`/`SBOM`/"Fetching…"; npm audit in `{"error": …}`) giờ báo
+    "Không chạy được quét" + `::warning::` thay vì "✅ Không thấy lỗ" (test mới trong `test_scan_summary.py`).
+  - F-44: `check_embedded_sync.py` đỏ khi bản nhúng genh (compose, Caddyfile, seccomp) lệch `deploy/`; bỏ
+    `docs/handoff/schema.sql` (lược đồ thật là `db/sql/*.sql` + `apps/api/migrations`), sửa các tài liệu trỏ tới.
+  - Bảng giá trị đã đo (digest, SHA action, phiên bản công cụ, nguồn, lệnh):
+    [anh-tai-lap-da-kiem.md](v0.1.48/anh-tai-lap-da-kiem.md) · [pipeline-da-kiem.md](v0.1.48/pipeline-da-kiem.md).
+- **Kiểm tra** (máy tích hợp): `check_release_gate.py` OK; unittest `.github/scripts` 80 test xanh; actionlint v1.7.12 0 lỗi,
+  170 khối `run:` qua `bash -n`; mô phỏng lệch bản nhúng (compose, seccomp) ⇒ exit 1, hoàn nguyên ⇒ 0; `uv lock --check` +
+  `uv sync --frozen` (api 58, browser 24 gói); ruff + mypy api/browser xanh; pytest api 1813 passed ×2 (superuser và GH_TEST_APP_ROLE=1); pytest browser 43 passed
+  (Chromium thật); web lint/typecheck/vitest 833/build/bridge 50/Playwright mock 274 passed; `go vet` + `go test`
+  genh xanh (gồm 4 test ghim digest/khớp bản nhúng); `renovate-config-validator --strict` hợp lệ; `docker compose config -q`,
+  cổng proxy mặc định 127.0.0.1, Caddyfile hợp lệ với ảnh caddy ghim digest. Build 5 ảnh + tái lập + E2E cài thật do CI quyết
+  (máy tích hợp không tải được blob ghcr.io).
+- **Lưu ý vận hành**: `genh update` lên bản này tạo lại container proxy/redis (tham chiếu ảnh đổi sang digest); dữ liệu redis
+  giữ ở volume. Còn lại: gói apt trong Dockerfile chưa ghim phiên bản.
+- **Boss**: Không cần làm gì. (Tuỳ chọn, 1 phút) Nếu muốn máy tự đề xuất nâng thư viện/ảnh mỗi tuần: mở
+  https://github.com/apps/renovate → bấm Install → chọn đúng repo Gen-Harness → Save. Không cài thì mọi thứ vẫn chạy như cũ.
