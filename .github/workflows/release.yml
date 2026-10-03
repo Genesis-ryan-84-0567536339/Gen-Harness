@@ -414,6 +414,19 @@ jobs:
       - name: Kiểm compose.release.yaml là YAML hợp lệ
         run: python3 -c "import yaml,sys; d=yaml.safe_load(open('deploy/compose.release.yaml')); assert 'services' in d; print('ok:', sorted(d['services']))"
 
+      - name: Bản phát hành vẫn mang profile seccomp + cap_drop ALL cho browser (F-85)
+        run: |
+          python3 - <<'PY'
+          import yaml
+          b = yaml.safe_load(open('deploy/compose.release.yaml'))['services']['browser']
+          opts = b.get('security_opt', [])
+          assert any(o.startswith('seccomp=') and 'chromium-seccomp.json' in o for o in opts), opts
+          assert 'no-new-privileges:true' in opts, opts
+          assert b.get('cap_drop') == ['ALL'], b.get('cap_drop')
+          print('ok: browser giữ', opts)
+          PY
+          cmp deploy/browser/chromium-seccomp.json apps/genh/internal/compose/embedded_chromium-seccomp.json
+
       - uses: actions/upload-artifact@v4
         with:
           name: compose-release

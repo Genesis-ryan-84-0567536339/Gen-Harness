@@ -14,6 +14,11 @@ COPY apps/browser/pyproject.toml ./
 COPY apps/browser/ghb ./ghb
 RUN pip install --break-system-packages --no-cache-dir . \
  && python3 -c "import ghb, ghb.worker, ghb.egress, playwright, redis, orjson; print('ghb', ghb.__version__)"
+# Sandbox Chromium (F-85, v0.1.47): BẬT bằng user namespace + seccomp-bpf của chính Chromium (GH_BROWSER_SANDBOX=auto|on|off,
+# xem ghb/sandbox.py) — KHÔNG dùng chrome-sandbox setuid vì trái no-new-privileges. Cần profile seccomp riêng
+# (deploy/browser/chromium-seccomp.json, đặt ở compose) cho phép clone/unshare/setns/chroot khi cap_drop ALL. Ảnh gốc không đặt
+# biến/cờ nào ép --no-sandbox; Playwright chỉ thêm cờ đó khi chromium_sandbox=False (xem ghb/worker.py).
+# Tự kiểm: python3 -m ghb.sandbox --probe (in JSON enabled/reason).
 # Không root. rootfs chỉ-đọc + tmpfs /tmp đặt ở compose (hồ sơ trình duyệt chỉ sống trong RAM, xoá khi xong việc).
 USER pwuser
 # Trình duyệt chạy CÓ giao diện trong màn hình ảo Xvfb (như trình duyệt thường), không phải chế độ headless.

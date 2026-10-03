@@ -569,6 +569,25 @@ jobs:
           curl -k -fsS -o /dev/null "https://localhost:${GH_PORT}/api/v1/ready"
           echo "OK: cài mới ở chế độ local — chỉ nghe 127.0.0.1, localhost vẫn ready."
 
+      - name: Profile seccomp của browser nằm cạnh compose + nhịp tim có trường sandbox (F-85)
+        if: steps.v146.outputs.run == 'true'
+        run: |
+          set -uo pipefail
+          if [ -n "${GENH_COMPOSE_FILE:-}" ]; then cdir="$(dirname "$GENH_COMPOSE_FILE")"; else cdir="$GEN_HARNESS_HOME/deploy"; fi
+          # Chế độ auto lùi êm khi runner chặn user namespace — KHÔNG đỏ vì sandbox; chỉ kiểm tệp profile là TỆP (không phải thư mục Docker tự tạo).
+          if grep -q 'chromium-seccomp.json' "$cdir/compose.yaml" 2>/dev/null || grep -q 'chromium-seccomp.json' "${GENH_COMPOSE_FILE:-/dev/null}" 2>/dev/null; then
+            [ -f "$cdir/browser/chromium-seccomp.json" ] || { echo "::error::compose có seccomp=chromium-seccomp.json nhưng $cdir/browser/chromium-seccomp.json không phải tệp" >&2; exit 1; }
+            echo "OK: $cdir/browser/chromium-seccomp.json có mặt"
+          else
+            echo "::notice::compose đang dùng chưa có profile seccomp (< v0.1.47) — bỏ qua."
+          fi
+          rc="$(docker ps --format '{{.Names}}' --filter label=com.docker.compose.project=gen-harness --filter label=com.docker.compose.service=browser-redis | head -1)"
+          if [ -n "$rc" ]; then
+            hb="$(docker exec "$rc" redis-cli get gh:browser:heartbeat 2>/dev/null || true)"
+            echo "::notice::nhịp tim browser: ${hb:-<chưa có>}"
+          fi
+          exit 0
+
       # Mặc định `genh remote lan` (không --name) tự dò IPv4 LAN và đặt GH_SITE_ADDRESS = IP đó. Trình duyệt mở bằng IP
       # KHÔNG gửi SNI — curl cũng vậy khi URL là IP và không có --resolve: kiểm đúng đường điện thoại đi (Caddyfile cần
       # default_sni, genh phải bỏ qua docker0/br-*/veth*/virbr*).

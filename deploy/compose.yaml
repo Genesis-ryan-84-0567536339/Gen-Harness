@@ -164,8 +164,12 @@ services:
   # worker giữ khoá master) — chỉ nói với browser-redis. Chỉ ở mạng nội bộ `browser` (không có đường ra Internet) — lối
   # ra duy nhất là browser-egress (chỉ tên miền nền tảng, chặn IP nội bộ). Rảnh thì chỉ là một tiến trình Python nhỏ;
   # Chromium chỉ mở khi có việc (Owner bấm/hỏi Gen/lịch Owner bật).
-  # Sandbox của Chromium đang TẮT (Playwright mặc định --no-sandbox): bật cần user namespace (seccomp/AppArmor mặc định
-  # của Docker chặn) hoặc chrome-sandbox setuid (trái no-new-privileges) — bù lại bằng cách ly container ở đây.
+  # Sandbox của Chromium (F-85, v0.1.47) BẬT: Chromium chạy dưới user pwuser (không root) với vùng cách ly của chính nó
+  # (user namespace + seccomp-bpf), KHÔNG dùng chrome-sandbox setuid (trái no-new-privileges). Container vẫn cap_drop ALL +
+  # no-new-privileges; profile seccomp riêng (./browser/chromium-seccomp.json = profile mặc định của Docker + clone/unshare/
+  # setns/chroot để Chromium tạo namespace) thay profile mặc định. GH_BROWSER_SANDBOX=auto: máy chủ không cho user namespace
+  # (vd Ubuntu 24.04 chặn bằng AppArmor) thì tự lùi về không sandbox và BÁO THẬT qua nhịp tim (api khoá việc ghi cho tới khi
+  # Sếp đồng ý rủi ro); on = bắt buộc (lỗi thì không chạy); off = tắt.
   browser:
     build: { context: .., dockerfile: deploy/images/browser.Dockerfile }
     restart: unless-stopped
@@ -177,13 +181,14 @@ services:
       GH_BROWSER_PROXY: http://browser-egress:3128
       GH_BROWSER_HEADLESS: "0"
       GH_BROWSER_MAX_JOBS: "2"
+      GH_BROWSER_SANDBOX: ${GH_BROWSER_SANDBOX:-auto}
     secrets: [gh_browser_key]
     networks: [browser]
     read_only: true
     tmpfs: ["/tmp:size=768m"]
     shm_size: 256m
     cap_drop: [ALL]
-    security_opt: ["no-new-privileges:true"]
+    security_opt: ["no-new-privileges:true", "seccomp=${GH_BROWSER_SECCOMP:-./browser/chromium-seccomp.json}"]
     mem_limit: 1536m
     cpus: 1.5
     pids_limit: 512

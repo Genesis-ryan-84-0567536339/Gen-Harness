@@ -305,6 +305,12 @@ func TestInSyncWithEmbedded(t *testing.T) {
 		if err := os.WriteFile(path, composeData, 0o644); err != nil {
 			t.Fatal(err)
 		}
+		if err := os.MkdirAll(filepath.Join(filepath.Dir(path), "browser"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(filepath.Dir(path), "browser", "chromium-seccomp.json"), embeddedSeccomp, 0o644); err != nil {
+			t.Fatal(err)
+		}
 		if caddy != nil {
 			if err := os.WriteFile(filepath.Join(filepath.Dir(path), "proxy", "Caddyfile"), caddy, 0o644); err != nil {
 				t.Fatal(err)

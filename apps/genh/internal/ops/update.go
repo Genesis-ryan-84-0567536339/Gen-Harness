@@ -149,7 +149,7 @@ func interruptedBeforeTouch(cause error) *OpError {
 }
 
 // UpdateNeeded báo dịch vụ đã khớp bản genh đang chạy chưa: compose.yaml GENH
-// QUẢN LÝ + Caddyfile trùng bản nhúng (compose.InSyncWithEmbedded) VÀ không còn
+// QUẢN LÝ + Caddyfile + profile seccomp trình duyệt trùng bản nhúng (compose.InSyncWithEmbedded) VÀ không còn
 // dấu cập nhật dở (run/update-inprogress.json — lần trước đã ghi compose.yaml
 // mới nhưng chưa tới `up -d` thành công). compose.yaml ngoài (GENH_COMPOSE_FILE,
 // checkout) → false: luôn chạy đủ. Lỗi (không tìm thấy compose…) → (false,

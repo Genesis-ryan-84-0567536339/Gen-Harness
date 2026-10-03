@@ -174,11 +174,16 @@ jobs:
       - name: Lint + typecheck
         working-directory: apps/browser
         run: .venv/bin/ruff check ghb tests && .venv/bin/mypy ghb
+      - name: Cho phép user namespace không đặc quyền (Ubuntu 24.04 chặn bằng AppArmor — F-85)
+        # Máy Fedora của Sếp không chặn; runner Ubuntu 24.04 chặn mặc định. Không bật được thì `|| true` rồi test
+        # GH_BROWSER_SANDBOX_REQUIRED=1 đỏ — đó là mục đích (không giả xanh).
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
       - name: Test (Chromium + Redis thật, trang mẫu)
         working-directory: apps/browser
         env:
           GH_TEST_REDIS: redis://localhost:6379/14
           GH_BROWSER_TESTS_REQUIRED: "1"
+          GH_BROWSER_SANDBOX_REQUIRED: "1"
         run: .venv/bin/pytest -q
 
   web:
@@ -228,6 +233,22 @@ jobs:
           docker build -f deploy/images/bridge.Dockerfile -t gh-bridge .
           docker build -f apps/web/Dockerfile -t gh-web .
           docker build -f deploy/images/db.Dockerfile -t gh-db .
+      - name: Sandbox Chromium bật trong container browser với đúng tuỳ chọn bảo mật như compose (F-85)
+        run: |
+          set -euo pipefail
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          python3 -c "import json;d=json.load(open('deploy/browser/chromium-seccomp.json'));assert d['defaultAction']"
+          out="$(docker run --rm --init --user pwuser --cap-drop ALL \
+            --security-opt no-new-privileges:true --security-opt "seccomp=$PWD/deploy/browser/chromium-seccomp.json" \
+            --read-only --tmpfs /tmp:size=768m --shm-size 256m \
+            -e GH_BROWSER_SANDBOX=auto -e GH_BROWSER_HEADLESS=0 \
+            gh-browser xvfb-run -a python3 -m ghb.sandbox --probe)"
+          echo "$out"
+          echo "$out" | tail -n 1 | python3 -c "
+          import json,sys
+          r=json.loads(sys.stdin.read())
+          assert r['enabled'] is True, 'Chromium trong container browser KHÔNG bật được sandbox: %s' % r
+          print('OK: sandbox bật trong container (không root, cap_drop ALL, seccomp riêng)')"
       - name: Ảnh api mang đúng phiên bản (v0.1.36 F-46)
         run: |
           want="$(tr -d '[:space:]' < VERSION)"
