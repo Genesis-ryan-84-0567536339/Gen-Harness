@@ -2490,3 +2490,72 @@ Không cần chụp màn hình hay gửi mã cho Claude — kết quả tự lư
   quả cũ thiếu `sendable`), `jev-once-v0139` (`#jev` cuộn tới thẻ), e2e `empty-state-v0143` (Lời hứa tab mặc định).
 - Chờ sau phát hành (người điều phối): kiểm genh tải từ Release đúng checksum + `genh version` = v0.1.43; E2E release
   xanh rồi mới promote.
+
+## v0.1.44 — Kênh Telegram tới Sếp + Trực canh máy chủ + Gói chẩn đoán (03/10/2026)
+
+### Boss cần làm gì
+
+1. **Tạo bot Telegram** (khoảng 3 phút, Console hướng dẫn từng bước ở **Kết nối › Telegram**):
+   1) Trên điện thoại mở Telegram, tìm **@BotFather** (có dấu tích xanh), bấm Bắt đầu.
+   2) Gửi `/newbot`, đặt tên (vd "Gen của Sếp") và tên người dùng kết thúc bằng `bot`.
+   3) BotFather gửi lại một mã dài dạng `123456789:AA…` — chép mã đó.
+   4) Bấm vào đường dẫn bot vừa tạo, bấm **Bắt đầu (Start)** và gửi một tin bất kỳ (vd "chào").
+   5) Trong Console dán mã vào ô Token, bấm **Tìm chat_id** rồi chọn tên Sếp, bấm **Lưu** (nhập PIN).
+   6) Bấm **Gửi thử** — điện thoại phải nhận 2 tin (một từ Console, một từ trực canh máy chủ). Không gửi mã bot cho ai khác.
+2. Trực canh máy chủ: không cần làm gì — `genh update` (hoặc lịch đêm) tự cài, chạy mỗi 12 phút. Nếu Console từng nhắc "máy
+   chủ có thể không tự chạy lại khi bật máy" (Linux), chạy một lần `sudo loginctl enable-linger $USER` như lời nhắc để trực
+   canh chạy cả khi không đăng nhập. Máy tắt hẳn/mất điện thì trực canh chỉ báo được khi máy bật lại (tin "Máy chủ vừa khởi
+   động lại").
+3. Khi cần gửi lỗi cho Claude: **Trợ giúp › Tạo gói chẩn đoán** (PIN) → **Tải gói chẩn đoán** → gửi tệp zip đó (đã lọc
+   mật khẩu/khoá/token).
+
+### Vì sao (kế hoạch tổng `docs/audit/2026-10-01/0-ke-hoach-tong.md`, mục v0.1.44)
+
+- **F-6 bước 2** 🔴: máy chủ/api chết thì Sếp không biết cho tới khi tự mở Console — cần báo ngoài app, chạy được cả khi api chết.
+- **F-8 (c)** 🟠: bản tin 07:30/17:30 và nhắc việc của Gen chỉ nằm trong Console.
+- **F-4 bước 2** 🟠: mã ERR-… trên web không nối được với log máy chủ; Claude thiếu gói chẩn đoán đầy đủ, an toàn.
+
+### Thay đổi
+
+- **genh — Trực canh máy chủ (F-6b)**: lịch `gen-harness-watchdog` mỗi 12 phút (systemd timer / crontab / launchd / schtasks),
+  `genh install`/`update` bật mặc định, `genh watchdog enable|disable|status`, `genh uninstall` gỡ. Một lượt = `genh doctor
+  --notify`: đo docker/api `/ready`/dịch vụ unhealthy/đĩa/nhịp worker-bridge/sao lưu/bản sao ngoài máy/cập nhật lỗi, tự khởi
+  động lại dịch vụ chết (≤ 1 lần/dịch vụ/60 phút), gộp sự cố phía api từ `run/api-health.json` còn tươi. Chống spam: mỗi lượt
+  tối đa 1 tin CẢNH BÁO + 1 tin ĐÃ ỔN, sự cố còn mở không báo lại; `api-health.json` cũ không sinh "đã ổn" giả. `genh stop`
+  ⇒ tạm nghỉ. Kết quả cho Console ở `run/watchdog-status.json`.
+- **api — Telegram (F-8c)**: migration **0029** (`ops.notify_channels` token mã hoá + `ops.telegram_outbox`, chạy lại an toàn,
+  RLS + GRANT gh_app); `GET/PUT/DELETE /notify/telegram`, `POST /notify/telegram/find-chat`, `POST /notify/telegram/test` (CHỈ
+  Owner, lưu/xoá cần PIN). Token chỉ ở `token_enc` (có trong `REENCRYPT_TARGETS`), che trong log (`JsonFormatter`), không có
+  trong phản hồi/Action Log/boss_checks. `run/telegram.json` cho genh (phong bì GH1, AAD `telegram_notify`; vector cố định chung
+  pytest/go test). Bản tin + nhắc việc vào hộp thư đi đúng 1 lần (khử trùng), worker `telegram_flush` mỗi phút, một chiều,
+  không qua bridge; lỗi cấu hình ⇒ sự cố `telegram.failed`. "Việc Sếp cần làm" thêm dòng 6 Telegram (bắt buộc, x/5).
+- **api — chẩn đoán (F-4b)**: middleware `X-Request-ID` (header + mọi problem+json 404/422/423/428/500 + dòng log); `POST
+  /client-errors` (ghi log, giới hạn tần suất); `/system/diagnostics` (PIN) ghi `run/request/doctor.json` → genh tạo zip ĐÃ
+  LỌC bí mật ở `run/diagnostics/` (logs.txt có giờ, versions.txt revision alembic + digest ảnh, `genh-logs/auto-update.log`,
+  `host/update-status.json`, manifest), tải chỉ nhận tên hợp lệ. `run/api-health.json` cho trực canh.
+- **web**: thẻ **Kết nối › Telegram** (6 bước BotFather, Tìm chat_id, Lưu, Gửi thử đạt/lỗi theo mã, key_mismatch/genh cũ,
+  trạng thái trực canh); dòng 6 ở "Việc Sếp cần làm"; "Mã yêu cầu" cạnh mã ERR; báo lỗi giao diện về máy chủ (khử trùng);
+  thẻ **Gói chẩn đoán** ở Trợ giúp.
+- **Tích hợp**: gộp 3 gói không xung đột; hợp đồng genh ↔ api (telegram.json, api-health.json, watchdog-status.json,
+  request/doctor.json, doctor-status.json, request/watchdog.json) và api ↔ web (contracts) khớp nhau.
+
+### Kiểm tra
+
+- genh: `go vet` + `go test ./...` ok — gồm `TestWatchdog_APIDownSendsExactlyOnce` (api chết ⇒ 1 tin, lượt 2 ⇒ 0 tin và không
+  restart lại, hồi ⇒ 1 tin "ĐÃ ỔN", lượt sau 0), nhiều sự cố cùng lượt 1 tin, `api-health.json` cũ không "đã ổn" giả,
+  `TestDoctorBundleHasNoSecrets`, `TestOpenEnvelope_VectorCoDinh`.
+- api: ruff + mypy sạch, alembic 1 head (**0029**); pytest đầy đủ (superuser và gh_app) — `test_telegram_v0144`,
+  `test_telegram_outbox_v0144`, `test_bundle_telegram_v0144`, `test_enc_columns_v0138`, `test_request_id_v0144`,
+  `test_client_errors_v0144`, `test_diagnostics_v0144`, `test_api_health_snapshot_v0144`, `test_boss_checks_v0139`.
+- web: lint/typecheck/check_no_fake_ids sạch, vitest (`telegram-v0144`, `diagnostics-v0144`, `client-errors-v0144`,
+  `request-id-v0144`, `boss-checks-v0139`), build OK, bridge test; Playwright mock (`telegram-v0144`, `diagnostics-v0144`,
+  `boss-checks-v0139`, `v0139-integ`); browser pytest.
+- E2E-install (`e2e-install.yml`): lịch `gen-harness-watchdog` đã cài, `genh doctor --notify` exit 0 ghi
+  `watchdog-status.json` (telegram=not_configured); dừng api ⇒ `api.down` + tự khởi động lại, `/ready` xanh ⇒ hết sự cố; gói
+  chẩn đoán qua hộp thư không chứa giá trị nào từ `secrets.json`/`secrets/*`.
+- Kết quả chạy tích hợp (03/10): ruff + mypy sạch (145 tệp), alembic 1 head (**0029**); pytest 1562 passed mỗi lượt
+  (superuser và gh_app, 3 deselected `slow` như CI); web lint/typecheck sạch, check_no_fake_ids sạch, vitest 718 passed (79
+  tệp), build OK, bridge test 0 fail; Playwright mock 244 passed (không skip, không flaky); browser 14 passed (ruff + mypy
+  sạch); genh `go vet` + `go test ./...` ok; `check_release_gate.py` thoát 0, unittest `.github/scripts` 30 OK.
+- Chờ sau phát hành (người điều phối): genh tải từ Release đúng checksum + `genh version` = v0.1.44; E2E release xanh rồi
+  mới promote.
