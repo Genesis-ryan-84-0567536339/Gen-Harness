@@ -67,6 +67,17 @@ async def test_rate_limit_per_ip(owner_api: Api) -> None:
     assert (await _post(owner_api.c, _body(), ip="10.0.0.3")).status_code == 202   # IP khác không bị chặn
 
 
+async def test_global_cap_stops_spoofed_forwarded_for(owner_api: Api, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Đổi X-Forwarded-For mỗi lần (giả IP) không vượt được trần chung mọi IP."""
+    from gh.system_api import client_errors
+
+    monkeypatch.setattr(client_errors, "GLOBAL_RATE_LIMIT", 5)
+    for i in range(5):
+        assert (await _post(owner_api.c, _body(), ip=f"10.1.0.{i}")).status_code == 202
+    r = await _post(owner_api.c, _body(), ip="10.1.0.99")
+    assert r.status_code == 429 and r.json()["code"] == "CLIENT_ERRORS_RATE_LIMITED"
+
+
 async def test_works_before_setup_and_anonymous(client: httpx.AsyncClient, caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.WARNING, logger="gh.client")
     assert (await client.get("/api/v1/auth/me")).status_code == 428          # SetupGate đang chặn

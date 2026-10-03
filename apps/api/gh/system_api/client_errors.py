@@ -1,9 +1,10 @@
 """POST /client-errors — web báo lỗi giao diện (Mã lỗi ERR-…) về máy chủ (v0.1.44, F-4b).
 
 Không cần đăng nhập và được miễn SetupGate (màn thiết lập cũng có thể lỗi). Thân giới hạn chặt (pydantic); tối đa
-20 lần/phút/IP qua Redis (không có Redis ⇒ cho qua). Ghi MỘT dòng log logger `gh.client` mức WARNING — dòng log mang
-`request_id` của chính request này (lọc log JSON theo Mã yêu cầu), cùng `client_request_id` (Mã yêu cầu của lần gọi
-API hỏng mà web đang hiện). Thông điệp/stack đi qua bộ che bí mật của log trước khi ghi. Không ghi Action Log.
+20 lần/phút/IP và 200 lần/phút chung mọi IP qua Redis (không có Redis ⇒ cho qua). Ghi MỘT dòng log logger `gh.client`
+mức WARNING — dòng log mang `request_id` của chính request này (lọc log JSON theo Mã yêu cầu), cùng
+`client_request_id` (Mã yêu cầu của lần gọi API hỏng mà web đang hiện). Thông điệp/stack đi qua bộ che bí mật của log
+trước khi ghi. Không ghi Action Log.
 """
 
 import logging
@@ -24,6 +25,10 @@ log = logging.getLogger("gh.client")
 RATE_LIMIT = 20
 RATE_WINDOW_S = 60
 RATE_KEY = "gh:client-errors:{}"
+#: Trần CHUNG mọi IP mỗi phút — IP lấy từ X-Forwarded-For (trái nhất) giả được bằng cách đổi header mỗi lần, nên giới
+#: hạn theo IP một mình không chặn được ai cố ghi log vô hạn (mỗi dòng tới ~10 KB).
+GLOBAL_RATE_LIMIT = 200
+GLOBAL_RATE_KEY = "gh:client-errors:_all"
 REQUEST_ID_PATTERN = r"^[A-Za-z0-9_-]{8,64}$"
 
 
@@ -46,15 +51,21 @@ def _clean(value: str | None) -> str | None:
     return _redact_log(value) if value else value
 
 
+async def _count(redis: Any, key: str) -> int:
+    n = int(await redis.incr(key))
+    if n == 1:
+        await redis.expire(key, RATE_WINDOW_S)
+    return n
+
+
 async def _rate_limited(request: Request) -> bool:
     redis = getattr(request.app.state, "redis", None)
     if redis is None:
         return False
-    key = RATE_KEY.format(client_ip(request) or "unknown")
     try:
-        n = int(await redis.incr(key))
-        if n == 1:
-            await redis.expire(key, RATE_WINDOW_S)
+        if await _count(redis, GLOBAL_RATE_KEY) > GLOBAL_RATE_LIMIT:
+            return True
+        n = await _count(redis, RATE_KEY.format(client_ip(request) or "unknown"))
     except Exception:  # noqa: BLE001 — Redis lỗi: không chặn báo lỗi
         return False
     return n > RATE_LIMIT

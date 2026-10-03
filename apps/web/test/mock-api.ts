@@ -397,7 +397,10 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
   let recordTelegram: (o: TelegramOutcome) => BossCheck = () => {
     throw new Error('bossChecks chưa sẵn sàng');
   };
-  const telegram = createTelegram({ fresh: opts.setup === 'fresh', emit: broadcast, record: (o) => recordTelegram(o) });
+  let forgetTelegram: () => void = () => {};
+  const telegram = createTelegram({
+    fresh: opts.setup === 'fresh', emit: broadcast, record: (o) => recordTelegram(o), forget: () => forgetTelegram(),
+  });
   const bossChecks = createBossChecks({
     fresh: opts.setup === 'fresh', emit: broadcast,
     hubLink: hubLinkOf,
@@ -410,6 +413,7 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     telegramTest: telegram.runTest,
   });
   recordTelegram = bossChecks.hooks.recordTelegram as (o: TelegramOutcome) => BossCheck;
+  forgetTelegram = bossChecks.hooks.forgetTelegram as () => void;
   const phase3 = {
     gen: genMock,
     social,

@@ -375,3 +375,78 @@ async def test_find_chat(owner_api: Api, fake_tg: FakeTelegram) -> None:
     assert body["chats"] == [] and body["message"]
     r = await owner_api.send("POST", "/notify/telegram/find-chat", {"token": "sai-dang"})
     assert r.status_code == 422 and "token" in r.json()["errors"]
+
+
+# ─── vòng đời sự cố/kết quả Gửi thử theo cấu hình (review v0.1.44) ─────────────────────────────────────────────
+
+async def _raise_failed(code: str = "TELEGRAM_BOT_BLOCKED") -> None:
+    from gh import health
+
+    async with admin_sessionmaker()() as s:
+        org = (await s.execute(text("SELECT id FROM core.organizations"))).scalar_one()
+        await health.raise_once(s, org, key=tsvc.ALERT_KEY, kind=tsvc.ALERT_KEY, severity="warn",
+                                title=tsvc.ALERT_TITLE, body=tsvc.ALERT_BODIES[code], link=tsvc.ALERT_LINK,
+                                fingerprint=code)
+        await s.commit()
+
+
+async def test_delete_clears_failed_alert_and_last_test(owner_api: Api, fake_tg: FakeTelegram) -> None:
+    """Tắt Telegram là đã xử lý cảnh báo telegram.failed — không còn đường gửi nào để tự đóng nó (ngõ cụt)."""
+    await verify_pin(owner_api)
+    assert (await _save(owner_api)).status_code == 200
+    assert (await owner_api.send("POST", "/notify/telegram/test", {})).json()["status"] == "pass"
+    await _raise_failed()
+    issues = (await owner_api.get("/system/health")).json()["issues"]
+    assert any(i["key"] == "telegram.failed" for i in issues)
+    assert (await owner_api.send("DELETE", "/notify/telegram")).status_code == 200
+    issues = (await owner_api.get("/system/health")).json()["issues"]
+    assert not any(i["key"] == "telegram.failed" for i in issues)
+    g = (await owner_api.get("/notify/telegram")).json()
+    assert g["configured"] is False and g["last_test"] is None
+    ov = (await owner_api.get("/boss-checks")).json()
+    assert next(x for x in ov["rows"] if x["key"] == "telegram")["done"] is False
+    assert ov["results"]["telegram"] is None
+
+
+async def test_new_token_or_chat_forgets_last_test(owner_api: Api, fake_tg: FakeTelegram) -> None:
+    """Kết quả Gửi thử thuộc cấu hình cũ: đổi token/chat_id ⇒ về "Chưa kiểm"; chỉ bật/tắt mục hoặc Lưu lại cùng token
+    ⇒ giữ. Bấm Gửi thử khi CHƯA nối rồi nối ⇒ không còn dòng lỗi "Chưa nối Telegram" cũ."""
+    await verify_pin(owner_api)
+    out = (await owner_api.send("POST", "/boss-checks/telegram/run", {})).json()
+    assert out["error_code"] == "TELEGRAM_NOT_CONFIGURED"
+    assert (await _save(owner_api)).status_code == 200
+    assert (await owner_api.get("/notify/telegram")).json()["last_test"] is None
+    assert (await owner_api.send("POST", "/notify/telegram/test", {})).json()["status"] == "pass"
+    assert (await owner_api.send("PUT", "/notify/telegram", {"briefing": False})).status_code == 200
+    assert (await _save(owner_api)).status_code == 200                     # cùng token + chat_id ⇒ giữ kết quả
+    assert (await owner_api.get("/notify/telegram")).json()["last_test"]["status"] == "pass"
+    assert (await owner_api.send("PUT", "/notify/telegram", {"token": TOKEN2})).status_code == 200
+    assert (await owner_api.get("/notify/telegram")).json()["last_test"] is None
+    assert (await owner_api.send("POST", "/notify/telegram/test", {})).json()["status"] == "pass"
+    assert (await owner_api.send("PUT", "/notify/telegram", {"chat_id": "-1001234"})).status_code == 200
+    assert (await owner_api.get("/notify/telegram")).json()["last_test"] is None
+    ov = (await owner_api.get("/boss-checks")).json()
+    assert next(x for x in ov["rows"] if x["key"] == "telegram")["done"] is False
+
+
+async def test_failed_alert_for_non_owner_has_no_dead_button(owner_api: Api, client: httpx.AsyncClient, db: Any,
+                                                             fake_tg: FakeTelegram) -> None:
+    """Thẻ Telegram chỉ Owner có ⇒ Manager thấy sự cố nhưng không có nút tới /connections#telegram (nút chết) và
+    thân sự cố bảo nhờ Owner, không bảo bấm Đổi token/chat_id."""
+    from gh import health
+
+    await _raise_failed("TELEGRAM_TOKEN_REJECTED")
+    owner_issue = next(i for i in (await owner_api.get("/system/health")).json()["issues"]
+                       if i["key"] == "telegram.failed")
+    assert owner_issue["link"] == "/connections#telegram" and owner_issue["action"] == "Mở cấu hình Telegram"
+    await db.execute(text("""INSERT INTO core.role_permissions (role_id, permission_code, scope)
+                             SELECT id, 'system.read', 'all' FROM core.roles WHERE code = 'manager'
+                             ON CONFLICT (role_id, permission_code) DO UPDATE SET scope = 'all'"""))
+    await db.commit()
+    manager = await login_as(client, db, "manager")
+    r = await manager.get("/system/health")
+    assert r.status_code == 200, r.text
+    issue = next(i for i in r.json()["issues"] if i["key"] == "telegram.failed")
+    assert issue["link"] is None and issue["action"] == "Nhờ Owner xử lý"
+    assert issue["body"] == health.NON_OWNER_BODIES[("telegram.failed", "TELEGRAM_TOKEN_REJECTED")]
+    assert "Đổi token" not in issue["body"] and "nhờ Owner" in issue["body"]

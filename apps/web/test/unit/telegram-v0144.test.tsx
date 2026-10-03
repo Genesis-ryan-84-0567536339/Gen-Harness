@@ -14,6 +14,8 @@ import {
   BOTFATHER_STEPS,
   FIND_CHAT_EMPTY,
   HOST_FAILED_PREFIX,
+  HOST_TEST_POLL_MS,
+  HOST_TEST_WAIT_MS,
   HOST_KEY_MISMATCH_TEXT,
   HOST_UNSUPPORTED_TEXT,
   TELEGRAM_ERROR_TEXT,
@@ -21,8 +23,10 @@ import {
   TEST_OK_NO_HOST_TEXT,
   TEST_OK_TEXT,
   TOKEN_FORMAT_ERROR,
+  hostPollMs,
   hostTestText,
   hostWarning,
+  telegramKicker,
   testOkText,
   tokenFormatError,
 } from '../../src/screens/connections/telegramModel';
@@ -89,6 +93,8 @@ function setup(w: Partial<World> = {}) {
                 reminders: typeof body.reminders === 'boolean' ? body.reminders : world.config.reminders,
                 // chat_id bỏ trống ⇒ máy chủ giữ chat cũ.
                 chat_id_masked: body.chat_id ? `•••${String(body.chat_id).slice(-4)}` : world.config.chat_id_masked,
+                // Như máy chủ (forget_tests): token/chat_id mới ⇒ kết quả Gửi thử cũ bị xoá; chỉ đổi công tắc ⇒ giữ.
+                last_test: body.token || body.chat_id ? null : world.config.last_test,
               }
             : EMPTY;
         return json(200, world.config);
@@ -282,8 +288,12 @@ describe('Kết nối › Telegram (thẻ)', () => {
     },
   );
 
-  it('BOT_BLOCKED chỉ cách bấm Bắt đầu', () => {
-    expect(TELEGRAM_ERROR_TEXT.TELEGRAM_BOT_BLOCKED).toMatch(/bấm Bắt đầu/);
+  it('BOT_BLOCKED chỉ cách bấm Bắt đầu (Start) — cùng chữ với máy chủ và 6 bước BotFather', () => {
+    expect(TELEGRAM_ERROR_TEXT.TELEGRAM_BOT_BLOCKED).toMatch(/bấm Bắt đầu \(Start\)/);
+    expect(TELEGRAM_ERROR_TEXT.TELEGRAM_CHAT_NOT_FOUND).toMatch(/bấm Bắt đầu \(Start\)/);
+    expect(BOTFATHER_STEPS[0]).toMatch(/bấm Bắt đầu \(Start\)\.$/);
+    expect(BOTFATHER_STEPS[5]).toMatch(/bấm Bắt đầu \(Start\)/);
+    expect(FIND_CHAT_EMPTY).toBe('Chưa thấy tin nào — mở bot, bấm Bắt đầu (Start), gửi một tin rồi bấm Tìm chat_id lần nữa.');
   });
 
   it('Trực canh máy chủ: key_mismatch → "bấm Lưu lại một lần" — một lần bấm = PUT {} (PIN), giữ token + chat_id; genh cũ → "Cập nhật genh"', async () => {
@@ -303,6 +313,32 @@ describe('Kết nối › Telegram (thẻ)', () => {
     go({ config: { ...SAVED, host: { ...HOST, supported: false, schedule: null, last_run_at: null, state: null, telegram: null } } });
     renderCard();
     expect(await screen.findByTestId('telegram-host-warning')).toHaveTextContent(HOST_UNSUPPORTED_TEXT);
+  });
+
+  it('Lưu token mới sau khi Gửi thử Đạt: viên "Cần Sếp xử lý", không còn dòng "Gửi thử gần nhất" của cấu hình cũ', async () => {
+    const PASSED: TelegramConfig = { ...SAVED, last_test: { status: 'pass', error_code: null, message: null, checked_at: '2026-10-03T01:05:00Z' } };
+    go({ config: PASSED });
+    const { container } = renderCard();
+    expect(await screen.findByTestId('telegram-last-test')).toHaveTextContent('Gửi thử gần nhất: Đạt');
+    expect(container.querySelector('.conn-pill')).toHaveTextContent('Đang chạy');
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Đổi token/chat_id' }));
+    await user.type(screen.getByLabelText('Token mới (bỏ trống để giữ)'), TOKEN);
+    await user.click(screen.getByRole('button', { name: 'Lưu' }));
+    expect(await screen.findByText('Chưa Gửi thử lần nào — bấm Gửi thử để chắc tin tới được điện thoại.')).toBeInTheDocument();
+    expect(screen.queryByTestId('telegram-last-test')).toBeNull();
+    expect(container.querySelector('.conn-pill')).toHaveTextContent('Cần Sếp xử lý');
+  });
+
+  it('kicker theo mục đang bật (không hứa bản tin/nhắc việc đã tắt)', async () => {
+    go({ config: { ...SAVED, briefing: false } });
+    const { container } = renderCard();
+    await screen.findByTestId('telegram-target');
+    expect(container.textContent).toContain('Báo động sự cố và nhắc việc');
+    expect(container.textContent).not.toContain('Báo động sự cố, bản tin 07:30/17:30 và nhắc việc');
+    expect(telegramKicker({ ...SAVED, briefing: false, reminders: false })).toBe('Báo động sự cố qua bot Telegram của Sếp');
+    expect(telegramKicker(SAVED)).toBe('Báo động sự cố, bản tin 07:30/17:30 và nhắc việc');
+    expect(telegramKicker(EMPTY)).toBe('Nhận báo động & bản tin qua bot Telegram của Sếp');
   });
 
   it('Đổi token/chat_id: bỏ trống chat_id = giữ chat cũ; chỉ tắt bản tin cũng lưu được (không đòi Tìm chat_id)', async () => {
@@ -338,6 +374,16 @@ describe('Kết nối › Telegram (thẻ)', () => {
     expect(await screen.findByTestId('telegram-test-result')).toHaveTextContent(TEST_OK_NO_HOST_TEXT);
     expect(screen.getByTestId('telegram-test-result')).not.toHaveTextContent('trực canh');
     expect(container.textContent).not.toContain('[object Object]');
+  });
+
+  it('hostPollMs: chỉ hỏi lại khi đang chờ tin thử từ máy chủ, dừng khi kết quả đổi hoặc quá 2 phút', () => {
+    const wait = { since: 1_000_000, prevAt: '2026-10-03T01:00:00Z' };
+    expect(hostPollMs(null, null, 1_000_000)).toBe(false);
+    expect(hostPollMs(wait, '2026-10-03T01:00:00Z', 1_005_000)).toBe(HOST_TEST_POLL_MS);
+    expect(hostPollMs(wait, '2026-10-03T01:06:00Z', 1_005_000)).toBe(false);
+    expect(hostPollMs(wait, '2026-10-03T01:00:00Z', 1_000_000 + HOST_TEST_WAIT_MS + 1)).toBe(false);
+    expect(hostPollMs({ since: 1_000_000, prevAt: null }, null, 1_005_000)).toBe(HOST_TEST_POLL_MS);
+    expect(hostPollMs({ since: 1_000_000, prevAt: null }, '2026-10-03T01:06:00Z', 1_005_000)).toBe(false);
   });
 
   it('hostWarning / hostTestText / testOkText', () => {

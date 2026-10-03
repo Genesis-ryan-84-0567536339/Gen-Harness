@@ -4,8 +4,9 @@
 - URL chứa token bot (`/bot<token>/…`) ⇒ KHÔNG BAO GIỜ log/ném chuỗi có URL: mọi ngoại lệ httpx bị bắt và đổi thành
   `TelegramError(code)` (chỉ giữ mã, `from None` để không mang ngoại lệ gốc theo traceback). Logger `httpx`/`httpcore`
   bị hạ xuống WARNING (dòng INFO "HTTP Request: POST https://api.telegram.org/bot<token>/…" của httpx).
-- Văn bản thường: KHÔNG `parse_mode` (không Markdown/HTML — chữ của khách/Kho không thành định dạng/link lạ), tắt xem
-  trước link, cắt ≤ `TEXT_MAX` ký tự.
+- Văn bản thường: KHÔNG `parse_mode` (không Markdown/HTML — chữ của khách/Kho không thành định dạng), tắt xem trước
+  link, cắt ≤ `TEXT_MAX` ký tự. Telegram VẪN tự dò URL/tên miền/@username trong văn bản thường ⇒ phần chữ không tin
+  cậy phải qua `gh.telegram.service.defang` trước khi xếp vào hộp thư đi.
 """
 
 import logging

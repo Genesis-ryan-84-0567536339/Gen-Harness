@@ -29,8 +29,8 @@ export function tokenFormatError(token: string): string | null {
 export const TELEGRAM_ERROR_TEXT: Record<string, string> = {
   TELEGRAM_NOT_CONFIGURED: 'Chưa nối Telegram — làm theo hướng dẫn ở Kết nối › Telegram rồi bấm Lưu.',
   TELEGRAM_TOKEN_REJECTED: 'Token sai hoặc bot đã bị xoá — tạo lại bằng BotFather rồi dán token mới.',
-  TELEGRAM_CHAT_NOT_FOUND: 'Không tìm thấy chat — mở bot, bấm Bắt đầu rồi bấm Tìm chat_id lại.',
-  TELEGRAM_BOT_BLOCKED: 'Sếp đã chặn bot hoặc chưa bấm Bắt đầu — mở bot trên Telegram, bấm Bắt đầu.',
+  TELEGRAM_CHAT_NOT_FOUND: 'Không tìm thấy chat — mở bot, bấm Bắt đầu (Start) rồi bấm Tìm chat_id lại.',
+  TELEGRAM_BOT_BLOCKED: 'Sếp đã chặn bot hoặc chưa bấm Bắt đầu (Start) — mở bot trên Telegram, bấm Bắt đầu (Start).',
   TELEGRAM_RATE_LIMITED: 'Telegram đang giới hạn số tin — đợi một phút rồi bấm Gửi thử lại.',
   TELEGRAM_UNREACHABLE: 'Máy chủ không ra được Internet tới Telegram — kiểm tra mạng.',
   TELEGRAM_KEY_MISMATCH: 'Máy chủ không đọc được cấu hình Telegram — bấm Lưu lại một lần.',
@@ -53,13 +53,22 @@ export function telegramTechDetail(x: { error_code?: string | null; message?: st
 
 /** Sáu bước tạo bot bằng BotFather (đánh số trên giao diện). */
 export const BOTFATHER_STEPS: readonly string[] = [
-  'Mở Telegram trên điện thoại, tìm @BotFather (có dấu tích xanh) và bấm Bắt đầu.',
+  'Mở Telegram trên điện thoại, tìm @BotFather (có dấu tích xanh) và bấm Bắt đầu (Start).',
   'Gửi lệnh /newbot cho BotFather.',
   'Đặt tên hiển thị cho bot, vd "Gen-Harness của Sếp".',
   'Đặt tên đăng nhập cho bot, phải kết thúc bằng "bot", vd genharness_sep_bot.',
   'BotFather gửi lại token dạng 123456789:AAH… — chép nguyên dòng, dán vào ô Token bên dưới.',
-  'Mở bot vừa tạo, bấm Bắt đầu và gửi một tin bất kỳ, rồi bấm "Tìm chat_id".',
+  'Mở bot vừa tạo, bấm Bắt đầu (Start) và gửi một tin bất kỳ, rồi bấm "Tìm chat_id".',
 ];
+
+/** Dòng phụ dưới tiêu đề thẻ — chỉ kể mục ĐANG bật (không hứa bản tin/nhắc việc Sếp đã tắt). */
+export function telegramKicker(t: Pick<TelegramConfig, 'configured' | 'briefing' | 'reminders'> | null | undefined): string {
+  if (!t?.configured) return 'Nhận báo động & bản tin qua bot Telegram của Sếp';
+  const extra = [t.briefing ? 'bản tin 07:30/17:30' : null, t.reminders ? 'nhắc việc' : null].filter((x): x is string => !!x);
+  if (extra.length === 0) return 'Báo động sự cố qua bot Telegram của Sếp';
+  if (extra.length === 1) return `Báo động sự cố và ${extra[0]}`;
+  return `Báo động sự cố, ${extra[0]} và ${extra[1]}`;
+}
 
 /** Câu cảnh báo cố định của thẻ. */
 export const TELEGRAM_WARNING =
@@ -80,7 +89,28 @@ export function testOkText(
   return TEST_OK_TEXT;
 }
 
-export const FIND_CHAT_EMPTY = 'Chưa thấy tin nào — mở bot, bấm Bắt đầu và gửi một tin rồi bấm lại';
+/** Chờ tin thử thứ hai của Trực canh máy chủ: hỏi lại mỗi 5 giây, tối đa 2 phút. */
+export const HOST_TEST_POLL_MS = 5_000;
+export const HOST_TEST_WAIT_MS = 120_000;
+
+/** Mốc bấm Gửi thử (giờ trình duyệt) + `host.test.at` lúc đó (null = chưa có tin thử nào từ máy chủ). */
+export interface HostWait {
+  since: number;
+  prevAt: string | null;
+}
+
+/**
+ * `refetchInterval` của `GET /notify/telegram` khi đang chờ tin thử từ máy chủ: số ms, hoặc false khi không chờ / kết
+ * quả đã đổi so với lúc bấm (so mốc của máy chủ với nhau — không so với giờ trình duyệt) / quá 2 phút.
+ */
+export function hostPollMs(wait: HostWait | null, at: string | null | undefined, now: number = Date.now()): number | false {
+  if (!wait) return false;
+  if ((typeof at === 'string' && at ? at : null) !== wait.prevAt) return false;
+  if (now - wait.since > HOST_TEST_WAIT_MS) return false;
+  return HOST_TEST_POLL_MS;
+}
+
+export const FIND_CHAT_EMPTY = 'Chưa thấy tin nào — mở bot, bấm Bắt đầu (Start), gửi một tin rồi bấm Tìm chat_id lần nữa.';
 
 export const HOST_KEY_MISMATCH_TEXT = 'Máy chủ không đọc được cấu hình — bấm Lưu lại một lần.';
 export const HOST_UNSUPPORTED_TEXT = 'Cập nhật genh để bật trực canh.';

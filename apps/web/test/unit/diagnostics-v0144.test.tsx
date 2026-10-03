@@ -10,7 +10,18 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { DIAGNOSTICS_DOWNLOAD_URL, type DiagnosticsState } from '@gen-harness/contracts';
 import { DiagnosticsCard } from '../../src/help/DiagnosticsCard';
-import { DIAG_FILTERED_TEXT, DIAG_STALE_TEXT, DIAG_WORKING_TEXT, diagPhase, downloadLabel, fmtBytes } from '../../src/help/diagnosticsModel';
+import {
+  DIAG_ERROR_TEXT,
+  DIAG_FILTERED_TEXT,
+  DIAG_SLOW_AFTER_MS,
+  DIAG_SLOW_TEXT,
+  DIAG_STALE_TEXT,
+  DIAG_WORKING_TEXT,
+  diagPhase,
+  diagSlow,
+  downloadLabel,
+  fmtBytes,
+} from '../../src/help/diagnosticsModel';
 import { usePinStore } from '../../src/lib/pinStore';
 import { queryClient } from '../../src/lib/queryClient';
 import { qk } from '../../src/lib/queries';
@@ -35,7 +46,7 @@ interface Call {
   method: string;
 }
 
-function setup(states: DiagnosticsState[], opts: { pinFirst?: boolean; postError?: { status: number; code: string } } = {}) {
+function setup(states: DiagnosticsState[], opts: { pinFirst?: boolean; postError?: { status: number; code: string }; downloadError?: boolean } = {}) {
   const calls: Call[] = [];
   let i = 0;
   let pinOk = !opts.pinFirst;
@@ -58,6 +69,7 @@ function setup(states: DiagnosticsState[], opts: { pinFirst?: boolean; postError
       }
       if (path === '/system/diagnostics/download') {
         if (!pinOk) return json(423, { status: 423, code: 'PIN_REQUIRED', title: 'Cần PIN' });
+        if (opts.downloadError) return json(404, { status: 404, code: 'DIAG_NOT_READY', title: 'x', request_id: 'req0123456789abc' });
         return new Response(new Blob(['PK']), { status: 200, headers: { 'Content-Type': 'application/zip' } });
       }
       return json(404, { status: 404, code: 'NOT_FOUND', title: 'Không tồn tại' });
@@ -115,6 +127,15 @@ describe('diagnosticsModel', () => {
     expect(fmtBytes(null)).toBe('');
     expect(downloadLabel(DONE)).toBe('Tải gói chẩn đoán (47 KB)');
   });
+
+  it('diagSlow: chỉ khi đang tạo và đã quá 3 phút kể từ lúc yêu cầu', () => {
+    const now = Date.parse('2026-10-03T01:10:00Z');
+    expect(diagSlow({ requested_at: '2026-10-03T01:00:00Z' }, 'working', now)).toBe(true);
+    expect(diagSlow({ requested_at: '2026-10-03T01:08:00Z' }, 'working', now)).toBe(false);
+    expect(diagSlow({ requested_at: '2026-10-03T01:00:00Z' }, 'stale', now)).toBe(false);
+    expect(diagSlow({ requested_at: null }, 'working', now)).toBe(false);
+    expect(DIAG_SLOW_AFTER_MS).toBe(180_000);
+  });
 });
 
 describe('Gói chẩn đoán cho người hỗ trợ', () => {
@@ -140,11 +161,32 @@ describe('Gói chẩn đoán cho người hỗ trợ', () => {
     await waitFor(() => expect(screen.getByTestId('diagnostics-done')).toBeInTheDocument(), { timeout: 8000 });
   }, 12_000);
 
-  it('pending → chữ đang tạo, không có nút', async () => {
-    setup([{ ...IDLE, state: 'pending', request_id: '0123456789abcdef', requested_at: '2026-10-03T01:00:00Z' }]);
+  it('pending → chữ đang tạo, không có nút; mới yêu cầu thì chưa hiện lệnh chạy tay', async () => {
+    setup([{ ...IDLE, state: 'pending', request_id: '0123456789abcdef', requested_at: new Date().toISOString() }]);
     renderCard();
     expect(await screen.findByTestId('diagnostics-working')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Tạo gói chẩn đoán' })).toBeNull();
+    expect(screen.queryByTestId('diagnostics-slow-command')).toBeNull();
+  });
+
+  it('đang tạo quá 3 phút (chưa tới mốc stale 15 phút) → thêm câu "Lâu hơn thường lệ" + lệnh genh doctor', async () => {
+    const at = new Date(Date.now() - 4 * 60_000).toISOString();
+    setup([{ ...IDLE, state: 'running', request_id: '0123456789abcdef', requested_at: at }]);
+    renderCard();
+    const slow = await screen.findByTestId('diagnostics-slow-command');
+    expect(slow).toHaveTextContent(DIAG_SLOW_TEXT);
+    expect(within(slow).getByText('genh doctor')).toBeInTheDocument();
+    expect(screen.getByTestId('diagnostics-working')).toBeInTheDocument();
+  });
+
+  it('lỗi tải gói cũ biến mất khi bấm Tạo gói chẩn đoán lần nữa', async () => {
+    setup([DONE, DONE, { ...IDLE, state: 'pending', request_id: '0123456789abcdef', requested_at: new Date().toISOString() }], { downloadError: true });
+    renderCard();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('link', { name: 'Tải gói chẩn đoán (47 KB)' }));
+    expect(await screen.findByText(DIAG_ERROR_TEXT.DIAG_NOT_READY)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Tạo gói chẩn đoán' }));
+    await waitFor(() => expect(screen.queryByText(DIAG_ERROR_TEXT.DIAG_NOT_READY)).toBeNull());
   });
 
   it('pending quá 15 phút (stale) → câu "Máy chủ chưa nhận", lệnh genh doctor, nút Tạo gói lại; thôi thăm lại', async () => {

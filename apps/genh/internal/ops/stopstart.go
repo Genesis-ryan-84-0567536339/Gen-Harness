@@ -51,6 +51,39 @@ func ClearOwnerPause(installDir string) error {
 	return nil
 }
 
+// WatchdogOptOutFile: <gốc cài đặt>/config/watchdog-disabled.json — Owner đã
+// CHỦ ĐỘNG tắt trực canh máy chủ (`genh watchdog disable`). install/update (kể
+// cả lịch đêm) KHÔNG bật lại lịch khi có tệp này; `genh watchdog enable` xoá.
+const WatchdogOptOutFile = "watchdog-disabled.json"
+
+// WatchdogOptOutPath là đường dẫn tệp đánh dấu Owner tắt trực canh.
+func WatchdogOptOutPath(installDir string) string {
+	return filepath.Join(installDir, "config", WatchdogOptOutFile)
+}
+
+// WatchdogOptedOut báo Owner có đang chủ động tắt trực canh không.
+func WatchdogOptedOut(installDir string) bool {
+	_, err := os.Lstat(WatchdogOptOutPath(installDir))
+	return err == nil
+}
+
+// SetWatchdogOptOut ghi (on=true, {at} 0600) hoặc xoá (on=false — không có tệp
+// không phải lỗi) đánh dấu Owner tắt trực canh.
+func SetWatchdogOptOut(installDir string, on bool, at time.Time) error {
+	path := WatchdogOptOutPath(installDir)
+	if !on {
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	b, _ := json.Marshal(map[string]string{"at": at.UTC().Format(time.RFC3339)})
+	return os.WriteFile(path, append(b, '\n'), 0o600)
+}
+
 // watchdogQuiesceWait: genh stop/uninstall chờ tối đa chừng này cho lượt trực
 // canh ĐANG chạy (bắt đầu trước khi có đánh dấu tạm dừng) xong hẳn.
 var watchdogQuiesceWait = watchdogRunTimeout + 30*time.Second

@@ -96,7 +96,11 @@ ACTIONS = {
 #: Nhãn cho người KHÔNG phải Owner khi nút ở nhãn gốc chỉ Owner có (vd "Chọn nơi lưu" — Manager không có nút đó).
 NON_OWNER_ACTIONS = {
     "offsite.stale": "Xem bản sao ngoài máy",
+    "telegram.failed": "Nhờ Owner xử lý",
 }
+#: Sự cố mà đích nút chỉ Owner mở được (thẻ Telegram chỉ dựng cho Owner) ⇒ người khác không nhận link (không nút chết).
+NON_OWNER_NO_LINK = frozenset({"telegram.failed"})
+_TELEGRAM_NON_OWNER = "Kênh Telegram của Owner đang lỗi — nhờ Owner mở Kết nối › Telegram"
 #: Thân sự cố cho người KHÔNG phải Owner khi thân gốc bảo bấm nút chỉ Owner có ("Chọn nơi lưu…"). Khoá = (kind, mã) —
 #: mã là fingerprint (offsite.stale) hoặc mã genh ở cuối fingerprint (offsite.failed: "<lần thử>|<mã>").
 NON_OWNER_BODIES = {
@@ -104,6 +108,11 @@ NON_OWNER_BODIES = {
                                          "sao ngoài máy",
     ("offsite.failed", "GH-EB00"): "Chưa chọn nơi lưu — nhờ Owner cắm ổ USB/NAS và chọn nơi lưu bản sao ngoài máy",
     ("offsite.failed", "GH-EB07"): "Nơi lưu không hợp lệ — nhờ Owner chọn lại thư mục trên ổ USB/NAS",
+    # v0.1.44 (F-8c): fingerprint = mã lỗi Telegram (gh/telegram/client.py).
+    ("telegram.failed", "TELEGRAM_TOKEN_REJECTED"): f"{_TELEGRAM_NON_OWNER} và dán lại token bot.",
+    ("telegram.failed", "TELEGRAM_CHAT_NOT_FOUND"): f"{_TELEGRAM_NON_OWNER} và chọn lại chat_id.",
+    ("telegram.failed", "TELEGRAM_BOT_BLOCKED"): f"{_TELEGRAM_NON_OWNER}; Owner mở bot trên Telegram, bấm Bắt đầu "
+                                                 "(Start) rồi bấm Gửi thử.",
 }
 
 
@@ -209,7 +218,8 @@ async def active_issues(db: AsyncSession, org_id: uuid.UUID, *, is_owner: bool =
         ORDER BY (severity = 'bad') DESC, raised_at DESC"""), {"o": org_id})).all()
     return [{"key": r.key, "kind": r.kind, "severity": r.severity, "title": r.title,
              "body": _viewer_body(r.kind, r.fingerprint, r.body, is_owner),
-             "link": r.link, "action": labels.get(r.kind, "Xem chi tiết"), "raised_at": _iso(r.raised_at)}
+             "link": None if not is_owner and r.kind in NON_OWNER_NO_LINK else r.link,
+             "action": labels.get(r.kind, "Xem chi tiết"), "raised_at": _iso(r.raised_at)}
             for r in rows]
 
 

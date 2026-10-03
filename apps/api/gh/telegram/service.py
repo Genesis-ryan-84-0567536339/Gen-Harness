@@ -124,6 +124,13 @@ def view(row: Any) -> dict[str, Any]:
             "reminders": bool(row.reminders), "updated_at": _iso(row.updated_at)}
 
 
+def _same_token(row: Any, token: str) -> bool:
+    try:
+        return decrypt_token(row) == token
+    except Exception:  # noqa: BLE001 — token cũ không giải được (đổi khoá) ⇒ coi như khác
+        return False
+
+
 def validate_token(token: str) -> str:
     token = token.strip()
     if not TOKEN_RE.fullmatch(token):
@@ -166,6 +173,12 @@ async def save_config(db: AsyncSession, org_id: uuid.UUID, token: str | None, ch
         bot_username = uname[:64] if isinstance(uname, str) and uname else None
         token_enc = crypto.encrypt(clean_token.encode(), TOKEN_AAD)
 
+    # Token hoặc chat_id thật sự đổi (hoặc nối lần đầu) ⇒ kết quả Gửi thử cũ không còn nói gì về cấu hình mới:
+    # xoá để thẻ Telegram và dòng 6 "Việc Sếp cần làm" cùng về "Chưa kiểm" (Sếp phải Gửi thử lại).
+    if existing is None or chat_id != existing.chat_id or (clean_token is not None
+                                                            and not _same_token(existing, clean_token)):
+        await forget_tests(db, org_id)
+
     def pick(v: bool | None, old: str) -> bool:
         return bool(v) if v is not None else (bool(getattr(existing, old)) if existing is not None else True)
 
@@ -181,10 +194,21 @@ async def save_config(db: AsyncSession, org_id: uuid.UUID, token: str | None, ch
     return await get_config(db, org_id)
 
 
+async def forget_tests(db: AsyncSession, org_id: uuid.UUID) -> None:
+    """Xoá các bản kiểm 'telegram' (Gửi thử) của tổ chức — chúng thuộc cấu hình cũ. Không commit."""
+    await db.execute(text("DELETE FROM ops.boss_checks WHERE org_id = :o AND check_key = :k"),
+                     {"o": org_id, "k": CHECK_KEY})
+
+
 async def delete_config(db: AsyncSession, org_id: uuid.UUID) -> bool:
-    """Xoá cấu hình + tin đang chờ gửi của tổ chức. Không commit."""
+    """Xoá cấu hình + tin đang chờ gửi + kết quả Gửi thử cũ của tổ chức, đóng sự cố telegram.failed (Sếp tắt Telegram
+    là đã xử lý xong cảnh báo — không còn đường nào gửi được để tự đóng). Không commit."""
+    from gh import health
+
     res = await db.execute(text("DELETE FROM ops.notify_channels WHERE org_id = :o"), {"o": org_id})
     await db.execute(text("""DELETE FROM ops.telegram_outbox WHERE org_id = :o AND sent_at IS NULL"""), {"o": org_id})
+    await forget_tests(db, org_id)
+    await health.clear(db, org_id, ALERT_KEY)
     return bool(getattr(res, "rowcount", 0))
 
 
@@ -408,11 +432,25 @@ def _line(s: str, limit: int = 160) -> str:
     return s if len(s) <= limit else s[:limit - 1] + "…"
 
 
+_SCHEME_RE = re.compile(r":/{2}")
+_HOST_DOT_RE = re.compile(r"(?<=\w)\.(?=[^\W\d_])")
+_MENTION_RE = re.compile(r"@(?=\w)")
+
+
+def defang(s: str) -> str:
+    """Chữ KHÔNG tin cậy (tóm tắt AI từ nội dung khách/Kho, dòng đầu của mục, tên việc) ⇒ không để Telegram tự nhận
+    thành link/@nhắc bấm được trên điện thoại Sếp: 'https://x.vn' → 'https[:]//x[.]vn', '@ten' → '[@]ten'.
+    `parse_mode` trống chưa đủ — Telegram vẫn tự dò URL, tên miền, @username trong văn bản thường."""
+    s = _SCHEME_RE.sub("[:]//", s)
+    s = _HOST_DOT_RE.sub("[.]", s)
+    return _MENTION_RE.sub("[@]", s)
+
+
 def briefing_text(slot_label: str, summary: str | None, sections: list[dict[str, Any]]) -> str:
     lines = [f"Bản tin Gen · {slot_label}"]
     if summary:
-        lines += ["", summary.strip()]
-    items = [f"• {s['title']} ({s['count']})" + (f": {_line(s['lines'][0])}" if s.get("lines") else "")
+        lines += ["", defang(summary.strip())]
+    items = [f"• {s['title']} ({s['count']})" + (f": {defang(_line(s['lines'][0]))}" if s.get("lines") else "")
              for s in sections if int(s.get("count") or 0) > 0]
     lines += ["", *items] if items else ["", "Không có việc gì cần Sếp xử lý lúc này."]
     lines += ["", f"Mở Console: {public_url()}/overview", ONE_WAY]
@@ -421,7 +459,7 @@ def briefing_text(slot_label: str, summary: str | None, sections: list[dict[str,
 
 def reminder_text(title: str, code: str, priority: str, due: str | None) -> str:
     meta = f"{code} · {priority}" + (f" · hạn {due}" if due else "")
-    return f"Nhắc việc: {_line(title, 300)}\n{meta}\nMở Console: {public_url()}/tasks\n{ONE_WAY}"
+    return f"Nhắc việc: {defang(_line(title, 300))}\n{meta}\nMở Console: {public_url()}/tasks\n{ONE_WAY}"
 
 
 async def _org_token(db: AsyncSession, org_id: uuid.UUID) -> tuple[str, str] | None:

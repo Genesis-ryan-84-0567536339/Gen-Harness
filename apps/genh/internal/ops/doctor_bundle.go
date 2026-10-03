@@ -33,13 +33,13 @@ import (
 // secrets/, config/secrets.json, .env, run/telegram.json, config/offsite.json.
 
 const (
-	doctorLogsTail      = "--tail=2000"
-	doctorGenhLogMax    = 1 << 20
-	doctorKeepZips      = 3
+	doctorLogsTail   = "--tail=2000"
+	doctorGenhLogMax = 1 << 20
+	doctorKeepZips   = 3
 	// doctorZipMaxAge: zip (log đầy đủ mọi dịch vụ, có thể chứa dữ liệu khách)
 	// phải 0644 để api (uid khác) đọc — nên không để lâu: quá hạn này thì xoá
 	// (lượt trực canh 12 phút và lần tạo gói sau đều dọn).
-	doctorZipMaxAge = 24 * time.Hour
+	doctorZipMaxAge     = 24 * time.Hour
 	doctorZipPrefix     = "genh-doctor-"
 	doctorRequestTimout = 10 * time.Minute
 )

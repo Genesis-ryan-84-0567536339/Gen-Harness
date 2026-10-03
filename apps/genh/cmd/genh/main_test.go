@@ -877,13 +877,37 @@ func TestHandleRequests_DoctorVaWatchdog(t *testing.T) {
 func TestWatchdogStatusText(t *testing.T) {
 	txt := watchdogStatusText(autoupdate.WatchdogSchedule{Enabled: true, Mechanism: "cron", Detail: "crontab"},
 		hostlink.WatchdogStatus{LastRunAt: "2026-10-03T10:00:00Z", State: "issues", Telegram: "failed", TelegramErrorCode: "TELEGRAM_BOT_BLOCKED",
-			Incidents: []hostlink.WatchdogIncident{{Key: "api.down", Title: "Máy chủ ứng dụng (api) không chạy", Since: "2026-10-03T09:48:00Z"}}}, nil)
+			Incidents: []hostlink.WatchdogIncident{{Key: "api.down", Title: "Máy chủ ứng dụng (api) không chạy", Since: "2026-10-03T09:48:00Z"}}}, nil, false)
 	for _, want := range []string{"Trực canh máy chủ: BẬT (cron)", "Lần chạy gần nhất: 2026-10-03T10:00:00Z (issues)", "TELEGRAM_BOT_BLOCKED", "Sự cố đang mở (1):", "api.down"} {
 		if !strings.Contains(txt, want) {
 			t.Errorf("thiếu %q:\n%s", want, txt)
 		}
 	}
-	if txt := watchdogStatusText(autoupdate.WatchdogSchedule{Detail: "chưa bật"}, hostlink.WatchdogStatus{}, os.ErrNotExist); !strings.Contains(txt, "TẮT") || !strings.Contains(txt, "chưa có") {
+	if txt := watchdogStatusText(autoupdate.WatchdogSchedule{Detail: "chưa bật"}, hostlink.WatchdogStatus{}, os.ErrNotExist, false); !strings.Contains(txt, "TẮT") || !strings.Contains(txt, "chưa có") || strings.Contains(txt, "Owner đã tắt") {
 		t.Errorf("%s", txt)
+	}
+	if txt := watchdogStatusText(autoupdate.WatchdogSchedule{Detail: "chưa bật"}, hostlink.WatchdogStatus{}, os.ErrNotExist, true); !strings.Contains(txt, "Owner đã tắt") || !strings.Contains(txt, "genh watchdog enable") {
+		t.Errorf("Owner tắt thì status phải nói rõ:\n%s", txt)
+	}
+}
+
+// Owner `genh watchdog disable` ⇒ install/update (kể cả lịch đêm) không bật lại.
+func TestEnableWatchdogSchedule_TonTrongOwnerTat(t *testing.T) {
+	dir := t.TempDir()
+	if err := ops.SetWatchdogOptOut(dir, true, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	out, errOut := captureStd(t, func() { enableWatchdogSchedule(context.Background(), dir, 0) })
+	if out != "" || errOut != "" {
+		t.Fatalf("Owner đã tắt thì không bật/không in gì, được %q %q", out, errOut)
+	}
+	if _, err := hostlink.ReadWatchdogStatus(dir); err == nil {
+		t.Fatal("không được ghi lịch trực canh khi Owner đã tắt")
+	}
+	if err := ops.SetWatchdogOptOut(dir, false, time.Now()); err != nil || ops.WatchdogOptedOut(dir) {
+		t.Fatalf("enable phải xoá đánh dấu: %v", err)
+	}
+	if err := ops.SetWatchdogOptOut(dir, false, time.Now()); err != nil {
+		t.Fatalf("xoá khi không có tệp không phải lỗi: %v", err)
 	}
 }

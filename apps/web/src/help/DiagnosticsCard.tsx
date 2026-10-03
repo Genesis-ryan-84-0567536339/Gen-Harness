@@ -14,6 +14,7 @@ import {
   DIAGNOSTICS_KEY,
   DIAG_FILTERED_TEXT,
   DIAG_POLL_MS,
+  DIAG_SLOW_TEXT,
   DIAG_STALE_TEXT,
   DIAG_UNSUPPORTED_TEXT,
   DIAG_WORKING_TEXT,
@@ -21,6 +22,7 @@ import {
   diagFailedText,
   diagFileName,
   diagPhase,
+  diagSlow,
   diagTechDetail,
   downloadLabel,
 } from './diagnosticsModel';
@@ -37,13 +39,6 @@ export function DiagnosticsCard() {
     queryFn: ({ signal }) => api.diagnostics.getDiagnostics(signal),
     refetchInterval: (query) => (diagPhase(query.state.data) === 'working' ? DIAG_POLL_MS : false),
   });
-  const create = useMutation({
-    mutationFn: () => api.diagnostics.requestDiagnostics(),
-    onSuccess: (d) => queryClient.setQueryData(DIAGNOSTICS_KEY, d),
-    onError: (e) => {
-      if (e instanceof ApiError && (e.code === 'DIAG_BUSY' || e.code === 'DIAG_UNSUPPORTED')) void q.refetch();
-    },
-  });
   const download = useMutation({
     mutationFn: async (d: DiagnosticsState) => {
       const blob = await api.diagnostics.downloadDiagnostics();
@@ -52,6 +47,16 @@ export function DiagnosticsCard() {
     onSuccess: () => toast('Đã tải gói chẩn đoán — gửi tệp .zip cho người hỗ trợ.', 'ok'),
     onError: (e) => {
       if (e instanceof ApiError && e.code === 'DIAG_NOT_READY') void q.refetch();
+    },
+  });
+  const create = useMutation({
+    mutationFn: () => api.diagnostics.requestDiagnostics(),
+    onSuccess: (d) => {
+      download.reset(); // lỗi tải của gói cũ không còn đúng với gói mới
+      queryClient.setQueryData(DIAGNOSTICS_KEY, d);
+    },
+    onError: (e) => {
+      if (e instanceof ApiError && (e.code === 'DIAG_BUSY' || e.code === 'DIAG_UNSUPPORTED')) void q.refetch();
     },
   });
 
@@ -84,9 +89,12 @@ export function DiagnosticsCard() {
               </div>
             ) : null}
             {phase === 'working' ? (
-              <p className="muted-note" role="status" data-testid="diagnostics-working">
-                <Icon name="ph ph-circle-notch" size={12} className="spin" /> {DIAG_WORKING_TEXT}
-              </p>
+              <>
+                <p className="muted-note" role="status" data-testid="diagnostics-working">
+                  <Icon name="ph ph-circle-notch" size={12} className="spin" /> {DIAG_WORKING_TEXT}
+                </p>
+                {diagSlow(d, phase) ? <CommandBlock text={DIAG_SLOW_TEXT} command={commandOf(d)} testId="diagnostics-slow-command" /> : null}
+              </>
             ) : (
               <div className="boss-actions">
                 <Button

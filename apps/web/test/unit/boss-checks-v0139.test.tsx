@@ -7,6 +7,7 @@ import type { BossCheck, BossCheckKey, BossOverview, CliProfile, HubLink, Social
 import { BossChecksPage } from '../../src/guide/BossChecksPage';
 import { queryClient } from '../../src/lib/queryClient';
 import { qk } from '../../src/lib/queries';
+import { TELEGRAM_KEY } from '../../src/screens/connections/telegramModel';
 
 /**
  * v0.1.39 (F-74) — trang "Việc Sếp cần làm": ô kết quả ngay cạnh, kết quả đọc từ `GET /boss-checks`. v0.1.44 (F-8c):
@@ -492,12 +493,16 @@ describe('Việc Sếp cần làm (/guide/viec-sep)', () => {
       run: (key) => check(key as BossCheckKey, 'fail', { error_code: 'TELEGRAM_NOT_CONFIGURED', message: 'Chưa cấu hình Telegram' }),
     });
     const { container } = renderPage();
+    // Thẻ Kết nối › Telegram đã có trong cache (cùng phiên) — Gửi thử ở dòng 6 phải làm nó cũ đi.
+    queryClient.setQueryData(TELEGRAM_KEY, { configured: false });
     const user = userEvent.setup();
     const tg = await screen.findByRole('region', { name: 'Telegram (báo động & bản tin)' });
     expect(within(tg).getByRole('link', { name: /Mở hướng dẫn/ })).toHaveAttribute('href', '/connections#telegram');
     expect(within(tg).getByText('Chưa kiểm')).toBeInTheDocument();
+    expect(queryClient.getQueryState(TELEGRAM_KEY)?.isInvalidated).toBe(false);
     await user.click(within(tg).getByRole('button', { name: 'Gửi thử' }));
     expect(await within(tg).findByText(/^Lỗi · Chưa nối Telegram/)).toBeInTheDocument();
+    await waitFor(() => expect(queryClient.getQueryState(TELEGRAM_KEY)?.isInvalidated).toBe(true));
     expect(within(tg).getByText('Mã lỗi TELEGRAM_NOT_CONFIGURED')).toBeInTheDocument();
     expect(calls.filter((c) => c.method === 'POST').map((c) => c.path)).toEqual(['/boss-checks/telegram/run']);
     expect(container.innerHTML).not.toContain('[object Object]');
@@ -520,7 +525,7 @@ describe('Việc Sếp cần làm (/guide/viec-sep)', () => {
     setup({ results: { ...EMPTY, telegram: check('telegram', 'fail', { error_code: 'TELEGRAM_BOT_BLOCKED' }) } });
     renderPage();
     const tg2 = await screen.findByRole('region', { name: 'Telegram (báo động & bản tin)' });
-    expect(await within(tg2).findByText(/Lỗi · Sếp đã chặn bot hoặc chưa bấm Bắt đầu — mở bot trên Telegram, bấm Bắt đầu/)).toBeInTheDocument();
+    expect(await within(tg2).findByText(/Lỗi · Sếp đã chặn bot hoặc chưa bấm Bắt đầu \(Start\) — mở bot trên Telegram, bấm Bắt đầu \(Start\)/)).toBeInTheDocument();
   });
 
   it('vai trò Vận hành → lời giải thích, không gọi /boss-checks', async () => {

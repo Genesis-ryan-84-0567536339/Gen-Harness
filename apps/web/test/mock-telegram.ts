@@ -5,7 +5,8 @@
  *
  * Mặc định: chưa cấu hình; Trực canh máy chủ được hỗ trợ (systemd, chạy 40 giây trước).
  * - PUT: token sai dạng → 422 `errors.token`; token chứa "REJECT" → 409 TELEGRAM_TOKEN_REJECTED; chat_id sai (máy chủ
- *   chỉ nhận dãy số `^-?\d{1,20}$`) → 422. Đã cấu hình: token/chat_id trống = giữ; `{}` = "Lưu lại".
+ *   chỉ nhận dãy số `^-?\d{1,20}$`) → 422. Đã cấu hình: token/chat_id trống = giữ; `{}` = "Lưu lại". Token/chat_id đổi
+ *   (hoặc nối lần đầu) và DELETE ⇒ xoá kết quả Gửi thử cũ (cả dòng 6 boss_checks).
  * - find-chat: mặc định một chat (987654321 · "Ryan Cơ"); `seed {findChats:'none'}` → rỗng; token chứa "REJECT" →
  *   `error_code` TELEGRAM_TOKEN_REJECTED; không token + chưa cấu hình → TELEGRAM_NOT_CONFIGURED.
  * - Gửi thử (`/notify/telegram/test`, `/boss-checks/telegram/run`): chưa cấu hình → TELEGRAM_NOT_CONFIGURED; `seed
@@ -27,6 +28,8 @@ interface Opts {
   emit: (type: string, data: unknown) => void;
   /** Ghi kết quả Gửi thử vào boss_checks (gắn sau khi tạo mock-boss-checks). */
   record: (o: TelegramOutcome) => BossCheck;
+  /** Xoá kết quả Gửi thử cũ ở boss_checks (đổi token/chat_id, Tắt Telegram) — như api `forget_tests`. */
+  forget?: () => void;
 }
 
 interface Seed {
@@ -135,20 +138,27 @@ export function createMock(opts: Opts) {
       if (!/^-?\d{1,20}$/.test(nextChat)) errors.chat_id = 'chat_id là một dãy số — bấm Tìm chat_id sau khi Sếp đã nhắn bot';
       if (Object.keys(errors).length) return problem(422, 'VALIDATION', 'Dữ liệu chưa hợp lệ', { errors });
       if (token.includes('REJECT')) return problem(409, 'TELEGRAM_TOKEN_REJECTED', 'Telegram từ chối token');
+      // Như api: token/chat_id THẬT SỰ đổi (hoặc nối lần đầu) ⇒ kết quả Gửi thử cũ bị xoá (cả dòng 6); chỉ bật/tắt
+      // bản tin/nhắc việc hoặc "Lưu lại" cùng cấu hình ⇒ giữ.
+      const changed = !s.configured || (!!token && token !== s.token) || nextChat !== s.chatId;
       if (token) s.token = token;
       s.chatId = nextChat;
+      if (changed) {
+        s.lastTest = null;
+        opts.forget?.();
+      }
       s.configured = true;
       s.enabled = body.enabled !== false;
       if (typeof body.briefing === 'boolean') s.briefing = body.briefing;
       if (typeof body.reminders === 'boolean') s.reminders = body.reminders;
       s.updatedAt = now();
-      s.lastTest = null;
       if (s.host === 'key_mismatch') s.host = 'ok'; // Lưu lại = api ghi lại run/telegram.json bằng khoá hiện tại.
       return reply(200, view());
     }
     if (p === '/notify/telegram' && m === 'DELETE') {
       if (needPin(ctx)) return true;
       Object.assign(s, { configured: false, token: null, chatId: null, enabled: false, updatedAt: now(), lastTest: null, hostTest: null });
+      opts.forget?.();
       return reply(200, view());
     }
     if (p === '/notify/telegram/find-chat' && m === 'POST') {

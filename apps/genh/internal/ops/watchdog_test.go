@@ -297,7 +297,7 @@ func TestWatchdog_APIDownSendsExactlyOnce(t *testing.T) {
 		t.Fatalf("lượt 1 phải đúng 1 tin, được %d: %q", h.tg.posts(), sent)
 	}
 	for _, want := range []string{"Gen-Harness · CẢNH BÁO", "Máy chủ: may-chu-test", "• Máy chủ ứng dụng (api) không chạy", "Đã tự khởi động lại api lúc",
-		"Mở Console: https://localhost:18443/system?tab=storage&focus=health", "mọi thao tác Sếp xác nhận trong Console"} {
+		"Mở Console: https://localhost:18443/connections#telegram", "mọi thao tác Sếp xác nhận trong Console"} {
 		if !strings.Contains(sent[0], want) {
 			t.Errorf("tin thiếu %q:\n%s", want, sent[0])
 		}
@@ -426,7 +426,7 @@ func TestWatchdog_APIHealthCu_KhongDaOnGia(t *testing.T) {
 	if s := h.tg.sent(); len(s) != 1 || !strings.Contains(s[0], "Kênh Zalo mất kết nối: Quét lại QR") {
 		t.Fatalf("phải báo sự cố từ api: %q", s)
 	}
-	if !strings.Contains(h.tg.sent()[0], "Mở Console: https://gh.example.vn/system?tab=storage&focus=health") {
+	if !strings.Contains(h.tg.sent()[0], "Mở Console: https://gh.example.vn/connections#telegram") {
 		t.Fatalf("Console URL phải lấy public_url: %s", h.tg.sent()[0])
 	}
 	// api chết ⇒ api-health không còn tươi ⇒ channel.down:zalo GIỮ NGUYÊN.
@@ -806,6 +806,35 @@ func TestWatchdog_TamDungGiuaLuot_KhongRestart(t *testing.T) {
 	h.mustRun(WatchdogOptions{Quiet: true})
 	if n := h.runner.count("up -d"); n != 0 {
 		t.Fatalf("đã tạm dừng thì không được up -d: %v", h.runner.calls)
+	}
+}
+
+// update/restore/import lấy genh.lock SAU lần kiểm đầu lượt ⇒ không restart
+// (không dựng lại service bằng compose/env cũ giữa lúc đang cập nhật).
+func TestWatchdog_KhoaBanGiuaLuot_KhongRestart(t *testing.T) {
+	h := newWDHarness(t, true)
+	h.runner.ps = psJSON(rowsWith(psRow{Service: "worker", State: "exited"},
+		psRow{Service: "db", State: "running", Health: "unhealthy", Status: "Up 1 hour (unhealthy)"})...)
+	var held *hostlink.Lock
+	h.runner.onPS = func() {
+		if held == nil {
+			l, err := hostlink.AcquireLock(h.env.InstallDir)
+			if err != nil {
+				t.Errorf("lấy genh.lock: %v", err)
+				return
+			}
+			held = l
+		}
+	}
+	h.mustRun(WatchdogOptions{Quiet: true})
+	if held != nil {
+		held.Release()
+	}
+	if h.runner.count("up -d") != 0 || h.runner.count("restart db") != 0 {
+		t.Fatalf("genh.lock đang bị giữ thì không được restart/up -d: %v", h.runner.calls)
+	}
+	if st := loadWatchdogState(h.env.InstallDir); len(st.Restarts) != 0 {
+		t.Fatalf("không restart thì không ghi mốc restart (lượt sau còn thử được): %v", st.Restarts)
 	}
 }
 

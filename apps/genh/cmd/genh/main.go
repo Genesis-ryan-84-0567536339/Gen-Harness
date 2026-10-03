@@ -1272,6 +1272,10 @@ func runWatchdogCmd(args []string) int {
 			_, _ = fmt.Fprintf(os.Stderr, "genh: bật trực canh máy chủ thất bại: %v\n", err)
 			return 1
 		}
+		if err := ops.SetWatchdogOptOut(env.InstallDir, false, time.Now()); err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "genh: cảnh báo — không xoá được %s: %v (lần cập nhật sau vẫn coi như Owner đã tắt)\n",
+				ops.WatchdogOptOutPath(env.InstallDir), err)
+		}
 		_ = hostlink.SetWatchdogSchedule(env.InstallDir, mech)
 		fmt.Println(msg)
 		return 0
@@ -1280,6 +1284,11 @@ func runWatchdogCmd(args []string) int {
 		if err != nil {
 			_, _ = fmt.Fprintf(os.Stderr, "genh: tắt trực canh máy chủ thất bại: %v\n", err)
 			return 1
+		}
+		// Ghi nhớ lựa chọn của Owner: install/update (kể cả lịch đêm) không bật lại.
+		if err := ops.SetWatchdogOptOut(env.InstallDir, true, time.Now()); err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "genh: cảnh báo — không ghi được %s: %v (lần cập nhật sau có thể bật lại trực canh)\n",
+				ops.WatchdogOptOutPath(env.InstallDir), err)
 		}
 		_ = hostlink.SetWatchdogSchedule(env.InstallDir, "")
 		fmt.Println(msg)
@@ -1291,7 +1300,7 @@ func runWatchdogCmd(args []string) int {
 			return 1
 		}
 		ws, werr := hostlink.ReadWatchdogStatus(env.InstallDir)
-		fmt.Print(watchdogStatusText(ss, ws, werr))
+		fmt.Print(watchdogStatusText(ss, ws, werr, ops.WatchdogOptedOut(env.InstallDir)))
 		return 0
 	default:
 		_, _ = fmt.Fprintf(os.Stderr, "genh: lệnh con watchdog không rõ %q (dùng enable|disable|status)\n", args[0])
@@ -1300,11 +1309,13 @@ func runWatchdogCmd(args []string) int {
 }
 
 // watchdogStatusText: cơ chế lịch + lần chạy gần nhất + sự cố đang mở.
-func watchdogStatusText(ss autoupdate.WatchdogSchedule, ws hostlink.WatchdogStatus, werr error) string {
+func watchdogStatusText(ss autoupdate.WatchdogSchedule, ws hostlink.WatchdogStatus, werr error, optedOut bool) string {
 	var b strings.Builder
 	state := "TẮT"
 	if ss.Enabled {
 		state = "BẬT (" + ss.Mechanism + ")"
+	} else if optedOut {
+		state = "TẮT — Owner đã tắt bằng `genh watchdog disable` (cập nhật không tự bật lại; bật lại: genh watchdog enable)"
 	}
 	_, _ = fmt.Fprintf(&b, "Trực canh máy chủ: %s\n  %s\n", state, ss.Detail)
 	if werr != nil || ws.LastRunAt == "" {
@@ -1665,8 +1676,12 @@ func publishHostInfo(installDir string, port int) {
 }
 
 // enableWatchdogSchedule bật (idempotent) lịch trực canh và ghi cơ chế vào
-// run/watchdog-status.json ("schedule") — in một dòng khi lần đầu bật.
+// run/watchdog-status.json ("schedule") — in một dòng khi lần đầu bật. Owner đã
+// `genh watchdog disable` (config/watchdog-disabled.json) ⇒ không làm gì.
 func enableWatchdogSchedule(ctx context.Context, installDir string, port int) {
+	if ops.WatchdogOptedOut(installDir) { // Owner đã chủ động tắt — không ghi đè lựa chọn đó
+		return
+	}
 	msg, mech, err := ops.NewWatchdogScheduler(&ops.Env{InstallDir: installDir, Port: port}).Enable(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "genh: cảnh báo — không bật được trực canh máy chủ: %v (thử lại: genh watchdog enable)\n", err)

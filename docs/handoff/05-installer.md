@@ -228,7 +228,9 @@ Owner chỉ biết máy chủ "chết" khi tự mở Console. Từ v0.1.44 genh 
   macOS LaunchAgent `com.gen-harness.watchdog` `StartInterval=720`; Windows `schtasks /SC MINUTE /MO 12 /RL LIMITED`.
   `genh install`/`genh update` bật **mặc định, idempotent, KHÔNG phụ thuộc `--no-auto-update`** và ghi cơ chế vào
   `run/watchdog-status.json` ("schedule"); lỗi chỉ cảnh báo. `genh watchdog enable|disable|status` bật/tắt/xem (status in
-  cơ chế, lần chạy gần nhất, sự cố đang mở). `genh uninstall` gỡ lịch.
+  cơ chế, lần chạy gần nhất, sự cố đang mở). `genh watchdog disable` ghi `config/watchdog-disabled.json` (Owner chủ động
+  tắt) ⇒ install/update (kể cả lịch đêm) **không** bật lại, status ghi "Owner đã tắt"; `genh watchdog enable` xoá tệp đó.
+  `genh uninstall` gỡ lịch.
 - **Một lượt** = `genh doctor --notify --quiet` (`ops.RunWatchdog`, toàn lượt ≤ 4 phút, mỗi lệnh docker ≤ 30 giây; mã
   thoát luôn 0 trừ lỗi cấu hình nghiêm trọng GH-E961 — timer không "đỏ" vì sự cố của máy chủ):
   1. Khoá riêng `<gốc cài>/watchdog.lock` (lượt khác đang chạy ⇒ thoát 0). Khoá loại trừ `genh.lock` đang bị
@@ -255,7 +257,7 @@ Owner chỉ biết máy chủ "chết" khi tự mở Console. Từ v0.1.44 genh 
   cách > 30 phút ⇒ thêm tin "Máy chủ vừa khởi động lại (tắt khoảng X)".
 - **Tin Telegram**: văn bản thường, không emoji, không `parse_mode`, không bí mật: dòng 1 `Gen-Harness · CẢNH BÁO` /
   `Gen-Harness · ĐÃ ỔN`, dòng 2 tên máy, mỗi sự cố `• <tiêu đề>: <nội dung>`, cuối `Mở Console: <public_url hoặc
-  https://localhost:<cổng>>/system?tab=storage&focus=health` + "(Tin tự động từ trực canh máy chủ — mọi thao tác Sếp xác
+  https://localhost:<cổng>>/connections#telegram` + "(Tin tự động từ trực canh máy chủ — mọi thao tác Sếp xác
   nhận trong Console.)". Không có nút/hành động trong Telegram, không nhận tin từ Owner, không đi qua bridge Zalo.
 - **Cấu hình Telegram** do api ghi `run/telegram.json` (`{schema:1, enabled, enc, briefing, reminders, updated_at}`), token
   **mã hoá phong bì GH1** (`gh.crypto.encrypt`, AAD `telegram_notify`) — genh giải bằng `secrets/gh_master_key`
@@ -271,7 +273,8 @@ Owner chỉ biết máy chủ "chết" khi tự mở Console. Từ v0.1.44 genh 
 - **Giới hạn**: máy chủ **tắt hẳn** (mất điện, treo cứng) thì không có gì để chạy trực canh — Owner chỉ nhận tin khi máy bật
   lại (kèm "Máy chủ vừa khởi động lại"). Thiếu linger (Linux) ⇒ timer `--user` chỉ chạy khi đang đăng nhập (genh in cảnh
   báo kèm lệnh `sudo loginctl enable-linger $USER`). Trực canh không giữ khoá loại trừ khi đo (chỉ thử rồi nhả ngay) để
-  không chặn lịch đêm. `genh stop`/`genh uninstall` ghi `config/paused-by-owner.json` **trước** khi dừng/gỡ container và chờ lượt trực canh
+  không chặn lịch đêm; riêng lệnh tự khởi động lại (`restart`/`up -d --no-deps`) lấy `genh.lock` không chờ quanh đúng
+  lệnh docker đó — update/restore/import đã lấy khoá giữa lượt ⇒ bỏ qua, không dựng lại service bằng compose/env cũ. `genh stop`/`genh uninstall` ghi `config/paused-by-owner.json` **trước** khi dừng/gỡ container và chờ lượt trực canh
   đang chạy xong (`watchdog.lock`); trực canh **không** tự `up -d` khi không có container api (bản cài đã gỡ), chỉ báo. Trạng
   thái `restarting` (docker đang tự thử lại) / `created` / `paused` cũng là sự cố (không restart chồng). "Gửi thử" chờ lượt
   định kỳ đang chạy xong thay vì bỏ qua.

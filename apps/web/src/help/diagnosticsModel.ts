@@ -16,6 +16,18 @@ export const DIAG_UNSUPPORTED_TEXT =
   'Công cụ genh trên máy chủ chưa tạo được gói từ Console. Chạy lệnh dưới đây trên máy chủ, rồi gửi tệp .zip nó tạo cho người hỗ trợ:';
 export const DIAG_STALE_TEXT =
   'Máy chủ chưa nhận yêu cầu tạo gói (đã hơn 15 phút) — có thể công cụ genh trên máy chủ đang tạm dừng hoặc chưa chạy nền. Bấm Tạo gói chẩn đoán để thử lại, hoặc chạy lệnh dưới đây trên máy chủ rồi gửi tệp .zip nó tạo cho người hỗ trợ:';
+/** Đang tạo quá chừng này (tính từ `requested_at`) ⇒ hiện thêm lệnh chạy tay, chưa đợi tới mốc `stale` 15 phút. */
+export const DIAG_SLOW_AFTER_MS = 3 * 60_000;
+export const DIAG_SLOW_TEXT =
+  'Lâu hơn thường lệ — có thể công cụ genh trên máy chủ đang tạm dừng hoặc chưa chạy nền. Không muốn đợi thì chạy lệnh dưới đây trên máy chủ rồi gửi tệp .zip nó tạo cho người hỗ trợ:';
+
+/** Đang tạo (`working`) đã quá `DIAG_SLOW_AFTER_MS` kể từ lúc yêu cầu. */
+export function diagSlow(d: Pick<DiagnosticsState, 'requested_at'> | null | undefined, phase: DiagPhase, now: number = Date.now()): boolean {
+  if (phase !== 'working' || !d || typeof d.requested_at !== 'string') return false;
+  const at = Date.parse(d.requested_at);
+  return Number.isFinite(at) && now - at > DIAG_SLOW_AFTER_MS;
+}
+
 export const DIAG_FAILED_TEXT = 'Chưa tạo được gói chẩn đoán — bấm Tạo gói chẩn đoán lần nữa; vẫn lỗi thì chạy "genh doctor" trên máy chủ.';
 
 export const DIAG_ERROR_TEXT: Record<string, string> = {

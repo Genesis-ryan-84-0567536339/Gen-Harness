@@ -2,8 +2,12 @@
 KHÁC ⇒ được mã hoá lại, giải được bằng khoá mới (không còn mở được bằng khoá cũ); run/telegram.json đồng bộ lại
 bằng khoá mới."""
 
+import asyncio
 import base64
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +19,7 @@ from gh import bundle, crypto
 from gh.config import get_settings
 from gh.db import admin_sessionmaker, sessionmaker
 from gh.telegram import service as tsvc
-from tests.conftest import Api
+from tests.conftest import API_DIR, Api
 from tests.test_bundle import _set_master_key, _use_objects_dir
 from tests.test_bundle_social_v0138 import KEY_A, _drop, _migrate
 from tests.test_telegram_v0144 import CHAT, TOKEN
@@ -55,5 +59,38 @@ async def test_import_reencrypts_telegram_token(owner_api: Api, redis: Redis, tm
         data = json.loads((host / "telegram.json").read_text())
         plain = crypto.decrypt(base64.b64decode(data["enc"]), b"telegram_notify")
         assert json.loads(plain) == {"token": TOKEN, "chat_id": CHAT}
+    finally:
+        await _drop(target_db)
+
+
+async def test_import_old_bundle_without_notify_channels(owner_api: Api, redis: Redis, tmp_path: Path,
+                                                        monkeypatch: pytest.MonkeyPatch) -> None:
+    """Gói xuất từ v0.1.43 trở về trước (revision 0028 — chưa có ops.notify_channels) nhập sang máy khoá master KHÁC:
+    bước mã hoá lại phải bỏ qua bảng chưa tồn tại (genh migrate SAU khi nhập) thay vì UndefinedTable làm cuộn lại
+    mọi bí mật khác (kẹt ở khoá cũ vĩnh viễn)."""
+    totp = b"bi-mat-totp-gia-lap"
+    async with admin_sessionmaker()() as s:
+        user = (await s.execute(text("SELECT id FROM core.users ORDER BY created_at LIMIT 1"))).scalar_one()
+        await s.execute(text("UPDATE core.users SET totp_secret_enc = :e WHERE id = :i"),
+                        {"e": crypto.encrypt(totp, b"totp_secret"), "i": user})
+        # Mô phỏng CSDL ở revision 0028: chưa có các bảng của migration 0029.
+        await s.execute(text("DROP TABLE ops.telegram_outbox, ops.notify_channels"))
+        await s.execute(text("UPDATE alembic_version SET version_num = '0028' WHERE version_num = '0029'"))
+        await s.commit()
+    target_db, _key_b = await _migrate(monkeypatch, tmp_path)
+    try:
+        async with admin_sessionmaker()() as s:
+            assert (await s.execute(text("SELECT to_regclass('ops.notify_channels')"))).scalar() is None
+            enc = (await s.execute(text("SELECT totp_secret_enc FROM core.users WHERE id = :i"),
+                                   {"i": user})).scalar_one()
+        assert crypto.decrypt(bytes(enc), b"totp_secret") == totp                       # khoá B (hiện hành)
+        with pytest.raises(Exception):  # noqa: B017 — đã thật sự mã hoá lại, không còn ở khoá A
+            crypto.decrypt(bytes(enc), b"totp_secret", key=base64.b64decode(KEY_A))
+        # Như genh: `alembic upgrade heads` sau khi nhập — bảng Telegram xuất hiện, trống.
+        env = {**os.environ, "GH_ADMIN_DATABASE_URL": ""}
+        await asyncio.to_thread(subprocess.run, [sys.executable, "-m", "alembic", "upgrade", "heads"], cwd=API_DIR,
+                                env=env, check=True)
+        async with admin_sessionmaker()() as s:
+            assert (await s.execute(text("SELECT count(*) FROM ops.notify_channels"))).scalar_one() == 0
     finally:
         await _drop(target_db)

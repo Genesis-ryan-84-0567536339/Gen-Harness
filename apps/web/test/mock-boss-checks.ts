@@ -105,6 +105,11 @@ export function createMock(opts: Opts) {
     return { ...record('telegram', rest.status, { error_code: rest.error_code, message: rest.message, detail: rest.detail }), host_requested } as BossCheck;
   };
 
+  /** Như `telegram.service.forget_tests` của api: đổi token/chat_id hoặc Tắt Telegram ⇒ dòng 6 về "Chưa kiểm". */
+  const forgetTelegram = () => {
+    results.telegram = null;
+  };
+
   const pass = (k: BossCheckKey) => results[k]?.status === 'pass';
   const overview = (): BossOverview => {
     syncLogins();
@@ -206,5 +211,5 @@ export function createMock(opts: Opts) {
     return list;
   };
 
-  return { handle, hooks: { seedAgy, seedClaude, overview, recordTelegram } as Record<string, (...args: never[]) => unknown>, dispose: () => {} };
+  return { handle, hooks: { seedAgy, seedClaude, overview, recordTelegram, forgetTelegram } as Record<string, (...args: never[]) => unknown>, dispose: () => {} };
 }

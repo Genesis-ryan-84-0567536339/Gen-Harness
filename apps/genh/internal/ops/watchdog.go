@@ -48,7 +48,7 @@ const (
 	watchdogMsgResolved   = "Gen-Harness · ĐÃ ỔN"
 	watchdogMsgTest       = "Gen-Harness · Tin thử từ trực canh máy chủ"
 	watchdogMsgFooterNote = "(Tin tự động từ trực canh máy chủ — mọi thao tác Sếp xác nhận trong Console.)"
-	watchdogConsolePath   = "/system?tab=storage&focus=health"
+	watchdogConsolePath   = "/connections#telegram" // khối Trực canh máy chủ + sự cố đang mở
 )
 
 // WatchdogScheduler bật/tắt/hỏi lịch trực canh (mặc định: internal/autoupdate

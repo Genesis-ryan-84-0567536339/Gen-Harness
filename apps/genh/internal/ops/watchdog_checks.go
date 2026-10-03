@@ -203,6 +203,15 @@ func (w *wdRun) maybeRestart(ctx context.Context, m *wdMeasure, svc string, exit
 			return ""
 		}
 	}
+	// Giữ genh.lock (không chờ) CHỈ quanh lệnh docker: update/restore/import có
+	// thể lấy khoá sau lần kiểm đầu lượt (đo mất tới ~25 giây) — khi đó không
+	// được dựng lại service bằng compose/env cũ giữa lúc đang dừng/migrate.
+	lock, lerr := hostlink.AcquireLock(w.env.InstallDir)
+	if lerr != nil {
+		m.notes = append(m.notes, "đang cập nhật/khôi phục — không tự khởi động lại "+svc)
+		return ""
+	}
+	defer lock.Release()
 	w.state.Restarts[svc] = w.now.UTC().Format(time.RFC3339)
 	var err error
 	if exited {

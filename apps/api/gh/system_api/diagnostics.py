@@ -161,18 +161,30 @@ def _unsafe() -> ApiError:
 
 
 def _open_zip(name: str) -> tuple[int, int]:
-    """(fd, kích thước). Thư mục và tệp đều không được là liên kết mềm; tệp thường ≤ MAX_BYTES."""
+    """(fd, kích thước). Thư mục và tệp đều không được là liên kết mềm; tệp thường ≤ MAX_BYTES.
+
+    run/ là 0777 ⇒ mở THƯ MỤC bằng O_NOFOLLOW|O_DIRECTORY rồi mở tệp tương đối với fd đó (dir_fd): không còn khe giữa
+    lúc kiểm và lúc mở để ai đó tráo run/diagnostics thành liên kết mềm trỏ ra chỗ khác."""
     d = upd._dir() / DIAG_DIR
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
     if d.is_symlink():
         raise _unsafe()
     if not d.is_dir():
         raise _not_ready()
     try:
-        fd = os.open(d / name, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+        dfd = os.open(d, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | nofollow)
     except FileNotFoundError:
         raise _not_ready() from None
     except OSError:
         raise _unsafe() from None
+    try:
+        fd = os.open(name, os.O_RDONLY | nofollow | getattr(os, "O_NONBLOCK", 0), dir_fd=dfd)
+    except FileNotFoundError:
+        raise _not_ready() from None
+    except OSError:
+        raise _unsafe() from None
+    finally:
+        os.close(dfd)
     st = os.fstat(fd)
     if not stat.S_ISREG(st.st_mode) or st.st_size > MAX_BYTES:
         os.close(fd)

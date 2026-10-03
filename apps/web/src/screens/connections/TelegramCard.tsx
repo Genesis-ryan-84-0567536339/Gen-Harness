@@ -11,6 +11,7 @@ import { useOrgTimezone } from '../../lib/permissions';
 import { queryClient } from '../../lib/queryClient';
 import { toast } from '../../lib/toast';
 import { CardError, InlineError, Panel, SkeletonLines } from '../common';
+import { qkSystem } from '../system/queries';
 import { ConnectionStatusPill } from './ConnectionStatusPill';
 import { telegramConnStatus } from './connectionsModel';
 import {
@@ -19,7 +20,9 @@ import {
   HOST_STATE_LABEL,
   TELEGRAM_KEY,
   TELEGRAM_WARNING,
+  type HostWait,
   asTelegramConfig,
+  hostPollMs,
   hostTestText,
   hostWarning,
   hostWarningDetail,
@@ -27,6 +30,7 @@ import {
   str,
   telegramErrorText,
   telegramTechDetail,
+  telegramKicker,
   testOkText,
   tokenFormatError,
 } from './telegramModel';
@@ -37,7 +41,14 @@ import {
  * lưu, ô token xoá trắng, thẻ chỉ hiện "@bot → chat •••1234". Lưu/Tắt cần PIN (apiClient tự mở hộp PIN khi 423).
  */
 export function TelegramCard() {
-  const q = useQuery({ queryKey: TELEGRAM_KEY, queryFn: ({ signal }) => api.notify.getTelegram(signal) });
+  // Gửi thử đạt + đã nhờ Trực canh máy chủ gửi tin thứ hai ⇒ hỏi lại mỗi 5 giây (tối đa ~2 phút) tới khi kết quả tin
+  // thử từ máy chủ đổi — Sếp thấy ngay dòng "Tin thử từ máy chủ: Đạt/Lỗi" mà không phải tải lại trang.
+  const [hostWait, setHostWait] = useState<HostWait | null>(null);
+  const q = useQuery({
+    queryKey: TELEGRAM_KEY,
+    queryFn: ({ signal }) => api.notify.getTelegram(signal),
+    refetchInterval: (query) => hostPollMs(hostWait, asTelegramConfig(query.state.data)?.host?.test?.at),
+  });
   const t = asTelegramConfig(q.data);
   const [editing, setEditing] = useState(false);
   const status = q.data !== undefined ? telegramConnStatus(t) : null;
@@ -46,7 +57,7 @@ export function TelegramCard() {
     <Panel
       title="Telegram"
       label="Telegram — báo động & bản tin"
-      kicker={t?.configured ? 'Báo động sự cố, bản tin 07:30/17:30 và nhắc việc' : 'Nhận báo động & bản tin qua bot Telegram của Sếp'}
+      kicker={telegramKicker(t)}
       aside={status ? <ConnectionStatusPill status={status} /> : undefined}
       bodyClass="conn-card__body"
     >
@@ -55,7 +66,11 @@ export function TelegramCard() {
       ) : q.isError ? (
         <CardError error={q.error} onRetry={() => void q.refetch()} retrying={q.isFetching} />
       ) : t?.configured && !editing ? (
-        <ConfiguredView t={t} onEdit={() => setEditing(true)} />
+        <ConfiguredView
+          t={t}
+          onEdit={() => setEditing(true)}
+          onHostRequested={() => setHostWait({ since: Date.now(), prevAt: str(t.host?.test?.at) })}
+        />
       ) : (
         <SetupForm t={t} onDone={() => setEditing(false)} onCancel={t?.configured ? () => setEditing(false) : undefined} />
       )}
@@ -71,6 +86,8 @@ function applyConfig(c: TelegramConfig) {
   queryClient.setQueryData(TELEGRAM_KEY, c);
   void queryClient.invalidateQueries({ queryKey: TELEGRAM_KEY });
   void queryClient.invalidateQueries({ queryKey: BOSS_CHECKS_KEY });
+  // Tắt Telegram đóng sự cố telegram.failed ở máy chủ — dải "Cần Sếp xử lý" và chuông cập nhật ngay.
+  void queryClient.invalidateQueries({ queryKey: qkSystem.health });
 }
 
 /** Chưa cấu hình (hoặc "Đổi token/chat_id"): 6 bước BotFather, token, Tìm chat_id, chat_id, 2 công tắc, Lưu. */
@@ -251,12 +268,13 @@ function FoundChats({ result, selected, onPick }: { result: TelegramFindChatResu
 }
 
 /** Đã cấu hình: "@bot → chat •••1234", Gửi thử, Đổi token/chat_id, Tắt Telegram (xác nhận). */
-function ConfiguredView({ t, onEdit }: { t: TelegramConfig; onEdit: () => void }) {
+function ConfiguredView({ t, onEdit, onHostRequested }: { t: TelegramConfig; onEdit: () => void; onHostRequested: () => void }) {
   const tz = useOrgTimezone();
   const [confirmOff, setConfirmOff] = useState(false);
   const test = useMutation({
     mutationFn: () => api.notify.testTelegram(),
     onSuccess: (r) => {
+      if (r.host_requested === true) onHostRequested();
       if (!r.transient) void queryClient.invalidateQueries({ queryKey: TELEGRAM_KEY });
       void queryClient.invalidateQueries({ queryKey: BOSS_CHECKS_KEY });
     },

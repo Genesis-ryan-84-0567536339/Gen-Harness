@@ -16,7 +16,7 @@ import { useHubLink, useUpdateHubLink } from '../screens/mcp/queries';
 import { ClaudeRiskNotice, CliLoginPanel } from '../screens/system/CliCard';
 import { useCliLogin } from '../screens/system/useCliLogin';
 import { accountStatus, qkSocial } from '../social/socialModel';
-import { TELEGRAM_GUIDE_PATH } from '../screens/connections/telegramModel';
+import { TELEGRAM_GUIDE_PATH, TELEGRAM_KEY } from '../screens/connections/telegramModel';
 import {
   BOSS_CHECKS_KEY,
   BOSS_CHECKS_POLL_MS,
@@ -600,7 +600,13 @@ function TelegramRow({ data, done }: { data: Results; done: boolean }) {
           className="btn-27"
           icon="ph ph-paper-plane-tilt"
           loading={run.isPending}
-          onClick={() => run.mutate({ key: 'telegram' })}
+          onClick={() =>
+            run.mutate(
+              { key: 'telegram' },
+              // Cùng kết quả hiện ở Kết nối › Telegram (viên trạng thái, "Gửi thử gần nhất") — làm mới luôn.
+              { onSuccess: () => void queryClient.invalidateQueries({ queryKey: TELEGRAM_KEY }) },
+            )
+          }
         >
           Gửi thử
         </Button>

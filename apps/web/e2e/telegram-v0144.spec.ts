@@ -3,7 +3,7 @@ import { OWNER, loginAs, loginAsOwner, p3Hook, resetMock } from './support';
 
 /**
  * v0.1.44 (F-8c) — Kết nối › Telegram ("Báo động & bản tin"), mock tất định (không gọi Telegram thật): dán token →
- * Tìm chat_id → chọn → Lưu (PIN) → Gửi thử → "Đã gửi"; nhánh TELEGRAM_BOT_BLOCKED chỉ cách bấm Bắt đầu. Token (giả,
+ * Tìm chat_id → chọn → Lưu (PIN) → Gửi thử → "Đã gửi"; nhánh TELEGRAM_BOT_BLOCKED chỉ cách bấm Bắt đầu (Start). Token (giả,
  * chỉ cho test) không bao giờ nằm lại trên trang sau khi lưu.
  */
 
@@ -66,14 +66,14 @@ test.describe('Kết nối › Telegram (v0.1.44)', () => {
     await expect(page.getByRole('region', { name: 'Telegram (báo động & bản tin)', exact: true })).toContainText('Xong');
   });
 
-  test('TELEGRAM_BOT_BLOCKED → hướng dẫn mở bot, bấm Bắt đầu (+ Chi tiết kỹ thuật); Tắt Telegram cần xác nhận', async ({ page }) => {
+  test('TELEGRAM_BOT_BLOCKED → hướng dẫn mở bot, bấm Bắt đầu (Start) (+ Chi tiết kỹ thuật); Tắt Telegram cần xác nhận', async ({ page }) => {
     await p3Hook(page.request, 'telegram', 'seed', { configured: true, testError: 'TELEGRAM_BOT_BLOCKED' });
     await loginAsOwner(page);
     await page.goto('/connections#telegram');
     const tg = card(page);
     await tg.getByRole('button', { name: 'Gửi thử' }).click();
     const res = tg.getByTestId('telegram-test-result');
-    await expect(res).toContainText('Sếp đã chặn bot hoặc chưa bấm Bắt đầu — mở bot trên Telegram, bấm Bắt đầu');
+    await expect(res).toContainText('Sếp đã chặn bot hoặc chưa bấm Bắt đầu (Start) — mở bot trên Telegram, bấm Bắt đầu (Start)');
     await res.getByText('Chi tiết kỹ thuật').click();
     await expect(res).toContainText('Mã lỗi TELEGRAM_BOT_BLOCKED');
     await expect(tg.locator('.conn-pill')).toHaveText('Cần Sếp xử lý');
@@ -109,7 +109,7 @@ test.describe('Kết nối › Telegram (v0.1.44)', () => {
     const tg = card(page);
     await tg.getByRole('button', { name: 'Đổi token/chat_id' }).click();
     await tg.getByRole('button', { name: 'Tìm chat_id' }).click();
-    await expect(tg.getByTestId('telegram-find-empty')).toContainText('Chưa thấy tin nào — mở bot, bấm Bắt đầu và gửi một tin rồi bấm lại');
+    await expect(tg.getByTestId('telegram-find-empty')).toContainText('Chưa thấy tin nào — mở bot, bấm Bắt đầu (Start), gửi một tin rồi bấm Tìm chat_id lần nữa.');
     await expect(tg.getByLabel('chat_id mới (bỏ trống để giữ •••4321)')).toHaveValue('');
     await tg.getByRole('switch', { name: 'Gửi bản tin 07:30/17:30' }).click();
     await tg.getByRole('button', { name: 'Lưu', exact: true }).click();
@@ -124,13 +124,43 @@ test.describe('Kết nối › Telegram (v0.1.44)', () => {
     await page.goto('/connections#telegram');
     const tg = card(page);
     const warn = tg.getByTestId('telegram-host-warning');
-    await expect(warn).toContainText('Trực canh máy chủ chưa gửi được tin Telegram: Sếp đã chặn bot hoặc chưa bấm Bắt đầu');
+    await expect(warn).toContainText('Trực canh máy chủ chưa gửi được tin Telegram: Sếp đã chặn bot hoặc chưa bấm Bắt đầu (Start)');
     await warn.getByText('Chi tiết kỹ thuật').click();
     await expect(warn).toContainText('Mã lỗi TELEGRAM_BOT_BLOCKED');
     await tg.getByRole('button', { name: 'Gửi thử' }).click();
     await expect(tg.getByTestId('telegram-test-result')).toHaveText(/Đã gửi — kiểm tra Telegram trên điện thoại$/);
     await expect(tg.getByTestId('telegram-host-test')).toContainText('Tin thử từ máy chủ: Lỗi · Sếp đã chặn bot');
     await expect(page.locator('body')).not.toContainText('[object Object]');
+  });
+
+  test('Gửi thử Đạt rồi Lưu token mới → "Cần Sếp xử lý", không còn "Gửi thử gần nhất", dòng 6 về Chưa kiểm; Tắt Telegram cũng vậy', async ({ page }) => {
+    await p3Hook(page.request, 'telegram', 'seed', { configured: true });
+    await loginAsOwner(page);
+    await page.goto('/connections#telegram');
+    const tg = card(page);
+    await tg.getByRole('button', { name: 'Gửi thử' }).click();
+    await expect(tg.locator('.conn-pill')).toHaveText('Đang chạy');
+    const row6 = () => page.getByRole('region', { name: 'Telegram (báo động & bản tin)', exact: true });
+
+    await tg.getByRole('button', { name: 'Đổi token/chat_id' }).click();
+    await tg.getByLabel(/Token mới/).fill('987654321:BBOtherFakeTokenOnly_zyxwvutsrqponm');
+    await tg.getByRole('button', { name: 'Lưu', exact: true }).click();
+    await enterPin(page);
+    await expect(tg.locator('.conn-pill')).toHaveText('Cần Sếp xử lý');
+    await expect(tg.getByTestId('telegram-last-test')).toHaveCount(0);
+    await expect(tg).toContainText('Chưa Gửi thử lần nào');
+    await page.goto('/guide/viec-sep');
+    await expect(row6()).toContainText('Chưa kiểm');
+    await expect(row6()).not.toContainText('Xong');
+
+    await page.goto('/connections#telegram');
+    await tg.getByRole('button', { name: 'Gửi thử' }).click();
+    await expect(tg.locator('.conn-pill')).toHaveText('Đang chạy');
+    await tg.getByRole('button', { name: 'Tắt Telegram' }).click();
+    await page.getByRole('dialog', { name: 'Tắt Telegram?' }).getByRole('button', { name: 'Tắt Telegram' }).click();
+    await expect(tg.locator('.conn-pill')).toHaveText('Chưa nối');
+    await page.goto('/guide/viec-sep');
+    await expect(row6()).toContainText('Chưa kiểm');
   });
 
   test('vai trò khác Owner không thấy thẻ Telegram', async ({ page }) => {

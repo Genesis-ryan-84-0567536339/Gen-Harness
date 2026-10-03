@@ -149,6 +149,10 @@ async def test_download_rejects_symlinked_dir_and_too_big(owner_api: Api, host: 
     (host / "diagnostics").rmdir()
     (host / "diagnostics").symlink_to(other)
     assert (await owner_api.get("/system/diagnostics/download")).json()["code"] == "DIAG_FILE_UNSAFE"
+    # Tráo thư mục SAU lần kiểm is_symlink (đua TOCTOU — run/ là 0777): mở thư mục bằng O_NOFOLLOW vẫn từ chối.
+    monkeypatch.setattr(Path, "is_symlink", lambda self: False)
+    r = await owner_api.get("/system/diagnostics/download")
+    assert r.json()["code"] == "DIAG_FILE_UNSAFE" and CONTENT not in r.content
 
 
 async def test_failed_state_and_staff_forbidden(owner_api: Api, host: Path, client: httpx.AsyncClient,

@@ -538,6 +538,12 @@ async def _reencrypt_secrets(old_master_key: bytes) -> None:
     needs_login = 0
     async with sm() as db:
         for t in REENCRYPT_TARGETS:
+            # Gói CŨ hơn bản này (vd xuất trước migration 0029 — chưa có ops.notify_channels): bảng chưa tồn tại lúc
+            # mã hoá lại (genh chạy `alembic upgrade heads` SAU khi nhập) ⇒ bỏ qua bảng đó, không làm hỏng cả lượt
+            # (lỗi ở đây cuộn lại mọi bảng khác và tệp keys.json tạm đã bị xoá ⇒ bí mật kẹt ở khoá cũ vĩnh viễn).
+            if (await db.execute(text("SELECT to_regclass(:t)"), {"t": t.table})).scalar() is None:
+                log.info("Bảng %s chưa có trong gói (gói từ bản cũ hơn) — bỏ qua bước mã hoá lại bảng này", t.table)
+                continue
             cols = ", ".join((t.id_col, t.secret_col, *t.extra_cols))
             rows = (await db.execute(
                 text(f"SELECT {cols} FROM {t.table} WHERE {t.secret_col} IS NOT NULL"))).mappings().all()  # noqa: S608

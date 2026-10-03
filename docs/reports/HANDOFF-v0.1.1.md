@@ -2496,7 +2496,7 @@ Không cần chụp màn hình hay gửi mã cho Claude — kết quả tự lư
 ### Boss cần làm gì
 
 1. **Tạo bot Telegram** (khoảng 3 phút, Console hướng dẫn từng bước ở **Kết nối › Telegram**):
-   1) Trên điện thoại mở Telegram, tìm **@BotFather** (có dấu tích xanh), bấm Bắt đầu.
+   1) Trên điện thoại mở Telegram, tìm **@BotFather** (có dấu tích xanh), bấm **Bắt đầu (Start)**.
    2) Gửi `/newbot`, đặt tên (vd "Gen của Sếp") và tên người dùng kết thúc bằng `bot`.
    3) BotFather gửi lại một mã dài dạng `123456789:AA…` — chép mã đó.
    4) Bấm vào đường dẫn bot vừa tạo, bấm **Bắt đầu (Start)** và gửi một tin bất kỳ (vd "chào").
@@ -2578,3 +2578,24 @@ Không cần chụp màn hình hay gửi mã cho Claude — kết quả tự lư
   khi gửi không làm gửi trùng). Chữ: "Bắt đầu (Start)", thân sự cố nói đủ bước (Đổi token/chat_id → Lưu → Gửi thử), câu lỗi
   có dấu chấm cuối; mock nhận chat_id đúng như máy chủ (chỉ số).
 - Nhỏ: Hướng dẫn "(~25 phút)" + Telegram; Kết nối cuộn tới `#telegram` cả khi `me` về sau danh sách kênh.
+
+### Sửa sau review lượt 2 (03/10)
+
+- **Nhập gói cũ (blocker)**: gói xuất từ v0.1.43 trở về trước (revision 0028, chưa có `ops.notify_channels`) nhập sang máy
+  khoá master khác từng hỏng cả lượt (UndefinedTable ⇒ cuộn lại mọi bí mật đã mã hoá lại, keys.json tạm đã xoá ⇒ bí mật kẹt
+  ở khoá cũ). `_reencrypt_secrets` bỏ qua bảng chưa tồn tại (`to_regclass`); test nhập dump 0028 dưới khoá khác rồi migrate.
+- **F-6b**: trực canh lấy `genh.lock` (không chờ) quanh đúng lệnh `restart`/`up -d` — update/restore/import lấy khoá giữa
+  lượt ⇒ không dựng lại service bằng compose/env cũ. `genh watchdog disable` ghi `config/watchdog-disabled.json`: install/
+  update (kể cả lịch đêm) không bật lại; `watchdog status` ghi "Owner đã tắt"; `enable` xoá tệp. Link trong tin trực canh
+  trỏ `/connections#telegram` (khối Trực canh + sự cố đang mở) thay vì thẻ Sức khoẻ (không hiện sự cố genh đo).
+- **F-8c — Telegram**: Tắt Telegram đóng sự cố `telegram.failed` (hết ngõ cụt) và xoá kết quả Gửi thử; đổi token/chat_id
+  (hoặc nối lần đầu) cũng xoá ⇒ thẻ + dòng 6 về "Chưa kiểm" (chỉ đổi công tắc/Lưu lại thì giữ). Người không phải Owner thấy
+  sự cố `telegram.failed` không có nút (thẻ chỉ Owner có), thân "nhờ Owner mở Kết nối › Telegram". Bản tin/nhắc việc: phần
+  chữ không tin cậy (tóm tắt AI, dòng đầu mục, tên việc) bị "làm cùn" link/@ (`https[:]//x[.]vn`, `[@]ten`) — Telegram tự
+  dò link cả khi không có parse_mode. Web: chữ "Bắt đầu (Start)" ở 6 bước BotFather, câu lỗi, "Tìm chat_id lần nữa.";
+  kicker thẻ chỉ kể mục đang bật; Gửi thử ở dòng 6 làm mới thẻ Telegram; sau Gửi thử thẻ hỏi lại 5 giây/lần (≤ 2 phút) tới
+  khi có kết quả tin thử từ máy chủ.
+- **F-4b**: `POST /client-errors` thêm trần chung 200 lần/phút (X-Forwarded-For giả được); tải gói chẩn đoán mở thư mục
+  bằng O_NOFOLLOW rồi mở tệp theo `dir_fd` (hết khe tráo symlink). Gói chẩn đoán "đang tạo" quá 3 phút ⇒ thêm lệnh
+  `genh doctor` chạy tay; lỗi tải cũ biến mất khi tạo gói mới. Trợ giúp: `genh stop` nói rõ trực canh tạm nghỉ; thêm
+  `genh doctor`, `genh watchdog status`.

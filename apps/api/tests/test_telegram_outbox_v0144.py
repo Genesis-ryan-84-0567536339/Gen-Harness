@@ -271,3 +271,16 @@ async def test_disabled_config_no_enqueue_and_no_send(owner_api: Any, db: Any) -
     assert not await tsvc.enqueue(db, org, "briefing", "x", "b:1")
     await db.commit()
     assert await _outbox(db) == []
+
+
+async def test_untrusted_text_is_defanged() -> None:
+    """Tóm tắt AI và dòng đầu của mục (chữ khách/Kho) không thành link/@nhắc bấm được trên Telegram của Sếp."""
+    sections = [{"key": "tasks_due", "title": "Việc đến hạn", "count": 1,
+                 "lines": ["Khách gửi http://evil.example.com/dang-nhap và @gia_mao_bot"]}]
+    body = tsvc.briefing_text("sáng 03/10", "Sếp vào www.lua-dao.vn ngay, hỏi a@b.vn. Bản v0.1.44 ổn.", sections)
+    assert "://" not in body.split("Mở Console:")[0]
+    assert "evil[.]example[.]com" in body and "www[.]lua-dao[.]vn" in body and "[@]gia_mao_bot" in body
+    assert "a[@]b[.]vn" in body and "v0.1.44" in body
+    assert "Mở Console: " in body and "/overview" in body                  # link Console của chính Gen vẫn còn
+    r = tsvc.reminder_text("Gọi lại theo https://t.me/abc", "VIEC-1", "P1", None)
+    assert "https[:]//t[.]me/abc" in r and "/tasks" in r
