@@ -1,17 +1,14 @@
 import { useEffect, useRef } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import type { AiCost } from '@gen-harness/contracts';
-import { fmtInt } from '../../lib/format';
+import { fmtInt, fmtVnd } from '../../lib/format';
 import { useCan } from '../../lib/permissions';
 import { CardError, Panel, SkeletonLines } from '../common';
 import { useAiCost } from '../system/queries';
 
-/** 12500 → "12.500 ₫" (số nguyên VND, phân cách nghìn bằng dấu chấm). */
-const fmtVnd = (n: number | null | undefined) => `${fmtInt(n ?? 0)} ₫`;
-
-/** Kicker: "<tổng> ₫ / trần <trần> ₫" hoặc "<tổng> ₫ · chưa đặt trần". */
+/** Kicker: "<tổng> ₫ / trần <trần> ₫" hoặc "<tổng> ₫ · chưa đặt trần". Số tiền thiếu hiện "0 ₫" (không "—"). */
 function aiCostKicker(d: Pick<AiCost, 'total_vnd' | 'budget_vnd'>): string {
-  return d.budget_vnd == null ? `${fmtVnd(d.total_vnd)} · chưa đặt trần` : `${fmtVnd(d.total_vnd)} / trần ${fmtVnd(d.budget_vnd)}`;
+  return d.budget_vnd == null ? `${fmtVnd(d.total_vnd ?? 0)} · chưa đặt trần` : `${fmtVnd(d.total_vnd ?? 0)} / trần ${fmtVnd(d.budget_vnd)}`;
 }
 
 /**
@@ -65,7 +62,7 @@ function AiCostBody({ d }: { d: AiCost }) {
   return (
     <div className="ov-ai-cost__body" data-over={over ? 'yes' : 'no'}>
       <div className="ov-ai-cost__total">
-        <b data-testid="ai-cost-total">{fmtVnd(d.total_vnd)}</b>
+        <b data-testid="ai-cost-total">{fmtVnd(d.total_vnd ?? 0)}</b>
         {over ? (
           <span className="ov-ai-cost__over" role="status">
             Vượt trần
@@ -100,7 +97,7 @@ function AiCostBody({ d }: { d: AiCost }) {
               <tr key={a.agent_key} data-testid={`ai-cost-agent-${a.agent_key}`}>
                 <td>{a.label}</td>
                 <td className="mono">{fmtInt(a.calls)}</td>
-                <td className="mono">{fmtVnd(a.cost_vnd)}</td>
+                <td className="mono">{fmtVnd(a.cost_vnd ?? 0)}</td>
               </tr>
             ))}
           </tbody>

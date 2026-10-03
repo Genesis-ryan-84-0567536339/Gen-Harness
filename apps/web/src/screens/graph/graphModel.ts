@@ -1,5 +1,7 @@
 /** Presentation helpers dùng chung cho 4 chế độ của cụm Bản đồ quan hệ (`graph`). */
 import type { GraphHeatBand, GraphState, GraphValueBand } from '@gen-harness/contracts';
+// F-38 (v0.1.43): định nghĩa duy nhất ở lib/format.ts — re-export để các màn không phải đổi import.
+export { initialsOf, fmtVnd } from '../../lib/format';
 
 export const OK = 'var(--color-ok)';
 export const WARN = 'var(--color-warn)';
@@ -63,18 +65,6 @@ export function channelIcon(type: string): string {
 }
 export function channelTone(type: string): string {
   return type === 'zalo' ? OK : type === 'whatsapp' ? WARN : N4;
-}
-
-export function initialsOf(name: string): string {
-  const parts = name.trim().split(/\s+/);
-  const last = parts.at(-1)?.[0] ?? '';
-  const first = parts[0]?.[0] ?? '';
-  return (first + last).toLocaleUpperCase('vi').slice(0, 2) || '·';
-}
-
-const VND = new Intl.NumberFormat('vi-VN');
-export function fmtVnd(n: number | null): string {
-  return n === null ? '—' : `${VND.format(n)} ₫`;
 }
 
 export const TYPE_OPTIONS: { value: string; label: string }[] = [

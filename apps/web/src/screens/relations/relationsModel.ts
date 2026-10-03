@@ -1,5 +1,7 @@
 /** Presentation helpers dùng chung cho 4 màn của cụm Quan hệ & Đối tượng. */
 import type { DirHeatBand, DirPriority, DirRelation, DirValueBand, DocSource, ListenMode } from '@gen-harness/contracts';
+// F-38 (v0.1.43): định nghĩa duy nhất ở lib/format.ts — re-export để các màn không phải đổi import.
+export { initialsOf, fmtVnd } from '../../lib/format';
 
 export const OK = 'var(--color-ok)';
 export const WARN = 'var(--color-warn)';
@@ -53,13 +55,6 @@ export const CHANNEL_STATE_LABEL: Record<string, string> = {
   active: 'Đang kết nối', pending_qr: 'Chờ quét QR', expired: 'Phiên hết hạn', logged_out: 'Đã đăng xuất',
 };
 
-export function initialsOf(name: string): string {
-  const parts = name.trim().split(/\s+/);
-  const last = parts.at(-1)?.[0] ?? '';
-  const first = parts[0]?.[0] ?? '';
-  return (first + last).toLocaleUpperCase('vi').slice(0, 2) || '·';
-}
-
 export const SUMMARY_TONE: Record<string, string> = { ok: OK, bad: BAD, neutral: N4 };
 
 const EVENT_TONE: Record<string, string> = {
@@ -104,11 +99,6 @@ export function docIcon(mime: string): string {
   if (mime.includes('word') || mime.includes('document')) return 'ph ph-file-doc';
   return 'ph ph-file-text';
 }
-const VND = new Intl.NumberFormat('vi-VN');
-export function fmtVnd(n: number | null): string {
-  return n === null ? '—' : `${VND.format(n)} ₫`;
-}
-
 export function fmtBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;

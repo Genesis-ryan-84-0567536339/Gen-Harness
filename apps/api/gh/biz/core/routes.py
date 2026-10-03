@@ -320,7 +320,8 @@ def _owner_reasons(user: service.CurrentUser, reasons: list[str]) -> list[str]:
 
 
 def _agent_key(r: Any) -> str:
-    return f"agent:{r.agent_id}" if r.agent_id else "core.reply_fast"
+    # F-25: nháp không gắn agent dùng model gán cho 'Soạn lại / dịch nháp' (core.reply).
+    return f"agent:{r.agent_id}" if r.agent_id else "core.reply"
 
 
 @router.post("/drafts/{draft_id}/translate")

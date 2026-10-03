@@ -7,22 +7,9 @@ import { describeError, TOKEN_INVALID, type StepProps } from './types';
 import { useFieldErrors } from './useFieldErrors';
 import { isComplete, step1Errors, type Step1Values } from './validation';
 
-const MODES: Array<{ value: Step1Values['mode']; title: string; desc: string; icon: string }> = [
-  {
-    value: 'empty',
-    title: 'Bắt đầu trống',
-    desc: 'Console trống, dữ liệu đến từ các kênh Sếp kết nối ở bước 5.',
-    icon: 'ph ph-rocket-launch',
-  },
-  {
-    value: 'sample',
-    title: 'Dùng dữ liệu mẫu',
-    desc: 'Nạp dữ liệu mẫu để xem Console vận hành; xoá được sau ở Cài đặt.',
-    icon: 'ph ph-database',
-  },
-];
-
 export function Step1Welcome({ meta, description, status, token, setToken, onSaved, onNext, formRef }: StepProps) {
+  // v0.1.43 (F-23): bỏ lựa chọn 'Dùng dữ liệu mẫu' — tin mẫu ghi vào raw.events sẽ ở lại mãi. Luôn bắt đầu trống,
+  // luôn gửi language 'vi' (chưa có bản dịch giao diện tiếng Anh).
   const [v, setV] = useState<Step1Values>({ token, language: 'vi', mode: 'empty' });
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -82,29 +69,6 @@ export function Step1Welcome({ meta, description, status, token, setToken, onSav
             error={f.errorOf('token')}
             hint="Hiện trong trình cài (TUI) — tự điền khi mở từ đường dẫn của trình cài."
           />
-          {/* v0.1.28 (UX V3): chưa có bản dịch giao diện tiếng Anh — ẩn lựa chọn ngôn ngữ (luôn gửi "vi") tới khi có. */}
-          <fieldset className="setup-options">
-            <legend className="gh-field__label">Cách bắt đầu</legend>
-            {MODES.map((m) => (
-              <label key={m.value} className="setup-option" data-checked={v.mode === m.value || undefined}>
-                <input
-                  type="radio"
-                  name="mode"
-                  value={m.value}
-                  checked={v.mode === m.value}
-                  onChange={() => setV({ ...v, mode: m.value })}
-                />
-                <span className="setup-option__icon" aria-hidden>
-                  <Icon name={m.icon} size={16} />
-                </span>
-                <span className="setup-option__text">
-                  <span className="setup-option__title">{m.title}</span>
-                  <span className="setup-option__desc">{m.desc}</span>
-                </span>
-                <span className="setup-option__radio" aria-hidden />
-              </label>
-            ))}
-          </fieldset>
         </div>
       )}
     </StepFrame>

@@ -1,5 +1,7 @@
 /** Presentation helpers dùng chung cho 4 màn của cụm Cơ hội & Thị trường. */
 import type { CaseStatus, DealStatus, OppConfidence, OppStage, SearchBulkAction } from '@gen-harness/contracts';
+// F-38 (v0.1.43): định nghĩa duy nhất ở lib/format.ts — re-export để các màn không phải đổi import.
+export { initialsOf, fmtVnd } from '../../lib/format';
 
 export const OK = 'var(--color-ok)';
 export const WARN = 'var(--color-warn)';
@@ -44,11 +46,6 @@ export function confidenceTone(c: OppConfidence): string {
   return c === 'high' ? OK : c === 'medium' ? WARN : N4;
 }
 
-const VND = new Intl.NumberFormat('vi-VN');
-export function fmtVnd(n: number | null): string {
-  return n === null ? '—' : `${VND.format(n)} ₫`;
-}
-
 // ── Cung ↔ Cầu ──
 export function scoreTone(score: number): string {
   return score >= 80 ? OK : score >= 60 ? WARN : N4;
@@ -90,9 +87,3 @@ export function priorityTone(p: string): string {
   return p === 'P1' ? BAD : p === 'P2' ? WARN : N4;
 }
 
-export function initialsOf(name: string): string {
-  const parts = name.trim().split(/\s+/);
-  const last = parts.at(-1)?.[0] ?? '';
-  const first = parts[0]?.[0] ?? '';
-  return (first + last).toLocaleUpperCase('vi').slice(0, 2) || '·';
-}
