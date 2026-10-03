@@ -29,6 +29,7 @@ from gh.auth.deps import require, require_owner, require_pin
 from gh.chassis import actionlog
 from gh.db import DB
 from gh.errors import ApiError, conflict
+from gh.hostlink_io import write_request
 from gh.system_api import update as upd
 
 router = APIRouter(prefix="/system/diagnostics", tags=["system"])
@@ -139,11 +140,9 @@ async def request_diagnostics(_m: service.CurrentUser = Depends(MANAGE),
         raise conflict("DIAG_UNSUPPORTED", "Chưa tạo được gói chẩn đoán từ Console", UNSUPPORTED_DETAIL)
     if _busy(s):
         raise conflict("DIAG_BUSY", "Đang tạo gói chẩn đoán — chờ xong rồi tải")
-    from gh.telegram.service import write_json_atomic
-
     rid = secrets.token_hex(8)
-    write_json_atomic(upd._dir() / "request" / REQUEST_FILE,
-                      {"schema": 1, "request_id": rid, "requested_at": _iso_now()})
+    write_request(upd._dir() / "request", REQUEST_FILE,
+                  {"schema": 1, "request_id": rid, "requested_at": _iso_now()})
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                            action="system.diagnostics.request", target_type="system", target_id="diagnostics",
                            detail={"request_id": rid}, ip=user.ip)
@@ -163,8 +162,8 @@ def _unsafe() -> ApiError:
 def _open_zip(name: str) -> tuple[int, int]:
     """(fd, kích thước). Thư mục và tệp đều không được là liên kết mềm; tệp thường ≤ MAX_BYTES.
 
-    run/ là 0777 ⇒ mở THƯ MỤC bằng O_NOFOLLOW|O_DIRECTORY rồi mở tệp tương đối với fd đó (dir_fd): không còn khe giữa
-    lúc kiểm và lúc mở để ai đó tráo run/diagnostics thành liên kết mềm trỏ ra chỗ khác."""
+    api và genh cùng ghi được run/ ⇒ mở THƯ MỤC bằng O_NOFOLLOW|O_DIRECTORY rồi mở tệp tương đối với fd đó (dir_fd):
+    không còn khe giữa lúc kiểm và lúc mở để ai đó tráo run/diagnostics thành liên kết mềm trỏ ra chỗ khác."""
     d = upd._dir() / DIAG_DIR
     nofollow = getattr(os, "O_NOFOLLOW", 0)
     if d.is_symlink():

@@ -48,7 +48,7 @@ class BudgetIn(BaseModel):
 
 @router.put("/system/ai-cost/budget")
 async def put_ai_budget(body: BudgetIn, db: AsyncSession = DB,
-                        user: service.CurrentUser = Depends(require("system.manage"))) -> dict[str, Any]:
+                        user: service.CurrentUser = Depends(require("system.manage", rbac.ALL))) -> dict[str, Any]:
     """Đặt/bỏ "Trần chi phí mỗi ngày" (null = bỏ trần). Chuông vượt trần do vòng theo dõi sức khoẻ gửi."""
     before = await ai_cost.get_budget(db, user.org_id)
     await ai_cost.set_budget(db, user.org_id, body.daily_budget_vnd)
@@ -65,7 +65,7 @@ class PriceIn(BaseModel):
 
 @router.put("/system/ai-cost/prices/{model_id}")
 async def put_ai_price(model_id: uuid.UUID, body: PriceIn, db: AsyncSession = DB,
-                       user: service.CurrentUser = Depends(require("system.manage"))) -> dict[str, Any]:
+                       user: service.CurrentUser = Depends(require("system.manage", rbac.ALL))) -> dict[str, Any]:
     """Giá model (VND / 1 triệu token vào/ra). Cả hai null ⇒ xoá giá (model về "chưa có giá"). Giá áp lại cho cả
     lịch sử (tính lúc đọc)."""
     if not await ai_cost.model_in_org(db, user.org_id, model_id):

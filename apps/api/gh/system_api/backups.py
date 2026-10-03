@@ -27,16 +27,17 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gh import backup, jobcodec
-from gh.auth import service
+from gh.auth import rbac, service
 from gh.auth.deps import require, require_owner, require_pin
 from gh.chassis import actionlog
 from gh.chassis.objects import ObjectNotFound, get_object_store
 from gh.db import DB
 from gh.errors import conflict, field_errors, not_found
+from gh.hostlink_io import write_request
 from gh.system_api import update as upd
 
 router = APIRouter(tags=["system"])
-MANAGE = require("system.manage")
+MANAGE = require("system.manage", rbac.ALL)
 
 CONFIRM_TEXT = "KHÔI PHỤC"
 RESTORE_REQUEST = "restore.json"
@@ -189,10 +190,7 @@ async def request_restore(body: RestoreIn, request: Request, db: AsyncSession = 
         raise conflict("UPDATE_IN_PROGRESS", "Đang cập nhật phiên bản — chờ xong rồi thử lại")
     req = {"id": str(uuid.uuid4()), "key": entry.key, "requested_at": datetime.now(UTC).isoformat(),
            "by": user.actor_id}
-    target = upd._dir() / "request" / RESTORE_REQUEST
-    tmp = target.with_suffix(".tmp")
-    tmp.write_text(json.dumps(req), encoding="utf-8")
-    tmp.replace(target)
+    write_request(upd._dir() / "request", RESTORE_REQUEST, req)
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                            action="backup.restore_requested", target_type="backup", target_id=entry.key,
                            detail={"request_id": req["id"], "taken_at": entry.taken_at.isoformat()}, ip=user.ip)
