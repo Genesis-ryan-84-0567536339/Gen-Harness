@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { InviteRole, ManagedUser, TempPasswordResult, UsersPage } from '@gen-harness/contracts';
-import { Button, Chip, Dialog, EmptyState, Icon, SelectField, TextField } from '@gen-harness/ui';
+import { Button, Chip, Dialog, EmptyState, SelectField, TextField } from '@gen-harness/ui';
 import { api } from '../../lib/api';
 import { errorText } from '../../lib/errorText';
 import { fmtAgo } from '../../lib/format';
@@ -10,7 +10,9 @@ import { toast } from '../../lib/toast';
 import { serverFieldErrors } from '../../account/accountModel';
 import { validateEmail, validateRequired } from '../../setup/validation';
 import { CardError, InlineError, Panel, SkeletonLines } from '../common';
-import { INVITE_ROLES, USERS_KEY, inviteMessage, userStatus } from './usersModel';
+import { TempPasswordDialog } from './TempPasswordDialog';
+import { useAccess } from './queries';
+import { INVITE_ROLES, USERS_KEY, userStatus } from './usersModel';
 
 type Pending = { kind: 'deactivate' | 'reset'; user: ManagedUser };
 
@@ -36,6 +38,8 @@ function UsersPanel() {
   const [inviting, setInviting] = useState(false);
   const [pending, setPending] = useState<Pending | null>(null);
   const [secret, setSecret] = useState<{ title: string; result: TempPasswordResult } | null>(null);
+  // v0.1.46 (F-21): đọc sẵn địa chỉ đăng nhập khi mở tab để hộp mời có ngay (không nháy "chưa đọc được").
+  useAccess();
 
   return (
     <div className="sys-tabs-col">
@@ -289,55 +293,6 @@ function ConfirmDialog({ pending, onClose, onSecret }: { pending: Pending; onClo
         )}
       </ul>
       {run.isError ? <p className="upd-error">{errorText(run.error)}</p> : null}
-    </Dialog>
-  );
-}
-
-function TempPasswordDialog({ title, result, onClose }: { title: string; result: TempPasswordResult; onClose: () => void }) {
-  const [copied, setCopied] = useState(false);
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(inviteMessage(result, window.location.origin));
-      setCopied(true);
-    } catch {
-      toast('Không chép được — hãy bôi đen và chép tay.', 'warn');
-    }
-  };
-  return (
-    <Dialog
-      open
-      onClose={onClose}
-      dismissable={false}
-      width={460}
-      title={title}
-      kicker="Mật khẩu tạm chỉ hiện MỘT lần"
-      actions={
-        <>
-          <Button variant="secondary" icon={copied ? 'ph ph-check' : 'ph ph-copy'} onClick={() => void copy()}>
-            {copied ? 'Đã chép' : 'Chép lời nhắn gửi nhân viên'}
-          </Button>
-          <Button variant="primary" onClick={onClose}>
-            Đã gửi, đóng
-          </Button>
-        </>
-      }
-    >
-      <div className="invite-result-row" data-gen-target="system.users.temp_password">
-        <Icon name="ph ph-user-plus" size={15} color="var(--color-accent-300)" />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div className="invite-result-row__name">
-            {result.user.display_name} · {result.user.role.name}
-          </div>
-          <div className="invite-result-row__email">{result.user.email}</div>
-        </div>
-        <span className="mono invite-result-row__pw" aria-label="Mật khẩu tạm">
-          {result.temp_password}
-        </span>
-      </div>
-      <p className="muted-note">
-        Gửi cho người này qua kênh riêng (Zalo, email cá nhân…) — lời nhắn đã chép gồm địa chỉ đăng nhập {window.location.origin}/login, email và mật khẩu tạm. Đăng nhập
-        lần đầu sẽ bắt đặt mật khẩu mới. Hộp này chỉ đóng bằng nút "Đã gửi, đóng" — đóng rồi là không xem lại được, quên thì bấm Đặt lại mật khẩu.
-      </p>
     </Dialog>
   );
 }

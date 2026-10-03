@@ -58,6 +58,7 @@ from gh.setup.routes import router as setup_router
 from gh.shell.routes import router as shell_router
 from gh.social import service as social_service
 from gh.social.routes import router as social_router
+from gh.system_api.access import router as access_router
 from gh.system_api.backups import router as backups_router
 from gh.system_api.client_errors import router as client_errors_router
 from gh.system_api.diagnostics import router as diagnostics_router
@@ -237,7 +238,7 @@ def create_app(*, with_lifespan: bool = True, expose_docs: bool | None = None) -
     for r in (auth_router, account_router, users_router, setup_router, shell_router, audit_router, plugins_router,
              mcp_router, data_router, system_router, update_router, backups_router, offsite_router, org_router,
              gen_router, notifications_router, triage_router, hub_router, social_router, health_router,
-             boss_checks_router, telegram_router, diagnostics_router, client_errors_router):
+             boss_checks_router, telegram_router, diagnostics_router, client_errors_router, access_router):
         app.include_router(r, prefix="/api/v1")
     for r in biz.routers():
         app.include_router(r, prefix="/api/v1")

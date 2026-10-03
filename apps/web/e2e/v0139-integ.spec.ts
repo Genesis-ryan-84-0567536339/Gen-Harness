@@ -116,8 +116,8 @@ test.describe('v0.1.39 · nghiệm thu sau gộp', () => {
   test('Việc Sếp cần làm: token sai → Lỗi + câu thân thiện + Chi tiết kỹ thuật HUB_TOKEN_REJECTED; tiến độ x/5', async ({ page }) => {
     await loginAsOwner(page);
     await page.goto('/guide/viec-sep');
-    await expect(page.locator('.boss-row')).toHaveCount(6);
-    await expect(page.getByText('Đã đạt 0/5 dòng bắt buộc')).toBeVisible();
+    await expect(page.locator('.boss-row')).toHaveCount(7);
+    await expect(page.getByText('Đã đạt 0/6 dòng bắt buộc')).toBeVisible();
     for (const name of ['Nối Gen-hub', 'Kết nối Facebook', 'Google (Antigravity) — hai tài khoản', 'Claude Code CLI', 'Jev']) {
       await expect(row(page, name)).toBeVisible();
     }
@@ -134,7 +134,7 @@ test.describe('v0.1.39 · nghiệm thu sau gộp', () => {
     await expect(res).toContainText('Lỗi · Gen-hub từ chối token');
     await res.getByText('Chi tiết kỹ thuật').click();
     await expect(res).toContainText('Mã lỗi HUB_TOKEN_REJECTED');
-    await expect(page.getByText('Đã đạt 0/5 dòng bắt buộc')).toBeVisible();
+    await expect(page.getByText('Đã đạt 0/6 dòng bắt buộc')).toBeVisible();
     await noObjectText(page);
   });
 
@@ -174,7 +174,7 @@ test.describe('v0.1.39 · nghiệm thu sau gộp', () => {
     await expect(results.nth(1)).toContainText('Đạt');
     await expect(results.nth(0)).toContainText('Đạt');
     await expect(cl).toContainText('Xong');
-    await expect(page.getByText('Đã đạt 1/5 dòng bắt buộc')).toBeVisible();
+    await expect(page.getByText('Đã đạt 1/6 dòng bắt buộc')).toBeVisible();
     await noObjectText(page);
   });
 

@@ -36,7 +36,7 @@ import {
 type Results = BossOverview | undefined;
 
 /**
- * v0.1.39 (F-74) — "Việc Sếp cần làm" (`/guide/viec-sep`): 6 dòng kết nối chạy thật (5 bắt buộc + Jev tuỳ chọn). Mỗi
+ * v0.1.39 (F-74) — "Việc Sếp cần làm" (`/guide/viec-sep`): 7 dòng kết nối chạy thật (6 bắt buộc + Jev tuỳ chọn). Mỗi
  * dòng có việc phải làm bằng lời thường, nút hành động và Ô KẾT QUẢ ngay cạnh. Kết quả lưu ở máy chủ
  * (`GET /boss-checks`) — tải lại trang vẫn còn, Claude tự đọc, Sếp không cần chụp màn hình. Chỉ Owner.
  */
@@ -57,7 +57,7 @@ export function BossChecksPage() {
 
   const data = q.data;
   const rowDone = (n: number) => !!data?.rows?.find((r) => r.row === n)?.done;
-  const total = data?.required_total ?? 5;
+  const total = data?.required_total ?? 6;
   const done = data?.required_done ?? 0;
 
   return (
@@ -67,7 +67,7 @@ export function BossChecksPage() {
       </Link>
       <ScreenTitle
         title="Việc Sếp cần làm"
-        description="Sáu việc để hệ thống kết nối chạy thật (khoảng 25 phút). Làm từng dòng: bấm nút, xem ô kết quả ngay bên cạnh."
+        description="Bảy việc để hệ thống kết nối chạy thật (khoảng 25 phút). Làm từng dòng: bấm nút, xem ô kết quả ngay bên cạnh."
         maxWidth={640}
       />
       {nonOwner ? (
@@ -106,6 +106,7 @@ export function BossChecksPage() {
             <ClaudeRow data={data} done={rowDone(4)} />
             <JevRow data={data} done={rowDone(5)} />
             <TelegramRow data={data} done={rowDone(6)} />
+            <RemoteRow data={data} done={rowDone(7)} />
           </ol>
           <p className="boss-foot muted-note">
             <Icon name="ph ph-floppy-disk" size={13} /> Kết quả được lưu lại — Claude tự đọc, Sếp không cần chụp màn hình.
@@ -615,6 +616,39 @@ function TelegramRow({ data, done }: { data: Results; done: boolean }) {
           <Icon name="ph ph-arrow-right" size={13} />
         </Link>
       </div>
+      {run.isError ? <InlineError detail={errorDetail(run.error)}>{errorText(run.error)}</InlineError> : null}
+      <TransientNote check={run.data} />
+    </Row>
+  );
+}
+
+// ── 7. Truy cập từ xa ────────────────────────────────────────────────────────────────────────────────────
+/**
+ * v0.1.46 (F-21): bấm TRÊN ĐIỆN THOẠI sau khi mở Console bằng địa chỉ từ xa — máy chủ quyết theo header Origin của lần
+ * bấm (không có PIN). Mở trên chính máy chủ (localhost) hoặc chưa chọn cách truy cập ⇒ "Lỗi" kèm câu hướng dẫn.
+ */
+function RemoteRow({ data, done }: { data: Results; done: boolean }) {
+  const run = useRunCheck();
+  const tz = useOrgTimezone();
+  const res = resultOf(data, 'remote_access');
+  const okText = (c: BossCheck) => {
+    const host = typeof c.detail?.opened_from === 'string' && c.detail.opened_from ? c.detail.opened_from : null;
+    return host ? `Đạt · đã mở Console từ ${host}` : `Đạt · ${fmtCheckedAt(c.checked_at, tz)}`;
+  };
+  return (
+    <Row
+      n={7}
+      title="Truy cập từ xa"
+      done={done}
+      todo="Trên máy chủ chạy genh remote tailscale (khuyên dùng), mở Console trên điện thoại bằng địa chỉ ở Cài đặt › Sao lưu & cập nhật › Truy cập từ xa, rồi bấm Kiểm tra ở đó."
+      results={<ResultCell check={res} okText={okText} />}
+    >
+      <div className="boss-actions">
+        <Button variant={res?.status === 'pass' ? 'secondary' : 'primary'} className="btn-27" icon="ph ph-device-mobile" loading={run.isPending} onClick={() => run.mutate({ key: 'remote_access' })}>
+          Kiểm tra
+        </Button>
+      </div>
+      <p className="muted-note">Bấm nút này TRÊN ĐIỆN THOẠI sau khi mở Console bằng địa chỉ từ xa</p>
       {run.isError ? <InlineError detail={errorDetail(run.error)}>{errorText(run.error)}</InlineError> : null}
       <TransientNote check={run.data} />
     </Row>

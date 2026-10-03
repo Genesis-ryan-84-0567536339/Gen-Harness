@@ -25,7 +25,7 @@ test.describe('Việc Sếp cần làm (v0.1.39)', () => {
     await page.setViewportSize({ width: 1440, height: 900 });
   });
 
-  test('Owner: thẻ ở Hướng dẫn thiết lập → 6 dòng; Gen-hub PIN một lần → Đạt; Facebook Đọc ngay → Đang chạy… → Đạt', async ({ page }) => {
+  test('Owner: thẻ ở Hướng dẫn thiết lập → 7 dòng; Gen-hub PIN một lần → Đạt; Facebook Đọc ngay → Đang chạy… → Đạt', async ({ page }) => {
     test.setTimeout(90_000);
     await p3Hook(page.request, 'social', 'seedActive', { label: 'Facebook của Sếp' });
     let pinDialogs = 0;
@@ -36,10 +36,10 @@ test.describe('Việc Sếp cần làm (v0.1.39)', () => {
     await page.goto('/guide');
     await expect(page.getByRole('heading', { level: 2, name: 'Hướng dẫn thiết lập' })).toBeVisible();
     const card = page.getByRole('link', { name: /Việc Sếp cần làm — kết nối chạy thật/ });
-    await expect(card).toContainText('Đã đạt 0/5 dòng bắt buộc');
+    await expect(card).toContainText('Đã đạt 0/6 dòng bắt buộc');
     await card.click();
     await expect(page).toHaveURL(/\/guide\/viec-sep$/);
-    await expect(page.locator('.boss-row')).toHaveCount(6);
+    await expect(page.locator('.boss-row')).toHaveCount(7);
     await expect(row(page, 'Jev')).toContainText('Không bắt buộc');
     await expect(page.getByText('Kết quả được lưu lại — Claude tự đọc, Sếp không cần chụp màn hình.')).toBeVisible();
 
@@ -65,13 +65,13 @@ test.describe('Việc Sếp cần làm (v0.1.39)', () => {
     await expect(fb.getByRole('button', { name: 'Đọc ngay' })).toBeDisabled();
     await expect(fb.getByTestId('boss-result')).toContainText('Đạt ·', { timeout: 15_000 });
     await expect(fb.getByRole('button', { name: 'Đọc lại' })).toBeEnabled();
-    await expect(page.getByText('Đã đạt 2/5 dòng bắt buộc')).toBeVisible();
+    await expect(page.getByText('Đã đạt 2/6 dòng bắt buộc')).toBeVisible();
 
     // Hướng dẫn thiết lập: việc "Nối Gen-hub" và "Kết nối Facebook" tự hiện Đã xong.
     await page.goto('/guide');
     await expect(page.locator('[data-gen-target="guide.item:14"]')).toContainText('Đã xong');
     await expect(page.locator('[data-gen-target="guide.item:13"]')).toContainText('Đã xong');
-    await expect(page.getByRole('link', { name: /Việc Sếp cần làm/ })).toContainText('Đã đạt 2/5 dòng bắt buộc');
+    await expect(page.getByRole('link', { name: /Việc Sếp cần làm/ })).toContainText('Đã đạt 2/6 dòng bắt buộc');
   });
 
   test('Google: Gọi thử báo binh@ → Đổi sang an@ (PIN) → Đổi sang binh@ → 2/2; tải lại vẫn còn kết quả', async ({ page }) => {
@@ -121,7 +121,7 @@ test.describe('Việc Sếp cần làm (v0.1.39)', () => {
     await expect(again).toContainText('Xong');
     await expect(again.getByTestId('boss-result').nth(0)).toContainText('phiên có sẵn');
   });
-  test('Telegram (dòng 6, v0.1.44): chưa nối → Gửi thử báo cách làm + Mở hướng dẫn tới Kết nối › Telegram; đã nối → Đạt, đếm 1/5', async ({ page }) => {
+  test('Telegram (dòng 6, v0.1.44): chưa nối → Gửi thử báo cách làm + Mở hướng dẫn tới Kết nối › Telegram; đã nối → Đạt, đếm 1/6', async ({ page }) => {
     await loginAsOwner(page);
     await page.goto('/guide/viec-sep');
     const tg = row(page, 'Telegram (báo động & bản tin)');
@@ -136,7 +136,7 @@ test.describe('Việc Sếp cần làm (v0.1.39)', () => {
     await tg.getByRole('button', { name: 'Gửi thử' }).click();
     await expect(tg.getByTestId('boss-result')).toContainText('Đạt · đã gửi tới @gen_harness_sep_bot → chat •••4321');
     await expect(tg).toContainText('Xong');
-    await expect(page.getByText('Đã đạt 1/5 dòng bắt buộc')).toBeVisible();
+    await expect(page.getByText('Đã đạt 1/6 dòng bắt buộc')).toBeVisible();
 
     await tg.getByRole('link', { name: /Mở hướng dẫn/ }).click();
     await expect(page).toHaveURL(/\/connections#telegram$/);

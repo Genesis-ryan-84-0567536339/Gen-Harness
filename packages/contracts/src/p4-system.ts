@@ -12,6 +12,7 @@
  * ở đây.
  */
 import type { ApiClient } from './client';
+import { accessEndpoints } from './access';
 import type { AuditPage } from './schema';
 import type { GroupKind, ListenMode, ViewScope } from './phase2';
 
@@ -598,6 +599,8 @@ export function systemEndpoints(r: ApiClient['request']) {
       /** Owner + PIN (`offsite.portable`): tệp .ghbundle — trình duyệt tự tải bằng điều hướng tới URL này. */
       portableUrl: OFFSITE_PORTABLE_URL,
     },
+    /** v0.1.46 (F-21): `api.system.access()` — Truy cập từ xa / địa chỉ đăng nhập. */
+    ...accessEndpoints(r),
     /** v0.1.36 (F-6): sức khoẻ hệ thống + sự cố cần Sếp xử lý. */
     systemHealth: {
       get: (signal?: AbortSignal) => r<SystemHealth>('/system/health', { signal }),

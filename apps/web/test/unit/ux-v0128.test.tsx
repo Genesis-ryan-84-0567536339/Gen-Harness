@@ -88,7 +88,7 @@ describe('V11 — ghi chú phát hành đọc được', () => {
 
 describe('V4 — mời người dùng', () => {
   it('lời nhắn gồm địa chỉ đăng nhập, email, mật khẩu tạm', () => {
-    const msg = inviteMessage({ user: { display_name: 'Lan', email: 'lan@x.vn' } as never, temp_password: 'abcd-efgh-jkmn' }, 'https://gh.local');
+    const msg = inviteMessage({ user: { display_name: 'Lan', email: 'lan@x.vn' } as never, temp_password: 'abcd-efgh-jkmn' }, 'https://gh.local/login');
     expect(msg).toContain('https://gh.local/login');
     expect(msg).toContain('lan@x.vn');
     expect(msg).toContain('abcd-efgh-jkmn');

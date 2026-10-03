@@ -56,6 +56,10 @@ export const BOSS_ERROR_TEXT: Record<string, string> = {
   JEV_ERROR: 'Thẻ Jev sẽ ẩn, không cần làm thêm.',
   // v0.1.44 (F-8c): dòng 6 Telegram — cùng câu với thẻ Kết nối › Telegram.
   ...TELEGRAM_ERROR_TEXT,
+  // v0.1.46 (F-21): dòng 7 Truy cập từ xa.
+  REMOTE_NOT_CONFIGURED: 'Chưa chọn cách truy cập từ xa — trên máy chủ chạy genh remote tailscale (khuyên dùng) hoặc genh remote --lan.',
+  REMOTE_OPENED_ON_SERVER:
+    'Đang mở trên chính máy chủ — mở Console trên điện thoại bằng địa chỉ ở Cài đặt › Sao lưu & cập nhật › Truy cập từ xa rồi bấm Kiểm tra từ đó.',
 };
 
 /** Lỗi chỉ sửa được bằng ĐĂNG NHẬP LẠI (đổi lại hay gọi thử lại chỉ lặp lại lỗi) → dòng hiện nút "Đăng nhập lại". */

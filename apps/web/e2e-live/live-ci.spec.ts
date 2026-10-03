@@ -1,5 +1,7 @@
 import { expect, test, type Browser, type Page, type Response } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
+import type { NavDomain } from '@gen-harness/contracts';
+import { firstScreenKey } from '../src/shell/navModel';
 
 /**
  * v0.1.35 (F-14) — e2e THẬT rút gọn chạy trong job `api` của CI (`LIVE_SPECS=live-ci bash e2e-live/run.sh`):
@@ -12,6 +14,8 @@ import { execFileSync } from 'node:child_process';
  *   (c) Nhóm → 'Gán BOT trực nhóm' → 'Lưu' (d) Gen đề xuất 'Giao người phụ trách' → Xác nhận.
  * v0.1.41 (F-84): (e) "nối model" — thêm nhà cung cấp từ mẫu OpenRouter (đổi endpoint sang fake_llm giao thức OpenAI)
  *   → Kiểm tra kết nối OK → thấy trong chuỗi chuyển hướng ở Bộ não AI.
+ * v0.1.46 (F-21): (f) Mời người — Owner mời qua giao diện → nhân viên (context trình duyệt MỚI) đăng nhập bằng mật khẩu tạm
+ *   → đổi mật khẩu → vào màn đầu của vai trò; đăng nhập lại bằng mật khẩu mới được, mật khẩu tạm bị từ chối.
  * Người dùng thứ hai là dữ liệu kiểm thử nội bộ trên CSDL gh_live (bị xoá mỗi lần chạy) — không phải tài khoản
  * trên dịch vụ ngoài.
  */
@@ -292,5 +296,82 @@ test.describe.serial('CI — e2e thật rút gọn: giao/gán người & trợ l
     await expect(chain.locator('.brain-chain-row__name', { hasText: 'OpenRouter' })).toBeVisible({ timeout: 20_000 });
     await expect(page.getByText('[object Object]')).toHaveCount(0);
     await shot('ci-e-openrouter-chain');
+  });
+
+  test('(f) Mời người: Owner mời → nhân viên đăng nhập mật khẩu tạm → đổi mật khẩu → màn đầu của vai trò', async ({ browser }) => {
+    test.setTimeout(120_000);
+    // Email ngẫu nhiên theo lượt — CSDL gh_live bị xoá mỗi lần chạy, nhưng chạy lại cục bộ không được đụng lượt trước.
+    const email = `moi.${Date.now().toString(36)}${Math.floor(Math.random() * 1e4)}@genesis.vn`;
+    const newPassword = `mat-khau-moi-${Date.now().toString(36)}-2026`;
+
+    await page.goto('/team');
+    await page.getByRole('button', { name: /Mời người dùng/ }).first().click();
+    const form = page.getByRole('dialog', { name: 'Mời người dùng' });
+    await expect(form).toBeVisible();
+    await form.getByLabel('Tên hiển thị').fill('Phạm Thị Mời');
+    await form.getByLabel('Email đăng nhập').fill(email);
+    await form.getByLabel('Vai trò').selectOption('operator');
+    const invitedP = writeResponse(page, 'POST', /\/api\/v1\/users$/);
+    await form.getByRole('button', { name: 'Mời', exact: true }).click();
+    await maybeEnterOwnerPin(page);
+    const invited = await invitedP;
+    expect(invited.status(), await invited.text()).toBe(201);
+
+    // Live không đặt GH_PUBLIC_URL ⇒ địa chỉ đăng nhập là localhost ⇒ hộp mời phải cảnh báo đỏ.
+    const box = page.getByRole('dialog', { name: /Đã mời Phạm Thị Mời/ });
+    await expect(box).toBeVisible();
+    const warn = box.getByTestId('invite-local-warning');
+    await expect(warn).toBeVisible();
+    await expect(warn).toHaveAttribute('role', 'alert');
+    await expect(warn).toContainText('Địa chỉ này chỉ mở được trên chính máy chủ');
+    const tempPassword = (await box.locator("[aria-label='Mật khẩu tạm']").innerText()).trim();
+    expect(tempPassword.length).toBeGreaterThan(8);
+    await box.getByRole('button', { name: 'Đã gửi, đóng' }).click();
+    await expect(box).toBeHidden();
+
+    // Nhân viên: context MỚI (không chung cookie với Owner).
+    const ctx = await browser.newContext({
+      baseURL: process.env.LIVE_BASE_URL ?? 'http://localhost:5175',
+      locale: 'vi-VN', timezoneId: 'Asia/Ho_Chi_Minh', colorScheme: 'dark', viewport: { width: 1440, height: 900 },
+    });
+    try {
+      const sp = await ctx.newPage();
+      await sp.goto('/login');
+      await sp.getByLabel('Email').fill(email);
+      await sp.getByLabel('Mật khẩu', { exact: true }).fill(tempPassword);
+      await sp.getByRole('button', { name: 'Đăng nhập', exact: true }).click();
+      await expect(sp).toHaveURL(/\/change-password$/);
+      await expect(sp.getByRole('heading', { name: 'Đặt mật khẩu mới' })).toBeVisible();
+      await sp.getByLabel('Mật khẩu tạm hiện tại').fill(tempPassword);
+      await sp.getByLabel('Mật khẩu mới', { exact: true }).fill(newPassword);
+      await sp.getByLabel('Nhập lại mật khẩu mới').fill(newPassword);
+      const changeP = writeResponse(sp, 'POST', /\/api\/v1\/account\/password$/);
+      await sp.getByRole('button', { name: 'Lưu mật khẩu mới' }).click();
+      const changed = await changeP;
+      expect(changed.status(), await changed.text()).toBeLessThan(300);
+
+      // Màn đầu: kỳ vọng lấy từ ĐÚNG API mà HomeRedirect dùng (GET /navigation) trong context nhân viên.
+      const navRes = await sp.request.get('/api/v1/navigation');
+      expect(navRes.ok(), await navRes.text()).toBe(true);
+      const key = firstScreenKey((await navRes.json()) as NavDomain[]);
+      expect(key, 'vai trò Vận hành phải có ít nhất một màn').toBeTruthy();
+      await expect.poll(() => new URL(sp.url()).pathname, { timeout: 20_000 }).toBe(`/${key}`);
+      const path = new URL(sp.url()).pathname;
+      expect(path).not.toMatch(/^\/(login|account|change-password)/);
+      await expect(sp.getByText('[object Object]')).toHaveCount(0);
+      await sp.screenshot({ path: `${OUT}/ci-f-invited-first-screen.png`, fullPage: true });
+
+      // Đăng xuất → mật khẩu mới vào được, mật khẩu tạm bị từ chối (401).
+      const csrfOf = async () => (await ctx.cookies()).find((c) => c.name === 'gh_csrf')?.value ?? '';
+      const out = await sp.request.post('/api/v1/auth/logout', { headers: { 'X-CSRF-Token': await csrfOf() } });
+      expect(out.status()).toBeLessThan(300);
+      const bad = await sp.request.post('/api/v1/auth/login', { data: { email, password: tempPassword }, headers: { 'X-CSRF-Token': await csrfOf() } });
+      expect(bad.status(), 'mật khẩu tạm phải hết dùng được').toBe(401);
+      const good = await sp.request.post('/api/v1/auth/login', { data: { email, password: newPassword }, headers: { 'X-CSRF-Token': await csrfOf() } });
+      expect(good.status(), await good.text()).toBe(200);
+      expect(((await good.json()) as { must_change_password?: boolean }).must_change_password).toBeFalsy();
+    } finally {
+      await ctx.close();
+    }
   });
 });

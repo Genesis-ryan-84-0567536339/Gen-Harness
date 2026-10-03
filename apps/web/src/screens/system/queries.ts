@@ -27,6 +27,8 @@ export const qkSystem = {
   retention: ['system', 'retention'] as const,
   dataRequests: (personId: string) => ['system', 'data-requests', personId] as const,
   health: ['system', 'health'] as const,
+  /** v0.1.46 (F-21): `GET /system/access` — địa chỉ đăng nhập + chế độ Truy cập từ xa. */
+  access: ['system', 'access'] as const,
   /** v0.1.41 (F-84): `['system','ai-cost']` (+ ngày) — prefix dùng để làm mới mọi ngày. */
   aiCost: ['system', 'ai-cost'] as const,
   aiCostDay: (date: string) => ['system', 'ai-cost', date] as const,
@@ -44,6 +46,8 @@ export const HEALTH_KINDS: ReadonlySet<string> = new Set([
   'offsite.stale', 'offsite.failed', 'job.timeout',
   // v0.1.41 (F-84, F-86): vượt trần chi phí AI trong ngày; việc nền không còn nguồn AI nào.
   'ai.budget_exceeded', 'ai.background_no_source',
+  // v0.1.46 (F-21): cổng đang mở cho cả mạng (bản cài cũ) — làm mới dải "Cần Sếp xử lý" ngay.
+  'network.open_lan',
 ]);
 
 /** v0.1.36 (F-6): `GET /system/health` — chỉ gọi khi vai trò có `system.read` (`enabled`); tự hỏi lại mỗi 60 giây. */
@@ -54,6 +58,10 @@ export const useSystemHealth = (enabled: boolean) =>
     refetchInterval: 60_000,
     enabled,
   });
+
+/** v0.1.46 (F-21): `GET /system/access` (`system.read`) — hộp mời và thẻ "Truy cập từ xa". */
+export const useAccess = () =>
+  useQuery({ queryKey: qkSystem.access, queryFn: ({ signal }) => api.system.access(signal), staleTime: 30_000 });
 
 export const usePermissions = () => useQuery({ queryKey: qkSystem.permissions, queryFn: ({ signal }) => api.permissions.get(signal) });
 
