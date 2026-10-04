@@ -1,7 +1,7 @@
 # Gen Tình báo (Intel) — thiết kế nghiên cứu
 
 > Trạng thái: **nghiên cứu / đề xuất**, chưa code. Nhánh: `claude/elegant-cori-1ex7dn`. Ngày: 2026-10-04.
-> **Chốt hướng (Boss, 04/10):** giai đoạn đầu chạy **độc lập** (app riêng, login đơn giản), gộp vào hạ tầng Gen-Harness sau. Mục 7 mô tả đích gộp; mục 7b mô tả bản độc lập.
+> **Trạng thái (Boss, 04/10): Ý TƯỞNG ĐỂ SAU cho Gen-Harness.** Trước mắt làm bản độc lập ở phiên/repo khác theo `docs/design/gen-intel-standalone-spec.md`; gộp vào đây sau. Mục 7 = đích gộp, 7b = bản độc lập.
 
 ## 1. Bài toán thật (không phải "đọc tin")
 
