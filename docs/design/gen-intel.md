@@ -1,7 +1,7 @@
 # Gen Tình báo (Intel) — thiết kế nghiên cứu
 
 > Trạng thái: **nghiên cứu / đề xuất**, chưa code. Nhánh: `claude/elegant-cori-1ex7dn`. Ngày: 2026-10-04.
-> Không đụng tới phần đang làm ở main; cụm mới `gh/biz/intel/` + màn mới, tách biệt.
+> **Chốt hướng (Boss, 04/10):** giai đoạn đầu chạy **độc lập** (app riêng, login đơn giản), gộp vào hạ tầng Gen-Harness sau. Mục 7 mô tả đích gộp; mục 7b mô tả bản độc lập.
 
 ## 1. Bài toán thật (không phải "đọc tin")
 
@@ -98,6 +98,23 @@ Tinh thần Spec K: không làm dashboard cho đẹp; mọi biểu đồ phải 
   - `intel.feedback` (user, signal, hữu ích/bỏ qua/theo dõi)
 - **Màn mới**: sửa đúng 5 chỗ — `navigation.py`, `packages/contracts/src/screens.ts`, `rbac.py`, `docs/design/screens.json`, `gen/registry.json` + mock + test.
 - **Sức khoẻ nguồn**: nguồn không chính thức (vnstock, giá vàng, Google News) hỏng → sự cố mức nhẹ trên `/system/health`, không làm chết cả hệ.
+
+## 7b. Bản độc lập (giai đoạn đầu)
+
+Lý do: ý tưởng còn mới, cần thử nhanh; không vướng quy trình phát hành/CI/RBAC của Gen-Harness (tăng `VERSION` là tự phát hành); không giẫm chân phiên đang làm main.
+
+- **Dáng**: 1 app nhỏ gồm API (FastAPI) + worker định kỳ + Postgres (hoặc SQLite lúc thử) + web React. Một `docker compose` riêng.
+- **Login**: 1 người dùng (Owner). Mật khẩu/passkey đơn + phiên cookie; khuyến nghị chỉ mở qua mạng riêng (Tailscale) hoặc sau Caddy. Không RBAC, không đa tổ chức.
+- **AI**: khoá OpenRouter/Gemini trực tiếp, có trần chi phí VND/ngày riêng.
+
+**Mối nối để gộp sau (giữ từ ngày đầu, gần như không tốn công):**
+1. **Cùng công nghệ** với Gen-Harness (FastAPI, SQLAlchemy async, React + TanStack Query, token màu Nocturne) → bê code sang thành cụm `gh/biz/intel/` được.
+2. **Hợp đồng dữ liệu** `Signal` (JSON schema cố định: mảng, tiêu đề, vậy-thì-sao, tin cậy, hạn, nguồn[]) — sau này Gen-Harness chỉ việc đọc qua API/MCP, giống cách Gen đọc Kho.
+3. **Auth sau một cổng duy nhất** (`current_owner()`), lúc gộp thay bằng phiên Gen-Harness, không sửa nghiệp vụ.
+4. **Bảng theo quy ước Gen-Harness** (có `org_id`, schema `intel`, chỉ INSERT với dữ liệu thô) → migration chép sang được.
+5. **Gọi AI qua 1 lớp `llm.call(purpose, …)`**, lúc gộp đổi sang `ModelRouter` để tính chung trần chi phí.
+
+Khi gộp: dữ liệu chuyển bằng script export/import; màn "Tình báo" thành mục menu Owner-only.
 
 ## 8. Lộ trình đề xuất
 
