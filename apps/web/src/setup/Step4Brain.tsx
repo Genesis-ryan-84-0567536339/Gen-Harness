@@ -168,12 +168,9 @@ export function Step4Brain({ meta, description, onBack, onSaved, formRef, onSkip
                 <div className="prov-row" key={p.id} data-ready={isReady || undefined}>
                   <span className="prov-rank">{isReady ? `${i + 1}.` : '–'}</span>
                   <div className="setup-row__main">
-                    <div className="setup-row__title">{p.name}</div>
-                    <div className="setup-row__meta">
-                      {isCliKind(p.kind)
-                        ? PROVIDER_KIND_LABEL[p.kind]
-                        : `${fmtInt(p.keys.length)} khoá${p.keys[0] ? ` · …${p.keys[0].last4}` : ''}`}
-                      {p.models.length ? ` · ${p.models.map((m) => choiceText(m.model_name, m.effort)).join(', ')}` : ''}
+                    <div className="setup-row__title" title={p.name}>{p.name}</div>
+                    <div className="setup-row__meta" title={provMeta(p)}>
+                      {provMeta(p)}
                     </div>
                     {t ? (
                       <div className="prov-test" style={{ color: t.ok ? 'var(--color-ok)' : 'var(--color-bad)' }} role="status">
@@ -196,24 +193,28 @@ export function Step4Brain({ meta, description, onBack, onSaved, formRef, onSkip
                     {isReady && offered.length ? <ModelPicker provider={p} test={t} /> : null}
                     {isCliKind(p.kind) ? <CliDiagnose provider={p} /> : null}
                   </div>
-                  <StateChip color={status.tone} border={status.tone === N5 || status.tone === N4 ? N8 : status.tone}>
-                    {status.label}
-                  </StateChip>
-                  <Button variant="secondary" className="btn-27" loading={testing} onClick={() => test.mutate(p.id)}>
-                    Kiểm tra
-                  </Button>
-                  <IconButton icon="ph ph-arrow-up" label={`Đưa ${p.name} lên trước`} disabled={i === 0 || !isReady} onClick={() => move(i, -1)} />
-                  <IconButton icon="ph ph-arrow-down" label={`Đưa ${p.name} xuống sau`} disabled={i >= ready.length - 1} onClick={() => move(i, 1)} />
-                  {!isCliKind(p.kind) ? (
-                    <IconButton
-                      icon="ph ph-trash"
-                      label={`Xoá ${p.name}`}
-                      disabled={remove.isPending}
-                      onClick={() => {
-                        if (window.confirm(`Xoá nguồn "${p.name}"? Khoá API của nguồn này cũng bị xoá.`)) remove.mutate(p.id);
-                      }}
-                    />
-                  ) : null}
+                  {/* Sau v0.1.49: nhóm nút là MỘT khối — hẹp (điện thoại) thì cả nhóm xuống hàng dưới, cột tên/meta giữ ≥ 180px
+                      (trước đó 5 nút đứng ngang ép cột chữ còn ~22px: "G…", meta vỡ từng chữ). */}
+                  <div className="prov-row__actions">
+                    <StateChip color={status.tone} border={status.tone === N5 || status.tone === N4 ? N8 : status.tone}>
+                      {status.label}
+                    </StateChip>
+                    <Button variant="secondary" className="btn-27" loading={testing} onClick={() => test.mutate(p.id)}>
+                      Kiểm tra
+                    </Button>
+                    <IconButton icon="ph ph-arrow-up" label={`Đưa ${p.name} lên trước`} disabled={i === 0 || !isReady} onClick={() => move(i, -1)} />
+                    <IconButton icon="ph ph-arrow-down" label={`Đưa ${p.name} xuống sau`} disabled={i >= ready.length - 1} onClick={() => move(i, 1)} />
+                    {!isCliKind(p.kind) ? (
+                      <IconButton
+                        icon="ph ph-trash"
+                        label={`Xoá ${p.name}`}
+                        disabled={remove.isPending}
+                        onClick={() => {
+                          if (window.confirm(`Xoá nguồn "${p.name}"? Khoá API của nguồn này cũng bị xoá.`)) remove.mutate(p.id);
+                        }}
+                      />
+                    ) : null}
+                  </div>
                 </div>
               );
             })}
@@ -224,6 +225,12 @@ export function Step4Brain({ meta, description, onBack, onSaved, formRef, onSkip
       </div>
     </StepFrame>
   );
+}
+
+/** Dòng phụ của hàng nguồn AI (loại/khoá · model) — hiện và làm `title` khi bị cắt "…". */
+function provMeta(p: Provider): string {
+  const head = isCliKind(p.kind) ? PROVIDER_KIND_LABEL[p.kind] : `${fmtInt(p.keys.length)} khoá${p.keys[0] ? ` · …${p.keys[0].last4}` : ''}`;
+  return `${head}${p.models.length ? ` · ${p.models.map((m) => choiceText(m.model_name, m.effort)).join(', ')}` : ''}`;
 }
 
 function AddProvider({ onAdded }: { onAdded: (p: Provider) => void }) {
@@ -300,7 +307,7 @@ function AddProvider({ onAdded }: { onAdded: (p: Provider) => void }) {
           ) : null}
         </p>
       ) : null}
-      <div className="dlg-row">
+      <div className="dlg-row dlg-row--wrap">
         <Button variant="secondary" icon="ph ph-plus" disabled={!valid} loading={add.isPending} onClick={() => add.mutate()}>
           Thêm & kiểm tra
         </Button>
@@ -387,7 +394,7 @@ function CliAccountSection({ kind, onlyAgyReady = false }: { kind: CliKind; only
             {active ? emailInitials(active.email) : '—'}
           </div>
           <div className="setup-row__main">
-            <div className="setup-row__title">{active ? cliAccountLabel(active) : claude ? 'Chưa bật' : 'Chưa đăng nhập'}</div>
+            <div className="setup-row__title" title={active ? cliAccountLabel(active) : undefined}>{active ? cliAccountLabel(active) : claude ? 'Chưa bật' : 'Chưa đăng nhập'}</div>
             <div className="cli-meta">
               {active ? cliMeta(active, now) : claude ? txt.empty : 'Đăng nhập Google để hệ thống dùng AI qua tài khoản của Sếp.'}
             </div>

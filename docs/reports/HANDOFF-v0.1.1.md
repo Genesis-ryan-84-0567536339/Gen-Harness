@@ -3214,3 +3214,109 @@ Sếp xác nhận bằng mã PIN, có bằng chứng bằng ảnh chụp, và d�
      "tick thêm quyền…" thì làm lại bước 1–2.
   4. (Tuỳ chọn) Hỏi Gen: "Deal nào đang mở?", "Có tài liệu báo giá nào mới?", "Hôm nay tôi có lịch gì?" — chỉ tài khoản Owner
      hỏi được. Rủi ro Owner tự quyết: nội dung lịch/mail (đã che) đi sang model đám mây như Kho.
+
+
+## Sửa trình bày: nội dung dính biên khung (sau v0.1.48) (09/10/2026)
+
+- **Vì sao**: ảnh máy Boss (v0.1.44, ~2000px, giao diện tối) cho thấy nhiều thẻ có chữ/số dính sát mép thẻ (Hôm nay: Sức khoẻ
+  hệ thống, Chất lượng dữ liệu, Chi phí AI hôm nay; Cài đặt: Sức khoẻ hệ thống, Truy cập từ xa) và khối "Máy chủ chưa nhận yêu
+  cầu cập nhật — xem ở Cài đặt" vỡ 3 dòng. Quét tự động 45+ route × 4 cỡ màn đo bằng hộp chữ thật xác nhận và tìm thêm lỗi cùng họ.
+  Không có media query nào làm mất đệm ở bề rộng lớn (chỉ có `min-width: 761px`/`1025px` không đụng đệm; `--space-content-pad`
+  22px cố định) — lỗi giống nhau ở mọi cỡ.
+- **Gốc rễ** (gom theo chỗ dùng chung, không vá từng màn):
+  1. `Panel` (`apps/web/src/screens/common.tsx`) khi không có `bodyClass` đặt con thẳng vào thẻ, không thân bọc; còn các lớp
+     thân `bodyClass` kiểu `padding: X 0` dựa vào hàng tự có đệm 16px — 4 thẻ mới trộn sai hai quy ước (thân 0 ngang + hàng
+     0 ngang): `.ov-health`/`.ov-dq` (`p3-queue.css`), `.ov-ai-cost__body` + bảng `th/td padding 3px 0`, `.health-card`
+     (`system.css`, dùng chung HealthCard + RemoteAccessCard), `.care-grid` (không có quy tắc nào, hàng chỉ đệm 4px).
+  2. `Icon` (`packages/ui/src/Icon.tsx`) luôn `display: block` ⇒ trong cha không flex/grid icon rớt dòng riêng: UpdateNotice
+     (`.upd-notice`/`.upd-notice__text` còn KHÔNG có quy tắc CSS nào từ v0.1.42), ghi chú token Telegram, PinHint "Cần mã PIN 6
+     số" (API, Bộ não AI, MCP, Hướng dẫn 4/10, thẻ Claude Code CLI), dd Token Gen-hub lệch hàng — chính là thứ trông như "dính
+     mép trái" ở các thẻ Kết nối Boss chụp.
+  3. Chữ một dòng `nowrap + ellipsis` không `title` (thẻ kênh "THỜI GIAN …", agent, API & Model, MCP, Cung ứng, Bảng cơ hội — số
+     tiền bị cắt, PipelineStrip, Hướng dẫn 4, Chủ đề đang nổi, tài khoản CLI, Chăm sóc, dòng sự kiện Hồ sơ sống).
+  4. Tràn ngang ở 390px: `.screen-head-actions { flex: none }` (Đồ thị 186px), `.pf-head__actions` không xuống dòng (Hồ sơ
+     sống 27px), `.setup-row` không wrap (Hướng dẫn 4 / Thiết lập bước 4), lệnh `genh remote cloudflare …` nowrap.
+  5. `/people` 641–1180px: lưới `.ppl-row` 5 cột cố định ép cột "Tín hiệu nổi bật" còn ~0px, chữ xếp dọc đè "Khuyến nghị";
+     chip "Đáng ngờ" tràn cột điểm 96px.
+- **Thay đổi**:
+  - `Panel`: mặc định bọc `.gh-card__body` (15px 16px); prop mới `flush` cho thẻ có con tự lo đệm (16 chỗ cũ: Sổ tay, Hồ sơ
+    sống ×6, Nhiệt kế hoạt động, Kho thô ×3, Quy tắc ×2, Kho sạch, Tổ chức) — giữ nguyên hình. Hôm nay: Sức khoẻ hệ thống,
+    Chất lượng dữ liệu, Chi phí AI dùng thân mặc định; `.ov-health/.ov-dq/.ov-ai-cost__body` bỏ `padding: 4px 0`.
+  - `.health-card` 12px 16px 14px (như `.upd/.bk/.offsite` cùng tab); `.care-grid` 6px 12px 10px; khối Chẩn đoán CLI trong thẻ
+    nguồn API có đệm 15px. Bảng không viền/nền trong thân (`.ov-ai-cost__table`, `.roles-matrix`) giữ ô đầu/cuối đệm ngang 0
+    — thân thẻ đã đệm 16px (bản đầu của nhánh từng cho bảng lấn `margin: 0 -8px` để qua guard; đã gỡ, xem "Sửa sau review").
+  - `Icon`: `display: inline-block; vertical-align: middle` (trong cha flex/grid không đổi gì; khung CHỈ chứa icon phải là
+    flex/grid — xem "Sửa sau review"). UpdateNotice có CSS: một dải
+    flex, viền trái theo tông (accent/ok/warn/bad), đệm 10px 14px, chữ xuống dòng gọn.
+  - Chữ cắt: thêm `title` ở 15 chỗ; nhãn số liệu thẻ kênh xuống dòng (giá trị dồn đáy ô); số tiền Bảng cơ hội không còn
+    "…" (mức tin cậy xuống dòng); dòng sự kiện Hồ sơ sống ở điện thoại xuống hàng riêng; lệnh `genh` dài xuống dòng trong ô.
+  - Tràn ngang: `.screen-head-actions` co + xuống dòng, Segmented quá rộng xuống dòng trong khung (`.gh-seg`); `.pf-head__actions`,
+    `.setup-row`, `.gp-head-actions` wrap; `/people` 641–1180px Khuyến nghị xuống hàng 2, chip trong cột điểm xuống dòng.
+- **Lính gác** `apps/web/e2e/layout-guard.spec.ts` (chạy trong `npm run test:e2e`; mỗi cỡ màn MỘT test, timeout 180s/test — đo
+  tại máy: vite nguội (worktree mới, có phát hiện + chụp ảnh) 30–33s/cỡ, ấm trong cả bộ 20–22s/cỡ + 4s trang ngoài ≈ 1,5 phút;
+  test chậm nhất dùng ~18% ngân sách): Owner, mọi màn trong `packages/contracts/src/screens.ts` + tab chính (Hộp thư, Việc,
+  Khách & Nhóm, Deal, Đánh giá con người, 5 tab Cài đặt) + Hướng dẫn 4/5/6/10/viec-sep, Trợ giúp, Tài khoản, Mạng xã hội, 2 Hồ
+  sơ sống, ở 1920/1440/1024/390; thêm một test trang ngoài: Đăng nhập (chưa phiên, gốc đo `.login`) và Thiết lập bước 4 thật
+  (mock "fresh", bước 1–3 qua API) × 4 cỡ. Mock ép thẻ cập nhật "chưa nhận yêu cầu" + 2 sự cố "Cần Sếp xử lý". Chỉ đo trong
+  `<main>` (bỏ `header.hd`, thanh bên), 8 kiểu: (a) `dinh-bien` — hộp chữ thật `Range.selectNodeContents(textNode)` so với
+  khung gần nhất (border-left > 0 | radius + nền | gốc đo; `<table>` KHÔNG tự là khung) < 6px, bỏ khung ≤ 48×48 (avatar chữ
+  viết tắt), bỏ phía giáp mép một vùng cuộn ngang còn nội dung khuất (bảng rộng đang cuộn); (b) `tran-ngang`
+  trang/`.content`/phần tử; (c) `bi-cat-khung` — vùng overflow hidden/clip (không phải ellipsis) có nội dung bị cắt mất; (d)
+  `chu-bi-cat` — chữ một dòng bị cắt không `title`; (e) `chu-bi-ep` — có title cũng tính: chữ một dòng còn < 64px và thấy <
+  55%, hoặc đoạn chữ vỡ ≥ 3 dòng mà dòng rộng nhất < 48px; (f) `cuon-an` — vùng cuộn ngang có nội dung khuất mà ẩn thanh cuộn
+  và không có mép mờ (`mask-image`); (g) `icon-rot-dong` — Icon block trong cha không flex/grid có chữ; (h) `icon-lech` — Icon
+  là nội dung duy nhất của hộp khối không flex/grid mà hộp cao hơn icon > 2px (strut). Ảnh CHỈ khi route có phát hiện: ảnh cả
+  trang + ảnh phóng ±40px mỗi phát hiện vào `$LAYOUT_GUARD_DIR/<nhánh>/` (mặc định `test-results/layout-guard/`;
+  `LAYOUT_GUARD_SHOTS=all` ⇒ chụp mọi route để xem bằng mắt); đầu mỗi test xoá ảnh cũ của test đó. Lỗi ⇒ in bảng gom theo
+  loại/route/selector + các cỡ. `ALLOWLIST` rỗng — chỉ thêm khi đã xem ảnh và xác nhận dương tính giả, kèm lý do. Trên main
+  (v0.1.49) bản guard đầu bắt 62 phát hiện (440 lượt); sau sửa: 0.
+- **Cố ý chưa sửa / ngoài phạm vi**: thẻ Telegram/Gen-hub/Facebook ở Kết nối và dải "Chưa có bản sao ngoài máy" — đo cách mép
+  16–36px, không tái hiện "dính mép" ngoài lỗi icon rớt dòng đã sửa; nếu máy Boss vẫn thấy, nghi CSS cũ trong bộ nhớ đệm — cần
+  ảnh mới sau bản này. Lớp chỉ làm móc (telegram-steps, telegram-host, help-about…) không có CSS nhưng không vỡ hình. Guard chưa
+  đo chữ đè chữ (lỗi `/people` 1024 đã sửa và xem bằng ảnh), cạnh trên/dưới, chữ trong `<select>`, hộp thoại/menu chưa mở;
+  icon chỉ-icon nằm thẳng trong ô bảng (`td`) không đo `icon-lech` (ô cao theo hàng); Thiết lập chỉ đo bước 4.
+
+### Sửa sau review + quét lại (lượt 2, cùng nhánh `claude/css-bien-khung`)
+
+- **Gốc rễ**:
+  1. Icon inline-block ⇒ khung CHỈ chứa icon mà là khối thường có hộp dòng: strut (line-height) đội khung cao và đẩy icon lệch
+     xuống — `.td-ch` cột kênh /raw 14→20px (lệch 4px), `button.tk-row__status` /tasks 18→21px (vòng trạng thái thấp hơn
+     tiêu đề), span ✓/✕ ma trận Quyền hạn 15→19px. Ghi chú cũ "trong cha flex/grid không đổi gì" bỏ sót trường hợp này.
+  2. Guard coi `<table>` luôn là khung ⇒ bảng không viền/nền trong thân thẻ có đệm 16px bị báo dính biên (dương tính giả) ⇒
+     nhánh phải vá `margin: 0 -8px` cho `.ov-ai-cost__table`/`.roles-matrix`.
+  3. Guard dồn 212 tổ hợp vào 1 test 240s (lần đầu vite nguội ~228s ≈ 95% ngân sách) và chụp fullPage mọi tổ hợp (~36MB/lượt).
+  4. `.screen-head-actions .gh-seg { overflow-x:auto; scrollbar-width:none }` ⇒ /graph 390px "Luồng chủ đề" khuất 106px
+     không dấu hiệu; guard bỏ qua mọi vùng overflow-x:auto nên không bắt. Cùng họ: dải tab ở điện thoại (Hộp thư 191px, Cài
+     đặt 490px khuất, `.gh-tabs` ẩn thanh cuộn từ trước).
+  5. Còn sót: `.mcp-tool-table` 5 cột (402–443px) trong `.mcp-server` overflow:hidden ở 390px ⇒ cột "Cấp cho"/nút "Gọi thử"
+     bị cắt, không cuộn được; `.setup-row` thêm `flex-wrap` nhưng `.setup-row__main { flex: 1 }` (cơ sở 0) ⇒ hàng không bao
+     giờ xuống dòng, cột chữ bị ép còn vài px ("Chưa bật"/"Chưa đăng nhập" biến mất, meta vỡ từng chữ — Hướng dẫn 4, Thiết lập
+     bước 4, hàng nguồn model "G…"); `.login-card__help code` đệm 5px; `.pair__grid` 3 cột ở 390px ⇒ tên "Ngu…". Quét bằng
+     kiểu đo mới còn ra cùng họ "cột bị ép": cột Giai đoạn /graph 26px (1024/390), Tên nhóm /directory 46px, Nhóm ở
+     Hướng dẫn/Thiết lập 6 (390px, "GRP-WA-0007" vỡ 3 dòng), "Cần mã PIN 6 số" vỡ 3 dòng ở hàng Thêm khoá API — do bảng min 920px
+     mà tổng cột cố định đã lớn hơn, hoặc hàng flex không wrap.
+- **Thay đổi**:
+  - Khung chỉ-icon thành flex: `.td-ch { display: flex }`, `.tk-row__status { display: flex }`, `.roles-matrix__mark` (mới,
+    flex căn giữa) — đo lại 14/18/15px như main, icon dy 0/2/0. Comment `Icon.tsx` ghi rõ quy tắc.
+  - Gỡ `margin: 0 -8px`/`width: calc(100% + 16px)` của hai bảng; trả `th/td` đầu đệm ngang 0 (thân thẻ lo 16px).
+  - `.gh-seg` (packages/ui): `flex-wrap: wrap; max-width: 100%` — hẹp thì lựa chọn xuống dòng trong khung, đủ chỗ không đổi;
+    bỏ luật cuộn ẩn ở `data.css`. `.gh-tabs` ở ≤760px: mép mờ theo vị trí cuộn (`mask-image` + scroll-driven animation
+    `gh-scroll-fade`, `@property --gh-fade-l/r`): đầu dải mờ phải, cuối dải mờ trái, không cuộn được thì không mờ; trình duyệt
+    chưa hỗ trợ thì như cũ (`@supports`).
+  - MCP: ≤760px mỗi tool là một thẻ (tên một dòng, Loại · Mở · Cấp cho có nhãn, Gọi thử dồn phải) — desktop không đổi.
+  - `.setup-row__main { flex: 1 1 180px }`; hàng nguồn model gom chip + nút vào `.prov-row__actions` (xuống hàng dưới, dồn
+    phải khi hẹp); hàng "Thêm & kiểm tra" `dlg-row--wrap`; `.login-card__help code` đệm 6px; `.pair__grid` 1 cột ≤640px;
+    cột Giai đoạn /graph `nowrap`, `.dir-grp-name` ≥180px, `.grp-name` ≥160px + mã nhóm `nowrap` (bảng rộng ra, `.gh-table-scroll`
+    cuộn).
+  - Guard: tách mỗi cỡ màn một test (180s) + test trang ngoài; ảnh chỉ khi có phát hiện; 4 kiểu đo mới (`bi-cat-khung`,
+    `chu-bi-ep`, `cuon-an`, `icon-lech`); `<table>` không tự là khung; mép vùng cuộn còn nội dung khuất không tính dính biên.
+    Biến môi trường: `LAYOUT_GUARD_DIR` (thư mục ảnh, thay `LAYOUT_GUARD_SHOTS` cũ), `LAYOUT_GUARD_SHOTS=all`,
+    `LAYOUT_GUARD_VERBOSE=1`.
+  - Trước sửa, guard mới bắt trên nhánh: 4 cỡ + trang ngoài đều đỏ (icon-lech /tasks ×3 tab, /raw, Quyền hạn 390; cuon-an
+    /graph, Hộp thư ×5, Cài đặt ×6, Việc; bi-cat-khung /mcp; chu-bi-ep/chu-bi-cat như trên; dinh-bien /login ×4 cỡ). Sau sửa: 0.
+- **Kiểm tra**: eslint + tsc xanh; vitest **874 passed** (93 tệp); `vite build` xanh; Playwright mock **285 passed** (15,1
+  phút, gồm 5 test guard). Khung chỉ-icon đo lại bằng probe: `.td-ch` 14px/dy 0, `.tk-row__status` 18px/dy 2,
+  `.roles-matrix__mark` 15px/dy 0 (1440 và 390) — bằng main. Xem ảnh: /graph 390 (Segmented 2 hàng), /mcp 390 (thẻ tool),
+  Hướng dẫn 4 + Thiết lập bước 4 ở 390, /identity 390, dải tab Cài đặt 390 đầu/cuối (mép mờ đổi phía), /directory + /graph
+  1024, Hướng dẫn 6 390.
+

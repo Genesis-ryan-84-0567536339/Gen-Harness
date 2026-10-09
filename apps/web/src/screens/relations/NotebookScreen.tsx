@@ -177,7 +177,7 @@ function NotebookDetail({ type, id }: { type: NotebookSubjectType; id: string })
       </section>
 
       <div className="nb-bottom">
-        <Panel title="Lịch sử nén" kicker={`${fmtInt(d.compaction_no)} lần nén`}>
+        <Panel flush title="Lịch sử nén" kicker={`${fmtInt(d.compaction_no)} lần nén`}>
           {history.isPending ? (
             <SkeletonLines rows={3} padding="10px 16px" />
           ) : history.isError ? (
@@ -197,7 +197,7 @@ function NotebookDetail({ type, id }: { type: NotebookSubjectType; id: string })
           )}
         </Panel>
 
-        <Panel title="Mục đã lưu trữ" kicker="Đã nén khỏi cửa sổ — vẫn truy được">
+        <Panel flush title="Mục đã lưu trữ" kicker="Đã nén khỏi cửa sổ — vẫn truy được">
           {dropped.isPending ? (
             <SkeletonLines rows={3} padding="10px 16px" />
           ) : dropped.isError ? (

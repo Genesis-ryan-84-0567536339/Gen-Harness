@@ -120,7 +120,9 @@ export function ListPane() {
                     <td>
                       <span className="mono-tag">{p.type ? (PERSON_TYPE_LABEL[p.type] ?? p.type) : '—'}</span>
                     </td>
-                    <td style={{ fontSize: 12, color: 'var(--color-neutral-300)' }}>{RELATION_LABEL[p.relation] ?? p.relation}</td>
+                    {/* Nhãn giai đoạn một dòng: bảng min 920px mà tổng cột cố định đã ~970px ⇒ cột này bị ép còn ~26px, chữ xếp
+                        dọc từng tiếng ("Trực/tiếp/với/Sếp") ở 1024/390px. nowrap ⇒ bảng tự rộng ra, vùng .gh-table-scroll cuộn. */}
+                    <td style={{ fontSize: 12, color: 'var(--color-neutral-300)', whiteSpace: 'nowrap' }}>{RELATION_LABEL[p.relation] ?? p.relation}</td>
                     <td>
                       <span className="gp-ch-icons">
                         {p.channels.map((c) => (

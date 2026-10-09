@@ -205,7 +205,9 @@ export function CliCard({ canManage, showCredentials = true, kind = 'antigravity
               {active ? emailInitials(active.email) : <Icon name="ph ph-user" size={15} />}
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div className="cli-email">{active ? cliAccountLabel(active) : `Chưa chọn tài khoản ${txt.account}`}</div>
+              <div className="cli-email" title={active ? cliAccountLabel(active) : `Chưa chọn tài khoản ${txt.account}`}>
+                {active ? cliAccountLabel(active) : `Chưa chọn tài khoản ${txt.account}`}
+              </div>
               <div className="cli-meta">
                 {active
                   ? `${chip.label} · ${cliMeta(active, now)}${others ? ` · ${others} tài khoản khác đã lưu` : ''}`
@@ -371,7 +373,7 @@ function ProfilesDialog({
                   {emailInitials(p.email)}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div className="cli-email">{label}</div>
+                  <div className="cli-email" title={label}>{label}</div>
                   <div className="cli-meta">{cliMeta(p, now)}</div>
                 </div>
                 {p.active ? (

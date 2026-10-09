@@ -100,7 +100,7 @@ function PermissionMatrix() {
                     if (!canManage || locked) {
                       return (
                         <td key={c.key} className="roles-matrix__cell" data-label={c.label} data-locked={locked || undefined}>
-                          <span title={locked ? `${cell.title} — cố định, không sửa được` : cell.title}>
+                          <span className="roles-matrix__mark" title={locked ? `${cell.title} — cố định, không sửa được` : cell.title}>
                             <Icon name={cell.icon} size={15} color={cell.tone} label={cell.title} />
                           </span>
                         </td>

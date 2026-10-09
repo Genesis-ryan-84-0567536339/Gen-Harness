@@ -228,7 +228,7 @@ export function OverviewScreen() {
                 const max = Math.max(1, ...d.signals.map((s) => s.count));
                 return d.signals.map((s) => (
                   <div className="ov-signal-row" key={s.topic}>
-                    <span className="ov-signal-row__topic">{s.topic}</span>
+                    <span className="ov-signal-row__topic" title={s.topic}>{s.topic}</span>
                     <span className="ov-signal-row__bar">
                       <span style={{ width: `${(s.count / max) * 100}%` }} />
                     </span>
@@ -288,7 +288,7 @@ export function OverviewScreen() {
             </div>
           </div>
         </Panel>
-        <Panel title="Nhiệt kế hoạt động" kicker="Hội thoại theo giờ · hôm nay">
+        <Panel flush title="Nhiệt kế hoạt động" kicker="Hội thoại theo giờ · hôm nay">
           {d.hourly.length === 0 ? <EmptyState icon="ph ph-chart-bar" title="Chưa có sự kiện trong 24 giờ qua" /> : <HourlyChart hourly={d.hourly} />}
         </Panel>
       </div>
