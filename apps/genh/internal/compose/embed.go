@@ -36,3 +36,12 @@ var embeddedComposeYAML []byte
 //
 //go:embed embedded_Caddyfile
 var embeddedCaddyfile []byte
+
+// embeddedSeccomp là bản sao deploy/browser/chromium-seccomp.json (F-85, v0.1.47) —
+// compose.yaml dịch vụ browser dùng "seccomp=${GH_BROWSER_SECCOMP:-./browser/chromium-seccomp.json}"
+// (tương đối với thư mục chứa compose.yaml) để Chromium tạo được user namespace dù cap_drop ALL.
+// Thiếu tệp thì container browser không tạo được (Docker không đọc được profile), nên genh
+// PHẢI ghi kèm tệp này như Caddyfile. TestEmbeddedSeccompMatchesRepo giữ bản sao khớp deploy/.
+//
+//go:embed embedded_chromium-seccomp.json
+var embeddedSeccomp []byte

@@ -24,7 +24,9 @@ from gh.backup import scheduled_backup_scan
 from gh.worker import WorkerSettings
 
 # nhẹ, chỉ nhắc — được chạy trong giờ làm việc. v0.1.41 (F-8b): Bản tin Gen 07:30/17:30 (+ lượt bù) chủ ý trong giờ.
-LIGHT_ALLOWLIST = {"hub_token_expiry_scan", "gen_briefing"}
+# v0.1.47 (F-83): kiểm phiên mạng xã hội 09:10 — chỉ xếp việc `health` cho trình duyệt nền (không nặng cho api/CSDL),
+# chủ ý trong giờ để chuông "phiên hết hạn" tới lúc Sếp đang dùng máy (ngoài giờ yên lặng của mạng xã hội).
+LIGHT_ALLOWLIST = {"hub_token_expiry_scan", "gen_briefing", "social_session_check"}
 DAILY = {"partition_maintenance", "verify_action_log", "compact_notebooks", "retention_sweep",
          "people_review_recompute"}
 

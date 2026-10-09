@@ -56,6 +56,7 @@ from gh.providers.router import ModelRouter
 from gh.refinery.runner import Refinery
 from gh.refinery.scheduler import Scheduler
 from gh.social import service as social
+from gh.social import session_watch
 from gh.telegram import service as telegram
 
 log = logging.getLogger("gh.worker")
@@ -88,6 +89,7 @@ JOB_LABELS = {
     "expire_sessions": "Dọn phiên đăng nhập",
     "hub_token_expiry_scan": "Nhắc hạn token Gen-hub",
     "social_schedule": "Lịch đọc mạng xã hội",
+    "social_session_check": "Kiểm phiên mạng xã hội",
     "people_review_recompute": "Tính lại đánh giá nhân sự",
     "scheduled_backup_scan": "Sao lưu theo lịch",
     "gen_briefing": "Bản tin Gen",
@@ -355,6 +357,14 @@ async def social_schedule(ctx: dict[str, Any]) -> int:
     return n
 
 
+async def social_session_check(ctx: dict[str, Any]) -> int:
+    """F-83: mỗi ngày 09:10 giờ VN kiểm phiên đăng nhập của từng tài khoản mạng xã hội (việc health, chỉ đọc)."""
+    async with sessionmaker()() as db:
+        n = await session_watch.daily_check(db, ctx["redis_bus"])
+        await db.commit()
+    return n
+
+
 async def gen_briefing(ctx: dict[str, Any]) -> dict[str, Any]:
     """v0.1.41 (F-8b): Bản tin Gen 07:30 / 17:30 giờ VN cho Owner — xem `gh.gen.briefing.run_briefing`."""
     return await briefing.run_briefing(sessionmaker(), ctx["redis_bus"], ctx["model_router"])
@@ -378,7 +388,7 @@ class WorkerSettings:
     on_shutdown = shutdown
     functions = [verify_action_log, partition_maintenance, detect_identities, compact_notebooks, expire_sessions,
                  purge_gen_conversations, purge_notifications, retention_sweep, hub_token_expiry_scan,
-                 social_schedule, gen_briefing, telegram_flush,
+                 social_schedule, social_session_check, gen_briefing, telegram_flush,
                  *(fn for fn, _ in _BIZ_JOBS), *BACKUP_FUNCTIONS]
     health_check_interval = 30
     job_timeout = JOB_TIMEOUT  # v0.1.40 (F-16): tường minh — `_cron` dùng cùng giá trị để nhận ra lần quá giờ
@@ -394,6 +404,7 @@ class WorkerSettings:
         _cron(retention_sweep, hour={5}, minute={0}, timeout=1800),  # 05:00 giờ VN — dọn dữ liệu quá hạn (F-2)
         _cron(hub_token_expiry_scan, hour={8}, minute={50}),     # 08:50 giờ VN — nhắc token Gen-hub (nhẹ)
         _cron(social_schedule, minute=set(range(60))),           # mỗi phút — lịch đọc mạng xã hội (tắt mặc định)
+        _cron(social_session_check, hour={9}, minute={10}),      # 09:10 giờ VN — kiểm phiên mạng xã hội (F-83)
         # 07:30 / 17:30 giờ VN — Bản tin Gen (F-8b); các lượt sau trong 3 giờ chỉ bù khi lỡ giờ (idempotent)
         _cron(gen_briefing, hour={7, 8, 9, 17, 18, 19}, minute={30}),
         # mỗi phút — gửi hộp thư đi Telegram (bản tin + nhắc việc của Owner, F-8c); lượt ngắn

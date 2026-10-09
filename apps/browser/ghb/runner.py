@@ -10,8 +10,8 @@
 
 import asyncio
 import contextlib
+import hashlib
 import logging
-import random
 import time
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -19,10 +19,11 @@ from typing import Any
 import orjson
 from redis.asyncio import Redis
 
-from ghb import protocol
+from ghb import permit, protocol
 from ghb.adapters import ADAPTERS, Adapter
-from ghb.adapters.base import STATE_ERROR
+from ghb.adapters.base import STATE_ERROR, TargetNotFound
 from ghb.config import Config
+from ghb.errors import JobError
 from ghb.guard import url_allowed
 
 log = logging.getLogger("ghb.runner")
@@ -32,10 +33,12 @@ STATE_POLL_S = 1.5
 SPECIAL_KEYS = {"Space": " "}
 
 
-class JobError(Exception):
-    def __init__(self, code: str, detail: str = ""):
-        super().__init__(f"{code}: {detail}" if detail else code)
-        self.code = code
+__all__ = ["Halted", "JobError", "Runner"]
+
+CONFIRM_TIMEOUT_MS = 10_000
+SHOT_SOFT_MAX = int(1.9 * 1024 * 1024)
+SHOT_HARD_MAX = 2 * 1024 * 1024
+TRACE_MAX = 30
 
 
 class Halted(Exception):
@@ -68,17 +71,21 @@ class Runner:
         await self.redis.publish(protocol.FRAMES_PREFIX + ticket, orjson.dumps(signed))
 
     # ─── kiểm dừng / nghỉ ───────────────────────────────────────────────────────
-    async def check(self, cancel: asyncio.Event) -> None:
+    async def check(self, cancel: asyncio.Event, job_id: str | None = None) -> None:
+        """Dừng nếu: lệnh huỷ đã tới, Dừng tất cả đang bật, hoặc api đã huỷ RIÊNG việc này (khoá CANCELLED_PREFIX —
+        lệnh pub/sub `cancel` gửi lúc việc còn trong hàng đợi không tới được `running`)."""
         if cancel.is_set() or await self.redis.exists(protocol.HALT_KEY):
             raise Halted()
+        if job_id and await self.redis.exists(protocol.CANCELLED_PREFIX + job_id):
+            cancel.set()
+            raise Halted()
 
-    async def pause(self, cancel: asyncio.Event) -> None:
-        lo, hi = self.cfg.delay
-        d = random.uniform(lo, hi) if hi > 0 else 0.0
+    async def pause(self, cancel: asyncio.Event, job_id: str | None = None) -> None:
+        d = self.cfg.delay
         if d > 0:
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(cancel.wait(), timeout=d)
-        await self.check(cancel)
+        await self.check(cancel, job_id)
 
     # ─── ngữ cảnh ─────────────────────────────────────────────────────────────
     async def new_context(self, job: dict[str, Any], state: dict[str, Any] | None) -> tuple[Any, list[str]]:
@@ -109,9 +116,12 @@ class Runner:
     async def run(self, job: dict[str, Any], cancel: asyncio.Event) -> None:
         adapter = ADAPTERS.get(job.get("platform", ""))
         ctx_box: list[Any] = []
+        committed = asyncio.Event()      # việc ghi đã bấm gửi: huỷ đến sau KHÔNG đóng trình duyệt giữa chừng
 
         async def closer() -> None:
             await cancel.wait()
+            if committed.is_set():
+                return
             for c in ctx_box:
                 with contextlib.suppress(Exception):
                     await c.close()
@@ -120,12 +130,14 @@ class Runner:
         try:
             if adapter is None:
                 raise JobError("ERROR", "nền tảng chưa có adapter")
-            await self.check(cancel)
+            await self.check(cancel, str(job.get("id") or ""))
             kind = job.get("kind")
             if kind == "login":
                 await self._login(job, adapter, cancel, ctx_box)
             elif kind in ("read", "health"):
                 await self._read(job, adapter, cancel, ctx_box, health=kind == "health")
+            elif kind == "write":
+                await self._write(job, adapter, cancel, ctx_box, committed)
             else:
                 raise JobError("ERROR", f"loại việc lạ {kind}")
         except Halted:
@@ -187,6 +199,108 @@ class Runner:
         await self.publish(job, "done", {"items": items[: max_items * 2], "pages": pages, "page_state": "ok",
                                          "cost": {"ms": int((time.monotonic() - started) * 1000), "pages": pages,
                                                   "blocked": len(blocked)}}, state=new_state)
+
+    async def _screenshot(self, page: Any) -> bytes | None:
+        try:
+            shot: bytes = await page.screenshot(type="jpeg", quality=70, full_page=False)
+            if len(shot) > SHOT_SOFT_MAX:
+                shot = await page.screenshot(type="jpeg", quality=40, full_page=False)
+            return shot if len(shot) <= SHOT_HARD_MAX else None
+        except Exception:  # noqa: BLE001 — chụp lỗi: api ghi PROOF_MISSING
+            return None
+
+    async def _write(self, job: dict[str, Any], adapter: Adapter, cancel: asyncio.Event, box: list[Any],
+                     committed: asyncio.Event) -> None:
+        # (a) permit TRƯỚC khi mở bất kỳ ngữ cảnh trình duyệt nào
+        await permit.check(self.cfg, self.redis, job)
+        p = job.get("payload") or {}
+        action, target_url, text = str(p["action"]), str(p["target_url"]), str(p["text"])
+        domains = tuple(job.get("domains") or ())
+        if not url_allowed(target_url, domains):
+            raise JobError("BLOCKED_URL")
+        started = time.monotonic()
+        trace: list[dict[str, Any]] = []
+
+        def step(name: str, ok: bool = True) -> None:
+            if len(trace) < TRACE_MAX:
+                trace.append({"step": name, "ms": int((time.monotonic() - started) * 1000), "ok": ok})
+
+        state = orjson.loads(protocol.unseal(self.cfg.key, p["state"],
+                                             protocol.account_aad(job["org_id"], job["account_id"])))
+        ctx, blocked = await self.new_context(job, state)
+        box.append(ctx)
+        page = await ctx.new_page()
+        try:
+            await adapter.open_target(page, action, target_url)
+        except TargetNotFound as e:
+            step("open", False)
+            raise JobError("TARGET_NOT_FOUND") from e
+        except Exception:
+            # Trang checkpoint / CAPTCHA / đăng nhập không có ô trả lời: báo đúng nguyên nhân thay vì "SELECTOR".
+            step("open", False)
+            if not cancel.is_set():
+                try:
+                    await self._state_code(adapter, page, ctx, blocked, domains)
+                except JobError:
+                    raise
+                except Exception:  # noqa: BLE001, S110 — không xác định được trạng thái: giữ lỗi gốc
+                    pass
+            raise
+        step("open")
+        pages = 1
+        try:
+            await self._state_code(adapter, page, ctx, blocked, domains)
+        except JobError:
+            step("page_state", False)
+            raise                                   # checkpoint / CAPTCHA / đăng xuất → dừng, KHÔNG gửi
+        step("page_state")
+        job_id = str(job["id"])
+        await self.pause(cancel, job_id)
+        try:
+            await adapter.compose(page, action, text, target_url)
+        except TargetNotFound as e:
+            step("compose", False)
+            raise JobError("TARGET_NOT_FOUND") from e
+        step("compose")
+        await self.pause(cancel, job_id)
+        await self.check(cancel, job_id)            # KIỂM DỪNG LẦN CUỐI ngay trước khi gửi (kể cả việc đã bị api huỷ)
+        committed.set()
+        step("halt_check")
+        # ─── từ đây coi như ĐÃ GỬI: không bỏ dở, luôn chụp ảnh và báo 'done' ───
+        # Bất kỳ lỗi nào sau điểm này (bấm Enter lỗi giữa chừng, trang đóng…) KHÔNG được báo 'failed'/'halted': phím
+        # có thể đã gửi đi — báo 'failed' khiến Owner bấm gửi lại và tin bị gửi HAI lần. Báo 'done' với confirmed=False
+        # + send_error để api nói rõ "chưa chắc đã gửi — mở Facebook kiểm tra trước khi gửi lại".
+        confirmed = False
+        send_error = False
+        submitted = False
+        try:
+            await adapter.submit(page, action)
+            submitted = True
+            step("submit")
+            confirmed = await adapter.confirm_sent(page, action, text, CONFIRM_TIMEOUT_MS)
+            step("confirm", confirmed)
+        except Exception as e:  # noqa: BLE001 — xem chú thích trên
+            send_error = True
+            step("confirm" if submitted else "submit", False)
+            log.warning("việc %s lỗi sau khi bấm gửi: %s", job.get("id"), type(e).__name__)
+        shot = await self._screenshot(page)
+        step("screenshot", shot is not None)
+        new_state = None
+        with contextlib.suppress(Exception):
+            new_state = await ctx.storage_state()
+        proof = None
+        proof_sha = None
+        if shot is not None:
+            aad = f"{job['org_id']}:{job['account_id']}:proof:{job['id']}"
+            proof = protocol.seal(self.cfg.key, shot, aad)
+            proof_sha = hashlib.sha256(shot).hexdigest()
+        data: dict[str, Any] = {
+            "action": action, "sent": True, "confirmed": confirmed, "proof": proof, "proof_sha256": proof_sha,
+            "trace": trace, "cost": {"ms": int((time.monotonic() - started) * 1000), "pages": pages,
+                                     "blocked": len(blocked)}}
+        if send_error:
+            data["send_error"] = True
+        await self.publish(job, "done", data, state=new_state)
 
     async def _login(self, job: dict[str, Any], adapter: Adapter, cancel: asyncio.Event, box: list[Any]) -> None:
         p = job.get("payload") or {}

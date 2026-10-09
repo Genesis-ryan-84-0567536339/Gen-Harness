@@ -6,14 +6,18 @@ dẫn `/checkpoint/`, link thông báo có `notif_id=`/`notif_t=`, link hội th
 kiểm trên TRANG MẪU lưu sẵn (tests/fixtures) — CHƯA kiểm trên Facebook thật. Giao diện đổi → việc báo lỗi `SELECTOR`
 rõ ràng thay vì đoán; Owner nghiệm thu bằng một lần đăng nhập + đọc thật.
 
-KHÔNG có: đăng, trả lời, nhắn, thích, kết bạn (v0.1.30 — qua đề xuất + permit); không lách chống bot; gặp checkpoint /
-CAPTCHA thì trả trạng thái để worker DỪNG, không vượt.
+GHI (trả lời bình luận, nhắn tin): chỉ khi có permit hợp lệ (ghb.permit). THÀNH THẬT: bộ chọn ghi kiểm trên TRANG
+MẪU, CHƯA kiểm trên Facebook thật — Owner nghiệm thu bằng một lần trả lời thật. Nội dung được chèn MỘT lần
+(`insert_text`), không mô phỏng gõ phím người.
+
+KHÔNG có: đăng bài, thích, kết bạn; không lách chống bot; gặp checkpoint / CAPTCHA thì trả trạng thái để worker DỪNG,
+không vượt.
 """
 
 import re
 from typing import Any
 
-from ghb.adapters.base import Adapter, PageState
+from ghb.adapters.base import Adapter, PageState, TargetNotFound
 
 HOME = "https://www.facebook.com/"
 NOTIFICATIONS = "https://www.facebook.com/notifications"
@@ -65,6 +69,50 @@ CAPTCHA_SELECTORS = ('iframe[src*="recaptcha"]', 'iframe[src*="captcha"]', 'ifra
                      '#captcha', '[id*="captcha" i]')
 
 
+ARTICLE = '[role="article"]'
+TEXTBOX = '[contenteditable="true"][role="textbox"]'
+MESSAGE_ROW = '[role="main"] [role="row"]'
+TARGET_ATTR = "data-ghb-target"
+# comment_id dạng base64 của Facebook (Y29tbWVudDo…%3D%3D) thường dài 50+ ký tự — cắt 40 thì không bao giờ khớp.
+COMMENT_ID_MAX = 128
+
+# Chọn bình luận đích: bài viết ARIA có aria-label bắt đầu "Bình luận"/"Comment" có link chứa ĐÚNG comment_id của
+# target_url (đã ký trong permit). Không thấy → 0 (TargetNotFound): KHÔNG đoán sang bình luận được làm nổi hay bình luận
+# đầu tiên — trả lời nhầm người là gửi thật dưới tên Owner. Đánh dấu bằng thuộc tính để lấy locator (chỉ đọc).
+MARK_COMMENT_JS = """(commentId) => {
+  const re = /^(bình luận|comment)/i;
+  document.querySelectorAll('[data-ghb-target]').forEach((e) => e.removeAttribute('data-ghb-target'));
+  if (!commentId) return 0;
+  const arts = Array.from(document.querySelectorAll('[role="article"]'))
+    .filter((a) => re.test(a.getAttribute('aria-label') || ''));
+  // Chuẩn hoá GIỐNG comment_id() bên Python: giải mã %xx, bỏ ký tự ngoài [0-9A-Za-z_], cắt COMMENT_ID_MAX.
+  const norm = (href) => {
+    let v = null;
+    try { v = new URL(href, location.href).searchParams.get('comment_id'); } catch (e) { return ''; }
+    return (v || '').replace(/[^0-9A-Za-z_]/g, '').slice(0, COMMENT_ID_MAX);
+  };
+  const pick = arts.find((a) => Array.from(a.querySelectorAll('a[href*="comment_id="]'))
+    .some((l) => norm(l.getAttribute('href') || '') === commentId));
+  if (!pick) return 0;
+  pick.setAttribute('data-ghb-target', '1');
+  return arts.length;
+}""".replace("COMMENT_ID_MAX", str(COMMENT_ID_MAX))
+
+COUNT_JS = """([sel, text]) => Array.from(document.querySelectorAll(sel))
+  .filter((e) => !e.querySelector('[contenteditable="true"]') && (e.innerText || '').includes(text)).length"""
+
+WAIT_NEW_JS = """([sel, text, base]) => Array.from(document.querySelectorAll(sel))
+  .filter((e) => !e.querySelector('[contenteditable="true"]') && (e.innerText || '').includes(text)).length > base"""
+
+
+def comment_id(url: str) -> str:
+    """comment_id trong URL đích ('' nếu không có) — trả lời bình luận BẮT BUỘC có, không đoán."""
+    from urllib.parse import parse_qs, urlsplit
+
+    vals = parse_qs(urlsplit(url).query).get("comment_id") or []
+    return re.sub(r"[^0-9A-Za-z_]", "", vals[0])[:COMMENT_ID_MAX] if vals else ""
+
+
 def _lines(text: str) -> list[str]:
     return [ln.strip() for ln in text.splitlines() if ln.strip() and ln.strip() not in ("·", "•")]
 
@@ -98,6 +146,7 @@ def parse_conversation(raw: dict[str, Any]) -> dict[str, Any] | None:
 class FacebookAdapter(Adapter):
     key = "facebook_personal"
     home = HOME
+    write_kinds = ("reply_comment", "send_message")
 
     async def page_state(self, page: Any, context: Any) -> PageState:
         url = (page.url or "").lower()
@@ -134,3 +183,54 @@ class FacebookAdapter(Adapter):
         else:
             raise ValueError(f"không đọc được mục {what}")
         return [x for x in (parse(r) for r in raws if isinstance(r, dict)) if x is not None]
+
+    # ─── ghi (selector cố định; chỉ chạy sau ghb.permit.check) ──────────────────────────────────────────────
+    async def open_target(self, page: Any, action: str, target_url: str) -> None:
+        await page.goto(target_url, wait_until="domcontentloaded")
+        if action == "reply_comment":
+            await page.wait_for_selector(ARTICLE, timeout=15_000)
+        else:
+            await page.wait_for_selector(f'[role="main"] {TEXTBOX}, [role="main"]', timeout=15_000)
+
+    async def compose(self, page: Any, action: str, text: str, target_url: str = "") -> None:
+        if action == "reply_comment":
+            # comment_id lấy từ target_url đã ký trong permit — KHÔNG từ page.url (chuyển hướng có thể làm mất).
+            cid = comment_id(target_url)
+            if not cid:
+                raise TargetNotFound("đường dẫn đích không có comment_id")
+            if not await page.evaluate(MARK_COMMENT_JS, cid):
+                raise TargetNotFound("không thấy bình luận đích")
+            target = page.locator(f"[{TARGET_ATTR}]")
+            btn = target.locator('[role="button"]').filter(has_text=re.compile(r"^\s*(Phản hồi|Reply)\s*$", re.I))
+            if await btn.count() == 0:
+                raise TargetNotFound("bình luận không có nút Phản hồi")
+            await btn.first.click()
+            box = target.locator(TEXTBOX)
+            try:
+                await box.first.wait_for(state="visible", timeout=5_000)
+            except Exception as e:  # noqa: BLE001
+                raise TargetNotFound("không thấy ô trả lời") from e
+            sel = ARTICLE
+        elif action == "send_message":
+            box = page.locator(f'[role="main"] {TEXTBOX}')
+            if await box.count() == 0:
+                raise TargetNotFound("không thấy ô soạn tin")
+            sel = MESSAGE_ROW
+        else:
+            raise TargetNotFound("hành động lạ")
+        base = await page.evaluate(COUNT_JS, [sel, text])
+        await page.evaluate("(n) => { window.__ghbBase = n; }", base)
+        await box.first.focus()
+        await page.keyboard.insert_text(text)       # MỘT lần chèn — không gõ từng phím
+
+    async def submit(self, page: Any, action: str) -> None:
+        await page.keyboard.press("Enter")
+
+    async def confirm_sent(self, page: Any, action: str, text: str, timeout_ms: int) -> bool:
+        sel = ARTICLE if action == "reply_comment" else MESSAGE_ROW
+        try:
+            base = await page.evaluate("() => window.__ghbBase || 0")
+            await page.wait_for_function(WAIT_NEW_JS, arg=[sel, text, base], timeout=timeout_ms)
+            return True
+        except Exception:  # noqa: BLE001 — hết giờ / trang đóng: không xác nhận được
+            return False

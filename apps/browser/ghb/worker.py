@@ -18,7 +18,7 @@ from typing import Any
 import orjson
 from redis.asyncio import Redis
 
-from ghb import __version__, protocol
+from ghb import __version__, protocol, sandbox
 from ghb.adapters import ADAPTERS
 from ghb.config import Config, load
 from ghb.runner import Runner
@@ -32,8 +32,10 @@ IDLE_CLOSE_S = 300
 
 class Worker:
     def __init__(self, cfg: Config, redis: Redis, runner: Runner, *,
-                 idle_close: Callable[[], Awaitable[None]] | None = None, idle_close_s: float = IDLE_CLOSE_S):
+                 idle_close: Callable[[], Awaitable[None]] | None = None, idle_close_s: float = IDLE_CLOSE_S,
+                 sandbox_info: Callable[[], dict[str, Any] | None] | None = None):
         self.cfg, self.redis, self.runner = cfg, redis, runner
+        self.sandbox_info = sandbox_info
         self.running: dict[str, tuple[asyncio.Task[None], asyncio.Event]] = {}
         self.sem = asyncio.Semaphore(cfg.max_jobs)
         self.idle_close, self.idle_close_s = idle_close, idle_close_s
@@ -48,7 +50,8 @@ class Worker:
 
     async def heartbeat_once(self) -> None:
         await self.redis.set(protocol.HEARTBEAT_KEY, orjson.dumps({
-            "version": __version__, "at": datetime.now(UTC).isoformat(), "running": len(self.running)}), ex=45)
+            "version": __version__, "at": datetime.now(UTC).isoformat(), "running": len(self.running),
+            "sandbox": self.sandbox_info() if self.sandbox_info is not None else None}), ex=45)
 
     async def _heartbeat(self, stop: asyncio.Event) -> None:
         while not stop.is_set():
@@ -113,6 +116,10 @@ class Worker:
             await self.runner.publish(env, "failed", {"code": "ERROR"})
             return
         if await self.redis.exists(protocol.HALT_KEY):
+            await self.runner.publish(env, "halted")
+            return
+        if await self.redis.exists(protocol.CANCELLED_PREFIX + job_id):
+            # api đã huỷ việc này khi nó còn trong hàng đợi (tạm dừng/gỡ tài khoản, rút đồng ý gửi) → không chạy.
             await self.runner.publish(env, "halted")
             return
         ttl = int((env.get("payload") or {}).get("timeout_s", 300)) + LOCK_EXTRA_S
@@ -183,13 +190,22 @@ class Worker:
 
 
 class BrowserHolder:
-    """Một Chromium dùng chung (mỗi việc một ngữ cảnh riêng); tự mở lại nếu trình duyệt chết."""
+    """Một Chromium dùng chung (mỗi việc một ngữ cảnh riêng); tự mở lại nếu trình duyệt chết.
 
-    def __init__(self, cfg: Config):
+    Sandbox (F-85): GH_BROWSER_SANDBOX=on → bắt buộc có sandbox (lỗi thì ném); auto → thử có sandbox, lỗi thì lùi
+    về không sandbox và BÁO THẬT; off → không sandbox. Sau mỗi lần khởi chạy dò lại (`sandbox.probe`) và giữ kết quả
+    (kể cả khi Chromium bị đóng vì rảnh) — nhịp tim đưa nó cho api."""
+
+    def __init__(self, cfg: Config, *, launcher: Callable[..., Awaitable[Any]] | None = None):
         self.cfg = cfg
         self._pw: Any = None
         self._browser: Any = None
         self._lock = asyncio.Lock()
+        self._launcher = launcher
+        self.sandbox: dict[str, Any] | None = None
+
+    def sandbox_info(self) -> dict[str, Any] | None:
+        return None if self.sandbox is None else dict(self.sandbox)
 
     async def close_browser(self) -> None:
         """Đóng Chromium khi rảnh (giữ Playwright driver nhỏ); lần `get()` sau tự mở lại."""
@@ -200,14 +216,19 @@ class BrowserHolder:
                 self._browser = None
                 log.info("đóng Chromium (rảnh)")
 
+    async def _launch(self, **kw: Any) -> Any:
+        if self._launcher is not None:
+            return await self._launcher(**kw)
+        from playwright.async_api import async_playwright
+
+        if self._pw is None:
+            self._pw = await async_playwright().start()
+        return await self._pw.chromium.launch(**kw)
+
     async def get(self) -> Any:
         async with self._lock:
             if self._browser is not None and self._browser.is_connected():
                 return self._browser
-            from playwright.async_api import async_playwright
-
-            if self._pw is None:
-                self._pw = await async_playwright().start()
             # WebRTC chỉ đi qua proxy (không mở UDP thẳng ra mạng nội bộ `browser` / lộ IP) — mọi lưu lượng qua egress.
             launch: dict[str, Any] = {"headless": self.cfg.headless,
                                       "args": ["--disable-dev-shm-usage",
@@ -215,8 +236,41 @@ class BrowserHolder:
                                                "--webrtc-ip-handling-policy=disable_non_proxied_udp"]}
             if self.cfg.proxy:
                 launch["proxy"] = {"server": self.cfg.proxy}
-            self._browser = await self._pw.chromium.launch(**launch)
-            return self._browser
+            md = sandbox.mode()
+            fallback: str | None = None
+            if md == "off":
+                browser = await self._launch(**launch, **sandbox.launch_kwargs(False))
+                fallback = sandbox.REASON_OFF
+            elif md == "on":
+                browser = await self._launch(**launch, **sandbox.launch_kwargs(True))
+            else:
+                try:
+                    browser = await self._launch(**launch, **sandbox.launch_kwargs(True))
+                except Exception as exc:  # noqa: BLE001 — thường "No usable sandbox" / user namespace bị chặn
+                    log.warning("Chromium không bật được sandbox (%s) — chạy KHÔNG sandbox, báo qua nhịp tim",
+                                (str(exc).strip().splitlines() or [type(exc).__name__])[0][:160])
+                    browser = await self._launch(**launch, **sandbox.launch_kwargs(False))
+                    fallback = sandbox.REASON_BLOCKED
+            self._browser = browser
+            res = await sandbox.probe(browser)
+            if fallback is not None:
+                res = {**res, "enabled": False, "reason": fallback}
+            self.sandbox = res
+            log.info("sandbox Chromium: %s (%s)", "BẬT" if res["enabled"] else "TẮT", res["mode"])
+            return browser
+
+    async def warm_up(self) -> None:
+        """Lúc worker khởi động: mở Chromium một lần để dò sandbox rồi đóng — trạng thái có ngay, không chờ việc đầu."""
+        try:
+            await self.get()
+        except Exception as exc:  # noqa: BLE001
+            md = sandbox.mode()
+            log.warning("khởi động dò sandbox lỗi: %s", (str(exc).strip().splitlines() or [""])[0][:160])
+            self.sandbox = {"enabled": False, "mode": md,
+                            "reason": sandbox.REASON_BLOCKED if md != "off" else sandbox.REASON_OFF,
+                            "checked_at": datetime.now(UTC).isoformat()}
+        finally:
+            await self.close_browser()
 
     async def close(self) -> None:
         with contextlib.suppress(Exception):
@@ -232,13 +286,15 @@ async def main() -> None:
     cfg = load()
     redis = Redis.from_url(cfg.redis_url)
     holder = BrowserHolder(cfg)
-    worker = Worker(cfg, redis, Runner(cfg, redis, holder.get), idle_close=holder.close_browser)
+    worker = Worker(cfg, redis, Runner(cfg, redis, holder.get), idle_close=holder.close_browser,
+                    sandbox_info=holder.sandbox_info)
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         with contextlib.suppress(NotImplementedError):
             loop.add_signal_handler(sig, stop.set)
     try:
+        await holder.warm_up()
         await worker.run(stop)
     finally:
         await holder.close()

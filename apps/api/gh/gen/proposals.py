@@ -34,7 +34,10 @@ CLAIM_TTL_S = 60
 # Nhắc việc lùi quá khứ quá mức này thì từ chối (cho phép lệch đồng hồ nhỏ).
 PAST_SLACK = timedelta(minutes=2)
 
-TYPE_LABELS = {"draft_message": "Soạn nháp tin gửi đi", "reminder": "Tạo nhắc việc", "assign": "Giao người phụ trách"}
+TYPE_LABELS = {"draft_message": "Soạn nháp tin gửi đi", "reminder": "Tạo nhắc việc", "assign": "Giao người phụ trách",
+               "social_reply": "Trả lời bình luận Facebook", "social_dm": "Nhắn tin Facebook"}
+SOCIAL_TYPES = ("social_reply", "social_dm")
+SOCIAL_TARGET_PREFIX = "social.write:"
 
 
 @dataclass(frozen=True)
@@ -48,6 +51,9 @@ SPECS: dict[str, Spec] = {
     "draft_message": Spec("action.draft", ("title", "text")),
     "reminder": Spec("queue.act", ("title", "remind_at", "due_at", "priority", "assignee_user_id")),
     "assign": Spec("queue.act", ("user_id",)),
+    # Chỉ Owner (kiểm riêng ở permission_error); chỉ nội dung trả lời sửa được — tài khoản + đích giữ như lúc đề xuất.
+    "social_reply": Spec("system.manage", ("text",)),
+    "social_dm": Spec("system.manage", ("text",)),
 }
 
 
@@ -63,12 +69,16 @@ def target_of(ptype: str, fields: dict[str, Any]) -> str:
     """Mục tiêu registry mà đề xuất gắn vào (quyền + cờ nhạy cảm lấy từ đây)."""
     if ptype == "draft_message":
         return "workbench.drafts"
+    if ptype in SOCIAL_TYPES:
+        return f"{SOCIAL_TARGET_PREFIX}{fields.get('account_id')}"
     if ptype == "reminder":
         return "tasks.new"
     return f"{'tasks.row' if fields.get('item_type') == 'task' else 'inbox.row'}:{fields.get('item_id')}"
 
 
 def requires_pin(target_id: str) -> bool:
+    if target_id.startswith(SOCIAL_TARGET_PREFIX):
+        return True            # gửi lên mạng xã hội: luôn cần PIN (cả ở bước xác nhận lẫn endpoint /social/.../write)
     t = registry.resolve_target(target_id)
     return bool(t and t.sensitive)
 
@@ -77,11 +87,15 @@ def _has(permissions: dict[str, str], perm: str | None) -> bool:
     return perm is None or permissions.get(perm, rbac.NONE) != rbac.NONE
 
 
-def permission_error(permissions: dict[str, str], ptype: str, target_id: str) -> str | None:
-    """Quyền của CHÍNH người hỏi: quyền của loại đề xuất + màn + quyền riêng của mục tiêu registry."""
+def permission_error(permissions: dict[str, str], ptype: str, target_id: str,
+                     role_code: str | None = None) -> str | None:
+    """Quyền của CHÍNH người hỏi: quyền của loại đề xuất + màn + quyền riêng của mục tiêu registry. Loại social_*
+    KHÔNG tra registry: chỉ Owner (vai trò tuỳ biến có system.manage vẫn bị chặn)."""
     spec = SPECS[ptype]
     if not _has(permissions, spec.permission):
         return f"người hỏi không có quyền '{spec.permission}'"
+    if ptype in SOCIAL_TYPES:
+        return None if role_code == rbac.OWNER else "chỉ Owner được gửi trả lời / tin nhắn mạng xã hội"
     t = registry.resolve_target(target_id)
     if t is None:
         return f"mục tiêu '{target_id}' không có trong registry"
@@ -127,7 +141,7 @@ def normalize(ptype: str, fields: dict[str, Any], tz: ZoneInfo) -> dict[str, Any
         if k in out:
             v = _aware(out[k], tz)
             out[k] = v.astimezone(UTC).isoformat().replace("+00:00", "Z") if v else None
-    for k in ("assignee_user_id", "user_id", "item_id"):
+    for k in ("assignee_user_id", "user_id", "item_id", "account_id"):
         if out.get(k) is not None:
             u = _uuid(out[k])
             if u is None:
@@ -139,6 +153,12 @@ def normalize(ptype: str, fields: dict[str, Any], tz: ZoneInfo) -> dict[str, Any
         if u is None:
             raise ValueError("subject.id phải là UUID")
         subj["id"] = str(u)
+    if ptype in SOCIAL_TYPES:
+        from gh.social.service import clean_write_text
+
+        out["text"] = clean_write_text(out["text"])
+        if not out["text"]:
+            raise ValueError("nội dung trả lời không được trống")
     if ptype == "reminder":
         remind = datetime.fromisoformat(out["remind_at"].replace("Z", "+00:00"))
         if remind < datetime.now(UTC) - PAST_SLACK:
@@ -161,8 +181,48 @@ def id_errors(ptype: str, fields: dict[str, Any], seen_ids: set[str], self_id: s
     return None
 
 
-async def labels(db: AsyncSession, user: service.CurrentUser, ptype: str, fields: dict[str, Any]) -> dict[str, str]:
+def _snippet(v: Any, n: int) -> str:
+    s = " ".join(str(v or "").split())
+    return s if len(s) <= n else s[: max(0, n - 1)] + "…"
+
+
+async def social_labels(db: AsyncSession, user: service.CurrentUser, ptype: str, fields: dict[str, Any],
+                        redis: Redis | None) -> dict[str, str]:
+    """Nhãn thẻ đề xuất gửi mạng xã hội: tài khoản (thuộc tổ chức, chưa gỡ), đích LẤY TỪ mục đọc khớp target_url trong 7
+    ngày (Gen không được bịa link), trạng thái cổng F-85, cờ đáng ngờ."""
+    from gh.social import permit
+    from gh.social import service as social
+
+    label = (await db.execute(text("""SELECT label FROM core.social_accounts
+                                      WHERE id = :i AND org_id = :o AND status <> 'revoked'"""),
+                              {"i": fields["account_id"], "o": user.org_id})).scalar_one_or_none()
+    if label is None:
+        raise ValueError("tài khoản mạng xã hội không tồn tại")
+    if not social.write_target_ok(permit.PROPOSAL_ACTION[ptype], fields["target_url"]):
+        raise ValueError("target_url không trỏ tới một bình luận cụ thể (không có comment_id) — chỉ trả lời được vào "
+                         "thông báo về bình luận")
+    item = await social.find_read_item(db, user.org_id, uuid.UUID(fields["account_id"]),
+                                       permit.PROPOSAL_ACTION[ptype], fields["target_url"])
+    if item is None:
+        raise ValueError("target_url không phải mục Gen vừa đọc từ tài khoản này trong 7 ngày qua")
+    if ptype == "social_dm":
+        prefix = f"Hội thoại với {_snippet(item.get('who') or 'người gửi', 40)}: “"
+    else:
+        prefix = "Bình luận/Thông báo: “"
+    out = {"account": label, "target": prefix + _snippet(item.get("text"), 120 - len(prefix) - 1) + "”",
+           "write_gate": "locked"}
+    if redis is not None and (await social.write_gate(db, redis, user.org_id))["open"]:
+        out["write_gate"] = "open"
+    if item.get("suspicious"):
+        out["suspicious"] = "1"
+    return out
+
+
+async def labels(db: AsyncSession, user: service.CurrentUser, ptype: str, fields: dict[str, Any],
+                 redis: Redis | None = None) -> dict[str, str]:
     """Nhãn hiển thị cho thẻ (tên người, việc, đối tượng). Người được giao phải là người dùng còn hoạt động."""
+    if ptype in SOCIAL_TYPES:
+        return await social_labels(db, user, ptype, fields, redis)
     owner = user.role_code == rbac.OWNER
     out: dict[str, str] = {}
     uid = fields.get("user_id") if ptype == "assign" else fields.get("assignee_user_id")
@@ -223,6 +283,10 @@ def summary(ptype: str, fields: dict[str, Any], lab: dict[str, str], tz: ZoneInf
         due = f", hạn {_fmt_time(fields.get('due_at'), tz)}" if fields.get("due_at") else ""
         return (f"Tạo nhắc việc “{fields['title']}” ({fields['priority']}), nhắc lúc "
                 f"{_fmt_time(fields['remind_at'], tz)}{due}{who}.")
+    if ptype in SOCIAL_TYPES:
+        verb = "Trả lời trên Facebook" if ptype == "social_reply" else "Nhắn tin trên Facebook"
+        return (f"{verb} ({lab.get('account', '')}) vào {lab.get('target', '')}: “{fields['text']}”. "
+                "Gửi NGAY khi Sếp bấm Xác nhận và nhập mã PIN; có ảnh chụp làm bằng chứng.")
     return f"Giao {lab.get('item', 'mục này')} cho {lab.get('user', 'người được chọn')}."
 
 
@@ -233,7 +297,8 @@ def public(p: dict[str, Any]) -> dict[str, Any]:
 
 
 async def build(db: AsyncSession, user: service.CurrentUser, prop: Any, seen_ids: set[str], tz: ZoneInfo,
-                *, turn_id: uuid.UUID, conversation_id: uuid.UUID) -> tuple[dict[str, Any] | None, str | None]:
+                *, turn_id: uuid.UUID, conversation_id: uuid.UUID,
+                redis: Redis | None = None) -> tuple[dict[str, Any] | None, str | None]:
     """Kiểm + làm giàu một đề xuất của model. Trả (đề xuất đầy đủ, None) hoặc (None, lý do chặn)."""
     ptype: str = prop.type
     try:
@@ -243,11 +308,12 @@ async def build(db: AsyncSession, user: service.CurrentUser, prop: Any, seen_ids
     if ptype == "reminder" and not fields.get("assignee_user_id"):
         fields["assignee_user_id"] = str(user.id)  # mặc định nhắc chính người hỏi
     target = target_of(ptype, fields)
-    err = permission_error(user.permissions, ptype, target) or id_errors(ptype, fields, seen_ids, str(user.id))
+    err = permission_error(user.permissions, ptype, target, user.role_code) \
+        or id_errors(ptype, fields, seen_ids, str(user.id))
     if err:
         return None, err
     try:
-        lab = await labels(db, user, ptype, fields)
+        lab = await labels(db, user, ptype, fields, redis)
     except ValueError as e:
         return None, str(e)
     pid = uuid.uuid4()
@@ -276,8 +342,15 @@ class Call:
     result_type: str
 
 
-async def plan_call(db: AsyncSession, user: service.CurrentUser, ptype: str, f: dict[str, Any]) -> Call:
+async def plan_call(db: AsyncSession, user: service.CurrentUser, ptype: str, f: dict[str, Any],
+                    pid: str | None = None) -> Call:
     """Endpoint SẴN CÓ tương ứng loại đề xuất (không có đường ghi riêng cho Gen)."""
+    if ptype in SOCIAL_TYPES:
+        from gh.social import permit
+
+        return Call("POST", f"/social/accounts/{f['account_id']}/write",
+                    {"action": permit.PROPOSAL_ACTION[ptype], "target_url": f["target_url"], "text": f["text"],
+                     "proposal_id": pid}, "social_write")
     if ptype == "draft_message":
         body: dict[str, Any] = {"kind": "message", "title": f["title"], "text": f["text"],
                                 "sources": [{"label": "Gen đề xuất, người dùng xác nhận"}]}
@@ -321,6 +394,9 @@ async def call_as_user(app: Any, cookies: dict[str, str], csrf: str, call: Call,
 
 def result_of(call: Call, fields: dict[str, Any], body: Any) -> dict[str, Any]:
     b = body if isinstance(body, dict) else {}
+    if call.result_type == "social_write":
+        return {"type": "social_write", "id": str(b.get("id")) if b.get("id") else None, "code": None,
+                "screen": "social", "status": b.get("status")}
     if call.result_type == "inbox_item":
         return {"type": "inbox_item", "id": fields["item_id"], "screen": "inbox"}
     rid = b.get("id")

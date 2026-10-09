@@ -32,7 +32,7 @@ LOGGED_IN = {"cookies": [
 
 
 def cfg(**kw: Any) -> Config:
-    base: dict[str, Any] = {"redis_url": REDIS_URL, "key": KEY, "headless": True, "delay": (0.0, 0.0),
+    base: dict[str, Any] = {"redis_url": REDIS_URL, "key": KEY, "headless": True, "delay": 0.0,
                             "nav_timeout_ms": 8000}
     return Config(**{**base, **kw})
 
@@ -65,7 +65,9 @@ class FakeSite:
     def __init__(self) -> None:
         self.pages: dict[str, str] = {"/": "fb_home.html", "/notifications": "fb_notifications.html",
                                       "/messages/t/": "fb_messages.html", "/login/": "fb_login.html",
-                                      "/checkpoint/": "fb_checkpoint.html"}
+                                      "/checkpoint/": "fb_checkpoint.html",
+                                      "/permalink.php": "fb_post_comment.html",
+                                      "/messages/t/1001": "fb_thread.html", "/messages/t/1001/": "fb_thread.html"}
         self.hang: set[str] = set()
         self.seen: list[str] = []
         self.on_path: dict[str, Any] = {}

@@ -36,13 +36,23 @@ class Config:
     proxy: str | None = None
     headless: bool = True
     max_jobs: int = 2
-    # Nghỉ ngẫu nhiên giữa các thao tác (giây) — để dùng ít và lịch sự, KHÔNG phải để nguỵ trang.
-    delay: tuple[float, float] = (2.0, 6.0)
+    # Nghỉ CỐ ĐỊNH giữa các thao tác — để lịch sự với nền tảng (giới hạn tốc độ), KHÔNG phải để giả người hay né
+    # chống bot; không ngẫu nhiên.
+    delay: float = 3.0
     viewport: dict[str, int] = field(default_factory=lambda: {"width": 1280, "height": 800})
     locale: str = "vi-VN"
     timezone: str = "Asia/Ho_Chi_Minh"
     nav_timeout_ms: int = 30_000
     consumer: str = "browser-1"
+
+
+def parse_delay(raw: str) -> float:
+    """'3' → 3.0; dạng cũ 'lo,hi' → lấy giá trị LỚN hơn (lịch sự hơn); kẹp [1, 30]."""
+    try:
+        v = max(float(x) for x in raw.split(",") if x.strip())
+    except ValueError:
+        v = 3.0
+    return min(30.0, max(1.0, v))
 
 
 def load() -> Config:
@@ -53,9 +63,9 @@ def load() -> Config:
             raw = f.read().strip()
     if not raw:
         raise RuntimeError("Thiếu khoá browser (GH_BROWSER_KEY_FILE / GH_BROWSER_KEY)")
-    lo, hi = (float(x) for x in os.environ.get("GH_BROWSER_DELAY", "2,6").split(","))
     return Config(redis_url=os.environ.get("GH_REDIS_URL", "redis://localhost:6379/0"), key=decode_key(raw),
                   proxy=os.environ.get("GH_BROWSER_PROXY") or None,
                   headless=_env_bool("GH_BROWSER_HEADLESS", True),
                   max_jobs=max(1, min(4, int(os.environ.get("GH_BROWSER_MAX_JOBS", "2")))),
-                  delay=(max(0.0, lo), max(lo, hi)), consumer=os.environ.get("HOSTNAME", "browser-1"))
+                  delay=parse_delay(os.environ.get("GH_BROWSER_DELAY", "3")),
+                  consumer=os.environ.get("HOSTNAME", "browser-1"))

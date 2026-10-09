@@ -135,6 +135,14 @@ ghi `.env` (GH_BIND_ADDR/GH_SITE_ADDRESS/GH_PUBLIC_URL); lời mời lấy đị
 máy chủ; thẻ "Truy cập từ xa" ở Cài đặt, dòng 7 "Truy cập từ xa" ở Việc Sếp cần làm (bắt buộc ⇒ 6 dòng); 10 lần sai/15 phút
 theo IP và email (429), argon2 giả cho email lạ, phiên tối đa 30 ngày. Còn: TOTP (hoãn); nút đổi chế độ trong Console (không
 làm — tránh tự cắt truy cập); kiểm Tailscale/điện thoại trên máy Fedora thật của Boss.
+v0.1.47: Facebook ghi, lát 1 (F-79, F-85, F-83 phần mạng xã hội, F-59, F-92) — **Trả lời bình luận** và **Nhắn tin** qua
+đề xuất Gen → Xác nhận + mã PIN → permit ký (TTL 5 phút, nonce một lần, hash nội dung + đích) → worker kiểm permit và kiểm
+Dừng tất cả ngay trước khi bấm gửi → ảnh chụp bằng chứng mã hoá (90 ngày) + Action Log + chuông; Giới hạn gửi/ngày mặc định
+10 (trần 20); trễ cố định 3 giây; sandbox trình duyệt bật bằng user namespace + seccomp riêng, tự lùi và báo thật khi máy chủ
+không cho — khi đó gửi chỉ mở sau khi Owner bấm "Tôi hiểu rủi ro và đồng ý" (`/social/ghi-facebook`); kiểm phiên Facebook
+hằng ngày 09:10 → sự cố + chuông + Telegram (qua genh watchdog); dòng 8 "Facebook trả lời" (không bắt buộc) ở Việc Sếp cần làm;
+bỏ số phiên bản khỏi chú thích "chỗ cắm". Còn: **đăng bài = lát 2**; selector ghi Facebook mới kiểm trên trang mẫu —
+nghiệm thu thật do Boss; `like`/`follow` chưa làm.
 
 ## Đợt A — Gen v1 (thiết kế: docs/design/gen-v1.md)
 - ✅ A1 Khung chat phải + Gen trả lời/tóm tắt (chỉ đọc), lưu hội thoại, Nhật ký hành động — v0.1.21.
@@ -165,6 +173,8 @@ làm — tránh tự cắt truy cập); kiểm Tailscale/điện thoại trên m
 - ~~D2 Jules worker~~ — **Bỏ** (Boss chốt QD-10, xác nhận lại 30/09). Không làm, không kiểm điều khoản Jules nữa.
 - 🟡 D3 Gen điều khiển mạng xã hội thay Boss (API trước, Playwright cho tài khoản cá nhân) — thiết kế:
   docs/design/gen-browser-agent.md. ✅ Lát đầu **v0.1.29**: Facebook cá nhân, đăng nhập + CHỈ ĐỌC (thông báo, hội thoại).
-  Tiếp: v0.1.31 ghi có xác nhận (đề xuất Gen + PIN + permit — chỗ cắm `gh/social/permit.py`); Trang FB/IG chuyên nghiệp
-  qua API; nền tảng khác. Luật cứng giữ nguyên: không tài khoản giả, không lách chống bot (không stealth/proxy/giải CAPTCHA).
+  ✅ **v0.1.47** ghi lát 1 (F-79): Trả lời bình luận + Nhắn tin có xác nhận (đề xuất Gen + PIN + permit + ảnh chụp bằng chứng);
+  F-85 sandbox: bật bằng user namespace + seccomp riêng, tự lùi + trang đồng ý rủi ro khi máy chủ không cho (kết quả thật trên máy
+  Boss xem ở `GET /social/write-gate`); F-83 phần mạng xã hội xong (kiểm phiên 09:10 + chuông + Telegram).
+  Tiếp: **đăng bài = lát 2**; Trang FB/IG chuyên nghiệp qua API; nền tảng khác. Luật cứng giữ nguyên: không tài khoản giả, không lách chống bot (không stealth/proxy/giải CAPTCHA).
 Thiết kế: docs/design/gen-hub-link.md (lát đầu v0.1.26 ✅ — Gen đọc Kho qua Gen-hub, chỉ-đọc).

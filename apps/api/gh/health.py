@@ -94,15 +94,19 @@ ACTIONS = {
     "telegram.failed": "Mở cấu hình Telegram",
     # v0.1.46 (F-21): cổng đang mở cho cả mạng (bản cài cũ) — `_eval_network`.
     "network.open_lan": "Chọn cách truy cập",
+    # v0.1.47 (F-83): phiên Facebook đã hết / bị yêu cầu xác minh — gh.social.session_watch mở/đóng.
+    "social.session_expired": "Đăng nhập lại",
 }
 #: Nhãn cho người KHÔNG phải Owner khi nút ở nhãn gốc chỉ Owner có (vd "Chọn nơi lưu" — Manager không có nút đó).
 NON_OWNER_ACTIONS = {
     "offsite.stale": "Xem bản sao ngoài máy",
     "telegram.failed": "Nhờ Owner xử lý",
     "network.open_lan": "Nhờ Owner xử lý",
+    "social.session_expired": "Nhờ Owner xử lý",
 }
 #: Sự cố mà đích nút chỉ Owner mở được (thẻ Telegram chỉ dựng cho Owner) ⇒ người khác không nhận link (không nút chết).
-NON_OWNER_NO_LINK = frozenset({"telegram.failed"})
+#: (trang /social chỉ Owner mở được ⇒ social.session_expired cũng không có link cho người khác.)
+NON_OWNER_NO_LINK = frozenset({"telegram.failed", "social.session_expired"})
 _TELEGRAM_NON_OWNER = "Kênh Telegram của Owner đang lỗi — nhờ Owner mở Kết nối › Telegram"
 #: Thân sự cố cho người KHÔNG phải Owner khi thân gốc bảo bấm nút chỉ Owner có ("Chọn nơi lưu…"). Khoá = (kind, mã) —
 #: mã là fingerprint (offsite.stale) hoặc mã genh ở cuối fingerprint (offsite.failed: "<lần thử>|<mã>").
@@ -119,6 +123,12 @@ NON_OWNER_BODIES = {
     # v0.1.46 (F-21): fingerprint cố định "lan_legacy"; người không phải Owner không chạy được `genh remote`.
     ("network.open_lan", "lan_legacy"): "Cổng Console đang mở cho cả mạng — nhờ Owner chọn cách truy cập từ xa.",
 }
+#: Thân cho người KHÔNG phải Owner theo `kind` (mọi fingerprint) — dùng khi không có mục riêng (kind, mã) ở trên.
+#: v0.1.47 (F-83): sự cố phiên Facebook có nhiều fingerprint (needs_login, key_changed, checkpoint, captcha…) — mọi
+#: trường hợp chỉ Owner tự đăng nhập lại được ở trang /social.
+NON_OWNER_KIND_BODIES = {
+    "social.session_expired": "Phiên Facebook của Owner đã hết — nhờ Owner mở Tài khoản mạng xã hội và đăng nhập lại.",
+}
 
 
 def _viewer_body(kind: str, fingerprint: str | None, body: str, is_owner: bool) -> str:
@@ -127,7 +137,7 @@ def _viewer_body(kind: str, fingerprint: str | None, body: str, is_owner: bool) 
         return body
     fp = fingerprint or ""
     code = fp.rpartition("|")[2] if kind == "offsite.failed" else fp
-    return NON_OWNER_BODIES.get((kind, code), body)
+    return NON_OWNER_BODIES.get((kind, code)) or NON_OWNER_KIND_BODIES.get(kind, body)
 
 #: v0.1.37 (F-73): `run/autostart-status.json` (genh ghi) — chỉ nhận giá trị trong các tập này, còn lại 'unknown'.
 AUTOSTART_YES_NO = ("yes", "no", "unknown", "not_applicable")
@@ -868,8 +878,10 @@ async def evaluate(db: AsyncSession, redis: Any, org_id: uuid.UUID, *, now: date
         ("ai.budget", lambda: _eval_budget(db, org_id, redis, now)),
         ("ai.background_source", lambda: _eval_background_source(db, org_id, redis)),
         ("network", lambda: _eval_network(db, org_id, redis)),
+        ("social.session", lambda: session_watch.evaluate_alerts(db, org_id, redis)),
     )
     from gh import notifications
+    from gh.social import session_watch  # nạp trễ: session_watch import gh.health
 
     for name, run in parts:
         mark = notifications.pending_mark(db)

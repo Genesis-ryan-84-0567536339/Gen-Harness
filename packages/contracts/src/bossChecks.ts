@@ -5,8 +5,12 @@
  */
 import type { ApiClient } from './client';
 
-/** `agy_login` / `claude_login` do luồng đăng nhập CLI tự ghi — không chạy được bằng `run`. */
-export type BossCheckKey = 'hub' | 'facebook' | 'agy_login' | 'agy_call' | 'agy_switch' | 'claude_login' | 'claude_call' | 'jev' | 'telegram' | 'remote_access';
+/**
+ * `agy_login` / `claude_login` do luồng đăng nhập CLI tự ghi — không chạy được bằng `run`. v0.1.47 (F-79):
+ * `facebook_reply` (dòng 8, KHÔNG bắt buộc) do máy chủ tự ghi 'pass' khi một lần Gửi trả lời Facebook thật được
+ * xác nhận — cũng không có nút chạy.
+ */
+export type BossCheckKey = 'hub' | 'facebook' | 'agy_login' | 'agy_call' | 'agy_switch' | 'claude_login' | 'claude_call' | 'jev' | 'telegram' | 'remote_access' | 'facebook_reply';
 
 export type BossCheckStatus = 'pass' | 'fail' | 'pending';
 
@@ -42,8 +46,10 @@ export interface BossRow {
 
 export interface BossOverview {
   rows: BossRow[];
-  results: Record<BossCheckKey, BossCheck | null>;
+  /** `facebook_reply` (v0.1.47) có thể vắng ở máy chủ cũ — web đọc bằng `resultOf` (null = chưa kiểm). */
+  results: Record<Exclude<BossCheckKey, 'facebook_reply'>, BossCheck | null> & { facebook_reply?: BossCheck | null };
   required_done: number;
+  /** Số dòng BẮT BUỘC (6) — dòng 5 Jev và dòng 8 Facebook trả lời là tuỳ chọn, không tính. */
   required_total: number;
   /** Số lần đổi tài khoản Google THẬT đã đạt (chỉ lượt 'pass', đích khác lượt trước) — dòng 3 cần ≥ 2. */
   switch_passes: number;
@@ -59,6 +65,7 @@ const enc = encodeURIComponent;
 /**
  * `GET /boss-checks`, `POST /boss-checks/{key}/run` (423 PIN_REQUIRED cho hub/agy_switch). v0.1.44 (F-8c): dòng 6
  * "telegram" (bắt buộc ⇒ `required_total` 5); v0.1.46 (F-21): dòng 7 "remote_access" ⇒ `required_total` 6 (quyết theo header Origin); `run('telegram')` trả thêm `host_requested`.
+ * v0.1.47 (F-79): dòng 8 "facebook_reply" (KHÔNG bắt buộc, không có nút chạy) ⇒ `required_total` vẫn 6.
  */
 export function bossChecksEndpoints(r: ApiClient['request']) {
   return {

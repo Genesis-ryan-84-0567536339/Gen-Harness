@@ -83,13 +83,14 @@ TOOLS: dict[str, Tool] = {t.name: t for t in (
     Tool("hub.kho_get", "Một bản ghi Kho Ryan theo mã; args.ma (vd VIEC-12, QD-3, PHIEN-1)", ("system.manage",),
          "/hub/kho/records/{ma}", path_args=("ma",), path_patterns={"ma": r"^[A-Za-z]{2,6}-\d{1,6}$"},
          owner_only=True),
-    # v0.1.29 (Đợt D3 lát đầu): mạng xã hội — CHỈ ĐỌC, chỉ Owner. social.read xếp một lượt đọc trình duyệt (tính vào
-    # giới hạn 6 lượt/ngày; dùng lại lượt vừa đọc trong 10 phút) rồi chờ ngắn; nội dung đã làm sạch + gắn cờ đáng ngờ.
+    # Mạng xã hội — chỉ Owner. social.read xếp một lượt đọc trình duyệt (tính vào giới hạn 6 lượt/ngày; dùng lại lượt
+    # vừa đọc trong 10 phút) rồi chờ ngắn; nội dung đã làm sạch + gắn cờ đáng ngờ. Muốn trả lời/nhắn thì Gen ĐỀ XUẤT
+    # (social_reply/social_dm) — Sếp xác nhận + nhập PIN mới gửi.
     Tool("social.accounts", "Tài khoản mạng xã hội đã kết nối (id, tên, nền tảng, trạng thái, lần đọc gần nhất)",
          ("system.manage",), "/social/accounts", owner_only=True),
-    Tool("social.read", "ĐỌC thông báo + danh sách hội thoại (xem trước tin mới nhất) của một tài khoản mạng xã hội; "
-         "args.account_id (tuỳ chọn — bỏ trống = tài khoản đang hoạt động đầu tiên). Chỉ đọc, tốn 1 lượt "
-         "(tối đa 6 lượt/ngày)",
+    Tool("social.read", "Đọc thông báo + danh sách hội thoại (xem trước tin mới nhất) của một tài khoản mạng xã hội; "
+         "args.account_id (tuỳ chọn — bỏ trống = tài khoản đang hoạt động đầu tiên). Tốn 1 lượt (tối đa 6 lượt/ngày); "
+         "muốn trả lời/nhắn thì đề xuất social_reply/social_dm",
          ("system.manage",), owner_only=True),
 )}
 

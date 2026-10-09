@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import type { SocialAccount, SocialPlatform } from '@gen-harness/contracts';
+import type { SocialAccount, SocialPlatform, SocialWriteGate } from '@gen-harness/contracts';
 import { Button, Card, Chip, Dialog, EmptyState, Icon, SelectField, Switch, TextField } from '@gen-harness/ui';
 import { api } from '../lib/api';
 import { errorText } from '../lib/errorText';
-import { fmtAgo } from '../lib/format';
+import { fmtAgo, fmtDMClock } from '../lib/format';
+import { useOrgTimezone } from '../lib/permissions';
 import { useMe } from '../lib/queries';
 import { queryClient } from '../lib/queryClient';
 import { onRealtimeEvent } from '../lib/realtime';
@@ -15,7 +16,20 @@ import { useGenStore } from '../gen/genStore';
 import { CardError, SkeletonLines } from '../screens/common';
 import { ScreenTitle } from '../screens/ScreenPage';
 import { LoginViewer } from './LoginViewer';
-import { SOCIAL_KEY, accountStatus, loginLabel, parseTimes, qkSocial } from './socialModel';
+import {
+  SOCIAL_KEY,
+  WRITE_LIMIT_MAX,
+  WRITE_LIMIT_MIN,
+  WRITE_RISK_PATH,
+  accountStatus,
+  loginLabel,
+  parseTimes,
+  qkSocial,
+  shortTarget,
+  writeActionLabel,
+  writeStatusView,
+} from './socialModel';
+import { ErrorWithDetail, WriteProofDialog } from './WriteProofDialog';
 
 // Máy chủ báo tài khoản/việc đổi (đăng nhập xong, đọc xong, tự dừng…) → tải lại.
 onRealtimeEvent('social.update', (qc) => void qc.invalidateQueries({ queryKey: SOCIAL_KEY }));
@@ -62,7 +76,7 @@ function SocialBody({ ownerId }: { ownerId: string }) {
     <div className="screen social">
       <ScreenTitle
         title="Tài khoản mạng xã hội"
-        description="Gen đọc thông báo và tin nhắn trên tài khoản của chính Sếp rồi tóm tắt khi Sếp hỏi. Bản này CHỈ ĐỌC — chưa đăng, chưa trả lời, chưa nhắn."
+        description="Gen đọc thông báo và tin nhắn trên tài khoản của chính Sếp rồi tóm tắt khi Sếp hỏi. Trả lời bình luận và nhắn tin chỉ gửi khi Sếp bấm Xác nhận và nhập mã PIN; chưa hỗ trợ đăng bài."
         maxWidth={720}
       />
       <div className="social-grid">
@@ -106,6 +120,7 @@ function SocialBody({ ownerId }: { ownerId: string }) {
         </div>
         <div className="side-col">
           <KillSwitchCard halted={halted} worker={status.data?.worker ?? null} loading={status.isPending} />
+          <WriteGateCard accounts={accounts.data?.items ?? []} />
           <HardRulesCard rules={status.data?.hard_rules ?? platforms.data?.hard_rules ?? []} />
           <Card title="Hỏi Gen" kicker="Tóm tắt khi cần">
             <p className="muted-note">Hỏi: "Facebook có gì mới?" — Gen đọc (tốn 1 lượt) rồi tóm tắt; mục đáng ngờ được đánh dấu.</p>
@@ -145,6 +160,7 @@ function KillSwitchCard({ halted, worker, loading }: { halted: boolean; worker: 
   });
   return (
     <Card title="Công tắc dừng khẩn" kicker={halted ? 'Đang dừng' : 'Đang cho phép chạy'} data-testid="social-kill-switch">
+      <p className="muted-note">Đóng ngay mọi trình duyệt nền, chặn cả ĐỌC và GỬI. Bật lại cần mã PIN.</p>
       <p className="muted-note">
         {worker ? (
           <>
@@ -193,6 +209,113 @@ function KillSwitchCard({ halted, worker, loading }: { halted: boolean; worker: 
         <p className="risk-box__text">Việc đang chạy bị huỷ, lịch đọc và Gen không chạy nữa cho tới khi Sếp bấm Bật lại (cần PIN). Phiên đăng nhập đã lưu vẫn giữ nguyên.</p>
       </Dialog>
     </Card>
+  );
+}
+
+/** Mô tả cổng ghi: Mở/Khoá + lý do (một nguồn cho thẻ và test). */
+function gateView(g: SocialWriteGate): { open: boolean; text: string } {
+  if (g.open) return { open: true, text: g.sandbox.enabled === true ? 'Trình duyệt chạy trong sandbox' : 'Sếp đã đồng ý rủi ro' };
+  if (!g.worker_online) return { open: false, text: 'Trình duyệt nền chưa chạy, Sếp chưa đồng ý rủi ro' };
+  return { open: false, text: g.sandbox.reason ?? 'Chưa bật được sandbox và Sếp chưa đồng ý rủi ro' };
+}
+
+/** v0.1.47 (F-79/F-85): cổng ghi Facebook, giới hạn gửi/ngày từng tài khoản, 10 lần gửi gần đây (+ ảnh chụp). */
+function WriteGateCard({ accounts }: { accounts: SocialAccount[] }) {
+  const tz = useOrgTimezone();
+  const gate = useQuery({ queryKey: qkSocial.writeGate, queryFn: ({ signal }) => api.social.writeGate(signal), refetchInterval: 30_000 });
+  const writes = useQuery({
+    queryKey: [...qkSocial.writes, 10],
+    queryFn: ({ signal }) => api.social.writes({ limit: 10 }, signal),
+    refetchInterval: (q) => (q.state.data?.items.some((w) => w.status === 'queued' || w.status === 'running') ? 4000 : 30_000),
+  });
+  const [proofFor, setProofFor] = useState<string | null>(null);
+  const view = gate.data ? gateView(gate.data) : null;
+  return (
+    <Card title="Gửi trả lời & tin nhắn" kicker={view ? (view.open ? 'Cổng gửi: Mở' : 'Cổng gửi: Khoá') : 'Cổng gửi'} data-testid="social-write-gate">
+      {gate.isPending ? (
+        <SkeletonLines rows={2} />
+      ) : gate.isError ? (
+        <CardError error={gate.error} onRetry={() => void gate.refetch()} retrying={gate.isFetching} />
+      ) : view ? (
+        <p className="muted-note" data-testid="social-write-gate-state" data-open={view.open}>
+          <Chip tone={view.open ? 'ok' : 'warn'} dot>
+            {view.open ? 'Mở' : 'Khoá'}
+          </Chip>{' '}
+          {view.text}
+        </p>
+      ) : null}
+      <p className="muted-note">
+        <Link to={WRITE_RISK_PATH}>Đọc cảnh báo rủi ro{gate.data?.consent || gate.data?.sandbox.enabled ? '' : ' & đồng ý'}</Link>
+      </p>
+      {accounts.length ? (
+        <ul className="write-accounts" aria-label="Giới hạn gửi theo tài khoản">
+          {accounts.map((a) => (
+            <WriteLimitRow key={a.id} account={a} />
+          ))}
+        </ul>
+      ) : null}
+      <div className="setup-section__title">Lần gửi gần đây</div>
+      {writes.isPending ? (
+        <SkeletonLines rows={2} />
+      ) : writes.isError ? (
+        <CardError error={writes.error} onRetry={() => void writes.refetch()} retrying={writes.isFetching} />
+      ) : writes.data.items.length === 0 ? (
+        <p className="muted-note">Chưa gửi lần nào.</p>
+      ) : (
+        <ul className="write-recent" aria-label="Lần gửi gần đây" data-testid="social-writes">
+          {writes.data.items.slice(0, 10).map((w) => {
+            const st = writeStatusView(w);
+            return (
+              <li key={w.job_id} className="write-recent__item">
+                <div className="write-recent__top">
+                  <span className="muted-note">{fmtDMClock(w.created_at, tz)}</span>
+                  <strong>{writeActionLabel(w.action)}</strong>
+                  <Chip tone={st.tone}>{st.chip}</Chip>
+                </div>
+                <div className="muted-note write-recent__target" title={w.target_url ?? undefined}>
+                  {w.account_label} · {shortTarget(w.target_url)}
+                </div>
+                {w.status === 'failed' && w.error_text ? <div className="muted-note">{w.error_text}</div> : null}
+                {st.notes.map((n) => (
+                  <div key={n} className="muted-note write-recent__note">
+                    {n}
+                  </div>
+                ))}
+                {w.has_proof ? (
+                  <Button variant="ghost" size="sm" icon="ph ph-image" onClick={() => setProofFor(w.job_id)}>
+                    Xem ảnh chụp
+                  </Button>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {proofFor ? <WriteProofDialog jobId={proofFor} open onClose={() => setProofFor(null)} /> : null}
+    </Card>
+  );
+}
+
+function WriteLimitRow({ account: a }: { account: SocialAccount }) {
+  const limit = a.daily_write_limit ?? 10;
+  const save = useMutation({
+    mutationFn: (n: number) => api.social.accounts.update(a.id, { daily_write_limit: n }),
+    onSuccess: (acc) => {
+      toast(`${acc.label}: giới hạn gửi ${acc.daily_write_limit}/ngày`, 'neutral');
+      refresh();
+    },
+    onError: (e) => toast(errorText(e), 'bad'),
+  });
+  const options = Array.from({ length: WRITE_LIMIT_MAX - WRITE_LIMIT_MIN + 1 }, (_, i) => String(WRITE_LIMIT_MIN + i)).map((v) => ({ value: v, label: v }));
+  return (
+    <li className="write-accounts__row" data-testid={`social-write-limit-${a.id}`}>
+      <div className="write-accounts__name">{a.label}</div>
+      <div className="muted-note">
+        Đã dùng {a.writes_today ?? 0}/{limit} lượt gửi (24 giờ qua)
+      </div>
+      <SelectField label="Giới hạn gửi/ngày" value={String(limit)} options={options} disabled={save.isPending} onChange={(e) => save.mutate(Number(e.target.value))} />
+      {save.isError ? <ErrorWithDetail error={save.error} /> : null}
+    </li>
   );
 }
 

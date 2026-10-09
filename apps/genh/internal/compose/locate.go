@@ -109,6 +109,33 @@ func LocateAndSync(installDir string) (string, error) {
 // bộ compose.yaml GENH QUẢN LÝ đã lệch bản nhúng (ghi lại + giữ .bak),
 // sync=false chỉ in một dòng nhắc qua NoticeWriter nếu lệch, không đụng tệp.
 func locate(installDir string, sync bool) (string, error) {
+	path, err := locateInner(installDir, sync)
+	if err != nil {
+		return "", err
+	}
+	exportSeccompEnv(path)
+	return path, nil
+}
+
+// SeccompEnv là biến compose.yaml dùng để chọn profile seccomp của container browser.
+const SeccompEnv = "GH_BROWSER_SECCOMP"
+
+// exportSeccompEnv đặt GH_BROWSER_SECCOMP thành đường dẫn TUYỆT ĐỐI của profile cạnh compose.yaml
+// (mọi lệnh docker compose genh chạy kế thừa os.Environ) — không phụ thuộc compose bản đang dùng có
+// phân giải "./browser/…" theo thư mục compose hay theo thư mục hiện tại. Owner đã tự đặt biến thì giữ nguyên.
+func exportSeccompEnv(composePath string) {
+	if os.Getenv(SeccompEnv) != "" {
+		return
+	}
+	p := filepath.Join(filepath.Dir(composePath), "browser", "chromium-seccomp.json")
+	if info, err := os.Stat(p); err == nil && !info.IsDir() {
+		if abs, err := filepath.Abs(p); err == nil {
+			_ = os.Setenv(SeccompEnv, abs)
+		}
+	}
+}
+
+func locateInner(installDir string, sync bool) (string, error) {
 	cwd, _ := os.Getwd()
 	exeDir := ""
 	if exe, err := os.Executable(); err == nil {
@@ -138,6 +165,9 @@ func locate(installDir string, sync bool) (string, error) {
 			if err := ensureCaddyfile(filepath.Dir(managedPath), sync); err != nil {
 				return "", err
 			}
+			if err := ensureSeccomp(filepath.Dir(managedPath), sync); err != nil {
+				return "", err
+			}
 			if sync {
 				if err := syncEmbeddedCompose(managedPath); err != nil {
 					return "", fmt.Errorf("đồng bộ %s với bản nhúng mới: %w", managedPath, err)
@@ -153,6 +183,9 @@ func locate(installDir string, sync bool) (string, error) {
 	if managedPath != "" {
 		if path, err := writeEmbeddedCompose(managedPath); err == nil {
 			if err := ensureCaddyfile(filepath.Dir(managedPath), sync); err != nil {
+				return "", err
+			}
+			if err := ensureSeccomp(filepath.Dir(managedPath), sync); err != nil {
 				return "", err
 			}
 			return path, nil
@@ -275,6 +308,50 @@ func ensureCaddyfile(deployDir string, sync bool) error {
 	return nil
 }
 
+// ensureSeccomp đảm bảo "<deployDir>/browser/chromium-seccomp.json" tồn tại cạnh compose.yaml GENH QUẢN LÝ
+// (xem embeddedSeccomp) — cùng quy tắc với ensureCaddyfile: thiếu → ghi; là thư mục (Docker tự tạo) → xoá rồi
+// ghi; sync=true và khác bản nhúng → giữ ".bak" rồi ghi đè.
+func ensureSeccomp(deployDir string, sync bool) error {
+	return ensureEmbeddedFile(filepath.Join(deployDir, "browser", "chromium-seccomp.json"), embeddedSeccomp, sync)
+}
+
+func ensureEmbeddedFile(path string, want []byte, sync bool) error {
+	info, err := os.Stat(path)
+	switch {
+	case err == nil && info.IsDir():
+		if err := os.Remove(path); err != nil {
+			return fmt.Errorf("%s là thư mục (Docker tự tạo khi thiếu tệp) và không xoá được: %w — xoá tay rồi chạy lại", path, err)
+		}
+	case err == nil:
+		if !sync {
+			return nil
+		}
+		current, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("đọc %s: %w", path, err)
+		}
+		if bytes.Equal(current, want) {
+			return nil
+		}
+		if err := os.WriteFile(path+".bak", current, 0o644); err != nil {
+			return fmt.Errorf("ghi bản sao lưu %s.bak: %w", path, err)
+		}
+	case !os.IsNotExist(err):
+		return fmt.Errorf("kiểm %s: %w", path, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("tạo thư mục %s: %w", filepath.Dir(path), err)
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, want, 0o644); err != nil {
+		return fmt.Errorf("ghi %s: %w", tmp, err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return fmt.Errorf("đổi tên %s -> %s: %w", tmp, path, err)
+	}
+	return nil
+}
+
 // EmbeddedCompose trả bản sao compose.yaml nhúng trong binary genh đang chạy —
 // `genh update` dùng làm "bản đích" để tải ảnh mới TRƯỚC khi đụng compose.yaml
 // trên đĩa (xem internal/ops/update.go).
@@ -298,7 +375,7 @@ func ManagedComposePath(installDir string) string {
 // được coi là "đã khớp" — `genh update` luôn chạy đủ sao lưu/tải/migrate/khởi
 // động lại như trước v0.1.34. Với tệp genh quản lý: true chỉ khi
 // compose.yaml trùng từng byte bản nhúng VÀ deploy/proxy/Caddyfile trùng
-// embeddedCaddyfile (thiếu Caddyfile = không trùng).
+// embeddedCaddyfile VÀ deploy/browser/chromium-seccomp.json trùng embeddedSeccomp (thiếu tệp = không trùng).
 func InSyncWithEmbedded(installDir, path string) (bool, error) {
 	managed := ManagedComposePath(installDir)
 	if managed == "" || filepath.Clean(path) != filepath.Clean(managed) {
@@ -318,5 +395,15 @@ func InSyncWithEmbedded(installDir, path string) (bool, error) {
 		}
 		return false, fmt.Errorf("đọc Caddyfile: %w", err)
 	}
-	return bytes.Equal(caddy, embeddedCaddyfile), nil
+	if !bytes.Equal(caddy, embeddedCaddyfile) {
+		return false, nil
+	}
+	sec, err := os.ReadFile(filepath.Join(filepath.Dir(managed), "browser", "chromium-seccomp.json"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("đọc chromium-seccomp.json: %w", err)
+	}
+	return bytes.Equal(sec, embeddedSeccomp), nil
 }

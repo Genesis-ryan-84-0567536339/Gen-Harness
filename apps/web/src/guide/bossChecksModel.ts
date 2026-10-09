@@ -62,6 +62,14 @@ export const BOSS_ERROR_TEXT: Record<string, string> = {
     'Đang mở trên chính máy chủ — mở Console trên điện thoại bằng địa chỉ ở Cài đặt › Sao lưu & cập nhật › Truy cập từ xa rồi bấm Kiểm tra từ đó.',
 };
 
+/** Dòng 8 (không bắt buộc): các bước thử gửi một câu trả lời bình luận thật bằng Gen. */
+export const FACEBOOK_REPLY_STEPS: readonly string[] = [
+  'Hỏi Gen: “đọc Facebook”',
+  'Hỏi Gen: “trả lời bình luận của <tên> trên bài của tôi: …”',
+  'Đọc kỹ thẻ, bấm Xác nhận và gửi, nhập mã PIN',
+  'Đợi “Đã gửi”, bấm Xem ảnh chụp, mở Facebook xem lại',
+];
+
 /** Lỗi chỉ sửa được bằng ĐĂNG NHẬP LẠI (đổi lại hay gọi thử lại chỉ lặp lại lỗi) → dòng hiện nút "Đăng nhập lại". */
 export const RELOGIN_CODES: ReadonlySet<string> = new Set(['AUTH_EXPIRED', 'CLI_PROFILE_NO_SESSION', 'AGY_ACCOUNT_MISMATCH']);
 

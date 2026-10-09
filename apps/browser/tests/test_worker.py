@@ -2,6 +2,7 @@
 giao thức khớp api; danh sách tên miền; proxy ra ngoài."""
 
 import asyncio
+import hashlib
 import time
 from pathlib import Path
 from typing import Any
@@ -54,6 +55,16 @@ def test_protocol_vectors_match_api() -> None:
     key = bytes(range(32))
     obj = {"a": 1, "b": "xin chào", "c": [1, 2, {"z": None}]}
     assert protocol.signature(key, "job", obj) == "4oQ_2B4CsAD9D_xEaU8z5sKWvWGfdTaVGxk-kk1UJlk"
+    url = "https://www.facebook.com/permalink.php?story_fbid=1&comment_id=2"
+    shared_notes = {"v": 1, "nonce": "00112233445566778899aabbccddeeff",
+                    "job_id": "0190a000-0000-7000-8000-0000000000j1",
+                    "org_id": "0190a000-0000-7000-8000-000000000001",
+                    "account_id": "0190a000-0000-7000-8000-0000000000aa", "action": "reply_comment",
+                    "target_url_sha256": hashlib.sha256(url.encode("utf-8")).hexdigest(),
+                    "body_sha256": hashlib.sha256("Cảm ơn bạn!".encode()).hexdigest(), "iat": 1700000000,
+                    "exp": 1700000300, "confirmed_by": "0190a000-0000-7000-8000-0000000000u1"}
+    assert protocol.P_PERMIT == "permit" and protocol.PERMIT_NONCE_PREFIX == "gh:browser:permit:"
+    assert protocol.signature(key, protocol.P_PERMIT, shared_notes) == "8yjIbFDVot8HRqGMFe3JMbTbPG9E5w_ajEISGa2sLTA"
     api = Path(__file__).resolve().parents[2] / "api" / "gh" / "social" / "protocol.py"
     if api.exists():   # trong repo: hai bản sao phải giống hệt (trừ docstring đầu tệp)
         mine = (Path(__file__).resolve().parents[1] / "ghb" / "protocol.py").read_text(encoding="utf-8")
@@ -124,6 +135,22 @@ async def test_one_job_per_account_and_halt(redis: Redis) -> None:
     await w.heartbeat_once()
     hb = orjson.loads(await redis.get(protocol.HEARTBEAT_KEY))
     assert hb["version"] and "running" in hb
+
+
+async def test_queued_job_cancelled_by_api_never_runs(redis: Redis) -> None:
+    """Việc GỬI còn nằm trong hàng đợi khi Owner rút đồng ý: pub/sub `cancel` bị bỏ qua (chưa có trong `running`)
+    nhưng khoá CANCELLED_PREFIX api đặt vẫn chặn — worker nhận việc sau đó KHÔNG chạy (không gửi gì)."""
+    fr = FakeRunner(redis)
+    w = Worker(cfg(), redis, fr)  # type: ignore[arg-type]
+    j = job("write", {})
+    assert w.on_control(orjson.dumps(protocol.sign(KEY, protocol.P_CONTROL,
+                                                   {"type": "cancel", "job_id": j["id"], "ts": 1}))) == "ignored"
+    await redis.set(protocol.CANCELLED_PREFIX + j["id"], "1", ex=60)
+    await w.execute(j)
+    assert fr.ran == []
+    kinds = [(r["job_id"], r["type"]) for r in await results(redis)]
+    assert kinds == [(j["id"], "halted")]
+    assert await redis.get(protocol.LOCK_PREFIX + ACC) is None
 
 
 async def test_idle_closes_browser_only_when_no_job_running(redis: Redis) -> None:
