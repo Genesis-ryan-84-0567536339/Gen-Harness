@@ -96,6 +96,8 @@ ACTIONS = {
     "network.open_lan": "Chọn cách truy cập",
     # v0.1.47 (F-83): phiên Facebook đã hết / bị yêu cầu xác minh — gh.social.session_watch mở/đóng.
     "social.session_expired": "Đăng nhập lại",
+    # v0.1.49 (F-83): Gen-hub không trả lời hơn 15 phút — gh.hub_link.service.breaker_watch mở/đóng.
+    "hub.unreachable": "Mở Gen-hub",
 }
 #: Nhãn cho người KHÔNG phải Owner khi nút ở nhãn gốc chỉ Owner có (vd "Chọn nơi lưu" — Manager không có nút đó).
 NON_OWNER_ACTIONS = {
@@ -103,6 +105,7 @@ NON_OWNER_ACTIONS = {
     "telegram.failed": "Nhờ Owner xử lý",
     "network.open_lan": "Nhờ Owner xử lý",
     "social.session_expired": "Nhờ Owner xử lý",
+    "hub.unreachable": "Nhờ Owner xử lý",
 }
 #: Sự cố mà đích nút chỉ Owner mở được (thẻ Telegram chỉ dựng cho Owner) ⇒ người khác không nhận link (không nút chết).
 #: (trang /social chỉ Owner mở được ⇒ social.session_expired cũng không có link cho người khác.)
@@ -128,6 +131,8 @@ NON_OWNER_BODIES = {
 #: trường hợp chỉ Owner tự đăng nhập lại được ở trang /social.
 NON_OWNER_KIND_BODIES = {
     "social.session_expired": "Phiên Facebook của Owner đã hết — nhờ Owner mở Tài khoản mạng xã hội và đăng nhập lại.",
+    # v0.1.49 (F-83): thẻ Gen-hub (Kết nối › Gen-hub) chỉ Owner thao tác.
+    "hub.unreachable": "Gen-hub của Owner tạm không trả lời — nhờ Owner kiểm tra ở Kết nối › Gen-hub.",
 }
 
 
