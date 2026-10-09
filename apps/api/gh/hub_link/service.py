@@ -31,7 +31,7 @@ import re
 import socket
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from datetime import time as dtime
@@ -50,7 +50,7 @@ from gh.chassis import actionlog
 from gh.chassis.masking import _RE_SECRET, MASK, mask_for_model
 from gh.chassis.mcp_client import McpClient, always_forbidden, forbidden_host
 from gh.data.common import iso
-from gh.errors import ApiError, conflict, field_errors
+from gh.errors import ApiError, conflict
 from gh.hub_link import kho_write
 from gh.hub_link import permit as hub_permit
 from gh.mcp_api import invoke
@@ -71,7 +71,6 @@ WRITE_SUFFIXES_DENY = ("gmail_send", "gmail_create_draft", "calendar_create_even
                        "kho_create", "kho_update")
 # v0.1.50 (F-81): hai tool ghi Kho duy nhất được gọi — chỉ qua `write_kho` (Xác nhận + PIN + permit).
 KHO_WRITE_SUFFIXES = ("kho_create", "kho_update")
-WRITE_SCOPE_LABEL = "ghi Kho (kho_create, kho_update)"
 REQUIRED_SUFFIXES = ("kho_tom_tat", "kho_search", "kho_find_by_id")
 # Quyền đọc thêm (không bắt buộc): mỗi quyền = mọi hậu tố của nó đều có tool đọc, đã mở, đã cấp cho `core.gen`.
 READ_SCOPES: dict[str, tuple[str, ...]] = {
@@ -323,17 +322,23 @@ async def read_scopes(db: AsyncSession, org_id: uuid.UUID) -> dict[str, bool]:
     return {scope: all(suf in have for suf in sufs) for scope, sufs in READ_SCOPES.items()}
 
 
+def write_scope_map(have: set[str | None]) -> dict[str, bool]:
+    """`{kho_create, kho_update}` → có từng tool không, và `kho` = có CẢ HAI (giữ cho bên đọc cũ: job F-87, web cũ)."""
+    each = {suf: suf in have for suf in KHO_WRITE_SUFFIXES}
+    return {"kho": all(each.values()), **each}
+
+
 async def write_scopes(db: AsyncSession, org_id: uuid.UUID) -> dict[str, bool]:
-    """Quyền GHI Kho: True khi CẢ HAI tool kho_create và kho_update có trên máy chủ liên kết, đã mở (`is_exposed`) và đã
-    cấp cho `core.gen` (mọi `access` — Gen-hub đánh dấu chúng là tool ghi). Chưa nối ⇒ False."""
+    """Quyền GHI Kho theo TỪNG tool (`kho_create`, `kho_update`) + `kho` (= có cả hai): tool có trên máy chủ liên kết,
+    đã mở (`is_exposed`) và đã cấp cho `core.gen` (mọi `access` — Gen-hub đánh dấu chúng là tool ghi). Chưa nối ⇒
+    False."""
     names = (await db.execute(text("""
         SELECT t.name FROM agent.hub_links l
         JOIN agent.mcp_servers s ON s.id = l.server_id AND s.org_id = l.org_id
         JOIN agent.mcp_tools t ON t.server_id = s.id
         JOIN agent.mcp_grants g ON g.tool_id = t.id AND g.agent_key = :a
         WHERE l.org_id = :o AND t.is_exposed"""), {"o": org_id, "a": AGENT_KEY})).scalars().all()
-    have = {write_suffix_of(n) for n in names}
-    return {"kho": all(suf in have for suf in KHO_WRITE_SUFFIXES)}
+    return write_scope_map({write_suffix_of(n) for n in names})
 
 
 def scopes_known(r: Any) -> bool:
@@ -703,11 +708,16 @@ async def generic_call(db: AsyncSession, redis: Any, transport: Any, *, user: se
 
 # ─── ghi Kho (v0.1.50, F-81, QD-18): MỘT đường duy nhất, sau Xác nhận + PIN + permit ────────────────────────────────
 
-WRITE_PERMIT_MSG = "Giấy phép ghi Kho không hợp lệ hoặc đã hết hạn — Sếp bấm Xác nhận lại trên thẻ đề xuất"
+WRITE_PERMIT_MSG = ("Giấy phép ghi Kho không hợp lệ hoặc đã quá 5 phút — chưa ghi gì vào Kho. Bấm Xác nhận lại "
+                    "(nhập mã PIN) để ghi")
 WRITE_MISSING_MSG = ("Gen-hub chưa cấp quyền ghi Kho — vào Kết nối › Gen-hub tick kho_create, kho_update cho token "
                      "rồi bấm Kiểm tra")
 WRITE_UNCERTAIN_MSG = "Chưa chắc đã ghi — Sếp mở Kho kiểm trước khi bấm lại"
 WRITE_REJECTED_MSG = "Kho từ chối lần ghi này"
+WRITE_INVALID_MSG = "Dữ liệu ghi Kho chưa hợp lệ — chưa ghi gì vào Kho"
+# 401/403 từ Gen-hub khi GHI: token hết hạn / bị thu hồi — không phải lỗi trường, Sếp phải đổi token chứ không Sửa thẻ.
+WRITE_TOKEN_MSG = ("Token Gen-hub hết hạn hoặc đã bị thu hồi — chưa ghi gì vào Kho. Vào Kết nối › Gen-hub dán token "
+                   "mới rồi bấm Kiểm tra")
 WRITE_NOT_ALLOWED_MSG = "Chỉ ghi Kho bằng kho_create hoặc kho_update — tool khác không được gọi"
 _MA_IN_TEXT = re.compile(r"\b(?:PHIEN|VIEC)-\d{1,6}\b")
 _MA_KEYS = ("Mã ID", "ma_id", "ma")
@@ -718,47 +728,53 @@ def _write_summary(suffix: str, result: Any) -> str:
     return f"Ghi Gen-hub ({suffix}) — {len(orjson.dumps(result))} byte, nội dung không lưu"
 
 
-def _ma_by_key(v: Any, depth: int = 0) -> str | None:
+def _ma_by_key(v: Any, bang: str, depth: int = 0) -> str | None:
+    """Mã ở khoá 'Mã ID' / ma_id / ma (ưu tiên) — chỉ nhận mã đúng bảng vừa ghi."""
     if depth > 6:
         return None
     if isinstance(v, dict):
         for k in _MA_KEYS:
             x = v.get(k)
-            if isinstance(x, str) and kho_write.is_ma(x.strip().upper()):
+            if isinstance(x, str) and kho_write.bang_of_ma(x.strip().upper()) == bang:
                 return x.strip().upper()
         for x in v.values():
-            found = _ma_by_key(x, depth + 1)
+            found = _ma_by_key(x, bang, depth + 1)
             if found:
                 return found
     elif isinstance(v, list):
         for x in v:
-            found = _ma_by_key(x, depth + 1)
+            found = _ma_by_key(x, bang, depth + 1)
             if found:
                 return found
     elif isinstance(v, str):
         parsed = _json_or_none(v)
         if parsed is not None:
-            return _ma_by_key(parsed, depth + 1)
+            return _ma_by_key(parsed, bang, depth + 1)
     return None
 
 
-def _ma_by_text(v: Any, depth: int = 0) -> str | None:
+def _codes_in_text(v: Any, depth: int = 0) -> list[str]:
+    """Mọi mã PHIEN-n / VIEC-n trong chữ của `v` (theo thứ tự gặp)."""
     if depth > 6:
-        return None
+        return []
     if isinstance(v, str):
-        m = _MA_IN_TEXT.search(v)
-        return m.group(0) if m else None
+        return _MA_IN_TEXT.findall(v)
     items = list(v.values()) if isinstance(v, dict) else v if isinstance(v, list) else []
-    for x in items:
-        found = _ma_by_text(x, depth + 1)
-        if found:
-            return found
-    return None
+    return [c for x in items for c in _codes_in_text(x, depth + 1)]
 
 
-def ma_from_result(result: Any) -> str | None:
-    """Mã bản ghi ('PHIEN-12') trong kết quả tool ghi Kho (đã che): ưu tiên khoá 'Mã ID', rồi mã đầu tiên trong chữ."""
-    return _ma_by_key(result) or _ma_by_text(result)
+def ma_from_result(result: Any, bang: str, sent: Iterable[Any] = ()) -> str | None:
+    """Mã bản ghi VỪA TẠO ('PHIEN-12') trong kết quả tool ghi Kho (đã che), hoặc None khi không chắc.
+
+    Chỉ nhận mã đúng bảng `bang`. Ưu tiên khoá 'Mã ID' / ma_id / ma; không có khoá thì lấy mã trong chữ nhưng BỎ mọi mã
+    xuất hiện trong nội dung vừa gửi (`sent` — Kho hay lặp lại bản ghi, vd Việc 'Làm tiếp VIEC-12'): còn đúng một mã thì
+    nhận, không còn hoặc còn nhiều mã khác nhau ⇒ None (không đoán — Sếp đọc Kho)."""
+    by_key = _ma_by_key(result, bang)
+    if by_key:
+        return by_key
+    echoed = {c for v in sent for c in _codes_in_text(v)}
+    left = {c for c in _codes_in_text(result) if kho_write.bang_of_ma(c) == bang and c not in echoed}
+    return left.pop() if len(left) == 1 else None
 
 
 def _result_text(result: Any) -> str:
@@ -817,7 +833,7 @@ async def write_kho(db: AsyncSession, redis: Any, client: McpClient, *, user: se
         await _write_log(db, user, "hub.kho_write_blocked", result="blocked", tool=tool, proposal_id=pid,
                          code="HUB_WRITE_INVALID", reason=str(e)[:200])
         await db.commit()
-        raise field_errors({"args": str(e)}) from e
+        raise ApiError(422, "HUB_WRITE_INVALID", WRITE_INVALID_MSG, str(e), errors={"args": str(e)}) from e
     link = await load(db, user.org_id)
     if link is None or link.server_id is None or not link.enabled:
         raise conflict("HUB_LINK_OFF", "Chưa nối Gen-hub — Sếp cấu hình ở Kết nối › thẻ Gen-hub rồi bấm Kiểm tra")
@@ -846,7 +862,12 @@ async def write_kho(db: AsyncSession, redis: Any, client: McpClient, *, user: se
             await db.commit()
             raise ApiError(502, "HUB_WRITE_UNCERTAIN", WRITE_UNCERTAIN_MSG, msg) from e
         if str(e.cause).split(":", 1)[0].strip() in ("401", "403"):
-            await _set_result(db, user.org_id, ok=False, error=msg)  # token bị từ chối: thẻ Gen-hub hiện "hết hạn"
+            # Token bị từ chối: thẻ Gen-hub hiện "hết hạn"; mã riêng để thẻ đề xuất dẫn Sếp tới Kết nối › Gen-hub.
+            await _set_result(db, user.org_id, ok=False, error=msg)
+            await _write_log(db, user, "hub.kho_write_failed", result="failed", tool=tool, proposal_id=pid,
+                             target_id=ma or None, target_label=label, code="HUB_TOKEN_REJECTED", error=msg)
+            await db.commit()
+            raise conflict("HUB_TOKEN_REJECTED", WRITE_TOKEN_MSG, msg) from e
         await _write_log(db, user, "hub.kho_write_failed", result="failed", tool=tool, proposal_id=pid,
                          target_id=ma or None, target_label=label, code="HUB_WRITE_REJECTED", error=msg)
         await db.commit()
@@ -867,7 +888,7 @@ async def write_kho(db: AsyncSession, redis: Any, client: McpClient, *, user: se
         raise conflict("HUB_WRITE_REJECTED", f"{WRITE_REJECTED_MSG}: {msg}"[:300], msg)
     await clear_cache(redis, user.org_id)  # Kho vừa đổi: bỏ đệm đọc 5 phút để Gen không trả bản cũ
     await _set_result(db, user.org_id, ok=True)
-    ma = ma or ma_from_result(masked) or ""
+    ma = ma or ma_from_result(masked, bang, record.values()) or ""
     await _write_log(db, user, "hub.kho_written", result="ok", tool=tool, proposal_id=pid, target_id=ma or None,
                      target_label=f"{bang} · {record.get('Chủ đề') or record.get('Tiêu đề') or ma}"[:200],
                      bang=bang, field_keys=sorted(record), fields_digest=_digest16(record))
@@ -973,9 +994,9 @@ async def test_link(db: AsyncSession, redis: Any, client: McpClient, *, user: se
         await db.commit()
         return {"ok": False, "error": msg, "error_code": error_code,
                 "latency_ms": int((time.monotonic() - started) * 1000), "exposed_tools": [],
-                "missing_tools": list(extra.get("missing_tools", [])), "read_scopes": scopes,
+                "exposed_write_tools": [], "missing_tools": list(extra.get("missing_tools", [])), "read_scopes": scopes,
                 "read_missing": read_missing(scopes), "write_tools": list(extra.get("write_tools", [])),
-                "write_scopes": wscopes, "write_missing": write_missing(wscopes),
+                "write_scopes": wscopes, "write_missing": write_missing(wscopes), "write_hidden": [],
                 "link": link_out(await load(db, user.org_id))}
 
     if endpoint_forbidden(server.endpoint or ""):
@@ -985,6 +1006,8 @@ async def test_link(db: AsyncSession, redis: Any, client: McpClient, *, user: se
     except ApiError as e:
         return await fail(_classify(str(e.title), code=e.code), code=e.code)
     exposed: list[str] = []
+    exposed_write: list[str] = []
+    write_hidden: list[str] = []
     write_tools: list[str] = []
     have: set[str] = set()
     have_write: set[str] = set()
@@ -993,10 +1016,15 @@ async def test_link(db: AsyncSession, redis: Any, client: McpClient, *, user: se
         wsuf = write_suffix_of(t["name"])
         if suf is None and wsuf is not None:
             # v0.1.50 (F-81): kho_create / kho_update — mở + cấp (mọi access, Gen-hub đánh dấu chúng là tool ghi) để
-            # `write_kho` đi được; KHÔNG gọi khi kiểm, và route MCP chung vẫn chặn (generic_call).
+            # `write_kho` đi được; KHÔNG gọi khi kiểm, và route MCP chung vẫn chặn (generic_call). Owner đã TỰ đóng tool
+            # (hoặc gỡ cấp core.gen) ở MCP Hub ⇒ Kiểm tra không mở lại — Owner mở lại ở MCP Hub khi muốn.
+            if await _hidden_by_owner(db, user.org_id, uuid.UUID(t["id"])):
+                write_hidden.append(wsuf)
+                continue
             have_write.add(wsuf)
             await _open_and_grant(db, user, t, via="hub_link_write")
             exposed.append(t["name"])
+            exposed_write.append(t["name"])
             continue
         if suf is None:
             continue  # tool lạ (Vault, gmail_send…): để nguyên, mặc định đóng — code cũng không bao giờ gọi
@@ -1010,7 +1038,7 @@ async def test_link(db: AsyncSession, redis: Any, client: McpClient, *, user: se
         # Quyền đọc vừa mất ⇒ bỏ đệm 5 phút NGAY (kể cả khi lượt kiểm này đỏ ở bước sau): không trả mail/lịch cũ nữa.
         await clear_cache(redis, user.org_id)
     scopes = {scope: all(suf in have for suf in sufs) for scope, sufs in READ_SCOPES.items()}
-    wscopes = {"kho": all(suf in have_write for suf in KHO_WRITE_SUFFIXES)}
+    wscopes = write_scope_map(set(have_write))
     missing = [s for s in REQUIRED_SUFFIXES if s not in have]
     if "kho_tom_tat" in missing:
         return await fail(f"Gen-hub chưa cấp tool đọc Kho: {', '.join(missing)}", missing_tools=missing,
@@ -1032,12 +1060,29 @@ async def test_link(db: AsyncSession, redis: Any, client: McpClient, *, user: se
                            action="hub.link_tested", target_type="hub_link", target_id=str(link.server_id),
                            target_label=SERVER_NAME, detail={"exposed": exposed, "missing_tools": missing,
                                                              "write_tools": write_tools, "read_scopes": scopes,
-                                                             "write_scopes": wscopes, "latency_ms": latency},
+                                                             "write_scopes": wscopes, "write_hidden": write_hidden,
+                                                             "latency_ms": latency},
                            ip=user.ip)
     return {"ok": True, "error": None, "error_code": None, "latency_ms": latency, "exposed_tools": exposed,
-            "missing_tools": missing, "read_scopes": scopes, "read_missing": read_missing(scopes),
-            "write_tools": write_tools, "write_scopes": wscopes, "write_missing": write_missing(wscopes),
+            "exposed_write_tools": exposed_write, "missing_tools": missing, "read_scopes": scopes,
+            "read_missing": read_missing(scopes),
+            "write_tools": write_tools, "write_scopes": wscopes,
+            "write_missing": write_missing(wscopes, hidden=write_hidden), "write_hidden": write_hidden,
             "link": link_out(await load(db, user.org_id))}
+
+
+async def _hidden_by_owner(db: AsyncSession, org_id: uuid.UUID, tool_id: uuid.UUID) -> bool:
+    """Thay đổi mở/cấp GẦN NHẤT của tool là Owner TỰ đóng (`mcp.tool_hidden` từ MCP Hub, PIN `mcp.expose`) hoặc tự gỡ
+    cấp `core.gen` (`mcp.grant_removed`) — không phải liên kết Gen-hub tự thu hồi (`via` = hub_link)."""
+    row = (await db.execute(text("""
+        SELECT action, detail FROM ops.action_log
+        WHERE org_id = :o AND target_type = 'mcp_tool' AND target_id = :t
+          AND (action IN ('mcp.tool_exposed', 'mcp.tool_hidden')
+               OR (action IN ('mcp.grant_added', 'mcp.grant_removed') AND detail->>'agent_key' = :a))
+        ORDER BY at DESC, id DESC LIMIT 1"""), {"o": org_id, "t": str(tool_id), "a": AGENT_KEY})).first()
+    if row is None or row.action not in ("mcp.tool_hidden", "mcp.grant_removed"):
+        return False
+    return not (row.detail or {}).get("via")
 
 
 async def _open_and_grant(db: AsyncSession, user: service.CurrentUser, t: dict[str, Any], *, via: str) -> None:
@@ -1058,9 +1103,12 @@ async def _open_and_grant(db: AsyncSession, user: service.CurrentUser, t: dict[s
                                detail={"agent_key": AGENT_KEY, "via": via}, ip=user.ip)
 
 
-def write_missing(wscopes: dict[str, bool]) -> list[str]:
-    """Nhãn quyền ghi Kho còn thiếu (rỗng khi đủ)."""
-    return [] if wscopes.get("kho") else [WRITE_SCOPE_LABEL]
+def write_missing(wscopes: dict[str, bool], *, hidden: Iterable[str] = ()) -> list[str]:
+    """Nhãn quyền ghi Kho Gen-hub còn THIẾU (rỗng khi đủ), nêu đúng tool: 'ghi Kho (kho_update)'. Tool Owner tự đóng
+    ở MCP Hub (`hidden`) không tính là thiếu ở Gen-hub — thẻ nói riêng."""
+    off = set(hidden)
+    gone = [suf for suf in KHO_WRITE_SUFFIXES if not wscopes.get(suf, wscopes.get("kho")) and suf not in off]
+    return [f"ghi Kho ({', '.join(gone)})"] if gone else []
 
 
 async def _revoke_gone_google(db: AsyncSession, user: service.CurrentUser, server_id: uuid.UUID,

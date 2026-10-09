@@ -5,10 +5,12 @@ Gen-hub `/mcp` giả (httpx.MockTransport) đếm MỌI lời gọi tools/call �
 hợp lệ) thì KHÔNG có lời gọi kho_create / kho_update nào; token Gen-hub không bao giờ vào log / Action Log /
 mcp_calls / lỗi."""
 
+import ast
 import logging
 import time
 import uuid
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -37,14 +39,20 @@ MISSING_MSG = ("Gen-hub chưa cấp quyền ghi Kho — vào Kết nối › Gen
                "Kiểm tra")
 UNCERTAIN_MSG = "Chưa chắc đã ghi — Sếp mở Kho kiểm trước khi bấm lại"
 PHIEN = {"Chủ đề": "Họp chốt kế hoạch v0.1.50", "Đã chốt": "Ra mắt Gen nhớ và ghi Kho có PIN"}
+# Quyền ghi Kho theo TỪNG tool + `kho` (= có cả hai).
+W_ALL = {"kho": True, "kho_create": True, "kho_update": True}
+W_NO_UPDATE = {"kho": False, "kho_create": True, "kho_update": False}
 
 
 class FakeHub:
     """Gen-hub `/mcp` giả: Kho (đọc + ghi) và gmail_send. `calls`/`args` ghi MỌI tools/call.
 
     `drop` = hậu tố Gen-hub không liệt kê · `mode` = giả lỗi CHỈ ở lời gọi ghi Kho: `write_timeout`, `write_echo` (500
-    lặp lại header Authorization), `write_error` (Kho báo isError và chữ lỗi có chứa token) · `find_style` = hình dạng
-    kết quả kho_find_by_id (`dict` | `text` — JSON nằm trong content[].text, mã ở khoá "Mã ID")."""
+    lặp lại header Authorization), `write_error` (Kho báo isError và chữ lỗi có chứa token), `write_401` (token bị thu
+    hồi giữa chừng) · `find_style` = hình dạng kết quả kho_find_by_id (`dict` | `text` — JSON nằm trong
+    content[].text, mã ở khoá "Mã ID" | `plain` — chữ thường không có tên trường | `error` — Kho báo isError) ·
+    `create_style` = kết quả kho_create (`json` — có khoá "Mã ID" | `echo` — chữ lặp lại nội dung + mã mới, không khoá |
+    `echo_only` — chữ chỉ lặp lại nội dung, không có mã mới)."""
 
     def __init__(self) -> None:
         self.calls: list[str] = []
@@ -52,6 +60,7 @@ class FakeHub:
         self.mode = "ok"
         self.drop: set[str] = set()
         self.find_style = "dict"
+        self.create_style = "json"
         self.next_ma = 12
         self.auth_seen: list[str | None] = []
 
@@ -83,12 +92,19 @@ class FakeHub:
             raise httpx.ReadTimeout("hết giờ", request=req)
         if suffix in WRITE_TOOLS and self.mode == "write_echo":
             return httpx.Response(500, text=f"boom authorization={req.headers.get('authorization')}")
+        if suffix in WRITE_TOOLS and self.mode == "write_401":
+            return httpx.Response(401, json={"error": "token revoked"})
         if suffix in WRITE_TOOLS and self.mode == "write_error":
             return self.ok(body, {"isError": True, "content": [{
                 "type": "text", "text": f"Lỗi: giá trị 'Trạng thái' không hợp lệ (Bearer {TOKEN})"}]})
         if suffix == "kho_create":
             ma = f"{_prefix(args['bang'])}-{self.next_ma}"
             self.next_ma += 1
+            echo = "; ".join(f"{k}: {v}" for k, v in args["fields"].items())
+            if self.create_style == "echo":
+                return self.ok(body, {"content": [{"type": "text", "text": f"Đã tạo bản ghi — {echo} — mã {ma}"}]})
+            if self.create_style == "echo_only":
+                return self.ok(body, {"content": [{"type": "text", "text": f"Đã tạo bản ghi — {echo}"}]})
             return self.ok(body, {"content": [{"type": "text", "text": orjson.dumps(
                 {"Mã ID": ma, **args["fields"]}).decode()}]})
         if suffix == "kho_update":
@@ -100,6 +116,10 @@ class FakeHub:
             if self.find_style == "text":
                 text_ = orjson.dumps({"Mã ID": code, **rec}).decode()
                 return self.ok(body, {"content": [{"type": "text", "text": text_}]})
+            if self.find_style == "plain":
+                return self.ok(body, {"content": [{"type": "text", "text": f"Bản ghi {code}: Nối Gen-hub, đang chờ"}]})
+            if self.find_style == "error":
+                return self.ok(body, {"isError": True, "content": [{"type": "text", "text": f"Không đọc được {code}"}]})
             return self.ok(body, {"id": code, **rec})
         return self.ok(body, {"content": [{"type": "text", "text": "VIEC-3 Đang làm — hạn 2026-09-27"}]})
 
@@ -187,12 +207,13 @@ async def test_test_opens_and_grants_kho_write_tools(owner_api: Api, fake_hub: F
         assert by[PREFIX + n].access == "write"
         assert by[PREFIX + n].is_exposed is True and by[PREFIX + n].grants == ["core.gen"], n
     assert by[GG + "gmail_send"].is_exposed is False and by[GG + "gmail_send"].grants == []   # gmail_send vẫn đóng
-    assert out["write_scopes"] == {"kho": True} and out["write_missing"] == []
+    assert out["write_scopes"] == W_ALL and out["write_missing"] == []
+    assert out["exposed_write_tools"] == [PREFIX + "kho_create", PREFIX + "kho_update"] and out["write_hidden"] == []
     assert out["read_scopes"] == {"calendar": False, "mail": False, "tasks": False, "drive": False}
     assert fake_hub.calls == [PREFIX + "kho_tom_tat"]                                   # kiểm không gọi tool ghi
-    assert (await owner_api.get("/hub/link")).json()["write_scopes"] == {"kho": True}
+    assert (await owner_api.get("/hub/link")).json()["write_scopes"] == W_ALL
     user, _ = await user_of(owner_api)
-    assert await hub.write_scopes(db, user.org_id) == {"kho": True}
+    assert await hub.write_scopes(db, user.org_id) == W_ALL
     log = await _db_text("SELECT detail FROM ops.action_log WHERE action IN ('mcp.tool_exposed', 'mcp.grant_added')")
     assert "hub_link_write" in log
     assert TOKEN not in await _db_text("SELECT * FROM ops.action_log")
@@ -201,16 +222,16 @@ async def test_test_opens_and_grants_kho_write_tools(owner_api: Api, fake_hub: F
 async def test_missing_write_tool_keeps_ok_and_revokes_when_gone(owner_api: Api, fake_hub: FakeHub, db: Any) -> None:
     fake_hub.drop = {"kho_update"}
     out = await _linked(owner_api)
-    assert out["ok"] is True and out["write_scopes"] == {"kho": False}
-    assert out["write_missing"] == ["ghi Kho (kho_create, kho_update)"]
+    assert out["ok"] is True and out["write_scopes"] == W_NO_UPDATE
+    assert out["write_missing"] == ["ghi Kho (kho_update)"]
     assert out["link"]["status"] == "ok"
-    assert (await owner_api.get("/hub/link")).json()["write_scopes"] == {"kho": False}
+    assert (await owner_api.get("/hub/link")).json()["write_scopes"] == W_NO_UPDATE
     # Gen-hub liệt kê đủ rồi lại bỏ kho_update: thu hồi (đóng + gỡ cấp), giống tool Google.
     fake_hub.drop = set()
-    assert (await owner_api.send("POST", "/hub/link/test", {})).json()["write_scopes"] == {"kho": True}
+    assert (await owner_api.send("POST", "/hub/link/test", {})).json()["write_scopes"] == W_ALL
     fake_hub.drop = {"kho_update"}
     out = await owner_api.send("POST", "/hub/link/test", {})
-    assert out.json()["ok"] is True and out.json()["write_scopes"] == {"kho": False}
+    assert out.json()["ok"] is True and out.json()["write_scopes"] == W_NO_UPDATE
     by = await _tools(db)
     assert by[PREFIX + "kho_update"].is_exposed is False and by[PREFIX + "kho_update"].grants == []
     assert by[PREFIX + "kho_create"].is_exposed is True
@@ -359,6 +380,22 @@ async def test_update_labels_when_kho_returns_json_text_with_ma_id_key(owner_api
     assert p["labels"]["target"] == "VIEC-12 · Nối Gen-hub" and p["labels"]["cur:Trạng thái"] == "Chờ"
 
 
+@pytest.mark.parametrize("style", ["plain", "error"])
+async def test_update_blocked_when_current_value_unreadable(owner_api: Api, fake_hub: FakeHub, app: Any,
+                                                            style: str) -> None:
+    """Kho trả chữ thường / Markdown (không nhận ra tên trường) hoặc báo isError khi đọc bản ghi ⇒ không dựng thẻ sửa:
+    thẻ trống cột "Hiện tại" sẽ khiến Sếp tưởng trường đang trống và ghi đè mà không thấy giá trị cũ."""
+    await _linked(owner_api)
+    fake_hub.find_style = style
+    router = FakeRouter([_read("VIEC-12"), _update("VIEC-12"),
+                         {"steps": [{"kind": "say", "text": "Em chưa đọc được giá trị hiện tại."}]}])
+    t = await ask(owner_api, app, router, "Chuyển VIEC-12 sang Xong giúp tôi")
+    assert _proposals(t) == [] and fake_hub.writes() == []
+    blocked = [r for r in await _log("gen.propose") if r.result == "blocked"]
+    assert len(blocked) == 1 and "VIEC-12" in blocked[0].detail["reason"]
+    assert "giá trị hiện tại" in blocked[0].detail["reason"]
+
+
 # ─── 4. Chống bịa: mã chưa đọc, trường lạ, giá trị sai ────────────────────────────────────────────────────────────
 
 async def test_update_needs_ma_seen_in_this_turn(owner_api: Api, fake_hub: FakeHub, app: Any) -> None:
@@ -494,6 +531,8 @@ async def test_direct_write_needs_valid_permit(owner_api: Api, fake_hub: FakeHub
     r = await _direct(owner_api, hub_permit.issue(user.org_id, user.id, p2, "kho_create", bad_args), pid=p2,
                       args=bad_args)
     assert r.status_code == 422 and fake_hub.writes() == [PREFIX + "kho_create"]
+    assert r.json()["code"] == "HUB_WRITE_INVALID" and "Người làm" in r.json()["errors"]["args"]
+    assert r.json()["title"] == hub.WRITE_INVALID_MSG
     # Cần phiên PIN: thiếu → 423 (trước cả permit).
     await _clear_pin(owner_api)
     r = await _direct(owner_api, good)
@@ -663,7 +702,7 @@ async def test_missing_write_scope_is_409_with_no_call(owner_api: Api, fake_hub:
     fake_hub.drop = {"kho_update"}
     await _linked(owner_api)
     p = await _propose_create(owner_api, app)
-    assert p["labels"]["write_scope"] == "missing"
+    assert p["labels"]["write_scope"] == "ok"                # quyền theo ĐÚNG tool: thiếu kho_update không khoá thẻ tạo
     await _pin(owner_api)
     r = await owner_api.send("POST", f"/gen/proposals/{p['id']}/confirm", {})
     assert r.status_code == 200, r.text                      # quyền kiểm theo từng tool: kho_create vẫn có ⇒ ghi được
@@ -685,6 +724,105 @@ async def test_link_off_blocks_write(owner_api: Api, fake_hub: FakeHub, app: Any
     r = await owner_api.send("POST", f"/gen/proposals/{p['id']}/confirm", {})
     assert r.status_code == 409 and r.json()["code"] == "HUB_LINK_OFF" and fake_hub.writes() == []
     assert (await proposals.load(app.state.redis, p["id"]))["status"] == "pending"
+
+
+async def test_token_rejected_on_write_has_its_own_code(owner_api: Api, fake_hub: FakeHub, app: Any) -> None:
+    """401/403 lúc GHI: token hết hạn / bị thu hồi — mã riêng HUB_TOKEN_REJECTED (thẻ dẫn tới Kết nối › Gen-hub), không
+    phải HUB_WRITE_REJECTED ("Bấm Sửa các trường" là sai hướng)."""
+    await _linked(owner_api)
+    p = await _propose_create(owner_api, app)
+    await _pin(owner_api)
+    fake_hub.mode = "write_401"
+    r = await owner_api.send("POST", f"/gen/proposals/{p['id']}/confirm", {})
+    assert r.status_code == 409 and r.json()["code"] == "HUB_TOKEN_REJECTED", r.text
+    assert r.json()["title"] == hub.WRITE_TOKEN_MSG and r.json()["detail"].startswith("401")
+    assert TOKEN not in r.text
+    assert (await proposals.load(app.state.redis, p["id"]))["status"] == "pending"
+    failed = await _log("hub.kho_write_failed")
+    assert len(failed) == 1 and failed[0].detail["code"] == "HUB_TOKEN_REJECTED"
+    assert (await owner_api.get("/hub/link")).json()["status"] == "expired"               # thẻ Gen-hub báo token
+
+
+async def test_create_code_ignores_codes_echoed_from_content(owner_api: Api, fake_hub: FakeHub, app: Any) -> None:
+    """Kho không trả khoá "Mã ID" mà lặp lại nội dung vừa ghi: mã trong nội dung (VIEC-7 ở 'Việc tiếp', PHIEN-3) không
+    được nhận nhầm là mã bản ghi mới; chỉ nhận mã đúng bảng; không còn mã nào ⇒ None (không đoán)."""
+    await _linked(owner_api)
+    await _pin(owner_api)
+    fake_hub.create_style = "echo"
+    p = await _propose_create(owner_api, app, {"Chủ đề": "Họp", "Việc tiếp": "Làm tiếp VIEC-7 rồi xem PHIEN-3"})
+    r = await owner_api.send("POST", f"/gen/proposals/{p['id']}/confirm", {})
+    assert r.status_code == 200, r.text
+    assert r.json()["result"]["code"] == "PHIEN-12"
+    assert (await _log("hub.kho_written"))[-1].target_id == "PHIEN-12"
+    # Việc có tiêu đề nhắc VIEC-12, Kho chỉ lặp lại nội dung (không có mã mới) ⇒ không có mã.
+    fake_hub.create_style = "echo_only"
+    t = await ask(owner_api, app, FakeRouter([_create({"Tiêu đề": "Làm tiếp VIEC-12"}, "Việc")]), "tạo việc")
+    p2 = _proposals(t)[0]
+    r = await owner_api.send("POST", f"/gen/proposals/{p2['id']}/confirm", {})
+    assert r.status_code == 200, r.text
+    assert r.json()["result"] == {"type": "kho_record", "id": None, "code": None, "screen": None, "bang": "Việc"}
+    assert (await _log("hub.kho_written"))[-1].target_id is None
+    assert len(fake_hub.writes()) == 2
+
+
+def test_ma_from_result_rules() -> None:
+    rec = {"Chủ đề": "Họp", "Việc tiếp": "Làm tiếp VIEC-7"}
+    # Khoá "Mã ID" được ưu tiên, nhưng phải đúng bảng.
+    assert hub.ma_from_result({"Mã ID": "PHIEN-5", "x": "VIEC-7"}, "Phiên", rec.values()) == "PHIEN-5"
+    assert hub.ma_from_result({"Mã ID": "VIEC-7"}, "Phiên", rec.values()) is None
+    assert hub.ma_from_result({"content": [{"type": "text", "text": '{"ma": "viec-9"}'}]}, "Việc") == "VIEC-9"
+    # Theo chữ: bỏ mã lặp lại từ nội dung vừa gửi, bỏ mã khác bảng.
+    assert hub.ma_from_result("Đã tạo PHIEN-13; Việc tiếp: Làm tiếp VIEC-7", "Phiên", rec.values()) == "PHIEN-13"
+    assert hub.ma_from_result("Việc tiếp: Làm tiếp VIEC-7", "Việc", rec.values()) is None
+    assert hub.ma_from_result("Đã tạo PHIEN-13 (liên quan PHIEN-12)", "Phiên") is None          # mơ hồ ⇒ không đoán
+    assert hub.ma_from_result("Đã tạo PHIEN-13, PHIEN-13", "Phiên") == "PHIEN-13"
+    assert hub.ma_from_result({"isError": False, "content": []}, "Phiên") is None
+
+
+async def test_owner_hidden_write_tool_is_not_reopened_by_test(owner_api: Api, fake_hub: FakeHub, db: Any) -> None:
+    """Owner TỰ đóng kho_create ở MCP Hub (PIN mcp.expose) để tắt Gen ghi Kho ⇒ Kiểm tra (nút ở thẻ Gen-hub, hay dòng
+    'Gen-hub' ở Việc Sếp cần làm) không lặng lẽ mở lại; mở lại ở MCP Hub thì Kiểm tra cấp lại bình thường."""
+    await _linked(owner_api)
+    by = await _tools(db)
+    tid = by[PREFIX + "kho_create"].id
+    assert (await owner_api.send("PATCH", f"/mcp/tools/{tid}/expose", {"is_exposed": False})).status_code == 200
+    out = (await owner_api.send("POST", "/hub/link/test", {})).json()
+    assert out["ok"] is True and out["write_hidden"] == ["kho_create"]
+    assert out["write_scopes"] == {"kho": False, "kho_create": False, "kho_update": True}
+    assert out["write_missing"] == []                         # Gen-hub vẫn cấp đủ — chỉ Owner tự đóng ở MCP Hub
+    assert PREFIX + "kho_create" not in out["exposed_write_tools"]
+    assert (await _tools(db))[PREFIX + "kho_create"].is_exposed is False
+    # Gỡ cấp core.gen (thay vì đóng) cũng được tôn trọng.
+    tid_u = by[PREFIX + "kho_update"].id
+    assert (await owner_api.send("DELETE", f"/mcp/tools/{tid_u}/grants/core.gen")).status_code == 204
+    out = (await owner_api.send("POST", "/hub/link/test", {})).json()
+    assert sorted(out["write_hidden"]) == ["kho_create", "kho_update"] and out["write_scopes"]["kho"] is False
+    assert (await _tools(db))[PREFIX + "kho_update"].grants == []
+    # Mở lại ở MCP Hub ⇒ Kiểm tra mở + cấp lại như thường.
+    assert (await owner_api.send("PATCH", f"/mcp/tools/{tid}/expose", {"is_exposed": True})).status_code == 200
+    r = await owner_api.send("POST", f"/mcp/tools/{tid_u}/grants", {"agent_key": "core.gen"})
+    assert r.status_code == 201
+    out = (await owner_api.send("POST", "/hub/link/test", {})).json()
+    assert out["write_hidden"] == [] and out["write_scopes"] == W_ALL
+    assert fake_hub.writes() == []
+
+
+def test_approved_write_true_only_in_write_kho() -> None:
+    """Bất biến khoá cứng #4: ngoại lệ "tool ghi không thành bản nháp" (lời gọi có `approved_write=` khác False) CHỈ có
+    trong `hub_link.service.write_kho` — duyệt cây cú pháp mọi tệp gh/ (chú thích / docstring không tính)."""
+    gh_dir = Path(hub.__file__).resolve().parents[1]
+    hits: list[tuple[str, str]] = []
+    for f in sorted(gh_dir.rglob("*.py")):
+        tree = ast.parse(f.read_text(encoding="utf-8"))
+        for fn in ast.walk(tree):
+            if not isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef):
+                continue
+            for node in ast.walk(fn):
+                if isinstance(node, ast.Call) and any(
+                        k.arg == "approved_write" and not (isinstance(k.value, ast.Constant) and k.value.value is False)
+                        for k in node.keywords):
+                    hits.append((str(f.relative_to(gh_dir)), fn.name))
+    assert hits == [("hub_link/service.py", "write_kho")]
 
 
 async def test_invoke_tool_default_still_drafts_write_tools(owner_api: Api, fake_hub: FakeHub, db: Any) -> None:

@@ -118,6 +118,24 @@ async def test_confirm_can_edit_text_and_reason_only(owner_api: Api, app: Any) -
     assert row.text == "Gọi tôi là anh Cơ" and row.reason == "Sếp sửa lại" and row.source == "gen"
 
 
+async def test_confirm_with_empty_reason_is_allowed_for_owner(owner_api: Api, app: Any) -> None:
+    """Một quy tắc cho Sếp ở cả hai màn: lý do KHÔNG bắt buộc khi Sếp xác nhận (như ô "Lý do (không bắt buộc)" ở Cài đặt
+    › Gen nhớ). Gen thì vẫn phải nêu lý do khi đề xuất."""
+    t = await ask(owner_api, app, FakeRouter([_propose()]), "nhớ giúp")
+    p = _proposals(t)[0]
+    r = await owner_api.send("POST", f"/gen/proposals/{p['id']}/confirm", {"fields": {"reason": "   "}})
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["status"] == "confirmed" and out["fields"] == {"text": NOTE, "reason": ""}
+    assert "(lý do" not in out["summary"] and out["summary"].startswith(f"Ghi nhớ: “{NOTE}”. ")
+    row = (await _rows())[0]
+    assert row.text == NOTE and row.reason is None and row.source == "gen" and str(row.proposal_id) == p["id"]
+    # Gen đề xuất mà không nêu lý do ⇒ vẫn bị chặn (không có thẻ).
+    router = FakeRouter([_propose("Quy ước khác", ""), {"steps": [{"kind": "say", "text": "Thiếu lý do."}]}])
+    t2 = await ask(owner_api, app, router, "nhớ giúp em")
+    assert _proposals(t2) == [] and len(await _rows()) == 1
+
+
 async def test_proposal_refused_when_full_or_duplicate(owner_api: Api, app: Any) -> None:
     assert (await _save(owner_api, NOTE.upper())).status_code == 201
     router = FakeRouter([_propose(), {"steps": [{"kind": "say", "text": "Em đã có ghi chú này."}]}])

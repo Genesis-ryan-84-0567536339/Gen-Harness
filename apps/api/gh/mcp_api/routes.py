@@ -316,6 +316,11 @@ async def call_tool(tool_id: uuid.UUID, body: CallIn, request: Request, user: se
     `write` luôn tạo `biz.action_drafts(kind='mcp_write')` rồi DỪNG (không gọi ra ngoài); `read` gọi ngay nếu
     mức tự trị hiệu lực > 1 (không phải "chỉ ghi nhận/tóm tắt"). Mọi nhánh — kể cả bị chặn — ghi một dòng
     `agent.mcp_calls` và một dòng Action Log; không có đường nào bỏ qua log này.
+
+    Ngoại lệ DUY NHẤT của "tool ghi luôn thành bản nháp" (v0.1.50, F-81, QD-18) KHÔNG đi qua route này:
+    `gh.hub_link.service.write_kho` (POST /hub/kho/write — kho_create / kho_update của Gen-hub) gọi
+    `invoke_tool(approved_write=True)` sau khi Owner đã Xác nhận + nhập mã PIN và permit ký còn hiệu lực — đó chính là
+    bước duyệt. Route này gọi kho_create / kho_update → 403 HUB_TOOL_NOT_ALLOWED (`hub.generic_call`).
     """
     t = await _tool(db, user.org_id, tool_id)
     # Máy chủ của liên kết Gen-hub (Kho Ryan): chỉ Owner, ghim DNS, kết quả đã che (v0.1.27).

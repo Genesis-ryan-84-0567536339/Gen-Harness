@@ -287,6 +287,7 @@ Mã hoá phong bì AES-256-GCM cho khoá API, phiên kênh, TOTP, auth MCP (`byt
 - `agent.mcp_servers` (stdio | http+sse | streamable_http, breaker riêng), `agent.mcp_tools` (`access read|write`, `is_exposed` **mặc định false**), `agent.mcp_grants` (tool × agent), `agent.mcp_calls` (nhật ký LIVE).
 - Chỉ Owner (PIN) mở tool và cấp cho agent. Agent chỉ thấy tool đã mở + được cấp; gọi tool chưa mở → chặn, ghi log (kết quả "Bị chặn").
 - Tool `write` luôn tạo `biz.action_drafts(kind='mcp_write')` trước (guard khoá). Tool `read` chạy ngay nếu mức tự trị cho phép, vẫn ghi log.
+  Ngoại lệ duy nhất (v0.1.50, QD-18): `kho_create` / `kho_update` của Gen-hub qua `gh.hub_link.service.write_kho` — bước duyệt là Xác nhận + mã PIN của Owner + permit ký (`invoke_tool(approved_write=True)`); route MCP chung vẫn chặn hai tool này (403 `HUB_TOOL_NOT_ALLOWED`).
 - Mặc định chặn mạng công cộng cho máy chủ MCP (guard "Cho phép máy chủ MCP ngoài mạng nội bộ" = tắt).
 - Quyền tệp/nhóm áp cả qua MCP: tham số gọi được lọc theo phạm vi của agent.
 

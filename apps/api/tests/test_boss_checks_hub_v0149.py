@@ -86,8 +86,8 @@ async def test_clean_detail_whitelist(owner_api: Api, db: Any) -> None:
 
 # ─── v0.1.50 (F-81): quyền GHI Kho (kho_create, kho_update) — cũng chỉ để hiển thị ───────────────────────────────
 
-WSCOPES = {"kho": False}
-WMISSING = ["ghi Kho (kho_create, kho_update)"]
+WSCOPES = {"kho": False, "kho_create": True, "kho_update": False}
+WMISSING = ["ghi Kho (kho_update)"]
 
 
 async def test_hub_pass_keeps_write_scopes(owner_api: Api, db: Any, monkeypatch: pytest.MonkeyPatch) -> None:

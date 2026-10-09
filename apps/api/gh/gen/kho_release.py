@@ -13,8 +13,10 @@ Cron `gen_kho_release` (phút 7 và 37, gh/worker.py). Với MỖI tổ chức �
    không để lại dòng nào, lần chạy sau thử lại.
 
 Job KHÔNG gọi Gen-hub và KHÔNG ghi Kho: ghi chỉ khi Owner bấm Xác nhận + nhập mã PIN (gh.gen.routes.confirm_proposal).
-Dọn: đề xuất `pending` mà đề xuất Redis đã hết hạn (7 ngày) → `expired`; `writing` mà không còn khoá đang-ghi trong
-Redis (tiến trình ghi chết giữa chừng) → trả về `pending`.
+Dọn: đề xuất `pending` / `uncertain` mà đề xuất Redis đã hết hạn (7 ngày) → `expired`; `writing` mà không còn khoá
+đang-ghi trong Redis (tiến trình ghi chết giữa chừng) → trả về `pending`, hoặc `uncertain` nếu trước đó đã có một lần
+ghi chưa chắc (`uncertain_by` — chỉ Owner đó bấm lại / huỷ, Owner khác không ghi trùng được). `uncertain` còn đề xuất
+sống thì giữ nguyên: chỉ Owner đã ghi chưa chắc mới gỡ được (sau khi mở Kho kiểm).
 """
 
 import asyncio
@@ -58,29 +60,39 @@ async def _set_org(db: Any, org: uuid.UUID) -> None:
 
 
 async def _expire_stale(sm: Any, redis: Any, now: datetime) -> dict[str, int]:
-    """`pending` mà mọi đề xuất Redis đã hết hạn → `expired`; `writing` mà không còn khoá đang-ghi → `pending`."""
+    """`pending` / `uncertain` mà mọi đề xuất Redis đã hết hạn → `expired`; `writing` mà không còn khoá đang-ghi →
+    `pending` (hoặc `uncertain` khi đã có lần ghi chưa chắc trước đó)."""
     counts = {"expired": 0, "reset": 0}
     async with sm() as db:
         rows = (await db.execute(text("""SELECT org_id, version, status, proposal_ids FROM agent.hub_release_proposals
-                                         WHERE status IN ('pending', 'writing') AND created_at < :lim"""),
+                                         WHERE status IN ('pending', 'writing', 'uncertain') AND created_at < :lim"""),
                                  {"lim": now - STALE_AFTER})).all()
         for r in rows:
             pids = [str(x) for x in (r.proposal_ids or [])]
             alive = sum([await redis.exists(proposals.key(x)) for x in pids])
-            if r.status == "pending" and not alive:
+            if r.status in ("pending", "uncertain") and not alive:
                 await db.execute(text("""UPDATE agent.hub_release_proposals SET status = 'expired', decided_at = now()
-                                         WHERE org_id = :o AND version = :v AND status = 'pending'"""),
-                                 {"o": r.org_id, "v": r.version})
+                                         WHERE org_id = :o AND version = :v AND status = :s"""),
+                                 {"o": r.org_id, "v": r.version, "s": r.status})
                 counts["expired"] += 1
             elif r.status == "writing":
                 busy = sum([await redis.exists(proposals.claim_key(x)) for x in pids])
                 if not busy:
-                    await db.execute(text("""UPDATE agent.hub_release_proposals SET status = 'pending'
+                    await db.execute(text("""UPDATE agent.hub_release_proposals
+                                             SET status = CASE WHEN uncertain_by IS NULL THEN 'pending'
+                                                               ELSE 'uncertain' END
                                              WHERE org_id = :o AND version = :v AND status = 'writing'"""),
                                      {"o": r.org_id, "v": r.version})
                     counts["reset"] += 1
         await db.commit()
     return counts
+
+
+async def _addr_of(db: Any, uid: uuid.UUID) -> str:
+    """Cách Gen gọi Owner này (`core.users.addressing.bot_calls_me`, như engine/GenPanel); trống ⇒ 'Sếp'."""
+    raw = (await db.execute(text("SELECT addressing->>'bot_calls_me' FROM core.users WHERE id = :u"),
+                            {"u": uid})).scalar_one_or_none()
+    return " ".join(str(raw or "").split())[:60] or "Sếp"
 
 
 async def _one_org(sm: Any, redis: Any, org: uuid.UUID, version: str, now: datetime) -> str:
@@ -114,7 +126,7 @@ async def _one_org(sm: Any, redis: Any, org: uuid.UUID, version: str, now: datet
             prop = proposals.build_release(org, uid, version, turn_id=turn_id, conversation_id=cid, tz=tz, repo=repo,
                                            now=now)
             await proposals.save(redis, prop, ttl=PROPOSAL_TTL_S)
-            steps = [{"kind": "say", "text": SAY.format(version=version, addr="Sếp")},
+            steps = [{"kind": "say", "text": SAY.format(version=version, addr=await _addr_of(db, uid))},
                      {"kind": "proposal", "proposal": proposals.public(prop)}]
             await store.add_message(db, org, cid, "assistant", {"steps": steps}, turn_id=turn_id)
             await notifications.notify(db, org, [uid], kind=KIND, title=TITLE.format(version=version),

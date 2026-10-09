@@ -11,8 +11,9 @@
 - `GET /hub/google/calendar?day=today|tomorrow`, `/hub/google/tasks`, `/hub/google/mail/search?q&limit`,
   `/hub/google/mail/message?id`, `/hub/google/drive/search?q` — đọc lịch/việc/mail/Drive qua Gen-hub (đã che, đệm
   5 phút, ngắt mạch) · CHỈ Owner (QD-16). Kết quả `{source, tool, cached, data}`. KHÔNG có đường ghi nào lên Google.
-- v0.1.50 (F-81, QD-18): `GET /hub/link` thêm `write_scopes` ({kho: bool}; null khi chưa có lần Kiểm tra xanh);
-  `POST /hub/link/test` thêm `write_scopes` + `write_missing`. `POST /hub/kho/write` — đường GHI Kho duy nhất
+- v0.1.50 (F-81, QD-18): `GET /hub/link` thêm `write_scopes` ({kho, kho_create, kho_update: bool}; null khi chưa có
+  lần Kiểm tra xanh); `POST /hub/link/test` thêm `write_scopes` + `write_missing` + `write_hidden` (tool ghi Owner tự
+  đóng ở MCP Hub — Kiểm tra không mở lại) + `exposed_write_tools`. `POST /hub/kho/write` — đường GHI Kho duy nhất
   (kho_create / kho_update, bảng Phiên và Việc): Owner + PIN `hub.write` + permit ký do `confirm_proposal` của Gen phát
   sau khi Sếp bấm Xác nhận (gh.hub_link.permit). Gọi thẳng không có permit hợp lệ → 403 `HUB_WRITE_PERMIT`.
 """

@@ -164,8 +164,9 @@ async def test_test_exposes_only_whitelisted_read_tools(owner_api: Api, fake_hub
     assert by["vault__vault-35323"].is_exposed is False and by["vault__vault-35323"].grants == []
     assert fake_hub.calls == [PREFIX + "kho_tom_tat"]
     # Máy chủ giả này chỉ có kho_create (thiếu kho_update) ⇒ chưa đủ quyền ghi Kho; thiếu quyền ghi KHÔNG làm ok=false.
-    assert out["ok"] is True and out["write_scopes"] == {"kho": False}
-    assert out["write_missing"] == ["ghi Kho (kho_create, kho_update)"]
+    assert out["ok"] is True and out["write_scopes"] == {"kho": False, "kho_create": True, "kho_update": False}
+    assert out["write_missing"] == ["ghi Kho (kho_update)"] and out["exposed_write_tools"] == [PREFIX + "kho_create"]
+    assert out["write_hidden"] == []
 
 
 def test_suffix_whitelist() -> None:

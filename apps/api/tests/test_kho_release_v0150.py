@@ -1,7 +1,8 @@
 """v0.1.50 (F-87, QD-18) — Gen đề xuất ghi một Phiên vào Kho Ryan mỗi khi máy chủ lên bản mới (cron `gen_kho_release`).
 
 Mỗi (tổ chức, phiên bản) ĐÚNG MỘT lần (bảng agent.hub_release_proposals); chỉ khi Gen-hub đã cấp quyền ghi Kho; job chỉ
-ĐỀ XUẤT (0 lời gọi ghi) — ghi khi Owner bấm Xác nhận + PIN; Owner thứ hai xác nhận cùng bản → 409. Migration 0032
+ĐỀ XUẤT (0 lời gọi ghi) — ghi khi Owner bấm Xác nhận + PIN; Owner thứ hai xác nhận cùng bản → 409 và thẻ của Owner khác
+được đóng khi bản đã ghi / đã huỷ / ghi chưa chắc (502 HUB_WRITE_UNCERTAIN không trả bản về 'pending'). Migration 0032
 chạy lại an toàn."""
 
 import asyncio
@@ -18,6 +19,7 @@ import gh
 from gh.crypto import hash_secret
 from gh.db import admin_sessionmaker, sessionmaker
 from gh.gen import kho_release, proposals
+from gh.gen import routes as gen_routes
 from gh.hub_link import kho_write
 from gh.worker import JOB_LABELS, WorkerSettings
 from tests.conftest import PG, Api
@@ -38,7 +40,7 @@ async def _run(redis: Any, now: Any = None) -> dict[str, Any]:
 async def _rows() -> list[Any]:
     async with admin_sessionmaker()() as db:
         return (await db.execute(text("""SELECT org_id, version, status, proposal_ids, kho_ma, created_at, decided_at,
-                                                decided_by FROM agent.hub_release_proposals
+                                                decided_by, uncertain_by FROM agent.hub_release_proposals
                                          ORDER BY version"""))).all()
 
 
@@ -57,6 +59,15 @@ async def _release_proposal(api: Api, version: str = "v0.1.50") -> dict[str, Any
     assert [s["kind"] for s in steps] == ["say", "proposal"]
     p: dict[str, Any] = steps[1]["proposal"]
     return p
+
+
+async def _clear_breaker(redis: Any) -> None:
+    async for k in redis.scan_iter(match="gh:hub:brk:*"):
+        await redis.delete(k)
+
+
+async def _b_pin(b: Api) -> None:
+    assert (await b.send("POST", "/auth/pin/verify", {"pin": "112233"})).status_code == 200
 
 
 async def _add_owner(db: Any, email: str = "owner2@example.vn") -> Api:
@@ -155,7 +166,7 @@ async def test_not_eligible_inserts_nothing_then_retries(owner_api: Api, fake_hu
     await _linked(owner_api)                                           # nối nhưng chưa đủ quyền ghi Kho
     assert (await _run(redis))[org] == "no_write_scope" and await _rows() == []
     fake_hub.drop = set()                                              # Sếp tick quyền rồi bấm Kiểm tra
-    assert (await owner_api.send("POST", "/hub/link/test", {})).json()["write_scopes"] == {"kho": True}
+    assert (await owner_api.send("POST", "/hub/link/test", {})).json()["write_scopes"]["kho"] is True
     assert (await _run(redis))[org] == "proposed" and len(await _rows()) == 1
     # Gen tắt → không đề xuất cho bản kế.
     await db.execute(text("""UPDATE core.organizations SET settings = jsonb_set(COALESCE(settings, '{}'::jsonb),
@@ -225,20 +236,39 @@ async def test_second_owner_cannot_write_same_version(owner_api: Api, fake_hub: 
         fake_hub.calls.clear()
         await _pin(owner_api)
         assert (await owner_api.send("POST", f"/gen/proposals/{pa['id']}/confirm", {})).status_code == 200
-        assert (await b.send("POST", "/auth/pin/verify", {"pin": "112233"})).status_code == 200
+        await _b_pin(b)
+        # Thẻ của Owner hai được ĐÓNG ngay khi Owner một ghi xong (Redis + tin đã lưu + chuông đã đọc): mở chuông / tải
+        # lại hội thoại thấy "Owner khác đã ghi", không còn nút Xác nhận chết.
+        stored = await proposals.load(redis, pb["id"])
+        assert stored["status"] == "cancelled"
+        assert stored["labels"]["closed"] == "Owner khác đã ghi bản này vào Kho (PHIEN-12)"
+        reloaded = await _release_proposal(b)
+        assert reloaded["status"] == "cancelled" and reloaded["labels"]["closed"] == stored["labels"]["closed"]
+        bell = [x for x in (await b.get("/notifications")).json()["items"] if x["kind"] == "gen.kho_proposal"]
+        assert len(bell) == 1 and bell[0]["read"] is True
+        mine = [x for x in (await owner_api.get("/notifications")).json()["items"] if x["kind"] == "gen.kho_proposal"]
+        assert len(mine) == 1
         r = await b.send("POST", f"/gen/proposals/{pb['id']}/confirm", {})
         assert r.status_code == 409 and r.json()["code"] == "GEN_PROPOSAL_DECIDED"
-        assert r.json()["title"] == "Bản này đã được ghi vào Kho hoặc đã huỷ"
         assert fake_hub.writes() == [PREFIX + "kho_create"]                              # vẫn đúng một lời gọi
-        # Thẻ của Owner hai vẫn 'pending' trong Redis (không bị đánh dấu đã ghi) nhưng không ghi được nữa.
-        assert (await proposals.load(redis, pb["id"]))["status"] == "pending"
+        # Bấm Huỷ trên thẻ cũ (màn chưa tải lại) ⇒ 200 với trạng thái đã đóng — không 409, thẻ trên màn cập nhật theo.
+        r = await b.send("POST", f"/gen/proposals/{pb['id']}/cancel", {})
+        assert r.status_code == 200 and r.json()["status"] == "cancelled"
+        # Đua: thẻ B vẫn 'pending' lúc bấm ⇒ _release_claim chặn 409 TRƯỚC Gen-hub và đóng thẻ đó.
+        await redis.set(proposals.key(pb["id"]), orjson.dumps({**stored, "status": "pending"}))
+        r = await b.send("POST", f"/gen/proposals/{pb['id']}/confirm", {})
+        assert r.status_code == 409 and r.json()["code"] == "GEN_PROPOSAL_DECIDED"
+        assert r.json()["title"] == gen_routes.RELEASE_DECIDED_MSG
+        assert (await proposals.load(redis, pb["id"]))["status"] == "cancelled"
+        assert fake_hub.writes() == [PREFIX + "kho_create"]
     finally:
         await b.c.aclose()
     assert (await _rows())[0].status == "written"
 
 
-async def test_failed_write_returns_to_pending_and_can_retry(owner_api: Api, fake_hub: FakeHub,  # noqa: F811
-                                                             redis: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_uncertain_write_stays_with_same_owner_and_can_retry(owner_api: Api, fake_hub: FakeHub,  # noqa: F811
+                                                                    redis: Any,
+                                                                    monkeypatch: pytest.MonkeyPatch) -> None:
     await _linked(owner_api)
     monkeypatch.setattr(gh, "__version__", "v0.1.50")
     await _run(redis)
@@ -248,14 +278,109 @@ async def test_failed_write_returns_to_pending_and_can_retry(owner_api: Api, fak
     r = await owner_api.send("POST", f"/gen/proposals/{p['id']}/confirm", {})
     assert r.status_code == 502 and r.json()["code"] == "HUB_WRITE_UNCERTAIN"
     row = (await _rows())[0]
-    assert row.status == "pending" and row.kho_ma is None and row.decided_at is None
+    # CÓ THỂ đã ghi ⇒ KHÔNG trả về 'pending' (Owner khác sẽ ghi trùng): 'uncertain', gắn đúng Owner vừa ghi.
+    me = (await owner_api.get("/auth/me")).json()
+    assert row.status == "uncertain" and str(row.uncertain_by) == me["id"]
+    assert row.kho_ma is None and row.decided_at is None
+    assert (await proposals.load(redis, p["id"]))["status"] == "pending"     # thẻ của chính Owner này vẫn bấm lại được
     fake_hub.mode = "ok"
-    async for k in redis.scan_iter(match="gh:hub:brk:*"):
-        await redis.delete(k)
+    await _clear_breaker(redis)
     r = await owner_api.send("POST", f"/gen/proposals/{p['id']}/confirm", {})
     assert r.status_code == 200, r.text
     assert (await _rows())[0].status == "written" and (await _rows())[0].kho_ma == "PHIEN-12"
     assert len(fake_hub.writes()) == 2                                       # 1 lần timeout + 1 lần ghi được
+
+
+async def test_uncertain_write_blocks_second_owner(owner_api: Api, fake_hub: FakeHub, db: Any,  # noqa: F811
+                                                   client: Any, redis: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Owner một nhận 502 HUB_WRITE_UNCERTAIN ⇒ Owner hai KHÔNG ghi được bản đó (409 GEN_PROPOSAL_DECIDED, 0 lời gọi):
+    mỗi (tổ chức, bản) ghi Kho đúng MỘT lần. Chỉ Owner một bấm lại / huỷ sau khi mở Kho kiểm."""
+    await _linked(owner_api)
+    await _add_owner(db)
+    monkeypatch.setattr(gh, "__version__", "v0.1.50")
+    await _run(redis)
+    b = await _login(client, "owner2@example.vn")
+    try:
+        pa, pb = await _release_proposal(owner_api), await _release_proposal(b)
+        await _pin(owner_api)
+        fake_hub.calls.clear()
+        fake_hub.mode = "write_timeout"
+        r = await owner_api.send("POST", f"/gen/proposals/{pa['id']}/confirm", {})
+        assert r.status_code == 502 and r.json()["code"] == "HUB_WRITE_UNCERTAIN"
+        assert (await _rows())[0].status == "uncertain"
+        # Thẻ của Owner hai đóng ngay, nói rõ vì sao.
+        stored = await proposals.load(redis, pb["id"])
+        assert stored["status"] == "cancelled" and stored["labels"]["closed"] == gen_routes.RELEASE_CLOSED_UNCERTAIN
+        fake_hub.mode = "ok"
+        await _clear_breaker(redis)
+        await _b_pin(b)
+        r = await b.send("POST", f"/gen/proposals/{pb['id']}/confirm", {})
+        assert r.status_code == 409 and r.json()["code"] == "GEN_PROPOSAL_DECIDED"
+        # Đua: thẻ B còn 'pending' lúc bấm ⇒ vẫn 409 GEN_PROPOSAL_DECIDED từ dòng bảng (không phải BUSY), thẻ đóng.
+        await redis.set(proposals.key(pb["id"]), orjson.dumps({**stored, "status": "pending"}))
+        r = await b.send("POST", f"/gen/proposals/{pb['id']}/confirm", {})
+        assert r.status_code == 409 and r.json()["code"] == "GEN_PROPOSAL_DECIDED"
+        assert (await proposals.load(redis, pb["id"]))["status"] == "cancelled"
+        assert fake_hub.writes() == [PREFIX + "kho_create"]                  # chỉ lần chưa chắc của Owner một
+        # Owner hai bấm Huỷ không gỡ được lần ghi chưa chắc của Owner một.
+        assert (await b.send("POST", f"/gen/proposals/{pb['id']}/cancel", {})).status_code == 200
+        assert (await _rows())[0].status == "uncertain"
+        # Owner một bấm lại, Kho từ chối CHẮC CHẮN ⇒ vẫn 'uncertain' (lần trước có thể đã ghi), không về 'pending'.
+        fake_hub.mode = "write_error"
+        r = await owner_api.send("POST", f"/gen/proposals/{pa['id']}/confirm", {})
+        assert r.status_code == 409 and r.json()["code"] == "HUB_WRITE_REJECTED"
+        assert (await _rows())[0].status == "uncertain"
+        # Owner một mở Kho thấy đã có ⇒ Huỷ ⇒ bản 'cancelled' cho cả tổ chức.
+        r = await owner_api.send("POST", f"/gen/proposals/{pa['id']}/cancel", {})
+        assert r.status_code == 200 and r.json()["status"] == "cancelled"
+        row = (await _rows())[0]
+        me = (await owner_api.get("/auth/me")).json()
+        assert row.status == "cancelled" and str(row.decided_by) == me["id"]
+    finally:
+        await b.c.aclose()
+    assert len(fake_hub.writes()) == 2
+
+
+async def test_definite_failure_returns_to_pending_for_everyone(owner_api: Api, fake_hub: FakeHub,  # noqa: F811
+                                                                db: Any, client: Any, redis: Any,
+                                                                monkeypatch: pytest.MonkeyPatch) -> None:
+    """Lỗi CHẮC CHẮN chưa ghi (Kho báo isError) ⇒ về 'pending', thẻ Owner khác KHÔNG bị đóng: Owner hai ghi được."""
+    await _linked(owner_api)
+    await _add_owner(db)
+    monkeypatch.setattr(gh, "__version__", "v0.1.50")
+    await _run(redis)
+    b = await _login(client, "owner2@example.vn")
+    try:
+        pa, pb = await _release_proposal(owner_api), await _release_proposal(b)
+        await _pin(owner_api)
+        fake_hub.mode = "write_error"
+        r = await owner_api.send("POST", f"/gen/proposals/{pa['id']}/confirm", {})
+        assert r.status_code == 409 and r.json()["code"] == "HUB_WRITE_REJECTED"
+        row = (await _rows())[0]
+        assert row.status == "pending" and row.uncertain_by is None
+        assert (await proposals.load(redis, pb["id"]))["status"] == "pending"
+        fake_hub.mode = "ok"
+        await _b_pin(b)
+        r = await b.send("POST", f"/gen/proposals/{pb['id']}/confirm", {})
+        assert r.status_code == 200, r.text
+        assert (await _rows())[0].status == "written"
+        closed = await proposals.load(redis, pa["id"])
+        assert closed["status"] == "cancelled" and closed["labels"]["closed"].startswith("Owner khác đã ghi")
+    finally:
+        await b.c.aclose()
+
+
+async def test_release_say_uses_owner_addressing(owner_api: Api, fake_hub: FakeHub, db: Any,  # noqa: F811
+                                                 redis: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    await _linked(owner_api)
+    await db.execute(text("""UPDATE core.users SET addressing = addressing || '{"bot_calls_me": "Anh Cả"}'::jsonb"""))
+    await db.commit()
+    monkeypatch.setattr(gh, "__version__", "v0.1.50")
+    await _run(redis)
+    convs = [c for c in (await owner_api.get("/gen/conversations")).json() if c["title"] == TITLE.format(v="v0.1.50")]
+    msgs = (await owner_api.get(f"/gen/conversations/{convs[0]['id']}/messages")).json()
+    say = msgs[0]["content"]["steps"][0]["text"]
+    assert "Anh Cả xem lại" in say and "Sếp xem lại" not in say
 
 
 async def test_cancel_cancels_version_for_everyone(owner_api: Api, fake_hub: FakeHub, db: Any,  # noqa: F811
@@ -272,6 +397,8 @@ async def test_cancel_cancels_version_for_everyone(owner_api: Api, fake_hub: Fak
         assert r.status_code == 200 and r.json()["status"] == "cancelled"
         row = (await _rows())[0]
         assert row.status == "cancelled" and row.decided_at is not None
+        stored = await proposals.load(redis, pb["id"])
+        assert stored["status"] == "cancelled" and stored["labels"]["closed"] == "Owner khác đã huỷ ghi bản này"
         await b.send("POST", "/auth/pin/verify", {"pin": "112233"})
         r = await b.send("POST", f"/gen/proposals/{pb['id']}/confirm", {})
         assert r.status_code == 409 and r.json()["code"] == "GEN_PROPOSAL_DECIDED"
@@ -311,6 +438,17 @@ async def test_expired_and_stuck_rows_are_cleaned(owner_api: Api, fake_hub: Fake
     assert (await _run(redis))["reset"] == 0 and (await _rows())[0].status == "writing"
     await redis.delete(proposals.claim_key(p["id"]))
     assert (await _run(redis))["reset"] == 1 and (await _rows())[0].status == "pending"
+    # 'writing' kẹt mà trước đó đã có một lần ghi chưa chắc ⇒ về 'uncertain' (về 'pending' thì Owner khác ghi trùng).
+    async with admin_sessionmaker()() as adm:
+        await adm.execute(text("UPDATE agent.hub_release_proposals SET status = 'writing', "
+                               "uncertain_by = gen_random_uuid()"))
+        await adm.commit()
+    assert (await _run(redis))["reset"] == 1 and (await _rows())[0].status == "uncertain"
+    # 'uncertain' còn đề xuất sống ⇒ giữ nguyên (chỉ Owner đã ghi gỡ được); hết đề xuất ⇒ 'expired'.
+    out = await _run(redis)
+    assert out["expired"] == 0 and out["reset"] == 0 and (await _rows())[0].status == "uncertain"
+    await redis.delete(proposals.key(p["id"]))
+    assert (await _run(redis))["expired"] == 1 and (await _rows())[0].status == "expired"
 
 
 # ─── 4. Cron + migration ──────────────────────────────────────────────────────────────────────────────────────────
@@ -329,9 +467,17 @@ async def test_migration_0032_is_rerunnable_and_constrained(owner_api: Api, fres
     with psycopg.connect(f"{PG}/{fresh_db}", autocommit=True) as c:        # đã migrate một lần; chạy thêm hai lần nữa
         c.execute(sql)  # type: ignore[arg-type]
         c.execute(sql)  # type: ignore[arg-type]
+        # Bảng của bản dựng trước (chưa có trạng thái 'uncertain' / cột uncertain_by): chạy lại phải nâng được.
+        c.execute("ALTER TABLE agent.hub_release_proposals DROP COLUMN uncertain_by")
+        c.execute("ALTER TABLE agent.hub_release_proposals DROP CONSTRAINT hub_release_proposals_status_check")
+        c.execute("ALTER TABLE agent.hub_release_proposals ADD CONSTRAINT hub_release_proposals_status_check "
+                  "CHECK (status IN ('pending', 'writing', 'written', 'cancelled', 'expired'))")
+        c.execute(sql)  # type: ignore[arg-type]
     org = await org_id(db)
     ok_cases = [
         "INSERT INTO agent.hub_release_proposals (org_id, version, status) VALUES (:o, 'v0.1.50', 'pending')",
+        "INSERT INTO agent.hub_release_proposals (org_id, version, status, uncertain_by) "
+        "VALUES (:o, 'v0.1.52', 'uncertain', gen_random_uuid())",
         "INSERT INTO agent.gen_memory_notes (org_id, text, source) VALUES (:o, 'a', 'gen')",
     ]
     for sql_ in ok_cases:

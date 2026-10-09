@@ -25,7 +25,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 import orjson
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -158,9 +158,17 @@ async def org_tz(db: AsyncSession, org_id: uuid.UUID) -> ZoneInfo:
         return ZoneInfo("UTC")
 
 
-def normalize(ptype: str, fields: dict[str, Any], tz: ZoneInfo) -> dict[str, Any]:
-    """Kiểm schema loại đề xuất + chuẩn hoá (giờ không múi → múi giờ tổ chức, UUID dạng chuẩn). Lỗi → ValueError."""
-    model: type[BaseModel] = envelope.PROPOSAL_FIELDS[ptype]
+class _MemoryConfirmFields(envelope.MemoryNoteFields):
+    """Ghi nhớ lúc Sếp XÁC NHẬN: lý do không bắt buộc (cùng quy tắc ô "Lý do (không bắt buộc)" ở Cài đặt › Gen nhớ).
+    Gen thì vẫn PHẢI nêu lý do khi đề xuất (`envelope.MemoryNoteFields`)."""
+    reason: str = Field(default="", max_length=200)
+
+
+def normalize(ptype: str, fields: dict[str, Any], tz: ZoneInfo, *, confirming: bool = False) -> dict[str, Any]:
+    """Kiểm schema loại đề xuất + chuẩn hoá (giờ không múi → múi giờ tổ chức, UUID dạng chuẩn). Lỗi → ValueError.
+    `confirming=True` (Sếp bấm Xác nhận, đã có thể sửa trường): Ghi nhớ được để trống lý do."""
+    model: type[BaseModel] = (_MemoryConfirmFields if confirming and ptype == MEMORY_TYPE
+                              else envelope.PROPOSAL_FIELDS[ptype])
     try:
         m = model.model_validate(fields)
     except ValidationError as e:
@@ -192,9 +200,9 @@ def normalize(ptype: str, fields: dict[str, Any], tz: ZoneInfo) -> dict[str, Any
     if ptype == MEMORY_TYPE:
         out["text"] = memory_notes.clean_text(out["text"])
         reason = memory_notes.clean_reason(out["reason"])
-        if not reason:
+        if not reason and not confirming:
             raise ValueError("lý do ghi nhớ không được trống")
-        out["reason"] = reason
+        out["reason"] = reason or ""
     if ptype == "kho_create":
         record = kho_write.validate_record(out["bang"], out["record"], create=True)
         out["record"] = kho_write.fill_defaults(out["bang"], record)
@@ -294,12 +302,15 @@ async def kho_labels(db: AsyncSession, user: service.CurrentUser, ptype: str, fi
                      redis: Redis | None, app: Any) -> dict[str, str]:
     """Nhãn thẻ ghi Kho: bảng, đích ('Tạo mới ở bảng Phiên' | 'VIEC-12 · <tiêu đề hiện tại>'), quyền ghi ('ok' |
     'missing') và với kho_update `cur:<tên trường>` = giá trị HIỆN TẠI của trường sẽ sửa (đọc qua Gen-hub, đã che, đi
-    qua đệm 5 phút). Đọc lỗi ⇒ ValueError — Sếp không được xác nhận một thay đổi mà thẻ không cho thấy giá trị cũ."""
+    qua đệm 5 phút). Đọc lỗi, Kho báo lỗi (`isError`) hoặc kết quả không nhận ra được các trường của bảng (chữ thường,
+    Markdown, hình dạng lạ) ⇒ ValueError, KHÔNG có đề xuất — Sếp không được xác nhận một thay đổi mà thẻ không cho thấy
+    giá trị cũ (thẻ trống cột Hiện tại sẽ đọc thành "đang trống")."""
     from gh.hub_link import service as hub
 
     link = await hub.load(db, user.org_id)
+    # Quyền theo ĐÚNG tool của đề xuất (thiếu kho_update không khoá thẻ tạo mới) — như `write_kho` kiểm khi ghi.
     ok = (link is not None and link.server_id is not None and bool(link.enabled)
-          and (await hub.write_scopes(db, user.org_id))["kho"])
+          and (await hub.write_scopes(db, user.org_id))[ptype])
     out = {"write_scope": "ok" if ok else "missing"}
     if ptype == "kho_create":
         return {"bang": fields["bang"], "target": f"Tạo mới ở bảng {fields['bang']}", **out}
@@ -311,13 +322,16 @@ async def kho_labels(db: AsyncSession, user: service.CurrentUser, ptype: str, fi
                                  args={"id": ma})
     except ApiError as e:
         raise ValueError("chưa đọc được bản ghi Kho") from e
-    cur = _record_fields(res.get("data"), bang) if bang else None
-    labs = {"bang": bang, "target": ma, **out}
-    if cur is not None:
-        title = _snippet(cur.get(kho_write.REQUIRED[bang]), 80)
-        labs["target"] = f"{ma} · {title}" if title else ma
-        for k in fields["record"]:
-            labs[f"cur:{k}"] = _snippet(cur.get(k, ""), VALUE_SNIPPET)
+    data = res.get("data")
+    if isinstance(data, dict) and data.get("isError") is True:
+        raise ValueError(f"Kho báo lỗi khi đọc {ma} — chưa đọc được giá trị hiện tại")
+    cur = _record_fields(data, bang) if bang else None
+    if cur is None:
+        raise ValueError(f"chưa đọc được giá trị hiện tại của {ma} (Kho trả kết quả không nhận ra các trường)")
+    title = _snippet(cur.get(kho_write.REQUIRED[bang]), 80)
+    labs = {"bang": bang, "target": f"{ma} · {title}" if title else ma, **out}
+    for k in fields["record"]:
+        labs[f"cur:{k}"] = _snippet(cur.get(k, ""), VALUE_SNIPPET)
     return labs
 
 
@@ -400,7 +414,8 @@ def summary(ptype: str, fields: dict[str, Any], lab: dict[str, str], tz: ZoneInf
         return (f"Tạo nhắc việc “{fields['title']}” ({fields['priority']}), nhắc lúc "
                 f"{_fmt_time(fields['remind_at'], tz)}{due}{who}.")
     if ptype == MEMORY_TYPE:
-        return (f"Ghi nhớ: “{fields['text']}” (lý do: {fields['reason']}). Gen dùng ghi chú này khi trả lời và khi "
+        why = f" (lý do: {fields['reason']})" if fields.get("reason") else ""
+        return (f"Ghi nhớ: “{fields['text']}”{why}. Gen dùng ghi chú này khi trả lời và khi "
                 "soạn Bản tin; sửa/xoá ở Cài đặt › Bộ não AI › Gen nhớ.")
     if ptype in KHO_TYPES:
         listing = "; ".join(f"{k} = “{_snippet(v, VALUE_SNIPPET)}”" for k, v in fields["record"].items())
@@ -474,7 +489,7 @@ async def plan_call(db: AsyncSession, user: service.CurrentUser, ptype: str, f: 
                     pid: str | None = None) -> Call:
     """Endpoint SẴN CÓ tương ứng loại đề xuất (không có đường ghi riêng cho Gen)."""
     if ptype == MEMORY_TYPE:
-        return Call("POST", "/gen/memory", {"text": f["text"], "reason": f["reason"], "proposal_id": pid},
+        return Call("POST", "/gen/memory", {"text": f["text"], "reason": f["reason"] or None, "proposal_id": pid},
                     "memory_note")
     if ptype in KHO_TYPES:
         # Permit ký PHÁT Ở ĐÂY — hàm này chỉ được `confirm_proposal` gọi, SAU khi qua kiểm quyền + PIN (không bao giờ ở

@@ -27,18 +27,26 @@ CREATE POLICY org_isolation ON agent.gen_memory_notes
          OR current_setting('app.org_id', true) = '');
 
 -- b) agent.hub_release_proposals: mỗi (tổ chức, phiên bản) đề xuất ghi Phiên vào Kho ĐÚNG MỘT lần (F-87).
---    pending -> writing (một Owner đang ghi) -> written | pending (ghi lỗi, thử lại được) | cancelled | expired.
+--    pending -> writing (một Owner đang ghi) -> written | pending (ghi lỗi chắc chắn, thử lại được) | uncertain (lỗi mạng /
+--    timeout / 5xx SAU khi đã gửi: chưa chắc đã ghi — CHỈ Owner đó (uncertain_by) bấm lại hoặc huỷ, Owner khác bị chặn) |
+--    cancelled | expired.
 CREATE TABLE IF NOT EXISTS agent.hub_release_proposals (
   org_id        uuid NOT NULL REFERENCES core.organizations(id) ON DELETE CASCADE,
   version       text NOT NULL CHECK (version ~ '^v\d+\.\d+\.\d+$'),
-  status        text NOT NULL CHECK (status IN ('pending', 'writing', 'written', 'cancelled', 'expired')),
+  status        text NOT NULL CHECK (status IN ('pending', 'writing', 'uncertain', 'written', 'cancelled', 'expired')),
   proposal_ids  uuid[] NOT NULL DEFAULT '{}',
   kho_ma        text,
   created_at    timestamptz NOT NULL DEFAULT now(),
   decided_at    timestamptz,
   decided_by    uuid,
+  uncertain_by  uuid,
   PRIMARY KEY (org_id, version)
 );
+-- Bản dựng trước có bảng thiếu cột / ràng buộc trạng thái cũ: thêm cột + thay ràng buộc (chạy lại an toàn).
+ALTER TABLE agent.hub_release_proposals ADD COLUMN IF NOT EXISTS uncertain_by uuid;
+ALTER TABLE agent.hub_release_proposals DROP CONSTRAINT IF EXISTS hub_release_proposals_status_check;
+ALTER TABLE agent.hub_release_proposals ADD CONSTRAINT hub_release_proposals_status_check
+  CHECK (status IN ('pending', 'writing', 'uncertain', 'written', 'cancelled', 'expired'));
 
 ALTER TABLE agent.hub_release_proposals ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS org_isolation ON agent.hub_release_proposals;
