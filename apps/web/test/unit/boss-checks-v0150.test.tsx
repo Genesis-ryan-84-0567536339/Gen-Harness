@@ -141,6 +141,14 @@ describe('Việc Sếp cần làm — dòng 9 Gen ghi Kho', () => {
     expect(within(row).getByTestId('boss-result')).toHaveTextContent('Chưa kiểm');
   });
 
+  it('dòng Gen-hub chưa đạt: hướng dẫn tạo token KHÔNG còn "token chỉ đọc" — quyền đọc Kho, tuỳ chọn tick kho_create, kho_update', async () => {
+    setup({});
+    renderPage();
+    const hubRow = await screen.findByRole('region', { name: 'Nối Gen-hub' });
+    expect(hubRow).toHaveTextContent('tạo token 90 ngày có quyền đọc Kho (muốn Gen ghi Kho thì tick thêm kho_create, kho_update)');
+    expect(hubRow).not.toHaveTextContent('token chỉ đọc');
+  });
+
   it('dòng Gen-hub hiện write_scopes từ detail (Đạt): Có không cần nhắc; Chưa ⇒ hướng dẫn tick; vắng ⇒ ẩn', async () => {
     setup({ hub: pass('hub', { tools: 3, write_scopes: { kho: true } }) });
     const first = renderPage();

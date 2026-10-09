@@ -123,7 +123,8 @@ async def test_job_proposes_once_per_version(owner_api: Api, fake_hub: FakeHub, 
         "Đã chốt": ("Máy chủ Gen-Harness đã nâng lên v0.1.50. Ghi chú phát hành: "
                     f"https://github.com/{REPO}/releases/tag/v0.1.50")}}
     assert p["requires_pin"] is True and p["target"] == "hub.kho_write:Phiên"
-    assert p["labels"] == {"bang": "Phiên", "target": "Tạo mới ở bảng Phiên", "write_scope": "ok"}
+    # `release` = phiên bản: thẻ nói rõ mỗi bản ghi MỘT lần cho cả tổ chức (Huỷ = huỷ cho mọi Owner).
+    assert p["labels"] == {"bang": "Phiên", "target": "Tạo mới ở bảng Phiên", "write_scope": "ok", "release": "v0.1.50"}
     assert p["summary"].endswith("Chỉ ghi khi Sếp bấm Xác nhận và nhập mã PIN (qua Gen-hub).")
     # Redis: sống 7 ngày, mang khoá meta release_version (không thuộc fields).
     stored = await proposals.load(redis, p["id"])

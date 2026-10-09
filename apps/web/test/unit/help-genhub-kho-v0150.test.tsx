@@ -40,6 +40,8 @@ describe('Gen-hub ghi Kho có xác nhận — chữ trên Trợ giúp và Hướ
     const card = await screen.findByTestId('help-genhub-reads');
     expect(card.textContent).toContain('Gen chỉ ĐỌC');
     expect(card.textContent).toContain('Gen KHÔNG gửi mail');
+    // "việc" ở dòng KHÔNG là việc Google Tasks — không đá nhau với dòng "Ghi duy nhất: Phiên, Việc vào Kho Ryan".
+    expect(card.textContent).toContain('KHÔNG tạo hay sửa lịch, việc Google Tasks, tệp Drive.');
     expect(card.textContent).toMatch(/Phiên, Việc vào Kho Ryan — chỉ khi Sếp bấm Xác nhận và nhập mã PIN/);
     expect(card.textContent).toContain('kho_create, kho_update');
     expect(card.textContent).not.toContain('Gen chỉ đọc');

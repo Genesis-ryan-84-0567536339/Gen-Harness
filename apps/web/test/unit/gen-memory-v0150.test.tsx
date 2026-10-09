@@ -164,7 +164,7 @@ describe('Thẻ đề xuất "Ghi nhớ" (memory_note)', () => {
     const card = cardOf('Ghi nhớ');
     await userEvent.click(within(card).getByRole('button', { name: 'Sửa' }));
     const text = within(card).getByLabelText('Ghi nhớ');
-    const reason = within(card).getByLabelText('Lý do');
+    const reason = within(card).getByLabelText('Lý do (không bắt buộc)');
     expect(text.tagName).toBe('TEXTAREA');
     expect(reason.tagName).toBe('TEXTAREA');
     expect(text).toHaveAttribute('maxlength', '280');
@@ -179,6 +179,22 @@ describe('Thẻ đề xuất "Ghi nhớ" (memory_note)', () => {
     await userEvent.click(within(card).getByRole('button', { name: 'Xác nhận ghi nhớ' }));
     await waitFor(() => expect(writes()).toHaveLength(1));
     expect(writes()[0].body).toEqual({ fields: { text: 'Xưng em, gọi Sếp', reason: 'Sếp thích vậy' } });
+  });
+
+  it('Lý do KHÔNG bắt buộc khi Sếp xác nhận (cùng quy tắc ô "Lý do (không bắt buộc)" ở Cài đặt › Gen nhớ): xoá trắng vẫn bấm được, gửi reason rỗng', async () => {
+    renderPanel();
+    showProposal(MEMORY);
+    const card = cardOf('Ghi nhớ');
+    await userEvent.click(within(card).getByRole('button', { name: 'Sửa' }));
+    const reason = within(card).getByLabelText('Lý do (không bắt buộc)');
+    expect(within(card).queryByText('Bắt buộc')).toBeNull();
+    await userEvent.clear(reason);
+    const confirmBtn = within(card).getByRole('button', { name: 'Xác nhận ghi nhớ' });
+    expect(confirmBtn).toBeEnabled();
+    await userEvent.click(confirmBtn);
+    await waitFor(() => expect(writes()).toHaveLength(1));
+    expect(writes()[0].body).toEqual({ fields: { reason: '' } });
+    expect(card).not.toHaveTextContent('không được trống');
   });
 
   it('Huỷ → "Đã huỷ — không ghi nhớ", không gọi confirm', async () => {

@@ -445,7 +445,12 @@ export function createMock(opts: MockGenOptions) {
       if (seg[3] === 'confirm' && opts.extra) {
         const r = opts.extra.confirm({ ...pr, fields: pr.fields } as GenProposal, ctx);
         if (r) {
-          if ('error' in r) return problem(r.error.status, r.error.code, r.error.title, r.error.operation ? { detail: { operation: r.error.operation } } : r.error.errors ? { errors: r.error.errors } : undefined);
+          if ('error' in r) {
+            const e = r.error;
+            // Như confirm_proposal thật: chuyển nguyên `detail` (lý do Kho từ chối, lý do permit…) của lần ghi Kho.
+            const extra = e.operation ? { detail: { operation: e.operation } } : { ...(e.errors ? { errors: e.errors } : {}), ...(e.detail ? { detail: e.detail } : {}) };
+            return problem(e.status, e.code, e.title, Object.keys(extra).length ? extra : undefined);
+          }
           proposals.set(pr.id, r.proposal);
           return reply(200, r.proposal);
         }
@@ -499,6 +504,37 @@ export function createMock(opts: MockGenOptions) {
       script: (b: unknown) => script(String((b as { text?: string })?.text ?? '')),
       /** v0.1.41 (F-8): worker Bản tin Gen tới giờ (như `POST /gen/__mock/briefing`). */
       briefing: (b: unknown) => makeBriefing((b ?? {}) as { slot?: unknown; needs_api_key?: unknown; hub?: unknown }),
+      /**
+       * v0.1.50 (F-87): job `gen_kho_release` — máy chủ vừa lên bản `version`: một hội thoại có thẻ đề xuất ghi Phiên (kho_create,
+       * nhãn `release`) + chuông `gen.kho_proposal` (link `/overview?gen={cid}`) cho Owner. Job KHÔNG ghi Kho — chỉ khi Sếp Xác nhận
+       * + nhập mã PIN (mock-gen-v0150 `confirm`). `closed` ⇒ thẻ đã bị đóng vì Owner khác đã ghi (như `_close_release_cards`).
+       */
+      khoRelease: (b: unknown) => {
+        const body = (b ?? {}) as { version?: unknown; closed?: unknown };
+        const version = typeof body.version === 'string' && /^v\d+\.\d+\.\d+$/.test(body.version) ? body.version : 'v0.1.50';
+        const iso = new Date().toISOString();
+        const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' }).format(new Date());
+        const proposal: GenProposal = {
+          id: randomUUID(), type: 'kho_create',
+          fields: {
+            bang: 'Phiên',
+            record: {
+              'Chủ đề': `Gen-Harness lên bản ${version}`, Ngày: today,
+              'Đã chốt': `Máy chủ Gen-Harness đã nâng lên ${version}. Ghi chú phát hành: https://github.com/genesis/gen-harness/releases/tag/${version}`,
+            },
+          },
+          summary: 'Tạo bản ghi mới ở bảng Phiên của Kho Ryan — ghi thẳng qua Gen-hub khi Sếp xác nhận và nhập mã PIN.',
+          labels: { bang: 'Phiên', target: 'Tạo mới ở bảng Phiên', write_scope: 'ok', release: version, ...(body.closed ? { closed: 'Owner khác đã ghi bản này vào Kho (PHIEN-12)' } : {}) },
+          target: 'hub.kho_write:Phiên', requires_pin: true, status: body.closed ? 'cancelled' : 'pending',
+        };
+        proposals.set(proposal.id, proposal);
+        const conv: Conversation = { id: randomUUID(), title: `Ghi Phiên ${version} vào Kho`, created_at: iso, last_at: iso, kind: 'chat', messages: [] };
+        const say = `Máy chủ Gen-Harness vừa lên ${version}. Em đề xuất ghi một Phiên vào Kho Ryan để lưu mốc này — Sếp xem lại, sửa nếu cần rồi bấm Xác nhận và nhập mã PIN thì em mới ghi (qua Gen-hub).`;
+        conv.messages.push({ id: randomUUID(), role: 'assistant', turn_id: randomUUID(), content: { steps: [{ kind: 'say', text: say }, { kind: 'proposal', proposal }] }, created_at: iso });
+        conversations.set(conv.id, conv);
+        opts.notifyOwners?.('gen.kho_proposal', `Gen đề xuất ghi Kho · Phiên ${version}`, `Gen-Harness đã lên ${version}. Xem thẻ đề xuất, Xác nhận và nhập mã PIN để ghi Phiên vào Kho Ryan.`, `/overview?gen=${conv.id}`);
+        return { conversation_id: conv.id, proposal_id: proposal.id };
+      },
       /** Worker nhắc việc tới giờ: chuông cho Owner, mỗi nhắc một lần. */
       fireReminders: () => {
         let n = 0;

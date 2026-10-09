@@ -28,7 +28,9 @@ export interface KhoWriteReq {
   args: Record<string, unknown>;
   permit: string;
 }
-export type KhoWriteOutcome = { ok: true; code: string | null; bang: KhoBang } | { ok: false; status: number; code: string; title: string };
+export type KhoWriteOutcome =
+  | { ok: true; code: string | null; bang: KhoBang }
+  | { ok: false; status: number; code: string; title: string; /** Lý do thật (lời Kho từ chối, lý do permit…) như máy chủ đặt ở `detail`. */ detail?: string };
 
 export interface GenV0150Options {
   /** Một lần ghi Kho đã được xác nhận (mock-p4-mcp `khoWrite`) — KHÔNG gọi khi Huỷ. */
@@ -39,7 +41,10 @@ export interface GenV0150Options {
 export interface GenExtra {
   script: (q: string) => GenStep[] | null;
   /** `null` = không phải loại của gói này (mock-gen xử lý tiếp); khác = phản hồi cuối. */
-  confirm: (pr: GenProposal, ctx: P2Ctx) => { proposal: GenProposal } | { error: { status: number; code: string; title: string; operation?: string; errors?: Record<string, string> } } | null;
+  confirm: (
+    pr: GenProposal,
+    ctx: P2Ctx,
+  ) => { proposal: GenProposal } | { error: { status: number; code: string; title: string; detail?: string; operation?: string; errors?: Record<string, string> } } | null;
 }
 
 const trimSpaces = (v: string) => v.replace(/\s+/g, ' ').trim();
@@ -202,7 +207,7 @@ export function createMock(opts: GenV0150Options) {
     const args = pr.type === 'kho_create' ? { bang, ...record } : { ma: pr.fields.ma, ...record };
     // Giấy phép ký 5 phút, 1 lần, gắn proposal_id + tool + sha256 args (mock: chuỗi giả, không bí mật).
     const out = opts.kho.write({ proposal_id: pr.id, tool: pr.type, args, permit: `permit-${randomUUID()}` });
-    if (!out.ok) return { error: { status: out.status, code: out.code, title: out.title } };
+    if (!out.ok) return { error: { status: out.status, code: out.code, title: out.title, ...(out.detail ? { detail: out.detail } : {}) } };
     const code = pr.type === 'kho_update' ? pr.fields.ma : out.code;
     return {
       proposal: { ...pr, fields: pr.type === 'kho_create' ? { bang, record } : { ma: pr.fields.ma, record }, status: 'confirmed', result: { type: 'kho_record', id: null, code, screen: null, bang } } as GenProposal,

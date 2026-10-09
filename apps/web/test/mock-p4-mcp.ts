@@ -106,9 +106,13 @@ export function createMock(opts: P4McpOptions) {
   /** Mọi lời gọi `/hub/kho/write` (kể cả lỗi) — Huỷ đề xuất thì KHÔNG có lời gọi nào. Không lưu permit / token. */
   const khoCalls: Array<{ proposal_id: string; tool: string; outcome: string; code: string | null }> = [];
   const khoSeq = { Phiên: 12, Việc: 40 };
-  const FULL_WRITE: HubWriteScopes = { kho: true };
-  const MISSING_WRITE: HubWriteScopes = { kho: false };
+  // Như máy chủ: quyền ghi THEO TỪNG tool + `kho` (= có cả hai).
+  const FULL_WRITE: HubWriteScopes = { kho: true, kho_create: true, kho_update: true };
+  const MISSING_WRITE: HubWriteScopes = { kho: false, kho_create: false, kho_update: false };
   const WRITE_MISSING_LABEL = 'ghi Kho (kho_create, kho_update)';
+  const KHO_WRITE_TOOLS = ['mcp-58450__kho_create', 'mcp-58450__kho_update'];
+  /** Lời Kho từ chối giả (đã che) — như `write_kho`: title "Kho từ chối lần ghi này: <lý do>", lý do ở `detail`. */
+  const KHO_REJECT_REASON = "Giá trị 'Trạng thái' không có trong danh sách lựa chọn của Kho";
   const FULL_SCOPES: HubReadScopes = { calendar: true, mail: true, tasks: true, drive: true };
   const MISSING_SCOPES: HubReadScopes = { calendar: false, mail: false, tasks: true, drive: true };
   const SCOPE_LABEL: Record<keyof HubReadScopes, string> = { calendar: 'đọc lịch', mail: 'đọc mail', tasks: 'đọc việc (Google Tasks)', drive: 'tìm tệp Drive' };
@@ -132,7 +136,8 @@ export function createMock(opts: P4McpOptions) {
   };
   type HubTestOut = {
     ok: boolean; error: string | null; error_code: string | null; latency_ms: number; exposed_tools: string[]; missing_tools: string[];
-    read_scopes?: HubReadScopes; read_missing?: string[]; write_tools?: string[]; write_scopes?: HubWriteScopes; write_missing?: string[]; link: HubLink;
+    read_scopes?: HubReadScopes; read_missing?: string[]; write_tools?: string[]; write_scopes?: HubWriteScopes; write_missing?: string[];
+    exposed_write_tools?: string[]; write_hidden?: string[]; link: HubLink;
   };
   /** Một lượt "Kiểm tra" Gen-hub — dùng chung cho `POST /hub/link/test` và `POST /boss-checks/hub/run`. */
   const hubTest = (): HubTestOut => {
@@ -152,9 +157,10 @@ export function createMock(opts: P4McpOptions) {
     hubLink = { ...hubLink, enabled: true, status: 'ok', last_ok_at: new Date().toISOString(), last_error: null, health: 'healthy', read_scopes: { ...scopes }, write_scopes: { ...write } };
     return {
       ok: true, error: null, error_code: null, latency_ms: 240,
-      exposed_tools: ['mcp-58450__kho_tom_tat', 'mcp-58450__kho_search', 'mcp-58450__kho_find_by_id'], missing_tools: [],
+      exposed_tools: ['mcp-58450__kho_tom_tat', 'mcp-58450__kho_search', 'mcp-58450__kho_find_by_id', ...(write.kho ? KHO_WRITE_TOOLS : [])], missing_tools: [],
       read_scopes: { ...scopes }, read_missing: readMissing, write_tools: [],
-      write_scopes: { ...write }, write_missing: write.kho ? [] : [WRITE_MISSING_LABEL], link: linkOut(hubLink),
+      write_scopes: { ...write }, write_missing: write.kho ? [] : [WRITE_MISSING_LABEL],
+      exposed_write_tools: write.kho ? [...KHO_WRITE_TOOLS] : [], write_hidden: [], link: linkOut(hubLink),
     };
   };
 
@@ -242,15 +248,15 @@ export function createMock(opts: P4McpOptions) {
    */
   const khoWrite = (req: KhoWriteReq): KhoWriteOutcome => {
     const note = (outcome: string, code: string | null = null) => khoCalls.push({ proposal_id: req.proposal_id, tool: req.tool, outcome, code });
-    const fail = (status: number, code: string, title: string): KhoWriteOutcome => {
+    const fail = (status: number, code: string, title: string, detail?: string): KhoWriteOutcome => {
       note(code);
-      return { ok: false, status, code, title };
+      return { ok: false, status, code, title, ...(detail ? { detail } : {}) };
     };
-    if (!req.permit.startsWith('permit-') || khoSim === 'permit') return fail(403, 'HUB_WRITE_PERMIT', 'Giấy phép ghi không hợp lệ hoặc đã quá 5 phút');
+    if (!req.permit.startsWith('permit-') || khoSim === 'permit') return fail(403, 'HUB_WRITE_PERMIT', 'Giấy phép ghi không hợp lệ hoặc đã quá 5 phút', 'EXPIRED');
     if (!hubLink.configured || !hubLink.enabled) return fail(409, 'HUB_LINK_OFF', 'Gen-hub đang tắt — Kiểm tra xanh ở Kết nối › Gen-hub trước');
     if (hubBreakerOpen) return fail(503, 'HUB_BREAKER_OPEN', 'Gen-hub tạm không trả lời — thử lại sau 1 phút');
     if (hubWriteMissing) return fail(409, 'HUB_WRITE_MISSING', 'Token Gen-hub chưa có quyền ghi Kho (kho_create, kho_update)');
-    if (khoSim === 'rejected') return fail(409, 'HUB_WRITE_REJECTED', 'Gen-hub từ chối bản ghi: trường chưa hợp lệ');
+    if (khoSim === 'rejected') return fail(409, 'HUB_WRITE_REJECTED', `Kho từ chối lần ghi này: ${KHO_REJECT_REASON}`, KHO_REJECT_REASON);
     if (khoSim === 'uncertain') return fail(502, 'HUB_WRITE_UNCERTAIN', 'Không rõ Gen-hub đã ghi hay chưa');
     const bang = req.tool === 'kho_create' ? (req.args.bang === 'Việc' ? 'Việc' : 'Phiên') : String(req.args.ma ?? '').startsWith('VIEC-') ? 'Việc' : 'Phiên';
     const code = req.tool === 'kho_create' ? `${bang === 'Việc' ? 'VIEC' : 'PHIEN'}-${khoSeq[bang]++}` : String(req.args.ma ?? '') || null;

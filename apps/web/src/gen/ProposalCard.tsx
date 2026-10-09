@@ -14,6 +14,7 @@ import {
   KHO_PRIORITY,
   KHO_REQUIRED,
   KHO_STATUS,
+  khoMaxLen,
   type AssignFields,
   type DraftMessageFields,
   type GenProposal,
@@ -31,7 +32,8 @@ import { qkMcp } from '../screens/mcp/queries';
 import { ErrorWithDetail, WriteProofDialog } from '../social/WriteProofDialog';
 import { PROOF_MISSING_TEXT, WRITE_RISK_PATH, proofMissing, qkSocial, writeStatusView } from '../social/socialModel';
 import { charCount, MEMORY_MAX_LEN, MEMORY_REASON_MAX } from './genMemoryModel';
-import { patchProposal } from './genStore';
+import { loadConversation } from './genClient';
+import { patchProposal, useGenStore } from './genStore';
 import {
   HUB_CARD_PATH,
   KHO_MISSING_HINT,
@@ -41,11 +43,15 @@ import {
   isKhoWrite,
   isMemoryNote,
   khoBangOf,
+  khoCurrent,
+  khoReleaseNote,
   khoDraftValid,
   khoFieldKind,
+  khoLengthError,
   khoLinkError,
   khoRows,
   khoTargetText,
+  proposalErrorDetail,
   proposalErrorView,
   valueText,
   writeScopeMissing,
@@ -189,7 +195,10 @@ function Summary({ p }: { p: GenProposal }) {
   );
 }
 
-/** Form Sửa của thẻ Ghi nhớ: hai ô nhiều dòng, mỗi ô có bộ đếm ký tự (0/280, 0/200). */
+/**
+ * Form Sửa của thẻ Ghi nhớ: hai ô nhiều dòng, mỗi ô có bộ đếm ký tự (0/280, 0/200). Lý do KHÔNG bắt buộc khi Sếp xác nhận — cùng
+ * quy tắc ô "Lý do (không bắt buộc)" ở Cài đặt › Gen nhớ (Gen thì phải nêu lý do khi đề xuất).
+ */
 function MemoryEditForm({ p, draft, set }: { p: MemoryProposal; draft: Draft; set: (k: string, v: string) => void }) {
   return (
     <div className="gen-prop__form">
@@ -204,7 +213,7 @@ function MemoryEditForm({ p, draft, set }: { p: MemoryProposal; draft: Draft; se
       </div>
       <div className="gh-field">
         <label className="gh-field__label" htmlFor={`gen-prop-mem-reason-${p.id}`}>
-          Lý do
+          Lý do (không bắt buộc)
         </label>
         <textarea id={`gen-prop-mem-reason-${p.id}`} className="gh-input" rows={3} maxLength={MEMORY_REASON_MAX} value={draft.reason ?? ''} onChange={(e) => set('reason', e.target.value)} />
         <span className="gen-prop__count" data-testid="gen-mem-count-reason">
@@ -215,22 +224,43 @@ function MemoryEditForm({ p, draft, set }: { p: MemoryProposal; draft: Draft; se
   );
 }
 
-/** Form Sửa của thẻ Ghi vào Kho: một ô cho từng trường được phép của bảng (bảng / mã bản ghi khoá cứng, không có ô). */
+/**
+ * Form Sửa của thẻ Ghi vào Kho: một ô cho từng trường được phép của bảng (bảng / mã bản ghi khoá cứng, không có ô). Mỗi ô chữ có
+ * giới hạn ký tự đúng `kho_write.py` + bộ đếm. Sửa bản ghi (`kho_update`): dưới mỗi ô là giá trị HIỆN TẠI trong Kho (nhãn
+ * `cur:<trường>`; trường Gen không đề xuất sửa ⇒ "chưa đọc") và câu "Để trống = giữ nguyên" — xoá trắng một ô KHÔNG xoá trường
+ * trong Kho (trường rỗng bị bỏ khỏi bản ghi gửi đi).
+ */
 function KhoEditForm({ p, draft, set }: { p: KhoProposal; draft: Draft; set: (k: string, v: string) => void }) {
   const bang = khoBangOf(p);
   if (!bang) return <p className="gen-prop__note">Không rõ bảng của đề xuất này — không sửa được; bấm Huỷ và nhờ Gen đề xuất lại.</p>;
+  const update = p.type === 'kho_update';
   const linkError = khoLinkError(draft);
   return (
     <div className="gen-prop__form" data-testid="gen-kho-form">
+      {update ? (
+        <p className="gen-prop__note" data-testid="gen-kho-keep-note">
+          Để trống = giữ nguyên trong Kho (không xoá giá trị cũ). Dưới mỗi ô là giá trị hiện tại.
+        </p>
+      ) : null}
       {KHO_FIELDS[bang].map((field) => {
         const kind = khoFieldKind(bang, field);
         const value = draft[field] ?? '';
-        const hint = field === KHO_REQUIRED[bang] && p.type === 'kho_create' ? 'Bắt buộc' : undefined;
+        const cur = khoCurrent(p, field);
+        const curHint = !update ? undefined : cur === null ? 'Hiện tại: chưa đọc (Gen không đề xuất sửa trường này)' : `Hiện tại: ${cur || '—'}`;
+        const hint = field === KHO_REQUIRED[bang] && p.type === 'kho_create' ? 'Bắt buộc' : curHint;
         if (kind === 'status' || kind === 'priority') {
           const list: readonly string[] = kind === 'status' ? KHO_STATUS : KHO_PRIORITY;
           const options = [{ value: '', label: '— Không đặt —' }, ...(value && !list.includes(value) ? [{ value, label: value }] : []), ...list.map((v) => ({ value: v, label: v }))];
-          return <SelectField key={field} label={field} value={value} options={options} onChange={(e) => set(field, e.target.value)} />;
+          return <SelectField key={field} label={field} value={value} hint={hint} options={options} onChange={(e) => set(field, e.target.value)} />;
         }
+        const max = khoMaxLen(bang, field);
+        const lengthError = kind === 'date' ? null : khoLengthError(bang, field, value);
+        const counter =
+          kind === 'date' ? undefined : (
+            <span className="gen-prop__count" data-testid={`gen-kho-count-${field}`}>
+              {charCount(value, max)}
+            </span>
+          );
         if (kind === 'long') {
           const id = `gen-prop-kho-${p.id}-${field}`;
           return (
@@ -238,7 +268,9 @@ function KhoEditForm({ p, draft, set }: { p: KhoProposal; draft: Draft; set: (k:
               <label className="gh-field__label" htmlFor={id}>
                 {field}
               </label>
-              <textarea id={id} className="gh-input" rows={3} maxLength={4000} value={value} onChange={(e) => set(field, e.target.value)} />
+              <textarea id={id} className="gh-input" rows={3} maxLength={max} value={value} aria-invalid={lengthError ? true : undefined} onChange={(e) => set(field, e.target.value)} />
+              {counter}
+              {lengthError ? <div className="gh-field__error">{lengthError}</div> : hint ? <div className="gh-field__hint">{hint}</div> : null}
             </div>
           );
         }
@@ -249,8 +281,9 @@ function KhoEditForm({ p, draft, set }: { p: KhoProposal; draft: Draft; set: (k:
             type={kind === 'date' ? 'date' : 'text'}
             value={value}
             hint={hint}
-            error={field === 'Link Issue/PR' ? linkError : undefined}
-            maxLength={kind === 'date' ? undefined : 500}
+            error={(field === 'Link Issue/PR' ? linkError : null) ?? lengthError}
+            maxLength={kind === 'date' ? undefined : max}
+            after={counter}
             placeholder={field === 'Link Issue/PR' ? 'https://github.com/…' : undefined}
             onChange={(e) => set(field, e.target.value)}
           />
@@ -439,6 +472,23 @@ export function ProposalCard({ proposal: p }: { proposal: GenProposal }) {
     }
   };
 
+  // GEN_PROPOSAL_DECIDED: thẻ đã được xác nhận / đóng ở nơi khác (vd Owner khác đã ghi Phiên của bản này) — máy chủ đã lưu trạng
+  // thái mới vào hội thoại ⇒ tải lại hội thoại để thẻ hiện đúng (không còn nút Xác nhận chết).
+  const conversationId = useGenStore((s) => s.conversationId);
+  const reload = async () => {
+    const cid = conversationId;
+    if (!cid) return;
+    setBusy('cancel');
+    try {
+      await loadConversation(cid);
+    } catch (e) {
+      setError(errorText(e));
+      setErrorRaw(e);
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const title = PROPOSAL_TITLE[p.type];
   const resultScreen = p.result?.screen ? GEN_SCREEN_BY_KEY[p.result.screen] : undefined;
   // v0.1.43 (F-24): nháp tin chỉ được LƯU, chưa gửi — nói rõ và dẫn thẳng tới đúng nháp ở Bàn làm việc để duyệt/gửi.
@@ -454,6 +504,10 @@ export function ProposalCard({ proposal: p }: { proposal: GenProposal }) {
   // v0.1.50: thẻ ghi nhớ / ghi Kho luôn vẽ lỗi theo khuôn "câu thân thiện + Chi tiết kỹ thuật" (như thẻ gửi Facebook).
   const richError = social || memory || kho;
   const errView = proposalErrorView(errorRaw);
+  // F-87: thẻ ghi Phiên của bản mới bị đóng vì Owner khác đã ghi / huỷ / ghi chưa chắc — máy chủ nêu lý do ở `labels.closed`.
+  const closedNote = valueText(p.labels.closed).trim();
+  // F-87: thẻ ghi Phiên của bản mới (job `gen_kho_release`, nhãn `release` = phiên bản) — mỗi bản ghi MỘT lần cho cả tổ chức.
+  const releaseVersion = kho ? valueText(p.labels.release).trim() : '';
   const confirmLabel = social ? 'Xác nhận và gửi' : kho ? 'Xác nhận và ghi Kho' : memory ? 'Xác nhận ghi nhớ' : 'Xác nhận';
   return (
     <div className="gen-prop" data-status={p.status} role="group" aria-label={`Đề xuất: ${title}`}>
@@ -490,6 +544,11 @@ export function ProposalCard({ proposal: p }: { proposal: GenProposal }) {
           <p className="gen-prop__warn gen-prop__warn--send" role="note" data-testid="gen-kho-warning">
             <Icon name="ph ph-warning" size={13} /> {KHO_WRITE_WARNING}
           </p>
+          {releaseVersion ? (
+            <p className="gen-prop__note" role="note" data-testid="gen-kho-release-note">
+              {khoReleaseNote(releaseVersion)}
+            </p>
+          ) : null}
           {noWrite ? (
             <p className="gen-prop__warn" role="note" data-testid="gen-kho-missing">
               <Icon name="ph ph-lock-simple" size={13} />
@@ -502,7 +561,7 @@ export function ProposalCard({ proposal: p }: { proposal: GenProposal }) {
       ) : null}
       {error && richError ? (
         <>
-          <ErrorWithDetail error={errorRaw} text={error} className="gen-prop__error write-error" />
+          <ErrorWithDetail error={errorRaw} text={error} detail={proposalErrorDetail(errorRaw)} className="gen-prop__error write-error" />
           {social && writeErrorKind((errorRaw as { code?: string } | null)?.code) === 'locked' ? (
             <Button variant="secondary" className="btn-27" icon="ph ph-shield-warning" onClick={() => navigateTo(WRITE_RISK_PATH)}>
               Đọc cảnh báo & đồng ý
@@ -511,6 +570,11 @@ export function ProposalCard({ proposal: p }: { proposal: GenProposal }) {
           {errView?.action === 'open_hub' ? (
             <Button variant="secondary" className="btn-27" icon="ph ph-plugs-connected" onClick={() => navigateTo(HUB_CARD_PATH)}>
               Mở Kết nối › Gen-hub
+            </Button>
+          ) : null}
+          {errView?.action === 'reload' && p.status === 'pending' && conversationId ? (
+            <Button variant="secondary" className="btn-27" icon="ph ph-arrows-clockwise" disabled={busy !== null} onClick={() => void reload()}>
+              Tải lại hội thoại
             </Button>
           ) : null}
           {errView?.action === 'open_memory' ? (
@@ -604,8 +668,15 @@ export function ProposalCard({ proposal: p }: { proposal: GenProposal }) {
           ) : null}
         </div>
       ) : (
-        <div className="gen-prop__done gen-prop__done--off">
-          <Icon name="ph ph-x-circle" size={13} /> {kho ? 'Đã huỷ — không ghi gì vào Kho' : memory ? 'Đã huỷ — không ghi nhớ' : 'Đã huỷ — không làm gì'}
+        <div className="gen-prop__done gen-prop__done--off" data-testid="gen-prop-cancelled">
+          <Icon name="ph ph-x-circle" size={13} />{' '}
+          {closedNote
+            ? `Thẻ đã đóng — ${closedNote}`
+            : kho
+              ? 'Đã huỷ — không ghi gì vào Kho'
+              : memory
+                ? 'Đã huỷ — không ghi nhớ'
+                : 'Đã huỷ — không làm gì'}
         </div>
       )}
     </div>

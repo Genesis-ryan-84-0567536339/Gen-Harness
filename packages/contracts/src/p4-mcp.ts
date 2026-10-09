@@ -118,10 +118,11 @@ export type HubLinkStatus = 'off' | 'ok' | 'expiring' | 'expired' | 'error';
 export type HubReadScopes = { calendar: boolean; mail: boolean; tasks: boolean; drive: boolean };
 
 /**
- * v0.1.50 (F-81, QD-18): quyền GHI Kho của token Gen-hub (tuỳ chọn): `kho` = token có cả `kho_create` và `kho_update`. Gen KHÔNG
- * tự ghi — chỉ khi Sếp bấm Xác nhận + nhập mã PIN trên thẻ đề xuất "Ghi vào Kho Ryan".
+ * v0.1.50 (F-81, QD-18): quyền GHI Kho của token Gen-hub (tuỳ chọn), THEO TỪNG tool: `kho_create`, `kho_update` (tool có trên Gen-hub,
+ * đang mở và đã cấp cho Gen); `kho` = có cả hai (giữ cho bên đọc cũ). Máy chủ cũ chỉ gửi `kho` ⇒ hai dòng theo `kho`. Gen KHÔNG tự
+ * ghi — chỉ khi Sếp bấm Xác nhận + nhập mã PIN trên thẻ đề xuất "Ghi vào Kho Ryan".
  */
-export type HubWriteScopes = { kho: boolean };
+export type HubWriteScopes = { kho: boolean; kho_create?: boolean; kho_update?: boolean };
 
 export interface HubLink {
   configured: boolean;
@@ -175,8 +176,15 @@ export interface HubLinkTestResult {
   write_tools?: string[];
   /** v0.1.50: quyền ghi Kho của token; thiếu quyền ghi KHÔNG làm `ok=false`. */
   write_scopes?: HubWriteScopes;
-  /** v0.1.50: nhãn quyền ghi còn thiếu (vd 'ghi Kho (kho_create, kho_update)'); rỗng = đủ. */
+  /** v0.1.50: nhãn quyền ghi còn thiếu ở Gen-hub, nêu đúng tool (vd 'ghi Kho (kho_update)'); rỗng = đủ. */
   write_missing?: string[];
+  /** v0.1.50: tool GHI Kho vừa mở cho Gen (nằm trong `exposed_tools`) — để thẻ đếm riêng "tool đọc" và "tool ghi Kho". */
+  exposed_write_tools?: string[];
+  /**
+   * v0.1.50: hậu tố tool ghi Kho ('kho_create' | 'kho_update') Owner đã TỰ đóng (hoặc gỡ cấp Gen) ở MCP Hub — Kiểm tra không mở
+   * lại; muốn bật lại thì mở ở MCP Hub.
+   */
+  write_hidden?: string[];
   link: HubLink;
 }
 

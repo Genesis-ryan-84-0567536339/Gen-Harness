@@ -259,7 +259,9 @@ describe('mock-p4-mcp — chế độ giả "thiếu quyền lịch + mail" (tok
     expect((call(mock, 'GET', '/hub/link').body as { read_scopes?: unknown }).read_scopes).toBeNull();
     const full = call(mock, 'POST', '/hub/link/test').body;
     expect(full).toMatchObject({ ok: true, read_scopes: { calendar: true, mail: true, tasks: true, drive: true }, read_missing: [], write_tools: [] });
-    expect(full.exposed_tools).toHaveLength(3);
+    // 3 tool đọc Kho; v0.1.50: token mặc định có quyền ghi Kho ⇒ thêm kho_create, kho_update (đếm riêng ở exposed_write_tools).
+    expect(full.exposed_tools).toHaveLength(5);
+    expect(full.exposed_write_tools).toEqual(['mcp-58450__kho_create', 'mcp-58450__kho_update']);
 
     call(mock, 'PATCH', '/hub/link', { token: 'ghtok_thieu_quyen_2' });
     const miss = call(mock, 'POST', '/hub/link/test').body;

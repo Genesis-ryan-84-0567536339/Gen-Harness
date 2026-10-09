@@ -587,7 +587,8 @@ def build_release(org_id: uuid.UUID, owner_id: uuid.UUID, version: str, *, turn_
     chỉ cho MỘT Owner ghi mỗi (tổ chức, phiên bản). Quyền ghi đã được job kiểm trước khi dựng (nhãn 'ok')."""
     today = kho_write.vn_today(now).isoformat()
     fields = normalize("kho_create", {"bang": "Phiên", "record": release_record(version, today, repo)}, tz)
-    lab = {"bang": "Phiên", "target": "Tạo mới ở bảng Phiên", "write_scope": "ok"}
+    # `release` = phiên bản: thẻ nói rõ mỗi bản ghi MỘT lần cho cả tổ chức (Huỷ = huỷ cho mọi Owner).
+    lab = {"bang": "Phiên", "target": "Tạo mới ở bảng Phiên", "write_scope": "ok", "release": version}
     target = target_of("kho_create", fields)
     pid = uuid.uuid4()
     return {"id": str(pid), "type": "kho_create", "fields": fields, "labels": lab, "target": target,

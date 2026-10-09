@@ -2,6 +2,7 @@
 import {
   ApiError,
   type HubLinkStatus,
+  type HubLinkTestResult,
   type HubReadScopes,
   type HubWriteScopes,
   type McpArgsDigest,
@@ -151,9 +152,9 @@ export function scopesMessage(readMissing: unknown, scopes: Partial<Record<keyof
 }
 
 /**
- * v0.1.50 (F-81, QD-18): quyền GHI Kho (tuỳ chọn) của token Gen-hub. Máy chủ báo MỘT cờ `write_scopes.kho` (token có cả
- * `kho_create` và `kho_update`); thẻ vẽ 2 dòng, cùng trạng thái. Gen KHÔNG tự ghi: chỉ ghi khi Sếp bấm Xác nhận + nhập mã PIN
- * trên thẻ đề xuất "Ghi vào Kho Ryan". Thiếu quyền ghi không làm Kiểm tra đỏ.
+ * v0.1.50 (F-81, QD-18): quyền GHI Kho (tuỳ chọn) của token Gen-hub, THEO TỪNG tool — máy chủ báo `write_scopes.kho_create`,
+ * `write_scopes.kho_update` (và `kho` = có cả hai); máy chủ cũ chỉ có `kho` ⇒ hai dòng theo `kho`. Gen KHÔNG tự ghi: chỉ ghi khi
+ * Sếp bấm Xác nhận + nhập mã PIN trên thẻ đề xuất "Ghi vào Kho Ryan". Thiếu quyền ghi không làm Kiểm tra đỏ.
  */
 export const WRITE_SCOPE_ROWS: ReadonlyArray<{ key: 'kho_create' | 'kho_update'; label: string }> = [
   { key: 'kho_create', label: 'Tạo bản ghi Phiên/Việc' },
@@ -168,33 +169,75 @@ export interface WriteScopeRow {
   text: 'Có' | 'Chưa' | 'Chưa kiểm';
 }
 
-export function writeScopeRows(scopes: Partial<Record<keyof HubWriteScopes, unknown>> | null | undefined): WriteScopeRow[] {
-  const v = scopes && typeof scopes === 'object' ? scopes.kho : undefined;
-  const state = v === true ? 'yes' : v === false ? 'no' : 'unknown';
-  return WRITE_SCOPE_ROWS.map((r) => ({ ...r, state, text: state === 'yes' ? 'Có' : state === 'no' ? 'Chưa' : 'Chưa kiểm' }));
+type WriteScopesIn = Partial<Record<keyof HubWriteScopes, unknown>> | null | undefined;
+
+/** Có quyền của MỘT tool: cờ riêng của tool (boolean) nếu máy chủ gửi, không thì cờ chung `kho` (máy chủ cũ); khác ⇒ undefined. */
+function writeScopeOf(scopes: WriteScopesIn, key: 'kho_create' | 'kho_update'): boolean | undefined {
+  if (!scopes || typeof scopes !== 'object') return undefined;
+  const own = scopes[key];
+  if (typeof own === 'boolean') return own;
+  return typeof scopes.kho === 'boolean' ? scopes.kho : undefined;
+}
+
+export function writeScopeRows(scopes: WriteScopesIn): WriteScopeRow[] {
+  return WRITE_SCOPE_ROWS.map((r) => {
+    const v = writeScopeOf(scopes, r.key);
+    const state = v === true ? 'yes' : v === false ? 'no' : 'unknown';
+    return { ...r, state, text: state === 'yes' ? 'Có' : state === 'no' ? 'Chưa' : 'Chưa kiểm' };
+  });
 }
 
 export const WRITE_MISSING_TEXT = 'Vào Gen-hub tick quyền kho_create, kho_update cho token của Gen-Harness rồi bấm Kiểm tra.';
 export const WRITE_ENOUGH_TEXT = 'Đủ quyền ghi Kho (Phiên, Việc).';
 export const WRITE_CONFIRM_ONLY_TEXT = 'Gen chỉ ghi khi Sếp bấm Xác nhận + nhập mã PIN trên thẻ đề xuất.';
+/** Câu khi Owner TỰ đóng tool ghi Kho ở MCP Hub — Kiểm tra không mở lại; tắt hẳn quyền ghi thì bỏ tick ở Gen-hub. */
+export const WRITE_HIDDEN_TEXT = (tools: string[]) =>
+  `Sếp đã tự đóng ${tools.join(', ')} ở MCP Hub — Kiểm tra không mở lại. Muốn Gen ghi lại thì mở ở MCP Hub; muốn tắt hẳn thì bỏ tick ở Gen-hub.`;
+
+/** Hậu tố tool ghi Kho Owner tự đóng ở MCP Hub (`write_hidden` của máy chủ) — chỉ giữ 'kho_create' / 'kho_update'. */
+export function writeHidden(list: unknown): string[] {
+  if (!Array.isArray(list)) return [];
+  return list.filter((t): t is string => t === 'kho_create' || t === 'kho_update');
+}
 
 /**
- * Câu về quyền ghi Kho sau một lần Kiểm tra: thiếu (máy chủ báo `write_missing` không rỗng, hoặc `kho === false`) ⇒ hướng dẫn tick
- * quyền; đủ ⇒ câu đủ quyền; chưa có dữ liệu ⇒ null. Chỉ nhận chuỗi / boolean.
+ * Câu về quyền ghi Kho sau một lần Kiểm tra: thiếu ở Gen-hub (máy chủ báo `write_missing` không rỗng, hoặc có tool `false` mà
+ * không phải do Owner tự đóng) ⇒ hướng dẫn tick quyền; Owner tự đóng ở MCP Hub ⇒ câu riêng; đủ ⇒ câu đủ quyền; chưa có dữ liệu ⇒
+ * null. Chỉ nhận chuỗi / boolean.
  */
-export function writeScopesMessage(writeMissing: unknown, scopes: Partial<Record<keyof HubWriteScopes, unknown>> | null | undefined): { tone: 'warn' | 'ok'; text: string } | null {
+export function writeScopesMessage(writeMissing: unknown, scopes: WriteScopesIn, hidden: unknown = undefined): { tone: 'warn' | 'ok'; text: string } | null {
   const listed = Array.isArray(writeMissing) ? writeMissing.filter((x): x is string => typeof x === 'string' && x.trim() !== '') : [];
   if (listed.length > 0) return { tone: 'warn', text: WRITE_MISSING_TEXT };
-  const kho = scopes && typeof scopes === 'object' ? scopes.kho : undefined;
-  if (kho === false) return { tone: 'warn', text: WRITE_MISSING_TEXT };
-  if (kho === true) return { tone: 'ok', text: WRITE_ENOUGH_TEXT };
+  const off = writeHidden(hidden);
+  const rows = writeScopeRows(scopes);
+  if (rows.some((r) => r.state === 'no' && !off.includes(r.key))) return { tone: 'warn', text: WRITE_MISSING_TEXT };
+  if (off.length > 0) return { tone: 'warn', text: WRITE_HIDDEN_TEXT(off) };
+  if (rows.every((r) => r.state === 'yes')) return { tone: 'ok', text: WRITE_ENOUGH_TEXT };
   return null;
+}
+
+/** Dòng phụ của thẻ Gen-hub: Gen đọc; ghi Kho chỉ khi Sếp xác nhận + mã PIN (cùng lời với thẻ Trợ giúp). */
+export const HUB_KICKER = 'Gen đọc; ghi Kho khi Sếp xác nhận + mã PIN · chỉ Sếp · tắt tới khi Kiểm tra xanh';
+
+/** Tool ghi Kho trong một danh sách tên tool (theo hậu tố, như máy chủ). */
+const isKhoWriteTool = (t: string): boolean => /(^|[_.:/-])kho_(create|update)$/.test(t);
+
+/**
+ * "mở 5 tool đọc + 2 tool ghi Kho cho Gen" sau Kiểm tra xanh: đếm RIÊNG tool đọc và tool ghi. Máy chủ gửi `exposed_write_tools`;
+ * máy chủ cũ không gửi ⇒ tách theo tên (kho_create / kho_update). Không có tool ghi ⇒ "mở 5 tool đọc cho Gen".
+ */
+export function testedToolsText(result: Pick<HubLinkTestResult, 'exposed_tools' | 'exposed_write_tools'>): string {
+  const all = Array.isArray(result.exposed_tools) ? result.exposed_tools.filter((t): t is string => typeof t === 'string') : [];
+  const fromServer = Array.isArray(result.exposed_write_tools) ? result.exposed_write_tools.filter((t): t is string => typeof t === 'string') : null;
+  const writes = new Set(fromServer ?? all.filter(isKhoWriteTool));
+  const reads = all.filter((t) => !writes.has(t)).length;
+  return writes.size > 0 ? `mở ${reads} tool đọc + ${writes.size} tool ghi Kho cho Gen` : `mở ${reads} tool đọc cho Gen`;
 }
 
 /** Quyền GHI khác mà token đang có (ngoài ghi Kho, vốn là tuỳ chọn có chủ đích) — Gen không dùng, nên tắt. Chỉ giữ chuỗi. */
 export function otherWriteTools(list: unknown): string[] {
   if (!Array.isArray(list)) return [];
-  return list.filter((t): t is string => typeof t === 'string' && t !== '' && !/(^|[_.:/-])kho_(create|update)$/.test(t));
+  return list.filter((t): t is string => typeof t === 'string' && t !== '' && !isKhoWriteTool(t));
 }
 
 /** `YYYY-MM-DD` (ô ngày) → ISO cuối ngày giờ VN; rỗng → null. */

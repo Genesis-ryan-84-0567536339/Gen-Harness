@@ -156,6 +156,18 @@ export const KHO_FIELDS: Record<KhoBang, readonly string[]> = {
 export const KHO_REQUIRED: Record<KhoBang, string> = { Phiên: 'Chủ đề', Việc: 'Tiêu đề' };
 /** Trường kiểu ngày `YYYY-MM-DD` (ô chọn ngày khi Sửa). */
 export const KHO_DATE_FIELDS: Record<KhoBang, readonly string[]> = { Phiên: ['Ngày'], Việc: ['Hạn', 'Ngày bắt đầu', 'Ngày xong'] };
+/**
+ * Độ dài tối đa (ký tự) mỗi trường Kho — bản sao `TITLE_MAX` / `TEXT_MAX` / `WARNING_MAX` của `kho_write.py` (test so khớp tệp đó):
+ * Chủ đề / Tiêu đề 200, Cảnh báo 1000, các trường chữ khác 2000.
+ */
+export const KHO_TITLE_MAX = 200;
+export const KHO_TEXT_MAX = 2000;
+export const KHO_WARNING_MAX = 1000;
+/** Độ dài tối đa của một trường Kho theo bảng (trường bắt buộc = tiêu đề; 'Cảnh báo'; còn lại chữ dài). */
+export function khoMaxLen(bang: KhoBang, field: string): number {
+  if (field === KHO_REQUIRED[bang]) return KHO_TITLE_MAX;
+  return field === 'Cảnh báo' ? KHO_WARNING_MAX : KHO_TEXT_MAX;
+}
 export const KHO_STATUS = ['Chờ', 'Đang làm', 'Chờ duyệt', 'Xong'] as const;
 export const KHO_PRIORITY = ['P1', 'P2', 'P3'] as const;
 

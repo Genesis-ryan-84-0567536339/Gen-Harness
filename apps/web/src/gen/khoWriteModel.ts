@@ -3,7 +3,9 @@
  * (`memory_note`): nhãn, câu cảnh báo cố định, bảng trường (đúng `fields.record`), form Sửa theo bảng, câu lỗi theo mã.
  * Không chứa bí mật; mọi giá trị từ máy chủ được ép về chuỗi trước khi hiện (không bao giờ render object).
  */
-import { ApiError, KHO_DATE_FIELDS, KHO_FIELDS, KHO_REQUIRED, type GenProposal, type KhoBang } from '@gen-harness/contracts';
+import { ApiError, KHO_DATE_FIELDS, KHO_FIELDS, KHO_REQUIRED, khoMaxLen, type GenProposal, type KhoBang } from '@gen-harness/contracts';
+import { errorDetail } from '../lib/errorText';
+import { detailToText } from '../lib/friendlyError';
 
 export type KhoProposal = Extract<GenProposal, { type: 'kho_create' | 'kho_update' }>;
 export type MemoryProposal = Extract<GenProposal, { type: 'memory_note' }>;
@@ -82,6 +84,16 @@ export function khoRows(p: KhoProposal): KhoRow[] {
   }));
 }
 
+/**
+ * Giá trị HIỆN TẠI của một trường khi sửa bản ghi (nhãn `cur:<trường>` máy chủ đọc từ Kho lúc đề xuất). Chỉ có cho trường Gen đề
+ * xuất sửa; trường khác ⇒ null (thẻ không biết giá trị cũ). Rỗng ⇒ '' (Kho đang trống).
+ */
+export function khoCurrent(p: KhoProposal, field: string): string | null {
+  if (p.type !== 'kho_update') return null;
+  const key = `cur:${field}`;
+  return key in p.labels ? valueText(p.labels[key]).trim() : null;
+}
+
 /** Nháp form Sửa: mọi trường được phép của bảng, điền sẵn giá trị đang đề xuất (thiếu ⇒ rỗng). Bảng lạ ⇒ rỗng. */
 export function khoInitialDraft(p: KhoProposal): Record<string, string> {
   const bang = khoBangOf(p);
@@ -107,13 +119,23 @@ export function sameRecord(a: Record<string, unknown>, b: Record<string, unknown
   return ka.length === Object.keys(b).length && ka.every((k) => k in b && valueText(a[k]) === valueText(b[k]));
 }
 
-/** Form Sửa hợp lệ: tạo ⇒ có trường bắt buộc (Chủ đề / Tiêu đề); sửa ⇒ còn ít nhất một trường. Link phải là https. */
+/** Số ký tự như máy chủ đếm (điểm mã Unicode — `len()` của Python), không phải số đơn vị UTF-16. */
+export const khoLen = (v: string): number => [...v].length;
+
+/** Lỗi độ dài của một ô khi Sửa ('Tối đa 200 ký tự') hoặc null — cùng giới hạn `kho_write.py` (tính sau khi bỏ khoảng trắng hai đầu). */
+export function khoLengthError(bang: KhoBang, field: string, value: string): string | null {
+  const max = khoMaxLen(bang, field);
+  return khoLen(value.trim()) > max ? `Tối đa ${max} ký tự` : null;
+}
+
+/** Form Sửa hợp lệ: tạo ⇒ có trường bắt buộc (Chủ đề / Tiêu đề); sửa ⇒ còn ít nhất một trường; không ô nào quá dài. Link phải là https. */
 export function khoDraftValid(p: KhoProposal, d: Record<string, string>): boolean {
   const bang = khoBangOf(p);
   if (!bang) return false;
   const rec = khoDraftRecord(bang, d);
   if (p.type === 'kho_create' && !rec[KHO_REQUIRED[bang]]) return false;
   if (Object.keys(rec).length === 0) return false;
+  if (Object.entries(rec).some(([f, v]) => khoLengthError(bang, f, v))) return false;
   const link = rec['Link Issue/PR'];
   return !link || /^https:\/\/\S+$/.test(link);
 }
@@ -124,19 +146,39 @@ export function khoLinkError(d: Record<string, string>): string | null {
   return link && !/^https:\/\/\S+$/.test(link) ? 'Link phải bắt đầu bằng https://' : null;
 }
 
+/**
+ * F-87: câu trên thẻ ghi Phiên của bản mới (nhãn `release`): mỗi (tổ chức, bản) chỉ ghi Kho MỘT lần — Owner khác ghi rồi thì thẻ tự
+ * đóng; Huỷ ở đây là huỷ cho mọi Owner.
+ */
+export const khoReleaseNote = (version: string): string =>
+  `Phiên của bản ${version}: mỗi bản chỉ ghi vào Kho một lần cho cả tổ chức — Owner khác đã ghi thì thẻ này tự đóng; bấm Huỷ là huỷ cho mọi Owner.`;
+
 /** Quyền ghi Kho của token theo nhãn lúc đề xuất. */
 export const writeScopeMissing = (p: KhoProposal): boolean => p.labels.write_scope === 'missing';
 
 // ── Câu lỗi theo mã (xác nhận Ghi nhớ / Ghi vào Kho) ─────────────────────────────────────────────────────────
 
-export type ProposalErrorAction = 'open_hub' | 'open_memory' | null;
+export type ProposalErrorAction = 'open_hub' | 'open_memory' | 'reload' | null;
 export interface ProposalErrorView {
   text: string;
-  /** Nút kèm câu lỗi: mở Kết nối › Gen-hub / mở Cài đặt › Gen nhớ. */
+  /** Nút kèm câu lỗi: mở Kết nối › Gen-hub / mở Cài đặt › Gen nhớ / tải lại hội thoại (thẻ đã đóng ở nơi khác). */
   action: ProposalErrorAction;
 }
 
-const ERROR_VIEW: Record<string, ProposalErrorView> = {
+/** Lý do thật máy chủ gửi kèm (`detail`, vd lời Kho từ chối) — luôn là chuỗi, đã bỏ khoảng trắng; không có ⇒ ''. */
+function serverDetail(e: ApiError): string {
+  return detailToText(e.problem.detail).trim();
+}
+
+export const KHO_REJECTED_FIX = 'Bấm Sửa để chỉnh các trường rồi Xác nhận lại.';
+export const KHO_PERMIT_TEXT = 'Giấy phép ghi không hợp lệ hoặc đã quá 5 phút — chưa ghi gì vào Kho. Bấm Xác nhận lại (nhập mã PIN) để ghi.';
+export const KHO_TOKEN_TEXT = 'Token Gen-hub hết hạn hoặc đã bị thu hồi — chưa ghi gì vào Kho. Vào Kết nối › Gen-hub dán token mới rồi bấm Kiểm tra.';
+export const PROPOSAL_DECIDED_TEXT =
+  'Đề xuất này đã được xác nhận hoặc đã huỷ ở nơi khác (hoặc Owner khác đã ghi / huỷ bản này) — chưa làm gì thêm. Bấm Tải lại hội thoại để xem thẻ đã đóng.';
+
+type ViewSpec = { text: string | ((e: ApiError) => string); action: ProposalErrorAction };
+
+const ERROR_VIEW: Record<string, ViewSpec> = {
   HUB_WRITE_MISSING: {
     text: `${KHO_MISSING_TEXT} — ${KHO_MISSING_HINT} Chưa ghi gì vào Kho.`,
     action: 'open_hub',
@@ -145,18 +187,28 @@ const ERROR_VIEW: Record<string, ProposalErrorView> = {
     text: 'Chưa chắc đã ghi — Sếp mở Kho kiểm trước khi bấm lại.',
     action: null,
   },
-  HUB_WRITE_PERMIT: {
-    text: 'Giấy phép ghi không hợp lệ hoặc đã quá 5 phút — chưa ghi gì vào Kho. Hỏi Gen đề xuất lại để ghi lần nữa.',
-    action: null,
-  },
+  HUB_WRITE_PERMIT: { text: KHO_PERMIT_TEXT, action: null },
   HUB_TOOL_NOT_ALLOWED: {
     text: 'Thao tác ghi này không nằm trong phạm vi Gen được phép — chưa ghi gì vào Kho.',
     action: null,
   },
+  // Kho từ chối (trường sai, Kho báo lỗi): nêu ĐÚNG lý do Kho trả (máy chủ đặt ở `detail`, đã che) để Sếp biết sửa trường nào.
   HUB_WRITE_REJECTED: {
-    text: 'Gen-hub từ chối bản ghi này (có trường chưa hợp lệ) — chưa ghi gì. Bấm Sửa để chỉnh các trường rồi Xác nhận lại.',
+    text: (e) => {
+      const why = serverDetail(e);
+      return `Kho từ chối lần ghi này${why ? `: ${why.replace(/[.\s]+$/, '')}` : ''} — chưa ghi gì. ${KHO_REJECTED_FIX}`;
+    },
     action: null,
   },
+  HUB_WRITE_INVALID: {
+    text: (e) => {
+      const why = serverDetail(e);
+      return `Dữ liệu ghi Kho chưa hợp lệ${why ? ` (${why.replace(/[.\s]+$/, '')})` : ''} — chưa ghi gì vào Kho. ${KHO_REJECTED_FIX}`;
+    },
+    action: null,
+  },
+  // 401/403 từ Gen-hub lúc ghi: token hết hạn / bị thu hồi — Sửa thẻ không giúp gì, phải đổi token.
+  HUB_TOKEN_REJECTED: { text: KHO_TOKEN_TEXT, action: 'open_hub' },
   HUB_BREAKER_OPEN: {
     text: 'Gen-hub tạm không trả lời — Gen tự thử lại sau 1 phút. Chưa ghi gì, Sếp bấm Xác nhận lại sau.',
     action: null,
@@ -164,6 +216,14 @@ const ERROR_VIEW: Record<string, ProposalErrorView> = {
   HUB_LINK_OFF: {
     text: 'Gen-hub đang tắt — vào Kết nối › Gen-hub bấm Kiểm tra để bật lại. Chưa ghi gì vào Kho.',
     action: 'open_hub',
+  },
+  HUB_BLOCKED: {
+    text: 'Ghi Kho đang bị rào chắn MCP Hub chặn — chưa ghi gì vào Kho. Xem lý do ở "Chi tiết kỹ thuật", rồi mở Kết nối › Gen-hub bấm Kiểm tra.',
+    action: 'open_hub',
+  },
+  HUB_OWNER_ONLY: {
+    text: 'Chỉ Sếp (Owner) được ghi vào Kho Ryan — chưa ghi gì.',
+    action: null,
   },
   GEN_MEMORY_FULL: {
     text: 'Gen nhớ đã đủ 30 ghi chú — Sếp xoá bớt ở Cài đặt › Bộ não AI rồi xác nhận lại.',
@@ -173,14 +233,24 @@ const ERROR_VIEW: Record<string, ProposalErrorView> = {
     text: 'Ghi chú này đã có trong Gen nhớ — không cần ghi lại.',
     action: 'open_memory',
   },
-  GEN_PROPOSAL_DECIDED: {
-    text: 'Đề xuất này đã được xác nhận hoặc đã huỷ ở nơi khác — tải lại hội thoại để xem kết quả.',
-    action: null,
-  },
+  GEN_PROPOSAL_DECIDED: { text: PROPOSAL_DECIDED_TEXT, action: 'reload' },
 };
 
 /** Câu thân thiện + nút kèm theo cho mã lỗi của Ghi nhớ / Ghi vào Kho; mã khác ⇒ null (dùng `errorText` chung). */
 export function proposalErrorView(e: unknown): ProposalErrorView | null {
   if (!(e instanceof ApiError)) return null;
-  return ERROR_VIEW[e.code] ?? null;
+  const spec = ERROR_VIEW[e.code];
+  if (!spec) return null;
+  return { text: typeof spec.text === 'function' ? spec.text(e) : spec.text, action: spec.action };
+}
+
+/**
+ * Dòng "Chi tiết kỹ thuật" cho lỗi của thẻ: mã HTTP + mã lỗi + mã yêu cầu (`errorDetail`) KÈM lý do máy chủ gửi ở `detail`
+ * (lời Kho từ chối, lý do permit EXPIRED/USED, lỗi mạng…) — chuỗi, không bao giờ là đối tượng; không có gì ⇒ null.
+ */
+export function proposalErrorDetail(e: unknown): string | null {
+  const base = errorDetail(e);
+  const extra = e instanceof ApiError ? serverDetail(e) : '';
+  const parts = [base ?? '', extra && !(base ?? '').includes(extra) ? extra : ''].filter(Boolean);
+  return parts.length ? parts.join(' · ') : null;
 }

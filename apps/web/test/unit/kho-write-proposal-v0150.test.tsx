@@ -21,13 +21,28 @@ import {
   KHO_PRIORITY,
   KHO_REQUIRED,
   KHO_STATUS,
+  KHO_TEXT_MAX,
+  KHO_TITLE_MAX,
+  KHO_WARNING_MAX,
+  khoMaxLen,
   type GenProposal,
   type GenStepEvent,
 } from '@gen-harness/contracts';
 import { GenPanel } from '../../src/gen/GenPanel';
 import { changedFields, initialDraft } from '../../src/gen/proposalModel';
 import { useGenStore } from '../../src/gen/genStore';
-import { khoBangOf, khoDraftRecord, khoDraftValid, khoFieldKind, khoRows, khoTargetText, proposalErrorView } from '../../src/gen/khoWriteModel';
+import {
+  khoBangOf,
+  khoCurrent,
+  khoDraftRecord,
+  khoDraftValid,
+  khoFieldKind,
+  khoLengthError,
+  khoRows,
+  khoTargetText,
+  proposalErrorDetail,
+  proposalErrorView,
+} from '../../src/gen/khoWriteModel';
 import { applyEvent } from '../../src/lib/realtime';
 import { setNavigator } from '../../src/lib/navigation';
 import { usePinStore } from '../../src/lib/pinStore';
@@ -89,6 +104,8 @@ const navigations: string[] = [];
 let confirmQueue: Array<{ status: number; body: unknown }> = [];
 let hubLink: Record<string, unknown> = { configured: true, enabled: true, status: 'ok', write_scopes: { kho: false } };
 let notifications: unknown = { items: [], unread: 0 };
+/** Tin của hội thoại khi web tải lại (GET /gen/conversations/{id}/messages). */
+let conversationMessages: unknown[] = [];
 
 const ALL = [PHIEN, VIEC, UPDATE, MISSING];
 
@@ -103,6 +120,7 @@ function stubApi() {
       const json = (status: number, b: unknown) => new Response(JSON.stringify(b), { status, headers: { 'Content-Type': 'application/json' } });
       if (url.endsWith('/hub/link') && method === 'GET') return json(200, hubLink);
       if (url.includes('/notifications') && method === 'GET') return json(200, notifications);
+      if (/\/gen\/conversations\/\w+\/messages/.test(url) && method === 'GET') return json(200, conversationMessages);
       const m = url.match(/\/gen\/proposals\/(\w+)\/(confirm|cancel)$/);
       if (m && method === 'POST') {
         const queued = confirmQueue.shift();
@@ -154,6 +172,7 @@ beforeEach(() => {
   confirmQueue = [];
   hubLink = { configured: true, enabled: true, status: 'ok', write_scopes: { kho: false } };
   notifications = { items: [], unread: 0 };
+  conversationMessages = [];
   usePinStore.setState({ open: false, waiters: [] });
   useGenStore.setState({ openByUser: {}, conversationId: 'c1', messages: [], busy: false, spotlight: null });
   setNavigator((to) => navigations.push(to));
@@ -263,6 +282,18 @@ describe('Thẻ "Ghi vào Kho Ryan" — kho_create', () => {
     await waitFor(() => expect(card).toHaveTextContent('Đã ghi vào Kho: bản ghi mới'));
   });
 
+  it('thẻ ghi Phiên của bản mới (nhãn release) nói rõ: mỗi bản ghi MỘT lần cho cả tổ chức, Huỷ là huỷ cho mọi Owner; thẻ thường thì không', () => {
+    renderPanel();
+    showProposal({ ...PHIEN, id: 'k9', labels: { ...PHIEN.labels, release: 'v0.1.50' } } as GenProposal);
+    expect(within(cardOf()).getByTestId('gen-kho-release-note')).toHaveTextContent(
+      'Phiên của bản v0.1.50: mỗi bản chỉ ghi vào Kho một lần cho cả tổ chức — Owner khác đã ghi thì thẻ này tự đóng; bấm Huỷ là huỷ cho mọi Owner.',
+    );
+    cleanup();
+    renderPanel();
+    showProposal(PHIEN);
+    expect(within(cardOf()).queryByTestId('gen-kho-release-note')).toBeNull();
+  });
+
   it('Huỷ → "Đã huỷ — không ghi gì vào Kho"; chỉ gọi cancel', async () => {
     renderPanel();
     showProposal(PHIEN);
@@ -366,11 +397,13 @@ describe('Lỗi khi xác nhận ghi Kho — câu tiếng Việt + "Chi tiết k�
   });
 
   it.each([
-    ['HUB_WRITE_PERMIT', 403, 'Giấy phép ghi không hợp lệ hoặc đã quá 5 phút — chưa ghi gì vào Kho.'],
+    ['HUB_WRITE_PERMIT', 403, 'Giấy phép ghi không hợp lệ hoặc đã quá 5 phút — chưa ghi gì vào Kho. Bấm Xác nhận lại (nhập mã PIN) để ghi.'],
     ['HUB_TOOL_NOT_ALLOWED', 403, 'Thao tác ghi này không nằm trong phạm vi Gen được phép — chưa ghi gì vào Kho.'],
-    ['HUB_WRITE_REJECTED', 409, 'Gen-hub từ chối bản ghi này (có trường chưa hợp lệ) — chưa ghi gì.'],
+    ['HUB_OWNER_ONLY', 403, 'Chỉ Sếp (Owner) được ghi vào Kho Ryan — chưa ghi gì.'],
     ['HUB_BREAKER_OPEN', 503, 'Gen-hub tạm không trả lời — Gen tự thử lại sau 1 phút.'],
     ['HUB_LINK_OFF', 409, 'Gen-hub đang tắt — vào Kết nối › Gen-hub bấm Kiểm tra để bật lại.'],
+    ['HUB_BLOCKED', 409, 'Ghi Kho đang bị rào chắn MCP Hub chặn — chưa ghi gì vào Kho.'],
+    ['HUB_TOKEN_REJECTED', 409, 'Token Gen-hub hết hạn hoặc đã bị thu hồi — chưa ghi gì vào Kho. Vào Kết nối › Gen-hub dán token mới rồi bấm Kiểm tra.'],
     ['GEN_PROPOSAL_DECIDED', 409, 'Đề xuất này đã được xác nhận hoặc đã huỷ ở nơi khác'],
   ])('%s ⇒ câu thân thiện (không phải câu 403 chung), mã chỉ trong "Chi tiết kỹ thuật"', async (code, status, sentence) => {
     confirmQueue = [{ status, body: { status, code, title: 'thô từ máy chủ' } }];
@@ -387,11 +420,105 @@ describe('Lỗi khi xác nhận ghi Kho — câu tiếng Việt + "Chi tiết k�
     expect(container.textContent).not.toContain('[object Object]');
   });
 
+  it('HUB_WRITE_REJECTED ⇒ nêu ĐÚNG lý do Kho trả (detail) + "Bấm Sửa"; lý do cũng có trong "Chi tiết kỹ thuật"', async () => {
+    const why = "Giá trị 'Trạng thái' không hợp lệ (Bearer ***)";
+    confirmQueue = [{ status: 409, body: { status: 409, code: 'HUB_WRITE_REJECTED', title: `Kho từ chối lần ghi này: ${why}`, detail: why } }];
+    const { container } = renderPanel();
+    showProposal(PHIEN);
+    const card = cardOf();
+    await userEvent.click(within(card).getByRole('button', { name: 'Xác nhận và ghi Kho' }));
+    const alert = await within(card).findByRole('alert');
+    expect(alert.querySelector('.write-error__text')?.textContent).toBe(`Kho từ chối lần ghi này: ${why} — chưa ghi gì. Bấm Sửa để chỉnh các trường rồi Xác nhận lại.`);
+    expect(alert.querySelector('details code')?.textContent).toBe(`HTTP 409 · HUB_WRITE_REJECTED · ${why}`);
+    expect(within(card).queryByRole('button', { name: 'Mở Kết nối › Gen-hub' })).toBeNull();
+    expect(container.textContent).not.toContain('[object Object]');
+  });
+
+  it('HUB_TOKEN_REJECTED (Gen-hub trả 401/403 lúc ghi) ⇒ KHÔNG bảo "Bấm Sửa" mà dẫn tới Kết nối › Gen-hub đổi token', async () => {
+    confirmQueue = [{ status: 409, body: { status: 409, code: 'HUB_TOKEN_REJECTED', title: 'Token Gen-hub hết hạn', detail: '401: unauthorized' } }];
+    renderPanel();
+    showProposal(PHIEN);
+    const card = cardOf();
+    await userEvent.click(within(card).getByRole('button', { name: 'Xác nhận và ghi Kho' }));
+    const alert = await within(card).findByRole('alert');
+    expect(alert).toHaveTextContent('Token Gen-hub hết hạn hoặc đã bị thu hồi — chưa ghi gì vào Kho.');
+    expect(alert).not.toHaveTextContent('Bấm Sửa');
+    expect(alert.querySelector('details code')?.textContent).toBe('HTTP 409 · HUB_TOKEN_REJECTED · 401: unauthorized');
+    await userEvent.click(within(card).getByRole('button', { name: 'Mở Kết nối › Gen-hub' }));
+    expect(navigations).toEqual(['/connections#genhub']);
+  });
+
+  it('lý do ở `detail` (permit EXPIRED, lỗi mạng) nằm trong "Chi tiết kỹ thuật"; câu permit = bấm Xác nhận lại, không bảo hỏi Gen', async () => {
+    confirmQueue = [
+      { status: 403, body: { status: 403, code: 'HUB_WRITE_PERMIT', title: 'Giấy phép ghi Kho không hợp lệ', detail: 'EXPIRED' } },
+      { status: 502, body: { status: 502, code: 'HUB_WRITE_UNCERTAIN', title: 'Chưa chắc đã ghi', detail: 'Gen-hub không trả lời (hết giờ)' } },
+    ];
+    renderPanel();
+    showProposal(PHIEN);
+    const card = cardOf();
+    const btn = () => within(card).getByRole('button', { name: 'Xác nhận và ghi Kho' });
+    await userEvent.click(btn());
+    let alert = await within(card).findByRole('alert');
+    expect(alert).toHaveTextContent('Bấm Xác nhận lại (nhập mã PIN) để ghi.');
+    expect(alert).not.toHaveTextContent('Hỏi Gen đề xuất lại');
+    expect(alert.querySelector('details code')?.textContent).toBe('HTTP 403 · HUB_WRITE_PERMIT · EXPIRED');
+    await userEvent.click(btn());
+    await waitFor(() => expect(within(card).getByRole('alert')).toHaveTextContent('Chưa chắc đã ghi'));
+    alert = within(card).getByRole('alert');
+    expect(alert.querySelector('details code')?.textContent).toBe('HTTP 502 · HUB_WRITE_UNCERTAIN · Gen-hub không trả lời (hết giờ)');
+  });
+
+  it('GEN_PROPOSAL_DECIDED (Owner khác đã ghi bản này) ⇒ nút "Tải lại hội thoại" → thẻ hiện "Thẻ đã đóng — …", hết nút Xác nhận', async () => {
+    const closed = { ...PHIEN, status: 'cancelled', labels: { ...PHIEN.labels, closed: 'Owner khác đã ghi bản này vào Kho (PHIEN-12)' } };
+    conversationMessages = [
+      { id: 'm-u', role: 'user', content: { text: 'ghi vào Kho' }, turn_id: 't1', created_at: '2026-10-09T08:00:00Z' },
+      { id: 'm-a', role: 'assistant', content: { steps: [{ kind: 'say', text: 'Em đề xuất:' }, { kind: 'proposal', proposal: closed }] }, turn_id: 't1', created_at: '2026-10-09T08:00:01Z' },
+    ];
+    confirmQueue = [{ status: 409, body: { status: 409, code: 'GEN_PROPOSAL_DECIDED', title: 'Bản này đã được ghi vào Kho hoặc đã huỷ — thẻ đã đóng' } }];
+    renderPanel();
+    showProposal(PHIEN);
+    // Lượt Gen đã xong (tin không còn "đang nghĩ") — như khi Sếp mở thẻ từ chuông.
+    useGenStore.setState({ conversationId: 'c1', messages: useGenStore.getState().messages.map((m) => ({ ...m, status: undefined })) });
+    let card = cardOf();
+    await userEvent.click(within(card).getByRole('button', { name: 'Xác nhận và ghi Kho' }));
+    const alert = await within(card).findByRole('alert');
+    expect(alert).toHaveTextContent('Đề xuất này đã được xác nhận hoặc đã huỷ ở nơi khác');
+    await userEvent.click(within(card).getByRole('button', { name: 'Tải lại hội thoại' }));
+    await waitFor(() => expect(within(cardOf()).getByTestId('gen-prop-cancelled')).toHaveTextContent('Thẻ đã đóng — Owner khác đã ghi bản này vào Kho (PHIEN-12)'));
+    card = cardOf();
+    expect(within(card).queryByRole('button', { name: 'Xác nhận và ghi Kho' })).toBeNull();
+    expect(card).not.toHaveTextContent('Đã huỷ — không ghi gì vào Kho');
+    expect(calls.filter((c) => c.method === 'GET' && c.url.includes('/gen/conversations/c1/messages'))).toHaveLength(1);
+  });
+
+  it('thẻ đã đóng vì Owner khác (labels.closed) — kể cả khi bấm Huỷ trên thẻ cũ — nói rõ lý do thay vì "Đã huỷ — không ghi gì"', async () => {
+    confirmQueue = [{ status: 200, body: { ...PHIEN, status: 'cancelled', labels: { ...PHIEN.labels, closed: 'Owner khác đã huỷ ghi bản này' } } }];
+    renderPanel();
+    showProposal(PHIEN);
+    const card = cardOf();
+    await userEvent.click(within(card).getByRole('button', { name: 'Huỷ' }));
+    await waitFor(() => expect(within(card).getByTestId('gen-prop-cancelled')).toHaveTextContent('Thẻ đã đóng — Owner khác đã huỷ ghi bản này'));
+  });
+
+  it('proposalErrorDetail: mã HTTP + mã lỗi + detail (chuỗi; đối tượng được ép chuỗi; không lặp lại)', () => {
+    expect(proposalErrorDetail(new ApiError(409, { code: 'HUB_WRITE_REJECTED', title: 't', detail: 'Lý do' }))).toBe('HTTP 409 · HUB_WRITE_REJECTED · Lý do');
+    expect(proposalErrorDetail(new ApiError(409, { code: 'HUB_LINK_OFF', title: 't' }))).toBe('HTTP 409 · HUB_LINK_OFF');
+    expect(proposalErrorDetail(new ApiError(403, { code: 'HUB_WRITE_PERMIT', title: 't', detail: { reasons: ['USED'] } as never }))).not.toContain('[object Object]');
+    expect(proposalErrorDetail(null)).toBeNull();
+  });
+
   it('proposalErrorView: chỉ nhận ApiError có mã đã biết; mã lạ / lỗi thường ⇒ null (dùng errorText chung)', () => {
     expect(proposalErrorView(new ApiError(409, { code: 'HUB_WRITE_MISSING', title: 'x' }))?.action).toBe('open_hub');
     expect(proposalErrorView(new ApiError(409, { code: 'HUB_LINK_OFF', title: 'x' }))?.action).toBe('open_hub');
     expect(proposalErrorView(new ApiError(409, { code: 'GEN_MEMORY_FULL', title: 'x' }))?.action).toBe('open_memory');
     expect(proposalErrorView(new ApiError(502, { code: 'HUB_WRITE_UNCERTAIN', title: 'x' }))?.action).toBeNull();
+    expect(proposalErrorView(new ApiError(409, { code: 'HUB_TOKEN_REJECTED', title: 'x' }))?.action).toBe('open_hub');
+    expect(proposalErrorView(new ApiError(409, { code: 'GEN_PROPOSAL_DECIDED', title: 'x' }))?.action).toBe('reload');
+    // Kho từ chối nhưng không gửi lý do ⇒ câu vẫn trọn vẹn (không có dấu hai chấm treo).
+    expect(proposalErrorView(new ApiError(409, { code: 'HUB_WRITE_REJECTED', title: 'x' }))?.text).toBe('Kho từ chối lần ghi này — chưa ghi gì. Bấm Sửa để chỉnh các trường rồi Xác nhận lại.');
+    expect(proposalErrorView(new ApiError(422, { code: 'HUB_WRITE_INVALID', title: 'x', detail: "Trường 'Hạn' phải là ngày" }))?.text).toBe(
+      "Dữ liệu ghi Kho chưa hợp lệ (Trường 'Hạn' phải là ngày) — chưa ghi gì vào Kho. Bấm Sửa để chỉnh các trường rồi Xác nhận lại.",
+    );
     expect(proposalErrorView(new ApiError(500, { code: 'INTERNAL', title: 'x' }))).toBeNull();
     expect(proposalErrorView(new Error('x'))).toBeNull();
     expect(proposalErrorView(null)).toBeNull();
@@ -476,6 +603,47 @@ describe('Sửa thẻ Ghi vào Kho — ô theo từng trường cho phép của 
     expect(writes()[0].body).toEqual({ fields: {} }); // không đổi ⇒ server giữ nguyên đề xuất
   });
 
+  it('giới hạn ký tự ĐÚNG kho_write.py (Chủ đề 200, chữ dài 2000, Cảnh báo 1000) + bộ đếm; quá dài ⇒ báo lỗi, khoá Xác nhận', async () => {
+    renderPanel();
+    showProposal(PHIEN);
+    const card = cardOf();
+    await userEvent.click(within(card).getByRole('button', { name: 'Sửa' }));
+    const form = within(card).getByTestId('gen-kho-form');
+    expect(within(form).getByLabelText('Chủ đề')).toHaveAttribute('maxlength', String(KHO_TITLE_MAX));
+    expect(within(form).getByLabelText('Đã chốt')).toHaveAttribute('maxlength', String(KHO_TEXT_MAX));
+    expect(within(form).getByLabelText('Cảnh báo')).toHaveAttribute('maxlength', String(KHO_WARNING_MAX));
+    expect(within(form).getByLabelText('Ngày')).not.toHaveAttribute('maxlength');
+    expect(within(form).getByTestId('gen-kho-count-Chủ đề')).toHaveTextContent(`${[...'Gen-Harness v0.1.50 — Gen nhớ và ghi Kho'].length}/200`);
+    expect(within(form).getByTestId('gen-kho-count-Cảnh báo')).toHaveTextContent('0/1000');
+    expect(within(form).queryByTestId('gen-kho-count-Ngày')).toBeNull();
+    // Dán vượt giới hạn (máy chủ cũ / sửa thẳng DOM) ⇒ báo lỗi ngay, không đợi 422 sau PIN.
+    const warn = within(form).getByLabelText('Cảnh báo');
+    warn.removeAttribute('maxlength');
+    await userEvent.click(warn);
+    await userEvent.paste('x'.repeat(KHO_WARNING_MAX + 1));
+    expect(within(form).getByText('Tối đa 1000 ký tự')).toBeInTheDocument();
+    expect(within(card).getByRole('button', { name: 'Xác nhận và ghi Kho' })).toBeDisabled();
+    expect(writes()).toEqual([]);
+  });
+
+  it('kho_update: dưới mỗi ô là giá trị HIỆN TẠI (— khi trống, "chưa đọc" khi Gen không đề xuất sửa) + "Để trống = giữ nguyên"', async () => {
+    renderPanel();
+    showProposal(UPDATE);
+    const card = cardOf();
+    await userEvent.click(within(card).getByRole('button', { name: 'Sửa' }));
+    const form = within(card).getByTestId('gen-kho-form');
+    expect(within(form).getByTestId('gen-kho-keep-note')).toHaveTextContent('Để trống = giữ nguyên trong Kho (không xoá giá trị cũ).');
+    expect(within(form).getByText('Hiện tại: Đang làm')).toBeInTheDocument();
+    expect(within(form).getByText('Hiện tại: —')).toBeInTheDocument(); // Ngày xong đang trống trong Kho
+    expect(within(form).getAllByText('Hiện tại: chưa đọc (Gen không đề xuất sửa trường này)')).toHaveLength(KHO_FIELDS.Việc.length - 2);
+    expect(within(form).queryByText('Bắt buộc')).toBeNull(); // sửa bản ghi: không có trường bắt buộc
+    // Thẻ tạo mới không có dòng "Hiện tại".
+    expect(khoCurrent(PHIEN as never, 'Chủ đề')).toBeNull();
+    expect(khoCurrent(UPDATE as never, 'Trạng thái')).toBe('Đang làm');
+    expect(khoCurrent(UPDATE as never, 'Ngày xong')).toBe('');
+    expect(khoCurrent(UPDATE as never, 'Tiêu đề')).toBeNull();
+  });
+
   it('hàm thuần: changedFields / initialDraft / khoDraftRecord / khoDraftValid / khoFieldKind / khoBangOf', () => {
     expect(initialDraft(PHIEN)).toEqual({ 'Chủ đề': 'Gen-Harness v0.1.50 — Gen nhớ và ghi Kho', Ngày: '2026-10-09', 'Đã chốt': 'Gen nhớ tối đa 30 ghi chú', 'Đang bàn': '', 'Việc tiếp': 'Sếp duyệt đề xuất PHIEN đầu tiên', 'Cảnh báo': '' });
     expect(changedFields(PHIEN, initialDraft(PHIEN))).toEqual({});
@@ -487,6 +655,15 @@ describe('Sửa thẻ Ghi vào Kho — ô theo từng trường cho phép của 
     expect(khoDraftValid(PHIEN as never, { 'Chủ đề': 'x' })).toBe(true);
     expect(khoDraftValid(UPDATE as never, { 'Trạng thái': 'Xong' })).toBe(true);
     expect(khoDraftValid(UPDATE as never, {})).toBe(false);
+    expect(khoDraftValid(PHIEN as never, { 'Chủ đề': 'x'.repeat(KHO_TITLE_MAX) })).toBe(true);
+    expect(khoDraftValid(PHIEN as never, { 'Chủ đề': 'x'.repeat(KHO_TITLE_MAX + 1) })).toBe(false);
+    expect(khoDraftValid(PHIEN as never, { 'Chủ đề': 'x', 'Cảnh báo': 'y'.repeat(KHO_WARNING_MAX + 1) })).toBe(false);
+    expect(khoDraftValid(UPDATE as never, { 'Trạng thái': 'Xong', 'Tiêu đề': 'ố'.repeat(KHO_TITLE_MAX) })).toBe(true); // đếm theo ký tự
+    expect(khoLengthError('Phiên', 'Đã chốt', 'a'.repeat(KHO_TEXT_MAX + 1))).toBe('Tối đa 2000 ký tự');
+    expect(khoLengthError('Phiên', 'Đã chốt', `  ${'a'.repeat(KHO_TEXT_MAX)}  `)).toBeNull();
+    expect(khoMaxLen('Việc', 'Tiêu đề')).toBe(KHO_TITLE_MAX);
+    expect(khoMaxLen('Phiên', 'Cảnh báo')).toBe(KHO_WARNING_MAX);
+    expect(khoMaxLen('Việc', 'Link Issue/PR')).toBe(KHO_TEXT_MAX);
     expect(khoFieldKind('Việc', 'Trạng thái')).toBe('status');
     expect(khoFieldKind('Việc', 'Ưu tiên')).toBe('priority');
     expect(khoFieldKind('Việc', 'Ngày xong')).toBe('date');
@@ -618,6 +795,10 @@ describe('KHO_FIELDS (TS) ≡ KHO_FIELDS (kho_write.py)', () => {
     // Giá trị chọn của hai trường: tệp Python phải nhắc đúng các chuỗi này (dạng chuỗi trong mã).
     const has = (s: string) => src.includes(`"${s}"`) || src.includes(`'${s}'`);
     for (const v of [...KHO_STATUS, ...KHO_PRIORITY]) expect(has(v), `kho_write.py thiếu giá trị "${v}"`).toBe(true);
+    // Giới hạn độ dài: form Sửa chặn đúng như máy chủ (không để Sếp nhập mã PIN rồi mới nhận 422).
+    const num = (name: string) => Number(new RegExp(`^${name}\\s*=\\s*(\\d+)`, 'm').exec(src)?.[1]);
+    expect({ title: num('TITLE_MAX'), text: num('TEXT_MAX'), warning: num('WARNING_MAX') }).toEqual({ title: KHO_TITLE_MAX, text: KHO_TEXT_MAX, warning: KHO_WARNING_MAX });
+    expect(src).toContain('WARNING_FIELD = "Cảnh báo"');
   });
 
   it('bộ phân tích Python: hiểu dict → tuple, dict → dict (bỏ giá trị chuỗi), bỏ chú thích', () => {

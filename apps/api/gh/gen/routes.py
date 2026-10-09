@@ -493,6 +493,8 @@ async def confirm_proposal(pid: uuid.UUID, request: Request, body: ConfirmIn | N
         lab = await proposals.labels(db, user, ptype, fields, redis, request.app)
     except ValueError as e:
         raise field_errors({"fields": str(e)}) from e
+    if p.get("release_version"):
+        lab = {**lab, "release": str(p["release_version"])}  # F-87: giữ nhãn "bản" của thẻ ghi Phiên
     if not await redis.set(proposals.claim_key(pid), "1", nx=True, ex=proposals.CLAIM_TTL_S):
         raise conflict("GEN_PROPOSAL_BUSY", "Đề xuất đang được thực hiện")
     release: str | None = p.get("release_version")

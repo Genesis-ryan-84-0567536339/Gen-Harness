@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { askGen, enterPin, enterPinIfAsked, hubSim, khoCalls, loginAsOwner, p3Hook, resetMock } from './support';
+import { MANAGER, askGen, enterPin, enterPinIfAsked, hubSim, khoCalls, loginAs, loginAsOwner, mockHook, p3Hook, resetMock } from './support';
 
 /**
  * v0.1.50 (F-81, QD-18) — mock, tất định (KHÔNG có Kho / Gen-hub thật): Gen đề xuất ghi Kho Ryan → thẻ "Ghi vào Kho Ryan" hiện đúng bảng +
@@ -144,4 +144,98 @@ test('mock ghi nhận mã lỗi theo hook: HUB_LINK_OFF khi Gen-hub chưa nối 
   expect((await khoCalls(page.request)).writes).toHaveLength(0);
   // Hook p3 chung vẫn dùng được (đảm bảo `p3Hook` import có tác dụng trong spec này).
   expect(await p3Hook(page.request, 'mcp', 'khoCalls')).toMatchObject({ calls: 1 });
+});
+
+// ── Bước 2 của Boss (F-87): chuông → hội thoại → thẻ ghi Phiên của bản mới ─────────────────────────────────────────────
+
+const GEN_PANEL = /Gen — trợ lý quản trị/;
+
+test('Boss bước 2: chuông "Gen đề xuất ghi Kho · Phiên v0.1.50" → /overview?gen=… → bảng Trường | Sẽ ghi + "Huỷ là huỷ cho mọi Owner" → Xác nhận + PIN → PHIEN-12', async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.goto('/overview');
+  const bell = page.getByRole('button', { name: /^Thông báo/ });
+  await expect(bell).toBeVisible();
+  // Job gen_kho_release (mock): một hội thoại có thẻ đề xuất + một chuông gen.kho_proposal — KHÔNG ghi gì.
+  const seeded = (await p3Hook(page.request, 'gen', 'khoRelease', { version: 'v0.1.50' })) as { conversation_id: string };
+  expect(seeded.conversation_id).toMatch(/^[0-9a-f-]{36}$/);
+  expect((await khoCalls(page.request)).calls).toBe(0);
+
+  await bell.click();
+  const item = page.getByRole('dialog', { name: 'Thông báo' }).locator('.nt-item', { hasText: 'Gen đề xuất ghi Kho · Phiên v0.1.50' });
+  await expect(item).toBeVisible();
+  await item.click();
+  await expect(page).toHaveURL(/\/overview$/);
+  const panel = page.getByRole('complementary', { name: GEN_PANEL });
+  await expect(panel).toBeVisible();
+  await expect(panel).toContainText('Máy chủ Gen-Harness vừa lên v0.1.50.');
+  const card = panel.getByRole('group', { name: `Đề xuất: ${CARD}` }).last();
+  await expect(card).toBeVisible();
+  // Tạo bản ghi ⇒ bảng chỉ có "Trường | Sẽ ghi" (cột "Hiện tại" chỉ có khi SỬA bản ghi).
+  const table = card.getByTestId('gen-kho-table');
+  await expect(table.locator('thead th')).toHaveText(['Trường', 'Sẽ ghi']);
+  await expect(table.locator('tbody th')).toHaveText(['Chủ đề', 'Ngày', 'Đã chốt']);
+  await expect(table.locator('tbody tr').first()).toContainText('Gen-Harness lên bản v0.1.50');
+  await expect(card.getByTestId('gen-kho-warning')).toHaveText(WARNING);
+  await expect(card.getByTestId('gen-kho-release-note')).toHaveText(
+    'Phiên của bản v0.1.50: mỗi bản chỉ ghi vào Kho một lần cho cả tổ chức — Owner khác đã ghi thì thẻ này tự đóng; bấm Huỷ là huỷ cho mọi Owner.',
+  );
+
+  await card.getByRole('button', { name: 'Xác nhận và ghi Kho' }).click();
+  await enterPin(page);
+  await expect(card).toContainText('Đã ghi vào Kho: PHIEN-12');
+  const calls = await khoCalls(page.request);
+  expect(calls.calls).toBe(1);
+  expect(calls.writes.map((w) => [w.tool, w.code])).toEqual([['kho_create', 'PHIEN-12']]);
+});
+
+test('Thẻ ghi Phiên mà Owner khác đã ghi: mở từ chuông thấy "Thẻ đã đóng — Owner khác đã ghi …", không còn nút Xác nhận', async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.goto('/overview');
+  await p3Hook(page.request, 'gen', 'khoRelease', { version: 'v0.1.50', closed: true });
+  await page.getByRole('button', { name: /^Thông báo/ }).click();
+  await page.getByRole('dialog', { name: 'Thông báo' }).locator('.nt-item', { hasText: 'Gen đề xuất ghi Kho · Phiên v0.1.50' }).click();
+  const card = page.getByRole('complementary', { name: GEN_PANEL }).getByRole('group', { name: `Đề xuất: ${CARD}` }).last();
+  await expect(card.getByTestId('gen-prop-cancelled')).toHaveText('Thẻ đã đóng — Owner khác đã ghi bản này vào Kho (PHIEN-12)');
+  await expect(card.getByRole('button', { name: 'Xác nhận và ghi Kho' })).toHaveCount(0);
+  expect((await khoCalls(page.request)).calls).toBe(0);
+});
+
+test('Kho từ chối (HUB_WRITE_REJECTED) ⇒ câu nêu ĐÚNG lý do Kho + "Bấm Sửa"; "Chi tiết kỹ thuật" có mã + lý do; thẻ còn chờ, không ghi', async ({ page }) => {
+  test.setTimeout(90_000);
+  await hubSim(page.request, { kho: 'rejected' });
+  await page.goto('/overview');
+  const card = await askGen(page, 'ghi việc mới vào Kho', CARD);
+  await card.getByRole('button', { name: 'Xác nhận và ghi Kho' }).click();
+  await enterPinIfAsked(page);
+  const alert = card.getByRole('alert');
+  const why = "Giá trị 'Trạng thái' không có trong danh sách lựa chọn của Kho";
+  await expect(alert.locator('.write-error__text')).toHaveText(`Kho từ chối lần ghi này: ${why} — chưa ghi gì. Bấm Sửa để chỉnh các trường rồi Xác nhận lại.`);
+  await alert.getByText('Chi tiết kỹ thuật').click();
+  await expect(alert.locator('details code')).toContainText('HUB_WRITE_REJECTED');
+  await expect(alert.locator('details code')).toContainText(why);
+  await expect(card.getByRole('button', { name: 'Xác nhận và ghi Kho' })).toBeEnabled();
+  await expect(card).not.toContainText('Đã ghi vào Kho');
+  const calls = await khoCalls(page.request);
+  expect(calls.calls).toBe(1);
+  expect(calls.writes).toHaveLength(0);
+});
+
+test('Vai trò Manager: không có thẻ Gen nhớ ở Cài đặt › Bộ não AI, không có khối "Quyền ghi Kho" ở Kết nối (chỉ Sếp)', async ({ page }) => {
+  test.setTimeout(90_000);
+  await mockHook(page.request, 'perm', { role: 'manager', permission: 'system.read', scope: 'all' });
+  await loginAs(page, MANAGER.email);
+  const memoryCalls: string[] = [];
+  page.on('request', (r) => {
+    if (r.url().includes('/api/v1/gen/memory')) memoryCalls.push(r.url());
+  });
+  await page.goto('/system?tab=brain');
+  await expect(page.getByRole('region', { name: 'Nguồn AI cho việc nền' })).toBeVisible(); // đã vào tab Bộ não AI
+  await expect(page.locator('#gen-memory')).toHaveCount(0);
+  await expect(page.getByText('Gen nhớ', { exact: true })).toHaveCount(0);
+
+  await page.goto('/connections#genhub');
+  const hub = page.locator('#genhub');
+  await expect(hub).toContainText('Chỉ Sếp (Owner) cấu hình và dùng Gen-hub.');
+  await expect(page.getByTestId('hub-write-scopes')).toHaveCount(0);
+  expect(memoryCalls).toEqual([]); // thẻ ẩn hẳn với vai trò khác — không gọi /gen/memory
 });

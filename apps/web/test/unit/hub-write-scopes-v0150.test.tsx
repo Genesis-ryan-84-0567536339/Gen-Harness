@@ -12,10 +12,14 @@ import { MemoryRouter } from 'react-router-dom';
 import type { HubLink, HubLinkTestResult } from '@gen-harness/contracts';
 import { HubLinkCard } from '../../src/screens/mcp/HubLinkCard';
 import {
+  HUB_KICKER,
   WRITE_CONFIRM_ONLY_TEXT,
   WRITE_ENOUGH_TEXT,
+  WRITE_HIDDEN_TEXT,
   WRITE_MISSING_TEXT,
   otherWriteTools,
+  testedToolsText,
+  writeHidden,
   writeScopeRows,
   writeScopesMessage,
 } from '../../src/screens/mcp/mcpModel';
@@ -82,6 +86,39 @@ describe('mcpModel — quyền ghi Kho (hàm thuần)', () => {
     expect(writeScopeRows({ kho: false }).map((r) => r.state)).toEqual(['no', 'no']);
   });
 
+  it('writeScopeRows: MỖI dòng theo đúng tool của nó (chỉ tick kho_create ⇒ kho_create "Có", kho_update "Chưa"); thiếu cờ riêng ⇒ theo `kho`', () => {
+    const one = writeScopeRows({ kho: false, kho_create: true, kho_update: false });
+    expect(one.map((r) => [r.key, r.text])).toEqual([
+      ['kho_create', 'Có'],
+      ['kho_update', 'Chưa'],
+    ]);
+    expect(writeScopeRows({ kho: false, kho_create: false, kho_update: true }).map((r) => r.text)).toEqual(['Chưa', 'Có']);
+    // Máy chủ cũ chỉ gửi `kho` ⇒ hai dòng theo `kho`; cờ riêng sai kiểu ⇒ cũng theo `kho`.
+    expect(writeScopeRows({ kho: true }).map((r) => r.text)).toEqual(['Có', 'Có']);
+    expect(writeScopeRows({ kho: false, kho_create: 'x' } as never).map((r) => r.text)).toEqual(['Chưa', 'Chưa']);
+    expect(writeScopeRows({ kho_create: true } as never).map((r) => r.text)).toEqual(['Có', 'Chưa kiểm']);
+  });
+
+  it('writeScopesMessage: chỉ thiếu kho_update ⇒ nhắc tick; Owner tự đóng ở MCP Hub (write_hidden) ⇒ câu riêng, không giục tick ở Gen-hub', () => {
+    expect(writeScopesMessage(undefined, { kho: false, kho_create: true, kho_update: false })).toEqual({ tone: 'warn', text: WRITE_MISSING_TEXT });
+    expect(writeScopesMessage([], { kho: false, kho_create: false, kho_update: true }, ['kho_create'])).toEqual({ tone: 'warn', text: WRITE_HIDDEN_TEXT(['kho_create']) });
+    expect(WRITE_HIDDEN_TEXT(['kho_create'])).toBe(
+      'Sếp đã tự đóng kho_create ở MCP Hub — Kiểm tra không mở lại. Muốn Gen ghi lại thì mở ở MCP Hub; muốn tắt hẳn thì bỏ tick ở Gen-hub.',
+    );
+    // Vừa thiếu ở Gen-hub vừa tự đóng ⇒ ưu tiên câu tick quyền (máy chủ báo write_missing).
+    expect(writeScopesMessage(['ghi Kho (kho_update)'], { kho: false, kho_create: false, kho_update: false }, ['kho_create'])?.text).toBe(WRITE_MISSING_TEXT);
+    expect(writeHidden(['kho_create', 'gmail_send', 3, null])).toEqual(['kho_create']);
+    expect(writeHidden('kho_create')).toEqual([]);
+  });
+
+  it('testedToolsText: đếm RIÊNG tool đọc và tool ghi Kho (máy chủ gửi exposed_write_tools, máy chủ cũ ⇒ tách theo tên)', () => {
+    const tools = ['p__kho_tom_tat', 'p__kho_search', 'p__kho_find_by_id', 'p__kho_create', 'p__kho_update'];
+    expect(testedToolsText({ exposed_tools: tools, exposed_write_tools: ['p__kho_create', 'p__kho_update'] })).toBe('mở 3 tool đọc + 2 tool ghi Kho cho Gen');
+    expect(testedToolsText({ exposed_tools: tools })).toBe('mở 3 tool đọc + 2 tool ghi Kho cho Gen');
+    expect(testedToolsText({ exposed_tools: tools.slice(0, 3), exposed_write_tools: [] })).toBe('mở 3 tool đọc cho Gen');
+    expect(testedToolsText({ exposed_tools: [...tools.slice(0, 3), 'p__kho_create'], exposed_write_tools: ['p__kho_create'] })).toBe('mở 3 tool đọc + 1 tool ghi Kho cho Gen');
+  });
+
   it('writeScopeRows: không có dữ liệu / sai kiểu ⇒ "Chưa kiểm"', () => {
     for (const bad of [undefined, null, {}, 'x', 5, { kho: 'yes' }, { kho: 1 }, { kho: null }]) {
       expect(writeScopeRows(bad as never).map((r) => r.text)).toEqual(['Chưa kiểm', 'Chưa kiểm']);
@@ -107,6 +144,49 @@ describe('mcpModel — quyền ghi Kho (hàm thuần)', () => {
 });
 
 describe('Thẻ Gen-hub — Quyền ghi Kho (tuỳ chọn)', () => {
+  it('tiêu đề + dòng phụ KHÔNG còn "chỉ đọc": Gen đọc; ghi Kho khi Sếp xác nhận + mã PIN (cùng lời thẻ Trợ giúp)', async () => {
+    stubHub(SAVED, testOut());
+    const { container } = renderCard(<HubLinkCard />);
+    await screen.findByTestId('hub-write-scopes');
+    expect(container).toHaveTextContent('Gen-hub — Gen đọc và ghi Kho tri thức');
+    expect(container).toHaveTextContent(`· ${HUB_KICKER}`);
+    expect(HUB_KICKER).toBe('Gen đọc; ghi Kho khi Sếp xác nhận + mã PIN · chỉ Sếp · tắt tới khi Kiểm tra xanh');
+    // "chỉ đọc" chỉ còn ở khối "Quyền đọc thêm" (lịch, mail, việc, Drive — đúng là chỉ đọc), không còn ở tiêu đề / dòng phụ của thẻ.
+    expect(container.textContent?.toLowerCase()).not.toContain('chỉ đọc · chỉ sếp');
+    expect(container.textContent?.toLowerCase()).not.toContain('gen đọc kho tri thức');
+  });
+
+  it('Kiểm tra xanh có tool ghi: "mở 3 tool đọc + 2 tool ghi Kho cho Gen" (không gộp 2 tool ghi vào "tool đọc")', async () => {
+    const tools = ['a__kho_tom_tat', 'a__kho_search', 'a__kho_find_by_id', 'a__kho_create', 'a__kho_update'];
+    stubHub(SAVED, testOut({ exposed_tools: tools, exposed_write_tools: ['a__kho_create', 'a__kho_update'], write_scopes: { kho: true, kho_create: true, kho_update: true }, write_missing: [] }));
+    renderCard(<HubLinkCard />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Kiểm tra' }));
+    expect(await screen.findByText('Đã nối Kho · 240 ms · mở 3 tool đọc + 2 tool ghi Kho cho Gen')).toBeInTheDocument();
+  });
+
+  it('chỉ tick kho_create: dòng kho_create "Có", kho_update "Chưa" + nhắc tick; Owner tự đóng kho_create ở MCP Hub ⇒ câu riêng', async () => {
+    stubHub(SAVED, testOut({ write_scopes: { kho: false, kho_create: true, kho_update: false }, write_missing: ['ghi Kho (kho_update)'], write_hidden: [] }));
+    const first = renderCard(<HubLinkCard />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Kiểm tra' }));
+    let box = screen.getByTestId('hub-write-scopes');
+    await within(box).findByText(WRITE_MISSING_TEXT);
+    let items = within(box).getAllByRole('listitem');
+    expect(items[0]).toHaveTextContent('kho_create — Tạo bản ghi Phiên/ViệcCó');
+    expect(items[1]).toHaveTextContent('kho_update — Sửa bản ghi Phiên/ViệcChưa');
+    first.unmount();
+    vi.unstubAllGlobals();
+
+    stubHub(SAVED, testOut({ write_scopes: { kho: false, kho_create: false, kho_update: true }, write_missing: [], write_hidden: ['kho_create'] }));
+    renderCard(<HubLinkCard />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Kiểm tra' }));
+    box = screen.getByTestId('hub-write-scopes');
+    expect(await within(box).findByText(WRITE_HIDDEN_TEXT(['kho_create']))).toBeInTheDocument();
+    expect(within(box).queryByText(WRITE_MISSING_TEXT)).toBeNull();
+    items = within(box).getAllByRole('listitem');
+    expect(items[0]).toHaveTextContent('Chưa');
+    expect(items[1]).toHaveTextContent('Có');
+  });
+
   it('chưa có dữ liệu: 2 dòng "Chưa kiểm", nằm dưới "Quyền đọc thêm", ghi rõ Gen chỉ ghi khi Sếp Xác nhận + mã PIN, không cảnh báo', async () => {
     stubHub(SAVED, testOut());
     renderCard(<HubLinkCard />);

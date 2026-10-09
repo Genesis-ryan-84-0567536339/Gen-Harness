@@ -301,7 +301,7 @@ function HubRow({ data, done }: { data: Results; done: boolean }) {
       n={1}
       title="Nối Gen-hub"
       done={done}
-      todo="Nhập địa chỉ Gen-hub (vd https://hub.genos.top/mcp), trong Gen-hub tạo token chỉ đọc 90 ngày, dán vào đây rồi bấm Kiểm tra."
+      todo="Nhập địa chỉ Gen-hub (vd https://hub.genos.top/mcp), trong Gen-hub tạo token 90 ngày có quyền đọc Kho (muốn Gen ghi Kho thì tick thêm kho_create, kho_update), dán vào đây rồi bấm Kiểm tra."
       results={
         <>
           <ResultCell check={hubRes} />

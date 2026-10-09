@@ -18,7 +18,7 @@ const GEN_EXAMPLES = ['Hôm nay có gì gấp?', 'Khách nào hỏi giá hôm na
 /** v0.1.49 (QD-16): Gen đọc gì từ Gen-hub — ai cũng đọc được trang này, nhưng chỉ Owner (Sếp) dùng được Gen-hub. */
 const GENHUB_READS: readonly string[] = [
   'Gen chỉ ĐỌC: Kho Ryan, lịch, mail (tìm và đọc), việc trong Google Tasks và tìm tệp trên Drive.',
-  'Gen KHÔNG gửi mail, KHÔNG tạo hay sửa lịch, việc, tệp.',
+  'Gen KHÔNG gửi mail, KHÔNG tạo hay sửa lịch, việc Google Tasks, tệp Drive.',
   'Ghi duy nhất: Phiên, Việc vào Kho Ryan — chỉ khi Sếp bấm Xác nhận và nhập mã PIN (cần tick quyền kho_create, kho_update ở Gen-hub).',
   'Email, số điện thoại và khoá trong nội dung được che trước khi gửi cho AI.',
   'Gen-hub lỗi liên tục thì Gen tạm dừng gọi 1 phút và báo chuông nếu quá 15 phút.',

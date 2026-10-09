@@ -182,7 +182,8 @@ test.describe('MCP Hub — thẻ Gen-hub', () => {
 
     await expect(check).toBeEnabled();
     await check.click();
-    await expect(card.getByRole('status')).toContainText('Đã nối Kho · 240 ms · mở 3 tool đọc cho Gen');
+    // v0.1.50: tool đọc và tool ghi Kho (kho_create, kho_update) đếm riêng — không gộp tool ghi vào "tool đọc".
+    await expect(card.getByRole('status')).toContainText('Đã nối Kho · 240 ms · mở 3 tool đọc + 2 tool ghi Kho cho Gen');
     await expect(card).toContainText('Đang nối');
     await settle(page);
     await page.screenshot({ path: join(shots, 'mcp-hub-link.png') });
