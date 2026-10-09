@@ -15,6 +15,14 @@ import { roleLabel } from '../screens/system/systemModel';
 
 const GEN_EXAMPLES = ['Hôm nay có gì gấp?', 'Khách nào hỏi giá hôm nay?', 'Sao lưu ở đâu?', 'Mời nhân viên mới thế nào?'];
 
+/** v0.1.49 (QD-16): Gen đọc gì từ Gen-hub — ai cũng đọc được trang này, nhưng chỉ Owner (Sếp) dùng được Gen-hub. */
+const GENHUB_READS: readonly string[] = [
+  'Gen chỉ ĐỌC: Kho Ryan, lịch, mail (tìm và đọc), việc trong Google Tasks và tìm tệp trên Drive.',
+  'Gen KHÔNG gửi mail, KHÔNG tạo hay sửa lịch, việc, tệp.',
+  'Email, số điện thoại và khoá trong nội dung được che trước khi gửi cho AI.',
+  'Gen-hub lỗi liên tục thì Gen tạm dừng gọi 1 phút và báo chuông nếu quá 15 phút.',
+];
+
 /** Trợ giúp / Giới thiệu (`/help`, v0.1.22 — Đợt B3). Ai đăng nhập cũng mở được. */
 export function HelpPage() {
   const me = useMe();
@@ -92,6 +100,21 @@ export function HelpPage() {
             ) : null}
           </Card>
         ) : null}
+
+        {/* v0.1.49 (QD-16): ai cũng thấy; ghi rõ chỉ Owner dùng được. */}
+        <Card title="Gen đọc được gì từ Gen-hub" kicker="Chỉ Sếp (Owner) dùng được · Gen chỉ đọc" data-testid="help-genhub-reads">
+          <ul className="help-examples">
+            {GENHUB_READS.map((t) => (
+              <li key={t}>{t}</li>
+            ))}
+            <li>Chỉ Sếp (Owner) dùng được phần này; vai trò khác không đọc được lịch, mail, việc hay Drive qua Gen.</li>
+          </ul>
+          {isOwner ? (
+            <Link className="gh-btn gh-btn--secondary help-link" to="/connections#genhub" data-testid="help-genhub-link">
+              <Icon name="ph ph-plugs-connected" size={14} /> Mở Kết nối › Gen-hub
+            </Link>
+          ) : null}
+        </Card>
 
         {/* v0.1.42 (F-61): thẻ cập nhật chỉ ở Cài đặt › Sao lưu & cập nhật — ở đây là liên kết tới đó. */}
         {canGuide ? (

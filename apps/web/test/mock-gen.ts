@@ -20,7 +20,10 @@
  * nhắc việc đã xác nhận → chuông `task.reminder` cho các Owner (một lần).
  * v0.1.41 (F-8, F-86): `POST /api/v1/gen/__mock/briefing` (hoặc `__mock/p3/gen/briefing`) {"slot"?: "sang"|"chieu",
  * "needs_api_key"?: bool} = worker Bản tin Gen tới giờ — tạo hội thoại bản tin (content đúng hợp đồng) + chuông
- * `gen.briefing` link `/overview?gen=<id>`, trả {conversation_id}. `PUT /gen/feedback`, `DELETE /gen/feedback/{turn}`
+ * `gen.briefing` link `/overview?gen=<id>`, trả {conversation_id}. v0.1.49 (QD-16): thêm `"hub"?: "ok"|"missing"|"breaker"|"error"|"off"`
+ * (mặc định `off`) — mục Gen-hub: ok = Lịch hôm nay (2) + Mail cần trả lời (3) + Việc đang mở (1); missing = thiếu quyền mail ⇒ không có mục
+ * mail, `hub_hint` + bước say/suggest "Mở Gen-hub"; breaker = cả 3 mục "Gen-hub tạm không trả lời" + detail; error = lịch lỗi (detail),
+ * mail ok, việc trống. `PUT /gen/feedback`, `DELETE /gen/feedback/{turn}`
  * lưu đánh giá; tin trong `messages` có `feedback`, mục trong `conversations` có `kind`.
  *   còn lại                        → lời chào + gợi ý
  */
@@ -66,8 +69,48 @@ interface Conversation {
   messages: Array<Omit<GenMessage, 'feedback'>>;
 }
 
-/** v0.1.41 (F-8): nội dung Bản tin Gen đúng hợp đồng (bước tool `briefing.sources` đứng đầu). */
-export function briefingContent(slotLabel: string, slotIso: string, needsApiKey: boolean): GenMessage['content'] {
+/** v0.1.49 (QD-16): chế độ mục Gen-hub của bản tin giả (xem ghi chú đầu tệp). */
+export type BriefingHubMode = 'ok' | 'missing' | 'breaker' | 'error' | 'off';
+export const BRIEFING_HUB_MODES: readonly BriefingHubMode[] = ['ok', 'missing', 'breaker', 'error', 'off'];
+
+export const HUB_HINT_MAIL = 'Chưa đọc được mail — vào Gen-hub tick thêm quyền đọc mail cho token của Gen-Harness rồi nhờ Gen làm bản tin lại.';
+
+/** Các mục `external` của bản tin theo chế độ; `hint` = câu nhắc khi có mục bị ẩn (chưa nối / thiếu quyền). */
+export function hubSections(hub: BriefingHubMode): { sections: GenBriefingSection[]; hint: string | null } {
+  const calendar: GenBriefingSection = {
+    key: 'calendar_today', title: 'Lịch hôm nay', count: 2, link: '/connections', external: true, state: 'ok',
+    lines: ['09:00 · Họp với nhà cung cấp ván MDF', '14:30 · Gặp anh Bảo tại showroom'],
+  };
+  const mail: GenBriefingSection = {
+    key: 'mail_reply', title: 'Mail cần trả lời', count: 3, link: '/connections', external: true, state: 'ok',
+    lines: ['Anh Bảo — Báo giá ván MDF E1 17mm', 'Công ty Hải Long — Xác nhận lịch giao hàng', 'Chị Mai — Hỏi bảo hành'],
+  };
+  const tasks: GenBriefingSection = {
+    key: 'gtasks_open', title: 'Việc đang mở', count: 1, link: '/connections', external: true, state: 'ok',
+    lines: ['Gọi nhà cung cấp keo dán'],
+  };
+  if (hub === 'ok') return { sections: [calendar, mail, tasks], hint: null };
+  if (hub === 'missing') return { sections: [calendar, tasks], hint: HUB_HINT_MAIL };
+  if (hub === 'breaker') {
+    const detail = 'HUB_BREAKER_OPEN: 3 lỗi liên tiếp, Gen tạm dừng gọi Gen-hub 60 giây';
+    return { sections: [calendar, mail, tasks].map((x): GenBriefingSection => ({ ...x, count: 0, lines: [], state: 'breaker', detail })), hint: null };
+  }
+  if (hub === 'error') {
+    return {
+      sections: [
+        { ...calendar, count: 0, lines: [], state: 'error', detail: 'HUB_UNAVAILABLE: Gen-hub trả 502 khi gọi calendar_list_events' },
+        mail,
+        { ...tasks, count: 0, lines: [], state: 'empty' },
+      ],
+      hint: null,
+    };
+  }
+  return { sections: [], hint: null };
+}
+
+/** v0.1.41 (F-8): nội dung Bản tin Gen đúng hợp đồng (bước tool `briefing.sources` đứng đầu). v0.1.49: `hub` = mục Gen-hub. */
+export function briefingContent(slotLabel: string, slotIso: string, needsApiKey: boolean, hub: BriefingHubMode = 'off'): GenMessage['content'] {
+  const ext = hubSections(hub);
   const sections: GenBriefingSection[] = [
     { key: 'tasks_due', title: 'Việc tới hạn hôm nay', count: 2, lines: ['TSK-0998 · Gọi lại anh Bảo (P1)', 'TSK-0999 · Gửi báo giá MDF (P2)'], link: '/tasks' },
     { key: 'hot_customers', title: 'Khách đang nóng', count: 1, lines: ['Anh Bảo — hỏi giá ván MDF E1 17mm'], link: '/inbox' },
@@ -79,6 +122,11 @@ export function briefingContent(slotLabel: string, slotIso: string, needsApiKey:
     { kind: 'say', text: `Bản tin ${slotLabel}: 2 việc tới hạn, 1 khách đang nóng, 1 nháp chờ duyệt, không có sự cố.` },
     ...sections.filter((x) => x.count > 0).map((x): GenStep => ({ kind: 'say', text: `${x.title} (${x.count}): ${x.lines.join('; ')}` })),
   ];
+  if (ext.hint) {
+    // Mục bị ẩn (thiếu quyền): một dòng nhắc + nút "Mở Gen-hub" (Kết nối › Gen-hub).
+    steps.push({ kind: 'say', text: ext.hint });
+    steps.push({ kind: 'suggest', items: [{ label: 'Mở Gen-hub', action: { type: 'navigate', screen: 'connections' } }] });
+  }
   if (needsApiKey) {
     steps.push({ kind: 'say', text: 'Dán khoá OpenRouter/Gemini để Gen tóm tắt' });
     steps.push({
@@ -86,7 +134,12 @@ export function briefingContent(slotLabel: string, slotIso: string, needsApiKey:
       items: [{ label: 'Mở nơi dán khoá', action: { type: 'navigate', screen: 'api' } }],
     });
   }
-  return { kind: 'briefing', slot: slotIso, slot_label: slotLabel, summary_source: needsApiKey ? 'none' : 'model', needs_api_key: needsApiKey, sections, steps };
+  const content: GenMessage['content'] = {
+    kind: 'briefing', slot: slotIso, slot_label: slotLabel, summary_source: needsApiKey ? 'none' : 'model', needs_api_key: needsApiKey,
+    sections: [...sections, ...ext.sections], steps,
+  };
+  if (hub !== 'off') content.hub_hint = ext.hint;
+  return content;
 }
 
 const OWNER_ID = USER_IDS.owner;
@@ -260,7 +313,8 @@ export function createMock(opts: MockGenOptions) {
   const feedback = new Map<string, GenRating>();
 
   /** Worker Bản tin Gen tới giờ: một hội thoại bản tin + chuông `gen.briefing` cho các Owner. */
-  function makeBriefing(b: { slot?: unknown; needs_api_key?: unknown }): { conversation_id: string } {
+  function makeBriefing(b: { slot?: unknown; needs_api_key?: unknown; hub?: unknown }): { conversation_id: string } {
+    const hub = BRIEFING_HUB_MODES.find((x) => x === b.hub) ?? 'off';
     const afternoon = b.slot === 'chieu';
     const now = new Date();
     const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' }).format(now); // YYYY-MM-DD
@@ -269,7 +323,7 @@ export function createMock(opts: MockGenOptions) {
     const slotIso = `${ymd}T${afternoon ? '17:30' : '07:30'}:00+07:00`;
     const iso = now.toISOString();
     const conv: Conversation = { id: randomUUID(), title: `Bản tin Gen · ${slotLabel}`, created_at: iso, last_at: iso, kind: 'briefing', messages: [] };
-    conv.messages.push({ id: randomUUID(), role: 'assistant', turn_id: randomUUID(), content: briefingContent(slotLabel, slotIso, b.needs_api_key !== false), created_at: iso });
+    conv.messages.push({ id: randomUUID(), role: 'assistant', turn_id: randomUUID(), content: briefingContent(slotLabel, slotIso, b.needs_api_key !== false, hub), created_at: iso });
     conversations.set(conv.id, conv);
     opts.notifyOwners?.('gen.briefing', `Bản tin Gen ${slotLabel}`, '2 việc tới hạn · 1 khách đang nóng · 1 nháp chờ duyệt', `/overview?gen=${conv.id}`);
     return { conversation_id: conv.id };
@@ -421,7 +475,7 @@ export function createMock(opts: MockGenOptions) {
       settings: () => settings,
       script: (b: unknown) => script(String((b as { text?: string })?.text ?? '')),
       /** v0.1.41 (F-8): worker Bản tin Gen tới giờ (như `POST /gen/__mock/briefing`). */
-      briefing: (b: unknown) => makeBriefing((b ?? {}) as { slot?: unknown; needs_api_key?: unknown }),
+      briefing: (b: unknown) => makeBriefing((b ?? {}) as { slot?: unknown; needs_api_key?: unknown; hub?: unknown }),
       /** Worker nhắc việc tới giờ: chuông cho Owner, mỗi nhắc một lần. */
       fireReminders: () => {
         let n = 0;

@@ -3,7 +3,8 @@
  * CHỈ Owner (403 vai trò khác), PIN cho `hub` và `agy_switch` (423 như mock khác), mã lạ 404. Lỗi nghiệp vụ vẫn 200
  * với `status: 'fail'` + `error_code`. Kết quả giữ trong state của mock (tải lại trang vẫn còn — đọc từ API).
  *
- * - hub: dùng chung lượt "Kiểm tra" của `mock-p4-mcp` (token chứa "sai" → HUB_TOKEN_REJECTED).
+ * - hub: dùng chung lượt "Kiểm tra" của `mock-p4-mcp` (token chứa "sai" → HUB_TOKEN_REJECTED). v0.1.49: Đạt kèm
+ *   `detail.read_scopes` {calendar, mail, tasks, drive} (token chứa "thieu" → lịch + mail false; vẫn Đạt, quyền đọc thêm không bắt buộc).
  * - facebook: trả `pending`; lần GET cách lượt chạy ≥ 1,5 giây thì thành `pass` (như việc đọc chạy nền).
  * - agy_call / agy_switch / claude_call: theo hồ sơ CLI của `mock-phase2` (`account` = email hồ sơ đang dùng — CHỈ
  *   trong phản hồi `run`; `GET` như `latest()` thật chỉ có `detail.account_masked`).
@@ -25,7 +26,7 @@
  * Hook e2e `POST /api/v1/__mock/p3/bossChecks/seedClaude {}`: một hồ sơ Claude đang dùng, CHƯA có bản claude_login.
  */
 import { randomUUID } from 'node:crypto';
-import type { BossCheck, BossCheckKey, BossOverview, BossRow, CliProfile, HubLink, Provider, SocialAccount } from '@gen-harness/contracts';
+import type { BossCheck, BossCheckKey, BossOverview, BossRow, CliProfile, HubLink, HubReadScopes, Provider, SocialAccount } from '@gen-harness/contracts';
 import type { P2Ctx } from './mock-phase2';
 import type { TelegramOutcome } from './mock-telegram';
 
@@ -33,7 +34,7 @@ interface Opts {
   fresh: boolean;
   emit: (type: string, data: unknown) => void;
   hubLink: () => HubLink;
-  hubTest: () => { ok: boolean; error: string | null; error_code: string | null };
+  hubTest: () => { ok: boolean; error: string | null; error_code: string | null; read_scopes?: HubReadScopes };
   socialAccounts: () => SocialAccount[];
   cliProfiles: (kind: string) => CliProfile[];
   activateCli: (id: string) => boolean;
@@ -148,7 +149,8 @@ export function createMock(opts: Opts) {
       case 'hub': {
         if (!opts.hubLink().configured) return fail('hub', 'HUB_LINK_NOT_CONFIGURED', 'Chưa nhập địa chỉ và token Gen-hub');
         const t = opts.hubTest();
-        return t.ok ? record('hub', 'pass', { detail: { tools: 3 } }) : fail('hub', t.error_code ?? 'HUB_ERROR', t.error ?? 'Gen-hub báo lỗi');
+        // v0.1.49 (QD-16): `detail.read_scopes` = quyền đọc thêm (không bắt buộc) của lần Kiểm tra — thiếu quyền vẫn là Đạt.
+        return t.ok ? record('hub', 'pass', { detail: { tools: 3, ...(t.read_scopes ? { read_scopes: { ...t.read_scopes } } : {}) } }) : fail('hub', t.error_code ?? 'HUB_ERROR', t.error ?? 'Gen-hub báo lỗi');
       }
       case 'facebook': {
         const acc = opts.socialAccounts().find((a) => a.id === body.account_id && a.status !== 'revoked');

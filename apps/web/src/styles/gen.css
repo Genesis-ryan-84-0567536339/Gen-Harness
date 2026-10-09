@@ -223,3 +223,32 @@
 .jev-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .jev-note { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--color-neutral-400); }
 .triage-row { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+
+/* ── v0.1.49 (F-8, QD-16): mục Gen-hub trong Bản tin (Lịch hôm nay / Mail cần trả lời / Việc đang mở) + khối "Quyền đọc thêm" ──
+ * Chỉ dùng token màu; mọi khối co được (min-width: 0, ngắt dòng) để không tràn ngang ở 390px. */
+.gen-hub-secs { align-self: stretch; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.gen-hub-sec {
+  min-width: 0; padding: 7px 9px 8px; border: 1px solid var(--color-divider); border-radius: var(--radius-md);
+  background: transparent;
+}
+.gen-hub-sec[data-state='error'], .gen-hub-sec[data-state='breaker'] { border-color: var(--color-warn); }
+.gen-hub-sec__title { margin: 0 0 3px; font-size: 12px; font-weight: 600; color: var(--color-neutral-300); overflow-wrap: anywhere; }
+.gen-hub-sec__count { font-weight: 400; color: var(--color-neutral-400); }
+.gen-hub-sec__lines { margin: 0; padding-left: 16px; display: flex; flex-direction: column; gap: 2px; font-size: 12.5px; color: var(--color-text); }
+.gen-hub-sec__lines li { overflow-wrap: anywhere; }
+.gen-hub-sec__note { margin: 0; font-size: 12px; color: var(--color-neutral-400); overflow-wrap: anywhere; }
+.gen-hub-sec__note--warn { color: var(--color-warn); }
+
+.hub-scopes { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.hub-scopes__title { margin: 0; font-size: 12.5px; font-weight: 600; color: var(--color-text); }
+.hub-scopes__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; }
+.hub-scopes__row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.hub-scopes__name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.hub-scopes__val { flex: none; font-size: 11.5px; color: var(--color-neutral-400); }
+.hub-scopes__row[data-has='yes'] .hub-scopes__val { color: var(--color-ok); }
+.hub-scopes__row[data-has='no'] .hub-scopes__val { color: var(--color-warn); }
+.hub-scopes__msg { margin: 0; font-size: 12px; overflow-wrap: anywhere; }
+.hub-scopes__msg[data-tone='warn'] { color: var(--color-warn); }
+.hub-scopes__msg[data-tone='ok'] { color: var(--color-ok); }
+.hub-breaker { margin: 0; padding: 6px 9px; border: 1px solid var(--color-warn); border-radius: var(--radius-md); color: var(--color-warn); font-size: 12px; overflow-wrap: anywhere; }
+.boss-hub-scopes { margin: 0; font-size: 12px; color: var(--color-neutral-400); overflow-wrap: anywhere; }

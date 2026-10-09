@@ -212,6 +212,16 @@ export interface GenBriefingSection {
   count: number;
   lines: string[];
   link: string;
+  /**
+   * v0.1.49 (F-8, QD-16): mục đọc từ Gen-hub (lịch hôm nay `calendar_today`, mail cần trả lời `mail_reply`, việc đang mở
+   * `gtasks_open`). `state`: `ok` có dòng · `empty` không có gì · `error` chưa đọc được · `breaker` Gen-hub tạm không trả
+   * lời. Máy chủ cũ không gửi ⇒ coi là `ok`. Mục chưa nối / thiếu quyền KHÔNG có trong danh sách (xem `hub_hint`).
+   */
+  state?: 'ok' | 'empty' | 'error' | 'breaker';
+  /** `true` = mục lấy từ Gen-hub (nội dung ngoài, đã che). */
+  external?: boolean;
+  /** Lỗi thô đã lọc bí mật (chỉ hiện trong "Chi tiết kỹ thuật"); luôn là chuỗi hoặc null. */
+  detail?: string | null;
 }
 
 export interface GenMessage {
@@ -231,6 +241,8 @@ export interface GenMessage {
     summary_source?: 'model' | 'none';
     needs_api_key?: boolean;
     sections?: GenBriefingSection[];
+    /** v0.1.49: một câu gợi ý khi mục Gen-hub bị ẩn (chưa nối / thiếu quyền) — null khi không có gì để nhắc. */
+    hub_hint?: string | null;
   };
   created_at: string;
   /** v0.1.41 (F-86): đánh giá của chính người xem cho lượt này (máy chủ cũ không gửi). */
