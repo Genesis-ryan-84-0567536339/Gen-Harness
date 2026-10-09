@@ -46,7 +46,8 @@ Bản mới nhất **v0.1.50** (09/10/2026; `VERSION` = v0.1.50 trên nhánh `cl
   đề xuất `memory_note`/`kho_create`/`kho_update`; đường ghi duy nhất `POST /hub/kho/write` có permit ký dùng một lần (route MCP chung vẫn chặn, Gmail/Lịch/Drive chỉ đọc);
   Kết nối › Gen-hub có "Quyền ghi Kho" (`write_scopes`, `write_missing`); job `gen_kho_release` đề xuất một Phiên mỗi bản; Việc Sếp cần làm dòng 9 "Gen ghi Kho";
   Trợ giúp + Hướng dẫn bước 14 bỏ chữ "chỉ đọc" tuyệt đối; tài liệu tách CHANGELOG + `docs/releases/` (F-90, F-69, F-47, F-91, F-92, F-42, F-39).
-- **Kiểm tra** (khi gộp): KIEMTRA_V0150.
+- **Kiểm tra** (khi gộp, nhánh `claude/v0150`): pytest 1970 xanh (superuser và role `gh_app`), 1 head alembic = `0032`; vitest 947; Playwright mock 287; e2e thật rút gọn 7;
+  browser 43; `go test ./...` xanh; unittest `.github/scripts` 120 + `check_doc_links.py`, `check_release_gate.py`, `check_embedded_sync.py`, `check_workflow_hygiene.py`, `check_no_fake_ids.py` xanh.
 - **Boss cần làm**: xem "Boss phải làm — v0.1.50" dưới (tick `kho_create`, `kho_update` ở Gen-hub → Kiểm tra → duyệt Phiên đầu tiên → thử Gen nhớ). Chi tiết: [v0.1.50.md](../releases/v0.1.50.md).
 
 ## Quy trình phát hành & cổng
