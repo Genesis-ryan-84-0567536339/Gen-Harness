@@ -3,43 +3,60 @@ import { mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { SCREENS } from '@gen-harness/contracts';
-import { loginAsOwner, mockHook, OWNER, resetMock, resultsDir } from './support';
+import { OWNER, SETUP_TOKEN, apiCall, loginAsOwner, mockHook, resetMock, resultsDir } from './support';
 
 /**
  * Lính gác bố cục (sau v0.1.49 — "nội dung dính biên khung"): duyệt MỌI màn (lấy từ packages/contracts/src/screens.ts)
- * + các tab chính + trang phụ (Hướng dẫn, Trợ giúp, Tài khoản, Mạng xã hội) ở 1920/1440/1024/390 với Owner, đo trong
- * <main> (bỏ header `.hd` và thanh bên) bốn lỗi trình bày:
+ * + các tab chính + trang phụ (Hướng dẫn, Trợ giúp, Tài khoản, Mạng xã hội) ở 1920/1440/1024/390 với Owner — MỖI CỠ MÀN
+ * MỘT TEST (một route chập chờn chỉ hỏng một cỡ, retry chỉ chạy lại cỡ đó) — cộng một test trang ngoài (Đăng nhập,
+ * Thiết lập bước 4). Đo trong <main> (bỏ header `.hd` và thanh bên; trang Đăng nhập không có <main> ⇒ đo trong `.login`):
  *
  *  - `dinh-bien` (chữ dính mép khung) — đo HỘP CHỮ THẬT: với mọi text node hiển thị (chữ sau trim dài > 1, không nằm
  *    trong script/style/select/textarea, không display:none/visibility:hidden, không position:fixed), lấy
  *    `Range.selectNodeContents(textNode).getBoundingClientRect()` (hộp glyph, đã cắt theo các tổ tiên overflow ≠ visible
- *    nằm giữa chữ và khung — chữ bị ellipsis tính tới mép vùng cắt). "Khung" = tổ tiên gần nhất có border-left-width > 0,
- *    hoặc (border-radius > 0 và nền không trong suốt), hoặc <main>, hoặc <table>. Khoảng cách hộp chữ tới mép trái/phải
- *    của khung < 6px ⇒ phát hiện. Không tính khung nhỏ ≤ 48×48px (avatar/huy hiệu chữ viết tắt căn giữa — chữ cố ý
- *    chiếm gần hết khung) — đây là quy tắc đo, không phải allowlist.
+ *    nằm giữa chữ và khung — chữ bị ellipsis tính tới mép vùng cắt; phía giáp mép một vùng CUỘN ngang còn nội dung khuất
+ *    thì bỏ — bảng rộng đang cuộn, cột kế tiếp chỉ khuất, không phải dính mép). "Khung" = tổ tiên gần nhất có
+ *    border-left-width > 0, hoặc (border-radius > 0 và nền không trong suốt), hoặc gốc đo. `<table>` KHÔNG tự là khung: bảng không viền/nền nằm
+ *    trong thân thẻ có đệm thì chữ cách mép thẻ đúng bằng đệm thân — mắt người thấy vậy; bảng có viền/nền đã được hai
+ *    luật trên bắt. Khoảng cách hộp chữ tới mép trái/phải của khung < 6px ⇒ phát hiện. Không tính khung nhỏ ≤ 48×48px
+ *    (avatar/huy hiệu chữ viết tắt căn giữa — chữ cố ý chiếm gần hết khung) — đây là quy tắc đo, không phải allowlist.
  *  - `tran-ngang` — `document.documentElement.scrollWidth > clientWidth`, hoặc vùng nội dung `.content` (overflow-x:auto)
  *    phải cuộn ngang, hoặc phần tử có `getBoundingClientRect().right > bề rộng màn + 1` (báo phần tử ngoài cùng gây tràn).
+ *  - `bi-cat-khung` — phần tử overflow-x: hidden|clip (không phải chữ ellipsis) có scrollWidth > clientWidth + 2: nội dung
+ *    bị cắt mất mép phải mà không cuộn được (vd bảng tool MCP rộng 443px trong thẻ `overflow:hidden` ở 390px).
  *  - `chu-bi-cat` — phần tử một dòng (white-space: nowrap hoặc text-overflow: ellipsis) có scrollWidth > clientWidth + 2
- *    mà không có `title` (trên nó hoặc tổ tiên). Bỏ qua vùng cuộn có chủ đích (overflow-x: auto|scroll, vd dải tab cuộn
- *    ngang ở điện thoại) và chữ ẩn cho trình đọc màn hình (rộng < 4px).
+ *    mà không có `title` (trên nó hoặc tổ tiên). Bỏ qua vùng cuộn có chủ đích (overflow-x: auto|scroll) và chữ ẩn cho
+ *    trình đọc màn hình (rộng < 4px).
+ *  - `chu-bi-ep` — cột chữ bị ép, CÓ title cũng tính: chữ một dòng bị cắt còn < 64px và thấy < 55% (vd tên "Ngu…"), hoặc
+ *    một đoạn chữ vỡ ≥ 3 dòng mà dòng rộng nhất < 48px (chữ xếp dọc từng tiếng một).
+ *  - `cuon-an` — vùng overflow-x: auto|scroll đang có nội dung khuất (scrollWidth > clientWidth + 1) mà ẩn thanh cuộn
+ *    (`scrollbar-width: none`) và không có mép mờ (`mask-image`) — người dùng không biết còn nội dung để cuộn.
  *  - `icon-rot-dong` — Icon (svg/span `data-icon`) display:block trong cha KHÔNG flex/grid mà cha có chữ ⇒ icon một dòng,
  *    chữ dòng dưới (đúng lỗi khối "Máy chủ chưa nhận yêu cầu cập nhật — xem ở Cài đặt" vỡ 3 dòng ở v0.1.44–v0.1.49).
+ *  - `icon-lech` — Icon là nội dung DUY NHẤT của một hộp khối không flex/grid (đi lên qua các span inline chỉ bọc mỗi
+ *    icon) mà hộp cao hơn icon > 2px: Icon inline-block ⇒ hộp dòng (strut theo line-height) đội hộp cao lên và đẩy icon
+ *    lệch xuống (vd cột kênh /raw 14→20px, vòng trạng thái /tasks 18→21px). Khung chỉ-icon phải là flex/inline-flex/grid.
  *
- * Ảnh: mỗi route × cỡ chụp vào `$LAYOUT_GUARD_SHOTS/<nhánh>/<w>_<route>.png` (mặc định test-results/layout-guard),
- * phát hiện nào cũng chụp thêm ảnh phóng ±40px quanh phần tử (`…__zoomN.png`). Lỗi ⇒ in bảng phát hiện gom theo
+ * Ảnh: chỉ chụp khi route có phát hiện — ảnh cả trang `<w>_<route>.png` + ảnh phóng ±40px quanh từng phần tử
+ * (`…__zoomN.png`) vào `$LAYOUT_GUARD_DIR/<nhánh>/` (mặc định test-results/layout-guard). `LAYOUT_GUARD_SHOTS=all` ⇒
+ * chụp cả trang mọi route (để xem bằng mắt). Đầu mỗi test xoá ảnh cũ của chính test đó. Lỗi ⇒ in bảng phát hiện gom theo
  * (loại, selector, route) kèm các cỡ màn gặp lỗi.
  *
  * Kịch bản dữ liệu: mock "finished" + ép thẻ cập nhật "Máy chủ chưa nhận yêu cầu cập nhật" (GET /system/update
  * stalled/not_picked_up) và vài sự cố ở dải "Cần Sếp xử lý" — đúng các thẻ trong ảnh Boss.
  */
 
+type Kind = 'dinh-bien' | 'tran-ngang' | 'bi-cat-khung' | 'chu-bi-cat' | 'chu-bi-ep' | 'cuon-an' | 'icon-rot-dong' | 'icon-lech';
+
 interface Finding {
-  kind: 'dinh-bien' | 'tran-ngang' | 'chu-bi-cat' | 'icon-rot-dong';
+  kind: Kind;
   selector: string;
   text: string;
   gap: number;
   rect: { x: number; y: number; width: number; height: number };
 }
+
+type Hit = Finding & { route: string; w: number };
 
 /**
  * ALLOWLIST — MẶC ĐỊNH RỖNG. Chỉ thêm khi phát hiện đã được người xem ảnh xác nhận KHÔNG phải lỗi (dương tính giả của
@@ -47,7 +64,7 @@ interface Finding {
  * — luôn kèm `reason` nói rõ vì sao và đến khi nào. Khớp khi `kind` bằng nhau, `selector` chứa `selector` (chuỗi con)
  * và (nếu có) `route` khớp đúng route.
  */
-const ALLOWLIST: Array<{ kind: Finding['kind']; selector: string; route?: string; reason: string }> = [];
+const ALLOWLIST: Array<{ kind: Kind; selector: string; route?: string; reason: string }> = [];
 
 const VIEWPORTS = [
   { width: 1920, height: 1080 },
@@ -124,13 +141,20 @@ function branchName(): string {
   }
 }
 
-const SHOT_DIR = join(process.env.LAYOUT_GUARD_SHOTS || join(resultsDir, 'layout-guard'), branchName());
+const SHOT_DIR = join(process.env.LAYOUT_GUARD_DIR || join(resultsDir, 'layout-guard'), branchName());
+const SHOT_ALL = process.env.LAYOUT_GUARD_SHOTS === 'all';
 const slug = (route: string) => route.replace(/^\//, '').replace(/[^\w-]+/g, '_') || 'root';
 
-/** Chạy trong trang: trả mọi phát hiện trong <main> (bỏ header .hd). Giữ thuần JS — không đóng gói hàm ngoài vào. */
-function scanLayout(): Finding[] {
+/** Xoá ảnh lượt trước có tiền tố này — ảnh cũ không còn đúng, thư mục chỉ chứa bằng chứng của lượt này. */
+function clearShots(prefix: string): void {
+  mkdirSync(SHOT_DIR, { recursive: true });
+  for (const f of readdirSync(SHOT_DIR)) if (f.startsWith(prefix)) rmSync(join(SHOT_DIR, f));
+}
+
+/** Chạy trong trang: trả mọi phát hiện trong gốc đo (bỏ header .hd). Giữ thuần JS — không đóng gói hàm ngoài vào. */
+function scanLayout(rootSel: string): Finding[] {
   const out: Finding[] = [];
-  const main = document.querySelector('main');
+  const main = document.querySelector(rootSel);
   if (!main) return out;
   const header = main.querySelector('header.hd');
   const vw = document.documentElement.clientWidth;
@@ -153,13 +177,14 @@ function scanLayout(): Finding[] {
   const clean = (s: string) => s.replace(/\s+/g, ' ').trim().slice(0, 40);
   const transparent = (c: string) => c === 'transparent' || /rgba\([^)]*,\s*0\)$/.test(c);
   const skipped = (el: Element) => (header ? header.contains(el) : false);
+  const round1 = (n: number) => Math.round(n * 10) / 10;
 
   const frameOf = new Map<Element, boolean>();
   const isFrame = (el: Element): boolean => {
     const hit = frameOf.get(el);
     if (hit !== undefined) return hit;
     let v = false;
-    if (el === main || el.tagName === 'TABLE') v = true;
+    if (el === main) v = true;
     else {
       const cs = getComputedStyle(el);
       if (parseFloat(cs.borderLeftWidth) > 0 && cs.borderLeftStyle !== 'none') v = true;
@@ -169,7 +194,7 @@ function scanLayout(): Finding[] {
     return v;
   };
 
-  // ── (a) dính biên: hộp chữ thật (Range) so với khung gần nhất ──
+  // ── (a) dính biên: hộp chữ thật (Range) so với khung gần nhất; chữ xếp dọc (cột bị ép) ──
   const walker = document.createTreeWalker(main, NodeFilter.SHOW_TEXT);
   const seen = new Set<string>();
   for (let n = walker.nextNode(); n; n = walker.nextNode()) {
@@ -183,10 +208,22 @@ function scanLayout(): Finding[] {
     range.selectNodeContents(n);
     const tr = range.getBoundingClientRect();
     if (tr.width <= 0 || tr.height <= 0) continue;
+    const lines = Array.from(range.getClientRects()).filter((r) => r.width > 0 && r.height > 0);
+    if (lines.length >= 3 && text.length >= 8 && Math.max(...lines.map((r) => r.width)) < 48) {
+      const sel = short(parent);
+      const key = `ep|${sel}|${clean(text)}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        out.push({ kind: 'chu-bi-ep', selector: sel, text: `${clean(text)} (${lines.length} dòng)`, gap: round1(tr.width), rect: r4(tr) });
+      }
+    }
     let left = tr.left;
     let right = tr.right;
     let frame: Element | null = null;
     let fixed = false;
+    // Phía chữ giáp mép một vùng CUỘN (overflow-x auto|scroll) còn nội dung khuất: không phải dính mép (xem dưới).
+    let scrolledL = false;
+    let scrolledR = false;
     for (let a: Element | null = parent; a; a = a.parentElement) {
       const cs = getComputedStyle(a);
       if (cs.position === 'fixed') {
@@ -197,8 +234,15 @@ function scanLayout(): Finding[] {
         // chữ bị cắt bởi vùng này (ellipsis, cuộn ngang) — chỉ phần nhìn thấy (hộp nội dung) mới tính
         const cr = a.getBoundingClientRect();
         const cl = cr.left + a.clientLeft + parseFloat(cs.paddingLeft);
+        const crr = cr.left + a.clientLeft + a.clientWidth - parseFloat(cs.paddingRight);
+        // Mép của vùng cuộn mà bên kia còn nội dung khuất (bảng rộng cuộn ngang) là mép CUỘN, không phải mép khung: chữ
+        // sát đó (hoặc bị nó cắt) chỉ là cột kế tiếp đang khuất — cuộn là ra. Phía đó không đo.
+        if (cs.overflowX === 'auto' || cs.overflowX === 'scroll') {
+          if (left < cl - 0.5 || a.scrollLeft > 1) scrolledL = true;
+          if (right > crr + 0.5 || a.scrollLeft + a.clientWidth < a.scrollWidth - 1) scrolledR = true;
+        }
         left = Math.max(left, cl);
-        right = Math.min(right, cr.left + a.clientLeft + a.clientWidth - parseFloat(cs.paddingRight));
+        right = Math.min(right, crr);
       }
       if (isFrame(a)) {
         frame = a;
@@ -208,15 +252,15 @@ function scanLayout(): Finding[] {
     if (fixed || !frame || right <= left) continue;
     const fr = frame.getBoundingClientRect();
     if (fr.width <= 48 && fr.height <= 48) continue; // avatar / huy hiệu chữ viết tắt căn giữa
-    const gl = left - fr.left;
-    const gr = fr.right - right;
+    const gl = scrolledL ? Infinity : left - fr.left;
+    const gr = scrolledR ? Infinity : fr.right - right;
     const gap = Math.min(gl, gr);
     if (gap < MIN_GAP) {
       const sel = `${short(frame)} » ${short(parent)} (${gl < gr ? 'trái' : 'phải'})`;
       const key = `${sel}|${clean(text)}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      out.push({ kind: 'dinh-bien', selector: sel, text: clean(text), gap: Math.round(gap * 10) / 10, rect: r4(new DOMRect(left, tr.top, right - left, tr.height)) });
+      out.push({ kind: 'dinh-bien', selector: sel, text: clean(text), gap: round1(gap), rect: r4(new DOMRect(left, tr.top, right - left, tr.height)) });
     }
   }
 
@@ -252,16 +296,36 @@ function scanLayout(): Finding[] {
     }
   }
 
-  // ── (c) chữ một dòng bị cắt, không title; (d) icon block rớt dòng ──
+  // ── (c) chữ một dòng bị cắt / bị ép, vùng bị cắt mép, vùng cuộn ẩn; (d) icon rớt dòng / lệch trong khung chỉ-icon ──
+  const onlyIcon = (e: Element) => e.children.length === 1 && !(e.textContent ?? '').trim();
   for (const el of Array.from(main.querySelectorAll('*'))) {
     if (skipped(el)) continue;
     if (el.closest('select,textarea,input,option')) continue;
     if (el.hasAttribute('data-icon')) {
       const p = el.parentElement;
       if (!p) continue;
+      const ir = el.getBoundingClientRect();
+      if (ir.width <= 0) continue;
       const pd = getComputedStyle(p).display;
-      if (getComputedStyle(el).display === 'block' && !/flex|grid/.test(pd) && (p.textContent ?? '').trim().length > 1 && el.getBoundingClientRect().width > 0) {
-        out.push({ kind: 'icon-rot-dong', selector: `${short(p)} > [icon ${el.getAttribute('data-icon')}]`, text: clean(p.textContent ?? ''), gap: 0, rect: r4(p.getBoundingClientRect()) });
+      const name = el.getAttribute('data-icon');
+      if (getComputedStyle(el).display === 'block' && !/flex|grid/.test(pd) && (p.textContent ?? '').trim().length > 1) {
+        out.push({ kind: 'icon-rot-dong', selector: `${short(p)} > [icon ${name}]`, text: clean(p.textContent ?? ''), gap: 0, rect: r4(p.getBoundingClientRect()) });
+      }
+      // Khung chỉ-icon: đi lên qua các span inline chỉ bọc mỗi icon tới hộp khối đầu tiên (ô bảng: chiều cao theo hàng — bỏ).
+      if (onlyIcon(p)) {
+        let box: Element = p;
+        let bd = pd;
+        while (bd === 'inline' && box.parentElement && box.parentElement !== main && onlyIcon(box.parentElement)) {
+          box = box.parentElement;
+          bd = getComputedStyle(box).display;
+        }
+        if (/^(block|inline-block|list-item|flow-root)$/.test(bd)) {
+          const bcs = getComputedStyle(box);
+          const inner = (box as HTMLElement).clientHeight - parseFloat(bcs.paddingTop) - parseFloat(bcs.paddingBottom);
+          if (inner > ir.height + 2) {
+            out.push({ kind: 'icon-lech', selector: `${short(box)} > [icon ${name}]`, text: `khung ${round1(inner)}px, icon ${round1(ir.height)}px`, gap: round1(ir.height - inner), rect: r4(box.getBoundingClientRect()) });
+          }
+        }
       }
       continue;
     }
@@ -269,18 +333,34 @@ function scanLayout(): Finding[] {
     const he = el;
     if (he.clientWidth < 4) continue;
     const cs = getComputedStyle(he);
+    const over = he.scrollWidth - he.clientWidth;
+    if (cs.overflowX === 'auto' || cs.overflowX === 'scroll') {
+      const hidden = cs.getPropertyValue('scrollbar-width') === 'none';
+      const faded = cs.getPropertyValue('mask-image') !== 'none' || (cs.getPropertyValue('-webkit-mask-image') || 'none') !== 'none';
+      if (over > 1 && hidden && !faded) {
+        out.push({ kind: 'cuon-an', selector: short(he), text: `khuất ${over}px, ẩn thanh cuộn, không mép mờ`, gap: -over, rect: r4(he.getBoundingClientRect()) });
+      }
+      continue;
+    }
+    if ((cs.overflowX === 'hidden' || cs.overflowX === 'clip') && cs.textOverflow !== 'ellipsis' && over > 2) {
+      const r = he.getBoundingClientRect();
+      const cut = Array.from(he.children).find((c) => c.getBoundingClientRect().right > r.right + 1);
+      out.push({ kind: 'bi-cat-khung', selector: cut ? `${short(he)} ⊃ ${short(cut)}` : short(he), text: clean((cut ?? he).textContent ?? ''), gap: -over, rect: r4(r) });
+      continue;
+    }
     if (cs.whiteSpace !== 'nowrap' && cs.textOverflow !== 'ellipsis') continue;
-    if (cs.overflowX === 'auto' || cs.overflowX === 'scroll') continue;
-    if (!(he.textContent ?? '').trim()) continue;
-    if (he.scrollWidth > he.clientWidth + 2 && !he.closest('[title]')) {
-      out.push({ kind: 'chu-bi-cat', selector: short(he), text: clean(he.textContent ?? ''), gap: he.clientWidth - he.scrollWidth, rect: r4(he.getBoundingClientRect()) });
+    if (!(he.textContent ?? '').trim() || over <= 2) continue;
+    if (!he.closest('[title]')) {
+      out.push({ kind: 'chu-bi-cat', selector: short(he), text: clean(he.textContent ?? ''), gap: -over, rect: r4(he.getBoundingClientRect()) });
+    } else if (he.clientWidth < 64 && he.clientWidth < he.scrollWidth * 0.55) {
+      out.push({ kind: 'chu-bi-ep', selector: short(he), text: `${clean(he.textContent ?? '')} (thấy ${he.clientWidth}/${he.scrollWidth}px)`, gap: -over, rect: r4(he.getBoundingClientRect()) });
     }
   }
   return out;
 }
 
-async function settled(page: Page): Promise<void> {
-  await page.locator('main').first().waitFor();
+async function settled(page: Page, root = 'main'): Promise<void> {
+  await page.locator(root).first().waitFor();
   await page
     .waitForFunction(() => !document.querySelector('main .gh-skeleton, main [aria-busy="true"]'), undefined, { timeout: 5_000 })
     .catch(() => undefined);
@@ -309,70 +389,107 @@ async function go(page: Page, route: string): Promise<void> {
   await pinIfAsked(page);
 }
 
-test.describe('Lính gác bố cục — chữ dính biên, tràn ngang, chữ bị cắt, icon rớt dòng', () => {
-  test('mọi màn × 1920/1440/1024/390 không có phát hiện', async ({ page }) => {
-    test.setTimeout(240_000);
-    mkdirSync(SHOT_DIR, { recursive: true });
-    // ảnh phóng của lượt chạy trước không còn đúng — xoá để thư mục chỉ chứa phát hiện của lượt này
-    for (const f of readdirSync(SHOT_DIR)) if (f.includes('__zoom')) rmSync(join(SHOT_DIR, f));
-    await resetMock(page.request, 'finished');
-    await mockHook(page.request, 'health', { issues: [{ kind: 'backup.stale' }, { kind: 'channel.down' }] });
-    await loginAsOwner(page);
-    await page.route('**/api/v1/system/update', (route) =>
-      route.request().method() === 'GET' ? route.fulfill({ json: UPDATE_STALLED }) : route.fallback(),
-    );
-    await page.setViewportSize(VIEWPORTS[0]);
-    await page.goto('/directory?dt=people');
-    await settled(page);
-    const profileHref = await page.locator('main a[href*="/profile?id="]').first().getAttribute('href');
-    // Hồ sơ đầu danh sách + hồ sơ mock đủ dữ liệu (tóm tắt, dòng sự kiện, tài liệu) — p-bao.
-    const routes = [...SCREEN_ROUTES, ...EXTRA_ROUTES, ...new Set([...(profileHref ? [profileHref] : []), '/profile?id=p-bao'])];
+/** Đo trang đang mở; chỉ chụp ảnh khi có phát hiện (hoặc LAYOUT_GUARD_SHOTS=all). `prefix` tách ảnh của từng test. */
+async function scanHere(page: Page, prefix: string, w: number, route: string, root = 'main'): Promise<Hit[]> {
+  await page.evaluate(() => window.scrollTo(0, 0));
+  const found = (await page.evaluate(scanLayout, root)).filter(
+    (f) => !ALLOWLIST.some((a) => a.kind === f.kind && f.selector.includes(a.selector) && (!a.route || a.route === route)),
+  );
+  const base = `${prefix}${w}_${slug(route)}`;
+  if (found.length || SHOT_ALL) await page.screenshot({ path: join(SHOT_DIR, `${base}.png`), fullPage: true });
+  for (const [i, f] of found.slice(0, 8).entries()) {
+    const pageH = await page.evaluate(() => document.documentElement.scrollHeight);
+    const x = Math.max(0, f.rect.x - 40);
+    const y = Math.max(0, f.rect.y - 40);
+    const width = Math.min(w - x, f.rect.width + 80);
+    const height = Math.min(pageH - y, f.rect.height + 80);
+    if (width > 0 && height > 0) {
+      await page.screenshot({ path: join(SHOT_DIR, `${base}__zoom${i + 1}.png`), fullPage: true, clip: { x, y, width, height } }).catch(() => undefined);
+    }
+  }
+  return found.map((f) => ({ ...f, route, w }));
+}
 
-    const all: Array<Finding & { route: string; w: number }> = [];
-    for (const vp of VIEWPORTS) {
+/** In bảng phát hiện gom theo (loại, route, selector) kèm các cỡ màn, rồi đòi rỗng. */
+function expectClean(all: Hit[]): void {
+  if (all.length) {
+    const groups = new Map<string, { kind: string; route: string; selector: string; text: string; gap: number; ws: Set<number> }>();
+    for (const f of all) {
+      const k = `${f.kind}|${f.route}|${f.selector}`;
+      const g = groups.get(k) ?? { kind: f.kind, route: f.route, selector: f.selector, text: f.text, gap: f.gap, ws: new Set<number>() };
+      g.ws.add(f.w);
+      g.gap = Math.min(g.gap, f.gap);
+      groups.set(k, g);
+    }
+    const rows = [...groups.values()].map((g) =>
+      [g.kind.padEnd(13), g.route.padEnd(28), [...g.ws].join('/').padEnd(19), String(g.gap).padStart(6), ` ${g.selector}  «${g.text}»`].join(' '),
+    );
+    console.log(
+      `\nLính gác bố cục: ${groups.size} phát hiện (${all.length} lượt) — ảnh: ${SHOT_DIR}\n` +
+        `${'loại'.padEnd(13)} ${'route'.padEnd(28)} ${'cỡ màn'.padEnd(19)} ${'gap'.padStart(6)}  selector «chữ»\n` +
+        rows.join('\n'),
+    );
+  }
+  expect(all.map((f) => `${f.kind} ${f.route} @${f.w}: ${f.selector} «${f.text}» gap=${f.gap}`)).toEqual([]);
+}
+
+test.describe('Lính gác bố cục — dính biên, tràn/cắt ngang, chữ bị cắt/ép, cuộn ẩn, icon rớt dòng/lệch', () => {
+  for (const vp of VIEWPORTS) {
+    test(`mọi màn @${vp.width}px không có phát hiện`, async ({ page }) => {
+      test.setTimeout(180_000);
+      clearShots(`${vp.width}_`);
+      await resetMock(page.request, 'finished');
+      await mockHook(page.request, 'health', { issues: [{ kind: 'backup.stale' }, { kind: 'channel.down' }] });
+      await loginAsOwner(page);
+      await page.route('**/api/v1/system/update', (route) =>
+        route.request().method() === 'GET' ? route.fulfill({ json: UPDATE_STALLED }) : route.fallback(),
+      );
       await page.setViewportSize(vp);
+      await page.goto('/directory?dt=people');
+      await settled(page);
+      const profileHref = await page.locator('main a[href*="/profile?id="]').first().getAttribute('href');
+      // Hồ sơ đầu danh sách + hồ sơ mock đủ dữ liệu (tóm tắt, dòng sự kiện, tài liệu) — p-bao.
+      const routes = [...SCREEN_ROUTES, ...EXTRA_ROUTES, ...new Set([...(profileHref ? [profileHref] : []), '/profile?id=p-bao'])];
+
+      const all: Hit[] = [];
       for (const route of routes) {
         const t0 = Date.now();
         await go(page, route);
-        await page.evaluate(() => window.scrollTo(0, 0));
-        const found = (await page.evaluate(scanLayout)).filter(
-          (f) => !ALLOWLIST.some((a) => a.kind === f.kind && f.selector.includes(a.selector) && (!a.route || a.route === route)),
-        );
-        const base = `${vp.width}_${slug(route)}`;
-        await page.screenshot({ path: join(SHOT_DIR, `${base}.png`), fullPage: true });
-        for (const [i, f] of found.slice(0, 8).entries()) {
-          const pageH = await page.evaluate(() => document.documentElement.scrollHeight);
-          const x = Math.max(0, f.rect.x - 40);
-          const y = Math.max(0, f.rect.y - 40);
-          const width = Math.min(vp.width - x, f.rect.width + 80);
-          const height = Math.min(pageH - y, f.rect.height + 80);
-          if (width > 0 && height > 0) {
-            await page.screenshot({ path: join(SHOT_DIR, `${base}__zoom${i + 1}.png`), fullPage: true, clip: { x, y, width, height } }).catch(() => undefined);
-          }
-        }
-        all.push(...found.map((f) => ({ ...f, route, w: vp.width })));
+        const found = await scanHere(page, '', vp.width, route);
+        all.push(...found);
         if (process.env.LAYOUT_GUARD_VERBOSE) console.log(`${vp.width} ${route} ${found.length} phát hiện ${Date.now() - t0}ms`);
       }
-    }
+      expectClean(all);
+    });
+  }
 
-    if (all.length) {
-      const groups = new Map<string, { kind: string; route: string; selector: string; text: string; gap: number; ws: Set<number> }>();
-      for (const f of all) {
-        const k = `${f.kind}|${f.route}|${f.selector}`;
-        const g = groups.get(k) ?? { kind: f.kind, route: f.route, selector: f.selector, text: f.text, gap: f.gap, ws: new Set<number>() };
-        g.ws.add(f.w);
-        g.gap = Math.min(g.gap, f.gap);
-        groups.set(k, g);
-      }
-      const rows = [...groups.values()].map((g) =>
-        [g.kind.padEnd(13), g.route.padEnd(28), [...g.ws].join('/').padEnd(19), String(g.gap).padStart(6), ` ${g.selector}  «${g.text}»`].join(' '),
-      );
-      console.log(
-        `\nLính gác bố cục: ${groups.size} phát hiện (${all.length} lượt) — ảnh: ${SHOT_DIR}\n` +
-          `${'loại'.padEnd(13)} ${'route'.padEnd(28)} ${'cỡ màn'.padEnd(19)} ${'gap'.padStart(6)}  selector «chữ»\n` +
-          rows.join('\n'),
-      );
+  test('trang ngoài (Đăng nhập, Thiết lập bước 4) × 1920/1440/1024/390 không có phát hiện', async ({ page }) => {
+    test.setTimeout(90_000);
+    clearShots('ngoai_');
+    const all: Hit[] = [];
+    // Đăng nhập — chưa có phiên (gốc đo `.login`, trang không có <main>).
+    await resetMock(page.request, 'finished');
+    await page.context().clearCookies();
+    await page.goto('/login');
+    for (const vp of VIEWPORTS) {
+      await page.setViewportSize(vp);
+      await settled(page, '.login');
+      all.push(...(await scanHere(page, 'ngoai_', vp.width, '/login', '.login')));
     }
-    expect(all.map((f) => `${f.kind} ${f.route} @${f.w}: ${f.selector} «${f.text}» gap=${f.gap}`)).toEqual([]);
+    // Thiết lập bước 4 (Bộ não AI, thẻ Claude Code CLI / Antigravity chưa đăng nhập) — mock "fresh", bước 1–3 qua API.
+    await resetMock(page.request, 'fresh');
+    await apiCall(page, 'PUT', '/setup/steps/1', { token: SETUP_TOKEN, language: 'vi', mode: 'empty' });
+    await apiCall(page, 'PUT', '/setup/steps/2', {
+      token: SETUP_TOKEN, display_name: 'Anh Cơ', email: 'ryan@genesis.vn', password: 'mot-cau-rat-dai-de-nho-2026', pin: OWNER.pin, pin_confirm: OWNER.pin,
+    });
+    await apiCall(page, 'PUT', '/setup/steps/3', { org_name: 'Genesis Trading', timezone: 'Asia/Ho_Chi_Minh', currency: 'VND', self_name: 'Anh', bot_calls_me: 'Sếp' });
+    await page.goto('/setup');
+    await expect(page.getByRole('heading', { name: 'Bộ não AI' })).toBeVisible();
+    for (const vp of VIEWPORTS) {
+      await page.setViewportSize(vp);
+      await settled(page);
+      all.push(...(await scanHere(page, 'ngoai_', vp.width, '/setup (bước 4)')));
+    }
+    expectClean(all);
   });
 });

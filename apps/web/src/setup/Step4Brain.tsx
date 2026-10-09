@@ -193,24 +193,28 @@ export function Step4Brain({ meta, description, onBack, onSaved, formRef, onSkip
                     {isReady && offered.length ? <ModelPicker provider={p} test={t} /> : null}
                     {isCliKind(p.kind) ? <CliDiagnose provider={p} /> : null}
                   </div>
-                  <StateChip color={status.tone} border={status.tone === N5 || status.tone === N4 ? N8 : status.tone}>
-                    {status.label}
-                  </StateChip>
-                  <Button variant="secondary" className="btn-27" loading={testing} onClick={() => test.mutate(p.id)}>
-                    Kiểm tra
-                  </Button>
-                  <IconButton icon="ph ph-arrow-up" label={`Đưa ${p.name} lên trước`} disabled={i === 0 || !isReady} onClick={() => move(i, -1)} />
-                  <IconButton icon="ph ph-arrow-down" label={`Đưa ${p.name} xuống sau`} disabled={i >= ready.length - 1} onClick={() => move(i, 1)} />
-                  {!isCliKind(p.kind) ? (
-                    <IconButton
-                      icon="ph ph-trash"
-                      label={`Xoá ${p.name}`}
-                      disabled={remove.isPending}
-                      onClick={() => {
-                        if (window.confirm(`Xoá nguồn "${p.name}"? Khoá API của nguồn này cũng bị xoá.`)) remove.mutate(p.id);
-                      }}
-                    />
-                  ) : null}
+                  {/* Sau v0.1.49: nhóm nút là MỘT khối — hẹp (điện thoại) thì cả nhóm xuống hàng dưới, cột tên/meta giữ ≥ 180px
+                      (trước đó 5 nút đứng ngang ép cột chữ còn ~22px: "G…", meta vỡ từng chữ). */}
+                  <div className="prov-row__actions">
+                    <StateChip color={status.tone} border={status.tone === N5 || status.tone === N4 ? N8 : status.tone}>
+                      {status.label}
+                    </StateChip>
+                    <Button variant="secondary" className="btn-27" loading={testing} onClick={() => test.mutate(p.id)}>
+                      Kiểm tra
+                    </Button>
+                    <IconButton icon="ph ph-arrow-up" label={`Đưa ${p.name} lên trước`} disabled={i === 0 || !isReady} onClick={() => move(i, -1)} />
+                    <IconButton icon="ph ph-arrow-down" label={`Đưa ${p.name} xuống sau`} disabled={i >= ready.length - 1} onClick={() => move(i, 1)} />
+                    {!isCliKind(p.kind) ? (
+                      <IconButton
+                        icon="ph ph-trash"
+                        label={`Xoá ${p.name}`}
+                        disabled={remove.isPending}
+                        onClick={() => {
+                          if (window.confirm(`Xoá nguồn "${p.name}"? Khoá API của nguồn này cũng bị xoá.`)) remove.mutate(p.id);
+                        }}
+                      />
+                    ) : null}
+                  </div>
                 </div>
               );
             })}
@@ -303,7 +307,7 @@ function AddProvider({ onAdded }: { onAdded: (p: Provider) => void }) {
           ) : null}
         </p>
       ) : null}
-      <div className="dlg-row">
+      <div className="dlg-row dlg-row--wrap">
         <Button variant="secondary" icon="ph ph-plus" disabled={!valid} loading={add.isPending} onClick={() => add.mutate()}>
           Thêm & kiểm tra
         </Button>

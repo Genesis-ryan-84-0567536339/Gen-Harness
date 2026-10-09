@@ -7,6 +7,9 @@
   width: 28px; height: 28px; flex: none; border-radius: var(--radius-md); display: grid; place-items: center;
   background: var(--color-neutral-900); border: 1px solid var(--color-neutral-800);
 }
+/* Cột "Tên nhóm" (bảng nhóm theo kênh): các cột khác cố định ~814px trong bảng min 920px ⇒ tên bị ép ~46px, vỡ 4 dòng ở
+   1024/390px. Giữ ≥ 180px — bảng rộng ra và .gh-table-scroll cuộn ngang. */
+.dir-grp-name { min-width: 180px; }
 .dir-bot-cell { display: flex; align-items: center; gap: 7px; }
 .dir-bot-cell__name { flex: 1; min-width: 0; font-size: 11px; color: var(--color-neutral-300); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 

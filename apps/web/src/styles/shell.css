@@ -212,10 +212,30 @@
   .hd-titles { min-width: 0; }
   .hd-right { gap: 6px; }
   .content { padding: 14px 12px; }
-  /* Dải tab dài (Hộp thư, Cài đặt …) cuộn ngang TRONG dải, không đẩy cả trang. */
+  /* Dải tab dài (Hộp thư, Cài đặt …) cuộn ngang TRONG dải, không đẩy cả trang. Ẩn thanh cuộn nên PHẢI có mép mờ phía còn
+     tab khuất (xem `gh-scroll-fade` bên dưới) — không thì người dùng không biết còn tab để cuộn tới. */
   .gh-tabs { flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
   .gh-tabs::-webkit-scrollbar { display: none; }
   .gh-tab { flex: none; }
+  @supports (animation-timeline: scroll()) {
+    .gh-tabs {
+      mask-image: linear-gradient(to right, transparent, #000 var(--gh-fade-l), #000 calc(100% - var(--gh-fade-r)), transparent);
+      animation: gh-scroll-fade linear both;
+      animation-timeline: scroll(self inline);
+    }
+  }
+}
+
+/* Mép mờ theo vị trí cuộn (sau v0.1.49): đầu dải chỉ mờ mép phải, giữa mờ cả hai, cuối dải chỉ mờ mép trái. Dải không
+   cuộn được ⇒ timeline không hoạt động ⇒ hai biến giữ 0px, không mờ gì. Trình duyệt chưa có scroll-driven animation thì
+   khối @supports ở trên bỏ qua (không mờ, như trước). */
+@property --gh-fade-l { syntax: '<length>'; inherits: false; initial-value: 0px; }
+@property --gh-fade-r { syntax: '<length>'; inherits: false; initial-value: 0px; }
+@keyframes gh-scroll-fade {
+  0% { --gh-fade-l: 0px; --gh-fade-r: 28px; }
+  8% { --gh-fade-l: 28px; }
+  92% { --gh-fade-r: 28px; }
+  100% { --gh-fade-l: 28px; --gh-fade-r: 0px; }
 }
 
 @media (max-width: 600px) {
