@@ -1,6 +1,6 @@
 # API giai đoạn 1 — hợp đồng giữa web và api
 
-Tiền tố `/api/v1`. JSON. Cookie phiên `gh_session` (HttpOnly). CSRF double-submit: cookie `gh_csrf` (đọc được bằng JS) phải khớp header `X-CSRF-Token` ở mọi request không phải GET/HEAD. Mọi request ghi có thể gửi `Idempotency-Key`.
+Tiền tố `/api/v1`. JSON. Cookie phiên `gh_session` (HttpOnly). CSRF double-submit: cookie `gh_csrf` (đọc được bằng JS) phải khớp header `X-CSRF-Token` ở mọi request không phải GET/HEAD. Mọi request ghi có thể gửi `Idempotency-Key` (chưa thi hành — server không đọc header này).
 
 Lỗi theo RFC 7807: `{"type": "...", "title": "...", "status": 4xx, "code": "PIN_REQUIRED", "detail": "..."}`.
 
