@@ -1,3 +1,11 @@
+//go:build !windows
+
+// Hai test dưới ép đúng cửa sổ race "thay tệp giữa Lstat và Open". Trên Windows
+// os.SameFile nạp mã định danh tệp LƯỜI (mở lại theo đường dẫn lúc so sánh), nên
+// FileInfo từ Lstat sẽ khớp với tệp MỚI và phép kiểm "tệp bị thay giữa chừng"
+// không bao giờ kích hoạt ở đó (hạn chế có từ trước, không do bước thử lại):
+// đọc chỉ đơn giản trả về nội dung mới. Vì vậy chỉ chạy trên Unix.
+
 package hostlink
 
 import (
