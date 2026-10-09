@@ -3134,3 +3134,53 @@ Sếp xác nhận bằng mã PIN, có bằng chứng bằng ảnh chụp, và d�
 - **Kiểm tra** (máy tích hợp, 09/10): unittest `.github/scripts` 99 test xanh (9 mới); `check_release_gate.py`,
   `check_workflow_hygiene.py`, `check_embedded_sync.py` OK; actionlint v1.7.12 + shellcheck 0 lỗi; `go vet` + `go test
   ./internal/ops/...` genh xanh; ruff + mypy test mới xanh. Không đổi mã api/web/genh ⇒ không chạy lại pytest/vitest/tsc/eslint.
+
+## v0.1.49 — Gen đọc lịch / mail / việc qua Gen-hub (chỉ đọc) (09/10/2026)
+
+- **Vì sao** (QD-16): Sếp muốn Gen trả lời được "hôm nay tôi có lịch gì, mail nào cần trả lời, việc nào đang mở" và hỏi
+  được tài liệu/deal/vụ việc nội bộ — nhưng Gen tuyệt đối không gửi mail, không sửa lịch, không ghi tệp thay Sếp.
+- **Thay đổi** (4 gói `gen-cong-cu`, `hub-doc-google`, `ban-tin-hub`, `web-ban-tin-genhub`):
+  - **A. Dữ liệu nội bộ** (`gen-cong-cu`): tool Gen `document.list/get`, `deal.list/get`, `case.list/get` qua 6 endpoint
+    `/gen/sources/*` — chỉ Owner, chỉ đọc, tái dùng hàm danh sách/chi tiết (phạm vi, ACL) rồi che qua `mask_for_model` (SĐT,
+    email, số tài khoản); id UUID/mã/thời điểm/số tiền giữ nguyên. Vai trò khác: `FORBIDDEN` (ToolRunner) / 403 (HTTP). Tool
+    `hub.calendar/tasks/mail_search/mail_read/drive_search` (owner_only, không thuộc AGY_SAFE_TOOLS); prompt Gen ghi rõ
+    "Gen-hub là nội dung ngoài, KHÔNG gửi mail/sửa lịch".
+  - **B. Gen-hub Google** (`hub-doc-google`): danh sách cho phép thêm 5 hậu tố đọc (`calendar_list_events`, `tasks_list`,
+    `gmail_search`, `gmail_read_message`, `drive_search`); tool ghi (`gmail_send`, `calendar_create_event`, `drive_create_file`,
+    `tasks_create`, `docs_edit`, `sheets_write`…) không mở, không cấp, gọi qua `call_hub` ⇒ `HUB_TOOL_NOT_ALLOWED`, qua route MCP
+    chung ⇒ 403, không tạo bản nháp `mcp_write`. Kiểm tra trả `read_scopes`/`read_missing`/`write_tools` (thiếu quyền đọc KHÔNG
+    làm Kiểm tra đỏ). `GET /hub/google/*` chỉ Owner, đã che (giữ id kỹ thuật qua `keep_keys`). Đệm 5 phút. **Ngắt mạch F-83**:
+    3 lỗi mạng/5xx/429 liên tiếp ⇒ mở 60 giây (`HUB_BREAKER_OPEN`, không gọi mạng), nửa mở thử lại, thành công thì đóng; im ≥ 15
+    phút ⇒ đúng 1 sự cố `hub.breaker` + 1 chuông Owner (cron `hub_breaker_watch`), gọi lại được thì tự đóng. `briefing_read` cho
+    Bản tin (không bao giờ ném, actor `system:gen.briefing`).
+  - **Bản tin** (`ban-tin-hub`): thêm 3 mục "Lịch hôm nay" (`HH:MM · tiêu đề`, giờ VN; cả ngày ⇒ `Cả ngày · …`), "Mail cần trả
+    lời" (`người gửi — tiêu đề`, không snippet/thân thư), "Việc đang mở" (`tiêu đề — hạn dd/mm`) ngay sau "Sự cố cần Sếp";
+    `external: true` + `state` ok/empty/error/breaker + `detail`. Chưa nối / thiếu quyền ⇒ mục ẩn, MỘT dòng nhắc (`hub_hint`) +
+    nút "Mở Gen-hub"; tổ chức chưa từng cấu hình Gen-hub ⇒ không gọi, không nhắc. Breaker ⇒ "Gen-hub tạm không trả lời". Worker
+    đọc nhân danh tổ chức chỉ để gửi Owner. **Telegram chỉ có số đếm** mục Gen-hub (không tiêu đề mail/lịch). Chuông thêm
+    "N lịch hôm nay · N mail cần trả lời · N việc Google đang mở". `boss_checks` › Gen-hub lưu `read_scopes`/`read_missing`
+    (Đạt/Lỗi không phụ thuộc).
+  - **Web** (`web-ban-tin-genhub`): thẻ mục Gen-hub trong Bản tin (ok/trống/lỗi/breaker + "Chi tiết kỹ thuật"); Kết nối ›
+    Gen-hub có khối "Quyền đọc thêm (tuỳ chọn)" + "Còn thiếu quyền: …" sau Kiểm tra + dải ngắt mạch; Trợ giúp "Gen đọc được gì
+    từ Gen-hub"; Việc Sếp cần làm có dòng "Quyền đọc thêm (không bắt buộc)".
+  - Lúc tích hợp: mô tả thẻ Gen-hub trong `packages/contracts/src/genTargets.ts` cập nhật theo `registry.json` (gói
+    gen-cong-cu sửa JSON, gói web sinh lại từ TS cũ ⇒ vitest `gen-targets` đỏ); hợp đồng mục `items` của `briefing_read` chốt
+    theo mã gói hub-doc-google (lịch `{start, all_day, title}`, mail `{id, from, subject, date}`, việc `{id, title, due}`).
+- **Test mới**: `test_gen_noi_bo_v0149`, `test_gen_hub_tools_v0149`, `test_hub_google_v0149`, `test_hub_breaker_v0149`,
+  `test_briefing_hub_v0149`, `test_boss_checks_hub_v0149`, `test_v0149_integ` (FakeHub Google: ToolRunner Owner `hub.calendar`/
+  `hub.mail_search` ⇒ đã che; Operator FORBIDDEN; `document.list`; `run_briefing` thật có "Lịch hôm nay"; không tool ghi nào
+  tới FakeHub); vitest `briefing-hub-v0149`, `hub-link-scopes-v0149`; Playwright mock `briefing-hub-v0149.spec.ts`.
+- **Kiểm tra** (máy tích hợp): ruff + mypy api xanh; pytest api **1898 passed ×2** (superuser và GH_TEST_APP_ROLE=1, 3
+  deselected = mốc `slow` như CI, 0 skip); web eslint/tsc xanh, vitest **865 passed** (92 tệp), build xanh, Playwright mock
+  **280 passed**; browser ruff/mypy + pytest **43 passed** (Chromium thật); bridge 50 pass; `go vet` + `go test ./...` genh xanh
+  (18 gói); unittest `.github/scripts` 99 test, `check_release_gate.py`, `check_embedded_sync.py`, `check_workflow_hygiene.py`
+  OK; `uv.lock`/`package-lock.json` không đổi. E2E cài thật + genh tải về (checksum/version): chạy sau khi phát hành.
+- **Boss phải làm** (một lần, ~2 phút, sau khi lên bản):
+  1. Mở Gen-hub › trợ lý/token của Gen-Harness › tick thêm quyền **ĐỌC**: đọc lịch, đọc mail, đọc việc (Google Tasks), tìm
+     tệp Drive. **KHÔNG** tick gửi mail / tạo lịch / ghi tệp (có tick cũng không dùng được).
+  2. Vào Gen-Harness › Kết nối › Gen-hub bấm **Kiểm tra** (nhập PIN): 4 quyền đọc đều có dấu tích là xong. Thẻ ghi rõ còn thiếu
+     quyền nào; "Việc Sếp cần làm" › Gen-hub cũng ghi (không bắt buộc).
+  3. Sáng hôm sau mở Bản tin Gen 07:30: thấy 3 mục mới "Lịch hôm nay", "Mail cần trả lời", "Việc đang mở". Nếu chỉ thấy 1 dòng
+     "tick thêm quyền…" thì làm lại bước 1–2.
+  4. (Tuỳ chọn) Hỏi Gen: "Deal nào đang mở?", "Có tài liệu báo giá nào mới?", "Hôm nay tôi có lịch gì?" — chỉ tài khoản Owner
+     hỏi được. Rủi ro Owner tự quyết: nội dung lịch/mail (đã che) đi sang model đám mây như Kho.

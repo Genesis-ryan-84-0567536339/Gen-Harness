@@ -151,6 +151,11 @@ build thử lại 1 lần + cache gha; quét pip-audit/npm audit/govulncheck d�
 bản promote cuối bằng workflow cũ (v0.1.46, hoặc v0.1.47 nếu promote trước khi v0.1.48 merge; không nhận bản vá) — không dùng.
 Còn: gói apt trong Dockerfile chưa ghim phiên bản (tầng apt dựng lại mỗi tuần); PR Renovate không tự merge nằm chờ tới khi Boss
 nhắn Claude (chưa có lịch tự động).
+v0.1.49: Gen đọc lịch / mail / việc / Drive qua Gen-hub, CHỈ ĐỌC (QD-16, F-83, F-8) — Gen (chỉ Owner) hỏi được Tài liệu, Deal,
+Vụ việc nội bộ (đã che) và lịch/mail/việc Google qua Gen-hub; tool ghi Google bị chặn ở mọi đường; ngắt mạch Gen-hub (3 lỗi →
+60 giây, im 15 phút → sự cố + chuông); Bản tin thêm "Lịch hôm nay", "Mail cần trả lời", "Việc đang mở" (thiếu quyền ⇒ 1 dòng
+nhắc + nút "Mở Gen-hub"; Telegram chỉ số đếm); Kết nối › Gen-hub và Việc Sếp cần làm ghi quyền đọc còn thiếu (không bắt buộc).
+Còn: Gen soạn mail/tạo lịch (có xác nhận) — chưa làm, cần Boss chốt.
 
 ## Đợt A — Gen v1 (thiết kế: docs/design/gen-v1.md)
 - ✅ A1 Khung chat phải + Gen trả lời/tóm tắt (chỉ đọc), lưu hội thoại, Nhật ký hành động — v0.1.21.
@@ -177,6 +182,7 @@ nhắn Claude (chưa có lịch tự động).
 ## Đợt D — Phòng làm việc chung (repo Gen-hub, cần mở quyền repo cho phiên này)
 - 🟡 D1 Gen nối Kho/warroom/kanban của Gen-hub — **một phần** v0.1.26: Gen đọc Kho (Owner, chỉ đọc, che dữ liệu, đệm 5 phút,
   nhắc token trước 14 ngày; thẻ Gen-hub ở MCP Hub); v0.1.27 gia cố (ghim DNS, lỗi chỉ Owner, route MCP chung chỉ Owner).
+  v0.1.49: thêm đọc lịch/mail/việc/Drive Google qua Gen-hub (chỉ đọc, chỉ Owner, ngắt mạch F-83) + 3 mục Bản tin.
   Còn: đề xuất ghi kanban/warroom (bản sau), phương án B.
 - ~~D2 Jules worker~~ — **Bỏ** (Boss chốt QD-10, xác nhận lại 30/09). Không làm, không kiểm điều khoản Jules nữa.
 - 🟡 D3 Gen điều khiển mạng xã hội thay Boss (API trước, Playwright cho tài khoản cá nhân) — thiết kế:
