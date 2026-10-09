@@ -19,6 +19,7 @@ const GEN_EXAMPLES = ['Hôm nay có gì gấp?', 'Khách nào hỏi giá hôm na
 const GENHUB_READS: readonly string[] = [
   'Gen chỉ ĐỌC: Kho Ryan, lịch, mail (tìm và đọc), việc trong Google Tasks và tìm tệp trên Drive.',
   'Gen KHÔNG gửi mail, KHÔNG tạo hay sửa lịch, việc, tệp.',
+  'Ghi duy nhất: Phiên, Việc vào Kho Ryan — chỉ khi Sếp bấm Xác nhận và nhập mã PIN (cần tick quyền kho_create, kho_update ở Gen-hub).',
   'Email, số điện thoại và khoá trong nội dung được che trước khi gửi cho AI.',
   'Gen-hub lỗi liên tục thì Gen tạm dừng gọi 1 phút và báo chuông nếu quá 15 phút.',
 ];
@@ -101,8 +102,8 @@ export function HelpPage() {
           </Card>
         ) : null}
 
-        {/* v0.1.49 (QD-16): ai cũng thấy; ghi rõ chỉ Owner dùng được. */}
-        <Card title="Gen đọc được gì từ Gen-hub" kicker="Chỉ Sếp (Owner) dùng được · Gen chỉ đọc" data-testid="help-genhub-reads">
+        {/* v0.1.49 (QD-16): ai cũng thấy; ghi rõ chỉ Owner dùng được. v0.1.50 (QD-18): thêm dòng ghi Kho có Xác nhận + PIN. */}
+        <Card title="Gen đọc được gì từ Gen-hub" kicker="Chỉ Sếp (Owner) dùng được · Gen đọc; ghi Kho khi Sếp xác nhận + mã PIN" data-testid="help-genhub-reads">
           <ul className="help-examples">
             {GENHUB_READS.map((t) => (
               <li key={t}>{t}</li>

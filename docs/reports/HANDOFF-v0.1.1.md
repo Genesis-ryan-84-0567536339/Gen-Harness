@@ -22,7 +22,7 @@ Còn hiệu lực từ v0.1.1 (vai trò DB, volume, gói hồ sơ); chi tiết �
 
 ## Hiện trạng (v0.1.50)
 
-Bản mới nhất **v0.1.50** (09/10/2026; `VERSION` được tăng ở commit phát hành do người điều phối làm); bản chạy trên máy Boss trước đó: v0.1.49.
+Bản mới nhất **v0.1.50** (09/10/2026; `VERSION` = v0.1.50 trên nhánh `claude/v0150`); bản chạy trên máy Boss trước đó: v0.1.49.
 Đang chạy, theo nhóm:
 
 - **Cài đặt & vận hành (genh)**: cài một lệnh; `genh update` an toàn (tải trước, sao lưu, migrate, tự quay về bản cũ khi lỗi, khoá `genh.lock`, báo "bị dừng giữa chừng");
@@ -38,6 +38,16 @@ Bản mới nhất **v0.1.50** (09/10/2026; `VERSION` được tăng ở commit 
   việc nền mặc định chỉ khoá API; chi phí ₫/ngày + trần; Jev đóng băng (QD-10 bỏ Jules).
 - **Kênh**: Zalo/WhatsApp qua bridge (QR); Telegram một chiều tới Sếp; Facebook cá nhân đọc + Trả lời bình luận/Nhắn tin có Xác nhận + PIN + ảnh chụp (đăng bài = lát 2).
 - **Dữ liệu & bảo mật**: Postgres 16 (pgvector, pg_partman), RLS chỉ là phòng thủ phụ (mỗi bản cài 1 tổ chức), hạn lưu thật, bí mật mã hoá phong bì, DNS ghim cho MCP/Gen-hub, ngắt mạch Gen-hub 60 giây.
+
+## v0.1.50 — Gen nhớ + Gen ghi Kho có xác nhận và mã PIN
+
+- **Vì sao** (QD-18, F-81, F-87): Gen mới chỉ đọc Kho nên mỗi bản phát hành, mỗi quy ước của Sếp vẫn nằm trong đầu người. Nay Gen **đề xuất** ghi, Sếp **Xác nhận + mã PIN** mới ghi.
+- **Thay đổi**: migration `0032` (`agent.gen_memory_notes`, `agent.hub_release_proposals`); Gen nhớ (≤ 30 ghi chú, ≤ 280 ký tự, chỉ Owner, vào lời nhắc Owner + Bản tin);
+  đề xuất `memory_note`/`kho_create`/`kho_update`; đường ghi duy nhất `POST /hub/kho/write` có permit ký dùng một lần (route MCP chung vẫn chặn, Gmail/Lịch/Drive chỉ đọc);
+  Kết nối › Gen-hub có "Quyền ghi Kho" (`write_scopes`, `write_missing`); job `gen_kho_release` đề xuất một Phiên mỗi bản; Việc Sếp cần làm dòng 9 "Gen ghi Kho";
+  Trợ giúp + Hướng dẫn bước 14 bỏ chữ "chỉ đọc" tuyệt đối; tài liệu tách CHANGELOG + `docs/releases/` (F-90, F-69, F-47, F-91, F-92, F-42, F-39).
+- **Kiểm tra** (khi gộp): KIEMTRA_V0150.
+- **Boss cần làm**: xem "Boss phải làm — v0.1.50" dưới (tick `kho_create`, `kho_update` ở Gen-hub → Kiểm tra → duyệt Phiên đầu tiên → thử Gen nhớ). Chi tiết: [v0.1.50.md](../releases/v0.1.50.md).
 
 ## Quy trình phát hành & cổng
 
@@ -74,8 +84,7 @@ Bản mới nhất **v0.1.50** (09/10/2026; `VERSION` được tăng ở commit 
 
 ### Claude / điều phối viên còn dở
 
-- **Gộp v0.1.50**: nối main vào `claude/v0150` bằng merge, tăng `VERSION`, chạy E2E cài thật, kiểm genh tải về (checksum/version), ghi số test cuối vào [v0.1.50.md](../releases/v0.1.50.md) rồi báo Boss.
-- **Chữ "Gen chỉ đọc"** trong `apps/web/src/help/HelpPage.tsx` và `guide/guideContent.ts` (mục Gen-hub) chưa sửa sau QD-18 (Gen vẫn không tự ghi — chỉ ghi Kho khi Sếp Xác nhận + PIN).
+- **Phát hành v0.1.50**: nhánh `claude/v0150` đã gộp 3 gói, `VERSION` = v0.1.50, đã nối main; còn mở PR, chạy E2E cài thật, kiểm genh tải về (checksum/version), ghi số test cuối vào [v0.1.50.md](../releases/v0.1.50.md) rồi báo Boss.
 - **PR Renovate** không tự merge nằm chờ tới khi Boss nhắn "xử lý PR phụ thuộc"; chưa có lịch tự động nào gọi Claude.
 - **Selector ghi Facebook** mới kiểm trên trang mẫu — chờ nghiệm thu thật (dòng 8). Chuông phiên hết có thể hiện hai lần (`social.paused` + `social.session_expired`), gộp ở bản sau nếu phiền.
 - **Giới hạn đã biết**: TOTP chưa làm; Redis lỗi ⇒ giới hạn đăng nhập tạm không áp; gói apt trong Dockerfile chưa ghim phiên bản; tag GHCR `:latest` cũ đứng yên (không dùng).
