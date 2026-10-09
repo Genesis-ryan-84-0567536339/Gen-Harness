@@ -43,7 +43,7 @@ def render_pip(title: str, data: dict) -> str:
     out = [f"### Quét bảo mật: {title}", ""]
     if not rows:
         return "\n".join(out + ["✅ Không thấy lỗ đã biết", ""])
-    out += [f"**⚠️ Lỗ mức cao: {len(rows)} lỗ cần xem** (PyPI không ghi mức nên coi mọi lỗ là 'cần xem')", ""]
+    out += [f"**⚠️ {len(rows)} lỗ cần xem** (PyPI không ghi mức)", ""]
     out += ["| gói | phiên bản | mã lỗ | bản sửa |", "|---|---|---|---|"]
     for n, v, i, f in rows:
         out.append(f"| {_cell(n)} | {_cell(v)} | {_cell(i)} | {_cell(f)} |")
@@ -126,8 +126,13 @@ def _complete(kind: str, data: dict) -> bool:
     return "error" not in data and isinstance(data.get("metadata"), dict)
 
 
+def _miss_text(title: str) -> str:
+    """Một câu chung cho step summary và ::warning:: (trước đây hai nơi ghi khác nhau)."""
+    return f"Không chạy được quét {title} (thiếu kết quả) — xem log bước quét"
+
+
 def build(kind: str, title: str, path: Path) -> str:
-    miss = f"### Quét bảo mật: {title}\n\n⚠️ Không chạy được quét {title} (thiếu kết quả) — xem log bước trước\n"
+    miss = f"### Quét bảo mật: {title}\n\n⚠️ {_miss_text(title)}\n"
     try:
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
@@ -144,7 +149,7 @@ def build(kind: str, title: str, path: Path) -> str:
         except (ValueError, AttributeError, TypeError):
             out = None
     if out is None:
-        _warn(f"Không chạy được quét {title} (thiếu kết quả) — xem log bước quét")
+        _warn(_miss_text(title))
         return miss
     return out
 

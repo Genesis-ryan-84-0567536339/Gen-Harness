@@ -26,7 +26,8 @@ name: E2E cài đặt thật
 #     gh.seed_demo seed, script .github/scripts/e2e_data.sh), đếm số dòng các
 #     bảng chính trước/sau nâng cấp — phải trùng; kéo sẵn ảnh của bản cũ hơn
 #     nữa (PREV2) rồi kiểm genh dọn ảnh cũ: chỉ còn ảnh của bản hiện tại + bản
-#     liền trước, mỗi repo gen-harness-* tối đa 2 digest.
+#     liền trước, mỗi repo gen-harness-* (và caddy, redis — ghim digest từ
+#     v0.1.48) tối đa 2 digest.
 #     v0.1.37: job là MA TRẬN hai ô nâng cấp (output upgrade_from của resolve):
 #     ô tags[1] = bản chính thức liền trước (máy Boss cập nhật đều mỗi đêm) và
 #     ô tags[3] = bản chính thức cũ hơn 3 bậc — máy Boss tắt vài ngày rồi bật
@@ -1512,11 +1513,12 @@ jobs:
               bad=1
             fi
           done <"$RUNNER_TEMP/prev2-refs.txt"
+          # v0.1.48: caddy/redis ghim digest (Renovate nâng hằng tuần) — genh cũng phải dọn digest cũ của đúng 2 repo này.
           over="$(docker images --digests --format '{{.Repository}} {{.Digest}}' \
-            | awk '$1 ~ /^ghcr\.io\/[^\/]+\/gen-harness-/ && $2 != "<none>"' | sort -u \
+            | awk '($1 ~ /^ghcr\.io\/[^\/]+\/gen-harness-/ || $1 == "caddy" || $1 == "redis") && $2 != "<none>"' | sort -u \
             | awk '{c[$1]++} END{for (r in c) if (c[r] > 2) print r " (" c[r] " bản)"}')"
           if [ -n "$over" ]; then
-            echo "::error::còn hơn 2 bản ảnh cho: $over — genh phải chỉ giữ ảnh của bản hiện tại và bản liền trước." >&2
+            echo "::error::còn hơn 2 bản ảnh cho: $over — genh phải chỉ giữ ảnh của bản hiện tại và bản liền trước (gen-harness-*, caddy, redis)." >&2
             bad=1
           fi
           [ "$bad" = 0 ] || exit 1

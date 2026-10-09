@@ -13,7 +13,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright HOME=/tmp
 # F-36 (v0.1.48): cài từ uv.lock vào /opt/venv (không dùng --system-site-packages; playwright==1.56.0 nằm trong venv, trình duyệt
 # vẫn ở /ms-playwright của ảnh gốc). uv chỉ gắn tạm lúc build, KHÔNG nằm lại trong ảnh. `python3` trên PATH = python của venv.
-ENV UV_PROJECT_ENVIRONMENT=/opt/venv UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never UV_PYTHON=/usr/bin/python3 PATH=/opt/venv/bin:$PATH
+# UV_COMPILE_BYTECODE=1: uv không tự sinh .pyc; rootfs chỉ-đọc + USER pwuser ⇒ thiếu .pyc thì mỗi lần khởi động dịch lại
+# cả cây thư viện (xem api.Dockerfile; CI kiểm bằng .github/scripts/check_bytecode.py).
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never UV_PYTHON=/usr/bin/python3 \
+    UV_COMPILE_BYTECODE=1 PATH=/opt/venv/bin:$PATH
 WORKDIR /app
 COPY apps/browser/pyproject.toml apps/browser/uv.lock ./
 RUN --mount=from=ghcr.io/astral-sh/uv:0.12.23@sha256:61d393e44e249f2e4b526b6c7ddcecce245946826e608e11c93ad4f5bba55b21,source=/uv,target=/usr/local/bin/uv --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev --no-install-project

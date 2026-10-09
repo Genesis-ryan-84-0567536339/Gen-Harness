@@ -33,7 +33,7 @@ Về "đã đọc release notes": trang Releases của GitHub không tải đư�
 | uv | 0.12.23 | `https://pypi.org/pypi/uv/json` (có trong releases) | setup-uv `version: "0.12.23"` — cùng số với gói anh-tai-lap |
 | pip-audit | 2.10.1 | `https://pypi.org/pypi/pip-audit/json` | `uvx --from pip-audit==2.10.1`; requires-python >=3.10 |
 | govulncheck (golang.org/x/vuln) | v1.8.0 | `https://proxy.golang.org/golang.org/x/vuln/@latest` | go.mod của bản này đòi `go 1.26.0` ⇒ bước đặt `GOTOOLCHAIN=auto` để Go 1.24 (setup-go) tự tải toolchain phù hợp; không đổi Go dùng build genh |
-| renovate | 44.132.5 | `https://registry.npmjs.org/renovate/latest` | engines `node ^24.11.0` ⇒ job `version` thêm setup-node 24; bin `renovate-config-validator` có |
+| renovate | 44.132.5 | `https://registry.npmjs.org/renovate/latest` | engines `node ^24.11.0` ⇒ setup-node 24; bin `renovate-config-validator` có. Sửa sau review: chạy ở job riêng `renovate-config` (chỉ khi renovate.json đổi, `--no-global`, npm thử lại 5 lần, không chạy trên đường phát hành) |
 | actionlint | v1.7.12 | `https://proxy.golang.org/github.com/rhysd/actionlint/@latest` | đã chạy trên 4 workflow: 0 lỗi |
 | redis:7-alpine (index đa kiến trúc) | sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499 | registry-1.docker.io, header `docker-content-digest` của `manifests/7-alpine` | ci.yml services redis (api, browser). PHẢI bằng digest redis trong deploy/compose.yaml do gói anh-tai-lap ghim — nếu gói đó đo ra digest khác (tag trôi) thì sửa ci.yml cho trùng |
 

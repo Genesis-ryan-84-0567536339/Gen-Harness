@@ -39,9 +39,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-      # Node 24: renovate (engines ^24.11) chỉ dùng cho bước kiểm renovate.json bên dưới.
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
-        with: { node-version: "24" }
       - name: Kiểm VERSION đúng định dạng vMAJOR.MINOR.PATCH[-PRERELEASE]
         run: |
           set -euo pipefail
@@ -65,10 +62,56 @@ jobs:
       # v0.1.48 (F-71/F-36) — action ghim SHA, permissions tối thiểu, không ảnh :latest, services có digest.
       - name: Vệ sinh workflow (F-71/F-36)
         run: python3 .github/scripts/check_workflow_hygiene.py
-      - name: renovate.json hợp lệ
-        run: npx --yes --package renovate@44.132.5 -- renovate-config-validator --strict renovate.json
       - name: Test script kiểm cổng phát hành (gỡ từng mắt xích → phải bắt được)
         run: python3 -m unittest discover -s .github/scripts -p 'test_*.py' -v
+
+  # ── renovate-config ──────────────────────────────────────────────────────
+  # v0.1.48 (sửa sau review): kiểm renovate.json TÁCH khỏi job version. `npx renovate` tải hàng trăm gói npm không
+  # lockfile, nên npm trục trặc không được chặn cổng phát hành: job này KHÔNG chạy khi release.yml gọi (from_release) và
+  # chỉ tải renovate khi renovate.json đổi so với nhánh gốc (PR) / lần đẩy trước (push). ci-ok nhận success hoặc skipped.
+  renovate-config:
+    if: ${{ !inputs.from_release }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with: { fetch-depth: 0 }
+      - name: renovate.json có đổi không
+        id: diff
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          base=""
+          if [ -n "$BASE_REF" ]; then
+            base="origin/$BASE_REF"
+          elif [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] \
+            && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            base="$BEFORE"
+          fi
+          # Không xác định được mốc so (nhánh mới, push ép…) ⇒ coi như có đổi, kiểm luôn cho chắc.
+          if [ -z "$base" ] || ! git diff --quiet "$base" HEAD -- renovate.json; then
+            echo "changed=true" >>"$GITHUB_OUTPUT"
+            echo "renovate.json đổi so với ${base:-<không rõ mốc>} — kiểm bằng renovate-config-validator."
+          else
+            echo "changed=false" >>"$GITHUB_OUTPUT"
+            echo "renovate.json không đổi so với $base — bỏ qua (không tải renovate)."
+          fi
+      # Node 24: renovate (engines ^24.11).
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        if: steps.diff.outputs.changed == 'true'
+        with: { node-version: "24" }
+      # --no-global: kiểm như cấu hình REPO (mặc định validator coi tệp truyền vào là cấu hình global self-hosted).
+      - name: renovate.json hợp lệ (cấu hình repo)
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          NPM_CONFIG_FETCH_RETRIES: "5"
+          NPM_CONFIG_FETCH_RETRY_MINTIMEOUT: "20000"
+          NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT: "120000"
+          NPM_CONFIG_UPDATE_NOTIFIER: "false"
+          NPM_CONFIG_FUND: "false"
+        run: npx --yes --package renovate@44.132.5 -- renovate-config-validator --strict --no-global renovate.json
 
   api:
     runs-on: ubuntu-latest
@@ -296,6 +339,22 @@ jobs:
           build --no-cache -f deploy/images/browser.Dockerfile -t gh-browser-2 .
           docker run --rm --entrypoint python3 gh-browser-2 -c "$FREEZE_PY" > /tmp/freeze-browser-2.txt
           python3 .github/scripts/check_image_lock.py --lock apps/browser/uv.lock --project gen-harness-browser /tmp/freeze-browser-1.txt /tmp/freeze-browser-2.txt
+      # v0.1.48 (sửa sau review F-36) — uv không tự sinh .pyc như pip: thiếu UV_COMPILE_BYTECODE=1 thì mọi tiến trình python
+      # (api, worker, migrate, `python -m gh.backup`…) dịch lại cả cây thư viện mỗi lần khởi động. Chạy import chính bằng
+      # đúng user của ảnh (browser: rootfs chỉ-đọc như compose); `python -v` cho biết module nạp từ .pyc hay dịch lại từ .py.
+      - name: 'Ảnh api/browser có sẵn .pyc trong /opt/venv (không dịch lại lúc chạy)'
+        run: |
+          set -euo pipefail
+          for img in gh-api gh-browser; do
+            echo "── $img: .pyc mẫu trong /opt/venv ──"
+            docker run --rm --entrypoint sh "$img" -c 'find /opt/venv -name "*.pyc" | head -n 3'
+          done
+          docker run --rm --entrypoint python gh-api -v -c 'import gh.main' 2>/tmp/pyv-api.txt >/dev/null \
+            || { tail -n 40 /tmp/pyv-api.txt; echo '::error::import gh.main trong ảnh gh-api lỗi'; exit 1; }
+          python3 .github/scripts/check_bytecode.py --title gh-api --prefix /opt/venv/ /tmp/pyv-api.txt
+          docker run --rm --read-only --tmpfs /tmp --entrypoint python3 gh-browser -v -c 'import ghb.worker, ghb.egress' 2>/tmp/pyv-browser.txt >/dev/null \
+            || { tail -n 40 /tmp/pyv-browser.txt; echo '::error::import ghb.worker trong ảnh gh-browser lỗi'; exit 1; }
+          python3 .github/scripts/check_bytecode.py --title gh-browser --prefix /opt/venv/ /tmp/pyv-browser.txt
       - name: Sandbox Chromium bật trong container browser với đúng tuỳ chọn bảo mật như compose (F-85)
         run: |
           set -euo pipefail
@@ -364,7 +423,7 @@ jobs:
   ci-ok:
     name: ci-ok
     runs-on: ubuntu-latest
-    needs: [version, api, browser, web, images]
+    needs: [version, api, browser, web, images, renovate-config]
     if: always()
     steps:
       - name: Tổng hợp kết quả các job CI
@@ -374,9 +433,11 @@ jobs:
           R_BROWSER: ${{ needs.browser.result }}
           R_WEB: ${{ needs.web.result }}
           R_IMAGES: ${{ needs.images.result }}
-          NOT_GREEN: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped') }}
+          R_RENOVATE: ${{ needs.renovate-config.result }}
+          # renovate-config được phép skipped (không chạy khi release.yml gọi); mọi job khác phải success.
+          NOT_GREEN: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || needs.version.result == 'skipped' || needs.api.result == 'skipped' || needs.browser.result == 'skipped' || needs.web.result == 'skipped' || needs.images.result == 'skipped' }}
         run: |
-          echo "version=$R_VERSION api=$R_API browser=$R_BROWSER web=$R_WEB images=$R_IMAGES"
+          echo "version=$R_VERSION api=$R_API browser=$R_BROWSER web=$R_WEB images=$R_IMAGES renovate-config=$R_RENOVATE"
           if [ "$NOT_GREEN" = "true" ]; then
             echo "::error::CI chưa xanh: có job failure/cancelled/skipped (xem dòng 'version=… api=…' của bước này) — mở job đỏ, sửa lỗi rồi đẩy lại hoặc bấm Re-run." >&2
             exit 1

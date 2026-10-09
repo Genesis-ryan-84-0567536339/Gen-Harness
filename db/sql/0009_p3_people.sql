@@ -2,7 +2,8 @@
 -- Giữ quy ước docs/handoff/03-database.md: UUIDv7, org_id, timestamptz, không ENUM.
 --
 -- Mọi bảng gốc đã có từ giai đoạn 1: biz.people_reviews, biz.review_disputes, biz.promises (xem
--- docs/handoff/schema.sql). Cụm này chỉ ALTER cột còn thiếu + thêm chỉ mục — không tạo lại bảng nào.
+-- docs/handoff/schema.sql — đã bỏ ở v0.1.48, xem lịch sử git; nay ở 0001_baseline.sql). Cụm này chỉ ALTER cột
+-- còn thiếu + thêm chỉ mục — không tạo lại bảng nào.
 
 -- ─── Đánh giá con người: sửa điểm tay giữ lịch sử ──────────────────────────────
 -- KHÔNG ghi đè `biz.people_reviews` khi sửa tay: mỗi lần sửa chèn một dòng mới, `supersedes_id` trỏ về dòng
@@ -44,5 +45,6 @@ CREATE INDEX ON biz.promises (org_id, to_person_id);
 CREATE INDEX ON biz.promises (org_id, broken) WHERE broken = true;
 
 -- Auditor thấy "nhật ký ai đã xem" một đánh giá cụ thể (PLAN Q4) — tra theo (org, target_type, target_id) mà
--- `ops.action_log` chưa có chỉ mục nào phủ (các chỉ mục sẵn có ở `docs/handoff/schema.sql` chỉ theo actor/action).
+-- `ops.action_log` chưa có chỉ mục nào phủ (các chỉ mục sẵn có ở `docs/handoff/schema.sql` — đã bỏ ở v0.1.48, nay ở
+-- 0001_baseline.sql — chỉ theo actor/action).
 CREATE INDEX ON ops.action_log (org_id, target_type, target_id, at DESC);

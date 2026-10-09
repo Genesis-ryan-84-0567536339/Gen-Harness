@@ -42,7 +42,7 @@ x-logging: &logging
 
 services:
   proxy:
-    image: caddy:2-alpine@sha256:881bbc60f9986d5ab8e7cfd6cf7e4ef3c9c0439fef2429d035d065577882f028
+    image: caddy:2-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f
     restart: unless-stopped
     logging: *logging
     # Mặc định chỉ máy này (127.0.0.1); genh ghi GH_BIND_ADDR=0.0.0.0 vào .env khi Owner chọn LAN hoặc bản cài cũ.

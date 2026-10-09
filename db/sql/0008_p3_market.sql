@@ -2,7 +2,8 @@
 -- Giữ quy ước docs/handoff/03-database.md: UUIDv7, org_id, timestamptz, không ENUM.
 --
 -- Mọi bảng gốc đã có từ giai đoạn 1: biz.opportunities, biz.opportunity_stage_history, biz.market_signals,
--- biz.matches, biz.deals, biz.cases (xem docs/handoff/schema.sql). Cụm này chỉ ALTER cột còn thiếu + thêm chỉ
+-- biz.matches, biz.deals, biz.cases (xem docs/handoff/schema.sql — đã bỏ ở v0.1.48, xem lịch sử git; nay ở
+-- 0001_baseline.sql). Cụm này chỉ ALTER cột còn thiếu + thêm chỉ
 -- mục cho truy vấn của cụm — không tạo lại bảng nào. `biz.cases` trước đây chưa cụm nào dùng (queue dùng
 -- `biz.alerts` cho cảnh báo sớm — khác bảng, không đụng tới).
 

@@ -2,7 +2,8 @@
 -- Giữ quy ước docs/handoff/03-database.md: UUIDv7, org_id, timestamptz, không ENUM.
 --
 -- `agent.mcp_servers` / `agent.mcp_tools` / `agent.mcp_grants` / `agent.mcp_calls` ĐÃ có từ 0001_baseline.sql
--- (docs/handoff/schema.sql §10) — cụm này chỉ thêm chỉ mục còn thiếu cho truy vấn thật + cột cho luồng nạp
+-- (docs/handoff/schema.sql §10, đã bỏ ở v0.1.48 — xem lịch sử git) — cụm này chỉ thêm chỉ mục còn thiếu cho truy
+-- vấn thật + cột cho luồng nạp
 -- plugin từ tệp (spec 4.4, ARCHITECTURE §6.4 "Cài: kiểm chữ ký, hiện danh sách quyền xin, yêu cầu PIN").
 
 -- ─── MCP Hub: chỉ mục cho liệt kê / phân trang / khoá cứng #4 ─────────────────

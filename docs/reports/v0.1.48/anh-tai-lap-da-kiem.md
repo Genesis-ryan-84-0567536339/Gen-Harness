@@ -13,10 +13,10 @@ Cách đo (registry API, tương đương `docker buildx imagetools inspect <ả
 
 | Ảnh:tag | Digest (index) | MediaType | amd64 + arm64 | Dùng ở |
 |---|---|---|---|---|
-| caddy:2-alpine | `sha256:881bbc60f9986d5ab8e7cfd6cf7e4ef3c9c0439fef2429d035d065577882f028` | oci.image.index | có | deploy/compose.yaml (proxy), bản nhúng genh |
+| caddy:2-alpine | `sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f` | oci.image.index | có | deploy/compose.yaml (proxy), bản nhúng genh |
 | redis:7-alpine | `sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499` | oci.image.index | có | compose (redis, browser-redis), bản nhúng |
-| python:3.11-slim | `sha256:bab1b7ef4b450c81002278d035eff85ebe394ae94df904f7a3ba14f7e16e487b` | oci.image.index | có | api.Dockerfile |
-| node:22-slim | `sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddfe4238355d3a30b772c` | oci.image.index | có | bridge.Dockerfile |
+| python:3.11-slim | `sha256:0dd364ba7e10242f07755449e3a3d0e35f9efd987952737b90def6709ab0c5ce` | oci.image.index | có | api.Dockerfile |
+| node:22-slim | `sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392` | oci.image.index | có | bridge.Dockerfile |
 | node:22-alpine | `sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402` | oci.image.index | có | apps/web/Dockerfile (build) |
 | nginxinc/nginx-unprivileged:1.27-alpine | `sha256:65e3e85dbaed8ba248841d9d58a899b6197106c23cb0ff1a132b7bfe0547e4c0` | oci.image.index | có | apps/web/Dockerfile (runtime) |
 | pgvector/pgvector:pg16 | `sha256:7b822b0aac60967beb1ea5e576b8602c94c300a157d187f385ae3e0da199b90a` | oci.image.index | có (chỉ 2 kiến trúc này) | db.Dockerfile |
@@ -25,6 +25,19 @@ Cách đo (registry API, tương đương `docker buildx imagetools inspect <ả
 | mcr.microsoft.com/playwright/python:v1.56.0-noble | `sha256:a7f6cf3ae520c9d670ad956572c13747ed5abdbba5123a01526f873ed1662528` | docker manifest.list.v2 | có | browser.Dockerfile (đã ghim sẵn, đo lại khớp) |
 
 Cả 10 giá trị đo lại trùng giá trị lúc lập kế hoạch (2026-10-03).
+
+**Đo lại 2026-10-09 (sửa sau review, trước khi phát hành)** — tag đã dời sang bản dựng mới, đã cập nhật 3 dòng trên (kiểm
+qua `hub.docker.com/v2/repositories/library/<ảnh>/tags/<tag>` và registry `mirror.gcr.io`, đọc `ENV *_VERSION` + `created`
+của ảnh amd64; vẫn là index đa kiến trúc có amd64 + arm64):
+
+| Ảnh:tag | Digest cũ (03/10) | Digest mới | Lý do |
+|---|---|---|---|
+| caddy:2-alpine | `sha256:881bbc60…` (Caddy v2.11.6, dựng 2026-10-02) | `sha256:d8542f48…` | Caddy v2.11.7 (dựng 2026-10-05) — giữ cũ thì Owner đã kéo tag sau 05/10 bị hạ bản khi cập nhật |
+| python:3.11-slim | `sha256:bab1b7ef…` (dựng 2026-10-01) | `sha256:0dd364ba…` | cùng 3.11.17, dựng lại 2026-10-06 (gói Debian mới hơn) |
+| node:22-slim | `sha256:43ac6c60…` (dựng 2026-09-23) | `sha256:c3de60bf…` | cùng 22.23.3, dựng lại 2026-10-06 (gói Debian mới hơn) |
+
+redis:7-alpine, node:22-alpine, nginx-unprivileged:1.27-alpine, pgvector:pg16 đo lại vẫn trùng. Sau khi merge, Renovate mở PR
+nhóm "ảnh Docker" mỗi tuần (không tự merge — xem renovate.json).
 
 Gói apt `postgresql-16-partman` (db.Dockerfile) và các gói apt/`postgresql-client-16` (api.Dockerfile) **chưa ghim phiên bản** — ngoài phạm vi gói này.
 Bản tải `agy`/`claude` vẫn ghim bằng SHA-256 như cũ.

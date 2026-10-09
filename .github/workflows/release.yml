@@ -333,6 +333,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Sửa sau review v0.1.48: ảnh nền ghim digest ⇒ khoá cache tầng apt (api, db) không bao giờ đổi, cache gha mode=max
+      # sẽ dùng lại gói apt cũ mãi và lỡ bản vá bảo mật Debian/PGDG. Truyền tuần ISO làm ARG APT_REFRESH ⇒ tầng apt dựng
+      # lại ít nhất mỗi tuần (ảnh không có ARG này bỏ qua).
+      - name: Tuần làm mới gói apt (APT_REFRESH)
+        run: echo "APT_REFRESH=$(date -u +%G-W%V)" >>"$GITHUB_ENV"
+
       - name: Build + push (linux/amd64, linux/arm64)
         id: build1
         continue-on-error: true
@@ -346,8 +352,10 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           # v0.1.36 (F-46): api.Dockerfile ghi phiên bản vào ảnh (ENV GH_VERSION + LABEL); ảnh khác bỏ qua ARG này.
+          # APT_REFRESH: chỉ api/db có tầng apt; ảnh khác bỏ qua.
           build-args: |
             VERSION=${{ needs.meta.outputs.version }}
+            APT_REFRESH=${{ env.APT_REFRESH }}
           tags: |
             ${{ env.REGISTRY }}/${{ needs.meta.outputs.owner_lower }}/gen-harness-${{ matrix.service }}:${{ needs.meta.outputs.version }}
             ${{ env.REGISTRY }}/${{ needs.meta.outputs.owner_lower }}/gen-harness-${{ matrix.service }}:sha-${{ github.sha }}
@@ -373,8 +381,10 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           # v0.1.36 (F-46): api.Dockerfile ghi phiên bản vào ảnh (ENV GH_VERSION + LABEL); ảnh khác bỏ qua ARG này.
+          # APT_REFRESH: chỉ api/db có tầng apt; ảnh khác bỏ qua.
           build-args: |
             VERSION=${{ needs.meta.outputs.version }}
+            APT_REFRESH=${{ env.APT_REFRESH }}
           tags: |
             ${{ env.REGISTRY }}/${{ needs.meta.outputs.owner_lower }}/gen-harness-${{ matrix.service }}:${{ needs.meta.outputs.version }}
             ${{ env.REGISTRY }}/${{ needs.meta.outputs.owner_lower }}/gen-harness-${{ matrix.service }}:sha-${{ github.sha }}

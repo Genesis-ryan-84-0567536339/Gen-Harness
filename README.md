@@ -204,6 +204,12 @@ make seed-demo-clean              # xoá kết luận đã sinh (giữ nguyên b
 Chạy API không cần Docker để phát triển nhanh: `make api-dev` (cần `GH_DATABASE_URL`/`GH_REDIS_URL` trỏ tới
 Postgres/Redis local, hoặc export các biến tương ứng trước khi chạy).
 
+Lần đầu (và mỗi khi kéo về `uv.lock` mới): `make api-sync` — cài `apps/api/.venv` đúng theo `uv.lock`
+(`uv sync --frozen --extra dev`); thiếu bước này thì `make api-dev`/`api-test`/`api-lint` báo không thấy `.venv`.
+Đổi phụ thuộc trong `pyproject.toml` thì `make lock` rồi commit `uv.lock`. Cả hai lệnh chạy uv 0.12.23 qua `uvx`
+(cùng bản với CI và ảnh Docker — khác bản thì `uv lock --check` của CI có thể đỏ); cần có `uv` trên máy
+(https://docs.astral.sh/uv/).
+
 ## Tài liệu chi tiết hơn
 
 - `docs/ARCHITECTURE.md` — kiến trúc hệ thống, ràng buộc bắt buộc (R1–R10), luồng dữ liệu.

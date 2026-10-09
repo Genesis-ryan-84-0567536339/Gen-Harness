@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
 # Một image cho api, worker và bước migrate. Build từ gốc repo: docker build -f deploy/images/api.Dockerfile .
 # ghim digest (F-19) — Renovate tự nâng
-FROM python:3.11-slim@sha256:bab1b7ef4b450c81002278d035eff85ebe394ae94df904f7a3ba14f7e16e487b
+FROM python:3.11-slim@sha256:0dd364ba7e10242f07755449e3a3d0e35f9efd987952737b90def6709ab0c5ce
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 WORKDIR /app/apps/api
 
@@ -17,7 +17,12 @@ ARG CLAUDE_CODE_VERSION=2.1.285
 ARG CLAUDE_SHA256_AMD64=3fea1abf2d5f42236ebf7e59126698e347ac80437a145dd6e85b87c8c3341ffe
 ARG CLAUDE_SHA256_ARM64=f8a0dc539db3c860bdd12a345a51db798908b089a1696f9720c57776dace4cbf
 ARG TARGETARCH
+# Làm mới gói apt mỗi tuần (sửa sau review v0.1.48): ảnh nền ghim digest nên khoá cache tầng apt không đổi — release.yml
+# dùng cache gha mode=max sẽ dùng lại gói apt cũ mãi, lỡ bản vá bảo mật Debian/PGDG. release.yml truyền tuần ISO
+# (vd 2026-W41) ⇒ tầng này dựng lại ít nhất mỗi tuần; build tay/CI để trống (không ảnh hưởng).
+ARG APT_REFRESH=
 RUN set -eux; \
+    echo "apt refresh: ${APT_REFRESH:-thủ công}"; \
     apt-get update; apt-get install -y --no-install-recommends ca-certificates curl; \
     case "${TARGETARCH:-amd64}" in \
       amd64) arch=x64; sum="$AGY_SHA256_AMD64"; csum="$CLAUDE_SHA256_AMD64" ;; \
@@ -48,7 +53,12 @@ RUN set -eux; \
     apt-get purge -y curl; apt-get autoremove -y; rm -rf /var/lib/apt/lists/*
 # F-36 (v0.1.48): cài từ uv.lock (uv sync --frozen) vào /opt/venv; uv chỉ gắn tạm lúc build, KHÔNG nằm lại trong ảnh.
 # PATH đặt bằng ENV: alembic, arq, gh-api, `python` đều ra /opt/venv/bin.
-ENV UV_PROJECT_ENVIRONMENT=/opt/venv UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never UV_PYTHON=/usr/local/bin/python3.11 PATH=/opt/venv/bin:$PATH
+# UV_COMPILE_BYTECODE=1: uv KHÔNG tự sinh .pyc (pip thì có). /opt/venv thuộc root, tiến trình chạy USER gh và
+# PYTHONDONTWRITEBYTECODE=1 ⇒ thiếu .pyc thì MỌI tiến trình python (api, worker, migrate, `python -m gh.backup`…) dịch lại
+# cả cây thư viện mỗi lần khởi động (~+1,3 giây CPU, chậm hơn trên máy arm64 yếu). CI (job images) kiểm không module nào
+# dưới /opt/venv phải dịch lại lúc chạy (.github/scripts/check_bytecode.py).
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never UV_PYTHON=/usr/local/bin/python3.11 \
+    UV_COMPILE_BYTECODE=1 PATH=/opt/venv/bin:$PATH
 COPY apps/api/pyproject.toml apps/api/uv.lock ./
 RUN --mount=from=ghcr.io/astral-sh/uv:0.12.23@sha256:61d393e44e249f2e4b526b6c7ddcecce245946826e608e11c93ad4f5bba55b21,source=/uv,target=/usr/local/bin/uv --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev --no-install-project
 COPY apps/api/gh ./gh

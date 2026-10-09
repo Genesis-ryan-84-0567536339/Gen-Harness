@@ -27,6 +27,9 @@ class ScanSummary(unittest.TestCase):
         self.assertIn("PYSEC-1", r.stdout)
         self.assertIn("1.1", r.stdout)
         self.assertIn("::warning::", r.stderr)
+        # PyPI không ghi mức ⇒ không gắn nhãn "mức cao" (npm/govulncheck mới có mức thật).
+        self.assertIn("1 lỗ cần xem", r.stdout)
+        self.assertNotIn("mức cao", r.stdout)
 
     def test_pip_clean(self):
         r = run("pip-audit", json.dumps({"dependencies": [{"name": "a", "version": "1", "vulns": []}]}))
@@ -67,6 +70,10 @@ class ScanSummary(unittest.TestCase):
             self.assertEqual(r.returncode, 0)
             self.assertIn("Không chạy được quét", r.stdout)
             self.assertIn("::warning::", r.stderr)
+            # Step summary và ::warning:: dùng cùng một câu.
+            msg = "Không chạy được quét Mẫu (thiếu kết quả) — xem log bước quét"
+            self.assertIn(msg, r.stdout)
+            self.assertIn(f"::warning::{msg}", r.stderr)
 
     def test_govulncheck_incomplete_is_not_clean(self):
         # Luồng thật khi không tải được vuln.go.dev: config + SBOM + "Fetching…" rồi dừng (exit 1).
