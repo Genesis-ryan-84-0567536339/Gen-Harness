@@ -11,7 +11,7 @@
 - v0.1.49 (QD-16): `hub` Đạt thì lưu thêm `read_scopes` (lịch/mail/việc/Drive → bool) và `read_missing` (nhãn quyền
   còn thiếu) vào `detail` — chỉ để hiển thị "Quyền đọc thêm (không bắt buộc)"; Đạt/Lỗi KHÔNG phụ thuộc các quyền này.
   Lỗi thì KHÔNG lưu (quyền trong CSDL lúc đó là của lần kiểm cũ / toàn False — gợi ý tick quyền sẽ chỉ sai cách sửa).
-- v0.1.50 (F-81): `hub` Đạt thì lưu thêm `write_scopes` ({kho: bool}) và `write_missing` (nhãn quyền ghi còn thiếu) —
+- v0.1.50 (F-81): `hub` Đạt thì lưu thêm `write_scopes` ({kho, kho_create, kho_update: bool}) và `write_missing` —
   cũng chỉ để hiển thị. Dòng 9 "Gen ghi Kho" (`kho_write`) KHÔNG chạy được từ đây (không nằm trong RUNNABLE): máy
   chủ tự ghi 'pass' sau lần ghi Kho thật đầu tiên (gh.hub_link.service.write_kho).
 - Phản hồi cho Owner được kèm email ĐẦY ĐỦ (`account`); CSDL chỉ lưu email đã che.

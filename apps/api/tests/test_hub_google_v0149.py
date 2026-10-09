@@ -220,7 +220,8 @@ async def test_scope_revoked_in_gen_hub_is_closed_on_next_test(owner_api: Api, f
     assert r.status_code == 409 and r.json()["code"] == "HUB_TOOL_MISSING"
     assert "hub.link_tested" in await _db_text("SELECT action FROM ops.action_log")
     # Đọc TÊN khoá (không in cả detail: repr dòng SQLAlchemy cắt giữa giá trị dài, khoá có thể rơi vào đoạn bị cắt).
-    keys = await _db_text("SELECT DISTINCT jsonb_object_keys(detail) FROM ops.action_log WHERE action = 'hub.link_tested'")
+    keys = await _db_text(
+        "SELECT DISTINCT jsonb_object_keys(detail) FROM ops.action_log WHERE action = 'hub.link_tested'")
     assert "read_scopes" in keys
 
 

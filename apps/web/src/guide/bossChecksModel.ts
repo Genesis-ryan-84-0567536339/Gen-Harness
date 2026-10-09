@@ -109,7 +109,8 @@ export function hubScopesHint(items: readonly HubScopeItem[]): string | null {
 
 /**
  * v0.1.50 (F-81, QD-18): dòng phụ của hàng Gen-hub — quyền GHI Kho (không bắt buộc) lấy từ `results.hub.detail.write_scopes`
- * ({kho: boolean}). Vắng / không phải boolean (máy chủ cũ, bản ghi cũ) ⇒ `null` (ẩn dòng, không đoán).
+ * — MỘT dòng theo cờ chung `kho` (có CẢ kho_create và kho_update; từng tool xem ở Kết nối › Gen-hub). Vắng / không phải boolean
+ * (máy chủ cũ, bản ghi cũ) ⇒ `null` (ẩn dòng, không đoán).
  */
 export function hubWriteScopeOf(c: Pick<BossCheck, 'detail'> | null | undefined): boolean | null {
   const raw = c?.detail?.write_scopes;
