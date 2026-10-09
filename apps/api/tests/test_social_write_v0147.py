@@ -159,7 +159,10 @@ async def test_permit_issue_verify_and_payload_in_stream(owner_api: Api, redis: 
     assert permit.verify(pl["permit"], **args, now=p["exp"] + 1) == "PERMIT_EXPIRED"
     assert permit.verify(pl["permit"], **(args | {"text": REPLY[:-1] + "?"}), now=p["iat"]) == "PERMIT_MISMATCH"
     assert permit.verify(pl["permit"], **(args | {"job_id": "khac"}), now=p["iat"]) == "PERMIT_MISMATCH"
-    bad = {**pl["permit"], "sig": "A" + pl["permit"]["sig"][1:]}
+    # Đổi ký tự đầu thành ký tự KHÁC: sig vốn bắt đầu bằng "A" (xác suất 1/64) thì "A"+sig[1:] trùng chữ ký gốc
+    # ⇒ test chập chờn (CI đỏ ở v0.1.50).
+    sig0 = pl["permit"]["sig"]
+    bad = {**pl["permit"], "sig": ("B" if sig0[0] == "A" else "A") + sig0[1:]}
     assert permit.verify(bad, **args, now=p["iat"]) == "PERMIT_BAD_SIG"
     assert permit.verify(None, **args) == "PERMIT_MISSING"
     # Ghi nhật ký: chỉ sha256, không nguyên văn nội dung.
