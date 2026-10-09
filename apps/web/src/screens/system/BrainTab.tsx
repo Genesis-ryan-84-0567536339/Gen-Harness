@@ -10,6 +10,7 @@ import { N4, OK, WARN } from '../data/dataModel';
 import { JevCard } from './JevCard';
 import { TriageCard } from './TriageCard';
 import { BackgroundSourcesCard } from './BackgroundSourcesCard';
+import { GenMemoryCard } from './GenMemoryCard';
 import { AiBudgetCard } from './AiBudgetCard';
 import { useCan } from '../../lib/permissions';
 
@@ -40,13 +41,21 @@ export function BrainTabBody() {
   const providers = useProviders();
   const rules = useFailoverRules();
   const qc = useQueryClient();
-  const jevHash = useLocation().hash === '#jev';
+  const hash = useLocation().hash;
+  const jevHash = hash === '#jev';
+  const memoryHash = hash === '#gen-memory';
   // v0.1.43: "Nhập khoá Jev" (Kiểm tra của Boss) dẫn tới #jev — thẻ ở lưới dưới, mở sẵn rồi cuộn tới (giống Kết nối).
   useEffect(() => {
     if (!jevHash) return;
     const t = window.setTimeout(() => document.getElementById('jev')?.scrollIntoView?.({ block: 'start' }), 50);
     return () => window.clearTimeout(t);
   }, [jevHash]);
+  // v0.1.50 (F-81): "Xem ở Cài đặt" trên thẻ Ghi nhớ dẫn tới #gen-memory — cuộn tới thẻ Gen nhớ.
+  useEffect(() => {
+    if (!memoryHash) return;
+    const t = window.setTimeout(() => document.getElementById('gen-memory')?.scrollIntoView?.({ block: 'start' }), 50);
+    return () => window.clearTimeout(t);
+  }, [memoryHash]);
   // v0.1.39 (F-78): Jev không bắt buộc — kiểm tra lỗi thì thu thẻ vào "Nâng cao" thay vì để lỗi đỏ giữa tab.
   // Mutation giữ ở đây để kết quả "Kiểm tra 1 lần" còn nguyên khi thẻ chuyển chỗ.
   const jevTest = useTestProvider();
@@ -169,6 +178,9 @@ export function BrainTabBody() {
           )}
         </Panel>
       </div>
+
+      {/* v0.1.50 (F-81, QD-18): Gen nhớ — chỉ Owner thấy (thẻ tự ẩn với vai trò khác, không gọi /gen/memory). */}
+      <GenMemoryCard />
 
       <div className="sys-grid2">
         {/* v0.1.43 (F-30): Jev không bắt buộc — luôn nằm trong "Nâng cao"; tới bằng `#jev` (vd từ Kiểm tra của Boss) thì mở sẵn. */}

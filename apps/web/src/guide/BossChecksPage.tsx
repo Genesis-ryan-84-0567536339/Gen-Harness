@@ -22,6 +22,7 @@ import {
   BOSS_CHECKS_POLL_MS,
   HUB_ADDRESS_CODES,
   FACEBOOK_REPLY_STEPS,
+  KHO_WRITE_STEPS,
   accountOf,
   bossErrorText,
   fmtCheckedAt,
@@ -30,6 +31,9 @@ import {
   hubScopesLine,
   hubScopesOf,
   hubTokenExpiry,
+  hubWriteHint,
+  hubWriteLine,
+  hubWriteScopeOf,
   isStalePending,
   needsRelogin,
   resultOf,
@@ -60,8 +64,9 @@ export function BossChecksPage() {
   }, []);
 
   const data = q.data;
-  // Dòng 8 chỉ hiện khi máy chủ có dòng đó (bản api cũ không có — không hiện dòng chết).
+  // Dòng 8 và 9 chỉ hiện khi máy chủ có dòng đó (bản api cũ không có — không hiện dòng chết).
   const hasReplyRow = !!data?.rows?.some((r) => r.row === 8);
+  const hasKhoRow = !!data?.rows?.some((r) => r.row === 9);
   const rowDone = (n: number) => !!data?.rows?.find((r) => r.row === n)?.done;
   const total = data?.required_total ?? 6;
   const done = data?.required_done ?? 0;
@@ -114,6 +119,7 @@ export function BossChecksPage() {
             <TelegramRow data={data} done={rowDone(6)} />
             <RemoteRow data={data} done={rowDone(7)} />
             {hasReplyRow ? <FacebookReplyRow data={data} done={rowDone(8)} /> : null}
+            {hasKhoRow ? <KhoWriteRow data={data} done={rowDone(9)} /> : null}
           </ol>
           <p className="boss-foot muted-note">
             <Icon name="ph ph-floppy-disk" size={13} /> Kết quả được lưu lại — Claude tự đọc, Sếp không cần chụp màn hình.
@@ -220,14 +226,28 @@ function ResultCell({ label, check, okText, failText, emptyText }: { label?: str
  * cách sửa (cùng quy tắc thẻ Kết nối › Gen-hub).
  */
 function HubScopesNote({ check }: { check: BossCheck | null }) {
-  const items = check?.status === 'pass' ? hubScopesOf(check) : null;
-  if (!items) return null;
-  const hint = hubScopesHint(items);
+  const passed = check?.status === 'pass';
+  const items = passed ? hubScopesOf(check) : null;
+  // v0.1.50 (F-81): quyền ghi Kho (không bắt buộc) — cùng điều kiện: chỉ khi lần kiểm Đạt và máy chủ có `detail.write_scopes`.
+  const write = passed ? hubWriteScopeOf(check) : null;
+  if (!items && write === null) return null;
+  const hint = items ? hubScopesHint(items) : null;
+  const writeHint = write === null ? null : hubWriteHint(write);
   return (
-    <p className="boss-hub-scopes" data-testid="boss-hub-scopes">
-      {hubScopesLine(items)}
-      {hint ? <span className="boss-hub-scopes__hint"> {hint}</span> : null}
-    </p>
+    <>
+      {items ? (
+        <p className="boss-hub-scopes" data-testid="boss-hub-scopes">
+          {hubScopesLine(items)}
+          {hint ? <span className="boss-hub-scopes__hint"> {hint}</span> : null}
+        </p>
+      ) : null}
+      {write !== null ? (
+        <p className="boss-hub-scopes" data-testid="boss-hub-write-scopes">
+          {hubWriteLine(write)}
+          {writeHint ? <span className="boss-hub-scopes__hint"> {writeHint}</span> : null}
+        </p>
+      ) : null}
+    </>
   );
 }
 
@@ -712,6 +732,42 @@ function FacebookReplyRow({ data, done }: { data: Results; done: boolean }) {
             <Icon name="ph ph-arrow-right" size={13} />
           </Link>
         </div>
+      ) : null}
+    </Row>
+  );
+}
+
+// ── 9. Gen ghi Kho (không bắt buộc) ─────────────────────────────────────────────────────────────────────
+/**
+ * v0.1.50 (F-81, QD-18): cho Gen ghi thẳng vào Kho Ryan (Phiên, Việc) qua Gen-hub. Không có nút chạy kiểm — Đạt khi máy chủ ghi
+ * 'pass' sau lần ghi Kho THẬT đầu tiên (đề xuất "Ghi vào Kho Ryan" đã Xác nhận + mã PIN). Chưa đạt thì hiện 2 bước + nút mở thẻ Gen-hub.
+ */
+function KhoWriteRow({ data, done }: { data: Results; done: boolean }) {
+  const res = resultOf(data, 'kho_write');
+  const passed = res?.status === 'pass';
+  return (
+    <Row
+      n={9}
+      title="Gen ghi Kho"
+      optional
+      done={done || passed}
+      todo="Không bắt buộc. Cho Gen ghi thẳng vào Kho Ryan (Phiên, Việc) — Gen chỉ đề xuất, Sếp bấm Xác nhận và nhập mã PIN thì mới ghi:"
+      results={<ResultCell check={res} />}
+    >
+      {!passed ? (
+        <>
+          <ol className="boss-kho-steps" data-testid="boss-kho-steps">
+            {KHO_WRITE_STEPS.map((s) => (
+              <li key={s}>{s}</li>
+            ))}
+          </ol>
+          <div className="boss-actions">
+            <Link to="/connections#genhub" className="gh-btn gh-btn--secondary btn-27">
+              Mở Kết nối › Gen-hub
+              <Icon name="ph ph-arrow-right" size={13} />
+            </Link>
+          </div>
+        </>
       ) : null}
     </Row>
   );

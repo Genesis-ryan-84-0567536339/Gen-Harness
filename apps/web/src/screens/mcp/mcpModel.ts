@@ -3,6 +3,7 @@ import {
   ApiError,
   type HubLinkStatus,
   type HubReadScopes,
+  type HubWriteScopes,
   type McpArgsDigest,
   type McpCall,
   type McpCallOutcome,
@@ -147,6 +148,53 @@ export function scopesMessage(readMissing: unknown, scopes: Partial<Record<keyof
   const fromScopes = missingText(missingFromScopes(scopes));
   if (fromScopes) return { tone: 'warn', text: fromScopes };
   return scopesKnown(scopes) ? { tone: 'ok', text: SCOPES_ENOUGH_TEXT } : null;
+}
+
+/**
+ * v0.1.50 (F-81, QD-18): quyền GHI Kho (tuỳ chọn) của token Gen-hub. Máy chủ báo MỘT cờ `write_scopes.kho` (token có cả
+ * `kho_create` và `kho_update`); thẻ vẽ 2 dòng, cùng trạng thái. Gen KHÔNG tự ghi: chỉ ghi khi Sếp bấm Xác nhận + nhập mã PIN
+ * trên thẻ đề xuất "Ghi vào Kho Ryan". Thiếu quyền ghi không làm Kiểm tra đỏ.
+ */
+export const WRITE_SCOPE_ROWS: ReadonlyArray<{ key: 'kho_create' | 'kho_update'; label: string }> = [
+  { key: 'kho_create', label: 'Tạo bản ghi Phiên/Việc' },
+  { key: 'kho_update', label: 'Sửa bản ghi Phiên/Việc' },
+];
+
+export interface WriteScopeRow {
+  key: 'kho_create' | 'kho_update';
+  label: string;
+  /** `yes` = Có · `no` = Chưa · `unknown` = Chưa kiểm (không có dữ liệu hoặc giá trị không phải boolean). */
+  state: 'yes' | 'no' | 'unknown';
+  text: 'Có' | 'Chưa' | 'Chưa kiểm';
+}
+
+export function writeScopeRows(scopes: Partial<Record<keyof HubWriteScopes, unknown>> | null | undefined): WriteScopeRow[] {
+  const v = scopes && typeof scopes === 'object' ? scopes.kho : undefined;
+  const state = v === true ? 'yes' : v === false ? 'no' : 'unknown';
+  return WRITE_SCOPE_ROWS.map((r) => ({ ...r, state, text: state === 'yes' ? 'Có' : state === 'no' ? 'Chưa' : 'Chưa kiểm' }));
+}
+
+export const WRITE_MISSING_TEXT = 'Vào Gen-hub tick quyền kho_create, kho_update cho token của Gen-Harness rồi bấm Kiểm tra.';
+export const WRITE_ENOUGH_TEXT = 'Đủ quyền ghi Kho (Phiên, Việc).';
+export const WRITE_CONFIRM_ONLY_TEXT = 'Gen chỉ ghi khi Sếp bấm Xác nhận + nhập mã PIN trên thẻ đề xuất.';
+
+/**
+ * Câu về quyền ghi Kho sau một lần Kiểm tra: thiếu (máy chủ báo `write_missing` không rỗng, hoặc `kho === false`) ⇒ hướng dẫn tick
+ * quyền; đủ ⇒ câu đủ quyền; chưa có dữ liệu ⇒ null. Chỉ nhận chuỗi / boolean.
+ */
+export function writeScopesMessage(writeMissing: unknown, scopes: Partial<Record<keyof HubWriteScopes, unknown>> | null | undefined): { tone: 'warn' | 'ok'; text: string } | null {
+  const listed = Array.isArray(writeMissing) ? writeMissing.filter((x): x is string => typeof x === 'string' && x.trim() !== '') : [];
+  if (listed.length > 0) return { tone: 'warn', text: WRITE_MISSING_TEXT };
+  const kho = scopes && typeof scopes === 'object' ? scopes.kho : undefined;
+  if (kho === false) return { tone: 'warn', text: WRITE_MISSING_TEXT };
+  if (kho === true) return { tone: 'ok', text: WRITE_ENOUGH_TEXT };
+  return null;
+}
+
+/** Quyền GHI khác mà token đang có (ngoài ghi Kho, vốn là tuỳ chọn có chủ đích) — Gen không dùng, nên tắt. Chỉ giữ chuỗi. */
+export function otherWriteTools(list: unknown): string[] {
+  if (!Array.isArray(list)) return [];
+  return list.filter((t): t is string => typeof t === 'string' && t !== '' && !/(^|[_.:/-])kho_(create|update)$/.test(t));
 }
 
 /** `YYYY-MM-DD` (ô ngày) → ISO cuối ngày giờ VN; rỗng → null. */

@@ -7,8 +7,9 @@
  * `/mcp/market` (những route đó chưa từng được cài, xem ghi chú đầu `packages/contracts/src/p4-mcp.ts`).
  */
 import { createHash, randomUUID } from 'node:crypto';
-import type { AgentIdentity, HubLink, HubReadScopes, McpArgsDigest, McpCall, McpCallOutcome, McpServer, McpTool } from '@gen-harness/contracts';
+import type { AgentIdentity, HubLink, HubReadScopes, HubWriteScopes, McpArgsDigest, McpCall, McpCallOutcome, McpServer, McpTool } from '@gen-harness/contracts';
 import type { P2Ctx } from './mock-phase2';
+import type { KhoWriteOutcome, KhoWriteReq } from './mock-gen-v0150';
 import { AGENT_IDS } from './mock-ids';
 
 /** v0.1.45 (F-57): như `gh.mcp_api.invoke.args_digest` — nhật ký chỉ lưu dấu vết tham số, không nguyên văn. */
@@ -31,6 +32,8 @@ export interface P4McpOptions {
   getAgents: () => AgentIdentity[];
   /** `p3Core.hooks.push` — tạo bản nháp `kind='mcp_write'` dùng chung cơ chế `create_draft`. */
   pushDraft: (d: Record<string, unknown>) => unknown;
+  /** v0.1.50 (F-81): một lần ghi Kho THẬT đầu tiên được xác nhận ⇒ boss_checks 'kho_write' đạt (gắn muộn, mock-boss-checks). */
+  onKhoWritten?: () => void;
 }
 
 interface MockServer extends Omit<McpServer, 'has_auth' | 'tool_count' | 'exposed_count'> {
@@ -92,6 +95,20 @@ export function createMock(opts: P4McpOptions) {
   let hubScopesMissing = false;
   /** v0.1.49 (F-83): bộ ngắt Gen-hub đang mở (giả lập 3 lỗi liên tiếp) — `GET /hub/link` trả `breaker.open`. */
   let hubBreakerOpen = false;
+  /**
+   * v0.1.50 (F-81, QD-18): quyền GHI Kho của token. Token chứa "khongghi" ⇒ thiếu quyền ghi Kho (Kiểm tra vẫn XANH, chỉ báo
+   * `write_missing`). Hook `hubSim {write:'ok'|'missing'}` đặt thẳng. Chỉ giữ cờ, không giữ token.
+   */
+  let hubWriteMissing = false;
+  /** v0.1.50: chế độ giả lập lỗi của lần ghi Kho tiếp theo (hook `hubSim {kho: …}`); `ok` = ghi thành công. */
+  type KhoSim = 'ok' | 'uncertain' | 'rejected' | 'permit';
+  let khoSim: KhoSim = 'ok';
+  /** Mọi lời gọi `/hub/kho/write` (kể cả lỗi) — Huỷ đề xuất thì KHÔNG có lời gọi nào. Không lưu permit / token. */
+  const khoCalls: Array<{ proposal_id: string; tool: string; outcome: string; code: string | null }> = [];
+  const khoSeq = { Phiên: 12, Việc: 40 };
+  const FULL_WRITE: HubWriteScopes = { kho: true };
+  const MISSING_WRITE: HubWriteScopes = { kho: false };
+  const WRITE_MISSING_LABEL = 'ghi Kho (kho_create, kho_update)';
   const FULL_SCOPES: HubReadScopes = { calendar: true, mail: true, tasks: true, drive: true };
   const MISSING_SCOPES: HubReadScopes = { calendar: false, mail: false, tasks: true, drive: true };
   const SCOPE_LABEL: Record<keyof HubReadScopes, string> = { calendar: 'đọc lịch', mail: 'đọc mail', tasks: 'đọc việc (Google Tasks)', drive: 'tìm tệp Drive' };
@@ -99,7 +116,9 @@ export function createMock(opts: P4McpOptions) {
    * `GET /hub/link` luôn kèm `breaker`; `read_scopes` chỉ có sau một lần Kiểm tra xanh với địa chỉ/token hiện tại — chưa kiểm
    * (hoặc vừa đổi địa chỉ/token) ⇒ `null`, đúng như máy chủ (`hub.scopes_known`).
    */
-  const linkOut = (l: HubLink): HubLink => ({ ...l, read_scopes: l.read_scopes ?? null, breaker: { open: hubBreakerOpen, retry_in_s: hubBreakerOpen ? 60 : null } });
+  const linkOut = (l: HubLink): HubLink => ({
+    ...l, read_scopes: l.read_scopes ?? null, write_scopes: l.write_scopes ?? null, breaker: { open: hubBreakerOpen, retry_in_s: hubBreakerOpen ? 60 : null },
+  });
   /** v0.1.39 (F-31): như máy chủ — địa chỉ https công khai mà chưa bật "mạng công cộng" thì bị chặn. */
   const publicHttps = (url: string | null) => {
     try {
@@ -113,7 +132,7 @@ export function createMock(opts: P4McpOptions) {
   };
   type HubTestOut = {
     ok: boolean; error: string | null; error_code: string | null; latency_ms: number; exposed_tools: string[]; missing_tools: string[];
-    read_scopes?: HubReadScopes; read_missing?: string[]; write_tools?: string[]; link: HubLink;
+    read_scopes?: HubReadScopes; read_missing?: string[]; write_tools?: string[]; write_scopes?: HubWriteScopes; write_missing?: string[]; link: HubLink;
   };
   /** Một lượt "Kiểm tra" Gen-hub — dùng chung cho `POST /hub/link/test` và `POST /boss-checks/hub/run`. */
   const hubTest = (): HubTestOut => {
@@ -128,11 +147,14 @@ export function createMock(opts: P4McpOptions) {
     const scopes = hubScopesMissing ? MISSING_SCOPES : FULL_SCOPES;
     const readMissing = (Object.keys(scopes) as Array<keyof HubReadScopes>).filter((k) => !scopes[k]).map((k) => SCOPE_LABEL[k]);
     hubBreakerOpen = false;
-    hubLink = { ...hubLink, enabled: true, status: 'ok', last_ok_at: new Date().toISOString(), last_error: null, health: 'healthy', read_scopes: { ...scopes } };
+    // v0.1.50: quyền ghi Kho — thiếu cũng KHÔNG làm ok=false (chỉ `write_missing`).
+    const write = hubWriteMissing ? MISSING_WRITE : FULL_WRITE;
+    hubLink = { ...hubLink, enabled: true, status: 'ok', last_ok_at: new Date().toISOString(), last_error: null, health: 'healthy', read_scopes: { ...scopes }, write_scopes: { ...write } };
     return {
       ok: true, error: null, error_code: null, latency_ms: 240,
       exposed_tools: ['mcp-58450__kho_tom_tat', 'mcp-58450__kho_search', 'mcp-58450__kho_find_by_id'], missing_tools: [],
-      read_scopes: { ...scopes }, read_missing: readMissing, write_tools: [], link: linkOut(hubLink),
+      read_scopes: { ...scopes }, read_missing: readMissing, write_tools: [],
+      write_scopes: { ...write }, write_missing: write.kho ? [] : [WRITE_MISSING_LABEL], link: linkOut(hubLink),
     };
   };
 
@@ -182,6 +204,7 @@ export function createMock(opts: P4McpOptions) {
         if (b.token) {
           hubTokenBad = b.token.includes('sai');
           hubScopesMissing = b.token.includes('thieu');
+          hubWriteMissing = b.token.includes('khongghi');
         }
         hubLink = {
           ...hubLink, configured: true, server_id: hubLink.server_id ?? 'mcp-genhub', endpoint: b.endpoint ?? hubLink.endpoint,
@@ -191,8 +214,9 @@ export function createMock(opts: P4McpOptions) {
         if (relink || b.enabled === false) hubLink = { ...hubLink, enabled: false, status: 'off' };
         // Đổi địa chỉ/token ⇒ quyền đọc đã kiểm không còn đúng cho tới khi Kiểm tra lại.
         if (relink) {
-          const { read_scopes: _rs, ...rest } = hubLink;
+          const { read_scopes: _rs, write_scopes: _ws, ...rest } = hubLink;
           void _rs;
+          void _ws;
           hubLink = rest;
         }
         return reply(200, linkOut(hubLink));
@@ -200,17 +224,63 @@ export function createMock(opts: P4McpOptions) {
       if (!hubLink.configured) return problem(409, 'HUB_LINK_NOT_CONFIGURED', 'Chưa nhập địa chỉ và token Gen-hub');
       return reply(200, hubTest());
     }
+    // v0.1.50 (F-81): đường ghi Kho duy nhất — Owner + PIN 'hub.write'. Web KHÔNG gọi trực tiếp: đề xuất Xác nhận rồi mới tới đây.
+    if (p === '/hub/kho/write' && m === 'POST') {
+      if (ctx.role !== 'owner') return problem(403, 'FORBIDDEN', 'Vai trò của bạn không có quyền thao tác này');
+      if (!pin(ctx, 'hub.write')) return true;
+      const b = body as Partial<KhoWriteReq>;
+      if (b.tool !== 'kho_create' && b.tool !== 'kho_update') return problem(403, 'HUB_TOOL_NOT_ALLOWED', 'Tool này không nằm trong phạm vi ghi của Gen');
+      const out = khoWrite({ proposal_id: String(b.proposal_id ?? ''), tool: b.tool, args: (b.args ?? {}) as Record<string, unknown>, permit: String(b.permit ?? '') });
+      return out.ok ? reply(200, { tool: b.tool, bang: out.bang, code: out.code }) : problem(out.status, out.code, out.title);
+    }
     return false;
   }
 
+  /**
+   * v0.1.50 (F-81): MỘT lần ghi Kho đã duyệt (như `hub_link.service.write_kho`): permit hợp lệ → liên kết bật → bộ ngắt đóng → token có
+   * quyền ghi Kho → ghi. Mọi lời gọi (kể cả lỗi) được đếm ở `khoCalls`. Không ghi gì ra ngoài, không giữ token / permit.
+   */
+  const khoWrite = (req: KhoWriteReq): KhoWriteOutcome => {
+    const note = (outcome: string, code: string | null = null) => khoCalls.push({ proposal_id: req.proposal_id, tool: req.tool, outcome, code });
+    const fail = (status: number, code: string, title: string): KhoWriteOutcome => {
+      note(code);
+      return { ok: false, status, code, title };
+    };
+    if (!req.permit.startsWith('permit-') || khoSim === 'permit') return fail(403, 'HUB_WRITE_PERMIT', 'Giấy phép ghi không hợp lệ hoặc đã quá 5 phút');
+    if (!hubLink.configured || !hubLink.enabled) return fail(409, 'HUB_LINK_OFF', 'Gen-hub đang tắt — Kiểm tra xanh ở Kết nối › Gen-hub trước');
+    if (hubBreakerOpen) return fail(503, 'HUB_BREAKER_OPEN', 'Gen-hub tạm không trả lời — thử lại sau 1 phút');
+    if (hubWriteMissing) return fail(409, 'HUB_WRITE_MISSING', 'Token Gen-hub chưa có quyền ghi Kho (kho_create, kho_update)');
+    if (khoSim === 'rejected') return fail(409, 'HUB_WRITE_REJECTED', 'Gen-hub từ chối bản ghi: trường chưa hợp lệ');
+    if (khoSim === 'uncertain') return fail(502, 'HUB_WRITE_UNCERTAIN', 'Không rõ Gen-hub đã ghi hay chưa');
+    const bang = req.tool === 'kho_create' ? (req.args.bang === 'Việc' ? 'Việc' : 'Phiên') : String(req.args.ma ?? '').startsWith('VIEC-') ? 'Việc' : 'Phiên';
+    const code = req.tool === 'kho_create' ? `${bang === 'Việc' ? 'VIEC' : 'PHIEN'}-${khoSeq[bang]++}` : String(req.args.ma ?? '') || null;
+    note('ok', code);
+    opts.onKhoWritten?.();
+    return { ok: true, code, bang };
+  };
+
   /** Hook e2e `POST /api/v1/__mock/p3/mcp/hubSim {scopes?:'full'|'missing', breaker?:bool}` (v0.1.49) — không qua token. */
   const hubSim = (b: unknown) => {
-    const body = (b ?? {}) as { scopes?: unknown; breaker?: unknown };
+    const body = (b ?? {}) as { scopes?: unknown; breaker?: unknown; write?: unknown; kho?: unknown; link?: unknown };
     if (body.scopes === 'missing') hubScopesMissing = true;
     if (body.scopes === 'full') hubScopesMissing = false;
     if (typeof body.breaker === 'boolean') hubBreakerOpen = body.breaker;
-    return { scopes: hubScopesMissing ? 'missing' : 'full', breaker: hubBreakerOpen };
+    // v0.1.50: `write` = quyền ghi Kho của token; `kho` = lần ghi tiếp theo thành công / lỗi; `link:'on'` = nối sẵn + Kiểm tra xanh.
+    if (body.write === 'missing') hubWriteMissing = true;
+    if (body.write === 'ok') hubWriteMissing = false;
+    if (body.kho === 'ok' || body.kho === 'uncertain' || body.kho === 'rejected' || body.kho === 'permit') khoSim = body.kho;
+    if (body.link === 'on') {
+      hubLink = {
+        ...hubLink, configured: true, server_id: hubLink.server_id ?? 'mcp-genhub', endpoint: 'https://hub.genos.top/mcp', has_token: true,
+        allow_public_network: true, token_expires_at: new Date(Date.now() + 80 * 86_400_000).toISOString(), days_left: 80,
+      };
+      hubTest();
+    }
+    return { scopes: hubScopesMissing ? 'missing' : 'full', breaker: hubBreakerOpen, write: hubWriteMissing ? 'missing' : 'ok', kho: khoSim };
   };
+
+  /** Hook e2e `POST /api/v1/__mock/p3/mcp/khoCalls {}` → {calls: số lời gọi `/hub/kho/write` kể cả lỗi, writes: các lần ghi thành công}. */
+  const khoCallsHook = () => ({ calls: khoCalls.length, writes: khoCalls.filter((c) => c.outcome === 'ok'), log: khoCalls });
 
   function handle(ctx: P2Ctx): boolean {
     const { method: m, path: p, url, body, reply, problem } = ctx;
@@ -380,6 +450,9 @@ export function createMock(opts: P4McpOptions) {
       hubLink: () => hubLink,
       hubTest,
       hubSim,
+      /** v0.1.50 — cho `mock-gen-v0150.ts` (ghi Kho đã duyệt) và e2e (đếm lời gọi). */
+      khoWrite,
+      khoCalls: khoCallsHook,
     } as Record<string, (...args: never[]) => unknown>,
     dispose: () => {},
   };

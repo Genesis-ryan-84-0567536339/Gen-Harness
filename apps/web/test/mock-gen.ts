@@ -15,6 +15,8 @@
  *                                    mock-social `createWrite` (409 SOCIAL_HALTED / SOCIAL_WRITE_LOCKED, 429 SOCIAL_WRITE_LIMIT…) →
  *                                    `result {type:'social_write', id: job_id, screen:'social', status}`. Chưa có tài khoản đăng nhập
  *                                    → Gen chỉ mở trang Tài khoản mạng xã hội.
+ *   "nhớ giúp" / "ghi nhớ"         → v0.1.50 (F-81): thẻ `memory_note`; "… vào Kho" → thẻ `kho_create`/`kho_update` (CẦN PIN) — kịch bản
+ *                                    + xác nhận nằm ở `mock-gen-v0150.ts` (qua `opts.extra`), `/gen/memory` cũng ở đó.
  *
  * Hook e2e (v0.1.27): `POST /api/v1/__mock/p3/gen/fireReminders` = worker `task_reminder_scan` tới giờ — mỗi
  * nhắc việc đã xác nhận → chuông `task.reminder` cho các Owner (một lần).
@@ -29,6 +31,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import type { GenBriefingSection, GenMessage, GenProposal, GenRating, GenStep } from '../../../packages/contracts/src/gen';
+import type { GenExtra } from './mock-gen-v0150';
 import type { WriteOutcome, WriteRequest } from './mock-social';
 import type { DraftDetail } from '../../../packages/contracts/src/p3-core';
 import { BAO, GROUP_TP } from './mock-p3-core';
@@ -51,6 +54,8 @@ export interface MockGenOptions {
     writeContext: () => { account_id: string; account_label: string; gate: 'open' | 'locked' } | null;
     createWrite: (req: WriteRequest) => WriteOutcome;
   };
+  /** v0.1.50 (F-81, QD-18): kịch bản + xác nhận cho đề xuất Ghi nhớ / Ghi vào Kho (mock-gen-v0150.ts). */
+  extra?: GenExtra;
 }
 
 interface Turn {
@@ -175,8 +180,10 @@ export function socialWriteProposal(
   };
 }
 
-export function script(q: string, write?: { account_id: string; account_label: string; gate: 'open' | 'locked' } | null): GenStep[] {
+export function script(q: string, write?: { account_id: string; account_label: string; gate: 'open' | 'locked' } | null, extra?: GenExtra): GenStep[] {
   const t = q.toLowerCase();
+  const added = extra?.script(q);
+  if (added) return added;
   if (/trả lời bình luận|nhắn tin facebook/.test(t)) {
     if (!write) {
       return [
@@ -419,7 +426,7 @@ export function createMock(opts: MockGenOptions) {
       const turn: Turn = { turn_id: randomUUID(), conversation_id: conv.id, status: 'running', steps: [] };
       conv.messages.push({ id: randomUUID(), role: 'user', turn_id: turn.turn_id, content: { text }, created_at: now });
       turns.set(turn.turn_id, turn);
-      run(turn, conv, script(text, opts.social?.writeContext()));
+      run(turn, conv, script(text, opts.social?.writeContext(), opts.extra));
       return reply(202, { turn_id: turn.turn_id, conversation_id: conv.id });
     }
     if (seg[1] === 'turns' && seg.length === 3 && m === 'GET') {
@@ -434,6 +441,15 @@ export function createMock(opts: MockGenOptions) {
       const pr = proposals.get(seg[2]);
       if (!pr) return problem(404, 'NOT_FOUND', 'Đề xuất (có thể đã hết hạn) không tồn tại hoặc nằm ngoài phạm vi của bạn');
       if (pr.status !== 'pending') return problem(409, 'GEN_PROPOSAL_DECIDED', 'Đề xuất này đã được xác nhận hoặc đã huỷ');
+      // v0.1.50: Ghi nhớ / Ghi vào Kho Ryan — mock-gen-v0150.ts xử lý (PIN 'hub.write' + một lời gọi ghi duy nhất).
+      if (seg[3] === 'confirm' && opts.extra) {
+        const r = opts.extra.confirm({ ...pr, fields: pr.fields } as GenProposal, ctx);
+        if (r) {
+          if ('error' in r) return problem(r.error.status, r.error.code, r.error.title, r.error.operation ? { detail: { operation: r.error.operation } } : r.error.errors ? { errors: r.error.errors } : undefined);
+          proposals.set(pr.id, r.proposal);
+          return reply(200, r.proposal);
+        }
+      }
       // Như API thật: thao tác nhạy cảm (nháp tin) → 423, web hỏi PIN rồi gửi lại.
       if (seg[3] === 'confirm' && pr.requires_pin && ctx.needPin()) {
         return problem(423, 'PIN_REQUIRED', 'Thao tác này cần nhập mã PIN', { detail: { operation: pr.type === 'social_reply' || pr.type === 'social_dm' ? 'social.write' : 'draft.create' } });

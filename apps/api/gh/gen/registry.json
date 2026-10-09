@@ -264,6 +264,17 @@
       }
     },
     {
+      "id": "system.brain.memory",
+      "screen": "system",
+      "label": "Thẻ \"Gen nhớ\"",
+      "description": "Các quy ước, sở thích Sếp đã xác nhận để Gen nhớ (tối đa 30 ghi chú): xem, sửa tại chỗ, xoá",
+      "dynamic": null,
+      "params": {
+        "tab": "brain"
+      },
+      "permission": "system.manage"
+    },
+    {
       "id": "system.brain.chain",
       "screen": "system",
       "label": "Chuỗi chuyển hướng",

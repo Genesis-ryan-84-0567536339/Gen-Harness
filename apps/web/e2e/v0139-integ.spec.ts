@@ -116,7 +116,7 @@ test.describe('v0.1.39 · nghiệm thu sau gộp', () => {
   test('Việc Sếp cần làm: token sai → Lỗi + câu thân thiện + Chi tiết kỹ thuật HUB_TOKEN_REJECTED; tiến độ x/5', async ({ page }) => {
     await loginAsOwner(page);
     await page.goto('/guide/viec-sep');
-    await expect(page.locator('.boss-row')).toHaveCount(8); // v0.1.47: + dòng 8 "Facebook trả lời" (không bắt buộc)
+    await expect(page.locator('.boss-row')).toHaveCount(9); // v0.1.47: + dòng 8 "Facebook trả lời"; v0.1.50: + dòng 9 "Gen ghi Kho" (đều không bắt buộc)
     await expect(page.getByText('Đã đạt 0/6 dòng bắt buộc')).toBeVisible();
     for (const name of ['Nối Gen-hub', 'Kết nối Facebook', 'Google (Antigravity) — hai tài khoản', 'Claude Code CLI', 'Jev']) {
       await expect(row(page, name)).toBeVisible();

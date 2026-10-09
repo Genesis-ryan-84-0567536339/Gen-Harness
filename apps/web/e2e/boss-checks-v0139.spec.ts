@@ -25,7 +25,7 @@ test.describe('Việc Sếp cần làm (v0.1.39)', () => {
     await page.setViewportSize({ width: 1440, height: 900 });
   });
 
-  test('Owner: thẻ ở Hướng dẫn thiết lập → 8 dòng; Gen-hub PIN một lần → Đạt; Facebook Đọc ngay → Đang chạy… → Đạt', async ({ page }) => {
+  test('Owner: thẻ ở Hướng dẫn thiết lập → 9 dòng; Gen-hub PIN một lần → Đạt; Facebook Đọc ngay → Đang chạy… → Đạt', async ({ page }) => {
     test.setTimeout(90_000);
     await p3Hook(page.request, 'social', 'seedActive', { label: 'Facebook của Sếp' });
     let pinDialogs = 0;
@@ -39,7 +39,7 @@ test.describe('Việc Sếp cần làm (v0.1.39)', () => {
     await expect(card).toContainText('Đã đạt 0/6 dòng bắt buộc');
     await card.click();
     await expect(page).toHaveURL(/\/guide\/viec-sep$/);
-    await expect(page.locator('.boss-row')).toHaveCount(8);
+    await expect(page.locator('.boss-row')).toHaveCount(9);
     await expect(row(page, 'Jev')).toContainText('Không bắt buộc');
     await expect(page.getByText('Kết quả được lưu lại — Claude tự đọc, Sếp không cần chụp màn hình.')).toBeVisible();
 
