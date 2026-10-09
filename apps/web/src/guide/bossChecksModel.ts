@@ -107,6 +107,34 @@ export function hubScopesHint(items: readonly HubScopeItem[]): string | null {
   return `Muốn Gen đọc cả ${missing.join(', ')}: vào Gen-hub tick thêm quyền đọc cho token của Gen-Harness rồi bấm Kiểm tra lại. Không tick cũng được — Gen vẫn chạy bình thường.`;
 }
 
+/**
+ * v0.1.50 (F-81, QD-18): dòng phụ của hàng Gen-hub — quyền GHI Kho (không bắt buộc) lấy từ `results.hub.detail.write_scopes`
+ * ({kho: boolean}). Vắng / không phải boolean (máy chủ cũ, bản ghi cũ) ⇒ `null` (ẩn dòng, không đoán).
+ */
+export function hubWriteScopeOf(c: Pick<BossCheck, 'detail'> | null | undefined): boolean | null {
+  const raw = c?.detail?.write_scopes;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const v = (raw as Record<string, unknown>).kho;
+  return typeof v === 'boolean' ? v : null;
+}
+
+/** "Quyền ghi Kho (không bắt buộc): Có" / "…: Chưa". */
+export function hubWriteLine(has: boolean): string {
+  return `Quyền ghi Kho (không bắt buộc): ${has ? 'Có' : 'Chưa'}`;
+}
+
+/** Chưa có quyền ghi Kho ⇒ hướng dẫn tick (không bắt buộc: không tick Gen vẫn đọc Kho bình thường); đã có ⇒ null. */
+export function hubWriteHint(has: boolean): string | null {
+  if (has) return null;
+  return 'Muốn Gen ghi được Kho: vào Gen-hub tick quyền kho_create, kho_update cho token của Gen-Harness rồi bấm Kiểm tra lại. Không tick cũng được — Gen vẫn đọc Kho bình thường.';
+}
+
+/** Dòng 9 "Gen ghi Kho" (không bắt buộc, không có nút kiểm): 2 bước để máy chủ ghi 'pass' sau lần ghi Kho thật đầu tiên. */
+export const KHO_WRITE_STEPS: readonly string[] = [
+  'Trong Gen-hub, tick quyền kho_create, kho_update cho token của Gen-Harness rồi bấm Kiểm tra ở dòng 1 (hoặc Kết nối › Gen-hub)',
+  'Duyệt đề xuất PHIEN đầu tiên của Gen (Gen đề xuất ghi Phiên mỗi bản phát hành): bấm Xác nhận và ghi Kho, nhập mã PIN, đợi “Đã ghi vào Kho: PHIEN-…”',
+];
+
 /** Dòng 8 (không bắt buộc): các bước thử gửi một câu trả lời bình luận thật bằng Gen. */
 export const FACEBOOK_REPLY_STEPS: readonly string[] = [
   'Hỏi Gen: “đọc Facebook”',

@@ -117,6 +117,12 @@ export type HubLinkStatus = 'off' | 'ok' | 'expiring' | 'expired' | 'error';
 /** v0.1.49 (QD-16): quyền ĐỌC thêm của token Gen-hub (tuỳ chọn) — Gen chỉ đọc, không bao giờ ghi. */
 export type HubReadScopes = { calendar: boolean; mail: boolean; tasks: boolean; drive: boolean };
 
+/**
+ * v0.1.50 (F-81, QD-18): quyền GHI Kho của token Gen-hub (tuỳ chọn): `kho` = token có cả `kho_create` và `kho_update`. Gen KHÔNG
+ * tự ghi — chỉ khi Sếp bấm Xác nhận + nhập mã PIN trên thẻ đề xuất "Ghi vào Kho Ryan".
+ */
+export type HubWriteScopes = { kho: boolean };
+
 export interface HubLink {
   configured: boolean;
   enabled: boolean;
@@ -138,6 +144,10 @@ export interface HubLink {
   read_scopes?: HubReadScopes | null;
   /** v0.1.49 (F-83): bộ ngắt riêng của Gen-hub — `open` = 3 lỗi liên tiếp, tạm dừng gọi 60 giây. */
   breaker?: { open: boolean; retry_in_s?: number | null };
+  /**
+   * v0.1.50: quyền ghi Kho thấy ở lần Kiểm tra xanh gần nhất. `null` / vắng (máy chủ cũ) ⇒ "Chưa kiểm" — cùng quy tắc `read_scopes`.
+   */
+  write_scopes?: HubWriteScopes | null;
 }
 
 /** `PATCH /hub/link` — Owner + PIN `hub.link`. `enabled` chỉ nhận `false` (bật = bấm Kiểm tra). */
@@ -163,6 +173,10 @@ export interface HubLinkTestResult {
   read_missing?: string[];
   /** v0.1.49: tool GHI mà token đang có (nếu có) — Gen không dùng, nhưng nên tắt cho an toàn. */
   write_tools?: string[];
+  /** v0.1.50: quyền ghi Kho của token; thiếu quyền ghi KHÔNG làm `ok=false`. */
+  write_scopes?: HubWriteScopes;
+  /** v0.1.50: nhãn quyền ghi còn thiếu (vd 'ghi Kho (kho_create, kho_update)'); rỗng = đủ. */
+  write_missing?: string[];
   link: HubLink;
 }
 

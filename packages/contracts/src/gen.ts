@@ -67,7 +67,17 @@ export interface Suggestion {
  * `POST /gen/proposals/{id}/confirm` và server thực hiện nhân danh người đó qua endpoint sẵn có (Action Log
  * actor=user, via=gen). `requires_pin` = mục tiêu registry nhạy cảm → API trả 423, client tự hỏi PIN rồi gửi lại.
  */
-export type GenProposalType = 'draft_message' | 'reminder' | 'assign' | 'social_reply' | 'social_dm';
+export type GenProposalType =
+  | 'draft_message'
+  | 'reminder'
+  | 'assign'
+  | 'social_reply'
+  | 'social_dm'
+  /** v0.1.50 (F-81, QD-18): Gen đề xuất GHI NHỚ một quy ước / sở thích của Sếp (Gen nhớ) — không cần PIN, chỉ Owner. */
+  | 'memory_note'
+  /** v0.1.50 (F-81, QD-18): Gen đề xuất TẠO / SỬA một bản ghi Phiên · Việc ở Kho Ryan qua Gen-hub — Xác nhận + mã PIN, chỉ Owner. */
+  | 'kho_create'
+  | 'kho_update';
 export type GenProposalStatus = 'pending' | 'confirmed' | 'cancelled';
 
 export interface GenSubjectRef {
@@ -107,13 +117,61 @@ export interface SocialWriteFields {
   text: string;
 }
 
+/**
+ * v0.1.50 (F-81): đề xuất GHI NHỚ. `text` ≤ 280 ký tự, `reason` ≤ 200 (rỗng nếu Gen không nêu lý do). Gen KHÔNG tự ghi: chỉ khi
+ * Sếp bấm Xác nhận máy chủ mới lưu ghi chú vào "Gen nhớ" (Cài đặt › Bộ não AI). Không cần mã PIN.
+ */
+export interface MemoryNoteFields {
+  text: string;
+  reason: string;
+}
+
+/** Bảng của Kho Ryan mà Gen được đề xuất ghi (v0.1.50): chỉ Phiên và Việc. */
+export type KhoBang = 'Phiên' | 'Việc';
+
+/**
+ * v0.1.50 (F-81, QD-18): đề xuất TẠO bản ghi Kho Ryan. `record` = các trường Kho (tên trường tiếng Việt, xem `KHO_FIELDS`) →
+ * chuỗi; bảng cố định, KHÔNG sửa được trên thẻ. Chỉ khi Sếp bấm Xác nhận + nhập mã PIN, máy chủ mới ghi qua Gen-hub.
+ */
+export interface KhoCreateFields {
+  bang: KhoBang;
+  record: Record<string, string>;
+}
+
+/** v0.1.50: đề xuất SỬA bản ghi đã có (`ma` = 'PHIEN-n' | 'VIEC-n', cố định); `record` chỉ gồm trường sẽ đổi. */
+export interface KhoUpdateFields {
+  ma: string;
+  record: Record<string, string>;
+}
+
+/**
+ * v0.1.50 — trường Kho Ryan Gen được ghi, THEO THỨ TỰ hiển thị. Nguồn sự thật: `apps/api/gh/hub_link/kho_write.py`
+ * (`KHO_FIELDS`); bản sao này được `kho-write-proposal-v0150.test.tsx` so khớp với tệp đó.
+ */
+export const KHO_FIELDS: Record<KhoBang, readonly string[]> = {
+  Phiên: ['Chủ đề', 'Ngày', 'Đã chốt', 'Đang bàn', 'Việc tiếp', 'Cảnh báo'],
+  Việc: ['Tiêu đề', 'Trạng thái', 'Ưu tiên', 'Hạn', 'Link Issue/PR', 'Ngày bắt đầu', 'Ngày xong'],
+};
+/** Trường bắt buộc khi tạo bản ghi (dấu * ở máy chủ). */
+export const KHO_REQUIRED: Record<KhoBang, string> = { Phiên: 'Chủ đề', Việc: 'Tiêu đề' };
+/** Trường kiểu ngày `YYYY-MM-DD` (ô chọn ngày khi Sửa). */
+export const KHO_DATE_FIELDS: Record<KhoBang, readonly string[]> = { Phiên: ['Ngày'], Việc: ['Hạn', 'Ngày bắt đầu', 'Ngày xong'] };
+export const KHO_STATUS = ['Chờ', 'Đang làm', 'Chờ duyệt', 'Xong'] as const;
+export const KHO_PRIORITY = ['P1', 'P2', 'P3'] as const;
+
 export interface GenProposalResult {
-  /** v0.1.47: `social_write` — `id` = job_id của việc gửi; web theo dõi qua `GET /social/jobs/{id}`. */
-  type: 'draft' | 'task' | 'inbox_item' | 'social_write';
+  /**
+   * v0.1.47: `social_write` — `id` = job_id của việc gửi; web theo dõi qua `GET /social/jobs/{id}`. v0.1.50: `memory_note` —
+   * `id` = id ghi chú Gen nhớ (`screen: 'system'`); `kho_record` — đã ghi vào Kho Ryan: `code` = mã bản ghi ('PHIEN-12'; null
+   * khi Gen-hub không trả mã), `bang`, `id` = null, `screen` = null.
+   */
+  type: 'draft' | 'task' | 'inbox_item' | 'social_write' | 'memory_note' | 'kho_record';
   id: string | null;
   code?: string | null;
-  /** Màn xem kết quả (khoá GEN_SCREENS). */
-  screen: string;
+  /** Màn xem kết quả (khoá GEN_SCREENS); v0.1.50: `null` với `kho_record`. */
+  screen: string | null;
+  /** v0.1.50: chỉ với `kho_record` — bảng đã ghi. */
+  bang?: KhoBang;
   /**
    * v0.1.43: chỉ với `type: 'draft'` — nháp có nơi gửi (target) nên duyệt ở Bàn làm việc sẽ gửi đi thật. Hiện API chỉ
    * gắn nơi gửi khi đối tượng là NHÓM; thiếu/false ⇒ web không ghi "Duyệt & gửi".
@@ -130,6 +188,8 @@ interface GenProposalBase {
   /**
    * Nhãn hiển thị: `user` (người được giao), `item` (việc/mục), `subject` (đối tượng). v0.1.47 (gửi Facebook): `account`
    * (tên tài khoản), `target` (bình luận/người nhận), `write_gate` (`open`|`locked`), `suspicious` (`'1'` = mục có dấu hiệu lừa đảo).
+   * v0.1.50: `memory_note` có `count` ('n/30'); `kho_create`/`kho_update` có `bang`, `target` (mã bản ghi), `write_scope`
+   * (`ok`|`missing` — token Gen-hub đã được cấp quyền ghi Kho chưa) và, với `kho_update`, `cur:<tên trường>` = giá trị hiện tại.
    */
   labels: Record<string, string>;
   /** Mục tiêu registry gắn với đề xuất (quyền + cờ nhạy cảm lấy từ đây). */
@@ -144,7 +204,10 @@ export type GenProposal =
   | (GenProposalBase & { type: 'reminder'; fields: ReminderFields })
   | (GenProposalBase & { type: 'assign'; fields: AssignFields })
   | (GenProposalBase & { type: 'social_reply'; fields: SocialWriteFields })
-  | (GenProposalBase & { type: 'social_dm'; fields: SocialWriteFields });
+  | (GenProposalBase & { type: 'social_dm'; fields: SocialWriteFields })
+  | (GenProposalBase & { type: 'memory_note'; fields: MemoryNoteFields })
+  | (GenProposalBase & { type: 'kho_create'; fields: KhoCreateFields })
+  | (GenProposalBase & { type: 'kho_update'; fields: KhoUpdateFields });
 
 /** Trường người dùng được sửa trên thẻ trước khi xác nhận (còn lại giữ nguyên như lúc đề xuất). */
 export const GEN_PROPOSAL_EDITABLE: Record<GenProposalType, readonly string[]> = {
@@ -153,6 +216,10 @@ export const GEN_PROPOSAL_EDITABLE: Record<GenProposalType, readonly string[]> =
   assign: ['user_id'],
   social_reply: ['text'],
   social_dm: ['text'],
+  // v0.1.50: ghi nhớ sửa được cả hai ô; ghi Kho chỉ sửa `record` (bảng / mã bản ghi khoá cứng).
+  memory_note: ['text', 'reason'],
+  kho_create: ['record'],
+  kho_update: ['record'],
 };
 
 export interface GenAssignee {
@@ -280,6 +347,35 @@ export interface GenSettings {
 
 export type TourOutcome = 'done' | 'skipped' | 'target_missing';
 
+/**
+ * v0.1.50 (F-81, QD-18) — "Gen nhớ" (Cài đặt › Bộ não AI): quy ước, sở thích Sếp đã xác nhận; Gen đọc khi trả lời Sếp và khi
+ * soạn Bản tin. CHỈ Owner (vai trò khác 403), không cần PIN. Ghi chú mới chỉ vào qua đề xuất `memory_note` + Xác nhận;
+ * Sếp sửa / xoá trực tiếp ở đây (sửa ⇒ `source` thành `owner`).
+ */
+export interface GenMemoryNote {
+  id: string;
+  text: string;
+  reason: string | null;
+  /** `gen` = Gen đề xuất, Sếp xác nhận · `owner` = Sếp đã sửa. */
+  source: 'gen' | 'owner';
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GenMemoryList {
+  items: GenMemoryNote[];
+  /** Số ghi chú tối đa (30). */
+  limit: number;
+  /** Độ dài tối đa của `text` (280) và `reason` (200). */
+  max_len: number;
+  reason_max: number;
+}
+
+export interface GenMemoryPatchBody {
+  text?: string;
+  reason?: string | null;
+}
+
 export function genEndpoints(r: ApiClient['request']) {
   return {
     gen: {
@@ -304,6 +400,13 @@ export function genEndpoints(r: ApiClient['request']) {
       feedback: (body: { conversation_id: string; turn_id: string; rating: GenRating }) =>
         r<{ turn_id: string; rating: GenRating; kind: 'reply' | 'briefing' }>('/gen/feedback', { method: 'PUT', body }),
       clearFeedback: (turnId: string) => r<void>(`/gen/feedback/${encodeURIComponent(turnId)}`, { method: 'DELETE' }),
+      /** v0.1.50 (F-81): Gen nhớ — chỉ Owner. 409 GEN_MEMORY_FULL / GEN_MEMORY_DUPLICATE, 422 field_errors, 404. */
+      memory: {
+        list: (signal?: AbortSignal) => r<GenMemoryList>('/gen/memory', { signal }),
+        update: (id: string, body: GenMemoryPatchBody) =>
+          r<GenMemoryNote>(`/gen/memory/${encodeURIComponent(id)}`, { method: 'PATCH', body }),
+        remove: (id: string) => r<void>(`/gen/memory/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+      },
     },
   };
 }
