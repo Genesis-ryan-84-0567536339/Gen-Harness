@@ -81,6 +81,8 @@ export const GEN_TARGETS: GenTarget[] = [
   { id: 'system.channels.facebook', screen: 'connections', label: 'Thẻ Facebook', description: 'Mở trang Tài khoản mạng xã hội (chỉ Owner)', permission: 'roles.manage' },
   { id: 'connections.brain', screen: 'connections', label: 'Thẻ "Bộ não AI"', description: 'Trạng thái bộ não AI (model, khoá API, tài khoản CLI) và nút mở Bộ não AI ở Cài đặt' },
   { id: 'system.brain.quota', screen: 'system', label: 'Hạn mức theo model', description: 'Bảng dùng trong ngày / còn lại của từng model', params: { tab: 'brain' } },
+  // v0.1.50 (F-81, QD-18): "Gen nhớ" — quy ước, sở thích Sếp đã xác nhận (chỉ Owner thấy thẻ).
+  { id: 'system.brain.memory', screen: 'system', label: 'Thẻ "Gen nhớ"', description: 'Các quy ước, sở thích Sếp đã xác nhận để Gen nhớ (tối đa 30 ghi chú): xem, sửa tại chỗ, xoá', params: { tab: 'brain' }, permission: 'system.manage' },
   { id: 'system.brain.chain', screen: 'system', label: 'Chuỗi chuyển hướng', description: 'Thứ tự nhà cung cấp model khi một nơi lỗi', params: { tab: 'brain' } },
   { id: 'system.brain.open_api', screen: 'system', label: 'Nút "Mở API & Model"', description: 'Sang màn thêm nhà cung cấp, khoá API, gán model', params: { tab: 'brain' } },
   { id: 'system.brain.jev', screen: 'system', label: 'Thẻ Jev (System One)', description: 'Cấu hình nguồn model quyết định nhanh Jev', params: { tab: 'brain' } },

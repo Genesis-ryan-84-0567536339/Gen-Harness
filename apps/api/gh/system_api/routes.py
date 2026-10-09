@@ -925,7 +925,8 @@ BOUNDARY_LABELS: dict[str, str] = {
     "observe_external_market": "Quan sát nhóm thị trường bên ngoài",
     "auto_personnel_decisions": "Hệ thống tự ra quyết định nhân sự",
     "approval_gate": "Gửi ra ngoài / vượt ngưỡng tiền / liên quan nhân sự luôn chờ duyệt",
-    "mcp_write_requires_approval": "Tool MCP loại ghi qua duyệt trước khi chạy",
+    "mcp_write_requires_approval": ("Tool MCP loại ghi qua duyệt trước khi chạy (ngoại lệ duy nhất: Ghi vào Kho "
+                                    "Ryan sau khi Sếp Xác nhận + nhập mã PIN)"),
 }
 
 

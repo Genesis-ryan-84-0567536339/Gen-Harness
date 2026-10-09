@@ -153,11 +153,12 @@ export const GUIDE: GuideItem[] = [
   {
     n: 14,
     title: 'Nối Gen-hub',
-    why: 'Để Gen đọc Kho tri thức của Sếp trên Gen-hub (chỉ đọc) — trả lời có căn cứ từ việc, quyết định, bài học đã ghi.',
+    why: 'Để Gen đọc Kho tri thức của Sếp trên Gen-hub — trả lời có căn cứ từ việc, quyết định, bài học đã ghi. Gen chỉ ghi Kho (Phiên, Việc) khi Sếp bấm Xác nhận và nhập mã PIN.',
     prepare: ['Tài khoản Gen-hub của Sếp.', 'Địa chỉ Gen-hub (ví dụ https://hub.genos.top/mcp).'],
     steps: [
-      'Trong Gen-hub: tạo trợ lý mới, chọn thẻ truy cập (token) 90 ngày, chỉ bật quyền ĐỌC Kho.',
-      'Tuỳ chọn: tick thêm quyền ĐỌC lịch, đọc mail, đọc việc (Google Tasks) và tìm Drive để bản tin Gen có lịch hôm nay, mail cần trả lời, việc đang mở — KHÔNG bật quyền ghi.',
+      'Trong Gen-hub: tạo trợ lý mới, chọn thẻ truy cập (token) 90 ngày, bật quyền ĐỌC Kho.',
+      'Tuỳ chọn: tick thêm quyền ĐỌC lịch, đọc mail, đọc việc (Google Tasks) và tìm Drive để bản tin Gen có lịch hôm nay, mail cần trả lời, việc đang mở — KHÔNG bật quyền ghi lịch, mail hay Drive.',
+      'Tuỳ chọn: tick kho_create, kho_update nếu muốn Gen ghi Phiên, Việc vào Kho — mỗi lần ghi Sếp vẫn bấm Xác nhận và nhập mã PIN.',
       'Chép token vừa tạo.',
       'Bấm "Mở thẻ Gen-hub" bên dưới, dán địa chỉ và token vào thẻ Gen-hub.',
       'Bấm "Lưu & kiểm tra" (nhập PIN khi được hỏi) và chờ báo Đã nối Kho.',

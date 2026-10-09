@@ -24,7 +24,11 @@ from gh.gen import registry
 
 MAX_BYTES = 4000
 MAX_ROWS = 20
-ID_KEYS = ("id", "code", "n", "person_id", "draft_id", "item_id", "subject_id")
+# v0.1.50 (F-81): "Mã ID" là khoá mã bản ghi Kho (PHIEN-12, VIEC-3) trong kết quả hub.kho_* — đề xuất kho_update chỉ
+# được dùng mã đã xuất hiện ở đây (proposals.id_errors).
+ID_KEYS = ("id", "code", "n", "person_id", "draft_id", "item_id", "subject_id", "Mã ID")
+# Mã Phiên / Việc nằm trong CHỮ của kết quả Kho (Kho trả `content[].text`): cũng được coi là mã đã thấy.
+KHO_CODE_RE = re.compile(r"\b(?:PHIEN|VIEC)-\d{1,6}\b")
 
 
 @dataclass(frozen=True)
@@ -152,15 +156,24 @@ class ToolResult:
     error: str | None = None
 
 
-def collect_ids(data: Any, out: set[str]) -> None:
+def collect_ids(data: Any, out: set[str], parse_text: bool = False, depth: int = 0) -> None:
+    if depth > 8:
+        return
     if isinstance(data, dict):
         for k, v in data.items():
             if k in ID_KEYS and isinstance(v, str | int) and not isinstance(v, bool):
                 out.add(str(v))
-            collect_ids(v, out)
+            collect_ids(v, out, parse_text, depth + 1)
     elif isinstance(data, list):
         for v in data:
-            collect_ids(v, out)
+            collect_ids(v, out, parse_text, depth + 1)
+    elif parse_text and isinstance(data, str) and data[:1] in ("{", "[") and len(data) <= 20000:
+        # Chỉ kết quả Kho (hub.kho_*): Kho gói JSON trong `content[].text` — đọc vào để thấy mã bản ghi. Các tool khác
+        # KHÔNG làm vậy (chữ do khách viết không được tự khai id).
+        try:
+            collect_ids(orjson.loads(data), out, parse_text, depth + 1)
+        except orjson.JSONDecodeError:
+            return
 
 
 def _shrink(data: Any, rows: int, text_len: int) -> Any:
@@ -271,7 +284,10 @@ class ToolRunner:
             return self._fail(e.code, str(e))
         small, raw = compact(data)
         ids: set[str] = set()
-        collect_ids(small if small is not None else data, ids)
+        kho = tool.name.startswith("hub.kho_")
+        collect_ids(small if small is not None else data, ids, parse_text=kho)
+        if kho:
+            ids.update(KHO_CODE_RE.findall(raw))
         self.seen_ids |= ids
         return ToolResult(ok=True, data=small, text=raw, ids=ids)
 

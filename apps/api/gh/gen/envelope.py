@@ -10,6 +10,8 @@ from typing import Annotated, Any, Literal
 import orjson
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
+from gh.hub_link import kho_write
+
 DATA_TOOL_NAMES = ("overview.summary", "queue.list", "draft.list", "draft.get", "profile.search", "profile.get",
                    "opportunity.list", "people.care", "audit.list", "system.health", "guide.list", "screens.list",
                    "task.list", "staff.list", "refinery.summary", "hub.kho_summary", "hub.kho_search", "hub.kho_get",
@@ -148,12 +150,47 @@ class ProposeSocialDm(_M):
     fields: SocialWriteFields
 
 
+class MemoryNoteFields(_M):
+    """v0.1.50 (QD-18): Gen nhớ — một quy ước / sở thích ổn định của Sếp (≤ 280 ký tự) + lý do (≤ 200)."""
+    text: str = Field(min_length=1, max_length=280)
+    reason: str = Field(min_length=1, max_length=200)
+
+
+class ProposeMemoryNote(_M):
+    type: Literal["memory_note"]
+    fields: MemoryNoteFields
+
+
+class KhoCreateFields(_M):
+    """v0.1.50 (F-81): tạo bản ghi Phiên / Việc ở Kho Ryan — trường hợp lệ: gh.hub_link.kho_write (server kiểm lại)."""
+    bang: Literal["Phiên", "Việc"]
+    record: dict[str, str] = Field(max_length=8)
+
+
+class KhoUpdateFields(_M):
+    """v0.1.50 (F-81): sửa bản ghi Kho — mã PHIEN-n / VIEC-n PHẢI có trong kết quả hub.kho_* của lượt này."""
+    ma: str = Field(pattern=kho_write.MA_RE, max_length=16)
+    record: dict[str, str] = Field(min_length=1, max_length=8)
+
+
+class ProposeKhoCreate(_M):
+    type: Literal["kho_create"]
+    fields: KhoCreateFields
+
+
+class ProposeKhoUpdate(_M):
+    type: Literal["kho_update"]
+    fields: KhoUpdateFields
+
+
 ProposalIn = Annotated[
-    ProposeDraft | ProposeReminder | ProposeAssign | ProposeSocialReply | ProposeSocialDm,
+    ProposeDraft | ProposeReminder | ProposeAssign | ProposeSocialReply | ProposeSocialDm | ProposeMemoryNote
+    | ProposeKhoCreate | ProposeKhoUpdate,
     Field(discriminator="type")]
 PROPOSAL_FIELDS: dict[str, type[_M]] = {"draft_message": DraftMessageFields, "reminder": ReminderFields,
                                         "assign": AssignFields, "social_reply": SocialWriteFields,
-                                        "social_dm": SocialWriteFields}
+                                        "social_dm": SocialWriteFields, "memory_note": MemoryNoteFields,
+                                        "kho_create": KhoCreateFields, "kho_update": KhoUpdateFields}
 
 
 class Propose(_M):

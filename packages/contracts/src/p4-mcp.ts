@@ -117,6 +117,13 @@ export type HubLinkStatus = 'off' | 'ok' | 'expiring' | 'expired' | 'error';
 /** v0.1.49 (QD-16): quyền ĐỌC thêm của token Gen-hub (tuỳ chọn) — Gen chỉ đọc, không bao giờ ghi. */
 export type HubReadScopes = { calendar: boolean; mail: boolean; tasks: boolean; drive: boolean };
 
+/**
+ * v0.1.50 (F-81, QD-18): quyền GHI Kho của token Gen-hub (tuỳ chọn), THEO TỪNG tool: `kho_create`, `kho_update` (tool có trên Gen-hub,
+ * đang mở và đã cấp cho Gen); `kho` = có cả hai (giữ cho bên đọc cũ). Máy chủ cũ chỉ gửi `kho` ⇒ hai dòng theo `kho`. Gen KHÔNG tự
+ * ghi — chỉ khi Sếp bấm Xác nhận + nhập mã PIN trên thẻ đề xuất "Ghi vào Kho Ryan".
+ */
+export type HubWriteScopes = { kho: boolean; kho_create?: boolean; kho_update?: boolean };
+
 export interface HubLink {
   configured: boolean;
   enabled: boolean;
@@ -138,6 +145,15 @@ export interface HubLink {
   read_scopes?: HubReadScopes | null;
   /** v0.1.49 (F-83): bộ ngắt riêng của Gen-hub — `open` = 3 lỗi liên tiếp, tạm dừng gọi 60 giây. */
   breaker?: { open: boolean; retry_in_s?: number | null };
+  /**
+   * v0.1.50: quyền ghi Kho thấy ở lần Kiểm tra xanh gần nhất. `null` / vắng (máy chủ cũ) ⇒ "Chưa kiểm" — cùng quy tắc `read_scopes`.
+   */
+  write_scopes?: HubWriteScopes | null;
+  /**
+   * v0.1.50: hậu tố tool ghi Kho ('kho_create' | 'kho_update') Owner đã TỰ đóng (hoặc gỡ cấp Gen) ở MCP Hub — máy chủ tính lại mỗi lần
+   * đọc, nên tải lại trang vẫn nói đúng "Sếp đã tự đóng…" thay vì giục tick ở Gen-hub. `null` / vắng ⇒ chưa kiểm (máy chủ cũ).
+   */
+  write_hidden?: string[] | null;
 }
 
 /** `PATCH /hub/link` — Owner + PIN `hub.link`. `enabled` chỉ nhận `false` (bật = bấm Kiểm tra). */
@@ -163,6 +179,17 @@ export interface HubLinkTestResult {
   read_missing?: string[];
   /** v0.1.49: tool GHI mà token đang có (nếu có) — Gen không dùng, nhưng nên tắt cho an toàn. */
   write_tools?: string[];
+  /** v0.1.50: quyền ghi Kho của token; thiếu quyền ghi KHÔNG làm `ok=false`. */
+  write_scopes?: HubWriteScopes;
+  /** v0.1.50: nhãn quyền ghi còn thiếu ở Gen-hub, nêu đúng tool (vd 'ghi Kho (kho_update)'); rỗng = đủ. */
+  write_missing?: string[];
+  /** v0.1.50: tool GHI Kho vừa mở cho Gen (nằm trong `exposed_tools`) — để thẻ đếm riêng "tool đọc" và "tool ghi Kho". */
+  exposed_write_tools?: string[];
+  /**
+   * v0.1.50: hậu tố tool ghi Kho ('kho_create' | 'kho_update') Owner đã TỰ đóng (hoặc gỡ cấp Gen) ở MCP Hub — Kiểm tra không mở
+   * lại; muốn bật lại thì mở ở MCP Hub.
+   */
+  write_hidden?: string[];
   link: HubLink;
 }
 

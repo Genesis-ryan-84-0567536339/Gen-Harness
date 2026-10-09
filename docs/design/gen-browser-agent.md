@@ -1,14 +1,16 @@
-# Gen điều khiển mạng xã hội thay Boss (Đợt D3 — bản nháp thiết kế)
+# Gen điều khiển mạng xã hội thay Boss (Đợt D3 — thiết kế + hiện trạng)
 
-> Trạng thái: lát đầu (§5.1) ĐÃ LÀM ở **v0.1.29** theo quyết định Boss 30/09 ("có công cụ, dùng hay không do Owner quyết,
-> cảnh báo rủi ro rõ"). Khác bản nháp: mã worker ở `apps/browser/ghb` (gói riêng, không có mã `gh`/DB); hàng đợi là Redis
-> Stream đã ký HMAC thay cho arq (arq dùng pickle); migration `0021_v0129_social`; không có cờ `social.enabled` — thêm
-> tài khoản + tích chấp nhận rủi ro là bật, "Dừng tất cả" là tắt; Owner-only dùng `require_owner` (không thêm quyền mới).
-> Giao thức: `docs/api/browser-protocol.md`. Thay mục "D3 Playwright cho agent vòng ngoài" trong `docs/ROADMAP.md`.
+> Trạng thái (10/2026): đã thi công tới v0.1.50 — xem [CHANGELOG.md](../../CHANGELOG.md); phần còn lại ở [ROADMAP](../ROADMAP.md) mục Nợ.
+
+> Đã làm: lát đầu (§5.1) ở **v0.1.29** (Facebook cá nhân, chỉ đọc) theo quyết định Boss 30/09 ("có công cụ, dùng hay không do Owner quyết,
+> cảnh báo rủi ro rõ") và ghi lát 1 (§3.5) ở **v0.1.47** (trả lời bình luận, nhắn tin). Khác bản nháp ban đầu: mã worker ở `apps/browser/ghb` (gói riêng,
+> không có mã `gh`/DB); hàng đợi là Redis Stream đã ký HMAC trên Redis riêng `browser-redis` thay cho arq (arq dùng pickle); migration `0021_v0129_social`
+> và `0031_v0147_social_write`; **không có cờ `social.enabled`** — thêm tài khoản + tích chấp nhận rủi ro là bật, "Dừng tất cả" là tắt; chỉ Owner dùng
+> (`require_owner`, không thêm quyền `social.read`/`social.manage`). Giao thức: [docs/api/browser-protocol.md](../api/browser-protocol.md).
+> Thay mục "D3 Playwright cho agent vòng ngoài" trong [ROADMAP](../ROADMAP.md). Phần chưa làm (đăng bài, `like`/`follow`, cổng API các nền tảng): ROADMAP › Nợ #4, #14.
 > Nguồn đã đọc: `CLAUDE.md`, `docs/ROADMAP.md`, `docs/design/gen-v1.md` (§5, §10), `docs/design/gen-hub-link.md`,
 > `apps/api/gh/gen/{jev,decider,engine,proposals}.py`, `apps/bridge/` + `docs/api/bridge-protocol.md`,
 > `apps/api/gh/crypto.py`, `gh/worker.py`, `gh/chassis/objects.py`, `deploy/compose.yaml`.
-> Chỉ là thiết kế — chưa có dòng code nào.
 
 ## 0. Tóm tắt cho Boss (đọc 30 giây)
 
@@ -20,8 +22,8 @@
   khoản (giống cách Zalo/WhatsApp cá nhân đang làm).
 - Boss **tự đăng nhập** trong một cửa sổ trình duyệt hiện ngay trong Gen-Harness; hệ thống không lưu mật khẩu/mã 2FA,
   chỉ lưu phiên (cookie) đã mã hoá.
-- **Bản đầu v0.1.28**: màn "Tài khoản mạng xã hội" + đăng nhập + Gen **chỉ đọc** thông báo/hộp tin của **1 nền tảng**
-  (đề xuất Facebook cá nhân) rồi tóm tắt. Chưa gửi/đăng gì.
+- **Bản đầu (làm ở v0.1.29)**: màn "Tài khoản mạng xã hội" + đăng nhập + Gen **chỉ đọc** thông báo/hộp tin của **1 nền tảng**
+  (Facebook cá nhân) rồi tóm tắt. **v0.1.47** thêm Trả lời bình luận và Nhắn tin qua đề xuất + Xác nhận + mã PIN; đăng bài chưa làm (lát 2).
 - Jev (đã có) làm việc rẻ & nhanh: phân loại từng tin (gấp/cần trả lời/quảng cáo), nhận biết trạng thái trang.
   Tóm tắt và soạn trả lời vẫn dùng model chính. Jev lỗi → tự rơi về model chính/quy tắc.
 
@@ -64,7 +66,7 @@ Tất cả cổng API đi chung một mô-đun `gh/social/` để Gen thấy m�
 Web: màn "Tài khoản mạng xã hội" ── WS luồng ảnh + phím/chuột (chỉ lúc đăng nhập) ──┐
      Gen (thẻ tóm tắt / thẻ đề xuất)                                               │
                 │                                                                    │
-apps/api  gh/social/ (routes, service, adapters API) ── arq queue "gh:browser" ──► browser-worker (container riêng)
+apps/api  gh/social/ (routes, service, permit) ── Redis Stream ký HMAC `gh:browser:*` (browser-redis) ──► browser-worker (container riêng)
           ├ lưu phiên mã hoá (khoá master)          ◄── kết quả + ảnh chụp/trace ──  Playwright + Chromium
           ├ Gen tool social.* (chỉ đọc)                                             không DB, không khoá master
           └ đề xuất ghi → Xác nhận → permit ký HMAC ──► worker chỉ ghi khi permit hợp lệ
@@ -73,7 +75,8 @@ apps/api  gh/social/ (routes, service, adapters API) ── arq queue "gh:browse
 
 ### 3.1 browser-worker (container mới)
 - Ảnh `deploy/images/browser.Dockerfile` (gốc Playwright Python chính thức), dịch vụ `browser` trong `deploy/compose.yaml`.
-  Chạy `arq gh.social.browser_worker.WorkerSettings` với `queue_name="gh:browser"` — tách khỏi worker chính.
+  Mã ở `apps/browser/ghb` (không phải `gh.social.browser_worker`): nhận việc qua Redis Stream `gh:browser:*` ký HMAC trên Redis riêng
+  `browser-redis` — tách khỏi worker chính và khỏi Redis chính (xem `docs/api/browser-protocol.md`).
 - **Như bridge**: chỉ nói với Redis; **không** truy cập Postgres, **không** giữ `gh_master_key`, **không** gọi model.
   Nhận secret riêng `gh_browser_key` (mã hoá phiên khi truyền + ký permit — cùng kiểu `bridge-protocol.md`).
 - Chạy user không root, `read_only` rootfs + tmpfs, giới hạn RAM/CPU (Chromium ~300–500 MB/ngữ cảnh — *ước tính,
@@ -105,8 +108,8 @@ apps/api  gh/social/ (routes, service, adapters API) ── arq queue "gh:browse
   "đăng xuất mọi thiết bị" trên nền tảng nếu muốn chắc chắn.
 
 ### 3.3 Hàng đợi & việc
-- Loại việc (adapter mỗi nền tảng khai báo): đọc `read_notifications`, `read_inbox`, `read_comments`; ghi
-  `post`, `reply_comment`, `send_dm`, `like`, `follow` (ghi chỉ từ v0.1.30).
+- Loại việc (adapter mỗi nền tảng khai báo): đọc `read_notifications`, `read_inbox`, `read_comments`; ghi `reply_comment`, `send_message`
+  (✅ v0.1.47). `post`, `like`, `follow` **chưa làm** (đăng bài = lát 2, ROADMAP › Nợ #4).
 - **Mỗi tài khoản chạy tối đa 1 việc cùng lúc**: khoá Redis `gh:browser:lock:<account_id>` (SET NX, hết hạn theo trần
   thời gian việc); việc sau xếp hàng.
 - Việc đọc lưu kết quả đã làm sạch; việc **ghi** lưu **ảnh chụp bằng chứng** (JPEG ≤ 2 MB, mã hoá bằng khoá master khi lưu,
@@ -160,7 +163,7 @@ Luồng thật, theo thứ tự:
   việc ghi**: API từ chối nhận việc ghi mới, và worker kiểm lại ngay trước khi bấm gửi.
 - Dừng từng tài khoản: trạng thái `paused`.
 - **Tự dừng**: phát hiện checkpoint/CAPTCHA/cảnh báo bất thường/đăng xuất bất ngờ, hoặc 3 lỗi liên tiếp → tài khoản
-  `paused` + chuông báo Boss. Cờ tổng `social.enabled` (tắt mặc định).
+  `paused` + chuông báo Boss. Không có cờ tổng `social.enabled`: thêm tài khoản + tích chấp nhận rủi ro là bật, **Dừng tất cả** là tắt.
 
 ### 3.8 Kiểm phiên hằng ngày (F-83)
 - Mỗi ngày **09:10 giờ VN** (ngoài giờ yên lặng 23:00–06:00 của tổ chức), cron `social_session_check` xếp một việc `health`
@@ -194,38 +197,31 @@ Jev hiện chỉ làm **chọn 1 trong danh sách** (`JevClient.choose` → `Cho
 - **Boss cần cung cấp**: khoá **OpenRouter** gắn vào nguồn model kind `system_one` (Agent & Model → Thêm nguồn Jev)
   — đã có sẵn từ v0.1.21. Không có Jev vẫn chạy được, chỉ chậm/đắt hơn chút.
 
-## 5. Kế hoạch theo lát
+## 5. Kế hoạch theo lát — hẹn và thực tế
 
-| Bản | Lát | Nhìn thấy |
+Bản nháp hẹn các bản v0.1.28–v0.1.31; số bản đã trượt vì các đợt sửa lỗi và kiểm toán chen vào (ROADMAP › Nợ #9). Bảng dưới ghi thực tế:
+
+| Lát | Nội dung | Thực tế |
 |---|---|---|
-| **v0.1.28** | Hạ tầng + đăng nhập + **chỉ đọc** thông báo & danh sách hội thoại (xem trước) của **1 nền tảng** (mặc định Facebook cá nhân); Gen tóm tắt khi Boss hỏi | "Gen, Facebook có gì mới?" → thẻ tóm tắt + phân loại |
-| v0.1.29 | **API**: Trang Facebook + Instagram chuyên nghiệp (Graph API, OAuth) — đọc bình luận/tin nhắn đổ vào Hộp thư ý nghĩa | Tin Trang/IG vào Hộp thư, không rủi ro khoá |
-| v0.1.30 | **Ghi có xác nhận**: trả lời bình luận/đăng bài (API trước, trình duyệt cho FB cá nhân) qua đề xuất + PIN + permit | Boss bấm Xác nhận → đăng thật, có ảnh chụp |
-| v0.1.31 | Zalo OA API; TikTok Content Posting API; LinkedIn đăng bài API | Đăng đa nền tảng từ 1 thẻ |
-| sau | X API (trả theo lượt); IG/TikTok/LinkedIn cá nhân đọc bằng trình duyệt (từng nền tảng, Boss chấp nhận rủi ro riêng) | |
+| 1 | Hạ tầng + đăng nhập + **chỉ đọc** thông báo & hội thoại của Facebook cá nhân; Gen tóm tắt khi Boss hỏi | ✅ **v0.1.29** (nháp hẹn v0.1.28) |
+| 2 | **Ghi có xác nhận, lát 1**: trả lời bình luận + nhắn tin qua đề xuất + mã PIN + permit + ảnh chụp bằng chứng | ✅ **v0.1.47** (nháp hẹn v0.1.30); đăng bài chưa làm |
+| 3 | Đăng bài (`post`), `like`, `follow` | Chưa xếp bản (lát 2 của phần ghi, Nợ #4); selector ghi mới kiểm trên trang mẫu — chờ Boss nghiệm thu thật |
+| 4 | **API**: Trang Facebook + Instagram chuyên nghiệp (Graph API), Zalo OA, TikTok, LinkedIn đăng bài | **Đóng băng** (F-80, Nợ #14) tới khi Facebook cá nhân chạy thật ≥ 2 tuần và Boss xác nhận có Trang/OA cần dùng |
+| sau | X API (trả theo lượt); IG/TikTok/LinkedIn cá nhân đọc bằng trình duyệt (từng nền tảng, Boss chấp nhận rủi ro riêng) | Chưa làm |
 
-### 5.1 Chi tiết v0.1.28
-- **Migration** `apps/api/migrations/versions/0021_v0128_social.py`:
-  - `core.social_accounts(id, org_id, platform, mode['api'|'browser'], label, external_handle, status['pending_login'|
-    'active'|'needs_login'|'paused'|'revoked'], state_enc bytea, state_updated_at, last_health jsonb,
-    risk_accepted_by, risk_accepted_at, created_by, created_at, revoked_at)` + RLS theo org như bảng khác.
-  - `agent.browser_jobs(id, org_id, account_id, kind, status['queued'|'running'|'done'|'failed'|'halted'], requested_by,
-    via['gen'|'user'|'schedule'], result jsonb, artifacts jsonb, cost jsonb, error, created_at, started_at, finished_at)`.
-  - Cờ `social.enabled` (tắt mặc định); vào `backup.py` (state_enc vẫn mã hoá).
-- **API** `apps/api/gh/social/` (`routes.py, service.py, adapters/facebook.py, jobs.py, permit.py`), gắn `/api/v1/social`:
-  - `GET/POST /social/accounts` · `POST /social/accounts/{id}/login` (PIN, trả vé WS) · `WS /social/login/{ticket}` ·
-    `POST /social/accounts/{id}/check` · `POST /social/accounts/{id}/pause|resume` · `DELETE /social/accounts/{id}` (PIN)
-  - `POST /social/jobs {account_id, kind}` · `GET /social/jobs/{id}` (kèm link ảnh chụp) · `POST /social/halt` /
-    `DELETE /social/halt` (Owner, PIN). Quyền mới `social.read`, `social.manage` (Owner).
-- **Worker trình duyệt** `apps/api/gh/social/browser_worker.py` + `deploy/images/browser.Dockerfile` + dịch vụ `browser`
-  và proxy ra ngoài trong `deploy/compose.yaml`; secret `gh_browser_key` (`genh` sinh như `gh_bridge_key`).
-- **Gen**: tool `social.summary {account_id?, kind}` trong `gh/gen/tools.py` (xếp việc, đợi ≤ 60 s, trả tóm tắt; lâu hơn
-  → chuông khi xong); target `social.accounts` trong `packages/contracts/src/genTargets.ts`.
-- **Web**: `apps/web/src/screens/social/SocialAccountsScreen.tsx` (danh sách, trạng thái, nút), `LoginViewer.tsx`
-  (canvas nhận khung, gửi chuột/phím), mục menu "Tài khoản mạng xã hội".
-- **Test**: pytest adapter Facebook trên **trang HTML mẫu lưu sẵn** (không gọi facebook.com trong CI), khoá 1 việc/tài
-  khoản, halt giữa chừng, bọc untrusted, mã hoá phiên khứ hồi; vitest màn + viewer; e2e trên mock. Nghiệm thu thật: Boss
-  đăng nhập tài khoản thật 1 lần.
+### 5.1 Lát đầu — thực tế đã làm ở v0.1.29
+- **Migration** `apps/api/migrations/versions/0021_v0129_social.py` (+ `db/sql/0021_v0129_social.sql`): `core.social_accounts` (nền tảng, chế độ, trạng thái, `state_enc` phiên mã hoá,
+  `risk_accepted_by/at`…) và `agent.browser_jobs` (loại việc, trạng thái, kết quả, chi phí…), RLS theo org như bảng khác, có trong `backup.py` (phiên vẫn mã hoá). v0.1.47 thêm
+  `0031_v0147_social_write.py`: loại việc `write`, cột `action`/`proof_key`/`proof_sha256`, `daily_write_limit`, bảng `ops.risk_consents`.
+- **API** `apps/api/gh/social/` (`routes.py`, `service.py`, `platforms.py`, `permit.py`, `protocol.py`, `session_watch.py`), gắn `/api/v1/social`: `GET /status|/platforms|/accounts`,
+  `POST /accounts`, `POST /accounts/{id}/login|check|read|pause|resume`, `DELETE /accounts/{id}` (PIN), `WS /login/{ticket}`, `POST|DELETE /halt` (Dừng tất cả, Owner + PIN);
+  v0.1.47: `POST /accounts/{id}/write`, `GET /writes`, `GET /jobs/{id}/proof`, `GET /write-gate`, `POST|DELETE /write-consent`. Chỉ Owner (`require_owner`).
+- **Worker trình duyệt** `apps/browser/ghb` + `deploy/images/browser.Dockerfile` + dịch vụ `browser`, `browser-redis`, `browser-egress` trong `deploy/compose.yaml`; secret `gh_browser_key`
+  (`genh` sinh như `gh_bridge_key`).
+- **Gen**: tool `social.accounts`, `social.read` trong `gh/gen/tools.py`; target `social.accounts` trong `packages/contracts/src/genTargets.ts`; đề xuất `social_reply`/`social_dm` (v0.1.47).
+- **Web**: `apps/web/src/social/` (`SocialPage.tsx`, `LoginViewer.tsx`, `SocialWriteRiskPage.tsx`, `WriteProofDialog.tsx`), mục menu "Tài khoản mạng xã hội" (Kết nối).
+- **Test**: pytest adapter Facebook trên **trang HTML mẫu lưu sẵn** (không gọi facebook.com trong CI), khoá 1 việc/tài khoản, halt giữa chừng, bọc untrusted, mã hoá phiên khứ hồi;
+  vitest màn + viewer; e2e trên mock. Nghiệm thu thật: Boss đăng nhập tài khoản thật 1 lần (đã làm cho phần đọc); phần ghi — dòng 8 "Facebook trả lời".
 
 ## 6. Rủi ro & câu hỏi cho Boss
 
@@ -234,10 +230,10 @@ tự dừng khi có cảnh báo; không loại bỏ được); giao diện nền
 adapter rõ ràng); lộ phiên đăng nhập (mã hoá bằng khoá master, worker không giữ khoá, thu hồi 1 nút); prompt injection
 (§3.6 + permit).
 
-1. **Nền tảng đầu tiên?** — Mặc định: **Facebook cá nhân**, chỉ đọc thông báo + danh sách hội thoại.
-2. **Chấp nhận rủi ro khoá tài khoản cá nhân khi tự động hoá trình duyệt?** — Mặc định: **có, chỉ đọc**, Boss bấm chấp
-   nhận từng tài khoản; ghi (đăng/trả lời) bằng trình duyệt để sau v0.1.30.
-3. **Công ty có Trang Facebook / Instagram chuyên nghiệp / Zalo OA không?** — Mặc định: có thì làm **API** ở v0.1.29
+1. **Nền tảng đầu tiên?** — Đã chốt: **Facebook cá nhân** (đọc thông báo + danh sách hội thoại ở v0.1.29, trả lời/nhắn ở v0.1.47).
+2. **Chấp nhận rủi ro khoá tài khoản cá nhân khi tự động hoá trình duyệt?** — Đã chốt: **có**, Boss bấm chấp nhận từng tài khoản; đọc từ v0.1.29, trả lời/nhắn
+   từ v0.1.47 (mỗi lần gửi do Boss Xác nhận + mã PIN); đăng bài để lát 2.
+3. **Công ty có Trang Facebook / Instagram chuyên nghiệp / Zalo OA không?** — Chưa trả lời; việc API đóng băng (F-80) tới khi có. Có thì làm **API**
    (an toàn hơn hẳn); Boss cần là admin Trang để cấp quyền.
 4. **Gen tự đọc bao lâu một lần?** — Mặc định: **chỉ khi Boss hỏi + 2 lần/ngày (08:00, 17:00)**.
 5. **X (Twitter) trả tiền theo lượt — có dùng không?** — Mặc định: **hoãn**, làm khi Boss cần.

@@ -35,6 +35,7 @@ import { createMock as createDiagnostics } from './mock-diagnostics';
 import { createMock as createP4Plugins } from './mock-p4-plugins';
 import { createMock as createP4System } from './mock-p4-system';
 import { createMock as createGen } from './mock-gen';
+import { createMock as createGenV0150, type KhoWriteReq } from './mock-gen-v0150';
 import { acceptWebSocket, type MockSocket } from './mock-ws';
 import { buildScreenTree, SCREEN_BY_KEY } from '../../../packages/contracts/src/screens';
 import type { NavDomain, NavItem, SetupState } from '../../../packages/contracts/src/schema';
@@ -397,8 +398,14 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
   });
   // Giao việc / gán người xử lý kiểm người dùng đang hoạt động (như API: UUID lạ hoặc bị khoá → 404).
   const findUser = (id: string) => users.find((u) => u.id === id && !u.inactive);
+  // v0.1.50 (F-81, QD-18): Gen nhớ (/gen/memory) + đề xuất Ghi nhớ / Ghi vào Kho Ryan (kịch bản + xác nhận cho mock-gen). Lời gọi ghi
+  // Kho duy nhất đi qua mock-p4-mcp (`khoWrite` = POST /hub/kho/write), khai báo bên dưới — gọi lúc chạy.
+  const genV0150 = createGenV0150({
+    kho: { write: (req: KhoWriteReq) => (mcp.hooks.khoWrite as (r: KhoWriteReq) => ReturnType<Parameters<typeof createGenV0150>[0]['kho']['write']>)(req) },
+  });
   // v0.1.21 Gen: kịch bản cố định (test/mock-gen.ts); `features.gen` của /auth/me đọc cờ ở đây.
   const genMock = createGen({
+    extra: genV0150.extra,
     emit: broadcast,
     // v0.1.47 (F-79): xác nhận đề xuất gửi Facebook tạo việc `write` ở mock-social (khai báo bên dưới — gọi lúc chạy).
     social: { writeContext: () => social.writeContext(), createWrite: (req) => social.createWrite(req, 'gen') },
@@ -429,9 +436,12 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     fresh: opts.setup === 'fresh', emit: broadcast,
     getAgents: p4Agents.hooks.list as () => AgentIdentity[],
     pushDraft: p3Core.hooks.push as (d: Record<string, unknown>) => unknown,
+    // v0.1.50 (F-81): lần ghi Kho thật đầu tiên ⇒ dòng 9 "Gen ghi Kho" ở Việc Sếp cần làm đạt (gắn muộn: bossChecks tạo sau).
+    onKhoWritten: () => recordKhoWrite(),
   });
   const hubLinkOf = mcp.hooks.hubLink as () => HubLink;
   // v0.1.44 (F-8c) — Kết nối › Telegram; Gửi thử ghi vào boss_checks (gắn sau khi tạo bossChecks bên dưới).
+  let recordKhoWrite: () => void = () => {};
   let recordTelegram: (o: TelegramOutcome) => BossCheck = () => {
     throw new Error('bossChecks chưa sẵn sàng');
   };
@@ -450,9 +460,12 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     onCliLogin: phase2.hooks.onCliLogin as (fn: (kind: string, ok: boolean, email: string | null) => void) => void,
     telegramTest: telegram.runTest,
   });
+  recordKhoWrite = bossChecks.hooks.recordKhoWrite as () => void;
   recordTelegram = bossChecks.hooks.recordTelegram as (o: TelegramOutcome) => BossCheck;
   forgetTelegram = bossChecks.hooks.forgetTelegram as () => void;
   const phase3 = {
+    // v0.1.50: `/gen/memory*` TRƯỚC `gen` — mock-gen trả 404 cho mọi đường `/gen/*` lạ.
+    genMemory: genV0150,
     gen: genMock,
     social,
     // v0.1.39 (F-74) — "Việc Sếp cần làm" (chỉ Owner; PIN cho hub/agy_switch). v0.1.44: dòng 6 Telegram.

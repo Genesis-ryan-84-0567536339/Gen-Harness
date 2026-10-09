@@ -11,12 +11,18 @@ import {
   HUB_STATUS_LABEL,
   PUBLIC_NET_HINT,
   SCOPES_READ_ONLY_TEXT,
+  WRITE_CONFIRM_ONLY_TEXT,
+  HUB_KICKER,
   expiryToIso,
   hubStatusTone,
   isPublicHttpsUrl,
   isoToDay,
+  otherWriteTools,
   scopeRows,
   scopesMessage,
+  testedToolsText,
+  writeScopeRows,
+  writeScopesMessage,
 } from './mcpModel';
 import { useHubLink, useTestHubLink, useUpdateHubLink } from './queries';
 
@@ -24,13 +30,16 @@ const fmtTime = (iso: string | null) => (iso ? new Date(iso).toLocaleString('vi-
 
 /**
  * v0.1.42 (F-61): thẻ này chỉ render ở Kết nối (/connections#genhub) — MCP Hub chỉ còn dòng liên kết tới đây.
- * Gen-hub (v0.1.26, docs/design/gen-hub-link.md §3): Gen đọc Kho Ryan qua Gen-hub — chỉ đọc, chỉ Sếp (Owner).
+ * Gen-hub (v0.1.26, docs/design/gen-hub-link.md §3): Gen đọc Kho Ryan qua Gen-hub — chỉ Sếp (Owner). Từ v0.1.50 Gen ghi được
+ * Phiên / Việc vào Kho, nhưng CHỈ khi Sếp bấm Xác nhận + nhập mã PIN trên thẻ đề xuất.
  * Token là ô CHỈ GHI: API không bao giờ trả lại (chỉ biết "đã lưu"). Liên kết tắt tới khi bấm "Kiểm tra" xanh;
  * đổi địa chỉ/token thì tắt lại, phải kiểm tra lại. Lưu / Kiểm tra cần PIN (`hub.link`), ghi Nhật ký hành động.
  * v0.1.39 (F-31): gõ địa chỉ https công khai → công tắc "mạng công cộng" bật sẵn (Owner vẫn bỏ được); "Kiểm tra" khi
  * còn thay đổi chưa lưu = lưu rồi kiểm tra luôn (một lần PIN — phiên PIN của lần lưu phủ lần kiểm tra).
  * v0.1.49 (QD-16): khối "Quyền đọc thêm (tuỳ chọn)" — lịch, mail, việc, Drive (Gen chỉ đọc); sau Kiểm tra báo quyền còn
  * thiếu (không làm Kiểm tra đỏ); bộ ngắt F-83 đang mở ⇒ dải "Gen-hub tạm không trả lời".
+ * v0.1.50 (F-81, QD-18): khối "Quyền ghi Kho (tuỳ chọn)" dưới "Quyền đọc thêm" — kho_create / kho_update; Gen chỉ ghi khi Sếp
+ * Xác nhận + nhập mã PIN trên thẻ đề xuất.
  */
 export function HubLinkCard() {
   const me = useMe();
@@ -38,15 +47,14 @@ export function HubLinkCard() {
   const link = useHubLink();
   return (
     <Panel
-      title="Gen-hub — Gen đọc Kho tri thức"
+      title="Gen-hub — Gen đọc và ghi Kho tri thức"
       kicker={
         link.data ? (
           <>
-            <span style={{ color: hubStatusTone(link.data.status) }}>{HUB_STATUS_LABEL[link.data.status]}</span> · chỉ đọc · chỉ Sếp · tắt tới khi
-            Kiểm tra xanh
+            <span style={{ color: hubStatusTone(link.data.status) }}>{HUB_STATUS_LABEL[link.data.status]}</span> · {HUB_KICKER}
           </>
         ) : (
-          'Chỉ đọc · chỉ Sếp · tắt tới khi Kiểm tra xanh'
+          HUB_KICKER
         )
       }
       label="Gen-hub"
@@ -211,7 +219,7 @@ function HubLinkBody({ link, isOwner }: { link: HubLink; isOwner: boolean }) {
           {result ? (
             <div className={result.ok ? 'apm-test-result apm-test-result--ok' : 'apm-test-result apm-test-result--bad'} role="status">
               {result.ok ? (
-                `Đã nối Kho · ${result.latency_ms} ms · mở ${result.exposed_tools.length} tool đọc cho Gen`
+                `Đã nối Kho · ${result.latency_ms} ms · ${testedToolsText(result)}`
               ) : (
                 <>
                   <FriendlyErrorText raw={blocked ? PUBLIC_NET_HINT : result.error} fallback="Chưa kết nối được Gen-hub — kiểm tra địa chỉ và thẻ truy cập." />
@@ -226,12 +234,13 @@ function HubLinkBody({ link, isOwner }: { link: HubLink; isOwner: boolean }) {
             </div>
           ) : null}
           <ReadScopes link={link} result={result} />
+          <WriteScopes link={link} result={result} />
           {/* v0.1.28 (UX V14): từng bước bằng lời thường, không tên riêng. */}
           <ol className="muted-note hub-steps">
             <li>Mở Gen-hub, vào mục tạo trợ lý mới, đặt tên có tên công ty (ví dụ gen-harness-congty).</li>
             <li>
               Chọn thời hạn thẻ truy cập 90 ngày. Bật quyền ĐỌC Kho (tóm tắt, tìm, xem một mục) và (tuỳ chọn) quyền đọc lịch, đọc mail, đọc việc, tìm Drive —
-              KHÔNG bật quyền ghi.
+              KHÔNG bật quyền ghi lịch, mail hay Drive. Muốn Gen ghi được Kho (Phiên, Việc), tick thêm kho_create, kho_update — không bắt buộc.
             </li>
             <li>Chép thẻ truy cập (token) vừa tạo, dán vào ô trên rồi bấm Kiểm tra.</li>
           </ol>
@@ -256,7 +265,7 @@ function ReadScopes({ link, result }: { link: HubLink; result: HubLinkTestResult
   const scopes = result?.ok ? (result.read_scopes ?? fromLink) : fromLink;
   const rows = scopeRows(scopes);
   const msg = result ? (result.ok ? scopesMessage(result.read_missing, scopes) : null) : scopesMessage(undefined, scopes);
-  const writeTools = result && Array.isArray(result.write_tools) ? result.write_tools.filter((t): t is string => typeof t === 'string' && t !== '') : [];
+  const writeTools = result ? otherWriteTools(result.write_tools) : [];
   return (
     <div className="hub-scopes" data-testid="hub-scopes">
       <p className="hub-scopes__title">Quyền đọc thêm (tuỳ chọn)</p>
@@ -279,6 +288,46 @@ function ReadScopes({ link, result }: { link: HubLink; result: HubLinkTestResult
         </p>
       ) : null}
       <p className="muted-note">{SCOPES_READ_ONLY_TEXT}</p>
+    </div>
+  );
+}
+
+/**
+ * v0.1.50 (F-81, QD-18): "Quyền ghi Kho (tuỳ chọn)" — 2 dòng Có / Chưa / Chưa kiểm, MỖI dòng theo đúng tool của nó (kho_create,
+ * kho_update; máy chủ cũ chỉ có `kho` ⇒ hai dòng theo `kho`). Owner tự đóng tool ghi ở MCP Hub ⇒ Kiểm tra không mở lại và thẻ nói
+ * rõ (tắt hẳn = bỏ tick ở Gen-hub) — cả sau khi tải lại trang (`link.write_hidden`). Nguồn như quyền đọc:
+ * lần Kiểm tra XANH vừa xong (`test.data.write_scopes`), không thì lần kiểm xanh gần nhất máy chủ nhớ (`link.write_scopes`); chưa
+ * nối / chưa từng kiểm xanh ⇒ "Chưa kiểm", không lời nhắc. Thiếu quyền ghi chỉ là lời nhắc — không làm Kiểm tra đỏ.
+ */
+function WriteScopes({ link, result }: { link: HubLink; result: HubLinkTestResult | undefined }) {
+  const fromLink = link.configured && !!link.last_ok_at ? link.write_scopes : undefined;
+  const scopes = result?.ok ? (result.write_scopes ?? fromLink) : fromLink;
+  const rows = writeScopeRows(scopes);
+  // Chưa bấm Kiểm tra trong lần mở trang này ⇒ tool Owner tự đóng lấy từ `GET /hub/link` (máy chủ tính lại mỗi lần đọc).
+  const msg = result
+    ? result.ok
+      ? writeScopesMessage(result.write_missing, scopes, result.write_hidden)
+      : null
+    : writeScopesMessage(undefined, scopes, fromLink !== undefined ? link.write_hidden : undefined);
+  return (
+    <div className="hub-scopes hub-write-scopes" data-testid="hub-write-scopes">
+      <p className="hub-scopes__title">Quyền ghi Kho (tuỳ chọn)</p>
+      <ul className="hub-scopes__list">
+        {rows.map((r) => (
+          <li key={r.key} className="hub-scopes__row" data-has={r.state === 'unknown' ? undefined : r.state}>
+            <span className="hub-scopes__name">
+              <span className="mono">{r.key}</span> — {r.label}
+            </span>
+            <span className="hub-scopes__val">{r.text}</span>
+          </li>
+        ))}
+      </ul>
+      {msg ? (
+        <p className="hub-scopes__msg" data-tone={msg.tone} role="note">
+          {msg.text}
+        </p>
+      ) : null}
+      <p className="muted-note">{WRITE_CONFIRM_ONLY_TEXT}</p>
     </div>
   );
 }

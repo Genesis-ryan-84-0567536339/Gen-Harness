@@ -6,6 +6,11 @@ thay SSE ghi ở docs/reports/HANDOFF-v0.1.1.md mục v0.1.21.
 v0.1.49 (QD-16): `/gen/sources/*` — đường ĐỌC Tài liệu, Deal, Vụ việc cho tool `document.*`/`deal.*`/`case.*` của Gen.
 Chỉ Owner; tái dùng nguyên hàm danh sách/chi tiết của cụm Quan hệ & Thị trường (cùng phạm vi, cùng ACL) rồi che kết
 quả bằng `mask_for_model` trước khi tới model đám mây (Owner nhận dữ liệu KHÔNG che từ endpoint gốc).
+
+v0.1.50 (QD-18): `/gen/memory` — "Gen nhớ" (GET/POST/PATCH/DELETE, CHỈ Owner, không PIN; gh.gen.memory_notes) và
+`confirm_proposal` / `cancel_proposal` cho ba loại đề xuất mới (`memory_note`, `kho_create`, `kho_update`). Đề xuất ghi
+Phiên của job `gh.gen.kho_release` mang khoá meta `release_version`: xác nhận claim dòng `agent.hub_release_proposals`
+(pending → writing → written; lỗi → pending; huỷ → cancelled) nên mỗi bản chỉ ghi vào Kho MỘT lần.
 """
 
 import asyncio
@@ -27,7 +32,7 @@ from gh.chassis import actionlog
 from gh.chassis.masking import MASK, is_secret_key, mask_for_model
 from gh.db import DB, sessionmaker
 from gh.errors import ApiError, conflict, field_errors, forbidden, not_found, pin_required
-from gh.gen import engine, proposals, store
+from gh.gen import engine, memory_notes, proposals, store
 
 router = APIRouter(prefix="/gen", tags=["gen"])
 
@@ -244,6 +249,79 @@ async def ack(turn_id: uuid.UUID, body: AckIn, request: Request, user: service.C
     return Response(status_code=204)
 
 
+# ── v0.1.50 (QD-18): Gen nhớ — ghi chú sở thích Sếp (chỉ Owner, không PIN) ──
+
+class MemoryIn(BaseModel):
+    text: str = Field(min_length=1, max_length=2000)  # độ dài thật (≤ 280) kiểm SAU khi làm sạch → 422 có thông điệp
+    reason: str | None = Field(default=None, max_length=2000)
+    proposal_id: uuid.UUID | None = None
+
+
+class MemoryPatch(BaseModel):
+    text: str | None = Field(default=None, min_length=1, max_length=2000)
+    reason: str | None = Field(default=None, max_length=2000)
+
+
+def _memory_detail(via: str, text_: str, proposal_id: uuid.UUID | None = None) -> dict[str, Any]:
+    """Action Log KHÔNG ghi nguyên văn ghi chú — chỉ độ dài + dấu vết (text_digest)."""
+    detail: dict[str, Any] = {"via": via, "length": len(text_), "text_digest": engine.digest(text_)}
+    if proposal_id is not None:
+        detail["proposal_id"] = str(proposal_id)
+    return detail
+
+
+def _memory_422(field: str, e: ValueError) -> ApiError:
+    return field_errors({field: str(e)})
+
+
+@router.get("/memory")
+async def get_memory(user: service.CurrentUser = Depends(require_owner), db: AsyncSession = DB) -> dict[str, Any]:
+    return {"items": await memory_notes.list_notes(db, user.org_id), "limit": memory_notes.MAX_NOTES,
+            "max_len": memory_notes.MAX_LEN, "reason_max": memory_notes.REASON_MAX}
+
+
+@router.post("/memory", status_code=201)
+async def create_memory(body: MemoryIn, user: service.CurrentUser = Depends(require_owner),
+                        db: AsyncSession = DB) -> dict[str, Any]:
+    source = "gen" if body.proposal_id is not None else "owner"
+    try:
+        note = await memory_notes.create(db, user, body.text, body.reason, source, body.proposal_id)
+    except ValueError as e:
+        raise _memory_422("text", e) from e
+    await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
+                           action="gen.memory_saved", target_type="gen_memory_note", target_id=note["id"],
+                           detail=_memory_detail("gen" if source == "gen" else "settings", note["text"],
+                                                 body.proposal_id), ip=user.ip)
+    return note
+
+
+@router.patch("/memory/{note_id}")
+async def update_memory(note_id: uuid.UUID, body: MemoryPatch, user: service.CurrentUser = Depends(require_owner),
+                        db: AsyncSession = DB) -> dict[str, Any]:
+    if not body.model_fields_set & {"text", "reason"}:
+        raise field_errors({"text": "Nhập nội dung cần sửa"})
+    try:
+        note = await memory_notes.update(db, user, note_id, body.text, body.reason,
+                                         set_reason="reason" in body.model_fields_set)
+    except ValueError as e:
+        raise _memory_422("text", e) from e
+    await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
+                           action="gen.memory_updated", target_type="gen_memory_note", target_id=note["id"],
+                           detail=_memory_detail("settings", note["text"]), ip=user.ip)
+    return note
+
+
+@router.delete("/memory/{note_id}", status_code=204)
+async def delete_memory(note_id: uuid.UUID, user: service.CurrentUser = Depends(require_owner),
+                        db: AsyncSession = DB) -> Response:
+    cur = await memory_notes.get(db, user.org_id, note_id)
+    await memory_notes.delete(db, user.org_id, note_id)
+    await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
+                           action="gen.memory_deleted", target_type="gen_memory_note", target_id=str(note_id),
+                           detail=_memory_detail("settings", cur.text), ip=user.ip)
+    return Response(status_code=204)
+
+
 # ── Gen v2 (A4): đề xuất thao tác có xác nhận — gh.gen.proposals ──
 
 @router.get("/assignees")
@@ -260,10 +338,13 @@ async def assignees(user: service.CurrentUser = Depends(gen_user), db: AsyncSess
                       for r in rows]}
 
 
-async def _owned_proposal(request: Request, user: service.CurrentUser, pid: uuid.UUID) -> dict[str, Any]:
+async def _owned_proposal(request: Request, user: service.CurrentUser, pid: uuid.UUID,
+                          *, allow_cancelled: bool = False) -> dict[str, Any]:
     p = await proposals.load(request.app.state.redis, pid)
     if p is None or p.get("user_id") != str(user.id) or p.get("org_id") != str(user.org_id):
         raise not_found("Đề xuất (có thể đã hết hạn)")
+    if allow_cancelled and p.get("status") == "cancelled":
+        return p
     if p.get("status") != "pending":
         raise conflict("GEN_PROPOSAL_DECIDED", "Đề xuất này đã được xác nhận hoặc đã huỷ")
     return p
@@ -279,6 +360,121 @@ async def _log_apart(user: service.CurrentUser, action: str, result: str, p: dic
                                detail={"via": "gen", "proposal_id": p["id"], "type": p["type"],
                                        "turn_id": p["turn_id"], **detail}, ip=user.ip)
         await s.commit()
+
+
+# ── F-87: đề xuất ghi Phiên của bản mới — mỗi (tổ chức, phiên bản) ghi Kho ĐÚNG MỘT lần, dù có nhiều Owner ──
+# pending → writing (một Owner đang ghi) → written | pending (lỗi CHẮC CHẮN chưa ghi) | uncertain (502
+# HUB_WRITE_UNCERTAIN: có thể đã ghi — chỉ Owner đó bấm lại hoặc huỷ, sau khi thẻ cảnh báo mở Kho kiểm trước) |
+# cancelled. Khi bản đã ghi / đã huỷ / ghi chưa chắc, thẻ của các Owner KHÁC được đóng (Redis + tin đã lưu + chuông) để
+# không còn nút Xác nhận chết.
+
+RELEASE_DECIDED_MSG = "Bản này đã được ghi vào Kho hoặc đã huỷ — thẻ đã đóng"
+RELEASE_BUSY_MSG = "Owner khác đang ghi bản này vào Kho — chưa ghi gì, thử lại sau ít phút"
+RELEASE_RETRY_MSG = "Bản này vừa đổi trạng thái (một lần ghi vừa lỗi) — chưa ghi gì, Sếp bấm Xác nhận lại"
+RELEASE_CLOSED_WRITTEN = "Owner khác đã ghi bản này vào Kho"
+RELEASE_CLOSED_CANCELLED = "Owner khác đã huỷ ghi bản này"
+RELEASE_CLOSED_UNCERTAIN = ("Owner khác vừa ghi bản này nhưng chưa chắc đã vào Kho — Owner đó kiểm Kho rồi bấm lại "
+                            "hoặc huỷ; Sếp không cần ghi")
+_RELEASE_CLOSED = {"written": RELEASE_CLOSED_WRITTEN, "cancelled": RELEASE_CLOSED_CANCELLED,
+                   "uncertain": RELEASE_CLOSED_UNCERTAIN, "expired": RELEASE_CLOSED_CANCELLED}
+
+
+async def _release_claim(db: AsyncSession, user: service.CurrentUser, version: str, p: dict[str, Any],
+                         redis: Any) -> None:
+    """Giành quyền ghi Phiên của bản `version` (→ writing): từ `pending`, hoặc từ `uncertain` khi CHÍNH Owner này là
+    người vừa ghi chưa chắc. Không giành được → 409 TRƯỚC khi gọi Gen-hub: bản đã ghi / huỷ / hết hạn, hoặc Owner KHÁC
+    vừa ghi chưa chắc ⇒ GEN_PROPOSAL_DECIDED và đóng luôn thẻ này (transaction riêng — request sắp rollback); Owner khác
+    đang ghi (writing) ⇒ GEN_PROPOSAL_BUSY. Đua: UPDATE trượt vì dòng đang `writing`, rồi lần ghi đó lỗi CHẮC CHẮN và
+    trả dòng về `pending` (hoặc `uncertain` của chính Owner này) trước câu SELECT ⇒ bản VẪN ghi được: GEN_PROPOSAL_BUSY
+    (bấm lại), KHÔNG đóng thẻ."""
+    row = (await db.execute(text("""UPDATE agent.hub_release_proposals SET status = 'writing'
+                                    WHERE org_id = :o AND version = :v
+                                      AND (status = 'pending' OR (status = 'uncertain' AND uncertain_by = :u))
+                                    RETURNING version"""),
+                            {"o": user.org_id, "v": version, "u": user.id})).first()
+    if row is not None:
+        return
+    cur = (await db.execute(text("""SELECT status, uncertain_by FROM agent.hub_release_proposals
+                                    WHERE org_id = :o AND version = :v"""),
+                            {"o": user.org_id, "v": version})).first()
+    status = str(cur.status) if cur is not None else None
+    if status == "writing":
+        raise conflict("GEN_PROPOSAL_BUSY", RELEASE_BUSY_MSG)
+    if status == "pending" or (status == "uncertain" and cur is not None and cur.uncertain_by == user.id):
+        raise conflict("GEN_PROPOSAL_BUSY", RELEASE_RETRY_MSG)
+    # Đã ghi / đã huỷ / hết hạn / Owner KHÁC ghi chưa chắc: thẻ này không bao giờ ghi được nữa ⇒ đóng nó luôn.
+    async with sessionmaker()() as s:
+        await s.execute(text("SELECT set_config('app.org_id', :o, true)"), {"o": str(user.org_id)})
+        await _close_release_cards(s, redis, user.org_id, [p["id"]],
+                                   _RELEASE_CLOSED.get(str(status), RELEASE_CLOSED_CANCELLED))
+        await s.commit()
+    raise conflict("GEN_PROPOSAL_DECIDED", RELEASE_DECIDED_MSG)
+
+
+async def _release_set(user: service.CurrentUser, version: str, status: str, *, kho_ma: str | None = None,
+                       from_: tuple[str, ...] = ("writing",), redis: Any = None, self_id: str | None = None) -> bool:
+    """Đặt trạng thái dòng `hub_release_proposals` ở transaction riêng (kết quả ghi Kho không được mất nếu bước sau
+    lỗi). `status='revert'`: lỗi chắc chắn chưa ghi ⇒ về `pending`, nhưng về `uncertain` nếu trước đó đã có lần ghi chưa
+    chắc (`uncertain_by`). `uncertain` ghi lại Owner vừa ghi. Chuyển từ `uncertain` chỉ khi đúng Owner đó. Trả True khi
+    đã đổi. Có `redis` + `self_id` và trạng thái mới là written / cancelled / uncertain ⇒ đóng luôn thẻ của các Owner
+    KHÁC (cùng transaction riêng này — request ngoài có thể sắp rollback vì lỗi)."""
+    decided = status in ("written", "cancelled")
+    async with sessionmaker()() as s:
+        await s.execute(text("SELECT set_config('app.org_id', :o, true)"), {"o": str(user.org_id)})
+        row = (await s.execute(text("""
+            UPDATE agent.hub_release_proposals
+            SET status = CASE WHEN CAST(:s AS text) = 'revert'
+                              THEN (CASE WHEN uncertain_by IS NULL THEN 'pending' ELSE 'uncertain' END)
+                              ELSE CAST(:s AS text) END,
+                kho_ma = COALESCE(CAST(:m AS text), kho_ma),
+                uncertain_by = CASE WHEN CAST(:s AS text) = 'uncertain' THEN CAST(:u AS uuid) ELSE uncertain_by END,
+                decided_at = CASE WHEN :d THEN now() ELSE decided_at END,
+                decided_by = CASE WHEN :d THEN CAST(:u AS uuid) ELSE decided_by END
+            WHERE org_id = :o AND version = :v AND status = ANY(CAST(:f AS text[]))
+              AND (status <> 'uncertain' OR uncertain_by = CAST(:u AS uuid))
+            RETURNING status, proposal_ids"""),
+            {"s": status, "m": kho_ma, "d": decided, "u": user.id, "o": user.org_id, "v": version,
+             "f": list(from_)})).first()
+        note = _RELEASE_CLOSED.get(str(row.status)) if row is not None else None
+        if row is not None and redis is not None and self_id is not None and note and row.status != "expired":
+            if row.status == "written" and kho_ma:
+                note = f"{note} ({kho_ma})"
+            others = [str(x) for x in (row.proposal_ids or []) if str(x) != self_id]
+            await _close_release_cards(s, redis, user.org_id, others, note)
+        await s.commit()
+    return row is not None
+
+
+async def _close_release_cards(db: AsyncSession, redis: Any, org_id: uuid.UUID, pids: list[str], note: str) -> int:
+    """Đóng các thẻ đề xuất ghi Phiên còn `pending` (Redis + tin đã lưu trong hội thoại) với lời ghi chú
+    `labels.closed`, và đánh dấu đã đọc chuông `gen.kho_proposal` của các thẻ đó. Bên gọi đã đặt app.org_id và tự
+    commit."""
+    closed = 0
+    for pid in pids:
+        q = await proposals.load(redis, pid)
+        if q is None or q.get("status") != "pending" or q.get("org_id") != str(org_id):
+            continue
+        labels = {**(q.get("labels") or {}), "closed": note}
+        q.update({"status": "cancelled", "labels": labels})
+        await redis.set(proposals.key(pid), orjson.dumps(q), keepttl=True)
+        await store.update_proposal_step(db, uuid.UUID(q["conversation_id"]), uuid.UUID(q["turn_id"]), pid,
+                                         {"status": "cancelled", "labels": labels})
+        await db.execute(text("""UPDATE core.notifications SET read_at = now()
+                                 WHERE org_id = :o AND kind = 'gen.kho_proposal' AND link = :l AND read_at IS NULL"""),
+                         {"o": org_id, "l": f"/overview?gen={q['conversation_id']}"})
+        closed += 1
+    return closed
+
+
+async def _mark_uncertain(redis: Any, pid: str) -> None:
+    """502 HUB_WRITE_UNCERTAIN: gắn nhãn `uncertain='1'` vào đề xuất (Redis, giữ TTL) — thẻ vẫn chờ (Sếp mở Kho kiểm
+    rồi bấm lại hoặc Huỷ); nếu sau đó Huỷ, thẻ KHÔNG được nói "không ghi gì vào Kho" (Kho có thể đã có bản ghi). Xác
+    nhận lại thành công thay toàn bộ nhãn ⇒ nhãn này tự mất."""
+    q = await proposals.load(redis, pid)
+    if q is None or q.get("status") != "pending":
+        return
+    q["labels"] = {**(q.get("labels") or {}), "uncertain": "1"}
+    await redis.set(proposals.key(pid), orjson.dumps(q), keepttl=True)
 
 
 class ConfirmIn(BaseModel):
@@ -300,7 +496,7 @@ async def confirm_proposal(pid: uuid.UUID, request: Request, body: ConfirmIn | N
     merged = {**p["fields"], **{k: v for k, v in body.fields.items() if k in spec.editable}}
     tz = await proposals.org_tz(db, user.org_id)
     try:
-        fields = proposals.normalize(ptype, merged, tz)
+        fields = proposals.normalize(ptype, merged, tz, confirming=True)
     except ValueError as e:
         raise field_errors({"fields": str(e)}) from e
     target = proposals.target_of(ptype, fields)
@@ -311,27 +507,50 @@ async def confirm_proposal(pid: uuid.UUID, request: Request, body: ConfirmIn | N
     if proposals.requires_pin(target) and not user.pin_active():
         raise pin_required()
     try:
-        lab = await proposals.labels(db, user, ptype, fields, redis)
+        lab = await proposals.labels(db, user, ptype, fields, redis, request.app)
     except ValueError as e:
         raise field_errors({"fields": str(e)}) from e
+    if p.get("release_version"):
+        lab = {**lab, "release": str(p["release_version"])}  # F-87: giữ nhãn "bản" của thẻ ghi Phiên
     if not await redis.set(proposals.claim_key(pid), "1", nx=True, ex=proposals.CLAIM_TTL_S):
         raise conflict("GEN_PROPOSAL_BUSY", "Đề xuất đang được thực hiện")
+    release: str | None = p.get("release_version")
+    claimed = False
+    calling = False
     try:
+        # Permit ghi Kho (nếu có) được phát TRONG plan_call — sau khi đã qua kiểm quyền + PIN ở trên.
         call = await proposals.plan_call(db, user, ptype, fields, p["id"])
+        if release:
+            await _release_claim(db, user, release, p, redis)
+            claimed = True
         # Đóng transaction của request ngoài TRƯỚC khi gọi nội bộ: request ngoài có thể đang giữ khoá dòng
         # core.sessions (gia hạn phiên / trượt phiên PIN trong load_session) mà request nội bộ cũng UPDATE → hai bên
         # chờ nhau (Postgres không thấy vòng chờ qua ứng dụng). Commit cũng trả connection về pool trong lúc chờ.
         await db.commit()
+        calling = True
         status, res = await proposals.call_as_user(request.app, dict(request.cookies),
                                                    request.headers.get("x-csrf-token", ""), call, ip=user.ip)
+        calling = False
         # Transaction mới cho phần ghi còn lại → đặt lại biến RLS (set_config(..., true) chỉ sống trong 1 transaction).
         await db.execute(text("SELECT set_config('app.org_id', :o, true)"), {"o": str(user.org_id)})
     except BaseException:
         await redis.delete(proposals.claim_key(pid))
+        if claimed:
+            # Lỗi giữa lúc đang gọi ghi (không có phản hồi) ⇒ có thể đã ghi: giữ cho đúng Owner này kiểm, như 502.
+            await _release_set(user, str(release), "uncertain" if calling else "revert", redis=redis,
+                               self_id=p["id"])
         raise
     if status >= 400:
         await redis.delete(proposals.claim_key(pid))
         err_body = res if isinstance(res, dict) else {}
+        uncertain = status == 502 and err_body.get("code") == "HUB_WRITE_UNCERTAIN"
+        if uncertain:
+            await _mark_uncertain(redis, p["id"])
+        if claimed:
+            # 502 HUB_WRITE_UNCERTAIN: CÓ THỂ đã ghi ⇒ không trả về 'pending' (Owner khác sẽ ghi trùng) — chỉ Owner này
+            # bấm lại / huỷ sau khi mở Kho kiểm. Lỗi khác: chắc chắn chưa ghi ⇒ Sếp bấm Xác nhận lại được.
+            await _release_set(user, str(release), "uncertain" if uncertain else "revert", redis=redis,
+                               self_id=p["id"])
         await _log_apart(user, "gen.proposal_confirmed", "blocked" if status in (403, 404, 423) else "failed", p,
                          endpoint=f"{call.method} {call.path}", status=status, code=err_body.get("code"))
         extra = {"errors": err_body["errors"]} if isinstance(err_body.get("errors"), dict) else {}
@@ -342,32 +561,48 @@ async def confirm_proposal(pid: uuid.UUID, request: Request, body: ConfirmIn | N
         raise ApiError(status, str(err_body.get("code") or "GEN_PROPOSAL_FAILED"),
                        str(err_body.get("title") or "Không thực hiện được đề xuất"), err_body.get("detail"), **extra)
     result = proposals.result_of(call, fields, res)
+    if claimed:
+        await _release_set(user, str(release), "written", kho_ma=result.get("code"), redis=redis, self_id=p["id"])
     edited = fields != p["fields"]
     patch = {"status": "confirmed", "fields": fields, "labels": lab,
              "summary": proposals.summary(ptype, fields, lab, tz), "result": result}
     p.update(patch)
     await proposals.save(redis, p)
     await store.update_proposal_step(db, uuid.UUID(p["conversation_id"]), uuid.UUID(p["turn_id"]), p["id"], patch)
+    label = fields.get("title") or lab.get("item") or (lab.get("target") if ptype in proposals.KHO_TYPES else "")
+    detail = {"via": "gen", "proposal_id": p["id"], "type": ptype, "turn_id": p["turn_id"],
+              "conversation_id": p["conversation_id"], "edited": edited,
+              "endpoint": f"{call.method} {call.path}", "fields_digest": engine.digest(fields)}
+    if release:
+        detail["release_version"] = release
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                            action="gen.proposal_confirmed", target_type=result["type"], target_id=result.get("id"),
-                           target_label=str(fields.get("title") or lab.get("item") or "")[:200] or None,
-                           detail={"via": "gen", "proposal_id": p["id"], "type": ptype, "turn_id": p["turn_id"],
-                                   "conversation_id": p["conversation_id"], "edited": edited,
-                                   "endpoint": f"{call.method} {call.path}", "fields_digest": engine.digest(fields)},
-                           ip=user.ip)
+                           target_label=str(label or "")[:200] or None, detail=detail, ip=user.ip)
     return proposals.public(p)
 
 
 @router.post("/proposals/{pid}/cancel")
 async def cancel_proposal(pid: uuid.UUID, request: Request, user: service.CurrentUser = Depends(gen_user),
                           db: AsyncSession = DB) -> dict[str, Any]:
-    p = await _owned_proposal(request, user, pid)
-    if await request.app.state.redis.exists(proposals.claim_key(pid)):
+    redis = request.app.state.redis
+    # Thẻ đã đóng (bấm Huỷ lần nữa, hoặc thẻ ghi Phiên vừa được đóng vì Owner khác đã ghi / huỷ) ⇒ trả trạng thái hiện
+    # tại để thẻ trên màn cập nhật theo — không 409.
+    p = await _owned_proposal(request, user, pid, allow_cancelled=True)
+    if p["status"] == "cancelled":
+        return proposals.public(p)
+    if await redis.exists(proposals.claim_key(pid)):
         raise conflict("GEN_PROPOSAL_BUSY", "Đề xuất đang được thực hiện")
     p["status"] = "cancelled"
-    await proposals.save(request.app.state.redis, p)
-    await store.update_proposal_step(db, uuid.UUID(p["conversation_id"]), uuid.UUID(p["turn_id"]), p["id"],
-                                     {"status": "cancelled"})
+    step: dict[str, Any] = {"status": "cancelled"}
+    if (p.get("labels") or {}).get("uncertain"):
+        step["labels"] = p["labels"]  # huỷ sau lần ghi chưa chắc: mở lại hội thoại vẫn thấy đúng lời "đã đóng"
+    if p.get("release_version"):
+        # F-87: huỷ một đề xuất ghi Phiên của bản mới = huỷ cho cả tổ chức (mỗi bản chỉ ghi một lần): khi bản còn
+        # chờ, hoặc khi CHÍNH Owner này vừa ghi chưa chắc (đã mở Kho kiểm). Thẻ của Owner khác đóng theo.
+        version = str(p["release_version"])
+        await _release_set(user, version, "cancelled", from_=("pending", "uncertain"), redis=redis, self_id=p["id"])
+    await proposals.save(redis, p)
+    await store.update_proposal_step(db, uuid.UUID(p["conversation_id"]), uuid.UUID(p["turn_id"]), p["id"], step)
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                            action="gen.proposal_cancelled", target_type="gen_proposal", target_id=p["id"],
                            detail={"via": "gen", "proposal_id": p["id"], "type": p["type"], "turn_id": p["turn_id"],

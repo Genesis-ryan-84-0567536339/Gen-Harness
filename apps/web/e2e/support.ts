@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { APIRequestContext, Page, Route } from '@playwright/test';
+import { expect, type APIRequestContext, type Locator, type Page, type Route } from '@playwright/test';
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const repoRoot = resolve(here, '../../..');
@@ -164,9 +164,59 @@ export async function p3Hook(request: APIRequestContext, cluster: string, hook: 
 }
 
 /** Authenticated JSON call through the page's cookies (CSRF handled). */
-export async function apiCall(page: Page, method: 'GET' | 'POST' | 'PUT' | 'PATCH', path: string, data?: unknown) {
+export async function apiCall(page: Page, method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, data?: unknown) {
   const token = await csrf(page.request);
   const res = await page.request.fetch(`/api/v1${path}`, { method, data, headers: { 'X-CSRF-Token': token } });
   if (!res.ok()) throw new Error(`${method} ${path} failed: ${res.status()} ${await res.text()}`);
   return res.status() === 204 ? null : res.json();
+}
+
+/**
+ * v0.1.50 (F-81, QD-18) — mock Gen-hub: nối sẵn + Kiểm tra xanh (`link:'on'`), quyền ghi Kho của token (`write`), lỗi lần ghi kế tiếp
+ * (`kho`). Hook `hubSim` của mock-p4-mcp; không đụng Gen-hub thật.
+ */
+export async function hubSim(request: APIRequestContext, data: { link?: 'on'; write?: 'ok' | 'missing'; kho?: 'ok' | 'uncertain' | 'rejected' | 'permit'; scopes?: 'full' | 'missing'; breaker?: boolean } = {}) {
+  return p3Hook(request, 'mcp', 'hubSim', data);
+}
+
+/** Số lời gọi `/hub/kho/write` mà mock đã nhận (kể cả lỗi) + các lần ghi thành công. Huỷ đề xuất thì phải là 0. */
+export async function khoCalls(request: APIRequestContext): Promise<{ calls: number; writes: Array<{ proposal_id: string; tool: string; code: string | null }> }> {
+  return (await p3Hook(request, 'mcp', 'khoCalls')) as { calls: number; writes: Array<{ proposal_id: string; tool: string; code: string | null }> };
+}
+
+/** Hộp PIN đang mở ⇒ nhập mã PIN của Owner (6 chữ số) và chờ hộp đóng. */
+export async function enterPin(page: Page): Promise<void> {
+  const dlg = page.getByRole('dialog', { name: 'Mã PIN xác nhận thao tác' });
+  await expect(dlg).toBeVisible();
+  await page.getByLabel('Mã PIN — chữ số 1/6').click();
+  await page.keyboard.type(OWNER.pin);
+  await expect(dlg).toBeHidden();
+}
+
+/** PIN có thể còn hiệu lực từ thao tác trước — chỉ nhập khi hộp PIN hiện (chờ thật tối đa 2,5 giây). */
+export async function enterPinIfAsked(page: Page): Promise<void> {
+  const dlg = page.getByRole('dialog', { name: 'Mã PIN xác nhận thao tác' });
+  const shown = await dlg
+    .waitFor({ state: 'visible', timeout: 2500 })
+    .then(() => true)
+    .catch(() => false);
+  if (shown) await enterPin(page);
+}
+
+/** Mở khung Gen (nếu đang đóng) và trả về khung. */
+export async function openGen(page: Page): Promise<Locator> {
+  const panel = page.getByRole('complementary', { name: /Gen — trợ lý quản trị/ });
+  if (!(await panel.isVisible())) await page.getByRole('button', { name: /Hỏi Gen/ }).click();
+  await expect(panel).toBeVisible();
+  return panel;
+}
+
+/** Hỏi Gen một câu và trả về thẻ đề xuất mới nhất có tên `Đề xuất: <title>`. */
+export async function askGen(page: Page, question: string, cardTitle: string): Promise<Locator> {
+  const panel = await openGen(page);
+  await panel.getByLabel('Câu hỏi cho Gen').fill(question);
+  await panel.getByRole('button', { name: 'Gửi', exact: true }).click();
+  const card = panel.getByRole('group', { name: `Đề xuất: ${cardTitle}` }).last();
+  await expect(card).toBeVisible();
+  return card;
 }

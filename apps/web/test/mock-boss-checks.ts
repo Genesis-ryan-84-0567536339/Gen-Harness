@@ -23,10 +23,13 @@
  * Hook e2e `POST /api/v1/__mock/p3/bossChecks/seedAgy {}`: đặt sẵn 2 hồ sơ Google an@… (không dùng), binh@… (đang dùng).
  * - facebook_reply (v0.1.47, F-79, dòng 8, KHÔNG bắt buộc ⇒ required_total vẫn 6): không có nút chạy (POST run → 404);
  *   hook `seedFacebookReply {}` ghi 'pass'.
+ * - kho_write (v0.1.50, F-81, dòng 9 "Gen ghi Kho", KHÔNG bắt buộc ⇒ required_total vẫn 6): không có nút chạy (POST run → 404); máy chủ
+ *   tự ghi 'pass' sau lần ghi Kho THẬT đầu tiên (mock-p4-mcp gọi hook `recordKhoWrite`); hook `seedKhoWrite {}` ghi 'pass'. Đạt dòng hub
+ *   kèm `detail.write_scopes` {kho} + `write_missing` (token chứa "khongghi" ⇒ kho false; vẫn Đạt).
  * Hook e2e `POST /api/v1/__mock/p3/bossChecks/seedClaude {}`: một hồ sơ Claude đang dùng, CHƯA có bản claude_login.
  */
 import { randomUUID } from 'node:crypto';
-import type { BossCheck, BossCheckKey, BossOverview, BossRow, CliProfile, HubLink, HubReadScopes, Provider, SocialAccount } from '@gen-harness/contracts';
+import type { BossCheck, BossCheckKey, BossOverview, BossRow, CliProfile, HubLink, HubReadScopes, HubWriteScopes, Provider, SocialAccount } from '@gen-harness/contracts';
 import type { P2Ctx } from './mock-phase2';
 import type { TelegramOutcome } from './mock-telegram';
 
@@ -34,7 +37,7 @@ interface Opts {
   fresh: boolean;
   emit: (type: string, data: unknown) => void;
   hubLink: () => HubLink;
-  hubTest: () => { ok: boolean; error: string | null; error_code: string | null; read_scopes?: HubReadScopes };
+  hubTest: () => { ok: boolean; error: string | null; error_code: string | null; read_scopes?: HubReadScopes; write_scopes?: HubWriteScopes; write_missing?: string[] };
   socialAccounts: () => SocialAccount[];
   cliProfiles: (kind: string) => CliProfile[];
   activateCli: (id: string) => boolean;
@@ -59,7 +62,7 @@ export function isLocalHost(host: string): boolean {
   return !!v4 && (Number(v4[1]) === 127 || v4.slice(1).every((x) => Number(x) === 0));
 }
 
-const KEYS: BossCheckKey[] = ['hub', 'facebook', 'agy_login', 'agy_call', 'agy_switch', 'claude_login', 'claude_call', 'jev', 'telegram', 'remote_access', 'facebook_reply'];
+const KEYS: BossCheckKey[] = ['hub', 'facebook', 'agy_login', 'agy_call', 'agy_switch', 'claude_login', 'claude_call', 'jev', 'telegram', 'remote_access', 'facebook_reply', 'kho_write'];
 const RUNNABLE = new Set<BossCheckKey>(['hub', 'facebook', 'agy_call', 'agy_switch', 'claude_call', 'jev', 'telegram', 'remote_access']);
 const NEEDS_PIN = new Set<BossCheckKey>(['hub', 'agy_switch']);
 const FB_READ_MS = 1500;
@@ -74,6 +77,8 @@ const ROWS: Array<Omit<BossRow, 'done'>> = [
   { row: 7, key: 'remote', title: 'Truy cập từ xa', optional: false, checks: ['remote_access'] },
   // v0.1.47 (F-79): không bắt buộc, không có nút chạy (RUNNABLE không có) — Đạt do hook seedFacebookReply / gửi thật.
   { row: 8, key: 'facebook_reply', title: 'Facebook trả lời', optional: true, checks: ['facebook_reply'] },
+  // v0.1.50 (F-81): không bắt buộc, không có nút chạy — Đạt do hook seedKhoWrite / lần ghi Kho thật đầu tiên.
+  { row: 9, key: 'kho_write', title: 'Gen ghi Kho', optional: true, checks: ['kho_write'] },
 ];
 
 export function createMock(opts: Opts) {
@@ -139,6 +144,7 @@ export function createMock(opts: Opts) {
       6: pass('telegram'),
       7: pass('remote_access'),
       8: pass('facebook_reply'),
+      9: pass('kho_write'),
     };
     const rows = ROWS.map((r) => ({ ...r, done: done[r.row] }));
     return { rows, results: { ...results }, required_done: rows.filter((r) => !r.optional && r.done).length, required_total: 6, switch_passes: switchPasses };
@@ -150,7 +156,7 @@ export function createMock(opts: Opts) {
         if (!opts.hubLink().configured) return fail('hub', 'HUB_LINK_NOT_CONFIGURED', 'Chưa nhập địa chỉ và token Gen-hub');
         const t = opts.hubTest();
         // v0.1.49 (QD-16): `detail.read_scopes` = quyền đọc thêm (không bắt buộc) của lần Kiểm tra — thiếu quyền vẫn là Đạt.
-        return t.ok ? record('hub', 'pass', { detail: { tools: 3, ...(t.read_scopes ? { read_scopes: { ...t.read_scopes } } : {}) } }) : fail('hub', t.error_code ?? 'HUB_ERROR', t.error ?? 'Gen-hub báo lỗi');
+        return t.ok ? record('hub', 'pass', { detail: { tools: 3, ...(t.read_scopes ? { read_scopes: { ...t.read_scopes } } : {}), ...(t.write_scopes ? { write_scopes: { ...t.write_scopes }, write_missing: t.write_missing ?? [] } : {}) } }) : fail('hub', t.error_code ?? 'HUB_ERROR', t.error ?? 'Gen-hub báo lỗi');
       }
       case 'facebook': {
         const acc = opts.socialAccounts().find((a) => a.id === body.account_id && a.status !== 'revoked');
@@ -247,5 +253,9 @@ export function createMock(opts: Opts) {
   /** Hook e2e: dòng 8 'Facebook trả lời' đạt (như sau một lần gửi thật được xác nhận). */
   const seedFacebookReply = () => record('facebook_reply', 'pass', { detail: { action: 'reply_comment' } });
 
-  return { handle, hooks: { seedAgy, seedClaude, seedFacebookReply, overview, recordTelegram, forgetTelegram, recordRemote } as Record<string, (...args: never[]) => unknown>, dispose: () => {} };
+  /** Dòng 9 'Gen ghi Kho' đạt — máy chủ ghi sau lần ghi Kho THẬT đầu tiên được xác nhận (không ghi đè nếu đã đạt). */
+  const recordKhoWrite = () => (pass('kho_write') ? (results.kho_write as BossCheck) : record('kho_write', 'pass', { detail: { action: 'kho_write' } }));
+  const seedKhoWrite = () => recordKhoWrite();
+
+  return { handle, hooks: { seedAgy, seedClaude, seedFacebookReply, seedKhoWrite, recordKhoWrite, overview, recordTelegram, forgetTelegram, recordRemote } as Record<string, (...args: never[]) => unknown>, dispose: () => {} };
 }

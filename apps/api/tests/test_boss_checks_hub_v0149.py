@@ -82,3 +82,57 @@ async def test_clean_detail_whitelist(owner_api: Api, db: Any) -> None:
                                                              "token": TOKEN})
     await db.commit()
     assert rec["detail"] == {"read_scopes": SCOPES, "read_missing": MISSING}
+
+
+# ─── v0.1.50 (F-81): quyền GHI Kho (kho_create, kho_update) — cũng chỉ để hiển thị ───────────────────────────────
+
+WSCOPES = {"kho": False, "kho_create": True, "kho_update": False}
+WMISSING = ["ghi Kho (kho_update)"]
+
+
+async def test_hub_pass_keeps_write_scopes(owner_api: Api, db: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(hub, "test_link", _fake_test_link({
+        "ok": True, "latency_ms": 42, "exposed_tools": ["a"], "missing_tools": [], "read_scopes": SCOPES,
+        "read_missing": MISSING, "write_scopes": WSCOPES, "write_missing": WMISSING, "token": TOKEN}))
+    await verify_pin(owner_api)
+    out = (await owner_api.send("POST", "/boss-checks/hub/run", {})).json()
+    assert out["status"] == "pass" and out["detail"]["write_scopes"] == WSCOPES
+    assert out["detail"]["write_missing"] == WMISSING
+    await db.rollback()
+    stored = (await db.execute(text("SELECT detail FROM ops.boss_checks WHERE check_key = 'hub'"))).scalar_one()
+    assert stored["write_scopes"] == WSCOPES and TOKEN not in orjson.dumps(stored).decode()
+    # Thiếu quyền ghi KHÔNG làm dòng Gen-hub "chưa xong".
+    ov = (await owner_api.get("/boss-checks")).json()
+    assert next(x for x in ov["rows"] if x["key"] == "hub")["done"] is True
+    assert ov["results"]["hub"]["detail"]["write_missing"] == WMISSING
+
+
+async def test_hub_fail_does_not_record_write_scopes(owner_api: Api, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(hub, "test_link", _fake_test_link({
+        "ok": False, "error": "Token Gen-hub sai", "error_code": "HUB_AUTH", "latency_ms": 3, "exposed_tools": [],
+        "missing_tools": [], "write_scopes": WSCOPES, "write_missing": WMISSING}))
+    await verify_pin(owner_api)
+    out = (await owner_api.send("POST", "/boss-checks/hub/run", {})).json()
+    assert out["status"] == "fail" and "write_scopes" not in out["detail"] and "write_missing" not in out["detail"]
+
+
+async def test_clean_detail_whitelist_write_scopes(owner_api: Api, db: Any) -> None:
+    org = await org_id(db)
+    rec = await boss.record(db, org, "hub", "pass", detail={"write_scopes": WSCOPES, "write_missing": WMISSING,
+                                                             "token": TOKEN})
+    await db.commit()
+    assert rec["detail"] == {"write_scopes": WSCOPES, "write_missing": WMISSING}
+
+
+async def test_kho_write_row_is_optional_and_not_runnable(owner_api: Api, db: Any) -> None:
+    org = await org_id(db)
+    assert (await owner_api.send("POST", "/boss-checks/kho_write/run", {})).status_code == 404
+    ov = (await owner_api.get("/boss-checks")).json()
+    row = next(x for x in ov["rows"] if x["key"] == "kho_write")
+    assert row["row"] == 9 and row["optional"] is True and row["done"] is False
+    assert ov["required_total"] == 6
+    await boss.record(db, org, "kho_write", "pass")
+    await db.commit()
+    ov = (await owner_api.get("/boss-checks")).json()
+    assert next(x for x in ov["rows"] if x["key"] == "kho_write")["done"] is True
+    assert ov["required_done"] == 0  # tuỳ chọn: không tính vào số bắt buộc

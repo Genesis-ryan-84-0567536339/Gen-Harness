@@ -157,9 +157,16 @@ async def test_test_exposes_only_whitelisted_read_tools(owner_api: Api, fake_hub
     by = {r.name: r for r in rows}
     for n in ("kho_tom_tat", "kho_search", "kho_get", "kho_find_by_id", "kho_list"):
         assert by[PREFIX + n].is_exposed is True and by[PREFIX + n].grants == ["core.gen"]
-    assert by[PREFIX + "kho_create"].is_exposed is False and by[PREFIX + "kho_create"].grants == []
+    # v0.1.50 (F-81): kho_create (tool GHI Kho) giờ được mở + cấp cho core.gen để `write_kho` đi được — KHÔNG bị gọi
+    # khi kiểm, và đường đọc (suffix_of / call_kho) vẫn từ chối nó (test_suffix_whitelist, test_unknown_suffix_refused).
+    assert by[PREFIX + "kho_create"].access == "write"
+    assert by[PREFIX + "kho_create"].is_exposed is True and by[PREFIX + "kho_create"].grants == ["core.gen"]
     assert by["vault__vault-35323"].is_exposed is False and by["vault__vault-35323"].grants == []
     assert fake_hub.calls == [PREFIX + "kho_tom_tat"]
+    # Máy chủ giả này chỉ có kho_create (thiếu kho_update) ⇒ chưa đủ quyền ghi Kho; thiếu quyền ghi KHÔNG làm ok=false.
+    assert out["ok"] is True and out["write_scopes"] == {"kho": False, "kho_create": True, "kho_update": False}
+    assert out["write_missing"] == ["ghi Kho (kho_update)"] and out["exposed_write_tools"] == [PREFIX + "kho_create"]
+    assert out["write_hidden"] == []
 
 
 def test_suffix_whitelist() -> None:
@@ -167,6 +174,12 @@ def test_suffix_whitelist() -> None:
     assert hub.suffix_of("kho_search") == "kho_search"
     for bad in ("mcp-1__kho_create", "kho_update", "vault__vault-1", "evil_kho_tom_tat", "mcp__kho_tom_tat_x"):
         assert hub.suffix_of(bad) is None
+    # v0.1.50: hậu tố GHI Kho có hàm riêng (chỉ cho write_kho) — suffix_of vẫn chỉ-đọc.
+    assert hub.write_suffix_of("mcp-1__kho_create") == "kho_create"
+    assert hub.write_suffix_of("kho_update") == "kho_update"
+    for bad in ("kho_delete", "gmail_send", "kho_tom_tat", "evil_kho_create", "mcp__kho_update_x"):
+        assert hub.write_suffix_of(bad) is None
+    assert hub.KHO_WRITE_SUFFIXES == ("kho_create", "kho_update")
 
 
 async def test_unknown_suffix_refused(owner_api: Api, fake_hub: FakeHub, db: Any, redis: Any) -> None:

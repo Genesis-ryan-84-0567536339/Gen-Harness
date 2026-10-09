@@ -1,8 +1,10 @@
-# Gen-Harness — Lộ trình tổng thể (cập nhật 02/10/2026)
+# Gen-Harness — Lộ trình tổng thể (cập nhật 09/10/2026, sau v0.1.50)
 
 Nguồn chuẩn tiến độ. Mỗi đợt = 1 PR = 1 bản phát hành. CI xanh mới tạo bản thử (prerelease); E2E cài thật xanh mới tự
 nâng thành bản chính thức (latest); lịch tự cập nhật đêm đợi bản chính thức ra đủ 24 giờ. genh chỉ kiểm SHA-256 theo
-checksums.txt — CHƯA kiểm chữ ký cosign (để sau).
+checksums.txt — CHƯA kiểm chữ ký cosign (để sau, xem mục Nợ).
+Lịch sử từng bản: [CHANGELOG.md](../CHANGELOG.md) + `docs/releases/`. Hiện trạng và việc Boss còn treo:
+[HANDOFF](reports/HANDOFF-v0.1.1.md). Vận hành: [runbook](runbook.md). Ngày dùng ngày Release trên GitHub, giờ Việt Nam.
 
 ## Vai trò
 | Vai | Ai | Việc |
@@ -10,160 +12,80 @@ checksums.txt — CHƯA kiểm chữ ký cosign (để sau).
 | Owner | Sếp (Ryan) | định hướng, duyệt, brainstorm |
 | Dev | Claude Code (+ sub agent Haiku/Sonnet/Opus) | code, review, phát hành |
 | ~~Dev phụ~~ | ~~Google Jules~~ — **Boss bỏ (QD-10, xác nhận 30/09)** | việc code cho repo khác đi theo agy đa repo (gen-workplace) |
-| Quản trị trong app | Gen | vận hành dữ liệu, dẫn Sếp dùng app |
-| Vòng ngoài | agent Zalo/WhatsApp (+ Playwright sau) | thu thập thị trường |
+| Quản trị trong app | Gen | vận hành dữ liệu, dẫn Sếp dùng app; đề xuất — Sếp Xác nhận (+ mã PIN khi nhạy cảm) mới làm |
+| Vòng ngoài | agent Zalo/WhatsApp (bridge, QR); Facebook cá nhân qua trình duyệt riêng (`apps/browser`, Playwright) | thu thập thị trường; Gen đọc, trả lời/nhắn chỉ khi Sếp xác nhận |
 
 ## Đã xong
-v0.1.15–0.1.20: thiết lập "Để sau" + hướng dẫn từng bước, nút Cập nhật ngay, reset mật khẩu / tin cậy CA, phiên 7 ngày,
-Tài khoản của tôi + bắt buộc đổi mật khẩu tạm, sao lưu & khôi phục trên giao diện.
-v0.1.21: Gen v1 (A1–A3) — khung chat, dẫn đường trên UI, nguồn Jev; cờ `gen.enabled` (bật cho Owner).
-v0.1.22: Đợt B1–B3 — quản lý người dùng, sửa thông tin công ty, trang Trợ giúp.
-v0.1.23: Đợt B4–B7 — giao diện điện thoại, trang lỗi/404, chuông thông báo, sáng/tối.
-v0.1.24: Đợt A4 — Gen v2 bước 1: đề xuất thao tác có xác nhận (nháp tin, nhắc việc, gán người).
-v0.1.25: Đợt C1 — lọc đầu Hộp thư (trùng, rác, điểm) dùng Jev khi có, quy tắc khi không.
-v0.1.26: Đợt D1 (lát đầu) — Gen đọc Kho Ryan qua Gen-hub (chỉ đọc, chỉ Owner, che dữ liệu trước khi gửi model).
-v0.1.27: gia cố & phủ test — ghim DNS cho Gen-hub, lỗi Gen-hub chỉ Owner thấy, route MCP chung không lộ Kho, số liệu lọc đầu
-theo phạm vi, rà trần so trùng, hạn lưu chuông 30/90 ngày, nhắc việc chịu lỗi từng dòng; e2e thẻ đề xuất/lọc đầu/Gen-hub/chuông.
-v0.1.28: sửa theo rà soát UX — bước 4 phải có model (tự chọn model đã gọi thử, gán cho agent lõi), bước 12 nói thật việc còn
-thiếu, nguồn lỗi xuống cuối + xoá được + một nhãn trạng thái, lỗi kỹ thuật thành câu dễ hiểu, "Để sau" dùng quy tắc/sao lưu
-mặc định, tắt phụ đề tiếng Anh + bỏ chữ lập trình viên, ma trận quyền tiếng Việt, bớt ngõ cụt cho vai trò khác Owner, điện thoại
-(bảng → thẻ). Còn lại: ghi chú phát hành tiếng Việt, số đếm Hộp thư, một số mục Nhẹ.
-v0.1.29: Boss 30/09 "có công cụ, dùng hay không do Owner quyết, cảnh báo rủi ro rõ" — V2 bước 4 "Để sau" được (hộp cảnh báo,
-dải "Chưa có model" ở bước 12 + Tổng quan, chọn model lại ở /guide/4); **D3 lát đầu**: dịch vụ `browser` (Playwright,
-không DB, không khoá master) + `browser-egress` (chỉ tên miền Facebook), màn Tài khoản mạng xã hội (chỉ Owner, chấp nhận
-rủi ro từng tài khoản, Owner tự đăng nhập trong cửa sổ trình duyệt từ xa, phiên mã hoá, gỡ = xoá phiên), Gen CHỈ ĐỌC thông
-báo + danh sách hội thoại Facebook cá nhân và tóm tắt, lịch đọc (tắt mặc định), Dừng tất cả, giới hạn tốc độ.
-v0.1.30 (hotfix): màn /guide/8 "Agent đầu tiên" sập (React error #31 `{reasons}`) khi không model nào chạy được — lỗi
-MODEL_UNAVAILABLE đúng khuôn chung (`detail` là chữ, `reasons` cấp ngoài), web không bao giờ vẽ đối tượng lỗi thô, trạng thái
-"Chọn model" tại chỗ; lối vào cố định "Hướng dẫn thiết lập" (thanh bên + menu tài khoản, Owner), thẻ "Việc thiết lập tiếp" có "Ẩn";
-mục "Cập nhật phần mềm" cố định (Hệ thống + Trợ giúp) có "Kiểm tra bản mới", đệm bản mới nhất 1 giờ → 10 phút.
-v0.1.31: Boss 01/10 "không thấy model và nhóm model nào để chọn" — nguồn CLI liệt kê model thật (`agy models`) theo nhóm
-(Gemini / Claude qua Antigravity / Claude…) kèm gợi ý nhanh-rẻ / mạnh, danh mục dự phòng khi CLI không liệt kê được, gọi thử
-THẬT trước khi lưu model ("Dùng model này" = model mặc định của nguồn); một sự thật cho trạng thái phiên CLI (token tự gia hạn
-→ "Đang hoạt động", "Gọi thử OK" chỉ khi gọi thật được); nguồn mới **Claude Code CLI** (gói Claude Pro/Max của Owner, đăng
-nhập trong container bằng link + mã, nhiều tài khoản, tắt tới khi đăng nhập, cảnh báo điều khoản — QD-12 Owner tự quyết).
-v0.1.32: Boss 01/10 "high là mức suy nghĩ, không phải tên model" — model và MỨC SUY NGHĨ (effort) tách riêng (agy `--model
-<gốc> --effort low|medium|high`, Claude Code `--effort` low…max), chuyển dữ liệu cũ (migration 0023), danh sách không thu gọn
-còn model đã lưu, mỗi model có nguồn (CLI / tài liệu chính thức / "chưa xác minh"), nhận diện "CLI không nhận" chính xác +
-"Chi tiết kỹ thuật", "Gọi thử OK" kèm giờ, nút **Chẩn đoán** (chỉ Owner) cho nguồn CLI với đầu ra thô đã che + "Chép".
-v0.1.33: cổng phát hành & CI đủ test (F-9, F-13) — CI chạy trước Release, Release ra dạng bản thử (prerelease), E2E cài
-thật xanh mới tự nâng thành bản chính thức (latest); lịch đêm đợi thời gian chín 24 giờ; CI thêm go vet/go test 4 hệ điều
-hành, pytest dưới vai app, Playwright mock, kiểm alembic 1 head, job tổng `ci-ok`/`installer-ok`. Sửa tài liệu: genh chưa kiểm cosign.
-v0.1.34: `genh update` an toàn (F-10, F-11, F-33, F-35, F-37) — tải bản mới TRƯỚC sao lưu (tải lỗi = chưa đụng gì), chỉ
-khôi phục CSDL khi đã migrate (container tạm từ ảnh cũ), bản lỗi tự quay về bản cũ và lịch đêm không thử lại bản đó, đã mới
-nhất thì không sao lưu/không tải, kiểm đĩa + dọn ảnh cũ (giữ 2 bản), giới hạn log mọi dịch vụ (10 MB × 3); E2E thêm dữ liệu
-mẫu + đếm dòng và job bản hỏng cố ý (promote đòi xanh).
-v0.1.35: sửa lỗi đỏ trong ứng dụng (F-1, F-5, F-14, F-15, F-20 phần gấp, F-43) — giao việc / gán người / gán BOT dùng
-người và trợ lý thật (`/pickers/*`, CI cấm ID giả), Tài liệu không phải PDF/ảnh buộc tải xuống + CSP sandbox, Sổ tay theo
-quyền Kho, PIN cho nhà cung cấp AI / khoá / chuỗi ưu tiên, lỗi thân thiện có mã (không lộ SQL, tắt /docs production), e2e
-thật rút gọn 4 luồng trong CI. Còn: F-20 phần còn lại (✅ xong ở v0.1.45), sinh type từ OpenAPI (hoãn).
-v0.1.36: hệ thống tự báo khi hỏng (F-6 bước 1, F-3, F-4 bước 1, F-45, F-46, F-2 tạm) — chuông khử trùng lặp
-(`ops.health_alerts`) cho kênh rớt / model hết hạn / cập nhật lỗi / sao lưu quá 36 giờ / Bộ xử lý nền im / ổ đĩa sắp đầy,
-`GET /system/health` (không đụng `/ready`), dải "Cần Sếp xử lý" đầu Tổng quan + thẻ "Sức khoẻ hệ thống"; sao lưu timeout
-3600 giây, bị huỷ thì báo chuông; log JSON có ts + traceback + error_id; cron theo giờ VN (job nặng 04:20–05:10); một số
-phiên bản từ build-arg (`gh.__version__`, LABEL ảnh, Trợ giúp hiện "phiên bản máy chủ" + "phiên bản công cụ cài đặt (genh)"). Còn: F-6/F-4 các
-bước sau (F-2 job tự xoá theo hạn lưu: xong ở v0.1.40).
-v0.1.37: cập nhật tự lành (F-34, F-35 phần còn lại, F-72, F-73) — khoá loại trừ `<gốc cài>/genh.lock` (lịch đêm bận
-bỏ qua, gõ tay bận GH-E94A), bắt SIGTERM + rollback không bị huỷ (hạn riêng 10 phút, dừng giữa chừng GH-E94B, lịch đêm thử
-lại), unit systemd `KillMode=mixed`/`TimeoutStopSec=900`, nhịp sống `run/genh-heartbeat.json` ⇒ Console hiện "bị dừng giữa
-chừng" + Thử lại thay vì kẹt "đang cập nhật"; tải binary genh theo thời gian rảnh + thử lại 3 lần (cả `install.sh`);
-`genh status/doctor` kiểm linger + `docker.service` enabled, chuông `host.autostart` kèm lệnh sửa; E2E nâng cấp có dữ liệu
-thêm ô `tags[3]` (nhảy nhiều bản) + kiểm khoá/tự chạy lại khi bật máy.
-v0.1.38: cô lập Antigravity CLI + gói chuyển máy (F-22, F-17) — agy chạy với cwd rỗng 0700 riêng mỗi lượt, env sạch,
-prompt qua stdin, `--model=<tên>` qua regex, tắt slash command; phiên Claude Code sang volume riêng `claude_state` (api tự
-chuyển tệp cũ); **luật cứng: agy chỉ dùng cho Gen của Sếp** (sàng lọc/trực việc/nhân viên bị từ chối, gán → 409
-`AGY_OWNER_GEN_ONLY`); canary offline trên agy 1.2.9 thật "không lộ" + bước canary trong E2E cài thật. Gói chuyển máy mã
-hoá lại phiên mạng xã hội; phiên không mở được → 409 `SOCIAL_NEEDS_LOGIN` + "Cần đăng nhập lại"; lịch đọc cô lập lỗi từng
-tài khoản; test quét mọi cột `*_enc`. Còn: canary `--live` có đăng nhập (v0.1.39, sau khi Boss đăng nhập agy) — chỉ nới
-luật cứng khi live "không lộ".
-v0.1.39: kết nối chạy thật cùng Boss (F-74, F-76, F-77, F-78, F-31, F-32, F-28) — trang **"Việc Sếp cần làm"**
-(`/guide/viec-sep`, chỉ Owner): 5 dòng Gen-hub, Facebook, Google/agy (2 tài khoản, đổi qua lại 2 lần kiểm bằng lượt gọi
-thật), Claude Code CLI, Jev (không bắt buộc, kiểm 1 lần); mỗi lần bấm ghi vào `ops.boss_checks` (migration 0025, không lưu
-token/mật khẩu/email đầy đủ/giá trị mã — mã đăng nhập chỉ lưu dạng `code_shape`), `GET /boss-checks` + khối `boss_checks`
-ở `/system/health` để Claude tự đọc. Gen-hub: địa chỉ https công khai tự bật "mạng công cộng", lỗi có mã thống nhất
-(`HUB_TOKEN_REJECTED`, `MCP_NETWORK_BLOCKED`…). Mục "Mạng xã hội" trên thanh bên + thẻ Facebook ở Hệ thống › Kênh + Gen mở
-`/social`; một tên "Hướng dẫn thiết lập" (9 việc, thêm Facebook/Gen-hub, việc 10 trỏ `/system?tab=users`, xong theo dữ liệu
-thật). Còn: nghiệm thu thật với tài khoản của Boss (kết quả tự ghi ở `ops.boss_checks`), canary `--live` agy sau khi Boss
-đăng nhập, đối chiếu `code_shape` với regex F-56 (✅ xong ở v0.1.45); Telegram trong hướng dẫn hoãn.
-v0.1.40: dữ liệu an toàn (F-12, F-2, F-16) — **bản sao ngoài máy**: `genh offsite set|run|status|disable`, lịch tuần Chủ
-nhật (systemd/cron/launchd/schtasks) xuất gói mã hoá ra ổ USB/NAS Owner chọn, tự kiểm gói (`gh.bundle verify`), xoay vòng 4
-gói, đích chưa mount ⇒ GH-EB01 không ghi gì; khoá khôi phục riêng + "Bộ khôi phục" (in/QR), "Tải gói mang đi" (Owner + PIN),
-chuông `offsite.stale` (> 7 ngày) / `offsite.failed` ở "Cần Sếp xử lý"; bỏ S3/MinIO giả (đích chỉ `local`); `genh uninstall`
-mặc định giữ dữ liệu (`--delete-data` mới xoá); E2E `e2e-offsite` thử khôi phục thật vào cài đặt mới (promote đòi xanh).
-**Hạn lưu thật**: `gh/retention.py` (partman retention + xoá theo lô, `browser_jobs.result` 14 ngày), nút Sửa mở lại,
-`ops.action_log` "Không áp dụng". **Job nặng**: dò trùng danh tính không còn ngừng đề xuất (NOT EXISTS + watermark + trigram),
-bản đồ chỉ quét cửa sổ thời gian, job quá giờ 2 lần ⇒ chuông `job.timeout`. Migration 0026. Còn: `ops.action_log` hạn lưu
-(vướng chuỗi băm) — để sau.
-v0.1.41: Gen trợ lý thật, lát 1 (F-8 a+b, F-86, F-84 phần ưu tiên) — khung Gen **nhớ hội thoại** qua tải lại + "Hội thoại
-cũ"; **Bản tin Gen** 07:30/17:30 giờ VN (việc đến hạn, khách nóng, nháp chờ duyệt, sự cố, Facebook mới, Kho) thành một
-chuông mở đúng bản tin, không có khoá API vẫn gửi kèm dòng "Dán khoá OpenRouter/Gemini để Gen tóm tắt"; **việc nền mặc định
-chỉ dùng khoá API** — Claude Code CLI chỉ khi Owner bật (cảnh báo nguyên văn + tích + PIN, QD-12), chỉ còn CLI ⇒ chuông
-`ai.background_no_source`; nút **Hữu ích / Không hữu ích**; **chi phí AI ₫/ngày theo agent** (giá model, trần mỗi ngày +
-chuông vượt trần) ở Tổng quan; mẫu nhà cung cấp **OpenRouter**. Migration 0027. Còn: F-8 (c) gửi bản tin qua Telegram
-(✅ xong ở v0.1.44); F-84 phần khác (duyệt nháp, đề xuất Deal/Vụ việc, vai trò khác, stream) hoãn; bộ 10–15 câu hỏi chuẩn + quyết
-định giữ/bỏ Jev chạy song song sau bản này.
-v0.1.42: "Chế độ Boss" = MỘT menu gọn theo việc (F-7, F-26, F-61, F-63–F-67, F-41) — thanh bên Hôm nay · Hộp thư & Việc ·
-Khách & Cơ hội · Kết nối · Đội ngũ · Cài đặt + "Nâng cao" thu gọn (không có công tắc, không có cây menu thứ hai); trang
-**Kết nối** một trang (Bộ não AI + tài khoản CLI, Zalo, WhatsApp, Telegram, Facebook, Gen-hub, MCP — viên Đang chạy / Cần
-Sếp xử lý / Chưa nối + một nút chính); **Đội ngũ** (Đánh giá/Chăm sóc chỉ khi đã có nhân viên); **Cài đặt** lọc tab theo
-quyền; `/` về màn đầu tiên của vai trò (Agent NV → Hộp thư); mỗi thẻ một chỗ (Cập nhật · PIN · CLI · Gen-hub; thang tự trị
-khai một nơi); Hôm nay một hàng 4 số; header gọn ngoài Nâng cao, logo phiên bản thật, bỏ phụ đề tiếng Anh; Plugin ẩn &
-đóng băng, Hồ sơ sống chỉ mở từ danh sách. Link cũ (`/system?tab=channels|users`) tự chuyển.
-v0.1.43: bỏ lời hứa không thật & chữ khó hiểu (F-23, F-25, F-29, F-30, F-38 phần logic, F-62, F-24 chỉ chữ) — bước 1
-không còn "Dùng dữ liệu mẫu"; gán model chỉ 3 khoá lõi (`core.refinery`, `core.reply`, `core.gen`); màn trống dẫn "Nối
-kênh"/"Quét lại QR"/"Chọn nhóm để nghe"; thang tự trị 3 mức ở giao diện (5–6 ở Nâng cao, backend giữ 0–6); Lọc tin Thấp/Vừa/Cao, Jev +
-trọng số vào Nâng cao; ẩn độ tin cậy trên thẻ Hộp thư; `gh/textnorm.py` + `lib/format.ts` dùng chung; nháp tin Gen "Đã lưu
-nháp — chưa gửi" + "Mở để duyệt và gửi". Còn: F-38 phần còn lại (gom khi chạm vào code).
-v0.1.44: kênh Telegram tới Sếp + Trực canh máy chủ + Gói chẩn đoán (F-6 bước 2, F-8 c, F-4 bước 2) — genh tự cài lịch
-`gen-harness-watchdog` mỗi 12 phút (`genh doctor --notify`): đo dịch vụ/api/đĩa/sao lưu/nhịp worker-bridge, tự khởi động lại
-dịch vụ chết, báo Telegram chống spam (1 tin CẢNH BÁO + 1 tin ĐÃ ỔN mỗi lượt), chạy được cả khi api chết; bot Telegram của
-Sếp ở **Kết nối › Telegram** (token mã hoá, `REENCRYPT_TARGETS`, migration 0029), bản tin 07:30/17:30 + nhắc việc đi một chiều
-qua hộp thư đi (không qua bridge); dòng 6 "Telegram" ở Việc Sếp cần làm; `X-Request-ID` ở header/problem+json/log + "Mã yêu
-cầu" cạnh mã ERR, `POST /client-errors`; **Gói chẩn đoán** ở Trợ giúp (genh tạo zip đã lọc bí mật). Còn: Sếp nhắn lại Gen
-qua Telegram (2 chiều) hoãn; F-28 Telegram làm kênh khách hoãn; watchdog ghi sự cố vào Kho hoãn.
-v0.1.45: khoá cấu hình nhạy cảm & vệ sinh bảo mật (F-20 phần còn lại, F-49, F-52, F-54, F-55, F-56, F-57, F-58, F-60) —
-PIN chỉ ở đúng đường hạ rào (đổi mức tự trị/điều cấm/giới hạn/phạm vi kênh của agent, tool MCP ghi → đọc, thêm tài khoản CLI,
-Hướng dẫn việc 9/10 sau Hoàn tất; cập nhật và sao lưu không hỏi PIN); `system.manage` luôn cần phạm vi ALL; MCP và nhà cung
-cấp AI ghim DNS, cấm link-local/0.0.0.0/tên dịch vụ compose, có token thì phải https; nhật ký MCP chỉ lưu dấu vết tham số
-(sha256/keys/bytes) và che kết quả; hộp thư `run/` 2770 nhóm 10001, genh bỏ qua symlink/tệp của uid lạ; mật khẩu
-pg_dump/pg_restore qua `PGPASSWORD`; WebSocket kiểm Origin (4403) + nạp lại phiên ≤ 60 giây (thu hồi ⇒ 4401); mã đăng nhập
-CLI theo regex (đã đối chiếu dạng mã thật của F-77); cờ "Đáng ngờ" cho điểm nhân sự (migration 0030) + đoạn "Mã PIN bảo vệ
-được gì" ở Trợ giúp. Đóng F-20 phần còn lại (từ v0.1.35) và việc đối chiếu `code_shape` với regex F-56 (từ v0.1.39).
-v0.1.46: nhân viên & điện thoại vào được, đăng nhập an toàn (F-21, F-27, F-1, F-3) — cài mới cổng chỉ nghe 127.0.0.1,
-máy cũ giữ 0.0.0.0 (`lan_legacy`) + đúng 1 chuông "Cổng đang mở cho cả mạng"; `genh remote tailscale|cloudflare|--lan|--local`
-ghi `.env` (GH_BIND_ADDR/GH_SITE_ADDRESS/GH_PUBLIC_URL); lời mời lấy địa chỉ theo GH_PUBLIC_URL + cảnh báo đỏ khi chỉ mở trên
-máy chủ; thẻ "Truy cập từ xa" ở Cài đặt, dòng 7 "Truy cập từ xa" ở Việc Sếp cần làm (bắt buộc ⇒ 6 dòng); 10 lần sai/15 phút
-theo IP và email (429), argon2 giả cho email lạ, phiên tối đa 30 ngày. Còn: TOTP (hoãn); nút đổi chế độ trong Console (không
-làm — tránh tự cắt truy cập); kiểm Tailscale/điện thoại trên máy Fedora thật của Boss.
-v0.1.47: Facebook ghi, lát 1 (F-79, F-85, F-83 phần mạng xã hội, F-59, F-92) — **Trả lời bình luận** và **Nhắn tin** qua
-đề xuất Gen → Xác nhận + mã PIN → permit ký (TTL 5 phút, nonce một lần, hash nội dung + đích) → worker kiểm permit và kiểm
-Dừng tất cả ngay trước khi bấm gửi → ảnh chụp bằng chứng mã hoá (90 ngày) + Action Log + chuông; Giới hạn gửi/ngày mặc định
-10 (trần 20); trễ cố định 3 giây; sandbox trình duyệt bật bằng user namespace + seccomp riêng, tự lùi và báo thật khi máy chủ
-không cho — khi đó gửi chỉ mở sau khi Owner bấm "Tôi hiểu rủi ro và đồng ý" (`/social/ghi-facebook`); kiểm phiên Facebook
-hằng ngày 09:10 → sự cố + chuông + Telegram (qua genh watchdog); dòng 8 "Facebook trả lời" (không bắt buộc) ở Việc Sếp cần làm;
-bỏ số phiên bản khỏi chú thích "chỗ cắm". Còn: **đăng bài = lát 2**; selector ghi Facebook mới kiểm trên trang mẫu —
-nghiệm thu thật do Boss; `like`/`follow` chưa làm.
-v0.1.48: bản build tái lập & pipeline gọn (F-19, F-36, F-71, F-13, F-44) — ảnh nền + caddy/redis ghim digest đa kiến trúc,
-api/browser cài từ `uv.lock` (`uv sync --frozen`, kiểm 2 lần build ra cùng tổ hợp gói), Renovate đề xuất nâng (cài App là
-tuỳ chọn); mọi action ghim SHA, quyền mặc định `contents: read`, ảnh GHCR chỉ `:<version>` + `:sha-<commit>` (bỏ `:latest`),
-build thử lại 1 lần + cache gha; quét pip-audit/npm audit/govulncheck dạng báo cáo (không chặn); CI đỏ khi bản nhúng genh lệch
-`deploy/`; `docs/handoff/schema.sql` đã bỏ (lược đồ thật ở `db/sql` + migrations). Tag GHCR `gen-harness-*:latest` cũ đứng yên ở
-bản promote cuối bằng workflow cũ (v0.1.46, hoặc v0.1.47 nếu promote trước khi v0.1.48 merge; không nhận bản vá) — không dùng.
-Còn: gói apt trong Dockerfile chưa ghim phiên bản (tầng apt dựng lại mỗi tuần); PR Renovate không tự merge nằm chờ tới khi Boss
-nhắn Claude (chưa có lịch tự động).
-v0.1.49: Gen đọc lịch / mail / việc / Drive qua Gen-hub, CHỈ ĐỌC (QD-16, F-83, F-8) — Gen (chỉ Owner) hỏi được Tài liệu, Deal,
-Vụ việc nội bộ (đã che) và lịch/mail/việc Google qua Gen-hub; tool ghi Google bị chặn ở mọi đường; ngắt mạch Gen-hub (3 lỗi →
-60 giây, im 15 phút → sự cố + chuông); Bản tin thêm "Lịch hôm nay", "Mail cần trả lời", "Việc Google đang mở" (thiếu quyền ⇒ 1 dòng
-nhắc + nút "Mở thẻ Gen-hub"; Telegram chỉ số đếm, model tóm tắt cũng chỉ thấy số đếm của mục Gen-hub); Kết nối › Gen-hub và Việc Sếp cần làm ghi quyền đọc còn thiếu (không bắt buộc).
-Còn: Gen soạn mail/tạo lịch (có xác nhận) — chưa làm, cần Boss chốt.
+Chi tiết từng bản ở [CHANGELOG.md](../CHANGELOG.md); tóm tắt theo chặng:
+- **v0.1.1 – v0.1.27 (27–30/09/2026)**: lưu trữ/hồ sơ Owner/RLS, `genh` (cài, cập nhật tự động, export/import, khôi phục), trình thiết lập "Để sau",
+  Console (người dùng, Trợ giúp, điện thoại, chuông, sáng/tối), **Gen v1/v2** (khung chat, dẫn đường, đề xuất có xác nhận), lọc đầu Hộp thư (Jev),
+  Gen đọc Kho Ryan qua Gen-hub (v0.1.26), gia cố (v0.1.27).
+- **v0.1.28 – v0.1.32 (30/09 – 02/10)**: sửa theo rà soát UX; bước 4 "Để sau"; Facebook cá nhân CHỈ ĐỌC (D3 lát đầu); hotfix React #31; model CLI theo nhóm,
+  Claude Code CLI (QD-12), model và mức suy nghĩ tách riêng.
+- **v0.1.33 – v0.1.40 (02 – 03/10)** — kế hoạch tổng [docs/audit/2026-10-01/0-ke-hoach-tong.md](audit/2026-10-01/0-ke-hoach-tong.md): cổng phát hành + CI đủ test, `genh update` an toàn/tự lành,
+  sửa lỗi đỏ (F-1, F-5…), hệ thống tự báo khi hỏng, cô lập agy, "Việc Sếp cần làm", bản sao ngoài máy + hạn lưu thật.
+- **v0.1.41 – v0.1.46 (03 – 04/10)**: Gen trợ lý thật lát 1 (nhớ hội thoại, Bản tin, chi phí AI), "Chế độ Boss" một menu, bỏ lời hứa không thật, Telegram + trực canh + gói chẩn đoán,
+  khoá cấu hình nhạy cảm, nhân viên & điện thoại vào được (`genh remote`).
+- **v0.1.47 – v0.1.50 (09/10)**: Facebook ghi lát 1 (trả lời/nhắn có xác nhận), bản build tái lập, Gen đọc lịch/mail/việc/Drive qua Gen-hub (QD-16),
+  **Gen nhớ + Gen ghi Kho có xác nhận và mã PIN (QD-18, F-81, F-87)**. Cùng đợt: đồng bộ tài liệu (F-90, F-69, F-47, F-91, F-92, F-42, F-39).
+
+## Tiếp theo (sau v0.1.50)
+Kế hoạch tổng của đợt kiểm toán kết thúc ở v0.1.50; không còn đợt đánh số sẵn. Thứ tự đề xuất:
+1. **Boss nghiệm thu thật** các tính năng chưa từng chạy với tài khoản thật (danh sách và cách làm ở [HANDOFF](reports/HANDOFF-v0.1.1.md) › Việc dở): Gen-hub quyền đọc + ghi Kho,
+   Telegram, Truy cập từ xa (Tailscale), Facebook trả lời. Kết quả tự ghi ở Việc Sếp cần làm.
+2. **Bộ câu hỏi chuẩn so model** (mục Nợ #1) rồi quyết giữ/bỏ Jev theo số đo.
+3. **Kho Ryan**: ghi Phiên bù, Việc cho mục Nợ, cập nhật QD-12 và DA-1 (mục Nợ #7) — cần Boss dặn; ghi Kho luôn qua Xác nhận + mã PIN.
+4. **Dọn nhánh** (F-70) khi Boss cho phép.
+5. **Chờ Boss chọn hướng** (chưa có bản đánh số): Facebook đăng bài (lát 2); Gen ghi ra Gen-hub ngoài Kho (kanban/warroom/nháp mail/lịch — cần QD mới); Trang FB/IG qua API (F-80, đóng băng
+   tới khi Facebook cá nhân chạy thật ≥ 2 tuần); TOTP sau khi truy cập từ xa ổn định.
+6. **Bảo trì đều**: PR Renovate (nhắn Claude "xử lý PR phụ thuộc"), theo dõi cảnh báo quét bảo mật, kiểm sức khoẻ ở Tổng quan.
+
+## Nợ
+Việc đã hứa hoặc đã biết mà chưa làm. Mỗi dòng ghi điều kiện mở; "Boss" = cần Boss cho phép/quyết. Khi làm xong thì chuyển sang CHANGELOG và xoá dòng ở đây.
+
+| # | Mục | Tình trạng / điều kiện |
+|---|---|---|
+| 1 | **Bộ 10–15 câu hỏi chuẩn so model** (chuyển từ v0.1.41) | **CHƯA chạy.** Script chạy trên 2–3 nguồn (CLI, OpenRouter, Gemini), ghi điểm + chi phí vào ghi chú phát hành; quyết giữ/bỏ Jev theo số đo. Cần khoá API và CLI đã đăng nhập |
+| 2 | **F-70** xoá nhánh `claude/*` đã merge + nhánh `worktree-agent-*` local; bật "Automatically delete head branches" | **Chờ Boss cho phép.** Không thêm `paths-ignore: docs/**` cho `ci.yml` (PR chỉ sửa tài liệu sẽ kẹt vì check bắt buộc) |
+| 3 | **TOTP cho Owner** (ARCHITECTURE hứa) | Chưa làm. Hiện có giới hạn đăng nhập, argon2 và mã PIN; làm sau khi truy cập từ xa ổn định |
+| 4 | **Facebook đăng bài** (`post`) — lát 2; `like`/`follow` chưa làm | Selector ghi Facebook mới kiểm trên trang mẫu; cần Boss nghiệm thu thật lát 1 (dòng 8) trước |
+| 5 | **gen-intel** | Ý tưởng để sau; chưa có thiết kế, chưa có mã. Làm khi Boss mô tả phạm vi |
+| 6 | **Kiểm cosign/minisign** trong genh và `install.sh` | Hoãn: chỉ chống tráo tệp trên Release; hiện genh kiểm SHA-256 theo `checksums.txt`. Tệp `.sig`/`.pem` đã đính kèm nhưng chưa nơi nào kiểm |
+| 7 | **Ghi PHIEN bù cho v0.1.28 → v0.1.49**; tạo VIEC cho mục Nợ; cập nhật QD-12 (hạn đã trượt) và DA-1; chốt câu định vị "Gen là mặt tiền chính, Console là nơi xem chi tiết" | Job F-87 (v0.1.50) chỉ đề xuất cho bản mới. **Boss** dặn Gen đề xuất từng bản cũ (mỗi bản một thẻ Ghi vào Kho Ryan + mã PIN) |
+| 8 | **Trường Kho "Công cụ" / "Người làm"** chưa ghi được | Chưa biết giá trị lựa chọn của hai cột; `KHO_FIELDS` (`gh/hub_link/kho_write.py`) chỉ có trường đã biết. Mở khi Boss/Gen-hub cho danh sách giá trị |
+| 9 | **F-91** lời hẹn "ghi có xác nhận (v0.1.30…)" ở v0.1.29 đã trượt | Làm thật ở **v0.1.47** (Facebook ghi lát 1); Trang FB/IG qua API vẫn chưa. Đã ghi chú ở [v0.1.29.md](releases/v0.1.29.md); bảng lát cũ trong [gen-browser-agent.md](design/gen-browser-agent.md) §5 đã sửa |
+| 10 | **F-92** chú thích "CHỖ CẮM v0.1.30" trong mã | Đã gỡ số bản ở **v0.1.47**; `test_plug_comments_v0147.py` chặn chú thích kiểu cũ quay lại. Đóng, giữ để tra |
+| 11 | Gen ghi ra Gen-hub **ngoài Kho** (nháp Gmail, tạo sự kiện Lịch, kanban/warroom); Gen soạn mail/tạo lịch có xác nhận | Hoãn; cần QD mới, dùng chung khung permit của v0.1.50. Hiện Gmail/Lịch/Drive/Tasks chỉ đọc |
+| 12 | Watchdog ghi sự cố vào Kho | Hoãn (cùng lý do). Claude đọc sự cố qua gói chẩn đoán và `GET /boss-checks` |
+| 13 | Boss nhắn lại Gen qua Telegram (2 chiều); Telegram làm kênh khách (F-28) | Hoãn: cần xác thực người gửi và chống lệnh giả; một chiều đã đủ cho Bản tin/cảnh báo |
+| 14 | **F-80** cổng API Trang FB/IG/Zalo OA/TikTok/LinkedIn/X; nền tảng mạng xã hội mới | Đóng băng tới khi Facebook cá nhân chạy thật ≥ 2 tuần và Boss xác nhận có Trang/OA cần dùng |
+| 15 | Bảo mật hoãn: F-50 Redis ACL, F-51 superuser sidecar, F-53 CA có NameConstraints | Xem lại khi mở truy cập từ xa rộng hơn |
+| 16 | F-84 phần còn lại (duyệt nháp, đề xuất Deal/Vụ việc, stream), F-68 mở Gen cho vai trò khác | Hoãn; chờ có nhân viên dùng thật |
+| 17 | Hạ tầng/CI | Gói apt trong Dockerfile chưa ghim phiên bản; PR Renovate chưa có lịch tự động; ô E2E Fedora thật (VM) chưa có; sinh type từ OpenAPI hoãn; `ops.action_log` hạn lưu (vướng chuỗi băm); F-38 phần còn lại |
+| 18 | Nghiệm thu thật chưa làm | Tailscale/điện thoại trên máy Fedora của Boss (v0.1.46); canary `--live` agy (v0.1.38/39); Facebook trả lời (v0.1.47) |
+
+## Bản phản ứng (hotfix)
+Các bản sửa nóng thật, không nằm trong kế hoạch đợt. Đối chiếu `git log origin/main` và nhánh `hotfix/*`:
+
+| Ngày | Bản / PR | Chuyện gì |
+|---|---|---|
+| 30/09/2026 | **v0.1.30** (PR #34) | Màn /guide/8 sập "React error #31 {reasons}" khi chưa có model; lối vào Hướng dẫn thiết lập "biến mất"; thiếu nút kiểm tra bản mới; đổi tài khoản Google của agy không hoạt động. [Chi tiết](releases/v0.1.30.md) |
+| 03/10/2026 | **Hotfix v0.1.41** (PR #46, nhánh `claude/hotfix-v0141`) | Release v0.1.41 đỏ 2 test prune sao lưu: bản vá neo giờ mẫu chỉ có trên nhánh cũ nên merge "giữ nguyên cây" ở v0.1.35 làm mất; khôi phục (cherry-pick) và phát hành lại v0.1.41, giữ `VERSION`. [Chi tiết](releases/v0.1.41.md) |
+| 03/10/2026 | **Hotfix v0.1.42 "time-bomb"** (PR #48, `hotfix/v0142-time-bomb`) | Test thẻ cập nhật lỗi dùng mốc cố định 02/10 hết hạn 24 giờ ⇒ vitest đỏ trên main, chặn phát hành v0.1.42; đổi sang mốc giờ tương đối (F-6) |
+| 04/10/2026 | **Sửa e2e-upgrade, Owner mẫu** (PR #53, `hotfix/e2e-owner-seed`) | Dữ liệu mẫu không có người dùng nên chuông `network.open_lan` luôn 0; chèn 1 Owner mẫu trước khi kiểm (F-21) |
+| 09/10/2026 | **Sửa e2e-upgrade từ v0.1.46** (PR #55, `hotfix/e2e-upgrade-from-v0146`) | Ô nâng cấp giả định bản cũ luôn nghe 0.0.0.0; bản ≥ v0.1.46 cài mới nghe 127.0.0.1 nên E2E release v0.1.47 đỏ và nằm yên ở bản thử. Sửa test (không sửa genh); v0.1.47 phát hành sau đó. [Chi tiết](releases/v0.1.48.md) |
+| 09/10/2026 | **Sửa trình bày dính biên khung** (PR #58, `claude/css-bien-khung`) | Ảnh máy Boss: chữ/số dính sát mép thẻ, khối "Máy chủ chưa nhận yêu cầu cập nhật" vỡ 3 dòng. Sửa gốc ở `Panel`/`Icon` + 5 họ lỗi, thêm lính gác `layout-guard.spec.ts` (4 cỡ màn); đi cùng v0.1.50. [Chi tiết](releases/v0.1.50.md) |
+| 09/10/2026 | **Sửa test heartbeat genh chập chờn** (PR #59) | `readStateFile` báo "tệp bị thay giữa chừng" khi nhịp vừa ghi tạm-rồi-rename (CI đỏ ~1/100); nay chỉ lỗi đó được thử lại tối đa 5 lần × 5ms, symlink/hard link/sai chủ vẫn từ chối ngay. Không tăng VERSION, đi cùng v0.1.50. [Chi tiết](releases/v0.1.50.md) |
+
+Hai bản **phản ứng theo yêu cầu của Boss** (tính năng, không phải sửa nóng): v0.1.31 (01/10 "không thấy model và nhóm model nào để chọn") và v0.1.32 (01/10 "high là mức suy nghĩ, không phải tên model").
 
 ## Đợt A — Gen v1 (thiết kế: docs/design/gen-v1.md)
 - ✅ A1 Khung chat phải + Gen trả lời/tóm tắt (chỉ đọc), lưu hội thoại, Nhật ký hành động — v0.1.21.
 - ✅ A2 Giao thức hành động UI: mở trang, khoanh sáng (`data-gen-target`), dẫn từng bước — v0.1.21.
 - ✅ A3 Nguồn model Jev (OpenRouter) + Gen dùng Jev cho quyết định nhanh, rơi về LLM khi lỗi — v0.1.21
-  (schema `/v1/systemone` còn là giả định, xem HANDOFF v0.1.21).
+  (schema `/v1/systemone` còn là giả định, xem [v0.1.21.md](releases/v0.1.21.md)).
 - ✅ A4 Gen v2 bước 1 — đề xuất thao tác có xác nhận (nháp tin → nhắc việc → gán người; Xác nhận/Sửa/Huỷ, PIN khi nhạy cảm,
-  Action Log via=gen; nhắc việc đến giờ → chuông) — v0.1.24.
+  Action Log via=gen; nhắc việc đến giờ → chuông) — v0.1.24. Mở rộng: `social_reply`/`social_dm` (v0.1.47), `memory_note`/`kho_create`/`kho_update` (v0.1.50).
 
 ## Đợt B — Cơ bản còn thiếu
 - ✅ B1 quản lý người dùng (mời, đổi vai trò, khoá/mở khoá, đặt lại mật khẩu) — v0.1.22.
@@ -179,16 +101,13 @@ Còn: Gen soạn mail/tạo lịch (có xác nhận) — chưa làm, cần Boss 
   quy tắc; Hộp thư có huy hiệu + "Ẩn rác & trùng", thẻ cấu hình Owner — v0.1.25. (Còn: đo độ chính xác có nhãn người.)
   v0.1.27: số liệu theo phạm vi `queue.read`; trần 3000 mục so trùng đã rà (trùng y hệt không bị trần bỏ sót).
 
-## Đợt D — Phòng làm việc chung (repo Gen-hub, cần mở quyền repo cho phiên này)
-- 🟡 D1 Gen nối Kho/warroom/kanban của Gen-hub — **một phần** v0.1.26: Gen đọc Kho (Owner, chỉ đọc, che dữ liệu, đệm 5 phút,
-  nhắc token trước 14 ngày; thẻ Gen-hub ở MCP Hub); v0.1.27 gia cố (ghim DNS, lỗi chỉ Owner, route MCP chung chỉ Owner).
-  v0.1.49: thêm đọc lịch/mail/việc/Drive Google qua Gen-hub (chỉ đọc, chỉ Owner, ngắt mạch F-83) + 3 mục Bản tin.
-  Còn: đề xuất ghi kanban/warroom (bản sau), phương án B.
+## Đợt D — Phòng làm việc chung (Gen-hub) và mạng xã hội
+- 🟡 D1 Gen nối Kho/Gen-hub — thiết kế: [gen-hub-link.md](design/gen-hub-link.md). ✅ v0.1.26 Gen đọc Kho (Owner, chỉ đọc, che dữ liệu, đệm 5 phút, nhắc token trước 14 ngày);
+  ✅ v0.1.27 gia cố (ghim DNS, lỗi chỉ Owner, route MCP chung chỉ Owner); ✅ v0.1.49 đọc lịch/mail/việc/Drive Google (chỉ đọc, ngắt mạch F-83) + 3 mục Bản tin;
+  ✅ **v0.1.50 ghi Kho (Phiên, Việc) qua đề xuất + mã PIN + permit (QD-18)** và Gen nhớ.
+  Còn: ghi kanban/warroom/Gmail/Lịch (Nợ #11, cần QD mới); phương án B (agent ngoài đọc số liệu Gen-Harness) — cắt khỏi lộ trình gần (F-82).
 - ~~D2 Jules worker~~ — **Bỏ** (Boss chốt QD-10, xác nhận lại 30/09). Không làm, không kiểm điều khoản Jules nữa.
-- 🟡 D3 Gen điều khiển mạng xã hội thay Boss (API trước, Playwright cho tài khoản cá nhân) — thiết kế:
-  docs/design/gen-browser-agent.md. ✅ Lát đầu **v0.1.29**: Facebook cá nhân, đăng nhập + CHỈ ĐỌC (thông báo, hội thoại).
+- 🟡 D3 Gen điều khiển mạng xã hội thay Boss — thiết kế: [gen-browser-agent.md](design/gen-browser-agent.md). ✅ v0.1.29 Facebook cá nhân, đăng nhập + CHỈ ĐỌC (thông báo, hội thoại).
   ✅ **v0.1.47** ghi lát 1 (F-79): Trả lời bình luận + Nhắn tin có xác nhận (đề xuất Gen + PIN + permit + ảnh chụp bằng chứng);
-  F-85 sandbox: bật bằng user namespace + seccomp riêng, tự lùi + trang đồng ý rủi ro khi máy chủ không cho (kết quả thật trên máy
-  Boss xem ở `GET /social/write-gate`); F-83 phần mạng xã hội xong (kiểm phiên 09:10 + chuông + Telegram).
-  Tiếp: **đăng bài = lát 2**; Trang FB/IG chuyên nghiệp qua API; nền tảng khác. Luật cứng giữ nguyên: không tài khoản giả, không lách chống bot (không stealth/proxy/giải CAPTCHA).
-Thiết kế: docs/design/gen-hub-link.md (lát đầu v0.1.26 ✅ — Gen đọc Kho qua Gen-hub, chỉ-đọc).
+  F-85 sandbox bật bằng user namespace + seccomp riêng, tự lùi + trang đồng ý rủi ro khi máy chủ không cho (xem `GET /social/write-gate`);
+  F-83 kiểm phiên 09:10 + chuông + Telegram. Tiếp: **đăng bài = lát 2** (Nợ #4). Luật cứng giữ nguyên: không tài khoản giả, không lách chống bot (không stealth/proxy/giải CAPTCHA).

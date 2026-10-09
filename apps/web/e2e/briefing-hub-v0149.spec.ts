@@ -158,7 +158,7 @@ test.describe('v0.1.49 — Bản tin Gen đọc lịch / mail / việc qua Gen-h
     await page.goto('/help');
     const card = page.getByTestId('help-genhub-reads');
     await expect(card.getByText('Gen đọc được gì từ Gen-hub')).toBeVisible();
-    await expect(card).toContainText('Gen chỉ ĐỌC');
+    await expect(card).toContainText('Gen đọc: Kho Ryan, lịch, mail'); // v0.1.50: hết "chỉ ĐỌC" — Gen ghi Kho khi Sếp xác nhận + PIN
     await expect(card).toContainText('Gen KHÔNG gửi mail');
     await expect(card).toContainText('che trước khi gửi cho AI');
     await expect(card).toContainText('tạm dừng gọi 1 phút');

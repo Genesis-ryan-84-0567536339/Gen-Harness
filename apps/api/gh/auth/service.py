@@ -32,6 +32,8 @@ PIN_OPERATIONS: dict[str, str] = {
     "draft.decide": "Duyệt / huỷ bản nháp",
     "mcp.expose": "Mở tool MCP",
     "hub.link": "Nối Gen-hub (địa chỉ, token)",
+    # v0.1.50 (F-81, QD-18): Gen đề xuất ghi Kho Ryan — Sếp Xác nhận + nhập PIN mới ghi (bảng Phiên, Việc).
+    "hub.write": "Ghi Kho Ryan qua Gen-hub (Phiên, Việc)",
     "social.manage": "Tài khoản mạng xã hội: thêm, đăng nhập, gỡ, bật lại sau Dừng tất cả",
     "policy.change": "Đổi mức tự trị, ngưỡng tiền, ranh giới",
     "data.export_delete": "Xuất / xoá dữ liệu",

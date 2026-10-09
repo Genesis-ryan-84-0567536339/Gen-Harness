@@ -14,6 +14,9 @@ thấy) nhưng cũng qua lớp che.
 
 v0.1.49: `actor` có thể là actor hệ thống của việc nền (`gh.hub_link.service.SystemActor`, Bản tin Gen) — Action Log ghi
 `actor_type = getattr(actor, "actor_type", "user")` ('system' cho việc nền); không đổi hành vi nào khác.
+
+v0.1.50 (F-81): kwarg `approved_write` (mặc định False) — xem docstring `invoke_tool`; duy nhất
+`hub_link.service.write_kho` truyền True.
 """
 
 import hashlib
@@ -165,12 +168,18 @@ def _mask_err(message: str, token: str | None) -> str:
 
 async def invoke_tool(db: AsyncSession, redis: Any, client: McpClient, *, org_id: uuid.UUID, tool: Any,
                       agent_key: str, args: dict[str, Any], actor: Actor,
-                      summarize: Callable[[Any], str] | None = None) -> dict[str, Any]:
+                      summarize: Callable[[Any], str] | None = None, approved_write: bool = False) -> dict[str, Any]:
     """Gọi `tool` (dòng từ `get_tool`) nhân danh `agent_key`. Trả `{"outcome": "ok", "result", "call"}` hoặc
     `{"outcome": "held_for_approval"|"blocked", "draft", "call"}` (tool ghi); ném `ApiError` 403 khi bị chặn (đã
     COMMIT log trước khi ném — `DB` rollback cả phiên khi route ném lỗi) và `McpCallFailed` khi máy chủ lỗi.
     `summarize` quyết định chuỗi lưu ở `mcp_calls.result_summary` (hub link truyền bản chỉ siêu dữ liệu); mặc định
-    là kết quả đã qua `mask_for_model`."""
+    là kết quả đã qua `mask_for_model`.
+
+    `approved_write` (v0.1.50, F-81): mặc định False — tool `write` luôn tạo bản nháp `mcp_write` rồi DỪNG. Chỉ khi True
+    VÀ `tool.access == 'write'` mới bỏ nhánh bản nháp và đi tiếp đường gọi (vẫn kiểm máy chủ bật, tool mở, được cấp,
+    mức tự trị như tool đọc; vẫn ghi `mcp_calls` + Action Log `mcp.call_ok` / `mcp.call_error`). CHỈ
+    `gh.hub_link.service.write_kho` được truyền True — sau khi Owner đã Xác nhận + nhập PIN và permit ký còn hiệu lực.
+    Tuyệt đối không truyền True từ route chung hay từ dữ liệu người dùng."""
     t = tool
     tool_id = t.id
     atype = getattr(actor, "actor_type", "user")  # v0.1.49: việc nền (SystemActor) ghi đúng 'system'
@@ -197,7 +206,7 @@ async def invoke_tool(db: AsyncSession, redis: Any, client: McpClient, *, org_id
     if agent_key not in await grants_of(db, tool_id):
         raise await blocked("MCP_TOOL_NOT_GRANTED", "Bị chặn: agent chưa được cấp tool này")
 
-    if t.access == "write":
+    if t.access == "write" and not approved_write:
         draft = await create_draft(db, org_id=org_id, kind="mcp_write", title=f"Gọi tool {t.name}",
                                    body_text=f"Gọi tool MCP ghi '{t.name}' trên máy chủ '{t.server_name}' với "
                                    f"tham số {orjson.dumps(mask_for_model(args)).decode()}", action_key="mcp.write",

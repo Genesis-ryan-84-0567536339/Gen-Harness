@@ -114,7 +114,7 @@ function seedBoundaries(): BoundaryRow[] {
       locked: true,
       params: { approval_threshold_vnd: 50_000_000 },
     },
-    { code: 'mcp_write_requires_approval', label: 'Tool MCP loại ghi qua duyệt trước khi chạy', enabled: true, locked: true, params: {} },
+    { code: 'mcp_write_requires_approval', label: 'Tool MCP loại ghi qua duyệt trước khi chạy (ngoại lệ duy nhất: Ghi vào Kho Ryan sau khi Sếp Xác nhận + nhập mã PIN)', enabled: true, locked: true, params: {} },
   ];
 }
 

@@ -165,7 +165,10 @@ async def test_test_exposes_google_read_tools_only(owner_api: Api, fake_hub: Fak
         assert by[GG + n].is_exposed is True and by[GG + n].grants == ["core.gen"], n
     for n in GOOGLE_WRITE:
         assert by[GG + n].is_exposed is False and by[GG + n].grants == [], n
-    assert by[KHO + "kho_create"].is_exposed is False
+    # v0.1.50 (F-81): kho_create (tool GHI Kho) được mở + cấp cho write_kho — không phải đường đọc, không bị gọi.
+    assert by[KHO + "kho_create"].is_exposed is True and by[KHO + "kho_create"].grants == ["core.gen"]
+    assert out["write_scopes"] == {"kho": False, "kho_create": True, "kho_update": False}
+    assert out["write_missing"] == ["ghi Kho (kho_update)"]
     assert out["read_scopes"] == {"calendar": True, "mail": True, "tasks": True, "drive": True}
     assert out["read_missing"] == [] and out["write_tools"] == []
     assert fake_hub.calls == [KHO + "kho_tom_tat"]  # không gọi tool Google khi kiểm
@@ -216,8 +219,10 @@ async def test_scope_revoked_in_gen_hub_is_closed_on_next_test(owner_api: Api, f
     r = await owner_api.get("/hub/google/calendar")
     assert r.status_code == 409 and r.json()["code"] == "HUB_TOOL_MISSING"
     assert "hub.link_tested" in await _db_text("SELECT action FROM ops.action_log")
-    detail = await _db_text("SELECT detail FROM ops.action_log WHERE action = 'hub.link_tested' ORDER BY at DESC")
-    assert "read_scopes" in detail
+    # Đọc TÊN khoá (không in cả detail: repr dòng SQLAlchemy cắt giữa giá trị dài, khoá có thể rơi vào đoạn bị cắt).
+    keys = await _db_text(
+        "SELECT DISTINCT jsonb_object_keys(detail) FROM ops.action_log WHERE action = 'hub.link_tested'")
+    assert "read_scopes" in keys
 
 
 async def test_link_read_scopes_null_until_green_check(owner_api: Api, fake_hub: FakeHub) -> None:

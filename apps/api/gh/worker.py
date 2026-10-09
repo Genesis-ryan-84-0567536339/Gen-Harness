@@ -21,6 +21,8 @@
 - v0.1.44 (F-8c): `telegram_flush` mỗi phút gửi hộp thư đi Telegram (bản tin + nhắc việc của Owner).
 - v0.1.49 (F-83): `hub_breaker_watch` mỗi 5 phút — Gen-hub không trả lời hơn 15 phút (ngắt mạch đã mở) ⇒ sự cố
   `hub.breaker` + chuông Owner một lần (`gh.hub_link.service.breaker_watch`); tự đóng khi gọi lại được.
+- v0.1.50 (F-87): `gen_kho_release` phút 7 và 37 mỗi giờ — Gen đề xuất ghi Phiên vào Kho khi máy chủ lên bản mới (mỗi
+  tổ chức, mỗi bản đúng MỘT lần; chỉ khi Gen-hub đã cấp quyền ghi Kho — `gh.gen.kho_release`). Không ghi gì lên Kho.
 """
 
 import asyncio
@@ -49,7 +51,7 @@ from gh.chassis import actionlog
 from gh.chassis.bus import EventBus
 from gh.config import get_settings
 from gh.db import admin_sessionmaker, dispose_engine, sessionmaker
-from gh.gen import briefing
+from gh.gen import briefing, kho_release
 from gh.hub_link import service as hub_link
 from gh.identity import service as identity
 from gh.memory import notebook
@@ -97,6 +99,7 @@ JOB_LABELS = {
     "gen_briefing": "Bản tin Gen",
     "telegram_flush": "Gửi tin Telegram",
     "hub_breaker_watch": "Theo dõi Gen-hub",
+    "gen_kho_release": "Đề xuất ghi Phiên vào Kho",
 }
 #: v0.1.44 (F-8c): lượt gửi hộp thư đi Telegram ngắn (≤ 20 tin, ngân sách 60 giây — gh.telegram.service).
 TELEGRAM_FLUSH_TIMEOUT = 90
@@ -379,6 +382,12 @@ async def gen_briefing(ctx: dict[str, Any]) -> dict[str, Any]:
     return await briefing.run_briefing(sessionmaker(), ctx["redis_bus"], ctx["model_router"])
 
 
+async def gen_kho_release(ctx: dict[str, Any]) -> dict[str, Any]:
+    """v0.1.50 (F-87): bản mới lên ⇒ Gen đề xuất ghi một Phiên vào Kho cho từng Owner (chỉ khi Gen-hub đã cấp quyền ghi
+    Kho; mỗi (tổ chức, bản) một lần) — xem `gh.gen.kho_release.run`. Job chỉ ĐỀ XUẤT, không ghi Kho."""
+    return await kho_release.run(sessionmaker(), ctx["redis_bus"])
+
+
 async def telegram_flush(ctx: dict[str, Any]) -> dict[str, int]:
     """v0.1.44 (F-8c): gửi bản tin/nhắc việc đang chờ trong ops.telegram_outbox — mỗi phút (Telegram Bot API, một
     chiều, không qua bridge/Zalo). Lỗi cấu hình ⇒ sự cố telegram.failed (chuông Owner một lần)."""
@@ -397,8 +406,8 @@ class WorkerSettings:
     on_shutdown = shutdown
     functions = [verify_action_log, partition_maintenance, detect_identities, compact_notebooks, expire_sessions,
                  purge_gen_conversations, purge_notifications, retention_sweep, hub_token_expiry_scan,
-                 hub_breaker_watch, social_schedule, social_session_check, gen_briefing, telegram_flush,
-                 *(fn for fn, _ in _BIZ_JOBS), *BACKUP_FUNCTIONS]
+                 hub_breaker_watch, social_schedule, social_session_check, gen_briefing, gen_kho_release,
+                 telegram_flush, *(fn for fn, _ in _BIZ_JOBS), *BACKUP_FUNCTIONS]
     health_check_interval = 30
     job_timeout = JOB_TIMEOUT  # v0.1.40 (F-16): tường minh — `_cron` dùng cùng giá trị để nhận ra lần quá giờ
     # v0.1.36 (F-45): mọi giờ dưới đây là GIỜ VN (Asia/Ho_Chi_Minh). Job nặng theo ngày tránh 08:00–18:00 và cửa
@@ -417,6 +426,8 @@ class WorkerSettings:
         _cron(social_session_check, hour={9}, minute={10}),      # 09:10 giờ VN — kiểm phiên mạng xã hội (F-83)
         # 07:30 / 17:30 giờ VN — Bản tin Gen (F-8b); các lượt sau trong 3 giờ chỉ bù khi lỡ giờ (idempotent)
         _cron(gen_briefing, hour={7, 8, 9, 17, 18, 19}, minute={30}),
+        # phút 7 và 37 mỗi giờ — Gen đề xuất ghi Phiên vào Kho khi máy chủ lên bản mới (F-87; mỗi bản một lần)
+        _cron(gen_kho_release, minute={7, 37}),
         # mỗi phút — gửi hộp thư đi Telegram (bản tin + nhắc việc của Owner, F-8c); lượt ngắn
         _cron(telegram_flush, minute=set(range(60)), timeout=TELEGRAM_FLUSH_TIMEOUT),
         *(_cron(fn, **kw) for fn, kw in _BIZ_JOBS),              # biz + sao lưu: giữ NGUYÊN kw (kể cả timeout)

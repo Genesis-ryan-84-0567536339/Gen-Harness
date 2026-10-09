@@ -1,23 +1,120 @@
 # Gen-Harness
 
 Gen-Harness là một hệ thống tự trị có kiểm soát cho một tổ chức bán hàng/dịch vụ nhỏ: lắng nghe các kênh nhắn
-tin (Zalo, WhatsApp…), sàng lọc thành dữ liệu sạch có nguồn gốc rõ ràng, và để agent AI soạn — nhưng không tự
+tin (Zalo, WhatsApp, Facebook…), sàng lọc thành dữ liệu sạch có nguồn gốc rõ ràng, và để agent AI soạn — nhưng không tự
 ý gửi — phản hồi, cập nhật cơ hội bán hàng, cảnh báo sớm. Mọi việc "ra ngoài", vượt ngưỡng tiền, hoặc liên quan
-nhân sự luôn dừng lại chờ người duyệt ở Bàn làm việc. Chi tiết kiến trúc và mục tiêu: `docs/ARCHITECTURE.md`;
-kế hoạch thi công theo giai đoạn: `docs/PLAN.md`.
+nhân sự luôn dừng lại chờ người duyệt ở Bàn làm việc. **Gen** là trợ lý trong Console: trả lời, dẫn đường từng bước, nhớ sở thích
+của Sếp, đọc Kho Ryan/lịch/mail qua **Gen-hub** — và chỉ *đề xuất*; Sếp bấm Xác nhận (kèm mã PIN khi nhạy cảm) thì mới làm.
 
-## Yêu cầu hệ thống
+Đọc theo vai: **[Dành cho Boss](#dành-cho-boss)** (cài, cập nhật, việc cần làm, nhờ giúp) ·
+**[Dành cho dev](#dành-cho-dev)** (dựng từ mã nguồn, kiểm thử, phát hành). Tài liệu khác: [Nhật ký thay đổi](CHANGELOG.md) ·
+[Lộ trình + mục Nợ](docs/ROADMAP.md) · [Sổ tay vận hành](docs/runbook.md) · [Kiến trúc](docs/ARCHITECTURE.md) · [Kế hoạch giai đoạn](docs/PLAN.md).
+
+---
+
+## Dành cho Boss
+
+### Cài đặt (một lần, khoảng 10 phút)
+
+Mở cửa sổ dòng lệnh trên máy sẽ làm máy chủ và dán **đúng một dòng**:
+
+```bash
+# Linux · macOS
+curl -fsSL https://github.com/Genesis-ryan-84-0567536339/Gen-Harness/releases/latest/download/install.sh | sh
+```
+
+```powershell
+# Windows (PowerShell)
+irm https://github.com/Genesis-ryan-84-0567536339/Gen-Harness/releases/latest/download/install.ps1 | iex
+```
+
+Trình cài tự kiểm máy, tự lo phần Docker nếu thiếu, tự tạo khoá bí mật rồi mở trình duyệt vào **trang thiết lập**. Nhập mã thiết lập
+do trình cài in ra (mất mã thì chạy `genh reset-setup`). Trình duyệt có thể cảnh báo "Not secure" — chạy `genh trust-ca` một lần là hết.
+
+Trang thiết lập có 12 bước, nhưng **chỉ bước 1–4 là bắt buộc** (mã thiết lập, tài khoản Sếp + **mã PIN 6 số**, tên tổ chức, bộ não AI).
+Bước nào chưa sẵn sàng thì bấm **Để sau** — các việc dở hiện ở Tổng quan và ở **Hướng dẫn thiết lập** (thanh bên).
+
+### Cập nhật
+
+**Tự động mỗi đêm, khoảng 03:00 — Sếp không phải làm gì.** Máy chỉ nhận bản đã được kiểm kỹ và ra đủ 24 giờ; có lỗi giữa chừng thì tự quay về
+bản cũ, dữ liệu không mất. Muốn cập nhật ngay: Console → **Cập nhật ngay**, hoặc chạy `genh update`. Có gì mới ở mỗi bản: [CHANGELOG.md](CHANGELOG.md).
+
+### Việc Sếp cần làm
+
+Console → **Hướng dẫn thiết lập** → **Việc Sếp cần làm**. Một trang gom mọi việc *chỉ Sếp làm được* (đăng nhập tài khoản của chính Sếp, dán mã, tick quyền),
+mỗi dòng có hướng dẫn từng bước và nút **Kiểm tra**; dòng chuyển **Đạt** là xong. Hiện có 9 dòng, 6 dòng bắt buộc:
+
+1. **Gen-hub** (bắt buộc) — nối Kho Ryan; tuỳ chọn thêm quyền đọc lịch/mail/việc/Drive và quyền ghi Kho.
+2. **Facebook** (bắt buộc) — đăng nhập tài khoản Facebook của Sếp trong cửa sổ trình duyệt từ xa.
+3. **Google / Antigravity** (bắt buộc) và 4. **Claude Code CLI** (bắt buộc) — các nguồn AI dùng gói của Sếp.
+5. **Jev** (tuỳ chọn). 6. **Telegram** (bắt buộc) — bot báo tin tới điện thoại Sếp. 7. **Truy cập từ xa** (bắt buộc) — vào Console từ điện thoại.
+8. **Facebook trả lời** (tuỳ chọn) — thử một lần trả lời bình luận thật. 9. **Gen ghi Kho** (tuỳ chọn) — duyệt lần Gen ghi Kho đầu tiên.
+
+Việc mới của từng bản nằm ở mục "Boss phải làm" trong `docs/releases/vX.Y.Z.md`; tổng hợp việc đang treo: [HANDOFF](docs/reports/HANDOFF-v0.1.1.md).
+
+### Dùng Gen
+
+Gen nằm ở khung chat bên phải. Hỏi bằng tiếng Việt: "Sáng nay có gì gấp?", "Chỉ tôi cách thêm khoá Gemini", "VIEC-12 là gì?", "Hôm nay tôi có lịch gì?".
+Gen **chỉ đề xuất**: nháp tin, nhắc việc, giao người, trả lời/nhắn Facebook, **Ghi nhớ** (dặn "nhớ giúp em …" — xem/sửa/xoá ở Cài đặt › Bộ não AI › **Gen nhớ**)
+và **Ghi vào Kho Ryan**. Mỗi thẻ có **Xác nhận / Sửa / Huỷ**; việc nhạy cảm (gửi ra ngoài, ghi Kho, đổi cấu hình) hỏi thêm **mã PIN**. Mỗi bản phát hành mới, Gen
+đề xuất sẵn một "Phiên" để Sếp duyệt ghi vào Kho.
+
+### Sao lưu — việc duy nhất Sếp nên nhớ
+
+Máy tự sao lưu hằng đêm. Nhưng **khoá giải mã chỉ nằm trên máy này**: máy hỏng mà không có bản sao khoá ở nơi khác thì mọi bản sao lưu đều mất. Vì vậy hãy bật **một** trong hai:
+
+```bash
+genh offsite set <thư mục ổ USB hoặc NAS đã cắm>   # tự xuất bản sao mã hoá mỗi Chủ nhật ~05:30, giữ 4 bản
+genh export --to <tệp>                              # hoặc xuất tay ra ổ khác, định kỳ (hỏi mật khẩu gói — cất ở nơi khác)
+```
+
+Chuyển sang máy mới: `genh import <tệp>`. Quên mật khẩu đăng nhập: `genh reset-password`. Chi tiết và các tình huống khác: [Sổ tay vận hành](docs/runbook.md).
+
+### Truy cập từ điện thoại, mời nhân viên
+
+Cài mới chỉ mở cho **chính máy chủ** (an toàn mặc định). Để vào từ điện thoại hoặc mời nhân viên: chạy `genh remote tailscale` (khuyên dùng) rồi làm theo hướng dẫn; xem
+tình trạng bằng `genh remote`. Console có thẻ **Truy cập từ xa** (Cài đặt) và dòng 7 ở Việc Sếp cần làm.
+
+### Khi có chuyện — nhờ giúp ở đâu
+
+- **Console → Trợ giúp**: phiên bản, **Cập nhật phần mềm**, **Tạo gói chẩn đoán** (nhập PIN, tải về, gửi tệp zip cho Claude — đã lọc mật khẩu/khoá/token).
+- **Chuông** và dải **Cần Sếp xử lý** ở Tổng quan; **Telegram** tự báo khi máy chủ hỏng hoặc có việc gấp (cần làm dòng 6 ở Việc Sếp cần làm).
+- **Hỏi Gen**: "Chỉ tôi cách …" — Gen mở trang và làm sáng đúng nút.
+- **Sổ tay vận hành**: [docs/runbook.md](docs/runbook.md) — cập nhật kẹt, khôi phục, ngắt mạch Gen-hub, báo động.
+- Báo lỗi cho Claude: kèm mã lỗi (ERR-…, "Mã yêu cầu") và gói chẩn đoán.
+
+### Rủi ro khi đăng nhập tài khoản cá nhân (Zalo/WhatsApp/Facebook)
+
+Gen-Harness kết nối Zalo/WhatsApp **như một thiết bị đăng nhập thêm của chính tài khoản cá nhân**, không qua cổng API chính thức dành cho doanh nghiệp
+(những nền tảng này chưa cấp API mở tương đương); Facebook cá nhân thì qua một trình duyệt riêng mà **Sếp tự đăng nhập**. Trước khi hiện mã QR ở bước 5, Console luôn bắt
+xác nhận đã đọc cảnh báo này (không có đường tắt bỏ qua):
+
+> Gen-Harness kết nối [kênh] như một thiết bị đăng nhập của chính Sếp, không qua cổng chính thức cho doanh
+> nghiệp. [Kênh] có thể tạm khoá hoặc hạn chế tài khoản nếu thấy hoạt động bất thường.
+
+Khuyến nghị đi kèm:
+
+- Dùng tài khoản **do chính Owner/người phụ trách sở hữu**, không dùng tài khoản của nhân viên hay khách. Không bao giờ tạo tài khoản giả.
+- Chỉ lắng nghe các nhóm đã bật rõ ràng — mọi nhóm mới mặc định "Không nghe".
+- Tin gửi đi luôn qua hàng đợi và ranh giới tự trị đã cấu hình; trả lời/nhắn Facebook chỉ gửi khi Sếp **Xác nhận và nhập mã PIN**, có ảnh chụp bằng chứng và nút **Dừng tất cả**.
+- Có thể đăng xuất kênh bất cứ lúc nào, từ Console hoặc ngay trên ứng dụng điện thoại.
+
+Vì đây là rủi ro thật (không phải hình thức), **cân nhắc kỹ trước khi kết nối tài khoản chính đang dùng cho công việc khác** — nên dùng một số/tài khoản riêng nếu có thể.
+
+---
+
+## Dành cho dev
+
+### Yêu cầu hệ thống
 
 - Docker Engine + Docker Compose v2 (`docker compose`, không phải `docker-compose` cũ).
-- ~4 GB RAM rảnh, vài GB đĩa trống (Postgres, Redis, ảnh container).
-- Một máy Linux/macOS (hoặc WSL2 trên Windows) có thể mở cổng ra ngoài để chạy `caddy` (mặc định `:8443`).
-- Để đăng nhập kênh thật (giai đoạn thiết lập): điện thoại đã cài Zalo/WhatsApp, quét được mã QR.
+- ~4 GB RAM rảnh, vài GB đĩa trống (Postgres, Redis, ảnh container; ảnh trình duyệt ~1,5 GB).
+- Một máy Linux/macOS (hoặc WSL2 trên Windows) có thể mở cổng cho `caddy` (mặc định `:8443`, chỉ nghe `127.0.0.1` ở bản cài mới).
+- Để đăng nhập kênh thật: điện thoại đã cài Zalo/WhatsApp, quét được mã QR.
 
-## Cài đặt
+### Dựng từ mã nguồn
 
-Gen-Harness chạy bằng **`docker compose`** — không cần cài Python/Node/Postgres lên máy. (Giai đoạn 6 của kế
-hoạch dự kiến thêm một trình cài một lệnh `genh` bọc quanh đúng các bước dưới đây; đến lúc đó, cách cài chuẩn
-là `docker compose`.)
+Người dùng cuối cài bằng `genh` (mục trên). Dev dựng bằng **`docker compose`** — không cần cài Python/Node/Postgres lên máy:
 
 ```bash
 git clone <repo-này> Gen-Harness && cd Gen-Harness
@@ -31,21 +128,24 @@ make up
 # tương đương: docker compose -f deploy/compose.yaml --env-file .env up -d --build
 ```
 
-`make up` kéo lên 8 dịch vụ (`deploy/compose.yaml`):
+`make up` kéo lên **11 dịch vụ** (các khoá dưới `services:` của `deploy/compose.yaml`):
 
 | Dịch vụ | Vai trò |
 |---|---|
 | `proxy` (Caddy) | Cổng vào duy nhất mở ra ngoài, HTTPS tự ký, mặc định `:8443` |
 | `web` | Console (giao diện) |
-| `migrate` | Chạy migration Postgres một lần rồi thoát, trước khi `api`/`worker` khởi động |
-| `api` | FastAPI — mọi nghiệp vụ, xác thực, WebSocket realtime |
-| `worker` | Tiến trình nền (arq): sàng lọc, hook nghiệp vụ, việc định kỳ (kể cả backup — xem bên dưới) |
+| `migrate` | Chạy migration Postgres một lần rồi thoát, trước khi `api`/`worker` khởi động (không chạy thường trực) |
+| `api` | FastAPI — mọi nghiệp vụ, xác thực, WebSocket realtime, Gen |
+| `worker` | Tiến trình nền (arq): sàng lọc, hook nghiệp vụ, việc định kỳ (sao lưu, Bản tin Gen, kiểm phiên…) |
 | `bridge` | Kết nối kênh nhắn tin thật (Zalo/WhatsApp qua QR), chỉ giữ khoá bridge, không bao giờ có khoá master |
+| `browser` | Trình duyệt riêng (Playwright/Chromium) cho Facebook cá nhân; không DB, không khoá master, không thấy Redis chính |
+| `browser-redis` | Redis riêng của `browser` (không lưu đĩa, ACL hẹp) — kênh giao thức `gh:browser:*` |
+| `browser-egress` | Proxy ra ngoài của `browser`, chỉ cho phép tên miền Facebook, chặn IP nội bộ |
 | `db` | Postgres 16 (pgvector, pg_partman) |
 | `redis` | Redis Streams (hàng đợi sự kiện) + cache |
 
-Tài liệu và bản sao lưu lưu trên đĩa qua volume Docker `gh_objects` (`GH_OBJECTS_DIR`, gắn vào `api` + `worker`
-— xem `docs/reports/HANDOFF-v0.1.1.md`), không còn dịch vụ MinIO riêng như bản trước v0.1.1.
+Tài liệu và bản sao lưu lưu trên đĩa qua volume Docker `gh_objects` (`GH_OBJECTS_DIR`, gắn vào `api` + `worker` — xem [v0.1.1](docs/releases/v0.1.1.md)),
+không còn dịch vụ MinIO riêng như bản trước v0.1.1.
 
 Xem tiến trình dựng và log:
 
@@ -58,53 +158,29 @@ make logs-token      # in mã thiết lập một lần (nếu GH_SETUP_TOKEN đ
 Khi `api` và `web` đã "healthy", mở **`https://localhost:8443/setup`** (trình duyệt sẽ cảnh báo chứng chỉ tự
 ký ở môi trường dev — chấp nhận tiếp tục) và nhập mã thiết lập từ `make logs-token`.
 
-## Các bước thiết lập chính (trình thiết lập Owner, 12 bước)
+### Trình thiết lập Owner (12 bước)
 
-Trình thiết lập ở `/setup` dẫn người dùng qua đủ các bước để hệ thống dùng được ngay, theo thứ tự:
+Trình thiết lập ở `/setup` dẫn người dùng qua đủ các bước để hệ thống dùng được ngay. **Chỉ bước 1–4 bắt buộc**; các bước còn lại có "Để sau" và tự dùng mặc định an toàn.
 
 1. **Chào mừng** — nhập mã thiết lập một lần.
 2. **Tài khoản Owner** — tên, email, mật khẩu, **PIN 6 số** (PIN xác nhận mọi thao tác nhạy cảm sau này).
 3. **Tổ chức & xưng hô** — tên tổ chức, múi giờ, đơn vị tiền tệ, cách agent xưng hô.
-4. **Bộ não AI** — chọn nhà cung cấp model (API key), chuỗi ưu tiên có failover.
-5. **Kết nối kênh** — đăng nhập Zalo/WhatsApp bằng **mã QR** (xem cảnh báo rủi ro bắt buộc ở mục kế tiếp).
+4. **Bộ não AI** — chọn nhà cung cấp model (khoá API hoặc CLI Antigravity/Claude Code), chuỗi ưu tiên có failover; "Để sau" thì tự gán model của nguồn đã gọi thử OK.
+5. **Kết nối kênh** — đăng nhập Zalo/WhatsApp bằng **mã QR** (cảnh báo rủi ro bắt buộc ở mục "Rủi ro" phía trên).
 6. **Chọn nhóm lắng nghe** — mặc định MỌI nhóm mới ở chế độ "Không nghe"; Owner tự bật từng nhóm muốn theo dõi.
 7. **Sàng lọc dữ liệu** — chu kỳ thời gian hoặc ngưỡng số lượng tin để đẩy vào sàng lọc.
 8. **Agent đầu tiên** — tạo agent, thử trò chuyện ngay trong trình thiết lập.
-9. **Tự trị & ranh giới** — mức tự trị (0–6) của agent; xác nhận đã đọc các ranh giới cứng (không tắt được:
-   agent không tự ra quyết định nhân sự, tin gửi ra ngoài luôn chờ duyệt, v.v. — `docs/ARCHITECTURE.md` §1).
-10. **Mời đội ngũ** *(tuỳ chọn)* — tạo tài khoản + mật khẩu tạm cho nhân viên (chưa có SMTP thật để tự gửi mời
-    qua email — mật khẩu tạm hiện ngay trên màn để Owner tự gửi).
-11. **Sao lưu** *(tuỳ chọn)* — chọn lịch (hằng ngày/hằng tuần/hằng tháng) và giờ chạy sao lưu tự động; cơ chế
-    backup thật (mô tả ở mục "Sao lưu/khôi phục" bên dưới) đọc đúng cấu hình này.
+9. **Tự trị & ranh giới** — mức tự trị của agent (3 mức ở giao diện, 0–6 ở Nâng cao); xác nhận đã đọc các ranh giới cứng (không tắt được:
+   agent không tự ra quyết định nhân sự, tin gửi ra ngoài luôn chờ duyệt, v.v. — [Kiến trúc](docs/ARCHITECTURE.md) §1).
+10. **Mời đội ngũ** *(tuỳ chọn)* — tạo tài khoản + mật khẩu tạm cho nhân viên (mật khẩu tạm hiện ngay trên màn để Owner tự gửi; chưa có SMTP).
+11. **Sao lưu** *(tuỳ chọn)* — chọn lịch (hằng ngày/hằng tuần/hằng tháng) và giờ chạy sao lưu tự động; cơ chế backup thật đọc đúng cấu hình này.
 12. **Hoàn tất** — vào thẳng Console.
 
-Mỗi bước (trừ các bước bắt buộc) có thể bỏ qua và cấu hình lại sau trong Console (Điều khiển hệ thống).
-
-## Rủi ro khi đăng nhập kênh bằng tài khoản cá nhân (Zalo/WhatsApp)
-
-Gen-Harness kết nối Zalo/WhatsApp **như một thiết bị đăng nhập thêm của chính tài khoản cá nhân**, không qua
-cổng API chính thức dành cho doanh nghiệp (những nền tảng này chưa cấp API mở tương đương). Trước khi hiện mã
-QR ở bước 5, Console luôn bắt xác nhận đã đọc cảnh báo này (không có đường tắt bỏ qua):
-
-> Gen-Harness kết nối [kênh] như một thiết bị đăng nhập của chính Sếp, không qua cổng chính thức cho doanh
-> nghiệp. [Kênh] có thể tạm khoá hoặc hạn chế tài khoản nếu thấy hoạt động bất thường.
-
-Khuyến nghị đi kèm, cũng hiện ngay trên màn xác nhận:
-
-- Dùng tài khoản **do chính Owner/người phụ trách sở hữu**, không dùng tài khoản của nhân viên hay khách.
-- Bridge chỉ lắng nghe các nhóm đã được bật rõ ràng — mọi nhóm mới mặc định "Không nghe".
-- Tin gửi đi luôn qua hàng đợi và ranh giới tự trị đã cấu hình — không gửi hàng loạt, không spam.
-- Có thể đăng xuất kênh bất cứ lúc nào, từ Console hoặc ngay trên ứng dụng điện thoại.
-
-Vì đây là rủi ro thật (không phải hình thức), **cân nhắc kỹ trước khi kết nối tài khoản chính đang dùng cho
-công việc khác** — nên dùng một số/tài khoản riêng cho việc này nếu có thể.
-
-## Sao lưu / khôi phục
+### Sao lưu / khôi phục (cơ chế)
 
 Hệ thống tự sao lưu định kỳ theo lịch cấu hình ở bước 11 (worker quét cấu hình mỗi 15 phút): `pg_dump` toàn bộ
-CSDL, **mã hoá** bằng đúng cơ chế mã hoá bí mật của hệ thống, lưu vào kho đối tượng đĩa cục bộ (volume
-`gh_objects`, `GH_OBJECTS_DIR`). Vòng đời: giữ **7 bản hằng ngày + 4 bản hằng tuần + 12 bản hằng tháng gần
-nhất**, tự dọn bản thừa sau mỗi lần chạy.
+CSDL, **mã hoá** (khoá riêng `GH_BACKUP_KEY` nếu có, không thì khoá master), lưu vào kho đối tượng đĩa cục bộ (volume
+`gh_objects`). Vòng đời: giữ **7 bản hằng ngày + 4 bản hằng tuần + 12 bản hằng tháng gần nhất**, tự dọn bản thừa.
 
 Lệnh thủ công (chạy trong container `api`/`worker`, hoặc từ máy dev qua `make`):
 
@@ -114,84 +190,49 @@ make backup-list                  # liệt kê các bản đang giữ
 make restore BACKUP=<khoá-bản-backup>   # khôi phục một bản (mặc định vào CSDL đang cấu hình)
 ```
 
-Chi tiết cơ chế, thuật toán vòng đời, và kết quả kiểm round-trip thật (sao lưu dữ liệu thật → khôi phục vào
-CSDL trống → đối chiếu từng dòng): `docs/reports/phase-5-backup.md`.
+Trên máy cài bằng `genh`: `genh backup [--to path]`, `genh restore <khoá>`, `genh export --to <tệp>` / `genh import <tệp> [--yes]`, `genh offsite set|run|status|disable`
+(xem [installer](docs/handoff/05-installer.md) mục "Lệnh vận hành" và [runbook](docs/runbook.md)). Cơ chế, thuật toán vòng đời và kết quả kiểm round-trip thật:
+[phase-5-backup.md](docs/reports/phase-5-backup.md). Gói `.ghbundle` (CSDL + object + bí mật, mã hoá lại bằng khoá master máy đích): [v0.1.1](docs/releases/v0.1.1.md);
+khoá backup riêng `GH_BACKUP_KEY`: [v0.1.2](docs/releases/v0.1.2.md).
 
-Để **chuyển toàn bộ hồ sơ Owner sang máy khác** (CSDL + object + bí mật, mã hoá lại bằng khoá master của máy
-đích): `genh export --to <file>` / `genh import <file> [--yes]` — xem `docs/handoff/05-installer.md` và
-`docs/reports/HANDOFF-v0.1.1.md`.
+**⚠️ Cảnh báo — khoá chỉ nằm trên máy này**: `GH_MASTER_KEY` (mã hoá bí mật ứng dụng) và `GH_BACKUP_KEY` chỉ tồn tại trên máy đang chạy, không tự sao lưu ra ngoài.
+Máy hỏng/ổ đĩa hỏng **mà không có bản sao khoá ở nơi khác** → mọi bản backup tại chỗ đều **không giải mã lại được**. Tự bảo vệ bằng `genh export`/`genh offsite` ra ổ KHÁC;
+gói `.ghbundle` mang theo cả khoá master (và khoá bridge nếu có), bảo vệ bằng mật khẩu riêng (`GH_BUNDLE_PASSWORD`, argon2id + AES-256-GCM). Giữ mật khẩu gói ở nơi khác — mất mật khẩu gói cũng coi như mất gói.
 
-**⚠️ Cảnh báo — khoá chỉ nằm trên máy này**: `GH_MASTER_KEY` (mã hoá bí mật ứng dụng) và, nếu có cấu hình,
-`GH_BACKUP_KEY` (mã hoá riêng cho backup — xem `docs/reports/HANDOFF-v0.1.2.md`) chỉ tồn tại trên máy đang
-chạy, không tự sao lưu ra ngoài. Máy hỏng/ổ đĩa hỏng **mà không có bản sao khoá ở nơi khác** → mọi bản backup
-tại chỗ (kể cả trong `gh_objects`) đều **không giải mã lại được**, coi như mất hoàn toàn.
+### Phát hành
 
-Tự bảo vệ: định kỳ chạy `genh export --to <file>` ra một ổ đĩa/máy KHÁC (USB, máy khác, kho lưu trữ ngoài) —
-gói `.ghbundle` mang theo cả khoá master (và khoá bridge nếu có), tự bảo vệ bằng mật khẩu riêng (`GH_BUNDLE_
-PASSWORD`, argon2id + AES-256-GCM), không phụ thuộc khoá đang cấu hình trên máy nguồn. Giữ mật khẩu gói này
-một nơi khác, an toàn (không cùng chỗ với gói) — mất mật khẩu gói cũng coi như mất gói.
+Phát hành = tăng `VERSION` (ở gốc repo) trong PR, merge vào main — GitHub Actions (`release.yml`) tự chạy CI, build, tạo Release **bản thử** (prerelease), chạy E2E cài thật; xanh hết mới
+nâng thành bản chính thức (latest) — không ai tạo tag/release tay. Máy người dùng chỉ thấy bản chính thức, lịch đêm đợi thêm 24 giờ. Mỗi bản ghi vào [CHANGELOG.md](CHANGELOG.md) (3–5 dòng)
+và `docs/releases/vX.Y.Z.md`; [HANDOFF](docs/reports/HANDOFF-v0.1.1.md) chỉ giữ hiện trạng + việc dở (≤ 200 dòng). Chi tiết cổng phát hành: [installer](docs/handoff/05-installer.md) mục "Cổng phát hành".
 
-## Nâng cấp
+### Phát triển
 
-**Từ v0.1.5: tự động mỗi đêm — không phải làm gì.** `genh install` tự bật lịch "tự cập nhật" (systemd
-timer/crontab trên Linux, LaunchAgent trên macOS, Task Scheduler trên Windows), chạy `genh update --yes
---quiet` lúc ~03:00 giờ máy: tự hỏi bản `genh` chính thức mới nhất trên GitHub Releases, kiểm SHA-256, thay
-binary, RỒI mới backup + migrate + khởi động lại dịch vụ — tự rollback nếu bất kỳ bước nào lỗi.
-
-**Từ v0.1.33, lịch đêm chỉ cài bản đã là bản chính thức đủ 24 giờ** (bản mới ra chưa đủ thì đợi đêm sau — có
-thể tới 2 đêm), để bản lỗi vừa phát hành không tự lan sang mọi máy ngay đêm đầu. Thẻ "Có bản mới" trong Console
-ghi rõ lúc nào sẽ tự cài. Muốn cài **ngay**: Console → **Cập nhật ngay**, hoặc chạy tay (không kèm `--yes`):
-
-```bash
-genh update
-```
-
-Kiểm/tắt lịch tự động: `genh auto-update status` / `genh auto-update disable` (bật lại: `genh auto-update
-enable`, hoặc thêm `--no-auto-update` lúc `genh install` để không bật ngay từ đầu). Chi tiết cơ chế từng hệ
-điều hành: `docs/handoff/05-installer.md` mục "Lệnh vận hành".
-
-Máy cài từ trước v0.1.3 (chưa có `genh update` tự thay binary) vẫn chạy lại được **đúng một dòng lệnh cài**
-đã dùng lần đầu — từ v0.1.5, script này (`install.sh`/`install.ps1`) tự phát hiện máy **đã cài** rồi CHẠY LUÔN
-`genh update` (không chỉ in hướng dẫn như trước), an toàn vì `genh update` đã tự có backup + rollback:
-
-```bash
-curl -fsSL https://github.com/Genesis-ryan-84-0567536339/Gen-Harness/releases/latest/download/install.sh | sh
-```
-
-(Windows: `irm .../install.ps1 | iex`.) `genh install` chỉ dùng cho máy **chưa cài lần nào**, hoặc lần cài
-trước **thật sự chưa xong** (thêm cờ `--force` nếu cần cố tình cài lại một máy đã cài).
-
-## Phát hành
-
-Phát hành = tăng `VERSION` (ở gốc repo) trong PR, merge vào main — GitHub Actions (`release.yml`) tự build, tự
-tạo GitHub Release và tag tương ứng, không cần ai tạo tag/release tay. Chi tiết: `docs/handoff/05-installer.md`
-mục "Phát hành".
-
-## Phát triển
-
-Monorepo npm workspaces + một app Python riêng:
+Monorepo npm workspaces + các app Python/Go riêng:
 
 ```
 apps/
   api/       FastAPI + arq worker (Python, .venv riêng — apps/api/gh/)
   web/       Console (React/Vite — apps/web/src/)
   bridge/    Kết nối kênh nhắn tin thật (Node)
+  browser/   Trình duyệt riêng cho mạng xã hội (Python + Playwright — apps/browser/ghb/)
+  genh/      Trình cài đặt/vận hành một lệnh (Go)
 packages/
   contracts/ Kiểu dữ liệu dùng chung giữa api/web
-db/          Migration SQL (Alembic)
+db/          Migration SQL (db/sql, đi cùng Alembic ở apps/api/migrations)
 deploy/      Dockerfile từng dịch vụ + deploy/compose.yaml
-docs/        ARCHITECTURE.md, PLAN.md, thiết kế gốc (docs/design/), đặc tả bàn giao (docs/handoff/), báo cáo
-             từng giai đoạn (docs/reports/)
+docs/        ARCHITECTURE.md, PLAN.md, ROADMAP.md, runbook.md, thiết kế (docs/design/), đặc tả bàn giao (docs/handoff/),
+             lịch sử từng bản (docs/releases/), báo cáo (docs/reports/), kiểm toán (docs/audit/)
 ```
 
 Chạy test (không cần Docker — dùng Postgres/Redis local, xem `apps/api/tests/conftest.py`):
 
 ```bash
 make api-lint                     # ruff + mypy (apps/api)
-make api-test                     # pytest (apps/api) — hiện 860+ test
+make api-test                     # pytest (apps/api) — gần 2.000 test
 make web-test                     # test unit Console
 make bridge-test                  # test bridge
 make test                         # cả bốn lệnh trên
+python3 -m unittest discover -s .github/scripts   # kiểm tra repo: cổng phát hành, link tài liệu, đồng bộ bản nhúng…
 ```
 
 Dữ liệu mẫu để phát triển/demo (đi đúng luồng raw → sàng lọc → sạch, không chèn thẳng vào bảng):
@@ -210,11 +251,14 @@ Lần đầu (và mỗi khi kéo về `uv.lock` mới): `make api-sync` — cài
 (cùng bản với CI và ảnh Docker — khác bản thì `uv lock --check` của CI có thể đỏ); cần có `uv` trên máy
 (https://docs.astral.sh/uv/).
 
-## Tài liệu chi tiết hơn
+### Tài liệu chi tiết hơn
 
-- `docs/ARCHITECTURE.md` — kiến trúc hệ thống, ràng buộc bắt buộc (R1–R10), luồng dữ liệu.
-- `docs/PLAN.md` — kế hoạch thi công theo giai đoạn, quyết định thiết kế (Q1–Q7).
-- `docs/reports/` — báo cáo từng giai đoạn đã hoàn thành: `phase-1.md` … `phase-4.md` (nền tảng → các cụm màn
-  Console), `phase-5-visual.md` (so ảnh pixel 21 màn), `phase-5-e2e-live.md` (luồng 2–8 trên hệ thống thật),
-  `phase-5-resilience.md` (chịu lỗi Postgres/Redis/bridge/provider), `phase-5-performance.md` (benchmark 10
-  triệu bản ghi), `phase-5-backup.md` (sao lưu/khôi phục — mục này).
+- [Kiến trúc](docs/ARCHITECTURE.md) — kiến trúc hệ thống, ràng buộc bắt buộc (R1–R10), luồng dữ liệu. [Kế hoạch giai đoạn](docs/PLAN.md) — quyết định thiết kế (Q1–Q7).
+- [Lộ trình + mục Nợ](docs/ROADMAP.md) · [Nhật ký thay đổi](CHANGELOG.md) · [Hiện trạng + việc dở](docs/reports/HANDOFF-v0.1.1.md) · [Sổ tay vận hành](docs/runbook.md).
+- Thiết kế Gen: [gen-v1](docs/design/gen-v1.md) (Gen, đề xuất, Gen nhớ), [gen-hub-link](docs/design/gen-hub-link.md) (Gen-hub, đọc/ghi Kho),
+  [gen-browser-agent](docs/design/gen-browser-agent.md) (mạng xã hội). Giao thức: [`docs/api/`](docs/api/phase-1.md).
+- [Đặc tả trình cài đặt `genh`](docs/handoff/05-installer.md) — lệnh vận hành, cập nhật tự lành, cổng phát hành.
+- Báo cáo từng giai đoạn đã hoàn thành: [phase-1](docs/reports/phase-1.md) … [phase-4](docs/reports/phase-4.md) (nền tảng → các cụm màn Console),
+  [phase-5-visual](docs/reports/phase-5-visual.md) (so ảnh pixel 21 màn), [phase-5-e2e-live](docs/reports/phase-5-e2e-live.md) (luồng 2–8 trên hệ thống thật),
+  [phase-5-resilience](docs/reports/phase-5-resilience.md) (chịu lỗi Postgres/Redis/bridge/provider), [phase-5-performance](docs/reports/phase-5-performance.md)
+  (benchmark 10 triệu bản ghi), [phase-5-backup](docs/reports/phase-5-backup.md) (sao lưu/khôi phục).

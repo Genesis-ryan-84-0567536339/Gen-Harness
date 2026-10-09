@@ -243,17 +243,20 @@ async def test_facebook_stale_job_closed_and_cancelled_has_own_code(owner_api: A
 
 async def test_overview_rows_and_done_rules(owner_api: Api, db: Any) -> None:
     ov = (await owner_api.get("/boss-checks")).json()
-    assert [r["row"] for r in ov["rows"]] == [1, 2, 3, 4, 5, 6, 7, 8]
+    assert [r["row"] for r in ov["rows"]] == [1, 2, 3, 4, 5, 6, 7, 8, 9]
     assert [r["key"] for r in ov["rows"]] == ["hub", "facebook", "agy", "claude", "jev", "telegram", "remote",
-                                                  "facebook_reply"]
+                                                  "facebook_reply", "kho_write"]
     assert ov["rows"][2]["title"] == "Google / Antigravity" and ov["rows"][2]["checks"] == [
         "agy_login", "agy_call", "agy_switch"]
     # v0.1.44 (F-8c): dòng 6 Telegram (báo động & bản tin) — bắt buộc.
     assert ov["rows"][5]["title"] == "Telegram (báo động & bản tin)" and ov["rows"][5]["checks"] == ["telegram"]
-    assert [r["optional"] for r in ov["rows"]] == [False, False, False, False, True, False, False, True]
+    assert [r["optional"] for r in ov["rows"]] == [False, False, False, False, True, False, False, True, True]
     # v0.1.47 (F-79): dòng 8 Facebook trả lời — không bắt buộc, không chạy được từ nút Kiểm tra.
     assert ov["rows"][7]["title"] == "Facebook trả lời" and ov["rows"][7]["checks"] == ["facebook_reply"]
     assert "facebook_reply" not in boss.RUNNABLE
+    # v0.1.50 (F-81): dòng 9 Gen ghi Kho — không bắt buộc, không có nút Kiểm tra (máy chủ tự ghi 'pass' sau lần ghi).
+    assert ov["rows"][8]["title"] == "Gen ghi Kho" and ov["rows"][8]["checks"] == ["kho_write"]
+    assert "kho_write" in boss.CHECK_KEYS and "kho_write" not in boss.RUNNABLE
     assert ov["required_total"] == 6 and ov["required_done"] == 0
     assert set(ov["results"]) == set(boss.CHECK_KEYS) and all(v is None for v in ov["results"].values())
     org = await org_id(db)
