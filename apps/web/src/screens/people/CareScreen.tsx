@@ -157,7 +157,7 @@ function ResponseGrid({ items }: { items: CareResponseRow[] }) {
       </div>
       {items.map((r) => (
         <div key={r.staff.id} className="care-grid-row" role="row">
-          <span role="cell" className="care-grid-row__name">{r.staff.name}</span>
+          <span role="cell" className="care-grid-row__name" title={r.staff.name}>{r.staff.name}</span>
           <span role="cell" className="care-grid-cell" style={{ color: OK }} title={`${r.fast} lượt dưới 15 phút`}>{fmtInt(r.fast)}</span>
           <span role="cell" className="care-grid-cell" style={{ color: WARN }} title={`${r.normal} lượt 15–60 phút`}>{fmtInt(r.normal)}</span>
           <span role="cell" className="care-grid-cell" style={{ color: BAD }} title={`${r.slow} lượt trên 60 phút`}>{fmtInt(r.slow)}</span>

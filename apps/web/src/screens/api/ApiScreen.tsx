@@ -224,7 +224,7 @@ function ProviderField({ label, value, tone, secret }: { label: string; value: s
     <div className="apm-field">
       <span className="apm-field__key">{label}</span>
       <div className="apm-field__box">
-        <span className="apm-field__val" style={{ color: tone }}>
+        <span className="apm-field__val" style={{ color: tone }} title={value}>
           {value}
         </span>
         {secret ? <Icon name="ph ph-eye" size={13} color="var(--color-neutral-700)" /> : null}
@@ -477,7 +477,7 @@ function CoreParamsPanel() {
         rows.map(([k, v]) => (
           <div className="apm-param-row" key={k}>
             <span className="apm-param-row__key">{k}</span>
-            <div className="apm-param-row__box">{v}</div>
+            <div className="apm-param-row__box" title={v}>{v}</div>
           </div>
         ))
       )}
@@ -499,7 +499,7 @@ function RateLimitsPanel() {
       ) : (
         rows.map((r) => (
           <div className="apm-rate-row" key={r.key}>
-            <span className="apm-rate-row__label">{r.label}</span>
+            <span className="apm-rate-row__label" title={r.label}>{r.label}</span>
             <span className="apm-rate-row__value mono">{r.quota}</span>
           </div>
         ))

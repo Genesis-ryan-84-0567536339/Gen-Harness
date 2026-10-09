@@ -60,12 +60,19 @@ export function ScreenHead({
   );
 }
 
-/** Surface card with the standard header; `bodyClass` sets the body padding of each design card. */
+/**
+ * Surface card with the standard header. Thân thẻ:
+ *  - `bodyClass` — lớp thân riêng của thẻ thiết kế (lớp đó tự lo đệm; hàng/danh sách trong thân phải có đệm ngang
+ *    16px ở thân HOẶC ở từng hàng — đừng để cả hai bằng 0, đó là lỗi "chữ dính mép thẻ" sau v0.1.48);
+ *  - `flush` — con nằm thẳng trong thẻ, không thân bọc (bảng tràn mép, danh sách hàng tự có đệm, EmptyState…);
+ *  - không truyền gì — bọc `.gh-card__body` (đệm chuẩn 15px 16px), để thẻ mới không bao giờ dính mép.
+ */
 export function Panel({
   title,
   kicker,
   aside,
   bodyClass,
+  flush,
   className,
   style,
   children,
@@ -76,6 +83,8 @@ export function Panel({
   kicker?: ReactNode;
   aside?: ReactNode;
   bodyClass?: string;
+  /** Con nằm thẳng trong thẻ (tự có đệm) — xem chú thích Panel. */
+  flush?: boolean;
   className?: string;
   style?: CSSProperties;
   children?: ReactNode;
@@ -92,7 +101,7 @@ export function Panel({
         </div>
         {aside}
       </div>
-      {bodyClass !== undefined ? <div className={bodyClass}>{children}</div> : children}
+      {flush ? children : <div className={bodyClass ?? 'gh-card__body'}>{children}</div>}
     </section>
   );
 }

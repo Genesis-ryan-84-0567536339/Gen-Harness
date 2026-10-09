@@ -5,13 +5,14 @@ Hiện trạng và việc dở: [docs/reports/HANDOFF-v0.1.1.md](docs/reports/HA
 vận hành: [docs/runbook.md](docs/runbook.md).
 Ngày = ngày Release trên GitHub theo giờ Việt Nam; tiêu đề trong `docs/releases/` có thể ghi ngày làm việc nên lệch 1 ngày
 (v0.1.32–v0.1.34, v0.1.40, v0.1.46) hoặc vài ngày (v0.1.47, v0.1.48: làm 03/10, phát hành 09/10).
-Việc sửa nóng không đổi số bản (PR #46, #48, #53, #55) ghi ở [ROADMAP › Bản phản ứng](docs/ROADMAP.md).
+Việc sửa nóng không đổi số bản (PR #46, #48, #53, #55, #58) ghi ở [ROADMAP › Bản phản ứng](docs/ROADMAP.md).
 
 ## v0.1.50 — Gen nhớ + Gen ghi Kho có xác nhận và mã PIN (09/10/2026)
 - Gen nhớ: ghi chú quy ước/sở thích của Sếp lưu cục bộ (tối đa 30), Gen đề xuất — Sếp xác nhận — sửa/xoá ở Cài đặt › Bộ não AI (F-81, migration 0032).
 - Ghi vào Kho Ryan: Gen đề xuất `kho_create`/`kho_update` cho Phiên/Việc; chỉ ghi sau Xác nhận + mã PIN + permit ký, qua Gen-hub (QD-18, F-81).
 - Mỗi bản mới Gen tự đề xuất một Phiên (chuông + thẻ); Kết nối › Gen-hub có "Quyền ghi Kho"; Việc Sếp cần làm thêm dòng 9 "Gen ghi Kho" (F-87).
 - Tài liệu đồng bộ: CHANGELOG + `docs/releases/`, HANDOFF ≤ 200 dòng, ROADMAP có mục Nợ, README/runbook, script kiểm link (F-90, F-69, F-47, F-91, F-92, F-42, F-39).
+- Gộp sửa trình bày từ main (PR #58): thẻ không còn chữ dính biên khung, Icon không rớt dòng, lính gác bố cục Playwright 4 cỡ màn.
 - Chi tiết: [docs/releases/v0.1.50.md](docs/releases/v0.1.50.md)
 
 ## v0.1.49 — Gen đọc lịch / mail / việc / Drive qua Gen-hub, chỉ đọc (09/10/2026)

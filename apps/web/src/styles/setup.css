@@ -127,7 +127,7 @@
 .login-card__error { font-size: 11px; color: var(--color-bad); min-height: 0; margin-top: -6px; }
 .login-card__error:empty { display: none; }
 .login-card__help { margin: -4px 0 0; font-size: 11px; line-height: 1.6; color: var(--color-neutral-400); }
-.login-card__help code { padding: 1px 5px; border-radius: 4px; background: var(--color-neutral-900, rgba(0,0,0,.3)); color: var(--color-accent-300); white-space: nowrap; display: inline-block; max-width: 100%; overflow-x: auto; vertical-align: bottom; }
+.login-card__help code { padding: 1px 6px; border-radius: 4px; background: var(--color-neutral-900, rgba(0,0,0,.3)); color: var(--color-accent-300); white-space: nowrap; display: inline-block; max-width: 100%; overflow-x: auto; vertical-align: bottom; }
 .login-card__help p { margin: 0; }
 
 /* ── Phase 2 steps (4–7, 12) ───────────────────────────────────────────── */
@@ -136,12 +136,15 @@
 .setup-section:last-child { border-bottom: none; }
 .setup-section__title { font-size: 9.5px; font-weight: 600; letter-spacing: 0.13em; text-transform: uppercase; color: var(--color-neutral-500); }
 .setup-section__hint { font-size: 11.5px; color: var(--color-neutral-400); line-height: 1.5; text-wrap: pretty; }
-.setup-row { display: flex; align-items: center; gap: 12px; min-width: 0; }
-.setup-row__main { flex: 1; min-width: 0; }
+.setup-row { display: flex; align-items: center; gap: 12px; min-width: 0; flex-wrap: wrap; }
+/* Cột tên/meta: cơ sở 180px (KHÔNG `flex: 1` = cơ sở 0) — hàng có flex-wrap tính chỗ theo cơ sở, cơ sở 0 thì không bao giờ
+   xuống dòng mà ép cột chữ còn vài px ở 390px ("Chưa bật" biến mất, meta vỡ từng chữ). Hẹp hơn thì nút xuống hàng dưới. */
+.setup-row__main { flex: 1 1 180px; min-width: 0; }
 .setup-row__title { font-size: 12.5px; color: var(--color-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .setup-row__meta { font-size: 10.5px; color: var(--color-neutral-500); margin-top: 2px; font-family: var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .prov-list { display: flex; flex-direction: column; }
-.prov-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--color-divider); }
+.prov-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--color-divider); }
+.prov-row__actions { display: flex; align-items: center; gap: 10px; flex: none; margin-left: auto; }
 .prov-row:last-child { border-bottom: none; }
 .prov-rank { width: 20px; flex: none; font-size: 11px; color: var(--color-neutral-500); font-family: var(--font-mono); }
 .prov-test { font-size: 10.5px; font-family: var(--font-mono); margin-top: 3px; }

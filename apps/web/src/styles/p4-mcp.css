@@ -31,6 +31,19 @@
 .mcp-tool-table { width: 100%; border-collapse: collapse; border-top: 1px solid var(--color-divider); }
 .mcp-tool-table th { text-align: left; font-size: 9px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--color-neutral-500); padding: 8px 15px 4px; }
 .mcp-tool-table td { padding: 7px 15px; font-size: 11.5px; color: var(--color-neutral-400); border-top: 1px solid var(--color-divider); }
+/* Sau v0.1.49: ở điện thoại bảng 5 cột rộng ~400–445px nằm trong thẻ .mcp-server (overflow:hidden) ⇒ cột "Cấp cho" và nút
+   "Gọi thử" bị cắt mất, không cuộn được. ≤760px mỗi tool thành một thẻ: tên một dòng riêng, các ô xếp hàng có nhãn
+   (Loại · Mở · Cấp cho), nút Gọi thử dồn phải — như bảng Người dùng / ma trận Quyền hạn (system.css). */
+@media (max-width: 760px) {
+  .mcp-tool-table thead { display: none; }
+  .mcp-tool-table, .mcp-tool-table tbody { display: block; width: 100%; }
+  .mcp-tool-table tr { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 9px 15px; border-top: 1px solid var(--color-divider); }
+  .mcp-tool-table td { display: block; padding: 0; border-top: none; min-width: 0; }
+  .mcp-tool-table__name { flex: 1 0 100%; color: var(--color-text); overflow-wrap: anywhere; }
+  .mcp-tool-table td[data-label] { display: flex; align-items: center; gap: 6px; }
+  .mcp-tool-table td[data-label]::before { content: attr(data-label); font-size: 10.5px; color: var(--color-neutral-500); }
+  .mcp-tool-table__test { margin-left: auto; }
+}
 
 .mcp-matrix-wrap, .mcp-log-wrap { width: 100%; overflow-x: auto; }
 .mcp-matrix { border-collapse: collapse; font-size: 11px; }
