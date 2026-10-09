@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 from sqlalchemy import text
 
-from gh.chassis.masking import MASK, mask_for_model
+from gh.chassis.masking import MASK, is_secret_key, mask_for_model
 from gh.db import sessionmaker
 from gh.gen import envelope
 from gh.gen.routes import KEEP_RAW, _for_model
@@ -223,6 +223,14 @@ def test_for_model_masks_secret_named_keys() -> None:
     assert out["pin"] == MASK and out["api_key"] == MASK and out["wifi_password"] == MASK
     assert out["meta"] == {"access_token": MASK, "Mật khẩu": MASK} and out["items"] == [{"secret": MASK}]
     assert out["token_hint"] == "" and out["pin_required"] is True
+
+
+def test_is_secret_key_public_helper() -> None:
+    """`_for_model` và `mask_for_model` dùng chung quy tắc tên khoá qua hàm công khai `is_secret_key`."""
+    for k in ("pin", "api_key", "apikey", "wifi_password", "access_token", "Mật khẩu", "mat_khau", "client-secret"):
+        assert is_secret_key(k), k
+    for k in ("id", "pinned", "tokens_used", "spin", "description", "code"):
+        assert not is_secret_key(k), k
 
 
 def test_envelope_accepts_new_tools() -> None:

@@ -221,7 +221,7 @@ async def test_breaker_watch_raises_once_and_clears(owner_api: Api, fake_hub: Fa
     # Dải "Cần Sếp xử lý": nhãn nút theo vai trò.
     user = (await _user_of(owner_api))[0]
     [issue] = await health.active_issues(db, user.org_id)
-    assert issue["kind"] == "hub.unreachable" and issue["action"] == "Mở Gen-hub"
+    assert issue["kind"] == "hub.unreachable" and issue["action"] == "Mở thẻ Gen-hub"
     assert "Kết nối › Gen-hub" in issue["body"]
     [other] = await health.active_issues(db, user.org_id, is_owner=False)
     assert other["action"] == "Nhờ Owner xử lý" and "nhờ Owner kiểm tra ở Kết nối › Gen-hub" in other["body"]
@@ -439,7 +439,7 @@ def test_worker_has_hub_breaker_watch_cron() -> None:
 
 
 def test_health_labels() -> None:
-    assert health.ACTIONS["hub.unreachable"] == "Mở Gen-hub"
+    assert health.ACTIONS["hub.unreachable"] == "Mở thẻ Gen-hub"
     assert health.NON_OWNER_ACTIONS["hub.unreachable"] == "Nhờ Owner xử lý"
     assert health.NON_OWNER_KIND_BODIES["hub.unreachable"] == (
         "Gen-hub của Owner tạm không trả lời — nhờ Owner kiểm tra ở Kết nối › Gen-hub.")

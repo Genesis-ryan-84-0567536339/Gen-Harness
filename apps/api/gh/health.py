@@ -97,7 +97,8 @@ ACTIONS = {
     # v0.1.47 (F-83): phiên Facebook đã hết / bị yêu cầu xác minh — gh.social.session_watch mở/đóng.
     "social.session_expired": "Đăng nhập lại",
     # v0.1.49 (F-83): Gen-hub không trả lời hơn 15 phút — gh.hub_link.service.breaker_watch mở/đóng.
-    "hub.unreachable": "Mở Gen-hub",
+    # Nút cuộn tới + làm sáng thẻ Gen-hub ở Kết nối (không mở trang Gen-hub bên ngoài) — cùng nhãn nút của Bản tin.
+    "hub.unreachable": "Mở thẻ Gen-hub",
 }
 #: Nhãn cho người KHÔNG phải Owner khi nút ở nhãn gốc chỉ Owner có (vd "Chọn nơi lưu" — Manager không có nút đó).
 NON_OWNER_ACTIONS = {

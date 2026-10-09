@@ -3182,6 +3182,16 @@ Sếp xác nhận bằng mã PIN, có bằng chứng bằng ảnh chụp, và d�
       "Không có việc gì…" khi mục Gen-hub lỗi/tạm không trả lời; Telegram gộp 3 dòng "tạm không trả lời" thành 1; "Drive" giữ
       chữ hoa, mục đổi tên "Việc Google đang mở", nhãn quyền "đọc việc (Google Tasks)" thống nhất; chuông `hub.unreachable` có
       biểu tượng + làm mới dải "Cần Sếp xử lý" ngay; câu nhắc mock khớp `HUB_HINT_SCOPE`.
+  - **Sửa sau review lượt 2** (F-8, QD-16):
+    - *Chuông và Telegram không còn "Không có việc gì…" khi chưa đọc được*: một quy tắc chung `briefing.unread()` — mục có
+      `state` error/breaker (Gen-hub lỗi / tạm không trả lời, và cả mục nội bộ đọc lỗi — nay mang `state: "error"`) ⇒ web,
+      chuông, Telegram đều bỏ câu đó. Chuông ghi "Chưa đọc được lịch hôm nay, mail cần trả lời lần này" (có việc khác thì nối sau
+      "· "); Telegram ghi "• Lịch hôm nay: chưa đọc được lần này" (breaker vẫn "Gen-hub tạm không trả lời"). Trước đây web hiện
+      thẻ "Chưa đọc được" trong khi chuông + điện thoại báo "không có việc gì".
+    - Tóm tắt của model: mục Gen-hub lỗi/breaker gửi count = "chưa đọc được" (không phải 0) + một câu trong `SYSTEM_PROMPT` —
+      model không tóm tắt thành "Sếp không có lịch hôm nay".
+    - Nút sự cố `hub.unreachable` đổi thành "Mở thẻ Gen-hub" (cùng đích `/connections#genhub`, cùng nhãn nút của Bản tin);
+      `gh.chassis.masking.is_secret_key` công khai, `_for_model` không còn nhập tên riêng `_SECRET_KEYS`.
   - Lúc tích hợp: mô tả thẻ Gen-hub trong `packages/contracts/src/genTargets.ts` cập nhật theo `registry.json` (gói
     gen-cong-cu sửa JSON, gói web sinh lại từ TS cũ ⇒ vitest `gen-targets` đỏ); hợp đồng mục `items` của `briefing_read` chốt
     theo mã gói hub-doc-google (lịch `{start, all_day, title}`, mail `{id, from, subject, date}`, việc `{id, title, due}`).

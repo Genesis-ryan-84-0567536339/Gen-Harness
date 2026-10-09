@@ -28,6 +28,11 @@ _SECRET_KEYS = re.compile(
 MASK = "[đã che]"
 
 
+def is_secret_key(key: str) -> bool:
+    """Tên khoá kiểu mật khẩu/token/api_key/pin — giá trị dưới khoá này bị thay hẳn bằng MASK (kể cả ngắn hay số)."""
+    return _SECRET_KEYS.search(key) is not None
+
+
 def _mask_str(s: str, extra: tuple[str, ...]) -> str:
     for secret in extra:
         if secret:
@@ -66,7 +71,7 @@ def mask_for_model(data: Any, *, secrets: tuple[str, ...] = (), keep_keys: froze
         out: dict[str, Any] = {}
         for k, v in data.items():
             key = str(k)
-            if _SECRET_KEYS.search(key) and isinstance(v, str | int) and not isinstance(v, bool) and v != "":
+            if is_secret_key(key) and isinstance(v, str | int) and not isinstance(v, bool) and v != "":
                 out[key] = MASK
             elif key in keep_keys and isinstance(v, str) and _keep_id(v, secrets):
                 out[key] = v

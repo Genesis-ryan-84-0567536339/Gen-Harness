@@ -24,7 +24,7 @@ from gh.auth.deps import current_user, require_owner
 from gh.biz.market import routes as market_routes
 from gh.biz.relations import routes as relations_routes
 from gh.chassis import actionlog
-from gh.chassis.masking import _SECRET_KEYS, MASK, mask_for_model
+from gh.chassis.masking import MASK, is_secret_key, mask_for_model
 from gh.db import DB, sessionmaker
 from gh.errors import ApiError, conflict, field_errors, forbidden, not_found, pin_required
 from gh.gen import engine, proposals, store
@@ -391,7 +391,7 @@ def _for_model(data: Any) -> Any:
     if isinstance(data, dict):
         out: dict[str, Any] = {}
         for k, v in data.items():
-            if _SECRET_KEYS.search(str(k)) and isinstance(v, str | int) and not isinstance(v, bool) and v != "":
+            if is_secret_key(str(k)) and isinstance(v, str | int) and not isinstance(v, bool) and v != "":
                 out[k] = MASK
             elif k in KEEP_RAW and not isinstance(v, dict | list):
                 out[k] = v

@@ -228,6 +228,8 @@ export interface GenBriefingSection {
    * v0.1.49 (F-8, QD-16): mục đọc từ Gen-hub (lịch hôm nay `calendar_today`, mail cần trả lời `mail_reply`, việc đang mở
    * `gtasks_open`). `state`: `ok` có dòng · `empty` không có gì · `error` chưa đọc được · `breaker` Gen-hub tạm không trả
    * lời. Máy chủ cũ không gửi ⇒ coi là `ok`. Mục chưa nối / thiếu quyền KHÔNG có trong danh sách (xem `hub_hint`).
+   * Mục nội bộ đọc lỗi cũng mang `state: 'error'` (chỉ để chuông/Telegram không báo "Không có việc gì…"); web chỉ vẽ
+   * thẻ cho mục `external`.
    */
   state?: 'ok' | 'empty' | 'error' | 'breaker';
   /** `true` = mục lấy từ Gen-hub (nội dung ngoài, đã che). */

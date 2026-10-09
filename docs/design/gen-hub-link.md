@@ -264,7 +264,8 @@ mạch tắt (không lỗi).
   08:00 không làm lần mở lúc 17:00 bị coi là "im hơn 15 phút" (sửa sau review v0.1.49).
 - **Chuông 15 phút**: `down_since` cách ≥ 900 giây (`BREAKER_ALERT_AFTER_S`) **và** ngắt mạch đã từng mở (`half`) ⇒ sự cố
   `hub.breaker` (kind `hub.unreachable`, mức `warn`, fingerprint `open`) + MỘT chuông cho Owner: "Gen-hub không trả lời hơn 15 phút"
-  (`/connections#genhub`, nút "Mở Gen-hub"; vai trò khác: "Nhờ Owner xử lý"). `raise_once` ⇒ không chuông thứ hai cho cùng đợt
+  (`/connections#genhub`, nút "Mở thẻ Gen-hub" — cùng nhãn nút của Bản tin, mở thẻ Gen-hub ở Kết nối chứ không mở trang Gen-hub
+  bên ngoài; vai trò khác: "Nhờ Owner xử lý"). `raise_once` ⇒ không chuông thứ hai cho cùng đợt
   im. Kiểm cả trong lúc ghi lỗi lẫn bằng cron worker `hub_breaker_watch` (5 phút/lần, `gh.worker`). Gọi lại được / Kiểm tra xanh /
   không còn `down_since` ⇒ tự đóng.
 
@@ -288,7 +289,10 @@ error|breaker, `detail`, và `more: true` khi chạm trần 10 mục (hiện "10
 ẩn, gom thành MỘT dòng `hub_hint` (nhãn quyền như thẻ Gen-hub, vd "đọc việc (Google Tasks)") + nút "Mở thẻ Gen-hub" (làm sáng
 thẻ `mcp.hub_link` ở Kết nối); tổ chức chưa từng có dòng `agent.hub_links` ⇒ không gọi, không nhắc. Web vẽ thẻ riêng từ
 `sections` (không có bước `say` cho mục Gen-hub), chèn tại `content.hub_at` (sau "Sự cố cần Sếp", trước Facebook/Kho và các lời
-nhắc + nút). Mục Gen-hub lỗi / tạm không trả lời ⇒ KHÔNG có câu "Không có việc gì cần Sếp xử lý". **Telegram chỉ nhận số đếm** —
+nhắc + nút). Mục chưa đọc được (`state` error/breaker — Gen-hub lỗi / tạm không trả lời, hoặc mục nội bộ lỗi) ⇒ KHÔNG có câu
+"Không có việc gì cần Sếp xử lý" ở cả web, chuông lẫn Telegram: chuông ghi "Chưa đọc được lịch hôm nay, … lần này", Telegram ghi
+"• Lịch hôm nay: chưa đọc được lần này" (tạm không trả lời: "Gen-hub tạm không trả lời"); model nhận count "chưa đọc được" thay
+cho 0 (không tóm tắt thành "Sếp không có lịch"). **Telegram chỉ nhận số đếm** —
 và vì tóm tắt của model cũng ra Telegram, model chỉ nhận `title`/`count`/`state` của mục Gen-hub, KHÔNG nhận `lines` (người
 gửi, tiêu đề mail, tên lịch/việc là chữ người ngoài viết; cũng chặn đường "cài" câu vào tóm tắt qua tiêu đề mail). Cả 3 mục
 cùng "tạm không trả lời" ⇒ Telegram gộp MỘT dòng "• Lịch / mail / việc Google: Gen-hub tạm không trả lời".
