@@ -3154,15 +3154,34 @@ Sếp xác nhận bằng mã PIN, có bằng chứng bằng ảnh chụp, và d�
     phút ⇒ đúng 1 sự cố `hub.breaker` + 1 chuông Owner (cron `hub_breaker_watch`), gọi lại được thì tự đóng. `briefing_read` cho
     Bản tin (không bao giờ ném, actor `system:gen.briefing`).
   - **Bản tin** (`ban-tin-hub`): thêm 3 mục "Lịch hôm nay" (`HH:MM · tiêu đề`, giờ VN; cả ngày ⇒ `Cả ngày · …`), "Mail cần trả
-    lời" (`người gửi — tiêu đề`, không snippet/thân thư), "Việc đang mở" (`tiêu đề — hạn dd/mm`) ngay sau "Sự cố cần Sếp";
-    `external: true` + `state` ok/empty/error/breaker + `detail`. Chưa nối / thiếu quyền ⇒ mục ẩn, MỘT dòng nhắc (`hub_hint`) +
-    nút "Mở Gen-hub"; tổ chức chưa từng cấu hình Gen-hub ⇒ không gọi, không nhắc. Breaker ⇒ "Gen-hub tạm không trả lời". Worker
-    đọc nhân danh tổ chức chỉ để gửi Owner. **Telegram chỉ có số đếm** mục Gen-hub (không tiêu đề mail/lịch). Chuông thêm
-    "N lịch hôm nay · N mail cần trả lời · N việc Google đang mở". `boss_checks` › Gen-hub lưu `read_scopes`/`read_missing`
-    (Đạt/Lỗi không phụ thuộc).
+    lời" (`người gửi — tiêu đề`, không snippet/thân thư), "Việc Google đang mở" (`tiêu đề — hạn dd/mm`) ngay sau "Sự cố cần
+    Sếp"; `external: true` + `state` ok/empty/error/breaker + `detail`. Chưa nối / thiếu quyền ⇒ mục ẩn, MỘT dòng nhắc
+    (`hub_hint`) + nút "Mở thẻ Gen-hub"; tổ chức chưa từng cấu hình Gen-hub ⇒ không gọi, không nhắc. Breaker ⇒ "Gen-hub tạm không
+    trả lời". Worker đọc nhân danh tổ chức chỉ để gửi Owner. **Telegram chỉ có số đếm** mục Gen-hub (không tiêu đề mail/lịch).
+    Chuông thêm "N lịch hôm nay · N mail cần trả lời · N việc Google đang mở". `boss_checks` › Gen-hub lưu
+    `read_scopes`/`read_missing` khi Đạt (Đạt/Lỗi không phụ thuộc).
   - **Web** (`web-ban-tin-genhub`): thẻ mục Gen-hub trong Bản tin (ok/trống/lỗi/breaker + "Chi tiết kỹ thuật"); Kết nối ›
     Gen-hub có khối "Quyền đọc thêm (tuỳ chọn)" + "Còn thiếu quyền: …" sau Kiểm tra + dải ngắt mạch; Trợ giúp "Gen đọc được gì
     từ Gen-hub"; Việc Sếp cần làm có dòng "Quyền đọc thêm (không bắt buộc)".
+  - **Sửa sau review** (F-8, F-83, QD-16):
+    - *Chặn rò chữ người ngoài ra Telegram qua tóm tắt*: `_summarize` chỉ gửi model `title`/`count`/`state` của mục Gen-hub
+      (không `lines`) — trước đây model nhận cả "người gửi — tiêu đề mail", tên lịch/việc và tóm tắt (đi thẳng ra Telegram +
+      Console) rất dễ nhắc lại; người ngoài gửi mail còn "cài" được câu vào tóm tắt. Test model giả nhại lại đầu vào: prompt,
+      tin Telegram xếp hàng và chuông không có tiêu đề mail/lịch/việc nào.
+    - *Chuông "im hơn 15 phút" báo nhầm*: `down_since` được đặt lại ở lỗi đầu của chuỗi mới (sống cùng bộ đếm 5 phút; mở ngắt
+      mạch mới giữ 24 giờ) — một lỗi lẻ buổi sáng không còn làm lần mở buổi chiều chuông ngay.
+    - *Quyền đọc "Chưa kiểm" thay vì 4 × "Chưa"*: `GET /hub/link` trả `read_scopes: null` khi chưa nối / chưa Kiểm tra xanh /
+      vừa đổi địa chỉ-token (`hub.scopes_known`); thẻ Gen-hub cũng tự coi là "Chưa kiểm" khi `!configured || !last_ok_at`; mock
+      trả `null` như máy chủ. Việc Sếp cần làm: `boss_checks` chỉ lưu quyền đọc khi Đạt, web chỉ hiện dòng quyền khi Đạt (lượt
+      Lỗi không còn "Lịch ✗ … tick thêm quyền" cạnh "Lỗi …").
+    - *Chip "Đã tra …"*: nhãn tiếng Việt cho 11 tool mới (`lịch (Gen-hub)`, `mail (Gen-hub)`, `deal`, `vụ việc`…) ở
+      `apps/web/src/gen/toolLabels.ts`; vitest đối chiếu `DATA_TOOL_NAMES` của `envelope.py`; tên lạ ⇒ "dữ liệu".
+    - Nhỏ: `_for_model` (`/gen/sources/*`) che khoá kiểu mật khẩu/token/pin trước; bỏ `code` khỏi `HUB_KEEP_KEYS`; Kiểm tra thu
+      hồi tool Google ⇒ xoá đệm 5 phút ngay (kể cả khi lượt kiểm đỏ); mục Gen-hub chạm trần 10 ⇒ "10+"; nút "Mở thẻ Gen-hub"
+      làm sáng thẻ `mcp.hub_link`; thẻ Gen-hub chèn tại `content.hub_at` (sau "Sự cố cần Sếp", trước lời nhắc + nút) và không có
+      "Không có việc gì…" khi mục Gen-hub lỗi/tạm không trả lời; Telegram gộp 3 dòng "tạm không trả lời" thành 1; "Drive" giữ
+      chữ hoa, mục đổi tên "Việc Google đang mở", nhãn quyền "đọc việc (Google Tasks)" thống nhất; chuông `hub.unreachable` có
+      biểu tượng + làm mới dải "Cần Sếp xử lý" ngay; câu nhắc mock khớp `HUB_HINT_SCOPE`.
   - Lúc tích hợp: mô tả thẻ Gen-hub trong `packages/contracts/src/genTargets.ts` cập nhật theo `registry.json` (gói
     gen-cong-cu sửa JSON, gói web sinh lại từ TS cũ ⇒ vitest `gen-targets` đỏ); hợp đồng mục `items` của `briefing_read` chốt
     theo mã gói hub-doc-google (lịch `{start, all_day, title}`, mail `{id, from, subject, date}`, việc `{id, title, due}`).
@@ -3178,9 +3197,10 @@ Sếp xác nhận bằng mã PIN, có bằng chứng bằng ảnh chụp, và d�
 - **Boss phải làm** (một lần, ~2 phút, sau khi lên bản):
   1. Mở Gen-hub › trợ lý/token của Gen-Harness › tick thêm quyền **ĐỌC**: đọc lịch, đọc mail, đọc việc (Google Tasks), tìm
      tệp Drive. **KHÔNG** tick gửi mail / tạo lịch / ghi tệp (có tick cũng không dùng được).
-  2. Vào Gen-Harness › Kết nối › Gen-hub bấm **Kiểm tra** (nhập PIN): 4 quyền đọc đều có dấu tích là xong. Thẻ ghi rõ còn thiếu
-     quyền nào; "Việc Sếp cần làm" › Gen-hub cũng ghi (không bắt buộc).
-  3. Sáng hôm sau mở Bản tin Gen 07:30: thấy 3 mục mới "Lịch hôm nay", "Mail cần trả lời", "Việc đang mở". Nếu chỉ thấy 1 dòng
+  2. Vào Gen-Harness › Kết nối › Gen-hub bấm **Kiểm tra** (nhập PIN): cả 4 dòng "Quyền đọc thêm" hiện **"Có"** và có câu
+     "Đủ quyền đọc lịch, mail, việc và Drive." là xong. Thẻ ghi rõ còn thiếu quyền nào; "Việc Sếp cần làm" › Gen-hub cũng ghi
+     (không bắt buộc).
+  3. Sáng hôm sau mở Bản tin Gen 07:30: thấy 3 mục mới "Lịch hôm nay", "Mail cần trả lời", "Việc Google đang mở". Nếu chỉ thấy 1 dòng
      "tick thêm quyền…" thì làm lại bước 1–2.
   4. (Tuỳ chọn) Hỏi Gen: "Deal nào đang mở?", "Có tài liệu báo giá nào mới?", "Hôm nay tôi có lịch gì?" — chỉ tài khoản Owner
      hỏi được. Rủi ro Owner tự quyết: nội dung lịch/mail (đã che) đi sang model đám mây như Kho.

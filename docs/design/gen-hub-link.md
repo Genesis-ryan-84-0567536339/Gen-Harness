@@ -259,6 +259,9 @@ mạch tắt (không lỗi).
   Hết 60 giây ⇒ lời gọi kế tiếp đi qua (nửa mở): thành công ⇒ xoá cả 4 khoá + đóng sự cố; lỗi ⇒ mở lại ngay.
 - Thứ tự trong `call_hub`: danh sách cho phép → liên kết bật → **đệm** → ngắt mạch → tool đã mở/cấp → guard MCP Hub → che → đệm.
 - Nút **Kiểm tra** không bị ngắt mạch chặn; Kiểm tra xanh ⇒ đóng ngắt mạch.
+- **Mốc `down_since`** = lỗi ĐẦU của chuỗi đang tính: lỗi thứ nhất của một chuỗi mới (bộ đếm đã hết hạn, ngắt mạch chưa từng
+  mở) ghi đè mốc cũ và sống cùng bộ đếm (5 phút); ngắt mạch mở ⇒ giữ mốc tới khi gọi lại được (tối đa 24 giờ). Một lỗi lẻ lúc
+  08:00 không làm lần mở lúc 17:00 bị coi là "im hơn 15 phút" (sửa sau review v0.1.49).
 - **Chuông 15 phút**: `down_since` cách ≥ 900 giây (`BREAKER_ALERT_AFTER_S`) **và** ngắt mạch đã từng mở (`half`) ⇒ sự cố
   `hub.breaker` (kind `hub.unreachable`, mức `warn`, fingerprint `open`) + MỘT chuông cho Owner: "Gen-hub không trả lời hơn 15 phút"
   (`/connections#genhub`, nút "Mở Gen-hub"; vai trò khác: "Nhờ Owner xử lý"). `raise_once` ⇒ không chuông thứ hai cho cùng đợt
@@ -279,11 +282,16 @@ tin đọc nhân danh tổ chức **chỉ để gửi Owner**, Gen không đọc
 title}`, mail `{id, from, subject, date}` (bỏ snippet/thân thư), việc `{id, title, due}`.
 
 Bản tin dùng (`gh/gen/briefing.py`, v0.1.49): ba mục "Lịch hôm nay" (`calendar_today`), "Mail cần trả lời" (`mail_reply`), "Việc
-đang mở" (`gtasks_open`, kind `tasks_open`) chèn ngay sau "Sự cố cần Sếp"; mỗi mục có `external: true`, `state` ok|empty|error|
-breaker, `detail`. Dòng: lịch `HH:MM · tiêu đề` giờ VN (cả ngày ⇒ `Cả ngày · tiêu đề`), mail `người gửi — tiêu đề` (bỏ phần
-`<địa chỉ>`), việc `tiêu đề — hạn dd/mm`. `off`/`missing_scope` ⇒ mục ẩn, gom thành MỘT dòng `hub_hint` + nút "Mở Gen-hub";
-tổ chức chưa từng có dòng `agent.hub_links` ⇒ không gọi, không nhắc. Web vẽ thẻ riêng từ `sections` (không có bước `say` cho
-mục Gen-hub); Telegram chỉ nhận số đếm.
+Google đang mở" (`gtasks_open`, kind `tasks_open`) chèn ngay sau "Sự cố cần Sếp"; mỗi mục có `external: true`, `state` ok|empty|
+error|breaker, `detail`, và `more: true` khi chạm trần 10 mục (hiện "10+"). Dòng: lịch `HH:MM · tiêu đề` giờ VN (cả ngày ⇒
+`Cả ngày · tiêu đề`), mail `người gửi — tiêu đề` (bỏ phần `<địa chỉ>`), việc `tiêu đề — hạn dd/mm`. `off`/`missing_scope` ⇒ mục
+ẩn, gom thành MỘT dòng `hub_hint` (nhãn quyền như thẻ Gen-hub, vd "đọc việc (Google Tasks)") + nút "Mở thẻ Gen-hub" (làm sáng
+thẻ `mcp.hub_link` ở Kết nối); tổ chức chưa từng có dòng `agent.hub_links` ⇒ không gọi, không nhắc. Web vẽ thẻ riêng từ
+`sections` (không có bước `say` cho mục Gen-hub), chèn tại `content.hub_at` (sau "Sự cố cần Sếp", trước Facebook/Kho và các lời
+nhắc + nút). Mục Gen-hub lỗi / tạm không trả lời ⇒ KHÔNG có câu "Không có việc gì cần Sếp xử lý". **Telegram chỉ nhận số đếm** —
+và vì tóm tắt của model cũng ra Telegram, model chỉ nhận `title`/`count`/`state` của mục Gen-hub, KHÔNG nhận `lines` (người
+gửi, tiêu đề mail, tên lịch/việc là chữ người ngoài viết; cũng chặn đường "cài" câu vào tóm tắt qua tiêu đề mail). Cả 3 mục
+cùng "tạm không trả lời" ⇒ Telegram gộp MỘT dòng "• Lịch / mail / việc Google: Gen-hub tạm không trả lời".
 
 ### 6.8 Việc của Boss (một lần, ~2 phút)
 

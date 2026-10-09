@@ -245,14 +245,16 @@ function HubLinkBody({ link, isOwner }: { link: HubLink; isOwner: boolean }) {
 }
 
 /**
- * v0.1.49 (QD-16): "Quyền đọc thêm (tuỳ chọn)" — 4 dòng Có / Chưa / Chưa kiểm lấy từ lần Kiểm tra vừa xong
- * (`test.data.read_scopes`) hoặc, chưa bấm, từ lần kiểm gần nhất máy chủ nhớ (`link.read_scopes`). Thiếu quyền đọc chỉ là
- * lời nhắc — không làm Kiểm tra đỏ. Mọi giá trị từ máy chủ được kiểm kiểu trước khi hiện (chỉ chuỗi / boolean).
+ * v0.1.49 (QD-16): "Quyền đọc thêm (tuỳ chọn)" — 4 dòng Có / Chưa / Chưa kiểm lấy từ lần Kiểm tra XANH vừa xong
+ * (`test.data.read_scopes`) hoặc, chưa bấm, từ lần kiểm xanh gần nhất máy chủ nhớ (`link.read_scopes`). Chưa nối / chưa
+ * từng kiểm xanh (`last_ok_at` trống) ⇒ 4 dòng "Chưa kiểm", không lời nhắc. Thiếu quyền đọc chỉ là lời nhắc — không làm
+ * Kiểm tra đỏ. Mọi giá trị từ máy chủ được kiểm kiểu trước khi hiện (chỉ chuỗi / boolean).
  */
 function ReadScopes({ link, result }: { link: HubLink; result: HubLinkTestResult | undefined }) {
-  const scopes = result?.read_scopes ?? link.read_scopes;
+  const fromLink = link.configured && !!link.last_ok_at ? link.read_scopes : undefined;
+  // Kiểm tra vừa đỏ (không nối được) thì chưa nói gì về quyền: dùng lần kiểm xanh gần nhất (nếu có), không lời nhắc.
+  const scopes = result?.ok ? (result.read_scopes ?? fromLink) : fromLink;
   const rows = scopeRows(scopes);
-  // Kiểm tra vừa đỏ (không nối được) thì chưa nói gì về quyền; còn lại: lần Kiểm tra vừa xong, hoặc lần kiểm gần nhất.
   const msg = result ? (result.ok ? scopesMessage(result.read_missing, scopes) : null) : scopesMessage(undefined, scopes);
   const writeTools = result && Array.isArray(result.write_tools) ? result.write_tools.filter((t): t is string => typeof t === 'string' && t !== '') : [];
   return (

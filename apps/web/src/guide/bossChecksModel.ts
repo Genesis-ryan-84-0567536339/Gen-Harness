@@ -97,9 +97,12 @@ export function hubScopesLine(items: readonly HubScopeItem[]): string {
   return `Quyền đọc thêm (không bắt buộc): ${items.map((i) => `${i.label} ${i.has ? '✓' : '✗'}`).join(' · ')}`;
 }
 
-/** Có ✗ thì hướng dẫn tick thêm quyền ở Gen-hub (không bắt buộc: không tick Gen vẫn chạy); đủ ⇒ null. */
+/**
+ * Có ✗ thì hướng dẫn tick thêm quyền ở Gen-hub (không bắt buộc: không tick Gen vẫn chạy); đủ ⇒ null. Hạ chữ thường
+ * "Lịch/Mail/Việc" trong câu, giữ nguyên "Drive" (tên riêng).
+ */
 export function hubScopesHint(items: readonly HubScopeItem[]): string | null {
-  const missing = items.filter((i) => !i.has).map((i) => i.label.toLowerCase());
+  const missing = items.filter((i) => !i.has).map((i) => (i.key === 'drive' ? i.label : i.label.toLowerCase()));
   if (missing.length === 0) return null;
   return `Muốn Gen đọc cả ${missing.join(', ')}: vào Gen-hub tick thêm quyền đọc cho token của Gen-Harness rồi bấm Kiểm tra lại. Không tick cũng được — Gen vẫn chạy bình thường.`;
 }

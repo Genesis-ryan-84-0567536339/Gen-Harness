@@ -21,8 +21,8 @@
  * v0.1.41 (F-8, F-86): `POST /api/v1/gen/__mock/briefing` (hoặc `__mock/p3/gen/briefing`) {"slot"?: "sang"|"chieu",
  * "needs_api_key"?: bool} = worker Bản tin Gen tới giờ — tạo hội thoại bản tin (content đúng hợp đồng) + chuông
  * `gen.briefing` link `/overview?gen=<id>`, trả {conversation_id}. v0.1.49 (QD-16): thêm `"hub"?: "ok"|"missing"|"breaker"|"error"|"off"`
- * (mặc định `off`) — mục Gen-hub: ok = Lịch hôm nay (2) + Mail cần trả lời (3) + Việc đang mở (1); missing = thiếu quyền mail ⇒ không có mục
- * mail, `hub_hint` + bước say/suggest "Mở Gen-hub"; breaker = cả 3 mục "Gen-hub tạm không trả lời" + detail; error = lịch lỗi (detail),
+ * (mặc định `off`) — mục Gen-hub: ok = Lịch hôm nay (2) + Mail cần trả lời (3) + Việc Google đang mở (1); missing = thiếu quyền mail ⇒ không có mục
+ * mail, `hub_hint` + bước say/suggest "Mở thẻ Gen-hub"; breaker = cả 3 mục "Gen-hub tạm không trả lời" + detail; error = lịch lỗi (detail),
  * mail ok, việc trống. `PUT /gen/feedback`, `DELETE /gen/feedback/{turn}`
  * lưu đánh giá; tin trong `messages` có `feedback`, mục trong `conversations` có `kind`.
  *   còn lại                        → lời chào + gợi ý
@@ -73,20 +73,24 @@ interface Conversation {
 export type BriefingHubMode = 'ok' | 'missing' | 'breaker' | 'error' | 'off';
 export const BRIEFING_HUB_MODES: readonly BriefingHubMode[] = ['ok', 'missing', 'breaker', 'error', 'off'];
 
-export const HUB_HINT_MAIL = 'Chưa đọc được mail — vào Gen-hub tick thêm quyền đọc mail cho token của Gen-Harness rồi nhờ Gen làm bản tin lại.';
+/** Đúng câu máy chủ (`briefing.HUB_HINT_SCOPE` với mục mail). */
+export const HUB_HINT_MAIL = 'Bản tin chưa có mail cần trả lời: vào Gen-hub tick thêm quyền đọc mail cho token của Gen-Harness, rồi bấm Kiểm tra ở Kết nối › Gen-hub.';
+/** Nút dưới lời nhắc (như `briefing.HUB_BUTTON` / `HUB_SPOT_SCOPE`): cuộn tới + làm sáng thẻ Gen-hub ở Kết nối. */
+export const HUB_BUTTON = 'Mở thẻ Gen-hub';
+export const HUB_SPOT_SCOPE = 'Thẻ Gen-hub: sau khi tick thêm quyền đọc trong Gen-hub, bấm Kiểm tra ở đây.';
 
 /** Các mục `external` của bản tin theo chế độ; `hint` = câu nhắc khi có mục bị ẩn (chưa nối / thiếu quyền). */
 export function hubSections(hub: BriefingHubMode): { sections: GenBriefingSection[]; hint: string | null } {
   const calendar: GenBriefingSection = {
-    key: 'calendar_today', title: 'Lịch hôm nay', count: 2, link: '/connections', external: true, state: 'ok',
+    key: 'calendar_today', title: 'Lịch hôm nay', count: 2, link: '/connections#genhub', external: true, state: 'ok',
     lines: ['09:00 · Họp với nhà cung cấp ván MDF', '14:30 · Gặp anh Bảo tại showroom'],
   };
   const mail: GenBriefingSection = {
-    key: 'mail_reply', title: 'Mail cần trả lời', count: 3, link: '/connections', external: true, state: 'ok',
+    key: 'mail_reply', title: 'Mail cần trả lời', count: 3, link: '/connections#genhub', external: true, state: 'ok',
     lines: ['Anh Bảo — Báo giá ván MDF E1 17mm', 'Công ty Hải Long — Xác nhận lịch giao hàng', 'Chị Mai — Hỏi bảo hành'],
   };
   const tasks: GenBriefingSection = {
-    key: 'gtasks_open', title: 'Việc đang mở', count: 1, link: '/connections', external: true, state: 'ok',
+    key: 'gtasks_open', title: 'Việc Google đang mở', count: 1, link: '/connections#genhub', external: true, state: 'ok',
     lines: ['Gọi nhà cung cấp keo dán'],
   };
   if (hub === 'ok') return { sections: [calendar, mail, tasks], hint: null };
@@ -122,10 +126,12 @@ export function briefingContent(slotLabel: string, slotIso: string, needsApiKey:
     { kind: 'say', text: `Bản tin ${slotLabel}: 2 việc tới hạn, 1 khách đang nóng, 1 nháp chờ duyệt, không có sự cố.` },
     ...sections.filter((x) => x.count > 0).map((x): GenStep => ({ kind: 'say', text: `${x.title} (${x.count}): ${x.lines.join('; ')}` })),
   ];
+  // Thẻ mục Gen-hub chèn ngay sau các mục nội bộ (như máy chủ: sau "Sự cố cần Sếp"), trước lời nhắc + nút.
+  const hubAt = steps.length;
   if (ext.hint) {
-    // Mục bị ẩn (thiếu quyền): một dòng nhắc + nút "Mở Gen-hub" (Kết nối › Gen-hub).
+    // Mục bị ẩn (thiếu quyền): một dòng nhắc + nút "Mở thẻ Gen-hub" (làm sáng thẻ Gen-hub ở Kết nối).
     steps.push({ kind: 'say', text: ext.hint });
-    steps.push({ kind: 'suggest', items: [{ label: 'Mở Gen-hub', action: { type: 'navigate', screen: 'connections' } }] });
+    steps.push({ kind: 'suggest', items: [{ label: HUB_BUTTON, action: { type: 'highlight', target: 'mcp.hub_link', message: HUB_SPOT_SCOPE } }] });
   }
   if (needsApiKey) {
     steps.push({ kind: 'say', text: 'Dán khoá OpenRouter/Gemini để Gen tóm tắt' });
@@ -139,6 +145,7 @@ export function briefingContent(slotLabel: string, slotIso: string, needsApiKey:
     sections: [...sections, ...ext.sections], steps,
   };
   if (hub !== 'off') content.hub_hint = ext.hint;
+  if (ext.sections.length > 0) content.hub_at = hubAt;
   return content;
 }
 

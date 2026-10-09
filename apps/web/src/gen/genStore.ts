@@ -24,6 +24,8 @@ export interface GenChatMessage {
   kind?: 'briefing';
   /** v0.1.49 (F-8, QD-16): các mục của bản tin (chỉ tin Bản tin) — khung Gen vẽ riêng mục lấy từ Gen-hub (`external`). */
   sections?: GenBriefingSection[];
+  /** v0.1.49: chỉ số trong `steps` để chèn thẻ mục Gen-hub (`content.hub_at`); không có ⇒ trước lời nhắc + nút đầu tiên. */
+  hubAt?: number;
   /** v0.1.41: dòng lỗi có "Chi tiết kỹ thuật" (luôn là chuỗi). */
   detail?: string | null;
   /** v0.1.41 (F-8a): tin báo "chưa tải lại được hội thoại" — mã hội thoại để nút "Thử lại" mở lại. */

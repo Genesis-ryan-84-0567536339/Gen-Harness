@@ -214,9 +214,13 @@ function ResultCell({ label, check, okText, failText, emptyText }: { label?: str
 }
 
 // ── 1. Gen-hub ─────────────────────────────────────────────────────────────────────────────────────────────
-/** v0.1.49 (QD-16): dòng phụ "Quyền đọc thêm (không bắt buộc)" — không đổi số mục bắt buộc; thiếu dữ liệu ⇒ ẩn. */
+/**
+ * v0.1.49 (QD-16): dòng phụ "Quyền đọc thêm (không bắt buộc)" — không đổi số mục bắt buộc; thiếu dữ liệu ⇒ ẩn. CHỈ khi
+ * lần kiểm Đạt: lần kiểm lỗi (mạng, token bị từ chối…) chưa nói gì về quyền — "tick thêm quyền" cạnh "Lỗi …" là chỉ sai
+ * cách sửa (cùng quy tắc thẻ Kết nối › Gen-hub).
+ */
 function HubScopesNote({ check }: { check: BossCheck | null }) {
-  const items = hubScopesOf(check);
+  const items = check?.status === 'pass' ? hubScopesOf(check) : null;
   if (!items) return null;
   const hint = hubScopesHint(items);
   return (

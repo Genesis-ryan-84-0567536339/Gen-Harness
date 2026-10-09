@@ -131,8 +131,11 @@ export interface HubLink {
   /** Lỗi thô (đã lọc token) chỉ Owner thấy; vai trò khác nhận một câu chung (v0.1.27). */
   last_error: string | null;
   health: string | null;
-  /** v0.1.49: quyền đọc thêm đã thấy ở lần Kiểm tra gần nhất (máy chủ cũ không gửi ⇒ "Chưa kiểm"). */
-  read_scopes?: HubReadScopes;
+  /**
+   * v0.1.49: quyền đọc thêm đã thấy ở lần Kiểm tra xanh gần nhất. `null` (hoặc máy chủ cũ không gửi) ⇒ "Chưa kiểm": chưa
+   * nối, chưa từng Kiểm tra xanh, hoặc vừa đổi địa chỉ/token (liên kết tắt chờ kiểm lại).
+   */
+  read_scopes?: HubReadScopes | null;
   /** v0.1.49 (F-83): bộ ngắt riêng của Gen-hub — `open` = 3 lỗi liên tiếp, tạm dừng gọi 60 giây. */
   breaker?: { open: boolean; retry_in_s?: number | null };
 }

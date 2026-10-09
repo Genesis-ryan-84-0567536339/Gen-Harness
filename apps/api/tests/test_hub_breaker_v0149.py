@@ -252,6 +252,35 @@ async def test_failure_after_15_minutes_raises_without_waiting_for_cron(owner_ap
     assert await _bells() == 1  # cùng fingerprint ⇒ không chuông thứ hai
 
 
+async def test_isolated_failure_then_outage_hours_later_no_false_bell(owner_api: Api, fake_hub: FakeHub, clock: Clock,
+                                                                       redis: Any) -> None:
+    """Một lỗi lẻ lúc 08:00 rồi im lặng (bộ đếm 5 phút hết hạn), 17:00 mới 3 lỗi liên tiếp ⇒ ngắt mạch mở nhưng đợt im
+    mới được VÀI GIÂY — không được chuông "không trả lời hơn 15 phút" ngay (mốc down_since phải là 17:00, không
+    08:00)."""
+    await _linked(owner_api)
+    org = (await _user_of(owner_api))[0].org_id
+    sm = sessionmaker()
+    fake_hub.mode = "timeout"
+    assert (await owner_api.get(SEARCH, params={"q": "lẻ"})).json()["code"] == "HUB_UNAVAILABLE"
+    assert float(await redis.get(hub._bk("down_since", org))) == T0
+    # Chưa mở ngắt mạch ⇒ mốc chỉ sống cùng bộ đếm (5 phút), không treo 24 giờ.
+    assert 0 < await redis.ttl(hub._bk("down_since", org)) <= 300
+    # Đồng hồ Redis là giờ thật: giả lập 9 giờ trôi qua bằng cách để bộ đếm "hết hạn" (khoá down_since cũ — như bản
+    # trước đây đặt 24 giờ — vẫn còn, để chắc chắn lỗi đầu của chuỗi mới GHI ĐÈ mốc cũ).
+    await redis.delete(hub._bk("fails", org))
+    await redis.set(hub._bk("down_since", org), repr(T0), ex=86400)
+    clock.now = T0 + 9 * 3600
+    await _open_breaker(owner_api, fake_hub)
+    assert (await hub.breaker_state(redis, org))["open"] is True
+    assert float(await redis.get(hub._bk("down_since", org))) == T0 + 9 * 3600
+    assert await redis.ttl(hub._bk("down_since", org)) > 300  # đã mở ⇒ giữ mốc tới khi gọi lại được
+    assert await _alerts() == [] and await _bells() == 0
+    assert await hub.breaker_watch(sm, redis) == 0 and await _bells() == 0
+    # Im thật 16 phút kể từ 17:00 ⇒ lúc đó mới chuông.
+    clock.now = T0 + 9 * 3600 + 16 * 60
+    assert await hub.breaker_watch(sm, redis) == 1 and await _bells() == 1
+
+
 async def test_breaker_watch_clears_when_down_since_gone_and_ignores_unopened(owner_api: Api, fake_hub: FakeHub,
                                                                               clock: Clock, redis: Any) -> None:
     await _linked(owner_api)
@@ -419,7 +448,7 @@ def test_health_labels() -> None:
 async def test_hub_link_has_read_scopes_and_breaker(owner_api: Api, fake_hub: FakeHub, client: Any, db: Any,
                                                     redis: Any) -> None:
     off = (await owner_api.get("/hub/link")).json()
-    assert off["read_scopes"] == {"calendar": False, "mail": False, "tasks": False, "drive": False}
+    assert off["read_scopes"] is None  # chưa nối ⇒ "Chưa kiểm", không phải 4 quyền False
     assert off["breaker"] == {"open": False, "retry_in_s": None, "down_since": None}
     await _linked(owner_api)
     own = (await owner_api.get("/hub/link")).json()

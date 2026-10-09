@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 from sqlalchemy import text
 
-from gh.chassis.masking import mask_for_model
+from gh.chassis.masking import MASK, mask_for_model
 from gh.db import sessionmaker
 from gh.gen import envelope
 from gh.gen.routes import KEEP_RAW, _for_model
@@ -211,6 +211,18 @@ def test_for_model_does_not_trust_containers_under_raw_keys() -> None:
     out = _for_model({"source": {"phone": "0912 345 678"}, "kind": ["a@b.vn"]})
     assert "0912 345 678" not in str(out) and "a@b.vn" not in str(out)
     assert {"id", "code", "status", "priority", "amount_vnd", "bytes"} <= KEEP_RAW
+
+
+def test_for_model_masks_secret_named_keys() -> None:
+    """Khoá kiểu mật khẩu/token/api_key/pin bị thay hẳn bằng [đã che] — kể cả giá trị ngắn hay số (regex số dài không
+    bắt được), ở mọi cấp; khoá KEEP_RAW và giá trị rỗng / bool giữ nguyên như `mask_for_model`."""
+    out = _for_model({"id": "DEA-1", "pin": 1234, "api_key": "abc", "wifi_password": "12345678",
+                      "meta": {"access_token": "x1", "Mật khẩu": "123"}, "items": [{"secret": 42}],
+                      "token_hint": "", "pin_required": True})
+    assert out["id"] == "DEA-1"
+    assert out["pin"] == MASK and out["api_key"] == MASK and out["wifi_password"] == MASK
+    assert out["meta"] == {"access_token": MASK, "Mật khẩu": MASK} and out["items"] == [{"secret": MASK}]
+    assert out["token_hint"] == "" and out["pin_required"] is True
 
 
 def test_envelope_accepts_new_tools() -> None:

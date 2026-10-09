@@ -95,8 +95,11 @@ export function createMock(opts: P4McpOptions) {
   const FULL_SCOPES: HubReadScopes = { calendar: true, mail: true, tasks: true, drive: true };
   const MISSING_SCOPES: HubReadScopes = { calendar: false, mail: false, tasks: true, drive: true };
   const SCOPE_LABEL: Record<keyof HubReadScopes, string> = { calendar: 'đọc lịch', mail: 'đọc mail', tasks: 'đọc việc (Google Tasks)', drive: 'tìm tệp Drive' };
-  /** `GET /hub/link` luôn kèm `breaker`; `read_scopes` chỉ có sau một lần Kiểm tra xanh (chưa kiểm ⇒ không gửi). */
-  const linkOut = (l: HubLink): HubLink => ({ ...l, breaker: { open: hubBreakerOpen, retry_in_s: hubBreakerOpen ? 60 : null } });
+  /**
+   * `GET /hub/link` luôn kèm `breaker`; `read_scopes` chỉ có sau một lần Kiểm tra xanh với địa chỉ/token hiện tại — chưa kiểm
+   * (hoặc vừa đổi địa chỉ/token) ⇒ `null`, đúng như máy chủ (`hub.scopes_known`).
+   */
+  const linkOut = (l: HubLink): HubLink => ({ ...l, read_scopes: l.read_scopes ?? null, breaker: { open: hubBreakerOpen, retry_in_s: hubBreakerOpen ? 60 : null } });
   /** v0.1.39 (F-31): như máy chủ — địa chỉ https công khai mà chưa bật "mạng công cộng" thì bị chặn. */
   const publicHttps = (url: string | null) => {
     try {

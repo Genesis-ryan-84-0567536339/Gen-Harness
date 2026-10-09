@@ -48,6 +48,8 @@ export const HEALTH_KINDS: ReadonlySet<string> = new Set([
   'ai.budget_exceeded', 'ai.background_no_source',
   // v0.1.46 (F-21): cổng đang mở cho cả mạng (bản cài cũ) — làm mới dải "Cần Sếp xử lý" ngay.
   'network.open_lan',
+  // v0.1.49 (F-83): Gen-hub không trả lời hơn 15 phút (sự cố `hub.breaker`).
+  'hub.unreachable',
 ]);
 
 /** v0.1.36 (F-6): `GET /system/health` — chỉ gọi khi vai trò có `system.read` (`enabled`); tự hỏi lại mỗi 60 giây. */

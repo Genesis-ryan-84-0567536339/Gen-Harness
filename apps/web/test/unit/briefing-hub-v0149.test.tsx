@@ -1,5 +1,5 @@
 /**
- * v0.1.49 (F-8, QD-16) — Bản tin Gen có thêm 3 mục đọc từ Gen-hub (chỉ đọc): Lịch hôm nay, Mail cần trả lời, Việc đang mở.
+ * v0.1.49 (F-8, QD-16) — Bản tin Gen có thêm 3 mục đọc từ Gen-hub (chỉ đọc): Lịch hôm nay, Mail cần trả lời, Việc Google đang mở.
  * Mục ẩn (chưa nối / thiếu quyền) không có trong `sections`; lỗi = câu thân thiện + "Chi tiết kỹ thuật"; không render object.
  */
 import type { ReactNode } from 'react';
@@ -33,10 +33,10 @@ describe('BriefingHubSections — vẽ mục Gen-hub', () => {
     render(<BriefingHubSections sections={OK_SECTIONS} />);
     expect(screen.getByRole('heading', { name: 'Lịch hôm nay (2)' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Mail cần trả lời (3)' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Việc đang mở (1)' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Việc Google đang mở (1)' })).toBeInTheDocument();
     expect(screen.getByText('Lịch hôm nay')).toBeInTheDocument();
     expect(screen.getByText('Mail cần trả lời')).toBeInTheDocument();
-    expect(screen.getByText('Việc đang mở')).toBeInTheDocument();
+    expect(screen.getByText('Việc Google đang mở')).toBeInTheDocument();
     expect(screen.getByText('09:00 · Họp với nhà cung cấp ván MDF')).toBeInTheDocument();
     expect(screen.getByText('Công ty Hải Long — Xác nhận lịch giao hàng')).toBeInTheDocument();
     expect(screen.getByText('Gọi nhà cung cấp keo dán')).toBeInTheDocument();
@@ -45,19 +45,24 @@ describe('BriefingHubSections — vẽ mục Gen-hub', () => {
     noObjectText();
   });
 
+  it('chạm trần (more: true) ⇒ số đếm "10+" (không phải 10)', () => {
+    render(<BriefingHubSections sections={[sec({ key: 'mail_reply', title: 'Mail cần trả lời', count: 10, more: true, lines: ['A — B'] })]} />);
+    expect(screen.getByRole('heading', { name: 'Mail cần trả lời (10+)' })).toBeInTheDocument();
+  });
+
   it('empty: câu thân thiện theo khoá mục', () => {
     render(
       <BriefingHubSections
         sections={[
           sec({ key: 'calendar_today', title: 'Lịch hôm nay', state: 'empty' }),
           sec({ key: 'mail_reply', title: 'Mail cần trả lời', state: 'empty' }),
-          sec({ key: 'gtasks_open', title: 'Việc đang mở', state: 'empty' }),
+          sec({ key: 'gtasks_open', title: 'Việc Google đang mở', state: 'empty' }),
         ]}
       />,
     );
     expect(screen.getByText('Hôm nay Sếp không có lịch.')).toBeInTheDocument();
     expect(screen.getByText('Không có mail cần trả lời.')).toBeInTheDocument();
-    expect(screen.getByText('Không có việc đang mở.')).toBeInTheDocument();
+    expect(screen.getByText('Không có việc Google đang mở.')).toBeInTheDocument();
     expect(screen.queryAllByRole('listitem')).toHaveLength(0);
   });
 
@@ -88,7 +93,7 @@ describe('BriefingHubSections — vẽ mục Gen-hub', () => {
   it('error/breaker không có detail (hoặc detail không phải chuỗi) ⇒ không có <details>, không vỡ, không "[object Object]"', () => {
     const bad = { key: 'calendar_today', title: 'Lịch hôm nay', count: 0, lines: [], link: '/x', external: true, state: 'error', detail: { code: 'X', nested: { a: 1 } } } as unknown as GenBriefingSection;
     const bad2 = { ...sec({ key: 'mail_reply', title: 'Mail cần trả lời', state: 'breaker' }), detail: ['a', 'b'] } as unknown as GenBriefingSection;
-    const none = sec({ key: 'gtasks_open', title: 'Việc đang mở', state: 'error', detail: null });
+    const none = sec({ key: 'gtasks_open', title: 'Việc Google đang mở', state: 'error', detail: null });
     const { container } = render(<BriefingHubSections sections={[bad, bad2, none]} />);
     expect(screen.getAllByText(/Chưa đọc được mục này lần này|Gen-hub tạm không trả lời/)).toHaveLength(3);
     expect(container.querySelector('details')).toBeNull();
@@ -196,7 +201,7 @@ describe('Khung Gen — Bản tin có mục Gen-hub', () => {
     const box = await screen.findByTestId('briefing-hub-sections');
     expect(within(box).getByText('Lịch hôm nay')).toBeInTheDocument();
     expect(within(box).getByText('Mail cần trả lời')).toBeInTheDocument();
-    expect(within(box).getByText('Việc đang mở')).toBeInTheDocument();
+    expect(within(box).getByText('Việc Google đang mở')).toBeInTheDocument();
     expect(within(box).getByText('Chị Mai — Hỏi bảo hành')).toBeInTheDocument();
     // Mục nội bộ chỉ có ở bước say, không bị vẽ lại trong khối Gen-hub.
     expect(within(box).queryByText(/Việc tới hạn hôm nay/)).toBeNull();
@@ -204,15 +209,47 @@ describe('Khung Gen — Bản tin có mục Gen-hub', () => {
     noObjectText();
   });
 
-  it('hub=missing: không có mục mail; có dòng "tick thêm quyền" và nút "Mở Gen-hub" mở Kết nối', async () => {
+  it('hub=missing: không có mục mail; có dòng "tick thêm quyền" và nút "Mở thẻ Gen-hub" làm sáng thẻ Gen-hub ở Kết nối', async () => {
     served = briefingMsg(briefingContent('sáng 09/10', '2026-10-09T07:30:00+07:00', false, 'missing'));
     wrap(<GenPanel userId="u1" />);
     expect(await screen.findByText(/tick thêm quyền/)).toBeInTheDocument();
     expect(screen.queryByText('Mail cần trả lời')).toBeNull();
     const box = screen.getByTestId('briefing-hub-sections');
     expect(within(box).getByText('Lịch hôm nay')).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Mở Gen-hub' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Mở thẻ Gen-hub' }));
     expect(navigations.some((p) => p.startsWith('/connections'))).toBe(true);
+    expect(useGenStore.getState().spotlight).toMatchObject({ target: 'mcp.hub_link' });
+  });
+
+  it('thẻ Gen-hub nằm ngay sau các mục nội bộ — TRƯỚC lời nhắc "tick thêm quyền" / "Dán khoá…" và các nút', async () => {
+    served = briefingMsg(briefingContent('sáng 09/10', '2026-10-09T07:30:00+07:00', true, 'missing'));
+    wrap(<GenPanel userId="u1" />);
+    const box = await screen.findByTestId('briefing-hub-sections');
+    const before = (a: Element, b: Element) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(before(screen.getByText(/Việc tới hạn hôm nay \(2\)/), box)).toBe(true);
+    expect(before(box, screen.getByText(/tick thêm quyền/))).toBe(true);
+    expect(before(box, screen.getByRole('button', { name: 'Mở thẻ Gen-hub' }))).toBe(true);
+    expect(before(box, screen.getByText('Dán khoá OpenRouter/Gemini để Gen tóm tắt'))).toBe(true);
+    expect(before(box, screen.getByRole('button', { name: 'Mở nơi dán khoá' }))).toBe(true);
+  });
+
+  it('hub_at từ máy chủ được tôn trọng; bản tin cũ không có hub_at ⇒ chèn trước cặp lời nhắc + nút đầu tiên', async () => {
+    const content = briefingContent('sáng 09/10', '2026-10-09T07:30:00+07:00', true, 'ok');
+    // Máy chủ đặt thẻ sau bước tóm tắt (chỉ số 2): thẻ phải đứng TRƯỚC "Việc tới hạn hôm nay".
+    served = briefingMsg({ ...content, hub_at: 2 });
+    const first = wrap(<GenPanel userId="u1" />);
+    let box = await screen.findByTestId('briefing-hub-sections');
+    expect(!!(box.compareDocumentPosition(screen.getByText(/Việc tới hạn hôm nay \(2\)/)) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    first.unmount();
+    stopAll();
+    useGenStore.setState({ messages: [], conversationId: BID, conversationOwner: 'u1' });
+    const { hub_at: _drop, ...old } = content;
+    void _drop;
+    served = briefingMsg(old);
+    wrap(<GenPanel userId="u1" />);
+    box = await screen.findByTestId('briefing-hub-sections');
+    const hint = screen.getByText('Dán khoá OpenRouter/Gemini để Gen tóm tắt');
+    expect(!!(box.compareDocumentPosition(hint) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
   });
 
   it('hub=off (bản tin cũ, không có mục external): không có khối Gen-hub', async () => {

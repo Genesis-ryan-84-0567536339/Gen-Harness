@@ -1,5 +1,5 @@
 /**
- * v0.1.49 (F-8, QD-16) — Bản tin Gen có Lịch hôm nay / Mail cần trả lời / Việc đang mở từ Gen-hub (chỉ đọc); Kết nối › Gen-hub
+ * v0.1.49 (F-8, QD-16) — Bản tin Gen có Lịch hôm nay / Mail cần trả lời / Việc Google đang mở từ Gen-hub (chỉ đọc); Kết nối › Gen-hub
  * ghi quyền đọc cần tick + Kiểm tra báo thiếu; Trợ giúp "Gen đọc được gì từ Gen-hub" (mock: `npm run dev:mock`).
  */
 import { expect, test, type Page } from '@playwright/test';
@@ -58,7 +58,7 @@ test.describe('v0.1.49 — Bản tin Gen đọc lịch / mail / việc qua Gen-h
     await expect(box).toBeVisible();
     await expect(box.getByRole('heading', { name: 'Lịch hôm nay (2)' })).toBeVisible();
     await expect(box.getByRole('heading', { name: 'Mail cần trả lời (3)' })).toBeVisible();
-    await expect(box.getByRole('heading', { name: 'Việc đang mở (1)' })).toBeVisible();
+    await expect(box.getByRole('heading', { name: 'Việc Google đang mở (1)' })).toBeVisible();
     await expect(box).toContainText('09:00 · Họp với nhà cung cấp ván MDF');
     await expect(box).toContainText('Anh Bảo — Báo giá ván MDF E1 17mm');
     await expect(box).toContainText('Gọi nhà cung cấp keo dán');
@@ -69,16 +69,22 @@ test.describe('v0.1.49 — Bản tin Gen đọc lịch / mail / việc qua Gen-h
     await noObjectText(page);
   });
 
-  test('hub=missing: không có "Mail cần trả lời"; có dòng "tick thêm quyền" và nút "Mở Gen-hub" dẫn tới /connections', async ({ page }) => {
+  test('hub=missing: không có thẻ "Mail cần trả lời"; có dòng "tick thêm quyền" và nút "Mở thẻ Gen-hub" làm sáng thẻ Gen-hub ở /connections', async ({ page }) => {
     await loginAsOwner(page);
     const msg = await openBriefing(page, 'missing');
-    await expect(msg).toContainText('tick thêm quyền');
-    await expect(msg.getByText('Mail cần trả lời')).toHaveCount(0);
+    await expect(msg).toContainText('Bản tin chưa có mail cần trả lời: vào Gen-hub tick thêm quyền đọc mail');
+    await expect(msg.getByRole('heading', { name: /Mail cần trả lời/ })).toHaveCount(0);
     await expect(msg.getByRole('heading', { name: 'Lịch hôm nay (2)' })).toBeVisible();
-    await expect(msg.getByRole('heading', { name: 'Việc đang mở (1)' })).toBeVisible();
-    await msg.getByRole('button', { name: 'Mở Gen-hub' }).click();
+    await expect(msg.getByRole('heading', { name: 'Việc Google đang mở (1)' })).toBeVisible();
+    // Thẻ Gen-hub đứng TRƯỚC lời nhắc + nút (không nằm dưới nút).
+    const box = msg.getByTestId('briefing-hub-sections');
+    const btn = msg.getByRole('button', { name: 'Mở thẻ Gen-hub' });
+    const [boxY, btnY] = await Promise.all([box.boundingBox(), btn.boundingBox()]);
+    expect(boxY && btnY ? boxY.y < btnY.y : false).toBe(true);
+    await btn.click();
     await expect(page).toHaveURL(/\/connections/);
     await expect(page.getByRole('region', { name: 'Gen-hub' })).toBeVisible();
+    await expect(page.getByText('Thẻ Gen-hub: sau khi tick thêm quyền đọc trong Gen-hub, bấm Kiểm tra ở đây.')).toBeVisible();
     await noObjectText(page);
   });
 
@@ -101,7 +107,7 @@ test.describe('v0.1.49 — Bản tin Gen đọc lịch / mail / việc qua Gen-h
     await box2.getByText('Chi tiết kỹ thuật').click();
     await expect(box2.locator('code')).toContainText('HUB_UNAVAILABLE');
     await expect(box2.getByRole('heading', { name: 'Mail cần trả lời (3)' })).toBeVisible();
-    await expect(box2.getByText('Không có việc đang mở.')).toBeVisible();
+    await expect(box2.getByText('Không có việc Google đang mở.')).toBeVisible();
     await noObjectText(page);
   });
 

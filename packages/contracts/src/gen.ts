@@ -29,6 +29,18 @@ export type DataToolName =
   | 'hub.kho_get'
   | 'social.accounts'
   | 'social.read'
+  /** v0.1.49 (QD-16): Tài liệu / Deal / Vụ việc nội bộ + lịch / việc / mail / Drive Google qua Gen-hub (chỉ Owner, chỉ đọc). */
+  | 'document.list'
+  | 'document.get'
+  | 'deal.list'
+  | 'deal.get'
+  | 'case.list'
+  | 'case.get'
+  | 'hub.calendar'
+  | 'hub.tasks'
+  | 'hub.mail_search'
+  | 'hub.mail_read'
+  | 'hub.drive_search'
   /** v0.1.41 (F-8): bước đầu của Bản tin Gen — đánh dấu nội dung ngoài (việc, khách, nháp, sự cố…). */
   | 'briefing.sources';
 
@@ -222,6 +234,8 @@ export interface GenBriefingSection {
   external?: boolean;
   /** Lỗi thô đã lọc bí mật (chỉ hiện trong "Chi tiết kỹ thuật"); luôn là chuỗi hoặc null. */
   detail?: string | null;
+  /** v0.1.49: mục Gen-hub chạm trần số mục đọc (10) — có thể còn nhiều hơn `count` ⇒ hiện "10+". */
+  more?: boolean;
 }
 
 export interface GenMessage {
@@ -243,6 +257,8 @@ export interface GenMessage {
     sections?: GenBriefingSection[];
     /** v0.1.49: một câu gợi ý khi mục Gen-hub bị ẩn (chưa nối / thiếu quyền) — null khi không có gì để nhắc. */
     hub_hint?: string | null;
+    /** v0.1.49: vị trí trong `steps` để chèn thẻ mục Gen-hub (ngay sau "Sự cố cần Sếp"); máy chủ cũ không gửi. */
+    hub_at?: number;
   };
   created_at: string;
   /** v0.1.41 (F-86): đánh giá của chính người xem cho lượt này (máy chủ cũ không gửi). */

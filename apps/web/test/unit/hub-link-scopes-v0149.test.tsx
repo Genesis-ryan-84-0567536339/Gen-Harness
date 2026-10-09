@@ -22,6 +22,7 @@ import { BossChecksPage } from '../../src/guide/BossChecksPage';
 import { hubScopesHint, hubScopesLine, hubScopesOf } from '../../src/guide/bossChecksModel';
 import { queryClient } from '../../src/lib/queryClient';
 import { qk } from '../../src/lib/queries';
+import { HEALTH_KINDS } from '../../src/screens/system/queries';
 import { createMock } from '../mock-p4-mcp';
 import type { P2Ctx } from '../mock-phase2';
 
@@ -168,6 +169,34 @@ describe('Thẻ Gen-hub — Quyền đọc thêm (tuỳ chọn)', () => {
     expect(document.body.textContent).not.toContain('[object Object]');
   });
 
+  it('chưa nối / chưa từng Kiểm tra xanh: read_scopes toàn false (máy chủ cũ) vẫn hiện "Chưa kiểm", không giục tick quyền', async () => {
+    const NONE = { calendar: false, mail: false, tasks: false, drive: false };
+    const OFF: HubLink = {
+      configured: false, enabled: false, status: 'off', server_id: null, endpoint: null, has_token: false, allow_public_network: false,
+      token_expires_at: null, days_left: null, last_ok_at: null, last_error: null, health: null,
+    };
+    for (const link of [{ ...OFF, read_scopes: NONE }, { ...SAVED, enabled: false, status: 'off' as const, last_ok_at: null, read_scopes: NONE }, { ...SAVED, read_scopes: null }]) {
+      stubHub(link, testOut());
+      const view = renderCard(<HubLinkCard />);
+      const box = await screen.findByTestId('hub-scopes');
+      expect(within(box).getAllByText('Chưa kiểm')).toHaveLength(4);
+      expect(within(box).queryByText('Chưa')).toBeNull();
+      expect(screen.queryByText(/Còn thiếu quyền|Đủ quyền đọc/)).toBeNull();
+      view.unmount();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('Kiểm tra đỏ mà phản hồi vẫn kèm read_scopes cũ (toàn false): dòng quyền theo lần kiểm xanh gần nhất, không cảnh báo', async () => {
+    const NONE = { calendar: false, mail: false, tasks: false, drive: false };
+    stubHub({ ...SAVED, last_ok_at: null }, testOut({ ok: false, error: 'mạng: hết giờ', error_code: 'HUB_UNREACHABLE', exposed_tools: [], read_scopes: NONE, read_missing: ['đọc lịch', 'đọc mail', 'đọc việc (Google Tasks)', 'tìm tệp Drive'] }));
+    renderCard(<HubLinkCard />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Kiểm tra' }));
+    expect(await screen.findByText(/Không gọi được địa chỉ này/)).toBeInTheDocument();
+    expect(within(screen.getByTestId('hub-scopes')).getAllByText('Chưa kiểm')).toHaveLength(4);
+    expect(screen.queryByText(/Còn thiếu quyền|Đủ quyền đọc/)).toBeNull();
+  });
+
   it('Kiểm tra đỏ (không nối được): không nói gì về quyền đọc', async () => {
     stubHub(SAVED, testOut({ ok: false, error: 'Gen-hub từ chối token', error_code: 'HUB_TOKEN_REJECTED', exposed_tools: [] }));
     renderCard(<HubLinkCard />);
@@ -203,6 +232,12 @@ describe('Thẻ Gen-hub — Quyền đọc thêm (tuỳ chọn)', () => {
   });
 });
 
+describe('Chuông "Gen-hub không trả lời hơn 15 phút" (F-83)', () => {
+  it('hub.unreachable là sự cố sức khoẻ: chuông tới thì dải "Cần Sếp xử lý" làm mới ngay (không chờ 60 giây)', () => {
+    expect(HEALTH_KINDS.has('hub.unreachable')).toBe(true);
+  });
+});
+
 describe('mock-p4-mcp — chế độ giả "thiếu quyền lịch + mail" (token chứa "thieu")', () => {
   function call(mock: ReturnType<typeof createMock>, method: string, path: string, body: Record<string, unknown> = {}) {
     let out: { status: number; body: unknown } | null = null;
@@ -220,7 +255,8 @@ describe('mock-p4-mcp — chế độ giả "thiếu quyền lịch + mail" (tok
     const mock = createMock({ fresh: true, emit: () => undefined, getAgents: () => [], pushDraft: () => undefined });
     call(mock, 'PATCH', '/hub/link', { endpoint: 'https://hub.genos.top/mcp', token: 'ghtok_binh_thuong_1', allow_public_network: true });
     expect(call(mock, 'GET', '/hub/link').body).toMatchObject({ breaker: { open: false } });
-    expect((call(mock, 'GET', '/hub/link').body as { read_scopes?: unknown }).read_scopes).toBeUndefined();
+    // Như máy chủ: chưa có lần Kiểm tra xanh ⇒ `read_scopes: null` ("Chưa kiểm"), KHÔNG phải 4 quyền false.
+    expect((call(mock, 'GET', '/hub/link').body as { read_scopes?: unknown }).read_scopes).toBeNull();
     const full = call(mock, 'POST', '/hub/link/test').body;
     expect(full).toMatchObject({ ok: true, read_scopes: { calendar: true, mail: true, tasks: true, drive: true }, read_missing: [], write_tools: [] });
     expect(full.exposed_tools).toHaveLength(3);
@@ -229,6 +265,10 @@ describe('mock-p4-mcp — chế độ giả "thiếu quyền lịch + mail" (tok
     const miss = call(mock, 'POST', '/hub/link/test').body;
     expect(miss).toMatchObject({ ok: true, read_scopes: { calendar: false, mail: false, tasks: true, drive: true }, read_missing: ['đọc lịch', 'đọc mail'] });
     expect(call(mock, 'GET', '/hub/link').body).toMatchObject({ status: 'ok', read_scopes: { calendar: false, mail: false } });
+    // Đổi token ⇒ quyền đã kiểm không còn đúng cho tới lần Kiểm tra xanh kế tiếp.
+    call(mock, 'PATCH', '/hub/link', { token: 'ghtok_moi_hoan_toan_3' });
+    expect((call(mock, 'GET', '/hub/link').body as { read_scopes?: unknown }).read_scopes).toBeNull();
+    call(mock, 'POST', '/hub/link/test');
 
     // Hook giả lập bộ ngắt mở / đóng.
     const sim = mock.hooks.hubSim as unknown as (b: unknown) => unknown;
@@ -283,7 +323,8 @@ describe('Việc Sếp cần làm — dòng phụ quyền đọc thêm ở hàng
     expect(items?.map((i) => `${i.label}:${i.has}`)).toEqual(['Lịch:true', 'Mail:false', 'Việc:true', 'Drive:false']);
     expect(hubScopesLine(items!)).toBe('Quyền đọc thêm (không bắt buộc): Lịch ✓ · Mail ✗ · Việc ✓ · Drive ✗');
     expect(hubScopesHint(items!)).toMatch(/tick thêm quyền đọc/);
-    expect(hubScopesHint(items!)).toMatch(/mail, drive/);
+    expect(hubScopesHint(items!)).toMatch(/mail, Drive:/); // "Drive" là tên riêng — không hạ chữ thường
+    expect(hubScopesHint(items!)).not.toMatch(/drive/);
     expect(hubScopesHint(hubScopesOf(check({ read_scopes: { calendar: true, mail: true, tasks: true, drive: true } }))!)).toBeNull();
     expect(hubScopesOf(null)).toBeNull();
     expect(hubScopesOf(check({}))).toBeNull();
@@ -301,6 +342,18 @@ describe('Việc Sếp cần làm — dòng phụ quyền đọc thêm ở hàng
     expect(line.textContent).toContain('Lịch ✓ · Mail ✗ · Việc ✓ · Drive ✗');
     expect(within(hub).getByText(/tick thêm quyền đọc/)).toBeInTheDocument();
     expect(await screen.findByText('Đã đạt 1/6 dòng bắt buộc')).toBeInTheDocument();
+  });
+
+  it('lần kiểm Gen-hub LỖI (detail còn read_scopes cũ) ⇒ KHÔNG hiện dòng quyền đọc / "tick thêm quyền" cạnh "Lỗi"', async () => {
+    stubBoss({
+      ...check({ read_scopes: { calendar: false, mail: false, tasks: false, drive: false }, read_missing: ['đọc lịch'] }),
+      status: 'fail', error_code: 'HUB_TOKEN_REJECTED', message: '401: Token Gen-hub hết hạn hoặc đã bị thu hồi',
+    });
+    renderBoss();
+    const hub = await screen.findByRole('region', { name: 'Nối Gen-hub' });
+    await waitFor(() => expect(within(hub).getByText(/^Lỗi/)).toBeInTheDocument());
+    expect(within(hub).queryByTestId('boss-hub-scopes')).toBeNull();
+    expect(within(hub).queryByText(/Quyền đọc thêm|tick thêm quyền đọc/)).toBeNull();
   });
 
   it('đủ quyền: có dòng, không có câu hướng dẫn; không có read_scopes ⇒ ẩn dòng', async () => {

@@ -1,7 +1,8 @@
 """v0.1.49 (QD-16) — "Việc Sếp cần làm" › Gen-hub lưu thêm quyền ĐỌC (lịch/mail/việc/Drive) của lần Kiểm tra.
 
 `read_scopes` / `read_missing` chỉ để hiển thị "Quyền đọc thêm (không bắt buộc)": Đạt/Lỗi và dòng "xong" của Gen-hub
-KHÔNG phụ thuộc chúng. Khoá lạ trong kết quả Kiểm tra (vd token) không bao giờ vào `detail`."""
+KHÔNG phụ thuộc chúng. Chỉ lưu khi Kiểm tra XANH (lượt đỏ trả quyền cũ / toàn False — gợi ý "tick thêm quyền" cạnh
+"Lỗi" là chỉ sai cách sửa). Khoá lạ trong kết quả Kiểm tra (vd token) không bao giờ vào `detail`."""
 
 from typing import Any
 
@@ -51,15 +52,17 @@ async def test_hub_pass_keeps_read_scopes(owner_api: Api, db: Any, monkeypatch: 
 
 
 async def test_hub_old_result_without_scopes(owner_api: Api, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Kết quả Kiểm tra kiểu cũ (không có read_scopes) ⇒ {} / [] — không lỗi."""
+    """Kết quả Kiểm tra kiểu cũ (không có read_scopes) ⇒ không có khoá quyền đọc (web ẩn dòng) — không lỗi."""
     monkeypatch.setattr(hub, "test_link", _fake_test_link({"ok": True, "latency_ms": 5, "exposed_tools": [],
                                                            "missing_tools": []}))
     await verify_pin(owner_api)
     out = (await owner_api.send("POST", "/boss-checks/hub/run", {})).json()
-    assert out["status"] == "pass" and out["detail"]["read_scopes"] == {} and out["detail"]["read_missing"] == []
+    assert out["status"] == "pass" and "read_scopes" not in out["detail"] and "read_missing" not in out["detail"]
 
 
-async def test_hub_fail_still_records_scopes(owner_api: Api, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_hub_fail_does_not_record_scopes(owner_api: Api, db: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Kiểm tra đỏ (token bị từ chối, mạng…) ⇒ KHÔNG lưu quyền đọc: `test_link.fail()` trả quyền cũ trong CSDL (toàn
+    False khi chưa từng xanh) — web sẽ hiện "Lịch ✗ … tick thêm quyền" cạnh "Lỗi", chỉ sai cách sửa."""
     monkeypatch.setattr(hub, "test_link", _fake_test_link({
         "ok": False, "error": "Token Gen-hub sai", "error_code": "HUB_AUTH", "latency_ms": 3, "exposed_tools": [],
         "missing_tools": ["kho_tom_tat"], "read_scopes": dict.fromkeys(SCOPES, False),
@@ -67,7 +70,10 @@ async def test_hub_fail_still_records_scopes(owner_api: Api, monkeypatch: pytest
     await verify_pin(owner_api)
     out = (await owner_api.send("POST", "/boss-checks/hub/run", {})).json()
     assert out["status"] == "fail" and out["error_code"] == "HUB_AUTH"
-    assert len(out["detail"]["read_missing"]) == 4
+    assert "read_scopes" not in out["detail"] and "read_missing" not in out["detail"]
+    await db.rollback()
+    stored = (await db.execute(text("SELECT detail FROM ops.boss_checks WHERE check_key = 'hub'"))).scalar_one()
+    assert "read_scopes" not in (stored or {}) and "read_missing" not in (stored or {})
 
 
 async def test_clean_detail_whitelist(owner_api: Api, db: Any) -> None:

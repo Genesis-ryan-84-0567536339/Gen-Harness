@@ -15,13 +15,17 @@ việc nền — gh.providers.router F-86), rồi ghi một hội thoại "Bản
 - v0.1.44 (F-8c): cùng lúc xếp MỘT tin vào hộp thư đi Telegram của tổ chức (gh.telegram.service.enqueue) — văn bản
   thường, kèm "Mở Console" và câu "mọi thao tác Sếp xác nhận trong Console".
 - Mục Kho: chỉ ghi trạng thái lần đọc Kho gần nhất + gợi ý hỏi Gen (không đọc Kho trong bản tin).
-- v0.1.49 (QD-16): thêm 3 mục từ Gen-hub — "Lịch hôm nay", "Mail cần trả lời", "Việc đang mở" — qua
+- v0.1.49 (QD-16): thêm 3 mục từ Gen-hub — "Lịch hôm nay", "Mail cần trả lời", "Việc Google đang mở" — qua
   `gh.hub_link.service.briefing_read` (CHỈ ĐỌC; đi đúng `call_hub`: đệm, ngắt mạch F-83, che). Worker đọc NHÂN DANH TỔ
   CHỨC (`SystemActor`, actor_type='system') và chỉ để gửi bản tin cho Owner — không đọc thay nhân viên. Mục Gen-hub có
   `external: True`, `state` (ok|empty|error|breaker) và `detail`; web vẽ thẻ riêng từ `sections` nên KHÔNG sinh bước
-  `say` cho chúng. Chưa nối / thiếu quyền ⇒ mục bị ẩn, gom thành MỘT dòng `hub_hint` + nút "Mở Gen-hub". Tổ chức chưa
-  từng cấu hình Gen-hub (không có dòng agent.hub_links) ⇒ không gọi, không nhắc (không làm phiền mỗi bản tin).
-  Telegram chỉ nhận SỐ ĐẾM của mục Gen-hub (không tiêu đề mail/lịch).
+  `say` cho chúng. Chưa nối / thiếu quyền ⇒ mục bị ẩn, gom thành MỘT dòng `hub_hint` + nút "Mở thẻ Gen-hub". Tổ chức
+  chưa từng cấu hình Gen-hub (không có dòng agent.hub_links) ⇒ không gọi, không nhắc (không làm phiền mỗi bản tin).
+  Telegram chỉ nhận SỐ ĐẾM của mục Gen-hub (không tiêu đề mail/lịch) — và vì tóm tắt của model cũng ra Telegram,
+  model chỉ nhận `title`/`count`/`state` của mục Gen-hub, KHÔNG nhận `lines` (người gửi, tiêu đề mail, tên lịch/việc
+  là chữ người ngoài viết — không để lọt qua tóm tắt, cũng không để ai gửi mail "cài" câu vào tóm tắt).
+  Chạm trần `hub.BRIEFING_MAX_ITEMS` ⇒ `more: True` (hiện "10+"). `content.hub_at` = vị trí trong `steps` để web chèn
+  thẻ Gen-hub (ngay sau "Sự cố cần Sếp", trước Facebook/Kho và các lời nhắc).
 """
 
 import asyncio
@@ -73,7 +77,7 @@ SECTION_META: dict[str, tuple[str, str]] = {
     "incidents": ("Sự cố cần Sếp", "/system?tab=storage&focus=health"),
     "calendar_today": ("Lịch hôm nay", "/connections#genhub"),
     "mail_reply": ("Mail cần trả lời", "/connections#genhub"),
-    "gtasks_open": ("Việc đang mở", "/connections#genhub"),
+    "gtasks_open": ("Việc Google đang mở", "/connections#genhub"),
     "facebook": ("Facebook mới", "/social"),
     "kho": ("Kho có gì mới", "/connections#genhub"),
 }
@@ -89,8 +93,13 @@ HUB_BREAKER_LINE = "Gen-hub tạm không trả lời"
 HUB_HINT_OFF = "Muốn bản tin có lịch, mail và việc: nối Gen-hub ở Kết nối › Gen-hub rồi bấm Kiểm tra."
 HUB_HINT_SCOPE = ("Bản tin chưa có {sections}: vào Gen-hub tick thêm quyền {scopes} cho token của Gen-Harness, rồi bấm "
                   "Kiểm tra ở Kết nối › Gen-hub.")
-HUB_BUTTON = "Mở Gen-hub"
-HUB_SCOPE_WORD = {"calendar": "đọc lịch", "mail": "đọc mail", "tasks": "đọc việc"}
+HUB_BUTTON = "Mở thẻ Gen-hub"
+#: Nút dưới lời nhắc: cuộn tới + làm sáng thẻ Gen-hub ở Kết nối (không phải trang Gen-hub bên ngoài).
+HUB_TARGET = "mcp.hub_link"
+HUB_SPOT_OFF = "Thẻ Gen-hub: dán địa chỉ và token Gen-hub rồi bấm Kiểm tra."
+HUB_SPOT_SCOPE = "Thẻ Gen-hub: sau khi tick thêm quyền đọc trong Gen-hub, bấm Kiểm tra ở đây."
+#: Cùng nhãn quyền với thẻ Gen-hub / `read_missing` ("đọc việc (Google Tasks)").
+HUB_SCOPE_WORD = {k: hub.SCOPE_LABELS[k] for k in ("calendar", "mail", "tasks")}
 _HM_RE = re.compile(r"\b(\d{1,2}):(\d{2})\b")
 _YMD_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
 DRAFT_KIND = {"message": "tin nhắn", "quotation": "báo giá", "contract": "hợp đồng", "reminder": "nhắc hẹn",
@@ -298,11 +307,23 @@ def _task_line(item: dict[str, Any]) -> str:
 _HUB_LINE = {"calendar_today": _event_line, "mail_reply": _mail_line, "gtasks_open": _task_line}
 
 
-def _hub_section(key: str, state: str, lines: list[str], *, count: int = 0,
-                 detail: str | None = None) -> dict[str, Any]:
+def _hub_section(key: str, state: str, lines: list[str], *, count: int = 0, detail: str | None = None,
+                 more: bool = False) -> dict[str, Any]:
     sec = _section(key, count, lines)
     sec.update({"state": state, "external": True, "detail": detail})
+    if more:
+        sec["more"] = True  # chạm trần hub.BRIEFING_MAX_ITEMS — có thể còn nhiều hơn `count` (hiện "10+")
     return sec
+
+
+def _lower_first(s: str) -> str:
+    """'Việc Google đang mở' → 'việc Google đang mở' (không hạ chữ hoa của tên riêng giữa câu)."""
+    return s[:1].lower() + s[1:]
+
+
+def count_text(s: dict[str, Any]) -> str:
+    """Số đếm hiển thị của một mục: "10+" khi mục Gen-hub chạm trần, còn lại là số."""
+    return f"{s['count']}+" if s.get("more") else str(s["count"])
 
 
 async def _hub_sections(sm: async_sessionmaker[AsyncSession], redis: Any, org: uuid.UUID,
@@ -328,7 +349,7 @@ async def _hub_sections(sm: async_sessionmaker[AsyncSession], redis: Any, org: u
             off = True
             continue
         if state == "missing_scope":
-            missing.append((SECTION_META[key][0].lower(), HUB_SCOPE_WORD.get(str(r.get("scope") or ""), "đọc")))
+            missing.append((_lower_first(SECTION_META[key][0]), HUB_SCOPE_WORD.get(str(r.get("scope") or ""), "đọc")))
             continue
         if state == "breaker_open":
             out.append(_hub_section(key, "breaker", [HUB_BREAKER_LINE], detail="HUB_BREAKER_OPEN"))
@@ -343,7 +364,7 @@ async def _hub_sections(sm: async_sessionmaker[AsyncSession], redis: Any, org: u
             out.append(_hub_section(key, "empty", []))
             continue
         lines: list[str] = mask_for_model([_HUB_LINE[key](i) for i in raw[:MAX_LINES]])
-        out.append(_hub_section(key, "ok", lines, count=len(raw)))
+        out.append(_hub_section(key, "ok", lines, count=len(raw), more=len(raw) >= hub.BRIEFING_MAX_ITEMS))
     hint: str | None = None
     if off:
         hint = HUB_HINT_OFF
@@ -357,7 +378,8 @@ async def _hub_sections(sm: async_sessionmaker[AsyncSession], redis: Any, org: u
 # ─── nội dung ────────────────────────────────────────────────────────────────
 
 def body_text(sections: list[dict[str, Any]], needs_api_key: bool) -> str:
-    parts = [f"{s['count']} {BODY_UNITS[s['key']]}" for s in sections if s["key"] in BODY_UNITS and s["count"] > 0]
+    parts = [f"{count_text(s)} {BODY_UNITS[s['key']]}" for s in sections
+             if s["key"] in BODY_UNITS and s["count"] > 0]
     body = " · ".join(parts) if parts else NOTHING
     return body + (f" · {KEY_HINT}" if needs_api_key else "")
 
@@ -369,31 +391,50 @@ def build_content(slot: Slot, sections: list[dict[str, Any]], *, summary: str | 
         steps.append({"kind": "say", "text": summary})
     elif summary_failed:
         steps.append({"kind": "say", "text": SUMMARY_FAILED})
+    hub_at: int | None = None
     for s in sections:
         if s.get("external"):
-            continue  # v0.1.49: mục Gen-hub — web vẽ thẻ riêng từ `sections`
+            # v0.1.49: mục Gen-hub — web vẽ thẻ riêng từ `sections`, chèn tại `hub_at` (đúng chỗ mục đầu tiên).
+            hub_at = len(steps) if hub_at is None else hub_at
+            continue
         if s["count"] > 0 or s["key"] == "kho" or SECTION_ERROR in s["lines"]:
             tail = "; ".join(s["lines"])
             steps.append({"kind": "say", "text": f"{s['title']} ({s['count']})" + (f": {tail}" if tail else "")})
-    if not any(s["count"] > 0 for s in sections):
+    # "Không có việc gì…" chỉ khi mọi mục đều 0 VÀ không mục Gen-hub nào đang lỗi / tạm không trả lời (khi đó chưa
+    # biết có việc hay không — câu "không có việc gì" ngay trên thẻ "Gen-hub tạm không trả lời" là sai).
+    hub_unknown = any(s.get("external") and s.get("state") in ("error", "breaker") for s in sections)
+    if not any(s["count"] > 0 for s in sections) and not hub_unknown:
         steps.append({"kind": "say", "text": NOTHING})
     if hub_hint:
         steps.append({"kind": "say", "text": hub_hint})
+        spot = HUB_SPOT_OFF if hub_hint == HUB_HINT_OFF else HUB_SPOT_SCOPE
         steps.append({"kind": "suggest", "items": [{"label": HUB_BUTTON, "action": {
-            "type": "navigate", "screen": "connections"}}]})
+            "type": "highlight", "target": HUB_TARGET, "message": spot}}]})
     if needs_api_key:
         steps.append({"kind": "say", "text": KEY_HINT})
         # Nút ngắn (không lặp lại câu trên), đưa thẳng tới API & Model — nơi có "Thêm nhà cung cấp" để dán khoá.
         steps.append({"kind": "suggest", "items": [{"label": KEY_BUTTON, "action": {
             "type": "navigate", "screen": "api"}}]})
-    return {"kind": "briefing", "slot": slot.at.isoformat(), "slot_label": slot.label,
-            "summary_source": summary_source, "needs_api_key": needs_api_key, "sections": sections, "steps": steps,
-            "hub_hint": hub_hint}
+    out = {"kind": "briefing", "slot": slot.at.isoformat(), "slot_label": slot.label,
+           "summary_source": summary_source, "needs_api_key": needs_api_key, "sections": sections, "steps": steps,
+           "hub_hint": hub_hint}
+    if hub_at is not None:
+        out["hub_at"] = hub_at
+    return out
+
+
+def _for_summary(s: dict[str, Any]) -> dict[str, Any]:
+    """Mục gửi cho model. Mục Gen-hub (`external`) CHỈ có tiêu đề + số đếm + trạng thái: dòng của nó là chữ người
+    ngoài viết (người gửi, tiêu đề mail, tên lịch/việc Google) — tóm tắt đi thẳng ra Telegram và chuông, nên không
+    được nhắc lại các dòng đó (docs/design/gen-hub-link.md §6.7: Telegram chỉ số đếm)."""
+    if s.get("external"):
+        return {"title": s["title"], "count": count_text(s), "state": s.get("state") or "ok"}
+    return {k: s[k] for k in ("title", "count", "lines")}
 
 
 async def _summarize(router: ModelRouter, org: uuid.UUID, sections: list[dict[str, Any]]) -> str | None:
     """None khi nguồn AI lỗi / quá 60 giây. KHÔNG truyền allow_agy (việc nền — F-22)."""
-    data = orjson.dumps([{k: s[k] for k in ("title", "count", "lines")} for s in sections]).decode()
+    data = orjson.dumps([_for_summary(s) for s in sections]).decode()
     msgs = [Message("system", SYSTEM_PROMPT), Message("user", wrap_untrusted(SOURCES_STEP, data))]
     try:
         routed = await asyncio.wait_for(

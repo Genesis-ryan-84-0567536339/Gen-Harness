@@ -1,8 +1,9 @@
 """/hub — liên kết Gen-hub + đọc Kho Ryan (v0.1.26) + đọc lịch/mail/việc/Drive Google (v0.1.49, QD-16)
 (docs/design/gen-hub-link.md §3.1, §6).
 
-- `GET /hub/link` — trạng thái (không bao giờ có token) + `read_scopes` (quyền đọc thêm) + `breaker` (ngắt mạch F-83;
-  chỉ Owner nhận đủ `retry_in_s`/`down_since`) · `system.read`.
+- `GET /hub/link` — trạng thái (không bao giờ có token) + `read_scopes` (quyền đọc thêm; null khi chưa có lần Kiểm tra
+  xanh với địa chỉ/token hiện tại) + `breaker` (ngắt mạch F-83; chỉ Owner nhận đủ `retry_in_s`/`down_since`) ·
+  `system.read`.
 - `PATCH /hub/link` — địa chỉ, token (chỉ ghi), ngày hết hạn, mạng công cộng, tắt · Owner + PIN `hub.link`.
 - `POST /hub/link/test` — khám phá, mở + cấp `core.gen` đúng tool đọc (Kho + Google), gọi `kho_tom_tat`; trả thêm
   `read_scopes`, `read_missing`, `write_tools` · Owner + PIN.
@@ -40,8 +41,11 @@ def _client(request: Request) -> Any:
 async def get_link(request: Request, user: service.CurrentUser = Depends(READ),
                    db: AsyncSession = DB) -> dict[str, Any]:
     owner = user.role_code == rbac.OWNER
-    out = hub.link_out(await hub.load(db, user.org_id), owner=owner)
-    out["read_scopes"] = await hub.read_scopes(db, user.org_id)
+    link = await hub.load(db, user.org_id)
+    out = hub.link_out(link, owner=owner)
+    # Chưa nối / chưa từng Kiểm tra xanh / vừa đổi địa chỉ-token (liên kết tắt chờ kiểm lại) ⇒ null = "Chưa kiểm",
+    # KHÔNG phải 4 quyền "Chưa" (thẻ sẽ giục tick quyền khi Sếp còn chưa nối).
+    out["read_scopes"] = await hub.read_scopes(db, user.org_id) if hub.scopes_known(link) else None
     breaker = await hub.breaker_state(request.app.state.redis, user.org_id)
     out["breaker"] = breaker if owner else {"open": breaker["open"]}  # vai trò khác: chỉ biết đang mở hay không
     return out

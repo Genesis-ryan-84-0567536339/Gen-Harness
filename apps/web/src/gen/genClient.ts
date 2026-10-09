@@ -126,6 +126,7 @@ function toChat(m: GenMessage): GenChatMessage {
     feedback: m.feedback ?? null,
     kind: c.kind === 'briefing' ? 'briefing' : undefined,
     sections: toSections(c),
+    hubAt: c.kind === 'briefing' && typeof c.hub_at === 'number' && Number.isInteger(c.hub_at) ? c.hub_at : undefined,
   };
 }
 

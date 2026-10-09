@@ -220,6 +220,41 @@ async def test_scope_revoked_in_gen_hub_is_closed_on_next_test(owner_api: Api, f
     assert "read_scopes" in detail
 
 
+async def test_link_read_scopes_null_until_green_check(owner_api: Api, fake_hub: FakeHub) -> None:
+    """`GET /hub/link`: chưa nối / đã lưu mà chưa Kiểm tra xanh / vừa đổi token ⇒ `read_scopes: null` ("Chưa kiểm") —
+    KHÔNG phải 4 quyền False (thẻ sẽ giục "Còn thiếu quyền… bấm Kiểm tra lại" khi Sếp còn chưa nối)."""
+    assert (await owner_api.get("/hub/link")).json()["read_scopes"] is None
+    await _pin(owner_api)
+    r = await owner_api.send("PATCH", "/hub/link", {"endpoint": ENDPOINT, "token": TOKEN})
+    assert r.status_code == 200, r.text
+    assert (await owner_api.get("/hub/link")).json()["read_scopes"] is None   # đã lưu, chưa kiểm
+    assert (await owner_api.send("POST", "/hub/link/test", {})).json()["ok"] is True
+    full = {"calendar": True, "mail": True, "tasks": True, "drive": True}
+    assert (await owner_api.get("/hub/link")).json()["read_scopes"] == full
+    # Đổi token ⇒ liên kết tắt chờ kiểm lại ⇒ quyền cũ không còn được coi là đã kiểm.
+    r = await owner_api.send("PATCH", "/hub/link", {"token": TOKEN})
+    assert r.status_code == 200, r.text
+    assert (await owner_api.get("/hub/link")).json()["read_scopes"] is None
+    assert (await owner_api.send("POST", "/hub/link/test", {})).json()["ok"] is True
+    assert (await owner_api.get("/hub/link")).json()["read_scopes"] == full
+
+
+async def test_scope_revoked_clears_cache_even_if_test_fails(owner_api: Api, fake_hub: FakeHub, redis: Any) -> None:
+    """Owner bỏ quyền lịch trong Gen-hub rồi bấm Kiểm tra mà lượt kiểm ĐỎ (Kho lỗi) ⇒ tool lịch đã bị thu hồi thì đệm
+    5 phút cũng phải bỏ ngay — Gen không được đọc lịch cũ từ đệm nữa."""
+    await _linked(owner_api)
+    r = await owner_api.get("/hub/google/calendar")
+    assert r.status_code == 200 and r.json()["cached"] is False
+    assert (await owner_api.get("/hub/google/calendar")).json()["cached"] is True
+    fake_hub.drop = {"calendar_list_events"}
+    fake_hub.mode = "echo"  # tools/list được, tools/call kho_tom_tat lỗi 500 ⇒ Kiểm tra đỏ
+    out = (await owner_api.send("POST", "/hub/link/test", {})).json()
+    assert out["ok"] is False
+    fake_hub.mode = "ok"
+    r = await owner_api.get("/hub/google/calendar")
+    assert r.status_code == 409 and r.json()["code"] == "HUB_TOOL_MISSING", r.text
+
+
 # ─── 3. Đọc lịch/mail/việc/Drive: tham số, che, id giữ nguyên ──────────────────────
 
 @pytest.mark.parametrize("style", ["text", "structured"])
@@ -430,6 +465,11 @@ def test_mask_keep_keys() -> None:
             "code": "HUB_X", "id2": 5}
     kept = hub.mask_for_model(data, keep_keys=hub.HUB_KEEP_KEYS)
     assert kept["id"] == MAIL_ID and kept["messageId"] == "18c2f49999999999" and kept["code"] == "HUB_X"
+    # `code` KHÔNG phải khoá id: mã đặt chỗ / OTP / SĐT viết liền dưới `code` vẫn bị che số dài.
+    assert "code" not in hub.HUB_KEEP_KEYS
+    for raw in ("0912345678", "190312345678901"):
+        masked = hub.mask_for_model({"code": raw}, keep_keys=hub.HUB_KEEP_KEYS)["code"]
+        assert masked != raw and "•" in masked, raw
     assert kept["nested"][1]["threadId"] == THREAD_ID
     assert EMAIL not in orjson.dumps(kept).decode() and kept["nested"][0]["id"] == "t•••@example.com"  # có '@' ⇒ che
     assert kept["calendarId"] == "t•••@example.com" and KEY not in orjson.dumps(kept).decode()

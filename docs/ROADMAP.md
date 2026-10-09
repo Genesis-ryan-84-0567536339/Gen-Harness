@@ -153,8 +153,8 @@ Còn: gói apt trong Dockerfile chưa ghim phiên bản (tầng apt dựng lại
 nhắn Claude (chưa có lịch tự động).
 v0.1.49: Gen đọc lịch / mail / việc / Drive qua Gen-hub, CHỈ ĐỌC (QD-16, F-83, F-8) — Gen (chỉ Owner) hỏi được Tài liệu, Deal,
 Vụ việc nội bộ (đã che) và lịch/mail/việc Google qua Gen-hub; tool ghi Google bị chặn ở mọi đường; ngắt mạch Gen-hub (3 lỗi →
-60 giây, im 15 phút → sự cố + chuông); Bản tin thêm "Lịch hôm nay", "Mail cần trả lời", "Việc đang mở" (thiếu quyền ⇒ 1 dòng
-nhắc + nút "Mở Gen-hub"; Telegram chỉ số đếm); Kết nối › Gen-hub và Việc Sếp cần làm ghi quyền đọc còn thiếu (không bắt buộc).
+60 giây, im 15 phút → sự cố + chuông); Bản tin thêm "Lịch hôm nay", "Mail cần trả lời", "Việc Google đang mở" (thiếu quyền ⇒ 1 dòng
+nhắc + nút "Mở thẻ Gen-hub"; Telegram chỉ số đếm, model tóm tắt cũng chỉ thấy số đếm của mục Gen-hub); Kết nối › Gen-hub và Việc Sếp cần làm ghi quyền đọc còn thiếu (không bắt buộc).
 Còn: Gen soạn mail/tạo lịch (có xác nhận) — chưa làm, cần Boss chốt.
 
 ## Đợt A — Gen v1 (thiết kế: docs/design/gen-v1.md)

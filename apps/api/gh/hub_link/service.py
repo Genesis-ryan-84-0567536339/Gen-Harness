@@ -71,7 +71,8 @@ READ_SCOPES: dict[str, tuple[str, ...]] = {
 SCOPE_LABELS = {"calendar": "đọc lịch", "mail": "đọc mail", "tasks": "đọc việc (Google Tasks)",
                 "drive": "tìm tệp Drive"}
 # Khoá mà giá trị chuỗi là id kỹ thuật (id Gmail/sự kiện có thể chứa ≥ 8 chữ số liền — regex số dài sẽ phá id).
-HUB_KEEP_KEYS = frozenset({"id", "messageId", "threadId", "eventId", "taskId", "fileId", "tasklistId", "code"})
+# KHÔNG có khoá chung chung như `code`: mã đặt chỗ / OTP / SĐT viết liền dưới `code` phải bị che như thường.
+HUB_KEEP_KEYS = frozenset({"id", "messageId", "threadId", "eventId", "taskId", "fileId", "tasklistId"})
 # Nguồn hiển thị + danh từ trong câu lỗi, theo tiền tố hậu tố tool.
 _SOURCES: tuple[tuple[str, str, str], ...] = (
     ("kho_", "Kho Ryan qua Gen-hub", "Kho"),
@@ -303,6 +304,12 @@ async def read_scopes(db: AsyncSession, org_id: uuid.UUID) -> dict[str, bool]:
     return {scope: all(suf in have for suf in sufs) for scope, sufs in READ_SCOPES.items()}
 
 
+def scopes_known(r: Any) -> bool:
+    """`read_scopes` có nghĩa chưa: đã nối, đã có ít nhất một lần Kiểm tra xanh và liên kết đang bật (đổi địa chỉ/token
+    ⇒ `upsert` tắt liên kết cho tới lần Kiểm tra xanh kế tiếp, nên quyền cũ không còn được coi là đã kiểm)."""
+    return r is not None and r.server_id is not None and r.last_ok_at is not None and bool(r.enabled)
+
+
 def read_missing(scopes: dict[str, bool]) -> list[str]:
     """Nhãn các quyền đọc thêm còn thiếu, theo thứ tự lịch, mail, việc, Drive."""
     return [SCOPE_LABELS[k] for k in READ_SCOPES if not scopes.get(k)]
@@ -431,13 +438,24 @@ async def _breaker_fail(db: AsyncSession, redis: Any, org_id: uuid.UUID) -> None
         return
     now = _clock()
     fails_key = _bk("fails", org_id)
+    down_key = _bk("down_since", org_id)
     fails = await redis.incr(fails_key)
     await redis.expire(fails_key, _BREAKER_FAILS_TTL_S)
-    await redis.set(_bk("down_since", org_id), repr(now), nx=True, ex=_BREAKER_DOWN_TTL_S)
     half = await redis.exists(_bk("half", org_id))
+    if half:
+        # Ngắt mạch đã từng mở mà chưa gọi được lại ⇒ vẫn là CÙNG đợt im (giữ mốc bắt đầu; đặt lại nếu lỡ mất).
+        await redis.set(down_key, repr(now), nx=True, ex=_BREAKER_DOWN_TTL_S)
+    elif fails == 1:
+        # Lỗi đầu của một chuỗi mới: đợt im bắt đầu TỪ BÂY GIỜ — ghi đè mốc cũ (một lỗi lẻ lúc 08:00 không được làm
+        # lần mở lúc 17:00 bị coi là "im hơn 15 phút"). Hết hạn cùng bộ đếm cho tới khi ngắt mạch mở.
+        await redis.set(down_key, repr(now), ex=_BREAKER_FAILS_TTL_S)
+    else:
+        await redis.set(down_key, repr(now), nx=True, ex=_BREAKER_FAILS_TTL_S)
+        await redis.expire(down_key, _BREAKER_FAILS_TTL_S)
     if fails >= BREAKER_FAILS or half:
         await redis.set(_bk("open_until", org_id), repr(now + BREAKER_OPEN_S), ex=_BREAKER_OPEN_TTL_S)
         await redis.set(_bk("half", org_id), "1", ex=_BREAKER_DOWN_TTL_S)
+        await redis.expire(down_key, _BREAKER_DOWN_TTL_S)  # đã mở ⇒ giữ mốc tới khi gọi được lại (tối đa 24 giờ)
         await redis.delete(fails_key)
     await _watch_org(db, redis, org_id, now)
 
@@ -778,7 +796,9 @@ async def test_link(db: AsyncSession, redis: Any, client: McpClient, *, user: se
                                    target_label=f"{SERVER_NAME} · {t['name']}",
                                    detail={"agent_key": AGENT_KEY, "via": "hub_link"}, ip=user.ip)
         exposed.append(t["name"])
-    await _revoke_gone_google(db, user, link.server_id, {t["name"] for t in found})
+    if await _revoke_gone_google(db, user, link.server_id, {t["name"] for t in found}):
+        # Quyền đọc vừa mất ⇒ bỏ đệm 5 phút NGAY (kể cả khi lượt kiểm này đỏ ở bước sau): không trả mail/lịch cũ nữa.
+        await clear_cache(redis, user.org_id)
     scopes = {scope: all(suf in have for suf in sufs) for scope, sufs in READ_SCOPES.items()}
     missing = [s for s in REQUIRED_SUFFIXES if s not in have]
     if "kho_tom_tat" in missing:
@@ -808,9 +828,11 @@ async def test_link(db: AsyncSession, redis: Any, client: McpClient, *, user: se
 
 
 async def _revoke_gone_google(db: AsyncSession, user: service.CurrentUser, server_id: uuid.UUID,
-                              listed: set[str]) -> None:
+                              listed: set[str]) -> bool:
     """Gen-hub không còn liệt kê một tool Google (Owner bỏ tick quyền) mà tool đó vẫn đang mở/cấp từ lần kiểm trước ⇒
-    đóng + thu hồi grant `core.gen`, để `read_scopes` và lời gọi không đứng trên quyền đã mất."""
+    đóng + thu hồi grant `core.gen`, để `read_scopes` và lời gọi không đứng trên quyền đã mất. Trả True khi đã thu
+    hồi ít nhất một tool (bên gọi xoá đệm)."""
+    revoked = False
     rows = (await db.execute(text("""
         SELECT t.id, t.name FROM agent.mcp_tools t
         WHERE t.server_id = :s AND (t.is_exposed OR EXISTS (SELECT 1 FROM agent.mcp_grants g
@@ -827,6 +849,8 @@ async def _revoke_gone_google(db: AsyncSession, user: service.CurrentUser, serve
                                action="mcp.tool_hidden", target_type="mcp_tool", target_id=str(r.id),
                                target_label=f"{SERVER_NAME} · {r.name}",
                                detail={"via": "hub_link", "reason": "Gen-hub không còn cấp tool này"}, ip=user.ip)
+        revoked = True
+    return revoked
 
 
 # ─── hàm đọc cho Bản tin Gen (v0.1.49, QD-16) ──────────────────────────────────

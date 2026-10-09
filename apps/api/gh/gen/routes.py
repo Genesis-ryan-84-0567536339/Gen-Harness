@@ -24,7 +24,7 @@ from gh.auth.deps import current_user, require_owner
 from gh.biz.market import routes as market_routes
 from gh.biz.relations import routes as relations_routes
 from gh.chassis import actionlog
-from gh.chassis.masking import mask_for_model
+from gh.chassis.masking import _SECRET_KEYS, MASK, mask_for_model
 from gh.db import DB, sessionmaker
 from gh.errors import ApiError, conflict, field_errors, forbidden, not_found, pin_required
 from gh.gen import engine, proposals, store
@@ -385,12 +385,15 @@ KEEP_RAW = frozenset({"id", "code", "person_id", "opportunity_id", "subject_id",
 
 
 def _for_model(data: Any) -> Any:
-    """Che kết quả trước khi sang model: khoá trong KEEP_RAW (giá trị vô hướng) giữ nguyên; mọi giá trị khác — chuỗi →
+    """Che kết quả trước khi sang model: khoá kiểu mật khẩu/token/api_key/pin (cùng quy tắc `mask_for_model`) bị thay
+    hẳn — kể cả giá trị ngắn hay số; khoá trong KEEP_RAW (giá trị vô hướng) giữ nguyên; mọi giá trị khác — chuỗi →
     `mask_for_model` (email, SĐT/số dài, khoá bí mật), list/dict → đệ quy."""
     if isinstance(data, dict):
         out: dict[str, Any] = {}
         for k, v in data.items():
-            if k in KEEP_RAW and not isinstance(v, dict | list):
+            if _SECRET_KEYS.search(str(k)) and isinstance(v, str | int) and not isinstance(v, bool) and v != "":
+                out[k] = MASK
+            elif k in KEEP_RAW and not isinstance(v, dict | list):
                 out[k] = v
             else:
                 out[k] = _for_model(v)
