@@ -29,7 +29,7 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('Gen-hub ghi Kho có xác nhận — chữ trên Trợ giúp và Hướng dẫn (v0.1.50)', () => {
-  it('thẻ Trợ giúp: vẫn ghi chỉ đọc lịch/mail, thêm dòng ghi Kho cần Xác nhận + mã PIN', async () => {
+  it('thẻ Trợ giúp: dòng đầu chỉ nói Gen đọc gì (không còn "chỉ ĐỌC" đá với dòng ghi Kho), lịch/mail vẫn không ghi, ghi Kho cần Xác nhận + mã PIN', async () => {
     render(
       <QueryClientProvider client={queryClient}>
         <MemoryRouter>
@@ -38,7 +38,9 @@ describe('Gen-hub ghi Kho có xác nhận — chữ trên Trợ giúp và Hướ
       </QueryClientProvider>,
     );
     const card = await screen.findByTestId('help-genhub-reads');
-    expect(card.textContent).toContain('Gen chỉ ĐỌC');
+    expect(card.textContent).toContain('Gen đọc: Kho Ryan, lịch, mail (tìm và đọc), việc Google Tasks, tệp Drive.');
+    // Cùng một danh sách không được vừa nói "chỉ ĐỌC" vừa nói "Ghi duy nhất: Phiên, Việc vào Kho Ryan".
+    expect(card.textContent).not.toMatch(/chỉ đọc/i);
     expect(card.textContent).toContain('Gen KHÔNG gửi mail');
     // "việc" ở dòng KHÔNG là việc Google Tasks — không đá nhau với dòng "Ghi duy nhất: Phiên, Việc vào Kho Ryan".
     expect(card.textContent).toContain('KHÔNG tạo hay sửa lịch, việc Google Tasks, tệp Drive.');

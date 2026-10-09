@@ -447,6 +447,8 @@ export function createMock(opts: MockGenOptions) {
         if (r) {
           if ('error' in r) {
             const e = r.error;
+            // Như confirm_proposal thật: 502 HUB_WRITE_UNCERTAIN gắn nhãn `uncertain` — Huỷ sau đó thẻ không nói "không ghi gì vào Kho".
+            if (e.code === 'HUB_WRITE_UNCERTAIN') proposals.set(pr.id, { ...pr, labels: { ...pr.labels, uncertain: '1' } } as GenProposal);
             // Như confirm_proposal thật: chuyển nguyên `detail` (lý do Kho từ chối, lý do permit…) của lần ghi Kho.
             const extra = e.operation ? { detail: { operation: e.operation } } : { ...(e.errors ? { errors: e.errors } : {}), ...(e.detail ? { detail: e.detail } : {}) };
             return problem(e.status, e.code, e.title, Object.keys(extra).length ? extra : undefined);

@@ -187,6 +187,25 @@ describe('Thẻ Gen-hub — Quyền ghi Kho (tuỳ chọn)', () => {
     expect(items[1]).toHaveTextContent('Có');
   });
 
+  it('tải lại trang (chưa bấm Kiểm tra): tool Sếp tự đóng lấy từ GET /hub/link (`write_hidden`) ⇒ câu "Sếp đã tự đóng…", không giục tick', async () => {
+    const link: HubLink = { ...SAVED, write_scopes: { kho: false, kho_create: false, kho_update: true }, write_hidden: ['kho_create'] };
+    stubHub(link, testOut());
+    renderCard(<HubLinkCard />);
+    const box = await screen.findByTestId('hub-write-scopes');
+    expect(await within(box).findByText(WRITE_HIDDEN_TEXT(['kho_create']))).toBeInTheDocument();
+    expect(within(box).queryByText(WRITE_MISSING_TEXT)).toBeNull();
+    const items = within(box).getAllByRole('listitem');
+    expect(items[0]).toHaveTextContent('Chưa');
+    expect(items[1]).toHaveTextContent('Có');
+  });
+
+  it('tải lại trang, máy chủ cũ (không có `write_hidden`) và thiếu kho_create ⇒ vẫn nhắc tick ở Gen-hub như trước', async () => {
+    stubHub({ ...SAVED, write_scopes: { kho: false, kho_create: false, kho_update: true } }, testOut());
+    renderCard(<HubLinkCard />);
+    const box = await screen.findByTestId('hub-write-scopes');
+    expect(await within(box).findByText(WRITE_MISSING_TEXT)).toBeInTheDocument();
+  });
+
   it('chưa có dữ liệu: 2 dòng "Chưa kiểm", nằm dưới "Quyền đọc thêm", ghi rõ Gen chỉ ghi khi Sếp Xác nhận + mã PIN, không cảnh báo', async () => {
     stubHub(SAVED, testOut());
     renderCard(<HubLinkCard />);

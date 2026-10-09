@@ -319,7 +319,10 @@ Gen đề xuất kho_create / kho_update ─► thẻ "Ghi vào Kho Ryan" (bản
 - **Permit**: ký HMAC bằng khoá con riêng `hub_write_permit` của khoá master (không dùng chéo với permit Facebook); claims gồm tổ chức, người xác nhận, `proposal_id`, tool, `args_sha256`, hạn 5 phút, `nonce` dùng một lần
   (Redis `gh:hub:permit:{nonce}`). Permit chỉ được phát trong `confirm_proposal` sau khi qua kiểm quyền + PIN — không bao giờ ở bước dựng thẻ. Gọi thẳng `/hub/kho/write` không có permit hợp lệ ⇒ 403 `HUB_WRITE_PERMIT`
   (lý do `PERMIT_MISSING|BAD_SIG|EXPIRED|MISMATCH|USED` ở `detail`).
-- Thiếu quyền ghi ở Gen-hub (`write_scope='missing'`) ⇒ web khoá nút Xác nhận; nếu vẫn gọi: 409 `HUB_WRITE_MISSING` (kiểm theo **từng** tool: có `kho_create` mà thiếu `kho_update` thì chỉ sửa bị chặn).
+- Thiếu quyền ghi ở Gen-hub (`write_scope='missing'`) ⇒ web khoá nút Xác nhận và hỏi lại `GET /hub/link`: mở khoá khi `write_scopes[<tool của thẻ>]` = true (máy chủ cũ: `kho`);
+  nếu vẫn gọi: 409 `HUB_WRITE_MISSING` (kiểm theo **từng** tool: có `kho_create` mà thiếu `kho_update` thì chỉ sửa bị chặn). Tool Sếp **tự đóng** ở MCP Hub ⇒ 409 `HUB_WRITE_HIDDEN`
+  (thẻ dẫn tới MCP Hub — tick ở Gen-hub + Kiểm tra không mở lại).
+- Ghi **chưa chắc** (502) ⇒ đề xuất mang nhãn `uncertain='1'`; Sếp mở Kho kiểm: đã có ⇒ Huỷ (thẻ ghi "Đã đóng — Gen không ghi thêm vào Kho…", không nói "không ghi gì"), chưa có ⇒ Xác nhận lại.
 - **Không có đường nào khác**: route MCP chung chặn `kho_create`/`kho_update` (403 `HUB_TOOL_NOT_ALLOWED`); `call_hub` của Gen chỉ gọi hậu tố trong `READ_SUFFIXES`.
 - Ghi đi qua `invoke_tool` nên dùng lại ghim DNS, ngắt mạch (§6.6), che, `agent.mcp_calls` (chỉ dấu vết tham số). Ghi xong xoá đệm đọc 5 phút. Token không vào log/Action Log/`mcp_calls`/thân lỗi.
 
@@ -332,28 +335,33 @@ Gen đề xuất kho_create / kho_update ─► thẻ "Ghi vào Kho Ryan" (bản
 | `HUB_TOOL_NOT_ALLOWED` / `HUB_OWNER_ONLY` | 403 | tool ngoài danh sách cho phép / không phải Owner |
 | `HUB_WRITE_INVALID` | 422 | giá trị sai khuôn (`field_errors`, vd ngày không đúng `YYYY-MM-DD`) |
 | `HUB_WRITE_MISSING` | 409 | Gen-hub chưa cấp quyền `kho_create`/`kho_update` |
+| `HUB_WRITE_HIDDEN` | 409 | Sếp đã tự đóng (hoặc gỡ cấp Gen) tool ghi ở MCP Hub — mở lại ở MCP Hub, Kiểm tra ở Gen-hub không mở lại |
 | `HUB_WRITE_REJECTED` | 409 | Kho từ chối hoặc trả lỗi nghiệp vụ (vd giá trị cột không hợp lệ) — **không** coi là đã ghi |
-| `HUB_WRITE_UNCERTAIN` | 502 | lỗi mạng/5xx/hết giờ SAU khi gửi — không chắc đã ghi, Sếp kiểm Kho trước khi bấm lại |
+| `HUB_WRITE_UNCERTAIN` | 502 | lỗi mạng/5xx/hết giờ SAU khi gửi — không chắc đã ghi: Sếp kiểm Kho, đã có thì Huỷ, chưa có thì Xác nhận lại |
 | `HUB_BLOCKED` | 409 | rào chắn MCP Hub chặn (máy chủ tắt, tool đóng, chặn mạng…) |
 | `HUB_LINK_OFF`, `HUB_BREAKER_OPEN` | 409 | liên kết Gen-hub tắt / ngắt mạch đang mở (§6.6) |
 | `GEN_PROPOSAL_DECIDED` | 409 | đề xuất đã được xác nhận hoặc huỷ (kể cả Owner khác xác nhận lần hai bản Phiên) |
+| `GEN_PROPOSAL_BUSY` | 409 | đang thực hiện, Owner khác đang ghi bản Phiên này, hoặc bản vừa đổi trạng thái (lần ghi kia vừa lỗi chắc chắn) — bấm lại, thẻ không bị đóng |
 
 Action Log: `gen.proposal_confirmed` + `hub.kho_written` (chỉ bảng, tên trường và dấu vết nội dung — không ghi nguyên văn) + `mcp.call_ok` do `invoke_tool`; bị chặn/lỗi: `hub.kho_write_blocked`, `hub.kho_write_failed`;
 `gen.kho_release_proposed` (actor hệ thống); `gen.memory_saved|updated|deleted`.
 
 ### 7.4 Quyền ghi ở thẻ Gen-hub
 
-`GET /hub/link` thêm `write_scopes` (`{kho: bool}` — true khi CẢ HAI tool `kho_create`, `kho_update` có trên máy chủ liên kết, đã mở và đã cấp `core.gen`; `null` khi chưa có lần Kiểm tra xanh). `POST /hub/link/test` thêm `write_scopes` và
+`GET /hub/link` thêm `write_scopes` (`{kho, kho_create, kho_update: bool}` — từng tool có trên máy chủ liên kết, đã mở và đã cấp `core.gen`; `kho` = có CẢ HAI) và `write_hidden` (tool ghi Sếp tự đóng
+ở MCP Hub, tính lại từ Action Log mỗi lần đọc) — cả hai `null` khi chưa có lần Kiểm tra xanh. `POST /hub/link/test` thêm `write_scopes`, `write_hidden` và
 `write_missing` (`['ghi Kho (kho_create, kho_update)']`): Kiểm tra **mở và cấp `core.gen`** cho hai tool khi Gen-hub có và **không bao giờ gọi chúng**; Boss bỏ tick ⇒ lần Kiểm tra sau đóng + thu hồi grant; thiếu quyền ghi **không** làm `ok=false`
 (Gen vẫn đọc bình thường). Web: khối **Quyền ghi Kho (tuỳ chọn)** ở Kết nối › Gen-hub; Việc Sếp cần làm có dòng 9 **Gen ghi Kho** (`boss_checks.check_key = 'kho_write'`, không bắt buộc, máy chủ tự ghi "Đạt" sau lần ghi Kho thật đầu tiên;
 chi tiết dòng Gen-hub thêm `write_scopes`/`write_missing`).
 
 ### 7.5 F-87 — mỗi bản mới, Gen đề xuất một Phiên
 
-Cron worker `gen_kho_release` (phút 7 và 37 mỗi giờ). Chỉ chạy cho tổ chức có Gen bật cho Owner, liên kết Gen-hub bật, **quyền ghi Kho đã cấp** (`write_scopes.kho`) và ≥ 1 Owner; chưa đủ thì không tạo gì, lần sau thử lại.
+Cron worker `gen_kho_release` (phút 7 và 37 mỗi giờ). Chỉ chạy cho tổ chức có Gen bật cho Owner, liên kết Gen-hub bật, **quyền tạo bản ghi Kho đã cấp** (`write_scopes.kho_create` — thẻ Phiên chỉ dùng
+`kho_create`; thiếu riêng `kho_update` không chặn) và ≥ 1 Owner; chưa đủ thì không tạo gì, lần sau thử lại.
 Mỗi (tổ chức, phiên bản) **đúng một lần** (bảng `agent.hub_release_proposals`, khoá chính `(org_id, version)`; `pending → writing → written`, lỗi → `pending`, Huỷ → `cancelled` cho cả tổ chức, hết hạn → `expired`).
 Mỗi Owner nhận hội thoại "Gen đề xuất ghi Kho · Phiên vX.Y.Z" với thẻ `kho_create` bảng Phiên (Chủ đề "Gen-Harness lên bản vX.Y.Z", Ngày hôm nay, Đã chốt kèm link ghi chú phát hành) và một chuông `gen.kho_proposal`
-(liên kết `/overview?gen={cid}`). Đề xuất sống 7 ngày trong Redis (đề xuất thường 24 giờ). Owner khác xác nhận lần hai ⇒ 409 `GEN_PROPOSAL_DECIDED`. Job **không** gọi Gen-hub và **không** ghi Kho — ghi chỉ khi Sếp Xác nhận + mã PIN.
+(liên kết `/overview?gen={cid}`). Đề xuất sống 7 ngày trong Redis (đề xuất thường 24 giờ). Owner khác xác nhận lần hai ⇒ 409 `GEN_PROPOSAL_DECIDED`; đua đúng lúc lần ghi của Owner kia vừa lỗi chắc chắn
+(bản về `pending`) ⇒ 409 `GEN_PROPOSAL_BUSY`, thẻ KHÔNG bị đóng — bấm lại. Job **không** gọi Gen-hub và **không** ghi Kho — ghi chỉ khi Sếp Xác nhận + mã PIN.
 Chỉ từ v0.1.50; Phiên bù cho v0.1.28 → v0.1.49 là Nợ (ROADMAP #7).
 
 ### 7.6 Gen nhớ (cục bộ, không ghi Gen-hub)

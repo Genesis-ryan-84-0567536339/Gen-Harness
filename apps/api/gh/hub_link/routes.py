@@ -11,9 +11,10 @@
 - `GET /hub/google/calendar?day=today|tomorrow`, `/hub/google/tasks`, `/hub/google/mail/search?q&limit`,
   `/hub/google/mail/message?id`, `/hub/google/drive/search?q` — đọc lịch/việc/mail/Drive qua Gen-hub (đã che, đệm
   5 phút, ngắt mạch) · CHỈ Owner (QD-16). Kết quả `{source, tool, cached, data}`. KHÔNG có đường ghi nào lên Google.
-- v0.1.50 (F-81, QD-18): `GET /hub/link` thêm `write_scopes` ({kho, kho_create, kho_update: bool}; null khi chưa có
-  lần Kiểm tra xanh); `POST /hub/link/test` thêm `write_scopes` + `write_missing` + `write_hidden` (tool ghi Owner tự
-  đóng ở MCP Hub — Kiểm tra không mở lại) + `exposed_write_tools`. `POST /hub/kho/write` — đường GHI Kho duy nhất
+- v0.1.50 (F-81, QD-18): `GET /hub/link` thêm `write_scopes` ({kho, kho_create, kho_update: bool}) và `write_hidden`
+  (tool ghi Kho Owner tự đóng ở MCP Hub) — cả hai null khi chưa có lần Kiểm tra xanh; `POST /hub/link/test` thêm
+  `write_scopes` + `write_missing` + `write_hidden` (tool ghi Owner tự đóng ở MCP Hub — Kiểm tra không mở lại) +
+  `exposed_write_tools`. `POST /hub/kho/write` — đường GHI Kho duy nhất
   (kho_create / kho_update, bảng Phiên và Việc): Owner + PIN `hub.write` + permit ký do `confirm_proposal` của Gen phát
   sau khi Sếp bấm Xác nhận (gh.hub_link.permit). Gọi thẳng không có permit hợp lệ → 403 `HUB_WRITE_PERMIT`.
 """
@@ -54,6 +55,9 @@ async def get_link(request: Request, user: service.CurrentUser = Depends(READ),
     known = hub.scopes_known(link)
     out["read_scopes"] = await hub.read_scopes(db, user.org_id) if known else None
     out["write_scopes"] = await hub.write_scopes(db, user.org_id) if known else None  # v0.1.50 (F-81)
+    # Tool ghi Kho Owner tự đóng ở MCP Hub — không lưu riêng, tính lại từ Action Log như lúc Kiểm tra (tải lại trang vẫn
+    # nói đúng "Sếp đã tự đóng…", không giục tick ở Gen-hub).
+    out["write_hidden"] = await hub.write_hidden(db, user.org_id) if known else None
     breaker = await hub.breaker_state(request.app.state.redis, user.org_id)
     out["breaker"] = breaker if owner else {"open": breaker["open"]}  # vai trò khác: chỉ biết đang mở hay không
     return out

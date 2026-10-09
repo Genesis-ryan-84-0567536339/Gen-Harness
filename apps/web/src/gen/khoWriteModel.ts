@@ -19,6 +19,15 @@ export const KHO_MISSING_TEXT = 'Gen-hub chưa cấp quyền ghi Kho';
 export const KHO_MISSING_HINT = 'Vào Gen-hub tick quyền kho_create, kho_update cho token của Gen-Harness rồi bấm Kiểm tra ở Kết nối › Gen-hub.';
 /** Đích của nút "Mở thẻ Gen-hub" / "Mở Kết nối › Gen-hub" — thẻ Gen-hub ở Kết nối. */
 export const HUB_CARD_PATH = '/connections#genhub';
+/** Đích của nút "Mở MCP Hub" — nơi Sếp mở lại tool ghi Kho đã TỰ đóng (Kiểm tra ở Gen-hub không mở lại). */
+export const MCP_HUB_PATH = '/mcp';
+/** Sếp đã TỰ đóng tool ghi Kho của thẻ ở MCP Hub (`write_hidden`) — tick ở Gen-hub + Kiểm tra không giúp gì, phải mở ở MCP Hub. */
+export const khoHiddenText = (tool: string): string =>
+  `Sếp đã tự đóng ${tool} ở MCP Hub nên Gen chưa ghi được. Muốn Gen ghi thì mở lại tool đó (và cấp cho Gen) ở MCP Hub — Kiểm tra ở Gen-hub không tự mở lại.`;
+/** Thẻ bị Huỷ SAU một lần ghi "chưa chắc" (nhãn `uncertain`): Kho có thể đã có bản ghi — không được nói "không ghi gì vào Kho". */
+export const KHO_CANCELLED_UNCERTAIN_TEXT = 'Đã đóng — Gen không ghi thêm vào Kho (lần ghi trước chưa chắc: Kho có thể đã có bản ghi)';
+/** Câu khi bấm "Tải lại hội thoại" lúc Gen đang trả lời câu khác — không đè lượt đang chạy, Sếp bấm lại sau. */
+export const RELOAD_BUSY_TEXT = 'Gen đang trả lời — chưa tải lại được hội thoại. Đợi Gen trả lời xong rồi bấm Tải lại hội thoại.';
 /** "Xem ở Cài đặt" — thẻ Gen nhớ ở Cài đặt › Bộ não AI (cuộn tới thẻ). */
 export const MEMORY_CARD_PATH = '/system?tab=brain#gen-memory';
 
@@ -156,12 +165,25 @@ export const khoReleaseNote = (version: string): string =>
 /** Quyền ghi Kho của token theo nhãn lúc đề xuất. */
 export const writeScopeMissing = (p: KhoProposal): boolean => p.labels.write_scope === 'missing';
 
+/** Thẻ có lần ghi "chưa chắc" (502 HUB_WRITE_UNCERTAIN — máy chủ gắn nhãn `uncertain`). */
+export const khoUncertain = (p: KhoProposal): boolean => p.labels.uncertain === '1';
+
+/**
+ * Quyền ghi Kho HIỆN TẠI cho ĐÚNG tool của thẻ (`kho_create` / `kho_update`) theo `GET /hub/link` — cờ riêng của tool nếu máy chủ gửi,
+ * không thì cờ chung `kho` (máy chủ cũ). Chỉ `true` mới là có quyền; thiếu / không phải boolean ⇒ chưa có.
+ */
+export function khoToolWritable(scopes: Partial<Record<string, unknown>> | null | undefined, tool: KhoProposal['type']): boolean {
+  if (!scopes || typeof scopes !== 'object') return false;
+  const own = scopes[tool];
+  return (typeof own === 'boolean' ? own : scopes.kho) === true;
+}
+
 // ── Câu lỗi theo mã (xác nhận Ghi nhớ / Ghi vào Kho) ─────────────────────────────────────────────────────────
 
-export type ProposalErrorAction = 'open_hub' | 'open_memory' | 'reload' | null;
+export type ProposalErrorAction = 'open_hub' | 'open_mcp' | 'open_memory' | 'reload' | null;
 export interface ProposalErrorView {
   text: string;
-  /** Nút kèm câu lỗi: mở Kết nối › Gen-hub / mở Cài đặt › Gen nhớ / tải lại hội thoại (thẻ đã đóng ở nơi khác). */
+  /** Nút kèm câu lỗi: mở Kết nối › Gen-hub / mở MCP Hub / mở Cài đặt › Gen nhớ / tải lại hội thoại (thẻ đã đóng ở nơi khác). */
   action: ProposalErrorAction;
 }
 
@@ -171,6 +193,9 @@ function serverDetail(e: ApiError): string {
 }
 
 export const KHO_REJECTED_FIX = 'Bấm Sửa để chỉnh các trường rồi Xác nhận lại.';
+/** 502 HUB_WRITE_UNCERTAIN: có thể đã ghi — nói rõ việc tiếp theo cho cả hai trường hợp (đúng ghi chú phát hành v0.1.50 bước 2). */
+export const KHO_UNCERTAIN_TEXT =
+  'Chưa chắc đã ghi — Sếp mở Kho kiểm trước khi bấm lại: Kho đã có bản ghi thì bấm Huỷ; chưa có thì bấm Xác nhận lại.';
 export const KHO_PERMIT_TEXT = 'Giấy phép ghi không hợp lệ hoặc đã quá 5 phút — chưa ghi gì vào Kho. Bấm Xác nhận lại (nhập mã PIN) để ghi.';
 export const KHO_TOKEN_TEXT = 'Token Gen-hub hết hạn hoặc đã bị thu hồi — chưa ghi gì vào Kho. Vào Kết nối › Gen-hub dán token mới rồi bấm Kiểm tra.';
 export const PROPOSAL_DECIDED_TEXT =
@@ -183,8 +208,12 @@ const ERROR_VIEW: Record<string, ViewSpec> = {
     text: `${KHO_MISSING_TEXT} — ${KHO_MISSING_HINT} Chưa ghi gì vào Kho.`,
     action: 'open_hub',
   },
+  HUB_WRITE_HIDDEN: {
+    text: 'Sếp đã tự đóng tool ghi Kho này ở MCP Hub — chưa ghi gì vào Kho. Muốn Gen ghi thì mở lại tool đó (và cấp cho Gen) ở MCP Hub; Kiểm tra ở Gen-hub không tự mở lại.',
+    action: 'open_mcp',
+  },
   HUB_WRITE_UNCERTAIN: {
-    text: 'Chưa chắc đã ghi — Sếp mở Kho kiểm trước khi bấm lại.',
+    text: KHO_UNCERTAIN_TEXT,
     action: null,
   },
   HUB_WRITE_PERMIT: { text: KHO_PERMIT_TEXT, action: null },

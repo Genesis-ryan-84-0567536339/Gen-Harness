@@ -37,7 +37,10 @@ GG = "mcp-46634__"
 WRITE_TOOLS = ("kho_create", "kho_update")
 MISSING_MSG = ("Gen-hub chưa cấp quyền ghi Kho — vào Kết nối › Gen-hub tick kho_create, kho_update cho token rồi bấm "
                "Kiểm tra")
-UNCERTAIN_MSG = "Chưa chắc đã ghi — Sếp mở Kho kiểm trước khi bấm lại"
+UNCERTAIN_MSG = ("Chưa chắc đã ghi — Sếp mở Kho kiểm trước khi bấm lại: Kho đã có bản ghi thì bấm Huỷ; chưa có thì bấm "
+                 "Xác nhận lại")
+HIDDEN_MSG = ("Sếp đã tự đóng kho_create ở MCP Hub — chưa ghi gì vào Kho. Muốn Gen ghi thì mở lại tool đó "
+              "(và cấp cho Gen) ở MCP Hub; Kiểm tra ở Gen-hub không tự mở lại")
 PHIEN = {"Chủ đề": "Họp chốt kế hoạch v0.1.50", "Đã chốt": "Ra mắt Gen nhớ và ghi Kho có PIN"}
 # Quyền ghi Kho theo TỪNG tool + `kho` (= có cả hai).
 W_ALL = {"kho": True, "kho_create": True, "kho_update": True}
@@ -670,7 +673,8 @@ async def test_network_error_is_uncertain_and_proposal_stays_pending(owner_api: 
     r = await owner_api.send("POST", f"/gen/proposals/{p['id']}/confirm", {})
     assert r.status_code == 502 and r.json()["code"] == "HUB_WRITE_UNCERTAIN" and r.json()["title"] == UNCERTAIN_MSG
     assert TOKEN not in r.text and fake_hub.writes() == [PREFIX + "kho_create"]
-    assert (await proposals.load(app.state.redis, p["id"]))["status"] == "pending"
+    stored = await proposals.load(app.state.redis, p["id"])
+    assert stored["status"] == "pending" and stored["labels"]["uncertain"] == "1"     # thẻ nhớ: lần ghi chưa chắc
     assert await app.state.redis.get(proposals.claim_key(p["id"])) is None            # nhả khoá để Sếp bấm lại
     assert await _log("hub.kho_written") == []
     failed = await _log("hub.kho_write_failed")
@@ -682,7 +686,31 @@ async def test_network_error_is_uncertain_and_proposal_stays_pending(owner_api: 
     await _clear_breaker(app)
     r = await owner_api.send("POST", f"/gen/proposals/{p['id']}/confirm", {})
     assert r.status_code == 200, r.text
+    assert "uncertain" not in r.json()["labels"]                                         # đã ghi chắc ⇒ nhãn mất
     assert (await owner_api.get("/boss-checks")).json()["results"]["kho_write"]["status"] == "pass"
+
+
+async def test_cancel_after_uncertain_write_says_kho_may_have_it(owner_api: Api, fake_hub: FakeHub, app: Any) -> None:
+    """502 HUB_WRITE_UNCERTAIN rồi Sếp mở Kho thấy đã có ⇒ bấm Huỷ: thẻ đóng mang nhãn `uncertain` (Redis + tin đã lưu)
+    để web KHÔNG nói "không ghi gì vào Kho" (bản ghi có thể đã nằm trong Kho)."""
+    await _linked(owner_api)
+    p = await _propose_create(owner_api, app)
+    await _pin(owner_api)
+    fake_hub.mode = "write_timeout"
+    r = await owner_api.send("POST", f"/gen/proposals/{p['id']}/confirm", {})
+    assert r.status_code == 502 and r.json()["code"] == "HUB_WRITE_UNCERTAIN"
+    r = await owner_api.send("POST", f"/gen/proposals/{p['id']}/cancel", {})
+    assert r.status_code == 200 and r.json()["status"] == "cancelled" and r.json()["labels"]["uncertain"] == "1"
+    stored = await proposals.load(app.state.redis, p["id"])
+    msgs = (await owner_api.get(f"/gen/conversations/{stored['conversation_id']}/messages")).json()
+    saved = [st["proposal"] for m in msgs for st in (m["content"].get("steps") or [])
+             if st.get("kind") == "proposal" and st["proposal"]["id"] == p["id"]]
+    assert len(saved) == 1 and saved[0]["status"] == "cancelled" and saved[0]["labels"]["uncertain"] == "1"
+    assert fake_hub.writes() == [PREFIX + "kho_create"]
+    # Thẻ thường (không có lần ghi chưa chắc) huỷ ⇒ không có nhãn.
+    p2 = await _propose_create(owner_api, app)
+    r = await owner_api.send("POST", f"/gen/proposals/{p2['id']}/cancel", {})
+    assert r.status_code == 200 and "uncertain" not in r.json()["labels"]
 
 
 async def test_three_failures_open_breaker_and_block_calls(owner_api: Api, fake_hub: FakeHub, app: Any) -> None:
@@ -779,7 +807,8 @@ def test_ma_from_result_rules() -> None:
     assert hub.ma_from_result({"isError": False, "content": []}, "Phiên") is None
 
 
-async def test_owner_hidden_write_tool_is_not_reopened_by_test(owner_api: Api, fake_hub: FakeHub, db: Any) -> None:
+async def test_owner_hidden_write_tool_is_not_reopened_by_test(owner_api: Api, fake_hub: FakeHub, db: Any,
+                                                                app: Any) -> None:
     """Owner TỰ đóng kho_create ở MCP Hub (PIN mcp.expose) để tắt Gen ghi Kho ⇒ Kiểm tra (nút ở thẻ Gen-hub, hay dòng
     'Gen-hub' ở Việc Sếp cần làm) không lặng lẽ mở lại; mở lại ở MCP Hub thì Kiểm tra cấp lại bình thường."""
     await _linked(owner_api)
@@ -792,6 +821,16 @@ async def test_owner_hidden_write_tool_is_not_reopened_by_test(owner_api: Api, f
     assert out["write_missing"] == []                         # Gen-hub vẫn cấp đủ — chỉ Owner tự đóng ở MCP Hub
     assert PREFIX + "kho_create" not in out["exposed_write_tools"]
     assert (await _tools(db))[PREFIX + "kho_create"].is_exposed is False
+    # Tải lại trang: GET /hub/link vẫn biết tool đóng là do Sếp (tính lại từ Action Log, không chỉ lúc Kiểm tra).
+    link = (await owner_api.get("/hub/link")).json()
+    assert link["write_hidden"] == ["kho_create"] and link["write_scopes"]["kho_create"] is False
+    # Ghi bằng tool Sếp đã đóng ⇒ 409 HUB_WRITE_HIDDEN chỉ đúng MCP Hub (không bảo tick ở Gen-hub — vô ích), 0 lời gọi.
+    p = await _propose_create(owner_api, app)
+    assert p["labels"]["write_scope"] == "missing"
+    await _pin(owner_api)
+    r = await owner_api.send("POST", f"/gen/proposals/{p['id']}/confirm", {})
+    assert r.status_code == 409 and r.json()["code"] == "HUB_WRITE_HIDDEN" and r.json()["title"] == HIDDEN_MSG
+    assert (await proposals.load(app.state.redis, p["id"]))["status"] == "pending"
     # Gỡ cấp core.gen (thay vì đóng) cũng được tôn trọng.
     tid_u = by[PREFIX + "kho_update"].id
     assert (await owner_api.send("DELETE", f"/mcp/tools/{tid_u}/grants/core.gen")).status_code == 204
@@ -804,6 +843,7 @@ async def test_owner_hidden_write_tool_is_not_reopened_by_test(owner_api: Api, f
     assert r.status_code == 201
     out = (await owner_api.send("POST", "/hub/link/test", {})).json()
     assert out["write_hidden"] == [] and out["write_scopes"] == W_ALL
+    assert (await owner_api.get("/hub/link")).json()["write_hidden"] == []
     assert fake_hub.writes() == []
 
 

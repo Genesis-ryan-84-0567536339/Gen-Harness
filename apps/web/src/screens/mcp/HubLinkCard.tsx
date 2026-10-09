@@ -295,7 +295,7 @@ function ReadScopes({ link, result }: { link: HubLink; result: HubLinkTestResult
 /**
  * v0.1.50 (F-81, QD-18): "Quyền ghi Kho (tuỳ chọn)" — 2 dòng Có / Chưa / Chưa kiểm, MỖI dòng theo đúng tool của nó (kho_create,
  * kho_update; máy chủ cũ chỉ có `kho` ⇒ hai dòng theo `kho`). Owner tự đóng tool ghi ở MCP Hub ⇒ Kiểm tra không mở lại và thẻ nói
- * rõ (tắt hẳn = bỏ tick ở Gen-hub). Nguồn như quyền đọc:
+ * rõ (tắt hẳn = bỏ tick ở Gen-hub) — cả sau khi tải lại trang (`link.write_hidden`). Nguồn như quyền đọc:
  * lần Kiểm tra XANH vừa xong (`test.data.write_scopes`), không thì lần kiểm xanh gần nhất máy chủ nhớ (`link.write_scopes`); chưa
  * nối / chưa từng kiểm xanh ⇒ "Chưa kiểm", không lời nhắc. Thiếu quyền ghi chỉ là lời nhắc — không làm Kiểm tra đỏ.
  */
@@ -303,7 +303,12 @@ function WriteScopes({ link, result }: { link: HubLink; result: HubLinkTestResul
   const fromLink = link.configured && !!link.last_ok_at ? link.write_scopes : undefined;
   const scopes = result?.ok ? (result.write_scopes ?? fromLink) : fromLink;
   const rows = writeScopeRows(scopes);
-  const msg = result ? (result.ok ? writeScopesMessage(result.write_missing, scopes, result.write_hidden) : null) : writeScopesMessage(undefined, scopes);
+  // Chưa bấm Kiểm tra trong lần mở trang này ⇒ tool Owner tự đóng lấy từ `GET /hub/link` (máy chủ tính lại mỗi lần đọc).
+  const msg = result
+    ? result.ok
+      ? writeScopesMessage(result.write_missing, scopes, result.write_hidden)
+      : null
+    : writeScopesMessage(undefined, scopes, fromLink !== undefined ? link.write_hidden : undefined);
   return (
     <div className="hub-scopes hub-write-scopes" data-testid="hub-write-scopes">
       <p className="hub-scopes__title">Quyền ghi Kho (tuỳ chọn)</p>

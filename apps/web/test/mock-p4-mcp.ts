@@ -121,7 +121,10 @@ export function createMock(opts: P4McpOptions) {
    * (hoặc vừa đổi địa chỉ/token) ⇒ `null`, đúng như máy chủ (`hub.scopes_known`).
    */
   const linkOut = (l: HubLink): HubLink => ({
-    ...l, read_scopes: l.read_scopes ?? null, write_scopes: l.write_scopes ?? null, breaker: { open: hubBreakerOpen, retry_in_s: hubBreakerOpen ? 60 : null },
+    ...l, read_scopes: l.read_scopes ?? null, write_scopes: l.write_scopes ?? null,
+    // Như máy chủ: tool ghi Kho Owner tự đóng ở MCP Hub — null khi chưa có lần Kiểm tra xanh; mock không giả "tự đóng" ⇒ [].
+    write_hidden: l.write_hidden ?? (l.write_scopes ? [] : null),
+    breaker: { open: hubBreakerOpen, retry_in_s: hubBreakerOpen ? 60 : null },
   });
   /** v0.1.39 (F-31): như máy chủ — địa chỉ https công khai mà chưa bật "mạng công cộng" thì bị chặn. */
   const publicHttps = (url: string | null) => {

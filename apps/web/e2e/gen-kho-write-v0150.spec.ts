@@ -101,6 +101,22 @@ test('Gen đề xuất sửa Việc: cột "Hiện tại" → "Sẽ ghi"; Sửa 
   expect(calls.writes.map((w) => [w.tool, w.code])).toEqual([['kho_update', 'VIEC-12']]);
 });
 
+test('Ghi "chưa chắc" ⇒ câu nói rõ Huỷ / Xác nhận lại; Sếp mở Kho thấy đã có ⇒ Huỷ: thẻ KHÔNG nói "không ghi gì vào Kho"', async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.goto('/overview');
+  const card = await askGen(page, 'ghi phiên hôm nay vào Kho', CARD);
+  await hubSim(page.request, { kho: 'uncertain' });
+  await card.getByRole('button', { name: 'Xác nhận và ghi Kho' }).click();
+  await enterPinIfAsked(page);
+  const alert = card.getByRole('alert');
+  await expect(alert).toContainText('Kho đã có bản ghi thì bấm Huỷ; chưa có thì bấm Xác nhận lại.');
+  await card.getByRole('button', { name: 'Huỷ' }).click();
+  await expect(card.getByTestId('gen-prop-cancelled')).toContainText('Đã đóng — Gen không ghi thêm vào Kho (lần ghi trước chưa chắc: Kho có thể đã có bản ghi)');
+  await expect(card).not.toContainText('không ghi gì vào Kho');
+  await expect(card.getByRole('alert')).toHaveCount(0);
+  expect((await khoCalls(page.request)).calls).toBe(1); // chỉ lần chưa chắc — Huỷ không gọi ghi
+});
+
 test('Token thiếu quyền ghi Kho: khoá Xác nhận + nút "Mở thẻ Gen-hub"; tick quyền + Kiểm tra ⇒ thẻ tự mở khoá', async ({ page }) => {
   test.setTimeout(90_000);
   await hubSim(page.request, { write: 'missing', link: 'on' });

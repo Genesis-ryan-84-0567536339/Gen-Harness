@@ -370,6 +370,7 @@ async def _log_apart(user: service.CurrentUser, action: str, result: str, p: dic
 
 RELEASE_DECIDED_MSG = "Bản này đã được ghi vào Kho hoặc đã huỷ — thẻ đã đóng"
 RELEASE_BUSY_MSG = "Owner khác đang ghi bản này vào Kho — chưa ghi gì, thử lại sau ít phút"
+RELEASE_RETRY_MSG = "Bản này vừa đổi trạng thái (một lần ghi vừa lỗi) — chưa ghi gì, Sếp bấm Xác nhận lại"
 RELEASE_CLOSED_WRITTEN = "Owner khác đã ghi bản này vào Kho"
 RELEASE_CLOSED_CANCELLED = "Owner khác đã huỷ ghi bản này"
 RELEASE_CLOSED_UNCERTAIN = ("Owner khác vừa ghi bản này nhưng chưa chắc đã vào Kho — Owner đó kiểm Kho rồi bấm lại "
@@ -381,9 +382,11 @@ _RELEASE_CLOSED = {"written": RELEASE_CLOSED_WRITTEN, "cancelled": RELEASE_CLOSE
 async def _release_claim(db: AsyncSession, user: service.CurrentUser, version: str, p: dict[str, Any],
                          redis: Any) -> None:
     """Giành quyền ghi Phiên của bản `version` (→ writing): từ `pending`, hoặc từ `uncertain` khi CHÍNH Owner này là
-    người vừa ghi chưa chắc. Không giành được → 409 TRƯỚC khi gọi Gen-hub: bản đã ghi / huỷ / hết hạn ⇒
-    GEN_PROPOSAL_DECIDED và đóng luôn thẻ này (transaction riêng — request sắp rollback), kể cả khi Owner KHÁC vừa ghi
-    chưa chắc; Owner khác đang ghi (writing) ⇒ GEN_PROPOSAL_BUSY."""
+    người vừa ghi chưa chắc. Không giành được → 409 TRƯỚC khi gọi Gen-hub: bản đã ghi / huỷ / hết hạn, hoặc Owner KHÁC
+    vừa ghi chưa chắc ⇒ GEN_PROPOSAL_DECIDED và đóng luôn thẻ này (transaction riêng — request sắp rollback); Owner khác
+    đang ghi (writing) ⇒ GEN_PROPOSAL_BUSY. Đua: UPDATE trượt vì dòng đang `writing`, rồi lần ghi đó lỗi CHẮC CHẮN và
+    trả dòng về `pending` (hoặc `uncertain` của chính Owner này) trước câu SELECT ⇒ bản VẪN ghi được: GEN_PROPOSAL_BUSY
+    (bấm lại), KHÔNG đóng thẻ."""
     row = (await db.execute(text("""UPDATE agent.hub_release_proposals SET status = 'writing'
                                     WHERE org_id = :o AND version = :v
                                       AND (status = 'pending' OR (status = 'uncertain' AND uncertain_by = :u))
@@ -391,16 +394,19 @@ async def _release_claim(db: AsyncSession, user: service.CurrentUser, version: s
                             {"o": user.org_id, "v": version, "u": user.id})).first()
     if row is not None:
         return
-    cur = (await db.execute(text("""SELECT status FROM agent.hub_release_proposals
+    cur = (await db.execute(text("""SELECT status, uncertain_by FROM agent.hub_release_proposals
                                     WHERE org_id = :o AND version = :v"""),
-                            {"o": user.org_id, "v": version})).scalar_one_or_none()
-    if cur == "writing":
+                            {"o": user.org_id, "v": version})).first()
+    status = str(cur.status) if cur is not None else None
+    if status == "writing":
         raise conflict("GEN_PROPOSAL_BUSY", RELEASE_BUSY_MSG)
+    if status == "pending" or (status == "uncertain" and cur is not None and cur.uncertain_by == user.id):
+        raise conflict("GEN_PROPOSAL_BUSY", RELEASE_RETRY_MSG)
     # Đã ghi / đã huỷ / hết hạn / Owner KHÁC ghi chưa chắc: thẻ này không bao giờ ghi được nữa ⇒ đóng nó luôn.
     async with sessionmaker()() as s:
         await s.execute(text("SELECT set_config('app.org_id', :o, true)"), {"o": str(user.org_id)})
         await _close_release_cards(s, redis, user.org_id, [p["id"]],
-                                   _RELEASE_CLOSED.get(str(cur), RELEASE_CLOSED_CANCELLED))
+                                   _RELEASE_CLOSED.get(str(status), RELEASE_CLOSED_CANCELLED))
         await s.commit()
     raise conflict("GEN_PROPOSAL_DECIDED", RELEASE_DECIDED_MSG)
 
@@ -458,6 +464,17 @@ async def _close_release_cards(db: AsyncSession, redis: Any, org_id: uuid.UUID, 
                          {"o": org_id, "l": f"/overview?gen={q['conversation_id']}"})
         closed += 1
     return closed
+
+
+async def _mark_uncertain(redis: Any, pid: str) -> None:
+    """502 HUB_WRITE_UNCERTAIN: gắn nhãn `uncertain='1'` vào đề xuất (Redis, giữ TTL) — thẻ vẫn chờ (Sếp mở Kho kiểm
+    rồi bấm lại hoặc Huỷ); nếu sau đó Huỷ, thẻ KHÔNG được nói "không ghi gì vào Kho" (Kho có thể đã có bản ghi). Xác
+    nhận lại thành công thay toàn bộ nhãn ⇒ nhãn này tự mất."""
+    q = await proposals.load(redis, pid)
+    if q is None or q.get("status") != "pending":
+        return
+    q["labels"] = {**(q.get("labels") or {}), "uncertain": "1"}
+    await redis.set(proposals.key(pid), orjson.dumps(q), keepttl=True)
 
 
 class ConfirmIn(BaseModel):
@@ -526,10 +543,12 @@ async def confirm_proposal(pid: uuid.UUID, request: Request, body: ConfirmIn | N
     if status >= 400:
         await redis.delete(proposals.claim_key(pid))
         err_body = res if isinstance(res, dict) else {}
+        uncertain = status == 502 and err_body.get("code") == "HUB_WRITE_UNCERTAIN"
+        if uncertain:
+            await _mark_uncertain(redis, p["id"])
         if claimed:
             # 502 HUB_WRITE_UNCERTAIN: CÓ THỂ đã ghi ⇒ không trả về 'pending' (Owner khác sẽ ghi trùng) — chỉ Owner này
             # bấm lại / huỷ sau khi mở Kho kiểm. Lỗi khác: chắc chắn chưa ghi ⇒ Sếp bấm Xác nhận lại được.
-            uncertain = status == 502 and err_body.get("code") == "HUB_WRITE_UNCERTAIN"
             await _release_set(user, str(release), "uncertain" if uncertain else "revert", redis=redis,
                                self_id=p["id"])
         await _log_apart(user, "gen.proposal_confirmed", "blocked" if status in (403, 404, 423) else "failed", p,
@@ -574,14 +593,16 @@ async def cancel_proposal(pid: uuid.UUID, request: Request, user: service.Curren
     if await redis.exists(proposals.claim_key(pid)):
         raise conflict("GEN_PROPOSAL_BUSY", "Đề xuất đang được thực hiện")
     p["status"] = "cancelled"
+    step: dict[str, Any] = {"status": "cancelled"}
+    if (p.get("labels") or {}).get("uncertain"):
+        step["labels"] = p["labels"]  # huỷ sau lần ghi chưa chắc: mở lại hội thoại vẫn thấy đúng lời "đã đóng"
     if p.get("release_version"):
         # F-87: huỷ một đề xuất ghi Phiên của bản mới = huỷ cho cả tổ chức (mỗi bản chỉ ghi một lần): khi bản còn
         # chờ, hoặc khi CHÍNH Owner này vừa ghi chưa chắc (đã mở Kho kiểm). Thẻ của Owner khác đóng theo.
         version = str(p["release_version"])
         await _release_set(user, version, "cancelled", from_=("pending", "uncertain"), redis=redis, self_id=p["id"])
     await proposals.save(redis, p)
-    await store.update_proposal_step(db, uuid.UUID(p["conversation_id"]), uuid.UUID(p["turn_id"]), p["id"],
-                                     {"status": "cancelled"})
+    await store.update_proposal_step(db, uuid.UUID(p["conversation_id"]), uuid.UUID(p["turn_id"]), p["id"], step)
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                            action="gen.proposal_cancelled", target_type="gen_proposal", target_id=p["id"],
                            detail={"via": "gen", "proposal_id": p["id"], "type": p["type"], "turn_id": p["turn_id"],

@@ -7,6 +7,7 @@ chạy lại an toàn."""
 
 import asyncio
 import uuid
+from types import SimpleNamespace
 from typing import Any
 
 import orjson
@@ -18,6 +19,7 @@ from sqlalchemy.exc import DBAPIError
 import gh
 from gh.crypto import hash_secret
 from gh.db import admin_sessionmaker, sessionmaker
+from gh.errors import ApiError
 from gh.gen import kho_release, proposals
 from gh.gen import routes as gen_routes
 from gh.hub_link import kho_write
@@ -163,11 +165,14 @@ async def test_not_eligible_inserts_nothing_then_retries(owner_api: Api, fake_hu
     monkeypatch.setattr(gh, "__version__", "v0.1.50")
     org = str(await org_id(db))
     assert (await _run(redis))[org] == "hub_off"                       # chưa nối Gen-hub
-    fake_hub.drop = {"kho_update"}
-    await _linked(owner_api)                                           # nối nhưng chưa đủ quyền ghi Kho
+    fake_hub.drop = {"kho_create"}
+    await _linked(owner_api)                                           # nối, có kho_update nhưng chưa có kho_create
     assert (await _run(redis))[org] == "no_write_scope" and await _rows() == []
-    fake_hub.drop = set()                                              # Sếp tick quyền rồi bấm Kiểm tra
-    assert (await owner_api.send("POST", "/hub/link/test", {})).json()["write_scopes"]["kho"] is True
+    # Sếp chỉ tick kho_create rồi bấm Kiểm tra: thẻ ghi Phiên chỉ dùng kho_create ⇒ đủ (thiếu kho_update không chặn),
+    # khớp dòng "Tạo bản ghi Phiên/Việc: Có" ở Kết nối và nhãn write_scope của thẻ (theo đúng tool).
+    fake_hub.drop = {"kho_update"}
+    ws = (await owner_api.send("POST", "/hub/link/test", {})).json()["write_scopes"]
+    assert ws == {"kho": False, "kho_create": True, "kho_update": False}
     assert (await _run(redis))[org] == "proposed" and len(await _rows()) == 1
     # Gen tắt → không đề xuất cho bản kế.
     await db.execute(text("""UPDATE core.organizations SET settings = jsonb_set(COALESCE(settings, '{}'::jsonb),
@@ -369,6 +374,40 @@ async def test_definite_failure_returns_to_pending_for_everyone(owner_api: Api, 
         assert closed["status"] == "cancelled" and closed["labels"]["closed"].startswith("Owner khác đã ghi")
     finally:
         await b.c.aclose()
+
+
+class _RaceDb:
+    """Giả đúng khe đua trong `_release_claim`: câu UPDATE trượt (dòng đang 'writing' — Owner khác đang ghi), rồi lần
+    ghi đó kết thúc TRƯỚC câu SELECT nên SELECT thấy trạng thái mới."""
+
+    def __init__(self, status: str, uncertain_by: Any = None) -> None:
+        self.after = SimpleNamespace(status=status, uncertain_by=uncertain_by)
+        self.n = 0
+
+    async def execute(self, *_a: Any, **_k: Any) -> Any:
+        self.n += 1
+        row = None if self.n == 1 else self.after
+        return SimpleNamespace(first=lambda: row)
+
+
+@pytest.mark.parametrize(("status", "mine", "msg"), [
+    ("pending", False, gen_routes.RELEASE_RETRY_MSG),   # lần ghi của Owner khác vừa lỗi CHẮC CHẮN ⇒ về 'pending'
+    ("uncertain", True, gen_routes.RELEASE_RETRY_MSG),  # chính Owner này vừa ghi chưa chắc ⇒ chỉ Owner này bấm lại
+    ("writing", False, gen_routes.RELEASE_BUSY_MSG),
+])
+async def test_release_claim_race_keeps_card_open(redis: Any, status: str, mine: bool, msg: str) -> None:
+    """UPDATE trượt vì Owner khác đang ghi, rồi dòng về 'pending' (hoặc 'uncertain' của chính Owner này) trước câu
+    SELECT ⇒ bản VẪN ghi được: 409 GEN_PROPOSAL_BUSY (bấm lại), thẻ KHÔNG bị đóng với lời "Owner khác đã huỷ"."""
+    user = SimpleNamespace(org_id=uuid.uuid4(), id=uuid.uuid4())
+    pid = str(uuid.uuid4())
+    card = {"id": pid, "org_id": str(user.org_id), "status": "pending", "labels": {"release": "v0.1.50"}}
+    await redis.set(proposals.key(pid), orjson.dumps(card), ex=60)
+    db = _RaceDb(status, user.id if mine else uuid.uuid4())
+    with pytest.raises(ApiError) as e:
+        await gen_routes._release_claim(db, user, "v0.1.50", card, redis)  # type: ignore[arg-type]
+    assert e.value.code == "GEN_PROPOSAL_BUSY" and e.value.title == msg
+    stored = await proposals.load(redis, pid)
+    assert stored is not None and stored["status"] == "pending" and "closed" not in stored["labels"]
 
 
 async def test_release_say_uses_owner_addressing(owner_api: Api, fake_hub: FakeHub, db: Any,  # noqa: F811

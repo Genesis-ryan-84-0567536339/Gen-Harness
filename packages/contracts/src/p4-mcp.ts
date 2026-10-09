@@ -149,6 +149,11 @@ export interface HubLink {
    * v0.1.50: quyền ghi Kho thấy ở lần Kiểm tra xanh gần nhất. `null` / vắng (máy chủ cũ) ⇒ "Chưa kiểm" — cùng quy tắc `read_scopes`.
    */
   write_scopes?: HubWriteScopes | null;
+  /**
+   * v0.1.50: hậu tố tool ghi Kho ('kho_create' | 'kho_update') Owner đã TỰ đóng (hoặc gỡ cấp Gen) ở MCP Hub — máy chủ tính lại mỗi lần
+   * đọc, nên tải lại trang vẫn nói đúng "Sếp đã tự đóng…" thay vì giục tick ở Gen-hub. `null` / vắng ⇒ chưa kiểm (máy chủ cũ).
+   */
+  write_hidden?: string[] | null;
 }
 
 /** `PATCH /hub/link` — Owner + PIN `hub.link`. `enabled` chỉ nhận `false` (bật = bấm Kiểm tra). */

@@ -45,7 +45,8 @@ Bản mới nhất **v0.1.50** (09/10/2026; `VERSION` = v0.1.50 trên nhánh `cl
 - **Thay đổi**: migration `0032` (`agent.gen_memory_notes`, `agent.hub_release_proposals`); Gen nhớ (≤ 30 ghi chú, ≤ 280 ký tự, chỉ Owner, vào lời nhắc Owner + Bản tin);
   đề xuất `memory_note`/`kho_create`/`kho_update`; đường ghi duy nhất `POST /hub/kho/write` có permit ký dùng một lần (route MCP chung vẫn chặn, Gmail/Lịch/Drive chỉ đọc);
   Kết nối › Gen-hub có "Quyền ghi Kho" (`write_scopes`, `write_missing`); job `gen_kho_release` đề xuất một Phiên mỗi bản; Việc Sếp cần làm dòng 9 "Gen ghi Kho";
-  Trợ giúp + Hướng dẫn bước 14 bỏ chữ "chỉ đọc" tuyệt đối; gộp từ main PR #58 (chữ dính biên khung, lính gác `layout-guard.spec.ts`) và PR #59 (genh đọc tệp trạng thái thử lại); tài liệu tách CHANGELOG + `docs/releases/` (F-90, F-69, F-47, F-91, F-92, F-42, F-39).
+  Trợ giúp + Hướng dẫn bước 14 bỏ chữ "chỉ đọc" tuyệt đối; sửa sau review lượt 2 (thẻ ghi Kho mở khoá theo đúng tool, `HUB_WRITE_HIDDEN` + `write_hidden` ở `GET /hub/link`,
+  nhãn `uncertain` + câu Huỷ/Xác nhận lại, "Tải lại hội thoại" xoá lỗi cũ, job F-87 chỉ cần `kho_create`, đua `_release_claim` không đóng nhầm thẻ); gộp từ main PR #58 (chữ dính biên khung, lính gác `layout-guard.spec.ts`) và PR #59 (genh đọc tệp trạng thái thử lại); tài liệu tách CHANGELOG + `docs/releases/` (F-90, F-69, F-47, F-91, F-92, F-42, F-39).
 - **Kiểm tra** (khi gộp, nhánh `claude/v0150`): pytest 1970 xanh (superuser và role `gh_app`), 1 head alembic = `0032`; vitest 947; Playwright mock 292 (gồm `layout-guard` của PR #58); e2e thật rút gọn 7;
   browser 43; `go test ./...` xanh; unittest `.github/scripts` 120 + `check_doc_links.py`, `check_release_gate.py`, `check_embedded_sync.py`, `check_workflow_hygiene.py`, `check_no_fake_ids.py` xanh.
 - **Boss cần làm**: xem "Boss phải làm — v0.1.50" dưới (tick `kho_create`, `kho_update` ở Gen-hub → Kiểm tra → duyệt Phiên đầu tiên → thử Gen nhớ). Chi tiết: [v0.1.50.md](../releases/v0.1.50.md).

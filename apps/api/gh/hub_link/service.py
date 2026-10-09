@@ -341,6 +341,23 @@ async def write_scopes(db: AsyncSession, org_id: uuid.UUID) -> dict[str, bool]:
     return write_scope_map({write_suffix_of(n) for n in names})
 
 
+async def write_hidden(db: AsyncSession, org_id: uuid.UUID) -> list[str]:
+    """Hậu tố tool ghi Kho ('kho_create' / 'kho_update') của máy chủ liên kết mà Owner đã TỰ đóng (hoặc gỡ cấp
+    `core.gen`) ở MCP Hub — cùng quy tắc `test_link` (Kiểm tra không mở lại). Cho `GET /hub/link`: tải lại trang vẫn
+    biết tool đóng là do Sếp, không giục tick ở Gen-hub. Chưa nối ⇒ []."""
+    rows = (await db.execute(text("""
+        SELECT t.id, t.name FROM agent.hub_links l
+        JOIN agent.mcp_servers s ON s.id = l.server_id AND s.org_id = l.org_id
+        JOIN agent.mcp_tools t ON t.server_id = s.id
+        WHERE l.org_id = :o ORDER BY t.name"""), {"o": org_id})).all()
+    out: list[str] = []
+    for r in rows:
+        suf = write_suffix_of(r.name)
+        if suf is not None and suf not in out and await _hidden_by_owner(db, org_id, r.id):
+            out.append(suf)
+    return [suf for suf in KHO_WRITE_SUFFIXES if suf in out]
+
+
 def scopes_known(r: Any) -> bool:
     """`read_scopes` có nghĩa chưa: đã nối, đã có ít nhất một lần Kiểm tra xanh và liên kết đang bật (đổi địa chỉ/token
     ⇒ `upsert` tắt liên kết cho tới lần Kiểm tra xanh kế tiếp, nên quyền cũ không còn được coi là đã kiểm)."""
@@ -712,7 +729,12 @@ WRITE_PERMIT_MSG = ("Giấy phép ghi Kho không hợp lệ hoặc đã quá 5 p
                     "(nhập mã PIN) để ghi")
 WRITE_MISSING_MSG = ("Gen-hub chưa cấp quyền ghi Kho — vào Kết nối › Gen-hub tick kho_create, kho_update cho token "
                      "rồi bấm Kiểm tra")
-WRITE_UNCERTAIN_MSG = "Chưa chắc đã ghi — Sếp mở Kho kiểm trước khi bấm lại"
+# Owner TỰ đóng tool ghi ở MCP Hub (hoặc gỡ cấp core.gen): tick ở Gen-hub + Kiểm tra KHÔNG mở lại ⇒ câu riêng,
+# chỉ đúng chỗ cần mở.
+WRITE_HIDDEN_MSG = ("Sếp đã tự đóng {tool} ở MCP Hub — chưa ghi gì vào Kho. Muốn Gen ghi thì mở lại tool đó "
+                    "(và cấp cho Gen) ở MCP Hub; Kiểm tra ở Gen-hub không tự mở lại")
+WRITE_UNCERTAIN_MSG = ("Chưa chắc đã ghi — Sếp mở Kho kiểm trước khi bấm lại: Kho đã có bản ghi thì bấm Huỷ; "
+                       "chưa có thì bấm Xác nhận lại")
 WRITE_REJECTED_MSG = "Kho từ chối lần ghi này"
 WRITE_INVALID_MSG = "Dữ liệu ghi Kho chưa hợp lệ — chưa ghi gì vào Kho"
 # 401/403 từ Gen-hub khi GHI: token hết hạn / bị thu hồi — không phải lỗi trường, Sếp phải đổi token chứ không Sửa thẻ.
@@ -842,6 +864,10 @@ async def write_kho(db: AsyncSession, redis: Any, client: McpClient, *, user: se
                        f"Ngắt mạch {BREAKER_OPEN_S} giây sau {BREAKER_FAILS} lỗi liên tiếp")
     row = await find_tool(db, user.org_id, link.server_id, tool)
     if row is None or not row.is_exposed or AGENT_KEY not in await invoke.grants_of(db, row.id):
+        if row is not None and await _hidden_by_owner(db, user.org_id, row.id):
+            # Tick ở Gen-hub rồi Kiểm tra KHÔNG giúp gì (Kiểm tra tôn trọng lựa chọn đóng của Owner) ⇒ chỉ đúng MCP Hub.
+            raise conflict("HUB_WRITE_HIDDEN", WRITE_HIDDEN_MSG.format(tool=tool),
+                           f"Tool {tool} đã bị Owner đóng (hoặc gỡ cấp Gen) ở MCP Hub")
         raise conflict("HUB_WRITE_MISSING", WRITE_MISSING_MSG, f"Thiếu tool {tool}")
     if endpoint_forbidden(link.endpoint or ""):
         raise conflict("HUB_BLOCKED", "Kho đang bị chặn bởi rào chắn MCP Hub", ENDPOINT_FORBIDDEN_MSG)

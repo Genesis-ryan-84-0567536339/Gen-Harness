@@ -15,9 +15,12 @@ import { roleLabel } from '../screens/system/systemModel';
 
 const GEN_EXAMPLES = ['Hôm nay có gì gấp?', 'Khách nào hỏi giá hôm nay?', 'Sao lưu ở đâu?', 'Mời nhân viên mới thế nào?'];
 
-/** v0.1.49 (QD-16): Gen đọc gì từ Gen-hub — ai cũng đọc được trang này, nhưng chỉ Owner (Sếp) dùng được Gen-hub. */
+/**
+ * v0.1.49 (QD-16): Gen đọc gì từ Gen-hub — ai cũng đọc được trang này, nhưng chỉ Owner (Sếp) dùng được Gen-hub. v0.1.50 (QD-18):
+ * không còn "chỉ đọc" tuyệt đối — Gen ghi Phiên, Việc vào Kho khi Sếp xác nhận + mã PIN, nên dòng đầu chỉ nói Gen đọc gì.
+ */
 const GENHUB_READS: readonly string[] = [
-  'Gen chỉ ĐỌC: Kho Ryan, lịch, mail (tìm và đọc), việc trong Google Tasks và tìm tệp trên Drive.',
+  'Gen đọc: Kho Ryan, lịch, mail (tìm và đọc), việc Google Tasks, tệp Drive.',
   'Gen KHÔNG gửi mail, KHÔNG tạo hay sửa lịch, việc Google Tasks, tệp Drive.',
   'Ghi duy nhất: Phiên, Việc vào Kho Ryan — chỉ khi Sếp bấm Xác nhận và nhập mã PIN (cần tick quyền kho_create, kho_update ở Gen-hub).',
   'Email, số điện thoại và khoá trong nội dung được che trước khi gửi cho AI.',

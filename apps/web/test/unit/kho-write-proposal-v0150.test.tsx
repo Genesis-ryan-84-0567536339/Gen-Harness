@@ -29,9 +29,13 @@ import {
   type GenStepEvent,
 } from '@gen-harness/contracts';
 import { GenPanel } from '../../src/gen/GenPanel';
+import { loadConversation } from '../../src/gen/genClient';
 import { changedFields, initialDraft } from '../../src/gen/proposalModel';
 import { useGenStore } from '../../src/gen/genStore';
 import {
+  KHO_CANCELLED_UNCERTAIN_TEXT,
+  KHO_UNCERTAIN_TEXT,
+  RELOAD_BUSY_TEXT,
   khoBangOf,
   khoCurrent,
   khoDraftRecord,
@@ -40,6 +44,7 @@ import {
   khoLengthError,
   khoRows,
   khoTargetText,
+  khoToolWritable,
   proposalErrorDetail,
   proposalErrorView,
 } from '../../src/gen/khoWriteModel';
@@ -96,6 +101,7 @@ const UPDATE: GenProposal = {
   status: 'pending',
 };
 const MISSING: GenProposal = { ...PHIEN, id: 'k4', labels: { ...PHIEN.labels, write_scope: 'missing' } } as GenProposal;
+const MISSING_UPDATE: GenProposal = { ...UPDATE, id: 'k5', labels: { ...UPDATE.labels, write_scope: 'missing' } } as GenProposal;
 
 type Call = { method: string; url: string; body: unknown };
 const calls: Call[] = [];
@@ -359,6 +365,50 @@ describe('Quyền ghi Kho của token (write_scope)', () => {
     expect(within(card).queryByRole('button', { name: 'Mở thẻ Gen-hub' })).toBeNull();
   });
 
+  it('quyền THEO TỪNG tool: write_scopes {kho:false, kho_create:true, kho_update:false} ⇒ thẻ kho_create mở khoá, thẻ kho_update vẫn khoá', async () => {
+    hubLink = { configured: true, enabled: true, status: 'ok', write_scopes: { kho: false, kho_create: true, kho_update: false } };
+    renderPanel();
+    showProposal(MISSING);
+    let card = cardOf();
+    // Sếp chỉ tick kho_create rồi Kiểm tra: Kết nối ghi "Tạo bản ghi Phiên/Việc: Có" ⇒ thẻ tạo mới phải mở (máy chủ cũng nhận).
+    await waitFor(() => expect(within(card).getByRole('button', { name: 'Xác nhận và ghi Kho' })).toBeEnabled());
+    expect(within(card).queryByTestId('gen-kho-missing')).toBeNull();
+    cleanup();
+    queryClient.clear();
+    queryClient.setQueryData(qk.me, ME);
+    calls.length = 0;
+    renderPanel();
+    showProposal(MISSING_UPDATE);
+    card = cardOf();
+    await waitFor(() => expect(calls.some((c) => c.url.endsWith('/hub/link'))).toBe(true));
+    expect(within(card).getByRole('button', { name: 'Xác nhận và ghi Kho' })).toBeDisabled();
+    expect(within(card).getByTestId('gen-kho-missing')).toHaveTextContent('Gen-hub chưa cấp quyền ghi Kho');
+  });
+
+  it('khoToolWritable: cờ riêng của tool trước, máy chủ cũ chỉ có `kho`; chỉ `true` mới là có quyền', () => {
+    expect(khoToolWritable({ kho: false, kho_create: true, kho_update: false }, 'kho_create')).toBe(true);
+    expect(khoToolWritable({ kho: false, kho_create: true, kho_update: false }, 'kho_update')).toBe(false);
+    expect(khoToolWritable({ kho: true }, 'kho_update')).toBe(true);
+    expect(khoToolWritable({ kho: false }, 'kho_create')).toBe(false);
+    expect(khoToolWritable({ kho: true, kho_create: false }, 'kho_create')).toBe(false);
+    expect(khoToolWritable({ kho: 'true', kho_create: 1 } as never, 'kho_create')).toBe(false);
+    expect(khoToolWritable(null, 'kho_create')).toBe(false);
+    expect(khoToolWritable(undefined, 'kho_update')).toBe(false);
+  });
+
+  it('Sếp TỰ đóng tool của thẻ ở MCP Hub (write_hidden) ⇒ câu riêng + nút "Mở MCP Hub", không giục tick ở Gen-hub', async () => {
+    hubLink = { configured: true, enabled: true, status: 'ok', write_scopes: { kho: false, kho_create: false, kho_update: true }, write_hidden: ['kho_create'] };
+    renderPanel();
+    showProposal(MISSING);
+    const card = cardOf();
+    await waitFor(() => expect(within(card).getByTestId('gen-kho-missing')).toHaveTextContent('Sếp đã tự đóng kho_create ở MCP Hub'));
+    expect(within(card).getByTestId('gen-kho-missing')).not.toHaveTextContent('tick quyền kho_create');
+    expect(within(card).getByRole('button', { name: 'Xác nhận và ghi Kho' })).toBeDisabled();
+    expect(within(card).queryByRole('button', { name: 'Mở thẻ Gen-hub' })).toBeNull();
+    await userEvent.click(within(card).getByRole('button', { name: 'Mở MCP Hub' }));
+    expect(navigations).toEqual(['/mcp']);
+  });
+
   it('write_scope "ok" ⇒ không hỏi liên kết Gen-hub, không có dòng thiếu quyền', () => {
     renderPanel();
     showProposal(PHIEN);
@@ -376,11 +426,46 @@ describe('Lỗi khi xác nhận ghi Kho — câu tiếng Việt + "Chi tiết k�
     await userEvent.click(within(card).getByRole('button', { name: 'Xác nhận và ghi Kho' }));
     const alert = await within(card).findByRole('alert');
     expect(alert).toHaveTextContent('Chưa chắc đã ghi — Sếp mở Kho kiểm trước khi bấm lại');
+    // Nói rõ cả hai đường (đúng ghi chú phát hành bước 2): Kho đã có ⇒ Huỷ; chưa có ⇒ Xác nhận lại.
+    expect(alert.querySelector('.write-error__text')?.textContent).toBe(KHO_UNCERTAIN_TEXT);
+    expect(alert).toHaveTextContent('Kho đã có bản ghi thì bấm Huỷ; chưa có thì bấm Xác nhận lại.');
     expect(within(alert).getByText('Chi tiết kỹ thuật')).toBeInTheDocument();
     expect(alert).toHaveTextContent('HUB_WRITE_UNCERTAIN');
     expect(card).not.toHaveTextContent('Đã ghi vào Kho');
     expect(container.textContent).not.toContain('[object Object]');
     expect(within(card).getByRole('button', { name: 'Xác nhận và ghi Kho' })).toBeEnabled();
+  });
+
+  it('ghi "chưa chắc" rồi Sếp bấm Huỷ (Kho đã có) ⇒ "Đã đóng — … Kho có thể đã có bản ghi", KHÔNG nói "không ghi gì vào Kho"', async () => {
+    confirmQueue = [
+      { status: 502, body: { status: 502, code: 'HUB_WRITE_UNCERTAIN', title: 'Chưa chắc đã ghi' } },
+      // Máy chủ gắn nhãn `uncertain` cho thẻ có lần ghi chưa chắc; Huỷ trả thẻ đã đóng kèm nhãn đó.
+      { status: 200, body: { ...PHIEN, status: 'cancelled', labels: { ...PHIEN.labels, uncertain: '1' } } },
+    ];
+    renderPanel();
+    showProposal(PHIEN);
+    const card = cardOf();
+    await userEvent.click(within(card).getByRole('button', { name: 'Xác nhận và ghi Kho' }));
+    await within(card).findByRole('alert');
+    await userEvent.click(within(card).getByRole('button', { name: 'Huỷ' }));
+    await waitFor(() => expect(within(card).getByTestId('gen-prop-cancelled')).toHaveTextContent(KHO_CANCELLED_UNCERTAIN_TEXT));
+    expect(card).not.toHaveTextContent('không ghi gì vào Kho');
+    expect(within(card).queryByRole('alert')).toBeNull();
+  });
+
+  it('HUB_WRITE_HIDDEN (Sếp tự đóng tool ở MCP Hub) ⇒ câu riêng + nút "Mở MCP Hub"; không bảo tick ở Gen-hub', async () => {
+    confirmQueue = [{ status: 409, body: { status: 409, code: 'HUB_WRITE_HIDDEN', title: 'thô', detail: 'Tool kho_create đã bị Owner đóng' } }];
+    renderPanel();
+    showProposal(PHIEN);
+    const card = cardOf();
+    await userEvent.click(within(card).getByRole('button', { name: 'Xác nhận và ghi Kho' }));
+    const alert = await within(card).findByRole('alert');
+    expect(alert).toHaveTextContent('Sếp đã tự đóng tool ghi Kho này ở MCP Hub — chưa ghi gì vào Kho.');
+    expect(alert).not.toHaveTextContent('tick kho_create');
+    expect(alert.querySelector('details code')?.textContent).toBe('HTTP 409 · HUB_WRITE_HIDDEN · Tool kho_create đã bị Owner đóng');
+    expect(within(card).queryByRole('button', { name: 'Mở Kết nối › Gen-hub' })).toBeNull();
+    await userEvent.click(within(card).getByRole('button', { name: 'Mở MCP Hub' }));
+    expect(navigations).toEqual(['/mcp']);
   });
 
   it('HUB_WRITE_MISSING ⇒ câu + nút "Mở Kết nối › Gen-hub"', async () => {
@@ -489,6 +574,41 @@ describe('Lỗi khi xác nhận ghi Kho — câu tiếng Việt + "Chi tiết k�
     expect(within(card).queryByRole('button', { name: 'Xác nhận và ghi Kho' })).toBeNull();
     expect(card).not.toHaveTextContent('Đã huỷ — không ghi gì vào Kho');
     expect(calls.filter((c) => c.method === 'GET' && c.url.includes('/gen/conversations/c1/messages'))).toHaveLength(1);
+  });
+
+  it('mở thẻ từ chuông (tin đã lưu, CÙNG id sau khi tải lại) ⇒ Tải lại hội thoại: thẻ đóng VÀ hết dòng lỗi cũ; Gen đang trả lời ⇒ báo rõ, giữ nút', async () => {
+    const msg = (proposal: unknown) => [
+      { id: 'm-u', role: 'user', content: { text: 'ghi vào Kho' }, turn_id: 't1', created_at: '2026-10-09T08:00:00Z' },
+      { id: 'm-a', role: 'assistant', content: { steps: [{ kind: 'say', text: 'Em đề xuất:' }, { kind: 'proposal', proposal }] }, turn_id: 't1', created_at: '2026-10-09T08:00:01Z' },
+    ];
+    // Sếp (Owner B) mở hội thoại từ chuông: tin của Gen nạp từ máy chủ với id 'm-a', thẻ còn chờ.
+    conversationMessages = msg(PHIEN);
+    renderPanel();
+    await act(async () => {
+      expect(await loadConversation('c1', 'u1')).toBe('opened');
+    });
+    const card = cardOf();
+    // Owner A đã ghi bản này: máy chủ đóng thẻ (tin 'm-a' giữ nguyên id) và trả 409 khi B bấm Xác nhận.
+    conversationMessages = msg({ ...PHIEN, status: 'cancelled', labels: { ...PHIEN.labels, closed: 'Owner khác đã ghi bản này vào Kho (PHIEN-12)' } });
+    confirmQueue = [{ status: 409, body: { status: 409, code: 'GEN_PROPOSAL_DECIDED', title: 'Bản này đã được ghi vào Kho hoặc đã huỷ — thẻ đã đóng' } }];
+    await userEvent.click(within(card).getByRole('button', { name: 'Xác nhận và ghi Kho' }));
+    expect(await within(card).findByRole('alert')).toHaveTextContent('Bấm Tải lại hội thoại để xem thẻ đã đóng.');
+    const reloads = () => calls.filter((c) => c.method === 'GET' && c.url.includes('/gen/conversations/c1/messages')).length;
+    const before = reloads();
+    // Gen đang trả lời câu khác ⇒ không tải (không đè lượt đang chạy) nhưng nói rõ; nút Tải lại vẫn còn để bấm sau.
+    act(() => useGenStore.setState({ busy: true }));
+    await userEvent.click(within(card).getByRole('button', { name: 'Tải lại hội thoại' }));
+    await waitFor(() => expect(within(card).getByRole('alert')).toHaveTextContent(RELOAD_BUSY_TEXT));
+    expect(reloads()).toBe(before);
+    expect(within(card).getByRole('button', { name: 'Tải lại hội thoại' })).toBeEnabled();
+    act(() => useGenStore.setState({ busy: false }));
+    await userEvent.click(within(card).getByRole('button', { name: 'Tải lại hội thoại' }));
+    await waitFor(() => expect(within(card).getByTestId('gen-prop-cancelled')).toHaveTextContent('Thẻ đã đóng — Owner khác đã ghi bản này vào Kho (PHIEN-12)'));
+    expect(cardOf()).toBe(card); // cùng thẻ (không gắn lại) — đúng trường hợp lỗi cũ từng còn lại
+    expect(within(card).queryByRole('alert')).toBeNull();
+    expect(card).not.toHaveTextContent('Bấm Tải lại hội thoại');
+    expect(within(card).queryByRole('button', { name: 'Tải lại hội thoại' })).toBeNull();
+    expect(reloads()).toBe(before + 1);
   });
 
   it('thẻ đã đóng vì Owner khác (labels.closed) — kể cả khi bấm Huỷ trên thẻ cũ — nói rõ lý do thay vì "Đã huỷ — không ghi gì"', async () => {

@@ -28,6 +28,7 @@ import { fmtDMClock } from '../lib/format';
 import { navigateTo } from '../lib/navigation';
 import { useCan } from '../lib/permissions';
 import { useNow } from '../lib/useNow';
+import { writeHidden } from '../screens/mcp/mcpModel';
 import { qkMcp } from '../screens/mcp/queries';
 import { ErrorWithDetail, WriteProofDialog } from '../social/WriteProofDialog';
 import { PROOF_MISSING_TEXT, WRITE_RISK_PATH, proofMissing, qkSocial, writeStatusView } from '../social/socialModel';
@@ -36,15 +37,21 @@ import { loadConversation } from './genClient';
 import { patchProposal, useGenStore } from './genStore';
 import {
   HUB_CARD_PATH,
+  KHO_CANCELLED_UNCERTAIN_TEXT,
   KHO_MISSING_HINT,
   KHO_MISSING_TEXT,
   KHO_WRITE_WARNING,
+  MCP_HUB_PATH,
   MEMORY_CARD_PATH,
+  RELOAD_BUSY_TEXT,
   isKhoWrite,
   isMemoryNote,
   khoBangOf,
   khoCurrent,
+  khoHiddenText,
   khoReleaseNote,
+  khoToolWritable,
+  khoUncertain,
   khoDraftValid,
   khoFieldKind,
   khoLengthError,
@@ -432,7 +439,8 @@ export function ProposalCard({ proposal: p }: { proposal: GenProposal }) {
   });
   const locked = labelLocked && !gate.data?.open;
   // v0.1.50: quyền ghi Kho — nhãn lúc đề xuất có thể đã cũ (Sếp vừa tick quyền ở Gen-hub) → hỏi lại liên kết Gen-hub khi thẻ
-  // còn chờ và đang khoá; chỉ mở khoá khi Gen-hub báo RÕ đã có quyền ghi Kho.
+  // còn chờ và đang khoá; chỉ mở khoá khi Gen-hub báo RÕ đã có quyền ghi bằng ĐÚNG tool của thẻ (kho_create / kho_update —
+  // như máy chủ kiểm theo từng tool; máy chủ cũ chỉ có cờ chung `kho`).
   const labelNoWrite = kho && writeScopeMissing(p);
   const hub = useQuery({
     queryKey: qkMcp.hubLink,
@@ -440,7 +448,9 @@ export function ProposalCard({ proposal: p }: { proposal: GenProposal }) {
     enabled: labelNoWrite && p.status === 'pending',
     retry: false,
   });
-  const noWrite = labelNoWrite && hub.data?.write_scopes?.kho !== true;
+  const noWrite = labelNoWrite && !khoToolWritable(hub.data?.write_scopes, p.type as KhoProposal['type']);
+  // Sếp TỰ đóng tool của thẻ ở MCP Hub ⇒ tick ở Gen-hub + Kiểm tra không giúp gì: chỉ đúng MCP Hub.
+  const hiddenByOwner = noWrite && writeHidden(hub.data?.write_hidden).includes(p.type);
   const set = (k: string, v: string) => setDraft((d) => ({ ...d, [k]: v }));
 
   const confirm = async () => {
@@ -480,7 +490,15 @@ export function ProposalCard({ proposal: p }: { proposal: GenProposal }) {
     if (!cid) return;
     setBusy('cancel');
     try {
-      await loadConversation(cid);
+      const res = await loadConversation(cid);
+      if (res === 'busy') {
+        // Gen đang trả lời câu khác — không đè lượt đang chạy; giữ lỗi gốc (còn nút Tải lại) nhưng nói rõ vì sao chưa tải.
+        setError(RELOAD_BUSY_TEXT);
+      } else {
+        // Tin của thẻ có thể giữ nguyên id sau khi tải (mở từ chuông) ⇒ thẻ KHÔNG gắn lại: phải tự xoá lỗi cũ.
+        setError(null);
+        setErrorRaw(null);
+      }
     } catch (e) {
       setError(errorText(e));
       setErrorRaw(e);
@@ -504,6 +522,8 @@ export function ProposalCard({ proposal: p }: { proposal: GenProposal }) {
   // v0.1.50: thẻ ghi nhớ / ghi Kho luôn vẽ lỗi theo khuôn "câu thân thiện + Chi tiết kỹ thuật" (như thẻ gửi Facebook).
   const richError = social || memory || kho;
   const errView = proposalErrorView(errorRaw);
+  // Lỗi của lần bấm trước chỉ có nghĩa khi thẻ còn chờ: thẻ đã đóng / đã xác nhận (tải lại, máy chủ cập nhật) thì không hiện nữa.
+  const shownError = p.status === 'pending' ? error : null;
   // F-87: thẻ ghi Phiên của bản mới bị đóng vì Owner khác đã ghi / huỷ / ghi chưa chắc — máy chủ nêu lý do ở `labels.closed`.
   const closedNote = valueText(p.labels.closed).trim();
   // F-87: thẻ ghi Phiên của bản mới (job `gen_kho_release`, nhãn `release` = phiên bản) — mỗi bản ghi MỘT lần cho cả tổ chức.
@@ -552,16 +572,14 @@ export function ProposalCard({ proposal: p }: { proposal: GenProposal }) {
           {noWrite ? (
             <p className="gen-prop__warn" role="note" data-testid="gen-kho-missing">
               <Icon name="ph ph-lock-simple" size={13} />
-              <span>
-                {KHO_MISSING_TEXT}. {KHO_MISSING_HINT}
-              </span>
+              <span>{hiddenByOwner ? khoHiddenText(p.type) : `${KHO_MISSING_TEXT}. ${KHO_MISSING_HINT}`}</span>
             </p>
           ) : null}
         </>
       ) : null}
-      {error && richError ? (
+      {shownError && richError ? (
         <>
-          <ErrorWithDetail error={errorRaw} text={error} detail={proposalErrorDetail(errorRaw)} className="gen-prop__error write-error" />
+          <ErrorWithDetail error={errorRaw} text={shownError} detail={proposalErrorDetail(errorRaw)} className="gen-prop__error write-error" />
           {social && writeErrorKind((errorRaw as { code?: string } | null)?.code) === 'locked' ? (
             <Button variant="secondary" className="btn-27" icon="ph ph-shield-warning" onClick={() => navigateTo(WRITE_RISK_PATH)}>
               Đọc cảnh báo & đồng ý
@@ -570,6 +588,11 @@ export function ProposalCard({ proposal: p }: { proposal: GenProposal }) {
           {errView?.action === 'open_hub' ? (
             <Button variant="secondary" className="btn-27" icon="ph ph-plugs-connected" onClick={() => navigateTo(HUB_CARD_PATH)}>
               Mở Kết nối › Gen-hub
+            </Button>
+          ) : null}
+          {errView?.action === 'open_mcp' ? (
+            <Button variant="secondary" className="btn-27" icon="ph ph-plugs" onClick={() => navigateTo(MCP_HUB_PATH)}>
+              Mở MCP Hub
             </Button>
           ) : null}
           {errView?.action === 'reload' && p.status === 'pending' && conversationId ? (
@@ -583,9 +606,9 @@ export function ProposalCard({ proposal: p }: { proposal: GenProposal }) {
             </Button>
           ) : null}
         </>
-      ) : error ? (
+      ) : shownError ? (
         <p className="gen-prop__error" role="alert">
-          {error}
+          {shownError}
         </p>
       ) : null}
       {p.status === 'pending' ? (
@@ -606,9 +629,15 @@ export function ProposalCard({ proposal: p }: { proposal: GenProposal }) {
             </Button>
           ) : null}
           {noWrite ? (
-            <Button variant="secondary" className="btn-27" icon="ph ph-plugs-connected" disabled={busy !== null} onClick={() => navigateTo(HUB_CARD_PATH)}>
-              Mở thẻ Gen-hub
-            </Button>
+            hiddenByOwner ? (
+              <Button variant="secondary" className="btn-27" icon="ph ph-plugs" disabled={busy !== null} onClick={() => navigateTo(MCP_HUB_PATH)}>
+                Mở MCP Hub
+              </Button>
+            ) : (
+              <Button variant="secondary" className="btn-27" icon="ph ph-plugs-connected" disabled={busy !== null} onClick={() => navigateTo(HUB_CARD_PATH)}>
+                Mở thẻ Gen-hub
+              </Button>
+            )
           ) : null}
           <Button
             variant="secondary"
@@ -673,7 +702,9 @@ export function ProposalCard({ proposal: p }: { proposal: GenProposal }) {
           {closedNote
             ? `Thẻ đã đóng — ${closedNote}`
             : kho
-              ? 'Đã huỷ — không ghi gì vào Kho'
+              ? khoUncertain(p as KhoProposal)
+                ? KHO_CANCELLED_UNCERTAIN_TEXT
+                : 'Đã huỷ — không ghi gì vào Kho'
               : memory
                 ? 'Đã huỷ — không ghi nhớ'
                 : 'Đã huỷ — không làm gì'}

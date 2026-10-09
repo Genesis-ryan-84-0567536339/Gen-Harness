@@ -1,7 +1,8 @@
 """Gen đề xuất ghi Phiên vào Kho Ryan mỗi khi máy chủ lên bản mới — v0.1.50 (F-87, QD-18).
 
 Cron `gen_kho_release` (phút 7 và 37, gh/worker.py). Với MỖI tổ chức đủ điều kiện (Gen bật cho Owner, liên kết Gen-hub
-đang bật, Gen-hub đã cấp quyền GHI Kho — `hub.write_scopes(...)['kho']`, ≥ 1 Owner hoạt động):
+đang bật, Gen-hub đã cấp quyền TẠO bản ghi Kho — `hub.write_scopes(...)['kho_create']`, đúng tool thẻ dùng, như
+`kho_labels` và `write_kho`; thiếu riêng kho_update không chặn — ≥ 1 Owner hoạt động):
 
 1. `INSERT INTO agent.hub_release_proposals (org_id, version, 'pending') ON CONFLICT DO NOTHING RETURNING` — chỉ khi
    chèn được mới dựng đề xuất ⇒ mỗi (tổ chức, phiên bản) ĐÚNG MỘT lần, kể cả khi hai worker chạy song song (PK).
@@ -104,7 +105,7 @@ async def _one_org(sm: Any, redis: Any, org: uuid.UUID, version: str, now: datet
         link = await hub.load(db, org)
         if link is None or link.server_id is None or not link.enabled:
             return "hub_off"
-        if not (await hub.write_scopes(db, org))["kho"]:
+        if not (await hub.write_scopes(db, org))["kho_create"]:  # thẻ ghi Phiên chỉ dùng kho_create
             return "no_write_scope"
         owners = await notifications.owner_ids(db, org)
         if not owners:
