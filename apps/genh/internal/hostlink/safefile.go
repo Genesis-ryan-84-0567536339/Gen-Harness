@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 )
 
 // maxStateFileBytes giới hạn kích thước tệp trạng thái genh đọc từ run/ — các
@@ -15,6 +16,23 @@ const maxStateFileBytes = 64 << 10
 // (symlink, thiết bị, FIFO, nhiều hard link, quá lớn, sai chủ).
 var errUnsafeStateFile = errors.New("tệp trạng thái không an toàn")
 
+// errStateFileReplaced: giữa lần Lstat và lần Open/Stat, đường dẫn đã trỏ sang
+// một tệp khác (inode đổi). Với tệp được ghi kiểu tạm-rồi-rename (writeFileAtomic)
+// đây là chuyện bình thường khi người đọc trùng đúng lúc người ghi rename — nên
+// readStateFile thử lại; nếu đích bị tráo liên tục thì vẫn trả lỗi an toàn.
+var errStateFileReplaced = errors.New("tệp bị thay giữa chừng")
+
+const (
+	// stateFileReadAttempts: số lần đọc tối đa khi tệp liên tục bị thay giữa chừng.
+	stateFileReadAttempts = 5
+	// stateFileRetryDelay: nghỉ ngắn giữa hai lần thử (cửa sổ race chỉ vài chục µs).
+	stateFileRetryDelay = 5 * time.Millisecond
+)
+
+// afterLstatHook chỉ để test: chạy ngay sau Lstat, trước Open (mô phỏng người
+// ghi rename đè đúng khoảng này). Luôn nil khi chạy thật.
+var afterLstatHook func()
+
 // readStateFile đọc một tệp trạng thái trong run/ AN TOÀN: run/ bind-mount vào
 // container api (2770 nhóm 10001 từ v0.1.45; bản cài cũ/macOS có thể còn 0777),
 // nên ai ghi được run/ cũng cài được symlink /
@@ -24,13 +42,37 @@ var errUnsafeStateFile = errors.New("tệp trạng thái không an toàn")
 // (Unix) rồi đối chiếu lại đúng tệp đã Lstat. requireOwner: tệp phải thuộc uid
 // đang chạy genh (Unix) — dùng cho tệp genh tự ghi và tin theo (update-blocked).
 // Không có tệp → lỗi bọc os.ErrNotExist như os.ReadFile.
+//
+// Tệp genh/api ghi qua rename nguyên tử (writeFileAtomic) có thể được thay đúng
+// giữa Lstat và Open: đó là thay thế hợp lệ chứ không phải tráo, nên khi (và chỉ
+// khi) gặp errStateFileReplaced thì thử lại tối đa stateFileReadAttempts lần,
+// nghỉ stateFileRetryDelay giữa các lần. Symlink/thiết bị/hard link/quá lớn/sai
+// chủ vẫn bị từ chối ngay ở lần đầu, không thử lại.
 func readStateFile(path string, requireOwner bool) ([]byte, error) {
+	var err error
+	for attempt := 0; attempt < stateFileReadAttempts; attempt++ {
+		if attempt > 0 {
+			time.Sleep(stateFileRetryDelay)
+		}
+		var b []byte
+		b, err = readStateFileOnce(path, requireOwner)
+		if !errors.Is(err, errStateFileReplaced) {
+			return b, err
+		}
+	}
+	return nil, err
+}
+
+func readStateFileOnce(path string, requireOwner bool) ([]byte, error) {
 	fi, err := os.Lstat(path)
 	if err != nil {
 		return nil, err
 	}
 	if err := checkStateFileInfo(fi, requireOwner); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	if afterLstatHook != nil {
+		afterLstatHook()
 	}
 	f, err := openNoFollow(path)
 	if err != nil {
@@ -42,7 +84,8 @@ func readStateFile(path string, requireOwner bool) ([]byte, error) {
 		return nil, err
 	}
 	if !os.SameFile(fi, fi2) {
-		return nil, fmt.Errorf("%s: %w (tệp bị thay giữa chừng)", path, errUnsafeStateFile)
+		// Thông báo giữ nguyên: "<path>: tệp trạng thái không an toàn (tệp bị thay giữa chừng)".
+		return nil, fmt.Errorf("%s: %w (%w)", path, errUnsafeStateFile, errStateFileReplaced)
 	}
 	if err := checkStateFileInfo(fi2, requireOwner); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)

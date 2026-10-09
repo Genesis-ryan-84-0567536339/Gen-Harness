@@ -3320,3 +3320,7 @@ Sếp xác nhận bằng mã PIN, có bằng chứng bằng ảnh chụp, và d�
   Hướng dẫn 4 + Thiết lập bước 4 ở 390, /identity 390, dải tab Cài đặt 390 đầu/cuối (mép mờ đổi phía), /directory + /graph
   1024, Hướng dẫn 6 390.
 
+## Hotfix: test heartbeat chập chờn (sau v0.1.49)
+- **Lỗi**: CI (ubuntu-22.04) thỉnh thoảng đỏ `TestStartHeartbeat_GhiDuKhoa_StopXoaTep` với "tệp trạng thái không an toàn (tệp bị thay giữa chừng)". Gốc: `readStateFile` Lstat rồi Open+Stat và so `SameFile`; goroutine nhịp ghi tạm-rồi-rename đúng khoảng đó ⇒ inode đổi ⇒ báo lỗi. Người đọc thật (Console/genh) cũng gặp được, không chỉ test.
+- **Sửa** (`apps/genh/internal/hostlink/safefile.go`): chỉ lỗi "bị thay giữa chừng" được thử lại tối đa 5 lần, nghỉ 5ms; symlink/thiết bị/hard link/quá lớn/sai chủ vẫn từ chối ngay, đích bị tráo liên tục vẫn trả lỗi. Không đổi hành vi nào khác, KHÔNG tăng VERSION.
+- **Test**: `safefile_test.go` (thay giữa Lstat và Open ⇒ thử lại thành công; tráo liên tục ⇒ dừng đúng 5 lần), `safefile_unix_test.go` (đọc đồng thời khi ghi liên tục không bao giờ lỗi; symlink vẫn bị chặn ngay). Trước sửa: lặp 200 lần đỏ 2/200 (1/200 với `-race`); sau sửa: 0/200 cả hai, 0/1000 không race.

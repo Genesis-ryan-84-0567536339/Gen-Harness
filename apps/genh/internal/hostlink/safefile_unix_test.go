@@ -6,7 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 // assertNoSecretInRun: không tệp nào trong run/ chứa chuỗi bí mật.
@@ -106,5 +108,83 @@ func TestReadUpdateBlocked_RefusesSymlink(t *testing.T) {
 	}
 	if b, ok, err := ReadUpdateBlocked(root); ok || err == nil {
 		t.Fatalf("symlink: phải từ chối, được %+v ok=%v err=%v", b, ok, err)
+	}
+}
+
+// Người đọc thật (Console/genh) đọc genh-heartbeat.json đúng lúc goroutine nhịp
+// ghi tạm-rồi-rename liên tục: ReadHeartbeat không bao giờ được trả lỗi
+// "tệp bị thay giữa chừng". Người ghi nghỉ 2ms giữa hai lần ghi (nhanh hơn nhịp
+// thật 30s hàng nghìn lần) nên khoảng Lstat→Open bị đè xảy ra thường xuyên.
+func TestReadHeartbeat_DocDongThoiKhiGhiLienTuc_KhongBaoGioLoiThayGiuaChung(t *testing.T) {
+	dir := t.TempDir()
+	if err := EnsureDir(dir); err != nil {
+		t.Fatal(err)
+	}
+	path := HeartbeatPath(dir)
+	if err := writeJSON(path, Heartbeat{PID: os.Getpid(), Op: "update"}); err != nil {
+		t.Fatal(err)
+	}
+
+	stopW := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stopW:
+				return
+			default:
+			}
+			_ = writeJSON(path, Heartbeat{PID: os.Getpid(), Op: "update", At: now()})
+			time.Sleep(2 * time.Millisecond)
+		}
+	}()
+	defer func() { close(stopW); wg.Wait() }()
+
+	deadline := time.Now().Add(400 * time.Millisecond)
+	reads := 0
+	for time.Now().Before(deadline) {
+		hb, err := ReadHeartbeat(dir)
+		if err != nil {
+			t.Fatalf("lần đọc %d: %v", reads, err)
+		}
+		if hb.PID != os.Getpid() || hb.Op != "update" {
+			t.Fatalf("lần đọc %d: nội dung sai: %+v", reads, hb)
+		}
+		reads++
+	}
+	if reads < 50 {
+		t.Fatalf("chỉ đọc được %d lần trong 400ms — test không đủ sức chứng minh", reads)
+	}
+}
+
+// Thử lại KHÔNG nới kiểm tra symlink: tệp là symlink bị từ chối ngay (không
+// thuộc diện "thay giữa chừng" nên không thử lại, không ngủ).
+func TestReadStateFile_SymlinkVanBiTuChoiNgay(t *testing.T) {
+	dir := t.TempDir()
+	if err := EnsureDir(dir); err != nil {
+		t.Fatal(err)
+	}
+	secret := filepath.Join(t.TempDir(), "bi-mat.json")
+	if err := os.WriteFile(secret, []byte(`{"pid":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secret, HeartbeatPath(dir)); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	afterLstatHook = func() { calls++ }
+	defer func() { afterLstatHook = nil }()
+
+	start := time.Now()
+	if _, err := ReadHeartbeat(dir); err == nil || !strings.Contains(err.Error(), "không an toàn") {
+		t.Fatalf("symlink phải bị từ chối, được: %v", err)
+	}
+	if calls != 0 {
+		t.Fatalf("symlink phải bị chặn trước khi Open (hook gọi %d lần)", calls)
+	}
+	if time.Since(start) >= stateFileRetryDelay {
+		t.Errorf("symlink không được thử lại/ngủ: %v", time.Since(start))
 	}
 }
