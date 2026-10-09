@@ -26,7 +26,9 @@ name: E2E cài đặt thật
 #     gh.seed_demo seed, script .github/scripts/e2e_data.sh), đếm số dòng các
 #     bảng chính trước/sau nâng cấp — phải trùng; kéo sẵn ảnh của bản cũ hơn
 #     nữa (PREV2) rồi kiểm genh dọn ảnh cũ: chỉ còn ảnh của bản hiện tại + bản
-#     liền trước, mỗi repo gen-harness-* tối đa 2 digest.
+#     liền trước, mỗi repo gen-harness-* (và caddy, redis — ghim digest từ
+#     v0.1.48) tối đa 2 digest. Từ v0.1.48 kéo thêm 1 digest caddy + 1 digest
+#     redis CŨ không gắn tag (ghi vào prev2-refs.txt) — genh phải xoá chúng.
 #     v0.1.37: job là MA TRẬN hai ô nâng cấp (output upgrade_from của resolve):
 #     ô tags[1] = bản chính thức liền trước (máy Boss cập nhật đều mỗi đêm) và
 #     ô tags[3] = bản chính thức cũ hơn 3 bậc — máy Boss tắt vài ngày rồi bật
@@ -97,6 +99,8 @@ on:
     paths:
       - "apps/genh/**"
       - "apps/api/**"
+      - "apps/browser/**"
+      - "apps/bridge/**"
       - "apps/web/Dockerfile"
       - "deploy/**"
       - "deploy/images/**"
@@ -109,6 +113,8 @@ on:
     paths:
       - "apps/genh/**"
       - "apps/api/**"
+      - "apps/browser/**"
+      - "apps/bridge/**"
       - "apps/web/Dockerfile"
       - "deploy/**"
       - "deploy/images/**"
@@ -159,8 +165,7 @@ jobs:
       IN_SKIP_E2E: ${{ inputs.skip_e2e }}
     steps:
       - name: Lấy mã nguồn (cần remote origin cho git ls-remote)
-        uses: actions/checkout@v4
-
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - name: Xác định chế độ, tag, run_e2e, promote, prev_tag, upgrade_from
         id: r
         run: |
@@ -370,8 +375,7 @@ jobs:
       MODE: ${{ needs.resolve.outputs.mode }}
     steps:
       - name: Lấy mã nguồn
-        uses: actions/checkout@v4
-
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - name: Đặt GEN_HARNESS_HOME (thư mục cài đặt tạm của job này)
         run: echo "GEN_HARNESS_HOME=$RUNNER_TEMP/gh" >>"$GITHUB_ENV"
 
@@ -387,7 +391,7 @@ jobs:
       # publish của bản chính thức mới nhất (releases/latest) ────────────────
       - name: (pr) Cài Go
         if: needs.resolve.outputs.mode == 'pr'
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version: "1.24.0"
 
@@ -1238,8 +1242,7 @@ jobs:
       PREV_TAG: ${{ matrix.from }}
     steps:
       - name: Lấy mã nguồn (dùng .github/scripts/e2e_data.sh, không build gì ở job này)
-        uses: actions/checkout@v4
-
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - name: Đặt GEN_HARNESS_HOME (thư mục cài đặt tạm của job này)
         run: echo "GEN_HARNESS_HOME=$RUNNER_TEMP/gh-upgrade" >>"$GITHUB_ENV"
 
@@ -1291,11 +1294,29 @@ jobs:
 
       # Máy Owner lâu năm còn ảnh của các bản cũ hơn nữa — kéo sẵn ảnh của bản chính thức liền trước PREV_TAG
       # (PREV2) để kiểm genh mới DỌN chúng sau nâng cấp (chỉ giữ ảnh bản hiện tại + bản liền trước).
+      # v0.1.48: caddy/redis ghim digest, Renovate nâng hằng tuần ⇒ máy Owner sẽ tồn digest cũ KHÔNG gắn tag (đúng kiểu
+      # genh kéo bản ghim). Chưa bản phát hành nào trước v0.1.48 ghim caddy/redis (bản cũ kéo theo tag) nên tự nhiên
+      # runner không có digest cũ nào — phải kéo sẵn 1 digest caddy + 1 digest redis cũ, khác cả digest đang ghim lẫn
+      # digest tag caddy:2-alpine/redis:7-alpine hiện trỏ tới, thì bước "Chỉ còn ảnh…" mới thật sự kiểm được genh dọn
+      # ảnh ngoài. Bản < v0.1.48 chưa dọn ảnh ngoài ⇒ không kéo (chạy tay workflow cho tag cũ không đỏ oan).
       - name: Giả lập ảnh tồn đọng của bản cũ hơn nữa
         run: |
           set -euo pipefail
           refs="$RUNNER_TEMP/prev2-refs.txt"
           : >"$refs"
+          if [ "$(printf '%s\n%s\n' v0.1.48 "$TAG" | sort -V | head -n1)" = "v0.1.48" ]; then
+            # caddy 2.11.6 (bản ghim đầu tiên của v0.1.48, trước khi đo lại 05/10) và redis 7.2.5-alpine (09/2024): digest
+            # danh sách đa kiến trúc, kiểm còn kéo được trên Docker Hub ngày 09/10/2026. `docker images` in repo dạng
+            # ngắn (caddy, redis) nên ghi đúng dạng đó để vòng kiểm so khớp.
+            for ref in \
+              caddy@sha256:881bbc60f9986d5ab8e7cfd6cf7e4ef3c9c0439fef2429d035d065577882f028 \
+              redis@sha256:6aaf3f5e6bc8a592fbfe2cccf19eb36d27c39d12dab4f4b01556b7449e7b1f44; do
+              docker pull -q "$ref"
+              echo "$ref" >>"$refs"
+            done
+            echo "digest caddy/redis cũ (không tag) đã kéo sẵn:"
+            cat "$refs"
+          fi
           prev2=""
           official="$(gh release list --repo "$R" --exclude-drafts --exclude-pre-releases --limit 20 --json tagName --jq '.[].tagName')"
           for t in $official; do
@@ -1313,12 +1334,14 @@ jobs:
             echo "::notice::$prev2 không có compose.release.yaml — bỏ qua giả lập ảnh tồn đọng."
             exit 0
           fi
-          { grep -oE 'ghcr\.io/[^"[:space:]]+@sha256:[0-9a-f]{64}' "$RUNNER_TEMP/prev2/compose.release.yaml" || true; } | sort -u >"$refs"
+          ghrefs="$RUNNER_TEMP/prev2-gh-refs.txt"
+          { grep -oE 'ghcr\.io/[^"[:space:]]+@sha256:[0-9a-f]{64}' "$RUNNER_TEMP/prev2/compose.release.yaml" || true; } | sort -u >"$ghrefs"
           echo "ảnh của $prev2 (bản chính thức cũ hơn $PREV_TAG):"
-          cat "$refs"
+          cat "$ghrefs"
           while read -r ref; do
             docker pull -q "$ref"
-          done <"$refs"
+          done <"$ghrefs"
+          cat "$ghrefs" >>"$refs"
 
       - name: Ghi lại app_db_password TRƯỚC khi nâng cấp
         id: before
@@ -1541,11 +1564,14 @@ jobs:
               bad=1
             fi
           done <"$RUNNER_TEMP/prev2-refs.txt"
+          # v0.1.48: caddy/redis ghim digest (Renovate nâng hằng tuần) — genh cũng phải dọn digest cũ của đúng 2 repo này.
+          # Digest cũ không tag kéo sẵn ở bước "Giả lập ảnh tồn đọng" nằm trong prev2-refs.txt ⇒ vòng trên đã đòi xoá;
+          # đếm dưới đây chặn thêm trường hợp genh kéo/giữ quá 2 bản.
           over="$(docker images --digests --format '{{.Repository}} {{.Digest}}' \
-            | awk '$1 ~ /^ghcr\.io\/[^\/]+\/gen-harness-/ && $2 != "<none>"' | sort -u \
+            | awk '($1 ~ /^ghcr\.io\/[^\/]+\/gen-harness-/ || $1 == "caddy" || $1 == "redis") && $2 != "<none>"' | sort -u \
             | awk '{c[$1]++} END{for (r in c) if (c[r] > 2) print r " (" c[r] " bản)"}')"
           if [ -n "$over" ]; then
-            echo "::error::còn hơn 2 bản ảnh cho: $over — genh phải chỉ giữ ảnh của bản hiện tại và bản liền trước." >&2
+            echo "::error::còn hơn 2 bản ảnh cho: $over — genh phải chỉ giữ ảnh của bản hiện tại và bản liền trước (gen-harness-*, caddy, redis)." >&2
             bad=1
           fi
           [ "$bad" = 0 ] || exit 1
@@ -1662,7 +1688,7 @@ jobs:
       MODE: ${{ needs.resolve.outputs.mode }}
     steps:
       - name: Lấy mã nguồn (release — đúng mã của tag; pr — commit đang xét)
-        uses: actions/checkout@v4
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           ref: ${{ needs.resolve.outputs.mode == 'release' && needs.resolve.outputs.tag || '' }}
 
@@ -1670,7 +1696,7 @@ jobs:
         run: echo "GEN_HARNESS_HOME=$RUNNER_TEMP/gh-hong" >>"$GITHUB_ENV"
 
       - name: Cài Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version: "1.24.0"
 
@@ -1951,7 +1977,7 @@ jobs:
       OFFSITE_MARKER: "# gen-harness-offsite (genh offsite) — KHONG sua tay"
     steps:
       - name: Lấy mã nguồn (release — đúng mã của tag; pr — commit đang xét)
-        uses: actions/checkout@v4
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           ref: ${{ needs.resolve.outputs.mode == 'release' && needs.resolve.outputs.tag || '' }}
 
@@ -1966,7 +1992,7 @@ jobs:
         run: echo "GENH_COMPOSE_FILE=$GITHUB_WORKSPACE/deploy/compose.yaml" >>"$GITHUB_ENV"
 
       - name: Cài Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version: "1.24.0"
 
@@ -2199,8 +2225,9 @@ jobs:
   # đổi nó, nên bản thử promote muộn (vd promote tay sau vài ngày) sẽ lọt
   # cổng ngay nếu chỉ dựa vào published_at. Định dạng dấu phải khớp
   # PromotedMarker (check_release_gate.py giữ).
-  # Ảnh GHCR `:latest` cũng chỉ gắn ở đây (build-images của release.yml chỉ
-  # đẩy `:<version>`) — `:latest` không bao giờ trỏ ảnh chưa qua cổng.
+  # v0.1.48 (F-36): KHÔNG còn ảnh GHCR `:latest` — ảnh chỉ có tag `:<version>` + `:sha-<commit>` (release.yml
+  # build-images); máy Owner dùng digest ghim trong compose.release.yaml, nên job này chỉ nâng Release
+  # (quyền contents: write, không cần packages: write).
   promote:
     name: nâng thành bản chính thức (promote ${{ needs.resolve.outputs.tag }})
     runs-on: ubuntu-latest
@@ -2208,7 +2235,6 @@ jobs:
     if: always() && needs.resolve.outputs.promote == 'true' && (needs.resolve.outputs.skip_e2e == 'true' || (needs.e2e-install.result == 'success' && needs.e2e-rollback.result == 'success' && needs.e2e-offsite.result == 'success' && (needs.e2e-upgrade.result == 'success' || needs.e2e-upgrade.result == 'skipped')))
     permissions:
       contents: write
-      packages: write
     outputs:
       # true khi CHÍNH lượt này vừa nâng tag thành latest (e2e-selfupdate chỉ
       # chạy khi đó); false khi đã là latest từ trước hoặc không hạ cấp.
@@ -2296,38 +2322,6 @@ jobs:
             echo "releases/latest: ${before:-<chưa có>} → **$after** (dấu: \`$marker\`)"
           } >>"$GITHUB_STEP_SUMMARY"
           echo "OK: $TAG là bản chính thức — máy Boss (install.sh, genh tự cập nhật) sẽ nhận bản này; lịch đêm đợi đủ 24 giờ từ $marker."
-
-      - name: Đăng nhập GHCR (gắn ảnh :latest)
-        if: steps.p.outputs.is_latest == 'true'
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: docker/setup-buildx-action@v3
-        if: steps.p.outputs.is_latest == 'true'
-
-      - name: Gắn ảnh GHCR :latest = :${{ needs.resolve.outputs.tag }} (sau khi đã là bản chính thức)
-        if: steps.p.outputs.is_latest == 'true'
-        run: |
-          set -euo pipefail
-          # genh ghim ảnh theo digest (compose.release.yaml) nên máy Owner không
-          # dùng :latest — tag này chỉ cho người kéo ảnh tay. Lỗi ở đây KHÔNG
-          # làm hỏng việc promote đã xong: chỉ cảnh báo, kèm lệnh làm tay.
-          owner="$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
-          failed=""
-          for svc in api web bridge db browser; do
-            img="ghcr.io/$owner/gen-harness-$svc"
-            if docker buildx imagetools create -t "$img:latest" "$img:$TAG"; then
-              echo "OK: $img:latest → $img:$TAG"
-            else
-              failed="$failed $svc"
-            fi
-          done
-          if [ -n "$failed" ]; then
-            echo "::warning::Chưa gắn được ảnh :latest cho:$failed — máy Owner KHÔNG bị ảnh hưởng (genh ghim digest). Làm tay: docker buildx imagetools create -t ghcr.io/$owner/gen-harness-<dịch vụ>:latest ghcr.io/$owner/gen-harness-<dịch vụ>:$TAG"
-          fi
 
   # ── e2e-selfupdate ───────────────────────────────────────────────────────
   # Đường MỌI máy Owner thật sự đi khi có bản mới: genh CŨ (bản chính thức

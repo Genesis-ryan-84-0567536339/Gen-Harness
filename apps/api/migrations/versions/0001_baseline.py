@@ -1,4 +1,4 @@
-"""Baseline schema (docs/handoff/schema.sql + sửa pg_partman 5).
+"""Baseline schema (docs/handoff/schema.sql — đã bỏ ở v0.1.48, xem lịch sử git — + sửa pg_partman 5).
 
 Revision ID: 0001
 Revises:

@@ -143,6 +143,14 @@ không cho — khi đó gửi chỉ mở sau khi Owner bấm "Tôi hiểu rủi 
 hằng ngày 09:10 → sự cố + chuông + Telegram (qua genh watchdog); dòng 8 "Facebook trả lời" (không bắt buộc) ở Việc Sếp cần làm;
 bỏ số phiên bản khỏi chú thích "chỗ cắm". Còn: **đăng bài = lát 2**; selector ghi Facebook mới kiểm trên trang mẫu —
 nghiệm thu thật do Boss; `like`/`follow` chưa làm.
+v0.1.48: bản build tái lập & pipeline gọn (F-19, F-36, F-71, F-13, F-44) — ảnh nền + caddy/redis ghim digest đa kiến trúc,
+api/browser cài từ `uv.lock` (`uv sync --frozen`, kiểm 2 lần build ra cùng tổ hợp gói), Renovate đề xuất nâng (cài App là
+tuỳ chọn); mọi action ghim SHA, quyền mặc định `contents: read`, ảnh GHCR chỉ `:<version>` + `:sha-<commit>` (bỏ `:latest`),
+build thử lại 1 lần + cache gha; quét pip-audit/npm audit/govulncheck dạng báo cáo (không chặn); CI đỏ khi bản nhúng genh lệch
+`deploy/`; `docs/handoff/schema.sql` đã bỏ (lược đồ thật ở `db/sql` + migrations). Tag GHCR `gen-harness-*:latest` cũ đứng yên ở
+bản promote cuối bằng workflow cũ (v0.1.46, hoặc v0.1.47 nếu promote trước khi v0.1.48 merge; không nhận bản vá) — không dùng.
+Còn: gói apt trong Dockerfile chưa ghim phiên bản (tầng apt dựng lại mỗi tuần); PR Renovate không tự merge nằm chờ tới khi Boss
+nhắn Claude (chưa có lịch tự động).
 
 ## Đợt A — Gen v1 (thiết kế: docs/design/gen-v1.md)
 - ✅ A1 Khung chat phải + Gen trả lời/tóm tắt (chỉ đọc), lưu hội thoại, Nhật ký hành động — v0.1.21.

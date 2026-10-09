@@ -1,3 +1,6 @@
+# Ảnh dựng sẵn (caddy, redis) GHIM DIGEST của danh sách đa kiến trúc (F-19, v0.1.48); Renovate tự mở PR nâng digest
+# (cả deploy/compose.yaml lẫn bản nhúng genh trong cùng một PR). Đo tay: docker buildx imagetools inspect <ảnh>:<tag>
+# (dòng Digest:, MediaType phải là index, có cả linux/amd64 và linux/arm64) — KHÔNG dùng digest của một kiến trúc.
 # Gen-Harness — `docker compose -f deploy/compose.yaml --env-file .env up -d` (hoặc `make up`).
 # Chỉ proxy mở cổng ra ngoài (8443). Bí mật: khoá master nằm ở ./secrets/gh_master_key (Docker secret).
 name: gen-harness
@@ -39,7 +42,7 @@ x-logging: &logging
 
 services:
   proxy:
-    image: caddy:2-alpine
+    image: caddy:2-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f
     restart: unless-stopped
     logging: *logging
     # Mặc định chỉ máy này (127.0.0.1); genh ghi GH_BIND_ADDR=0.0.0.0 vào .env khi Owner chọn LAN hoặc bản cài cũ.
@@ -201,7 +204,7 @@ services:
   # (api/worker); không ở mạng default nên kể cả bị chiếm cũng không tới được Redis chính/Postgres. Không lưu xuống
   # đĩa; tắt Lua/lệnh nguy hiểm (CONFIG, KEYS, FLUSH*, DEBUG, MODULE…) cho mọi kết nối.
   browser-redis:
-    image: redis:7-alpine
+    image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
     restart: unless-stopped
     logging: *logging
     command:
@@ -283,7 +286,7 @@ services:
       retries: 10
 
   redis:
-    image: redis:7-alpine
+    image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
     restart: unless-stopped
     logging: *logging
     command: ["redis-server", "--appendonly", "yes"]

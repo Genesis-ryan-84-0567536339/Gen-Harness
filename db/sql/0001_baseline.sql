@@ -2,7 +2,7 @@
 -- Gen-Harness · lược đồ khởi điểm · PostgreSQL 16
 -- Quy ước: xem docs/03-database.md. Được chỉnh, nhưng giữ các quy ước.
 -- Chạy qua công cụ migration (Alembic/Atlas/sqitch) — không chạy tay ở production.
--- Bản trong repo = docs/handoff/schema.sql + 3 chỉnh:
+-- Bản trong repo = docs/handoff/schema.sql (đã bỏ ở v0.1.48, xem lịch sử git) + 3 chỉnh:
 --   (1) pg_partman 5.x: extension cài vào schema partman; (2) create_parent không còn p_retention → đặt qua
 --   part_config; (3) core.uuid_v7(): lấy & 255 trước khi ép kiểu int (bản gốc tràn số "integer out of range").
 -- ═══════════════════════════════════════════════════════════════════════════

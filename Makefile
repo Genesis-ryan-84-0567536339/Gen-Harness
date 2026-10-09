@@ -1,9 +1,13 @@
 # Lối tắt cho nhà phát triển. Người dùng cuối cài bằng trình cài `genh` (giai đoạn 6).
 COMPOSE = docker compose -f deploy/compose.yaml --env-file .env
 API = apps/api
+# Cùng bản uv với CI (setup-uv `version:`) và ảnh (api/browser.Dockerfile) — lệch bản thì `uv lock --check` của CI có thể
+# đỏ dù máy dev xanh. Renovate nâng cả ba trong cùng một PR (nhóm "uv", renovate.json).
+UV_VERSION = 0.12.23
+UV = uvx uv@$(UV_VERSION)
 
 .PHONY: secrets up down logs logs-token ps api-dev api-test api-test-app-role api-lint web-test bridge-test browser-test \
-        test migrate seed-demo seed-demo-clean backup backup-list restore
+        api-sync lock test migrate seed-demo seed-demo-clean backup backup-list restore
 
 secrets:
 	@mkdir -p secrets
@@ -38,6 +42,14 @@ migrate:
 api-dev:
 	cd $(API) && GH_COOKIE_SECURE=false .venv/bin/uvicorn gh.main:app --reload --port 8000
 
+# F-36 (v0.1.48): cài môi trường dev đúng theo uv.lock (lần đầu, trước `make api-dev`/`api-test`); `make lock` tạo lại
+# uv.lock khi đổi phụ thuộc. Cả hai dùng uv $(UV_VERSION) như CI (uvx tự tải đúng bản, không đụng uv đã cài trên máy).
+api-sync:
+	cd $(API) && $(UV) sync --frozen --extra dev
+
+lock:
+	cd apps/api && $(UV) lock && cd ../browser && $(UV) lock
+
 api-test:
 	cd $(API) && .venv/bin/pytest -q
 
@@ -55,8 +67,8 @@ web-test:
 bridge-test:
 	npm run -w apps/bridge test
 
-# v0.1.29 — browser-worker: cần `cd apps/browser && uv venv .venv && uv pip install -e ".[dev]" && .venv/bin/playwright
-# install chromium` một lần. Test chạy Chromium thật trên trang mẫu (không gọi facebook.com).
+# v0.1.29 — browser-worker: cần `cd apps/browser && uv sync --frozen --extra dev && .venv/bin/playwright install chromium`
+# một lần. Test chạy Chromium thật trên trang mẫu (không gọi facebook.com).
 browser-test:
 	cd apps/browser && .venv/bin/ruff check ghb tests && .venv/bin/mypy ghb && .venv/bin/pytest -q
 

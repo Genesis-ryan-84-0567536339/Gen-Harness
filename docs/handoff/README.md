@@ -15,7 +15,7 @@ Gen-Harness là hệ điều hành quản trị dựa trên hội thoại. Các 
 | 3 | `design/Gen-Harness Console.dc.html` | **SSOT giao diện.** Mở trực tiếp bằng trình duyệt |
 | 4 | `docs/01-ui-screens.md` | 21 màn hình: mục đích, bố cục, thành phần, tương tác |
 | 5 | `docs/02-design-tokens.md` + `design/tokens.json` | Màu, chữ, khoảng cách, bo góc, bóng, trạng thái |
-| 6 | `docs/03-database.md` + `db/schema.sql` | Mô hình dữ liệu, quy ước mở rộng, lớp thống kê |
+| 6 | `docs/03-database.md` (`db/schema.sql` gốc đã bỏ ở v0.1.48; lược đồ hiện hành: `db/sql/0001_baseline.sql` + `apps/api/migrations`) | Mô hình dữ liệu, quy ước mở rộng, lớp thống kê |
 | 7 | `docs/04-architecture.md` | Dịch vụ, luồng dữ liệu, plugin, API, bảo mật |
 | 8 | `docs/05-installer.md` | Cài một lệnh, TUI có % tiến độ, tự cung cấp mọi công cụ |
 | 9 | `docs/06-owner-onboarding.md` | Trình thiết lập từng bước cho Owner mới trên Web UI |
