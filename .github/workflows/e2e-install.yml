@@ -1359,6 +1359,16 @@ jobs:
           install -m 0755 "$d/genh-linux-amd64" "$GEN_HARNESS_HOME/bin/genh"
           "$GEN_HARNESS_HOME/bin/genh" version
 
+      - name: Ghi lại cổng/chế độ truy cập TRƯỚC khi nâng cấp (bản cũ < v0.1.46 không có GH_BIND_ADDR)
+        run: |
+          set -euo pipefail
+          envf="$GEN_HARNESS_HOME/deploy/.env"
+          prev_bind="$(grep -E '^GH_BIND_ADDR=' "$envf" 2>/dev/null | head -1 | cut -d= -f2- || true)"
+          prev_mode="$(grep -E '^GH_ACCESS_MODE=' "$envf" 2>/dev/null | head -1 | cut -d= -f2- || true)"
+          echo "PREV_BIND_ADDR=$prev_bind" >> "$GITHUB_ENV"
+          echo "PREV_ACCESS_MODE=$prev_mode" >> "$GITHUB_ENV"
+          echo "trước nâng cấp ($PREV_TAG): GH_BIND_ADDR='${prev_bind:-<không có>}' GH_ACCESS_MODE='${prev_mode:-<không có>}'"
+
       - name: genh update --yes --no-self-update (genh ${{ needs.resolve.outputs.tag }} nâng cấp dịch vụ từ bản cũ)
         run: '"$GEN_HARNESS_HOME/bin/genh" update --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes --no-self-update'
 
@@ -1372,8 +1382,9 @@ jobs:
           done
 
       # v0.1.46 (F-27/F-21b): nâng cấp từ bản cũ (không có GH_BIND_ADDR) PHẢI giữ hành vi cũ (0.0.0.0, lan_legacy) và
-      # nhắc Owner đúng 1 chuông "Cổng đang mở cho cả mạng". Chỉ kiểm khi genh mới có lệnh `genh remote`.
-      - name: Nâng cấp giữ cổng 0.0.0.0 + đúng 1 chuông network.open_lan (v0.1.46+, tối đa ~8 phút)
+      # nhắc Owner đúng 1 chuông "Cổng đang mở cho cả mạng". Bản cũ đã là v0.1.46+ (có GH_BIND_ADDR) thì nâng cấp phải
+      # GIỮ NGUYÊN địa chỉ/chế độ và KHÔNG chuông. Chỉ kiểm khi genh mới có lệnh `genh remote`.
+      - name: Nâng cấp giữ cổng/chế độ truy cập + chuông network.open_lan đúng kỳ vọng (v0.1.46+, tối đa ~8 phút)
         if: matrix.broken != 'true'
         run: |
           set -euo pipefail
@@ -1385,6 +1396,34 @@ jobs:
           proxy="$(docker ps --format '{{.Names}}' --filter label=com.docker.compose.project=gen-harness --filter label=com.docker.compose.service=proxy | head -1)"
           bind="$(docker port "$proxy" 8443/tcp)"
           echo "docker port: $bind"
+          dbc="$(docker ps -q --filter label=com.docker.compose.project=gen-harness --filter label=com.docker.compose.service=db | head -1)"
+          [ -n "$dbc" ] || { echo "::error::không thấy container db" >&2; exit 1; }
+          q() {
+            # $1 là đối số vị trí của sh -c — không nội suy vào chuỗi lệnh. $POSTGRES_USER/$POSTGRES_DB mở rộng trong container.
+            # shellcheck disable=SC2016
+            docker exec "$dbc" sh -c 'psql -v ON_ERROR_STOP=1 -U "${POSTGRES_USER:-gh}" -d "${POSTGRES_DB:-gen_harness}" -tAc "$1"' psql "$1"
+          }
+          alerts_sql="SELECT count(*) FROM ops.health_alerts WHERE key='network.open_lan' AND cleared_at IS NULL"
+          bells_sql="SELECT count(*) FROM core.notifications WHERE kind='network.open_lan'"
+          if [ -n "${PREV_BIND_ADDR:-}" ]; then
+            # Bản cũ đã là v0.1.46+ (cài mới nghe 127.0.0.1 hoặc Owner đã chọn qua `genh remote`): nâng cấp phải GIỮ NGUYÊN
+            # địa chỉ/chế độ Owner đã có và KHÔNG được nhắc "cổng đang mở" (chỉ nhắc cho bản cũ không có GH_BIND_ADDR).
+            echo "$bind" | grep -q "^${PREV_BIND_ADDR}:${GH_PORT}\$" || { echo "::error::nâng cấp từ $PREV_TAG (đã có GH_BIND_ADDR=$PREV_BIND_ADDR) phải giữ nguyên địa chỉ nghe — đang: $bind" >&2; exit 1; }
+            grep -qx "GH_BIND_ADDR=${PREV_BIND_ADDR}" "$cdir/.env" || { echo "::error::$cdir/.env đổi GH_BIND_ADDR (trước: $PREV_BIND_ADDR)" >&2; exit 1; }
+            if [ -n "${PREV_ACCESS_MODE:-}" ]; then
+              grep -qx "GH_ACCESS_MODE=${PREV_ACCESS_MODE}" "$cdir/.env" || { echo "::error::$cdir/.env đổi GH_ACCESS_MODE (trước: $PREV_ACCESS_MODE)" >&2; exit 1; }
+            fi
+            if [ "$PREV_ACCESS_MODE" != "lan_legacy" ]; then
+              # Đợi 2 vòng sức khoẻ (60 giây/vòng) rồi khẳng định KHÔNG có sự cố/chuông cổng mở.
+              sleep 130
+              a="$(q "$alerts_sql")"; b="$(q "$bells_sql")"
+              echo "sau nâng cấp từ $PREV_TAG: sự cố network.open_lan mở=$a, chuông=$b (cần 0/0)"
+              [ "$a" = "0" ] && [ "$b" = "0" ] || { echo "::error::nâng cấp từ bản đã nghe $PREV_BIND_ADDR không được nhắc 'cổng đang mở' (sự cố=$a, chuông=$b)" >&2; exit 1; }
+              echo "OK: giữ nguyên $PREV_BIND_ADDR/${PREV_ACCESS_MODE:-?} và không có chuông network.open_lan."
+              exit 0
+            fi
+            echo "bản cũ đang ở lan_legacy — kiểm như nâng cấp từ bản cũ (0.0.0.0 + đúng 1 chuông)."
+          fi
           echo "$bind" | grep -q "^0\.0\.0\.0:${GH_PORT}\$" || { echo "::error::sau nâng cấp từ bản cũ proxy phải VẪN nghe 0.0.0.0:${GH_PORT} (giữ hành vi cũ) — đang: $bind" >&2; exit 1; }
           grep -E '^GH_(BIND_ADDR|ACCESS_MODE)=' "$cdir/.env" || true
           grep -qx 'GH_BIND_ADDR=0.0.0.0' "$cdir/.env" || { echo "::error::$cdir/.env thiếu GH_BIND_ADDR=0.0.0.0" >&2; exit 1; }
@@ -1396,20 +1435,11 @@ jobs:
           assert d.get("mode") == "lan_legacy", "mode=%r (cần lan_legacy)" % d.get("mode")
           assert d.get("bind_addr") == "0.0.0.0", "bind_addr=%r" % d.get("bind_addr")
           PY
-          dbc="$(docker ps -q --filter label=com.docker.compose.project=gen-harness --filter label=com.docker.compose.service=db | head -1)"
-          [ -n "$dbc" ] || { echo "::error::không thấy container db" >&2; exit 1; }
-          q() {
-            # $1 là đối số vị trí của sh -c — không nội suy vào chuỗi lệnh. $POSTGRES_USER/$POSTGRES_DB mở rộng trong container.
-            # shellcheck disable=SC2016
-            docker exec "$dbc" sh -c 'psql -v ON_ERROR_STOP=1 -U "${POSTGRES_USER:-gh}" -d "${POSTGRES_DB:-gen_harness}" -tAc "$1"' psql "$1"
-          }
           orgs="$(q "SELECT count(*) FROM core.organizations")"
           if [ "$orgs" = "0" ]; then
             echo "::error::dữ liệu mẫu của bản cũ chưa có tổ chức nào (core.organizations rỗng) — không thể kiểm chuông network.open_lan; sửa bước nạp dữ liệu mẫu, không bỏ qua." >&2; exit 1
           fi
-          alerts_sql="SELECT count(*) FROM ops.health_alerts WHERE key='network.open_lan' AND cleared_at IS NULL"
           owners_sql="SELECT count(DISTINCT u.id) FROM core.users u JOIN core.user_roles ur ON ur.user_id=u.id JOIN core.roles r ON r.id=ur.role_id WHERE u.is_active AND u.deleted_at IS NULL AND r.code='owner'"
-          bells_sql="SELECT count(*) FROM core.notifications WHERE kind='network.open_lan'"
           # Dữ liệu mẫu (gh.seed_demo) chỉ tạo tổ chức + vai trò, KHÔNG có người dùng (Owner chỉ sinh ra ở trình thiết lập
           # thật). Chuông network.open_lan gửi cho Owner (notifications.owner_ids) nên phải có ít nhất 1 Owner mới kiểm
           # được. Chèn 1 Owner mẫu (mật khẩu băm giả, không đăng nhập được) rồi xoá sự cố đang mở (nếu api đã mở lúc
