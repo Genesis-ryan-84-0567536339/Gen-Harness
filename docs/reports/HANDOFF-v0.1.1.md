@@ -3034,12 +3034,14 @@ Sếp xác nhận bằng mã PIN, có bằng chứng bằng ảnh chụp, và d�
   genh xanh (gồm 4 test ghim digest/khớp bản nhúng); `renovate-config-validator --strict` hợp lệ; `docker compose config -q`,
   cổng proxy mặc định 127.0.0.1, Caddyfile hợp lệ với ảnh caddy ghim digest. Máy tích hợp KHÔNG build được ảnh (không tải
   được blob ghcr.io).
-- **Kiểm tra trên CI GitHub: CHƯA XÁC NHẬN.** Head 927bf83 (03–04/10): cả 3 workflow (CI, Installer matrix, E2E cài đặt
-  thật) dừng sau 3 giây — "recent account payments have failed or your spending limit needs to be increased" ⇒ chưa lần
-  nào build thật 5 ảnh (uv sync, venv /opt/venv), chưa chạy `check_image_lock.py`/`check_bytecode.py`, chưa chạy
-  e2e-upgrade (lượt tạo lại proxy/redis bằng digest). 09/10 Actions chạy lại được (E2E trên main xanh; CI nhánh này đã chạy
-  job `version`, `renovate-config`, `browser` xanh trên 3870a60). **Không merge, không phát hành v0.1.48 tới khi `ci-ok`,
-  `images` (tái lập + .pyc) và E2E cài thật xanh thật trên commit cuối của nhánh**; chỉ khi đó mới sửa dòng này.
+- **Kiểm tra trên CI GitHub** (09/10, sau khi Actions chạy lại): head 927bf83 (03–04/10) chưa từng chạy CI — cả 3 workflow
+  dừng sau 3 giây vì lỗi thanh toán Actions ("recent account payments have failed or your spending limit…"). Trên bản sửa
+  sau review: **CI xanh** trên 6f61955 (`version`, `renovate-config`, `api`, `web`, `browser`, `images` gồm build thật 5 ảnh
+  + tái lập `--no-cache` + `.pyc` trong /opt/venv, `ci-ok`); **Installer matrix xanh** (4 hệ điều hành); **E2E cài đặt thật
+  chế độ pr xanh** trên 3870a60 (cùng mã, 6f61955 chỉ đổi tài liệu): build ảnh từ Dockerfile của nhánh, cài sạch, backup,
+  export/import, bản hỏng cố ý tự quay về, khôi phục bản sao ngoài máy. `e2e-upgrade` (tạo lại proxy/redis bằng digest,
+  dọn digest caddy/redis cũ) chỉ chạy ở chế độ release ⇒ chạy sau khi tăng VERSION và là cổng promote (đỏ ⇒ không tới máy
+  Boss).
 - **Lưu ý vận hành**: `genh update` lên bản này tạo lại container proxy/redis (tham chiếu ảnh đổi sang digest); dữ liệu redis
   giữ ở volume. Còn lại: gói apt trong Dockerfile chưa ghim phiên bản (tầng apt dựng lại ít nhất mỗi tuần — xem dưới). Tag
   GHCR `gen-harness-*:latest` cũ **đứng yên ở v0.1.46** (bản promote cuối trước v0.1.48), không nhận bản vá — không dùng; không
@@ -3086,4 +3088,4 @@ Sếp xác nhận bằng mã PIN, có bằng chứng bằng ảnh chụp, và d�
 - **Kiểm tra** (máy tích hợp, 09/10): unittest `.github/scripts` 90 test xanh; `check_release_gate.py`,
   `check_workflow_hygiene.py`, `check_embedded_sync.py` OK; actionlint v1.7.12 + shellcheck 0 lỗi; `renovate-config-validator
   --strict --no-global` hợp lệ (cả trên CI); `go vet` + `go test ./...` genh xanh; ruff + mypy api xanh. Build ảnh thật,
-  `check_bytecode.py` trong ảnh và E2E: chờ CI (xem dòng "Kiểm tra trên CI GitHub" ở trên).
+  `check_bytecode.py` trong ảnh và E2E: xanh trên CI (xem dòng "Kiểm tra trên CI GitHub" ở trên).
