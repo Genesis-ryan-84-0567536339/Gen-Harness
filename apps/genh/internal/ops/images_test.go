@@ -249,3 +249,108 @@ func TestFamiliarRepo(t *testing.T) {
 		}
 	}
 }
+
+// ghDigestCompose: compose chỉ có db (gen-harness, owner "o") ghim digest và redis
+// ghim digest — dựng nhanh cho các ca "cùng IMAGE ID, khác digest" bên dưới.
+func ghDigestCompose(db, redis string) string {
+	return "name: gen-harness\nservices:\n" +
+		"  db:\n    image: ghcr.io/o/gen-harness-db@" + db + "\n" +
+		"  redis:\n    image: redis:7-alpine@" + redis + "\n"
+}
+
+// Cổng phát hành v0.1.50 đỏ: gen-harness-db không đổi nội dung qua 3 bản liên tiếp
+// (CÙNG IMAGE ID) nhưng mỗi bản đẩy manifest mới ⇒ 3 digest khác nhau. Digest cũ
+// (ngoài tập giữ) phải bị gỡ dù trùng ID với ảnh giữ; 2 digest của tập giữ ở lại.
+func TestPruneOldImages_SameIDDifferentDigests_RemovesOldDigestRef(t *testing.T) {
+	current := ghDigestCompose("sha256:d3", "sha256:r3")
+	previous := ghDigestCompose("sha256:d2", "sha256:r2")
+	fr := &fake.Runner{Responses: []fake.Response{
+		{Match: exactArgs("images"), Output: imagesListing(
+			"ghcr.io/o/gen-harness-db\t<none>\tsha256:d3\t3653e740d26c",
+			"ghcr.io/o/gen-harness-db\t<none>\tsha256:d2\t3653e740d26c",
+			"ghcr.io/o/gen-harness-db\t<none>\tsha256:d1\t3653e740d26c",
+			// Owner khác dùng chung Docker, cùng ID: không thuộc tập giữ ⇒ không đụng.
+			"ghcr.io/khac/gen-harness-db\t<none>\tsha256:k1\t3653e740d26c",
+		)},
+		{Match: exactArgs("rmi"), Output: []byte("")},
+	}}
+	n, err := pruneOldImages(context.Background(), fr, [][]byte{[]byte(current), []byte(previous)}, &strings.Builder{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := rmiRefs(fr); strings.Join(got, ",") != "ghcr.io/o/gen-harness-db@sha256:d1" || n != 1 {
+		t.Errorf("rmi = %v (n=%d), muốn đúng 1 lệnh rmi ghcr.io/o/gen-harness-db@sha256:d1", got, n)
+	}
+}
+
+// Tập giữ chỉ có TAG (bản genh cũ chưa ghim digest) ⇒ không biết digest nào là của
+// ảnh giữ ⇒ giữ theo ID cho repo đó như trước: dòng digest cùng ID không bị rmi,
+// chỉ tag cũ khác ID bị gỡ.
+func TestPruneOldImages_KeepByTag_KeepsSameIDDigestRows(t *testing.T) {
+	keep := []byte("services:\n  db:\n    image: ghcr.io/o/gen-harness-db:v0.1.50\n")
+	fr := &fake.Runner{Responses: []fake.Response{
+		{Match: exactArgs("images"), Output: imagesListing(
+			"ghcr.io/o/gen-harness-db\tv0.1.50\t<none>\tid-same",
+			"ghcr.io/o/gen-harness-db\t<none>\tsha256:x1\tid-same",
+			"ghcr.io/o/gen-harness-db\t<none>\tsha256:x2\tid-same",
+			"ghcr.io/o/gen-harness-db\tv0.1.40\t<none>\tid-old",
+		)},
+		{Match: exactArgs("rmi"), Output: []byte("")},
+	}}
+	n, err := pruneOldImages(context.Background(), fr, [][]byte{keep}, &strings.Builder{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := rmiRefs(fr); strings.Join(got, ",") != "ghcr.io/o/gen-harness-db:v0.1.40" || n != 1 {
+		t.Errorf("rmi = %v (n=%d), muốn chỉ tag cũ v0.1.40 (dòng digest cùng ID giữ theo ID)", got, n)
+	}
+}
+
+// Chuyển tiếp: bản hiện tại ghim digest, bản liền trước còn dùng TAG ⇒ dòng giữ nhờ
+// tag kéo theo dòng digest cùng ID của repo ấy (có thể chính là digest của nó);
+// digest khác ID vẫn bị gỡ.
+func TestPruneOldImages_CurrentDigestPreviousTag_KeepsSameIDAsTag(t *testing.T) {
+	current := []byte("services:\n  db:\n    image: ghcr.io/o/gen-harness-db@sha256:d3\n")
+	previous := []byte("services:\n  db:\n    image: ghcr.io/o/gen-harness-db:v0.1.34\n")
+	fr := &fake.Runner{Responses: []fake.Response{
+		{Match: exactArgs("images"), Output: imagesListing(
+			"ghcr.io/o/gen-harness-db\t<none>\tsha256:d3\tid-cur",
+			"ghcr.io/o/gen-harness-db\tv0.1.34\t<none>\tid-prev",
+			"ghcr.io/o/gen-harness-db\t<none>\tsha256:dp\tid-prev",
+			"ghcr.io/o/gen-harness-db\t<none>\tsha256:d1\tid-old",
+		)},
+		{Match: exactArgs("rmi"), Output: []byte("")},
+	}}
+	n, err := pruneOldImages(context.Background(), fr, [][]byte{current, previous}, &strings.Builder{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := rmiRefs(fr); strings.Join(got, ",") != "ghcr.io/o/gen-harness-db@sha256:d1" || n != 1 {
+		t.Errorf("rmi = %v (n=%d), muốn chỉ digest d1 (khác ID)", got, n)
+	}
+}
+
+// Ảnh ngoài (redis) ghim digest, 2 digest giữ + 1 digest cũ không tag, cùng ID ⇒ gỡ digest
+// cũ; dòng có tag cùng ID (redis:7-alpine của bản genh cũ/dự án khác) không bao giờ đụng.
+func TestPruneOldImages_PinnedThirdPartySameID_RemovesOldDigestRef(t *testing.T) {
+	current := ghDigestCompose("sha256:d3", "sha256:r3")
+	previous := ghDigestCompose("sha256:d2", "sha256:r2")
+	fr := &fake.Runner{Responses: []fake.Response{
+		{Match: exactArgs("images"), Output: imagesListing(
+			"ghcr.io/o/gen-harness-db\t<none>\tsha256:d3\tid-db",
+			"ghcr.io/o/gen-harness-db\t<none>\tsha256:d2\tid-db",
+			"redis\t<none>\tsha256:r3\tid-redis",
+			"redis\t<none>\tsha256:r2\tid-redis",
+			"redis\t<none>\tsha256:r1\tid-redis",
+			"redis\t7-alpine\tsha256:rt\tid-redis",
+		)},
+		{Match: exactArgs("rmi"), Output: []byte("")},
+	}}
+	n, err := pruneOldImages(context.Background(), fr, [][]byte{[]byte(current), []byte(previous)}, &strings.Builder{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := rmiRefs(fr); strings.Join(got, ",") != "redis@sha256:r1" || n != 1 {
+		t.Errorf("rmi = %v (n=%d), muốn chỉ redis@sha256:r1", got, n)
+	}
+}

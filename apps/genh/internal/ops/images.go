@@ -79,6 +79,17 @@ func familiarRepo(repo string) string {
 //     bản genh cũ kéo theo tag, redis:6 của dự án khác…) không bao giờ đụng;
 //   - tập giữ không có ref gen-harness nào (compose dùng build: cục bộ/dev)
 //     → không xoá gì, kể cả ảnh ngoài;
+//   - QUYẾT ĐỊNH GIỮ/XOÁ THEO CHÍNH THAM CHIẾU của dòng (repo@digest hoặc
+//     repo:tag có trong tập giữ), KHÔNG theo IMAGE ID. Mỗi bản phát hành đẩy
+//     manifest mới nên digest đổi dù ảnh không đổi nội dung (vd gen-harness-db
+//     qua v0.1.48→v0.1.50: 3 digest, CÙNG một ID); nếu giữ theo ID thì tham chiếu
+//     digest CŨ nằm ngoài tập giữ cũng được "ké" và không bao giờ bị gỡ → danh sách
+//     ảnh dài dần (cổng E2E v0.1.50 đỏ). `docker rmi repo@digest` chỉ GỠ THAM
+//     CHIẾU đó; lớp ảnh vẫn còn vì còn tham chiếu khác của bản giữ (không mất dữ
+//     liệu, container đang chạy không ảnh hưởng). Ngoại lệ an toàn: dòng giữ nhờ
+//     TAG (bản genh cũ chưa ghim digest) không cho biết digest nào là của nó →
+//     mọi dòng cùng ID TRONG CÙNG repo ấy cũng giữ như trước; chỉ khi tập giữ có
+//     digest cho dòng/repo thì mới so theo digest;
 //   - `docker rmi` KHÔNG -f; ảnh đang dùng (rmi lỗi — kể cả container đã dừng
 //     của dự án khác) chỉ in một dòng rồi bỏ qua.
 //
@@ -142,16 +153,25 @@ func pruneOldImages(ctx context.Context, runner dockercli.Runner, keep [][]byte,
 		rows = append(rows, r)
 	}
 
+	// Dòng thuộc tập giữ theo CHÍNH tham chiếu của nó (digest hoặc tag).
+	byOwnRef := func(r row) (byDigest, byTag bool) {
+		byDigest = r.digest != "" && r.digest != "<none>" && keepKeys[r.repo+"@"+r.digest]
+		byTag = r.tag != "" && r.tag != "<none>" && keepKeys[r.repo+":"+r.tag]
+		return byDigest, byTag
+	}
+	// keepIDs (khoá theo repo, KHÔNG dùng chung giữa các repo) chỉ để giữ các dòng
+	// cùng ID với dòng giữ nhờ TAG: lúc đó không biết digest nào là của ảnh giữ.
+	// Dòng giữ nhờ digest KHÔNG kéo theo dòng khác cùng ID — digest cũ phải bị gỡ.
 	keepIDs := map[string]bool{}
 	for _, r := range rows {
-		if (r.digest != "<none>" && keepKeys[r.repo+"@"+r.digest]) || (r.tag != "<none>" && keepKeys[r.repo+":"+r.tag]) {
-			keepIDs[r.id] = true
+		if _, byTag := byOwnRef(r); byTag {
+			keepIDs[r.repo+"\x00"+r.id] = true
 		}
 	}
 
 	tried := map[string]bool{}
 	for _, r := range rows {
-		if keepIDs[r.id] {
+		if byDigest, byTag := byOwnRef(r); byDigest || byTag || keepIDs[r.repo+"\x00"+r.id] {
 			continue
 		}
 		if !r.gh && r.tag != "" && r.tag != "<none>" {
