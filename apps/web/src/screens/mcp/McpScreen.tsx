@@ -182,7 +182,9 @@ function ServerCard({ server: s, tools, canManage, onEdit, onTest }: { server: M
         <Icon name="ph ph-plugs-connected" size={16} color={healthTone(s.health)} />
         <div className="mcp-server__title">
           <div className="mcp-server__name">{s.name}</div>
-          <div className="mcp-server__kind">{TRANSPORT_LABEL[s.transport]} · {s.endpoint}</div>
+          <div className="mcp-server__kind" title={`${TRANSPORT_LABEL[s.transport]} · ${s.endpoint}`}>
+            {TRANSPORT_LABEL[s.transport]} · {s.endpoint}
+          </div>
         </div>
         <StateChip color={healthTone(s.health)} dot>
           {healthLabel(s.health)}
@@ -313,7 +315,7 @@ function ToolRow({ tool: t, canManage, hintId, onTest }: { tool: McpTool; canMan
   return (
     <tr data-tool={t.name} data-exposed={t.is_exposed ? '' : undefined}>
       <td className="mcp-tool-table__name mono">{t.name}</td>
-      <td>
+      <td data-label="Loại">
         {canManage ? (
           <>
             <select
@@ -365,15 +367,15 @@ function ToolRow({ tool: t, canManage, hintId, onTest }: { tool: McpTool; canMan
           <StateChip color={t.access === 'write' ? WARN : N5}>{ACCESS_LABEL[t.access]}</StateChip>
         )}
       </td>
-      <td>
+      <td data-label="Mở">
         {canManage ? (
           <Switch checked={t.is_exposed} disabled={expose.isPending} label={`${t.is_exposed ? 'Đóng' : 'Mở'} tool ${t.name}`} onChange={(v) => expose.mutate({ id: t.id, isExposed: v })} />
         ) : (
           <StateChip color={t.is_exposed ? OK : N5}>{t.is_exposed ? 'Đã mở' : 'Đóng'}</StateChip>
         )}
       </td>
-      <td>{t.grants.length ? `${t.grants.length} agent` : <span style={{ color: N5 }}>Chưa cấp</span>}</td>
-      <td>
+      <td data-label="Cấp cho">{t.grants.length ? `${t.grants.length} agent` : <span style={{ color: N5 }}>Chưa cấp</span>}</td>
+      <td className="mcp-tool-table__test">
         <Button variant="ghost" className="btn-22" icon="ph ph-play" onClick={onTest}>
           Gọi thử
         </Button>

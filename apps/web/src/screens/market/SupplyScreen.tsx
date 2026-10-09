@@ -130,7 +130,7 @@ function SignalRow({ s }: { s: MarketSignal }) {
             {fmtInt(s.heat)}
           </span>
         ) : null}
-        <span className="sup-row__item">{s.item}</span>
+        <span className="sup-row__item" title={s.item}>{s.item}</span>
         <span className="sup-row__value">{fmtVnd(s.value_vnd)}</span>
       </div>
       <div className="sup-row__line">

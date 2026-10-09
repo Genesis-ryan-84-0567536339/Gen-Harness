@@ -42,7 +42,7 @@ export function OrgTab() {
     );
   }
   return (
-    <Panel
+    <Panel flush
       title="Tổ chức & xưng hô"
       kicker="Như bước 3 của trình thiết lập · chỉ Owner sửa · ghi Nhật ký hành động"
       label="Tổ chức & xưng hô"

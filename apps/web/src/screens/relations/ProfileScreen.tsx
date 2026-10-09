@@ -117,7 +117,7 @@ function ProfileBody({ id, p }: { id: string; p: Profile }) {
 
       <div className="pf-grid">
         <div className="pf-col">
-          <Panel title="Hệ thống hiểu gì về đối tượng này" kicker="Tóm tắt tự cập nhật">
+          <Panel flush title="Hệ thống hiểu gì về đối tượng này" kicker="Tóm tắt tự cập nhật">
             {p.summary.length === 0 ? (
               <EmptyState icon="ph ph-brain" title="Chưa có tóm tắt" description="Cần thêm tin nhắn có nội dung để hệ thống tóm tắt." />
             ) : (
@@ -132,7 +132,7 @@ function ProfileBody({ id, p }: { id: string; p: Profile }) {
             )}
           </Panel>
 
-          <Panel title="Dòng sự kiện" kicker="Sự kiện có nghĩa, không phải log tin nhắn">
+          <Panel flush title="Dòng sự kiện" kicker="Sự kiện có nghĩa, không phải log tin nhắn">
             {p.timeline.length === 0 ? (
               <EmptyState icon="ph ph-clock-counter-clockwise" title="Chưa có sự kiện nào" />
             ) : (
@@ -143,7 +143,9 @@ function ProfileBody({ id, p }: { id: string; p: Profile }) {
                     <span className="mono-tag" style={{ color: eventTone(tl.event_type) }}>
                       {tl.event_type}
                     </span>
-                    <span className="pf-timeline__detail">{tl.conclusion}</span>
+                    <span className="pf-timeline__detail" title={tl.conclusion}>
+                      {tl.conclusion}
+                    </span>
                     <WhyButton kind="meaning_unit" id={tl.id} icon={null} size="sm">
                       Chứng cứ
                     </WhyButton>
@@ -155,7 +157,7 @@ function ProfileBody({ id, p }: { id: string; p: Profile }) {
         </div>
 
         <div className="pf-col">
-          <Panel title="Mức tự trị với đối tượng này" kicker="Trợ lý được làm tới đâu với người này">
+          <Panel flush title="Mức tự trị với đối tượng này" kicker="Trợ lý được làm tới đâu với người này">
             <div className="pf-autonomy">
               <AutonomySteps level={p.autonomy_level} />
               <p className="pf-autonomy__desc">
@@ -171,7 +173,7 @@ function ProfileBody({ id, p }: { id: string; p: Profile }) {
             </div>
           </Panel>
 
-          <Panel title="Tài liệu đã trao đổi" kicker="Tài liệu">
+          <Panel flush title="Tài liệu đã trao đổi" kicker="Tài liệu">
             {p.documents.length === 0 ? (
               <EmptyState icon="ph ph-files" title="Chưa có tài liệu nào" />
             ) : (
@@ -189,7 +191,7 @@ function ProfileBody({ id, p }: { id: string; p: Profile }) {
             )}
           </Panel>
 
-          <Panel title="Người nội bộ từng chạm" kicker="Người trong công ty">
+          <Panel flush title="Người nội bộ từng chạm" kicker="Người trong công ty">
             {p.touchpoints.length === 0 ? (
               <EmptyState icon="ph ph-users-three" title="Chưa ai từng chạm hồ sơ này" />
             ) : (
@@ -204,7 +206,7 @@ function ProfileBody({ id, p }: { id: string; p: Profile }) {
             )}
           </Panel>
 
-          <Panel title="Ghi chú tay của Sếp" kicker="Hệ thống không sửa">
+          <Panel flush title="Ghi chú tay của Sếp" kicker="Hệ thống không sửa">
             {p.owner_note ? <p className="pf-note">{p.owner_note}</p> : <EmptyState icon="ph ph-note-pencil" title="Chưa có ghi chú" />}
           </Panel>
         </div>

@@ -102,8 +102,10 @@
 .gh-tab__count { font-size: 10.5px; color: var(--color-neutral-500); font-family: var(--font-mono); font-weight: 400; }
 
 /* ── Segmented ──────────────────────────────────────────────────────────── */
+/* Sau v0.1.49: hẹp hơn dải lựa chọn (vd Bản đồ quan hệ ở điện thoại) thì xuống dòng TRONG khung — không tràn trang, cũng
+   không cuộn ngang ẩn mất lựa chọn cuối. Đủ chỗ thì không đổi gì (max-width chỉ chặn khi rộng hơn cha). */
 .gh-seg {
-  display: flex; align-items: center; gap: 2px; flex: none;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 2px; flex: none; max-width: 100%;
   border: 1px solid var(--color-neutral-800); border-radius: var(--radius-md); padding: 2px;
 }
 .gh-seg__opt {

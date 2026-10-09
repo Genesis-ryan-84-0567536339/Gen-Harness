@@ -170,7 +170,7 @@ function GroupsPane() {
                     {rows.map((g) => (
                       <tr key={g.id}>
                         <td className="td-id">{g.code}</td>
-                        <td>{g.name}</td>
+                        <td className="dir-grp-name">{g.name}</td>
                         <td>
                           <span className="mono-tag">{GROUP_KIND_LABEL[g.kind] ?? g.kind}</span>
                         </td>

@@ -205,7 +205,7 @@ function WeightsCard({ canManage }: { canManage: boolean }) {
   };
 
   return (
-    <Panel genTarget="rules.weights" title="Trọng số chấm điểm" kicker="Dùng chung cho mọi đối tượng" label="Trọng số chấm điểm">
+    <Panel flush genTarget="rules.weights" title="Trọng số chấm điểm" kicker="Dùng chung cho mọi đối tượng" label="Trọng số chấm điểm">
       {weights.isPending ? (
         <SkeletonLines rows={6} padding="13px 16px 15px" gap={11} />
       ) : weights.isError ? (
@@ -277,7 +277,7 @@ function TestCard() {
   const code = text !== null ? 'tự nhập' : (test.data?.input.code ?? seedItem?.code ?? '');
 
   return (
-    <Panel
+    <Panel flush
       genTarget="rules.tryone"
       title="Chạy thử một bản ghi"
       kicker="Thô vào — sạch ra"

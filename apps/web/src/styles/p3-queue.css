@@ -64,7 +64,9 @@
 @media (min-width: 1025px) {
   .ov-bottom-grid:has(> .ov-ai-cost) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
-.ov-health, .ov-dq { display: flex; flex-direction: column; gap: 11px; padding: 4px 0; }
+/* Sau v0.1.49: hai thẻ này nằm trong .gh-card__body mặc định của Panel (15px 16px) — trước đây con nằm thẳng trong
+   thẻ với padding 4px 0 nên chấm/nhãn dính mép trái, số liệu dính mép phải. */
+.ov-health, .ov-dq { display: flex; flex-direction: column; gap: 11px; }
 .ov-health__row { display: flex; align-items: center; gap: 9px; }
 .ov-health__dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
 .ov-health__name { flex: 1; min-width: 0; font-size: 11.5px; color: var(--color-neutral-300); }
@@ -137,7 +139,8 @@
 .tk-row { display: flex; align-items: flex-start; gap: 10px; padding: 11px 16px; border-bottom: 1px solid var(--color-divider); }
 .tk-row:last-child { border-bottom: none; }
 .tk-row--overdue { box-shadow: inset 2px 0 0 var(--color-bad); background: var(--color-bad-tint); }
-.tk-row__status { flex: none; background: none; border: none; padding: 2px 0 0; cursor: pointer; }
+/* Khung chỉ-icon: flex (không để hộp dòng của nút đội cao 18→21px, vòng trạng thái thấp hơn dòng tiêu đề). */
+.tk-row__status { flex: none; display: flex; background: none; border: none; padding: 2px 0 0; cursor: pointer; }
 .tk-row__body { flex: 1; min-width: 0; }
 .tk-row__title { font-size: 12.5px; color: var(--color-text); line-height: 1.4; text-wrap: pretty; }
 .tk-row__meta { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 4px; font-size: 10.5px; color: var(--color-neutral-500); }
@@ -219,6 +222,21 @@
 @media (max-width: 760px) { .boss-row__body { grid-template-columns: 1fr; padding-left: 0; } }
 
 /* Cập nhật phiên bản (Tổng quan) */
+/* Sau v0.1.49: dòng báo bản mới ở Hôm nay (UpdateNotice, có từ v0.1.42) trước KHÔNG có quy tắc CSS nào — <a> chứa icon
+   display:block nên icon / chữ / mũi tên xếp 3 dòng, dính mép trái vùng nội dung. Nay là một dải gọn như các thẻ khác. */
+.upd-notice {
+  display: flex; align-items: center; gap: 9px; padding: 10px 14px; min-width: 0;
+  border: 1px solid var(--color-divider); border-left: 3px solid var(--upd-tone, var(--color-accent));
+  border-radius: var(--radius-md); background: var(--color-surface);
+  font-size: 12px; line-height: 1.45; color: var(--color-text); text-decoration: none;
+}
+.upd-notice:hover { border-color: var(--color-neutral-700); border-left-color: var(--upd-tone, var(--color-accent)); }
+.upd-notice > svg:first-child { color: var(--upd-tone, var(--color-accent)); }
+.upd-notice > svg:last-child { margin-left: auto; color: var(--color-neutral-500); }
+.upd-notice__text { flex: 1; min-width: 0; text-wrap: pretty; overflow-wrap: anywhere; }
+.upd-notice[data-tone='ok'] { --upd-tone: var(--color-ok); }
+.upd-notice[data-tone='warn'] { --upd-tone: var(--color-warn); }
+.upd-notice[data-tone='bad'] { --upd-tone: var(--color-bad); }
 .upd-card--accent { border-color: var(--color-accent); }
 .upd-card--ok { border-color: var(--color-ok); }
 .upd-card--warn { border-color: var(--color-warn); }
@@ -256,13 +274,14 @@
 /* ── v0.1.41 (F-84): Chi phí AI hôm nay (Tổng quan › Sức khoẻ) ─────────────── */
 .ov-ai-cost { min-width: 0; outline: none; scroll-margin-top: 16px; }
 .ov-ai-cost__card { height: 100%; }
-.ov-ai-cost__body { display: flex; flex-direction: column; gap: 9px; padding: 4px 0; }
+.ov-ai-cost__body { display: flex; flex-direction: column; gap: 9px; }
 .ov-ai-cost__total { display: flex; align-items: baseline; gap: 10px; }
 .ov-ai-cost__total > b { font-family: var(--font-mono); font-size: 20px; font-weight: 600; color: var(--color-text); }
 .ov-ai-cost__over { font-size: 10.5px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--color-bad); color: var(--color-bad); }
 .ov-ai-cost__bar { height: 5px; border-radius: 3px; background: var(--color-neutral-800); overflow: hidden; }
 .ov-ai-cost__bar > span { display: block; height: 100%; background: var(--color-ok); }
 .ov-ai-cost__body[data-over='yes'] .ov-ai-cost__bar > span { background: var(--color-bad); }
+/* Bảng nằm trong .gh-card__body (đệm 16px) — ô đầu/cuối không cần đệm ngang riêng, chữ đã cách mép thẻ 16px. */
 .ov-ai-cost__table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
 .ov-ai-cost__table th { text-align: left; font-weight: 500; font-size: 10.5px; color: var(--color-neutral-500); padding: 3px 0; }
 .ov-ai-cost__table td { padding: 3px 0; color: var(--color-neutral-300); }

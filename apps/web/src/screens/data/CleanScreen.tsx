@@ -445,7 +445,7 @@ function ParamsCard({ row, loading }: { row: CleanItem | null; loading: boolean 
     enabled: !!row,
   });
   return (
-    <Panel title="Tham số agent đang dùng" kicker="Đầu vào quyết định nội dung phản hồi" label="Tham số agent đang dùng">
+    <Panel flush title="Tham số agent đang dùng" kicker="Đầu vào quyết định nội dung phản hồi" label="Tham số agent đang dùng">
       {loading || (row && params.isPending) ? (
         <SkeletonLines rows={6} padding="12px 16px" gap={12} />
       ) : !row ? (
