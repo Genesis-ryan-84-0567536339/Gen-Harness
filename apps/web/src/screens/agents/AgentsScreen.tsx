@@ -109,7 +109,7 @@ function AgentCard({
         </div>
         <div className="ag-card__title">
           <div className="ag-card__name">{agent.name}</div>
-          <div className="ag-card__role">{agent.role_desc}</div>
+          <div className="ag-card__role" title={agent.role_desc}>{agent.role_desc}</div>
         </div>
         {canManage ? (
           <Switch
@@ -135,7 +135,7 @@ function AgentCard({
         <span className="ag-autonomy" title={`Mức ${agent.autonomy_level} — ${AUTONOMY_LEVELS[agent.autonomy_level] ?? ''}`}>
           {autonomyChoice(agent.autonomy_level)?.label ?? `mức ${agent.autonomy_level}`}
         </span>
-        <span className="ag-card__spoke">{lastSpoke(agent.id, decisions)}</span>
+        <span className="ag-card__spoke" title={lastSpoke(agent.id, decisions)}>{lastSpoke(agent.id, decisions)}</span>
         <Button variant="ghost" className="btn-22" onClick={onEdit} aria-label={`${canManage ? 'Sửa' : 'Xem'} agent ${agent.name}`}>
           {canManage ? 'Sửa' : 'Xem'}
         </Button>
@@ -179,7 +179,7 @@ function DecisionsPanel() {
           <div className="ag-log-row" key={d.id}>
             <span className="ag-log-row__time">{fmtDMClock(d.at)}</span>
             <span className="ag-log-row__agent">{d.agent.name}</span>
-            <span className="ag-log-row__what" style={{ color: decisionTone(d.decision) }}>
+            <span className="ag-log-row__what" style={{ color: decisionTone(d.decision) }} title={decisionWhat(d)}>
               {decisionWhat(d)}
             </span>
           </div>
@@ -205,7 +205,7 @@ function TemplatesPanel({ canManage, onUseTemplate }: { canManage: boolean; onUs
               <div className="ag-template-row__name" style={{ color: t.default_enabled ? undefined : 'var(--color-neutral-500)' }}>
                 {t.name}
               </div>
-              <div className="ag-template-row__note">{t.role_desc}</div>
+              <div className="ag-template-row__note" title={t.role_desc}>{t.role_desc}</div>
             </div>
             {canManage ? (
               <Button variant="ghost" className="btn-22" onClick={() => onUseTemplate(t)}>

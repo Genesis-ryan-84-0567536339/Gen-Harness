@@ -51,7 +51,7 @@ export function PipelineStrip({ screen }: { screen: DataScreen }) {
                 </div>
                 <div className="pipe-card__head">
                   <div className="pipe-card__step">Bước {c.step}</div>
-                  <div className="pipe-card__name">{c.name}</div>
+                  <div className="pipe-card__name" title={c.name}>{c.name}</div>
                 </div>
                 {!c.last ? <Icon name="ph ph-caret-double-right" size={14} className="pipe-card__arrow" /> : null}
               </div>

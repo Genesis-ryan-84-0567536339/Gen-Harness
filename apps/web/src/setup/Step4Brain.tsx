@@ -168,12 +168,9 @@ export function Step4Brain({ meta, description, onBack, onSaved, formRef, onSkip
                 <div className="prov-row" key={p.id} data-ready={isReady || undefined}>
                   <span className="prov-rank">{isReady ? `${i + 1}.` : '–'}</span>
                   <div className="setup-row__main">
-                    <div className="setup-row__title">{p.name}</div>
-                    <div className="setup-row__meta">
-                      {isCliKind(p.kind)
-                        ? PROVIDER_KIND_LABEL[p.kind]
-                        : `${fmtInt(p.keys.length)} khoá${p.keys[0] ? ` · …${p.keys[0].last4}` : ''}`}
-                      {p.models.length ? ` · ${p.models.map((m) => choiceText(m.model_name, m.effort)).join(', ')}` : ''}
+                    <div className="setup-row__title" title={p.name}>{p.name}</div>
+                    <div className="setup-row__meta" title={provMeta(p)}>
+                      {provMeta(p)}
                     </div>
                     {t ? (
                       <div className="prov-test" style={{ color: t.ok ? 'var(--color-ok)' : 'var(--color-bad)' }} role="status">
@@ -224,6 +221,12 @@ export function Step4Brain({ meta, description, onBack, onSaved, formRef, onSkip
       </div>
     </StepFrame>
   );
+}
+
+/** Dòng phụ của hàng nguồn AI (loại/khoá · model) — hiện và làm `title` khi bị cắt "…". */
+function provMeta(p: Provider): string {
+  const head = isCliKind(p.kind) ? PROVIDER_KIND_LABEL[p.kind] : `${fmtInt(p.keys.length)} khoá${p.keys[0] ? ` · …${p.keys[0].last4}` : ''}`;
+  return `${head}${p.models.length ? ` · ${p.models.map((m) => choiceText(m.model_name, m.effort)).join(', ')}` : ''}`;
 }
 
 function AddProvider({ onAdded }: { onAdded: (p: Provider) => void }) {
@@ -387,7 +390,7 @@ function CliAccountSection({ kind, onlyAgyReady = false }: { kind: CliKind; only
             {active ? emailInitials(active.email) : '—'}
           </div>
           <div className="setup-row__main">
-            <div className="setup-row__title">{active ? cliAccountLabel(active) : claude ? 'Chưa bật' : 'Chưa đăng nhập'}</div>
+            <div className="setup-row__title" title={active ? cliAccountLabel(active) : undefined}>{active ? cliAccountLabel(active) : claude ? 'Chưa bật' : 'Chưa đăng nhập'}</div>
             <div className="cli-meta">
               {active ? cliMeta(active, now) : claude ? txt.empty : 'Đăng nhập Google để hệ thống dùng AI qua tài khoản của Sếp.'}
             </div>

@@ -182,7 +182,9 @@ function ServerCard({ server: s, tools, canManage, onEdit, onTest }: { server: M
         <Icon name="ph ph-plugs-connected" size={16} color={healthTone(s.health)} />
         <div className="mcp-server__title">
           <div className="mcp-server__name">{s.name}</div>
-          <div className="mcp-server__kind">{TRANSPORT_LABEL[s.transport]} · {s.endpoint}</div>
+          <div className="mcp-server__kind" title={`${TRANSPORT_LABEL[s.transport]} · ${s.endpoint}`}>
+            {TRANSPORT_LABEL[s.transport]} · {s.endpoint}
+          </div>
         </div>
         <StateChip color={healthTone(s.health)} dot>
           {healthLabel(s.health)}

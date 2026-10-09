@@ -3214,3 +3214,55 @@ Sếp xác nhận bằng mã PIN, có bằng chứng bằng ảnh chụp, và d�
      "tick thêm quyền…" thì làm lại bước 1–2.
   4. (Tuỳ chọn) Hỏi Gen: "Deal nào đang mở?", "Có tài liệu báo giá nào mới?", "Hôm nay tôi có lịch gì?" — chỉ tài khoản Owner
      hỏi được. Rủi ro Owner tự quyết: nội dung lịch/mail (đã che) đi sang model đám mây như Kho.
+
+
+## Sửa trình bày: nội dung dính biên khung (sau v0.1.48) (09/10/2026)
+
+- **Vì sao**: ảnh máy Boss (v0.1.44, ~2000px, giao diện tối) cho thấy nhiều thẻ có chữ/số dính sát mép thẻ (Hôm nay: Sức khoẻ
+  hệ thống, Chất lượng dữ liệu, Chi phí AI hôm nay; Cài đặt: Sức khoẻ hệ thống, Truy cập từ xa) và khối "Máy chủ chưa nhận yêu
+  cầu cập nhật — xem ở Cài đặt" vỡ 3 dòng. Quét tự động 45+ route × 4 cỡ màn đo bằng hộp chữ thật xác nhận và tìm thêm lỗi cùng họ.
+  Không có media query nào làm mất đệm ở bề rộng lớn (chỉ có `min-width: 761px`/`1025px` không đụng đệm; `--space-content-pad`
+  22px cố định) — lỗi giống nhau ở mọi cỡ.
+- **Gốc rễ** (gom theo chỗ dùng chung, không vá từng màn):
+  1. `Panel` (`apps/web/src/screens/common.tsx`) khi không có `bodyClass` đặt con thẳng vào thẻ, không thân bọc; còn các lớp
+     thân `bodyClass` kiểu `padding: X 0` dựa vào hàng tự có đệm 16px — 4 thẻ mới trộn sai hai quy ước (thân 0 ngang + hàng
+     0 ngang): `.ov-health`/`.ov-dq` (`p3-queue.css`), `.ov-ai-cost__body` + bảng `th/td padding 3px 0`, `.health-card`
+     (`system.css`, dùng chung HealthCard + RemoteAccessCard), `.care-grid` (không có quy tắc nào, hàng chỉ đệm 4px).
+  2. `Icon` (`packages/ui/src/Icon.tsx`) luôn `display: block` ⇒ trong cha không flex/grid icon rớt dòng riêng: UpdateNotice
+     (`.upd-notice`/`.upd-notice__text` còn KHÔNG có quy tắc CSS nào từ v0.1.42), ghi chú token Telegram, PinHint "Cần mã PIN 6
+     số" (API, Bộ não AI, MCP, Hướng dẫn 4/10, thẻ Claude Code CLI), dd Token Gen-hub lệch hàng — chính là thứ trông như "dính
+     mép trái" ở các thẻ Kết nối Boss chụp.
+  3. Chữ một dòng `nowrap + ellipsis` không `title` (thẻ kênh "THỜI GIAN …", agent, API & Model, MCP, Cung ứng, Bảng cơ hội — số
+     tiền bị cắt, PipelineStrip, Hướng dẫn 4, Chủ đề đang nổi, tài khoản CLI, Chăm sóc, dòng sự kiện Hồ sơ sống).
+  4. Tràn ngang ở 390px: `.screen-head-actions { flex: none }` (Đồ thị 186px), `.pf-head__actions` không xuống dòng (Hồ sơ
+     sống 27px), `.setup-row` không wrap (Hướng dẫn 4 / Thiết lập bước 4), lệnh `genh remote cloudflare …` nowrap.
+  5. `/people` 641–1180px: lưới `.ppl-row` 5 cột cố định ép cột "Tín hiệu nổi bật" còn ~0px, chữ xếp dọc đè "Khuyến nghị";
+     chip "Đáng ngờ" tràn cột điểm 96px.
+- **Thay đổi**:
+  - `Panel`: mặc định bọc `.gh-card__body` (15px 16px); prop mới `flush` cho thẻ có con tự lo đệm (16 chỗ cũ: Sổ tay, Hồ sơ
+    sống ×6, Nhiệt kế hoạt động, Kho thô ×3, Quy tắc ×2, Kho sạch, Tổ chức) — giữ nguyên hình. Hôm nay: Sức khoẻ hệ thống,
+    Chất lượng dữ liệu, Chi phí AI dùng thân mặc định; `.ov-health/.ov-dq/.ov-ai-cost__body` bỏ `padding: 4px 0`.
+  - `.health-card` 12px 16px 14px (như `.upd/.bk/.offsite` cùng tab); `.care-grid` 6px 12px 10px; khối Chẩn đoán CLI trong thẻ
+    nguồn API có đệm 15px. Bảng trong thân có đệm (`.ov-ai-cost__table`, `.roles-matrix`) lấn 8px vào đệm thân, ô đầu/cuối đệm
+    8px — chữ vẫn thẳng hàng 16px với mép thẻ, không dính mép bảng (cả bản thẻ ở điện thoại).
+  - `Icon`: `display: inline-block; vertical-align: middle` (trong cha flex/grid không đổi gì). UpdateNotice có CSS: một dải
+    flex, viền trái theo tông (accent/ok/warn/bad), đệm 10px 14px, chữ xuống dòng gọn.
+  - Chữ cắt: thêm `title` ở 15 chỗ; nhãn số liệu thẻ kênh xuống dòng (giá trị dồn đáy ô); số tiền Bảng cơ hội không còn
+    "…" (mức tin cậy xuống dòng); dòng sự kiện Hồ sơ sống ở điện thoại xuống hàng riêng; lệnh `genh` dài xuống dòng trong ô.
+  - Tràn ngang: `.screen-head-actions` co + xuống dòng, Segmented quá rộng cuộn trong chính nó; `.pf-head__actions`,
+    `.setup-row`, `.gp-head-actions` wrap; `/people` 641–1180px Khuyến nghị xuống hàng 2, chip trong cột điểm xuống dòng.
+- **Lính gác** `apps/web/e2e/layout-guard.spec.ts` (chạy trong `npm run test:e2e`, ~2,3 phút): Owner, mọi màn trong
+  `packages/contracts/src/screens.ts` + tab chính (Hộp thư, Việc, Khách & Nhóm, Deal, Đánh giá con người, 5 tab Cài đặt) +
+  Hướng dẫn 4/5/6/10/viec-sep, Trợ giúp, Tài khoản, Mạng xã hội, 2 Hồ sơ sống, ở 1920/1440/1024/390; mock ép thẻ cập nhật
+  "chưa nhận yêu cầu" + 2 sự cố "Cần Sếp xử lý". Chỉ đo trong `<main>` (bỏ `header.hd`, thanh bên): (a) dính biên — hộp chữ
+  thật `Range.selectNodeContents(textNode)` so với khung gần nhất (border-left > 0 | radius + nền | `<main>` | `<table>`) < 6px,
+  bỏ khung ≤ 48×48 (avatar chữ viết tắt); (b) tràn ngang trang/`.content`/phần tử; (c) chữ một dòng bị cắt không `title`;
+  (d) Icon block rớt dòng trong cha không flex/grid. Ảnh mỗi route × cỡ + ảnh phóng ±40px mỗi phát hiện vào
+  `$LAYOUT_GUARD_SHOTS/<nhánh>/` (mặc định `test-results/layout-guard/`); lỗi ⇒ in bảng gom theo loại/route/selector + các cỡ.
+  `ALLOWLIST` rỗng — chỉ thêm khi đã xem ảnh và xác nhận dương tính giả, kèm lý do. Trên main (v0.1.49) guard bắt 62 phát hiện
+  (440 lượt); sau sửa: 0.
+- **Cố ý chưa sửa / ngoài phạm vi**: thẻ Telegram/Gen-hub/Facebook ở Kết nối và dải "Chưa có bản sao ngoài máy" — đo cách mép
+  16–36px, không tái hiện "dính mép" ngoài lỗi icon rớt dòng đã sửa; nếu máy Boss vẫn thấy, nghi CSS cũ trong bộ nhớ đệm — cần
+  ảnh mới sau bản này. Lớp chỉ làm móc (telegram-steps, telegram-host, help-about…) không có CSS nhưng không vỡ hình. Guard chưa
+  đo chữ đè chữ (lỗi `/people` 1024 đã sửa và xem bằng ảnh), cạnh trên/dưới, chữ trong `<select>`; `/setup?step=N` cần mock
+  "fresh" nên đo gián tiếp qua `/guide/4` (cùng component Step4Brain).

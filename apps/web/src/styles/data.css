@@ -4,7 +4,10 @@
 /* ── Screen head ────────────────────────────────────────────────────────── */
 .screen-head-block { flex: 1 1 320px; min-width: min(100%, 320px); }
 .screen-head-solo { min-width: 0; }
-.screen-head-actions { display: flex; align-items: center; gap: 9px; flex: none; }
+/* Sau v0.1.49: được co và xuống dòng (trước `flex: none` ⇒ nhóm nút rộng tràn ngang ở điện thoại, vd Đồ thị 186px);
+   dải Segmented quá rộng thì cuộn ngang trong chính nó thay vì đẩy cả trang. */
+.screen-head-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; flex: 0 1 auto; min-width: 0; max-width: 100%; }
+.screen-head-actions .gh-seg { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
 .btn-30 { height: 30px; }
 .inline-error { font-size: 11px; color: var(--color-bad); line-height: 1.45; }
 .inline-error:empty { display: none; }

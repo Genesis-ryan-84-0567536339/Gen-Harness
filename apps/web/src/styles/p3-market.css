@@ -31,8 +31,8 @@
 .opp-card__need { font-size: 11.5px; color: var(--color-text); line-height: 1.4; text-wrap: pretty; }
 .opp-card__who { font-size: 10.5px; color: var(--color-neutral-400); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .opp-card__divider { height: 1px; background: var(--color-divider); }
-.opp-card__row { display: flex; align-items: center; gap: 6px; }
-.opp-card__value { flex: 1; min-width: 0; font-size: 10.5px; color: var(--color-neutral-300); font-family: var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.opp-card__row { display: flex; align-items: center; gap: 2px 6px; flex-wrap: wrap; }
+.opp-card__value { flex: 1 0 auto; font-size: 10.5px; color: var(--color-neutral-300); font-family: var(--font-mono); white-space: nowrap; }
 .opp-card__conf { font-size: 10px; white-space: nowrap; }
 .opp-card__match { display: flex; align-items: flex-start; gap: 6px; font-size: 10px; color: var(--color-ok); line-height: 1.4; }
 .opp-card__match svg { flex: none; margin-top: 1px; }

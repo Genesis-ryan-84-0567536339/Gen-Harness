@@ -251,7 +251,7 @@ export function RawScreen() {
 
           <div className="side-col">
             <TriggerCard canManage={canManage} />
-            <Panel title="Thô theo nhóm nguồn" kicker="24 giờ · bấm để lọc bảng">
+            <Panel flush title="Thô theo nhóm nguồn" kicker="24 giờ · bấm để lọc bảng">
               {byGroup.isPending ? (
                 <SkeletonLines rows={5} padding="12px 16px 14px" gap={9} />
               ) : byGroup.isError ? (
@@ -344,7 +344,7 @@ function TriggerCard({ canManage }: { canManage: boolean }) {
   const now = useNow(1000, s.isSuccess);
   const [editing, setEditing] = useState(false);
   return (
-    <Panel
+    <Panel flush
       title="Kích hoạt sàng lọc"
       kicker="Theo chu kỳ hoặc theo số lượng — cái nào đến trước"
       aside={
@@ -387,7 +387,7 @@ function TriggerCard({ canManage }: { canManage: boolean }) {
 function RunsCard({ tz }: { tz: string }) {
   const runs = useRuns();
   return (
-    <Panel title="Chu kỳ gần nhất" kicker="Các lượt sàng lọc">
+    <Panel flush title="Chu kỳ gần nhất" kicker="Các lượt sàng lọc">
       {runs.isPending ? (
         <SkeletonLines rows={5} padding="12px 16px" gap={14} />
       ) : runs.isError ? (

@@ -22,7 +22,9 @@ export interface IconProps {
 export function Icon({ name, size = 16, color, weight, className, style, label }: IconProps) {
   const parsed = name.includes('ph') ? parseIconClass(name) : { name, weight: 'regular' as IconWeight };
   const Cmp = ICONS[parsed.name];
-  const boxStyle: CSSProperties = { width: size, height: size, flex: 'none', display: 'block', color, ...style };
+  // Sau v0.1.49: inline-block (không còn block) — Icon trong cha KHÔNG flex/grid (vd `<span class="muted-note"><Icon/> chữ</span>`,
+  // `<a class="upd-notice">`) trước đây rớt một dòng riêng phía trên chữ. Trong cha flex/grid (đa số chỗ dùng) không đổi gì.
+  const boxStyle: CSSProperties = { width: size, height: size, flex: 'none', display: 'inline-block', verticalAlign: 'middle', color, ...style };
   if (!Cmp) {
     return <span className={className} style={boxStyle} aria-hidden={label ? undefined : true} aria-label={label} data-icon={parsed.name} />;
   }
