@@ -1,6 +1,8 @@
 """Công cụ dữ liệu CHỈ ĐỌC của Gen (docs/design/gen-v1.md §3.4; v2 thêm task.list, staff.list;
 v0.1.25 thêm refinery.summary; v0.1.26 thêm hub.kho_* — đọc Kho Ryan qua Gen-hub, chỉ Owner, đã che trước khi vào
-model).
+model; v0.1.49 (QD-16) thêm document.*/deal.*/case.* — Tài liệu, Deal, Vụ việc nội bộ, và hub.calendar/tasks/
+mail_search/mail_read/drive_search — lịch, việc, mail, Drive Google qua Gen-hub; tất cả CHỈ ĐỌC, chỉ Owner, nội dung
+đã che trước khi vào model và coi là dữ liệu không tin cậy).
 
 Mỗi tool là lớp bọc mỏng quanh một endpoint GET đã có, gọi NỘI BỘ (ASGI, không qua mạng) bằng chính cookie phiên
 của người đang hỏi → tái dùng nguyên RBAC, phạm vi dữ liệu và lớp che của endpoint; Gen không có quyền riêng, không
@@ -82,6 +84,36 @@ TOOLS: dict[str, Tool] = {t.name: t for t in (
          {"q": None, "bang": None}, owner_only=True),
     Tool("hub.kho_get", "Một bản ghi Kho Ryan theo mã; args.ma (vd VIEC-12, QD-3, PHIEN-1)", ("system.manage",),
          "/hub/kho/records/{ma}", path_args=("ma",), path_patterns={"ma": r"^[A-Za-z]{2,6}-\d{1,6}$"},
+         owner_only=True),
+    # v0.1.49 (QD-16): Gen đọc lịch, việc, mail, Drive Google qua Gen-hub — CHỈ ĐỌC, chỉ Owner; endpoint (gh.hub_link)
+    # tự che nội dung và chặn mọi tool ghi. Mã mail phân biệt hoa/thường nên `hub.mail_read` đi bằng QUERY
+    # (path_patterns sẽ viết HOA giá trị).
+    Tool("hub.calendar", "Lịch Google của Sếp qua Gen-hub (chỉ đọc); args.day ∈ today|tomorrow",
+         ("system.manage",), "/hub/google/calendar", {"day": ("today", "tomorrow")}, owner_only=True),
+    Tool("hub.tasks", "Việc đang mở (Google Tasks) qua Gen-hub (chỉ đọc)", ("system.manage",),
+         "/hub/google/tasks", owner_only=True),
+    Tool("hub.mail_search", "Tìm mail (cú pháp Gmail, vd is:unread from:x) qua Gen-hub, chỉ đọc; trả id/tiêu đề/người "
+         "gửi/đoạn trích đã che; args.q", ("system.manage",), "/hub/google/mail/search", {"q": None}, owner_only=True),
+    Tool("hub.mail_read", "Đọc một mail theo args.id (lấy từ hub.mail_search), đã che", ("system.manage",),
+         "/hub/google/mail/message", {"id": None}, owner_only=True),
+    Tool("hub.drive_search", "Tìm tệp Google Drive theo tên (chỉ đọc, không đọc/sửa nội dung); args.q",
+         ("system.manage",), "/hub/google/drive/search", {"q": None}, owner_only=True),
+    # v0.1.49 (QD-16): Tài liệu, Deal, Vụ việc nội bộ — chỉ Owner; endpoint /gen/sources/* tái dùng phạm vi/ACL của
+    # cụm Quan hệ & Thị trường rồi che email/SĐT/số dài. Tài liệu chỉ siêu dữ liệu, không đọc nội dung tệp.
+    Tool("document.list", "Tài liệu nội bộ (báo giá, hợp đồng, tệp): tiêu đề, mô tả, người/nhóm gắn, nguồn; "
+         "args.source ∈ channel|agent|tay", ("profile.read",), "/gen/sources/documents",
+         {"source": ("channel", "agent", "tay")}, default_query={"limit": "20"}, owner_only=True),
+    Tool("document.get", "Siêu dữ liệu một tài liệu theo args.id (không đọc nội dung tệp)", ("profile.read",),
+         "/gen/sources/documents/{id}", path_args=("id",), owner_only=True),
+    Tool("deal.list", "Deal (thương vụ): mã, khách, số tiền, trạng thái; args.status ∈ open|won|lost",
+         ("opportunity.read",), "/gen/sources/deals", {"status": ("open", "won", "lost")},
+         default_query={"limit": "20"}, owner_only=True),
+    Tool("deal.get", "Một deal theo args.id", ("opportunity.read",), "/gen/sources/deals/{id}", path_args=("id",),
+         owner_only=True),
+    Tool("case.list", "Vụ việc (khiếu nại): mã, tiêu đề, mức ưu tiên, người xử lý; args.status, "
+         "args.priority ∈ P1|P2|P3", ("opportunity.read",), "/gen/sources/cases",
+         {"status": None, "priority": ("P1", "P2", "P3")}, default_query={"limit": "20"}, owner_only=True),
+    Tool("case.get", "Một vụ việc theo args.id", ("opportunity.read",), "/gen/sources/cases/{id}", path_args=("id",),
          owner_only=True),
     # Mạng xã hội — chỉ Owner. social.read xếp một lượt đọc trình duyệt (tính vào giới hạn 6 lượt/ngày; dùng lại lượt
     # vừa đọc trong 10 phút) rồi chờ ngắn; nội dung đã làm sạch + gắn cờ đáng ngờ. Muốn trả lời/nhắn thì Gen ĐỀ XUẤT

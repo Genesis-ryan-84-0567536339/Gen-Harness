@@ -548,7 +548,7 @@
       "id": "mcp.hub_link",
       "screen": "connections",
       "label": "Thẻ \"Gen-hub\"",
-      "description": "Nối Gen-hub để Gen đọc Kho Ryan (chỉ đọc, chỉ Sếp): địa chỉ, token, hạn token, trạng thái",
+      "description": "Nối Gen-hub để Gen đọc Kho Ryan, lịch, mail, việc, Drive (chỉ đọc, chỉ Sếp): địa chỉ, token, hạn token, trạng thái",
       "dynamic": null,
       "params": null,
       "permission": "system.manage"
