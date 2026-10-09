@@ -278,6 +278,13 @@ tin đọc nhân danh tổ chức **chỉ để gửi Owner**, Gen không đọc
 (`structuredContent`, `content[].text` là JSON, văn bản thường mỗi dòng một mục) thành mục gọn đã che: lịch `{start, all_day,
 title}`, mail `{id, from, subject, date}` (bỏ snippet/thân thư), việc `{id, title, due}`.
 
+Bản tin dùng (`gh/gen/briefing.py`, v0.1.49): ba mục "Lịch hôm nay" (`calendar_today`), "Mail cần trả lời" (`mail_reply`), "Việc
+đang mở" (`gtasks_open`, kind `tasks_open`) chèn ngay sau "Sự cố cần Sếp"; mỗi mục có `external: true`, `state` ok|empty|error|
+breaker, `detail`. Dòng: lịch `HH:MM · tiêu đề` giờ VN (cả ngày ⇒ `Cả ngày · tiêu đề`), mail `người gửi — tiêu đề` (bỏ phần
+`<địa chỉ>`), việc `tiêu đề — hạn dd/mm`. `off`/`missing_scope` ⇒ mục ẩn, gom thành MỘT dòng `hub_hint` + nút "Mở Gen-hub";
+tổ chức chưa từng có dòng `agent.hub_links` ⇒ không gọi, không nhắc. Web vẽ thẻ riêng từ `sections` (không có bước `say` cho
+mục Gen-hub); Telegram chỉ nhận số đếm.
+
 ### 6.8 Việc của Boss (một lần, ~2 phút)
 
 Trong Gen-hub › Agent & quyền › agent `gen-harness-<công ty>`: tick thêm `calendar_list_events`, `tasks_list`, `gmail_search`,

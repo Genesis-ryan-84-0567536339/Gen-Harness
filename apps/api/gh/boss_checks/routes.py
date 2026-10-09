@@ -8,6 +8,8 @@
   chính máy chủ → REMOTE_OPENED_ON_SERVER, còn lại Đạt)
   và GHI kết quả. Lỗi nghiệp vụ (chưa cấu hình, 409/429 từ dịch vụ, gọi thử lỗi) vẫn 200 với `status: 'fail'` + mã lỗi
   thống nhất; chỉ 401/403/422/423 mới ném. `hub` và `agy_switch` cần phiên PIN (423 → web hỏi PIN rồi gửi lại).
+- v0.1.49 (QD-16): `hub` lưu thêm `read_scopes` (lịch/mail/việc/Drive → bool) và `read_missing` (nhãn quyền còn
+  thiếu) vào `detail` — chỉ để hiển thị "Quyền đọc thêm (không bắt buộc)"; Đạt/Lỗi KHÔNG phụ thuộc các quyền này.
 - Phản hồi cho Owner được kèm email ĐẦY ĐỦ (`account`); CSDL chỉ lưu email đã che.
 - Lỗi TẠM (bận/hạn mức: `TRANSIENT_CODES`) KHÔNG ghi thành bản kiểm: trả `{transient: true, status: 'fail', …}` để web
   báo ngay cạnh nút, còn kết quả đã lưu (Đạt / Đang chạy…) giữ nguyên — bấm lại khi đang chạy không biến "Xong" thành
@@ -116,8 +118,12 @@ async def _run_hub(request: Request, db: AsyncSession, user: service.CurrentUser
     ok = bool(r["ok"])
     if not ok and r.get("error_code") in TRANSIENT_CODES:
         return transient("hub", str(r["error_code"]), r.get("error"))
+    # v0.1.49 (QD-16): quyền ĐỌC thêm (lịch/mail/việc/Drive) chỉ để hiển thị — KHÔNG quyết định Đạt/Lỗi.
+    scopes = r.get("read_scopes") or {}
     detail = {"latency_ms": r.get("latency_ms"), "exposed_tools": len(r.get("exposed_tools") or []),
-              "missing_tools": list(r.get("missing_tools") or [])}
+              "missing_tools": list(r.get("missing_tools") or []),
+              "read_scopes": {str(k): bool(v) for k, v in scopes.items()} if isinstance(scopes, dict) else {},
+              "read_missing": [str(x) for x in (r.get("read_missing") or [])]}
     return await boss.record(db, user.org_id, "hub", "pass" if ok else "fail",
                              error_code=None if ok else (r.get("error_code") or "HUB_ERROR"),
                              message=None if ok else r.get("error"), detail=detail, user_id=user.id)

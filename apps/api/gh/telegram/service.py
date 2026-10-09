@@ -441,12 +441,24 @@ def defang(s: str) -> str:
     return _MENTION_RE.sub("[@]", s)
 
 
+def _briefing_item(s: dict[str, Any]) -> str | None:
+    """Một dòng của mục bản tin. v0.1.49 (QD-16): mục Gen-hub (`external`) chỉ có SỐ ĐẾM — tiêu đề mail/lịch/việc
+    không ra Telegram; ngắt mạch mở ⇒ "Gen-hub tạm không trả lời"."""
+    count = int(s.get("count") or 0)
+    if s.get("external"):
+        if s.get("state") == "breaker":
+            return f"• {s['title']}: Gen-hub tạm không trả lời"
+        return f"• {s['title']} ({count})" if count > 0 else None
+    if count <= 0:
+        return None
+    return f"• {s['title']} ({count})" + (f": {defang(_line(s['lines'][0]))}" if s.get("lines") else "")
+
+
 def briefing_text(slot_label: str, summary: str | None, sections: list[dict[str, Any]]) -> str:
     lines = [f"Bản tin Gen · {slot_label}"]
     if summary:
         lines += ["", defang(summary.strip())]
-    items = [f"• {s['title']} ({s['count']})" + (f": {defang(_line(s['lines'][0]))}" if s.get("lines") else "")
-             for s in sections if int(s.get("count") or 0) > 0]
+    items = [x for x in (_briefing_item(s) for s in sections) if x is not None]
     lines += ["", *items] if items else ["", "Không có việc gì cần Sếp xử lý lúc này."]
     lines += ["", f"Mở Console: {public_url()}/overview", ONE_WAY]
     return "\n".join(lines)
