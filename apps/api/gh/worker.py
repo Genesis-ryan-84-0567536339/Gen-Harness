@@ -19,6 +19,8 @@
   18:30, 19:30 chỉ để bù khi worker lỡ giờ (idempotent theo khung giờ — không gửi lần hai; quá 3 giờ thì bỏ).
   Việc nền (sàng lọc, trực việc, bản tin) mặc định chỉ dùng khoá API (F-86, gh.providers.router).
 - v0.1.44 (F-8c): `telegram_flush` mỗi phút gửi hộp thư đi Telegram (bản tin + nhắc việc của Owner).
+- v0.1.49 (F-83): `hub_breaker_watch` mỗi 5 phút — Gen-hub không trả lời hơn 15 phút (ngắt mạch đã mở) ⇒ sự cố
+  `hub.breaker` + chuông Owner một lần (`gh.hub_link.service.breaker_watch`); tự đóng khi gọi lại được.
 """
 
 import asyncio
@@ -94,6 +96,7 @@ JOB_LABELS = {
     "scheduled_backup_scan": "Sao lưu theo lịch",
     "gen_briefing": "Bản tin Gen",
     "telegram_flush": "Gửi tin Telegram",
+    "hub_breaker_watch": "Theo dõi Gen-hub",
 }
 #: v0.1.44 (F-8c): lượt gửi hộp thư đi Telegram ngắn (≤ 20 tin, ngân sách 60 giây — gh.telegram.service).
 TELEGRAM_FLUSH_TIMEOUT = 90
@@ -349,6 +352,12 @@ async def hub_token_expiry_scan(ctx: dict[str, Any]) -> int:
     return n
 
 
+async def hub_breaker_watch(ctx: dict[str, Any]) -> int:
+    """v0.1.49 (F-83): Gen-hub không trả lời hơn 15 phút → sự cố `hub.breaker` + chuông Owner (một lần); hết sự cố
+    thì tự đóng. Chỉ đọc Redis + ghi `ops.health_alerts`, không gọi mạng."""
+    return await hub_link.breaker_watch(sessionmaker(), ctx["redis_bus"])
+
+
 async def social_schedule(ctx: dict[str, Any]) -> int:
     """v0.1.29: lịch đọc mạng xã hội (TẮT mặc định; Owner bật từng tài khoản, vd 08:00/17:00) — mỗi phút."""
     async with sessionmaker()() as db:
@@ -388,7 +397,7 @@ class WorkerSettings:
     on_shutdown = shutdown
     functions = [verify_action_log, partition_maintenance, detect_identities, compact_notebooks, expire_sessions,
                  purge_gen_conversations, purge_notifications, retention_sweep, hub_token_expiry_scan,
-                 social_schedule, social_session_check, gen_briefing, telegram_flush,
+                 hub_breaker_watch, social_schedule, social_session_check, gen_briefing, telegram_flush,
                  *(fn for fn, _ in _BIZ_JOBS), *BACKUP_FUNCTIONS]
     health_check_interval = 30
     job_timeout = JOB_TIMEOUT  # v0.1.40 (F-16): tường minh — `_cron` dùng cùng giá trị để nhận ra lần quá giờ
@@ -403,6 +412,7 @@ class WorkerSettings:
         _cron(expire_sessions, minute={20}),                     # mỗi giờ — dọn core.sessions (0014_v011_db)
         _cron(retention_sweep, hour={5}, minute={0}, timeout=1800),  # 05:00 giờ VN — dọn dữ liệu quá hạn (F-2)
         _cron(hub_token_expiry_scan, hour={8}, minute={50}),     # 08:50 giờ VN — nhắc token Gen-hub (nhẹ)
+        _cron(hub_breaker_watch, minute=set(range(0, 60, 5))),   # mỗi 5 phút — Gen-hub im > 15 phút (F-83)
         _cron(social_schedule, minute=set(range(60))),           # mỗi phút — lịch đọc mạng xã hội (tắt mặc định)
         _cron(social_session_check, hour={9}, minute={10}),      # 09:10 giờ VN — kiểm phiên mạng xã hội (F-83)
         # 07:30 / 17:30 giờ VN — Bản tin Gen (F-8b); các lượt sau trong 3 giờ chỉ bù khi lỡ giờ (idempotent)

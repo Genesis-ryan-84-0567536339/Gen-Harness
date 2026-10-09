@@ -14,6 +14,8 @@
 - **Đề xuất bản v0.1.26**: Gen đọc Kho (Việc đang mở, Quyết định, Phiên gần nhất) qua Gen-hub, chỉ-đọc, chỉ Owner.
   Boss chỉ cần: tạo 1 agent + token trong Gen-hub, dán vào Gen-Harness, bấm "Kiểm tra".
 - Jules: **Boss đã bỏ (30/09)**. Playwright vòng ngoài: chưa làm, chờ Boss quyết.
+- **v0.1.49 (QD-16, Boss duyệt 09/10/2026)**: Gen còn **đọc lịch, mail, việc, Drive Google** qua cùng liên kết Gen-hub
+  (vẫn chỉ đọc, chỉ Owner, đã che) + ngắt mạch riêng cho Gen-hub (F-83) — xem §6.
 
 ## 1. Ai là ai, ai giữ gì
 
@@ -168,3 +170,118 @@ Mỗi tổ chức (org) trong Gen-Harness có **token riêng** và agent riêng 
 3. Gen có được **đề xuất ghi** vào Gen-hub (tạo thẻ kanban, đăng warroom — luôn chờ Boss bấm)? — *Mặc định: Để v0.1.27, sau khi đọc chạy ổn 1 tuần.*
 4. **Jules**: dùng bao nhiêu tài khoản? — *Mặc định: 1 tài khoản, tối đa 5 việc/ngày, cho tới khi Boss xác nhận điều khoản nhiều tài khoản.*
 5. **Phương án B** (agent ngoài đọc số liệu Gen-Harness qua Gen-hub): làm không, cho những số nào? — *Mặc định: làm ở v0.1.27, chỉ Tổng quan + sức khoẻ hệ thống, không dữ liệu khách.*
+
+## 6. v0.1.49 — Gen đọc lịch, mail, việc, Drive qua Gen-hub (QD-16, F-83)
+
+> **QD-16 (Boss duyệt 09/10/2026)**: Gen **ĐỌC** lịch/mail/việc/Drive qua Gen-hub; nội dung đã che đi sang model đám
+> mây như Kho (gen-v1 §9.2); **tuyệt đối không ghi** lên Gen-hub/Google. Không migration, không phụ thuộc Python mới —
+> quyền đọc suy từ `agent.mcp_tools` + `agent.mcp_grants`, ngắt mạch nằm ở Redis.
+
+### 6.1 Danh sách cho phép (cố định trong code, `gh/hub_link/service.py`)
+
+| Nhóm | Hậu tố được gọi | Quyền đọc thêm (`read_scopes`) |
+|---|---|---|
+| Kho (bắt buộc: `kho_tom_tat`, `kho_search`, `kho_find_by_id`) | `kho_tom_tat`, `kho_search`, `kho_get`, `kho_find_by_id`, `kho_list` | — |
+| Lịch | `calendar_list_events` | `calendar` — "đọc lịch" |
+| Mail | `gmail_search`, `gmail_read_message` | `mail` — "đọc mail" (cần CẢ hai tool) |
+| Việc | `tasks_list` | `tasks` — "đọc việc (Google Tasks)" |
+| Drive | `drive_search` | `drive` — "tìm tệp Drive" |
+
+So **theo hậu tố** (Gen-hub đặt tiền tố theo connector, vd `mcp-46634__gmail_search`). Một quyền "có" khi MỌI hậu tố của nó có
+tool trên máy chủ liên kết, `access='read'`, đã mở (`is_exposed`) và đã cấp cho `core.gen`.
+
+### 6.2 Tool ghi bị từ chối — kể cả Owner
+
+`WRITE_SUFFIXES_DENY` = `gmail_send`, `gmail_create_draft`, `calendar_create_event`, `drive_create_file`,
+`drive_share_file`, `tasks_create`, `docs_edit`, `sheets_write`, `slides_add_slide`, `kho_create`, `kho_update`. Danh sách
+này **chỉ để ghi lý do và kiểm thử**; quy tắc thật là danh sách cho phép ở §6.1 (tool lạ — kể cả tool ĐỌC không có trong
+danh sách như `drive_read_file`, `sheets_read`, `contacts_search` — đều không bao giờ được gọi). Ba lớp:
+
+1. `call_hub` (đường của Gen và các GET `/hub/*`): hậu tố ngoài danh sách ⇒ 409 `HUB_TOOL_NOT_ALLOWED`.
+2. Route MCP chung `POST /mcp/tools/{id}/call` trên máy chủ Gen-hub: tool ngoài danh sách ⇒ **403 `HUB_TOOL_NOT_ALLOWED`**
+   ("Gen-Harness chỉ đọc qua Gen-hub — tool ghi (gửi mail, tạo lịch, ghi Drive…) không được gọi"), ghi `mcp_calls` (blocked)
+   + Action Log `mcp.call_blocked`, **trước** `invoke_tool` ⇒ không tạo bản nháp `mcp_write`, không gọi ra ngoài. Owner cũng
+   bị chặn; vai trò khác vẫn nhận 403 `HUB_OWNER_ONLY` như cũ.
+3. Nút **Kiểm tra**: chỉ mở + cấp `core.gen` cho tool trong danh sách có `access='read'`. Tool Google bị Gen-hub đánh dấu GHI
+   vào `write_tools` (không mở); tool ghi để nguyên đóng. Kiểm tra **không gọi** tool Google (chỉ `kho_tom_tat` như cũ).
+
+### 6.3 Quyền đọc thêm (không bắt buộc) và nút Kiểm tra
+
+`POST /hub/link/test` trả thêm `read_scopes` (4 khoá → bool, tính từ lần khám phá này), `read_missing` (nhãn quyền còn
+thiếu, theo thứ tự lịch, mail, việc, Drive) và `write_tools`. Thiếu quyền đọc thêm **không** làm `ok=false`. `read_scopes`
+cũng nằm trong Action Log `hub.link_tested`. Gen-hub không còn liệt kê một tool Google (Boss bỏ tick) ⇒ lần Kiểm tra sau đóng
+tool đó và thu hồi grant `core.gen`. Gọi một quyền chưa có ⇒ 409 `HUB_TOOL_MISSING`: "Gen-hub chưa cấp quyền *đọc lịch* — vào
+Gen-hub **tick thêm quyền** cho token của Gen-Harness rồi bấm Kiểm tra ở Kết nối › Gen-hub".
+`GET /hub/link` thêm `read_scopes` và `breaker` ({open, retry_in_s, down_since}; vai trò khác Owner chỉ nhận `{open}`).
+
+### 6.4 Endpoint (CHỈ Owner; vai trò khác 403) — kết quả `{source, tool, cached, data}`, `data` đã che
+
+| Endpoint | Tool Gen-hub | Tham số gửi đi |
+|---|---|---|
+| `GET /hub/google/calendar?day=today\|tomorrow` | `calendar_list_events` | `timeMin`/`timeMax` = đầu/cuối ngày giờ VN (+07:00), `maxResults` 20 |
+| `GET /hub/google/tasks` | `tasks_list` | `{}` |
+| `GET /hub/google/mail/search?q&limit` (q 1–200, limit 1–10) | `gmail_search` | `query`, `maxResults` |
+| `GET /hub/google/mail/message?id` (`^[A-Za-z0-9_-]{6,64}$`, sai ⇒ 422) | `gmail_read_message` | `messageId`; chuỗi dài cắt ≤ 4000 ký tự SAU khi che |
+| `GET /hub/google/drive/search?q` | `drive_search` | `query`, `maxResults` 10 |
+
+Nhãn nguồn: "Lịch Google qua Gen-hub", "Gmail qua Gen-hub", "Google Tasks qua Gen-hub", "Google Drive qua Gen-hub"
+(Kho vẫn "Kho Ryan qua Gen-hub"). `call_kho` giữ làm bí danh của `call_hub`.
+
+### 6.5 Che, đệm, nhật ký
+
+- Che TRƯỚC khi trả/đệm (`mask_for_model`, kèm token liên kết): email, số dài (SĐT/tài khoản), khoá/token. Id kỹ thuật dưới
+  `HUB_KEEP_KEYS` (`id`, `messageId`, `threadId`, `eventId`, `taskId`, `fileId`, `tasklistId`, `code`) **giữ nguyên** nếu khớp
+  `^[A-Za-z0-9_.:-]{1,128}$` và không có `@` (id Gmail như `18c2f41234567890` có ≥ 8 chữ số liền — regex số dài sẽ phá);
+  `calendarId` dạng email vẫn che. `content[].text` là JSON được che theo cấu trúc rồi gói lại thành chuỗi. Tham số
+  `keep_keys` mặc định rỗng ⇒ hành vi cũ của `mask_for_model` không đổi (Kho giữ nguyên).
+- Đệm Redis 5 phút theo tổ chức + tool + tham số (chỉ bản đã che; khoá `gh:hub:kho:{org}:…`); đổi địa chỉ/token/tắt ⇒ xoá đệm.
+  Đệm **vẫn trả** khi ngắt mạch đang mở.
+- `agent.mcp_calls.result_summary` chỉ là siêu dữ liệu: "Đọc Gen-hub ({hậu tố}) — N byte, nội dung không lưu"; tham số chỉ lưu dấu
+  vết (`args_digest`). Nội dung mail/lịch không vào `mcp_calls`, Action Log, sự kiện WS hay `health_alerts`; token không vào
+  bất kỳ đâu.
+
+### 6.6 Ngắt mạch riêng của Gen-hub (F-83)
+
+Theo mẫu `gh/providers/router.py` nhưng đồng hồ tiêm được (`hub._clock = time.time`, test monkeypatch). Redis tắt ⇒ ngắt
+mạch tắt (không lỗi).
+
+| Khoá Redis | Ý nghĩa | TTL |
+|---|---|---|
+| `gh:hub:brk:fails:{org}` | số lỗi liên tiếp (INCR) | 300 giây |
+| `gh:hub:brk:open_until:{org}` | epoch tới lúc đóng lại | 3600 giây |
+| `gh:hub:brk:down_since:{org}` | epoch lỗi đầu tiên của đợt im (SET NX) | 86400 giây |
+| `gh:hub:brk:half:{org}` | đã từng mở (ngưỡng nửa mở + điều kiện chuông) | 86400 giây |
+
+- **Tính vào bộ đếm**: lỗi mạng/timeout, 5xx, 429/408, phản hồi không phải JSON. **Không tính**: 401/403 (đã có trạng thái
+  `expired`), lỗi cấu hình/ứng dụng (4xx khác, JSON-RPC báo lỗi), lỗi guard MCP Hub.
+- 3 lỗi liên tiếp (`BREAKER_FAILS`) **hoặc** 1 lỗi khi nửa mở ⇒ mở 60 giây (`BREAKER_OPEN_S`): lời gọi trả
+  409 `HUB_BREAKER_OPEN` ("Gen-hub tạm không trả lời — thử lại sau ít phút"), **không gọi mạng, không ghi `mcp_calls`**.
+  Hết 60 giây ⇒ lời gọi kế tiếp đi qua (nửa mở): thành công ⇒ xoá cả 4 khoá + đóng sự cố; lỗi ⇒ mở lại ngay.
+- Thứ tự trong `call_hub`: danh sách cho phép → liên kết bật → **đệm** → ngắt mạch → tool đã mở/cấp → guard MCP Hub → che → đệm.
+- Nút **Kiểm tra** không bị ngắt mạch chặn; Kiểm tra xanh ⇒ đóng ngắt mạch.
+- **Chuông 15 phút**: `down_since` cách ≥ 900 giây (`BREAKER_ALERT_AFTER_S`) **và** ngắt mạch đã từng mở (`half`) ⇒ sự cố
+  `hub.breaker` (kind `hub.unreachable`, mức `warn`, fingerprint `open`) + MỘT chuông cho Owner: "Gen-hub không trả lời hơn 15 phút"
+  (`/connections#genhub`, nút "Mở Gen-hub"; vai trò khác: "Nhờ Owner xử lý"). `raise_once` ⇒ không chuông thứ hai cho cùng đợt
+  im. Kiểm cả trong lúc ghi lỗi lẫn bằng cron worker `hub_breaker_watch` (5 phút/lần, `gh.worker`). Gọi lại được / Kiểm tra xanh /
+  không còn `down_since` ⇒ tự đóng.
+
+### 6.7 Hàm đọc cho Bản tin — `briefing_read` (hợp đồng với gói ban-tin)
+
+`await hub.briefing_read(sm, redis, *, org_id, kind, now, transport=None)` với `kind` ∈ `calendar_today` (→ `calendar_list_events`,
+ngày VN của `now`, tối đa 10), `mail_reply` (→ `gmail_search`, `is:unread in:inbox newer_than:3d -category:promotions
+-category:social -category:updates`, tối đa 10), `tasks_open` (→ `tasks_list`, bỏ việc đã xong). Trả
+`{"state": ok|off|missing_scope|breaker_open|error, "items", "error_code", "detail" (đã scrub, ≤ 200 ký tự), "scope"}` —
+**không bao giờ ném** (trừ `CancelledError`): `off` = chưa nối/tắt (hoặc tổ chức chưa có Owner), `missing_scope` =
+`HUB_TOOL_MISSING`, `breaker_open` = `HUB_BREAKER_OPEN`. Tự mở phiên riêng và commit riêng, đi qua đúng `call_hub` (đệm, ngắt mạch,
+ghim DNS, che). Actor là `SystemActor` (`actor_type='system'`, `system:gen.briefing`), chỉ dùng khi tổ chức có ≥ 1 Owner — Bản
+tin đọc nhân danh tổ chức **chỉ để gửi Owner**, Gen không đọc thay nhân viên. `normalize_items` chuẩn hoá nhiều dạng kết quả
+(`structuredContent`, `content[].text` là JSON, văn bản thường mỗi dòng một mục) thành mục gọn đã che: lịch `{start, all_day,
+title}`, mail `{id, from, subject, date}` (bỏ snippet/thân thư), việc `{id, title, due}`.
+
+### 6.8 Việc của Boss (một lần, ~2 phút)
+
+Trong Gen-hub › Agent & quyền › agent `gen-harness-<công ty>`: tick thêm `calendar_list_events`, `tasks_list`, `gmail_search`,
+`gmail_read_message`, `drive_search` (**không** tick `gmail_send`, `calendar_create_event`, `drive_create_file`… — có tick cũng
+không dùng được); rồi bấm **Kiểm tra** ở Gen-Harness › Kết nối › Gen-hub. Phần quyền đọc thêm hiện "thiếu" nào thì chỉ cần
+tick đúng quyền đó. Rủi ro Owner tự quyết: nội dung lịch/mail (đã che) đi sang model đám mây như Kho.
+
