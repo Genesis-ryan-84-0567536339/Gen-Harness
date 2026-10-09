@@ -11,6 +11,9 @@
 - v0.1.49 (QD-16): `hub` Đạt thì lưu thêm `read_scopes` (lịch/mail/việc/Drive → bool) và `read_missing` (nhãn quyền
   còn thiếu) vào `detail` — chỉ để hiển thị "Quyền đọc thêm (không bắt buộc)"; Đạt/Lỗi KHÔNG phụ thuộc các quyền này.
   Lỗi thì KHÔNG lưu (quyền trong CSDL lúc đó là của lần kiểm cũ / toàn False — gợi ý tick quyền sẽ chỉ sai cách sửa).
+- v0.1.50 (F-81): `hub` Đạt thì lưu thêm `write_scopes` ({kho: bool}) và `write_missing` (nhãn quyền ghi còn thiếu) —
+  cũng chỉ để hiển thị. Dòng 9 "Gen ghi Kho" (`kho_write`) KHÔNG chạy được từ đây (không nằm trong RUNNABLE): máy
+  chủ tự ghi 'pass' sau lần ghi Kho thật đầu tiên (gh.hub_link.service.write_kho).
 - Phản hồi cho Owner được kèm email ĐẦY ĐỦ (`account`); CSDL chỉ lưu email đã che.
 - Lỗi TẠM (bận/hạn mức: `TRANSIENT_CODES`) KHÔNG ghi thành bản kiểm: trả `{transient: true, status: 'fail', …}` để web
   báo ngay cạnh nút, còn kết quả đã lưu (Đạt / Đang chạy…) giữ nguyên — bấm lại khi đang chạy không biến "Xong" thành
@@ -128,6 +131,11 @@ async def _run_hub(request: Request, db: AsyncSession, user: service.CurrentUser
     if ok and isinstance(scopes, dict):
         detail["read_scopes"] = {str(k): bool(v) for k, v in scopes.items()}
         detail["read_missing"] = [str(x) for x in (r.get("read_missing") or [])]
+    # v0.1.50 (F-81): quyền GHI Kho (kho_create, kho_update) — cũng chỉ để hiển thị, cùng quy tắc "chỉ khi kiểm xanh".
+    wscopes = r.get("write_scopes")
+    if ok and isinstance(wscopes, dict):
+        detail["write_scopes"] = {str(k): bool(v) for k, v in wscopes.items()}
+        detail["write_missing"] = [str(x) for x in (r.get("write_missing") or [])]
     return await boss.record(db, user.org_id, "hub", "pass" if ok else "fail",
                              error_code=None if ok else (r.get("error_code") or "HUB_ERROR"),
                              message=None if ok else r.get("error"), detail=detail, user_id=user.id)

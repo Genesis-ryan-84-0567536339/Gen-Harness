@@ -165,7 +165,9 @@ async def test_test_exposes_google_read_tools_only(owner_api: Api, fake_hub: Fak
         assert by[GG + n].is_exposed is True and by[GG + n].grants == ["core.gen"], n
     for n in GOOGLE_WRITE:
         assert by[GG + n].is_exposed is False and by[GG + n].grants == [], n
-    assert by[KHO + "kho_create"].is_exposed is False
+    # v0.1.50 (F-81): kho_create (tool GHI Kho) được mở + cấp cho write_kho — không phải đường đọc, không bị gọi.
+    assert by[KHO + "kho_create"].is_exposed is True and by[KHO + "kho_create"].grants == ["core.gen"]
+    assert out["write_scopes"] == {"kho": False} and out["write_missing"] == ["ghi Kho (kho_create, kho_update)"]
     assert out["read_scopes"] == {"calendar": True, "mail": True, "tasks": True, "drive": True}
     assert out["read_missing"] == [] and out["write_tools"] == []
     assert fake_hub.calls == [KHO + "kho_tom_tat"]  # không gọi tool Google khi kiểm

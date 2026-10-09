@@ -12,6 +12,8 @@ việc nền — gh.providers.router F-86), rồi ghi một hội thoại "Bản
 - Máy tắt cả buổi (now − mốc > 3 giờ) ⇒ bỏ, không gửi bản tin cũ.
 - Bước đầu tiên của tin luôn là `{"kind": "tool", "name": "briefing.sources"}` — nội dung có chữ của khách/Kho, để
   `gh.gen.engine._history_tainted` coi hội thoại này là có nội dung ngoài (agy không đọc, F-22).
+- v0.1.50 (QD-18): ghi chú "Gen nhớ" của tổ chức (`gh.gen.memory_notes`, Sếp đã xác nhận) được thêm vào system
+  message của lượt tóm tắt (`_summarize(..., notes=…)`) — chỉ khi có nguồn AI; không có nguồn thì không gửi gì ra ngoài.
 - v0.1.44 (F-8c): cùng lúc xếp MỘT tin vào hộp thư đi Telegram của tổ chức (gh.telegram.service.enqueue) — văn bản
   thường, kèm "Mở Console" và câu "mọi thao tác Sếp xác nhận trong Console".
 - Mục Kho: chỉ ghi trạng thái lần đọc Kho gần nhất + gợi ý hỏi Gen (không đọc Kho trong bản tin).
@@ -44,7 +46,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from gh import notifications
 from gh.chassis import actionlog
 from gh.chassis.masking import mask_for_model
-from gh.gen import store
+from gh.gen import memory_notes, store
 from gh.gen.engine import wrap_untrusted
 from gh.hub_link import service as hub
 from gh.providers.clients import Message
@@ -450,10 +452,18 @@ def _for_summary(s: dict[str, Any]) -> dict[str, Any]:
     return {k: s[k] for k in ("title", "count", "lines")}
 
 
-async def _summarize(router: ModelRouter, org: uuid.UUID, sections: list[dict[str, Any]]) -> str | None:
-    """None khi nguồn AI lỗi / quá 60 giây. KHÔNG truyền allow_agy (việc nền — F-22)."""
+async def _summarize(router: ModelRouter, org: uuid.UUID, sections: list[dict[str, Any]],
+                     notes: list[str] | None = None) -> str | None:
+    """None khi nguồn AI lỗi / quá 60 giây. KHÔNG truyền allow_agy (việc nền — F-22).
+
+    v0.1.50 (QD-18): `notes` = ghi chú Gen nhớ của tổ chức (Sếp đã xác nhận) — thêm vào system message để bản tóm tắt
+    theo sở thích của Sếp. Chỉ có mặt khi có nguồn AI (hàm này chỉ chạy khi có nguồn)."""
     data = orjson.dumps([_for_summary(s) for s in sections]).decode()
-    msgs = [Message("system", SYSTEM_PROMPT), Message("user", wrap_untrusted(SOURCES_STEP, data))]
+    system = SYSTEM_PROMPT
+    block = memory_notes.prompt_block(notes or [])
+    if block:
+        system = f"{SYSTEM_PROMPT}\n\n{block}"
+    msgs = [Message("system", system), Message("user", wrap_untrusted(SOURCES_STEP, data))]
     try:
         routed = await asyncio.wait_for(
             router.generate(org, agent_key=AGENT_KEY, purpose=PURPOSE, messages=msgs, json_mode=False,
@@ -495,6 +505,8 @@ async def _one_org(sm: async_sessionmaker[AsyncSession], redis: Any, router: Mod
         # Có nguồn = khoá API dùng được, hoặc Claude Code CLI Owner đã cho chạy việc nền MÀ nguồn đó vẫn bật + có model
         # (đã cho phép rồi tắt/xoá nguồn ⇒ vẫn nhắc dán khoá, không gọi model rồi báo "nguồn AI lỗi").
         has_source = await has_api_source(db, org) or any(src["used"] for src in await background_sources(db, org))
+        # v0.1.50 (QD-18): ghi chú Gen nhớ — đọc trong cùng phiên này (trước rollback), chỉ khi có nguồn AI tóm tắt.
+        notes = await memory_notes.texts(db, org) if has_source else []
         await db.rollback()
     # v0.1.49 (QD-16): mục Gen-hub — ngoài phiên trên (hub tự mở phiên, tự commit). Chèn ngay sau "incidents".
     hub_secs, hub_hint = await _hub_sections(sm, redis, org, now) if hub_linked else ([], None)
@@ -502,7 +514,8 @@ async def _one_org(sm: async_sessionmaker[AsyncSession], redis: Any, router: Mod
         at = next((i + 1 for i, s in enumerate(sections) if s["key"] == "incidents"), len(sections))
         sections = sections[:at] + hub_secs + sections[at:]
     needs_api_key = not has_source
-    summary = None if needs_api_key else await _summarize(router, org, sections)
+    # Không truyền `notes` khi trống: hàm thay thế `_summarize` trong test cũ có chữ ký (router, org, sections).
+    summary = None if needs_api_key else await _summarize(router, org, sections, **({"notes": notes} if notes else {}))
     content = build_content(slot, sections, summary=summary, summary_source="model" if summary else "none",
                             needs_api_key=needs_api_key, summary_failed=not needs_api_key and summary is None,
                             hub_hint=hub_hint)

@@ -11,8 +11,13 @@
 - `GET /hub/google/calendar?day=today|tomorrow`, `/hub/google/tasks`, `/hub/google/mail/search?q&limit`,
   `/hub/google/mail/message?id`, `/hub/google/drive/search?q` — đọc lịch/việc/mail/Drive qua Gen-hub (đã che, đệm
   5 phút, ngắt mạch) · CHỈ Owner (QD-16). Kết quả `{source, tool, cached, data}`. KHÔNG có đường ghi nào lên Google.
+- v0.1.50 (F-81, QD-18): `GET /hub/link` thêm `write_scopes` ({kho: bool}; null khi chưa có lần Kiểm tra xanh);
+  `POST /hub/link/test` thêm `write_scopes` + `write_missing`. `POST /hub/kho/write` — đường GHI Kho duy nhất
+  (kho_create / kho_update, bảng Phiên và Việc): Owner + PIN `hub.write` + permit ký do `confirm_proposal` của Gen phát
+  sau khi Sếp bấm Xác nhận (gh.hub_link.permit). Gọi thẳng không có permit hợp lệ → 403 `HUB_WRITE_PERMIT`.
 """
 
+import uuid
 from datetime import datetime, timedelta
 from typing import Any, Literal
 from urllib.parse import urlparse
@@ -45,7 +50,9 @@ async def get_link(request: Request, user: service.CurrentUser = Depends(READ),
     out = hub.link_out(link, owner=owner)
     # Chưa nối / chưa từng Kiểm tra xanh / vừa đổi địa chỉ-token (liên kết tắt chờ kiểm lại) ⇒ null = "Chưa kiểm",
     # KHÔNG phải 4 quyền "Chưa" (thẻ sẽ giục tick quyền khi Sếp còn chưa nối).
-    out["read_scopes"] = await hub.read_scopes(db, user.org_id) if hub.scopes_known(link) else None
+    known = hub.scopes_known(link)
+    out["read_scopes"] = await hub.read_scopes(db, user.org_id) if known else None
+    out["write_scopes"] = await hub.write_scopes(db, user.org_id) if known else None  # v0.1.50 (F-81)
     breaker = await hub.breaker_state(request.app.state.redis, user.org_id)
     out["breaker"] = breaker if owner else {"open": breaker["open"]}  # vai trò khác: chỉ biết đang mở hay không
     return out
@@ -142,6 +149,23 @@ async def kho_record(ma: str, request: Request, _r: service.CurrentUser = Depend
         raise field_errors({"ma": "Mã bản ghi dạng VIEC-12, QD-3, PHIEN-1"})
     return await hub.call_hub(db, request.app.state.redis, _client(request), user=user, suffix="kho_find_by_id",
                               args={"id": code})
+
+
+# ─── ghi Kho (v0.1.50, F-81): chỉ Owner + PIN + permit từ đề xuất đã Xác nhận ─────
+
+class KhoWriteIn(BaseModel):
+    proposal_id: uuid.UUID
+    tool: str = Field(max_length=40)
+    args: dict[str, Any]
+    permit: dict[str, Any] | None = None  # thiếu → 403 HUB_WRITE_PERMIT (không phải 422)
+
+
+@router.post("/kho/write")
+async def kho_write(body: KhoWriteIn, request: Request, _o: service.CurrentUser = Depends(require_owner),
+                    user: service.CurrentUser = Depends(require_pin("hub.write")),
+                    db: AsyncSession = DB) -> dict[str, Any]:
+    return await hub.write_kho(db, request.app.state.redis, _client(request), user=user,
+                               proposal_id=body.proposal_id, tool=body.tool, args=body.args, permit=body.permit)
 
 
 # ─── đọc Google qua Gen-hub (QD-16): chỉ Owner, chỉ đọc ────────────────────────

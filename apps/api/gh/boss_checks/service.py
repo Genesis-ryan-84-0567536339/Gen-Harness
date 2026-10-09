@@ -17,7 +17,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 CHECK_KEYS = ("hub", "facebook", "agy_login", "agy_call", "agy_switch", "claude_login", "claude_call", "jev",
-              "telegram", "remote_access", "facebook_reply")
+              "telegram", "remote_access", "facebook_reply", "kho_write")
 RUNNABLE = ("hub", "facebook", "agy_call", "agy_switch", "claude_call", "jev", "telegram", "remote_access")
 STATUSES = ("pass", "fail", "pending")
 KEEP_PER_KEY = 50
@@ -40,6 +40,9 @@ ROWS: tuple[dict[str, Any], ...] = (
     # v0.1.47 (F-79): Facebook trả lời — đạt khi một lượt trả lời bình luận thật đã gửi xong (không bắt buộc; không có
     # nút "Kiểm tra" riêng vì mỗi lần gửi phải do chính Sếp xác nhận + nhập PIN).
     {"row": 8, "key": "facebook_reply", "title": "Facebook trả lời", "optional": True, "checks": ["facebook_reply"]},
+    # v0.1.50 (F-81): Gen ghi Kho — đạt khi một lần ghi Kho THẬT (Gen đề xuất → Sếp Xác nhận + PIN) đã xong; không có
+    # nút "Kiểm tra" riêng vì mỗi lần ghi phải do chính Sếp xác nhận (máy chủ tự ghi 'pass' lần đầu: write_kho).
+    {"row": 9, "key": "kho_write", "title": "Gen ghi Kho", "optional": True, "checks": ["kho_write"]},
 )
 REQUIRED_TOTAL = sum(1 for r in ROWS if not r["optional"])
 
@@ -47,7 +50,7 @@ DETAIL_KEYS = frozenset({"latency_ms", "probe_model", "models_count", "models_so
                          "expected_masked", "account_match", "code_shape", "credentials_file", "job_status",
                          "exposed_tools", "missing_tools", "target_profile", "from_profile",
                          "login_source", "bot_username", "chat_masked", "opened_from", "access_mode",
-                         "read_scopes", "read_missing"})
+                         "read_scopes", "read_missing", "write_scopes", "write_missing"})
 
 SOCIAL_FAILED_MSG = "Lượt đọc Facebook chưa thành công — mở trang Mạng xã hội xem lý do rồi bấm Đọc ngay lần nữa"
 SOCIAL_HALTED_MSG = ("Đọc mạng xã hội đang bị dừng (Dừng tất cả) — bật lại ở trang Tài khoản mạng xã hội rồi bấm "
