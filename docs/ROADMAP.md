@@ -75,6 +75,7 @@ Các bản sửa nóng thật, không nằm trong kế hoạch đợt. Đối ch
 | 04/10/2026 | **Sửa e2e-upgrade, Owner mẫu** (PR #53, `hotfix/e2e-owner-seed`) | Dữ liệu mẫu không có người dùng nên chuông `network.open_lan` luôn 0; chèn 1 Owner mẫu trước khi kiểm (F-21) |
 | 09/10/2026 | **Sửa e2e-upgrade từ v0.1.46** (PR #55, `hotfix/e2e-upgrade-from-v0146`) | Ô nâng cấp giả định bản cũ luôn nghe 0.0.0.0; bản ≥ v0.1.46 cài mới nghe 127.0.0.1 nên E2E release v0.1.47 đỏ và nằm yên ở bản thử. Sửa test (không sửa genh); v0.1.47 phát hành sau đó. [Chi tiết](releases/v0.1.48.md) |
 | 09/10/2026 | **Sửa trình bày dính biên khung** (PR #58, `claude/css-bien-khung`) | Ảnh máy Boss: chữ/số dính sát mép thẻ, khối "Máy chủ chưa nhận yêu cầu cập nhật" vỡ 3 dòng. Sửa gốc ở `Panel`/`Icon` + 5 họ lỗi, thêm lính gác `layout-guard.spec.ts` (4 cỡ màn); đi cùng v0.1.50. [Chi tiết](releases/v0.1.50.md) |
+| 09/10/2026 | **Sửa test heartbeat genh chập chờn** (PR #59) | `readStateFile` báo "tệp bị thay giữa chừng" khi nhịp vừa ghi tạm-rồi-rename (CI đỏ ~1/100); nay chỉ lỗi đó được thử lại tối đa 5 lần × 5ms, symlink/hard link/sai chủ vẫn từ chối ngay. Không tăng VERSION, đi cùng v0.1.50. [Chi tiết](releases/v0.1.50.md) |
 
 Hai bản **phản ứng theo yêu cầu của Boss** (tính năng, không phải sửa nóng): v0.1.31 (01/10 "không thấy model và nhóm model nào để chọn") và v0.1.32 (01/10 "high là mức suy nghĩ, không phải tên model").
 
