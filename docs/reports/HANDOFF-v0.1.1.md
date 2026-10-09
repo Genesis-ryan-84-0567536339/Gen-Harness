@@ -3035,23 +3035,38 @@ Sếp xác nhận bằng mã PIN, có bằng chứng bằng ảnh chụp, và d�
   cổng proxy mặc định 127.0.0.1, Caddyfile hợp lệ với ảnh caddy ghim digest. Máy tích hợp KHÔNG build được ảnh (không tải
   được blob ghcr.io).
 - **Kiểm tra trên CI GitHub** (09/10, sau khi Actions chạy lại): head 927bf83 (03–04/10) chưa từng chạy CI — cả 3 workflow
-  dừng sau 3 giây vì lỗi thanh toán Actions ("recent account payments have failed or your spending limit…"). Trên bản sửa
-  sau review: **CI xanh** trên 6f61955 (`version`, `renovate-config`, `api`, `web`, `browser`, `images` gồm build thật 5 ảnh
-  + tái lập `--no-cache` + `.pyc` trong /opt/venv, `ci-ok`); **Installer matrix xanh** (4 hệ điều hành); **E2E cài đặt thật
-  chế độ pr xanh** trên 3870a60 (cùng mã, 6f61955 chỉ đổi tài liệu): build ảnh từ Dockerfile của nhánh, cài sạch, backup,
-  export/import, bản hỏng cố ý tự quay về, khôi phục bản sao ngoài máy. `e2e-upgrade` (tạo lại proxy/redis bằng digest,
-  dọn digest caddy/redis cũ) chỉ chạy ở chế độ release ⇒ chạy sau khi tăng VERSION và là cổng promote (đỏ ⇒ không tới máy
-  Boss).
+  dừng sau 3 giây vì lỗi thanh toán Actions ("recent account payments have failed or your spending limit…").
+  Nhánh đã nối main (merge 4777a73: main 3a9c84d = v0.1.47 squash, cây trùng hệt e24e279 vốn có sẵn trên nhánh ⇒ cây mã sau
+  merge không đổi, chỉ gỡ xung đột VERSION/ci.yml/release.yml/ROADMAP/HANDOFF về bản v0.1.48). Kết quả trên head sau merge:
+  đang chạy lại CI, Installer matrix, E2E (pr) — commit kế tiếp ghi kết quả thật.
+  `e2e-upgrade` (tạo lại proxy/redis bằng digest, dọn digest caddy/redis cũ, ô v0.1.46→) chỉ chạy ở chế độ release ⇒ chạy
+  sau khi tăng VERSION và là cổng promote (đỏ ⇒ không tới máy Boss).
 - **Lưu ý vận hành**: `genh update` lên bản này tạo lại container proxy/redis (tham chiếu ảnh đổi sang digest); dữ liệu redis
   giữ ở volume. Còn lại: gói apt trong Dockerfile chưa ghim phiên bản (tầng apt dựng lại ít nhất mỗi tuần — xem dưới). Tag
-  GHCR `gen-harness-*:latest` cũ **đứng yên ở v0.1.46** (bản promote cuối trước v0.1.48), không nhận bản vá — không dùng; không
-  xoá riêng được tag mà không xoá luôn ảnh v0.1.46 (máy cũ/rollback cần) nên để nguyên.
+  GHCR `gen-harness-*:latest` cũ **đứng yên ở bản cuối cùng được promote bằng `e2e-install.yml` trước v0.1.48** — hiện là
+  v0.1.46; nếu v0.1.47 được promote (PR #55) trước khi v0.1.48 merge thì job promote cũ dời nó sang v0.1.47 (vô hại). Từ
+  v0.1.48 không còn gì gắn `:latest` ⇒ không nhận bản vá — không dùng; không xoá riêng được tag mà không xoá luôn ảnh bản đó
+  (máy cũ/rollback cần) nên để nguyên. Ảnh `caddy:2-alpine`/`redis:7-alpine` do genh ≤ v0.1.47 kéo **theo tag** không bao
+  giờ bị dọn (genh không đụng ảnh ngoài có tag — có thể của dự án khác) ⇒ mỗi máy cũ còn 2 ảnh mồ côi, ~50–70MB, một lần
+  (không lớn dần). Muốn lấy lại chỗ: sau lần cập nhật kế tiếp v0.1.48, chạy `docker image rm caddy:2-alpine redis:7-alpine`
+  (báo đang dùng thì bỏ qua). **Không** dùng `docker image prune -a` (xoá cả ảnh bản liền trước để lùi bản).
+- **v0.1.47 chưa tới máy Boss**: E2E release của v0.1.47 (run 37876690835) đỏ ở ô "nâng cấp tags[1] v0.1.46 → v0.1.47"
+  (`proxy phải VẪN nghe 0.0.0.0:8444 — đang: 127.0.0.1:8444`) ⇒ v0.1.47 nằm yên ở bản thử, `releases/latest` vẫn v0.1.46.
+  Gốc lỗi ở **test**, không ở genh: bước kiểm giả định bản cũ luôn < v0.1.46 (chưa có `GH_BIND_ADDR`), nhưng v0.1.46 cài mới
+  đã nghe 127.0.0.1 và `access.Ensure` giữ nguyên khi nâng cấp — đúng thiết kế. Sửa ở PR #55 (ghi `GH_BIND_ADDR`/
+  `GH_ACCESS_MODE` trước nâng cấp; đã có ⇒ đòi giữ nguyên + 0 chuông `network.open_lan`; chưa có ⇒ kiểm cũ 0.0.0.0 + 1
+  chuông) và mang **y nguyên** vào nhánh này (aec04f3), nên v0.1.48 qua được ô v0.1.46→ dù PR #55 merge trước hay sau.
+  v0.1.48 chỉ promote khi **mọi ô** `e2e-upgrade` (ô tags[1] từ bản chính thức lúc đó — v0.1.46, hoặc v0.1.47 nếu đã promote)
+  xanh; đỏ ⇒ nằm yên ở bản thử, không tới máy Boss. **Không** promote tay v0.1.47 sau khi v0.1.48 đã là bản chính thức:
+  promote gắn `--latest` ⇒ `releases/latest` lùi về v0.1.47 (máy cài mới bằng install.sh nhận bản cũ).
 - **Boss**: Không cần làm gì lúc này (thanh toán Actions đã chạy lại 09/10). Nếu CI lại báo lỗi thanh toán: vào GitHub
   **Settings → Billing & plans**, sửa thanh toán hoặc nâng spending limit cho Actions.
   (Tuỳ chọn, 1 phút) Renovate đề xuất nâng thư viện/ảnh mỗi tuần: https://github.com/apps/renovate → **Install** → **Only
   select repositories** → Gen-Harness → **Install** (nếu Mend đòi đăng nhập developer.mend.io thì đăng nhập bằng GitHub).
-  Cài xong sẽ có 1 issue "Dependency Dashboard" và vài PR nhãn `phụ thuộc` (ảnh Docker, GitHub Actions, bản lớn, playwright,
-  uv, làm mới uv.lock); Claude review rồi merge, Boss không cần bấm. Không cài thì mọi thứ vẫn chạy như cũ.
+  Cài xong sẽ có 1 issue "Dependency Dashboard" và vài PR nhãn `phụ thuộc`. Thư viện bản nhỏ/vá tự merge khi mọi check xanh;
+  các PR còn lại (ảnh Docker, GitHub Actions, bản lớn, playwright, uv, làm mới uv.lock) **nằm chờ** — chưa có lịch tự động nào
+  gọi Claude. Khi muốn xử lý: nhắn Claude "xử lý PR phụ thuộc" (một câu, không cần bấm trên GitHub); trong lúc chờ, bản vá ảnh
+  nền chưa tới máy Boss. Không cài thì mọi thứ vẫn chạy như cũ.
 
 ### Sửa sau review (v0.1.48)
 
@@ -3072,8 +3087,11 @@ Sếp xác nhận bằng mã PIN, có bằng chứng bằng ảnh chụp, và d�
 - **Dọn digest caddy/redis cũ** (`genh update`): trước chỉ dọn `ghcr.io/*/gen-harness-*` ⇒ mỗi lần Renovate đổi digest
   caddy/redis để lại một ảnh ~40–60MB. Nay dọn thêm repo mà compose giữ (bản hiện tại + liền trước) ghim digest — chỉ dòng
   KHÔNG gắn tag (kéo theo digest, đúng kiểu genh kéo); ảnh có tag (bản genh cũ kéo theo tag, dự án khác) không đụng; vẫn
-  không `rmi -f`; checkout dev (không có ảnh gen-harness) không xoá gì. 5 test Go mới; e2e-upgrade kiểm thêm caddy/redis
-  mỗi repo tối đa 2 digest.
+  không `rmi -f`; checkout dev (không có ảnh gen-harness) không xoá gì. 5 test Go mới. E2E: chưa bản nào trước v0.1.48 ghim
+  caddy/redis (bản cũ kéo theo tag) nên phép kiểm "mỗi repo tối đa 2 digest" tự nó luôn đạt — nay `e2e-upgrade` (TAG ≥
+  v0.1.48) **kéo sẵn** 1 digest caddy cũ (`881bbc60…`, Caddy 2.11.6) + 1 digest redis cũ (`6aaf3f5e…`, 7.2.5-alpine), không
+  gắn tag, ghi vào `prev2-refs.txt` ⇒ genh không dọn thì bước "Chỉ còn ảnh của bản hiện tại và bản liền trước" đỏ. Ảnh có
+  tag của bản cũ không bị dọn (xem "Lưu ý vận hành" ở trên).
 - **Đo lại digest trước phát hành**: caddy:2-alpine đã dời sang v2.11.7 (giữ v2.11.6 thì Owner kéo tag sau 05/10 bị hạ bản),
   python:3.11-slim và node:22-slim bản dựng 06/10 (gói Debian mới) — xem bảng đo lại trong
   [anh-tai-lap-da-kiem.md](v0.1.48/anh-tai-lap-da-kiem.md). Các ảnh nền còn lại đo lại vẫn trùng.
@@ -3089,3 +3107,26 @@ Sếp xác nhận bằng mã PIN, có bằng chứng bằng ảnh chụp, và d�
   `check_workflow_hygiene.py`, `check_embedded_sync.py` OK; actionlint v1.7.12 + shellcheck 0 lỗi; `renovate-config-validator
   --strict --no-global` hợp lệ (cả trên CI); `go vet` + `go test ./...` genh xanh; ruff + mypy api xanh. Build ảnh thật,
   `check_bytecode.py` trong ảnh và E2E: xanh trên CI (xem dòng "Kiểm tra trên CI GitHub" ở trên).
+
+### Sửa sau review lượt 2 (v0.1.48)
+
+- **Nhánh nối main**: main có v0.1.47 dạng squash (3a9c84d) nên `git merge-tree` báo xung đột VERSION, ci.yml, release.yml,
+  ROADMAP, HANDOFF. Cây 3a9c84d **trùng hệt** cây e24e279 (v0.1.47 vốn đã ở trên nhánh, ngay trước các gói v0.1.48) ⇒ mọi
+  kết quả CI trước đây đã gồm mã v0.1.47. Merge (không rebase — không force-push) 4777a73: xung đột chỉ là v0.1.48 chồng lên
+  v0.1.47, giữ bản nhánh (VERSION=v0.1.48; ci.yml/release.yml giữ cả v0.1.47 lẫn job `renovate-config`/`APT_REFRESH`;
+  HANDOFF xếp v0.1.47 trước v0.1.48); cây sau merge = cây trước merge (a00f1bc). Sau merge nhánh merge sạch vào main.
+- **Ô nâng cấp v0.1.46 →** (gốc lỗi E2E release v0.1.47 đỏ): xem "v0.1.47 chưa tới máy Boss" ở trên. Mang y nguyên sửa của
+  PR #55 (aec04f3). Test mới `.github/scripts/test_e2e_upgrade_steps.py` chạy đúng khối `run:` của bước "Ghi lại cổng/chế độ
+  truy cập TRƯỚC khi nâng cấp" (phải đứng trước `genh update`; .env có/không `GH_BIND_ADDR`, thiếu .env).
+- **E2E thật sự kiểm dọn caddy/redis**: bước "Giả lập ảnh tồn đọng" (TAG ≥ v0.1.48) kéo sẵn `caddy@sha256:881bbc60…` +
+  `redis@sha256:6aaf3f5e…` (không tag, kiểm còn kéo được trên Docker Hub 09/10), ghi vào `prev2-refs.txt` — kể cả khi không
+  có PREV2. Test mới chạy khối `run:` với `docker`/`gh` giả: TAG v0.1.48 ⇒ có đúng 1 caddy + 1 redis cũ, khác digest đang ghim
+  ở `deploy/compose.yaml`; TAG v0.1.47 ⇒ không kéo (genh cũ chưa dọn ảnh ngoài); bước "Chỉ còn ảnh…" đỏ khi digest caddy cũ
+  còn, xanh khi đã dọn. Trên workflow trước sửa, 2 test kéo digest đỏ (bắt đúng lỗ hổng).
+- **Renovate**: tài liệu ghi đúng sự thật — chưa có lịch tự động (Routine) nào gọi Claude; PR không tự merge nằm chờ tới khi Boss
+  nhắn Claude "xử lý PR phụ thuộc". Không tự tạo Routine hằng tuần cho Claude tự merge: đó là quyền tự động mới, cần Boss bật.
+- **Ảnh có tag của bản cũ**: không tự dọn `caddy:2-alpine`/`redis:7-alpine` (giữ bất biến "không đụng ảnh ngoài có tag" — có
+  thể của dự án khác cùng Docker); ghi rõ dung lượng (~50–70MB, một lần) và lệnh xoá tay an toàn ở "Lưu ý vận hành".
+- **Kiểm tra** (máy tích hợp, 09/10): unittest `.github/scripts` 99 test xanh (9 mới); `check_release_gate.py`,
+  `check_workflow_hygiene.py`, `check_embedded_sync.py` OK; actionlint v1.7.12 + shellcheck 0 lỗi; `go vet` + `go test
+  ./internal/ops/...` genh xanh; ruff + mypy test mới xanh. Không đổi mã api/web/genh ⇒ không chạy lại pytest/vitest/tsc/eslint.

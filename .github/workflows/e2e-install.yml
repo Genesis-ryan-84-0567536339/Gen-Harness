@@ -27,7 +27,8 @@ name: E2E cài đặt thật
 #     bảng chính trước/sau nâng cấp — phải trùng; kéo sẵn ảnh của bản cũ hơn
 #     nữa (PREV2) rồi kiểm genh dọn ảnh cũ: chỉ còn ảnh của bản hiện tại + bản
 #     liền trước, mỗi repo gen-harness-* (và caddy, redis — ghim digest từ
-#     v0.1.48) tối đa 2 digest.
+#     v0.1.48) tối đa 2 digest. Từ v0.1.48 kéo thêm 1 digest caddy + 1 digest
+#     redis CŨ không gắn tag (ghi vào prev2-refs.txt) — genh phải xoá chúng.
 #     v0.1.37: job là MA TRẬN hai ô nâng cấp (output upgrade_from của resolve):
 #     ô tags[1] = bản chính thức liền trước (máy Boss cập nhật đều mỗi đêm) và
 #     ô tags[3] = bản chính thức cũ hơn 3 bậc — máy Boss tắt vài ngày rồi bật
@@ -1293,11 +1294,29 @@ jobs:
 
       # Máy Owner lâu năm còn ảnh của các bản cũ hơn nữa — kéo sẵn ảnh của bản chính thức liền trước PREV_TAG
       # (PREV2) để kiểm genh mới DỌN chúng sau nâng cấp (chỉ giữ ảnh bản hiện tại + bản liền trước).
+      # v0.1.48: caddy/redis ghim digest, Renovate nâng hằng tuần ⇒ máy Owner sẽ tồn digest cũ KHÔNG gắn tag (đúng kiểu
+      # genh kéo bản ghim). Chưa bản phát hành nào trước v0.1.48 ghim caddy/redis (bản cũ kéo theo tag) nên tự nhiên
+      # runner không có digest cũ nào — phải kéo sẵn 1 digest caddy + 1 digest redis cũ, khác cả digest đang ghim lẫn
+      # digest tag caddy:2-alpine/redis:7-alpine hiện trỏ tới, thì bước "Chỉ còn ảnh…" mới thật sự kiểm được genh dọn
+      # ảnh ngoài. Bản < v0.1.48 chưa dọn ảnh ngoài ⇒ không kéo (chạy tay workflow cho tag cũ không đỏ oan).
       - name: Giả lập ảnh tồn đọng của bản cũ hơn nữa
         run: |
           set -euo pipefail
           refs="$RUNNER_TEMP/prev2-refs.txt"
           : >"$refs"
+          if [ "$(printf '%s\n%s\n' v0.1.48 "$TAG" | sort -V | head -n1)" = "v0.1.48" ]; then
+            # caddy 2.11.6 (bản ghim đầu tiên của v0.1.48, trước khi đo lại 05/10) và redis 7.2.5-alpine (09/2024): digest
+            # danh sách đa kiến trúc, kiểm còn kéo được trên Docker Hub ngày 09/10/2026. `docker images` in repo dạng
+            # ngắn (caddy, redis) nên ghi đúng dạng đó để vòng kiểm so khớp.
+            for ref in \
+              caddy@sha256:881bbc60f9986d5ab8e7cfd6cf7e4ef3c9c0439fef2429d035d065577882f028 \
+              redis@sha256:6aaf3f5e6bc8a592fbfe2cccf19eb36d27c39d12dab4f4b01556b7449e7b1f44; do
+              docker pull -q "$ref"
+              echo "$ref" >>"$refs"
+            done
+            echo "digest caddy/redis cũ (không tag) đã kéo sẵn:"
+            cat "$refs"
+          fi
           prev2=""
           official="$(gh release list --repo "$R" --exclude-drafts --exclude-pre-releases --limit 20 --json tagName --jq '.[].tagName')"
           for t in $official; do
@@ -1315,12 +1334,14 @@ jobs:
             echo "::notice::$prev2 không có compose.release.yaml — bỏ qua giả lập ảnh tồn đọng."
             exit 0
           fi
-          { grep -oE 'ghcr\.io/[^"[:space:]]+@sha256:[0-9a-f]{64}' "$RUNNER_TEMP/prev2/compose.release.yaml" || true; } | sort -u >"$refs"
+          ghrefs="$RUNNER_TEMP/prev2-gh-refs.txt"
+          { grep -oE 'ghcr\.io/[^"[:space:]]+@sha256:[0-9a-f]{64}' "$RUNNER_TEMP/prev2/compose.release.yaml" || true; } | sort -u >"$ghrefs"
           echo "ảnh của $prev2 (bản chính thức cũ hơn $PREV_TAG):"
-          cat "$refs"
+          cat "$ghrefs"
           while read -r ref; do
             docker pull -q "$ref"
-          done <"$refs"
+          done <"$ghrefs"
+          cat "$ghrefs" >>"$refs"
 
       - name: Ghi lại app_db_password TRƯỚC khi nâng cấp
         id: before
@@ -1544,6 +1565,8 @@ jobs:
             fi
           done <"$RUNNER_TEMP/prev2-refs.txt"
           # v0.1.48: caddy/redis ghim digest (Renovate nâng hằng tuần) — genh cũng phải dọn digest cũ của đúng 2 repo này.
+          # Digest cũ không tag kéo sẵn ở bước "Giả lập ảnh tồn đọng" nằm trong prev2-refs.txt ⇒ vòng trên đã đòi xoá;
+          # đếm dưới đây chặn thêm trường hợp genh kéo/giữ quá 2 bản.
           over="$(docker images --digests --format '{{.Repository}} {{.Digest}}' \
             | awk '($1 ~ /^ghcr\.io\/[^\/]+\/gen-harness-/ || $1 == "caddy" || $1 == "redis") && $2 != "<none>"' | sort -u \
             | awk '{c[$1]++} END{for (r in c) if (c[r] > 2) print r " (" c[r] " bản)"}')"
