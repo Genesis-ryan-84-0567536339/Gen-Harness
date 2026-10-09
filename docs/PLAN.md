@@ -3,6 +3,10 @@
 **Tài liệu:** PLAN.md · **Phiên bản:** 1.0 · **Trạng thái:** ĐÃ DUYỆT 23/09/2026 kèm quyết định Q1–Q7 (mục Quyết định).
 Kiến trúc: `docs/ARCHITECTURE.md`. Giao diện: `docs/design/`. Đặc tả kỹ thuật đi kèm thiết kế: `docs/handoff/`.
 
+> **Nguồn hiện hành (10/2026).** Đây là kế hoạch thi công gốc theo giai đoạn (đã xong). Tiến độ thật và việc còn lại: [ROADMAP.md](ROADMAP.md) (mục Nợ);
+> từng bản đã phát hành: [CHANGELOG.md](../CHANGELOG.md); thiết kế sau giai đoạn 6: [gen-v1.md](design/gen-v1.md), [gen-hub-link.md](design/gen-hub-link.md),
+> [gen-browser-agent.md](design/gen-browser-agent.md). Mâu thuẫn thì các tài liệu đó thắng.
+
 ---
 
 ## 0. Cách làm việc
@@ -34,7 +38,7 @@ Mục tiêu: `docker compose up` dựng toàn bộ; Owner đầu tiên tạo qua
 |---|---|---|---|
 | 1.1 | Monorepo theo ARCHITECTURE §3; `deploy/compose.yaml` 8 dịch vụ + healthcheck; `.env.example`; Makefile; CI | M | `docker compose up` → mọi dịch vụ healthy, chỉ cổng 8443 mở |
 | 1.2 | Đưa lược đồ khởi điểm (`schema.sql` gốc của gói bàn giao, đã bỏ ở v0.1.48) vào Alembic (tách theo schema), extension, pg_partman, trigger chỉ-INSERT, `core.uuid_v7`, `core.next_code`, `core.lookup` seed | L | Migration lên/xuống sạch trên DB trống; `UPDATE raw.events` lỗi |
-| 1.3 | Auth: đăng nhập, phiên cookie băm, đăng xuất, thu hồi, CSRF, Idempotency-Key, TOTP tuỳ chọn | M | Test sai mật khẩu, phiên hết hạn/thu hồi, CSRF thiếu |
+| 1.3 | Auth: đăng nhập, phiên cookie băm, đăng xuất, thu hồi, CSRF, Idempotency-Key (chưa thi hành — server không đọc header này), TOTP tuỳ chọn *(chưa làm — ROADMAP mục Nợ)* | M | Test sai mật khẩu, phiên hết hạn/thu hồi, CSRF thiếu |
 | 1.4 | PIN: đặt/đổi, phiên PIN 30 phút, `423 PIN_REQUIRED`, khoá 15 phút sau 5 lần sai, danh mục thao tác cần PIN ở một chỗ | M | Test đủ nhánh; mọi lần nhập vào log |
 | 1.5 | RBAC: 5 vai trò, ma trận 7 cột × 5 hàng của thiết kế, `require()` + `ScopeFilter` ở tầng service, `core.assignments` | L | Test ma trận: mỗi endpoint × mỗi vai trò × trong/ngoài phạm vi |
 | 1.6 | Event bus Redis Streams: publish/consume, consumer group, ack, retry, dead-letter; WebSocket `/ws` + pub/sub | M | Consumer chết giữa chừng → sự kiện không mất |

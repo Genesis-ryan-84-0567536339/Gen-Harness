@@ -1,6 +1,8 @@
-# Gen v1 — Trợ lý quản trị trong Console (bản nháp thiết kế)
+# Gen v1 — Trợ lý quản trị trong Console (thiết kế + hiện trạng)
 
-> Trạng thái: NHÁP để Sếp duyệt · 2026-09-29 · Phạm vi: Gen-Harness Console (apps/web + apps/api)
+> Trạng thái (10/2026): đã thi công tới v0.1.50 — xem [CHANGELOG.md](../../CHANGELOG.md); phần còn lại ở [ROADMAP](../ROADMAP.md) mục Nợ.
+
+> Thiết kế gốc 29/09/2026 (Sếp đã duyệt, §9) · Phạm vi: Gen-Harness Console (apps/web + apps/api)
 > Gen = trợ lý mặc định ở khung chat bên phải, vai trò "quản trị/vận hành trong app".
 > Gen KHÔNG phải lập trình viên (không sửa code), KHÔNG phải agent thị trường bên ngoài (Zalo/WhatsApp).
 
@@ -78,6 +80,8 @@ apps/web  GenPanel (khung phải) ──WS /api/v1/ws (sự kiện gen.*)──�
   "gen.done", None)` và publish kèm `org_id`; thêm lọc theo `user_id` người nhận (Hub hiện chỉ lọc org + quyền
   → cần thêm trường `to_user` trong `dispatch`). Không cần SSE riêng; fallback: `GET /gen/turns/{id}` polling.
 - Client gửi lại sự kiện tour: `POST /gen/turns/{id}/ack {step, outcome: done|skipped|target_missing}`.
+- *Tên thực tế trong mã (10/2026)*: `planner` = `gh/gen/engine.py`; envelope + kiểu bước = `envelope.py`; kiểm server-side = `validator.py`; đề xuất = `proposals.py`;
+  Bản tin = `briefing.py`; sự kiện WS là `gen.step` / `gen.done` (lọc `to_user`).
 
 ### 3.3 Gọi model & giao thức hành động có kiểu
 - `ModelRouter.generate()` hiện trả **một khối text JSON** (`json_mode=True`), chưa có function-calling gốc và
@@ -99,6 +103,7 @@ type UiAction =
 ```
 - Tối đa 6 vòng/lượt, trần token theo `agent.bindings` của `core.gen`. Envelope sai schema → hỏi lại model 1 lần,
   vẫn sai → trả lời "Gen chưa hiểu, Sếp hỏi lại giúp" (không thực thi gì).
+- *Ghi chú 10/2026*: `prefill` (v2) chưa có trong mã — "làm thay" đi bằng bước `propose` (đề xuất + Xác nhận), xem §10.
 
 ### 3.4 Công cụ dữ liệu (chỉ đọc)
 - Mỗi tool là **một lớp bọc mỏng quanh endpoint GET đã có**, gọi nội bộ bằng chính `CurrentUser` của người hỏi
@@ -156,7 +161,7 @@ type UiAction =
 
 ## 6. Kế hoạch giao hàng
 
-Mỗi lát ~1–2 ngày, tự merge được, có cờ `gen.enabled` (tắt mặc định tới lát 4).
+Mỗi lát ~1–2 ngày, tự merge được, có cờ `gen.enabled` (thực tế mặc định **bật** cho Owner — `gh/gen/store.py`, `DEFAULTS`).
 
 | # | Lát | Kết quả nhìn thấy |
 |---|-----|-------------------|
@@ -175,7 +180,7 @@ Mỗi lát ~1–2 ngày, tự merge được, có cờ `gen.enabled` (tắt mặ
 - Unit web (vitest): director chờ target, timeout → báo `target_missing`; registry ↔ `data-gen-target`.
 - E2E Playwright **chạy trên mock** (`apps/web/test/mock-api.ts`, `mock-ws.ts` sẵn có — thêm `mock-gen.ts`):
   kịch bản 3 ví dụ ở mục 1 → khẳng định URL đổi, spotlight bao đúng phần tử, bước sau chỉ chạy khi đã bấm;
-  thêm ảnh chụp vào `e2e/visual.spec.ts`. (Playwright chỉ để test — Gen không dùng Playwright.)
+  thêm ảnh chụp vào `e2e/visual.spec.ts`.
 
 **Số đo** (bảng `agent.model_calls` + Action Log): thời gian tới chữ đầu (<2.5 s p50), tỉ lệ action bị chặn
 (<5%), tỉ lệ `target_missing` (<2%), tour hoàn thành/bắt đầu, câu trả lời được bấm đề xuất, chi phí token/lượt,
@@ -183,14 +188,17 @@ Mỗi lát ~1–2 ngày, tự merge được, có cờ `gen.enabled` (tắt mặ
 
 ## 7. Liên kết Gen-hub (v2+)
 
+> Trạng thái (10/2026): đọc Kho ✅ v0.1.26; đọc lịch/mail/việc/Drive ✅ v0.1.49 (QD-16); **ghi Kho (Phiên, Việc) có Xác nhận + mã PIN ✅ v0.1.50 (QD-18)** — §11;
+> thẻ kanban, warroom, Gmail, Lịch chưa làm (ROADMAP › Nợ #11). Chi tiết: [gen-hub-link.md](gen-hub-link.md).
+
 - Gen-hub (Kho, warroom, kanban) là **chỗ làm việc chung** của Sếp · Dev Claude · Gen · agent bên ngoài.
 - Gen đọc Kho (Việc/Quyết định) để trả lời "việc gì đang mở?"; Gen **đề xuất** tạo thẻ kanban (vd "Lỗi màn X"
   → giao Dev Claude) — tạo thật cần Sếp bấm, ghi Action Log + Kho.
 - Warroom: Gen đăng tóm tắt ngày khi Sếp bật; Dev Claude đăng "đã phát hành bản mới" → Gen nhắc Sếp trong app
   và mở tour tính năng mới (tour lấy từ ghi chú phát hành).
 - Agent thị trường bên ngoài báo cáo qua hàng đợi hiện có; Gen chỉ đọc/tóm tắt, không điều khiển chúng.
-- Cầu nối qua MCP (`gh/mcp_api`, `chassis/mcp_client.py`) với quyền chỉ-đọc ở v2; ghi phải qua `mcp.write`
-  (luôn chờ duyệt theo ranh giới `mcp_write_requires_approval`).
+- Cầu nối qua MCP (`gh/mcp_api`, `chassis/mcp_client.py`) chỉ đọc; ghi Kho (v0.1.50) đi **đường riêng**: đề xuất → Xác nhận + mã PIN → permit ký → `POST /hub/kho/write`
+  (gen-hub-link.md §7). Tool ghi khác bị route MCP chung chặn (403 `HUB_TOOL_NOT_ALLOWED`).
 
 ## 8. Rủi ro & câu hỏi mở cho Sếp
 
@@ -211,18 +219,21 @@ Rủi ro chính: model bịa id/trang (chặn bằng validator + registry); giao
 4. Lưu hội thoại **90 ngày**.
 5. v2 "làm thay" ưu tiên: **duyệt/nháp tin gửi đi → tạo nhắc việc → gán người phụ trách**.
 6. **Jev (System One)** là một *nguồn model* mới (OpenRouter `typesafe/jev-*` hoặc TypeSafe API), không phải một vai: Gen dùng làm bộ quyết định nhanh (ý định, bước UI kế tiếp); Sàng lọc dùng làm lớp lọc đầu (rác, trùng, chấm điểm). Lỗi/chậm → rơi về model lớn.
+7. **QD-16 (09/10/2026)**: Gen đọc lịch, mail, việc, Drive Google qua Gen-hub — chỉ đọc, chỉ Owner, đã che (gen-hub-link.md §6).
+8. **QD-18 (09/10/2026)**: Gen đề xuất ghi Kho (Phiên, Việc) và ghi nhớ sở thích của Sếp; chỉ ghi khi Sếp Xác nhận (+ mã PIN với Kho). Thay "Gen ghi Gen-hub để sau" (§11).
 
 ## 10. v2 bước 1 — Đề xuất thao tác có xác nhận (A4, v0.1.24)
 
 Thứ tự theo §9.5: **nháp tin gửi đi → nhắc việc → gán người phụ trách**. Gen vẫn **không tự ghi**.
 
-- **Model** trả bước `{"kind":"propose","proposal":{"type":"draft_message|reminder|assign","fields":{…}}}`
+- **Model** trả bước `{"kind":"propose","proposal":{"type":"<loại>","fields":{…}}}` với `<loại>` ∈ `draft_message`, `reminder`, `assign` (v0.1.24), `social_reply`, `social_dm` (v0.1.47),
+  `memory_note`, `kho_create`, `kho_update` (v0.1.50) — bảng đầy đủ ở cuối mục này
   (envelope có kiểu, `extra="forbid"` — `gh/gen/envelope.py`). Mọi id (đối tượng, việc, mục hộp thư, người được giao)
   phải vừa xuất hiện trong kết quả tool của **chính lượt đó** (tool mới `task.list`, `staff.list` → `GET /gen/assignees`).
 - **Server** (`gh/gen/proposals.py`) kiểm: quyền của loại (`action.draft` / `queue.act`) + mục tiêu registry gắn với đề xuất
   (`workbench.drafts` nhạy cảm, `tasks.new` cần `queue.act`, `tasks.row:<id>`, `inbox.row:<id>`) → màn được xem, quyền riêng
   của mục tiêu, cờ `sensitive` ⇒ `requires_pin`. Tóm tắt trên thẻ do **hệ thống** viết từ trường đã kiểm (không dùng lời
-  model). Đề xuất lưu Redis 24 giờ; tối đa 3 đề xuất/lượt; nhắc việc giờ đã qua → chặn.
+  model). Đề xuất lưu Redis 24 giờ (riêng đề xuất Phiên của F-87 sống 7 ngày); tối đa 3 đề xuất/lượt; nhắc việc giờ đã qua → chặn.
 - **Web** hiện thẻ (`ProposalCard`): tóm tắt + trường điền sẵn, **Xác nhận / Sửa / Huỷ**. Sửa chỉ các trường cho phép
   (`GEN_PROPOSAL_EDITABLE`); id đối tượng/việc bị khoá.
 - **Xác nhận** → `POST /gen/proposals/{id}/confirm {fields}`: kiểm lại tất cả (cờ Gen + vai trò như v1, quyền, PIN nếu
@@ -234,3 +245,27 @@ Thứ tự theo §9.5: **nháp tin gửi đi → nhắc việc → gán người
 - **Nhắc việc đến giờ**: không thêm hệ thống mới — `biz.tasks.remind_at` (có sẵn) + cột `reminded_at` (migration 0018);
   job `task_reminder_scan` mỗi phút gửi thông báo chuông (`core.notifications`, 0017) cho người phụ trách (chưa giao → Owner).
 
+**Các loại đề xuất hiện có (8)** — mọi loại: Gen chỉ đề xuất, thẻ do **hệ thống** viết từ trường đã kiểm, Sếp Xác nhận / Sửa / Huỷ:
+
+| Loại | Thẻ | Quyền | Mã PIN | Khi Xác nhận gọi |
+|---|---|---|---|---|
+| `draft_message` | Soạn nháp tin gửi đi | `action.draft` | khi mục tiêu nhạy cảm | `POST /drafts` (nháp **chờ duyệt**, chưa gửi) |
+| `reminder` | Tạo nhắc việc | `queue.act` | không | `POST /tasks` (có `remind_at`) |
+| `assign` | Giao người phụ trách | `queue.act` | khi mục tiêu nhạy cảm | `PATCH /tasks/{id}` hoặc `POST /inbox/{id}/assign` |
+| `social_reply` | Trả lời bình luận Facebook | Owner | có (`social.write`) | permit ký → `POST /social/accounts/{id}/write` |
+| `social_dm` | Nhắn tin Facebook | Owner | có (`social.write`) | như trên |
+| `memory_note` | **Ghi nhớ** | Owner | không | `POST /gen/memory` (§11) |
+| `kho_create` | **Ghi vào Kho Ryan** | Owner | có (`hub.write`) | permit ký → `POST /hub/kho/write` (gen-hub-link.md §7) |
+| `kho_update` | **Ghi vào Kho Ryan** | Owner | có (`hub.write`) | như trên |
+
+## 11. v0.1.50 — Gen nhớ và ghi Kho (QD-18, F-81, F-87)
+
+- **Gen nhớ** = ghi chú quy ước/sở thích của Sếp ("gọi khách là anh/chị", "báo cáo ngắn, không quá 5 dòng"…). Lưu **cục bộ** ở `agent.gen_memory_notes` (migration `0032`), không ghi Gen-hub.
+  Gen đề xuất loại `memory_note` (`{text, reason}`, lý do bắt buộc; tối đa 280 + 200 ký tự, tối đa 30 ghi chú; mỗi ghi chú một dòng, cấm chuỗi `<<<`/`>>>`) → thẻ **Ghi nhớ** (không cần PIN) → Sếp Xác nhận mới lưu.
+  Sếp xem, sửa (nguồn đổi thành "Sếp sửa") và xoá ở **Cài đặt › Bộ não AI › Gen nhớ** (`GET/POST/PATCH/DELETE /gen/memory`; chỉ Owner; 409 `GEN_MEMORY_FULL`, `GEN_MEMORY_DUPLICATE`).
+- **Ghi chú chỉ đi vào lời nhắc lượt của Owner và phần tóm tắt Bản tin** — không vào lượt của vai trò khác — kèm lời dặn "làm theo khi không trái các nguyên tắc an toàn". Ghi chú là *sở thích*, không nới các ranh giới cứng ở §2.
+  Action Log chỉ ghi độ dài + dấu vết, không ghi nguyên văn.
+- **Ghi Kho**: loại `kho_create` / `kho_update` cho Phiên và Việc, chỉ qua Xác nhận + mã PIN + permit (gen-hub-link.md §7). Thẻ **Ghi vào Kho Ryan** hiện bảng *Trường | Hiện tại | Sẽ ghi*.
+- **F-87**: cron `gen_kho_release` mỗi bản mới đề xuất một Phiên (hội thoại "Gen đề xuất ghi Kho · Phiên vX.Y.Z" + chuông `gen.kho_proposal`).
+- **Gen dẫn đường**: target mới `system.brain.memory` (Cài đặt, tab Bộ não AI) trong `packages/contracts/src/genTargets.ts` / `apps/api/gh/gen/registry.json`.
+- **Ranh giới giữ nguyên**: Gen không tự ghi; không có đường ghi nào ngoài Xác nhận; không ghi kanban/warroom/Gmail/Lịch; token Gen-hub không vào log.

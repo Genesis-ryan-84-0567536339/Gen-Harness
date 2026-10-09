@@ -2,6 +2,12 @@
 
 **Tài liệu:** ARCHITECTURE.md · **Phiên bản:** 1.0 (duyệt 23/09/2026, kèm quyết định Q1–Q7 trong PLAN.md) · **Ngày:** 23/09/2026
 
+> **Nguồn hiện hành (10/2026).** Đây là kiến trúc gốc 23/09/2026. Phần đã thi công thêm hoặc đã đổi sau đó nằm ở: thiết kế Gen
+> [gen-v1.md](design/gen-v1.md), nối Gen-hub [gen-hub-link.md](design/gen-hub-link.md), mạng xã hội [gen-browser-agent.md](design/gen-browser-agent.md);
+> tiến độ + mục Nợ ở [ROADMAP.md](ROADMAP.md); lịch sử từng bản ở [CHANGELOG.md](../CHANGELOG.md); vận hành ở [runbook.md](runbook.md). Mâu thuẫn thì các tài liệu đó thắng.
+> Chưa có trong bản gốc (đã có trong mã): Gen (trợ lý, đề xuất có xác nhận, Gen nhớ), Gen-hub (Kho Ryan, lịch, mail), Facebook cá nhân qua trình duyệt riêng,
+> nguồn model Jev và Claude Code CLI (§11 mới nhắc Antigravity CLI), Telegram, trực canh máy chủ, `genh remote`.
+
 ## 0. Nguồn sự thật và thứ tự ưu tiên
 
 | Ưu tiên | Tài liệu | Phạm vi |
@@ -240,7 +246,7 @@ Còn lại mặc định **mở** khi cài mới (ví dụ: quan sát nhóm th�
 ## 8. Bảo mật (R6, R8, R10)
 
 ### 8.1 Đăng nhập
-Mật khẩu argon2id (≥12 ký tự), TOTP tuỳ chọn. Phiên là token ngẫu nhiên trong cookie `HttpOnly; Secure; SameSite=Strict`, lưu băm ở `core.sessions` (thu hồi được). CSRF token cho request ghi; `Idempotency-Key` cho mọi endpoint ghi. Owner đầu tiên tạo qua trình thiết lập bằng **mã thiết lập một lần** do trình cài sinh — không có tài khoản mặc định.
+Mật khẩu argon2id (≥12 ký tự), TOTP tuỳ chọn *(chưa làm — ROADMAP mục Nợ)*. Phiên là token ngẫu nhiên trong cookie `HttpOnly; Secure; SameSite=Strict`, lưu băm ở `core.sessions` (thu hồi được). CSRF token cho request ghi; `Idempotency-Key` cho mọi endpoint ghi (chưa thi hành — server không đọc header này). Owner đầu tiên tạo qua trình thiết lập bằng **mã thiết lập một lần** do trình cài sinh — không có tài khoản mặc định.
 
 ### 8.2 PIN 6 số (theo `pinRules` của thiết kế)
 - PIN riêng mỗi người, argon2id. Nhập đúng mở **phiên PIN 30 phút** (`core.sessions.pin_verified_until`), gia hạn khi có thao tác.
@@ -256,6 +262,7 @@ Mật khẩu argon2id (≥12 ký tự), TOTP tuỳ chọn. Phiên là token ng�
 - Đánh giá nhân sự: khoá mức Owner (yêu cầu của dự án, chip "Dữ liệu khoá ở cấp Owner", guard MCP "Dữ liệu nhân sự chỉ ở mức Owner"). Mặc định (quyết định Q4): chỉ Owner thấy nội dung; Auditor thấy nhật ký ai đã xem; Manager không thấy. Owner có thể tự cấp thêm cho vai trò khác trong Quyền hạn (PIN + log). Mọi lần xem vào Action Log.
 - Ranh giới "Ẩn dữ liệu nhạy cảm khỏi mọi vai trò dưới Owner" áp ở serializer (trường được gắn nhãn nhạy cảm bị che).
 - Row-Level Security Postgres bật ở giai đoạn hoàn thiện như lớp phòng thủ thứ hai (handoff 03).
+  RLS chỉ là phòng thủ phụ (mỗi bản cài 1 tổ chức) — không mở rộng thêm.
 
 ### 8.4 Action Log
 `ops.action_log` phân vùng tháng, chỉ INSERT, `row_hash = sha256(prev_hash || nội dung chuẩn hoá)`. Ghi qua **một** service duy nhất; middleware ghi mọi request ghi, worker ghi mọi hành động agent/plugin/hệ thống. Job hằng đêm kiểm chuỗi, đứt → đẩy cảnh báo vào hàng đợi. Test quét route bảo đảm không đường ghi nào bỏ qua log.
@@ -340,7 +347,7 @@ Thực thể spec G1 → bảng:
 
 ## 13. API
 
-REST JSON `/api/v1`, OpenAPI tự sinh; phân trang con trỏ `?cursor=&limit=`; lọc/sắp xếp qua query phản ánh vào URL; lỗi RFC 7807; `Idempotency-Key` cho ghi; 🔒 = cần phiên PIN (423 khi thiếu). WebSocket `/ws`: hàng đợi, tin thô LIVE, tiến độ refinery, trạng thái phiên QR, log plugin LIVE, nhật ký MCP LIVE, tiến độ thiết lập. Mọi route có `require(permission)` + `ScopeFilter`.
+REST JSON `/api/v1`, OpenAPI tự sinh; phân trang con trỏ `?cursor=&limit=`; lọc/sắp xếp qua query phản ánh vào URL; lỗi RFC 7807; `Idempotency-Key` cho ghi (chưa thi hành — server không đọc header này); 🔒 = cần phiên PIN (423 khi thiếu). WebSocket `/ws`: hàng đợi, tin thô LIVE, tiến độ refinery, trạng thái phiên QR, log plugin LIVE, nhật ký MCP LIVE, tiến độ thiết lập. Mọi route có `require(permission)` + `ScopeFilter`.
 
 | Nhóm | Endpoint | Màn |
 |---|---|---|
