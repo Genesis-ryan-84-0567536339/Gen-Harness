@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { GEN_SCREEN_BY_KEY, GEN_TARGET_BY_ID, splitTargetId, type GenStep, type UiAction } from '@gen-harness/contracts';
 import { Button, Icon, IconButton } from '@gen-harness/ui';
 import { useMe } from '../lib/queries';
+import { BriefingHubSections } from './BriefingHubSections';
 import { closeSpotlight, executeUiAction } from './director';
 import { restoreIfNeeded, retryRestore, sendFeedback, sendQuestion } from './genClient';
 import { GenHistory } from './GenHistory';
@@ -107,6 +108,8 @@ function Message({ m, userId }: { m: GenChatMessage; userId?: string }) {
       {steps.map((s, i) => (
         <Step key={i} step={s} turnId={m.turnId} />
       ))}
+      {/* v0.1.49 (F-8, QD-16): Lịch hôm nay / Mail cần trả lời / Việc đang mở từ Gen-hub (chỉ đọc). */}
+      {m.kind === 'briefing' ? <BriefingHubSections sections={m.sections} /> : null}
       {typeof m.detail === 'string' && m.detail ? (
         <details className="tech-detail">
           <summary>Chi tiết kỹ thuật</summary>

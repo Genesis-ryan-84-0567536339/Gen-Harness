@@ -8,7 +8,7 @@
  */
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
-import type { GenProposal, GenRating, GenStep, TourStep } from '@gen-harness/contracts';
+import type { GenBriefingSection, GenProposal, GenRating, GenStep, TourStep } from '@gen-harness/contracts';
 
 export interface GenChatMessage {
   id: string;
@@ -22,6 +22,8 @@ export interface GenChatMessage {
   feedback?: GenRating | null;
   /** v0.1.41 (F-8): tin Bản tin Gen (hiện nhãn "Bản tin"). */
   kind?: 'briefing';
+  /** v0.1.49 (F-8, QD-16): các mục của bản tin (chỉ tin Bản tin) — khung Gen vẽ riêng mục lấy từ Gen-hub (`external`). */
+  sections?: GenBriefingSection[];
   /** v0.1.41: dòng lỗi có "Chi tiết kỹ thuật" (luôn là chuỗi). */
   detail?: string | null;
   /** v0.1.41 (F-8a): tin báo "chưa tải lại được hội thoại" — mã hội thoại để nút "Thử lại" mở lại. */
