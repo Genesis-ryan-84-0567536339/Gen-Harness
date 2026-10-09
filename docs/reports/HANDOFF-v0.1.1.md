@@ -3038,7 +3038,10 @@ Sếp xác nhận bằng mã PIN, có bằng chứng bằng ảnh chụp, và d�
   dừng sau 3 giây vì lỗi thanh toán Actions ("recent account payments have failed or your spending limit…").
   Nhánh đã nối main (merge 4777a73: main 3a9c84d = v0.1.47 squash, cây trùng hệt e24e279 vốn có sẵn trên nhánh ⇒ cây mã sau
   merge không đổi, chỉ gỡ xung đột VERSION/ci.yml/release.yml/ROADMAP/HANDOFF về bản v0.1.48). Kết quả trên head sau merge:
-  đang chạy lại CI, Installer matrix, E2E (pr) — commit kế tiếp ghi kết quả thật.
+  **CI xanh** trên 27bb183 (`version`, `renovate-config`, `api`, `web`, `browser`, `images` gồm build thật 5 ảnh + tái lập
+  `--no-cache` + `.pyc` trong /opt/venv, `ci-ok`; run 37879780632); **Installer matrix xanh** (4 hệ điều hành, run
+  37879780689); **E2E cài đặt thật chế độ pr xanh** (run 37879780717): build ảnh từ Dockerfile của nhánh, cài sạch, backup,
+  export/import, bản hỏng cố ý tự quay về, khôi phục bản sao ngoài máy. Commit sau 27bb183 chỉ ghi kết quả này vào HANDOFF.
   `e2e-upgrade` (tạo lại proxy/redis bằng digest, dọn digest caddy/redis cũ, ô v0.1.46→) chỉ chạy ở chế độ release ⇒ chạy
   sau khi tăng VERSION và là cổng promote (đỏ ⇒ không tới máy Boss).
 - **Lưu ý vận hành**: `genh update` lên bản này tạo lại container proxy/redis (tham chiếu ảnh đổi sang digest); dữ liệu redis
