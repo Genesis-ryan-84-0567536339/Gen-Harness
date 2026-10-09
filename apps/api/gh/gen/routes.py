@@ -2,6 +2,10 @@
 
 Truyền kết quả: WS sẵn có (`gen.step`/`gen.done`, lọc `to_user`) + `GET /gen/turns/{id}` dự phòng — lý do chọn WS
 thay SSE ghi ở docs/reports/HANDOFF-v0.1.1.md mục v0.1.21.
+
+v0.1.49 (QD-16): `/gen/sources/*` — đường ĐỌC Tài liệu, Deal, Vụ việc cho tool `document.*`/`deal.*`/`case.*` của Gen.
+Chỉ Owner; tái dùng nguyên hàm danh sách/chi tiết của cụm Quan hệ & Thị trường (cùng phạm vi, cùng ACL) rồi che kết
+quả bằng `mask_for_model` trước khi tới model đám mây (Owner nhận dữ liệu KHÔNG che từ endpoint gốc).
 """
 
 import asyncio
@@ -17,7 +21,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gh.auth import rbac, service
 from gh.auth.deps import current_user, require_owner
+from gh.biz.market import routes as market_routes
+from gh.biz.relations import routes as relations_routes
 from gh.chassis import actionlog
+from gh.chassis.masking import MASK, is_secret_key, mask_for_model
 from gh.db import DB, sessionmaker
 from gh.errors import ApiError, conflict, field_errors, forbidden, not_found, pin_required
 from gh.gen import engine, proposals, store
@@ -366,3 +373,81 @@ async def cancel_proposal(pid: uuid.UUID, request: Request, user: service.Curren
                            detail={"via": "gen", "proposal_id": p["id"], "type": p["type"], "turn_id": p["turn_id"],
                                    "conversation_id": p["conversation_id"]}, ip=user.ip)
     return proposals.public(p)
+
+
+# ── v0.1.49 (QD-16): nguồn dữ liệu nội bộ cho Gen — Tài liệu, Deal, Vụ việc (chỉ Owner, chỉ đọc, đã che) ──
+
+#: Khoá có giá trị là định danh / mã / thời điểm / số tiền / enum — KHÔNG phải dữ liệu cá nhân và phải giữ nguyên:
+#: regex số dài của `mask_for_model` sẽ cắt nát đuôi UUID (vd 446655440000) làm validator không còn khớp id.
+KEEP_RAW = frozenset({"id", "code", "person_id", "opportunity_id", "subject_id", "status", "priority", "kind", "mime",
+                      "source", "created_at", "updated_at", "opened_at", "resolved_at", "won_at", "bytes",
+                      "amount_vnd"})
+
+
+def _for_model(data: Any) -> Any:
+    """Che kết quả trước khi sang model: khoá kiểu mật khẩu/token/api_key/pin (cùng quy tắc `mask_for_model`) bị thay
+    hẳn — kể cả giá trị ngắn hay số; khoá trong KEEP_RAW (giá trị vô hướng) giữ nguyên; mọi giá trị khác — chuỗi →
+    `mask_for_model` (email, SĐT/số dài, khoá bí mật), list/dict → đệ quy."""
+    if isinstance(data, dict):
+        out: dict[str, Any] = {}
+        for k, v in data.items():
+            if is_secret_key(str(k)) and isinstance(v, str | int) and not isinstance(v, bool) and v != "":
+                out[k] = MASK
+            elif k in KEEP_RAW and not isinstance(v, dict | list):
+                out[k] = v
+            else:
+                out[k] = _for_model(v)
+        return out
+    if isinstance(data, list):
+        return [_for_model(v) for v in data]
+    return mask_for_model(data)
+
+
+def _doc_for_model(item: dict[str, Any]) -> dict[str, Any]:
+    """Bỏ `created_by` (dạng `user:<id>`) — `source` đã nói đủ nguồn tài liệu; không đưa principal cho model."""
+    return {k: v for k, v in item.items() if k != "created_by"}
+
+
+@router.get("/sources/documents")
+async def source_documents(source: Literal["channel", "agent", "tay"] | None = None,
+                           limit: int = Query(20, ge=1, le=20), user: service.CurrentUser = Depends(require_owner),
+                           db: AsyncSession = DB) -> Any:
+    """Siêu dữ liệu tài liệu (tiêu đề, mô tả, người/nhóm gắn, nguồn) — KHÔNG đọc nội dung tệp."""
+    res = await relations_routes.list_documents(owner_person_id=None, owner_group_id=None, source=source,
+                                                cursor=None, limit=limit, user=user, db=db)
+    return _for_model({**res, "items": [_doc_for_model(i) for i in res["items"]]})
+
+
+@router.get("/sources/documents/{document_id}")
+async def source_document(document_id: uuid.UUID, user: service.CurrentUser = Depends(require_owner),
+                          db: AsyncSession = DB) -> Any:
+    res = await relations_routes.get_document(document_id, user=user, db=db)
+    acl = res.get("acl") or []
+    return _for_model({**_doc_for_model({k: v for k, v in res.items() if k != "acl"}), "acl_count": len(acl)})
+
+
+@router.get("/sources/deals")
+async def source_deals(status: Literal["open", "won", "lost"] | None = None, limit: int = Query(20, ge=1, le=20),
+                       user: service.CurrentUser = Depends(require_owner), db: AsyncSession = DB) -> Any:
+    return _for_model(await market_routes.list_deals(status=status, person_id=None, cursor=None, limit=limit,
+                                                      user=user, db=db))
+
+
+@router.get("/sources/deals/{deal_id}")
+async def source_deal(deal_id: uuid.UUID, user: service.CurrentUser = Depends(require_owner),
+                      db: AsyncSession = DB) -> Any:
+    return _for_model(await market_routes.get_deal(deal_id, user=user, db=db))
+
+
+@router.get("/sources/cases")
+async def source_cases(status: str | None = Query(None, max_length=40),
+                       priority: Literal["P1", "P2", "P3"] | None = None, limit: int = Query(20, ge=1, le=20),
+                       user: service.CurrentUser = Depends(require_owner), db: AsyncSession = DB) -> Any:
+    return _for_model(await market_routes.list_cases(status=status, assignee_user_id=None, priority=priority,
+                                                      cursor=None, limit=limit, user=user, db=db))
+
+
+@router.get("/sources/cases/{case_id}")
+async def source_case(case_id: uuid.UUID, user: service.CurrentUser = Depends(require_owner),
+                      db: AsyncSession = DB) -> Any:
+    return _for_model(await market_routes.get_case(case_id, user=user, db=db))

@@ -143,8 +143,9 @@ describe('thẻ "Lọc tin" — Gen và huy hiệu dùng đúng tên mới', () 
     expect(t.description).not.toMatch(/ngưỡng điểm chất lượng, dùng Jev/);
     const badges = triageBadges({ duplicate_of: null, duplicate_kind: null, spam: false, spam_reason: null, score: 82, low_score: false, reason: 'ok', source: 'rules' } as never);
     expect(badges.map((b) => b.label)).toEqual(['Điểm lọc 82']);
-    const panel = readFileSync(resolve(__dirname, '../../src/gen/GenPanel.tsx'), 'utf8');
-    expect(panel).toContain("'refinery.summary': 'lọc tin'");
+    // v0.1.49: nhãn bước tool của khung Gen chuyển từ GenPanel.tsx sang toolLabels.ts.
+    const labels = readFileSync(resolve(__dirname, '../../src/gen/toolLabels.ts'), 'utf8');
+    expect(labels).toContain("'refinery.summary': 'lọc tin'");
     const tools = readFileSync(resolve(__dirname, '../../../api/gh/gen/tools.py'), 'utf8');
     expect(tools).not.toMatch(/Lọc đầu Hộp thư/);
   });

@@ -1,12 +1,23 @@
 import { useEffect, useState } from 'react';
-import type { HubLink } from '@gen-harness/contracts';
+import type { HubLink, HubLinkTestResult } from '@gen-harness/contracts';
 import { Button, Icon, Switch, TextField } from '@gen-harness/ui';
 import { errorText } from '../../lib/errorText';
 import { useMe } from '../../lib/queries';
 import { CardError, FriendlyErrorText, InlineError, Panel, SkeletonLines } from '../common';
 import { ConnectionStatusPill } from '../connections/ConnectionStatusPill';
 import { hubStatus } from '../connections/connectionsModel';
-import { HUB_STATUS_LABEL, PUBLIC_NET_HINT, expiryToIso, hubStatusTone, isPublicHttpsUrl, isoToDay } from './mcpModel';
+import {
+  HUB_BREAKER_STRIP,
+  HUB_STATUS_LABEL,
+  PUBLIC_NET_HINT,
+  SCOPES_READ_ONLY_TEXT,
+  expiryToIso,
+  hubStatusTone,
+  isPublicHttpsUrl,
+  isoToDay,
+  scopeRows,
+  scopesMessage,
+} from './mcpModel';
 import { useHubLink, useTestHubLink, useUpdateHubLink } from './queries';
 
 const fmtTime = (iso: string | null) => (iso ? new Date(iso).toLocaleString('vi-VN') : '—');
@@ -18,6 +29,8 @@ const fmtTime = (iso: string | null) => (iso ? new Date(iso).toLocaleString('vi-
  * đổi địa chỉ/token thì tắt lại, phải kiểm tra lại. Lưu / Kiểm tra cần PIN (`hub.link`), ghi Nhật ký hành động.
  * v0.1.39 (F-31): gõ địa chỉ https công khai → công tắc "mạng công cộng" bật sẵn (Owner vẫn bỏ được); "Kiểm tra" khi
  * còn thay đổi chưa lưu = lưu rồi kiểm tra luôn (một lần PIN — phiên PIN của lần lưu phủ lần kiểm tra).
+ * v0.1.49 (QD-16): khối "Quyền đọc thêm (tuỳ chọn)" — lịch, mail, việc, Drive (Gen chỉ đọc); sau Kiểm tra báo quyền còn
+ * thiếu (không làm Kiểm tra đỏ); bộ ngắt F-83 đang mở ⇒ dải "Gen-hub tạm không trả lời".
  */
 export function HubLinkCard() {
   const me = useMe();
@@ -136,6 +149,12 @@ function HubLinkBody({ link, isOwner }: { link: HubLink; isOwner: boolean }) {
         ) : null}
       </dl>
 
+      {link.breaker?.open === true ? (
+        <p className="hub-breaker" role="note" data-testid="hub-breaker">
+          <Icon name="ph ph-warning" size={12} /> {HUB_BREAKER_STRIP}
+        </p>
+      ) : null}
+
       {isOwner ? (
         <form
           className="jev-form"
@@ -206,10 +225,14 @@ function HubLinkBody({ link, isOwner }: { link: HubLink; isOwner: boolean }) {
               )}
             </div>
           ) : null}
+          <ReadScopes link={link} result={result} />
           {/* v0.1.28 (UX V14): từng bước bằng lời thường, không tên riêng. */}
           <ol className="muted-note hub-steps">
             <li>Mở Gen-hub, vào mục tạo trợ lý mới, đặt tên có tên công ty (ví dụ gen-harness-congty).</li>
-            <li>Chọn thời hạn thẻ truy cập 90 ngày và chỉ bật các quyền ĐỌC Kho (tóm tắt, tìm, xem một mục) — không bật quyền ghi.</li>
+            <li>
+              Chọn thời hạn thẻ truy cập 90 ngày. Bật quyền ĐỌC Kho (tóm tắt, tìm, xem một mục) và (tuỳ chọn) quyền đọc lịch, đọc mail, đọc việc, tìm Drive —
+              KHÔNG bật quyền ghi.
+            </li>
             <li>Chép thẻ truy cập (token) vừa tạo, dán vào ô trên rồi bấm Kiểm tra.</li>
           </ol>
           <p className="muted-note">Nội dung Kho được che số tài khoản, SĐT, email, khoá trước khi gửi cho AI.</p>
@@ -218,5 +241,44 @@ function HubLinkBody({ link, isOwner }: { link: HubLink; isOwner: boolean }) {
         <p className="muted-note">Chỉ Sếp (Owner) cấu hình và dùng Gen-hub.</p>
       )}
     </>
+  );
+}
+
+/**
+ * v0.1.49 (QD-16): "Quyền đọc thêm (tuỳ chọn)" — 4 dòng Có / Chưa / Chưa kiểm lấy từ lần Kiểm tra XANH vừa xong
+ * (`test.data.read_scopes`) hoặc, chưa bấm, từ lần kiểm xanh gần nhất máy chủ nhớ (`link.read_scopes`). Chưa nối / chưa
+ * từng kiểm xanh (`last_ok_at` trống) ⇒ 4 dòng "Chưa kiểm", không lời nhắc. Thiếu quyền đọc chỉ là lời nhắc — không làm
+ * Kiểm tra đỏ. Mọi giá trị từ máy chủ được kiểm kiểu trước khi hiện (chỉ chuỗi / boolean).
+ */
+function ReadScopes({ link, result }: { link: HubLink; result: HubLinkTestResult | undefined }) {
+  const fromLink = link.configured && !!link.last_ok_at ? link.read_scopes : undefined;
+  // Kiểm tra vừa đỏ (không nối được) thì chưa nói gì về quyền: dùng lần kiểm xanh gần nhất (nếu có), không lời nhắc.
+  const scopes = result?.ok ? (result.read_scopes ?? fromLink) : fromLink;
+  const rows = scopeRows(scopes);
+  const msg = result ? (result.ok ? scopesMessage(result.read_missing, scopes) : null) : scopesMessage(undefined, scopes);
+  const writeTools = result && Array.isArray(result.write_tools) ? result.write_tools.filter((t): t is string => typeof t === 'string' && t !== '') : [];
+  return (
+    <div className="hub-scopes" data-testid="hub-scopes">
+      <p className="hub-scopes__title">Quyền đọc thêm (tuỳ chọn)</p>
+      <ul className="hub-scopes__list">
+        {rows.map((r) => (
+          <li key={r.key} className="hub-scopes__row" data-has={r.state === 'unknown' ? undefined : r.state}>
+            <span className="hub-scopes__name">{r.label}</span>
+            <span className="hub-scopes__val">{r.text}</span>
+          </li>
+        ))}
+      </ul>
+      {msg ? (
+        <p className="hub-scopes__msg" data-tone={msg.tone} role="note">
+          {msg.text}
+        </p>
+      ) : null}
+      {writeTools.length > 0 ? (
+        <p className="hub-scopes__msg" data-tone="warn" role="note">
+          Token đang có thêm quyền GHI ({writeTools.join(', ')}) — Gen không bao giờ dùng, nên tắt các quyền này trong Gen-hub.
+        </p>
+      ) : null}
+      <p className="muted-note">{SCOPES_READ_ONLY_TEXT}</p>
+    </div>
   );
 }

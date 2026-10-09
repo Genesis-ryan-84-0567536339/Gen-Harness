@@ -1,30 +1,44 @@
-"""Liên kết Gen-hub — Gen ĐỌC Kho Ryan (v0.1.26, docs/design/gen-hub-link.md §3).
+"""Liên kết Gen-hub — Gen ĐỌC Kho Ryan (v0.1.26), lịch/mail/việc/Drive Google (v0.1.49, QD-16)
+(docs/design/gen-hub-link.md §3, §6).
 
 - Liên kết (`agent.hub_links`, một dòng / tổ chức) trỏ tới một máy chủ trong MCP Hub sẵn có (`agent.mcp_servers`);
   token agent của Gen-hub mã hoá phong bì trong `mcp_servers.auth_enc` (gh.crypto) — không lưu rõ, không log, không
   trả qua API. Mọi lời gọi ra ngoài đi qua `gh.mcp_api.invoke.invoke_tool` (không có đường gọi MCP thứ hai).
-- Chỉ-đọc, 2 lớp: Gen-hub chỉ grant tool đọc Kho; ở đây chỉ gọi tool có hậu tố thuộc `KHO_READ_SUFFIXES` (so hậu tố
-  vì Gen-hub đặt tiền tố theo connector, vd `mcp-58450__kho_tom_tat`) — tool lạ bị bỏ qua dù Owner lỡ mở.
-- Nội dung Kho sang model đám mây (quyết định Boss #2) → luôn qua `mask_for_model` (gen-v1 §9.2: cùng lớp che
-  `mask_text` như vai trò dưới Owner + che email, khoá/token) TRƯỚC khi trả về, lưu đệm hay ghi `mcp_calls`.
+- Chỉ-đọc, 2 lớp: Gen-hub chỉ grant tool đọc; ở đây chỉ gọi tool có hậu tố thuộc `READ_SUFFIXES` = Kho + Google (so
+  hậu tố vì Gen-hub đặt tiền tố theo connector, vd `mcp-58450__kho_tom_tat`) — tool lạ bị bỏ qua dù Owner lỡ mở.
+  Quy tắc THẬT là danh sách cho phép; `WRITE_SUFFIXES_DENY` chỉ để ghi lý do/kiểm thử. Tool ghi (gửi mail, tạo lịch,
+  ghi Drive…) bị từ chối cả ở route MCP chung, kể cả Owner (`generic_call`).
+- Nội dung Kho/lịch/mail/việc/Drive sang model đám mây (quyết định Boss #2, QD-16) → luôn qua `mask_for_model` (gen-v1
+  §9.2: cùng lớp che `mask_text` như vai trò dưới Owner + che email, khoá/token; id kỹ thuật giữ nguyên qua
+  `HUB_KEEP_KEYS`) TRƯỚC khi trả về, lưu đệm hay ghi `mcp_calls` (chỉ siêu dữ liệu).
 - Đệm Redis 5 phút theo org + tool + tham số (chỉ bản đã che); đổi địa chỉ/token → xoá đệm.
+- v0.1.49 (F-83): ngắt mạch riêng của Gen-hub (3 lỗi mạng/timeout/5xx/429 liên tiếp → mở 60 giây, nửa mở lỗi 1 lần →
+  mở lại; 401/403 không tính), khoá Redis `gh:hub:brk:*:{org}`, đồng hồ tiêm được `_clock`; mở quá 15 phút ⇒ sự cố
+  `hub.breaker` + chuông Owner (`breaker_watch`, worker mỗi 5 phút). `briefing_read` là hàm đọc cho Bản tin (không ném).
 """
 
+import asyncio
 import hashlib
 import ipaddress
+import logging
+import math
 import re
 import socket
 import time
 import uuid
-from datetime import UTC, datetime, timedelta
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import UTC, date, datetime, timedelta
+from datetime import time as dtime
 from typing import Any
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo
 
 import orjson
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gh import notifications
+from gh import health, notifications
 from gh.auth import rbac, service
 from gh.chassis import actionlog
 from gh.chassis.masking import _RE_SECRET, MASK, mask_for_model
@@ -33,16 +47,47 @@ from gh.data.common import iso
 from gh.errors import ApiError, conflict
 from gh.mcp_api import invoke
 
+log = logging.getLogger("gh.hub_link")
+
 AGENT_KEY = "core.gen"
 SERVER_NAME = "Gen-hub"
-SERVER_NOTE = "Liên kết Gen-hub — Gen đọc Kho Ryan (chỉ đọc). Quản lý ở thẻ Gen-hub."
-# Danh sách cho phép cố định trong code (không cấu hình được): chỉ tool ĐỌC Kho.
+SERVER_NOTE = "Liên kết Gen-hub — Gen đọc Kho Ryan, lịch, mail, việc, Drive (chỉ đọc). Quản lý ở thẻ Gen-hub."
+# Danh sách cho phép cố định trong code (không cấu hình được): chỉ tool ĐỌC — Kho + Google (QD-16, v0.1.49).
 KHO_READ_SUFFIXES = ("kho_tom_tat", "kho_search", "kho_get", "kho_find_by_id", "kho_list")
+GOOGLE_READ_SUFFIXES = ("calendar_list_events", "tasks_list", "gmail_search", "gmail_read_message", "drive_search")
+READ_SUFFIXES = KHO_READ_SUFFIXES + GOOGLE_READ_SUFFIXES
+# Chỉ để ghi lý do + kiểm thử: các tool GHI không bao giờ được gọi. Quy tắc thật vẫn là danh sách cho phép ở trên.
+WRITE_SUFFIXES_DENY = ("gmail_send", "gmail_create_draft", "calendar_create_event", "drive_create_file",
+                       "drive_share_file", "tasks_create", "docs_edit", "sheets_write", "slides_add_slide",
+                       "kho_create", "kho_update")
 REQUIRED_SUFFIXES = ("kho_tom_tat", "kho_search", "kho_find_by_id")
+# Quyền đọc thêm (không bắt buộc): mỗi quyền = mọi hậu tố của nó đều có tool đọc, đã mở, đã cấp cho `core.gen`.
+READ_SCOPES: dict[str, tuple[str, ...]] = {
+    "calendar": ("calendar_list_events",),
+    "mail": ("gmail_search", "gmail_read_message"),
+    "tasks": ("tasks_list",),
+    "drive": ("drive_search",),
+}
+SCOPE_LABELS = {"calendar": "đọc lịch", "mail": "đọc mail", "tasks": "đọc việc (Google Tasks)",
+                "drive": "tìm tệp Drive"}
+# Khoá mà giá trị chuỗi là id kỹ thuật (id Gmail/sự kiện có thể chứa ≥ 8 chữ số liền — regex số dài sẽ phá id).
+# KHÔNG có khoá chung chung như `code`: mã đặt chỗ / OTP / SĐT viết liền dưới `code` phải bị che như thường.
+HUB_KEEP_KEYS = frozenset({"id", "messageId", "threadId", "eventId", "taskId", "fileId", "tasklistId"})
+# Nguồn hiển thị + danh từ trong câu lỗi, theo tiền tố hậu tố tool.
+_SOURCES: tuple[tuple[str, str, str], ...] = (
+    ("kho_", "Kho Ryan qua Gen-hub", "Kho"),
+    ("calendar_", "Lịch Google qua Gen-hub", "lịch"),
+    ("gmail_", "Gmail qua Gen-hub", "mail"),
+    ("tasks_", "Google Tasks qua Gen-hub", "việc"),
+    ("drive_", "Google Drive qua Gen-hub", "Drive"),
+)
 RECORD_RE = re.compile(r"^[A-Z]{2,6}-\d{1,6}$")
+GMAIL_ID_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
+MAIL_TEXT_MAX = 4000
 CACHE_TTL_S = 300
 EXPIRY_WARN_DAYS = 14
 CALL_TIMEOUT_S = 10.0
+VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 
 
 # ─── che dữ liệu trước khi sang model (gen-v1 §9.2) ───────────────────────────
@@ -78,9 +123,88 @@ ENDPOINT_INVALID_MSG = "Địa chỉ Gen-hub không hợp lệ — kiểm tra l�
 
 
 def _summary(suffix: str, result: Any) -> str:
-    """`mcp_calls.result_summary` + sự kiện WS `mcp.call` đi tới cả vai trò `system.read` — Kho chỉ cho Owner
-    (quyết định Boss #1) nên KHÔNG lưu nội dung, chỉ siêu dữ liệu."""
-    return f"Đọc Kho ({suffix}) — {len(orjson.dumps(result))} byte, nội dung không lưu"
+    """`mcp_calls.result_summary` + sự kiện WS `mcp.call` đi tới cả vai trò `system.read` — Kho/lịch/mail/việc/Drive
+    chỉ cho Owner (quyết định Boss #1, QD-16) nên KHÔNG lưu nội dung, chỉ siêu dữ liệu."""
+    return f"Đọc Gen-hub ({suffix}) — {len(orjson.dumps(result))} byte, nội dung không lưu"
+
+
+def source_of(suffix: str) -> str:
+    """Nhãn nguồn theo hậu tố: kho_* "Kho Ryan qua Gen-hub", calendar_* "Lịch Google qua Gen-hub", gmail_* …"""
+    for prefix, label, _ in _SOURCES:
+        if suffix.startswith(prefix):
+            return label
+    return "Gen-hub"
+
+
+def _noun_of(suffix: str) -> str:
+    for prefix, _, noun in _SOURCES:
+        if suffix.startswith(prefix):
+            return noun
+    return "Gen-hub"
+
+
+def scope_of(suffix: str) -> str | None:
+    """Quyền đọc thêm (calendar/mail/tasks/drive) chứa hậu tố này; None với Kho và hậu tố lạ."""
+    for scope, suffixes in READ_SCOPES.items():
+        if suffix in suffixes:
+            return scope
+    return None
+
+
+def mask_hub(result: Any, *, secrets: tuple[str, ...] = (), suffix: str | None = None) -> Any:
+    """Che kết quả tool Gen-hub trước khi trả/đệm. Tool Google: id kỹ thuật dưới `HUB_KEEP_KEYS` giữ nguyên và
+    `content[].text` là JSON được che theo cấu trúc rồi gói lại thành chuỗi (nếu che cả chuỗi, regex số dài sẽ phá id
+    Gmail như `18c2f41234567890`). Kho giữ nguyên hành vi cũ."""
+    if suffix is None or scope_of(suffix) is None:
+        return mask_for_model(result, secrets=secrets)
+    pre = result
+    parsed_at: list[int] = []
+    if isinstance(result, dict) and isinstance(result.get("content"), list):
+        content = list(result["content"])
+        for i, c in enumerate(content):
+            if isinstance(c, dict) and isinstance(c.get("text"), str):
+                obj = _json_or_none(c["text"])
+                if obj is not None:
+                    content[i] = {**c, "text": obj}
+                    parsed_at.append(i)
+        pre = {**result, "content": content}
+    masked = mask_for_model(pre, secrets=secrets, keep_keys=HUB_KEEP_KEYS)
+    for i in parsed_at:
+        masked["content"][i]["text"] = orjson.dumps(masked["content"][i]["text"]).decode()
+    return masked
+
+
+def _json_or_none(raw: str) -> Any:
+    t = raw.strip()
+    if not t or t[0] not in "[{":
+        return None
+    try:
+        return orjson.loads(t)
+    except orjson.JSONDecodeError:
+        return None
+
+
+def truncate_text(data: Any, limit: int = 4000) -> Any:
+    """Cắt mọi chuỗi dài hơn `limit` (gọi SAU khi che) — thân mail dài không tràn ngữ cảnh model."""
+    if isinstance(data, str):
+        return data if len(data) <= limit else data[: limit - 1] + "…"
+    if isinstance(data, list):
+        return [truncate_text(v, limit) for v in data]
+    if isinstance(data, dict):
+        return {k: truncate_text(v, limit) for k, v in data.items()}
+    return data
+
+
+def vn_day_bounds(day: date) -> dict[str, str]:
+    """Đầu/cuối ngày giờ VN (ISO, +07:00) cho `calendar_list_events`."""
+    return {"timeMin": datetime.combine(day, dtime(0, 0, 0), tzinfo=VN_TZ).isoformat(),
+            "timeMax": datetime.combine(day, dtime(23, 59, 59), tzinfo=VN_TZ).isoformat()}
+
+
+def vn_today(now: datetime | None = None) -> date:
+    """Ngày hiện tại theo giờ VN; `now` naive coi là giờ VN."""
+    now = now or datetime.now(UTC)
+    return (now.astimezone(VN_TZ) if now.tzinfo else now.replace(tzinfo=VN_TZ)).date()
 
 
 def scrub(message: str, token: str | None) -> str:
@@ -161,13 +285,38 @@ async def clear_cache(redis: Any, org_id: uuid.UUID) -> None:
 
 
 def suffix_of(tool_name: str) -> str | None:
-    """Hậu tố cho phép của một tool Gen-hub (`kho_tom_tat` hoặc `<connector>__kho_tom_tat`), None nếu tool lạ."""
+    """Hậu tố cho phép của một tool Gen-hub (`kho_tom_tat` hoặc `<connector>__kho_tom_tat`, `mcp-46634__gmail_search`),
+    None nếu tool lạ — gồm mọi tool GHI (gmail_send, calendar_create_event…): không bao giờ gọi."""
     base = tool_name.rsplit("__", 1)[-1]
-    return base if base in KHO_READ_SUFFIXES else None
+    return base if base in READ_SUFFIXES else None
+
+
+async def read_scopes(db: AsyncSession, org_id: uuid.UUID) -> dict[str, bool]:
+    """Quyền đọc thêm đang có: True khi MỌI hậu tố của quyền có tool trên máy chủ liên kết, `access='read'`, đã mở
+    (`is_exposed`) và đã cấp cho `core.gen`. Chưa nối ⇒ tất cả False."""
+    names = (await db.execute(text("""
+        SELECT t.name FROM agent.hub_links l
+        JOIN agent.mcp_servers s ON s.id = l.server_id AND s.org_id = l.org_id
+        JOIN agent.mcp_tools t ON t.server_id = s.id
+        JOIN agent.mcp_grants g ON g.tool_id = t.id AND g.agent_key = :a
+        WHERE l.org_id = :o AND t.access = 'read' AND t.is_exposed"""), {"o": org_id, "a": AGENT_KEY})).scalars().all()
+    have = {suffix_of(n) for n in names}
+    return {scope: all(suf in have for suf in sufs) for scope, sufs in READ_SCOPES.items()}
+
+
+def scopes_known(r: Any) -> bool:
+    """`read_scopes` có nghĩa chưa: đã nối, đã có ít nhất một lần Kiểm tra xanh và liên kết đang bật (đổi địa chỉ/token
+    ⇒ `upsert` tắt liên kết cho tới lần Kiểm tra xanh kế tiếp, nên quyền cũ không còn được coi là đã kiểm)."""
+    return r is not None and r.server_id is not None and r.last_ok_at is not None and bool(r.enabled)
+
+
+def read_missing(scopes: dict[str, bool]) -> list[str]:
+    """Nhãn các quyền đọc thêm còn thiếu, theo thứ tự lịch, mail, việc, Drive."""
+    return [SCOPE_LABELS[k] for k in READ_SCOPES if not scopes.get(k)]
 
 
 async def find_tool(db: AsyncSession, org_id: uuid.UUID, server_id: uuid.UUID, suffix: str) -> Any:
-    assert suffix in KHO_READ_SUFFIXES
+    assert suffix in READ_SUFFIXES
     rows = (await db.execute(text(invoke.TOOL_SELECT + " WHERE t.server_id = :s AND s.org_id = :o ORDER BY t.name"),
                              {"s": server_id, "o": org_id})).all()
     for r in rows:
@@ -238,11 +387,163 @@ def client_for(transport: Any) -> McpClient:
     return McpClient(transport=transport, timeout=CALL_TIMEOUT_S, pin_dns=True)
 
 
-async def call_kho(db: AsyncSession, redis: Any, client: McpClient, *, user: service.CurrentUser, suffix: str,
-                   args: dict[str, Any]) -> dict[str, Any]:
-    """Một lần đọc Kho cho Gen/Owner. Kết quả LUÔN đã che (mask_for_model)."""
-    if suffix not in KHO_READ_SUFFIXES:
-        raise conflict("HUB_TOOL_NOT_ALLOWED", "Tool này không nằm trong danh sách đọc Kho được phép")
+# ─── ngắt mạch riêng của Gen-hub (v0.1.49, F-83) ──────────────────────────────
+
+BREAKER_FAILS = 3
+BREAKER_OPEN_S = 60
+BREAKER_ALERT_AFTER_S = 900
+BREAKER_KEY = "hub.breaker"
+BREAKER_KIND = "hub.unreachable"
+_BREAKER_FAILS_TTL_S = 300
+_BREAKER_OPEN_TTL_S = 3600
+_BREAKER_DOWN_TTL_S = 86400
+#: Đồng hồ tiêm được (epoch giây) — test monkeypatch `hub._clock`; luôn gọi qua tên module, không bind sớm.
+_clock = time.time
+
+
+def _bk(part: str, org_id: uuid.UUID) -> str:
+    """gh:hub:brk:{fails|open_until|down_since|half}:{org}"""
+    return f"gh:hub:brk:{part}:{org_id}"
+
+
+def _epoch(raw: Any) -> float | None:
+    if raw is None:
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _counts_for_breaker(cause: Exception) -> bool:
+    """Chỉ lỗi KHÔNG tới được Gen-hub mới tính: mạng/timeout, 5xx, 429/408, phản hồi không phải JSON. 401/403 (token
+    — đã có trạng thái 'expired') và lỗi cấu hình/ứng dụng (4xx khác, JSON-RPC báo lỗi) thì không."""
+    head = str(cause).split(":", 1)[0].strip()
+    if head == "mạng" or head.startswith("phản hồi không phải JSON"):
+        return True
+    return head.isdigit() and (int(head) in (408, 429) or int(head) >= 500)
+
+
+async def _breaker_blocked(redis: Any, org_id: uuid.UUID) -> bool:
+    if redis is None:
+        return False
+    until = _epoch(await redis.get(_bk("open_until", org_id)))
+    return until is not None and until > _clock()
+
+
+async def _breaker_fail(db: AsyncSession, redis: Any, org_id: uuid.UUID) -> None:
+    """Một lỗi mạng/timeout/5xx/429: ≥ 3 lỗi liên tiếp, hoặc đang nửa mở (đã từng mở) mà lỗi ⇒ mở 60 giây. Cũng kiểm
+    luôn "im hơn 15 phút" (không chờ cron). Bên gọi commit."""
+    if redis is None:
+        return
+    now = _clock()
+    fails_key = _bk("fails", org_id)
+    down_key = _bk("down_since", org_id)
+    fails = await redis.incr(fails_key)
+    await redis.expire(fails_key, _BREAKER_FAILS_TTL_S)
+    half = await redis.exists(_bk("half", org_id))
+    if half:
+        # Ngắt mạch đã từng mở mà chưa gọi được lại ⇒ vẫn là CÙNG đợt im (giữ mốc bắt đầu; đặt lại nếu lỡ mất).
+        await redis.set(down_key, repr(now), nx=True, ex=_BREAKER_DOWN_TTL_S)
+    elif fails == 1:
+        # Lỗi đầu của một chuỗi mới: đợt im bắt đầu TỪ BÂY GIỜ — ghi đè mốc cũ (một lỗi lẻ lúc 08:00 không được làm
+        # lần mở lúc 17:00 bị coi là "im hơn 15 phút"). Hết hạn cùng bộ đếm cho tới khi ngắt mạch mở.
+        await redis.set(down_key, repr(now), ex=_BREAKER_FAILS_TTL_S)
+    else:
+        await redis.set(down_key, repr(now), nx=True, ex=_BREAKER_FAILS_TTL_S)
+        await redis.expire(down_key, _BREAKER_FAILS_TTL_S)
+    if fails >= BREAKER_FAILS or half:
+        await redis.set(_bk("open_until", org_id), repr(now + BREAKER_OPEN_S), ex=_BREAKER_OPEN_TTL_S)
+        await redis.set(_bk("half", org_id), "1", ex=_BREAKER_DOWN_TTL_S)
+        await redis.expire(down_key, _BREAKER_DOWN_TTL_S)  # đã mở ⇒ giữ mốc tới khi gọi được lại (tối đa 24 giờ)
+        await redis.delete(fails_key)
+    await _watch_org(db, redis, org_id, now)
+
+
+async def _breaker_ok(db: AsyncSession, redis: Any, org_id: uuid.UUID) -> None:
+    """Gọi được Gen-hub: xoá mọi khoá ngắt mạch + đóng sự cố `hub.breaker` (nếu có). Bên gọi commit."""
+    if redis is None:
+        return
+    await redis.delete(_bk("fails", org_id), _bk("open_until", org_id), _bk("down_since", org_id), _bk("half", org_id))
+    await health.clear(db, org_id, BREAKER_KEY)  # no-op khi không có sự cố đang mở
+
+
+async def breaker_state(redis: Any, org_id: uuid.UUID) -> dict[str, Any]:
+    """{"open": bool, "retry_in_s": int|None, "down_since": ISO|None}. Redis None ⇒ ngắt mạch tắt (luôn đóng)."""
+    if redis is None:
+        return {"open": False, "retry_in_s": None, "down_since": None}
+    until = _epoch(await redis.get(_bk("open_until", org_id)))
+    down = _epoch(await redis.get(_bk("down_since", org_id)))
+    now = _clock()
+    is_open = until is not None and until > now
+    return {"open": is_open, "retry_in_s": max(1, math.ceil(until - now)) if is_open and until is not None else None,
+            "down_since": iso(datetime.fromtimestamp(down, UTC)) if down is not None else None}
+
+
+async def _watch_org(db: AsyncSession, redis: Any, org_id: uuid.UUID, now: float) -> bool:
+    """Gen-hub im ≥ 15 phút VÀ ngắt mạch đã từng mở ⇒ mở sự cố `hub.breaker` (chuông Owner một lần); không còn dấu
+    "bắt đầu im" ⇒ đóng. Trả True khi vừa gửi chuông. Bên gọi commit."""
+    down = _epoch(await redis.get(_bk("down_since", org_id)))
+    if down is None:
+        await health.clear(db, org_id, BREAKER_KEY)
+        return False
+    if now - down >= BREAKER_ALERT_AFTER_S and await redis.exists(_bk("half", org_id)):
+        return await health.raise_once(
+            db, org_id, key=BREAKER_KEY, kind=BREAKER_KIND, severity="warn", fingerprint="open",
+            title="Gen-hub không trả lời hơn 15 phút",
+            body="Gen tạm chưa đọc được Kho, lịch, mail và việc. Kiểm tra máy Gen-hub còn chạy không, rồi bấm Kiểm "
+                 "tra ở Kết nối › Gen-hub.", link="/connections#genhub", redis=redis)
+    return False
+
+
+async def breaker_watch(sm: Any, redis: Any, now: datetime | float | None = None) -> int:
+    """Cron `hub_breaker_watch` (5 phút/lần): duyệt mọi tổ chức có liên kết Gen-hub, mở/đóng sự cố `hub.breaker`.
+    Chỉ đọc Redis + ghi `ops.health_alerts`. Trả số chuông MỚI đã gửi. Redis None ⇒ 0."""
+    if redis is None:
+        return 0
+    at = _clock() if now is None else (now.timestamp() if isinstance(now, datetime) else float(now))
+    sent = 0
+    async with sm() as db:
+        orgs = (await db.execute(text("SELECT org_id FROM agent.hub_links WHERE server_id IS NOT NULL"))
+                ).scalars().all()
+        for org in orgs:
+            sent += int(await _watch_org(db, redis, org, at))
+        await db.commit()
+    return sent
+
+
+# ─── đọc Gen-hub (Kho + Google) ────────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class SystemActor:
+    """Actor hệ thống của việc nền (Bản tin Gen đọc nhân danh tổ chức, chỉ để gửi Owner). Có cùng hình dạng tối
+    thiểu như `CurrentUser` mà `call_hub`/`invoke_tool` cần; Action Log ghi `actor_type='system'`."""
+
+    org_id: uuid.UUID
+    actor_id: str = "system:gen.briefing"
+    ip: str | None = None
+    role_code: str = rbac.OWNER
+    actor_type: str = "system"
+
+
+def _missing_error(suffix: str) -> ApiError:
+    scope = scope_of(suffix)
+    if scope is None:
+        return conflict("HUB_TOOL_MISSING", f"Gen-hub chưa cấp tool {suffix} — bấm Kiểm tra ở thẻ Gen-hub")
+    return conflict("HUB_TOOL_MISSING", f"Gen-hub chưa cấp quyền {SCOPE_LABELS[scope]} — vào Gen-hub tick thêm quyền "
+                    "cho token của Gen-Harness rồi bấm Kiểm tra ở Kết nối › Gen-hub", f"Thiếu tool {suffix}")
+
+
+async def call_hub(db: AsyncSession, redis: Any, client: McpClient, *, user: service.CurrentUser | SystemActor,
+                   suffix: str, args: dict[str, Any]) -> dict[str, Any]:
+    """Một lần ĐỌC Gen-hub (Kho, lịch, mail, việc, Drive) cho Gen/Owner. Kết quả LUÔN đã che.
+
+    Thứ tự: danh sách cho phép → liên kết bật → đệm 5 phút (vẫn trả khi ngắt mạch mở) → ngắt mạch → tool đã
+    mở/cấp → guard MCP Hub (`invoke_tool`) → che → đệm. Lỗi mạng/5xx/429 tính vào ngắt mạch; thành công đóng nó."""
+    if suffix not in READ_SUFFIXES:
+        raise conflict("HUB_TOOL_NOT_ALLOWED", "Tool này không nằm trong danh sách đọc Gen-hub được phép")
+    source = source_of(suffix)
+    noun = _noun_of(suffix)
     link = await load(db, user.org_id)
     if link is None or link.server_id is None or not link.enabled:
         raise conflict("HUB_LINK_OFF", "Chưa nối Gen-hub — Sếp cấu hình ở Kết nối › thẻ Gen-hub rồi bấm Kiểm tra")
@@ -250,12 +551,17 @@ async def call_kho(db: AsyncSession, redis: Any, client: McpClient, *, user: ser
     if redis is not None:
         raw = await redis.get(key)
         if raw:
-            return {"source": "Kho Ryan qua Gen-hub", "tool": suffix, "cached": True, "data": orjson.loads(raw)}
+            return {"source": source, "tool": suffix, "cached": True, "data": orjson.loads(raw)}
+    if await _breaker_blocked(redis, user.org_id):
+        raise conflict("HUB_BREAKER_OPEN", "Gen-hub tạm không trả lời — thử lại sau ít phút",
+                       f"Ngắt mạch {BREAKER_OPEN_S} giây sau {BREAKER_FAILS} lỗi liên tiếp")
     tool = await find_tool(db, user.org_id, link.server_id, suffix)
     if tool is None:
-        raise conflict("HUB_TOOL_MISSING", f"Gen-hub chưa cấp tool {suffix} — bấm Kiểm tra ở thẻ Gen-hub")
+        raise _missing_error(suffix)
+    if scope_of(suffix) is not None and (not tool.is_exposed or AGENT_KEY not in await invoke.grants_of(db, tool.id)):
+        raise _missing_error(suffix)  # Google: chưa mở/cấp = chưa có quyền đọc (cùng nghĩa với `read_scopes`)
     if endpoint_forbidden(link.endpoint or ""):
-        raise conflict("HUB_BLOCKED", "Kho đang bị chặn bởi rào chắn MCP Hub", ENDPOINT_FORBIDDEN_MSG)
+        raise conflict("HUB_BLOCKED", f"{noun.capitalize()} đang bị chặn bởi rào chắn MCP Hub", ENDPOINT_FORBIDDEN_MSG)
     token = await invoke.auth_token(db, link.server_id)
     secrets = (token,) if token else ()
     try:
@@ -263,23 +569,29 @@ async def call_kho(db: AsyncSession, redis: Any, client: McpClient, *, user: ser
                                        args=args, actor=user, summarize=lambda r: _summary(suffix, r))
     except invoke.McpCallFailed as e:
         msg = scrub(_classify(str(e.cause)), token)
+        if _counts_for_breaker(e.cause):
+            await _breaker_fail(db, redis, user.org_id)
         await _set_result(db, user.org_id, ok=False, error=msg)
         await db.commit()
-        raise conflict("HUB_UNAVAILABLE", "Chưa đọc được Kho lúc này", msg) from e
+        raise conflict("HUB_UNAVAILABLE", f"Chưa đọc được {noun} lúc này", msg) from e
     except ApiError as e:
         # Bị chặn bởi guard MCP Hub (máy chủ tắt, tool đóng/chưa cấp, chặn mạng, mức tự trị) — log đã commit.
         msg = scrub(str(e.detail or e.title), token)
         await _set_result(db, user.org_id, ok=False, error=msg)
         await db.commit()
-        raise conflict("HUB_BLOCKED", "Kho đang bị chặn bởi rào chắn MCP Hub", msg) from e
+        raise conflict("HUB_BLOCKED", f"{noun.capitalize()} đang bị chặn bởi rào chắn MCP Hub", msg) from e
     if out["outcome"] != "ok":
         await db.commit()  # giữ bản nháp mcp_write + log trước khi báo lỗi (route ném → rollback)
         raise conflict("HUB_TOOL_HELD", "Tool đang ở loại ghi — đã tạo bản nháp chờ duyệt, không gọi ra ngoài")
-    data = mask_for_model(out["result"], secrets=secrets)
+    data = mask_hub(out["result"], secrets=secrets, suffix=suffix)
     if redis is not None:
         await redis.set(key, orjson.dumps(data), ex=CACHE_TTL_S)
+    await _breaker_ok(db, redis, user.org_id)
     await _set_result(db, user.org_id, ok=True)
-    return {"source": "Kho Ryan qua Gen-hub", "tool": suffix, "cached": False, "data": data}
+    return {"source": source, "tool": suffix, "cached": False, "data": data}
+
+
+call_kho = call_hub  # tên cũ (v0.1.26) — mã/test cũ vẫn chạy
 
 
 async def is_hub_server(db: AsyncSession, org_id: uuid.UUID, server_id: uuid.UUID) -> bool:
@@ -305,34 +617,50 @@ async def guard_server_admin(db: AsyncSession, *, user: service.CurrentUser, ser
     return True
 
 
+async def _blocked_call(db: AsyncSession, redis: Any, *, user: service.CurrentUser, tool: Any, agent_key: str,
+                        args: dict[str, Any], code: str, msg: str, detail: str) -> ApiError:
+    """Ghi `mcp_calls` (blocked) + Action Log `mcp.call_blocked`, commit rồi trả lỗi 403 cho bên gọi ném (route ném
+    → `DB` rollback cả phiên, nên log phải commit TRƯỚC)."""
+    item = await invoke.log_call(db, redis, org_id=user.org_id, tool_id=tool.id, agent_key=agent_key, args=args,
+                                 outcome="blocked", result_summary=msg, latency_ms=0)
+    await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
+                           action="mcp.call_blocked", target_type="mcp_tool", target_id=str(tool.id),
+                           target_label=f"{tool.server_name} · {tool.name}", result="blocked",
+                           detail={"code": code, "reason": msg, "agent_key": agent_key}, ip=user.ip)
+    await db.commit()
+    return ApiError(403, code, "Bị chặn", detail, call=item)
+
+
 async def generic_call(db: AsyncSession, redis: Any, transport: Any, *, user: service.CurrentUser, tool: Any,
                        agent_key: str, args: dict[str, Any]) -> dict[str, Any] | None:
     """Route chung `POST /mcp/tools/{id}/call` gọi vào máy chủ của liên kết Gen-hub (v0.1.27): Kho chỉ Owner
     (quyết định Boss #1) → vai trò khác bị chặn (403 `HUB_OWNER_ONLY`, có log); Owner thì đi đúng đường của liên
-    kết — ghim DNS, `mcp_calls` chỉ siêu dữ liệu, kết quả đã che. Trả None khi tool không thuộc Gen-hub."""
+    kết — ghim DNS, `mcp_calls` chỉ siêu dữ liệu, kết quả đã che. Trả None khi tool không thuộc Gen-hub.
+
+    v0.1.49 (QD-16): tool Gen-hub NGOÀI danh sách đọc (`suffix_of` None — gmail_send, calendar_create_event,
+    drive_create_file…) bị từ chối 403 `HUB_TOOL_NOT_ALLOWED`, kể cả Owner, TRƯỚC `invoke_tool` (không tạo bản nháp
+    `mcp_write`, không gọi ra ngoài): Gen-Harness chỉ đọc qua Gen-hub."""
     link = await load(db, user.org_id)
     if link is None or link.server_id is None or link.server_id != tool.server_id:
         return None
     if user.role_code != rbac.OWNER:
         msg = "Bị chặn: máy chủ Gen-hub (Kho Ryan) chỉ Owner được gọi"
-        item = await invoke.log_call(db, redis, org_id=user.org_id, tool_id=tool.id, agent_key=agent_key, args=args,
-                                     outcome="blocked", result_summary=msg, latency_ms=0)
-        await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
-                               action="mcp.call_blocked", target_type="mcp_tool", target_id=str(tool.id),
-                               target_label=f"{tool.server_name} · {tool.name}", result="blocked",
-                               detail={"code": "HUB_OWNER_ONLY", "reason": msg, "agent_key": agent_key}, ip=user.ip)
-        await db.commit()
-        raise ApiError(403, "HUB_OWNER_ONLY", "Bị chặn", msg, call=item)
-    label = suffix_of(tool.name) or tool.name
+        raise await _blocked_call(db, redis, user=user, tool=tool, agent_key=agent_key, args=args,
+                                  code="HUB_OWNER_ONLY", msg=msg, detail=msg)
+    suffix = suffix_of(tool.name)
+    if suffix is None:
+        detail = ("Gen-Harness chỉ đọc qua Gen-hub — tool ghi (gửi mail, tạo lịch, ghi Drive…) không được gọi")
+        raise await _blocked_call(db, redis, user=user, tool=tool, agent_key=agent_key, args=args,
+                                  code="HUB_TOOL_NOT_ALLOWED", msg=f"Bị chặn: {detail}", detail=detail)
     token = await invoke.auth_token(db, link.server_id)
     try:
         out = await invoke.invoke_tool(db, redis, client_for(transport), org_id=user.org_id, tool=tool,
                                        agent_key=agent_key, args=args, actor=user,
-                                       summarize=lambda r: _summary(label, r))
+                                       summarize=lambda r: _summary(suffix, r))
     except invoke.McpCallFailed as e:
         raise invoke.McpCallFailed(e.cause, scrub(str(e.title), token)) from e
     if out["outcome"] == "ok":
-        out["result"] = mask_for_model(out["result"], secrets=(token,) if token else ())
+        out["result"] = mask_hub(out["result"], secrets=(token,) if token else (), suffix=suffix)
     return out
 
 
@@ -406,8 +734,13 @@ async def upsert(db: AsyncSession, redis: Any, *, user: service.CurrentUser, end
 
 
 async def test_link(db: AsyncSession, redis: Any, client: McpClient, *, user: service.CurrentUser) -> dict[str, Any]:
-    """Khám phá tool → mở + cấp `core.gen` ĐÚNG các tool đọc Kho (hậu tố cho phép, loại `read`) → gọi `kho_tom_tat`.
-    Xanh → bật liên kết. Không ném lỗi khi Gen-hub lỗi: trả `{ok: false, error}` để thẻ hiện lý do."""
+    """Khám phá tool → mở + cấp `core.gen` ĐÚNG các tool đọc (hậu tố cho phép, loại `read`: Kho + Google) → gọi
+    `kho_tom_tat`. Xanh → bật liên kết. Không ném lỗi khi Gen-hub lỗi: trả `{ok: false, error}` để thẻ hiện lý do.
+
+    v0.1.49 (QD-16): thêm `read_scopes` (calendar/mail/tasks/drive → bool, tính từ lần khám phá này), `read_missing`
+    (nhãn quyền đọc thêm còn thiếu) và `write_tools` (tool trong danh sách đọc nhưng Gen-hub đánh dấu GHI — không mở).
+    Thiếu quyền đọc Google KHÔNG làm `ok=false`; không gọi tool Google khi kiểm. Nút Kiểm tra không bị ngắt mạch chặn;
+    kiểm xanh thì đóng ngắt mạch."""
     link = await load(db, user.org_id)
     if link is None or link.server_id is None:
         raise conflict("HUB_LINK_NOT_CONFIGURED", "Chưa nhập địa chỉ và token Gen-hub")
@@ -418,6 +751,7 @@ async def test_link(db: AsyncSession, redis: Any, client: McpClient, *, user: se
     async def fail(msg: str, *, code: str | None = None, tools_missing: bool = False, **extra: Any) -> dict[str, Any]:
         error_code = _error_code(msg, code=code, missing=tools_missing)
         msg = scrub(msg, token)
+        scopes = await read_scopes(db, user.org_id)
         await _set_result(db, user.org_id, ok=False, error=msg)
         await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                                action="hub.link_tested", target_type="hub_link", target_id=str(link.server_id),
@@ -425,7 +759,9 @@ async def test_link(db: AsyncSession, redis: Any, client: McpClient, *, user: se
         await db.commit()
         return {"ok": False, "error": msg, "error_code": error_code,
                 "latency_ms": int((time.monotonic() - started) * 1000), "exposed_tools": [],
-                "missing_tools": list(extra.get("missing_tools", [])), "link": link_out(await load(db, user.org_id))}
+                "missing_tools": list(extra.get("missing_tools", [])), "read_scopes": scopes,
+                "read_missing": read_missing(scopes), "write_tools": list(extra.get("write_tools", [])),
+                "link": link_out(await load(db, user.org_id))}
 
     if endpoint_forbidden(server.endpoint or ""):
         return await fail(ENDPOINT_FORBIDDEN_MSG)
@@ -434,14 +770,14 @@ async def test_link(db: AsyncSession, redis: Any, client: McpClient, *, user: se
     except ApiError as e:
         return await fail(_classify(str(e.title), code=e.code), code=e.code)
     exposed: list[str] = []
-    write_kho: list[str] = []
+    write_tools: list[str] = []
     have: set[str] = set()
     for t in found:
         suf = suffix_of(t["name"])
         if suf is None:
-            continue  # tool lạ (Vault, kho_create…): để nguyên, mặc định đóng — code cũng không bao giờ gọi
+            continue  # tool lạ (Vault, kho_create, gmail_send…): để nguyên, mặc định đóng — code cũng không bao giờ gọi
         if t["access"] != "read":
-            write_kho.append(t["name"])
+            write_tools.append(t["name"])
             continue
         have.add(suf)
         tid = uuid.UUID(t["id"])
@@ -460,28 +796,293 @@ async def test_link(db: AsyncSession, redis: Any, client: McpClient, *, user: se
                                    target_label=f"{SERVER_NAME} · {t['name']}",
                                    detail={"agent_key": AGENT_KEY, "via": "hub_link"}, ip=user.ip)
         exposed.append(t["name"])
+    if await _revoke_gone_google(db, user, link.server_id, {t["name"] for t in found}):
+        # Quyền đọc vừa mất ⇒ bỏ đệm 5 phút NGAY (kể cả khi lượt kiểm này đỏ ở bước sau): không trả mail/lịch cũ nữa.
+        await clear_cache(redis, user.org_id)
+    scopes = {scope: all(suf in have for suf in sufs) for scope, sufs in READ_SCOPES.items()}
     missing = [s for s in REQUIRED_SUFFIXES if s not in have]
     if "kho_tom_tat" in missing:
         return await fail(f"Gen-hub chưa cấp tool đọc Kho: {', '.join(missing)}", missing_tools=missing,
-                          write_tools=write_kho, tools_missing=True)
+                          write_tools=write_tools, tools_missing=True)
     tool = await find_tool(db, user.org_id, link.server_id, "kho_tom_tat")
     try:
         await invoke.invoke_tool(db, redis, client, org_id=user.org_id, tool=tool, agent_key=AGENT_KEY, args={},
                                  actor=user, summarize=lambda r: _summary("kho_tom_tat", r))
     except invoke.McpCallFailed as e:
-        return await fail(_classify(str(e.cause)), missing_tools=missing)
+        return await fail(_classify(str(e.cause)), missing_tools=missing, write_tools=write_tools)
     except ApiError as e:
-        return await fail(_classify(str(e.detail or e.title), code=e.code), code=e.code, missing_tools=missing)
+        return await fail(_classify(str(e.detail or e.title), code=e.code), code=e.code, missing_tools=missing,
+                          write_tools=write_tools)
     await _set_result(db, user.org_id, ok=True, enable=True)
+    await _breaker_ok(db, redis, user.org_id)
     await clear_cache(redis, user.org_id)
     latency = int((time.monotonic() - started) * 1000)
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                            action="hub.link_tested", target_type="hub_link", target_id=str(link.server_id),
                            target_label=SERVER_NAME, detail={"exposed": exposed, "missing_tools": missing,
-                                                             "write_tools": write_kho, "latency_ms": latency},
-                           ip=user.ip)
+                                                             "write_tools": write_tools, "read_scopes": scopes,
+                                                             "latency_ms": latency}, ip=user.ip)
     return {"ok": True, "error": None, "error_code": None, "latency_ms": latency, "exposed_tools": exposed,
-            "missing_tools": missing, "link": link_out(await load(db, user.org_id))}
+            "missing_tools": missing, "read_scopes": scopes, "read_missing": read_missing(scopes),
+            "write_tools": write_tools, "link": link_out(await load(db, user.org_id))}
+
+
+async def _revoke_gone_google(db: AsyncSession, user: service.CurrentUser, server_id: uuid.UUID,
+                              listed: set[str]) -> bool:
+    """Gen-hub không còn liệt kê một tool Google (Owner bỏ tick quyền) mà tool đó vẫn đang mở/cấp từ lần kiểm trước ⇒
+    đóng + thu hồi grant `core.gen`, để `read_scopes` và lời gọi không đứng trên quyền đã mất. Trả True khi đã thu
+    hồi ít nhất một tool (bên gọi xoá đệm)."""
+    revoked = False
+    rows = (await db.execute(text("""
+        SELECT t.id, t.name FROM agent.mcp_tools t
+        WHERE t.server_id = :s AND (t.is_exposed OR EXISTS (SELECT 1 FROM agent.mcp_grants g
+                                                            WHERE g.tool_id = t.id AND g.agent_key = :a))"""),
+                            {"s": server_id, "a": AGENT_KEY})).all()
+    for r in rows:
+        suf = suffix_of(r.name)
+        if suf is None or scope_of(suf) is None or r.name in listed:
+            continue
+        await db.execute(text("UPDATE agent.mcp_tools SET is_exposed = false WHERE id = :i"), {"i": r.id})
+        await db.execute(text("DELETE FROM agent.mcp_grants WHERE tool_id = :t AND agent_key = :a"),
+                         {"t": r.id, "a": AGENT_KEY})
+        await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
+                               action="mcp.tool_hidden", target_type="mcp_tool", target_id=str(r.id),
+                               target_label=f"{SERVER_NAME} · {r.name}",
+                               detail={"via": "hub_link", "reason": "Gen-hub không còn cấp tool này"}, ip=user.ip)
+        revoked = True
+    return revoked
+
+
+# ─── hàm đọc cho Bản tin Gen (v0.1.49, QD-16) ──────────────────────────────────
+
+BRIEFING_MAX_ITEMS = 10
+_ITEM_TEXT_MAX = 200
+MAIL_REPLY_QUERY = "is:unread in:inbox newer_than:3d -category:promotions -category:social -category:updates"
+#: kind → (hậu tố tool, quyền đọc thêm)
+BRIEFING_KINDS: dict[str, tuple[str, str]] = {
+    "calendar_today": ("calendar_list_events", "calendar"),
+    "mail_reply": ("gmail_search", "mail"),
+    "tasks_open": ("tasks_list", "tasks"),
+}
+_LIST_KEYS = ("items", "events", "messages", "tasks", "files", "threads", "results", "data")
+_DATE_ONLY = re.compile(r"\d{4}-\d{2}-\d{2}")
+_LINE_EVENT = re.compile(
+    r"^(?P<start>\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:?\d{2})?)?"
+    r"|\d{1,2}:\d{2}(?:\s*[-–]\s*\d{1,2}:\d{2})?)\s*[-–:|]?\s*(?P<title>.+)$")
+
+
+def _txt(value: Any, limit: int = _ITEM_TEXT_MAX) -> str:
+    if value is None or isinstance(value, dict | list | bool):
+        return ""
+    return " ".join(str(value).split())[:limit]
+
+
+def _first(d: dict[str, Any], *keys: str) -> Any:
+    for k in keys:
+        v = d.get(k)
+        if v not in (None, ""):
+            return v
+    return None
+
+
+def _as_list(obj: Any, depth: int = 0) -> list[Any] | None:
+    """Danh sách mục trong kết quả: chính nó nếu là list, hoặc dict có items/events/messages/tasks… (lồng tối đa 2
+    cấp). Danh sách Google Tasks theo từng tasklist ({"tasklists": [{"tasks": [...]}]}) được trải phẳng."""
+    if isinstance(obj, list):
+        return obj
+    if not isinstance(obj, dict) or depth > 2:
+        return None
+    for k in _LIST_KEYS:
+        v = obj.get(k)
+        if isinstance(v, list):
+            return v
+        if isinstance(v, dict):
+            inner = _as_list(v, depth + 1)
+            if inner is not None:
+                return inner
+    for k in ("tasklists", "taskLists", "lists"):
+        lists = obj.get(k)
+        if isinstance(lists, list):
+            flat: list[Any] = []
+            for tl in lists:
+                if isinstance(tl, dict) and isinstance(tl.get("tasks"), list):
+                    flat.extend(tl["tasks"])
+            return flat
+    return None
+
+
+def _raw_items(result: Any) -> list[Any]:
+    """Mục thô từ kết quả MCP, chịu nhiều dạng: `structuredContent` (list hoặc dict có items/events/messages/tasks),
+    `content[].text` là JSON, hoặc văn bản thường (mỗi dòng một mục)."""
+    lines: list[str] = []
+    if isinstance(result, dict):
+        sc = result.get("structuredContent")
+        if sc is not None:
+            found = _as_list(sc)
+            if found is not None:
+                return found
+        content = result.get("content")
+        if isinstance(content, list):
+            for c in content:
+                text_ = c.get("text") if isinstance(c, dict) else c
+                if not isinstance(text_, str):
+                    continue
+                parsed = _json_or_none(text_)
+                if parsed is not None:
+                    found = _as_list(parsed)
+                    if found is not None:
+                        return found
+                    continue
+                lines.extend(ln for ln in text_.splitlines() if ln.strip())
+            return list(lines)
+        return _as_list(result) or []
+    if isinstance(result, list):
+        return result
+    if isinstance(result, str):
+        parsed = _json_or_none(result)
+        if parsed is not None:
+            return _as_list(parsed) or []
+        return [ln for ln in result.splitlines() if ln.strip()]
+    return []
+
+
+def _norm_event(raw: Any) -> dict[str, Any] | None:
+    if isinstance(raw, str):
+        line = raw.strip().lstrip("-*•").strip()
+        m = _LINE_EVENT.match(line)
+        start, title = (m.group("start"), m.group("title")) if m else ("", line)
+        return {"start": _txt(start), "all_day": bool(_DATE_ONLY.fullmatch(start)),
+                "title": _txt(title) or "(không có tiêu đề)"}
+    if not isinstance(raw, dict):
+        return None
+    start = _first(raw, "start", "startTime", "start_time", "when")
+    all_day = raw.get("allDay") is True or raw.get("all_day") is True
+    if isinstance(start, dict):
+        dt = _first(start, "dateTime", "datetime")
+        if dt:
+            start_s = _txt(dt)
+        else:
+            start_s = _txt(start.get("date"))
+            all_day = all_day or bool(start_s)
+    else:
+        start_s = _txt(start)
+        all_day = all_day or bool(_DATE_ONLY.fullmatch(start_s))
+    return {"start": start_s, "all_day": all_day,
+            "title": _txt(_first(raw, "summary", "title", "name", "subject")) or "(không có tiêu đề)"}
+
+
+def _person(value: Any) -> str:
+    if isinstance(value, dict):
+        name, mail = _txt(_first(value, "name", "displayName")), _txt(_first(value, "email", "address"))
+        return f"{name} <{mail}>" if name and mail else name or mail
+    return _txt(value)
+
+
+def _mail_date(value: Any) -> str:
+    s_ = _txt(value)
+    if s_.isdigit() and len(s_) >= 12:  # Gmail internalDate: epoch mili giây
+        return datetime.fromtimestamp(int(s_) / 1000, UTC).isoformat().replace("+00:00", "Z")
+    return s_
+
+
+def _norm_mail(raw: Any) -> dict[str, Any] | None:
+    if isinstance(raw, str):
+        line = raw.strip().lstrip("-*•").strip()
+        return {"id": "", "from": "", "subject": _txt(line), "date": ""} if line else None
+    if not isinstance(raw, dict):
+        return None
+    headers: dict[str, Any] = {}
+    payload = raw.get("payload")
+    if isinstance(payload, dict) and isinstance(payload.get("headers"), list):
+        headers = {str(h.get("name", "")).lower(): h.get("value") for h in payload["headers"] if isinstance(h, dict)}
+    item = {"id": _txt(_first(raw, "id", "messageId", "message_id")),
+            "from": _person(_first(raw, "from", "sender") or headers.get("from")),
+            "subject": _txt(_first(raw, "subject", "title") or headers.get("subject")),
+            "date": _mail_date(_first(raw, "date", "receivedAt", "internalDate") or headers.get("date"))}
+    return item if item["id"] or item["subject"] or item["from"] else None  # KHÔNG lấy snippet/thân thư
+
+
+def _norm_task(raw: Any) -> dict[str, Any] | None:
+    if isinstance(raw, str):
+        line = raw.strip().lstrip("-*•[] ").strip()
+        return {"id": "", "title": _txt(line), "due": ""} if line else None
+    if not isinstance(raw, dict):
+        return None
+    if str(raw.get("status", "")).lower() in ("completed", "done"):
+        return None  # "Việc đang mở": bỏ việc đã xong
+    title = _txt(_first(raw, "title", "name", "summary"))
+    if not title:
+        return None
+    return {"id": _txt(_first(raw, "id", "taskId")), "title": title,
+            "due": _txt(_first(raw, "due", "dueDate", "due_date"))}
+
+
+_NORMALIZERS: dict[str, Callable[[Any], dict[str, Any] | None]] = {
+    "calendar_today": _norm_event, "mail_reply": _norm_mail, "tasks_open": _norm_task}
+
+
+def normalize_items(kind: str, result: Any) -> list[dict[str, Any]]:
+    """Chuẩn hoá kết quả tool Google thành mục gọn cho Bản tin: calendar {start, all_day, title}, mail {id, from,
+    subject, date}, tasks {id, title, due}. ≤ 10 mục, bỏ snippet/thân thư. Kết quả luôn qua `mask_for_model`
+    (keep_keys=HUB_KEEP_KEYS) — an toàn kể cả khi `result` chưa che."""
+    norm = _NORMALIZERS.get(kind)
+    if norm is None:
+        return []
+    items: list[dict[str, Any]] = []
+    for raw in _raw_items(result):
+        item = norm(raw)
+        if item is not None:
+            items.append(item)
+        if len(items) >= BRIEFING_MAX_ITEMS:
+            break
+    masked: list[dict[str, Any]] = mask_for_model(items, keep_keys=HUB_KEEP_KEYS)
+    return masked
+
+
+def _brief(scope: str, state: str, items: list[dict[str, Any]] | None = None, *, code: str | None = None,
+           detail: str | None = None) -> dict[str, Any]:
+    return {"state": state, "items": items or [], "error_code": code,
+            "detail": scrub(detail, None)[:200] if detail else None, "scope": scope}
+
+
+_BRIEF_STATES = {"HUB_LINK_OFF": "off", "HUB_TOOL_MISSING": "missing_scope", "HUB_BREAKER_OPEN": "breaker_open"}
+
+
+async def briefing_read(sm: Any, redis: Any, *, org_id: uuid.UUID, kind: str, now: datetime,
+                        transport: Any = None) -> dict[str, Any]:
+    """Một lần đọc Google qua Gen-hub cho Bản tin (gói ban-tin gọi). KHÔNG BAO GIỜ ném (trừ CancelledError).
+
+    Tự mở phiên riêng và commit riêng; đi đúng `call_hub` (đệm, ngắt mạch, ghim DNS, che). Actor là `SystemActor`
+    (`actor_type='system'`) và chỉ dùng khi tổ chức có ≥ 1 Owner — Gen KHÔNG đọc thay nhân viên. Trả
+    {"state": ok|off|missing_scope|breaker_open|error, "items", "error_code", "detail", "scope"}."""
+    spec = BRIEFING_KINDS.get(kind)
+    if spec is None:
+        return _brief("", "error", code="HUB_BAD_KIND", detail="Loại mục Bản tin không hợp lệ")
+    suffix, scope = spec
+    if kind == "calendar_today":
+        args: dict[str, Any] = {**vn_day_bounds(vn_today(now)), "maxResults": BRIEFING_MAX_ITEMS}
+    elif kind == "mail_reply":
+        args = {"query": MAIL_REPLY_QUERY, "maxResults": BRIEFING_MAX_ITEMS}
+    else:
+        args = {}
+    try:
+        async with sm() as db:
+            await db.execute(text("SELECT set_config('app.org_id', :o, true)"), {"o": str(org_id)})
+            if not await notifications.owner_ids(db, org_id):
+                return _brief(scope, "off", code="HUB_NO_OWNER", detail="Tổ chức chưa có Owner để nhận Bản tin")
+            res = await call_hub(db, redis, client_for(transport), user=SystemActor(org_id=org_id), suffix=suffix,
+                                 args=args)
+            await db.commit()
+        return _brief(scope, "ok", normalize_items(kind, res["data"]))
+    except asyncio.CancelledError:
+        raise
+    except ApiError as e:
+        return _brief(scope, _BRIEF_STATES.get(e.code, "error"), code=e.code,
+                      detail=str(e.detail or e.title) if e.code not in _BRIEF_STATES else str(e.title))
+    except Exception as e:  # noqa: BLE001 — Bản tin không được hỏng vì Gen-hub/CSDL; chỉ tên lớp lỗi, không nội dung
+        log.warning("Bản tin: đọc Gen-hub (%s) lỗi: %s", kind, type(e).__name__)
+        return _brief(scope, "error", code="HUB_ERROR",
+                      detail=f"Lỗi không mong đợi khi đọc Gen-hub ({type(e).__name__})")
 
 
 # ─── nhắc token sắp hết hạn (worker, hằng ngày) ───────────────────────────────

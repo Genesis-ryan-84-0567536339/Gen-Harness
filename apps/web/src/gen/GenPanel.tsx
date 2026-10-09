@@ -2,38 +2,16 @@ import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { GEN_SCREEN_BY_KEY, GEN_TARGET_BY_ID, splitTargetId, type GenStep, type UiAction } from '@gen-harness/contracts';
 import { Button, Icon, IconButton } from '@gen-harness/ui';
 import { useMe } from '../lib/queries';
+import { BriefingHubSections } from './BriefingHubSections';
+import { hubCardsAt } from './briefingModel';
 import { closeSpotlight, executeUiAction } from './director';
 import { restoreIfNeeded, retryRestore, sendFeedback, sendQuestion } from './genClient';
 import { GenHistory } from './GenHistory';
 import { ProposalCard } from './ProposalCard';
+import { toolLabel } from './toolLabels';
 import { useGenStore, type GenChatMessage } from './genStore';
 
 const EXAMPLES = ['Hôm nay có gì cần tôi xử lý?', 'Khách nào hỏi giá hôm nay?', 'Nhắc tôi gọi lại khách lúc 3 giờ chiều'];
-
-const TOOL_LABEL: Record<string, string> = {
-  'overview.summary': 'Hôm nay',
-  'queue.list': 'Hộp thư',
-  'draft.list': 'bản nháp',
-  'draft.get': 'bản nháp',
-  'profile.search': 'tìm kiếm',
-  'profile.get': 'hồ sơ',
-  'opportunity.list': 'cơ hội',
-  'people.care': 'chất lượng chăm sóc',
-  'audit.list': 'nhật ký',
-  'system.health': 'sức khoẻ hệ thống',
-  'guide.list': 'hướng dẫn kết nối',
-  'screens.list': 'danh mục màn',
-  'task.list': 'việc & nhắc hẹn',
-  'staff.list': 'danh sách người',
-  'refinery.summary': 'lọc tin',
-  'hub.kho_summary': 'Kho tri thức (Gen-hub)',
-  'hub.kho_search': 'Kho tri thức (Gen-hub)',
-  'hub.kho_get': 'Kho tri thức (Gen-hub)',
-  'social.accounts': 'tài khoản mạng xã hội',
-  'social.read': 'đọc mạng xã hội',
-  // v0.1.41 (F-8): bước đầu của Bản tin Gen.
-  'briefing.sources': 'việc, khách, nháp, sự cố…',
-};
 
 function targetLabel(id: string): string {
   return GEN_TARGET_BY_ID[splitTargetId(id).base]?.label ?? id;
@@ -56,7 +34,7 @@ function Step({ step, turnId }: { step: GenStep; turnId?: string }) {
   if (step.kind === 'tool')
     return (
       <span className="gen-chip">
-        <Icon name="ph ph-magnifying-glass" size={11} /> Đã tra {TOOL_LABEL[step.name] ?? step.name}
+        <Icon name="ph ph-magnifying-glass" size={11} /> Đã tra {toolLabel(step.name)}
       </span>
     );
   if (step.kind === 'ui')
@@ -97,6 +75,9 @@ function Message({ m, userId }: { m: GenChatMessage; userId?: string }) {
   if (m.role === 'user') return <div className="gen-msg gen-msg--user">{m.text}</div>;
   const steps = m.steps.filter(Boolean);
   const rateable = m.status === 'done' && !!m.turnId;
+  // v0.1.49 (F-8, QD-16): thẻ Lịch hôm nay / Mail cần trả lời / Việc Google đang mở (Gen-hub, chỉ đọc) chèn ngay sau
+  // "Sự cố cần Sếp" — trước Facebook/Kho và các lời nhắc + nút.
+  const hubAt = m.kind === 'briefing' ? hubCardsAt(steps, m.hubAt) : steps.length;
   return (
     <div className={m.kind === 'briefing' ? 'gen-msg gen-msg--gen gen-msg--briefing' : 'gen-msg gen-msg--gen'} aria-busy={m.status === 'running' || undefined}>
       {m.kind === 'briefing' ? (
@@ -104,8 +85,12 @@ function Message({ m, userId }: { m: GenChatMessage; userId?: string }) {
           <Icon name="ph ph-newspaper" size={11} /> Bản tin
         </span>
       ) : null}
-      {steps.map((s, i) => (
+      {steps.slice(0, hubAt).map((s, i) => (
         <Step key={i} step={s} turnId={m.turnId} />
+      ))}
+      {m.kind === 'briefing' ? <BriefingHubSections sections={m.sections} /> : null}
+      {steps.slice(hubAt).map((s, i) => (
+        <Step key={hubAt + i} step={s} turnId={m.turnId} />
       ))}
       {typeof m.detail === 'string' && m.detail ? (
         <details className="tech-detail">

@@ -1,13 +1,20 @@
-"""/hub — liên kết Gen-hub + đọc Kho Ryan (v0.1.26, docs/design/gen-hub-link.md §3.1).
+"""/hub — liên kết Gen-hub + đọc Kho Ryan (v0.1.26) + đọc lịch/mail/việc/Drive Google (v0.1.49, QD-16)
+(docs/design/gen-hub-link.md §3.1, §6).
 
-- `GET /hub/link` — trạng thái (không bao giờ có token) · `system.read`.
+- `GET /hub/link` — trạng thái (không bao giờ có token) + `read_scopes` (quyền đọc thêm; null khi chưa có lần Kiểm tra
+  xanh với địa chỉ/token hiện tại) + `breaker` (ngắt mạch F-83; chỉ Owner nhận đủ `retry_in_s`/`down_since`) ·
+  `system.read`.
 - `PATCH /hub/link` — địa chỉ, token (chỉ ghi), ngày hết hạn, mạng công cộng, tắt · Owner + PIN `hub.link`.
-- `POST /hub/link/test` — khám phá, mở + cấp `core.gen` đúng tool đọc Kho, gọi `kho_tom_tat` · Owner + PIN.
+- `POST /hub/link/test` — khám phá, mở + cấp `core.gen` đúng tool đọc (Kho + Google), gọi `kho_tom_tat`; trả thêm
+  `read_scopes`, `read_missing`, `write_tools` · Owner + PIN.
 - `GET /hub/kho/summary|search|records/{ma}` — đọc Kho (đã che, đệm 5 phút) · CHỈ Owner (quyết định Boss #1).
+- `GET /hub/google/calendar?day=today|tomorrow`, `/hub/google/tasks`, `/hub/google/mail/search?q&limit`,
+  `/hub/google/mail/message?id`, `/hub/google/drive/search?q` — đọc lịch/việc/mail/Drive qua Gen-hub (đã che, đệm
+  5 phút, ngắt mạch) · CHỈ Owner (QD-16). Kết quả `{source, tool, cached, data}`. KHÔNG có đường ghi nào lên Google.
 """
 
-from datetime import datetime
-from typing import Any
+from datetime import datetime, timedelta
+from typing import Any, Literal
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -31,8 +38,17 @@ def _client(request: Request) -> Any:
 
 
 @router.get("/link")
-async def get_link(user: service.CurrentUser = Depends(READ), db: AsyncSession = DB) -> dict[str, Any]:
-    return hub.link_out(await hub.load(db, user.org_id), owner=user.role_code == rbac.OWNER)
+async def get_link(request: Request, user: service.CurrentUser = Depends(READ),
+                   db: AsyncSession = DB) -> dict[str, Any]:
+    owner = user.role_code == rbac.OWNER
+    link = await hub.load(db, user.org_id)
+    out = hub.link_out(link, owner=owner)
+    # Chưa nối / chưa từng Kiểm tra xanh / vừa đổi địa chỉ-token (liên kết tắt chờ kiểm lại) ⇒ null = "Chưa kiểm",
+    # KHÔNG phải 4 quyền "Chưa" (thẻ sẽ giục tick quyền khi Sếp còn chưa nối).
+    out["read_scopes"] = await hub.read_scopes(db, user.org_id) if hub.scopes_known(link) else None
+    breaker = await hub.breaker_state(request.app.state.redis, user.org_id)
+    out["breaker"] = breaker if owner else {"open": breaker["open"]}  # vai trò khác: chỉ biết đang mở hay không
+    return out
 
 
 class LinkPatch(BaseModel):
@@ -103,7 +119,7 @@ async def kho_summary(request: Request, so_phien: int | None = Query(None, ge=1,
                       _r: service.CurrentUser = Depends(READ), user: service.CurrentUser = Depends(require_owner),
                       db: AsyncSession = DB) -> dict[str, Any]:
     args: dict[str, Any] = {"so_phien": so_phien} if so_phien else {}
-    return await hub.call_kho(db, request.app.state.redis, _client(request), user=user, suffix="kho_tom_tat",
+    return await hub.call_hub(db, request.app.state.redis, _client(request), user=user, suffix="kho_tom_tat",
                               args=args)
 
 
@@ -114,7 +130,7 @@ async def kho_search(request: Request, q: str = Query(min_length=1, max_length=2
     args: dict[str, Any] = {"text": q.strip()}
     if bang and bang.strip():
         args["bang"] = bang.strip()
-    return await hub.call_kho(db, request.app.state.redis, _client(request), user=user, suffix="kho_search",
+    return await hub.call_hub(db, request.app.state.redis, _client(request), user=user, suffix="kho_search",
                               args=args)
 
 
@@ -124,8 +140,65 @@ async def kho_record(ma: str, request: Request, _r: service.CurrentUser = Depend
     code = ma.strip().upper()
     if not hub.RECORD_RE.fullmatch(code):
         raise field_errors({"ma": "Mã bản ghi dạng VIEC-12, QD-3, PHIEN-1"})
-    return await hub.call_kho(db, request.app.state.redis, _client(request), user=user, suffix="kho_find_by_id",
+    return await hub.call_hub(db, request.app.state.redis, _client(request), user=user, suffix="kho_find_by_id",
                               args={"id": code})
+
+
+# ─── đọc Google qua Gen-hub (QD-16): chỉ Owner, chỉ đọc ────────────────────────
+
+@router.get("/google/calendar")
+async def google_calendar(request: Request, day: Literal["today", "tomorrow"] = Query("today"),
+                          _r: service.CurrentUser = Depends(READ), user: service.CurrentUser = Depends(require_owner),
+                          db: AsyncSession = DB) -> dict[str, Any]:
+    target = hub.vn_today() + timedelta(days=1 if day == "tomorrow" else 0)
+    args: dict[str, Any] = {**hub.vn_day_bounds(target), "maxResults": 20}
+    return await hub.call_hub(db, request.app.state.redis, _client(request), user=user,
+                              suffix="calendar_list_events", args=args)
+
+
+@router.get("/google/tasks")
+async def google_tasks(request: Request, _r: service.CurrentUser = Depends(READ),
+                       user: service.CurrentUser = Depends(require_owner), db: AsyncSession = DB) -> dict[str, Any]:
+    return await hub.call_hub(db, request.app.state.redis, _client(request), user=user, suffix="tasks_list", args={})
+
+
+def _query(q: str) -> str:
+    text_ = q.strip()
+    if not text_:
+        raise field_errors({"q": "Nhập từ khoá cần tìm"})
+    return text_
+
+
+@router.get("/google/mail/search")
+async def google_mail_search(request: Request, q: str = Query(min_length=1, max_length=200),
+                             limit: int = Query(10, ge=1, le=10), _r: service.CurrentUser = Depends(READ),
+                             user: service.CurrentUser = Depends(require_owner),
+                             db: AsyncSession = DB) -> dict[str, Any]:
+    return await hub.call_hub(db, request.app.state.redis, _client(request), user=user, suffix="gmail_search",
+                              args={"query": _query(q), "maxResults": limit})
+
+
+@router.get("/google/mail/message")
+async def google_mail_message(request: Request, id: str = Query(max_length=200),  # noqa: A002 — tên tham số của API
+                              _r: service.CurrentUser = Depends(READ),
+                              user: service.CurrentUser = Depends(require_owner),
+                              db: AsyncSession = DB) -> dict[str, Any]:
+    message_id = id.strip()
+    if not hub.GMAIL_ID_RE.fullmatch(message_id):
+        raise field_errors({"id": "Mã thư dạng chữ-số 6–64 ký tự (lấy từ kết quả tìm thư)"})
+    out = await hub.call_hub(db, request.app.state.redis, _client(request), user=user, suffix="gmail_read_message",
+                             args={"messageId": message_id})
+    out["data"] = hub.truncate_text(out["data"], hub.MAIL_TEXT_MAX)  # cắt SAU khi che (data đã che từ call_hub)
+    return out
+
+
+@router.get("/google/drive/search")
+async def google_drive_search(request: Request, q: str = Query(min_length=1, max_length=200),
+                              _r: service.CurrentUser = Depends(READ),
+                              user: service.CurrentUser = Depends(require_owner),
+                              db: AsyncSession = DB) -> dict[str, Any]:
+    return await hub.call_hub(db, request.app.state.redis, _client(request), user=user, suffix="drive_search",
+                              args={"query": _query(q), "maxResults": 10})
 
 
 __all__ = ["router"]

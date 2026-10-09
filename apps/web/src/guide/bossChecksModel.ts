@@ -62,6 +62,51 @@ export const BOSS_ERROR_TEXT: Record<string, string> = {
     'Đang mở trên chính máy chủ — mở Console trên điện thoại bằng địa chỉ ở Cài đặt › Sao lưu & cập nhật › Truy cập từ xa rồi bấm Kiểm tra từ đó.',
 };
 
+/**
+ * v0.1.49 (QD-16): dòng phụ của hàng Gen-hub — quyền ĐỌC thêm (không bắt buộc) lấy từ `results.hub.detail.read_scopes`.
+ * Máy chủ cũ / bản ghi cũ không có `read_scopes`, hoặc có giá trị không phải boolean ⇒ `null` (ẩn dòng, không đoán).
+ */
+export interface HubScopeItem {
+  key: 'calendar' | 'mail' | 'tasks' | 'drive';
+  label: 'Lịch' | 'Mail' | 'Việc' | 'Drive';
+  has: boolean;
+}
+
+const HUB_SCOPE_ITEMS: ReadonlyArray<Pick<HubScopeItem, 'key' | 'label'>> = [
+  { key: 'calendar', label: 'Lịch' },
+  { key: 'mail', label: 'Mail' },
+  { key: 'tasks', label: 'Việc' },
+  { key: 'drive', label: 'Drive' },
+];
+
+export function hubScopesOf(c: Pick<BossCheck, 'detail'> | null | undefined): HubScopeItem[] | null {
+  const raw = c?.detail?.read_scopes;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const src = raw as Record<string, unknown>;
+  const out: HubScopeItem[] = [];
+  for (const it of HUB_SCOPE_ITEMS) {
+    const v = src[it.key];
+    if (typeof v !== 'boolean') return null;
+    out.push({ ...it, has: v });
+  }
+  return out;
+}
+
+/** "Quyền đọc thêm (không bắt buộc): Lịch ✓ · Mail ✗ · Việc ✓ · Drive ✗". */
+export function hubScopesLine(items: readonly HubScopeItem[]): string {
+  return `Quyền đọc thêm (không bắt buộc): ${items.map((i) => `${i.label} ${i.has ? '✓' : '✗'}`).join(' · ')}`;
+}
+
+/**
+ * Có ✗ thì hướng dẫn tick thêm quyền ở Gen-hub (không bắt buộc: không tick Gen vẫn chạy); đủ ⇒ null. Hạ chữ thường
+ * "Lịch/Mail/Việc" trong câu, giữ nguyên "Drive" (tên riêng).
+ */
+export function hubScopesHint(items: readonly HubScopeItem[]): string | null {
+  const missing = items.filter((i) => !i.has).map((i) => (i.key === 'drive' ? i.label : i.label.toLowerCase()));
+  if (missing.length === 0) return null;
+  return `Muốn Gen đọc cả ${missing.join(', ')}: vào Gen-hub tick thêm quyền đọc cho token của Gen-Harness rồi bấm Kiểm tra lại. Không tick cũng được — Gen vẫn chạy bình thường.`;
+}
+
 /** Dòng 8 (không bắt buộc): các bước thử gửi một câu trả lời bình luận thật bằng Gen. */
 export const FACEBOOK_REPLY_STEPS: readonly string[] = [
   'Hỏi Gen: “đọc Facebook”',

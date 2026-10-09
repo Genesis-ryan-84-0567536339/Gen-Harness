@@ -2,6 +2,7 @@
 import {
   ApiError,
   type HubLinkStatus,
+  type HubReadScopes,
   type McpArgsDigest,
   type McpCall,
   type McpCallOutcome,
@@ -83,6 +84,69 @@ export function hubStatusTone(s: HubLinkStatus): string {
   if (s === 'expiring') return WARN;
   if (s === 'expired' || s === 'error') return BAD;
   return N5;
+}
+
+/**
+ * v0.1.49 (QD-16): quyền ĐỌC thêm (tuỳ chọn) của token Gen-hub. `label` là tên dòng trên thẻ, `short` là nhãn trong câu
+ * "Còn thiếu quyền: …" (cùng nhãn máy chủ trả ở `read_missing`). Gen chỉ đọc — không có quyền ghi nào được dùng.
+ */
+export const READ_SCOPE_KEYS = ['calendar', 'mail', 'tasks', 'drive'] as const;
+export const READ_SCOPE_META: Record<keyof HubReadScopes, { label: string; short: string }> = {
+  calendar: { label: 'Đọc lịch', short: 'đọc lịch' },
+  mail: { label: 'Đọc mail', short: 'đọc mail' },
+  tasks: { label: 'Đọc việc (Google Tasks)', short: 'đọc việc (Google Tasks)' },
+  drive: { label: 'Tìm tệp Drive', short: 'tìm tệp Drive' },
+};
+
+export interface ScopeRow {
+  key: keyof HubReadScopes;
+  label: string;
+  /** `yes` = Có · `no` = Chưa · `unknown` = Chưa kiểm (không có dữ liệu hoặc giá trị không phải boolean). */
+  state: 'yes' | 'no' | 'unknown';
+  text: 'Có' | 'Chưa' | 'Chưa kiểm';
+}
+
+/** 4 dòng quyền đọc thêm từ `read_scopes`; giá trị nào không phải boolean (hoặc không có dữ liệu) ⇒ "Chưa kiểm". */
+export function scopeRows(scopes: Partial<Record<keyof HubReadScopes, unknown>> | null | undefined): ScopeRow[] {
+  const src = scopes && typeof scopes === 'object' ? scopes : {};
+  return READ_SCOPE_KEYS.map((key) => {
+    const v = src[key];
+    const state = v === true ? 'yes' : v === false ? 'no' : 'unknown';
+    return { key, label: READ_SCOPE_META[key].label, state, text: state === 'yes' ? 'Có' : state === 'no' ? 'Chưa' : 'Chưa kiểm' };
+  });
+}
+
+/** Cả 4 quyền đều có giá trị boolean (đã kiểm). */
+export function scopesKnown(scopes: Partial<Record<keyof HubReadScopes, unknown>> | null | undefined): boolean {
+  return scopeRows(scopes).every((r) => r.state !== 'unknown');
+}
+
+/** Nhãn các quyền còn thiếu (đã biết là `false`) theo `read_scopes` — dùng khi máy chủ chưa gửi `read_missing`. */
+export function missingFromScopes(scopes: Partial<Record<keyof HubReadScopes, unknown>> | null | undefined): string[] {
+  return scopeRows(scopes)
+    .filter((r) => r.state === 'no')
+    .map((r) => READ_SCOPE_META[r.key].short);
+}
+
+/** Câu cho Sếp khi token còn thiếu quyền đọc; danh sách rỗng (hoặc không có chuỗi nào) ⇒ null. Chỉ nhận chuỗi. */
+export function missingText(list: unknown): string | null {
+  const items = Array.isArray(list) ? list.filter((x): x is string => typeof x === 'string' && x.trim() !== '').map((x) => x.trim()) : [];
+  if (items.length === 0) return null;
+  return `Còn thiếu quyền: ${items.join(', ')} — vào Gen-hub tick thêm cho token của Gen-Harness rồi bấm Kiểm tra lại.`;
+}
+
+export const SCOPES_ENOUGH_TEXT = 'Đủ quyền đọc lịch, mail, việc và Drive.';
+export const SCOPES_READ_ONLY_TEXT = 'Gen chỉ đọc — không gửi mail, không tạo lịch hay tệp.';
+export const HUB_BREAKER_STRIP = 'Gen-hub tạm không trả lời — Gen tự thử lại sau 1 phút.';
+
+/** Câu về quyền sau một lần Kiểm tra: thiếu ⇒ cảnh báo, đủ ⇒ câu đủ quyền, chưa có dữ liệu ⇒ null. */
+export function scopesMessage(readMissing: unknown, scopes: Partial<Record<keyof HubReadScopes, unknown>> | null | undefined): { tone: 'warn' | 'ok'; text: string } | null {
+  const fromServer = missingText(readMissing);
+  if (fromServer) return { tone: 'warn', text: fromServer };
+  if (Array.isArray(readMissing) && readMissing.length === 0) return { tone: 'ok', text: SCOPES_ENOUGH_TEXT };
+  const fromScopes = missingText(missingFromScopes(scopes));
+  if (fromScopes) return { tone: 'warn', text: fromScopes };
+  return scopesKnown(scopes) ? { tone: 'ok', text: SCOPES_ENOUGH_TEXT } : null;
 }
 
 /** `YYYY-MM-DD` (ô ngày) → ISO cuối ngày giờ VN; rỗng → null. */

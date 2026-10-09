@@ -26,6 +26,9 @@ import {
   bossErrorText,
   fmtCheckedAt,
   hasPending,
+  hubScopesHint,
+  hubScopesLine,
+  hubScopesOf,
   hubTokenExpiry,
   isStalePending,
   needsRelogin,
@@ -211,6 +214,23 @@ function ResultCell({ label, check, okText, failText, emptyText }: { label?: str
 }
 
 // ── 1. Gen-hub ─────────────────────────────────────────────────────────────────────────────────────────────
+/**
+ * v0.1.49 (QD-16): dòng phụ "Quyền đọc thêm (không bắt buộc)" — không đổi số mục bắt buộc; thiếu dữ liệu ⇒ ẩn. CHỈ khi
+ * lần kiểm Đạt: lần kiểm lỗi (mạng, token bị từ chối…) chưa nói gì về quyền — "tick thêm quyền" cạnh "Lỗi …" là chỉ sai
+ * cách sửa (cùng quy tắc thẻ Kết nối › Gen-hub).
+ */
+function HubScopesNote({ check }: { check: BossCheck | null }) {
+  const items = check?.status === 'pass' ? hubScopesOf(check) : null;
+  if (!items) return null;
+  const hint = hubScopesHint(items);
+  return (
+    <p className="boss-hub-scopes" data-testid="boss-hub-scopes">
+      {hubScopesLine(items)}
+      {hint ? <span className="boss-hub-scopes__hint"> {hint}</span> : null}
+    </p>
+  );
+}
+
 function HubRow({ data, done }: { data: Results; done: boolean }) {
   const link = useHubLink();
   const update = useUpdateHubLink();
@@ -262,7 +282,12 @@ function HubRow({ data, done }: { data: Results; done: boolean }) {
       title="Nối Gen-hub"
       done={done}
       todo="Nhập địa chỉ Gen-hub (vd https://hub.genos.top/mcp), trong Gen-hub tạo token chỉ đọc 90 ngày, dán vào đây rồi bấm Kiểm tra."
-      results={<ResultCell check={hubRes} />}
+      results={
+        <>
+          <ResultCell check={hubRes} />
+          <HubScopesNote check={hubRes} />
+        </>
+      }
     >
       {link.isPending ? (
         <SkeletonLines rows={2} padding="0" />

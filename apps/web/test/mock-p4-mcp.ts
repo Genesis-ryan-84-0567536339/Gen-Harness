@@ -7,7 +7,7 @@
  * `/mcp/market` (những route đó chưa từng được cài, xem ghi chú đầu `packages/contracts/src/p4-mcp.ts`).
  */
 import { createHash, randomUUID } from 'node:crypto';
-import type { AgentIdentity, HubLink, McpArgsDigest, McpCall, McpCallOutcome, McpServer, McpTool } from '@gen-harness/contracts';
+import type { AgentIdentity, HubLink, HubReadScopes, McpArgsDigest, McpCall, McpCallOutcome, McpServer, McpTool } from '@gen-harness/contracts';
 import type { P2Ctx } from './mock-phase2';
 import { AGENT_IDS } from './mock-ids';
 
@@ -85,6 +85,21 @@ export function createMock(opts: P4McpOptions) {
   };
   /** v0.1.39: token mock chứa "sai" → Gen-hub từ chối (HUB_TOKEN_REJECTED). Chỉ giữ cờ, không giữ token. */
   let hubTokenBad = false;
+  /**
+   * v0.1.49 (QD-16): token mock chứa "thieu" → token thiếu quyền đọc lịch + mail (tasks, Drive có) — Kiểm tra vẫn XANH, chỉ báo
+   * `read_missing`. Chỉ giữ cờ, không giữ token. Hook e2e `hubSim {scopes:'full'|'missing', breaker?:bool}` đặt thẳng, không qua token.
+   */
+  let hubScopesMissing = false;
+  /** v0.1.49 (F-83): bộ ngắt Gen-hub đang mở (giả lập 3 lỗi liên tiếp) — `GET /hub/link` trả `breaker.open`. */
+  let hubBreakerOpen = false;
+  const FULL_SCOPES: HubReadScopes = { calendar: true, mail: true, tasks: true, drive: true };
+  const MISSING_SCOPES: HubReadScopes = { calendar: false, mail: false, tasks: true, drive: true };
+  const SCOPE_LABEL: Record<keyof HubReadScopes, string> = { calendar: 'đọc lịch', mail: 'đọc mail', tasks: 'đọc việc (Google Tasks)', drive: 'tìm tệp Drive' };
+  /**
+   * `GET /hub/link` luôn kèm `breaker`; `read_scopes` chỉ có sau một lần Kiểm tra xanh với địa chỉ/token hiện tại — chưa kiểm
+   * (hoặc vừa đổi địa chỉ/token) ⇒ `null`, đúng như máy chủ (`hub.scopes_known`).
+   */
+  const linkOut = (l: HubLink): HubLink => ({ ...l, read_scopes: l.read_scopes ?? null, breaker: { open: hubBreakerOpen, retry_in_s: hubBreakerOpen ? 60 : null } });
   /** v0.1.39 (F-31): như máy chủ — địa chỉ https công khai mà chưa bật "mạng công cộng" thì bị chặn. */
   const publicHttps = (url: string | null) => {
     try {
@@ -96,18 +111,29 @@ export function createMock(opts: P4McpOptions) {
       return false;
     }
   };
-  type HubTestOut = { ok: boolean; error: string | null; error_code: string | null; latency_ms: number; exposed_tools: string[]; missing_tools: string[]; link: HubLink };
+  type HubTestOut = {
+    ok: boolean; error: string | null; error_code: string | null; latency_ms: number; exposed_tools: string[]; missing_tools: string[];
+    read_scopes?: HubReadScopes; read_missing?: string[]; write_tools?: string[]; link: HubLink;
+  };
   /** Một lượt "Kiểm tra" Gen-hub — dùng chung cho `POST /hub/link/test` và `POST /boss-checks/hub/run`. */
   const hubTest = (): HubTestOut => {
     const fail = (code: string, error: string): HubTestOut => {
       hubLink = { ...hubLink, enabled: false, status: 'error', last_error: error, health: 'error' };
-      return { ok: false, error, error_code: code, latency_ms: 20, exposed_tools: [], missing_tools: [], link: hubLink };
+      return { ok: false, error, error_code: code, latency_ms: 20, exposed_tools: [], missing_tools: [], link: linkOut(hubLink) };
     };
     if (!hubLink.configured) return fail('HUB_LINK_NOT_CONFIGURED', 'Chưa nhập địa chỉ và token Gen-hub');
     if (publicHttps(hubLink.endpoint) && !hubLink.allow_public_network) return fail('MCP_NETWORK_BLOCKED', "Bật 'Cho phép Gen-hub ở mạng công cộng' ngay trong thẻ này.");
     if (hubTokenBad) return fail('HUB_TOKEN_REJECTED', '401: Token Gen-hub hết hạn hoặc đã bị thu hồi');
-    hubLink = { ...hubLink, enabled: true, status: 'ok', last_ok_at: new Date().toISOString(), last_error: null, health: 'healthy' };
-    return { ok: true, error: null, error_code: null, latency_ms: 240, exposed_tools: ['mcp-58450__kho_tom_tat', 'mcp-58450__kho_search', 'mcp-58450__kho_find_by_id'], missing_tools: [], link: hubLink };
+    // v0.1.49: thiếu quyền ĐỌC thêm KHÔNG làm ok=false — chỉ trả read_scopes + read_missing; Kiểm tra xanh đóng bộ ngắt.
+    const scopes = hubScopesMissing ? MISSING_SCOPES : FULL_SCOPES;
+    const readMissing = (Object.keys(scopes) as Array<keyof HubReadScopes>).filter((k) => !scopes[k]).map((k) => SCOPE_LABEL[k]);
+    hubBreakerOpen = false;
+    hubLink = { ...hubLink, enabled: true, status: 'ok', last_ok_at: new Date().toISOString(), last_error: null, health: 'healthy', read_scopes: { ...scopes } };
+    return {
+      ok: true, error: null, error_code: null, latency_ms: 240,
+      exposed_tools: ['mcp-58450__kho_tom_tat', 'mcp-58450__kho_search', 'mcp-58450__kho_find_by_id'], missing_tools: [],
+      read_scopes: { ...scopes }, read_missing: readMissing, write_tools: [], link: linkOut(hubLink),
+    };
   };
 
   const has = (ctx: P2Ctx, perm: string) => !!ctx.perms[perm] && ctx.perms[perm] !== 'none';
@@ -143,8 +169,8 @@ export function createMock(opts: P4McpOptions) {
     if (p === '/hub/link' && m === 'GET') {
       if (!has(ctx, 'system.read')) return problem(403, 'FORBIDDEN', 'Vai trò không có quyền này');
       // v0.1.27: lỗi thô chỉ Owner thấy (như `link_out(owner=…)` ở API).
-      if (ctx.role !== 'owner' && hubLink.last_error) return reply(200, { ...hubLink, last_error: 'Gen-hub đang lỗi — Owner xem chi tiết ở thẻ Gen-hub' });
-      return reply(200, hubLink);
+      if (ctx.role !== 'owner' && hubLink.last_error) return reply(200, linkOut({ ...hubLink, last_error: 'Gen-hub đang lỗi — Owner xem chi tiết ở thẻ Gen-hub' }));
+      return reply(200, linkOut(hubLink));
     }
     if ((p === '/hub/link' && m === 'PATCH') || (p === '/hub/link/test' && m === 'POST')) {
       if (ctx.role !== 'owner') return problem(403, 'FORBIDDEN', 'Vai trò của bạn không có quyền thao tác này');
@@ -153,20 +179,38 @@ export function createMock(opts: P4McpOptions) {
         const b = body as { endpoint?: string; token?: string; token_expires_at?: string | null; allow_public_network?: boolean; enabled?: boolean };
         if (!hubLink.configured && (!b.endpoint || !b.token)) return problem(422, 'VALIDATION', 'Dữ liệu chưa hợp lệ', { errors: { endpoint: 'Cần địa chỉ Gen-hub và token cho lần nối đầu' } });
         const relink = (b.endpoint !== undefined && b.endpoint !== hubLink.endpoint) || !!b.token;
-        if (b.token) hubTokenBad = b.token.includes('sai');
+        if (b.token) {
+          hubTokenBad = b.token.includes('sai');
+          hubScopesMissing = b.token.includes('thieu');
+        }
         hubLink = {
           ...hubLink, configured: true, server_id: hubLink.server_id ?? 'mcp-genhub', endpoint: b.endpoint ?? hubLink.endpoint,
           has_token: hubLink.has_token || !!b.token, allow_public_network: b.allow_public_network ?? hubLink.allow_public_network,
           token_expires_at: 'token_expires_at' in b ? b.token_expires_at ?? null : hubLink.token_expires_at,
         };
         if (relink || b.enabled === false) hubLink = { ...hubLink, enabled: false, status: 'off' };
-        return reply(200, hubLink);
+        // Đổi địa chỉ/token ⇒ quyền đọc đã kiểm không còn đúng cho tới khi Kiểm tra lại.
+        if (relink) {
+          const { read_scopes: _rs, ...rest } = hubLink;
+          void _rs;
+          hubLink = rest;
+        }
+        return reply(200, linkOut(hubLink));
       }
       if (!hubLink.configured) return problem(409, 'HUB_LINK_NOT_CONFIGURED', 'Chưa nhập địa chỉ và token Gen-hub');
       return reply(200, hubTest());
     }
     return false;
   }
+
+  /** Hook e2e `POST /api/v1/__mock/p3/mcp/hubSim {scopes?:'full'|'missing', breaker?:bool}` (v0.1.49) — không qua token. */
+  const hubSim = (b: unknown) => {
+    const body = (b ?? {}) as { scopes?: unknown; breaker?: unknown };
+    if (body.scopes === 'missing') hubScopesMissing = true;
+    if (body.scopes === 'full') hubScopesMissing = false;
+    if (typeof body.breaker === 'boolean') hubBreakerOpen = body.breaker;
+    return { scopes: hubScopesMissing ? 'missing' : 'full', breaker: hubBreakerOpen };
+  };
 
   function handle(ctx: P2Ctx): boolean {
     const { method: m, path: p, url, body, reply, problem } = ctx;
@@ -335,6 +379,7 @@ export function createMock(opts: P4McpOptions) {
       /** v0.1.39 — cho `mock-boss-checks.ts` và `/setup/follow-up` (việc 14). */
       hubLink: () => hubLink,
       hubTest,
+      hubSim,
     } as Record<string, (...args: never[]) => unknown>,
     dispose: () => {},
   };

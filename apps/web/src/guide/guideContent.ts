@@ -157,6 +157,7 @@ export const GUIDE: GuideItem[] = [
     prepare: ['Tài khoản Gen-hub của Sếp.', 'Địa chỉ Gen-hub (ví dụ https://hub.genos.top/mcp).'],
     steps: [
       'Trong Gen-hub: tạo trợ lý mới, chọn thẻ truy cập (token) 90 ngày, chỉ bật quyền ĐỌC Kho.',
+      'Tuỳ chọn: tick thêm quyền ĐỌC lịch, đọc mail, đọc việc (Google Tasks) và tìm Drive để bản tin Gen có lịch hôm nay, mail cần trả lời, việc đang mở — KHÔNG bật quyền ghi.',
       'Chép token vừa tạo.',
       'Bấm "Mở thẻ Gen-hub" bên dưới, dán địa chỉ và token vào thẻ Gen-hub.',
       'Bấm "Lưu & kiểm tra" (nhập PIN khi được hỏi) và chờ báo Đã nối Kho.',

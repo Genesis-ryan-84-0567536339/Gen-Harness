@@ -3,7 +3,7 @@
  * song song hỏi `GET /gen/turns/{id}` mỗi 1,2 s tới khi xong — WS rớt thì câu trả lời vẫn tới. Hai nguồn ghép theo
  * `seq`, bước `ui` chỉ thực thi MỘT lần và tuần tự (mở trang xong mới làm sáng).
  */
-import { ApiError, type GenDoneEvent, type GenMessage, type GenRating, GenStep, GenStepEvent, GenTurn } from '@gen-harness/contracts';
+import { ApiError, type GenBriefingSection, type GenDoneEvent, type GenMessage, type GenRating, GenStep, GenStepEvent, GenTurn } from '@gen-harness/contracts';
 import { api } from '../lib/api';
 import { errorDetail, errorText } from '../lib/errorText';
 import { qk } from '../lib/queries';
@@ -108,6 +108,12 @@ export async function sendQuestion(text: string, userId: string | null = current
   }
 }
 
+/** v0.1.49: `content.sections` từ máy chủ — bỏ phần tử không phải object (không để vỡ khung Gen vì một mục hỏng). */
+function toSections(c: GenMessage['content']): GenBriefingSection[] | undefined {
+  if (c.kind !== 'briefing' || !Array.isArray(c.sections)) return undefined;
+  return c.sections.filter((x): x is GenBriefingSection => !!x && typeof x === 'object' && !Array.isArray(x));
+}
+
 function toChat(m: GenMessage): GenChatMessage {
   const c = m.content ?? {};
   return {
@@ -119,6 +125,8 @@ function toChat(m: GenMessage): GenChatMessage {
     status: 'done' as const,
     feedback: m.feedback ?? null,
     kind: c.kind === 'briefing' ? 'briefing' : undefined,
+    sections: toSections(c),
+    hubAt: c.kind === 'briefing' && typeof c.hub_at === 'number' && Number.isInteger(c.hub_at) ? c.hub_at : undefined,
   };
 }
 

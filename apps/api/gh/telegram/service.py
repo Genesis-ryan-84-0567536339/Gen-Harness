@@ -441,13 +441,56 @@ def defang(s: str) -> str:
     return _MENTION_RE.sub("[@]", s)
 
 
+HUB_DOWN = "Gen-hub tạm không trả lời"
+#: Mục lỗi lần này (`state` = 'error' — mục nội bộ hoặc Gen-hub): chưa biết có việc hay không, không phải "không có".
+UNREAD = "chưa đọc được lần này"
+NOTHING = "Không có việc gì cần Sếp xử lý lúc này."
+#: Tên ngắn của mục Gen-hub khi gộp một dòng "• Lịch / mail / việc Google: Gen-hub tạm không trả lời".
+_HUB_SHORT = {"calendar_today": "lịch", "mail_reply": "mail", "gtasks_open": "việc Google"}
+
+
+def _briefing_item(s: dict[str, Any]) -> str | None:
+    """Một dòng của mục bản tin. v0.1.49 (QD-16): mục Gen-hub (`external`) chỉ có SỐ ĐẾM — tiêu đề mail/lịch/việc
+    không ra Telegram; ngắt mạch mở ⇒ "Gen-hub tạm không trả lời"; chạm trần (`more`) ⇒ "10+". Mục lỗi (`state` =
+    'error', nội bộ hay Gen-hub) ⇒ "chưa đọc được lần này" — luôn có dòng, nên không bao giờ kèm "Không có việc gì…"."""
+    count = int(s.get("count") or 0)
+    if s.get("state") == "error" and count <= 0:
+        return f"• {s['title']}: {UNREAD}"
+    if s.get("external"):
+        if s.get("state") == "breaker":
+            return f"• {s['title']}: {HUB_DOWN}"
+        return f"• {s['title']} ({count}{'+' if s.get('more') else ''})" if count > 0 else None
+    if count <= 0:
+        return None
+    return f"• {s['title']} ({count})" + (f": {defang(_line(s['lines'][0]))}" if s.get("lines") else "")
+
+
+def _briefing_items(sections: list[dict[str, Any]]) -> list[str]:
+    """Các dòng mục; khi MỌI mục Gen-hub (≥ 2) cùng "tạm không trả lời" thì gộp thành MỘT dòng ở chỗ mục đầu tiên."""
+    ext = [s for s in sections if s.get("external")]
+    merge = len(ext) > 1 and all(s.get("state") == "breaker" for s in ext)
+    out: list[str] = []
+    merged = False
+    for s in sections:
+        if merge and s.get("external"):
+            if not merged:
+                names = " / ".join(_HUB_SHORT.get(str(x.get("key")), str(x.get("title") or "")) for x in ext)
+                out.append(f"• {names[:1].upper() + names[1:]}: {HUB_DOWN}")
+                merged = True
+            continue
+        item = _briefing_item(s)
+        if item is not None:
+            out.append(item)
+    return out
+
+
 def briefing_text(slot_label: str, summary: str | None, sections: list[dict[str, Any]]) -> str:
     lines = [f"Bản tin Gen · {slot_label}"]
     if summary:
         lines += ["", defang(summary.strip())]
-    items = [f"• {s['title']} ({s['count']})" + (f": {defang(_line(s['lines'][0]))}" if s.get("lines") else "")
-             for s in sections if int(s.get("count") or 0) > 0]
-    lines += ["", *items] if items else ["", "Không có việc gì cần Sếp xử lý lúc này."]
+    # Mục chưa đọc được (lỗi / Gen-hub tạm không trả lời) luôn có dòng ⇒ không có dòng nào = mọi mục đã đọc và đều 0.
+    items = _briefing_items(sections)
+    lines += ["", *items] if items else ["", NOTHING]
     lines += ["", f"Mở Console: {public_url()}/overview", ONE_WAY]
     return "\n".join(lines)
 

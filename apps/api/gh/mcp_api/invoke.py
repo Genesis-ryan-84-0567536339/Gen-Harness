@@ -11,20 +11,22 @@ v0.1.45 (F-57): `agent.mcp_calls.args` và sự kiện WS `mcp.call` (đi tới 
 tham số (`args_digest`: sha256 + tên khoá cấp 1 + số byte) — không lưu nguyên văn; `result_summary` và lỗi đi qua
 `gh.chassis.masking.mask_for_model` (che số dài, email, khoá/token). Bản nháp `mcp_write` giữ tham số (người duyệt cần
 thấy) nhưng cũng qua lớp che.
+
+v0.1.49: `actor` có thể là actor hệ thống của việc nền (`gh.hub_link.service.SystemActor`, Bản tin Gen) — Action Log ghi
+`actor_type = getattr(actor, "actor_type", "user")` ('system' cho việc nền); không đổi hành vi nào khác.
 """
 
 import hashlib
 import time
 import uuid
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Protocol
 
 import orjson
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gh import crypto, realtime
-from gh.auth import service
 from gh.biz.core.drafts import create_draft, effective_level
 from gh.chassis import actionlog
 from gh.chassis.masking import mask_for_model
@@ -33,6 +35,18 @@ from gh.data.common import iso
 from gh.errors import ApiError, conflict, not_found
 
 MCP_AAD = b"mcp_server_auth"
+
+
+class Actor(Protocol):
+    """Người/hệ thống đứng sau một lời gọi tool: `service.CurrentUser` (người dùng) hoặc actor hệ thống của việc nền
+    (`gh.hub_link.service.SystemActor`, v0.1.49). Chỉ cần định danh để ghi Action Log; `actor_type` mặc định 'user'."""
+
+    @property
+    def actor_id(self) -> str: ...
+
+    @property
+    def ip(self) -> str | None: ...
+
 
 SERVER_SELECT = """
 SELECT s.*, (SELECT count(*) FROM agent.mcp_tools t WHERE t.server_id = s.id) AS tool_count,
@@ -150,7 +164,7 @@ def _mask_err(message: str, token: str | None) -> str:
 
 
 async def invoke_tool(db: AsyncSession, redis: Any, client: McpClient, *, org_id: uuid.UUID, tool: Any,
-                      agent_key: str, args: dict[str, Any], actor: service.CurrentUser,
+                      agent_key: str, args: dict[str, Any], actor: Actor,
                       summarize: Callable[[Any], str] | None = None) -> dict[str, Any]:
     """Gọi `tool` (dòng từ `get_tool`) nhân danh `agent_key`. Trả `{"outcome": "ok", "result", "call"}` hoặc
     `{"outcome": "held_for_approval"|"blocked", "draft", "call"}` (tool ghi); ném `ApiError` 403 khi bị chặn (đã
@@ -159,6 +173,7 @@ async def invoke_tool(db: AsyncSession, redis: Any, client: McpClient, *, org_id
     là kết quả đã qua `mask_for_model`."""
     t = tool
     tool_id = t.id
+    atype = getattr(actor, "actor_type", "user")  # v0.1.49: việc nền (SystemActor) ghi đúng 'system'
     started = time.monotonic()
 
     def elapsed() -> int:
@@ -167,7 +182,7 @@ async def invoke_tool(db: AsyncSession, redis: Any, client: McpClient, *, org_id
     async def blocked(code: str, msg: str) -> ApiError:
         item = await log_call(db, redis, org_id=org_id, tool_id=tool_id, agent_key=agent_key, args=args,
                               outcome="blocked", result_summary=msg, latency_ms=elapsed())
-        await actionlog.record(db, org_id=org_id, actor_type="user", actor_id=actor.actor_id,
+        await actionlog.record(db, org_id=org_id, actor_type=atype, actor_id=actor.actor_id,
                                action="mcp.call_blocked", target_type="mcp_tool", target_id=str(tool_id),
                                target_label=f"{t.server_name} · {t.name}", result="blocked",
                                detail={"code": code, "reason": msg, "agent_key": agent_key}, ip=actor.ip)
@@ -212,7 +227,7 @@ async def invoke_tool(db: AsyncSession, redis: Any, client: McpClient, *, org_id
         await set_health(db, redis, org_id, server.id, "error")
         await log_call(db, redis, org_id=org_id, tool_id=tool_id, agent_key=agent_key, args=args, outcome="error",
                        result_summary=err[:500], latency_ms=elapsed())
-        await actionlog.record(db, org_id=org_id, actor_type="user", actor_id=actor.actor_id,
+        await actionlog.record(db, org_id=org_id, actor_type=atype, actor_id=actor.actor_id,
                                action="mcp.call_error", target_type="mcp_tool", target_id=str(tool_id),
                                target_label=f"{t.server_name} · {t.name}", result="failed",
                                detail={"error": err[:500]}, ip=actor.ip)
@@ -222,18 +237,19 @@ async def invoke_tool(db: AsyncSession, redis: Any, client: McpClient, *, org_id
     item = await log_call(db, redis, org_id=org_id, tool_id=tool_id, agent_key=agent_key, args=args, outcome="ok",
                           result_summary=(summarize(result) if summarize is not None
                                           else _default_summary(result, token)), latency_ms=elapsed())
-    await actionlog.record(db, org_id=org_id, actor_type="user", actor_id=actor.actor_id, action="mcp.call_ok",
+    await actionlog.record(db, org_id=org_id, actor_type=atype, actor_id=actor.actor_id, action="mcp.call_ok",
                            target_type="mcp_tool", target_id=str(tool_id), target_label=f"{t.server_name} · {t.name}",
                            detail={"agent_key": agent_key}, ip=actor.ip)
     return {"outcome": "ok", "result": result, "call": item}
 
 
 async def discover(db: AsyncSession, redis: Any, client: McpClient, *, org_id: uuid.UUID, server: Any,
-                   actor: service.CurrentUser) -> list[dict[str, Any]]:
+                   actor: Actor) -> list[dict[str, Any]]:
     """Khám phá tool qua `tools/list`. Tool MỚI luôn vào với `is_exposed=false` (mặc định đóng, khoá cứng #4) —
     tool đã biết giữ nguyên trạng thái mở/đóng + phạm vi cấp hiện có, chỉ cập nhật mô tả/schema."""
     if not server.is_enabled:
         raise conflict("MCP_SERVER_DISABLED", "Máy chủ đang tắt")
+    atype = getattr(actor, "actor_type", "user")
     token = await auth_token(db, server.id)
     try:
         tools = await client.list_tools(server, token)
@@ -259,7 +275,7 @@ async def discover(db: AsyncSession, redis: Any, client: McpClient, *, org_id: u
         found.append({"id": str(row.id), "name": t.name, "access": row.access, "is_exposed": row.is_exposed,
                       "is_new": row.is_new})
     await set_health(db, redis, org_id, server.id, "healthy")
-    await actionlog.record(db, org_id=org_id, actor_type="user", actor_id=actor.actor_id,
+    await actionlog.record(db, org_id=org_id, actor_type=atype, actor_id=actor.actor_id,
                            action="mcp.server_discovered", target_type="mcp_server", target_id=str(server.id),
                            target_label=server.name, detail={"tool_count": len(found),
                            "new": sum(1 for f in found if f["is_new"])}, ip=actor.ip)

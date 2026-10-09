@@ -41,6 +41,8 @@ const KIND_ICON: Record<string, string> = {
   'gen.briefing': 'ph ph-newspaper',
   'ai.budget_exceeded': 'ph ph-currency-circle-dollar',
   'ai.background_no_source': 'ph ph-brain',
+  // v0.1.49 (F-83): Gen-hub không trả lời hơn 15 phút.
+  'hub.unreachable': 'ph ph-plugs',
 };
 
 /**

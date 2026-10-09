@@ -112,7 +112,7 @@ export const GEN_TARGETS: GenTarget[] = [
   { id: 'api.add_provider', screen: 'api', label: 'Nút "Thêm nhà cung cấp"', description: 'Thêm Gemini/DeepSeek/API tương thích OpenAI' },
   { id: 'api.bindings', screen: 'api', label: 'Gán model cho từng agent', description: 'Chọn model cho từng mục đích, gồm core.gen của Gen' },
   // ── Gen-hub (v0.1.26, Đợt D1: Gen đọc Kho Ryan, chỉ đọc, chỉ Owner) — v0.1.42: thẻ ở Kết nối (id giữ nguyên) ──
-  { id: 'mcp.hub_link', screen: 'connections', label: 'Thẻ "Gen-hub"', description: 'Nối Gen-hub để Gen đọc Kho Ryan (chỉ đọc, chỉ Sếp): địa chỉ, token, hạn token, trạng thái', permission: 'system.manage' },
+  { id: 'mcp.hub_link', screen: 'connections', label: 'Thẻ "Gen-hub"', description: 'Nối Gen-hub để Gen đọc Kho Ryan, lịch, mail, việc, Drive (chỉ đọc, chỉ Sếp): địa chỉ, token, hạn token, trạng thái', permission: 'system.manage' },
   { id: 'mcp.hub_link.token', screen: 'connections', label: 'Ô "Token Gen-hub"', description: 'Dán token agent tạo trong Gen-hub (chỉ ghi — không bao giờ hiện lại)', permission: 'system.manage', sensitive: true },
   { id: 'mcp.hub_link.test', screen: 'connections', label: 'Nút "Kiểm tra" Gen-hub', description: 'Thử kết nối, mở đúng tool đọc Kho cho Gen rồi bật liên kết (cần PIN)', permission: 'system.manage' },
   // ── Tài khoản của tôi ──
