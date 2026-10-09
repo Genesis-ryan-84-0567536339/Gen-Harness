@@ -3032,9 +3032,58 @@ Sếp xác nhận bằng mã PIN, có bằng chứng bằng ảnh chụp, và d�
   `uv sync --frozen` (api 58, browser 24 gói); ruff + mypy api/browser xanh; pytest api 1813 passed ×2 (superuser và GH_TEST_APP_ROLE=1); pytest browser 43 passed
   (Chromium thật); web lint/typecheck/vitest 833/build/bridge 50/Playwright mock 274 passed; `go vet` + `go test`
   genh xanh (gồm 4 test ghim digest/khớp bản nhúng); `renovate-config-validator --strict` hợp lệ; `docker compose config -q`,
-  cổng proxy mặc định 127.0.0.1, Caddyfile hợp lệ với ảnh caddy ghim digest. Build 5 ảnh + tái lập + E2E cài thật do CI quyết
-  (máy tích hợp không tải được blob ghcr.io).
+  cổng proxy mặc định 127.0.0.1, Caddyfile hợp lệ với ảnh caddy ghim digest. Máy tích hợp KHÔNG build được ảnh (không tải
+  được blob ghcr.io).
+- **Kiểm tra trên CI GitHub: CHƯA XÁC NHẬN.** Head 927bf83 (03–04/10): cả 3 workflow (CI, Installer matrix, E2E cài đặt
+  thật) dừng sau 3 giây — "recent account payments have failed or your spending limit needs to be increased" ⇒ chưa lần
+  nào build thật 5 ảnh (uv sync, venv /opt/venv), chưa chạy `check_image_lock.py`/`check_bytecode.py`, chưa chạy
+  e2e-upgrade (lượt tạo lại proxy/redis bằng digest). 09/10 Actions chạy lại được (E2E trên main xanh; CI nhánh này đã chạy
+  job `version`, `renovate-config`, `browser` xanh trên 3870a60). **Không merge, không phát hành v0.1.48 tới khi `ci-ok`,
+  `images` (tái lập + .pyc) và E2E cài thật xanh thật trên commit cuối của nhánh**; chỉ khi đó mới sửa dòng này.
 - **Lưu ý vận hành**: `genh update` lên bản này tạo lại container proxy/redis (tham chiếu ảnh đổi sang digest); dữ liệu redis
-  giữ ở volume. Còn lại: gói apt trong Dockerfile chưa ghim phiên bản.
-- **Boss**: Không cần làm gì. (Tuỳ chọn, 1 phút) Nếu muốn máy tự đề xuất nâng thư viện/ảnh mỗi tuần: mở
-  https://github.com/apps/renovate → bấm Install → chọn đúng repo Gen-Harness → Save. Không cài thì mọi thứ vẫn chạy như cũ.
+  giữ ở volume. Còn lại: gói apt trong Dockerfile chưa ghim phiên bản (tầng apt dựng lại ít nhất mỗi tuần — xem dưới). Tag
+  GHCR `gen-harness-*:latest` cũ **đứng yên ở v0.1.46** (bản promote cuối trước v0.1.48), không nhận bản vá — không dùng; không
+  xoá riêng được tag mà không xoá luôn ảnh v0.1.46 (máy cũ/rollback cần) nên để nguyên.
+- **Boss**: Không cần làm gì lúc này (thanh toán Actions đã chạy lại 09/10). Nếu CI lại báo lỗi thanh toán: vào GitHub
+  **Settings → Billing & plans**, sửa thanh toán hoặc nâng spending limit cho Actions.
+  (Tuỳ chọn, 1 phút) Renovate đề xuất nâng thư viện/ảnh mỗi tuần: https://github.com/apps/renovate → **Install** → **Only
+  select repositories** → Gen-Harness → **Install** (nếu Mend đòi đăng nhập developer.mend.io thì đăng nhập bằng GitHub).
+  Cài xong sẽ có 1 issue "Dependency Dashboard" và vài PR nhãn `phụ thuộc` (ảnh Docker, GitHub Actions, bản lớn, playwright,
+  uv, làm mới uv.lock); Claude review rồi merge, Boss không cần bấm. Không cài thì mọi thứ vẫn chạy như cũ.
+
+### Sửa sau review (v0.1.48)
+
+- **.pyc trong ảnh** (api, browser): `uv sync` không tự sinh .pyc như pip; `/opt/venv` thuộc root + `PYTHONDONTWRITEBYTECODE=1`
+  ⇒ mọi tiến trình python (api, worker, migrate, `python -m gh.backup/gh.bundle/…` do genh gọi) dịch lại cả cây thư viện
+  mỗi lần khởi động (~+1,3 giây CPU, chậm hơn trên arm64 yếu). Bật `UV_COMPILE_BYTECODE=1`; job `images` chạy
+  `python -v -c "import gh.main"` (và `ghb.worker`, rootfs chỉ-đọc) trong ảnh rồi `check_bytecode.py` đỏ nếu có module dưới
+  `/opt/venv` phải dịch lại. Đo tại máy tích hợp (venv từ uv.lock): có .pyc ⇒ 754 module nạp từ .pyc, 0 dịch lại; không
+  .pyc ⇒ 754 module dịch lại (script bắt đúng). Test tĩnh: Dockerfile nào dùng `uv sync` phải bật biên dịch .pyc.
+- **Renovate an toàn hơn**: chỉ **thư viện** (pypi/npm/go) bản nhỏ/vá đã ra ≥ 3 ngày mới tự merge (`minimumReleaseAge`,
+  `internalChecksFilter: strict`); ảnh Docker (gom 1 PR), GitHub Actions (1 PR), nhóm uv KHÔNG tự merge — tag/action bị chiếm
+  thì digest mới không tự lọt vào bản phát hành. `customManagers` cho các bản ghim trước đây Renovate không thấy: uv gắn lúc
+  build (`RUN --mount=from=ghcr.io/astral-sh/uv`), setup-uv `version:`, `UV_VERSION` của Makefile (cùng nhóm "uv"),
+  `pip-audit==`, `govulncheck@`, `renovate@` (đã thử regex trên tệp thật: khớp đủ 4+3+2+1+1 chỗ).
+  `renovate-config-validator --strict --no-global` (kiểm như cấu hình repo — trước đây không có cờ này nên kiểm như cấu hình
+  global) chạy ở **job riêng `renovate-config`**: chỉ tải renovate khi `renovate.json` đổi, npm thử lại 5 lần, KHÔNG chạy khi
+  release.yml gọi (npm trục trặc không còn chặn phát hành); `ci-ok` nhận success hoặc skipped cho riêng job này.
+- **Dọn digest caddy/redis cũ** (`genh update`): trước chỉ dọn `ghcr.io/*/gen-harness-*` ⇒ mỗi lần Renovate đổi digest
+  caddy/redis để lại một ảnh ~40–60MB. Nay dọn thêm repo mà compose giữ (bản hiện tại + liền trước) ghim digest — chỉ dòng
+  KHÔNG gắn tag (kéo theo digest, đúng kiểu genh kéo); ảnh có tag (bản genh cũ kéo theo tag, dự án khác) không đụng; vẫn
+  không `rmi -f`; checkout dev (không có ảnh gen-harness) không xoá gì. 5 test Go mới; e2e-upgrade kiểm thêm caddy/redis
+  mỗi repo tối đa 2 digest.
+- **Đo lại digest trước phát hành**: caddy:2-alpine đã dời sang v2.11.7 (giữ v2.11.6 thì Owner kéo tag sau 05/10 bị hạ bản),
+  python:3.11-slim và node:22-slim bản dựng 06/10 (gói Debian mới) — xem bảng đo lại trong
+  [anh-tai-lap-da-kiem.md](v0.1.48/anh-tai-lap-da-kiem.md). Các ảnh nền còn lại đo lại vẫn trùng.
+- **Tầng apt không dùng cache cũ mãi**: ảnh nền ghim digest ⇒ cache gha mode=max giữ tầng apt (api: postgresql-client-16;
+  db: partman) vô thời hạn. `ARG APT_REFRESH` trước apt-get, release.yml truyền tuần ISO (`date -u +%G-W%V`) ⇒ dựng lại
+  ít nhất mỗi tuần; test `test_apt_refresh.py` giữ bất biến.
+- Nhỏ: pip-audit ghi "N lỗ cần xem (PyPI không ghi mức)" thay vì "Lỗ mức cao"; câu "Không chạy được quét … — xem log bước
+  quét" thống nhất giữa step summary và `::warning::`. Chú thích `db/sql/0001/0008/0009/0011` + migration 0001 ghi rõ
+  `schema.sql` đã bỏ (chỉ chú thích; alembic không có checksum tệp SQL, migration đã áp không chạy lại);
+  `test_no_stale_schema_sql.py` quét thêm `db/sql` và `apps/api/migrations`. README: lần đầu `make api-sync`; `make lock` /
+  `make api-sync` chạy uv 0.12.23 qua `uvx` như CI.
+- **Kiểm tra** (máy tích hợp, 09/10): unittest `.github/scripts` 90 test xanh; `check_release_gate.py`,
+  `check_workflow_hygiene.py`, `check_embedded_sync.py` OK; actionlint v1.7.12 + shellcheck 0 lỗi; `renovate-config-validator
+  --strict --no-global` hợp lệ (cả trên CI); `go vet` + `go test ./...` genh xanh; ruff + mypy api xanh. Build ảnh thật,
+  `check_bytecode.py` trong ảnh và E2E: chờ CI (xem dòng "Kiểm tra trên CI GitHub" ở trên).
