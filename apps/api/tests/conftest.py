@@ -49,7 +49,7 @@ os.environ.setdefault("GH_CLAUDE_BINARY", "gh-test-no-claude")
 # F-22: HOME của agy trong test không bao giờ là HOME thật (mặc định ~/.gemini/antigravity-cli ⇒ HOME = ~).
 os.environ.setdefault("GH_CLI_HOME", f"/tmp/gh-test-agy-{os.getpid()}/.gemini/antigravity-cli")
 os.environ.setdefault("GH_MASTER_KEY", "")
-# v0.1.57: kho đối tượng đĩa cục bộ mặc định (/tmp/gh-objects) là chỗ dùng chung giữa hai lượt pytest song song ⇒ theo pid.
+# v0.1.57: kho đối tượng đĩa mặc định (/tmp/gh-objects) là chỗ dùng chung của hai lượt pytest song song ⇒ theo pid.
 os.environ.setdefault("GH_OBJECTS_DIR", f"/tmp/gh-test-objects-{os.getpid()}")
 
 # gh_app (migration 0014) — mật khẩu test cố định, KHÔNG dùng ngoài môi trường test. Luôn đặt (kể cả khi
@@ -90,7 +90,7 @@ def _async_url(db: str, base: str = PG) -> str:
 def template_db() -> str:
     # v0.1.57: hai lượt pytest song song cùng migrate CSDL mẫu khác tên của MỘT cụm Postgres; migration 0014 chạy
     # `ALTER ROLE gh_app` (vai trò dùng chung cả cụm) nên hai lượt đồng thời có thể đụng "tuple concurrently updated".
-    # Khoá tư vấn cấp cụm (giữ tới khi đóng kết nối) xếp hàng phần tạo + migrate; các test sau đó chạy song song thoải mái.
+    # Khoá tư vấn cấp cụm (giữ tới khi đóng kết nối) xếp hàng phần tạo + migrate; test sau đó chạy song song thoải mái.
     with psycopg.connect(f"{PG}/postgres", autocommit=True) as lock:
         lock.execute("SELECT pg_advisory_lock(%s)", (TEMPLATE_LOCK_KEY,))
         _admin(f"DROP DATABASE IF EXISTS {TEMPLATE} WITH (FORCE)")

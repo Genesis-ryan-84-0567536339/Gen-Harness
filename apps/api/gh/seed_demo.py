@@ -599,14 +599,15 @@ _REAL_DATA_PROBES: tuple[tuple[str, str], ...] = (
      "SELECT count(*) FROM (SELECT 1 FROM core.users LIMIT 1000) s"),
     ("core.persons (hồ sơ liên hệ ngoài bộ mẫu)",
      """SELECT count(*) FROM (SELECT 1 FROM core.persons p WHERE NOT EXISTS (
-            SELECT 1 FROM core.person_identities i WHERE i.person_id = p.id AND i.external_id LIKE :ns) LIMIT 1000) s"""),
+            SELECT 1 FROM core.person_identities i
+             WHERE i.person_id = p.id AND i.external_id LIKE :ns) LIMIT 1000) s"""),
     ("raw.event_keys (tin nhắn ngoài bộ mẫu)",
      "SELECT count(*) FROM (SELECT 1 FROM raw.event_keys WHERE external_msg_id NOT LIKE :mp LIMIT 1000) s"),
 )
 
 
 class SeedRefused(Exception):
-    """Từ chối nạp dữ liệu mẫu: `message` thân thiện cho người chạy, `detail` là "Chi tiết kỹ thuật" (không có bí mật)."""
+    """Từ chối nạp dữ liệu mẫu: `message` thân thiện cho người chạy, `detail` = "Chi tiết kỹ thuật" (không bí mật)."""
 
     def __init__(self, message: str, detail: str):
         super().__init__(message)
@@ -658,7 +659,7 @@ async def _main() -> int:
     parser = argparse.ArgumentParser(description="Seed / xoá dữ liệu mẫu Gen-Harness (PLAN §5.1)")
     parser.add_argument("action", choices=["seed", "clear"])
     parser.add_argument("--force", action="store_true",
-                        help=f"cho phép nạp dữ liệu mẫu (tương đương {ALLOW_ENV}=1); vẫn từ chối nếu DB đã có dữ liệu thật")
+                        help=f"cho phép nạp dữ liệu mẫu (như {ALLOW_ENV}=1); vẫn từ chối nếu DB đã có dữ liệu thật")
     args = parser.parse_args()
     sm = sessionmaker()
     redis = Redis.from_url(get_settings().redis_url)
