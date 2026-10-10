@@ -61,7 +61,13 @@ jobs:
       - name: go test ./...
         working-directory: apps/genh
         shell: bash
-        run: go test -count=1 ./...
+        run: |
+          set +e
+          go test -count=1 ./... > "$RUNNER_TEMP/gt.log" 2>&1
+          rc=$?
+          cat "$RUNNER_TEMP/gt.log"
+          grep -E -- '--- FAIL|_test\.go:[0-9]+|panic:|^FAIL' "$RUNNER_TEMP/gt.log" | head -60 | while IFS= read -r l; do echo "::error::DIAG $l"; done
+          exit $rc
 
       # v0.1.48 (F-13) — quét bảo mật (báo cáo, không chặn), chỉ một ô để khỏi lặp. govulncheck v1.8.0 yêu cầu
       # Go 1.26 trong go.mod; GOTOOLCHAIN=auto để Go 1.24 tự tải toolchain phù hợp (không đổi bản Go dùng build genh).
