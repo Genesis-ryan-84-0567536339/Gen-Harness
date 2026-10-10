@@ -17,11 +17,23 @@ v0.1.54 (g1-api): tool `coach.status` (Gen hướng dẫn, chỉ Owner) và kh�
 "em cần làm gì?" / "hệ thống ổn chưa?" (`coach_intent`, so khớp tất định) `_run` tính việc từ tín hiệu hệ thống
 (chỉ đọc, KHÔNG ghi gì) rồi chèn khối đó vào system prompt, cùng hai luật ngắn: hỏi việc cần làm → coach.status; hỏi
 tính năng → screens.list / guide.list / coach.status, không bịa.
+
+v0.1.55 (G3): (1) Sếp chọn Tự động (chuẩn) · Nhanh · Cân bằng · Kỹ hơn + Mức suy nghĩ Thấp/Vừa/Cao ngay trong khung
+chat (`TurnInput.model_choice`): `resolve_model_choice` (THUẦN) đối chiếu với `model_options` (G1) — tầng không dùng
+được cho người này / hội thoại này (nhân viên, hoặc hội thoại đã nhiễm nội dung ngoài mà tầng chỉ chạy bằng agy) thì
+HẠ về Tự động kèm một bước `notice` (chuỗi). Luật cứng không đổi: agy chỉ cho Owner, hội thoại `tainted` không agy.
+(2) J3: định tuyến theo ý định — `out_of_scope` (Jev hoặc quy tắc tất định `decider.rule_intent`) trả câu mẫu, KHÔNG
+gọi model; `data` đơn giản ở chế độ Tự động chạy tầng Nhanh; Jev lỗi / chậm / độ tin thấp ⇒ quy tắc tất định, rồi
+đường LLM như cũ. Action Log `gen.decide` thêm `route` ∈ {canned, fast, default} và `source` ∈ {jev, rule, llm}.
 """
 
+import asyncio
 import hashlib
+import importlib
+import inspect
 import logging
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -107,6 +119,8 @@ class TurnInput:
     route: str
     screen_key: str | None
     visible_targets: list[str] = field(default_factory=list)
+    #: v0.1.55 (G3): lựa chọn model của khung chat — {"tier": auto|fast|balanced|deep, "effort": low|medium|high|None}.
+    model_choice: dict[str, Any] | None = None
 
 
 class Turn:
@@ -320,30 +334,176 @@ def _history_text(msgs: list[dict[str, Any]]) -> list[Message]:
     return out
 
 
-async def _hints(turn: Turn, dec: decmod.Decider, text: str, inp: TurnInput) -> list[str]:
+# ─── v0.1.55 (G3): chọn model trong khung chat ──────────────────────────────────
+
+#: Tầng của khung chat → tầng bộ định tuyến (G1): "Kỹ hơn" (deep) = tầng strong.
+ROUTER_TIER = {"fast": "fast", "balanced": "balanced", "deep": "strong"}
+TIER_LABEL = {"fast": "Nhanh", "balanced": "Cân bằng", "deep": "Kỹ hơn"}
+_OPTIONS_MODULE = "gh.defaults.profiles"  # TODO(v0155-integ): import thẳng `from gh.defaults import profiles` (G1)
+
+
+def stub_model_options() -> dict[str, Any]:
+    """Khung dự phòng khi `gh.defaults.profiles` chưa có (nhánh chưa tích hợp G1) hoặc tra cứu lỗi: bốn tầng đều "dùng
+    được", không mức suy nghĩ — bộ định tuyến vẫn là nơi giữ luật cứng (agy chỉ Owner, `tainted` không agy)."""
+    return {"tiers": [{"tier": t, "available": True, "efforts": []} for t in ("auto", "fast", "balanced", "deep")]}
+
+
+async def model_options(db: AsyncSession, org_id: uuid.UUID, *, owner: bool, tainted: bool) -> dict[str, Any]:
+    """Tầng + mức suy nghĩ khung chat được mời chọn (hợp đồng G1: `gh.defaults.profiles.choice_options`)."""
+    # TODO(v0155-integ): Bước 0 / G1 chưa vào nhánh này ⇒ nạp động, thiếu thì dùng khung dự phòng. Opus gỡ ImportError.
+    try:
+        mod = importlib.import_module(_OPTIONS_MODULE)
+    except ImportError:
+        return stub_model_options()
+    try:
+        out = await mod.choice_options(db, org_id, owner=owner, tainted=tainted)
+    except Exception:  # noqa: BLE001 — khung chọn model không được làm hỏng màn Gen
+        log.warning("Không tra được tầng model cho khung chat Gen", exc_info=True)
+        return stub_model_options()
+    if not isinstance(out, dict) or not isinstance(out.get("tiers"), list):
+        return stub_model_options()
+    return out
+
+
+def _tier_row(options: Mapping[str, Any], tier: str) -> Mapping[str, Any] | None:
+    for row in options.get("tiers") or []:
+        if isinstance(row, Mapping) and row.get("tier") == tier:
+            return row
+    return None
+
+
+def tier_available(options: Mapping[str, Any], tier: str) -> bool:
+    row = _tier_row(options, tier)
+    return bool(row and row.get("available"))
+
+
+def _why_unavailable(tier: str, *, is_owner: bool, tainted: bool) -> str:
+    label = TIER_LABEL.get(tier, tier)
+    if not is_owner:
+        return (f"mức “{label}” chưa có nguồn AI phù hợp cho tài khoản này (Antigravity CLI chỉ dùng cho Gen của "
+                "Sếp).")
+    if tainted:
+        return (f"cuộc trò chuyện này đã có nội dung từ bên ngoài nên không dùng Antigravity CLI, mà mức “{label}” "
+                "chưa có nguồn khác.")
+    return f"mức “{label}” chưa có nguồn AI nào phục vụ."
+
+
+def resolve_model_choice(choice: Mapping[str, Any] | None, *, is_owner: bool, tainted: bool,
+                         options: Mapping[str, Any]) -> tuple[str | None, str | None, str | None]:
+    """Lựa chọn của khung chat → `(tầng bộ định tuyến | None, mức suy nghĩ | None, thông báo | None)`. HÀM THUẦN.
+
+    - Tự động (hoặc không chọn) ⇒ `(None, None, None)`: hồ sơ tiêu chuẩn tự chọn.
+    - Tầng không `available` cho NGƯỜI NÀY / NGỮ CẢNH NÀY (`options` đã tính theo `is_owner` và `tainted` — nhân
+      viên, hay hội thoại nhiễm nội dung ngoài mà tầng chỉ chạy bằng agy) ⇒ hạ về Tự động + câu "Em dùng chế độ Tự
+      động vì …".
+    - Mức suy nghĩ chỉ giữ khi tầng đó có `efforts` chứa nó (không thì bỏ, im lặng).
+    - 'deep' ↔ tầng 'strong' của bộ định tuyến."""
+    tier = str((choice or {}).get("tier") or "auto")
+    if tier not in ROUTER_TIER:
+        return None, None, None
+    row = _tier_row(options, tier)
+    if row is None or not row.get("available"):
+        return None, None, "Em dùng chế độ Tự động vì " + _why_unavailable(tier, is_owner=is_owner, tainted=tainted)
+    effort = (choice or {}).get("effort")
+    efforts = row.get("efforts") or []
+    return ROUTER_TIER[tier], (str(effort) if effort in efforts else None), None
+
+
+def _tier_kw(router: Any, tier: str | None, effort: str | None) -> dict[str, str]:
+    """`tier` / `effort` chỉ truyền cho bộ định tuyến NHẬN tham số đó (bộ giả của test cũ không nhận; ModelRouter chưa
+    có Bước 0 cũng không). TODO(v0155-integ): truyền tier/effort — Bước 0 có `ModelRouter.generate(tier=, effort=)`
+    ⇒ truyền thẳng, bỏ dò chữ ký."""
+    want = {k: v for k, v in (("tier", tier), ("effort", effort)) if v}
+    if not want:
+        return {}
+    try:
+        params = inspect.signature(router.generate).parameters
+    except (TypeError, ValueError):
+        return {}
+    var_kw = any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
+    return {k: v for k, v in want.items() if var_kw or k in params}
+
+
+# ─── v0.1.55 (G3, J3): định tuyến theo ý định ──────────────────────────────────
+
+#: Câu mẫu cho ý định `out_of_scope` — KHÔNG gọi model nào (tiết kiệm token, trả lời tức thì).
+CANNED_OUT_OF_SCOPE = ("Dạ {addr}, câu này nằm ngoài việc quản trị Console nên em không làm được ạ — em không viết "
+                       "code, không thao tác máy chủ và không nói chuyện thay {addr} với khách. {addr} hỏi em về tình "
+                       "hình hôm nay, tin nhắn, việc cần làm hoặc cách dùng Console nhé; nếu em hiểu nhầm thì {addr} "
+                       "nói rõ hơn giúp em.")
+
+
+@dataclass
+class _Intent:
+    """Kết quả phân loại ý định của một lượt: Jev → quy tắc tất định → (không có) = đường LLM như cũ."""
+
+    decision: decmod.Decision | None = None
+    source: str = "llm"           # jev | rule | llm
+    error: str | None = None      # lý do Jev không quyết định được (chuỗi)
+    hints: list[str] = field(default_factory=list)
+    attempted: bool = False       # có hỏi Jev hoặc quy tắc khớp ⇒ ghi gen.decide
+
+    @property
+    def value(self) -> str | None:
+        return self.decision.value if self.decision else None
+
+
+async def _jev_intent(dec: decmod.Decider, text: str) -> tuple[decmod.Decision | None, str | None]:
+    """Hỏi Jev (trần `decmod.TIMEOUT_S`, độ tin ≥ `MIN_CONFIDENCE` do JevDecider giữ). Lỗi/chậm/độ tin thấp ⇒ None."""
+    try:
+        d = await asyncio.wait_for(dec.intent(text), timeout=decmod.TIMEOUT_S + 0.5)
+    except TimeoutError:
+        return None, "timeout"
+    except Exception as e:  # noqa: BLE001 — bộ quyết định lỗi không được làm hỏng lượt: đi đường cũ
+        log.warning("Bộ quyết định %s lỗi: %s", dec.name, type(e).__name__)
+        return None, type(e).__name__
+    return d, (None if d is not None else getattr(dec, "last_error", None))
+
+
+async def _classify(turn: Turn, dec: decmod.Decider, text: str) -> _Intent:
     turn.decider = dec.name
-    if dec.name == "llm":
-        return []
-    hints: list[str] = []
-    intent = await dec.intent(text)
-    await turn.log("gen.decide", result="ok" if intent else "failed", target_type="decider",
-                   target_id="intent", value=intent.value if intent else None,
-                   latency_ms=intent.latency_ms if intent else None,
-                   error=getattr(dec, "last_error", None) if intent is None else None)
-    if intent is None:
+    out = _Intent()
+    decision: decmod.Decision | None = None
+    if dec.name != "llm":
+        out.attempted = True
+        decision, out.error = await _jev_intent(dec, text)
+        if decision is not None:
+            out.source = "jev"
+    if decision is None:
+        decision = decmod.rule_intent(text)  # dự phòng tất định (không mạng, không model)
+        if decision is not None:
+            out.source, out.attempted = "rule", True
+    out.decision = decision
+    if decision is None:
         turn.decider = "llm"  # rơi về LLM
-        return []
-    hints.append(f"- ý định: {intent.value} ({decmod.INTENTS[intent.value]})")
-    if intent.value == "guide":
+        return out
+    if out.source == "rule":
+        turn.decider = "rule"
+        return out
+    out.hints.append(f"- ý định: {decision.value} ({decmod.INTENTS[decision.value]})")
+    if decision.value == "guide":
         candidates = [t for t in registry.load().targets.values()
                       if registry.can_see(turn.user.permissions, t.screen)]
         choice = await dec.next_target(text, candidates)
         if choice is not None:
             t = registry.resolve_target(choice.value)
             if t is not None:
-                hints.append(f"- mục tiêu nên làm sáng: {t.id} (màn {t.screen}"
-                             f"{', tab=' + t.params['tab'] if t.params and 'tab' in t.params else ''})")
-    return hints
+                out.hints.append(f"- mục tiêu nên làm sáng: {t.id} (màn {t.screen}"
+                                 f"{', tab=' + t.params['tab'] if t.params and 'tab' in t.params else ''})")
+    return out
+
+
+async def _log_decide(turn: Turn, intent: _Intent, route: str) -> None:
+    """Action Log `gen.decide` (nguồn đếm "lần tránh gọi model" của G4: `value='out_of_scope'`): thêm `route` ∈
+    {canned, fast, default} và `source` ∈ {jev, rule, llm}. Không bộ quyết định nào chạy (không Jev, quy tắc không
+    khớp) ⇒ không ghi."""
+    if not intent.attempted:
+        return
+    d = intent.decision
+    await turn.log("gen.decide", result="ok" if d else "failed", target_type="decider", target_id="intent",
+                   value=d.value if d else None, latency_ms=d.latency_ms if d else None,
+                   error=intent.error if (d is None or intent.source == "rule") else None,
+                   route=route, source=intent.source)
 
 
 async def run_turn(*, app: Any, sm: async_sessionmaker[AsyncSession], redis: Redis, router: ModelRouter,
@@ -407,23 +567,49 @@ async def _run(turn: Turn, *, app: Any, router: ModelRouter, session_token: str,
         # v0.1.50 (QD-18): Gen nhớ chỉ đi vào prompt lượt của Owner — vai trò khác không bao giờ thấy ghi chú.
         notes = await memory_notes.texts(db, user.org_id) if user.role_code == rbac.OWNER else []
     now_text = datetime.now(tz).isoformat(timespec="minutes") + f" ({tz.key})"
-    # v0.1.54 (g1-api): chỉ Owner, chỉ khi câu hỏi thuộc kiểu "em cần làm gì?" (so khớp tất định, không gọi model).
-    coach_block = await _coach_block(turn) if is_owner and coach_engine.coach_intent(inp.text) else ""
     # Tin cuối trong lịch sử là chính câu hỏi này (routes đã lưu) — bỏ ra, đưa riêng ở cuối.
     prior = history[:-1] if history and history[-1]["role"] == "user" else history
-    hints = await _hints(turn, dec, inp.text, inp)
-    messages = [Message("system", system_prompt(user, inp, hints, now_text, notes, coach_block)),
+    # Review F-22: nội dung bên ngoài (kết quả công cụ, hoặc lịch sử đã có) ⇒ không cho agy nữa (`tainted`).
+    history_tainted = _history_tainted(prior)
+    # v0.1.55 (G3, J3): ý định → câu mẫu (out_of_scope, KHÔNG gọi model) / tầng Nhanh (data đơn giản + chế độ Tự
+    # động) / đường cũ.
+    intent = await _classify(turn, dec, inp.text)
+    choice = inp.model_choice
+    auto = str((choice or {}).get("tier") or "auto") not in ROUTER_TIER
+    if intent.value == "out_of_scope":
+        await _log_decide(turn, intent, "canned")
+        await turn.emit({"kind": "say", "text": CANNED_OUT_OF_SCOPE.format(addr=turn.addr)})
+        return
+    tier: str | None = None
+    effort: str | None = None
+    route = "default"
+    if not auto:
+        async with turn.sm() as db:
+            options = await model_options(db, user.org_id, owner=is_owner, tainted=history_tainted)
+        tier, effort, notice = resolve_model_choice(choice, is_owner=is_owner, tainted=history_tainted, options=options)
+        if notice:
+            await turn.emit({"kind": "notice", "text": notice})  # chuỗi thuần — web hiện một dòng nhỏ
+    elif intent.value == "data" and decmod.is_simple_question(inp.text):
+        async with turn.sm() as db:
+            options = await model_options(db, user.org_id, owner=is_owner, tainted=history_tainted)
+        if tier_available(options, "fast"):
+            tier, route = ROUTER_TIER["fast"], "fast"
+    await _log_decide(turn, intent, route)
+    # v0.1.54 (g1-api): chỉ Owner, chỉ khi câu hỏi thuộc kiểu "em cần làm gì?" (so khớp tất định, không gọi model).
+    coach_block = await _coach_block(turn) if is_owner and coach_engine.coach_intent(inp.text) else ""
+    messages = [Message("system", system_prompt(user, inp, intent.hints, now_text, notes, coach_block)),
                 *_history_text(prior),
                 Message("user", inp.text[:4000])]
     # F-22: Antigravity CLI chỉ cho Gen của Sếp (luật cứng — gh.providers.router.AGY_OWNER_ONLY_REASON). Bộ định
     # tuyến giả (test, dữ liệu mẫu) không có tham số này và không bao giờ gọi agy → chỉ truyền cho ModelRouter thật.
-    # Review F-22: nội dung bên ngoài (kết quả công cụ, hoặc lịch sử đã có) ⇒ không cho agy nữa (`tainted`).
-    history_tainted = _history_tainted(prior)
     tainted = history_tainted
     turn_tainted = False  # lượt NÀY đã gọi công cụ trả nội dung bên ngoài
     owner = user.role_code == rbac.OWNER
     real = isinstance(router, ModelRouter)
-    route_kw = {"allow_agy": owner and not tainted} if real else {}
+    route_kw: dict[str, Any] = {"allow_agy": owner and not tainted} if real else {}
+    # v0.1.55 (G3): tầng / mức suy nghĩ đã chọn (hoặc J3 chọn Nhanh).
+    # TODO(v0155-integ): truyền tier/effort (xem _tier_kw).
+    route_kw.update(_tier_kw(router, tier, effort))
     retried = False
     for _ in range(MAX_ROUNDS):
         try:

@@ -5,10 +5,15 @@
 - `LlmDecider`: mặc định khi chưa cấu hình Jev — không gọi thêm model nào, để planner LLM (`core.gen`) tự quyết
   (tránh cộng thêm một lượt gọi model vào độ trễ mỗi câu).
 - `classify` (v0.1.25, Đợt C1): lọc đầu Hộp thư (rác / chất lượng) — `gh.refinery.triage`; None → quy tắc tất định.
+
+v0.1.55 (G3, J3): `rule_intent(text)` — quy tắc TẤT ĐỊNH dự phòng khi không có Jev (hoặc Jev lỗi / chậm / độ tin thấp):
+từ khoá code · máy chủ · chuyện ngoài lề ⇒ `out_of_scope`; câu hỏi số liệu ngắn ⇒ `data`. Không gọi mạng, không gọi
+model. `is_simple_question(text)` cho biết câu có đủ "đơn giản" để Gen dùng tầng Nhanh (chế độ Tự động).
 """
 
 import asyncio
 import logging
+import re
 import time
 import uuid
 from dataclasses import dataclass
@@ -21,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gh import crypto
 from gh.gen import jev
 from gh.gen.registry import Target
+from gh.textnorm import strip_accents
 
 log = logging.getLogger("gh.gen.decider")
 
@@ -123,3 +129,66 @@ async def load_decider(db: AsyncSession, org_id: uuid.UUID, *,
         log.error("Không giải mã được khoá Jev")
         return LlmDecider()
     return JevDecider(jev.JevClient(row.endpoint, secret, row.model_name, transport=transport))
+
+
+# ─── v0.1.55 (G3, J3): quy tắc tất định dự phòng ─────────────────────────────
+
+_NON_WORD = re.compile(r"[^a-z0-9+#]+")
+
+# Cụm (sau khi bỏ dấu, chữ thường, bỏ dấu câu) cho thấy câu hỏi ngoài phạm vi quản trị Console. Chỉ chọn cụm RÕ RÀNG
+# (lệnh viết code / thao tác máy chủ / chuyện ngoài lề) — câu hỏi cách dùng Console (kể cả về Docker, GitHub, máy chủ
+# của chính Console) KHÔNG được chặn nhầm: thà để model quyết còn hơn từ chối oan.
+_OUT_OF_SCOPE_PHRASES: tuple[str, ...] = (
+    # viết / sửa code
+    "viet code", "viet giup code", "viet ma nguon", "sua code", "sua loi code", "debug code", "lap trinh",
+    "viet ham", "viet script", "viet chuong trinh", "viet cau lenh", "cau lenh sql", "viet sql", "regex",
+    "python", "javascript", "typescript", "golang", "java", "c++", "c#", "nodejs", "reactjs",
+    # thao tác máy chủ bằng dòng lệnh
+    "ssh", "sudo", "chmod", "chown", "crontab", "systemctl", "kubectl", "terraform", "apt get", "apt install",
+    "pip install", "npm install",
+    # chuyện ngoài lề, không liên quan quản trị doanh nghiệp
+    "thoi tiet", "ke chuyen cuoi", "ke chuyen", "lam tho", "viet tho", "bai tho", "bong da", "xo so", "tu vi",
+    "nau an", "cong thuc nau",
+)
+
+# Câu hỏi số liệu: có cụm đếm … và KHÔNG có từ chỉ việc ghi / phân tích / hướng dẫn.
+_COUNT_PHRASES: tuple[str, ...] = ("bao nhieu", "co may", "may khach", "may viec", "may don", "so luong", "tong so")
+_NOT_SIMPLE_WORDS: tuple[str, ...] = (
+    "so sanh", "phan tich", "vi sao", "tai sao", "de xuat", "soan", "viet", "gui", "nhac", "giao", "tao", "bao cao",
+    "tom tat", "huong dan", "lam sao", "lam the nao", "cach", "chi cho", "chi toi", "o dau", "ghi nho", "ghi vao",
+    "xoa", "sua", "doi", "dat lai", "duyet", "tra loi", "nho giup",
+)
+SIMPLE_MAX_WORDS = 14
+SIMPLE_MAX_CHARS = 100
+
+
+def _norm(text: str) -> str:
+    return _NON_WORD.sub(" ", strip_accents(text or "").lower()).strip()
+
+
+def _has_phrase(norm: str, phrases: tuple[str, ...]) -> bool:
+    padded = f" {norm} "
+    return any(f" {p} " in padded or (not p[-1].isalnum() and f" {p}" in padded) for p in phrases)
+
+
+def is_simple_question(text: str) -> bool:
+    """Câu ngắn (≤ 14 từ, ≤ 100 ký tự), không có từ chỉ việc ghi / phân tích / hướng dẫn — đủ nhẹ cho tầng Nhanh."""
+    t = (text or "").strip()
+    norm = _norm(t)
+    if not norm or len(t) > SIMPLE_MAX_CHARS or len(norm.split()) > SIMPLE_MAX_WORDS:
+        return False
+    return not _has_phrase(norm, _NOT_SIMPLE_WORDS)
+
+
+def rule_intent(text: str) -> Decision | None:
+    """Ý định bằng quy tắc TẤT ĐỊNH (không mạng, không model) — dự phòng khi không có Jev hoặc Jev lỗi / chậm / độ tin
+    thấp. `out_of_scope`: câu có cụm code / máy chủ / ngoài lề. `data`: câu số liệu NGẮN ("có bao nhiêu khách mới?").
+    Không khớp ⇒ None (đi đường LLM như cũ). `Decision.source == "rule"`, độ tin 1.0, độ trễ 0."""
+    norm = _norm(text)
+    if not norm:
+        return None
+    if _has_phrase(norm, _OUT_OF_SCOPE_PHRASES):
+        return Decision("out_of_scope", 1.0, 0, "rule")
+    if _has_phrase(norm, _COUNT_PHRASES) and is_simple_question(text):
+        return Decision("data", 1.0, 0, "rule")
+    return None
