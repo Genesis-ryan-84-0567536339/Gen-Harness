@@ -2299,7 +2299,14 @@ jobs:
         if: needs.resolve.outputs.mode == 'pr'
         # Như e2e-install: chế độ pr kiểm CODE của PR (kể cả ảnh api/web). GENH_COMPOSE_FILE phải có trong môi
         # trường LÚC `genh install` chạy để unit lịch đêm mang nó theo (lịch chạy ngoài phiên shell).
-        run: echo "GENH_COMPOSE_FILE=$GITHUB_WORKSPACE/deploy/compose.yaml" >>"$GITHUB_ENV"
+        run: |
+          set -euo pipefail
+          echo "GENH_COMPOSE_FILE=$GITHUB_WORKSPACE/deploy/compose.yaml" >>"$GITHUB_ENV"
+          # `--port` của genh chỉ là cổng genh gọi /api/v1/ready; cổng proxy thật do compose đọc từ GH_PORT (mặc định
+          # 8443). Lịch đêm và trình nhận yêu cầu chạy NGOÀI phiên shell nên không có biến GH_PORT của job — máy Owner
+          # dùng cổng khác phải để GH_PORT trong .env cạnh compose.yaml (genh giữ nguyên các dòng lạ khi ghi .env),
+          # nếu không bản cập nhật tạo lại proxy ở 8443 và /ready ở cổng đã cài không bao giờ xanh (tự quay về bản cũ).
+          printf 'GH_PORT=%s\n' "$GH_PORT" >"$GITHUB_WORKSPACE/deploy/.env"
 
       # ── Chế độ "pr": build genh từ source, ghim compose.release.yaml đã publish (như e2e-install) ────────
       - name: (pr) Cài Go
