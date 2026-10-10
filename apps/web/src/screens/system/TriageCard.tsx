@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Button, Switch, TextField } from '@gen-harness/ui';
+import { DefaultControls } from '../../defaults/ResetButton';
 import { errorText } from '../../lib/errorText';
 import { useMe } from '../../lib/queries';
 import { CardError, InlineError, Panel, SkeletonLines } from '../common';
@@ -35,7 +36,7 @@ export function TriageCard() {
   };
 
   return (
-    <Panel title="Lọc tin" kicker="Đánh dấu tin trùng, rác, điểm thấp — bật 'Ẩn rác & trùng' ở Hộp thư để ẩn" label="Lọc tin" genTarget="system.brain.triage" bodyClass="jev-body">
+    <Panel title="Lọc tin" kicker="Đánh dấu tin trùng, rác, điểm thấp — bật 'Ẩn rác & trùng' ở Hộp thư để ẩn" label="Lọc tin" genTarget="system.brain.triage" bodyClass="jev-body" aside={isOwner ? <DefaultControls itemKey="triage" /> : undefined}>
       {settings.isPending ? (
         <SkeletonLines rows={3} padding="0" />
       ) : settings.isError ? (

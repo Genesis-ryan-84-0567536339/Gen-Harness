@@ -10,12 +10,38 @@
  */
 import type { ApiClient } from './client';
 import type { AgentBinding } from './p4-agents';
+import type { Effort } from './phase2';
+
+/** v0.1.55 (G1): dòng gán model — thêm `effort` (mức suy nghĩ riêng của vai; null = theo hồ sơ tiêu chuẩn / model). */
+export type BindingWithEffort = AgentBinding & { effort?: Effort | null };
+
+/**
+ * v0.1.55 (G1): model "Chuẩn" đang phủ một vai khi Owner chưa gán (hồ sơ tiêu chuẩn theo vai —
+ * `gh/defaults/profiles.py`). Chỉ chuỗi/số/null; máy chủ cũ không có trường này.
+ */
+export interface StandardPick {
+  model_name: string;
+  provider_name: string;
+  tier: 'fast' | 'balanced' | 'strong';
+  /** Nhanh / Cân bằng / Kỹ hơn. */
+  tier_label: string;
+  effort: Effort | null;
+  temperature: number;
+  context_tokens: number;
+}
 
 export interface AgentBindingSlot {
   agent_key: string;
   label: string;
   /** v0.1.38 (F-22): lý do không dùng được nằm trong `binding.blocked_reason` (xem AgentBinding). */
-  binding: AgentBinding | null;
+  binding: BindingWithEffort | null;
+  /**
+   * v0.1.55 (G1): `custom` = Owner đã gán (có dòng) · `standard` = chưa gán, dùng hồ sơ tiêu chuẩn. Máy chủ cũ không có
+   * trường này ⇒ suy từ `binding` (có = custom).
+   */
+  source?: 'custom' | 'standard';
+  /** v0.1.55 (G1): model hồ sơ đang phủ khi chưa có dòng gán; null = chưa có nguồn phù hợp. */
+  standard?: StandardPick | null;
 }
 
 export interface BindableModel {
@@ -35,6 +61,8 @@ export interface BindingSetBody {
   temperature?: number;
   context_tokens?: number;
   rule_codes?: string[];
+  /** v0.1.55 (G1): mức suy nghĩ theo vai (422 `effort` khi model không nhận mức đó). Bỏ trống = theo hồ sơ tiêu chuẩn. */
+  effort?: Effort | null;
 }
 
 export interface FailoverRule {
@@ -77,7 +105,7 @@ export function agentModelEndpoints(r: ApiClient['request']) {
     bindings: {
       list: (signal?: AbortSignal) => r<BindingsPage>('/agents/bindings', { signal }),
       set: (agentKey: string, body: BindingSetBody) =>
-        r<{ agent_key: string; label: string; binding: AgentBinding }>(`/agents/bindings/${enc(agentKey)}`, { method: 'PUT', body }),
+        r<{ agent_key: string; label: string; binding: BindingWithEffort; source?: 'custom'; standard?: null }>(`/agents/bindings/${enc(agentKey)}`, { method: 'PUT', body }),
       remove: (agentKey: string) => r<void>(`/agents/bindings/${enc(agentKey)}`, { method: 'DELETE' }),
     },
     failoverRules: (signal?: AbortSignal) => r<FailoverRule[]>('/failover-rules', { signal }),

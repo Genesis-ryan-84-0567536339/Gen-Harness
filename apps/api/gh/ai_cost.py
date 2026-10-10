@@ -32,7 +32,10 @@ from gh.providers.cli import CLI_KINDS
 # F-25: khoá cũ đã đổi tên — chi phí đã ghi theo khoá cũ vẫn hiện nhãn tiếng Việt, không hiện mã thô. Khoá cũ
 # core.intent/core.scoring/core.indexing (không còn dùng) giữ fallback: hiện chính khoá.
 # Nhãn có hậu tố "(cũ)" để ngày nâng cấp không có hai dòng cùng nhãn trong bảng chi phí (day_cost gộp theo agent_key).
-LEGACY_AGENT_LABELS: dict[str, str] = {"core.reply_fast": "Soạn lại / dịch nháp (cũ)"}
+# v0.1.55 (G1): `core.briefing` (Bản tin Gen, việc nền riêng) đã nằm trong CORE_AGENT_KEYS; giữ thêm ở đây để nhãn tiếng
+# Việt không phụ thuộc thứ tự tra cứu. Lượt gọi cũ của Bản tin (dưới khoá core.gen) vẫn hiện "Gen — trợ lý quản trị".
+# KHÔNG đặt giá mặc định cho model nào (xem đầu tệp).
+LEGACY_AGENT_LABELS: dict[str, str] = {"core.reply_fast": "Soạn lại / dịch nháp (cũ)", "core.briefing": "Bản tin Gen"}
 
 VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 TIMEZONE = "Asia/Ho_Chi_Minh"
