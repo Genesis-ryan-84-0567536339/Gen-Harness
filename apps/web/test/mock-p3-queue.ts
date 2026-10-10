@@ -558,6 +558,11 @@ export function createMock(opts: P3Options) {
       setTasks: (rows: Task[]) => {
         tasks = rows;
       },
+      /** e2e (F-R9): đặt Jev "đã có khoá" hay chưa — `false` ⇒ benchmark / enable trả 409 JEV_KEY_MISSING như API. */
+      jevKey: (b: { on?: boolean } = {}) => {
+        jevKey = b.on !== false;
+        return { jev_key: jevKey };
+      },
     } as Record<string, (...args: never[]) => unknown>,
     dispose: () => {},
   };
