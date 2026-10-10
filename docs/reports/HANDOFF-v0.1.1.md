@@ -1,4 +1,4 @@
-# Bàn giao Gen-Harness — hiện trạng + việc dở (cập nhật 10/10/2026, bản v0.1.52)
+# Bàn giao Gen-Harness — hiện trạng + việc dở (cập nhật 10/10/2026, bản v0.1.53)
 
 File này nay chỉ ghi **hiện trạng + việc dở** (tên cũ `HANDOFF-v0.1.1.md` giữ nguyên vì mã nguồn có chú thích trỏ tới).
 Lịch sử từng bản nằm ở [CHANGELOG.md](../../CHANGELOG.md) (3–5 dòng/bản) và `docs/releases/vX.Y.Z.md` (chi tiết, chuyển nguyên từ HANDOFF cũ):
@@ -20,14 +20,14 @@ Còn hiệu lực từ v0.1.1 (vai trò DB, volume, gói hồ sơ); chi tiết �
 - **Gói hồ sơ `.ghbundle`**: Python tạo/đọc (`python -m gh.bundle export|import`), Go chỉ chuyển bytes; mật khẩu qua `GH_BUNDLE_PASSWORD` (≥ 12 ký tự);
   mã thoát `0` ok · `2` sai mật khẩu/gói hỏng · `3` không tương thích · `1` lỗi khác; mã hoá lại mọi bí mật bằng khoá master máy đích.
 
-## Hiện trạng (v0.1.52)
+## Hiện trạng (v0.1.53)
 
-Bản mới nhất **v0.1.52** (10/10/2026, `VERSION` = v0.1.52): **bản phản ứng lần 2 thay v0.1.51 chưa promote** — `genh` đã gỡ digest cũ nhưng Docker từ chối (mọi digest cùng repo là MỘT tham chiếu khi ảnh đang chạy);
-`pruneOldImages` nay dùng `rmi -f` chỉ cho digest mà ảnh còn được tham chiếu giữ ([v0.1.52.md](../releases/v0.1.52.md)). v0.1.52 chứa toàn bộ v0.1.51 và v0.1.50; bản chạy trên máy Boss: v0.1.49.
+Bản mới nhất **v0.1.53** (10/10/2026, `VERSION` = v0.1.53): **bản phản ứng "tự cập nhật đêm tự lành + trung thực"** — máy Boss đứng ở v0.1.44 từ 03/10 đến 09/10 vì lịch đêm bị tắt mà không ai biết ([v0.1.53.md](../releases/v0.1.53.md)).
+v0.1.53 chứa toàn bộ v0.1.52 (gỡ digest cũ bằng `rmi -f`, [v0.1.52.md](../releases/v0.1.52.md)), v0.1.51 và v0.1.50; bản chạy trên máy Boss: v0.1.49.
 Đang chạy, theo nhóm:
 
 - **Cài đặt & vận hành (genh)**: cài một lệnh; `genh update` an toàn (tải trước, sao lưu, migrate, tự quay về bản cũ khi lỗi, khoá `genh.lock`, báo "bị dừng giữa chừng");
-  lịch đêm ~03:00 chỉ nhận bản chính thức đủ 24 giờ; `genh export/import`, `genh offsite` (bản sao tuần ra USB/NAS), `genh remote` (Tailscale/Cloudflare/LAN/local),
+  lịch đêm ~03:00 **tự lành** (bật lại khi mất/tắt/không chạy, trừ khi Sếp đã chủ động tắt), `genh auto-update status` nói thật, chọn bản cao nhất đã đủ 24 giờ; `genh export/import`, `genh offsite` (bản sao tuần ra USB/NAS), `genh remote` (Tailscale/Cloudflare/LAN/local),
   trực canh 12 phút → Telegram, gói chẩn đoán. Cổng mặc định chỉ nghe 127.0.0.1 (máy cũ giữ 0.0.0.0 + một chuông nhắc).
 - **Phát hành & CI**: xem "Quy trình phát hành" dưới; ảnh ghim digest, `uv.lock --frozen`, action ghim SHA, quét bảo mật dạng báo cáo, `check_*` trong `.github/scripts`.
 - **Console**: 11 dịch vụ compose (`proxy web migrate api worker bridge browser browser-redis browser-egress db redis`); menu 6 mục + Nâng cao; trình thiết lập; Hướng dẫn thiết lập;
@@ -52,16 +52,31 @@ Bản mới nhất **v0.1.52** (10/10/2026, `VERSION` = v0.1.52): **bản phản
   browser 43; `go test ./...` xanh; unittest `.github/scripts` 120 + `check_doc_links.py`, `check_release_gate.py`, `check_embedded_sync.py`, `check_workflow_hygiene.py`, `check_no_fake_ids.py` xanh.
 - **Boss cần làm**: xem "Boss phải làm — v0.1.50" dưới (tick `kho_create`, `kho_update` ở Gen-hub → Kiểm tra → duyệt Phiên đầu tiên → thử Gen nhớ). Chi tiết: [v0.1.50.md](../releases/v0.1.50.md).
 
+## v0.1.53 — Tự cập nhật đêm tự lành + trung thực
+
+- **Vì sao** (F-93…F-100): máy Boss kẹt v0.1.44 từ 03/10 đến 09/10; `genh auto-update status` in TẮT (đọc sai `is-enabled` thoát ≠ 0), Console chỉ nói "chưa nhận yêu cầu". Điều tra: **H-a tái hiện bằng mã** (bản cài phụ gỡ/ghi đè lịch dùng chung), **H-c tái hiện** (status in sai),
+  **H-b không tái hiện được bằng mã** (chờ E2E systemd thật); chưa chỉ ra được nguyên nhân gốc đêm 03/10 ngoài H-a ⇒ bản này làm lịch **tự lành** cho mọi nguyên nhân.
+- **Thay đổi**: `genh update` tự bật lại lịch đêm (dấu `config/auto-update-disabled.json` = Sếp đã chủ động tắt thì không); `status` đủ 5 thông tin + cảnh báo log im > 36 giờ; kiểm linger sau `enable-linger`; lịch đêm chọn bản cao nhất đã đủ 24 giờ trong 10 bản gần nhất;
+  `ConsumeRequest` không nuốt lỗi xoá (**GH-E94C**, chờ khoá > 30 phút ⇒ GH-E94A); unit đêm có `--install-dir`/`--port`/`GEN_HARNESS_HOME`, `StartLimit`/`TriggerLimit`, bản cài phụ không đụng lịch bản chính; `run/nightly-status.json`;
+  API `stalled_reason` `linger_off`/`watcher_failed`, `nightly_candidates`, `nightly`, khối `nightly` + sự cố `host.nightly` (ngưỡng 36 giờ); Console nói nguyên nhân + dòng "Tự cập nhật đêm"; E2E `e2e-nightly-real` chạy thật timer/`.path` có linger, bắt buộc trước promote.
+- **Kiểm tra**: `go test ./...` (genh) xanh; pytest/vitest/Playwright của gói api-web và URL lượt E2E kiểm ngược: xem "Kiểm tra" ở [v0.1.53.md](../releases/v0.1.53.md). Vận hành: [05-installer.md](../handoff/05-installer.md) mục "Lịch tự cập nhật đêm tự lành và trung thực".
+
 ## Quy trình phát hành & cổng
 
 1. Nhánh làm việc → PR vào `main`; CI xanh thì tự merge squash (Boss đã cho phép), sau đó **nối lịch sử main vào nhánh bằng merge** (không reset/force-push).
-2. Tăng `VERSION` ⇒ `release.yml`: CI chạy trước → Release dạng **bản thử** (prerelease) → `e2e-install` + mọi ô `e2e-upgrade` + `e2e-rollback` xanh → **promote** thành bản chính thức (latest);
+2. Tăng `VERSION` ⇒ `release.yml`: CI chạy trước → Release dạng **bản thử** (prerelease) → `e2e-install` + mọi ô `e2e-upgrade` + `e2e-rollback` + `e2e-nightly-real` (v0.1.53) xanh → **promote** thành bản chính thức (latest);
    lịch đêm đợi thêm 24 giờ. Chi tiết: `docs/handoff/05-installer.md` mục "Cổng phát hành".
 3. Báo Boss "đã phát hành" chỉ sau khi **kiểm genh tải về** (checksum + `genh version` khớp tag) và `releases/latest` là đúng tag mới. Promote tay (`skip_e2e`) chỉ khi E2E lỗi ngoài mã.
 4. Mỗi bản ghi: [CHANGELOG.md](../../CHANGELOG.md) (3–5 dòng) + `docs/releases/vX.Y.Z.md`; file này chỉ cập nhật hiện trạng + việc dở (≤ 200 dòng, có test).
 5. Bật bảo vệ nhánh `main` + tag `v*` (cần quyền admin repo, ~2 phút): xem [v0.1.33.md](../releases/v0.1.33.md). Không thêm `paths-ignore: docs/**` cho `ci.yml`.
 
 ## Việc dở
+
+### Boss phải làm — v0.1.53 (một lần, ~2 phút, sau khi máy lên v0.1.53; chi tiết ở [v0.1.53.md](../releases/v0.1.53.md))
+
+1. Trên máy chủ chạy `genh auto-update status`: dòng đầu phải là **BẬT**, "Linger: có", có "Lần kế tiếp". Thấy **BẬT NHƯNG KHÔNG CHẠY** hoặc **TẮT** mà Sếp không tắt ⇒ `genh auto-update enable` (Linger KHÔNG ⇒ chạy trước `sudo loginctl enable-linger $USER`).
+2. Sáng hôm sau, Console › Tổng quan › Sức khoẻ hệ thống: dòng **Tự cập nhật đêm** ghi "Bình thường · chạy lần cuối …". Có chuông "Lịch tự cập nhật đêm chưa chạy N ngày" ⇒ bấm **Xem cách bật lại**.
+3. Xem timer bằng tay: `systemctl --user list-timers --all | grep gen-harness` (không phải `grep genh`). Muốn tắt hẳn tự cập nhật: `genh auto-update disable` (genh nhớ là Sếp đã tắt, không tự bật lại).
 
 ### Boss phải làm — v0.1.50 (một lần, ~3 phút, sau khi máy tự cập nhật; chi tiết ở [v0.1.50.md](../releases/v0.1.50.md))
 
@@ -87,7 +102,8 @@ Bản mới nhất **v0.1.52** (10/10/2026, `VERSION` = v0.1.52): **bản phản
 
 ### Claude / điều phối viên còn dở
 
-- **Phát hành v0.1.52** (thay v0.1.51 chưa promote): nhánh `claude/hotfix-prune-digest-2` → PR vào main → CI xanh → merge → E2E cài thật + nâng cấp → kiểm genh tải về (checksum/version) → báo Boss. Boss làm theo "Boss phải làm — v0.1.50" dưới (v0.1.52 chứa toàn bộ v0.1.50).
+- **Phát hành v0.1.53** (gộp luôn v0.1.52, v0.1.51, v0.1.50 nếu các bản đó chưa promote): nhánh `claude/v0153` → PR vào main → CI xanh → merge → E2E cài thật + nâng cấp + `e2e-nightly-real` → promote → kiểm genh tải về (checksum/version) → báo Boss. Ghi URL lượt kiểm ngược vào "Kiểm tra" của [v0.1.53.md](../releases/v0.1.53.md).
+- **H-b còn mở**: chưa tái hiện được bằng mã việc timer đêm mất lịch khi `daemon-reload`/`enable` chạy từ bên trong service đêm; nếu `e2e-nightly-real` bắt được thì ghi vào v0.1.53.md.
 - **PR Renovate** không tự merge nằm chờ tới khi Boss nhắn "xử lý PR phụ thuộc"; chưa có lịch tự động nào gọi Claude.
 - **Selector ghi Facebook** mới kiểm trên trang mẫu — chờ nghiệm thu thật (dòng 8). Chuông phiên hết có thể hiện hai lần (`social.paused` + `social.session_expired`), gộp ở bản sau nếu phiền.
 - **Giới hạn đã biết**: TOTP chưa làm; Redis lỗi ⇒ giới hạn đăng nhập tạm không áp; gói apt trong Dockerfile chưa ghim phiên bản; tag GHCR `:latest` cũ đứng yên (không dùng).
