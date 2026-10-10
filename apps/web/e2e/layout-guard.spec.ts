@@ -103,6 +103,12 @@ const EXTRA_ROUTES = [
   '/account',
   '/social',
   '/social/ghi-facebook',
+  // v0.1.55 (G5): Mặt tiền Owner — 5 màn mobile-first (không thuộc screens.json nên liệt kê tay).
+  '/owner',
+  '/owner/quan-he',
+  '/owner/viec',
+  '/owner/gen',
+  '/owner/them',
 ];
 
 /** Màn trong cây SCREENS (trừ Hồ sơ sống — cần ?id=, thêm riêng bên dưới). */
