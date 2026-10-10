@@ -30,7 +30,7 @@
  *   còn lại                        → lời chào + gợi ý
  */
 import { randomUUID } from 'node:crypto';
-import type { GenBriefingSection, GenMessage, GenProposal, GenRating, GenStep } from '../../../packages/contracts/src/gen';
+import type { GenBriefingSection, GenMessage, GenModelOptions, GenModelTier, GenProposal, GenRating, GenStep } from '../../../packages/contracts/src/gen';
 import type { GenExtra } from './mock-gen-v0150';
 import type { WriteOutcome, WriteRequest } from './mock-social';
 import type { DraftDetail } from '../../../packages/contracts/src/p3-core';
@@ -155,6 +155,36 @@ export function briefingContent(slotLabel: string, slotIso: string, needsApiKey:
 }
 
 const OWNER_ID = USER_IDS.owner;
+
+/**
+ * v0.1.55 (G3): `GET /gen/settings` → `model_options` mẫu (hợp đồng `choice_options` của G1): bốn tầng dùng được, "Kỹ hơn" có đủ
+ * ba mức suy nghĩ (Thấp/Vừa/Cao). Hook `modelOptions` ({deep?: false, balanced?: false}) khoá tầng để thử nút bị khoá + dòng hạ về Tự động.
+ */
+export function sampleModelOptions(off: { deep?: boolean; balanced?: boolean } = {}): GenModelOptions {
+  return {
+    tiers: [
+      { tier: 'auto', available: true, efforts: [] },
+      { tier: 'fast', available: true, efforts: [] },
+      { tier: 'balanced', available: off.balanced !== false, efforts: [] },
+      { tier: 'deep', available: off.deep !== false, efforts: off.deep === false ? [] : ['low', 'medium', 'high'] },
+    ],
+  };
+}
+
+const MODEL_TIERS: readonly string[] = ['auto', 'fast', 'balanced', 'deep'];
+const MODEL_EFFORTS: readonly string[] = ['low', 'medium', 'high'];
+/** Đúng câu máy chủ (`gh.gen.routes.MODEL_CHOICE_INVALID_TITLE`). */
+export const MODEL_CHOICE_INVALID_TITLE = 'Lựa chọn model không hợp lệ — em dùng chế độ Tự động nhé';
+const TIER_NAME: Record<string, string> = { fast: 'Nhanh', balanced: 'Cân bằng', deep: 'Kỹ hơn' };
+
+/** Kiểm `model_choice` như `ModelChoiceIn` của máy chủ: tier ∈ auto|fast|balanced|deep, effort ∈ low|medium|high|null. */
+export function modelChoiceValid(v: unknown): boolean {
+  if (v === undefined || v === null) return true;
+  if (typeof v !== 'object' || Array.isArray(v)) return false;
+  const o = v as { tier?: unknown; effort?: unknown };
+  if (o.tier !== undefined && !(typeof o.tier === 'string' && MODEL_TIERS.includes(o.tier))) return false;
+  return o.effort === undefined || o.effort === null || (typeof o.effort === 'string' && MODEL_EFFORTS.includes(o.effort));
+}
 
 /** Thẻ gửi Facebook (v0.1.47): trả lời bình luận hoặc nhắn tin; `suspicious` → nhãn cảnh báo lừa đảo. */
 export function socialWriteProposal(
@@ -319,6 +349,10 @@ function makeGenDraft(code: string, title: string, text: string, userLabel: stri
 export function createMock(opts: MockGenOptions) {
   const stepMs = opts.stepMs ?? 350;
   const settings = { enabled: true, roles: ['owner'], retention_days: 90 };
+  /** v0.1.55 (G3): `model_options` đang trả cho khung chat (hook `modelOptions` đổi được). */
+  let modelOptions: GenModelOptions = sampleModelOptions();
+  /** v0.1.55 (G3): thân `POST /gen/turns` gần nhất (đã qua kiểm `model_choice`) — e2e đọc qua hook `lastTurnBody`. */
+  let lastTurnBody: { text: string; conversation_id: string | null; model_choice: unknown } | null = null;
   const conversations = new Map<string, Conversation>();
   const turns = new Map<string, Turn>();
   const proposals = new Map<string, GenProposal>();
@@ -371,6 +405,14 @@ export function createMock(opts: MockGenOptions) {
     });
   }
 
+  /** Như `engine.resolve_model_choice`: tầng đã chọn mà `model_options` báo không dùng được ⇒ hạ về Tự động + một dòng giải thích. */
+  function modelChoiceNotice(choice: unknown): string | null {
+    const tier = (choice as { tier?: GenModelTier } | null | undefined)?.tier;
+    if (!tier || tier === 'auto') return null;
+    const row = modelOptions.tiers.find((r) => r.tier === tier);
+    return row?.available ? null : `Em dùng chế độ Tự động vì mức “${TIER_NAME[tier]}” chưa có nguồn AI nào phục vụ.`;
+  }
+
   function handle(ctx: P2Ctx): boolean {
     const { method: m, path: p, body, reply, problem } = ctx;
     if (!p.startsWith('/gen/')) return false;
@@ -382,7 +424,7 @@ export function createMock(opts: MockGenOptions) {
         if (typeof body.enabled === 'boolean') settings.enabled = body.enabled;
         if (typeof body.retention_days === 'number') settings.retention_days = body.retention_days;
       }
-      return reply(200, { ...settings, available: settings.enabled && settings.roles.includes(ctx.role), decider: 'llm' });
+      return reply(200, { ...settings, available: settings.enabled && settings.roles.includes(ctx.role), decider: 'llm', model_options: modelOptions });
     }
     if (!available) return problem(403, 'GEN_DISABLED', 'Gen chưa bật cho vai trò này');
     if (seg[1] === '__mock' && seg[2] === 'briefing' && m === 'POST') return reply(200, makeBriefing(body));
@@ -416,6 +458,13 @@ export function createMock(opts: MockGenOptions) {
     if (seg[1] === 'turns' && seg.length === 2 && m === 'POST') {
       const text = String(body.text ?? '').trim();
       if (!text) return problem(422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors: { text: 'Nhập câu hỏi' } });
+      // v0.1.55 (G3): `model_choice` sai tập giá trị ⇒ 422 problem+json thân thiện (như `ModelChoiceIn` của máy chủ thật).
+      if (!modelChoiceValid(body.model_choice)) {
+        return problem(422, 'MODEL_CHOICE_INVALID', MODEL_CHOICE_INVALID_TITLE, {
+          detail: 'Trường không hợp lệ: model_choice. tier ∈ auto | fast | balanced | deep; effort ∈ low | medium | high (hoặc bỏ trống).',
+        });
+      }
+      lastTurnBody = { text, conversation_id: body.conversation_id ? String(body.conversation_id) : null, model_choice: body.model_choice ?? null };
       const now = new Date().toISOString();
       let conv = body.conversation_id ? conversations.get(String(body.conversation_id)) : undefined;
       if (body.conversation_id && !conv) return problem(404, 'NOT_FOUND', 'Không tồn tại');
@@ -426,7 +475,9 @@ export function createMock(opts: MockGenOptions) {
       const turn: Turn = { turn_id: randomUUID(), conversation_id: conv.id, status: 'running', steps: [] };
       conv.messages.push({ id: randomUUID(), role: 'user', turn_id: turn.turn_id, content: { text }, created_at: now });
       turns.set(turn.turn_id, turn);
-      run(turn, conv, script(text, opts.social?.writeContext(), opts.extra));
+      const scripted = script(text, opts.social?.writeContext(), opts.extra);
+      const notice = modelChoiceNotice(body.model_choice);
+      run(turn, conv, notice ? [{ kind: 'notice', text: notice }, ...scripted] : scripted);
       return reply(202, { turn_id: turn.turn_id, conversation_id: conv.id });
     }
     if (seg[1] === 'turns' && seg.length === 3 && m === 'GET') {
@@ -504,6 +555,14 @@ export function createMock(opts: MockGenOptions) {
     hooks: {
       settings: () => settings,
       script: (b: unknown) => script(String((b as { text?: string })?.text ?? '')),
+      /** v0.1.55 (G3): thân `POST /gen/turns` gần nhất (`{text, conversation_id, model_choice}`; null nếu chưa có) — e2e/dev đọc. */
+      lastTurnBody: () => lastTurnBody,
+      /** v0.1.55 (G3): đổi `model_options` của `/gen/settings`: `{deep?: false, balanced?: false}` khoá tầng; `{}` trả về mẫu đầy đủ. */
+      modelOptions: (b: unknown) => {
+        const o = (b ?? {}) as { deep?: unknown; balanced?: unknown };
+        modelOptions = sampleModelOptions({ deep: o.deep === false ? false : undefined, balanced: o.balanced === false ? false : undefined });
+        return modelOptions;
+      },
       /** v0.1.41 (F-8): worker Bản tin Gen tới giờ (như `POST /gen/__mock/briefing`). */
       briefing: (b: unknown) => makeBriefing((b ?? {}) as { slot?: unknown; needs_api_key?: unknown; hub?: unknown }),
       /**
