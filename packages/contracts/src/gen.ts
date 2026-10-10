@@ -249,6 +249,11 @@ export type GenStep =
   | { kind: 'ui'; action: UiAction }
   | { kind: 'suggest'; items: Suggestion[] }
   | { kind: 'proposal'; proposal: GenProposal }
+  /**
+   * v0.1.55 (G3): thông báo của HỆ THỐNG (không phải lời model), luôn là chuỗi — vd "Em dùng chế độ Tự động vì mức “Kỹ hơn” chưa
+   * có nguồn AI phù hợp …" khi lựa chọn model của khung chat phải hạ về Tự động. Không vào lịch sử gửi cho model.
+   */
+  | { kind: 'notice'; text: string }
   | { kind: 'done' };
 
 /** Bước server đẩy xuống web (đã kiểm). `tool` chỉ báo tên — kết quả không gửi về trình duyệt. */
@@ -280,10 +285,40 @@ export interface GenTurnContext {
   visible_targets: string[];
 }
 
+/** v0.1.55 (G3): tầng model của khung chat — Tự động (chuẩn) · Nhanh · Cân bằng · Kỹ hơn ('deep' ↔ tầng 'strong' của bộ định tuyến). */
+export type GenModelTier = 'auto' | 'fast' | 'balanced' | 'deep';
+/** Mức suy nghĩ: Thấp / Vừa / Cao. */
+export type GenModelEffort = 'low' | 'medium' | 'high';
+
+/**
+ * v0.1.55 (G3): lựa chọn model của khung chat, gửi kèm `POST /gen/turns` (`GenTurnBody.model_choice`; web BỎ trường này khi
+ * `tier === 'auto'`). Giá trị lạ ⇒ 422 MODEL_CHOICE_INVALID ("Lựa chọn model không hợp lệ — em dùng chế độ Tự động nhé").
+ * `effort` chỉ có nghĩa khi tầng được chọn hỗ trợ (máy chủ bỏ mức không hỗ trợ).
+ */
+export interface ModelChoice {
+  tier: GenModelTier;
+  effort?: GenModelEffort;
+}
+
+/** Một tầng trong `GenSettings.model_options` (hợp đồng `gh.defaults.profiles.choice_options`, G1 → G3). */
+export interface GenModelOption {
+  tier: GenModelTier;
+  /** Có dùng được cho NGƯỜI NÀY (nhân viên không dùng Antigravity CLI) trong hội thoại mới. */
+  available: boolean;
+  /** Mức suy nghĩ mà các model của tầng này hỗ trợ (⊆ low/medium/high); rỗng ⇒ ẩn hàng "Mức suy nghĩ". */
+  efforts: GenModelEffort[];
+}
+
+export interface GenModelOptions {
+  tiers: GenModelOption[];
+}
+
 export interface GenTurnBody {
   conversation_id?: string | null;
   text: string;
   context: GenTurnContext;
+  /** v0.1.55 (G3): bỏ khi Tự động (chuẩn). */
+  model_choice?: ModelChoice;
 }
 
 export interface GenConversation {
@@ -357,7 +392,12 @@ export interface GenSettings {
   available: boolean;
   /** Có nguồn Jev (System One) đang bật — Gen dùng làm bộ quyết định nhanh. */
   decider: 'jev' | 'llm';
+  /** v0.1.55 (G3): tầng + mức suy nghĩ khung chat được mời chọn; máy chủ cũ không gửi ⇒ khung chat coi mọi tầng là dùng được. */
+  model_options?: GenModelOptions;
 }
+
+/** Tên gọi khác của cấu hình Gen (`GET /gen/settings`). */
+export type GenConfig = GenSettings;
 
 export type TourOutcome = 'done' | 'skipped' | 'target_missing';
 

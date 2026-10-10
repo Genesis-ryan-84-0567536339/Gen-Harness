@@ -3,6 +3,7 @@
  * song song hỏi `GET /gen/turns/{id}` mỗi 1,2 s tới khi xong — WS rớt thì câu trả lời vẫn tới. Hai nguồn ghép theo
  * `seq`, bước `ui` chỉ thực thi MỘT lần và tuần tự (mở trang xong mới làm sáng).
  */
+import { useQuery } from '@tanstack/react-query';
 import { ApiError, type GenBriefingSection, type GenDoneEvent, type GenMessage, type GenRating, GenStep, GenStepEvent, GenTurn } from '@gen-harness/contracts';
 import { api } from '../lib/api';
 import { errorDetail, errorText } from '../lib/errorText';
@@ -12,8 +13,22 @@ import { onRealtimeEvent } from '../lib/realtime';
 import { toast } from '../lib/toast';
 import { currentScreenKey, executeUiAction, visibleTargets } from './director';
 import { mergeStep, useGenStore, type GenChatMessage } from './genStore';
+import { AUTO_CHOICE, loadChoice, saveChoice, toBody } from './modelChoice';
 
 export const POLL_MS = 1200;
+
+/** v0.1.55 (G3): khoá cache của `GET /gen/settings` (có `model_options`) — một lần tải, dùng chung mọi lần mở khung Gen. */
+export const GEN_SETTINGS_KEY = ['gen', 'settings'] as const;
+
+/**
+ * `model_options` của máy chủ (tầng nào dùng được cho người này, mức suy nghĩ nào tầng đó hỗ trợ) cho thẻ chọn model. Lỗi /
+ * máy chủ cũ không gửi ⇒ `undefined` ⇒ khung chat coi mọi tầng là dùng được (máy chủ vẫn hạ về Tự động kèm một dòng giải
+ * thích nếu không được).
+ */
+export function useGenModelOptions() {
+  const q = useQuery({ queryKey: GEN_SETTINGS_KEY, queryFn: ({ signal }) => api.gen.settings(signal), staleTime: 60_000, retry: false });
+  return q.data?.model_options;
+}
 
 let queue: Promise<void> = Promise.resolve();
 const polling = new Set<string>();
@@ -80,12 +95,17 @@ export async function sendQuestion(text: string, userId: string | null = current
   const st = useGenStore.getState();
   const localId = `u-${Date.now()}`;
   useGenStore.setState({ busy: true, messages: [...st.messages, { id: localId, role: 'user', text: q, steps: [] }] });
+  // v0.1.55 (G3): lựa chọn model của hội thoại này; Tự động (chuẩn) ⇒ BỎ trường `model_choice`.
+  const choice = st.modelChoice;
+  const modelChoice = toBody(choice);
   try {
     const res = await api.gen.createTurn({
       conversation_id: st.conversationId,
       text: q,
       context: { route: window.location.pathname + window.location.search, screen_key: currentScreenKey(), visible_targets: visibleTargets() },
+      ...(modelChoice ? { model_choice: modelChoice } : {}),
     });
+    saveChoice(res.conversation_id, choice); // hội thoại mới vừa có mã ⇒ nhớ lựa chọn theo mã đó
     useGenStore.setState((s) => ({
       conversationId: res.conversation_id,
       conversationOwner: userId,
@@ -95,15 +115,24 @@ export async function sendQuestion(text: string, userId: string | null = current
     early.delete(res.turn_id);
     void poll(res.turn_id);
   } catch (e) {
-    const msg =
+    let msg =
       e instanceof ApiError && e.status === 409
         ? 'Gen đang trả lời câu trước — đợi xong rồi hỏi tiếp nhé.'
         : e instanceof ApiError && e.status === 429
           ? 'Hỏi hơi nhanh rồi — đợi vài phút rồi hỏi tiếp nhé.'
           : errorText(e);
+    let detail = errorDetail(e);
+    if (e instanceof ApiError && e.code === 'MODEL_CHOICE_INVALID') {
+      // 422 thân thiện: câu của máy chủ ("… em dùng chế độ Tự động nhé"); lý do kỹ thuật (chuỗi) nằm ở "Chi tiết kỹ thuật".
+      const title = typeof e.problem.title === 'string' ? e.problem.title.trim() : '';
+      const why = typeof e.problem.detail === 'string' ? e.problem.detail.trim() : '';
+      msg = title || 'Lựa chọn model không hợp lệ — em dùng chế độ Tự động nhé';
+      detail = [detail, why].filter(Boolean).join(' · ') || null;
+      useGenStore.getState().setModelChoice(AUTO_CHOICE); // đúng như lời hứa: lượt sau dùng Tự động
+    }
     useGenStore.setState((s) => ({
       busy: false,
-      messages: [...s.messages, { id: `e-${localId}`, role: 'assistant', status: 'failed', steps: [{ kind: 'say', text: msg || 'Không gửi được câu hỏi — thử lại sau.' }] }],
+      messages: [...s.messages, { id: `e-${localId}`, role: 'assistant', status: 'failed', steps: [{ kind: 'say', text: msg || 'Không gửi được câu hỏi — thử lại sau.' }], detail }],
     }));
   }
 }
@@ -182,7 +211,7 @@ export async function loadConversation(id: string, userId: string | null = curre
     });
     return 'busy';
   }
-  useGenStore.setState({ conversationId: id, conversationOwner: userId, busy: false, messages: msgs.map(toChat) });
+  useGenStore.setState({ conversationId: id, conversationOwner: userId, busy: false, messages: msgs.map(toChat), modelChoice: loadChoice(id) });
   return 'opened';
 }
 
@@ -239,6 +268,8 @@ export function restoreIfNeeded(userId: string): Promise<void> {
     st.reset();
     return Promise.resolve();
   }
+  // v0.1.55 (G3): tải lại trang ⇒ nút chọn model hiện đúng lựa chọn đã nhớ của hội thoại này ngay (trước khi tải xong tin).
+  if (!genBusy()) useGenStore.setState({ modelChoice: loadChoice(st.conversationId) });
   if (st.messages.length > 0 || genBusy()) return Promise.resolve();
   if (restoring) return restoring;
   if (loading > 0) return Promise.resolve(); // đang mở hội thoại khác (vd bản tin từ chuông)

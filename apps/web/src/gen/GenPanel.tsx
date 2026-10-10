@@ -10,6 +10,7 @@ import { CoachTodayCard } from './CoachTodayCard';
 import { closeSpotlight, executeUiAction } from './director';
 import { restoreIfNeeded, retryRestore, sendFeedback, sendQuestion } from './genClient';
 import { GenHistory } from './GenHistory';
+import { ModelPicker } from './ModelPicker';
 import { ProposalCard } from './ProposalCard';
 import { toolLabel } from './toolLabels';
 import { useGenStore, type GenChatMessage } from './genStore';
@@ -34,6 +35,14 @@ function useAddressing(): string {
 
 function Step({ step, turnId }: { step: GenStep; turnId?: string }) {
   if (step.kind === 'say') return <p className="gen-msg__text">{step.text}</p>;
+  // v0.1.55 (G3): thông báo của hệ thống (vd hạ về Tự động) — một dòng nhỏ, luôn là chuỗi.
+  if (step.kind === 'notice')
+    return (
+      <p className="gen-msg__text" role="note" style={{ display: 'flex', alignItems: 'flex-start', gap: 5, fontSize: 11.5, color: 'var(--color-neutral-400)' }}>
+        <Icon name="ph ph-info" size={12} style={{ marginTop: 2 }} />
+        <span>{typeof step.text === 'string' ? step.text : ''}</span>
+      </p>
+    );
   if (step.kind === 'tool')
     return (
       <span className="gen-chip">
@@ -257,6 +266,8 @@ export function GenPanel({ userId }: { userId: string }) {
         />
         <IconButton icon="ph ph-paper-plane-right" label="Gửi" variant="primary" type="submit" disabled={busy || opening || !text.trim()} />
       </form>
+      {/* v0.1.55 (G3): chọn model / mức suy nghĩ cho câu hỏi kế tiếp (nhớ theo hội thoại; hội thoại mới = Tự động). */}
+      <ModelPicker />
     </aside>
   );
 }
