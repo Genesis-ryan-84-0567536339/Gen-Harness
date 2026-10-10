@@ -178,13 +178,13 @@ async def test_org_settings_reuse_step3_validation(owner_api: Api) -> None:
     assert r.status_code == 422
     assert set(r.json()["errors"]) == {"org_name", "timezone", "currency", "self_name", "bot_calls_me"}
     good = {"org_name": " Genesis Trading ", "timezone": "Asia/Singapore", "currency": "usd", "self_name": "Tôi",
-            "bot_calls_me": "Sếp Ryan"}
+            "bot_calls_me": "Sếp A"}
     r = await owner_api.send("PATCH", "/system/org", good)
     assert r.status_code == 200, r.text
     assert r.json()["org_name"] == "Genesis Trading" and r.json()["currency"] == "USD"
     me = (await owner_api.get("/auth/me")).json()
     assert me["org"]["name"] == "Genesis Trading" and me["org"]["timezone"] == "Asia/Singapore"
-    assert me["addressing"]["bot_calls_me"] == "Sếp Ryan"
+    assert me["addressing"]["bot_calls_me"] == "Sếp A"
     logs = await _log("org.updated")
     assert len(logs) == 1 and logs[0]["detail"]["fields"] == [  # type: ignore[index]
         "bot_calls_me", "currency", "org_name", "self_name", "timezone"]

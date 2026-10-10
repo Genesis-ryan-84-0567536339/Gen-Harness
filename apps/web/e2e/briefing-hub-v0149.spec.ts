@@ -122,7 +122,7 @@ test.describe('v0.1.49 — Bản tin Gen đọc lịch / mail / việc qua Gen-h
     await expect(card).toContainText('KHÔNG bật quyền ghi');
 
     // Token chứa "thieu" ⇒ mock giả lập token chưa tick quyền đọc lịch + mail (Kiểm tra vẫn xanh).
-    await card.getByLabel('Địa chỉ Gen-hub').fill('https://hub.genos.top/mcp');
+    await card.getByLabel('Địa chỉ Gen-hub').fill('https://hub.example.test/mcp');
     await card.getByLabel('Token Gen-hub').fill('ghtok_thieu_quyen_123456');
     await card.getByRole('button', { name: 'Lưu & kiểm tra' }).click();
     await enterPin(page);
@@ -158,7 +158,7 @@ test.describe('v0.1.49 — Bản tin Gen đọc lịch / mail / việc qua Gen-h
     await page.goto('/help');
     const card = page.getByTestId('help-genhub-reads');
     await expect(card.getByText('Gen đọc được gì từ Gen-hub')).toBeVisible();
-    await expect(card).toContainText('Gen đọc: Kho Ryan, lịch, mail'); // v0.1.50: hết "chỉ ĐỌC" — Gen ghi Kho khi Sếp xác nhận + PIN
+    await expect(card).toContainText('Gen đọc: Kho dữ liệu, lịch, mail'); // v0.1.50: hết "chỉ ĐỌC" — Gen ghi Kho khi Sếp xác nhận + PIN
     await expect(card).toContainText('Gen KHÔNG gửi mail');
     await expect(card).toContainText('che trước khi gửi cho AI');
     await expect(card).toContainText('tạm dừng gọi 1 phút');

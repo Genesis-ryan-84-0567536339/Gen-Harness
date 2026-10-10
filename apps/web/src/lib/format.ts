@@ -156,7 +156,7 @@ export function countWord(n: number, capital = true): string {
   return capital ? w.charAt(0).toLocaleUpperCase('vi') + w.slice(1) : w;
 }
 
-/** Two-letter avatar from an email ("ryan.genesis@gmail.com" → "RY"). */
+/** Two-letter avatar from an email ("a@example.test" → "A"). */
 export function emailInitials(email: string | null | undefined): string {
   const local = (email ?? '').split('@')[0]?.replace(/[^\p{L}\p{N}]/gu, '') ?? '';
   return (local.slice(0, 2) || '·').toLocaleUpperCase('vi');

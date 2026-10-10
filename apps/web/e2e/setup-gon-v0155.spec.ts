@@ -19,7 +19,7 @@ test('Thiết lập gọn: từ bước 3 tới Hoàn tất chỉ gõ tên tổ 
   await resetMock(page.request, 'fresh');
   await apiCall(page, 'PUT', '/setup/steps/1', { token: SETUP_TOKEN, language: 'vi', mode: 'empty' });
   await apiCall(page, 'PUT', '/setup/steps/2', {
-    token: SETUP_TOKEN, display_name: 'Anh Cơ La (Ryan)', email: 'ryan@genesis.vn', password: 'mot-cau-rat-dai-de-nho-2026', pin: OWNER.pin, pin_confirm: OWNER.pin,
+    token: SETUP_TOKEN, display_name: 'Anh Nguyễn Văn A (Chủ)', email: 'owner@example.test', password: 'mot-cau-rat-dai-de-nho-2026', pin: OWNER.pin, pin_confirm: OWNER.pin,
   });
 
   // Ghi lại payload từng PUT /setup/steps/N do giao diện gửi (chỉ kiểm hình dạng — không in mật khẩu / PIN).
@@ -55,7 +55,7 @@ test('Thiết lập gọn: từ bước 3 tới Hoàn tất chỉ gõ tên tổ 
   await expect(page.getByRole('link', { name: 'Mở trang đăng nhập Google' })).toBeVisible({ timeout: 5000 });
   await type(page.getByLabel('Mã xác thực'), '4/0AbCd-EfGh');
   await page.getByRole('button', { name: 'Xác nhận' }).click();
-  await expect(page.getByText('ryan.genesis@gmail.com').first()).toBeVisible({ timeout: 5000 });
+  await expect(page.getByText('a@example.test').first()).toBeVisible({ timeout: 5000 });
   await expect(next).toBeEnabled();
   await next.click();
   await page.request.post('/api/v1/__mock/pin_expire', { data: {} });

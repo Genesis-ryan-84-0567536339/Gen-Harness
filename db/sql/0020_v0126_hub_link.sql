@@ -1,4 +1,4 @@
--- Gen-Harness · v0.1.26 — Đợt D1 (lát đầu): nối Gen-hub để Gen ĐỌC Kho Ryan (docs/design/gen-hub-link.md §3.1).
+-- Gen-Harness · v0.1.26 — Đợt D1 (lát đầu): nối Gen-hub để Gen ĐỌC Kho dữ liệu (docs/design/gen-hub-link.md §3.1).
 -- Một dòng / tổ chức. Liên kết trỏ tới một máy chủ trong MCP Hub sẵn có (`agent.mcp_servers`) — token agent của
 -- Gen-hub KHÔNG nằm ở bảng này: nó được mã hoá phong bì (gh.crypto, AAD `mcp_server_auth`) trong
 -- `agent.mcp_servers.auth_enc` như mọi máy chủ MCP khác, không bao giờ lưu dạng rõ, không ghi log, không trả qua API.

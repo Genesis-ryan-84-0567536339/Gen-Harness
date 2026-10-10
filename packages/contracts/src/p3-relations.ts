@@ -208,7 +208,7 @@ export interface DocumentItem {
   bytes: number;
   owner: (PersonRef | GroupRef) | null;
   source: DocSource;
-  /** Nhãn người/agent tạo (vd "Anh Cơ La (Ryan)", "Trợ lý thương mại") — `source` đã tách theo loại. */
+  /** Nhãn người/agent tạo (vd "Nguyễn Văn A (Chủ)", "Trợ lý thương mại") — `source` đã tách theo loại. */
   created_by: string | null;
   created_at: string;
   updated_at: string;

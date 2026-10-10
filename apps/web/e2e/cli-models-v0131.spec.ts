@@ -43,7 +43,7 @@ test.describe('v0.1.31 — model CLI theo nhóm + Claude Code CLI', () => {
     await expect(section.getByRole('link', { name: /Mở trang đăng nhập Claude/ })).toHaveAttribute('href', /^https:\/\/claude\.com\/cai\/oauth\/authorize/);
     await section.getByLabel('Mã xác thực').fill('abcd#efgh');
     await section.getByRole('button', { name: 'Xác nhận' }).click();
-    await expect(section).toContainText('ryan.claude@gmail.com');
+    await expect(section).toContainText('c@example.test');
     await expect(section).toContainText('Đang hoạt động');
     await expect(section).toContainText('tự gia hạn');
 

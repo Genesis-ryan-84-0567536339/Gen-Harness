@@ -81,7 +81,7 @@ describe('C1/V10 — bước 12 liệt kê việc còn thiếu', () => {
 
 describe('V11 — ghi chú phát hành đọc được', () => {
   it('bỏ phần tự sinh tiếng Anh của GitHub', () => {
-    const md = "## What's Changed\n* Sửa lỗi sao lưu by @ryan in https://github.com/x/y/pull/31\n\n**Full Changelog**: https://github.com/x/y/compare/a...b";
+    const md = "## What's Changed\n* Sửa lỗi sao lưu by @user in https://github.com/x/y/pull/31\n\n**Full Changelog**: https://github.com/x/y/compare/a...b";
     expect(readableNotes(md)).toBe('## Điểm mới\n* Sửa lỗi sao lưu');
   });
 });

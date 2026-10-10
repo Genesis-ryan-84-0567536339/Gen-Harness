@@ -4,7 +4,7 @@ Gen-Harness là một hệ thống tự trị có kiểm soát cho một tổ ch
 tin (Zalo, WhatsApp, Facebook…), sàng lọc thành dữ liệu sạch có nguồn gốc rõ ràng, và để agent AI soạn — nhưng không tự
 ý gửi — phản hồi, cập nhật cơ hội bán hàng, cảnh báo sớm. Mọi việc "ra ngoài", vượt ngưỡng tiền, hoặc liên quan
 nhân sự luôn dừng lại chờ người duyệt ở Bàn làm việc. **Gen** là trợ lý trong Console: trả lời, dẫn đường từng bước, nhớ sở thích
-của Sếp, đọc Kho Ryan/lịch/mail qua **Gen-hub** — và chỉ *đề xuất*; Sếp bấm Xác nhận (kèm mã PIN khi nhạy cảm) thì mới làm.
+của Sếp, đọc Kho dữ liệu/lịch/mail qua **Gen-hub** — và chỉ *đề xuất*; Sếp bấm Xác nhận (kèm mã PIN khi nhạy cảm) thì mới làm.
 
 Đọc theo vai: **[Dành cho Boss](#dành-cho-boss)** (cài, cập nhật, việc cần làm, nhờ giúp) ·
 **[Dành cho dev](#dành-cho-dev)** (dựng từ mã nguồn, kiểm thử, phát hành). Tài liệu khác: [Nhật ký thay đổi](CHANGELOG.md) ·
@@ -44,7 +44,7 @@ bản cũ, dữ liệu không mất. Muốn cập nhật ngay: Console → **C�
 Console → **Hướng dẫn thiết lập** → **Việc Sếp cần làm**. Một trang gom mọi việc *chỉ Sếp làm được* (đăng nhập tài khoản của chính Sếp, dán mã, tick quyền),
 mỗi dòng có hướng dẫn từng bước và nút **Kiểm tra**; dòng chuyển **Đạt** là xong. Hiện có 9 dòng, 6 dòng bắt buộc:
 
-1. **Gen-hub** (bắt buộc) — nối Kho Ryan; tuỳ chọn thêm quyền đọc lịch/mail/việc/Drive và quyền ghi Kho.
+1. **Gen-hub** (bắt buộc) — nối Kho dữ liệu; tuỳ chọn thêm quyền đọc lịch/mail/việc/Drive và quyền ghi Kho.
 2. **Facebook** (bắt buộc) — đăng nhập tài khoản Facebook của Sếp trong cửa sổ trình duyệt từ xa.
 3. **Google / Antigravity** (bắt buộc) và 4. **Claude Code CLI** (bắt buộc) — các nguồn AI dùng gói của Sếp.
 5. **Jev** (tuỳ chọn). 6. **Telegram** (bắt buộc) — bot báo tin tới điện thoại Sếp. 7. **Truy cập từ xa** (bắt buộc) — vào Console từ điện thoại.
@@ -56,7 +56,7 @@ Việc mới của từng bản nằm ở mục "Boss phải làm" trong `docs/r
 
 Gen nằm ở khung chat bên phải. Hỏi bằng tiếng Việt: "Sáng nay có gì gấp?", "Chỉ tôi cách thêm khoá Gemini", "VIEC-12 là gì?", "Hôm nay tôi có lịch gì?".
 Gen **chỉ đề xuất**: nháp tin, nhắc việc, giao người, trả lời/nhắn Facebook, **Ghi nhớ** (dặn "nhớ giúp em …" — xem/sửa/xoá ở Cài đặt › Bộ não AI › **Gen nhớ**)
-và **Ghi vào Kho Ryan**. Mỗi thẻ có **Xác nhận / Sửa / Huỷ**; việc nhạy cảm (gửi ra ngoài, ghi Kho, đổi cấu hình) hỏi thêm **mã PIN**. Mỗi bản phát hành mới, Gen
+và **Ghi vào Kho dữ liệu**. Mỗi thẻ có **Xác nhận / Sửa / Huỷ**; việc nhạy cảm (gửi ra ngoài, ghi Kho, đổi cấu hình) hỏi thêm **mã PIN**. Mỗi bản phát hành mới, Gen
 đề xuất sẵn một "Phiên" để Sếp duyệt ghi vào Kho.
 
 ### Sao lưu — việc duy nhất Sếp nên nhớ

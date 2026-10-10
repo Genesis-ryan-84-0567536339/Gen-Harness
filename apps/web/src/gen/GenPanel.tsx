@@ -232,7 +232,7 @@ export function GenPanel({ userId }: { userId: string }) {
           <div className="gen-empty">
             <p>
               Chào {addr}, em là Gen. {addr} hỏi về tình hình hôm nay, nhờ em chỉ chỗ bấm, hoặc nhờ em soạn nháp tin, đặt
-              nhắc việc, giao người, ghi nhớ một quy ước, ghi vào Kho Ryan — em chỉ đề xuất, {addr} xác nhận thì em mới làm.
+              nhắc việc, giao người, ghi nhớ một quy ước, ghi vào Kho dữ liệu — em chỉ đề xuất, {addr} xác nhận thì em mới làm.
             </p>
             <div className="gen-suggest">
               {examples.map((q) => (

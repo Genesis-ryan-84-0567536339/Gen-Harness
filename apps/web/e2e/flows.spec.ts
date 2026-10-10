@@ -25,7 +25,7 @@ test.describe('auth', () => {
     await expect(page.locator('.hd-group')).toHaveText('Hộp thư & Việc');
     await expect(page.getByRole('tab', { name: /Tất cả/ })).toBeVisible();
 
-    await page.getByRole('button', { name: /Anh Cơ La/ }).click();
+    await page.getByRole('button', { name: /Anh Nguyễn Văn A/ }).click();
     await page.getByRole('menuitem', { name: 'Đăng xuất' }).click();
     await expect(page).toHaveURL(/\/login$/);
   });
@@ -51,7 +51,7 @@ test.describe('auth', () => {
     // v0.1.55 (G5): Owner đăng nhập vào Mặt tiền /owner; thanh bên thu gọn là của Console (Cài đặt nâng cao).
     await expect(page).toHaveURL(/\/owner$/);
     await page.goto('/overview');
-    await page.getByRole('button', { name: /Anh Cơ La/ }).click();
+    await page.getByRole('button', { name: /Anh Nguyễn Văn A/ }).click();
     await page.getByRole('menuitem', { name: 'Thu gọn thanh bên' }).click();
     await expect(page.locator('.app')).toHaveAttribute('data-sidebar', 'rail');
     // v0.1.42: rail — "Nâng cao" là một icon, bấm thì hiện các nhóm của nó.
@@ -79,8 +79,8 @@ test.describe('owner setup', () => {
     await expect(page.getByRole('heading', { name: 'Tài khoản Owner' })).toBeVisible();
     const next = page.getByRole('button', { name: /Tiếp tục/ });
     await expect(next).toBeDisabled();
-    await page.getByLabel('Tên hiển thị').fill('Anh Cơ La (Ryan)');
-    await page.getByLabel('Email').fill('ryan@genesis.vn');
+    await page.getByLabel('Tên hiển thị').fill('Anh Nguyễn Văn A (Chủ)');
+    await page.getByLabel('Email').fill('owner@example.test');
     await page.getByLabel('Mật khẩu', { exact: true }).fill('mot-cau-rat-dai-de-nho-2026');
     await page.getByLabel('Mã PIN (6 số) — chữ số 1/6').click();
     await page.keyboard.type('246810');
@@ -94,8 +94,8 @@ test.describe('owner setup', () => {
     await page.getByLabel('Tên tổ chức').fill('Genesis Trading');
     await page.getByLabel('Sếp tự xưng là').fill('Anh');
     await expect(page.locator('.setup-preview__line')).toContainText('Dạ Sếp');
-    await page.getByLabel('Agent gọi Sếp là').fill('anh Ryan');
-    await expect(page.locator('.setup-preview__line')).toContainText('Dạ Anh Ryan');
+    await page.getByLabel('Agent gọi Sếp là').fill('anh A');
+    await expect(page.locator('.setup-preview__line')).toContainText('Dạ Anh A');
     await expect(page.getByLabel('Múi giờ')).toHaveValue('Asia/Ho_Chi_Minh');
     await expect(page.getByLabel('Tiền tệ')).toHaveValue('VND');
     await page.screenshot({ path: join(shots, 'setup-step3-1440.png') });

@@ -50,7 +50,7 @@ describe('setup validation', () => {
   });
 
   it('step 2 completes only when every field is valid', () => {
-    const ok = { token: 't', display_name: 'Anh Cơ La', email: 'a@b.vn', password: 'mat-khau-dai-lam', pin: '246810', pin_confirm: '246810' };
+    const ok = { token: 't', display_name: 'Anh Nguyễn Văn A', email: 'a@b.vn', password: 'mat-khau-dai-lam', pin: '246810', pin_confirm: '246810' };
     expect(isComplete(step2Errors(ok))).toBe(true);
     expect(Object.keys(step2Errors({ ...ok, pin_confirm: '000000' }))).toEqual(['pin_confirm']);
     expect(Object.keys(step2Errors({ ...ok, password: 'ngan' }))).toEqual(['password']);
@@ -221,7 +221,7 @@ describe('<SetupPage>', () => {
     renderSetup();
     await screen.findByRole('heading', { name: 'Bước 2' });
     const next = screen.getByRole('button', { name: /Tiếp tục/ });
-    await user.type(screen.getByLabelText('Tên hiển thị'), 'Anh Cơ La');
+    await user.type(screen.getByLabelText('Tên hiển thị'), 'Anh Nguyễn Văn A');
     await user.type(screen.getByLabelText('Email'), 'owner@genesis.vn');
     await user.type(screen.getByLabelText('Mật khẩu'), 'ngan');
     await user.tab();

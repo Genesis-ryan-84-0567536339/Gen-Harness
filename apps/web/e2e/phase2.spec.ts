@@ -257,7 +257,7 @@ test.describe('Kết nối › kênh & đăng nhập', () => {
   test('CLI login: open the URL, paste the code, done', async ({ page }) => {
     await page.goto('/connections');
     const cli = page.getByRole('region', { name: 'Tài khoản Antigravity CLI' });
-    await expect(cli).toContainText('ryan.genesis@gmail.com');
+    await expect(cli).toContainText('a@example.test');
     await cli.getByRole('button', { name: /Đổi tài khoản/ }).click();
     await page.getByRole('button', { name: 'Thêm tài khoản Google' }).click();
     // v0.1.45 (F-20): thêm tài khoản CLI cần mã PIN (`cli.switch_account`).
@@ -279,18 +279,18 @@ test.describe('Kết nối › kênh & đăng nhập', () => {
   test('CLI switch account: PIN, then the chosen Google account is in use (v0.1.30)', async ({ page }) => {
     await page.goto('/connections');
     const cli = page.getByRole('region', { name: 'Tài khoản Antigravity CLI' });
-    await expect(cli.getByTestId('cli-current')).toContainText('ryan.genesis@gmail.com');
+    await expect(cli.getByTestId('cli-current')).toContainText('a@example.test');
     await cli.getByRole('button', { name: /Đổi tài khoản/ }).click();
     const dlg = page.getByRole('dialog', { name: 'Đổi tài khoản Google cho AI' });
-    await expect(dlg).toContainText('AI đang dùng ryan.genesis@gmail.com');
-    await dlg.getByRole('button', { name: 'Dùng tài khoản ops.genesis@gmail.com' }).click();
+    await expect(dlg).toContainText('AI đang dùng a@example.test');
+    await dlg.getByRole('button', { name: 'Dùng tài khoản b@example.test' }).click();
     const pin = page.getByRole('dialog', { name: 'Mã PIN xác nhận thao tác' });
     await expect(pin).toBeVisible();
     await page.keyboard.type(OWNER.pin);
     await expect(pin).toBeHidden();
-    await expect(page.getByText(/Đã chuyển sang ops\.genesis@gmail\.com/)).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText(/Đã chuyển sang b@example\.test/)).toBeVisible({ timeout: 5000 });
     await expect(dlg).toBeHidden();
-    await expect(cli.getByTestId('cli-current')).toContainText('ops.genesis@gmail.com');
+    await expect(cli.getByTestId('cli-current')).toContainText('b@example.test');
   });
 
   test('mã PIN chỉ ở Tài khoản của tôi: form Đổi mã PIN + Lịch sử nhập PIN', async ({ page }) => {
@@ -330,7 +330,7 @@ test('setup steps 4–7 and 12 against the mock', async ({ page }) => {
   await resetMock(page.request, 'fresh');
   await apiCall(page, 'PUT', '/setup/steps/1', { token: SETUP_TOKEN, language: 'vi', mode: 'empty' });
   await apiCall(page, 'PUT', '/setup/steps/2', {
-    token: SETUP_TOKEN, display_name: 'Anh Cơ La (Ryan)', email: 'ryan@genesis.vn', password: 'mot-cau-rat-dai-de-nho-2026', pin: OWNER.pin, pin_confirm: OWNER.pin,
+    token: SETUP_TOKEN, display_name: 'Anh Nguyễn Văn A (Chủ)', email: 'owner@example.test', password: 'mot-cau-rat-dai-de-nho-2026', pin: OWNER.pin, pin_confirm: OWNER.pin,
   });
   await apiCall(page, 'PUT', '/setup/steps/3', { org_name: 'Genesis Trading', timezone: 'Asia/Ho_Chi_Minh', currency: 'VND', self_name: 'Anh', bot_calls_me: 'Sếp' });
 
@@ -347,7 +347,7 @@ test('setup steps 4–7 and 12 against the mock', async ({ page }) => {
   await expect(page.getByRole('link', { name: 'Mở trang đăng nhập Google' })).toBeVisible({ timeout: 5000 });
   await page.getByLabel('Mã xác thực').fill('4/0AbCd-EfGh');
   await page.getByRole('button', { name: 'Xác nhận' }).click();
-  await expect(page.getByText('ryan.genesis@gmail.com').first()).toBeVisible({ timeout: 5000 });
+  await expect(page.getByText('a@example.test').first()).toBeVisible({ timeout: 5000 });
   await page.screenshot({ path: join(outDir, 'setup-step4-1440.png'), fullPage: true });
   await expect(next).toBeEnabled();
   await next.click();

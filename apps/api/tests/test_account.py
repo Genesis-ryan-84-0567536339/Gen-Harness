@@ -42,10 +42,10 @@ async def test_get_account_lists_sessions(owner_api: Api, app: object) -> None:
 
 
 async def test_update_display_name_and_email(owner_api: Api) -> None:
-    r = await owner_api.send("PATCH", "/account", {"display_name": "  Anh   Cơ La  "})
+    r = await owner_api.send("PATCH", "/account", {"display_name": "  Nguyễn   Văn A  "})
     assert r.status_code == 200, r.text
-    assert r.json()["display_name"] == "Anh Cơ La"
-    assert (await owner_api.get("/auth/me")).json()["display_name"] == "Anh Cơ La"
+    assert r.json()["display_name"] == "Nguyễn Văn A"
+    assert (await owner_api.get("/auth/me")).json()["display_name"] == "Nguyễn Văn A"
     # Đổi email cần mật khẩu hiện tại.
     r = await owner_api.send("PATCH", "/account", {"email": "moi@example.vn"})
     assert r.status_code == 422 and "current_password" in r.json()["errors"]

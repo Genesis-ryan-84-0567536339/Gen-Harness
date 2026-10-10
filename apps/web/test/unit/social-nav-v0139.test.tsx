@@ -23,7 +23,7 @@ const OPERATOR = { code: 'operator', name: 'Vận hành' };
 
 function me(role: { code: string; name: string }, permissions: Record<string, string> = {}) {
   return {
-    id: 'u', email: 'owner@genesis.local', display_name: 'Anh Cơ La (Ryan)',
+    id: 'u', email: 'owner@genesis.local', display_name: 'Anh Nguyễn Văn A (Chủ)',
     role,
     org: { id: 'o', name: 'x', timezone: 'Asia/Ho_Chi_Minh', currency: 'VND' },
     addressing: { self: 'Anh', bot_calls_me: 'Sếp' }, pin_verified_until: null, permissions,
@@ -104,7 +104,7 @@ describe('v0.1.42 — Facebook vào Kết nối (không còn mục "Mạng xã h
     expect(within(nav).queryByRole('link', { name: /Mạng xã hội/ })).not.toBeInTheDocument();
     expect(document.querySelector('[data-screen="social"]')).toBeNull();
     expect(within(nav).getByRole('link', { name: /Kết nối/ })).toHaveAttribute('href', '/connections');
-    await user.click(screen.getByRole('button', { name: /Anh Cơ La/ }));
+    await user.click(screen.getByRole('button', { name: /Anh Nguyễn Văn A/ }));
     await user.click(screen.getByRole('menuitem', { name: /Tài khoản mạng xã hội/ }));
     expect(screen.getByTestId('where')).toHaveTextContent('/social');
   });

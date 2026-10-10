@@ -77,7 +77,7 @@ export type GenProposalType =
   | 'social_dm'
   /** v0.1.50 (F-81, QD-18): Gen đề xuất GHI NHỚ một quy ước / sở thích của Sếp (Gen nhớ) — không cần PIN, chỉ Owner. */
   | 'memory_note'
-  /** v0.1.50 (F-81, QD-18): Gen đề xuất TẠO / SỬA một bản ghi Phiên · Việc ở Kho Ryan qua Gen-hub — Xác nhận + mã PIN, chỉ Owner. */
+  /** v0.1.50 (F-81, QD-18): Gen đề xuất TẠO / SỬA một bản ghi Phiên · Việc ở Kho dữ liệu qua Gen-hub — Xác nhận + mã PIN, chỉ Owner. */
   | 'kho_create'
   | 'kho_update';
 export type GenProposalStatus = 'pending' | 'confirmed' | 'cancelled';
@@ -128,11 +128,17 @@ export interface MemoryNoteFields {
   reason: string;
 }
 
-/** Bảng của Kho Ryan mà Gen được đề xuất ghi (v0.1.50): chỉ Phiên và Việc. */
+/**
+ * v0.1.56: tên hiển thị của Kho nối qua Gen-hub — MỘT chỗ ở web/contracts (bản sao API: `KHO_LABEL` ở
+ * `apps/api/gh/hub_link/__init__.py`). Tên chung, không mang tên riêng của chủ Gen-hub. Nhãn ngắn trên nút / thẻ vẫn là "Kho".
+ */
+export const KHO_LABEL = 'Kho dữ liệu';
+
+/** Bảng của Kho dữ liệu mà Gen được đề xuất ghi (v0.1.50): chỉ Phiên và Việc. */
 export type KhoBang = 'Phiên' | 'Việc';
 
 /**
- * v0.1.50 (F-81, QD-18): đề xuất TẠO bản ghi Kho Ryan. `record` = các trường Kho (tên trường tiếng Việt, xem `KHO_FIELDS`) →
+ * v0.1.50 (F-81, QD-18): đề xuất TẠO bản ghi Kho dữ liệu. `record` = các trường Kho (tên trường tiếng Việt, xem `KHO_FIELDS`) →
  * chuỗi; bảng cố định, KHÔNG sửa được trên thẻ. Chỉ khi Sếp bấm Xác nhận + nhập mã PIN, máy chủ mới ghi qua Gen-hub.
  */
 export interface KhoCreateFields {
@@ -147,7 +153,7 @@ export interface KhoUpdateFields {
 }
 
 /**
- * v0.1.50 — trường Kho Ryan Gen được ghi, THEO THỨ TỰ hiển thị. Nguồn sự thật: `apps/api/gh/hub_link/kho_write.py`
+ * v0.1.50 — trường Kho dữ liệu Gen được ghi, THEO THỨ TỰ hiển thị. Nguồn sự thật: `apps/api/gh/hub_link/kho_write.py`
  * (`KHO_FIELDS`); bản sao này được `kho-write-proposal-v0150.test.tsx` so khớp với tệp đó.
  */
 export const KHO_FIELDS: Record<KhoBang, readonly string[]> = {
@@ -176,7 +182,7 @@ export const KHO_PRIORITY = ['P1', 'P2', 'P3'] as const;
 export interface GenProposalResult {
   /**
    * v0.1.47: `social_write` — `id` = job_id của việc gửi; web theo dõi qua `GET /social/jobs/{id}`. v0.1.50: `memory_note` —
-   * `id` = id ghi chú Gen nhớ (`screen: 'system'`); `kho_record` — đã ghi vào Kho Ryan: `code` = mã bản ghi ('PHIEN-12'; null
+   * `id` = id ghi chú Gen nhớ (`screen: 'system'`); `kho_record` — đã ghi vào Kho dữ liệu: `code` = mã bản ghi ('PHIEN-12'; null
    * khi Gen-hub không trả mã), `bang`, `id` = null, `screen` = null.
    */
   type: 'draft' | 'task' | 'inbox_item' | 'social_write' | 'memory_note' | 'kho_record';

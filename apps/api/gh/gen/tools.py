@@ -1,5 +1,5 @@
 """Công cụ dữ liệu CHỈ ĐỌC của Gen (docs/design/gen-v1.md §3.4; v2 thêm task.list, staff.list;
-v0.1.25 thêm refinery.summary; v0.1.26 thêm hub.kho_* — đọc Kho Ryan qua Gen-hub, chỉ Owner, đã che trước khi vào
+v0.1.25 thêm refinery.summary; v0.1.26 thêm hub.kho_* — đọc Kho dữ liệu qua Gen-hub, chỉ Owner, đã che trước khi vào
 model; v0.1.49 (QD-16) thêm document.*/deal.*/case.* — Tài liệu, Deal, Vụ việc nội bộ, và hub.calendar/tasks/
 mail_search/mail_read/drive_search — lịch, việc, mail, Drive Google qua Gen-hub; tất cả CHỈ ĐỌC, chỉ Owner, nội dung
 đã che trước khi vào model và coi là dữ liệu không tin cậy).
@@ -21,6 +21,7 @@ import orjson
 
 from gh.auth import rbac, service
 from gh.gen import registry
+from gh.hub_link import KHO_LABEL
 
 MAX_BYTES = 4000
 MAX_ROWS = 20
@@ -84,13 +85,13 @@ TOOLS: dict[str, Tool] = {t.name: t for t in (
     Tool("refinery.summary", "Lọc tin Hộp thư (Jev/quy tắc): số mục đã lọc, trùng, rác, điểm thấp, chờ lọc, độ trễ và "
          "độ khớp của Jev; args.days ∈ 1|7|30", ("queue.read",), "/refinery/triage/summary",
          {"days": ("1", "7", "30")}),
-    Tool("hub.kho_summary", "Kho Ryan qua Gen-hub (chỉ đọc): tóm tắt đầu phiên — Phiên gần nhất, Việc đang mở, Quyết "
-         "định hiệu lực, Dự án trọng tâm; args.so_phien ∈ 1..5. Trích dẫn bằng mã (VIEC-/QD-/PHIEN-)",
+    Tool("hub.kho_summary", f"{KHO_LABEL} qua Gen-hub (chỉ đọc): tóm tắt đầu phiên — Phiên gần nhất, Việc đang mở, "
+         "Quyết định hiệu lực, Dự án trọng tâm; args.so_phien ∈ 1..5. Trích dẫn bằng mã (VIEC-/QD-/PHIEN-)",
          ("system.manage",), "/hub/kho/summary", {"so_phien": ("1", "2", "3", "4", "5")}, owner_only=True),
-    Tool("hub.kho_search", "Tìm trong Kho Ryan theo từ khoá; args.q, args.bang (tuỳ chọn: Việc, Dự án, Phiên, Quyết "
-         "định, Bài học, Tri thức — Tri thức chỉ là bản sao từ GitHub)", ("system.manage",), "/hub/kho/search",
+    Tool("hub.kho_search", f"Tìm trong {KHO_LABEL} theo từ khoá; args.q, args.bang (tuỳ chọn: Việc, Dự án, Phiên, "
+         "Quyết định, Bài học, Tri thức — Tri thức chỉ là bản sao từ GitHub)", ("system.manage",), "/hub/kho/search",
          {"q": None, "bang": None}, owner_only=True),
-    Tool("hub.kho_get", "Một bản ghi Kho Ryan theo mã; args.ma (vd VIEC-12, QD-3, PHIEN-1)", ("system.manage",),
+    Tool("hub.kho_get", f"Một bản ghi {KHO_LABEL} theo mã; args.ma (vd VIEC-12, QD-3, PHIEN-1)", ("system.manage",),
          "/hub/kho/records/{ma}", path_args=("ma",), path_patterns={"ma": r"^[A-Za-z]{2,6}-\d{1,6}$"},
          owner_only=True),
     # v0.1.49 (QD-16): Gen đọc lịch, việc, mail, Drive Google qua Gen-hub — CHỈ ĐỌC, chỉ Owner; endpoint (gh.hub_link)

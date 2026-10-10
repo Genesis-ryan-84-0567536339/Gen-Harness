@@ -21,9 +21,9 @@ const GEN_EXAMPLES = ['Hôm nay có gì gấp?', 'Khách nào hỏi giá hôm na
  * không còn "chỉ đọc" tuyệt đối — Gen ghi Phiên, Việc vào Kho khi Sếp xác nhận + mã PIN, nên dòng đầu chỉ nói Gen đọc gì.
  */
 const GENHUB_READS: readonly string[] = [
-  'Gen đọc: Kho Ryan, lịch, mail (tìm và đọc), việc Google Tasks, tệp Drive.',
+  'Gen đọc: Kho dữ liệu, lịch, mail (tìm và đọc), việc Google Tasks, tệp Drive.',
   'Gen KHÔNG gửi mail, KHÔNG tạo hay sửa lịch, việc Google Tasks, tệp Drive.',
-  'Ghi duy nhất: Phiên, Việc vào Kho Ryan — chỉ khi Sếp bấm Xác nhận và nhập mã PIN (cần tick quyền kho_create, kho_update ở Gen-hub).',
+  'Ghi duy nhất: Phiên, Việc vào Kho dữ liệu — chỉ khi Sếp bấm Xác nhận và nhập mã PIN (cần tick quyền kho_create, kho_update ở Gen-hub).',
   'Email, số điện thoại và khoá trong nội dung được che trước khi gửi cho AI.',
   'Gen-hub lỗi liên tục thì Gen tạm dừng gọi 1 phút và báo chuông nếu quá 15 phút.',
 ];

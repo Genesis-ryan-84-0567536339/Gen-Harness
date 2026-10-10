@@ -8,7 +8,7 @@ import { queryClient } from '../../src/lib/queryClient';
 import { qk } from '../../src/lib/queries';
 
 const me = (role: { code: string; name: string }, extra: Record<string, string> = {}) => ({
-  id: 'u1', email: 'owner@genesis.local', display_name: 'Anh Cơ La (Ryan)', role,
+  id: 'u1', email: 'owner@genesis.local', display_name: 'Anh Nguyễn Văn A (Chủ)', role,
   org: { id: 'o1', name: 'Genesis Trading', timezone: 'Asia/Ho_Chi_Minh', currency: 'VND' },
   addressing: { self: 'Anh', bot_calls_me: 'Sếp' }, pin_verified_until: null,
   permissions: role.code === 'owner' ? { 'system.read': 'all', 'system.manage': 'all' } : extra, must_change_password: false,

@@ -46,7 +46,7 @@ const KIND_ICON: Record<string, string> = {
   'ai.background_no_source': 'ph ph-brain',
   // v0.1.49 (F-83): Gen-hub không trả lời hơn 15 phút.
   'hub.unreachable': 'ph ph-plugs',
-  // v0.1.50 (F-87): Gen đề xuất ghi Phiên của bản phát hành vào Kho Ryan (link `/overview?gen=<hội thoại>`).
+  // v0.1.50 (F-87): Gen đề xuất ghi Phiên của bản phát hành vào Kho dữ liệu (link `/overview?gen=<hội thoại>`).
   'gen.kho_proposal': 'ph ph-database',
   // v0.1.54: Gen hướng dẫn nhắc việc / bài học (link `/overview?gen=coach` khi Gen bật, `/guide/viec-sep` khi Gen tắt).
   'gen.coach': 'ph ph-chalkboard-teacher',

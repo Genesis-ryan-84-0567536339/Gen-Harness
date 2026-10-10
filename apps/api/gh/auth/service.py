@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gh.chassis import actionlog
 from gh.config import get_settings
 from gh.crypto import hash_secret, new_token, token_digest, verify_secret
+from gh.hub_link import KHO_LABEL
 
 SESSION_COOKIE = "gh_session"
 CSRF_COOKIE = "gh_csrf"
@@ -32,8 +33,8 @@ PIN_OPERATIONS: dict[str, str] = {
     "draft.decide": "Duyệt / huỷ bản nháp",
     "mcp.expose": "Mở tool MCP",
     "hub.link": "Nối Gen-hub (địa chỉ, token)",
-    # v0.1.50 (F-81, QD-18): Gen đề xuất ghi Kho Ryan — Sếp Xác nhận + nhập PIN mới ghi (bảng Phiên, Việc).
-    "hub.write": "Ghi Kho Ryan qua Gen-hub (Phiên, Việc)",
+    # v0.1.50 (F-81, QD-18): Gen đề xuất ghi Kho dữ liệu — Sếp Xác nhận + nhập PIN mới ghi (bảng Phiên, Việc).
+    "hub.write": f"Ghi {KHO_LABEL} qua Gen-hub (Phiên, Việc)",
     "social.manage": "Tài khoản mạng xã hội: thêm, đăng nhập, gỡ, bật lại sau Dừng tất cả",
     "policy.change": "Đổi mức tự trị, ngưỡng tiền, ranh giới",
     "data.export_delete": "Xuất / xoá dữ liệu",

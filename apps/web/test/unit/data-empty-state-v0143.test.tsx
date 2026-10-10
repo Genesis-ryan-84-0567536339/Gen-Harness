@@ -19,7 +19,7 @@ const json = (status: number, body?: unknown) =>
 
 function me(code: string) {
   return {
-    id: 'u', email: `${code}@genesis.local`, display_name: 'Anh Cơ La (Ryan)', role: { code, name: code },
+    id: 'u', email: `${code}@genesis.local`, display_name: 'Anh Nguyễn Văn A (Chủ)', role: { code, name: code },
     org: { id: 'o', name: 'x', timezone: 'Asia/Ho_Chi_Minh', currency: 'VND' },
     addressing: { self: 'Anh', bot_calls_me: 'Sếp' }, pin_verified_until: null, permissions: {},
   };

@@ -1,4 +1,4 @@
-"""Liên kết Gen-hub — Gen ĐỌC Kho Ryan (v0.1.26), lịch/mail/việc/Drive Google (v0.1.49, QD-16)
+"""Liên kết Gen-hub — Gen ĐỌC Kho dữ liệu (v0.1.26), lịch/mail/việc/Drive Google (v0.1.49, QD-16)
 (docs/design/gen-hub-link.md §3, §6).
 
 - Liên kết (`agent.hub_links`, một dòng / tổ chức) trỏ tới một máy chủ trong MCP Hub sẵn có (`agent.mcp_servers`);
@@ -51,7 +51,7 @@ from gh.chassis.masking import _RE_SECRET, MASK, mask_for_model
 from gh.chassis.mcp_client import McpClient, always_forbidden, forbidden_host
 from gh.data.common import iso
 from gh.errors import ApiError, conflict
-from gh.hub_link import kho_write
+from gh.hub_link import KHO_LABEL, kho_write
 from gh.hub_link import permit as hub_permit
 from gh.mcp_api import invoke
 
@@ -59,7 +59,8 @@ log = logging.getLogger("gh.hub_link")
 
 AGENT_KEY = "core.gen"
 SERVER_NAME = "Gen-hub"
-SERVER_NOTE = "Liên kết Gen-hub — Gen đọc Kho Ryan, lịch, mail, việc, Drive (chỉ đọc). Quản lý ở thẻ Gen-hub."
+# v0.1.56: ghi chú máy chủ lưu vào DB của Owner — tên Kho chung; ghi chú cũ (tên riêng) do migration 0035 cập nhật.
+SERVER_NOTE = f"Liên kết Gen-hub — Gen đọc {KHO_LABEL}, lịch, mail, việc, Drive (chỉ đọc). Quản lý ở thẻ Gen-hub."
 # Danh sách cho phép cố định trong code (không cấu hình được): chỉ tool ĐỌC — Kho + Google (QD-16, v0.1.49).
 KHO_READ_SUFFIXES = ("kho_tom_tat", "kho_search", "kho_get", "kho_find_by_id", "kho_list")
 GOOGLE_READ_SUFFIXES = ("calendar_list_events", "tasks_list", "gmail_search", "gmail_read_message", "drive_search")
@@ -86,7 +87,7 @@ SCOPE_LABELS = {"calendar": "đọc lịch", "mail": "đọc mail", "tasks": "đ
 HUB_KEEP_KEYS = frozenset({"id", "messageId", "threadId", "eventId", "taskId", "fileId", "tasklistId"})
 # Nguồn hiển thị + danh từ trong câu lỗi, theo tiền tố hậu tố tool.
 _SOURCES: tuple[tuple[str, str, str], ...] = (
-    ("kho_", "Kho Ryan qua Gen-hub", "Kho"),
+    ("kho_", f"{KHO_LABEL} qua Gen-hub", "Kho"),
     ("calendar_", "Lịch Google qua Gen-hub", "lịch"),
     ("gmail_", "Gmail qua Gen-hub", "mail"),
     ("tasks_", "Google Tasks qua Gen-hub", "việc"),
@@ -130,7 +131,7 @@ def endpoint_forbidden(endpoint: str) -> bool:
 
 
 ENDPOINT_FORBIDDEN_MSG = "Địa chỉ Gen-hub trỏ tới vùng mạng bị cấm (link-local/siêu dữ liệu đám mây)"
-ENDPOINT_INVALID_MSG = "Địa chỉ Gen-hub không hợp lệ — kiểm tra lại (dạng https://hub.genos.top/mcp)"
+ENDPOINT_INVALID_MSG = "Địa chỉ Gen-hub không hợp lệ — kiểm tra lại (dạng https://<máy-chủ>/mcp)"
 
 
 def _summary(suffix: str, result: Any) -> str:
@@ -140,7 +141,7 @@ def _summary(suffix: str, result: Any) -> str:
 
 
 def source_of(suffix: str) -> str:
-    """Nhãn nguồn theo hậu tố: kho_* "Kho Ryan qua Gen-hub", calendar_* "Lịch Google qua Gen-hub", gmail_* …"""
+    """Nhãn nguồn theo hậu tố: kho_* "Kho dữ liệu qua Gen-hub", calendar_* "Lịch Google qua Gen-hub", gmail_* …"""
     for prefix, label, _ in _SOURCES:
         if suffix.startswith(prefix):
             return label
@@ -662,7 +663,7 @@ async def guard_server_admin(db: AsyncSession, *, user: service.CurrentUser, ser
     if not await is_hub_server(db, user.org_id, server_id):
         return False
     if user.role_code != rbac.OWNER:
-        msg = "Bị chặn: máy chủ Gen-hub (Kho Ryan) chỉ Owner được quản lý"
+        msg = f"Bị chặn: máy chủ Gen-hub ({KHO_LABEL}) chỉ Owner được quản lý"
         await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                                action="mcp.server_blocked", target_type="mcp_server", target_id=str(server_id),
                                target_label=SERVER_NAME, result="blocked",
@@ -699,7 +700,7 @@ async def generic_call(db: AsyncSession, redis: Any, transport: Any, *, user: se
     if link is None or link.server_id is None or link.server_id != tool.server_id:
         return None
     if user.role_code != rbac.OWNER:
-        msg = "Bị chặn: máy chủ Gen-hub (Kho Ryan) chỉ Owner được gọi"
+        msg = f"Bị chặn: máy chủ Gen-hub ({KHO_LABEL}) chỉ Owner được gọi"
         raise await _blocked_call(db, redis, user=user, tool=tool, agent_key=agent_key, args=args,
                                   code="HUB_OWNER_ONLY", msg=msg, detail=msg)
     suffix = suffix_of(tool.name)
@@ -831,7 +832,7 @@ async def _write_blocked(db: AsyncSession, user: service.CurrentUser, status: in
 
 async def write_kho(db: AsyncSession, redis: Any, client: McpClient, *, user: service.CurrentUser,
                     proposal_id: uuid.UUID, tool: str, args: dict[str, Any], permit: Any) -> dict[str, Any]:
-    """MỘT lần GHI Kho Ryan (kho_create / kho_update — bảng Phiên, Việc) sau khi Owner đã Xác nhận + nhập PIN.
+    """MỘT lần GHI Kho dữ liệu (kho_create / kho_update — bảng Phiên, Việc) sau khi Owner đã Xác nhận + nhập PIN.
 
     Thứ tự (lỗi nào cũng KHÔNG gọi ra ngoài trước khi qua hết): tool ∈ KHO_WRITE_SUFFIXES → Owner → permit ký (gắn
     đúng đề xuất + tool + sha256 tham số, 5 phút, dùng một lần) → kiểm lại tham số (kho_write) → liên kết bật →
@@ -842,7 +843,7 @@ async def write_kho(db: AsyncSession, redis: Any, client: McpClient, *, user: se
         raise await _write_blocked(db, user, 403, "HUB_TOOL_NOT_ALLOWED", WRITE_NOT_ALLOWED_MSG, tool=tool,
                                    proposal_id=pid)
     if user.role_code != rbac.OWNER:
-        raise await _write_blocked(db, user, 403, "HUB_OWNER_ONLY", "Chỉ Owner được ghi vào Kho Ryan", tool=tool,
+        raise await _write_blocked(db, user, 403, "HUB_OWNER_ONLY", f"Chỉ Owner được ghi vào {KHO_LABEL}", tool=tool,
                                    proposal_id=pid)
     err = await hub_permit.verify(permit, org_id=user.org_id, user_id=user.id, proposal_id=proposal_id, tool=tool,
                                   args=args, redis=redis)

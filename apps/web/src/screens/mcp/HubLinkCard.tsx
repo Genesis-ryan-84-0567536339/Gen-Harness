@@ -34,7 +34,7 @@ const fmtTime = (iso: string | null) => (iso ? new Date(iso).toLocaleString('vi-
 
 /**
  * v0.1.42 (F-61): thẻ này chỉ render ở Kết nối (/connections#genhub) — MCP Hub chỉ còn dòng liên kết tới đây.
- * Gen-hub (v0.1.26, docs/design/gen-hub-link.md §3): Gen đọc Kho Ryan qua Gen-hub — chỉ Sếp (Owner). Từ v0.1.50 Gen ghi được
+ * Gen-hub (v0.1.26, docs/design/gen-hub-link.md §3): Gen đọc Kho dữ liệu qua Gen-hub — chỉ Sếp (Owner). Từ v0.1.50 Gen ghi được
  * Phiên / Việc vào Kho, nhưng CHỈ khi Sếp bấm Xác nhận + nhập mã PIN trên thẻ đề xuất.
  * Token là ô CHỈ GHI: API không bao giờ trả lại (chỉ biết "đã lưu"). Liên kết tắt tới khi bấm "Kiểm tra" xanh;
  * đổi địa chỉ/token thì tắt lại, phải kiểm tra lại. Lưu / Kiểm tra cần PIN (`hub.link`), ghi Nhật ký hành động.
@@ -182,7 +182,7 @@ function HubLinkBody({ link, isOwner }: { link: HubLink; isOwner: boolean }) {
             save();
           }}
         >
-          <TextField label="Địa chỉ Gen-hub" value={endpoint} onChange={(e) => onEndpoint(e.target.value)} placeholder="https://hub.genos.top/mcp" className="mono" />
+          <TextField label="Địa chỉ Gen-hub" value={endpoint} onChange={(e) => onEndpoint(e.target.value)} placeholder="https://<địa-chỉ-gen-hub-của-bạn>/mcp" className="mono" />
           <TextField
             label={link.has_token ? 'Token mới (bỏ trống để giữ token đã lưu)' : 'Token Gen-hub'}
             type="password"

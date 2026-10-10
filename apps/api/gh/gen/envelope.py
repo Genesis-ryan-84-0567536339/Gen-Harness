@@ -164,7 +164,8 @@ class ProposeMemoryNote(_M):
 
 
 class KhoCreateFields(_M):
-    """v0.1.50 (F-81): tạo bản ghi Phiên / Việc ở Kho Ryan — trường hợp lệ: gh.hub_link.kho_write (server kiểm lại)."""
+    """v0.1.50 (F-81): tạo bản ghi Phiên / Việc ở Kho dữ liệu — trường hợp lệ: gh.hub_link.kho_write (server kiểm
+    lại)."""
     bang: Literal["Phiên", "Việc"]
     record: dict[str, str] = Field(max_length=8)
 

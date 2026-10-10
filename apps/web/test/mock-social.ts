@@ -420,7 +420,7 @@ export function createMock(opts: Opts) {
       gateState.sandbox.reason = o.sandbox === true ? null : (o.reason ?? gateState.sandbox.reason);
     }
     if (o.consent !== undefined) {
-      gateState.consent = o.consent ? { accepted_at: now(), accepted_by_name: 'Anh Cơ La', version: WRITE_RISK_VERSION } : null;
+      gateState.consent = o.consent ? { accepted_at: now(), accepted_by_name: 'Anh Nguyễn Văn A', version: WRITE_RISK_VERSION } : null;
     }
     if (o.worker_online !== undefined) gateState.workerOnline = o.worker_online;
     opts.emit('social.update', {});

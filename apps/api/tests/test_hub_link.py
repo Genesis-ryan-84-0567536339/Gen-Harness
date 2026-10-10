@@ -1,4 +1,4 @@
-"""v0.1.26 — Đợt D1: nối Gen-hub, Gen đọc Kho Ryan (docs/design/gen-hub-link.md §3).
+"""v0.1.26 — Đợt D1: nối Gen-hub, Gen đọc Kho dữ liệu (docs/design/gen-hub-link.md §3).
 
 Gen-hub `/mcp` giả bằng `httpx.MockTransport`: tên tool có tiền tố connector, Bearer bắt buộc, 401/429/timeout,
 tool lạ + tool ghi. Kiểm: chỉ Owner, PIN, token không bao giờ lộ, danh sách cho phép theo hậu tố, che dữ liệu trước
@@ -209,7 +209,7 @@ async def test_kho_reads_masked_and_cached(owner_api: Api, fake_hub: FakeHub, re
     r = await owner_api.get("/hub/kho/summary")
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["cached"] is False and body["source"] == "Kho Ryan qua Gen-hub"
+    assert body["cached"] is False and body["source"] == "Kho dữ liệu qua Gen-hub"
     for leaked in ("0912 345 678", "tuan.nguyen@example.com", "sk-abcdefghij", "190312345678901"):
         assert leaked not in r.text
     assert "VIEC-3" in r.text and "2026-09-27" in r.text

@@ -1,5 +1,5 @@
-"""v0.1.50 (F-81, QD-18) — Gen ĐỀ XUẤT ghi Kho Ryan (kho_create / kho_update — bảng Phiên, Việc); ghi thật chỉ khi Sếp
-bấm Xác nhận + nhập mã PIN, qua MỘT đường: confirm_proposal phát permit ký → POST /hub/kho/write → write_kho.
+"""v0.1.50 (F-81, QD-18) — Gen ĐỀ XUẤT ghi Kho dữ liệu (kho_create / kho_update — bảng Phiên, Việc); ghi thật chỉ khi
+Sếp bấm Xác nhận + nhập mã PIN, qua MỘT đường: confirm_proposal phát permit ký → POST /hub/kho/write → write_kho.
 
 Gen-hub `/mcp` giả (httpx.MockTransport) đếm MỌI lời gọi tools/call — bất biến cứng: không Xác nhận + PIN (+ permit
 hợp lệ) thì KHÔNG có lời gọi kho_create / kho_update nào; token Gen-hub không bao giờ vào log / Action Log /
@@ -254,7 +254,8 @@ async def test_proposal_cancel_and_no_pin_make_no_write_calls(owner_api: Api, fa
     assert list(p["fields"]["record"]) == ["Chủ đề", "Ngày", "Đã chốt"]                   # thứ tự trường của KHO_FIELDS
     assert p["labels"] == {"bang": "Phiên", "target": "Tạo mới ở bảng Phiên", "write_scope": "ok"}
     # Tóm tắt do HỆ THỐNG viết: đúng bảng + từng trường + câu kết.
-    assert p["summary"].startswith("Tạo bản ghi mới ở bảng Phiên của Kho Ryan: Chủ đề = “Họp chốt kế hoạch v0.1.50”; ")
+    assert p["summary"].startswith(
+        "Tạo bản ghi mới ở bảng Phiên của Kho dữ liệu: Chủ đề = “Họp chốt kế hoạch v0.1.50”; ")
     assert "Ngày = “" + today + "”" in p["summary"] and "Đã chốt = “Ra mắt Gen nhớ và ghi Kho có PIN”" in p["summary"]
     assert p["summary"].endswith("Chỉ ghi khi Sếp bấm Xác nhận và nhập mã PIN (qua Gen-hub).")
     assert "LỜI MODEL" not in p["summary"] and "user_id" not in p and "org_id" not in p
@@ -361,8 +362,8 @@ async def test_update_flow_labels_current_value_and_writes_once(owner_api: Api, 
     assert p["fields"] == {"ma": "VIEC-12", "record": {"Trạng thái": "Xong", "Ngày xong": "2026-10-09"}}
     assert p["labels"] == {"bang": "Việc", "target": "VIEC-12 · Nối Gen-hub", "write_scope": "ok",
                            "cur:Trạng thái": "Chờ", "cur:Ngày xong": ""}
-    assert p["summary"] == ("Cập nhật VIEC-12 (bảng Việc) ở Kho Ryan: Trạng thái = “Xong”; Ngày xong = “2026-10-09”. "
-                            "Chỉ ghi khi Sếp bấm Xác nhận và nhập mã PIN (qua Gen-hub).")
+    assert p["summary"] == ("Cập nhật VIEC-12 (bảng Việc) ở Kho dữ liệu: Trạng thái = “Xong”; "
+                            "Ngày xong = “2026-10-09”. Chỉ ghi khi Sếp bấm Xác nhận và nhập mã PIN (qua Gen-hub).")
     assert fake_hub.writes() == []
     await _pin(owner_api)
     r = await owner_api.send("POST", f"/gen/proposals/{p['id']}/confirm", {})

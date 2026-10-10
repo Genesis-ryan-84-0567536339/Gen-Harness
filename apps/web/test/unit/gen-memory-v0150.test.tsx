@@ -25,7 +25,7 @@ import { ApiError } from '../../src/lib/api';
 import { GenMemoryCard } from '../../src/screens/system/GenMemoryCard';
 
 const ME = (role: string) => ({
-  id: 'u1', email: 'owner@genesis.local', display_name: 'Anh Cơ La', role: { code: role, name: role },
+  id: 'u1', email: 'owner@genesis.local', display_name: 'Anh Nguyễn Văn A', role: { code: role, name: role },
   org: { id: 'o1', name: 'Genesis', timezone: 'Asia/Ho_Chi_Minh', currency: 'VND' },
   addressing: { self: 'Anh', bot_calls_me: 'Sếp' }, pin_verified_until: null, permissions: { 'system.read': 'all', 'system.manage': role === 'owner' ? 'all' : 'none' },
   features: { gen: role === 'owner' },
@@ -124,7 +124,7 @@ describe('Thẻ đề xuất "Ghi nhớ" (memory_note)', () => {
     expect(card).toHaveTextContent('Sếp dặn khi soạn báo giá ván MDF.');
     expect(card).toHaveTextContent('3/30');
     expect(card).not.toHaveTextContent('Cần mã PIN');
-    expect(card).not.toHaveTextContent('Ghi thẳng vào Kho Ryan');
+    expect(card).not.toHaveTextContent('Ghi thẳng vào Kho dữ liệu');
     expect(card.querySelector('[data-icon="brain"]')).not.toBeNull();
     expect(within(card).getByRole('button', { name: 'Xác nhận ghi nhớ' })).toBeEnabled();
     expect(writes()).toEqual([]);

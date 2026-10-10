@@ -25,7 +25,7 @@ test.describe('Tài khoản mạng xã hội (v0.1.29)', () => {
     await loginAsOwner(page);
     await page.goto('/overview');
     // Lối vào: menu tài khoản ở chân thanh bên.
-    await page.getByRole('button', { name: /Anh Cơ|Tài khoản/ }).last().click();
+    await page.getByRole('button', { name: /Anh Nguyễn Văn A|Tài khoản/ }).last().click();
     await page.getByRole('menuitem', { name: 'Tài khoản mạng xã hội' }).click();
     await expect(page).toHaveURL(/\/social$/);
     await expect(page.getByRole('heading', { level: 2, name: 'Tài khoản mạng xã hội' })).toBeVisible();
@@ -96,7 +96,7 @@ test.describe('Bước 4 "Để sau" (v0.1.29)', () => {
     await resetMock(page.request, 'fresh');
     await apiCall(page, 'PUT', '/setup/steps/1', { token: SETUP_TOKEN, language: 'vi', mode: 'empty' });
     await apiCall(page, 'PUT', '/setup/steps/2', {
-      token: SETUP_TOKEN, display_name: 'Anh Cơ', email: 'ryan@genesis.vn', password: 'mot-cau-rat-dai-de-nho-2026', pin: OWNER.pin, pin_confirm: OWNER.pin,
+      token: SETUP_TOKEN, display_name: 'Anh Cơ', email: 'owner@example.test', password: 'mot-cau-rat-dai-de-nho-2026', pin: OWNER.pin, pin_confirm: OWNER.pin,
     });
     await apiCall(page, 'PUT', '/setup/steps/3', { org_name: 'Genesis Trading', timezone: 'Asia/Ho_Chi_Minh', currency: 'VND', self_name: 'Anh', bot_calls_me: 'Sếp' });
     await page.goto('/setup');

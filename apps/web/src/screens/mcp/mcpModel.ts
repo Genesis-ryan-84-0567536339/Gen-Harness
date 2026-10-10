@@ -154,7 +154,7 @@ export function scopesMessage(readMissing: unknown, scopes: Partial<Record<keyof
 /**
  * v0.1.50 (F-81, QD-18): quyền GHI Kho (tuỳ chọn) của token Gen-hub, THEO TỪNG tool — máy chủ báo `write_scopes.kho_create`,
  * `write_scopes.kho_update` (và `kho` = có cả hai); máy chủ cũ chỉ có `kho` ⇒ hai dòng theo `kho`. Gen KHÔNG tự ghi: chỉ ghi khi
- * Sếp bấm Xác nhận + nhập mã PIN trên thẻ đề xuất "Ghi vào Kho Ryan". Thiếu quyền ghi không làm Kiểm tra đỏ.
+ * Sếp bấm Xác nhận + nhập mã PIN trên thẻ đề xuất "Ghi vào Kho dữ liệu". Thiếu quyền ghi không làm Kiểm tra đỏ.
  */
 export const WRITE_SCOPE_ROWS: ReadonlyArray<{ key: 'kho_create' | 'kho_update'; label: string }> = [
   { key: 'kho_create', label: 'Tạo bản ghi Phiên/Việc' },

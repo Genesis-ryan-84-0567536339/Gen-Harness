@@ -17,7 +17,7 @@ import { qk } from '../../src/lib/queries';
 import { queryClient } from '../../src/lib/queryClient';
 
 const ME = {
-  id: 'u1', email: 'owner@genesis.local', display_name: 'Anh Cơ La', role: { code: 'owner', name: 'Owner — Sếp' },
+  id: 'u1', email: 'owner@genesis.local', display_name: 'Anh Nguyễn Văn A', role: { code: 'owner', name: 'Owner — Sếp' },
   org: { id: 'o1', name: 'Genesis', timezone: 'Asia/Ho_Chi_Minh', currency: 'VND' },
   addressing: { self: 'Anh', bot_calls_me: 'Sếp' }, pin_verified_until: null, permissions: { 'action.approve': 'all' }, must_change_password: false,
   features: { gen: true },
@@ -29,8 +29,8 @@ const REMINDER: GenProposal = {
   id: 'p1',
   type: 'reminder',
   fields: { title: 'Gọi lại anh Bình', remind_at: REMIND, due_at: null, priority: 'P2', assignee_user_id: 'u1' },
-  summary: 'Tạo nhắc việc “Gọi lại anh Bình” (P2), nhắc lúc 15:00 30/09/2026, giao cho Anh Cơ La.',
-  labels: { user: 'Anh Cơ La' },
+  summary: 'Tạo nhắc việc “Gọi lại anh Bình” (P2), nhắc lúc 15:00 30/09/2026, giao cho Anh Nguyễn Văn A.',
+  labels: { user: 'Anh Nguyễn Văn A' },
   target: 'tasks.new',
   requires_pin: false,
   status: 'pending',
@@ -64,7 +64,7 @@ function stubApi() {
       calls.push({ method, url, body });
       const json = (status: number, b: unknown) => new Response(JSON.stringify(b), { status, headers: { 'Content-Type': 'application/json' } });
       if (url.endsWith('/gen/assignees'))
-        return json(200, { items: [{ id: 'u1', name: 'Anh Cơ La', role: 'Owner', me: true }, { id: 'u2', name: 'Chị Lan', role: 'Vận hành', me: false }] });
+        return json(200, { items: [{ id: 'u1', name: 'Anh Nguyễn Văn A', role: 'Owner', me: true }, { id: 'u2', name: 'Chị Lan', role: 'Vận hành', me: false }] });
       const m = url.match(/\/gen\/proposals\/(\w+)\/(confirm|cancel)$/);
       if (m && method === 'POST') {
         if (confirmReply) return json(confirmReply.status, confirmReply.body);
@@ -129,7 +129,7 @@ describe('Gen proposal card', () => {
     expect(card).toHaveTextContent('Đề xuất · Tạo nhắc việc');
     expect(card).toHaveTextContent(REMINDER.summary);
     expect(card).toHaveTextContent('Gọi lại anh Bình');
-    expect(card).toHaveTextContent('Anh Cơ La');
+    expect(card).toHaveTextContent('Anh Nguyễn Văn A');
     for (const name of ['Xác nhận', 'Sửa', 'Huỷ']) expect(within(card).getByRole('button', { name })).toBeEnabled();
     expect(within(card).queryByText('Cần mã PIN')).toBeNull();
     expect(writes()).toEqual([]);

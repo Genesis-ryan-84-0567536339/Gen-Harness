@@ -1,6 +1,6 @@
 /**
  * Gen v2 (A4) — thẻ đề xuất thao tác có xác nhận: nháp tin gửi đi, nhắc việc, giao người phụ trách. v0.1.50 (F-81, QD-18):
- * thẻ "Ghi nhớ" (Gen nhớ, không PIN) và thẻ "Ghi vào Kho Ryan" (tạo / sửa bản ghi Phiên · Việc qua Gen-hub, cần PIN).
+ * thẻ "Ghi nhớ" (Gen nhớ, không PIN) và thẻ "Ghi vào Kho dữ liệu" (tạo / sửa bản ghi Phiên · Việc qua Gen-hub, cần PIN).
  *
  * Gen KHÔNG tự làm: thẻ hiện form điền sẵn + tóm tắt do hệ thống viết; chỉ khi bấm **Xác nhận** web mới gọi
  * `POST /gen/proposals/{id}/confirm` (server thực hiện nhân danh người bấm qua endpoint sẵn có, đúng quyền + PIN).
@@ -122,7 +122,7 @@ function MemorySummary({ p }: { p: MemoryProposal }) {
   );
 }
 
-/** Thẻ Ghi vào Kho Ryan: bảng + bản ghi (khoá cứng) và BẢNG trường — đúng `fields.record`, hiện tại → sẽ ghi khi sửa. */
+/** Thẻ Ghi vào Kho dữ liệu: bảng + bản ghi (khoá cứng) và BẢNG trường — đúng `fields.record`, hiện tại → sẽ ghi khi sửa. */
 function KhoSummary({ p }: { p: KhoProposal }) {
   const update = p.type === 'kho_update';
   const rows = khoRows(p);

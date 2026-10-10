@@ -4,7 +4,7 @@ const HONORIFICS = new Set(['anh', 'chị', 'chi', 'em', 'ông', 'bà', 'cô', '
 
 /**
  * Avatar initials: drop a leading honorific and any "(nickname)", then take the
- * first letters of the last two words — "Anh Cơ La (Ryan)" → "CL" (design).
+ * first letters of the last two words — "Anh Nguyễn Văn A (Chủ)" → "VA" (design).
  */
 export function initials(displayName: string): string {
   const words = displayName

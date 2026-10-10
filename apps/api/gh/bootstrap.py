@@ -42,7 +42,7 @@ BOUNDARIES = (
     Boundary("observe_external_market", True, False),
     Boundary("auto_personnel_decisions", False, True),
     Boundary("approval_gate", True, True, {"approval_threshold_vnd": policy.DEFAULT_APPROVAL_THRESHOLD_VND}),
-    # Khoá cứng #4. Ngoại lệ duy nhất (v0.1.50, QD-18): ghi Kho Ryan qua `hub_link.service.write_kho` — bước duyệt là
+    # Khoá cứng #4. Ngoại lệ duy nhất (v0.1.50, QD-18): ghi Kho dữ liệu qua `hub_link.service.write_kho` — bước duyệt là
     # Xác nhận + mã PIN của Owner + permit ký (invoke_tool(approved_write=True)); test bất biến khoá chỗ gọi này.
     Boundary("mcp_write_requires_approval", True, True),
 )

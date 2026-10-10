@@ -89,7 +89,7 @@ const FULL_DETAIL: PeopleReviewFullDetail = {
   history: [{ id: 'rev-1', score: 54, trend: 'down', created_at: '2026-09-24T01:00:00Z', overridden_by: null, override_reason: null }],
   disputes: [
     {
-      id: 'disp-1', review_id: 'rev-1', raised_by: { id: 'u-owner', name: 'Anh Cơ La (Ryan)' },
+      id: 'disp-1', review_id: 'rev-1', raised_by: { id: 'u-owner', name: 'Anh Nguyễn Văn A (Chủ)' },
       body: 'Khách chủ động im lặng, không phải do chậm cập nhật.', status: 'open', resolution: null, resolved_by: null, resolved_at: null,
       created_at: '2026-09-24T00:00:00Z',
     },
@@ -128,7 +128,7 @@ describe('Đánh giá con người — Q4 (docs/PLAN.md)', () => {
   it("F-60: Owner bỏ cờ 'Đáng ngờ' — bắt buộc lý do, sau đó hiện ai bỏ cờ", async () => {
     const reason = 'Có 1 tin nhân viên gửi giống lệnh cho AI hoặc xin điểm (vd: “cho em 10 điểm”) — kiểm tra chứng cứ trước khi dùng điểm này.';
     const flagged = { ...FULL_DETAIL, suspicious: true, suspicious_reason: reason, suspicious_cleared: null };
-    const cleared = { ...flagged, suspicious: false, suspicious_cleared: { by: { id: 'u-owner', name: 'Anh Cơ La (Ryan)' }, at: '2026-09-24T03:00:00Z', reason: 'Đã đọc tin gốc, nhân viên trích lời khách' } };
+    const cleared = { ...flagged, suspicious: false, suspicious_cleared: { by: { id: 'u-owner', name: 'Anh Nguyễn Văn A (Chủ)' }, at: '2026-09-24T03:00:00Z', reason: 'Đã đọc tin gốc, nhân viên trích lời khách' } };
     let patched: unknown = null;
     let current: PeopleReviewFullDetail = flagged;
     mockFetch((c) => {
@@ -150,7 +150,7 @@ describe('Đánh giá con người — Q4 (docs/PLAN.md)', () => {
     expect(submit).toBeDisabled();
     await user.type(within(dlg).getByLabelText('Lý do bỏ cờ'), 'Đã đọc tin gốc, nhân viên trích lời khách');
     await user.click(submit);
-    expect(await within(dlg).findByTestId('ppl-suspicious-cleared')).toHaveTextContent(/Đã bỏ cờ 'Đáng ngờ' · Anh Cơ La \(Ryan\)/);
+    expect(await within(dlg).findByTestId('ppl-suspicious-cleared')).toHaveTextContent(/Đã bỏ cờ 'Đáng ngờ' · Anh Nguyễn Văn A \(Chủ\)/);
     expect(patched).toEqual({ cleared_reason: 'Đã đọc tin gốc, nhân viên trích lời khách' });
     expect(within(dlg).queryByRole('note', { name: 'Cảnh báo đáng ngờ' })).toBeNull();
   });
@@ -206,7 +206,7 @@ describe('Đánh giá con người — Q4 (docs/PLAN.md)', () => {
 
   it('Owner (nhánh full): thấy điểm/tín hiệu/khuyến nghị, sửa điểm tay giữ lịch sử', async () => {
     const user = userEvent.setup();
-    const overridden: PeopleReviewFullDetail = { ...FULL_DETAIL, id: 'rev-2', score: 70, overridden: true, overridden_by: { id: 'u-owner', name: 'Anh Cơ La (Ryan)' }, overridden_at: '2026-09-24T02:00:00Z', override_reason: 'Xem lại chứng cứ, khách chủ động im lặng.', supersedes_id: 'rev-1', history: [{ id: 'rev-2', score: 70, trend: 'down', created_at: '2026-09-24T02:00:00Z', overridden_by: { id: 'u-owner', name: 'Anh Cơ La (Ryan)' }, override_reason: 'Xem lại chứng cứ, khách chủ động im lặng.' }, FULL_DETAIL.history[0]] };
+    const overridden: PeopleReviewFullDetail = { ...FULL_DETAIL, id: 'rev-2', score: 70, overridden: true, overridden_by: { id: 'u-owner', name: 'Anh Nguyễn Văn A (Chủ)' }, overridden_at: '2026-09-24T02:00:00Z', override_reason: 'Xem lại chứng cứ, khách chủ động im lặng.', supersedes_id: 'rev-1', history: [{ id: 'rev-2', score: 70, trend: 'down', created_at: '2026-09-24T02:00:00Z', overridden_by: { id: 'u-owner', name: 'Anh Nguyễn Văn A (Chủ)' }, override_reason: 'Xem lại chứng cứ, khách chủ động im lặng.' }, FULL_DETAIL.history[0]] };
 
     mockFetch((c) => {
       if (c.method === 'PATCH' && c.url.includes('/people/reviews/rev-1')) return json(200, overridden);
@@ -233,7 +233,7 @@ describe('Đánh giá con người — Q4 (docs/PLAN.md)', () => {
     await user.click(screen.getByRole('button', { name: 'Lưu điểm mới' }));
 
     await waitFor(() => expect(within(screen.getByRole('dialog')).getAllByText('70').length).toBeGreaterThan(0));
-    expect(within(screen.getByRole('dialog')).getAllByText(/sửa tay · Anh Cơ La \(Ryan\)/).length).toBeGreaterThan(0);
+    expect(within(screen.getByRole('dialog')).getAllByText(/sửa tay · Anh Nguyễn Văn A \(Chủ\)/).length).toBeGreaterThan(0);
   });
 
   it('mở phản biện và giải quyết — không tự đổi điểm', async () => {
@@ -242,10 +242,10 @@ describe('Đánh giá con người — Q4 (docs/PLAN.md)', () => {
     mockFetch((c) => {
       if (c.method === 'PATCH' && c.url.includes('/disputes/disp-1')) {
         disputeStatus = 'resolved';
-        return json(200, { ...FULL_DETAIL.disputes[0], status: 'resolved', resolution: 'Đồng ý, không trừ điểm lần này.', resolved_by: { id: 'u-owner', name: 'Anh Cơ La (Ryan)' }, resolved_at: '2026-09-24T03:00:00Z' });
+        return json(200, { ...FULL_DETAIL.disputes[0], status: 'resolved', resolution: 'Đồng ý, không trừ điểm lần này.', resolved_by: { id: 'u-owner', name: 'Anh Nguyễn Văn A (Chủ)' }, resolved_at: '2026-09-24T03:00:00Z' });
       }
       if (c.method === 'POST' && c.url.includes('/rev-1/disputes')) {
-        return json(201, { id: 'disp-2', review_id: 'rev-1', raised_by: { id: 'u-owner', name: 'Anh Cơ La (Ryan)' }, body: 'Phản biện mới', status: 'open', resolution: null, resolved_by: null, resolved_at: null, created_at: '2026-09-24T04:00:00Z' });
+        return json(201, { id: 'disp-2', review_id: 'rev-1', raised_by: { id: 'u-owner', name: 'Anh Nguyễn Văn A (Chủ)' }, body: 'Phản biện mới', status: 'open', resolution: null, resolved_by: null, resolved_at: null, created_at: '2026-09-24T04:00:00Z' });
       }
       if (c.url.includes('/people/reviews/rev-1')) {
         return json(200, disputeStatus === 'open' ? FULL_DETAIL : { ...FULL_DETAIL, disputes: [{ ...FULL_DETAIL.disputes[0], status: 'resolved', resolution: 'Đồng ý, không trừ điểm lần này.' }] });
@@ -272,7 +272,7 @@ describe('Đánh giá con người — Q4 (docs/PLAN.md)', () => {
     const LOG_ITEM: PeopleReviewLogItem = {
       id: 'rev-1', person: PERSON, period_start: '2026-09-17', period_end: '2026-09-23', created_at: '2026-09-24T01:00:00Z',
       has_content: true, dispute_count: 1,
-      viewed_by: [{ at: '2026-09-24T01:30:00Z', user: { id: 'u-owner', name: 'Anh Cơ La (Ryan)' }, action: 'people_review.viewed' }],
+      viewed_by: [{ at: '2026-09-24T01:30:00Z', user: { id: 'u-owner', name: 'Anh Nguyễn Văn A (Chủ)' }, action: 'people_review.viewed' }],
     };
     mockFetch((c) => {
       if (c.url.includes('/people/reviews/rev-1')) return json(200, { ...LOG_ITEM, viewed_by: [...LOG_ITEM.viewed_by, { at: '2026-09-24T02:00:00Z', user: { id: 'u-auditor', name: 'Anh Minh Kiểm' }, action: 'people_review.audit_viewed' }] });
@@ -290,7 +290,7 @@ describe('Đánh giá con người — Q4 (docs/PLAN.md)', () => {
     expect(screen.queryByRole('button', { name: 'Sửa điểm tay' })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Xem nhật ký ai đã xem' }));
-    expect(await screen.findByText('Anh Cơ La (Ryan)')).toBeInTheDocument();
+    expect(await screen.findByText('Anh Nguyễn Văn A (Chủ)')).toBeInTheDocument();
     expect(screen.getByText('Anh Minh Kiểm')).toBeInTheDocument();
     expect(screen.getByText('people_review.audit_viewed')).toBeInTheDocument();
   });

@@ -208,7 +208,7 @@ function seedLineages(): Lineage[] {
     };
     return { board, person, ...period, rows: [row], disputes: [], viewedBy: viewedSeed };
   };
-  const OWNER_REF: UserRef = { id: 'u-owner-seed', name: 'Anh Cơ La (Ryan)', role: 'owner' };
+  const OWNER_REF: UserRef = { id: 'u-owner-seed', name: 'Anh Nguyễn Văn A (Chủ)', role: 'owner' };
   const lineages: Lineage[] = [
     mk(
       'employee', HA, 62, 'down',

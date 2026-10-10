@@ -26,15 +26,15 @@ async def test_seed_produces_evidence_that_traces_back_to_raw_message(app, db, r
     out = await seed_demo(sessionmaker(), redis)
     org = out["org_id"]
 
-    # Cơ hội MDF của Trần Văn Hậu (OPP-1842 thiết kế) — bấm "vì sao" phải lần được về đúng tin thô.
+    # Cơ hội MDF của Nguyễn Văn Mẫu (OPP-1842 thiết kế) — bấm "vì sao" phải lần được về đúng tin thô.
     opp = (await db.execute(text("""
         SELECT o.value_vnd, p.display_name, o.need FROM biz.opportunities o JOIN core.persons p ON p.id = o.person_id
-        WHERE o.org_id = :o AND p.display_name = 'Trần Văn Hậu'"""), {"o": org})).one()
-    assert opp.display_name == "Trần Văn Hậu" and opp.value_vnd == 1_200_000_000
+        WHERE o.org_id = :o AND p.display_name = 'Nguyễn Văn Mẫu'"""), {"o": org})).one()
+    assert opp.display_name == "Nguyễn Văn Mẫu" and opp.value_vnd == 1_200_000_000
 
     unit = (await db.execute(text("""
         SELECT mu.id FROM clean.meaning_units mu JOIN core.persons p ON p.id = mu.person_id
-        WHERE mu.org_id = :o AND p.display_name = 'Trần Văn Hậu' AND mu.side = 'demand'"""), {"o": org})).one()
+        WHERE mu.org_id = :o AND p.display_name = 'Nguyễn Văn Mẫu' AND mu.side = 'demand'"""), {"o": org})).one()
     ev = (await db.execute(text("SELECT raw_event_id, quote FROM clean.evidence WHERE meaning_unit_id = :u"),
                            {"u": unit.id})).one()
     raw_text = (await db.execute(text("SELECT body_text FROM raw.events WHERE id = :i"), {"i": ev.raw_event_id})
@@ -48,7 +48,7 @@ async def test_seed_produces_evidence_that_traces_back_to_raw_message(app, db, r
         SELECT a.title, a.priority, a.evidence, p.display_name FROM biz.alerts a
         JOIN core.persons p ON p.id = a.subject_id
         WHERE a.org_id = :o AND a.alert_type = 'repeated_complaint'"""), {"o": org})).one()
-    assert alert.priority == "P1" and alert.display_name == "Nguyễn Văn Bảo"
+    assert alert.priority == "P1" and alert.display_name == "Đặng Văn Mẫu Bảy"
     raw_ref = next(e for e in alert.evidence if e["type"] == "raw")
     raw_text2 = (await db.execute(text("SELECT body_text FROM raw.events WHERE id = :i"), {"i": raw_ref["id"]})
                 ).scalar_one()
@@ -58,7 +58,7 @@ async def test_seed_produces_evidence_that_traces_back_to_raw_message(app, db, r
     assert out["matches"] >= 1
 
     # Tín hiệu ứng viên qua R-05.
-    candidate = (await db.execute(text("SELECT person_type FROM core.persons WHERE display_name = 'Võ Thanh Sơn'")
+    candidate = (await db.execute(text("SELECT person_type FROM core.persons WHERE display_name = 'Bùi Văn Mẫu Tám'")
                                   )).scalar_one()
     assert candidate == "candidate"
 

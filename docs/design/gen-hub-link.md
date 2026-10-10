@@ -10,7 +10,7 @@
 
 ## 0. Tóm tắt cho Boss (đọc 30 giây)
 
-- **Gen-hub** = trạm điều phối công cụ + danh tính cho mọi agent (MCP `/mcp`, Kho Ryan, Vault, nhật ký).
+- **Gen-hub** = trạm điều phối công cụ + danh tính cho mọi agent (MCP `/mcp`, Kho dữ liệu, Vault, nhật ký).
   **Gen-Harness** = app vận hành doanh nghiệp (Console, Gen, Hộp thư, agent Zalo/WhatsApp).
 - Gen-Harness **đã có sẵn** "MCP Hub" để gọi máy chủ MCP bên ngoài (có mở tool, cấp quyền, chặn mạng, tool ghi phải duyệt).
   Gen-hub **đã có sẵn** token riêng cho từng agent và tool đọc Kho. → Nối được **mà không cần sửa Gen-hub**.
@@ -29,7 +29,7 @@
 | **Dev Claude** | Claude Code (+ sub agent) | Code, review, merge, phát hành cả 2 repo | Không vận hành dữ liệu khách |
 | **Gen (trong app)** | Trợ lý quản trị ở Gen-Harness | Đọc dữ liệu app theo quyền người hỏi; *từ v0.1.26* đọc Kho, *từ v0.1.49* đọc lịch/mail/việc/Drive qua Gen-hub; đề xuất việc; *từ v0.1.50* đề xuất ghi Kho | Không sửa code, không nói với khách, **không tự ghi Kho** — chỉ ghi khi Sếp Xác nhận + mã PIN (§7) |
 | **Agent vòng ngoài** | Agent Zalo/WhatsApp (bridge Gen-Harness) | Thu thập thị trường, trả lời nhóm theo chính sách | Không chạm Kho/Gen-hub trực tiếp |
-| **Gen-hub `/mcp` + Kho** | Trạm MCP + Baserow `kho.<domain>` | SSOT Việc/Phiên/Quyết định/Bài học/Dự án (QD-6); token agent, audit, Vault | Không giữ dữ liệu khách của Gen-Harness |
+| **Gen-hub `/mcp` + Kho** | Trạm MCP + Kho dữ liệu (Baserow) | SSOT Việc/Phiên/Quyết định/Bài học/Dự án (QD-6); token agent, audit, Vault | Không giữ dữ liệu khách của Gen-Harness |
 | **gen-workplace** (warroom, kanban, swarm) | Dịch vụ riêng, lộ ra qua Gen-hub (thấy tool `post_warroom_message`, `create_kanban_task`, `claim_task`…) | Phòng làm việc chung của các agent | *Chưa đọc mã — chưa kiểm tra* |
 | **Trình duyệt tự động** (Playwright/Chromium) | Test E2E ở cả hai repo; từ v0.1.29 là worker `apps/browser` đọc/trả lời Facebook cá nhân cho Gen ([gen-browser-agent.md](gen-browser-agent.md)) | Thao tác web theo kịch bản có tên; mọi việc gửi ra ngoài qua Xác nhận + mã PIN | Không giữ DB hay khoá master |
 
@@ -101,7 +101,7 @@ Mỗi tổ chức (org) trong Gen-Harness có **token riêng** và agent riêng 
 ## 3. Lát đầu tiên — v0.1.26 "Gen đọc Kho"
 
 **Kết quả nhìn thấy**: Boss hỏi Gen "Kho đang có việc gì mở?", "đã chốt gì về Jev?", "VIEC-12 là gì?" → Gen trả lời kèm mã
-(VIEC-/QD-/PHIEN-) và nguồn "Kho Ryan qua Gen-hub". Màn MCP Hub có thẻ "Gen-hub" với trạng thái + nút Kiểm tra.
+(VIEC-/QD-/PHIEN-) và nguồn "Kho dữ liệu qua Gen-hub". Màn MCP Hub có thẻ "Gen-hub" với trạng thái + nút Kiểm tra.
 
 ### 3.1 Gen-Harness (việc của Dev Claude)
 
@@ -123,7 +123,7 @@ Mỗi tổ chức (org) trong Gen-Harness có **token riêng** và agent riêng 
 **Bắt buộc cho v0.1.26 — chỉ thao tác, không sửa mã** (Boss làm, ~3 phút):
 1. Gen-hub › **Agent & quyền** › tạo agent `gen-harness-<công ty>`; mô tả "Gen trong Gen-Harness — chỉ đọc Kho".
 2. Tạo token thủ công; chỉ tick `kho_tom_tat`, `kho_search`, `kho_get`, `kho_find_by_id`, `kho_list`; **không** tick Vault/tool khác.
-3. Chép token (hiện 1 lần) → Gen-Harness › MCP Hub › Thêm máy chủ `https://hub.genos.top/mcp`, `streamable_http`, dán token,
+3. Chép token (hiện 1 lần) → Gen-Harness › MCP Hub › Thêm máy chủ `https://<địa-chỉ-gen-hub-của-bạn>/mcp`, `streamable_http`, dán token,
    bật "Cho phép mạng công cộng" cho máy chủ này (PIN) → Kiểm tra.
 
 **Nên có sau (mở Issue bên Gen-hub, gắn `agent:claude` review)**:
@@ -204,7 +204,7 @@ Gen-hub **tick thêm quyền** cho token của Gen-Harness rồi bấm Kiểm tr
 | `GET /hub/google/drive/search?q` | `drive_search` | `query`, `maxResults` 10 |
 
 Nhãn nguồn: "Lịch Google qua Gen-hub", "Gmail qua Gen-hub", "Google Tasks qua Gen-hub", "Google Drive qua Gen-hub"
-(Kho vẫn "Kho Ryan qua Gen-hub"). `call_kho` giữ làm bí danh của `call_hub`.
+(Kho vẫn "Kho dữ liệu qua Gen-hub"). `call_kho` giữ làm bí danh của `call_hub`.
 
 ### 6.5 Che, đệm, nhật ký
 
@@ -285,7 +285,7 @@ tick đúng quyền đó. Rủi ro Owner tự quyết: nội dung lịch/mail (�
 
 ## 7. v0.1.50 — Gen nhớ và ghi Kho có xác nhận (QD-18, F-81, F-87)
 
-> **QD-18 (Boss duyệt 09/10/2026)** thay quyết định cũ "Gen ghi Gen-hub để sau": Gen được **đề xuất** ghi Phiên/Việc vào Kho Ryan. Gen **không bao giờ tự ghi** —
+> **QD-18 (Boss duyệt 09/10/2026)** thay quyết định cũ "Gen ghi Gen-hub để sau": Gen được **đề xuất** ghi Phiên/Việc vào Kho dữ liệu. Gen **không bao giờ tự ghi** —
 > mỗi lần ghi do Sếp bấm Xác nhận và nhập mã PIN. Kanban, warroom, Gmail, Lịch, Drive, Tasks vẫn chỉ đọc (hoặc chưa làm). Migration `0032`
 > (`db/sql/0032_v0150_gen_memory_kho_write.sql`, revision `0032` ← `0031`, chạy lại an toàn): `agent.gen_memory_notes`, `agent.hub_release_proposals`.
 
@@ -303,14 +303,14 @@ Trường khác (Công cụ, Người làm…) **chưa ghi được** — chưa 
 ### 7.2 Luồng ghi — đường duy nhất
 
 ```
-Gen đề xuất kho_create / kho_update ─► thẻ "Ghi vào Kho Ryan" (bảng Trường | Hiện tại | Sẽ ghi, cảnh báo cố định)
+Gen đề xuất kho_create / kho_update ─► thẻ "Ghi vào Kho dữ liệu" (bảng Trường | Hiện tại | Sẽ ghi, cảnh báo cố định)
   ─► Sếp bấm Xác nhận + nhập mã PIN ─► confirm_proposal (Owner) phát PERMIT ký: 5 phút, dùng một lần, gắn proposal_id + tool + sha256(args)
   ─► nội bộ POST /hub/kho/write {proposal_id, tool, args, permit} (Owner + PIN `hub.write`)
-  ─► hub_link.service.write_kho ─► invoke_tool(approved_write=True) ─► Gen-hub kho_create | kho_update ─► Kho Ryan
+  ─► hub_link.service.write_kho ─► invoke_tool(approved_write=True) ─► Gen-hub kho_create | kho_update ─► Kho dữ liệu
 ```
 
 - Đề xuất (bước `proposal` như cũ; chỉ Owner): `kho_create` `{bang:'Phiên'|'Việc', record:{<trường>: chuỗi}}`, target `hub.kho_write:<bang>`; `kho_update` `{ma:'PHIEN-n'|'VIEC-n', record}`,
-  target `hub.kho_write:<ma>`. `requires_pin = true` (PIN `hub.write` = "Ghi Kho Ryan qua Gen-hub (Phiên, Việc)"). Nhãn: `bang`, `target` ("Tạo mới ở bảng Phiên" | "VIEC-12 · <tiêu đề hiện tại>"),
+  target `hub.kho_write:<ma>`. `requires_pin = true` (PIN `hub.write` = "Ghi Kho dữ liệu qua Gen-hub (Phiên, Việc)"). Nhãn: `bang`, `target` ("Tạo mới ở bảng Phiên" | "VIEC-12 · <tiêu đề hiện tại>"),
   `write_scope` (`ok`|`missing`) và với sửa `cur:<trường>` (giá trị HIỆN TẠI, đọc qua Gen-hub, đã che, rỗng nếu trường đang trống). Sửa trên thẻ chỉ `record`.
   Kết quả: `{type:'kho_record', id:null, code:'PHIEN-12'|null, screen:null, bang}`.
 - `kho_update` chỉ được đề xuất khi mã bản ghi vừa xuất hiện trong kết quả `hub.kho_*` của chính lượt đó (chống model bịa mã) và đọc được giá trị hiện tại — để Sếp không xác nhận thay đổi mà thẻ không cho thấy giá trị cũ.

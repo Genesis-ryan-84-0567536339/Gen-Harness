@@ -35,7 +35,7 @@ function mockFetch(handler: (c: Call) => Response | Promise<Response>) {
 
 function meWith(permissions: Record<string, string>, role = 'owner') {
   return {
-    id: 'u', email: 'owner@genesis.local', display_name: 'Anh Cơ La (Ryan)',
+    id: 'u', email: 'owner@genesis.local', display_name: 'Anh Nguyễn Văn A (Chủ)',
     role: { code: role, name: role === 'owner' ? 'Owner — Sếp' : role },
     org: { id: 'o', name: 'x', timezone: 'Asia/Ho_Chi_Minh', currency: 'VND' },
     addressing: { self: 'Anh', bot_calls_me: 'Sếp' }, pin_verified_until: null,
@@ -171,7 +171,7 @@ describe('Điều khiển hệ thống › Quyền hạn', () => {
 describe('Điều khiển hệ thống › Nhật ký', () => {
   it('tìm theo tên/hành động lọc bảng phía client; Xuất CSV gọi đúng GET /audit-log/export', async () => {
     const AUDIT_ITEMS = [
-      { id: '1', at: '2026-09-20T08:00:00Z', actor_type: 'user', actor_id: 'u1', actor_label: 'Anh Cơ La', action: 'auth.pin_verified', target_type: null, target_id: null, target_label: null, autonomy_level: null, result: 'ok', detail: null },
+      { id: '1', at: '2026-09-20T08:00:00Z', actor_type: 'user', actor_id: 'u1', actor_label: 'Anh Nguyễn Văn A', action: 'auth.pin_verified', target_type: null, target_id: null, target_label: null, autonomy_level: null, result: 'ok', detail: null },
       { id: '2', at: '2026-09-20T07:00:00Z', actor_type: 'agent', actor_id: 'a1', actor_label: 'Trợ lý thương mại', action: 'draft.created', target_type: 'draft', target_id: 'd1', target_label: 'ACT-0231', autonomy_level: 4, result: 'held', detail: null },
     ];
     const calls = mockFetch((c) => {
@@ -184,10 +184,10 @@ describe('Điều khiển hệ thống › Nhật ký', () => {
     const user = userEvent.setup();
     renderScreen(<SystemScreen />, FULL_PERMS, 'log');
     await screen.findByText('Trợ lý thương mại');
-    expect(screen.getByText('Anh Cơ La')).toBeInTheDocument();
+    expect(screen.getByText('Anh Nguyễn Văn A')).toBeInTheDocument();
 
     await user.type(screen.getByLabelText('Tìm trong nhật ký'), 'Trợ lý');
-    expect(screen.queryByText('Anh Cơ La')).not.toBeInTheDocument();
+    expect(screen.queryByText('Anh Nguyễn Văn A')).not.toBeInTheDocument();
     expect(screen.getByText('Trợ lý thương mại')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: /Xuất CSV/ }));

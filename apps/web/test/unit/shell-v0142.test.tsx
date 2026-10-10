@@ -21,7 +21,7 @@ const STATUS = { channels_live: 2, groups_listening: 5, autonomy_level: 4, data_
 
 function me(role: RoleCode) {
   return {
-    id: 'u', email: `${role}@genesis.local`, display_name: 'Anh Cơ La (Ryan)', role: { code: role, name: role },
+    id: 'u', email: `${role}@genesis.local`, display_name: 'Anh Nguyễn Văn A (Chủ)', role: { code: role, name: role },
     org: { id: 'o', name: 'x', timezone: 'Asia/Ho_Chi_Minh', currency: 'VND' },
     addressing: { self: 'Anh', bot_calls_me: 'Sếp' }, pin_verified_until: null, permissions: permissionsOf(role),
   };
@@ -132,7 +132,7 @@ describe('Logo + menu tài khoản (F-67, F-63)', () => {
   it('menu tài khoản không còn "Phụ đề tiếng Anh"', async () => {
     const user = userEvent.setup();
     renderWith(<Sidebar activeKey="overview" />, 'owner', (qc) => qc.setQueryData(qk.navigation, buildNavigation()));
-    await user.click(screen.getByRole('button', { name: /Anh Cơ La/ }));
+    await user.click(screen.getByRole('button', { name: /Anh Nguyễn Văn A/ }));
     expect(screen.getByRole('menuitem', { name: /Tài khoản của tôi/ })).toBeInTheDocument();
     expect(screen.queryByText('Phụ đề tiếng Anh')).toBeNull();
   });
@@ -166,7 +166,7 @@ describe('Đội ngũ', () => {
 
 describe('Tài khoản của tôi — thẻ mã PIN (F-61)', () => {
   const ACCOUNT = {
-    display_name: 'Anh Cơ La (Ryan)', email: 'owner@genesis.local', role: { code: 'owner', name: 'Owner' },
+    display_name: 'Anh Nguyễn Văn A (Chủ)', email: 'owner@genesis.local', role: { code: 'owner', name: 'Owner' },
     created_at: '2026-05-04T02:15:00Z', must_change_password: false, has_pin: true, sessions: [],
   };
   it('audit.read → nút "Lịch sử nhập PIN" mở hộp lịch sử; không có audit.read → không có nút', async () => {

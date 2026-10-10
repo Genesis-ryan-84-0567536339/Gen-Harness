@@ -11,7 +11,7 @@
 3. Mục tiêu registry nhạy cảm (`sensitive`) → cần phiên PIN (423 PIN_REQUIRED, web tự hỏi PIN rồi gửi lại).
 4. Mỗi lần xác nhận/huỷ ghi Action Log: actor_type="user" (người bấm), detail.via="gen".
 5. v0.1.50 (QD-18): thêm 3 loại CHỈ Owner — `memory_note` (Gen nhớ, không PIN), `kho_create` / `kho_update` (ghi Kho
-   Ryan, bảng Phiên và Việc; PIN `hub.write`). Ghi Kho đi MỘT đường: `confirm_proposal` (Owner + PIN) phát permit ký
+   dữ liệu, bảng Phiên và Việc; PIN `hub.write`). Ghi Kho đi MỘT đường: `confirm_proposal` (Owner + PIN) phát permit ký
    ngay trong `plan_call` (không bao giờ ở bước dựng thẻ) → `POST /hub/kho/write` → `hub_link.service.write_kho`.
    Đề xuất do job `gh.gen.kho_release` dựng (`build_release`) mang thêm khoá meta `release_version` (không thuộc
    `fields`, không sửa được) để mỗi (tổ chức, phiên bản) chỉ ghi vào Kho một lần.
@@ -34,7 +34,7 @@ from gh.auth import rbac, service
 from gh.data.common import mask_text
 from gh.errors import ApiError
 from gh.gen import envelope, memory_notes, registry
-from gh.hub_link import kho_write
+from gh.hub_link import KHO_LABEL, kho_write
 from gh.hub_link import permit as hub_permit
 
 PROPOSAL_TTL_S = 24 * 3600
@@ -44,8 +44,8 @@ PAST_SLACK = timedelta(minutes=2)
 
 TYPE_LABELS = {"draft_message": "Soạn nháp tin gửi đi", "reminder": "Tạo nhắc việc", "assign": "Giao người phụ trách",
                "social_reply": "Trả lời bình luận Facebook", "social_dm": "Nhắn tin Facebook",
-               "memory_note": "Ghi nhớ", "kho_create": "Ghi vào Kho Ryan (tạo mới)",
-               "kho_update": "Ghi vào Kho Ryan (cập nhật)"}
+               "memory_note": "Ghi nhớ", "kho_create": f"Ghi vào {KHO_LABEL} (tạo mới)",
+               "kho_update": f"Ghi vào {KHO_LABEL} (cập nhật)"}
 SOCIAL_TYPES = ("social_reply", "social_dm")
 SOCIAL_TARGET_PREFIX = "social.write:"
 MEMORY_TYPE = "memory_note"
@@ -56,7 +56,8 @@ OWNER_ONLY_TYPES = SOCIAL_TYPES + (MEMORY_TYPE,) + KHO_TYPES
 OWNER_ONLY_MSG = {"social_reply": "chỉ Owner được gửi trả lời / tin nhắn mạng xã hội",
                   "social_dm": "chỉ Owner được gửi trả lời / tin nhắn mạng xã hội",
                   "memory_note": "chỉ Owner được lưu ghi chú Gen nhớ",
-                  "kho_create": "chỉ Owner được ghi vào Kho Ryan", "kho_update": "chỉ Owner được ghi vào Kho Ryan"}
+                  "kho_create": f"chỉ Owner được ghi vào {KHO_LABEL}",
+                  "kho_update": f"chỉ Owner được ghi vào {KHO_LABEL}"}
 VALUE_SNIPPET = 400
 
 
@@ -108,7 +109,7 @@ def requires_pin(target_id: str) -> bool:
     if target_id.startswith(SOCIAL_TARGET_PREFIX):
         return True            # gửi lên mạng xã hội: luôn cần PIN (cả ở bước xác nhận lẫn endpoint /social/.../write)
     if target_id.startswith(KHO_TARGET_PREFIX):
-        return True            # ghi Kho Ryan: luôn cần PIN (cả ở bước xác nhận lẫn endpoint /hub/kho/write)
+        return True            # ghi Kho dữ liệu: luôn cần PIN (cả ở bước xác nhận lẫn endpoint /hub/kho/write)
     t = registry.resolve_target(target_id)
     return bool(t and t.sensitive)
 
@@ -420,9 +421,9 @@ def summary(ptype: str, fields: dict[str, Any], lab: dict[str, str], tz: ZoneInf
     if ptype in KHO_TYPES:
         listing = "; ".join(f"{k} = “{_snippet(v, VALUE_SNIPPET)}”" for k, v in fields["record"].items())
         if ptype == "kho_create":
-            head = f"Tạo bản ghi mới ở bảng {fields['bang']} của Kho Ryan: {listing}."
+            head = f"Tạo bản ghi mới ở bảng {fields['bang']} của {KHO_LABEL}: {listing}."
         else:
-            head = f"Cập nhật {fields['ma']} (bảng {lab.get('bang', '')}) ở Kho Ryan: {listing}."
+            head = f"Cập nhật {fields['ma']} (bảng {lab.get('bang', '')}) ở {KHO_LABEL}: {listing}."
         return f"{head} Chỉ ghi khi Sếp bấm Xác nhận và nhập mã PIN (qua Gen-hub)."
     if ptype in SOCIAL_TYPES:
         verb = "Trả lời trên Facebook" if ptype == "social_reply" else "Nhắn tin trên Facebook"

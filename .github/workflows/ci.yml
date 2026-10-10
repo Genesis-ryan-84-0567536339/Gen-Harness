@@ -288,6 +288,9 @@ jobs:
       # v0.1.35 (F-1) — script do gói f1 tạo: chặn id giả viết cứng (vd 'u-lan', 'agent-tls') lọt lại vào mã web.
       - name: Cấm ID giả viết cứng trong apps/web/src (F-1)
         run: python3 .github/scripts/check_no_fake_ids.py apps/web/src
+      # v0.1.56 — repo công khai, bản phát hành đi tới Owner khác: mã giao đi không được mang địa chỉ Gen-hub / tên riêng của Sếp.
+      - name: Chống lộ thông tin riêng của Sếp
+        run: python3 .github/scripts/check_no_personal_info.py
       - run: npm run -w apps/web typecheck
       - run: npm run -w apps/web test
       - run: npm run -w apps/web build

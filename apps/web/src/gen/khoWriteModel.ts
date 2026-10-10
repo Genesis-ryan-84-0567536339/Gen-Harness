@@ -1,9 +1,9 @@
 /**
- * v0.1.50 (F-81, QD-18) — hàm thuần cho thẻ đề xuất GHI VÀO KHO RYAN (`kho_create` / `kho_update`) và thẻ GHI NHỚ
+ * v0.1.50 (F-81, QD-18) — hàm thuần cho thẻ đề xuất GHI VÀO KHO DỮ LIỆU (`kho_create` / `kho_update`) và thẻ GHI NHỚ
  * (`memory_note`): nhãn, câu cảnh báo cố định, bảng trường (đúng `fields.record`), form Sửa theo bảng, câu lỗi theo mã.
  * Không chứa bí mật; mọi giá trị từ máy chủ được ép về chuỗi trước khi hiện (không bao giờ render object).
  */
-import { ApiError, KHO_DATE_FIELDS, KHO_FIELDS, KHO_REQUIRED, khoMaxLen, type GenProposal, type KhoBang } from '@gen-harness/contracts';
+import { ApiError, KHO_DATE_FIELDS, KHO_FIELDS, KHO_LABEL, KHO_REQUIRED, khoMaxLen, type GenProposal, type KhoBang } from '@gen-harness/contracts';
 import { errorDetail } from '../lib/errorText';
 import { detailToText } from '../lib/friendlyError';
 
@@ -13,8 +13,8 @@ export type MemoryProposal = Extract<GenProposal, { type: 'memory_note' }>;
 export const isKhoWrite = (p: GenProposal): p is KhoProposal => p.type === 'kho_create' || p.type === 'kho_update';
 export const isMemoryNote = (p: GenProposal): p is MemoryProposal => p.type === 'memory_note';
 
-/** Câu cảnh báo cố định trên thẻ "Ghi vào Kho Ryan" (còn chờ xác nhận). */
-export const KHO_WRITE_WARNING = 'Ghi thẳng vào Kho Ryan qua Gen-hub khi Sếp bấm Xác nhận và nhập mã PIN — không tự hoàn tác.';
+/** Câu cảnh báo cố định trên thẻ "Ghi vào Kho dữ liệu" (còn chờ xác nhận). */
+export const KHO_WRITE_WARNING = `Ghi thẳng vào ${KHO_LABEL} qua Gen-hub khi Sếp bấm Xác nhận và nhập mã PIN — không tự hoàn tác.`;
 export const KHO_MISSING_TEXT = 'Gen-hub chưa cấp quyền ghi Kho';
 export const KHO_MISSING_HINT = 'Vào Gen-hub tick quyền kho_create, kho_update cho token của Gen-Harness rồi bấm Kiểm tra ở Kết nối › Gen-hub.';
 /** Đích của nút "Mở thẻ Gen-hub" / "Mở Kết nối › Gen-hub" — thẻ Gen-hub ở Kết nối. */
@@ -251,7 +251,7 @@ const ERROR_VIEW: Record<string, ViewSpec> = {
     action: 'open_hub',
   },
   HUB_OWNER_ONLY: {
-    text: 'Chỉ Sếp (Owner) được ghi vào Kho Ryan — chưa ghi gì.',
+    text: `Chỉ Sếp (Owner) được ghi vào ${KHO_LABEL} — chưa ghi gì.`,
     action: null,
   },
   GEN_MEMORY_FULL: {

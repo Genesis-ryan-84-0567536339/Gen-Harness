@@ -10,6 +10,7 @@
  * Kiểm chéo: `apps/web/test/unit/gen-targets.test.ts` quét `apps/web/src` (mỗi id có chỗ gắn và ngược lại) và so
  * với bản xuất cho API `apps/api/gh/gen/registry.json` (chạy `GEN_WRITE=1 npx vitest run gen-targets` để ghi lại).
  */
+import { KHO_LABEL } from './gen';
 import { SCREENS } from './screens';
 
 export interface GenTarget {
@@ -85,7 +86,7 @@ export const GEN_TARGETS: GenTarget[] = [
   { id: 'boss_checks.row.telegram', screen: 'boss_checks', label: 'Dòng 6 "Telegram"', description: 'Dòng 6 của Việc Sếp cần làm: Gửi thử một tin Telegram báo động và bản tin' },
   { id: 'boss_checks.row.remote', screen: 'boss_checks', label: 'Dòng 7 "Truy cập từ xa"', description: 'Dòng 7 của Việc Sếp cần làm: mở Console từ điện thoại bằng địa chỉ truy cập từ xa rồi bấm Kiểm tra' },
   { id: 'boss_checks.row.facebook_reply', screen: 'boss_checks', label: 'Dòng 8 "Facebook trả lời" (không bắt buộc)', description: 'Dòng 8 của Việc Sếp cần làm: thử gửi một câu trả lời bình luận Facebook thật bằng Gen — không bắt buộc' },
-  { id: 'boss_checks.row.kho_write', screen: 'boss_checks', label: 'Dòng 9 "Gen ghi Kho" (không bắt buộc)', description: 'Dòng 9 của Việc Sếp cần làm: duyệt đề xuất ghi Phiên đầu tiên của Gen vào Kho Ryan — không bắt buộc' },
+  { id: 'boss_checks.row.kho_write', screen: 'boss_checks', label: 'Dòng 9 "Gen ghi Kho" (không bắt buộc)', description: `Dòng 9 của Việc Sếp cần làm: duyệt đề xuất ghi Phiên đầu tiên của Gen vào ${KHO_LABEL} — không bắt buộc` },
   // ── Cài đặt (v0.1.42; trước là Điều khiển hệ thống) ──
   { id: 'system.tab.brain', screen: 'system', label: 'Tab "Bộ não AI"', description: 'Chuyển sang tab nhà cung cấp model, hạn mức, Jev' },
   { id: 'system.tab.org', screen: 'system', label: 'Tab "Tổ chức"', description: 'Chuyển sang tab sửa tên tổ chức, múi giờ, tiền tệ, xưng hô' },
@@ -135,8 +136,8 @@ export const GEN_TARGETS: GenTarget[] = [
   // ── API & Model ──
   { id: 'api.add_provider', screen: 'api', label: 'Nút "Thêm nhà cung cấp"', description: 'Thêm Gemini/DeepSeek/API tương thích OpenAI' },
   { id: 'api.bindings', screen: 'api', label: 'Gán model cho từng agent', description: 'Chọn model cho từng mục đích, gồm core.gen của Gen' },
-  // ── Gen-hub (v0.1.26, Đợt D1: Gen đọc Kho Ryan, chỉ đọc, chỉ Owner) — v0.1.42: thẻ ở Kết nối (id giữ nguyên) ──
-  { id: 'mcp.hub_link', screen: 'connections', label: 'Thẻ "Gen-hub"', description: 'Nối Gen-hub để Gen đọc Kho Ryan, lịch, mail, việc, Drive (chỉ đọc, chỉ Sếp): địa chỉ, token, hạn token, trạng thái', permission: 'system.manage' },
+  // ── Gen-hub (v0.1.26, Đợt D1: Gen đọc Kho dữ liệu, chỉ đọc, chỉ Owner) — v0.1.42: thẻ ở Kết nối (id giữ nguyên) ──
+  { id: 'mcp.hub_link', screen: 'connections', label: 'Thẻ "Gen-hub"', description: `Nối Gen-hub để Gen đọc ${KHO_LABEL}, lịch, mail, việc, Drive (chỉ đọc, chỉ Sếp): địa chỉ, token, hạn token, trạng thái`, permission: 'system.manage' },
   { id: 'mcp.hub_link.token', screen: 'connections', label: 'Ô "Token Gen-hub"', description: 'Dán token agent tạo trong Gen-hub (chỉ ghi — không bao giờ hiện lại)', permission: 'system.manage', sensitive: true },
   { id: 'mcp.hub_link.test', screen: 'connections', label: 'Nút "Kiểm tra" Gen-hub', description: 'Thử kết nối, mở đúng tool đọc Kho cho Gen rồi bật liên kết (cần PIN)', permission: 'system.manage' },
   // ── Tài khoản của tôi ──

@@ -148,7 +148,7 @@ describe('BriefingHubSections — vẽ mục Gen-hub', () => {
 // ── Tích hợp: khung Gen mở bản tin từ máy chủ ─────────────────────────────────────────────────────────────────
 
 const ME = {
-  id: 'u1', email: 'owner@genesis.local', display_name: 'Anh Cơ La', role: { code: 'owner', name: 'Owner — Sếp' },
+  id: 'u1', email: 'owner@genesis.local', display_name: 'Anh Nguyễn Văn A', role: { code: 'owner', name: 'Owner — Sếp' },
   org: { id: 'o1', name: 'Genesis', timezone: 'Asia/Ho_Chi_Minh', currency: 'VND' },
   addressing: { self: 'Anh', bot_calls_me: 'Sếp' }, pin_verified_until: null, permissions: {}, must_change_password: false,
   features: { gen: true },

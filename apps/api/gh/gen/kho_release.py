@@ -1,4 +1,4 @@
-"""Gen đề xuất ghi Phiên vào Kho Ryan mỗi khi máy chủ lên bản mới — v0.1.50 (F-87, QD-18).
+"""Gen đề xuất ghi Phiên vào Kho dữ liệu mỗi khi máy chủ lên bản mới — v0.1.50 (F-87, QD-18).
 
 Cron `gen_kho_release` (phút 7 và 37, gh/worker.py). Với MỖI tổ chức đủ điều kiện (Gen bật cho Owner, liên kết Gen-hub
 đang bật, Gen-hub đã cấp quyền TẠO bản ghi Kho — `hub.write_scopes(...)['kho_create']`, đúng tool thẻ dùng, như
@@ -34,6 +34,7 @@ from gh import notifications
 from gh.chassis import actionlog
 from gh.config import get_settings
 from gh.gen import proposals, store
+from gh.hub_link import KHO_LABEL
 from gh.hub_link import service as hub
 
 log = logging.getLogger("gh.gen.kho_release")
@@ -42,9 +43,9 @@ PROPOSAL_TTL_S = 7 * 24 * 3600
 KIND = "gen.kho_proposal"
 ACTION = "gen.kho_release_proposed"
 TITLE = "Gen đề xuất ghi Kho · Phiên {version}"
-SAY = ("Máy chủ Gen-Harness vừa lên {version}. Em đề xuất ghi một Phiên vào Kho Ryan để lưu mốc này — {addr} xem lại, "
-       "sửa nếu cần rồi bấm Xác nhận và nhập mã PIN thì em mới ghi (qua Gen-hub).")
-BELL_BODY = "Gen-Harness đã lên {version}. Xem thẻ đề xuất, Xác nhận và nhập mã PIN để ghi Phiên vào Kho Ryan."
+SAY = ("Máy chủ Gen-Harness vừa lên {version}. Em đề xuất ghi một Phiên vào " + KHO_LABEL +
+       " để lưu mốc này — {addr} xem lại, sửa nếu cần rồi bấm Xác nhận và nhập mã PIN thì em mới ghi (qua Gen-hub).")
+BELL_BODY = "Gen-Harness đã lên {version}. Xem thẻ đề xuất, Xác nhận và nhập mã PIN để ghi Phiên vào " + KHO_LABEL + "."
 #: Đề xuất `pending` còn trẻ hơn mốc này không bị coi là "hết hạn" dù thiếu khoá Redis (tránh đua với lúc vừa dựng).
 STALE_AFTER = timedelta(hours=1)
 _VERSION = re.compile(r"v?(\d+\.\d+\.\d+)")

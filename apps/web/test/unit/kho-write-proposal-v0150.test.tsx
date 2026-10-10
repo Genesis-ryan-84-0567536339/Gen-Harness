@@ -1,5 +1,5 @@
 /**
- * v0.1.50 (F-81, QD-18) — thẻ đề xuất "Ghi vào Kho Ryan" (kho_create / kho_update) trong khung Gen:
+ * v0.1.50 (F-81, QD-18) — thẻ đề xuất "Ghi vào Kho dữ liệu" (kho_create / kho_update) trong khung Gen:
  * - hàng Bảng + Bản ghi (khoá cứng) và BẢNG trường "Trường | (Hiện tại) | Sẽ ghi" — ĐÚNG fields.record, theo thứ tự KHO_FIELDS;
  * - nhãn "Cần mã PIN" + câu cảnh báo cố định; 423 ⇒ hộp PIN sẵn có rồi gửi lại; xong ⇒ "Đã ghi vào Kho: PHIEN-12";
  * - write_scope 'missing' ⇒ khoá nút Xác nhận + "Gen-hub chưa cấp quyền ghi Kho" + nút "Mở thẻ Gen-hub";
@@ -57,13 +57,13 @@ import { ApiError } from '../../src/lib/api';
 import { NotificationBell } from '../../src/shell/NotificationBell';
 
 const ME = {
-  id: 'u1', email: 'owner@genesis.local', display_name: 'Anh Cơ La', role: { code: 'owner', name: 'Owner — Sếp' },
+  id: 'u1', email: 'owner@genesis.local', display_name: 'Anh Nguyễn Văn A', role: { code: 'owner', name: 'Owner — Sếp' },
   org: { id: 'o1', name: 'Genesis', timezone: 'Asia/Ho_Chi_Minh', currency: 'VND' },
   addressing: { self: 'Anh', bot_calls_me: 'Sếp' }, pin_verified_until: null, permissions: { 'action.approve': 'all', 'system.read': 'all' },
   features: { gen: true },
 };
 
-const WARNING = 'Ghi thẳng vào Kho Ryan qua Gen-hub khi Sếp bấm Xác nhận và nhập mã PIN — không tự hoàn tác.';
+const WARNING = 'Ghi thẳng vào Kho dữ liệu qua Gen-hub khi Sếp bấm Xác nhận và nhập mã PIN — không tự hoàn tác.';
 
 // record cố ý đặt LỘN thứ tự để kiểm bảng sắp theo KHO_FIELDS.
 const PHIEN: GenProposal = {
@@ -78,7 +78,7 @@ const PHIEN: GenProposal = {
       Ngày: '2026-10-09',
     },
   },
-  summary: 'Tạo bản ghi mới ở bảng Phiên của Kho Ryan — ghi thẳng qua Gen-hub khi Sếp xác nhận và nhập mã PIN.',
+  summary: 'Tạo bản ghi mới ở bảng Phiên của Kho dữ liệu — ghi thẳng qua Gen-hub khi Sếp xác nhận và nhập mã PIN.',
   labels: { bang: 'Phiên', target: 'Bản ghi mới', write_scope: 'ok' },
   target: 'hub.kho_write:Phiên',
   requires_pin: true,
@@ -94,7 +94,7 @@ const UPDATE: GenProposal = {
   id: 'k3',
   type: 'kho_update',
   fields: { ma: 'VIEC-12', record: { 'Ngày xong': '2026-10-09', 'Trạng thái': 'Xong' } },
-  summary: 'Sửa bản ghi VIEC-12 ở bảng Việc của Kho Ryan — ghi thẳng qua Gen-hub khi Sếp xác nhận và nhập mã PIN.',
+  summary: 'Sửa bản ghi VIEC-12 ở bảng Việc của Kho dữ liệu — ghi thẳng qua Gen-hub khi Sếp xác nhận và nhập mã PIN.',
   labels: { bang: 'Việc', target: 'VIEC-12 · Soạn báo giá ván MDF', write_scope: 'ok', 'cur:Trạng thái': 'Đang làm', 'cur:Ngày xong': '' },
   target: 'hub.kho_write:VIEC-12',
   requires_pin: true,
@@ -166,7 +166,7 @@ function renderPanel() {
 }
 
 const writes = () => calls.filter((c) => c.method !== 'GET');
-const cardOf = () => screen.getByRole('group', { name: 'Đề xuất: Ghi vào Kho Ryan' });
+const cardOf = () => screen.getByRole('group', { name: 'Đề xuất: Ghi vào Kho dữ liệu' });
 const tableRows = (card: HTMLElement) => within(card).getByTestId('gen-kho-table').querySelectorAll('tbody tr');
 const headers = (card: HTMLElement) => [...within(card).getByTestId('gen-kho-table').querySelectorAll('thead th')].map((h) => h.textContent);
 
@@ -189,12 +189,12 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('Thẻ "Ghi vào Kho Ryan" — kho_create', () => {
+describe('Thẻ "Ghi vào Kho dữ liệu" — kho_create', () => {
   it('hiện Bảng + Bản ghi, BẢNG trường đúng fields.record theo thứ tự KHO_FIELDS, "Cần mã PIN", câu cảnh báo cố định; chưa ghi gì', () => {
     const { container } = renderPanel();
     showProposal(PHIEN);
     const card = cardOf();
-    expect(card).toHaveTextContent('Đề xuất · Ghi vào Kho Ryan');
+    expect(card).toHaveTextContent('Đề xuất · Ghi vào Kho dữ liệu');
     const dl = card.querySelector('dl')!;
     expect(dl).toHaveTextContent('Bảng');
     expect(dl).toHaveTextContent('Phiên');
@@ -256,7 +256,7 @@ describe('Thẻ "Ghi vào Kho Ryan" — kho_create', () => {
     expect(writes().map((c) => c.url.replace(/^.*\/api\/v1/, ''))).toEqual(['/gen/proposals/k1/confirm', '/gen/proposals/k1/confirm']);
     expect(writes()[1].body).toEqual({ fields: {} });
     expect(within(card).queryByRole('button', { name: 'Xác nhận và ghi Kho' })).toBeNull();
-    expect(card).not.toHaveTextContent('Ghi thẳng vào Kho Ryan qua Gen-hub khi Sếp bấm');
+    expect(card).not.toHaveTextContent('Ghi thẳng vào Kho dữ liệu qua Gen-hub khi Sếp bấm');
     expect(card).not.toHaveTextContent('Đã xác nhận');
   });
 
@@ -310,7 +310,7 @@ describe('Thẻ "Ghi vào Kho Ryan" — kho_create', () => {
   });
 });
 
-describe('Thẻ "Ghi vào Kho Ryan" — kho_update', () => {
+describe('Thẻ "Ghi vào Kho dữ liệu" — kho_update', () => {
   it('có cột "Hiện tại" (labels["cur:<trường>"], rỗng ⇒ —) và "Sẽ ghi"; Bản ghi = mã + tên', () => {
     renderPanel();
     showProposal(UPDATE);
@@ -484,7 +484,7 @@ describe('Lỗi khi xác nhận ghi Kho — câu tiếng Việt + "Chi tiết k�
   it.each([
     ['HUB_WRITE_PERMIT', 403, 'Giấy phép ghi không hợp lệ hoặc đã quá 5 phút — chưa ghi gì vào Kho. Bấm Xác nhận lại (nhập mã PIN) để ghi.'],
     ['HUB_TOOL_NOT_ALLOWED', 403, 'Thao tác ghi này không nằm trong phạm vi Gen được phép — chưa ghi gì vào Kho.'],
-    ['HUB_OWNER_ONLY', 403, 'Chỉ Sếp (Owner) được ghi vào Kho Ryan — chưa ghi gì.'],
+    ['HUB_OWNER_ONLY', 403, 'Chỉ Sếp (Owner) được ghi vào Kho dữ liệu — chưa ghi gì.'],
     ['HUB_BREAKER_OPEN', 503, 'Gen-hub tạm không trả lời — Gen tự thử lại sau 1 phút.'],
     ['HUB_LINK_OFF', 409, 'Gen-hub đang tắt — vào Kết nối › Gen-hub bấm Kiểm tra để bật lại.'],
     ['HUB_BLOCKED', 409, 'Ghi Kho đang bị rào chắn MCP Hub chặn — chưa ghi gì vào Kho.'],
@@ -799,7 +799,7 @@ describe('Sửa thẻ Ghi vào Kho — ô theo từng trường cho phép của 
 describe('Chuông: kind "gen.kho_proposal" (F-87)', () => {
   it('có biểu tượng cơ sở dữ liệu; bấm mở link /overview?gen=<hội thoại>', async () => {
     notifications = {
-      items: [{ id: 'nt1', kind: 'gen.kho_proposal', title: 'Gen đề xuất ghi Kho · Phiên v0.1.50', body: 'Sếp xem và Xác nhận để ghi Phiên vào Kho Ryan', link: '/overview?gen=conv-1', created_at: '2026-10-09T01:00:00Z', read: false }],
+      items: [{ id: 'nt1', kind: 'gen.kho_proposal', title: 'Gen đề xuất ghi Kho · Phiên v0.1.50', body: 'Sếp xem và Xác nhận để ghi Phiên vào Kho dữ liệu', link: '/overview?gen=conv-1', created_at: '2026-10-09T01:00:00Z', read: false }],
       unread: 1,
     };
     queryClient.setQueryData(qk.notifications, notifications);

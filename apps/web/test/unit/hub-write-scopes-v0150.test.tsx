@@ -38,7 +38,7 @@ const me = (role: string) => ({
 });
 
 const SAVED: HubLink = {
-  configured: true, enabled: true, status: 'ok', server_id: 's1', endpoint: 'https://hub.genos.top/mcp', has_token: true,
+  configured: true, enabled: true, status: 'ok', server_id: 's1', endpoint: 'https://hub.example.test/mcp', has_token: true,
   allow_public_network: true, token_expires_at: '2026-12-28T16:59:00Z', days_left: 80, last_ok_at: '2026-10-09T01:00:00Z', last_error: null, health: 'healthy',
 };
 const FULL_READ = { calendar: true, mail: true, tasks: true, drive: true };
@@ -335,7 +335,7 @@ describe('mock-p4-mcp — quyền ghi Kho (token chứa "khongghi"), hubSim và 
 
   it('Kiểm tra xanh trả write_scopes {kho:true}, write_missing []; token "khongghi" ⇒ vẫn xanh, kho false + write_missing', () => {
     const mock = newMock();
-    call(mock, 'PATCH', '/hub/link', { endpoint: 'https://hub.genos.top/mcp', token: 'ghtok_binh_thuong_1', allow_public_network: true });
+    call(mock, 'PATCH', '/hub/link', { endpoint: 'https://hub.example.test/mcp', token: 'ghtok_binh_thuong_1', allow_public_network: true });
     // Như máy chủ: chưa kiểm xanh ⇒ write_scopes null ("Chưa kiểm").
     expect((call(mock, 'GET', '/hub/link').body as { write_scopes?: unknown }).write_scopes).toBeNull();
     expect(call(mock, 'POST', '/hub/link/test').body).toMatchObject({ ok: true, write_scopes: { kho: true }, write_missing: [] });

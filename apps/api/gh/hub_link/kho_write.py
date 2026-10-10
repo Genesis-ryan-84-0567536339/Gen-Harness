@@ -1,4 +1,4 @@
-"""Ghi Kho Ryan qua Gen-hub (v0.1.50, F-81, QD-18) — CHỈ bảng Phiên và Việc, CHỈ các trường liệt kê dưới đây.
+"""Ghi Kho dữ liệu qua Gen-hub (v0.1.50, F-81, QD-18) — CHỈ bảng Phiên và Việc, CHỈ các trường liệt kê dưới đây.
 
 Nguồn sự thật của danh sách trường (bản sao TypeScript: packages/contracts/src/gen.ts). Gen chỉ ĐỀ XUẤT; ghi thật khi
 Sếp bấm Xác nhận + nhập mã PIN (gh.gen.proposals → POST /hub/kho/write → gh.hub_link.service.write_kho). Mọi giá trị

@@ -1,4 +1,4 @@
-# Bàn giao Gen-Harness — hiện trạng + việc dở (cập nhật 10/10/2026, bản v0.1.55)
+# Bàn giao Gen-Harness — hiện trạng + việc dở (cập nhật 10/10/2026, bản v0.1.56)
 
 File này nay chỉ ghi **hiện trạng + việc dở** (tên cũ `HANDOFF-v0.1.1.md` giữ nguyên vì mã nguồn có chú thích trỏ tới).
 Lịch sử từng bản nằm ở [CHANGELOG.md](../../CHANGELOG.md) (3–5 dòng/bản) và `docs/releases/vX.Y.Z.md` (chi tiết, chuyển nguyên từ HANDOFF cũ):
@@ -20,9 +20,10 @@ Còn hiệu lực từ v0.1.1 (vai trò DB, volume, gói hồ sơ); chi tiết �
 - **Gói hồ sơ `.ghbundle`**: Python tạo/đọc (`python -m gh.bundle export|import`), Go chỉ chuyển bytes; mật khẩu qua `GH_BUNDLE_PASSWORD` (≥ 12 ký tự);
   mã thoát `0` ok · `2` sai mật khẩu/gói hỏng · `3` không tương thích · `1` lỗi khác; mã hoá lại mọi bí mật bằng khoá master máy đích.
 
-## Hiện trạng (v0.1.55)
+## Hiện trạng (v0.1.56)
 
-Bản mới nhất **v0.1.55** (10/10/2026, `VERSION` = v0.1.55): **Gọn cho Sếp** — Mặt tiền Owner, hồ sơ model tiêu chuẩn + Về mặc định, thiết lập gọn, chọn model trong chat, Jev lọc trước ([v0.1.55.md](../releases/v0.1.55.md)).
+Bản mới nhất **v0.1.56** (10/10/2026, `VERSION` = v0.1.56): **không lộ thông tin riêng của Sếp cho Owner khác** — bỏ địa chỉ Gen-hub khỏi mã giao đi, tên Kho chung "Kho dữ liệu", CI chống lộ ([v0.1.56.md](../releases/v0.1.56.md)).
+Trước đó **v0.1.55** (10/10/2026): **Gọn cho Sếp** — Mặt tiền Owner, hồ sơ model tiêu chuẩn + Về mặc định, thiết lập gọn, chọn model trong chat, Jev lọc trước ([v0.1.55.md](../releases/v0.1.55.md)).
 Trước đó **v0.1.54**: **Gen hướng dẫn** — Gen chủ động nhắc việc Sếp cần làm, giới thiệu tính năng, bài học mỗi ngày ([v0.1.54.md](../releases/v0.1.54.md), thiết kế [gen-coach.md](../design/gen-coach.md)).
 v0.1.54 chứa toàn bộ **v0.1.53** ("tự cập nhật đêm tự lành + trung thực": máy Boss đứng ở v0.1.44 từ 03/10 đến 09/10 vì lịch đêm bị tắt mà không ai biết, [v0.1.53.md](../releases/v0.1.53.md)),
 v0.1.52 (gỡ digest cũ bằng `rmi -f`, [v0.1.52.md](../releases/v0.1.52.md)), v0.1.51 và v0.1.50; bản chạy trên máy Boss: v0.1.49.
@@ -42,6 +43,12 @@ v0.1.52 (gỡ digest cũ bằng `rmi -f`, [v0.1.52.md](../releases/v0.1.52.md)),
   việc nền mặc định chỉ khoá API; chi phí ₫/ngày + trần; Jev tuỳ chọn: lọc trước tin trùng/rác (che dữ liệu bắt buộc, v0.1.55; QD-10 bỏ Jules).
 - **Kênh**: Zalo/WhatsApp qua bridge (QR); Telegram một chiều tới Sếp; Facebook cá nhân đọc + Trả lời bình luận/Nhắn tin có Xác nhận + PIN + ảnh chụp (đăng bài = lát 2).
 - **Dữ liệu & bảo mật**: Postgres 16 (pgvector, pg_partman), RLS chỉ là phòng thủ phụ (mỗi bản cài 1 tổ chức), hạn lưu thật, bí mật mã hoá phong bì, DNS ghim cho MCP/Gen-hub, ngắt mạch Gen-hub 60 giây.
+
+## v0.1.56 — Không lộ thông tin riêng của Sếp cho Owner khác (3 gói A/B/C, nhánh `claude/v0156`)
+
+- **Vì sao**: repo công khai + mọi Owner nhận cùng bản; Boss dặn không gợi ý cổng nối Gen-hub và rà thông tin riêng (Zalo, dữ liệu demo). Không có khoá/token/Zalo thật bị lộ; lộ thật là địa chỉ Gen-hub (6 chỗ) và tên riêng của Kho (~30 file, cả ghi chú máy chủ lưu DB).
+- **Thay đổi**: A `KHO_LABEL` ("Kho dữ liệu") + `ENDPOINT_INVALID_MSG` dạng `https://<máy-chủ>/mcp` + migration `0035` (đổi ghi chú máy chủ Gen-hub cũ) + `seed_demo.py` tên hư cấu; B ô nhập `https://<địa-chỉ-gen-hub-của-bạn>/mcp`, mock/test `example.test`; C `check_no_personal_info.py` (bước CI ở job `web`) + tài liệu chung.
+- **Chưa làm / để Boss quyết**: ghi chú vận hành riêng còn công khai (Nợ #31), ô Tên Kho (Nợ #30), tên khách trong `seed-data.json`/mock web. Git history giữ địa chỉ cũ — không viết lại. Chi tiết: [v0.1.56.md](../releases/v0.1.56.md).
 
 ## v0.1.55 — Gọn cho Sếp (5 gói song song G1–G5, QD-14)
 
@@ -94,13 +101,18 @@ v0.1.52 (gỡ digest cũ bằng `rmi -f`, [v0.1.52.md](../releases/v0.1.52.md)),
 
 ## Việc dở
 
+### Boss phải làm — v0.1.56 (không bắt buộc; chi tiết ở [v0.1.56.md](../releases/v0.1.56.md))
+
+1. Không cần làm gì với máy đang chạy. **Quyết**: repo công khai còn ghi chú vận hành riêng — đặt repo private (Owner khác sẽ không tải được bản phát hành) hay chuyển ghi chú sang repo Brain? Nhắn Claude chọn.
+2. Xem tên mẫu khách trong `docs/design/seed-data.json` và mock web có phải khách thật không (`seed_demo.py` đã dùng tên hư cấu).
+
 ### Boss phải làm — v0.1.55 (không bắt buộc; chi tiết ở [v0.1.55.md](../releases/v0.1.55.md))
 
 1. Không cần làm gì. Lần tới mở trang chủ (cả trên điện thoại) sẽ thấy **Mặt tiền**: Hôm nay, Việc, Quan hệ, Hỏi Gen; màn quản trị cũ ở **Thêm › Cài đặt nâng cao**.
 2. Trang Hôm nay hiện thẻ **"Áp model chuẩn theo vai?"** ⇒ bấm **Mở** (ở Hôm nay), rồi **Áp model chuẩn theo vai** → **Xác nhận** (khoá API và nguồn AI giữ nguyên). Nút "Về mặc định tất cả" hỏi mã PIN.
 3. Hỏi Gen: chọn **Nhanh** hoặc **Kỹ hơn** ngay dưới ô nhập; để **Tự động** là chuẩn.
 4. Thẻ Cập nhật không có nút "Cập nhật ngay" ⇒ đọc dòng lý do trên thẻ và làm đúng việc ghi ở đó (vd `genh auto-update enable` trên máy chủ). Gen-hub, Facebook, Telegram, Truy cập từ xa giờ là tuỳ chọn.
-5. **Muốn dùng Jev**: Cài đặt › Bộ não AI › thẻ Jev → **"Dùng khóa OpenRouter đang có"** (hoặc dán khoá OpenRouter) → mã PIN → **"Thử 12 câu mẫu"** → gửi kết quả cho Claude (để làm v0.1.56). Không bật thì vẫn lọc bằng quy tắc như cũ.
+5. **Muốn dùng Jev**: Cài đặt › Bộ não AI › thẻ Jev → **"Dùng khóa OpenRouter đang có"** (hoặc dán khoá OpenRouter) → mã PIN → **"Thử 12 câu mẫu"** → gửi kết quả cho Claude (để làm v0.1.57). Không bật thì vẫn lọc bằng quy tắc như cũ.
 
 ### Boss phải làm — v0.1.54 (không bắt buộc, ~3 phút, sau khi máy lên v0.1.54; chi tiết ở [v0.1.54.md](../releases/v0.1.54.md))
 
@@ -140,8 +152,9 @@ v0.1.52 (gỡ digest cũ bằng `rmi -f`, [v0.1.52.md](../releases/v0.1.52.md)),
 
 ### Claude / điều phối viên còn dở
 
+- **Phát hành v0.1.56**: `claude/v0156` → PR vào main → CI xanh (có bước "Chống lộ thông tin riêng của Sếp") → merge → bản thử → E2E cài thật + nâng cấp → promote → kiểm genh tải về → báo Boss.
 - **Phát hành v0.1.55**: `claude/v0155` (5 gói đã tích hợp, đã nối main) → PR vào main → CI xanh → merge → Release bản thử → E2E cài thật (có bước hồ sơ tiêu chuẩn) + nâng cấp + `e2e-nightly-real` → promote → kiểm genh tải về (checksum/version) → báo Boss.
-- **v0.1.56 (đã hẹn)**: nhận kết quả "Thử 12 câu mẫu" của Jev từ Boss rồi quyết ngưỡng lọc trước; Mặt tiền thêm "Chi phí AI hôm nay" + thẻ "Chưa có model", mục Phân tích; chuông Gen dẫn về Mặt tiền; xoá hội thoại Gen thì xoá luôn lựa chọn model đã nhớ.
+- **v0.1.57 (đã hẹn)**: nhận kết quả "Thử 12 câu mẫu" của Jev từ Boss rồi quyết ngưỡng lọc trước; Mặt tiền thêm "Chi phí AI hôm nay" + thẻ "Chưa có model", mục Phân tích; chuông Gen dẫn về Mặt tiền; xoá hội thoại Gen thì xoá luôn lựa chọn model đã nhớ.
 - **H-b còn mở**: timer đêm mất lịch khi `daemon-reload`/`enable` chạy từ bên trong service đêm — không tái hiện được bằng mã lẫn `e2e-nightly-real` (systemd thật: sau lần chạy timer vẫn có lần kế tiếp); tự lành bao ca này. Máy thật còn tái diễn thì ghi vào v0.1.53.md.
 - **PR Renovate** không tự merge nằm chờ tới khi Boss nhắn "xử lý PR phụ thuộc"; chưa có lịch tự động nào gọi Claude.
 - **Selector ghi Facebook** mới kiểm trên trang mẫu — chờ nghiệm thu thật (dòng 8). Chuông phiên hết có thể hiện hai lần (`social.paused` + `social.session_expired`), gộp ở bản sau nếu phiền.

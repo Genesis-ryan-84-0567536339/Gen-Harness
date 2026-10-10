@@ -277,7 +277,7 @@ export function createMock(opts: Opts) {
   const seedClaude = () => {
     const list = opts.cliProfiles('claude_code_cli');
     const exp = new Date(Date.now() + 5 * 86_400_000).toISOString();
-    list.splice(0, list.length, { id: randomUUID(), email: 'ryan@claude.ai', plan_label: 'Claude Max', active: true, expires_at: exp, state: 'ok' });
+    list.splice(0, list.length, { id: randomUUID(), email: 'a@example.test', plan_label: 'Claude Max', active: true, expires_at: exp, state: 'ok' });
     return list;
   };
 

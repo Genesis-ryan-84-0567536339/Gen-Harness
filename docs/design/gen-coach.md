@@ -160,7 +160,7 @@ và 9 bài `G05`–`G11`, `G13`, `G14` **sinh từ Hướng dẫn thiết lập*
 | G13 | 130 | (Kết nối Facebook) | `guide.item.do:13` | — | `followup.13.done` |
 | N09 | 135 | Gia hạn token Gen-hub | `mcp.hub_link.token` | `boss.hub.done` | Sếp bấm Đã hiểu |
 | G14 | 140 | (Nối Gen-hub) | `guide.item.do:14` | — | `followup.14.done` |
-| N06 | 145 | Cho Gen ghi vào Kho Ryan | `boss_checks.row.kho_write` | `boss.hub.done` | `boss.kho_write.done` |
+| N06 | 145 | Cho Gen ghi vào Kho dữ liệu | `boss_checks.row.kho_write` | `boss.hub.done` | `boss.kho_write.done` |
 
 Luật chọn bài hôm nay: bài kế tiếp trong lộ trình chưa hiểu / chưa xong / chưa hoãn, đã mở khoá, chưa đạt `done_signal`; giữ bài đã hiện hôm nay (không đổi giữa ngày); không quá `lessons_per_day` (0–2, mặc định 1; 0 ⇒ không bài).
 Bài đã hiện ≥ 3 ngày mà Sếp chưa phản hồi coi như hoãn (quay lại sau 10 ngày kể từ lần hiện đầu). Bài `G<n>` bị bỏ khi việc `followup.<n>` đang nằm trong 3 việc hôm nay hoặc Sếp đã chọn không dùng việc đó (không nói hai lần một chuyện).

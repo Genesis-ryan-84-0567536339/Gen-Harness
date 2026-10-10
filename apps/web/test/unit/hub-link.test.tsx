@@ -11,7 +11,7 @@ import { usePinStore } from '../../src/lib/pinStore';
 import { qk } from '../../src/lib/queries';
 
 /**
- * v0.1.26 — thẻ Gen-hub (Gen đọc Kho Ryan): token chỉ ghi, Kiểm tra bật liên kết, chỉ Owner cấu hình.
+ * v0.1.26 — thẻ Gen-hub (Gen đọc Kho dữ liệu): token chỉ ghi, Kiểm tra bật liên kết, chỉ Owner cấu hình.
  * v0.1.55: ô "Ngày hết hạn token" điền sẵn hôm nay + 90 ngày khi còn trống (sửa được).
  */
 
@@ -61,7 +61,7 @@ const OFF: HubLink = {
   configured: false, enabled: false, status: 'off', server_id: null, endpoint: null, has_token: false,
   allow_public_network: false, token_expires_at: null, days_left: null, last_ok_at: null, last_error: null, health: null,
 };
-const SAVED: HubLink = { ...OFF, configured: true, server_id: 's1', endpoint: 'https://hub.genos.top/mcp', has_token: true, allow_public_network: true, token_expires_at: '2026-12-28T16:59:00Z', days_left: 90 };
+const SAVED: HubLink = { ...OFF, configured: true, server_id: 's1', endpoint: 'https://hub.example.test/mcp', has_token: true, allow_public_network: true, token_expires_at: '2026-12-28T16:59:00Z', days_left: 90 };
 const TOKEN = 'ghtok_SieuBiMat_123456';
 
 /** Hạn gửi kèm token mới (v0.1.55): hôm nay + 90 ngày, ISO — sai số < 1 ngày. */
@@ -89,7 +89,7 @@ describe('Thẻ Gen-hub', () => {
     const user = userEvent.setup();
     const save = screen.getByRole('button', { name: 'Lưu' });
     expect(save).toBeDisabled();
-    await user.type(screen.getByLabelText('Địa chỉ Gen-hub'), 'https://hub.genos.top/mcp');
+    await user.type(screen.getByLabelText('Địa chỉ Gen-hub'), 'https://hub.example.test/mcp');
     const tokenInput = screen.getByLabelText('Token Gen-hub');
     expect(tokenInput).toHaveAttribute('type', 'password');
     expect(tokenInput).toHaveAttribute('data-gen-target', 'mcp.hub_link.token');
@@ -100,7 +100,7 @@ describe('Thẻ Gen-hub', () => {
     await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true));
     const patch = calls.find((c) => c.method === 'PATCH')!;
     // v0.1.55: token mới + chưa có hạn ⇒ gửi kèm hạn điền sẵn (hôm nay + 90 ngày).
-    expect(patch.body).toEqual({ endpoint: 'https://hub.genos.top/mcp', token: TOKEN, token_expires_at: expect.any(String), allow_public_network: true });
+    expect(patch.body).toEqual({ endpoint: 'https://hub.example.test/mcp', token: TOKEN, token_expires_at: expect.any(String), allow_public_network: true });
     expect(isNinetyDaysOut((patch.body as { token_expires_at: string }).token_expires_at)).toBe(true);
     expect(await screen.findByText('Đã lưu (mã hoá, không hiện lại)')).toBeInTheDocument();
     expect(screen.getByLabelText('Token mới (bỏ trống để giữ token đã lưu)')).toHaveValue('');
@@ -210,11 +210,11 @@ describe('v0.1.39 (F-31) — mạng công cộng bật sẵn, Kiểm tra tự l�
 
   it('isPublicHttpsUrl: chỉ https trỏ ra Internet', () => {
     const cases: Array<[string, boolean]> = [
-      ['https://hub.genos.top/mcp', true],
+      ['https://hub.example.test/mcp', true],
       ['https://8.8.8.8/mcp', true],
       ['https://100.64.1.2/mcp', true], // 100.64/10 coi là công khai như máy chủ
       ['https://[2001:4860::8888]/mcp', true],
-      ['http://hub.genos.top/mcp', false],
+      ['http://hub.example.test/mcp', false],
       ['http://192.168.1.5/mcp', false],
       ['https://192.168.1.5/mcp', false],
       ['https://10.0.0.2/mcp', false],
@@ -247,7 +247,7 @@ describe('v0.1.39 (F-31) — mạng công cộng bật sẵn, Kiểm tra tự l�
     const user = userEvent.setup();
     const addr = await screen.findByLabelText('Địa chỉ Gen-hub');
     const sw = screen.getByLabelText('Cho phép Gen-hub ở mạng công cộng');
-    await user.type(addr, 'https://hub.genos.top/mcp');
+    await user.type(addr, 'https://hub.example.test/mcp');
     expect(sw).toHaveAttribute('aria-checked', 'true');
     expect(screen.getByRole('note')).toHaveTextContent('Đã bật sẵn vì địa chỉ là https công khai — Gen-hub sẽ được gọi qua Internet. Bỏ tích nếu Gen-hub nằm trong mạng nội bộ.');
     await user.clear(addr);
@@ -258,13 +258,13 @@ describe('v0.1.39 (F-31) — mạng công cộng bật sẵn, Kiểm tra tự l�
     await user.type(addr, 'https://hub.local');
     expect(sw).toHaveAttribute('aria-checked', 'false');
     await user.clear(addr);
-    await user.type(addr, 'https://hub.genos.top/mcp');
+    await user.type(addr, 'https://hub.example.test/mcp');
     expect(sw).toHaveAttribute('aria-checked', 'true');
     // Owner tự bỏ tích → sửa địa chỉ không tự bật lại.
     await user.click(sw);
     expect(sw).toHaveAttribute('aria-checked', 'false');
     await user.clear(addr);
-    await user.type(addr, 'https://kho.genos.top/mcp');
+    await user.type(addr, 'https://kho.example.test/mcp');
     expect(sw).toHaveAttribute('aria-checked', 'false');
     expect(screen.queryByRole('note')).toBeNull();
   });
@@ -292,7 +292,7 @@ describe('v0.1.39 (F-31) — mạng công cộng bật sẵn, Kiểm tra tự l�
     });
     renderCard(<HubLinkCard />);
     const user = userEvent.setup();
-    await user.type(await screen.findByLabelText('Địa chỉ Gen-hub'), 'https://hub.genos.top/mcp');
+    await user.type(await screen.findByLabelText('Địa chỉ Gen-hub'), 'https://hub.example.test/mcp');
     await user.type(screen.getByLabelText('Token Gen-hub'), TOKEN);
     const btn = screen.getByRole('button', { name: 'Lưu & kiểm tra' });
     expect(btn).toHaveAttribute('data-gen-target', 'mcp.hub_link.test');
@@ -302,7 +302,7 @@ describe('v0.1.39 (F-31) — mạng công cộng bật sẵn, Kiểm tra tự l�
     const writes = calls.filter((c) => c.method !== 'GET').map((c) => `${c.method} ${c.url.replace(/^.*\/api\/v1/, '')}`);
     // PATCH bị 423 một lần → nhập PIN → PATCH lại → POST test (không hỏi PIN lần nữa).
     expect(writes).toEqual(['PATCH /hub/link', 'PATCH /hub/link', 'POST /hub/link/test']);
-    expect(calls.find((c) => c.method === 'PATCH')!.body).toEqual({ endpoint: 'https://hub.genos.top/mcp', token: TOKEN, token_expires_at: expect.any(String), allow_public_network: true });
+    expect(calls.find((c) => c.method === 'PATCH')!.body).toEqual({ endpoint: 'https://hub.example.test/mcp', token: TOKEN, token_expires_at: expect.any(String), allow_public_network: true });
     expect(opens).toBe(1);
     expect(screen.getByLabelText('Token mới (bỏ trống để giữ token đã lưu)')).toHaveValue('');
   });
