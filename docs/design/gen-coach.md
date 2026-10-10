@@ -213,7 +213,7 @@ Một nguồn sinh việc P0/P1 đọc lỗi ⇒ giữ nguyên mốc và **khôn
 `unseen` = có việc P0/P1 chưa từng hiện, sự cố sức khoẻ mở lại sau lần hiện cuối, hoặc mẹo chưa hiện (bài học không bật chấm).
 
 **`POST /api/v1/gen/coach/items/{item_key}`** body `{action, days?, confirm?}` → **204**. `action` ∈ `understood` · `snooze` (`days` ∈ 1, 3, 7) · `done` · `dismiss` (cần `confirm: true`; chỉ việc `todo:` mức P1/P3) · `restore`.
-`item_key` ∈ `todo:<khoá>` · `tip:<key>` · `lesson:<N01..N10|G05..G14>` · `card:setup_followup` (thẻ "Việc thiết lập tiếp" ở Tổng quan; chỉ `snooze`/`restore`).
+`item_key` ∈ `todo:<khoá>` (chỉ `snooze`/`dismiss`/`restore`; `understood`/`done` → 422 `COACH_ACTION_NOT_ALLOWED` vì sẽ giải quyết vĩnh viễn việc không qua kiểm mức + xác nhận) · `tip:<key>` · `lesson:<N01..N10|G05..G14>` · `card:setup_followup` (thẻ "Việc thiết lập tiếp" ở Tổng quan; chỉ `snooze`/`restore`).
 
 **`GET /api/v1/gen/coach/prefs`** → `{enabled, bell, lessons_per_day, quiet_start, quiet_end, snooze_until, followup_snoozed_until, dismissed: [{key, level, title}]}`.
 **`PATCH /api/v1/gen/coach/prefs`** `{enabled?, bell?, lessons_per_day? (0..2), quiet_start?, quiet_end? (0..23), snooze_all_days? (0|1|3|7)}` → prefs mới (`snooze_all_days: 0` bỏ hoãn).

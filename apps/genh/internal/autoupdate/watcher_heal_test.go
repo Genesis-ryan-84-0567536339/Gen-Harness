@@ -19,7 +19,21 @@ type sysdFake struct {
 	result    string // giá trị `show -p Result` khi .path failed (mặc định "resources")
 	timerOn   bool
 	enableErr error // lỗi khi enable --now timer dự phòng
-	calls     []string
+	// svcRunning: service mà .path kích (genh handle-requests) đang chạy. systemd THẬT khi đó cho
+	// `restart .path` "thành công" (active/running) mà không dựng watch inotify nào — dù hết instance.
+	svcRunning bool
+	// headroomSet/headroom: ghi đè phép thử inotify (mặc định = inotifyOK).
+	headroomSet bool
+	headroom    bool
+	calls       []string
+}
+
+// hasHeadroom là phép thử inotify giả (Deps.InotifyHeadroom).
+func (s *sysdFake) hasHeadroom(int) bool {
+	if s.headroomSet {
+		return s.headroom
+	}
+	return s.inotifyOK
 }
 
 func newSysd(pathState string, inotifyOK bool) *sysdFake {
@@ -40,6 +54,14 @@ func (s *sysdFake) Output(_ context.Context, name string, args []string) ([]byte
 			return []byte("active\n"), nil
 		}
 		return []byte("inactive\n"), errors.New("exit status 3")
+	case strings.Contains(line, "show "+RequestTaskName+".path -p SubState"):
+		switch {
+		case s.pathState == "active" && s.svcRunning:
+			return []byte("SubState=running\n"), nil
+		case s.pathState == "active":
+			return []byte("SubState=waiting\n"), nil
+		}
+		return []byte("SubState=" + s.pathState + "\n"), nil
 	case strings.Contains(line, "show "+RequestTaskName+".path"):
 		if s.pathState == "failed" {
 			return []byte("Result=" + s.result + "\n"), nil
@@ -50,7 +72,7 @@ func (s *sysdFake) Output(_ context.Context, name string, args []string) ([]byte
 			s.pathState = "inactive"
 		}
 	case strings.Contains(line, "restart "+RequestTaskName+".path"):
-		if s.inotifyOK {
+		if s.svcRunning || s.inotifyOK {
 			s.pathState = "active"
 			return nil, nil
 		}
@@ -64,7 +86,7 @@ func (s *sysdFake) Output(_ context.Context, name string, args []string) ([]byte
 	case strings.Contains(line, "disable --now "+RequestFallbackTimer):
 		s.timerOn = false
 	case strings.Contains(line, "enable --now "+RequestTaskName+".path"):
-		if s.inotifyOK {
+		if s.svcRunning || s.inotifyOK {
 			s.pathState = "active"
 			return nil, nil
 		}
@@ -102,6 +124,12 @@ func healDeps(t *testing.T, rr Runner, inotifyLimit string) (Deps, string) {
 	writeUnit(t, home, RequestTaskName+".service", SystemdRequestServiceUnit("/g/genh", "/g/log", testRP))
 	deps := Deps{Runner: rr, HomeDir: home, GOOS: "linux", GenhPath: "/g/genh",
 		LookPath: func(string) (string, error) { return "/usr/bin/systemctl", nil },
+		InotifyHeadroom: func(n int) bool {
+			if f, ok := rr.(*sysdFake); ok {
+				return f.hasHeadroom(n)
+			}
+			return true
+		},
 		ReadFile: func(p string) ([]byte, error) {
 			if p != InotifyInstancesProc {
 				return nil, os.ErrNotExist
@@ -283,6 +311,7 @@ func TestHealRequestWatcher_ChanDoanLyDo(t *testing.T) {
 
 	rr = newSysd("failed", false)
 	rr.result = "start-limit-hit"
+	rr.headroomSet, rr.headroom = true, true // còn instance; restart hỏng vì lý do khác
 	deps, _ = healDeps(t, rr, "128")
 	h = HealRequestWatcher(context.Background(), deps)
 	if h.State != WatcherHealthFallback || h.Reason != WatcherReasonOther {
@@ -314,8 +343,9 @@ func TestEnsureRequestWatcher_PathLoiInotify_DuPhong(t *testing.T) {
 	rr := newSysd("inactive", false)
 	home := t.TempDir()
 	deps := Deps{Runner: rr, GenhPath: "/g/genh", LogFile: "/g/log", HomeDir: home, GOOS: "linux",
-		LookPath: func(string) (string, error) { return "/usr/bin/systemctl", nil },
-		ReadFile: func(string) ([]byte, error) { return []byte("128\n"), nil }}
+		LookPath:        func(string) (string, error) { return "/usr/bin/systemctl", nil },
+		InotifyHeadroom: func(n int) bool { return rr.hasHeadroom(n) },
+		ReadFile:        func(string) ([]byte, error) { return []byte("128\n"), nil }}
 	got, err := EnsureRequestWatcher(context.Background(), deps, testRP)
 	if err != nil || got != UpdaterSystemd {
 		t.Fatalf("dự phòng nhận thay ⇒ vẫn systemd: %q, %v", got, err)
@@ -363,5 +393,144 @@ func TestRequestFallbackTimerUnit_LyDoLa(t *testing.T) {
 	mustContain(t, RequestFallbackTimerUnit("bậy; rm -rf /"), fallbackReasonMarker+WatcherReasonOther)
 	if got := fallbackReasonFromFile(filepath.Join(t.TempDir(), "khong-co")); got != WatcherReasonOther {
 		t.Errorf("tệp thiếu ⇒ other, được %q", got)
+	}
+}
+
+// Hết instance (ca máy Sếp): KHÔNG reset-failed/restart (chỉ "sống giả"), Result=resources còn nguyên
+// để chẩn đoán đúng lý do.
+func TestHealRequestWatcher_HetInstance_KhongRestart(t *testing.T) {
+	rr := newSysd("failed", false)
+	deps, _ := healDeps(t, rr, "128")
+	h := HealRequestWatcher(context.Background(), deps)
+	if h.State != WatcherHealthFallback || h.Reason != WatcherReasonInotify {
+		t.Fatalf("phải dự phòng vì inotify: %+v", h)
+	}
+	if rr.count("reset-failed") != 0 || rr.count("restart "+RequestTaskName+".path") != 0 {
+		t.Errorf("hết instance thì không reset-failed/restart: %v", rr.calls)
+	}
+	if rr.pathState != "failed" {
+		t.Errorf(".path phải còn failed, được %q", rr.pathState)
+	}
+}
+
+// Hồi quy E2E v0.1.54: timer dự phòng kích service (genh handle-requests) và NGAY TRONG service đó
+// heal chạy lại. systemd thật cho `restart .path` thành công (running, không watch) ⇒ bản cũ báo
+// "đã sống lại" và GỠ dự phòng; service xong .path lại failed (resources) và không còn ai nhận yêu cầu.
+func TestHealRequestWatcher_TrongService_KhongSongGia_GiuDuPhong(t *testing.T) {
+	rr := newSysd("failed", false)
+	deps, dir := healDeps(t, rr, "128")
+	if h := HealRequestWatcher(context.Background(), deps); h.State != WatcherHealthFallback || !h.Changed {
+		t.Fatalf("tiền đề: dự phòng vừa bật: %+v", h)
+	}
+	restarts := rr.count("restart " + RequestTaskName + ".path")
+
+	rr.svcRunning = true // timer dự phòng vừa kích service; heal chạy bên trong nó
+	h := HealRequestWatcher(context.Background(), deps)
+	if h.State != WatcherHealthFallback || h.Changed || h.Healed || h.FallbackRemoved || h.Reason != WatcherReasonInotify {
+		t.Fatalf("trong service mà vẫn hết instance ⇒ giữ dự phòng, im lặng: %+v", h)
+	}
+	if !rr.timerOn || !fileExists(filepath.Join(dir, RequestFallbackTimer)) ||
+		fileExists(filepath.Join(dir, RequestTaskName+".service.d")) == false {
+		t.Errorf("không được gỡ timer dự phòng/drop-in (timerOn=%v): %v", rr.timerOn, rr.calls)
+	}
+	if rr.count("restart "+RequestTaskName+".path") != restarts || rr.count("disable --now "+RequestFallbackTimer) != 0 {
+		t.Errorf("không được restart .path hay disable timer khi hết instance: %v", rr.calls)
+	}
+	mustContain(t, timerFileText(t, dir), fallbackReasonMarker+"inotify") // lý do không bị ghi đè thành other
+
+	// Sếp đã sysctl nhưng heal vẫn chạy trong service: .path "running" ⇒ chưa biết ⇒ GIỮ dự phòng.
+	rr.inotifyOK = true
+	h = HealRequestWatcher(context.Background(), deps)
+	if h.State != WatcherHealthFallback || h.FallbackRemoved || !rr.timerOn || !fileExists(filepath.Join(dir, RequestFallbackTimer)) {
+		t.Errorf(".path chỉ running (service đang chạy) ⇒ giữ dự phòng: %+v", h)
+	}
+	// Service xong, heal chạy ngoài service: .path waiting (gác thật) ⇒ gỡ dự phòng.
+	rr.svcRunning = false
+	h = HealRequestWatcher(context.Background(), deps)
+	if h.State != WatcherHealthOK || !h.FallbackRemoved || rr.timerOn || fileExists(filepath.Join(dir, RequestFallbackTimer)) {
+		t.Errorf(".path waiting ⇒ gỡ dự phòng: %+v", h)
+	}
+}
+
+// .path "active" nhưng SubState=running (service đang chạy) ⇒ chưa biết có gác thật không ⇒ GIỮ dự phòng
+// (kể cả khi còn instance); SubState=waiting (đang gác thật) ⇒ gỡ.
+func TestHealRequestWatcher_ActiveRunning_ChuaGoDuPhong(t *testing.T) {
+	rr := newSysd("failed", false)
+	deps, dir := healDeps(t, rr, "128")
+	HealRequestWatcher(context.Background(), deps)
+	rr.pathState, rr.svcRunning = "active", true
+	h := HealRequestWatcher(context.Background(), deps)
+	if h.State != WatcherHealthFallback || h.FallbackRemoved || !fileExists(filepath.Join(dir, RequestFallbackTimer)) {
+		t.Fatalf("running + hết instance ⇒ giữ dự phòng: %+v", h)
+	}
+	rr.inotifyOK = true // còn instance cũng không đổi: running vẫn là "chưa biết"
+	if h := HealRequestWatcher(context.Background(), deps); h.State != WatcherHealthFallback || h.FallbackRemoved || rr.count("disable --now "+RequestFallbackTimer) != 0 {
+		t.Fatalf("running + còn instance ⇒ vẫn giữ dự phòng: %+v", h)
+	}
+	rr.svcRunning = false // đang chờ thật
+	h = HealRequestWatcher(context.Background(), deps)
+	if h.State != WatcherHealthOK || !h.FallbackRemoved || fileExists(filepath.Join(dir, RequestFallbackTimer)) {
+		t.Errorf("waiting ⇒ gỡ dự phòng: %+v", h)
+	}
+}
+
+func timerFileText(t *testing.T, dir string) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(dir, RequestFallbackTimer))
+	if err != nil {
+		t.Fatalf("thiếu timer dự phòng: %v", err)
+	}
+	return string(b)
+}
+
+// Mỗi dòng Path*= là một inotify instance của .path.
+func TestRequestPathSpecs(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "x.path")
+	if err := os.WriteFile(p, []byte(SystemdRequestPathUnit(testRP.files()...)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := requestPathSpecs(p), len(testRP.files()); got != want || got < 2 {
+		t.Errorf("số watch = %d, cần %d (≥ 2)", got, want)
+	}
+	if got := requestPathSpecs(filepath.Join(t.TempDir(), "khong-co")); got != 1 {
+		t.Errorf("không đọc được ⇒ 1, được %d", got)
+	}
+}
+
+// Phép thử inotify thật không làm rò instance (rò sẽ làm kết quả đổi khi gọi nhiều lần).
+func TestProbeInotifyInstances_KhongRoRi(t *testing.T) {
+	first := probeInotifyInstances(4)
+	for i := 0; i < 400; i++ {
+		if got := probeInotifyInstances(4); got != first {
+			t.Fatalf("lần %d: kết quả đổi %v → %v — rò inotify instance", i, first, got)
+		}
+	}
+}
+
+// EnsureRequestWatcher chạy trong service yêu cầu (genh update do nút Console chạy): enable --now .path
+// "thành công" giả (running) ⇒ KHÔNG được gỡ dự phòng; chạy ngoài service (waiting) ⇒ gỡ.
+func TestEnsureRequestWatcher_TrongService_GiuDuPhong(t *testing.T) {
+	rr := newSysd("inactive", false)
+	home := t.TempDir()
+	deps := Deps{Runner: rr, GenhPath: "/g/genh", LogFile: "/g/log", HomeDir: home, GOOS: "linux",
+		LookPath:        func(string) (string, error) { return "/usr/bin/systemctl", nil },
+		InotifyHeadroom: func(n int) bool { return rr.hasHeadroom(n) },
+		ReadFile:        func(string) ([]byte, error) { return []byte("128\n"), nil }}
+	if _, err := EnsureRequestWatcher(context.Background(), deps, testRP); err != nil || !rr.timerOn {
+		t.Fatalf("tiền đề: dự phòng bật: %v %v", err, rr.calls)
+	}
+	rr.svcRunning = true
+	if _, err := EnsureRequestWatcher(context.Background(), deps, testRP); err != nil {
+		t.Fatal(err)
+	}
+	if !rr.timerOn || !fileExists(filepath.Join(systemdUserDir(home), RequestFallbackTimer)) {
+		t.Errorf("cài/cập nhật chạy trong service (.path running) không được gỡ dự phòng: %v", rr.calls)
+	}
+	rr.svcRunning, rr.inotifyOK = false, true
+	if _, err := EnsureRequestWatcher(context.Background(), deps, testRP); err != nil {
+		t.Fatal(err)
+	}
+	if rr.timerOn || fileExists(filepath.Join(systemdUserDir(home), RequestFallbackTimer)) {
+		t.Errorf("ngoài service, .path waiting ⇒ gỡ dự phòng: %v", rr.calls)
 	}
 }

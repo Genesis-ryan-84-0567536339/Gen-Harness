@@ -19,6 +19,8 @@ type watcherSim struct {
 	pathState string
 	inotifyOK bool
 	timerOn   bool
+	// svcRunning: service mà .path kích đang chạy ⇒ systemd thật cho .path "active (running)" (không gác).
+	svcRunning bool
 }
 
 func (w *watcherSim) dyn(line string, _ []string) (string, error, bool) {
@@ -35,6 +37,14 @@ func (w *watcherSim) dyn(line string, _ []string) (string, error, bool) {
 			return "active\n", nil, true
 		}
 		return "inactive\n", errors.New("exit status 3"), true
+	case strings.Contains(line, "show gen-harness-update-request.path -p SubState"):
+		switch {
+		case w.pathState == "active" && w.svcRunning:
+			return "SubState=running\n", nil, true
+		case w.pathState == "active":
+			return "SubState=waiting\n", nil, true
+		}
+		return "SubState=" + w.pathState + "\n", nil, true
 	case strings.Contains(line, "show gen-harness-update-request.path"):
 		if w.pathState == "failed" {
 			return "Result=resources\n", nil, true
@@ -46,7 +56,7 @@ func (w *watcherSim) dyn(line string, _ []string) (string, error, bool) {
 		}
 		return "", nil, true
 	case strings.Contains(line, "restart gen-harness-update-request.path"):
-		if w.inotifyOK {
+		if w.svcRunning || w.inotifyOK {
 			w.pathState = "active"
 			return "", nil, true
 		}
@@ -85,6 +95,7 @@ func useWatcherHost(t *testing.T, sim *watcherSim) (home string, rr *cmdRunner) 
 	hostInfoEnvFn = func() hostInfoEnv {
 		he := hermeticHost(home, rr)
 		he.Base.ReadFile = func(string) ([]byte, error) { return []byte("128\n"), nil }
+		he.Base.InotifyHeadroom = func(int) bool { sim.mu.Lock(); defer sim.mu.Unlock(); return sim.inotifyOK }
 		return he
 	}
 	t.Cleanup(func() { hostInfoEnvFn = old })
@@ -106,8 +117,8 @@ func TestAutoUpdateCmd_NguoiGacInotify_DuPhongRoiPhucHoi(t *testing.T) {
 	if code != 0 || !strings.Contains(out, want) {
 		t.Fatalf("status phải nói thật về dự phòng: code=%d out=%q", code, out)
 	}
-	if !sim.timerOn || !rr.ran("reset-failed gen-harness-update-request.path") {
-		t.Fatalf("phải reset-failed rồi bật timer dự phòng: %v", rr.calls)
+	if !sim.timerOn || rr.ran("reset-failed gen-harness-update-request.path") || rr.ran("restart gen-harness-update-request.path") {
+		t.Fatalf("hết instance ⇒ bật timer dự phòng, KHÔNG reset-failed/restart (chỉ sống giả): %v", rr.calls)
 	}
 	ns := readNightly(t, dir)
 	if ns.Watcher.State != "fallback" || ns.Watcher.Reason != "inotify" || !strings.Contains(ns.Watcher.Hint, "inotify") {
@@ -121,11 +132,28 @@ func TestAutoUpdateCmd_NguoiGacInotify_DuPhongRoiPhucHoi(t *testing.T) {
 		t.Errorf("status lần 2: out=%q enable=%d→%d", out, n, rr.count("enable --now gen-harness-update-request.timer"))
 	}
 
-	// handle-requests (dự phòng gọi mỗi phút) không in gì khi dự phòng không đổi.
+	// handle-requests (dự phòng gọi mỗi phút) chạy TRONG service mà .path kích: không in gì và KHÔNG
+	// động vào .path/timer dự phòng (ở đó systemd báo .path "running" giả — E2E v0.1.54).
+	rr.reset()
+	sim.mu.Lock()
+	sim.svcRunning = true
+	sim.mu.Unlock()
 	out, errOut := captureStd(t, func() { code = runHandleRequests([]string{"--quiet", "--install-dir", dir}) })
 	if code != 0 || out != "" || errOut != "" {
 		t.Errorf("handle-requests phải im lặng: code=%d out=%q err=%q", code, out, errOut)
 	}
+	for _, c := range rr.calls {
+		if strings.Contains(c, "reset-failed") || strings.Contains(c, "restart") || strings.Contains(c, "enable") || strings.Contains(c, "disable") {
+			t.Errorf("handle-requests không được chữa/gỡ người gác: %v", rr.calls)
+			break
+		}
+	}
+	if !sim.timerOn {
+		t.Error("handle-requests không được gỡ timer dự phòng")
+	}
+	sim.mu.Lock()
+	sim.svcRunning = false
+	sim.mu.Unlock()
 
 	// Sếp sửa sysctl → `genh auto-update enable` ⇒ .path sống, dự phòng gỡ.
 	sim.fixInotify()

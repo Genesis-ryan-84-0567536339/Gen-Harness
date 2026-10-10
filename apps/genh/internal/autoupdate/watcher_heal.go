@@ -216,6 +216,53 @@ func inotifyLimit(deps Deps) int {
 	return n
 }
 
+// pathSpecKeys là các khoá của [Path] mà systemd dựng MỖI dòng một inotify instance riêng.
+var pathSpecKeys = []string{"PathExists=", "PathExistsGlob=", "PathChanged=", "PathModified=", "DirectoryNotEmpty="}
+
+// requestPathSpecs đếm số dòng Path*= của unit .path (mỗi dòng cần một inotify instance).
+// Không đọc được ⇒ 1.
+func requestPathSpecs(unitFile string) int {
+	b, err := os.ReadFile(unitFile)
+	if err != nil {
+		return 1
+	}
+	n := 0
+	for _, line := range strings.Split(string(b), "\n") {
+		line = strings.TrimSpace(line)
+		for _, k := range pathSpecKeys {
+			if strings.HasPrefix(line, k) {
+				n++
+				break
+			}
+		}
+	}
+	if n < 1 {
+		n = 1
+	}
+	return n
+}
+
+// inotifyHeadroom: người dùng này còn mở thêm được n inotify instance không (đúng nhu cầu của
+// .path khi vào lại trạng thái chờ). Bằng chứng trực tiếp từ nhân, không phụ thuộc cách systemd báo.
+func (d Deps) inotifyHeadroom(n int) bool {
+	if d.InotifyHeadroom != nil {
+		return d.InotifyHeadroom(n)
+	}
+	return probeInotifyInstances(n)
+}
+
+// requestWatcherSubState: SubState của .path ("waiting" = đang gác thật; "running" = service nó
+// kích đang chạy). Không hỏi được ⇒ "".
+func requestWatcherSubState(ctx context.Context, deps Deps) string {
+	out, _ := deps.runner().Output(ctx, "systemctl", []string{"--user", "show", RequestTaskName + ".path", "-p", "SubState"})
+	for _, line := range strings.Split(string(out), "\n") {
+		if v, ok := strings.CutPrefix(strings.TrimSpace(line), "SubState="); ok {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
 // diagnoseWatcher: `.path` đang failed — vì sao? Result=resources + hạn mức inotify thấp
 // ⇒ inotify; Result=resources mà không đọc được hạn mức (hoặc hạn mức đủ) ⇒ resources
 // (lỗi tài nguyên chung); lý do khác ⇒ other. Chỉ đọc.
@@ -259,6 +306,14 @@ func RequestWatcherHealth(ctx context.Context, deps Deps) WatcherHealth {
 
 // HealRequestWatcher tự chữa người gác (xem đầu tệp). Khoẻ và không có dự phòng ⇒ chỉ MỘT
 // lệnh đọc (is-active), không ghi gì, không in gì.
+//
+// Bài học systemd thật (E2E v0.1.54): `is-active`/`restart` KHÔNG chứng minh .path đang gác. Khi
+// service mà .path kích (gen-harness-update-request.service — nơi `genh handle-requests` và cả
+// `genh update` do nút Console chạy) đang chạy, systemd đưa .path vào "active (running)" mà KHÔNG
+// dựng inotify nào ("If the triggered unit is already running, so are we"); service xong, .path vào
+// lại chờ ⇒ hết instance ⇒ failed (resources) lần nữa. Nên: chỉ SubState=waiting mới là "đang gác
+// thật" (mới gỡ dự phòng); "running" là chưa biết ⇒ GIỮ dự phòng. Hết inotify instance (phép thử
+// trực tiếp) thì không reset-failed/restart — chỉ có thể "sống giả" và xoá mất Result chẩn đoán.
 func HealRequestWatcher(ctx context.Context, deps Deps) WatcherHealth {
 	ok := WatcherHealth{State: WatcherHealthOK}
 	wp, applicable := deps.watcherPaths()
@@ -268,10 +323,14 @@ func HealRequestWatcher(ctx context.Context, deps Deps) WatcherHealth {
 	runner := deps.runner()
 	state := RequestWatcherState(ctx, deps)
 	hasFallback := fileExists(wp.timer)
+	specs := requestPathSpecs(wp.path)
 
 	switch {
 	case state == "active":
-		if hasFallback { // đã sửa gốc (sysctl…) và .path sống lại ⇒ gỡ dự phòng
+		if hasFallback { // đã sửa gốc (sysctl…) và .path sống lại ⇒ gỡ dự phòng — nhưng chỉ khi đang GÁC thật
+			if requestWatcherSubState(ctx, deps) != "waiting" {
+				return WatcherHealth{State: WatcherHealthFallback, Reason: fallbackReasonFromFile(wp.timer)}
+			}
 			removeFallback(ctx, deps, wp)
 			ok.Changed, ok.FallbackRemoved = true, true
 		}
@@ -285,17 +344,29 @@ func HealRequestWatcher(ctx context.Context, deps Deps) WatcherHealth {
 		return ok
 	}
 
-	_, _ = runner.Output(ctx, "systemctl", []string{"--user", "reset-failed", RequestTaskName + ".path", RequestTaskName + ".service"})
-	_, _ = runner.Output(ctx, "systemctl", []string{"--user", "restart", RequestTaskName + ".path"})
-	if RequestWatcherState(ctx, deps) == "active" {
-		if hasFallback {
-			removeFallback(ctx, deps, wp)
+	headroom := deps.inotifyHeadroom(specs)
+	if headroom {
+		_, _ = runner.Output(ctx, "systemctl", []string{"--user", "reset-failed", RequestTaskName + ".path", RequestTaskName + ".service"})
+		_, _ = runner.Output(ctx, "systemctl", []string{"--user", "restart", RequestTaskName + ".path"})
+		if RequestWatcherState(ctx, deps) == "active" {
+			if !hasFallback {
+				return WatcherHealth{State: WatcherHealthOK, Healed: true, Changed: true}
+			}
+			if requestWatcherSubState(ctx, deps) == "waiting" {
+				removeFallback(ctx, deps, wp)
+				return WatcherHealth{State: WatcherHealthOK, Healed: true, Changed: true, FallbackRemoved: true}
+			}
+			// "running": service đang chạy nên .path chưa gác thật ⇒ chưa biết, GIỮ dự phòng.
+			return WatcherHealth{State: WatcherHealthFallback, Reason: fallbackReasonFromFile(wp.timer)}
 		}
-		return WatcherHealth{State: WatcherHealthOK, Healed: true, Changed: true, FallbackRemoved: hasFallback}
 	}
+	// Hết instance thì restart chỉ có thể "sống giả" (xem trên) ⇒ không thử; giữ nguyên failed + Result.
 
 	// Vẫn lỗi ⇒ dự phòng quét mỗi phút.
 	reason := diagnoseWatcher(ctx, deps)
+	if !headroom && reason == WatcherReasonOther {
+		reason = WatcherReasonInotify // nhân báo hết instance: bằng chứng trực tiếp
+	}
 	if hasFallback && fallbackTimerActive(ctx, deps) && fallbackReasonFromFile(wp.timer) == reason {
 		return WatcherHealth{State: WatcherHealthFallback, Reason: reason} // đã có từ trước: im lặng
 	}

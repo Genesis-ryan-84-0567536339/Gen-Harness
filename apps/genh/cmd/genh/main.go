@@ -1099,8 +1099,8 @@ func runAutoUpdate(args []string) int {
 
 // healRequestWatcher chạy autoupdate.HealRequestWatcher (v0.1.54) và in MỘT dòng khi vừa đổi trạng
 // thái (chữa xong / bật dự phòng / gỡ dự phòng) rồi làm mới run/nightly-status.json; im lặng khi
-// khoẻ hoặc không đổi (watcher dự phòng gọi mỗi phút — log không bị lặp). Dùng ở `auto-update enable`
-// và đầu `handle-requests`. deps cần InstallDir (ghi nightly-status).
+// khoẻ hoặc không đổi. Dùng ở `auto-update enable`; KHÔNG gọi từ `handle-requests` (chạy trong service
+// mà .path kích ⇒ trạng thái .path không đáng tin). deps cần InstallDir (ghi nightly-status).
 func healRequestWatcher(ctx context.Context, deps autoupdate.Deps, w io.Writer) autoupdate.WatcherHealth {
 	h := autoupdate.HealRequestWatcher(ctx, deps)
 	if !h.Changed {
@@ -1385,15 +1385,10 @@ func runHandleRequests(args []string) int {
 		return 1
 	}
 	pass := []string{"--port", strconv.Itoa(*port), "--install-dir", dir}
-	// v0.1.54: người gác yêu cầu (.path) lỗi ⇒ tự chữa (nhẹ: khoẻ thì chỉ một lệnh đọc, không in gì).
-	{
-		hctx, hcancel := context.WithTimeout(context.Background(), 30*time.Second)
-		hdeps := hostInfoEnvFn().Base
-		hdeps.InstallDir = dir
-		hdeps.LogFile = filepath.Join(config.New(dir).LogsDir(), "auto-update.log")
-		healRequestWatcher(hctx, hdeps, os.Stderr)
-		hcancel()
-	}
+	// v0.1.54: KHÔNG tự chữa người gác (.path) ở đây. handle-requests luôn chạy BÊN TRONG
+	// gen-harness-update-request.service; khi service mà .path kích đang chạy, systemd đưa .path sang
+	// "active (running)" mà không dựng inotify nào ⇒ reset-failed + restart báo "sống" giả và gỡ nhầm
+	// timer dự phòng (E2E v0.1.54). Chữa/gỡ dự phòng chỉ ở `auto-update enable|status` và lần cài/cập nhật.
 	switch hostlink.Pending(dir) {
 	case "update":
 		return runUpdate(append(handleRequestUpdateArgs(*quiet), pass...))

@@ -2,7 +2,8 @@
 
 - `GET /today[?mark_shown=1]` — thẻ "Hôm nay của Sếp". Không `mark_shown` thì KHÔNG ghi mục nào (ngoại lệ duy nhất: mốc
   `stable_since` được cập nhật ở mọi lần gọi). `mark_shown=1` ghi mục đã hiện + `prefs.last_seen_at`.
-- `POST /items/{item_key}` — understood / snooze (1, 3, 7 ngày) / done / dismiss (cần confirm, chỉ P1/P3) / restore.
+- `POST /items/{item_key}` — understood / snooze (1, 3, 7 ngày) / done / dismiss (cần confirm, chỉ P1/P3) / restore;
+  việc cần làm (`todo:*`) chỉ nhận snooze / dismiss / restore (understood, done → 422 COACH_ACTION_NOT_ALLOWED).
 - `GET|PATCH /prefs` — tuỳ chọn (bật/tắt, chuông, số bài mỗi ngày, giờ yên lặng, hoãn tất cả).
 - `GET /curriculum` — 19 bài + trạng thái.
 
@@ -129,6 +130,10 @@ async def item_action(item_key: str, body: CoachItemAction, request: Request,
     if kind is None:
         raise ApiError(404, "COACH_ITEM_UNKNOWN", UNKNOWN_TITLE)
     if kind == "card" and body.action not in ("snooze", "restore"):
+        raise ApiError(422, "COACH_ACTION_NOT_ALLOWED", ACTION_TITLE)
+    # Việc cần làm (todo) chỉ hoãn / tắt (qua kiểm mức + xác nhận) / bật lại: "đã hiểu"/"đã làm" sẽ giải quyết vĩnh
+    # viễn việc không phải P0 mà không qua kiểm xác nhận, và danh sách "Bật lại" không liệt kê ⇒ lách luật P2.
+    if kind == "todo" and body.action in ("understood", "done"):
         raise ApiError(422, "COACH_ACTION_NOT_ALLOWED", ACTION_TITLE)
     if body.action == "snooze" and body.days is None:
         raise field_errors({"days": "Chọn hoãn 1, 3 hoặc 7 ngày"})

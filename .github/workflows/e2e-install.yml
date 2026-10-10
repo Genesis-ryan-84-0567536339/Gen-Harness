@@ -2890,6 +2890,18 @@ jobs:
           result="$(systemctl --user show "$svc" -p Result --value)"
           echo "timer dự phòng đã kích service ($last); service Result=$result"
           [ "$result" = "success" ] || { echo "::error::service nhận yêu cầu do timer dự phòng kích có Result='$result'." >&2; journalctl --user -u "$svc" --no-pager | tail -50 || true; exit 1; }
+          # Hồi quy (E2E v0.1.54 từng đỏ ở đây): hạn mức vẫn thấp thì dự phòng PHẢI sống sót sau lần chạy service của chính nó.
+          # systemd thật: khi service mà .path kích đang chạy, `restart .path` cho .path "active (running)" mà không dựng
+          # inotify nào ("If the triggered unit is already running, so are we") ⇒ tự chữa trong service từng báo sống giả,
+          # gỡ dự phòng; service xong .path lại failed (resources) và không còn ai nhận yêu cầu.
+          st="$(systemctl --user is-active "$p" 2>&1 || true)"
+          en="$(systemctl --user is-enabled "$tm" 2>&1 || true)"
+          ac="$(systemctl --user is-active "$tm" 2>&1 || true)"
+          echo "sau lần chạy service của dự phòng — $p: $st; $tm is-enabled: $en; is-active: $ac"
+          [ "$st" = "failed" ] || { echo "::error::$p is-active = '$st' (cần failed) khi hạn mức inotify vẫn thấp — .path sống giả?" >&2; exit 1; }
+          [ "$en" = "enabled" ] && [ "$ac" = "active" ] \
+            || { echo "::error::timer dự phòng bị gỡ/tắt sau lần chạy service của chính nó (is-enabled='$en', is-active='$ac') — .path sống giả trong service rồi gỡ dự phòng." >&2; exit 1; }
+          [ -e "$udir/$tm" ] || { echo "::error::tệp timer dự phòng $tm biến mất khi hạn mức inotify vẫn thấp." >&2; exit 1; }
 
           # 4) Sửa gốc rồi `genh auto-update enable` ⇒ .path sống lại, timer dự phòng tắt + gỡ.
           restore
