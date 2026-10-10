@@ -7,6 +7,13 @@ Ngày = ngày Release trên GitHub theo giờ Việt Nam; tiêu đề trong `doc
 (v0.1.32–v0.1.34, v0.1.40, v0.1.46) hoặc vài ngày (v0.1.47, v0.1.48: làm 03/10, phát hành 09/10).
 Việc sửa nóng không đổi số bản (PR #46, #48, #53, #55, #58, #59) ghi ở [ROADMAP › Bản phản ứng](docs/ROADMAP.md).
 
+## v0.1.57 — Khoá nạp dữ liệu mẫu, Owner tự đặt Tên Kho, CI api song song, bộ kiểm chống lộ không ghi danh tính (10/10/2026)
+- **Dữ liệu mẫu có khoá**: `gh.seed_demo seed` chỉ chạy khi có `--force` / `GH_ALLOW_SEED_DEMO=1` và cơ sở dữ liệu chưa có dữ liệu thật (người dùng, liên hệ, tin nhắn); không thì in câu tiếng Việt + "Chi tiết kỹ thuật", thoát mã 2. Makefile và E2E đã truyền cờ.
+- **Ô "Tên Kho (tuỳ chọn)"** ở thẻ Gen-hub (≤ 40 ký tự, chỉ Owner, trống = "Kho dữ liệu", có Về mặc định): `kho_label(settings)` thay mọi chữ tên Kho chạy thật (thẻ đề xuất, prompt Gen, chuông, bài học/mẹo…). Không migration; Nợ #30 xong.
+- **CI `api`**: hai lượt pytest (superuser + role `gh_app`) chạy song song trong cùng job, CSDL mẫu + Redis riêng, khoá migrate; tên job và timeout 75 giữ nguyên.
+- **Bộ kiểm chống lộ** chỉ giữ quy tắc chung trong repo (email phải `example.*`/noreply, địa chỉ `/mcp` phải là `<…>`/`example.*`); mẫu riêng của Sếp nằm ở secret `GH_PERSONAL_PATTERNS`, log không in giá trị mẫu. Test dùng mẫu giả.
+- Chi tiết: [docs/releases/v0.1.57.md](docs/releases/v0.1.57.md)
+
 ## v0.1.56 — Không lộ thông tin riêng của Sếp cho Owner khác (10/10/2026)
 - Bỏ địa chỉ Gen-hub của Sếp khỏi mọi thứ giao cho Owner khác (ô nhập, hướng dẫn bước 14, câu lỗi web + API): chỉ còn chỗ giữ chỗ `https://<địa-chỉ-gen-hub-của-bạn>/mcp`; tên Kho đổi thành **"Kho dữ liệu"** (`KHO_LABEL` một chỗ ở API + contracts; thẻ đề xuất, bài học/mẹo Gen, prompt, nhãn quyền PIN).
 - Migration **0035** (chạy lại an toàn) đổi ghi chú máy chủ Gen-hub cũ đã lưu trong DB Owner; dữ liệu mẫu `seed_demo.py` và mock/test dùng tên hư cấu (`example.test`, "Công ty Mẫu…").
