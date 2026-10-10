@@ -26,7 +26,7 @@ from gh.db import sessionmaker
 from gh.defaults import profiles, registry
 from gh.defaults.routes import router as defaults_router
 from gh.providers import catalog
-from gh.providers.clients import Completion, Message, ModelRejected
+from gh.providers.clients import AuthFailed, Completion, Message, ModelRejected
 from gh.providers.router import KEY_AAD, ModelRouter, ModelUnavailable
 from gh.setup.routes import DEFAULT_BACKUP
 from tests.conftest import PG, Api, verify_pin
@@ -660,6 +660,85 @@ async def test_generate_sends_the_profile_model_to_the_provider(app: Any, db: An
     await r.generate(org, agent_key="core.gen", purpose="gen.turn", messages=MSGS, json_mode=False, tier="strong")
     await r.generate(org, agent_key="core.briefing", purpose="gen.briefing", messages=MSGS)
     assert seen == ["a-flash-lite", "m-flash", "z-pro", "a-flash-lite"]
+
+
+async def test_provider_level_failure_is_not_retried_on_the_tail_link(app: Any, db: Any, redis: Any) -> None:
+    """F-R3: hồ sơ chọn model X, đuôi `_chain` thêm model Y của CÙNG nguồn. Nguồn quá giờ / 5xx ở X ⇒ chỉ MỘT lượt gọi,
+    MỘT dòng model_calls 'error', ngắt mạch tăng 1; model Y không bị thử lại."""
+    org = await org_id(db)
+    alpha, _ = await add_source(db, org, API, "alpha", 1, ["z-pro", "a-flash-lite"])
+    await add_source(db, org, API, "beta", 2, ["b-flash"])
+    assert len([c for c in await chain_of(router_for(redis), org, "core.refinery") if c[0] == "alpha"]) == 2
+    seen: list[tuple[str, str]] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        host = req.headers["host"].split(":")[0]
+        seen.append((host, orjson.loads(req.content)["model"]))
+        if host == "alpha.test":
+            raise httpx.ReadTimeout("quá giờ", request=req)
+        return httpx.Response(200, json=OK)
+
+    r = ModelRouter(sessionmaker(), redis, transport=httpx.MockTransport(handler))
+    out = await r.generate(org, agent_key="core.refinery", purpose="refinery", messages=MSGS)
+    assert out.provider == "beta" and seen == [("alpha.test", "a-flash-lite"), ("beta.test", "b-flash")]
+    rows = (await db.execute(text("""SELECT mo.model_name, c.status FROM agent.model_calls c
+                                     JOIN agent.models mo ON mo.id = c.model_id ORDER BY c.id"""))).all()
+    assert [(x.model_name, x.status) for x in rows] == [("a-flash-lite", "error"), ("b-flash", "ok")]
+    assert int(await redis.get(f"gh:pfail:{alpha}") or 0) == 1
+    # Chỉ còn nguồn lỗi: hết chuỗi sau ĐÚNG một lượt gọi (không nhân đôi thời gian chờ).
+    await db.execute(text("UPDATE agent.providers SET is_enabled = false WHERE name = 'beta'"))
+    await db.commit()
+    seen.clear()
+    await redis.delete(f"gh:pfail:{alpha}")
+    with pytest.raises(ModelUnavailable) as e:
+        await r.generate(org, agent_key="core.refinery", purpose="refinery", messages=MSGS)
+    assert seen == [("alpha.test", "a-flash-lite")]
+    assert any("không thử lại model khác" in x for x in e.value.reasons)
+    assert int(await redis.get(f"gh:pfail:{alpha}") or 0) == 1
+
+
+async def test_model_level_failure_still_falls_back_to_the_tail_model(app: Any, db: Any, redis: Any) -> None:
+    """F-R3: lỗi cấp MODEL (400 từ chối model) thì model khác của cùng nguồn vẫn là đường lui hợp lệ."""
+    org = await org_id(db)
+    await add_source(db, org, API, "alpha", 1, ["z-pro", "a-flash-lite"])
+    seen: list[str] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        model = orjson.loads(req.content)["model"]
+        seen.append(model)
+        if model == "a-flash-lite":
+            return httpx.Response(400, json={"error": "model not supported"})
+        return httpx.Response(200, json=OK)
+
+    r = ModelRouter(sessionmaker(), redis, transport=httpx.MockTransport(handler))
+    out = await r.generate(org, agent_key="core.refinery", purpose="refinery", messages=MSGS)
+    assert out.model == "z-pro"
+    assert list(dict.fromkeys(seen)) == ["a-flash-lite", "z-pro"]            # 400 có thể thử lại không json_mode
+
+
+class ExpiredCli:
+    """CLI giả hết phiên đăng nhập: mọi lượt đều AuthFailed."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def __call__(self) -> "ExpiredCli":
+        return self
+
+    async def generate(self, model: str, messages: list[Message], **kw: Any) -> Completion:
+        self.calls.append(model)
+        raise AuthFailed("phiên hết hạn")
+
+
+async def test_cli_auth_failure_is_not_retried_on_its_other_model(app: Any, db: Any, redis: Any) -> None:
+    """F-R3: CLI (không có khoá) báo hết phiên ở model hồ sơ chọn ⇒ không gọi lại CLI đó bằng model đuôi."""
+    org = await org_id(db)
+    await add_source(db, org, CLAUDE, "Claude CLI", 1, ["sonnet", "haiku"])
+    cli = ExpiredCli()
+    r = router_for(redis, claude=cli)
+    with pytest.raises(ModelUnavailable) as e:
+        await r.generate(org, agent_key="core.gen", purpose="gen.turn", messages=MSGS, json_mode=False)
+    assert cli.calls == ["sonnet"] and any("xác thực lỗi" in x for x in e.value.reasons)
 
 
 class EffortCli:

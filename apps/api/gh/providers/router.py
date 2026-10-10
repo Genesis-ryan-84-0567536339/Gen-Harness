@@ -491,8 +491,18 @@ class ModelRouter:
             chain = await self._chain(db, org_id, agent_key, tier=tier)
             bg_cli = await background_cli_allowed(db, org_id) if background else set()
         reasons: list[str] = []
+        # v0.1.55 (F-R3): nguồn đã lỗi Ở CẤP NGUỒN (mạng / 5xx / quá giờ, hoặc CLI hết phiên đăng nhập) trong lượt này
+        # ⇒ bỏ mọi mắt xích sau của CÙNG nguồn (phần đuôi `_chain` có thể trỏ model khác của nguồn đó): gọi lại chỉ
+        # nhân đôi thời gian chờ, dòng `model_calls` lỗi và số đếm ngắt mạch. Lỗi cấp MODEL (BadRequest/ModelRejected,
+        # hết hạn mức một model) thì đuôi vẫn là đường lui hợp lệ.
+        provider_down: set[Any] = set()
         for link in chain:
             p, m = link["provider"], link["model"]
+            if p.id in provider_down:
+                reason = f"{p.name}: đã lỗi ở lượt này — không thử lại model khác của cùng nguồn"
+                if reason not in reasons:
+                    reasons.append(reason)
+                continue
             if p.kind == "antigravity_cli" and not allow_agy:
                 if AGY_OWNER_ONLY_REASON not in reasons:
                     reasons.append(AGY_OWNER_ONLY_REASON)
@@ -549,6 +559,7 @@ class ModelRouter:
                         await self.redis.set(cooldown_key(key.id), "auth", ex=AUTH_COOLDOWN_S)
                     else:
                         await self._set_auth_state(p, "expired")
+                        provider_down.add(p.id)           # CLI hết phiên: model khác của cùng CLI cũng hỏng
                     reasons.append(f"{p.name}: xác thực lỗi ({str(e)[:80]})")
                     continue
                 except BadRequest as e:
@@ -558,6 +569,7 @@ class ModelRouter:
                 except (ProviderError, TimeoutError) as e:
                     await self._record(org_id, m.id, kid, agent_key, purpose, "error", started, None)
                     await self._fail(p)
+                    provider_down.add(p.id)
                     reasons.append(f"{p.name}: {str(e)[:120]}")
                     break
                 await self._record(org_id, m.id, kid, agent_key, purpose, "ok", started, c)
