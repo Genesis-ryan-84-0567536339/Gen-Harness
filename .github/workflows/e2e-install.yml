@@ -2236,7 +2236,10 @@ jobs:
   # thật) → ca tệp yêu cầu không xoá được (GH-E94C, .path không kích lặp vô hạn) → tự lành khi timer bị tắt →
   # opt-out (Sếp đã chủ động tắt) không bị tự lành → bật lại → gỡ cài đặt.
   # Mọi bước kiểm chỉ ĐỌC trạng thái qua systemctl/journalctl/tệp run/ — không in config/secrets.json hay .env.
-  # promote đòi job này xanh (check_release_gate.py giữ bất biến).
+  # promote đòi job này xanh (check_release_gate.py giữ bất biến). Chạy tay workflow cho tag cũ hơn v0.1.53 (genh
+  # chưa có lịch đêm tự lành) sẽ đỏ ở job này — promote tay bản cũ dùng skip_e2e.
+  # Ghi chú vận hành: `--port` của genh chỉ là cổng genh kiểm /api/v1/ready; cổng proxy thật do compose đọc GH_PORT
+  # (chế độ pr ghi GH_PORT vào deploy/.env, vì lịch đêm/trình nhận yêu cầu chạy ngoài phiên shell của job).
   e2e-nightly-real:
     name: lịch tự cập nhật đêm + trình nhận yêu cầu chạy thật dưới user manager có linger (chế độ ${{ needs.resolve.outputs.mode }}${{ needs.resolve.outputs.mode == 'release' && format(', {0}', needs.resolve.outputs.tag) || '' }})
     needs: resolve
