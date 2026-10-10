@@ -156,7 +156,7 @@ _COUNT_PHRASES: tuple[str, ...] = ("bao nhieu", "co may", "may khach", "may viec
 _NOT_SIMPLE_WORDS: tuple[str, ...] = (
     "so sanh", "phan tich", "vi sao", "tai sao", "de xuat", "soan", "viet", "gui", "nhac", "giao", "tao", "bao cao",
     "tom tat", "huong dan", "lam sao", "lam the nao", "cach", "chi cho", "chi toi", "o dau", "ghi nho", "ghi vao",
-    "xoa", "sua", "doi", "dat lai", "duyet", "tra loi", "nho giup",
+    "xoa", "sua", "doi", "dat lai", "duyet giup", "duyet luon", "tra loi", "nho giup",
 )
 SIMPLE_MAX_WORDS = 14
 SIMPLE_MAX_CHARS = 100

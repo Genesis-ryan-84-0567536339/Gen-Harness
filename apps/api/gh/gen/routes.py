@@ -11,6 +11,10 @@ v0.1.50 (QD-18): `/gen/memory` — "Gen nhớ" (GET/POST/PATCH/DELETE, CHỈ Own
 `confirm_proposal` / `cancel_proposal` cho ba loại đề xuất mới (`memory_note`, `kho_create`, `kho_update`). Đề xuất ghi
 Phiên của job `gh.gen.kho_release` mang khoá meta `release_version`: xác nhận claim dòng `agent.hub_release_proposals`
 (pending → writing → written; lỗi → pending; huỷ → cancelled) nên mỗi bản chỉ ghi vào Kho MỘT lần.
+
+v0.1.55 (G3): `TurnIn.model_choice` {tier: auto|fast|balanced|deep, effort?: low|medium|high} — Sếp chọn model / mức
+suy nghĩ ngay trong khung chat (giá trị lạ ⇒ 422 MODEL_CHOICE_INVALID); `GET /gen/settings` trả thêm `model_options`
+(tầng nào dùng được cho người này). Việc hạ về Tự động + định tuyến ý định (J3) nằm ở `gh.gen.engine`.
 """
 
 import asyncio
