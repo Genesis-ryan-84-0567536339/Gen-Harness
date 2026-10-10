@@ -392,7 +392,8 @@ NIGHTLY_NO_LINGER_MECHANISMS = ("cron", "launchd", "schtasks")
 
 def _nightly_eval(now: datetime) -> dict[str, Any]:
     """Khối `nightly` của /system/health từ `run/nightly-status.json` (genh ghi; đã lọc kiểu/tập giá trị
-    ở `update.read_nightly`). `state`:
+    ở `update.read_nightly`). Thêm `watcher` {state, reason, hint} CHỈ khi người gác yêu cầu (.path) không ok
+    (v0.1.54: dự phòng quét mỗi phút / chưa có người nhận). `state`:
     - 'other': lịch đêm dùng chung của máy thuộc một bản cài KHÁC còn sống (owned_by_other) — bản cài này không tự lên
       bản mới theo lịch đó, mà `genh auto-update enable` ở đây cũng bị từ chối ⇒ chỉ báo (xám), không mở sự cố;
     - 'off': Sếp đã chủ động tắt (opted_out) VÀ lịch không còn bật;
@@ -439,8 +440,15 @@ def _nightly_eval(now: datetime) -> dict[str, Any]:
         state = "ok"
     else:
         state, days = "unknown", None
-    return {"state": state, "reason": reason, "last_run_at": raw["last_run_at"], "next_run_at": raw["next_run_at"],
-            "days_since": days, "opted_out": opted_out, "linger": linger, "checked_at": raw["checked_at"]}
+    block: dict[str, Any] = {
+        "state": state, "reason": reason, "last_run_at": raw["last_run_at"], "next_run_at": raw["next_run_at"],
+        "days_since": days, "opted_out": opted_out, "linger": linger, "checked_at": raw["checked_at"]}
+    w = raw["watcher"]
+    if w["state"] != "ok":
+        # v0.1.54: người gác yêu cầu (.path) lỗi — đang chạy dự phòng quét mỗi phút ('fallback') hoặc chưa có người nhận
+        # ('failed'). Chỉ có khối này khi không ok; câu gợi ý là chuỗi cố định của API (không lấy chữ từ tệp).
+        block["watcher"] = {"state": w["state"], "reason": w["reason"], "hint": update.WATCHER_HINTS[w["reason"]]}
+    return block
 
 
 def _nightly_status(now: datetime | None = None) -> dict[str, Any]:
