@@ -6,7 +6,7 @@
 - `GET|PATCH /prefs` — tuỳ chọn (bật/tắt, chuông, số bài mỗi ngày, giờ yên lặng, hoãn tất cả).
 - `GET /curriculum` — 19 bài + trạng thái.
 
-Không import / gọi ModelRouter, không ghi agent.gen_messages. Payload chỉ có khoá, tiêu đề tĩnh và số đếm.
+Không gọi model, không ghi agent.gen_messages. Payload chỉ có khoá, tiêu đề tĩnh và số đếm.
 """
 
 import logging
@@ -166,7 +166,7 @@ def _dismissed_rows(items: dict[str, engine.Item]) -> list[dict[str, Any]]:
         if todo.startswith("health."):
             title, level = sg.health_title(todo.removeprefix("health.")), "P1"
         else:
-            title = sg.TODO_COPY.get(todo, (sg.GENERIC_HEALTH_TITLE, ""))[0]
+            title = sg.todo_copy(todo)[0]
             level = sg.static_level(todo) or "P1"
         out.append({"key": todo, "level": level, "title": title})
     return out

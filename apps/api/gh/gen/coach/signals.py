@@ -233,6 +233,18 @@ def static_level(key: str) -> str | None:
     return None
 
 
+def todo_copy(key: str) -> tuple[str, str]:
+    """(tiêu đề, lý do) tĩnh của việc. Dòng "Việc Sếp cần làm" mới (chưa có câu riêng) vẫn có câu chung — không để
+    thêm một dòng bắt buộc làm hỏng cả thẻ."""
+    if key in TODO_COPY:
+        return TODO_COPY[key]
+    for row in boss_service.ROWS:
+        if key == f"boss.{row['key']}":
+            return (f"Hoàn tất mục {row['title']} ở Việc Sếp cần làm",
+                    "Mục này còn thiếu trong danh sách việc bắt buộc — Sếp mở Việc Sếp cần làm để làm tiếp.")
+    return (GENERIC_HEALTH_TITLE, HEALTH_WHY["warn"])
+
+
 def drafts_title(n: int) -> str:
     return f"Có {n} bản nháp chờ Sếp duyệt"
 

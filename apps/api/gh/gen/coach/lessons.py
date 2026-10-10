@@ -100,9 +100,9 @@ def _validate_lessons(raw: list[Any]) -> list[dict[str, Any]]:
         order = o["order"]
         if isinstance(order, bool) or not isinstance(order, int) or not 1 <= order <= 10000:
             raise _err(where, "order phải là số nguyên 1..10000")
+        # Giữ đúng hình dạng của tệp: trường tuỳ chọn chỉ có mặt khi tệp có (người dùng `.get()` cho an toàn).
         lesson: dict[str, Any] = {"id": lid, "order": order, "title": _text(where, "title", o["title"], TITLE_MAX),
-                                  "body": _text(where, "body", o["body"], LESSON_BODY_MAX), "kind": "N",
-                                  "try": None, "unlock": [], "done_signal": None}
+                                  "body": _text(where, "body", o["body"], LESSON_BODY_MAX), "kind": "N"}
         if "try" in o and o["try"] is not None:
             lesson["try"] = _try(where, o["try"])
         if "unlock" in o:
@@ -133,7 +133,7 @@ def _validate_tips(raw: list[Any]) -> list[dict[str, Any]]:
             raise _err(where, f"topic '{o['topic']}' không thuộc {', '.join(sorted(TOPICS))}")
         tip: dict[str, Any] = {"key": key, "topic": o["topic"], "when": _expr(where, "when", o["when"]),
                                "title": _text(where, "title", o["title"], TITLE_MAX),
-                               "body": _text(where, "body", o["body"], TIP_BODY_MAX), "try": None}
+                               "body": _text(where, "body", o["body"], TIP_BODY_MAX)}
         if "try" in o and o["try"] is not None:
             tip["try"] = _try(where, o["try"])
         out.append(tip)

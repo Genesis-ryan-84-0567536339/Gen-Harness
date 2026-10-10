@@ -146,7 +146,7 @@ def candidate_todos(sig: sg.Signals) -> list[Todo]:
             applies = sg.eval_cond(rule.when, sig.state)
         if not applies:
             continue
-        title, why = sg.TODO_COPY[rule.key]
+        title, why = sg.todo_copy(rule.key)
         if rule.key == "drafts.pending" and sig.drafts_pending > 0:
             title = sg.drafts_title(sig.drafts_pending)
         out.append(Todo(key=rule.key, level=rule.level, title=title, why=why,
