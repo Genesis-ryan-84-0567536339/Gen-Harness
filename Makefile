@@ -76,9 +76,10 @@ test: api-lint api-test bridge-test browser-test web-test
 
 # PLAN §5.1 — dữ liệu mẫu đi qua đúng luồng raw → refinery → clean (gh/seed_demo.py). Idempotent: chạy lại
 # không tạo trùng. seed-demo-clean xoá mọi kết luận/đối tượng đã sinh (không đụng raw.events — xem docstring
-# đầu gh/seed_demo.py).
+# đầu gh/seed_demo.py). v0.1.57: khoá an toàn — `seed` từ chối nếu thiếu cờ (--force / GH_ALLOW_SEED_DEMO=1) hoặc DB đã
+# có dữ liệu thật của tổ chức (thoát mã 2); gõ `make seed-demo` là chủ ý nên đã truyền --force, còn kiểm "dữ liệu thật" vẫn chạy.
 seed-demo:
-	cd $(API) && .venv/bin/python -m gh.seed_demo seed
+	cd $(API) && .venv/bin/python -m gh.seed_demo seed --force
 
 seed-demo-clean:
 	cd $(API) && .venv/bin/python -m gh.seed_demo clear

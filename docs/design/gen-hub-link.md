@@ -25,7 +25,7 @@
 
 | Vai | Là gì | Giữ / làm | Không làm |
 |---|---|---|---|
-| **Owner (Boss Ryan)** | Chủ | Duyệt, cấp token, bấm xác nhận, PIN | — |
+| **Owner (Sếp)** | Chủ | Duyệt, cấp token, bấm xác nhận, PIN | — |
 | **Dev Claude** | Claude Code (+ sub agent) | Code, review, merge, phát hành cả 2 repo | Không vận hành dữ liệu khách |
 | **Gen (trong app)** | Trợ lý quản trị ở Gen-Harness | Đọc dữ liệu app theo quyền người hỏi; *từ v0.1.26* đọc Kho, *từ v0.1.49* đọc lịch/mail/việc/Drive qua Gen-hub; đề xuất việc; *từ v0.1.50* đề xuất ghi Kho | Không sửa code, không nói với khách, **không tự ghi Kho** — chỉ ghi khi Sếp Xác nhận + mã PIN (§7) |
 | **Agent vòng ngoài** | Agent Zalo/WhatsApp (bridge Gen-Harness) | Thu thập thị trường, trả lời nhóm theo chính sách | Không chạm Kho/Gen-hub trực tiếp |

@@ -216,7 +216,7 @@
     "gh/social/protocol.py:25 (gh:browser:heartbeat đã tồn tại)"
    ],
    "impact": "Với Boss không rành kỹ thuật, tự bảo trì thất bại âm thầm: lỗi hook/consumer/worker/browser không ai thấy, worker chết thì Console vẫn \"khoẻ\"; cập nhật lỗi lặp mỗi đêm, backup ngừng, kênh rớt nhiều ngày, dữ liệu ngừng chảy về mà Boss không biết. Biết có bản mới chỉ khi tình cờ mở Tổng quan — đúng kiểu \"nút cập nhật biến mất\" Boss từng gặp.",
-   "fix": "(1) Trong app: job \"Sức khoẻ cần Sếp\" — mỗi sự cố (kênh rớt/phiên hết hạn, model lỗi/hết hạn mức, CLI hết hạn, cập nhật lỗi/rollback, worker chết, đĩa đầy, có bản mới, nháp chờ lâu, sàng lọc lỗi) sinh một thông báo chuông khử trùng lặp kèm liên kết sửa; thẻ \"Cần Sếp xử lý\" ở đầu Tổng quan gộp dải Chưa có model, thẻ Cập nhật và kênh rớt; thẻ \"Sức khoẻ hệ thống\" ở Điều khiển hệ thống: nhịp tim worker (arq health-check key), lần chạy cuối của từng cron (ghi Redis khi job xong), số tin DLQ theo stream + nút \"Chạy lại\"; chuông P1 khi worker im > 10 phút. (2) Ngoài app: watchdog do genh cài (timer 10–15 phút) kiểm /ready, container unhealthy (tự restart), đĩa, tuổi backup, update-status=failed, heartbeat worker/bridge → gửi một kênh ngoài (Telegram/Zalo của Boss, email, hoặc Kho Ryan), chống spam.",
+   "fix": "(1) Trong app: job \"Sức khoẻ cần Sếp\" — mỗi sự cố (kênh rớt/phiên hết hạn, model lỗi/hết hạn mức, CLI hết hạn, cập nhật lỗi/rollback, worker chết, đĩa đầy, có bản mới, nháp chờ lâu, sàng lọc lỗi) sinh một thông báo chuông khử trùng lặp kèm liên kết sửa; thẻ \"Cần Sếp xử lý\" ở đầu Tổng quan gộp dải Chưa có model, thẻ Cập nhật và kênh rớt; thẻ \"Sức khoẻ hệ thống\" ở Điều khiển hệ thống: nhịp tim worker (arq health-check key), lần chạy cuối của từng cron (ghi Redis khi job xong), số tin DLQ theo stream + nút \"Chạy lại\"; chuông P1 khi worker im > 10 phút. (2) Ngoài app: watchdog do genh cài (timer 10–15 phút) kiểm /ready, container unhealthy (tự restart), đĩa, tuổi backup, update-status=failed, heartbeat worker/bridge → gửi một kênh ngoài (Telegram/Zalo của Boss, email, hoặc Kho dữ liệu), chống spam.",
    "effort": "M",
    "sources": [
     "VH-5",
@@ -314,7 +314,7 @@
   },
   {
    "id": "F-9",
-   "title": "Phát hành và tự cập nhật không có cổng chặn: bản thành \"latest\" trước CI/E2E, chữ ký cosign không ai kiểm, không người duyệt — máy Boss tự nhận bản lỗi (hoặc bị chiếm) lúc 03:00",
+   "title": "Phát hành và tự cập nhật không có cổng chặn: bản thành \"latest\" trước CI/E2E, chữ ký cosign không ai kiểm, không người duyệt — máy Owner tự nhận bản lỗi (hoặc bị chiếm) lúc 03:00",
    "severity": "orange",
    "dimension": "van-hanh",
    "evidence": [
@@ -486,7 +486,7 @@
     "e2e-install.yml:41-51 — E2E pr chỉ kích hoạt khi đổi apps/genh/**, deploy/**, install.sh",
     "Không có quét bảo mật (Dependabot, CodeQL, pip-audit, npm audit, govulncheck, Trivy); compose.yaml:54 alembic upgrade heads che giấu nhánh migration kép"
    ],
-   "impact": "genh (bộ máy tự bảo trì, giữ dữ liệu của Boss khi update/khôi phục) có thể hỏng rollback/selfupdate mà PR vẫn xanh rồi tự cài lên máy Boss; thiếu GRANT/RLS và migration kép chỉ lộ sau khi đã phát hành; đổi apps/api/** hay apps/web/Dockerfile không được cài thử trước khi phát hành.",
+   "impact": "genh (bộ máy tự bảo trì, giữ dữ liệu của Boss khi update/khôi phục) có thể hỏng rollback/selfupdate mà PR vẫn xanh rồi tự cài lên máy Owner; thiếu GRANT/RLS và migration kép chỉ lộ sau khi đã phát hành; đổi apps/api/** hay apps/web/Dockerfile không được cài thử trước khi phát hành.",
    "fix": "Thêm job genh vào ci.yml: go vet ./... && go test -race ./... (+ govulncheck); thêm npx playwright test (mock, đã có webServer trong apps/web/playwright.config.ts); đổi pytest CI sang GH_TEST_APP_ROLE=1 (hoặc chạy cả hai); mở rộng path filter E2E pr (hoặc chạy khi VERSION đổi); job \"alembic heads = 1\"; Dependabot + pip-audit/npm audit.",
    "effort": "M",
    "sources": [
@@ -495,7 +495,7 @@
     "VH-14"
    ],
    "survives": true,
-   "better_fix": "Thêm go vet ./... và go test ./... vào ngay installer-matrix.yml: job đã có setup-go trên 4 hệ điều hành, nên bắt được cả mã riêng của Windows và macOS (probe_disk_windows.go, bootstrap_darwin.go) mà không tốn thêm job. Ở bước pytest của ci.yml, thêm env GH_TEST_APP_ROLE: \"1\". Thêm bước npx playwright test (mock) vào job web. | Ngoài các job go vet/test -race, playwright mock, APP_ROLE: đưa e2e-install vào trước khi phát hành. Ví dụ release tạo prerelease/draft, e2e xanh mới promote thành latest, và autoupdate chỉ lấy bản 'latest' đã qua e2e. Như vậy bản lỗi không bao giờ tự cài lên máy Boss.",
+   "better_fix": "Thêm go vet ./... và go test ./... vào ngay installer-matrix.yml: job đã có setup-go trên 4 hệ điều hành, nên bắt được cả mã riêng của Windows và macOS (probe_disk_windows.go, bootstrap_darwin.go) mà không tốn thêm job. Ở bước pytest của ci.yml, thêm env GH_TEST_APP_ROLE: \"1\". Thêm bước npx playwright test (mock) vào job web. | Ngoài các job go vet/test -race, playwright mock, APP_ROLE: đưa e2e-install vào trước khi phát hành. Ví dụ release tạo prerelease/draft, e2e xanh mới promote thành latest, và autoupdate chỉ lấy bản 'latest' đã qua e2e. Như vậy bản lỗi không bao giờ tự cài lên máy Owner.",
    "verdicts": [
     {
      "lens": "tai-hien",
@@ -700,7 +700,7 @@
     "deploy/images/api.Dockerfile:49 (RUN pip install .); log CI cho thấy starlette==1.7.0 kéo tự do",
     "gh/db.py:73 (Depends(get_db, scope=\"function\") cần FastAPI 0.121+, cận dưới 0.115 đã sai)"
    ],
-   "impact": "Bản build không tái lập; mỗi lần phát hành có thể kéo bản thư viện khác bản CI đã test — một bản FastAPI/arq/redis-py lỗi là hỏng release mà không đổi dòng mã nào; tổ hợp phụ thuộc chạy thật trên máy Boss chưa từng được kiểm.",
+   "impact": "Bản build không tái lập; mỗi lần phát hành có thể kéo bản thư viện khác bản CI đã test — một bản FastAPI/arq/redis-py lỗi là hỏng release mà không đổi dòng mã nào; tổ hợp phụ thuộc chạy thật trên máy Owner chưa từng được kiểm.",
    "fix": "uv lock + uv sync --frozen trong Dockerfile và CI (cả apps/browser); sửa cận dưới FastAPI; ghim digest caddy/redis trong compose (qua pin-compose) và ảnh nền build; bật Dependabot/Renovate.",
    "effort": "M",
    "sources": [
@@ -714,13 +714,13 @@
      "lens": "tai-hien",
      "refuted": false,
      "confidence": 0.85,
-     "reason": "Đúng. deploy/compose.yaml:31, :170, :249 dùng caddy:2-alpine và redis:7-alpine theo tag. genh update có chạy compose pull (internal/ops/update_test.go:50), nên máy Boss kéo bản caddy/redis mới mỗi đêm mà CI chưa từng kiểm. Ảnh nền api.Dockerfile:2 python:3.11-slim, bridge node:22-slim, db pgvector:pg16, web nginx-unprivileged:1.27-alpine đều không có digest; chỉ browser.Dockerfile:9 có ghim. pyproject.toml:6-23 chỉ có cận dưới, không có uv.lock hay requirements. api.Dockerfile:49 pip install .; ci.yml:55 tự giải phụ thuộc ở thời điểm khác. db.py:73 dùng Depends(scope='function') (FastAPI 0.121+) trong khi cận dưới là >=0.115. Không có dependabot/renovate. Không kiểm được số starlette trong log CI, nhưng phần chính của phát hiện đã được xác nhận."
+     "reason": "Đúng. deploy/compose.yaml:31, :170, :249 dùng caddy:2-alpine và redis:7-alpine theo tag. genh update có chạy compose pull (internal/ops/update_test.go:50), nên máy Owner kéo bản caddy/redis mới mỗi đêm mà CI chưa từng kiểm. Ảnh nền api.Dockerfile:2 python:3.11-slim, bridge node:22-slim, db pgvector:pg16, web nginx-unprivileged:1.27-alpine đều không có digest; chỉ browser.Dockerfile:9 có ghim. pyproject.toml:6-23 chỉ có cận dưới, không có uv.lock hay requirements. api.Dockerfile:49 pip install .; ci.yml:55 tự giải phụ thuộc ở thời điểm khác. db.py:73 dùng Depends(scope='function') (FastAPI 0.121+) trong khi cận dưới là >=0.115. Không có dependabot/renovate. Không kiểm được số starlette trong log CI, nhưng phần chính của phát hiện đã được xác nhận."
     },
     {
      "lens": "tac-dong",
      "refuted": false,
      "confidence": 0.6,
-     "reason": "Xác nhận: pyproject chỉ có cận dưới, không có lockfile; caddy:2-alpine/redis:7-alpine và ảnh nền build không ghim digest. Tuy vậy đã có lớp bù: 5 ảnh tự build được ghim digest khi phát hành, nên máy Boss chạy đúng ảnh mà E2E cài thật đã thử. CI cài bản mới nhất ở mỗi PR nên bản lớn gây vỡ thường lộ ra ở CI trước khi merge. genh update có healthcheck và tự rollback. Rủi ro còn lại: lệch giữa lúc chạy CI và lúc build release, caddy/redis trôi theo mỗi lần pull (rollback không đưa về ảnh cũ được), không build lại y hệt được. Cận dưới FastAPI sai chỉ là lý thuyết vì pip luôn lấy bản mới nhất. Hạ xuống yellow."
+     "reason": "Xác nhận: pyproject chỉ có cận dưới, không có lockfile; caddy:2-alpine/redis:7-alpine và ảnh nền build không ghim digest. Tuy vậy đã có lớp bù: 5 ảnh tự build được ghim digest khi phát hành, nên máy Owner chạy đúng ảnh mà E2E cài thật đã thử. CI cài bản mới nhất ở mỗi PR nên bản lớn gây vỡ thường lộ ra ở CI trước khi merge. genh update có healthcheck và tự rollback. Rủi ro còn lại: lệch giữa lúc chạy CI và lúc build release, caddy/redis trôi theo mỗi lần pull (rollback không đưa về ảnh cũ được), không build lại y hệt được. Cận dưới FastAPI sai chỉ là lý thuyết vì pip luôn lấy bản mới nhất. Hạ xuống yellow."
     }
    ],
    "missing_verdict": false
@@ -963,7 +963,7 @@
     "README và app không có hướng dẫn truy cập từ máy khác hoặc điện thoại"
    ],
    "impact": "Lời mời trỏ về https://localhost:8443. Nhân viên mở ra lỗi. Boss cũng không mở được Console trên điện thoại.",
-   "fix": "Nếu địa chỉ là localhost: cảnh báo ngay trong hộp mời. Thêm thẻ \"Địa chỉ cho nhân viên và điện thoại\" ở trang Đội ngũ; genh đặt GH_SITE_ADDRESS/tên miền hoặc đường hầm. Cần kiểm trên máy Boss.",
+   "fix": "Nếu địa chỉ là localhost: cảnh báo ngay trong hộp mời. Thêm thẻ \"Địa chỉ cho nhân viên và điện thoại\" ở trang Đội ngũ; genh đặt GH_SITE_ADDRESS/tên miền hoặc đường hầm. Cần kiểm trên máy Owner.",
    "effort": "M",
    "sources": [
     "UX-9"
@@ -1187,7 +1187,7 @@
      "lens": "tac-dong",
      "refuted": false,
      "confidence": 0.75,
-     "reason": "Đã xác nhận trình tự rollback: khôi phục compose cũ → restoreInContainer (exec vào container api đang chạy, tức bản MỚI) → up -d. Khi container đang restarting, Docker báo 'is restarting, wait until the container is running', không chứa chuỗi 'is not running' nên không chuyển sang run --rm. Nếu exec lọt vào lúc container vừa lên thì cũng bị giết khi PID 1 crash. Đêm nào timer cũng chạy update vô điều kiện nên sẽ lặp lại. Nhưng 'hay gặp nhất' là nói quá: migrate lỗi xảy ra trước up -d nên rollback vẫn chạy được. Ngoài ra lỗi crash-loop chỉ xảy ra trên máy Boss mà E2E không bắt được thì hiếm. Dù vậy đây là lưới an toàn của tự cập nhật ban đêm, nên giữ cam."
+     "reason": "Đã xác nhận trình tự rollback: khôi phục compose cũ → restoreInContainer (exec vào container api đang chạy, tức bản MỚI) → up -d. Khi container đang restarting, Docker báo 'is restarting, wait until the container is running', không chứa chuỗi 'is not running' nên không chuyển sang run --rm. Nếu exec lọt vào lúc container vừa lên thì cũng bị giết khi PID 1 crash. Đêm nào timer cũng chạy update vô điều kiện nên sẽ lặp lại. Nhưng 'hay gặp nhất' là nói quá: migrate lỗi xảy ra trước up -d nên rollback vẫn chạy được. Ngoài ra lỗi crash-loop chỉ xảy ra trên máy Owner mà E2E không bắt được thì hiếm. Dù vậy đây là lưới an toàn của tự cập nhật ban đêm, nên giữ cam."
     }
    ],
    "missing_verdict": false
@@ -1228,7 +1228,7 @@
   },
   {
    "id": "F-35",
-   "title": "Kiểm nâng cấp quá hẹp: chỉ từ N-1, CSDL rỗng, chỉ Ubuntu — máy Boss nhảy nhiều bản, có dữ liệu thật, chạy Fedora",
+   "title": "Kiểm nâng cấp quá hẹp: chỉ từ N-1, CSDL rỗng, chỉ Ubuntu — máy Owner nhảy nhiều bản, có dữ liệu thật, chạy Fedora",
    "severity": "orange",
    "dimension": "van-hanh",
    "evidence": [
@@ -1255,7 +1255,7 @@
      "lens": "tac-dong",
      "refuted": false,
      "confidence": 0.55,
-     "reason": "Đã xác nhận: e2e-upgrade lấy tags[1], DB rỗng, chỉ chạy ubuntu-24.04. Tài liệu 05-installer.md:159 ghi có Fedora/Debian nhưng installer-matrix không có. Bước 'Cập nhật ngay' chỉ thử trường hợp đã mới nhất. Phần N-5 và Fedora ít giá trị: chuỗi alembic vẫn như nhau, phát hành nhiều bản một ngày nên máy Boss vẫn hay nhảy N-2/N-3, và chạy Docker trong container fedora không kiểm được SELinux của máy thật. Lỗ hổng thật là: không có dữ liệu mẫu, và e2e-upgrade chạy SAU khi đã phát hành chứ không chặn được. Máy Boss vẫn lấy releases/latest lúc 03:00. Giữ cam."
+     "reason": "Đã xác nhận: e2e-upgrade lấy tags[1], DB rỗng, chỉ chạy ubuntu-24.04. Tài liệu 05-installer.md:159 ghi có Fedora/Debian nhưng installer-matrix không có. Bước 'Cập nhật ngay' chỉ thử trường hợp đã mới nhất. Phần N-5 và Fedora ít giá trị: chuỗi alembic vẫn như nhau, phát hành nhiều bản một ngày nên máy Owner vẫn hay nhảy N-2/N-3, và chạy Docker trong container fedora không kiểm được SELinux của máy thật. Lỗ hổng thật là: không có dữ liệu mẫu, và e2e-upgrade chạy SAU khi đã phát hành chứ không chặn được. Máy Owner vẫn lấy releases/latest lúc 03:00. Giữ cam."
     }
    ],
    "missing_verdict": false
@@ -1315,7 +1315,7 @@
      "lens": "tai-hien",
      "refuted": false,
      "confidence": 0.85,
-     "reason": "Đã xác nhận: deploy/compose.yaml không có khối logging: hay driver cho dịch vụ nào trong 12 dịch vụ (grep chỉ ra x-app-env ở dòng 11). Toàn repo không có daemon.json, log-opts hay max-size, kể cả trong apps/genh. worker.py:200 có cron social_schedule chạy mỗi phút, và mỗi lần arq đều ghi log. Healthcheck api chạy mỗi 15 giây (api.Dockerfile:68-69). Driver json-file mặc định của docker-ce và Docker tĩnh (rootless) không xoay vòng log. Riêng moby-engine của Fedora mặc định dùng journald nên có xoay vòng, tùy cách cài trên máy Boss. content.go:27-29 xác nhận StandardOutput=append, nhưng tệp này chỉ ghi 1 lần/ngày với --quiet nên tăng không đáng kể. Phần chính về log container là đúng."
+     "reason": "Đã xác nhận: deploy/compose.yaml không có khối logging: hay driver cho dịch vụ nào trong 12 dịch vụ (grep chỉ ra x-app-env ở dòng 11). Toàn repo không có daemon.json, log-opts hay max-size, kể cả trong apps/genh. worker.py:200 có cron social_schedule chạy mỗi phút, và mỗi lần arq đều ghi log. Healthcheck api chạy mỗi 15 giây (api.Dockerfile:68-69). Driver json-file mặc định của docker-ce và Docker tĩnh (rootless) không xoay vòng log. Riêng moby-engine của Fedora mặc định dùng journald nên có xoay vòng, tùy cách cài trên máy Owner. content.go:27-29 xác nhận StandardOutput=append, nhưng tệp này chỉ ghi 1 lần/ngày với --quiet nên tăng không đáng kể. Phần chính về log container là đúng."
     },
     {
      "lens": "tac-dong",
@@ -1963,7 +1963,7 @@
     "grep is-enabled docker: không có"
    ],
    "impact": "Nếu thiếu linger/docker enabled, timer/watcher không chạy khi Boss chưa đăng nhập.",
-   "fix": "genh doctor/status + Console hiện 2 mục này; cần kiểm 1 lần trên máy Boss.",
+   "fix": "genh doctor/status + Console hiện 2 mục này; cần kiểm 1 lần trên máy Owner.",
    "effort": "S",
    "sources": [
     "VH-24"

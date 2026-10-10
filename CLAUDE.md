@@ -1,6 +1,8 @@
 # Gen-Harness — ghi chú cho Claude
 
-## Cách làm việc (Kho Ryan QD-2, QD-3, QD-4, QD-14)
+Ghi chú vận hành riêng của Sếp nằm ở repo Brain › Project/gen-harness (riêng tư).
+
+## Cách làm việc (Kho dữ liệu của Sếp — QD-2, QD-3, QD-4, QD-14)
 - Việc nặng ngữ cảnh (đọc log CI, dò nhiều file, review diff lớn, chạy test/e2e, chụp màn hình) → giao sub agent
   (công cụ Agent); ngữ cảnh chính chỉ giữ quyết định, kết luận, báo cáo Boss. Việc 1–2 thao tác thì làm thẳng.
 - Phân vai model: Sonnet thi công (dò/sửa code, chạy test) · Opus thiết kế + review trước merge · Haiku đọc log,
@@ -32,5 +34,5 @@
 - Token/khoá/bí mật không vào log, Action Log, kết quả, thân lỗi hay repo. Không tạo tài khoản giả, không né chống bot.
 - Không skip/quarantine test để xanh. Mọi thay đổi hành vi có test; migration chạy lại an toàn.
 - Lỗi hiển thị cho người dùng = chuỗi thân thiện + "Chi tiết kỹ thuật"; không bao giờ render object vào JSX.
-- Tiếng Việt có dấu trong UI, tài liệu, thông báo lỗi. Thuật ngữ: Sếp, Gen nhớ, Ghi nhớ, Ghi vào Kho Ryan, Kho Ryan, Gen-hub,
+- Tiếng Việt có dấu trong UI, tài liệu, thông báo lỗi. Thuật ngữ: Sếp, Gen nhớ, Ghi nhớ, Ghi vào Kho dữ liệu, Kho dữ liệu (Kho của Sếp), Gen-hub,
   mã PIN, Việc Sếp cần làm.

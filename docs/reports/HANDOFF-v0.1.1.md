@@ -1,10 +1,11 @@
-# Bàn giao Gen-Harness — hiện trạng + việc dở (cập nhật 10/10/2026, bản v0.1.56)
+# Bàn giao Gen-Harness — hiện trạng + việc dở (cập nhật 10/10/2026, bản v0.1.57)
 
 File này nay chỉ ghi **hiện trạng + việc dở** (tên cũ `HANDOFF-v0.1.1.md` giữ nguyên vì mã nguồn có chú thích trỏ tới).
 Lịch sử từng bản nằm ở [CHANGELOG.md](../../CHANGELOG.md) (3–5 dòng/bản) và `docs/releases/vX.Y.Z.md` (chi tiết, chuyển nguyên từ HANDOFF cũ):
 mục "Lỗi cần sửa", "Chia việc", "Kiểm tra tích hợp" của v0.1.1/v0.1.2 nay ở [v0.1.1.md](../releases/v0.1.1.md) và [v0.1.2.md](../releases/v0.1.2.md);
 chú thích trong mã trỏ "HANDOFF mục vX.Y.Z" thì đọc tệp `docs/releases/vX.Y.Z.md` tương ứng.
 Tiến độ, bản phản ứng (hotfix) và **mục Nợ**: [ROADMAP](../ROADMAP.md). Vận hành hằng ngày: [runbook](../runbook.md).
+Ghi chú vận hành riêng của Sếp (máy, tài khoản, địa chỉ, việc riêng) nằm ở repo Brain › Project/gen-harness (riêng tư) — không ghi vào repo công khai này.
 
 ## Hợp đồng chung
 
@@ -20,13 +21,14 @@ Còn hiệu lực từ v0.1.1 (vai trò DB, volume, gói hồ sơ); chi tiết �
 - **Gói hồ sơ `.ghbundle`**: Python tạo/đọc (`python -m gh.bundle export|import`), Go chỉ chuyển bytes; mật khẩu qua `GH_BUNDLE_PASSWORD` (≥ 12 ký tự);
   mã thoát `0` ok · `2` sai mật khẩu/gói hỏng · `3` không tương thích · `1` lỗi khác; mã hoá lại mọi bí mật bằng khoá master máy đích.
 
-## Hiện trạng (v0.1.56)
+## Hiện trạng (v0.1.57)
 
-Bản mới nhất **v0.1.56** (10/10/2026, `VERSION` = v0.1.56): **không lộ thông tin riêng của Sếp cho Owner khác** — bỏ địa chỉ Gen-hub khỏi mã giao đi, tên Kho chung "Kho dữ liệu", CI chống lộ ([v0.1.56.md](../releases/v0.1.56.md)).
+Bản mới nhất **v0.1.57** (10/10/2026, `VERSION` = v0.1.57): **khoá nạp dữ liệu mẫu** (cờ + DB chưa có dữ liệu thật), **Owner tự đặt Tên Kho** (Nợ #30), **CI `api` chạy hai lượt pytest song song**, bộ kiểm chống lộ chỉ giữ quy tắc chung (mẫu riêng ở secret `GH_PERSONAL_PATTERNS`), bản công khai đã gọt danh tính riêng ([v0.1.57.md](../releases/v0.1.57.md)); đang chờ PR vào main + cổng phát hành.
+Trước đó **v0.1.56** (10/10/2026): **không lộ thông tin riêng của Sếp cho Owner khác** — bỏ địa chỉ Gen-hub khỏi mã giao đi, tên Kho chung "Kho dữ liệu", CI chống lộ ([v0.1.56.md](../releases/v0.1.56.md)).
 Trước đó **v0.1.55** (10/10/2026): **Gọn cho Sếp** — Mặt tiền Owner, hồ sơ model tiêu chuẩn + Về mặc định, thiết lập gọn, chọn model trong chat, Jev lọc trước ([v0.1.55.md](../releases/v0.1.55.md)).
 Trước đó **v0.1.54**: **Gen hướng dẫn** — Gen chủ động nhắc việc Sếp cần làm, giới thiệu tính năng, bài học mỗi ngày ([v0.1.54.md](../releases/v0.1.54.md), thiết kế [gen-coach.md](../design/gen-coach.md)).
-v0.1.54 chứa toàn bộ **v0.1.53** ("tự cập nhật đêm tự lành + trung thực": máy Boss đứng ở v0.1.44 từ 03/10 đến 09/10 vì lịch đêm bị tắt mà không ai biết, [v0.1.53.md](../releases/v0.1.53.md)),
-v0.1.52 (gỡ digest cũ bằng `rmi -f`, [v0.1.52.md](../releases/v0.1.52.md)), v0.1.51 và v0.1.50; bản chạy trên máy Boss: v0.1.49.
+v0.1.54 chứa toàn bộ **v0.1.53** ("tự cập nhật đêm tự lành + trung thực": một bản cài đứng ở v0.1.44 từ 03/10 đến 09/10 vì lịch đêm bị tắt mà không ai biết, [v0.1.53.md](../releases/v0.1.53.md)),
+v0.1.52 (gỡ digest cũ bằng `rmi -f`, [v0.1.52.md](../releases/v0.1.52.md)), v0.1.51 và v0.1.50.
 Đang chạy, theo nhóm:
 
 - **Cài đặt & vận hành (genh)**: cài một lệnh; `genh update` an toàn (tải trước, sao lưu, migrate, tự quay về bản cũ khi lỗi, khoá `genh.lock`, báo "bị dừng giữa chừng");
@@ -48,7 +50,7 @@ v0.1.52 (gỡ digest cũ bằng `rmi -f`, [v0.1.52.md](../releases/v0.1.52.md)),
 
 - **Vì sao**: repo công khai + mọi Owner nhận cùng bản; Boss dặn không gợi ý cổng nối Gen-hub và rà thông tin riêng (Zalo, dữ liệu demo). Không có khoá/token/Zalo thật bị lộ; lộ thật là địa chỉ Gen-hub (6 chỗ) và tên riêng của Kho (~30 file, cả ghi chú máy chủ lưu DB).
 - **Thay đổi**: A `KHO_LABEL` ("Kho dữ liệu") + `ENDPOINT_INVALID_MSG` dạng `https://<máy-chủ>/mcp` + migration `0035` (đổi ghi chú máy chủ Gen-hub cũ) + `seed_demo.py` tên hư cấu; B ô nhập `https://<địa-chỉ-gen-hub-của-bạn>/mcp`, mock/test `example.test`; C `check_no_personal_info.py` (bước CI ở job `web`) + tài liệu chung.
-- **Chưa làm / để Boss quyết**: ghi chú vận hành riêng còn công khai (Nợ #31), ô Tên Kho (Nợ #30), tên khách trong `seed-data.json`/mock web. Git history giữ địa chỉ cũ — không viết lại. Chi tiết: [v0.1.56.md](../releases/v0.1.56.md).
+- **Chưa làm / để Boss quyết**: ghi chú vận hành riêng còn công khai (Nợ #31) — đã xong ở v0.1.57 (repo giữ công khai, ghi chú riêng dời sang Brain); ô Tên Kho (Nợ #30) — xong ở v0.1.57; tên khách trong `seed-data.json`/mock web (còn chờ Boss). Git history giữ địa chỉ cũ — không viết lại. Chi tiết: [v0.1.56.md](../releases/v0.1.56.md).
 
 ## v0.1.55 — Gọn cho Sếp (5 gói song song G1–G5, QD-14)
 
@@ -65,7 +67,7 @@ v0.1.52 (gỡ digest cũ bằng `rmi -f`, [v0.1.52.md](../releases/v0.1.52.md)),
 - **Thay đổi**: migration `0033` (`agent.gen_coach_prefs`, `agent.gen_coach_items`); gói `gh/gen/coach/` (signals, lessons, engine, store, routes, cron) + `content/lessons.json` (10 bài N01–N10) và `tips.json` (6 mẹo); API `/gen/coach/{today,items,prefs,curriculum}` (chỉ Owner);
   job `gen_coach` 09:05/11:05/14:05; thẻ Hôm nay của Sếp, Lộ trình học cùng Gen (19 bài = 10 + 9 từ Hướng dẫn thiết lập), Cài đặt › Bộ não AI › Gen hướng dẫn; 16 mục tiêu Gen mới; thẻ "Việc thiết lập tiếp" đổi "Ẩn" thành "Để sau 7 ngày" (lưu ở máy chủ).
 - **Kiểm tra** (gói nội dung, cây gộp tạm): pytest `test_coach_content_v0154` 27 xanh; cùng `test_gen_coach_v0154` + `test_worker_schedule_v0136` = 176 xanh. Bộ đủ (pytest, vitest, Playwright mock) chạy khi tích hợp `claude/v0154` — kết quả ở báo cáo tích hợp.
-- **Người gác yêu cầu tự chữa** (cùng bản, bài học máy Boss: `gen-harness-update-request.path` failed "Result: resources" vì hết hạn mức inotify 128): `genh auto-update enable|status` và lần cài/cập nhật chữa (chỉ `SubState=waiting` mới là khoẻ; `handle-requests` KHÔNG chữa — trong service `.path` "running" giả); còn lỗi ⇒ `gen-harness-update-request.timer` dự phòng + `watcher` trong `run/nightly-status.json` + dòng "Người gác cập nhật" ở thẻ Sức khoẻ; E2E thật có ca inotify (xem [v0.1.54.md](../releases/v0.1.54.md)).
+- **Người gác yêu cầu tự chữa** (cùng bản, bài học từ một bản cài thật: `gen-harness-update-request.path` failed "Result: resources" vì hết hạn mức inotify 128): `genh auto-update enable|status` và lần cài/cập nhật chữa (chỉ `SubState=waiting` mới là khoẻ; `handle-requests` KHÔNG chữa — trong service `.path` "running" giả); còn lỗi ⇒ `gen-harness-update-request.timer` dự phòng + `watcher` trong `run/nightly-status.json` + dòng "Người gác cập nhật" ở thẻ Sức khoẻ; E2E thật có ca inotify (xem [v0.1.54.md](../releases/v0.1.54.md)).
 - **Boss cần làm**: xem "Boss phải làm — v0.1.54" dưới (không bắt buộc, ~3 phút). Chi tiết: [v0.1.54.md](../releases/v0.1.54.md).
 
 ## v0.1.50 — Gen nhớ + Gen ghi Kho có xác nhận và mã PIN
@@ -82,7 +84,7 @@ v0.1.52 (gỡ digest cũ bằng `rmi -f`, [v0.1.52.md](../releases/v0.1.52.md)),
 
 ## v0.1.53 — Tự cập nhật đêm tự lành + trung thực
 
-- **Vì sao** (F-93…F-100): máy Boss kẹt v0.1.44 từ 03/10 đến 09/10; `genh auto-update status` in TẮT (đọc sai `is-enabled` thoát ≠ 0), Console chỉ nói "chưa nhận yêu cầu". Điều tra: **H-a tái hiện bằng mã** (bản cài phụ gỡ/ghi đè lịch dùng chung), **H-c tái hiện** (status in sai),
+- **Vì sao** (F-93…F-100): một bản cài kẹt v0.1.44 từ 03/10 đến 09/10; `genh auto-update status` in TẮT (đọc sai `is-enabled` thoát ≠ 0), Console chỉ nói "chưa nhận yêu cầu". Điều tra: **H-a tái hiện bằng mã** (bản cài phụ gỡ/ghi đè lịch dùng chung), **H-c tái hiện** (status in sai),
   **H-b không tái hiện được** (bằng mã lẫn E2E systemd thật); chưa chỉ ra được nguyên nhân gốc đêm 03/10 ngoài H-a ⇒ bản này làm lịch **tự lành** cho mọi nguyên nhân.
 - **Thay đổi**: `genh update` tự bật lại lịch đêm (dấu `config/auto-update-disabled.json` = Sếp đã chủ động tắt thì không); `status` đủ 5 thông tin + cảnh báo log im > 36 giờ; kiểm linger sau `enable-linger`; lịch đêm chọn bản cao nhất đã đủ 24 giờ trong 10 bản gần nhất;
   `ConsumeRequest` không nuốt lỗi xoá (**GH-E94C**, chờ khoá > 30 phút ⇒ GH-E94A); unit đêm có `--install-dir`/`--port`/`GEN_HARNESS_HOME`, `StartLimit`/`TriggerLimit`, bản cài phụ không đụng lịch bản chính; `run/nightly-status.json`;
@@ -101,9 +103,16 @@ v0.1.52 (gỡ digest cũ bằng `rmi -f`, [v0.1.52.md](../releases/v0.1.52.md)),
 
 ## Việc dở
 
+### Boss phải làm — v0.1.57 (không gấp; chi tiết ở [v0.1.57.md](../releases/v0.1.57.md))
+
+1. **Thêm secret `GH_PERSONAL_PATTERNS`**: GitHub › Settings › Secrets and variables › Actions › New repository secret, mỗi dòng một mẫu (tên miền / tên gọi / email riêng của Sếp, viết như biểu thức chính quy). Chưa thêm thì CI vẫn chạy quy tắc chung và chỉ cảnh báo "chưa cấu hình mẫu riêng".
+2. **Duyệt PR #137 ở repo Brain** (ghi chú vận hành riêng của Sếp dời từ repo công khai sang Brain).
+3. Tuỳ chọn: **đặt Tên Kho** ở Kết nối › Gen-hub › "Tên Kho (tuỳ chọn)" (≤ 40 ký tự, cần mã PIN); để trống là "Kho dữ liệu".
+4. Biết thêm: `make seed-demo` nay từ chối khi cơ sở dữ liệu đã có người dùng / dữ liệu thật, và phải chạy TRƯỚC trình thiết lập — chủ ý, không cần làm gì.
+
 ### Boss phải làm — v0.1.56 (không bắt buộc; chi tiết ở [v0.1.56.md](../releases/v0.1.56.md))
 
-1. Không cần làm gì với máy đang chạy. **Quyết**: repo công khai còn ghi chú vận hành riêng — đặt repo private (Owner khác sẽ không tải được bản phát hành) hay chuyển ghi chú sang repo Brain? Nhắn Claude chọn.
+1. Không cần làm gì với máy đang chạy. Đã quyết (10/10): repo giữ công khai (Owner khác cần tải bản phát hành), ghi chú vận hành riêng dời sang repo Brain (riêng tư).
 2. Xem tên mẫu khách trong `docs/design/seed-data.json` và mock web có phải khách thật không (`seed_demo.py` đã dùng tên hư cấu).
 
 ### Boss phải làm — v0.1.55 (không bắt buộc; chi tiết ở [v0.1.55.md](../releases/v0.1.55.md))
@@ -131,7 +140,7 @@ v0.1.52 (gỡ digest cũ bằng `rmi -f`, [v0.1.52.md](../releases/v0.1.52.md)),
 ### Boss phải làm — v0.1.50 (một lần, ~3 phút, sau khi máy tự cập nhật; chi tiết ở [v0.1.50.md](../releases/v0.1.50.md))
 
 1. **Quyền ghi Kho (tuỳ chọn)**: Gen-hub › token của Gen-Harness › tick thêm `kho_create`, `kho_update` (không tick gì khác), rồi Gen-Harness › Kết nối › Gen-hub › **Kiểm tra** (mã PIN):
-   khối "Quyền ghi Kho" hiện "Có". Chưa tick thì thẻ Ghi vào Kho Ryan bị khoá nút Xác nhận; phần còn lại vẫn chạy.
+   khối "Quyền ghi Kho" hiện "Có". Chưa tick thì thẻ Ghi vào Kho dữ liệu bị khoá nút Xác nhận; phần còn lại vẫn chạy.
 2. **Duyệt đề xuất Phiên đầu tiên**: sau bước 1 (Kiểm tra xanh với quyền ghi), trong ≤ 30 phút có chuông "Gen đề xuất ghi Kho · Phiên v0.1.50" → đọc bảng "Trường | Sẽ ghi" (thẻ sửa bản ghi có thêm cột "Hiện tại") → **Xác nhận** + mã PIN →
    mở Kho kiểm bản ghi. Việc Sếp cần làm › dòng 9 "Gen ghi Kho" tự chuyển Đạt.
 3. **Thử Gen nhớ**: nói "nhớ giúp em: …" → thẻ Ghi nhớ → Xác nhận; xem/sửa/xoá ở Cài đặt › Bộ não AI › Gen nhớ.
@@ -152,9 +161,10 @@ v0.1.52 (gỡ digest cũ bằng `rmi -f`, [v0.1.52.md](../releases/v0.1.52.md)),
 
 ### Claude / điều phối viên còn dở
 
+- **Phát hành v0.1.57**: `claude/v0157` → PR vào main → CI xanh (job `api` hai lượt song song, lớp mẫu riêng cần secret `GH_PERSONAL_PATTERNS`; `release.yml` truyền `secrets: inherit`) → merge → bản thử → E2E cài thật + nâng cấp → promote → kiểm genh tải về → báo Boss.
 - **Phát hành v0.1.56**: `claude/v0156` → PR vào main → CI xanh (có bước "Chống lộ thông tin riêng của Sếp") → merge → bản thử → E2E cài thật + nâng cấp → promote → kiểm genh tải về → báo Boss.
 - **Phát hành v0.1.55**: `claude/v0155` (5 gói đã tích hợp, đã nối main) → PR vào main → CI xanh → merge → Release bản thử → E2E cài thật (có bước hồ sơ tiêu chuẩn) + nâng cấp + `e2e-nightly-real` → promote → kiểm genh tải về (checksum/version) → báo Boss.
-- **v0.1.57 (đã hẹn)**: nhận kết quả "Thử 12 câu mẫu" của Jev từ Boss rồi quyết ngưỡng lọc trước; Mặt tiền thêm "Chi phí AI hôm nay" + thẻ "Chưa có model", mục Phân tích; chuông Gen dẫn về Mặt tiền; xoá hội thoại Gen thì xoá luôn lựa chọn model đã nhớ.
+- **v0.1.58 (đã hẹn)**: nhận kết quả "Thử 12 câu mẫu" của Jev từ Boss rồi quyết ngưỡng lọc trước; Mặt tiền thêm "Chi phí AI hôm nay" + thẻ "Chưa có model", mục Phân tích; chuông Gen dẫn về Mặt tiền; xoá hội thoại Gen thì xoá luôn lựa chọn model đã nhớ.
 - **H-b còn mở**: timer đêm mất lịch khi `daemon-reload`/`enable` chạy từ bên trong service đêm — không tái hiện được bằng mã lẫn `e2e-nightly-real` (systemd thật: sau lần chạy timer vẫn có lần kế tiếp); tự lành bao ca này. Máy thật còn tái diễn thì ghi vào v0.1.53.md.
 - **PR Renovate** không tự merge nằm chờ tới khi Boss nhắn "xử lý PR phụ thuộc"; chưa có lịch tự động nào gọi Claude.
 - **Selector ghi Facebook** mới kiểm trên trang mẫu — chờ nghiệm thu thật (dòng 8). Chuông phiên hết có thể hiện hai lần (`social.paused` + `social.session_expired`), gộp ở bản sau nếu phiền.

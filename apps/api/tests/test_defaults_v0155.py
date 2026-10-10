@@ -128,7 +128,8 @@ async def owner_uid(db: Any) -> uuid.UUID:
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
 CORE_ITEMS = {"binding:core.gen", "binding:core.briefing", "binding:core.refinery", "binding:core.reply"}
-STATIC_ITEMS = {"gen", "coach", "triage", "refinery.schedule", "jev.preset", "ai_cost", "backup", "autonomy"}
+STATIC_ITEMS = {"gen", "coach", "triage", "refinery.schedule", "jev.preset", "ai_cost", "backup", "autonomy",
+                "kho_label"}
 
 
 async def test_list_has_every_item_and_nothing_customized_on_a_fresh_install(dapi: Api, db: Any) -> None:

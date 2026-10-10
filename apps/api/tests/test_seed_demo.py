@@ -4,7 +4,18 @@ xoá sạch; chạy lại không lỗi/không trùng."""
 from sqlalchemy import text
 
 from gh.db import sessionmaker
-from gh.seed_demo import MSG_PREFIX, NS, clear_demo, seed_demo
+from gh.seed_demo import (
+    ALLOW_ENV,
+    EXIT_REFUSED,
+    MSG_HAS_REAL_DATA,
+    MSG_NOT_ALLOWED,
+    MSG_PREFIX,
+    NS,
+    clear_demo,
+    run_cli,
+    seed_demo,
+)
+from tests.conftest import Api
 
 
 async def _counts(db, org):  # type: ignore[no-untyped-def]
@@ -121,3 +132,40 @@ async def test_clear_then_reseed_twice_is_clean(app, db, redis) -> None:  # type
                                      WHERE external_id NOT LIKE :p AND external_id NOT LIKE 'seed-demo-probe'"""),
                               {"p": f"{NS}-%"})).scalar_one()
     assert stray == 0   # tổ chức mới tinh trong test — không có dữ liệu thật nào để so sánh, chỉ canh không lỗi
+
+
+# ─── v0.1.57: khoá an toàn — dữ liệu mẫu (bịa) không được làm rối dữ liệu thật của Owner ──────────────────────────
+
+async def _persons(db) -> int:  # type: ignore[no-untyped-def]
+    return (await db.execute(text("SELECT count(*) FROM core.persons"))).scalar_one()  # type: ignore[no-any-return]
+
+
+async def test_seed_cli_refuses_without_flag_or_env(app, db, redis, capsys) -> None:  # type: ignore[no-untyped-def]
+    rc = await run_cli("seed", force=False, sm=sessionmaker(), redis=redis, env={})
+    assert rc == EXIT_REFUSED == 2
+    err = capsys.readouterr().err
+    assert MSG_NOT_ALLOWED in err and "Chi tiết kỹ thuật:" in err and ALLOW_ENV in err
+    assert await _persons(db) == 0   # không nạp gì
+
+    # Giá trị khác "1" cũng không tính là cho phép.
+    rc = await run_cli("seed", force=False, sm=sessionmaker(), redis=redis, env={ALLOW_ENV: "true"})
+    assert rc == EXIT_REFUSED
+    assert await _persons(db) == 0
+
+
+async def test_seed_cli_runs_with_flag_on_empty_db_and_again_on_seeded_db(app, db, redis) -> None:  # type: ignore[no-untyped-def]
+    sm = sessionmaker()
+    assert await run_cli("seed", force=True, sm=sm, redis=redis, env={}) == 0          # cờ --force
+    assert await _persons(db) > 0
+    # Biến môi trường cũng đủ; và dữ liệu của chính bộ mẫu KHÔNG bị tính là "dữ liệu thật" (chạy lại được).
+    assert await run_cli("seed", force=False, sm=sm, redis=redis, env={ALLOW_ENV: "1"}) == 0
+
+
+async def test_seed_cli_refuses_when_db_has_real_data_even_with_flag(owner_api: Api, db, redis, capsys) -> None:  # type: ignore[no-untyped-def]
+    # owner_api: trình thiết lập đã tạo Owner thật ⇒ có người dùng ngoài bootstrap.
+    for force, env in ((True, {}), (False, {ALLOW_ENV: "1"})):
+        rc = await run_cli("seed", force=force, sm=sessionmaker(), redis=redis, env=env)
+        assert rc == EXIT_REFUSED
+        err = capsys.readouterr().err
+        assert MSG_HAS_REAL_DATA in err and "Chi tiết kỹ thuật:" in err and "core.users" in err
+    assert await _persons(db) == 0   # không nạp gì vào DB của Owner

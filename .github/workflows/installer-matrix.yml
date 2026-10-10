@@ -52,7 +52,7 @@ jobs:
 
       # v0.1.33 (F-13) — vet + test TRƯỚC khi build, trên đúng hệ điều hành
       # của runner: lỗi chỉ lộ trên Windows/macOS (đường dẫn, quyền tệp, CRLF…)
-      # phải đỏ ở đây chứ không phải trên máy Boss.
+      # phải đỏ ở đây chứ không phải trên máy Owner.
       - name: go vet ./...
         working-directory: apps/genh
         shell: bash

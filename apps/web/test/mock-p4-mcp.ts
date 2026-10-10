@@ -11,6 +11,7 @@ import type { AgentIdentity, HubLink, HubReadScopes, HubWriteScopes, McpArgsDige
 import type { P2Ctx } from './mock-phase2';
 import type { KhoWriteOutcome, KhoWriteReq } from './mock-gen-v0150';
 import { AGENT_IDS } from './mock-ids';
+import { KHO_DEFAULT, KHO_MAX, khoLabelState, resetKhoLabel } from './mock-kho-label';
 
 /** v0.1.45 (F-57): như `gh.mcp_api.invoke.args_digest` — nhật ký chỉ lưu dấu vết tham số, không nguyên văn. */
 function sortKeys(v: unknown): unknown {
@@ -76,6 +77,7 @@ const HIDDEN_NEW_TOOL: Record<string, { name: string; access: 'read' | 'write' }
 };
 
 export function createMock(opts: P4McpOptions) {
+  resetKhoLabel();
   const seed = opts.fresh ? { servers: [], tools: [] } : seedServers();
   let servers: MockServer[] = seed.servers;
   let tools: MockTool[] = seed.tools;
@@ -122,6 +124,8 @@ export function createMock(opts: P4McpOptions) {
    */
   const linkOut = (l: HubLink): HubLink => ({
     ...l, read_scopes: l.read_scopes ?? null, write_scopes: l.write_scopes ?? null,
+    // v0.1.57: tên Kho hiệu lực (ai đọc được thẻ cũng nhận) + đã đổi chưa + mặc định + độ dài tối đa.
+    kho_label: khoLabelState.label || KHO_DEFAULT, kho_label_custom: khoLabelState.label !== '', kho_label_default: KHO_DEFAULT, kho_label_max: KHO_MAX,
     // Như máy chủ: tool ghi Kho Owner tự đóng ở MCP Hub — null khi chưa có lần Kiểm tra xanh; mock không giả "tự đóng" ⇒ [].
     write_hidden: l.write_hidden ?? (l.write_scopes ? [] : null),
     breaker: { open: hubBreakerOpen, retry_in_s: hubBreakerOpen ? 60 : null },
@@ -207,7 +211,15 @@ export function createMock(opts: P4McpOptions) {
       if (ctx.role !== 'owner') return problem(403, 'FORBIDDEN', 'Vai trò của bạn không có quyền thao tác này');
       if (!pin(ctx, 'hub.link')) return true;
       if (m === 'PATCH') {
-        const b = body as { endpoint?: string; token?: string; token_expires_at?: string | null; allow_public_network?: boolean; enabled?: boolean };
+        const b = body as { endpoint?: string; token?: string; token_expires_at?: string | null; allow_public_network?: boolean; enabled?: boolean; kho_label?: string };
+        // v0.1.57: Tên Kho — ≤ 40 ký tự (422 thân thiện), rỗng = về mặc định; chỉ gửi mỗi trường này thì không đụng liên kết (kể cả chưa nối).
+        if (b.kho_label !== undefined) {
+          const name = String(b.kho_label).trim().replace(/\s+/g, ' ');
+          if (name.length > KHO_MAX) return problem(422, 'VALIDATION', 'Dữ liệu chưa hợp lệ', { errors: { kho_label: `Tên Kho tối đa ${KHO_MAX} ký tự — Sếp rút gọn giúp em` } });
+          khoLabelState.label = name;
+          const touches = b.endpoint !== undefined || b.token !== undefined || b.allow_public_network !== undefined || b.enabled !== undefined || 'token_expires_at' in b;
+          if (!touches) return reply(200, linkOut(hubLink));
+        }
         if (!hubLink.configured && (!b.endpoint || !b.token)) return problem(422, 'VALIDATION', 'Dữ liệu chưa hợp lệ', { errors: { endpoint: 'Cần địa chỉ Gen-hub và token cho lần nối đầu' } });
         const relink = (b.endpoint !== undefined && b.endpoint !== hubLink.endpoint) || !!b.token;
         if (b.token) {

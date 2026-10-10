@@ -5,7 +5,7 @@
 **Ngày:** 21/09/2026  
 **Tên sản phẩm chính thức:** Gen-Harness (Genesis Harness OS)  
 **Tên cũ (deprecated):** Heo-Harness / Bé Heo Chassis  
-**Định hướng sản phẩm:** Anh Cơ La (Ryan)  
+**Định hướng sản phẩm:** Sếp (Owner)  
 **Trạng thái:** ĐÃ CHỐT — dùng làm tài liệu định hướng chính thức.  
 **Tài liệu này thay thế:** Spec v1.0, v2.0 và v2.1  
 

@@ -116,8 +116,9 @@ jobs:
   api:
     runs-on: ubuntu-latest
     # Hai lượt pytest đầy đủ (superuser + gh_app) + build image db + e2e thật rút gọn (v0.1.35, F-14) — chặn treo
-    # vô hạn nếu test kẹt. v0.1.55 thêm ~500 ca (hồ sơ mặc định, Jev, Mặt tiền) ⇒ hai lượt ≈ 47–50 phút, cổng
-    # phát hành v0.1.55 bị huỷ ở phút 48 (run 38075952803); nâng lên 75. Nợ ROADMAP: tách hai lượt thành matrix.
+    # vô hạn nếu test kẹt. v0.1.55 thêm ~500 ca (hồ sơ mặc định, Jev, Mặt tiền) ⇒ hai lượt NỐI TIẾP ≈ 47–50 phút, cổng
+    # phát hành v0.1.55 bị huỷ ở phút 48 (run 38075952803); nâng lên 75. v0.1.57: hai lượt chạy SONG SONG trong cùng job
+    # (xem bước "Test song song") ⇒ giữ nguyên tên job `api` (có thể là required check) và timeout 75 làm biên an toàn.
     timeout-minutes: 75
     services:
       redis:
@@ -162,23 +163,78 @@ jobs:
           (cd apps/api && uv export --frozen --no-dev --no-hashes --no-emit-project -o /tmp/req-api.txt)
           uvx --from pip-audit==2.10.1 pip-audit -r /tmp/req-api.txt --no-deps --disable-pip -f json -o pip-audit-api.json || true
           python3 .github/scripts/scan_summary.py --kind pip-audit --title 'pip-audit (apps/api, uv.lock)' pip-audit-api.json >> "$GITHUB_STEP_SUMMARY"
-      - name: Test (Postgres + Redis thật)
+      # v0.1.57 — hai lượt pytest ĐẦY ĐỦ chạy SONG SONG trong cùng job (trước đây nối tiếp, ≈ 2× thời gian):
+      #   · lượt 1: superuser `postgres` (mặc định);
+      #   · lượt 2 (v0.1.33, F-13): TOÀN BỘ bộ test dưới role ứng dụng gh_app (không superuser, không BYPASSRLS —
+      #     migration 0014), giống `make api-test-app-role`, để GRANT còn thiếu lộ ra ở CI chứ không phải trên máy Owner.
+      # Hai lượt dùng CHUNG một Postgres + một Redis nhưng KHÔNG chung trạng thái: CSDL mẫu riêng (GH_TEST_TEMPLATE;
+      # tên DB từng test có hậu tố ngẫu nhiên), DB Redis riêng (GH_TEST_REDIS) và DB Redis browser riêng
+      # (GH_TEST_BROWSER_REDIS). Bước migrate CSDL mẫu được xếp hàng bằng khoá tư vấn Postgres (tests/conftest.py) vì
+      # `ALTER ROLE gh_app` của migration 0014 dùng chung cả cụm. Mỗi lượt ghi log riêng; lỗi ⇒ in danh sách ca hỏng +
+      # phần đuôi log của lượt đó; log đầy đủ lên artifact. Chờ CẢ HAI lượt xong (không dừng sớm) để một lần chạy lộ hết lỗi.
+      - name: Test song song (superuser + role gh_app; Postgres + Redis thật)
+        # Quá 65 phút ⇒ bước tự thất bại (failure) chứ không đợi job 75' bị huỷ ⇒ bước lưu log phía dưới vẫn chạy được.
+        timeout-minutes: 65
         working-directory: apps/api
         env:
           GH_TEST_PG: postgresql://postgres:postgres@localhost:5432
-          GH_TEST_REDIS: redis://localhost:6379/15
-        run: .venv/bin/pytest -q
-      # v0.1.33 (F-13) — chạy lại TOÀN BỘ bộ test dưới role ứng dụng gh_app (không superuser, không BYPASSRLS —
-      # migration 0014), giống `make api-test-app-role`, để GRANT còn thiếu lộ ra ở CI chứ không phải trên máy
-      # Boss. CSDL mẫu riêng (GH_TEST_TEMPLATE) để không đè lên CSDL mẫu của lượt trên.
-      - name: Test dưới role ứng dụng gh_app (GH_TEST_APP_ROLE=1)
-        working-directory: apps/api
-        env:
-          GH_TEST_PG: postgresql://postgres:postgres@localhost:5432
-          GH_TEST_REDIS: redis://localhost:6379/15
-          GH_TEST_APP_ROLE: "1"
-          GH_TEST_TEMPLATE: gh_test_template_app
-        run: .venv/bin/pytest -q
+        run: |
+          set -uo pipefail
+          logdir="$RUNNER_TEMP/pytest-logs"
+          mkdir -p "$logdir"
+          GH_TEST_REDIS=redis://localhost:6379/15 GH_TEST_BROWSER_REDIS=redis://localhost:6379/13 \
+            .venv/bin/pytest -q >"$logdir/superuser.log" 2>&1 &
+          pid_su=$!
+          GH_TEST_APP_ROLE=1 GH_TEST_TEMPLATE=gh_test_template_app \
+            GH_TEST_REDIS=redis://localhost:6379/14 GH_TEST_BROWSER_REDIS=redis://localhost:6379/12 \
+            .venv/bin/pytest -q >"$logdir/app-role.log" 2>&1 &
+          pid_app=$!
+          # Nhịp tim 5 phút/lần: dòng tiến độ cuối của từng lượt, để log job không im lặng hàng chục phút. Ngủ từng
+          # nhịp 5 giây (không `sleep 300` một lần) để tiến trình mồ côi sau `kill` chết ngay, không giữ stdout của bước.
+          (
+            n=0
+            while kill -0 "$pid_su" 2>/dev/null || kill -0 "$pid_app" 2>/dev/null; do
+              sleep 5
+              n=$((n + 5))
+              if [ $((n % 300)) -eq 0 ]; then
+                for lane in superuser app-role; do
+                  echo "[nhịp tim] $lane: $(tail -n 1 "$logdir/$lane.log" | tail -c 160)"
+                done
+              fi
+            done
+          ) &
+          pid_beat=$!
+          rc_su=0; rc_app=0
+          wait "$pid_su" || rc_su=$?
+          wait "$pid_app" || rc_app=$?
+          kill "$pid_beat" 2>/dev/null || true
+          fail=0
+          for lane in superuser app-role; do
+            if [ "$lane" = superuser ]; then rc=$rc_su; else rc=$rc_app; fi
+            echo "::group::pytest lượt $lane (mã thoát $rc)"
+            if [ "$rc" -eq 0 ]; then
+              tail -n 3 "$logdir/$lane.log"
+            else
+              fail=1
+              grep -E '^(FAILED|ERROR) ' "$logdir/$lane.log" | head -n 60 || true
+              echo "----- đuôi log lượt $lane -----"
+              tail -n 120 "$logdir/$lane.log"
+            fi
+            echo "::endgroup::"
+            if [ "$rc" -ne 0 ]; then
+              echo "::error::pytest lượt $lane đỏ (mã $rc) — xem nhóm log trên và artifact pytest-logs."
+            fi
+          done
+          exit "$fail"
+      # failure() || cancelled(): lượt treo tới biên timeout job (75') bị huỷ chứ không "failure" ⇒ vẫn phải lên artifact.
+      - name: Lưu log pytest khi lỗi
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: pytest-logs-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pytest-logs
+          retention-days: 7
+          if-no-files-found: ignore
       # v0.1.35 (F-14) — e2e THẬT rút gọn: api + worker thật trên đúng Postgres (image gh-db) + Redis của job này,
       # bridge giả + model giả, Chromium thật bấm 4 luồng giao/gán (Hộp thư, Vụ việc, BOT nhóm, Gen đề xuất). Bắt lỗi
       # kiểu "mock xanh, máy thật hỏng" (id viết cứng, hợp đồng API lệch) — xem docs/reports/phase-5-e2e-live.md.
@@ -289,7 +345,12 @@ jobs:
       - name: Cấm ID giả viết cứng trong apps/web/src (F-1)
         run: python3 .github/scripts/check_no_fake_ids.py apps/web/src
       # v0.1.56 — repo công khai, bản phát hành đi tới Owner khác: mã giao đi không được mang địa chỉ Gen-hub / tên riêng của Sếp.
+      # v0.1.57 — quy tắc CHUNG (email phải là example.test/example.com/noreply; địa chỉ `/mcp` phải là <…> hoặc example.*)
+      # nằm trong repo; mẫu RIÊNG (tên miền, tên gọi, email của Sếp) KHÔNG nằm trong repo mà lấy từ secret
+      # GH_PERSONAL_PATTERNS (mỗi dòng một regex). Secret trống (chưa đặt, hoặc PR từ fork) ⇒ chỉ chạy quy tắc chung + cảnh báo.
       - name: Chống lộ thông tin riêng của Sếp
+        env:
+          GH_PERSONAL_PATTERNS: ${{ secrets.GH_PERSONAL_PATTERNS }}
         run: python3 .github/scripts/check_no_personal_info.py
       - run: npm run -w apps/web typecheck
       - run: npm run -w apps/web test

@@ -242,6 +242,9 @@ make seed-demo                    # nạp 115 sự kiện mẫu theo docs/design
 make seed-demo-clean              # xoá kết luận đã sinh (giữ nguyên bản ghi thô bất biến)
 ```
 
+`make seed-demo` chỉ dành cho cơ sở dữ liệu trống: chạy **trước** trình thiết lập; đã tạo Owner (hoặc đã có dữ liệu thật) thì lệnh từ chối
+(thoát mã 2, kèm câu tiếng Việt). Gõ trực tiếp `python -m gh.seed_demo seed` thì phải thêm `--force` hoặc đặt `GH_ALLOW_SEED_DEMO=1`.
+
 Chạy API không cần Docker để phát triển nhanh: `make api-dev` (cần `GH_DATABASE_URL`/`GH_REDIS_URL` trỏ tới
 Postgres/Redis local, hoặc export các biến tương ứng trước khi chạy).
 

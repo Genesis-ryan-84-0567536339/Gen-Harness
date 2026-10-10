@@ -5,6 +5,9 @@
   xanh với địa chỉ/token hiện tại) + `breaker` (ngắt mạch F-83; chỉ Owner nhận đủ `retry_in_s`/`down_since`) ·
   `system.read`.
 - `PATCH /hub/link` — địa chỉ, token (chỉ ghi), ngày hết hạn, mạng công cộng, tắt · Owner + PIN `hub.link`.
+  v0.1.57 (Nợ #30): thêm `kho_label` (Tên Kho Owner tự đặt, ≤ 40 ký tự; rỗng ⇒ về mặc định "Kho dữ liệu"); `GET` và
+  `PATCH` trả thêm `kho_label` (tên hiệu lực), `kho_label_custom`, `kho_label_default`, `kho_label_max`. Chỉ gửi
+  `kho_label` thì không đụng liên kết (kể cả khi chưa nối Gen-hub).
 - `POST /hub/link/test` — khám phá, mở + cấp `core.gen` đúng tool đọc (Kho + Google), gọi `kho_tom_tat`; trả thêm
   `read_scopes`, `read_missing`, `write_tools` · Owner + PIN.
 - `GET /hub/kho/summary|search|records/{ma}` — đọc Kho (đã che, đệm 5 phút) · CHỈ Owner (quyết định Boss #1).
@@ -33,6 +36,7 @@ from gh.auth.deps import require, require_owner, require_pin
 from gh.chassis.mcp_client import HTTPS_REQUIRED_MSG, McpBlockedNetwork, McpError, pin_endpoint
 from gh.db import DB
 from gh.errors import field_errors
+from gh.hub_link import KHO_LABEL_MAX, clean_kho_label
 from gh.hub_link import service as hub
 
 router = APIRouter(prefix="/hub", tags=["hub"])
@@ -60,6 +64,7 @@ async def get_link(request: Request, user: service.CurrentUser = Depends(READ),
     out["write_hidden"] = await hub.write_hidden(db, user.org_id) if known else None
     breaker = await hub.breaker_state(request.app.state.redis, user.org_id)
     out["breaker"] = breaker if owner else {"open": breaker["open"]}  # vai trò khác: chỉ biết đang mở hay không
+    out.update(await hub.kho_label_out(db, user.org_id))                # v0.1.57: tên Kho hiệu lực (ai đọc cũng cần)
     return out
 
 
@@ -69,6 +74,7 @@ class LinkPatch(BaseModel):
     token_expires_at: datetime | None = None
     allow_public_network: bool | None = None
     enabled: bool | None = None
+    kho_label: str | None = Field(default=None, max_length=400)    # v0.1.57: ≤ 40 ký tự, kiểm ở route
 
 
 @router.patch("/link")
@@ -86,6 +92,9 @@ async def patch_link(body: LinkPatch, request: Request, _m: service.CurrentUser 
             errors["endpoint"] = "Gen-hub ở mạng công cộng phải dùng https://"
         elif hub.endpoint_forbidden(endpoint):
             errors["endpoint"] = hub.ENDPOINT_FORBIDDEN_MSG
+    kho_label = clean_kho_label(body.kho_label) if body.kho_label is not None else None
+    if kho_label is not None and len(kho_label) > KHO_LABEL_MAX:
+        errors["kho_label"] = f"Tên Kho tối đa {KHO_LABEL_MAX} ký tự — Sếp rút gọn giúp em"
     token = body.token.strip() if body.token is not None else None
     if body.token is not None and (not token or len(token) < 8):
         errors["token"] = "Token quá ngắn — dán đúng token agent tạo trong Gen-hub"
@@ -109,11 +118,20 @@ async def patch_link(body: LinkPatch, request: Request, _m: service.CurrentUser 
                                                 "khi Gen-hub cùng máy hoặc trong mạng nội bộ)"}) from e
         except McpError:
             pass
-    row = await hub.upsert(db, request.app.state.redis, user=user, endpoint=endpoint, token=token or None,
-                           token_expires_at=body.token_expires_at,
-                           set_expiry="token_expires_at" in body.model_fields_set,
-                           allow_public_network=body.allow_public_network, disable=body.enabled is False)
-    return hub.link_out(row)
+    touches_link = (endpoint is not None or token is not None or body.allow_public_network is not None
+                    or body.enabled is not None or "token_expires_at" in body.model_fields_set)
+    if kho_label is not None:
+        await hub.set_kho_label(db, user=user, label=kho_label)
+    if touches_link or kho_label is None:      # chỉ đổi tên Kho thì KHÔNG đụng liên kết (kể cả khi chưa nối Gen-hub)
+        row = await hub.upsert(db, request.app.state.redis, user=user, endpoint=endpoint, token=token or None,
+                               token_expires_at=body.token_expires_at,
+                               set_expiry="token_expires_at" in body.model_fields_set,
+                               allow_public_network=body.allow_public_network, disable=body.enabled is False)
+    else:
+        row = await hub.load(db, user.org_id)
+    out = hub.link_out(row)
+    out.update(await hub.kho_label_out(db, user.org_id))
+    return out
 
 
 @router.post("/link/test")

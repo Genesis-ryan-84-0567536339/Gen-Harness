@@ -410,6 +410,9 @@ describe('Quyền ghi Kho của token (write_scope)', () => {
   });
 
   it('write_scope "ok" ⇒ không hỏi liên kết Gen-hub, không có dòng thiếu quyền', () => {
+    // v0.1.57: câu chào của khung (lúc còn trống) hỏi `/hub/link` lấy Tên Kho nếu người xem đọc được cài đặt — nên ở ca này
+    // người xem chỉ có quyền duyệt, để phép kiểm chỉ nói về THẺ đề xuất.
+    queryClient.setQueryData(qk.me, { ...ME, permissions: { 'action.approve': 'all' } });
     renderPanel();
     showProposal(PHIEN);
     expect(calls.filter((c) => c.url.endsWith('/hub/link'))).toEqual([]);

@@ -20,6 +20,7 @@
  */
 import type { DefaultItem, DefaultSuggestion, DefaultsResponse } from '../../../packages/contracts/src/defaults';
 import type { P2Ctx } from './mock-phase2';
+import { KHO_DEFAULT, khoLabelState, resetKhoLabel } from './mock-kho-label';
 
 interface Opts {
   fresh: boolean;
@@ -29,6 +30,8 @@ interface Opts {
 interface Row extends DefaultItem {
   customized_text: string;
 }
+
+const khoText = (label: string) => `Kho nối qua Gen-hub gọi là “${label}”`;
 
 const CORE_BINDINGS = ['binding:core.gen', 'binding:core.briefing', 'binding:core.refinery', 'binding:core.reply'];
 
@@ -46,6 +49,8 @@ function seedRows(): Row[] {
     mk('ai_cost', 'Trần chi phí AI', 'Chi phí AI', 'Không đặt trần chi phí AI', 'Trần chi phí AI 500.000 ₫ mỗi ngày'),
     mk('backup', 'Lịch sao lưu', 'Sao lưu', 'Sao lưu hằng ngày lúc 02:00 · giữ 7 bản · lưu trên máy chủ này', 'Sao lưu hằng tuần lúc 03:30 · giữ 3 bản · lưu trên máy chủ này'),
     mk('autonomy', 'Mức tự trị của tổ chức', 'Gen', 'Soạn sẵn chờ duyệt (mức 4)', 'Gợi ý hành động (mức 3)'),
+    // v0.1.57 (Nợ #30): Tên Kho — trạng thái thật nằm ở `mock-kho-label` (chung với `GET/PATCH /hub/link`); `view()` ghi đè dòng này.
+    mk('kho_label', 'Tên Kho nối qua Gen-hub', 'Kết nối', khoText(KHO_DEFAULT), khoText('Sổ tay Công ty')),
     mk('binding:core.gen', 'Model cho Gen — trợ lý quản trị', 'Gán model', 'Chuẩn: sonnet (tự chọn) · mức suy nghĩ Vừa', 'gemini-2.5-pro (Antigravity Brain) — Sếp đã chọn'),
     mk('binding:core.briefing', 'Model cho Bản tin Gen', 'Gán model', 'Chuẩn: gemini-2.5-flash-lite (tự chọn)', 'gemini-2.5-pro (Antigravity Brain) — Sếp đã chọn'),
     mk('binding:core.refinery', 'Model cho Sàng lọc & suy luận chính', 'Gán model', 'Chuẩn: gemini-2.5-flash-lite (tự chọn)', 'gemini-2.5-pro (Antigravity Brain) — Sếp đã chọn'),
@@ -54,12 +59,17 @@ function seedRows(): Row[] {
 }
 
 export function createMock(_opts: Opts) {
+  resetKhoLabel();
   const rows = seedRows();
   let resets = 0;
   const find = (key: string) => rows.find((r) => r.key === key);
 
   const view = (): DefaultsResponse => {
-    const items: DefaultItem[] = rows.map(({ customized_text: _t, ...item }) => ({ ...item }));
+    const items: DefaultItem[] = rows.map(({ customized_text: _t, ...item }) =>
+      item.key === 'kho_label'
+        ? { ...item, customized: khoLabelState.label !== '', current_text: khoText(khoLabelState.label || KHO_DEFAULT) }
+        : { ...item },
+    );
     const suggestions: DefaultSuggestion[] =
       CORE_BINDINGS.filter((k) => find(k)?.customized).length >= 2
         ? [{
@@ -98,6 +108,7 @@ export function createMock(_opts: Opts) {
       if (!confirmed) return needConfirm();
       const hit = rows.filter((r) => r.resettable);
       hit.forEach((r) => setCustomized(r, false));
+      resetKhoLabel();
       resets += 1;
       return reply(200, { reset: hit.length });
     }
@@ -110,9 +121,10 @@ export function createMock(_opts: Opts) {
     if (!confirmed) return needConfirm();
     // Như API: nâng mức tự trị của tổ chức luôn cần phiên mã PIN, kể cả khi chỉ về mặc định riêng mục này.
     if (key === 'autonomy' && ctx.needPin()) return problem(423, 'PIN_REQUIRED', 'Thao tác này cần nhập mã PIN', { detail: { operation: 'defaults.reset_all' } });
+    if (key === 'kho_label') resetKhoLabel();
     setCustomized(r, false);
     resets += 1;
-    return reply(200, { key, reset: true, customized: false, current_text: r.current_text });
+    return reply(200, { key, reset: true, customized: false, current_text: key === 'kho_label' ? khoText(KHO_DEFAULT) : r.current_text });
   }
 
   return {
@@ -122,6 +134,7 @@ export function createMock(_opts: Opts) {
         for (const k of b.keys ?? []) {
           const r = find(k);
           if (r) setCustomized(r, true);
+          if (k === 'kho_label') khoLabelState.label = 'Sổ tay Công ty';
         }
         return view();
       },

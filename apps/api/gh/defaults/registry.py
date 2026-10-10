@@ -10,7 +10,8 @@ Một sổ DUY NHẤT trong mã liệt kê mọi cài đặt có "mặc định 
   `agent.hub_links`, `ops.notify_channels`, `core.social_accounts`, ranh giới cứng, danh tính tổ chức.
   Từng mục có quyết định riêng: gen giữ nguyên công tắc `enabled` (chỉ vai trò + số ngày giữ); backup GHI LẠI mặc
   định (xoá khoá = tắt sao lưu); ai_cost chỉ xoá trần chi phí và GIỮ bảng giá Owner đã nhập; coach xoá dòng của CHÍNH
-  người gọi; jev.preset chỉ hiển thị (đổi nguồn model cần PIN `ai.route_change` ở thẻ Jev).
+  người gọi; jev.preset chỉ hiển thị (đổi nguồn model cần PIN `ai.route_change` ở thẻ Jev); kho_label (v0.1.57) chỉ
+  xoá khoá tên Kho tuỳ chỉnh (không đụng địa chỉ/token Gen-hub).
 - Mọi lần ghi ở `gh.defaults.routes` chỉ ghi vào Action Log khoá (key | 'all' | 'apply_standard'), không ghi giá trị
   cài đặt.
 """
@@ -274,6 +275,34 @@ async def _noop(_db: AsyncSession, _org: uuid.UUID, _user: uuid.UUID) -> None:
     return None
 
 
+# ─── tên Kho (v0.1.57, Nợ #30) ────────────────────────────────────────────────
+
+KHO_LABEL_KEY = "kho_label"
+
+
+def _kho_text(label: str) -> str:
+    return f"Kho nối qua Gen-hub gọi là “{label}”"
+
+
+async def _read_kho_label(db: AsyncSession, org: uuid.UUID, _user: uuid.UUID) -> State:
+    from gh.hub_link import KHO_LABEL, load_kho_label
+
+    label = await load_kho_label(db, org)
+    return State(_kho_text(KHO_LABEL), _kho_text(label), label != KHO_LABEL)
+
+
+async def _reset_kho_label(db: AsyncSession, org: uuid.UUID, _user: uuid.UUID) -> None:
+    # Chỉ xoá khoá tên Kho; địa chỉ/token Gen-hub (agent.hub_links, agent.mcp_servers.auth_enc) KHÔNG đụng. Ghi chú
+    # máy chủ do hệ thống tự đặt đổi theo tên mặc định (ghi chú Owner sửa tay giữ nguyên).
+    from gh.hub_link import KHO_LABEL, load_kho_label
+    from gh.hub_link import service as hub
+
+    old = await load_kho_label(db, org)
+    await db.execute(text("UPDATE core.organizations SET settings = settings - 'kho_label' WHERE id = :o"), {"o": org})
+    if old != KHO_LABEL:
+        await hub.refresh_server_note(db, org, old, KHO_LABEL)
+
+
 # ─── mức tự trị của tổ chức ───────────────────────────────────────────────────
 
 def _autonomy_text(level: int) -> str:
@@ -360,6 +389,7 @@ _STATIC: tuple[Item, ...] = (
     Item("ai_cost", "Trần chi phí AI", "org", "Chi phí AI", True, _read_ai_cost, _reset_ai_cost),
     Item("backup", "Lịch sao lưu", "org", "Sao lưu", True, _read_backup, _reset_backup),
     Item(AUTONOMY_KEY, "Mức tự trị của tổ chức", "org", "Gen", True, _read_autonomy, _reset_autonomy),
+    Item(KHO_LABEL_KEY, "Tên Kho nối qua Gen-hub", "org", "Kết nối", True, _read_kho_label, _reset_kho_label),
 )
 
 

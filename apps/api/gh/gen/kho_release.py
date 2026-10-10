@@ -34,7 +34,7 @@ from gh import notifications
 from gh.chassis import actionlog
 from gh.config import get_settings
 from gh.gen import proposals, store
-from gh.hub_link import KHO_LABEL
+from gh.hub_link import KHO_LABEL, load_kho_label, relabel
 from gh.hub_link import service as hub
 
 log = logging.getLogger("gh.gen.kho_release")
@@ -119,6 +119,7 @@ async def _one_org(sm: Any, redis: Any, org: uuid.UUID, version: str, now: datet
             return "already_proposed"
         tz = await proposals.org_tz(db, org)
         repo = get_settings().release_repo
+        kho = await load_kho_label(db, org)                   # v0.1.57: tên Kho Owner tự đặt (Nợ #30)
         pids: list[str] = []
         for uid in owners:
             cid = (await db.execute(text("""INSERT INTO agent.gen_conversations (org_id, user_id, title)
@@ -126,14 +127,14 @@ async def _one_org(sm: Any, redis: Any, org: uuid.UUID, version: str, now: datet
                                     {"o": org, "u": uid, "t": TITLE.format(version=version)})).scalar_one()
             turn_id = uuid.uuid4()
             prop = proposals.build_release(org, uid, version, turn_id=turn_id, conversation_id=cid, tz=tz, repo=repo,
-                                           now=now)
+                                           now=now, kho=kho)
             await proposals.save(redis, prop, ttl=PROPOSAL_TTL_S)
-            steps = [{"kind": "say", "text": SAY.format(version=version, addr=await _addr_of(db, uid))},
-                     {"kind": "proposal", "proposal": proposals.public(prop)}]
+            say = relabel(SAY.format(version=version, addr=await _addr_of(db, uid)), kho)
+            steps = [{"kind": "say", "text": say}, {"kind": "proposal", "proposal": proposals.public(prop)}]
             await store.add_message(db, org, cid, "assistant", {"steps": steps}, turn_id=turn_id)
+            bell = relabel(BELL_BODY.format(version=version), kho)
             await notifications.notify(db, org, [uid], kind=KIND, title=TITLE.format(version=version),
-                                       body=BELL_BODY.format(version=version), link=f"/overview?gen={cid}",
-                                       redis=redis)
+                                       body=bell, link=f"/overview?gen={cid}", redis=redis)
             pids.append(prop["id"])
         await db.execute(text("""UPDATE agent.hub_release_proposals SET proposal_ids = CAST(:p AS uuid[])
                                  WHERE org_id = :o AND version = :v"""),

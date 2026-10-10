@@ -22,7 +22,7 @@ Gen-Harness là hệ điều hành quản trị dựa trên hội thoại. Các 
 | 10 | `docs/07-acceptance.md` | Định nghĩa "xong" và kế hoạch kiểm thử |
 | — | `design/screens.json` | Danh mục 21 màn hình máy đọc được (khoá, miền, cha) |
 | — | `design/seed-data.json` | 115 tập dữ liệu mẫu trích nguyên từ thiết kế — dùng để seed |
-| — | `spec/github.md` | Ánh xạ màn hình ↔ mục spec ↔ mã repo cũ `heo-harness` |
+| — | `spec/github.md` | Ánh xạ màn hình ↔ mục spec |
 
 ## About the Design Files
 

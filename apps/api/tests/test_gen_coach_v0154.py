@@ -46,6 +46,7 @@ from tests.test_briefing_v0141 import _router as briefing_router
 from tests.test_briefing_v0141 import _today as briefing_today
 from tests.test_gen import FakeRouter, _user_of, ask, kinds
 from tests.test_model_router import provider as api_provider
+from tests.test_no_personal_info_v0156 import OLD_NAME
 from tests.test_rbac_api import login_as
 from tests.test_rls import _as_low_priv
 
@@ -210,7 +211,7 @@ def test_health_titles_cover_every_action_kind() -> None:
 def test_dismiss_warnings_cover_every_p1_p3_key() -> None:
     assert sg.DISMISS_WARNINGS["boss.hub"] == ("Không nối Gen-hub thì Gen không đọc được lịch, mail và Kho dữ liệu "
                                                "của Sếp.")
-    assert "Kho Ryan" not in " ".join(sg.DISMISS_WARNINGS.values())          # thẻ dùng tên chung "Kho dữ liệu"
+    assert OLD_NAME not in " ".join(sg.DISMISS_WARNINGS.values())            # thẻ dùng tên chung "Kho dữ liệu"
     for rule in sg.TODO_RULES:
         if rule.level in ("P1", "P3"):
             key = "health" if rule.kind == "health" else rule.key
@@ -283,7 +284,7 @@ def test_boss_ai_is_deduped_with_model_missing_and_gen_hub_is_only_a_p3_hint() -
     plan = today_of(optional_off)
     assert plan.p01_keys == [] and keys_of(plan) == ["boss.hub"]
     assert plan.payload["todos"][0]["title"] == "Nối Gen-hub nếu Sếp muốn"
-    assert "Kho Ryan" not in todos[0].why and "Kho dữ liệu" in todos[0].why
+    assert OLD_NAME not in todos[0].why and "Kho dữ liệu" in todos[0].why
 
 
 def test_remote_access_is_only_nudged_after_staff_were_invited() -> None:
@@ -977,6 +978,23 @@ async def test_dismissing_the_gen_hub_hint_and_the_removed_p1_keys(
     for key in ("todo:boss.facebook", "todo:boss.agy", "todo:boss.claude", "todo:boss.telegram"):
         r = await post_item(owner_api, key, action="snooze", days=1)
         assert r.status_code == 404 and r.json()["code"] == "COACH_ITEM_UNKNOWN", key
+
+
+async def test_static_todo_copy_uses_the_effective_kho_label(
+        owner_api: Api, sigbox: list[sg.Signals], clock: list[datetime]) -> None:
+    """v0.1.57 (Nợ #30, F-R2): thẻ "Nối Gen-hub" ở Hôm nay (lý do + câu hậu quả khi tắt) nhắc đúng Tên Kho Owner đã đặt;
+    chưa đặt ⇒ giữ nguyên "Kho dữ liệu" (mặc định không đổi chữ nào)."""
+    sigbox[0] = mk_sig(state={"boss.hub.done": False})
+    todo = (await today(owner_api))["todos"][0]
+    assert todo["key"] == "boss.hub" and "Kho dữ liệu" in todo["why"] and "Kho dữ liệu" in todo["dismiss_warning"]
+    name = "Sổ tay Công ty"
+    async with admin_sessionmaker()() as adm:
+        await adm.execute(text("UPDATE core.organizations SET settings = settings || CAST(:s AS jsonb) WHERE id = :o"),
+                          {"o": await org_id(adm), "s": json.dumps({"kho_label": name})})
+        await adm.commit()
+    todo = (await today(owner_api))["todos"][0]
+    assert todo["key"] == "boss.hub" and name in todo["why"] and name in todo["dismiss_warning"]
+    assert "Kho dữ liệu" not in todo["why"] + todo["dismiss_warning"] + todo["title"]
 
 
 async def test_p0_stays_visible_even_if_a_dismissed_row_exists_and_health_escalation(

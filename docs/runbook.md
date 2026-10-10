@@ -68,14 +68,14 @@ bằng một container tạm từ ảnh cũ. Sau đó lịch đêm **không th�
 
 ## 8. Ngắt mạch Gen-hub
 
-Gen-hub (Kho Ryan, lịch, mail, việc, Drive) có **ngắt mạch riêng** để Gen-Harness không bị treo khi Gen-hub chập chờn.
+Gen-hub (Kho dữ liệu, lịch, mail, việc, Drive) có **ngắt mạch riêng** để Gen-Harness không bị treo khi Gen-hub chập chờn.
 
 - **Cơ chế**: 3 lỗi liên tiếp (mạng/timeout, 5xx, 429/408, phản hồi không phải JSON) trong 5 phút ⇒ mở **60 giây**: Gen và Bản tin trả "Gen-hub tạm không trả lời" mà không gọi mạng; hết 60 giây cho thử lại 1 lần
   (thành công ⇒ đóng, lỗi ⇒ mở tiếp). Lỗi 401/403 *không* tính (đó là token hết hạn/bị thu hồi — trạng thái `expired`). Gen vẫn trả bản đệm ≤ 5 phút nếu có.
 - **Báo động**: ngắt mạch mở quá **15 phút** ⇒ một sự cố + một chuông "Gen-hub không trả lời hơn 15 phút" (nút **Mở thẻ Gen-hub**); tự đóng khi gọi lại được.
 - **Xử lý**: (1) kiểm Gen-hub có chạy/mở được không; (2) Console → **Kết nối › Gen-hub → Kiểm tra** (nhập PIN) — nút này không bị ngắt mạch chặn, **xanh là đóng ngắt mạch**; (3) 401: token hết hạn (90 ngày; có chuông nhắc trước 14 ngày) →
   tạo token mới ở Gen-hub, dán vào thẻ (PIN), thu hồi token cũ.
-- **Tắt khẩn**: tắt liên kết ở thẻ Gen-hub (PIN) — Gen thôi đọc Kho/lịch/mail. **Chỉ chặn việc ghi Kho**: bỏ tick `kho_create`, `kho_update` ở Gen-hub rồi bấm Kiểm tra (thẻ **Ghi vào Kho Ryan** khoá nút Xác nhận); đường ghi chỉ chạy khi Sếp Xác nhận + mã PIN nên không tự ghi.
+- **Tắt khẩn**: tắt liên kết ở thẻ Gen-hub (PIN) — Gen thôi đọc Kho/lịch/mail. **Chỉ chặn việc ghi Kho**: bỏ tick `kho_create`, `kho_update` ở Gen-hub rồi bấm Kiểm tra (thẻ **Ghi vào Kho dữ liệu** khoá nút Xác nhận); đường ghi chỉ chạy khi Sếp Xác nhận + mã PIN nên không tự ghi.
 - Ghi sai vào Kho: báo lỗi `HUB_WRITE_UNCERTAIN` nghĩa là không chắc đã ghi — **mở Kho kiểm trước khi thử lại**: đã có thì bấm Huỷ trên thẻ, chưa có thì bấm Xác nhận lại; sửa bản ghi bằng một đề xuất `kho_update` mới hoặc trực tiếp trong Kho.
 - `HUB_WRITE_HIDDEN`: Sếp đã tự đóng `kho_create`/`kho_update` (hoặc gỡ cấp Gen) ở MCP Hub — mở lại ở MCP Hub; tick ở Gen-hub + Kiểm tra không mở lại.
 

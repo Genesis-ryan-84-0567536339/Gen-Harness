@@ -15,7 +15,7 @@
 | 1 | `docs/Gen-Harness-Product-Spec-LOCKED.md` (v2.2) | Mục đích, nghiệp vụ, thực thể, quyền, nguyên tắc có trách nhiệm. Thắng mọi mâu thuẫn. |
 | 2 | `docs/design/Gen-Harness Console.dc.html` (+ `screens.json`, `seed-data.json`, `tokens.json`, `_ds/…/styles.css`) | Giao diện 21 màn, dữ liệu mẫu. Dựng lại pixel-perfect ở 1440px/1280px, không "cải tiến". |
 | 3 | `docs/handoff/` (01–07) | Đặc tả kỹ thuật đi kèm thiết kế: màn hình, token, database, kiến trúc, trình cài, thiết lập Owner, nghiệm thu. |
-| 4 | `docs/github.md` | Ánh xạ màn ↔ mục spec ↔ mã repo cũ `heo-harness` (chỉ tham khảo bridge Zalo/WhatsApp và chassis plugin). |
+| 4 | `docs/github.md` | Ánh xạ màn ↔ mục spec. |
 
 Trong repo, gói bàn giao được xếp lại: `spec/` → `docs/`, `design/` → `docs/design/`, `docs/01–07` → `docs/handoff/` (đường dẫn trong `docs/handoff/README.md` là đường dẫn gốc của gói). Lược đồ hiện hành nằm ở `db/sql/0001_baseline.sql` + các migration sau (`apps/api/migrations`) (`schema.sql` gốc của gói bàn giao đã bỏ ở v0.1.48, xem lịch sử git).
 
@@ -56,7 +56,7 @@ Ràng buộc bắt buộc và nơi hiện thực:
 | Worker | Cùng mã với api, tiến trình riêng; lịch + job bằng **arq** (Redis) | Tách tải nặng (sàng lọc, LLM, chấm điểm, nén sổ tay, làm mới MV, partman, backup) khỏi API. arq nhẹ, async-native, có cron. |
 | CSDL | PostgreSQL 16 + pgvector + pg_partman + pg_trgm | SSOT duy nhất (spec G4). Lược đồ hiện hành: `db/sql/0001_baseline.sql` + các migration sau (`apps/api/migrations`) (`schema.sql` gốc của gói bàn giao đã bỏ ở v0.1.48, xem lịch sử git). |
 | Bus & realtime | Redis 7: **Streams** cho event bus (consumer group, ack, phát lại), **pub/sub** cho đẩy realtime tới WebSocket, khoá phân tán, rate-limit, bộ đếm hạn mức | Streams bền: consumer chết không mất sự kiện (ưu tiên 2). |
-| Bridge | Node 20 + TypeScript; Zalo `zca-js`, WhatsApp `@whiskeysockets/baileys`; mỗi kênh một adapter | Theo gợi ý; hai thư viện đã chạy trong `heo-harness/bridge`. Viết lại gọn, không mang persona/tên cũ. |
+| Bridge | Node 20 + TypeScript; Zalo `zca-js`, WhatsApp `@whiskeysockets/baileys`; mỗi kênh một adapter | Theo gợi ý; hai thư viện đã chạy ở dự án cũ. Viết lại gọn, không mang persona/tên cũ. |
 | Tệp | MinIO (S3-compatible) | Tài liệu, tệp đính kèm, lưu trữ lạnh Parquet, backup (handoff 03/04). |
 | Proxy | Caddy 2 | TLS nội bộ tự ký `https://localhost:8443`, định tuyến `/` web, `/api` + `/ws` api. Chỉ proxy mở cổng ra host. |
 | MCP | SDK MCP chính thức cho Python; máy chủ stdio chạy như sidecar khi Owner bật | §10 |
@@ -123,7 +123,7 @@ Luật cứng:
 - Chạy lại quy tắc không xoá kết luận cũ: bản mới trỏ qua `superseded_by`.
 
 ### 4.1 Bridge
-- Zalo (quyết định Q7): Owner quét QR do hệ thống sinh bằng **tài khoản Zalo thật**; bridge giữ phiên đăng nhập (mã hoá, `core.channel_sessions.credential_enc`), tự đăng nhập lại bằng phiên đã lưu khi khởi động, hết hạn mới xin QR mới, rồi bắt tin như `heo-harness/bridge/bot.js` (`zca-js` `loginQR`, `listener.on('message')`). WhatsApp tương tự với Baileys. Cảnh báo rủi ro khoá tài khoản cá nhân hiện trước QR.
+- Zalo (quyết định Q7): Owner quét QR do hệ thống sinh bằng **tài khoản Zalo thật**; bridge giữ phiên đăng nhập (mã hoá, `core.channel_sessions.credential_enc`), tự đăng nhập lại bằng phiên đã lưu khi khởi động, hết hạn mới xin QR mới, rồi bắt tin bằng `zca-js` (`loginQR`, `listener.on('message')`). WhatsApp tương tự với Baileys. Cảnh báo rủi ro khoá tài khoản cá nhân hiện trước QR.
 - Mỗi tài khoản kênh là một phiên (`core.channel_sessions`: `pending_qr → active → expired | logged_out | error`). QR sinh trong bridge, đẩy qua `gh.bridge.status` → api → WebSocket → Console (khối QR 88px ở Điều khiển hệ thống, 240px ở trình thiết lập), đếm ngược 60s tự làm mới. Không in QR ra terminal hay ghi file như repo cũ.
 - Tin vào/ra được đóng gói *envelope* `{channel, session_id, external_msg_id, external_group_id|null, sender_external_id, occurred_at, kind, body_text, payload (nguyên văn từ thư viện)}` rồi `XADD gh.bridge.inbound`. Bridge **không** gọi LLM, **không** quyết định trả lời (khác `bot.js` cũ tự gọi `/api/chat`).
 - Gửi đi chỉ nhận từ `gh.bridge.outbound` và chỉ thực hiện khi lệnh mang **permit** hợp lệ (§7.3). Tin đã gửi quay lại `gh.bridge.inbound` như tin `outbound` → cũng vào kho thô và được sàng lọc (handoff 03).
@@ -300,9 +300,9 @@ Mã hoá phong bì AES-256-GCM cho khoá API, phiên kênh, TOTP, auth MCP (`byt
 - **Xoay vòng khoá**: `agent.provider_keys.rotation_order`; chọn khoá còn hạn mức, không trong cooldown. 429/hết hạn mức → cooldown khoá đó, sang khoá kế.
 - **Hạn mức theo model**: `agent.models.daily_quota`, `rate_limit_per_min`; bộ đếm nóng ở Redis, chốt vào `agent.model_calls` (phân vùng tháng) → `analytics.mv_model_usage_daily`.
 - **Chuỗi chuyển hướng** (`failoverRules` thiết kế): hết hạn mức → nhà cung cấp kế tiếp; ngắt mạch → giữ nguyên hội thoại, thử lại sau 60s; hết chuỗi → xếp hàng và báo Sếp qua hàng đợi; còn < 20% hạn mức → cảnh báo.
-- **Antigravity CLI** (quyết định Q6: bản cài chính hãng, đăng nhập/đổi tài khoản như heo-harness):
+- **Antigravity CLI** (quyết định Q6: bản cài chính hãng, đăng nhập/đổi tài khoản như dự án cũ):
   - Image `worker` cài **binary `agy` chính hãng** của Google lúc build (nguồn tải + checksum ghim trong Dockerfile), không đóng gói lại.
-  - Như heo-harness: CLI lưu phiên đăng nhập ở tệp OAuth `~/.gemini/antigravity-cli/antigravity-oauth-token`; email tài khoản đọc từ `id_token` trong tệp đó; đăng xuất = xoá tệp.
+  - Như dự án cũ: CLI lưu phiên đăng nhập ở tệp OAuth `~/.gemini/antigravity-cli/antigravity-oauth-token`; email tài khoản đọc từ `id_token` trong tệp đó; đăng xuất = xoá tệp.
   - **Đăng nhập**: Console bấm Đăng nhập → worker chạy luồng đăng nhập của chính CLI trong container, chuyển link/mã xác thực lên Console qua WebSocket; xong thì tệp token được đọc, **mã hoá** và lưu vào `agent.cli_profiles` (email, gói, hạn).
   - **Đổi tài khoản**: nhiều hồ sơ trong `agent.cli_profiles`, một hồ sơ hoạt động; chuyển hồ sơ = ghi tệp token của hồ sơ đó vào thư mục cấu hình CLI trong volume (api và worker mount chung `agy_state`; worker chạy `agy -p` mới cho mỗi lượt nên lượt kế tiếp dùng ngay tài khoản mới). Cần PIN, vào Action Log. Hồ sơ không có phiên đã lưu → `409 CLI_PROFILE_NO_SESSION` (không "đổi giả").
   - **Thêm tài khoản khi đang đăng nhập** (v0.1.30): CLI đã đăng nhập không in link đăng nhập, nên trước khi chạy CLI tệp phiên hiện tại được gửi tạm sang `antigravity-oauth-token.before-login`; xong → bỏ bản gửi tạm (tài khoản mới thành tài khoản đang dùng), lỗi/huỷ/quá giờ → trả về chỗ cũ; api/worker khởi động mà thấy bản gửi tạm thì trả về trước. Trong lúc đó đổi/xoá tài khoản trả `409 CLI_LOGIN_IN_PROGRESS`; lượt gọi AI qua CLI chuyển nhà cung cấp kế tiếp mà không đánh dấu CLI hết hạn. Trạng thái đăng nhập còn đọc được qua `GET /cli/login/{id}` (UI hỏi 2 giây/lần, không phụ thuộc WebSocket).

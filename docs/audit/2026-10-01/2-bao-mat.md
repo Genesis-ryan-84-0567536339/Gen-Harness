@@ -10,7 +10,7 @@
 ## (a) Mô hình mối đe doạ (ngắn)
 
 **Tài sản cần bảo vệ**
-1. Dữ liệu công ty: tin Zalo/WhatsApp (kho thô), hồ sơ khách, đánh giá nhân sự, cơ hội/deal, Kho Ryan (qua Gen-hub), tài liệu.
+1. Dữ liệu công ty: tin Zalo/WhatsApp (kho thô), hồ sơ khách, đánh giá nhân sự, cơ hội/deal, Kho dữ liệu (qua Gen-hub), tài liệu.
 2. Bí mật: khoá master/bridge/browser/backup, mật khẩu Postgres (superuser + gh_app), khoá API nhà cung cấp AI, phiên OAuth của agy/Claude, phiên Facebook, token Gen-hub/MCP.
 3. Quyền của Owner: duyệt gửi tin ra ngoài, PIN, ma trận quyền, cập nhật/khôi phục.
 4. Máy chủ của Owner (genh chạy bằng user Owner, điều khiển Docker).

@@ -134,6 +134,19 @@ export interface MemoryNoteFields {
  */
 export const KHO_LABEL = 'Kho dữ liệu';
 
+/** v0.1.57 (Nợ #30): Owner tự đặt "Tên Kho" (tối đa 40 ký tự; rỗng ⇒ KHO_LABEL). Bản sao API: `KHO_LABEL_MAX` ở `gh/hub_link/__init__.py`. */
+export const KHO_LABEL_MAX = 40;
+
+/**
+ * Thay tên Kho MẶC ĐỊNH trong một chuỗi dựng sẵn từ KHO_LABEL bằng tên hiệu lực của tổ chức (`HubLink.kho_label`), như `relabel()` của
+ * API. Giữ nguyên "Kho dữ liệu thô" (tầng dữ liệu khác). Tên rỗng / chính là mặc định ⇒ trả nguyên chuỗi.
+ */
+export function relabelKho(text: string, label?: string | null): string {
+  const name = (label ?? '').trim();
+  if (!name || name === KHO_LABEL) return text;
+  return text.replace(/Kho dữ liệu(?! thô)/g, () => name);
+}
+
 /** Bảng của Kho dữ liệu mà Gen được đề xuất ghi (v0.1.50): chỉ Phiên và Việc. */
 export type KhoBang = 'Phiên' | 'Việc';
 
@@ -210,6 +223,7 @@ interface GenProposalBase {
    * (tên tài khoản), `target` (bình luận/người nhận), `write_gate` (`open`|`locked`), `suspicious` (`'1'` = mục có dấu hiệu lừa đảo).
    * v0.1.50: `memory_note` có `count` ('n/30'); `kho_create`/`kho_update` có `bang`, `target` (mã bản ghi), `write_scope`
    * (`ok`|`missing` — token Gen-hub đã được cấp quyền ghi Kho chưa) và, với `kho_update`, `cur:<tên trường>` = giá trị hiện tại.
+   * v0.1.57: `kho` = tên Kho Owner tự đặt (chỉ có khi khác mặc định "Kho dữ liệu"); thẻ dùng nó cho tiêu đề / cảnh báo (`relabelKho`).
    */
   labels: Record<string, string>;
   /** Mục tiêu registry gắn với đề xuất (quyền + cờ nhạy cảm lấy từ đây). */

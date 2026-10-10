@@ -71,7 +71,7 @@ SOCIAL_MISSING_MSG = "Không còn thấy lượt đọc Facebook này (có thể
 
 
 def mask_email(email: str | None) -> str | None:
-    """'binh@example.vn' → 'b***@example.vn'. Không phải email → None (không bao giờ trả chuỗi gốc)."""
+    """'binh@example.test' → 'b***@example.test'. Không phải email → None (không bao giờ trả chuỗi gốc)."""
     if not email or "@" not in email:
         return None
     local, _, domain = email.strip().rpartition("@")

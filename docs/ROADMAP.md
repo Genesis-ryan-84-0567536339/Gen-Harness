@@ -9,7 +9,7 @@ Lịch sử từng bản: [CHANGELOG.md](../CHANGELOG.md) + `docs/releases/`. Hi
 ## Vai trò
 | Vai | Ai | Việc |
 |---|---|---|
-| Owner | Sếp (Ryan) | định hướng, duyệt, brainstorm |
+| Owner | Sếp | định hướng, duyệt, brainstorm |
 | Dev | Claude Code (+ sub agent Haiku/Sonnet/Opus) | code, review, phát hành |
 | ~~Dev phụ~~ | ~~Google Jules~~ — **Boss bỏ (QD-10, xác nhận 30/09)** | việc code cho repo khác đi theo agy đa repo (gen-workplace) |
 | Quản trị trong app | Gen | vận hành dữ liệu, dẫn Sếp dùng app; đề xuất — Sếp Xác nhận (+ mã PIN khi nhạy cảm) mới làm |
@@ -19,7 +19,7 @@ Lịch sử từng bản: [CHANGELOG.md](../CHANGELOG.md) + `docs/releases/`. Hi
 Chi tiết từng bản ở [CHANGELOG.md](../CHANGELOG.md); tóm tắt theo chặng:
 - **v0.1.1 – v0.1.27 (27–30/09/2026)**: lưu trữ/hồ sơ Owner/RLS, `genh` (cài, cập nhật tự động, export/import, khôi phục), trình thiết lập "Để sau",
   Console (người dùng, Trợ giúp, điện thoại, chuông, sáng/tối), **Gen v1/v2** (khung chat, dẫn đường, đề xuất có xác nhận), lọc đầu Hộp thư (Jev),
-  Gen đọc Kho Ryan qua Gen-hub (v0.1.26), gia cố (v0.1.27).
+  Gen đọc Kho dữ liệu qua Gen-hub (v0.1.26), gia cố (v0.1.27).
 - **v0.1.28 – v0.1.32 (30/09 – 02/10)**: sửa theo rà soát UX; bước 4 "Để sau"; Facebook cá nhân CHỈ ĐỌC (D3 lát đầu); hotfix React #31; model CLI theo nhóm,
   Claude Code CLI (QD-12), model và mức suy nghĩ tách riêng.
 - **v0.1.33 – v0.1.40 (02 – 03/10)** — kế hoạch tổng [docs/audit/2026-10-01/0-ke-hoach-tong.md](audit/2026-10-01/0-ke-hoach-tong.md): cổng phát hành + CI đủ test, `genh update` an toàn/tự lành,
@@ -33,15 +33,16 @@ Chi tiết từng bản ở [CHANGELOG.md](../CHANGELOG.md); tóm tắt theo ch�
 
 - **v0.1.55 (10/10)**: **Gọn cho Sếp** — Mặt tiền Owner `/owner/*`, hồ sơ model tiêu chuẩn theo vai + Về mặc định, thiết lập ≤ 4 lần nhập và 1 dòng bắt buộc, thẻ Cập nhật nói lý do, chọn Nhanh/Kỹ hơn trong khung chat, Jev lọc trước tuỳ chọn ([v0.1.55.md](releases/v0.1.55.md)).
 - **v0.1.56 (10/10)**: **Không lộ thông tin riêng của Sếp cho Owner khác** — bỏ địa chỉ Gen-hub khỏi web/API/hướng dẫn (chỉ còn chỗ giữ chỗ chung), tên Kho chung "Kho dữ liệu" (`KHO_LABEL`), migration 0035 đổi ghi chú máy chủ Gen-hub cũ, dữ liệu mẫu/mock hư cấu, CI `check_no_personal_info.py` ([v0.1.56.md](releases/v0.1.56.md)).
+- **v0.1.57 (10/10)**: khoá nạp dữ liệu mẫu (cờ + DB chưa có dữ liệu thật), **Owner tự đặt Tên Kho** (Nợ #30 xong), **CI `api` chạy hai lượt pytest song song** (Nợ tách lượt xong), bộ kiểm chống lộ chỉ giữ quy tắc chung + mẫu riêng từ secret `GH_PERSONAL_PATTERNS`, **bản công khai đã gọt danh tính riêng — ghi chú riêng của Sếp dời sang Brain (Nợ #31 xong)** ([v0.1.57.md](releases/v0.1.57.md)).
 
-## Tiếp theo (sau v0.1.56)
+## Tiếp theo (sau v0.1.57)
 Kế hoạch tổng của đợt kiểm toán kết thúc ở v0.1.50; không còn đợt đánh số sẵn. Thứ tự đề xuất:
-0. **v0.1.57**: Boss gửi kết quả "Thử 12 câu mẫu" của Jev (HANDOFF › Boss phải làm — v0.1.55) ⇒ chốt ngưỡng lọc trước; Mặt tiền thêm chi phí AI hôm nay, thẻ "Chưa có model", mục Phân tích (Nợ #28–#29).
+0. **v0.1.58**: Boss gửi kết quả "Thử 12 câu mẫu" của Jev (HANDOFF › Boss phải làm — v0.1.55) ⇒ chốt ngưỡng lọc trước; Mặt tiền thêm chi phí AI hôm nay, thẻ "Chưa có model", mục Phân tích (Nợ #28–#29).
    **Dùng thử Gen hướng dẫn một tuần** (3 bước ở [HANDOFF](reports/HANDOFF-v0.1.1.md) › Boss phải làm — v0.1.54), rồi nói cho Claude biết thẻ có đúng việc, chuông có phiền không; các ý để sau nằm ở mục Nợ #20–#25.
 1. **Boss nghiệm thu thật** các tính năng chưa từng chạy với tài khoản thật (danh sách và cách làm ở [HANDOFF](reports/HANDOFF-v0.1.1.md) › Việc dở): Gen-hub quyền đọc + ghi Kho,
    Telegram, Truy cập từ xa (Tailscale), Facebook trả lời — từ v0.1.55 đều là tuỳ chọn (chỉ "nguồn AI" bắt buộc). Kết quả tự ghi ở Việc Sếp cần làm.
-2. **Bộ câu hỏi chuẩn so model** (mục Nợ #1); riêng Jev đã có bộ 12 câu cố định (v0.1.55) — quyết ngưỡng theo kết quả máy Boss.
-3. **Kho Ryan**: ghi Phiên bù, Việc cho mục Nợ, cập nhật QD-12 và DA-1 (mục Nợ #7) — cần Boss dặn; ghi Kho luôn qua Xác nhận + mã PIN.
+2. **Bộ câu hỏi chuẩn so model** (mục Nợ #1); riêng Jev đã có bộ 12 câu cố định (v0.1.55) — quyết ngưỡng theo kết quả chạy thật của Sếp.
+3. **Kho dữ liệu**: ghi Phiên bù, Việc cho mục Nợ, cập nhật QD-12 và DA-1 (mục Nợ #7) — cần Boss dặn; ghi Kho luôn qua Xác nhận + mã PIN.
 4. **Dọn nhánh** (F-70) khi Boss cho phép.
 5. **Chờ Boss chọn hướng** (chưa có bản đánh số): Facebook đăng bài (lát 2); Gen ghi ra Gen-hub ngoài Kho (kanban/warroom/nháp mail/lịch — cần QD mới); Trang FB/IG qua API (F-80, đóng băng
    tới khi Facebook cá nhân chạy thật ≥ 2 tuần); TOTP sau khi truy cập từ xa ổn định.
@@ -58,7 +59,7 @@ Việc đã hứa hoặc đã biết mà chưa làm. Mỗi dòng ghi điều ki�
 | 4 | **Facebook đăng bài** (`post`) — lát 2; `like`/`follow` chưa làm | Selector ghi Facebook mới kiểm trên trang mẫu; cần Boss nghiệm thu thật lát 1 (dòng 8) trước |
 | 5 | **gen-intel** | Ý tưởng để sau; chưa có thiết kế, chưa có mã. Làm khi Boss mô tả phạm vi |
 | 6 | **Kiểm cosign/minisign** trong genh và `install.sh` | Hoãn: chỉ chống tráo tệp trên Release; hiện genh kiểm SHA-256 theo `checksums.txt`. Tệp `.sig`/`.pem` đã đính kèm nhưng chưa nơi nào kiểm |
-| 7 | **Ghi PHIEN bù cho v0.1.28 → v0.1.49**; tạo VIEC cho mục Nợ; cập nhật QD-12 (hạn đã trượt) và DA-1; chốt câu định vị "Gen là mặt tiền chính, Console là nơi xem chi tiết" | Job F-87 (v0.1.50) chỉ đề xuất cho bản mới. **Boss** dặn Gen đề xuất từng bản cũ (mỗi bản một thẻ Ghi vào Kho Ryan + mã PIN) |
+| 7 | **Ghi PHIEN bù cho v0.1.28 → v0.1.49**; tạo VIEC cho mục Nợ; cập nhật QD-12 (hạn đã trượt) và DA-1; chốt câu định vị "Gen là mặt tiền chính, Console là nơi xem chi tiết" | Job F-87 (v0.1.50) chỉ đề xuất cho bản mới. **Boss** dặn Gen đề xuất từng bản cũ (mỗi bản một thẻ Ghi vào Kho dữ liệu + mã PIN) |
 | 8 | **Trường Kho "Công cụ" / "Người làm"** chưa ghi được | Chưa biết giá trị lựa chọn của hai cột; `KHO_FIELDS` (`gh/hub_link/kho_write.py`) chỉ có trường đã biết. Mở khi Boss/Gen-hub cho danh sách giá trị |
 | 9 | **F-91** lời hẹn "ghi có xác nhận (v0.1.30…)" ở v0.1.29 đã trượt | Làm thật ở **v0.1.47** (Facebook ghi lát 1); Trang FB/IG qua API vẫn chưa. Đã ghi chú ở [v0.1.29.md](releases/v0.1.29.md); bảng lát cũ trong [gen-browser-agent.md](design/gen-browser-agent.md) §5 đã sửa |
 | 10 | **F-92** chú thích "CHỖ CẮM v0.1.30" trong mã | Đã gỡ số bản ở **v0.1.47**; `test_plug_comments_v0147.py` chặn chú thích kiểu cũ quay lại. Đóng, giữ để tra |
@@ -69,7 +70,7 @@ Việc đã hứa hoặc đã biết mà chưa làm. Mỗi dòng ghi điều ki�
 | 15 | Bảo mật hoãn: F-50 Redis ACL, F-51 superuser sidecar, F-53 CA có NameConstraints | Xem lại khi mở truy cập từ xa rộng hơn |
 | 16 | F-84 phần còn lại (duyệt nháp, đề xuất Deal/Vụ việc, stream), F-68 mở Gen cho vai trò khác | Hoãn; chờ có nhân viên dùng thật |
 | 17 | Hạ tầng/CI | Gói apt trong Dockerfile chưa ghim phiên bản; PR Renovate chưa có lịch tự động; ô E2E Fedora thật (VM) chưa có; sinh type từ OpenAPI hoãn; `ops.action_log` hạn lưu (vướng chuỗi băm); F-38 phần còn lại |
-| 18 | Nghiệm thu thật chưa làm | Tailscale/điện thoại trên máy Fedora của Boss (v0.1.46); canary `--live` agy (v0.1.38/39); Facebook trả lời (v0.1.47) |
+| 18 | Nghiệm thu thật chưa làm | Tailscale/điện thoại trên máy chủ thật (v0.1.46); canary `--live` agy (v0.1.38/39); Facebook trả lời (v0.1.47) |
 | 19 | **H-b** (v0.1.53): timer `gen-harness-update.timer` mất lịch khi `daemon-reload`/`enable` chạy từ bên trong service đêm | **Chưa tái hiện được** — bằng mã lẫn bằng `e2e-nightly-real` (systemd thật có linger: sau lần chạy service đêm timer vẫn enabled + active + có lần kế tiếp). H-a và H-c đã tái hiện và sửa; tự lành bao cả ca này nếu xảy ra trên máy thật. Chi tiết: [v0.1.53.md](releases/v0.1.53.md) |
 | 20 | **`release_todos`** — mỗi bản phát hành khai báo "việc Sếp làm sau khi lên bản" thành dữ liệu (Gen hướng dẫn, v0.1.54) | Chưa làm. Hiện việc này chỉ nằm trong HANDOFF/`docs/releases/`; Gen chưa tự biết bản mới đòi Sếp làm gì. Thiết kế: [gen-coach.md](design/gen-coach.md) mục 18 |
 | 21 | **Danh mục tính năng** có cấu trúc cho Gen (mô tả, đích, điều kiện dùng) | Chưa làm. Gen chỉ dựa vào `screens.list`, `guide.list`, `coach.status` để trả lời "có tính năng X không?" — chưa giới thiệu được tính năng ngoài 6 mẹo |
@@ -81,8 +82,6 @@ Việc đã hứa hoặc đã biết mà chưa làm. Mỗi dòng ghi điều ki�
 | 27 | **`genh auto-update disable` khi không có phiên systemd `--user`** (chạy qua `sudo`/`su`/ssh không có `XDG_RUNTIME_DIR`, hoặc tài khoản khác tài khoản đã bật lịch) (v0.1.53) | Chưa làm. Hiện genh hỏi lại trạng thái, báo "CHƯA tắt được" và thoát 1 (không nói dối) nhưng chưa tự dò `XDG_RUNTIME_DIR`/`loginctl` để tắt hộ; Sếp phải chạy lại đúng tài khoản trong phiên đăng nhập |
 | 28 | **Mặt tiền Owner còn thiếu** (v0.1.55): "Chi phí AI hôm nay" + thẻ "Chưa có model" (Console vẫn có), mục **Phân tích** đang khoá "sắp có"; chuông Gen (`gen.briefing`/`coach`/`kho_proposal`) còn dẫn vào Console `/overview?gen=…` | Hẹn v0.1.56 |
 | 29 | **Dọn còn lại của v0.1.55**: ẩn giới hạn agent + hạn lưu dữ liệu vào Nâng cao (màn agents/storage); xoá hội thoại ở Lịch sử Gen chưa xoá lựa chọn model đã nhớ (`forgetChoice`, tự giới hạn 50 hội thoại) | Chưa làm, nhỏ |
-| 30 | **Ô "Tên Kho" cho Owner tự đặt** (v0.1.56): hiện tên Kho cố định "Kho dữ liệu" (`KHO_LABEL`) cho mọi Owner | Chưa làm. Thêm 1 ô trong thẻ Gen-hub (1 cột, ≤ 40 ký tự) rồi nối `KHO_LABEL` với Cài đặt; cần Boss muốn |
-| 31 | **Ghi chú vận hành riêng còn công khai** (v0.1.56): `CLAUDE.md`, HANDOFF, runbook, ROADMAP, Product-Spec, `docs/github.md`, `handoff/CLAUDE_CODE_PROMPT.md` còn tên/ghi chú riêng của Sếp trong repo công khai | **Chờ Boss quyết**: repo private (lưu ý Owner khác tải bản phát hành từ Releases) hay chuyển ghi chú riêng sang repo Brain; CI mới `check_no_personal_info.py` chưa quét docs/test/mock |
 
 ## Bản phản ứng (hotfix)
 Các bản sửa nóng thật, không nằm trong kế hoạch đợt. Đối chiếu `git log origin/main` và nhánh `hotfix/*`:
@@ -94,11 +93,11 @@ Các bản sửa nóng thật, không nằm trong kế hoạch đợt. Đối ch
 | 03/10/2026 | **Hotfix v0.1.42 "time-bomb"** (PR #48, `hotfix/v0142-time-bomb`) | Test thẻ cập nhật lỗi dùng mốc cố định 02/10 hết hạn 24 giờ ⇒ vitest đỏ trên main, chặn phát hành v0.1.42; đổi sang mốc giờ tương đối (F-6) |
 | 04/10/2026 | **Sửa e2e-upgrade, Owner mẫu** (PR #53, `hotfix/e2e-owner-seed`) | Dữ liệu mẫu không có người dùng nên chuông `network.open_lan` luôn 0; chèn 1 Owner mẫu trước khi kiểm (F-21) |
 | 09/10/2026 | **Sửa e2e-upgrade từ v0.1.46** (PR #55, `hotfix/e2e-upgrade-from-v0146`) | Ô nâng cấp giả định bản cũ luôn nghe 0.0.0.0; bản ≥ v0.1.46 cài mới nghe 127.0.0.1 nên E2E release v0.1.47 đỏ và nằm yên ở bản thử. Sửa test (không sửa genh); v0.1.47 phát hành sau đó. [Chi tiết](releases/v0.1.48.md) |
-| 09/10/2026 | **Sửa trình bày dính biên khung** (PR #58, `claude/css-bien-khung`) | Ảnh máy Boss: chữ/số dính sát mép thẻ, khối "Máy chủ chưa nhận yêu cầu cập nhật" vỡ 3 dòng. Sửa gốc ở `Panel`/`Icon` + 5 họ lỗi, thêm lính gác `layout-guard.spec.ts` (4 cỡ màn); đi cùng v0.1.50. [Chi tiết](releases/v0.1.50.md) |
+| 09/10/2026 | **Sửa trình bày dính biên khung** (PR #58, `claude/css-bien-khung`) | Ảnh chụp màn hình thật: chữ/số dính sát mép thẻ, khối "Máy chủ chưa nhận yêu cầu cập nhật" vỡ 3 dòng. Sửa gốc ở `Panel`/`Icon` + 5 họ lỗi, thêm lính gác `layout-guard.spec.ts` (4 cỡ màn); đi cùng v0.1.50. [Chi tiết](releases/v0.1.50.md) |
 | 09/10/2026 | **Sửa test heartbeat genh chập chờn** (PR #59) | `readStateFile` báo "tệp bị thay giữa chừng" khi nhịp vừa ghi tạm-rồi-rename (CI đỏ ~1/100); nay chỉ lỗi đó được thử lại tối đa 5 lần × 5ms, symlink/hard link/sai chủ vẫn từ chối ngay. Không tăng VERSION, đi cùng v0.1.50. [Chi tiết](releases/v0.1.50.md) |
 | 10/10/2026 | **Bản phản ứng v0.1.51** (`claude/hotfix-prune-digest`) | Cổng phát hành v0.1.50 đỏ ở bước "chỉ còn ảnh của bản hiện tại và bản liền trước": `pruneOldImages` giữ theo IMAGE ID nên digest cũ của ảnh trùng nội dung (`gen-harness-db`, 3 digest cùng ID) không bao giờ bị gỡ. Sửa theo tham chiếu; thay v0.1.50 chưa promote. [Chi tiết](releases/v0.1.51.md) |
 | 10/10/2026 | **Bản phản ứng 2 — v0.1.52** (`claude/hotfix-prune-digest-2`) | Cổng phát hành v0.1.51 vẫn đỏ ở bước giữ 2 bản ảnh: genh đã gọi `rmi …@digest` nhưng Docker từ chối (`isSingleReference`: mọi digest cùng repo là MỘT tham chiếu, container db đang chạy). Nay `rmi -f` cho digest mà ảnh còn được tham chiếu giữ; thay v0.1.51 chưa promote. [Chi tiết](releases/v0.1.52.md) |
-| 10/10/2026 | **Bản phản ứng v0.1.53** (`claude/v0153`) | Máy Boss kẹt v0.1.44 từ 03/10 đến 09/10: lịch tự cập nhật đêm bị tắt mà `genh auto-update status` đọc sai và không ai biết, nút Cập nhật ngay trên Console chỉ nói "chưa nhận yêu cầu". Lịch đêm nay tự lành (trừ khi Sếp đã chủ động tắt), `status` nói thật, kiểm linger, chọn bản đủ 24 giờ từ danh sách, `ConsumeRequest` không nuốt lỗi xoá (GH-E94C), bản cài phụ không gỡ lịch của bản chính; Console nói rõ nguyên nhân; E2E chạy thật timer. [Chi tiết](releases/v0.1.53.md) |
+| 10/10/2026 | **Bản phản ứng v0.1.53** (`claude/v0153`) | Một bản cài kẹt v0.1.44 từ 03/10 đến 09/10: lịch tự cập nhật đêm bị tắt mà `genh auto-update status` đọc sai và không ai biết, nút Cập nhật ngay trên Console chỉ nói "chưa nhận yêu cầu". Lịch đêm nay tự lành (trừ khi Sếp đã chủ động tắt), `status` nói thật, kiểm linger, chọn bản đủ 24 giờ từ danh sách, `ConsumeRequest` không nuốt lỗi xoá (GH-E94C), bản cài phụ không gỡ lịch của bản chính; Console nói rõ nguyên nhân; E2E chạy thật timer. [Chi tiết](releases/v0.1.53.md) |
 
 Hai bản **phản ứng theo yêu cầu của Boss** (tính năng, không phải sửa nóng): v0.1.31 (01/10 "không thấy model và nhóm model nào để chọn") và v0.1.32 (01/10 "high là mức suy nghĩ, không phải tên model").
 

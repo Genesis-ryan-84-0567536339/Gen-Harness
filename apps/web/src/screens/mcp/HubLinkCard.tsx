@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import type { HubLink, HubLinkTestResult } from '@gen-harness/contracts';
+import { KHO_LABEL, KHO_LABEL_MAX, type HubLink, type HubLinkTestResult } from '@gen-harness/contracts';
 import { Button, Icon, Switch, TextField } from '@gen-harness/ui';
+import { DefaultControls } from '../../defaults/ResetButton';
 import { errorText } from '../../lib/errorText';
 import { useMe } from '../../lib/queries';
 import { CardError, FriendlyErrorText, InlineError, Panel, SkeletonLines } from '../common';
@@ -46,6 +47,8 @@ const fmtTime = (iso: string | null) => (iso ? new Date(iso).toLocaleString('vi-
  * thiếu (không làm Kiểm tra đỏ); bộ ngắt F-83 đang mở ⇒ dải "Gen-hub tạm không trả lời".
  * v0.1.50 (F-81, QD-18): khối "Quyền ghi Kho (tuỳ chọn)" dưới "Quyền đọc thêm" — kho_create / kho_update; Gen chỉ ghi khi Sếp
  * Xác nhận + nhập mã PIN trên thẻ đề xuất.
+ * v0.1.57 (Nợ #30): ô "Tên Kho (tuỳ chọn)" — Owner tự đặt tên hiển thị của Kho (≤ 40 ký tự; trống = "Kho dữ liệu"); chip Mặc định / Đã
+ * đổi + Về mặc định lấy từ sổ mặc định (`kho_label`). Chỉ đổi tên (không đụng địa chỉ/token) vẫn lưu được, kể cả khi chưa nối Gen-hub.
  */
 export function HubLinkCard() {
   const me = useMe();
@@ -112,12 +115,26 @@ function HubLinkBody({ link, isOwner }: { link: HubLink; isOwner: boolean }) {
     setPublicNet(on);
   };
 
+  // v0.1.57: Tên Kho — chỉ giữ chữ khi Owner đã đổi (khác mặc định); ô trống = mặc định.
+  const khoMax = link.kho_label_max ?? KHO_LABEL_MAX;
+  const savedLabel = link.kho_label_custom ? (link.kho_label ?? '') : '';
+  const [label, setLabel] = useState(savedLabel);
+  useEffect(() => {
+    setLabel(savedLabel);
+  }, [savedLabel]);
+  const labelTrim = label.trim();
+  const labelDirty = labelTrim !== savedLabel;
+  const labelError = labelTrim.length > khoMax ? `Tên Kho tối đa ${khoMax} ký tự` : null;
+
   const firstTime = !link.configured;
-  const valid = /^https?:\/\/\S+$/.test(endpoint.trim()) && (!firstTime || token.trim().length >= 8) && (!token.trim() || token.trim().length >= 8);
+  const linkValid = /^https?:\/\/\S+$/.test(endpoint.trim()) && (!firstTime || token.trim().length >= 8) && (!token.trim() || token.trim().length >= 8);
   // Hạn điền sẵn (chưa có hạn đã lưu, Owner chưa sửa) chỉ đi kèm khi đang lưu một token mới; Owner tự sửa thì gửi nếu khác hạn đã lưu.
   const expiryAuto = !expiryTouched && !savedDay;
   const expiryChanged = expiryTouched ? expiry !== savedDay : expiryAuto && token.trim() !== '';
-  const dirty = endpoint.trim() !== (link.endpoint ?? '') || token.trim() !== '' || expiryChanged || publicNet !== link.allow_public_network;
+  const linkDirty = endpoint.trim() !== (link.endpoint ?? '') || token.trim() !== '' || expiryChanged || publicNet !== link.allow_public_network;
+  const dirty = linkDirty || labelDirty;
+  // Chỉ đổi tên Kho thì không đòi địa chỉ/token hợp lệ; có đổi địa chỉ/token thì vẫn đòi như cũ.
+  const valid = !labelError && (!linkDirty || linkValid);
 
   const buildBody = () => {
     const body: Parameters<typeof update.mutate>[0] = {};
@@ -125,6 +142,7 @@ function HubLinkBody({ link, isOwner }: { link: HubLink; isOwner: boolean }) {
     if (token.trim()) body.token = token.trim();
     if (expiryChanged) body.token_expires_at = expiryToIso(expiry);
     if (publicNet !== link.allow_public_network) body.allow_public_network = publicNet;
+    if (labelDirty) body.kho_label = labelTrim;
     return body;
   };
   const save = () => {
@@ -211,6 +229,16 @@ function HubLinkBody({ link, isOwner }: { link: HubLink; isOwner: boolean }) {
               <Icon name="ph ph-globe" size={12} /> Đã bật sẵn vì địa chỉ là https công khai — Gen-hub sẽ được gọi qua Internet. Bỏ tích nếu Gen-hub nằm trong mạng nội bộ.
             </p>
           ) : null}
+          <TextField
+            label="Tên Kho (tuỳ chọn)"
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            placeholder={KHO_LABEL}
+            maxLength={khoMax + 20}
+            error={labelError}
+            hint={`Tên hiển thị của Kho trong Gen-Harness (thẻ đề xuất, câu Gen trả lời…), tối đa ${khoMax} ký tự. Để trống = "${KHO_LABEL}".`}
+            after={<DefaultControls itemKey="kho_label" />}
+          />
           <div className="jev-actions">
             <Button variant="primary" type="submit" className="btn-27" icon="ph ph-floppy-disk" disabled={!valid || !dirty} loading={update.isPending}>
               Lưu
@@ -221,7 +249,7 @@ function HubLinkBody({ link, isOwner }: { link: HubLink; isOwner: boolean }) {
               className="btn-27"
               icon="ph ph-pulse"
               data-main-action
-              disabled={dirty ? !valid : !link.configured}
+              disabled={dirty ? !valid || !(link.configured || linkDirty) : !link.configured}
               loading={test.isPending || (update.isPending && dirty)}
               data-gen-target="mcp.hub_link.test"
               onClick={() => void saveAndTest()}

@@ -3,7 +3,7 @@
  * (`memory_note`): nhãn, câu cảnh báo cố định, bảng trường (đúng `fields.record`), form Sửa theo bảng, câu lỗi theo mã.
  * Không chứa bí mật; mọi giá trị từ máy chủ được ép về chuỗi trước khi hiện (không bao giờ render object).
  */
-import { ApiError, KHO_DATE_FIELDS, KHO_FIELDS, KHO_LABEL, KHO_REQUIRED, khoMaxLen, type GenProposal, type KhoBang } from '@gen-harness/contracts';
+import { ApiError, KHO_DATE_FIELDS, KHO_FIELDS, KHO_LABEL, KHO_REQUIRED, khoMaxLen, relabelKho, type GenProposal, type KhoBang } from '@gen-harness/contracts';
 import { errorDetail } from '../lib/errorText';
 import { detailToText } from '../lib/friendlyError';
 
@@ -265,12 +265,16 @@ const ERROR_VIEW: Record<string, ViewSpec> = {
   GEN_PROPOSAL_DECIDED: { text: PROPOSAL_DECIDED_TEXT, action: 'reload' },
 };
 
-/** Câu thân thiện + nút kèm theo cho mã lỗi của Ghi nhớ / Ghi vào Kho; mã khác ⇒ null (dùng `errorText` chung). */
-export function proposalErrorView(e: unknown): ProposalErrorView | null {
+/**
+ * Câu thân thiện + nút kèm theo cho mã lỗi của Ghi nhớ / Ghi vào Kho; mã khác ⇒ null (dùng `errorText` chung).
+ * `khoLabel` = tên Kho Owner tự đặt (v0.1.57, Nợ #30; `GenProposal.labels.kho`) — câu kết quả dùng nó thay cho "Kho dữ liệu".
+ */
+export function proposalErrorView(e: unknown, khoLabel?: string | null): ProposalErrorView | null {
   if (!(e instanceof ApiError)) return null;
   const spec = ERROR_VIEW[e.code];
   if (!spec) return null;
-  return { text: typeof spec.text === 'function' ? spec.text(e) : spec.text, action: spec.action };
+  const text = typeof spec.text === 'function' ? spec.text(e) : spec.text;
+  return { text: relabelKho(text, khoLabel), action: spec.action };
 }
 
 /**

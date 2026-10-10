@@ -7,6 +7,13 @@ Ngày = ngày Release trên GitHub theo giờ Việt Nam; tiêu đề trong `doc
 (v0.1.32–v0.1.34, v0.1.40, v0.1.46) hoặc vài ngày (v0.1.47, v0.1.48: làm 03/10, phát hành 09/10).
 Việc sửa nóng không đổi số bản (PR #46, #48, #53, #55, #58, #59) ghi ở [ROADMAP › Bản phản ứng](docs/ROADMAP.md).
 
+## v0.1.57 — Khoá nạp dữ liệu mẫu, Owner tự đặt Tên Kho, CI api song song, bộ kiểm chống lộ không ghi danh tính (10/10/2026)
+- **Dữ liệu mẫu có khoá**: `gh.seed_demo seed` chỉ chạy khi có `--force` / `GH_ALLOW_SEED_DEMO=1` và cơ sở dữ liệu chưa có dữ liệu thật (người dùng, liên hệ, tin nhắn); không thì in câu tiếng Việt + "Chi tiết kỹ thuật", thoát mã 2. Makefile và E2E đã truyền cờ.
+- **Ô "Tên Kho (tuỳ chọn)"** ở thẻ Gen-hub (≤ 40 ký tự, chỉ Owner, trống = "Kho dữ liệu", có Về mặc định): `kho_label(settings)` thay mọi chữ tên Kho chạy thật (thẻ đề xuất, prompt Gen, chuông, bài học/mẹo…). Không migration; Nợ #30 xong.
+- **CI `api`**: hai lượt pytest (superuser + role `gh_app`) chạy song song trong cùng job, CSDL mẫu + Redis riêng, khoá migrate; tên job và timeout 75 giữ nguyên.
+- **Bộ kiểm chống lộ** chỉ giữ quy tắc chung trong repo (email phải `example.*`/noreply, địa chỉ `/mcp` phải là `<…>`/`example.*`); mẫu riêng của Sếp nằm ở secret `GH_PERSONAL_PATTERNS`, log không in giá trị mẫu. Test dùng mẫu giả. Bản công khai đã gọt danh tính riêng (tên, địa chỉ, ghi chú vận hành); ghi chú riêng của Sếp ở Brain (riêng tư).
+- Chi tiết: [docs/releases/v0.1.57.md](docs/releases/v0.1.57.md)
+
 ## v0.1.56 — Không lộ thông tin riêng của Sếp cho Owner khác (10/10/2026)
 - Bỏ địa chỉ Gen-hub của Sếp khỏi mọi thứ giao cho Owner khác (ô nhập, hướng dẫn bước 14, câu lỗi web + API): chỉ còn chỗ giữ chỗ `https://<địa-chỉ-gen-hub-của-bạn>/mcp`; tên Kho đổi thành **"Kho dữ liệu"** (`KHO_LABEL` một chỗ ở API + contracts; thẻ đề xuất, bài học/mẹo Gen, prompt, nhãn quyền PIN).
 - Migration **0035** (chạy lại an toàn) đổi ghi chú máy chủ Gen-hub cũ đã lưu trong DB Owner; dữ liệu mẫu `seed_demo.py` và mock/test dùng tên hư cấu (`example.test`, "Công ty Mẫu…").
@@ -24,11 +31,11 @@ Việc sửa nóng không đổi số bản (PR #46, #48, #53, #55, #58, #59) gh
 - Thẻ **Hôm nay của Sếp** ở đầu khung Gen (chỉ Owner): tối đa 3 **Việc cần làm ngay** (sự cố, dòng bắt buộc, sao lưu, token Gen-hub, nháp chờ duyệt…), một mẹo **Sếp biết chưa?** và **Bài học hôm nay · k/19**; mỗi việc có Chỉ cho em / Để mai / Không dùng việc này (việc khẩn không tắt được).
 - Lộ trình 19 bài (10 bài nội dung + 9 bài từ Hướng dẫn thiết lập) ở Trợ giúp › Lộ trình học cùng Gen; chấm đỏ ở nút Gen; chuông `gen.coach` tối đa 1/ngày (09:05/11:05/14:05, có giờ yên lặng, không đẩy Telegram); Bản tin thêm dòng "Việc bắt buộc: đã đạt x/N".
 - Cài đặt › Bộ não AI › Gen hướng dẫn (bật/tắt, chuông, số bài mỗi ngày, giờ yên lặng, Bật lại); Gen có tool `coach.status` để trả lời "em cần làm gì?". Không gọi model, không ghi hội thoại; migration 0033.
-- **Người gác yêu cầu tự chữa**: bài học máy Boss — `gen-harness-update-request.path` rơi vào failed "Result: resources" vì hết hạn mức inotify (mặc định 128, đang dùng 174) nên nút Cập nhật ngay không có ai nhận; `genh auto-update enable|status` và lần cài/cập nhật nay `reset-failed` + restart khi còn inotify, vẫn lỗi thì bật timer dự phòng quét mỗi phút và nói rõ lệnh `sudo sysctl -w fs.inotify.max_user_instances=1024`; chỉ coi `.path` khoẻ khi `SubState=waiting` (đang `running` trong service thì systemd báo sống giả — giữ dự phòng); `handle-requests` không còn tự chữa; thẻ Sức khoẻ có dòng cảnh báo, E2E thật có ca inotify (đã chạy, đã sửa gốc rễ).
+- **Người gác yêu cầu tự chữa**: bài học từ một bản cài thật — `gen-harness-update-request.path` rơi vào failed "Result: resources" vì hết hạn mức inotify (mặc định 128, đang dùng 174) nên nút Cập nhật ngay không có ai nhận; `genh auto-update enable|status` và lần cài/cập nhật nay `reset-failed` + restart khi còn inotify, vẫn lỗi thì bật timer dự phòng quét mỗi phút và nói rõ lệnh `sudo sysctl -w fs.inotify.max_user_instances=1024`; chỉ coi `.path` khoẻ khi `SubState=waiting` (đang `running` trong service thì systemd báo sống giả — giữ dự phòng); `handle-requests` không còn tự chữa; thẻ Sức khoẻ có dòng cảnh báo, E2E thật có ca inotify (đã chạy, đã sửa gốc rễ).
 - Chi tiết: [docs/releases/v0.1.54.md](docs/releases/v0.1.54.md) · thiết kế: [docs/design/gen-coach.md](docs/design/gen-coach.md)
 
 ## v0.1.53 — Tự cập nhật đêm tự lành + trung thực (10/10/2026)
-- Máy Boss kẹt ở v0.1.44 từ 03/10 đến 09/10: lịch tự cập nhật đêm bị tắt mà `genh auto-update status` đọc sai và không ai biết, nút Cập nhật ngay trên Console chỉ nói "chưa nhận yêu cầu" (F-93, F-94, F-99).
+- Một bản cài kẹt ở v0.1.44 từ 03/10 đến 09/10: lịch tự cập nhật đêm bị tắt mà `genh auto-update status` đọc sai và không ai biết, nút Cập nhật ngay trên Console chỉ nói "chưa nhận yêu cầu" (F-93, F-94, F-99).
 - `genh update` tự lành: bật lại lịch đêm khi unit mất/tắt/không chạy (trừ khi Sếp đã chủ động tắt); `genh auto-update status` nói thật (5 thông tin: bật/tắt thật, cơ chế, enabled/active, lần chạy gần nhất/kế tiếp, linger) và cảnh báo khi log im quá 36 giờ; kiểm linger sau `enable-linger` (F-93, F-94, F-95).
   **Thay đổi hành vi**: máy đã tắt lịch đêm từ trước v0.1.53 (chưa có dấu "Sếp đã tắt") được bật lại một lần — muốn tắt hẳn: `genh auto-update disable`; `install --no-auto-update` nay tắt luôn lịch đêm đang có của bản cài đó.
 - Lịch đêm chọn bản cao nhất đã đủ 24 giờ trong 10 bản gần nhất, không bị bản mới chưa chín chặn "đói" (F-96); nút Cập nhật ngay không kích lặp và không kẹt khi tệp yêu cầu không xoá được (GH-E94C, F-97); unit đêm mang `--install-dir`/`--port` và bản cài phụ không gỡ/ghi đè lịch của bản chính (F-98).
@@ -47,7 +54,7 @@ Việc sửa nóng không đổi số bản (PR #46, #48, #53, #55, #58, #59) gh
 
 ## v0.1.50 — Gen nhớ + Gen ghi Kho có xác nhận và mã PIN (09/10/2026)
 - Gen nhớ: ghi chú quy ước/sở thích của Sếp lưu cục bộ (tối đa 30), Gen đề xuất — Sếp xác nhận — sửa/xoá ở Cài đặt › Bộ não AI (F-81, migration 0032).
-- Ghi vào Kho Ryan: Gen đề xuất `kho_create`/`kho_update` cho Phiên/Việc; chỉ ghi sau Xác nhận + mã PIN + permit ký, qua Gen-hub (QD-18, F-81).
+- Ghi vào Kho dữ liệu: Gen đề xuất `kho_create`/`kho_update` cho Phiên/Việc; chỉ ghi sau Xác nhận + mã PIN + permit ký, qua Gen-hub (QD-18, F-81).
 - Mỗi bản mới Gen tự đề xuất một Phiên (chuông + thẻ); Kết nối › Gen-hub có "Quyền ghi Kho"; Việc Sếp cần làm thêm dòng 9 "Gen ghi Kho" (F-87).
 - Tài liệu đồng bộ: CHANGELOG + `docs/releases/`, HANDOFF ≤ 200 dòng, ROADMAP có mục Nợ, README/runbook, script kiểm link (F-90, F-69, F-47, F-91, F-92, F-42, F-39).
 - Gộp từ main: sửa trình bày (PR #58 — chữ dính biên khung, Icon rớt dòng, lính gác bố cục 4 cỡ màn) và genh đọc tệp trạng thái thử lại khi tệp vừa bị thay (PR #59).
@@ -183,7 +190,7 @@ Việc sửa nóng không đổi số bản (PR #46, #48, #53, #55, #58, #59) gh
 Một dòng mỗi bản; chi tiết ở `docs/releases/`.
 
 - v0.1.27 (30/09/2026) — gia cố & phủ test: ghim DNS Gen-hub, hạn lưu chuông, nhắc việc chịu lỗi — [chi tiết](docs/releases/v0.1.27.md)
-- v0.1.26 (30/09/2026) — Đợt D1: Gen đọc Kho Ryan qua Gen-hub (chỉ đọc, chỉ Owner) — [chi tiết](docs/releases/v0.1.26.md)
+- v0.1.26 (30/09/2026) — Đợt D1: Gen đọc Kho dữ liệu qua Gen-hub (chỉ đọc, chỉ Owner) — [chi tiết](docs/releases/v0.1.26.md)
 - v0.1.25 (29/09/2026) — Đợt C1: lọc đầu Hộp thư (trùng, rác, điểm), dùng Jev khi có — [chi tiết](docs/releases/v0.1.25.md)
 - v0.1.24 (29/09/2026) — Đợt A4: Gen v2 bước 1, đề xuất thao tác có xác nhận — [chi tiết](docs/releases/v0.1.24.md)
 - v0.1.23 (29/09/2026) — Đợt B4–B7: điện thoại, trang lỗi/404, chuông thông báo, sáng/tối — [chi tiết](docs/releases/v0.1.23.md)

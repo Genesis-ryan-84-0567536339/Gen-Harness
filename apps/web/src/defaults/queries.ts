@@ -12,7 +12,8 @@ export const DEFAULTS_KEY = ['defaults'] as const;
 /**
  * Cache cài đặt bị Về mặc định đổi: dòng gán model (`agents`), lọc tin (`queue`), trần chi phí/sao lưu/nguồn việc nền
  * (`system`, `providers`), Gen + Gen nhớ + Gen hướng dẫn (`gen`), lịch sàng lọc (`refinery`), Mặt tiền Owner (`owner`: thẻ
- * "Áp model chuẩn theo vai?" ở Hôm nay đến từ cùng sổ này — không làm tươi thì Sếp tưởng thao tác chưa chạy) và chính sổ mặc định.
+ * "Áp model chuẩn theo vai?" ở Hôm nay đến từ cùng sổ này — không làm tươi thì Sếp tưởng thao tác chưa chạy), thẻ Gen-hub
+ * (`hub`: ô "Tên Kho" về mặc định ở v0.1.57) và chính sổ mặc định.
  */
 const RELATED_ROOTS: ReadonlyArray<readonly string[]> = [
   DEFAULTS_KEY,
@@ -22,6 +23,7 @@ const RELATED_ROOTS: ReadonlyArray<readonly string[]> = [
   ['providers'],
   ['gen'],
   ['refinery'],
+  ['hub', 'link'],
   OWNER_KEYS.all,
 ];
 

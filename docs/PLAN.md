@@ -133,8 +133,8 @@ Nền chung trước: `explain` (điểm → đơn vị ý nghĩa → trích d�
 | Q3 | Tin tag agent | Có đường nhanh: tin tag agent và tin 1-1 được sàng lọc ngay khi tới, cùng quy tắc, vẫn một chiều Kho thô → Kho sạch. |
 | Q4 | Đánh giá nhân sự | Mặc định chỉ Owner thấy nội dung; Auditor thấy nhật ký ai đã xem; Manager không thấy. Owner có thể tự cấp thêm cho vai trò khác trong Quyền hạn (cần PIN, ghi log). |
 | Q5 | 3 màn còn thiếu | Dựng luôn trong GĐ 3: **Việc & Nhắc hẹn** (Hàng đợi & Hành động), **Tài liệu** (cạnh Nhóm & Con người), **Deal & Vụ việc** (Cơ hội & Thị trường), cùng ngôn ngữ thiết kế. |
-| Q6 | Antigravity CLI | Dùng bản cài chính hãng; đăng nhập và đổi tài khoản theo cách heo-harness làm (xem ARCHITECTURE §11). |
-| Q7 | Zalo | Owner đăng nhập bằng cách quét QR do hệ thống sinh, bằng tài khoản Zalo thật; bridge giữ phiên và bắt tin như heo-harness (`zca-js`). Vẫn hiện cảnh báo rủi ro trước QR. |
+| Q6 | Antigravity CLI | Dùng bản cài chính hãng; đăng nhập và đổi tài khoản theo cách dự án cũ làm (xem ARCHITECTURE §11). |
+| Q7 | Zalo | Owner đăng nhập bằng cách quét QR do hệ thống sinh, bằng tài khoản Zalo thật; bridge giữ phiên và bắt tin như dự án cũ (`zca-js`). Vẫn hiện cảnh báo rủi ro trước QR. |
 | — | Mặc định giới hạn | **Mặc định mở hết, trừ các quyền nguy hiểm nghiêm trọng.** Mọi giới hạn còn lại là tuỳ chọn Owner tự bật/tắt trong cài đặt. Danh sách khoá cứng ở ARCHITECTURE §7.4. |
 
 ## Định nghĩa "có giới hạn" trong ma trận quyền

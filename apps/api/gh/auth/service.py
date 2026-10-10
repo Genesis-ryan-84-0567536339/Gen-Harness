@@ -34,6 +34,7 @@ PIN_OPERATIONS: dict[str, str] = {
     "mcp.expose": "Mở tool MCP",
     "hub.link": "Nối Gen-hub (địa chỉ, token)",
     # v0.1.50 (F-81, QD-18): Gen đề xuất ghi Kho dữ liệu — Sếp Xác nhận + nhập PIN mới ghi (bảng Phiên, Việc).
+    # Nhãn chỉ để khai báo (UI không hiện) ⇒ không cần tên Kho tuỳ chỉnh.
     "hub.write": f"Ghi {KHO_LABEL} qua Gen-hub (Phiên, Việc)",
     "social.manage": "Tài khoản mạng xã hội: thêm, đăng nhập, gỡ, bật lại sau Dừng tất cả",
     "policy.change": "Đổi mức tự trị, ngưỡng tiền, ranh giới",

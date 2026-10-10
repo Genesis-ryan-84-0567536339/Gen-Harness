@@ -28,7 +28,7 @@ from gh.gen.tools import TOOLS, ToolRunner
 from gh.social import permit, platforms, protocol
 from gh.social import service as social
 from gh.social.routes import clean_input
-from tests.conftest import OWNER, REDIS_URL, Api
+from tests.conftest import BROWSER_REDIS_URL, OWNER, Api
 from tests.phase2 import org_id
 from tests.test_actionlog_db import _set_scope
 from tests.test_gen import _user_of
@@ -335,10 +335,18 @@ async def test_kill_switch_halts_everything_until_owner_releases(owner_api: Api,
     await owner_api.send("POST", "/auth/login", {"email": OWNER["email"], "password": OWNER["password"]})
     r = await owner_api.send("POST", "/social/halt", {})
     assert r.status_code == 200 and r.json()["halted"] is True
-    msg = await pubsub.get_message(timeout=2, ignore_subscribe_messages=True)
-    assert msg is not None
-    ctl = protocol.verify(crypto.browser_key(), protocol.P_CONTROL, orjson.loads(msg["data"]))
-    assert ctl is not None and ctl["type"] == "halt"
+    # Pub/sub của Redis dùng chung mọi DB: khi hai lượt pytest chạy song song (CI v0.1.57) kênh điều khiển cố định này
+    # có thể nhận thêm lệnh của lượt kia ⇒ đọc tới khi gặp đúng lệnh "halt" thay vì giả định tin đầu tiên.
+    ctl = None
+    deadline = asyncio.get_running_loop().time() + 5
+    while ctl is None and asyncio.get_running_loop().time() < deadline:
+        msg = await pubsub.get_message(timeout=1, ignore_subscribe_messages=True)
+        if msg is None:
+            continue
+        got = protocol.verify(crypto.browser_key(), protocol.P_CONTROL, orjson.loads(msg["data"]))
+        if got is not None and got["type"] == "halt":
+            ctl = got
+    assert ctl is not None
     await pubsub.aclose()
     st = (await db.execute(text("SELECT status FROM agent.browser_jobs WHERE id = :i"), {"i": job["id"]})).scalar_one()
     assert st == "halted"
@@ -429,7 +437,7 @@ async def test_schedule_off_by_default_then_runs_once_per_slot(owner_api: Api, r
 @pytest.fixture
 async def browser_bus(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[Redis]:
     """GH_BROWSER_REDIS_URL trỏ DB Redis khác (như dịch vụ browser-redis) — phải đặt TRƯỚC khi app dựng."""
-    url = REDIS_URL.rsplit("/", 1)[0] + "/13"
+    url = BROWSER_REDIS_URL
     monkeypatch.setenv("GH_BROWSER_REDIS_URL", url)
     b = Redis.from_url(url)
     await b.flushdb()

@@ -10,7 +10,7 @@ name: E2E cài đặt thật
 # CỔNG PHÁT HÀNH (v0.1.33, F-9/F-13): release.yml chỉ tạo BẢN THỬ
 # (prerelease, không đổi latest). Workflow này cài thật ĐÚNG tag bản thử đó;
 # e2e-install + e2e-upgrade xanh thì job `promote` mới nâng nó thành BẢN
-# CHÍNH THỨC (latest) — lúc đó máy Boss (install.sh, genh tự cập nhật) mới
+# CHÍNH THỨC (latest) — lúc đó máy Owner (install.sh, genh tự cập nhật) mới
 # thấy. E2E đỏ → bản thử nằm yên, bản chính thức không đổi. Promote ghi dấu
 # `<!-- genh:promoted_at=… -->` vào ghi chú Release (cùng một lệnh
 # gh release edit) — thời gian chín 24 giờ của lịch đêm tính từ dấu này, vì
@@ -30,8 +30,8 @@ name: E2E cài đặt thật
 #     v0.1.48) tối đa 2 digest. Từ v0.1.48 kéo thêm 1 digest caddy + 1 digest
 #     redis CŨ không gắn tag (ghi vào prev2-refs.txt) — genh phải xoá chúng.
 #     v0.1.37: job là MA TRẬN hai ô nâng cấp (output upgrade_from của resolve):
-#     ô tags[1] = bản chính thức liền trước (máy Boss cập nhật đều mỗi đêm) và
-#     ô tags[3] = bản chính thức cũ hơn 3 bậc — máy Boss tắt vài ngày rồi bật
+#     ô tags[1] = bản chính thức liền trước (máy Owner cập nhật đều mỗi đêm) và
+#     ô tags[3] = bản chính thức cũ hơn 3 bậc — máy Owner tắt vài ngày rồi bật
 #     lại, nhảy nhiều bản một lần (migration dồn, compose đổi nhiều lần). Chưa
 #     đủ 3 bản chính thức cũ hơn ⇒ ô tags[3] vắng (ghi ở tóm tắt resolve,
 #     không đỏ). fail-fast: false; ô nào đỏ ⇒ kết quả job = failure ⇒ KHÔNG
@@ -49,7 +49,7 @@ name: E2E cài đặt thật
 #     thành công, xoá update-blocked.json, dữ liệu vẫn nguyên.
 #
 # LỊCH ĐÊM THẬT (v0.1.53, F-100) — promote đòi THÊM job `e2e-nightly-real` xanh:
-#   máy Boss kẹt ở v0.1.44 (lịch tự cập nhật đêm TẮT 10 ngày, nút "Cập nhật ngay" báo "Máy chủ chưa nhận yêu
+#   máy Owner kẹt ở v0.1.44 (lịch tự cập nhật đêm TẮT 10 ngày, nút "Cập nhật ngay" báo "Máy chủ chưa nhận yêu
 #   cầu") mà mọi E2E vẫn xanh, vì các job khác cài bằng --no-auto-update hoặc trên runner không có
 #   `systemctl --user` (genh rơi về crontab) — chưa từng có ai chạy timer/.path thật. Job này bật user manager
 #   systemd thật + linger (tiến trình nền chạy cả khi không ai đăng nhập) rồi kiểm: `genh install` (KHÔNG
@@ -287,8 +287,8 @@ jobs:
 
           # tags = [$tag, cũ1, cũ2, cũ3] — các bản CHÍNH THỨC cũ hơn $tag (bỏ bản
           # nháp + bản thử), mới→cũ theo sort -V. prev_tag (cho e2e-selfupdate
-          # và ô tags[1] của e2e-upgrade) = tags[1] = cũ1 — chính là bản máy Boss
-          # đang chạy. Ô tags[3] = cũ3 — máy Boss tắt vài ngày, nhảy nhiều bản
+          # và ô tags[1] của e2e-upgrade) = tags[1] = cũ1 — chính là bản máy Owner
+          # đang chạy. Ô tags[3] = cũ3 — máy Owner tắt vài ngày, nhảy nhiều bản
           # một lần. Tính cả khi promote tay skip_e2e (run_e2e=false):
           # e2e-selfupdate sau promote vẫn cần prev_tag.
           # Các bản genh ≤ v0.1.8 cài từ binary phát hành KHÔNG ghi Caddyfile
@@ -1297,7 +1297,7 @@ jobs:
   # đó — chế độ pr build từ source, không có "bản trước" để nâng cấp lên chính
   # commit đang review) và khi resolve tìm được prev_tag.
   # Ma trận (v0.1.37): mỗi ô của upgrade_from là một runner riêng — ô tags[1]
-  # (matrix.from = prev_tag, bản máy Boss đang chạy) và ô tags[3] (máy tắt vài
+  # (matrix.from = prev_tag, bản máy Owner đang chạy) và ô tags[3] (máy tắt vài
   # ngày, nhảy nhiều bản; vắng khi chưa đủ 3 bản chính thức cũ hơn).
   # Kịch bản mỗi ô: cài BẢN CHÍNH THỨC cũ (matrix.from)
   # → đặt genh của tag đang kiểm đè lên → genh update --yes --no-self-update
@@ -2323,7 +2323,7 @@ jobs:
   # (gen-harness-update-request.path/.service — nút "Cập nhật ngay"/"Khôi phục" của Console) dưới một user
   # manager systemd THẬT có linger (tiến trình nền chạy cả khi không ai đăng nhập). Lý do: các job khác cài bằng
   # --no-auto-update hoặc trên runner không có `systemctl --user` (genh rơi về crontab), nên chưa bao giờ có ai
-  # chạy timer/.path thật — máy Boss kẹt ở v0.1.44 mà E2E vẫn xanh (lịch đêm TẮT 10 ngày không ai biết).
+  # chạy timer/.path thật — máy Owner kẹt ở v0.1.44 mà E2E vẫn xanh (lịch đêm TẮT 10 ngày không ai biết).
   # Ở đây KHÔNG truyền --no-auto-update: chính `genh install` phải bật lịch đêm.
   # Kịch bản: user manager + linger → cài (cổng 9443 ở chế độ pr, để kiểm --port vào unit) → timer enabled/active,
   # lần kế tiếp trong 24 giờ 31 phút, unit mang --install-dir/--port/Environment → chạy thật service đêm
@@ -2533,7 +2533,7 @@ jobs:
           i = json.load(open(sys.argv[1], encoding="utf-8"))
           assert i.get("updater") == "systemd", "genh.json updater=%r (cần systemd — runner có user manager thật): %s" % (i.get("updater"), i)
           assert "update" in (i.get("requests") or []), "genh.json thiếu 'update' trong requests: %s" % i
-          assert i.get("auto_update_enabled") is True, "genh.json auto_update_enabled=%r sau install (máy Boss từng ghi false): %s" % (i.get("auto_update_enabled"), i)
+          assert i.get("auto_update_enabled") is True, "genh.json auto_update_enabled=%r sau install (máy Owner từng ghi false): %s" % (i.get("auto_update_enabled"), i)
           PY
           p="$(systemctl --user is-active gen-harness-update-request.path 2>&1 || true)"
           [ "$p" = "active" ] || { echo "::error::gen-harness-update-request.path is-active = '$p' (cần active) — nút Cập nhật ngay không có ai nhận." >&2; exit 1; }
@@ -2589,7 +2589,7 @@ jobs:
             systemctl --user status gen-harness-update.service --no-pager || true
             journalctl --user -u gen-harness-update.service --no-pager | tail -100 || true
             [ -f "$log" ] && tail -n 50 "$log" || true
-            echo "::error::service lịch đêm không thành công (thoát $rc, $result) — đúng lỗi máy Boss: timer kích mà service không chạy được." >&2
+            echo "::error::service lịch đêm không thành công (thoát $rc, $result) — đúng lỗi máy Owner: timer kích mà service không chạy được." >&2
             exit 1
           fi
           n1=0
@@ -2820,7 +2820,7 @@ jobs:
           [ "$en" != "enabled" ] && [ "$ac" != "active" ] || { echo "::error::không tắt được $t để dựng ca tự lành" >&2; exit 1; }
           "$GENH" update --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" 2>&1 | tee "$RUNNER_TEMP/heal.log"
           grep -Fq 'đã bật lại' "$RUNNER_TEMP/heal.log" \
-            || { echo "::error::genh update không in 'đã bật lại' sau khi timer bị tắt (máy chưa có dấu opt-out) — lịch đêm không tự lành, đúng lỗi máy Boss." >&2; exit 1; }
+            || { echo "::error::genh update không in 'đã bật lại' sau khi timer bị tắt (máy chưa có dấu opt-out) — lịch đêm không tự lành, đúng lỗi máy Owner." >&2; exit 1; }
           en="$(systemctl --user is-enabled "$t" 2>&1 || true)"
           ac="$(systemctl --user is-active "$t" 2>&1 || true)"
           echo "sau genh update — is-enabled: $en; is-active: $ac"
@@ -2864,11 +2864,11 @@ jobs:
           echo "OK: opt-out được tôn trọng; enable xoá dấu và bật lại."
 
       - name: Hết hạn mức inotify — .path failed (Result=resources) ⇒ status tự chữa sang timer dự phòng; sửa gốc rồi enable ⇒ .path sống, dự phòng tắt
-        # v0.1.54: lỗi THẬT trên máy Boss — gen-harness-update-request.path rơi vào failed "Result: resources" vì hết
+        # v0.1.54: lỗi THẬT trên máy Owner — gen-harness-update-request.path rơi vào failed "Result: resources" vì hết
         # hạn mức inotify (fs.inotify.max_user_instances mặc định 128, máy đang dùng 174); reset-failed + restart vẫn lỗi
         # tới khi Boss `sudo sysctl -w fs.inotify.max_user_instances=1024`. Ở đây dựng lại đúng thế: hạ hạn mức xuống 1
         # (runner là VM, có sudo) rồi restart .path. Runner không cho hạ sysctl ⇒ cách giả khác CHẠY THẬT: một tiến trình
-        # python chiếm hết inotify instance của chính người dùng này (đúng nguyên nhân "174 > 128" của máy Boss).
+        # python chiếm hết inotify instance của chính người dùng này (đúng nguyên nhân "174 > 128" của máy Owner).
         # Mọi lần sửa hệ thống (sysctl / tiến trình chiếm) được khôi phục ở trap EXIT, kể cả khi bước đỏ.
         run: |
           set -euo pipefail
@@ -2932,7 +2932,7 @@ jobs:
           st="$(systemctl --user is-active "$p" 2>&1 || true)"
           res="$(systemctl --user show "$p" -p Result --value 2>/dev/null || true)"
           echo "sau khi hết hạn mức — $p is-active: $st; Result: $res"
-          [ "$st" = "failed" ] || { echo "::error::$p is-active = '$st' (cần failed) — không dựng được ca máy Boss." >&2; exit 1; }
+          [ "$st" = "failed" ] || { echo "::error::$p is-active = '$st' (cần failed) — không dựng được ca máy Owner." >&2; exit 1; }
 
           # 2) `genh auto-update status` tự chữa: reset-failed + restart vẫn lỗi ⇒ timer dự phòng + nói thật.
           "$GENH" auto-update status --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" | tee "$RUNNER_TEMP/au-inotify.txt"
@@ -3141,7 +3141,7 @@ jobs:
           fi
           case "$TAG" in
             *-*)
-              echo "::error::$TAG có hậu tố '-' (bản thử dài hạn) — không được nâng thành bản chính thức. Phát hành bản không hậu tố (tăng VERSION) nếu muốn máy Boss nhận." >&2
+              echo "::error::$TAG có hậu tố '-' (bản thử dài hạn) — không được nâng thành bản chính thức. Phát hành bản không hậu tố (tăng VERSION) nếu muốn máy Owner nhận." >&2
               exit 1
               ;;
           esac
@@ -3188,7 +3188,7 @@ jobs:
             echo "### Promote"
             echo "releases/latest: ${before:-<chưa có>} → **$after** (dấu: \`$marker\`)"
           } >>"$GITHUB_STEP_SUMMARY"
-          echo "OK: $TAG là bản chính thức — máy Boss (install.sh, genh tự cập nhật) sẽ nhận bản này; lịch đêm đợi đủ 24 giờ từ $marker."
+          echo "OK: $TAG là bản chính thức — máy Owner (install.sh, genh tự cập nhật) sẽ nhận bản này; lịch đêm đợi đủ 24 giờ từ $marker."
 
   # ── e2e-selfupdate ───────────────────────────────────────────────────────
   # Đường MỌI máy Owner thật sự đi khi có bản mới: genh CŨ (bản chính thức
