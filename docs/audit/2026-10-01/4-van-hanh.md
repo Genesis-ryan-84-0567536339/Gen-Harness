@@ -4,7 +4,7 @@ Phạm vi: snapshot `origin/main` = `eb5a71b` (v0.1.31), các workflow `.github/
 (34 lần Release, 98 lần E2E, 100 lần CI gần nhất), mã `apps/genh` (Go), `apps/api/gh/{backup,worker,system_api,…}`.
 Chỉ đọc; đã chạy thử `go vet ./...` + `go test ./...` của `apps/genh` trên **bản sao** trong scratchpad (tất cả xanh).
 
-Ký hiệu: 🔴 nghiêm trọng (có thể mất dữ liệu / sập âm thầm trên máy Boss) · 🟠 nên sửa sớm · 🟡 vệ sinh/nhỏ.
+Ký hiệu: 🔴 nghiêm trọng (có thể mất dữ liệu / sập âm thầm trên máy Owner) · 🟠 nên sửa sớm · 🟡 vệ sinh/nhỏ.
 Effort: S ≤ ½ ngày · M 1–2 ngày · L > 2 ngày.
 
 ---
@@ -35,7 +35,7 @@ Effort: S ≤ ½ ngày · M 1–2 ngày · L > 2 ngày.
                                                  build-genh ×6 (go:embed compose đã ghim, -X main.version)
                                                  ▼
                                                  release: checksums.txt + cosign sign-blob + GitHub Release
-                                                 ══► NGAY LẬP TỨC là "latest" (máy Boss thấy được)
+                                                 ══► NGAY LẬP TỨC là "latest" (máy Owner thấy được)
                                                  ▼ workflow_run (sau khi đã phát hành)
                                                  E2E e2e-install.yml (~3 phút)
                                                  ├ e2e-install: install.sh thật → ready → status → backup →
@@ -101,14 +101,14 @@ Merge → bản phát hành đã kiểm E2E: ~11 phút.
 
 ### 🔴 Nghiêm trọng
 
-#### 🔴1. Bản phát hành thành "latest" TRƯỚC khi được kiểm; không có cổng chặn CI/E2E — máy Boss tự nhận bản lỗi lúc 03:00
+#### 🔴1. Bản phát hành thành "latest" TRƯỚC khi được kiểm; không có cổng chặn CI/E2E — máy Owner tự nhận bản lỗi lúc 03:00
 - **Bằng chứng**:
   - `release.yml` chạy trên `push: main` song song với CI, các job chỉ `needs: meta` — không chờ CI. Bản **v0.1.24**
     được phát hành (Release run 36581421234, xanh, published 14:23:34) trong khi **CI trên đúng commit đó đỏ**
     (run 36581421131, job 109450289123: `1 failed, 997 passed`).
   - E2E chỉ chạy **sau** khi Release xong (`e2e-install.yml:32-34`, `workflow_run`); release job dùng
     `softprops/action-gh-release` mặc định đánh dấu latest (`release.yml:489-497`). `selfupdate.go:208-237` và
-    `install.sh:13` đọc `releases/latest` ⇒ E2E đỏ cũng không ngăn được máy Boss cập nhật.
+    `install.sh:13` đọc `releases/latest` ⇒ E2E đỏ cũng không ngăn được máy Owner cập nhật.
   - `main` không bảo vệ (`list_branches`: `"protected": false`) — "CI xanh mới merge" chỉ là quy ước.
   - Tài liệu nói ngược: `docs/ROADMAP.md:3` "CI + E2E cài thật xanh mới phát hành".
   - Kênh `--channel stable|beta` chỉ là trang trí (`ops/update.go:25-31`) — không có độ trễ an toàn nào.
@@ -179,7 +179,7 @@ Merge → bản phát hành đã kiểm E2E: ~11 phút.
   backup ngừng, kênh rớt nhiều ngày mà không ai hay.
 - **Cách sửa**: watchdog do `genh` cài (timer 10–15 phút, cùng cơ chế auto-update): kiểm `/ready`, container
   unhealthy (tự restart), dung lượng đĩa, tuổi backup gần nhất, `update-status=failed`, heartbeat worker/bridge →
-  gửi **một kênh ngoài** (Zalo/Telegram của Boss, email, hoặc ghi vào Kho Ryan qua Gen-hub để Claude thấy đầu phiên),
+  gửi **một kênh ngoài** (Zalo/Telegram của Owner, email, hoặc ghi vào Kho dữ liệu qua Gen-hub để Claude thấy đầu phiên),
   chống spam (1 lần/sự cố + nhắc lại 24 giờ). Đồng thời thêm thông báo trong app cho các loại trên.
 - **Effort**: M.
 
@@ -189,7 +189,7 @@ Merge → bản phát hành đã kiểm E2E: ~11 phút.
 - **Bằng chứng**: 45 tệp `*_test.go` (~7,7 nghìn dòng) trong `apps/genh`; grep `go test|go vet` trong
   `.github/` và `Makefile`: không có. `installer-matrix.yml:34-50` chỉ `go build` + `genh version/help`.
   Chạy thử trên bản sao: `go vet` sạch, `go test ./...` xanh — nhưng không có gì giữ cho nó xanh.
-- **Ảnh hưởng**: một thay đổi làm hỏng rollback/selfupdate sẽ qua CI và tự cài lên máy Boss (kết hợp 🔴1).
+- **Ảnh hưởng**: một thay đổi làm hỏng rollback/selfupdate sẽ qua CI và tự cài lên máy Owner (kết hợp 🔴1).
 - **Cách sửa**: thêm job `genh` vào `ci.yml`: `go vet ./... && go test -race ./...` (+ `govulncheck`). **Effort**: S.
 
 #### 🟠2. Rollback thất bại đúng ở kịch bản hay gặp nhất (container api mới crash-loop) → bản cũ chạy trên schema mới; và vòng lặp lỗi mỗi đêm
@@ -212,7 +212,7 @@ Merge → bản phát hành đã kiểm E2E: ~11 phút.
 - **Cách sửa**: `flock` trên `run/genh.lock` cho update/restore/import; "running" quá 60 phút ⇒ coi là failed;
   bắt SIGTERM vào cùng context để rollback. **Effort**: S.
 
-#### 🟠4. Kiểm nâng cấp quá hẹp: chỉ từ bản N-1, CSDL rỗng, chỉ Ubuntu — máy Boss nhảy nhiều bản, có dữ liệu thật, chạy Fedora
+#### 🟠4. Kiểm nâng cấp quá hẹp: chỉ từ bản N-1, CSDL rỗng, chỉ Ubuntu — máy Owner nhảy nhiều bản, có dữ liệu thật, chạy Fedora
 - **Bằng chứng**: `e2e-upgrade` lấy đúng `tags[1]` (`e2e-install.yml:411-423`), không nạp dữ liệu (chỉ e2e-install gọi
   setup bước 1). 31 bản/6 ngày + timer `Persistent` ⇒ máy tắt vài ngày sẽ nhảy N-5 → N qua nhiều migration.
   Tài liệu ghi ma trận có Fedora 40/Debian 12 (`docs/handoff/05-installer.md:159`) nhưng cài thật chỉ chạy
@@ -286,7 +286,7 @@ Merge → bản phát hành đã kiểm E2E: ~11 phút.
 | 🟡6 | GitHub Actions: cảnh báo Node 20 bị khai tử (checkout@v4, docker/*@v3/v6, setup-uv@v6); action ghim theo tag, không theo SHA (`softprops/action-gh-release@v2` có `contents: write`); `ci.yml` không khai `permissions:` | log job 109975416642 | Nâng phiên bản action, ghim SHA (Dependabot tự nâng), `permissions: contents: read` | S |
 | 🟡7 | Cập nhật đêm (03:00 ±30') trùng cửa sổ cron worker 03:15/03:40/03:45 (`worker.py:195-198`) — restart worker có thể bỏ lỡ job ngày đó (arq không chạy bù) | `content.go:42-44` | Dời cron dọn dẹp sang 04:30, hoặc bỏ restart khi không có bản mới (🔴2) | S |
 | 🟡8 | Tải binary `genh` timeout 20 giây cho **cả tệp** (`selfupdate.go:90`, `http.Client.Timeout`) — mạng chậm ⇒ tự cập nhật binary hỏng âm thầm, chạy tiếp bản cũ | `main.go:358-363` | Timeout theo thời gian rảnh + thử lại 3 lần | S |
-| 🟡9 | Không kiểm "tự lên sau khi bật lại máy": không kiểm `docker.service` enabled; `linger` chỉ cảnh báo lúc cài (`systemd.go:246-248`), Console không hiện ⇒ nếu thiếu, timer/watcher không chạy khi Boss chưa đăng nhập | grep `is-enabled docker`: không có | `genh doctor`/`status` + Console hiện 2 mục này; cần kiểm 1 lần trên máy Boss | S |
+| 🟡9 | Không kiểm "tự lên sau khi bật lại máy": không kiểm `docker.service` enabled; `linger` chỉ cảnh báo lúc cài (`systemd.go:246-248`), Console không hiện ⇒ nếu thiếu, timer/watcher không chạy khi Boss chưa đăng nhập | grep `is-enabled docker`: không có | `genh doctor`/`status` + Console hiện 2 mục này; cần kiểm 1 lần trên máy Owner | S |
 | 🟡10 | Thư mục hộp thư `run/` để 0777 (`hostlink.go:57-66`) — người dùng khác trên máy có thể thả yêu cầu cập nhật/khôi phục (khoá restore có regex chặt, rủi ro thấp) | `hostlink.go` | Chown về uid container (10001) + 0770 thay vì 0777 | S |
 
 ---
@@ -294,13 +294,13 @@ Merge → bản phát hành đã kiểm E2E: ~11 phút.
 ## (d) Top 5 khuyến nghị để "tự bảo trì" thật sự
 
 1. **Cổng an toàn cho phát hành** (🔴1 + 🟠1): phát hành dạng prerelease → E2E (thêm nâng cấp N-5 có dữ liệu mẫu) →
-   chỉ khi xanh mới gắn "latest"; Release chờ CI; thêm `go test`/`go vet` vào CI; bật branch protection. Máy Boss chỉ
+   chỉ khi xanh mới gắn "latest"; Release chờ CI; thêm `go test`/`go vet` vào CI; bật branch protection. Máy Owner chỉ
    nhận bản đã qua kiểm thật.
 2. **Làm `genh update` "không bao giờ làm hại"** (🔴2, 🔴3, 🟠2, 🟠3): pull trước khi backup; chỉ restore khi đã
    migrate; dừng nguồn ghi trước backup khi có migration; restore bằng ảnh cũ; `flock`; bỏ qua chu trình khi không có
    bản mới; dọn ảnh cũ (giữ N-1); không tự thử lại một bản đã rollback.
 3. **Watchdog + cảnh báo ra ngoài app** (🔴5, 🟠8): timer 10–15 phút kiểm ready, unhealthy, đĩa, tuổi backup, update
-   lỗi, kênh rớt, CLI hết hạn → tự restart cái tự sửa được, còn lại nhắn Boss qua một kênh ngoài (và ghi Kho Ryan để
+   lỗi, kênh rớt, CLI hết hạn → tự restart cái tự sửa được, còn lại nhắn Boss qua một kênh ngoài (và ghi Kho dữ liệu để
    Claude thấy); kèm giới hạn log container.
 4. **Sao lưu ra ngoài máy tự động** (🔴4): xuất `.ghbundle` theo lịch (CSDL + tài liệu + khoá, mật khẩu riêng) sang
    Drive/USB/NAS; Console hiện "bản ngoài máy gần nhất" và cảnh báo khi quá 7 ngày; `uninstall` mặc định giữ dữ liệu.

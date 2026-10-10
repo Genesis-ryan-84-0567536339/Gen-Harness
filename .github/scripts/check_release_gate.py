@@ -33,11 +33,11 @@ thật đúng tag → job `promote` nâng thành bản chính thức (latest). S
     strategy.matrix.include == `${{ fromJSON(needs.resolve.outputs.upgrade_from) }}`,
     strategy.fail-fast false, KHÔNG continue-on-error true (ô nào đỏ ⇒ job
     failure ⇒ không promote); job `resolve` có outputs.upgrade_from và script
-    tính ô "tags[3]" (máy Boss tắt vài ngày, nhảy nhiều bản một lần).
+    tính ô "tags[3]" (máy Owner tắt vài ngày, nhảy nhiều bản một lần).
 
   - e2e-install.yml (v0.1.53, F-100): job `e2e-nightly-real` chạy THẬT lịch tự cập nhật đêm
     (gen-harness-update.timer/.service) và trình nhận yêu cầu (gen-harness-update-request.path/.service) dưới user
-    manager systemd thật có linger — máy Boss kẹt ở v0.1.44 vì lịch đêm TẮT mà mọi E2E vẫn xanh (các job khác cài
+    manager systemd thật có linger — máy Owner kẹt ở v0.1.44 vì lịch đêm TẮT mà mọi E2E vẫn xanh (các job khác cài
     bằng --no-auto-update hoặc chạy trên runner không có `systemctl --user`). Phải có: job tồn tại, runs-on
     ubuntu-24.04, một bước chạy `loginctl enable-linger` và một bước chạy `systemctl --user start
     gen-harness-update.service`, KHÔNG lệnh nào truyền `--no-auto-update` (chính `genh install` phải bật lịch đêm);
@@ -338,7 +338,7 @@ def check_e2e(e2e: dict[Any, Any]) -> list[str]:
         if NIGHTLY_JOB not in needs:
             errs.append(
                 f"{E2E_PATH}: job `promote` thiếu '{NIGHTLY_JOB}' trong needs — lịch tự cập nhật đêm chưa được chạy "
-                "thật dưới user manager có linger mà vẫn promote (máy Boss kẹt phiên bản vì lịch đêm TẮT)."
+                "thật dưới user manager có linger mà vẫn promote (máy Owner kẹt phiên bản vì lịch đêm TẮT)."
             )
         if PROMOTE_IF_NIGHTLY not in str(promote.get("if", "")):
             errs.append(
@@ -381,7 +381,7 @@ def check_e2e(e2e: dict[Any, Any]) -> list[str]:
 def check_nightly(jobs: dict[Any, Any]) -> list[str]:
     """e2e-nightly-real (v0.1.53, F-100): lịch đêm + trình nhận yêu cầu chạy THẬT dưới user manager có linger."""
     errs: list[str] = []
-    hau_qua = "lịch tự cập nhật đêm (timer/.path) không còn được chạy thật trước khi phát hành — lỗi như máy Boss kẹt v0.1.44 lọt qua"
+    hau_qua = "lịch tự cập nhật đêm (timer/.path) không còn được chạy thật trước khi phát hành — lỗi như máy Owner kẹt v0.1.44 lọt qua"
     job = jobs.get(NIGHTLY_JOB)
     if not isinstance(job, dict):
         errs.append(f"{E2E_PATH}: thiếu job `{NIGHTLY_JOB}` ⇒ {hau_qua}.")
@@ -418,7 +418,7 @@ def check_upgrade_matrix(jobs: dict[Any, Any]) -> list[str]:
     if not isinstance(upg, dict):
         errs.append(
             f"{E2E_PATH}: thiếu job `{UPGRADE_JOB}` — không còn E2E nào nâng cấp có dữ liệu từ bản chính thức cũ; "
-            "máy Boss nâng cấp có thể mất dữ liệu mà vẫn promote."
+            "máy Owner nâng cấp có thể mất dữ liệu mà vẫn promote."
         )
     else:
         strat = upg.get("strategy")
@@ -428,7 +428,7 @@ def check_upgrade_matrix(jobs: dict[Any, Any]) -> list[str]:
         if include != UPGRADE_MATRIX:
             errs.append(
                 f"{E2E_PATH}: job `{UPGRADE_JOB}` phải có `strategy.matrix.include: {UPGRADE_MATRIX}` "
-                f"(hiện: {include!r}) — thiếu ô tags[3] ⇒ {hau_qua} (máy Boss tắt vài ngày nhảy nhiều bản không được kiểm)."
+                f"(hiện: {include!r}) — thiếu ô tags[3] ⇒ {hau_qua} (máy Owner tắt vài ngày nhảy nhiều bản không được kiểm)."
             )
         if not is_false(strat.get("fail-fast")):
             errs.append(
@@ -452,7 +452,7 @@ def check_upgrade_matrix(jobs: dict[Any, Any]) -> list[str]:
     if not any(UPGRADE_SLOT3 in sc for sc in run_scripts(resolve)):
         errs.append(
             f"{E2E_PATH}: script của job `resolve` không tính ô '{UPGRADE_SLOT3}' — chỉ còn ô tags[1] ⇒ "
-            f"{hau_qua} (máy Boss tắt vài ngày nhảy nhiều bản không được kiểm)."
+            f"{hau_qua} (máy Owner tắt vài ngày nhảy nhiều bản không được kiểm)."
         )
     return errs
 

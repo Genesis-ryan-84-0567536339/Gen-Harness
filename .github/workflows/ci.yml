@@ -166,7 +166,7 @@ jobs:
       # v0.1.57 — hai lượt pytest ĐẦY ĐỦ chạy SONG SONG trong cùng job (trước đây nối tiếp, ≈ 2× thời gian):
       #   · lượt 1: superuser `postgres` (mặc định);
       #   · lượt 2 (v0.1.33, F-13): TOÀN BỘ bộ test dưới role ứng dụng gh_app (không superuser, không BYPASSRLS —
-      #     migration 0014), giống `make api-test-app-role`, để GRANT còn thiếu lộ ra ở CI chứ không phải trên máy Boss.
+      #     migration 0014), giống `make api-test-app-role`, để GRANT còn thiếu lộ ra ở CI chứ không phải trên máy Owner.
       # Hai lượt dùng CHUNG một Postgres + một Redis nhưng KHÔNG chung trạng thái: CSDL mẫu riêng (GH_TEST_TEMPLATE;
       # tên DB từng test có hậu tố ngẫu nhiên), DB Redis riêng (GH_TEST_REDIS) và DB Redis browser riêng
       # (GH_TEST_BROWSER_REDIS). Bước migrate CSDL mẫu được xếp hàng bằng khoá tư vấn Postgres (tests/conftest.py) vì

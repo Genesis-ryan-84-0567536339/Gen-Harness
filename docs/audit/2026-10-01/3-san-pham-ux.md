@@ -264,7 +264,7 @@ Thang effort: **S** ≤ 1 ngày · **M** 2–5 ngày · **L** > 1 tuần.
 - Cách sửa:
   - Nếu địa chỉ là localhost: cảnh báo ngay trong hộp mời.
   - Thêm thẻ "Địa chỉ cho nhân viên và điện thoại" ở trang Đội ngũ. `genh` có thể đặt `GH_SITE_ADDRESS` và tên miền hoặc đường hầm.
-  - Cần kiểm trên máy Boss.
+  - Cần kiểm trên máy Owner.
 - Effort: **M**.
 
 **C6. Hướng dẫn: 3 tên gọi, một liên kết sai, thiếu các việc Boss thật sự muốn làm.**

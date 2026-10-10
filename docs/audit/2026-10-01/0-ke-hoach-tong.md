@@ -9,14 +9,14 @@ Mã nguồn đối chiếu: main v0.1.31; v0.1.32 (tách model / mức suy nghĩ
 ## (a) Tình trạng tổng thể
 
 - Phần lõi đã làm (Gen có đề xuất + xác nhận + PIN, sàng lọc, Kho, đọc Facebook, genh cài/cập nhật/khôi phục) có test và nhìn chung chắc. Các lỗi thật nằm ở **chỗ nối** giữa các phần, và ở những thứ chỉ được kiểm bằng mock.
-- **Phát hành chưa có cổng chặn**: một bản có thể thành "latest" khi CI còn đỏ, rồi máy Boss tự cài lúc 03:00. Cập nhật đêm còn có thể khôi phục đè CSDL khi chỉ lỗi mạng (F-9, F-10). Vì vậy việc này phải làm đầu tiên.
+- **Phát hành chưa có cổng chặn**: một bản có thể thành "latest" khi CI còn đỏ, rồi máy Owner tự cài lúc 03:00. Cập nhật đêm còn có thể khôi phục đè CSDL khi chỉ lỗi mạng (F-9, F-10). Vì vậy việc này phải làm đầu tiên.
 - Có 5 lỗi đỏ. Ba lỗi liên quan trực tiếp tới Boss: giao việc / gán người / gán trợ lý **luôn hỏng** trên máy thật (F-1); nhân viên chiếm được phiên Owner qua tệp tải lên (F-5); hệ thống hỏng mà không báo ai (F-6). Hai lỗi còn lại là nguy cơ âm thầm: đĩa đầy dần (F-11); sao lưu và khoá giải mã chỉ nằm trên cùng một ổ (F-12).
 - Gen mới là "khung chat trả lời khi được hỏi": chưa chủ động, mất hội thoại khi tải lại trang, chưa có kênh tới Boss ngoài Console. Phần lớn tích hợp mới (Gen-hub, Facebook, agy/Claude CLI, Jev) **chưa từng chạy với tài khoản thật**.
 - Giao diện xếp theo kiến trúc kỹ thuật. Một số chỗ hứa mà chưa làm (dữ liệu mẫu, 4 dòng gán model chết, "hạn lưu dữ liệu" không ai thi hành).
 
 ## (b) Nguyên tắc sắp xếp
 
-1. **An toàn phát hành trước hết.** Máy Boss chỉ nhận bản đã qua CI + E2E cài thật, và cập nhật đêm không bao giờ làm hại dữ liệu. Chừng nào chưa có cổng này, mọi bản sửa sau đều có thể làm hỏng máy Boss.
+1. **An toàn phát hành trước hết.** Máy Owner chỉ nhận bản đã qua CI + E2E cài thật, và cập nhật đêm không bao giờ làm hại dữ liệu. Chừng nào chưa có cổng này, mọi bản sửa sau đều có thể làm hỏng máy Owner.
 2. **Xếp theo giá trị cho Boss chia công sức.** Lỗi đỏ đi trước, kế đến là lỗi làm Boss hiểu sai hoặc không biết hệ thống hỏng, rồi tới tính năng trợ lý.
 3. **Mỗi đợt là một bản phát hành, ≤ 1–2 ngày công**, chỉ một mục tiêu. Đợt nào cũng có tiêu chí nghiệm thu kiểm được bằng test tự động (pytest / vitest / go test / Playwright / e2e-live / E2E cài thật). "Xem bằng mắt" không tính là tiêu chí.
 4. **Chặn tái phát chứ không chỉ sửa một chỗ.** Lỗi loại "mock xanh, máy thật hỏng" thì phải có test trên API thật, và mock phải kiểm dữ liệu giống API thật.
@@ -33,7 +33,7 @@ Quy ước công sức: **S** ≈ ½–1 ngày · **M** ≈ 1½–2 ngày.
 
 ### v0.1.33 — Cổng phát hành & CI đủ test · M (~2 ngày)
 
-**Mục tiêu:** máy Boss chỉ nhận bản đã qua CI + E2E cài thật. (Phần "cập nhật không làm hại" tách sang v0.1.34, xem mục g.)
+**Mục tiêu:** máy Owner chỉ nhận bản đã qua CI + E2E cài thật. (Phần "cập nhật không làm hại" tách sang v0.1.34, xem mục g.)
 
 Việc:
 - **F-9 — Cổng phát hành (tự động, không cần người duyệt).**
@@ -193,7 +193,7 @@ Việc:
   - Unit systemd thêm `KillMode=mixed` và `TimeoutStopSec=900`.
   - `flock` trên `run/genh.lock`, lấy ở tiến trình ngoài cùng. Tiến trình con chạy `--self-updated` thì bỏ qua khoá.
   - API: trạng thái 'running' quá 60 phút mà PID không còn sống thì trả 'stalled'.
-- **F-35 (phần còn lại)** — thêm ô nâng cấp có dữ liệu từ `tags[3]` (máy Boss tắt vài ngày sẽ nhảy nhiều bản). Sửa `05-installer.md:159` cho đúng ma trận thật. Ô Fedora chạy trong container bị bỏ (xem mục d).
+- **F-35 (phần còn lại)** — thêm ô nâng cấp có dữ liệu từ `tags[3]` (máy Owner tắt vài ngày sẽ nhảy nhiều bản). Sửa `05-installer.md:159` cho đúng ma trận thật. Ô Fedora chạy trong container bị bỏ (xem mục d).
 - **F-72** — tải binary genh: timeout tính theo thời gian rảnh (không theo cả tệp), thử lại 3 lần.
 - **F-73** — `genh doctor/status` kiểm linger và `docker.service` enabled, ghi kết quả vào `run/` để Console hiện.
 
@@ -263,7 +263,7 @@ Việc:
 
 Tiêu chí nghiệm thu:
 - pytest: bấm Kiểm tra (với dịch vụ giả đạt/lỗi) lưu đúng kết quả từng dòng; bản ghi không chứa token/mật khẩu.
-- Nghiệm thu thật: các dòng bắt buộc (1–4) trên máy Boss có kết quả "đạt" trong CSDL; Claude chép bảng kết quả (không bí mật) vào HANDOFF.
+- Nghiệm thu thật: các dòng bắt buộc (1–4) trên máy Owner có kết quả "đạt" trong CSDL; Claude chép bảng kết quả (không bí mật) vào HANDOFF.
 - Đổi tài khoản Google 2 lần: lần gọi thử sau mỗi lần đổi báo đúng tài khoản. Có test tự động với agy giả.
 - vitest: HubLinkCard bật sẵn công tắc khi nhập URL công khai.
 
@@ -527,7 +527,7 @@ Tiêu chí nghiệm thu:
 
 Kiểm thử bắt buộc: E2E-install (2 chế độ bind), pytest đăng nhập, vitest hộp mời.
 
-Boss phải làm: chọn cách truy cập từ xa (Tailscale khuyên dùng: cài app trên điện thoại và đăng nhập, khoảng 5 phút), rồi mở thử Console trên điện thoại. **Cần kiểm trên máy Fedora thật.**
+Boss phải làm: chọn cách truy cập từ xa (Tailscale khuyên dùng: cài app trên điện thoại và đăng nhập, khoảng 5 phút), rồi mở thử Console trên điện thoại. **Cần kiểm trên máy chủ Fedora thật.**
 
 ---
 
@@ -566,7 +566,7 @@ Boss phải làm: chốt điều kiện F-85 (đọc 1 trang cảnh báo rồi b
 
 ### v0.1.48 — Bản build tái lập & pipeline gọn · S–M (~1–1½ ngày)
 
-**Mục tiêu:** máy Boss chạy đúng tổ hợp thư viện mà CI đã kiểm, và phát hành không hỏng chỉ vì lỗi mạng tạm thời.
+**Mục tiêu:** máy Owner chạy đúng tổ hợp thư viện mà CI đã kiểm, và phát hành không hỏng chỉ vì lỗi mạng tạm thời.
 
 Việc:
 - **F-19.**
@@ -680,7 +680,7 @@ Boss phải làm: trả lời "ghi Kho đi", "cho xoá nhánh", "cho sửa CLAUD
 | F-68 Mở Gen cho vai trò khác | **Hoãn** | Chờ có nhân viên dùng thật. |
 | F-84 phần stream và Gen cho vai trò khác | **Hoãn** | Đánh giá và chi phí được ưu tiên trước. |
 | Gen ghi ra ngoài qua Gen-hub: nháp Gmail, tạo sự kiện Lịch, kanban/warroom (Mốc 5b của báo cáo lộ trình) | **Hoãn** | Quyết định hiện hành "Gen ghi Gen-hub để sau". Chỉ mở sau khi có QD mới, cùng khung permit của v0.1.50. |
-| Watchdog ghi sự cố vào Kho Ryan (khuyến nghị #3 của báo cáo vận hành) | **Hoãn** | Cùng lý do (ghi Gen-hub để sau). Claude đọc sự cố qua gói chẩn đoán (v0.1.44) và kết quả kiểm tra (v0.1.39). |
+| Watchdog ghi sự cố vào Kho dữ liệu (khuyến nghị #3 của báo cáo vận hành) | **Hoãn** | Cùng lý do (ghi Gen-hub để sau). Claude đọc sự cố qua gói chẩn đoán (v0.1.44) và kết quả kiểm tra (v0.1.39). |
 | Boss nhắn lại Gen qua Telegram (2 chiều) | **Hoãn** sau v0.1.44 | Một chiều đủ cho bản tin/cảnh báo. Hai chiều cần xác thực người gửi và chống lệnh giả; làm sau khi đường một chiều chạy ổn ≥ 2 tuần. |
 | Đổi mặc định cổng sang 127.0.0.1 cho máy **đang chạy** | **Không làm tự động** | Sẽ cắt truy cập của nhân viên/điện thoại trong lần cập nhật đêm. Chỉ áp cho cài mới; máy cũ được chuông đề nghị, Owner tự quyết (QD-12). |
 | F-41 Nền tảng plugin | **Ẩn & đóng băng** (v0.1.42) | 9 manifest đều có `entry: null`, không có giá trị cho Owner. |
@@ -710,7 +710,7 @@ Mức của phát hiện đứng vững là mức sau kiểm chứng.
 | F-6 | 🔴 đỏ | Hệ thống hỏng mà không báo cho Boss: không giám sát sức khoẻ, không cảnh báo chủ động trong lẫn ngoài app | v0.1.36 (trong app) → v0.1.44 (ngoài app) | đứng vững |
 | F-7 | 🟠 cam | Menu xếp theo kiến trúc kỹ thuật, việc quản trị của Boss nằm trong "Kỹ thuật · Backend" | v0.1.42 | đứng vững |
 | F-8 | 🟠 cam | Gen chưa phải trợ lý thật: chỉ trả lời trong khung chat Console | v0.1.41 (a,b) → v0.1.44 (c) → v0.1.49 (A nội bộ; B cần QD) → v0.1.50 (Gen nhớ) | đứng vững |
-| F-9 | 🟠 cam | Phát hành và tự cập nhật không có cổng chặn: bản thành "latest" trước CI/E2E, chữ ký cosign không ai kiểm, không người duyệt — máy Boss tự nhận bản lỗi (hoặc bị chiếm) lúc 03:00 | v0.1.33 | đứng vững |
+| F-9 | 🟠 cam | Phát hành và tự cập nhật không có cổng chặn: bản thành "latest" trước CI/E2E, chữ ký cosign không ai kiểm, không người duyệt — máy Owner tự nhận bản lỗi (hoặc bị chiếm) lúc 03:00 | v0.1.33 | đứng vững |
 | F-10 | 🟠 cam | Rollback khôi phục CSDL kể cả khi CHƯA đụng gì (pull lỗi) — mất dữ liệu ghi trong khoảng đó; chu trình chạy MỖI ĐÊM | v0.1.34 | đứng vững |
 | F-11 | 🔴 đỏ | Không dọn image cũ, không theo dõi dung lượng đĩa — đĩa đầy dần, Postgres dừng, Boss không được báo | v0.1.34 (genh) + v0.1.36 (chuông) | đứng vững |
 | F-12 | 🔴 đỏ | Sao lưu và khoá giải mã chỉ nằm trên cùng ổ đĩa; tuỳ chọn S3/MinIO không có tác dụng — hỏng ổ là mất hết | v0.1.40 | đứng vững |
@@ -736,7 +736,7 @@ Mức của phát hiện đứng vững là mức sau kiểm chứng.
 | F-32 | 🟠 cam | Facebook chỉ vào được từ menu tài khoản, không nằm trong danh sách kênh | v0.1.39 | đứng vững |
 | F-33 | 🟠 cam | Rollback thất bại đúng kịch bản hay gặp nhất (api mới crash-loop) → bản cũ chạy trên schema mới; vòng lặp lỗi mỗi đêm | v0.1.34 | đứng vững |
 | F-34 | 🟡 vàng | Không có khoá loại trừ trên máy chủ; trạng thái "running" có thể kẹt; SIGTERM giết giữa chừng | v0.1.37 | đứng vững |
-| F-35 | 🟠 cam | Kiểm nâng cấp quá hẹp: chỉ từ N-1, CSDL rỗng, chỉ Ubuntu — máy Boss nhảy nhiều bản, có dữ liệu thật, chạy Fedora | v0.1.34 (seed + bản hỏng cố ý) → v0.1.37 (tags[3]) | đứng vững |
+| F-35 | 🟠 cam | Kiểm nâng cấp quá hẹp: chỉ từ N-1, CSDL rỗng, chỉ Ubuntu — máy Owner nhảy nhiều bản, có dữ liệu thật, chạy Fedora | v0.1.34 (seed + bản hỏng cố ý) → v0.1.37 (tags[3]) | đứng vững |
 | F-36 | 🟡 vàng | Lỗi mạng tạm thời làm hỏng phát hành; không có retry/cache | v0.1.48 | đứng vững |
 | F-37 | 🟡 vàng | Log container không giới hạn | v0.1.34 | đứng vững |
 | F-38 | 🟡 vàng | Sao chép-dán giữa các cụm (hệ quả của làm song song theo cụm) | v0.1.43 (textnorm); phần còn lại khi chạm | 🟡 chưa kiểm |
@@ -833,7 +833,7 @@ Tổng: 36 đứng vững (5 đỏ · 15 cam · 16 vàng), 1 bị bác, 55 vàng
    Cách xử lý: đợt nào vượt 2 ngày thì cắt đôi. Không dồn thêm việc vào cùng bản.
 8. **Nhịp 1 bản mỗi 1–2 ngày vẫn nhanh hơn tốc độ Boss dùng**, giống nhận xét của báo cáo lộ trình. Tính năng dễ ra đời trước khi tính năng cũ được nghiệm thu.
    - Cách xử lý: v0.1.39 (nghiệm thu) đứng trước mọi tính năng trợ lý mới (v0.1.41 trở đi).
-   - Các đợt tính năng (v0.1.41 trở đi) chỉ bắt đầu khi bản trước đã chạy trên máy Boss ít nhất 1 đêm, không lỗi.
+   - Các đợt tính năng (v0.1.41 trở đi) chỉ bắt đầu khi bản trước đã chạy trên máy Owner ít nhất 1 đêm, không lỗi.
 9. **Sắp lại menu (v0.1.42) phá các test so ảnh pixel và thói quen hiện tại của Boss.** Cách xử lý: hạ so ảnh xuống kiểm khói, và nhờ Boss xem thử ngay sau khi lên bản.
 10. **Một số phát hiện còn là giả định**, ví dụ F-22: agy có tự chạy tool hay không. Còn 55 mục vàng chưa kiểm chứng.
     - Cách xử lý: bước kiểm chứng nằm ngay trong đợt, và kết quả có thể làm đổi cách sửa.

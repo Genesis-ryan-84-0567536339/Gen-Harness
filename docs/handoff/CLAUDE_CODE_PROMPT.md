@@ -14,7 +14,7 @@ Thư mục hiện tại là gói bàn giao. Đọc theo đúng thứ tự trong 
 - docs/01…07 — màn hình, token, database, kiến trúc, trình cài, thiết lập Owner, tiêu chí nghiệm thu.
 - db/schema.sql — lược đồ khởi điểm (đường dẫn gốc của gói, đã bỏ ở v0.1.48; nay dùng db/sql/0001_baseline.sql + apps/api/migrations). Được chỉnh, nhưng giữ nguyên các quy ước trong docs/03.
 - design/seed-data.json, design/screens.json — dữ liệu mẫu và danh mục màn hình để seed và dựng routing.
-Tên cũ Heo-Harness và persona "Bé Heo" đã bị bỏ. Repo cũ Genesis-ryan-84-0567536339/heo-harness chỉ để tham khảo logic bridge Zalo/WhatsApp và chassis plugin.
+Tên cũ Heo-Harness và persona "Bé Heo" đã bị bỏ. Mã nguồn cũ không còn dùng; bridge Zalo/WhatsApp được viết lại trong repo này.
 
 ## Việc đầu tiên
 1. Tạo repo GitHub private tên Gen-Harness bằng gh CLI, nhánh main. Chép gói bàn giao vào docs/handoff/ của repo.

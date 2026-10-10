@@ -28,7 +28,7 @@ name: Release
 #      /releases/latest) CHƯA thấy bản này.
 #   3. e2e-install.yml (workflow_run sau Release) cài thật ĐÚNG tag vừa tạo;
 #      e2e-install + e2e-upgrade xanh thì job `promote` mới nâng tag đó thành
-#      bản chính thức (latest). E2E đỏ → bản thử nằm yên, máy Boss không đổi.
+#      bản chính thức (latest). E2E đỏ → bản thử nằm yên, máy Owner không đổi.
 on:
   push:
     branches: [main]
@@ -635,7 +635,7 @@ jobs:
           target_commitish: ${{ github.sha }}
           name: Gen-Harness ${{ needs.meta.outputs.version }}
           generate_release_notes: true
-          # LUÔN là bản thử (prerelease) và KHÔNG đổi latest — máy Boss chỉ
+          # LUÔN là bản thử (prerelease) và KHÔNG đổi latest — máy Owner chỉ
           # thấy bản này sau khi e2e-install.yml (job promote) cài thật xanh
           # rồi nâng thành bản chính thức. Bản có hậu tố "-" (vd -beta.1)
           # không bao giờ được promote.
@@ -659,7 +659,7 @@ jobs:
           pre="$(gh api "repos/$R/releases/tags/$V" --jq .prerelease)"
           echo "$V prerelease=$pre"
           if [ "$pre" != "true" ]; then
-            echo "::error::Release $V KHÔNG phải bản thử (prerelease=$pre) — máy Boss có thể đã thấy bản chưa qua E2E. Sửa tay: gh release edit $V --prerelease, rồi kiểm lại bước softprops/action-gh-release." >&2
+            echo "::error::Release $V KHÔNG phải bản thử (prerelease=$pre) — máy Owner có thể đã thấy bản chưa qua E2E. Sửa tay: gh release edit $V --prerelease, rồi kiểm lại bước softprops/action-gh-release." >&2
             exit 1
           fi
           if [ "$latest" = "$V" ]; then
