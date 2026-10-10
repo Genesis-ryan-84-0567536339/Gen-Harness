@@ -155,7 +155,8 @@ export function GenPanel({ userId }: { userId: string }) {
 
   useEffect(() => {
     const el = listRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    // v0.1.54: chưa có tin nào ⇒ giữ nguyên đầu danh sách (thẻ "Hôm nay của Sếp" nằm ở đó); có tin ⇒ cuộn xuống tin mới nhất.
+    if (el && messages.length > 0) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
   useEffect(() => {
