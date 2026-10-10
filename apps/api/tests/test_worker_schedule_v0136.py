@@ -26,7 +26,9 @@ from gh.worker import WorkerSettings
 # nhẹ, chỉ nhắc — được chạy trong giờ làm việc. v0.1.41 (F-8b): Bản tin Gen 07:30/17:30 (+ lượt bù) chủ ý trong giờ.
 # v0.1.47 (F-83): kiểm phiên mạng xã hội 09:10 — chỉ xếp việc `health` cho trình duyệt nền (không nặng cho api/CSDL),
 # chủ ý trong giờ để chuông "phiên hết hạn" tới lúc Sếp đang dùng máy (ngoài giờ yên lặng của mạng xã hội).
-LIGHT_ALLOWLIST = {"hub_token_expiry_scan", "gen_briefing", "social_session_check"}
+# v0.1.54 (g1-api): chuông Gen hướng dẫn 09:05/11:05/14:05 — job nhẹ (chỉ đọc tín hiệu + ghi chuông), chủ ý trong giờ
+# làm việc để Sếp thấy chuông lúc đang dùng máy (ngoài giờ yên lặng của từng Owner).
+LIGHT_ALLOWLIST = {"hub_token_expiry_scan", "gen_briefing", "social_session_check", "gen_coach"}
 DAILY = {"partition_maintenance", "verify_action_log", "compact_notebooks", "retention_sweep",
          "people_review_recompute"}
 
