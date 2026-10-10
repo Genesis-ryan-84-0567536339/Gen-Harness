@@ -21,7 +21,13 @@ import (
 //	 "since":RFC3339|"", "last_run_at":RFC3339|"",
 //	 "last_result":"done"|"failed"|"deferred"|"up_to_date"|"blocked"|"",
 //	 "next_run_at":RFC3339|"", "linger":"yes"|"no"|"unknown"|"not_applicable",
-//	 "request_watcher":"active"|"failed"|"inactive"|"unknown", "checked_at":RFC3339}
+//	 "request_watcher":"active"|"failed"|"inactive"|"unknown",
+//	 "watcher":{"state":"ok"|"fallback"|"failed","reason":""|"inotify"|"resources"|"other","hint":"…"},
+//	 "checked_at":RFC3339}
+//
+// v0.1.54: `watcher` (người gác yêu cầu .path tự chữa) — thêm tương thích ngược: thiếu khoá = ok.
+// fallback = .path lỗi (vd hết hạn mức inotify) nhưng timer dự phòng quét mỗi phút đang nhận thay;
+// failed = .path lỗi và chưa bật được dự phòng. hint là câu cố định genh sinh (tiếng Việt).
 
 // NightlyStatusFile là tên tệp trong run/.
 const NightlyStatusFile = "nightly-status.json"
@@ -46,6 +52,24 @@ const (
 	WatcherUnknown  = "unknown"
 )
 
+// Các giá trị watcher.state / watcher.reason (v0.1.54).
+const (
+	WatcherStateOK       = "ok"
+	WatcherStateFallback = "fallback"
+	WatcherStateFailed   = "failed"
+
+	WatcherReasonInotify   = "inotify"
+	WatcherReasonResources = "resources"
+	WatcherReasonOther     = "other"
+)
+
+// NightlyWatcher là khối `watcher` (v0.1.54): người gác yêu cầu `.path` có tự chữa được không.
+type NightlyWatcher struct {
+	State  string `json:"state"`
+	Reason string `json:"reason"`
+	Hint   string `json:"hint"`
+}
+
 // NightlyStatus là nội dung run/nightly-status.json — KHÔNG omitempty: api đọc đủ
 // mọi khoá (chuỗi rỗng = chưa có; active null = không áp dụng/không rõ).
 type NightlyStatus struct {
@@ -65,7 +89,9 @@ type NightlyStatus struct {
 	NextRunAt      string `json:"next_run_at"`
 	Linger         string `json:"linger"`
 	RequestWatcher string `json:"request_watcher"`
-	CheckedAt      string `json:"checked_at"`
+	// Watcher (v0.1.54): người gác yêu cầu tự chữa — thiếu khoá = ok.
+	Watcher   NightlyWatcher `json:"watcher"`
+	CheckedAt string         `json:"checked_at"`
 }
 
 // NightlyStatusPath là đường dẫn run/nightly-status.json.
@@ -112,7 +138,27 @@ func ReadNightlyStatus(installDir string) (NightlyStatus, error) {
 	if !validWatchers[st.RequestWatcher] {
 		st.RequestWatcher = WatcherUnknown
 	}
+	st.Watcher = cleanNightlyWatcher(st.Watcher)
 	return st, nil
+}
+
+// cleanNightlyWatcher lọc khối watcher: state ngoài tập ⇒ ok; reason ngoài tập ⇒ ""; hint chỉ
+// giữ khi không ok và ≤ 400 ký tự (api ghi được run/ nên không tin giá trị đọc vào).
+func cleanNightlyWatcher(w NightlyWatcher) NightlyWatcher {
+	switch w.State {
+	case WatcherStateFallback, WatcherStateFailed:
+	default:
+		return NightlyWatcher{State: WatcherStateOK}
+	}
+	switch w.Reason {
+	case WatcherReasonInotify, WatcherReasonResources, WatcherReasonOther:
+	default:
+		w.Reason = ""
+	}
+	if len(w.Hint) > 400 {
+		w.Hint = ""
+	}
+	return w
 }
 
 // WriteNightlyStatus ghi nguyên tử run/nightly-status.json (0644 để api đọc). Các
@@ -150,6 +196,7 @@ func WriteNightlyStatus(installDir string, st NightlyStatus) error {
 	if st.RequestWatcher == "" {
 		st.RequestWatcher = WatcherUnknown
 	}
+	st.Watcher = cleanNightlyWatcher(st.Watcher)
 	st.CheckedAt = now()
 	return writeJSON(NightlyStatusPath(installDir), st)
 }
@@ -167,7 +214,7 @@ func RecordNightlyRun(installDir string, at time.Time, result string) error {
 	}
 	st, err := ReadNightlyStatus(installDir)
 	if err != nil {
-		st = NightlyStatus{Linger: "unknown", RequestWatcher: WatcherUnknown}
+		st = NightlyStatus{Linger: "unknown", RequestWatcher: WatcherUnknown, Watcher: NightlyWatcher{State: WatcherStateOK}}
 	}
 	st.Schema = NightlyStatusSchema
 	if !at.IsZero() {

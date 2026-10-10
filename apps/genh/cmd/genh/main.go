@@ -1039,6 +1039,9 @@ func runAutoUpdate(args []string) int {
 		_ = hostlink.SetAutoUpdate(env.InstallDir, version, true)
 		fmt.Println(res.Msg)
 		printLingerWarning(os.Stdout, res.Warning, tui.IsTerminal(os.Stdout))
+		// v0.1.54: người gác yêu cầu (.path) lỗi ⇒ tự chữa (reset-failed + restart; vẫn lỗi ⇒ dự phòng
+		// quét mỗi phút); đã sửa gốc (sysctl…) ⇒ .path sống lại, gỡ dự phòng. Im lặng khi khoẻ.
+		healRequestWatcher(ctx, deps, os.Stdout)
 		// v0.1.53 (F-95): làm mới autostart-status + nightly-status (linger vừa đổi).
 		refreshAutostartStatus(env.InstallDir)
 		_ = ops.RecordNightlyStatus(ctx, env.InstallDir, deps)
@@ -1081,11 +1084,51 @@ func runAutoUpdate(args []string) int {
 			logMod = fi.ModTime()
 		}
 		fmt.Print(nightlyStatusText(st, logMod, logErr, ops.AutoUpdateOptedOut(env.InstallDir), time.Now()))
+		// v0.1.54: tự chữa người gác yêu cầu rồi nói thật tình trạng của nó (dự phòng quét mỗi phút…).
+		wh := autoupdate.HealRequestWatcher(ctx, deps)
+		fmt.Print(requestWatcherStatusText(wh))
+		if wh.Changed {
+			_ = ops.RecordNightlyStatus(ctx, env.InstallDir, deps)
+		}
 		return 0
 	default:
 		_, _ = fmt.Fprintf(os.Stderr, "genh: lệnh con auto-update không rõ %q (dùng enable|disable|status)\n", args[0])
 		return 2
 	}
+}
+
+// healRequestWatcher chạy autoupdate.HealRequestWatcher (v0.1.54) và in MỘT dòng khi vừa đổi trạng
+// thái (chữa xong / bật dự phòng / gỡ dự phòng) rồi làm mới run/nightly-status.json; im lặng khi
+// khoẻ hoặc không đổi (watcher dự phòng gọi mỗi phút — log không bị lặp). Dùng ở `auto-update enable`
+// và đầu `handle-requests`. deps cần InstallDir (ghi nightly-status).
+func healRequestWatcher(ctx context.Context, deps autoupdate.Deps, w io.Writer) autoupdate.WatcherHealth {
+	h := autoupdate.HealRequestWatcher(ctx, deps)
+	if !h.Changed {
+		return h
+	}
+	if text := strings.TrimRight(requestWatcherStatusText(h), "\n"); text != "" {
+		_, _ = fmt.Fprintln(w, "genh: "+strings.TrimPrefix(text, "  "))
+	}
+	if deps.InstallDir != "" {
+		_ = ops.RecordNightlyStatus(ctx, deps.InstallDir, deps)
+	}
+	return h
+}
+
+// requestWatcherStatusText: phần "Người gác yêu cầu" của `genh auto-update status` (rỗng khi khoẻ
+// và không có gì vừa đổi).
+func requestWatcherStatusText(h autoupdate.WatcherHealth) string {
+	switch {
+	case h.Healed && h.FallbackRemoved:
+		return "  Người gác yêu cầu (.path) đã sống lại (reset-failed + restart) — đã gỡ dự phòng quét mỗi phút.\n"
+	case h.Healed:
+		return "  Người gác yêu cầu (.path): vừa tự chữa xong (reset-failed + restart).\n"
+	case h.State == autoupdate.WatcherHealthFallback || h.State == autoupdate.WatcherHealthFailed:
+		return "  " + h.Line() + "\n"
+	case h.FallbackRemoved: // .path tự sống lại, chỉ cần gỡ dự phòng
+		return "  Người gác yêu cầu (.path) đã sống lại — đã gỡ dự phòng quét mỗi phút.\n"
+	}
+	return ""
 }
 
 // disableStillOnLine: `genh auto-update disable` xong mà lịch đêm vẫn bật (tắt hụt).
@@ -1342,6 +1385,15 @@ func runHandleRequests(args []string) int {
 		return 1
 	}
 	pass := []string{"--port", strconv.Itoa(*port), "--install-dir", dir}
+	// v0.1.54: người gác yêu cầu (.path) lỗi ⇒ tự chữa (nhẹ: khoẻ thì chỉ một lệnh đọc, không in gì).
+	{
+		hctx, hcancel := context.WithTimeout(context.Background(), 30*time.Second)
+		hdeps := hostInfoEnvFn().Base
+		hdeps.InstallDir = dir
+		hdeps.LogFile = filepath.Join(config.New(dir).LogsDir(), "auto-update.log")
+		healRequestWatcher(hctx, hdeps, os.Stderr)
+		hcancel()
+	}
 	switch hostlink.Pending(dir) {
 	case "update":
 		return runUpdate(append(handleRequestUpdateArgs(*quiet), pass...))
@@ -2245,7 +2297,11 @@ func publishHostInfoWith(installDir string, port int, he hostInfoEnv) {
 			autoUpdate = &enabled
 			// v0.1.53 (F-99): run/nightly-status.json — Console thấy lịch đêm có thật sự
 			// bật/chạy không (kể cả khi im lặng nhiều ngày).
-			_ = ops.SaveNightlyStatus(installDir, st, optedOut, autoupdate.RequestWatcherState(ctx, deps))
+			wh := autoupdate.RequestWatcherHealth(ctx, deps)
+			if !wh.OK() { // v0.1.54: install/update xong mà người gác vẫn lỗi ⇒ nói một dòng (đã tự chữa/dự phòng)
+				fmt.Fprintln(os.Stderr, "genh: "+wh.Line())
+			}
+			_ = ops.SaveNightlyStatus(installDir, st, optedOut, autoupdate.RequestWatcherState(ctx, deps), wh)
 		}
 	}
 	_ = hostlink.WriteInfo(installDir, version, updater, autoUpdate)
