@@ -7,8 +7,9 @@
 - `classify` (v0.1.25, Đợt C1): lọc đầu Hộp thư (rác / chất lượng) — `gh.refinery.triage`; None → quy tắc tất định.
 
 v0.1.55 (G3, J3): `rule_intent(text)` — quy tắc TẤT ĐỊNH dự phòng khi không có Jev (hoặc Jev lỗi / chậm / độ tin thấp):
-từ khoá code · máy chủ · chuyện ngoài lề ⇒ `out_of_scope`; câu hỏi số liệu ngắn ⇒ `data`. Không gọi mạng, không gọi
-model. `is_simple_question(text)` cho biết câu có đủ "đơn giản" để Gen dùng tầng Nhanh (chế độ Tự động).
+yêu cầu viết / sửa code hoặc chuyện ngoài lề RÕ RÀNG (động từ + đối tượng) ⇒ `out_of_scope`; câu hỏi số liệu ngắn ⇒
+`data`. Không gọi mạng, không gọi model. `is_simple_question(text)` cho biết câu có đủ "đơn giản" để Gen dùng tầng
+Nhanh (chế độ Tự động).
 """
 
 import asyncio
@@ -135,20 +136,18 @@ async def load_decider(db: AsyncSession, org_id: uuid.UUID, *,
 
 _NON_WORD = re.compile(r"[^a-z0-9+#]+")
 
-# Cụm (sau khi bỏ dấu, chữ thường, bỏ dấu câu) cho thấy câu hỏi ngoài phạm vi quản trị Console. Chỉ chọn cụm RÕ RÀNG
-# (lệnh viết code / thao tác máy chủ / chuyện ngoài lề) — câu hỏi cách dùng Console (kể cả về Docker, GitHub, máy chủ
-# của chính Console) KHÔNG được chặn nhầm: thà để model quyết còn hơn từ chối oan.
+# Cụm (sau khi bỏ dấu, chữ thường, bỏ dấu câu) cho thấy câu hỏi ngoài phạm vi quản trị Console. Chỉ giữ YÊU CẦU RÕ
+# RÀNG mà ĐỘNG TỪ đi kèm ĐỐI TƯỢNG ("viết code", "sửa code", "viết hàm", "kể chuyện cười", "làm thơ"). TUYỆT ĐỐI không
+# đưa vào từ chủ đề / công cụ đứng một mình (python, java, ssh, sudo, systemctl, crontab, regex, bóng đá, tử vi, thời
+# tiết, "kể chuyện"…): khách hỏi mua cà phê Java, khoá học Python, bóng đá, "khách kể chuyện gì" là câu quản trị THẬT,
+# và chính Console dặn Sếp chạy `sudo loginctl enable-linger` — hỏi lệnh đó là hỏi cách dùng Console. Quy tắc này chạy
+# ở MỌI cài đặt (kể cả không có Jev) và khớp là trả câu mẫu, KHÔNG gọi model ⇒ thà để model quyết còn hơn từ chối oan.
 _OUT_OF_SCOPE_PHRASES: tuple[str, ...] = (
     # viết / sửa code
-    "viet code", "viet giup code", "viet ma nguon", "sua code", "sua loi code", "debug code", "lap trinh",
-    "viet ham", "viet script", "viet chuong trinh", "viet cau lenh", "cau lenh sql", "viet sql", "regex",
-    "python", "javascript", "typescript", "golang", "java", "c++", "c#", "nodejs", "reactjs",
-    # thao tác máy chủ bằng dòng lệnh
-    "ssh", "sudo", "chmod", "chown", "crontab", "systemctl", "kubectl", "terraform", "apt get", "apt install",
-    "pip install", "npm install",
+    "viet code", "viet giup code", "viet ma nguon", "sua code", "sua loi code", "debug code",
+    "lap trinh giup", "lap trinh ho", "viet ham", "viet script", "cau lenh sql", "viet sql",
     # chuyện ngoài lề, không liên quan quản trị doanh nghiệp
-    "thoi tiet", "ke chuyen cuoi", "ke chuyen", "lam tho", "viet tho", "bai tho", "bong da", "xo so", "tu vi",
-    "nau an", "cong thuc nau",
+    "ke chuyen cuoi", "lam tho", "viet tho",
 )
 
 # Câu hỏi số liệu: có cụm đếm … và KHÔNG có từ chỉ việc ghi / phân tích / hướng dẫn.
@@ -182,7 +181,8 @@ def is_simple_question(text: str) -> bool:
 
 def rule_intent(text: str) -> Decision | None:
     """Ý định bằng quy tắc TẤT ĐỊNH (không mạng, không model) — dự phòng khi không có Jev hoặc Jev lỗi / chậm / độ tin
-    thấp. `out_of_scope`: câu có cụm code / máy chủ / ngoài lề. `data`: câu số liệu NGẮN ("có bao nhiêu khách mới?").
+    thấp. `out_of_scope`: câu có yêu cầu viết / sửa code hoặc chuyện ngoài lề rõ ràng (động từ + đối tượng). `data`: câu
+    số liệu NGẮN ("có bao nhiêu khách mới?").
     Không khớp ⇒ None (đi đường LLM như cũ). `Decision.source == "rule"`, độ tin 1.0, độ trễ 0."""
     norm = _norm(text)
     if not norm:

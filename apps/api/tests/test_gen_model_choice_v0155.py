@@ -457,7 +457,7 @@ async def test_rule_runs_without_jev(owner_api: Api, app: Any, options: Any) -> 
     assert "crawl" not in json.dumps(d, ensure_ascii=False) and d["latency_ms"] == 0
     # Jev hỏng + quy tắc khớp ⇒ vẫn chặn (nguồn 'rule', giữ lý do Jev trong `error`).
     router2 = FakeRouter([TURN_DONE])
-    t2 = await turn(owner_api, app, router2, "ssh vào máy chủ rồi restart nginx", decider_=FakeDecider(None))
+    t2 = await turn(owner_api, app, router2, "Viết script bash restart nginx giúp tôi", decider_=FakeDecider(None))
     assert router2.calls == [] and steps_of(t2, "say")[0]["text"].startswith("Dạ Sếp, câu này nằm ngoài")
     d2 = (await decide_rows())[-1].detail
     assert d2["source"] == "rule" and d2["route"] == "canned" and "thấp" in str(d2["error"])
@@ -525,7 +525,7 @@ async def test_staff_also_gets_canned_reply(owner_api: Api, app: Any, client: ht
     mgr = await login_as(client, db, "manager")
     try:
         router = FakeRouter([TURN_DONE])
-        t = await turn(mgr, app, router, "Thời tiết ngày mai thế nào?")
+        t = await turn(mgr, app, router, "Kể chuyện cười cho vui đi")
         assert router.calls == [] and steps_of(t, "say")[0]["text"].startswith("Dạ ")
     finally:
         await mgr.c.aclose()
@@ -536,13 +536,26 @@ async def test_staff_also_gets_canned_reply(owner_api: Api, app: Any, client: ht
 @pytest.mark.parametrize(("q", "want"), [
     ("Viết code Python giúp tôi", "out_of_scope"),
     ("Sửa lỗi code trong file này", "out_of_scope"),
-    ("ssh vào máy chủ rồi sudo restart", "out_of_scope"),
-    ("Thời tiết hôm nay thế nào?", "out_of_scope"),
+    ("Viết script bash restart nginx giúp tôi", "out_of_scope"),
+    ("Kể chuyện cười cho vui đi", "out_of_scope"),
+    ("Làm thơ về mùa thu nhé", "out_of_scope"),
     ("Lập trình giúp em một bot", "out_of_scope"),
     ("Hôm nay có bao nhiêu khách mới?", "data"),
     ("có bao nhiêu việc quá hạn", "data"),
     ("Tổng số nháp chờ duyệt?", "data"),
     # Hỏi cách dùng Console (kể cả nhắc tới GitHub/Docker/máy chủ của Console) KHÔNG được chặn nhầm.
+    ("Lệnh sudo loginctl enable-linger trên thẻ Cập nhật là gì?", None),
+    ("Console bảo chạy sudo systemctl enable docker, lệnh đó làm gì?", None),
+    ("genh auto-update enable chạy ở đâu?", None),
+    ("ssh vào máy chủ của Console thì làm thế nào?", None),
+    # Chủ đề kinh doanh của Sếp / khách có từ Python, Java, bóng đá, kể chuyện, thời tiết KHÔNG phải "ngoài phạm vi".
+    ("Khách hỏi về khoá học Python, em tóm tắt giúp", None),
+    ("Kể chuyện hôm qua khách A phàn nàn gì?", None),
+    ("Khách Lan kể chuyện gì hôm nay?", None),
+    ("Thời tiết xấu nên khách nào hoãn đơn?", None),
+    ("Quán bán đồ bóng đá, khách nào hỏi áo đấu?", None),
+    ("Có bao nhiêu khách hỏi mua cà phê Java?", "data"),
+    ("Tuần này có mấy khách nhắn về bóng đá?", "data"),
     ("Kết nối GitHub ở đâu?", None),
     ("Docker báo lỗi thì xem log ở đâu?", None),
     ("Chỉ tôi cách thêm khoá Gemini", None),
