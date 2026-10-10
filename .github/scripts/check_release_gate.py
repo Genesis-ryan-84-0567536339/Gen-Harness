@@ -35,6 +35,14 @@ thật đúng tag → job `promote` nâng thành bản chính thức (latest). S
     failure ⇒ không promote); job `resolve` có outputs.upgrade_from và script
     tính ô "tags[3]" (máy Boss tắt vài ngày, nhảy nhiều bản một lần).
 
+  - e2e-install.yml (v0.1.53, F-100): job `e2e-nightly-real` chạy THẬT lịch tự cập nhật đêm
+    (gen-harness-update.timer/.service) và trình nhận yêu cầu (gen-harness-update-request.path/.service) dưới user
+    manager systemd thật có linger — máy Boss kẹt ở v0.1.44 vì lịch đêm TẮT mà mọi E2E vẫn xanh (các job khác cài
+    bằng --no-auto-update hoặc chạy trên runner không có `systemctl --user`). Phải có: job tồn tại, runs-on
+    ubuntu-24.04, một bước chạy `loginctl enable-linger` và một bước chạy `systemctl --user start
+    gen-harness-update.service`, KHÔNG lệnh nào truyền `--no-auto-update` (chính `genh install` phải bật lịch đêm);
+    job `promote` có 'e2e-nightly-real' trong needs và `if` đòi `needs.e2e-nightly-real.result == 'success'`.
+
 Chạy:  python3 .github/scripts/check_release_gate.py [--root <thư mục repo>]
 Cần python3 + PyYAML. Lưu ý PyYAML (YAML 1.1) đọc khoá `on:` thành True.
 Thoát 0 nếu mọi bất biến đúng, 1 nếu có lỗi (in từng lỗi), 2 nếu thiếu
@@ -44,6 +52,7 @@ tệp/PyYAML.
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -67,6 +76,13 @@ PROMOTE_IF_ROLLBACK = "needs.e2e-rollback.result == 'success'"
 # v0.1.40 (F-12): thử khôi phục thật từ bản sao ngoài máy (lịch xuất → uninstall → cài mới → genh import, số dòng khớp).
 OFFSITE_JOB = "e2e-offsite"
 PROMOTE_IF_OFFSITE = "needs.e2e-offsite.result == 'success'"
+# v0.1.53 (F-100): chạy thật lịch tự cập nhật đêm + trình nhận yêu cầu dưới user manager có linger.
+NIGHTLY_JOB = "e2e-nightly-real"
+PROMOTE_IF_NIGHTLY = "needs.e2e-nightly-real.result == 'success'"
+NIGHTLY_RUNS_ON = "ubuntu-24.04"
+NIGHTLY_LINGER_CMD = "loginctl enable-linger"
+NIGHTLY_SERVICE_CMD = "systemctl --user start gen-harness-update.service"
+NIGHTLY_OPT_OUT_FLAG = "--no-auto-update"
 RELEASE_PATH = ".github/workflows/release.yml"
 E2E_PATH = ".github/workflows/e2e-install.yml"
 CI_USES = "./.github/workflows/ci.yml"
@@ -135,6 +151,20 @@ def run_scripts(job: dict[Any, Any]) -> list[str]:
 def joined_commands(script: str) -> list[str]:
     """Các dòng lệnh shell sau khi nối dòng tiếp nối (dấu \\ cuối dòng)."""
     return script.replace("\\\n", " ").splitlines()
+
+
+QUOTED = re.compile(r"\"[^\"]*\"|'[^']*'")
+
+
+def command_lines(job: dict[Any, Any]) -> list[str]:
+    """Dòng lệnh THẬT của mọi bước `run:` trong job: đã nối dòng tiếp nối, bỏ dòng chú thích `#` và RUỘT các chuỗi
+    trong dấu nháy (câu `echo "::error::… loginctl enable-linger …"` không tính là có chạy lệnh đó)."""
+    return [
+        QUOTED.sub('""', ln.strip())
+        for sc in run_scripts(job)
+        for ln in joined_commands(sc)
+        if ln.strip() and not ln.lstrip().startswith("#")
+    ]
 
 
 def check_ci(ci: dict[Any, Any], path: str = CI_PATH, job: str = "ci") -> list[str]:
@@ -305,6 +335,16 @@ def check_e2e(e2e: dict[Any, Any]) -> list[str]:
                 f"{E2E_PATH}: job `promote` phải có job `{OFFSITE_JOB}` trong needs và `if` đòi `{PROMOTE_IF_OFFSITE}` — "
                 "bản sao ngoài máy chưa chứng minh khôi phục được mà vẫn promote."
             )
+        if NIGHTLY_JOB not in needs:
+            errs.append(
+                f"{E2E_PATH}: job `promote` thiếu '{NIGHTLY_JOB}' trong needs — lịch tự cập nhật đêm chưa được chạy "
+                "thật dưới user manager có linger mà vẫn promote (máy Boss kẹt phiên bản vì lịch đêm TẮT)."
+            )
+        if PROMOTE_IF_NIGHTLY not in str(promote.get("if", "")):
+            errs.append(
+                f"{E2E_PATH}: `if` của job `promote` không đòi `{PROMOTE_IF_NIGHTLY}` — lịch tự cập nhật đêm chưa "
+                "được chạy thật mà vẫn promote."
+            )
         errs += check_promote_marker(promote)
 
     selfupd = jobs.get("e2e-selfupdate")
@@ -317,6 +357,7 @@ def check_e2e(e2e: dict[Any, Any]) -> list[str]:
         errs += check_selfupdate_rollback(selfupd)
 
     errs += check_upgrade_matrix(jobs)
+    errs += check_nightly(jobs)
 
     on = triggers(e2e)
     wd = on.get("workflow_dispatch")
@@ -334,6 +375,38 @@ def check_e2e(e2e: dict[Any, Any]) -> list[str]:
                 f"{E2E_PATH}: bộ lọc paths của pull_request thiếu '{want}' — "
                 "PR đổi phần này sẽ không chạy E2E cài thật."
             )
+    return errs
+
+
+def check_nightly(jobs: dict[Any, Any]) -> list[str]:
+    """e2e-nightly-real (v0.1.53, F-100): lịch đêm + trình nhận yêu cầu chạy THẬT dưới user manager có linger."""
+    errs: list[str] = []
+    hau_qua = "lịch tự cập nhật đêm (timer/.path) không còn được chạy thật trước khi phát hành — lỗi như máy Boss kẹt v0.1.44 lọt qua"
+    job = jobs.get(NIGHTLY_JOB)
+    if not isinstance(job, dict):
+        errs.append(f"{E2E_PATH}: thiếu job `{NIGHTLY_JOB}` ⇒ {hau_qua}.")
+        return errs
+    if job.get("runs-on") != NIGHTLY_RUNS_ON:
+        errs.append(
+            f"{E2E_PATH}: job `{NIGHTLY_JOB}` phải có `runs-on: {NIGHTLY_RUNS_ON}` (hiện: {job.get('runs-on')!r}) — "
+            "cần máy ảo có systemd thật (user manager + linger), không phải container hay ubuntu-latest trôi nổi."
+        )
+    cmds = command_lines(job)
+    if not any(NIGHTLY_LINGER_CMD in c for c in cmds):
+        errs.append(
+            f"{E2E_PATH}: job `{NIGHTLY_JOB}` thiếu bước chạy `sudo {NIGHTLY_LINGER_CMD} \"$USER\"` — không có linger "
+            "thì runner không có user manager, `systemctl --user` hỏng và genh rơi về crontab ⇒ " + hau_qua + "."
+        )
+    if not any(NIGHTLY_SERVICE_CMD in c for c in cmds):
+        errs.append(
+            f"{E2E_PATH}: job `{NIGHTLY_JOB}` thiếu bước chạy `{NIGHTLY_SERVICE_CMD}` — service đêm chưa từng chạy "
+            f"thật ⇒ {hau_qua}."
+        )
+    if any(NIGHTLY_OPT_OUT_FLAG in c for c in cmds):
+        errs.append(
+            f"{E2E_PATH}: job `{NIGHTLY_JOB}` truyền `{NIGHTLY_OPT_OUT_FLAG}` — cờ này ghi dấu Sếp đã chủ động tắt lịch "
+            "đêm; job tồn tại để chính `genh install` bật lịch đêm (gỡ cờ khỏi mọi lệnh của job)."
+        )
     return errs
 
 

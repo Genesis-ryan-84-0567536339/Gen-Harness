@@ -24,6 +24,8 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class ReleaseGateTest(unittest.TestCase):
+    PROMOTE_NEEDS = "needs: [resolve, e2e-install, e2e-upgrade, e2e-rollback, e2e-offsite, e2e-nightly-real]"
+
     def run_gate(self, mutate: Callable[[Path], None] | None = None) -> tuple[int, str]:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -44,6 +46,20 @@ class ReleaseGateTest(unittest.TestCase):
             s = p.read_text(encoding="utf-8")
             assert old in s, f"không thấy đoạn cần sửa trong {rel}: {old!r}"
             p.write_text(s.replace(old, new), encoding="utf-8")
+
+        return mutate
+
+    @staticmethod
+    def replace_in_job(rel: str, job: str, old: str, new: str) -> Callable[[Path], None]:
+        """Như `replace` nhưng chỉ đổi lần xuất hiện ĐẦU TIÊN của `old` từ đầu job `job` (khoá job cấp 2 trong YAML)."""
+
+        def mutate(root: Path) -> None:
+            p = root / rel
+            s = p.read_text(encoding="utf-8")
+            head, sep, rest = s.partition(f"\n  {job}:\n")
+            assert sep, f"không thấy job {job} trong {rel}"
+            assert old in rest, f"không thấy đoạn cần sửa trong job {job}: {old!r}"
+            p.write_text(head + sep + rest.replace(old, new, 1), encoding="utf-8")
 
         return mutate
 
@@ -115,8 +131,9 @@ class ReleaseGateTest(unittest.TestCase):
         self.assertIn("bản hỏng cố ý chưa chứng minh rollback mà vẫn promote", err)
 
     def test_promote_needs_thieu_e2e_rollback(self) -> None:
-        old = "needs: [resolve, e2e-install, e2e-upgrade, e2e-rollback, e2e-offsite]"
-        code, err = self.run_gate(self.replace(gate.E2E_PATH, old, "needs: [resolve, e2e-install, e2e-upgrade, e2e-offsite]"))
+        code, err = self.run_gate(
+            self.replace(gate.E2E_PATH, self.PROMOTE_NEEDS, "needs: [resolve, e2e-install, e2e-upgrade, e2e-offsite, e2e-nightly-real]")
+        )
         self.assertEqual(code, 1)
         self.assertIn("thiếu 'e2e-rollback' trong needs", err)
         self.assertIn("bản hỏng cố ý chưa chứng minh rollback mà vẫn promote", err)
@@ -129,8 +146,9 @@ class ReleaseGateTest(unittest.TestCase):
         self.assertIn("bản hỏng cố ý chưa chứng minh rollback mà vẫn promote", err)
 
     def test_promote_needs_thieu_e2e_offsite(self) -> None:
-        old = "needs: [resolve, e2e-install, e2e-upgrade, e2e-rollback, e2e-offsite]"
-        code, err = self.run_gate(self.replace(gate.E2E_PATH, old, "needs: [resolve, e2e-install, e2e-upgrade, e2e-rollback]"))
+        code, err = self.run_gate(
+            self.replace(gate.E2E_PATH, self.PROMOTE_NEEDS, "needs: [resolve, e2e-install, e2e-upgrade, e2e-rollback, e2e-nightly-real]")
+        )
         self.assertEqual(code, 1)
         self.assertIn("e2e-offsite", err)
         self.assertIn("chưa chứng minh khôi phục được", err)
@@ -234,6 +252,66 @@ class ReleaseGateTest(unittest.TestCase):
         code, err = self.run_gate(self.replace(gate.RELEASE_PATH, 'make_latest: "false"', 'make_latest: "true"'))
         self.assertEqual(code, 1)
         self.assertIn("make_latest", err)
+
+
+    # ── v0.1.53 (F-100): e2e-nightly-real — lịch đêm + trình nhận yêu cầu chạy thật dưới user manager có linger ──
+    HAU_QUA = "lịch tự cập nhật đêm (timer/.path) không còn được chạy thật trước khi phát hành"
+
+    def test_nightly_tep_that_khong_loi(self) -> None:
+        errs = gate.check_e2e(gate.load(ROOT, gate.E2E_PATH))
+        self.assertEqual([e for e in errs if gate.NIGHTLY_JOB in e], [])
+
+    def test_thieu_job_e2e_nightly_real(self) -> None:
+        code, err = self.run_gate(self.replace(gate.E2E_PATH, "  e2e-nightly-real:\n", "  e2e-nightly-real-cu:\n"))
+        self.assertEqual(code, 1)
+        self.assertIn("thiếu job `e2e-nightly-real`", err)
+        self.assertIn(self.HAU_QUA, err)
+
+    def test_promote_needs_thieu_e2e_nightly_real(self) -> None:
+        new = "needs: [resolve, e2e-install, e2e-upgrade, e2e-rollback, e2e-offsite]"
+        code, err = self.run_gate(self.replace(gate.E2E_PATH, self.PROMOTE_NEEDS, new))
+        self.assertEqual(code, 1)
+        self.assertIn("thiếu 'e2e-nightly-real' trong needs", err)
+
+    def test_promote_if_khong_doi_e2e_nightly_real(self) -> None:
+        old = " && needs.e2e-nightly-real.result == 'success'"
+        code, err = self.run_gate(self.replace(gate.E2E_PATH, old, ""))
+        self.assertEqual(code, 1)
+        self.assertIn("e2e-nightly-real.result", err)
+
+    def test_nightly_thieu_buoc_enable_linger(self) -> None:
+        old = 'sudo loginctl enable-linger "$user"'
+        code, err = self.run_gate(self.replace_in_job(gate.E2E_PATH, gate.NIGHTLY_JOB, old, "echo bo-qua-linger"))
+        self.assertEqual(code, 1)
+        self.assertIn("enable-linger", err)
+        self.assertIn(self.HAU_QUA, err)
+
+    def test_nightly_enable_linger_chi_trong_chu_thich_khong_tinh(self) -> None:
+        old = 'sudo loginctl enable-linger "$user"'
+        new = '# sudo loginctl enable-linger "$user"'
+        code, err = self.run_gate(self.replace_in_job(gate.E2E_PATH, gate.NIGHTLY_JOB, old, new))
+        self.assertEqual(code, 1)
+        self.assertIn("enable-linger", err)
+
+    def test_nightly_thieu_buoc_chay_service_dem(self) -> None:
+        old = "timeout 1500 systemctl --user start gen-harness-update.service || rc=$?"
+        code, err = self.run_gate(self.replace_in_job(gate.E2E_PATH, gate.NIGHTLY_JOB, old, "rc=0"))
+        self.assertEqual(code, 1)
+        self.assertIn("systemctl --user start gen-harness-update.service", err)
+
+    def test_nightly_runs_on_sai(self) -> None:
+        mutate = self.replace_in_job(gate.E2E_PATH, gate.NIGHTLY_JOB, "runs-on: ubuntu-24.04", "runs-on: ubuntu-latest")
+        code, err = self.run_gate(mutate)
+        self.assertEqual(code, 1)
+        self.assertIn("runs-on: ubuntu-24.04", err)
+
+    def test_nightly_cai_voi_no_auto_update(self) -> None:
+        # Cài kèm --no-auto-update ghi dấu Sếp đã chủ động tắt ⇒ job không còn kiểm genh install bật lịch đêm.
+        old = '"$GENH" install --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes\n'
+        new = '"$GENH" install --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes --no-auto-update\n'
+        code, err = self.run_gate(self.replace_in_job(gate.E2E_PATH, gate.NIGHTLY_JOB, old, new))
+        self.assertEqual(code, 1)
+        self.assertIn("--no-auto-update", err)
 
 
 if __name__ == "__main__":
