@@ -25,6 +25,7 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	_ = os.Setenv("HOME", home)
+	_ = os.Setenv("USERPROFILE", home) // os.UserHomeDir trên Windows
 	code := m.Run()
 	_ = os.RemoveAll(home)
 	os.Exit(code)
@@ -346,6 +347,7 @@ func TestRunUninstall_RemovesShortcutAndPathLine_Linux(t *testing.T) {
 func TestRunUninstall_BanPhu_KhongGoLichCuaBanChinh(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)                 // os.UserHomeDir trên Windows đọc USERPROFILE, không đọc HOME
 	mainEnv := testEnv(t, testComposePath(t, "")) // có config/secrets.json = còn sống
 	otherEnv := testEnv(t, testComposePath(t, ""))
 	unitDir := filepath.Join(home, ".config", "systemd", "user")
