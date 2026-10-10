@@ -55,9 +55,12 @@ AGY_SRC = (f"agy 1.2.9 — biến thể trong tệp chạy + `agy --help` (--eff
 CLAUDE_SRC = (f"`claude --help` 2.1.285 + https://code.claude.com/docs/en/model-config (đọc {VERIFIED_ON})")
 
 # (3) Antigravity: tối thiểu, chưa xác minh — chỉ hiện khi `agy models` không đọc được (Console ghi "chưa xác minh").
+# v0.1.55 (G1): mỗi model agy mang `tier` theo nhãn mới cho hồ sơ tiêu chuẩn (`tier_of`): flash = "balanced", pro =
+# "strong". Gợi ý "nhanh, rẻ" của bộ chọn model (`describe`/`tier`) giữ nguyên như trước — hai thứ độc lập.
 AGY_FALLBACK: tuple[dict[str, Any], ...] = (
-    {"id": "gemini-3.8-flash", "efforts": ("low", "medium", "high"), "source": AGY_SRC, "verified": False},
-    {"id": "gemini-3.1-pro", "efforts": ("low", "high"), "source": AGY_SRC, "verified": False},
+    {"id": "gemini-3.8-flash", "tier": "balanced", "efforts": ("low", "medium", "high"), "source": AGY_SRC,
+     "verified": False},
+    {"id": "gemini-3.1-pro", "tier": "strong", "efforts": ("low", "high"), "source": AGY_SRC, "verified": False},
 )
 # (1)+(2) Claude Code: bí danh của `claude --model` (tự trỏ tới bản mới nhất gói Claude cho dùng).
 CLAUDE_CODE_MODELS: tuple[dict[str, Any], ...] = (
@@ -182,6 +185,59 @@ def tier(model_id: str) -> str:
     if words & {"pro", "opus", "fable", "ultra", "120b"}:
         return "strong"
     return "balanced"
+
+
+#: Tầng model của hồ sơ tiêu chuẩn (v0.1.55, G1): fast < balanced < strong. Chat gọi tầng "strong" là "deep" (Kỹ hơn).
+TIERS = ("fast", "balanced", "strong")
+_TIER_FAST_WORDS = frozenset({"lite", "mini", "haiku", "nano", "20b"})
+_TIER_STRONG_WORDS = frozenset({"pro", "opus", "fable", "ultra", "120b"})
+_TIER_BALANCED_WORDS = frozenset({"flash", "sonnet"})
+_TEXT_KINDS_NO_TIER = frozenset({"embedding", "system_one"})
+
+
+def _tier_words(model_name: str) -> set[str]:
+    # Tách theo gạch/chấm/gạch chéo/hai chấm: "google/gemini-2.5-flash-lite" → {google, gemini, 2, 5, flash, lite};
+    # "gemini" KHÔNG chứa từ "mini" (so theo từ, không chuỗi con).
+    return {w for w in re.split(r"[-_./:\[\]\s]+", model_name.lower()) if w}
+
+
+def infer_tier(model_name: str) -> str:
+    """Suy tầng theo TÊN model (nguồn khoá API): flash-lite/mini/haiku/nano ⇒ fast; pro/opus ⇒ strong; flash/sonnet ⇒
+    balanced; không đoán được ⇒ balanced. Thứ tự kiểm: fast trước (flash-lite có cả "flash" lẫn "lite")."""
+    words = _tier_words(model_name)
+    if words & _TIER_FAST_WORDS:
+        return "fast"
+    if words & _TIER_STRONG_WORDS:
+        return "strong"
+    if words & _TIER_BALANCED_WORDS:
+        return "balanced"
+    return "balanced"
+
+
+def tier_of(kind: str, model_name: str) -> str | None:
+    """Tầng của một model theo NGUỒN (v0.1.55, G1) — dữ liệu cho hồ sơ tiêu chuẩn, không ghi cứng tên model trong hồ sơ.
+
+    - Claude Code CLI: theo nhãn sẵn của danh mục (haiku=fast, sonnet=balanced, opus/fable=strong); tên đầy đủ ngoài
+      danh mục ("claude-sonnet-4-6") suy theo tên.
+    - Antigravity CLI: theo nhãn mới của danh mục agy (flash=balanced, pro=strong); model khác suy theo tên, riêng
+      "flash" của agy luôn là balanced.
+    - Khoá API (gemini/deepseek/openai_compat): suy theo tên (`infer_tier`).
+    - None: nguồn không sinh văn bản (embedding, system_one) hoặc model embedding."""
+    if kind in _TEXT_KINDS_NO_TIER or re.search(r"embed", model_name, re.I):
+        return None
+    if kind == "claude_code_cli":
+        base = model_name.split("[")[0].strip().lower()
+        for m in CLAUDE_CODE_MODELS:
+            if m["id"] == base:
+                return str(m["tier"])
+        return infer_tier(model_name)
+    if kind == "antigravity_cli":
+        base, _eff = split_variant(kind, model_name)
+        for m in AGY_FALLBACK:
+            if m["id"] == base.lower():
+                return str(m["tier"])
+        return infer_tier(base)
+    return infer_tier(model_name)
 
 
 def _pretty(model_id: str) -> str:

@@ -8,6 +8,11 @@ Theo `failoverRules` của thiết kế (ARCHITECTURE §11):
 - còn < 20% hạn mức ở bất kỳ model nào → cảnh báo (1 lần / ngày / model).
 Mọi lượt gọi (thành công hay không) ghi `agent.model_calls`.
 
+v0.1.55 (G1) — thứ tự chuỗi: (1) dòng `agent.bindings` Owner đã đổi (kèm `bindings.effort`) → (2) hồ sơ tiêu chuẩn theo
+vai (`gh.defaults.profiles.resolve`, chọn model theo TẦNG trong các nguồn đang bật) → (3) hạng nhà cung cấp như cũ
+(`failover_rank`, model mặc định) làm phần đuôi. `generate(tier=…)` ép tầng của hồ sơ (chat chọn Nhanh / Cân bằng / Kỹ
+hơn), `effort=…` ép mức suy nghĩ — vẫn tôn trọng luật F-22/F-86 bên dưới.
+
 v0.1.41 (F-86) — việc nền (`BACKGROUND_PURPOSES`: sàng lọc tin, trực việc, Bản tin Gen) mặc định CHỈ dùng khoá API:
 Claude Code CLI (gói Pro/Max cá nhân của Sếp) bị bỏ qua trừ khi Owner cho phép (cảnh báo + xác nhận + PIN, lưu ở
 `core.organizations.settings->'ai'->'background_cli'`). Antigravity CLI không bao giờ chạy việc nền (F-22). Việc nền
@@ -31,6 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from gh import crypto
 from gh.config import get_settings
+from gh.defaults import profiles
 from gh.providers.clients import (
     AgyClient,
     AuthFailed,
@@ -301,30 +307,87 @@ class ModelRouter:
 
     # ─── chuỗi ───────────────────────────────────────────────────────────────
 
-    async def _chain(self, db: AsyncSession, org_id: uuid.UUID, agent_key: str) -> list[dict[str, Any]]:
-        bound = (await db.execute(text("""SELECT m.id, m.provider_id FROM agent.bindings b
-                                          JOIN agent.models m ON m.id = b.model_id
+    async def _chain(self, db: AsyncSession, org_id: uuid.UUID, agent_key: str, *,
+                     tier: str | None = None) -> list[dict[str, Any]]:
+        """Chuỗi nguồn + model cho `agent_key` (v0.1.55: binding → hồ sơ tiêu chuẩn → hạng nhà cung cấp):
+
+        1. dòng `agent.bindings` Owner đã đổi — luôn đứng đầu (kèm `bindings.effort`); lượt gọi ép `tier` (chat chọn
+           tầng) thì dòng gán xuống sau các nguồn đã chọn theo tầng;
+        2. mỗi nguồn đang bật theo `failover_rank` với model do HỒ SƠ TIÊU CHUẨN chọn theo tầng của vai
+           (`profiles.resolve`); nguồn Owner đã chốt model ("Dùng model này" = `is_default`) giữ model đó như trước, trừ
+           khi lượt gọi ép tầng;
+        3. phần đuôi như cũ: model mặc định theo hạng của các nguồn còn lại/chưa dùng (để lỗi tầng đã chọn vẫn còn đường
+           lui).
+        Luật F-22/F-86 KHÔNG lọc ở đây: `generate` bỏ qua nguồn bị cấm và ghi LÝ DO vào `attempts`/hết chuỗi.
+
+        Mỗi phần tử: {"provider", "model", "keys", "source": binding|default|profile|rank, "binding_effort"}."""
+        bound = (await db.execute(text("""SELECT b.model_id, b.effort FROM agent.bindings b
                                           WHERE b.org_id = :o AND b.agent_key = :k"""),
                                   {"o": org_id, "k": agent_key})).one_or_none()
         providers = (await db.execute(text("""
-            SELECT id, kind, name, endpoint, auth_state FROM agent.providers
+            SELECT id, kind, name, endpoint, auth_state, failover_rank FROM agent.providers
             WHERE org_id = :o AND is_enabled AND kind NOT IN ('embedding', 'system_one')
-            ORDER BY (id = :bp) DESC, failover_rank NULLS LAST, created_at"""),
-            {"o": org_id, "bp": bound.provider_id if bound else None})).all()
-        chain = []
+            ORDER BY failover_rank NULLS LAST, created_at"""), {"o": org_id})).all()
+        models = (await db.execute(text("""
+            SELECT m.id, m.provider_id, m.model_name, m.effort, m.daily_quota, m.rate_limit_per_min, m.is_default,
+                   m.is_enabled
+            FROM agent.models m JOIN agent.providers p ON p.id = m.provider_id
+            WHERE p.org_id = :o AND m.is_enabled AND m.model_name NOT ILIKE '%embedding%'
+            ORDER BY m.is_default DESC, m.id"""), {"o": org_id})).all()
+        by_provider: dict[Any, list[Any]] = {}
+        for m in models:
+            by_provider.setdefault(m.provider_id, []).append(m)
+        prov_by_id = {p.id: p for p in providers}
+        model_by_id = {m.id: m for m in models}
+        forced = profiles.normalize_tier(tier)
+        # Chọn model theo hồ sơ cho MỌI nguồn (luật F-22/F-86 do `generate` áp — nên cho hồ sơ xét cả CLI/agy ở đây).
+        picked = {c["provider_id"]: c for c in profiles.resolve(
+            providers, models, agent_key, background=False, bg_cli_allowed={"claude_code_cli"}, allow_agy=True,
+            tier_override=tier)}
+        keys_cache: dict[Any, list[Any]] = {}
+
+        async def keys_of(pid: Any) -> list[Any]:
+            if pid not in keys_cache:
+                keys_cache[pid] = list((await db.execute(text("""
+                    SELECT id, label, secret_enc FROM agent.provider_keys
+                    WHERE provider_id = :p AND is_enabled ORDER BY rotation_order, created_at"""),
+                                                          {"p": pid})).all())
+            return keys_cache[pid]
+
+        seen: set[tuple[Any, Any]] = set()
+
+        async def link(p: Any, m: Any, source: str, binding_effort: str | None = None) -> dict[str, Any] | None:
+            if (p.id, m.id) in seen:
+                return None
+            seen.add((p.id, m.id))
+            return {"provider": p, "model": m, "keys": await keys_of(p.id), "source": source,
+                    "binding_effort": binding_effort}
+
+        bound_link = None
+        if bound is not None and bound.model_id in model_by_id:
+            bm = model_by_id[bound.model_id]
+            if bm.provider_id in prov_by_id:
+                bound_link = await link(prov_by_id[bm.provider_id], bm, "binding", bound.effort)
+        chain: list[dict[str, Any]] = [bound_link] if bound_link is not None and not forced else []
         for p in providers:
-            models = (await db.execute(text("""
-                SELECT id, model_name, effort, daily_quota, rate_limit_per_min FROM agent.models
-                WHERE provider_id = :p AND is_enabled AND model_name NOT ILIKE '%embedding%'
-                ORDER BY (id = :bm) DESC, is_default DESC, id"""),
-                {"p": p.id, "bm": bound.id if bound else None})).all()
-            if not models:
+            ms = by_provider.get(p.id)
+            if not ms:
                 continue
-            keys = (await db.execute(text("""
-                SELECT id, label, secret_enc FROM agent.provider_keys
-                WHERE provider_id = :p AND is_enabled ORDER BY rotation_order, created_at"""),
-                                     {"p": p.id})).all()
-            chain.append({"provider": p, "model": models[0], "keys": keys})
+            if ms[0].is_default and not forced:
+                lk = await link(p, ms[0], "default")          # Owner đã chốt model của nguồn này
+            elif p.id in picked:
+                lk = await link(p, model_by_id[picked[p.id]["model_id"]], "profile")
+            else:
+                lk = await link(p, ms[0], "rank")
+            if lk is not None:
+                chain.append(lk)
+        if bound_link is not None and forced:
+            chain.append(bound_link)
+        for p in providers:           # phần đuôi: model mặc định theo hạng của nguồn chưa có đường lui
+            ms = by_provider.get(p.id)
+            lk = await link(p, ms[0], "rank") if ms else None
+            if lk is not None:
+                chain.append(lk)
         return chain
 
     def _client(self, p: Any, secret: str | None) -> Any:
@@ -409,17 +472,24 @@ class ModelRouter:
     # ─── gọi ─────────────────────────────────────────────────────────────────
 
     async def generate(self, org_id: uuid.UUID, *, agent_key: str, purpose: str, messages: list[Message],
-                       json_mode: bool = True, temperature: float = 0.2, allow_agy: bool = False) -> Routed:
+                       json_mode: bool = True, temperature: float = 0.2, allow_agy: bool = False,
+                       tier: str | None = None, effort: str | None = None) -> Routed:
         """`allow_agy` (F-22): mặc định TỪ CHỐI Antigravity CLI — chỉ lượt Gen của Owner truyền True.
 
         v0.1.41 (F-86): việc nền (`is_background(purpose)`) bỏ qua Claude Code CLI trừ khi Owner đã cho phép
-        (`background_cli_allowed`); agy không bao giờ chạy việc nền dù bên gọi truyền gì."""
+        (`background_cli_allowed`); agy không bao giờ chạy việc nền dù bên gọi truyền gì.
+
+        v0.1.55 (G1): `tier` ('fast' | 'balanced' | 'strong'; chat gọi 'deep' = 'strong') ép tầng model của hồ sơ
+        tiêu chuẩn cho lượt này — vẫn tôn trọng allow_agy / F-22 / F-86 (việc nền KHÔNG BAO GIỜ agy, CLI chỉ khi được
+        phép). `effort` ép mức suy nghĩ; ưu tiên: tham số → `bindings.effort` → hồ sơ → `models.effort`, chỉ gửi khi
+        model hỗ trợ mức đó. Thiếu nguồn cho việc nền ⇒ giữ hành vi cũ (hết chuỗi → ModelUnavailable / bản tin để
+        trống), KHÔNG tự chuyển sang CLI."""
         background = is_background(purpose)
-        async with self.sm() as db:
-            chain = await self._chain(db, org_id, agent_key)
-            bg_cli = await background_cli_allowed(db, org_id) if background else set()
         if background:
             allow_agy = False
+        async with self.sm() as db:
+            chain = await self._chain(db, org_id, agent_key, tier=tier)
+            bg_cli = await background_cli_allowed(db, org_id) if background else set()
         reasons: list[str] = []
         for link in chain:
             p, m = link["provider"], link["model"]
@@ -459,9 +529,9 @@ class ModelRouter:
                 started = time.monotonic()
                 kid = key.id if key else None
                 try:
-                    extra = {"effort": m.effort} if p.kind in CLI_KINDS and m.effort else {}
-                    c = await self._client(p, secret).generate(m.model_name, messages, json_mode=json_mode,
-                                                               temperature=temperature, **extra)
+                    eff, implicit = self._effort(agent_key, p, m, link, effort)
+                    c = await self._complete(p, secret, m, messages, json_mode=json_mode, temperature=temperature,
+                                             effort=eff, implicit=implicit)
                 except RateLimited as e:
                     await self._record(org_id, m.id, kid, agent_key, purpose, "rate_limited", started, None)
                     if key is not None:
@@ -501,6 +571,44 @@ class ModelRouter:
                 return Routed(c.text, p.name, m.model_name, c.tokens_in, c.tokens_out, reasons)
         await self._chain_exhausted(org_id, reasons, agent_key=agent_key, purpose=purpose)
         raise ModelUnavailable(reasons, no_chain=not chain)
+
+    @staticmethod
+    def _effort(agent_key: str, p: Any, m: Any, link: dict[str, Any], param: str | None) -> tuple[str | None, bool]:
+        """(mức suy nghĩ gửi cho CLI, do hồ sơ tự thêm?). Ưu tiên: tham số → `bindings.effort` (chỉ khi model do dòng
+        gán chọn) → hồ sơ (chỉ khi model do hồ sơ chọn) → `models.effort`; lấy mức ĐẦU TIÊN model hỗ trợ
+        (`profiles.effort_for`). Nguồn khoá API không có mức suy nghĩ ⇒ None. Model Owner đã chốt (dòng gán, "Dùng model
+        này") giữ nguyên mức Owner đã đặt — hồ sơ không ghi đè lựa chọn của Sếp."""
+        if p.kind not in CLI_KINDS:
+            return None, False
+        src = link.get("source")
+        layers: list[tuple[str, str | None]] = [("param", param)]
+        if src == "binding":
+            layers.append(("binding", link.get("binding_effort")))
+        if src == "profile":
+            layers.append(("profile", profiles.profile_effort(agent_key, p.kind, m.model_name)))
+        layers.append(("model", m.effort))
+        for name, cand in layers:
+            eff = profiles.effort_for(p.kind, m.model_name, cand)
+            if eff:
+                return eff, name == "profile"
+        return None, False
+
+    async def _complete(self, p: Any, secret: str | None, m: Any, messages: list[Message], *, json_mode: bool,
+                        temperature: float, effort: str | None, implicit: bool) -> Completion:
+        """Một lượt gọi model. Mức suy nghĩ do HỒ SƠ tự thêm (`implicit`) mà CLI không nhận cho model này thì gọi lại
+        một lần KHÔNG gửi mức — hồ sơ tiêu chuẩn không bao giờ làm hỏng lượt gọi chỉ vì mức suy nghĩ."""
+        client = self._client(p, secret)
+        extra = {"effort": effort} if effort else {}
+        try:
+            c: Completion = await client.generate(m.model_name, messages, json_mode=json_mode,
+                                                  temperature=temperature, **extra)
+            return c
+        except ModelRejected as e:
+            if not (implicit and effort and e.what == "effort"):
+                raise
+            log.warning("CLI không nhận mức %s cho %s — gọi lại không gửi mức", effort, m.model_name)
+            c = await client.generate(m.model_name, messages, json_mode=json_mode, temperature=temperature)
+            return c
 
     async def _background_no_source(self, org_id: uuid.UUID) -> None:
         """v0.1.41 (F-86): việc nền chỉ còn nguồn CLI ⇒ sự cố `ai.background_no_source` + MỘT chuông (raise_once không

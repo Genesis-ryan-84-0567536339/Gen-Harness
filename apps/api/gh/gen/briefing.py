@@ -63,7 +63,9 @@ VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 SLOTS = ((7, 30, "sáng"), (17, 30, "chiều"))
 STALE_AFTER = timedelta(hours=3)
 JOB = "gen.briefing"
-AGENT_KEY = "core.gen"
+# v0.1.55 (G1): Bản tin Gen là việc nền riêng — khoá `core.briefing` (hồ sơ tiêu chuẩn: khoá API, tầng nhanh), không còn
+# chạy dưới khoá `core.gen` của trợ lý. PURPOSE giữ `gen.briefing` (việc nền: không agy, CLI chỉ khi Owner cho phép).
+AGENT_KEY = "core.briefing"
 PURPOSE = "gen.briefing"
 MODEL_TIMEOUT_S = 60.0
 SOURCES_STEP = "briefing.sources"
