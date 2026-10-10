@@ -55,13 +55,13 @@ async def _one_org(sm: async_sessionmaker[AsyncSession], redis: Any, org: uuid.U
             prefs = await store.ensure_prefs(db, org, uid)
             items = await store.list_items(db, uid)
             tp = engine.plan_todos(sig, items, now)
-            stable_since = engine.update_stable(prefs, tp.pending_p01, tp.last_alert_raised_at, now)
+            stable_since, stable = engine.settle(sig, prefs, tp, now)
             if stable_since != prefs.stable_since:
                 await store.set_stable(db, org, uid, stable_since)
                 prefs = replace(prefs, stable_since=stable_since)
             shown = tp.visible[:engine.MAX_TODOS]
             keys = [t.key for t in shown if t.level in ("P0", "P1")]
-            if not engine.bell_due(prefs, keys, engine.is_stable(stable_since, now), now, tz):
+            if not engine.bell_due(prefs, keys, stable, now, tz):
                 continue
             if not await store.claim_bell(db, uid, today_start, keys, now):
                 continue

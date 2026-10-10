@@ -386,8 +386,8 @@ async def _coach_block(turn: Turn) -> str:
             sig = await coach_signals.collect(db, turn.redis, user.org_id)
             prefs = await coach_store.get_prefs(db, user.id)
             items = await coach_store.list_items(db, user.id)
-            plan = coach_engine.plan_today(sig, prefs, items, datetime.now(UTC), tz, tips=[], curr=[])
-        return coach_engine.prompt_block(plan.payload["todos"])
+            today = coach_engine.build_today(sig, prefs, items, datetime.now(UTC), tz, tips=[], curr=[])
+        return coach_engine.prompt_block(today["todos"])
     except Exception:  # noqa: BLE001 — khối này chỉ là gợi ý thêm cho model
         log.warning("Lượt Gen %s: không dựng được khối việc vận hành", turn.inp.turn_id, exc_info=True)
         return ""

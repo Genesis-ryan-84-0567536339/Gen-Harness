@@ -197,6 +197,15 @@ def is_stable(stable_since: datetime | None, now: datetime) -> bool:
     return stable_since is not None and stable_since <= now - STABLE_AFTER
 
 
+def settle(sig: sg.Signals, prefs: Prefs, tp: TodoPlan, now: datetime) -> tuple[datetime | None, bool]:
+    """(mốc ổn định mới, đang ổn định?). Một nguồn sinh việc P0/P1 đọc lỗi ⇒ chưa biết có việc hay không: giữ nguyên mốc
+    đang lưu và KHÔNG báo 'ổn định' (không để lỗi đọc nguồn thành 7 ngày 'yên')."""
+    if not sig.p01_known():
+        return prefs.stable_since, False
+    since = update_stable(prefs, tp.pending_p01, tp.last_alert_raised_at, now)
+    return since, is_stable(since, now)
+
+
 # ─── bài học ──────────────────────────────────────────────────────────────────────────────────────────────────
 
 def lesson_status(lesson: Mapping[str, Any], item: Item | None, state: Mapping[str, bool], now: datetime) -> str:
@@ -302,8 +311,7 @@ def plan_today(sig: sg.Signals, prefs: Prefs, items: Mapping[str, Item], now: da
     tips, curr = _content(tips, curr)
     tp = plan_todos(sig, items, now)
     shown_todos = tp.visible[:MAX_TODOS]
-    stable_since = update_stable(prefs, tp.pending_p01, tp.last_alert_raised_at, now)
-    stable = is_stable(stable_since, now)
+    stable_since, stable = settle(sig, prefs, tp, now)
     rows = lesson_statuses(curr, items, sig.state, now)
     progress = {"required_done": sig.required_done, "required_total": sig.required_total,
                 "lessons_done": sum(1 for _, s in rows if s in ("understood", "done")),

@@ -286,6 +286,11 @@ class Signals:
     #: Tên các nguồn đọc lỗi lần này (mục tương ứng bị bỏ).
     failed: list[str] = field(default_factory=list)
 
+    def p01_known(self) -> bool:
+        """Có đọc được đủ nguồn sinh việc P0/P1 không? Thiếu nguồn ⇒ KHÔNG biết có việc P0/P1 hay không, nên không được
+        coi là 'không có việc' để bắt đầu đếm ngày ổn định."""
+        return not set(self.failed) & P01_SOURCES
+
     def to_dict(self) -> dict[str, Any]:
         return {"state": self.state, "alerts": self.alerts, "last_alert_raised_at": self.last_alert_raised_at,
                 "required_done": self.required_done, "required_total": self.required_total,
@@ -436,6 +441,9 @@ async def _src_pin(db: AsyncSession, redis: Any, org: uuid.UUID) -> dict[str, An
                          AND u.pin_hash IS NOT NULL)"""), {"o": org})).scalar_one()
     return {"state": {"pin.set": bool(ok)}}
 
+
+#: Các nguồn quyết định việc P0/P1: sự cố sức khoẻ, model (bước 4), dòng bắt buộc, lịch sao lưu, token Gen-hub.
+P01_SOURCES = frozenset({"health", "boss", "followup", "settings", "hub"})
 
 Source = Callable[[AsyncSession, Any, uuid.UUID], Awaitable[dict[str, Any]]]
 

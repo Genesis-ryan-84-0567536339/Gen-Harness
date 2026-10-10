@@ -1831,3 +1831,30 @@ def test_every_static_rule_has_its_own_copy_and_unknown_rows_fall_back(monkeypat
     title, why = sg.todo_copy("boss.moi")
     assert "Dòng mới" in title and why
     assert sg.todo_copy("khoa.la")[0] == sg.GENERIC_HEALTH_TITLE
+
+
+def test_a_failed_p01_source_never_starts_or_extends_the_stable_count() -> None:
+    quiet = mk_sig()
+    assert quiet.p01_known() is True
+    for name in ("health", "boss", "followup", "settings", "hub"):
+        broken = mk_sig()
+        broken.failed = [name]
+        assert broken.p01_known() is False
+        assert today_of(broken, Prefs()).stable_since is None                       # không bắt đầu đếm
+        kept = today_of(broken, Prefs(stable_since=T0 - timedelta(days=30)), now=T0)
+        assert kept.stable_since == T0 - timedelta(days=30) and kept.stable is False    # giữ mốc, không báo ổn định
+    harmless = mk_sig()
+    harmless.failed = ["offsite", "telegram"]                                         # nguồn không sinh việc P0/P1
+    assert harmless.p01_known() is True and today_of(harmless, Prefs()).stable_since == T0
+
+
+async def test_cron_with_a_failed_source_does_not_touch_the_stable_mark(owner_api: Api, redis: Any,
+                                                                        sigbox: list[sg.Signals]) -> None:
+    broken = mk_sig()
+    broken.failed = ["boss"]
+    sigbox[0] = broken
+    assert (await run(redis, at(0, 2, 5)))["bells"] == 0
+    assert (await rows("SELECT stable_since FROM agent.gen_coach_prefs"))[0].stable_since is None
+    sigbox[0] = mk_sig()
+    await run(redis, at(1, 2, 5))
+    assert (await rows("SELECT stable_since FROM agent.gen_coach_prefs"))[0].stable_since == at(1, 2, 5)
