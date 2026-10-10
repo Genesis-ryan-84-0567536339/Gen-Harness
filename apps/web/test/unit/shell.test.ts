@@ -48,7 +48,9 @@ describe('screen registry', () => {
     // + Tài khoản của tôi (account, v0.1.19) + Trợ giúp (help, v0.1.22) + Tài khoản mạng xã hội (social, v0.1.29)
     // + Việc Sếp cần làm (guide/viec-sep, v0.1.39) + Kết nối, Đội ngũ (v0.1.42)
     // + Trang cảnh báo gửi Facebook (social/ghi-facebook, v0.1.47)
-    expect(paths).toHaveLength(33);
+    // + Mặt tiền Owner (v0.1.55): 4 màn con tương đối của /owner (quan-he, viec, gen, them)
+    expect(paths).toHaveLength(37);
+    for (const p of ['quan-he', 'viec', 'gen', 'them']) expect(paths).toContain(p);
     expect(paths).toContain('social/ghi-facebook');
     expect(paths).toContain('domain:business > connections');
     expect(paths).toContain('domain:business > team');

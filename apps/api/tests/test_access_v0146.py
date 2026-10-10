@@ -215,6 +215,8 @@ async def test_boss_remote_pass_uses_origin_not_host(owner_api: Api, link: Path,
     assert out["status"] == "pass"
     assert out["detail"]["opened_from"] == "gen.tail1234.ts.net" and out["detail"]["access_mode"] == "tailscale"
     ov = (await owner_api.get("/boss-checks")).json()
-    assert ov["required_total"] == 6 and ov["required_done"] == 1
+    # v0.1.55 (G2): Truy cập từ xa là tuỳ chọn — dòng bắt buộc duy nhất là "nguồn AI" (chưa có ⇒ 0/1).
+    assert ov["required_total"] == 1 and ov["required_done"] == 0
     remote = next(r for r in ov["rows"] if r["key"] == "remote")
     assert remote["row"] == 7 and remote["title"] == "Truy cập từ xa" and remote["done"] is True
+    assert remote["optional"] is True

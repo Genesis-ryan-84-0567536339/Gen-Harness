@@ -2,23 +2,32 @@ import { useEffect } from 'react';
 import { Link, Navigate, useLocation } from 'react-router-dom';
 import { Card, EmptyState, ErrorState, Skeleton } from '@gen-harness/ui';
 import { errorDetail, errorText } from '../lib/errorText';
-import { useNavigation } from '../lib/queries';
+import { useMe, useNavigation } from '../lib/queries';
+import { OWNER_HOME } from '../owner/ownerModel';
 import { firstScreenKey } from './navModel';
 
 /**
  * v0.1.42 (F-26): trang chủ "/" chuyển tới màn đầu tiên KHÔNG ẩn trong danh mục của vai trò (GET /navigation) —
  * không còn cứng "/overview" (Agent NV không có quyền Tổng quan từng gặp ổ khoá ngay khi đăng nhập). Giữ nguyên
  * query (vd `?gen=` mở Bản tin Gen từ chuông).
+ *
+ * v0.1.55 (G5): vai Owner ⇒ `/owner` (Mặt tiền), vẫn giữ nguyên `?gen=` (`?gen=coach` mở thẻ Hôm nay của Sếp, `?gen=<mã>`
+ * mở Bản tin); mọi vai khác giữ như cũ. "Cài đặt nâng cao" của Mặt tiền đi tới `/overview`, không qua "/".
  */
 export function HomeRedirect() {
+  const me = useMe();
   const nav = useNavigation();
   const { search } = useLocation();
+  const owner = me.data?.role?.code === 'owner';
 
   useEffect(() => {
     document.title = 'Gen-Harness';
   }, []);
 
-  if (nav.isPending) {
+  if (owner) return <Navigate to={`${OWNER_HOME}${search}`} replace />;
+
+  // Chưa biết vai (đang tải /auth/me) hoặc chưa có danh mục: khung chờ. /auth/me lỗi ⇒ coi như không phải Owner.
+  if (me.isPending || nav.isPending) {
     return (
       <div className="screen" aria-busy="true" aria-label="Đang mở trang chủ">
         <Card padded={false}>

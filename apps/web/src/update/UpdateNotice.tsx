@@ -24,7 +24,9 @@ export function UpdateNotice({ hideFailed = false }: { hideFailed?: boolean }) {
   const target = q.data.latest ?? 'bản mới';
   const text =
     view.kind === 'available'
-      ? `Có bản mới ${target} — cập nhật ở Cài đặt`
+      ? view.block
+        ? `Có bản mới ${target} — ${view.block.title}; xem ở Cài đặt`
+        : `Có bản mới ${target} — cập nhật ở Cài đặt`
       : view.kind === 'working'
         ? `Đang cập nhật lên ${target} — xem tiến độ ở Cài đặt`
         : `${view.title} — xem ở Cài đặt`;

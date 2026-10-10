@@ -37,6 +37,8 @@ import { createMock as createP4System } from './mock-p4-system';
 import { createMock as createGen } from './mock-gen';
 import { createMock as createGenV0150, type KhoWriteReq } from './mock-gen-v0150';
 import { createMock as createGenCoach, type GenCoachOptions } from './mock-gen-coach';
+import { createMock as createDefaults } from './mock-defaults';
+import { createMock as createOwner } from './mock-owner';
 import { acceptWebSocket, type MockSocket } from './mock-ws';
 import { buildScreenTree, SCREEN_BY_KEY } from '../../../packages/contracts/src/screens';
 import type { NavDomain, NavItem, SetupState } from '../../../packages/contracts/src/schema';
@@ -498,6 +500,10 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     telegram,
     // v0.1.44 (F-4b) — Gói chẩn đoán (chỉ Owner, PIN) + POST /client-errors (gọi trước cổng đăng nhập).
     diagnostics: createDiagnostics({ fresh: opts.setup === 'fresh', emit: broadcast }),
+    // v0.1.55 (G1): "Chế độ tiêu chuẩn" / "Về mặc định" (/defaults*, chỉ Owner).
+    defaults: createDefaults({ fresh: opts.setup === 'fresh', emit: broadcast }),
+    // v0.1.55 (G5): Mặt tiền Owner (/owner/*, chỉ đọc, chỉ Owner) — tiến độ lấy từ "Việc Sếp cần làm".
+    owner: createOwner({ fresh: opts.setup === 'fresh', emit: broadcast, boss: bossChecks.hooks.overview as never }),
     // agents TRƯỚC core: `GET /agents/decisions` cần trả dữ liệu thật ("agent đã nói gì") — core.handle() có
     // một stub rỗng cho cùng đường (chưa màn nào dùng tới trước giai đoạn 4) nên phải chặn trước nó.
     agents: p4Agents,
@@ -505,7 +511,20 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     // chứng cứ) — core.handle() nuốt mọi `/explain/{kind}/{id}` không phân biệt kind nên phải chặn trước nó.
     people: createP3People({ fresh: opts.setup === 'fresh', emit: broadcast }),
     core: p3Core,
-    queue: createP3Queue({ fresh: opts.setup === 'fresh', emit: broadcast, findUser }),
+    queue: createP3Queue({
+      fresh: opts.setup === 'fresh', emit: broadcast, findUser,
+      // v0.1.55 (G4): Bật Jev 1 chạm ⇒ nguồn Jev (system_one) hiện trong `/providers` như API thật.
+      onJevEnabled: (j) => {
+        const list = phase2.hooks.providers() as unknown as Array<Record<string, unknown>>;
+        if (list.some((x) => x.kind === 'system_one')) return;
+        list.push({
+          id: j.provider_id, kind: 'system_one', name: 'Jev', endpoint: j.endpoint, failover_rank: list.length + 1,
+          enabled: true, auth_state: 'ok',
+          keys: [{ id: `${j.provider_id}-k1`, label: 'JEV-KEY-01', last4: j.key_tail, enabled: true, cooldown_until: null, quota_left_pct: null }],
+          models: [{ id: `${j.provider_id}-m1`, model_name: j.model, daily_quota: null, used_today: 0 }],
+        });
+      },
+    }),
     relations: p3Relations,
     graph: createP3Graph({ fresh: opts.setup === 'fresh', emit: broadcast }),
     // market "Giới thiệu hai bên" tạo bản nháp thật qua core.hooks.push — cùng cơ chế create_draft dùng chung ở backend.
@@ -1069,7 +1088,7 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
               return problem(res, 422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors: { name: 'Nhập tên agent' } });
             }
             advance(8, 'done');
-            const agent = { id: randomUUID(), name: String(body.name), try_reply: `Chào Sếp, tôi là ${String(body.name)}.`, try_error: null };
+            const agent = { id: randomUUID(), name: String(body.name), try_reply: typeof body.try_message === 'string' && body.try_message.trim() ? `Chào Sếp, tôi là ${String(body.name)}.` : null, try_error: null }; // v0.1.55: chỉ trả lời thử khi có try_message (như API)
             setupAgent = { id: agent.id, name: agent.name, autonomy_level: 4 };
             return reply(200, { ...stateView(), agent });
           }

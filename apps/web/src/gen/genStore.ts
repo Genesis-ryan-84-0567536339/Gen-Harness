@@ -8,7 +8,8 @@
  */
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
-import type { GenBriefingSection, GenProposal, GenRating, GenStep, TourStep } from '@gen-harness/contracts';
+import type { GenBriefingSection, GenProposal, GenRating, GenStep, ModelChoice, TourStep } from '@gen-harness/contracts';
+import { AUTO_CHOICE, loadChoice, saveChoice } from './modelChoice';
 
 export interface GenChatMessage {
   id: string;
@@ -61,6 +62,12 @@ interface GenState {
   coachFocus: boolean;
   /** v0.1.54: câu điền sẵn vào ô nhập của khung Gen (nút "Hỏi Gen thêm") — KHÔNG gửi; ô nhập lấy rồi hạ về null. */
   composerDraft: string | null;
+  /**
+   * v0.1.55 (G3): lựa chọn model / mức suy nghĩ của hội thoại đang mở (Tự động (chuẩn) khi là hội thoại mới). Nhớ THEO MÃ
+   * HỘI THOẠI ở localStorage `gh-gen-model-choice` (gen/modelChoice.ts) — KHÔNG nằm trong `gh-gen`, không rò sang hội thoại khác.
+   */
+  modelChoice: ModelChoice;
+  setModelChoice: (c: ModelChoice) => void;
   setCoachFocus: (on: boolean) => void;
   setComposerDraft: (text: string | null) => void;
   setOpen: (userId: string, open: boolean) => void;
@@ -128,11 +135,17 @@ export const useGenStore = create<GenState>()(
       spotlight: null,
       coachFocus: false,
       composerDraft: null,
+      modelChoice: AUTO_CHOICE,
+      setModelChoice: (modelChoice) =>
+        set((s) => {
+          saveChoice(s.conversationId, modelChoice); // hội thoại mới (chưa có mã) ⇒ giữ trong store, lưu máy khi có mã
+          return { modelChoice };
+        }),
       setCoachFocus: (coachFocus) => set({ coachFocus }),
       setComposerDraft: (composerDraft) => set({ composerDraft }),
       setOpen: (userId, open) => set((s) => ({ openByUser: { ...s.openByUser, [userId]: open } })),
-      setConversation: (userId, id) => set({ conversationId: id, conversationOwner: id ? userId : null }),
-      reset: () => set({ conversationId: null, conversationOwner: null, messages: [], busy: false }),
+      setConversation: (userId, id) => set({ conversationId: id, conversationOwner: id ? userId : null, modelChoice: loadChoice(id) }),
+      reset: () => set({ conversationId: null, conversationOwner: null, messages: [], busy: false, modelChoice: AUTO_CHOICE }),
       setSpotlight: (spotlight) => set({ spotlight }),
     }),
     {

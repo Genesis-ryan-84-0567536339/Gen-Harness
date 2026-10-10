@@ -128,7 +128,8 @@ test.describe('B5–B7 (máy tính)', () => {
     await settle(page);
     await page.screenshot({ path: join(shots, 'notfound-1280.png') });
     await page.getByRole('button', { name: 'Về trang chủ' }).click();
-    await expect(page).toHaveURL(/\/overview$/);
+    // v0.1.55: "/" của Owner là Mặt tiền (/owner), không còn /overview.
+    await expect(page).toHaveURL(/\/owner$/);
   });
 
   test('chuông: số chưa đọc, cập nhật trực tiếp qua WebSocket, bấm mở trang liên quan', async ({ page }) => {

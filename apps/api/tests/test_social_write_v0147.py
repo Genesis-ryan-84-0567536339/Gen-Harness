@@ -327,7 +327,7 @@ async def test_done_with_proof_is_encrypted_served_and_logged_safely(owner_api: 
     ov = (await owner_api.get("/boss-checks")).json()
     assert ov["results"]["facebook_reply"]["status"] == "pass"
     assert next(r_ for r_ in ov["rows"] if r_["key"] == "facebook_reply")["done"] is True
-    assert ov["required_total"] == 6
+    assert ov["required_total"] == 1          # v0.1.55 (G2): chỉ dòng "nguồn AI" bắt buộc; dòng 8 tuỳ chọn
     # Action Log: có sha256, KHÔNG có nguyên văn / cookie / permit.
     async with admin_sessionmaker()() as adb:
         detail = (await adb.execute(text("SELECT detail FROM ops.action_log WHERE action = 'social.write'"))

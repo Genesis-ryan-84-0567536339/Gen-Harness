@@ -1,6 +1,6 @@
 /** Presentation logic for API & Model — mirrors `dataModel.ts` / `agentsModel.ts` conventions. */
 import { ApiError } from '@gen-harness/contracts';
-import type { Effort, ModelGroup, ModelOption, Provider, ProviderDiagnosis, ProviderKind, ProviderTestResult } from '@gen-harness/contracts';
+import type { AgentBindingSlot, Effort, ModelGroup, ModelOption, Provider, ProviderDiagnosis, ProviderKind, ProviderTestResult } from '@gen-harness/contracts';
 import { fmtDMClock } from '../../lib/format';
 
 export const OK = 'var(--color-ok)';
@@ -156,6 +156,47 @@ const EFFORT_NOTE: Record<Effort, string> = { low: 'nhanh, rẻ', medium: 'cân 
 /** Chữ trong ô "Mức suy nghĩ": "Thấp · nhanh, rẻ". */
 export function effortOptionText(e: Effort): string {
   return `${EFFORT_LABEL[e] ?? e} · ${EFFORT_NOTE[e] ?? ''}`;
+}
+
+/**
+ * v0.1.55 (G1): mức suy nghĩ mà một model của nguồn `p` nhận — theo danh sách CLI/danh mục ở lần kiểm tra gần nhất, không có thì
+ * theo luật của máy chủ (`gh/defaults/profiles.py::allowed_efforts`): Claude Code CLI năm mức trừ haiku (không mức nào); Antigravity
+ * CLI ba mức; nguồn khoá API không có mức suy nghĩ.
+ */
+export function supportedEfforts(p: Pick<Provider, 'kind' | 'last_test'> | undefined, modelName: string | undefined): Effort[] {
+  if (!p || !modelName || !isCliKind(p.kind)) return [];
+  const opt = offeredGroups(p.last_test)
+    .flatMap((g) => g.models)
+    .find((m) => m.id === modelName);
+  if (opt && Array.isArray(opt.efforts)) return opt.efforts;
+  if (p.kind === 'antigravity_cli') return ['low', 'medium', 'high'];
+  return /haiku/i.test(modelName) ? [] : ['low', 'medium', 'high', 'xhigh', 'max'];
+}
+
+type SlotView = Pick<AgentBindingSlot, 'binding' | 'source' | 'standard'>;
+
+/** Ô "Model" của bảng gán: model Sếp đã gán; chưa gán ⇒ "Chuẩn: <model> (tự chọn)" (hồ sơ tiêu chuẩn theo vai). */
+export function bindingModelText(slot: SlotView): string {
+  if (slot.binding) return slot.binding.model_name;
+  if (slot.standard && typeof slot.standard.model_name === 'string' && slot.standard.model_name) return `Chuẩn: ${slot.standard.model_name} (tự chọn)`;
+  return slot.source === 'standard' ? 'Chuẩn: chưa có nguồn phù hợp' : 'chưa gán';
+}
+
+/** Ô "Mức suy nghĩ": mức Sếp chọn cho vai; không có thì mức của hồ sơ chuẩn ("Vừa (chuẩn)"); không thì "—". */
+export function bindingEffortText(slot: SlotView): string {
+  const own = slot.binding?.effort;
+  if (own) return EFFORT_LABEL[own] ?? own;
+  const std = slot.binding ? null : slot.standard?.effort;
+  return std ? `${EFFORT_LABEL[std] ?? std} (chuẩn)` : '—';
+}
+
+/** Dòng "Nâng cao" của một vai: nhiệt độ · ngữ cảnh · bộ quy tắc (một chuỗi — web không render object). */
+export function bindingParamsText(slot: SlotView & Pick<AgentBindingSlot, 'label'>): string {
+  const b = slot.binding;
+  const t = b ? b.temperature : slot.standard?.temperature;
+  const c = b ? b.context_tokens : slot.standard?.context_tokens;
+  const rules = b?.rule_codes?.length ? b.rule_codes.join(', ') : '—';
+  return `${slot.label} — nhiệt độ ${t == null ? '—' : fmtTemperature(t)} · ngữ cảnh ${c == null ? '—' : fmtContextTokens(c)} · bộ quy tắc ${rules}${b ? '' : ' (chuẩn)'}`;
 }
 
 /** Model + mức đang dùng của nguồn ("Dùng model này"), không có thì model đã lưu đầu tiên. */

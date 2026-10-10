@@ -28,8 +28,8 @@ function followUp(done: number[]): SetupFollowUpItem[] {
 const BOSS: BossOverview = {
   rows: [],
   results: { hub: null, facebook: null, agy_login: null, agy_call: null, agy_switch: null, claude_login: null, claude_call: null, jev: null, telegram: null, remote_access: null },
-  required_done: 1,
-  required_total: 4,
+  required_done: 0,
+  required_total: 1,
   switch_passes: 0,
 };
 
@@ -95,9 +95,9 @@ describe('Hướng dẫn thiết lập (/guide)', () => {
 
   it('v0.1.39: thẻ "Việc Sếp cần làm" ở đầu trang dẫn tới /guide/viec-sep, kèm tiến độ dòng bắt buộc', () => {
     renderGuide([]);
-    const link = screen.getByRole('link', { name: /Việc Sếp cần làm — kết nối chạy thật \(~25 phút\)/ });
+    const link = screen.getByRole('link', { name: /Việc Sếp cần làm — nguồn AI chạy thật/ });
     expect(link).toHaveAttribute('href', '/guide/viec-sep');
-    expect(link).toHaveTextContent('Đã đạt 1/4 dòng bắt buộc');
+    expect(link).toHaveTextContent('Đã đạt 0/1 dòng bắt buộc');
     // Đứng trước danh sách việc.
     const list = document.querySelector('.guide-list')!;
     expect(link.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

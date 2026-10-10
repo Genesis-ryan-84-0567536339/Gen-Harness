@@ -14,6 +14,11 @@ Hai đường gọi, chọn theo base URL của nguồn (`agent.providers.endpoi
      response `{"choice": str, "confidence": float}` — chấp nhận thêm biến thể `label`/`score`/`probability`
               và bọc trong `output` hoặc `result`.
 Mọi lỗi (mạng, HTTP ≥ 400, trả lời không phải một trong các lựa chọn) → `JevError`; bên gọi rơi về LLM.
+
+v0.1.55 (G4, QD-12): MỌI thứ gửi ra ngoài (câu hỏi, ngữ cảnh, nhãn lựa chọn) đi qua `gh.chassis.masking.mask_for_model`
+TRƯỚC khi dựng payload — số dài ≥ 8 chữ số (SĐT, số tài khoản), email, khoá/token bị che. KHÔNG có cờ tắt: đây là
+điểm duy nhất gửi dữ liệu sang OpenRouter/TypeSafe nên che ở đây là che cho mọi bên gọi (J1 lọc tin, J3 ý định Gen,
+J2 lọc trước, thử 12 câu mẫu). Không log khoá hay nội dung gốc.
 """
 
 import time
@@ -24,13 +29,15 @@ from urllib.parse import urlparse
 import httpx
 import orjson
 
-from gh.chassis.masking import mask_error
+from gh.chassis.masking import mask_error, mask_for_model
 from gh.chassis.mcp_client import McpBlockedNetwork, McpError, pinned_client, pinned_request
 
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 TYPESAFE_BASE_URL = "https://api.typesafe.ai"
 DEFAULT_MODEL = "typesafe/jev-1.13"
 BASE_URL_CHOICES = (DEFAULT_BASE_URL, TYPESAFE_BASE_URL)
+#: v0.1.55 (G4): cấu hình "Bật Jev 1 chạm" — web điền sẵn, `POST /jev/enable` dựng nguồn `system_one` theo đúng cặp này.
+PRESET: dict[str, str] = {"endpoint": DEFAULT_BASE_URL, "model": DEFAULT_MODEL}
 
 
 class JevError(Exception):
@@ -92,7 +99,21 @@ class JevClient:
         return {"authorization": f"Bearer {self.api_key}", "content-type": "application/json",
                 "x-title": "Gen-Harness"}
 
+    def masked(self, question: str, options: list[str], context: str = "") -> tuple[str, list[str], str]:
+        """Bản ĐÃ CHE của (câu hỏi, các lựa chọn, ngữ cảnh) — cái duy nhất được phép rời máy. Khoá của chính client
+        cũng bị xoá nếu lỡ nằm trong chữ. Không có cờ tắt (QD-12)."""
+        # (khoá ngắn < 8 ký tự chỉ có trong test — thay nó sẽ phá chữ thường; khoá thật luôn dài hơn và còn bị
+        #  regex khoá/token của `mask_for_model` bắt.)
+        secrets = (self.api_key,) if len(self.api_key) >= 8 else ()
+        return (str(mask_for_model(question, secrets=secrets)),
+                [str(mask_for_model(o, secrets=secrets)) for o in options],
+                str(mask_for_model(context, secrets=secrets)))
+
     def build_request(self, question: str, options: list[str], context: str = "") -> tuple[str, dict[str, Any]]:
+        """Dựng yêu cầu đã che (xem `masked`)."""
+        return self._build(*self.masked(question, options, context))
+
+    def _build(self, question: str, options: list[str], context: str) -> tuple[str, dict[str, Any]]:
         if self.mode == "systemone":
             return _systemone_url(self.base_url), {"model": self.model, "task": "choice", "input": question,
                                                    "context": context, "options": options}
@@ -133,7 +154,8 @@ class JevClient:
     async def choose(self, question: str, options: list[str], context: str = "") -> Choice:
         if not options:
             raise JevError("không có lựa chọn")
-        url, payload = self.build_request(question, options, context)
+        q, opts, ctx = self.masked(question, options, context)   # QD-12: che TRƯỚC khi dựng payload
+        url, payload = self._build(q, opts, ctx)
         started = time.monotonic()
         try:
             # v0.1.45 (F-49): ghim DNS như nhà cung cấp AI (gh.providers.clients.HttpClient) — cấm vùng mạng xấu.
@@ -153,7 +175,9 @@ class JevClient:
             body = resp.json()
         except ValueError as e:
             raise JevError("trả lời không phải JSON") from e
-        label, conf = self.parse_response(body, options)
+        label, conf = self.parse_response(body, opts)
+        # Nhãn model trả khớp bản đã che → trả về nhãn GỐC cùng vị trí (bên gọi so khớp theo nhãn gốc).
+        label = options[opts.index(label)]
         return Choice(label, conf, int((time.monotonic() - started) * 1000), body if isinstance(body, dict) else {})
 
     async def ping(self) -> Choice:

@@ -11,7 +11,7 @@ afterEach(() => {
 });
 
 describe('<JevCard> gợi ý PIN', () => {
-  it('form cấu hình Jev hiện «Cần mã PIN 6 số» cạnh nút Lưu & kiểm tra', async () => {
+  it('form cấu hình Jev hiện «Cần mã PIN 6 số» cạnh nút Bật Jev và nút Lưu & kiểm tra', async () => {
     const me = {
       id: 'u', email: 'owner@genesis.local', display_name: 'Owner', role: { code: 'owner', name: 'Owner' },
       org: { id: 'o', name: 'x', timezone: 'Asia/Ho_Chi_Minh', currency: 'VND' },
@@ -32,6 +32,10 @@ describe('<JevCard> gợi ý PIN', () => {
         <JevCard />
       </QueryClientProvider>,
     );
+    // v0.1.55: "Bật Jev 1 chạm" giữ NGUYÊN rào PIN của việc tạo nguồn — báo trước cạnh nút.
+    const batJev = await screen.findByRole('button', { name: /Bật Jev$/ });
+    expect(within(batJev.parentElement as HTMLElement).getByText(/Cần mã PIN 6 số/)).toBeInTheDocument();
+    // Khối "Nâng cao" (tự chọn địa chỉ/model) vẫn đi đường tạo nguồn cũ, cũng báo PIN.
     const save = await screen.findByRole('button', { name: /Lưu & kiểm tra/ });
     const actions = save.parentElement as HTMLElement;
     expect(within(actions).getByText(/Cần mã PIN 6 số/)).toBeInTheDocument();

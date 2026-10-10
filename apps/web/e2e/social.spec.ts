@@ -110,7 +110,9 @@ test.describe('Bước 4 "Để sau" (v0.1.29)', () => {
     await page.goto('/setup');
     await expect(page.getByTestId('no-model')).toBeVisible();
     await page.getByRole('button', { name: /Vào Console/ }).click();
-    await expect(page).toHaveURL(/\/overview/);
+    // v0.1.55 (G5): Owner "/" ⇒ Mặt tiền /owner; thẻ "Chưa có model" nằm ở Tổng quan (Console).
+    await expect(page).toHaveURL(/\/owner$/);
+    await page.goto('/overview');
     const banner = page.getByTestId('no-model');
     await expect(banner).toContainText('Chưa có model');
     await banner.getByRole('link', { name: /Chọn model/ }).click();

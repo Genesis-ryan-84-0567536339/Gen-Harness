@@ -92,7 +92,6 @@ test.describe('v0.1.45 — PIN đúng chỗ hạ rào', () => {
     await expect(page.getByTestId('step9-agent')).toContainText('Trợ lý thương mại');
     await expect(page.getByRole('radio', { name: 'Soạn sẵn chờ duyệt' })).toHaveAttribute('aria-checked', 'true');
     await expect(page.getByText('Sau Hoàn tất, đổi mức tự trị cần mã PIN')).toHaveCount(0);
-    await page.getByLabel('Tôi đã đọc các ranh giới trên').check();
     const req = page.waitForResponse((r) => r.url().includes('/setup/steps/9') && r.request().method() === 'PUT' && r.ok());
     await page.getByRole('button', { name: 'Tiếp tục', exact: true }).click();
     await req;
@@ -106,7 +105,6 @@ test.describe('v0.1.45 — PIN đúng chỗ hạ rào', () => {
     await expect(page.getByTestId('step9-agent')).toBeVisible();
     await page.getByRole('radio', { name: 'Gợi ý' }).click();
     await expect(page.getByText('Sau Hoàn tất, đổi mức tự trị cần mã PIN')).toBeVisible();
-    await page.getByLabel('Tôi đã đọc các ranh giới trên').check();
     const req = page.waitForResponse((r) => r.url().includes('/setup/steps/9') && r.request().method() === 'PUT' && r.ok());
     await page.getByRole('button', { name: 'Tiếp tục', exact: true }).click();
     await enterOwnerPin(page);

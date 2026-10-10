@@ -20,3 +20,11 @@ export const TRIAGE_LEVELS: readonly TriageLevel[] = [
 export function triageLevelOf(minScore: number): TriageLevelKey | 'custom' {
   return TRIAGE_LEVELS.find((l) => l.min_score === minScore)?.key ?? 'custom';
 }
+
+/**
+ * v0.1.55 (J2): lọc trước khi trích xuất (`triage.prefilter`) — bỏ qua tin trùng hẳn / rác chắc chắn trước khi gửi
+ * model. Máy chủ cũ không trả `prefilter` ⇒ coi như bật (mặc định của máy chủ mới).
+ */
+export function prefilterOn(settings: { prefilter?: boolean } | null | undefined): boolean {
+  return settings?.prefilter !== false;
+}

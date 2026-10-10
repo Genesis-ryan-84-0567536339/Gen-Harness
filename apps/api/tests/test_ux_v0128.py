@@ -32,7 +32,9 @@ async def _provider(api: Api, db, name: str, *, ok: bool, models: list[str] | No
     return str(pid)
 
 
-async def test_step4_auto_picks_tested_model_binds_core_agents_and_sinks_failed_source(owner_api, db) -> None:  # type: ignore[no-untyped-def]
+async def test_step4_auto_picks_tested_model_and_sinks_failed_source(owner_api, db) -> None:  # type: ignore[no-untyped-def]
+    """v0.1.55 (G2): bước 4 vẫn chép model đã gọi thử + đẩy nguồn lỗi xuống cuối, nhưng KHÔNG ghi agent.bindings —
+    hồ sơ tiêu chuẩn tự chọn model theo vai (dòng gán hiện "Chuẩn")."""
     api: Api = owner_api
     org = await org_id(db)
     bad = await _provider(api, db, "Model sai", ok=False)                       # tạo trước → rank 1
@@ -45,13 +47,12 @@ async def test_step4_auto_picks_tested_model_binds_core_agents_and_sinks_failed_
     bound = dict((await db.execute(text("""SELECT b.agent_key, m.model_name FROM agent.bindings b
                                             JOIN agent.models m ON m.id = b.model_id WHERE b.org_id = :o"""),
                                    {"o": org})).all())
-    assert bound.get("core.refinery") == "qwen2.5-7b" and bound.get("core.gen") == "qwen2.5-7b"
-    assert "core.indexing" not in bound
+    assert bound == {}
     ranks = dict((await db.execute(text("SELECT id::text, failover_rank FROM agent.providers WHERE org_id = :o"),
                                    {"o": org})).all())
     assert ranks[good] == 1 and ranks[bad] == 2                                  # nguồn lỗi xuống cuối
     items = {i["agent_key"]: i for i in (await api.get("/agents/bindings")).json()["items"]}
-    assert items["core.gen"]["binding"]["model_name"] == "qwen2.5-7b"
+    assert items["core.gen"]["binding"] is None
 
 
 async def test_step4_refuses_when_no_source_has_a_model(owner_api, db) -> None:  # type: ignore[no-untyped-def]

@@ -32,6 +32,7 @@ from gh.config import get_settings
 from gh.data.ingest import Ingest
 from gh.data_api.routes import router as data_router
 from gh.db import dispose_engine, sessionmaker
+from gh.defaults.routes import router as defaults_router
 from gh.errors import (
     INFRA_ERRORS,
     ApiError,
@@ -51,9 +52,11 @@ from gh.hub_link.routes import router as hub_router
 from gh.mcp_api.routes import router as mcp_router
 from gh.middleware import ActionLogGuard, RequestIdMiddleware, SameOriginFrame, SessionCookieRenewal, SetupGate
 from gh.notifications import router as notifications_router
+from gh.owner.routes import router as owner_router
 from gh.plugins_api.routes import router as plugins_router
 from gh.providers import cli as climod
 from gh.providers.router import ModelRouter
+from gh.refinery.jev_routes import router as jev_router
 from gh.refinery.triage_routes import router as triage_router
 from gh.setup.routes import router as setup_router
 from gh.shell.routes import router as shell_router
@@ -239,7 +242,8 @@ def create_app(*, with_lifespan: bool = True, expose_docs: bool | None = None) -
     for r in (auth_router, account_router, users_router, setup_router, shell_router, audit_router, plugins_router,
              mcp_router, data_router, system_router, update_router, backups_router, offsite_router, org_router,
              gen_router, coach_router, notifications_router, triage_router, hub_router, social_router, health_router,
-             boss_checks_router, telegram_router, diagnostics_router, client_errors_router, access_router):
+             boss_checks_router, telegram_router, diagnostics_router, client_errors_router, access_router,
+             defaults_router, jev_router, owner_router):
         app.include_router(r, prefix="/api/v1")
     for r in biz.routers():
         app.include_router(r, prefix="/api/v1")

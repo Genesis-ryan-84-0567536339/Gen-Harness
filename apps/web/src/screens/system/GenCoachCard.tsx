@@ -1,5 +1,6 @@
 import type { CoachDismissedItem, CoachPrefs, CoachPrefsPatch } from '@gen-harness/contracts';
 import { Button, Icon, SelectField, Switch } from '@gen-harness/ui';
+import { DefaultControls } from '../../defaults/ResetButton';
 import { COACH_DISMISSED_TITLE, COACH_PREFS_TITLE, HOURS, dismissedItemKey, hourLabel, levelMeta } from '../../gen/coachModel';
 import { useCoachItemAction, useCoachPrefs, useIsOwner, usePatchCoachPrefs } from '../../gen/coachQueries';
 import { errorDetail, errorText } from '../../lib/errorText';
@@ -29,6 +30,7 @@ function GenCoachPanel() {
         kicker="Việc cần làm, mẹo và bài học Gen nhắc Sếp mỗi ngày — chỉ khuyên, không ép"
         label={COACH_PREFS_TITLE}
         bodyClass="gh-card__body"
+        aside={<DefaultControls itemKey="coach" />}
       >
         {q.isPending ? (
           <SkeletonLines rows={4} padding="0" />

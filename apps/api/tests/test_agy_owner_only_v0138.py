@@ -151,7 +151,7 @@ async def test_binding_agy_only_for_gen(owner_api, clis) -> None:  # type: ignor
     assert items["core.gen"]["binding"]["blocked_reason"] is None
 
 
-# ─── (5) Hướng dẫn bước 4 / tự gán ───────────────────────────────────────
+# ─── (5) Hướng dẫn bước 4 ───────────────────────────────────────
 
 async def _bound(org: uuid.UUID) -> dict[str, str]:
     async with sessionmaker()() as db:
@@ -160,46 +160,19 @@ async def _bound(org: uuid.UUID) -> dict[str, str]:
                                       {"o": org})).all())
 
 
-async def test_setup_step4_binds_agy_only_to_gen(owner_api, db, clis) -> None:  # type: ignore[no-untyped-def]
+async def test_setup_step4_with_agy_only_completes_without_bindings(owner_api, db, clis) -> None:  # type: ignore[no-untyped-def]
+    """v0.1.55 (G2): bước 4 KHÔNG ghi `agent.bindings` — hồ sơ tiêu chuẩn (gh.defaults.profiles) tự chọn model theo vai,
+    và luật "agy chỉ cho Gen của Owner" nằm ở hồ sơ + ModelRouter (test_defaults_v0155: việc nền không bao giờ agy)."""
     api = owner_api
     org, pid, _mid = await _agy_only(api)
     r = await api.send("PUT", "/setup/steps/4", {"provider_ids": [str(pid)]})
     assert r.status_code == 200, r.text                      # chỉ có agy vẫn hoàn tất được (Owner dùng Gen)
-    bound = await _bound(org)
-    assert bound == {"core.gen": "gemini-3.1-pro"}             # sàng lọc tin, trực việc… để trống
+    assert await _bound(org) == {}
 
-    # Thêm nguồn khoá API đã gọi thử OK → khoá lõi khác nhận model của nguồn đó, Gen vẫn giữ agy.
     key = await _key_provider(api, db, "Khoá API", ok=True, tested=["qwen2.5-7b"])
     r = await api.send("PUT", "/setup/steps/4", {"provider_ids": [str(pid), key]})
     assert r.status_code == 200, r.text
-    bound = await _bound(org)
-    assert bound["core.gen"] == "gemini-3.1-pro" and bound["core.refinery"] == "qwen2.5-7b"
-    assert all(v == "qwen2.5-7b" for k, v in bound.items() if k != "core.gen")
-
-    # Tự gán (auto_assign_tested_model) theo cùng luật.
-    from gh.setup.routes import auto_assign_tested_model
-
-    await db.execute(text("DELETE FROM agent.bindings WHERE org_id = :o"), {"o": org})
-    await db.execute(text("UPDATE agent.providers SET is_enabled = true WHERE id = ANY(:ids)"),
-                     {"ids": [pid, uuid.UUID(key)]})
-    await db.execute(text("UPDATE agent.providers SET failover_rank = CASE WHEN id = :p THEN 1 ELSE 2 END "
-                          "WHERE org_id = :o"), {"p": pid, "o": org})
-    await db.commit()
-    await auto_assign_tested_model(db, org)
-    await db.commit()
-    bound = await _bound(org)
-    assert bound["core.gen"] == "gemini-3.1-pro" and bound["core.refinery"] == "qwen2.5-7b"
-
-
-async def test_auto_assign_agy_only_leaves_other_slots_empty(owner_api, db, clis) -> None:  # type: ignore[no-untyped-def]
-    org, _pid, _mid = await _agy_only(owner_api)
-    from gh.setup.routes import auto_assign_tested_model
-
-    await db.execute(text("DELETE FROM agent.bindings WHERE org_id = :o"), {"o": org})
-    await db.commit()
-    assert await auto_assign_tested_model(db, org) is not None
-    await db.commit()
-    assert await _bound(org) == {"core.gen": "gemini-3.1-pro"}
+    assert await _bound(org) == {}
 
 
 # ─── (6) tên model agy sai regex ─────────────────────────────────────────

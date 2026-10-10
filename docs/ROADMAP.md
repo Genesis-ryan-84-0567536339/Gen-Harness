@@ -1,4 +1,4 @@
-# Gen-Harness — Lộ trình tổng thể (cập nhật 10/10/2026, sau v0.1.54)
+# Gen-Harness — Lộ trình tổng thể (cập nhật 10/10/2026, sau v0.1.55)
 
 Nguồn chuẩn tiến độ. Mỗi đợt = 1 PR = 1 bản phát hành. CI xanh mới tạo bản thử (prerelease); E2E cài thật xanh mới tự
 nâng thành bản chính thức (latest); lịch tự cập nhật đêm đợi bản chính thức ra đủ 24 giờ. genh chỉ kiểm SHA-256 theo
@@ -31,12 +31,15 @@ Chi tiết từng bản ở [CHANGELOG.md](../CHANGELOG.md); tóm tắt theo ch�
 - **v0.1.51 – v0.1.53 (10/10)**: bản phản ứng — cổng phát hành dọn ảnh cũ (v0.1.51, v0.1.52) và **tự cập nhật đêm tự lành + trung thực** (v0.1.53, F-93…F-100); xem mục Bản phản ứng bên dưới.
 - **v0.1.54 (10/10)**: **Gen hướng dẫn** — Gen chủ động nhắc việc Sếp cần làm, giới thiệu tính năng chưa dùng, bài học mỗi ngày (thiết kế: [gen-coach.md](design/gen-coach.md)). Cùng bản: **người gác yêu cầu tự chữa** (`.path` failed vì hết hạn mức inotify ⇒ reset-failed + restart, vẫn lỗi ⇒ timer dự phòng quét mỗi phút + dòng cảnh báo ở thẻ Sức khoẻ; [v0.1.54.md](releases/v0.1.54.md)).
 
-## Tiếp theo (sau v0.1.54)
+- **v0.1.55 (10/10)**: **Gọn cho Sếp** — Mặt tiền Owner `/owner/*`, hồ sơ model tiêu chuẩn theo vai + Về mặc định, thiết lập ≤ 4 lần nhập và 1 dòng bắt buộc, thẻ Cập nhật nói lý do, chọn Nhanh/Kỹ hơn trong khung chat, Jev lọc trước tuỳ chọn ([v0.1.55.md](releases/v0.1.55.md)).
+
+## Tiếp theo (sau v0.1.55)
 Kế hoạch tổng của đợt kiểm toán kết thúc ở v0.1.50; không còn đợt đánh số sẵn. Thứ tự đề xuất:
-0. **Dùng thử Gen hướng dẫn một tuần** (3 bước ở [HANDOFF](reports/HANDOFF-v0.1.1.md) › Boss phải làm — v0.1.54), rồi nói cho Claude biết thẻ có đúng việc, chuông có phiền không; các ý để sau nằm ở mục Nợ #20–#25.
+0. **v0.1.56**: Boss gửi kết quả "Thử 12 câu mẫu" của Jev (HANDOFF › Boss phải làm — v0.1.55) ⇒ chốt ngưỡng lọc trước; Mặt tiền thêm chi phí AI hôm nay, thẻ "Chưa có model", mục Phân tích (Nợ #28–#29).
+   **Dùng thử Gen hướng dẫn một tuần** (3 bước ở [HANDOFF](reports/HANDOFF-v0.1.1.md) › Boss phải làm — v0.1.54), rồi nói cho Claude biết thẻ có đúng việc, chuông có phiền không; các ý để sau nằm ở mục Nợ #20–#25.
 1. **Boss nghiệm thu thật** các tính năng chưa từng chạy với tài khoản thật (danh sách và cách làm ở [HANDOFF](reports/HANDOFF-v0.1.1.md) › Việc dở): Gen-hub quyền đọc + ghi Kho,
-   Telegram, Truy cập từ xa (Tailscale), Facebook trả lời. Kết quả tự ghi ở Việc Sếp cần làm.
-2. **Bộ câu hỏi chuẩn so model** (mục Nợ #1) rồi quyết giữ/bỏ Jev theo số đo.
+   Telegram, Truy cập từ xa (Tailscale), Facebook trả lời — từ v0.1.55 đều là tuỳ chọn (chỉ "nguồn AI" bắt buộc). Kết quả tự ghi ở Việc Sếp cần làm.
+2. **Bộ câu hỏi chuẩn so model** (mục Nợ #1); riêng Jev đã có bộ 12 câu cố định (v0.1.55) — quyết ngưỡng theo kết quả máy Boss.
 3. **Kho Ryan**: ghi Phiên bù, Việc cho mục Nợ, cập nhật QD-12 và DA-1 (mục Nợ #7) — cần Boss dặn; ghi Kho luôn qua Xác nhận + mã PIN.
 4. **Dọn nhánh** (F-70) khi Boss cho phép.
 5. **Chờ Boss chọn hướng** (chưa có bản đánh số): Facebook đăng bài (lát 2); Gen ghi ra Gen-hub ngoài Kho (kanban/warroom/nháp mail/lịch — cần QD mới); Trang FB/IG qua API (F-80, đóng băng
@@ -75,6 +78,8 @@ Việc đã hứa hoặc đã biết mà chưa làm. Mỗi dòng ghi điều ki�
 | 25 | **Tắt chuông theo loại** (việc khẩn / token sắp hết hạn / bài học) | Chưa làm. Hiện "Chuông nhắc" là một công tắc chung; cần ý kiến Sếp sau một tuần dùng thử |
 | 26 | **Nhãn nút theo trạng thái `opted_out_running`** (v0.1.53): sự cố/chuông `host.nightly` khi Sếp đã tắt tự cập nhật mà lịch vẫn bật vẫn dùng nút **"Xem cách bật lại"** (chung cho mọi lý do) | Chưa làm. Nội dung đích đã đúng (hai lựa chọn: tắt hẳn / giữ tự cập nhật) nhưng nhãn nút nói "bật lại"; cần nhãn riêng (vd "Xem lựa chọn") ở `gh/health.py` (`ACTIONS`) + web |
 | 27 | **`genh auto-update disable` khi không có phiên systemd `--user`** (chạy qua `sudo`/`su`/ssh không có `XDG_RUNTIME_DIR`, hoặc tài khoản khác tài khoản đã bật lịch) (v0.1.53) | Chưa làm. Hiện genh hỏi lại trạng thái, báo "CHƯA tắt được" và thoát 1 (không nói dối) nhưng chưa tự dò `XDG_RUNTIME_DIR`/`loginctl` để tắt hộ; Sếp phải chạy lại đúng tài khoản trong phiên đăng nhập |
+| 28 | **Mặt tiền Owner còn thiếu** (v0.1.55): "Chi phí AI hôm nay" + thẻ "Chưa có model" (Console vẫn có), mục **Phân tích** đang khoá "sắp có"; chuông Gen (`gen.briefing`/`coach`/`kho_proposal`) còn dẫn vào Console `/overview?gen=…` | Hẹn v0.1.56 |
+| 29 | **Dọn còn lại của v0.1.55**: ẩn giới hạn agent + hạn lưu dữ liệu vào Nâng cao (màn agents/storage); xoá hội thoại ở Lịch sử Gen chưa xoá lựa chọn model đã nhớ (`forgetChoice`, tự giới hạn 50 hội thoại) | Chưa làm, nhỏ |
 
 ## Bản phản ứng (hotfix)
 Các bản sửa nóng thật, không nằm trong kế hoạch đợt. Đối chiếu `git log origin/main` và nhánh `hotfix/*`:
@@ -103,6 +108,7 @@ Hai bản **phản ứng theo yêu cầu của Boss** (tính năng, không phả
   Action Log via=gen; nhắc việc đến giờ → chuông) — v0.1.24. Mở rộng: `social_reply`/`social_dm` (v0.1.47), `memory_note`/`kho_create`/`kho_update` (v0.1.50).
 - ✅ A5 Gen hướng dẫn — thẻ "Hôm nay của Sếp" (việc cần làm ngay, mẹo, bài học k/19), Lộ trình học cùng Gen, chuông `gen.coach`, dòng Bản tin x/N, tool `coach.status` — v0.1.54
   (thiết kế: [gen-coach.md](design/gen-coach.md); không gọi model, chỉ Owner, khuyên không ép).
+- ✅ A6 Gen chọn model trong khung chat (Tự động/Nhanh/Kỹ hơn + mức suy nghĩ) + định tuyến theo ý định (câu ngoài phạm vi không gọi model) + Mặt tiền Owner "Hỏi Gen" — v0.1.55.
 
 ## Đợt B — Cơ bản còn thiếu
 - ✅ B1 quản lý người dùng (mời, đổi vai trò, khoá/mở khoá, đặt lại mật khẩu) — v0.1.22.

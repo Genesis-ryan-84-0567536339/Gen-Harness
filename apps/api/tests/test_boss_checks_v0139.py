@@ -149,6 +149,52 @@ async def test_jev_not_configured_error_and_pass(owner_api: Api, app: Any) -> No
     assert ov["required_done"] == 0                                    # Jev không bắt buộc
 
 
+# ─── (d2) nguồn AI (v0.1.55) ────────────────────────────────────────────────
+
+async def test_ai_source_run_probes_first_ready_source_and_never_stores_the_key(owner_api: Api, app: Any,
+                                                                                 db: Any) -> None:
+    """`POST /boss-checks/ai_source/run` (Owner, không PIN): chưa có nguồn → fail AI_NO_SOURCE; có nguồn thì gọi thử
+    nguồn đầu chuỗi sẵn sàng (router.test_provider); Đạt ⇒ dòng `ai` xong, required 1/1. Khoá không vào CSDL kết quả."""
+    secret = "sk-test-key-ai-source-9876"
+    out = (await _run(owner_api, "ai_source")).json()
+    assert out["status"] == "fail" and out["error_code"] == "AI_NO_SOURCE" and "nguồn AI" in out["message"], out
+    await verify_pin(owner_api)
+    r = await owner_api.send("POST", "/providers", {"kind": "openai_compat", "name": "Nguồn thử",
+                                                    "endpoint": "https://127.0.0.1:9/v1", "keys": [secret],
+                                                    "models": ["m1"]})
+    assert r.status_code == 201, r.text
+    app.state.model_router.transport = httpx.MockTransport(lambda req: httpx.Response(500, text=f"hỏng {secret}"))
+    out = (await _run(owner_api, "ai_source")).json()
+    assert out["status"] == "fail" and out["key"] == "ai_source" and out["error_code"], out
+    ov = (await owner_api.get("/boss-checks")).json()
+    assert next(r for r in ov["rows"] if r["key"] == "ai")["done"] is False and ov["required_done"] == 0
+    app.state.model_router.transport = httpx.MockTransport(
+        lambda req: httpx.Response(200, json={"data": [{"id": "m1"}]}))
+    out = (await _run(owner_api, "ai_source")).json()
+    assert out["status"] == "pass" and out["error_code"] is None and out["runs"] == 3, out
+    ov = (await owner_api.get("/boss-checks")).json()
+    assert next(r for r in ov["rows"] if r["key"] == "ai")["done"] is True
+    assert (ov["required_done"], ov["required_total"]) == (1, 1)
+    assert secret not in await _db_text("SELECT message, detail::text, error_code FROM ops.boss_checks")
+    assert secret not in await _db_text("SELECT detail::text, target_label FROM ops.action_log")
+
+
+async def test_ai_source_run_names_the_missing_key_of_the_first_source(owner_api: Api, db: Any) -> None:
+    org = await org_id(db)
+    await db.execute(text("""INSERT INTO agent.providers (org_id, kind, name, is_enabled, failover_rank)
+                             VALUES (:o, 'openai_compat', 'Chưa có khoá', true, 1)"""), {"o": org})
+    await db.commit()
+    out = (await _run(owner_api, "ai_source")).json()
+    assert out["status"] == "fail" and out["error_code"] == "AI_KEY_MISSING" and "khoá API" in out["message"], out
+
+
+async def test_ai_source_run_is_owner_only(owner_api: Api, client: httpx.AsyncClient, db: Any) -> None:
+    for role in ("operator", "manager"):
+        api = await login_as(client, db, role)
+        assert (await _run(api, "ai_source")).status_code == 403
+    assert await _db_text("SELECT id FROM ops.boss_checks") == "[]"
+
+
 # ─── (e) Facebook ───────────────────────────────────────────────────────────
 
 async def test_facebook_no_account_pending_then_resolved(owner_api: Api, redis: Redis) -> None:
@@ -243,21 +289,26 @@ async def test_facebook_stale_job_closed_and_cancelled_has_own_code(owner_api: A
 
 async def test_overview_rows_and_done_rules(owner_api: Api, db: Any) -> None:
     ov = (await owner_api.get("/boss-checks")).json()
-    assert [r["row"] for r in ov["rows"]] == [1, 2, 3, 4, 5, 6, 7, 8, 9]
-    assert [r["key"] for r in ov["rows"]] == ["hub", "facebook", "agy", "claude", "jev", "telegram", "remote",
+    # v0.1.55 (G2): thêm dòng 0 "ai" đứng đầu — số dòng 1–9 giữ nguyên (nhãn Gen, e2e).
+    assert [r["row"] for r in ov["rows"]] == [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    assert [r["key"] for r in ov["rows"]] == ["ai", "hub", "facebook", "agy", "claude", "jev", "telegram", "remote",
                                                   "facebook_reply", "kho_write"]
-    assert ov["rows"][2]["title"] == "Google / Antigravity" and ov["rows"][2]["checks"] == [
-        "agy_login", "agy_call", "agy_switch"]
-    # v0.1.44 (F-8c): dòng 6 Telegram (báo động & bản tin) — bắt buộc.
-    assert ov["rows"][5]["title"] == "Telegram (báo động & bản tin)" and ov["rows"][5]["checks"] == ["telegram"]
-    assert [r["optional"] for r in ov["rows"]] == [False, False, False, False, True, False, False, True, True]
+    assert ov["rows"][0]["title"] == "Có ít nhất 1 nguồn AI chạy được" and ov["rows"][0]["checks"] == ["ai_source"]
+    # Bỏ agy_switch khỏi dòng Google / Antigravity (bài kiểm của nhà phát triển).
+    assert ov["rows"][3]["title"] == "Google / Antigravity" and ov["rows"][3]["checks"] == ["agy_login", "agy_call"]
+    assert all("agy_switch" not in r["checks"] for r in ov["rows"])
+    assert ov["rows"][6]["title"] == "Telegram (báo động & bản tin)" and ov["rows"][6]["checks"] == ["telegram"]
+    # Chỉ dòng "ai" bắt buộc; mọi dòng kết nối khác là tuỳ chọn.
+    assert [r["optional"] for r in ov["rows"]] == [False, True, True, True, True, True, True, True, True, True]
     # v0.1.47 (F-79): dòng 8 Facebook trả lời — không bắt buộc, không chạy được từ nút Kiểm tra.
-    assert ov["rows"][7]["title"] == "Facebook trả lời" and ov["rows"][7]["checks"] == ["facebook_reply"]
+    assert ov["rows"][8]["title"] == "Facebook trả lời" and ov["rows"][8]["checks"] == ["facebook_reply"]
     assert "facebook_reply" not in boss.RUNNABLE
     # v0.1.50 (F-81): dòng 9 Gen ghi Kho — không bắt buộc, không có nút Kiểm tra (máy chủ tự ghi 'pass' sau lần ghi).
-    assert ov["rows"][8]["title"] == "Gen ghi Kho" and ov["rows"][8]["checks"] == ["kho_write"]
+    assert ov["rows"][9]["title"] == "Gen ghi Kho" and ov["rows"][9]["checks"] == ["kho_write"]
     assert "kho_write" in boss.CHECK_KEYS and "kho_write" not in boss.RUNNABLE
-    assert ov["required_total"] == 6 and ov["required_done"] == 0
+    assert "ai_source" in boss.CHECK_KEYS and "ai_source" in boss.RUNNABLE
+    assert ov["required_total"] == boss.REQUIRED_TOTAL == sum(1 for r in ov["rows"] if not r["optional"]) == 1
+    assert ov["required_done"] == 0
     assert set(ov["results"]) == set(boss.CHECK_KEYS) and all(v is None for v in ov["results"].values())
     org = await org_id(db)
 
@@ -265,14 +316,10 @@ async def test_overview_rows_and_done_rules(owner_api: Api, db: Any) -> None:
         body = (await owner_api.get("/boss-checks")).json()
         return {r["key"]: r["done"] for r in body["rows"]} | {"_n": body["required_done"]}
 
+    # agy chỉ cần lần gọi thử mới nhất đạt (không còn đòi đổi qua lại hai tài khoản).
     await boss.record(db, org, "agy_call", "pass")
-    await boss.record(db, org, "agy_switch", "pass")
     await db.commit()
-    assert (await rows())["agy"] is False                               # mới đổi 1 lần
-    await boss.record(db, org, "agy_switch", "fail", error_code="AGY_ACCOUNT_MISMATCH")
-    await boss.record(db, org, "agy_switch", "pass")
-    await db.commit()
-    assert (await rows())["agy"] is True                                # đổi qua lại 2 lần đạt
+    assert (await rows())["agy"] is True
     await boss.record(db, org, "agy_call", "fail", error_code="AUTH_EXPIRED")
     await db.commit()
     assert (await rows())["agy"] is False                               # lần gọi thử mới nhất lỗi
@@ -283,12 +330,110 @@ async def test_overview_rows_and_done_rules(owner_api: Api, db: Any) -> None:
     await boss.record(db, org, "hub", "pass")
     await db.commit()
     got = await rows()
-    assert got["claude"] is True and got["hub"] is True and got["facebook"] is False and got["_n"] == 2
+    # Claude gọi thử đạt ⇒ cũng đủ chứng cứ "có nguồn AI chạy được" (dòng ai bắt buộc duy nhất).
+    assert got["claude"] is True and got["hub"] is True and got["facebook"] is False and got["ai"] is True
+    assert got["_n"] == 1
+
+
+async def test_ai_source_row_done_rules(owner_api: Api, db: Any) -> None:
+    """Dòng `ai`: Đạt khi (a) có lượt agent.model_calls 'ok' trong 30 ngày (không tính Jev / embedding), HOẶC (b)
+    Claude / Google gọi thử đạt, HOẶC (c) bấm Kiểm tra (`ai_source` đạt). Lượt lỗi / quá 30 ngày không tính."""
+    org = await org_id(db)
+
+    async def ai() -> tuple[bool, dict[str, Any] | None]:
+        body = (await owner_api.get("/boss-checks")).json()
+        return next(r for r in body["rows"] if r["key"] == "ai")["done"], body["results"]["ai_source"]
+
+    assert await ai() == (False, None)
+    kinds = {"gemini": uuid.uuid4(), "system_one": uuid.uuid4()}
+    for kind, pid in kinds.items():
+        await db.execute(text("INSERT INTO agent.providers (id, org_id, kind, name) VALUES (:i, :o, :k, :n)"),
+                         {"i": pid, "o": org, "k": kind, "n": kind})
+    models = {}
+    for kind, pid in kinds.items():
+        models[kind] = (await db.execute(text("""INSERT INTO agent.models (provider_id, model_name) VALUES (:p, 'm')
+                                                 RETURNING id"""), {"p": pid})).scalar_one()
+
+    async def call(kind: str, status: str, purpose: str = "reply", ago: str = "1 hour") -> None:
+        await db.execute(text(f"""INSERT INTO agent.model_calls (org_id, at, model_id, agent_key, purpose, status)
+                                  VALUES (:o, now() - interval '{ago}', :m, 'core.gen', :p, :s)"""),
+                         {"o": org, "m": models[kind], "p": purpose, "s": status})
+        await db.commit()
+
+    await call("gemini", "error")
+    await call("gemini", "ok", ago="40 days")          # quá 30 ngày
+    await call("gemini", "ok", purpose="embedding")    # embedding không sinh văn bản
+    await call("system_one", "ok")                     # Jev không sinh văn bản
+    assert await ai() == (False, None)
+    await call("gemini", "ok")
+    done, res = await ai()
+    assert done is True and res is not None and res["status"] == "pass"
+    assert res["detail"] == {"via": "model_calls"} and res["runs"] == 0
+    assert (await owner_api.get("/boss-checks")).json()["required_done"] == 1
+
+
+async def test_ai_source_row_done_by_cli_call_or_manual_check(owner_api: Api, db: Any) -> None:
+    org = await org_id(db)
+    await boss.record(db, org, "agy_call", "pass")
+    await db.commit()
+    body = (await owner_api.get("/boss-checks")).json()
+    ai_row = next(r for r in body["rows"] if r["key"] == "ai")
+    assert ai_row["done"] is True and body["results"]["ai_source"]["detail"] == {"via": "agy_call"}
+    await db.execute(text("DELETE FROM ops.boss_checks WHERE org_id = :o"), {"o": org})
+    await db.commit()
+    assert next(r for r in (await owner_api.get("/boss-checks")).json()["rows"] if r["key"] == "ai")["done"] is False
+    await boss.record(db, org, "ai_source", "fail", error_code="AI_NO_SOURCE", message="Chưa có nguồn AI")
+    await db.commit()
+    body = (await owner_api.get("/boss-checks")).json()
+    assert next(r for r in body["rows"] if r["key"] == "ai")["done"] is False
+    assert body["results"]["ai_source"]["status"] == "fail" and body["required_done"] == 0
+    await boss.record(db, org, "ai_source", "pass", detail={"latency_ms": 9, "probe_model": "m"})
+    await db.commit()
+    body = (await owner_api.get("/boss-checks")).json()
+    assert next(r for r in body["rows"] if r["key"] == "ai")["done"] is True and body["required_done"] == 1
+
+
+async def test_failed_ai_check_is_not_masked_by_an_older_successful_call(owner_api: Api, db: Any) -> None:
+    """F-R6: Sếp bấm Kiểm tra dòng 0 và LỖI sau lần gọi model thành công cũ ⇒ vẫn 'fail' (không che bằng bằng chứng cũ);
+    lượt gọi / Claude gọi thử đạt MỚI HƠN lần kiểm lỗi mới đổi lại thành Đạt."""
+    org = await org_id(db)
+    pid = uuid.uuid4()
+    await db.execute(text("INSERT INTO agent.providers (id, org_id, kind, name) VALUES (:i, :o, 'gemini', 'g')"),
+                     {"i": pid, "o": org})
+    mid = (await db.execute(text("INSERT INTO agent.models (provider_id, model_name) VALUES (:p, 'm') RETURNING id"),
+                            {"p": pid})).scalar_one()
+    await db.commit()
+
+    async def call(ago: str) -> None:
+        await db.execute(text(f"""INSERT INTO agent.model_calls (org_id, at, model_id, agent_key, purpose, status)
+                                  VALUES (:o, now() - interval '{ago}', :m, 'core.gen', 'reply', 'ok')"""),
+                         {"o": org, "m": mid})
+        await db.commit()
+
+    async def ai() -> tuple[bool, str | None, int]:
+        body = (await owner_api.get("/boss-checks")).json()
+        row = next(r for r in body["rows"] if r["key"] == "ai")
+        res = body["results"]["ai_source"]
+        return row["done"], res["status"] if res else None, body["required_done"]
+
+    await call("20 days")
+    assert await ai() == (True, "pass", 1)                       # chưa kiểm lần nào: bằng chứng cũ đủ
+    await boss.record(db, org, "ai_source", "fail", error_code="AI_NO_SOURCE", message="Khoá bị thu hồi")
+    await db.commit()
+    assert await ai() == (False, "fail", 0)                      # kiểm LỖI mới hơn lượt gọi cũ ⇒ phải nói sự thật
+    await boss.record(db, org, "claude_call", "pass")             # Claude gọi thử đạt SAU lần kiểm lỗi
+    await db.commit()
+    assert await ai() == (True, "pass", 1)                       # bằng chứng MỚI HƠN lần kiểm lỗi ⇒ Đạt trở lại
+    await boss.record(db, org, "ai_source", "fail", error_code="AI_NO_SOURCE", message="Lại lỗi")
+    await db.commit()
+    assert await ai() == (False, "fail", 0)                      # kiểm lỗi lần nữa, mới hơn mọi bằng chứng
+    await call("0 seconds")
+    assert await ai() == (True, "pass", 1)                       # lượt gọi thật mới hơn cả lần kiểm lỗi
 
 
 async def test_switch_counter_counts_real_switches_only(owner_api: Api, db: Any) -> None:
-    """Bộ đếm "Đã đổi qua lại x/2" = `switch_passes`: không tính lượt lỗi, không tính đổi sang CHÍNH tài khoản vừa đổi
-    tới; `results.agy_switch.runs` vẫn là tổng số bản ghi (cả lỗi)."""
+    """Bộ đếm `switch_passes` (còn trả cho Kết nối): không tính lượt lỗi, không tính đổi sang CHÍNH tài khoản vừa đổi
+    tới; `results.agy_switch.runs` vẫn là tổng số bản ghi (cả lỗi). v0.1.55: dòng agy KHÔNG còn phụ thuộc bộ đếm."""
     org = await org_id(db)
     a, b = str(uuid.uuid4()), str(uuid.uuid4())
 
@@ -304,7 +449,7 @@ async def test_switch_counter_counts_real_switches_only(owner_api: Api, db: Any)
     await boss.record(db, org, "agy_switch", "pass", detail={"target_profile": a})       # lại chính tài khoản a
     await db.commit()
     got = await ov()
-    assert got["switch_passes"] == 1 and next(r for r in got["rows"] if r["key"] == "agy")["done"] is False
+    assert got["switch_passes"] == 1 and next(r for r in got["rows"] if r["key"] == "agy")["done"] is True
     await boss.record(db, org, "agy_switch", "pass", detail={"target_profile": b})
     await db.commit()
     got = await ov()

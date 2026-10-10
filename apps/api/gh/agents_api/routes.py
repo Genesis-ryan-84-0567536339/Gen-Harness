@@ -19,7 +19,7 @@ khớp theo thứ tự đăng ký, `/{agent_id}` (một đoạn biến) sẽ nu�
 """
 
 import uuid
-from typing import Any
+from typing import Any, Literal
 
 import orjson
 from fastapi import APIRouter, Depends, Response
@@ -35,7 +35,9 @@ from gh.chassis import actionlog
 from gh.chassis.policy import DEFAULT_AUTONOMY
 from gh.data.common import iso
 from gh.db import DB
+from gh.defaults import profiles
 from gh.errors import conflict, field_errors, not_found, pin_required
+from gh.providers import catalog
 from gh.providers.router import AGY_OWNER_ONLY_REASON
 
 router = APIRouter(prefix="/agents", tags=["agents"])
@@ -133,6 +135,8 @@ def _check_limits(v: dict[str, int]) -> dict[str, int]:
 #   core.refinery — gh.refinery.runner.AGENT_KEY (sàng lọc & suy luận chính);
 #   core.reply    — gh.biz.core.routes._agent_key (soạn lại / dịch nháp không gắn agent);
 #   core.gen      — gh.gen.engine.AGENT_KEY (Gen — trợ lý quản trị trong Console).
+# v0.1.55 (G1): thêm core.briefing — gh.gen.briefing.AGENT_KEY (Bản tin Gen, việc nền; trước đây dưới khoá core.gen).
+# Khoá lõi KHÔNG có dòng gán thì dùng hồ sơ tiêu chuẩn theo vai (gh.defaults.profiles): "Chuẩn: <model> (tự chọn)".
 # Ngoài ra mỗi agent identity có khoá riêng `agent:<id>` (gh.biz.duty.engine.agent_key) — danh sách động, ghép ở
 # list_bindings(). Bỏ core.intent/core.scoring/core.indexing (không nơi nào gọi model bằng các khoá đó); hàng
 # agent.bindings cũ của chúng do migration 0028 dọn — list_bindings vẫn tự ẩn nếu còn, PUT/DELETE trả 422.
@@ -140,6 +144,7 @@ CORE_AGENT_KEYS: dict[str, str] = {
     "core.refinery": "Sàng lọc & suy luận chính",
     "core.reply": "Soạn lại / dịch nháp",
     "core.gen": "Gen — trợ lý quản trị",
+    "core.briefing": "Bản tin Gen",
 }
 
 
@@ -168,21 +173,29 @@ def _binding_out(r: Any, agent_key: str) -> dict[str, Any]:
     blocked = AGY_OWNER_ONLY_REASON if r.provider_kind == "antigravity_cli" and agent_key != GEN_KEY else None
     return {"model_id": str(r.model_id), "model_name": r.model_name, "provider_name": r.provider_name,
             "temperature": float(r.temperature), "context_tokens": r.context_tokens,
-            "rule_codes": list(r.rule_codes or []), "blocked_reason": blocked}
+            "rule_codes": list(r.rule_codes or []), "blocked_reason": blocked,
+            "effort": getattr(r, "effort", None)}
 
 
 @router.get("/bindings")
 async def list_bindings(user: service.CurrentUser = Depends(READ), db: AsyncSession = DB) -> dict[str, Any]:
+    """Mỗi mục: `binding` (dòng Owner đã gán, kèm `effort`) hoặc null; `source` = 'custom' (có dòng gán — Owner đã đổi)
+    | 'standard' (chưa có dòng — dùng hồ sơ tiêu chuẩn); `standard` = model hồ sơ đang phủ khi chưa có dòng (null nếu
+    chưa có nguồn phù hợp)."""
     agents = (await db.execute(text("SELECT id, name FROM agent.identities WHERE org_id = :o ORDER BY created_at"),
                                {"o": user.org_id})).all()
     keys = [*CORE_AGENT_KEYS.items(), *((f"agent:{a.id}", a.name) for a in agents)]
     rows = (await db.execute(text("""
         SELECT b.agent_key, b.model_id, m.model_name, p.name AS provider_name, p.kind AS provider_kind,
-               b.temperature, b.context_tokens, b.rule_codes
+               b.temperature, b.context_tokens, b.rule_codes, b.effort
         FROM agent.bindings b JOIN agent.models m ON m.id = b.model_id JOIN agent.providers p ON p.id = m.provider_id
         WHERE b.org_id = :o"""), {"o": user.org_id})).all()
     by_key = {r.agent_key: r for r in rows}
-    items = [{"agent_key": k, "label": label, "binding": _binding_out(by_key[k], k) if k in by_key else None}
+    unbound = [k for k, _ in keys if k not in by_key]
+    standard = await profiles.standard_for(db, user.org_id, unbound) if unbound else {}
+    items = [{"agent_key": k, "label": label, "binding": _binding_out(by_key[k], k) if k in by_key else None,
+              "source": "custom" if k in by_key else "standard",
+              "standard": None if k in by_key else profiles.standard_public(standard.get(k))}
              for k, label in keys]
     models = (await db.execute(text("""
         SELECT m.id, m.model_name, p.name AS provider_name, m.is_enabled FROM agent.models m
@@ -198,35 +211,53 @@ class BindingIn(BaseModel):
     temperature: float = Field(default=0.3, ge=0, le=2)
     context_tokens: int = Field(default=DEFAULT_CONTEXT_TOKENS, ge=256, le=200_000)
     rule_codes: list[str] = Field(default_factory=list, max_length=20)
+    #: v0.1.55 (G1): mức suy nghĩ riêng của vai này (chỉ model CLI có mức); null = theo hồ sơ tiêu chuẩn / model.
+    effort: Literal["low", "medium", "high", "xhigh", "max"] | None = None
+
+
+def _check_effort(kind: str, model_name: str, effort: str | None) -> None:
+    """422 thân thiện khi mức suy nghĩ không hợp với model (theo `catalog.known_efforts` / `valid_efforts`)."""
+    if effort is None:
+        return
+    allowed = profiles.allowed_efforts(kind, model_name)
+    if effort in allowed:
+        return
+    if not allowed:
+        raise field_errors({"effort": f"Model “{model_name}” không chỉnh được mức suy nghĩ — bỏ trống ô này"})
+    names = ", ".join(catalog.EFFORT_LABEL[e] for e in catalog.sort_efforts(allowed))
+    raise field_errors({"effort": f"Model “{model_name}” chỉ nhận mức suy nghĩ: {names}"})
 
 
 @router.put("/bindings/{agent_key}")
 async def set_binding(agent_key: str, body: BindingIn, user: service.CurrentUser = Depends(MANAGE),
                       db: AsyncSession = DB) -> dict[str, Any]:
     label = await _agent_key_label(db, user.org_id, agent_key)
-    m = (await db.execute(text("""SELECT m.id, p.kind FROM agent.models m JOIN agent.providers p ON p.id = m.provider_id
+    m = (await db.execute(text("""SELECT m.id, m.model_name, p.kind FROM agent.models m
+                                  JOIN agent.providers p ON p.id = m.provider_id
                                   WHERE m.id = :m AND p.org_id = :o"""),
                           {"m": body.model_id, "o": user.org_id})).one_or_none()
     if m is None:
         raise not_found("Model")
     if m.kind == "antigravity_cli" and agent_key != GEN_KEY:
         raise conflict("AGY_OWNER_GEN_ONLY", AGY_GEN_ONLY_MSG)
+    _check_effort(m.kind, m.model_name, body.effort)
     await db.execute(text("""
-        INSERT INTO agent.bindings (org_id, agent_key, model_id, temperature, context_tokens, rule_codes)
-        VALUES (:o, :k, :m, :t, :ct, :rc)
+        INSERT INTO agent.bindings (org_id, agent_key, model_id, temperature, context_tokens, rule_codes, effort)
+        VALUES (:o, :k, :m, :t, :ct, :rc, :e)
         ON CONFLICT (org_id, agent_key) DO UPDATE
-          SET model_id = :m, temperature = :t, context_tokens = :ct, rule_codes = :rc"""),
+          SET model_id = :m, temperature = :t, context_tokens = :ct, rule_codes = :rc, effort = :e"""),
         {"o": user.org_id, "k": agent_key, "m": body.model_id, "t": body.temperature, "ct": body.context_tokens,
-         "rc": body.rule_codes})
+         "rc": body.rule_codes, "e": body.effort})
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id, action="agent.bound",
                            target_type="binding", target_id=agent_key, target_label=label,
                            detail=body.model_dump(mode="json"), ip=user.ip)
     r = (await db.execute(text("""
         SELECT b.model_id, m.model_name, p.name AS provider_name, p.kind AS provider_kind, b.temperature,
-               b.context_tokens, b.rule_codes
+               b.context_tokens, b.rule_codes, b.effort
         FROM agent.bindings b JOIN agent.models m ON m.id = b.model_id JOIN agent.providers p ON p.id = m.provider_id
         WHERE b.org_id = :o AND b.agent_key = :k"""), {"o": user.org_id, "k": agent_key})).one()
-    return {"agent_key": agent_key, "label": label, "binding": _binding_out(r, agent_key)}
+    return {"agent_key": agent_key, "label": label, "binding": _binding_out(r, agent_key), "source": "custom",
+            "standard": None}
 
 
 @router.delete("/bindings/{agent_key}", status_code=204)
@@ -346,7 +377,7 @@ async def _scopes_of(db: AsyncSession, agent_id: uuid.UUID) -> list[dict[str, An
 async def _binding_of(db: AsyncSession, org_id: uuid.UUID, agent_id: uuid.UUID) -> dict[str, Any] | None:
     r = (await db.execute(text("""
         SELECT b.model_id, m.model_name, p.name AS provider_name, p.kind AS provider_kind, b.temperature,
-               b.context_tokens, b.rule_codes
+               b.context_tokens, b.rule_codes, b.effort
         FROM agent.bindings b JOIN agent.models m ON m.id = b.model_id JOIN agent.providers p ON p.id = m.provider_id
         WHERE b.org_id = :o AND b.agent_key = :k"""), {"o": org_id, "k": f"agent:{agent_id}"})).one_or_none()
     return None if r is None else _binding_out(r, f"agent:{agent_id}")

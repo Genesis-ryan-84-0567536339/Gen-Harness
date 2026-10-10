@@ -254,9 +254,10 @@ describe('<SetupPage>', () => {
     });
     renderSetup();
     await screen.findByRole('heading', { name: 'Bước 10' });
-    // Bước 10 "Mời đội ngũ" đã có form thật (giai đoạn 4.6) — bỏ trống danh sách vẫn Tiếp tục được.
-    expect(screen.getByText('Chưa mời ai')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Tiếp tục/ })).toBeEnabled();
+    // v0.1.55 (G2): bước 10 là thẻ gợi ý — "Để sau" (bỏ qua) hoặc "Mời ngay" (mở form thật); không có nút Tiếp tục.
+    expect(screen.getByTestId('step10-suggestion')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Mời ngay' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Tiếp tục/ })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Để sau' }));
     expect(await screen.findByRole('heading', { name: 'Bước 11' })).toBeInTheDocument();
     // Bước 11 "Sao lưu" có form thật, mặc định hằng ngày 02:00 — vẫn bỏ qua được.
@@ -284,6 +285,10 @@ describe('<SetupPage>', () => {
     });
     renderSetup();
     await screen.findByRole('heading', { name: 'Bước 10' });
+    await user.click(screen.getByRole('button', { name: 'Mời ngay' }));
+    // Form mời thật (giai đoạn 4.6): bỏ trống danh sách vẫn Tiếp tục được.
+    expect(screen.getByText('Chưa mời ai')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Tiếp tục/ })).toBeEnabled();
     await user.click(screen.getByRole('button', { name: 'Thêm người' }));
     await user.type(screen.getByLabelText('Tên hiển thị'), 'Chị Hồng Quản');
     await user.type(screen.getByLabelText('Email'), 'hong@genesis.vn');
@@ -379,9 +384,9 @@ describe('<SetupPage>', () => {
     await user.click(screen.getByRole('button', { name: /Tiếp tục/ }));
     await screen.findByRole('heading', { name: 'Bước 9' });
     expect(await screen.findByText('Chỉ lắng nghe nhóm Owner đã bật')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Tiếp tục/ })).toBeDisabled();
-    await user.click(screen.getByLabelText('Tôi đã đọc các ranh giới trên'));
-    await user.click(screen.getByRole('button', { name: /Tiếp tục/ }));
+    // v0.1.55 (G2): không còn ô tích — một dòng ghi chú, bấm Tiếp tục là đã đọc ranh giới (gửi ack_boundaries: true).
+    expect(screen.getByTestId('step9-ack-note')).toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: /Tiếp tục/ }));
     await screen.findByRole('heading', { name: 'Bước 10' });
     expect(calls[1].body).toEqual({ autonomy_level: 4, ack_boundaries: true });
   });

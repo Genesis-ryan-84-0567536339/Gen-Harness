@@ -4,6 +4,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { migrateGen, useGenStore } from '../../src/gen/genStore';
+import { AUTO_CHOICE, MODEL_CHOICE_KEY, resetModelChoiceMemory } from '../../src/gen/modelChoice';
 
 const KEY = 'gh-gen';
 
@@ -92,5 +93,25 @@ describe('genStore v0.1.41 — lưu mã hội thoại', () => {
     expect(mod.useGenStore.getState().conversationId).toBe('c-2');
     mod.useGenStore.getState().reset();
     expect(mod.useGenStore.getState().conversationOwner).toBeNull();
+  });
+});
+
+describe('genStore v0.1.55 (G3) — lựa chọn model không đụng bản lưu `gh-gen`', () => {
+  it('modelChoice KHÔNG nằm trong `gh-gen`; reset() / setConversation() đưa về Tự động / lựa chọn đã nhớ của hội thoại', () => {
+    window.localStorage.removeItem(MODEL_CHOICE_KEY);
+    resetModelChoiceMemory();
+    useGenStore.getState().setConversation('u1', 'c-7');
+    useGenStore.getState().setModelChoice({ tier: 'deep', effort: 'high' });
+    expect(useGenStore.getState().modelChoice).toEqual({ tier: 'deep', effort: 'high' });
+    expect(saved().state).not.toHaveProperty('modelChoice');
+    expect(JSON.parse(window.localStorage.getItem(MODEL_CHOICE_KEY) ?? '{}')).toEqual({ 'c-7': { tier: 'deep', effort: 'high' } });
+    useGenStore.getState().reset();
+    expect(useGenStore.getState().modelChoice).toEqual(AUTO_CHOICE);
+    useGenStore.getState().setConversation('u1', 'c-7');
+    expect(useGenStore.getState().modelChoice).toEqual({ tier: 'deep', effort: 'high' });
+    useGenStore.getState().setConversation('u1', 'c-8');
+    expect(useGenStore.getState().modelChoice).toEqual(AUTO_CHOICE);
+    window.localStorage.removeItem(MODEL_CHOICE_KEY);
+    resetModelChoiceMemory();
   });
 });

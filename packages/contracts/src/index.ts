@@ -27,3 +27,5 @@ export * from './bossChecks';
 export * from './autonomy';
 export * from './telegram';
 export * from './diagnostics';
+export * from './defaults';
+export * from './owner';

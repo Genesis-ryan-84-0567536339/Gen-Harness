@@ -140,7 +140,7 @@ test.describe('v0.1.49 — Bản tin Gen đọc lịch / mail / việc qua Gen-h
     await expect(hub.getByText(/^Đạt · /)).toBeVisible();
     await expect(hub.getByTestId('boss-hub-scopes')).toContainText('Quyền đọc thêm (không bắt buộc): Lịch ✗ · Mail ✗ · Việc ✓ · Drive ✓');
     await expect(hub).toContainText('tick thêm quyền đọc');
-    await expect(page.getByText(/Đã đạt \d\/6 dòng bắt buộc/)).toBeVisible();
+    await expect(page.getByText(/Đã đạt \d\/\d+ dòng bắt buộc/)).toBeVisible();
 
     // Tick đủ quyền rồi Kiểm tra lại ⇒ "Đủ quyền"; bộ ngắt mở ⇒ dải "Gen-hub tạm không trả lời".
     await p3Hook(page.request, 'mcp', 'hubSim', { scopes: 'full', breaker: true });

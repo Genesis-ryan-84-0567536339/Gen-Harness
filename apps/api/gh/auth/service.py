@@ -54,6 +54,9 @@ PIN_OPERATIONS: dict[str, str] = {
     # v0.1.44 (F-8c, F-4b): nơi nhận báo động/bản tin (token bot Telegram) và gói chẩn đoán (log máy chủ).
     "notify.change": "Đổi nơi nhận báo động (Telegram)",
     "diagnostics.download": "Tải gói chẩn đoán",
+    # v0.1.55 (G1): "Về mặc định tất cả" — đưa mọi cài đặt có thể reset về mặc định (không đụng khoá API, phiên CLI, mã
+    # PIN, mật khẩu, token Gen-hub/Telegram, tài khoản mạng xã hội, danh tính tổ chức, ranh giới cứng).
+    "defaults.reset_all": "Về mặc định tất cả cài đặt",
 }
 
 

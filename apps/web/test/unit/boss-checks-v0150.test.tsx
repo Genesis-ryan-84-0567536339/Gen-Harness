@@ -13,7 +13,7 @@ import type { P2Ctx } from '../mock-phase2';
 /**
  * v0.1.50 (F-81, QD-18) — dòng 9 "Gen ghi Kho" (không bắt buộc, KHÔNG có nút Kiểm tra): Đạt khi kho_write pass; chưa đạt → hướng dẫn
  * 2 bước (tick quyền ghi ở Gen-hub + Kiểm tra; duyệt đề xuất PHIEN đầu tiên); dòng Gen-hub hiện write_scopes từ detail nếu có;
- * required_total vẫn 6. Máy chủ cũ (không có dòng 9 / kho_write) → không hiện dòng chết.
+ * v0.1.55: `required_total` do máy chủ trả (chỉ dòng 0 "nguồn AI" bắt buộc ⇒ 1). Máy chủ cũ (không có dòng 9 / kho_write) → không hiện dòng chết.
  */
 
 const json = (status: number, body?: unknown) =>
@@ -28,16 +28,17 @@ const me = {
 
 const EMPTY: Record<string, BossCheck | null> = {
   hub: null, facebook: null, agy_login: null, agy_call: null, agy_switch: null, claude_login: null, claude_call: null,
-  jev: null, telegram: null, remote_access: null, facebook_reply: null,
+  jev: null, telegram: null, remote_access: null, facebook_reply: null, ai_source: null,
 };
 const ROWS: BossOverview['rows'] = [
-  { row: 1, key: 'hub', title: 'Nối Gen-hub', optional: false, checks: ['hub'], done: false },
-  { row: 2, key: 'facebook', title: 'Kết nối Facebook', optional: false, checks: ['facebook'], done: false },
-  { row: 3, key: 'agy', title: 'Google', optional: false, checks: ['agy_login', 'agy_call', 'agy_switch'], done: false },
-  { row: 4, key: 'claude', title: 'Claude Code', optional: false, checks: ['claude_login', 'claude_call'], done: false },
+  { row: 0, key: 'ai', title: 'Có ít nhất 1 nguồn AI chạy được', optional: false, checks: ['ai_source'], done: false },
+  { row: 1, key: 'hub', title: 'Nối Gen-hub', optional: true, checks: ['hub'], done: false },
+  { row: 2, key: 'facebook', title: 'Kết nối Facebook', optional: true, checks: ['facebook'], done: false },
+  { row: 3, key: 'agy', title: 'Google', optional: true, checks: ['agy_login', 'agy_call'], done: false },
+  { row: 4, key: 'claude', title: 'Claude Code', optional: true, checks: ['claude_login', 'claude_call'], done: false },
   { row: 5, key: 'jev', title: 'Jev', optional: true, checks: ['jev'], done: false },
-  { row: 6, key: 'telegram', title: 'Telegram (báo động & bản tin)', optional: false, checks: ['telegram'], done: false },
-  { row: 7, key: 'remote', title: 'Truy cập từ xa', optional: false, checks: ['remote_access'], done: false },
+  { row: 6, key: 'telegram', title: 'Telegram (báo động & bản tin)', optional: true, checks: ['telegram'], done: false },
+  { row: 7, key: 'remote', title: 'Truy cập từ xa', optional: true, checks: ['remote_access'], done: false },
   { row: 8, key: 'facebook_reply', title: 'Facebook trả lời', optional: true, checks: ['facebook_reply'], done: false },
   { row: 9, key: 'kho_write', title: 'Gen ghi Kho', optional: true, checks: ['kho_write'], done: false },
 ];
@@ -48,7 +49,7 @@ const pass = (key: BossCheckKey, detail: BossCheck['detail'] = {}): BossCheck =>
 
 function setup(opts: { kho?: BossCheck | null; hub?: BossCheck | null; withRow?: boolean; withKey?: boolean } = {}) {
   const calls: string[] = [];
-  const rows = (opts.withRow ?? true) ? ROWS.map((r) => (r.row === 9 ? { ...r, done: opts.kho?.status === 'pass' } : r)) : ROWS.slice(0, 8);
+  const rows = (opts.withRow ?? true) ? ROWS.map((r) => (r.row === 9 ? { ...r, done: opts.kho?.status === 'pass' } : r)) : ROWS.slice(0, 9);
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
@@ -56,7 +57,7 @@ function setup(opts: { kho?: BossCheck | null; hub?: BossCheck | null; withRow?:
       calls.push(`${init?.method ?? 'GET'} ${path}`);
       if (path === '/boss-checks') {
         const results = { ...EMPTY, hub: opts.hub ?? null, ...((opts.withKey ?? true) ? { kho_write: opts.kho ?? null } : {}) };
-        return json(200, { rows, results, required_done: 0, required_total: 6, switch_passes: 0 });
+        return json(200, { rows, results, required_done: 0, required_total: 1, switch_passes: 0 });
       }
       if (path === '/social/accounts') return json(200, { items: [] });
       if (path === '/cli/profiles') return json(200, []);
@@ -86,10 +87,10 @@ afterEach(() => {
 });
 
 describe('Việc Sếp cần làm — dòng 9 Gen ghi Kho', () => {
-  it('chưa đạt: "Không bắt buộc", "Chưa kiểm", hướng dẫn 2 bước, nút mở Kết nối › Gen-hub, KHÔNG có nút Kiểm tra; required_total vẫn 6', async () => {
+  it('chưa đạt: "Không bắt buộc", "Chưa kiểm", hướng dẫn 2 bước, nút mở Kết nối › Gen-hub, KHÔNG có nút Kiểm tra', async () => {
     const calls = setup();
     renderPage();
-    expect(await screen.findByText('Đã đạt 0/6 dòng bắt buộc')).toBeInTheDocument();
+    expect(await screen.findByText('Đã đạt 0/1 dòng bắt buộc')).toBeInTheDocument();
     const row = screen.getByRole('region', { name: 'Gen ghi Kho' });
     expect(within(row).getByText('Không bắt buộc')).toBeInTheDocument();
     expect(within(row).getByText('09')).toBeInTheDocument();
@@ -130,7 +131,7 @@ describe('Việc Sếp cần làm — dòng 9 Gen ghi Kho', () => {
   it('máy chủ cũ không có dòng 9 → không hiện dòng chết; có dòng mà thiếu khoá kho_write → "Chưa kiểm", không lỗi', async () => {
     setup({ withRow: false });
     const first = renderPage();
-    expect(await screen.findByText('Đã đạt 0/6 dòng bắt buộc')).toBeInTheDocument();
+    expect(await screen.findByText('Đã đạt 0/1 dòng bắt buộc')).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Gen ghi Kho' })).toBeNull();
     first.unmount();
     vi.unstubAllGlobals();
@@ -194,7 +195,7 @@ describe('bossChecksModel — quyền ghi Kho', () => {
   });
 
   it('resultOf đọc kho_write như facebook_reply: vắng ⇒ null', () => {
-    const base = { rows: [], required_done: 0, required_total: 6, switch_passes: 0 };
+    const base = { rows: [], required_done: 0, required_total: 1, switch_passes: 0 };
     expect(resultOf({ ...base, results: { ...EMPTY } } as unknown as BossOverview, 'kho_write')).toBeNull();
     expect(resultOf({ ...base, results: { ...EMPTY, kho_write: pass('kho_write') } } as unknown as BossOverview, 'kho_write')?.status).toBe('pass');
     expect(resultOf(undefined, 'kho_write')).toBeNull();
@@ -228,11 +229,11 @@ describe('mock-boss-checks — dòng 9', () => {
     return out as unknown as { status: number; body: Record<string, unknown> };
   }
 
-  it('có dòng 9 tuỳ chọn, required_total 6; POST run → 404; recordKhoWrite → Đạt; dòng hub kèm write_scopes', () => {
+  it('có dòng 9 tuỳ chọn, required_total 1 (chỉ dòng "ai"); POST run → 404; recordKhoWrite → Đạt; dòng hub kèm write_scopes', () => {
     const mock = makeMock();
     const ov0 = call(mock, 'GET', '/boss-checks').body as unknown as BossOverview;
     expect(ov0.rows.find((r) => r.row === 9)).toMatchObject({ key: 'kho_write', title: 'Gen ghi Kho', optional: true, done: false });
-    expect(ov0.required_total).toBe(6);
+    expect(ov0.required_total).toBe(1);
     expect(ov0.results.kho_write).toBeNull();
     expect(call(mock, 'POST', '/boss-checks/kho_write/run').status).toBe(404);
 
@@ -244,6 +245,6 @@ describe('mock-boss-checks — dòng 9', () => {
     const ov1 = call(mock, 'GET', '/boss-checks').body as unknown as BossOverview;
     expect(ov1.results.kho_write?.status).toBe('pass');
     expect(ov1.rows.find((r) => r.row === 9)?.done).toBe(true);
-    expect(ov1.required_done).toBe(1); // chỉ dòng hub — dòng 9 không tính vào bắt buộc
+    expect(ov1.required_done).toBe(0); // dòng hub và dòng 9 đều tuỳ chọn — chỉ dòng 0 "ai" mới tính
   });
 });

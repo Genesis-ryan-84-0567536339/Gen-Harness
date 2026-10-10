@@ -14,6 +14,8 @@
 - v0.1.50 (F-81): `hub` Đạt thì lưu thêm `write_scopes` ({kho, kho_create, kho_update: bool}) và `write_missing` —
   cũng chỉ để hiển thị. Dòng 9 "Gen ghi Kho" (`kho_write`) KHÔNG chạy được từ đây (không nằm trong RUNNABLE): máy
   chủ tự ghi 'pass' sau lần ghi Kho thật đầu tiên (gh.hub_link.service.write_kho).
+- v0.1.55 (G2): `ai_source` (dòng 0 "nguồn AI", duy nhất bắt buộc) chạy được từ đây — gọi thử nguồn đầu chuỗi sẵn sàng
+  (`ModelRouter.test_provider`, như nút Kiểm tra ở Bộ não AI). Không cần PIN; không ghi khoá vào log / kết quả.
 - Phản hồi cho Owner được kèm email ĐẦY ĐỦ (`account`); CSDL chỉ lưu email đã che.
 - Lỗi TẠM (bận/hạn mức: `TRANSIENT_CODES`) KHÔNG ghi thành bản kiểm: trả `{transient: true, status: 'fail', …}` để web
   báo ngay cạnh nút, còn kết quả đã lưu (Đạt / Đang chạy…) giữ nguyên — bấm lại khi đang chạy không biến "Xong" thành
@@ -90,6 +92,8 @@ async def run_check(key: str, request: Request, body: BossRunIn | None = None,
             return await _run_switch(request, db, user, body.profile_id)
         if key == "remote_access":
             return await _run_remote(request, db, user)
+        if key == "ai_source":
+            return await _run_ai_source(request, db, user)
         if key == "telegram":
             # v0.1.44 (F-8c): cùng hàm với POST /notify/telegram/test (ghi bản kiểm + yêu cầu genh gửi thử).
             from gh.telegram.routes import run_test as telegram_test
@@ -240,6 +244,46 @@ async def _run_call(request: Request, db: AsyncSession, user: service.CurrentUse
     if key == "claude_call" and ok:
         await _adopt_existing_claude_login(db, user, result)
     return out
+
+
+AI_NO_SOURCE_MSG = ("Chưa có nguồn AI nào — thêm khoá API hoặc đăng nhập Google / Claude Code ở Kết nối › Bộ não AI "
+                    "rồi bấm Kiểm tra")
+AI_NO_KEY_MSG = "Nguồn AI đầu chuỗi chưa có khoá API — thêm khoá ở Cài đặt › Bộ não AI rồi bấm Kiểm tra"
+
+
+async def _run_ai_source(request: Request, db: AsyncSession, user: service.CurrentUser) -> dict[str, Any]:
+    """v0.1.55: gọi thử nguồn AI đầu chuỗi (nguồn bật, có khoá API / phiên CLI) — như `POST /providers/{id}/test`.
+    Không có nguồn nào sẵn sàng thì ghi 'fail' kèm câu chỉ đường (nguồn đầu chuỗi chưa có khoá / chưa đăng nhập)."""
+    rows = (await db.execute(text("""
+        SELECT p.id, p.name, p.kind,
+               EXISTS (SELECT 1 FROM agent.provider_keys k WHERE k.provider_id = p.id AND k.is_enabled) AS has_key,
+               EXISTS (SELECT 1 FROM agent.cli_profiles c WHERE c.provider_id = p.id AND c.is_active
+                       AND c.token_enc IS NOT NULL) AS has_session
+        FROM agent.providers p
+        WHERE p.org_id = :o AND p.is_enabled AND p.kind NOT IN ('embedding', 'system_one')
+        ORDER BY p.failover_rank NULLS LAST, p.created_at"""), {"o": user.org_id})).all()
+    if not rows:
+        return await boss.record(db, user.org_id, "ai_source", "fail", error_code="AI_NO_SOURCE",
+                                 message=AI_NO_SOURCE_MSG, user_id=user.id)
+    ready = [r for r in rows if (r.has_session if r.kind in climod.CLI_KINDS else r.has_key)]
+    if not ready:
+        first = rows[0]
+        if first.kind == climod.AGY:
+            code, msg = NOT_READY["agy_call"]
+        elif first.kind == climod.CLAUDE:
+            code, msg = NOT_READY["claude_call"]
+        else:
+            code, msg = "AI_KEY_MISSING", AI_NO_KEY_MSG
+        return await boss.record(db, user.org_id, "ai_source", "fail", error_code=code, message=msg, user_id=user.id)
+    p = ready[0]
+    result = await _probe(request, db, user, p, p.kind)
+    ok = bool(result["ok"])
+    if not ok and result.get("error_code") in TRANSIENT_CODES:
+        return transient("ai_source", str(result["error_code"]), result.get("error"))
+    return await boss.record(db, user.org_id, "ai_source", "pass" if ok else "fail",
+                             error_code=None if ok else (result.get("error_code") or "PROVIDER_ERROR"),
+                             message=None if ok else result.get("error"), detail=_call_detail(result),
+                             user_id=user.id)
 
 
 async def _adopt_existing_claude_login(db: AsyncSession, user: service.CurrentUser, result: dict[str, Any]) -> None:

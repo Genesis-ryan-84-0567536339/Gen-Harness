@@ -382,6 +382,9 @@ test('setup steps 4–7 and 12 against the mock', async ({ page }) => {
 
   // Bước 7 — presets + weights.
   await expect(page.getByRole('heading', { name: 'Sàng lọc dữ liệu' })).toBeVisible();
+  // v0.1.55: từng quy tắc R-01…R-06 nằm trong "Nâng cao — lịch sàng lọc và từng quy tắc" (đóng sẵn) — mở ra mới thấy.
+  await expect(page.getByText('R-06').first()).toBeHidden();
+  await page.getByText('Nâng cao — lịch sàng lọc và từng quy tắc').click();
   await expect(page.getByText('R-06').first()).toBeVisible();
   await page.screenshot({ path: join(outDir, 'setup-step7-1440.png'), fullPage: true });
   // v0.1.43 (F-30): trọng số gập trong "Nâng cao" — đóng sẵn, mở ra mới thấy; vẫn lưu được không cần mở.
@@ -393,23 +396,25 @@ test('setup steps 4–7 and 12 against the mock', async ({ page }) => {
   await expect(next).toBeEnabled();
   await next.click();
 
-  // Bước 8–9 đã có form thật (v0.1.15: 5–11 là tuỳ chọn, "Để sau" bỏ qua được). Form 8 hiện đủ ô nhưng
-  // "Tiếp tục" chỉ bật khi đã nhập tên + vai trò; ở đây để sau cả hai (luồng tạo agent có test riêng).
+  // Bước 8–9 đã có form thật (v0.1.15: 5–11 là tuỳ chọn, "Để sau" bỏ qua được). v0.1.55 (Thiết lập gọn): form 8 điền sẵn theo mẫu nên
+  // "Tiếp tục" bật ngay, bước 9 chỉ còn một dòng ghi chú (không còn ô tích); ở đây vẫn để sau cả hai (luồng tạo agent có test riêng).
   const skip = page.getByRole('button', { name: 'Để sau', exact: true });
   await expect(page.getByRole('heading', { name: 'Agent đầu tiên' })).toBeVisible();
   await expect(page.getByLabel('Tên agent')).toBeVisible();
-  await expect(next).toBeDisabled();
+  await expect(next).toBeEnabled();
   await skip.click();
   await expect(page.getByRole('heading', { name: 'Tự trị & ranh giới' })).toBeVisible();
-  await expect(next).toBeDisabled(); // cần tick "Tôi đã đọc các ranh giới trên"
+  await expect(page.getByRole('checkbox')).toHaveCount(0);
+  await expect(next).toBeEnabled();
   await skip.click();
 
-  // Bước 10–11: lưu bằng giá trị mặc định (danh sách mời rỗng vẫn hợp lệ, lịch sao lưu mặc định hằng ngày
-  // 02:00 vẫn hợp lệ) — 8–9 đã "để sau" nên không kéo trang quay lại. Luồng điền/thấy mật khẩu tạm thật của
-  // bước 10 có test riêng ở flows.spec.ts "Trình thiết lập bước 10–11".
+  // Bước 10–11: v0.1.55 — bước 10 là thẻ gợi ý có nút chính "Để sau"; sao lưu mặc định hằng ngày 02:00 vẫn hợp lệ — 8–9 đã
+  // "để sau" nên không kéo trang quay lại. Luồng điền/thấy mật khẩu tạm thật của bước 10 có test riêng ở flows.spec.ts
+  // "Trình thiết lập bước 10–11".
   await expect(page.getByRole('heading', { name: 'Mời đội ngũ' })).toBeVisible();
   await expect(page.getByText('Sắp có')).toHaveCount(0);
-  await next.click();
+  await expect(page.getByTestId('step10-suggestion')).toBeVisible();
+  await skip.click();
   await expect(page.getByRole('heading', { name: 'Sao lưu' })).toBeVisible();
   await expect(page.getByLabel('Giờ chạy (HH:MM)')).toHaveValue('02:00');
   await next.click();
@@ -421,8 +426,8 @@ test('setup steps 4–7 and 12 against the mock', async ({ page }) => {
   await expect(page.getByText('Lần sàng lọc đầu tiên đã xong.')).toBeVisible({ timeout: 15_000 });
   await page.screenshot({ path: join(outDir, 'setup-step12-1440.png'), fullPage: true });
   await page.getByRole('button', { name: /Vào Console/ }).click();
-  await expect(page).toHaveURL(/\/overview/);
+  await expect(page).toHaveURL(/\/owner$/);
   const state = await apiCall(page, 'GET', '/setup/state');
   expect(state.finished).toBe(true);
-  expect(state.steps.filter((s: { status: string }) => s.status === 'skipped').map((s: { n: number }) => s.n)).toEqual([8, 9]);
+  expect(state.steps.filter((s: { status: string }) => s.status === 'skipped').map((s: { n: number }) => s.n)).toEqual([8, 9, 10]);
 });

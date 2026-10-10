@@ -80,6 +80,9 @@ export interface Step3Values {
 
 export type Errors<T> = Partial<Record<keyof T, string>>;
 
+/** v0.1.55: cách xưng hô điền sẵn ở bước 3 (cả "Sếp tự xưng" lẫn "Agent gọi Sếp") — khớp `DEFAULT_ADDRESSING` của api. */
+export const DEFAULT_ADDRESSING = 'Sếp';
+
 export function step1Errors(v: Step1Values): Errors<Step1Values> {
   const e: Errors<Step1Values> = {};
   const t = validateToken(v.token);

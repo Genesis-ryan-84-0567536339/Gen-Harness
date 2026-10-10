@@ -7,6 +7,8 @@
  */
 import type {
   GroupRef,
+  JevBenchmark,
+  SkippedItem,
   InboxDetail,
   InboxItem,
   InboxTab,
@@ -17,13 +19,15 @@ import type {
 } from '@gen-harness/contracts';
 import { BAO, GROUP_TP, registerExplain } from './mock-p3-core';
 import { AGENT_IDS, USER_IDS, rejectNonUuid } from './mock-ids';
-import type { P2Ctx } from './mock-phase2';
+import { maskText, type P2Ctx } from './mock-phase2';
 
 export interface P3Options {
   fresh: boolean;
   emit: (type: string, data: unknown) => void;
   /** v0.1.35: người dùng đang hoạt động theo id (mock-api `users`) — giao việc kiểm như API (UUID lạ → 404). */
   findUser?: (id: string) => { id: string; display_name: string } | undefined;
+  /** v0.1.55 (G4): `POST /jev/enable` thành công ⇒ mock-api thêm nguồn Jev (system_one) vào danh sách `/providers`. */
+  onJevEnabled?: (r: { provider_id: string; endpoint: string; model: string; key_tail: string }) => void;
 }
 
 const ago = (min: number) => new Date(Date.now() - min * 60_000).toISOString();
@@ -243,13 +247,57 @@ function overviewPayload(items: InboxRow[], silenced: Set<string>, tasks: Task[]
   };
 }
 
+/** v0.1.55 (J2): "Tin đã bỏ qua" mẫu — chữ có số điện thoại để thử che với vai không phải Owner. */
+function seedSkipped(): SkippedItem[] {
+  return [
+    {
+      id: 'sk-1', code: 'RAW-000101', at: ago(12), kind: 'text', reason: 'spam_rule_jev',
+      reason_text: 'Rác — quy tắc và Jev cùng chấm rác',
+      text: 'KHUYẾN MÃI SỐC!!! Nhận quà miễn phí, click ngay http://abc.xyz — liên hệ 0912345678', group: 'Nhóm Thép Phát', person: 'Số lạ 7',
+    },
+    {
+      id: 'sk-2', code: 'RAW-000102', at: ago(55), kind: 'text', reason: 'exact_dup',
+      reason_text: 'Trùng hẳn một tin đã có',
+      text: 'Cần 3 container thép cuộn giao Bình Dương trong tháng này, báo giá giúp em nhé anh', group: 'Nhóm Thép Phát', person: 'Chị Lan Phạm',
+    },
+  ];
+}
+
+/** Bộ 12 câu mẫu (khớp gh/gen/jev_bench.py): 6 ý định + 6 lọc tin; 2 câu cuối cho Jev "trả sai" để bảng có cả Đúng/Sai. */
+function benchmarkResult(): JevBenchmark {
+  const rows: [string, string, string, number][] = [
+    ['Tuần này khách nào hỏi giá nhiều nhất vậy em?', 'hỏi dữ liệu / tóm tắt tình hình', 'hỏi dữ liệu / tóm tắt tình hình', 410],
+    ['Hôm nay có việc nào quá hạn chưa xử lý không?', 'hỏi dữ liệu / tóm tắt tình hình', 'hỏi dữ liệu / tóm tắt tình hình', 388],
+    ['Chỉ anh cách thêm một nguồn model mới ở màn nào với?', 'hỏi cách làm / cần dẫn đường trên giao diện', 'hỏi cách làm / cần dẫn đường trên giao diện', 402],
+    ['Làm sao để bật sao lưu tự động hằng đêm?', 'hỏi cách làm / cần dẫn đường trên giao diện', 'hỏi cách làm / cần dẫn đường trên giao diện', 395],
+    ['Cho anh báo cáo tóm tắt doanh số tháng này, có số liệu cụ thể nhé.', 'xin báo cáo có số liệu', 'xin báo cáo có số liệu', 431],
+    ['Viết giúp anh đoạn mã Python đọc một tệp CSV rồi cộng cột cuối.', 'ngoài phạm vi quản trị app (code, máy chủ, nói chuyện với khách)', 'ngoài phạm vi quản trị app (code, máy chủ, nói chuyện với khách)', 377],
+    ['KHUYẾN MÃI SỐC!!! Click ngay để nhận quà miễn phí, đăng ký ngay hôm nay', 'rác / quảng cáo / không liên quan kinh doanh', 'rác / quảng cáo / không liên quan kinh doanh', 352],
+    ['Vay tiền nhanh giải ngân trong 5 phút, không cần thế chấp, inbox ngay', 'rác / quảng cáo / không liên quan kinh doanh', 'rác / quảng cáo / không liên quan kinh doanh', 361],
+    ['ok em nhé', 'ít giá trị', 'ít giá trị', 340],
+    ['Anh gửi em danh sách hàng tồn kho tháng này để em xem trước nhé', 'giá trị trung bình', 'giá trị trung bình', 372],
+    ['Bên em cần mua 3 container ván MDF giao Bình Dương trong tháng 10, báo giá giúp em', 'giá trị cao — cần xử lý sớm', 'giá trị cao — cần xử lý sớm', 399],
+    ['Khách phàn nàn đơn giao trễ 5 ngày, đòi hoàn tiền, cần xử lý gấp trong hôm nay', 'giá trị cao — cần xử lý sớm', 'giá trị trung bình', 384],
+  ];
+  const items = rows.map(([question, expected, got, latency_ms]) => ({ question, expected, got, ok: expected === got, latency_ms }));
+  return { total: 12, correct: items.filter((i) => i.ok).length, avg_latency_ms: 384, items };
+}
+
 export function createMock(opts: P3Options) {
   let items: InboxRow[] = opts.fresh ? [] : seedInboxItems();
   let tasks: Task[] = opts.fresh ? [] : seedTasks();
   let promises: PromiseItem[] = opts.fresh ? [] : seedPromises();
   const silenced = new Map<string, { reason: string | null; until: string | null }>();
   const has = (ctx: P2Ctx, perm: string) => !!ctx.perms[perm] && ctx.perms[perm] !== 'none';
-  const triage = { enabled: true, min_score: 30, use_jev: true };
+  const triage = { enabled: true, min_score: 30, use_jev: true, prefilter: true };
+  // v0.1.55 (G4): Jev đã có khoá? (bản "fresh" chưa bật). `POST /jev/enable` bật nó và báo mock-api (`onJevEnabled`) thêm
+  // nguồn Jev vào `/providers` để thẻ Jev hiện nguồn mới ở dev:mock/e2e.
+  let jevKey = !opts.fresh;
+  const skipped = opts.fresh ? [] : seedSkipped();
+  const keyMissing = (problem: P2Ctx['problem']) =>
+    problem(409, 'JEV_KEY_MISSING', 'Chưa có khóa OpenRouter cho Jev', {
+      reasons: ['Không có nguồn model kind=system_one đang bật kèm khóa (agent.providers / agent.provider_keys).'],
+    });
   const isJunk = (r: InboxRow) => !!r.triage && (r.triage.spam || !!r.triage.duplicate_of || r.triage.score < triage.min_score);
 
   registerExplain('task', (id) => {
@@ -305,6 +353,42 @@ export function createMock(opts: P3Options) {
         spam: marked.filter((i) => i.triage?.spam).length, low_score: 0, pending: 0, avg_quality: 48,
         jev: { count: 0, heuristic_count: marked.length, avg_latency_ms: null, spam_agreement: null },
       });
+    }
+
+    if (p === '/refinery/triage/skipped' && m === 'GET') {
+      if (!has(ctx, 'queue.read')) return problem(403, 'FORBIDDEN', 'Vai trò không có quyền này');
+      const limit = Number(url.searchParams.get('limit') ?? 50);
+      return reply(200, {
+        items: skipped.slice(0, limit).map((i) => ({ ...i, text: ctx.owner ? i.text : (maskText(i.text) ?? '') })),
+        total: skipped.length, days: 30,
+      });
+    }
+    if (p === '/jev/value-summary' && m === 'GET') {
+      if (ctx.role !== 'owner') return problem(403, 'FORBIDDEN', 'Chỉ Owner');
+      const spam = skipped.filter((i) => i.reason !== 'exact_dup').length;
+      return reply(200, { filtered: 18 + skipped.length, spam_blocked: 11 + spam, calls_saved: 7 + skipped.length, jev_on: jevKey });
+    }
+    if (p === '/jev/benchmark' && m === 'POST') {
+      if (ctx.role !== 'owner') return problem(403, 'FORBIDDEN', 'Chỉ Owner');
+      if (!jevKey) return keyMissing(problem);
+      return reply(200, benchmarkResult());
+    }
+    if (p === '/jev/enable' && m === 'POST') {
+      if (ctx.role !== 'owner') return problem(403, 'FORBIDDEN', 'Chỉ Owner');
+      if (ctx.needPin()) return problem(423, 'PIN_REQUIRED', 'Thao tác này cần nhập mã PIN');
+      const b = body as { use_existing_openrouter?: boolean; key?: string };
+      const pasted = typeof b.key === 'string' ? b.key.trim() : '';
+      if (b.use_existing_openrouter && pasted) return problem(422, 'VALIDATION', 'Dữ liệu chưa hợp lệ', { errors: { key: 'Chọn một: dùng khóa OpenRouter đang có hoặc dán khóa mới, không cả hai' } });
+      if (!b.use_existing_openrouter && pasted.length < 8 && !jevKey) return keyMissing(problem);
+      const created = !jevKey;
+      jevKey = true;
+      const out = {
+        provider_id: '00000000-0000-4000-8000-0000000000e5', created,
+        key_source: b.use_existing_openrouter ? 'existing_openrouter' : pasted ? 'pasted' : 'kept',
+        endpoint: 'https://openrouter.ai/api/v1', model: 'typesafe/jev-1.13',
+      };
+      opts.onJevEnabled?.({ provider_id: out.provider_id, endpoint: out.endpoint, model: out.model, key_tail: pasted ? pasted.slice(-4) : 'or01' });
+      return reply(200, out);
     }
 
     if (seg[0] === 'inbox') {
@@ -473,6 +557,11 @@ export function createMock(opts: P3Options) {
       promises: () => promises,
       setTasks: (rows: Task[]) => {
         tasks = rows;
+      },
+      /** e2e (F-R9): đặt Jev "đã có khoá" hay chưa — `false` ⇒ benchmark / enable trả 409 JEV_KEY_MISSING như API. */
+      jevKey: (b: { on?: boolean } = {}) => {
+        jevKey = b.on !== false;
+        return { jev_key: jevKey };
       },
     } as Record<string, (...args: never[]) => unknown>,
     dispose: () => {},

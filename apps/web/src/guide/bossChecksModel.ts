@@ -14,11 +14,13 @@ export const BOSS_CHECKS_KEY = ['boss-checks'] as const;
 export const BOSS_CHECKS_PATH = '/guide/viec-sep';
 
 /**
- * v0.1.54 (Gen hướng dẫn): mục tiêu `data-gen-target` của 9 dòng "Việc Sếp cần làm" — khoá = `key` của dòng (khớp `ROWS` trong
- * apps/api/gh/boss_checks/service.py; vitest `coach-v0154` so khớp hai bên), `row` = số dòng. Các literal `genTarget: '…'`
- * ĐỂ NGUYÊN dạng này: bộ quét tĩnh của gen-targets.test.ts đọc chúng để biết id nào đã được gắn vào màn hình.
+ * v0.1.54 (Gen hướng dẫn): mục tiêu `data-gen-target` của các dòng kết nối "Việc Sếp cần làm" — khoá = `key` của dòng (khớp `ROWS`
+ * trong apps/api/gh/boss_checks/service.py; vitest `coach-v0154` so khớp hai bên), `row` = số dòng. Các literal
+ * `genTarget: '…'` ĐỂ NGUYÊN dạng này: bộ quét tĩnh của gen-targets.test.ts đọc chúng để biết id nào đã được gắn vào màn hình.
+ * v0.1.55: dòng 0 `ai` (nguồn AI, bắt buộc duy nhất).
  */
 export const BOSS_ROW_TARGETS = {
+  ai: { row: 0, genTarget: 'boss_checks.row.ai' },
   hub: { row: 1, genTarget: 'boss_checks.row.hub' },
   facebook: { row: 2, genTarget: 'boss_checks.row.facebook' },
   agy: { row: 3, genTarget: 'boss_checks.row.agy' },
@@ -30,7 +32,7 @@ export const BOSS_ROW_TARGETS = {
   kho_write: { row: 9, genTarget: 'boss_checks.row.kho_write' },
 } as const;
 
-/** Số dòng (1..9) → id `data-gen-target` của dòng đó; số lạ ⇒ undefined (không gắn). */
+/** Số dòng (0..9) → id `data-gen-target` của dòng đó; số lạ ⇒ undefined (không gắn). */
 export function bossRowTarget(n: number): string | undefined {
   return Object.values(BOSS_ROW_TARGETS).find((r) => r.row === n)?.genTarget;
 }
@@ -61,6 +63,9 @@ export const BOSS_ERROR_TEXT: Record<string, string> = {
   SOCIAL_READ_CANCELLED: 'Lượt đọc Facebook đã bị huỷ — bấm Đọc ngay lần nữa.',
   WORKER_TIMEOUT: 'Lượt đọc Facebook chạy quá lâu nên đã dừng — mở trang Tài khoản mạng xã hội xem rồi bấm Đọc ngay lần nữa.',
   SOCIAL_JOB_MISSING: 'Không thấy lượt đọc vừa chạy — bấm Đọc ngay lại.',
+  // v0.1.55: dòng 0 "nguồn AI" (ai_source).
+  AI_NO_SOURCE: 'Chưa có nguồn AI nào — thêm khoá API hoặc đăng nhập Google / Claude Code ở Kết nối › Bộ não AI rồi bấm Kiểm tra.',
+  AI_KEY_MISSING: 'Nguồn AI đầu chuỗi chưa có khoá API — thêm khoá ở Kết nối › Bộ não AI rồi bấm Kiểm tra.',
   AGY_NOT_LOGGED_IN: 'Chưa đăng nhập Google cho Antigravity — bấm Đăng nhập Google.',
   AGY_ACCOUNT_MISMATCH: 'Gọi thử vẫn chạy bằng tài khoản khác với tài khoản vừa chọn — bấm Đăng nhập lại và đăng nhập đúng tài khoản đó.',
   CLI_PROFILE_NO_SESSION: 'Tài khoản này chưa có phiên đăng nhập đã lưu — bấm Đăng nhập lại tài khoản đó.',
@@ -175,6 +180,19 @@ export const HUB_ADDRESS_CODES: ReadonlySet<string> = new Set(['HUB_ENDPOINT_FOR
 /** Kết quả lỗi cần đăng nhập lại (theo mã lỗi thống nhất). */
 export function needsRelogin(c: Pick<BossCheck, 'status' | 'error_code'> | null | undefined): boolean {
   return !!c && c.status === 'fail' && !!c.error_code && RELOGIN_CODES.has(c.error_code);
+}
+
+/**
+ * v0.1.55: câu "Đạt" của dòng 0 (nguồn AI) theo cách máy chủ chứng minh: lượt gọi model thật (`via = model_calls`), Claude /
+ * Google đã gọi thử đạt (`claude_call` / `agy_call`), hoặc bấm Kiểm tra (không có `via`). Luôn là chuỗi.
+ */
+export function aiSourceOkText(c: Pick<BossCheck, 'detail' | 'checked_at'>, tz: string = DEFAULT_TZ): string {
+  const via = c.detail?.via;
+  const when = fmtCheckedAt(c.checked_at, tz);
+  if (via === 'model_calls') return `Đạt · Gen đã gọi model thật thành công (gần nhất ${when})`;
+  if (via === 'claude_call') return `Đạt · Claude Code đã gọi thử thành công (${when})`;
+  if (via === 'agy_call') return `Đạt · Google (Antigravity) đã gọi thử thành công (${when})`;
+  return `Đạt · ${when}`;
 }
 
 /** Token Gen-hub trang yêu cầu tạo là 90 ngày → hạn gửi kèm khi lưu token (nhắc trước 14 ngày chạy được). */

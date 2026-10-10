@@ -11,6 +11,10 @@ v0.1.50 (QD-18): `/gen/memory` — "Gen nhớ" (GET/POST/PATCH/DELETE, CHỈ Own
 `confirm_proposal` / `cancel_proposal` cho ba loại đề xuất mới (`memory_note`, `kho_create`, `kho_update`). Đề xuất ghi
 Phiên của job `gh.gen.kho_release` mang khoá meta `release_version`: xác nhận claim dòng `agent.hub_release_proposals`
 (pending → writing → written; lỗi → pending; huỷ → cancelled) nên mỗi bản chỉ ghi vào Kho MỘT lần.
+
+v0.1.55 (G3): `TurnIn.model_choice` {tier: auto|fast|balanced|deep, effort?: low|medium|high} — Sếp chọn model / mức
+suy nghĩ ngay trong khung chat (giá trị lạ ⇒ 422 MODEL_CHOICE_INVALID); `GET /gen/settings` trả thêm `model_options`
+(tầng nào dùng được cho người này). Việc hạ về Tự động + định tuyến ý định (J3) nằm ở `gh.gen.engine`.
 """
 
 import asyncio
@@ -20,7 +24,7 @@ from typing import Any, Literal
 
 import orjson
 from fastapi import APIRouter, Depends, Query, Request, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError, ValidatorFunctionWrapHandler, field_validator
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -56,7 +60,11 @@ async def gen_user(user: service.CurrentUser = Depends(current_user), db: AsyncS
 
 async def _settings_out(db: AsyncSession, user: service.CurrentUser) -> dict[str, Any]:
     cfg = await store.get_settings(db, user.org_id)
-    return {**cfg, "available": store.available(cfg, user), "decider": await _decider_kind(db, user.org_id)}
+    # v0.1.55 (G3): tầng + mức suy nghĩ khung chat được mời chọn (hợp đồng G1 `choice_options`). Hội thoại mới chưa
+    # nhiễm nội dung ngoài ⇒ `tainted=False`; lượt thật còn kiểm lại theo lịch sử hội thoại (engine._run).
+    options = await engine.model_options(db, user.org_id, owner=user.role_code == rbac.OWNER, tainted=False)
+    return {**cfg, "available": store.available(cfg, user), "decider": await _decider_kind(db, user.org_id),
+            "model_options": options}
 
 
 @router.get("/settings")
@@ -143,10 +151,35 @@ class TurnContextIn(BaseModel):
     visible_targets: list[str] = Field(default_factory=list, max_length=200)
 
 
+MODEL_CHOICE_INVALID_TITLE = "Lựa chọn model không hợp lệ — em dùng chế độ Tự động nhé"
+
+
+class ModelChoiceIn(BaseModel):
+    """v0.1.55 (G3): lựa chọn model của khung chat. 'deep' (Kỹ hơn) ↔ tầng 'strong' của bộ định tuyến; `effort` chỉ
+    có nghĩa khi tầng được chọn hỗ trợ (engine.resolve_model_choice bỏ mức không hỗ trợ)."""
+
+    tier: Literal["auto", "fast", "balanced", "deep"] = "auto"
+    effort: Literal["low", "medium", "high"] | None = None
+
+
 class TurnIn(BaseModel):
     conversation_id: uuid.UUID | None = None
     text: str = Field(min_length=1, max_length=4000)
     context: TurnContextIn = Field(default_factory=TurnContextIn)
+    model_choice: ModelChoiceIn | None = None
+
+    @field_validator("model_choice", mode="wrap")
+    @classmethod
+    def _friendly_model_choice(cls, v: Any, handler: ValidatorFunctionWrapHandler) -> ModelChoiceIn | None:
+        """Giá trị lạ ⇒ 422 MODEL_CHOICE_INVALID (problem+json qua handler ApiError) thay vì VALIDATION chung. Chỉ nêu
+        TÊN trường sai — không lặp lại giá trị người gửi."""
+        try:
+            return handler(v)  # type: ignore[no-any-return]
+        except ValidationError as e:
+            bad = sorted({str(err["loc"][0]) for err in e.errors() if err.get("loc")}) or ["model_choice"]
+            raise ApiError(422, "MODEL_CHOICE_INVALID", MODEL_CHOICE_INVALID_TITLE,
+                           "Trường không hợp lệ: " + ", ".join(bad) + ". tier ∈ auto | fast | balanced | deep; "
+                           "effort ∈ low | medium | high (hoặc bỏ trống).") from e
 
 
 RATE_WINDOW_S, RATE_MAX_TURNS = 300, 20
@@ -201,7 +234,8 @@ async def _start_turn(body: TurnIn, q: str, request: Request, user: service.Curr
     app = request.app
     token = request.cookies.get(service.SESSION_COOKIE, "")
     inp = engine.TurnInput(turn_id=turn_id, conversation_id=cid, text=q, route=body.context.route,
-                           screen_key=body.context.screen_key, visible_targets=body.context.visible_targets)
+                           screen_key=body.context.screen_key, visible_targets=body.context.visible_targets,
+                           model_choice=body.model_choice.model_dump() if body.model_choice else None)
     await app.state.redis.set(engine.turn_key(turn_id), orjson.dumps(
         {"turn_id": str(turn_id), "conversation_id": str(cid), "user_id": str(user.id), "status": "running",
          "steps": []}), ex=engine.TURN_TTL_S)

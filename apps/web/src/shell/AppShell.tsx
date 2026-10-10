@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef } from 'react';
-import { Navigate, Outlet, useLocation, useMatches, useNavigate } from 'react-router-dom';
+import { useEffect, useMemo } from 'react';
+import { Navigate, Outlet, useLocation, useMatches } from 'react-router-dom';
 import { DOMAINS, SCREEN_BY_KEY, type DomainId } from '@gen-harness/contracts';
 import { useActiveNavKey, useActiveScreenKey, type RouteHandle } from './routeHandles';
 import { useMe, useNavigation } from '../lib/queries';
@@ -12,75 +12,7 @@ import { ErrorBoundary } from './ErrorPage';
 import { GenPanel } from '../gen/GenPanel';
 import { Spotlight } from '../gen/Spotlight';
 import { useGenStore } from '../gen/genStore';
-import { genBusy, loadConversation } from '../gen/genClient';
-import { errorDetail, errorText } from '../lib/errorText';
-import { toast } from '../lib/toast';
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-/** v0.1.54 (Gen hướng dẫn): `?gen=coach` — chuông "Gen hướng dẫn" dẫn tới thẻ "Hôm nay của Sếp". */
-const COACH_PARAM = 'coach';
-/** Gen tắt mà gặp `?gen=coach` ⇒ đưa Sếp tới "Việc Sếp cần làm" (cùng nội dung, không cần khung Gen). */
-const COACH_FALLBACK_PATH = '/guide/viec-sep';
-
-/**
- * v0.1.41 (F-8): mở Bản tin Gen từ chuông — link `/overview?gen=<conversation_id>`. Mở khung Gen, tải hội thoại rồi
- * bỏ tham số `gen` khỏi địa chỉ (replace — nút Lùi không mở lại). Mã sai dạng ⇒ bỏ qua (chỉ gỡ tham số). Gen đang
- * trả lời câu khác ⇒ GIỮ tham số và chờ lượt đó xong mới mở (không đè câu trả lời đang viết).
- *
- * v0.1.54: `?gen=coach` — bỏ tham số, mở khung Gen và đặt cờ `coachFocus` để thẻ "Hôm nay của Sếp" cuộn tới + mở rộng.
- * Gen TẮT (`genOn` false) ⇒ `navigate('/guide/viec-sep', { replace: true })`. Hành vi với mã hội thoại giữ nguyên: Gen tắt
- * thì tham số UUID không làm gì.
- */
-function useOpenGenFromUrl(userId: string | null, genOn: boolean): void {
-  const { pathname, search } = useLocation();
-  const navigate = useNavigate();
-  const busy = useGenStore((s) => s.busy);
-  const warned = useRef<string | null>(null);
-  useEffect(() => {
-    if (!userId) return;
-    const params = new URLSearchParams(search);
-    const cid = params.get('gen');
-    if (cid === null) return;
-    if (cid === COACH_PARAM) {
-      if (!genOn) {
-        navigate(COACH_FALLBACK_PATH, { replace: true });
-        return;
-      }
-      params.delete('gen');
-      const rest = params.toString();
-      navigate(pathname + (rest ? `?${rest}` : ''), { replace: true });
-      useGenStore.getState().setOpen(userId, true);
-      useGenStore.getState().setCoachFocus(true);
-      return;
-    }
-    if (!genOn) return;
-    if (UUID_RE.test(cid) && (busy || genBusy())) {
-      useGenStore.getState().setOpen(userId, true);
-      if (warned.current !== cid) {
-        warned.current = cid;
-        toast('Gen đang trả lời — bản tin sẽ mở khi xong', 'warn');
-      }
-      return;
-    }
-    warned.current = null;
-    params.delete('gen');
-    const rest = params.toString();
-    navigate(pathname + (rest ? `?${rest}` : ''), { replace: true });
-    if (!UUID_RE.test(cid)) return;
-    useGenStore.getState().setOpen(userId, true);
-    loadConversation(cid, userId).then(
-      (r) => {
-        if (r === 'missing') toast('Không mở được bản tin — có thể đã quá hạn lưu', 'bad');
-        else if (r === 'busy') toast('Gen đang trả lời — mở bản tin sau từ "Hội thoại cũ"', 'warn');
-      },
-      (e: unknown) => {
-        const detail = errorDetail(e);
-        toast(`Không mở được bản tin — ${errorText(e)}${detail ? ` (Chi tiết kỹ thuật: ${detail})` : ''}`, 'bad');
-      },
-    );
-  }, [userId, genOn, pathname, search, navigate, busy]);
-}
+import { useOpenGenFromUrl } from '../owner/useOpenGenFromUrl';
 
 function useCrumbs(activeKey: string | null): Crumbs | null {
   const matches = useMatches();

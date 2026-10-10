@@ -214,6 +214,14 @@
       "params": null
     },
     {
+      "id": "boss_checks.row.ai",
+      "screen": "boss_checks",
+      "label": "Dòng 0 \"Nguồn AI\" (bắt buộc duy nhất)",
+      "description": "Dòng 0 của Việc Sếp cần làm: có ít nhất 1 nguồn AI chạy được — bấm Kiểm tra hoặc mở Bộ não AI để thêm nguồn",
+      "dynamic": null,
+      "params": null
+    },
+    {
       "id": "boss_checks.row.hub",
       "screen": "boss_checks",
       "label": "Dòng 1 \"Nối Gen-hub\"",
@@ -433,6 +441,17 @@
       "params": {
         "tab": "brain"
       }
+    },
+    {
+      "id": "system.brain.jev.enable",
+      "screen": "system",
+      "label": "Nút \"Bật Jev\" (1 chạm)",
+      "description": "Bật Jev bằng khóa OpenRouter đang có hoặc dán khóa mới (cần mã PIN); sau đó bấm \"Thử 12 câu mẫu\"",
+      "dynamic": null,
+      "params": {
+        "tab": "brain"
+      },
+      "permission": "system.manage"
     },
     {
       "id": "system.brain.triage",
@@ -923,8 +942,8 @@
       "why": "Tin nhắn thô được lọc, phân loại và chấm điểm trước khi vào kho sạch — agent chỉ dùng dữ liệu đã lọc.",
       "steps": [
         "Bấm \"Làm bước này\".",
-        "Giữ mặc định \"Chu kỳ thời gian\" và \"Ngưỡng số lượng\" (lọc khi đủ thời gian hoặc đủ số tin, cái nào đến trước).",
-        "Ở \"Bộ quy tắc khởi đầu\", tích các quy tắc hợp với việc kinh doanh của Sếp (xem điều kiện và đầu ra ngay trên từng dòng).",
+        "Trả lời một câu \"Sếp làm ngành nào?\" — Gen chọn sẵn bộ quy tắc hợp ngành; lịch lọc mặc định là mỗi 15 phút hoặc đủ 500 tin, giữ tin có độ tin cậy từ 0,6.",
+        "Muốn chỉnh chi tiết: mở \"Nâng cao — lịch sàng lọc và từng quy tắc\" (hoặc \"Nâng cao — trọng số chấm điểm\"); không cần thì bỏ qua.",
         "Bấm \"Tiếp tục\"."
       ],
       "done_when": "Có ít nhất một quy tắc sàng lọc đang bật.",
@@ -939,10 +958,9 @@
       "why": "Agent là \"nhân viên AI\" làm việc thay Sếp trên các kênh — có tên, vai trò và giọng nói riêng.",
       "steps": [
         "Bấm \"Làm bước này\".",
-        "Chọn một \"Mẫu\" (ví dụ Trợ lý thương mại, CSKH, Thư ký cá nhân) — tên và vai trò được điền sẵn.",
-        "Sửa \"Tên agent\" và \"Vai trò — agent làm gì cho Sếp\" nếu muốn.",
-        "Gõ một \"Câu thử trò chuyện\", ví dụ \"Chào em, hôm nay có khách nào hỏi hàng không?\".",
-        "Bấm \"Tiếp tục\" rồi đọc câu trả lời thử của agent; bấm \"Tiếp tục\" lần nữa để lưu."
+        "Chọn một \"Mẫu\" (ví dụ Trợ lý thương mại, CSKH, Thư ký cá nhân) — tên và vai trò được điền sẵn, chọn mẫu là xong.",
+        "Sửa \"Tên agent\" và \"Vai trò — agent làm gì cho Sếp\" nếu muốn (sửa lại ở Danh tính Agent bất cứ lúc nào).",
+        "Bấm \"Tiếp tục\" để lưu. Gen không gọi model thử ở bước này; muốn trò chuyện thử với agent, làm ở Danh tính Agent."
       ],
       "done_when": "Có ít nhất một agent.",
       "console": {
@@ -958,7 +976,7 @@
         "Bấm \"Làm bước này\".",
         "Ở \"Mức tự trị\", chọn 4 (agent soạn sẵn, Sếp duyệt rồi mới gửi — khuyên dùng) hoặc 3 (agent chỉ gợi ý).",
         "Đọc danh sách \"Ranh giới khoá cứng\" — các việc agent không bao giờ được tự làm.",
-        "Tích \"Tôi đã đọc các ranh giới trên\" rồi bấm \"Tiếp tục\"."
+        "Bấm \"Tiếp tục\" — bấm nghĩa là Sếp đã đọc các ranh giới trên (không còn ô tích riêng)."
       ],
       "done_when": "Agent đã có mức tự trị (tạo agent là có mức mặc định; bước này để Sếp chọn lại cho chắc).",
       "console": {
@@ -971,8 +989,8 @@
       "title": "Mời người trong đội",
       "why": "Cho quản lý, nhân viên cùng dùng Console với quyền hạn riêng — mỗi người chỉ thấy phần được giao.",
       "steps": [
-        "Bấm \"Làm bước này\".",
-        "Bấm \"Thêm người\", điền \"Tên hiển thị\", \"Email\" và chọn \"Vai trò\" (Quản lý, Vận hành, Nhân viên phụ trách, Kiểm soát).",
+        "Bấm \"Làm bước này\". Chưa cần mời ai thì bấm \"Để sau\" — mời lúc nào cũng được ở Đội ngũ › Người dùng.",
+        "Muốn mời ngay: bấm \"Mời ngay\", rồi \"Thêm người\", điền \"Tên hiển thị\", \"Email\" và chọn \"Vai trò\" (Quản lý, Vận hành, Nhân viên phụ trách, Kiểm soát).",
         "Thêm đủ người rồi bấm \"Tiếp tục\".",
         "Hệ thống hiện mật khẩu tạm của từng người — chép lại và tự gửi cho họ qua Zalo/email riêng (chưa có gửi thư tự động).",
         "Nhân viên ở máy khác hoặc dùng điện thoại cần Truy cập từ xa: Sếp chạy genh remote tailscale (khuyên dùng) trên máy chủ trước khi gửi. Lời nhắn kèm địa chỉ đăng nhập có ở Đội ngũ › Người dùng (nút \"Mời người dùng\" hoặc \"Đặt lại mật khẩu\") — hộp đó cảnh báo đỏ nếu địa chỉ chỉ mở được trên máy chủ.",
@@ -990,9 +1008,8 @@
       "why": "Máy hỏng hay lỡ tay xoá vẫn khôi phục được dữ liệu — bản sao lưu được mã hoá và giữ ngay trong máy.",
       "steps": [
         "Bấm \"Làm bước này\".",
-        "Chọn \"Tần suất\" (khuyên dùng \"Hằng ngày\").",
-        "Nhập \"Giờ chạy (HH:MM)\", ví dụ 02:00.",
-        "Bấm \"Tiếp tục\"."
+        "Đọc dòng \"Sao lưu đã tự bật\"; muốn giữ nguyên thì bấm \"Tiếp tục\" (hoặc \"Để sau\" — lịch này vẫn chạy).",
+        "Muốn đổi: mở \"Đổi lịch (không bắt buộc)\", chọn \"Tần suất\" rồi nhập \"Giờ chạy (HH:MM)\", ví dụ 03:30, và bấm \"Tiếp tục\"."
       ],
       "done_when": "Đã có lịch sao lưu.",
       "console": {

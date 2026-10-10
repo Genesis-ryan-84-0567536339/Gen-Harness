@@ -53,10 +53,11 @@ describe('Bước 9 mở lại sau Hoàn tất', () => {
     stub(3);
     const { onSaved } = renderStep();
     expect(await screen.findByTestId('step9-agent')).toHaveTextContent('Trợ lý Mai · mức hiện tại: Gợi ý');
+    // v0.1.55 (G2): không còn ô tích ranh giới — một dòng ghi chú, bấm Tiếp tục là đã đọc.
+    expect(screen.getByTestId('step9-ack-note')).toHaveTextContent('Bấm Tiếp tục nghĩa là Sếp đã đọc các ranh giới trên');
     expect(screen.getByRole('radio', { name: 'Gợi ý' })).toHaveAttribute('aria-checked', 'true');
     expect(screen.queryByText('Sau Hoàn tất, đổi mức tự trị cần mã PIN')).toBeNull();
     const user = userEvent.setup();
-    await user.click(screen.getByLabelText('Tôi đã đọc các ranh giới trên'));
     await user.click(screen.getByRole('button', { name: /Tiếp tục/ }));
     await vi.waitFor(() => expect(onSaved).toHaveBeenCalled());
     expect(puts).toEqual([{ autonomy_level: 3, ack_boundaries: true }]);
@@ -75,7 +76,6 @@ describe('Bước 9 mở lại sau Hoàn tất', () => {
     const { onSaved } = renderStep();
     expect(await screen.findByTestId('step9-agent')).toHaveTextContent('mức hiện tại: Chỉ ghi nhận');
     const user = userEvent.setup();
-    await user.click(screen.getByLabelText('Tôi đã đọc các ranh giới trên'));
     await user.click(screen.getByRole('button', { name: /Tiếp tục/ }));
     await vi.waitFor(() => expect(onSaved).toHaveBeenCalled());
     expect(puts).toEqual([{ autonomy_level: null, ack_boundaries: true }]);
@@ -87,7 +87,6 @@ describe('Bước 9 mở lại sau Hoàn tất', () => {
     await screen.findByTestId('step9-agent');
     const user = userEvent.setup();
     await user.click(screen.getByRole('radio', { name: 'Gợi ý' }));
-    await user.click(screen.getByLabelText('Tôi đã đọc các ranh giới trên'));
     await user.click(screen.getByRole('button', { name: /Tiếp tục/ }));
     await vi.waitFor(() => expect(onSaved).toHaveBeenCalled());
     expect(queryClient.getQueryData(qk.setupStep9)).toEqual({ agent: { id: 'a1', name: 'Trợ lý Mai', autonomy_level: 3 } });
@@ -95,7 +94,6 @@ describe('Bước 9 mở lại sau Hoàn tất', () => {
     const again = renderStep();
     expect(await screen.findByTestId('step9-agent')).toHaveTextContent('mức hiện tại: Gợi ý');
     expect(screen.getByRole('radio', { name: 'Gợi ý' })).toHaveAttribute('aria-checked', 'true');
-    await user.click(screen.getByLabelText('Tôi đã đọc các ranh giới trên'));
     await user.click(screen.getByRole('button', { name: /Tiếp tục/ }));
     await vi.waitFor(() => expect(again.onSaved).toHaveBeenCalled());
     expect(puts).toEqual([{ autonomy_level: 3, ack_boundaries: true }, { autonomy_level: 3, ack_boundaries: true }]);
@@ -106,7 +104,6 @@ describe('Bước 9 mở lại sau Hoàn tất', () => {
     renderStep();
     expect(await screen.findByRole('button', { name: /Thử lại/ }, { timeout: 5000 })).toBeInTheDocument();
     expect(screen.queryByTestId('step9-agent')).toBeNull();
-    await userEvent.setup().click(screen.getByLabelText('Tôi đã đọc các ranh giới trên'));
     expect(screen.getByRole('button', { name: /Tiếp tục/ })).toBeDisabled();
     expect(puts).toEqual([]);
   });

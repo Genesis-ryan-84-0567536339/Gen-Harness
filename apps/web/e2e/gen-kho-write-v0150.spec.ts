@@ -50,7 +50,7 @@ test('Gen đề xuất ghi Phiên → thẻ đúng bảng + trường → Xác n
   await expect(row.getByTestId('boss-result')).toContainText('Đạt');
   await expect(row).toContainText('Không bắt buộc');
   await expect(row.getByRole('button')).toHaveCount(0);
-  await expect(page.getByText('Đã đạt 0/6 dòng bắt buộc')).toBeVisible(); // không tính vào bắt buộc
+  await expect(page.getByText('Đã đạt 0/1 dòng bắt buộc')).toBeVisible(); // không tính vào bắt buộc
 });
 
 test('Bấm Huỷ ⇒ không ghi gì: mock ghi nhận 0 lời gọi /hub/kho/write', async ({ page }) => {
@@ -180,6 +180,7 @@ test('Boss bước 2: chuông "Gen đề xuất ghi Kho · Phiên v0.1.50" → /
   const item = page.getByRole('dialog', { name: 'Thông báo' }).locator('.nt-item', { hasText: 'Gen đề xuất ghi Kho · Phiên v0.1.50' });
   await expect(item).toBeVisible();
   await item.click();
+  // v0.1.55: chuông Gen dẫn vào Console /overview?gen=… (không về Mặt tiền); bỏ tham số khỏi địa chỉ.
   await expect(page).toHaveURL(/\/overview$/);
   const panel = page.getByRole('complementary', { name: GEN_PANEL });
   await expect(panel).toBeVisible();

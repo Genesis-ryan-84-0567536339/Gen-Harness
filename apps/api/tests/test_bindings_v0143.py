@@ -3,7 +3,7 @@
 - GET /agents/bindings: core.refinery, core.reply ('Soạn lại / dịch nháp'), core.gen + agent:<id>; không còn
   core.intent/core.scoring/core.indexing (hàng cũ trong DB để nguyên, tự ẩn).
 - PUT/DELETE /agents/bindings/core.intent → 422.
-- Bước 4 thiết lập chỉ tự gán core.refinery, core.reply, core.gen.
+- Bước 4 thiết lập không còn tự gán khoá lõi (v0.1.55: hồ sơ tiêu chuẩn tự phủ).
 - Dịch / soạn lại nháp không gắn agent gọi model bằng khoá core.reply.
 - Bảng chi phí: khoá cũ core.reply_fast hiện nhãn tiếng Việt.
 """
@@ -22,7 +22,7 @@ from tests.phase2 import org_id
 from tests.test_p4_agents import _seed_agent, _seed_provider_model
 from tests.test_ux_v0128 import _provider
 
-CORE = {"core.refinery", "core.reply", "core.gen"}
+CORE = {"core.refinery", "core.reply", "core.gen", "core.briefing"}  # v0.1.55 (G1): + Bản tin Gen
 DEAD = {"core.intent", "core.scoring", "core.indexing"}
 
 
@@ -68,7 +68,8 @@ async def test_bindings_list_only_live_core_keys(owner_api, db) -> None:  # type
     assert still == 1
 
 
-async def test_setup_step4_binds_only_live_core_keys(owner_api, db) -> None:  # type: ignore[no-untyped-def]
+async def test_setup_step4_writes_no_bindings(owner_api, db) -> None:  # type: ignore[no-untyped-def]
+    """v0.1.55 (G2): bước 4 không còn tự gán khoá lõi nào — hồ sơ tiêu chuẩn tự phủ (gh.defaults.profiles)."""
     api: Api = owner_api
     org = await org_id(db)
     good = await _provider(api, db, "Model nội bộ", ok=True, tested=["qwen2.5-7b"])
@@ -76,7 +77,7 @@ async def test_setup_step4_binds_only_live_core_keys(owner_api, db) -> None:  # 
     assert r.status_code == 200, r.text
     bound = set((await db.execute(text("SELECT agent_key FROM agent.bindings WHERE org_id = :o"),
                                   {"o": org})).scalars().all())
-    assert bound == CORE
+    assert bound == set()
 
 
 async def test_translate_and_regenerate_without_agent_use_core_reply(owner_api, app) -> None:  # type: ignore[no-untyped-def]

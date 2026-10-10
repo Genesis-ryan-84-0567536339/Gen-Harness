@@ -2,9 +2,11 @@
  * v0.1.42 (F-26): trang chủ "/" chuyển tới màn đầu tiên KHÔNG ẩn trong danh mục của vai trò (GET /navigation) —
  * không còn cứng "/overview" (Agent NV từng gặp ổ khoá ngay khi đăng nhập). Giữ ?gen=; danh mục rỗng/lỗi có trạng thái
  * riêng. Đổi mật khẩu bắt buộc xong và thiết lập đã xong cũng về "/".
+ *
+ * v0.1.55 (G5): vai Owner ⇒ "/" chuyển tới "/owner" (Mặt tiền), vẫn giữ ?gen=; nhân viên (mọi vai khác) như cũ.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterProvider, createMemoryRouter, useLocation, type RouteObject } from 'react-router-dom';
 import type { NavDomain } from '@gen-harness/contracts';
@@ -27,7 +29,7 @@ function Where() {
   return <div data-testid="where">{`${l.pathname}${l.search}`}</div>;
 }
 
-const TARGETS: RouteObject[] = ['inbox', 'overview', 'account'].map((k) => ({ path: `/${k}`, element: <Where /> }));
+const TARGETS: RouteObject[] = ['inbox', 'overview', 'account', 'owner'].map((k) => ({ path: `/${k}`, element: <Where /> }));
 
 function renderAt(path: string, extra: RouteObject[] = [], qc: QueryClient = queryClient) {
   const router = createMemoryRouter([{ path: '/', element: <HomeRedirect /> }, ...TARGETS, ...extra], { initialEntries: [path] });
@@ -39,13 +41,17 @@ function renderAt(path: string, extra: RouteObject[] = [], qc: QueryClient = que
   return router;
 }
 
-function stubNav(nav: NavDomain[] | 'error', extra: (url: string) => unknown = () => undefined) {
+/** `role`: vai trả về ở GET /auth/me (null = chưa đăng nhập được ⇒ 404, HomeRedirect coi như không phải Owner). */
+function stubNav(nav: NavDomain[] | 'error', extra: (url: string) => unknown = () => undefined, role: string | null = null) {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       const other = extra(url);
       if (other !== undefined) return new Response(JSON.stringify(other), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      if (url.endsWith('/auth/me') && role) {
+        return new Response(JSON.stringify({ ...ME, role: { code: role, name: role } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
       if (url.endsWith('/navigation')) {
         if (nav === 'error') {
           return new Response(JSON.stringify({ status: 500, code: 'INTERNAL', title: 'Lỗi máy chủ', error_id: 'e-42' }), {
@@ -82,17 +88,48 @@ describe('HomeRedirect', () => {
     expect(screen.queryByText(/không có quyền|không xem được/i)).not.toBeInTheDocument();
   });
 
-  it('Owner: "/" → /overview', async () => {
-    stubNav(buildNavigation());
+  it('Owner: "/" → /owner (Mặt tiền), không còn /overview', async () => {
+    stubNav(buildNavigation(), undefined, 'owner');
+    const router = renderAt('/');
+    expect(await screen.findByTestId('where')).toHaveTextContent('/owner');
+    expect(router.state.location.pathname).toBe('/owner');
+  });
+
+  it('Owner: giữ ?gen= (Bản tin Gen từ chuông) và ?gen=coach (thẻ Hôm nay của Sếp)', async () => {
+    stubNav(buildNavigation(), undefined, 'owner');
+    renderAt('/?gen=0192aaaa-bbbb-4ccc-8ddd-eeeeffff0000');
+    expect(await screen.findByTestId('where')).toHaveTextContent('/owner?gen=0192aaaa-bbbb-4ccc-8ddd-eeeeffff0000');
+    cleanup();
+    renderAt('/?gen=coach');
+    expect(await screen.findByTestId('where')).toHaveTextContent('/owner?gen=coach');
+  });
+
+  it('Owner vẫn về /owner dù danh mục lỗi (không cần /navigation)', async () => {
+    stubNav('error', undefined, 'owner');
+    const router = renderAt('/', [], new QueryClient({ defaultOptions: { queries: { retry: false } } }));
+    expect(await screen.findByTestId('where')).toHaveTextContent('/owner');
+    expect(router.state.location.pathname).toBe('/owner');
+    expect(screen.queryByText('Không tải được danh mục')).not.toBeInTheDocument();
+  });
+
+  it.each(['manager', 'operator', 'auditor'])('nhân viên (%s): "/" → /overview như cũ, không bị đưa tới /owner', async (role) => {
+    stubNav(buildNavigation(), undefined, role);
     const router = renderAt('/');
     expect(await screen.findByTestId('where')).toHaveTextContent('/overview');
     expect(router.state.location.pathname).toBe('/overview');
   });
 
-  it('giữ ?gen= (Bản tin Gen từ chuông)', async () => {
-    stubNav(buildNavigation());
+  it('nhân viên giữ ?gen= (Bản tin Gen từ chuông) như cũ', async () => {
+    stubNav(buildNavigation(), undefined, 'manager');
     renderAt('/?gen=0192aaaa-bbbb-4ccc-8ddd-eeeeffff0000');
     expect(await screen.findByTestId('where')).toHaveTextContent('/overview?gen=0192aaaa-bbbb-4ccc-8ddd-eeeeffff0000');
+  });
+
+  it('chưa biết vai (đang tải /auth/me): khung chờ, không chuyển vội', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => undefined)));
+    const router = renderAt('/');
+    expect(await screen.findByLabelText('Đang mở trang chủ')).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe('/');
   });
 
   it('bỏ qua màn ẩn: chỉ còn nhóm có con ẩn thì đi tiếp nhóm sau', async () => {
@@ -128,11 +165,11 @@ describe('HomeRedirect', () => {
 });
 
 describe('Về "/" sau đổi mật khẩu bắt buộc và sau thiết lập', () => {
-  it('ForcePasswordPage khi đã đổi xong → "/" → màn đầu tiên', async () => {
+  it('ForcePasswordPage khi đã đổi xong → "/" → Mặt tiền (Owner)', async () => {
     stubNav(buildNavigation(), (url) => (url.endsWith('/auth/me') ? ME : undefined));
     const router = renderAt('/change-password', [{ path: '/change-password', element: <ForcePasswordPage /> }]);
-    expect(await screen.findByTestId('where')).toHaveTextContent('/overview');
-    expect(router.state.location.pathname).toBe('/overview');
+    expect(await screen.findByTestId('where')).toHaveTextContent('/owner');
+    expect(router.state.location.pathname).toBe('/owner');
   });
 
   it('SetupPage khi đã hoàn tất → "/" → màn đầu tiên của vai trò', async () => {

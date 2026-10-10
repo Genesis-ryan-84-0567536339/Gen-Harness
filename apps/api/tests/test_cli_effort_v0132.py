@@ -221,13 +221,14 @@ async def test_migration_splits_saved_variant_names(owner_api, clis) -> None:  #
                     "gemini-3.5-flash-extra-low": None}     # tên riêng — không tách
 
 
-async def test_auto_assign_splits_pre_upgrade_probe_model(owner_api, clis) -> None:  # type: ignore[no-untyped-def]
-    """Review v0.1.32: `last_test.probe_model` của bản ≤ v0.1.31 còn tên biến thể → tự gán lưu model gốc + mức."""
+async def test_ensure_tested_models_splits_pre_upgrade_probe_model(owner_api, clis) -> None:  # type: ignore[no-untyped-def]
+    """Review v0.1.32: `last_test.probe_model` của bản ≤ v0.1.31 còn tên biến thể → model chép từ lần gọi thử lưu model
+    gốc + mức (v0.1.55: `ensure_tested_models`, không còn tự gán agent.bindings)."""
     api = owner_api
     await _login(api, "antigravity_cli", "4/an")
     p = await _provider(api, "antigravity_cli")
     from gh.db import sessionmaker
-    from gh.setup.routes import _tested_choice, auto_assign_tested_model
+    from gh.setup.routes import _tested_choice, ensure_tested_models
 
     assert _tested_choice(type("P", (), {"kind": "antigravity_cli", "probe_model": "gemini-3.8-flash-high",
                                           "probe_effort": None, "test_models": []})()) == ("gemini-3.8-flash", "high")
@@ -240,9 +241,13 @@ async def test_auto_assign_splits_pre_upgrade_probe_model(owner_api, clis) -> No
                          {"i": pid, "o": org, "t": json.dumps({"ok": True, "probe_model": "gemini-3.8-flash-high",
                                                                "models": ["gemini-3.8-flash-high"]})})
         await db.commit()
-        mid = await auto_assign_tested_model(db, org)
+        await db.execute(text("DELETE FROM agent.models WHERE provider_id = :i"), {"i": pid})
+        assert await ensure_tested_models(db, org) == 1
         await db.commit()
-        row = (await db.execute(text("SELECT model_name, effort FROM agent.models WHERE id = :m"), {"m": mid})).one()
+        row = (await db.execute(text("SELECT model_name, effort FROM agent.models WHERE provider_id = :i"),
+                                {"i": pid})).one()
+        assert (await db.execute(text("SELECT count(*) FROM agent.bindings WHERE org_id = :o"),
+                                 {"o": org})).scalar_one() == 0
     assert (row.model_name, row.effort) == ("gemini-3.8-flash", "high")
 
 
