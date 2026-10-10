@@ -295,8 +295,8 @@ async def overview(db: AsyncSession, org_id: uuid.UUID) -> dict[str, Any]:
     switches = await switch_passes(db, org_id)
     ai = results.get("ai_source")
     if ai is None or ai["status"] != "pass":
-        # Bằng chứng ngầm chỉ thay kết quả ĐÃ GHI khi nó MỚI HƠN: Sếp vừa bấm Kiểm tra mà lỗi (khoá bị thu hồi…) thì lượt
-        # gọi thành công của 20 ngày trước không được che nó — dòng bắt buộc duy nhất phải nói đúng sự thật.
+        # Bằng chứng ngầm chỉ thay kết quả ĐÃ GHI khi nó MỚI HƠN: Sếp vừa bấm Kiểm tra mà lỗi (khoá bị thu hồi…) thì
+        # lượt gọi thành công của 20 ngày trước không được che nó — dòng bắt buộc duy nhất phải nói đúng sự thật.
         found = (await ai_source_evidence(db, org_id), _derived_ai(results))
         best = max((e for e in found if e is not None), key=lambda e: _ts(e["checked_at"]), default=None)
         if best is not None and (ai is None or _ts(best["checked_at"]) > _ts(ai["checked_at"])):
