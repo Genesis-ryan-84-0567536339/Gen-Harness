@@ -571,11 +571,10 @@ function AdvancedParamsPanel() {
         <EmptyState icon="ph ph-sliders-horizontal" title="Chưa có agent nào" />
       ) : (
         items.map((slot) => (
-          <div className="apm-param-row" key={slot.agent_key}>
-            <div className="apm-param-row__box" data-testid={`binding-params-${slot.agent_key}`}>
-              {bindingParamsText(slot)}
-            </div>
-          </div>
+          // Chữ dài xuống dòng được (màn hẹp): không dùng ô một dòng `apm-param-row__box` (cắt bằng dấu …).
+          <p className="muted-note" style={{ margin: '6px 0', overflowWrap: 'anywhere' }} key={slot.agent_key} data-testid={`binding-params-${slot.agent_key}`}>
+            {bindingParamsText(slot)}
+          </p>
         ))
       )}
     </Panel>
