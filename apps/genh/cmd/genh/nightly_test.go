@@ -37,6 +37,7 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	_ = os.Setenv("HOME", home)
+	_ = os.Setenv("USERPROFILE", home) // os.UserHomeDir trên Windows
 	hostInfoEnvFn = func() hostInfoEnv { return hermeticHost(home, errRunner{}) }
 	autostartDepsFn = func() ops.AutostartDeps { return ops.AutostartDeps{Runner: &fake.Runner{}} }
 	code := m.Run()
@@ -243,8 +244,12 @@ func TestAutoUpdateCmd_DisableGhiDau_EnableXoaDau(t *testing.T) {
 		t.Fatal("`auto-update disable` phải ghi dấu Sếp đã chủ động tắt")
 	}
 	fi, err := os.Stat(ops.AutoUpdateOptOutPath(dir))
-	if err != nil || fi.Mode().Perm() != 0o600 {
-		t.Fatalf("dấu phải 0600: %v %v", fi, err)
+	if err != nil {
+		t.Fatalf("dấu: %v", err)
+	}
+	// Windows không có bit quyền kiểu Unix (Stat luôn báo 0666/0444) ⇒ chỉ kiểm 0600 ở Unix.
+	if runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600 {
+		t.Fatalf("dấu phải 0600: %v", fi.Mode())
 	}
 	if info, _ := hostlink.ReadInfo(dir); info.AutoUpdateEnabled == nil || *info.AutoUpdateEnabled {
 		t.Errorf("genh.json: %+v", info)
@@ -896,6 +901,9 @@ func TestHandleRequests_XoaLoi_DoctorOffsiteWatchdog(t *testing.T) {
 func TestHandleRequests_KhongXacDinhDuocThuMucCaiDat(t *testing.T) {
 	t.Setenv("GEN_HARNESS_HOME", "")
 	t.Setenv("HOME", "")
+	// Windows: config.DefaultRoot đọc LOCALAPPDATA rồi USERPROFILE (os.UserHomeDir), không đọc HOME.
+	t.Setenv("LOCALAPPDATA", "")
+	t.Setenv("USERPROFILE", "")
 	var code int
 	_, errOut := captureStd(t, func() { code = runHandleRequests([]string{"--quiet"}) })
 	if code != 1 || !strings.Contains(errOut, "không xác định được thư mục cài đặt") {

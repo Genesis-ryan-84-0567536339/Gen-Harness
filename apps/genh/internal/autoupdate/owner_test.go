@@ -249,6 +249,21 @@ func TestUnitInstallDir_DocEnvVaExecStart(t *testing.T) {
 	}
 }
 
+// Đường dẫn kiểu Windows (genh ghi unit KHÔNG thoát \) phải đọc lại nguyên vẹn; \ chỉ là ký tự
+// thoát trước khoảng trắng/dấu nháy/\ (ma trận Installer windows-2022 đỏ ở v0.1.53 trước sửa này).
+func TestSplitWords_DuongDanWindowsVaKyTuThoat(t *testing.T) {
+	got := splitWords(`/g/genh --install-dir C:\Users\RUNNER~1\AppData\Local\Temp\x a\ b "c\"d" "e\\f" "C:\Temp\y" 'g\h'`)
+	want := []string{"/g/genh", "--install-dir", `C:\Users\RUNNER~1\AppData\Local\Temp\x`, "a b", `c"d`, `e\f`, `C:\Temp\y`, `g\h`}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("splitWords:\n được %q\n muốn %q", got, want)
+	}
+	home := t.TempDir()
+	writeUnit(t, home, "w.service", "[Service]\nEnvironment=GEN_HARNESS_HOME=C:\\Users\\o\\gh\nExecStart=C:\\g\\genh.exe update --install-dir C:\\Users\\o\\gh\n")
+	if d, ok := UnitInstallDir(home, "w.service"); !ok || d != `C:\Users\o\gh` {
+		t.Fatalf("UnitInstallDir = %q, %v", d, ok)
+	}
+}
+
 func TestSamePath_ClearVaSymlink(t *testing.T) {
 	real := t.TempDir()
 	link := filepath.Join(t.TempDir(), "lien-ket")

@@ -3,6 +3,7 @@ package hostlink
 import (
 	"encoding/json"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -58,8 +59,8 @@ func TestNightlyStatus_KhoaHopDong(t *testing.T) {
 	if !strings.Contains(string(raw), `"active": null`) {
 		t.Errorf("active phải là null:\n%s", raw)
 	}
-	// Quyền 0644 để api đọc.
-	if fi, _ := os.Stat(NightlyStatusPath(root)); fi.Mode().Perm() != 0o644 {
+	// Quyền 0644 để api đọc (Windows không có bit quyền kiểu Unix ⇒ chỉ kiểm ở Unix).
+	if fi, _ := os.Stat(NightlyStatusPath(root)); runtime.GOOS != "windows" && fi.Mode().Perm() != 0o644 {
 		t.Errorf("quyền = %v", fi.Mode().Perm())
 	}
 }

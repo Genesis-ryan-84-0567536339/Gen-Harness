@@ -281,13 +281,16 @@ func (d Deps) guardDarwin(plistPath string) error {
 }
 
 // splitWords tách chuỗi kiểu shell/systemd: khoảng trắng ngăn từ, '…' và "…"
-// gom thành một từ (nối liền với phần kề), \ thoát ký tự kế (ngoài '…').
+// gom thành một từ (nối liền với phần kề), \ thoát ký tự kế (ngoài '…') — CHỈ khi
+// ký tự kế là khoảng trắng, dấu nháy hoặc \; còn lại \ giữ nguyên là ký tự thường để
+// đường dẫn kiểu Windows (C:\Users\…, genh ghi unit không thoát) đọc lại đúng.
 func splitWords(s string) []string {
 	var words []string
 	var cur strings.Builder
 	inWord := false
 	var quote rune
 	runes := []rune(s)
+	escapes := func(i int, set string) bool { return i+1 < len(runes) && strings.ContainsRune(set, runes[i+1]) }
 	for i := 0; i < len(runes); i++ {
 		r := runes[i]
 		switch {
@@ -301,7 +304,7 @@ func splitWords(s string) []string {
 			switch {
 			case r == '"':
 				quote = 0
-			case r == '\\' && i+1 < len(runes):
+			case r == '\\' && escapes(i, "\"\\"):
 				i++
 				cur.WriteRune(runes[i])
 			default:
@@ -310,7 +313,7 @@ func splitWords(s string) []string {
 		case r == '\'' || r == '"':
 			quote = r
 			inWord = true
-		case r == '\\' && i+1 < len(runes):
+		case r == '\\' && escapes(i, " \t'\"\\"):
 			i++
 			cur.WriteRune(runes[i])
 			inWord = true

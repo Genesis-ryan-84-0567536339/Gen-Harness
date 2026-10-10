@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -32,8 +33,12 @@ func TestAutoUpdateOptOut(t *testing.T) {
 		t.Fatalf("path=%s opted=%v", path, AutoUpdateOptedOut(dir))
 	}
 	fi, err := os.Stat(path)
-	if err != nil || fi.Mode().Perm() != 0o600 {
-		t.Fatalf("quyền = %v, %v (muốn 0600)", fi.Mode().Perm(), err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Windows không có bit quyền kiểu Unix ⇒ chỉ kiểm 0600 ở Unix.
+	if runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600 {
+		t.Fatalf("quyền = %v (muốn 0600)", fi.Mode().Perm())
 	}
 	var m map[string]string
 	raw, _ := os.ReadFile(path)
