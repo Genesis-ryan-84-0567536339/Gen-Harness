@@ -7,7 +7,8 @@
 - `POST /defaults/apply-standard` {confirm: true} — "Áp model chuẩn theo vai": xoá đúng các dòng gán core.gen /
   core.briefing / core.refinery / core.reply (agent:* và khoá/nguồn giữ nguyên) ⇒ Gen dùng hồ sơ tiêu chuẩn.
 - `POST /defaults/reset-all` {confirm: true} + phiên mã PIN `defaults.reset_all` (423 PIN_REQUIRED) — mọi mục
-  resettable + mức tự trị của tổ chức về mặc định 4.
+  resettable, kể cả mục `autonomy` (mức tự trị của tổ chức về mặc định 4; là mục sổ riêng nên hiện trong danh sách,
+  đếm vào "Đã đổi" và nói trong hộp Xác nhận). Về mặc định riêng mục `autonomy` cũng đòi phiên PIN.
 
 Action Log 'defaults.reset': target_id = khoá | 'all' | 'apply_standard' (+ `detail.value` giống vậy). KHÔNG ghi giá
 trị cài đặt. TUYỆT ĐỐI không chạm khoá API, nguồn AI, mã PIN/mật khẩu, Gen-hub, kênh báo động, tài khoản mạng xã hội,
@@ -26,7 +27,7 @@ from gh.auth.deps import require_owner, require_pin
 from gh.chassis import actionlog
 from gh.db import DB
 from gh.defaults import registry
-from gh.errors import ApiError, field_errors
+from gh.errors import ApiError, field_errors, pin_required
 
 router = APIRouter(prefix="/defaults", tags=["defaults"])
 
@@ -78,7 +79,6 @@ async def reset_all(body: ConfirmIn, user: service.CurrentUser = Depends(require
         if it.resettable:
             await it.reset(db, user.org_id, user.id)
             n += 1
-    await registry.reset_autonomy(db, user.org_id)
     await _log(db, user, "all", count=n)
     return {"reset": n}
 
@@ -93,6 +93,8 @@ async def reset_one(key: str, body: ConfirmIn, user: service.CurrentUser = Depen
         raise ApiError(409, "DEFAULTS_NOT_RESETTABLE",
                        "Mục này chỉ để xem — Sếp đổi ở thẻ của nó (đổi nguồn model cần mã PIN)")
     _need_confirm(body)
+    if key == registry.AUTONOMY_KEY and not user.pin_active():
+        raise pin_required()     # nâng mức tự trị của tổ chức luôn cần phiên mã PIN, kể cả khi chỉ đổi riêng mục này
     await it.reset(db, user.org_id, user.id)
     await _log(db, user, key)
     st = await it.read(db, user.org_id, user.id)

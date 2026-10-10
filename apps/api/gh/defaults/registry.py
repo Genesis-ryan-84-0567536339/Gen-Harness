@@ -28,6 +28,9 @@ from gh.defaults import profiles
 
 #: Dòng gán lõi mà "Áp model chuẩn theo vai" xoá (khoá/nguồn giữ nguyên; agent:* giữ nguyên).
 CORE_BINDING_KEYS = ("core.gen", "core.briefing", "core.refinery", "core.reply")
+#: Khoá mục "Mức tự trị của tổ chức": nâng mức tự trị là thay đổi liên quan an toàn ⇒ Về mặc định MỘT mục này cũng đòi
+#: phiên mã PIN (như tất cả); mục hiện trong sổ để hộp Xác nhận nói thẳng, đếm vào "Đã đổi N mục".
+AUTONOMY_KEY = "autonomy"
 APPLY_STANDARD_TO = "/system?tab=brain#chuan"
 BRAIN_TAB = "/system?tab=brain"
 
@@ -271,6 +274,36 @@ async def _noop(_db: AsyncSession, _org: uuid.UUID, _user: uuid.UUID) -> None:
     return None
 
 
+# ─── mức tự trị của tổ chức ───────────────────────────────────────────────────
+
+def _autonomy_text(level: int) -> str:
+    from gh.chassis import policy
+
+    return f"{policy.LEVELS.get(level, 'mức ' + str(level))} (mức {level})"
+
+
+async def _org_autonomy(db: AsyncSession, org: uuid.UUID) -> int | None:
+    """Mức tự trị đã LƯU của tổ chức (khoá `autonomy_level`); chưa có khoá ⇒ None."""
+    raw = (await db.execute(text("SELECT settings->>'autonomy_level' FROM core.organizations WHERE id = :o"),
+                            {"o": org})).scalar_one_or_none()
+    try:
+        return int(raw) if raw is not None else None
+    except ValueError:
+        return None
+
+
+async def _read_autonomy(db: AsyncSession, org: uuid.UUID, _user: uuid.UUID) -> State:
+    from gh.chassis import policy
+
+    cur = await _org_autonomy(db, org)
+    level = policy.DEFAULT_AUTONOMY if cur is None else cur
+    return State(_autonomy_text(policy.DEFAULT_AUTONOMY), _autonomy_text(level), level != policy.DEFAULT_AUTONOMY)
+
+
+async def _reset_autonomy(db: AsyncSession, org: uuid.UUID, _user: uuid.UUID) -> None:
+    await reset_autonomy(db, org)
+
+
 # ─── dòng gán model ───────────────────────────────────────────────────────────
 
 def _effort_label(effort: str | None) -> str:
@@ -326,6 +359,7 @@ _STATIC: tuple[Item, ...] = (
     Item("jev.preset", "Jev — nguồn model", "org", "Bộ não AI", False, _read_jev, _noop),
     Item("ai_cost", "Trần chi phí AI", "org", "Chi phí AI", True, _read_ai_cost, _reset_ai_cost),
     Item("backup", "Lịch sao lưu", "org", "Sao lưu", True, _read_backup, _reset_backup),
+    Item(AUTONOMY_KEY, "Mức tự trị của tổ chức", "org", "Gen", True, _read_autonomy, _reset_autonomy),
 )
 
 
@@ -354,9 +388,10 @@ async def describe(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID,
 
 
 async def reset_autonomy(db: AsyncSession, org_id: uuid.UUID) -> None:
-    """"Về mặc định tất cả": mức tự trị của TỔ CHỨC về mặc định 4 (`policy.DEFAULT_AUTONOMY`) nếu khoá đang có và khác.
-    Chỉ chạy sau PIN `defaults.reset_all`; không đụng mức tự trị từng agent (đổi cần PIN `policy.change`) và ranh
-    giới cứng."""
+    """Mức tự trị của TỔ CHỨC về mặc định 4 (`policy.DEFAULT_AUTONOMY`) nếu khoá đang có và khác. Là mục sổ
+    `autonomy` (hiện trong `GET /defaults`, đếm vào "Đã đổi", nói trong hộp Xác nhận) và chỉ chạy sau phiên PIN
+    (`defaults.reset_all`, hoặc PIN cho Về mặc định riêng mục này); không đụng mức tự trị từng agent (đổi cần PIN
+    `policy.change`) và ranh giới cứng."""
     from gh.chassis import policy
 
     await db.execute(text("""

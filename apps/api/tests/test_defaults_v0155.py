@@ -125,7 +125,7 @@ async def owner_uid(db: Any) -> uuid.UUID:
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
 CORE_ITEMS = {"binding:core.gen", "binding:core.briefing", "binding:core.refinery", "binding:core.reply"}
-STATIC_ITEMS = {"gen", "coach", "triage", "refinery.schedule", "jev.preset", "ai_cost", "backup"}
+STATIC_ITEMS = {"gen", "coach", "triage", "refinery.schedule", "jev.preset", "ai_cost", "backup", "autonomy"}
 
 
 async def test_list_has_every_item_and_nothing_customized_on_a_fresh_install(dapi: Api, db: Any) -> None:
@@ -396,6 +396,28 @@ async def test_reset_all_needs_pin_then_resets_everything_resettable(dapi: Api, 
     logs = await reset_logs(db)
     assert len(logs) == 1 and logs[0].target_id == "all" and logs[0].detail["value"] == "all"
     assert "90" not in orjson.dumps(logs[0].detail).decode() and "monthly" not in orjson.dumps(logs[0].detail).decode()
+
+
+async def test_org_autonomy_is_its_own_item_counted_and_pin_guarded(dapi: Api, db: Any) -> None:
+    """F-R8: mức tự trị của tổ chức là MỘT MỤC của sổ (hiện chữ mặc định/đang dùng, đếm vào "Đã đổi"), không còn bị
+    "Về mặc định tất cả" đổi ngầm. Về mặc định riêng mục này cũng cần phiên PIN (nâng mức tự trị)."""
+    org = await org_id(db)
+    it = (await items_of(dapi))["autonomy"]
+    assert it["label"] == "Mức tự trị của tổ chức" and it["resettable"] is True and not it["customized"]
+    assert it["default_text"] == "Soạn sẵn chờ duyệt (mức 4)" == it["current_text"]
+    await set_setting(db, org, "autonomy_level", 3)
+    body = (await dapi.get("/defaults")).json()
+    it = {i["key"]: i for i in body["items"]}["autonomy"]
+    assert it["customized"] and it["current_text"] == "Gợi ý hành động (mức 3)"
+    assert body["customized_count"] == 1                          # CHỈ mức tự trị khác mặc định vẫn đếm: nút không tắt
+    r = await dapi.send("POST", "/defaults/autonomy/reset", CONFIRM)
+    assert r.status_code == 423 and r.json()["code"] == "PIN_REQUIRED", r.text
+    assert await setting(db, org, "autonomy_level") == 3 and await reset_logs(db) == []
+    await verify_pin(dapi)
+    r = await dapi.send("POST", "/defaults/autonomy/reset", CONFIRM)
+    assert r.status_code == 200 and r.json()["customized"] is False, r.text
+    assert await setting(db, org, "autonomy_level") == 4
+    assert [x.target_id for x in await reset_logs(db)] == ["autonomy"]
 
 
 async def test_reset_all_requires_confirm(dapi: Api, db: Any) -> None:
