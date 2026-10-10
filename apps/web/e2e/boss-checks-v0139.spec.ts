@@ -2,9 +2,12 @@ import { expect, test, type Page } from '@playwright/test';
 import { OWNER, loginAsOwner, p3Hook, resetMock } from './support';
 
 /**
- * v0.1.39 (F-74) — "Việc Sếp cần làm" (mock, tất định): thẻ ở đầu Hướng dẫn thiết lập → trang 5 dòng; Gen-hub nhập
- * token → Kiểm tra (PIN một lần) → "Đạt" ngay cạnh dòng; Facebook "Đọc ngay" → "Đang chạy…" → "Đạt"; Google gọi thử +
- * đổi qua lại hai tài khoản (PIN); tải lại trang kết quả vẫn còn (đọc từ API, không phải bộ nhớ trình duyệt).
+ * v0.1.39 (F-74) — "Việc Sếp cần làm" (mock, tất định): thẻ ở đầu Hướng dẫn thiết lập → trang các dòng; Gen-hub nhập
+ * token → Kiểm tra (PIN một lần) → "Đạt" ngay cạnh dòng; Facebook "Đọc ngay" → "Đang chạy…" → "Đạt"; Google gọi thử;
+ * tải lại trang kết quả vẫn còn (đọc từ API, không phải bộ nhớ trình duyệt).
+ *
+ * v0.1.55 (G2): CHỈ dòng 0 "Có ít nhất 1 nguồn AI chạy được" bắt buộc (x/1); mọi dòng kết nối khác "Không bắt buộc" và không
+ * đổi số đếm; Google bỏ yêu cầu đổi qua lại hai tài khoản (chỉ Đăng nhập + Gọi thử).
  */
 
 const HUB_TOKEN = 'ghtok_E2E_dung_0123456789';
@@ -25,7 +28,7 @@ test.describe('Việc Sếp cần làm (v0.1.39)', () => {
     await page.setViewportSize({ width: 1440, height: 900 });
   });
 
-  test('Owner: thẻ ở Hướng dẫn thiết lập → 9 dòng; Gen-hub PIN một lần → Đạt; Facebook Đọc ngay → Đang chạy… → Đạt', async ({ page }) => {
+  test('Owner: thẻ ở Hướng dẫn thiết lập → 10 dòng; nguồn AI Kiểm tra → 1/1; Gen-hub PIN một lần → Đạt; Facebook Đọc ngay → Đang chạy… → Đạt (không đổi số bắt buộc)', async ({ page }) => {
     test.setTimeout(90_000);
     await p3Hook(page.request, 'social', 'seedActive', { label: 'Facebook của Sếp' });
     let pinDialogs = 0;
@@ -35,13 +38,22 @@ test.describe('Việc Sếp cần làm (v0.1.39)', () => {
     await loginAsOwner(page);
     await page.goto('/guide');
     await expect(page.getByRole('heading', { level: 2, name: 'Hướng dẫn thiết lập' })).toBeVisible();
-    const card = page.getByRole('link', { name: /Việc Sếp cần làm — kết nối chạy thật/ });
-    await expect(card).toContainText('Đã đạt 0/6 dòng bắt buộc');
+    const card = page.getByRole('link', { name: /Việc Sếp cần làm — nguồn AI chạy thật/ });
+    await expect(card).toContainText('Đã đạt 0/1 dòng bắt buộc');
     await card.click();
     await expect(page).toHaveURL(/\/guide\/viec-sep$/);
-    await expect(page.locator('.boss-row')).toHaveCount(9);
+    await expect(page.locator('.boss-row')).toHaveCount(10);
     await expect(row(page, 'Jev')).toContainText('Không bắt buộc');
+    await expect(row(page, 'Có ít nhất 1 nguồn AI chạy được')).not.toContainText('Không bắt buộc');
     await expect(page.getByText('Kết quả được lưu lại — Claude tự đọc, Sếp không cần chụp màn hình.')).toBeVisible();
+
+    // 0. Nguồn AI (dòng bắt buộc duy nhất): Kiểm tra — không hỏi PIN — → Đạt, thẻ đếm 1/1.
+    const ai = row(page, 'Có ít nhất 1 nguồn AI chạy được');
+    await expect(ai.getByTestId('boss-result')).toContainText('Chưa kiểm');
+    await ai.getByRole('button', { name: 'Kiểm tra', exact: true }).click();
+    await expect(ai.getByTestId('boss-result')).toContainText(/Đạt/);
+    await expect(page.getByText('Đã đạt đủ 1 dòng bắt buộc')).toBeVisible();
+    expect(pinDialogs).toBe(0);
 
     // 1. Gen-hub: địa chỉ https công khai → công tắc bật sẵn; Kiểm tra = lưu (PIN) rồi kiểm, không hỏi PIN lần hai.
     const hub = row(page, 'Nối Gen-hub');
@@ -65,43 +77,40 @@ test.describe('Việc Sếp cần làm (v0.1.39)', () => {
     await expect(fb.getByRole('button', { name: 'Đọc ngay' })).toBeDisabled();
     await expect(fb.getByTestId('boss-result')).toContainText('Đạt ·', { timeout: 15_000 });
     await expect(fb.getByRole('button', { name: 'Đọc lại' })).toBeEnabled();
-    await expect(page.getByText('Đã đạt 2/6 dòng bắt buộc')).toBeVisible();
+    // Gen-hub và Facebook không bắt buộc ⇒ số đếm vẫn đủ 1/1 (chỉ dòng nguồn AI tính).
+    await expect(page.getByText('Đã đạt đủ 1 dòng bắt buộc')).toBeVisible();
 
     // Hướng dẫn thiết lập: việc "Nối Gen-hub" và "Kết nối Facebook" tự hiện Đã xong.
     await page.goto('/guide');
     await expect(page.locator('[data-gen-target="guide.item:14"]')).toContainText('Đã xong');
     await expect(page.locator('[data-gen-target="guide.item:13"]')).toContainText('Đã xong');
-    await expect(page.getByRole('link', { name: /Việc Sếp cần làm/ })).toContainText('Đã đạt 2/6 dòng bắt buộc');
+    await expect(page.getByRole('link', { name: /Việc Sếp cần làm/ })).toContainText('Đã đạt 1/1 dòng bắt buộc');
   });
 
-  test('Google: Gọi thử báo binh@ → Đổi sang an@ (PIN) → Đổi sang binh@ → 2/2; tải lại vẫn còn kết quả', async ({ page }) => {
+  test('Google: Gọi thử báo binh@ (không còn đòi đổi qua lại hai tài khoản) → Xong + nguồn AI tự đạt; tải lại vẫn còn kết quả', async ({ page }) => {
     test.setTimeout(90_000);
     await p3Hook(page.request, 'bossChecks', 'seedAgy');
     await loginAsOwner(page);
     await page.goto('/guide/viec-sep');
-    const agy = row(page, 'Google (Antigravity) — hai tài khoản');
+    const agy = row(page, 'Google (Antigravity)');
     const results = agy.getByTestId('boss-result');
-    await expect(results).toHaveCount(3);
+    await expect(results).toHaveCount(2);
+    await expect(agy.getByRole('button', { name: /Đổi sang/ })).toHaveCount(0);
+    await expect(agy).toContainText('Không bắt buộc');
+    await expect(agy.getByRole('link', { name: /Thêm \/ đổi tài khoản ở Kết nối/ })).toHaveAttribute('href', '/connections#brain');
 
     await agy.getByRole('button', { name: 'Gọi thử' }).click();
     await expect(results.nth(1)).toContainText('Đạt · đang dùng binh@genesis.vn');
-
-    await agy.getByRole('button', { name: 'Đổi sang an@genesis.vn' }).click();
-    await enterPin(page);
-    await expect(results.nth(2)).toContainText('Đã đổi · gọi thử chạy bằng an@genesis.vn — khớp');
-    await expect(agy).toContainText('Đã đổi qua lại 1/2 lần');
-
-    await agy.getByRole('button', { name: 'Đổi sang binh@genesis.vn' }).click();
-    await expect(results.nth(2)).toContainText('Đã đổi · gọi thử chạy bằng binh@genesis.vn — khớp');
-    await expect(agy).toContainText('Đã đổi qua lại 2/2 lần');
     await expect(agy).toContainText('Xong');
+    // Google gọi thử đạt ⇒ dòng nguồn AI tự đạt (máy chủ suy ra), đủ 1/1.
+    await expect(page.getByText('Đã đạt đủ 1 dòng bắt buộc')).toBeVisible();
 
     // Tải lại: kết quả đọc lại từ API — máy chủ chỉ lưu email ĐÃ CHE (email đầy đủ chỉ có trong phản hồi lúc bấm).
     await page.reload();
-    const again = row(page, 'Google (Antigravity) — hai tài khoản');
+    const again = row(page, 'Google (Antigravity)');
     await expect(again.getByTestId('boss-result').nth(1)).toContainText('Đạt · đang dùng b***@genesis.vn');
-    await expect(again.getByTestId('boss-result').nth(2)).toContainText('gọi thử chạy bằng b***@genesis.vn — khớp');
-    await expect(again).toContainText('Đã đổi qua lại 2/2 lần');
+    await expect(again).toContainText('Xong');
+    await expect(page.getByText('Đã đạt đủ 1 dòng bắt buộc')).toBeVisible();
   });
 
   test('Claude: đã đăng nhập từ trước (chưa có bản đăng nhập) → Gọi thử đạt là dòng 4 Xong; tải lại vẫn còn', async ({ page }) => {
@@ -121,7 +130,7 @@ test.describe('Việc Sếp cần làm (v0.1.39)', () => {
     await expect(again).toContainText('Xong');
     await expect(again.getByTestId('boss-result').nth(0)).toContainText('phiên có sẵn');
   });
-  test('Telegram (dòng 6, v0.1.44): chưa nối → Gửi thử báo cách làm + Mở hướng dẫn tới Kết nối › Telegram; đã nối → Đạt, đếm 1/6', async ({ page }) => {
+  test('Telegram (dòng 6, v0.1.44): chưa nối → Gửi thử báo cách làm + Mở hướng dẫn tới Kết nối › Telegram; đã nối → Đạt, không đổi số bắt buộc (0/1)', async ({ page }) => {
     await loginAsOwner(page);
     await page.goto('/guide/viec-sep');
     const tg = row(page, 'Telegram (báo động & bản tin)');
@@ -136,29 +145,30 @@ test.describe('Việc Sếp cần làm (v0.1.39)', () => {
     await tg.getByRole('button', { name: 'Gửi thử' }).click();
     await expect(tg.getByTestId('boss-result')).toContainText('Đạt · đã gửi tới @gen_harness_sep_bot → chat •••4321');
     await expect(tg).toContainText('Xong');
-    await expect(page.getByText('Đã đạt 1/6 dòng bắt buộc')).toBeVisible();
+    await expect(page.getByText('Đã đạt 0/1 dòng bắt buộc')).toBeVisible();   // Telegram không bắt buộc ⇒ không tính
 
     await tg.getByRole('link', { name: /Mở hướng dẫn/ }).click();
     await expect(page).toHaveURL(/\/connections#telegram$/);
     await expect(page.getByRole('region', { name: 'Telegram — báo động & bản tin' })).toBeVisible();
   });
 
-  test('Facebook trả lời (dòng 8, v0.1.47): không bắt buộc, 4 bước, nút mở Tài khoản mạng xã hội; đạt → Đạt, vẫn 0/6 bắt buộc', async ({ page }) => {
+  test('Facebook trả lời (dòng 8, v0.1.47): không bắt buộc, 4 bước, nút mở Tài khoản mạng xã hội; đạt → Đạt, vẫn 0/1 bắt buộc', async ({ page }) => {
     await loginAsOwner(page);
     await page.goto('/guide/viec-sep');
-    const fr = row(page, 'Facebook trả lời (không bắt buộc)');
+    const fr = row(page, 'Facebook trả lời');
     await expect(fr.getByTestId('boss-result')).toContainText('Chưa kiểm');
+    await expect(fr).toContainText('Không bắt buộc');
     await expect(fr.getByRole('listitem')).toHaveCount(4);
     await expect(fr.getByRole('button')).toHaveCount(0);
-    await expect(page.getByText('Đã đạt 0/6 dòng bắt buộc')).toBeVisible();
+    await expect(page.getByText('Đã đạt 0/1 dòng bắt buộc')).toBeVisible();
     await fr.getByRole('link', { name: /Mở Tài khoản mạng xã hội/ }).click();
     await expect(page).toHaveURL(/\/social$/);
 
     await p3Hook(page.request, 'bossChecks', 'seedFacebookReply');
     await page.goto('/guide/viec-sep');
-    const again = row(page, 'Facebook trả lời (không bắt buộc)');
+    const again = row(page, 'Facebook trả lời');
     await expect(again.getByTestId('boss-result')).toContainText(/Đạt · \d\d:\d\d \d\d\/\d\d/);
     await expect(again).toContainText('Xong');
-    await expect(page.getByText('Đã đạt 0/6 dòng bắt buộc')).toBeVisible();   // không bắt buộc ⇒ không tính
+    await expect(page.getByText('Đã đạt 0/1 dòng bắt buộc')).toBeVisible();   // không bắt buộc ⇒ không tính
   });
 });

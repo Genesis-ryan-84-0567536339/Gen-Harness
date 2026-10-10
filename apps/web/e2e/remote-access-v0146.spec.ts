@@ -127,7 +127,7 @@ test.describe('Truy cập từ xa (v0.1.46)', () => {
     }
   });
 
-  test('Việc Sếp cần làm dòng 7: Kiểm tra trên localhost → Lỗi + câu hướng dẫn; Origin từ xa → Đạt, đếm 1/6', async ({ page }) => {
+  test('Việc Sếp cần làm dòng 7: Kiểm tra trên localhost → Lỗi + câu hướng dẫn; Origin từ xa → Đạt, không đổi số bắt buộc (0/1)', async ({ page }) => {
     await page.goto('/guide/viec-sep');
     const row = page.getByRole('region', { name: 'Truy cập từ xa', exact: true });
     await expect(row).toContainText('Bấm nút này TRÊN ĐIỆN THOẠI sau khi mở Console bằng địa chỉ từ xa');
@@ -141,15 +141,15 @@ test.describe('Truy cập từ xa (v0.1.46)', () => {
     await row.getByRole('button', { name: 'Kiểm tra' }).click();
     await expect(row).toContainText('Đang mở trên chính máy chủ — mở Console trên điện thoại bằng địa chỉ ở Cài đặt › Sao lưu & cập nhật › Truy cập từ xa');
     await expect(row).toContainText('REMOTE_OPENED_ON_SERVER');
-    await expect(page.getByText('Đã đạt 0/6 dòng bắt buộc')).toBeVisible();
-    // Bấm từ điện thoại: Origin là địa chỉ Tailscale ⇒ Đạt, đếm 1/6.
+    await expect(page.getByText('Đã đạt 0/1 dòng bắt buộc')).toBeVisible();
+    // Bấm từ điện thoại: Origin là địa chỉ Tailscale ⇒ Đạt (dòng không bắt buộc ⇒ vẫn 0/1).
     await page.route('**/api/v1/boss-checks/remote_access/run', (route) =>
       route.continue({ headers: { ...route.request().headers(), origin: 'https://gen-harness.tail1234.ts.net' } }),
     );
     await row.getByRole('button', { name: 'Kiểm tra' }).click();
     await expect(row.getByTestId('boss-result')).toContainText('Đạt · đã mở Console từ gen-harness.tail1234.ts.net');
     await expect(row).toContainText('Xong');
-    await expect(page.getByText('Đã đạt 1/6 dòng bắt buộc')).toBeVisible();
+    await expect(page.getByText('Đã đạt 0/1 dòng bắt buộc')).toBeVisible();
     await expect(page.getByText('[object Object]')).toHaveCount(0);
   });
 
