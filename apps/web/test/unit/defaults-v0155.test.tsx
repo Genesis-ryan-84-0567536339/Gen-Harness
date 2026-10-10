@@ -8,9 +8,10 @@ import type { DefaultItem, DefaultSuggestion, DefaultsResponse } from '../../src
 import { DefaultBadge } from '../../src/defaults/DefaultBadge';
 import { DefaultControls, ResetButton } from '../../src/defaults/ResetButton';
 import { StandardModeStrip } from '../../src/defaults/StandardModeStrip';
-import { asText, changedCount, confirmLines, standardModeText } from '../../src/defaults/defaultsModel';
+import { asText, changedAutonomy, changedCount, confirmLines, customCoreBindingCount, standardModeText } from '../../src/defaults/defaultsModel';
 import { ApiScreen } from '../../src/screens/api/ApiScreen';
 import { bindingEffortText, bindingModelText, bindingParamsText, supportedEfforts } from '../../src/screens/api/apiModel';
+import { refreshSettings } from '../../src/defaults/queries';
 import { PinDialogHost } from '../../src/shell/PinDialogHost';
 import { qk } from '../../src/lib/queries';
 import { queryClient } from '../../src/lib/queryClient';
@@ -93,6 +94,32 @@ describe('defaultsModel (thuần)', () => {
     expect(changedCount(d)).toBe(1);
     expect(changedCount({ ...d, customized_count: undefined as unknown as number })).toBe(1);
     expect(changedCount(undefined)).toBe(0);
+  });
+
+  it('hộp "Áp model chuẩn theo vai" chỉ đếm bốn dòng gán LÕI, không đếm dòng gán riêng của agent', () => {
+    const d = defaults([
+      item('binding:core.gen'), item('binding:core.reply'), item('binding:core.briefing', { customized: false }),
+      item('binding:agent:a1'), item('binding:agent:a2'), item('triage'),
+    ]);
+    expect(customCoreBindingCount(d)).toBe(2);
+    expect(customCoreBindingCount(defaults([item('binding:agent:a1')]))).toBe(0);
+    expect(customCoreBindingCount(undefined)).toBe(0);
+  });
+
+  it('mức tự trị của tổ chức: chỉ nêu khi đã đổi khỏi mặc định', () => {
+    expect(changedAutonomy(defaults([item('autonomy', { customized: false })]))).toBeUndefined();
+    expect(changedAutonomy(defaults([item('triage')]))).toBeUndefined();
+    expect(changedAutonomy(defaults([item('autonomy')]))?.key).toBe('autonomy');
+    expect(changedAutonomy(undefined)).toBeUndefined();
+  });
+
+  it('Về mặc định / Áp model chuẩn làm tươi cả thẻ ở Hôm nay của Mặt tiền Owner (khoá owner)', () => {
+    const spy = vi.spyOn(queryClient, 'invalidateQueries');
+    refreshSettings(queryClient);
+    const keys = spy.mock.calls.map((c) => JSON.stringify((c[0] as { queryKey: unknown[] }).queryKey));
+    expect(keys).toContain(JSON.stringify(['owner']));
+    expect(keys).toContain(JSON.stringify(['defaults']));
+    spy.mockRestore();
   });
 
   it('chuỗi an toàn: object/null không bao giờ thành chữ', () => {
@@ -249,6 +276,45 @@ describe('<StandardModeStrip>', () => {
     expect(screen.getByTestId('standard-strip-badge')).toHaveTextContent('Mặc định');
   });
 
+  it('mức tự trị của tổ chức đã đổi ⇒ hộp Xác nhận nói thẳng, và nút không mờ dù chỉ mục này khác mặc định', async () => {
+    const aut = item('autonomy', { label: 'Mức tự trị của tổ chức', current_text: 'Gợi ý hành động (mức 3)', default_text: 'Soạn sẵn chờ duyệt (mức 4)' });
+    mockFetch((c) => (c.url.endsWith('/defaults') ? json(200, defaults([item('triage', { customized: false }), aut])) : undefined));
+    const user = userEvent.setup();
+    renderUi(<StandardModeStrip />);
+    expect(await screen.findByTestId('standard-strip-text')).toHaveTextContent('Chế độ tiêu chuẩn: đã đổi 1 mục');
+    const btn = screen.getByRole('button', { name: 'Về mặc định tất cả' });
+    expect(btn).toBeEnabled();
+    await user.click(btn);
+    const dlg = await screen.findByRole('dialog', { name: /Về mặc định tất cả/ });
+    const note = within(dlg).getByTestId('reset-all-autonomy');
+    expect(note).toHaveTextContent('mức tự trị của tổ chức');
+    expect(note).toHaveTextContent('Gợi ý hành động (mức 3)');
+    expect(note).toHaveTextContent('Soạn sẵn chờ duyệt (mức 4)');
+    expect(dlg).not.toHaveTextContent('[object Object]');
+  });
+
+  it('mức tự trị chưa đổi ⇒ hộp Xác nhận không nhắc tới nó', async () => {
+    mockFetch((c) => (c.url.endsWith('/defaults') ? json(200, defaults([item('triage'), item('autonomy', { customized: false })])) : undefined));
+    const user = userEvent.setup();
+    renderUi(<StandardModeStrip />);
+    await user.click(await screen.findByRole('button', { name: 'Về mặc định tất cả' }));
+    const dlg = await screen.findByRole('dialog', { name: /Về mặc định tất cả/ });
+    expect(within(dlg).queryByTestId('reset-all-autonomy')).toBeNull();
+  });
+
+  it('hộp "Áp model chuẩn theo vai" đếm đúng số dòng gán lõi (không tính dòng gán của agent)', async () => {
+    mockFetch((c) =>
+      c.url.endsWith('/defaults')
+        ? json(200, defaults([item('binding:core.gen'), item('binding:core.reply'), item('binding:agent:a1'), item('binding:agent:a2'), item('binding:agent:a3')], [SUGGEST]))
+        : undefined,
+    );
+    const user = userEvent.setup();
+    renderUi(<StandardModeStrip />);
+    await user.click(await screen.findByTestId('apply-standard'));
+    const dlg = await screen.findByRole('dialog', { name: /Áp model chuẩn theo vai/ });
+    expect(within(dlg).getByTestId('apply-standard-body')).toHaveTextContent('Em bỏ 2 dòng gán model');
+  });
+
   it('chưa đổi gì ⇒ "đang dùng", Về mặc định tất cả mờ', async () => {
     mockFetch((c) => (c.url.endsWith('/defaults') ? json(200, defaults([item('triage', { customized: false })])) : undefined));
     renderUi(<StandardModeStrip />);
@@ -341,6 +407,20 @@ describe('mock-defaults (hợp đồng của máy chủ)', () => {
     r = ctx('GET', '/defaults');
     m.handle(r.c);
     expect((r.out.body as DefaultsResponse).customized_count).toBe(0);
+  });
+
+  it('mục autonomy: Về mặc định riêng mục này cũng cần PIN (423); có PIN thì về mặc định', () => {
+    const m = createMock({ fresh: false, emit: () => {} });
+    (m.hooks.customize as (b: { keys: string[] }) => unknown)({ keys: ['autonomy'] });
+    let r = ctx('GET', '/defaults');
+    m.handle(r.c);
+    expect((r.out.body as DefaultsResponse).items.find((i) => i.key === 'autonomy')?.customized).toBe(true);
+    r = ctx('POST', '/defaults/autonomy/reset', { confirm: true }, { needPin: () => true });
+    m.handle(r.c);
+    expect([r.out.status, (r.out.body as { code: string }).code]).toEqual([423, 'PIN_REQUIRED']);
+    r = ctx('POST', '/defaults/autonomy/reset', { confirm: true });
+    m.handle(r.c);
+    expect(r.out.status).toBe(200);
   });
 
   it('reset-all cần PIN (423); apply-standard xoá bốn dòng gán lõi; gợi ý apply_standard khi ≥ 2 dòng đổi', () => {

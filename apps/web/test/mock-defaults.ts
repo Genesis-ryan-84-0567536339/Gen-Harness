@@ -6,7 +6,8 @@
  * - `POST /defaults/{key}/reset` {confirm: true} — thiếu `confirm` ⇒ 422; khoá lạ ⇒ 404 DEFAULTS_KEY_UNKNOWN; `jev.preset` (chỉ xem) ⇒
  *   409 DEFAULTS_NOT_RESETTABLE.
  * - `POST /defaults/apply-standard` {confirm: true} — bỏ 4 dòng gán lõi (core.gen/briefing/refinery/reply).
- * - `POST /defaults/reset-all` {confirm: true} — cần mã PIN (423 PIN_REQUIRED khi chưa có phiên PIN).
+ * - `POST /defaults/reset-all` {confirm: true} — cần mã PIN (423 PIN_REQUIRED khi chưa có phiên PIN). Mục `autonomy` (mức tự trị của tổ chức)
+ *   là mục sổ riêng; Về mặc định riêng mục này cũng cần PIN.
  *
  * Trạng thái ở trong bộ nhớ (mỗi lần `createMock`, tức mỗi `POST /__mock/reset`, về lại tình trạng ban đầu). Mục `triage` MẶC ĐỊNH
  * "Đã đổi" (ngưỡng 55) để e2e bấm Về mặc định ngay; các mục khác "Mặc định".
@@ -44,6 +45,7 @@ function seedRows(): Row[] {
     mk('jev.preset', 'Jev — nguồn model', 'Bộ não AI', 'Jev dùng model typesafe/jev-1.13 qua openrouter.ai', 'Jev dùng model tự host qua jev.local', { resettable: false }),
     mk('ai_cost', 'Trần chi phí AI', 'Chi phí AI', 'Không đặt trần chi phí AI', 'Trần chi phí AI 500.000 ₫ mỗi ngày'),
     mk('backup', 'Lịch sao lưu', 'Sao lưu', 'Sao lưu hằng ngày lúc 02:00 · giữ 7 bản · lưu trên máy chủ này', 'Sao lưu hằng tuần lúc 03:30 · giữ 3 bản · lưu trên máy chủ này'),
+    mk('autonomy', 'Mức tự trị của tổ chức', 'Gen', 'Soạn sẵn chờ duyệt (mức 4)', 'Gợi ý hành động (mức 3)'),
     mk('binding:core.gen', 'Model cho Gen — trợ lý quản trị', 'Gán model', 'Chuẩn: sonnet (tự chọn) · mức suy nghĩ Vừa', 'gemini-2.5-pro (Antigravity Brain) — Sếp đã chọn'),
     mk('binding:core.briefing', 'Model cho Bản tin Gen', 'Gán model', 'Chuẩn: gemini-2.5-flash-lite (tự chọn)', 'gemini-2.5-pro (Antigravity Brain) — Sếp đã chọn'),
     mk('binding:core.refinery', 'Model cho Sàng lọc & suy luận chính', 'Gán model', 'Chuẩn: gemini-2.5-flash-lite (tự chọn)', 'gemini-2.5-pro (Antigravity Brain) — Sếp đã chọn'),
@@ -106,6 +108,8 @@ export function createMock(_opts: Opts) {
     if (!r) return problem(404, 'DEFAULTS_KEY_UNKNOWN', 'Em không có mục mặc định này — Sếp tải lại trang rồi thử lại');
     if (!r.resettable) return problem(409, 'DEFAULTS_NOT_RESETTABLE', 'Mục này chỉ để xem — Sếp đổi ở thẻ của nó (đổi nguồn model cần mã PIN)');
     if (!confirmed) return needConfirm();
+    // Như API: nâng mức tự trị của tổ chức luôn cần phiên mã PIN, kể cả khi chỉ về mặc định riêng mục này.
+    if (key === 'autonomy' && ctx.needPin()) return problem(423, 'PIN_REQUIRED', 'Thao tác này cần nhập mã PIN', { detail: { operation: 'defaults.reset_all' } });
     setCustomized(r, false);
     resets += 1;
     return reply(200, { key, reset: true, customized: false, current_text: r.current_text });

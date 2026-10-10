@@ -12,8 +12,13 @@ import type { ApiClient } from './client';
 
 export type DefaultScope = 'org' | 'user';
 
+/** Khoá bốn dòng gán model lõi mà "Áp model chuẩn theo vai" xoá (= `registry.CORE_BINDING_KEYS` của máy chủ); `agent:*` giữ nguyên. */
+export const CORE_BINDING_KEYS = ['core.gen', 'core.briefing', 'core.refinery', 'core.reply'] as const;
+/** Khoá mục sổ "Mức tự trị của tổ chức" — nằm trong "Về mặc định tất cả", Về mặc định riêng mục này cũng cần mã PIN. */
+export const AUTONOMY_KEY = 'autonomy';
+
 export interface DefaultItem {
-  /** `gen` | `coach` | `triage` | `refinery.schedule` | `jev.preset` | `ai_cost` | `backup` | `binding:core.gen` | `binding:agent:<id>`… */
+  /** `gen` | `coach` | `triage` | `refinery.schedule` | `jev.preset` | `ai_cost` | `backup` | `autonomy` | `binding:core.gen` | `binding:agent:<id>`… */
   key: string;
   label: string;
   /** `org`: cả tổ chức; `user`: riêng người đang đăng nhập (vd tuỳ chọn Gen hướng dẫn). */

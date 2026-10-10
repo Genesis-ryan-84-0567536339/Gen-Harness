@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { useMe } from '../lib/queries';
+import { OWNER_KEYS } from '../owner/queries';
 import type { DefaultsResponse } from './defaultsModel';
 
 const defaultsApi = api.defaults;
@@ -10,7 +11,8 @@ export const DEFAULTS_KEY = ['defaults'] as const;
 
 /**
  * Cache cài đặt bị Về mặc định đổi: dòng gán model (`agents`), lọc tin (`queue`), trần chi phí/sao lưu/nguồn việc nền
- * (`system`, `providers`), Gen + Gen nhớ + Gen hướng dẫn (`gen`), lịch sàng lọc (`refinery`) và chính sổ mặc định.
+ * (`system`, `providers`), Gen + Gen nhớ + Gen hướng dẫn (`gen`), lịch sàng lọc (`refinery`), Mặt tiền Owner (`owner`: thẻ
+ * "Áp model chuẩn theo vai?" ở Hôm nay đến từ cùng sổ này — không làm tươi thì Sếp tưởng thao tác chưa chạy) và chính sổ mặc định.
  */
 const RELATED_ROOTS: ReadonlyArray<readonly string[]> = [
   DEFAULTS_KEY,
@@ -20,6 +22,7 @@ const RELATED_ROOTS: ReadonlyArray<readonly string[]> = [
   ['providers'],
   ['gen'],
   ['refinery'],
+  OWNER_KEYS.all,
 ];
 
 export function refreshSettings(qc: QueryClient): void {

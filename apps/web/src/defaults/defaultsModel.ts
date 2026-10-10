@@ -9,6 +9,7 @@ export type {
   DefaultsResponse,
 } from '@gen-harness/contracts';
 
+import { AUTONOMY_KEY, CORE_BINDING_KEYS } from '@gen-harness/contracts';
 import type { DefaultItem, DefaultSuggestion, DefaultsResponse } from '@gen-harness/contracts';
 
 export const DEFAULT_CHIP = 'Mặc định';
@@ -53,9 +54,22 @@ export function bindingItems(data: DefaultsResponse | undefined): DefaultItem[] 
   return Array.isArray(data?.items) ? data.items.filter((i) => i.key.startsWith('binding:')) : [];
 }
 
-/** Số dòng gán model Owner đã đổi (mục `binding:*` có customized). */
-export function customBindingCount(data: DefaultsResponse | undefined): number {
-  return bindingItems(data).filter((i) => i.customized).length;
+/**
+ * Số dòng gán model LÕI (Gen, Bản tin Gen, lọc tin, soạn nháp) Owner đã đổi — đúng số dòng "Áp model chuẩn theo vai" sẽ bỏ
+ * (máy chủ chỉ xoá bốn khoá lõi; dòng gán riêng của agent giữ nguyên nên KHÔNG tính vào hộp Xác nhận).
+ */
+export function customCoreBindingCount(data: DefaultsResponse | undefined): number {
+  const core = new Set(CORE_BINDING_KEYS.map((k) => `binding:${k}`));
+  return bindingItems(data).filter((i) => i.customized && core.has(i.key)).length;
+}
+
+/**
+ * Mục "Mức tự trị của tổ chức" khi Sếp đã đổi khỏi mặc định — "Về mặc định tất cả" sẽ đưa nó về mặc định nên hộp Xác nhận
+ * phải nói thẳng (đổi mức tự trị là việc liên quan an toàn). Không đổi ⇒ undefined.
+ */
+export function changedAutonomy(data: DefaultsResponse | undefined): DefaultItem | undefined {
+  const it = findDefault(data, AUTONOMY_KEY);
+  return it && it.customized && it.resettable ? it : undefined;
 }
 
 /** Nội dung hộp Xác nhận của một mục: "Đang dùng: …" và "Mặc định: …" (luôn là chuỗi). */

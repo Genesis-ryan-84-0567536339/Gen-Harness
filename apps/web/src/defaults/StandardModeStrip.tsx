@@ -11,8 +11,9 @@ import {
   STANDARD_ANCHOR,
   STANDARD_MODE_TITLE,
   asText,
+  changedAutonomy,
   changedCount,
-  customBindingCount,
+  customCoreBindingCount,
   standardModeText,
   suggestionOf,
 } from './defaultsModel';
@@ -45,7 +46,8 @@ export function StandardModeStrip() {
   }
   if (!data) return null;
   const n = changedCount(data);
-  const customBindings = customBindingCount(data);
+  const customBindings = customCoreBindingCount(data);
+  const autonomy = changedAutonomy(data);
   const suggestion = suggestionOf(data, 'apply_standard');
 
   const closeReset = () => {
@@ -117,6 +119,12 @@ export function StandardModeStrip() {
           Em đưa {n} mục Sếp đã đổi về mặc định (model theo vai, lọc tin, lịch sao lưu, trần chi phí AI, tuỳ chọn Gen…). Khoá API,
           phiên đăng nhập CLI, mã PIN, mật khẩu, kết nối Gen-hub, Telegram và tài khoản Facebook của Sếp được giữ nguyên.
         </p>
+        {autonomy ? (
+          <p className="muted-note" data-testid="reset-all-autonomy">
+            <strong>Có cả mức tự trị của tổ chức:</strong> đang là “{asText(autonomy.current_text)}”, em đưa về “{asText(autonomy.default_text)}”. Sếp
+            chưa muốn đổi mức này thì Huỷ rồi về mặc định từng mục khác.
+          </p>
+        ) : null}
         {resetAll.isError ? <InlineError detail={errorDetail(resetAll.error)}>{errorText(resetAll.error)}</InlineError> : null}
       </Dialog>
 
