@@ -1,9 +1,12 @@
 """Test chạy trên PostgreSQL 16 + Redis thật (không mock DB).
 
 Biến môi trường: GH_TEST_PG (mặc định postgresql://postgres:postgres@localhost:5432), GH_TEST_REDIS
-(mặc định redis://localhost:6379/15), GH_TEST_TEMPLATE (tên CSDL mẫu, mặc định gh_test_template). Chạy song song
-nhiều bộ test trên cùng máy: mỗi bộ đặt GH_TEST_TEMPLATE và số db Redis riêng. Một CSDL mẫu được migrate một
-lần; mỗi test cần DB sạch nhận một bản sao.
+(mặc định redis://localhost:6379/15), GH_TEST_TEMPLATE (tên CSDL mẫu, mặc định gh_test_template),
+GH_TEST_BROWSER_REDIS (DB Redis thứ hai cho test kênh browser-worker, mặc định cùng máy chủ với GH_TEST_REDIS, DB 13).
+Chạy song song nhiều bộ test trên cùng máy (v0.1.57: CI chạy lượt superuser và lượt gh_app SONG SONG trong job `api`):
+mỗi bộ đặt GH_TEST_TEMPLATE, số db Redis (GH_TEST_REDIS) và GH_TEST_BROWSER_REDIS riêng — ba tài nguyên này là toàn bộ
+trạng thái dùng chung của bộ test (tên DB mỗi test đã có hậu tố ngẫu nhiên; thư mục tạm theo pid). Một CSDL mẫu được
+migrate một lần; mỗi test cần DB sạch nhận một bản sao.
 
 `GH_TEST_APP_ROLE=1` (mục v0.1.1/1a): chạy TOÀN BỘ bộ test dưới role ứng dụng `gh_app` (không superuser,
 không BYPASSRLS — migration 0014) thay vì `postgres`, để bắt sớm mọi GRANT còn thiếu. Migrate vẫn luôn chạy
@@ -32,6 +35,10 @@ API_DIR = Path(__file__).resolve().parents[1]
 PG = os.environ.get("GH_TEST_PG", "postgresql://postgres:postgres@localhost:5432")
 REDIS_URL = os.environ.get("GH_TEST_REDIS", "redis://localhost:6379/15")
 TEMPLATE = os.environ.get("GH_TEST_TEMPLATE", "gh_test_template")
+# v0.1.57: DB Redis riêng của test kênh browser-worker (tests/test_social.py) — hai lượt song song phải khác nhau.
+BROWSER_REDIS_URL = os.environ.get("GH_TEST_BROWSER_REDIS") or REDIS_URL.rsplit("/", 1)[0] + "/13"
+# Khoá tư vấn cấp CỤM (kết nối tới DB `postgres`) tuần tự hoá bước migrate CSDL mẫu — xem `template_db`.
+TEMPLATE_LOCK_KEY = 0x6768_5445  # "ghTE"
 
 os.environ.setdefault("GH_ENV", "test")
 os.environ["GH_COOKIE_SECURE"] = "false"
@@ -42,6 +49,8 @@ os.environ.setdefault("GH_CLAUDE_BINARY", "gh-test-no-claude")
 # F-22: HOME của agy trong test không bao giờ là HOME thật (mặc định ~/.gemini/antigravity-cli ⇒ HOME = ~).
 os.environ.setdefault("GH_CLI_HOME", f"/tmp/gh-test-agy-{os.getpid()}/.gemini/antigravity-cli")
 os.environ.setdefault("GH_MASTER_KEY", "")
+# v0.1.57: kho đối tượng đĩa cục bộ mặc định (/tmp/gh-objects) là chỗ dùng chung giữa hai lượt pytest song song ⇒ theo pid.
+os.environ.setdefault("GH_OBJECTS_DIR", f"/tmp/gh-test-objects-{os.getpid()}")
 
 # gh_app (migration 0014) — mật khẩu test cố định, KHÔNG dùng ngoài môi trường test. Luôn đặt (kể cả khi
 # GH_TEST_APP_ROLE tắt) để role gh_app có LOGIN sẵn nếu một test nào đó cần SET ROLE gh_app thủ công.
@@ -79,12 +88,17 @@ def _async_url(db: str, base: str = PG) -> str:
 
 @pytest.fixture(scope="session")
 def template_db() -> str:
-    _admin(f"DROP DATABASE IF EXISTS {TEMPLATE} WITH (FORCE)")
-    _admin(f"CREATE DATABASE {TEMPLATE}")
-    # Migrate = DDL → luôn superuser, dù GH_TEST_APP_ROLE=1 (gh_app chỉ có quyền DML từ migration 0014).
-    # GH_ADMIN_DATABASE_URL ép rỗng để không kế thừa giá trị của test trước đó (env tiến trình con là bản sao).
-    env = {**os.environ, "GH_DATABASE_URL": _async_url(TEMPLATE), "GH_ADMIN_DATABASE_URL": ""}
-    subprocess.run([sys.executable, "-m", "alembic", "upgrade", "heads"], cwd=API_DIR, env=env, check=True)
+    # v0.1.57: hai lượt pytest song song cùng migrate CSDL mẫu khác tên của MỘT cụm Postgres; migration 0014 chạy
+    # `ALTER ROLE gh_app` (vai trò dùng chung cả cụm) nên hai lượt đồng thời có thể đụng "tuple concurrently updated".
+    # Khoá tư vấn cấp cụm (giữ tới khi đóng kết nối) xếp hàng phần tạo + migrate; các test sau đó chạy song song thoải mái.
+    with psycopg.connect(f"{PG}/postgres", autocommit=True) as lock:
+        lock.execute("SELECT pg_advisory_lock(%s)", (TEMPLATE_LOCK_KEY,))
+        _admin(f"DROP DATABASE IF EXISTS {TEMPLATE} WITH (FORCE)")
+        _admin(f"CREATE DATABASE {TEMPLATE}")
+        # Migrate = DDL → luôn superuser, dù GH_TEST_APP_ROLE=1 (gh_app chỉ có quyền DML từ migration 0014).
+        # GH_ADMIN_DATABASE_URL ép rỗng để không kế thừa giá trị của test trước đó (env tiến trình con là bản sao).
+        env = {**os.environ, "GH_DATABASE_URL": _async_url(TEMPLATE), "GH_ADMIN_DATABASE_URL": ""}
+        subprocess.run([sys.executable, "-m", "alembic", "upgrade", "heads"], cwd=API_DIR, env=env, check=True)
     return TEMPLATE
 
 
