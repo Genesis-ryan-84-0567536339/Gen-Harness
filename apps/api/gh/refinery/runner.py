@@ -5,14 +5,21 @@
 3. LLM trích xuất theo từng phần lô, kiểm chứng cứ; model chết → tin trả về `pending`, lượt sau thử lại.
 4. Độ tin ≥ ngưỡng → clean.meaning_units + clean.evidence; dưới ngưỡng → `lowconf` chờ Sếp xem.
 5. Embedding, chấm điểm người/nhóm, ghi sổ tay, cảnh báo theo quy tắc, phát gh.clean.ready + WebSocket.
+
+v0.1.55 (G4, J2): giữa bước 2 và 3, nếu `triage.prefilter` bật (mặc định), `gh.refinery.prefilter` bỏ qua tin trùng hẳn
+và tin rác chắc chắn (quy tắc + Jev, hoặc quy tắc khi chưa có Jev) — KHÔNG gửi model; tin vẫn nằm trong Kho thô với
+trạng thái `discarded` (`detail.discarded_by = 'prefilter'`) để xem lại ở "Tin đã bỏ qua". Mọi lỗi của bước này ⇒ chạy
+như cũ (không mất tin).
 """
 
+import asyncio
 import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+import httpx
 import orjson
 from redis.asyncio import Redis
 from sqlalchemy import text
@@ -21,15 +28,19 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from gh import realtime
 from gh.chassis.bus import CLEAN_READY, EventBus
 from gh.data.common import iso, live_person, raw_code
+from gh.gen import decider as decmod
 from gh.memory import notebook
 from gh.providers.router import ModelRouter, ModelUnavailable, raise_alert
-from gh.refinery import extract, scoring
+from gh.refinery import extract, prefilter, scoring, triage
 from gh.refinery.rules import EventCtx, Outcome, RuleDef, RuleHit, apply_outputs, evaluate
 
 log = logging.getLogger("gh.refinery")
 
 AGENT_KEY = "core.refinery"
 MAX_ATTEMPTS = 3
+#: J2: tổng thời gian tối đa hỏi Jev cho CẢ lô trước khi trích xuất (giây). Quá hạn ⇒ coi như Jev lỗi (thận trọng:
+#: chỉ bỏ tin trùng hẳn) — bước tối ưu chi phí không được ăn hết `JOB_TIMEOUT` của job sàng lọc.
+PREFILTER_JEV_BUDGET_S = 20.0
 ATTENTION_TYPES = {"Complained", "MentionsCompetitor", "WentSilent"}
 OPEN_THREAD_TYPES = {"PromisedDelivery", "ScheduledMeeting", "AskedStatus", "RequestedSample", "SentQuotation"}
 RULE_KIND_ALERT = {"risk": "repeated_complaint", "competition": "competitor", "hr": "people_signal",
@@ -60,6 +71,7 @@ class Ev:
     ref: str = ""
     outcome: Outcome | None = None
     sets: dict[str, Any] = field(default_factory=dict)
+    mentions: bool = False          # tin tag trực tiếp Gen/agent — lọc trước (J2) không bao giờ bỏ qua
 
 
 def run_out(r: Any) -> dict[str, Any]:
@@ -79,6 +91,7 @@ class RunStats:
     noise: int = 0
     errors: int = 0
     held: int = 0
+    prefilter_skipped: int = 0     # v0.1.55 (J2): tin bỏ qua trước khi trích xuất (đã tính cả vào noise/processed)
     status: str = "running"
     error: str | None = None
     unit_ids: list[str] = field(default_factory=list)
@@ -135,8 +148,9 @@ async def unanswered(db: AsyncSession, ev: Ev, sender_identity: uuid.UUID | None
 
 class Refinery:
     def __init__(self, sm: async_sessionmaker[AsyncSession], redis: Redis, router: ModelRouter,
-                 bus: EventBus | None = None):
+                 bus: EventBus | None = None, *, jev_transport: httpx.AsyncBaseTransport | None = None):
         self.sm, self.redis, self.router, self.bus = sm, redis, router, bus
+        self.jev_transport = jev_transport      # chỉ test tiêm (Jev giả); production = None
 
     async def _progress(self, org_id: uuid.UUID, st: RunStats, final: bool = False) -> None:
         await realtime.publish(self.redis, "refinery.progress", st.progress(), org_id=org_id)
@@ -170,7 +184,8 @@ class Refinery:
         ids = [c.event_id for c in claimed]
         rows = (await db.execute(text("""
             SELECT e.id, e.received_at, e.seq, e.occurred_at, e.kind, e.body_text, e.direction, e.group_id,
-                   e.sender_identity_id, g.code AS group_code, p.id AS person_id, p.code AS person_code
+                   e.sender_identity_id, e.mentions_agent, g.code AS group_code, p.id AS person_id,
+                   p.code AS person_code
             FROM raw.events e LEFT JOIN core.groups g ON g.id = e.group_id
             LEFT JOIN core.person_identities pi ON pi.id = e.sender_identity_id
             LEFT JOIN core.persons p ON p.id = pi.person_id
@@ -189,7 +204,7 @@ class Refinery:
             else:
                 r_code = None
             ev = Ev(r.id, r.received_at, r.seq, r.occurred_at, r.kind, r.body_text or "", r.direction,
-                    r.group_id, r.group_code, pid, r_code)
+                    r.group_id, r.group_code, pid, r_code, mentions=bool(r.mentions_agent))
             evs.append(ev)
             senders[r.id] = r.sender_identity_id
         return evs, senders
@@ -281,6 +296,7 @@ class Refinery:
                     to_model.append(ev)
             await self._rule_hits(db, evs, rules)
             await db.commit()
+        to_model = await self._prefilter(org_id, st, to_model)
         await self._progress(org_id, st)
         # Bước 2–4: model theo từng phần lô.
         for part in extract.chunks([self._event_in(ev) for ev in to_model]):
@@ -303,6 +319,68 @@ class Refinery:
                 continue
             await self._apply(org_id, st, sched, rules, by_ref, ex, routed.model)
             await self._progress(org_id, st)
+
+    async def _prefilter(self, org_id: uuid.UUID, st: RunStats, to_model: list[Ev]) -> list[Ev]:
+        """J2 (v0.1.55): bỏ qua tin trùng hẳn / rác chắc chắn trước khi trích xuất, xếp tin "Jev một mình chấm rác" cuối
+        lô. LỖI BẤT KỲ (Jev, DB) ⇒ trả nguyên `to_model` — tin vẫn đi đường cũ, không bao giờ mất tin vì bước này."""
+        if not to_model:
+            return to_model
+        try:
+            kept, skipped = await self._prefilter_apply(org_id, st, to_model)
+        except Exception:  # noqa: BLE001 — lọc trước là tối ưu chi phí, không được làm hỏng lượt sàng lọc
+            log.exception("Lọc trước (J2) lỗi — trích xuất như cũ")
+            return to_model
+        for ev, _reason in skipped:
+            try:
+                await self._raw_state(org_id, ev, "discarded", "Noise", None)
+            except Exception:  # noqa: BLE001 — chỉ là sự kiện thời gian thực
+                log.warning("Không phát được raw.state cho tin lọc trước", exc_info=True)
+        return kept
+
+    async def _prefilter_apply(self, org_id: uuid.UUID, st: RunStats,
+                               to_model: list[Ev]) -> tuple[list[Ev], list[tuple[Ev, str]]]:
+        async with self.sm() as db:
+            cfg = await triage.get_settings(db, org_id)
+            if cfg.get("prefilter") is False:
+                return to_model, []
+            dec: decmod.Decider = (await decmod.load_decider(db, org_id, transport=self.jev_transport)
+                                   if cfg["use_jev"] else decmod.LlmDecider())
+            items = [prefilter.PrefilterItem(ev.text, ev.person_id, ev.group_id, ev.mentions) for ev in to_model]
+            hashes = {k[0] for it in items if (k := prefilter.exact_key(it)) is not None}
+            known = await prefilter.dup_index(db, org_id, hashes, [ev.event_id for ev in to_model])
+        n = len(items)
+        has_jev = dec.name != "llm"
+        labels: list[str | None] | None = None
+        if has_jev:
+            # Chỉ hỏi Jev về tin chưa chắc chắn trùng hẳn và không phải tin tag (đỡ lượt gọi vô ích).
+            first = prefilter.decide(items, rules_spam=[False] * n, jev_labels=None, dup_index=known)
+            ask = [not r.skip and not it.tagged for r, it in zip(first, items, strict=True)]
+            jobs = [(ev.text, ev.kind) for ev, a in zip(to_model, ask, strict=True) if a]
+            try:
+                asked = await asyncio.wait_for(triage.ask_jev_batch(dec, jobs), timeout=PREFILTER_JEV_BUDGET_S)
+            except TimeoutError:
+                log.warning("Lọc trước (J2): hỏi Jev quá %.0f giây — coi như Jev lỗi cho lô này",
+                            PREFILTER_JEV_BUDGET_S)
+                asked = [None] * len(jobs)
+            answers = iter(asked)
+            labels = []
+            for a in ask:
+                d = next(answers) if a else None
+                labels.append(d.value if d is not None else None)
+        rules = [prefilter.rule_spam(it.text, jev_present=has_jev) for it in items]
+        results = prefilter.decide(items, rules_spam=rules, jev_labels=labels, dup_index=known)
+        skipped: list[tuple[Ev, str]] = [(ev, r.reason or "") for ev, r in zip(to_model, results, strict=True)
+                                         if r.skip]
+        if skipped:
+            async with self.sm() as db:
+                for ev, reason in skipped:
+                    await self._set_state(db, ev, "discarded", st.run_id, label="Noise", confidence=None,
+                                          detail={"discarded_by": "prefilter", "reason": reason})
+                await db.commit()
+            st.noise += len(skipped)
+            st.processed += len(skipped)
+            st.prefilter_skipped += len(skipped)
+        return prefilter.lower_last(to_model, results), skipped
 
     def _event_in(self, ev: Ev) -> extract.EventIn:
         assert ev.outcome is not None
