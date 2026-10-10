@@ -45,7 +45,9 @@ func updateRequestCmd(genhPath string, port int) string {
 }
 
 // SystemdRequestServiceUnit: chạy `genh handle-requests` một lần (genh tự xoá
-// tệp yêu cầu trước khi làm nên path unit không kích lặp). KillMode=mixed +
+// tệp yêu cầu trước khi làm nên path unit không kích lặp; không xoá được thì
+// genh KHÔNG làm yêu cầu — GH-E94C — và StartLimit* dưới đây chặn kích lặp vô
+// hạn). KillMode=mixed +
 // TimeoutStopSec=900: như SystemdServiceUnit (lúc tắt máy giới hạn thật vẫn là
 // ~120 giây của user@.service — xem chú thích ở đó).
 func SystemdRequestServiceUnit(genhPath, logFile string, rp RequestPaths) string {
@@ -56,6 +58,8 @@ func SystemdRequestServiceUnit(genhPath, logFile string, rp RequestPaths) string
 	port := rp.Port
 	return fmt.Sprintf(`[Unit]
 Description=Gen-Harness — cap nhat/khoi phuc khi Owner bam nut trong Console
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=oneshot
@@ -68,7 +72,9 @@ StandardError=append:%s
 }
 
 // SystemdRequestPathUnit: kích service khi MỘT trong các tệp yêu cầu xuất
-// hiện (nhiều dòng PathExists= là "hoặc").
+// hiện (nhiều dòng PathExists= là "hoặc"). TriggerLimit*: tệp yêu cầu không xoá
+// được (quyền) thì path unit không kích lặp quá 10 lần/phút — `genh update`
+// chữa bằng reset-failed (EnsureRequestWatcher).
 func SystemdRequestPathUnit(requestPaths ...string) string {
 	var exists strings.Builder
 	for _, p := range requestPaths {
@@ -80,7 +86,9 @@ func SystemdRequestPathUnit(requestPaths ...string) string {
 Description=Gen-Harness — cho yeu cau cap nhat/khoi phuc tu Console
 
 [Path]
-%sUnit=%s.service
+%sTriggerLimitIntervalSec=60
+TriggerLimitBurst=10
+Unit=%s.service
 
 [Install]
 WantedBy=default.target
@@ -199,6 +207,11 @@ func (rp RequestPaths) env() []string {
 // EnsureRequestWatcher cài (idempotent) watcher nhận yêu cầu "Cập nhật ngay"
 // từ Console, trả cơ chế đã dùng (UpdaterSystemd/UpdaterCron/UpdaterLaunchd).
 // Windows chưa hỗ trợ → lỗi; Console khi đó hiện lệnh để Owner tự chạy.
+//
+// v0.1.53 (F-98): watcher là CHUNG cho mọi bản cài của người dùng — đang thuộc
+// bản cài khác còn sống (rp.InstallDir khác) thì KHÔNG ghi đè, trả
+// *OwnedByOtherError. Unit systemd đã start-limit-hit (tệp yêu cầu từng không
+// xoá được) được `reset-failed` trước khi `enable --now` để `genh update` chữa.
 func EnsureRequestWatcher(ctx context.Context, deps Deps, rp RequestPaths) (string, error) {
 	if deps.GenhPath == "" {
 		return "", fmt.Errorf("thiếu đường dẫn binary genh")
@@ -208,9 +221,15 @@ func EnsureRequestWatcher(ctx context.Context, deps Deps, rp RequestPaths) (stri
 		return "", fmt.Errorf("không xác định được thư mục home: %w", err)
 	}
 	runner := deps.runner()
+	if deps.InstallDir == "" {
+		deps.InstallDir = rp.InstallDir
+	}
 	switch deps.goos() {
 	case "linux":
 		if systemdUserAvailable(ctx, runner, deps.lookPath()) {
+			if err := deps.guardUnit(home, RequestTaskName+".service"); err != nil {
+				return "", err
+			}
 			dir := systemdUserDir(home)
 			if err := os.MkdirAll(dir, 0o755); err != nil {
 				return "", fmt.Errorf("tạo %s: %w", dir, err)
@@ -226,10 +245,16 @@ func EnsureRequestWatcher(ctx context.Context, deps Deps, rp RequestPaths) (stri
 			if _, err := runner.Output(ctx, "systemctl", []string{"--user", "daemon-reload"}); err != nil {
 				return "", err
 			}
+			// .path/.service từng start-limit-hit (tệp yêu cầu không xoá được, kích lặp)
+			// thì enable --now không đủ: phải reset-failed. Bỏ qua lỗi (chưa failed).
+			_, _ = runner.Output(ctx, "systemctl", []string{"--user", "reset-failed", RequestTaskName + ".path", RequestTaskName + ".service"})
 			if _, err := runner.Output(ctx, "systemctl", []string{"--user", "enable", "--now", RequestTaskName + ".path"}); err != nil {
 				return "", err
 			}
 			return UpdaterSystemd, nil
+		}
+		if err := deps.guardLinux(ctx, home, RequestTaskName+".service", CrontabRequestMarker); err != nil {
+			return "", err
 		}
 		existing, _ := runner.Output(ctx, "crontab", []string{"-l"})
 		merged := mergeCrontabMarked(string(existing), CrontabRequestMarker,
@@ -244,6 +269,9 @@ func EnsureRequestWatcher(ctx context.Context, deps Deps, rp RequestPaths) (stri
 			return "", fmt.Errorf("tạo %s: %w", dir, err)
 		}
 		path := filepath.Join(dir, "com.gen-harness.update-request.plist")
+		if err := deps.guardDarwin(path); err != nil {
+			return "", err
+		}
 		_, _ = runner.Output(ctx, "launchctl", []string{"unload", path})
 		if err := os.WriteFile(path, []byte(LaunchdRequestPlist(deps.GenhPath, deps.LogFile, rp)), 0o644); err != nil {
 			return "", fmt.Errorf("ghi %s: %w", path, err)
@@ -257,15 +285,19 @@ func EnsureRequestWatcher(ctx context.Context, deps Deps, rp RequestPaths) (stri
 	}
 }
 
-// DisableRequestWatcher gỡ watcher (best-effort, idempotent).
-func DisableRequestWatcher(ctx context.Context, deps Deps) {
+// DisableRequestWatcher gỡ watcher (best-effort, idempotent). Trả một dòng nói
+// rõ khi KHÔNG gỡ vì watcher thuộc bản cài khác còn sống (deps.InstallDir).
+func DisableRequestWatcher(ctx context.Context, deps Deps) string {
 	home, err := deps.homeDir()
 	if err != nil {
-		return
+		return ""
 	}
 	runner := deps.runner()
 	switch deps.goos() {
 	case "linux":
+		if other, yes := deps.ownerOnLinux(ctx, home, RequestTaskName+".service", CrontabRequestMarker); yes {
+			return keptMessage("trình nhận yêu cầu (nút Cập nhật ngay)", other)
+		}
 		_, _ = runner.Output(ctx, "systemctl", []string{"--user", "disable", "--now", RequestTaskName + ".path"})
 		dir := systemdUserDir(home)
 		_ = os.Remove(filepath.Join(dir, RequestTaskName+".service"))
@@ -276,7 +308,13 @@ func DisableRequestWatcher(ctx context.Context, deps Deps) {
 		}
 	case "darwin":
 		path := filepath.Join(launchAgentDir(home), "com.gen-harness.update-request.plist")
+		if err := deps.guardDarwin(path); err != nil {
+			if other, ok := OwnerOf(err); ok {
+				return keptMessage("trình nhận yêu cầu (nút Cập nhật ngay)", other)
+			}
+		}
 		_, _ = runner.Output(ctx, "launchctl", []string{"unload", path})
 		_ = os.Remove(path)
 	}
+	return ""
 }

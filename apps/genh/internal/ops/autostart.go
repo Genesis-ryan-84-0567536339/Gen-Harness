@@ -31,7 +31,7 @@ type AutostartDeps struct {
 //   - Docker: dịch vụ docker (system: `systemctl is-enabled docker.service`;
 //     rootless: `systemctl --user is-enabled docker.service`) phải được bật;
 //   - linger (systemd --user chạy khi chưa đăng nhập): bắt buộc nếu có lịch
-//     đêm/watcher systemd --user HOẶC Docker rootless.
+//     đêm/watcher/trực canh/bản sao ngoài máy systemd --user HOẶC Docker rootless.
 //
 // macOS/Windows: linger không áp dụng. Docker CHỈ coi là "tự lo"
 // (not_applicable, docker_mode=desktop) khi phát hiện được Docker Desktop
@@ -108,7 +108,12 @@ func CheckAutostart(ctx context.Context, deps AutostartDeps) hostlink.AutostartS
 		}
 	}
 	st.LingerRequired = st.DockerMode == "rootless"
-	for _, unit := range []string{autoupdate.RequestTaskName + ".path", autoupdate.TaskName + ".timer"} {
+	// v0.1.53 (F-95): cả trực canh (12 phút) và bản sao ngoài máy (tuần) cũng là timer
+	// systemd --user — chỉ chạy khi chưa đăng nhập nếu bật linger.
+	for _, unit := range []string{
+		autoupdate.RequestTaskName + ".path", autoupdate.TaskName + ".timer",
+		autoupdate.WatchdogTaskName + ".timer", autoupdate.OffsiteTaskName + ".timer",
+	} {
 		if st.LingerRequired {
 			break
 		}

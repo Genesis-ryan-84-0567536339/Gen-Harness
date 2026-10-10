@@ -50,7 +50,7 @@ var doctorGenhLogs = []string{"auto-update.log", "offsite.log", "watchdog.log"}
 // doctorHostFiles là tệp trạng thái trong run/ đưa vào gói (đọc an toàn).
 // KHÔNG có telegram.json (token mã hoá), api-health.json (không cần).
 var doctorHostFiles = []string{"update-status", "restore-status", "disk-status", "autostart-status", "offsite-status",
-	"genh", "update-blocked", "watchdog-status", "doctor-status", "network-status"}
+	"genh", "update-blocked", "watchdog-status", "doctor-status", "network-status", "nightly-status"}
 
 var doctorZipRe = regexp.MustCompile(`^genh-doctor-\d{8}T\d{6}Z\.zip$`)
 
@@ -289,6 +289,24 @@ func writeDoctorBundleFile(outPath string, perm os.FileMode, entries []bundleEnt
 	return nil
 }
 
+// failUndeletableDoctor: tệp yêu cầu còn nguyên sau khi đã cố xoá ⇒ ghi doctor-status
+// failed GH-E94C (idempotent theo request_id) và thôi. Tệp yêu cầu đã biến mất ⇒ không làm gì.
+func failUndeletableDoctor(env *Env, req hostlink.DoctorRequest, out io.Writer) {
+	if !hostlink.HasDoctorRequest(env.InstallDir) {
+		return
+	}
+	if prev, err := hostlink.ReadDoctorStatus(env.InstallDir); err == nil && prev.State == "failed" &&
+		prev.ErrorCode == ErrCodeRequestUndeletable && prev.RequestID == req.RequestID {
+		return
+	}
+	t := time.Now().UTC().Format(time.RFC3339)
+	_ = hostlink.WriteDoctorStatus(env.InstallDir, hostlink.DoctorStatus{
+		RequestID: req.RequestID, State: "failed", StartedAt: t, FinishedAt: t,
+		ErrorCode: ErrCodeRequestUndeletable, Message: RequestUndeletableMessage("yêu cầu gói chẩn đoán"),
+	})
+	_, _ = fmt.Fprintln(out, "genh: "+RequestUndeletableMessage("yêu cầu gói chẩn đoán"))
+}
+
 // RunDoctorRequest làm yêu cầu "Gói chẩn đoán" của Console: đọc + xoá
 // run/request/doctor.json (request_id sai dạng ⇒ bỏ), báo running, tạo zip ĐÃ
 // LỌC BÍ MẬT vào run/diagnostics/genh-doctor-<UTC>.zip (0644 để api đọc), báo
@@ -301,6 +319,13 @@ func RunDoctorRequest(ctx context.Context, env *Env, deps DoctorDeps, out io.Wri
 			return nil
 		}
 		_, _ = fmt.Fprintln(out, "Bỏ yêu cầu gói chẩn đoán không hợp lệ: "+shortText(err.Error(), 200))
+		failUndeletableDoctor(env, req, out)
+		return nil
+	}
+	if hostlink.HasDoctorRequest(env.InstallDir) {
+		// Đọc được nhưng KHÔNG xoá được (quyền…): không làm — xoá-trước-khi-làm là thứ
+		// giữ cho watcher không kích lặp (GH-E94C, v0.1.53).
+		failUndeletableDoctor(env, req, out)
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, doctorRequestTimout)

@@ -64,6 +64,15 @@ import (
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/dockercli"
 )
 
+// removeFile xoá tệp yêu cầu — biến gói để test giả lỗi xoá (EACCES…) mà không cần
+// chạy non-root.
+var removeFile = os.Remove
+
+// ErrRequestUndeletable: không xoá được tệp yêu cầu trong run/request (quyền…). genh
+// KHÔNG làm yêu cầu đó (xoá-trước-khi-làm là thứ giữ cho watcher không kích lặp);
+// caller ghi trạng thái failed GH-E94C. errors.Is(err, ErrRequestUndeletable).
+var ErrRequestUndeletable = errors.New("không xoá được tệp yêu cầu trong run/request")
+
 // EnvDir là biến môi trường genh đặt cho docker compose: đường dẫn hộp thư trên
 // máy chủ (compose.yaml: ${GH_HOST_LINK_DIR:-../run}:/var/lib/gh/host).
 const EnvDir = "GH_HOST_LINK_DIR"
@@ -243,6 +252,9 @@ type Status struct {
 	// BootID (v0.1.37): /proc/sys/kernel/random/boot_id lúc Start ("" ngoài
 	// Linux) — khác boot_id hiện tại ⇒ máy đã khởi động lại, lần chạy đã chết.
 	BootID string `json:"boot_id,omitempty"`
+	// RequestedAt (v0.1.53): requested_at của yêu cầu không xoá được (GH-E94C) —
+	// chỉ để genh nhận ra "đã báo lỗi cho đúng yêu cầu này rồi" (idempotent).
+	RequestedAt string `json:"requested_at,omitempty"`
 }
 
 func now() string { return time.Now().UTC().Format(time.RFC3339) }
@@ -369,7 +381,7 @@ func checkUpdateRequest(installDir string) (present, valid bool) {
 // rejectUpdateRequest xoá tệp yêu cầu lạ (Remove không theo symlink) và báo
 // update-status "failed" — yêu cầu bị BỎ QUA.
 func rejectUpdateRequest(installDir string) {
-	_ = os.Remove(RequestPath(installDir))
+	_ = removeFile(RequestPath(installDir))
 	_ = Finish(installDir, "failed", "", BadUpdateRequestMessage)
 }
 
@@ -384,20 +396,98 @@ func HasRequest(installDir string) bool {
 	return present
 }
 
-// ConsumeRequest xoá tệp yêu cầu (gọi khi bắt đầu cập nhật) — trả true nếu
-// trước đó có yêu cầu hợp lệ. Xoá TRƯỚC khi chạy để watcher không kích lặp lại.
-// Tệp lạ: xoá, ghi update-status failed, trả false (bỏ qua yêu cầu).
-func ConsumeRequest(installDir string) bool {
+// ConsumeRequest xoá tệp yêu cầu (gọi khi bắt đầu cập nhật) — consumed=true nếu
+// trước đó có yêu cầu hợp lệ và nó đã biến mất (xoá được, hoặc đã bị xoá mất
+// ENOENT). Xoá TRƯỚC khi chạy để watcher không kích lặp lại. Tệp lạ: xoá, ghi
+// update-status failed, (false, nil) — bỏ qua yêu cầu. Xoá LỖI (quyền…): (false,
+// err) với err bọc ErrRequestUndeletable — caller KHÔNG được làm yêu cầu này
+// (v0.1.53, F-97: bản cũ coi lỗi xoá là "đã nhận" ⇒ path unit kích lặp tới
+// start-limit-hit).
+func ConsumeRequest(installDir string) (consumed bool, err error) {
 	present, valid := checkUpdateRequest(installDir)
 	if !present {
-		return false
+		return false, nil
 	}
 	if !valid {
 		rejectUpdateRequest(installDir)
-		return false
+		return false, nil
 	}
-	err := os.Remove(RequestPath(installDir))
-	return err == nil || !errors.Is(err, os.ErrNotExist)
+	if rerr := removeFile(RequestPath(installDir)); rerr != nil {
+		if errors.Is(rerr, os.ErrNotExist) {
+			return true, nil
+		}
+		return false, fmt.Errorf("%w: %w", ErrRequestUndeletable, rerr)
+	}
+	return true, nil
+}
+
+// RequestDirWritable dò TRƯỚC khi làm yêu cầu có xoá được tệp trong run/request không
+// (tạo rồi xoá một tệp thăm dò — quyền thư mục sai/ổ chỉ-đọc thì xoá yêu cầu cũng
+// không được). nil = xoá được.
+func RequestDirWritable(installDir string) error {
+	f, err := os.CreateTemp(RequestDirPath(installDir), ".probe-*")
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrRequestUndeletable, err)
+	}
+	name := f.Name()
+	_ = f.Close()
+	if err := removeFile(name); err != nil {
+		_ = os.Remove(name)
+		return fmt.Errorf("%w: %w", ErrRequestUndeletable, err)
+	}
+	return nil
+}
+
+// requestStamp: dấu nhận dạng một yêu cầu (requested_at, không có thì id) đọc AN
+// TOÀN từ tệp yêu cầu JSON — "" nếu không đọc được. Dùng cho idempotency của
+// trạng thái failed GH-E94C (cùng yêu cầu ⇒ không ghi lại).
+func requestStamp(installDir, path string) string {
+	b, err := readRequestFile(installDir, path)
+	if err != nil {
+		return ""
+	}
+	var r struct {
+		ID          string `json:"id"`
+		RequestedAt string `json:"requested_at"`
+	}
+	if json.Unmarshal(b, &r) != nil {
+		return ""
+	}
+	if r.RequestedAt != "" {
+		return cleanText(r.RequestedAt, maxAlertShortStr)
+	}
+	return cleanText(r.ID, maxAlertShortStr)
+}
+
+// UpdateRequestStamp là requestStamp của request/update.json.
+func UpdateRequestStamp(installDir string) string {
+	return requestStamp(installDir, RequestPath(installDir))
+}
+
+// UpdateUndeletableReported: update-status đã là failed mang mã code (GH-E94C) cho
+// ĐÚNG yêu cầu đang nằm trong hộp thư (cùng requested_at) — không cần báo/làm lại.
+func UpdateUndeletableReported(installDir, code string) bool {
+	st, err := ReadStatus(installDir)
+	return err == nil && st.State == "failed" && strings.Contains(st.Message, code) && st.RequestedAt == UpdateRequestStamp(installDir)
+}
+
+// FailUndeletableUpdate ghi update-status "failed" cho yêu cầu cập nhật KHÔNG xoá
+// được (message đã có mã GH-E94C — code là chuỗi mã để nhận ra lần ghi trước).
+// Idempotent theo requested_at: update-status đã là failed mang code cho cùng
+// yêu cầu thì KHÔNG ghi lại (wrote=false) — path unit kích lặp thì tệp
+// trạng thái không bị làm mới mỗi lần.
+func FailUndeletableUpdate(installDir, from, code, message string) (wrote bool, err error) {
+	if UpdateUndeletableReported(installDir, code) {
+		return false, nil
+	}
+	stamp := UpdateRequestStamp(installDir)
+	if err := EnsureDir(installDir); err != nil {
+		return false, err
+	}
+	t := now()
+	return true, writeJSON(filepath.Join(Dir(installDir), StatusFile), Status{
+		State: "failed", From: from, To: from, Message: message, StartedAt: t, FinishedAt: t, RequestedAt: stamp,
+	})
 }
 
 // Start ghi trạng thái "running" kèm PID tiến trình này (tiến trình NGOÀI CÙNG
@@ -494,6 +584,8 @@ type RestoreStatus struct {
 	Message    string `json:"message,omitempty"`
 	StartedAt  string `json:"started_at,omitempty"`
 	FinishedAt string `json:"finished_at,omitempty"`
+	// RequestedAt (v0.1.53): như Status.RequestedAt — idempotency của GH-E94C.
+	RequestedAt string `json:"requested_at,omitempty"`
 }
 
 // HasRestoreRequest báo Console có đang yêu cầu khôi phục không (Lstat —
@@ -505,7 +597,8 @@ func HasRestoreRequest(installDir string) bool {
 
 // ConsumeRestoreRequest đọc AN TOÀN (readRequestFile — không theo symlink, đúng
 // chủ sở hữu) rồi XOÁ yêu cầu khôi phục (xoá trước khi chạy để watcher không
-// kích lặp). Tệp hỏng/lạ vẫn bị xoá, trả lỗi.
+// kích lặp). Tệp hỏng/lạ vẫn bị xoá, trả lỗi. Xoá không được (quyền…) ⇒ lỗi bọc
+// ErrRequestUndeletable và KHÔNG khôi phục (v0.1.53, F-97).
 func ConsumeRestoreRequest(installDir string) (RestoreRequest, error) {
 	var r RestoreRequest
 	path := RestoreRequestPath(installDir)
@@ -513,7 +606,9 @@ func ConsumeRestoreRequest(installDir string) (RestoreRequest, error) {
 	if err != nil && errors.Is(err, os.ErrNotExist) {
 		return r, err
 	}
-	_ = os.Remove(path)
+	if rerr := removeFile(path); rerr != nil && !errors.Is(rerr, os.ErrNotExist) {
+		return r, fmt.Errorf("%w: %w", ErrRequestUndeletable, rerr)
+	}
 	if err != nil {
 		return r, err
 	}
@@ -524,6 +619,32 @@ func ConsumeRestoreRequest(installDir string) (RestoreRequest, error) {
 		return r, errors.New("yêu cầu khôi phục thiếu khoá bản sao lưu")
 	}
 	return r, nil
+}
+
+// RestoreRequestStamp là requestStamp của request/restore.json.
+func RestoreRequestStamp(installDir string) string {
+	return requestStamp(installDir, RestoreRequestPath(installDir))
+}
+
+// RestoreUndeletableReported như UpdateUndeletableReported cho restore-status.json.
+func RestoreUndeletableReported(installDir, code string) bool {
+	st, err := ReadRestoreStatus(installDir)
+	return err == nil && st.State == "failed" && strings.Contains(st.Message, code) && st.RequestedAt == RestoreRequestStamp(installDir)
+}
+
+// FailUndeletableRestore như FailUndeletableUpdate cho restore-status.json.
+func FailUndeletableRestore(installDir, code, message string) (wrote bool, err error) {
+	if RestoreUndeletableReported(installDir, code) {
+		return false, nil
+	}
+	stamp := RestoreRequestStamp(installDir)
+	if err := EnsureDir(installDir); err != nil {
+		return false, err
+	}
+	t := now()
+	return true, writeJSON(filepath.Join(Dir(installDir), RestoreStatusFile), RestoreStatus{
+		State: "failed", Message: message, StartedAt: t, FinishedAt: t, RequestedAt: stamp,
+	})
 }
 
 // StartRestore ghi trạng thái khôi phục "running".

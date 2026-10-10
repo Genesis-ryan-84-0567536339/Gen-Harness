@@ -29,6 +29,9 @@ func EnableWatchdog(ctx context.Context, deps Deps, job WatchdogJob) (msg, mecha
 	if deps.GenhPath == "" {
 		return "", "", fmt.Errorf("thiếu đường dẫn binary genh")
 	}
+	if deps.InstallDir == "" {
+		deps.InstallDir = job.InstallDir
+	}
 	if deps.LogFile != "" {
 		_ = os.MkdirAll(filepath.Dir(deps.LogFile), 0o755)
 	}
@@ -56,6 +59,10 @@ func DisableWatchdog(ctx context.Context, deps Deps) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("không xác định được thư mục home: %w", err)
 		}
+		// Lịch dùng chung giữa các bản cài: thuộc bản cài khác còn sống thì KHÔNG gỡ.
+		if other, yes := deps.ownerOnLinux(ctx, home, WatchdogTaskName+".service", WatchdogCrontabMarker); yes {
+			return keptMessage("lịch trực canh máy chủ", other), nil
+		}
 		_, _ = runner.Output(ctx, "systemctl", []string{"--user", "disable", "--now", WatchdogTaskName + ".timer"})
 		_ = os.Remove(watchdogServicePath(home))
 		_ = os.Remove(watchdogTimerPath(home))
@@ -67,6 +74,11 @@ func DisableWatchdog(ctx context.Context, deps Deps) (string, error) {
 			return "", fmt.Errorf("không xác định được thư mục home: %w", err)
 		}
 		path := watchdogPlistPath(home)
+		if err := deps.guardDarwin(path); err != nil {
+			if other, ok := OwnerOf(err); ok {
+				return keptMessage("lịch trực canh máy chủ", other), nil
+			}
+		}
 		_, _ = runner.Output(ctx, "launchctl", []string{"unload", path})
 		_ = os.Remove(path)
 	case "windows":
@@ -146,6 +158,9 @@ func enableWatchdogLinux(ctx context.Context, deps Deps, job WatchdogJob) (strin
 	}
 	runner := deps.runner()
 	if systemdUserAvailable(ctx, runner, deps.lookPath()) {
+		if err := deps.guardUnit(home, WatchdogTaskName+".service"); err != nil {
+			return "", "", err
+		}
 		dir := systemdUserDir(home)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return "", "", fmt.Errorf("tạo %s: %w", dir, err)
@@ -165,10 +180,13 @@ func enableWatchdogLinux(ctx context.Context, deps Deps, job WatchdogJob) (strin
 		// Máy từng dùng crontab: bỏ dòng cũ để không chạy hai lần.
 		removeWatchdogCrontab(ctx, runner)
 		msg := fmt.Sprintf(watchdogEnabledMsg, "systemd --user timer")
-		if _, err := runner.Output(ctx, "loginctl", []string{"enable-linger"}); err != nil {
-			msg += "\nCảnh báo: chưa bật được linger — trực canh chỉ chạy khi bạn đang đăng nhập. Chạy `sudo loginctl enable-linger $USER` một lần để trực canh chạy cả khi không đăng nhập."
+		if _, warning := ensureLinger(ctx, runner, deps); warning != "" {
+			msg += "\nCảnh báo: linger đang TẮT — trực canh chỉ chạy khi bạn đang đăng nhập. Chạy một lần: sudo loginctl enable-linger $USER"
 		}
 		return msg, ScheduleSystemd, nil
+	}
+	if err := deps.guardLinux(ctx, home, WatchdogTaskName+".service", WatchdogCrontabMarker); err != nil {
+		return "", "", err
 	}
 	existing, _ := runner.Output(ctx, "crontab", []string{"-l"}) // chưa có crontab → rỗng
 	merged := MergeWatchdogCrontab(string(existing), WatchdogCrontabLine(deps.GenhPath, deps.LogFile, job), false)
@@ -189,6 +207,9 @@ func enableWatchdogDarwin(ctx context.Context, deps Deps, job WatchdogJob) (stri
 		return "", "", fmt.Errorf("tạo %s: %w", dir, err)
 	}
 	path := watchdogPlistPath(home)
+	if err := deps.guardDarwin(path); err != nil {
+		return "", "", err
+	}
 	_, _ = runner.Output(ctx, "launchctl", []string{"unload", path})
 	if err := os.WriteFile(path, []byte(WatchdogLaunchdPlist(deps.GenhPath, deps.LogFile, job)), 0o644); err != nil {
 		return "", "", fmt.Errorf("ghi %s: %w", path, err)

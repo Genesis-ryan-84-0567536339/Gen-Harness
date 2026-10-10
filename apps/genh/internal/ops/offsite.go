@@ -174,7 +174,7 @@ func NewOffsiteScheduler(env *Env) OffsiteScheduler {
 		job.Env = append(job.Env, compose.EnvOverrideVar+"="+v)
 	}
 	return autoupdateOffsiteScheduler{
-		deps: autoupdate.Deps{GenhPath: genh, LogFile: filepath.Join(config.New(env.InstallDir).LogsDir(), "offsite.log")},
+		deps: autoupdate.Deps{GenhPath: genh, LogFile: filepath.Join(config.New(env.InstallDir).LogsDir(), "offsite.log"), InstallDir: env.InstallDir},
 		job:  job,
 	}
 }

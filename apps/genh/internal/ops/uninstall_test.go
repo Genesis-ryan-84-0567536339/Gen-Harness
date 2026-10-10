@@ -16,6 +16,20 @@ import (
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/hostlink"
 )
 
+// TestMain đặt HOME về thư mục tạm cho MỌI test của gói ops: RunUninstall đọc unit
+// systemd --user (~/.config/systemd/user) để biết lịch thuộc bản cài nào, và gỡ lối tắt/
+// dòng PATH trong HOME — test không được chạm HOME thật của máy dev.
+func TestMain(m *testing.M) {
+	home, err := os.MkdirTemp("", "genh-ops-home-*")
+	if err != nil {
+		panic(err)
+	}
+	_ = os.Setenv("HOME", home)
+	code := m.Run()
+	_ = os.RemoveAll(home)
+	os.Exit(code)
+}
+
 // fakeOffsiteScheduler ghi lại lời gọi bật/tắt lịch tuần (không đụng systemd/cron thật).
 type fakeOffsiteScheduler struct {
 	enabled   bool
@@ -324,5 +338,62 @@ func TestRunUninstall_RemovesShortcutAndPathLine_Linux(t *testing.T) {
 	}
 	if !strings.Contains(string(gotRC), "existing line 1") || !strings.Contains(string(gotRC), "existing line 2") {
 		t.Errorf("rc file phải giữ nguyên các dòng khác, được %q", gotRC)
+	}
+}
+
+// v0.1.53 (F-98): lịch trực canh/bản sao ngoài máy là CHUNG cho mọi bản cài — gỡ bản cài PHỤ
+// không được gỡ lịch của bản chính còn sống.
+func TestRunUninstall_BanPhu_KhongGoLichCuaBanChinh(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	mainEnv := testEnv(t, testComposePath(t, "")) // có config/secrets.json = còn sống
+	otherEnv := testEnv(t, testComposePath(t, ""))
+	unitDir := filepath.Join(home, ".config", "systemd", "user")
+	if err := os.MkdirAll(unitDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{autoupdate.WatchdogTaskName, autoupdate.OffsiteTaskName} {
+		unit := "[Service]\nEnvironment=GEN_HARNESS_HOME=" + mainEnv.InstallDir + "\nExecStart=/g/genh x --install-dir " + mainEnv.InstallDir + "\n"
+		if err := os.WriteFile(filepath.Join(unitDir, name+".service"), []byte(unit), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	wd, off := &fakeWatchdogScheduler{}, &fakeOffsiteScheduler{}
+	var out strings.Builder
+	if err := RunUninstall(context.Background(), otherEnv, UninstallOptions{AutoApprove: true, Watchdog: wd, Offsite: off}, downRunner(), strings.NewReader(""), &out); err != nil {
+		t.Fatalf("RunUninstall bản phụ: %v", err)
+	}
+	if wd.disables != 0 || off.disables != 0 {
+		t.Fatalf("gỡ bản phụ KHÔNG được gọi Disable lịch của bản chính: watchdog=%d offsite=%d", wd.disables, off.disables)
+	}
+	for _, want := range []string{
+		"Giữ nguyên lịch trực canh máy chủ của bản cài " + mainEnv.InstallDir + " (không phải bản đang gỡ).",
+		"Giữ nguyên lịch sao lưu ra ổ ngoài của bản cài " + mainEnv.InstallDir + " (không phải bản đang gỡ).",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("thiếu dòng %q:\n%s", want, out.String())
+		}
+	}
+
+	// Gỡ chính bản chính thì vẫn gỡ lịch của nó.
+	wd, off = &fakeWatchdogScheduler{}, &fakeOffsiteScheduler{}
+	if err := RunUninstall(context.Background(), mainEnv, UninstallOptions{AutoApprove: true, Watchdog: wd, Offsite: off}, downRunner(), strings.NewReader(""), &strings.Builder{}); err != nil {
+		t.Fatal(err)
+	}
+	if wd.disables != 1 || off.disables != 1 {
+		t.Fatalf("gỡ bản chính phải gỡ lịch của nó: watchdog=%d offsite=%d", wd.disables, off.disables)
+	}
+
+	// Bản chủ đã gỡ hẳn (không còn secrets.json) thì bản khác được gỡ.
+	if err := os.Remove(filepath.Join(mainEnv.InstallDir, "config", "secrets.json")); err != nil {
+		t.Fatal(err)
+	}
+	wd, off = &fakeWatchdogScheduler{}, &fakeOffsiteScheduler{}
+	if err := RunUninstall(context.Background(), otherEnv, UninstallOptions{AutoApprove: true, Watchdog: wd, Offsite: off}, downRunner(), strings.NewReader(""), &strings.Builder{}); err != nil {
+		t.Fatal(err)
+	}
+	if wd.disables != 1 || off.disables != 1 {
+		t.Fatalf("chủ lịch đã gỡ ⇒ bản khác được gỡ: watchdog=%d offsite=%d", wd.disables, off.disables)
 	}
 }
