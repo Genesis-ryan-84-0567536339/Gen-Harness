@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/machine"
 )
 
 // randomizedDelaySec là biên độ lùi giờ chạy NGẪU NHIÊN mà systemd/launchd
@@ -12,8 +14,54 @@ import (
 // đương trực tiếp nên dùng phút lẻ khác nhau — xem launchdPlist).
 const randomizedDelaySec = 30 * 60 // 30 phút
 
+// NightlyJob là những gì lịch tự cập nhật đêm cần biết để gọi đúng bản cài
+// (v0.1.53, F-98) — trước đó unit chỉ chạy `genh update --yes --quiet` nên bản
+// cài dùng --port/--install-dir/GENH_COMPOSE_FILE khác mặc định bị cập nhật
+// sai chỗ (hoặc không tìm thấy bản cài). Mọi trường rỗng = như cũ.
+type NightlyJob struct {
+	// InstallDir là gốc cài đặt — truyền qua --install-dir (và GEN_HARNESS_HOME).
+	InstallDir string
+	// Port là cổng HTTPS; chỉ truyền --port khi KHÁC machine.DefaultPort.
+	Port int
+	// Env là biến "KEY=VALUE" cần mang theo (ví dụ GENH_COMPOSE_FILE) — lịch
+	// chạy ngoài phiên shell của Owner.
+	Env []string
+}
+
+// args là đối số sau binary genh: `update --yes --quiet [--install-dir <dir>] [--port N]`.
+// GIỮ NGUYÊN tiền tố `update --yes --quiet` — cổng 24 giờ dựa vào --yes (xem
+// cmd/genh selfUpdateMinAge) và E2E grep đúng chuỗi này.
+func (j NightlyJob) args() []string {
+	a := []string{"update", "--yes", "--quiet"}
+	if j.InstallDir != "" {
+		a = append(a, "--install-dir", j.InstallDir)
+	}
+	if j.Port > 0 && j.Port != machine.DefaultPort {
+		a = append(a, "--port", strconv.Itoa(j.Port))
+	}
+	return a
+}
+
+func (j NightlyJob) env() []string {
+	out := []string{}
+	if j.InstallDir != "" {
+		out = append(out, "GEN_HARNESS_HOME="+j.InstallDir)
+	}
+	return append(out, j.Env...)
+}
+
+// execStart là giá trị dòng ExecStart= của unit lịch đêm.
+func (j NightlyJob) execStart(genhPath string) string {
+	parts := []string{quoteUnitArg(genhPath)}
+	for _, a := range j.args() {
+		parts = append(parts, quoteUnitArg(a))
+	}
+	return strings.Join(parts, " ")
+}
+
 // SystemdServiceUnit sinh nội dung "<TaskName>.service" — chạy đúng MỘT lần
-// `genhPath update --yes --quiet` mỗi khi timer kích hoạt, log gộp cả
+// `genhPath update --yes --quiet [--install-dir …] [--port …]` mỗi khi timer
+// kích hoạt (kèm Environment=GEN_HARNESS_HOME=<dir> và biến job.Env), log gộp cả
 // stdout+stderr nối vào logFile (StandardOutput=append: cần systemd >= 236,
 // có trên mọi bản phân phối chính còn được hỗ trợ tại thời điểm viết —
 // distro cũ hơn vẫn ghi log qua journal như mặc định, chỉ mất phần nối vào
@@ -28,18 +76,22 @@ const randomizedDelaySec = 30 * 60 // 30 phút
 // manager cùng cgroup sau khoảng 2 phút, và docker.service (unit hệ thống, không
 // xếp thứ tự với user@) có thể đang dừng song song — vì vậy genh nhận SIGTERM
 // sau khi đã đụng CSDL thì KHÔNG bắt đầu khôi phục (xem ops.ErrShutdownSignal).
-func SystemdServiceUnit(genhPath, logFile string) string {
+func SystemdServiceUnit(genhPath, logFile string, job NightlyJob) string {
+	env := ""
+	for _, kv := range job.env() {
+		env += fmt.Sprintf("Environment=%s\n", quoteUnitArg(kv))
+	}
 	return fmt.Sprintf(`[Unit]
 Description=Gen-Harness — tu dong cap nhat genh + dich vu hang dem
 
 [Service]
 Type=oneshot
-ExecStart=%s update --yes --quiet
+%sExecStart=%s
 KillMode=mixed
 TimeoutStopSec=900
 StandardOutput=append:%s
 StandardError=append:%s
-`, quoteUnitArg(genhPath), logFile, logFile)
+`, env, job.execStart(genhPath), logFile, logFile)
 }
 
 // SystemdTimerUnit sinh nội dung "<TaskName>.timer" — chạy hằng ngày lúc
@@ -75,14 +127,24 @@ func quoteUnitArg(path string) string {
 // của Owner.
 const CrontabMarker = "# gen-harness-auto-update (genh auto-update) — KHONG sua tay, dung `genh auto-update disable` de tat"
 
-// CrontabLine sinh dòng crontab chạy `genhPath update --yes --quiet` mỗi
-// ngày lúc 03:<minute> (phút lẻ hoá trong khoảng 0-29 dựa trên chính giờ
+// CrontabLine sinh dòng crontab chạy `genhPath update --yes --quiet [--install-dir …]`
+// mỗi ngày lúc 03:<minute> (phút lẻ hoá trong khoảng 0-29 dựa trên chính giờ
 // hiện tại lúc Enable chạy — xem randomizedMinute — để không phải mọi máy
 // dùng crontab đều gọi đúng 03:00:00) — fallback khi máy không có
-// systemd --user (xem enableLinux).
-func CrontabLine(genhPath, logFile string, minute int) string {
+// systemd --user (xem enableLinux). Biến môi trường của job đứng trước lệnh
+// (như CrontabRequestLine).
+func CrontabLine(genhPath, logFile string, minute int, job NightlyJob) string {
 	minute = ((minute % 30) + 30) % 30
-	return fmt.Sprintf("%d 3 * * * %s update --yes --quiet >> %s 2>&1", minute, genhPath, logFile)
+	env := ""
+	for _, kv := range job.env() {
+		k, v, _ := strings.Cut(kv, "=")
+		env += k + "=" + shellQuote(v) + " "
+	}
+	rest := ""
+	for _, a := range job.args()[3:] { // sau `update --yes --quiet`
+		rest += " " + shellQuote(a)
+	}
+	return fmt.Sprintf("%d 3 * * * %s%s update --yes --quiet%s >> %s 2>&1", minute, env, genhPath, rest, logFile)
 }
 
 // MergeCrontab trả về nội dung crontab MỚI: bỏ mọi dòng marker+lệnh genh cũ
@@ -129,9 +191,22 @@ func mergeCrontabMarked(existing, marker, newLine string, removeOnly bool) strin
 // LaunchdPlist sinh nội dung "<launchAgentLabel>.plist" cho macOS
 // LaunchAgent — StartCalendarInterval chạy hằng ngày lúc 03:<minute>
 // (không có tương đương RandomizedDelaySec trên launchd, nên phút lẻ hoá
-// ngay trong plist thay vì luôn đúng 03:00 — xem randomizedMinute).
-func LaunchdPlist(genhPath, logFile string, minute int) string {
+// ngay trong plist thay vì luôn đúng 03:00 — xem randomizedMinute). Đối số
+// --install-dir/--port và EnvironmentVariables lấy từ job.
+func LaunchdPlist(genhPath, logFile string, minute int, job NightlyJob) string {
 	minute = ((minute % 30) + 30) % 30
+	var argXML, envXML strings.Builder
+	for _, a := range job.args() {
+		argXML.WriteString("\t\t<string>" + xmlEscape(a) + "</string>\n")
+	}
+	if kvs := job.env(); len(kvs) > 0 {
+		envXML.WriteString("\t<key>EnvironmentVariables</key>\n\t<dict>\n")
+		for _, kv := range kvs {
+			k, v, _ := strings.Cut(kv, "=")
+			envXML.WriteString("\t\t<key>" + xmlEscape(k) + "</key>\n\t\t<string>" + xmlEscape(v) + "</string>\n")
+		}
+		envXML.WriteString("\t</dict>\n")
+	}
 	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -141,11 +216,8 @@ func LaunchdPlist(genhPath, logFile string, minute int) string {
 	<key>ProgramArguments</key>
 	<array>
 		<string>%s</string>
-		<string>update</string>
-		<string>--yes</string>
-		<string>--quiet</string>
-	</array>
-	<key>StartCalendarInterval</key>
+%s	</array>
+%s	<key>StartCalendarInterval</key>
 	<dict>
 		<key>Hour</key>
 		<integer>3</integer>
@@ -160,16 +232,24 @@ func LaunchdPlist(genhPath, logFile string, minute int) string {
 	<false/>
 </dict>
 </plist>
-`, launchAgentLabel(), genhPath, minute, logFile, logFile)
+`, launchAgentLabel(), xmlEscape(genhPath), argXML.String(), envXML.String(), minute, xmlEscape(logFile), xmlEscape(logFile))
 }
 
 // SchtasksCreateArgs sinh args cho `schtasks /Create` — dùng `cmd.exe /c`
 // nối stdout+stderr vào logFile (schtasks tự nó không hỗ trợ redirect log),
 // /F ghi đè nếu task đã tồn tại (idempotent, Enable gọi lại an toàn),
 // /RL LIMITED chạy quyền người dùng thường (không cần admin — đúng tinh
-// thần "không cần quyền admin" của toàn bộ trình cài).
-func SchtasksCreateArgs(genhPath, logFile string) []string {
-	tr := fmt.Sprintf(`cmd.exe /c ""%s" update --yes --quiet >> "%s" 2>&1"`, genhPath, logFile)
+// thần "không cần quyền admin" của toàn bộ trình cài). Task Scheduler không đặt
+// được biến môi trường — --install-dir/--port đủ để genh tìm đúng bản cài.
+func SchtasksCreateArgs(genhPath, logFile string, job NightlyJob) []string {
+	rest := ""
+	for _, a := range job.args()[3:] { // sau `update --yes --quiet`
+		if strings.ContainsAny(a, " \t") {
+			a = `"` + a + `"`
+		}
+		rest += " " + a
+	}
+	tr := fmt.Sprintf(`cmd.exe /c ""%s" update --yes --quiet%s >> "%s" 2>&1"`, genhPath, rest, logFile)
 	return []string{
 		"/Create", "/TN", TaskName,
 		"/TR", tr,
@@ -190,7 +270,7 @@ func SchtasksDeleteArgs() []string {
 // SchtasksQueryArgs sinh args cho `schtasks /Query` — dùng để hỏi task đã
 // tồn tại/đang bật hay chưa (`genh auto-update status`).
 func SchtasksQueryArgs() []string {
-	return []string{"/Query", "/TN", TaskName, "/FO", "LIST"}
+	return []string{"/Query", "/TN", TaskName, "/FO", "LIST", "/V"}
 }
 
 // parseMinuteFromClock rút phút hiện tại từ một chuỗi "HH:MM:SS" (dùng bởi

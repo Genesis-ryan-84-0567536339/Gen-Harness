@@ -80,11 +80,17 @@ func (s autoupdateWatchdogScheduler) Status(ctx context.Context) (autoupdate.Wat
 // --notify --quiet --install-dir <dir> [--port N]` mỗi 12 phút, log
 // logs/watchdog.log, mang theo GENH_COMPOSE_FILE nếu phiên hiện tại có.
 func NewWatchdogScheduler(env *Env) WatchdogScheduler {
-	genh, err := os.Executable()
-	if err == nil {
-		genh, _ = filepath.Abs(genh)
-	} else {
-		genh = ""
+	return NewWatchdogSchedulerWith(env, autoupdate.Deps{})
+}
+
+// NewWatchdogSchedulerWith như NewWatchdogScheduler nhưng mượn Runner/HomeDir/GOOS/
+// LookPath (và GenhPath) của base — test tiêm lệnh hệ thống giả (v0.1.53).
+func NewWatchdogSchedulerWith(env *Env, base autoupdate.Deps) WatchdogScheduler {
+	genh := base.GenhPath
+	if genh == "" {
+		if exe, err := os.Executable(); err == nil {
+			genh, _ = filepath.Abs(exe)
+		}
 	}
 	job := autoupdate.WatchdogJob{InstallDir: env.InstallDir}
 	if env.Port > 0 && env.Port != machine.DefaultPort {
@@ -93,10 +99,9 @@ func NewWatchdogScheduler(env *Env) WatchdogScheduler {
 	if v := os.Getenv(compose.EnvOverrideVar); v != "" {
 		job.Env = append(job.Env, compose.EnvOverrideVar+"="+v)
 	}
-	return autoupdateWatchdogScheduler{
-		deps: autoupdate.Deps{GenhPath: genh, LogFile: WatchdogLogPath(env.InstallDir)},
-		job:  job,
-	}
+	deps := base
+	deps.GenhPath, deps.LogFile, deps.InstallDir = genh, WatchdogLogPath(env.InstallDir), env.InstallDir
+	return autoupdateWatchdogScheduler{deps: deps, job: job}
 }
 
 // WatchdogOptions là cờ của `genh doctor --notify`.
@@ -119,6 +124,23 @@ type WatchdogDeps struct {
 	Hostname func() (string, error)
 	BootID   func() string
 	Sleep    func(ctx context.Context, d time.Duration) error
+	// Nightly làm mới run/nightly-status.json (nil = thật: RecordNightlyStatus) — test
+	// tiêm giả để không hỏi systemctl/loginctl của máy chạy test.
+	Nightly func(ctx context.Context, env *Env)
+}
+
+// refreshNightlyStatus (v0.1.53, F-99): mỗi lượt trực canh (12 phút) làm mới phần
+// TRẠNG THÁI của run/nightly-status.json (lịch đêm bật/chạy không, linger, trình
+// nhận yêu cầu) để Console thấy lịch đêm im lặng kể cả khi không ai chạy genh.
+// KHÔNG đụng last_run_at/last_result (lịch đêm tự ghi). Lỗi bỏ qua.
+func refreshNightlyStatus(ctx context.Context, env *Env, deps WatchdogDeps) {
+	nctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	if deps.Nightly != nil {
+		deps.Nightly(nctx, env)
+		return
+	}
+	_ = RecordNightlyStatus(nctx, env.InstallDir, NightlyDeps(env.InstallDir))
 }
 
 func (d WatchdogDeps) now() time.Time {
@@ -260,6 +282,7 @@ func RunWatchdog(ctx context.Context, env *Env, opts WatchdogOptions, deps Watch
 	ctx, cancel := context.WithTimeout(ctx, watchdogRunTimeout)
 	defer cancel()
 	now := deps.now()
+	refreshNightlyStatus(ctx, env, deps)
 	PruneDiagnostics(env.InstallDir, now)
 
 	st := loadWatchdogState(env.InstallDir)

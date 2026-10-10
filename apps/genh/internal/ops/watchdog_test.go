@@ -136,6 +136,9 @@ type wdHarness struct {
 	deadURL  string
 	diskFree uint64
 	out      strings.Builder
+	// nightly đếm số lần RunWatchdog làm mới run/nightly-status.json (hook giả — test
+	// không hỏi systemctl/loginctl của máy chạy test).
+	nightly int
 }
 
 func newWDHarness(t *testing.T, withTelegram bool) *wdHarness {
@@ -242,6 +245,7 @@ func (h *wdHarness) run(opts WatchdogOptions) error {
 		Hostname:    func() (string, error) { return "may-chu-test", nil },
 		BootID:      func() string { return h.boot },
 		Sleep:       func(context.Context, time.Duration) error { return nil },
+		Nightly:     func(context.Context, *Env) { h.nightly++ },
 	}
 	return RunWatchdog(context.Background(), h.env, opts, deps, &h.out)
 }
@@ -867,5 +871,29 @@ func TestWatchdog_GuiThu_ChoLuotDangChay(t *testing.T) {
 	h.mustRun(WatchdogOptions{Quiet: true, Test: true})
 	if st := h.status(); st.Test == nil || !st.Test.OK {
 		t.Fatalf("gửi thử phải chờ khoá rồi gửi: %+v", st.Test)
+	}
+}
+
+// v0.1.53 (F-99): mỗi lượt trực canh (12 phút) làm mới run/nightly-status.json để Console thấy lịch
+// đêm im lặng kể cả khi không ai chạy genh. Lượt bị bỏ qua vì khoá riêng bận thì không làm mới.
+func TestWatchdog_LamMoiNightlyStatus(t *testing.T) {
+	h := newWDHarness(t, false)
+	h.mustRun(WatchdogOptions{Quiet: true})
+	if h.nightly != 1 {
+		t.Fatalf("mỗi lượt phải làm mới nightly-status đúng 1 lần, được %d", h.nightly)
+	}
+	h.advance(12 * time.Minute)
+	h.mustRun(WatchdogOptions{Quiet: true})
+	if h.nightly != 2 {
+		t.Fatalf("lượt 2: %d", h.nightly)
+	}
+	lock, err := hostlink.AcquireWatchdogLock(h.env.InstallDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Release()
+	h.mustRun(WatchdogOptions{Quiet: true})
+	if h.nightly != 2 {
+		t.Fatalf("khoá bận ⇒ lượt bị bỏ qua, không làm mới: %d", h.nightly)
 	}
 }

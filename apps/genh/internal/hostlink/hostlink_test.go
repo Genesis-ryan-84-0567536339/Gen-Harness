@@ -1,10 +1,12 @@
 package hostlink
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -75,14 +77,17 @@ func TestRoundTrip(t *testing.T) {
 		}
 	}
 
-	if HasRequest(root) || ConsumeRequest(root) {
-		t.Fatal("chưa có yêu cầu mà HasRequest/ConsumeRequest báo có")
+	if c, err := ConsumeRequest(root); HasRequest(root) || c || err != nil {
+		t.Fatalf("chưa có yêu cầu mà HasRequest/ConsumeRequest báo có: consumed=%v err=%v", c, err)
 	}
 	if err := os.WriteFile(RequestPath(root), []byte(`{"requested_at":"x"}`), 0o666); err != nil {
 		t.Fatal(err)
 	}
-	if !HasRequest(root) || !ConsumeRequest(root) || HasRequest(root) {
-		t.Fatal("ConsumeRequest phải báo có rồi xoá tệp yêu cầu")
+	if !HasRequest(root) {
+		t.Fatal("phải thấy yêu cầu")
+	}
+	if c, err := ConsumeRequest(root); !c || err != nil || HasRequest(root) {
+		t.Fatalf("ConsumeRequest phải báo có rồi xoá tệp yêu cầu: consumed=%v err=%v", c, err)
 	}
 
 	if err := Start(root, "v0.1.16"); err != nil {
@@ -334,5 +339,148 @@ func TestWriteJSON_DoesNotFollowPlantedTmpSymlink(t *testing.T) {
 	}
 	if fi, err := os.Stat(filepath.Join(Dir(root), UpdateBlockedFile)); runtime.GOOS != "windows" && (err != nil || fi.Mode().Perm() != 0o644) {
 		t.Fatalf("tệp trạng thái phải 0644 để api đọc được: %v %v", fi, err)
+	}
+}
+
+// ─── v0.1.53 (F-97): xoá yêu cầu lỗi KHÔNG được coi là "đã nhận" ─────────────
+
+func fakeRemove(t *testing.T, f func(string) error) {
+	t.Helper()
+	old := removeFile
+	removeFile = f
+	t.Cleanup(func() { removeFile = old })
+}
+
+func TestConsumeRequest_LoiXoa(t *testing.T) {
+	root := t.TempDir()
+	if err := EnsureDir(root); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(RequestPath(root), []byte(`{"requested_at":"2026-10-10T01:00:00Z"}`), 0o666); err != nil {
+		t.Fatal(err)
+	}
+
+	// EACCES ⇒ (false, err): caller KHÔNG được làm yêu cầu.
+	fakeRemove(t, func(string) error { return &os.PathError{Op: "remove", Path: RequestPath(root), Err: syscall.EACCES} })
+	consumed, err := ConsumeRequest(root)
+	if consumed || err == nil || !errors.Is(err, ErrRequestUndeletable) || !errors.Is(err, syscall.EACCES) {
+		t.Fatalf("EACCES: consumed=%v err=%v", consumed, err)
+	}
+	if !HasRequest(root) {
+		t.Fatal("tệp yêu cầu phải còn nguyên")
+	}
+
+	// ENOENT (bị xoá mất giữa chừng) ⇒ (true, nil).
+	fakeRemove(t, func(string) error { return &os.PathError{Op: "remove", Path: RequestPath(root), Err: syscall.ENOENT} })
+	if consumed, err := ConsumeRequest(root); !consumed || err != nil {
+		t.Fatalf("ENOENT: consumed=%v err=%v", consumed, err)
+	}
+
+	// Xoá thật ⇒ (true, nil); không có tệp ⇒ (false, nil).
+	fakeRemove(t, os.Remove)
+	if consumed, err := ConsumeRequest(root); !consumed || err != nil || HasRequest(root) {
+		t.Fatalf("xoá thật: consumed=%v err=%v", consumed, err)
+	}
+	if consumed, err := ConsumeRequest(root); consumed || err != nil {
+		t.Fatalf("không có tệp: consumed=%v err=%v", consumed, err)
+	}
+}
+
+func TestConsumeRestoreRequest_LoiXoa(t *testing.T) {
+	root := t.TempDir()
+	if err := EnsureDir(root); err != nil {
+		t.Fatal(err)
+	}
+	key := "backups/20260929T010203Z-abcdef12.pgcustom.enc"
+	if err := os.WriteFile(RestoreRequestPath(root), []byte(`{"key":"`+key+`","requested_at":"2026-10-10T01:00:00Z"}`), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	fakeRemove(t, func(string) error { return syscall.EACCES })
+	if _, err := ConsumeRestoreRequest(root); !errors.Is(err, ErrRequestUndeletable) {
+		t.Fatalf("restore xoá lỗi phải trả ErrRequestUndeletable: %v", err)
+	}
+	if !HasRestoreRequest(root) {
+		t.Fatal("tệp yêu cầu khôi phục phải còn")
+	}
+	// Ghi failed GH-E94C một lần cho mỗi yêu cầu (idempotent theo requested_at).
+	wrote, err := FailUndeletableRestore(root, "GH-E94C", "Không xoá được yêu cầu khôi phục trong run/request (GH-E94C)")
+	if err != nil || !wrote {
+		t.Fatalf("lần 1: wrote=%v err=%v", wrote, err)
+	}
+	before, _ := ReadRestoreStatus(root)
+	if before.State != "failed" || before.RequestedAt != "2026-10-10T01:00:00Z" || !RestoreUndeletableReported(root, "GH-E94C") {
+		t.Fatalf("restore-status = %+v", before)
+	}
+	if wrote, _ := FailUndeletableRestore(root, "GH-E94C", "x (GH-E94C)"); wrote {
+		t.Fatal("lần 2 cùng yêu cầu không được ghi lại")
+	}
+	// Yêu cầu MỚI (requested_at khác) thì báo lại.
+	if err := os.WriteFile(RestoreRequestPath(root), []byte(`{"key":"`+key+`","requested_at":"2026-10-10T02:00:00Z"}`), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	if RestoreUndeletableReported(root, "GH-E94C") {
+		t.Fatal("yêu cầu mới không được coi là đã báo")
+	}
+}
+
+func TestFailUndeletableUpdate_IdempotentTheoRequestedAt(t *testing.T) {
+	root := t.TempDir()
+	if err := EnsureDir(root); err != nil {
+		t.Fatal(err)
+	}
+	write := func(at string) {
+		t.Helper()
+		if err := os.WriteFile(RequestPath(root), []byte(`{"requested_at":"`+at+`"}`), 0o666); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("2026-10-10T01:00:00Z")
+	if UpdateUndeletableReported(root, "GH-E94C") {
+		t.Fatal("chưa báo gì")
+	}
+	msg := "Không xoá được yêu cầu cập nhật trong run/request — máy chủ không làm yêu cầu này để tránh chạy lặp. Kiểm quyền thư mục run/request trên máy chủ rồi bấm Thử lại (GH-E94C)"
+	if wrote, err := FailUndeletableUpdate(root, "v0.1.52", "GH-E94C", msg); err != nil || !wrote {
+		t.Fatalf("lần 1: wrote=%v err=%v", wrote, err)
+	}
+	st1, err := ReadStatus(root)
+	if err != nil || st1.State != "failed" || st1.Message != msg || st1.From != "v0.1.52" || st1.To != "v0.1.52" || st1.RequestedAt != "2026-10-10T01:00:00Z" {
+		t.Fatalf("update-status = %+v, %v", st1, err)
+	}
+	raw1, _ := os.ReadFile(filepath.Join(Dir(root), StatusFile))
+	if !UpdateUndeletableReported(root, "GH-E94C") {
+		t.Fatal("cùng yêu cầu ⇒ đã báo")
+	}
+	if wrote, _ := FailUndeletableUpdate(root, "v0.1.52", "GH-E94C", msg); wrote {
+		t.Fatal("lần 2 không được ghi lại")
+	}
+	if raw2, _ := os.ReadFile(filepath.Join(Dir(root), StatusFile)); string(raw1) != string(raw2) {
+		t.Fatal("update-status.json bị ghi lại ở lần 2")
+	}
+	// Bấm Thử lại ⇒ yêu cầu mới ⇒ báo lại được.
+	write("2026-10-10T03:00:00Z")
+	if wrote, _ := FailUndeletableUpdate(root, "v0.1.52", "GH-E94C", msg); !wrote {
+		t.Fatal("yêu cầu mới phải được báo")
+	}
+}
+
+func TestRequestDirWritable(t *testing.T) {
+	root := t.TempDir()
+	if err := EnsureDir(root); err != nil {
+		t.Fatal(err)
+	}
+	if err := RequestDirWritable(root); err != nil {
+		t.Fatalf("thư mục ghi được: %v", err)
+	}
+	entries, _ := os.ReadDir(RequestDirPath(root))
+	if len(entries) != 0 {
+		t.Fatalf("tệp thăm dò phải được xoá: %v", entries)
+	}
+	fakeRemove(t, func(string) error { return syscall.EACCES })
+	if err := RequestDirWritable(root); !errors.Is(err, ErrRequestUndeletable) {
+		t.Fatalf("xoá lỗi: %v", err)
+	}
+	_ = os.RemoveAll(RequestDirPath(root))
+	if err := RequestDirWritable(root); !errors.Is(err, ErrRequestUndeletable) {
+		t.Fatalf("thư mục không có: %v", err)
 	}
 }
