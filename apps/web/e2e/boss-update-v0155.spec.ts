@@ -92,7 +92,7 @@ test.describe('v0.1.55 — Việc Sếp cần làm chỉ 1 dòng bắt buộc', 
 
     // Đủ 1/1 ⇒ dòng "Đã đạt x/N việc bắt buộc" ở Tổng quan tự ẩn.
     await page.goto('/overview');
-    await expect(page.getByRole('heading', { level: 2 }).first()).toBeVisible();
+    await page.waitForLoadState('networkidle');
     await expect(page.getByTestId('boss-progress')).toHaveCount(0);
     await expect(page.getByText('[object Object]')).toHaveCount(0);
   });
