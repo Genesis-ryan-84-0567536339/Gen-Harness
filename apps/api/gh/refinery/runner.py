@@ -345,7 +345,8 @@ class Refinery:
                 return to_model, []
             dec: decmod.Decider = (await decmod.load_decider(db, org_id, transport=self.jev_transport)
                                    if cfg["use_jev"] else decmod.LlmDecider())
-            items = [prefilter.PrefilterItem(ev.text, ev.person_id, ev.group_id, ev.mentions) for ev in to_model]
+            items = [prefilter.PrefilterItem(ev.text, ev.person_id, ev.group_id, ev.mentions, ev.occurred_at)
+                     for ev in to_model]
             hashes = {k[0] for it in items if (k := prefilter.exact_key(it)) is not None}
             known = await prefilter.dup_index(db, org_id, hashes, [ev.event_id for ev in to_model])
         n = len(items)

@@ -6,10 +6,12 @@ thái `discarded` kèm `detail.discarded_by = 'prefilter'` + lý do, Sếp xem l
 
 Luật BỎ QUA (chặt — "Boss không muốn rủi ro"; chỉ bỏ khi chắc):
 1. **Trùng hẳn** (`exact_dup`): chuẩn hoá + sha256 (`text_hash`) trùng một tin đã thấy (trong lô hoặc trong dấu
-   `item_marks` 14 ngày) CỦA CÙNG NGƯỜI GỬI Ở CÙNG NƠI (cùng nhóm / cùng hội thoại riêng) — tức người đó gửi lặp y hệt
-   (bấm gửi hai lần, dán lại, tin rải lặp). Hai người khác nhau, hoặc hai nhóm khác nhau, gửi cùng một câu là hai tín
-   hiệu riêng (khách A và khách B cùng hỏi "Cần 3 container thép cuộn, giá bao nhiêu vậy em?") ⇒ KHÔNG bỏ — chặt hơn
-   chỉ so băm, vì mất một khách hỏi giá đắt hơn một lượt trích xuất. Người gửi không rõ ⇒ không bao giờ là bản trùng.
+   `item_marks`) CỦA CÙNG NGƯỜI GỬI Ở CÙNG NƠI (cùng nhóm / cùng hội thoại riêng) TRONG `EXACT_DUP_HOURS` GIỜ — tức
+   người đó gửi lặp y hệt (bấm gửi hai lần, dán lại, tin rải lặp). Cửa sổ NGẮN (khác 14 ngày ẩn tin ở Hộp thư): khách
+   nhắc lại y nguyên câu báo giá sau nhiều ngày vì chưa ai trả lời là TÍN HIỆU theo dõi, không phải bản trùng — vẫn
+   được trích xuất. Hai người khác nhau, hoặc hai nhóm khác nhau, gửi cùng một câu là hai tín hiệu riêng (khách A và
+   khách B cùng hỏi "Cần 3 container thép cuộn, giá bao nhiêu vậy em?") ⇒ KHÔNG bỏ — chặt hơn chỉ so băm, vì mất
+   một khách hỏi giá đắt hơn một lượt trích xuất. Người gửi không rõ ⇒ không bao giờ là bản trùng.
    Tin NGẮN (< `triage.BROADCAST_MIN_LEN` ký tự sau chuẩn hoá, gồm tin chỉ có biểu tượng cảm xúc = rỗng) cũng không
    bao giờ là "trùng hẳn" (cùng khuôn `triage.find_duplicate`).
 2. **Quy tắc chấm rác VÀ Jev cũng chấm rác** (`spam_rule_jev`).
@@ -27,6 +29,7 @@ Thứ tự ưu tiên lý do: `exact_dup` > `spam_rule_jev` > `spam_rule_nojev`.
 import uuid
 from collections.abc import Collection, Hashable, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Literal, TypeVar
 
 from sqlalchemy import text
@@ -44,17 +47,23 @@ REASON_TEXT: dict[str, str] = {
     "spam_rule_nojev": "Rác — quy tắc chấm rác (chưa có Jev)",
 }
 JEV_SPAM_LABEL = "spam"
+#: Cửa sổ "gửi lặp y hệt" tính bằng GIỜ (không phải `triage.WINDOW_DAYS` = 14 ngày): chỉ bắt lỗi bấm gửi hai lần / dán
+#: lại. Lặp lại sau cửa sổ này được coi là nhắc việc và đi tiếp tới trích xuất.
+EXACT_DUP_HOURS = 6.0
 
 
 @dataclass(frozen=True)
 class PrefilterItem:
     """Một tin đưa vào `decide`. `sender`/`place` (người gửi, nhóm hoặc hội thoại riêng) quyết định "trùng hẳn" là
-    cùng người, cùng nơi; `sender=None` (không rõ) ⇒ không bao giờ tính trùng. `tagged` = tin tag trực tiếp."""
+    cùng người, cùng nơi; `sender=None` (không rõ) ⇒ không bao giờ tính trùng. `tagged` = tin tag trực tiếp. `at` = thời
+    điểm tin xảy ra: bản lặp TRONG LÔ chỉ là "trùng hẳn" khi cách bản trước ≤ `EXACT_DUP_HOURS` (thiếu `at` ⇒ coi là
+    trong cửa sổ)."""
 
     text: str
     sender: Hashable | None = None
     place: Hashable | None = None
     tagged: bool = False
+    at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -95,18 +104,18 @@ def decide(items: Sequence[PrefilterItem | str], *, rules_spam: Sequence[bool],
     - `jev_labels`: None = CHƯA có Jev; ngược lại nhãn Jev của từng tin (`'spam'|'low'|'medium'|'high'`) hoặc None =
       Jev lỗi/chậm với tin đó;
     - `dup_index`: tập khoá `exact_key` của các tin đã thấy trước lô này. Lần xuất hiện ĐẦU TIÊN trong lô giữ lại,
-      các lần sau trùng hẳn (cùng người, cùng nơi) mới bị bỏ."""
+      các lần sau trùng hẳn (cùng người, cùng nơi, trong `EXACT_DUP_HOURS` giờ) mới bị bỏ."""
     n = len(items)
     if len(rules_spam) != n or (jev_labels is not None and len(jev_labels) != n):
         raise ValueError("items, rules_spam, jev_labels phải cùng độ dài")
-    seen: set[Hashable] = set()
+    seen: dict[Hashable, datetime | None] = {}      # khoá → thời điểm lần xuất hiện gần nhất trong lô
     out: list[PrefilterResult] = []
     for i, raw in enumerate(items):
         it = PrefilterItem(raw, sender="") if isinstance(raw, str) else raw
         key = exact_key(it)
-        dup = key is not None and (key in dup_index or key in seen)
+        dup = key is not None and (key in dup_index or (key in seen and _within_window(seen[key], it.at)))
         if key is not None:
-            seen.add(key)
+            seen[key] = it.at
         if it.tagged:                                # tag trực tiếp: luôn đi tiếp
             out.append(PrefilterResult())
             continue
@@ -127,6 +136,13 @@ def decide(items: Sequence[PrefilterItem | str], *, rules_spam: Sequence[bool],
     return out
 
 
+def _within_window(a: datetime | None, b: datetime | None) -> bool:
+    """Hai thời điểm cách nhau ≤ `EXACT_DUP_HOURS` giờ? Thiếu một bên ⇒ True (hành vi cũ: cùng lô là gửi lặp)."""
+    if a is None or b is None:
+        return True
+    return abs((b - a).total_seconds()) <= EXACT_DUP_HOURS * 3600
+
+
 def lower_last(items: Sequence[T], results: Sequence[PrefilterResult]) -> list[T]:
     """Giữ tin không bị bỏ; tin `lower_priority` xếp CUỐI lô (J2 "rẻ trước, đắt sau"), thứ tự còn lại giữ nguyên."""
     kept = [(it, r) for it, r in zip(items, results, strict=True) if not r.skip]
@@ -134,10 +150,10 @@ def lower_last(items: Sequence[T], results: Sequence[PrefilterResult]) -> list[T
 
 
 async def dup_index(db: AsyncSession, org_id: uuid.UUID, hashes: Collection[bytes],
-                    event_ids: Collection[uuid.UUID]) -> set[Hashable]:
-    """Khoá "trùng hẳn" `(băm, người, nhóm)` đã có dấu `refinery.item_marks` trong `WINDOW_DAYS` ngày, của các đơn vị ý
-    nghĩa có người gửi rõ. Loại các dấu của chính những tin đang xử lý (chạy lại cùng một tin không được tự coi
-    mình là bản trùng)."""
+                    event_ids: Collection[uuid.UUID], *, window_hours: float | None = None) -> set[Hashable]:
+    """Khoá "trùng hẳn" `(băm, người, nhóm)` đã có dấu `refinery.item_marks` trong `EXACT_DUP_HOURS` giờ gần đây (hoặc
+    `window_hours`), của các đơn vị ý nghĩa có người gửi rõ. Loại các dấu của chính những tin đang xử lý (chạy lại cùng
+    một tin không được tự coi mình là bản trùng)."""
     if not hashes:
         return set()
     rows = (await db.execute(text("""
@@ -145,8 +161,9 @@ async def dup_index(db: AsyncSession, org_id: uuid.UUID, hashes: Collection[byte
         FROM refinery.item_marks m
         JOIN clean.meaning_units mu ON mu.id = m.item_id AND mu.observed_at = m.observed_at
         WHERE m.org_id = :o AND m.item_type = 'unit' AND m.text_hash = ANY(:hs) AND mu.person_id IS NOT NULL
-          AND m.observed_at > now() - make_interval(days => :w)
+          AND m.observed_at > now() - make_interval(secs => :w)
           AND NOT EXISTS (SELECT 1 FROM clean.evidence ev
                           WHERE ev.meaning_unit_id = m.item_id AND ev.raw_event_id = ANY(:eids))"""),
-        {"o": org_id, "hs": list(hashes), "w": triage.WINDOW_DAYS, "eids": list(event_ids)})).all()
+        {"o": org_id, "hs": list(hashes), "eids": list(event_ids),
+         "w": (EXACT_DUP_HOURS if window_hours is None else window_hours) * 3600})).all()
     return {(bytes(r.text_hash), r.person_id, r.group_id) for r in rows}

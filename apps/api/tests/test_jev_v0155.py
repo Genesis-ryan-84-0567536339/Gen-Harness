@@ -15,6 +15,7 @@ import logging
 import time
 import uuid
 from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -238,6 +239,25 @@ def test_decide_exact_dup_needs_same_sender_and_place_and_never_hits_tags() -> N
     assert [r.reason for r in got2] == ["exact_dup", None]
 
 
+def test_decide_exact_dup_in_batch_respects_the_short_window() -> None:
+    """F-N1: cùng người gửi lặp y hệt SAU nhiều ngày là tín hiệu nhắc việc (chưa ai trả lời) ⇒ KHÔNG bỏ; lặp trong vài
+    giờ (bấm gửi hai lần) mới là bản trùng. Thiếu thời điểm ⇒ giữ hành vi chặt cũ."""
+    P = prefilter.PrefilterItem
+    a, g = uuid.uuid4(), uuid.uuid4()
+    t0 = datetime(2026, 10, 1, 9, 0, tzinfo=UTC)
+    kw = {"rules_spam": [False] * 4, "jev_labels": None, "dup_index": frozenset()}
+    got = prefilter.decide([P(LONG_A, a, g, at=t0),
+                            P(LONG_A, a, g, at=t0 + timedelta(minutes=2)),          # bấm gửi hai lần ⇒ trùng
+                            P(LONG_A, a, g, at=t0 + timedelta(days=3)),             # nhắc lại sau 3 ngày ⇒ giữ
+                            P(LONG_A, a, g, at=t0 + timedelta(days=3, minutes=1))],  # lại bấm hai lần ⇒ trùng
+                           **kw)
+    assert [r.reason for r in got] == [None, "exact_dup", None, "exact_dup"]
+    got2 = prefilter.decide([P(LONG_A, a, g), P(LONG_A, a, g, at=t0)], rules_spam=[False] * 2, jev_labels=None,
+                            dup_index=frozenset())
+    assert [r.reason for r in got2] == [None, "exact_dup"]
+    assert 0 < prefilter.EXACT_DUP_HOURS < 24                     # cửa sổ tính bằng giờ, không phải 14 ngày
+
+
 def test_lower_last_keeps_order_and_drops_skipped() -> None:
     R = prefilter.PrefilterResult
     res = [R(), R(False, None, True), R(True, "exact_dup", False), R(), R(False, None, True)]
@@ -357,6 +377,27 @@ async def test_no_jev_rule_spam_skipped_and_exact_dups_skipped(app: Any, db: Any
     seen.clear()
     st2 = await Refinery(sm, redis, router_taking(seen)).run(org, "manual")  # type: ignore[arg-type]
     assert st2.prefilter_skipped == 1 and seen == [LONG_BUY]               # u1 lặp lại bị bỏ; u4 (người mới) vẫn đi
+
+
+async def test_exact_dup_against_marks_uses_the_short_window(app: Any, db: Any, redis: Any,
+                                                              monkeypatch: pytest.MonkeyPatch) -> None:
+    """F-N1: dấu item_marks chỉ tính là "đã thấy" trong EXACT_DUP_HOURS giờ; ngoài cửa sổ, người đó gửi lại y hệt vẫn
+    được trích xuất (tín hiệu theo dõi)."""
+    org = await setup_listen(db)
+    sm = sessionmaker()
+    seen: list[str] = []
+    await put(sm, org, msg(LONG_BUY))
+    await Refinery(sm, redis, router_taking(seen)).run(org, "manual")  # type: ignore[arg-type]
+    await triage.run_org(sm, org)
+    hashes = {prefilter.exact_key(LONG_BUY)[0]}                        # type: ignore[index]
+    async with sm() as s:
+        assert await prefilter.dup_index(s, org, hashes, [])           # trong cửa sổ mặc định: đã thấy
+        assert await prefilter.dup_index(s, org, hashes, [], window_hours=0) == set()
+    monkeypatch.setattr(prefilter, "EXACT_DUP_HOURS", 0.0)             # coi như tin đầu đã quá cũ
+    await put(sm, org, msg(LONG_BUY))
+    seen.clear()
+    st = await Refinery(sm, redis, router_taking(seen)).run(org, "manual")  # type: ignore[arg-type]
+    assert st.prefilter_skipped == 0 and seen == [LONG_BUY]
 
 
 async def test_jev_error_keeps_old_flow_and_loses_nothing(app: Any, db: Any, redis: Any, owner_api: Api,
