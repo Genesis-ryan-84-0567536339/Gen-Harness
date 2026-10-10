@@ -116,8 +116,9 @@ jobs:
   api:
     runs-on: ubuntu-latest
     # Hai lượt pytest đầy đủ (superuser + gh_app) + build image db + e2e thật rút gọn (v0.1.35, F-14) — chặn treo
-    # vô hạn nếu test kẹt.
-    timeout-minutes: 48
+    # vô hạn nếu test kẹt. v0.1.55 thêm ~500 ca (hồ sơ mặc định, Jev, Mặt tiền) ⇒ hai lượt ≈ 47–50 phút, cổng
+    # phát hành v0.1.55 bị huỷ ở phút 48 (run 38075952803); nâng lên 75. Nợ ROADMAP: tách hai lượt thành matrix.
+    timeout-minutes: 75
     services:
       redis:
         image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
