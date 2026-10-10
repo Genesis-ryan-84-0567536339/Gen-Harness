@@ -83,6 +83,9 @@ async def add_source(db: Any, org: uuid.UUID, kind: str, name: str, rank: int, m
                          {"p": pid, "s": crypto.encrypt(f"sk-{name}-aaaa".encode(), KEY_AAD)})
     ids: dict[str, uuid.UUID] = {}
     for m in models:
+        # `agent.models.id` = core.uuid_v7(): hai dòng chèn cùng một mili-giây có thứ tự id NGẪU NHIÊN (~50%) ⇒ chờ để
+        # model liệt kê trước luôn có id nhỏ hơn (các ca dưới giả định "tạo trước ⇒ legacy chọn theo id").
+        await db.execute(text("SELECT pg_sleep(0.003)"))
         ids[m] = (await db.execute(text("""INSERT INTO agent.models (provider_id, model_name, is_default)
                                            VALUES (:p, :m, :d) RETURNING id"""),
                                    {"p": pid, "m": m, "d": m == default})).scalar_one()
