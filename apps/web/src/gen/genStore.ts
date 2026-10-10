@@ -54,6 +54,15 @@ interface GenState {
   /** Đang tải nội dung một hội thoại (mở từ "Hội thoại cũ" hoặc bản tin từ chuông) ⇒ khoá gửi, hiện "Đang mở hội thoại…". */
   loadingConversation: boolean;
   spotlight: SpotlightState | null;
+  /**
+   * v0.1.54 (Gen hướng dẫn): `/overview?gen=coach` (link chuông) ⇒ đặt cờ để thẻ "Hôm nay của Sếp" cuộn tới và mở rộng.
+   * Không lưu máy; thẻ tự hạ cờ sau khi xử lý.
+   */
+  coachFocus: boolean;
+  /** v0.1.54: câu điền sẵn vào ô nhập của khung Gen (nút "Hỏi Gen thêm") — KHÔNG gửi; ô nhập lấy rồi hạ về null. */
+  composerDraft: string | null;
+  setCoachFocus: (on: boolean) => void;
+  setComposerDraft: (text: string | null) => void;
   setOpen: (userId: string, open: boolean) => void;
   /** v0.1.41 (F-8a): ghi hội thoại đang mở kèm chủ của nó (được lưu máy để tải lại trang). */
   setConversation: (userId: string | null, id: string | null) => void;
@@ -117,6 +126,10 @@ export const useGenStore = create<GenState>()(
       restoring: false,
       loadingConversation: false,
       spotlight: null,
+      coachFocus: false,
+      composerDraft: null,
+      setCoachFocus: (coachFocus) => set({ coachFocus }),
+      setComposerDraft: (composerDraft) => set({ composerDraft }),
       setOpen: (userId, open) => set((s) => ({ openByUser: { ...s.openByUser, [userId]: open } })),
       setConversation: (userId, id) => set({ conversationId: id, conversationOwner: id ? userId : null }),
       reset: () => set({ conversationId: null, conversationOwner: null, messages: [], busy: false }),

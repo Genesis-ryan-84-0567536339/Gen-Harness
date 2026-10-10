@@ -16,11 +16,6 @@ interface UiPrefs {
   theme: ThemePref;
   /** Lựa chọn giao diện theo từng người dùng (id) — hai người dùng chung máy không đè lựa chọn của nhau. */
   themeByUser: Record<string, ThemePref>;
-  /**
-   * v0.1.30: thẻ "Việc thiết lập tiếp" người dùng (id) đã bấm "Ẩn" — lưu các bước còn dở lúc ẩn; có bước dở MỚI thì
-   * thẻ hiện lại. Chỉ ẩn cho người đó trên trình duyệt này (lối vào cố định: menu tài khoản / thanh bên).
-   */
-  followUpHiddenByUser: Record<string, number[]>;
   /** Ngăn kéo điều hướng trên điện thoại (B4) — không lưu. */
   drawerOpen: boolean;
   /**
@@ -34,7 +29,6 @@ interface UiPrefs {
   setTheme: (theme: ThemePref, userId?: string | null) => void;
   setDrawerOpen: (open: boolean) => void;
   setDomainOpen: (domain: string, open: boolean) => void;
-  hideFollowUp: (userId: string, pending: number[]) => void;
 }
 
 const safeStorage = createJSONStorage<Partial<UiPrefs>>(() => {
@@ -50,6 +44,18 @@ const safeStorage = createJSONStorage<Partial<UiPrefs>>(() => {
   }
 });
 
+/**
+ * Nâng bản đã lưu lên bản hiện tại: xoá `showEnglish` (v2) và `followUpHiddenByUser` (v3, v0.1.54); mọi lựa chọn khác giữ
+ * nguyên. Dữ liệu hỏng (không phải đối tượng) ⇒ trả đối tượng rỗng (store dùng mặc định), không ném lỗi.
+ */
+export function migrateUiPrefs(persisted: unknown): Partial<UiPrefs> {
+  const base = persisted && typeof persisted === 'object' && !Array.isArray(persisted) ? (persisted as Record<string, unknown>) : {};
+  const s = { ...base };
+  delete s.showEnglish;
+  delete s.followUpHiddenByUser;
+  return s as Partial<UiPrefs>;
+}
+
 /** Per-viewer layout preferences (persisted in localStorage). */
 export const useUiStore = create<UiPrefs>()(
   persist(
@@ -60,7 +66,6 @@ export const useUiStore = create<UiPrefs>()(
       themeByUser: {},
       drawerOpen: false,
       domainOpen: {},
-      followUpHiddenByUser: {},
       setSidebarMode: (sidebarMode) => set({ sidebarMode }),
       toggleSidebarMode: () => set((s) => ({ sidebarMode: s.sidebarMode === 'full' ? 'rail' : 'full' })),
       setNavOpen: (group, open) => set((s) => ({ navOpen: { ...s.navOpen, [group]: open } })),
@@ -68,25 +73,21 @@ export const useUiStore = create<UiPrefs>()(
         set((s) => ({ theme, themeByUser: userId ? { ...s.themeByUser, [userId]: theme } : s.themeByUser })),
       setDrawerOpen: (drawerOpen) => set({ drawerOpen }),
       setDomainOpen: (domain, open) => set((s) => ({ domainOpen: { ...s.domainOpen, [domain]: open } })),
-      hideFollowUp: (userId, pending) => set((s) => ({ followUpHiddenByUser: { ...s.followUpHiddenByUser, [userId]: [...pending] } })),
     }),
     {
       name: 'gh-ui',
       storage: safeStorage,
       // v2 (v0.1.42, F-63): bỏ hẳn phụ đề tiếng Anh — xoá field `showEnglish` đã lưu ở mọi bản cũ (v0: mặc định bật,
       // v1: mặc định tắt). Lựa chọn khác (thanh bên, giao diện, nhóm mở/đóng) giữ nguyên.
-      version: 2,
-      migrate: (persisted) => {
-        const s = { ...((persisted ?? {}) as Record<string, unknown>) };
-        delete s.showEnglish;
-        return s as Partial<UiPrefs>;
-      },
+      // v3 (v0.1.54): bỏ nút "Ẩn" của thẻ "Việc thiết lập tiếp" (nay "Để sau 7 ngày" lưu ở máy chủ) — xoá khoá
+      // `followUpHiddenByUser` đã lưu. Dữ liệu hỏng (không phải đối tượng) ⇒ bắt đầu lại từ mặc định, không ném lỗi.
+      version: 3,
+      migrate: migrateUiPrefs,
       partialize: (s) => ({
         sidebarMode: s.sidebarMode,
         navOpen: s.navOpen,
         theme: s.theme,
         themeByUser: s.themeByUser,
-        followUpHiddenByUser: s.followUpHiddenByUser,
       }),
     },
   ),

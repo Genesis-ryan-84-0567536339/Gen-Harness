@@ -264,3 +264,103 @@
 .gen-prop__tbl-cur { color: var(--color-neutral-500); }
 .gen-prop__tbl-next { color: var(--color-text); }
 .boss-kho-steps { margin: 0 0 8px; padding-left: 20px; display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; }
+
+/* ── v0.1.54: Gen hướng dẫn — chấm đỏ ở nút Gen, thẻ "Hôm nay của Sếp", Cài đặt, Lộ trình học ──
+ * Chỉ dùng token màu sẵn có; mọi khối co được (min-width: 0, ngắt dòng, flex-wrap) để không tràn ngang ở 390px. */
+.hd-gen-wrap { position: relative; display: flex; }
+.hd-gen__dot {
+  position: absolute; top: -3px; right: -3px; width: 9px; height: 9px; border-radius: 50%;
+  background: var(--color-bad); box-shadow: 0 0 0 2px var(--color-bg); pointer-events: none;
+}
+
+.coach-card {
+  flex: none; min-width: 0; display: flex; flex-direction: column;
+  border: 1px solid var(--color-accent-800); border-radius: var(--radius-lg); background: var(--color-surface);
+}
+.coach-card:focus { outline: none; }
+.coach-card:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+.coach-card--error { gap: 8px; padding: 10px 12px; align-items: flex-start; border-color: var(--color-divider); }
+.coach-card__head { display: flex; align-items: center; gap: 8px; padding: 8px 6px 8px 12px; min-width: 0; }
+.coach-card__icon { flex: none; display: inline-flex; color: var(--color-accent-300); }
+.coach-card__titles { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.coach-card__title { margin: 0; font-size: 12.8px; font-weight: 600; overflow-wrap: anywhere; }
+.coach-card__meta { font-size: 11px; color: var(--color-neutral-400); overflow-wrap: anywhere; }
+.coach-card__toggle { flex: none; }
+.coach-card__body { display: flex; flex-direction: column; gap: 10px; padding: 2px 12px 12px; min-width: 0; }
+.coach-card__block { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.coach-card__heading {
+  margin: 0; font-size: 10.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--color-neutral-500);
+}
+.coach-card__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.coach-card__item {
+  display: flex; flex-direction: column; gap: 5px; min-width: 0; padding: 8px 10px 9px;
+  border: 1px solid var(--color-divider); border-left-width: 3px; border-radius: var(--radius-md);
+}
+.coach-card__item[data-level='P0'] { border-left-color: var(--color-bad); background: var(--color-bad-tint); }
+.coach-card__item[data-level='P1'] { border-left-color: var(--color-warn); }
+.coach-card__item[data-level='P2'] { border-left-color: var(--color-accent); }
+.coach-card__item[data-level='P3'] { border-left-color: var(--color-neutral-600); }
+.coach-card__item--plain { border-left-width: 1px; }
+.coach-card__item-head { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.coach-card__chip {
+  flex: none; padding: 0 7px; border-radius: var(--radius-pill); border: 1px solid var(--color-divider);
+  font-size: 10.5px; font-weight: 600; line-height: 1.6; color: var(--color-neutral-400);
+}
+.coach-card__chip[data-tone='bad'] { color: var(--color-bad); border-color: var(--color-bad); }
+.coach-card__chip[data-tone='warn'] { color: var(--color-warn); border-color: var(--color-warn); }
+.coach-card__chip[data-tone='info'] { color: var(--color-accent-300); border-color: var(--color-accent-800); }
+.coach-card__item-title { flex: 1; min-width: 0; font-size: 12.5px; font-weight: 600; color: var(--color-text); overflow-wrap: anywhere; }
+.coach-card__why { margin: 0; font-size: 12px; line-height: 1.5; color: var(--color-neutral-300); overflow-wrap: anywhere; }
+.coach-card__actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.coach-card__stable { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 12px; font-weight: 600; color: var(--color-ok); }
+.coach-card__note { margin: 0; font-size: 12px; color: var(--color-neutral-400); overflow-wrap: anywhere; }
+.coach-card__snoozed { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; color: var(--color-neutral-300); }
+.coach-card__foot {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px;
+  padding-top: 8px; border-top: 1px solid var(--color-divider);
+}
+.coach-card__foot-group { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.coach-card__foot-label { font-size: 11px; color: var(--color-neutral-400); }
+.coach-card__warning { margin: 0 0 8px; font-size: 12.5px; line-height: 1.5; color: var(--color-text); overflow-wrap: anywhere; }
+.coach-card__restore { margin: 0; font-size: 12px; color: var(--color-neutral-400); overflow-wrap: anywhere; }
+
+@media (max-width: 760px) {
+  .coach-card__actions .gh-btn, .coach-card__foot .gh-btn { min-height: 34px; }
+}
+
+/* Cài đặt › Bộ não AI › Gen hướng dẫn */
+.coach-set { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.coach-set__row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; font-size: 12.5px; }
+.coach-set__label { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; overflow-wrap: anywhere; }
+.coach-set__hint { font-size: 11.5px; color: var(--color-neutral-400); }
+.coach-set__select { flex: none; min-width: 84px; }
+.coach-set__quiet { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.coach-set__quiet > * { flex: 1 1 140px; min-width: 0; }
+.coach-set__sub { margin: 0; font-size: 10.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--color-neutral-500); }
+.coach-set__dismissed { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.coach-set__dismissed li {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; padding: 6px 8px;
+  border: 1px solid var(--color-divider); border-radius: var(--radius-md); font-size: 12.5px;
+}
+.coach-set__dismissed-title { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+
+/* Trợ giúp › Lộ trình học cùng Gen */
+.curr { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.curr__item { min-width: 0; border: 1px solid var(--color-divider); border-radius: var(--radius-md); }
+.curr__row { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 7px 10px; }
+.curr__k { flex: none; width: 22px; font-size: 11px; color: var(--color-neutral-500); }
+.curr__title { flex: 1; min-width: 0; font: inherit; font-size: 12.5px; text-align: left; color: var(--color-text); background: none; border: 0; padding: 0; cursor: pointer; overflow-wrap: anywhere; }
+.curr__title:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.curr__status { flex: none; padding: 0 7px; border-radius: var(--radius-pill); border: 1px solid var(--color-divider); font-size: 10.5px; font-weight: 600; line-height: 1.6; color: var(--color-neutral-400); }
+.curr__status[data-status='understood'], .curr__status[data-status='done'] { color: var(--color-ok); border-color: var(--color-ok); }
+.curr__status[data-status='snoozed'] { color: var(--color-warn); border-color: var(--color-warn); }
+.curr__body { display: flex; flex-direction: column; gap: 8px; padding: 0 10px 10px 40px; }
+.curr__text { margin: 0; font-size: 12.5px; line-height: 1.55; color: var(--color-neutral-300); overflow-wrap: anywhere; }
+.curr__actions { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* Tổng quan: dòng "Đã đạt x/N việc bắt buộc" + hoãn "Việc thiết lập tiếp" */
+.needs-boss-progress {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-width: 0; padding: 8px 12px;
+  border: 1px solid var(--color-divider); border-radius: var(--radius-lg); background: var(--color-surface); font-size: 12.5px;
+}
+.needs-boss-progress__text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
