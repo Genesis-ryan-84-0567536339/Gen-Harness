@@ -90,8 +90,10 @@ func familiarRepo(repo string) string {
 //     TAG (bản genh cũ chưa ghim digest) không cho biết digest nào là của nó →
 //     mọi dòng cùng ID TRONG CÙNG repo ấy cũng giữ như trước; chỉ khi tập giữ có
 //     digest cho dòng/repo thì mới so theo digest;
-//   - `docker rmi` KHÔNG -f; ảnh đang dùng (rmi lỗi — kể cả container đã dừng
-//     của dự án khác) chỉ in một dòng rồi bỏ qua.
+//   - `docker rmi` mặc định KHÔNG -f; ảnh đang dùng (rmi lỗi — kể cả container đã
+//     dừng của dự án khác) chỉ in một dòng rồi bỏ qua. NGOẠI LỆ duy nhất: tham
+//     chiếu DIGEST mà image ID vẫn còn được ít nhất một dòng trong tập giữ tham
+//     chiếu → `rmi -f` (xem chú thích ở vòng xoá);
 //
 // err chỉ khác nil khi không liệt kê được ảnh.
 func pruneOldImages(ctx context.Context, runner dockercli.Runner, keep [][]byte, out io.Writer) (removed int, err error) {
@@ -159,28 +161,42 @@ func pruneOldImages(ctx context.Context, runner dockercli.Runner, keep [][]byte,
 		byTag = r.tag != "" && r.tag != "<none>" && keepKeys[r.repo+":"+r.tag]
 		return byDigest, byTag
 	}
-	// keepIDs (khoá theo repo, KHÔNG dùng chung giữa các repo) chỉ để giữ các dòng
+	// tagKeepIDs (khoá theo repo, KHÔNG dùng chung giữa các repo) chỉ để giữ các dòng
 	// cùng ID với dòng giữ nhờ TAG: lúc đó không biết digest nào là của ảnh giữ.
 	// Dòng giữ nhờ digest KHÔNG kéo theo dòng khác cùng ID — digest cũ phải bị gỡ.
-	keepIDs := map[string]bool{}
+	tagKeepIDs := map[string]bool{}
 	for _, r := range rows {
 		if _, byTag := byOwnRef(r); byTag {
-			keepIDs[r.repo+"\x00"+r.id] = true
+			tagKeepIDs[r.repo+"\x00"+r.id] = true
+		}
+	}
+	kept := func(r row) bool {
+		byDigest, byTag := byOwnRef(r)
+		return byDigest || byTag || tagKeepIDs[r.repo+"\x00"+r.id]
+	}
+	// keptIDs: image ID của MỌI dòng được giữ (khoá theo ID, chung mọi repo). Chỉ để
+	// quyết định có dùng `rmi -f` hay không — KHÔNG dùng để giữ/xoá.
+	keptIDs := map[string]bool{}
+	for _, r := range rows {
+		if kept(r) {
+			keptIDs[r.id] = true
 		}
 	}
 
 	tried := map[string]bool{}
 	for _, r := range rows {
-		if byDigest, byTag := byOwnRef(r); byDigest || byTag || keepIDs[r.repo+"\x00"+r.id] {
+		if kept(r) {
 			continue
 		}
 		if !r.gh && r.tag != "" && r.tag != "<none>" {
 			continue // ảnh ngoài có tag: có thể của dự án khác — không đụng
 		}
 		var ref string
+		digestRef := false
 		switch {
 		case r.digest != "" && r.digest != "<none>":
 			ref = r.repo + "@" + r.digest
+			digestRef = true
 		case r.gh && r.tag != "" && r.tag != "<none>":
 			ref = r.repo + ":" + r.tag
 		default:
@@ -190,7 +206,24 @@ func pruneOldImages(ctx context.Context, runner dockercli.Runner, keep [][]byte,
 			continue
 		}
 		tried[ref] = true
-		if _, rmErr := runner.Output(ctx, dockercli.Cmd{Name: "docker", Args: []string{"rmi", ref}}); rmErr != nil {
+		args := []string{"rmi"}
+		// Docker (daemon/images/image_delete.go) coi MỌI digest của cùng một repo là
+		// MỘT tham chiếu: isSingleReference = true khi mọi tham chiếu của ảnh đều là
+		// digest cùng repo và không có tag. Khi đó, nếu có container đang chạy ảnh này,
+		// `rmi repo@digest` bị từ chối (conflict "container … is using its referenced
+		// image") dù còn digest khác trỏ cùng ảnh — v0.1.51 đỏ vì thế. `-f` bỏ qua
+		// kiểm đó, gỡ đúng tham chiếu rồi, vì repoRefs vẫn còn digest của bản giữ nên
+		// CHỈ untag và return — không bao giờ xoá lớp ảnh. Nên `-f` an toàn tuyệt đối
+		// khi và chỉ khi image ID của dòng còn được ít nhất một dòng trong tập giữ
+		// tham chiếu (keptIDs). Ảnh KHÔNG còn tham chiếu giữ thì KHÔNG dùng -f: -f
+		// còn xoá được ảnh của container ĐÃ DỪNG (có thể của dự án khác). Tham chiếu
+		// TAG cũng không dùng -f: không bao giờ vướng isSingleReference, và -f ở đó
+		// có thể kéo theo dọn digest cùng repo (kể cả digest giữ).
+		if digestRef && keptIDs[r.id] {
+			args = append(args, "-f")
+		}
+		args = append(args, ref)
+		if _, rmErr := runner.Output(ctx, dockercli.Cmd{Name: "docker", Args: args}); rmErr != nil {
 			_, _ = fmt.Fprintf(out, "     (không xoá được ảnh %s — có thể đang dùng; bỏ qua)\n", ref)
 			continue
 		}

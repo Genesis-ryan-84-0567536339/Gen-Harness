@@ -7,6 +7,11 @@ Ngày = ngày Release trên GitHub theo giờ Việt Nam; tiêu đề trong `doc
 (v0.1.32–v0.1.34, v0.1.40, v0.1.46) hoặc vài ngày (v0.1.47, v0.1.48: làm 03/10, phát hành 09/10).
 Việc sửa nóng không đổi số bản (PR #46, #48, #53, #55, #58, #59) ghi ở [ROADMAP › Bản phản ứng](docs/ROADMAP.md).
 
+## v0.1.52 — Sửa cổng phát hành lần 2: genh gỡ digest cũ của ảnh đang chạy bằng `rmi -f` (10/10/2026)
+- Thay v0.1.51 chưa promote: E2E nâng cấp vẫn đỏ ở bước "chỉ còn ảnh của bản hiện tại và bản liền trước" vì Docker từ chối gỡ digest cũ của `gen-harness-db` (container db đang chạy ảnh này). v0.1.52 chứa toàn bộ v0.1.51 + v0.1.50 + sửa này.
+- Docker coi mọi digest của cùng một repo là MỘT tham chiếu nên `rmi repo@digest` bị chặn dù còn digest khác trỏ cùng ảnh; `genh update` nay dùng `rmi -f` chỉ cho digest mà ảnh còn được tham chiếu giữ (chỉ untag, không xoá ảnh).
+- Chi tiết: [docs/releases/v0.1.52.md](docs/releases/v0.1.52.md)
+
 ## v0.1.51 — Sửa cổng phát hành: genh dọn cả tham chiếu digest cũ của ảnh trùng nội dung (10/10/2026)
 - Thay v0.1.50 chưa promote: E2E nâng cấp đỏ ở bước "chỉ còn ảnh của bản hiện tại và bản liền trước" nên v0.1.50 nằm yên ở bản thử. v0.1.51 chứa toàn bộ v0.1.50 + sửa này.
 - `genh update` dọn ảnh cũ theo CHÍNH tham chiếu (repo@digest / repo:tag) thay vì theo IMAGE ID: ảnh `gen-harness-db` không đổi nội dung qua nhiều bản (cùng ID, khác digest) nên digest cũ trước đây không bao giờ bị gỡ.

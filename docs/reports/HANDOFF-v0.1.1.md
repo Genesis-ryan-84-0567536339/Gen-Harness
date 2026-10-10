@@ -1,4 +1,4 @@
-# Bàn giao Gen-Harness — hiện trạng + việc dở (cập nhật 10/10/2026, bản v0.1.51)
+# Bàn giao Gen-Harness — hiện trạng + việc dở (cập nhật 10/10/2026, bản v0.1.52)
 
 File này nay chỉ ghi **hiện trạng + việc dở** (tên cũ `HANDOFF-v0.1.1.md` giữ nguyên vì mã nguồn có chú thích trỏ tới).
 Lịch sử từng bản nằm ở [CHANGELOG.md](../../CHANGELOG.md) (3–5 dòng/bản) và `docs/releases/vX.Y.Z.md` (chi tiết, chuyển nguyên từ HANDOFF cũ):
@@ -20,11 +20,10 @@ Còn hiệu lực từ v0.1.1 (vai trò DB, volume, gói hồ sơ); chi tiết �
 - **Gói hồ sơ `.ghbundle`**: Python tạo/đọc (`python -m gh.bundle export|import`), Go chỉ chuyển bytes; mật khẩu qua `GH_BUNDLE_PASSWORD` (≥ 12 ký tự);
   mã thoát `0` ok · `2` sai mật khẩu/gói hỏng · `3` không tương thích · `1` lỗi khác; mã hoá lại mọi bí mật bằng khoá master máy đích.
 
-## Hiện trạng (v0.1.51)
+## Hiện trạng (v0.1.52)
 
-Bản mới nhất **v0.1.51** (10/10/2026, `VERSION` = v0.1.51): **bản phản ứng thay v0.1.50 chưa promote** — E2E nâng cấp đỏ vì `genh` không gỡ tham chiếu digest cũ của ảnh trùng nội dung
-(`gen-harness-db` cùng IMAGE ID qua 3 bản); sửa `pruneOldImages` quyết định theo tham chiếu, không theo ID ([v0.1.51.md](../releases/v0.1.51.md)). v0.1.51 chứa toàn bộ v0.1.50;
-bản chạy trên máy Boss: v0.1.49.
+Bản mới nhất **v0.1.52** (10/10/2026, `VERSION` = v0.1.52): **bản phản ứng lần 2 thay v0.1.51 chưa promote** — `genh` đã gỡ digest cũ nhưng Docker từ chối (mọi digest cùng repo là MỘT tham chiếu khi ảnh đang chạy);
+`pruneOldImages` nay dùng `rmi -f` chỉ cho digest mà ảnh còn được tham chiếu giữ ([v0.1.52.md](../releases/v0.1.52.md)). v0.1.52 chứa toàn bộ v0.1.51 và v0.1.50; bản chạy trên máy Boss: v0.1.49.
 Đang chạy, theo nhóm:
 
 - **Cài đặt & vận hành (genh)**: cài một lệnh; `genh update` an toàn (tải trước, sao lưu, migrate, tự quay về bản cũ khi lỗi, khoá `genh.lock`, báo "bị dừng giữa chừng");
@@ -88,7 +87,7 @@ bản chạy trên máy Boss: v0.1.49.
 
 ### Claude / điều phối viên còn dở
 
-- **Phát hành v0.1.51** (thay v0.1.50 chưa promote): nhánh `claude/hotfix-prune-digest` → PR vào main → CI xanh → merge → E2E cài thật + nâng cấp → kiểm genh tải về (checksum/version) → báo Boss. Boss làm theo "Boss phải làm — v0.1.50" dưới (v0.1.51 chứa toàn bộ v0.1.50).
+- **Phát hành v0.1.52** (thay v0.1.51 chưa promote): nhánh `claude/hotfix-prune-digest-2` → PR vào main → CI xanh → merge → E2E cài thật + nâng cấp → kiểm genh tải về (checksum/version) → báo Boss. Boss làm theo "Boss phải làm — v0.1.50" dưới (v0.1.52 chứa toàn bộ v0.1.50).
 - **PR Renovate** không tự merge nằm chờ tới khi Boss nhắn "xử lý PR phụ thuộc"; chưa có lịch tự động nào gọi Claude.
 - **Selector ghi Facebook** mới kiểm trên trang mẫu — chờ nghiệm thu thật (dòng 8). Chuông phiên hết có thể hiện hai lần (`social.paused` + `social.session_expired`), gộp ở bản sau nếu phiền.
 - **Giới hạn đã biết**: TOTP chưa làm; Redis lỗi ⇒ giới hạn đăng nhập tạm không áp; gói apt trong Dockerfile chưa ghim phiên bản; tag GHCR `:latest` cũ đứng yên (không dùng).
