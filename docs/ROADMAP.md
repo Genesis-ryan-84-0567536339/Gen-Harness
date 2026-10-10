@@ -1,4 +1,4 @@
-# Gen-Harness — Lộ trình tổng thể (cập nhật 10/10/2026, sau v0.1.51)
+# Gen-Harness — Lộ trình tổng thể (cập nhật 10/10/2026, sau v0.1.52)
 
 Nguồn chuẩn tiến độ. Mỗi đợt = 1 PR = 1 bản phát hành. CI xanh mới tạo bản thử (prerelease); E2E cài thật xanh mới tự
 nâng thành bản chính thức (latest); lịch tự cập nhật đêm đợi bản chính thức ra đủ 24 giờ. genh chỉ kiểm SHA-256 theo
@@ -77,6 +77,7 @@ Các bản sửa nóng thật, không nằm trong kế hoạch đợt. Đối ch
 | 09/10/2026 | **Sửa trình bày dính biên khung** (PR #58, `claude/css-bien-khung`) | Ảnh máy Boss: chữ/số dính sát mép thẻ, khối "Máy chủ chưa nhận yêu cầu cập nhật" vỡ 3 dòng. Sửa gốc ở `Panel`/`Icon` + 5 họ lỗi, thêm lính gác `layout-guard.spec.ts` (4 cỡ màn); đi cùng v0.1.50. [Chi tiết](releases/v0.1.50.md) |
 | 09/10/2026 | **Sửa test heartbeat genh chập chờn** (PR #59) | `readStateFile` báo "tệp bị thay giữa chừng" khi nhịp vừa ghi tạm-rồi-rename (CI đỏ ~1/100); nay chỉ lỗi đó được thử lại tối đa 5 lần × 5ms, symlink/hard link/sai chủ vẫn từ chối ngay. Không tăng VERSION, đi cùng v0.1.50. [Chi tiết](releases/v0.1.50.md) |
 | 10/10/2026 | **Bản phản ứng v0.1.51** (`claude/hotfix-prune-digest`) | Cổng phát hành v0.1.50 đỏ ở bước "chỉ còn ảnh của bản hiện tại và bản liền trước": `pruneOldImages` giữ theo IMAGE ID nên digest cũ của ảnh trùng nội dung (`gen-harness-db`, 3 digest cùng ID) không bao giờ bị gỡ. Sửa theo tham chiếu; thay v0.1.50 chưa promote. [Chi tiết](releases/v0.1.51.md) |
+| 10/10/2026 | **Bản phản ứng 2 — v0.1.52** (`claude/hotfix-prune-digest-2`) | Cổng phát hành v0.1.51 vẫn đỏ ở bước giữ 2 bản ảnh: genh đã gọi `rmi …@digest` nhưng Docker từ chối (`isSingleReference`: mọi digest cùng repo là MỘT tham chiếu, container db đang chạy). Nay `rmi -f` cho digest mà ảnh còn được tham chiếu giữ; thay v0.1.51 chưa promote. [Chi tiết](releases/v0.1.52.md) |
 
 Hai bản **phản ứng theo yêu cầu của Boss** (tính năng, không phải sửa nóng): v0.1.31 (01/10 "không thấy model và nhóm model nào để chọn") và v0.1.32 (01/10 "high là mức suy nghĩ, không phải tên model").
 
