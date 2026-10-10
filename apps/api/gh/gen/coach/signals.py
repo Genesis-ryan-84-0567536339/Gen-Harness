@@ -465,6 +465,22 @@ def _merge(sig: Signals, part: Mapping[str, Any]) -> None:
             setattr(sig, attr, part[attr])
 
 
+async def _heal(db: AsyncSession, org_id: uuid.UUID) -> None:
+    """Sau một nguồn lỗi / quá giờ: bảo đảm phiên còn dùng được cho các nguồn kế tiếp. Câu lệnh bị huỷ giữa chừng (quá 2
+    giây) có thể để phiên ở trạng thái 'chờ rollback' — khi đó rollback rồi đặt lại `app.org_id` (collect luôn chạy
+    TRƯỚC mọi thao tác ghi của bên gọi nên rollback không làm mất gì)."""
+    try:
+        await db.execute(text("SELECT 1"))
+        return
+    except Exception:  # noqa: BLE001 — phiên hỏng, thử phục hồi bên dưới
+        pass
+    try:
+        await db.rollback()
+        await db.execute(text("SELECT set_config('app.org_id', :o, true)"), {"o": str(org_id)})
+    except Exception:  # noqa: BLE001 — các nguồn còn lại sẽ tự báo lỗi, thẻ vẫn trả
+        log.warning("Gen hướng dẫn: không phục hồi được phiên sau nguồn lỗi")
+
+
 async def collect(db: AsyncSession, redis: Any, org_id: uuid.UUID) -> Signals:
     """Tín hiệu của tổ chức (cache 60 giây). Không ghi gì vào CSDL; nguồn lỗi/quá 2 giây thì bỏ mục đó."""
     key = CACHE_KEY.format(org_id)
@@ -485,6 +501,7 @@ async def collect(db: AsyncSession, redis: Any, org_id: uuid.UUID) -> Signals:
         except Exception as exc:  # noqa: BLE001 — một nguồn lỗi chỉ làm mất mục của nó
             log.warning("Gen hướng dẫn: bỏ nguồn %s (%s)", name, type(exc).__name__)
             sig.failed.append(name)
+            await _heal(db, org_id)
             continue
         _merge(sig, part)
     if redis is not None:

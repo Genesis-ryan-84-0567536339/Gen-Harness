@@ -1181,18 +1181,38 @@ async def test_failed_or_slow_sources_are_dropped_but_the_card_is_returned(
         await asyncio.sleep(5)
         return {}
 
+    async def fake_pin(db_: Any, redis_: Any, org_: Any) -> dict[str, Any]:
+        return {"state": {"pin.set": True}}
+
+    # Chỉ 3 nguồn (hỏng · quá giờ · bình thường), không câu SQL nào chạy dưới hạn 0,05 giây ⇒ không phụ thuộc tải máy.
+    real_sources = sg._sources
     monkeypatch.setattr(health, "active_issues", broken)
-    monkeypatch.setattr(sg, "_src_boss", slow)
+    monkeypatch.setattr(sg, "_sources", lambda: [("health", sg._src_health), ("boss", slow), ("pin", fake_pin)])
     monkeypatch.setattr(sg, "SOURCE_TIMEOUT_S", 0.05)
     with caplog.at_level("WARNING", logger="gh.gen.coach"):
         sig = await sg.collect(db, redis, org)
     assert sorted(sig.failed) == ["boss", "health"]
     assert sig.alerts == [] and not any(k.startswith("boss.") for k in sig.state)
-    assert "model.bound" in sig.state and "pin.set" in sig.state             # nguồn khác vẫn có
+    assert sig.state == {"pin.set": True}                                    # nguồn khác vẫn có
     assert "DỮ-LIỆU-NHẠY-CẢM" not in caplog.text                            # log cảnh báo không kèm dữ liệu
+    assert sig.p01_known() is False
+    # cả thẻ: nguồn thật, chỉ riêng health lỗi ⇒ thẻ vẫn trả, thiếu đúng mục health
+    monkeypatch.setattr(sg, "_sources", real_sources)
+    monkeypatch.setattr(sg, "SOURCE_TIMEOUT_S", 2.0)
     await redis.delete(sg.CACHE_KEY.format(org))
-    d = await today(owner_api)                                              # thẻ vẫn trả
-    assert todo_keys(d)[0] == "model.missing" and not any(k.startswith(("boss.", "health.")) for k in todo_keys(d))
+    d = await today(owner_api)
+    assert todo_keys(d)[0] == "model.missing" and not any(k.startswith("health.") for k in todo_keys(d))
+
+
+async def test_failed_source_heals_a_broken_session_for_the_next_sources(db: Any, owner_api: Api) -> None:
+    org, _ = await owner_of(db)
+    with pytest.raises(DBAPIError):
+        await db.execute(text("SELECT * FROM bang_khong_ton_tai"))
+    with pytest.raises(DBAPIError):
+        await db.execute(text("SELECT 1"))                              # phiên đang ở trạng thái chờ rollback
+    await sg._heal(db, org)
+    assert (await db.execute(text("SELECT 1"))).scalar_one() == 1
+    assert (await db.execute(text("SELECT current_setting('app.org_id', true)"))).scalar_one() == str(org)
 
 
 async def test_real_sources_produce_expected_state_on_fresh_machine(owner_api: Api, db: Any, redis: Any) -> None:
