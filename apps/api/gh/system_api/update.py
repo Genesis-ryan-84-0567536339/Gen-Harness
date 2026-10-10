@@ -13,7 +13,7 @@ import logging
 import os
 import re
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -33,7 +33,8 @@ log = logging.getLogger(__name__)
 router = APIRouter(tags=["system"])
 MANAGE = require("system.manage", rbac.ALL)
 
-LATEST_CACHE_KEY = "gh:update:latest"
+# v0.1.53 (F-96): hình dạng bộ đệm đổi (thêm danh sách bản đủ điều kiện cho lịch đêm) ⇒ khoá mới, bản đệm cũ bỏ.
+LATEST_CACHE_KEY = "gh:update:latest:v2"
 # v0.1.30: 1 giờ → 10 phút (Boss thấy "mất nút update" gần 1 giờ sau khi v0.1.29 đã phát hành).
 LATEST_CACHE_SECONDS = 600
 # `POST /system/update/check` hỏi GitHub ngay (bỏ qua bộ đệm) — tối đa 1 lần / 30 giây cho cả tổ chức.
@@ -49,6 +50,10 @@ RUNNING_STALL_SECONDS = 60 * 60
 HEARTBEAT_STALE_SECONDS = 5 * 60
 BOOT_ID_PATH = Path("/proc/sys/kernel/random/boot_id")
 _SEMVER = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
+# v0.1.53 (F-96): lịch đêm chọn bản CAO NHẤT đã đủ thời gian chín 24 giờ (genh selfupdate.NightlyMinAge) trong vài bản
+# gần nhất, không chỉ bản mới nhất — nên Console hỏi một danh sách thay vì /releases/latest.
+NIGHTLY_MIN_AGE = timedelta(hours=24)
+RELEASES_PER_PAGE = 10
 # v0.1.33: dấu job `promote` (e2e-install.yml) ghi vào ghi chú Release lúc nâng bản thử thành bản chính thức — cùng
 # định dạng với apps/genh/internal/selfupdate PromotedMarker. Thời gian chín 24 giờ của lịch đêm tính từ dấu này
 # (published_at là lúc tạo bản thử, promote không đổi nó).
@@ -96,21 +101,75 @@ def strip_markers(notes: str) -> str:
     return _PROMOTED.sub("", notes).strip()
 
 
+def _iso_z(t: datetime) -> str:
+    return t.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _summarize(releases: list[Any]) -> dict[str, Any] | None:
+    """Tóm tắt danh sách release GitHub (dữ liệu bên ngoài — chỉ nhận đúng kiểu, bỏ phần tử lạ): `latest` = semver CAO
+    NHẤT trong các bản không draft/không prerelease; `candidates` = các bản chính thức CÓ dấu promote, sắp tăng dần theo
+    semver, mỗi bản kèm `eligible_at` = lúc thành bản chính thức + 24 giờ (thời gian chín của lịch đêm). Việc lọc "mới
+    hơn bản đang chạy" làm ở `_payload` (bản đang chạy đổi sau mỗi lần cập nhật, bộ đệm thì không)."""
+    official: list[tuple[tuple[int, int, int], str, dict[str, Any], str]] = []
+    for rel in releases:
+        if not isinstance(rel, dict) or rel.get("draft") is True or rel.get("prerelease") is True:
+            continue
+        tag = rel.get("tag_name")
+        ver = _parse(tag) if isinstance(tag, str) else None
+        if ver is None or not isinstance(tag, str):
+            continue
+        notes = rel.get("body")
+        official.append((ver, tag, rel, notes if isinstance(notes, str) else ""))
+    if not official:
+        return None
+    official.sort(key=lambda o: o[0])
+    candidates: list[dict[str, str]] = []
+    for _, tag, rel, notes in official:
+        if not _PROMOTED.search(notes):
+            continue
+        since = _ts(official_since(rel.get("published_at"), notes))
+        if since is not None:
+            candidates.append({"tag": tag, "eligible_at": _iso_z(since + NIGHTLY_MIN_AGE)})
+    _, tag, rel, notes = official[-1]
+    url = rel.get("html_url")
+    return {"tag": tag, "url": url if isinstance(url, str) else None,
+            "published_at": official_since(rel.get("published_at"), notes),
+            "notes": strip_markers(notes)[:4000], "candidates": candidates[-RELEASES_PER_PAGE:]}
+
+
 async def fetch_latest(repo: str) -> dict[str, Any] | None:
-    """Bản phát hành mới nhất trên GitHub (tag, link, ghi chú) — lỗi mạng ⇒ None, không làm hỏng màn hình.
+    """Bản phát hành mới nhất trên GitHub (tag, link, ghi chú) + danh sách bản đủ điều kiện cho lịch đêm — lỗi mạng ⇒
+    None, không làm hỏng màn hình.
+
+    v0.1.53 (F-96): MỘT lần GET `/releases?per_page=10` (thay `/releases/latest`): `latest` là semver cao nhất trong các
+    bản chính thức, không phụ thuộc bản nào tạo sau cùng. Lỗi/danh sách không dùng được ⇒ rơi về `/releases/latest` như
+    trước (không mất nút cập nhật), khi đó `candidates` chỉ có bản đó (nếu có dấu promote).
 
     `published_at` trả về là lúc bản này thành BẢN CHÍNH THỨC (official_since) — Console dùng để báo lịch đêm tự cài
     từ khi nào."""
+    base = f"https://api.github.com/repos/{repo}"
     try:
         async with httpx.AsyncClient(timeout=6.0, headers={"Accept": "application/vnd.github+json"}) as c:
-            r = await c.get(f"https://api.github.com/repos/{repo}/releases/latest")
-        if r.status_code != 200:
-            return None
-        body = r.json()
-        raw = body.get("body") or ""
-        return {"tag": body.get("tag_name"), "url": body.get("html_url"),
-                "published_at": official_since(body.get("published_at"), raw),
-                "notes": strip_markers(raw)[:4000]}
+            summary = None
+            try:
+                r = await c.get(f"{base}/releases?per_page={RELEASES_PER_PAGE}")
+                body = r.json() if r.status_code == 200 else None
+                summary = _summarize(body) if isinstance(body, list) else None
+            except (httpx.HTTPError, ValueError):
+                log.info("Không đọc được danh sách bản phát hành — rơi về bản mới nhất của GitHub")
+            if summary is None:
+                r = await c.get(f"{base}/releases/latest")
+                body = r.json() if r.status_code == 200 else None
+                if not isinstance(body, dict):
+                    return None
+                notes = body.get("body")
+                raw = notes if isinstance(notes, str) else ""
+                summary = _summarize([body]) or {
+                    # Tag không theo semver (hiếm): giữ cách cũ — Console vẫn hiện, is_newer tự bỏ qua.
+                    "tag": body.get("tag_name"), "url": body.get("html_url"),
+                    "published_at": official_since(body.get("published_at"), raw),
+                    "notes": strip_markers(raw)[:4000], "candidates": []}
+        return summary
     except (httpx.HTTPError, ValueError):
         return None
 
@@ -195,6 +254,61 @@ def _host_busy(d: Path) -> bool:
     return _heartbeat(d)[0]
 
 
+#: v0.1.53 (F-99): giá trị cho phép của các trường chuỗi trong `run/autostart-status.json` / `run/nightly-status.json`
+#: (genh ghi, thư mục 0777 ⇒ dữ liệu không tin cậy): ngoài tập này ⇒ 'unknown'. Không bao giờ đưa chữ lấy từ tệp vào
+#: thông điệp; lệnh sửa do web/API ghép từ chuỗi cố định.
+LINGER_VALUES = ("yes", "no", "unknown", "not_applicable")
+NIGHTLY_MECHANISMS = ("systemd", "cron", "launchd", "schtasks", "")
+NIGHTLY_RESULTS = ("done", "failed", "deferred", "up_to_date", "blocked", "")
+WATCHER_VALUES = ("active", "failed", "inactive", "unknown")
+
+
+def _pick(value: Any, allowed: tuple[str, ...]) -> str:
+    return value if isinstance(value, str) and value in allowed else "unknown"
+
+
+def _bool(value: Any) -> bool | None:
+    return value if isinstance(value, bool) else None
+
+
+def _iso_or_none(value: Any) -> str | None:
+    t = _ts(value) if isinstance(value, str) else None
+    return _iso_z(t) if t is not None else None
+
+
+def read_nightly(d: Path) -> dict[str, Any] | None:
+    """`run/nightly-status.json` (genh ghi: publishHostInfo, lần chạy lịch đêm, trực canh 12 phút) đã LỌC: chỉ nhận
+    đúng kiểu/tập giá trị — lạ ⇒ 'unknown'/None. Tệp thiếu/hỏng/không phải object ⇒ None (genh cũ chưa ghi)."""
+    raw = _read_json(d / "nightly-status.json")
+    if raw is None:
+        return None
+    mechanism = raw.get("mechanism")
+    result = raw.get("last_result")
+    return {
+        "mechanism": mechanism if isinstance(mechanism, str) and mechanism in NIGHTLY_MECHANISMS else "unknown",
+        "enabled": _bool(raw.get("enabled")), "active": _bool(raw.get("active")),
+        "unit_present": _bool(raw.get("unit_present")), "opted_out": _bool(raw.get("opted_out")),
+        "since": _iso_or_none(raw.get("since")), "last_run_at": _iso_or_none(raw.get("last_run_at")),
+        "next_run_at": _iso_or_none(raw.get("next_run_at")),
+        "last_result": result if isinstance(result, str) and result in NIGHTLY_RESULTS else "unknown",
+        "linger": _pick(raw.get("linger"), LINGER_VALUES),
+        "request_watcher": _pick(raw.get("request_watcher"), WATCHER_VALUES),
+        "checked_at": _iso_or_none(raw.get("checked_at")),
+    }
+
+
+def _stalled_cause(d: Path) -> str:
+    """Vì sao yêu cầu nằm quá `STALE_REQUEST_SECONDS` mà không ai nhận (không tính lúc máy chủ đang bận):
+    - 'linger_off': linger tắt ⇒ systemd --user chỉ chạy khi có người đăng nhập, trình nhận yêu cầu không chạy;
+    - 'watcher_failed': genh báo trình nhận yêu cầu (gen-harness-update-request.path/.service) ở trạng thái lỗi;
+    - 'not_picked_up': còn lại (không rõ nguyên nhân). Đọc trực tiếp tệp run/, không import gh.health (vòng import)."""
+    if _pick((_read_json(d / "autostart-status.json") or {}).get("linger"), LINGER_VALUES) == "no":
+        return "linger_off"
+    if (read_nightly(d) or {}).get("request_watcher") == "failed":
+        return "watcher_failed"
+    return "not_picked_up"
+
+
 #: Mã genh (GH-E9xx) cuối thông điệp hộp thư — cùng cách đọc với web (updateModel.ts `updateErrorCode`).
 _GH_CODE = re.compile(r"GH-E[0-9A-F]{3}")
 #: Dấu "quay về chưa trọn / cần xử lý tay" trong thông điệp genh — cùng mẫu với web (updateModel.ts `failedCopy`).
@@ -213,6 +327,23 @@ def _interrupted(state: str, message: Any, rollback_failed: bool) -> str | None:
     if not codes or codes[-1] != "GH-E94B" or _MANUAL.search(message):
         return None
     return "resume" if SHUTDOWN_FORWARD_MARKER in message else "rolled_back"
+
+
+#: v0.1.53 (F-97): genh KHÔNG làm yêu cầu khi không xoá được tệp `request/update.json` (xoá hỏng ⇒ làm tiếp sẽ khiến
+#: .path kích lặp). Nó ghi update-status 'failed' + mã GH-E94C rồi thoát; tệp yêu cầu vẫn nằm lại.
+CONSUME_FAILED_CODE = "GH-E94C"
+
+
+def _consume_failed(status: dict[str, Any], request: dict[str, Any]) -> bool:
+    """update-status.json là 'failed' GH-E94C của CHÍNH yêu cầu còn nằm lại (finished_at ≥ requested_at) ⇒ Console phải
+    hiện thông điệp genh (không phải 'đã gửi yêu cầu' mãi rồi 'chưa nhận'). Thiếu/hỏng mốc thời gian ⇒ không khớp."""
+    message = status.get("message")
+    if status.get("state") != "failed" or not isinstance(message, str):
+        return False
+    codes = _GH_CODE.findall(message)
+    finished, requested = _ts(status.get("finished_at")), _ts(request.get("requested_at"))
+    return bool(codes) and codes[-1] == CONSUME_FAILED_CODE and finished is not None and requested is not None \
+        and finished >= requested
 
 
 def running_version() -> str | None:
@@ -234,8 +365,12 @@ def _state() -> dict[str, Any]:
     if request is not None:
         age = _age_seconds(request.get("requested_at"))
         host_busy = _host_busy(d)
-        if age is not None and age > STALE_REQUEST_SECONDS and not host_busy:
-            state, stalled_reason = "stalled", "not_picked_up"
+        if _consume_failed(status, request):
+            # genh đã thử nhận yêu cầu này nhưng không xoá được tệp (GH-E94C): giữ 'failed' để Console hiện thông điệp
+            # của genh (kiểm quyền thư mục run/request) thay vì chờ 15 phút rồi nói "chưa nhận" không rõ nguyên nhân.
+            state, stalled_reason = "failed", None
+        elif age is not None and age > STALE_REQUEST_SECONDS and not host_busy:
+            state, stalled_reason = "stalled", _stalled_cause(d)
         else:
             state, stalled_reason = "requested", None
     updater = info.get("updater") or None
@@ -277,11 +412,28 @@ async def _payload(request: Request, *, force: bool = False) -> dict[str, Any]:
     s = _state()
     latest = await _latest(request, force=force) if s["linked"] else None
     tag = latest.get("tag") if latest else None
+    nightly = read_nightly(_dir()) if s["linked"] else None
     return {**s, "latest": tag, "release_url": latest.get("url") if latest else None,
             "release_notes": latest.get("notes") if latest else None,
             "published_at": latest.get("published_at") if latest else None,
             "checked_at": latest.get("checked_at") if latest else None,
-            "update_available": is_newer(tag, s["current"])}
+            "update_available": is_newer(tag, s["current"]),
+            # v0.1.53 (F-96): bản chính thức mới hơn bản đang chạy mà lịch đêm có thể chọn, kèm lúc đủ 24 giờ.
+            "nightly_candidates": _candidates(latest, s["current"]),
+            # v0.1.53 (F-99): lịch tự cập nhật đêm (genh ghi run/nightly-status.json, đã lọc); chưa có tệp ⇒ null.
+            "nightly": None if nightly is None else {k: nightly[k] for k in (
+                "mechanism", "enabled", "active", "opted_out", "last_run_at", "next_run_at")}}
+
+
+def _candidates(latest: dict[str, Any] | None, current: str | None) -> list[dict[str, str]]:
+    """`nightly_candidates` của payload: các bản trong bộ đệm mới hơn bản đang chạy (tăng dần theo semver), ≤ 10."""
+    raw = (latest or {}).get("candidates")
+    if not isinstance(raw, list):
+        return []
+    out = [{"tag": c["tag"], "eligible_at": c["eligible_at"]} for c in raw
+           if isinstance(c, dict) and isinstance(c.get("tag"), str) and isinstance(c.get("eligible_at"), str)
+           and is_newer(c["tag"], current)]
+    return out[-RELEASES_PER_PAGE:]
 
 
 @router.get("/system/update")
