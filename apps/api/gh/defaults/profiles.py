@@ -60,8 +60,7 @@ PROFILES: dict[str, dict[str, Profile]] = {
     # Bản tin Gen: khoá API nhanh; CLI nhanh CHỈ khi Owner cho phép việc nền; agy KHÔNG.
     ROLE_BRIEFING: {KIND_API: Profile("fast", None, 0.2, 6000),
                     KIND_CLAUDE: Profile("fast", None, 0.2, 6000)},
-    # Sàng lọc: khoá API nhanh t=0,2 (JSON sai hai lần thì runner hiện có tự lên balanced — chỉ cấp tầng ở đây); agy
-    # KHÔNG.
+    # Sàng lọc: khoá API nhanh t=0,2 (JSON sai hai lần: runner hiện có tự lên balanced — ở đây chỉ cấp tầng); không agy.
     ROLE_REFINERY: {KIND_API: Profile("fast", None, 0.2, 6000),
                     KIND_CLAUDE: Profile("fast", None, 0.2, 6000)},
     # Soạn lại / dịch nháp: CLI cân bằng/thấp; khoá API cân bằng; agy KHÔNG (F-22).

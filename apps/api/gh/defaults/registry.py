@@ -123,8 +123,7 @@ async def _read_gen(db: AsyncSession, org: uuid.UUID, _user: uuid.UUID) -> State
 
 
 async def _reset_gen(db: AsyncSession, org: uuid.UUID, _user: uuid.UUID) -> None:
-    # KHÔNG đụng `enabled` (công tắc Gen của Sếp): chỉ vai trò + số ngày giữ hội thoại; không có khoá `gen` thì không
-    # tạo.
+    # KHÔNG đụng `enabled` (công tắc Gen của Sếp): chỉ vai trò + số ngày giữ hội thoại; chưa có khoá `gen` ⇒ không tạo.
     await db.execute(text("""
         UPDATE core.organizations
         SET settings = jsonb_set(settings, '{gen}', (settings->'gen') || CAST(:d AS jsonb), true)
@@ -174,9 +173,8 @@ async def _read_backup(db: AsyncSession, org: uuid.UUID, _user: uuid.UUID) -> St
 
 
 async def _reset_backup(db: AsyncSession, org: uuid.UUID, _user: uuid.UUID) -> None:
-    # KHÔNG xoá khoá: xoá `settings->'backup'` = TẮT sao lưu (gh.health / gh.backup coi "có khoá" là đã cấu hình). Ghi
-    # lại
-    # mặc định (hằng ngày 02:00, giữ 7 bản, đích máy chủ này).
+    # KHÔNG xoá khoá: xoá `settings->'backup'` = TẮT sao lưu (gh.health / gh.backup coi "có khoá" là đã cấu hình).
+    # Ghi lại mặc định (hằng ngày 02:00, giữ 7 bản, đích máy chủ này).
     await db.execute(text("""
         UPDATE core.organizations SET settings = jsonb_set(COALESCE(settings, '{}'::jsonb), '{backup}',
                                                           CAST(:d AS jsonb), true) WHERE id = :o"""),
