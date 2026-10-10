@@ -365,8 +365,8 @@ async def reset_autonomy(db: AsyncSession, org_id: uuid.UUID) -> None:
         UPDATE core.organizations
         SET settings = jsonb_set(settings, '{autonomy_level}', to_jsonb(CAST(:n AS int)), true)
         WHERE id = :o AND settings ? 'autonomy_level'
-          AND (settings->>'autonomy_level') IS DISTINCT FROM CAST(:n AS text)"""),
-                     {"o": org_id, "n": policy.DEFAULT_AUTONOMY})
+          AND (settings->>'autonomy_level') IS DISTINCT FROM CAST(:s AS text)"""),
+                     {"o": org_id, "n": policy.DEFAULT_AUTONOMY, "s": str(policy.DEFAULT_AUTONOMY)})
 
 
 # ─── hợp đồng với G5: gợi ý trên màn Hôm nay ──────────────────────────────────
