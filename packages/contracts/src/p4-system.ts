@@ -239,7 +239,24 @@ export interface SetupFollowUpItem {
 
 /** `GET/POST /system/update` — nút "Cập nhật ngay" (genh trên máy chủ làm việc thật, xem gh/system_api/update.py). */
 export type SystemUpdateState = 'idle' | 'requested' | 'running' | 'done' | 'failed' | 'stalled';
-export type SystemUpdateStalledReason = 'not_picked_up' | 'process_gone' | null;
+export type SystemUpdateStalledReason = 'not_picked_up' | 'process_gone' | 'linger_off' | 'watcher_failed' | null;
+/** Giá trị `linger` api chỉ nhận trong tập này (genh ghi run/autostart-status.json, run/nightly-status.json); lạ ⇒ 'unknown'. */
+export type SystemLinger = 'yes' | 'no' | 'unknown' | 'not_applicable';
+/**
+ * v0.1.53 (F-99): lịch tự cập nhật đêm (genh ghi run/nightly-status.json, api đã lọc kiểu/tập giá trị). `mechanism`
+ * 'unknown' = giá trị lạ trong tệp; các trường bool/ngày null = không rõ. Mọi trường là chuỗi/bool/null.
+ */
+export interface SystemUpdateNightly {
+  mechanism: 'systemd' | 'cron' | 'launchd' | 'schtasks' | '' | 'unknown';
+  enabled: boolean | null;
+  active: boolean | null;
+  /** Sếp đã chủ động tắt lịch đêm (`genh auto-update disable`). */
+  opted_out: boolean | null;
+  /** v0.1.53: lịch đêm dùng chung của máy thuộc một bản cài KHÁC còn sống (genh cũ không ghi ⇒ null). */
+  owned_by_other?: boolean | null;
+  last_run_at: string | null;
+  next_run_at: string | null;
+}
 /**
  * v0.1.37: lần cập nhật 'failed' vì genh nhận tín hiệu dừng (GH-E94B — máy tắt/khởi động lại/bị dừng tay) mà KHÔNG để
  * máy dở dang: `rolled_back` = chưa đụng gì / đã tự quay về bản cũ; `resume` = máy tắt sau khi đã đổi CSDL — giữ bản
@@ -261,6 +278,8 @@ export interface SystemUpdate {
    * v0.1.37 (F-34): lý do 'stalled' — `not_picked_up` = yêu cầu nằm quá 15 phút (watcher không chạy); `process_gone` =
    * 'running' mà tiến trình genh đã chết (máy khởi động lại / quá 60 phút không còn nhịp sống). null khi không 'stalled';
    * thiếu ở api cũ.
+   * v0.1.53 (F-99): `linger_off` = yêu cầu quá 15 phút mà linger đang tắt (tiến trình nền chỉ chạy khi có người đăng
+   * nhập); `watcher_failed` = trình nhận yêu cầu (gen-harness-update-request.path/.service) báo lỗi.
    */
   stalled_reason?: SystemUpdateStalledReason;
   /**
@@ -298,6 +317,14 @@ export interface SystemUpdate {
    * xử lý tay. null = không có bản bị chặn (hoặc api cũ) — Console rơi về dò chữ trong thông điệp genh.
    */
   blocked_rollback_failed?: boolean | null;
+  /**
+   * v0.1.53 (F-96): bản chính thức CÓ dấu promote, mới hơn bản đang chạy (tăng dần theo semver, ≤ 10), mỗi bản kèm
+   * `eligible_at` = lúc đủ thời gian chín 24 giờ (ISO) — lịch đêm cài bản cao nhất đã đủ hạn, không nhất thiết là
+   * `latest`. Thiếu ở api cũ ⇒ Console rơi về cách tính theo `published_at`.
+   */
+  nightly_candidates?: Array<{ tag: string; eligible_at: string }>;
+  /** v0.1.53 (F-99): trạng thái lịch tự cập nhật đêm; null = genh cũ chưa ghi run/nightly-status.json. */
+  nightly?: SystemUpdateNightly | null;
   /** v0.1.30: lần hỏi GitHub gần nhất thành công (ISO); null = chưa hỏi được. */
   checked_at?: string | null;
   /** v0.1.30: `POST /system/update/check` bị giới hạn (≤ 1 lần / 30 giây) — trả kết quả đang đệm. */
@@ -421,6 +448,28 @@ export interface SystemHealth {
     linger_required: boolean | null;
     docker_enabled: 'yes' | 'no' | 'unknown' | 'not_applicable';
     docker_mode: 'system' | 'rootless' | 'desktop' | 'unknown';
+    checked_at: string | null;
+  };
+  /**
+   * v0.1.53 (F-99): lịch tự cập nhật đêm (~03:00) có đang chạy không (genh ghi run/nightly-status.json). Chỉ có khi api
+   * có hộp thư với genh. 'warn' = có việc Sếp cần biết (kèm sự cố host.nightly, lý do ở `reason`); 'off' = Sếp đã chủ
+   * động tắt VÀ lịch không còn bật; 'other' = lịch đêm của máy do một bản cài KHÁC (còn sống) quản lý — bản cài này
+   * không đổi được lịch đó, không cảnh báo; 'unknown' = genh cũ chưa ghi tệp. `days_since` = số ngày tròn kể từ mốc
+   * max(lần chạy cuối, lúc bật). `linger` = 'not_applicable' khi lịch là crontab/LaunchAgent/Task Scheduler (linger
+   * không chi phối, không nhắc `enable-linger`).
+   */
+  nightly?: {
+    state: 'ok' | 'warn' | 'off' | 'other' | 'unknown';
+    /**
+     * Lý do 'warn' (null ở trạng thái khác; thiếu ở api cũ): 'disabled' = lịch đang tắt (không do Sếp tắt); 'stale' =
+     * bật mà im quá 36 giờ; 'opted_out_running' = Sếp đã tắt nhưng lịch VẪN bật (máy vẫn tự lên bản mới ~03:00).
+     */
+    reason?: 'disabled' | 'stale' | 'opted_out_running' | null;
+    last_run_at: string | null;
+    next_run_at: string | null;
+    days_since: number | null;
+    opted_out: boolean | null;
+    linger: SystemLinger;
     checked_at: string | null;
   };
 }

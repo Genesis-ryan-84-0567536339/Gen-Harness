@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -553,5 +554,306 @@ func TestFormatDurationVi(t *testing.T) {
 		if got := formatDurationVi(c.d); got != c.want {
 			t.Errorf("formatDurationVi(%v) = %q, muốn %q", c.d, got, c.want)
 		}
+	}
+}
+
+// ─── v0.1.53 (F-96): lịch đêm chọn bản đủ chín trong DANH SÁCH release ───────
+
+// listRel mô tả một release trong /releases?per_page=10 (mới trước).
+type listRel struct {
+	Tag        string
+	PromotedAt time.Time // zero ⇒ không có dấu promote trong ghi chú
+	Published  time.Time // published_at (zero ⇒ dùng PromotedAt)
+	Prerelease bool
+	Draft      bool
+}
+
+// listGH là GitHub giả có CẢ /releases?per_page=10 lẫn /releases/latest lẫn tải asset; ghi lại mọi đường dẫn.
+type listGH struct {
+	*httptest.Server
+	mu         sync.Mutex
+	paths      []string // path+query của mọi request tới API (không tính tải)
+	downloads  []string // path của mọi request tải
+	listStatus int
+}
+
+func fakeGitHubList(t *testing.T, rels []listRel, latest string) *listGH {
+	t.Helper()
+	gh := &listGH{listStatus: http.StatusOK}
+	asset := AssetName("linux", "amd64")
+	mux := http.NewServeMux()
+	meta := func(r listRel) map[string]any {
+		pub := r.Published
+		if pub.IsZero() {
+			pub = r.PromotedAt
+		}
+		body := "ghi chú " + r.Tag
+		if !r.PromotedAt.IsZero() {
+			body += "\n" + PromotedMarker(r.PromotedAt)
+		}
+		m := map[string]any{"tag_name": r.Tag, "prerelease": r.Prerelease, "draft": r.Draft, "body": body}
+		if !pub.IsZero() {
+			m["published_at"] = pub.UTC().Format(time.RFC3339)
+		}
+		return m
+	}
+	mux.HandleFunc("/repos/o/r/releases", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("User-Agent") == "" || r.Header.Get("Accept") != "application/vnd.github+json" {
+			t.Errorf("thiếu User-Agent/Accept trên /releases: %v", r.Header)
+		}
+		gh.mu.Lock()
+		status := gh.listStatus
+		gh.mu.Unlock()
+		if status != http.StatusOK {
+			http.Error(w, "boom", status)
+			return
+		}
+		out := []map[string]any{}
+		for _, rel := range rels {
+			out = append(out, meta(rel))
+		}
+		_ = json.NewEncoder(w).Encode(out)
+	})
+	mux.HandleFunc("/repos/o/r/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		for _, rel := range rels {
+			if rel.Tag == latest {
+				_ = json.NewEncoder(w).Encode(meta(rel))
+				return
+			}
+		}
+		http.NotFound(w, r)
+	})
+	for _, rel := range rels {
+		rel := rel
+		content := []byte("genh binary " + rel.Tag)
+		mux.HandleFunc("/o/r/releases/download/"+rel.Tag+"/checksums.txt", func(w http.ResponseWriter, r *http.Request) {
+			_, _ = fmt.Fprintf(w, "%s  %s\n", sumHex(content), asset)
+		})
+		mux.HandleFunc("/o/r/releases/download/"+rel.Tag+"/"+asset, func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write(content) })
+	}
+	gh.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gh.mu.Lock()
+		if strings.Contains(r.URL.Path, "/releases/download/") {
+			gh.downloads = append(gh.downloads, r.URL.Path)
+		} else {
+			gh.paths = append(gh.paths, r.URL.RequestURI())
+		}
+		gh.mu.Unlock()
+		mux.ServeHTTP(w, r)
+	}))
+	t.Cleanup(gh.Close)
+	return gh
+}
+
+func (g *listGH) askedList() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for _, p := range g.paths {
+		if strings.HasPrefix(p, "/repos/o/r/releases?") {
+			return true
+		}
+	}
+	return false
+}
+
+func nightlyOpts(t *testing.T, gh *listGH, current string, now time.Time) (Options, string) {
+	t.Helper()
+	exe := filepath.Join(t.TempDir(), "genh")
+	if err := os.WriteFile(exe, []byte("genh cu "+current), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return Options{
+		Owner: "o", Repo: "r", CurrentVersion: current, GOOS: "linux", GOARCH: "amd64",
+		APIBase: gh.URL, DownloadBase: gh.URL, ExecutablePath: exe,
+		MinAge: NightlyMinAge, Now: func() time.Time { return now }, Out: &strings.Builder{},
+	}, exe
+}
+
+var nowFixed = time.Date(2026, 10, 10, 3, 0, 0, 0, time.UTC)
+
+// Bản ra dồn dập: v0.1.54 mới 1 giờ, v0.1.53 đã chín 25 giờ ⇒ cài v0.1.53 (không "đói").
+func TestRun_LichDem_ChonBanDuChinTrongDanhSach(t *testing.T) {
+	gh := fakeGitHubList(t, []listRel{
+		{Tag: "v0.1.54", PromotedAt: nowFixed.Add(-1 * time.Hour)},
+		{Tag: "v0.1.53", PromotedAt: nowFixed.Add(-25 * time.Hour)},
+	}, "v0.1.54")
+	opts, exe := nightlyOpts(t, gh, "v0.1.52", nowFixed)
+	res, err := Run(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !res.Updated || res.To != "v0.1.53" || res.From != "v0.1.52" {
+		t.Fatalf("muốn cài v0.1.53, được %+v", res)
+	}
+	if !gh.askedList() || len(gh.downloads) != 2 {
+		t.Fatalf("phải hỏi danh sách và tải checksums+asset: paths=%v downloads=%v", gh.paths, gh.downloads)
+	}
+	for _, d := range gh.downloads {
+		if !strings.HasPrefix(d, "/o/r/releases/download/v0.1.53/") {
+			t.Errorf("phải tải đúng tag v0.1.53, được %s", d)
+		}
+	}
+	if b, _ := os.ReadFile(exe); string(b) != "genh binary v0.1.53" {
+		t.Fatalf("binary = %q", b)
+	}
+	if out := opts.Out.(*strings.Builder).String(); !strings.Contains(out, "genh: đã tự cập nhật lên v0.1.53 (bản cũ v0.1.52).") {
+		t.Errorf("log: %q", out)
+	}
+}
+
+func TestRun_LichDem_ChonBanSemverCaoNhatTrongCacBanChin(t *testing.T) {
+	gh := fakeGitHubList(t, []listRel{
+		{Tag: "v0.1.55", PromotedAt: nowFixed.Add(-26 * time.Hour)},
+		{Tag: "v0.1.54", PromotedAt: nowFixed.Add(-90 * time.Hour)},
+		{Tag: "v0.1.53", PromotedAt: nowFixed.Add(-100 * time.Hour)},
+	}, "v0.1.55")
+	opts, _ := nightlyOpts(t, gh, "v0.1.52", nowFixed)
+	if res, err := Run(context.Background(), opts); err != nil || res.To != "v0.1.55" {
+		t.Fatalf("phải chọn bản cao nhất đủ chín: %+v %v", res, err)
+	}
+	// Đúng biên (tuổi == MinAge) thì cho cài.
+	gh = fakeGitHubList(t, []listRel{{Tag: "v0.1.53", PromotedAt: nowFixed.Add(-NightlyMinAge)}}, "v0.1.53")
+	opts, _ = nightlyOpts(t, gh, "v0.1.52", nowFixed)
+	if res, err := Run(context.Background(), opts); err != nil || !res.Updated {
+		t.Fatalf("đúng biên 24 giờ phải cài: %+v %v", res, err)
+	}
+}
+
+func TestRun_LichDem_BoQuaBanThuNhapVaThieuDau(t *testing.T) {
+	gh := fakeGitHubList(t, []listRel{
+		{Tag: "v0.1.57", PromotedAt: nowFixed.Add(-40 * time.Hour), Prerelease: true},                         // bản thử
+		{Tag: "v0.1.56", PromotedAt: nowFixed.Add(-40 * time.Hour), Draft: true},                              // bản nháp
+		{Tag: "v0.1.55", Published: nowFixed.Add(-40 * time.Hour)},                                            // THIẾU dấu promote
+		{Tag: "v0.1.53", PromotedAt: nowFixed.Add(-30 * time.Hour), Published: nowFixed.Add(-80 * time.Hour)}, // hợp lệ
+	}, "v0.1.55")
+	opts, _ := nightlyOpts(t, gh, "v0.1.52", nowFixed)
+	res, err := Run(context.Background(), opts)
+	if err != nil || !res.Updated || res.To != "v0.1.53" {
+		t.Fatalf("bản thử/nháp/thiếu dấu phải bị bỏ, cài v0.1.53: %+v %v", res, err)
+	}
+
+	// Chỉ có bản thiếu dấu ⇒ bỏ qua cho an toàn (không hứa "đợi đủ 24 giờ" vì đợi cũng không tự cài).
+	gh = fakeGitHubList(t, []listRel{{Tag: "v0.1.55", Published: nowFixed.Add(-40 * time.Hour)}}, "v0.1.55")
+	opts, exe := nightlyOpts(t, gh, "v0.1.52", nowFixed)
+	res, err = Run(context.Background(), opts)
+	if err != nil || res.Updated || !res.Skipped || res.Deferred {
+		t.Fatalf("thiếu dấu promote: %+v %v", res, err)
+	}
+	if !strings.Contains(res.Reason, "chưa có dấu promote") || !strings.Contains(res.Reason, installNowHint) || len(gh.downloads) != 0 {
+		t.Errorf("reason=%q downloads=%v", res.Reason, gh.downloads)
+	}
+	if b, _ := os.ReadFile(exe); string(b) != "genh cu v0.1.52" {
+		t.Error("không được thay binary")
+	}
+}
+
+// Tất cả < 24 giờ ⇒ Deferred (đợi đêm sau), Reason nêu bản mới nhất + tuổi, KHÔNG tải gì.
+func TestRun_LichDem_TatCaChuaChin_Deferred(t *testing.T) {
+	gh := fakeGitHubList(t, []listRel{
+		{Tag: "v0.1.54", PromotedAt: nowFixed.Add(-1 * time.Hour)},
+		{Tag: "v0.1.53", PromotedAt: nowFixed.Add(-23*time.Hour - 30*time.Minute)},
+	}, "v0.1.54")
+	opts, exe := nightlyOpts(t, gh, "v0.1.52", nowFixed)
+	res, err := Run(context.Background(), opts)
+	if err != nil || res.Updated || !res.Skipped || !res.Deferred {
+		t.Fatalf("muốn Skipped+Deferred: %+v %v", res, err)
+	}
+	for _, want := range []string{"v0.1.54", "mới phát hành 1 giờ trước", "đợi đủ 24 giờ", installNowHint} {
+		if !strings.Contains(res.Reason, want) {
+			t.Errorf("Reason thiếu %q: %s", want, res.Reason)
+		}
+	}
+	if len(gh.downloads) != 0 {
+		t.Errorf("hoãn thì KHÔNG tải gì: %v", gh.downloads)
+	}
+	if b, _ := os.ReadFile(exe); string(b) != "genh cu v0.1.52" {
+		t.Error("không được thay binary")
+	}
+	if out := opts.Out.(*strings.Builder).String(); !strings.Contains(out, "đợi đủ 24 giờ") {
+		t.Errorf("dòng log (cả khi Quiet) phải nói đợi: %q", out)
+	}
+
+	// Đã ở bản mới nhất ⇒ không Deferred.
+	opts, _ = nightlyOpts(t, gh, "v0.1.54", nowFixed)
+	if res, err := Run(context.Background(), opts); err != nil || res.Updated || res.Deferred || res.Reason != "đã ở bản mới nhất" {
+		t.Fatalf("đã mới nhất: %+v %v", res, err)
+	}
+}
+
+// MinAge == 0 (nút "Cập nhật ngay", gõ tay) GIỮ đường /releases/latest — không hỏi danh sách.
+func TestRun_MinAge0_ChiGoiReleasesLatest(t *testing.T) {
+	gh := fakeGitHubList(t, []listRel{
+		{Tag: "v0.1.54", PromotedAt: nowFixed.Add(-1 * time.Hour)},
+		{Tag: "v0.1.53", PromotedAt: nowFixed.Add(-25 * time.Hour)},
+	}, "v0.1.54")
+	opts, _ := nightlyOpts(t, gh, "v0.1.52", nowFixed)
+	opts.MinAge = 0
+	res, err := Run(context.Background(), opts)
+	if err != nil || !res.Updated || res.To != "v0.1.54" {
+		t.Fatalf("MinAge=0 phải cài ngay bản mới nhất: %+v %v", res, err)
+	}
+	if gh.askedList() {
+		t.Fatalf("MinAge=0 KHÔNG được gọi /releases?: %v", gh.paths)
+	}
+	if len(gh.paths) != 1 || gh.paths[0] != "/repos/o/r/releases/latest" {
+		t.Errorf("chỉ gọi /releases/latest: %v", gh.paths)
+	}
+}
+
+// Danh sách lỗi (500) ⇒ rơi về /releases/latest + một dòng log.
+func TestRun_LichDem_DanhSachLoi_RoiVeLatest(t *testing.T) {
+	gh := fakeGitHubList(t, []listRel{{Tag: "v0.1.53", PromotedAt: nowFixed.Add(-25 * time.Hour)}}, "v0.1.53")
+	gh.listStatus = http.StatusInternalServerError
+	opts, _ := nightlyOpts(t, gh, "v0.1.52", nowFixed)
+	res, err := Run(context.Background(), opts)
+	if err != nil || !res.Updated || res.To != "v0.1.53" {
+		t.Fatalf("danh sách lỗi ⇒ dùng latest: %+v %v", res, err)
+	}
+	if !gh.askedList() {
+		t.Error("phải thử danh sách trước")
+	}
+	out := opts.Out.(*strings.Builder).String()
+	if n := strings.Count(out, "không hỏi được danh sách bản phát hành"); n != 1 {
+		t.Errorf("đúng 1 dòng log về lỗi danh sách, được %d:\n%s", n, out)
+	}
+
+	// Rơi về latest mà bản đó chưa chín ⇒ vẫn bị cổng 24 giờ hoãn như cũ.
+	gh = fakeGitHubList(t, []listRel{{Tag: "v0.1.54", PromotedAt: nowFixed.Add(-1 * time.Hour)}}, "v0.1.54")
+	gh.listStatus = http.StatusBadGateway
+	opts, _ = nightlyOpts(t, gh, "v0.1.52", nowFixed)
+	if res, err := Run(context.Background(), opts); err != nil || !res.Deferred || res.Updated {
+		t.Fatalf("latest chưa chín phải bị hoãn: %+v %v", res, err)
+	}
+}
+
+func TestPickRelease(t *testing.T) {
+	mk := func(tag string, age time.Duration, marker bool) releaseMeta {
+		m := releaseMeta{TagName: tag, PublishedAt: nowFixed.Add(-age)}
+		if marker {
+			m.Body = PromotedMarker(nowFixed.Add(-age))
+		}
+		return m
+	}
+	list := []releaseMeta{mk("v0.1.55", time.Hour, true), mk("v0.1.54", 30*time.Hour, true), mk("v0.1.53", 50*time.Hour, true), mk("v0.1.52", 90*time.Hour, true)}
+	got, ok := pickRelease(list, "v0.1.52", 24*time.Hour, nowFixed)
+	if !ok || got.TagName != "v0.1.54" {
+		t.Fatalf("pick = %q %v", got.TagName, ok)
+	}
+	if _, ok := pickRelease(list, "v0.1.54", 24*time.Hour, nowFixed); ok {
+		t.Error("v0.1.55 mới 1 giờ, chưa chín ⇒ không chọn")
+	}
+	if _, ok := pickRelease(list, "v0.1.55", 24*time.Hour, nowFixed); ok {
+		t.Error("đã ở bản cao nhất")
+	}
+	if _, ok := pickRelease([]releaseMeta{mk("v0.1.60", 99*time.Hour, false)}, "v0.1.52", 24*time.Hour, nowFixed); ok {
+		t.Error("thiếu dấu promote ⇒ không chọn")
+	}
+	// Dấu promote MUỘN hơn published_at thì tuổi tính từ dấu.
+	late := releaseMeta{TagName: "v0.1.60", PublishedAt: nowFixed.Add(-99 * time.Hour), Body: PromotedMarker(nowFixed.Add(-2 * time.Hour))}
+	if _, ok := pickRelease([]releaseMeta{late}, "v0.1.52", 24*time.Hour, nowFixed); ok {
+		t.Error("promote 2 giờ trước ⇒ chưa chín dù published_at đã cũ")
+	}
+	if n, any := newestNewer(list, "v0.1.52"); !any || n.TagName != "v0.1.55" {
+		t.Errorf("newestNewer = %q %v", n.TagName, any)
 	}
 }

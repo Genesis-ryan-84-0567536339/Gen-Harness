@@ -63,7 +63,7 @@ func TestHandleRequestUpdateArgs_CapNhatNgayKhongBiChan(t *testing.T) {
 // Đi trọn đường lịch đêm: lấy đúng các cờ timer truyền cho `genh update`
 // (dòng crontab do internal/autoupdate sinh) → parse → thời gian chín 24 giờ.
 func TestLichDem_ApThoiGianChin24h(t *testing.T) {
-	line := autoupdate.CrontabLine("/opt/genh/bin/genh", "/tmp/auto-update.log", 7)
+	line := autoupdate.CrontabLine("/opt/genh/bin/genh", "/tmp/auto-update.log", 7, autoupdate.NightlyJob{InstallDir: "/home/o/.gen-harness", Port: 9443})
 	fields := strings.Fields(line)
 	var args []string
 	inUpdate := false
@@ -84,6 +84,10 @@ func TestLichDem_ApThoiGianChin24h(t *testing.T) {
 	f, err := parseUpdateFlags(args)
 	if err != nil {
 		t.Fatalf("parse cờ lịch đêm %q lỗi: %v", args, err)
+	}
+	// v0.1.53: lịch đêm mang --install-dir/--port của bản cài (không chỉ `update --yes --quiet`).
+	if f.installDir != "/home/o/.gen-harness" || f.port != 9443 {
+		t.Fatalf("lịch đêm phải mang --install-dir/--port: %+v", f)
 	}
 	if got := selfUpdateMinAge(f.yes, f.ifRequested); got != selfupdate.NightlyMinAge {
 		t.Fatalf("lịch đêm (%q) phải áp thời gian chín %v, được %v", args, selfupdate.NightlyMinAge, got)

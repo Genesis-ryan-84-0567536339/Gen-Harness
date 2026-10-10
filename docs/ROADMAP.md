@@ -1,4 +1,4 @@
-# Gen-Harness — Lộ trình tổng thể (cập nhật 10/10/2026, sau v0.1.52)
+# Gen-Harness — Lộ trình tổng thể (cập nhật 10/10/2026, sau v0.1.53)
 
 Nguồn chuẩn tiến độ. Mỗi đợt = 1 PR = 1 bản phát hành. CI xanh mới tạo bản thử (prerelease); E2E cài thật xanh mới tự
 nâng thành bản chính thức (latest); lịch tự cập nhật đêm đợi bản chính thức ra đủ 24 giờ. genh chỉ kiểm SHA-256 theo
@@ -28,6 +28,7 @@ Chi tiết từng bản ở [CHANGELOG.md](../CHANGELOG.md); tóm tắt theo ch�
   khoá cấu hình nhạy cảm, nhân viên & điện thoại vào được (`genh remote`).
 - **v0.1.47 – v0.1.50 (09/10)**: Facebook ghi lát 1 (trả lời/nhắn có xác nhận), bản build tái lập, Gen đọc lịch/mail/việc/Drive qua Gen-hub (QD-16),
   **Gen nhớ + Gen ghi Kho có xác nhận và mã PIN (QD-18, F-81, F-87)**. Cùng đợt: đồng bộ tài liệu (F-90, F-69, F-47, F-91, F-92, F-42, F-39).
+- **v0.1.51 – v0.1.53 (10/10)**: bản phản ứng — cổng phát hành dọn ảnh cũ (v0.1.51, v0.1.52) và **tự cập nhật đêm tự lành + trung thực** (v0.1.53, F-93…F-100); xem mục Bản phản ứng bên dưới.
 
 ## Tiếp theo (sau v0.1.50)
 Kế hoạch tổng của đợt kiểm toán kết thúc ở v0.1.50; không còn đợt đánh số sẵn. Thứ tự đề xuất:
@@ -63,6 +64,7 @@ Việc đã hứa hoặc đã biết mà chưa làm. Mỗi dòng ghi điều ki�
 | 16 | F-84 phần còn lại (duyệt nháp, đề xuất Deal/Vụ việc, stream), F-68 mở Gen cho vai trò khác | Hoãn; chờ có nhân viên dùng thật |
 | 17 | Hạ tầng/CI | Gói apt trong Dockerfile chưa ghim phiên bản; PR Renovate chưa có lịch tự động; ô E2E Fedora thật (VM) chưa có; sinh type từ OpenAPI hoãn; `ops.action_log` hạn lưu (vướng chuỗi băm); F-38 phần còn lại |
 | 18 | Nghiệm thu thật chưa làm | Tailscale/điện thoại trên máy Fedora của Boss (v0.1.46); canary `--live` agy (v0.1.38/39); Facebook trả lời (v0.1.47) |
+| 19 | **H-b** (v0.1.53): timer `gen-harness-update.timer` mất lịch khi `daemon-reload`/`enable` chạy từ bên trong service đêm | **Chưa tái hiện được** — bằng mã lẫn bằng `e2e-nightly-real` (systemd thật có linger: sau lần chạy service đêm timer vẫn enabled + active + có lần kế tiếp). H-a và H-c đã tái hiện và sửa; tự lành bao cả ca này nếu xảy ra trên máy thật. Chi tiết: [v0.1.53.md](releases/v0.1.53.md) |
 
 ## Bản phản ứng (hotfix)
 Các bản sửa nóng thật, không nằm trong kế hoạch đợt. Đối chiếu `git log origin/main` và nhánh `hotfix/*`:
@@ -78,6 +80,7 @@ Các bản sửa nóng thật, không nằm trong kế hoạch đợt. Đối ch
 | 09/10/2026 | **Sửa test heartbeat genh chập chờn** (PR #59) | `readStateFile` báo "tệp bị thay giữa chừng" khi nhịp vừa ghi tạm-rồi-rename (CI đỏ ~1/100); nay chỉ lỗi đó được thử lại tối đa 5 lần × 5ms, symlink/hard link/sai chủ vẫn từ chối ngay. Không tăng VERSION, đi cùng v0.1.50. [Chi tiết](releases/v0.1.50.md) |
 | 10/10/2026 | **Bản phản ứng v0.1.51** (`claude/hotfix-prune-digest`) | Cổng phát hành v0.1.50 đỏ ở bước "chỉ còn ảnh của bản hiện tại và bản liền trước": `pruneOldImages` giữ theo IMAGE ID nên digest cũ của ảnh trùng nội dung (`gen-harness-db`, 3 digest cùng ID) không bao giờ bị gỡ. Sửa theo tham chiếu; thay v0.1.50 chưa promote. [Chi tiết](releases/v0.1.51.md) |
 | 10/10/2026 | **Bản phản ứng 2 — v0.1.52** (`claude/hotfix-prune-digest-2`) | Cổng phát hành v0.1.51 vẫn đỏ ở bước giữ 2 bản ảnh: genh đã gọi `rmi …@digest` nhưng Docker từ chối (`isSingleReference`: mọi digest cùng repo là MỘT tham chiếu, container db đang chạy). Nay `rmi -f` cho digest mà ảnh còn được tham chiếu giữ; thay v0.1.51 chưa promote. [Chi tiết](releases/v0.1.52.md) |
+| 10/10/2026 | **Bản phản ứng v0.1.53** (`claude/v0153`) | Máy Boss kẹt v0.1.44 từ 03/10 đến 09/10: lịch tự cập nhật đêm bị tắt mà `genh auto-update status` đọc sai và không ai biết, nút Cập nhật ngay trên Console chỉ nói "chưa nhận yêu cầu". Lịch đêm nay tự lành (trừ khi Sếp đã chủ động tắt), `status` nói thật, kiểm linger, chọn bản đủ 24 giờ từ danh sách, `ConsumeRequest` không nuốt lỗi xoá (GH-E94C), bản cài phụ không gỡ lịch của bản chính; Console nói rõ nguyên nhân; E2E chạy thật timer. [Chi tiết](releases/v0.1.53.md) |
 
 Hai bản **phản ứng theo yêu cầu của Boss** (tính năng, không phải sửa nóng): v0.1.31 (01/10 "không thấy model và nhóm model nào để chọn") và v0.1.32 (01/10 "high là mức suy nghĩ, không phải tên model").
 

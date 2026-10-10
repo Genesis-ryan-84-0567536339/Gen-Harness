@@ -147,6 +147,12 @@ class _GitHubResp:
                 "published_at": "2026-09-25T00:00:00Z", "body": f"- Nút cập nhật\n\n{MARK}\n"}
 
 
+class _GitHubListResp(_GitHubResp):
+    @staticmethod
+    def json() -> list[dict[str, object]]:  # type: ignore[override]
+        return [_GitHubResp.json()]
+
+
 class _GitHubClient:
     """httpx.AsyncClient giả — trả release có dấu promote, không gọi mạng."""
 
@@ -160,7 +166,10 @@ class _GitHubClient:
         return None
 
     async def get(self, url: str) -> _GitHubResp:
-        assert url.endswith("/releases/latest")
+        # v0.1.53 (F-96): Console hỏi danh sách `/releases?per_page=10` trước, rơi về `/releases/latest` khi lỗi.
+        assert url.endswith(("/releases?per_page=10", "/releases/latest"))
+        if url.endswith("/releases?per_page=10"):
+            return _GitHubListResp()
         return _GitHubResp()
 
 

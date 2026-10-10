@@ -10,6 +10,10 @@
 //   - macOS: LaunchAgent (~/Library/LaunchAgents).
 //   - Windows: Task Scheduler (schtasks).
 //
+// v0.1.53: tên unit/Label/marker là CHUNG cho mọi bản cài của người dùng nên mỗi lịch
+// ghi rõ bản cài chủ (owner.go) và bản cài khác không gỡ/ghi đè lịch của bản còn sống;
+// lịch đêm bị tắt/mất thì tự lành (nightly.go) trừ khi Sếp đã chủ động tắt.
+//
 // Phần SINH NỘI DUNG tệp/lệnh (unit systemd, dòng crontab, plist,
 // args schtasks) là hàm THUẦN trong content.go — test được trên MỌI hệ điều
 // hành (không cần build tag), không gọi tiến trình con nào. Phần GỌI THẬT
@@ -27,6 +31,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
+	"time"
 )
 
 // TaskName là tên định danh dùng ở MỌI hệ điều hành (tên service/timer
@@ -85,6 +91,51 @@ type Deps struct {
 	// --user hoạt động — đó là lý do daemon-reload là phép thử thật sự,
 	// LookPath chỉ là bước lọc nhanh trước).
 	LookPath func(string) (string, error)
+
+	// InstallDir (v0.1.53, F-98) là bản cài ĐANG thao tác. Lịch/unit là CHUNG cho
+	// mọi bản cài của người dùng: khác rỗng thì Enable*/Disable* kiểm lịch đã cài
+	// có thuộc một bản cài KHÁC còn sống không (owner.go) — có thì không gỡ,
+	// không ghi đè. Rỗng = không bảo vệ (hành vi cũ).
+	InstallDir string
+	// Nightly là những gì lịch tự cập nhật đêm cần (cổng, bản cài, biến môi
+	// trường) — xem NightlyJob. Nightly.InstallDir rỗng thì lấy InstallDir.
+	Nightly NightlyJob
+	// UID cho `loginctl show-user` — "" dùng os.Getuid().
+	UID string
+	// Now cho test (tính "lần kế tiếp") — nil dùng time.Now.
+	Now func() time.Time
+	// Location để đọc mốc giờ systemd in theo múi giờ máy (systemd < 247 không
+	// có --timestamp=unix) — nil dùng time.Local.
+	Location *time.Location
+}
+
+func (d Deps) job() NightlyJob {
+	j := d.Nightly
+	if j.InstallDir == "" {
+		j.InstallDir = d.InstallDir
+	}
+	return j
+}
+
+func (d Deps) now() time.Time {
+	if d.Now != nil {
+		return d.Now()
+	}
+	return time.Now()
+}
+
+func (d Deps) location() *time.Location {
+	if d.Location != nil {
+		return d.Location
+	}
+	return time.Local
+}
+
+func (d Deps) uid() string {
+	if d.UID != "" {
+		return d.UID
+	}
+	return strconv.Itoa(os.Getuid())
 }
 
 func (d Deps) runner() Runner {
@@ -115,20 +166,65 @@ func (d Deps) homeDir() (string, error) {
 	return os.UserHomeDir()
 }
 
-// Status là kết quả của Status(): Enabled báo đã bật lịch tự động hay chưa,
-// Detail mô tả cơ chế đang dùng (systemd timer/crontab/LaunchAgent/Task
-// Scheduler) cho `genh auto-update status` in ra.
+// Status là kết quả của GetStatus(): trạng thái TRUNG THỰC của lịch tự cập nhật
+// đêm (v0.1.53, F-94) — không chỉ "BẬT/TẮT" mà còn đang chạy hay không, lần chạy
+// gần nhất/kế tiếp, linger.
 type Status struct {
+	// Enabled = lịch thật sự sẽ chạy: systemd UnitFileState=enabled VÀ
+	// ActiveState=active; cron/launchd/schtasks: có dòng/đã nạp/chưa Disabled.
 	Enabled bool
-	Detail  string
+	// Mechanism: systemd | cron | launchd | schtasks | "" (không có lịch nào).
+	Mechanism string
+	// UnitPresent: có unit/dòng lịch nào đã cài (systemd: LoadState≠not-found).
+	UnitPresent bool
+	// UnitFileState (systemd): enabled | disabled | masked | static | linked… ("" nếu không rõ).
+	UnitFileState string
+	// Active (systemd): active | inactive | failed | … ("" nếu không áp dụng/không rõ).
+	Active string
+	// LastRun/NextRun: zero nếu không rõ.
+	LastRun, NextRun time.Time
+	// Linger: yes | no | unknown | not_applicable.
+	Linger string
+	// Owner là bản cài chủ của lịch (nếu biết); OwnedByOther: bản cài chủ khác
+	// Deps.InstallDir và còn sống — lịch này KHÔNG phải của bản đang hỏi.
+	Owner        string
+	OwnedByOther bool
+	// Detail mô tả cơ chế/trạng thái bằng tiếng Việt cho `genh auto-update status`.
+	Detail string
 }
 
-// Enable bật lịch tự động theo đúng hệ điều hành hiện tại — trả về một dòng
+// EnableResult là kết quả Enable.
+type EnableResult struct {
+	// Msg là dòng mô tả NGẮN ("Đã bật tự cập nhật hằng đêm lúc ~03:00 …").
+	Msg string
+	// Mechanism: systemd | cron | launchd | schtasks.
+	Mechanism string
+	// Linger (chỉ systemd --user): yes | no | unknown; "" ở cơ chế khác.
+	Linger string
+	// Warning: cảnh báo linger (LingerWarning) khi linger đang tắt/không xác nhận
+	// được — "" nếu không có. cmd in nổi bật khi stdout là TTY.
+	Warning string
+}
+
+// Text là Msg + (nếu có) cảnh báo ở dòng kế.
+func (r EnableResult) Text() string {
+	if r.Warning == "" {
+		return r.Msg
+	}
+	return r.Msg + "\n" + r.Warning
+}
+
+// LingerWarning là cảnh báo khi linger (systemd --user chạy cả khi không ai
+// đăng nhập) đang tắt. Lệnh sửa KHÔNG có dấu chấm ngay sau.
+const LingerWarning = "CẢNH BÁO: linger đang TẮT — lịch tự cập nhật đêm và nút Cập nhật ngay chỉ chạy khi có người đăng nhập máy. Chạy một lần: sudo loginctl enable-linger $USER"
+
+// Enable bật lịch tự động theo đúng hệ điều hành hiện tại — kết quả có một dòng
 // mô tả NGẮN cho `genh install`/`genh auto-update enable` in ra (đúng yêu
-// cầu: 1 dòng rõ ràng "Đã bật tự cập nhật hằng đêm…").
-func Enable(ctx context.Context, deps Deps) (string, error) {
+// cầu: 1 dòng rõ ràng "Đã bật tự cập nhật hằng đêm…"). Lịch đang thuộc bản cài
+// khác còn sống (Deps.InstallDir) ⇒ lỗi *OwnedByOtherError, không ghi đè.
+func Enable(ctx context.Context, deps Deps) (EnableResult, error) {
 	if deps.GenhPath == "" {
-		return "", fmt.Errorf("thiếu đường dẫn binary genh")
+		return EnableResult{}, fmt.Errorf("thiếu đường dẫn binary genh")
 	}
 	switch deps.goos() {
 	case "linux":
@@ -138,11 +234,13 @@ func Enable(ctx context.Context, deps Deps) (string, error) {
 	case "windows":
 		return enableWindows(ctx, deps)
 	default:
-		return "", fmt.Errorf("chưa hỗ trợ tự cập nhật theo lịch trên %s", deps.goos())
+		return EnableResult{}, fmt.Errorf("chưa hỗ trợ tự cập nhật theo lịch trên %s", deps.goos())
 	}
 }
 
-// Disable tắt lịch tự động — KHÔNG lỗi nếu vốn chưa bật (idempotent).
+// Disable tắt lịch tự động — KHÔNG lỗi nếu vốn chưa bật (idempotent). Lịch
+// thuộc bản cài khác còn sống (Deps.InstallDir) thì KHÔNG gỡ, trả câu "Giữ
+// nguyên lịch … của bản cài <dir> (không phải bản đang gỡ)."
 func Disable(ctx context.Context, deps Deps) (string, error) {
 	switch deps.goos() {
 	case "linux":
@@ -170,13 +268,27 @@ func GetStatus(ctx context.Context, deps Deps) (Status, error) {
 	}
 }
 
+// RefreshReport là kết quả RefreshUnitsReport: Changed = đã ghi lại unit; What =
+// những gì đã thêm/đổi (cho dòng thông báo).
+type RefreshReport struct {
+	Changed bool
+	What    []string
+}
+
 // RefreshUnits (v0.1.37) cập nhật unit lịch đêm ĐÃ CÀI cho khớp bản genh này
 // (unit chỉ được ghi lúc install/enable — máy cài từ bản cũ sẽ thiếu
-// KillMode=mixed/TimeoutStopSec). Chỉ Linux (systemd --user) làm việc; hệ điều
+// KillMode=mixed/TimeoutStopSec, và từ v0.1.53 cả --install-dir/--port/
+// Environment=GEN_HARNESS_HOME). Chỉ Linux (systemd --user) làm việc; hệ điều
 // hành khác trả (false, nil). Không bật/tắt lịch. Trả true nếu đã ghi lại.
 func RefreshUnits(ctx context.Context, deps Deps) (bool, error) {
+	r, err := RefreshUnitsReport(ctx, deps)
+	return r.Changed, err
+}
+
+// RefreshUnitsReport như RefreshUnits nhưng nói rõ đã đổi những gì.
+func RefreshUnitsReport(ctx context.Context, deps Deps) (RefreshReport, error) {
 	if deps.goos() != "linux" || deps.GenhPath == "" {
-		return false, nil
+		return RefreshReport{}, nil
 	}
 	return refreshUnitsLinux(ctx, deps)
 }

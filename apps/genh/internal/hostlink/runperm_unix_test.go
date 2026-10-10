@@ -185,8 +185,8 @@ func TestForeignOwnerRequestsIgnored(t *testing.T) {
 		t.Fatalf("update-status = %+v, %v", st, err)
 	}
 	write(RequestPath(root), `{"requested_at":"x"}`)
-	if ConsumeRequest(root) {
-		t.Fatal("ConsumeRequest phải bỏ qua tệp yêu cầu của uid lạ")
+	if c, err := ConsumeRequest(root); c || err != nil {
+		t.Fatalf("ConsumeRequest phải bỏ qua tệp yêu cầu của uid lạ: consumed=%v err=%v", c, err)
 	}
 	if _, err := os.Lstat(RequestPath(root)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("tệp yêu cầu lạ phải bị xoá: %v", err)
@@ -218,8 +218,11 @@ func TestForeignOwnerRequestsIgnored(t *testing.T) {
 	// Chủ hợp lệ (mặc định: người chạy genh) → nhận.
 	withOwnerAllowed(t, func(_ string, uid uint32) bool { return uid == uint32(os.Getuid()) })
 	write(RequestPath(root), `{"requested_at":"x"}`)
-	if !HasRequest(root) || !ConsumeRequest(root) {
+	if !HasRequest(root) {
 		t.Fatal("tệp yêu cầu hợp lệ phải được nhận")
+	}
+	if c, err := ConsumeRequest(root); !c || err != nil {
+		t.Fatalf("tệp yêu cầu hợp lệ phải được nhận: consumed=%v err=%v", c, err)
 	}
 }
 
@@ -244,7 +247,7 @@ func TestUpdateRequestSymlinkAndHardlinkIgnored(t *testing.T) {
 	if err := os.Link(other, RequestPath(root)); err != nil {
 		t.Fatal(err)
 	}
-	if ConsumeRequest(root) {
+	if c, _ := ConsumeRequest(root); c {
 		t.Fatal("hard link update.json không phải yêu cầu hợp lệ")
 	}
 }

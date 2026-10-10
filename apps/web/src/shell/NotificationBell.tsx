@@ -33,6 +33,8 @@ const KIND_ICON: Record<string, string> = {
   'disk.low': 'ph ph-hard-drives',
   // v0.1.37 (F-73): máy chủ chưa tự chạy lại Gen-Harness khi bật máy.
   'host.autostart': 'ph ph-power',
+  // v0.1.53 (F-99): lịch tự cập nhật đêm không chạy.
+  'host.nightly': 'ph ph-calendar-x',
   // v0.1.40 (F-12, F-2): bản sao ngoài máy quá hạn / lỗi; việc nền chạy quá giờ.
   'offsite.stale': 'ph ph-hard-drives',
   'offsite.failed': 'ph ph-warning-circle',

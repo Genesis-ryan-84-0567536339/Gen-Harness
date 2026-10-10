@@ -6,14 +6,17 @@ import (
 )
 
 func TestSystemdServiceUnit_ContainsGenhPathAndLogFile(t *testing.T) {
-	unit := SystemdServiceUnit("/home/o/.gen-harness/bin/genh", "/home/o/.gen-harness/logs/auto-update.log")
+	unit := SystemdServiceUnit("/home/o/.gen-harness/bin/genh", "/home/o/.gen-harness/logs/auto-update.log", NightlyJob{})
 	mustContain(t, unit, "/home/o/.gen-harness/bin/genh update --yes --quiet")
+	if strings.Contains(unit, "--install-dir") || strings.Contains(unit, "GEN_HARNESS_HOME") || strings.Contains(unit, "--port") {
+		t.Errorf("không có job thì unit y như cũ (không --install-dir/--port/Environment):\n%s", unit)
+	}
 	mustContain(t, unit, "StandardOutput=append:/home/o/.gen-harness/logs/auto-update.log")
 	mustContain(t, unit, "Type=oneshot")
 }
 
 func TestSystemdServiceUnit_QuotesPathWithSpaces(t *testing.T) {
-	unit := SystemdServiceUnit("/home/o dir/genh", "/tmp/log")
+	unit := SystemdServiceUnit("/home/o dir/genh", "/tmp/log", NightlyJob{})
 	mustContain(t, unit, `"/home/o dir/genh" update --yes --quiet`)
 }
 
@@ -25,7 +28,7 @@ func TestSystemdTimerUnit_DailyAt3AMPersistent(t *testing.T) {
 }
 
 func TestCrontabLine_DailyAt3(t *testing.T) {
-	line := CrontabLine("/home/o/.gen-harness/bin/genh", "/tmp/log", 7)
+	line := CrontabLine("/home/o/.gen-harness/bin/genh", "/tmp/log", 7, NightlyJob{})
 	want := "7 3 * * * /home/o/.gen-harness/bin/genh update --yes --quiet >> /tmp/log 2>&1"
 	if line != want {
 		t.Fatalf("CrontabLine = %q, muốn %q", line, want)
@@ -33,7 +36,7 @@ func TestCrontabLine_DailyAt3(t *testing.T) {
 }
 
 func TestCrontabLine_MinuteWraps(t *testing.T) {
-	line := CrontabLine("genh", "/tmp/log", 45) // 45 % 30 = 15
+	line := CrontabLine("genh", "/tmp/log", 45, NightlyJob{}) // 45 % 30 = 15
 	if !contains(line, "15 3 * * *") {
 		t.Fatalf("muốn phút lẻ hoá về 0-29, được %q", line)
 	}
@@ -85,7 +88,7 @@ func TestMergeCrontab_RemoveOnly_EmptyResultWhenNothingElse(t *testing.T) {
 }
 
 func TestLaunchdPlist_ContainsScheduleAndArgs(t *testing.T) {
-	plist := LaunchdPlist("/Users/o/.gen-harness/bin/genh", "/Users/o/.gen-harness/logs/auto-update.log", 12)
+	plist := LaunchdPlist("/Users/o/.gen-harness/bin/genh", "/Users/o/.gen-harness/logs/auto-update.log", 12, NightlyJob{})
 	mustContain(t, plist, "<string>/Users/o/.gen-harness/bin/genh</string>")
 	mustContain(t, plist, "<string>update</string>")
 	mustContain(t, plist, "<string>--yes</string>")
@@ -96,7 +99,7 @@ func TestLaunchdPlist_ContainsScheduleAndArgs(t *testing.T) {
 }
 
 func TestSchtasksCreateArgs_DailyAt3(t *testing.T) {
-	args := SchtasksCreateArgs(`C:\Users\o\genh.exe`, `C:\Users\o\log.txt`)
+	args := SchtasksCreateArgs(`C:\Users\o\genh.exe`, `C:\Users\o\log.txt`, NightlyJob{})
 	joined := ""
 	for _, a := range args {
 		joined += a + "|"
@@ -114,7 +117,7 @@ func TestSchtasksDeleteAndQueryArgs_UseTaskName(t *testing.T) {
 		t.Fatalf("SchtasksDeleteArgs = %v", del)
 	}
 	q := SchtasksQueryArgs()
-	if q[0] != "/Query" || q[2] != TaskName {
+	if q[0] != "/Query" || q[2] != TaskName || q[len(q)-1] != "/V" {
 		t.Fatalf("SchtasksQueryArgs = %v", q)
 	}
 }
@@ -165,7 +168,7 @@ func countOccurrences(haystack, needle string) int {
 // chờ 15 phút cho phần quay về bản cũ.
 func TestSystemdServiceUnits_KillModeMixed_TimeoutStop900(t *testing.T) {
 	units := map[string]string{
-		"lịch đêm":        SystemdServiceUnit("/g/genh", "/g/log"),
+		"lịch đêm":        SystemdServiceUnit("/g/genh", "/g/log", NightlyJob{InstallDir: "/r"}),
 		"watcher yêu cầu": SystemdRequestServiceUnit("/g/genh", "/g/log", RequestPaths{InstallDir: "/r", RequestFile: "/r/run/request/update.json"}),
 	}
 	for name, u := range units {
@@ -174,4 +177,67 @@ func TestSystemdServiceUnits_KillModeMixed_TimeoutStop900(t *testing.T) {
 			t.Errorf("%s: [Service] phải có KillMode=mixed và TimeoutStopSec=900:\n%s", name, u)
 		}
 	}
+}
+
+// v0.1.53 (F-98): unit lịch đêm mang --install-dir/--port/Environment của bản cài.
+func TestSystemdServiceUnit_MangBanCaiVaCong(t *testing.T) {
+	job := NightlyJob{InstallDir: "/home/o/.gen-harness", Port: 9443, Env: []string{"GENH_COMPOSE_FILE=/src/deploy/compose.yaml"}}
+	unit := SystemdServiceUnit("/home/o/.gen-harness/bin/genh", "/g/log", job)
+	mustContain(t, unit, "Environment=GEN_HARNESS_HOME=/home/o/.gen-harness\n")
+	mustContain(t, unit, "Environment=GENH_COMPOSE_FILE=/src/deploy/compose.yaml\n")
+	// Giữ nguyên tiền tố `update --yes --quiet` (cổng 24 giờ dựa vào --yes; E2E grep).
+	mustContain(t, unit, "ExecStart=/home/o/.gen-harness/bin/genh update --yes --quiet --install-dir /home/o/.gen-harness --port 9443\n")
+
+	// Cổng mặc định (8443) thì KHÔNG truyền --port.
+	def := SystemdServiceUnit("/g/genh", "/g/log", NightlyJob{InstallDir: "/r", Port: 8443})
+	if strings.Contains(def, "--port") {
+		t.Errorf("cổng mặc định không được truyền --port:\n%s", def)
+	}
+	mustContain(t, def, "update --yes --quiet --install-dir /r\n")
+
+	// Đường dẫn có khoảng trắng: quote cả Environment lẫn --install-dir.
+	sp := SystemdServiceUnit("/g/genh", "/g/log", NightlyJob{InstallDir: "/home/o dir/gh"})
+	mustContain(t, sp, `Environment="GEN_HARNESS_HOME=/home/o dir/gh"`)
+	mustContain(t, sp, `--install-dir "/home/o dir/gh"`)
+	if dir, ok := installDirOfText(sp); !ok || dir != "/home/o dir/gh" {
+		t.Errorf("đọc ngược bản cài chủ = %q, %v", dir, ok)
+	}
+}
+
+func TestNightlyJob_CrontabPlistSchtasksMangCungDoiSo(t *testing.T) {
+	job := NightlyJob{InstallDir: "/home/o/.gen-harness", Port: 9443, Env: []string{"GENH_COMPOSE_FILE=/src/deploy/compose.yaml"}}
+	line := CrontabLine("/g/genh", "/g/log", 7, job)
+	mustContain(t, line, "7 3 * * * GEN_HARNESS_HOME=/home/o/.gen-harness GENH_COMPOSE_FILE=/src/deploy/compose.yaml /g/genh update --yes --quiet --install-dir /home/o/.gen-harness --port 9443 >> /g/log 2>&1")
+
+	plist := LaunchdPlist("/g/genh", "/g/log", 12, job)
+	mustContain(t, plist, "<string>--install-dir</string>\n\t\t<string>/home/o/.gen-harness</string>")
+	mustContain(t, plist, "<string>--port</string>\n\t\t<string>9443</string>")
+	mustContain(t, plist, "<key>EnvironmentVariables</key>")
+	mustContain(t, plist, "<key>GEN_HARNESS_HOME</key>\n\t\t<string>/home/o/.gen-harness</string>")
+	mustContain(t, plist, "<key>GENH_COMPOSE_FILE</key>")
+	if strings.Contains(LaunchdPlist("/g/genh", "/g/log", 12, NightlyJob{}), "EnvironmentVariables") {
+		t.Error("không có job thì plist không có EnvironmentVariables")
+	}
+
+	tr := strings.Join(SchtasksCreateArgs(`C:\g\genh.exe`, `C:\g\log.txt`, NightlyJob{InstallDir: `C:\Users\o\GenHarness`, Port: 9443}), "|")
+	mustContain(t, tr, `update --yes --quiet --install-dir C:\Users\o\GenHarness --port 9443`)
+	// Cổng mặc định không --port; đường dẫn có khoảng trắng được quote.
+	tr = strings.Join(SchtasksCreateArgs(`C:\g\genh.exe`, `C:\g\log.txt`, NightlyJob{InstallDir: `C:\Program Files\GH`, Port: 8443}), "|")
+	mustContain(t, tr, `--install-dir "C:\Program Files\GH"`)
+	if strings.Contains(tr, "--port") {
+		t.Errorf("cổng mặc định không --port: %s", tr)
+	}
+}
+
+// v0.1.53: chặn kích lặp khi tệp yêu cầu không xoá được.
+func TestRequestUnits_GioiHanKichLap(t *testing.T) {
+	svc := SystemdRequestServiceUnit("/g/genh", "/g/log", RequestPaths{InstallDir: "/r", RequestFile: "/r/run/request/update.json"})
+	unit := svc[:strings.Index(svc, "[Service]")]
+	mustContain(t, unit, "StartLimitIntervalSec=300\n")
+	mustContain(t, unit, "StartLimitBurst=5\n")
+	path := SystemdRequestPathUnit("/r/run/request/update.json")
+	section := path[strings.Index(path, "[Path]"):]
+	mustContain(t, section, "TriggerLimitIntervalSec=60\n")
+	mustContain(t, section, "TriggerLimitBurst=10\n")
+	mustContain(t, section, "Unit="+RequestTaskName+".service")
 }

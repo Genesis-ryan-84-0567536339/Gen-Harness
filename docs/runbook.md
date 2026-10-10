@@ -15,7 +15,10 @@ Mục này không thay README: cài đặt lần đầu và dựng từ mã ngu�
 
 ## 2. Cập nhật
 
-- **Tự động mỗi đêm ~03:00** (`genh auto-update status|enable|disable`). Lịch đêm chỉ nhận bản đã là *bản chính thức* và ra **đủ 24 giờ** — bản mới có thể đợi 1–2 đêm.
+- **Tự động mỗi đêm ~03:00** (`genh auto-update status|enable|disable`). Lịch đêm chọn bản *chính thức* **cao nhất đã đủ 24 giờ** trong 10 bản gần nhất — bản mới có thể đợi 1–2 đêm.
+  Từ v0.1.53 lịch **tự lành**: `genh update` bật lại lịch đêm nếu unit mất/tắt/không chạy, trừ khi Sếp đã chủ động tắt bằng `genh auto-update disable` (genh nhớ dấu `config/auto-update-disabled.json`).
+- **Kiểm lịch đêm**: chạy `genh auto-update status` — phải thấy dòng đầu **BẬT**, "Linger: có" (linger = tiến trình nền chạy cả khi không ai đăng nhập) và một "Lần kế tiếp" (~03:00). Thấy **BẬT NHƯNG KHÔNG CHẠY** hoặc **TẮT** (mà Sếp không tắt): `genh auto-update enable`; Linger KHÔNG thì chạy trước: `sudo loginctl enable-linger $USER` (máy hỏi mật khẩu đăng nhập máy).
+  Xem timer bằng tay: `systemctl --user list-timers --all | grep gen-harness` (tên unit là `gen-harness-update.timer`; `grep genh` không khớp). Thẻ Sức khoẻ hệ thống ở **Cài đặt › Sao lưu & cập nhật** (`/system?tab=storage&focus=health`) có dòng **Tự cập nhật đêm**; lịch tắt hoặc im quá 36 giờ thì có chuông **"Lịch tự cập nhật đêm chưa chạy N ngày"** (nút Xem cách bật lại).
 - **Ngay lập tức**: Console → **Cập nhật ngay** (Trợ giúp, hoặc Cài đặt › Sao lưu & cập nhật), hoặc `genh update` (không kèm `--yes` thì bỏ qua thời gian chín).
 - Thứ tự an toàn của `genh update`: tự thay binary `genh` (kiểm SHA-256, chạy lại bằng bản mới) → kiểm đĩa → tải ảnh bản mới *trước* → sao lưu (`pre-update`) → migrate → khởi động lại → kiểm sẵn sàng.
   Lỗi ở bất kỳ bước nào → tự quay về bản cũ. Dịch vụ đã khớp bản này thì **bỏ qua** (không sao lưu, không tải).
@@ -59,7 +62,7 @@ bằng một container tạm từ ảnh cũ. Sau đó lịch đêm **không th�
   **Gửi thử** (điện thoại nhận 2 tin: một từ Console, một từ trực canh). Dòng 6 ở Hướng dẫn › Việc Sếp cần làm chuyển **Đạt**. Không gửi mã bot cho ai.
 - **Trực canh** chạy mỗi 12 phút (`genh watchdog status|enable|disable`; mặc định bật sau cài/cập nhật): đo dịch vụ/api/đĩa/sao lưu/nhịp worker-bridge, tự khởi động lại dịch vụ chết (tối đa 1 lần/giờ), báo Telegram **chống spam**
   (một tin CẢNH BÁO + một tin ĐÃ ỔN mỗi đợt). Thử tay: `genh doctor --notify --test`. Chạy được cả khi api chết.
-- Linux: nếu Console nhắc "máy chủ có thể không tự chạy lại khi bật máy", chạy một lần `sudo loginctl enable-linger $USER`. Máy tắt hẳn/mất điện thì chỉ báo được khi máy bật lại ("Máy chủ vừa khởi động lại").
+- Linux: nếu Console nhắc "máy chủ có thể không tự chạy lại khi bật máy", chạy một lần: `sudo loginctl enable-linger $USER` (máy hỏi mật khẩu đăng nhập máy; từ v0.1.53 genh hỏi lại linger sau khi bật và cảnh báo nổi bật nếu vẫn tắt). Máy tắt hẳn/mất điện thì chỉ báo được khi máy bật lại ("Máy chủ vừa khởi động lại").
 - `genh stop` cho trực canh **tạm nghỉ** (không tự khởi động lại, không báo động) tới khi `genh start`.
 - Bản tin Gen 07:30/17:30 và nhắc việc cũng đi qua Telegram (một chiều, Telegram chỉ nhận số đếm của mục Gen-hub — không tiêu đề mail/lịch).
 
@@ -89,6 +92,10 @@ Bắt đầu bằng `genh status`, `genh logs -f`, rồi tìm mã trong Console 
 | "tự quay về bản cũ CŨNG THẤT BẠI — cần xử lý tay" (`rollback_failed`) | dịch vụ có thể đang dừng | `genh restore <khoá>` bằng `backup_key` trong `run/update-blocked.json` nếu CSDL đã bị đụng; nếu chưa (`db_touched=false`) chỉ cần `docker compose up -d --remove-orphans`. Rồi báo Claude |
 | `GH-E948` "ổ đĩa sắp đầy — chưa đụng gì" | thiếu chỗ trống (< 5 GB) | dọn đĩa (log Docker, tệp lớn) rồi cập nhật lại. `genh update` tự dọn ảnh cũ của Gen-Harness, giữ 2 bản |
 | `GH-E940`/`GH-E941`/`GH-E900`/`GH-E901` "chưa đụng gì" | tải hoặc sao lưu lỗi trước khi đổi gì | thử lại sau; kiểm mạng và chỗ trống |
+| Thẻ "Máy chủ chưa nhận yêu cầu cập nhật" kèm "chỉ chạy khi có người đăng nhập — cần bật linger" (`stalled_reason: linger_off`) | linger tắt nên trình nhận yêu cầu (nút Cập nhật ngay) và lịch đêm không chạy khi không ai đăng nhập | chạy một lần trên máy chủ `sudo loginctl enable-linger $USER` rồi bấm **Thử lại** |
+| Thẻ "Trình nhận yêu cầu trên máy chủ đang lỗi" (`stalled_reason: watcher_failed`) | `gen-harness-update-request.path`/`.service` ở trạng thái lỗi (vd start-limit) | chạy `genh update` (tự `reset-failed` và bật lại) rồi bấm **Thử lại** |
+| `GH-E94C` "Máy chủ không xoá được tệp yêu cầu — chưa đụng gì" | genh không xoá được tệp trong `run/request` (quyền thư mục) nên không làm yêu cầu, để tránh chạy lặp | kiểm quyền thư mục `<gốc cài>/run/request` (genh phải xoá được tệp trong đó) rồi bấm **Thử lại** |
+| Chuông "Lịch tự cập nhật đêm chưa chạy N ngày" / "đang tắt" (`host.nightly`) | lịch đêm tắt hoặc im quá 36 giờ và Sếp không chủ động tắt | bấm **Xem cách bật lại**: `genh auto-update status`, nếu Linger KHÔNG thì `sudo loginctl enable-linger $USER`, rồi `genh auto-update enable` |
 | Dịch vụ dừng hết sau khi máy khởi động lại | Docker chưa tự lên | `genh start`; `genh status` để xem cảnh báo khởi động cùng máy (`host.autostart`) |
 
 Vẫn kẹt → gói chẩn đoán (mục 6) + nhắn Claude. **Đừng** chạy `docker image prune -a` (xoá cả ảnh bản liền trước, mất khả năng quay về).

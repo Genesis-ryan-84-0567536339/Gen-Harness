@@ -12,6 +12,7 @@ export const GENH_COMMANDS: Array<{ cmd: string; what: string }> = [
   { cmd: 'genh start', what: 'Bật lại toàn bộ dịch vụ sau genh stop (trực canh máy chủ chạy lại).' },
   { cmd: 'genh doctor', what: 'Tạo gói chẩn đoán đã lọc bí mật để gửi người hỗ trợ (trong Console: Trợ giúp › Gói chẩn đoán).' },
   { cmd: 'genh watchdog status', what: 'Xem trực canh máy chủ: lịch, lần chạy gần nhất, sự cố đang mở.' },
+  { cmd: 'genh auto-update status', what: 'Xem lịch tự cập nhật đêm có đang chạy không: lần chạy gần nhất, lần kế tiếp, linger. Có cảnh báo thì làm đúng lệnh nó in ra.' },
   { cmd: 'genh logs worker', what: 'Xem lỗi gần nhất của Bộ xử lý nền (đổi "worker" thành api, bridge… cho dịch vụ khác).' },
 ];
 

@@ -27,6 +27,8 @@ const (
 	argsLinger       = "show-user 1000 --property=Linger --value"
 	argsUserReqPath  = "--user is-enabled gen-harness-update-request.path"
 	argsUserTimer    = "--user is-enabled gen-harness-update.timer"
+	argsUserWatchdog = "--user is-enabled gen-harness-watchdog.timer"
+	argsUserOffsite  = "--user is-enabled gen-harness-offsite.timer"
 	securityOptsSys  = `["name=seccomp,profile=builtin","name=cgroupns"]`
 	securityOptsRoot = `["name=seccomp,profile=builtin","name=rootless","name=cgroupns"]`
 )
@@ -218,4 +220,35 @@ func checkAutostartFile(t *testing.T, installDir string) map[string]any {
 		}
 	}
 	return raw
+}
+
+// v0.1.53 (F-95): trực canh (12 phút) và bản sao ngoài máy (tuần) cũng là timer systemd --user —
+// chỉ cần MỘT trong số đó bật là cần linger.
+func TestCheckAutostart_ChiTrucCanhHoacOffsiteBat_CanLinger(t *testing.T) {
+	for name, enabledArgs := range map[string]string{"trực canh": argsUserWatchdog, "bản sao ngoài máy": argsUserOffsite} {
+		fr := &fake.Runner{Responses: []fake.Response{
+			{Match: cmdIs("docker", argsDockerInfo), Output: []byte(securityOptsSys)},
+			{Match: cmdIs("systemctl", argsSysDocker), Output: []byte("enabled\n")},
+			{Match: cmdIs("loginctl", argsLinger), Output: []byte("no\n")},
+			{Match: cmdIs("systemctl", argsUserReqPath), Output: []byte("disabled\n"), Err: errExit1},
+			{Match: cmdIs("systemctl", argsUserTimer), Output: []byte("disabled\n"), Err: errExit1},
+			{Match: cmdIs("systemctl", enabledArgs), Output: []byte("enabled\n")},
+		}}
+		st := CheckAutostart(context.Background(), AutostartDeps{Runner: fr, GOOS: "linux", UID: "1000"})
+		if !st.LingerRequired || st.Linger != "no" {
+			t.Errorf("%s bật (còn lại tắt) ⇒ phải cần linger: %+v", name, st)
+		}
+		if l := autostartLines(st)[1]; l.OK || !strings.Contains(l.Info, "sudo loginctl enable-linger $USER") {
+			t.Errorf("%s: linger tắt mà cần ⇒ phải cảnh báo: %+v", name, l)
+		}
+	}
+	// Không timer/path nào bật ⇒ không cần linger.
+	fr := &fake.Runner{Responses: []fake.Response{
+		{Match: cmdIs("docker", argsDockerInfo), Output: []byte(securityOptsSys)},
+		{Match: cmdIs("systemctl", argsSysDocker), Output: []byte("enabled\n")},
+		{Match: cmdIs("loginctl", argsLinger), Output: []byte("no\n")},
+	}}
+	if st := CheckAutostart(context.Background(), AutostartDeps{Runner: fr, GOOS: "linux", UID: "1000"}); st.LingerRequired {
+		t.Errorf("không lịch nào ⇒ không cần linger: %+v", st)
+	}
 }

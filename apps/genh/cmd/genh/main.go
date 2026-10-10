@@ -50,6 +50,25 @@ const (
 	selfupdateRepo  = "Gen-Harness"
 )
 
+// Biến gói CHỈ để test (sản xuất giữ nguyên giá trị mặc định): tiêm bước tự cập nhật
+// binary, tiêm cách chạy tiến trình con sau khi tự thay binary, giả lỗi xoá yêu cầu.
+var (
+	// selfUpdateRun là selfupdate.Run; selfUpdateTweak (nil ở sản xuất) chỉnh Options
+	// trước khi chạy (trỏ APIBase/DownloadBase vào httptest, ExecutablePath vào tệp tạm…).
+	selfUpdateRun   = selfupdate.Run
+	selfUpdateTweak func(*selfupdate.Options)
+	// reExecChild chạy tiến trình con (genh bản mới) và chờ nó xong.
+	reExecChild = func(ctx context.Context, c *exec.Cmd) error { return runChildForwardingSignal(ctx, c) }
+	// consumeRequest là hostlink.ConsumeRequest (test giả lỗi xoá GH-E94C).
+	consumeRequest = hostlink.ConsumeRequest
+	// autostartDepsFn dựng ops.AutostartDeps khi ghi run/autostart-status.json
+	// (test tiêm Runner giả để không hỏi docker/systemctl thật).
+	autostartDepsFn = func() ops.AutostartDeps { return ops.AutostartDeps{} }
+	// hostInfoEnvFn dựng phần phụ thuộc của publishHostInfo (Runner/HomeDir/… cho
+	// systemctl, crontab, loginctl) — rỗng = thật; test tiêm Runner giả + HomeDir tạm.
+	hostInfoEnvFn = func() hostInfoEnv { return hostInfoEnv{} }
+)
+
 // version được ghi đè lúc build phát hành thật qua:
 //
 //	go build -ldflags "-X main.version=v2.2.0"
@@ -151,7 +170,12 @@ Lệnh vận hành (cờ chung mọi lệnh dưới đây: --port N, --install-d
                                           Scheduler tuỳ hệ điều hành) — mặc định đã BẬT sau
                                           "genh install" (tắt bằng --no-auto-update lúc cài,
                                           hoặc "genh auto-update disable" sau đó); vì có --yes,
-                                          lịch đêm chỉ nhận bản đã là bản chính thức ≥ 24 giờ
+                                          lịch đêm chỉ nhận bản đã là bản chính thức ≥ 24 giờ.
+                                          Lịch đêm bị tắt/mất ngoài ý muốn thì mỗi lần genh chạy
+                                          (update, lịch đêm) TỰ BẬT LẠI — trừ khi Sếp đã chủ động
+                                          tắt ("genh auto-update disable" / --no-auto-update).
+                                          status: bật/tắt thật, cơ chế, lần chạy gần nhất/kế tiếp,
+                                          linger, cảnh báo khi log không có dòng mới > 36 giờ
   genh backup [--to path]                sao lưu vào ObjectStore nội bộ (--to: copy thêm ra host)
   genh restore <khoá>                    khôi phục một bản backup theo khoá: tự sao lưu an toàn,
                                           dừng api/worker, khôi phục, migrate, khởi động lại
@@ -297,6 +321,14 @@ func lockBusyLine(err error) string {
 // genh.lock…) chỉ cảnh báo rồi chạy tiếp không khoá — không chặn bản vá vì một
 // tệp khoá hỏng.
 func acquireOpLock(ctx context.Context, installDir string, mode lockMode, stillWanted func() bool, stdout, stderr io.Writer) (lock *hostlink.Lock, exitCode int, ok bool) {
+	return acquireOpLockEx(ctx, installDir, mode, stillWanted, nil, stdout, stderr)
+}
+
+// acquireOpLockEx như acquireOpLock; onExpired (chỉ lockRequested) chạy khi đã CHỜ đủ
+// requestLockWait mà khoá vẫn bận (v0.1.53, F-97): yêu cầu từ Console không được để
+// nằm lại hộp thư (path unit sẽ kích lặp) — caller xoá tệp yêu cầu và ghi failed
+// GH-E94A. KHÔNG chạy khi "đã có tiến trình khác đang chờ" (người chờ kia làm).
+func acquireOpLockEx(ctx context.Context, installDir string, mode lockMode, stillWanted func() bool, onExpired func(), stdout, stderr io.Writer) (lock *hostlink.Lock, exitCode int, ok bool) {
 	lock, err := hostlink.AcquireLock(installDir)
 	if mode == lockRequested && errors.Is(err, hostlink.ErrLockBusy) {
 		// Chỉ MỘT người chờ cùng lúc (watcher crontab kích mỗi phút — xem
@@ -324,6 +356,9 @@ func acquireOpLock(ctx context.Context, installDir string, mode lockMode, stillW
 			return nil, 1, false
 		}
 		_, _ = fmt.Fprintln(stdout, lockBusyLine(err))
+		if mode == lockRequested && onExpired != nil {
+			onExpired()
+		}
 		return nil, 0, false
 	case ctx.Err() != nil:
 		_, _ = fmt.Fprintln(stderr, "genh: nhận tín hiệu dừng khi đang chờ lần cập nhật/khôi phục khác chạy xong — không làm gì.")
@@ -423,6 +458,13 @@ func runLogs(args []string) int {
 	return 0
 }
 
+// stdoutIsTerminal: stdout là terminal ⇒ người gõ tay. Mọi lịch đêm (systemd
+// StandardOutput=append:, crontab `>>`, LaunchAgent StandardOutPath, schtasks `>>`)
+// đều ghi stdout vào logs/auto-update.log — nên đây là dấu phân biệt lần chạy của lịch
+// với `genh update --yes` gõ tay, đúng cả với unit/dòng lịch do genh cũ ghi (không cần
+// thêm cờ/biến vào lịch: genh cũ sau quay về bản cũ sẽ không hiểu cờ mới). Biến để test tiêm.
+var stdoutIsTerminal = func() bool { return tui.IsTerminal(os.Stdout) }
+
 // updateFlags là các cờ của `genh update` sau khi Parse.
 type updateFlags struct {
 	port         int
@@ -478,12 +520,25 @@ func runUpdate(args []string) int {
 	ctx, stop := signalContext()
 	defer stop()
 
+	// Lịch đêm (--yes không --if-requested, tiến trình ngoài cùng, stdout KHÔNG phải
+	// terminal): ghi run/nightly-status.json lúc BẮT ĐẦU (last_run_at) và lúc KẾT THÚC
+	// (last_result) — v0.1.53, F-99. Mặc định "failed" cho mọi lối thoát bất ngờ; mỗi
+	// nhánh đặt kết quả đúng của nó. Sếp gõ tay `genh update --yes` trong terminal không
+	// phải lần chạy của lịch: tính vào thì timer hỏng vẫn hiện "Bình thường" thêm 36 giờ.
+	nightly := f.yes && !f.ifRequested && !f.selfUpdated && !stdoutIsTerminal()
+	nightlyResult := hostlink.NightlyResultFailed
+
 	// Khoá loại trừ (v0.1.37, F-35): tiến trình NGOÀI CÙNG lấy khoá TRƯỚC khi đụng
 	// hộp thư Console — hai genh update/restore chạy chồng nhau (lịch đêm + nút
 	// Console + gõ tay) sẽ sao lưu/migrate/khôi phục giẫm lên nhau. Tiến trình
 	// con --self-updated BỎ QUA (cha đang giữ khoá; fd khoá không kế thừa).
 	if !f.selfUpdated {
 		if f.ifRequested && !hostlink.HasRequest(env.InstallDir) {
+			return 0
+		}
+		// Yêu cầu không xoá được và đã báo lỗi GH-E94C cho đúng yêu cầu này: không làm
+		// lại, không chờ khoá (path unit có thể kích lặp tới giới hạn rồi dừng).
+		if f.ifRequested && hostlink.UpdateUndeletableReported(env.InstallDir, ops.ErrCodeRequestUndeletable) {
 			return 0
 		}
 		mode := lockManual
@@ -493,13 +548,42 @@ func runUpdate(args []string) int {
 		case f.yes:
 			mode = lockScheduled
 		}
-		lock, code, ok := acquireOpLock(ctx, env.InstallDir, mode, func() bool { return hostlink.HasRequest(env.InstallDir) }, os.Stdout, os.Stderr)
+		onExpired := func() {
+			// Chờ khoá đủ 30 phút mà máy chủ vẫn bận: xoá yêu cầu (path unit không kích
+			// lặp mãi) và báo Console GH-E94A — Sếp bấm Thử lại sau.
+			if f.ifRequested && hostlink.HasRequest(env.InstallDir) {
+				if _, cerr := consumeRequest(env.InstallDir); cerr != nil {
+					reportUndeletableUpdate(env.InstallDir, cerr)
+					return
+				}
+				_ = hostlink.Start(env.InstallDir, version)
+				_ = hostlink.Finish(env.InstallDir, "failed", "", ops.RequestBusyMessage)
+			}
+		}
+		lock, code, ok := acquireOpLockEx(ctx, env.InstallDir, mode, func() bool { return hostlink.HasRequest(env.InstallDir) }, onExpired, os.Stdout, os.Stderr)
 		if !ok {
 			return code
 		}
 		defer lock.Release()
 		stopBeat := hostlink.StartHeartbeat(env.InstallDir, "update")
 		defer stopBeat()
+		// v0.1.53 (F-95): MỌI lối thoát của tiến trình ngoài cùng làm mới
+		// run/autostart-status.json (trước đây chỉ nhánh "xong"), để Console nhắc
+		// linger/Docker kể cả khi cập nhật lỗi hoặc bỏ qua.
+		defer refreshAutostartStatus(env.InstallDir)
+		if nightly {
+			// Chưa có nightly-status.json (lần đầu sau khi nâng cấp): ghi ảnh chụp trạng thái lịch
+			// TRƯỚC, để lần chạy lỗi sớm không để lại bản ghi "lịch tắt" sai.
+			if _, err := hostlink.ReadNightlyStatus(env.InstallDir); err != nil {
+				bctx, bcancel := context.WithTimeout(context.Background(), 15*time.Second)
+				base := hostInfoEnvFn().Base
+				base.LogFile = filepath.Join(config.New(env.InstallDir).LogsDir(), "auto-update.log")
+				_ = ops.RecordNightlyStatus(bctx, env.InstallDir, base)
+				bcancel()
+			}
+			_ = hostlink.RecordNightlyRun(env.InstallDir, time.Now(), "")
+			defer func() { _ = hostlink.RecordNightlyRun(env.InstallDir, time.Time{}, nightlyResult) }()
+		}
 	}
 
 	// Hộp thư Console (internal/hostlink): tiến trình NGOÀI CÙNG (không phải bản
@@ -511,11 +595,23 @@ func runUpdate(args []string) int {
 	// Lịch đêm chạy ĐÚNG lúc Owner vừa bấm "Cập nhật ngay"/"Thử lại" (watcher
 	// chưa kịp gọi): lịch đêm đã nuốt yêu cầu thì phải làm như --if-requested
 	// (không bị chặn, không đợi chín) — nếu không yêu cầu mất không dấu vết.
+	//
+	// Không xoá được yêu cầu (quyền…): --if-requested KHÔNG làm yêu cầu (xoá-trước-khi-làm
+	// là thứ chặn watcher kích lặp) — ghi failed GH-E94C, thoát 0 (v0.1.53, F-97). Lịch
+	// đêm/gõ tay thì cảnh báo rồi cập nhật như thường (không để một tệp kẹt chặn cập nhật).
 	var statusSnap []byte
 	hadStatus, hadRequest := false, false
 	if !f.selfUpdated {
 		statusSnap, hadStatus = hostlink.SnapshotStatus(env.InstallDir)
-		hadRequest = hostlink.ConsumeRequest(env.InstallDir)
+		consumed, cerr := consumeRequest(env.InstallDir)
+		if cerr != nil {
+			reportUndeletableUpdate(env.InstallDir, cerr)
+			if f.ifRequested {
+				nightlyResult = hostlink.NightlyResultFailed
+				return 0
+			}
+		}
+		hadRequest = consumed
 		_ = hostlink.Start(env.InstallDir, version)
 	}
 	requested := f.ifRequested || hadRequest
@@ -540,6 +636,9 @@ func runUpdate(args []string) int {
 			if code == exitStoppedBeforeReExec {
 				return 1
 			}
+			if code == 0 {
+				nightlyResult = hostlink.NightlyResultDone
+			}
 			return code
 		}
 	}
@@ -559,6 +658,7 @@ func runUpdate(args []string) int {
 	case skip && kind == "blocked":
 		// In ra stdout CẢ khi --quiet để vào logs/auto-update.log.
 		skipBlockedUpdate(os.Stdout, env.InstallDir, version, blocked, statusSnap, hadStatus, f.selfUpdated)
+		nightlyResult = hostlink.NightlyResultBlocked
 		return 0
 	case skip && kind == "up-to-date":
 		fmt.Println(upToDateLine(version))
@@ -566,6 +666,9 @@ func runUpdate(args []string) int {
 		publishHostInfo(env.InstallDir, env.Port)
 		if deferred {
 			fmt.Println(updateDoneLine(true))
+			nightlyResult = hostlink.NightlyResultDeferred
+		} else {
+			nightlyResult = hostlink.NightlyResultUpToDate
 		}
 		return 0
 	}
@@ -584,12 +687,29 @@ func runUpdate(args []string) int {
 	// Cập nhật xong = dịch vụ đã khởi động lại ⇒ bỏ đánh dấu "Owner chủ động dừng".
 	_ = ops.ClearOwnerPause(env.InstallDir)
 	publishHostInfo(env.InstallDir, env.Port)
+	nightlyResult = hostlink.NightlyResultDone
 	if deferred {
 		fmt.Println(deferredAfterRunLine)
 	} else if f.quiet {
 		fmt.Println(updateDoneLine(false))
 	}
 	return 0
+}
+
+// reportUndeletableUpdate xử lý yêu cầu "Cập nhật ngay" KHÔNG xoá được (GH-E94C):
+// lỗi gốc in stderr/log, update-status ghi failed một lần cho mỗi yêu cầu (idempotent
+// theo requested_at). Thông điệp Console không chứa đường dẫn hay lỗi gốc.
+func reportUndeletableUpdate(installDir string, cause error) {
+	_, _ = fmt.Fprintf(os.Stderr, "genh: không xoá được yêu cầu cập nhật trong run/request (%v) — không làm yêu cầu này để tránh chạy lặp (%s).\n", cause, ops.ErrCodeRequestUndeletable)
+	_, _ = hostlink.FailUndeletableUpdate(installDir, version, ops.ErrCodeRequestUndeletable, ops.RequestUndeletableMessage("yêu cầu cập nhật"))
+}
+
+// refreshAutostartStatus làm mới run/autostart-status.json (Docker/linger có tự chạy
+// lại khi bật máy không). Lỗi bỏ qua.
+func refreshAutostartStatus(installDir string) {
+	actx, acancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer acancel()
+	_ = hostlink.WriteAutostartStatus(installDir, ops.CheckAutostart(actx, autostartDepsFn()))
 }
 
 // childUpdateArgs: args cho tiến trình re-exec sau khi tự thay binary. Tiến
@@ -772,7 +892,7 @@ func trySelfUpdateAndReExec(ctx context.Context, originalArgs []string, quiet bo
 	}
 	execPath, _ = filepath.Abs(execPath)
 
-	res, err := selfupdate.Run(ctx, selfupdate.Options{
+	suOpts := selfupdate.Options{
 		Owner: selfupdateOwner, Repo: selfupdateRepo,
 		CurrentVersion: version,
 		GOOS:           runtime.GOOS, GOARCH: runtime.GOARCH,
@@ -780,7 +900,11 @@ func trySelfUpdateAndReExec(ctx context.Context, originalArgs []string, quiet bo
 		Out:            os.Stdout,
 		Quiet:          quiet,
 		MinAge:         minAge,
-	})
+	}
+	if selfUpdateTweak != nil {
+		selfUpdateTweak(&suOpts)
+	}
+	res, err := selfUpdateRun(ctx, suOpts)
 	if err != nil {
 		// Tải/kiểm checksum/thay binary thất bại: KHÔNG chặn `genh update`
 		// — báo rõ rồi tiếp tục nâng cấp dịch vụ bằng binary hiện tại.
@@ -792,11 +916,11 @@ func trySelfUpdateAndReExec(ctx context.Context, originalArgs []string, quiet bo
 	}
 
 	newArgs := append(append([]string{}, originalArgs...), "--self-updated")
-	child := exec.Command(execPath, append([]string{"update"}, newArgs...)...)
+	child := exec.Command(suOpts.ExecutablePath, append([]string{"update"}, newArgs...)...)
 	child.Stdin = os.Stdin
 	child.Stdout = os.Stdout
 	child.Stderr = os.Stderr
-	if err := runChildForwardingSignal(ctx, child); err != nil {
+	if err := reExecChild(ctx, child); err != nil {
 		if errors.Is(err, errStoppedBeforeReExec) {
 			fmt.Fprintf(os.Stderr, "genh: nhận tín hiệu dừng ngay sau khi tải genh %s — chưa đụng gì tới dịch vụ; lần sau (lịch đêm hoặc genh update) sẽ làm tiếp.\n", res.To)
 			return exitStoppedBeforeReExec, true, false
@@ -888,7 +1012,9 @@ func runAutoUpdate(args []string) int {
 
 	ctx, stop := signalContext()
 	defer stop()
-	deps := autoupdate.Deps{GenhPath: execPath, LogFile: logFile}
+	deps := hostInfoEnvFn().Base
+	deps.GenhPath, deps.LogFile = execPath, logFile
+	deps.InstallDir, deps.Nightly = env.InstallDir, nightlyJobFor(env.InstallDir, env.Port)
 
 	switch args[0] {
 	case "enable":
@@ -896,14 +1022,26 @@ func runAutoUpdate(args []string) int {
 			fmt.Fprintf(os.Stderr, "genh: không tạo được thư mục log: %v\n", err)
 			return 1
 		}
-		msg, err := autoupdate.Enable(ctx, deps)
+		res, err := autoupdate.Enable(ctx, deps)
 		if err != nil {
+			if other, owned := autoupdate.OwnerOf(err); owned {
+				fmt.Fprintln(os.Stderr, "genh: "+ownedByOtherLine(other, env.InstallDir))
+				return 1
+			}
 			fmt.Fprintf(os.Stderr, "genh: bật tự cập nhật hằng đêm thất bại: %v\n", err)
 			return 1
 		}
+		// Sếp chủ động bật lại: bỏ dấu "đã tắt" (tự lành lại được áp dụng).
+		if err := ops.SetAutoUpdateOptOut(env.InstallDir, false, time.Now()); err != nil {
+			fmt.Fprintf(os.Stderr, "genh: cảnh báo — không xoá được %s: %v\n", ops.AutoUpdateOptOutPath(env.InstallDir), err)
+		}
 		// v0.1.33: báo Console (genh.json) lịch đêm đã bật — lỗi ghi chỉ làm Console không hứa "Tự cài".
 		_ = hostlink.SetAutoUpdate(env.InstallDir, version, true)
-		fmt.Println(msg)
+		fmt.Println(res.Msg)
+		printLingerWarning(os.Stdout, res.Warning, tui.IsTerminal(os.Stdout))
+		// v0.1.53 (F-95): làm mới autostart-status + nightly-status (linger vừa đổi).
+		refreshAutostartStatus(env.InstallDir)
+		_ = ops.RecordNightlyStatus(ctx, env.InstallDir, deps)
 		return 0
 	case "disable":
 		msg, err := autoupdate.Disable(ctx, deps)
@@ -911,7 +1049,24 @@ func runAutoUpdate(args []string) int {
 			fmt.Fprintf(os.Stderr, "genh: tắt tự cập nhật hằng đêm thất bại: %v\n", err)
 			return 1
 		}
-		_ = hostlink.SetAutoUpdate(env.InstallDir, version, false)
+		// Ghi nhớ lựa chọn của Sếp: genh KHÔNG tự bật lại (tự lành) lịch đêm này.
+		if err := ops.SetAutoUpdateOptOut(env.InstallDir, true, time.Now()); err != nil {
+			fmt.Fprintf(os.Stderr, "genh: cảnh báo — không ghi được %s: %v (lần cập nhật sau có thể tự bật lại lịch đêm)\n",
+				ops.AutoUpdateOptOutPath(env.InstallDir), err)
+		}
+		// v0.1.53: Disable là best-effort (bỏ qua lỗi systemctl/crontab — vd chạy bằng tài
+		// khoản khác hay không có phiên systemd --user) ⇒ HỎI LẠI trạng thái thật, không báo
+		// "Đã tắt" khi lịch vẫn bật (Console cũng nói thật: "Sếp đã tắt nhưng lịch vẫn bật").
+		stillOn := false
+		if st, serr := autoupdate.GetStatus(ctx, deps); serr == nil && st.Enabled && !st.OwnedByOther {
+			stillOn = true
+		}
+		_ = hostlink.SetAutoUpdate(env.InstallDir, version, stillOn)
+		_ = ops.RecordNightlyStatus(ctx, env.InstallDir, deps)
+		if stillOn {
+			fmt.Fprintln(os.Stderr, disableStillOnLine)
+			return 1
+		}
 		fmt.Println(msg)
 		return 0
 	case "status":
@@ -920,16 +1075,153 @@ func runAutoUpdate(args []string) int {
 			fmt.Fprintf(os.Stderr, "genh: kiểm trạng thái tự cập nhật thất bại: %v\n", err)
 			return 1
 		}
-		state := "TẮT"
-		if st.Enabled {
-			state = "BẬT"
+		var logMod time.Time
+		fi, logErr := os.Stat(logFile)
+		if logErr == nil {
+			logMod = fi.ModTime()
 		}
-		fmt.Printf("Tự cập nhật hằng đêm: %s\n  %s\n", state, st.Detail)
+		fmt.Print(nightlyStatusText(st, logMod, logErr, ops.AutoUpdateOptedOut(env.InstallDir), time.Now()))
 		return 0
 	default:
 		_, _ = fmt.Fprintf(os.Stderr, "genh: lệnh con auto-update không rõ %q (dùng enable|disable|status)\n", args[0])
 		return 2
 	}
+}
+
+// disableStillOnLine: `genh auto-update disable` xong mà lịch đêm vẫn bật (tắt hụt).
+const disableStillOnLine = "genh: CHƯA tắt được — lịch tự cập nhật đêm vẫn đang bật (máy vẫn tự lên bản mới ~03:00). Chạy lại bằng đúng tài khoản đã bật lịch (Linux: trong phiên đăng nhập có systemd --user), rồi kiểm: genh auto-update status"
+
+// nightlyJobFor dựng NightlyJob cho bản cài: --install-dir/--port (khi ≠ mặc định) và
+// GENH_COMPOSE_FILE nếu phiên hiện tại có — lịch chạy ngoài phiên shell của Sếp.
+func nightlyJobFor(installDir string, port int) autoupdate.NightlyJob {
+	job := autoupdate.NightlyJob{InstallDir: installDir}
+	if port > 0 && port != machine.DefaultPort {
+		job.Port = port
+	}
+	if v := os.Getenv(compose.EnvOverrideVar); v != "" {
+		job.Env = append(job.Env, compose.EnvOverrideVar+"="+v)
+	}
+	return job
+}
+
+// ownedByOtherLine: một dòng cảnh báo khi lịch đang thuộc bản cài khác còn sống.
+func ownedByOtherLine(other, self string) string {
+	return (&autoupdate.OwnedByOtherError{Other: other, Self: self}).Error()
+}
+
+// printLingerWarning in cảnh báo linger: có TTY thì tô đậm đỏ (lipgloss); không TTY
+// (lịch đêm ghi vào logs/auto-update.log) thì chữ thường, không mã màu.
+func printLingerWarning(w io.Writer, warning string, tty bool) {
+	if warning == "" {
+		return
+	}
+	if tty {
+		style := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("9"))
+		_, _ = fmt.Fprintln(w, style.Render(warning))
+		return
+	}
+	_, _ = fmt.Fprintln(w, strings.Replace(warning, "CẢNH BÁO:", "cảnh báo:", 1))
+}
+
+// nightlyStaleAfter: log lịch đêm không có dòng mới hơn ngưỡng này (36 giờ — thống nhất
+// với Console, NIGHTLY_STALE_HOURS) thì lịch đêm coi như không chạy.
+const nightlyStaleAfter = 36 * time.Hour
+
+// nightlyMechanismText: tên cơ chế bằng tiếng Việt cho `genh auto-update status`.
+func nightlyMechanismText(st autoupdate.Status) string {
+	switch st.Mechanism {
+	case autoupdate.ScheduleSystemd:
+		return "systemd --user timer (" + autoupdate.TaskName + ".timer)"
+	case autoupdate.ScheduleCron:
+		return "crontab"
+	case autoupdate.ScheduleLaunchd:
+		return "LaunchAgent (macOS)"
+	case autoupdate.ScheduleSchtasks:
+		return "Task Scheduler (Windows)"
+	}
+	return "chưa có (không có unit systemd, dòng crontab, LaunchAgent hay Task nào)"
+}
+
+// nightlyStatusText (hàm thuần) dựng nội dung `genh auto-update status` (F-94): ĐỦ 5
+// thông tin — bật/tắt thật, cơ chế, đã bật + đang chạy, lần chạy gần nhất/kế tiếp,
+// linger — cùng cảnh báo khi logs/auto-update.log (logMod/logErr) không có dòng mới
+// hơn 36 giờ. optedOut: Sếp đã chủ động tắt (`genh auto-update disable`).
+func nightlyStatusText(st autoupdate.Status, logMod time.Time, logErr error, optedOut bool, now time.Time) string {
+	loc := now.Location()
+	yesNo := func(b bool) string {
+		if b {
+			return "có"
+		}
+		return "không"
+	}
+	fmtTime := func(t time.Time) string { return t.In(loc).Format("02/01/2006 15:04") + " (giờ máy)" }
+
+	running := st.Enabled && !st.OwnedByOther
+	// systemd: unit đã enable mà timer không active (failed/inactive) ≠ "BẬT".
+	broken := st.Mechanism == autoupdate.ScheduleSystemd && st.UnitPresent && st.UnitFileState == "enabled" && st.Active != "active"
+	logMissing := logErr != nil
+	// Log chưa có VÀ chưa từng có lần chạy nào (vừa bật xong) chưa phải dấu hiệu hỏng. Log chưa có mà timer
+	// đã kích: chỉ cảnh báo khi lần kích đó cũ hơn 36 giờ — sau khi khởi động lại, systemd nạp mtime tệp stamp
+	// (tạo lúc bật lịch) vào LastTriggerUSec nên "đã kích" chưa chắc đã có lần chạy thật.
+	logStale := running && ((!logMissing && now.Sub(logMod) > nightlyStaleAfter) ||
+		(logMissing && !st.LastRun.IsZero() && now.Sub(st.LastRun) > nightlyStaleAfter))
+
+	var b strings.Builder
+	switch {
+	case st.OwnedByOther:
+		b.WriteString("Tự cập nhật hằng đêm: TẮT (lịch đêm của máy đang thuộc bản cài khác — bản cài này không đổi lịch)\n")
+	case running && !logStale:
+		b.WriteString("Tự cập nhật hằng đêm: BẬT\n")
+	case running || broken:
+		b.WriteString("Tự cập nhật hằng đêm: BẬT NHƯNG KHÔNG CHẠY\n")
+	case optedOut:
+		b.WriteString("Tự cập nhật hằng đêm: TẮT (Sếp đã chủ động tắt — bật lại: genh auto-update enable)\n")
+	default:
+		b.WriteString("Tự cập nhật hằng đêm: TẮT\n")
+	}
+	_, _ = fmt.Fprintf(&b, "  Cơ chế: %s\n", nightlyMechanismText(st))
+	enabled, active := st.Enabled, st.Enabled
+	if st.Mechanism == autoupdate.ScheduleSystemd {
+		enabled, active = st.UnitFileState == "enabled", st.Active == "active"
+	}
+	_, _ = fmt.Fprintf(&b, "  Đã bật (enabled): %s · Lịch đang chạy (active): %s\n", yesNo(enabled), yesNo(active))
+	switch {
+	case !st.LastRun.IsZero():
+		_, _ = fmt.Fprintf(&b, "  Lần chạy gần nhất: %s\n", fmtTime(st.LastRun))
+	case !logMissing:
+		_, _ = fmt.Fprintf(&b, "  Lần chạy gần nhất: %s\n", fmtTime(logMod))
+	default:
+		b.WriteString("  Lần chạy gần nhất: chưa chạy lần nào\n")
+	}
+	if st.NextRun.IsZero() {
+		b.WriteString("  Lần kế tiếp: không rõ\n")
+	} else {
+		_, _ = fmt.Fprintf(&b, "  Lần kế tiếp: %s\n", fmtTime(st.NextRun))
+	}
+	switch st.Linger {
+	case "yes":
+		b.WriteString("  Linger: có (tiến trình nền chạy cả khi không ai đăng nhập)\n")
+	case "no":
+		b.WriteString("  Linger: KHÔNG — chạy một lần: sudo loginctl enable-linger $USER\n")
+	case "not_applicable":
+		b.WriteString("  Linger: không áp dụng trên hệ điều hành này\n")
+	default:
+		b.WriteString("  Linger: không rõ (không hỏi được loginctl)\n")
+	}
+	if st.Detail != "" {
+		_, _ = fmt.Fprintf(&b, "  %s\n", st.Detail)
+	}
+	if st.Owner != "" && st.OwnedByOther {
+		_, _ = fmt.Fprintf(&b, "  Lịch đang thuộc bản cài: %s\n", st.Owner)
+	}
+	if logStale {
+		last := "chưa có"
+		if !logMissing {
+			last = fmtTime(logMod)
+		}
+		_, _ = fmt.Fprintf(&b, "CẢNH BÁO: logs/auto-update.log không có dòng mới hơn 36 giờ (lần ghi cuối %s) — lịch đêm có thể không chạy. Bật lại: genh auto-update enable\n", last)
+	}
+	return b.String()
 }
 
 func runBackup(args []string) int {
@@ -974,9 +1266,26 @@ func runRestore(args []string) int {
 		if !hostlink.HasRestoreRequest(env.InstallDir) {
 			return 0
 		}
+		// Yêu cầu không xoá được và đã báo GH-E94C cho đúng yêu cầu này: không làm lại.
+		if hostlink.RestoreUndeletableReported(env.InstallDir, ops.ErrCodeRequestUndeletable) {
+			return 0
+		}
 		mode = lockRequested
 	}
-	lock, code, ok := acquireOpLock(ctx, env.InstallDir, mode, func() bool { return hostlink.HasRestoreRequest(env.InstallDir) }, os.Stdout, os.Stderr)
+	onExpired := func() {
+		// Chờ khoá đủ 30 phút mà máy chủ vẫn bận: xoá yêu cầu + báo Console GH-E94A.
+		if !*ifRequested || !hostlink.HasRestoreRequest(env.InstallDir) {
+			return
+		}
+		req, cerr := hostlink.ConsumeRestoreRequest(env.InstallDir)
+		if errors.Is(cerr, hostlink.ErrRequestUndeletable) {
+			reportUndeletableRestore(env.InstallDir, cerr)
+			return
+		}
+		_ = hostlink.StartRestore(env.InstallDir, req.Key)
+		_ = hostlink.FinishRestore(env.InstallDir, "failed", "", ops.RequestBusyMessage)
+	}
+	lock, code, ok := acquireOpLockEx(ctx, env.InstallDir, mode, func() bool { return hostlink.HasRestoreRequest(env.InstallDir) }, onExpired, os.Stdout, os.Stderr)
 	if !ok {
 		return code
 	}
@@ -986,6 +1295,11 @@ func runRestore(args []string) int {
 	if *ifRequested {
 		handled, err := ops.RunRestoreRequest(ctx, env, ops.RestoreDeps{}, os.Stdout)
 		if err != nil {
+			// Tệp yêu cầu còn nguyên = KHÔNG xoá được (GH-E94C): không làm, thoát 0.
+			if hostlink.HasRestoreRequest(env.InstallDir) {
+				reportUndeletableRestore(env.InstallDir, err)
+				return 0
+			}
 			reportOpErr(err)
 			return 1
 		}
@@ -1013,6 +1327,17 @@ func runHandleRequests(args []string) int {
 	}
 	dir, err := ops.ResolveInstallDir(*installDir)
 	if err != nil {
+		// Không xác định được thư mục cài đặt (thiếu --install-dir, GEN_HARNESS_HOME và
+		// HOME): nếu GEN_HARNESS_HOME trỏ tới một thư mục thật thì báo Console "failed"
+		// thay vì để yêu cầu nằm im; không có thì chỉ in lỗi.
+		if v := os.Getenv(config.EnvRoot); v != "" {
+			if fi, serr := os.Stat(v); serr == nil && fi.IsDir() {
+				_ = hostlink.Start(v, version)
+				_ = hostlink.Finish(v, "failed", "", "Máy chủ không xác định được thư mục cài đặt để làm yêu cầu — xem logs/auto-update.log")
+				_, _ = fmt.Fprintf(os.Stderr, "genh: không xác định được thư mục cài đặt: %v\n", err)
+				return 1
+			}
+		}
 		_, _ = fmt.Fprintf(os.Stderr, "genh: không xác định được thư mục cài đặt: %v\n", err)
 		return 1
 	}
@@ -1023,12 +1348,26 @@ func runHandleRequests(args []string) int {
 	case "restore":
 		return runRestore(append([]string{"--if-requested"}, pass...))
 	case "offsite":
+		// Không xoá được tệp yêu cầu thì không làm (xem runOffsite) — dò trước khi bắt đầu.
+		if offsiteUndeletableReported(dir) {
+			return 0
+		}
+		if perr := hostlink.RequestDirWritable(dir); perr != nil {
+			reportUndeletableOffsite(dir, perr)
+			return 0
+		}
 		return runOffsite(append(handleRequestOffsiteArgs(*quiet), pass...))
 	case "doctor":
 		return runDoctor(append(handleRequestDoctorArgs(), pass...))
 	case "watchdog":
 		// Xoá yêu cầu TRƯỚC khi làm (watcher không kích lặp); tệp hỏng/action lạ ⇒ bỏ.
-		if _, err := hostlink.ConsumeWatchdogRequest(dir); err != nil {
+		// Đọc được mà KHÔNG xoá được (GH-E94C) ⇒ không làm, thoát 0.
+		_, err := hostlink.ConsumeWatchdogRequest(dir)
+		if hostlink.HasWatchdogRequest(dir) {
+			reportUndeletableWatchdog(dir)
+			return 0
+		}
+		if err != nil {
 			_, _ = fmt.Fprintf(os.Stderr, "genh: bỏ yêu cầu gửi thử không hợp lệ: %v\n", err)
 			return 0
 		}
@@ -1036,6 +1375,51 @@ func runHandleRequests(args []string) int {
 	default:
 		return 0
 	}
+}
+
+// reportUndeletableRestore / Offsite / Watchdog: yêu cầu Console KHÔNG xoá được (GH-E94C) —
+// lỗi gốc in stderr/log, trạng thái failed ghi một lần (idempotent).
+func reportUndeletableRestore(installDir string, cause error) {
+	_, _ = fmt.Fprintf(os.Stderr, "genh: không xoá được yêu cầu khôi phục trong run/request (%v) — không làm yêu cầu này để tránh chạy lặp (%s).\n", cause, ops.ErrCodeRequestUndeletable)
+	_, _ = hostlink.FailUndeletableRestore(installDir, ops.ErrCodeRequestUndeletable, ops.RequestUndeletableMessage("yêu cầu khôi phục"))
+}
+
+func reportUndeletableOffsite(installDir string, cause error) {
+	_, _ = fmt.Fprintf(os.Stderr, "genh: không xoá được yêu cầu sao lưu ra ổ ngoài trong run/request (%v) — không làm yêu cầu này để tránh chạy lặp (%s).\n", cause, ops.ErrCodeRequestUndeletable)
+	if prev, err := hostlink.ReadOffsiteStatus(installDir); err == nil && prev.State == hostlink.OffsiteStateFailed && prev.ErrorCode == ops.ErrCodeRequestUndeletable {
+		return
+	}
+	st, err := hostlink.ReadOffsiteStatus(installDir)
+	if err != nil {
+		st = hostlink.OffsiteStatus{}
+	}
+	st.State, st.ErrorCode, st.LastAttemptAt = hostlink.OffsiteStateFailed, ops.ErrCodeRequestUndeletable, time.Now().UTC().Format(time.RFC3339)
+	_ = hostlink.WriteOffsiteStatus(installDir, st)
+}
+
+// offsiteUndeletableReported: offsite-status đã là failed GH-E94C và tệp yêu cầu còn
+// nằm đó từ trước lúc báo (cùng một yêu cầu) — không làm lại.
+func offsiteUndeletableReported(installDir string) bool {
+	st, err := hostlink.ReadOffsiteStatus(installDir)
+	if err != nil || st.State != hostlink.OffsiteStateFailed || st.ErrorCode != ops.ErrCodeRequestUndeletable {
+		return false
+	}
+	at, perr := time.Parse(time.RFC3339, st.LastAttemptAt)
+	fi, serr := os.Lstat(hostlink.OffsiteRequestPath(installDir))
+	return perr == nil && serr == nil && !fi.ModTime().Truncate(time.Second).After(at)
+}
+
+func reportUndeletableWatchdog(installDir string) {
+	_, _ = fmt.Fprintf(os.Stderr, "genh: không xoá được yêu cầu gửi thử trong run/request — không làm yêu cầu này để tránh chạy lặp (%s).\n", ops.ErrCodeRequestUndeletable)
+	st, err := hostlink.ReadWatchdogStatus(installDir)
+	if err != nil {
+		st = hostlink.WatchdogStatus{}
+	}
+	if st.Test != nil && !st.Test.OK && st.Test.ErrorCode == ops.ErrCodeRequestUndeletable {
+		return
+	}
+	st.Test = &hostlink.WatchdogTest{At: time.Now().UTC().Format(time.RFC3339), OK: false, ErrorCode: ops.ErrCodeRequestUndeletable}
+	_ = hostlink.WriteWatchdogStatus(installDir, st)
 }
 
 // handleRequestDoctorArgs: run/request/doctor.json → `genh doctor --if-requested`
@@ -1153,6 +1537,13 @@ func runOffsite(args []string) int {
 	case "run":
 		if f.ifRequested {
 			_, err = ops.RunOffsiteRequest(ctx, env, deps, os.Stdout)
+			// KHÔNG xoá được tệp yêu cầu (GH-E94C): ops đã dừng TRƯỚC khi làm gì (như
+			// ConsumeRequest của cập nhật) — báo một lần, thoát 0 (path unit không bị lỗi đỏ;
+			// TriggerLimit chặn kích lặp).
+			if errors.Is(err, hostlink.ErrRequestUndeletable) {
+				reportUndeletableOffsite(env.InstallDir, err)
+				return 0
+			}
 		} else {
 			err = ops.RunOffsiteRun(ctx, env, ops.OffsiteRunOptions{Quiet: f.quiet}, deps, os.Stdout)
 		}
@@ -1511,11 +1902,21 @@ func runUninstall(args []string) int {
 	// Gỡ luôn lịch tự cập nhật hằng đêm + watcher "Cập nhật ngay" — không để lại
 	// dòng cron/unit systemd gọi một bản cài đã gỡ (lịch tuần bản sao ngoài máy
 	// do ops.RunUninstall gỡ).
+	//
+	// v0.1.53 (F-98): lịch là CHUNG cho mọi bản cài của người dùng — Deps.InstallDir
+	// là bản cài ĐANG gỡ; lịch/watcher đang thuộc bản cài KHÁC còn sống thì giữ nguyên
+	// (trước đây `genh uninstall --install-dir <bản phụ>` xoá luôn lịch đêm và watcher
+	// của bản chính).
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	deps := autoupdate.Deps{}
-	autoupdate.DisableRequestWatcher(ctx, deps)
-	_, _ = autoupdate.Disable(ctx, deps)
+	deps := hostInfoEnvFn().Base
+	deps.InstallDir = env.InstallDir
+	if msg := autoupdate.DisableRequestWatcher(ctx, deps); msg != "" {
+		fmt.Println(msg)
+	}
+	if msg, _ := autoupdate.Disable(ctx, deps); strings.HasPrefix(msg, "Giữ nguyên") {
+		fmt.Println(msg)
+	}
 	return 0
 }
 
@@ -1640,25 +2041,50 @@ func runInstall(args []string) int {
 	// một lần cài đặt vừa xong thành công — Owner vẫn dùng được Gen-Harness
 	// bình thường, chỉ là phải tự chạy `genh update` tay hoặc `genh
 	// auto-update enable` lại sau.
-	if !*noAutoUpdate {
-		enableAutoUpdateAfterInstall(dir)
-	}
+	//
+	// v0.1.53 (F-93): --no-auto-update ghi dấu "Sếp đã chủ động tắt" (genh không tự bật
+	// lại lịch đêm); cài không cờ xoá dấu đó rồi bật.
+	applyAutoUpdateChoice(dir, *port, *noAutoUpdate)
 	_ = ops.ClearOwnerPause(dir)
 	publishHostInfo(dir, *port)
 
 	return 0
 }
 
-// enableAutoUpdateAfterInstall bật internal/autoupdate ngay sau khi cài xong
-// — xem ghi chú ở nơi gọi. In đúng MỘT dòng rõ ràng khi thành công (yêu cầu
-// của phiên v0.1.5), hoặc một dòng cảnh báo ngắn khi thất bại.
-func enableAutoUpdateAfterInstall(installDir string) {
-	execPath, err := os.Executable()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "genh: không bật được tự cập nhật hằng đêm (không xác định được đường dẫn genh): %v — chạy tay `genh auto-update enable` sau.\n", err)
+// applyAutoUpdateChoice áp lựa chọn lịch đêm của `genh install`: --no-auto-update ghi dấu
+// "Sếp đã chủ động tắt" (genh không tự lành lại) VÀ tắt lịch đêm đang có của chính bản
+// cài này (`install --force --no-auto-update` đè lên máy đã bật lịch — trước đây dấu nói
+// "tắt" mà lịch vẫn chạy 03:00); không cờ xoá dấu đó rồi bật lịch.
+func applyAutoUpdateChoice(dir string, port int, noAutoUpdate bool) {
+	if noAutoUpdate {
+		if err := ops.SetAutoUpdateOptOut(dir, true, time.Now()); err != nil {
+			fmt.Fprintf(os.Stderr, "genh: cảnh báo — không ghi được %s: %v (lần cập nhật sau có thể tự bật lại lịch đêm)\n", ops.AutoUpdateOptOutPath(dir), err)
+		}
+		disableAutoUpdateAfterInstall(dir, port)
 		return
 	}
-	execPath, _ = filepath.Abs(execPath)
+	if err := ops.SetAutoUpdateOptOut(dir, false, time.Now()); err != nil {
+		fmt.Fprintf(os.Stderr, "genh: cảnh báo — không xoá được %s: %v\n", ops.AutoUpdateOptOutPath(dir), err)
+	}
+	enableAutoUpdateAfterInstall(dir, port)
+}
+
+// enableAutoUpdateAfterInstall bật internal/autoupdate ngay sau khi cài xong
+// — xem ghi chú ở nơi gọi. In đúng MỘT dòng rõ ràng khi thành công (yêu cầu
+// của phiên v0.1.5), hoặc một dòng cảnh báo ngắn khi thất bại. Lịch đêm mang
+// --install-dir/--port/GENH_COMPOSE_FILE của bản cài này (v0.1.53, F-98); đang thuộc
+// bản cài KHÁC còn sống thì không đổi lịch, chỉ cảnh báo một dòng.
+func enableAutoUpdateAfterInstall(installDir string, port int) {
+	he := hostInfoEnvFn()
+	execPath := he.Base.GenhPath
+	if execPath == "" {
+		p, err := os.Executable()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "genh: không bật được tự cập nhật hằng đêm (không xác định được đường dẫn genh): %v — chạy tay `genh auto-update enable` sau.\n", err)
+			return
+		}
+		execPath, _ = filepath.Abs(p)
+	}
 	logFile := filepath.Join(config.New(installDir).LogsDir(), "auto-update.log")
 	if err := os.MkdirAll(filepath.Dir(logFile), 0o755); err != nil {
 		fmt.Fprintf(os.Stderr, "genh: không bật được tự cập nhật hằng đêm (không tạo được thư mục log): %v — chạy tay `genh auto-update enable` sau.\n", err)
@@ -1667,12 +2093,55 @@ func enableAutoUpdateAfterInstall(installDir string) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	msg, err := autoupdate.Enable(ctx, autoupdate.Deps{GenhPath: execPath, LogFile: logFile})
+	deps := he.Base
+	deps.GenhPath, deps.LogFile = execPath, logFile
+	deps.InstallDir, deps.Nightly = installDir, nightlyJobFor(installDir, port)
+	res, err := autoupdate.Enable(ctx, deps)
 	if err != nil {
+		if other, owned := autoupdate.OwnerOf(err); owned {
+			fmt.Fprintln(os.Stderr, "genh: "+ownedByOtherLine(other, installDir))
+			return
+		}
 		fmt.Fprintf(os.Stderr, "genh: không bật được tự cập nhật hằng đêm tự động (%v) — chạy tay `genh auto-update enable`, hoặc bỏ qua nếu không cần.\n", err)
 		return
 	}
+	fmt.Println(res.Msg)
+	printLingerWarning(os.Stdout, res.Warning, tui.IsTerminal(os.Stdout))
+}
+
+// disableAutoUpdateAfterInstall tắt lịch đêm ĐANG CÓ của bản cài này cho `genh install
+// --no-auto-update` (v0.1.53). Chưa có lịch nào ⇒ không gọi lệnh ghi nào (cài mới không
+// đụng crontab/systemd); lịch thuộc bản cài KHÁC còn sống ⇒ không đụng (Disable cũng tự
+// giữ nguyên). Lỗi/tắt hụt chỉ cảnh báo — không làm hỏng lần cài vừa xong.
+func disableAutoUpdateAfterInstall(installDir string, port int) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	deps := hostInfoEnvFn().Base
+	deps.LogFile = filepath.Join(config.New(installDir).LogsDir(), "auto-update.log")
+	deps.InstallDir, deps.Nightly = installDir, nightlyJobFor(installDir, port)
+	st, err := autoupdate.GetStatus(ctx, deps)
+	if err != nil || !st.UnitPresent || st.OwnedByOther {
+		return
+	}
+	msg, err := autoupdate.Disable(ctx, deps)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "genh: cảnh báo — không tắt được lịch tự cập nhật đêm đang có (%v) — chạy tay `genh auto-update disable`.\n", err)
+		return
+	}
+	if st, err := autoupdate.GetStatus(ctx, deps); err == nil && st.Enabled && !st.OwnedByOther {
+		fmt.Fprintln(os.Stderr, disableStillOnLine)
+		return
+	}
 	fmt.Println(msg)
+}
+
+// hostInfoEnv là phần phụ thuộc của publishHostInfo: Base mang Runner/HomeDir/GOOS/
+// LookPath (và GenhPath) cho systemctl/crontab/loginctl — rỗng = thật; Offsite/Watchdog
+// tiêm lịch giả. Test tiêm qua hostInfoEnvFn.
+type hostInfoEnv struct {
+	Base     autoupdate.Deps
+	Offsite  ops.OffsiteDeps
+	Watchdog ops.WatchdogScheduler
 }
 
 // publishHostInfo cài (idempotent) watcher nhận yêu cầu "Cập nhật ngay" từ
@@ -1680,13 +2149,22 @@ func enableAutoUpdateAfterInstall(installDir string) {
 // đọc. Lỗi chỉ làm nút trong Console hiện lệnh tay thay vì bấm được — không
 // bao giờ làm hỏng install/update vừa xong.
 func publishHostInfo(installDir string, port int) {
+	publishHostInfoWith(installDir, port, hostInfoEnvFn())
+}
+
+func publishHostInfoWith(installDir string, port int, he hostInfoEnv) {
 	updater := ""
 	var autoUpdate *bool
-	if execPath, err := os.Executable(); err == nil {
-		execPath, _ = filepath.Abs(execPath)
+	execPath := he.Base.GenhPath
+	if execPath == "" {
+		if p, err := os.Executable(); err == nil {
+			execPath, _ = filepath.Abs(p)
+		}
+	}
+	if execPath != "" {
 		logFile := filepath.Join(config.New(installDir).LogsDir(), "auto-update.log")
 		_ = os.MkdirAll(filepath.Dir(logFile), 0o755)
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
 		defer cancel()
 		rp := autoupdate.RequestPaths{InstallDir: installDir, RequestDir: hostlink.RequestDirPath(installDir), RequestFile: hostlink.RequestPath(installDir),
 			RestoreFile: hostlink.RestoreRequestPath(installDir), OffsiteFile: hostlink.OffsiteRequestPath(installDir),
@@ -1697,30 +2175,77 @@ func publishHostInfo(installDir string, port int) {
 		if v := os.Getenv(compose.EnvOverrideVar); v != "" {
 			rp.Env = append(rp.Env, compose.EnvOverrideVar+"="+v)
 		}
-		deps := autoupdate.Deps{GenhPath: execPath, LogFile: logFile}
-		// v0.1.37: unit lịch đêm chỉ được ghi lúc install/enable — máy cài từ bản
-		// cũ cần ghi lại để có KillMode=mixed/TimeoutStopSec (không bật/tắt gì).
-		if changed, err := autoupdate.RefreshUnits(ctx, deps); err != nil {
-			fmt.Fprintf(os.Stderr, "genh: cảnh báo — không làm mới được unit lịch tự cập nhật: %v\n", err)
-		} else if changed {
-			fmt.Println("genh: đã thêm KillMode=mixed/TimeoutStopSec vào unit lịch tự cập nhật (~/.config/systemd/user/" + autoupdate.TaskName + ".service) — các dòng khác giữ nguyên.")
+		deps := he.Base
+		deps.GenhPath, deps.LogFile = execPath, logFile
+		deps.InstallDir, deps.Nightly = installDir, nightlyJobFor(installDir, port)
+		warnedOwner := false
+		warnOwner := func(err error) bool {
+			other, owned := autoupdate.OwnerOf(err)
+			if owned && !warnedOwner {
+				warnedOwner = true
+				fmt.Fprintln(os.Stderr, "genh: "+ownedByOtherLine(other, installDir))
+			}
+			return owned
 		}
+		optedOut := ops.AutoUpdateOptedOut(installDir)
+		// v0.1.37: unit lịch đêm chỉ được ghi lúc install/enable — máy cài từ bản
+		// cũ cần ghi lại để có KillMode=mixed/TimeoutStopSec (không bật/tắt gì). Từ
+		// v0.1.53 cả ExecStart --install-dir/--port + Environment=GEN_HARNESS_HOME.
+		if rep, err := autoupdate.RefreshUnitsReport(ctx, deps); err != nil {
+			fmt.Fprintf(os.Stderr, "genh: cảnh báo — không làm mới được unit lịch tự cập nhật: %v\n", err)
+		} else if rep.Changed {
+			fmt.Println("genh: đã làm mới unit lịch tự cập nhật (" + strings.Join(rep.What, ", ") + ") — các dòng khác giữ nguyên.")
+		}
+		// v0.1.53 (F-93): lịch đêm bị tắt/mất thì TỰ LÀNH (bật lại) — trừ khi Sếp đã chủ
+		// động tắt. TRƯỚC GetStatus bên dưới để genh.json phản ánh trạng thái sau khi lành.
+		healNightly := func() {
+			if optedOut {
+				return
+			}
+			healed, msg, err := autoupdate.EnsureNightly(ctx, deps)
+			switch {
+			case err != nil:
+				if !warnOwner(err) {
+					fmt.Fprintf(os.Stderr, "genh: cảnh báo — không tự bật lại được lịch tự cập nhật đêm: %v (thử: genh auto-update enable)\n", err)
+				}
+			case healed:
+				// Dòng đầu là thông báo tự lành; dòng sau (nếu có) là cảnh báo linger — nổi bật khi
+				// có TTY, chữ thường khi vào log (lịch đêm).
+				lines := strings.SplitN(msg, "\n", 2)
+				fmt.Println(lines[0])
+				if len(lines) == 2 {
+					printLingerWarning(os.Stdout, lines[1], tui.IsTerminal(os.Stdout))
+				}
+			}
+		}
+		healNightly()
 		if u, err := autoupdate.EnsureRequestWatcher(ctx, deps, rp); err == nil {
 			updater = u
+		} else {
+			warnOwner(err)
 		}
 		// v0.1.40: bản sao ngoài máy đang bật → ghi lại lịch tuần (idempotent) cho
 		// khớp bản genh này (máy cập nhật từ bản cũ). Chưa bật thì không làm gì.
-		if _, err := ops.RefreshOffsiteSchedule(ctx, &ops.Env{InstallDir: installDir, Port: port}, ops.OffsiteDeps{}); err != nil {
-			fmt.Fprintf(os.Stderr, "genh: cảnh báo — không làm mới được lịch sao lưu ra ổ ngoài: %v\n", err)
+		if _, err := ops.RefreshOffsiteSchedule(ctx, &ops.Env{InstallDir: installDir, Port: port}, he.Offsite); err != nil {
+			if !warnOwner(err) {
+				fmt.Fprintf(os.Stderr, "genh: cảnh báo — không làm mới được lịch sao lưu ra ổ ngoài: %v\n", err)
+			}
 		}
 		// v0.1.44 (F-6b): lịch trực canh máy chủ mỗi 12 phút — idempotent, KHÔNG phụ
 		// thuộc --no-auto-update (trực canh không đổi gì trên máy ngoài tự khởi động
 		// lại dịch vụ đã chết). Lỗi chỉ cảnh báo.
-		enableWatchdogSchedule(ctx, installDir, port)
+		enableWatchdogScheduleWith(ctx, installDir, he.watchdog(installDir, port), warnOwner)
+		// Các lệnh daemon-reload/enable ở trên (nhất là khi chạy TỪ BÊN TRONG
+		// gen-harness-update.service lúc lịch đêm) có thể làm timer mất lịch: kiểm lại
+		// sau cùng (idempotent — khoẻ thì không ghi gì).
+		healNightly()
 		// v0.1.33: Console chỉ hứa "Tự cài đêm …" khi lịch đêm thật sự đang bật.
 		if st, err := autoupdate.GetStatus(ctx, deps); err == nil {
-			enabled := st.Enabled
+			enabled := st.Enabled && !st.OwnedByOther
 			autoUpdate = &enabled
+			// v0.1.53 (F-99): run/nightly-status.json — Console thấy lịch đêm có thật sự
+			// bật/chạy không (kể cả khi im lặng nhiều ngày).
+			_ = ops.SaveNightlyStatus(installDir, st, optedOut, autoupdate.RequestWatcherState(ctx, deps))
 		}
 	}
 	_ = hostlink.WriteInfo(installDir, version, updater, autoUpdate)
@@ -1728,20 +2253,44 @@ func publishHostInfo(installDir string, port int) {
 	// v0.1.37 (F-73): làm mới run/autostart-status.json để Console nhắc Owner
 	// khi Docker/linger không tự chạy lại sau khởi động — lịch đêm cũng gọi tới
 	// đây nên Owner không phải chạy `genh status`. Lỗi bỏ qua.
-	actx, acancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer acancel()
-	_ = hostlink.WriteAutostartStatus(installDir, ops.CheckAutostart(actx, ops.AutostartDeps{}))
+	refreshAutostartStatus(installDir)
+}
+
+// watchdog trả lịch trực canh: đã tiêm thì dùng, không thì dựng thật (có Runner/HomeDir
+// của Base để test không chạm máy thật).
+func (he hostInfoEnv) watchdog(installDir string, port int) ops.WatchdogScheduler {
+	if he.Watchdog != nil {
+		return he.Watchdog
+	}
+	env := &ops.Env{InstallDir: installDir, Port: port}
+	if he.Base.Runner != nil || he.Base.HomeDir != "" || he.Base.GOOS != "" || he.Base.LookPath != nil {
+		return ops.NewWatchdogSchedulerWith(env, he.Base)
+	}
+	return ops.NewWatchdogScheduler(env)
 }
 
 // enableWatchdogSchedule bật (idempotent) lịch trực canh và ghi cơ chế vào
 // run/watchdog-status.json ("schedule") — in một dòng khi lần đầu bật. Owner đã
 // `genh watchdog disable` (config/watchdog-disabled.json) ⇒ không làm gì.
 func enableWatchdogSchedule(ctx context.Context, installDir string, port int) {
+	enableWatchdogScheduleWith(ctx, installDir, ops.NewWatchdogScheduler(&ops.Env{InstallDir: installDir, Port: port}), nil)
+}
+
+// enableWatchdogScheduleWith như enableWatchdogSchedule với lịch tiêm sẵn; warnOwner
+// (nil được) in cảnh báo "bản cài khác đang giữ lịch" một lần và báo lỗi đó đã xử lý.
+func enableWatchdogScheduleWith(ctx context.Context, installDir string, sched ops.WatchdogScheduler, warnOwner func(error) bool) {
 	if ops.WatchdogOptedOut(installDir) { // Owner đã chủ động tắt — không ghi đè lựa chọn đó
 		return
 	}
-	msg, mech, err := ops.NewWatchdogScheduler(&ops.Env{InstallDir: installDir, Port: port}).Enable(ctx)
+	msg, mech, err := sched.Enable(ctx)
 	if err != nil {
+		if warnOwner != nil && warnOwner(err) {
+			return
+		}
+		if other, owned := autoupdate.OwnerOf(err); owned {
+			fmt.Fprintln(os.Stderr, "genh: "+ownedByOtherLine(other, installDir))
+			return
+		}
 		fmt.Fprintf(os.Stderr, "genh: cảnh báo — không bật được trực canh máy chủ: %v (thử lại: genh watchdog enable)\n", err)
 		return
 	}

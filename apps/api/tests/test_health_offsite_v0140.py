@@ -266,6 +266,20 @@ async def test_manager_body_does_not_promise_owner_buttons(client, owner_api: Ap
     assert o_bodies["offsite.failed"] == health.OFFSITE_FAILED_BODY["GH-EB07"]
 
 
+async def test_failed_request_undeletable_body_says_fix_permissions(owner_api: Api, link: Path, db, redis) -> None:  # type: ignore[no-untyped-def]
+    """v0.1.53 (F-97): offsite.failed vì không xoá được tệp yêu cầu (GH-E94C) ⇒ thân nói kiểm quyền run/request (cùng
+    câu với GET /system/offsite), không phải câu chung "bấm để xem chi tiết và thử lại"."""
+    org = await org_id(db)
+    _status(link, state="failed", error_code="GH-E94C", last_attempt_at=_iso(datetime.now(UTC)))
+    await _evaluate(redis, org)
+    [row] = await _alerts(db, "offsite.failed")
+    assert row.body == health.OFFSITE_FAILED_BODY["GH-E94C"]
+    assert "run/request" in row.body and row.body != health.OFFSITE_FAILED_GENERIC
+    from gh.system_api import offsite as offsite_api
+
+    assert row.body == offsite_api.ERROR_MESSAGES["GH-E94C"]
+
+
 def test_viewer_body_keeps_run_button_text_for_manager() -> None:
     """Manager CÓ nút "Sao lưu ra ổ ngoài ngay" ⇒ thân offsite cũ/EB01 giữ nguyên."""
     body = "Cắm ổ USB/NAS rồi bấm 'Sao lưu ra ổ ngoài ngay' để có bản sao mới ngoài máy chủ"
