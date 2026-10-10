@@ -12,6 +12,7 @@ trạng thái `discarded` (`detail.discarded_by = 'prefilter'`) để xem lại 
 như cũ (không mất tin).
 """
 
+import asyncio
 import logging
 import uuid
 from dataclasses import dataclass, field
@@ -37,6 +38,9 @@ log = logging.getLogger("gh.refinery")
 
 AGENT_KEY = "core.refinery"
 MAX_ATTEMPTS = 3
+#: J2: tổng thời gian tối đa hỏi Jev cho CẢ lô trước khi trích xuất (giây). Quá hạn ⇒ coi như Jev lỗi (thận trọng:
+#: chỉ bỏ tin trùng hẳn) — bước tối ưu chi phí không được ăn hết `JOB_TIMEOUT` của job sàng lọc.
+PREFILTER_JEV_BUDGET_S = 20.0
 ATTENTION_TYPES = {"Complained", "MentionsCompetitor", "WentSilent"}
 OPEN_THREAD_TYPES = {"PromisedDelivery", "ScheduledMeeting", "AskedStatus", "RequestedSample", "SentQuotation"}
 RULE_KIND_ALERT = {"risk": "repeated_complaint", "competition": "competitor", "hr": "people_signal",
@@ -351,8 +355,13 @@ class Refinery:
             # Chỉ hỏi Jev về tin chưa chắc chắn trùng hẳn và không phải tin tag (đỡ lượt gọi vô ích).
             first = prefilter.decide(items, rules_spam=[False] * n, jev_labels=None, dup_index=known)
             ask = [not r.skip and not it.tagged for r, it in zip(first, items, strict=True)]
-            asked = await triage.ask_jev_batch(dec, [(ev.text, ev.kind) for ev, a in zip(to_model, ask, strict=True)
-                                                     if a])
+            jobs = [(ev.text, ev.kind) for ev, a in zip(to_model, ask, strict=True) if a]
+            try:
+                asked = await asyncio.wait_for(triage.ask_jev_batch(dec, jobs), timeout=PREFILTER_JEV_BUDGET_S)
+            except TimeoutError:
+                log.warning("Lọc trước (J2): hỏi Jev quá %.0f giây — coi như Jev lỗi cho lô này",
+                            PREFILTER_JEV_BUDGET_S)
+                asked = [None] * len(jobs)
             answers = iter(asked)
             labels = []
             for a in ask:

@@ -9,8 +9,10 @@
   chứa khóa).
 Chỉ dùng Jev/router giả."""
 
+import asyncio
 import json
 import logging
+import time
 import uuid
 from collections.abc import Callable
 from typing import Any
@@ -400,6 +402,28 @@ async def test_tagged_messages_and_other_senders_are_never_dropped(app: Any, db:
     assert st.prefilter_skipped == 0 and seen.count(LONG_BUY) == 3 and tagged_spam in seen
 
 
+async def test_jev_too_slow_for_the_batch_budget_counts_as_jev_error(app: Any, db: Any, redis: Any, owner_api: Api,
+                                                                     monkeypatch: pytest.MonkeyPatch) -> None:
+    from gh.refinery import runner
+
+    monkeypatch.setattr(runner, "PREFILTER_JEV_BUDGET_S", 0.2)
+    org = await setup_listen(db)
+    await add_jev_source(db, org)
+    sm = sessionmaker()
+
+    async def slow(request: httpx.Request) -> httpx.Response:
+        await asyncio.sleep(2)
+        return httpx.Response(200, json=chat(LAB["spam"]))
+
+    seen: list[str] = []
+    spam_c = SPAM + " container chậm"
+    await put(sm, org, msg(spam_c), msg(LONG_BUY, sender="u2"), msg(LONG_BUY, sender="u2"))
+    t0 = time.monotonic()
+    st = await Refinery(sm, redis, router_taking(seen), jev_transport=httpx.MockTransport(slow)).run(org, "manual")  # type: ignore[arg-type]
+    assert time.monotonic() - t0 < 1.8                       # không chờ hết các lượt gọi chậm
+    assert spam_c in seen and st.prefilter_skipped == 1      # Jev "lỗi" ⇒ chỉ bỏ tin trùng hẳn, tin rác vẫn đi tiếp
+
+
 async def test_prefilter_off_drops_nothing(app: Any, db: Any, redis: Any, owner_api: Api) -> None:
     org = await setup_listen(db)
     await triage.save_settings(db, org, {**triage.DEFAULTS, "prefilter": False})
@@ -471,6 +495,16 @@ def test_bench_items_fixed_and_synthetic() -> None:
     blob = " ".join(i.question for i in items)
     assert not any(p in blob for p in PII) and "@" not in blob
     assert len({i.question for i in items}) == 12
+
+
+async def test_benchmark_payloads_are_masked_even_for_pii_items() -> None:
+    spy = JevSpy(lambda _i, o: o[0])
+    item = jev_bench.BenchItem("intent", f"Khách {PHONE} email {EMAIL} tk {ACCOUNT} hỏi gì?", "data")
+    flt = jev_bench.BenchItem("filter", f"Gọi {PHONE} mail {EMAIL} chuyển {ACCOUNT}", "high")
+    d = decmod.JevDecider(client_for(spy))
+    out = await jev_bench.run(d, filter_options=dict(LAB), filter_context=triage.jev_context("x"), items=(item, flt))
+    assert out["total"] == 2 and len(spy.payloads) == 2
+    assert_clean(spy.wire)
 
 
 def oracle(wrong_for: tuple[str, ...] = ()) -> Callable[[str, list[str]], str | None]:
