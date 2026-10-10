@@ -342,7 +342,12 @@ jobs:
       - name: Cấm ID giả viết cứng trong apps/web/src (F-1)
         run: python3 .github/scripts/check_no_fake_ids.py apps/web/src
       # v0.1.56 — repo công khai, bản phát hành đi tới Owner khác: mã giao đi không được mang địa chỉ Gen-hub / tên riêng của Sếp.
+      # v0.1.57 — quy tắc CHUNG (email phải là example.test/example.com/noreply; địa chỉ `/mcp` phải là <…> hoặc example.*)
+      # nằm trong repo; mẫu RIÊNG (tên miền, tên gọi, email của Sếp) KHÔNG nằm trong repo mà lấy từ secret
+      # GH_PERSONAL_PATTERNS (mỗi dòng một regex). Secret trống (chưa đặt, hoặc PR từ fork) ⇒ chỉ chạy quy tắc chung + cảnh báo.
       - name: Chống lộ thông tin riêng của Sếp
+        env:
+          GH_PERSONAL_PATTERNS: ${{ secrets.GH_PERSONAL_PATTERNS }}
         run: python3 .github/scripts/check_no_personal_info.py
       - run: npm run -w apps/web typecheck
       - run: npm run -w apps/web test

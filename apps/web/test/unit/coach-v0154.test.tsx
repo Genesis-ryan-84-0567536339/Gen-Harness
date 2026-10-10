@@ -692,7 +692,7 @@ describe('hợp đồng gen.ts ↔ mock-gen-coach', () => {
     expect(t.lesson).toMatchObject({ id: 'N01', k: 1, total: 19, status: 'new' });
     expect(t.progress).toEqual({ required_done: 0, required_total: 1, lessons_done: 0, lessons_total: 19, stable: false, stable_since: null });
     expect(t.unseen).toBe(true);
-    expect(JSON.stringify(t)).not.toMatch(/token|email|message|Kho Ryan/i);
+    expect(JSON.stringify(t)).not.toMatch(/token|email|message/i);
   });
 
   it('boss.remote chỉ hiện khi đã mời nhân viên (scenario staff); model.missing ẩn boss.ai như máy chủ', () => {

@@ -46,6 +46,7 @@ from tests.test_briefing_v0141 import _router as briefing_router
 from tests.test_briefing_v0141 import _today as briefing_today
 from tests.test_gen import FakeRouter, _user_of, ask, kinds
 from tests.test_model_router import provider as api_provider
+from tests.test_no_personal_info_v0156 import OLD_NAME
 from tests.test_rbac_api import login_as
 from tests.test_rls import _as_low_priv
 
@@ -210,7 +211,7 @@ def test_health_titles_cover_every_action_kind() -> None:
 def test_dismiss_warnings_cover_every_p1_p3_key() -> None:
     assert sg.DISMISS_WARNINGS["boss.hub"] == ("Không nối Gen-hub thì Gen không đọc được lịch, mail và Kho dữ liệu "
                                                "của Sếp.")
-    assert "Kho Ryan" not in " ".join(sg.DISMISS_WARNINGS.values())          # thẻ dùng tên chung "Kho dữ liệu"
+    assert OLD_NAME not in " ".join(sg.DISMISS_WARNINGS.values())            # thẻ dùng tên chung "Kho dữ liệu"
     for rule in sg.TODO_RULES:
         if rule.level in ("P1", "P3"):
             key = "health" if rule.kind == "health" else rule.key
@@ -283,7 +284,7 @@ def test_boss_ai_is_deduped_with_model_missing_and_gen_hub_is_only_a_p3_hint() -
     plan = today_of(optional_off)
     assert plan.p01_keys == [] and keys_of(plan) == ["boss.hub"]
     assert plan.payload["todos"][0]["title"] == "Nối Gen-hub nếu Sếp muốn"
-    assert "Kho Ryan" not in todos[0].why and "Kho dữ liệu" in todos[0].why
+    assert OLD_NAME not in todos[0].why and "Kho dữ liệu" in todos[0].why
 
 
 def test_remote_access_is_only_nudged_after_staff_were_invited() -> None:
