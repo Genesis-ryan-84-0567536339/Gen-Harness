@@ -8,9 +8,6 @@
 - `POST /jev/benchmark` — chạy bộ 12 câu cố định (`gh.gen.jev_bench`) tuần tự qua `JevDecider` (trần 1,5 s/câu). Chưa có
   nguồn Jev kèm khoá ⇒ 409 `JEV_KEY_MISSING`.
 - `GET /jev/value-summary` — số đo giá trị (`triage.value_summary`): chỉ đếm lần, không quy ra tiền.
-
-TODO(v0155-integ): router này CHƯA được gắn vào `gh/app.py` (file dùng chung — chỉ Opus sửa; không có Bước 0): thêm
-`from gh.refinery.jev_routes import router as jev_router` vào vòng `include_router(prefix="/api/v1")`.
 """
 
 import uuid

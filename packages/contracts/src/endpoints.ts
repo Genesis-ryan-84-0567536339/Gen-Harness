@@ -20,6 +20,8 @@ import { telegramEndpoints } from './telegram';
 import { diagnosticsEndpoints } from './diagnostics';
 import { pluginsEndpoints } from './p4-plugins';
 import { systemEndpoints } from './p4-system';
+import { defaultsEndpoints } from './defaults';
+import { ownerEndpoints } from './owner';
 import type { Step10Body, Step11Body, Step10Invited, BackupConfig, Step8Body, Step8Agent, Step9Body, Step9State, SetupFollowUpItem } from './p4-system';
 import type {
   AuditPage,
@@ -301,6 +303,10 @@ export function createEndpoints(client: ApiClient) {
     notify: telegramEndpoints(r),
     /** v0.1.44 (F-4b): Gói chẩn đoán cho người hỗ trợ — chỉ Owner. */
     diagnostics: diagnosticsEndpoints(r),
+    /** v0.1.55 (G1): "Chế độ tiêu chuẩn" / "Về mặc định" — chỉ Owner. */
+    defaults: defaultsEndpoints(r),
+    /** v0.1.55 (G5): Mặt tiền Owner `/owner/*` — chỉ đọc, chỉ Owner. */
+    owner: ownerEndpoints(r),
   };
 }
 

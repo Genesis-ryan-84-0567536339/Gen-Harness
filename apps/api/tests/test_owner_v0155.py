@@ -7,12 +7,9 @@
 - Không có route ghi nào trong gh/owner/routes.py; GET không ghi Action Log; không lộ bí mật.
 
 Chạy cả quyền superuser và `GH_TEST_APP_ROLE=1` (gh_app): `pytest -q tests/test_owner_v0155.py`.
-TODO(v0155-integ): Opus gắn `gh.owner.routes.router` vào `app.py` ⇒ fixture `owner_app` thành no-op (dò route sẵn).
 """
 
 import re
-import sys
-import types
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -33,9 +30,9 @@ ROUTES_FILE = Path(owner_routes.__file__)
 
 @pytest.fixture
 async def owner_app(app: Any) -> Any:
-    """Gắn router Owner vào app test khi app.py chưa gắn (Bước 0 của đợt chưa có)."""
-    if not any(str(getattr(r, "path", "")).startswith("/api/v1/owner/") for r in app.routes):
-        app.include_router(owner_routes.router, prefix="/api/v1")
+    """Router Owner phải được `gh/app.py` gắn sẵn (prefix /api/v1)."""
+    assert any(getattr(r, "original_router", None) is owner_routes.router
+               or str(getattr(r, "path", "")).startswith("/api/v1/owner/") for r in app.routes)
     return app
 
 
@@ -187,7 +184,9 @@ async def test_empty_org_returns_empty_arrays_not_500(owner: Api) -> None:
     assert today.status_code == 200, today.text
     d = today.json()
     assert set(d) == {"needs_review", "kpis", "briefing_latest", "filter_value", "suggestions", "progress"}
-    assert d["needs_review"] == [] and d["briefing_latest"] is None and d["suggestions"] == []
+    assert d["needs_review"] == [] and d["briefing_latest"] is None
+    # tổ chức trống chưa có khoá API cho việc nền ⇒ gợi ý thật duy nhất của registry (G1) là thiếu khoá nền
+    assert [s["key"] for s in d["suggestions"]] == ["background_key_missing"]
     assert d["kpis"] == {"hot": 0, "cooling": 0, "open_opps": 0, "open_value_vnd": 0, "overdue_promises": 0}
     assert d["filter_value"] == {"filtered": 0, "spam_blocked": 0, "calls_saved": 0, "jev_on": False}
     # tiến độ lấy từ "Việc Sếp cần làm" (không ghi cứng): tổng = số dòng bắt buộc của boss_checks
@@ -363,9 +362,7 @@ def _fake_registry(monkeypatch: pytest.MonkeyPatch, rows: Any) -> None:
     async def suggestions(db: Any, org_id: Any) -> Any:
         return rows
 
-    mod = types.ModuleType("gh.defaults.registry")
-    mod.suggestions = suggestions                              # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "gh.defaults.registry", mod)
+    monkeypatch.setattr(svc.defaults_registry, "suggestions", suggestions)
 
 
 async def test_suggestions_from_registry_and_background_state(owner: Api, db: Any,
@@ -393,9 +390,7 @@ async def test_suggestions_registry_failure_is_ignored(owner: Api, monkeypatch: 
     async def boom(db: Any, org_id: Any) -> Any:
         raise RuntimeError("hỏng")
 
-    mod = types.ModuleType("gh.defaults.registry")
-    mod.suggestions = boom                                     # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "gh.defaults.registry", mod)
+    monkeypatch.setattr(svc.defaults_registry, "suggestions", boom)
     r = await owner.get("/owner/today")
     assert r.status_code == 200 and r.json()["suggestions"] == []
 

@@ -779,11 +779,10 @@ describe('BOSS_ROW_TARGETS khớp ROWS của api (boss_checks/service.py)', () =
     expect(end).toBeGreaterThan(start);
     const all = [...src.slice(start, end).matchAll(/"row":\s*(\d+),\s*"key":\s*"(\w+)"/g)].map((m) => [m[2], Number(m[1])] as const);
     expect(all.length).toBeGreaterThanOrEqual(10);
-    // v0.1.55: dòng 0 "ai" (nguồn AI, bắt buộc duy nhất) CHƯA có mục tiêu `data-gen-target` (id `boss_checks.row.ai` chưa có trong
-    // registry — Opus thêm khi tích hợp, rồi bỏ ngoại lệ này). Mọi dòng kết nối còn lại phải khớp.
+    // v0.1.55: dòng 0 "ai" (nguồn AI, bắt buộc duy nhất) có mục tiêu `boss_checks.row.ai` như mọi dòng kết nối khác.
     expect(all[0]).toEqual(['ai', 0]);
-    expect(bossRowTarget(0)).toBeUndefined();
-    const rows = all.filter(([k]) => k !== 'ai');
+    expect(bossRowTarget(0)).toBe('boss_checks.row.ai');
+    const rows = all;
     expect(Object.keys(BOSS_ROW_TARGETS).sort()).toEqual(rows.map(([k]) => k).sort());
     for (const [key, row] of rows) {
       const t = BOSS_ROW_TARGETS[key as keyof typeof BOSS_ROW_TARGETS];

@@ -14,13 +14,13 @@ export const BOSS_CHECKS_KEY = ['boss-checks'] as const;
 export const BOSS_CHECKS_PATH = '/guide/viec-sep';
 
 /**
- * v0.1.54 (Gen hướng dẫn): mục tiêu `data-gen-target` của 9 dòng kết nối "Việc Sếp cần làm" — khoá = `key` của dòng (khớp `ROWS`
- * trong apps/api/gh/boss_checks/service.py; vitest `coach-v0154` so khớp hai bên, trừ dòng `ai`), `row` = số dòng. Các literal
+ * v0.1.54 (Gen hướng dẫn): mục tiêu `data-gen-target` của các dòng kết nối "Việc Sếp cần làm" — khoá = `key` của dòng (khớp `ROWS`
+ * trong apps/api/gh/boss_checks/service.py; vitest `coach-v0154` so khớp hai bên), `row` = số dòng. Các literal
  * `genTarget: '…'` ĐỂ NGUYÊN dạng này: bộ quét tĩnh của gen-targets.test.ts đọc chúng để biết id nào đã được gắn vào màn hình.
- * v0.1.55: dòng 0 `ai` (nguồn AI, bắt buộc duy nhất) CHƯA có mục tiêu `data-gen-target` (id `boss_checks.row.ai` chưa có trong
- * registry — TODO(v0155-integ): Opus thêm vào genTargets.ts + registry.json rồi thêm `ai` vào bảng này).
+ * v0.1.55: dòng 0 `ai` (nguồn AI, bắt buộc duy nhất).
  */
 export const BOSS_ROW_TARGETS = {
+  ai: { row: 0, genTarget: 'boss_checks.row.ai' },
   hub: { row: 1, genTarget: 'boss_checks.row.hub' },
   facebook: { row: 2, genTarget: 'boss_checks.row.facebook' },
   agy: { row: 3, genTarget: 'boss_checks.row.agy' },
@@ -32,7 +32,7 @@ export const BOSS_ROW_TARGETS = {
   kho_write: { row: 9, genTarget: 'boss_checks.row.kho_write' },
 } as const;
 
-/** Số dòng (1..9) → id `data-gen-target` của dòng đó; số lạ ⇒ undefined (không gắn). */
+/** Số dòng (0..9) → id `data-gen-target` của dòng đó; số lạ ⇒ undefined (không gắn). */
 export function bossRowTarget(n: number): string | undefined {
   return Object.values(BOSS_ROW_TARGETS).find((r) => r.row === n)?.genTarget;
 }

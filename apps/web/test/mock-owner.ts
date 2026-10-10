@@ -14,7 +14,7 @@
  *                                  cả ba; `only` chỉ áp cho một đường, các đường còn lại về 'data');
  *   state {} — đọc số lần gọi + lời gọi bị 403 của vai trò khác Owner (kiểm tra); reset {} — về dữ liệu mẫu.
  *
- * TODO(v0155-integ): nối vào `phase3` của `test/mock-api.ts` (Opus), TRƯỚC `core`:
+ * Nối vào `phase3` của `test/mock-api.ts`, TRƯỚC `core`:
  *   `import { createMock as createOwner } from './mock-owner';` và
  *   `owner: createOwner({ fresh: opts.setup === 'fresh', emit: broadcast, boss: bossChecks.hooks.overview as () => BossOverview }),`.
  */

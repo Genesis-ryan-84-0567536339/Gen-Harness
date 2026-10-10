@@ -3,12 +3,11 @@
  * ghi dẫn link sâu tới luồng sẵn có. Vai trò khác Owner KHÔNG gọi (máy chủ trả 403) — `enabled` theo `Me.role`.
  */
 import { useQuery } from '@tanstack/react-query';
-import { apiClient } from '../lib/api';
+import { api } from '../lib/api';
 import { useMe } from '../lib/queries';
-import { ownerEndpoints, type OwnerRelationList } from './ownerModel';
+import type { OwnerRelationList } from './ownerModel';
 
-// TODO(v0155-integ): khi `endpoints.ts` nối `owner: ownerEndpoints(r)` thì đổi sang `api.owner`.
-const ownerApi = ownerEndpoints(apiClient.request);
+const ownerApi = api.owner;
 
 export const OWNER_KEYS = {
   all: ['owner'] as const,

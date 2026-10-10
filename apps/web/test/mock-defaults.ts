@@ -14,7 +14,7 @@
  * Hook e2e `POST /api/v1/__mock/p3/defaults/{hook}`:
  *   customize {keys: string[]} — đặt các mục thành "Đã đổi"; state {} — đọc trạng thái (kiểm tra); resets {} — số lần reset đã nhận.
  *
- * TODO(v0155-integ): nối vào `phase3` của `test/mock-api.ts` (Opus): `import { createMock as createDefaults } from './mock-defaults';`
+ * Nối vào `phase3` của `test/mock-api.ts`: `import { createMock as createDefaults } from './mock-defaults';`
  * và `defaults: createDefaults({ fresh: opts.setup === 'fresh', emit: broadcast }),` TRƯỚC `core`.
  */
 import type { DefaultItem, DefaultSuggestion, DefaultsResponse } from '../../../packages/contracts/src/defaults';

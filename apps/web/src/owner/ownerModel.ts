@@ -3,10 +3,7 @@
  *
  * Màn Hôm nay/Quan hệ dùng chữ đời thường — không có thuật ngữ kỹ thuật (model, token, API). Mọi chuỗi từ máy chủ đi qua
  * `asText` (không bao giờ render object) và mọi link đi qua `safeLink` (chỉ đường dẫn trong Console).
- *
- * TODO(v0155-integ): `packages/contracts/src/index.ts` (Opus) chưa có `export * from './owner'` ⇒ tạm re-export từ đường
- * dẫn tương đối. Khi tích hợp: đổi các dòng này thành `from '@gen-harness/contracts'` (và dùng `api.owner` sau khi
- * `endpoints.ts` nối `owner: ownerEndpoints(r)`).
+
  */
 import { fmtInt } from '../lib/format';
 import type {
@@ -15,9 +12,8 @@ import type {
   OwnerRelationList,
   OwnerReviewKind,
   OwnerTaskGroupKey,
-} from '../../../../packages/contracts/src/owner';
+} from '@gen-harness/contracts';
 
-export { ownerEndpoints } from '../../../../packages/contracts/src/owner';
 export type {
   OwnerBriefing,
   OwnerFilterValue,
@@ -35,7 +31,7 @@ export type {
   OwnerTaskItem,
   OwnerTasks,
   OwnerToday,
-} from '../../../../packages/contracts/src/owner';
+} from '@gen-harness/contracts';
 
 // ── đường dẫn + thanh điều hướng ───────────────────────────────────────────────────────────────────────────────
 

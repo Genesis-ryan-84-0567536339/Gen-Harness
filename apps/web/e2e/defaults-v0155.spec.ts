@@ -3,7 +3,6 @@ import { loginAsOwner, p3Hook, resetMock } from './support';
 
 /**
  * v0.1.55 (G1) — "Chế độ tiêu chuẩn" + "Về mặc định" ở Cài đặt › Bộ não AI (mock-defaults: thẻ Lọc tin mặc định "Đã đổi").
- * TODO(v0155-integ): cần `defaults` nối vào phase3 của test/mock-api.ts (Opus).
  */
 test.describe('v0.1.55 — Chế độ tiêu chuẩn / Về mặc định', () => {
   test.beforeEach(async ({ page }) => {

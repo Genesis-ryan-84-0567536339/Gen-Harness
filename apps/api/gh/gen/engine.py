@@ -29,7 +29,6 @@ gọi model; `data` đơn giản ở chế độ Tự động chạy tầng Nhan
 
 import asyncio
 import hashlib
-import importlib
 import inspect
 import logging
 import uuid
@@ -46,6 +45,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from gh import realtime
 from gh.auth import rbac, service
 from gh.chassis import actionlog
+from gh.defaults import profiles
 from gh.gen import decider as decmod
 from gh.gen import envelope, memory_notes, proposals, registry, store
 from gh.gen.coach import engine as coach_engine
@@ -339,24 +339,18 @@ def _history_text(msgs: list[dict[str, Any]]) -> list[Message]:
 #: Tầng của khung chat → tầng bộ định tuyến (G1): "Kỹ hơn" (deep) = tầng strong.
 ROUTER_TIER = {"fast": "fast", "balanced": "balanced", "deep": "strong"}
 TIER_LABEL = {"fast": "Nhanh", "balanced": "Cân bằng", "deep": "Kỹ hơn"}
-_OPTIONS_MODULE = "gh.defaults.profiles"  # TODO(v0155-integ): import thẳng `from gh.defaults import profiles` (G1)
 
 
 def stub_model_options() -> dict[str, Any]:
-    """Khung dự phòng khi `gh.defaults.profiles` chưa có (nhánh chưa tích hợp G1) hoặc tra cứu lỗi: bốn tầng đều "dùng
+    """Khung dự phòng khi tra cứu hồ sơ tiêu chuẩn lỗi: bốn tầng đều "dùng
     được", không mức suy nghĩ — bộ định tuyến vẫn là nơi giữ luật cứng (agy chỉ Owner, `tainted` không agy)."""
     return {"tiers": [{"tier": t, "available": True, "efforts": []} for t in ("auto", "fast", "balanced", "deep")]}
 
 
 async def model_options(db: AsyncSession, org_id: uuid.UUID, *, owner: bool, tainted: bool) -> dict[str, Any]:
     """Tầng + mức suy nghĩ khung chat được mời chọn (hợp đồng G1: `gh.defaults.profiles.choice_options`)."""
-    # TODO(v0155-integ): Bước 0 / G1 chưa vào nhánh này ⇒ nạp động, thiếu thì dùng khung dự phòng. Opus gỡ ImportError.
     try:
-        mod = importlib.import_module(_OPTIONS_MODULE)
-    except ImportError:
-        return stub_model_options()
-    try:
-        out = await mod.choice_options(db, org_id, owner=owner, tainted=tainted)
+        out = await profiles.choice_options(db, org_id, owner=owner, tainted=tainted)
     except Exception:  # noqa: BLE001 — khung chọn model không được làm hỏng màn Gen
         log.warning("Không tra được tầng model cho khung chat Gen", exc_info=True)
         return stub_model_options()
@@ -411,8 +405,7 @@ def resolve_model_choice(choice: Mapping[str, Any] | None, *, is_owner: bool, ta
 
 def _tier_kw(router: Any, tier: str | None, effort: str | None) -> dict[str, str]:
     """`tier` / `effort` chỉ truyền cho bộ định tuyến NHẬN tham số đó (bộ giả của test cũ không nhận; ModelRouter chưa
-    có Bước 0 cũng không). TODO(v0155-integ): truyền tier/effort — Bước 0 có `ModelRouter.generate(tier=, effort=)`
-    ⇒ truyền thẳng, bỏ dò chữ ký."""
+    có tham số này cũng không) — `ModelRouter.generate(tier=, effort=)` thật luôn nhận."""
     want = {k: v for k, v in (("tier", tier), ("effort", effort)) if v}
     if not want:
         return {}
@@ -610,7 +603,6 @@ async def _run(turn: Turn, *, app: Any, router: ModelRouter, session_token: str,
     real = isinstance(router, ModelRouter)
     route_kw: dict[str, Any] = {"allow_agy": owner and not tainted} if real else {}
     # v0.1.55 (G3): tầng / mức suy nghĩ đã chọn (hoặc J3 chọn Nhanh).
-    # TODO(v0155-integ): truyền tier/effort (xem _tier_kw).
     route_kw.update(_tier_kw(router, tier, effort))
     retried = False
     for _ in range(MAX_ROUNDS):

@@ -76,6 +76,7 @@ export const GEN_TARGETS: GenTarget[] = [
   { id: 'guide.item', screen: 'guide', label: 'Một việc thiết lập', description: 'Thẻ một việc thiết lập (theo số việc n)', dynamic: 'row' },
   { id: 'guide.item.do', screen: 'guide', label: 'Nút "Làm bước này"', description: 'Mở form làm việc thiết lập n', dynamic: 'row' },
   // v0.1.54: 9 dòng của "Việc Sếp cần làm" (/guide/viec-sep) — mỗi dòng một mục tiêu để Gen hướng dẫn chỉ đúng dòng.
+  { id: 'boss_checks.row.ai', screen: 'boss_checks', label: 'Dòng 0 "Nguồn AI" (bắt buộc duy nhất)', description: 'Dòng 0 của Việc Sếp cần làm: có ít nhất 1 nguồn AI chạy được — bấm Kiểm tra hoặc mở Bộ não AI để thêm nguồn' },
   { id: 'boss_checks.row.hub', screen: 'boss_checks', label: 'Dòng 1 "Nối Gen-hub"', description: 'Dòng 1 của Việc Sếp cần làm: dán địa chỉ + token Gen-hub rồi bấm Kiểm tra (cần mã PIN)' },
   { id: 'boss_checks.row.facebook', screen: 'boss_checks', label: 'Dòng 2 "Kết nối Facebook"', description: 'Dòng 2 của Việc Sếp cần làm: chọn tài khoản Facebook đã đăng nhập rồi bấm Đọc ngay' },
   { id: 'boss_checks.row.agy', screen: 'boss_checks', label: 'Dòng 3 "Google (Antigravity)"', description: 'Dòng 3 của Việc Sếp cần làm: đăng nhập hai tài khoản Google, gọi thử và đổi qua lại' },
@@ -106,6 +107,7 @@ export const GEN_TARGETS: GenTarget[] = [
   { id: 'system.brain.coach', screen: 'system', label: 'Thẻ "Gen hướng dẫn"', description: 'Bật/tắt Gen hướng dẫn, chuông nhắc, số bài học mỗi ngày (0–2), giờ yên lặng và danh sách việc Sếp đã chọn không dùng (có nút Bật lại)', params: { tab: 'brain' }, permission: 'system.manage' },
   { id: 'system.brain.jev', screen: 'system', label: 'Thẻ Jev (System One)', description: 'Cấu hình nguồn model quyết định nhanh Jev', params: { tab: 'brain' } },
   { id: 'system.brain.jev.test', screen: 'system', label: 'Nút "Kiểm tra 1 lần" Jev', description: 'Gọi thử Jev một lần để biết khoá và địa chỉ đúng chưa', params: { tab: 'brain' } },
+  { id: 'system.brain.jev.enable', screen: 'system', label: 'Nút "Bật Jev" (1 chạm)', description: 'Bật Jev bằng khóa OpenRouter đang có hoặc dán khóa mới (cần mã PIN); sau đó bấm "Thử 12 câu mẫu"', params: { tab: 'brain' }, permission: 'system.manage' },
   { id: 'system.brain.triage', screen: 'system', label: 'Thẻ "Lọc tin"', description: 'Bật/tắt lọc tin, chọn mức Thấp/Vừa/Cao; Jev và ngưỡng số ở Nâng cao (chỉ Owner sửa)', params: { tab: 'brain' } },
   { id: 'system.storage.health', screen: 'system', label: 'Sức khoẻ hệ thống', description: 'Bộ xử lý nền, Trình duyệt nền, hàng lỗi, sao lưu, cập nhật, ổ đĩa; chi tiết kỹ thuật lịch chạy', params: { tab: 'storage' } },
   { id: 'system.storage.retention', screen: 'system', label: 'Hạn lưu dữ liệu', description: 'Mỗi tập dữ liệu giữ bao lâu', params: { tab: 'storage' } },

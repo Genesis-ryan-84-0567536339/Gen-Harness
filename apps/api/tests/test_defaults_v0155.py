@@ -41,9 +41,9 @@ MSGS = [Message("user", "xin chào")]
 
 
 def _mount(app: Any) -> None:
-    """TODO(v0155-integ): `gh/app.py` (Opus) sẽ gắn router /defaults; khi chưa gắn, test tự gắn."""
-    if not any(str(getattr(r, "path", "")).startswith("/api/v1/defaults") for r in app.routes):
-        app.include_router(defaults_router, prefix="/api/v1")
+    """Router /defaults phải được `gh/app.py` gắn sẵn (prefix /api/v1)."""
+    assert any(getattr(r, "original_router", None) is defaults_router
+               or str(getattr(r, "path", "")).startswith("/api/v1/defaults") for r in app.routes)
 
 
 @pytest.fixture

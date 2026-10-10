@@ -523,9 +523,9 @@ def oracle(wrong_for: tuple[str, ...] = ()) -> Callable[[str, list[str]], str | 
 
 
 def _mounted(app: Any, api: Api) -> Api:
-    """TODO(v0155-integ): `gh/app.py` (Opus) gắn `jev_routes.router`; trước đó test tự gắn nếu thiếu."""
-    if not any(getattr(r, "path", "") == "/api/v1/jev/enable" for r in app.routes):
-        app.include_router(jev_routes.router, prefix="/api/v1")
+    """Router /jev phải được `gh/app.py` gắn sẵn (prefix /api/v1)."""
+    assert any(getattr(r, "original_router", None) is jev_routes.router
+               or getattr(r, "path", "") == "/api/v1/jev/enable" for r in app.routes)
     return api
 
 

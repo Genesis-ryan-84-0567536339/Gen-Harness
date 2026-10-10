@@ -12,8 +12,6 @@
 Action Log 'defaults.reset': target_id = khoá | 'all' | 'apply_standard' (+ `detail.value` giống vậy). KHÔNG ghi giá
 trị cài đặt. TUYỆT ĐỐI không chạm khoá API, nguồn AI, mã PIN/mật khẩu, Gen-hub, kênh báo động, tài khoản mạng xã hội,
 ranh giới cứng, danh tính tổ chức (xem `gh.defaults.registry`).
-
-TODO(v0155-integ): gắn `router` vào `gh/app.py` (prefix /api/v1) — file dùng chung của Opus.
 """
 
 from typing import Any

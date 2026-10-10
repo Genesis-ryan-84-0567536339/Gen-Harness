@@ -16,11 +16,9 @@ from pydantic_core import PydanticCustomError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gh.agents_api.routes import CORE_AGENT_KEYS, GEN_KEY
 from gh.auth import rbac, service
 from gh.auth.deps import client_ip, optional_user
 from gh.auth.routes import set_session_cookies
-from gh.biz.duty.context import DEFAULT_CONTEXT_TOKENS
 from gh.biz.people.routes import try_chat
 from gh.chassis import actionlog, policy
 from gh.crypto import hash_secret, token_digest
@@ -475,36 +473,7 @@ async def step4(body: Step4In, request: Request, db: AsyncSession = DB,
                                                           "model_id": str(model_id)})
 
 
-async def _is_agy_model(db: AsyncSession, model_id: uuid.UUID | None) -> bool:
-    if model_id is None:
-        return False
-    kind = (await db.execute(text("""SELECT p.kind FROM agent.models m JOIN agent.providers p ON p.id = m.provider_id
-                                     WHERE m.id = :m"""), {"m": model_id})).scalar_one_or_none()
-    return kind == "antigravity_cli"
-
-
-async def _bind_core_agents(db: AsyncSession, org_id: uuid.UUID, model_id: uuid.UUID,
-                            other_id: uuid.UUID | None = None) -> None:
-    """[CŨ — v0.1.55: trình thiết lập KHÔNG còn gọi; hồ sơ tiêu chuẩn (gh.defaults) tự phủ.] Gán model cho các agent
-    lõi còn trống (Sàng lọc, Gen…) — Owner đổi lại được ở màn API & Model.
-
-    F-22 (luật cứng): model của Antigravity CLI CHỈ gán cho Gen (core.gen); khoá lõi khác nhận `other_id` (model đầu
-    tiên của nguồn không phải agy đã sẵn sàng), không có thì để trống.
-    TODO(v0155-integ): Opus xoá hàm này cùng `auto_assign_tested_model` và các test cũ import chúng
-    (test_cli_effort_v0132, test_agy_owner_only_v0138) khi tích hợp."""
-    agy = await _is_agy_model(db, model_id)
-    if agy and await _is_agy_model(db, other_id):
-        other_id = None
-    for key in CORE_AGENT_KEYS:   # core.refinery, core.reply, core.gen (F-25)
-        mid = model_id if (not agy or key == GEN_KEY) else other_id
-        if mid is None:
-            continue
-        await db.execute(text("""INSERT INTO agent.bindings (org_id, agent_key, model_id, context_tokens)
-                                 VALUES (:o, :k, :m, :ct) ON CONFLICT (org_id, agent_key) DO NOTHING"""),
-                         {"o": org_id, "k": key, "m": mid, "ct": DEFAULT_CONTEXT_TOKENS})
-
-
-#: Nguồn đã gọi thử OK (hoặc CLI đã đăng nhập), theo thứ tự chuỗi — dùng cho `ensure_tested_models` và hàm cũ.
+#: Nguồn đã gọi thử OK (hoặc CLI đã đăng nhập), theo thứ tự chuỗi — dùng cho `ensure_tested_models`.
 _TESTED_SOURCES_SQL = """
         SELECT p.id, p.kind, CASE WHEN jsonb_typeof(p.last_test->'models') = 'array' THEN
                     ARRAY(SELECT jsonb_array_elements_text(p.last_test->'models')) END AS test_models,
@@ -533,34 +502,6 @@ async def ensure_tested_models(db: AsyncSession, org_id: uuid.UUID) -> int:
             ON CONFLICT (provider_id, model_name) DO NOTHING"""), {"p": p.id, "m": choice[0], "e": choice[1]})
         added += 1
     return added
-
-
-async def auto_assign_tested_model(db: AsyncSession, org_id: uuid.UUID) -> uuid.UUID | None:
-    """[CŨ — v0.1.55: trình thiết lập KHÔNG còn gọi; xem `_bind_core_agents`.] Model của nguồn đã gọi thử OK (đã chọn,
-    hoặc model đầu tiên nhận được khi gọi thử) → gán cho agent lõi còn trống. Không có nguồn nào như vậy → None."""
-    rows = (await db.execute(text(_TESTED_SOURCES_SQL), {"o": org_id})).all()
-    first: uuid.UUID | None = None
-    for p in rows:
-        if first is not None and p.kind == "antigravity_cli":
-            continue
-        mid = await _first_model(db, p.id)
-        if mid is None:
-            choice = _tested_choice(p)
-            if choice is None:
-                continue
-            mid = (await db.execute(text("""
-                INSERT INTO agent.models (provider_id, model_name, effort) VALUES (:p, :m, :e)
-                ON CONFLICT (provider_id, model_name) DO UPDATE SET model_name = EXCLUDED.model_name
-                RETURNING id"""), {"p": p.id, "m": choice[0], "e": choice[1]})).scalar_one()
-        if first is None and p.kind == "antigravity_cli":
-            # F-22: agy chỉ cho Gen — tìm tiếp model của nguồn khác cho các khoá lõi còn lại.
-            first = mid
-            continue
-        await _bind_core_agents(db, org_id, first or mid, mid)
-        return first or mid
-    if first is not None:
-        await _bind_core_agents(db, org_id, first)
-    return first
 
 
 CLI_KINDS = ("antigravity_cli", "claude_code_cli")

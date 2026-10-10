@@ -1,10 +1,9 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
-import { apiClient } from '../lib/api';
+import { api } from '../lib/api';
 import { useMe } from '../lib/queries';
-import { defaultsEndpoints, type DefaultsResponse } from './defaultsModel';
+import type { DefaultsResponse } from './defaultsModel';
 
-// TODO(v0155-integ): khi `endpoints.ts` nối `defaults: defaultsEndpoints(r)` thì đổi sang `api.defaults`.
-const defaultsApi = defaultsEndpoints(apiClient.request);
+const defaultsApi = api.defaults;
 
 /** `GET /defaults` (chỉ Owner). */
 export const DEFAULTS_KEY = ['defaults'] as const;

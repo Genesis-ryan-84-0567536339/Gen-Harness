@@ -8,12 +8,10 @@ Nguyên tắc:
   chạm trần `COUNT_CAP` thì web hiện "999+"). Chỉ dùng chỉ mục sẵn có (xem chú thích từng câu).
 - Chữ trả về là tiếng Việt đời thường — không có thuật ngữ kỹ thuật (model/token/API) ở Hôm nay và Quan hệ. Không
   trả khoá, bí mật, nội dung hội thoại Gen (chỉ nhãn tĩnh của loại đề xuất / tiêu đề bản tin).
-- Hai hợp đồng của gói khác được gọi qua cầu mềm (`TODO(v0155-integ)`): `gh.refinery.triage.value_summary` (G4) và
-  `gh.defaults.registry.suggestions` (G1). Chưa có (nhánh riêng của gói) ⇒ dùng giá trị rỗng; có rồi ⇒ gọi thật. Lỗi
-  của cầu không làm sập `GET /owner/today` (bọc savepoint để giao dịch không bị hỏng).
+- Hai hợp đồng của gói khác: `gh.refinery.triage.value_summary` (G4) và `gh.defaults.registry.suggestions` (G1). Lỗi
+  của chúng không làm sập `GET /owner/today` (bọc savepoint để giao dịch không bị hỏng; lỗi ⇒ giá trị rỗng).
 """
 
-import importlib
 import logging
 import uuid
 from collections.abc import Awaitable, Callable
@@ -27,6 +25,7 @@ from gh.biz.market.service import OPEN_STAGES
 from gh.biz.queue.service import EVENT_LABELS
 from gh.boss_checks import service as boss_service
 from gh.data.common import iso
+from gh.defaults import registry as defaults_registry
 from gh.gen import proposals
 from gh.refinery import triage
 
@@ -99,20 +98,14 @@ async def _count(db: AsyncSession, sql: str, params: dict[str, Any]) -> int:
 
 # ─── cầu mềm tới hợp đồng của gói khác ───────────────────────────────────────────────────────────────────────────
 
-def _bridge(module: str, attr: str) -> Callable[..., Awaitable[Any]] | None:
-    """Hàm `attr` của `module` nếu có (nhánh gói khác chưa gộp ⇒ None). Tra lúc gọi để test thay bằng monkeypatch."""
-    try:
-        mod = importlib.import_module(module)
-    except ImportError:
-        return None
+def _bridge(mod: Any, attr: str) -> Callable[..., Awaitable[Any]] | None:
+    """Hàm `attr` của `mod` nếu có. Tra lúc gọi để test thay bằng monkeypatch."""
     fn = getattr(mod, attr, None)
     return fn if callable(fn) else None
 
 
 async def filter_value(db: AsyncSession, org_id: uuid.UUID) -> dict[str, Any]:
-    """`gh.refinery.triage.value_summary(db, org_id)` (hợp đồng G4): {filtered, spam_blocked, calls_saved, jev_on}.
-
-    TODO(v0155-integ): G4 chưa gộp ⇒ số 0. Khi `triage.value_summary` có thật thì hàm này tự dùng nó."""
+    """`gh.refinery.triage.value_summary(db, org_id)` (hợp đồng G4): {filtered, spam_blocked, calls_saved, jev_on}."""
     fn = getattr(triage, "value_summary", None)
     out = dict(VALUE_ZERO)
     if fn is None:
@@ -134,10 +127,10 @@ async def filter_value(db: AsyncSession, org_id: uuid.UUID) -> dict[str, Any]:
 async def suggestions(db: AsyncSession, org_id: uuid.UUID) -> list[dict[str, str]]:
     """`gh.defaults.registry.suggestions(db, org_id)` (hợp đồng G1) + tình trạng nguồn nền.
 
-    TODO(v0155-integ): G1 chưa gộp ⇒ danh sách rỗng. Phần "nguồn nền" luôn tự thêm `background_key_missing` khi sự cố
+    Phần "nguồn nền" luôn tự thêm `background_key_missing` khi sự cố
     `ai.background_no_source` đang mở mà registry chưa nêu (không trùng khoá)."""
     out: list[dict[str, str]] = []
-    fn = _bridge("gh.defaults.registry", "suggestions")
+    fn = _bridge(defaults_registry, "suggestions")
     if fn is not None:
         try:
             async with db.begin_nested():

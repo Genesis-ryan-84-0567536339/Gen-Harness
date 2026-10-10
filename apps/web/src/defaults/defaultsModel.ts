@@ -1,19 +1,15 @@
 /**
  * v0.1.55 (G1) — mô hình thuần của "Chế độ tiêu chuẩn" / "Về mặc định" (không React, test được).
- *
- * TODO(v0155-integ): `packages/contracts/src/index.ts` (Opus) chưa có `export * from './defaults'` ⇒ tạm re-export từ
- * đường dẫn tương đối. Khi tích hợp: đổi hai dòng bên dưới thành `from '@gen-harness/contracts'` (và dùng `api.defaults` sau
- * khi `endpoints.ts` nối `defaults: defaultsEndpoints(r)`).
+
  */
-export { defaultsEndpoints } from '../../../../packages/contracts/src/defaults';
 export type {
   DefaultItem,
   DefaultSuggestion,
   DefaultsResetResult,
   DefaultsResponse,
-} from '../../../../packages/contracts/src/defaults';
+} from '@gen-harness/contracts';
 
-import type { DefaultItem, DefaultSuggestion, DefaultsResponse } from '../../../../packages/contracts/src/defaults';
+import type { DefaultItem, DefaultSuggestion, DefaultsResponse } from '@gen-harness/contracts';
 
 export const DEFAULT_CHIP = 'Mặc định';
 export const CHANGED_CHIP = 'Đã đổi';

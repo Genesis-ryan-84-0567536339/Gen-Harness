@@ -26,6 +26,8 @@ export interface P3Options {
   emit: (type: string, data: unknown) => void;
   /** v0.1.35: người dùng đang hoạt động theo id (mock-api `users`) — giao việc kiểm như API (UUID lạ → 404). */
   findUser?: (id: string) => { id: string; display_name: string } | undefined;
+  /** v0.1.55 (G4): `POST /jev/enable` thành công ⇒ mock-api thêm nguồn Jev (system_one) vào danh sách `/providers`. */
+  onJevEnabled?: (r: { provider_id: string; endpoint: string; model: string; key_tail: string }) => void;
 }
 
 const ago = (min: number) => new Date(Date.now() - min * 60_000).toISOString();
@@ -288,8 +290,8 @@ export function createMock(opts: P3Options) {
   const silenced = new Map<string, { reason: string | null; until: string | null }>();
   const has = (ctx: P2Ctx, perm: string) => !!ctx.perms[perm] && ctx.perms[perm] !== 'none';
   const triage = { enabled: true, min_score: 30, use_jev: true, prefilter: true };
-  // v0.1.55 (G4): Jev đã có khoá? (bản "fresh" chưa bật). `POST /jev/enable` bật nó; `/providers` (mock-api) tách riêng.
-  // TODO(v0155-integ): mock-api.ts (Opus) nối `/jev/enable` vào mảng `providers` để thẻ Jev hiện nguồn mới ở dev:mock/e2e.
+  // v0.1.55 (G4): Jev đã có khoá? (bản "fresh" chưa bật). `POST /jev/enable` bật nó và báo mock-api (`onJevEnabled`) thêm
+  // nguồn Jev vào `/providers` để thẻ Jev hiện nguồn mới ở dev:mock/e2e.
   let jevKey = !opts.fresh;
   const skipped = opts.fresh ? [] : seedSkipped();
   const keyMissing = (problem: P2Ctx['problem']) =>
@@ -380,11 +382,13 @@ export function createMock(opts: P3Options) {
       if (!b.use_existing_openrouter && pasted.length < 8 && !jevKey) return keyMissing(problem);
       const created = !jevKey;
       jevKey = true;
-      return reply(200, {
+      const out = {
         provider_id: '00000000-0000-4000-8000-0000000000e5', created,
         key_source: b.use_existing_openrouter ? 'existing_openrouter' : pasted ? 'pasted' : 'kept',
         endpoint: 'https://openrouter.ai/api/v1', model: 'typesafe/jev-1.13',
-      });
+      };
+      opts.onJevEnabled?.({ provider_id: out.provider_id, endpoint: out.endpoint, model: out.model, key_tail: pasted ? pasted.slice(-4) : 'or01' });
+      return reply(200, out);
     }
 
     if (seg[0] === 'inbox') {

@@ -71,8 +71,7 @@ TOPIC: dict[str, str] = {
 BOSS_TARGET = "boss_checks.row.{key}"
 
 #: Khoá việc (không kể health.<kind>: đích của sự cố là liên kết `link` của chính sự cố) → đích làm sáng.
-#: v0.1.55: `boss.ai` trỏ thẻ "Bộ não AI" ở Kết nối (id `boss_checks.row.ai` chưa có trong registry —
-#: TODO(v0155-integ): Opus thêm vào genTargets.ts rồi có thể đổi sang `BOSS_TARGET.format(key="ai")`).
+#: v0.1.55: `boss.ai` trỏ thẻ "Bộ não AI" ở Kết nối — nơi Sếp thêm nguồn AI.
 TODO_TARGETS: dict[str, str] = {
     "model.missing": "api.bindings",
     "boss.ai": "connections.brain",
