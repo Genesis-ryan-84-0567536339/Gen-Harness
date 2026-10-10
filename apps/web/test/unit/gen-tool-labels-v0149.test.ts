@@ -37,6 +37,7 @@ describe('Nhãn bước tool của khung Gen', () => {
   });
 
   it('v0.1.54: coach.status (Gen hướng dẫn) có nhãn tiếng Việt cho Sếp', () => {
+    expect(serverToolNames()).toContain('coach.status');
     expect(TOOL_LABEL).toHaveProperty(['coach.status']);
     expect(toolLabel('coach.status')).toBe('Việc cần làm & bài học');
   });

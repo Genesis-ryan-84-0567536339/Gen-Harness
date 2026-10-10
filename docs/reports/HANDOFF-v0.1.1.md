@@ -82,11 +82,11 @@ v0.1.52 (gỡ digest cũ bằng `rmi -f`, [v0.1.52.md](../releases/v0.1.52.md)),
 
 ## Việc dở
 
-### Boss phải làm — v0.1.54 (không bắt buộc, một lần, ~3 phút, sau khi máy tự cập nhật; chi tiết ở [v0.1.54.md](../releases/v0.1.54.md))
+### Boss phải làm — v0.1.54 (không bắt buộc, ~3 phút, sau khi máy lên v0.1.54; chi tiết ở [v0.1.54.md](../releases/v0.1.54.md))
 
-1. **Xem thẻ**: bấm nút Gen ở góc trên bên phải — đầu khung có thẻ **Hôm nay của Sếp**. Đọc **Việc cần làm ngay**, bấm **Chỉ cho em** ở việc đầu và làm theo; việc chưa tiện thì **Để mai**. Chấm đỏ ở nút Gen = có việc mới chưa xem.
-2. **Chỉnh theo ý Sếp**: Cài đặt › Bộ não AI › **Gen hướng dẫn** — Bật hướng dẫn, Chuông nhắc, Số bài mỗi ngày (0 = chỉ nhắc việc), Giờ yên lặng. Việc không cần thì **Không dùng việc này** (đọc câu hậu quả); bật lại ở đây lúc nào cũng được.
-3. **Thử một bài**: Trợ giúp › **Lộ trình học cùng Gen** — mở bài đầu, bấm **Làm thử**. Sáng hôm sau Bản tin 07:30 có dòng **Việc bắt buộc: đã đạt x/N, xem Việc Sếp cần làm** nếu còn việc bắt buộc.
+1. Mở app → bấm nút **Gen** (có chấm đỏ) → xem thẻ **Hôm nay của Sếp** → bấm **Chỉ cho em** ở việc đầu tiên và làm theo.
+2. Việc nào Sếp không dùng (vd Facebook) thì bấm **Không dùng việc này** (đọc câu hậu quả, Xác nhận) để Gen thôi nhắc; bật lại ở Cài đặt › Bộ não AI › Gen hướng dẫn.
+3. Không bắt buộc: Cài đặt › Bộ não AI › **Gen hướng dẫn** để chỉnh giờ yên lặng hoặc số bài mỗi ngày. Ngoài ra không cần làm gì, bài học tự đến.
 
 ### Boss phải làm — v0.1.53 (một lần, ~2 phút, sau khi máy lên v0.1.53; chi tiết ở [v0.1.53.md](../releases/v0.1.53.md))
 

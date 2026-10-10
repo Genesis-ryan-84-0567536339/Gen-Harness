@@ -35,6 +35,8 @@ test('chấm đỏ → mở khung → 3 việc đúng thứ tự → "Chỉ cho 
   await expect(panel(page)).toBeVisible();
   const c = card(page);
   await expect(c).toBeVisible();
+  // Thẻ ở ĐẦU khung (phần tử đầu tiên của vùng tin, trước lời chào/câu mẫu).
+  await expect(panel(page).locator('.gen-panel__list > *').first()).toHaveAttribute('data-gen-target', 'gen.coach.card');
   await expect(c.getByRole('group', { name: 'Việc cần làm ngay' })).toBeVisible();
   await expect(c.getByRole('group', { name: 'Sếp biết chưa?' })).toBeVisible();
   await expect(c.getByRole('group', { name: 'Bài học hôm nay · 1/19' })).toBeVisible();
@@ -176,6 +178,8 @@ test('/overview?gen=coach mở khung Gen, thẻ hiện (đã bỏ tham số kh�
   await expect(card(page)).toBeVisible();
   await expect(card(page).getByRole('group', { name: 'Việc cần làm ngay' })).toBeVisible();
   await expect(card(page).getByRole('button', { name: 'Thu gọn thẻ Hôm nay của Sếp' })).toBeVisible();
+  // Đã cuộn tới thẻ: mục tiêu gen.coach.card nằm trong vùng nhìn thấy.
+  await expect(panel(page).locator('[data-gen-target="gen.coach.card"]')).toBeInViewport();
 });
 
 test('Gen tắt (me.features.gen=false) + ?gen=coach → chuyển tới /guide/viec-sep; không có khung Gen', async ({ page }) => {
@@ -222,6 +226,12 @@ test('thẻ: "Hoãn tất cả 3 ngày" gọn thẻ lại, "Bỏ hoãn" trả vi
   await card(page).getByRole('button', { name: 'Hoãn tất cả 3 ngày' }).click();
   await expect(card(page).getByTestId('coach-snoozed')).toBeVisible();
   await expect(card(page).getByTestId('coach-todo')).toHaveCount(0);
+  // prefs.snooze_until đặt ~3 ngày tới (máy chủ), không phải chỉ ẩn ở trình duyệt.
+  const prefs = (await (await page.request.get('/api/v1/gen/coach/prefs')).json()) as { snooze_until: string | null };
+  expect(prefs.snooze_until).not.toBeNull();
+  const days = (Date.parse(prefs.snooze_until as string) - Date.now()) / 86_400_000;
+  expect(days).toBeGreaterThan(2.9);
+  expect(days).toBeLessThanOrEqual(3.01);
   await card(page).getByRole('button', { name: 'Bỏ hoãn' }).click();
   await expect.poll(() => todoTitles(page)).toEqual(TITLES);
 
@@ -230,7 +240,7 @@ test('thẻ: "Hoãn tất cả 3 ngày" gọn thẻ lại, "Bỏ hoãn" trả vi
   await expect(page.getByTestId('gen-coach-dot')).toHaveCount(0);
 });
 
-test('Tổng quan có "Đã đạt x/6 việc bắt buộc" → Xem tới Việc Sếp cần làm; "Việc thiết lập tiếp" có "Để sau 7 ngày" (máy chủ)', async ({ page }) => {
+test('Tổng quan có "Đã đạt x/6 việc bắt buộc" → Xem tới Việc Sếp cần làm; "Việc thiết lập tiếp" có "Để sau 7 ngày" (máy chủ)', async ({ page, browser, baseURL }) => {
   await page.goto('/overview');
   const line = page.getByTestId('boss-progress');
   await expect(line).toBeVisible();
@@ -248,6 +258,17 @@ test('Tổng quan có "Đã đạt x/6 việc bắt buộc" → Xem tới Việc
   await page.reload();
   await expect(page.getByTestId('boss-progress')).toBeVisible();
   await expect(page.getByRole('region', { name: 'Việc thiết lập tiếp' })).toHaveCount(0);
+  // Context trình duyệt thứ 2 (cùng Owner): thẻ cũng ẩn.
+  const ctx2 = await browser.newContext({ viewport: { width: 1440, height: 900 }, baseURL });
+  try {
+    const page2 = await ctx2.newPage();
+    await loginAsOwner(page2);
+    await page2.goto('/overview');
+    await expect(page2.getByTestId('boss-progress')).toBeVisible();
+    await expect(page2.getByRole('region', { name: 'Việc thiết lập tiếp' })).toHaveCount(0);
+  } finally {
+    await ctx2.close();
+  }
 
   await line.getByRole('link', { name: /Xem/ }).click();
   await expect(page).toHaveURL(/\/guide\/viec-sep$/);
@@ -280,19 +301,142 @@ test('chuông gen.coach: thông báo mới bật chấm đỏ; bấm chuông m�
   await expect(page.getByTestId('gen-coach-dot')).toHaveCount(0);
 });
 
-test('Gen hướng dẫn chỉ cho Owner: vai trò khác không có thẻ, không có Lộ trình học; API trả 403', async ({ browser, baseURL }) => {
-  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, baseURL });
-  try {
-    const page = await ctx.newPage();
-    await loginAs(page, 'manager@genesis.local');
-    const res = await page.request.get('/api/v1/gen/coach/today');
-    expect(res.status()).toBe(403);
-    expect(((await res.json()) as { code: string }).code).toBe('FORBIDDEN');
-    await page.goto('/help');
-    await expect(page.locator('h2.screen-title', { hasText: 'Trợ giúp' })).toBeVisible();
-    await expect(page.getByTestId('help-curriculum')).toHaveCount(0);
-    await expect(page.getByTestId('gen-coach-dot')).toHaveCount(0);
-  } finally {
-    await ctx.close();
-  }
+for (const who of [
+  { email: 'manager@genesis.local', role: 'Manager' },
+  { email: 'operator@genesis.local', role: 'nhân viên (Operator)' },
+]) {
+  test(`Gen hướng dẫn chỉ cho Owner: ${who.role} không có thẻ, không chấm đỏ, không gọi /gen/coach/*; API trả 403`, async ({ browser, baseURL }) => {
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, baseURL });
+    const seen: string[] = [];
+    ctx.on('request', (r) => {
+      if (new URL(r.url()).pathname.startsWith('/api/v1/gen/coach')) seen.push(`${r.method()} ${r.url()}`);
+    });
+    try {
+      const page = await ctx.newPage();
+      await loginAs(page, who.email);
+      // Đi qua các màn có thành phần Gen hướng dẫn (Tổng quan, Trợ giúp) và mở khung Gen nếu vai trò này có.
+      await page.goto('/overview');
+      await expect(page.getByRole('button', { name: /Thông báo/ })).toBeVisible();
+      await page.waitForLoadState('networkidle');
+      await expect(page.getByTestId('boss-progress')).toHaveCount(0);
+      if ((await genButton(page).count()) > 0) {
+        await genButton(page).click();
+        await expect(panel(page)).toBeVisible();
+      }
+      await expect(card(page)).toHaveCount(0);
+      await expect(page.getByTestId('gen-coach-dot')).toHaveCount(0);
+      await page.goto('/help');
+      await expect(page.locator('h2.screen-title', { hasText: 'Trợ giúp' })).toBeVisible();
+      await expect(page.getByTestId('help-curriculum')).toHaveCount(0);
+      await expect(page.getByTestId('gen-coach-dot')).toHaveCount(0);
+      await page.goto('/overview?gen=coach');
+      await expect(page.getByRole('button', { name: /Thông báo/ })).toBeVisible();
+      await page.waitForLoadState('networkidle');
+      await expect(card(page)).toHaveCount(0);
+      await page.waitForLoadState('networkidle');
+      // Giao diện KHÔNG gọi /gen/coach/* thay nhân viên (mock trả 403 và ghi lại nếu bị gọi).
+      expect(seen, 'trình duyệt không gọi /gen/coach/*').toEqual([]);
+      const state = (await p3Hook(page.request, 'genCoach', 'state')) as { nonOwnerCalls: string[] };
+      expect(state.nonOwnerCalls, 'máy chủ mock không nhận lời gọi /gen/coach/* nào').toEqual([]);
+      // Gọi thẳng API (ngoài giao diện) ⇒ 403 FORBIDDEN.
+      const res = await page.request.get('/api/v1/gen/coach/today');
+      expect(res.status()).toBe(403);
+      expect(((await res.json()) as { code: string }).code).toBe('FORBIDDEN');
+    } finally {
+      await ctx.close();
+    }
+  });
+}
+
+test('dòng Gen-hub đạt ⇒ tải lại thẻ: việc Gen-hub biến mất, việc thứ 4 lên thay; Tổng quan "Đã đạt 1/6 việc bắt buộc"', async ({ page }) => {
+  await page.goto('/overview');
+  await genButton(page).click();
+  await expect(card(page)).toBeVisible();
+  expect(await todoTitles(page)).toEqual(TITLES);
+  await expect(page.getByTestId('boss-progress')).toContainText('Đã đạt 0/6 việc bắt buộc');
+
+  await p3Hook(page.request, 'bossChecks', 'seedHub');
+  await page.reload();
+  await expect(card(page)).toBeVisible();
+  await expect.poll(() => todoTitles(page)).toEqual(['Kết nối Facebook', 'Đăng nhập hai tài khoản Google (Antigravity)', 'Đăng nhập Claude Code']);
+  await expect(page.getByTestId('boss-progress')).toContainText('Đã đạt 1/6 việc bắt buộc');
+});
+
+test('"Không dùng việc này" ở Facebook → cảnh báo hậu quả → Xác nhận → biến mất → Cài đặt "Bật lại" → quay lại; x/N không đổi', async ({ page }) => {
+  const progress = page.getByTestId('boss-progress');
+  const requiredOf = async () =>
+    ((await (await page.request.get('/api/v1/gen/coach/today')).json()) as { progress: { required_done: number; required_total: number } }).progress;
+  await page.goto('/overview');
+  await expect(progress).toContainText('Đã đạt 0/6 việc bắt buộc');
+  await genButton(page).click();
+  await expect(card(page)).toBeVisible();
+  expect(await todoTitles(page)).toEqual(TITLES);
+
+  const fb = card(page).getByTestId('coach-todo').filter({ hasText: 'Kết nối Facebook' });
+  await fb.getByRole('button', { name: 'Không dùng việc này' }).click();
+  const dlg = page.getByRole('dialog', { name: /Không dùng việc này\?/ });
+  await expect(dlg).toBeVisible();
+  await expect(dlg.getByTestId('coach-dismiss-warning')).toContainText('Gen sẽ không nhắc kết nối Facebook nữa');
+  await dlg.getByRole('button', { name: 'Xác nhận tắt việc này' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect.poll(() => todoTitles(page)).toEqual(['Nối Gen-hub', 'Đăng nhập hai tài khoản Google (Antigravity)', 'Đăng nhập Claude Code']);
+  // Tắt nhắc KHÔNG phải là đạt: x/N giữ nguyên.
+  await expect(progress).toContainText('Đã đạt 0/6 việc bắt buộc');
+  expect(await requiredOf()).toMatchObject({ required_done: 0, required_total: 6 });
+
+  await page.goto('/system?tab=brain');
+  const set = page.getByRole('region', { name: 'Gen hướng dẫn' });
+  const rows = set.getByTestId('coach-dismissed-row');
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first()).toContainText('Kết nối Facebook');
+  await rows.first().getByRole('button', { name: 'Bật lại' }).click();
+  await expect(rows).toHaveCount(0);
+  expect(await requiredOf()).toMatchObject({ required_done: 0, required_total: 6 });
+
+  await page.goto('/overview');
+  await expect(card(page)).toBeVisible();
+  await expect.poll(() => todoTitles(page)).toEqual(TITLES);
+  await expect(progress).toContainText('Đã đạt 0/6 việc bắt buộc');
+  expect(await requiredOf()).toMatchObject({ required_done: 0, required_total: 6 });
+});
+
+test('"Sếp biết chưa?" có mẹo telegram_briefing: "Thử ngay" làm sáng system.channels.telegram; "Đã hiểu" ⇒ mẹo không quay lại', async ({ page }) => {
+  await page.goto('/overview');
+  await genButton(page).click();
+  const tip = card(page).getByRole('group', { name: 'Sếp biết chưa?' });
+  await expect(tip).toBeVisible();
+  await expect(tip).toContainText('Bản tin Telegram 07:30 và 17:30');
+  await tip.getByRole('button', { name: 'Thử ngay' }).click();
+  await expect(page).toHaveURL(/\/connections/);
+  const target = page.locator('[data-gen-target="system.channels.telegram"]');
+  await expect(target).toBeVisible();
+  const spot = page.getByTestId('gen-spotlight');
+  await expect(spot).toBeVisible();
+  await expect(spot.locator('.gen-spot__ring')).toBeVisible();
+  await expect(spot.getByRole('dialog', { name: 'Gen đang chỉ' })).toContainText('Bật bản tin ở thẻ Telegram');
+
+  await page.goto('/overview');
+  await expect(card(page)).toBeVisible();
+  await card(page).getByRole('group', { name: 'Sếp biết chưa?' }).getByRole('button', { name: 'Đã hiểu' }).click();
+  await expect(card(page).getByRole('group', { name: 'Sếp biết chưa?' })).toHaveCount(0);
+  const state = (await p3Hook(page.request, 'genCoach', 'state')) as { tipsUnderstood: string[] };
+  expect(state.tipsUnderstood).toEqual(['telegram_briefing']);
+  await page.reload();
+  await expect(card(page)).toBeVisible();
+  await expect(card(page).getByRole('group', { name: 'Việc cần làm ngay' })).toBeVisible();
+  await expect(card(page).getByRole('group', { name: 'Sếp biết chưa?' })).toHaveCount(0);
+});
+
+test('câu mẫu "Hôm nay em cần làm gì?" chỉ hiện khi còn việc P0/P1', async ({ page }) => {
+  await page.goto('/overview');
+  await genButton(page).click();
+  await expect(card(page)).toBeVisible();
+  const ask = panel(page).locator('.gen-suggest').getByRole('button', { name: 'Hôm nay em cần làm gì?' });
+  await expect(ask).toBeVisible();
+  // Hoãn hết ⇒ thẻ không còn việc ⇒ câu mẫu biến mất; bỏ hoãn ⇒ quay lại.
+  await card(page).getByRole('button', { name: 'Hoãn tất cả 3 ngày' }).click();
+  await expect(card(page).getByTestId('coach-snoozed')).toBeVisible();
+  await expect(ask).toHaveCount(0);
+  await card(page).getByRole('button', { name: 'Bỏ hoãn' }).click();
+  await expect(ask).toBeVisible();
 });

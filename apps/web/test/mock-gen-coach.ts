@@ -16,7 +16,7 @@
  *   scenario {extras?: string[], stable?: boolean, unseen?: boolean} — thêm việc mẫu (health.channel.down P0, model.missing P0, backup.unset,
  *                                  hub.token_expiring, drafts.pending, followup.7), ép nhãn "ổn định", ép chấm đỏ;
  *   notify {} — chuông `gen.coach` cho Owner (link theo Gen bật/tắt) + bật `unseen`;
- *   state {} — đọc trạng thái nội bộ (kiểm tra); reset {} — về máy mới.
+ *   state {} — đọc trạng thái nội bộ (kiểm tra; `nonOwnerCalls` = lời gọi bị 403 của vai trò khác Owner); reset {} — về máy mới.
  */
 import type {
   CoachItemAction,
@@ -196,6 +196,8 @@ interface State {
   forceStable: boolean;
   extras: string[];
   markShownCalls: number;
+  /** Lời gọi `/gen/coach/*` từ vai trò khác Owner (bị 403) — e2e kiểm bằng 0: giao diện không được gọi thay nhân viên. */
+  nonOwnerCalls: string[];
 }
 
 function fresh(): State {
@@ -217,6 +219,7 @@ function fresh(): State {
     forceStable: false,
     extras: [],
     markShownCalls: 0,
+    nonOwnerCalls: [],
   };
 }
 
@@ -428,7 +431,10 @@ export function createMock(opts: GenCoachOptions = {}) {
   function handle(ctx: P2Ctx): boolean {
     const { method: m, path: p } = ctx;
     if (p !== '/gen/coach' && !p.startsWith('/gen/coach/')) return false;
-    if (ctx.role !== 'owner') return ctx.problem(403, 'FORBIDDEN', 'Chỉ Sếp (Owner) dùng được Gen hướng dẫn');
+    if (ctx.role !== 'owner') {
+      S.nonOwnerCalls.push(`${ctx.role} ${m} ${p}`);
+      return ctx.problem(403, 'FORBIDDEN', 'Chỉ Sếp (Owner) dùng được Gen hướng dẫn');
+    }
 
     if (p === '/gen/coach/today' && m === 'GET') {
       if (ctx.url.searchParams.get('mark_shown') === '1') {
@@ -476,6 +482,9 @@ export function createMock(opts: GenCoachOptions = {}) {
       enabled: S.enabled,
       seen: S.seen,
       markShownCalls: S.markShownCalls,
+      nonOwnerCalls: [...S.nonOwnerCalls],
+      snoozeUntil: S.snoozeUntil,
+      tipsUnderstood: [...S.tipsUnderstood],
       dismissed: [...S.dismissed.keys()],
       tomorrow: [...S.tomorrow],
       lessons: Object.fromEntries(S.lessonStatus),
