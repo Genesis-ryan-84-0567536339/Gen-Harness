@@ -45,6 +45,7 @@ from gh.errors import (
     unhandled_error_handler,
     validation_error_handler,
 )
+from gh.gen.coach.routes import router as coach_router
 from gh.gen.routes import router as gen_router
 from gh.hub_link.routes import router as hub_router
 from gh.mcp_api.routes import router as mcp_router
@@ -237,7 +238,7 @@ def create_app(*, with_lifespan: bool = True, expose_docs: bool | None = None) -
     app.add_exception_handler(Exception, unhandled_error_handler)
     for r in (auth_router, account_router, users_router, setup_router, shell_router, audit_router, plugins_router,
              mcp_router, data_router, system_router, update_router, backups_router, offsite_router, org_router,
-             gen_router, notifications_router, triage_router, hub_router, social_router, health_router,
+             gen_router, coach_router, notifications_router, triage_router, hub_router, social_router, health_router,
              boss_checks_router, telegram_router, diagnostics_router, client_errors_router, access_router):
         app.include_router(r, prefix="/api/v1")
     for r in biz.routers():
