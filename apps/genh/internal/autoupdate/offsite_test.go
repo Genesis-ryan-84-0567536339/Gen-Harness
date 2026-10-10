@@ -283,3 +283,32 @@ func TestEnableOffsite_ThieuGenhPath(t *testing.T) {
 		t.Fatal("thiếu GenhPath phải lỗi")
 	}
 }
+
+// v0.1.53 (F-95): hỏi lại linger bằng `loginctl show-user` thay vì tin mã thoát của enable-linger.
+func TestEnableOffsite_LingerSauEnableLinger(t *testing.T) {
+	for _, tc := range []struct {
+		show     string
+		enable   error
+		wantWarn bool
+	}{{"no\n", nil, true}, {"yes\n", nil, false}, {"yes\n", errExit1, false}, {"", errExit1, true}} {
+		rr := &recRunner{}
+		rr.on("loginctl enable-linger", "", tc.enable)
+		rr.on("loginctl show-user", tc.show, nil)
+		deps := Deps{Runner: rr, GenhPath: "/g/genh", LogFile: filepath.Join(t.TempDir(), "x.log"), HomeDir: t.TempDir(), GOOS: "linux", UID: "1000",
+			LookPath: func(string) (string, error) { return "/usr/bin/systemctl", nil }}
+		msg, _, err := EnableOffsite(context.Background(), deps, OffsiteJob{InstallDir: "/i"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		warned := strings.Contains(msg, "sudo loginctl enable-linger $USER")
+		if warned != tc.wantWarn {
+			t.Errorf("show=%q enableErr=%v: cảnh báo=%v, muốn %v\n%s", tc.show, tc.enable, warned, tc.wantWarn, msg)
+		}
+		if strings.Contains(msg, "enable-linger $USER.") {
+			t.Errorf("không có dấu chấm ngay sau lệnh:\n%s", msg)
+		}
+		if !rr.ran("loginctl show-user 1000 -p Linger --value") {
+			t.Errorf("phải hỏi lại linger: %v", rr.calls)
+		}
+	}
+}

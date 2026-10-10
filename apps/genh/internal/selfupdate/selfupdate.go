@@ -235,6 +235,12 @@ func AssetName(goos, goarch string) string {
 // lúc tải nếu có release mới xen vào giữa chừng) -> kiểm SHA-256 (BẮT BUỘC,
 // sai -> từ chối, KHÔNG thay gì) -> thay ExecutablePath an toàn.
 //
+// Chế độ lịch đêm (MinAge > 0, v0.1.53): hỏi DANH SÁCH bản phát hành
+// (GET /releases?per_page=10, pickRelease) và cài bản semver CAO NHẤT đã đủ chín
+// — không bị bản mới nhất chưa chín chặn "đói" khi bản ra dồn dập; chưa có bản
+// nào đủ chín mà có bản mới hơn ⇒ Skipped+Deferred (Reason nêu bản mới nhất và
+// tuổi). MinAge == 0 (nút "Cập nhật ngay", gõ tay) vẫn chỉ hỏi /releases/latest.
+//
 // Trước khi tải, bản mới hơn còn phải qua 2 cửa (cả hai đều trả Skipped,
 // err == nil, KHÔNG có request tải asset/checksums nào):
 //   - bản thử (prerelease) hoặc bản nháp (draft) ⇒ luôn bỏ qua (phòng hờ —
@@ -254,6 +260,21 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	current := strings.TrimSpace(opts.CurrentVersion)
 	if current == "" || current == "dev" {
 		return Result{Skipped: true, Reason: "binary bản dev (chưa gắn phiên bản phát hành) — bỏ qua tự cập nhật"}, nil
+	}
+
+	// Lịch đêm (MinAge > 0): chọn trong DANH SÁCH bản phát hành bản cao nhất ĐÃ ĐỦ
+	// chín (v0.1.53, F-96). /releases/latest chỉ cho bản MỚI NHẤT — khi bản ra dồn
+	// dập (vd v0.1.54 vừa lên 1 giờ trước, v0.1.53 đã chín 25 giờ) lịch đêm cứ bị
+	// bản mới nhất chưa chín hoãn, "đói" mãi không cài được bản nào. Nút "Cập nhật
+	// ngay"/gõ tay (MinAge == 0) giữ đường /releases/latest như cũ. Không hỏi được
+	// danh sách ⇒ rơi về /releases/latest (1 dòng log).
+	if opts.MinAge > 0 {
+		opts.logf(false, "genh: đang hỏi danh sách bản genh (%s/%s)…", opts.Owner, opts.Repo)
+		list, err := listReleases(ctx, opts)
+		if err == nil {
+			return runFromList(ctx, opts, current, list)
+		}
+		opts.logf(true, "genh: không hỏi được danh sách bản phát hành (%v) — dùng bản mới nhất (releases/latest).", err)
 	}
 
 	opts.logf(false, "genh: đang hỏi bản genh mới nhất (%s/%s)…", opts.Owner, opts.Repo)
@@ -293,24 +314,56 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 		}
 	}
 
-	opts.logf(true, "genh: có bản mới %s (đang chạy %s) — đang tải…", latest, current)
+	return applyRelease(ctx, opts, current, latest)
+}
+
+// applyRelease tải + kiểm checksum + thay binary bằng ĐÚNG tag đã chọn.
+func applyRelease(ctx context.Context, opts Options, current, tag string) (Result, error) {
+	opts.logf(true, "genh: có bản mới %s (đang chạy %s) — đang tải…", tag, current)
 
 	if opts.ExecutablePath == "" {
 		return Result{Skipped: true, Reason: "không có ExecutablePath để thay"}, nil
 	}
 
 	asset := AssetName(opts.goos(), opts.goarch())
-	data, err := downloadVerified(ctx, opts, latest, asset)
+	data, err := downloadVerified(ctx, opts, tag, asset)
 	if err != nil {
-		return Result{}, fmt.Errorf("tải/kiểm checksum %s bản %s: %w", asset, latest, err)
+		return Result{}, fmt.Errorf("tải/kiểm checksum %s bản %s: %w", asset, tag, err)
 	}
 
 	if err := replaceExecutable(opts.ExecutablePath, data); err != nil {
 		return Result{}, fmt.Errorf("thay binary %s: %w", opts.ExecutablePath, err)
 	}
 
-	opts.logf(true, "genh: đã tự cập nhật lên %s (bản cũ %s).", latest, current)
-	return Result{Updated: true, From: current, To: latest}, nil
+	opts.logf(true, "genh: đã tự cập nhật lên %s (bản cũ %s).", tag, current)
+	return Result{Updated: true, From: current, To: tag}, nil
+}
+
+// runFromList là Run cho chế độ lịch đêm (MinAge > 0) khi đã có danh sách bản phát hành.
+func runFromList(ctx context.Context, opts Options, current string, list []releaseMeta) (Result, error) {
+	if pick, ok := pickRelease(list, current, opts.MinAge, opts.now()); ok {
+		return applyRelease(ctx, opts, current, pick.TagName)
+	}
+	newest, any := newestNewer(list, current)
+	if !any {
+		opts.logf(false, "genh: đã ở bản mới nhất (%s).", current)
+		return Result{Skipped: true, Reason: "đã ở bản mới nhất"}, nil
+	}
+	since := newest.officialSince()
+	switch {
+	case promotedAt(newest.Body).IsZero():
+		// Không có dấu promote hợp lệ: danh sách không chọn bản này (không biết nó
+		// thành bản chính thức lúc nào) — không hứa "đợi đủ 24 giờ" vì có đợi cũng không tự cài.
+		reason := fmt.Sprintf("bản %s chưa có dấu promote (không biết khi nào thành bản chính thức) — chế độ --yes (lịch đêm) bỏ qua cho an toàn; %s", newest.TagName, installNowHint)
+		opts.logf(true, "genh: %s", reason)
+		return Result{Skipped: true, Reason: reason}, nil
+	default:
+		age := opts.now().Sub(since)
+		reason := fmt.Sprintf("bản %s mới phát hành %s trước — chế độ --yes (lịch đêm) đợi đủ %s rồi mới cài; %s",
+			newest.TagName, formatDurationVi(age), formatDurationVi(opts.MinAge), installNowHint)
+		opts.logf(true, "genh: %s", reason)
+		return Result{Skipped: true, Deferred: true, Reason: reason}, nil
+	}
 }
 
 // installNowHint là phần "muốn cài ngay thì làm gì" của Reason khi thời
@@ -374,6 +427,76 @@ func latestRelease(ctx context.Context, opts Options) (releaseMeta, error) {
 		return releaseMeta{}, errors.New("response không có tag_name")
 	}
 	return meta, nil
+}
+
+// listReleases hỏi GET <api>/repos/<owner>/<repo>/releases?per_page=10 (10 bản phát
+// hành gần nhất, mới trước) — dùng cho chế độ lịch đêm (pickRelease).
+func listReleases(ctx context.Context, opts Options) ([]releaseMeta, error) {
+	url := fmt.Sprintf("%s/repos/%s/%s/releases?per_page=10", opts.apiBase(), opts.Owner, opts.Repo)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "gen-harness-genh")
+	req.Header.Set("Accept", "application/vnd.github+json")
+
+	resp, err := opts.client().Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, fmt.Errorf("GET %s: %s — %s", url, resp.Status, strings.TrimSpace(string(body)))
+	}
+	var list []releaseMeta
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&list); err != nil {
+		return nil, fmt.Errorf("giải mã JSON danh sách release: %w", err)
+	}
+	out := list[:0]
+	for _, m := range list {
+		if m.TagName != "" {
+			out = append(out, m)
+		}
+	}
+	return out, nil
+}
+
+// pickRelease chọn bản semver CAO NHẤT thoả: không phải bản nháp/bản thử, có dấu
+// PromotedMarker hợp lệ, mới hơn current, và đã là bản chính thức đủ minAge
+// (now − officialSince ≥ minAge; đúng biên thì cho cài). found=false nếu không có bản nào.
+func pickRelease(list []releaseMeta, current string, minAge time.Duration, now time.Time) (pick releaseMeta, found bool) {
+	for _, m := range list {
+		if m.Draft || m.Prerelease || !IsNewer(current, m.TagName) {
+			continue
+		}
+		if promotedAt(m.Body).IsZero() {
+			continue
+		}
+		since := m.officialSince()
+		if since.IsZero() || now.Sub(since) < minAge {
+			continue
+		}
+		if !found || IsNewer(pick.TagName, m.TagName) {
+			pick, found = m, true
+		}
+	}
+	return pick, found
+}
+
+// newestNewer: bản chính thức (không nháp/thử) semver cao nhất mới hơn current,
+// chín hay chưa — để Reason nêu "bản mới nhất" khi chưa có bản nào đủ chín.
+func newestNewer(list []releaseMeta, current string) (newest releaseMeta, any bool) {
+	for _, m := range list {
+		if m.Draft || m.Prerelease || !IsNewer(current, m.TagName) {
+			continue
+		}
+		if !any || IsNewer(newest.TagName, m.TagName) {
+			newest, any = m, true
+		}
+	}
+	return newest, any
 }
 
 // formatDurationVi in thời lượng làm tròn XUỐNG tới phút theo kiểu tiếng Việt

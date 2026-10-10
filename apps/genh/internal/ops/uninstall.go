@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/autoupdate"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/browseropen"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/compose"
 	"github.com/Genesis-ryan-84-0567536339/gen-harness/apps/genh/internal/dockercli"
@@ -159,30 +160,41 @@ func RunUninstall(ctx context.Context, env *Env, opts UninstallOptions, runner d
 	}
 
 	// Gỡ lịch tuần bản sao ngoài máy (v0.1.40) — không để lịch gọi một bản cài đã gỡ.
-	offsite := opts.Offsite
-	if offsite == nil {
-		offsite = NewOffsiteScheduler(env)
-	}
-	octx, ocancel := context.WithTimeout(ctx, 20*time.Second)
-	if msg, err := offsite.Disable(octx); err != nil {
-		_, _ = fmt.Fprintln(out, "Không gỡ được lịch sao lưu ra ổ ngoài: "+err.Error())
+	// v0.1.53 (F-98): lịch là CHUNG cho mọi bản cài của người dùng — đang thuộc bản
+	// cài KHÁC còn sống (gỡ bản phụ) thì GIỮ NGUYÊN, không gỡ lịch của bản chính.
+	if other, kept := scheduleKeptForOther(env, autoupdate.OffsiteTaskName); kept {
+		_, _ = fmt.Fprintln(out, "Giữ nguyên lịch sao lưu ra ổ ngoài của bản cài "+other+" (không phải bản đang gỡ).")
 	} else {
-		_, _ = fmt.Fprintln(out, msg)
+		offsite := opts.Offsite
+		if offsite == nil {
+			offsite = NewOffsiteScheduler(env)
+		}
+		octx, ocancel := context.WithTimeout(ctx, 20*time.Second)
+		if msg, err := offsite.Disable(octx); err != nil {
+			_, _ = fmt.Fprintln(out, "Không gỡ được lịch sao lưu ra ổ ngoài: "+err.Error())
+		} else {
+			_, _ = fmt.Fprintln(out, msg)
+		}
+		ocancel()
 	}
-	ocancel()
 
-	// Gỡ lịch trực canh máy chủ (v0.1.44) — không để lịch 12 phút gọi bản cài đã gỡ.
-	watchdog := opts.Watchdog
-	if watchdog == nil {
-		watchdog = NewWatchdogScheduler(env)
-	}
-	wctx, wcancel := context.WithTimeout(ctx, 20*time.Second)
-	if msg, err := watchdog.Disable(wctx); err != nil {
-		_, _ = fmt.Fprintln(out, "Không gỡ được lịch trực canh máy chủ: "+err.Error())
+	// Gỡ lịch trực canh máy chủ (v0.1.44) — không để lịch 12 phút gọi bản cài đã gỡ
+	// (cũng giữ nguyên nếu thuộc bản cài khác còn sống, như trên).
+	if other, kept := scheduleKeptForOther(env, autoupdate.WatchdogTaskName); kept {
+		_, _ = fmt.Fprintln(out, "Giữ nguyên lịch trực canh máy chủ của bản cài "+other+" (không phải bản đang gỡ).")
 	} else {
-		_, _ = fmt.Fprintln(out, msg)
+		watchdog := opts.Watchdog
+		if watchdog == nil {
+			watchdog = NewWatchdogScheduler(env)
+		}
+		wctx, wcancel := context.WithTimeout(ctx, 20*time.Second)
+		if msg, err := watchdog.Disable(wctx); err != nil {
+			_, _ = fmt.Fprintln(out, "Không gỡ được lịch trực canh máy chủ: "+err.Error())
+		} else {
+			_, _ = fmt.Fprintln(out, msg)
+		}
+		wcancel()
 	}
-	wcancel()
 
 	if path, err := browseropen.ShortcutPath(); err == nil {
 		if rmErr := os.Remove(path); rmErr == nil {
@@ -202,6 +214,18 @@ func RunUninstall(ctx context.Context, env *Env, opts UninstallOptions, runner d
 
 	_, _ = fmt.Fprintln(out, "\nGIỚI HẠN: genh uninstall KHÔNG tự gỡ Docker Engine/Colima/WSL kể cả khi genh đã tự cài ở Bước 2 (không có cách phân biệt an toàn với runtime sẵn có của Owner) — tự gỡ tay nếu không còn cần, xem ~/.gen-harness/runtime.")
 	return nil
+}
+
+// scheduleKeptForOther: lịch systemd --user `taskName` (unit <taskName>.service) đang
+// thuộc một bản cài KHÁC env.InstallDir mà bản đó còn sống (có config/secrets.json)
+// ⇒ (thư mục bản kia, true) — RunUninstall không gỡ. Cron/LaunchAgent do chính
+// autoupdate.Disable* kiểm (Deps.InstallDir).
+func scheduleKeptForOther(env *Env, taskName string) (string, bool) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", false
+	}
+	return autoupdate.OwnedByOther(home, taskName+".service", env.InstallDir)
 }
 
 // keepDataNote: volume giữ lại (pg_data…) vẫn khoá bằng mật khẩu CŨ trong
