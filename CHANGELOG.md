@@ -7,6 +7,13 @@ Ngày = ngày Release trên GitHub theo giờ Việt Nam; tiêu đề trong `doc
 (v0.1.32–v0.1.34, v0.1.40, v0.1.46) hoặc vài ngày (v0.1.47, v0.1.48: làm 03/10, phát hành 09/10).
 Việc sửa nóng không đổi số bản (PR #46, #48, #53, #55, #58, #59) ghi ở [ROADMAP › Bản phản ứng](docs/ROADMAP.md).
 
+## v0.1.55 — Gọn cho Sếp: Mặt tiền Owner, mặc định tiêu chuẩn, thiết lập gọn, chọn model trong chat, Jev lọc trước (10/10/2026)
+- **Mặt tiền Owner** `/owner/*`: Owner mở trang chủ thấy Hôm nay (4 số + việc chờ duyệt + Bản tin + "Gen lọc giúp"), Việc, Quan hệ, Hỏi Gen; Console cũ ở Thêm › Cài đặt nâng cao. API chỉ đọc, chỉ Owner.
+- **Hồ sơ model tiêu chuẩn theo vai** + **Về mặc định** (từng mục / tất cả có mã PIN, không chạm khoá, nguồn AI, PIN, Gen-hub…): cài xong không phải gán model; migration 0034 (`agent.bindings.effort`).
+- **Thiết lập ≤ 4 lần nhập**, Việc Sếp cần làm chỉ còn 1 dòng bắt buộc ("Có ít nhất 1 nguồn AI chạy được"); thẻ Cập nhật không có nút thì luôn nói lý do + việc cần làm.
+- **Chọn Nhanh / Kỹ hơn ngay dưới ô nhập Gen** (nhớ theo hội thoại); câu ngoài phạm vi trả câu mẫu không gọi model. **Jev lọc trước** tin trùng/rác (che dữ liệu bắt buộc), Bật Jev 1 chạm + "Thử 12 câu mẫu".
+- Chi tiết: [docs/releases/v0.1.55.md](docs/releases/v0.1.55.md)
+
 ## v0.1.54 — Gen hướng dẫn: Gen chủ động nhắc việc Sếp cần làm, giới thiệu tính năng, bài học mỗi ngày (10/10/2026)
 - Thẻ **Hôm nay của Sếp** ở đầu khung Gen (chỉ Owner): tối đa 3 **Việc cần làm ngay** (sự cố, dòng bắt buộc, sao lưu, token Gen-hub, nháp chờ duyệt…), một mẹo **Sếp biết chưa?** và **Bài học hôm nay · k/19**; mỗi việc có Chỉ cho em / Để mai / Không dùng việc này (việc khẩn không tắt được).
 - Lộ trình 19 bài (10 bài nội dung + 9 bài từ Hướng dẫn thiết lập) ở Trợ giúp › Lộ trình học cùng Gen; chấm đỏ ở nút Gen; chuông `gen.coach` tối đa 1/ngày (09:05/11:05/14:05, có giờ yên lặng, không đẩy Telegram); Bản tin thêm dòng "Việc bắt buộc: đã đạt x/N".

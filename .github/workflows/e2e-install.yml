@@ -1169,6 +1169,93 @@ jobs:
           grep -qx 'GH_ACCESS_MODE=local' "$cdir/.env" || { echo "::error::$cdir/.env thiếu GH_ACCESS_MODE=local" >&2; exit 1; }
           echo "OK: về lại chế độ local."
 
+      # v0.1.55 (G1): cài xong KHÔNG gán model nào (bước 4 không ghi agent.bindings) mà Gen vẫn trả lời — hồ sơ tiêu chuẩn
+      # theo vai tự chọn model của nguồn đang bật. Kiểm trong container api: 0 dòng gán ⇒ thêm tạm 1 nguồn openai_compat
+      # (khoá giả, gọi qua httpx.MockTransport — không ra mạng) ⇒ ModelRouter.generate(core.gen) trả lời bằng model của hồ
+      # sơ ⇒ vẫn 0 dòng gán ⇒ gỡ nguồn tạm (còn dòng chi phí tham chiếu thì tắt nó). Ảnh api chưa có gh.defaults ⇒ bỏ qua.
+      - name: Cài xong không gán model nào, Gen vẫn trả lời bằng hồ sơ tiêu chuẩn (v0.1.55+)
+        run: |
+          set -euo pipefail
+          api="$(docker ps --format '{{.Names}}' | grep -E '^gen-harness-api-[0-9]+$' | head -1)"
+          [ -n "$api" ] || { echo "::error::không thấy container api" >&2; exit 1; }
+          if ! docker exec "$api" python -c "import gh.defaults.profiles" >/dev/null 2>&1; then
+            echo "::notice::ảnh api chưa có hồ sơ tiêu chuẩn (gh.defaults, < v0.1.55) — bỏ qua."; exit 0
+          fi
+          cat >"$RUNNER_TEMP/hoso_check.py" <<'PY'
+          import asyncio, json, sys
+          import httpx
+          from redis.asyncio import Redis
+          from sqlalchemy import text
+          from gh import crypto
+          from gh.config import get_settings
+          from gh.db import sessionmaker
+          from gh.providers.clients import Message
+          from gh.providers.router import KEY_AAD, ModelRouter
+
+          MODELS = ["e2e-hoso-pro", "e2e-hoso-flash-lite", "e2e-hoso-flash"]
+          REPLY = "Dạ, em đây."
+
+          async def bindings(sm, org):
+              async with sm() as db:
+                  return (await db.execute(text("SELECT count(*) FROM agent.bindings WHERE org_id = :o"), {"o": org})).scalar_one()
+
+          async def main():
+              sm = sessionmaker()
+              redis = Redis.from_url(get_settings().redis_url, decode_responses=False)
+              pid = None
+              try:
+                  async with sm() as db:
+                      org = (await db.execute(text("SELECT id FROM core.organizations LIMIT 1"))).scalar_one_or_none()
+                  if org is None:
+                      print("::error::cài xong chưa có tổ chức nào (bootstrap)", file=sys.stderr); return 1
+                  n = await bindings(sm, org)
+                  if n:
+                      print("::error::cài xong đã có %d dòng gán model (agent.bindings) — v0.1.55 không gán model nào" % n, file=sys.stderr)
+                      return 1
+                  async with sm() as db:
+                      pid = (await db.execute(text("""INSERT INTO agent.providers (org_id, kind, name, endpoint, failover_rank, auth_state)
+                                                      VALUES (:o, 'openai_compat', 'e2e-hoso', 'https://openrouter.ai/api/v1', 99, 'ok')
+                                                      RETURNING id"""), {"o": org})).scalar_one()
+                      await db.execute(text("""INSERT INTO agent.provider_keys (provider_id, label, secret_enc, last4, rotation_order)
+                                               VALUES (:p, 'E2E-KEY-01', :s, 'e2e0', 0)"""),
+                                       {"p": pid, "s": crypto.encrypt(b"sk-e2e-hoso-khong-that-e2e0", KEY_AAD)})
+                      for m in MODELS:
+                          await db.execute(text("INSERT INTO agent.models (provider_id, model_name) VALUES (:p, :m)"), {"p": pid, "m": m})
+                      await db.commit()
+                  seen = []
+
+                  def handler(req):
+                      seen.append(json.loads(req.content)["model"])
+                      return httpx.Response(200, json={"choices": [{"message": {"content": REPLY}}],
+                                                       "usage": {"prompt_tokens": 1, "completion_tokens": 1}})
+
+                  router = ModelRouter(sm, redis, transport=httpx.MockTransport(handler))
+                  out = await router.generate(org, agent_key="core.gen", purpose="gen.turn",
+                                              messages=[Message("user", "xin chào")], json_mode=False)
+                  if out.text.strip() != REPLY or not seen or seen[0] not in MODELS:
+                      print("::error::Gen không trả lời qua hồ sơ tiêu chuẩn: text=%r model=%r" % (out.text[:80], seen[:1]), file=sys.stderr)
+                      return 1
+                  n = await bindings(sm, org)
+                  if n:
+                      print("::error::trả lời xong lại sinh %d dòng gán model" % n, file=sys.stderr); return 1
+                  print("OK: 0 dòng gán model; Gen trả lời bằng hồ sơ tiêu chuẩn (model %s của nguồn tạm)." % seen[0])
+                  return 0
+              finally:
+                  if pid is not None:
+                      async with sm() as db:
+                          try:
+                              await db.execute(text("DELETE FROM agent.providers WHERE id = :p"), {"p": pid})
+                              await db.commit()
+                          except Exception:
+                              await db.rollback()
+                              await db.execute(text("UPDATE agent.providers SET is_enabled = false WHERE id = :p"), {"p": pid})
+                              await db.commit()
+                  await redis.aclose()
+
+          sys.exit(asyncio.run(main()))
+          PY
+          docker exec -i "$api" python - <"$RUNNER_TEMP/hoso_check.py"
+
       - name: genh uninstall --yes --delete-data (không tương tác, dọn sạch cả dữ liệu)
         # v0.1.40: uninstall mặc định GIỮ dữ liệu — dọn sạch phải kèm --delete-data.
         # genh cũ (< v0.1.40, chạy tay workflow cho tag cũ) không biết cờ này: khi đó
