@@ -6,7 +6,7 @@ mọi trường khác có mặc định ở máy chủ. Hình dạng payload PUT
 - Theo dõi bước 4 "xong" = có ít nhất một nhà cung cấp BẬT (không tính embedding / Jev) có model.
 - Bước 7: 900 giây / 500 tin / lô 250 / tin cậy 0,6 + bộ quy tắc khởi đầu bật sẵn khi không gửi `rule_codes`.
 - Bước 8: chọn mẫu là xong (thiếu tên / vai trò điền mặc định; không có `try_message` thì không thử trò chuyện).
-- Bước 9: thiếu `ack_boundaries` = đã xác nhận (web thay ô tích bằng một dòng ghi chú); `false` rõ ràng vẫn 422.
+- Bước 9: web thay ô tích bằng một dòng ghi chú nhưng GỬI `ack_boundaries: true`; thiếu trường hoặc `false` ⇒ 422.
 - Bước 11: lịch sao lưu hằng ngày 02:00, giữ 7 bản khi đi qua / bỏ qua bước.
 """
 
@@ -184,13 +184,14 @@ async def test_step8_template_only_has_no_try_chat_and_step9_defaults(owner_api:
     assert (row.name, row.role_desc, row.template) == (setup_routes.STEP8_DEFAULT_NAME,
                                                        setup_routes.STEP8_DEFAULT_ROLE, "sales")
     assert int((await db.execute(text("SELECT count(*) FROM agent.model_calls"))).scalar_one()) == 0   # không gọi model
-    # Bước 9: thiếu cả hai trường ⇒ mức mặc định 4 + đã xác nhận ranh giới (một dòng ghi chú ở web).
-    r = await api.send("PUT", "/setup/steps/9", {})
+    # Bước 9: thiếu `ack_boundaries` hoặc `false` ⇒ API vẫn đòi xác nhận (F-N2: không xác nhận ngầm).
+    for body in ({}, {"ack_boundaries": False}, {"autonomy_level": 4}):
+        r = await api.send("PUT", "/setup/steps/9", body)
+        assert r.status_code == 422 and "ack_boundaries" in json.dumps(r.json(), ensure_ascii=False), body
+    # Web gửi `true` rõ ràng, thiếu mức ⇒ mức mặc định 4.
+    r = await api.send("PUT", "/setup/steps/9", {"ack_boundaries": True})
     assert r.status_code == 200, r.text
     assert r.json()["agent"]["autonomy_level"] == 4 and r.json()["hard_boundaries"]
-    # gửi false rõ ràng thì vẫn bị từ chối
-    r = await api.send("PUT", "/setup/steps/9", {"ack_boundaries": False})
-    assert r.status_code == 422 and "ack_boundaries" in json.dumps(r.json(), ensure_ascii=False)
 
 
 async def test_step8_with_try_message_still_tries_the_chat(owner_api: Api, db: Any) -> None:
@@ -252,7 +253,7 @@ async def test_whole_wizard_with_four_inputs(client: httpx.AsyncClient, db: Any)
     assert (await api.send("PUT", "/setup/steps/4", {"provider_ids": [good]})).status_code == 200
     assert (await api.send("PUT", "/setup/steps/7", {})).status_code == 200
     assert (await api.send("PUT", "/setup/steps/8", {"template": "secretary"})).status_code == 200
-    assert (await api.send("PUT", "/setup/steps/9", {})).status_code == 200
+    assert (await api.send("PUT", "/setup/steps/9", {"ack_boundaries": True})).status_code == 200
     for n in (5, 6, 10, 11):
         assert (await api.send("POST", f"/setup/steps/{n}/skip")).status_code == 200, n
     r = await api.send("PUT", "/setup/steps/12", {})

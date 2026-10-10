@@ -676,9 +676,9 @@ async def step8(body: Step8In, request: Request, db: AsyncSession = DB,
 class Step9In(BaseModel):
     # None = giữ nguyên mức hiện tại (mở lại sau Hoàn tất chỉ để xác nhận ranh giới, hoặc agent đang ở mức khác 3/4).
     autonomy_level: Literal[3, 4] | None = policy.DEFAULT_AUTONOMY  # type: ignore[assignment]
-    # v0.1.55 (G2): web thay ô tích bằng một dòng ghi chú ("tiếp tục = đã đọc ranh giới khoá cứng") nên thiếu trường ⇒
-    # đã xác nhận; gửi `false` rõ ràng vẫn bị từ chối (422).
-    ack_boundaries: bool = True
+    # v0.1.55 (G2): web thay ô tích bằng một dòng ghi chú ("tiếp tục = đã đọc ranh giới khoá cứng") và GỬI `true` rõ
+    # ràng. API vẫn giữ cổng cũ: thiếu trường hoặc `false` ⇒ 422 (client khác không được coi là đã xác nhận ngầm).
+    ack_boundaries: bool = False
 
 
 async def _setup_agent(db: AsyncSession, row: Any) -> Any:
