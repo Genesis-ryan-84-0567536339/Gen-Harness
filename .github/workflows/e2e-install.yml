@@ -2381,7 +2381,7 @@ jobs:
         if: needs.resolve.outputs.mode == 'pr'
         run: |
           set -euo pipefail
-          "$GENH" install --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes
+          "$GENH" install --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes --no-auto-update
 
       - name: Chờ /api/v1/ready xanh (tối đa 5 phút)
         run: |
