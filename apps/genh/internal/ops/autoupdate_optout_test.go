@@ -86,8 +86,12 @@ func TestNightlyStatusFrom(t *testing.T) {
 	if ns := NightlyStatusFrom(autoupdate.Status{Enabled: true, Mechanism: "cron", UnitPresent: true}, false, "unknown"); ns.Active != nil {
 		t.Errorf("cron: active phải nil: %+v", ns)
 	}
-	// Lịch của bản cài KHÁC ⇒ với bản này coi như chưa bật.
-	if ns := NightlyStatusFrom(autoupdate.Status{Enabled: true, Mechanism: "systemd", UnitPresent: true, OwnedByOther: true, Active: "active"}, false, "active"); ns.Enabled {
+	if ns.OwnedByOther {
+		t.Errorf("lịch của chính bản này: owned_by_other phải false: %+v", ns)
+	}
+	// Lịch của bản cài KHÁC ⇒ với bản này coi như chưa bật, và ghi owned_by_other để Console
+	// không báo "đang tắt" (enable ở bản này bị từ chối).
+	if ns := NightlyStatusFrom(autoupdate.Status{Enabled: true, Mechanism: "systemd", UnitPresent: true, OwnedByOther: true, Active: "active"}, false, "active"); ns.Enabled || !ns.OwnedByOther {
 		t.Errorf("lịch của bản khác không phải của bản này: %+v", ns)
 	}
 	// Unit enabled nhưng timer inactive ⇒ active=false.

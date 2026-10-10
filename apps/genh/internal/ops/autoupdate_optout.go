@@ -64,13 +64,15 @@ func NightlyDeps(installDir string) autoupdate.Deps {
 
 // NightlyStatusFrom chuyển autoupdate.Status thành run/nightly-status.json. Lịch
 // thuộc bản cài KHÁC còn sống (st.OwnedByOther) thì với bản cài này coi như chưa
-// bật — lịch đó cập nhật bản kia, không phải bản này.
+// bật — lịch đó cập nhật bản kia, không phải bản này — và ghi owned_by_other để
+// Console không báo "đang tắt" mãi với lối ra là lệnh bị từ chối.
 func NightlyStatusFrom(st autoupdate.Status, optedOut bool, watcher string) hostlink.NightlyStatus {
 	ns := hostlink.NightlyStatus{
 		Mechanism:      st.Mechanism,
 		Enabled:        st.Enabled && !st.OwnedByOther,
 		UnitPresent:    st.UnitPresent,
 		OptedOut:       optedOut,
+		OwnedByOther:   st.OwnedByOther,
 		Linger:         st.Linger,
 		RequestWatcher: watcher,
 	}

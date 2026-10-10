@@ -77,7 +77,9 @@ def test_block_warn_when_last_run_is_three_days_old(link: Path) -> None:
     assert blk["state"] == "warn" and blk["days_since"] == 3 and blk["opted_out"] is False
     assert blk["linger"] == "yes" and blk["next_run_at"] == "2099-01-01T03:00:00Z"
     assert blk["last_run_at"] and blk["checked_at"]
-    assert set(blk) == {"state", "last_run_at", "next_run_at", "days_since", "opted_out", "linger", "checked_at"}
+    assert set(blk) == {"state", "reason", "last_run_at", "next_run_at", "days_since", "opted_out", "linger",
+                        "checked_at"}
+    assert blk["reason"] == "stale"
 
 
 def test_block_thresholds_36_hours_and_days_are_floored(link: Path) -> None:
@@ -108,17 +110,53 @@ def test_anchor_is_the_later_of_last_run_and_since(link: Path) -> None:
     assert blk["state"] == "warn" and blk["days_since"] == 4
 
 
-def test_opted_out_is_off_even_when_disabled_or_old(link: Path) -> None:
-    write_nightly(link, opted_out=True)
+def test_opted_out_is_off_when_the_schedule_is_really_off(link: Path) -> None:
+    write_nightly(link, opted_out=True, enabled=False, active=False)
     blk = health._nightly_status()
-    assert blk["state"] == "off" and blk["opted_out"] is True and blk["days_since"] is None
+    assert blk["state"] == "off" and blk["opted_out"] is True and blk["days_since"] is None and blk["reason"] is None
     write_nightly(link, opted_out=True, enabled=False, last_run_at="")
     assert health._nightly_status()["state"] == "off"
+    # Chưa biết lịch bật hay không (genh lạ) ⇒ vẫn theo lựa chọn của Sếp.
+    write_nightly(link, opted_out=True, enabled=None)
+    assert health._nightly_status()["state"] == "off"
+
+
+def test_opted_out_but_schedule_still_enabled_is_not_off(link: Path) -> None:
+    """Dấu "Sếp đã tắt" có mà lịch VẪN bật (tắt hụt, `install --no-auto-update` đè lên máy đang có lịch, hay bật tay
+    lại): máy vẫn tự lên bản mới lúc 03:00 ⇒ KHÔNG được nói "Tắt (Sếp đã tắt)"."""
+    for last in (_ago(hours=2), _ago(days=5)):
+        write_nightly(link, opted_out=True, enabled=True, last_run_at=last)
+        blk = health._nightly_status()
+        assert blk["state"] == "warn" and blk["reason"] == "opted_out_running" and blk["opted_out"] is True
 
 
 def test_disabled_without_opt_out_is_warn(link: Path) -> None:
     write_nightly(link, enabled=False, active=False, last_run_at=_ago(hours=1))
+    blk = health._nightly_status()
+    assert blk["state"] == "warn" and blk["reason"] == "disabled"
+
+
+def test_schedule_owned_by_other_install_is_other_not_warn(link: Path) -> None:
+    """Bản cài phụ: lịch dùng chung thuộc bản cài khác còn sống (genh ghi enabled=false, owned_by_other=true) — không
+    phải "đang tắt" (và `genh auto-update enable` ở đây bị từ chối) ⇒ 'other', không cảnh báo."""
+    write_nightly(link, enabled=False, owned_by_other=True, opted_out=False)
+    blk = health._nightly_status()
+    assert blk["state"] == "other" and blk["reason"] is None and blk["days_since"] is None
+    # genh cũ không ghi owned_by_other / giá trị sai kiểu ⇒ như trước (đang tắt).
+    write_nightly(link, enabled=False, owned_by_other="true")
     assert health._nightly_status()["state"] == "warn"
+
+
+def test_linger_is_not_applicable_for_cron_launchd_schtasks(link: Path) -> None:
+    """crontab/LaunchAgent/Task Scheduler chạy cả khi không ai đăng nhập — linger không chi phối lịch đó."""
+    for mech in ("cron", "launchd", "schtasks"):
+        write_nightly(link, mechanism=mech, linger="no")
+        assert health._nightly_status()["linger"] == "not_applicable", mech
+    (link / "autostart-status.json").write_text(json.dumps({"linger": "no", "linger_required": True}))
+    write_nightly(link, mechanism="cron", linger="unknown")
+    assert health._nightly_status()["linger"] == "not_applicable"
+    write_nightly(link, mechanism="systemd", linger="no")
+    assert health._nightly_status()["linger"] == "no"
 
 
 def test_missing_or_broken_file_is_unknown(link: Path) -> None:
@@ -149,7 +187,7 @@ def test_hostile_values_never_leak_or_raise(link: Path) -> None:
     write_nightly(link, mechanism=evil, linger=evil, request_watcher=evil, last_result=evil, enabled=evil,
                   opted_out=evil, since=evil, last_run_at=evil, next_run_at=evil, checked_at=evil)
     blk = health._nightly_status()
-    assert blk == {"state": "unknown", "last_run_at": None, "next_run_at": None, "days_since": None,
+    assert blk == {"state": "unknown", "reason": None, "last_run_at": None, "next_run_at": None, "days_since": None,
                    "opted_out": None, "linger": "unknown", "checked_at": None}
     assert evil not in json.dumps(blk)
 
@@ -162,9 +200,12 @@ async def test_system_health_has_nightly_and_overall_warn(owner_api: Api, link: 
     write_nightly(link, last_run_at=_ago(hours=3))
     body = (await owner_api.get("/system/health")).json()
     assert body["nightly"]["state"] == "ok" and body["overall"] == "ok"
-    write_nightly(link, opted_out=True)
+    write_nightly(link, opted_out=True, enabled=False)
     body = (await owner_api.get("/system/health")).json()
     assert body["nightly"]["state"] == "off" and body["overall"] == "ok"
+    write_nightly(link, enabled=False, owned_by_other=True)
+    body = (await owner_api.get("/system/health")).json()
+    assert body["nightly"]["state"] == "other" and body["overall"] == "ok"
 
 
 async def test_system_health_without_mailbox_has_no_nightly(owner_api: Api, tmp_path: Path,
@@ -195,7 +236,7 @@ async def test_stale_schedule_rings_once_with_fixed_body(owner_api: Api, app, db
     assert rows[0].title == "Lịch tự cập nhật đêm chưa chạy 3 ngày"
     assert rows[0].link == health.HEALTH_LINK
     assert rows[0].body == ("Máy chủ không tự lên bản mới. Trên máy chủ chạy: genh auto-update status"
-                            " · Rồi: genh auto-update enable")
+                            " · Sau đó bật lại lịch: genh auto-update enable")
     assert ENABLE in rows[0].body and "enable-linger" not in rows[0].body
     a = await alert(db)
     assert a.severity == "warn" and a.cleared_at is None and a.fingerprint == "stale"
@@ -223,7 +264,7 @@ async def test_linger_off_adds_the_enable_linger_step(owner_api: Api, app, db, r
     [row] = await bells(db)
     assert row.body == ("Máy chủ không tự lên bản mới. Trên máy chủ chạy: genh auto-update status"
                         " · Tiến trình nền chỉ chạy khi có người đăng nhập — chạy một lần: "
-                        "sudo loginctl enable-linger $USER · Rồi: genh auto-update enable")
+                        "sudo loginctl enable-linger $USER · Sau đó bật lại lịch: genh auto-update enable")
     assert LINGER_FIX in row.body and ENABLE in row.body
     assert (await alert(db)).fingerprint == "linger"
 
@@ -256,13 +297,14 @@ async def test_cause_change_rings_again(owner_api: Api, app, db, redis, link: Pa
 
 async def test_opted_out_raises_nothing_and_closes_open_incident(owner_api: Api, app, db, redis, link: Path) -> None:  # type: ignore[no-untyped-def]
     org = await org_id(db)
-    write_nightly(link, opted_out=True)
+    write_nightly(link, opted_out=True, enabled=False, active=False)
     await evaluate(redis, org)
     assert await alert(db) is None and await bells(db) == []
     write_nightly(link)
     await evaluate(redis, org)
     assert (await alert(db)).cleared_at is None
-    write_nightly(link, opted_out=True)  # Sếp tự tắt bằng `genh auto-update disable` ⇒ hết sự cố
+    # Sếp tự tắt bằng `genh auto-update disable` ⇒ hết sự cố
+    write_nightly(link, opted_out=True, enabled=False, active=False)
     await evaluate(redis, org)
     assert (await alert(db)).cleared_at is not None
     assert await health.active_issues(db, org) == []
@@ -323,3 +365,50 @@ async def test_hostile_values_do_not_reach_the_incident_body(owner_api: Api, app
     [row] = await bells(db)
     assert evil not in row.body and evil not in row.title
     assert row.body.endswith(ENABLE) and "enable-linger" not in row.body
+
+
+async def test_opted_out_but_still_enabled_rings_with_both_choices(owner_api: Api, app, db, redis,  # type: ignore[no-untyped-def]
+                                                                    link: Path) -> None:
+    """Sếp đã tắt mà lịch vẫn bật ⇒ một chuông nói thật (máy vẫn tự cập nhật lúc 03:00) + hai lựa chọn, Sếp tự quyết."""
+    org = await org_id(db)
+    write_nightly(link, opted_out=True, enabled=True, last_run_at=_ago(hours=3))
+    await evaluate(redis, org)
+    await evaluate(redis, org)
+    [row] = await bells(db)
+    assert row.title == "Sếp đã tắt tự cập nhật đêm nhưng lịch vẫn bật"
+    assert row.body == ("Máy chủ vẫn tự lên bản mới khoảng 03:00. Trên máy chủ chạy: genh auto-update status"
+                        " · Muốn tắt hẳn: genh auto-update disable · Muốn giữ tự cập nhật: genh auto-update enable")
+    assert (await alert(db)).fingerprint == "opted_out_running"
+    # Tắt hẳn được (lịch không còn bật) ⇒ hết sự cố.
+    write_nightly(link, opted_out=True, enabled=False, active=False)
+    await evaluate(redis, org)
+    assert (await alert(db)).cleared_at is not None
+
+
+async def test_owned_by_other_raises_nothing_and_closes_open_incident(owner_api: Api, app, db, redis,  # type: ignore[no-untyped-def]
+                                                                       link: Path) -> None:
+    """Bản cài phụ: không chuông "đang tắt" mãi với lối ra là lệnh bị từ chối (OwnedByOtherError)."""
+    org = await org_id(db)
+    write_nightly(link, enabled=False, active=False, owned_by_other=True)
+    await evaluate(redis, org)
+    assert await alert(db) is None and await bells(db) == []
+    write_nightly(link, enabled=False, active=False)  # genh cũ: chưa biết là của bản khác ⇒ "đang tắt"
+    await evaluate(redis, org)
+    assert (await alert(db)).cleared_at is None
+    write_nightly(link, enabled=False, active=False, owned_by_other=True)
+    await evaluate(redis, org)
+    assert (await alert(db)).cleared_at is not None
+    assert await health.active_issues(db, org) == []
+
+
+async def test_cron_schedule_with_linger_off_does_not_blame_linger(owner_api: Api, app, db, redis,  # type: ignore[no-untyped-def]
+                                                                    link: Path) -> None:
+    """Lịch đêm là crontab (máy không có systemd --user): linger 'no' không phải nguyên nhân ⇒ không nhắc
+    enable-linger."""
+    org = await org_id(db)
+    write_nightly(link, mechanism="cron", linger="no", active=None)
+    (link / "autostart-status.json").write_text(json.dumps({"linger": "no", "linger_required": False}))
+    await evaluate(redis, org)
+    [row] = await bells(db)
+    assert "enable-linger" not in row.body and row.body.endswith(ENABLE)
+    assert (await alert(db)).fingerprint == "stale"

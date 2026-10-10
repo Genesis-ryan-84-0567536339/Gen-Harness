@@ -1273,6 +1273,14 @@ jobs:
           install -m 0755 "$RUNNER_TEMP/prev/genh-linux-amd64" "$GEN_HARNESS_HOME/bin/genh"
           "$GEN_HARNESS_HOME/bin/genh" version
           "$GEN_HARNESS_HOME/bin/genh" install --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes --no-auto-update
+          # v0.1.53: genh cũ chưa biết dấu "Sếp đã chủ động tắt" (config/auto-update-disabled.json) nên --no-auto-update ở
+          # trên không ghi nó. Ghi sẵn để genh mới (sau nâng cấp) KHÔNG tự lành bật dòng crontab 03:00–03:29 giờ runner (UTC
+          # = 10:00 VN, giờ hay phát hành) — dòng đó chạy `genh update --yes` giành genh.lock giữa bài kiểm ⇒ đỏ chập chờn
+          # GH-E94A. Đúng ý nghĩa --no-auto-update của genh mới (cài kiểu này = Sếp đã tắt).
+          optout="$GEN_HARNESS_HOME/config/auto-update-disabled.json"
+          mkdir -p "$GEN_HARNESS_HOME/config"
+          [ -e "$optout" ] || printf '{"at":"%s"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$optout"
+          chmod 600 "$optout"
 
       - name: Chờ /api/v1/ready xanh (bản cũ, tối đa 5 phút)
         if: matrix.broken != 'true'
@@ -2988,6 +2996,14 @@ jobs:
           install -m 0755 "$RUNNER_TEMP/prev/genh-linux-amd64" "$GEN_HARNESS_HOME/bin/genh"
           "$GEN_HARNESS_HOME/bin/genh" version
           "$GEN_HARNESS_HOME/bin/genh" install --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes --no-auto-update
+          # v0.1.53: genh cũ chưa biết dấu "Sếp đã chủ động tắt" (config/auto-update-disabled.json) nên --no-auto-update ở
+          # trên không ghi nó. Ghi sẵn để genh mới (sau nâng cấp) KHÔNG tự lành bật dòng crontab 03:00–03:29 giờ runner (UTC
+          # = 10:00 VN, giờ hay phát hành) — dòng đó chạy `genh update --yes` giành genh.lock giữa bài kiểm ⇒ đỏ chập chờn
+          # GH-E94A. Đúng ý nghĩa --no-auto-update của genh mới (cài kiểu này = Sếp đã tắt).
+          optout="$GEN_HARNESS_HOME/config/auto-update-disabled.json"
+          mkdir -p "$GEN_HARNESS_HOME/config"
+          [ -e "$optout" ] || printf '{"at":"%s"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$optout"
+          chmod 600 "$optout"
 
       - name: Chờ /api/v1/ready xanh (bản cũ, tối đa 5 phút)
         run: |

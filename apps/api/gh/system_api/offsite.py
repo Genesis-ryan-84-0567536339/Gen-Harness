@@ -72,7 +72,7 @@ MANUAL_COMMANDS = {"run": "genh offsite run", "disable": "genh offsite disable",
 #: Ký tự làm lệnh trong dấu nháy kép đổi nghĩa (bash/PowerShell: thay biến, chạy lệnh con) ⇒ không ghép lệnh.
 _UNSAFE_IN_QUOTES = re.compile(r'["$`]')
 
-#: Thông điệp theo mã lỗi genh (GH-EBxx) — bảng cố định, KHÔNG lấy chữ từ tệp run/.
+#: Thông điệp theo mã lỗi genh (GH-EBxx, GH-E94C) — bảng cố định, KHÔNG lấy chữ từ tệp run/.
 ERROR_MESSAGES = {
     "GH-EB00": "Chưa chọn nơi lưu bản sao ngoài máy",
     "GH-EB01": "Chưa thấy ổ USB/NAS — cắm lại ổ rồi bấm 'Sao lưu ra ổ ngoài ngay'",
@@ -82,6 +82,10 @@ ERROR_MESSAGES = {
     "GH-EB05": "Máy chủ đang cập nhật/khôi phục — lần sao lưu ra ổ ngoài sẽ thử lại sau",
     "GH-EB06": "Dịch vụ Gen-Harness chưa chạy — bật lại rồi thử lại",
     "GH-EB07": "Nơi lưu không hợp lệ — chọn lại thư mục trên ổ USB/NAS",
+    # v0.1.53 (F-97): genh không xoá được tệp yêu cầu trong run/request nên KHÔNG làm yêu cầu (tránh chạy lặp) — thử
+    # lại/cắm ổ không chữa được; phải sửa quyền thư mục.
+    "GH-E94C": ("Máy chủ không xoá được tệp yêu cầu — chưa làm gì. Nhờ người quản trị kiểm quyền thư mục run/request "
+                "trong thư mục cài đặt rồi thử lại"),
 }
 FAILED_GENERIC = "Lần sao lưu ra ổ ngoài gần nhất chưa thành công"
 STATE_MESSAGES = {

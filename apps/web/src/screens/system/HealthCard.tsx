@@ -46,13 +46,6 @@ export function HealthCard() {
   );
 }
 
-/**
- * Lệnh trong hướng dẫn từng bước: khối nội dòng (không vỡ thành nhiều mảnh nền khi xuống dòng ở màn hẹp) có đệm 6px hai
- * bên — lính gác bố cục (e2e/layout-guard.spec.ts) đo chữ cách mép khung ≥ 6px; `.health-card__tip-steps code` ở
- * styles/system.css chỉ đệm 4px và là nội dòng nên chữ bị xuống dòng dính mép khung.
- */
-const TIP_CMD_STYLE = { display: 'inline-block', maxWidth: '100%', padding: '0 6px', verticalAlign: 'bottom' } as const;
-
 function HealthBody({ data, now, tz }: { data: SystemHealth; now: number; tz: string }) {
   const canManage = useCan('system.manage');
   const isOwner = useMe().data?.role?.code === 'owner';
@@ -83,9 +76,7 @@ function HealthBody({ data, now, tz }: { data: SystemHealth; now: number; tz: st
                 {st.cmd ? (
                   <>
                     {' '}
-                    <code className="mono" style={TIP_CMD_STYLE}>
-                      {st.cmd}
-                    </code>
+                    <code className="mono">{st.cmd}</code>
                   </>
                 ) : null}
               </li>

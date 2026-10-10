@@ -67,6 +67,9 @@ const NIGHTLY_LOOKAHEAD = 5;
  * tăng dần theo semver): tìm lần ~03:00 đầu tiên có ứng viên đủ hạn; ứng viên đó là `latest` ⇒ như cũ, khác `latest` ⇒
  * "Tự cài v0.1.53 đêm 11/10 (~03:00) — v0.1.54 tự cài sau khi đủ 24 giờ (đêm 12/10)". Không có `candidates` (api cũ) hoặc
  * rỗng ⇒ cách cũ theo `published_at`. Gọi 2 tham số `(publishedAt, now)` vẫn là cách cũ.
+ *
+ * `blocked` (api `blocked_version` — bản đã lỗi lần trước): genh vẫn CHỌN bản cao nhất đủ hạn rồi BỎ QUA nếu đó là bản bị
+ * chặn ⇒ đêm đó không cài gì. Đêm nào bản chọn được là bản bị chặn thì không hứa, xét đêm kế tiếp.
  */
 export function autoInstallHint(
   ...args:
@@ -76,10 +79,11 @@ export function autoInstallHint(
         latest: string | null | undefined,
         publishedAt: string | null | undefined,
         now: number,
+        blocked?: string | null,
       ]
 ): string | null {
   if (args.length === 2) return legacyHint(args[0], args[1]);
-  const [candidates, latest, publishedAt, now] = args;
+  const [candidates, latest, publishedAt, now, blocked] = args;
   const usable = (Array.isArray(candidates) ? candidates : [])
     .map((c) => ({ tag: c?.tag, at: Date.parse(String(c?.eligible_at)) }))
     .filter((c): c is { tag: string; at: number } => typeof c.tag === 'string' && c.tag !== '' && Number.isFinite(c.at));
@@ -88,7 +92,7 @@ export function autoInstallHint(
   for (let i = 0; i < NIGHTLY_LOOKAHEAD; i += 1, run = nextNightlyRun(run.getTime() + 24 * 3600 * 1000)) {
     // Danh sách tăng dần theo semver ⇒ ứng viên đủ hạn CUỐI cùng là bản cao nhất lịch đêm sẽ chọn.
     const pick = [...usable].reverse().find((c) => c.at <= run.getTime());
-    if (!pick) continue;
+    if (!pick || (blocked && pick.tag === blocked)) continue;
     const when = `đêm ${ddmm(run)} (~03:00)`;
     if (!latest || pick.tag === latest) return `Tự cài ${when}`;
     // Bản mới nhất đủ hạn lúc nào: theo ứng viên (api tính sẵn), không có thì theo mốc chính thức + 24 giờ.
@@ -330,7 +334,8 @@ export function updateView(
     // Chỉ nói khi genh báo lịch đêm đang BẬT (genh.json auto_update_enabled === true) — tắt/không rõ thì không hứa.
     // Bản mới nhất đã lỗi lần trước (genh ghi run/update-blocked.json): lịch đêm KHÔNG tự cài lại — không hứa "Tự cài".
     const blocked = !!d.blocked_version && d.blocked_version === d.latest;
-    const hint = d.auto_update_enabled === true && !blocked ? autoInstallHint(d.nightly_candidates, d.latest, d.published_at, now) : null;
+    const hint =
+      d.auto_update_enabled === true && !blocked ? autoInstallHint(d.nightly_candidates, d.latest, d.published_at, now, d.blocked_version) : null;
     const action = d.can_request ? 'bấm Cập nhật ngay' : 'chạy lệnh bên dưới';
     return {
       kind: 'available', tone: 'accent', title: `Có bản mới ${d.latest}`,

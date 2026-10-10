@@ -376,6 +376,49 @@ func TestOffsiteRequest_Console_KhongTinCay(t *testing.T) {
 	}
 }
 
+// v0.1.53 (F-97): KHÔNG xoá được tệp yêu cầu ⇒ dừng TRƯỚC khi làm (không set/run/disable,
+// không ghi offsite-status) và trả lỗi bọc ErrRequestUndeletable để caller báo GH-E94C — như
+// ConsumeRequest của cập nhật. Trước đây lỗi xoá bị bỏ qua: bản sao chạy trọn rồi kết quả
+// thành công bị ghi đè bằng failed GH-E94C.
+func TestOffsiteRequest_XoaLoi_KhongLamGi(t *testing.T) {
+	f := newOffsiteFixture(t)
+	if err := hostlink.EnsureDir(f.env.InstallDir); err != nil {
+		t.Fatal(err)
+	}
+	old := clearOffsiteRequest
+	t.Cleanup(func() { clearOffsiteRequest = old })
+	clearOffsiteRequest = func(string) error { return os.ErrPermission }
+	for _, body := range []string{
+		`{"id":"o1","action":"set","path":` + jsonQuote(f.dest) + `}`,
+		`{"id":"o2","action":"run"}`,
+		`{"id":"o3","action":"disable"}`,
+		`{không phải json`,
+	} {
+		if err := os.WriteFile(hostlink.OffsiteRequestPath(f.env.InstallDir), []byte(body), 0o666); err != nil {
+			t.Fatal(err)
+		}
+		r := okRunner(0)
+		handled, err := RunOffsiteRequest(context.Background(), f.env, f.deps(r), &strings.Builder{})
+		if !handled || !errors.Is(err, hostlink.ErrRequestUndeletable) || !errors.Is(err, os.ErrPermission) {
+			t.Fatalf("%s: handled=%v err=%v — phải trả ErrRequestUndeletable", body, handled, err)
+		}
+		if len(r.Calls) != 0 || f.sched.enables != 0 || f.sched.disables != 0 {
+			t.Fatalf("%s: không được làm gì khi không xoá được yêu cầu: calls=%d enables=%d disables=%d", body, len(r.Calls), f.sched.enables, f.sched.disables)
+		}
+		if _, ok, _ := loadOffsiteConfig(f.env.InstallDir); ok {
+			t.Fatalf("%s: không được lưu nơi lưu", body)
+		}
+		if _, err := hostlink.ReadOffsiteStatus(f.env.InstallDir); err == nil {
+			t.Fatalf("%s: không được ghi offsite-status (caller ghi GH-E94C)", body)
+		}
+	}
+	// Xoá được thì làm như thường.
+	clearOffsiteRequest = old
+	if handled, err := RunOffsiteRequest(context.Background(), f.env, f.deps(okRunner(0)), &strings.Builder{}); !handled || errors.Is(err, hostlink.ErrRequestUndeletable) {
+		t.Fatalf("xoá được: handled=%v err=%v", handled, err)
+	}
+}
+
 func jsonQuote(s string) string {
 	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`, "\x01", `\u0001`)
 	return `"` + r.Replace(s) + `"`

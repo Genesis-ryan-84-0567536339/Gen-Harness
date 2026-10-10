@@ -130,6 +130,8 @@ test.describe('v0.1.53 — lịch tự cập nhật đêm: nguyên nhân + cản
     const states: Array<[Record<string, unknown>, RegExp]> = [
       [{ state: 'ok', days_since: 0, linger: 'yes', last_run_at: new Date(Date.now() - 2 * 3600_000).toISOString() }, /Bình thường · chạy lần cuối \d{2}\/\d{2} \d{2}:\d{2}/],
       [{ state: 'off', days_since: null, opted_out: true, linger: 'yes' }, /Tắt \(Sếp đã tắt\)/],
+      // Bản cài phụ: lịch dùng chung thuộc bản cài khác còn sống — không cảnh báo, không có lệnh bật (bị từ chối).
+      [{ state: 'other', reason: null, days_since: null, linger: 'yes' }, /Lịch đêm do bản cài khác trên máy này quản lý/],
       [{ state: 'unknown', days_since: null, last_run_at: null, next_run_at: null, opted_out: null, linger: 'unknown', checked_at: null }, /Chưa rõ/],
     ];
     for (const [over, text] of states) {
@@ -138,6 +140,23 @@ test.describe('v0.1.53 — lịch tự cập nhật đêm: nguyên nhân + cản
       await expect(page.getByRole('region', { name: 'Sức khoẻ hệ thống' }).getByTestId('health-nightly')).toContainText(text);
       await expect(page.getByTestId('health-tip-nightly')).toHaveCount(0);
     }
+  });
+
+  test('Sếp đã tắt mà lịch vẫn bật: thẻ nói thật (không "Tắt"), hướng dẫn hai lựa chọn; chuông cùng cách nói', async ({ page }) => {
+    await mockHook(page.request, 'health', { nightly: { ...NIGHTLY_WARN, reason: 'opted_out_running', opted_out: true, days_since: 0, linger: 'yes' } });
+    await page.goto('/system?tab=storage');
+    const card = page.getByRole('region', { name: 'Sức khoẻ hệ thống' });
+    const row = card.getByTestId('health-nightly');
+    await expect(row).toContainText('Sếp đã tắt nhưng lịch vẫn bật');
+    await expect(row).not.toContainText('Tắt (Sếp đã tắt)');
+    await expect(row).toHaveAttribute('data-tone', 'warn');
+    const tip = card.getByTestId('health-tip-nightly');
+    await expect(tip.locator('code', { hasText: 'genh auto-update disable' })).toBeVisible();
+    await expect(tip.locator('code', { hasText: 'genh auto-update enable' })).toBeVisible();
+    await page.goto('/overview');
+    const strip = page.getByRole('region', { name: 'Cần Sếp xử lý' });
+    await expect(strip.getByTestId('needs-boss-row').filter({ hasText: 'Sếp đã tắt tự cập nhật đêm nhưng lịch vẫn bật' })).toHaveCount(1);
+    await expect(page.getByText('[object Object]')).toHaveCount(0);
   });
 
   test('Auditor (chỉ system.read): thẻ Sức khoẻ có dòng "Tự cập nhật đêm" + hướng dẫn', async ({ page }) => {

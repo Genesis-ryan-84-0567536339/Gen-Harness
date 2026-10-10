@@ -378,15 +378,30 @@ def _autostart_problems(linger: str, required: bool | None, docker: str, mode: s
 NIGHTLY_BODY = "Máy chủ không tự lên bản mới. Trên máy chủ chạy: genh auto-update status"
 NIGHTLY_LINGER = ("Tiến trình nền chỉ chạy khi có người đăng nhập — chạy một lần: "
                   "sudo loginctl enable-linger $USER")
-NIGHTLY_ENABLE = "Rồi: genh auto-update enable"
+NIGHTLY_ENABLE = "Sau đó bật lại lịch: genh auto-update enable"
+#: Sếp đã chủ động tắt (`genh auto-update disable` / `install --no-auto-update`) mà lịch vẫn bật (tắt hụt, hoặc bật
+#: lại tay bằng systemctl/crontab): máy chủ VẪN tự lên bản mới ~03:00 — nói thật + hai lựa chọn, Sếp tự quyết.
+NIGHTLY_OPTED_OUT_RUNNING_TITLE = "Sếp đã tắt tự cập nhật đêm nhưng lịch vẫn bật"
+NIGHTLY_OPTED_OUT_RUNNING_BODY = ("Máy chủ vẫn tự lên bản mới khoảng 03:00. Trên máy chủ chạy: genh auto-update status"
+                                  " · Muốn tắt hẳn: genh auto-update disable"
+                                  " · Muốn giữ tự cập nhật: genh auto-update enable")
+#: Cơ chế lịch đêm mà linger (systemd --user) KHÔNG chi phối: crontab/LaunchAgent/Task Scheduler chạy cả khi không ai
+#: đăng nhập ⇒ khối `nightly` báo linger 'not_applicable', không nhắc `enable-linger` (lệnh đó không chữa được gì).
+NIGHTLY_NO_LINGER_MECHANISMS = ("cron", "launchd", "schtasks")
 
 
-def _nightly_eval(now: datetime) -> tuple[dict[str, Any], bool | None]:
-    """(khối `nightly` của /system/health, `enabled`) từ `run/nightly-status.json` (genh ghi; đã lọc kiểu/tập giá trị
-    ở `update.read_nightly`). `state`: 'off' (Sếp đã chủ động tắt — opted_out), 'warn' (lịch đang tắt, hoặc đã quá
-    `NIGHTLY_STALE_HOURS` kể từ mốc = max(lần chạy cuối, lúc bật)), 'ok', 'unknown' (tệp thiếu/hỏng = genh cũ, hoặc
-    không đủ dữ liệu để kết luận). `days_since` = số ngày tròn kể từ mốc (36–48 giờ ⇒ 1). Linger: giá trị genh ghi
-    trong nightly-status.json; chưa rõ thì lấy từ autostart-status.json."""
+def _nightly_eval(now: datetime) -> dict[str, Any]:
+    """Khối `nightly` của /system/health từ `run/nightly-status.json` (genh ghi; đã lọc kiểu/tập giá trị
+    ở `update.read_nightly`). `state`:
+    - 'other': lịch đêm dùng chung của máy thuộc một bản cài KHÁC còn sống (owned_by_other) — bản cài này không tự lên
+      bản mới theo lịch đó, mà `genh auto-update enable` ở đây cũng bị từ chối ⇒ chỉ báo (xám), không mở sự cố;
+    - 'off': Sếp đã chủ động tắt (opted_out) VÀ lịch không còn bật;
+    - 'warn': lịch đang tắt (`reason` 'disabled'), đã quá `NIGHTLY_STALE_HOURS` kể từ mốc = max(lần chạy cuối, lúc bật)
+      ('stale'), hoặc Sếp đã tắt mà lịch VẪN bật ('opted_out_running' — máy vẫn tự lên bản mới, nói thật);
+    - 'ok'; 'unknown' (tệp thiếu/hỏng = genh cũ, hoặc không đủ dữ liệu để kết luận).
+    `days_since` = số ngày tròn kể từ mốc (36–48 giờ ⇒ 1). Linger: giá trị genh ghi trong nightly-status.json; chưa
+    rõ thì lấy từ autostart-status.json; cơ chế không phải systemd --user (crontab/launchd/schtasks) ⇒
+    'not_applicable'."""
     from gh.system_api import update
 
     d = _host_dir()
@@ -398,29 +413,39 @@ def _nightly_eval(now: datetime) -> tuple[dict[str, Any], bool | None]:
         auto = update._read_json(d / "autostart-status.json")
         if auto is not None:
             linger = _pick(auto.get("linger"), AUTOSTART_YES_NO)
+    if raw is not None and raw["mechanism"] in NIGHTLY_NO_LINGER_MECHANISMS:
+        linger = "not_applicable"
     if raw is None:
-        return ({"state": "unknown", "last_run_at": None, "next_run_at": None, "days_since": None,
-                 "opted_out": None, "linger": linger, "checked_at": None}, None)
+        return {"state": "unknown", "reason": None, "last_run_at": None, "next_run_at": None, "days_since": None,
+                "opted_out": None, "linger": linger, "checked_at": None}
     enabled, opted_out = raw["enabled"], raw["opted_out"]
     times = [t for t in (_parse_ts(raw["last_run_at"]), _parse_ts(raw["since"])) if t is not None]
     anchor = max(times) if times else None
     days = max(0, int((now - anchor).total_seconds() // 86400)) if anchor is not None else None
-    if opted_out is True:
+    stale = enabled is True and anchor is not None and now - anchor > timedelta(hours=NIGHTLY_STALE_HOURS)
+    reason: str | None = None
+    if opted_out is True and enabled is not True:
         state, days = "off", None
-    elif enabled is False or (enabled is True and anchor is not None
-                              and now - anchor > timedelta(hours=NIGHTLY_STALE_HOURS)):
-        state = "warn"
+    elif raw["owned_by_other"] is True and enabled is not True:
+        state, days = "other", None
+    elif opted_out is True:
+        # Dấu "Sếp đã tắt" có mà lịch vẫn bật: KHÔNG được nói "Tắt" (máy vẫn tự cập nhật lúc 03:00).
+        state, reason = "warn", "opted_out_running"
+    elif enabled is False:
+        state, reason = "warn", "disabled"
+    elif stale:
+        state, reason = "warn", "stale"
     elif enabled is True and anchor is not None:
         state = "ok"
     else:
         state, days = "unknown", None
-    return ({"state": state, "last_run_at": raw["last_run_at"], "next_run_at": raw["next_run_at"],
-             "days_since": days, "opted_out": opted_out, "linger": linger, "checked_at": raw["checked_at"]}, enabled)
+    return {"state": state, "reason": reason, "last_run_at": raw["last_run_at"], "next_run_at": raw["next_run_at"],
+            "days_since": days, "opted_out": opted_out, "linger": linger, "checked_at": raw["checked_at"]}
 
 
 def _nightly_status(now: datetime | None = None) -> dict[str, Any]:
     """Khối `nightly` của /system/health — xem `_nightly_eval`."""
-    return _nightly_eval(now or datetime.now(UTC))[0]
+    return _nightly_eval(now or datetime.now(UTC))
 
 
 def _gb(n: Any) -> str:
@@ -736,28 +761,34 @@ async def _eval_autostart(db: AsyncSession, org_id: uuid.UUID, redis: Any) -> No
 
 
 async def _eval_nightly(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: datetime) -> None:
-    """F-99: lịch tự cập nhật đêm không chạy — đang tắt (không do Sếp chủ động tắt) hoặc im quá `NIGHTLY_STALE_HOURS`.
-    Máy chủ không tự lên bản mới mà Sếp không hay biết gì. Thân chỉ ghép từ chuỗi cố định; fingerprint = tình trạng
-    (disabled | linger | stale) ⇒ số ngày tăng dần không sinh chuông mới, đổi nguyên nhân mới có chuông mới. 'off' (Sếp
-    đã tắt) / 'ok' ⇒ đóng; 'unknown' (genh cũ chưa ghi tệp) ⇒ để nguyên. Chỉ khi có hộp thư."""
+    """F-99: lịch tự cập nhật đêm không chạy — đang tắt (không do Sếp chủ động tắt) hoặc im quá `NIGHTLY_STALE_HOURS`;
+    hoặc Sếp đã tắt mà lịch vẫn bật (máy vẫn tự lên bản mới). Thân chỉ ghép từ chuỗi cố định; fingerprint = tình trạng
+    (disabled | linger | stale | opted_out_running) ⇒ số ngày tăng dần không sinh chuông mới, đổi nguyên nhân mới có
+    chuông mới. 'off' (Sếp đã tắt) / 'other' (lịch của bản cài khác) / 'ok' ⇒ đóng; 'unknown' (genh cũ chưa ghi tệp)
+    ⇒ để nguyên. Chỉ khi có hộp thư."""
     if not _host_dir().is_dir():
         return
-    st, enabled = _nightly_eval(now)
+    st = _nightly_eval(now)
     if st["state"] == "warn":
         days = st["days_since"] or 0
-        if enabled is False:
-            title, fingerprint = "Lịch tự cập nhật đêm đang tắt", "disabled"
+        if st["reason"] == "opted_out_running":
+            title, fingerprint, body = (NIGHTLY_OPTED_OUT_RUNNING_TITLE, "opted_out_running",
+                                        NIGHTLY_OPTED_OUT_RUNNING_BODY)
         else:
-            title = ("Lịch tự cập nhật đêm đã hơn 1 ngày chưa chạy" if days < 2
-                     else f"Lịch tự cập nhật đêm chưa chạy {days} ngày")
-            fingerprint = "linger" if st["linger"] == "no" else "stale"
-        parts = [NIGHTLY_BODY]
-        if st["linger"] == "no":
-            parts.append(NIGHTLY_LINGER)
-        parts.append(NIGHTLY_ENABLE)
+            if st["reason"] == "disabled":
+                title, fingerprint = "Lịch tự cập nhật đêm đang tắt", "disabled"
+            else:
+                title = ("Lịch tự cập nhật đêm đã hơn 1 ngày chưa chạy" if days < 2
+                         else f"Lịch tự cập nhật đêm chưa chạy {days} ngày")
+                fingerprint = "linger" if st["linger"] == "no" else "stale"
+            parts = [NIGHTLY_BODY]
+            if st["linger"] == "no":  # 'not_applicable' khi lịch là crontab/launchd/schtasks (xem `_nightly_eval`)
+                parts.append(NIGHTLY_LINGER)
+            parts.append(NIGHTLY_ENABLE)
+            body = AUTOSTART_SEP.join(parts)
         await raise_once(db, org_id, key="host.nightly", kind="host.nightly", severity="warn", title=title,
-                         body=AUTOSTART_SEP.join(parts), link=HEALTH_LINK, fingerprint=fingerprint, redis=redis)
-    elif st["state"] in ("ok", "off"):
+                         body=body, link=HEALTH_LINK, fingerprint=fingerprint, redis=redis)
+    elif st["state"] in ("ok", "off", "other"):
         await clear(db, org_id, "host.nightly")
 
 
@@ -808,6 +839,9 @@ OFFSITE_FAILED_BODY = {
     "GH-EB05": "Máy chủ đang cập nhật/khôi phục nên lần sao lưu ra ổ ngoài bị bỏ qua — sẽ thử lại sau",
     "GH-EB06": "Dịch vụ Gen-Harness chưa chạy nên chưa sao lưu ra ổ ngoài được",
     "GH-EB07": "Nơi lưu không hợp lệ — chọn lại thư mục trên ổ USB/NAS",
+    # v0.1.53 (F-97): cùng câu với gh/system_api/offsite.py ERROR_MESSAGES — sửa quyền, không phải cắm ổ/thử lại.
+    "GH-E94C": "Máy chủ không xoá được tệp yêu cầu — chưa làm gì. Nhờ người quản trị kiểm quyền thư mục run/request "
+               "trong thư mục cài đặt rồi thử lại",
 }
 OFFSITE_FAILED_GENERIC = "Lần sao lưu ra ổ ngoài gần nhất chưa thành công — bấm để xem chi tiết và thử lại"
 

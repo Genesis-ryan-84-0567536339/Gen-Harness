@@ -50,6 +50,8 @@ export const HEALTH_KINDS: ReadonlySet<string> = new Set([
   'network.open_lan',
   // v0.1.49 (F-83): Gen-hub không trả lời hơn 15 phút (sự cố `hub.breaker`).
   'hub.unreachable',
+  // v0.1.53 (F-99): lịch tự cập nhật đêm không chạy / Sếp đã tắt mà lịch vẫn bật.
+  'host.nightly',
 ]);
 
 /** v0.1.36 (F-6): `GET /system/health` — chỉ gọi khi vai trò có `system.read` (`enabled`); tự hỏi lại mỗi 60 giây. */

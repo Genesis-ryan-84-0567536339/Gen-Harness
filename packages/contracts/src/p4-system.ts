@@ -252,6 +252,8 @@ export interface SystemUpdateNightly {
   active: boolean | null;
   /** Sếp đã chủ động tắt lịch đêm (`genh auto-update disable`). */
   opted_out: boolean | null;
+  /** v0.1.53: lịch đêm dùng chung của máy thuộc một bản cài KHÁC còn sống (genh cũ không ghi ⇒ null). */
+  owned_by_other?: boolean | null;
   last_run_at: string | null;
   next_run_at: string | null;
 }
@@ -450,11 +452,19 @@ export interface SystemHealth {
   };
   /**
    * v0.1.53 (F-99): lịch tự cập nhật đêm (~03:00) có đang chạy không (genh ghi run/nightly-status.json). Chỉ có khi api
-   * có hộp thư với genh. 'warn' = lịch đang tắt (không do Sếp tắt) hoặc im quá 36 giờ (kèm sự cố host.nightly); 'off' =
-   * Sếp đã chủ động tắt; 'unknown' = genh cũ chưa ghi tệp. `days_since` = số ngày tròn kể từ mốc max(lần chạy cuối, lúc bật).
+   * có hộp thư với genh. 'warn' = có việc Sếp cần biết (kèm sự cố host.nightly, lý do ở `reason`); 'off' = Sếp đã chủ
+   * động tắt VÀ lịch không còn bật; 'other' = lịch đêm của máy do một bản cài KHÁC (còn sống) quản lý — bản cài này
+   * không đổi được lịch đó, không cảnh báo; 'unknown' = genh cũ chưa ghi tệp. `days_since` = số ngày tròn kể từ mốc
+   * max(lần chạy cuối, lúc bật). `linger` = 'not_applicable' khi lịch là crontab/LaunchAgent/Task Scheduler (linger
+   * không chi phối, không nhắc `enable-linger`).
    */
   nightly?: {
-    state: 'ok' | 'warn' | 'off' | 'unknown';
+    state: 'ok' | 'warn' | 'off' | 'other' | 'unknown';
+    /**
+     * Lý do 'warn' (null ở trạng thái khác; thiếu ở api cũ): 'disabled' = lịch đang tắt (không do Sếp tắt); 'stale' =
+     * bật mà im quá 36 giờ; 'opted_out_running' = Sếp đã tắt nhưng lịch VẪN bật (máy vẫn tự lên bản mới ~03:00).
+     */
+    reason?: 'disabled' | 'stale' | 'opted_out_running' | null;
     last_run_at: string | null;
     next_run_at: string | null;
     days_since: number | null;

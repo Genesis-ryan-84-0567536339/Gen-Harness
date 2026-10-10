@@ -6,6 +6,7 @@ import { UpdateCard } from '../../src/update/UpdateCard';
 import { UPDATE_COMMAND, autoInstallHint, updateView } from '../../src/update/updateModel';
 import { healthRows, healthTips } from '../../src/screens/system/healthModel';
 import { GENH_COMMANDS } from '../../src/help/helpModel';
+import { HEALTH_KINDS } from '../../src/screens/system/queries';
 import { queryClient } from '../../src/lib/queryClient';
 
 /**
@@ -154,6 +155,28 @@ describe('healthRows — Tự cập nhật đêm', () => {
     expect(row(healthBase(nightly({ days_since: null })))).toMatchObject({ value: 'Đang tắt', tone: 'warn' });
   });
 
+  it('theo `reason` của api — cùng cách nói với chuông host.nightly', () => {
+    // Lịch đang tắt mà lần chạy cuối đã cũ: chuông "đang tắt" ⇒ thẻ cũng "Đang tắt" (không "Chưa chạy N ngày").
+    expect(row(healthBase(nightly({ reason: 'disabled', days_since: 5 })))).toMatchObject({ value: 'Đang tắt', tone: 'warn' });
+    // 36–48 giờ: chuông "đã hơn 1 ngày chưa chạy" ⇒ thẻ "Hơn 1 ngày chưa chạy" (không "Chưa chạy 1 ngày").
+    expect(row(healthBase(nightly({ reason: 'stale', days_since: 1 })))).toMatchObject({ value: 'Hơn 1 ngày chưa chạy', tone: 'warn' });
+    expect(row(healthBase(nightly({ reason: 'stale', days_since: 4 })))).toMatchObject({ value: 'Chưa chạy 4 ngày', tone: 'warn' });
+    // api cũ (không reason): 1 ngày cũng nói "Hơn 1 ngày chưa chạy".
+    expect(row(healthBase(nightly({ days_since: 1 })))).toMatchObject({ value: 'Hơn 1 ngày chưa chạy' });
+  });
+
+  it('Sếp đã tắt mà lịch vẫn bật ⇒ nói thật (vàng), không "Tắt (Sếp đã tắt)"', () => {
+    const r = row(healthBase(nightly({ reason: 'opted_out_running', opted_out: true, days_since: 0 })));
+    expect(r).toMatchObject({ value: 'Sếp đã tắt nhưng lịch vẫn bật — máy vẫn tự lên bản mới', tone: 'warn' });
+    expect(r?.value).not.toMatch(/^Tắt/);
+  });
+
+  it('other ⇒ lịch đêm do bản cài khác quản lý (xám, không cảnh báo)', () => {
+    expect(row(healthBase(nightly({ state: 'other', reason: null, days_since: null })))).toMatchObject({
+      value: 'Lịch đêm do bản cài khác trên máy này quản lý', tone: 'muted',
+    });
+  });
+
   it('ok ⇒ "Bình thường · chạy lần cuối dd/mm HH:MM" theo múi giờ tổ chức', () => {
     // 2026-10-09T20:00:00Z = 03:00 ngày 10/10 giờ Việt Nam.
     const r = row(healthBase(nightly({ state: 'ok', days_since: 0, last_run_at: '2026-10-09T20:00:00Z' })));
@@ -178,7 +201,7 @@ describe('healthTips — Cách bật lại lịch tự cập nhật đêm', () =
     expect(t?.title).toBe('Cách bật lại lịch tự cập nhật đêm');
     expect(t?.steps.map((s) => s.cmd)).toEqual(['genh auto-update status', 'genh auto-update enable']);
     expect(t?.steps[0].text).toBe('Trên máy chủ, xem tình trạng lịch:');
-    expect(t?.steps[1].text).toBe('Bật lại lịch:');
+    expect(t?.steps[1].text).toBe('Sau đó bật lại lịch:');
   });
 
   it('warn, linger tắt ⇒ 3 lệnh, bước enable-linger ở giữa', () => {
@@ -194,9 +217,21 @@ describe('healthTips — Cách bật lại lịch tự cập nhật đêm', () =
     }
   });
 
-  it('ok / off / unknown / không có khối ⇒ không có hướng dẫn', () => {
-    for (const state of ['ok', 'off', 'unknown'] as const) expect(tip(healthBase(nightly({ state })))).toBeUndefined();
+  it('ok / off / other / unknown / không có khối ⇒ không có hướng dẫn (other: enable ở bản này bị từ chối)', () => {
+    for (const state of ['ok', 'off', 'other', 'unknown'] as const) expect(tip(healthBase(nightly({ state })))).toBeUndefined();
     expect(tip(healthBase())).toBeUndefined();
+  });
+
+  it('linger không áp dụng (crontab/launchd/schtasks) ⇒ không nhắc enable-linger', () => {
+    const t = tip(healthBase(nightly({ linger: 'not_applicable' })));
+    expect(t?.steps.map((s) => s.cmd)).toEqual(['genh auto-update status', 'genh auto-update enable']);
+  });
+
+  it('Sếp đã tắt mà lịch vẫn bật ⇒ hai lựa chọn: tắt hẳn hoặc giữ tự cập nhật', () => {
+    const t = tip(healthBase(nightly({ reason: 'opted_out_running', opted_out: true })));
+    expect(t?.title).toBe('Sếp đã tắt tự cập nhật đêm nhưng lịch vẫn bật');
+    expect(t?.steps.map((s) => s.cmd)).toEqual(['genh auto-update status', 'genh auto-update disable', 'genh auto-update enable']);
+    for (const st of t?.steps ?? []) expect(st.cmd?.endsWith('.')).toBe(false);
   });
 });
 
@@ -255,6 +290,18 @@ describe('autoInstallHint — chọn bản đủ 24 giờ', () => {
     expect(autoInstallHint('không-phải-ngày', T)).toBeNull();
   });
 
+  it('ứng viên đủ hạn đêm nay là bản BỊ CHẶN (lỗi lần trước) ⇒ đêm đó không cài gì: hứa đêm bản kế tiếp đủ hạn', () => {
+    // genh chọn bản cao nhất đủ hạn (v0.1.53) rồi bỏ qua vì bị chặn ⇒ không phải "Tự cài v0.1.53 đêm 11/10".
+    expect(autoInstallHint([c53, c54], 'v0.1.54', iso(T - 3600_000), T, 'v0.1.53')).toBe('Tự cài đêm 12/10 (~03:00)');
+    // Bản cũ hơn đủ hạn không được hứa thay bản bị chặn (genh không lùi về bản thấp hơn).
+    const c52b = { tag: 'v0.1.52', eligible_at: iso(T - 48 * 3600_000) };
+    expect(autoInstallHint([c52b, c53, c54], 'v0.1.54', iso(T - 3600_000), T, 'v0.1.53')).toBe('Tự cài đêm 12/10 (~03:00)');
+    // Không bị chặn ⇒ như cũ.
+    expect(autoInstallHint([c53, c54], 'v0.1.54', iso(T - 3600_000), T, null)).toBe(
+      'Tự cài v0.1.53 đêm 11/10 (~03:00) — v0.1.54 tự cài sau khi đủ 24 giờ (đêm 12/10)',
+    );
+  });
+
   it('updateView: chỉ hứa khi lịch đêm BẬT và bản mới nhất không bị chặn; có ứng viên khác bản mới nhất thì nêu cả hai', () => {
     const d: SystemUpdate = {
       ...base, current: 'v0.1.52', latest: 'v0.1.54', auto_update_enabled: true,
@@ -268,6 +315,8 @@ describe('autoInstallHint — chọn bản đủ 24 giờ', () => {
     expect(kicker({ ...d, auto_update_enabled: false })).toBe('Đang dùng v0.1.52 · bấm Cập nhật ngay (mất khoảng 2–5 phút, tự sao lưu trước)');
     expect(kicker({ ...d, auto_update_enabled: null })).toBe('Đang dùng v0.1.52 · bấm Cập nhật ngay (mất khoảng 2–5 phút, tự sao lưu trước)');
     expect(kicker({ ...d, blocked_version: 'v0.1.54' })).toMatch(/lịch đêm không tự cài lại/);
+    // Bản bị chặn là ứng viên CŨ hơn bản mới nhất: không hứa cài nó.
+    expect(kicker({ ...d, blocked_version: 'v0.1.53' })).toBe('Đang dùng v0.1.52 · Tự cài đêm 12/10 (~03:00) — hoặc bấm Cập nhật ngay');
     // api cũ (không có nightly_candidates): cách cũ theo published_at.
     const { nightly_candidates: _omit, ...old } = d;
     void _omit;
@@ -280,5 +329,11 @@ describe('Trợ giúp — genh auto-update status', () => {
     const c = GENH_COMMANDS.find((x) => x.cmd === 'genh auto-update status');
     expect(c?.what).toBe('Xem lịch tự cập nhật đêm có đang chạy không: lần chạy gần nhất, lần kế tiếp, linger. Có cảnh báo thì làm đúng lệnh nó in ra.');
     expect(c?.cmd.endsWith('.')).toBe(false);
+  });
+});
+
+describe('Chuông — sự cố host.nightly', () => {
+  it('HEALTH_KINDS có host.nightly ⇒ dải "Cần Sếp xử lý" và thẻ Sức khoẻ đổi ngay khi chuông nhận sự cố (không chờ 60 giây)', () => {
+    expect(HEALTH_KINDS.has('host.nightly')).toBe(true);
   });
 });

@@ -113,6 +113,17 @@ async def test_get_failed_not_mounted(owner_api: Api, link: Path) -> None:
     assert b["message"].startswith("Chưa thấy ổ USB/NAS")
 
 
+async def test_get_failed_request_undeletable_says_fix_permissions(owner_api: Api, link: Path) -> None:
+    """v0.1.53 (F-97): genh không xoá được tệp yêu cầu (GH-E94C) ⇒ câu riêng (kiểm quyền run/request), không phải câu
+    chung "chưa thành công" kèm gợi ý cắm ổ/thử lại — thử lại vẫn lỗi y như cũ."""
+    _status(link, state="failed", error_code="GH-E94C", last_attempt_at=_iso(datetime.now(UTC)))
+    b = (await owner_api.get("/system/offsite")).json()
+    assert b["state"] == "failed" and b["error_code"] == "GH-E94C"
+    assert b["message"] == ("Máy chủ không xoá được tệp yêu cầu — chưa làm gì. Nhờ người quản trị kiểm quyền thư mục "
+                            "run/request trong thư mục cài đặt rồi thử lại")
+    assert "cắm" not in b["message"].lower()
+
+
 async def test_untrusted_values_are_filtered(owner_api: Api, link: Path) -> None:
     _status(link, state="<script>hack</script>", error_code="rm -rf /", dest="/x\n" + "a" * 500,
             schedule="evil", key_id="not-hex!", last_size_bytes="lots", message="Chữ lạ từ tệp")

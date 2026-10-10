@@ -315,7 +315,7 @@ const HEALTH_KIND_DEFAULTS: Record<string, Omit<HealthIssue, 'raised_at' | 'body
   'network.open_lan': { key: 'network.open_lan', kind: 'network.open_lan', severity: 'warn', title: 'Cổng đang mở cho cả mạng', body: 'Mọi máy cùng mạng (Wi-Fi văn phòng, khách…) đều thấy trang đăng nhập Gen-Harness. Bấm để xem lệnh chọn cách truy cập (chạy trên máy chủ): Tailscale (khuyên dùng), chỉ máy này, hoặc giữ mở cho mạng nội bộ.', link: '/system?tab=storage&focus=access', action: 'Chọn cách truy cập' },
   // v0.1.53 (F-99) — gh/health.py _eval_nightly (NIGHTLY_BODY/NIGHTLY_LINGER/NIGHTLY_ENABLE, HEALTH_LINK, ACTIONS): thân ghép
   // từ chuỗi cố định; số ngày / bước linger do healthView tính khi suy từ khối `nightly`.
-  'host.nightly': { key: 'host.nightly', kind: 'host.nightly', severity: 'warn', title: 'Lịch tự cập nhật đêm chưa chạy 3 ngày', body: 'Máy chủ không tự lên bản mới. Trên máy chủ chạy: genh auto-update status · Rồi: genh auto-update enable', link: '/system?tab=storage&focus=health', action: 'Xem cách bật lại' },
+  'host.nightly': { key: 'host.nightly', kind: 'host.nightly', severity: 'warn', title: 'Lịch tự cập nhật đêm chưa chạy 3 ngày', body: 'Máy chủ không tự lên bản mới. Trên máy chủ chạy: genh auto-update status · Sau đó bật lại lịch: genh auto-update enable', link: '/system?tab=storage&focus=health', action: 'Xem cách bật lại' },
   'host.autostart': { key: 'host.autostart', kind: 'host.autostart', severity: 'warn', title: 'Máy chủ có thể không tự chạy lại Gen-Harness khi bật lại máy', body: 'Docker chưa bật tự chạy khi mở máy — chạy một lần trên máy chủ: sudo systemctl enable docker · Lịch tự cập nhật và nút Cập nhật ngay chỉ chạy khi có người đăng nhập — chạy một lần: sudo loginctl enable-linger $USER · Chạy xong thì chạy genh status để cảnh báo tự hết', link: '/system?tab=storage', action: 'Xem cách bật' },
 };
 
@@ -578,17 +578,25 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     } else if (update.failed) derived.push({ kind: 'update.failed', title: `Cập nhật lên ${sysUpdate.to ?? 'bản mới'} chưa thành công` });
     if (disk.state === 'low') derived.push({ kind: 'disk.low', body: `Còn ${gb(disk.free_bytes)} GB trống, cần tối thiểu ${gb(disk.min_bytes)} GB — cập nhật tự động đang tạm dừng.` });
     if (o.autostart?.state === 'warn') derived.push({ kind: 'host.autostart' });
-    // v0.1.53 (F-99): như gh/health._eval_nightly — tiêu đề theo số ngày; thân ghép từ chuỗi cố định (+ bước linger khi 'no').
+    // v0.1.53 (F-99): như gh/health._eval_nightly — tiêu đề theo `reason` (api cũ: theo số ngày); thân ghép từ chuỗi cố
+    // định (+ bước linger khi 'no'); Sếp đã tắt mà lịch vẫn bật ⇒ thân hai lựa chọn.
     const nightly = o.nightly ?? undefined;
-    if (nightly?.state === 'warn') {
-      const days = nightly.days_since;
+    if (nightly?.state === 'warn' && nightly.reason === 'opted_out_running') {
       derived.push({
         kind: 'host.nightly',
-        title: days == null || days < 0 ? 'Lịch tự cập nhật đêm đang tắt' : days < 2 ? 'Lịch tự cập nhật đêm đã hơn 1 ngày chưa chạy' : `Lịch tự cập nhật đêm chưa chạy ${days} ngày`,
+        title: 'Sếp đã tắt tự cập nhật đêm nhưng lịch vẫn bật',
+        body: 'Máy chủ vẫn tự lên bản mới khoảng 03:00. Trên máy chủ chạy: genh auto-update status · Muốn tắt hẳn: genh auto-update disable · Muốn giữ tự cập nhật: genh auto-update enable',
+      });
+    } else if (nightly?.state === 'warn') {
+      const days = nightly.days_since;
+      const disabled = nightly.reason === 'disabled' || (nightly.reason == null && (days == null || days < 0));
+      derived.push({
+        kind: 'host.nightly',
+        title: disabled ? 'Lịch tự cập nhật đêm đang tắt' : days == null || days < 2 ? 'Lịch tự cập nhật đêm đã hơn 1 ngày chưa chạy' : `Lịch tự cập nhật đêm chưa chạy ${days} ngày`,
         body: [
           'Máy chủ không tự lên bản mới. Trên máy chủ chạy: genh auto-update status',
           ...(nightly.linger === 'no' ? ['Tiến trình nền chỉ chạy khi có người đăng nhập — chạy một lần: sudo loginctl enable-linger $USER'] : []),
-          'Rồi: genh auto-update enable',
+          'Sau đó bật lại lịch: genh auto-update enable',
         ].join(' · '),
       });
     }

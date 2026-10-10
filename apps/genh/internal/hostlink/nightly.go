@@ -17,6 +17,7 @@ import (
 //
 //	{"schema":1, "mechanism":"systemd"|"cron"|"launchd"|"schtasks"|"",
 //	 "enabled":bool, "active":bool|null, "unit_present":bool, "opted_out":bool,
+//	 "owned_by_other":bool,
 //	 "since":RFC3339|"", "last_run_at":RFC3339|"",
 //	 "last_result":"done"|"failed"|"deferred"|"up_to_date"|"blocked"|"",
 //	 "next_run_at":RFC3339|"", "linger":"yes"|"no"|"unknown"|"not_applicable",
@@ -48,12 +49,16 @@ const (
 // NightlyStatus là nội dung run/nightly-status.json — KHÔNG omitempty: api đọc đủ
 // mọi khoá (chuỗi rỗng = chưa có; active null = không áp dụng/không rõ).
 type NightlyStatus struct {
-	Schema         int    `json:"schema"`
-	Mechanism      string `json:"mechanism"`
-	Enabled        bool   `json:"enabled"`
-	Active         *bool  `json:"active"`
-	UnitPresent    bool   `json:"unit_present"`
-	OptedOut       bool   `json:"opted_out"`
+	Schema      int    `json:"schema"`
+	Mechanism   string `json:"mechanism"`
+	Enabled     bool   `json:"enabled"`
+	Active      *bool  `json:"active"`
+	UnitPresent bool   `json:"unit_present"`
+	OptedOut    bool   `json:"opted_out"`
+	// OwnedByOther: lịch đêm DÙNG CHUNG của máy thuộc một bản cài KHÁC còn sống —
+	// với bản cài này Enabled=false nhưng không phải "đang tắt" (`genh auto-update
+	// enable` ở đây bị từ chối): Console báo xám, không cảnh báo.
+	OwnedByOther   bool   `json:"owned_by_other"`
 	Since          string `json:"since"`
 	LastRunAt      string `json:"last_run_at"`
 	LastResult     string `json:"last_result"`

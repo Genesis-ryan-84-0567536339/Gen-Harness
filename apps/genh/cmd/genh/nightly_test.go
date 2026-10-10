@@ -153,6 +153,31 @@ func healthyRules(rr *cmdRunner) *cmdRunner {
 		on("is-active gen-harness-update-request.path", "active\n", nil)
 }
 
+// statefulTimer: `systemctl --user show gen-harness-update.timer` theo lệnh enable/disable
+// GẦN NHẤT đã chạy (bật ⇒ enabled + active + có lần kế tiếp; tắt ⇒ not-found). on = trạng thái
+// trước mọi lệnh.
+func statefulTimer(rr *cmdRunner, on bool) *cmdRunner {
+	rr.dyn = func(line string, calls []string) (string, error, bool) {
+		if !strings.Contains(line, "show gen-harness-update.timer") {
+			return "", nil, false
+		}
+		state := on
+		for _, c := range calls {
+			switch {
+			case strings.HasPrefix(c, "systemctl --user disable --now gen-harness-update.timer"):
+				state = false
+			case strings.HasPrefix(c, "systemctl --user enable --now gen-harness-update.timer"):
+				state = true
+			}
+		}
+		if state {
+			return showProps("loaded", "enabled", "active", "@1760000000", "@1760086400"), nil, true
+		}
+		return showProps("not-found", "", "inactive", "", ""), nil, true
+	}
+	return rr
+}
+
 // installDirAlive: gốc cài đặt tạm có config/secrets.json (bản cài "còn sống").
 func installDirAlive(t *testing.T) string {
 	t.Helper()
@@ -231,7 +256,7 @@ func TestPublishHostInfo_DauOptOut_KhongTuLanh(t *testing.T) {
 }
 
 func TestAutoUpdateCmd_DisableGhiDau_EnableXoaDau(t *testing.T) {
-	rr := healthyRules(&cmdRunner{})
+	rr := statefulTimer(healthyRules(&cmdRunner{}), true)
 	useHost(t, rr)
 	dir := installDirAlive(t)
 
@@ -282,21 +307,50 @@ func TestAutoUpdateCmd_DisableGhiDau_EnableXoaDau(t *testing.T) {
 	}
 }
 
-// `install --no-auto-update` ghi dấu; `install` không cờ xoá dấu rồi bật lịch (mang --install-dir/--port).
+// `genh auto-update disable` mà lịch VẪN bật sau đó (Disable best-effort bỏ qua lỗi systemctl —
+// vd chạy bằng tài khoản khác/không có phiên systemd --user): KHÔNG báo "Đã tắt", thoát 1, nói rõ
+// lịch vẫn bật; dấu vẫn ghi (ý Sếp: không tự lành) và genh.json nói thật (lịch còn bật).
+func TestAutoUpdateCmd_DisableHut_KhongBaoDaTat(t *testing.T) {
+	rr := healthyRules(&cmdRunner{}) // show luôn báo enabled + active: tắt không ăn
+	useHost(t, rr)
+	dir := installDirAlive(t)
+	var code int
+	out, errOut := captureStd(t, func() { code = runAutoUpdate([]string{"disable", "--install-dir", dir}) })
+	if code != 1 || strings.Contains(out, "Đã tắt") || !strings.Contains(errOut, disableStillOnLine) {
+		t.Fatalf("tắt hụt: code=%d out=%q err=%q", code, out, errOut)
+	}
+	if !ops.AutoUpdateOptedOut(dir) {
+		t.Error("dấu Sếp đã tắt vẫn phải ghi (không tự lành)")
+	}
+	if info, _ := hostlink.ReadInfo(dir); info.AutoUpdateEnabled == nil || !*info.AutoUpdateEnabled {
+		t.Errorf("genh.json phải nói lịch còn bật: %+v", info)
+	}
+	if ns := readNightly(t, dir); !ns.OptedOut || !ns.Enabled {
+		t.Errorf("nightly-status phải opted_out=true + enabled=true (Console: Sếp đã tắt nhưng lịch vẫn bật): %+v", ns)
+	}
+}
+
+// `install --no-auto-update` ghi dấu VÀ tắt lịch đêm đang có của chính bản cài này (vd `install
+// --force --no-auto-update` đè lên máy đã bật lịch); `install` không cờ xoá dấu rồi bật lịch
+// (mang --install-dir/--port).
 func TestApplyAutoUpdateChoice(t *testing.T) {
-	rr := healthyRules(&cmdRunner{})
+	rr := statefulTimer(healthyRules(&cmdRunner{}), true)
 	home := useHost(t, rr)
 	dir := installDirAlive(t)
 
-	captureStd(t, func() { applyAutoUpdateChoice(dir, 9443, true) })
+	out, errOut := captureStd(t, func() { applyAutoUpdateChoice(dir, 9443, true) })
 	if !ops.AutoUpdateOptedOut(dir) {
 		t.Fatal("--no-auto-update phải ghi dấu")
 	}
-	if rr.ran("enable --now gen-harness-update.timer") {
+	if rr.ran("--user enable --now gen-harness-update.timer") {
 		t.Fatal("--no-auto-update không được bật lịch")
 	}
+	if !rr.ran("--user disable --now gen-harness-update.timer") || !strings.Contains(out, "Đã tắt tự cập nhật hằng đêm.") {
+		t.Fatalf("--no-auto-update trên máy đang có lịch phải tắt lịch đó: %v out=%q err=%q", rr.calls, out, errOut)
+	}
+	rr.reset()
 
-	out, _ := captureStd(t, func() { applyAutoUpdateChoice(dir, 9443, false) })
+	out, _ = captureStd(t, func() { applyAutoUpdateChoice(dir, 9443, false) })
 	if ops.AutoUpdateOptedOut(dir) {
 		t.Fatal("install không cờ phải xoá dấu")
 	}
@@ -306,6 +360,47 @@ func TestApplyAutoUpdateChoice(t *testing.T) {
 	svc, _ := os.ReadFile(filepath.Join(home, ".config", "systemd", "user", autoupdate.TaskName+".service"))
 	if !strings.Contains(string(svc), "update --yes --quiet --install-dir "+dir+" --port 9443") {
 		t.Errorf("lịch đêm phải mang --install-dir/--port:\n%s", svc)
+	}
+}
+
+// `install --no-auto-update` trên máy CHƯA có lịch: chỉ ghi dấu, không gọi lệnh ghi nào
+// (không disable/daemon-reload/ghi lại crontab của Sếp).
+func TestApplyAutoUpdateChoice_NoAutoUpdate_MayMoiKhongDungGi(t *testing.T) {
+	rr := statefulTimer(&cmdRunner{}, false)
+	rr.on("crontab -l", "", errExit1)
+	useHost(t, rr)
+	dir := installDirAlive(t)
+	out, _ := captureStd(t, func() { applyAutoUpdateChoice(dir, 8443, true) })
+	if !ops.AutoUpdateOptedOut(dir) {
+		t.Fatal("--no-auto-update phải ghi dấu")
+	}
+	for _, c := range rr.calls {
+		if strings.Contains(c, " disable") || strings.Contains(c, "daemon-reload") || strings.HasPrefix(c, "crontab /") {
+			t.Fatalf("máy chưa có lịch: không được gọi lệnh ghi %q (%v)", c, rr.calls)
+		}
+	}
+	if strings.Contains(out, "Đã tắt") {
+		t.Errorf("không có gì để tắt: %q", out)
+	}
+}
+
+// Bản cài PHỤ `install --no-auto-update` không tắt lịch của bản chính còn sống.
+func TestApplyAutoUpdateChoice_NoAutoUpdate_BanPhuKhongTatLichBanChinh(t *testing.T) {
+	rr := statefulTimer(healthyRules(&cmdRunner{}), false)
+	home := useHost(t, rr)
+	mainDir, other := installDirAlive(t), installDirAlive(t)
+	captureStd(t, func() { applyAutoUpdateChoice(mainDir, 8443, false) })
+	timerBefore, _ := os.ReadFile(filepath.Join(home, ".config", "systemd", "user", autoupdate.TaskName+".timer"))
+	rr.reset()
+	captureStd(t, func() { applyAutoUpdateChoice(other, 8443, true) })
+	if rr.ran("disable") {
+		t.Fatalf("bản phụ không được tắt lịch của bản chính: %v", rr.calls)
+	}
+	if b, err := os.ReadFile(filepath.Join(home, ".config", "systemd", "user", autoupdate.TaskName+".timer")); err != nil || string(b) != string(timerBefore) {
+		t.Errorf("timer của bản chính phải còn nguyên: %v", err)
+	}
+	if !ops.AutoUpdateOptedOut(other) || ops.AutoUpdateOptedOut(mainDir) {
+		t.Error("dấu chỉ ghi cho bản phụ")
 	}
 }
 
@@ -935,5 +1030,14 @@ func TestRunUpdate_LichDem_GhiNightlyStatusKeCaKhiLoi(t *testing.T) {
 	captureStd(t, func() { runUpdate([]string{"--no-self-update", "--install-dir", dir}) })
 	if after := readNightly(t, dir); after.LastRunAt != before.LastRunAt || after.LastResult != before.LastResult {
 		t.Errorf("chạy tay không được đổi kết quả lịch đêm: %+v -> %+v", before, after)
+	}
+	// Gõ tay `genh update --yes` trong terminal (stdout là TTY) cũng KHÔNG phải lần chạy của lịch:
+	// tính vào thì timer hỏng vẫn hiện "Bình thường" thêm 36 giờ.
+	old := stdoutIsTerminal
+	stdoutIsTerminal = func() bool { return true }
+	t.Cleanup(func() { stdoutIsTerminal = old })
+	captureStd(t, func() { runUpdate([]string{"--yes", "--no-self-update", "--install-dir", dir}) })
+	if after := readNightly(t, dir); after.LastRunAt != before.LastRunAt || after.LastResult != before.LastResult {
+		t.Errorf("`genh update --yes` gõ tay không được đổi kết quả lịch đêm: %+v -> %+v", before, after)
 	}
 }

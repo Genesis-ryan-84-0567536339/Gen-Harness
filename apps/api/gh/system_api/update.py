@@ -288,6 +288,8 @@ def read_nightly(d: Path) -> dict[str, Any] | None:
         "mechanism": mechanism if isinstance(mechanism, str) and mechanism in NIGHTLY_MECHANISMS else "unknown",
         "enabled": _bool(raw.get("enabled")), "active": _bool(raw.get("active")),
         "unit_present": _bool(raw.get("unit_present")), "opted_out": _bool(raw.get("opted_out")),
+        # v0.1.53: lịch dùng chung của máy thuộc bản cài KHÁC còn sống (genh cũ không ghi ⇒ None).
+        "owned_by_other": _bool(raw.get("owned_by_other")),
         "since": _iso_or_none(raw.get("since")), "last_run_at": _iso_or_none(raw.get("last_run_at")),
         "next_run_at": _iso_or_none(raw.get("next_run_at")),
         "last_result": result if isinstance(result, str) and result in NIGHTLY_RESULTS else "unknown",
@@ -297,12 +299,21 @@ def read_nightly(d: Path) -> dict[str, Any] | None:
     }
 
 
-def _stalled_cause(d: Path) -> str:
+def _stalled_cause(d: Path, updater: Any) -> str:
     """Vì sao yêu cầu nằm quá `STALE_REQUEST_SECONDS` mà không ai nhận (không tính lúc máy chủ đang bận):
-    - 'linger_off': linger tắt ⇒ systemd --user chỉ chạy khi có người đăng nhập, trình nhận yêu cầu không chạy;
+    - 'linger_off': linger tắt VÀ trình nhận yêu cầu là systemd --user (genh.json `updater` = 'systemd'; genh cũ không
+      ghi `updater` thì dựa vào `linger_required` của autostart-status.json) ⇒ chỉ chạy khi có người đăng nhập.
+      Trình nhận yêu cầu crontab/launchd chạy cả khi không ai đăng nhập — genh vẫn ghi giá trị loginctl thật vào
+      autostart-status.json, nên linger 'no' ở đó KHÔNG phải nguyên nhân (nhắc `enable-linger` chỉ che nguyên nhân
+      thật);
     - 'watcher_failed': genh báo trình nhận yêu cầu (gen-harness-update-request.path/.service) ở trạng thái lỗi;
     - 'not_picked_up': còn lại (không rõ nguyên nhân). Đọc trực tiếp tệp run/, không import gh.health (vòng import)."""
-    if _pick((_read_json(d / "autostart-status.json") or {}).get("linger"), LINGER_VALUES) == "no":
+    auto = _read_json(d / "autostart-status.json") or {}
+    if isinstance(updater, str) and updater:
+        systemd_watcher = updater == "systemd"
+    else:  # genh cũ không ghi `updater`
+        systemd_watcher = auto.get("linger_required") is True
+    if systemd_watcher and _pick(auto.get("linger"), LINGER_VALUES) == "no":
         return "linger_off"
     if (read_nightly(d) or {}).get("request_watcher") == "failed":
         return "watcher_failed"
@@ -370,7 +381,7 @@ def _state() -> dict[str, Any]:
             # của genh (kiểm quyền thư mục run/request) thay vì chờ 15 phút rồi nói "chưa nhận" không rõ nguyên nhân.
             state, stalled_reason = "failed", None
         elif age is not None and age > STALE_REQUEST_SECONDS and not host_busy:
-            state, stalled_reason = "stalled", _stalled_cause(d)
+            state, stalled_reason = "stalled", _stalled_cause(d, info.get("updater"))
         else:
             state, stalled_reason = "requested", None
     updater = info.get("updater") or None
@@ -422,7 +433,7 @@ async def _payload(request: Request, *, force: bool = False) -> dict[str, Any]:
             "nightly_candidates": _candidates(latest, s["current"]),
             # v0.1.53 (F-99): lịch tự cập nhật đêm (genh ghi run/nightly-status.json, đã lọc); chưa có tệp ⇒ null.
             "nightly": None if nightly is None else {k: nightly[k] for k in (
-                "mechanism", "enabled", "active", "opted_out", "last_run_at", "next_run_at")}}
+                "mechanism", "enabled", "active", "opted_out", "owned_by_other", "last_run_at", "next_run_at")}}
 
 
 def _candidates(latest: dict[str, Any] | None, current: str | None) -> list[dict[str, str]]:

@@ -208,10 +208,23 @@ func TestOwner_BanKiaDaGo_DuocGhiDeVaGo(t *testing.T) {
 	}
 }
 
-// Unit cũ (trước v0.1.53) không có GEN_HARNESS_HOME/--install-dir ⇒ coi là bản mặc định.
+// legacyHome đặt HOME (USERPROFILE trên Windows; LOCALAPPDATA rỗng) để gốc mặc định theo
+// HOME (config.HomeRoot) là <tạm>/.gen-harness, ghi secrets cho bản đó; trả về thư mục đó.
+func legacyHome(t *testing.T) string {
+	t.Helper()
+	h := t.TempDir()
+	t.Setenv("HOME", h)
+	t.Setenv("USERPROFILE", h)
+	t.Setenv("LOCALAPPDATA", "")
+	dir := filepath.Join(h, ".gen-harness")
+	writeSecrets(t, dir)
+	return dir
+}
+
+// Unit cũ (trước v0.1.53) không có GEN_HARNESS_HOME/--install-dir ⇒ coi là bản mặc định THEO HOME.
 func TestOwner_UnitCuKhongGhiBanCai_LaBanMacDinh(t *testing.T) {
 	ti := newTwoInstalls(t)
-	t.Setenv("GEN_HARNESS_HOME", ti.mainDir) // config.DefaultRoot() = bản chính
+	ti.mainDir = legacyHome(t) // bản mặc định theo HOME = bản chính
 	writeUnit(t, ti.home, TaskName+".service", "[Service]\nType=oneshot\nExecStart=/g/bin/genh update --yes --quiet\n")
 	writeUnit(t, ti.home, TaskName+".timer", "[Timer]\nOnCalendar=*-*-* 03:00:00\n")
 
@@ -328,5 +341,108 @@ func TestOwner_KhongInstallDirThiKhongBaoVe(t *testing.T) {
 	}
 	if _, err := os.Stat(timerUnitPath(ti.home)); !os.IsNotExist(err) {
 		t.Error("không có InstallDir ⇒ gỡ như cũ")
+	}
+}
+
+// $GEN_HARNESS_HOME của NGƯỜI GỌI không đổi chủ của lịch cũ: `GEN_HARNESS_HOME=<bản phụ> genh
+// uninstall` (không --install-dir) không được coi lịch cũ (chạy ngoài phiên shell, luôn làm việc
+// trên gốc theo HOME) là của bản phụ rồi gỡ mất lịch của bản chính.
+func TestOwner_UnitCu_KhongDocGEN_HARNESS_HOMECuaNguoiGoi(t *testing.T) {
+	ti := newTwoInstalls(t)
+	ti.mainDir = legacyHome(t)
+	t.Setenv("GEN_HARNESS_HOME", ti.otherDir)
+	writeSecrets(t, ti.otherDir)
+	writeUnit(t, ti.home, TaskName+".service", "[Service]\nType=oneshot\nExecStart=/g/bin/genh update --yes --quiet\n")
+	writeUnit(t, ti.home, TaskName+".timer", "[Timer]\nOnCalendar=*-*-* 03:00:00\n")
+	if dir, found := UnitInstallDir(ti.home, TaskName+".service"); !found || dir != ti.mainDir {
+		t.Fatalf("UnitInstallDir(unit cũ) = %q — muốn gốc theo HOME %q, không phải $GEN_HARNESS_HOME", dir, ti.mainDir)
+	}
+	if msg, _ := Disable(context.Background(), ti.deps(ti.otherDir)); !strings.HasPrefix(msg, "Giữ nguyên") {
+		t.Errorf("bản phụ (qua GEN_HARNESS_HOME) không được gỡ lịch cũ của bản chính: %q", msg)
+	}
+	if _, err := os.Stat(timerUnitPath(ti.home)); err != nil {
+		t.Errorf("timer của bản chính phải còn: %v", err)
+	}
+	// Dòng cron cũ cũng vậy.
+	if d, ok := crontabInstallDir(CrontabMarker+"\n7 3 * * * /g/genh update --yes --quiet >> /l 2>&1\n", CrontabMarker); !ok || d != ti.mainDir {
+		t.Errorf("crontab cũ: %q %v", d, ok)
+	}
+}
+
+// Windows (F-98): Task Scheduler cũng là lịch dùng chung — bản cài phụ không /F ghi đè, không
+// xoá Task của bản chính còn sống; status báo đúng chủ.
+func TestOwner_Windows_TaskCuaBanChinh(t *testing.T) {
+	ti := newTwoInstalls(t)
+	writeSecrets(t, ti.otherDir)
+	tr := SchtasksCreateArgs(`C:\g\genh.exe`, `C:\g\log.txt`, NightlyJob{InstallDir: ti.mainDir})[4]
+	query := "Folder: \\\r\nHostName:      PC\r\nTaskName:      \\" + TaskName + "\r\nNext Run Time: N/A\r\nStatus:        Ready\r\n" +
+		"Task To Run:   " + tr + "\r\nLast Run Time: N/A\r\n"
+	rr := (&recRunner{}).on("schtasks /Query", query, nil)
+	win := func(dir string) Deps {
+		d := ti.deps(dir)
+		d.GOOS, d.Runner, d.GenhPath = "windows", rr, `C:\g\genh.exe`
+		return d
+	}
+	ctx := context.Background()
+
+	if _, err := Enable(ctx, win(ti.otherDir)); !errors.Is(err, ErrScheduleOwnedByOther) {
+		t.Fatalf("Enable bản phụ phải bị từ chối: %v", err)
+	}
+	if msg, err := Disable(ctx, win(ti.otherDir)); err != nil || !strings.HasPrefix(msg, "Giữ nguyên lịch tự cập nhật đêm của bản cài "+ti.mainDir) {
+		t.Fatalf("Disable bản phụ: %q %v", msg, err)
+	}
+	for _, c := range rr.calls {
+		if strings.Contains(c, "/Create") || strings.Contains(c, "/Delete") {
+			t.Fatalf("bản phụ không được ghi/xoá Task của bản chính: %v", rr.calls)
+		}
+	}
+	st, err := GetStatus(ctx, win(ti.otherDir))
+	if err != nil || st.Owner != ti.mainDir || !st.OwnedByOther {
+		t.Fatalf("status bản phụ: %+v %v", st, err)
+	}
+
+	// Chính bản chính: được ghi đè/xoá như thường.
+	rr.calls = nil
+	if st, _ := GetStatus(ctx, win(ti.mainDir)); st.OwnedByOther {
+		t.Errorf("bản chính: OwnedByOther phải false: %+v", st)
+	}
+	if _, err := Enable(ctx, win(ti.mainDir)); err != nil {
+		t.Fatalf("Enable bản chính: %v", err)
+	}
+	if msg, _ := Disable(ctx, win(ti.mainDir)); msg != "Đã tắt tự cập nhật hằng đêm." {
+		t.Fatalf("Disable bản chính: %q", msg)
+	}
+	created, deleted := false, false
+	for _, c := range rr.calls {
+		created = created || strings.Contains(c, "/Create")
+		deleted = deleted || strings.Contains(c, "/Delete")
+	}
+	if !created || !deleted {
+		t.Errorf("bản chính phải /Create rồi /Delete: %v", rr.calls)
+	}
+
+	// Bản chính đã gỡ (không còn secrets.json) ⇒ bản khác được thay.
+	_ = os.Remove(filepath.Join(ti.mainDir, "config", "secrets.json"))
+	if _, err := Enable(ctx, win(ti.otherDir)); err != nil {
+		t.Errorf("chủ Task đã gỡ thì bản khác bật được: %v", err)
+	}
+}
+
+func TestSchtasksOwner(t *testing.T) {
+	legacy := legacyHome(t)
+	for _, c := range []struct {
+		name, text, want string
+		found            bool
+	}{
+		{"có --install-dir", "Task To Run: " + SchtasksCreateArgs(`C:\g\genh.exe`, `C:\l`, NightlyJob{InstallDir: `C:\Users\o\gh`})[4], `C:\Users\o\gh`, true},
+		{"đường dẫn có khoảng trắng", "Task To Run: " + SchtasksCreateArgs(`C:\g\genh.exe`, `C:\l`, NightlyJob{InstallDir: `C:\Users\o\Gen Harness`})[4], `C:\Users\o\Gen Harness`, true},
+		{"nhãn bản địa hoá", "Auszuführende Aufgabe: " + SchtasksCreateArgs(`C:\g\genh.exe`, `C:\l`, NightlyJob{InstallDir: `D:\gh`})[4] + "\r", `D:\gh`, true},
+		{"Task cũ không --install-dir ⇒ gốc theo HOME", "Task To Run: " + SchtasksCreateArgs(`C:\g\genh.exe`, `C:\l`, NightlyJob{})[4], legacy, true},
+		{"không có lệnh genh", "Status: Ready\r\nTask To Run: notepad.exe\r\n", "", false},
+	} {
+		got, found := schtasksOwner(c.text)
+		if got != c.want || found != c.found {
+			t.Errorf("%s: schtasksOwner = %q, %v — muốn %q, %v", c.name, got, found, c.want, c.found)
+		}
 	}
 }

@@ -90,8 +90,8 @@ func unitPath(home, unitFile string) string {
 
 // UnitInstallDir đọc bản cài chủ của một unit đã cài: `Environment=GEN_HARNESS_HOME=`
 // hoặc `--install-dir <x>` trong ExecStart. Unit có mà không ghi cả hai (bản
-// genh trước v0.1.53) ⇒ config.DefaultRoot(). found=false khi không có tệp
-// (hoặc không đọc được).
+// genh trước v0.1.53) ⇒ gốc mặc định theo HOME (defaultOwner). found=false khi
+// không có tệp (hoặc không đọc được).
 func UnitInstallDir(home, unitFile string) (dir string, found bool) {
 	b, err := os.ReadFile(unitPath(home, unitFile))
 	if err != nil {
@@ -112,8 +112,14 @@ func installDirOfText(text string) (string, bool) {
 	return defaultOwner()
 }
 
+// defaultOwner: bản cài chủ của một lịch do genh TRƯỚC v0.1.53 ghi (không mang
+// --install-dir/GEN_HARNESS_HOME) = gốc mặc định theo HOME (config.HomeRoot —
+// ~/.gen-harness, Windows %LOCALAPPDATA%\GenHarness). KHÔNG đọc $GEN_HARNESS_HOME của
+// người đang chạy lệnh: lịch đó chạy ngoài phiên shell (không có biến này) nên luôn làm
+// việc trên gốc theo HOME; đọc biến của người gọi thì `GEN_HARNESS_HOME=/opt/b genh
+// uninstall` coi lịch cũ là của /opt/b và gỡ mất lịch của bản chính.
 func defaultOwner() (string, bool) {
-	d, err := config.DefaultRoot()
+	d, err := config.HomeRoot()
 	if err != nil || d == "" {
 		return "", false
 	}

@@ -28,8 +28,8 @@ func TestNightlyStatus_KhoaHopDong(t *testing.T) {
 	if err := json.Unmarshal(raw, &m); err != nil {
 		t.Fatalf("JSON hỏng: %v\n%s", err, raw)
 	}
-	want := []string{"schema", "mechanism", "enabled", "active", "unit_present", "opted_out", "since", "last_run_at",
-		"last_result", "next_run_at", "linger", "request_watcher", "checked_at"}
+	want := []string{"schema", "mechanism", "enabled", "active", "unit_present", "opted_out", "owned_by_other", "since",
+		"last_run_at", "last_result", "next_run_at", "linger", "request_watcher", "checked_at"}
 	if len(m) != len(want) {
 		t.Errorf("số khoá = %d, muốn %d: %s", len(m), len(want), raw)
 	}
@@ -39,7 +39,8 @@ func TestNightlyStatus_KhoaHopDong(t *testing.T) {
 		}
 	}
 	if m["schema"] != float64(1) || m["mechanism"] != "systemd" || m["enabled"] != true || m["active"] != true ||
-		m["unit_present"] != true || m["opted_out"] != false || m["linger"] != "yes" || m["request_watcher"] != "active" {
+		m["unit_present"] != true || m["opted_out"] != false || m["owned_by_other"] != false || m["linger"] != "yes" ||
+		m["request_watcher"] != "active" {
 		t.Errorf("giá trị sai: %s", raw)
 	}
 	for _, k := range []string{"since", "checked_at"} {
