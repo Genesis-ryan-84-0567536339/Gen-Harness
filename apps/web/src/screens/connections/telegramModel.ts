@@ -1,5 +1,6 @@
 import type { TelegramConfig, TelegramHostStatus } from '@gen-harness/contracts';
 import { friendlyError } from '../../lib/friendlyError';
+import { REQUEST_UNDELETABLE_CODE, REQUEST_UNDELETABLE_TEXT } from '../../lib/genhCodes';
 
 /**
  * v0.1.44 (F-8c): Kết nối › Telegram ("Báo động & bản tin") — chữ, câu lỗi theo mã, kiểm định dạng token. Hàm thuần,
@@ -34,6 +35,8 @@ export const TELEGRAM_ERROR_TEXT: Record<string, string> = {
   TELEGRAM_RATE_LIMITED: 'Telegram đang giới hạn số tin — đợi một phút rồi bấm Gửi thử lại.',
   TELEGRAM_UNREACHABLE: 'Máy chủ không ra được Internet tới Telegram — kiểm tra mạng.',
   TELEGRAM_KEY_MISMATCH: 'Máy chủ không đọc được cấu hình Telegram — bấm Lưu lại một lần.',
+  // v0.1.53 (F-97): Gửi thử từ máy chủ — genh không xoá được tệp yêu cầu nên không gửi; thử lại vẫn lỗi tới khi sửa quyền.
+  [REQUEST_UNDELETABLE_CODE]: REQUEST_UNDELETABLE_TEXT,
 };
 
 /** Câu thân thiện theo mã (mã lạ → câu máy chủ đã lọc qua friendlyError). Luôn là chuỗi. */

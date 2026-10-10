@@ -174,7 +174,7 @@ func NewOffsiteScheduler(env *Env) OffsiteScheduler {
 		job.Env = append(job.Env, compose.EnvOverrideVar+"="+v)
 	}
 	return autoupdateOffsiteScheduler{
-		deps: autoupdate.Deps{GenhPath: genh, LogFile: filepath.Join(config.New(env.InstallDir).LogsDir(), "offsite.log")},
+		deps: autoupdate.Deps{GenhPath: genh, LogFile: filepath.Join(config.New(env.InstallDir).LogsDir(), "offsite.log"), InstallDir: env.InstallDir},
 		job:  job,
 	}
 }
@@ -875,15 +875,25 @@ func RefreshOffsiteSchedule(ctx context.Context, env *Env, deps OffsiteDeps) (bo
 
 // ─── Yêu cầu từ Console ─────────────────────────────────────────────────────
 
+// clearOffsiteRequest xoá tệp yêu cầu — biến để test tiêm lỗi xoá (chạy bằng root thì
+// quyền thư mục không chặn được Remove).
+var clearOffsiteRequest = hostlink.ClearOffsiteRequest
+
 // RunOffsiteRequest làm yêu cầu trong run/request/offsite.json (watcher gọi qua
 // `genh offsite … --if-requested`). XOÁ tệp yêu cầu TRƯỚC khi làm (watcher không
 // kích lặp). handled=false khi hộp thư không có yêu cầu.
+//
+// v0.1.53 (F-97): KHÔNG xoá được tệp yêu cầu ⇒ trả lỗi bọc hostlink.ErrRequestUndeletable
+// và KHÔNG làm gì (không set/run/disable, không ghi offsite-status) — như ConsumeRequest
+// của cập nhật: làm tiếp thì trình nhận yêu cầu kích lặp. Caller báo GH-E94C.
 func RunOffsiteRequest(ctx context.Context, env *Env, deps OffsiteDeps, out io.Writer) (handled bool, err error) {
 	if !hostlink.HasOffsiteRequest(env.InstallDir) {
 		return false, nil
 	}
 	req, rerr := hostlink.ReadOffsiteRequest(env.InstallDir)
-	_ = hostlink.ClearOffsiteRequest(env.InstallDir)
+	if cerr := clearOffsiteRequest(env.InstallDir); cerr != nil {
+		return true, fmt.Errorf("%w: %w", hostlink.ErrRequestUndeletable, cerr)
+	}
 	if rerr != nil {
 		return true, failOffsiteRequest(ctx, env, deps, &OpError{Code: ErrCodeOffsiteInvalidDest, What: "Yêu cầu bản sao ngoài máy từ Console không đọc được", Why: rerr.Error(), Next: "Thử lại trong Console.", Err: rerr})
 	}

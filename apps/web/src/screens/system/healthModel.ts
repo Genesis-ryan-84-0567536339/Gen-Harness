@@ -10,7 +10,7 @@ import { offsiteNextStep, type OffsiteViewer } from './offsiteModel';
 export type HealthTone = 'ok' | 'warn' | 'bad' | 'muted';
 
 export interface HealthRow {
-  key: 'worker' | 'browser' | 'dlq' | 'backup' | 'offsite' | 'update' | 'disk' | 'autostart';
+  key: 'worker' | 'browser' | 'dlq' | 'backup' | 'offsite' | 'update' | 'disk' | 'autostart' | 'nightly';
   label: string;
   value: string;
   tone: HealthTone;
@@ -142,7 +142,39 @@ export function healthRows(
           : { key: 'autostart', label: 'Tự chạy lại khi bật máy', value: 'Chưa rõ', tone: 'muted' },
     );
   }
+
+  // v0.1.53 (F-99): lịch tự cập nhật đêm (~03:00) — khối chỉ có khi api có hộp thư với genh ⇒ vắng khối thì không có
+  // dòng. 'warn' = đang tắt / im quá 36 giờ / Sếp đã tắt mà lịch vẫn bật (hướng dẫn ở `healthTips`); 'off' = Sếp đã chủ
+  // động tắt; 'other' = lịch của máy do bản cài khác quản lý (không cảnh báo, không có lệnh bật — lệnh đó bị từ chối).
+  const n = h.nightly;
+  if (n) {
+    const last = n.last_run_at ? `${fmtDM(n.last_run_at, tz)} ${fmtHM(n.last_run_at, tz)}` : null;
+    rows.push(
+      n.state === 'warn'
+        ? { key: 'nightly', label: 'Tự cập nhật đêm', value: nightlyWarnValue(n), tone: 'warn' }
+        : n.state === 'ok'
+          ? { key: 'nightly', label: 'Tự cập nhật đêm', value: last ? `Bình thường · chạy lần cuối ${last}` : 'Bình thường · chưa tới giờ chạy lần đầu', tone: 'ok' }
+          : n.state === 'off'
+            ? { key: 'nightly', label: 'Tự cập nhật đêm', value: 'Tắt (Sếp đã tắt)', tone: 'muted' }
+            : n.state === 'other'
+              ? { key: 'nightly', label: 'Tự cập nhật đêm', value: 'Lịch đêm do bản cài khác trên máy này quản lý', tone: 'muted' }
+              : { key: 'nightly', label: 'Tự cập nhật đêm', value: 'Chưa rõ', tone: 'muted' },
+    );
+  }
   return rows;
+}
+
+/**
+ * Chữ dòng "Tự cập nhật đêm" khi 'warn' — cùng cách nói với tiêu đề sự cố host.nightly (gh/health._eval_nightly): theo
+ * `reason` của api ('disabled' ⇒ "Đang tắt"; 'stale' ⇒ "Hơn 1 ngày chưa chạy" khi < 2 ngày, còn lại "Chưa chạy N ngày";
+ * 'opted_out_running' ⇒ Sếp đã tắt mà lịch vẫn bật). api cũ không có `reason` ⇒ suy từ số ngày như trước.
+ */
+function nightlyWarnValue(n: NonNullable<SystemHealth['nightly']>): string {
+  if (n.reason === 'opted_out_running') return 'Sếp đã tắt nhưng lịch vẫn bật — máy vẫn tự lên bản mới';
+  if (n.reason === 'disabled') return 'Đang tắt';
+  const days = typeof n.days_since === 'number' && Number.isFinite(n.days_since) ? Math.floor(n.days_since) : null;
+  if (days == null || days < 1) return n.reason === 'stale' ? 'Hơn 1 ngày chưa chạy' : 'Đang tắt';
+  return days < 2 ? 'Hơn 1 ngày chưa chạy' : `Chưa chạy ${fmtInt(days)} ngày`;
 }
 
 export interface HealthTipStep {
@@ -151,7 +183,7 @@ export interface HealthTipStep {
   cmd?: string;
 }
 export interface HealthTip {
-  key: 'disk' | 'worker' | 'autostart';
+  key: 'disk' | 'worker' | 'autostart' | 'nightly';
   title: string;
   steps: HealthTipStep[];
   /** Cảnh báo rủi ro (Sếp tự quyết, nhưng phải thấy rõ). */
@@ -159,8 +191,9 @@ export interface HealthTip {
 }
 
 /**
- * Hướng dẫn tự xử lý ngay trong thẻ — đích của nút "Xem cách giải phóng" (disk.low), "Xem sức khoẻ" (worker.silent) và
- * "Xem cách bật" (host.autostart, cả chuông) ở dải "Cần Sếp xử lý": nút hứa gì thì trang đích phải có đúng cái đó.
+ * Hướng dẫn tự xử lý ngay trong thẻ — đích của nút "Xem cách giải phóng" (disk.low), "Xem sức khoẻ" (worker.silent),
+ * "Xem cách bật" (host.autostart, cả chuông) và "Xem cách bật lại" (host.nightly, v0.1.53) ở dải "Cần Sếp xử lý": nút
+ * hứa gì thì trang đích phải có đúng cái đó.
  */
 export function healthTips(h: SystemHealth): HealthTip[] {
   const tips: HealthTip[] = [];
@@ -215,6 +248,31 @@ export function healthTips(h: SystemHealth): HealthTip[] {
     // Không hứa "đợi tới đêm": thiếu linger thì lịch đêm không chạy, tắt tự cập nhật thì không có lần chạy đêm nào.
     steps.push({ text: 'Chạy xong thì kiểm lại để cảnh báo tự hết:', cmd: 'genh status' });
     tips.push({ key: 'autostart', title: 'Cách bật tự chạy lại khi bật máy', steps });
+  }
+  const n = h.nightly;
+  if (n && n.state === 'warn' && n.reason === 'opted_out_running') {
+    // v0.1.53: Sếp đã tắt mà lịch vẫn bật — nói thật, đưa cả hai lựa chọn (cùng chuỗi thân sự cố host.nightly).
+    tips.push({
+      key: 'nightly',
+      title: 'Sếp đã tắt tự cập nhật đêm nhưng lịch vẫn bật',
+      steps: [
+        { text: 'Trên máy chủ, xem tình trạng lịch:', cmd: 'genh auto-update status' },
+        { text: 'Muốn tắt hẳn (chạy bằng đúng tài khoản đã cài Gen-Harness):', cmd: 'genh auto-update disable' },
+        { text: 'Hoặc muốn giữ tự cập nhật mỗi đêm:', cmd: 'genh auto-update enable' },
+      ],
+    });
+  } else if (n && n.state === 'warn') {
+    // v0.1.53 (F-99): lệnh cố định (cùng chuỗi API ghép vào thân sự cố host.nightly) — không lấy chữ nào từ tệp trên máy chủ.
+    // linger 'not_applicable' khi lịch là crontab/LaunchAgent/Task Scheduler ⇒ không nhắc enable-linger.
+    const steps: HealthTipStep[] = [{ text: 'Trên máy chủ, xem tình trạng lịch:', cmd: 'genh auto-update status' }];
+    if (n.linger === 'no') {
+      steps.push({
+        text: 'Cho tiến trình nền (lịch tự cập nhật, nút Cập nhật ngay) chạy cả khi không ai đăng nhập — chạy một lần (máy hỏi mật khẩu đăng nhập máy):',
+        cmd: 'sudo loginctl enable-linger $USER',
+      });
+    }
+    steps.push({ text: 'Sau đó bật lại lịch:', cmd: 'genh auto-update enable' });
+    tips.push({ key: 'nightly', title: 'Cách bật lại lịch tự cập nhật đêm', steps });
   }
   return tips;
 }

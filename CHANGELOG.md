@@ -16,6 +16,7 @@ Việc sửa nóng không đổi số bản (PR #46, #48, #53, #55, #58, #59) gh
 ## v0.1.53 — Tự cập nhật đêm tự lành + trung thực (10/10/2026)
 - Máy Boss kẹt ở v0.1.44 từ 03/10 đến 09/10: lịch tự cập nhật đêm bị tắt mà `genh auto-update status` đọc sai và không ai biết, nút Cập nhật ngay trên Console chỉ nói "chưa nhận yêu cầu" (F-93, F-94, F-99).
 - `genh update` tự lành: bật lại lịch đêm khi unit mất/tắt/không chạy (trừ khi Sếp đã chủ động tắt); `genh auto-update status` nói thật (5 thông tin: bật/tắt thật, cơ chế, enabled/active, lần chạy gần nhất/kế tiếp, linger) và cảnh báo khi log im quá 36 giờ; kiểm linger sau `enable-linger` (F-93, F-94, F-95).
+  **Thay đổi hành vi**: máy đã tắt lịch đêm từ trước v0.1.53 (chưa có dấu "Sếp đã tắt") được bật lại một lần — muốn tắt hẳn: `genh auto-update disable`; `install --no-auto-update` nay tắt luôn lịch đêm đang có của bản cài đó.
 - Lịch đêm chọn bản cao nhất đã đủ 24 giờ trong 10 bản gần nhất, không bị bản mới chưa chín chặn "đói" (F-96); nút Cập nhật ngay không kích lặp và không kẹt khi tệp yêu cầu không xoá được (GH-E94C, F-97); unit đêm mang `--install-dir`/`--port` và bản cài phụ không gỡ/ghi đè lịch của bản chính (F-98).
 - Console nói rõ nguyên nhân "chưa nhận yêu cầu" (linger tắt / trình nhận yêu cầu lỗi) và cảnh báo lịch đêm im (F-99); E2E chạy thật timer và `.path` dưới user manager có linger, bắt buộc trước promote (F-100).
 - Chi tiết: [docs/releases/v0.1.53.md](docs/releases/v0.1.53.md)

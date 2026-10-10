@@ -26,6 +26,14 @@ func DefaultRoot() (string, error) {
 	if v := os.Getenv(EnvRoot); v != "" {
 		return v, nil
 	}
+	return HomeRoot()
+}
+
+// HomeRoot là gốc cài đặt mặc định theo tài khoản, BỎ QUA $GEN_HARNESS_HOME:
+// Windows %LOCALAPPDATA%\GenHarness, còn lại ~/.gen-harness. Dùng khi cần gốc mà
+// một tiến trình chạy NGOÀI phiên shell (lịch systemd/cron/launchd/schtasks không
+// mang biến này) sẽ tự tìm thấy — không phụ thuộc biến môi trường của người gọi.
+func HomeRoot() (string, error) {
 	if runtime.GOOS == "windows" {
 		if v := os.Getenv("LOCALAPPDATA"); v != "" {
 			return filepath.Join(v, "GenHarness"), nil

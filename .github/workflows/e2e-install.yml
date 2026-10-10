@@ -48,6 +48,17 @@ name: E2E cài đặt thật
 #     đêm không tự thử lại", không sao lưu/không tải ảnh; genh sửa update →
 #     thành công, xoá update-blocked.json, dữ liệu vẫn nguyên.
 #
+# LỊCH ĐÊM THẬT (v0.1.53, F-100) — promote đòi THÊM job `e2e-nightly-real` xanh:
+#   máy Boss kẹt ở v0.1.44 (lịch tự cập nhật đêm TẮT 10 ngày, nút "Cập nhật ngay" báo "Máy chủ chưa nhận yêu
+#   cầu") mà mọi E2E vẫn xanh, vì các job khác cài bằng --no-auto-update hoặc trên runner không có
+#   `systemctl --user` (genh rơi về crontab) — chưa từng có ai chạy timer/.path thật. Job này bật user manager
+#   systemd thật + linger (tiến trình nền chạy cả khi không ai đăng nhập) rồi kiểm: `genh install` (KHÔNG
+#   --no-auto-update) bật gen-harness-update.timer (enabled + active, lần kế tiếp trong 24 giờ 31 phút, unit
+#   mang --install-dir/--port/GEN_HARNESS_HOME/GENH_COMPOSE_FILE); chạy thật gen-harness-update.service (Result=
+#   success, log có dòng mới, timer còn lịch — bắt ứng viên H-b); nút Console ghi yêu cầu TỪ container api và
+#   gen-harness-update-request.path nhận; tệp yêu cầu không xoá được ⇒ GH-E94C, .path không kích lặp vô hạn;
+#   timer bị tắt ⇒ genh update tự lành ("đã bật lại"); Sếp đã chủ động tắt ⇒ không tự lành. Đỏ ⇒ KHÔNG promote.
+#
 # Job `resolve` quyết định mọi thứ (mode, tag, có chạy E2E/promote không):
 #   - workflow_run (workflow "Release" xong) → CHẾ ĐỘ "release": tìm tag trỏ
 #     ĐÚNG commit Release vừa chạy (head_sha). Không có tag (lượt Release bỏ
@@ -1262,6 +1273,14 @@ jobs:
           install -m 0755 "$RUNNER_TEMP/prev/genh-linux-amd64" "$GEN_HARNESS_HOME/bin/genh"
           "$GEN_HARNESS_HOME/bin/genh" version
           "$GEN_HARNESS_HOME/bin/genh" install --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes --no-auto-update
+          # v0.1.53: genh cũ chưa biết dấu "Sếp đã chủ động tắt" (config/auto-update-disabled.json) nên --no-auto-update ở
+          # trên không ghi nó. Ghi sẵn để genh mới (sau nâng cấp) KHÔNG tự lành bật dòng crontab 03:00–03:29 giờ runner (UTC
+          # = 10:00 VN, giờ hay phát hành) — dòng đó chạy `genh update --yes` giành genh.lock giữa bài kiểm ⇒ đỏ chập chờn
+          # GH-E94A. Đúng ý nghĩa --no-auto-update của genh mới (cài kiểu này = Sếp đã tắt).
+          optout="$GEN_HARNESS_HOME/config/auto-update-disabled.json"
+          mkdir -p "$GEN_HARNESS_HOME/config"
+          [ -e "$optout" ] || printf '{"at":"%s"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$optout"
+          chmod 600 "$optout"
 
       - name: Chờ /api/v1/ready xanh (bản cũ, tối đa 5 phút)
         if: matrix.broken != 'true'
@@ -2212,9 +2231,612 @@ jobs:
           done
           crontab -l 2>/dev/null || true
 
+  # ── e2e-nightly-real ─────────────────────────────────────────────────────
+  # v0.1.53 (F-100): chạy THẬT lịch tự cập nhật đêm (gen-harness-update.timer/.service) và trình nhận yêu cầu
+  # (gen-harness-update-request.path/.service — nút "Cập nhật ngay"/"Khôi phục" của Console) dưới một user
+  # manager systemd THẬT có linger (tiến trình nền chạy cả khi không ai đăng nhập). Lý do: các job khác cài bằng
+  # --no-auto-update hoặc trên runner không có `systemctl --user` (genh rơi về crontab), nên chưa bao giờ có ai
+  # chạy timer/.path thật — máy Boss kẹt ở v0.1.44 mà E2E vẫn xanh (lịch đêm TẮT 10 ngày không ai biết).
+  # Ở đây KHÔNG truyền --no-auto-update: chính `genh install` phải bật lịch đêm.
+  # Kịch bản: user manager + linger → cài (cổng 9443 ở chế độ pr, để kiểm --port vào unit) → timer enabled/active,
+  # lần kế tiếp trong 24 giờ 31 phút, unit mang --install-dir/--port/Environment → chạy thật service đêm
+  # (Result=success, log có dòng mới, timer vẫn còn lịch) → nút Console ghi yêu cầu TỪ container api (đúng uid
+  # thật) → ca tệp yêu cầu không xoá được (GH-E94C, .path không kích lặp vô hạn) → tự lành khi timer bị tắt →
+  # opt-out (Sếp đã chủ động tắt) không bị tự lành → bật lại → gỡ cài đặt.
+  # Mọi bước kiểm chỉ ĐỌC trạng thái qua systemctl/journalctl/tệp run/ — không in config/secrets.json hay .env.
+  # promote đòi job này xanh (check_release_gate.py giữ bất biến). Chạy tay workflow cho tag cũ hơn v0.1.53 (genh
+  # chưa có lịch đêm tự lành) sẽ đỏ ở job này — promote tay bản cũ dùng skip_e2e.
+  # Ghi chú vận hành: `--port` của genh chỉ là cổng genh kiểm /api/v1/ready; cổng proxy thật do compose đọc GH_PORT
+  # (chế độ pr ghi GH_PORT vào deploy/.env, vì lịch đêm/trình nhận yêu cầu chạy ngoài phiên shell của job).
+  e2e-nightly-real:
+    name: lịch tự cập nhật đêm + trình nhận yêu cầu chạy thật dưới user manager có linger (chế độ ${{ needs.resolve.outputs.mode }}${{ needs.resolve.outputs.mode == 'release' && format(', {0}', needs.resolve.outputs.tag) || '' }})
+    needs: resolve
+    if: needs.resolve.outputs.run_e2e == 'true'
+    runs-on: ubuntu-24.04
+    # Chạy ngoài checkout repo — xem e2e-install.
+    defaults:
+      run:
+        working-directory: /tmp
+    timeout-minutes: 45
+    env:
+      # pr: cổng 9443 để kiểm --port đi vào unit lịch đêm; release: install.sh dùng cổng mặc định 8443.
+      GH_PORT: ${{ needs.resolve.outputs.mode == 'pr' && '9443' || '8443' }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      R: ${{ github.repository }}
+      TAG: ${{ needs.resolve.outputs.tag }}
+      MODE: ${{ needs.resolve.outputs.mode }}
+    steps:
+      - name: Lấy mã nguồn
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - name: User manager thật + linger (sudo loginctl enable-linger)
+        run: |
+          set -euo pipefail
+          user="$(id -un)"
+          uid="$(id -u)"
+          # linger = tiến trình nền của người dùng chạy cả khi không ai đăng nhập — runner không có phiên đăng
+          # nhập, nên không bật thì `systemctl --user` không có user manager để nói chuyện.
+          sudo loginctl enable-linger "$user"
+          sudo systemctl start "user@${uid}.service"
+          echo "XDG_RUNTIME_DIR=/run/user/${uid}" >>"$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/${uid}/bus" >>"$GITHUB_ENV"
+          export XDG_RUNTIME_DIR="/run/user/${uid}"
+          export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${uid}/bus"
+          state=""
+          deadline=$((SECONDS + 30))
+          while :; do
+            state="$(systemctl --user is-system-running 2>/dev/null || true)"
+            case "$state" in running|degraded) break ;; esac
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              systemctl status "user@${uid}.service" --no-pager || true
+              journalctl -u "user@${uid}.service" --no-pager -n 50 || true
+              echo "::error::user manager systemd của $user không lên (is-system-running='${state:-<rỗng>}') sau 30 giây — job này cần systemctl --user thật." >&2
+              exit 1
+            fi
+            sleep 1
+          done
+          echo "user manager: $state"
+          got="$(loginctl show-user "$user" -p Linger)"
+          echo "$got"
+          if [ "$got" != "Linger=yes" ]; then
+            echo "::error::loginctl báo '$got', cần Linger=yes sau sudo loginctl enable-linger." >&2
+            exit 1
+          fi
+
+      - name: Đặt GEN_HARNESS_HOME (thư mục cài đặt tạm của job này)
+        run: echo "GEN_HARNESS_HOME=$RUNNER_TEMP/gh-nightly" >>"$GITHUB_ENV"
+
+      - name: (pr) Trỏ genh vào deploy/compose.yaml của checkout
+        if: needs.resolve.outputs.mode == 'pr'
+        # Như e2e-install: chế độ pr kiểm CODE của PR (kể cả ảnh api/web). GENH_COMPOSE_FILE phải có trong môi
+        # trường LÚC `genh install` chạy để unit lịch đêm mang nó theo (lịch chạy ngoài phiên shell).
+        run: |
+          set -euo pipefail
+          echo "GENH_COMPOSE_FILE=$GITHUB_WORKSPACE/deploy/compose.yaml" >>"$GITHUB_ENV"
+          # `--port` của genh chỉ là cổng genh gọi /api/v1/ready; cổng proxy thật do compose đọc từ GH_PORT (mặc định
+          # 8443). Lịch đêm và trình nhận yêu cầu chạy NGOÀI phiên shell nên không có biến GH_PORT của job — máy Owner
+          # dùng cổng khác phải để GH_PORT trong .env cạnh compose.yaml (genh giữ nguyên các dòng lạ khi ghi .env),
+          # nếu không bản cập nhật tạo lại proxy ở 8443 và /ready ở cổng đã cài không bao giờ xanh (tự quay về bản cũ).
+          printf 'GH_PORT=%s\n' "$GH_PORT" >"$GITHUB_WORKSPACE/deploy/.env"
+
+      # ── Chế độ "pr": build genh từ source, ghim compose.release.yaml đã publish (như e2e-install) ────────
+      - name: (pr) Cài Go
+        if: needs.resolve.outputs.mode == 'pr'
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: "1.24.0"
+
+      - name: (pr) Tải deploy/compose.release.yaml của bản chính thức ${{ needs.resolve.outputs.tag }}
+        if: needs.resolve.outputs.mode == 'pr'
+        run: |
+          set -euo pipefail
+          gh release download "$TAG" --repo "$R" \
+            --pattern 'compose.release.yaml' --dir "$RUNNER_TEMP/pinned" --clobber
+
+      - name: (pr) Ghim compose.yaml đã publish vào binary (giống bước cùng tên ở release.yml)
+        if: needs.resolve.outputs.mode == 'pr'
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+          cp "$RUNNER_TEMP/pinned/compose.release.yaml" apps/genh/internal/compose/embedded_compose.yaml
+          echo "đã ghi đè embedded_compose.yaml bằng compose.release.yaml của $TAG (digest thật):"
+          grep '^\s*image:' apps/genh/internal/compose/embedded_compose.yaml || true
+
+      - name: (pr) Build genh từ mã nguồn đang xét
+        if: needs.resolve.outputs.mode == 'pr'
+        working-directory: ${{ github.workspace }}/apps/genh
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+          # Giữ version mặc định "dev" (như e2e-install): selfupdate bỏ qua tự tải binary, chỉ kiểm CODE genh.
+          go build -trimpath -ldflags "-s -w" -o "$RUNNER_TEMP/genh" ./cmd/genh
+          echo "GENH=$RUNNER_TEMP/genh" >>"$GITHUB_ENV"
+
+      # ── Chế độ "release": install.sh thật của ĐÚNG tag (cổng mặc định 8443) ──────────────────────────────
+      - name: (release) Tải install.sh của bản phát hành ${{ needs.resolve.outputs.tag }}
+        if: needs.resolve.outputs.mode == 'release'
+        run: |
+          set -euo pipefail
+          gh release download "$TAG" --repo "$R" \
+            --pattern 'install.sh' --dir "$RUNNER_TEMP" --clobber
+          chmod +x "$RUNNER_TEMP/install.sh"
+
+      - name: (release) Cài sạch bằng install.sh thật của ${{ needs.resolve.outputs.tag }} (không --no-auto-update)
+        if: needs.resolve.outputs.mode == 'release'
+        run: |
+          set -euo pipefail
+          # Xem bước cùng tên ở e2e-install: GEN_HARNESS_RELEASE_TAG để install.sh tải ĐÚNG tag đang kiểm (có thể là
+          # bản thử), không cờ nào — nên chính `genh install` phải bật lịch đêm (không có dấu opt-out).
+          GEN_HARNESS_RELEASE_TAG="$TAG" "$RUNNER_TEMP/install.sh"
+          echo "GENH=${GEN_HARNESS_HOME}/bin/genh" >>"$GITHUB_ENV"
+
+      - name: (release) Kiểm genh vừa cài đúng tag ${{ needs.resolve.outputs.tag }}
+        if: needs.resolve.outputs.mode == 'release'
+        run: |
+          set -euo pipefail
+          out="$("$GENH" version)"
+          echo "$out"
+          case " $out " in
+            *" $TAG "*) echo "OK: genh đã cài đúng $TAG" ;;
+            *)
+              echo "::error::genh vừa cài báo '$out', không phải $TAG — install.sh đã tải nhầm bản (kiểm GEN_HARNESS_RELEASE_TAG)." >&2
+              exit 1
+              ;;
+          esac
+
+      - name: (pr) Cài sạch bằng genh build từ source — KHÔNG --no-auto-update (chính install bật lịch đêm)
+        if: needs.resolve.outputs.mode == 'pr'
+        run: |
+          set -euo pipefail
+          "$GENH" install --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes
+
+      - name: Chờ /api/v1/ready xanh (tối đa 5 phút)
+        run: |
+          set -euo pipefail
+          deadline=$((SECONDS + 300))
+          until curl -k -fsS -o "$RUNNER_TEMP/ready.json" "https://localhost:${GH_PORT}/api/v1/ready"; do
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::error::/api/v1/ready không xanh sau 5 phút" >&2
+              exit 1
+            fi
+            sleep 3
+          done
+          cat "$RUNNER_TEMP/ready.json"
+          echo
+
+      - name: Lịch đêm sau install — timer is-enabled + timer is-active + lần kế tiếp trong 24 giờ 31 phút
+        run: |
+          set -euo pipefail
+          t=gen-harness-update.timer
+          en="$(systemctl --user is-enabled "$t" 2>&1 || true)"
+          echo "timer is-enabled: $en"
+          [ "$en" = "enabled" ] || { echo "::error::$t is-enabled = '$en' (cần enabled) — genh install không bật lịch tự cập nhật đêm." >&2; systemctl --user list-timers --all --no-pager || true; exit 1; }
+          ac="$(systemctl --user is-active "$t" 2>&1 || true)"
+          echo "timer is-active: $ac"
+          [ "$ac" = "active" ] || { echo "::error::$t is-active = '$ac' (cần active) — lịch đêm đã cài nhưng không chạy." >&2; systemctl --user status "$t" --no-pager || true; exit 1; }
+          # `systemctl show` in mốc giờ dạng "Sun 2026-10-11 03:09:12 UTC" (cờ --timestamp=unix chỉ có tác dụng ở
+          # `status`/`list-timers`, không ở `show`) — đổi sang giây bằng date -d; chấp nhận cả dạng "@giây".
+          next_epoch() {
+            local v
+            v="$(systemctl --user show "$1" -p NextElapseUSecRealtime --value 2>/dev/null || true)"
+            echo "NextElapseUSecRealtime của $1: '${v:-<rỗng>}'" >&2
+            case "$v" in ''|n/a|0|@0) return 1 ;; @*) printf '%s' "${v#@}" ;; *) date -d "$v" +%s ;; esac
+          }
+          next="$(next_epoch "$t")" || { echo "::error::$t không có NextElapseUSecRealtime — timer active mà không có lần chạy kế tiếp." >&2; exit 1; }
+          now="$(date +%s)"
+          limit=$((now + 24 * 3600 + 31 * 60))
+          echo "lần kế tiếp: $(date -d "@$next" '+%F %T %Z') (còn $(( (next - now) / 60 )) phút)"
+          if [ "$next" -le 0 ] || [ "$next" -gt "$limit" ]; then
+            echo "::error::lần chạy kế tiếp ($next) không nằm trong 24 giờ 31 phút tới ($limit) — OnCalendar sai hoặc timer mất lịch." >&2
+            exit 1
+          fi
+          echo "OK: timer enabled + active, có lần chạy kế tiếp trong 24 giờ 31 phút."
+
+      - name: Trình nhận yêu cầu cài bằng systemd (genh.json updater=systemd, tự cập nhật đêm BẬT)
+        run: |
+          set -euo pipefail
+          run="$GEN_HARNESS_HOME/run"
+          cat "$run/genh.json"
+          echo
+          python3 - "$run/genh.json" <<'PY'
+          import json, sys
+          i = json.load(open(sys.argv[1], encoding="utf-8"))
+          assert i.get("updater") == "systemd", "genh.json updater=%r (cần systemd — runner có user manager thật): %s" % (i.get("updater"), i)
+          assert "update" in (i.get("requests") or []), "genh.json thiếu 'update' trong requests: %s" % i
+          assert i.get("auto_update_enabled") is True, "genh.json auto_update_enabled=%r sau install (máy Boss từng ghi false): %s" % (i.get("auto_update_enabled"), i)
+          PY
+          p="$(systemctl --user is-active gen-harness-update-request.path 2>&1 || true)"
+          [ "$p" = "active" ] || { echo "::error::gen-harness-update-request.path is-active = '$p' (cần active) — nút Cập nhật ngay không có ai nhận." >&2; exit 1; }
+          echo "OK: trình nhận yêu cầu (.path) active, genh.json updater=systemd."
+
+      - name: Unit lịch đêm mang đủ --install-dir, Environment=GEN_HARNESS_HOME, (pr) --port 9443 và GENH_COMPOSE_FILE
+        run: |
+          set -euo pipefail
+          unit="$HOME/.config/systemd/user/gen-harness-update.service"
+          [ -f "$unit" ] || { echo "::error::không thấy $unit" >&2; ls -la "$HOME/.config/systemd/user" || true; exit 1; }
+          cat "$unit"
+          grep -Fq -e "--install-dir $GEN_HARNESS_HOME" "$unit" \
+            || { echo "::error::unit lịch đêm thiếu '--install-dir $GEN_HARNESS_HOME' — lịch chạy ngoài phiên shell sẽ cập nhật sai bản cài (hoặc không thấy bản cài)." >&2; exit 1; }
+          grep -Fq "Environment=GEN_HARNESS_HOME=$GEN_HARNESS_HOME" "$unit" \
+            || { echo "::error::unit lịch đêm thiếu 'Environment=GEN_HARNESS_HOME=$GEN_HARNESS_HOME'." >&2; exit 1; }
+          if [ "$MODE" = "pr" ]; then
+            grep -Fq -e "--port 9443" "$unit" \
+              || { echo "::error::unit lịch đêm thiếu '--port 9443' — bản cài không dùng cổng mặc định bị kiểm /ready sai cổng." >&2; exit 1; }
+            grep -Fq "GENH_COMPOSE_FILE=$GENH_COMPOSE_FILE" "$unit" \
+              || { echo "::error::unit lịch đêm thiếu 'GENH_COMPOSE_FILE=$GENH_COMPOSE_FILE' — lịch chạy ngoài phiên shell sẽ dùng compose khác." >&2; exit 1; }
+          fi
+          echo "OK: unit lịch đêm đủ đối số và môi trường."
+
+      - name: genh auto-update status nói thật (BẬT, Lần kế tiếp, Linger có)
+        run: |
+          set -euo pipefail
+          "$GENH" auto-update status --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" | tee "$RUNNER_TEMP/au-status.txt"
+          for want in 'BẬT' 'Lần kế tiếp' 'Linger: có'; do
+            grep -Fq "$want" "$RUNNER_TEMP/au-status.txt" \
+              || { echo "::error::genh auto-update status thiếu '$want' (xem đầu ra ở trên) — trạng thái không phản ánh lịch đêm thật." >&2; exit 1; }
+          done
+          if grep -Fq 'NHƯNG KHÔNG CHẠY' "$RUNNER_TEMP/au-status.txt"; then
+            echo "::error::genh auto-update status báo 'BẬT NHƯNG KHÔNG CHẠY' trong khi timer active." >&2; exit 1
+          fi
+          if grep -Fq 'Lần kế tiếp: không rõ' "$RUNNER_TEMP/au-status.txt"; then
+            echo "::error::genh auto-update status không biết lần kế tiếp trong khi systemctl show có NextElapseUSecRealtime." >&2; exit 1
+          fi
+          echo "OK: auto-update status khớp systemd."
+
+      - name: Chạy thật service đêm — systemctl --user start gen-harness-update.service (oneshot, chờ xong)
+        run: |
+          set -euo pipefail
+          log="$GEN_HARNESS_HOME/logs/auto-update.log"
+          n0=0
+          if [ -f "$log" ]; then n0="$(wc -l <"$log" | tr -d ' ')"; fi
+          t0="$(date +%s)"
+          echo "log lịch đêm trước khi chạy: $n0 dòng; mốc t0=$t0"
+          rc=0
+          timeout 1500 systemctl --user start gen-harness-update.service || rc=$?
+          result="$(systemctl --user show gen-harness-update.service -p Result)"
+          echo "systemctl start thoát $rc; $result"
+          if [ "$rc" != "0" ] || [ "$result" != "Result=success" ]; then
+            systemctl --user status gen-harness-update.service --no-pager || true
+            journalctl --user -u gen-harness-update.service --no-pager | tail -100 || true
+            [ -f "$log" ] && tail -n 50 "$log" || true
+            echo "::error::service lịch đêm không thành công (thoát $rc, $result) — đúng lỗi máy Boss: timer kích mà service không chạy được." >&2
+            exit 1
+          fi
+          n1=0
+          if [ -f "$log" ]; then n1="$(wc -l <"$log" | tr -d ' ')"; fi
+          echo "log lịch đêm sau khi chạy: $n1 dòng"
+          if [ "$n1" -le "$n0" ]; then
+            echo "::error::service chạy xong mà logs/auto-update.log không có dòng mới ($n0 → $n1) — Boss sẽ không thấy lịch đêm có chạy." >&2
+            exit 1
+          fi
+          echo "── dòng mới của logs/auto-update.log ──"
+          tail -n +"$((n0 + 1))" "$log"
+          # Bắt ứng viên H-b: daemon-reload/enable từ BÊN TRONG service (genh gọi lại systemctl) làm timer mất lịch.
+          t=gen-harness-update.timer
+          en="$(systemctl --user is-enabled "$t" 2>&1 || true)"
+          ac="$(systemctl --user is-active "$t" 2>&1 || true)"
+          nxt="$(systemctl --user show "$t" -p NextElapseUSecRealtime --value 2>/dev/null || true)"
+          echo "SAU lần chạy — timer is-enabled: $en; is-active: $ac; NextElapseUSecRealtime: '${nxt:-<rỗng>}'"
+          [ "$en" = "enabled" ] || { echo "::error::sau khi service đêm chạy, $t is-enabled = '$en' (cần enabled) — lịch bị tắt từ bên trong lần chạy." >&2; exit 1; }
+          [ "$ac" = "active" ] || { echo "::error::sau khi service đêm chạy, $t is-active = '$ac' (cần active)." >&2; exit 1; }
+          case "$nxt" in ''|n/a|0|@0) echo "::error::sau khi service đêm chạy, $t mất NextElapseUSecRealtime — lịch đêm biến mất sau lần chạy đầu." >&2; exit 1 ;; esac
+          python3 - "$GEN_HARNESS_HOME/run/nightly-status.json" "$t0" <<'PY'
+          import datetime, json, sys
+          d = json.load(open(sys.argv[1], encoding="utf-8"))
+          t0 = int(sys.argv[2])
+          print(json.dumps(d, ensure_ascii=False, indent=1))
+          assert d.get("schema") == 1, "nightly-status.json schema=%r" % d.get("schema")
+          raw = d.get("last_run_at") or ""
+          assert raw, "nightly-status.json thiếu last_run_at sau lần chạy lịch đêm"
+          at = datetime.datetime.fromisoformat(raw.replace("Z", "+00:00")).timestamp()
+          assert at >= t0 - 5, "last_run_at=%s cũ hơn lần chạy vừa rồi (t0=%d)" % (raw, t0)
+          assert d.get("last_result") in ("done", "up_to_date", "deferred"), "last_result=%r sau lần chạy thành công" % d.get("last_result")
+          PY
+          echo "OK: service đêm chạy thật (Result=success), log có dòng mới, timer còn nguyên lịch, nightly-status.json có last_run_at mới."
+
+      - name: Nút "Cập nhật ngay" — api ghi yêu cầu (đúng uid), trình nhận yêu cầu (.path) nhận và cập nhật xong
+        run: |
+          set -euo pipefail
+          run="$GEN_HARNESS_HOME/run"
+          starting_count() {
+            local out
+            out="$(journalctl --user -u gen-harness-update-request.service -o cat --no-pager 2>/dev/null || true)"
+            if [ -z "$out" ]; then
+              out="$(sudo -n journalctl --user-unit gen-harness-update-request.service -o cat --no-pager 2>/dev/null || true)"
+            fi
+            printf '%s\n' "$out" | grep -c '^Starting ' || true
+          }
+          p="$(systemctl --user is-active gen-harness-update-request.path 2>&1 || true)"
+          [ "$p" = "active" ] || { echo "::error::gen-harness-update-request.path is-active = '$p' trước khi bấm nút." >&2; exit 1; }
+          s0="$(starting_count)"
+          before="$(python3 -c "import json,sys;print(json.load(open(sys.argv[1])).get('started_at',''))" "$run/update-status.json" 2>/dev/null || true)"
+          api="$(docker ps --format '{{.Names}}' | grep -E '^gen-harness-api-[0-9]+$' | head -1)"
+          [ -n "$api" ] || { echo "::error::không thấy container api" >&2; docker ps -a; exit 1; }
+          # Như nút trong Console (gh/system_api/update.py): CHÍNH container api (uid 10001, khác người dùng
+          # máy chủ) ghi run/request/update.json qua bind mount bằng gh.hostlink_io.write_request.
+          docker exec -i "$api" python - <<'PY'
+          import datetime, uuid
+          from pathlib import Path
+          from gh.config import get_settings
+          from gh.hostlink_io import write_request
+          d = Path(get_settings().host_link_dir) / "request"
+          req = {"id": str(uuid.uuid4()), "requested_at": datetime.datetime.now(datetime.timezone.utc).isoformat(), "by": "e2e-nightly"}
+          write_request(d, "update.json", req)
+          print("đã ghi", d / "update.json", req["requested_at"])
+          PY
+          # (a) trình nhận yêu cầu phải nhận trong 120 giây: tệp yêu cầu biến mất.
+          deadline=$((SECONDS + 120))
+          while [ -e "$run/request/update.json" ]; do
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              ls -la "$run" "$run/request"
+              systemctl --user status gen-harness-update-request.path gen-harness-update-request.service --no-pager || true
+              echo "::error::trình nhận yêu cầu (.path) không nhận update.json trong 120 giây — đúng lỗi Console 'Máy chủ chưa nhận yêu cầu'." >&2
+              exit 1
+            fi
+            sleep 2
+          done
+          echo "tệp yêu cầu đã được nhận sau $((SECONDS - deadline + 120)) giây."
+          # (b) genh cập nhật xong (pr: chạy đủ đường cập nhật compose ngoài; tối đa 10 phút).
+          deadline=$((SECONDS + 600))
+          while :; do
+            st="$(python3 -c "import json,sys;d=json.load(open(sys.argv[1]));print(d.get('state',''), d.get('started_at',''))" "$run/update-status.json" 2>/dev/null || true)"
+            state="${st%% *}"; started="${st#* }"
+            if [ "$started" != "$before" ] && [ "$state" = "done" ]; then break; fi
+            if [ "$started" != "$before" ] && [ "$state" = "failed" ]; then
+              cat "$run/update-status.json"; echo "::error::genh báo cập nhật lỗi" >&2; exit 1
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              cat "$run/update-status.json" 2>/dev/null || true
+              echo "::error::update-status.json không chuyển sang done trong 10 phút" >&2; exit 1
+            fi
+            sleep 5
+          done
+          cat "$run/update-status.json"; echo
+          until curl -k -fsS -o /dev/null "https://localhost:${GH_PORT}/api/v1/ready"; do sleep 3; done
+          pf="$(systemctl --user is-failed gen-harness-update-request.path 2>&1 || true)"
+          echo "gen-harness-update-request.path is-failed: $pf"
+          [ "$pf" != "failed" ] || { echo "::error::gen-harness-update-request.path ở trạng thái failed sau một yêu cầu bình thường." >&2; systemctl --user status gen-harness-update-request.path --no-pager || true; exit 1; }
+          nr="$(systemctl --user show gen-harness-update-request.service -p NRestarts)"
+          s1="$(starting_count)"
+          echo "$nr; số lần gen-harness-update-request.service được khởi động (Starting): $s0 → $s1"
+          [ "${nr#NRestarts=}" -le 2 ] || { echo "::error::$nr — service nhận yêu cầu khởi động lại quá nhiều." >&2; exit 1; }
+          [ $((s1 - s0)) -ge 1 ] || { echo "::error::không thấy dòng 'Starting gen-harness-update-request.service' trong journal sau khi bấm nút — .path không kích service hoặc không đọc được journal." >&2; journalctl --user -u gen-harness-update-request.service --no-pager | tail -50 || true; exit 1; }
+          [ $((s1 - s0)) -le 2 ] || { echo "::error::một yêu cầu bình thường mà service nhận yêu cầu được khởi động $((s1 - s0)) lần (cần ≤ 2)." >&2; journalctl --user -u gen-harness-update-request.service --no-pager | tail -50 || true; exit 1; }
+          echo "OK: nút Cập nhật ngay đi hết đường .path → genh → done, không kích lặp."
+
+      - name: run/nightly-status.json đúng hợp đồng sau cập nhật (Console đọc tệp này)
+        run: |
+          set -euo pipefail
+          python3 - "$GEN_HARNESS_HOME/run/nightly-status.json" <<'PY'
+          import datetime, json, sys
+          d = json.load(open(sys.argv[1], encoding="utf-8"))
+          print(json.dumps(d, ensure_ascii=False, indent=1))
+          want_keys = {"schema", "mechanism", "enabled", "active", "unit_present", "opted_out", "since", "last_run_at",
+                       "last_result", "next_run_at", "linger", "request_watcher", "checked_at"}
+          missing = want_keys - set(d)
+          assert not missing, "nightly-status.json thiếu khoá: %s" % sorted(missing)
+          assert d["schema"] == 1, "schema=%r" % d["schema"]
+          assert d["mechanism"] == "systemd", "mechanism=%r (runner có user manager thật)" % d["mechanism"]
+          assert d["enabled"] is True and d["active"] is True and d["unit_present"] is True, "lịch đêm không bật/chạy: %s" % d
+          assert d["opted_out"] is False, "opted_out=%r trong khi Sếp chưa tắt" % d["opted_out"]
+          assert d["linger"] == "yes", "linger=%r (đã sudo loginctl enable-linger)" % d["linger"]
+          assert d["request_watcher"] == "active", "request_watcher=%r" % d["request_watcher"]
+          assert d["next_run_at"], "next_run_at rỗng trong khi timer có lần chạy kế tiếp"
+          for k in ("since", "last_run_at", "next_run_at", "checked_at"):
+              if d[k]:
+                  datetime.datetime.fromisoformat(d[k].replace("Z", "+00:00"))
+          PY
+          echo "OK: nightly-status.json đúng hợp đồng (systemd, bật + chạy, linger yes, trình nhận yêu cầu active)."
+
+      - name: Ca tệp yêu cầu không xoá được — GH-E94C, không làm yêu cầu, .path không kích lặp vô hạn
+        run: |
+          set -euo pipefail
+          run="$GEN_HARNESS_HOME/run"
+          req="$run/request"
+          svc=gen-harness-update-request.service
+          pth=gen-harness-update-request.path
+          starting_count() {
+            local out
+            out="$(journalctl --user -u "$svc" -o cat --no-pager 2>/dev/null || true)"
+            if [ -z "$out" ]; then
+              out="$(sudo -n journalctl --user-unit "$svc" -o cat --no-pager 2>/dev/null || true)"
+            fi
+            printf '%s\n' "$out" | grep -c '^Starting ' || true
+          }
+          # Ghi lại quyền/nhóm TRƯỚC khi chmod để khôi phục đúng (và luôn khôi phục kể cả khi bước đỏ giữa chừng).
+          mode0="$(stat -c %a "$req")"; grp0="$(stat -c %g "$req")"
+          echo "run/request trước: quyền $mode0, nhóm $grp0"
+          # Khôi phục bằng sudo: chmod của người không thuộc nhóm 10001 sẽ lặng lẽ bỏ bit setgid (2770 → 770).
+          restore_perms() {
+            sudo chmod "$mode0" "$req" 2>/dev/null || chmod "$mode0" "$req" || true
+          }
+          trap restore_perms EXIT
+          systemctl --user stop "$pth"
+          api="$(docker ps --format '{{.Names}}' | grep -E '^gen-harness-api-[0-9]+$' | head -1)"
+          [ -n "$api" ] || { echo "::error::không thấy container api" >&2; docker ps -a; exit 1; }
+          # Cùng đường nút Console đi (xem bước "Cập nhật ngay"): api ghi run/request/update.json.
+          docker exec -i "$api" python - <<'PY'
+          import datetime, uuid
+          from pathlib import Path
+          from gh.config import get_settings
+          from gh.hostlink_io import write_request
+          d = Path(get_settings().host_link_dir) / "request"
+          req = {"id": str(uuid.uuid4()), "requested_at": datetime.datetime.now(datetime.timezone.utc).isoformat(), "by": "e2e-nightly"}
+          write_request(d, "update.json", req)
+          print("đã ghi", d / "update.json", req["requested_at"])
+          PY
+          [ -f "$req/update.json" ] || { echo "::error::api không ghi được update.json" >&2; ls -la "$req"; exit 1; }
+          # Bỏ quyền ghi thư mục: genh (chủ thư mục) đọc được yêu cầu nhưng KHÔNG xoá được.
+          chmod 0555 "$req" 2>/dev/null || sudo chmod 0555 "$req"
+          echo "run/request sau chmod: quyền $(stat -c %a "$req")"
+          if [ -w "$req" ]; then
+            echo "::error::run/request vẫn ghi được sau chmod 0555 (runner chạy bằng root?) — không dựng được ca tệp không xoá được." >&2
+            exit 1
+          fi
+          s0="$(starting_count)"
+          systemctl --user start "$pth"
+          # Chờ tối đa 90 giây: update-status.json phải là failed kèm GH-E94C.
+          deadline=$((SECONDS + 90))
+          while :; do
+            out="$(python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));print(d.get("state","")+"\t"+str(d.get("message","")))' "$run/update-status.json" 2>/dev/null || true)"
+            state="${out%%$'\t'*}"; msg="${out#*$'\t'}"
+            if [ "$state" = "failed" ] && [[ "$msg" == *GH-E94C* ]]; then break; fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              cat "$run/update-status.json" 2>/dev/null || true
+              ls -la "$run" "$req"
+              systemctl --user status "$pth" "$svc" --no-pager || true
+              echo "::error::sau 90 giây update-status.json không là failed kèm GH-E94C (state='$state') — genh coi lỗi xoá là đã nhận hoặc không báo Console." >&2
+              exit 1
+            fi
+            sleep 3
+          done
+          echo "update-status: state=$state — $msg"
+          # Cho .path đủ thời gian kích lặp (nếu có lỗi): rồi đếm số lần service được khởi động.
+          sleep 20
+          s1="$(starting_count)"
+          sleep 15
+          s2="$(starting_count)"
+          journalctl --user -u "$svc" --no-pager 2>/dev/null | tail -30 || true
+          # Service oneshot kết thúc bằng "Finished", nên mỗi lần khởi động là một dòng "Starting …" trong journal.
+          echo "Số lần $svc được khởi động (Starting): trước $s0, sau 20 giây $s1, sau 35 giây $s2 (tăng $((s2 - s0)))"
+          systemctl --user is-failed "$pth" "$svc" || true
+          [ $((s2 - s0)) -ge 1 ] || { echo "::error::không thấy dòng 'Starting $svc' nào sau khi bật lại .path với tệp yêu cầu đang nằm đó — .path không kích service hoặc không đọc được journal." >&2; exit 1; }
+          [ $((s2 - s0)) -le 6 ] || { echo "::error::$svc được khởi động $((s2 - s0)) lần (cần ≤ 6 = StartLimitBurst 5 + 1) — .path kích lặp vô hạn trên tệp yêu cầu không xoá được." >&2; exit 1; }
+          [ "$s2" = "$s1" ] || { echo "::error::$svc vẫn được khởi động thêm sau khi báo GH-E94C ($s1 → $s2) — .path còn đang kích lặp." >&2; exit 1; }
+          [ -e "$req/update.json" ] || { echo "::error::tệp yêu cầu biến mất dù không xoá được — yêu cầu mất dấu." >&2; exit 1; }
+          echo "OK: GH-E94C, tệp yêu cầu còn nguyên, service khởi động $((s2 - s0)) lần (≤ 6)."
+          # Dọn: khôi phục quyền cũ, xoá tệp, genh update ⇒ .path active, không failed (genh tự reset-failed).
+          restore_perms
+          trap - EXIT
+          [ "$(stat -c %a "$req")" = "$mode0" ] && [ "$(stat -c %g "$req")" = "$grp0" ] \
+            || { echo "::error::không khôi phục được quyền run/request (còn $(stat -c %a "$req") nhóm $(stat -c %g "$req"), cần $mode0 nhóm $grp0)." >&2; exit 1; }
+          rm -f "$req/update.json"
+          "$GENH" update --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT"
+          pa="$(systemctl --user is-active "$pth" 2>&1 || true)"
+          pf="$(systemctl --user is-failed "$pth" 2>&1 || true)"
+          echo "$pth is-active: $pa; is-failed: $pf"
+          [ "$pa" = "active" ] || { echo "::error::sau genh update, $pth is-active = '$pa' (cần active) — genh không reset-failed/enable lại trình nhận yêu cầu." >&2; systemctl --user status "$pth" --no-pager || true; exit 1; }
+          [ "$pf" != "failed" ] || { echo "::error::sau genh update, $pth vẫn failed." >&2; exit 1; }
+          echo "OK: sau khi dọn và genh update, trình nhận yêu cầu active, không failed."
+
+      - name: Tự lành — timer bị tắt thì genh update bật lại (đã bật lại), nightly timer enabled + active
+        run: |
+          set -euo pipefail
+          t=gen-harness-update.timer
+          systemctl --user disable --now "$t"
+          en="$(systemctl --user is-enabled "$t" 2>&1 || true)"
+          ac="$(systemctl --user is-active "$t" 2>&1 || true)"
+          echo "sau disable --now — is-enabled: $en; is-active: $ac"
+          [ "$en" != "enabled" ] && [ "$ac" != "active" ] || { echo "::error::không tắt được $t để dựng ca tự lành" >&2; exit 1; }
+          "$GENH" update --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" 2>&1 | tee "$RUNNER_TEMP/heal.log"
+          grep -Fq 'đã bật lại' "$RUNNER_TEMP/heal.log" \
+            || { echo "::error::genh update không in 'đã bật lại' sau khi timer bị tắt (máy chưa có dấu opt-out) — lịch đêm không tự lành, đúng lỗi máy Boss." >&2; exit 1; }
+          en="$(systemctl --user is-enabled "$t" 2>&1 || true)"
+          ac="$(systemctl --user is-active "$t" 2>&1 || true)"
+          echo "sau genh update — is-enabled: $en; is-active: $ac"
+          [ "$en" = "enabled" ] || { echo "::error::sau tự lành $t is-enabled = '$en'" >&2; exit 1; }
+          [ "$ac" = "active" ] || { echo "::error::sau tự lành $t is-active = '$ac'" >&2; exit 1; }
+          echo "OK: lịch đêm tự lành."
+
+      - name: Opt-out (Sếp đã chủ động tắt) — không tự lành; enable xoá dấu và bật lại
+        run: |
+          set -euo pipefail
+          t=gen-harness-update.timer
+          marker="$GEN_HARNESS_HOME/config/auto-update-disabled.json"
+          "$GENH" auto-update disable --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT"
+          [ -f "$marker" ] || { echo "::error::genh auto-update disable không ghi dấu $marker (Sếp đã chủ động tắt)." >&2; exit 1; }
+          echo "dấu opt-out: quyền $(stat -c %a "$marker")"
+          [ "$(stat -c %a "$marker")" = "600" ] || { echo "::error::$marker phải 0600" >&2; exit 1; }
+          "$GENH" auto-update status --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" | tee "$RUNNER_TEMP/au-off.txt"
+          grep -Fq 'TẮT' "$RUNNER_TEMP/au-off.txt" \
+            || { echo "::error::genh auto-update status không báo TẮT sau auto-update disable." >&2; exit 1; }
+          "$GENH" update --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT"
+          en="$(systemctl --user is-enabled "$t" 2>&1 || true)"
+          ac="$(systemctl --user is-active "$t" 2>&1 || true)"
+          echo "sau genh update (đã opt-out) — is-enabled: $en; is-active: $ac"
+          [ "$en" != "enabled" ] || { echo "::error::genh update bật lại lịch đêm dù Sếp đã chủ động tắt (có dấu opt-out)." >&2; exit 1; }
+          [ "$ac" != "active" ] || { echo "::error::lịch đêm đang chạy dù Sếp đã chủ động tắt." >&2; exit 1; }
+          python3 - "$GEN_HARNESS_HOME/run/nightly-status.json" "$GEN_HARNESS_HOME/run/genh.json" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1], encoding="utf-8"))
+          i = json.load(open(sys.argv[2], encoding="utf-8"))
+          assert d.get("opted_out") is True, "nightly-status.json opted_out=%r sau opt-out: %s" % (d.get("opted_out"), d)
+          assert d.get("enabled") is False, "nightly-status.json enabled=%r sau opt-out: %s" % (d.get("enabled"), d)
+          assert i.get("auto_update_enabled") is False, "genh.json auto_update_enabled=%r sau opt-out" % i.get("auto_update_enabled")
+          PY
+          "$GENH" auto-update enable --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT"
+          [ ! -e "$marker" ] || { echo "::error::genh auto-update enable không xoá dấu opt-out $marker." >&2; exit 1; }
+          en="$(systemctl --user is-enabled "$t" 2>&1 || true)"
+          ac="$(systemctl --user is-active "$t" 2>&1 || true)"
+          echo "sau auto-update enable — is-enabled: $en; is-active: $ac"
+          [ "$en" = "enabled" ] || { echo "::error::sau auto-update enable $t is-enabled = '$en'" >&2; exit 1; }
+          [ "$ac" = "active" ] || { echo "::error::sau auto-update enable $t is-active = '$ac'" >&2; exit 1; }
+          echo "OK: opt-out được tôn trọng; enable xoá dấu và bật lại."
+
+      - name: (khi lỗi) In chẩn đoán systemd --user + log lịch đêm — KHÔNG in config/secrets.json hay .env
+        if: failure()
+        run: |
+          set +e
+          echo "════ systemctl --user list-timers --all ════"
+          systemctl --user list-timers --all --no-pager
+          echo "════ systemctl --user status 'gen-harness-*' ════"
+          systemctl --user status 'gen-harness-*' --no-pager
+          echo "════ journalctl --user -u 'gen-harness-*' (200 dòng cuối) ════"
+          journalctl --user -u 'gen-harness-*' --no-pager | tail -200
+          echo "════ tail -100 logs/auto-update.log ════"
+          tail -n 100 "$GEN_HARNESS_HOME/logs/auto-update.log"
+          echo "════ run/ (chỉ trạng thái, không bí mật) ════"
+          ls -la "$GEN_HARNESS_HOME/run" "$GEN_HARNESS_HOME/run/request"
+          for f in genh.json nightly-status.json update-status.json autostart-status.json; do
+            echo "── run/$f ──"
+            cat "$GEN_HARNESS_HOME/run/$f"
+            echo
+          done
+          exit 0
+
+      - name: genh uninstall --yes --delete-data (không tương tác, dọn sạch cả dữ liệu)
+        run: |
+          set -euo pipefail
+          "$GENH" help >"$RUNNER_TEMP/genh-help.txt"
+          if grep -q -- '--delete-data' "$RUNNER_TEMP/genh-help.txt"; then
+            "$GENH" uninstall --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes --delete-data
+          else
+            "$GENH" uninstall --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes
+          fi
+          for u in gen-harness-update.timer gen-harness-update-request.path; do
+            en="$(systemctl --user is-enabled "$u" 2>&1 || true)"
+            ac="$(systemctl --user is-active "$u" 2>&1 || true)"
+            echo "$u sau uninstall — is-enabled: $en; is-active: $ac"
+            { [ "$en" != "enabled" ] && [ "$ac" != "active" ]; } || { echo "::error::sau genh uninstall $u vẫn còn bật/chạy." >&2; exit 1; }
+          done
+
+      - name: (luôn) In log docker compose (tail 200) để debug
+        if: always()
+        run: |
+          set -euo pipefail
+          docker ps -a || true
+          for c in $(docker ps -a --format '{{.Names}}' | grep '^gen-harness-' || true); do
+            echo "════ $c ════"
+            docker logs --tail 200 "$c" 2>&1 || true
+          done
+
+      - name: (luôn) In log genh (logs/) để debug
+        if: always()
+        run: |
+          set -euo pipefail
+          if [ -d "$GEN_HARNESS_HOME/logs" ]; then
+            for f in "$GEN_HARNESS_HOME"/logs/*; do
+              echo "── $f ──"
+              tail -n 200 "$f" || true
+            done
+          else
+            echo "không thấy $GEN_HARNESS_HOME/logs"
+          fi
+
   # ── promote ──────────────────────────────────────────────────────────────
   # Nâng tag thành BẢN CHÍNH THỨC (latest) — chỉ khi resolve bảo promote VÀ
-  # (e2e-install xanh VÀ e2e-rollback xanh VÀ e2e-offsite xanh VÀ e2e-upgrade xanh/bỏ qua), hoặc khi Owner chạy tay
+  # (e2e-install xanh VÀ e2e-rollback xanh VÀ e2e-offsite xanh VÀ e2e-nightly-real xanh VÀ e2e-upgrade xanh/bỏ qua), hoặc khi Owner chạy tay
   # với skip_e2e=true (promote tay, có cảnh báo). always() để job vẫn được
   # xét khi e2e-upgrade bị bỏ qua (chưa có bản chính thức cũ hơn).
   # Không bao giờ hạ cấp: latest hiện tại mới hơn thì chỉ cảnh báo.
@@ -2231,8 +2853,8 @@ jobs:
   promote:
     name: nâng thành bản chính thức (promote ${{ needs.resolve.outputs.tag }})
     runs-on: ubuntu-latest
-    needs: [resolve, e2e-install, e2e-upgrade, e2e-rollback, e2e-offsite]
-    if: always() && needs.resolve.outputs.promote == 'true' && (needs.resolve.outputs.skip_e2e == 'true' || (needs.e2e-install.result == 'success' && needs.e2e-rollback.result == 'success' && needs.e2e-offsite.result == 'success' && (needs.e2e-upgrade.result == 'success' || needs.e2e-upgrade.result == 'skipped')))
+    needs: [resolve, e2e-install, e2e-upgrade, e2e-rollback, e2e-offsite, e2e-nightly-real]
+    if: always() && needs.resolve.outputs.promote == 'true' && (needs.resolve.outputs.skip_e2e == 'true' || (needs.e2e-install.result == 'success' && needs.e2e-rollback.result == 'success' && needs.e2e-offsite.result == 'success' && needs.e2e-nightly-real.result == 'success' && (needs.e2e-upgrade.result == 'success' || needs.e2e-upgrade.result == 'skipped')))
     permissions:
       contents: write
     outputs:
@@ -2374,6 +2996,14 @@ jobs:
           install -m 0755 "$RUNNER_TEMP/prev/genh-linux-amd64" "$GEN_HARNESS_HOME/bin/genh"
           "$GEN_HARNESS_HOME/bin/genh" version
           "$GEN_HARNESS_HOME/bin/genh" install --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" --yes --no-auto-update
+          # v0.1.53: genh cũ chưa biết dấu "Sếp đã chủ động tắt" (config/auto-update-disabled.json) nên --no-auto-update ở
+          # trên không ghi nó. Ghi sẵn để genh mới (sau nâng cấp) KHÔNG tự lành bật dòng crontab 03:00–03:29 giờ runner (UTC
+          # = 10:00 VN, giờ hay phát hành) — dòng đó chạy `genh update --yes` giành genh.lock giữa bài kiểm ⇒ đỏ chập chờn
+          # GH-E94A. Đúng ý nghĩa --no-auto-update của genh mới (cài kiểu này = Sếp đã tắt).
+          optout="$GEN_HARNESS_HOME/config/auto-update-disabled.json"
+          mkdir -p "$GEN_HARNESS_HOME/config"
+          [ -e "$optout" ] || printf '{"at":"%s"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$optout"
+          chmod 600 "$optout"
 
       - name: Chờ /api/v1/ready xanh (bản cũ, tối đa 5 phút)
         run: |

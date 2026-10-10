@@ -145,3 +145,37 @@ func TestRequestWatcher_DoctorVaWatchdogFile(t *testing.T) {
 	mustContain(t, string(b), "PathExists="+rp.DoctorFile)
 	mustContain(t, string(b), "PathExists="+rp.WatchdogFile)
 }
+
+// v0.1.53: .path/.service từng start-limit-hit (tệp yêu cầu không xoá được) thì `genh update`
+// phải reset-failed TRƯỚC khi enable --now để chữa.
+func TestEnsureRequestWatcher_ResetFailedTruocEnable(t *testing.T) {
+	rr := &recRunner{}
+	deps := Deps{Runner: rr, GenhPath: "/g/genh", LogFile: "/g/log", HomeDir: t.TempDir(), GOOS: "linux",
+		LookPath: func(string) (string, error) { return "/usr/bin/systemctl", nil }}
+	if got, err := EnsureRequestWatcher(context.Background(), deps, testRP); err != nil || got != UpdaterSystemd {
+		t.Fatalf("EnsureRequestWatcher = %q, %v", got, err)
+	}
+	reset, enable := -1, -1
+	for i, c := range rr.calls {
+		switch {
+		case strings.Contains(c, "reset-failed"):
+			reset = i
+			if !strings.Contains(c, RequestTaskName+".path") || !strings.Contains(c, RequestTaskName+".service") {
+				t.Errorf("reset-failed phải gồm cả .path và .service: %q", c)
+			}
+		case strings.Contains(c, "enable --now "+RequestTaskName+".path"):
+			enable = i
+		}
+	}
+	if reset < 0 || enable < 0 || reset > enable {
+		t.Fatalf("reset-failed (%d) phải chạy trước enable --now (%d): %v", reset, enable, rr.calls)
+	}
+
+	// reset-failed lỗi (chưa failed) không làm hỏng việc cài.
+	rr = &recRunner{}
+	rr.on("reset-failed", "", errExit1)
+	deps.Runner = rr
+	if got, err := EnsureRequestWatcher(context.Background(), deps, testRP); err != nil || got != UpdaterSystemd {
+		t.Fatalf("reset-failed lỗi phải bị bỏ qua: %q, %v", got, err)
+	}
+}

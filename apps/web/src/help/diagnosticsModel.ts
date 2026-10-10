@@ -1,4 +1,5 @@
 import { ApiError, type DiagnosticsState } from '@gen-harness/contracts';
+import { REQUEST_UNDELETABLE_CODE, REQUEST_UNDELETABLE_TEXT } from '../lib/genhCodes';
 
 /**
  * v0.1.44 (F-4b) — "Gói chẩn đoán cho người hỗ trợ" (Trợ giúp, chỉ Owner): chữ, trạng thái, kích thước tệp. Hàm thuần.
@@ -35,6 +36,8 @@ export const DIAG_ERROR_TEXT: Record<string, string> = {
   DIAG_BUSY: 'Máy chủ đang tạo một gói chẩn đoán — đợi gói đó xong rồi tải.',
   DIAG_NOT_READY: 'Gói chẩn đoán chưa có hoặc đã bị dọn — bấm Tạo gói chẩn đoán lần nữa.',
   DIAG_FILE_UNSAFE: 'Tệp gói chẩn đoán trên máy chủ không an toàn để tải — bấm Tạo gói chẩn đoán lần nữa.',
+  // v0.1.53 (F-97): genh không xoá được tệp yêu cầu nên không tạo gói — bấm lại vẫn lỗi tới khi sửa quyền thư mục.
+  [REQUEST_UNDELETABLE_CODE]: REQUEST_UNDELETABLE_TEXT,
 };
 
 /** `stale` — đang chờ/chạy quá 15 phút (máy chủ báo `stale`): thôi thăm lại, cho tạo lại + hiện lệnh chạy tay. */

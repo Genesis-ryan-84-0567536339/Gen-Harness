@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeRunner ghi lại mọi lệnh được gọi, trả về output/lỗi định sẵn theo tên
@@ -67,11 +68,14 @@ func TestEnableLinux_UsesSystemdWhenAvailable(t *testing.T) {
 		LookPath: func(string) (string, error) { return "/usr/bin/systemctl", nil },
 	}
 
-	msg, err := Enable(context.Background(), deps)
+	res, err := Enable(context.Background(), deps)
 	if err != nil {
 		t.Fatalf("Enable: %v", err)
 	}
-	mustContain(t, msg, "03:00")
+	mustContain(t, res.Msg, "03:00")
+	if res.Mechanism != ScheduleSystemd {
+		t.Errorf("Mechanism = %q", res.Mechanism)
+	}
 
 	if !runner.calledWith("systemctl", "--user", "enable", "--now", TaskName+".timer") {
 		t.Fatalf("phải gọi systemctl --user enable --now, các lệnh đã gọi: %+v", runner.calls)
@@ -100,11 +104,11 @@ func TestEnableLinux_FallsBackToCrontab_WhenNoSystemdUser(t *testing.T) {
 		// không có D-Bus) — vẫn phải rơi về crontab.
 		LookPath: func(string) (string, error) { return "/usr/bin/systemctl", nil },
 	}
-	msg, err := Enable(context.Background(), deps)
+	res, err := Enable(context.Background(), deps)
 	if err != nil {
 		t.Fatalf("Enable: %v", err)
 	}
-	mustContain(t, msg, "crontab")
+	mustContain(t, res.Msg, "crontab")
 
 	if !runner.calledWith("crontab") {
 		t.Fatalf("phải gọi crontab để cài lịch, các lệnh đã gọi: %+v", runner.calls)
@@ -166,28 +170,32 @@ func TestDisableLinux_RemovesUnitsAndCrontabLine(t *testing.T) {
 }
 
 func TestStatusLinux_ReportsEnabled(t *testing.T) {
-	runner := newFakeRunner()
-	runner.outputs["systemctl|--user|is-enabled|"+TaskName+".timer"] = []byte("enabled\n")
+	rr := &recRunner{}
+	rr.on("show gen-harness-update.timer", "LoadState=loaded\nUnitFileState=enabled\nActiveState=active\nLastTriggerUSec=@1760000000\nNextElapseUSecRealtime=@1760086400\n", nil)
+	rr.on("loginctl show-user", "yes\n", nil)
 
-	st, err := GetStatus(context.Background(), Deps{Runner: runner, GOOS: "linux"})
+	st, err := GetStatus(context.Background(), Deps{Runner: rr, GOOS: "linux", UID: "1000", HomeDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("GetStatus: %v", err)
 	}
-	if !st.Enabled {
-		t.Fatalf("muốn Enabled=true, được %+v", st)
+	if !st.Enabled || st.Mechanism != ScheduleSystemd || !st.UnitPresent || st.Active != "active" || st.Linger != "yes" {
+		t.Fatalf("muốn bật/systemd/active/linger yes, được %+v", st)
+	}
+	if !st.LastRun.Equal(time.Unix(1760000000, 0)) || !st.NextRun.Equal(time.Unix(1760086400, 0)) {
+		t.Errorf("mốc giờ '@giây' sai: last=%v next=%v", st.LastRun, st.NextRun)
 	}
 }
 
 func TestStatusLinux_FallsBackToCrontabCheck(t *testing.T) {
-	runner := newFakeRunner()
-	runner.errs["systemctl|--user|is-enabled|"+TaskName+".timer"] = errCommandFailed
-	runner.outputs["crontab|-l"] = []byte(CrontabMarker + "\n0 3 * * * genh update --yes --quiet\n")
+	rr := &recRunner{}
+	rr.on("show gen-harness-update.timer", "LoadState=not-found\nUnitFileState=\nActiveState=inactive\n", nil)
+	rr.on("crontab -l", CrontabMarker+"\n0 3 * * * genh update --yes --quiet\n", nil)
 
-	st, err := GetStatus(context.Background(), Deps{Runner: runner, GOOS: "linux"})
+	st, err := GetStatus(context.Background(), Deps{Runner: rr, GOOS: "linux", HomeDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("GetStatus: %v", err)
 	}
-	if !st.Enabled {
+	if !st.Enabled || st.Mechanism != ScheduleCron || st.UnitPresent != true {
 		t.Fatalf("muốn Enabled=true (thấy marker trong crontab), được %+v", st)
 	}
 }
@@ -259,7 +267,7 @@ func TestDisableWindows_CallsSchtasksDelete(t *testing.T) {
 
 func TestStatusWindows_NotCreated(t *testing.T) {
 	runner := newFakeRunner()
-	runner.errs["schtasks|/Query|/TN|"+TaskName+"|/FO|LIST"] = errCommandFailed
+	runner.errs["schtasks|/Query|/TN|"+TaskName+"|/FO|LIST|/V"] = errCommandFailed
 
 	st, err := GetStatus(context.Background(), Deps{Runner: runner, GOOS: "windows"})
 	if err != nil {

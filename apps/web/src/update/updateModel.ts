@@ -2,6 +2,10 @@ import type { SystemUpdate } from '@gen-harness/contracts';
 
 export const UPDATE_COMMAND = '~/.gen-harness/bin/genh update';
 export const UPDATE_KEY = ['system', 'update'] as const;
+/** v0.1.53 (F-99): lệnh cố định bật linger (tiến trình nền chạy cả khi không ai đăng nhập) — chạy một lần, không dấu chấm sau lệnh. */
+export const LINGER_COMMAND = 'sudo loginctl enable-linger $USER';
+/** Câu dẫn trên lệnh khi lệnh KHÔNG phải để cập nhật tay (stalled: linger / trình nhận yêu cầu lỗi). */
+const COMMAND_LABEL_SERVER = 'Lệnh chạy một lần trên máy chủ:';
 
 /** v0.1.42: khi đang cập nhật (requested/running) hỏi lại mỗi 4 giây — dòng báo ở Hôm nay tự đổi sang xong/lỗi. */
 export function updatePollMs(state: string | null | undefined): number | false {
@@ -20,6 +24,10 @@ export type UpdateView =
       /** Nguyên văn thông điệp genh (mã lỗi, lệnh, bản sao lưu) — hiện trong "Chi tiết kỹ thuật". */
       detail?: string;
       showCommand?: boolean;
+      /** v0.1.53 (F-99): lệnh hiện trong khối chép được (chuỗi cố định); thiếu ⇒ `UPDATE_COMMAND`. */
+      command?: string;
+      /** v0.1.53: câu dẫn trên lệnh; thiếu ⇒ câu mặc định của thẻ ("Chạy lệnh này một lần trên máy chủ…"). */
+      commandLabel?: string;
       steps: Array<{ label: string; state: StepState }>;
     };
 
@@ -30,22 +38,76 @@ export const NIGHTLY_MIN_AGE_MS = 24 * 3600 * 1000;
 /** Giờ lịch đêm chạy (genh `internal/autoupdate`: ~03:00 giờ máy). */
 export const NIGHTLY_HOUR = 3;
 
+/** Bản chính thức mà lịch đêm có thể chọn + lúc đủ thời gian chín 24 giờ (api `nightly_candidates`, v0.1.53). */
+export type NightlyCandidate = { tag: string; eligible_at: string };
+
+/** Lần chạy ~03:00 (giờ trình duyệt) đầu tiên không sớm hơn `from`. */
+function nextNightlyRun(from: number): Date {
+  const run = new Date(from);
+  run.setHours(NIGHTLY_HOUR, 0, 0, 0);
+  if (run.getTime() < from) run.setDate(run.getDate() + 1);
+  return run;
+}
+
+/** "dd/mm" của ngày chạy (ngày của chính mốc 03:00). */
+function ddmm(d: Date): string {
+  return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+/** Số lần ~03:00 tối đa xét: ứng viên chỉ chờ ≤ 24 giờ nên 2 đêm là đủ; dư vài đêm phòng lệch đồng hồ. */
+const NIGHTLY_LOOKAHEAD = 5;
+
 /**
  * v0.1.33: lịch đêm (~03:00) tự cài bản mới vào đêm nào — `published_at` là lúc bản đó thành bản chính thức
  * (gh/system_api/update.py official_since); cài ở lần ~03:00 đầu tiên sau khi bản đủ 24 giờ (và sau `now`). Tính theo
  * giờ trình duyệt, dạng "Tự cài đêm 30/09 (~03:00)" (ngày của chính mốc 03:00). null khi không biết lúc phát hành.
+ *
+ * v0.1.53 (F-96): lịch đêm chọn bản CAO NHẤT đã đủ 24 giờ, không phải lúc nào cũng là bản mới nhất — khi bản ra dồn
+ * dập thì bản mới nhất còn "chưa chín" nhưng bản liền trước thì đã. Gọi với `candidates` (api `nightly_candidates`,
+ * tăng dần theo semver): tìm lần ~03:00 đầu tiên có ứng viên đủ hạn; ứng viên đó là `latest` ⇒ như cũ, khác `latest` ⇒
+ * "Tự cài v0.1.53 đêm 11/10 (~03:00) — v0.1.54 tự cài sau khi đủ 24 giờ (đêm 12/10)". Không có `candidates` (api cũ) hoặc
+ * rỗng ⇒ cách cũ theo `published_at`. Gọi 2 tham số `(publishedAt, now)` vẫn là cách cũ.
+ *
+ * `blocked` (api `blocked_version` — bản đã lỗi lần trước): genh vẫn CHỌN bản cao nhất đủ hạn rồi BỎ QUA nếu đó là bản bị
+ * chặn ⇒ đêm đó không cài gì. Đêm nào bản chọn được là bản bị chặn thì không hứa, xét đêm kế tiếp.
  */
-export function autoInstallHint(publishedAt: string | null | undefined, now: number): string | null {
+export function autoInstallHint(
+  ...args:
+    | [publishedAt: string | null | undefined, now: number]
+    | [
+        candidates: readonly NightlyCandidate[] | null | undefined,
+        latest: string | null | undefined,
+        publishedAt: string | null | undefined,
+        now: number,
+        blocked?: string | null,
+      ]
+): string | null {
+  if (args.length === 2) return legacyHint(args[0], args[1]);
+  const [candidates, latest, publishedAt, now, blocked] = args;
+  const usable = (Array.isArray(candidates) ? candidates : [])
+    .map((c) => ({ tag: c?.tag, at: Date.parse(String(c?.eligible_at)) }))
+    .filter((c): c is { tag: string; at: number } => typeof c.tag === 'string' && c.tag !== '' && Number.isFinite(c.at));
+  if (usable.length === 0) return legacyHint(publishedAt, now);
+  let run = nextNightlyRun(now);
+  for (let i = 0; i < NIGHTLY_LOOKAHEAD; i += 1, run = nextNightlyRun(run.getTime() + 24 * 3600 * 1000)) {
+    // Danh sách tăng dần theo semver ⇒ ứng viên đủ hạn CUỐI cùng là bản cao nhất lịch đêm sẽ chọn.
+    const pick = [...usable].reverse().find((c) => c.at <= run.getTime());
+    if (!pick || (blocked && pick.tag === blocked)) continue;
+    const when = `đêm ${ddmm(run)} (~03:00)`;
+    if (!latest || pick.tag === latest) return `Tự cài ${when}`;
+    // Bản mới nhất đủ hạn lúc nào: theo ứng viên (api tính sẵn), không có thì theo mốc chính thức + 24 giờ.
+    const own = usable.find((c) => c.tag === latest)?.at ?? (publishedAt ? Date.parse(publishedAt) + NIGHTLY_MIN_AGE_MS : NaN);
+    const tail = Number.isFinite(own) ? ` — ${latest} tự cài sau khi đủ 24 giờ (đêm ${ddmm(nextNightlyRun(Math.max(own, run.getTime() + 1)))})` : '';
+    return `Tự cài ${pick.tag} ${when}${tail}`;
+  }
+  return legacyHint(publishedAt, now);
+}
+
+function legacyHint(publishedAt: string | null | undefined, now: number): string | null {
   if (!publishedAt) return null;
   const t = Date.parse(publishedAt);
   if (!Number.isFinite(t)) return null;
-  const from = new Date(Math.max(t + NIGHTLY_MIN_AGE_MS, now));
-  const run = new Date(from);
-  run.setHours(NIGHTLY_HOUR, 0, 0, 0);
-  if (run.getTime() < from.getTime()) run.setDate(run.getDate() + 1);
-  const dd = String(run.getDate()).padStart(2, '0');
-  const mm = String(run.getMonth() + 1).padStart(2, '0');
-  return `Tự cài đêm ${dd}/${mm} (~03:00)`;
+  return `Tự cài đêm ${ddmm(nextNightlyRun(Math.max(t + NIGHTLY_MIN_AGE_MS, now)))} (~03:00)`;
 }
 
 /** Mã lỗi genh (GH-E9xx) cuối thông điệp hộp thư — genh ≥ v0.1.34 ghi "<việc> — <cách xử lý> (GH-E9xx)". */
@@ -73,6 +135,14 @@ function failedCopy(
     return {
       tone: 'bad', kicker: 'Cần xử lý tay — tự quay về bản cũ chưa trọn',
       body: 'Hệ thống chưa tự đưa máy về trạng thái chạy ổn. Cần người quản trị máy chủ làm theo hướng dẫn trong Chi tiết kỹ thuật.',
+    };
+  }
+  if (code === 'GH-E94C') {
+    // v0.1.53 (F-97): genh không xoá được tệp yêu cầu trong run/request nên KHÔNG làm yêu cầu (làm tiếp sẽ khiến
+    // trình nhận yêu cầu kích lặp) — chưa đụng gì. Thông điệp nguyên văn của genh nằm ở "Chi tiết kỹ thuật".
+    return {
+      tone: 'warn', kicker: 'Máy chủ không xoá được tệp yêu cầu — chưa đụng gì',
+      body: `Bản đang dùng vẫn chạy bình thường. Nhờ người quản trị máy chủ kiểm quyền thư mục run/request trong thư mục cài đặt (genh phải xoá được tệp trong đó), rồi ${retry}.`,
     };
   }
   if (code === 'GH-E948') {
@@ -214,6 +284,25 @@ export function updateView(
       showCommand: !d.can_request, steps: [],
     };
   }
+  if (d.state === 'stalled' && d.stalled_reason === 'linger_off') {
+    // v0.1.53 (F-99): nguyên nhân phổ biến nhất — linger tắt nên tiến trình nền (trình nhận yêu cầu, lịch đêm) chỉ chạy
+    // khi có người đăng nhập máy chủ. Lệnh cố định, Sếp chạy một lần.
+    return {
+      kind: 'stalled', tone: 'warn', title: 'Máy chủ chưa nhận yêu cầu cập nhật',
+      kicker: 'Tiến trình nền trên máy chủ chỉ chạy khi có người đăng nhập — cần bật linger',
+      body: 'Chạy một lần lệnh dưới đây trên máy chủ (máy hỏi mật khẩu đăng nhập máy), rồi bấm Thử lại.',
+      command: LINGER_COMMAND, commandLabel: COMMAND_LABEL_SERVER, showCommand: true, steps: [],
+    };
+  }
+  if (d.state === 'stalled' && d.stalled_reason === 'watcher_failed') {
+    // v0.1.53 (F-99): trình nhận yêu cầu (gen-harness-update-request.path/.service) báo lỗi — `genh update` cài lại.
+    return {
+      kind: 'stalled', tone: 'warn', title: 'Máy chủ chưa nhận yêu cầu cập nhật',
+      kicker: 'Trình nhận yêu cầu trên máy chủ đang lỗi',
+      body: 'Chạy lệnh dưới đây trên máy chủ một lần để bật lại, rồi bấm Thử lại.',
+      command: UPDATE_COMMAND, commandLabel: COMMAND_LABEL_SERVER, showCommand: true, steps: [],
+    };
+  }
   if (d.state === 'stalled') {
     return {
       kind: 'stalled', tone: 'warn', title: 'Máy chủ chưa nhận yêu cầu cập nhật',
@@ -245,7 +334,8 @@ export function updateView(
     // Chỉ nói khi genh báo lịch đêm đang BẬT (genh.json auto_update_enabled === true) — tắt/không rõ thì không hứa.
     // Bản mới nhất đã lỗi lần trước (genh ghi run/update-blocked.json): lịch đêm KHÔNG tự cài lại — không hứa "Tự cài".
     const blocked = !!d.blocked_version && d.blocked_version === d.latest;
-    const hint = d.auto_update_enabled === true && !blocked ? autoInstallHint(d.published_at, now) : null;
+    const hint =
+      d.auto_update_enabled === true && !blocked ? autoInstallHint(d.nightly_candidates, d.latest, d.published_at, now, d.blocked_version) : null;
     const action = d.can_request ? 'bấm Cập nhật ngay' : 'chạy lệnh bên dưới';
     return {
       kind: 'available', tone: 'accent', title: `Có bản mới ${d.latest}`,

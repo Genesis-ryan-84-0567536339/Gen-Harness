@@ -10,8 +10,9 @@ import { useSystemHealth } from './queries';
 
 /**
  * v0.1.36 (F-6): thẻ "Sức khoẻ hệ thống" đầu Điều khiển hệ thống › Dữ liệu & lưu trữ — Bộ xử lý nền, Trình duyệt nền,
- * hàng lỗi (DLQ), sao lưu, cập nhật, ổ đĩa (`GET /system/health`); "Chi tiết kỹ thuật" liệt kê lịch chạy và từng hàng
- * lỗi. Chỉ vai trò có `system.read`.
+ * hàng lỗi (DLQ), sao lưu, cập nhật, ổ đĩa, tự cập nhật đêm (`GET /system/health`); "Chi tiết kỹ thuật" liệt kê lịch
+ * chạy và từng hàng lỗi. Chỉ vai trò có `system.read`. Hướng dẫn từng bước (`healthTips`, kể cả "Cách bật lại lịch tự
+ * cập nhật đêm" — đích của nút "Xem cách bật lại") hiện ngay dưới các dòng.
  */
 export function HealthCard() {
   const canRead = useCan('system.read');

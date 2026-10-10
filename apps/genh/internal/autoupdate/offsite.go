@@ -31,6 +31,9 @@ func EnableOffsite(ctx context.Context, deps Deps, job OffsiteJob) (msg, mechani
 	if deps.GenhPath == "" {
 		return "", "", fmt.Errorf("thiếu đường dẫn binary genh")
 	}
+	if deps.InstallDir == "" {
+		deps.InstallDir = job.InstallDir
+	}
 	if deps.LogFile != "" {
 		_ = os.MkdirAll(filepath.Dir(deps.LogFile), 0o755)
 	}
@@ -58,6 +61,10 @@ func DisableOffsite(ctx context.Context, deps Deps) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("không xác định được thư mục home: %w", err)
 		}
+		// Lịch dùng chung giữa các bản cài: thuộc bản cài khác còn sống thì KHÔNG gỡ.
+		if other, yes := deps.ownerOnLinux(ctx, home, OffsiteTaskName+".service", OffsiteCrontabMarker); yes {
+			return keptMessage("lịch sao lưu ra ổ ngoài", other), nil
+		}
 		// Gỡ cả hai cơ chế, best-effort (máy có thể đã đổi có/mất systemd --user).
 		_, _ = runner.Output(ctx, "systemctl", []string{"--user", "disable", "--now", OffsiteTaskName + ".timer"})
 		_ = os.Remove(offsiteServicePath(home))
@@ -70,6 +77,11 @@ func DisableOffsite(ctx context.Context, deps Deps) (string, error) {
 			return "", fmt.Errorf("không xác định được thư mục home: %w", err)
 		}
 		path := offsitePlistPath(home)
+		if err := deps.guardDarwin(path); err != nil {
+			if other, ok := OwnerOf(err); ok {
+				return keptMessage("lịch sao lưu ra ổ ngoài", other), nil
+			}
+		}
 		_, _ = runner.Output(ctx, "launchctl", []string{"unload", path})
 		_ = os.Remove(path)
 	case "windows":
@@ -150,6 +162,9 @@ func enableOffsiteLinux(ctx context.Context, deps Deps, job OffsiteJob) (string,
 	}
 	runner := deps.runner()
 	if systemdUserAvailable(ctx, runner, deps.lookPath()) {
+		if err := deps.guardUnit(home, OffsiteTaskName+".service"); err != nil {
+			return "", "", err
+		}
 		dir := systemdUserDir(home)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return "", "", fmt.Errorf("tạo %s: %w", dir, err)
@@ -170,10 +185,13 @@ func enableOffsiteLinux(ctx context.Context, deps Deps, job OffsiteJob) (string,
 		removeOffsiteCrontab(ctx, runner)
 		msg := fmt.Sprintf(offsiteEnabledMsg, "systemd --user timer")
 		// Như enableLinux: không có linger thì timer chỉ chạy khi đang đăng nhập.
-		if _, err := runner.Output(ctx, "loginctl", []string{"enable-linger"}); err != nil {
-			msg += "\nCảnh báo: chưa bật được linger — lịch chỉ chạy khi bạn đang đăng nhập. Chạy `sudo loginctl enable-linger $USER` một lần để lịch chạy cả khi không đăng nhập."
+		if _, warning := ensureLinger(ctx, runner, deps); warning != "" {
+			msg += "\nCảnh báo: linger đang TẮT — lịch chỉ chạy khi bạn đang đăng nhập. Chạy một lần: sudo loginctl enable-linger $USER"
 		}
 		return msg, ScheduleSystemd, nil
+	}
+	if err := deps.guardLinux(ctx, home, OffsiteTaskName+".service", OffsiteCrontabMarker); err != nil {
+		return "", "", err
 	}
 	minute := parseMinuteFromClock(time.Now().Format("15:04:05"))
 	existing, _ := runner.Output(ctx, "crontab", []string{"-l"}) // chưa có crontab → rỗng
@@ -195,6 +213,9 @@ func enableOffsiteDarwin(ctx context.Context, deps Deps, job OffsiteJob) (string
 		return "", "", fmt.Errorf("tạo %s: %w", dir, err)
 	}
 	path := offsitePlistPath(home)
+	if err := deps.guardDarwin(path); err != nil {
+		return "", "", err
+	}
 	_, _ = runner.Output(ctx, "launchctl", []string{"unload", path})
 	minute := parseMinuteFromClock(time.Now().Format("15:04:05"))
 	if err := os.WriteFile(path, []byte(OffsiteLaunchdPlist(deps.GenhPath, deps.LogFile, job, minute)), 0o644); err != nil {

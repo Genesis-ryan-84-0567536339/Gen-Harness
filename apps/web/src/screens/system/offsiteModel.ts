@@ -4,6 +4,7 @@
  */
 import { ApiError, type OffsiteState } from '@gen-harness/contracts';
 import { DEFAULT_TZ, fmtDM, fmtDec, fmtHM } from '../../lib/format';
+import { REQUEST_UNDELETABLE_CODE, REQUEST_UNDELETABLE_TEXT } from '../../lib/genhCodes';
 
 export const OFFSITE_KEY = ['system', 'offsite'] as const;
 
@@ -14,7 +15,7 @@ export const OFFSITE_BAD_DAYS = 30;
 const STALL_MS = 15 * 60_000;
 const DAY_MS = 24 * 3600 * 1000;
 
-/** Chữ hiện trên thẻ cho từng mã lỗi genh (GH-EBxx) — dùng khi API không gửi `message`. */
+/** Chữ hiện trên thẻ cho từng mã lỗi genh (GH-EBxx, GH-E94C) — dùng khi API không gửi `message`. */
 export const OFFSITE_ERROR_TEXT: Record<string, string> = {
   'GH-EB00': 'Chưa chọn nơi lưu bản sao ngoài máy.',
   'GH-EB01': 'Chưa thấy ổ USB/NAS — hãy cắm ổ (hoặc mount NAS) vào máy chủ rồi thử lại.',
@@ -24,6 +25,9 @@ export const OFFSITE_ERROR_TEXT: Record<string, string> = {
   'GH-EB05': 'Máy chủ đang cập nhật hoặc khôi phục — bản sao ngoài máy sẽ chạy lại sau.',
   'GH-EB06': 'Dịch vụ Gen-Harness chưa chạy nên chưa xuất được bản sao.',
   'GH-EB07': 'Nơi lưu không hợp lệ — phải là ổ USB/NAS khác ổ chính của máy chủ.',
+  // v0.1.53 (F-97): genh không xoá được tệp yêu cầu trong run/request nên KHÔNG làm (tránh chạy lặp) — cắm ổ/thử lại
+  // không chữa được, phải sửa quyền thư mục.
+  [REQUEST_UNDELETABLE_CODE]: REQUEST_UNDELETABLE_TEXT,
 };
 
 /** Gợi ý đường dẫn TRÊN MÁY CHỦ (không phải máy đang mở Console). */
@@ -104,6 +108,12 @@ const LOSS = 'Hỏng ổ đĩa là mất hết dữ liệu';
  * giải phóng chỗ/cho phép ghi.
  */
 export function offsiteNextStep(configured: boolean, who: OffsiteViewer = OWNER_VIEWER, errorCode?: string | null): string {
+  if (errorCode === REQUEST_UNDELETABLE_CODE) {
+    // Không phải lỗi ổ (v0.1.53, F-97): cắm ổ/sao lưu lại vẫn lỗi y như cũ cho tới khi sửa quyền thư mục.
+    return who.canManage
+      ? 'Nhờ người quản trị máy chủ kiểm quyền thư mục run/request trong thư mục cài đặt, rồi bấm "Sao lưu ra ổ ngoài ngay".'
+      : 'Báo Owner/quản trị kiểm quyền thư mục run/request trong thư mục cài đặt trên máy chủ.';
+  }
   if (errorCode === 'GH-EB07') {
     return who.isOwner
       ? 'Bấm "Chọn nơi lưu bản sao ngoài máy" và chọn thư mục khác trên ổ USB/NAS.'
@@ -142,15 +152,17 @@ export function offsiteView(o: OffsiteState, now = Date.now(), tz = DEFAULT_TZ, 
     headline = parts.join(' · ');
   }
 
-  const next = offsiteNextStep(!!o.configured, who);
+  const code = typeof o.error_code === 'string' ? o.error_code.trim() : '';
+  const failed = ERROR_STATES.has(String(o.state)) || (!!code && o.state !== 'ok' && o.state !== 'running');
+  // Lần thử gần nhất lỗi vì nguyên nhân mà "cắm ổ rồi sao lưu lại" không chữa được (GH-EB07/EB04/E94C) ⇒ bước tiếp
+  // theo mã lỗi (như dòng "Bản sao ngoài máy" ở thẻ Sức khoẻ).
+  const next = offsiteNextStep(!!o.configured, who, failed ? code : null);
   const warning = !stale
     ? null
     : hasCopy
       ? `${LOSS} — đã ${days ?? 'nhiều'} ngày chưa có bản sao ngoài máy. ${next}`
       : `${LOSS} — chưa có bản sao nào nằm ngoài máy chủ. ${next}`;
 
-  const code = typeof o.error_code === 'string' ? o.error_code.trim() : '';
-  const failed = ERROR_STATES.has(String(o.state)) || (!!code && o.state !== 'ok' && o.state !== 'running');
   // Chưa chọn nơi lưu không phải "lỗi" — cảnh báo phía trên đã nói; chỉ báo lỗi khi đã cấu hình.
   const error = failed && (o.configured || (code && code !== 'GH-EB00')) ? { text: offsiteErrorText(code, o.message), code: code || String(o.state) } : null;
 

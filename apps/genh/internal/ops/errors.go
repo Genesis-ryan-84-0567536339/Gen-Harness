@@ -36,8 +36,9 @@ const (
 	ErrCodeUpdateComposeSyncFailed    = "GH-E947" // đồng bộ compose.yaml với bản genh mới thất bại SAU KHI backup đã xong — chưa đụng migrate/restart
 	ErrCodeUpdateDiskLow              = "GH-E948" // ổ đĩa không đủ chỗ (sau khi đã dọn ảnh cũ) — dừng TRƯỚC khi tải, chưa đụng gì
 	ErrCodeUpdateBlocked              = "GH-E949" // bản này đã lỗi từ bước migrate trở đi ở lần trước (có hoặc không đụng CSDL) — lịch đêm không thử lại; chỉ dùng cho thông điệp/log, không phải lỗi thoát
-	ErrCodeUpdateLocked               = "GH-E94A" // đang có một lần cập nhật/khôi phục khác giữ khoá loại trừ (<gốc cài đặt>/genh.lock) — gõ tay thì thoát 1, lịch đêm thì bỏ qua (thoát 0)
+	ErrCodeUpdateLocked               = "GH-E94A" // đang có một lần cập nhật/khôi phục khác giữ khoá loại trừ (<gốc cài đặt>/genh.lock) — gõ tay thì thoát 1, lịch đêm thì bỏ qua (thoát 0); yêu cầu từ Console chờ khoá quá 30 phút (v0.1.53) thì xoá tệp yêu cầu + ghi failed
 	ErrCodeUpdateInterrupted          = "GH-E94B" // genh nhận tín hiệu dừng giữa chừng (máy tắt/khởi động lại/Ctrl-C) — đã quay về bản cũ nếu kịp (máy tắt sau khi đã đụng CSDL: giữ bản mới để `genh update` đi tiếp); KHÔNG ghi update-blocked.json (bản không hỏng) trừ khi quay về chưa trọn, lịch đêm thử lại
+	ErrCodeRequestUndeletable         = "GH-E94C" // v0.1.53 (F-97): không xoá được tệp yêu cầu trong run/request (quyền…) — genh KHÔNG làm yêu cầu này để tránh chạy lặp; ghi trạng thái failed (idempotent theo requested_at), thoát 0
 
 	// 95x — genh backup / genh restore.
 	ErrCodeBackupFailed  = "GH-E950"
@@ -92,6 +93,19 @@ const (
 	ErrCodeOffsiteNotRunning    = "GH-EB06" // dịch vụ (api) chưa chạy
 	ErrCodeOffsiteInvalidDest   = "GH-EB07" // đích không hợp lệ khi chọn (không tuyệt đối/không phải thư mục/nằm trong thư mục cài)
 )
+
+// RequestUndeletableMessage là thông điệp Console (update-status/restore-status…) khi
+// không xoá được tệp yêu cầu (GH-E94C): what = "yêu cầu cập nhật" | "yêu cầu khôi
+// phục" | "yêu cầu sao lưu ra ổ ngoài" | "yêu cầu gói chẩn đoán" | "yêu cầu Gửi thử".
+// Lỗi gốc (có đường dẫn) CHỈ in stderr/log, không đưa vào đây.
+func RequestUndeletableMessage(what string) string {
+	return "Không xoá được " + what + " trong run/request — máy chủ không làm yêu cầu này để tránh chạy lặp. " +
+		"Kiểm quyền thư mục run/request trên máy chủ rồi bấm Thử lại (" + ErrCodeRequestUndeletable + ")"
+}
+
+// RequestBusyMessage là thông điệp Console khi yêu cầu chờ khoá loại trừ quá 30
+// phút mà máy chủ vẫn bận (GH-E94A) — tệp yêu cầu đã bị xoá, chưa làm gì.
+const RequestBusyMessage = "Máy chủ bận một lần cập nhật/khôi phục khác quá 30 phút — chưa làm yêu cầu. Bấm Thử lại sau (" + ErrCodeUpdateLocked + ")"
 
 // OpError là lỗi có cấu trúc cho các lệnh vận hành, theo đúng tinh thần
 // "chuyện gì xảy ra · vì sao · làm gì tiếp" của install.StepError (xem
