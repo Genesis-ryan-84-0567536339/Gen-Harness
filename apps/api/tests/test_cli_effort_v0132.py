@@ -100,13 +100,13 @@ def test_rejection_detection_is_precise() -> None:
 
 
 def test_redact_hides_tokens_links_and_emails() -> None:
-    raw = ('{"access_token":"ya29.a0AfB_secret","email":"boss.ryan@gmail.com"}\n'
+    raw = ('{"access_token":"ya29.a0AfB_secret","email":"a@example.test"}\n'
            "https://accounts.google.com/o/oauth2/auth?client_id=1&code_challenge=abc&state=xyz\n"
            "Bearer sk-ant-oat01-ZZZZZZZZZZZZ eyJhbGciOiJIUzI1.eyJzdWIiOiIxMjM0.sig\n")
     out = redact(raw)
-    for secret in ("ya29.", "secret", "boss.ryan", "code_challenge", "state=xyz", "sk-ant", "eyJhbGci"):
+    for secret in ("ya29.", "secret", "a@example.test", "code_challenge", "state=xyz", "sk-ant", "eyJhbGci"):
         assert secret not in out, secret
-    assert "b***@gmail.com" in out and "https://accounts.google.com/o/oauth2/auth?…" in out
+    assert "a***@example.test" in out and "https://accounts.google.com/o/oauth2/auth?…" in out
 
 
 # ─── gọi CLI đúng cờ ───────────────────────────────────────────────────────

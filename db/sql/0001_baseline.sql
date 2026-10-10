@@ -91,7 +91,7 @@ CREATE TABLE core.users (
   pin_locked_until timestamptz,
   totp_secret_enc bytea,                        -- mã hoá bằng khoá master
   person_id      uuid,                          -- liên kết tới hồ sơ người trong hệ thống (FK thêm sau)
-  addressing     jsonb NOT NULL DEFAULT '{}',   -- {"self":"Anh","bot_calls_me":"Sếp Cơ La"}
+  addressing     jsonb NOT NULL DEFAULT '{}',   -- {"self":"Anh","bot_calls_me":"Sếp"}
   is_active      boolean NOT NULL DEFAULT true,
   last_login_at  timestamptz,
   created_at     timestamptz NOT NULL DEFAULT now(),

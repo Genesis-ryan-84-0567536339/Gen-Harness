@@ -71,8 +71,8 @@ async def test_pin_endpoint_rules(monkeypatch: pytest.MonkeyPatch) -> None:
             await pin_endpoint(bad, True)
     _fake_resolver(monkeypatch, [["93.184.216.34"]])
     with pytest.raises(McpBlockedNetwork, match="mạng công cộng"):
-        await pin_endpoint("https://hub.genos.top/mcp", False)
-    assert (await pin_endpoint("https://hub.genos.top/mcp", True)).url == "https://93.184.216.34/mcp"
+        await pin_endpoint("https://hub.example.test/mcp", False)
+    assert (await pin_endpoint("https://hub.example.test/mcp", True)).url == "https://93.184.216.34/mcp"
     # Một trong các IP là link-local → chặn cả (không chọn IP "đẹp" rồi để lần sau trúng IP xấu).
     _fake_resolver(monkeypatch, [["10.0.0.5", "169.254.169.254"]])
     with pytest.raises(McpBlockedNetwork, match="link-local"):
@@ -256,7 +256,7 @@ async def test_pin_mapped_ipv4_and_fallback(monkeypatch: pytest.MonkeyPatch) -> 
         await pin_endpoint("http://[::ffff:8.8.8.8]/mcp", False)
     _fake_resolver(monkeypatch, [["::ffff:93.184.216.34"]])
     with pytest.raises(McpBlockedNetwork, match="mạng công cộng"):
-        await pin_endpoint("https://hub.genos.top/mcp", False)
+        await pin_endpoint("https://hub.example.test/mcp", False)
     with pytest.raises(McpBlockedNetwork):
         await pin_endpoint("http://hub.noi-bo.vn:99999/mcp", True)
     # IP đầu (vd AAAA trên máy không có IPv6) không kết nối được → thử IP kế đã kiểm, không phân giải lại.
@@ -267,11 +267,11 @@ async def test_pin_mapped_ipv4_and_fallback(monkeypatch: pytest.MonkeyPatch) -> 
         seen.append(req.url.host)
         if req.url.host == "2606:4700::1":
             raise httpx.ConnectError("no route", request=req)
-        assert req.headers["host"] == "hub.genos.top" and req.extensions.get("sni_hostname") == "hub.genos.top"
+        assert req.headers["host"] == "hub.example.test" and req.extensions.get("sni_hostname") == "hub.example.test"
         return httpx.Response(200, json={"jsonrpc": "2.0", "id": "gh-1", "result": {"ok": True}})
 
     client = McpClient(transport=httpx.MockTransport(handle), pin_dns=True)
-    assert await client.call_tool(_Server("https://hub.genos.top/mcp", True), "t", {}, TOKEN) == {"ok": True}
+    assert await client.call_tool(_Server("https://hub.example.test/mcp", True), "t", {}, TOKEN) == {"ok": True}
     assert seen == ["2606:4700::1", "104.16.0.1"] and len(asked) == 1
 
 

@@ -1,4 +1,4 @@
--- Gen-Harness · v0.1.50 (F-81, F-87, QD-18): "Gen nhớ" (ghi chú sở thích của Sếp) + Gen đề xuất ghi Kho Ryan có Xác nhận + PIN
+-- Gen-Harness · v0.1.50 (F-81, F-87, QD-18): "Gen nhớ" (ghi chú sở thích của Sếp) + Gen đề xuất ghi Kho dữ liệu có Xác nhận + PIN
 -- + job đề xuất Phiên mỗi bản mới. Chạy lại an toàn (IF NOT EXISTS / DROP ... IF EXISTS), theo khuôn 0031.
 -- a) agent.gen_memory_notes: tối đa 30 ghi chú / tổ chức (giới hạn ở code, gh/gen/memory_notes.py); mỗi ghi chú <= 280 ký tự.
 --    proposal_id UNIQUE: một đề xuất Gen chỉ lưu được MỘT lần (xác nhận hai lần -> 409). Chỉ Owner đọc/ghi (kiểm ở API).

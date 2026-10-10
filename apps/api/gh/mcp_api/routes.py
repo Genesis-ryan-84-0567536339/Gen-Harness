@@ -323,7 +323,7 @@ async def call_tool(tool_id: uuid.UUID, body: CallIn, request: Request, user: se
     bước duyệt. Route này gọi kho_create / kho_update → 403 HUB_TOOL_NOT_ALLOWED (`hub.generic_call`).
     """
     t = await _tool(db, user.org_id, tool_id)
-    # Máy chủ của liên kết Gen-hub (Kho Ryan): chỉ Owner, ghim DNS, kết quả đã che (v0.1.27).
+    # Máy chủ của liên kết Gen-hub (Kho dữ liệu): chỉ Owner, ghim DNS, kết quả đã che (v0.1.27).
     hub_out = await hub.generic_call(db, request.app.state.redis, getattr(request.app.state, "mcp_transport", None),
                                      user=user, tool=t, agent_key=body.agent_key, args=body.args)
     if hub_out is not None:

@@ -63,7 +63,7 @@ def test_forbidden_host_names() -> None:
               "db.gen-harness_default", "redis.myproj_default", "gen-harness-api-1.gen-harness_default",
               "myproj-db-1", "other_redis_1"):
         assert forbidden_host(h), h
-    for h in ("localhost", "127.0.0.1", "10.0.0.5", "hub.genos.top", "mcp.example.com", "dbx", "gen-harness-foo-1",
+    for h in ("localhost", "127.0.0.1", "10.0.0.5", "hub.example.test", "mcp.example.com", "dbx", "gen-harness-foo-1",
               "ollama.lan", "api.openai.com", "web.example.com", "db.example.com", "redis.corp.lan",
               "mcp-db-1.example.com"):
         assert not forbidden_host(h), h

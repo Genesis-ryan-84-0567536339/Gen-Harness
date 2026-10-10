@@ -289,7 +289,7 @@
       "id": "boss_checks.row.kho_write",
       "screen": "boss_checks",
       "label": "Dòng 9 \"Gen ghi Kho\" (không bắt buộc)",
-      "description": "Dòng 9 của Việc Sếp cần làm: duyệt đề xuất ghi Phiên đầu tiên của Gen vào Kho Ryan — không bắt buộc",
+      "description": "Dòng 9 của Việc Sếp cần làm: duyệt đề xuất ghi Phiên đầu tiên của Gen vào Kho dữ liệu — không bắt buộc",
       "dynamic": null,
       "params": null
     },
@@ -708,7 +708,7 @@
       "id": "mcp.hub_link",
       "screen": "connections",
       "label": "Thẻ \"Gen-hub\"",
-      "description": "Nối Gen-hub để Gen đọc Kho Ryan, lịch, mail, việc, Drive (chỉ đọc, chỉ Sếp): địa chỉ, token, hạn token, trạng thái",
+      "description": "Nối Gen-hub để Gen đọc Kho dữ liệu, lịch, mail, việc, Drive (chỉ đọc, chỉ Sếp): địa chỉ, token, hạn token, trạng thái",
       "dynamic": null,
       "params": null,
       "permission": "system.manage"

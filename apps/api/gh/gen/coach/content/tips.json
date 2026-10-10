@@ -20,7 +20,7 @@
       "boss.hub.done",
       "hub.kho_write_missing"
     ],
-    "title": "Cho Gen ghi vào Kho Ryan",
+    "title": "Cho Gen ghi vào Kho dữ liệu",
     "body": "Gen-hub đã nối nhưng chưa cấp quyền ghi Kho. Sếp tick kho_create, kho_update cho token ở Gen-hub rồi bấm Kiểm tra, em sẽ đề xuất ghi Phiên vào Kho. Em chỉ ghi khi Sếp bấm Xác nhận và nhập mã PIN.",
     "try": {
       "label": "Thử ngay",

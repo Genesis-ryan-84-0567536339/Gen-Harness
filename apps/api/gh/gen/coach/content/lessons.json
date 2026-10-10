@@ -13,7 +13,7 @@
     "id": "N02",
     "order": 20,
     "title": "Mã PIN của Sếp",
-    "body": "Mã PIN gồm 6 số, em hỏi mỗi khi Sếp làm việc nhạy cảm như ghi vào Kho Ryan, mời người mới hay đổi nhà cung cấp AI. Sếp đặt hoặc đổi PIN ở menu tài khoản (góc dưới bên trái) › Tài khoản của tôi › Đổi mã PIN. Quên PIN cũ cũng không sao, Sếp chỉ cần mật khẩu đăng nhập. PIN chặn người ngồi nhờ máy đang mở của Sếp, nhưng ai biết mật khẩu thì đặt lại được PIN, nên Sếp giữ mật khẩu thật kín.",
+    "body": "Mã PIN gồm 6 số, em hỏi mỗi khi Sếp làm việc nhạy cảm như ghi vào Kho dữ liệu, mời người mới hay đổi nhà cung cấp AI. Sếp đặt hoặc đổi PIN ở menu tài khoản (góc dưới bên trái) › Tài khoản của tôi › Đổi mã PIN. Quên PIN cũ cũng không sao, Sếp chỉ cần mật khẩu đăng nhập. PIN chặn người ngồi nhờ máy đang mở của Sếp, nhưng ai biết mật khẩu thì đặt lại được PIN, nên Sếp giữ mật khẩu thật kín.",
     "try": {
       "label": "Làm thử",
       "target": "account.pin"
@@ -60,8 +60,8 @@
   {
     "id": "N06",
     "order": 145,
-    "title": "Cho Gen ghi vào Kho Ryan",
-    "body": "Em ghi được Phiên làm việc và Việc vào Kho Ryan, nhưng em chỉ đề xuất. Sếp đọc thẻ Ghi vào Kho Ryan, bấm “Xác nhận và ghi Kho” rồi nhập mã PIN thì em mới ghi. Trước đó Sếp tick hai quyền ghi Kho (kho_create, kho_update) cho token Gen-Harness ở Gen-hub, rồi bấm Kiểm tra ở Kết nối › Gen-hub. Mỗi bản mới em đề xuất một Phiên, ghi xong thì dòng Gen ghi Kho ở Việc Sếp cần làm tự chuyển sang Đạt.",
+    "title": "Cho Gen ghi vào Kho dữ liệu",
+    "body": "Em ghi được Phiên làm việc và Việc vào Kho dữ liệu, nhưng em chỉ đề xuất. Sếp đọc thẻ Ghi vào Kho dữ liệu, bấm “Xác nhận và ghi Kho” rồi nhập mã PIN thì em mới ghi. Trước đó Sếp tick hai quyền ghi Kho (kho_create, kho_update) cho token Gen-Harness ở Gen-hub, rồi bấm Kiểm tra ở Kết nối › Gen-hub. Mỗi bản mới em đề xuất một Phiên, ghi xong thì dòng Gen ghi Kho ở Việc Sếp cần làm tự chuyển sang Đạt.",
     "try": {
       "label": "Làm thử",
       "target": "boss_checks.row.kho_write"

@@ -1,4 +1,5 @@
-"""v0.1.50 (F-87, QD-18) — Gen đề xuất ghi một Phiên vào Kho Ryan mỗi khi máy chủ lên bản mới (cron `gen_kho_release`).
+"""v0.1.50 (F-87, QD-18) — Gen đề xuất ghi một Phiên vào Kho dữ liệu mỗi khi máy chủ lên bản mới (cron
+`gen_kho_release`).
 
 Mỗi (tổ chức, phiên bản) ĐÚNG MỘT lần (bảng agent.hub_release_proposals); chỉ khi Gen-hub đã cấp quyền ghi Kho; job chỉ
 ĐỀ XUẤT (0 lời gọi ghi) — ghi khi Owner bấm Xác nhận + PIN; Owner thứ hai xác nhận cùng bản → 409 và thẻ của Owner khác

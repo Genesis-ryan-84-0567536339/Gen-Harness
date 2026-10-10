@@ -8,8 +8,9 @@ giá con người. Vì không có model LLM thật trong môi trường seed, b�
 `SeedRouter` — cùng vai trò `FakeRouter` ở `tests/phase2.py` (mọi test giai đoạn 2-4 cũng không gọi LLM thật):
 trả kết luận đã soạn sẵn cho từng câu chữ cụ thể, còn quy tắc tất định (bước 1) vẫn là mã thật không giả lập.
 
-Nội dung mẫu giữ đúng tên người/nhóm/công ty xuất hiện trong `docs/design/seed-data.json` (Trần Văn Hậu, Nguyễn
-Văn Bảo, Hoàng Thị Lan, Group Ngành gỗ Miền Nam, Đối tác in ấn Thành Phát…) để so ảnh giai đoạn 5.2 dễ khớp.
+Nội dung mẫu giữ đúng kịch bản và con số của `docs/design/seed-data.json` (cơ hội MDF 1,2 tỷ, cảnh báo bất mãn P1,
+ghép kho lạnh…) để so ảnh giai đoạn 5.2 dễ khớp; TÊN người / công ty / nhóm là tên hư cấu rõ ràng ("Mẫu"), không
+phải khách thật (v0.1.56).
 
 **Vì sao không xoá được `raw.events`** (quan trọng cho `clear_demo`): bảng thô có trigger
 `raw_events_append_only` (`core.forbid_mutation`, `db/sql/0001_baseline.sql`) chặn tuyệt đối UPDATE/DELETE —
@@ -70,7 +71,7 @@ def _pext(key: str) -> str:
     return f"{NS}-person-{key}"
 
 
-# ═══ Danh bạ mẫu (giữ đúng tên trong design/seed-data.json) ═════════════════
+# ═══ Danh bạ mẫu (tên hư cấu — kịch bản khớp design/seed-data.json) ═════════════════
 
 @dataclass(frozen=True)
 class Person:
@@ -84,18 +85,18 @@ class Person:
 
 
 PEOPLE = [
-    Person("hau", "Trần Văn Hậu", "zalo", "Xưởng gỗ Bình Dương", "chủ xưởng", "customer", "direct"),
-    Person("duoc", "Lâm Văn Được", "zalo", "Kho ván Bình Dương", "chủ kho", "supplier", "stranger"),
-    Person("phuc", "Bùi Văn Phúc", "zalo", "Gỗ Trường Thành Mới", "phụ trách mua hàng", "customer", "stranger"),
-    Person("tung", "Ngô Thanh Tùng", "zalo", "Gỗ Phát Đạt", "kinh doanh", "supplier", "stranger"),
-    Person("minh", "Phạm Quốc Minh", "zalo", "Nội thất Minh Long", None, "customer", "via_staff"),
-    Person("duyen", "Trịnh Mỹ Duyên", "zalo", "Gỗ Đông Phương", None, "customer", "stranger"),
-    Person("bao", "Nguyễn Văn Bảo", "zalo", "Công ty in Thành Phát", "giám đốc", "customer", "direct"),
-    Person("son", "Võ Thanh Sơn", "zalo", None, "key account ngành lạnh", "candidate", "stranger"),
-    Person("bich", "Lê Thị Bích", "whatsapp", "Kho lạnh Tân Cảng", "quản lý", "customer", "stranger"),
-    Person("lan", "Hoàng Thị Lan", "whatsapp", "An Khang Logistics", "sales director", "customer", "via_staff"),
-    Person("ha", "Nguyễn Thu Hà", "zalo", None, "Trưởng ban Tài chính", "staff", "staff"),
-    Person("mai", "Đỗ Thanh Mai", "zalo", None, "Kế toán trưởng", "staff", "staff"),
+    Person("mau01", "Nguyễn Văn Mẫu", "zalo", "Công ty TNHH Mẫu Một", "chủ xưởng", "customer", "direct"),
+    Person("mau02", "Trần Văn Mẫu Hai", "zalo", "Công ty TNHH Mẫu Hai", "chủ kho", "supplier", "stranger"),
+    Person("mau03", "Lê Văn Mẫu Ba", "zalo", "Công ty TNHH Mẫu Ba", "phụ trách mua hàng", "customer", "stranger"),
+    Person("mau04", "Phạm Văn Mẫu Bốn", "zalo", "Công ty TNHH Mẫu Bốn", "kinh doanh", "supplier", "stranger"),
+    Person("mau05", "Hoàng Văn Mẫu Năm", "zalo", "Công ty TNHH Mẫu Năm", None, "customer", "via_staff"),
+    Person("mau06", "Vũ Thị Mẫu Sáu", "zalo", "Công ty TNHH Mẫu Sáu", None, "customer", "stranger"),
+    Person("mau07", "Đặng Văn Mẫu Bảy", "zalo", "Công ty TNHH Mẫu Bảy", "giám đốc", "customer", "direct"),
+    Person("mau08", "Bùi Văn Mẫu Tám", "zalo", None, "key account ngành lạnh", "candidate", "stranger"),
+    Person("mau09", "Đỗ Thị Mẫu Chín", "whatsapp", "Công ty TNHH Mẫu Chín", "quản lý", "customer", "stranger"),
+    Person("mau10", "Ngô Thị Mẫu Mười", "whatsapp", "Công ty TNHH Mẫu Mười", "sales director", "customer", "via_staff"),
+    Person("mau11", "Dương Thị Mẫu Mười Một", "zalo", None, "Trưởng ban Tài chính", "staff", "staff"),
+    Person("mau12", "Lý Thị Mẫu Mười Hai", "zalo", None, "Kế toán trưởng", "staff", "staff"),
 ]
 PEOPLE_BY_KEY = {p.key: p for p in PEOPLE}
 
@@ -109,13 +110,13 @@ class Group:
 
 
 GROUPS = [
-    Group("genesis_q4", "Vận hành Genesis — Quý 4", "zalo", "tagged_only"),
+    Group("van_hanh_q4", "Vận hành Công ty Mẫu — Quý 4", "zalo", "tagged_only"),
     Group("go_mien_nam", "Group Ngành gỗ Miền Nam", "zalo", "silent"),
     Group("tai_chinh", "Ban Tài chính", "zalo", "tagged_only"),
     Group("nhansu_logistics", "Group Nhân sự Logistics", "zalo", "silent"),
-    Group("doitac_thanhphat", "Đối tác in ấn Thành Phát", "zalo", "proactive"),
+    Group("doitac_in_an", "Đối tác in ấn Mẫu Bảy", "zalo", "proactive"),
     Group("mo_rong", "Điều hành mở rộng", "whatsapp", "tagged_only"),
-    Group("kho_lanh_tancang", "Kho lạnh Tân Cảng", "whatsapp", "silent"),
+    Group("kho_lanh_mau", "Kho lạnh Mẫu Chín", "whatsapp", "silent"),
 ]
 GROUPS_BY_KEY = {g.key: g for g in GROUPS}
 
@@ -143,101 +144,101 @@ def _ago(**kw: float) -> timedelta:
 
 # Cơ hội & tín hiệu thị trường (Group Ngành gỗ Miền Nam) — khớp meaningItems OPP-1842 và biz.matches thiết kế.
 MARKET = [
-    Msg(1, "hau", "Bên nào có sẵn MDF E1 17mm khổ 1220x2440 cho em 3 cont trong tháng 10 không ạ, ngân sách tầm "
+    Msg(1, "mau01", "Bên nào có sẵn MDF E1 17mm khổ 1220x2440 cho em 3 cont trong tháng 10 không ạ, ngân sách tầm "
               "1.2 tỷ, ưu tiên giao tận xưởng Bình Dương.", group="go_mien_nam", when=_ago(minutes=18),
         unit={"event_type": "AskedPrice", "side": "demand", "confidence": 0.96,
-              "conclusion": "Xưởng gỗ Bình Dương cần 3 container ván MDF E1 17mm, giao trong tháng 10.",
+              "conclusion": "Công ty Mẫu Một cần 3 container ván MDF E1 17mm, giao trong tháng 10.",
               "entities": {"product": "Ván MDF E1 17mm", "qty": 3, "unit": "container",
                            "budget_vnd": 1_200_000_000, "place": "Bình Dương", "deadline": "tháng 10"},
               "rules": {"R-01": 0.92}, "signals": {"heat": 91, "potential": 40}}),
-    Msg(2, "duoc", "Mình có kho ở Bình Dương, còn tồn 6 cont E1 17mm, ai cần inbox mình nhé.", group="go_mien_nam",
+    Msg(2, "mau02", "Mình có kho ở Bình Dương, còn tồn 6 cont E1 17mm, ai cần inbox mình nhé.", group="go_mien_nam",
         when=_ago(minutes=25),
         unit={"event_type": "OfferedSupply", "side": "supply", "confidence": 0.91,
-              "conclusion": "Kho ván Bình Dương còn tồn 6 container ván MDF E1 17mm.",
+              "conclusion": "Công ty Mẫu Hai còn tồn 6 container ván MDF E1 17mm.",
               "entities": {"product": "Ván MDF E1 17mm", "qty": 6, "unit": "container", "place": "Bình Dương"},
               "rules": {"R-02": 0.9}, "signals": {"potential": 84}}),
-    Msg(3, "phuc", "ai co nguon van phu melamine gia si k a", group="go_mien_nam", when=_ago(minutes=32),
+    Msg(3, "mau03", "ai co nguon van phu melamine gia si k a", group="go_mien_nam", when=_ago(minutes=32),
         unit={"event_type": "AskedPrice", "side": "demand", "confidence": 0.52,
               "conclusion": "Hỏi nguồn ván phủ melamine giá sỉ, chưa rõ số lượng.",
               "entities": {"product": "Ván phủ melamine"}, "rules": {"R-01": 0.5},
               "signals": {"heat": 30, "potential": 10}}),
-    Msg(4, "tung", "Bên mình còn tồn ván phủ melamine 12mm giá sỉ, số lượng lớn, ai cần báo em.",
+    Msg(4, "mau04", "Bên mình còn tồn ván phủ melamine 12mm giá sỉ, số lượng lớn, ai cần báo em.",
         group="go_mien_nam", when=_ago(minutes=40),
         unit={"event_type": "OfferedSupply", "side": "supply", "confidence": 0.7,
-              "conclusion": "Gỗ Phát Đạt còn tồn ván phủ melamine 12mm giá sỉ, số lượng lớn.",
+              "conclusion": "Công ty Mẫu Bốn còn tồn ván phủ melamine 12mm giá sỉ, số lượng lớn.",
               "entities": {"product": "Ván phủ melamine 12mm", "unit": "tấm"}, "rules": {"R-02": 0.75},
               "signals": {"potential": 55}}),
-    Msg(5, "minh", "giá bên minh long đang thấp hơn 4% đó anh, anh xem lại giúp em", group="go_mien_nam",
+    Msg(5, "mau05", "giá bên mẫu năm đang thấp hơn 4% đó anh, anh xem lại giúp em", group="go_mien_nam",
         when=_ago(minutes=50),
         unit={"event_type": "MentionsCompetitor", "side": None, "confidence": 0.79,
-              "conclusion": "Khách nhắc bên Minh Long chào giá thấp hơn 4%, cần xem lại giá.",
-              "entities": {"competitor": "Minh Long"}, "rules": {"R-04": 0.7}, "signals": {"churn_risk": 15}}),
-    Msg(6, "duoc", "Đơn hàng cont trước giao trễ 4 ngày, khách bên em phàn nàn nhiều lắm.", group="go_mien_nam",
+              "conclusion": "Khách nhắc bên Mẫu Năm chào giá thấp hơn 4%, cần xem lại giá.",
+              "entities": {"competitor": "Mẫu Năm"}, "rules": {"R-04": 0.7}, "signals": {"churn_risk": 15}}),
+    Msg(6, "mau02", "Đơn hàng cont trước giao trễ 4 ngày, khách bên em phàn nàn nhiều lắm.", group="go_mien_nam",
         when=_ago(hours=1),
         unit={"event_type": "Complained", "side": None, "confidence": 0.6,
               "conclusion": "Đơn hàng container trước giao trễ 4 ngày, khách hạ nguồn đang phàn nàn.",
               "entities": {}, "rules": {}, "signals": {"churn_risk": 20}}),
     # Khách đang nguội (>14 ngày, ≥2 đơn vị ý nghĩa) — nuôi cảnh báo customer_cooling thật.
-    Msg(7, "duyen", "Bên mình có kế hoạch nhập ván MDF quý sau, cho em xin báo giá sỉ.", group="go_mien_nam",
+    Msg(7, "mau06", "Bên mình có kế hoạch nhập ván MDF quý sau, cho em xin báo giá sỉ.", group="go_mien_nam",
         when=_ago(days=74, hours=2),
         unit={"event_type": "AskedPrice", "side": "demand", "confidence": 0.7,
-              "conclusion": "Gỗ Đông Phương hỏi báo giá sỉ ván MDF cho kế hoạch nhập quý sau.",
+              "conclusion": "Công ty Mẫu Sáu hỏi báo giá sỉ ván MDF cho kế hoạch nhập quý sau.",
               "entities": {"product": "Ván MDF"}, "rules": {"R-01": 0.6}, "signals": {"heat": 40}}),
-    Msg(8, "duyen", "Anh chị có mẫu ván phủ melamine gửi em tham khảo trước được không ạ?", group="go_mien_nam",
+    Msg(8, "mau06", "Anh chị có mẫu ván phủ melamine gửi em tham khảo trước được không ạ?", group="go_mien_nam",
         when=_ago(days=74),
         unit={"event_type": "AskedPrice", "side": "demand", "confidence": 0.65,
-              "conclusion": "Gỗ Đông Phương hỏi xin mẫu ván phủ melamine để tham khảo.",
+              "conclusion": "Công ty Mẫu Sáu hỏi xin mẫu ván phủ melamine để tham khảo.",
               "entities": {"product": "Ván phủ melamine"}, "rules": {"R-01": 0.55}, "signals": {"heat": 35}}),
 ]
 
 # Cảnh báo bất mãn thật (repeat_unanswered ≥ 2 + từ khoá tiêu cực + phương án thay thế — quy tắc R-03 tất định
 # thật sự chấm khớp trên 3 tin liên tiếp không ai trả lời) — khớp meaningItems ALR-0233.
 COMPLAINT = [
-    Msg(9, "bao", "Anh gửi ảnh mẫu bao bì rồi đó, bên em coi giúp anh chưa ạ", group="doitac_thanhphat",
+    Msg(9, "mau07", "Anh gửi ảnh mẫu bao bì rồi đó, bên em coi giúp anh chưa ạ", group="doitac_in_an",
         when=_ago(hours=3, minutes=20)),
-    Msg(10, "bao", "Sao chưa thấy phản hồi vậy em, xưởng anh đang cần gấp", group="doitac_thanhphat",
+    Msg(10, "mau07", "Sao chưa thấy phản hồi vậy em, xưởng anh đang cần gấp", group="doitac_in_an",
         when=_ago(hours=2, minutes=40)),
-    Msg(11, "bao", "Anh hỏi ba lần rồi mà không ai trả lời. Nếu bên mình không làm được thì nói thẳng để anh tìm "
-                 "chỗ khác nhé.", group="doitac_thanhphat", when=_ago(hours=2, minutes=14),
+    Msg(11, "mau07", "Anh hỏi ba lần rồi mà không ai trả lời. Nếu bên mình không làm được thì nói thẳng để anh tìm "
+                 "chỗ khác nhé.", group="doitac_in_an", when=_ago(hours=2, minutes=14),
         unit={"event_type": "Complained", "side": None, "confidence": 0.94,
-              "conclusion": "Khách Thành Phát nhắc ba lần không ai trả lời, doạ chuyển sang nhà cung cấp khác.",
+              "conclusion": "Khách Mẫu Bảy nhắc ba lần không ai trả lời, doạ chuyển sang nhà cung cấp khác.",
               "entities": {}, "rules": {"R-03": 0.9}, "signals": {"churn_risk": 60}}),
-    Msg(12, "duyen", "Sticker", group="doitac_thanhphat", kind="sticker", when=_ago(hours=1)),
+    Msg(12, "mau06", "Sticker", group="doitac_in_an", kind="sticker", when=_ago(hours=1)),
 ]
 
 # Nội bộ + nhiễu (khớp rawRows "ok a" / SentDocument).
 INTERNAL = [
-    Msg(13, "mai", "Ok chị đã gửi bản hợp đồng sửa vào kho tài liệu rồi nhé", group="genesis_q4", mentions=True,
+    Msg(13, "mau12", "Ok chị đã gửi bản hợp đồng sửa vào kho tài liệu rồi nhé", group="van_hanh_q4", mentions=True,
         when=_ago(minutes=8),
         unit={"event_type": "SentDocument", "side": None, "confidence": 0.86,
               "conclusion": "Đã gửi bản hợp đồng sửa vào kho tài liệu.", "entities": {}, "rules": {},
               "signals": {}}),
-    Msg(14, "hau", "ok a", group="genesis_q4", when=_ago(minutes=9)),   # bị loại bởi R-06 (max_words), không tốn model
-    Msg(15, "lan", "Em gửi lại file khảo sát qua đây cho nhanh nha anh", group="mo_rong", when=_ago(minutes=12),
+    Msg(14, "mau01", "ok a", group="van_hanh_q4", when=_ago(minutes=9)),   # bị loại bởi R-06 (max_words), không tốn model
+    Msg(15, "mau10", "Em gửi lại file khảo sát qua đây cho nhanh nha anh", group="mo_rong", when=_ago(minutes=12),
         unit={"event_type": "SentDocument", "side": None, "confidence": 0.88,
               "conclusion": "Đã gửi lại file khảo sát qua kênh WhatsApp.", "entities": {}, "rules": {},
               "signals": {}}),
 ]
 
-# Kho lạnh Tân Cảng — cầu/cung khớp nhau (biz.matches "128 triệu ₫").
+# Kho lạnh Mẫu Chín — cầu/cung khớp nhau (biz.matches "128 triệu ₫").
 COLD_CHAIN = [
-    Msg(16, "bich", "Cần kho lạnh 400 pallet khu Tân Cảng, giá sao ạ", group="kho_lanh_tancang",
+    Msg(16, "mau09", "Cần kho lạnh 400 pallet khu Cảng Mẫu, giá sao ạ", group="kho_lanh_mau",
         when=_ago(hours=1, minutes=5),
         unit={"event_type": "AskedPrice", "side": "demand", "confidence": 0.82,
-              "conclusion": "Kho lạnh Tân Cảng cần thuê kho lạnh 400 pallet.",
-              "entities": {"product": "Kho lạnh", "qty": 400, "unit": "pallet", "place": "Tân Cảng"},
+              "conclusion": "Kho lạnh Mẫu Chín cần thuê kho lạnh 400 pallet.",
+              "entities": {"product": "Kho lạnh", "qty": 400, "unit": "pallet", "place": "Cảng Mẫu"},
               "rules": {"R-01": 0.8}, "signals": {"heat": 78}}),
-    Msg(17, "lan", "Bên An Khang có tuyến vận chuyển lạnh Bình Dương – Tân Cảng đang trống tải, ai cần báo em.",
-        group="kho_lanh_tancang", when=_ago(hours=1),
+    Msg(17, "mau10", "Bên Mẫu Mười có tuyến vận chuyển lạnh Bình Dương – Cảng Mẫu đang trống tải, ai cần báo em.",
+        group="kho_lanh_mau", when=_ago(hours=1),
         unit={"event_type": "OfferedSupply", "side": "supply", "confidence": 0.8,
-              "conclusion": "An Khang Logistics còn trống tải tuyến vận chuyển lạnh Bình Dương – Tân Cảng.",
-              "entities": {"product": "Tuyến vận chuyển lạnh", "place": "Bình Dương – Tân Cảng"},
+              "conclusion": "Công ty Mẫu Mười còn trống tải tuyến vận chuyển lạnh Bình Dương – Cảng Mẫu.",
+              "entities": {"product": "Tuyến vận chuyển lạnh", "place": "Bình Dương – Cảng Mẫu"},
               "rules": {"R-02": 0.7}, "signals": {"potential": 60}}),
 ]
 
 # Tín hiệu ứng viên (R-05) — khớp meaningItems OPP-1839.
 CANDIDATE = [
-    Msg(18, "son", "Mình làm key account ngành lạnh 5 năm, đang tính đổi hướng sang gỗ nội thất, ai cần tư vấn "
+    Msg(18, "mau08", "Mình làm key account ngành lạnh 5 năm, đang tính đổi hướng sang gỗ nội thất, ai cần tư vấn "
                  "tuyến Bình Dương thì inbox mình.", group="nhansu_logistics", when=_ago(hours=6),
         unit={"event_type": "JobSignal", "side": None, "confidence": 0.68,
               "conclusion": "Người trong group nêu 5 năm kinh nghiệm key account ngành lạnh, đang tìm hướng mới.",
@@ -250,19 +251,19 @@ def _care_messages(period_mid: datetime) -> list[Msg]:
     (`gh.biz.people.jobs.period_for`) — nuôi lưới phản hồi thật cho `recompute_people_reviews_org`
     (khớp reviewRows: Thu Hà trả lời chậm ~84 phút, Mai trả lời nhanh)."""
     return [
-        Msg(19, "duoc", "Bên em vẫn chưa nhận được biên bản đối chiếu công nợ tháng 8, chị kiểm tra giúp em với",
+        Msg(19, "mau02", "Bên em vẫn chưa nhận được biên bản đối chiếu công nợ tháng 8, chị kiểm tra giúp em với",
             group="tai_chinh", when=timedelta(0), anchor="period",
             unit={"event_type": "AskedStatus", "side": None, "confidence": 0.8,
-                  "conclusion": "Kho ván Bình Dương hỏi lại biên bản đối chiếu công nợ tháng 8.", "entities": {},
+                  "conclusion": "Công ty Mẫu Hai hỏi lại biên bản đối chiếu công nợ tháng 8.", "entities": {},
                   "rules": {}, "signals": {}}),
-        Msg(20, "ha", "Chị kiểm tra rồi gửi lại em nhé, xin lỗi vì phản hồi trễ", group="tai_chinh",
+        Msg(20, "mau11", "Chị kiểm tra rồi gửi lại em nhé, xin lỗi vì phản hồi trễ", group="tai_chinh",
             direction="outbound", when=timedelta(minutes=84), anchor="period"),
-        Msg(21, "minh", "Bên em hỏi lại điều khoản thanh toán đợt hàng vừa rồi ạ", group="tai_chinh",
+        Msg(21, "mau05", "Bên em hỏi lại điều khoản thanh toán đợt hàng vừa rồi ạ", group="tai_chinh",
             when=timedelta(hours=4), anchor="period",
             unit={"event_type": "AskedStatus", "side": None, "confidence": 0.78,
-                  "conclusion": "Minh Long hỏi lại điều khoản thanh toán đợt hàng vừa rồi.", "entities": {},
+                  "conclusion": "Công ty Mẫu Năm hỏi lại điều khoản thanh toán đợt hàng vừa rồi.", "entities": {},
                   "rules": {}, "signals": {}}),
-        Msg(22, "mai", "Dạ điều khoản vẫn như cũ, em gửi lại hợp đồng ngay đây ạ", group="tai_chinh",
+        Msg(22, "mau12", "Dạ điều khoản vẫn như cũ, em gửi lại hợp đồng ngay đây ạ", group="tai_chinh",
             direction="outbound", when=timedelta(hours=4, minutes=8), anchor="period"),
     ]
 

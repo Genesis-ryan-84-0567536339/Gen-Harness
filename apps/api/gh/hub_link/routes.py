@@ -1,4 +1,4 @@
-"""/hub — liên kết Gen-hub + đọc Kho Ryan (v0.1.26) + đọc lịch/mail/việc/Drive Google (v0.1.49, QD-16)
+"""/hub — liên kết Gen-hub + đọc Kho dữ liệu (v0.1.26) + đọc lịch/mail/việc/Drive Google (v0.1.49, QD-16)
 (docs/design/gen-hub-link.md §3.1, §6).
 
 - `GET /hub/link` — trạng thái (không bao giờ có token) + `read_scopes` (quyền đọc thêm; null khi chưa có lần Kiểm tra

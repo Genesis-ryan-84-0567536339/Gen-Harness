@@ -27,6 +27,7 @@ from gh.data.ingest import sync_listen_sets, uptime_pct
 from gh.db import DB
 from gh.errors import ApiError, conflict, field_errors, forbidden, not_found, pin_required
 from gh.gen import jev
+from gh.hub_link import KHO_LABEL
 from gh.providers import catalog
 from gh.providers import cli as climod
 from gh.providers import router as mrouter
@@ -925,8 +926,8 @@ BOUNDARY_LABELS: dict[str, str] = {
     "observe_external_market": "Quan sát nhóm thị trường bên ngoài",
     "auto_personnel_decisions": "Hệ thống tự ra quyết định nhân sự",
     "approval_gate": "Gửi ra ngoài / vượt ngưỡng tiền / liên quan nhân sự luôn chờ duyệt",
-    "mcp_write_requires_approval": ("Tool MCP loại ghi qua duyệt trước khi chạy (ngoại lệ duy nhất: Ghi vào Kho "
-                                    "Ryan sau khi Sếp Xác nhận + nhập mã PIN)"),
+    "mcp_write_requires_approval": ("Tool MCP loại ghi qua duyệt trước khi chạy (ngoại lệ duy nhất: Ghi vào "
+                                    + KHO_LABEL + " sau khi Sếp Xác nhận + nhập mã PIN)"),
 }
 
 
