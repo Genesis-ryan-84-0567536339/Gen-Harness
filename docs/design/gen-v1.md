@@ -1,6 +1,7 @@
 # Gen v1 — Trợ lý quản trị trong Console (thiết kế + hiện trạng)
 
 > Trạng thái (10/2026): đã thi công tới v0.1.50 — xem [CHANGELOG.md](../../CHANGELOG.md); phần còn lại ở [ROADMAP](../ROADMAP.md) mục Nợ.
+> Gen chủ động nhắc việc, mẹo và bài học mỗi ngày (v0.1.54): xem [gen-coach.md](gen-coach.md).
 
 > Thiết kế gốc 29/09/2026 (Sếp đã duyệt, §9) · Phạm vi: Gen-Harness Console (apps/web + apps/api)
 > Gen = trợ lý mặc định ở khung chat bên phải, vai trò "quản trị/vận hành trong app".
