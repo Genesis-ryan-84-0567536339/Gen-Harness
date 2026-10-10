@@ -515,7 +515,7 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
       fresh: opts.setup === 'fresh', emit: broadcast, findUser,
       // v0.1.55 (G4): Bật Jev 1 chạm ⇒ nguồn Jev (system_one) hiện trong `/providers` như API thật.
       onJevEnabled: (j) => {
-        const list = phase2.hooks.providers() as Array<Record<string, unknown>>;
+        const list = phase2.hooks.providers() as unknown as Array<Record<string, unknown>>;
         if (list.some((x) => x.kind === 'system_one')) return;
         list.push({
           id: j.provider_id, kind: 'system_one', name: 'Jev', endpoint: j.endpoint, failover_rank: list.length + 1,
@@ -1088,7 +1088,7 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
               return problem(res, 422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors: { name: 'Nhập tên agent' } });
             }
             advance(8, 'done');
-            const agent = { id: randomUUID(), name: String(body.name), try_reply: `Chào Sếp, tôi là ${String(body.name)}.`, try_error: null };
+            const agent = { id: randomUUID(), name: String(body.name), try_reply: typeof body.try_message === 'string' && body.try_message.trim() ? `Chào Sếp, tôi là ${String(body.name)}.` : null, try_error: null }; // v0.1.55: chỉ trả lời thử khi có try_message (như API)
             setupAgent = { id: agent.id, name: agent.name, autonomy_level: 4 };
             return reply(200, { ...stateView(), agent });
           }

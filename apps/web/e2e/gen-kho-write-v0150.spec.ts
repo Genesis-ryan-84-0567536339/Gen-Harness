@@ -181,7 +181,7 @@ test('Boss bước 2: chuông "Gen đề xuất ghi Kho · Phiên v0.1.50" → /
   await expect(item).toBeVisible();
   await item.click();
   // v0.1.55: Owner về Mặt tiền (G5) — Opus siết thành /owner khi tích hợp
-  await expect(page).toHaveURL(/\/(owner|overview)$/);
+  await expect(page).toHaveURL(/\/owner$/);
   const panel = page.getByRole('complementary', { name: GEN_PANEL });
   await expect(panel).toBeVisible();
   await expect(panel).toContainText('Máy chủ Gen-Harness vừa lên v0.1.50.');

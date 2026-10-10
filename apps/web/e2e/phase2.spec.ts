@@ -426,7 +426,7 @@ test('setup steps 4–7 and 12 against the mock', async ({ page }) => {
   await expect(page.getByText('Lần sàng lọc đầu tiên đã xong.')).toBeVisible({ timeout: 15_000 });
   await page.screenshot({ path: join(outDir, 'setup-step12-1440.png'), fullPage: true });
   await page.getByRole('button', { name: /Vào Console/ }).click();
-  await expect(page).toHaveURL(/\/overview/);
+  await expect(page).toHaveURL(/\/owner$/);
   const state = await apiCall(page, 'GET', '/setup/state');
   expect(state.finished).toBe(true);
   expect(state.steps.filter((s: { status: string }) => s.status === 'skipped').map((s: { n: number }) => s.n)).toEqual([8, 9, 10]);

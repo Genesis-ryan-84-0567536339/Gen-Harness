@@ -30,11 +30,11 @@ import {
   filterValueText,
   kpiCards,
   moneyText,
-  ownerEndpoints,
   ownerTitle,
   progressText,
   safeLink,
 } from '../../src/owner/ownerModel';
+import { ownerEndpoints } from '@gen-harness/contracts';
 import { routes } from '../../src/router';
 import { createMock as createOwnerMock } from '../mock-owner';
 import type { P2Ctx } from '../mock-phase2';

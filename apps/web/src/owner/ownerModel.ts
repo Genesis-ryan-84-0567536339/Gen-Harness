@@ -125,7 +125,7 @@ export function filterValueText(fv: Pick<OwnerFilterValue, 'filtered' | 'calls_s
   return `Tuần này Gen lọc giúp Sếp ${fmtInt(n)} tin rác/trùng, bớt ${fmtInt(m)} lượt gọi AI.`;
 }
 
-/** "Việc Sếp cần làm: 4/6 việc bắt buộc đã xong". */
+/** "Việc Sếp cần làm: 0/1 việc bắt buộc đã xong" (tổng lấy từ máy chủ). */
 export function progressText(done: unknown, total: unknown): string {
   const d = typeof done === 'number' ? done : 0;
   const t = typeof total === 'number' ? total : 0;

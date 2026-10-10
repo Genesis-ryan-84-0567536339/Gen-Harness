@@ -861,6 +861,6 @@ test.describe('giai đoạn 4.5/4.6: Điều khiển hệ thống', () => {
     await expect(page.getByRole('heading', { name: 'Hoàn tất' })).toBeVisible();
     await page.getByRole('button', { name: /Vào Console/ }).click();
     // v0.1.55: Owner về Mặt tiền (G5) — Opus siết thành /owner khi tích hợp
-    await expect(page).toHaveURL(/\/(owner|overview)$/);
+    await expect(page).toHaveURL(/\/owner$/);
   });
 });

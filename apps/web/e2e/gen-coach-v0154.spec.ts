@@ -178,7 +178,7 @@ test('/overview?gen=coach mở khung Gen, thẻ hiện (đã bỏ tham số kh�
   await page.addInitScript(([key, id]) => window.localStorage.setItem(key, JSON.stringify({ [id]: true })), ['gh-coach-collapsed', me.id]);
   await page.goto('/overview?gen=coach');
   // v0.1.55: Owner về Mặt tiền (G5) — Opus siết thành /owner khi tích hợp
-  await expect(page).toHaveURL(/\/(owner|overview)$/);
+  await expect(page).toHaveURL(/\/owner$/);
   await expect(panel(page)).toBeVisible();
   await expect(card(page)).toBeVisible();
   await expect(card(page).getByRole('group', { name: 'Việc cần làm ngay' })).toBeVisible();
@@ -303,7 +303,7 @@ test('chuông gen.coach: thông báo mới bật chấm đỏ; bấm chuông m�
   await expect(panel(page)).toBeVisible();
   await expect(card(page)).toBeVisible();
   // v0.1.55: Owner về Mặt tiền (G5) — Opus siết thành /owner khi tích hợp
-  await expect(page).toHaveURL(/\/(owner|overview)$/);
+  await expect(page).toHaveURL(/\/owner$/);
   await expect(page.getByTestId('gen-coach-dot')).toHaveCount(0);
 });
 

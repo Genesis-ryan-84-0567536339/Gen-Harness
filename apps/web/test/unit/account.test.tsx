@@ -214,6 +214,8 @@ describe('buộc đổi mật khẩu (must_change_password)', () => {
     });
     const router = renderAt('/inbox', [
       { path: '/change-password', element: <ForcePasswordPage /> },
+      // v0.1.55 (G5): Owner "/" ⇒ Mặt tiền /owner.
+      { path: '/owner', element: <div>Mặt tiền</div> },
       {
         path: '/',
         element: <AppShell />,
@@ -233,11 +235,11 @@ describe('buộc đổi mật khẩu (must_change_password)', () => {
     await user.type(screen.getByLabelText('Mật khẩu mới'), 'mat-khau-rieng-cua-sep');
     await user.type(screen.getByLabelText('Nhập lại mật khẩu mới'), 'mat-khau-rieng-cua-sep');
     await user.click(screen.getByRole('button', { name: /Lưu mật khẩu mới/ }));
-    expect(await screen.findByText('Tổng quan')).toBeInTheDocument();
-    expect(router.state.location.pathname).toBe('/overview');
+    expect(await screen.findByText('Mặt tiền')).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe('/owner');
   });
 
-  it('không bị buộc thì trang /change-password tự về "/" rồi màn đầu tiên (Tổng quan)', async () => {
+  it('không bị buộc thì trang /change-password tự về "/" rồi màn đầu tiên (Owner ⇒ Mặt tiền /owner)', async () => {
     stubApi((url) =>
       url.endsWith('/auth/me') ? { status: 200, body: ME } : url.endsWith('/navigation') ? { status: 200, body: buildNavigation() } : undefined,
     );
@@ -245,8 +247,9 @@ describe('buộc đổi mật khẩu (must_change_password)', () => {
       { path: '/change-password', element: <ForcePasswordPage /> },
       { path: '/', element: <HomeRedirect /> },
       { path: '/overview', element: <div>Tổng quan</div> },
+      { path: '/owner', element: <div>Mặt tiền</div> },
     ]);
-    expect(await screen.findByText('Tổng quan')).toBeInTheDocument();
-    expect(router.state.location.pathname).toBe('/overview');
+    expect(await screen.findByText('Mặt tiền')).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe('/owner');
   });
 });

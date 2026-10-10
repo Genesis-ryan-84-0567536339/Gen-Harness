@@ -110,7 +110,7 @@ test('Thiết lập gọn: từ bước 3 tới Hoàn tất chỉ gõ tên tổ 
   await expect(page.getByText('Lần sàng lọc đầu tiên đã xong.')).toBeVisible({ timeout: 15_000 });
   await page.getByRole('button', { name: /Vào Console/ }).click();
   // v0.1.55: Owner về Mặt tiền (G5) — Opus siết thành /owner khi tích hợp
-  await expect(page).toHaveURL(/\/(owner|overview)$/);
+  await expect(page).toHaveURL(/\/owner$/);
 
   // Tổng ô nhập từ bước 3: tên tổ chức + mã xác thực nguồn AI (+ PIN gõ phím không tính là ô).
   expect(inputs).toBeLessThanOrEqual(4);
