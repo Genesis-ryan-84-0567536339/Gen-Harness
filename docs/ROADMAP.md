@@ -29,7 +29,7 @@ Chi tiết từng bản ở [CHANGELOG.md](../CHANGELOG.md); tóm tắt theo ch�
 - **v0.1.47 – v0.1.50 (09/10)**: Facebook ghi lát 1 (trả lời/nhắn có xác nhận), bản build tái lập, Gen đọc lịch/mail/việc/Drive qua Gen-hub (QD-16),
   **Gen nhớ + Gen ghi Kho có xác nhận và mã PIN (QD-18, F-81, F-87)**. Cùng đợt: đồng bộ tài liệu (F-90, F-69, F-47, F-91, F-92, F-42, F-39).
 - **v0.1.51 – v0.1.53 (10/10)**: bản phản ứng — cổng phát hành dọn ảnh cũ (v0.1.51, v0.1.52) và **tự cập nhật đêm tự lành + trung thực** (v0.1.53, F-93…F-100); xem mục Bản phản ứng bên dưới.
-- **v0.1.54 (10/10)**: **Gen hướng dẫn** — Gen chủ động nhắc việc Sếp cần làm, giới thiệu tính năng chưa dùng, bài học mỗi ngày (thiết kế: [gen-coach.md](design/gen-coach.md)).
+- **v0.1.54 (10/10)**: **Gen hướng dẫn** — Gen chủ động nhắc việc Sếp cần làm, giới thiệu tính năng chưa dùng, bài học mỗi ngày (thiết kế: [gen-coach.md](design/gen-coach.md)). Cùng bản: **người gác yêu cầu tự chữa** (`.path` failed vì hết hạn mức inotify ⇒ reset-failed + restart, vẫn lỗi ⇒ timer dự phòng quét mỗi phút + dòng cảnh báo ở thẻ Sức khoẻ; [v0.1.54.md](releases/v0.1.54.md)).
 
 ## Tiếp theo (sau v0.1.54)
 Kế hoạch tổng của đợt kiểm toán kết thúc ở v0.1.50; không còn đợt đánh số sẵn. Thứ tự đề xuất:
@@ -73,6 +73,8 @@ Việc đã hứa hoặc đã biết mà chưa làm. Mỗi dòng ghi điều ki�
 | 23 | **"Làm giúp" bước 8** (Gen điền sẵn form Tạo agent đầu tiên theo khuôn đề xuất có Xác nhận) | Chưa làm. Hiện Gen chỉ chỉ đường tới bước 8 |
 | 24 | **Bộ bài cho nhân viên** — lộ trình riêng cho vai trò khác Owner | Hoãn: Gen hướng dẫn chỉ dành cho Sếp (cùng lý do Nợ #16, F-68); mở khi có nhân viên dùng thật |
 | 25 | **Tắt chuông theo loại** (việc khẩn / token sắp hết hạn / bài học) | Chưa làm. Hiện "Chuông nhắc" là một công tắc chung; cần ý kiến Sếp sau một tuần dùng thử |
+| 26 | **Nhãn nút theo trạng thái `opted_out_running`** (v0.1.53): sự cố/chuông `host.nightly` khi Sếp đã tắt tự cập nhật mà lịch vẫn bật vẫn dùng nút **"Xem cách bật lại"** (chung cho mọi lý do) | Chưa làm. Nội dung đích đã đúng (hai lựa chọn: tắt hẳn / giữ tự cập nhật) nhưng nhãn nút nói "bật lại"; cần nhãn riêng (vd "Xem lựa chọn") ở `gh/health.py` (`ACTIONS`) + web |
+| 27 | **`genh auto-update disable` khi không có phiên systemd `--user`** (chạy qua `sudo`/`su`/ssh không có `XDG_RUNTIME_DIR`, hoặc tài khoản khác tài khoản đã bật lịch) (v0.1.53) | Chưa làm. Hiện genh hỏi lại trạng thái, báo "CHƯA tắt được" và thoát 1 (không nói dối) nhưng chưa tự dò `XDG_RUNTIME_DIR`/`loginctl` để tắt hộ; Sếp phải chạy lại đúng tài khoản trong phiên đăng nhập |
 
 ## Bản phản ứng (hotfix)
 Các bản sửa nóng thật, không nằm trong kế hoạch đợt. Đối chiếu `git log origin/main` và nhánh `hotfix/*`:

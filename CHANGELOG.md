@@ -11,6 +11,7 @@ Việc sửa nóng không đổi số bản (PR #46, #48, #53, #55, #58, #59) gh
 - Thẻ **Hôm nay của Sếp** ở đầu khung Gen (chỉ Owner): tối đa 3 **Việc cần làm ngay** (sự cố, dòng bắt buộc, sao lưu, token Gen-hub, nháp chờ duyệt…), một mẹo **Sếp biết chưa?** và **Bài học hôm nay · k/19**; mỗi việc có Chỉ cho em / Để mai / Không dùng việc này (việc khẩn không tắt được).
 - Lộ trình 19 bài (10 bài nội dung + 9 bài từ Hướng dẫn thiết lập) ở Trợ giúp › Lộ trình học cùng Gen; chấm đỏ ở nút Gen; chuông `gen.coach` tối đa 1/ngày (09:05/11:05/14:05, có giờ yên lặng, không đẩy Telegram); Bản tin thêm dòng "Việc bắt buộc: đã đạt x/N".
 - Cài đặt › Bộ não AI › Gen hướng dẫn (bật/tắt, chuông, số bài mỗi ngày, giờ yên lặng, Bật lại); Gen có tool `coach.status` để trả lời "em cần làm gì?". Không gọi model, không ghi hội thoại; migration 0033.
+- **Người gác yêu cầu tự chữa**: bài học máy Boss — `gen-harness-update-request.path` rơi vào failed "Result: resources" vì hết hạn mức inotify (mặc định 128, đang dùng 174) nên nút Cập nhật ngay không có ai nhận; `genh auto-update enable|status` và `handle-requests` nay `reset-failed` + restart, vẫn lỗi thì bật timer dự phòng quét mỗi phút và nói rõ lệnh `sudo sysctl -w fs.inotify.max_user_instances=1024`; thẻ Sức khoẻ có dòng cảnh báo, E2E thật có ca inotify.
 - Chi tiết: [docs/releases/v0.1.54.md](docs/releases/v0.1.54.md) · thiết kế: [docs/design/gen-coach.md](docs/design/gen-coach.md)
 
 ## v0.1.53 — Tự cập nhật đêm tự lành + trung thực (10/10/2026)
