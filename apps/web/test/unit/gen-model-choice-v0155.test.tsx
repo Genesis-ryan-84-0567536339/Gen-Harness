@@ -310,18 +310,28 @@ describe('ModelPicker trong khung Gen', () => {
     queryClient.setQueryData(qk.me, STAFF);
     wrap(<GenPanel userId="u2" />);
     await optionsLoaded();
-    await waitFor(() => expect(btn('Kỹ hơn')).toBeDisabled());
+    await waitFor(() => expect(btn('Kỹ hơn')).toHaveAttribute('aria-disabled', 'true'));
     expect(btn('Kỹ hơn')).toHaveAttribute('title', unavailableReason('deep', false));
     expect(btn('Kỹ hơn').getAttribute('title')).toMatch(/chỉ dành cho Sếp/);
-    expect(btn('Nhanh')).toBeEnabled();
+    expect(btn('Nhanh')).not.toHaveAttribute('aria-disabled');
+    // Màn cảm ứng không xem được tooltip: bấm vào nút mờ hiện CÂU GIẢI THÍCH ngay dưới hàng nút, không đổi lựa chọn.
+    expect(screen.queryByTestId('gen-model-reason')).toBeNull();
     await userEvent.click(btn('Kỹ hơn'));
     expect(useGenStore.getState().modelChoice).toEqual({ tier: 'auto' });
+    expect(screen.getByTestId('gen-model-reason')).toHaveTextContent(unavailableReason('deep', false));
+    expect(btn('Kỹ hơn')).toHaveAttribute('aria-describedby', 'gen-model-reason');
+    await userEvent.click(btn('Nhanh'));                                     // chọn tầng dùng được ⇒ câu giải thích biến mất
+    expect(screen.queryByTestId('gen-model-reason')).toBeNull();
+    expect(useGenStore.getState().modelChoice).toEqual({ tier: 'fast' });
     cleanup();
     queryClient.setQueryData(qk.me, ME);
     queryClient.removeQueries({ queryKey: ['gen', 'settings'] });
     wrap();
-    await waitFor(() => expect(btn('Kỹ hơn')).toBeDisabled());
+    await waitFor(() => expect(btn('Kỹ hơn')).toHaveAttribute('aria-disabled', 'true'));
     expect(btn('Kỹ hơn').getAttribute('title')).toMatch(/Sếp thêm nguồn/);
+    await userEvent.click(btn('Kỹ hơn'));
+    expect(screen.getByTestId('gen-model-reason')).toHaveTextContent(/Sếp thêm nguồn ở màn API & Model/);
+    expect(document.body).not.toHaveTextContent('[object Object]');
   });
 
   it('máy chủ cũ không gửi model_options (hoặc lỗi) ⇒ cả 3 tầng bấm được, không có hàng Mức suy nghĩ', async () => {

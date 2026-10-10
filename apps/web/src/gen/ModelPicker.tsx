@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import type { GenModelEffort, GenModelTier } from '@gen-harness/contracts';
 import { useIsOwner } from './coachQueries';
 import { useGenModelOptions } from './genClient';
@@ -7,8 +7,9 @@ import { EFFORT_LABEL, TIER_LABEL, effortsOf, tierAvailable, unavailableReason, 
 
 /**
  * v0.1.55 (G3) — dưới ô nhập của khung Gen: "Tự động (chuẩn) · Nhanh · Kỹ hơn" (Cân bằng mặc định ẩn, chỉ hiện khi đang chọn) và
- * "Mức suy nghĩ: Thấp · Vừa · Cao" CHỈ khi tầng đang chọn hỗ trợ. Tầng không dùng được thì nút bị khoá kèm chữ giải thích
- * (tooltip). Lựa chọn nhớ theo hội thoại (genStore.modelChoice); hội thoại mới = Tự động. Không dùng chữ token.
+ * "Mức suy nghĩ: Thấp · Vừa · Cao" CHỈ khi tầng đang chọn hỗ trợ. Tầng không dùng được thì nút mờ (`aria-disabled`, KHÔNG
+ * `disabled`) kèm tooltip, và bấm vào nút mờ hiện CÂU GIẢI THÍCH ngay dưới hàng nút — màn cảm ứng (Mặt tiền Owner dùng điện
+ * thoại là chính) không xem được `title` (bài học ApiScreen v0.1.38 F-22). Lựa chọn nhớ theo hội thoại (genStore.modelChoice); hội thoại mới = Tự động. Không dùng chữ token.
  * Dùng lại các lớp `.gen-rate*` (nút tròn, tự xuống dòng ở màn hẹp 390px) nên không tràn ngang.
  */
 export function ModelPicker() {
@@ -17,13 +18,23 @@ export function ModelPicker() {
   const options = useGenModelOptions();
   const isOwner = useIsOwner();
   const efforts = effortsOf(options, choice.tier);
+  // Tầng vừa bấm mà chưa dùng được: câu giải thích hiện dưới hàng nút (biến mất khi chọn tầng khác hoặc tầng đó dùng được).
+  const [hintTier, setHintTier] = useState<GenModelTier | null>(null);
+  const hint = hintTier && !tierAvailable(options, hintTier) ? unavailableReason(hintTier, isOwner) : null;
 
   // Lựa chọn đã nhớ mà nay máy chủ báo không dùng được nữa (đổi nguồn model, đăng nhập tài khoản khác) ⇒ về Tự động.
   useEffect(() => {
     if (choice.tier !== 'auto' && !tierAvailable(options, choice.tier)) setChoice({ tier: 'auto' });
   }, [options, choice.tier, setChoice]);
 
-  const pickTier = (tier: GenModelTier) => setChoice(withTier(choice, tier, options));
+  const pickTier = (tier: GenModelTier) => {
+    if (!tierAvailable(options, tier)) {
+      setHintTier(tier);
+      return;
+    }
+    setHintTier(null);
+    setChoice(withTier(choice, tier, options));
+  };
   const pickEffort = (e: GenModelEffort) => setChoice(withEffort(choice, choice.effort === e ? null : e));
 
   return (
@@ -38,7 +49,8 @@ export function ModelPicker() {
                 type="button"
                 className="gen-rate__btn"
                 aria-pressed={choice.tier === t}
-                disabled={!ok}
+                aria-disabled={ok ? undefined : true}
+                aria-describedby={ok || hintTier !== t ? undefined : 'gen-model-reason'}
                 title={reason}
                 style={ok ? undefined : { opacity: 0.5, cursor: 'not-allowed' }}
                 onClick={() => pickTier(t)}
@@ -49,6 +61,11 @@ export function ModelPicker() {
           );
         })}
       </div>
+      {hint ? (
+        <p id="gen-model-reason" role="status" data-testid="gen-model-reason" style={{ margin: 0, fontSize: 12, lineHeight: 1.4, color: 'var(--color-neutral-400)' }}>
+          {hint}
+        </p>
+      ) : null}
       {efforts.length > 0 ? (
         <div className="gen-rate" role="group" aria-label="Mức suy nghĩ" style={{ alignItems: 'center' }}>
           <span style={{ fontSize: 11, color: 'var(--color-neutral-400)' }}>Mức suy nghĩ:</span>

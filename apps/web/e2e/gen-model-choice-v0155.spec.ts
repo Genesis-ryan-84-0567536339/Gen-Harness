@@ -109,9 +109,26 @@ test.describe('v0.1.55 — Gen: chọn model / mức suy nghĩ', () => {
     await p3Hook(page.request, 'gen', 'modelOptions', { deep: false });
     await page.reload();
     await openGen(page);
-    await expect(tier(page, 'Kỹ hơn')).toBeDisabled();
+    await expect(tier(page, 'Kỹ hơn')).toHaveAttribute('aria-disabled', 'true');
     await expect(tier(page, 'Kỹ hơn')).toHaveAttribute('title', /Mức “Kỹ hơn” chưa dùng được/);
     await expect(tier(page, 'Nhanh')).toBeEnabled();
+    await p3Hook(page.request, 'gen', 'modelOptions', {});
+  });
+
+  test('điện thoại 390px: bấm tầng không dùng được hiện câu giải thích, không tràn ngang', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 780 });
+    await p3Hook(page.request, 'gen', 'modelOptions', { deep: false });
+    await page.reload();
+    await openGen(page);
+    await expect(page.getByTestId('gen-model-reason')).toHaveCount(0);
+    await tier(page, 'Kỹ hơn').click({ force: true }); // nút mờ (aria-disabled) vẫn bấm được trên màn cảm ứng
+    const reason = page.getByTestId('gen-model-reason');
+    await expect(reason).toBeVisible();
+    await expect(reason).toContainText('Mức “Kỹ hơn” chưa dùng được');
+    await expect(tier(page, 'Kỹ hơn')).toHaveAttribute('aria-pressed', 'false');
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(overflow).toBeLessThanOrEqual(0);
+    await noObjectText(page);
     await p3Hook(page.request, 'gen', 'modelOptions', {});
   });
 
