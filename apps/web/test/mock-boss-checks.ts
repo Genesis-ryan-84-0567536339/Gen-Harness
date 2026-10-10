@@ -14,20 +14,26 @@
  * - jev: theo nguồn `system_one` của `mock-phase2` (không có → JEV_NOT_CONFIGURED).
  * - claude_call đạt mà claude_login chưa đạt (phiên có từ trước v0.1.39) → ghi claude_login 'pass'
  *   (`login_source: existing_session`) như `_adopt_existing_claude_login` của api.
- * - telegram (v0.1.44, dòng 6, bắt buộc ⇒ required_total 5): Gửi thử của `mock-telegram` (chưa cấu hình →
+ * - v0.1.55 (Thiết lập gọn): CHỈ dòng 0 `ai` ("Có ít nhất 1 nguồn AI chạy được", `ai_source`) bắt buộc ⇒ required_total 1; mọi dòng kết nối
+ *   khác tuỳ chọn. `ai` đạt khi bấm Kiểm tra (`POST /boss-checks/ai_source/run`: gọi thử nguồn AI đầu chuỗi sẵn sàng — nhà cung cấp bật có
+ *   model và gọi thử OK, hoặc hồ sơ Google/Claude đang dùng; không có → AI_NO_SOURCE) HOẶC Claude / Google đã gọi thử đạt
+ *   (`results.ai_source` giả, `detail.via` = 'claude_call' | 'agy_call', `runs` 0 — như máy chủ). Hook `seedAi {}` ghi 'pass'. Dòng agy KHÔNG còn
+ *   đòi đổi qua lại hai tài khoản (bỏ `agy_switch` khỏi `checks`; `switch_passes` vẫn trả để tương thích).
+ * - telegram (v0.1.44, dòng 6): Gửi thử của `mock-telegram` (chưa cấu hình →
  *   TELEGRAM_NOT_CONFIGURED; TELEGRAM_RATE_LIMITED tạm, không ghi); phản hồi `run` kèm `host_requested`.
- * - remote_access (v0.1.46, F-21, dòng 7, bắt buộc ⇒ required_total 6; KHÔNG PIN): quyết theo hostname của header Origin
+ * - remote_access (v0.1.46, F-21, dòng 7; KHÔNG PIN): quyết theo hostname của header Origin
  *   (mock-api.ts chặn `POST /boss-checks/remote_access/run` rồi gọi hook `recordRemote`): public_url local →
  *   REMOTE_NOT_CONFIGURED; host local → REMOTE_OPENED_ON_SERVER; còn lại Đạt (`detail.opened_from`, `access_mode`).
  * - agy_switch: chỉ đếm khi hồ sơ đang dùng TRƯỚC khi đổi (`from_profile`) khác hồ sơ đích (đổi sang chính nó = 0).
  * Hook e2e `POST /api/v1/__mock/p3/bossChecks/seedAgy {}`: đặt sẵn 2 hồ sơ Google an@… (không dùng), binh@… (đang dùng).
- * - facebook_reply (v0.1.47, F-79, dòng 8, KHÔNG bắt buộc ⇒ required_total vẫn 6): không có nút chạy (POST run → 404);
+ * - facebook_reply (v0.1.47, F-79, dòng 8, KHÔNG bắt buộc): không có nút chạy (POST run → 404);
  *   hook `seedFacebookReply {}` ghi 'pass'.
- * - kho_write (v0.1.50, F-81, dòng 9 "Gen ghi Kho", KHÔNG bắt buộc ⇒ required_total vẫn 6): không có nút chạy (POST run → 404); máy chủ
+ * - kho_write (v0.1.50, F-81, dòng 9 "Gen ghi Kho", KHÔNG bắt buộc): không có nút chạy (POST run → 404); máy chủ
  *   tự ghi 'pass' sau lần ghi Kho THẬT đầu tiên (mock-p4-mcp gọi hook `recordKhoWrite`); hook `seedKhoWrite {}` ghi 'pass'. Đạt dòng hub
  *   kèm `detail.write_scopes` {kho} + `write_missing` (token chứa "khongghi" ⇒ kho false; vẫn Đạt).
  * Hook e2e `POST /api/v1/__mock/p3/bossChecks/seedClaude {}`: một hồ sơ Claude đang dùng, CHƯA có bản claude_login.
  * Hook e2e `POST /api/v1/__mock/p3/bossChecks/seedHub {}` (v0.1.54): dòng 1 "Nối Gen-hub" đạt (e2e Gen hướng dẫn: việc boss.hub biến mất).
+ * Hook e2e `POST /api/v1/__mock/p3/bossChecks/seedAi {}` (v0.1.55): dòng 0 "nguồn AI" đạt (required_done 1/1).
  */
 import { randomUUID } from 'node:crypto';
 import type { BossCheck, BossCheckKey, BossOverview, BossRow, CliProfile, HubLink, HubReadScopes, HubWriteScopes, Provider, SocialAccount } from '@gen-harness/contracts';
@@ -63,19 +69,21 @@ export function isLocalHost(host: string): boolean {
   return !!v4 && (Number(v4[1]) === 127 || v4.slice(1).every((x) => Number(x) === 0));
 }
 
-const KEYS: BossCheckKey[] = ['hub', 'facebook', 'agy_login', 'agy_call', 'agy_switch', 'claude_login', 'claude_call', 'jev', 'telegram', 'remote_access', 'facebook_reply', 'kho_write'];
-const RUNNABLE = new Set<BossCheckKey>(['hub', 'facebook', 'agy_call', 'agy_switch', 'claude_call', 'jev', 'telegram', 'remote_access']);
+const KEYS: BossCheckKey[] = ['hub', 'facebook', 'agy_login', 'agy_call', 'agy_switch', 'claude_login', 'claude_call', 'jev', 'telegram', 'remote_access', 'facebook_reply', 'kho_write', 'ai_source'];
+const RUNNABLE = new Set<BossCheckKey>(['hub', 'facebook', 'agy_call', 'agy_switch', 'claude_call', 'jev', 'telegram', 'remote_access', 'ai_source']);
 const NEEDS_PIN = new Set<BossCheckKey>(['hub', 'agy_switch']);
 const FB_READ_MS = 1500;
 
 const ROWS: Array<Omit<BossRow, 'done'>> = [
-  { row: 1, key: 'hub', title: 'Nối Gen-hub', optional: false, checks: ['hub'] },
-  { row: 2, key: 'facebook', title: 'Kết nối Facebook', optional: false, checks: ['facebook'] },
-  { row: 3, key: 'agy', title: 'Google (Antigravity) — hai tài khoản', optional: false, checks: ['agy_login', 'agy_call', 'agy_switch'] },
-  { row: 4, key: 'claude', title: 'Claude Code CLI', optional: false, checks: ['claude_login', 'claude_call'] },
+  // v0.1.55: dòng 0 — việc BẮT BUỘC duy nhất; số dòng 1–9 giữ nguyên.
+  { row: 0, key: 'ai', title: 'Có ít nhất 1 nguồn AI chạy được', optional: false, checks: ['ai_source'] },
+  { row: 1, key: 'hub', title: 'Nối Gen-hub', optional: true, checks: ['hub'] },
+  { row: 2, key: 'facebook', title: 'Kết nối Facebook', optional: true, checks: ['facebook'] },
+  { row: 3, key: 'agy', title: 'Google (Antigravity)', optional: true, checks: ['agy_login', 'agy_call'] },
+  { row: 4, key: 'claude', title: 'Claude Code CLI', optional: true, checks: ['claude_login', 'claude_call'] },
   { row: 5, key: 'jev', title: 'Jev', optional: true, checks: ['jev'] },
-  { row: 6, key: 'telegram', title: 'Telegram (báo động & bản tin)', optional: false, checks: ['telegram'] },
-  { row: 7, key: 'remote', title: 'Truy cập từ xa', optional: false, checks: ['remote_access'] },
+  { row: 6, key: 'telegram', title: 'Telegram (báo động & bản tin)', optional: true, checks: ['telegram'] },
+  { row: 7, key: 'remote', title: 'Truy cập từ xa', optional: true, checks: ['remote_access'] },
   // v0.1.47 (F-79): không bắt buộc, không có nút chạy (RUNNABLE không có) — Đạt do hook seedFacebookReply / gửi thật.
   { row: 8, key: 'facebook_reply', title: 'Facebook trả lời', optional: true, checks: ['facebook_reply'] },
   // v0.1.50 (F-81): không bắt buộc, không có nút chạy — Đạt do hook seedKhoWrite / lần ghi Kho thật đầu tiên.
@@ -134,12 +142,26 @@ export function createMock(opts: Opts) {
   };
 
   const pass = (k: BossCheckKey) => results[k]?.status === 'pass';
+  /** Như `_derived_ai` của api: Claude / Google gọi thử đạt ⇒ coi như có nguồn AI chạy được (kết quả giả, `runs` 0). */
+  const derivedAi = (): BossCheck | null => {
+    for (const k of ['claude_call', 'agy_call'] as const) {
+      const r = results[k];
+      if (r?.status === 'pass') return { key: 'ai_source', status: 'pass', error_code: null, message: null, detail: { via: k }, checked_at: r.checked_at, runs: 0 };
+    }
+    return null;
+  };
   const overview = (): BossOverview => {
     syncLogins();
+    const shown: Record<BossCheckKey, BossCheck | null> = { ...results };
+    if (!pass('ai_source')) {
+      const d = derivedAi();
+      if (d) shown.ai_source = d;
+    }
     const done: Record<number, boolean> = {
+      0: shown.ai_source?.status === 'pass',
       1: pass('hub'),
       2: pass('facebook'),
-      3: pass('agy_call') && switchPasses >= 2,
+      3: pass('agy_call'),
       4: pass('claude_login') && pass('claude_call'),
       5: pass('jev'),
       6: pass('telegram'),
@@ -148,7 +170,7 @@ export function createMock(opts: Opts) {
       9: pass('kho_write'),
     };
     const rows = ROWS.map((r) => ({ ...r, done: done[r.row] }));
-    return { rows, results: { ...results }, required_done: rows.filter((r) => !r.optional && r.done).length, required_total: 6, switch_passes: switchPasses };
+    return { rows, results: shown, required_done: rows.filter((r) => !r.optional && r.done).length, required_total: ROWS.filter((r) => !r.optional).length, switch_passes: switchPasses };
   };
 
   const run = (key: BossCheckKey, body: { profile_id?: string; account_id?: string }): BossCheck | null => {
@@ -189,6 +211,14 @@ export function createMock(opts: Opts) {
         const out = record('claude_call', 'pass', { account: a.email, detail: { account_masked: mask(a.email) } });
         if (!pass('claude_login')) record('claude_login', 'pass', { detail: { login_source: 'existing_session', account_masked: mask(a.email), credentials_file: true } });
         return out;
+      }
+      case 'ai_source': {
+        // Như `_run_ai_source`: nguồn đầu chuỗi sẵn sàng — nhà cung cấp bật, có model, gọi thử OK; hoặc hồ sơ Google / Claude đang dùng.
+        const api = opts.providers().find((p) => p.enabled && p.kind !== 'system_one' && p.models.length > 0 && p.auth_state === 'ok');
+        const cli = activeOf('claude_code_cli') ?? activeOf('antigravity_cli');
+        if (api) return record('ai_source', 'pass', { detail: { latency_ms: 120, probe_model: api.models[0]?.model_name ?? null, models_count: api.models.length } });
+        if (cli) return record('ai_source', 'pass', { detail: { latency_ms: 450, account_masked: mask(cli.email) } });
+        return fail('ai_source', 'AI_NO_SOURCE', 'Chưa có nguồn AI nào — thêm khoá API hoặc đăng nhập Google / Claude Code ở Cài đặt › Bộ não AI rồi bấm Kiểm tra');
       }
       case 'telegram':
         return recordTelegram(opts.telegramTest());
@@ -259,6 +289,8 @@ export function createMock(opts: Opts) {
   const seedKhoWrite = () => recordKhoWrite();
   /** v0.1.54 (e2e Gen hướng dẫn): giả lập dòng 1 "Nối Gen-hub" đạt (như lượt Kiểm tra đạt) — không qua PIN/Gen-hub mock. */
   const seedHub = () => record('hub', 'pass', { detail: { tools: 3 } });
+  /** v0.1.55 (e2e Thiết lập gọn / Việc Sếp cần làm): giả lập dòng 0 "nguồn AI" đạt (như một lượt Kiểm tra đạt). */
+  const seedAi = () => record('ai_source', 'pass', { detail: { latency_ms: 120, probe_model: 'gemini-2.5-flash', models_count: 1 } });
 
-  return { handle, hooks: { seedAgy, seedClaude, seedFacebookReply, seedKhoWrite, seedHub, recordKhoWrite, overview, recordTelegram, forgetTelegram, recordRemote } as Record<string, (...args: never[]) => unknown>, dispose: () => {} };
+  return { handle, hooks: { seedAgy, seedClaude, seedFacebookReply, seedKhoWrite, seedHub, seedAi, recordKhoWrite, overview, recordTelegram, forgetTelegram, recordRemote } as Record<string, (...args: never[]) => unknown>, dispose: () => {} };
 }

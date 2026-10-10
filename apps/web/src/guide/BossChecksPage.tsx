@@ -4,7 +4,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import type { BossCheck, BossCheckKey, BossCheckRunBody, BossOverview, CliProfile } from '@gen-harness/contracts';
 import { Button, EmptyState, Icon, Switch, TextField } from '@gen-harness/ui';
 import { api } from '../lib/api';
-import { cliProfilesKey, useCliProfiles, useProviders } from '../lib/dataQueries';
+import { useCliProfiles, useProviders } from '../lib/dataQueries';
 import { errorDetail, errorText } from '../lib/errorText';
 import { useOrgTimezone } from '../lib/permissions';
 import { useMe } from '../lib/queries';
@@ -24,6 +24,7 @@ import {
   FACEBOOK_REPLY_STEPS,
   KHO_WRITE_STEPS,
   accountOf,
+  aiSourceOkText,
   bossErrorText,
   bossRowTarget,
   fmtCheckedAt,
@@ -38,16 +39,17 @@ import {
   isStalePending,
   needsRelogin,
   resultOf,
-  switchesOf,
   withResult,
 } from './bossChecksModel';
 
 type Results = BossOverview | undefined;
 
 /**
- * v0.1.39 (F-74) — "Việc Sếp cần làm" (`/guide/viec-sep`): 7 dòng kết nối chạy thật (6 bắt buộc + Jev tuỳ chọn). Mỗi
- * dòng có việc phải làm bằng lời thường, nút hành động và Ô KẾT QUẢ ngay cạnh. Kết quả lưu ở máy chủ
- * (`GET /boss-checks`) — tải lại trang vẫn còn, Claude tự đọc, Sếp không cần chụp màn hình. Chỉ Owner.
+ * v0.1.39 (F-74) — "Việc Sếp cần làm" (`/guide/viec-sep`): các dòng kết nối chạy thật. Mỗi dòng có việc phải làm bằng
+ * lời thường, nút hành động và Ô KẾT QUẢ ngay cạnh. Kết quả lưu ở máy chủ (`GET /boss-checks`) — tải lại trang vẫn còn,
+ * Claude tự đọc, Sếp không cần chụp màn hình. Chỉ Owner.
+ * v0.1.55 (Thiết lập gọn): chỉ dòng 0 "Có ít nhất 1 nguồn AI chạy được" là bắt buộc; Gen-hub, Facebook, Google, Claude
+ * Code, Telegram, Truy cập từ xa… đều "Không bắt buộc". Số dòng bắt buộc lấy từ máy chủ (`required_total`), không ghi cứng.
  */
 export function BossChecksPage() {
   const me = useMe();
@@ -65,11 +67,12 @@ export function BossChecksPage() {
   }, []);
 
   const data = q.data;
-  // Dòng 8 và 9 chỉ hiện khi máy chủ có dòng đó (bản api cũ không có — không hiện dòng chết).
+  // Dòng 0 (nguồn AI), 8 và 9 chỉ hiện khi máy chủ có dòng đó (bản api cũ không có — không hiện dòng chết).
+  const aiRow = data?.rows?.find((r) => r.key === 'ai');
   const hasReplyRow = !!data?.rows?.some((r) => r.row === 8);
   const hasKhoRow = !!data?.rows?.some((r) => r.row === 9);
   const rowDone = (n: number) => !!data?.rows?.find((r) => r.row === n)?.done;
-  const total = data?.required_total ?? 6;
+  const total = data?.required_total ?? 0;
   const done = data?.required_done ?? 0;
 
   return (
@@ -79,7 +82,7 @@ export function BossChecksPage() {
       </Link>
       <ScreenTitle
         title="Việc Sếp cần làm"
-        description="Bảy việc để hệ thống kết nối chạy thật (khoảng 25 phút). Làm từng dòng: bấm nút, xem ô kết quả ngay bên cạnh."
+        description="Chỉ một việc bắt buộc: có ít nhất một nguồn AI chạy được. Các kết nối còn lại (Gen-hub, Facebook, Telegram…) không bắt buộc — làm khi Sếp cần: bấm nút, xem ô kết quả ngay bên cạnh."
         maxWidth={640}
       />
       {nonOwner ? (
@@ -109,9 +112,10 @@ export function BossChecksPage() {
             <div className="guide-progress__bar" role="progressbar" aria-label="Tiến độ việc Sếp cần làm" aria-valuemin={0} aria-valuemax={total} aria-valuenow={done}>
               <span style={{ width: `${total ? (done / total) * 100 : 0}%` }} />
             </div>
-            <span className="guide-progress__text">{done >= total ? `Đã đạt đủ ${total} dòng bắt buộc — kết nối chạy thật.` : `Đã đạt ${done}/${total} dòng bắt buộc`}</span>
+            <span className="guide-progress__text">{done >= total ? `Đã đạt đủ ${total} dòng bắt buộc — nguồn AI chạy thật.` : `Đã đạt ${done}/${total} dòng bắt buộc`}</span>
           </div>
           <ol className="boss-list">
+            {aiRow ? <AiRow data={data} done={aiRow.done} /> : null}
             <HubRow data={data} done={rowDone(1)} />
             <FacebookRow data={data} done={rowDone(2)} />
             <AgyRow data={data} done={rowDone(3)} />
@@ -161,14 +165,18 @@ function TransientNote({ check }: { check: BossCheck | undefined }) {
   );
 }
 
-function Row({ n, title, optional, done, todo, children, results }: { n: number; title: string; optional?: boolean; done: boolean; todo: string; children: ReactNode; results: ReactNode }) {
+/**
+ * `required`: dòng BẮT BUỘC (v0.1.55 chỉ có dòng 0 "nguồn AI"); các dòng còn lại hiện chip "Không bắt buộc". Dòng 0 hiện ký
+ * hiệu "AI" thay số.
+ */
+function Row({ n, title, required, done, todo, children, results }: { n: number; title: string; required?: boolean; done: boolean; todo: string; children: ReactNode; results: ReactNode }) {
   return (
     <li className="boss-row gh-card" data-done={done || undefined} data-gen-target={bossRowTarget(n)}>
       <section aria-label={title}>
         <div className="boss-row__head">
-          <span className="guide-card__num mono">{String(n).padStart(2, '0')}</span>
+          <span className="guide-card__num mono">{n === 0 ? 'AI' : String(n).padStart(2, '0')}</span>
           <span className="guide-card__title">{title}</span>
-          {optional ? <span className="guide-chip">Không bắt buộc</span> : null}
+          {required ? null : <span className="guide-chip">Không bắt buộc</span>}
           {done ? (
             <span className="guide-chip guide-chip--done">
               <Icon name="ph ph-check" size={12} /> Xong
@@ -217,6 +225,39 @@ function ResultCell({ label, check, okText, failText, emptyText }: { label?: str
         </span>
       )}
     </div>
+  );
+}
+
+// ── 0. Nguồn AI (bắt buộc duy nhất) ──────────────────────────────────────────────────────────────────────────
+/**
+ * v0.1.55: dòng DUY NHẤT bắt buộc — có ít nhất một nguồn AI gọi được. Máy chủ tự coi là Đạt khi Gen đã gọi model thật thành công
+ * trong 30 ngày gần đây, hoặc Claude / Google đã gọi thử đạt; còn lại bấm Kiểm tra (gọi thử nguồn đầu chuỗi, không cần PIN).
+ */
+function AiRow({ data, done }: { data: Results; done: boolean }) {
+  const run = useRunCheck();
+  const tz = useOrgTimezone();
+  const res = resultOf(data, 'ai_source');
+  return (
+    <Row
+      n={0}
+      required
+      title="Có ít nhất 1 nguồn AI chạy được"
+      done={done}
+      todo="Gen cần một nguồn AI để trả lời và lọc tin: thêm khoá API hoặc đăng nhập Google / Claude Code ở Kết nối › Bộ não AI, rồi bấm Kiểm tra. Gen đã trả lời được rồi thì dòng này tự đạt."
+      results={<ResultCell check={res} okText={(c) => aiSourceOkText(c, tz)} />}
+    >
+      <div className="boss-actions">
+        <Button variant={done ? 'secondary' : 'primary'} className="btn-27" icon="ph ph-pulse" loading={run.isPending} onClick={() => run.mutate({ key: 'ai_source' })}>
+          Kiểm tra
+        </Button>
+        <Link to="/connections#brain" className="gh-btn gh-btn--secondary btn-27">
+          Mở Kết nối › Bộ não AI
+          <Icon name="ph ph-arrow-right" size={13} />
+        </Link>
+      </div>
+      {run.isError ? <InlineError detail={errorDetail(run.error)}>{errorText(run.error)}</InlineError> : null}
+      <TransientNote check={run.data} />
+    </Row>
   );
 }
 
@@ -302,7 +343,7 @@ function HubRow({ data, done }: { data: Results; done: boolean }) {
       n={1}
       title="Nối Gen-hub"
       done={done}
-      todo="Nhập địa chỉ Gen-hub (vd https://hub.genos.top/mcp), trong Gen-hub tạo token 90 ngày có quyền đọc Kho (muốn Gen ghi Kho thì tick thêm kho_create, kho_update), dán vào đây rồi bấm Kiểm tra."
+      todo="Nhập địa chỉ Gen-hub (vd https://hub.genos.top/mcp), trong Gen-hub tạo token 90 ngày có quyền đọc Kho (muốn Gen ghi Kho thì tick thêm kho_create, kho_update), dán vào đây rồi bấm Kiểm tra. Nối khi Sếp muốn Gen đọc lịch, mail và Kho dữ liệu — không nối em vẫn làm việc."
       results={
         <>
           <ResultCell check={hubRes} />
@@ -434,40 +475,27 @@ function FacebookRow({ data, done }: { data: Results; done: boolean }) {
 }
 
 // ── 3. Google / Antigravity ───────────────────────────────────────────────────────────────────────────────
+/**
+ * v0.1.55: bỏ bài kiểm "đổi qua lại hai tài khoản" (bài kiểm của nhà phát triển, không phải việc của Sếp) — thêm tài khoản
+ * thứ hai và Đổi tài khoản vẫn dùng được ở Kết nối › Bộ não AI. Dòng chỉ cần đăng nhập + Gọi thử.
+ */
 function AgyRow({ data, done }: { data: Results; done: boolean }) {
   const profiles = useCliProfiles('antigravity_cli');
   const login = useCliLogin('antigravity_cli');
   const call = useRunCheck();
-  const sw = useRunCheck();
   const list: CliProfile[] = profiles.data ?? [];
-  const sw0 = resultOf(data, 'agy_switch');
-  const switches = switchesOf(data);
   // Hết hạn / chưa có phiên / gọi thử vẫn chạy tài khoản khác: chỉ đăng nhập lại mới sửa được (đổi lại = lặp lỗi).
-  const relogin = list.length > 0 && (needsRelogin(resultOf(data, 'agy_call')) || needsRelogin(sw0) || list.some((p) => p.state === 'expired'));
-  const doSwitch = (p: CliProfile) =>
-    sw.mutate(
-      { key: 'agy_switch', body: { profile_id: p.id } },
-      { onSettled: () => void queryClient.invalidateQueries({ queryKey: cliProfilesKey('antigravity_cli') }) },
-    );
+  const relogin = list.length > 0 && (needsRelogin(resultOf(data, 'agy_call')) || list.some((p) => p.state === 'expired'));
   return (
     <Row
       n={3}
-      title="Google (Antigravity) — hai tài khoản"
+      title="Google (Antigravity)"
       done={done}
-      todo="Đăng nhập hai tài khoản Google, bấm Gọi thử, rồi đổi qua lại hai lần để chắc hệ thống dùng đúng tài khoản."
+      todo="Đăng nhập tài khoản Google rồi bấm Gọi thử. Muốn dùng thêm tài khoản hoặc đổi qua lại, làm ở Kết nối › Bộ não AI."
       results={
         <>
           <ResultCell label="Đăng nhập" check={resultOf(data, 'agy_login')} emptyText={list.length > 0 ? 'Đã có phiên (đăng nhập trước đây)' : undefined} />
           <ResultCell label="Gọi thử" check={resultOf(data, 'agy_call')} okText={(c) => `Đạt · đang dùng ${accountOf(c, call.data) ?? 'tài khoản Google'}`} />
-          <ResultCell
-            label="Đổi tài khoản"
-            check={sw0}
-            okText={(c) =>
-              c.detail?.account_match === null || !accountOf(c, sw.data)
-                ? 'Đã đổi · gọi thử chạy được (không đọc được email để so)'
-                : `Đã đổi · gọi thử chạy bằng ${accountOf(c, sw.data)} — khớp`
-            }
-          />
         </>
       }
     >
@@ -486,36 +514,18 @@ function AgyRow({ data, done }: { data: Results; done: boolean }) {
               <Button variant="primary" className="btn-27" icon="ph ph-arrow-clockwise" disabled={login.active} loading={login.start.isPending} onClick={() => login.start.mutate()}>
                 Đăng nhập lại
               </Button>
-            ) : list.length === 1 ? (
-              <Button variant="secondary" className="btn-27" icon="ph ph-user-plus" disabled={login.active} loading={login.start.isPending} onClick={() => login.start.mutate()}>
-                Thêm tài khoản thứ hai
-              </Button>
             ) : null}
             {list.length > 0 ? (
               <Button variant="primary" className="btn-27" icon="ph ph-chat-circle-dots" loading={call.isPending} onClick={() => call.mutate({ key: 'agy_call' })}>
                 Gọi thử
               </Button>
             ) : null}
-            {list
-              .filter((p) => !p.active)
-              .map((p) => (
-                <Button
-                  key={p.id}
-                  variant="secondary"
-                  className="btn-27"
-                  icon="ph ph-arrows-left-right"
-                  loading={sw.isPending && sw.variables?.body?.profile_id === p.id}
-                  onClick={() => doSwitch(p)}
-                >
-                  {`Đổi sang ${p.email ?? 'tài khoản Google'}`}
-                </Button>
-              ))}
+            <Link to="/connections#brain" className="gh-btn gh-btn--secondary btn-27">
+              Thêm / đổi tài khoản ở Kết nối
+              <Icon name="ph ph-arrow-right" size={13} />
+            </Link>
           </div>
-          {list.length > 0 ? (
-            <p className="muted-note">
-              Đang dùng: {list.find((p) => p.active)?.email ?? '—'} · Đã đổi qua lại {switches}/2 lần
-            </p>
-          ) : null}
+          {list.length > 0 ? <p className="muted-note">Đang dùng: {list.find((p) => p.active)?.email ?? '—'}</p> : null}
           {relogin ? (
             <p className="muted-note" role="note">
               Bấm Đăng nhập lại rồi đăng nhập đúng tài khoản Google cần dùng — hoặc làm ở <Link to="/connections#brain">Kết nối › Bộ não AI</Link>.
@@ -525,9 +535,7 @@ function AgyRow({ data, done }: { data: Results; done: boolean }) {
         </>
       )}
       {call.isError ? <InlineError>{errorText(call.error)}</InlineError> : null}
-      {sw.isError ? <InlineError>{errorText(sw.error)}</InlineError> : null}
       <TransientNote check={call.data} />
-      <TransientNote check={sw.data} />
     </Row>
   );
 }
@@ -594,9 +602,8 @@ function JevRow({ data, done }: { data: Results; done: boolean }) {
     <Row
       n={5}
       title="Jev"
-      optional
       done={done}
-      todo="Không bắt buộc. Có khoá Jev thì kiểm một lần; không có thì bỏ qua dòng này."
+      todo="Có khoá Jev thì kiểm một lần; không có thì bỏ qua dòng này."
       results={<ResultCell check={result} failText={result?.status === 'fail' && result.error_code !== 'JEV_NOT_CONFIGURED' ? 'Lỗi — thẻ Jev sẽ ẩn, không cần làm thêm' : undefined} />}
     >
       {providers.isPending ? (
@@ -690,7 +697,7 @@ function RemoteRow({ data, done }: { data: Results; done: boolean }) {
       n={7}
       title="Truy cập từ xa"
       done={done}
-      todo="Trên máy chủ chạy genh remote tailscale (khuyên dùng). Trên điện thoại mở địa chỉ ở Cài đặt › Sao lưu & cập nhật › Truy cập từ xa, đăng nhập, vào Hướng dẫn › Việc Sếp cần làm rồi bấm Kiểm tra ở dòng này."
+      todo="Chỉ cần khi có người khác dùng Console từ ngoài. Trên máy chủ chạy genh remote tailscale (khuyên dùng). Trên điện thoại mở địa chỉ ở Cài đặt › Sao lưu & cập nhật › Truy cập từ xa, đăng nhập, vào Hướng dẫn › Việc Sếp cần làm rồi bấm Kiểm tra ở dòng này."
       results={<ResultCell check={res} okText={okText} />}
     >
       <div className="boss-actions">
@@ -716,9 +723,9 @@ function FacebookReplyRow({ data, done }: { data: Results; done: boolean }) {
   return (
     <Row
       n={8}
-      title="Facebook trả lời (không bắt buộc)"
+      title="Facebook trả lời"
       done={done || passed}
-      todo="Không bắt buộc. Thử một lần để chắc Gen trả lời được bình luận trên Facebook của Sếp:"
+      todo="Thử một lần để chắc Gen trả lời được bình luận trên Facebook của Sếp:"
       results={<ResultCell check={res} />}
     >
       <ol className="boss-steps" data-testid="boss-reply-steps" style={{ margin: "0 0 8px", paddingLeft: 20 }}>
@@ -750,9 +757,8 @@ function KhoWriteRow({ data, done }: { data: Results; done: boolean }) {
     <Row
       n={9}
       title="Gen ghi Kho"
-      optional
       done={done || passed}
-      todo="Không bắt buộc. Cho Gen ghi thẳng vào Kho Ryan (Phiên, Việc) — Gen chỉ đề xuất, Sếp bấm Xác nhận và nhập mã PIN thì mới ghi:"
+      todo="Cho Gen ghi thẳng vào Kho Ryan (Phiên, Việc) — Gen chỉ đề xuất, Sếp bấm Xác nhận và nhập mã PIN thì mới ghi:"
       results={<ResultCell check={res} />}
     >
       {!passed ? (

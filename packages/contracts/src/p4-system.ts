@@ -201,7 +201,11 @@ export interface Step8Body {
   voice?: string;
   speak_when?: string;
   template?: string | null;
-  try_message: string;
+  /**
+   * v0.1.55: tuỳ chọn — CÓ thì máy chủ trả lời thử một lượt (gọi model), KHÔNG có thì không thử (bước 8 chỉ cần chọn mẫu).
+   * Thiếu `name` / `role_desc` thì máy chủ điền mặc định, nhưng web luôn gửi cả hai (mock-api.ts đòi).
+   */
+  try_message?: string;
 }
 
 export interface Step8Agent {
@@ -263,6 +267,13 @@ export interface SystemUpdateNightly {
  * mới, chạy lại để đi tiếp. null = không phải trường hợp này (hoặc quay về chưa trọn); thiếu ở api cũ.
  */
 export type SystemUpdateInterrupted = 'rolled_back' | 'resume' | null;
+/**
+ * v0.1.55 (G2): vì sao KHÔNG hiện nút "Cập nhật ngay" (null ⇔ hiện được nút). Thứ tự ưu tiên máy chủ xét:
+ * `not_owner` (người gọi không phải Owner) → `in_progress` (đang requested/running) → `genh_unlinked` (không có trình nhận yêu
+ * cầu / hộp thư request không ghi được — cùng điều kiện `can_request = false`) → `watcher_stalled` (người gác cập nhật lỗi) →
+ * `up_to_date` (không có bản mới). Mã cố định — câu lý do + việc cần làm do web ghép (`blockReasonCopy`).
+ */
+export type SystemUpdateBlockReason = 'not_owner' | 'in_progress' | 'genh_unlinked' | 'watcher_stalled' | 'up_to_date';
 export interface SystemUpdate {
   /** Phiên bản đang chạy (genh ghi vào hộp thư); null ở dev/test. */
   current: string | null;
@@ -273,6 +284,8 @@ export interface SystemUpdate {
   /** Có hộp thư với máy chủ (cài bằng genh) hay không. */
   linked: boolean;
   can_request: boolean;
+  /** v0.1.55: xem `SystemUpdateBlockReason`; thiếu ở api cũ ⇒ web dựa vào `can_request` / `update_available` như trước. */
+  request_block_reason?: SystemUpdateBlockReason | null;
   state: SystemUpdateState;
   /**
    * v0.1.37 (F-34): lý do 'stalled' — `not_picked_up` = yêu cầu nằm quá 15 phút (watcher không chạy); `process_gone` =

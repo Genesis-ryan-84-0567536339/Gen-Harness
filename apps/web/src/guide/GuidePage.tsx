@@ -59,9 +59,9 @@ export function GuidePage() {
           <Link to={BOSS_CHECKS_PATH} className="guide-boss gh-card">
             <Icon name="ph ph-rocket-launch" size={18} className="guide-boss__icon" />
             <span className="guide-boss__body">
-              <span className="guide-boss__title">Việc Sếp cần làm — kết nối chạy thật (~25 phút)</span>
+              <span className="guide-boss__title">Việc Sếp cần làm — nguồn AI chạy thật</span>
               <span className="guide-boss__sub">
-                {typeof boss.data?.required_done === 'number' ? `Đã đạt ${boss.data.required_done}/${boss.data.required_total} dòng bắt buộc` : 'Gen-hub, Facebook, Google, Claude Code, Telegram, Truy cập từ xa — kiểm từng dòng, kết quả được lưu lại'}
+                {typeof boss.data?.required_done === 'number' ? `Đã đạt ${boss.data.required_done}/${boss.data.required_total} dòng bắt buộc` : 'Chỉ cần ít nhất một nguồn AI chạy được — các kết nối khác không bắt buộc, kết quả được lưu lại'}
               </span>
             </span>
             <Icon name="ph ph-arrow-right" size={14} />

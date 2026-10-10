@@ -13,7 +13,8 @@ const FREQUENCY_OPTIONS: Array<{ value: Frequency; label: string }> = [
 ];
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 
-/** Bước 11 — Sao lưu (tuỳ chọn, PLAN 4.6). Chỉ lưu LỊCH (`frequency`/`time_of_day`) — đích LUÔN trong máy và
+/** Bước 11 — Sao lưu. v0.1.55 (Thiết lập gọn): sao lưu TỰ BẬT hằng ngày 02:00, giữ 7 bản — đi tiếp hay "Để sau" đều ghi lịch mặc
+ * định; đổi giờ / tần suất nằm trong mục "Đổi lịch" (đóng sẵn). (PLAN 4.6) Chỉ lưu LỊCH (`frequency`/`time_of_day`) — đích LUÔN trong máy và
  * vòng đời GIỮ LUÔN CỐ ĐỊNH theo GFS 7 ngày/4 tuần/12 tháng (`gh/backup.py`, v0.1.1 mục 5.6), không cấu hình
  * được ở đây (nên KHÔNG có ô "giữ bao nhiêu bản" hay đích MinIO — MinIO đã gỡ khỏi hệ thống ở v0.1.1). Vẫn gửi
  * `retention_count`/`destination` mặc định lên API để tương thích với client cũ đọc lại state này. */
@@ -58,7 +59,15 @@ export function Step11Backup({ meta, description, onBack, onSaved, formRef, onSk
       skipping={skipping}
       formError={formError ?? skipError}
     >
-      <div className="setup-section">
+      <div className="setup-section" data-testid="step11-default">
+        <div className="setup-section__title">Sao lưu đã tự bật</div>
+        <p className="muted-note">
+          Hằng ngày lúc 02:00, giữ 7 bản gần nhất, lưu mã hoá ngay trong máy chủ. Đi tiếp hay bấm Để sau thì lịch này vẫn chạy; muốn đổi giờ hay
+          tần suất thì mở “Đổi lịch” bên dưới.
+        </p>
+      </div>
+      <details className="setup-section brain-advanced">
+        <summary>Đổi lịch (không bắt buộc)</summary>
         <div className="setup-section__title">Lịch sao lưu</div>
         <div className="setup-grid">
           <div className="seg-field">
@@ -75,7 +84,7 @@ export function Step11Backup({ meta, description, onBack, onSaved, formRef, onSk
             maxLength={5}
           />
         </div>
-      </div>
+      </details>
       <div className="setup-section">
         <div className="setup-section__title">Đích lưu &amp; giữ bao lâu</div>
         <p className="muted-note">

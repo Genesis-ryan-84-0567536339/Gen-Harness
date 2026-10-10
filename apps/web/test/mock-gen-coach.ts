@@ -9,12 +9,15 @@
  *
  * TRẠNG THÁI Ở BỘ NHỚ MODULE (không nằm trong từng lần `createMock`): mọi context trình duyệt của MỘT lần chạy dùng chung một máy chủ mock nên
  * bài đã "Đã hiểu" ở context 1 thì context 2 cũng không thấy. `resetCoachMock()` (gọi mỗi lần `createMock`, tức mỗi `POST /__mock/reset`)
- * đưa về "máy mới 0/6": việc `boss.hub`, `boss.facebook`, `boss.agy` (P1, đúng thứ tự), mẹo `telegram_briefing`, bài học N01 (1/19), `unseen`.
+ * đưa về "máy mới 0/1" (v0.1.55, Thiết lập gọn): việc `boss.ai` (P1, dòng bắt buộc duy nhất — "Kiểm tra nguồn AI chạy được") rồi gợi ý
+ * `boss.hub` (P3, không chuông), mẹo `telegram_briefing`, bài học N01 (1/19), `unseen`. `boss.remote` (P3) chỉ hiện khi đã mời nhân viên
+ * (hook `scenario {staff: true}`); Gen-hub/Facebook/Telegram/Google/Claude KHÔNG còn là việc P1.
  *
  * Việc `boss.*` suy từ bảng "Việc Sếp cần làm" của mock-boss-checks (`opts.boss`) nên làm xong một dòng là việc biến mất.
  * Hook e2e `POST /api/v1/__mock/p3/genCoach/{hook}`:
- *   scenario {extras?: string[], stable?: boolean, unseen?: boolean} — thêm việc mẫu (health.channel.down P0, model.missing P0, backup.unset,
- *                                  hub.token_expiring, drafts.pending, followup.7), ép nhãn "ổn định", ép chấm đỏ;
+ *   scenario {extras?: string[], stable?: boolean, unseen?: boolean, staff?: boolean} — thêm việc mẫu (health.channel.down P0, model.missing P0
+ *                                  [ẩn boss.ai như máy chủ], backup.unset, hub.token_expiring, drafts.pending, followup.7), ép nhãn "ổn định", ép chấm
+ *                                  đỏ, `staff` = đã mời nhân viên (bật việc boss.remote);
  *   notify {} — chuông `gen.coach` cho Owner (link theo Gen bật/tắt) + bật `unseen`;
  *   state {} — đọc trạng thái nội bộ (kiểm tra; `nonOwnerCalls` = lời gọi bị 403 của vai trò khác Owner); reset {} — về máy mới.
  */
@@ -54,52 +57,34 @@ interface Def {
   warning?: string;
 }
 
-/** Việc theo dòng "Việc Sếp cần làm" bắt buộc (đúng thứ tự dòng). */
+/**
+ * Việc theo dòng "Việc Sếp cần làm" (đúng thứ tự bảng quy tắc của máy chủ). v0.1.55: `ai` là P1 duy nhất (dòng bắt buộc); `hub` chỉ là
+ * gợi ý P3; `remote` P3 chỉ khi đã mời nhân viên.
+ */
 const BOSS_DEFS: Record<string, Def> = {
+  ai: {
+    title: 'Kiểm tra nguồn AI chạy được',
+    why: 'Em đã có nguồn AI nhưng chưa gọi thật được lần nào — Sếp bấm Kiểm tra để em chắc là trả lời và lọc tin được.',
+    level: 'P1',
+    target: 'connections.brain',
+    warning: 'Nếu tắt, Gen sẽ không nhắc kiểm tra nguồn AI nữa — tới lúc cần trả lời mới biết lỗi.',
+  },
   hub: {
-    title: 'Nối Gen-hub',
-    why: 'Để Gen đọc được Kho Ryan, lịch, mail và Drive của Sếp.',
-    level: 'P1',
+    title: 'Nối Gen-hub nếu Sếp muốn',
+    why: 'Gen-hub là cầu để em đọc lịch, mail và Kho dữ liệu của Sếp — không nối thì em vẫn làm việc bình thường.',
+    level: 'P3',
     target: 'boss_checks.row.hub',
-    warning: 'Nếu tắt, Gen sẽ không nhắc nối Gen-hub nữa — Gen không đọc được Kho Ryan, lịch và mail của Sếp.',
-  },
-  facebook: {
-    title: 'Kết nối Facebook',
-    why: 'Để Gen đọc bình luận và tin nhắn Facebook của Sếp.',
-    level: 'P1',
-    target: 'boss_checks.row.facebook',
-    warning: 'Nếu tắt, Gen sẽ không nhắc kết nối Facebook nữa — Sếp tự vào trang Tài khoản mạng xã hội khi cần.',
-  },
-  agy: {
-    title: 'Đăng nhập hai tài khoản Google (Antigravity)',
-    why: 'Có hai tài khoản để Gen đổi qua lại khi một tài khoản hết hạn mức.',
-    level: 'P1',
-    target: 'boss_checks.row.agy',
-    warning: 'Nếu tắt, Gen sẽ không nhắc đăng nhập Google nữa — khi hết hạn mức, Gen có thể ngừng trả lời.',
-  },
-  claude: {
-    title: 'Đăng nhập Claude Code',
-    why: 'Để các việc nền của hệ thống có thêm một nguồn AI dự phòng.',
-    level: 'P1',
-    target: 'boss_checks.row.claude',
-    warning: 'Nếu tắt, Gen sẽ không nhắc đăng nhập Claude Code nữa.',
-  },
-  telegram: {
-    title: 'Gửi thử Telegram',
-    why: 'Để báo động sự cố và bản tin tới được điện thoại của Sếp.',
-    level: 'P1',
-    target: 'boss_checks.row.telegram',
-    warning: 'Nếu tắt, Gen sẽ không nhắc gửi thử Telegram nữa — sự cố có thể không tới điện thoại Sếp.',
+    warning: 'Nếu tắt, Gen sẽ không nhắc nối Gen-hub nữa — Gen không đọc được lịch, mail và Kho dữ liệu của Sếp.',
   },
   remote: {
-    title: 'Kiểm tra truy cập từ xa',
-    why: 'Để Sếp mở Console từ điện thoại khi không ngồi ở máy chủ.',
-    level: 'P1',
+    title: 'Thử mở Console từ điện thoại',
+    why: 'Đã có người trong đội dùng Console — mở được từ máy khác thì mọi người xử lý việc khi đi ngoài.',
+    level: 'P3',
     target: 'boss_checks.row.remote',
     warning: 'Nếu tắt, Gen sẽ không nhắc kiểm tra truy cập từ xa nữa.',
   },
 };
-const BOSS_ORDER = ['hub', 'facebook', 'agy', 'claude', 'telegram', 'remote'];
+const BOSS_ORDER = ['ai', 'hub', 'remote'];
 
 /** Việc mẫu thêm qua hook `scenario` (khoá việc thật của máy chủ). */
 const EXTRA_DEFS: Record<string, Def> = {
@@ -124,7 +109,7 @@ const EXTRA_DEFS: Record<string, Def> = {
   },
   'hub.token_expiring': {
     title: 'Token Gen-hub sắp hết hạn',
-    why: 'Hết hạn thì Gen không đọc được Kho Ryan, lịch và mail.',
+    why: 'Hết hạn thì Gen không đọc được Kho dữ liệu, lịch và mail.',
     level: 'P1',
     target: 'mcp.hub_link.token',
     warning: 'Nếu tắt, Gen sẽ không nhắc thay token Gen-hub nữa.',
@@ -195,6 +180,8 @@ interface State {
   forceUnseen: boolean | null;
   forceStable: boolean;
   extras: string[];
+  /** v0.1.55: đã mời nhân viên (người dùng khác Owner đang hoạt động) ⇒ mới nhắc `boss.remote`. */
+  staff: boolean;
   markShownCalls: number;
   /** Lời gọi `/gen/coach/*` từ vai trò khác Owner (bị 403) — e2e kiểm bằng 0: giao diện không được gọi thay nhân viên. */
   nonOwnerCalls: string[];
@@ -218,6 +205,7 @@ function fresh(): State {
     forceUnseen: null,
     forceStable: false,
     extras: [],
+    staff: false,
     markShownCalls: 0,
     nonOwnerCalls: [],
   };
@@ -225,7 +213,7 @@ function fresh(): State {
 
 let S: State = fresh();
 
-/** Về "máy mới 0/6" — gọi mỗi lần `createMock` (mỗi `POST /__mock/reset`). */
+/** Về "máy mới 0/1" — gọi mỗi lần `createMock` (mỗi `POST /__mock/reset`). */
 export function resetCoachMock(): void {
   S = fresh();
 }
@@ -237,7 +225,7 @@ const finished = (st: CoachLessonStatus) => st === 'understood' || st === 'done'
 
 function bossDone(opts: GenCoachOptions): { done: number; total: number; ok: Set<string> } {
   const o = opts.boss?.();
-  if (!o) return { done: 0, total: 6, ok: new Set() };
+  if (!o) return { done: 0, total: 1, ok: new Set() };
   return { done: o.required_done, total: o.required_total, ok: new Set(o.rows.filter((r) => r.done).map((r) => r.key)) };
 }
 
@@ -258,7 +246,12 @@ function allTodos(opts: GenCoachOptions): CoachTodo[] {
   const { ok } = bossDone(opts);
   const out: Array<{ key: string; def: Def }> = [];
   for (const k of S.extras) if (EXTRA_DEFS[k]) out.push({ key: k, def: EXTRA_DEFS[k] });
-  for (const k of BOSS_ORDER) if (!ok.has(k)) out.push({ key: `boss.${k}`, def: BOSS_DEFS[k] });
+  for (const k of BOSS_ORDER) {
+    if (ok.has(k)) continue;
+    if (k === 'ai' && S.extras.includes('model.missing')) continue; // dedupe với model.missing (P0) như máy chủ
+    if (k === 'remote' && !S.staff) continue; // chỉ nhắc khi đã mời nhân viên
+    out.push({ key: `boss.${k}`, def: BOSS_DEFS[k] });
+  }
   const rank = { P0: 0, P1: 1, P2: 2, P3: 3 } as const;
   return out
     .filter((x) => !S.dismissed.has(x.key) && !S.tomorrow.has(x.key))
@@ -465,11 +458,12 @@ export function createMock(opts: GenCoachOptions = {}) {
 
   const hooks = {
     scenario: (b: unknown) => {
-      const x = (b ?? {}) as { extras?: string[]; stable?: boolean; unseen?: boolean };
+      const x = (b ?? {}) as { extras?: string[]; stable?: boolean; unseen?: boolean; staff?: boolean };
       if (Array.isArray(x.extras)) S.extras = x.extras.filter((k) => k in EXTRA_DEFS);
+      if (typeof x.staff === 'boolean') S.staff = x.staff;
       if (typeof x.stable === 'boolean') S.forceStable = x.stable;
       if (typeof x.unseen === 'boolean') S.forceUnseen = x.unseen;
-      return { extras: S.extras, stable: S.forceStable, unseen: S.forceUnseen };
+      return { extras: S.extras, stable: S.forceStable, unseen: S.forceUnseen, staff: S.staff };
     },
     notify: () => {
       S.seen = false;

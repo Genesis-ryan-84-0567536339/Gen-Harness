@@ -8,13 +8,17 @@ import { fmtDec, fmtInt } from '../lib/format';
 import { CardError, SkeletonLines } from '../screens/common';
 import { BAD, OK, conditionLabel, outputLabel, weightsMessage, weightsValid } from '../screens/data/dataModel';
 import { WeightSliders } from '../screens/data/WeightSliders';
-import { CONFIDENCE_OPTIONS, INTERVAL_OPTIONS, THRESHOLD_OPTIONS, nearest } from './phase2Model';
+import { CONFIDENCE_OPTIONS, INDUSTRIES, INTERVAL_OPTIONS, THRESHOLD_OPTIONS, industryCodes, industryOf, nearest } from './phase2Model';
 import { StepFrame } from './StepFrame';
 import { describeError, type StepProps } from './types';
 
 const kindTone = (k: string): Tone => (k === 'risk' ? 'bad' : k === 'competition' || k === 'hr' ? 'warn' : 'neutral');
 
-/** Bước 7 — schedule, starter rules R-01…R-06, scoring weights (sum 100%). */
+/**
+ * Bước 7 — Sàng lọc dữ liệu. v0.1.55 (Thiết lập gọn): chỉ hỏi MỘT câu "Sếp làm ngành nào?" (chọn bộ quy tắc khởi đầu); lịch
+ * 900 giây / 500 tin / lô 250 / tin cậy 0,6 là mặc định của máy chủ. Lịch + từng quy tắc R-01…R-06 nằm trong mục "Nâng cao —
+ * lịch sàng lọc và từng quy tắc", trọng số (tổng 100%) trong "Nâng cao — trọng số chấm điểm" (cả hai đóng sẵn).
+ */
 export function Step7Refinery({ meta, description, onBack, onSaved, formRef, onSkip, skipping, skipError }: StepProps) {
   const schedule = useSchedule();
   const presets = useQuery({ queryKey: qk2.rulePresets, queryFn: ({ signal }) => api.setup.rulePresets(signal) });
@@ -41,6 +45,8 @@ export function Step7Refinery({ meta, description, onBack, onSaved, formRef, onS
     if (weightsQ.data && weights === null) setWeights(weightsQ.data);
   }, [weightsQ.data, weights]);
 
+  const available = presets.data?.map((r) => r.code) ?? [];
+  const industry = picked ? industryOf(picked, available) : null;
   const ws = weights ?? [];
   const wMsg = weights ? weightsMessage(ws) : null;
   const canContinue = !!weights && weightsValid(ws) && (picked?.length ?? 0) > 0;
@@ -91,6 +97,27 @@ export function Step7Refinery({ meta, description, onBack, onSaved, formRef, onS
       skipping={skipping}
       formError={formError ?? skipError}
     >
+      <div className="setup-section" data-testid="step7-industry">
+        <div className="setup-section__title">Sếp làm ngành nào?</div>
+        <Segmented
+          label="Ngành của Sếp"
+          value={industry ?? ''}
+          onChange={(v) => {
+            if (presets.data) setPicked(industryCodes(v, available));
+          }}
+          options={INDUSTRIES.map((i) => ({ value: i.value, label: i.label }))}
+        />
+        <p className="muted-note">
+          {picked && industry === null
+            ? 'Bộ quy tắc đang chọn tay ở mục “Nâng cao — lịch sàng lọc và từng quy tắc”.'
+            : 'Em chọn sẵn bộ quy tắc hợp ngành, lọc tin mỗi 15 phút hoặc đủ 500 tin, giữ tin có độ tin cậy từ 0,6. Chỉnh chi tiết ở mục Nâng cao hoặc ở Quy tắc sàng lọc sau.'}
+        </p>
+        {presets.isError ? <CardError error={presets.error} onRetry={() => void presets.refetch()} retrying={presets.isFetching} /> : null}
+      </div>
+
+      {/* v0.1.55: lịch sàng lọc và bộ quy tắc từng dòng là tinh chỉnh — gập vào "Nâng cao" (đóng sẵn). */}
+      <details className="setup-section brain-advanced">
+        <summary>Nâng cao — lịch sàng lọc và từng quy tắc</summary>
       <div className="setup-section">
         <div className="setup-section__title">Kích hoạt sàng lọc · cái nào đến trước</div>
         <div className="setup-grid">
@@ -172,6 +199,8 @@ export function Step7Refinery({ meta, description, onBack, onSaved, formRef, onS
         )}
         {picked && picked.length === 0 ? <p className="inline-error">Chọn ít nhất một quy tắc.</p> : null}
       </div>
+
+      </details>
 
       {/* v0.1.43 (F-30): trọng số là tinh chỉnh — gập vào "Nâng cao", giá trị và kiểm tổng 100% giữ nguyên. */}
       <details className="setup-section brain-advanced" open={advOpen || weightsBlocked || undefined}>

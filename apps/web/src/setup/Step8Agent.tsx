@@ -7,9 +7,12 @@ import { FriendlyErrorText, ModelUnavailableNotice } from '../screens/common';
 import { StepFrame } from './StepFrame';
 import { describeError, type StepProps } from './types';
 
-/** Mẫu agent (docs/handoff/06 bước 8) — chỉ điền sẵn tên/vai trò, Sếp sửa lại tuỳ ý. */
+/**
+ * Mẫu agent (docs/handoff/06 bước 8) — điền sẵn tên/vai trò, Sếp sửa lại tuỳ ý. v0.1.55 (Thiết lập gọn): chọn mẫu là xong;
+ * "Tạo trống" cũng có tên + vai trò mặc định (cùng chữ với `STEP8_DEFAULT_*` của api) nên luôn bấm Tiếp tục được.
+ */
 const TEMPLATES: Array<{ value: string; label: string; name: string; role: string }> = [
-  { value: '', label: 'Tạo trống', name: '', role: '' },
+  { value: '', label: 'Tạo trống', name: 'Trợ lý', role: 'Theo dõi tin nhắn, báo việc quan trọng và soạn sẵn trả lời chờ Sếp duyệt.' },
   { value: 'sales', label: 'Trợ lý thương mại', name: 'Trợ lý Kinh doanh', role: 'Theo dõi nhu cầu mua bán trong nhóm, báo cơ hội và soạn sẵn báo giá chờ duyệt.' },
   { value: 'key_account', label: 'Khách hàng lớn', name: 'Trợ lý Khách hàng lớn', role: 'Chăm sóc khách hàng quan trọng, nhắc lịch hẹn và theo dõi đơn đang mở.' },
   { value: 'ops', label: 'Admin hậu cần', name: 'Trợ lý Hậu cần', role: 'Theo dõi giao nhận, tồn kho và việc đến hạn của đội vận hành.' },
@@ -17,6 +20,9 @@ const TEMPLATES: Array<{ value: string; label: string; name: string; role: strin
   { value: 'recruiter', label: 'Tuyển dụng', name: 'Trợ lý Tuyển dụng', role: 'Ghi nhận ứng viên, lịch phỏng vấn và nhắc việc tuyển dụng.' },
   { value: 'secretary', label: 'Thư ký cá nhân', name: 'Thư ký', role: 'Tóm tắt tin nhắn quan trọng, nhắc lịch và soạn sẵn trả lời cho Sếp duyệt.' },
 ];
+
+/** Mẫu chọn sẵn khi mở bước 8 (Trợ lý thương mại). */
+const DEFAULT_TEMPLATE = 'sales';
 
 /**
  * v0.1.30: thử trò chuyện lỗi. `try_error` là chuỗi từ v0.1.30; máy chủ cũ trả đối tượng `{reasons}` — trước đây vẽ
@@ -44,12 +50,15 @@ function TryFailed({ agent }: { agent: Step8Result }) {
   );
 }
 
-/** Bước 8 — Agent đầu tiên: tạo agent (PUT /setup/steps/8) và nghe thử một câu trả lời. Gán kênh/nhóm làm sau ở màn Agent. */
+/**
+ * Bước 8 — Agent đầu tiên: chọn mẫu là xong (PUT /setup/steps/8). v0.1.55: bỏ tin thử trò chuyện (không gọi model, không tốn
+ * lượt) — máy chủ chỉ trả lời thử khi payload có `try_message`. Gán kênh/nhóm làm sau ở màn Agent.
+ */
 export function Step8Agent({ meta, description, onBack, onSaved, formRef, onSkip, skipping, skipError }: StepProps) {
-  const [template, setTemplate] = useState('');
-  const [name, setName] = useState('');
-  const [role, setRole] = useState('');
-  const [tryMessage, setTryMessage] = useState('Chào bạn, bạn giới thiệu ngắn về mình và việc bạn sẽ giúp tôi nhé.');
+  const initial = TEMPLATES.find((t) => t.value === DEFAULT_TEMPLATE) ?? TEMPLATES[0];
+  const [template, setTemplate] = useState(initial.value);
+  const [name, setName] = useState(initial.name);
+  const [role, setRole] = useState(initial.role);
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [result, setResult] = useState<{ agent: Step8Result; state: SetupState } | null>(null);
@@ -57,18 +66,18 @@ export function Step8Agent({ meta, description, onBack, onSaved, formRef, onSkip
   const pickTemplate = (v: string) => {
     setTemplate(v);
     const t = TEMPLATES.find((x) => x.value === v);
-    if (t && t.value) {
+    if (t) {
       setName(t.name);
       setRole(t.role);
     }
   };
-  const canContinue = name.trim() !== '' && role.trim() !== '' && tryMessage.trim() !== '';
+  const canContinue = name.trim() !== '' && role.trim() !== '';
 
   const save = async () => {
     setBusy(true);
     setFormError(null);
     try {
-      const res = await api.setup.step8({ name: name.trim(), role_desc: role.trim(), template: template || null, try_message: tryMessage.trim() });
+      const res = await api.setup.step8({ name: name.trim(), role_desc: role.trim(), template: template || null });
       setResult({ agent: res.agent, state: res });
     } catch (e) {
       setFormError(describeError(e));
@@ -90,9 +99,9 @@ export function Step8Agent({ meta, description, onBack, onSaved, formRef, onSkip
               </div>
               <p className="setup-try__reply">{agent.try_reply}</p>
             </div>
-          ) : (
+          ) : agent.try_error || agent.try_error_code || agent.try_reasons?.length ? (
             <TryFailed agent={agent} />
-          )}
+          ) : null}
           <p className="muted-note">Gán kênh và nhóm cho agent làm sau ở màn Danh tính Agent.</p>
         </div>
       </StepFrame>
@@ -117,7 +126,9 @@ export function Step8Agent({ meta, description, onBack, onSaved, formRef, onSkip
         <SelectField label="Mẫu" value={template} onChange={(e) => pickTemplate(e.target.value)} options={TEMPLATES.map((t) => ({ value: t.value, label: t.label }))} />
         <TextField label="Tên agent" value={name} onChange={(e) => setName(e.target.value)} maxLength={120} required />
         <TextField label="Vai trò — agent làm gì cho Sếp" value={role} onChange={(e) => setRole(e.target.value)} maxLength={500} required />
-        <TextField label="Câu thử trò chuyện" value={tryMessage} onChange={(e) => setTryMessage(e.target.value)} maxLength={1000} required />
+        <p className="muted-note" data-testid="step8-note">
+          Chọn mẫu là xong — tên và vai trò điền sẵn theo mẫu, sửa lại ở Danh tính Agent bất cứ lúc nào.
+        </p>
       </div>
     </StepFrame>
   );
