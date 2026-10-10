@@ -48,6 +48,9 @@ test.describe('auth', () => {
     await page.getByLabel('Email').fill(OWNER.email);
     await page.getByLabel('Mật khẩu', { exact: true }).fill(OWNER.password);
     await page.keyboard.press('Enter');
+    // v0.1.55 (G5): Owner đăng nhập vào Mặt tiền /owner; thanh bên thu gọn là của Console (Cài đặt nâng cao).
+    await expect(page).toHaveURL(/\/owner$/);
+    await page.goto('/overview');
     await page.getByRole('button', { name: /Anh Cơ La/ }).click();
     await page.getByRole('menuitem', { name: 'Thu gọn thanh bên' }).click();
     await expect(page.locator('.app')).toHaveAttribute('data-sidebar', 'rail');
@@ -860,7 +863,7 @@ test.describe('giai đoạn 4.5/4.6: Điều khiển hệ thống', () => {
 
     await expect(page.getByRole('heading', { name: 'Hoàn tất' })).toBeVisible();
     await page.getByRole('button', { name: /Vào Console/ }).click();
-    // v0.1.55: Owner về Mặt tiền (G5) — Opus siết thành /owner khi tích hợp
+    // v0.1.55 (G5): Owner "/" ⇒ Mặt tiền /owner
     await expect(page).toHaveURL(/\/owner$/);
   });
 });

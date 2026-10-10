@@ -180,8 +180,8 @@ test('Boss bước 2: chuông "Gen đề xuất ghi Kho · Phiên v0.1.50" → /
   const item = page.getByRole('dialog', { name: 'Thông báo' }).locator('.nt-item', { hasText: 'Gen đề xuất ghi Kho · Phiên v0.1.50' });
   await expect(item).toBeVisible();
   await item.click();
-  // v0.1.55: Owner về Mặt tiền (G5) — Opus siết thành /owner khi tích hợp
-  await expect(page).toHaveURL(/\/owner$/);
+  // v0.1.55: chuông Gen dẫn vào Console /overview?gen=… (không về Mặt tiền); bỏ tham số khỏi địa chỉ.
+  await expect(page).toHaveURL(/\/overview$/);
   const panel = page.getByRole('complementary', { name: GEN_PANEL });
   await expect(panel).toBeVisible();
   await expect(panel).toContainText('Máy chủ Gen-Harness vừa lên v0.1.50.');
