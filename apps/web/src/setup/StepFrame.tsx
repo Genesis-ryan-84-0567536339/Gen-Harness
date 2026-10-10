@@ -22,6 +22,10 @@ export interface StepFrameProps {
   bare?: boolean;
   /** v0.1.28 (UX V1): why "Tiếp tục" is disabled — shown beside the buttons while `canContinue` is false. */
   blockedHint?: string | null;
+  /** v0.1.55: thẻ gợi ý (bước 10) — không có nút "Tiếp tục", chỉ "Để sau" (nút chính) / hành động trong thẻ. */
+  hideContinue?: boolean;
+  /** v0.1.55: "Để sau" là nút chính (thẻ gợi ý) thay vì nút phụ. */
+  skipPrimary?: boolean;
 }
 
 /** Right pane of the wizard: title, description, surface card, action bar. */
@@ -42,6 +46,8 @@ export function StepFrame({
   continueIcon = 'ph ph-arrow-right',
   bare,
   blockedHint,
+  hideContinue,
+  skipPrimary,
 }: StepFrameProps) {
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -70,13 +76,15 @@ export function StepFrame({
         </Button>
         <span className="setup-actions__spacer" />
         {onSkip ? (
-          <Button variant="secondary" onClick={onSkip} loading={skipping}>
+          <Button variant={skipPrimary ? 'primary' : 'secondary'} onClick={onSkip} loading={skipping}>
             Để sau
           </Button>
         ) : null}
-        <Button variant="primary" type="submit" disabled={!canContinue} loading={busy} iconRight={continueIcon}>
-          {continueLabel}
-        </Button>
+        {hideContinue ? null : (
+          <Button variant="primary" type="submit" disabled={!canContinue} loading={busy} iconRight={continueIcon}>
+            {continueLabel}
+          </Button>
+        )}
       </div>
     </form>
   );

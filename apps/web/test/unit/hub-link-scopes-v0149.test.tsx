@@ -284,8 +284,9 @@ describe('mock-p4-mcp — chế độ giả "thiếu quyền lịch + mail" (tok
 // ── Việc Sếp cần làm: hàng Gen-hub ────────────────────────────────────────────────────────────────────────────
 
 const ROWS: BossOverview['rows'] = [
-  { row: 1, key: 'hub', title: 'Nối Gen-hub', optional: false, checks: ['hub'], done: true },
-  { row: 2, key: 'facebook', title: 'Kết nối Facebook', optional: false, checks: ['facebook'], done: false },
+  { row: 0, key: 'ai', title: 'Có ít nhất 1 nguồn AI chạy được', optional: false, checks: ['ai_source'], done: true },
+  { row: 1, key: 'hub', title: 'Nối Gen-hub', optional: true, checks: ['hub'], done: true },
+  { row: 2, key: 'facebook', title: 'Kết nối Facebook', optional: true, checks: ['facebook'], done: false },
 ];
 const check = (detail: BossCheck['detail']): BossCheck => ({
   key: 'hub', status: 'pass', error_code: null, message: null, detail, checked_at: '2026-10-09T01:05:00Z', runs: 1,
@@ -297,7 +298,7 @@ function stubBoss(hub: BossCheck | null) {
     vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
       const path = new URL(String(url), 'http://x').pathname.replace('/api/v1', '');
       const method = init?.method ?? 'GET';
-      if (path === '/boss-checks' && method === 'GET') return json(200, { rows: ROWS, results: { hub }, required_done: 1, required_total: 6, switch_passes: 0 });
+      if (path === '/boss-checks' && method === 'GET') return json(200, { rows: ROWS, results: { hub }, required_done: 1, required_total: 1, switch_passes: 0 });
       if (path === '/hub/link' && method === 'GET') return json(200, SAVED);
       if (path === '/auth/me') return json(200, me('owner'));
       return json(404, { code: 'NOT_FOUND', title: 'Không tồn tại' });
@@ -343,7 +344,7 @@ describe('Việc Sếp cần làm — dòng phụ quyền đọc thêm ở hàng
     const line = await within(hub).findByText(/Quyền đọc thêm \(không bắt buộc\)/);
     expect(line.textContent).toContain('Lịch ✓ · Mail ✗ · Việc ✓ · Drive ✗');
     expect(within(hub).getByText(/tick thêm quyền đọc/)).toBeInTheDocument();
-    expect(await screen.findByText('Đã đạt 1/6 dòng bắt buộc')).toBeInTheDocument();
+    expect(await screen.findByText('Đã đạt đủ 1 dòng bắt buộc — nguồn AI chạy thật.')).toBeInTheDocument();
   });
 
   it('lần kiểm Gen-hub LỖI (detail còn read_scopes cũ) ⇒ KHÔNG hiện dòng quyền đọc / "tick thêm quyền" cạnh "Lỗi"', async () => {

@@ -113,12 +113,12 @@ test.describe('v0.1.39 · nghiệm thu sau gộp', () => {
     await noObjectText(page);
   });
 
-  test('Việc Sếp cần làm: token sai → Lỗi + câu thân thiện + Chi tiết kỹ thuật HUB_TOKEN_REJECTED; tiến độ x/5', async ({ page }) => {
+  test('Việc Sếp cần làm: token sai → Lỗi + câu thân thiện + Chi tiết kỹ thuật HUB_TOKEN_REJECTED; tiến độ vẫn 0/1', async ({ page }) => {
     await loginAsOwner(page);
     await page.goto('/guide/viec-sep');
-    await expect(page.locator('.boss-row')).toHaveCount(9); // v0.1.47: + dòng 8 "Facebook trả lời"; v0.1.50: + dòng 9 "Gen ghi Kho" (đều không bắt buộc)
-    await expect(page.getByText('Đã đạt 0/6 dòng bắt buộc')).toBeVisible();
-    for (const name of ['Nối Gen-hub', 'Kết nối Facebook', 'Google (Antigravity) — hai tài khoản', 'Claude Code CLI', 'Jev']) {
+    await expect(page.locator('.boss-row')).toHaveCount(10); // v0.1.55: + dòng 0 "nguồn AI" (bắt buộc duy nhất); v0.1.47: + dòng 8 "Facebook trả lời"; v0.1.50: + dòng 9 "Gen ghi Kho" (đều không bắt buộc)
+    await expect(page.getByText('Đã đạt 0/1 dòng bắt buộc')).toBeVisible();
+    for (const name of ['Nối Gen-hub', 'Kết nối Facebook', 'Google (Antigravity)', 'Claude Code CLI', 'Jev']) {
       await expect(row(page, name)).toBeVisible();
     }
     await expect(row(page, 'Jev')).toContainText('Không bắt buộc');
@@ -134,7 +134,7 @@ test.describe('v0.1.39 · nghiệm thu sau gộp', () => {
     await expect(res).toContainText('Lỗi · Gen-hub từ chối token');
     await res.getByText('Chi tiết kỹ thuật').click();
     await expect(res).toContainText('Mã lỗi HUB_TOKEN_REJECTED');
-    await expect(page.getByText('Đã đạt 0/6 dòng bắt buộc')).toBeVisible();
+    await expect(page.getByText('Đã đạt 0/1 dòng bắt buộc')).toBeVisible();
     await noObjectText(page);
   });
 
@@ -174,7 +174,7 @@ test.describe('v0.1.39 · nghiệm thu sau gộp', () => {
     await expect(results.nth(1)).toContainText('Đạt');
     await expect(results.nth(0)).toContainText('Đạt');
     await expect(cl).toContainText('Xong');
-    await expect(page.getByText('Đã đạt 1/6 dòng bắt buộc')).toBeVisible();
+    await expect(page.getByText('Đã đạt đủ 1 dòng bắt buộc')).toBeVisible(); // Claude gọi thử đạt ⇒ nguồn AI tự đạt
     await noObjectText(page);
   });
 

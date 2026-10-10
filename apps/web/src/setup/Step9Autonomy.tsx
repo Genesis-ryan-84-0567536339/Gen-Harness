@@ -13,10 +13,14 @@ import { describeError, type StepProps } from './types';
 const LEVEL_OPTIONS = AUTONOMY_CHOICES.filter((c) => c.level === 3 || c.level === 4).map((c) => ({ value: String(c.level), label: c.label }));
 
 const PIN_TEXT = 'Sau Hoàn tất, đổi mức tự trị cần mã PIN';
+/** Ngưỡng tiền mặc định phải duyệt (chữ hiển thị; giữ nguyên mặc định của hệ thống). */
+const AMOUNT_APPROVAL_VND = '50.000.000 ₫';
 const levelLabel = (n: number) => autonomyChoice(n)?.label ?? `mức ${n}`;
 
-/** Bước 9 — Tự trị & ranh giới: mức 3 hoặc 4 cho agent tạo ở bước 8, xác nhận đã đọc ranh giới khoá cứng (không tắt được).
- *  Mở lại sau Hoàn tất: điền sẵn mức hiện tại của agent; bấm Tiếp tục mà không đổi mức thì giữ nguyên (không hỏi PIN). */
+/** Bước 9 — Tự trị & ranh giới: mức 3 hoặc 4 cho agent tạo ở bước 8 (mặc định 4), kèm danh sách ranh giới khoá cứng (không tắt
+ *  được). v0.1.55: không còn ô tích "Tôi đã đọc…" — thay bằng MỘT dòng ghi chú (bấm Tiếp tục = đã đọc; web gửi
+ *  `ack_boundaries: true`). Mở lại sau Hoàn tất: điền sẵn mức hiện tại của agent; bấm Tiếp tục mà không đổi mức thì giữ nguyên
+ *  (không hỏi PIN). */
 export function Step9Autonomy({ meta, description, onBack, onSaved, formRef, onSkip, skipping, skipError }: StepProps) {
   const boundaries = useQuery({ queryKey: ['setup', 'hard-boundaries'], queryFn: ({ signal }) => api.setup.hardBoundaries(signal) });
   const qc = useQueryClient();
@@ -29,7 +33,6 @@ export function Step9Autonomy({ meta, description, onBack, onSaved, formRef, onS
     if (agent && !touched) setLevel(String(agent.autonomy_level));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- chỉ điền sẵn khi dữ liệu agent về, không đè lựa chọn của Sếp.
   }, [agent?.id, agent?.autonomy_level]);
-  const [ack, setAck] = useState(false);
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   // v0.1.45 (F-20): mở lại từ trang Hướng dẫn SAU Hoàn tất → máy chủ đòi phiên PIN (hộp PIN tự mở khi gặp 423).
@@ -41,7 +44,7 @@ export function Step9Autonomy({ meta, description, onBack, onSaved, formRef, onS
     try {
       // Mức hiện tại ngoài 3/4 (đã đổi ở màn Danh tính Agent) và Sếp không chọn lại → null = giữ nguyên.
       const chosen = level === '3' ? 3 : level === '4' ? 4 : null;
-      const state = await api.setup.step9({ autonomy_level: chosen, ack_boundaries: ack });
+      const state = await api.setup.step9({ autonomy_level: chosen, ack_boundaries: true });
       // Ghi mức vừa lưu vào bộ nhớ đệm — Quay lại / mở lại bước 9 không điền mức cũ rồi gửi ngược về.
       if (state.agent) qc.setQueryData(qk.setupStep9, { agent: state.agent });
       else void qc.invalidateQueries({ queryKey: qk.setupStep9 });
@@ -60,7 +63,7 @@ export function Step9Autonomy({ meta, description, onBack, onSaved, formRef, onS
       title={meta.title}
       description={description}
       formRef={formRef}
-      canContinue={ack && target.isSuccess}
+      canContinue={target.isSuccess}
       busy={busy}
       onContinue={() => void save()}
       onBack={onBack}
@@ -109,9 +112,9 @@ export function Step9Autonomy({ meta, description, onBack, onSaved, formRef, onS
             </li>
           ))}
         </ul>
-        <label className="setup-ack">
-          <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} /> Tôi đã đọc các ranh giới trên
-        </label>
+        <p className="muted-note" data-testid="step9-ack-note">
+          Bấm Tiếp tục nghĩa là Sếp đã đọc các ranh giới trên. Em giữ sẵn mức Soạn sẵn chờ duyệt; chi vượt {AMOUNT_APPROVAL_VND} luôn chờ Sếp duyệt.
+        </p>
       </div>
     </StepFrame>
   );

@@ -8,7 +8,7 @@ import { CURRENCIES, TIMEZONES } from './steps';
 import { StepFrame } from './StepFrame';
 import { describeError, type StepProps } from './types';
 import { useFieldErrors } from './useFieldErrors';
-import { addressingPreview, firstHiddenError, isComplete, step3Errors, type Step3Values } from './validation';
+import { DEFAULT_ADDRESSING, addressingPreview, firstHiddenError, isComplete, step3Errors, type Step3Values } from './validation';
 
 type K = keyof Step3Values;
 
@@ -17,8 +17,9 @@ export function Step3Org({ meta, description, onBack, onSaved, formRef }: StepPr
     org_name: '',
     timezone: 'Asia/Ho_Chi_Minh',
     currency: 'VND',
-    self_name: '',
-    bot_calls_me: 'Sếp',
+    // v0.1.55 (Thiết lập gọn): hai ô xưng hô điền sẵn "Sếp" — sửa được; chỉ tên tổ chức là ô bắt buộc phải gõ.
+    self_name: DEFAULT_ADDRESSING,
+    bot_calls_me: DEFAULT_ADDRESSING,
   });
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -97,7 +98,7 @@ export function Step3Org({ meta, description, onBack, onSaved, formRef }: StepPr
           />
         </div>
         <div className="setup-grid">
-          {text('self_name', 'Sếp tự xưng là', { placeholder: 'Anh, Chị, Tôi…' })}
+          {text('self_name', 'Sếp tự xưng là', { placeholder: 'Anh, Chị, Tôi…', hint: 'Điền sẵn “Sếp” — đổi nếu Sếp muốn xưng khác.' })}
           {text('bot_calls_me', 'Agent gọi Sếp là', { placeholder: 'Sếp, Anh, Chị…' })}
         </div>
         <div className="setup-preview">

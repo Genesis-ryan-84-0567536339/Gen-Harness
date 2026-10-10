@@ -38,8 +38,8 @@ HUB_TOKEN_WARN_DAYS = 7
 
 # ─── từ vựng tín hiệu ────────────────────────────────────────────────────────────────────────────────────────
 
-#: Khoá của 9 dòng "Việc Sếp cần làm" (boss_checks.service.ROWS) — test bảo đảm khớp ROWS.
-BOSS_KEYS = ("hub", "facebook", "agy", "claude", "jev", "telegram", "remote", "facebook_reply", "kho_write")
+#: Khoá các dòng "Việc Sếp cần làm" (boss_checks.service.ROWS) — test bảo đảm khớp ROWS (v0.1.55: thêm dòng đầu `ai`).
+BOSS_KEYS = ("ai", "hub", "facebook", "agy", "claude", "jev", "telegram", "remote", "facebook_reply", "kho_write")
 #: Việc thiết lập tuỳ chọn có tín hiệu `followup.<n>.done` (5–11 + 13 Facebook + 14 Gen-hub).
 FOLLOWUP_NS = (5, 6, 7, 8, 9, 10, 11, 13, 14)
 #: Chỉ 5–10 từng là VIỆC trên thẻ (11 trùng `backup.unset`; 13, 14 trùng `boss.facebook` / `boss.hub`).
@@ -48,6 +48,8 @@ FOLLOWUP_TODO_NS = (5, 6, 7, 8, 9, 10)
 STATE_SIGNALS: frozenset[str] = frozenset({
     "model.bound", "api_key.present", "ai_budget.set", "pin.set", "telegram.briefing_on", "hub.kho_write_missing",
     "memory.empty", "backup.scheduled", "offsite.chosen", "drafts.any",
+    # v0.1.55: đã có người dùng khác Owner đang hoạt động (mời nhân viên) — điều kiện để nhắc Truy cập từ xa.
+    "staff.active",
     *(f"boss.{k}.done" for k in BOSS_KEYS),
     *(f"followup.{n}.done" for n in FOLLOWUP_NS),
 })
@@ -57,7 +59,8 @@ TOPICS = frozenset({"model", "hub", "facebook", "agy", "claude", "telegram", "re
                     "memory", "ai_cost", "setup", "health"})
 #: Tiền tố khoá việc → chủ đề. Tra từ khoá đầy đủ rồi bỏ dần đoạn cuối (`topic_of`).
 TOPIC: dict[str, str] = {
-    "health": "health", "model": "model", "boss.hub": "hub", "boss.facebook": "facebook", "boss.agy": "agy",
+    "health": "health", "model": "model", "boss.ai": "model", "boss.hub": "hub", "boss.facebook": "facebook",
+    "boss.agy": "agy",
     "boss.claude": "claude", "boss.telegram": "telegram", "boss.remote": "remote", "backup": "backup",
     "hub": "hub", "drafts": "drafts", "followup": "setup",
 }
@@ -68,9 +71,13 @@ TOPIC: dict[str, str] = {
 BOSS_TARGET = "boss_checks.row.{key}"
 
 #: Khoá việc (không kể health.<kind>: đích của sự cố là liên kết `link` của chính sự cố) → đích làm sáng.
+#: v0.1.55: `boss.ai` trỏ thẻ "Bộ não AI" ở Kết nối (id `boss_checks.row.ai` chưa có trong registry —
+#: TODO(v0155-integ): Opus thêm vào genTargets.ts rồi có thể đổi sang `BOSS_TARGET.format(key="ai")`).
 TODO_TARGETS: dict[str, str] = {
     "model.missing": "api.bindings",
-    **{f"boss.{r['key']}": BOSS_TARGET.format(key=r["key"]) for r in boss_service.ROWS if not r["optional"]},
+    "boss.ai": "connections.brain",
+    "boss.hub": BOSS_TARGET.format(key="hub"),
+    "boss.remote": BOSS_TARGET.format(key="remote"),
     "backup.unset": "system.backup.schedule",
     "hub.token_expiring": "mcp.hub_link.token",
     "drafts.pending": "workbench.drafts",
@@ -94,16 +101,26 @@ class Rule:
     severity: str | None = None
 
 
+def _boss_when(key: str) -> tuple[str, ...]:
+    """Điều kiện của việc `boss.<key>`: chưa đạt. Riêng `boss.ai` chỉ khi ĐÃ có model (`model.bound`) — chưa có model
+    thì `model.missing` (P0) đã nói rồi, không nhắc hai lần một chuyện (v0.1.55)."""
+    return ("model.bound", f"!boss.{key}.done") if key == "ai" else (f"!boss.{key}.done",)
+
+
 #: Thứ tự CÓ Ý NGHĨA: xếp hạng theo mức (P0 > P1 > P2 > P3), cùng mức theo thứ tự trong bảng này.
+#: v0.1.55 (Boss "gọn"): P1 `boss.<key>` CHỈ cho dòng bắt buộc (sinh từ ROWS — nay chỉ `boss.ai`). Gen-hub / Facebook /
+#: Telegram / Google / Claude không còn là P1; Gen-hub còn một gợi ý P3 (không chuông, tối đa 1 mục kết nối), Truy cập
+#: từ xa chỉ nhắc (P3) khi đã có người dùng khác Owner đang hoạt động.
 TODO_RULES: tuple[Rule, ...] = (
     Rule("health:bad", "P0", kind="health", severity="bad"),
     Rule("model.missing", "P0", when=("!model.bound",)),
-    *(Rule(f"boss.{r['key']}", "P1", when=(f"!boss.{r['key']}.done",)) for r in boss_service.ROWS
-      if not r["optional"]),
+    *(Rule(f"boss.{r['key']}", "P1", when=_boss_when(r["key"])) for r in boss_service.ROWS if not r["optional"]),
     Rule("health:warn", "P1", kind="health", severity="warn"),
     Rule("backup.unset", "P1", when=("!backup.scheduled",)),
     Rule("hub.token_expiring", "P1", kind="hub_token"),
     Rule("drafts.pending", "P2", when=("drafts.any",)),
+    Rule("boss.hub", "P3", when=("!boss.hub.done",)),
+    Rule("boss.remote", "P3", when=("staff.active", "!boss.remote.done")),
     *(Rule(f"followup.{n}", "P3", when=(f"!followup.{n}.done",)) for n in FOLLOWUP_TODO_NS),
 )
 
@@ -138,19 +155,15 @@ HEALTH_WHY = {
 #: Tiêu đề + lý do của việc tĩnh theo khoá. `drafts.pending` có số đếm nên dựng riêng (`drafts_title`).
 TODO_COPY: dict[str, tuple[str, str]] = {
     "model.missing": ("Gen chưa có model để trả lời",
-                      "Chưa gán model cho Gen và Sàng lọc thì em chưa trả lời hay lọc tin được — Sếp chọn model nhé."),
-    "boss.hub": ("Nối Gen-hub rồi bấm Kiểm tra",
-                 "Gen-hub là cầu để em đọc lịch, mail và Kho Ryan của Sếp."),
-    "boss.facebook": ("Nối Facebook rồi bấm Kiểm tra",
-                      "Có kết nối Facebook em mới đọc được thông báo, bình luận và tin nhắn giúp Sếp."),
-    "boss.agy": ("Đăng nhập Google / Antigravity rồi thử gọi",
-                 "Nguồn AI này dùng cho Gen của Sếp — thử gọi và đổi qua lại hai tài khoản để chắc là chạy được."),
-    "boss.claude": ("Đăng nhập Claude Code CLI rồi thử gọi",
-                    "Em cần Claude Code CLI đăng nhập xong mới dùng được nguồn AI này cho Sếp."),
-    "boss.telegram": ("Nối Telegram để nhận báo động và bản tin",
-                      "Có Telegram thì sự cố và bản tin sáng chiều tới thẳng điện thoại của Sếp."),
+                      "Chưa có nguồn AI nào dùng được thì em chưa trả lời hay lọc tin được — Sếp thêm nguồn AI nhé."),
+    "boss.ai": ("Kiểm tra nguồn AI chạy được",
+                "Em đã có nguồn AI nhưng chưa gọi thật được lần nào — Sếp bấm Kiểm tra để em chắc là trả lời và lọc "
+                "tin được."),
+    "boss.hub": ("Nối Gen-hub nếu Sếp muốn",
+                 "Gen-hub là cầu để em đọc lịch, mail và Kho dữ liệu của Sếp — không nối thì em vẫn làm việc bình "
+                 "thường."),
     "boss.remote": ("Thử mở Console từ điện thoại",
-                    "Sếp mở được Console từ máy khác thì mới xử lý việc khi đi ngoài."),
+                    "Đã có người trong đội dùng Console — mở được từ máy khác thì mọi người xử lý việc khi đi ngoài."),
     "backup.unset": ("Đặt lịch sao lưu",
                      "Chưa đặt lịch sao lưu thì hỏng ổ đĩa hay lỡ tay xoá là mất dữ liệu."),
     "hub.token_expiring": ("Token Gen-hub sắp hết hạn",
@@ -176,12 +189,9 @@ DEFAULT_DISMISS_WARNING = "Tắt việc này thì em không nhắc lại nữa �
 DISMISS_WARNINGS: dict[str, str] = {
     "_default": DEFAULT_DISMISS_WARNING,
     "health": "Bỏ qua thì sự cố này vẫn còn đó mà em không nhắc nữa.",
-    "boss.hub": "Không nối Gen-hub thì Gen không đọc được lịch, mail và Kho Ryan của Sếp.",
-    "boss.facebook": "Không nối Facebook thì Gen không đọc hay trả lời bình luận được.",
-    "boss.agy": "Không đăng nhập Google / Antigravity thì Gen không dùng được nguồn AI này.",
-    "boss.claude": "Không đăng nhập Claude Code CLI thì Gen không dùng được nguồn AI này.",
-    "boss.telegram": "Không nối Telegram thì báo động và bản tin không tới điện thoại của Sếp.",
-    "boss.remote": "Không thử truy cập từ xa thì Sếp có thể không mở được Console khi đi ngoài.",
+    "boss.ai": "Không kiểm tra thì em chưa biết nguồn AI có chạy được không — tới lúc cần trả lời mới biết lỗi.",
+    "boss.hub": "Không nối Gen-hub thì Gen không đọc được lịch, mail và Kho dữ liệu của Sếp.",
+    "boss.remote": "Không thử truy cập từ xa thì cả đội có thể không mở được Console khi đi ngoài.",
     "backup.unset": "Không đặt lịch sao lưu thì hỏng ổ đĩa hay lỡ tay xoá là mất dữ liệu.",
     "hub.token_expiring": "Bỏ qua thì khi token hết hạn Gen mất kết nối lịch, mail và Kho.",
     "followup.5": "Không kết nối Zalo / WhatsApp thì hệ thống chưa có tin nhắn nào để làm việc.",
@@ -357,6 +367,12 @@ async def _src_boss(db: AsyncSession, redis: Any, org: uuid.UUID) -> dict[str, A
     hub_res = (ov.get("results") or {}).get("hub") or {}
     missing = (hub_res.get("detail") or {}).get("write_missing")
     state["hub.kho_write_missing"] = isinstance(missing, list) and len(missing) > 0   # chỉ cờ, không giữ nội dung
+    # v0.1.55: đã có người dùng khác Owner đang hoạt động (đã mời nhân viên) ⇒ mới nhắc Truy cập từ xa. Chỉ cờ.
+    state["staff.active"] = bool((await db.execute(text("""
+        SELECT EXISTS (SELECT 1 FROM core.users u JOIN core.user_roles ur ON ur.user_id = u.id
+                       JOIN core.roles r ON r.id = ur.role_id
+                       WHERE u.org_id = :o AND u.is_active AND u.deleted_at IS NULL AND r.code <> 'owner')"""),
+                                           {"o": org})).scalar_one())
     return {"state": state, "required_done": int(ov["required_done"]), "required_total": int(ov["required_total"])}
 
 

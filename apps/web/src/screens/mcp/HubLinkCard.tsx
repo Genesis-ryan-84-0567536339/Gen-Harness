@@ -6,6 +6,7 @@ import { useMe } from '../../lib/queries';
 import { CardError, FriendlyErrorText, InlineError, Panel, SkeletonLines } from '../common';
 import { ConnectionStatusPill } from '../connections/ConnectionStatusPill';
 import { hubStatus } from '../connections/connectionsModel';
+import { hubTokenExpiry } from '../../guide/bossChecksModel';
 import {
   HUB_BREAKER_STRIP,
   HUB_STATUS_LABEL,
@@ -26,6 +27,9 @@ import {
 } from './mcpModel';
 import { useHubLink, useTestHubLink, useUpdateHubLink } from './queries';
 
+/** Hôm nay + 90 ngày (giờ VN) — hạn điền sẵn của token Gen-hub thủ công. */
+const defaultExpiryDay = () => isoToDay(hubTokenExpiry());
+
 const fmtTime = (iso: string | null) => (iso ? new Date(iso).toLocaleString('vi-VN') : '—');
 
 /**
@@ -36,6 +40,8 @@ const fmtTime = (iso: string | null) => (iso ? new Date(iso).toLocaleString('vi-
  * đổi địa chỉ/token thì tắt lại, phải kiểm tra lại. Lưu / Kiểm tra cần PIN (`hub.link`), ghi Nhật ký hành động.
  * v0.1.39 (F-31): gõ địa chỉ https công khai → công tắc "mạng công cộng" bật sẵn (Owner vẫn bỏ được); "Kiểm tra" khi
  * còn thay đổi chưa lưu = lưu rồi kiểm tra luôn (một lần PIN — phiên PIN của lần lưu phủ lần kiểm tra).
+ * v0.1.55: ô "Ngày hết hạn token" điền sẵn hôm nay + 90 ngày khi còn trống (token thủ công hết hạn sau 90 ngày) — Owner vẫn sửa
+ * được; ô chưa đụng tới thì chỉ gửi kèm khi Owner đang lưu một token mới (mở thẻ rồi bấm Kiểm tra không tự ghi hạn).
  * v0.1.49 (QD-16): khối "Quyền đọc thêm (tuỳ chọn)" — lịch, mail, việc, Drive (Gen chỉ đọc); sau Kiểm tra báo quyền còn
  * thiếu (không làm Kiểm tra đỏ); bộ ngắt F-83 đang mở ⇒ dải "Gen-hub tạm không trả lời".
  * v0.1.50 (F-81, QD-18): khối "Quyền ghi Kho (tuỳ chọn)" dưới "Quyền đọc thêm" — kho_create / kho_update; Gen chỉ ghi khi Sếp
@@ -78,14 +84,17 @@ function HubLinkBody({ link, isOwner }: { link: HubLink; isOwner: boolean }) {
   const test = useTestHubLink();
   const [endpoint, setEndpoint] = useState(link.endpoint ?? '');
   const [token, setToken] = useState('');
-  const [expiry, setExpiry] = useState(isoToDay(link.token_expires_at));
+  const savedDay = isoToDay(link.token_expires_at);
+  const [expiry, setExpiry] = useState(savedDay || defaultExpiryDay());
+  const [expiryTouched, setExpiryTouched] = useState(false);
   const [publicNet, setPublicNet] = useState(link.allow_public_network);
   // Owner đã tự bấm công tắc → không tự bật/tắt theo địa chỉ nữa.
   const [publicTouched, setPublicTouched] = useState(false);
   const [publicAuto, setPublicAuto] = useState(false);
   useEffect(() => {
     setEndpoint(link.endpoint ?? '');
-    setExpiry(isoToDay(link.token_expires_at));
+    setExpiry(isoToDay(link.token_expires_at) || defaultExpiryDay());
+    setExpiryTouched(false);
     setPublicNet(link.allow_public_network);
     setPublicAuto(false);
   }, [link.endpoint, link.token_expires_at, link.allow_public_network]);
@@ -105,14 +114,16 @@ function HubLinkBody({ link, isOwner }: { link: HubLink; isOwner: boolean }) {
 
   const firstTime = !link.configured;
   const valid = /^https?:\/\/\S+$/.test(endpoint.trim()) && (!firstTime || token.trim().length >= 8) && (!token.trim() || token.trim().length >= 8);
-  const dirty =
-    endpoint.trim() !== (link.endpoint ?? '') || token.trim() !== '' || expiry !== isoToDay(link.token_expires_at) || publicNet !== link.allow_public_network;
+  // Hạn điền sẵn (chưa có hạn đã lưu, Owner chưa sửa) chỉ đi kèm khi đang lưu một token mới; Owner tự sửa thì gửi nếu khác hạn đã lưu.
+  const expiryAuto = !expiryTouched && !savedDay;
+  const expiryChanged = expiryTouched ? expiry !== savedDay : expiryAuto && token.trim() !== '';
+  const dirty = endpoint.trim() !== (link.endpoint ?? '') || token.trim() !== '' || expiryChanged || publicNet !== link.allow_public_network;
 
   const buildBody = () => {
     const body: Parameters<typeof update.mutate>[0] = {};
     if (endpoint.trim() !== (link.endpoint ?? '')) body.endpoint = endpoint.trim();
     if (token.trim()) body.token = token.trim();
-    if (expiry !== isoToDay(link.token_expires_at)) body.token_expires_at = expiryToIso(expiry);
+    if (expiryChanged) body.token_expires_at = expiryToIso(expiry);
     if (publicNet !== link.allow_public_network) body.allow_public_network = publicNet;
     return body;
   };
@@ -181,7 +192,16 @@ function HubLinkBody({ link, isOwner }: { link: HubLink; isOwner: boolean }) {
             placeholder="Dán token agent gen-harness-… tạo trong Gen-hub"
             data-gen-target="mcp.hub_link.token"
           />
-          <TextField label="Ngày hết hạn token" type="date" value={expiry} onChange={(e) => setExpiry(e.target.value)} hint="Token thủ công của Gen-hub hết hạn sau 90 ngày — Gen nhắc Sếp trước 14 ngày." />
+          <TextField
+            label="Ngày hết hạn token"
+            type="date"
+            value={expiry}
+            onChange={(e) => {
+              setExpiryTouched(true);
+              setExpiry(e.target.value);
+            }}
+            hint={`Token thủ công của Gen-hub hết hạn sau 90 ngày — Gen nhắc Sếp trước 14 ngày.${expiryAuto ? ' Em đã điền sẵn hôm nay + 90 ngày, Sếp sửa được nếu token có hạn khác.' : ''}`}
+          />
           <div className="triage-row">
             <Switch checked={publicNet} label="Cho phép Gen-hub ở mạng công cộng" onChange={onPublic} />
             <span>Gen-hub ở Internet (mạng công cộng) — chỉ bật cho máy chủ này</span>

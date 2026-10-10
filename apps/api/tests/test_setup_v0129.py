@@ -2,7 +2,8 @@
 
 - Để sau bước 4 khi chưa có model → Hoàn tất được; `GET /setup/follow-up` có mục 4 chưa xong ("Chưa có model").
 - Chọn model sau Hoàn tất (`PUT /setup/steps/4` từ `/guide/4`) → mục 4 tự xong.
-- Để sau khi ĐÃ có nguồn gọi thử OK kèm model → vẫn tự gán model đó cho agent lõi (giữ tự gán của v0.1.28).
+- Để sau khi ĐÃ có nguồn gọi thử OK kèm model → vẫn chép model đó vào `agent.models` (v0.1.55: KHÔNG còn ghi
+  `agent.bindings` — hồ sơ tiêu chuẩn tự phủ; mục 4 "xong" = có nguồn bật kèm model).
 """
 
 from sqlalchemy import text
@@ -37,21 +38,23 @@ async def test_skip_step4_without_model_then_fix_after_finish(owner_api, db) -> 
     assert r.status_code == 200, r.text
     items = {i["n"]: i for i in (await api.get("/setup/follow-up")).json()}
     assert items[4]["done"] is True
-    assert (await _bound(db, org)).get("core.gen") == "qwen2.5-7b"
+    assert await _bound(db, org) == {}      # v0.1.55: bước 4 không còn ghi agent.bindings
     log = (await db.execute(text("SELECT count(*) FROM ops.action_log WHERE action = 'setup.step_skipped' "
                                  "AND target_id = '4'"))).scalar_one()
     assert log == 1
 
 
-async def test_skip_step4_with_tested_model_still_auto_assigns(owner_api, db) -> None:  # type: ignore[no-untyped-def]
+async def test_skip_step4_with_tested_model_still_adds_model_row(owner_api, db) -> None:  # type: ignore[no-untyped-def]
     api: Api = owner_api
     org = await org_id(db)
     await _provider(api, db, "Lỗi", ok=False, tested=["x"])                  # nguồn lỗi không bao giờ được chọn
     await _provider(api, db, "Tốt", ok=True, tested=["text-embedding-3-small", "llama-3.1-8b"])
     assert (await api.send("POST", "/setup/steps/4/skip")).status_code == 200
-    bound = await _bound(db, org)
-    assert bound.get("core.gen") == "llama-3.1-8b" and bound.get("core.refinery") == "llama-3.1-8b"
-    assert "core.indexing" not in bound
+    assert await _bound(db, org) == {}      # v0.1.55: không ghi agent.bindings
+    models = (await db.execute(text("""SELECT m.model_name FROM agent.models m
+                                       JOIN agent.providers p ON p.id = m.provider_id
+                                       WHERE p.org_id = :o ORDER BY m.model_name"""), {"o": org})).scalars().all()
+    assert models == ["llama-3.1-8b"]       # model đã gọi thử của nguồn tốt; nguồn lỗi không bao giờ được chọn
     items = {i["n"]: i for i in (await api.get("/setup/follow-up")).json()}
     assert items[4]["done"] is True
 

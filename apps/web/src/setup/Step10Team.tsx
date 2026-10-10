@@ -36,10 +36,15 @@ interface InvitedRow {
 
 const PIN_TEXT = 'Sau Hoàn tất, mời thêm người (tạo tài khoản) cần mã PIN';
 
-/** Bước 10 — Mời đội ngũ (tuỳ chọn, PLAN 4.6). Danh sách rỗng vẫn lưu được ("Owner mời sau ở Quyền hạn"). */
+/**
+ * Bước 10 — Mời đội ngũ (tuỳ chọn, PLAN 4.6). v0.1.55 (Thiết lập gọn): mở ra là THẺ GỢI Ý có nút "Để sau" (nút chính) và "Mời
+ * ngay" (hiện form mời); mở lại sau Hoàn tất (từ Hướng dẫn) thì hiện thẳng form. Danh sách rỗng vẫn lưu được ("Owner mời sau
+ * ở Quyền hạn").
+ */
 export function Step10Team({ meta, description, onBack, onSaved, formRef, onSkip, skipping, skipError }: StepProps) {
   // v0.1.45 (F-20): mở lại từ trang Hướng dẫn SAU Hoàn tất → mời người cần phiên PIN `user.manage` (hộp PIN tự mở).
   const finished = useQuery({ queryKey: qk.setupState, queryFn: ({ signal }) => api.setup.state(signal) }).data?.finished === true;
+  const [formOpen, setFormOpen] = useState(false);
   const [rows, setRows] = useState<Row[]>([]);
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -104,6 +109,38 @@ export function Step10Team({ meta, description, onBack, onSaved, formRef, onSkip
               </div>
             ))}
           </div>
+        </div>
+      </StepFrame>
+    );
+  }
+
+  if (!formOpen && !finished && onSkip) {
+    return (
+      <StepFrame
+        n={meta.n}
+        title={meta.title}
+        description={description}
+        formRef={formRef}
+        canContinue={false}
+        hideContinue
+        skipPrimary
+        onContinue={() => undefined}
+        onBack={onBack}
+        onSkip={onSkip}
+        skipping={skipping}
+        formError={skipError}
+      >
+        <div className="setup-section" data-testid="step10-suggestion">
+          <div className="setup-section__title">
+            <Icon name="ph ph-users-three" size={15} /> Gợi ý: mời đội ngũ cùng dùng
+          </div>
+          <p className="muted-note">
+            Sếp một mình dùng được ngay. Khi có quản lý, vận hành hay nhân viên cùng làm, Sếp mời họ — mỗi người chỉ thấy phần việc được giao. Không bắt buộc:
+            mời lúc nào cũng được ở Đội ngũ › Người dùng.
+          </p>
+          <Button variant="secondary" icon="ph ph-user-plus" className="btn-27" onClick={() => setFormOpen(true)}>
+            Mời ngay
+          </Button>
         </div>
       </StepFrame>
     );

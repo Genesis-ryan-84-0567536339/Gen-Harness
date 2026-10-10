@@ -17,26 +17,35 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 CHECK_KEYS = ("hub", "facebook", "agy_login", "agy_call", "agy_switch", "claude_login", "claude_call", "jev",
-              "telegram", "remote_access", "facebook_reply", "kho_write")
-RUNNABLE = ("hub", "facebook", "agy_call", "agy_switch", "claude_call", "jev", "telegram", "remote_access")
+              "telegram", "remote_access", "facebook_reply", "kho_write", "ai_source")
+RUNNABLE = ("hub", "facebook", "agy_call", "agy_switch", "claude_call", "jev", "telegram", "remote_access",
+            "ai_source")
 STATUSES = ("pass", "fail", "pending")
 KEEP_PER_KEY = 50
 MESSAGE_MAX = 300
-SWITCHES_NEEDED = 2
+SWITCHES_NEEDED = 2   # v0.1.55: không còn dùng cho dòng agy (giữ hằng số cho tương thích)
 
+#: v0.1.55 (G2, Boss "gọn"): CHỈ dòng 0 "nguồn AI" là bắt buộc — mọi kết nối khác (Gen-hub, Facebook, Google, Claude,
+#: Telegram, từ xa, Jev…) là tuỳ chọn. Số dòng giữ nguyên 1–9 như trước (nhãn Gen, e2e); dòng "ai" đứng đầu mang số 0.
 ROWS: tuple[dict[str, Any], ...] = (
-    {"row": 1, "key": "hub", "title": "Gen-hub", "optional": False, "checks": ["hub"]},
-    {"row": 2, "key": "facebook", "title": "Facebook", "optional": False, "checks": ["facebook"]},
-    {"row": 3, "key": "agy", "title": "Google / Antigravity", "optional": False,
-     "checks": ["agy_login", "agy_call", "agy_switch"]},
-    {"row": 4, "key": "claude", "title": "Claude Code CLI", "optional": False,
+    # Đạt khi có lượt gọi model thật thành công trong 30 ngày, HOẶC Claude/Google đã gọi thử đạt, HOẶC bấm Kiểm tra
+    # (gọi thử nguồn đầu chuỗi) — xem `ai_source_evidence` / `overview`.
+    {"row": 0, "key": "ai", "title": "Có ít nhất 1 nguồn AI chạy được", "optional": False, "checks": ["ai_source"]},
+    {"row": 1, "key": "hub", "title": "Gen-hub", "optional": True, "checks": ["hub"]},
+    {"row": 2, "key": "facebook", "title": "Facebook", "optional": True, "checks": ["facebook"]},
+    # v0.1.55: bỏ `agy_switch` khỏi dòng (bài kiểm của nhà phát triển, đổi qua lại hai tài khoản); việc đổi tài khoản
+    # vẫn dùng được ở Kết nối.
+    {"row": 3, "key": "agy", "title": "Google / Antigravity", "optional": True,
+     "checks": ["agy_login", "agy_call"]},
+    {"row": 4, "key": "claude", "title": "Claude Code CLI", "optional": True,
      "checks": ["claude_login", "claude_call"]},
     {"row": 5, "key": "jev", "title": "Jev", "optional": True, "checks": ["jev"]},
     # v0.1.44 (F-8c): kênh "Báo động & bản tin" — đạt khi lần Gửi thử gần nhất tới được Telegram của Sếp.
-    {"row": 6, "key": "telegram", "title": "Telegram (báo động & bản tin)", "optional": False,
+    {"row": 6, "key": "telegram", "title": "Telegram (báo động & bản tin)", "optional": True,
      "checks": ["telegram"]},
     # v0.1.46 (F-21): Console mở được từ máy khác (điện thoại) bằng địa chỉ từ xa — kiểm theo Origin của lần bấm.
-    {"row": 7, "key": "remote", "title": "Truy cập từ xa", "optional": False, "checks": ["remote_access"]},
+    # v0.1.55: chỉ nhắc khi đã có người dùng khác Owner đang hoạt động (Gen hướng dẫn: signals `staff.active`).
+    {"row": 7, "key": "remote", "title": "Truy cập từ xa", "optional": True, "checks": ["remote_access"]},
     # v0.1.47 (F-79): Facebook trả lời — đạt khi một lượt trả lời bình luận thật đã gửi xong (không bắt buộc; không có
     # nút "Kiểm tra" riêng vì mỗi lần gửi phải do chính Sếp xác nhận + nhập PIN).
     {"row": 8, "key": "facebook_reply", "title": "Facebook trả lời", "optional": True, "checks": ["facebook_reply"]},
@@ -235,18 +244,54 @@ def _passed(results: dict[str, dict[str, Any] | None], key: str) -> bool:
     return r is not None and r["status"] == "pass"
 
 
-async def overview(db: AsyncSession, org_id: uuid.UUID) -> dict[str, Any]:
-    """Quy tắc 'done': hub/facebook/jev = kiểm tương ứng đạt; agy = agy_call đạt VÀ ≥2 lần đổi tài khoản THẬT đạt
-    (`switch_passes` — đổi qua lại giữa hai tài khoản); claude = claude_login đạt VÀ claude_call đạt.
+#: Số ngày nhìn lại tìm lượt gọi model thành công để coi "đã có nguồn AI chạy được".
+AI_SOURCE_DAYS = 30
 
-    `switch_passes` trả kèm cho web (bộ đếm "Đã đổi qua lại x/2 lần"): `results.agy_switch.runs` đếm MỌI bản ghi, cả
-    lượt lỗi, nên không dùng được cho bộ đếm."""
+
+async def ai_source_evidence(db: AsyncSession, org_id: uuid.UUID) -> dict[str, Any] | None:
+    """Bằng chứng có nguồn AI chạy được từ lượt gọi THẬT: `agent.model_calls` status 'ok' trong 30 ngày (không tính
+    embedding / Jev — không sinh văn bản). Trả bản ghi giả dạng kết quả kiểm (status 'pass', `runs` 0) hoặc None."""
+    r = (await db.execute(text("""
+        SELECT max(c.at) AS at, count(*) AS n
+        FROM agent.model_calls c
+        LEFT JOIN agent.models m ON m.id = c.model_id
+        LEFT JOIN agent.providers p ON p.id = m.provider_id
+        WHERE c.org_id = :o AND c.status = 'ok' AND c.at > now() - make_interval(days => :d)
+          AND c.purpose <> 'embedding' AND COALESCE(p.kind, '') NOT IN ('system_one', 'embedding')"""),
+                            {"o": org_id, "d": AI_SOURCE_DAYS})).one()
+    if not r.n:
+        return None
+    return {"key": "ai_source", "status": "pass", "error_code": None, "message": None,
+            "detail": {"via": "model_calls", "calls": int(r.n)}, "checked_at": _iso(r.at), "runs": 0}
+
+
+def _derived_ai(results: dict[str, dict[str, Any] | None]) -> dict[str, Any] | None:
+    """Claude / Google đã gọi thử ĐẠT (lượt gọi thật tới CLI) ⇒ coi như có nguồn AI chạy được."""
+    for key in ("claude_call", "agy_call"):
+        r = results.get(key)
+        if r is not None and r["status"] == "pass":
+            return {"key": "ai_source", "status": "pass", "error_code": None, "message": None,
+                    "detail": {"via": key}, "checked_at": r["checked_at"], "runs": 0}
+    return None
+
+
+async def overview(db: AsyncSession, org_id: uuid.UUID) -> dict[str, Any]:
+    """Quy tắc 'done' (v0.1.55): `ai` = có bằng chứng nguồn AI chạy được (lượt gọi model thật trong 30 ngày, hoặc
+    Claude / Google gọi thử đạt, hoặc bấm Kiểm tra đạt — `ai_source`); agy = agy_call đạt (không còn đòi đổi qua lại
+    hai tài khoản); claude = claude_login đạt VÀ claude_call đạt; còn lại = kiểm tương ứng đạt. Chỉ dòng `ai` bắt buộc.
+
+    `switch_passes` vẫn trả kèm (tương thích web cũ / Kết nối): `results.agy_switch.runs` đếm MỌI bản ghi, cả lỗi."""
     results = await latest(db, org_id)
     switches = await switch_passes(db, org_id)
+    ai = results.get("ai_source")
+    if ai is None or ai["status"] != "pass":
+        evidence = await ai_source_evidence(db, org_id) or _derived_ai(results)
+        if evidence is not None:
+            results["ai_source"] = ai = evidence
     rows: list[dict[str, Any]] = []
     for row in ROWS:
         if row["key"] == "agy":
-            done = _passed(results, "agy_call") and switches >= SWITCHES_NEEDED
+            done = _passed(results, "agy_call")
         elif row["key"] == "claude":
             done = _passed(results, "claude_login") and _passed(results, "claude_call")
         else:

@@ -11,7 +11,8 @@ import { TELEGRAM_KEY } from '../../src/screens/connections/telegramModel';
 
 /**
  * v0.1.39 (F-74) — trang "Việc Sếp cần làm": ô kết quả ngay cạnh, kết quả đọc từ `GET /boss-checks`. v0.1.44 (F-8c):
- * thêm dòng 6 Telegram (bắt buộc) ⇒ 6 dòng, đếm x/5. v0.1.46 (F-21): dòng 7 Truy cập từ xa (bắt buộc) ⇒ 7 dòng, đếm x/6.
+ * dòng 6 Telegram. v0.1.46 (F-21): dòng 7 Truy cập từ xa. v0.1.55 (Thiết lập gọn): thêm dòng 0 "nguồn AI" — dòng BẮT BUỘC DUY NHẤT
+ * (đếm x/1, `required_total` do máy chủ trả); mọi dòng kết nối khác "Không bắt buộc"; dòng Google bỏ bài kiểm đổi qua lại hai tài khoản.
  */
 
 const json = (status: number, body?: unknown) =>
@@ -30,15 +31,16 @@ const me = (role: string) => ({
   permissions: { 'system.read': 'all', 'system.manage': role === 'owner' ? 'all' : 'none' },
 });
 
-const EMPTY = { hub: null, facebook: null, agy_login: null, agy_call: null, agy_switch: null, claude_login: null, claude_call: null, jev: null, telegram: null, remote_access: null };
+const EMPTY = { hub: null, facebook: null, agy_login: null, agy_call: null, agy_switch: null, claude_login: null, claude_call: null, jev: null, telegram: null, remote_access: null, ai_source: null };
 const ROWS: BossOverview['rows'] = [
-  { row: 1, key: 'hub', title: 'Nối Gen-hub', optional: false, checks: ['hub'], done: false },
-  { row: 2, key: 'facebook', title: 'Kết nối Facebook', optional: false, checks: ['facebook'], done: false },
-  { row: 3, key: 'agy', title: 'Google', optional: false, checks: ['agy_login', 'agy_call', 'agy_switch'], done: false },
-  { row: 4, key: 'claude', title: 'Claude Code', optional: false, checks: ['claude_login', 'claude_call'], done: false },
+  { row: 0, key: 'ai', title: 'Có ít nhất 1 nguồn AI chạy được', optional: false, checks: ['ai_source'], done: false },
+  { row: 1, key: 'hub', title: 'Nối Gen-hub', optional: true, checks: ['hub'], done: false },
+  { row: 2, key: 'facebook', title: 'Kết nối Facebook', optional: true, checks: ['facebook'], done: false },
+  { row: 3, key: 'agy', title: 'Google', optional: true, checks: ['agy_login', 'agy_call'], done: false },
+  { row: 4, key: 'claude', title: 'Claude Code', optional: true, checks: ['claude_login', 'claude_call'], done: false },
   { row: 5, key: 'jev', title: 'Jev', optional: true, checks: ['jev'], done: false },
-  { row: 6, key: 'telegram', title: 'Telegram (báo động & bản tin)', optional: false, checks: ['telegram'], done: false },
-  { row: 7, key: 'remote', title: 'Truy cập từ xa', optional: false, checks: ['remote_access'], done: false },
+  { row: 6, key: 'telegram', title: 'Telegram (báo động & bản tin)', optional: true, checks: ['telegram'], done: false },
+  { row: 7, key: 'remote', title: 'Truy cập từ xa', optional: true, checks: ['remote_access'], done: false },
 ];
 const SAVED: HubLink = {
   configured: true, enabled: false, status: 'off', server_id: 's1', endpoint: 'https://hub.genos.top/mcp', has_token: true,
@@ -87,7 +89,7 @@ function setup(w: Partial<World> = {}) {
       calls.push({ path, method, body });
       if (path === '/boss-checks' && method === 'GET') {
         world.onList?.(++lists);
-        return json(200, { rows: ROWS, results: world.results, required_done: 0, required_total: 6, switch_passes: world.switchPasses });
+        return json(200, { rows: ROWS, results: world.results, required_done: 0, required_total: 1, switch_passes: world.switchPasses });
       }
       const run = /^\/boss-checks\/([a-z_]+)\/run$/.exec(path);
       if (run && method === 'POST') {
@@ -133,15 +135,16 @@ afterEach(() => {
 });
 
 describe('Việc Sếp cần làm (/guide/viec-sep)', () => {
-  it('đúng 7 dòng: 6 bắt buộc + Jev "Không bắt buộc"; mỗi dòng có ô kết quả "Chưa kiểm"', async () => {
+  it('đúng 8 dòng: chỉ dòng "nguồn AI" bắt buộc, 7 dòng kết nối còn lại "Không bắt buộc"; mỗi dòng có ô kết quả "Chưa kiểm"', async () => {
     setup();
     renderPage();
-    expect(await screen.findByText('Đã đạt 0/6 dòng bắt buộc')).toBeInTheDocument();
-    const names = ['Nối Gen-hub', 'Kết nối Facebook', 'Google (Antigravity) — hai tài khoản', 'Claude Code CLI', 'Jev', 'Telegram (báo động & bản tin)', 'Truy cập từ xa'];
+    expect(await screen.findByText('Đã đạt 0/1 dòng bắt buộc')).toBeInTheDocument();
+    const names = ['Có ít nhất 1 nguồn AI chạy được', 'Nối Gen-hub', 'Kết nối Facebook', 'Google (Antigravity)', 'Claude Code CLI', 'Jev', 'Telegram (báo động & bản tin)', 'Truy cập từ xa'];
     expect(screen.getAllByRole('region').map((r) => r.getAttribute('aria-label'))).toEqual(names);
-    for (const n of names.filter((x) => x !== 'Jev')) expect(within(row(n)).queryByText('Không bắt buộc')).toBeNull();
-    expect(within(row('Jev')).getByText('Không bắt buộc')).toBeInTheDocument();
+    expect(within(row('Có ít nhất 1 nguồn AI chạy được')).queryByText('Không bắt buộc')).toBeNull();
+    for (const n of names.slice(1)) expect(within(row(n)).getByText('Không bắt buộc'), n).toBeInTheDocument();
     expect(within(row('Nối Gen-hub')).getByText('Chưa kiểm')).toBeInTheDocument();
+    expect(within(row('Có ít nhất 1 nguồn AI chạy được')).getByText('Chưa kiểm')).toBeInTheDocument();
     expect(screen.getByText('Kết quả được lưu lại — Claude tự đọc, Sếp không cần chụp màn hình.')).toBeInTheDocument();
     expect(document.title).toBe('Việc Sếp cần làm · Hướng dẫn thiết lập · Gen-Harness');
   });
@@ -215,39 +218,41 @@ describe('Việc Sếp cần làm (/guide/viec-sep)', () => {
     expect(within(fb).queryByRole('button', { name: 'Đọc ngay' })).toBeNull();
   });
 
-  it('Google: "Đổi sang an@…" gửi profile_id, kết quả nói an@…; Gọi thử báo tài khoản đang dùng', async () => {
+  it('Google: Gọi thử báo tài khoản đang dùng; KHÔNG còn bài kiểm đổi qua lại (đổi tài khoản làm ở Kết nối)', async () => {
     const { calls } = setup({
       agy: [BINH, AN],
-      run: (key, body) =>
-        key === 'agy_switch'
-          ? check('agy_switch', 'pass', { account: body.profile_id === 'p-an' ? 'an@genesis.vn' : 'binh@genesis.vn' })
-          : check(key as BossCheckKey, 'pass', { account: 'binh@genesis.vn' }),
+      switchPasses: 1,
+      run: (key) => check(key as BossCheckKey, 'pass', { account: 'binh@genesis.vn' }),
     });
     renderPage();
     const user = userEvent.setup();
-    const agy = await screen.findByRole('region', { name: 'Google (Antigravity) — hai tài khoản' });
+    const agy = await screen.findByRole('region', { name: 'Google (Antigravity)' });
     await user.click(await within(agy).findByRole('button', { name: 'Gọi thử' }));
     expect(await within(agy).findByText('Đạt · đang dùng binh@genesis.vn')).toBeInTheDocument();
-    await user.click(within(agy).getByRole('button', { name: 'Đổi sang an@genesis.vn' }));
-    expect(await within(agy).findByText('Đã đổi · gọi thử chạy bằng an@genesis.vn — khớp')).toBeInTheDocument();
-    expect(calls.find((c) => c.path === '/boss-checks/agy_switch/run')!.body).toEqual({ profile_id: 'p-an' });
-    expect(within(agy).getByText(/Đã đổi qua lại 1\/2 lần/)).toBeInTheDocument();
-    for (const label of ['Đăng nhập', 'Gọi thử', 'Đổi tài khoản']) expect(within(agy).getAllByText(label).length).toBeGreaterThan(0);
+    for (const label of ['Đăng nhập', 'Gọi thử']) expect(within(agy).getAllByText(label).length).toBeGreaterThan(0);
+    expect(within(agy).queryByText('Đổi tài khoản')).toBeNull();
+    expect(within(agy).queryByRole('button', { name: /^Đổi sang / })).toBeNull();
+    expect(within(agy).queryByText(/Đã đổi qua lại/)).toBeNull();
+    expect(within(agy).getByText(/Đang dùng: binh@genesis.vn/)).toBeInTheDocument();
+    expect(within(agy).getByRole('link', { name: /Thêm \/ đổi tài khoản ở Kết nối/ })).toHaveAttribute('href', '/connections#brain');
+    expect(calls.some((c) => c.path === '/boss-checks/agy_switch/run')).toBe(false);
     // Có 2 hồ sơ: không còn mời đăng nhập lần đầu.
     expect(within(agy).queryByRole('button', { name: 'Đăng nhập Google' })).toBeNull();
   });
 
-  it('Google chưa có hồ sơ → "Đăng nhập Google"; một hồ sơ → "Thêm tài khoản thứ hai"', async () => {
+  it('Google chưa có hồ sơ → "Đăng nhập Google"; đã có hồ sơ → "Gọi thử" (không còn mời thêm tài khoản thứ hai)', async () => {
     setup();
     const { unmount } = renderPage();
-    const agy = await screen.findByRole('region', { name: 'Google (Antigravity) — hai tài khoản' });
+    const agy = await screen.findByRole('region', { name: 'Google (Antigravity)' });
     expect(await within(agy).findByRole('button', { name: 'Đăng nhập Google' })).toBeInTheDocument();
     unmount();
     queryClient.clear();
     setup({ agy: [BINH] });
     renderPage();
-    const agy2 = await screen.findByRole('region', { name: 'Google (Antigravity) — hai tài khoản' });
-    expect(await within(agy2).findByRole('button', { name: 'Thêm tài khoản thứ hai' })).toBeInTheDocument();
+    const agy2 = await screen.findByRole('region', { name: 'Google (Antigravity)' });
+    expect(await within(agy2).findByRole('button', { name: 'Gọi thử' })).toBeInTheDocument();
+    expect(within(agy2).queryByRole('button', { name: 'Thêm tài khoản thứ hai' })).toBeNull();
+    expect(within(agy2).queryByRole('button', { name: 'Đăng nhập Google' })).toBeNull();
   });
 
   it('Claude Code: cảnh báo rủi ro + "Đăng nhập Claude Code" + Gọi thử', async () => {
@@ -291,23 +296,20 @@ describe('Việc Sếp cần làm (/guide/viec-sep)', () => {
       results: {
         ...EMPTY,
         agy_call: check('agy_call', 'pass', { detail: { account_masked: 'b***@genesis.vn' } }),
-        agy_switch: check('agy_switch', 'pass', { runs: 2, detail: { account_masked: 'b***@genesis.vn', account_match: true } }),
         jev: check('jev', 'fail', { error_code: 'PROVIDER_ERROR', message: 'upstream 500' }),
       },
       switchPasses: 2,
     });
     renderPage();
-    const agy = await screen.findByRole('region', { name: 'Google (Antigravity) — hai tài khoản' });
+    const agy = await screen.findByRole('region', { name: 'Google (Antigravity)' });
     expect(await within(agy).findByText('Đạt · đang dùng b***@genesis.vn')).toBeInTheDocument();
-    expect(within(agy).getByText('Đã đổi · gọi thử chạy bằng b***@genesis.vn — khớp')).toBeInTheDocument();
-    expect(within(agy).getByText(/Đã đổi qua lại 2\/2 lần/)).toBeInTheDocument();
     const jev = screen.getByRole('region', { name: 'Jev' });
     expect(within(jev).getByText('Lỗi — thẻ Jev sẽ ẩn, không cần làm thêm')).toBeInTheDocument();
     expect(within(jev).getByText('Mã lỗi PROVIDER_ERROR')).toBeInTheDocument();
     expect(document.body.textContent).not.toContain('[object Object]');
   });
 
-  it('bộ đếm đổi qua lại dùng switch_passes (chỉ lượt ĐẠT) — 2 bản ghi mà 1 lỗi vẫn là 1/2', async () => {
+  it('kết quả agy_switch / switch_passes của máy chủ (bài kiểm cũ) không còn hiện ở dòng Google', async () => {
     setup({
       agy: [BINH, AN],
       switchPasses: 1,
@@ -317,18 +319,11 @@ describe('Việc Sếp cần làm (/guide/viec-sep)', () => {
       },
     });
     renderPage();
-    const agy = await screen.findByRole('region', { name: 'Google (Antigravity) — hai tài khoản' });
-    expect(await within(agy).findByText(/Đã đổi qua lại 1\/2 lần/)).toBeInTheDocument();
-  });
-
-  it('đổi tài khoản không đọc được email để so → vẫn Đạt, nói rõ không so được', async () => {
-    setup({
-      agy: [BINH, AN],
-      results: { ...EMPTY, agy_switch: check('agy_switch', 'pass', { detail: { account_masked: null, account_match: null } }) },
-    });
-    renderPage();
-    const agy = await screen.findByRole('region', { name: 'Google (Antigravity) — hai tài khoản' });
-    expect(await within(agy).findByText('Đã đổi · gọi thử chạy được (không đọc được email để so)')).toBeInTheDocument();
+    const agy = await screen.findByRole('region', { name: 'Google (Antigravity)' });
+    expect(await within(agy).findByRole('button', { name: 'Gọi thử' })).toBeInTheDocument();
+    expect(within(agy).queryByText(/Đã đổi qua lại/)).toBeNull();
+    expect(within(agy).queryByText('Đổi tài khoản')).toBeNull();
+    expect(within(agy).queryByText(/Gọi thử quá nhiều lần|PROBE_RATE_LIMITED/)).toBeNull();
   });
 
   it('Facebook: đang chạy → nút tắt; đã Đạt → "Đọc lại"', async () => {
@@ -368,16 +363,16 @@ describe('Việc Sếp cần làm (/guide/viec-sep)', () => {
     expect(within(fb).queryByRole('button', { name: /Đọc/ })).toBeNull();
   });
 
-  it('Google gọi thử AUTH_EXPIRED / đổi AGY_ACCOUNT_MISMATCH → nút "Đăng nhập lại" + câu chỉ đăng nhập lại', async () => {
+  it('Google gọi thử AUTH_EXPIRED / AGY_ACCOUNT_MISMATCH → nút "Đăng nhập lại" + câu chỉ đăng nhập lại', async () => {
     setup({
       agy: [BINH, AN],
       results: {
         ...EMPTY,
-        agy_switch: check('agy_switch', 'fail', { error_code: 'AGY_ACCOUNT_MISMATCH', message: 'x' }),
+        agy_call: check('agy_call', 'fail', { error_code: 'AGY_ACCOUNT_MISMATCH', message: 'x' }),
       },
     });
     const { unmount } = renderPage();
-    const agy = await screen.findByRole('region', { name: 'Google (Antigravity) — hai tài khoản' });
+    const agy = await screen.findByRole('region', { name: 'Google (Antigravity)' });
     expect(await within(agy).findByRole('button', { name: 'Đăng nhập lại' })).toBeInTheDocument();
     expect(within(agy).getByText(/Lỗi · Gọi thử vẫn chạy bằng tài khoản khác.*Đăng nhập lại/)).toBeInTheDocument();
     // v0.1.42 (F-61): tài khoản CLI chỉ ở Kết nối › Bộ não AI.
@@ -386,7 +381,7 @@ describe('Việc Sếp cần làm (/guide/viec-sep)', () => {
     queryClient.clear();
     setup({ agy: [BINH], results: { ...EMPTY, agy_call: check('agy_call', 'fail', { error_code: 'AUTH_EXPIRED' }) } });
     renderPage();
-    const agy2 = await screen.findByRole('region', { name: 'Google (Antigravity) — hai tài khoản' });
+    const agy2 = await screen.findByRole('region', { name: 'Google (Antigravity)' });
     expect(await within(agy2).findByRole('button', { name: 'Đăng nhập lại' })).toBeInTheDocument();
   });
 
@@ -445,7 +440,7 @@ describe('Việc Sếp cần làm (/guide/viec-sep)', () => {
   it('Google đã có hồ sơ mà chưa có bản đăng nhập → "Đã có phiên (đăng nhập trước đây)", không "Chưa kiểm"', async () => {
     setup({ agy: [BINH] });
     renderPage();
-    const agy = await screen.findByRole('region', { name: 'Google (Antigravity) — hai tài khoản' });
+    const agy = await screen.findByRole('region', { name: 'Google (Antigravity)' });
     expect(await within(agy).findByText('Đã có phiên (đăng nhập trước đây)')).toBeInTheDocument();
   });
 

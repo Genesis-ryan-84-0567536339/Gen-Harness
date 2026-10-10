@@ -196,7 +196,7 @@ export function lessonHeading(lesson: Pick<CoachLesson, 'k' | 'total'>): string 
   return `Bài học hôm nay · ${lesson.k}/${lesson.total}`;
 }
 
-/** "Đã đạt 2/6 việc bắt buộc". */
+/** "Đã đạt x/N việc bắt buộc" — N lấy từ máy chủ (`progress.required_total`), không ghi cứng. */
 export function requiredText(done: number, total: number): string {
   return `Đã đạt ${done}/${total} việc bắt buộc`;
 }

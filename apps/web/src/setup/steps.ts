@@ -25,7 +25,7 @@ export const SETUP_STEPS: StepMeta[] = [
   },
   {
     n: 3, key: 'org', title: 'Tổ chức & xưng hô', required: true, built: true,
-    content: 'Tên tổ chức, múi giờ, tiền tệ và cách xưng hô giữa Sếp với agent — xem trước một câu trả lời mẫu cập nhật trực tiếp.',
+    content: 'Tên tổ chức (ô duy nhất phải gõ); múi giờ, tiền tệ và hai ô xưng hô điền sẵn — xem trước một câu trả lời mẫu cập nhật trực tiếp.',
     doneWhen: 'Lưu',
   },
   {
@@ -45,28 +45,28 @@ export const SETUP_STEPS: StepMeta[] = [
   },
   {
     n: 7, key: 'refinery', title: 'Sàng lọc dữ liệu', required: false, built: true,
-    content: 'Chu kỳ thời gian, ngưỡng số lượng và ngưỡng tin cậy vào kho sạch. Chọn bộ quy tắc khởi đầu theo ngành, xem trước điều kiện và đầu ra. Bảng trọng số chấm điểm tổng 100%.',
+    content: 'Chỉ hỏi một câu: Sếp làm ngành nào (chọn bộ quy tắc khởi đầu). Lịch sàng lọc 900 giây / 500 tin / lô 250 / tin cậy ≥ 0,6 đã điền sẵn; chu kỳ, ngưỡng, từng quy tắc và trọng số chấm điểm (tổng 100%) chỉnh ở mục Nâng cao.',
     doneWhen: 'Lưu · hoặc Để sau (hiện ở "Việc thiết lập tiếp" trên Hôm nay)',
   },
   {
     n: 8, key: 'agent', title: 'Agent đầu tiên', required: false, built: true,
-    content: 'Chọn mẫu (Trợ lý thương mại, Khách hàng lớn, Hậu cần, Chăm sóc khách hàng, Tuyển dụng, Thư ký cá nhân) hoặc tạo trống. Sửa tên, xưng hô, giọng, được nói khi, cấm. Gán kênh/nhóm và thử trò chuyện ba lượt.',
-    doneWhen: 'Agent được lưu, có ít nhất một phạm vi kênh · hoặc Để sau (hiện ở "Việc thiết lập tiếp" trên Hôm nay)',
+    content: 'Chọn mẫu (Trợ lý thương mại, Khách hàng lớn, Hậu cần, Chăm sóc khách hàng, Tuyển dụng, Thư ký cá nhân) hoặc tạo trống — chọn mẫu là xong, tên và vai trò điền sẵn theo mẫu. Gán kênh/nhóm và chỉnh giọng nói làm sau ở Danh tính Agent.',
+    doneWhen: 'Agent được lưu · hoặc Để sau (hiện ở "Việc thiết lập tiếp" trên Hôm nay)',
   },
   {
     n: 9, key: 'autonomy', title: 'Tự trị & ranh giới', required: false, built: true,
-    content: 'Chọn mức tự trị (Gợi ý hoặc Soạn sẵn chờ duyệt), mặc định Soạn sẵn chờ duyệt. Ngưỡng tiền phải duyệt (mặc định 50.000.000 ₫). Danh sách ranh giới có trách nhiệm; mục khoá hiện công tắc mờ kèm lý do không tắt được.',
+    content: 'Mức tự trị (Gợi ý hoặc Soạn sẵn chờ duyệt), mặc định Soạn sẵn chờ duyệt; ngưỡng tiền phải duyệt mặc định 50.000.000 ₫. Danh sách ranh giới khoá cứng kèm một dòng ghi chú "bấm Tiếp tục là đã đọc" — không còn ô tích.',
     doneWhen: 'Lưu · hoặc Để sau (hiện ở "Việc thiết lập tiếp" trên Hôm nay)',
   },
   {
     n: 10, key: 'team', title: 'Mời đội ngũ', required: false, built: true,
-    content: 'Thêm email và vai trò (Quản lý, Vận hành, Nhân viên phụ trách, Kiểm soát), xem trước ma trận quyền của vai trò đã chọn. Sinh liên kết mời.',
+    content: 'Thẻ gợi ý có nút "Để sau": Sếp một mình dùng được ngay. Muốn mời luôn thì bấm "Mời ngay", thêm email và vai trò (Quản lý, Vận hành, Nhân viên phụ trách, Kiểm soát) — mật khẩu tạm hiện ngay để Sếp tự gửi.',
     doneWhen: 'Để sau được — hiện ở "Việc thiết lập tiếp" trên Hôm nay',
   },
   {
     n: 11, key: 'backup', title: 'Sao lưu', required: false, built: true,
-    content: 'Lịch sao lưu (mặc định hằng ngày 02:00), nơi lưu trên máy chủ (bản sao ra ổ USB/NAS chọn ở Cài đặt › Sao lưu & cập nhật), giữ bao lâu. Nút Sao lưu thử ngay với tiến độ %.',
-    doneWhen: 'Để sau được (có cảnh báo) — hiện ở "Việc thiết lập tiếp" trên Hôm nay',
+    content: 'Sao lưu tự bật hằng ngày lúc 02:00, giữ 7 bản gần nhất; nơi lưu trên máy chủ (bản sao ra ổ USB/NAS chọn ở Cài đặt › Sao lưu & cập nhật). Đổi giờ hoặc tần suất ở mục "Đổi lịch" nếu muốn.',
+    doneWhen: 'Đi qua hoặc Để sau đều bật lịch mặc định',
   },
   {
     n: 12, key: 'finish', title: 'Hoàn tất', required: true, built: true,
@@ -83,11 +83,11 @@ export const STEP_DESCRIPTIONS: Record<number, string> = {
   4: 'Hệ thống cần ít nhất một nguồn AI để đọc và hiểu tin nhắn: đăng nhập tài khoản Google (Antigravity CLI) hoặc dán khoá API. Bấm Kiểm tra, chọn model, rồi xếp thứ tự dùng khi một nguồn hết hạn mức. Để sau được, nhưng khi chưa có model thì Gen và sàng lọc tin chưa chạy.',
   5: 'Kết nối ít nhất một kênh để hệ thống bắt đầu gom tin. Zalo và WhatsApp đăng nhập bằng mã QR trên điện thoại của Sếp.',
   6: 'Mọi nhóm vừa đồng bộ đều ở chế độ Không nghe. Sếp bật từng nhóm muốn agent lắng nghe và chọn ai được xem dữ liệu của nhóm.',
-  7: 'Bao lâu hệ thống lọc tin một lần, những loại tin cần bắt, và cách chấm điểm. Bấm Để sau thì dùng sẵn bộ quy tắc khởi đầu — chỉnh lại được ở Quy tắc sàng lọc.',
-  8: 'Tạo trợ lý AI đầu tiên: chọn một mẫu hoặc tự đặt tên, vai trò và giọng nói, rồi nhắn thử một câu để nghe trợ lý trả lời.',
-  9: 'Chọn mức trợ lý được tự làm. Những giới hạn bên dưới luôn bật để bảo vệ Sếp và nhân viên — không ai tắt được.',
-  10: 'Tuỳ chọn — để sau thì mời ở Đội ngũ › Người dùng. Hệ thống chưa tự gửi email mời: mật khẩu tạm hiện ngay ở đây, Sếp tự gửi qua Zalo hoặc email cá nhân.',
-  11: 'Chọn giờ hệ thống tự sao lưu mỗi ngày. Bấm Để sau thì hệ thống vẫn tự sao lưu hằng ngày lúc 02:00, giữ 7 bản gần nhất.',
+  7: 'Em dùng sẵn lịch lọc tin mặc định (mỗi 15 phút hoặc đủ 500 tin) — Sếp chỉ cần cho em biết ngành để chọn bộ quy tắc hợp. Chỉnh chi tiết ở mục Nâng cao hoặc ở Quy tắc sàng lọc sau.',
+  8: 'Tạo trợ lý AI đầu tiên: chọn một mẫu là xong — tên và vai trò điền sẵn theo mẫu, sửa lại ở Danh tính Agent bất cứ lúc nào.',
+  9: 'Mức trợ lý được tự làm đã chọn sẵn: Soạn sẵn chờ duyệt. Những giới hạn bên dưới luôn bật để bảo vệ Sếp và nhân viên — không ai tắt được.',
+  10: 'Gợi ý, không bắt buộc — Sếp một mình dùng được ngay. Có người cùng làm thì mời lúc nào cũng được ở Đội ngũ › Người dùng; hệ thống chưa tự gửi email mời, mật khẩu tạm hiện ngay để Sếp tự gửi.',
+  11: 'Sao lưu đã tự bật: hằng ngày lúc 02:00, giữ 7 bản gần nhất. Đi tiếp hay bấm Để sau thì lịch này vẫn chạy — đổi giờ ở mục "Đổi lịch" nếu muốn.',
   12: 'Kiểm tra lại những gì đã bật. Việc còn thiếu có liên kết để làm tiếp — làm ngay hoặc sau ở Hôm nay.',
 };
 

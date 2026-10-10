@@ -842,6 +842,8 @@ test.describe('giai đoạn 4.5/4.6: Điều khiển hệ thống', () => {
 
     await expect(page.getByRole('heading', { name: 'Mời đội ngũ' })).toBeVisible();
     await expect(page.getByText('Bước 10/12')).toBeVisible();
+    // v0.1.55: bước 10 mở ra là thẻ gợi ý (nút chính "Để sau") — "Mời ngay" mới hiện form mời.
+    await page.getByRole('button', { name: 'Mời ngay' }).click();
     await page.getByRole('button', { name: 'Thêm người' }).click();
     await page.getByLabel('Tên hiển thị').fill('Chị Hồng Quản');
     await page.getByLabel('Email').fill('hong@genesis.vn');
@@ -858,6 +860,7 @@ test.describe('giai đoạn 4.5/4.6: Điều khiển hệ thống', () => {
 
     await expect(page.getByRole('heading', { name: 'Hoàn tất' })).toBeVisible();
     await page.getByRole('button', { name: /Vào Console/ }).click();
-    await expect(page).toHaveURL(/\/overview$/);
+    // v0.1.55: Owner về Mặt tiền (G5) — Opus siết thành /owner khi tích hợp
+    await expect(page).toHaveURL(/\/(owner|overview)$/);
   });
 });

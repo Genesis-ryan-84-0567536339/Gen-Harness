@@ -448,16 +448,50 @@ def _state() -> dict[str, Any]:
     }
 
 
-async def _payload(request: Request, *, force: bool = False) -> dict[str, Any]:
+#: v0.1.55 (G2): vì sao KHÔNG hiện nút "Cập nhật ngay" (null ⇔ hiện được nút). Thứ tự ưu tiên từ trên xuống; mã cố
+#: định — web ghép câu lý do + việc cần làm (updateModel.ts `blockReasonCopy`), KHÔNG lấy chữ từ run/.
+BLOCK_REASONS = ("not_owner", "in_progress", "genh_unlinked", "watcher_stalled", "up_to_date")
+
+
+def request_block_reason(user: service.CurrentUser, s: dict[str, Any], nightly: dict[str, Any] | None, *,
+                         update_available: bool) -> str | None:
+    """`request_block_reason` của `GET /system/update`:
+    1. `not_owner` — người gọi không phải Owner (chỉ Owner bấm cập nhật được);
+    2. `in_progress` — đang `requested`/`running`;
+    3. `genh_unlinked` — không có trình nhận yêu cầu hoặc hộp thư `request/` không ghi được (đúng điều kiện
+       `can_request = false`);
+    4. `watcher_stalled` — trình nhận yêu cầu LỖI: `stalled_reason = watcher_failed`, hoặc genh báo `watcher.state =
+       failed` / `request_watcher = failed` (`fallback` — timer dự phòng vẫn nhận yêu cầu — KHÔNG chặn nút);
+    5. `up_to_date` — không có bản mới hơn.
+    None ⇒ nút "Cập nhật ngay" hiện được."""
+    if user.role_code != rbac.OWNER:
+        return "not_owner"
+    if s["state"] in ("requested", "running"):
+        return "in_progress"
+    if not s["can_request"]:
+        return "genh_unlinked"
+    watcher_failed = s.get("stalled_reason") == "watcher_failed" or (
+        nightly is not None and (nightly["request_watcher"] == "failed" or nightly["watcher"]["state"] == "failed"))
+    if watcher_failed:
+        return "watcher_stalled"
+    if not update_available:
+        return "up_to_date"
+    return None
+
+
+async def _payload(request: Request, user: service.CurrentUser, *, force: bool = False) -> dict[str, Any]:
     s = _state()
     latest = await _latest(request, force=force) if s["linked"] else None
     tag = latest.get("tag") if latest else None
     nightly = read_nightly(_dir()) if s["linked"] else None
+    available = is_newer(tag, s["current"])
     return {**s, "latest": tag, "release_url": latest.get("url") if latest else None,
             "release_notes": latest.get("notes") if latest else None,
             "published_at": latest.get("published_at") if latest else None,
             "checked_at": latest.get("checked_at") if latest else None,
-            "update_available": is_newer(tag, s["current"]),
+            "update_available": available,
+            # v0.1.55 (G2): vì sao không hiện nút "Cập nhật ngay" (null ⇔ hiện được) — Console nói rõ lý do.
+            "request_block_reason": request_block_reason(user, s, nightly, update_available=available),
             # v0.1.53 (F-96): bản chính thức mới hơn bản đang chạy mà lịch đêm có thể chọn, kèm lúc đủ 24 giờ.
             "nightly_candidates": _candidates(latest, s["current"]),
             # v0.1.53 (F-99): lịch tự cập nhật đêm (genh ghi run/nightly-status.json, đã lọc); chưa có tệp ⇒ null.
@@ -479,7 +513,7 @@ def _candidates(latest: dict[str, Any] | None, current: str | None) -> list[dict
 @router.get("/system/update")
 async def get_update(request: Request, user: service.CurrentUser = Depends(MANAGE)) -> dict[str, Any]:
     """Phiên bản đang chạy, bản mới nhất, và tiến trình cập nhật (idle/requested/running/done/failed/stalled)."""
-    return await _payload(request)
+    return await _payload(request, user)
 
 
 @router.post("/system/update/check")
@@ -487,7 +521,7 @@ async def check_update(request: Request, user: service.CurrentUser = Depends(MAN
     """v0.1.30: nút "Kiểm tra bản mới" — hỏi GitHub ngay, bỏ qua bộ đệm. Giới hạn 1 lần / 30 giây (bấm dồn thì trả
     kết quả đang đệm, `throttled: true`) để không vượt hạn mức API GitHub không xác thực."""
     fresh = bool(await request.app.state.redis.set(CHECK_LOCK_KEY, "1", nx=True, ex=CHECK_MIN_INTERVAL_SECONDS))
-    return {**await _payload(request, force=fresh), "throttled": not fresh}
+    return {**await _payload(request, user, force=fresh), "throttled": not fresh}
 
 
 @router.post("/system/update", status_code=202)
@@ -510,4 +544,4 @@ async def request_update(request: Request, db: AsyncSession = DB,
                            action="system.update_requested", target_type="system", target_id="update",
                            target_label=s["current"], detail={"request_id": req["id"]}, ip=user.ip)
     await db.commit()
-    return await _payload(request)
+    return await _payload(request, user)

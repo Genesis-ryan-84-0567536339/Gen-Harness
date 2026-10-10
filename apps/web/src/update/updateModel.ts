@@ -1,11 +1,75 @@
-import type { SystemUpdate } from '@gen-harness/contracts';
+import type { SystemUpdate, SystemUpdateBlockReason } from '@gen-harness/contracts';
 
 export const UPDATE_COMMAND = '~/.gen-harness/bin/genh update';
 export const UPDATE_KEY = ['system', 'update'] as const;
 /** v0.1.53 (F-99): lệnh cố định bật linger (tiến trình nền chạy cả khi không ai đăng nhập) — chạy một lần, không dấu chấm sau lệnh. */
 export const LINGER_COMMAND = 'sudo loginctl enable-linger $USER';
+/** v0.1.55: lệnh bật lại người gác cập nhật (trình nhận yêu cầu của nút Cập nhật ngay + lịch đêm) trên máy chủ. */
+export const WATCHER_COMMAND = 'genh auto-update enable';
 /** Câu dẫn trên lệnh khi lệnh KHÔNG phải để cập nhật tay (stalled: linger / trình nhận yêu cầu lỗi). */
-const COMMAND_LABEL_SERVER = 'Lệnh chạy một lần trên máy chủ:';
+export const COMMAND_LABEL_SERVER = 'Lệnh chạy một lần trên máy chủ:';
+
+/**
+ * v0.1.55 (G2): lý do + việc cần làm khi KHÔNG hiện nút "Cập nhật ngay" (api `request_block_reason`).
+ * `title` = câu ngắn nêu lý do; `body` = giải thích; `action` = việc Sếp cần làm; `command` (nếu có) = lệnh chạy trên máy chủ.
+ * Luật cứng: KHÔNG BAO GIỜ hiện lệnh mà không có câu lý do — mọi ca có `command` đều có `title` + `body` khác rỗng.
+ */
+export interface BlockReasonCopy {
+  title: string;
+  body: string;
+  action: string;
+  command?: string;
+}
+
+/** Hàm thuần: mã `request_block_reason` → câu hiển thị. Chuỗi cố định (không lấy chữ nào từ máy chủ). */
+export function blockReasonCopy(reason: SystemUpdateBlockReason): BlockReasonCopy {
+  switch (reason) {
+    case 'not_owner':
+      return {
+        title: 'Chỉ Owner cập nhật được — nhờ Owner bấm',
+        body: 'Cập nhật khởi động lại cả hệ thống nên chỉ tài khoản Owner được bấm.',
+        action: 'Nhờ Owner mở mục này và bấm Cập nhật ngay.',
+      };
+    case 'genh_unlinked':
+      return {
+        title: 'Máy chủ chưa bật cập nhật bằng nút bấm',
+        body: 'Máy chủ chưa có trình nhận yêu cầu cập nhật từ Console (hoặc thư mục nhận yêu cầu không ghi được), nên bấm nút cũng không ai làm.',
+        action: 'Chạy lệnh dưới đây một lần trên máy chủ — lần sau chỉ cần bấm nút ở đây.',
+        command: UPDATE_COMMAND,
+      };
+    case 'watcher_stalled':
+      return {
+        title: 'Người gác cập nhật đang lỗi',
+        body: 'Người gác trên máy chủ (nhận yêu cầu từ nút Cập nhật ngay và chạy lịch đêm) đang báo lỗi, nên yêu cầu bấm nút sẽ nằm đó không ai làm.',
+        action: 'Chạy lệnh dưới đây trên máy chủ để bật lại người gác, rồi bấm Cập nhật ngay.',
+        command: WATCHER_COMMAND,
+      };
+    case 'in_progress':
+      return {
+        title: 'Đang cập nhật…',
+        body: 'Hệ thống đang nhận hoặc chạy một lần cập nhật nên chưa bấm thêm được.',
+        action: 'Chờ khoảng 2–5 phút — trang tự tải lại khi xong.',
+      };
+    case 'up_to_date':
+      return {
+        title: 'Đang là bản mới nhất',
+        body: 'Chưa có bản nào mới hơn bản đang chạy.',
+        action: 'Không cần làm gì.',
+      };
+  }
+}
+
+/**
+ * Lý do cần HIỆN trên thẻ khi có bản mới mà nút bị ẩn: Owner không bấm được / máy chủ chưa nhận yêu cầu / người gác lỗi.
+ * `in_progress` (thẻ đang hiện tiến trình) và `up_to_date` (đã nói "Đang dùng bản mới nhất") đã có câu riêng nên không lặp.
+ * Bản không cài bằng genh (không có hộp thư chung) không có lệnh genh để chạy ⇒ không hiện lý do `genh_unlinked`.
+ */
+export function blockOf(d: Pick<SystemUpdate, 'request_block_reason' | 'linked'>): BlockReasonCopy | undefined {
+  const r = d.request_block_reason;
+  if (r === 'not_owner' || r === 'watcher_stalled') return blockReasonCopy(r);
+  if (r === 'genh_unlinked' && d.linked) return blockReasonCopy(r);
+  return undefined;
+}
 
 /** v0.1.42: khi đang cập nhật (requested/running) hỏi lại mỗi 4 giây — dòng báo ở Hôm nay tự đổi sang xong/lỗi. */
 export function updatePollMs(state: string | null | undefined): number | false {
@@ -14,7 +78,7 @@ export function updatePollMs(state: string | null | undefined): number | false {
 
 type StepState = 'done' | 'active' | 'todo';
 export type UpdateView =
-  | { kind: 'hidden' }
+  | { kind: 'hidden'; block?: BlockReasonCopy }
   | {
       kind: 'available' | 'working' | 'finished' | 'failed' | 'stalled';
       tone: 'accent' | 'ok' | 'warn' | 'bad';
@@ -28,6 +92,8 @@ export type UpdateView =
       command?: string;
       /** v0.1.53: câu dẫn trên lệnh; thiếu ⇒ câu mặc định của thẻ ("Chạy lệnh này một lần trên máy chủ…"). */
       commandLabel?: string;
+      /** v0.1.55: vì sao nút "Cập nhật ngay" bị ẩn (lý do + việc cần làm + lệnh); thẻ hiện khối này thay cho nút. */
+      block?: BlockReasonCopy;
       steps: Array<{ label: string; state: StepState }>;
     };
 
@@ -257,6 +323,7 @@ export function updateView(
     return { kind: 'working', tone: 'accent', title: `Đang cập nhật lên ${opts.waitingFor}`, kicker: 'Hệ thống đang khởi động lại — trang tự tải lại khi xong', steps: steps(2) };
   }
   if (!d) return { kind: 'hidden' };
+  const block = blockOf(d);
   if (d.state === 'requested') {
     // v0.1.37: máy chủ đang chạy một lần cập nhật/khôi phục khác (vd lịch đêm) — yêu cầu xếp hàng, làm ngay sau đó.
     const kicker = d.host_busy
@@ -336,6 +403,10 @@ export function updateView(
     const blocked = !!d.blocked_version && d.blocked_version === d.latest;
     const hint =
       d.auto_update_enabled === true && !blocked ? autoInstallHint(d.nightly_candidates, d.latest, d.published_at, now, d.blocked_version) : null;
+    if (block) {
+      // v0.1.55: nút bị ẩn ⇒ nói rõ lý do + việc cần làm (+ lệnh), không để Owner đoán vì sao "mất nút".
+      return { kind: 'available', tone: 'accent', title: `Có bản mới ${d.latest}`, kicker: `Đang dùng ${d.current} · chưa bấm Cập nhật ngay được`, block, steps: [] };
+    }
     const action = d.can_request ? 'bấm Cập nhật ngay' : 'chạy lệnh bên dưới';
     return {
       kind: 'available', tone: 'accent', title: `Có bản mới ${d.latest}`,
@@ -348,7 +419,15 @@ export function updateView(
       showCommand: !d.can_request, steps: [],
     };
   }
-  return { kind: 'hidden' };
+  return { kind: 'hidden', ...(block ? { block } : {}) };
+}
+
+/**
+ * Nút "Cập nhật ngay" có hiện không: api mới ⇒ đúng khi `request_block_reason` là null; api cũ (thiếu trường) ⇒ như trước,
+ * theo `can_request`.
+ */
+export function canClickUpdate(d: Pick<SystemUpdate, 'request_block_reason' | 'can_request'>): boolean {
+  return d.request_block_reason === undefined ? d.can_request : d.request_block_reason === null;
 }
 
 /** v0.1.43 (F-62): tiền tố conventional commit đầu dòng/gạch đầu dòng; nhóm 2 = chữ đầu phần còn lại. */

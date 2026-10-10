@@ -8,7 +8,7 @@ import { fmtDMClock } from '../lib/format';
 import { queryClient } from '../lib/queryClient';
 import { Panel, SkeletonLines } from '../screens/common';
 import { toast } from '../lib/toast';
-import { UPDATED_FLAG, UPDATE_COMMAND, UPDATE_KEY, readableNotes, updatePollMs, updateView } from './updateModel';
+import { COMMAND_LABEL_SERVER, UPDATED_FLAG, UPDATE_COMMAND, UPDATE_KEY, canClickUpdate, readableNotes, updatePollMs, updateView } from './updateModel';
 
 /**
  * Thẻ "Có bản mới" ở Tổng quan: bấm "Cập nhật ngay" để genh trên máy chủ tự sao lưu → tải bản mới → khởi động lại
@@ -113,7 +113,7 @@ export function UpdateCard({ always = false, hideFailed = false }: { always?: bo
       bodyClass="upd"
       className={idle ? 'upd-card' : `upd-card upd-card--${view.tone}`}
       aside={
-        view.kind === 'available' && d?.can_request ? (
+        view.kind === 'available' && d && canClickUpdate(d) ? (
           <Button variant="primary" icon="ph ph-arrow-circle-up" className="btn-30" onClick={() => setConfirm(true)}>
             Cập nhật ngay
           </Button>
@@ -150,6 +150,22 @@ export function UpdateCard({ always = false, hideFailed = false }: { always?: bo
             </li>
           ))}
         </ol>
+      ) : null}
+      {view.block ? (
+        // v0.1.55: nút "Cập nhật ngay" bị ẩn ⇒ lý do + việc cần làm; lệnh (nếu có) luôn đi SAU câu lý do.
+        <div className="upd-block" data-testid="update-block-reason" data-reason={d?.request_block_reason ?? undefined}>
+          <p className="upd-body">
+            <strong>{view.block.title}</strong>
+          </p>
+          <p className="upd-body">{view.block.body}</p>
+          <p className="upd-body">{view.block.action}</p>
+          {view.block.command ? (
+            <div className="upd-cmd">
+              <span>{COMMAND_LABEL_SERVER}</span>
+              <code className="mono">{view.block.command}</code>
+            </div>
+          ) : null}
+        </div>
       ) : null}
       {view.kind !== 'hidden' && view.body ? <p className="upd-body">{view.body}</p> : null}
       {view.kind !== 'hidden' && view.detail ? (

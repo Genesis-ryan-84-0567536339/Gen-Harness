@@ -69,7 +69,7 @@ const TODAY = (over: Partial<CoachToday> = {}): CoachToday => ({
   date: '2026-10-10', enabled: true, snoozed_until: null,
   todos: [todo('boss.hub', 'P1', { target: 'boss_checks.row.hub' }), todo('boss.facebook', 'P1'), todo('boss.agy', 'P1')],
   tip: TIP, lesson: LESSON,
-  progress: { required_done: 0, required_total: 6, lessons_done: 0, lessons_total: 19, stable: false, stable_since: null },
+  progress: { required_done: 0, required_total: 1, lessons_done: 0, lessons_total: 19, stable: false, stable_since: null },
   unseen: true, ...over,
 });
 const PREFS = (over: Partial<CoachPrefs> = {}): CoachPrefs => ({
@@ -237,7 +237,7 @@ describe('CoachTodayCard', () => {
     expect(within(card).getByRole('group', { name: 'Bài học hôm nay · 1/19' })).toBeInTheDocument();
     expect(within(card).getAllByTestId('coach-todo').map((li) => li.getAttribute('data-level'))).toEqual(['P1', 'P1', 'P1']);
     expect(within(card).getAllByTestId('coach-todo').map((li) => within(li).getByText(/^Việc boss\./).textContent)).toEqual(['Việc boss.hub', 'Việc boss.facebook', 'Việc boss.agy']);
-    expect(within(card).getByTestId('coach-required')).toHaveTextContent('Đã đạt 0/6 việc bắt buộc');
+    expect(within(card).getByTestId('coach-required')).toHaveTextContent('Đã đạt 0/1 việc bắt buộc');
     // Mẹo + bài học.
     expect(within(card).getByRole('button', { name: 'Thử ngay' })).toBeInTheDocument();
     for (const name of ['Làm thử', 'Hỏi Gen thêm', 'Hoãn']) expect(within(card).getByRole('button', { name })).toBeInTheDocument();
@@ -259,7 +259,7 @@ describe('CoachTodayCard', () => {
   });
 
   it('nhãn "Hệ thống đã ổn định" khi progress.stable', async () => {
-    today = TODAY({ todos: [], tip: null, lesson: null, progress: { required_done: 6, required_total: 6, lessons_done: 19, lessons_total: 19, stable: true, stable_since: '2026-10-01T00:00:00Z' } });
+    today = TODAY({ todos: [], tip: null, lesson: null, progress: { required_done: 1, required_total: 1, lessons_done: 19, lessons_total: 19, stable: true, stable_since: '2026-10-01T00:00:00Z' } });
     wrap(<CoachTodayCard />);
     expect(await screen.findByTestId('coach-stable')).toHaveTextContent('Hệ thống đã ổn định');
     expect(screen.queryByRole('group', { name: 'Việc cần làm ngay' })).toBeNull();
@@ -586,18 +586,25 @@ describe('CurriculumCard (Trợ giúp)', () => {
 // ── Tổng quan ───────────────────────────────────────────────────────────────────────────────────────────
 
 describe('Tổng quan', () => {
-  const overview = (done: number, total = 6) => ({ rows: [], results: {}, required_done: done, required_total: total, switch_passes: 0 });
+  const overview = (done: number, total = 1) => ({ rows: [], results: {}, required_done: done, required_total: total, switch_passes: 0 });
 
   it('NeedsBossStrip: "Đã đạt x/N việc bắt buộc → Xem" tới /guide/viec-sep khi x<N; đủ N thì không hiện', async () => {
-    queryClient.setQueryData(['boss-checks'], overview(2));
+    // N lấy từ máy chủ (không ghi cứng): 0/1 là máy mới sau Thiết lập gọn; 2/3 chứng minh x/N động.
+    queryClient.setQueryData(['boss-checks'], overview(0));
     queryClient.setQueryData(['setup', 'follow-up'], []);
+    const zero = wrap(<NeedsBossStrip />);
+    const line0 = await screen.findByTestId('boss-progress');
+    expect(line0).toHaveTextContent('Đã đạt 0/1 việc bắt buộc');
+    zero.unmount();
+
+    queryClient.setQueryData(['boss-checks'], overview(2, 3));
     const first = wrap(<NeedsBossStrip />);
     const line = await screen.findByTestId('boss-progress');
-    expect(line).toHaveTextContent('Đã đạt 2/6 việc bắt buộc');
+    expect(line).toHaveTextContent('Đã đạt 2/3 việc bắt buộc');
     expect(within(line).getByRole('link', { name: /Xem/ })).toHaveAttribute('href', '/guide/viec-sep');
     first.unmount();
 
-    queryClient.setQueryData(['boss-checks'], overview(6));
+    queryClient.setQueryData(['boss-checks'], overview(1));
     const second = wrap(<NeedsBossStrip />);
     await new Promise((r) => setTimeout(r, 30));
     expect(screen.queryByTestId('boss-progress')).toBeNull();
@@ -605,7 +612,7 @@ describe('Tổng quan', () => {
 
     // Vai trò khác Owner: không hiện (và không gọi /boss-checks).
     queryClient.setQueryData(qk.me, ME('manager', false));
-    queryClient.setQueryData(['boss-checks'], overview(1));
+    queryClient.setQueryData(['boss-checks'], overview(0));
     wrap(<NeedsBossStrip />);
     await new Promise((r) => setTimeout(r, 30));
     expect(screen.queryByTestId('boss-progress')).toBeNull();
@@ -665,24 +672,37 @@ describe('hợp đồng gen.ts ↔ mock-gen-coach', () => {
 
   beforeEach(() => resetCoachMock());
 
-  it('máy mới 0/6: 3 việc P1 đúng thứ tự hub → facebook → agy, mẹo telegram_briefing, bài N01 1/19, unseen; đủ khoá của CoachToday', () => {
+  it('máy mới 0/1: việc boss.ai (P1) rồi gợi ý boss.hub (P3), mẹo telegram_briefing, bài N01 1/19, unseen; đủ khoá của CoachToday', () => {
     const mock = createCoachMock();
     const r = call(mock, 'GET', '/gen/coach/today');
     const t = r.body as CoachToday;
     expect(r.status).toBe(200);
     expect(Object.keys(t).sort()).toEqual(['date', 'enabled', 'lesson', 'progress', 'snoozed_until', 'tip', 'todos', 'unseen']);
-    expect(t.todos.map((x) => [x.key, x.level])).toEqual([['boss.hub', 'P1'], ['boss.facebook', 'P1'], ['boss.agy', 'P1']]);
+    // v0.1.55: chỉ dòng bắt buộc (boss.ai) là P1; Gen-hub chỉ là gợi ý P3; Facebook/Telegram/Google/Claude không còn là việc.
+    expect(t.todos.map((x) => [x.key, x.level])).toEqual([['boss.ai', 'P1'], ['boss.hub', 'P3']]);
     for (const x of t.todos) {
       expect(typeof x.title).toBe('string');
       expect(typeof x.why).toBe('string');
       expect(x.can_dismiss).toBe(true);
       expect(typeof x.dismiss_warning).toBe('string');
     }
+    expect(t.todos[0]).toMatchObject({ title: 'Kiểm tra nguồn AI chạy được', target: 'connections.brain' });
+    expect(t.todos[1]).toMatchObject({ title: 'Nối Gen-hub nếu Sếp muốn', target: 'boss_checks.row.hub' });
     expect(t.tip?.key).toBe('telegram_briefing');
     expect(t.lesson).toMatchObject({ id: 'N01', k: 1, total: 19, status: 'new' });
-    expect(t.progress).toEqual({ required_done: 0, required_total: 6, lessons_done: 0, lessons_total: 19, stable: false, stable_since: null });
+    expect(t.progress).toEqual({ required_done: 0, required_total: 1, lessons_done: 0, lessons_total: 19, stable: false, stable_since: null });
     expect(t.unseen).toBe(true);
-    expect(JSON.stringify(t)).not.toMatch(/token|email|message/i);
+    expect(JSON.stringify(t)).not.toMatch(/token|email|message|Kho Ryan/i);
+  });
+
+  it('boss.remote chỉ hiện khi đã mời nhân viên (scenario staff); model.missing ẩn boss.ai như máy chủ', () => {
+    const mock = createCoachMock();
+    const keys = () => (call(mock, 'GET', '/gen/coach/today').body as CoachToday).todos.map((x) => x.key);
+    expect(keys()).not.toContain('boss.remote');
+    mock.hooks.scenario({ staff: true } as never);
+    expect(keys()).toEqual(['boss.ai', 'boss.hub', 'boss.remote']);
+    mock.hooks.scenario({ extras: ['model.missing'] } as never);
+    expect(keys()).toEqual(['model.missing', 'boss.hub', 'boss.remote']);
   });
 
   it('mark_shown tắt unseen; vai trò khác Owner ⇒ 403 FORBIDDEN', () => {
@@ -698,7 +718,7 @@ describe('hợp đồng gen.ts ↔ mock-gen-coach', () => {
   it('dismiss bắt buộc confirm; việc P0 ⇒ 422 COACH_DISMISS_NOT_ALLOWED; khoá lạ ⇒ 404 COACH_ITEM_UNKNOWN; days sai ⇒ 422', () => {
     const mock = createCoachMock();
     mock.hooks.scenario({ extras: ['health.channel.down'] } as never);
-    const noConfirm = call(mock, 'POST', '/gen/coach/items/todo%3Aboss.hub', { action: 'dismiss' });
+    const noConfirm = call(mock, 'POST', '/gen/coach/items/todo%3Aboss.ai', { action: 'dismiss' });
     expect(noConfirm.status).toBe(422);
     expect(noConfirm.body).toMatchObject({ code: 'COACH_CONFIRM_REQUIRED', title: 'Sếp xác nhận giúp em trước khi tắt việc này' });
     const p0 = call(mock, 'POST', '/gen/coach/items/todo%3Ahealth.channel.down', { action: 'dismiss', confirm: true });
@@ -707,14 +727,16 @@ describe('hợp đồng gen.ts ↔ mock-gen-coach', () => {
     const unknown = call(mock, 'POST', '/gen/coach/items/todo%3Ano.such', { action: 'dismiss', confirm: true });
     expect(unknown.status).toBe(404);
     expect(unknown.body).toMatchObject({ code: 'COACH_ITEM_UNKNOWN', title: 'Em không biết việc này' });
-    expect(call(mock, 'POST', '/gen/coach/items/todo%3Aboss.hub', { action: 'snooze', days: 2 }).status).toBe(422);
+    expect(call(mock, 'POST', '/gen/coach/items/todo%3Aboss.ai', { action: 'snooze', days: 2 }).status).toBe(422);
+    // Khoá P1 cũ của dòng không còn bắt buộc (facebook, agy…) không còn là việc ⇒ 404.
+    expect(call(mock, 'POST', '/gen/coach/items/todo%3Aboss.facebook', { action: 'dismiss', confirm: true }).status).toBe(404);
 
-    const ok = call(mock, 'POST', '/gen/coach/items/todo%3Aboss.hub', { action: 'dismiss', confirm: true });
+    const ok = call(mock, 'POST', '/gen/coach/items/todo%3Aboss.ai', { action: 'dismiss', confirm: true });
     expect(ok.status).toBe(204);
-    expect((call(mock, 'GET', '/gen/coach/today').body as CoachToday).todos.map((x) => x.key)).toEqual(['health.channel.down', 'boss.facebook', 'boss.agy']);
+    expect((call(mock, 'GET', '/gen/coach/today').body as CoachToday).todos.map((x) => x.key)).toEqual(['health.channel.down', 'boss.hub']);
     const prefsOut = call(mock, 'GET', '/gen/coach/prefs').body as CoachPrefs;
-    expect(prefsOut.dismissed).toEqual([{ key: 'boss.hub', level: 'P1', title: 'Nối Gen-hub' }]);
-    expect(call(mock, 'POST', '/gen/coach/items/todo%3Aboss.hub', { action: 'restore' }).status).toBe(204);
+    expect(prefsOut.dismissed).toEqual([{ key: 'boss.ai', level: 'P1', title: 'Kiểm tra nguồn AI chạy được' }]);
+    expect(call(mock, 'POST', '/gen/coach/items/todo%3Aboss.ai', { action: 'restore' }).status).toBe(204);
     expect((call(mock, 'GET', '/gen/coach/prefs').body as CoachPrefs).dismissed).toEqual([]);
   });
 
@@ -755,8 +777,13 @@ describe('BOSS_ROW_TARGETS khớp ROWS của api (boss_checks/service.py)', () =
     const end = src.indexOf('\n)\n', start);
     expect(start).toBeGreaterThanOrEqual(0);
     expect(end).toBeGreaterThan(start);
-    const rows = [...src.slice(start, end).matchAll(/"row":\s*(\d+),\s*"key":\s*"(\w+)"/g)].map((m) => [m[2], Number(m[1])] as const);
-    expect(rows.length).toBeGreaterThanOrEqual(9);
+    const all = [...src.slice(start, end).matchAll(/"row":\s*(\d+),\s*"key":\s*"(\w+)"/g)].map((m) => [m[2], Number(m[1])] as const);
+    expect(all.length).toBeGreaterThanOrEqual(10);
+    // v0.1.55: dòng 0 "ai" (nguồn AI, bắt buộc duy nhất) CHƯA có mục tiêu `data-gen-target` (id `boss_checks.row.ai` chưa có trong
+    // registry — Opus thêm khi tích hợp, rồi bỏ ngoại lệ này). Mọi dòng kết nối còn lại phải khớp.
+    expect(all[0]).toEqual(['ai', 0]);
+    expect(bossRowTarget(0)).toBeUndefined();
+    const rows = all.filter(([k]) => k !== 'ai');
     expect(Object.keys(BOSS_ROW_TARGETS).sort()).toEqual(rows.map(([k]) => k).sort());
     for (const [key, row] of rows) {
       const t = BOSS_ROW_TARGETS[key as keyof typeof BOSS_ROW_TARGETS];

@@ -37,6 +37,38 @@ export function nearest(options: number[], v: number | undefined, fallback: numb
   return options.reduce((best, o) => (Math.abs(o - v) < Math.abs(best - v) ? o : best), options[0]);
 }
 
+/**
+ * v0.1.55 (Thiết lập gọn) — câu hỏi duy nhất của bước 7: "Sếp làm ngành nào?". Mỗi lựa chọn là một bộ quy tắc khởi đầu (mã
+ * quy tắc R-01…R-06 của gh/refinery/presets.py); lịch sàng lọc 900 giây / 500 tin / lô 250 / tin cậy 0,6 là mặc định của
+ * máy chủ. "Khác" bật cả bộ khởi đầu (cũng là cách máy chủ làm khi không gửi `rule_codes`).
+ */
+export interface IndustryOption {
+  value: 'trade' | 'service' | 'hr' | 'other';
+  label: string;
+  codes: readonly string[];
+}
+export const INDUSTRIES: readonly IndustryOption[] = [
+  { value: 'trade', label: 'Mua bán, thương mại', codes: ['R-01', 'R-02', 'R-03', 'R-04', 'R-06'] },
+  { value: 'service', label: 'Dịch vụ, chăm sóc khách', codes: ['R-01', 'R-03', 'R-04', 'R-06'] },
+  { value: 'hr', label: 'Tuyển dụng, nhân sự', codes: ['R-03', 'R-05', 'R-06'] },
+  { value: 'other', label: 'Khác — bật cả bộ khởi đầu', codes: ['R-01', 'R-02', 'R-03', 'R-04', 'R-05', 'R-06'] },
+];
+/** Ngành đang chọn mặc định (cả bộ khởi đầu). */
+export const DEFAULT_INDUSTRY: IndustryOption['value'] = 'other';
+
+/** Mã quy tắc của một ngành, chỉ giữ mã máy chủ đang có (`available`). Ngành lạ ⇒ rỗng. */
+export function industryCodes(value: string, available: readonly string[]): string[] {
+  const it = INDUSTRIES.find((x) => x.value === value);
+  return it ? available.filter((c) => it.codes.includes(c)) : [];
+}
+
+/** Ngành khớp ĐÚNG bộ quy tắc đang chọn (không phân biệt thứ tự); không khớp ⇒ null (Sếp đã chỉnh tay ở Nâng cao). */
+export function industryOf(picked: readonly string[], available: readonly string[]): IndustryOption['value'] | null {
+  const key = [...picked].sort().join(',');
+  const hit = INDUSTRIES.find((it) => industryCodes(it.value, available).slice().sort().join(',') === key);
+  return hit?.value ?? null;
+}
+
 // ── Bước 12 ───────────────────────────────────────────────────────────────
 /**
  * First-run counters: `GET /setup/first-run`, advanced live by the latest
