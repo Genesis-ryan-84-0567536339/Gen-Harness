@@ -9,7 +9,7 @@
 """
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 import orjson
@@ -114,6 +114,14 @@ def clean_message(message: str | None) -> str | None:
 
 def _iso(v: datetime | None) -> str | None:
     return v.isoformat().replace("+00:00", "Z") if v else None
+
+
+def _ts(iso: str | None) -> datetime:
+    """Ngược của `_iso` để so sánh thời điểm; thiếu/hỏng ⇒ mốc rất xa (coi là cũ nhất)."""
+    try:
+        return datetime.fromisoformat((iso or "").replace("Z", "+00:00"))
+    except ValueError:
+        return datetime.min.replace(tzinfo=UTC)
 
 
 async def record(db: AsyncSession, org_id: uuid.UUID, key: str, status: str, *, error_code: str | None = None,
@@ -250,19 +258,21 @@ AI_SOURCE_DAYS = 30
 
 async def ai_source_evidence(db: AsyncSession, org_id: uuid.UUID) -> dict[str, Any] | None:
     """Bằng chứng có nguồn AI chạy được từ lượt gọi THẬT: `agent.model_calls` status 'ok' trong 30 ngày (không tính
-    embedding / Jev — không sinh văn bản). Trả bản ghi giả dạng kết quả kiểm (status 'pass', `runs` 0) hoặc None."""
+    embedding / Jev — không sinh văn bản). Trả bản ghi giả dạng kết quả kiểm (status 'pass', `runs` 0) hoặc None.
+    Chỉ cần LƯỢT MỚI NHẤT (ORDER BY at DESC LIMIT 1 trên chỉ mục (org_id, at DESC)) — không đếm cả 30 ngày mỗi lần
+    `overview` chạy (Hôm nay, Việc Sếp cần làm, coach cùng gọi)."""
     r = (await db.execute(text("""
-        SELECT max(c.at) AS at, count(*) AS n
+        SELECT c.at
         FROM agent.model_calls c
         LEFT JOIN agent.models m ON m.id = c.model_id
         LEFT JOIN agent.providers p ON p.id = m.provider_id
         WHERE c.org_id = :o AND c.status = 'ok' AND c.at > now() - make_interval(days => :d)
-          AND c.purpose <> 'embedding' AND COALESCE(p.kind, '') NOT IN ('system_one', 'embedding')"""),
-                            {"o": org_id, "d": AI_SOURCE_DAYS})).one()
-    if not r.n:
+          AND c.purpose <> 'embedding' AND COALESCE(p.kind, '') NOT IN ('system_one', 'embedding')
+        ORDER BY c.at DESC LIMIT 1"""), {"o": org_id, "d": AI_SOURCE_DAYS})).one_or_none()
+    if r is None:
         return None
     return {"key": "ai_source", "status": "pass", "error_code": None, "message": None,
-            "detail": {"via": "model_calls", "calls": int(r.n)}, "checked_at": _iso(r.at), "runs": 0}
+            "detail": {"via": "model_calls"}, "checked_at": _iso(r.at), "runs": 0}
 
 
 def _derived_ai(results: dict[str, dict[str, Any] | None]) -> dict[str, Any] | None:
@@ -285,9 +295,12 @@ async def overview(db: AsyncSession, org_id: uuid.UUID) -> dict[str, Any]:
     switches = await switch_passes(db, org_id)
     ai = results.get("ai_source")
     if ai is None or ai["status"] != "pass":
-        evidence = await ai_source_evidence(db, org_id) or _derived_ai(results)
-        if evidence is not None:
-            results["ai_source"] = ai = evidence
+        # Bằng chứng ngầm chỉ thay kết quả ĐÃ GHI khi nó MỚI HƠN: Sếp vừa bấm Kiểm tra mà lỗi (khoá bị thu hồi…) thì lượt
+        # gọi thành công của 20 ngày trước không được che nó — dòng bắt buộc duy nhất phải nói đúng sự thật.
+        found = (await ai_source_evidence(db, org_id), _derived_ai(results))
+        best = max((e for e in found if e is not None), key=lambda e: _ts(e["checked_at"]), default=None)
+        if best is not None and (ai is None or _ts(best["checked_at"]) > _ts(ai["checked_at"])):
+            results["ai_source"] = best
     rows: list[dict[str, Any]] = []
     for row in ROWS:
         if row["key"] == "agy":

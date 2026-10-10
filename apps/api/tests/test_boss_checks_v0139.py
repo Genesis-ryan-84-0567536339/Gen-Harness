@@ -368,7 +368,7 @@ async def test_ai_source_row_done_rules(owner_api: Api, db: Any) -> None:
     await call("gemini", "ok")
     done, res = await ai()
     assert done is True and res is not None and res["status"] == "pass"
-    assert res["detail"] == {"via": "model_calls", "calls": 1} and res["runs"] == 0
+    assert res["detail"] == {"via": "model_calls"} and res["runs"] == 0
     assert (await owner_api.get("/boss-checks")).json()["required_done"] == 1
 
 
@@ -391,6 +391,44 @@ async def test_ai_source_row_done_by_cli_call_or_manual_check(owner_api: Api, db
     await db.commit()
     body = (await owner_api.get("/boss-checks")).json()
     assert next(r for r in body["rows"] if r["key"] == "ai")["done"] is True and body["required_done"] == 1
+
+
+async def test_failed_ai_check_is_not_masked_by_an_older_successful_call(owner_api: Api, db: Any) -> None:
+    """F-R6: Sếp bấm Kiểm tra dòng 0 và LỖI sau lần gọi model thành công cũ ⇒ vẫn 'fail' (không che bằng bằng chứng cũ);
+    lượt gọi / Claude gọi thử đạt MỚI HƠN lần kiểm lỗi mới đổi lại thành Đạt."""
+    org = await org_id(db)
+    pid = uuid.uuid4()
+    await db.execute(text("INSERT INTO agent.providers (id, org_id, kind, name) VALUES (:i, :o, 'gemini', 'g')"),
+                     {"i": pid, "o": org})
+    mid = (await db.execute(text("INSERT INTO agent.models (provider_id, model_name) VALUES (:p, 'm') RETURNING id"),
+                            {"p": pid})).scalar_one()
+    await db.commit()
+
+    async def call(ago: str) -> None:
+        await db.execute(text(f"""INSERT INTO agent.model_calls (org_id, at, model_id, agent_key, purpose, status)
+                                  VALUES (:o, now() - interval '{ago}', :m, 'core.gen', 'reply', 'ok')"""),
+                         {"o": org, "m": mid})
+        await db.commit()
+
+    async def ai() -> tuple[bool, str | None, int]:
+        body = (await owner_api.get("/boss-checks")).json()
+        row = next(r for r in body["rows"] if r["key"] == "ai")
+        res = body["results"]["ai_source"]
+        return row["done"], res["status"] if res else None, body["required_done"]
+
+    await call("20 days")
+    assert await ai() == (True, "pass", 1)                       # chưa kiểm lần nào: bằng chứng cũ đủ
+    await boss.record(db, org, "ai_source", "fail", error_code="AI_NO_SOURCE", message="Khoá bị thu hồi")
+    await db.commit()
+    assert await ai() == (False, "fail", 0)                      # kiểm LỖI mới hơn lượt gọi cũ ⇒ phải nói sự thật
+    await boss.record(db, org, "claude_call", "pass")             # Claude gọi thử đạt SAU lần kiểm lỗi
+    await db.commit()
+    assert await ai() == (True, "pass", 1)                       # bằng chứng MỚI HƠN lần kiểm lỗi ⇒ Đạt trở lại
+    await boss.record(db, org, "ai_source", "fail", error_code="AI_NO_SOURCE", message="Lại lỗi")
+    await db.commit()
+    assert await ai() == (False, "fail", 0)                      # kiểm lỗi lần nữa, mới hơn mọi bằng chứng
+    await call("0 seconds")
+    assert await ai() == (True, "pass", 1)                       # lượt gọi thật mới hơn cả lần kiểm lỗi
 
 
 async def test_switch_counter_counts_real_switches_only(owner_api: Api, db: Any) -> None:
