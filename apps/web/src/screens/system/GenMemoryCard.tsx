@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { GenMemoryPatchBody } from '@gen-harness/contracts';
 import { Button, Dialog, EmptyState, Icon } from '@gen-harness/ui';
 import { GEN_MEMORY_KEY, MEMORY_DESC, MEMORY_EMPTY, MEMORY_TITLE, charCount, countText, memoryErrorText, memoryItems, memoryLimits, type MemoryItemView } from '../../gen/genMemoryModel';
+import { DefaultControls } from '../../defaults/ResetButton';
 import { api } from '../../lib/api';
 import { errorDetail } from '../../lib/errorText';
 import { useOrgTimezone } from '../../lib/permissions';
@@ -33,7 +34,13 @@ function GenMemoryPanel() {
         kicker={MEMORY_DESC}
         label={MEMORY_TITLE}
         bodyClass="gen-mem"
-        aside={q.data ? <span className="mono gen-mem__count" data-testid="gen-memory-count">{countText(items.length, limits.limit)}</span> : undefined}
+        aside={
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            {q.data ? <span className="mono gen-mem__count" data-testid="gen-memory-count">{countText(items.length, limits.limit)}</span> : null}
+            {/* v0.1.55: Gen — vai trò dùng và số ngày giữ hội thoại (mặc định chỉ Owner · 90 ngày); công tắc bật/tắt Gen giữ nguyên. */}
+            <DefaultControls itemKey="gen" />
+          </span>
+        }
       >
         {q.isPending ? (
           <SkeletonLines rows={3} padding="10px 16px" />

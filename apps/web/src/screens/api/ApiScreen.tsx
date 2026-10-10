@@ -1,6 +1,6 @@
 import { useEffect, useState, type DragEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import type { AgentBindingSlot, BindableModel, Provider, ProviderKind } from '@gen-harness/contracts';
+import type { AgentBindingSlot, BindableModel, Effort, Provider, ProviderKind } from '@gen-harness/contracts';
 import { ApiError, SCREEN_BY_KEY } from '@gen-harness/contracts';
 import { Button, Dialog, EmptyState, Icon, SelectField, Switch, TextField } from '@gen-harness/ui';
 import { useProviders } from '../../lib/dataQueries';
@@ -9,10 +9,28 @@ import { detailToText } from '../../lib/friendlyError';
 import { useCan } from '../../lib/permissions';
 import { toast } from '../../lib/toast';
 import { CardError, FriendlyErrorText, InlineError, Panel, PinHint, PIN_ROUTE_CHANGE_TITLE, ScreenHead, SkeletonLines, StateChip } from '../common';
+import { DefaultBadge } from '../../defaults/DefaultBadge';
 import { ModelPicker } from './ModelPicker';
 import { CliDiagnose } from '../system/CliDiagnose';
 import { AGY_SCOPE_TEXT } from '../system/systemModel';
-import { PROVIDER_ICON, PROVIDER_KIND_LABEL, PROVIDER_PRESETS, choiceText, findPreset, fmtContextTokens, fmtQuota, fmtTemperature, isCliKind, providerStatus } from './apiModel';
+import {
+  EFFORT_HINT,
+  PROVIDER_ICON,
+  PROVIDER_KIND_LABEL,
+  PROVIDER_PRESETS,
+  bindingEffortText,
+  bindingModelText,
+  bindingParamsText,
+  choiceText,
+  effortOptionText,
+  findPreset,
+  fmtContextTokens,
+  fmtQuota,
+  fmtTemperature,
+  isCliKind,
+  providerStatus,
+  supportedEfforts,
+} from './apiModel';
 import {
   useAddModel,
   useAddProviderKey,
@@ -106,13 +124,19 @@ export function ApiScreen() {
         )}
       </div>
 
-      <div className="apm-mid">
+      <div className="apm-mid" style={{ gridTemplateColumns: 'minmax(0, 1fr)' }}>
         <BindingsPanel canManage={canManage} />
-        <div className="apm-side">
+      </div>
+
+      {/* v0.1.55: nhiệt độ, ngữ cảnh, bộ quy tắc và hạn mức model là việc hiếm — gom vào "Nâng cao", mặc định đóng. */}
+      <details className="brain-advanced" data-testid="api-advanced">
+        <summary>Nâng cao — nhiệt độ, ngữ cảnh, bộ quy tắc và hạn mức model</summary>
+        <div className="apm-side" style={{ marginTop: 12 }}>
+          <AdvancedParamsPanel />
           <CoreParamsPanel />
           <RateLimitsPanel />
         </div>
-      </div>
+      </details>
 
       <div className="apm-panels">
         <PriorityChainPanel canManage={canManage} />
@@ -256,9 +280,7 @@ function BindingsPanel({ canManage }: { canManage: boolean }) {
             <tr>
               <th>Agent</th>
               <th>Model</th>
-              <th>Bộ quy tắc</th>
-              <th>Nhiệt độ</th>
-              <th>Ngữ cảnh</th>
+              <th>Mức suy nghĩ</th>
               <th />
             </tr>
           </thead>
@@ -271,12 +293,18 @@ function BindingsPanel({ canManage }: { canManage: boolean }) {
                 <td>
                   {canManage ? (
                     <button type="button" className="apm-model-pill" onClick={() => setEditing(slot)}>
-                      {slot.binding?.model_name ?? 'chưa gán'}
+                      {bindingModelText(slot)}
                       <Icon name="ph ph-caret-down" size={10} />
                     </button>
                   ) : (
-                    <span>{slot.binding?.model_name ?? 'chưa gán'}</span>
+                    <span>{bindingModelText(slot)}</span>
                   )}
+                  {/* v0.1.55: chưa gán ⇒ "Mặc định" (hồ sơ tiêu chuẩn theo vai); Sếp đã gán ⇒ "Đã đổi". Máy chủ cũ: không chip. */}
+                  {slot.source ? (
+                    <span style={{ marginLeft: 6 }}>
+                      <DefaultBadge customized={slot.source === 'custom'} testId={`binding-badge-${slot.agent_key}`} />
+                    </span>
+                  ) : null}
                   {blockedReason(slot) ? (
                     // v0.1.38 (F-22): API báo agent này bỏ qua model đang gán (agy chỉ cho Gen của Sếp). Chữ hiện thẳng
                     // dưới dòng (không chỉ tooltip — màn hình cảm ứng không xem được `title`), kèm việc cần làm.
@@ -290,9 +318,9 @@ function BindingsPanel({ canManage }: { canManage: boolean }) {
                     </>
                   ) : null}
                 </td>
-                <td className="mono">{slot.binding?.rule_codes.length ? slot.binding.rule_codes.join(', ') : '—'}</td>
-                <td className="mono">{slot.binding ? fmtTemperature(slot.binding.temperature) : '—'}</td>
-                <td className="mono">{slot.binding ? fmtContextTokens(slot.binding.context_tokens) : '—'}</td>
+                <td className="mono" data-testid={`binding-effort-${slot.agent_key}`}>
+                  {bindingEffortText(slot)}
+                </td>
                 <td>
                   {canManage && slot.binding ? (
                     <RemoveBindingButton agentKey={slot.agent_key} />
@@ -346,7 +374,7 @@ function bindingErrorView(e: unknown): { message: string; detail: string | null 
 function RemoveBindingButton({ agentKey }: { agentKey: string }) {
   const remove = useRemoveBinding();
   return (
-    <Button variant="ghost" className="btn-22" icon="ph ph-x" loading={remove.isPending} aria-label="Bỏ gán model" onClick={() => remove.mutate(agentKey)} />
+    <Button variant="ghost" className="btn-22" icon="ph ph-x" loading={remove.isPending} aria-label="Bỏ gán model" title="Bỏ gán — vai này dùng model chuẩn (tự chọn)" onClick={() => remove.mutate(agentKey)} />
   );
 }
 
@@ -360,10 +388,21 @@ function BindingEditDialog({ slot, models, onClose }: { slot: AgentBindingSlot; 
   // Review F-22: slot chưa gán (khác core.gen) mặc định chọn model đầu tiên KHÔNG phải agy — API xếp model theo tên nhà
   // cung cấp nên "Antigravity CLI" thường đứng đầu, chọn sẵn nó thì bấm Lưu là gặp 409. Tính lại mỗi lần vẽ (danh sách
   // nhà cung cấp có thể tới sau) cho tới khi Sếp tự chọn.
-  const preferred = slot.binding?.model_id ?? (models.find((m) => !agyOnly(m)) ?? models[0])?.id ?? '';
+  // v0.1.55: slot chưa gán chọn sẵn đúng model hồ sơ chuẩn đang phủ (nếu có trong danh sách), rồi mới tới model đầu tiên.
+  const std = slot.standard;
+  const standardId = std ? models.find((m) => m.model_name === std.model_name && m.provider_name === std.provider_name && !agyOnly(m))?.id : undefined;
+  const preferred = slot.binding?.model_id ?? standardId ?? (models.find((m) => !agyOnly(m)) ?? models[0])?.id ?? '';
   const [picked, setPicked] = useState<string | null>(null);
   const modelId = picked ?? preferred;
   const setModelId = setPicked;
+  // v0.1.55: mức suy nghĩ theo vai — chỉ model CLI có mức; bỏ trống = theo hồ sơ chuẩn / mức của model.
+  const chosenProvider = (providers.data ?? []).find((p) => p.models.some((m) => m.id === modelId));
+  const chosenName = chosenProvider?.models.find((m) => m.id === modelId)?.model_name;
+  const efforts = supportedEfforts(chosenProvider, chosenName);
+  const [effortPick, setEffortPick] = useState<Effort | '' | null>(null);
+  const savedEffort = slot.binding?.effort ?? '';
+  const effortValue: Effort | '' = (effortPick ?? savedEffort) as Effort | '';
+  const effort: Effort | '' = effortValue && efforts.includes(effortValue) ? effortValue : '';
   const [temperature, setTemperature] = useState(String(slot.binding?.temperature ?? 0.3));
   const [contextTokens, setContextTokens] = useState(String(slot.binding?.context_tokens ?? 8000));
   const [ruleCodes, setRuleCodes] = useState((slot.binding?.rule_codes ?? []).join(', '));
@@ -380,6 +419,7 @@ function BindingEditDialog({ slot, models, onClose }: { slot: AgentBindingSlot; 
             .split(',')
             .map((s) => s.trim())
             .filter(Boolean),
+          effort: effort || null,
         },
       },
       { onSuccess: onClose },
@@ -430,9 +470,32 @@ function BindingEditDialog({ slot, models, onClose }: { slot: AgentBindingSlot; 
             ) : null}
           </div>
         )}
-        <TextField label="Nhiệt độ (0–2)" type="number" step="0.05" min={0} max={2} value={temperature} onChange={(e) => setTemperature(e.target.value)} />
-        <TextField label="Ngữ cảnh (token)" type="number" min={256} value={contextTokens} onChange={(e) => setContextTokens(e.target.value)} />
-        <TextField label="Bộ quy tắc (mã, cách nhau dấu phẩy)" value={ruleCodes} onChange={(e) => setRuleCodes(e.target.value)} placeholder="R-01, R-02" />
+        {efforts.length ? (
+          <div className="gh-field">
+            <label className="gh-field__label" htmlFor="apm-binding-effort">
+              Mức suy nghĩ
+            </label>
+            <select id="apm-binding-effort" className="gh-input" title={EFFORT_HINT} value={effort} onChange={(e) => setEffortPick(e.target.value as Effort | '')}>
+              <option value="">Theo hồ sơ chuẩn (tự chọn)</option>
+              {efforts.map((x) => (
+                <option key={x} value={x}>
+                  {effortOptionText(x)}
+                </option>
+              ))}
+            </select>
+            <p className="muted-note">{EFFORT_HINT}</p>
+          </div>
+        ) : modelId ? (
+          <p className="muted-note" data-testid="binding-no-effort">
+            Model này không chỉnh mức suy nghĩ — hệ thống tự chọn.
+          </p>
+        ) : null}
+        <details className="brain-advanced" data-testid="binding-edit-advanced">
+          <summary>Nâng cao — nhiệt độ, ngữ cảnh, bộ quy tắc</summary>
+          <TextField label="Nhiệt độ (0–2)" type="number" step="0.05" min={0} max={2} value={temperature} onChange={(e) => setTemperature(e.target.value)} />
+          <TextField label="Ngữ cảnh (token)" type="number" min={256} value={contextTokens} onChange={(e) => setContextTokens(e.target.value)} />
+          <TextField label="Bộ quy tắc (mã, cách nhau dấu phẩy)" value={ruleCodes} onChange={(e) => setRuleCodes(e.target.value)} placeholder="R-01, R-02" />
+        </details>
         {set.isError ? <BindingSaveError error={set.error} /> : null}
       </form>
     </Dialog>
@@ -456,7 +519,9 @@ function BindingSaveError({ error }: { error: unknown }) {
 
 function CoreParamsPanel() {
   const bindings = useBindings();
-  const core = bindings.data?.items.find((i) => i.agent_key === 'core.refinery')?.binding ?? null;
+  const slot = bindings.data?.items.find((i) => i.agent_key === 'core.refinery');
+  const core = slot?.binding ?? null;
+  const std = core ? null : (slot?.standard ?? null);
   const rows: Array<[string, string]> = core
     ? [
         ['Model', `${core.provider_name} · ${core.model_name}`],
@@ -464,7 +529,14 @@ function CoreParamsPanel() {
         ['Ngữ cảnh', fmtContextTokens(core.context_tokens)],
         ['Bộ quy tắc', core.rule_codes.length ? core.rule_codes.join(', ') : '—'],
       ]
-    : [];
+    : std
+      ? [
+          ['Model', `${std.provider_name} · ${std.model_name} (chuẩn, tự chọn)`],
+          ['Nhiệt độ', fmtTemperature(std.temperature)],
+          ['Ngữ cảnh', fmtContextTokens(std.context_tokens)],
+          ['Bộ quy tắc', '—'],
+        ]
+      : [];
   return (
     <Panel title="Tham số sàng lọc" kicker="Dùng cho việc sàng lọc thô → sạch" bodyClass="apm-params" label="Tham số sàng lọc">
       {bindings.isPending ? (
@@ -478,6 +550,31 @@ function CoreParamsPanel() {
           <div className="apm-param-row" key={k}>
             <span className="apm-param-row__key">{k}</span>
             <div className="apm-param-row__box" title={v}>{v}</div>
+          </div>
+        ))
+      )}
+    </Panel>
+  );
+}
+
+/** v0.1.55 (Nâng cao): nhiệt độ · ngữ cảnh · bộ quy tắc của MỌI vai (Sếp đã gán hoặc hồ sơ chuẩn) — mỗi vai một dòng chữ. */
+function AdvancedParamsPanel() {
+  const bindings = useBindings();
+  const items = bindings.data?.items ?? [];
+  return (
+    <Panel title="Tham số theo vai" kicker="Nhiệt độ, ngữ cảnh, bộ quy tắc — chỉnh ở hộp gán model (mục Nâng cao)" bodyClass="apm-params" label="Tham số theo vai">
+      {bindings.isPending ? (
+        <SkeletonLines rows={4} padding="0" />
+      ) : bindings.isError ? (
+        <CardError error={bindings.error} onRetry={() => void bindings.refetch()} retrying={bindings.isFetching} />
+      ) : items.length === 0 ? (
+        <EmptyState icon="ph ph-sliders-horizontal" title="Chưa có agent nào" />
+      ) : (
+        items.map((slot) => (
+          <div className="apm-param-row" key={slot.agent_key}>
+            <div className="apm-param-row__box" data-testid={`binding-params-${slot.agent_key}`}>
+              {bindingParamsText(slot)}
+            </div>
           </div>
         ))
       )}

@@ -61,6 +61,8 @@ const CORE_AGENT_KEYS: Record<string, string> = {
   'core.reply': 'Soạn lại / dịch nháp',
   // v0.1.21: Gen — trợ lý quản trị (gh.gen.engine.AGENT_KEY); v0.1.38 (F-22): khoá DUY NHẤT được gán Antigravity CLI.
   'core.gen': 'Gen — trợ lý quản trị',
+  // v0.1.55 (G1): Bản tin Gen có khoá riêng (việc nền) — gh.gen.briefing.AGENT_KEY.
+  'core.briefing': 'Bản tin Gen',
 };
 const GEN_KEY = 'core.gen';
 /** Chuỗi THẬT của máy chủ: gh/providers/router.py::AGY_OWNER_ONLY_REASON = gh/agents_api/routes.py::AGY_GEN_ONLY_MSG. */
@@ -84,14 +86,25 @@ interface BindingState {
   temperature: number;
   context_tokens: number;
   rule_codes: string[];
+  /** v0.1.55 (G1): mức suy nghĩ riêng của vai (null = theo hồ sơ chuẩn / model). */
+  effort: string | null;
 }
+
+/** Như `gh/defaults/profiles.py` (rút gọn): hồ sơ chuẩn theo vai khi chưa có dòng gán. */
+const STANDARD_PROFILE: Record<string, { tier: 'fast' | 'balanced' | 'strong'; tier_label: string; effort: string | null; temperature: number; context_tokens: number }> = {
+  'core.gen': { tier: 'balanced', tier_label: 'Cân bằng', effort: null, temperature: 0.3, context_tokens: 6000 },
+  'core.briefing': { tier: 'fast', tier_label: 'Nhanh', effort: null, temperature: 0.2, context_tokens: 6000 },
+  'core.refinery': { tier: 'fast', tier_label: 'Nhanh', effort: null, temperature: 0.2, context_tokens: 6000 },
+  'core.reply': { tier: 'balanced', tier_label: 'Cân bằng', effort: null, temperature: 0.3, context_tokens: 6000 },
+};
+const AGENT_PROFILE = { tier: 'balanced' as const, tier_label: 'Cân bằng', effort: null, temperature: 0.3, context_tokens: 6000 };
 
 export function createMock(opts: P4ApiOptions) {
   const bindings = new Map<string, BindingState>(
     opts.fresh
       ? []
       : [
-          ['core.refinery', { model_id: 'md-antigravity-pro', model_name: 'gemini-2.5-pro', provider_name: 'Antigravity Brain', temperature: 0.2, context_tokens: 64_000, rule_codes: ['R-01', 'R-02', 'R-03', 'R-04', 'R-05', 'R-06'] }],
+          ['core.refinery', { model_id: 'md-antigravity-pro', model_name: 'gemini-2.5-pro', provider_name: 'Antigravity Brain', temperature: 0.2, context_tokens: 64_000, rule_codes: ['R-01', 'R-02', 'R-03', 'R-04', 'R-05', 'R-06'], effort: null }],
         ],
   );
   const has = (ctx: P2Ctx, perm: string) => !!ctx.perms[perm] && ctx.perms[perm] !== 'none';
@@ -141,6 +154,18 @@ export function createMock(opts: P4ApiOptions) {
       for (const m of p.models) out.push({ id: m.id, model_name: m.model_name, provider_name: p.name, enabled: p.enabled });
     }
     return out;
+  }
+
+  /** Model "Chuẩn" cho một khoá: model đầu tiên của nguồn đầu tiên dùng được (agy chỉ cho Gen); không có ⇒ null. */
+  function standardFor(agentKey: string) {
+    const prof = STANDARD_PROFILE[agentKey] ?? AGENT_PROFILE;
+    const providers = [...opts.getProviders()].filter((x) => x.enabled && x.kind !== 'system_one').sort((a, b) => a.failover_rank - b.failover_rank);
+    for (const pv of providers) {
+      if (pv.kind === 'antigravity_cli' && agentKey !== GEN_KEY) continue;
+      const m = pv.models[0];
+      if (m) return { model_name: m.model_name, provider_name: pv.name, ...prof };
+    }
+    return null;
   }
 
   function keysAndLabels(): Array<[string, string]> {
@@ -242,7 +267,14 @@ export function createMock(opts: P4ApiOptions) {
       // Như gh/agents_api/routes.py::_binding_out: `blocked_reason` nằm TRONG binding (bản cài cũ gán agy cho khoá khác Gen).
       const items = keysAndLabels().map(([agent_key, label]) => {
         const b = bindings.get(agent_key);
-        return { agent_key, label, binding: b ? { ...b, blocked_reason: agent_key !== GEN_KEY && isAgy(b) ? AGY_OWNER_ONLY_REASON : null } : null };
+        return {
+          agent_key,
+          label,
+          binding: b ? { ...b, blocked_reason: agent_key !== GEN_KEY && isAgy(b) ? AGY_OWNER_ONLY_REASON : null } : null,
+          // v0.1.55 (G1): `custom` = Sếp đã gán; `standard` = dùng hồ sơ chuẩn (+ model đang phủ).
+          source: b ? 'custom' : 'standard',
+          standard: b ? null : standardFor(agent_key),
+        };
       });
       return reply(200, { items, models: bindableModels() });
     }
@@ -259,14 +291,24 @@ export function createMock(opts: P4ApiOptions) {
       if (!found) return problem(404, 'NOT_FOUND', 'Model không tồn tại');
       // F-22: luật cứng — model Antigravity CLI chỉ gán được cho Gen (gh.errors.conflict: chỉ title + code).
       if (agentKey !== GEN_KEY && isAgy({ model_id: modelId })) return problem(409, 'AGY_OWNER_GEN_ONLY', AGY_OWNER_ONLY_REASON);
+      // v0.1.55 (G1): `effort` kiểm theo nguồn — khoá API và haiku không có mức suy nghĩ (422 `effort`).
+      const effort = typeof b.effort === 'string' ? b.effort : null;
+      if (effort) {
+        const kind = opts.getProviders().find((x) => x.models.some((mm) => mm.id === modelId))?.kind;
+        const cli = kind === 'antigravity_cli' || kind === 'claude_code_cli';
+        if (!cli || /haiku/i.test(found.model_name) || !['low', 'medium', 'high', 'xhigh', 'max'].includes(effort) || (kind === 'antigravity_cli' && !['low', 'medium', 'high'].includes(effort))) {
+          return problem(422, 'VALIDATION', 'Dữ liệu chưa hợp lệ', { errors: { effort: `Model “${found.model_name}” không chỉnh được mức suy nghĩ này — bỏ trống ô này` } });
+        }
+      }
       const binding: BindingState = {
         model_id: modelId, model_name: found.model_name, provider_name: found.provider_name,
         temperature: typeof b.temperature === 'number' ? b.temperature : 0.3,
         context_tokens: typeof b.context_tokens === 'number' ? b.context_tokens : 8000,
         rule_codes: Array.isArray(b.rule_codes) ? (b.rule_codes as string[]) : [],
+        effort,
       };
       bindings.set(agentKey, binding);
-      return reply(200, { agent_key: agentKey, label, binding: { ...binding, blocked_reason: null } });
+      return reply(200, { agent_key: agentKey, label, binding: { ...binding, blocked_reason: null }, source: 'custom', standard: null });
     }
 
     if (seg.length === 3 && m === 'DELETE') {

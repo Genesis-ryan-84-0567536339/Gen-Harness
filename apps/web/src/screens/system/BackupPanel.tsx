@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { ApiError, type BackupItem, type BackupSchedule, type BackupsPage } from '@gen-harness/contracts';
 import { Button, Dialog, EmptyState, Icon, Segmented, TextField } from '@gen-harness/ui';
+import { DefaultControls } from '../../defaults/ResetButton';
 import { api } from '../../lib/api';
 import { downloadBlob } from '../../lib/download';
 import { errorText } from '../../lib/errorText';
@@ -121,17 +122,21 @@ export function BackupPanel() {
       label="Sao lưu & khôi phục"
       bodyClass="bk"
       aside={
-        <Button
-          variant="primary"
-          icon="ph ph-floppy-disk"
-          className="btn-30"
-          data-gen-target="system.backup.now"
-          loading={runNow.isPending || busyJob}
-          disabled={!d || restoring}
-          onClick={() => runNow.mutate()}
-        >
-          {busyJob ? 'Đang sao lưu…' : 'Sao lưu ngay'}
-        </Button>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          {/* v0.1.55: lịch sao lưu về mặc định (hằng ngày 02:00, giữ 7 bản) — chỉ Owner thấy chip + nút. */}
+          {isOwner ? <DefaultControls itemKey="backup" /> : null}
+          <Button
+            variant="primary"
+            icon="ph ph-floppy-disk"
+            className="btn-30"
+            data-gen-target="system.backup.now"
+            loading={runNow.isPending || busyJob}
+            disabled={!d || restoring}
+            onClick={() => runNow.mutate()}
+          >
+            {busyJob ? 'Đang sao lưu…' : 'Sao lưu ngay'}
+          </Button>
+        </span>
       }
     >
       {rv.kind !== 'hidden' ? (

@@ -14,6 +14,7 @@ import { GenMemoryCard } from './GenMemoryCard';
 import { GenCoachCard } from './GenCoachCard';
 import { AiBudgetCard } from './AiBudgetCard';
 import { useCan } from '../../lib/permissions';
+import { StandardModeStrip } from '../../defaults/StandardModeStrip';
 
 /**
  * Bộ não AI — góc nhìn vận hành hệ thống (PLAN 4.5): hạn mức theo model, chuỗi chuyển hướng, quy tắc chuyển
@@ -46,6 +47,7 @@ export function BrainTabBody() {
   const jevHash = hash === '#jev';
   const memoryHash = hash === '#gen-memory';
   const coachHash = hash === '#gen-coach';
+  const standardHash = hash === '#chuan';
   // v0.1.43: "Nhập khoá Jev" (Kiểm tra của Boss) dẫn tới #jev — thẻ ở lưới dưới, mở sẵn rồi cuộn tới (giống Kết nối).
   useEffect(() => {
     if (!jevHash) return;
@@ -64,6 +66,12 @@ export function BrainTabBody() {
     const t = window.setTimeout(() => document.getElementById('gen-coach')?.scrollIntoView?.({ block: 'start' }), 50);
     return () => window.clearTimeout(t);
   }, [coachHash]);
+  // v0.1.55: gợi ý "Áp model chuẩn theo vai?" (Hôm nay, Gen) dẫn tới `#chuan` — cuộn tới dải "Chế độ tiêu chuẩn".
+  useEffect(() => {
+    if (!standardHash) return;
+    const t = window.setTimeout(() => document.getElementById('chuan')?.scrollIntoView?.({ block: 'start' }), 50);
+    return () => window.clearTimeout(t);
+  }, [standardHash]);
   // v0.1.39 (F-78): Jev không bắt buộc — kiểm tra lỗi thì thu thẻ vào "Nâng cao" thay vì để lỗi đỏ giữa tab.
   // Mutation giữ ở đây để kết quả "Kiểm tra 1 lần" còn nguyên khi thẻ chuyển chỗ.
   const jevTest = useTestProvider();
@@ -83,6 +91,8 @@ export function BrainTabBody() {
 
   return (
     <div className="sys-tabs-col">
+      {/* v0.1.55: "Chế độ tiêu chuẩn: đang dùng / đã đổi N mục · Về mặc định tất cả" (chỉ Owner thấy dải). */}
+      <StandardModeStrip />
       <Panel
         title="Hạn mức theo model"
         genTarget="system.brain.quota"
