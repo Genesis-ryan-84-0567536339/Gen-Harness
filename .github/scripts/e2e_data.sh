@@ -50,18 +50,26 @@ psql_db() {
   docker exec "$db" sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "$1"' psql "$1"
 }
 
+# v0.1.57: gh.seed_demo từ chối chạy khi thiếu GH_ALLOW_SEED_DEMO=1 hoặc DB đã có dữ liệu thật (thoát mã 2). E2E luôn nạp
+# vào DB mới tinh nên truyền biến môi trường (KHÔNG truyền --force: bản cũ trong ma trận nâng cấp chưa có cờ này và
+# argparse của nó sẽ báo lỗi). Mã 2 = bị từ chối có chủ đích ⇒ không thử lại bằng tài khoản quản trị (sẽ bị từ chối y hệt).
 cmd_seed() {
-  local api
+  local api rc
   api="$(container api)"
   echo "nạp dữ liệu mẫu (gh.seed_demo seed) bằng tài khoản ứng dụng…"
-  if docker exec "$api" python -m gh.seed_demo seed; then
+  rc=0
+  docker exec -e GH_ALLOW_SEED_DEMO=1 "$api" python -m gh.seed_demo seed || rc=$?
+  if [ "$rc" -eq 0 ]; then
     echo "OK: đã nạp dữ liệu mẫu."
     return 0
+  fi
+  if [ "$rc" -eq 2 ]; then
+    die "gh.seed_demo từ chối nạp dữ liệu mẫu (mã 2: thiếu cờ cho phép hoặc DB đã có dữ liệu thật) — xem câu 'Chi tiết kỹ thuật' ở trên."
   fi
   # Tài khoản ứng dụng gh_app chịu RLS — có bản cũ không đủ quyền tạo tổ chức mẫu; thử lại bằng tài khoản quản trị.
   echo "::warning::seed bằng tài khoản ứng dụng lỗi — thử lại bằng GH_ADMIN_DATABASE_URL (superuser)."
   # shellcheck disable=SC2016 # $GH_ADMIN_DATABASE_URL mở rộng BÊN TRONG container, không lộ ra log runner.
-  if docker exec "$api" sh -c 'GH_DATABASE_URL="$GH_ADMIN_DATABASE_URL" python -m gh.seed_demo seed'; then
+  if docker exec -e GH_ALLOW_SEED_DEMO=1 "$api" sh -c 'GH_DATABASE_URL="$GH_ADMIN_DATABASE_URL" python -m gh.seed_demo seed'; then
     echo "OK: đã nạp dữ liệu mẫu (tài khoản quản trị)."
     return 0
   fi

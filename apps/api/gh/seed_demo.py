@@ -12,6 +12,12 @@ Nội dung mẫu giữ đúng kịch bản và con số của `docs/design/seed-
 ghép kho lạnh…) để so ảnh giai đoạn 5.2 dễ khớp; TÊN người / công ty / nhóm là tên hư cấu rõ ràng ("Mẫu"), không
 phải khách thật (v0.1.56).
 
+**Khoá an toàn (v0.1.57)**: dữ liệu mẫu là dữ liệu BỊA — nạp vào cơ sở dữ liệu của Owner sẽ làm rối dữ liệu thật
+(và `raw.events` bất biến nên tin mẫu ở lại vĩnh viễn). Vì vậy `seed` chỉ chạy khi (a) có biến môi trường
+`GH_ALLOW_SEED_DEMO=1` hoặc cờ `--force`, VÀ (b) cơ sở dữ liệu chưa có dữ liệu thật của tổ chức (người dùng,
+hồ sơ liên hệ hay tin nhắn không thuộc bộ mẫu). Từ chối ⇒ in câu tiếng Việt + "Chi tiết kỹ thuật", thoát mã 2.
+`clear` chỉ xoá đúng thứ mẫu đã nạp nên không bị khoá.
+
 **Vì sao không xoá được `raw.events`** (quan trọng cho `clear_demo`): bảng thô có trigger
 `raw_events_append_only` (`core.forbid_mutation`, `db/sql/0001_baseline.sql`) chặn tuyệt đối UPDATE/DELETE —
 đây là luật cứng R1, không có đường vòng, kể cả cho dữ liệu mẫu. Vì vậy "xoá dữ liệu mẫu" ở đây nghĩa là: xoá
@@ -27,7 +33,10 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
+import sys
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, time, timedelta
 from typing import Any
@@ -575,19 +584,89 @@ async def clear_demo(sm: async_sessionmaker[AsyncSession], redis: Redis) -> dict
                 "market_signals_removed": len(signal_ids)}
 
 
-async def _main() -> None:
+# ═══ Khoá an toàn (v0.1.57) ═════════════════════════════════════════════════════════
+
+ALLOW_ENV = "GH_ALLOW_SEED_DEMO"
+EXIT_REFUSED = 2
+MSG_NOT_ALLOWED = ("Chưa cho phép nạp dữ liệu mẫu — đó là dữ liệu bịa, dễ làm rối dữ liệu thật của tổ chức. "
+                   f"Chỉ nạp khi thật sự cần: chạy lại với cờ --force hoặc đặt {ALLOW_ENV}=1.")
+MSG_HAS_REAL_DATA = "Cơ sở dữ liệu đã có dữ liệu thật — không nạp dữ liệu mẫu."
+
+# (nhãn bảng, câu đếm tối đa 1000 dòng — đủ để biết "có hay không", không quét cả bảng lớn). Dữ liệu thuộc bộ mẫu
+# (khoá ngoài mang tiền tố NS) KHÔNG tính là dữ liệu thật, nên chạy `seed` lần hai trên DB đã nạp mẫu vẫn được phép.
+_REAL_DATA_PROBES: tuple[tuple[str, str], ...] = (
+    ("core.users (người dùng)",
+     "SELECT count(*) FROM (SELECT 1 FROM core.users LIMIT 1000) s"),
+    ("core.persons (hồ sơ liên hệ ngoài bộ mẫu)",
+     """SELECT count(*) FROM (SELECT 1 FROM core.persons p WHERE NOT EXISTS (
+            SELECT 1 FROM core.person_identities i WHERE i.person_id = p.id AND i.external_id LIKE :ns) LIMIT 1000) s"""),
+    ("raw.event_keys (tin nhắn ngoài bộ mẫu)",
+     "SELECT count(*) FROM (SELECT 1 FROM raw.event_keys WHERE external_msg_id NOT LIKE :mp LIMIT 1000) s"),
+)
+
+
+class SeedRefused(Exception):
+    """Từ chối nạp dữ liệu mẫu: `message` thân thiện cho người chạy, `detail` là "Chi tiết kỹ thuật" (không có bí mật)."""
+
+    def __init__(self, message: str, detail: str):
+        super().__init__(message)
+        self.message = message
+        self.detail = detail
+
+
+async def real_data_found(sm: async_sessionmaker[AsyncSession]) -> dict[str, int]:
+    """Bảng nào đang có dữ liệu thật → số dòng (tối đa 1000). Rỗng ⇒ chưa có dữ liệu thật."""
+    found: dict[str, int] = {}
+    async with sm() as db:
+        for label, sql in _REAL_DATA_PROBES:
+            n = int((await db.execute(text(sql), {"ns": f"{NS}-person-%", "mp": f"{MSG_PREFIX}%"})).scalar_one())
+            if n:
+                found[label] = n
+    return found
+
+
+async def check_seed_allowed(sm: async_sessionmaker[AsyncSession], *, force: bool,
+                             env: Mapping[str, str] | None = None) -> None:
+    """Ném `SeedRefused` nếu chưa được phép nạp: thiếu cờ/biến môi trường, hoặc DB đã có dữ liệu thật."""
+    env = os.environ if env is None else env
+    if not (force or env.get(ALLOW_ENV) == "1"):
+        raise SeedRefused(MSG_NOT_ALLOWED, f"không có --force và {ALLOW_ENV} != '1' (giá trị hiện tại: "
+                                           f"{env.get(ALLOW_ENV)!r})")
+    found = await real_data_found(sm)
+    if found:
+        raise SeedRefused(MSG_HAS_REAL_DATA, "; ".join(f"{k}: ≥ {v}" if v >= 1000 else f"{k}: {v}"
+                                                      for k, v in found.items()))
+
+
+async def run_cli(action: str, *, force: bool, sm: async_sessionmaker[AsyncSession], redis: Redis,
+                  env: Mapping[str, str] | None = None) -> int:
+    """Chạy `seed`/`clear` qua khoá an toàn. Trả mã thoát: 0 = xong, 2 = bị từ chối (xem `SeedRefused`)."""
+    if action == "seed":
+        try:
+            await check_seed_allowed(sm, force=force, env=env)
+        except SeedRefused as exc:
+            print(exc.message, file=sys.stderr)
+            print(f"Chi tiết kỹ thuật: {exc.detail}", file=sys.stderr)
+            return EXIT_REFUSED
+    out = await (seed_demo(sm, redis) if action == "seed" else clear_demo(sm, redis))
+    log.info("gh.seed_demo %s: %s", action, out)
+    return 0
+
+
+async def _main() -> int:
     logging.basicConfig(level=logging.INFO)
     parser = argparse.ArgumentParser(description="Seed / xoá dữ liệu mẫu Gen-Harness (PLAN §5.1)")
     parser.add_argument("action", choices=["seed", "clear"])
+    parser.add_argument("--force", action="store_true",
+                        help=f"cho phép nạp dữ liệu mẫu (tương đương {ALLOW_ENV}=1); vẫn từ chối nếu DB đã có dữ liệu thật")
     args = parser.parse_args()
     sm = sessionmaker()
     redis = Redis.from_url(get_settings().redis_url)
     try:
-        out = await (seed_demo(sm, redis) if args.action == "seed" else clear_demo(sm, redis))
-        log.info("gh.seed_demo %s: %s", args.action, out)
+        return await run_cli(args.action, force=args.force, sm=sm, redis=redis)
     finally:
         await redis.aclose()
 
 
 if __name__ == "__main__":
-    asyncio.run(_main())
+    sys.exit(asyncio.run(_main()))
