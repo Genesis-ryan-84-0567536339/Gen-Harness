@@ -37,7 +37,7 @@ const me = (role: string) => ({
 });
 
 const SAVED: HubLink = {
-  configured: true, enabled: true, status: 'ok', server_id: 's1', endpoint: 'https://hub.genos.top/mcp', has_token: true,
+  configured: true, enabled: true, status: 'ok', server_id: 's1', endpoint: 'https://hub.example.test/mcp', has_token: true,
   allow_public_network: true, token_expires_at: '2026-12-28T16:59:00Z', days_left: 80, last_ok_at: '2026-10-09T01:00:00Z', last_error: null, health: 'healthy',
 };
 const FULL = { calendar: true, mail: true, tasks: true, drive: true };
@@ -253,7 +253,7 @@ describe('mock-p4-mcp — chế độ giả "thiếu quyền lịch + mail" (tok
 
   it('token thường ⇒ đủ quyền; token "thieu" ⇒ Kiểm tra xanh + read_missing; GET /hub/link có read_scopes + breaker', () => {
     const mock = createMock({ fresh: true, emit: () => undefined, getAgents: () => [], pushDraft: () => undefined });
-    call(mock, 'PATCH', '/hub/link', { endpoint: 'https://hub.genos.top/mcp', token: 'ghtok_binh_thuong_1', allow_public_network: true });
+    call(mock, 'PATCH', '/hub/link', { endpoint: 'https://hub.example.test/mcp', token: 'ghtok_binh_thuong_1', allow_public_network: true });
     expect(call(mock, 'GET', '/hub/link').body).toMatchObject({ breaker: { open: false } });
     // Như máy chủ: chưa có lần Kiểm tra xanh ⇒ `read_scopes: null` ("Chưa kiểm"), KHÔNG phải 4 quyền false.
     expect((call(mock, 'GET', '/hub/link').body as { read_scopes?: unknown }).read_scopes).toBeNull();

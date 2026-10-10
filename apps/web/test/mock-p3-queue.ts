@@ -132,7 +132,7 @@ function seedTasks(): Task[] {
     },
     {
       id: 't-410', code: 'TSK-0410', title: 'Gửi hợp đồng in ấn quý 4 đã ký cho Thành Phát',
-      priority: 'P1', status: 'doing', assignee: { id: USER_IDS.owner, name: 'Anh Cơ La (Ryan)' },
+      priority: 'P1', status: 'doing', assignee: { id: USER_IDS.owner, name: 'Anh Nguyễn Văn A (Chủ)' },
       subject: BAO, due_at: ago(90), remind_at: null, overdue: true,
       source: 'draft', created_at: ago(300), completed_at: null,
     },
@@ -144,7 +144,7 @@ function seedTasks(): Task[] {
     },
     {
       id: 't-406', code: 'TSK-0406', title: 'Đã gọi xác nhận đơn hàng với Thành Phát',
-      priority: 'P3', status: 'done', assignee: { id: USER_IDS.owner, name: 'Anh Cơ La (Ryan)' },
+      priority: 'P3', status: 'done', assignee: { id: USER_IDS.owner, name: 'Anh Nguyễn Văn A (Chủ)' },
       subject: BAO, due_at: ago(1440), remind_at: null, overdue: false,
       source: 'manual', created_at: ago(2000), completed_at: ago(1000),
     },

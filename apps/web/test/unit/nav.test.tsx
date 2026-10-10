@@ -100,7 +100,7 @@ function renderSidebar(nav: NavDomain[], path: string, role: { code: string; nam
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   qc.setQueryData(qk.navigation, nav);
   qc.setQueryData(qk.me, {
-    id: 'u', email: 'owner@genesis.local', display_name: 'Anh Cơ La (Ryan)',
+    id: 'u', email: 'owner@genesis.local', display_name: 'Anh Nguyễn Văn A (Chủ)',
     role,
     org: { id: 'o', name: 'x', timezone: 'Asia/Ho_Chi_Minh', currency: 'VND' },
     addressing: { self: 'Anh', bot_calls_me: 'Sếp' }, pin_verified_until: null, permissions: {},
@@ -150,7 +150,7 @@ describe('<Sidebar>', () => {
     expect(within(nav).queryByText('Kho dữ liệu thô')).not.toBeInTheDocument();
     // children of collapsed groups are not rendered
     expect(within(nav).queryByText('Hộp thư')).not.toBeInTheDocument();
-    expect(screen.getByText('CL')).toBeInTheDocument();
+    expect(screen.getByText('VA')).toBeInTheDocument();
     expect(screen.getByText('Owner · thấy toàn cảnh')).toBeInTheDocument();
   });
 
@@ -203,7 +203,7 @@ describe('<Sidebar>', () => {
     expect(within(nav).queryByText('Hướng dẫn thiết lập')).not.toBeInTheDocument();
     expect(within(nav).queryByText('Mạng xã hội')).not.toBeInTheDocument();
     // Menu tài khoản của Owner vẫn có Hướng dẫn thiết lập.
-    await user.click(screen.getByRole('button', { name: /Anh Cơ La/ }));
+    await user.click(screen.getByRole('button', { name: /Anh Nguyễn Văn A/ }));
     expect(screen.getByRole('menuitem', { name: /Hướng dẫn thiết lập/ })).toBeInTheDocument();
   });
 
@@ -303,7 +303,7 @@ describe('Hướng dẫn thiết lập — menu tài khoản (v0.1.42: không c�
   it('Owner: menu tài khoản có "Hướng dẫn thiết lập" cạnh Trợ giúp', async () => {
     const user = userEvent.setup();
     renderSidebar(NAV, '/overview');
-    await user.click(screen.getByRole('button', { name: /Anh Cơ La/ }));
+    await user.click(screen.getByRole('button', { name: /Anh Nguyễn Văn A/ }));
     const items = screen.getAllByRole('menuitem').map((m) => m.textContent);
     const help = items.findIndex((t) => t?.includes('Trợ giúp'));
     expect(items[help + 1]).toContain('Hướng dẫn thiết lập');
@@ -315,7 +315,7 @@ describe('Hướng dẫn thiết lập — menu tài khoản (v0.1.42: không c�
     const user = userEvent.setup();
     renderSidebar(NAV, '/overview', { code: 'manager', name: 'Quản lý' });
     expect(screen.queryByRole('link', { name: /Hướng dẫn thiết lập/ })).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: /Anh Cơ La/ }));
+    await user.click(screen.getByRole('button', { name: /Anh Nguyễn Văn A/ }));
     expect(screen.queryByRole('menuitem', { name: /Hướng dẫn thiết lập/ })).not.toBeInTheDocument();
   });
 });

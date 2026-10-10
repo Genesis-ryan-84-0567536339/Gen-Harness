@@ -253,7 +253,7 @@
 .hub-breaker { margin: 0; padding: 6px 9px; border: 1px solid var(--color-warn); border-radius: var(--radius-md); color: var(--color-warn); font-size: 12px; overflow-wrap: anywhere; }
 .boss-hub-scopes { margin: 0; font-size: 12px; color: var(--color-neutral-400); overflow-wrap: anywhere; }
 
-/* ── v0.1.50 (F-81, QD-18): thẻ đề xuất "Ghi nhớ" / "Ghi vào Kho Ryan" + khối "Quyền ghi Kho" + dòng 9 "Gen ghi Kho" ──
+/* ── v0.1.50 (F-81, QD-18): thẻ đề xuất "Ghi nhớ" / "Ghi vào Kho dữ liệu" + khối "Quyền ghi Kho" + dòng 9 "Gen ghi Kho" ──
  * Chỉ dùng token màu; bảng trường co được (table-layout cố định, ngắt dòng) để không tràn ngang ở 390px. */
 .gen-prop__dl--memory, .gen-prop__dl--kho { grid-template-columns: 82px minmax(0, 1fr); }
 .gen-prop__count { align-self: flex-end; margin-top: 3px; font-size: 10.5px; font-family: var(--font-mono); color: var(--color-neutral-500); }

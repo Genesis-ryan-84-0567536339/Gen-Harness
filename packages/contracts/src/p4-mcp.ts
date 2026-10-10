@@ -109,7 +109,7 @@ export type McpCallResult =
   | { outcome: 'held_for_approval' | 'blocked'; draft: unknown; call: McpCall };
 
 /**
- * v0.1.26 (Đợt D1) — liên kết Gen-hub để Gen đọc Kho Ryan (`apps/api/gh/hub_link/routes.py`). Token Gen-hub CHỈ GHI:
+ * v0.1.26 (Đợt D1) — liên kết Gen-hub để Gen đọc Kho dữ liệu (`apps/api/gh/hub_link/routes.py`). Token Gen-hub CHỈ GHI:
  * API không bao giờ trả lại token (chỉ `has_token`). Liên kết tắt (`enabled=false`) tới khi Owner bấm "Kiểm tra" xanh.
  */
 export type HubLinkStatus = 'off' | 'ok' | 'expiring' | 'expired' | 'error';
@@ -120,7 +120,7 @@ export type HubReadScopes = { calendar: boolean; mail: boolean; tasks: boolean; 
 /**
  * v0.1.50 (F-81, QD-18): quyền GHI Kho của token Gen-hub (tuỳ chọn), THEO TỪNG tool: `kho_create`, `kho_update` (tool có trên Gen-hub,
  * đang mở và đã cấp cho Gen); `kho` = có cả hai (giữ cho bên đọc cũ). Máy chủ cũ chỉ gửi `kho` ⇒ hai dòng theo `kho`. Gen KHÔNG tự
- * ghi — chỉ khi Sếp bấm Xác nhận + nhập mã PIN trên thẻ đề xuất "Ghi vào Kho Ryan".
+ * ghi — chỉ khi Sếp bấm Xác nhận + nhập mã PIN trên thẻ đề xuất "Ghi vào Kho dữ liệu".
  */
 export type HubWriteScopes = { kho: boolean; kho_create?: boolean; kho_update?: boolean };
 

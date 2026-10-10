@@ -157,7 +157,7 @@ const LESSON_DEFS: Array<{ id: string; title: string; body: string; target?: str
   { id: 'G10', title: 'Mời nhân viên', body: 'Mời người dùng với mật khẩu tạm; mỗi vai trò chỉ thấy phần việc của mình.', target: 'guide.item.do:10' },
   { id: 'G11', title: 'Sao lưu tự động', body: 'Đặt lịch sao lưu để dữ liệu luôn có bản dự phòng.', target: 'guide.item.do:11' },
   { id: 'G13', title: 'Kết nối Facebook', body: 'Đăng nhập tài khoản Facebook để Gen đọc bình luận và tin nhắn.', target: 'guide.item.do:13' },
-  { id: 'G14', title: 'Nối Gen-hub', body: 'Nối Gen-hub để Gen đọc Kho Ryan, lịch, mail và Drive.', target: 'guide.item.do:14' },
+  { id: 'G14', title: 'Nối Gen-hub', body: 'Nối Gen-hub để Gen đọc Kho dữ liệu, lịch, mail và Drive.', target: 'guide.item.do:14' },
 ];
 
 interface State {

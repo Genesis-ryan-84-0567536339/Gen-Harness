@@ -1,5 +1,5 @@
 /** Gen v2 (A4) — hàm thuần cho thẻ đề xuất (ProposalCard): nhãn, chuyển giờ `datetime-local`, so trường đã sửa. */
-import { GEN_PROPOSAL_EDITABLE, type GenProposal } from '@gen-harness/contracts';
+import { GEN_PROPOSAL_EDITABLE, KHO_LABEL, type GenProposal } from '@gen-harness/contracts';
 import { khoBangOf, khoDraftRecord, khoInitialDraft, sameRecord } from './khoWriteModel';
 
 export const PROPOSAL_TITLE: Record<GenProposal['type'], string> = {
@@ -8,10 +8,10 @@ export const PROPOSAL_TITLE: Record<GenProposal['type'], string> = {
   assign: 'Giao người phụ trách',
   social_reply: 'Trả lời bình luận Facebook',
   social_dm: 'Nhắn tin Facebook',
-  // v0.1.50 (F-81, QD-18): thẻ Gen nhớ / thẻ ghi Kho Ryan (tạo và sửa dùng chung một tiêu đề).
+  // v0.1.50 (F-81, QD-18): thẻ Gen nhớ / thẻ ghi Kho dữ liệu (tạo và sửa dùng chung một tiêu đề).
   memory_note: 'Ghi nhớ',
-  kho_create: 'Ghi vào Kho Ryan',
-  kho_update: 'Ghi vào Kho Ryan',
+  kho_create: `Ghi vào ${KHO_LABEL}`,
+  kho_update: `Ghi vào ${KHO_LABEL}`,
 };
 
 /** v0.1.47 (F-79): đề xuất gửi lên Facebook (trả lời bình luận / nhắn tin) — gửi NGAY khi xác nhận, cần PIN. */

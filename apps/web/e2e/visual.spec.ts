@@ -470,7 +470,7 @@ for (const sc of SCENARIOS) {
     if (sc.afterGoto) await sc.afterGoto(appPage);
     // Viên "N kênh · M nhóm" luôn có; viên tự trị chỉ ở màn Nâng cao (F-67).
     await expect(appPage.locator('header.hd .hd-status')).toContainText(/kênh · \d+ nhóm/);
-    await expect(appPage.locator('.sb-avatar')).toHaveText('CL');
+    await expect(appPage.locator('.sb-avatar')).toHaveText('VA');
     await expect(appPage.locator('.sb-nav .sb-item').first()).toBeVisible();
     // Kiểm khói thanh bên: đúng 7 mục cấp 1 (6 + Nâng cao), không có mục nào bị cắt ra ngoài thanh bên.
     await expect(appPage.locator('.sb-nav [data-level1]')).toHaveCount(LEVEL1);

@@ -253,7 +253,7 @@ describe('mock-boss-checks — v0.1.55', () => {
   });
 
   it('Claude / Google gọi thử đạt ⇒ dòng 0 tự đạt (kết quả giả via claude_call / agy_call, runs 0); agy xong KHÔNG cần đổi 2 lần', () => {
-    const profile = { id: 'c1', email: 'ryan@claude.ai', plan_label: null, active: true, expires_at: null, state: 'ok' } as never;
+    const profile = { id: 'c1', email: 'a@example.test', plan_label: null, active: true, expires_at: null, state: 'ok' } as never;
     const mock = makeMock({ cliProfiles: (k) => (k === 'claude_code_cli' ? [profile] : []) });
     expect(call(mock, 'POST', '/boss-checks/claude_call/run').status).toBe(200);
     const ov = overview(mock);

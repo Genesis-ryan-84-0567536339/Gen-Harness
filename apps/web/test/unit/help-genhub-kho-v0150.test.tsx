@@ -11,7 +11,7 @@ import { queryClient } from '../../src/lib/queryClient';
  * khi Sếp Xác nhận + mã PIN; Gmail/Lịch/Drive vẫn chỉ đọc.
  */
 const owner = {
-  id: 'u1', email: 'owner@genesis.local', display_name: 'Anh Cơ La (Ryan)', role: { code: 'owner', name: 'Owner — Sếp' },
+  id: 'u1', email: 'owner@genesis.local', display_name: 'Anh Nguyễn Văn A (Chủ)', role: { code: 'owner', name: 'Owner — Sếp' },
   org: { id: 'o1', name: 'Genesis Trading', timezone: 'Asia/Ho_Chi_Minh', currency: 'VND' },
   addressing: { self: 'Anh', bot_calls_me: 'Sếp' }, pin_verified_until: null,
   permissions: { 'system.read': 'all', 'system.manage': 'all' }, must_change_password: false, features: { gen: false },
@@ -38,13 +38,13 @@ describe('Gen-hub ghi Kho có xác nhận — chữ trên Trợ giúp và Hướ
       </QueryClientProvider>,
     );
     const card = await screen.findByTestId('help-genhub-reads');
-    expect(card.textContent).toContain('Gen đọc: Kho Ryan, lịch, mail (tìm và đọc), việc Google Tasks, tệp Drive.');
-    // Cùng một danh sách không được vừa nói "chỉ ĐỌC" vừa nói "Ghi duy nhất: Phiên, Việc vào Kho Ryan".
+    expect(card.textContent).toContain('Gen đọc: Kho dữ liệu, lịch, mail (tìm và đọc), việc Google Tasks, tệp Drive.');
+    // Cùng một danh sách không được vừa nói "chỉ ĐỌC" vừa nói "Ghi duy nhất: Phiên, Việc vào Kho dữ liệu".
     expect(card.textContent).not.toMatch(/chỉ đọc/i);
     expect(card.textContent).toContain('Gen KHÔNG gửi mail');
-    // "việc" ở dòng KHÔNG là việc Google Tasks — không đá nhau với dòng "Ghi duy nhất: Phiên, Việc vào Kho Ryan".
+    // "việc" ở dòng KHÔNG là việc Google Tasks — không đá nhau với dòng "Ghi duy nhất: Phiên, Việc vào Kho dữ liệu".
     expect(card.textContent).toContain('KHÔNG tạo hay sửa lịch, việc Google Tasks, tệp Drive.');
-    expect(card.textContent).toMatch(/Phiên, Việc vào Kho Ryan — chỉ khi Sếp bấm Xác nhận và nhập mã PIN/);
+    expect(card.textContent).toMatch(/Phiên, Việc vào Kho dữ liệu — chỉ khi Sếp bấm Xác nhận và nhập mã PIN/);
     expect(card.textContent).toContain('kho_create, kho_update');
     expect(card.textContent).not.toContain('Gen chỉ đọc');
   });

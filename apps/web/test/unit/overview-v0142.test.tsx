@@ -57,7 +57,7 @@ function stub(overview: Overview, update: unknown = { ...UPDATE, latest: 'v0.1.4
 function renderOverview() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   qc.setQueryData(qk.me, {
-    id: 'u', email: 'owner@genesis.local', display_name: 'Anh Cơ La (Ryan)', role: { code: 'owner', name: 'Owner' },
+    id: 'u', email: 'owner@genesis.local', display_name: 'Anh Nguyễn Văn A (Chủ)', role: { code: 'owner', name: 'Owner' },
     org: { id: 'o', name: 'x', timezone: 'Asia/Ho_Chi_Minh', currency: 'VND' },
     addressing: { self: 'Anh', bot_calls_me: 'Sếp' }, pin_verified_until: null, permissions: permissionsOf('owner'),
   });

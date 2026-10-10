@@ -43,7 +43,7 @@ const ROWS: BossOverview['rows'] = [
   { row: 7, key: 'remote', title: 'Truy cập từ xa', optional: true, checks: ['remote_access'], done: false },
 ];
 const SAVED: HubLink = {
-  configured: true, enabled: false, status: 'off', server_id: 's1', endpoint: 'https://hub.genos.top/mcp', has_token: true,
+  configured: true, enabled: false, status: 'off', server_id: 's1', endpoint: 'https://hub.example.test/mcp', has_token: true,
   allow_public_network: true, token_expires_at: null, days_left: null, last_ok_at: null, last_error: null, health: null,
 };
 const AN: CliProfile = { id: 'p-an', email: 'an@genesis.vn', plan_label: null, active: false, expires_at: null, state: 'ok' };
@@ -387,7 +387,7 @@ describe('Việc Sếp cần làm (/guide/viec-sep)', () => {
 
   it('Claude Code gọi thử AUTH_EXPIRED → nút "Đăng nhập lại Claude Code"', async () => {
     setup({
-      claude: [{ ...BINH, id: 'c1', email: 'ryan@claude.ai' }],
+      claude: [{ ...BINH, id: 'c1', email: 'a@example.test' }],
       results: { ...EMPTY, claude_call: check('claude_call', 'fail', { error_code: 'AUTH_EXPIRED' }) },
     });
     renderPage();
@@ -412,7 +412,7 @@ describe('Việc Sếp cần làm (/guide/viec-sep)', () => {
 
   it('Claude: đã có phiên từ trước (chưa có bản đăng nhập) → ô Đăng nhập nói "Đã có phiên", Gọi thử đạt → dòng thành Đạt', async () => {
     const { world } = setup({
-      claude: [{ ...BINH, id: 'c1', email: 'ryan@claude.ai' }],
+      claude: [{ ...BINH, id: 'c1', email: 'a@example.test' }],
       run: (key) => {
         // Như máy chủ: Gọi thử đạt mà chưa có claude_login đạt → ghi claude_login 'pass' (phiên có sẵn).
         if (key === 'claude_call') world.results.claude_login = check('claude_login', 'pass', { detail: { login_source: 'existing_session' } });

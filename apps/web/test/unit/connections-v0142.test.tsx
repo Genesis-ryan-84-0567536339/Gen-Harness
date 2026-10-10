@@ -109,7 +109,7 @@ const CHANNELS: Channel[] = [
 
 function me(role: RoleCode) {
   return {
-    id: 'u', email: `${role}@genesis.local`, display_name: 'Anh Cơ La (Ryan)', role: { code: role, name: role },
+    id: 'u', email: `${role}@genesis.local`, display_name: 'Anh Nguyễn Văn A (Chủ)', role: { code: role, name: role },
     org: { id: 'o', name: 'x', timezone: 'Asia/Ho_Chi_Minh', currency: 'VND' },
     addressing: { self: 'Anh', bot_calls_me: 'Sếp' }, pin_verified_until: null, permissions: permissionsOf(role),
   };

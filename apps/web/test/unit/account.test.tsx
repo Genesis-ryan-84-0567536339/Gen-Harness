@@ -15,12 +15,12 @@ import { HomeRedirect } from '../../src/shell/HomeRedirect';
 import { buildNavigation } from '../mock-api';
 
 const ME = {
-  id: 'u1', email: 'owner@genesis.local', display_name: 'Anh Cơ La (Ryan)', role: { code: 'owner', name: 'Owner — Sếp' },
+  id: 'u1', email: 'owner@genesis.local', display_name: 'Anh Nguyễn Văn A (Chủ)', role: { code: 'owner', name: 'Owner — Sếp' },
   org: { id: 'o1', name: 'Genesis', timezone: 'Asia/Ho_Chi_Minh', currency: 'VND' },
   addressing: { self: 'Anh', bot_calls_me: 'Sếp' }, pin_verified_until: null, permissions: {}, must_change_password: false,
 };
 const ACCOUNT: Account = {
-  display_name: 'Anh Cơ La (Ryan)', email: 'owner@genesis.local', role: { code: 'owner', name: 'Owner — Sếp' },
+  display_name: 'Anh Nguyễn Văn A (Chủ)', email: 'owner@genesis.local', role: { code: 'owner', name: 'Owner — Sếp' },
   created_at: '2026-05-04T02:15:00Z', must_change_password: false, has_pin: true,
   sessions: [
     { id: 's1', created_at: '2026-09-29T01:00:00Z', last_seen_at: '2026-09-29T01:00:00Z', ip: '127.0.0.1',
@@ -124,7 +124,7 @@ describe('<AccountPage>', () => {
     });
     renderAt('/account', [{ path: '/account', element: <><SidebarName /><AccountPage /></> }]);
     expect(await screen.findByText('Hồ sơ')).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByTestId('sidebar-name')).toHaveTextContent('Anh Cơ La (Ryan)'));
+    await waitFor(() => expect(screen.getByTestId('sidebar-name')).toHaveTextContent('Anh Nguyễn Văn A (Chủ)'));
     expect(screen.getByText('Đổi mật khẩu', { selector: '.gh-card__title' })).toBeInTheDocument();
     expect(screen.getByText('Đổi mã PIN', { selector: '.gh-card__title' })).toBeInTheDocument();
     expect(screen.getByText('Phiên đăng nhập')).toBeInTheDocument();
@@ -133,12 +133,12 @@ describe('<AccountPage>', () => {
 
     const nameField = screen.getByLabelText('Tên hiển thị');
     await user.clear(nameField);
-    await user.type(nameField, 'Anh Cơ La');
+    await user.type(nameField, 'Anh Nguyễn Văn A');
     await user.click(screen.getByRole('button', { name: /Lưu hồ sơ/ }));
     await waitFor(() => expect(useToasts.getState().toasts.map((t) => t.text)).toContain('Đã lưu hồ sơ.'));
-    expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ display_name: 'Anh Cơ La' });
+    expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ display_name: 'Anh Nguyễn Văn A' });
     // Tên ở thanh bên đổi ngay (invalidate me).
-    await waitFor(() => expect(screen.getByTestId('sidebar-name')).toHaveTextContent(/^Anh Cơ La$/));
+    await waitFor(() => expect(screen.getByTestId('sidebar-name')).toHaveTextContent(/^Anh Nguyễn Văn A$/));
   });
 
   it('sai mật khẩu hiện tại → lỗi ngay dưới ô; đổi xong báo số thiết bị đã đăng xuất', async () => {

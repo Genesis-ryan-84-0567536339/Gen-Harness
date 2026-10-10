@@ -163,7 +163,7 @@ test.describe('MCP Hub — thẻ Gen-hub', () => {
     await expect(check).toBeDisabled();
     await expect(card.getByRole('button', { name: 'Tắt' })).toHaveCount(0);
 
-    await card.getByLabel('Địa chỉ Gen-hub').fill('https://hub.genos.top/mcp');
+    await card.getByLabel('Địa chỉ Gen-hub').fill('https://hub.example.test/mcp');
     const token = card.getByLabel('Token Gen-hub');
     await expect(token).toHaveAttribute('type', 'password');
     await token.fill('ngan');
@@ -176,7 +176,7 @@ test.describe('MCP Hub — thẻ Gen-hub', () => {
     await enterPin(page);
     await expect(card).toContainText('Đã lưu (mã hoá, không hiện lại)');
     await expect(card.getByLabel('Token mới (bỏ trống để giữ token đã lưu)')).toHaveValue('');
-    await expect(card).toContainText('https://hub.genos.top/mcp');
+    await expect(card).toContainText('https://hub.example.test/mcp');
     await expect(card).toContainText('2026-12-28');
     await expect(card).toContainText('Đang tắt'); // chưa Kiểm tra thì chưa bật
 

@@ -492,7 +492,7 @@ export function createMock(opts: MockGenOptions) {
       const pr = proposals.get(seg[2]);
       if (!pr) return problem(404, 'NOT_FOUND', 'Đề xuất (có thể đã hết hạn) không tồn tại hoặc nằm ngoài phạm vi của bạn');
       if (pr.status !== 'pending') return problem(409, 'GEN_PROPOSAL_DECIDED', 'Đề xuất này đã được xác nhận hoặc đã huỷ');
-      // v0.1.50: Ghi nhớ / Ghi vào Kho Ryan — mock-gen-v0150.ts xử lý (PIN 'hub.write' + một lời gọi ghi duy nhất).
+      // v0.1.50: Ghi nhớ / Ghi vào Kho dữ liệu — mock-gen-v0150.ts xử lý (PIN 'hub.write' + một lời gọi ghi duy nhất).
       if (seg[3] === 'confirm' && opts.extra) {
         const r = opts.extra.confirm({ ...pr, fields: pr.fields } as GenProposal, ctx);
         if (r) {
@@ -584,16 +584,16 @@ export function createMock(opts: MockGenOptions) {
               'Đã chốt': `Máy chủ Gen-Harness đã nâng lên ${version}. Ghi chú phát hành: https://github.com/genesis/gen-harness/releases/tag/${version}`,
             },
           },
-          summary: 'Tạo bản ghi mới ở bảng Phiên của Kho Ryan — ghi thẳng qua Gen-hub khi Sếp xác nhận và nhập mã PIN.',
+          summary: 'Tạo bản ghi mới ở bảng Phiên của Kho dữ liệu — ghi thẳng qua Gen-hub khi Sếp xác nhận và nhập mã PIN.',
           labels: { bang: 'Phiên', target: 'Tạo mới ở bảng Phiên', write_scope: 'ok', release: version, ...(body.closed ? { closed: 'Owner khác đã ghi bản này vào Kho (PHIEN-12)' } : {}) },
           target: 'hub.kho_write:Phiên', requires_pin: true, status: body.closed ? 'cancelled' : 'pending',
         };
         proposals.set(proposal.id, proposal);
         const conv: Conversation = { id: randomUUID(), title: `Ghi Phiên ${version} vào Kho`, created_at: iso, last_at: iso, kind: 'chat', messages: [] };
-        const say = `Máy chủ Gen-Harness vừa lên ${version}. Em đề xuất ghi một Phiên vào Kho Ryan để lưu mốc này — Sếp xem lại, sửa nếu cần rồi bấm Xác nhận và nhập mã PIN thì em mới ghi (qua Gen-hub).`;
+        const say = `Máy chủ Gen-Harness vừa lên ${version}. Em đề xuất ghi một Phiên vào Kho dữ liệu để lưu mốc này — Sếp xem lại, sửa nếu cần rồi bấm Xác nhận và nhập mã PIN thì em mới ghi (qua Gen-hub).`;
         conv.messages.push({ id: randomUUID(), role: 'assistant', turn_id: randomUUID(), content: { steps: [{ kind: 'say', text: say }, { kind: 'proposal', proposal }] }, created_at: iso });
         conversations.set(conv.id, conv);
-        opts.notifyOwners?.('gen.kho_proposal', `Gen đề xuất ghi Kho · Phiên ${version}`, `Gen-Harness đã lên ${version}. Xem thẻ đề xuất, Xác nhận và nhập mã PIN để ghi Phiên vào Kho Ryan.`, `/overview?gen=${conv.id}`);
+        opts.notifyOwners?.('gen.kho_proposal', `Gen đề xuất ghi Kho · Phiên ${version}`, `Gen-Harness đã lên ${version}. Xem thẻ đề xuất, Xác nhận và nhập mã PIN để ghi Phiên vào Kho dữ liệu.`, `/overview?gen=${conv.id}`);
         return { conversation_id: conv.id, proposal_id: proposal.id };
       },
       /** Worker nhắc việc tới giờ: chuông cho Owner, mỗi nhắc một lần. */

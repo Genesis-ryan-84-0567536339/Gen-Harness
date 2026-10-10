@@ -238,7 +238,7 @@ function seedCases(): CaseItem[] {
     },
     {
       id: 'case-15', code: 'CAS-0015', kind: 'complaint', priority: 'P3', title: 'Hoá đơn ghi sai địa chỉ công ty',
-      status: 'resolved', assignee: { id: USER_IDS.owner, name: 'Anh Cơ La (Ryan)' }, subject: MINH, opened_at: ago(6000), resolved_at: ago(5000), updated_at: ago(5000),
+      status: 'resolved', assignee: { id: USER_IDS.owner, name: 'Anh Nguyễn Văn A (Chủ)' }, subject: MINH, opened_at: ago(6000), resolved_at: ago(5000), updated_at: ago(5000),
     },
   ];
 }
@@ -300,7 +300,7 @@ export function createMock(opts: P3Options) {
       kind_label: target ? 'Tin nhắn' : 'Báo cáo',
       title: `Giới thiệu nguồn cung cho ${person?.name ?? m.demand.group?.name ?? 'khách'}`,
       agent: null,
-      created_by: { id: USER_IDS.owner, name: 'Anh Cơ La (Ryan)' },
+      created_by: { id: USER_IDS.owner, name: 'Anh Nguyễn Văn A (Chủ)' },
       created_at: new Date().toISOString(),
       status: 'pending',
       hold_reason: null,

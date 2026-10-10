@@ -6,7 +6,7 @@
 
 /** Người dùng seed của `mock-api.ts` (Owner + 3 tài khoản vai trò khác). */
 export const USER_IDS = {
-  /** 'Anh Cơ La (Ryan)' — Owner. */
+  /** 'Anh Nguyễn Văn A (Chủ)' — Owner. */
   owner: '0190f1a0-0000-7000-8000-000000000001',
   /** 'Chị Lan Phạm' — Operator. */
   lan: '0190f1a0-0000-7000-8000-000000000002',

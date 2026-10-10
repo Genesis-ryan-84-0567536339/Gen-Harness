@@ -343,7 +343,7 @@ function HubRow({ data, done }: { data: Results; done: boolean }) {
       n={1}
       title="Nối Gen-hub"
       done={done}
-      todo="Nhập địa chỉ Gen-hub (vd https://hub.genos.top/mcp), trong Gen-hub tạo token 90 ngày có quyền đọc Kho (muốn Gen ghi Kho thì tick thêm kho_create, kho_update), dán vào đây rồi bấm Kiểm tra. Nối khi Sếp muốn Gen đọc lịch, mail và Kho dữ liệu — không nối em vẫn làm việc."
+      todo="Nhập địa chỉ Gen-hub của Sếp (dạng https://…/mcp, lấy trong Gen-hub), trong Gen-hub tạo token 90 ngày có quyền đọc Kho (muốn Gen ghi Kho thì tick thêm kho_create, kho_update), dán vào đây rồi bấm Kiểm tra. Nối khi Sếp muốn Gen đọc lịch, mail và Kho dữ liệu — không nối em vẫn làm việc."
       results={
         <>
           <ResultCell check={hubRes} />
@@ -359,7 +359,7 @@ function HubRow({ data, done }: { data: Results; done: boolean }) {
         <div className="boss-form">
           {!configured ? (
             <>
-              <TextField label="Địa chỉ Gen-hub" value={endpoint} onChange={(e) => setEndpoint(e.target.value)} placeholder="https://hub.genos.top/mcp" className="mono" />
+              <TextField label="Địa chỉ Gen-hub" value={endpoint} onChange={(e) => setEndpoint(e.target.value)} placeholder="https://<địa-chỉ-gen-hub-của-bạn>/mcp" className="mono" />
               <TextField label="Token" type="password" autoComplete="off" value={token} onChange={(e) => setToken(e.target.value)} placeholder="Dán token tạo trong Gen-hub" />
             </>
           ) : (
@@ -747,8 +747,8 @@ function FacebookReplyRow({ data, done }: { data: Results; done: boolean }) {
 
 // ── 9. Gen ghi Kho (không bắt buộc) ─────────────────────────────────────────────────────────────────────
 /**
- * v0.1.50 (F-81, QD-18): cho Gen ghi thẳng vào Kho Ryan (Phiên, Việc) qua Gen-hub. Không có nút chạy kiểm — Đạt khi máy chủ ghi
- * 'pass' sau lần ghi Kho THẬT đầu tiên (đề xuất "Ghi vào Kho Ryan" đã Xác nhận + mã PIN). Chưa đạt thì hiện 2 bước + nút mở thẻ Gen-hub.
+ * v0.1.50 (F-81, QD-18): cho Gen ghi thẳng vào Kho dữ liệu (Phiên, Việc) qua Gen-hub. Không có nút chạy kiểm — Đạt khi máy chủ ghi
+ * 'pass' sau lần ghi Kho THẬT đầu tiên (đề xuất "Ghi vào Kho dữ liệu" đã Xác nhận + mã PIN). Chưa đạt thì hiện 2 bước + nút mở thẻ Gen-hub.
  */
 function KhoWriteRow({ data, done }: { data: Results; done: boolean }) {
   const res = resultOf(data, 'kho_write');
@@ -758,7 +758,7 @@ function KhoWriteRow({ data, done }: { data: Results; done: boolean }) {
       n={9}
       title="Gen ghi Kho"
       done={done || passed}
-      todo="Cho Gen ghi thẳng vào Kho Ryan (Phiên, Việc) — Gen chỉ đề xuất, Sếp bấm Xác nhận và nhập mã PIN thì mới ghi:"
+      todo="Cho Gen ghi thẳng vào Kho dữ liệu (Phiên, Việc) — Gen chỉ đề xuất, Sếp bấm Xác nhận và nhập mã PIN thì mới ghi:"
       results={<ResultCell check={res} />}
     >
       {!passed ? (

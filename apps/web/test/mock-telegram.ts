@@ -7,7 +7,7 @@
  * - PUT: token sai dạng → 422 `errors.token`; token chứa "REJECT" → 409 TELEGRAM_TOKEN_REJECTED; chat_id sai (máy chủ
  *   chỉ nhận dãy số `^-?\d{1,20}$`) → 422. Đã cấu hình: token/chat_id trống = giữ; `{}` = "Lưu lại". Token/chat_id đổi
  *   (hoặc nối lần đầu) và DELETE ⇒ xoá kết quả Gửi thử cũ (cả dòng 6 boss_checks).
- * - find-chat: mặc định một chat (987654321 · "Ryan Cơ"); `seed {findChats:'none'}` → rỗng; token chứa "REJECT" →
+ * - find-chat: mặc định một chat (987654321 · "Nguyễn Văn A"); `seed {findChats:'none'}` → rỗng; token chứa "REJECT" →
  *   `error_code` TELEGRAM_TOKEN_REJECTED; không token + chưa cấu hình → TELEGRAM_NOT_CONFIGURED.
  * - Gửi thử (`/notify/telegram/test`, `/boss-checks/telegram/run`): chưa cấu hình → TELEGRAM_NOT_CONFIGURED; `seed
  *   {testError:'TELEGRAM_BOT_BLOCKED'}` (hoặc chat_id 111) → lỗi theo mã; TELEGRAM_RATE_LIMITED là lỗi tạm (không ghi).
@@ -165,7 +165,7 @@ export function createMock(opts: Opts) {
       const token = typeof body.token === 'string' && body.token ? body.token : s.token;
       if (!token) return reply(200, { chats: [], error_code: 'TELEGRAM_NOT_CONFIGURED', message: MESSAGES.TELEGRAM_NOT_CONFIGURED });
       if (token.includes('REJECT')) return reply(200, { chats: [], error_code: 'TELEGRAM_TOKEN_REJECTED', message: MESSAGES.TELEGRAM_TOKEN_REJECTED });
-      const chats = s.findChats === 'none' ? [] : [{ chat_id: '987654321', name: 'Ryan Cơ', username: 'ryan_co' }];
+      const chats = s.findChats === 'none' ? [] : [{ chat_id: '987654321', name: 'Nguyễn Văn A', username: 'nva_test' }];
       return reply(200, { chats, error_code: null, message: null });
     }
     if (p === '/notify/telegram/test' && m === 'POST') {

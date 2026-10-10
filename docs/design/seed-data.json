@@ -525,7 +525,7 @@
         "z",
         "w"
       ],
-      "owner": "Anh Cơ La",
+      "owner": "Anh Nguyễn Văn A",
       "heat": "62",
       "potential": "—",
       "risk": "Cao",
@@ -545,7 +545,7 @@
         "z",
         "w"
       ],
-      "owner": "Anh Cơ La",
+      "owner": "Anh Nguyễn Văn A",
       "heat": "71",
       "potential": "—",
       "risk": "Trung bình",
@@ -1740,7 +1740,7 @@
       "fields": [
         {
           "key": "Xưng hô",
-          "value": "gọi Sếp là \"Sếp Cơ La\", tự gọi \"em\""
+          "value": "gọi Sếp là \"Sếp Nguyễn Văn A\", tự gọi \"em\""
         },
         {
           "key": "Giọng",
@@ -2634,7 +2634,7 @@
     },
     {
       "time": "21/09 11:02:31",
-      "who": "Anh Cơ La",
+      "who": "Anh Nguyễn Văn A",
       "action": "identity.merged",
       "target": "Nguyễn Văn Bảo ← LinkedIn",
       "level": "—",
@@ -2650,7 +2650,7 @@
     },
     {
       "time": "21/09 09:14:08",
-      "who": "Anh Cơ La",
+      "who": "Anh Nguyễn Văn A",
       "action": "auth.pin_verified",
       "target": "Phiên quản trị Console",
       "level": "—",
@@ -3924,7 +3924,7 @@
         },
         {
           "key": "Tài khoản",
-          "value": "ryan.genesis@gmail.com",
+          "value": "a@example.test",
           "secret": false
         },
         {
@@ -4149,7 +4149,7 @@
   ],
   "nodePoints": [
     {
-      "name": "Anh Cơ La",
+      "name": "Anh Nguyễn Văn A",
       "meta": "Owner"
     },
     {

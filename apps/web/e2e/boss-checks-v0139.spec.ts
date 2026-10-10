@@ -58,7 +58,7 @@ test.describe('Việc Sếp cần làm (v0.1.39)', () => {
     // 1. Gen-hub: địa chỉ https công khai → công tắc bật sẵn; Kiểm tra = lưu (PIN) rồi kiểm, không hỏi PIN lần hai.
     const hub = row(page, 'Nối Gen-hub');
     await expect(hub).toContainText('Chưa kiểm');
-    await hub.getByLabel('Địa chỉ Gen-hub').fill('https://hub.genos.top/mcp');
+    await hub.getByLabel('Địa chỉ Gen-hub').fill('https://hub.example.test/mcp');
     await hub.getByLabel('Token', { exact: true }).fill(HUB_TOKEN);
     await expect(hub.getByRole('switch', { name: 'Cho phép Gen-hub ở mạng công cộng' })).toHaveAttribute('aria-checked', 'true');
     await expect(hub.getByRole('note')).toContainText('Đã bật sẵn vì địa chỉ là https công khai');
@@ -122,7 +122,7 @@ test.describe('Việc Sếp cần làm (v0.1.39)', () => {
     await expect(results.nth(0)).toContainText('Đã có phiên (đăng nhập trước đây) — bấm Gọi thử để xác nhận');
     await expect(cl.getByRole('button', { name: /Đăng nhập/ })).toHaveCount(0);
     await cl.getByRole('button', { name: 'Gọi thử' }).click();
-    await expect(results.nth(1)).toContainText('Đạt · đang dùng ryan@claude.ai');
+    await expect(results.nth(1)).toContainText('Đạt · đang dùng a@example.test');
     await expect(results.nth(0)).toContainText('Đạt · phiên có sẵn, đã xác nhận bằng Gọi thử');
     await expect(cl).toContainText('Xong');
     await page.reload();

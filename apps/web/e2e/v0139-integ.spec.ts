@@ -94,7 +94,7 @@ test.describe('v0.1.39 · nghiệm thu sau gộp', () => {
     await p3Hook(page.request, 'social', 'importKeyChanged', { label: 'Facebook của Sếp' });
     await page.goto('/guide/viec-sep');
     const hub = row(page, 'Nối Gen-hub');
-    await hub.getByLabel('Địa chỉ Gen-hub').fill('https://hub.genos.top/mcp');
+    await hub.getByLabel('Địa chỉ Gen-hub').fill('https://hub.example.test/mcp');
     await hub.getByLabel('Token', { exact: true }).fill('ghtok_E2E_dung_0123456789');
     await hub.getByRole('button', { name: 'Kiểm tra', exact: true }).click();
     await enterPin(page);
@@ -124,7 +124,7 @@ test.describe('v0.1.39 · nghiệm thu sau gộp', () => {
     await expect(row(page, 'Jev')).toContainText('Không bắt buộc');
 
     const hub = row(page, 'Nối Gen-hub');
-    await hub.getByLabel('Địa chỉ Gen-hub').fill('https://hub.genos.top/mcp');
+    await hub.getByLabel('Địa chỉ Gen-hub').fill('https://hub.example.test/mcp');
     await expect(hub.getByRole('switch', { name: 'Cho phép Gen-hub ở mạng công cộng' })).toHaveAttribute('aria-checked', 'true');
     await expect(hub.getByRole('note')).toContainText('Đã bật sẵn vì địa chỉ là https công khai');
     await hub.getByLabel('Token', { exact: true }).fill('ghtok_token_sai_0123456789');
@@ -142,7 +142,7 @@ test.describe('v0.1.39 · nghiệm thu sau gộp', () => {
     await loginAsOwner(page);
     await page.goto('/connections');
     const card = page.getByRole('region', { name: 'Gen-hub' });
-    await card.getByLabel('Địa chỉ Gen-hub').fill('https://hub.genos.top/mcp');
+    await card.getByLabel('Địa chỉ Gen-hub').fill('https://hub.example.test/mcp');
     await card.getByLabel('Token Gen-hub').fill('ghtok_E2E_dung_0123456789');
     const sw = card.getByRole('switch', { name: 'Cho phép Gen-hub ở mạng công cộng' });
     await expect(sw).toHaveAttribute('aria-checked', 'true');

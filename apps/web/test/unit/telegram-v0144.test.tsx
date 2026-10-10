@@ -71,7 +71,7 @@ interface World {
 }
 
 function setup(w: Partial<World> = {}) {
-  const world: World = { config: EMPTY, chats: [{ chat_id: '987654321', name: 'Ryan Cơ', username: 'ryan_co' }], testCode: null, pin: true, ...w };
+  const world: World = { config: EMPTY, chats: [{ chat_id: '987654321', name: 'Nguyễn Văn A', username: 'nva_test' }], testCode: null, pin: true, ...w };
   const calls: Call[] = [];
   let pinOk = false;
   vi.stubGlobal(
@@ -213,7 +213,7 @@ describe('Kết nối › Telegram (thẻ)', () => {
     const user = userEvent.setup();
     await user.type(await screen.findByLabelText('Token'), TOKEN);
     await user.click(screen.getByRole('button', { name: 'Tìm chat_id' }));
-    await user.click(await screen.findByRole('button', { name: 'Ryan Cơ (@ryan_co)' }));
+    await user.click(await screen.findByRole('button', { name: 'Nguyễn Văn A (@nva_test)' }));
     expect(screen.getByLabelText('chat_id')).toHaveValue('987654321');
     expect(calls.find((c) => c.path === '/notify/telegram/find-chat')!.body).toEqual({ token: TOKEN });
     unmount();

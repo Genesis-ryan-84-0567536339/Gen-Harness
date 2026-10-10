@@ -16,7 +16,7 @@ import { userStatus } from '../../src/screens/system/usersModel';
 
 const OWNER_PERMS = { 'roles.manage': 'all', 'system.read': 'all', 'system.manage': 'all' };
 const me = (perms: Record<string, string> = OWNER_PERMS, role = { code: 'owner', name: 'Owner — Sếp' }) => ({
-  id: 'u1', email: 'owner@genesis.local', display_name: 'Anh Cơ La (Ryan)', role,
+  id: 'u1', email: 'owner@genesis.local', display_name: 'Anh Nguyễn Văn A (Chủ)', role,
   org: { id: 'o1', name: 'Genesis Trading', timezone: 'Asia/Ho_Chi_Minh', currency: 'VND' },
   addressing: { self: 'Anh', bot_calls_me: 'Sếp' }, pin_verified_until: null, permissions: perms, must_change_password: false,
   features: { gen: true },
@@ -28,7 +28,7 @@ const U = (over: Partial<ManagedUser>): ManagedUser => ({
 });
 const PAGE: UsersPage = {
   items: [
-    U({ id: 'u1', display_name: 'Anh Cơ La (Ryan)', email: 'owner@genesis.local', role: { code: 'owner', name: 'Owner — Sếp' }, is_self: true }),
+    U({ id: 'u1', display_name: 'Anh Nguyễn Văn A (Chủ)', email: 'owner@genesis.local', role: { code: 'owner', name: 'Owner — Sếp' }, is_self: true }),
     U({ id: 'u2', display_name: 'Chị Lan Phạm', email: 'operator@genesis.local' }),
   ],
   roles: [],
@@ -85,7 +85,7 @@ describe('UsersTab', () => {
     const table = await screen.findByRole('table');
     expect(within(table).getByText('Chị Lan Phạm')).toBeInTheDocument();
     expect(within(table).getByText('sửa ở Tài khoản của tôi')).toBeInTheDocument();
-    expect(within(table).queryByLabelText('Vai trò của Anh Cơ La (Ryan)')).toBeNull();
+    expect(within(table).queryByLabelText('Vai trò của Anh Nguyễn Văn A (Chủ)')).toBeNull();
     expect(within(table).getByLabelText('Vai trò của Chị Lan Phạm')).toHaveValue('operator');
 
     await user.click(screen.getByRole('button', { name: 'Mời người dùng' }));
@@ -157,13 +157,13 @@ describe('OrgTab', () => {
     const save = screen.getByRole('button', { name: 'Lưu thông tin tổ chức' });
     expect(save).toBeDisabled();
     await user.clear(screen.getByLabelText('Agent gọi Sếp là'));
-    await user.type(screen.getByLabelText('Agent gọi Sếp là'), 'anh Ryan');
-    expect(screen.getByText(/Dạ Anh Ryan, sáng nay/)).toBeInTheDocument();
+    await user.type(screen.getByLabelText('Agent gọi Sếp là'), 'anh A');
+    expect(screen.getByText(/Dạ Anh A, sáng nay/)).toBeInTheDocument();
     await user.clear(name);
     await user.type(name, '  Genesis Group ');
     await user.click(save);
     await waitFor(() => expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({
-      org_name: 'Genesis Group', timezone: 'Asia/Ho_Chi_Minh', currency: 'VND', self_name: 'Anh', bot_calls_me: 'anh Ryan',
+      org_name: 'Genesis Group', timezone: 'Asia/Ho_Chi_Minh', currency: 'VND', self_name: 'Anh', bot_calls_me: 'anh A',
     }));
     await waitFor(() => expect(useToasts.getState().toasts[0]?.text).toBe('Đã lưu thông tin tổ chức.'));
   });

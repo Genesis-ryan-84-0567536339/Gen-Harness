@@ -84,7 +84,7 @@ afterEach(() => {
 const USERS = {
   items: [
     { id: USER_IDS.minh, name: 'Anh Minh Kiểm', me: false },
-    { id: USER_IDS.owner, name: 'Anh Cơ La (Ryan)', me: true },
+    { id: USER_IDS.owner, name: 'Anh Nguyễn Văn A (Chủ)', me: true },
     { id: USER_IDS.lan, name: 'Chị Lan Phạm', me: false },
   ],
 };
@@ -189,7 +189,7 @@ describe('Hộp thư ý nghĩa › Giao cho người khác', () => {
     const me = meWith(perms);
     mockFetch((c) => {
       if (c.url.includes('/auth/me')) return json(200, me);
-      if (c.url.includes('/pickers/users')) return json(200, { items: [{ id: USER_IDS.owner, name: 'Anh Cơ La (Ryan)', me: true }] });
+      if (c.url.includes('/pickers/users')) return json(200, { items: [{ id: USER_IDS.owner, name: 'Anh Nguyễn Văn A (Chủ)', me: true }] });
       if (c.url.includes('/inbox')) return json(200, INBOX);
       return json(404);
     });

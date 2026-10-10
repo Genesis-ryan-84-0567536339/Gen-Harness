@@ -422,7 +422,7 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
   });
   // Giao việc / gán người xử lý kiểm người dùng đang hoạt động (như API: UUID lạ hoặc bị khoá → 404).
   const findUser = (id: string) => users.find((u) => u.id === id && !u.inactive);
-  // v0.1.50 (F-81, QD-18): Gen nhớ (/gen/memory) + đề xuất Ghi nhớ / Ghi vào Kho Ryan (kịch bản + xác nhận cho mock-gen). Lời gọi ghi
+  // v0.1.50 (F-81, QD-18): Gen nhớ (/gen/memory) + đề xuất Ghi nhớ / Ghi vào Kho dữ liệu (kịch bản + xác nhận cho mock-gen). Lời gọi ghi
   // Kho duy nhất đi qua mock-p4-mcp (`khoWrite` = POST /hub/kho/write), khai báo bên dưới — gọi lúc chạy.
   const genV0150 = createGenV0150({
     kho: { write: (req: KhoWriteReq) => (mcp.hooks.khoWrite as (r: KhoWriteReq) => ReturnType<Parameters<typeof createGenV0150>[0]['kho']['write']>)(req) },
@@ -692,7 +692,7 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
       detail,
     });
   const users: User[] = [];
-  const addOwner = (email = MOCK_OWNER.email, password = MOCK_OWNER.password, pin = MOCK_OWNER.pin, name = 'Anh Cơ La (Ryan)') =>
+  const addOwner = (email = MOCK_OWNER.email, password = MOCK_OWNER.password, pin = MOCK_OWNER.pin, name = 'Anh Nguyễn Văn A (Chủ)') =>
     users.push({
       // UUID cố định cho Owner seed (test/mock-ids.ts) — e2e so khớp id lấy từ /pickers/users.
       id: users.some((u) => u.id === USER_IDS.owner) ? randomUUID() : USER_IDS.owner,

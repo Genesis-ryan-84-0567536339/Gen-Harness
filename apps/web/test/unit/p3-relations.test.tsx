@@ -230,7 +230,7 @@ function notebookOf(pinned: boolean): NbNotebook {
     sections: [
       { key: 'attention_now', title: 'Điều cần chú ý ngay', entries: [{ id: 'e1', body: 'Đã nhắc ba lần chưa được trả lời.', refs: [], pinned, editable: false, author: { type: 'agent', label: 'agent' }, created_at: '2026-09-24T01:00:00Z' }] },
       { key: 'rolling_context', title: 'Ngữ cảnh ngắn lũy tiến', entries: [] },
-      { key: 'guardrails', title: 'Giới hạn cho agent', entries: [{ id: 'e2', body: 'Không để agent junior follow khách này.', refs: [], pinned: true, editable: true, author: { type: 'user', label: 'Anh Cơ La' }, created_at: '2026-09-24T01:00:00Z' }] },
+      { key: 'guardrails', title: 'Giới hạn cho agent', entries: [{ id: 'e2', body: 'Không để agent junior follow khách này.', refs: [], pinned: true, editable: true, author: { type: 'user', label: 'Anh Nguyễn Văn A' }, created_at: '2026-09-24T01:00:00Z' }] },
       { key: 'preferences', title: 'Sở thích', entries: [] },
       { key: 'open_threads', title: 'Việc dở', entries: [] },
     ],

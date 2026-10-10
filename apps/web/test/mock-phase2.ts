@@ -505,7 +505,7 @@ export function createPhase2(opts: Phase2Options) {
       hits_24h: fresh ? 0 : (RULE_HITS[r.code] ?? 0), updated_at: iso(base - 86_400_000 * 3),
     };
     rules.push(rule);
-    versions.set(rule.id, [{ version: 1, conditions: rule.conditions, outputs: rule.outputs, threshold: rule.threshold, created_at: rule.updated_at, created_by: { label: 'Anh Cơ La (Ryan)' } }]);
+    versions.set(rule.id, [{ version: 1, conditions: rule.conditions, outputs: rule.outputs, threshold: rule.threshold, created_at: rule.updated_at, created_by: { label: 'Anh Nguyễn Văn A (Chủ)' } }]);
   };
   if (!fresh) RULES.forEach((r) => addRule(r));
   let weights: Weight[] = WEIGHT_DIMS.map(([dimension, label], i) => {
@@ -558,7 +558,7 @@ export function createPhase2(opts: Phase2Options) {
     const memory = seedRows('memory');
     const isBao = p.code === 'PER-0042';
     const entry = (body: string, author: 'agent' | 'user', ageMs: number, pinned = false) => ({
-      id: randomUUID(), body, refs: [], author: { type: author, label: author === 'user' ? 'Anh Cơ La (Ryan)' : 'Core agent' }, pinned, created_at: iso(Date.now() - ageMs),
+      id: randomUUID(), body, refs: [], author: { type: author, label: author === 'user' ? 'Anh Nguyễn Văn A (Chủ)' : 'Core agent' }, pinned, created_at: iso(Date.now() - ageMs),
     });
     const mine = clean.filter((c) => c.person?.id === id);
     const sections = SECTION_TITLES.map(([k, title], i) => {
@@ -621,7 +621,7 @@ export function createPhase2(opts: Phase2Options) {
     ? []
     : [
         {
-          id: randomUUID(), op: 'merge', at: iso(base - 2 * 86_400_000), actor: { label: 'Anh Cơ La (Ryan)' },
+          id: randomUUID(), op: 'merge', at: iso(base - 2 * 86_400_000), actor: { label: 'Anh Nguyễn Văn A (Chủ)' },
           from: { id: randomUUID(), code: 'PER-0877', name: 'Bảo Thành Phát' },
           to: {
             id: bao.id, code: bao.code, name: bao.name,
@@ -633,7 +633,7 @@ export function createPhase2(opts: Phase2Options) {
           identities: 2, reverted: false,
         },
         {
-          id: randomUUID(), op: 'split', at: iso(base - 5 * 86_400_000), actor: { label: 'Anh Cơ La (Ryan)' },
+          id: randomUUID(), op: 'split', at: iso(base - 5 * 86_400_000), actor: { label: 'Anh Nguyễn Văn A (Chủ)' },
           from: { id: randomUUID(), code: 'PER-0512', name: 'Võ Thanh Tùng' }, to: { id: randomUUID(), code: 'PER-0960', name: 'Tùng (kho Bình Dương)' },
           identities: 1, reverted: false,
         },
@@ -661,8 +661,8 @@ export function createPhase2(opts: Phase2Options) {
   const cliProfiles: CliProfile[] = fresh
     ? []
     : [
-        { id: randomUUID(), email: 'ryan.genesis@gmail.com', plan_label: 'Google AI Pro · token 0 ₫', active: true, expires_at: iso(Date.now() + 23 * 3600_000 + 20 * 60_000), state: 'ok' },
-        { id: randomUUID(), email: 'ops.genesis@gmail.com', plan_label: 'Google AI · miễn phí', active: false, expires_at: iso(Date.now() + 5 * 86_400_000), state: 'ok' },
+        { id: randomUUID(), email: 'a@example.test', plan_label: 'Google AI Pro · token 0 ₫', active: true, expires_at: iso(Date.now() + 23 * 3600_000 + 20 * 60_000), state: 'ok' },
+        { id: randomUUID(), email: 'b@example.test', plan_label: 'Google AI · miễn phí', active: false, expires_at: iso(Date.now() + 5 * 86_400_000), state: 'ok' },
       ];
   // v0.1.31: hồ sơ Claude Code CLI (gói Claude) — tách khỏi hồ sơ Google của Antigravity, mặc định trống (TẮT).
   const claudeProfiles: CliProfile[] = [];
@@ -1395,7 +1395,7 @@ export function createPhase2(opts: Phase2Options) {
           }
           if (lg.kind === 'claude_code_cli') {
             const cp: CliProfile = {
-              id: randomUUID(), kind: 'claude_code_cli', email: claudeProfiles.length ? `claude.ops${claudeProfiles.length}@gmail.com` : 'ryan.claude@gmail.com',
+              id: randomUUID(), kind: 'claude_code_cli', email: claudeProfiles.length ? `claude.ops${claudeProfiles.length}@gmail.com` : 'c@example.test',
               plan_label: 'Claude Max', active: true, expires_at: iso(Date.now() - 60_000), refreshable: true, state: 'ok',
             };
             claudeProfiles.forEach((x) => (x.active = false));
@@ -1406,7 +1406,7 @@ export function createPhase2(opts: Phase2Options) {
             return;
           }
           const profile: CliProfile = {
-            id: randomUUID(), email: cliProfiles.length ? `genesis.ops${cliProfiles.length}@gmail.com` : 'ryan.genesis@gmail.com',
+            id: randomUUID(), email: cliProfiles.length ? `genesis.ops${cliProfiles.length}@gmail.com` : 'a@example.test',
             plan_label: 'Google AI Pro · token 0 ₫', active: true, expires_at: iso(Date.now() + 24 * 3600_000), state: 'ok',
           };
           // Như api thật (gh.providers.cli._finish): tài khoản vừa đăng nhập thành tài khoản đang dùng.

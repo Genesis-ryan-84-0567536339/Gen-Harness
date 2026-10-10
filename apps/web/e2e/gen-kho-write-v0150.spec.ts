@@ -2,13 +2,13 @@ import { expect, test } from '@playwright/test';
 import { MANAGER, askGen, enterPin, enterPinIfAsked, hubSim, khoCalls, loginAs, loginAsOwner, mockHook, p3Hook, resetMock } from './support';
 
 /**
- * v0.1.50 (F-81, QD-18) — mock, tất định (KHÔNG có Kho / Gen-hub thật): Gen đề xuất ghi Kho Ryan → thẻ "Ghi vào Kho Ryan" hiện đúng bảng +
+ * v0.1.50 (F-81, QD-18) — mock, tất định (KHÔNG có Kho / Gen-hub thật): Gen đề xuất ghi Kho dữ liệu → thẻ "Ghi vào Kho dữ liệu" hiện đúng bảng +
  * trường → Xác nhận và ghi Kho → 423 → nhập mã PIN → "Đã ghi vào Kho: PHIEN-12". Bấm Huỷ thì mock ghi nhận 0 lời gọi /hub/kho/write.
  * Thiếu quyền ghi Kho → khoá nút + nút mở thẻ Gen-hub; lỗi "Chưa chắc đã ghi" → câu đúng, bấm lại được; dòng 9 "Gen ghi Kho" đạt sau lần ghi đầu.
  */
 
-const CARD = 'Ghi vào Kho Ryan';
-const WARNING = 'Ghi thẳng vào Kho Ryan qua Gen-hub khi Sếp bấm Xác nhận và nhập mã PIN — không tự hoàn tác.';
+const CARD = 'Ghi vào Kho dữ liệu';
+const WARNING = 'Ghi thẳng vào Kho dữ liệu qua Gen-hub khi Sếp bấm Xác nhận và nhập mã PIN — không tự hoàn tác.';
 
 test.beforeEach(async ({ page }) => {
   await resetMock(page.request, 'finished');
@@ -22,7 +22,7 @@ test('Gen đề xuất ghi Phiên → thẻ đúng bảng + trường → Xác n
   await page.goto('/overview');
   const card = await askGen(page, 'ghi phiên hôm nay vào Kho', CARD);
 
-  await expect(card).toContainText('Đề xuất · Ghi vào Kho Ryan');
+  await expect(card).toContainText('Đề xuất · Ghi vào Kho dữ liệu');
   await expect(card).toContainText('Bảng');
   await expect(card).toContainText('Phiên');
   await expect(card).toContainText('Bản ghi mới');

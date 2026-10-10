@@ -1,5 +1,5 @@
 /**
- * Mock v0.1.50 (F-81, QD-18) — "Gen nhớ" + đề xuất GHI VÀO KHO RYAN của Gen, theo HỢP ĐỒNG API (gói api làm thật):
+ * Mock v0.1.50 (F-81, QD-18) — "Gen nhớ" + đề xuất GHI VÀO KHO DỮ LIỆU của Gen, theo HỢP ĐỒNG API (gói api làm thật):
  *
  * - `GET /gen/memory` → {items, limit: 30, max_len: 280, reason_max: 200}; `POST` (201, dùng nội bộ khi xác nhận đề xuất),
  *   `PATCH /gen/memory/{id}` (source → 'owner'), `DELETE` (204). CHỈ Owner (vai trò khác 403 FORBIDDEN), không PIN.
@@ -144,14 +144,14 @@ export function createMock(opts: GenV0150Options) {
       const cur: Record<string, string> = viec ? { 'cur:Trạng thái': 'Đang làm', 'cur:Ngày xong': '' } : { 'cur:Đã chốt': 'Gen nhớ tối đa 30 ghi chú' };
       return {
         ...base, type: 'kho_update', fields: { ma, record },
-        summary: `Sửa bản ghi ${ma} ở bảng ${bang} của Kho Ryan — ghi thẳng qua Gen-hub khi Sếp xác nhận và nhập mã PIN.`,
+        summary: `Sửa bản ghi ${ma} ở bảng ${bang} của Kho dữ liệu — ghi thẳng qua Gen-hub khi Sếp xác nhận và nhập mã PIN.`,
         labels: { bang, target: `${ma} · ${viec ? 'Soạn báo giá ván MDF E1' : 'Phiên v0.1.49'}`, write_scope: scope, ...cur },
         target: `hub.kho_write:${ma}`,
       };
     }
     return {
       ...base, type: 'kho_create', fields: { bang, record: viec ? VIEC_RECORD : PHIEN_RECORD },
-      summary: `Tạo bản ghi mới ở bảng ${bang} của Kho Ryan — ghi thẳng qua Gen-hub khi Sếp xác nhận và nhập mã PIN.`,
+      summary: `Tạo bản ghi mới ở bảng ${bang} của Kho dữ liệu — ghi thẳng qua Gen-hub khi Sếp xác nhận và nhập mã PIN.`,
       labels: { bang, target: 'Bản ghi mới', write_scope: scope },
       target: `hub.kho_write:${bang}`,
     };
@@ -174,7 +174,7 @@ export function createMock(opts: GenV0150Options) {
     }
     if (/vào kho|ghi kho/.test(t)) {
       return [
-        { kind: 'say', text: 'Dạ, em soạn sẵn bản ghi — Sếp đọc kỹ các trường, bấm Xác nhận và ghi Kho (cần mã PIN) thì mới ghi vào Kho Ryan nhé.' },
+        { kind: 'say', text: 'Dạ, em soạn sẵn bản ghi — Sếp đọc kỹ các trường, bấm Xác nhận và ghi Kho (cần mã PIN) thì mới ghi vào Kho dữ liệu nhé.' },
         { kind: 'proposal', proposal: khoProposal(q) },
       ];
     }

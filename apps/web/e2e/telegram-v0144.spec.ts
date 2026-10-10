@@ -47,7 +47,7 @@ test.describe('Kết nối › Telegram (v0.1.44)', () => {
 
     await token.fill(TOKEN);
     await tg.getByRole('button', { name: 'Tìm chat_id' }).click();
-    await tg.getByRole('button', { name: 'Ryan Cơ (@ryan_co)' }).click();
+    await tg.getByRole('button', { name: 'Nguyễn Văn A (@nva_test)' }).click();
     await expect(tg.getByLabel('chat_id')).toHaveValue('987654321');
     await tg.getByRole('button', { name: 'Lưu', exact: true }).click();
     await enterPin(page);

@@ -142,7 +142,7 @@ const TASKS: TaskPage = {
   items: [
     {
       id: 't1', code: 'TSK-0410', title: 'Gửi hợp đồng đã ký cho Thành Phát', priority: 'P1', status: 'doing',
-      assignee: { id: 'u1', name: 'Anh Cơ La (Ryan)' }, subject: null, due_at: '2020-01-01T00:00:00Z', remind_at: null,
+      assignee: { id: 'u1', name: 'Anh Nguyễn Văn A (Chủ)' }, subject: null, due_at: '2020-01-01T00:00:00Z', remind_at: null,
       overdue: true, source: 'draft', created_at: '2026-09-20T00:00:00Z', completed_at: null,
     },
     {

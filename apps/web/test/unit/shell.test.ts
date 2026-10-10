@@ -87,9 +87,9 @@ describe('header + footer helpers', () => {
     expect(confidencePercent(null)).toBeNull();
   });
   it('avatar initials skip the honorific and nickname', () => {
-    expect(initials('Anh Cơ La (Ryan)')).toBe('CL');
+    expect(initials('Anh Nguyễn Văn A (Chủ)')).toBe('VA');
     expect(initials('Chị Lan Phạm')).toBe('LP');
-    expect(initials('Ryan')).toBe('R');
+    expect(initials('Nam')).toBe('N');
   });
   it('owner role line matches the design', () => {
     expect(roleLine({ role: { code: 'owner', name: 'Owner — Sếp' } })).toBe('Owner · thấy toàn cảnh');

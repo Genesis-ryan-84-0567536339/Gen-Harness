@@ -44,7 +44,7 @@ export const BOSS_CHECKS_POLL_MS = 3000;
 export const BOSS_ERROR_TEXT: Record<string, string> = {
   HUB_LINK_NOT_CONFIGURED: 'Chưa nhập địa chỉ và token Gen-hub — điền rồi bấm Kiểm tra.',
   HUB_ENDPOINT_FORBIDDEN: 'Địa chỉ Gen-hub này không được phép gọi — kiểm tra lại địa chỉ.',
-  HUB_ENDPOINT_INVALID: 'Địa chỉ Gen-hub không hợp lệ — sửa lại theo dạng https://hub.genos.top/mcp.',
+  HUB_ENDPOINT_INVALID: 'Địa chỉ Gen-hub không hợp lệ — kiểm tra lại (dạng https://<máy-chủ>/mcp)',
   MCP_NETWORK_BLOCKED: "Bật 'Cho phép Gen-hub ở mạng công cộng' ngay trong thẻ này.",
   HUB_TOKEN_REJECTED: 'Gen-hub từ chối token — token sai, hết hạn hoặc đã bị thu hồi. Tạo token mới rồi dán lại.',
   HUB_RATE_LIMITED: 'Gen-hub đang giới hạn số lần gọi — đợi vài phút rồi kiểm tra lại.',

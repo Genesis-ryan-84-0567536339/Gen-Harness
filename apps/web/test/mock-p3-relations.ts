@@ -230,7 +230,7 @@ function seedBaoNotebook(): NbState {
       seedEntry('attention_now', 'Đã nhắc ba lần chưa được trả lời — mọi phản hồi phải xin lỗi trước, không giải thích dài.', { created_at: ago(20) }),
       seedEntry('attention_now', 'Đang so sánh giá với Minh Long, chênh 4% nằm ở loại giấy và bảo hành màu.', { created_at: ago(60 * 24 * 9) }),
       seedEntry('guardrails', 'Không để agent junior follow khách này. Không tự cam kết mốc giao dưới 12 ngày.', {
-        pinned: true, author: { type: 'user', label: 'Anh Cơ La' }, created_at: ago(60 * 24 * 9),
+        pinned: true, author: { type: 'user', label: 'Anh Nguyễn Văn A' }, created_at: ago(60 * 24 * 9),
       }),
       seedEntry('preferences', 'Trả lời trong 15 phút thì hội thoại tiếp tục; quá 60 phút thì phải xin lỗi mới nối lại được.', { created_at: ago(60 * 24 * 2) }),
       seedEntry('preferences', 'Gửi kèm bảng so sánh vật liệu khiến người này chốt nhanh hơn là giảm giá.', { created_at: ago(60 * 24 * 6) }),
@@ -261,7 +261,7 @@ function seedGroupNotebook(): NbState {
       seedEntry('rolling_context', 'Nhóm hay tag agent để so sánh báo giá — đây là loại yêu cầu xuất hiện nhiều nhất.', { created_at: ago(15) }),
       seedEntry('attention_now', 'Không nhắc lại chuyện Thành Phát chậm phản hồi trong nhóm này — đang là chuyện tế nhị.', { created_at: ago(60 * 8) }),
       seedEntry('guardrails', 'Mọi số tiền trên 50 triệu ₫ phải dừng lại chờ Sếp duyệt, không được tự cam kết.', {
-        pinned: true, author: { type: 'user', label: 'Anh Cơ La' }, created_at: ago(60 * 24 * 16),
+        pinned: true, author: { type: 'user', label: 'Anh Nguyễn Văn A' }, created_at: ago(60 * 24 * 16),
       }),
       seedEntry('preferences', 'Nhóm hoạt động mạnh nhất 08:00–10:00 và 14:00–17:00; sau 18:00 gần như im.', { created_at: ago(60 * 24) }),
       seedEntry('preferences', 'Văn phong ngắn, không chào hỏi dài. Trả lời quá dài thường bị bỏ qua.', { created_at: ago(60 * 24) }),
@@ -331,7 +331,7 @@ export function createMock(opts: P3Options) {
         {
           id: 'doc-3', title: 'DonHang_BaoBi_T8.xlsx', description: 'Đơn hàng bao bì tháng 8, đã ghi vào ERP',
           mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', bytes: 42_100,
-          owner: GROUP_TP, source: 'tay', created_by: 'Anh Cơ La (Ryan)', created_at: ago(60 * 24 * 30), updated_at: ago(60 * 24 * 30),
+          owner: GROUP_TP, source: 'tay', created_by: 'Anh Nguyễn Văn A (Chủ)', created_at: ago(60 * 24 * 30), updated_at: ago(60 * 24 * 30),
           acl: [{ principal: 'role:owner', can_read: true, can_write: true }],
           content: b64('DonHang_BaoBi_T8 — nội dung mẫu'),
         },

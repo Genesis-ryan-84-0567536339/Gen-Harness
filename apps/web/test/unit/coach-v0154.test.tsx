@@ -53,7 +53,7 @@ import type { P2Ctx } from '../mock-phase2';
 // ── dữ liệu mẫu ────────────────────────────────────────────────────────────────────────────────────────
 
 const ME = (role = 'owner', gen = true) => ({
-  id: 'u1', email: 'owner@genesis.local', display_name: 'Anh Cơ La', role: { code: role, name: role },
+  id: 'u1', email: 'owner@genesis.local', display_name: 'Anh Nguyễn Văn A', role: { code: role, name: role },
   org: { id: 'o1', name: 'Genesis', timezone: 'Asia/Ho_Chi_Minh', currency: 'VND' },
   addressing: { self: 'Anh', bot_calls_me: 'Sếp' }, pin_verified_until: null, permissions: {}, must_change_password: false,
   features: { gen },

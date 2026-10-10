@@ -280,7 +280,7 @@ export function createMock(opts: P4McpOptions) {
     if (body.kho === 'ok' || body.kho === 'uncertain' || body.kho === 'rejected' || body.kho === 'permit') khoSim = body.kho;
     if (body.link === 'on') {
       hubLink = {
-        ...hubLink, configured: true, server_id: hubLink.server_id ?? 'mcp-genhub', endpoint: 'https://hub.genos.top/mcp', has_token: true,
+        ...hubLink, configured: true, server_id: hubLink.server_id ?? 'mcp-genhub', endpoint: 'https://hub.example.test/mcp', has_token: true,
         allow_public_network: true, token_expires_at: new Date(Date.now() + 80 * 86_400_000).toISOString(), days_left: 80,
       };
       hubTest();
