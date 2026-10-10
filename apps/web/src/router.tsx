@@ -1,4 +1,4 @@
-import { createBrowserRouter, type RouteObject } from 'react-router-dom';
+import { createBrowserRouter, Navigate, type RouteObject } from 'react-router-dom';
 import { buildScreenTree } from '@gen-harness/contracts';
 import { setNavigator } from './lib/navigation';
 import { UrlStateSync } from './lib/uiStore';
@@ -18,6 +18,12 @@ import { HomeRedirect } from './shell/HomeRedirect';
 import { SocialPage } from './social/SocialPage';
 import { SocialWriteRiskPage } from './social/SocialWriteRiskPage';
 import { RootLayout } from './RootLayout';
+import { AskGenScreen } from './owner/AskGenScreen';
+import { MoreScreen } from './owner/MoreScreen';
+import { OwnerShell } from './owner/OwnerShell';
+import { RelationsScreen } from './owner/RelationsScreen';
+import { OwnerTasksScreen } from './owner/TasksScreen';
+import { TodayScreen } from './owner/TodayScreen';
 
 /**
  * One route per screen key (docs/design/screens.json), nested
@@ -67,6 +73,20 @@ export const routes: RouteObject[] = [
       { path: '/setup', element: <SetupPage /> },
       // v0.1.19: mật khẩu tạm sau `genh reset-password` — AppShell chuyển mọi màn Console về đây tới khi đổi xong.
       { path: '/change-password', element: <ForcePasswordPage /> },
+      // v0.1.55 (G5): Mặt tiền Owner — khai báo tay NGOÀI screens.json, anh em với "/" (AppShell), trước "*" của AppShell.
+      // Vai khác Owner mở /owner/* ⇒ OwnerShell chuyển về "/". Đường lạ dưới /owner về Hôm nay.
+      {
+        path: '/owner',
+        element: <OwnerShell />,
+        children: [
+          { index: true, element: <TodayScreen /> },
+          { path: 'quan-he', element: <RelationsScreen /> },
+          { path: 'viec', element: <OwnerTasksScreen /> },
+          { path: 'gen', element: <AskGenScreen /> },
+          { path: 'them', element: <MoreScreen /> },
+          { path: '*', element: <Navigate to="/owner" replace /> },
+        ],
+      },
       {
         path: '/',
         element: <AppShell />,

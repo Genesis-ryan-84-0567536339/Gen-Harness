@@ -7,6 +7,7 @@ import { useViews } from '../screens/core/queries';
 import { useUiStore } from '../lib/uiStore';
 import { autonomyPillText, autonomyTooltip, confidencePercent, showSavedViews } from './headerModel';
 import { GenToggle } from '../gen/GenToggle';
+import { BackToFront } from '../owner/BackToFront';
 import { NotificationBell } from './NotificationBell';
 import { ThemeToggle } from './ThemeToggle';
 
@@ -55,6 +56,8 @@ export function Header({
           aria-expanded={drawerOpen}
           onClick={() => setDrawerOpen(!drawerOpen)}
         />
+        {/* v0.1.55 (G5): "← Về Mặt tiền" — chỉ Owner thấy (BackToFront tự ẩn với vai khác). */}
+        <BackToFront />
         {crumbs ? (
           <>
             <span className="hd-chip">{crumbs.domain}</span>
