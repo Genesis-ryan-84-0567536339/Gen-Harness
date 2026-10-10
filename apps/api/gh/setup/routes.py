@@ -884,15 +884,10 @@ async def hard_boundaries(db: AsyncSession = DB,
     return list(HARD_BOUNDARIES)
 
 
-@router.get("/follow-up")
-async def follow_up(db: AsyncSession = DB,
-                    user: service.CurrentUser | None = Depends(optional_user)) -> list[dict[str, Any]]:
-    """Việc thiết lập tiếp (thẻ ở Tổng quan + trang Hướng dẫn thiết lập): MỌI bước tuỳ chọn 5–11 (+ 13 Facebook,
-    14 Gen-hub từ v0.1.39), `done` khi đã xong
-    trong trình thiết lập HOẶC dữ liệu thật cho thấy đã làm ở Console — không phải bấm tay. Thẻ Tổng quan chỉ hiện
-    mục chưa xong; trang Hướng dẫn hiện đủ để thấy tiến độ."""
-    row = await _row(db)
-    _owner_of(row, user)
+async def follow_up_status(db: AsyncSession, row: Any) -> list[dict[str, Any]]:
+    """Trạng thái từng việc thiết lập tuỳ chọn (bước 4–11 theo STEPS + 13 Facebook, 14 Gen-hub) cho tổ chức của
+    `row` (cần `.org_id` và `.completed` — dòng `ops.setup_state`). v0.1.54 (g1-api): tách khỏi endpoint để Gen
+    hướng dẫn (gh.gen.coach.signals) dùng lại đúng một nguồn sự thật; đầu ra `GET /setup/follow-up` KHÔNG đổi."""
     status = (row.completed or {}).get("steps", {})
     out = []
     for n, key, title, required, _phase in STEPS:
@@ -906,6 +901,18 @@ async def follow_up(db: AsyncSession = DB,
         done = bool((await db.execute(text(sql), {"o": row.org_id})).scalar())
         out.append({"n": n, "key": key, "title": title, "status": "todo", "done": done})
     return out
+
+
+@router.get("/follow-up")
+async def follow_up(db: AsyncSession = DB,
+                    user: service.CurrentUser | None = Depends(optional_user)) -> list[dict[str, Any]]:
+    """Việc thiết lập tiếp (thẻ ở Tổng quan + trang Hướng dẫn thiết lập): MỌI bước tuỳ chọn 5–11 (+ 13 Facebook,
+    14 Gen-hub từ v0.1.39), `done` khi đã xong
+    trong trình thiết lập HOẶC dữ liệu thật cho thấy đã làm ở Console — không phải bấm tay. Thẻ Tổng quan chỉ hiện
+    mục chưa xong; trang Hướng dẫn hiện đủ để thấy tiến độ."""
+    row = await _row(db)
+    _owner_of(row, user)
+    return await follow_up_status(db, row)
 
 
 @router.get("/first-run")
