@@ -11,6 +11,7 @@ import { toast } from '../lib/toast';
 import { useNow } from '../lib/useNow';
 import { badgeText } from './headerModel';
 import { HEALTH_KINDS, qkSystem } from '../screens/system/queries';
+import { COACH_TODAY_KEY } from '../gen/coachModel';
 
 const KIND_ICON: Record<string, string> = {
   'user.role_changed': 'ph ph-user-switch',
@@ -47,6 +48,8 @@ const KIND_ICON: Record<string, string> = {
   'hub.unreachable': 'ph ph-plugs',
   // v0.1.50 (F-87): Gen đề xuất ghi Phiên của bản phát hành vào Kho Ryan (link `/overview?gen=<hội thoại>`).
   'gen.kho_proposal': 'ph ph-database',
+  // v0.1.54: Gen hướng dẫn nhắc việc / bài học (link `/overview?gen=coach` khi Gen bật, `/guide/viec-sep` khi Gen tắt).
+  'gen.coach': 'ph ph-chalkboard-teacher',
 };
 
 /**
@@ -66,6 +69,8 @@ function useHealthRefreshOnNotify(items: NotificationItem[] | undefined) {
     const fresh = items.filter((n) => !known.has(n.id));
     for (const n of fresh) known.add(n.id);
     if (fresh.some((n) => HEALTH_KINDS.has(n.kind))) void qc.invalidateQueries({ queryKey: qkSystem.health });
+    // v0.1.54: chuông `gen.coach` (Gen hướng dẫn có việc / bài học mới) ⇒ làm mới ngay để chấm đỏ ở nút Gen bật lên.
+    if (fresh.some((n) => n.kind === 'gen.coach')) void qc.invalidateQueries({ queryKey: COACH_TODAY_KEY });
   }, [items, qc]);
 }
 

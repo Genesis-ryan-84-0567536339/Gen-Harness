@@ -89,11 +89,24 @@ func NightlyStatusFrom(st autoupdate.Status, optedOut bool, watcher string) host
 	return ns
 }
 
+// WatcherInfoFrom chuyển tình trạng người gác (autoupdate.WatcherHealth) thành khối `watcher`
+// của run/nightly-status.json (v0.1.54). Khoẻ ⇒ {state: ok, reason: "", hint: ""}.
+func WatcherInfoFrom(h autoupdate.WatcherHealth) hostlink.NightlyWatcher {
+	switch h.State {
+	case autoupdate.WatcherHealthFallback:
+		return hostlink.NightlyWatcher{State: hostlink.WatcherStateFallback, Reason: h.Reason, Hint: h.Hint()}
+	case autoupdate.WatcherHealthFailed:
+		return hostlink.NightlyWatcher{State: hostlink.WatcherStateFailed, Reason: h.Reason, Hint: h.Hint()}
+	}
+	return hostlink.NightlyWatcher{State: hostlink.WatcherStateOK}
+}
+
 // SaveNightlyStatus ghi run/nightly-status.json từ ảnh chụp st (giữ since/last_run_at/last_result
 // đã có — xem hostlink.WriteNightlyStatus). Mốc lần chạy do lịch đêm tự ghi (RecordNightlyRun) tin
 // hơn mốc systemd/log: chỉ lấy từ ảnh chụp khi genh chưa có mốc nào.
-func SaveNightlyStatus(installDir string, st autoupdate.Status, optedOut bool, watcher string) error {
+func SaveNightlyStatus(installDir string, st autoupdate.Status, optedOut bool, watcher string, health autoupdate.WatcherHealth) error {
 	ns := NightlyStatusFrom(st, optedOut, watcher)
+	ns.Watcher = WatcherInfoFrom(health)
 	if prev, err := hostlink.ReadNightlyStatus(installDir); err == nil && prev.LastRunAt != "" {
 		ns.LastRunAt = ""
 	}
@@ -110,5 +123,6 @@ func RecordNightlyStatus(ctx context.Context, installDir string, deps autoupdate
 	if err != nil {
 		return err
 	}
-	return SaveNightlyStatus(installDir, st, AutoUpdateOptedOut(installDir), autoupdate.RequestWatcherState(ctx, deps))
+	return SaveNightlyStatus(installDir, st, AutoUpdateOptedOut(installDir), autoupdate.RequestWatcherState(ctx, deps),
+		autoupdate.RequestWatcherHealth(ctx, deps))
 }

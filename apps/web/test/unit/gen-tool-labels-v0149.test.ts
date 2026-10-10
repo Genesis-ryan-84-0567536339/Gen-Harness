@@ -36,6 +36,12 @@ describe('Nhãn bước tool của khung Gen', () => {
     expect(missing).toEqual([]);
   });
 
+  it('v0.1.54: coach.status (Gen hướng dẫn) có nhãn tiếng Việt cho Sếp', () => {
+    expect(serverToolNames()).toContain('coach.status');
+    expect(TOOL_LABEL).toHaveProperty(['coach.status']);
+    expect(toolLabel('coach.status')).toBe('Việc cần làm & bài học');
+  });
+
   it('nhãn là chữ thường cho Sếp, không phải tên kỹ thuật', () => {
     for (const [name, label] of Object.entries(TOOL_LABEL)) {
       expect(label.trim()).not.toBe('');

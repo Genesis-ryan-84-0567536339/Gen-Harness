@@ -4,6 +4,9 @@ import { Button, Icon, IconButton } from '@gen-harness/ui';
 import { useMe } from '../lib/queries';
 import { BriefingHubSections } from './BriefingHubSections';
 import { hubCardsAt } from './briefingModel';
+import { COACH_URGENT_PROMPT, hasUrgent } from './coachModel';
+import { useCoachAudience, useCoachToday } from './coachQueries';
+import { CoachTodayCard } from './CoachTodayCard';
 import { closeSpotlight, executeUiAction } from './director';
 import { restoreIfNeeded, retryRestore, sendFeedback, sendQuestion } from './genClient';
 import { GenHistory } from './GenHistory';
@@ -130,6 +133,10 @@ export function GenPanel({ userId }: { userId: string }) {
   const setOpen = useGenStore((s) => s.setOpen);
   const reset = useGenStore((s) => s.reset);
   const addr = useAddressing();
+  // v0.1.54 (Gen hướng dẫn): có việc khẩn (P0/P1) ⇒ thêm câu mẫu "Hôm nay em cần làm gì?" (dùng chung cache với thẻ).
+  const coachAudience = useCoachAudience();
+  const urgent = hasUrgent(useCoachToday(coachAudience).data);
+  const examples = urgent ? [COACH_URGENT_PROMPT, ...EXAMPLES] : EXAMPLES;
   const [text, setText] = useState('');
   const [historyOpen, setHistoryOpen] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
@@ -148,12 +155,24 @@ export function GenPanel({ userId }: { userId: string }) {
 
   useEffect(() => {
     const el = listRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    // v0.1.54: chưa có tin nào ⇒ giữ nguyên đầu danh sách (thẻ "Hôm nay của Sếp" nằm ở đó); có tin ⇒ cuộn xuống tin mới nhất.
+    if (el && messages.length > 0) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
+
+  // v0.1.54: "Hỏi Gen thêm" của thẻ chỉ ĐIỀN SẴN ô nhập (không gửi) — lấy câu rồi hạ về null.
+  const draft = useGenStore((s) => s.composerDraft);
+  useEffect(() => {
+    if (draft === null) return;
+    setText(draft);
+    useGenStore.getState().setComposerDraft(null);
+    const el = inputRef.current;
+    el?.focus();
+    el?.setSelectionRange?.(draft.length, draft.length);
+  }, [draft]);
 
   const submit = (q = text) => {
     const st = useGenStore.getState();
@@ -194,6 +213,8 @@ export function GenPanel({ userId }: { userId: string }) {
       </div>
       {historyOpen ? <GenHistory userId={userId} onClose={closeHistory} /> : null}
       <div className="gen-panel__list" ref={listRef} aria-live="polite">
+        {/* v0.1.54: thẻ "Hôm nay của Sếp" (Gen hướng dẫn) ở ĐẦU khung — chỉ Owner & Gen bật; không tạo hội thoại. */}
+        <CoachTodayCard />
         {messages.length === 0 && opening ? (
           <p className="gen-empty" role="status">
             {restoring ? 'Đang mở lại hội thoại…' : 'Đang mở hội thoại…'}
@@ -205,7 +226,7 @@ export function GenPanel({ userId }: { userId: string }) {
               nhắc việc, giao người, ghi nhớ một quy ước, ghi vào Kho Ryan — em chỉ đề xuất, {addr} xác nhận thì em mới làm.
             </p>
             <div className="gen-suggest">
-              {EXAMPLES.map((q) => (
+              {examples.map((q) => (
                 <button key={q} type="button" className="gh-btn gh-btn--secondary btn-24" onClick={() => submit(q)}>
                   {q}
                 </button>

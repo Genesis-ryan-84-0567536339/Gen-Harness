@@ -2242,10 +2242,12 @@ jobs:
   # lần kế tiếp trong 24 giờ 31 phút, unit mang --install-dir/--port/Environment → chạy thật service đêm
   # (Result=success, log có dòng mới, timer vẫn còn lịch) → nút Console ghi yêu cầu TỪ container api (đúng uid
   # thật) → ca tệp yêu cầu không xoá được (GH-E94C, .path không kích lặp vô hạn) → tự lành khi timer bị tắt →
-  # opt-out (Sếp đã chủ động tắt) không bị tự lành → bật lại → gỡ cài đặt.
+  # opt-out (Sếp đã chủ động tắt) không bị tự lành → bật lại → ca hết hạn mức inotify (v0.1.54: .path failed
+  # "Result: resources" ⇒ `genh auto-update status` tự chữa sang timer dự phòng quét mỗi phút, sửa gốc + enable ⇒ .path
+  # sống lại, dự phòng gỡ) → gỡ cài đặt.
   # Mọi bước kiểm chỉ ĐỌC trạng thái qua systemctl/journalctl/tệp run/ — không in config/secrets.json hay .env.
-  # promote đòi job này xanh (check_release_gate.py giữ bất biến). Chạy tay workflow cho tag cũ hơn v0.1.53 (genh
-  # chưa có lịch đêm tự lành) sẽ đỏ ở job này — promote tay bản cũ dùng skip_e2e.
+  # promote đòi job này xanh (check_release_gate.py giữ bất biến). Chạy tay workflow cho tag cũ hơn v0.1.54 (genh
+  # chưa có lịch đêm tự lành / người gác yêu cầu tự chữa) sẽ đỏ ở job này — promote tay bản cũ dùng skip_e2e.
   # Ghi chú vận hành: `--port` của genh chỉ là cổng genh kiểm /api/v1/ready; cổng proxy thật do compose đọc GH_PORT
   # (chế độ pr ghi GH_PORT vào deploy/.env, vì lịch đêm/trình nhận yêu cầu chạy ngoài phiên shell của job).
   e2e-nightly-real:
@@ -2773,6 +2775,162 @@ jobs:
           [ "$en" = "enabled" ] || { echo "::error::sau auto-update enable $t is-enabled = '$en'" >&2; exit 1; }
           [ "$ac" = "active" ] || { echo "::error::sau auto-update enable $t is-active = '$ac'" >&2; exit 1; }
           echo "OK: opt-out được tôn trọng; enable xoá dấu và bật lại."
+
+      - name: Hết hạn mức inotify — .path failed (Result=resources) ⇒ status tự chữa sang timer dự phòng; sửa gốc rồi enable ⇒ .path sống, dự phòng tắt
+        # v0.1.54: lỗi THẬT trên máy Boss — gen-harness-update-request.path rơi vào failed "Result: resources" vì hết
+        # hạn mức inotify (fs.inotify.max_user_instances mặc định 128, máy đang dùng 174); reset-failed + restart vẫn lỗi
+        # tới khi Boss `sudo sysctl -w fs.inotify.max_user_instances=1024`. Ở đây dựng lại đúng thế: hạ hạn mức xuống 1
+        # (runner là VM, có sudo) rồi restart .path. Runner không cho hạ sysctl ⇒ cách giả khác CHẠY THẬT: một tiến trình
+        # python chiếm hết inotify instance của chính người dùng này (đúng nguyên nhân "174 > 128" của máy Boss).
+        # Mọi lần sửa hệ thống (sysctl / tiến trình chiếm) được khôi phục ở trap EXIT, kể cả khi bước đỏ.
+        run: |
+          set -euo pipefail
+          p=gen-harness-update-request.path
+          tm=gen-harness-update-request.timer
+          svc=gen-harness-update-request.service
+          udir="$HOME/.config/systemd/user"
+          old="$(sysctl -n fs.inotify.max_user_instances)"
+          mode=sysctl
+          hog_pid=""
+          restore() {
+            if [ "$mode" = "sysctl" ]; then
+              sudo sysctl -w "fs.inotify.max_user_instances=$old" >/dev/null 2>&1 || true
+            fi
+            if [ -n "$hog_pid" ]; then kill "$hog_pid" 2>/dev/null || true; hog_pid=""; fi
+          }
+          trap restore EXIT
+
+          [ "$(systemctl --user is-active "$p" 2>&1 || true)" = "active" ] \
+            || { echo "::error::$p không active trước ca inotify — các bước trước đã hỏng người gác." >&2; exit 1; }
+          [ ! -e "$udir/$tm" ] || { echo "::error::timer dự phòng $tm đã có sẵn khi người gác còn khoẻ." >&2; exit 1; }
+
+          # 1) Dựng lỗi: hết hạn mức inotify ⇒ restart .path ⇒ failed.
+          if sudo sysctl -w fs.inotify.max_user_instances=1 >/dev/null 2>&1; then
+            echo "hạ fs.inotify.max_user_instances: $old → 1 (sudo sysctl)"
+            if systemctl --user restart "$p"; then
+              echo "::error::restart $p vẫn thành công khi hạn mức inotify = 1 — không dựng được ca hết hạn mức." >&2
+              exit 1
+            fi
+          else
+            mode=hog
+            echo "::warning::runner không cho hạ sysctl — dùng tiến trình python chiếm hết inotify instance của người dùng này (cách giả chạy thật)."
+            systemctl --user stop "$p"
+            python3 -I - >"$RUNNER_TEMP/inotify-hog.log" 2>&1 <<'PY' &
+          import ctypes, time
+          libc = ctypes.CDLL(None, use_errno=True)
+          held = []
+          printed = False
+          while True:
+              fd = libc.inotify_init1(0)
+              if fd >= 0:
+                  held.append(fd)
+                  continue
+              if not printed:
+                  print("giữ %d inotify instance" % len(held), flush=True)
+                  printed = True
+              time.sleep(0.02)
+          PY
+            hog_pid=$!
+            deadline=$((SECONDS + 20))
+            until grep -q 'giữ ' "$RUNNER_TEMP/inotify-hog.log"; do
+              [ "$SECONDS" -lt "$deadline" ] || { echo "::error::tiến trình chiếm inotify không chạy được." >&2; cat "$RUNNER_TEMP/inotify-hog.log" || true; exit 1; }
+              sleep 0.5
+            done
+            cat "$RUNNER_TEMP/inotify-hog.log"
+            if systemctl --user start "$p"; then
+              echo "::error::start $p vẫn thành công khi đã chiếm hết inotify instance — không dựng được ca hết hạn mức." >&2
+              exit 1
+            fi
+          fi
+          st="$(systemctl --user is-active "$p" 2>&1 || true)"
+          res="$(systemctl --user show "$p" -p Result --value 2>/dev/null || true)"
+          echo "sau khi hết hạn mức — $p is-active: $st; Result: $res"
+          [ "$st" = "failed" ] || { echo "::error::$p is-active = '$st' (cần failed) — không dựng được ca máy Boss." >&2; exit 1; }
+
+          # 2) `genh auto-update status` tự chữa: reset-failed + restart vẫn lỗi ⇒ timer dự phòng + nói thật.
+          "$GENH" auto-update status --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT" | tee "$RUNNER_TEMP/au-inotify.txt"
+          for want in 'Người gác yêu cầu (.path) lỗi' 'hết hạn mức inotify' 'đang dùng dự phòng quét mỗi phút' \
+                      'sudo sysctl -w fs.inotify.max_user_instances=1024' 'genh auto-update enable'; do
+            grep -Fq -e "$want" "$RUNNER_TEMP/au-inotify.txt" \
+              || { echo "::error::genh auto-update status thiếu '$want' khi .path failed vì inotify (xem đầu ra ở trên)." >&2; exit 1; }
+          done
+          en="$(systemctl --user is-enabled "$tm" 2>&1 || true)"
+          ac="$(systemctl --user is-active "$tm" 2>&1 || true)"
+          echo "timer dự phòng — is-enabled: $en; is-active: $ac"
+          [ "$en" = "enabled" ] || { echo "::error::timer dự phòng $tm is-enabled = '$en' (cần enabled)." >&2; exit 1; }
+          [ "$ac" = "active" ] || { echo "::error::timer dự phòng $tm is-active = '$ac' (cần active) — yêu cầu cập nhật tay không có ai nhận." >&2; exit 1; }
+          cat "$udir/$tm"
+          grep -Fq 'OnUnitActiveSec=1min' "$udir/$tm" || { echo "::error::timer dự phòng không quét mỗi phút." >&2; exit 1; }
+          grep -Fq "Unit=$svc" "$udir/$tm" || { echo "::error::timer dự phòng không kích cùng service với .path." >&2; exit 1; }
+          lim="$(systemctl --user show "$svc" -p StartLimitIntervalUSec --value 2>/dev/null || true)"
+          [ "$lim" = "0" ] || { echo "::error::$svc StartLimitIntervalUSec='$lim' (cần 0 khi chạy dự phòng — kích mỗi phút sẽ chạm giới hạn khởi động sau 5 lần)." >&2; exit 1; }
+          python3 - "$GEN_HARNESS_HOME/run/nightly-status.json" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1], encoding="utf-8"))
+          w = d.get("watcher") or {}
+          print(json.dumps(w, ensure_ascii=False))
+          assert w.get("state") == "fallback", "nightly-status.json watcher.state=%r (cần fallback): %s" % (w.get("state"), d)
+          assert w.get("reason") == "inotify", "watcher.reason=%r (cần inotify)" % w.get("reason")
+          assert "inotify" in (w.get("hint") or ""), "watcher.hint thiếu 'inotify': %r" % w.get("hint")
+          assert d.get("request_watcher") == "failed", "request_watcher=%r (cần failed)" % d.get("request_watcher")
+          PY
+
+          # 3) Dự phòng nhận thật: timer kích service ít nhất một lần và service chạy xong (Result=success).
+          deadline=$((SECONDS + 150))
+          while :; do
+            last="$(systemctl --user show "$tm" -p LastTriggerUSec --value 2>/dev/null || true)"
+            state="$(systemctl --user show "$svc" -p ActiveState --value 2>/dev/null || true)"
+            case "$last" in
+              ''|n/a|0) ;;
+              *) [ "$state" = "inactive" ] && break ;;
+            esac
+            [ "$SECONDS" -lt "$deadline" ] || { echo "::error::sau 150 giây timer dự phòng chưa kích service (LastTriggerUSec='${last:-<rỗng>}', service '$state')." >&2; systemctl --user status "$tm" "$svc" --no-pager || true; exit 1; }
+            sleep 3
+          done
+          result="$(systemctl --user show "$svc" -p Result --value)"
+          echo "timer dự phòng đã kích service ($last); service Result=$result"
+          [ "$result" = "success" ] || { echo "::error::service nhận yêu cầu do timer dự phòng kích có Result='$result'." >&2; journalctl --user -u "$svc" --no-pager | tail -50 || true; exit 1; }
+          # Hồi quy (E2E v0.1.54 từng đỏ ở đây): hạn mức vẫn thấp thì dự phòng PHẢI sống sót sau lần chạy service của chính nó.
+          # systemd thật: khi service mà .path kích đang chạy, `restart .path` cho .path "active (running)" mà không dựng
+          # inotify nào ("If the triggered unit is already running, so are we") ⇒ tự chữa trong service từng báo sống giả,
+          # gỡ dự phòng; service xong .path lại failed (resources) và không còn ai nhận yêu cầu.
+          st="$(systemctl --user is-active "$p" 2>&1 || true)"
+          en="$(systemctl --user is-enabled "$tm" 2>&1 || true)"
+          ac="$(systemctl --user is-active "$tm" 2>&1 || true)"
+          echo "sau lần chạy service của dự phòng — $p: $st; $tm is-enabled: $en; is-active: $ac"
+          [ "$st" = "failed" ] || { echo "::error::$p is-active = '$st' (cần failed) khi hạn mức inotify vẫn thấp — .path sống giả?" >&2; exit 1; }
+          [ "$en" = "enabled" ] && [ "$ac" = "active" ] \
+            || { echo "::error::timer dự phòng bị gỡ/tắt sau lần chạy service của chính nó (is-enabled='$en', is-active='$ac') — .path sống giả trong service rồi gỡ dự phòng." >&2; exit 1; }
+          [ -e "$udir/$tm" ] || { echo "::error::tệp timer dự phòng $tm biến mất khi hạn mức inotify vẫn thấp." >&2; exit 1; }
+
+          # 4) Sửa gốc rồi `genh auto-update enable` ⇒ .path sống lại, timer dự phòng tắt + gỡ.
+          restore
+          trap - EXIT
+          if [ "$mode" = "sysctl" ]; then
+            [ "$(sysctl -n fs.inotify.max_user_instances)" = "$old" ] || { echo "::error::chưa khôi phục được fs.inotify.max_user_instances=$old." >&2; exit 1; }
+          fi
+          "$GENH" auto-update enable --install-dir "$GEN_HARNESS_HOME" --port "$GH_PORT"
+          st="$(systemctl --user is-active "$p" 2>&1 || true)"
+          echo "sau enable — $p is-active: $st"
+          [ "$st" = "active" ] || { echo "::error::sau khi sửa gốc và auto-update enable, $p is-active = '$st' (cần active)." >&2; exit 1; }
+          ac="$(systemctl --user is-active "$tm" 2>&1 || true)"
+          en="$(systemctl --user is-enabled "$tm" 2>&1 || true)"
+          echo "timer dự phòng sau enable — is-enabled: $en; is-active: $ac"
+          [ "$ac" != "active" ] && [ "$en" != "enabled" ] || { echo "::error::timer dự phòng vẫn bật sau khi .path sống lại." >&2; exit 1; }
+          [ ! -e "$udir/$tm" ] || { echo "::error::tệp timer dự phòng $tm chưa được gỡ." >&2; exit 1; }
+          [ ! -e "$udir/$svc.d/fallback.conf" ] || { echo "::error::drop-in StartLimit của chế độ dự phòng chưa được gỡ." >&2; exit 1; }
+          python3 - "$GEN_HARNESS_HOME/run/nightly-status.json" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1], encoding="utf-8"))
+          w = d.get("watcher") or {}
+          assert w.get("state") == "ok", "nightly-status.json watcher=%r sau khi sửa gốc (cần ok): %s" % (w, d)
+          assert d.get("request_watcher") == "active", "request_watcher=%r (cần active)" % d.get("request_watcher")
+          PY
+          # Lịch đêm không bị ảnh hưởng.
+          t=gen-harness-update.timer
+          [ "$(systemctl --user is-enabled "$t" 2>&1 || true)" = "enabled" ] && [ "$(systemctl --user is-active "$t" 2>&1 || true)" = "active" ] \
+            || { echo "::error::lịch đêm $t không còn enabled + active sau ca inotify." >&2; exit 1; }
+          echo "OK: hết hạn mức inotify ⇒ dự phòng quét mỗi phút nhận thật; sửa gốc + enable ⇒ .path active, dự phòng tắt và gỡ."
 
       - name: (khi lỗi) In chẩn đoán systemd --user + log lịch đêm — KHÔNG in config/secrets.json hay .env
         if: failure()

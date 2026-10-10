@@ -1,9 +1,11 @@
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Icon } from '@gen-harness/ui';
+import { BOSS_CHECKS_KEY, BOSS_CHECKS_PATH } from '../../guide/bossChecksModel';
 import { FOLLOW_UP_KEY } from '../../guide/guideContent';
 import { api } from '../../lib/api';
 import { useCan } from '../../lib/permissions';
+import { useMe } from '../../lib/queries';
 import { sortIssues } from '../system/healthModel';
 import { useSystemHealth } from '../system/queries';
 import { NoModelNotice } from './NoModelBanner';
@@ -19,7 +21,7 @@ import { WARN } from './queueModel';
  * Chỉ vai trò có `system.manage` (Owner): mọi nút ở đây dẫn tới chỗ CHỈ người quản lý hệ thống làm được (Sao lưu ngay,
  * đăng nhập lại kênh/model, thử lại cập nhật). Vai trò chỉ có `system.read` (Auditor) không thấy dải — tình trạng vẫn
  * xem được ở thẻ "Sức khoẻ hệ thống" (Dữ liệu & lưu trữ), không có nút chết.
- * Không có gì ⇒ không vẽ gì. Lỗi tải sức khoẻ không chặn Tổng quan: bỏ qua phần đó (thẻ "Sức khoẻ hệ thống" ở
+ * Không có gì ⇒ không vẽ gì (dòng "Đã đạt x/N việc bắt buộc" của v0.1.54 là phần riêng, xem `BossProgressLine`). Lỗi tải sức khoẻ không chặn Tổng quan: bỏ qua phần đó (thẻ "Sức khoẻ hệ thống" ở
  * Dữ liệu & lưu trữ báo lỗi kèm "Chi tiết kỹ thuật").
  */
 export function NeedsBossStrip() {
@@ -28,7 +30,40 @@ export function NeedsBossStrip() {
   const step4 = Array.isArray(followUp.data) ? followUp.data.find((s) => s.n === 4) : undefined;
   const noModel = !!step4 && !step4.done;
   const issues = Array.isArray(health.data?.issues) ? sortIssues(health.data.issues) : [];
-  if (!noModel && issues.length === 0) return null;
+  return (
+    <>
+      {noModel || issues.length > 0 ? <StripBody noModel={noModel} issues={issues} /> : null}
+      <BossProgressLine />
+    </>
+  );
+}
+
+/**
+ * v0.1.54 (Gen hướng dẫn): dòng "Đã đạt x/N việc bắt buộc → Xem" — dẫn tới "Việc Sếp cần làm" (`/guide/viec-sep`). Dùng
+ * chính truy vấn `boss-checks` của trang đó (CHỈ Owner — API trả 403 cho vai trò khác nên không gọi); chỉ hiện khi x < N.
+ * Không nằm trong dải đỏ "Cần Sếp xử lý": thiếu việc kết nối là việc nên làm dần, chưa phải sự cố.
+ */
+function BossProgressLine() {
+  const isOwner = useMe().data?.role?.code === 'owner';
+  const q = useQuery({ queryKey: BOSS_CHECKS_KEY, queryFn: ({ signal }) => api.bossChecks.list(signal), enabled: isOwner });
+  const done = q.data?.required_done;
+  const total = q.data?.required_total;
+  if (!isOwner || typeof done !== 'number' || typeof total !== 'number' || total <= 0 || done >= total) return null;
+  return (
+    <div className="needs-boss-progress" data-testid="boss-progress">
+      <Icon name="ph ph-list-checks" size={14} />
+      <span className="needs-boss-progress__text">
+        Đã đạt {done}/{total} việc bắt buộc
+      </span>
+      <Link to={BOSS_CHECKS_PATH} className="gh-btn gh-btn--secondary btn-24">
+        Xem
+        <Icon name="ph ph-arrow-right" size={11} />
+      </Link>
+    </div>
+  );
+}
+
+function StripBody({ noModel, issues }: { noModel: boolean; issues: ReturnType<typeof sortIssues> }) {
   return (
     <section className="needs-boss" aria-label="Cần Sếp xử lý" data-testid="needs-boss" data-gen-target="overview.needs_boss">
       <h2 className="needs-boss__title">

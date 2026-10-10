@@ -104,6 +104,12 @@ type Deps struct {
 	UID string
 	// Now cho test (tính "lần kế tiếp") — nil dùng time.Now.
 	Now func() time.Time
+	// ReadFile cho phép tiêm giả khi test việc đọc /proc/sys/fs/inotify/max_user_instances
+	// (chẩn đoán người gác yêu cầu — watcher_heal.go) — nil dùng os.ReadFile.
+	ReadFile func(string) ([]byte, error)
+	// InotifyHeadroom cho phép tiêm giả việc "còn đủ n inotify instance cho .path dựng n watch không"
+	// (watcher_heal.go) — nil dùng phép thử thật (mở thử n instance rồi đóng ngay).
+	InotifyHeadroom func(n int) bool
 	// Location để đọc mốc giờ systemd in theo múi giờ máy (systemd < 247 không
 	// có --timestamp=unix) — nil dùng time.Local.
 	Location *time.Location

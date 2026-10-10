@@ -10,6 +10,7 @@ import { toast } from '../lib/toast';
 import { CardError, SkeletonLines } from '../screens/common';
 import { ScreenTitle } from '../screens/ScreenPage';
 import { DiagnosticsCard } from './DiagnosticsCard';
+import { CurriculumCard } from './CurriculumCard';
 import { GENH_COMMANDS, GENH_VERSION_LABEL, SERVER_VERSION_LABEL, diagnosticText, pinLimitsFor, withVersions } from './helpModel';
 import { roleLabel } from '../screens/system/systemModel';
 
@@ -104,6 +105,9 @@ export function HelpPage() {
             ) : null}
           </Card>
         ) : null}
+
+        {/* v0.1.54 (Gen hướng dẫn): Lộ trình học cùng Gen — 19 bài kèm trạng thái; chỉ Owner (thẻ tự ẩn với vai trò khác). */}
+        <CurriculumCard />
 
         {/* v0.1.49 (QD-16): ai cũng thấy; ghi rõ chỉ Owner dùng được. v0.1.50 (QD-18): thêm dòng ghi Kho có Xác nhận + PIN. */}
         <Card title="Gen đọc được gì từ Gen-hub" kicker="Chỉ Sếp (Owner) dùng được · Gen đọc; ghi Kho khi Sếp xác nhận + mã PIN" data-testid="help-genhub-reads">

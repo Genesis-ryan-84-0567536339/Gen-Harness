@@ -27,6 +27,7 @@
  *   tự ghi 'pass' sau lần ghi Kho THẬT đầu tiên (mock-p4-mcp gọi hook `recordKhoWrite`); hook `seedKhoWrite {}` ghi 'pass'. Đạt dòng hub
  *   kèm `detail.write_scopes` {kho} + `write_missing` (token chứa "khongghi" ⇒ kho false; vẫn Đạt).
  * Hook e2e `POST /api/v1/__mock/p3/bossChecks/seedClaude {}`: một hồ sơ Claude đang dùng, CHƯA có bản claude_login.
+ * Hook e2e `POST /api/v1/__mock/p3/bossChecks/seedHub {}` (v0.1.54): dòng 1 "Nối Gen-hub" đạt (e2e Gen hướng dẫn: việc boss.hub biến mất).
  */
 import { randomUUID } from 'node:crypto';
 import type { BossCheck, BossCheckKey, BossOverview, BossRow, CliProfile, HubLink, HubReadScopes, HubWriteScopes, Provider, SocialAccount } from '@gen-harness/contracts';
@@ -256,6 +257,8 @@ export function createMock(opts: Opts) {
   /** Dòng 9 'Gen ghi Kho' đạt — máy chủ ghi sau lần ghi Kho THẬT đầu tiên được xác nhận (không ghi đè nếu đã đạt). */
   const recordKhoWrite = () => (pass('kho_write') ? (results.kho_write as BossCheck) : record('kho_write', 'pass', { detail: { action: 'kho_write' } }));
   const seedKhoWrite = () => recordKhoWrite();
+  /** v0.1.54 (e2e Gen hướng dẫn): giả lập dòng 1 "Nối Gen-hub" đạt (như lượt Kiểm tra đạt) — không qua PIN/Gen-hub mock. */
+  const seedHub = () => record('hub', 'pass', { detail: { tools: 3 } });
 
-  return { handle, hooks: { seedAgy, seedClaude, seedFacebookReply, seedKhoWrite, recordKhoWrite, overview, recordTelegram, forgetTelegram, recordRemote } as Record<string, (...args: never[]) => unknown>, dispose: () => {} };
+  return { handle, hooks: { seedAgy, seedClaude, seedFacebookReply, seedKhoWrite, seedHub, recordKhoWrite, overview, recordTelegram, forgetTelegram, recordRemote } as Record<string, (...args: never[]) => unknown>, dispose: () => {} };
 }

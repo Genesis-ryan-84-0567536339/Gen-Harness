@@ -249,8 +249,16 @@ func EnsureRequestWatcher(ctx context.Context, deps Deps, rp RequestPaths) (stri
 			// thì enable --now không đủ: phải reset-failed. Bỏ qua lỗi (chưa failed).
 			_, _ = runner.Output(ctx, "systemctl", []string{"--user", "reset-failed", RequestTaskName + ".path", RequestTaskName + ".service"})
 			if _, err := runner.Output(ctx, "systemctl", []string{"--user", "enable", "--now", RequestTaskName + ".path"}); err != nil {
+				// v0.1.54: .path không khởi động được (vd hết hạn mức inotify — Result=resources):
+				// tự chữa (reset-failed + restart); vẫn lỗi thì timer dự phòng quét mỗi phút nhận
+				// yêu cầu thay — nút Cập nhật ngay vẫn có người nhận, lý do ghi ở trạng thái.
+				if h := HealRequestWatcher(ctx, deps); h.State == WatcherHealthOK || h.State == WatcherHealthFallback {
+					return UpdaterSystemd, nil
+				}
 				return "", err
 			}
+			// .path sống: có timer dự phòng từ lần lỗi trước (đã sửa gốc) thì gỡ.
+			HealRequestWatcher(ctx, deps)
 			return UpdaterSystemd, nil
 		}
 		if err := deps.guardLinux(ctx, home, RequestTaskName+".service", CrontabRequestMarker); err != nil {
@@ -299,6 +307,9 @@ func DisableRequestWatcher(ctx context.Context, deps Deps) string {
 			return keptMessage("trình nhận yêu cầu (nút Cập nhật ngay)", other)
 		}
 		_, _ = runner.Output(ctx, "systemctl", []string{"--user", "disable", "--now", RequestTaskName + ".path"})
+		if wp, ok := deps.watcherPaths(); ok && (fileExists(wp.timer) || fileExists(wp.dropIn)) { // v0.1.54: gỡ cả timer dự phòng (nếu có)
+			removeFallback(ctx, deps, wp)
+		}
 		dir := systemdUserDir(home)
 		_ = os.Remove(filepath.Join(dir, RequestTaskName+".service"))
 		_ = os.Remove(filepath.Join(dir, RequestTaskName+".path"))

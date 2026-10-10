@@ -40,6 +40,8 @@ export const TOOL_LABEL: Record<DataToolName, string> = {
   'hub.drive_search': 'Drive (Gen-hub)',
   // v0.1.41 (F-8): bước đầu của Bản tin Gen.
   'briefing.sources': 'việc, khách, nháp, sự cố…',
+  // v0.1.54: Gen hướng dẫn — việc cần làm & bài học hôm nay của Sếp.
+  'coach.status': 'Việc cần làm & bài học',
 };
 
 /** Nhãn của một bước tool; tên lạ (máy chủ mới hơn web) ⇒ câu chung, không lộ tên kỹ thuật. */

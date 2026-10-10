@@ -44,7 +44,7 @@ export function RemoteAccessCard() {
   }, [focusAccess, q.data]);
   if (!canRead) return null;
   return (
-    <Panel title="Truy cập từ xa" kicker="Cách nhân viên và điện thoại mở Console" label="Truy cập từ xa" bodyClass="health-card">
+    <Panel title="Truy cập từ xa" genTarget="system.remote_access" kicker="Cách nhân viên và điện thoại mở Console" label="Truy cập từ xa" bodyClass="health-card">
       <div ref={ref}>
         {q.isPending ? (
           <SkeletonLines rows={3} padding="0" />

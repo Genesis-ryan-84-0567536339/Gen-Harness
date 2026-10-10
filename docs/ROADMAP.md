@@ -1,4 +1,4 @@
-# Gen-Harness — Lộ trình tổng thể (cập nhật 10/10/2026, sau v0.1.53)
+# Gen-Harness — Lộ trình tổng thể (cập nhật 10/10/2026, sau v0.1.54)
 
 Nguồn chuẩn tiến độ. Mỗi đợt = 1 PR = 1 bản phát hành. CI xanh mới tạo bản thử (prerelease); E2E cài thật xanh mới tự
 nâng thành bản chính thức (latest); lịch tự cập nhật đêm đợi bản chính thức ra đủ 24 giờ. genh chỉ kiểm SHA-256 theo
@@ -29,9 +29,11 @@ Chi tiết từng bản ở [CHANGELOG.md](../CHANGELOG.md); tóm tắt theo ch�
 - **v0.1.47 – v0.1.50 (09/10)**: Facebook ghi lát 1 (trả lời/nhắn có xác nhận), bản build tái lập, Gen đọc lịch/mail/việc/Drive qua Gen-hub (QD-16),
   **Gen nhớ + Gen ghi Kho có xác nhận và mã PIN (QD-18, F-81, F-87)**. Cùng đợt: đồng bộ tài liệu (F-90, F-69, F-47, F-91, F-92, F-42, F-39).
 - **v0.1.51 – v0.1.53 (10/10)**: bản phản ứng — cổng phát hành dọn ảnh cũ (v0.1.51, v0.1.52) và **tự cập nhật đêm tự lành + trung thực** (v0.1.53, F-93…F-100); xem mục Bản phản ứng bên dưới.
+- **v0.1.54 (10/10)**: **Gen hướng dẫn** — Gen chủ động nhắc việc Sếp cần làm, giới thiệu tính năng chưa dùng, bài học mỗi ngày (thiết kế: [gen-coach.md](design/gen-coach.md)). Cùng bản: **người gác yêu cầu tự chữa** (`.path` failed vì hết hạn mức inotify ⇒ reset-failed + restart, vẫn lỗi ⇒ timer dự phòng quét mỗi phút + dòng cảnh báo ở thẻ Sức khoẻ; [v0.1.54.md](releases/v0.1.54.md)).
 
-## Tiếp theo (sau v0.1.50)
+## Tiếp theo (sau v0.1.54)
 Kế hoạch tổng của đợt kiểm toán kết thúc ở v0.1.50; không còn đợt đánh số sẵn. Thứ tự đề xuất:
+0. **Dùng thử Gen hướng dẫn một tuần** (3 bước ở [HANDOFF](reports/HANDOFF-v0.1.1.md) › Boss phải làm — v0.1.54), rồi nói cho Claude biết thẻ có đúng việc, chuông có phiền không; các ý để sau nằm ở mục Nợ #20–#25.
 1. **Boss nghiệm thu thật** các tính năng chưa từng chạy với tài khoản thật (danh sách và cách làm ở [HANDOFF](reports/HANDOFF-v0.1.1.md) › Việc dở): Gen-hub quyền đọc + ghi Kho,
    Telegram, Truy cập từ xa (Tailscale), Facebook trả lời. Kết quả tự ghi ở Việc Sếp cần làm.
 2. **Bộ câu hỏi chuẩn so model** (mục Nợ #1) rồi quyết giữ/bỏ Jev theo số đo.
@@ -65,6 +67,14 @@ Việc đã hứa hoặc đã biết mà chưa làm. Mỗi dòng ghi điều ki�
 | 17 | Hạ tầng/CI | Gói apt trong Dockerfile chưa ghim phiên bản; PR Renovate chưa có lịch tự động; ô E2E Fedora thật (VM) chưa có; sinh type từ OpenAPI hoãn; `ops.action_log` hạn lưu (vướng chuỗi băm); F-38 phần còn lại |
 | 18 | Nghiệm thu thật chưa làm | Tailscale/điện thoại trên máy Fedora của Boss (v0.1.46); canary `--live` agy (v0.1.38/39); Facebook trả lời (v0.1.47) |
 | 19 | **H-b** (v0.1.53): timer `gen-harness-update.timer` mất lịch khi `daemon-reload`/`enable` chạy từ bên trong service đêm | **Chưa tái hiện được** — bằng mã lẫn bằng `e2e-nightly-real` (systemd thật có linger: sau lần chạy service đêm timer vẫn enabled + active + có lần kế tiếp). H-a và H-c đã tái hiện và sửa; tự lành bao cả ca này nếu xảy ra trên máy thật. Chi tiết: [v0.1.53.md](releases/v0.1.53.md) |
+| 20 | **`release_todos`** — mỗi bản phát hành khai báo "việc Sếp làm sau khi lên bản" thành dữ liệu (Gen hướng dẫn, v0.1.54) | Chưa làm. Hiện việc này chỉ nằm trong HANDOFF/`docs/releases/`; Gen chưa tự biết bản mới đòi Sếp làm gì. Thiết kế: [gen-coach.md](design/gen-coach.md) mục 18 |
+| 21 | **Danh mục tính năng** có cấu trúc cho Gen (mô tả, đích, điều kiện dùng) | Chưa làm. Gen chỉ dựa vào `screens.list`, `guide.list`, `coach.status` để trả lời "có tính năng X không?" — chưa giới thiệu được tính năng ngoài 6 mẹo |
+| 22 | **Gợi ý cuối câu tất định** — nút "Chỉ cho em" cuối câu trả lời do mã sinh (không do model) | Chưa làm. Cần `coach_intent` mở rộng + test chống bịa đích |
+| 23 | **"Làm giúp" bước 8** (Gen điền sẵn form Tạo agent đầu tiên theo khuôn đề xuất có Xác nhận) | Chưa làm. Hiện Gen chỉ chỉ đường tới bước 8 |
+| 24 | **Bộ bài cho nhân viên** — lộ trình riêng cho vai trò khác Owner | Hoãn: Gen hướng dẫn chỉ dành cho Sếp (cùng lý do Nợ #16, F-68); mở khi có nhân viên dùng thật |
+| 25 | **Tắt chuông theo loại** (việc khẩn / token sắp hết hạn / bài học) | Chưa làm. Hiện "Chuông nhắc" là một công tắc chung; cần ý kiến Sếp sau một tuần dùng thử |
+| 26 | **Nhãn nút theo trạng thái `opted_out_running`** (v0.1.53): sự cố/chuông `host.nightly` khi Sếp đã tắt tự cập nhật mà lịch vẫn bật vẫn dùng nút **"Xem cách bật lại"** (chung cho mọi lý do) | Chưa làm. Nội dung đích đã đúng (hai lựa chọn: tắt hẳn / giữ tự cập nhật) nhưng nhãn nút nói "bật lại"; cần nhãn riêng (vd "Xem lựa chọn") ở `gh/health.py` (`ACTIONS`) + web |
+| 27 | **`genh auto-update disable` khi không có phiên systemd `--user`** (chạy qua `sudo`/`su`/ssh không có `XDG_RUNTIME_DIR`, hoặc tài khoản khác tài khoản đã bật lịch) (v0.1.53) | Chưa làm. Hiện genh hỏi lại trạng thái, báo "CHƯA tắt được" và thoát 1 (không nói dối) nhưng chưa tự dò `XDG_RUNTIME_DIR`/`loginctl` để tắt hộ; Sếp phải chạy lại đúng tài khoản trong phiên đăng nhập |
 
 ## Bản phản ứng (hotfix)
 Các bản sửa nóng thật, không nằm trong kế hoạch đợt. Đối chiếu `git log origin/main` và nhánh `hotfix/*`:
@@ -91,6 +101,8 @@ Hai bản **phản ứng theo yêu cầu của Boss** (tính năng, không phả
   (schema `/v1/systemone` còn là giả định, xem [v0.1.21.md](releases/v0.1.21.md)).
 - ✅ A4 Gen v2 bước 1 — đề xuất thao tác có xác nhận (nháp tin → nhắc việc → gán người; Xác nhận/Sửa/Huỷ, PIN khi nhạy cảm,
   Action Log via=gen; nhắc việc đến giờ → chuông) — v0.1.24. Mở rộng: `social_reply`/`social_dm` (v0.1.47), `memory_note`/`kho_create`/`kho_update` (v0.1.50).
+- ✅ A5 Gen hướng dẫn — thẻ "Hôm nay của Sếp" (việc cần làm ngay, mẹo, bài học k/19), Lộ trình học cùng Gen, chuông `gen.coach`, dòng Bản tin x/N, tool `coach.status` — v0.1.54
+  (thiết kế: [gen-coach.md](design/gen-coach.md); không gọi model, chỉ Owner, khuyên không ép).
 
 ## Đợt B — Cơ bản còn thiếu
 - ✅ B1 quản lý người dùng (mời, đổi vai trò, khoá/mở khoá, đặt lại mật khẩu) — v0.1.22.

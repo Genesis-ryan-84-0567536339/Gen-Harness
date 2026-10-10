@@ -42,7 +42,9 @@ export type DataToolName =
   | 'hub.mail_read'
   | 'hub.drive_search'
   /** v0.1.41 (F-8): bước đầu của Bản tin Gen — đánh dấu nội dung ngoài (việc, khách, nháp, sự cố…). */
-  | 'briefing.sources';
+  | 'briefing.sources'
+  /** v0.1.54: tool chỉ-đọc của Gen hướng dẫn — việc cần làm & bài học hôm nay của Sếp (chỉ Owner). */
+  | 'coach.status';
 
 export type UiAction =
   | { type: 'navigate'; screen: string; params?: Record<string, string> }
@@ -388,6 +390,143 @@ export interface GenMemoryPatchBody {
   reason?: string | null;
 }
 
+/**
+ * v0.1.54 — "Gen hướng dẫn" (Gen coach): thẻ "Hôm nay của Sếp" ở đầu khung Gen, Cài đặt › Bộ não AI › Gen hướng dẫn và
+ * Trợ giúp › Lộ trình học cùng Gen. CHỈ Owner (vai trò khác 403 FORBIDDEN). 0 lời gọi model, 0 ghi `gen_messages` ở mọi
+ * đường `/gen/coach/*`; khuyên chứ không ép. Máy chủ không bao giờ trả `detail`, `message`, email hay token.
+ *
+ * Mã lỗi (ApiError, title tiếng Việt thân thiện): 403 FORBIDDEN · 404 COACH_ITEM_UNKNOWN · 422 COACH_DISMISS_NOT_ALLOWED
+ * (việc khẩn P0 không tắt được) · 422 COACH_CONFIRM_REQUIRED (tắt việc phải gửi `confirm: true`) · 422 VALIDATION.
+ */
+export type CoachLevel = 'P0' | 'P1' | 'P2' | 'P3';
+
+/** Nút "Thử ngay" / "Làm thử": `target` là mục tiêu registry (có thể dạng dòng `guide.item.do:7`). */
+export interface CoachTry {
+  label: string;
+  target: string;
+}
+
+/** Một việc cần làm ngay (≤ 3 mỗi lần). `target` (làm sáng phần tử) hoặc `link` (đường dẫn trong app) — hoặc cả hai. */
+export interface CoachTodo {
+  /** `health.<kind>` · `model.missing` · `boss.<key>` · `backup.unset` · `hub.token_expiring` · `drafts.pending` · `followup.<n>`. */
+  key: string;
+  level: CoachLevel;
+  title: string;
+  why: string;
+  target?: string | null;
+  link?: string | null;
+  /** `false` với P0 (khẩn cấp không tắt được). */
+  can_dismiss: boolean;
+  /** Câu cảnh báo hiện trong hộp xác nhận khi Sếp chọn "Không dùng việc này". */
+  dismiss_warning?: string | null;
+}
+
+/** "Sếp biết chưa?" — mẹo ngắn. */
+export interface CoachTip {
+  key: string;
+  title: string;
+  body: string;
+  try?: CoachTry | null;
+}
+
+export type CoachLessonStatus = 'new' | 'shown' | 'understood' | 'snoozed' | 'done';
+
+/** "Bài học hôm nay · k/19". */
+export interface CoachLesson {
+  /** `N01`..`N10` hoặc `G05`..`G14` (bài sinh từ Hướng dẫn thiết lập). */
+  id: string;
+  k: number;
+  total: number;
+  title: string;
+  body: string;
+  try?: CoachTry | null;
+  status: CoachLessonStatus;
+}
+
+export interface CoachProgress {
+  required_done: number;
+  required_total: number;
+  lessons_done: number;
+  lessons_total: number;
+  /** Đủ việc bắt buộc và không còn việc khẩn trong một thời gian — thẻ hiện "Hệ thống đã ổn định". */
+  stable: boolean;
+  stable_since: string | null;
+}
+
+/** `GET /gen/coach/today[?mark_shown=1]`. */
+export interface CoachToday {
+  date: string;
+  /** `false` khi Sếp đã Tắt hướng dẫn — web không vẽ thẻ. */
+  enabled: boolean;
+  /** Đang "Hoãn tất cả" tới lúc này (ISO) — null khi không hoãn. */
+  snoozed_until: string | null;
+  todos: CoachTodo[];
+  tip: CoachTip | null;
+  lesson: CoachLesson | null;
+  progress: CoachProgress;
+  /** Có nội dung mới Sếp chưa được thấy trong khung (chấm đỏ ở nút Gen). */
+  unseen: boolean;
+}
+
+export type CoachItemActionName = 'understood' | 'snooze' | 'done' | 'dismiss' | 'restore';
+
+/**
+ * `POST /gen/coach/items/{item_key}` → 204. `item_key`: `todo:<khoá>` | `tip:<key>` | `lesson:<N01..N10|G05..G14>` |
+ * `card:setup_followup`. `snooze` kèm `days` 1|3|7; `dismiss` bắt buộc `confirm: true` (thiếu ⇒ 422 COACH_CONFIRM_REQUIRED,
+ * việc P0 ⇒ 422 COACH_DISMISS_NOT_ALLOWED).
+ */
+export interface CoachItemAction {
+  action: CoachItemActionName;
+  days?: 1 | 3 | 7;
+  confirm?: true;
+}
+
+/** Việc Sếp đã chọn không dùng (hiện ở Cài đặt, mỗi dòng có "Bật lại"). */
+export interface CoachDismissedItem {
+  key: string;
+  level: CoachLevel;
+  title: string;
+}
+
+/** `GET /gen/coach/prefs`. Giờ yên lặng theo múi giờ tổ chức. */
+export interface CoachPrefs {
+  enabled: boolean;
+  bell: boolean;
+  lessons_per_day: number;
+  quiet_start: number;
+  quiet_end: number;
+  snooze_until: string | null;
+  /** Thẻ "Việc thiết lập tiếp" đang được hoãn tới lúc này (ISO) — null khi không hoãn. */
+  followup_snoozed_until: string | null;
+  dismissed: CoachDismissedItem[];
+}
+
+/** `PATCH /gen/coach/prefs` → CoachPrefs. `lessons_per_day` 0..2; `quiet_*` 0..23; `snooze_all_days` 0|1|3|7 (0 = bỏ hoãn). */
+export interface CoachPrefsPatch {
+  enabled?: boolean;
+  bell?: boolean;
+  lessons_per_day?: number;
+  quiet_start?: number;
+  quiet_end?: number;
+  snooze_all_days?: 0 | 1 | 3 | 7;
+}
+
+/** Một bài của Lộ trình học cùng Gen (`GET /gen/coach/curriculum`). */
+export interface CurriculumLesson {
+  id: string;
+  k: number;
+  title: string;
+  body: string;
+  try?: CoachTry | null;
+  status: CoachLessonStatus;
+}
+
+export interface Curriculum {
+  /** Tổng số bài (19). */
+  total: number;
+  lessons: CurriculumLesson[];
+}
+
 export function genEndpoints(r: ApiClient['request']) {
   return {
     gen: {
@@ -418,6 +557,19 @@ export function genEndpoints(r: ApiClient['request']) {
         update: (id: string, body: GenMemoryPatchBody) =>
           r<GenMemoryNote>(`/gen/memory/${encodeURIComponent(id)}`, { method: 'PATCH', body }),
         remove: (id: string) => r<void>(`/gen/memory/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+      },
+      /**
+       * v0.1.54: Gen hướng dẫn — chỉ Owner. `today(true)` = `?mark_shown=1` (đánh dấu Sếp đã thấy thẻ ⇒ tắt chấm đỏ);
+       * `itemAction` nhận `item_key` đầy đủ (`todo:boss.hub`, `tip:…`, `lesson:N01`, `card:setup_followup`).
+       */
+      coach: {
+        today: (markShown?: boolean, signal?: AbortSignal) =>
+          r<CoachToday>('/gen/coach/today', { signal, ...(markShown ? { query: { mark_shown: 1 } } : {}) }),
+        itemAction: (itemKey: string, body: CoachItemAction) =>
+          r<void>(`/gen/coach/items/${encodeURIComponent(itemKey)}`, { method: 'POST', body }),
+        prefs: (signal?: AbortSignal) => r<CoachPrefs>('/gen/coach/prefs', { signal }),
+        patchPrefs: (body: CoachPrefsPatch) => r<CoachPrefs>('/gen/coach/prefs', { method: 'PATCH', body }),
+        curriculum: (signal?: AbortSignal) => r<Curriculum>('/gen/coach/curriculum', { signal }),
       },
     },
   };

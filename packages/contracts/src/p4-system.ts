@@ -471,6 +471,17 @@ export interface SystemHealth {
     opted_out: boolean | null;
     linger: SystemLinger;
     checked_at: string | null;
+    /**
+     * v0.1.54: người gác yêu cầu (`gen-harness-update-request.path`) tự chữa. CHỈ có khi KHÔNG ok (thiếu = ok / api cũ):
+     * 'fallback' = người gác lỗi (vd hết hạn mức inotify) nhưng timer dự phòng quét mỗi phút đang nhận yêu cầu thay;
+     * 'failed' = lỗi và chưa bật được dự phòng (nút Cập nhật ngay chưa có người nhận). `reason` là mã ('inotify' |
+     * 'resources' | 'other'); `hint` là câu gợi ý cố định do api ghép (không lấy chữ từ tệp trên máy chủ).
+     */
+    watcher?: {
+      state: 'fallback' | 'failed';
+      reason: 'inotify' | 'resources' | 'other' | null;
+      hint: string;
+    };
   };
 }
 

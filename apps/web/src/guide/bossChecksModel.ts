@@ -13,6 +13,28 @@ export const BOSS_CHECKS_KEY = ['boss-checks'] as const;
 /** Đường dẫn trang con của Hướng dẫn thiết lập. */
 export const BOSS_CHECKS_PATH = '/guide/viec-sep';
 
+/**
+ * v0.1.54 (Gen hướng dẫn): mục tiêu `data-gen-target` của 9 dòng "Việc Sếp cần làm" — khoá = `key` của dòng (khớp `ROWS` trong
+ * apps/api/gh/boss_checks/service.py; vitest `coach-v0154` so khớp hai bên), `row` = số dòng. Các literal `genTarget: '…'`
+ * ĐỂ NGUYÊN dạng này: bộ quét tĩnh của gen-targets.test.ts đọc chúng để biết id nào đã được gắn vào màn hình.
+ */
+export const BOSS_ROW_TARGETS = {
+  hub: { row: 1, genTarget: 'boss_checks.row.hub' },
+  facebook: { row: 2, genTarget: 'boss_checks.row.facebook' },
+  agy: { row: 3, genTarget: 'boss_checks.row.agy' },
+  claude: { row: 4, genTarget: 'boss_checks.row.claude' },
+  jev: { row: 5, genTarget: 'boss_checks.row.jev' },
+  telegram: { row: 6, genTarget: 'boss_checks.row.telegram' },
+  remote: { row: 7, genTarget: 'boss_checks.row.remote' },
+  facebook_reply: { row: 8, genTarget: 'boss_checks.row.facebook_reply' },
+  kho_write: { row: 9, genTarget: 'boss_checks.row.kho_write' },
+} as const;
+
+/** Số dòng (1..9) → id `data-gen-target` của dòng đó; số lạ ⇒ undefined (không gắn). */
+export function bossRowTarget(n: number): string | undefined {
+  return Object.values(BOSS_ROW_TARGETS).find((r) => r.row === n)?.genTarget;
+}
+
 /** Thăm lại mỗi 3 giây khi có kết quả đang chạy (vd đọc Facebook chạy nền). */
 export const BOSS_CHECKS_POLL_MS = 3000;
 

@@ -29,7 +29,7 @@ func TestNightlyStatus_KhoaHopDong(t *testing.T) {
 		t.Fatalf("JSON hỏng: %v\n%s", err, raw)
 	}
 	want := []string{"schema", "mechanism", "enabled", "active", "unit_present", "opted_out", "owned_by_other", "since",
-		"last_run_at", "last_result", "next_run_at", "linger", "request_watcher", "checked_at"}
+		"last_run_at", "last_result", "next_run_at", "linger", "request_watcher", "watcher", "checked_at"}
 	if len(m) != len(want) {
 		t.Errorf("số khoá = %d, muốn %d: %s", len(m), len(want), raw)
 	}
@@ -50,6 +50,10 @@ func TestNightlyStatus_KhoaHopDong(t *testing.T) {
 	}
 	if m["last_run_at"] != "" || m["last_result"] != "" {
 		t.Errorf("chưa chạy lần nào thì rỗng: %s", raw)
+	}
+	// v0.1.54: watcher luôn có mặt, mặc định {state: ok, reason: "", hint: ""}.
+	if w, _ := m["watcher"].(map[string]any); w["state"] != "ok" || w["reason"] != "" || w["hint"] != "" || len(w) != 3 {
+		t.Errorf("watcher mặc định phải là ok: %s", raw)
 	}
 
 	// active null khi không áp dụng (cron…).
@@ -170,5 +174,49 @@ func TestNightlyStatus_LocGiaTriLa(t *testing.T) {
 	if st.Mechanism != "" || st.Since != "" || st.LastRunAt != "" || st.LastResult != "" || st.NextRunAt != "" ||
 		st.Linger != "unknown" || st.RequestWatcher != WatcherUnknown || st.CheckedAt != "" {
 		t.Fatalf("chưa lọc: %+v", st)
+	}
+}
+
+// v0.1.54: khối watcher — dự phòng ghi/đọc đủ, giữ qua RecordNightlyRun, thiếu khoá (tệp cũ) = ok, lọc giá trị lạ.
+func TestNightlyStatus_WatcherDuPhongVaTuongThichNguoc(t *testing.T) {
+	root := t.TempDir()
+	hint := "Hết hạn mức inotify: chạy `sudo sysctl -w fs.inotify.max_user_instances=1024` rồi `genh auto-update enable`."
+	err := WriteNightlyStatus(root, NightlyStatus{Mechanism: "systemd", Enabled: true, RequestWatcher: WatcherFailed,
+		Watcher: NightlyWatcher{State: WatcherStateFallback, Reason: WatcherReasonInotify, Hint: hint}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(NightlyStatusPath(root))
+	var m map[string]any
+	_ = json.Unmarshal(raw, &m)
+	w, _ := m["watcher"].(map[string]any)
+	if w["state"] != "fallback" || w["reason"] != "inotify" || w["hint"] != hint {
+		t.Fatalf("watcher ghi sai: %s", raw)
+	}
+	// Lịch đêm chạy (RecordNightlyRun) không được xoá khối watcher.
+	if err := RecordNightlyRun(root, time.Now(), NightlyResultDone); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := ReadNightlyStatus(root); st.Watcher.State != WatcherStateFallback || st.Watcher.Reason != WatcherReasonInotify {
+		t.Errorf("RecordNightlyRun làm mất watcher: %+v", st.Watcher)
+	}
+	// Tệp của genh cũ (không có khoá watcher) ⇒ ok.
+	old := `{"schema":1,"mechanism":"systemd","enabled":true,"linger":"yes","request_watcher":"active"}`
+	if err := os.WriteFile(NightlyStatusPath(root), []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if st, err := ReadNightlyStatus(root); err != nil || st.Watcher.State != WatcherStateOK || st.Watcher.Reason != "" || st.Watcher.Hint != "" {
+		t.Errorf("thiếu khoá watcher phải là ok: %+v %v", st.Watcher, err)
+	}
+	// Giá trị lạ (api ghi được run/) bị lọc.
+	bad := `{"schema":1,"watcher":{"state":"pwn","reason":"rm -rf","hint":"x"}}`
+	_ = os.WriteFile(NightlyStatusPath(root), []byte(bad), 0o644)
+	if st, _ := ReadNightlyStatus(root); st.Watcher != (NightlyWatcher{State: WatcherStateOK}) {
+		t.Errorf("state lạ phải thành ok, rỗng reason/hint: %+v", st.Watcher)
+	}
+	bad = `{"schema":1,"watcher":{"state":"fallback","reason":"rm -rf","hint":"` + strings.Repeat("x", 500) + `"}}`
+	_ = os.WriteFile(NightlyStatusPath(root), []byte(bad), 0o644)
+	if st, _ := ReadNightlyStatus(root); st.Watcher.State != WatcherStateFallback || st.Watcher.Reason != "" || st.Watcher.Hint != "" {
+		t.Errorf("reason lạ/hint quá dài phải bị bỏ: %+v", st.Watcher)
 	}
 }

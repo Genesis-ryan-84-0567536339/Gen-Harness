@@ -1,4 +1,4 @@
-# Bàn giao Gen-Harness — hiện trạng + việc dở (cập nhật 10/10/2026, bản v0.1.53)
+# Bàn giao Gen-Harness — hiện trạng + việc dở (cập nhật 10/10/2026, bản v0.1.54)
 
 File này nay chỉ ghi **hiện trạng + việc dở** (tên cũ `HANDOFF-v0.1.1.md` giữ nguyên vì mã nguồn có chú thích trỏ tới).
 Lịch sử từng bản nằm ở [CHANGELOG.md](../../CHANGELOG.md) (3–5 dòng/bản) và `docs/releases/vX.Y.Z.md` (chi tiết, chuyển nguyên từ HANDOFF cũ):
@@ -20,25 +20,45 @@ Còn hiệu lực từ v0.1.1 (vai trò DB, volume, gói hồ sơ); chi tiết �
 - **Gói hồ sơ `.ghbundle`**: Python tạo/đọc (`python -m gh.bundle export|import`), Go chỉ chuyển bytes; mật khẩu qua `GH_BUNDLE_PASSWORD` (≥ 12 ký tự);
   mã thoát `0` ok · `2` sai mật khẩu/gói hỏng · `3` không tương thích · `1` lỗi khác; mã hoá lại mọi bí mật bằng khoá master máy đích.
 
-## Hiện trạng (v0.1.53)
+## Hiện trạng (v0.1.54)
 
-Bản mới nhất **v0.1.53** (10/10/2026, `VERSION` = v0.1.53): **bản phản ứng "tự cập nhật đêm tự lành + trung thực"** — máy Boss đứng ở v0.1.44 từ 03/10 đến 09/10 vì lịch đêm bị tắt mà không ai biết ([v0.1.53.md](../releases/v0.1.53.md)).
-v0.1.53 chứa toàn bộ v0.1.52 (gỡ digest cũ bằng `rmi -f`, [v0.1.52.md](../releases/v0.1.52.md)), v0.1.51 và v0.1.50; bản chạy trên máy Boss: v0.1.49.
+Bản mới nhất **v0.1.54** (10/10/2026, `VERSION` = v0.1.54): **Gen hướng dẫn** — Gen chủ động nhắc việc Sếp cần làm, giới thiệu tính năng, bài học mỗi ngày ([v0.1.54.md](../releases/v0.1.54.md), thiết kế [gen-coach.md](../design/gen-coach.md)).
+v0.1.54 chứa toàn bộ **v0.1.53** ("tự cập nhật đêm tự lành + trung thực": máy Boss đứng ở v0.1.44 từ 03/10 đến 09/10 vì lịch đêm bị tắt mà không ai biết, [v0.1.53.md](../releases/v0.1.53.md)),
+v0.1.52 (gỡ digest cũ bằng `rmi -f`, [v0.1.52.md](../releases/v0.1.52.md)), v0.1.51 và v0.1.50; bản chạy trên máy Boss: v0.1.49.
 Đang chạy, theo nhóm:
 
 - **Cài đặt & vận hành (genh)**: cài một lệnh; `genh update` an toàn (tải trước, sao lưu, migrate, tự quay về bản cũ khi lỗi, khoá `genh.lock`, báo "bị dừng giữa chừng");
-  lịch đêm ~03:00 **tự lành** (bật lại khi mất/tắt/không chạy, trừ khi Sếp đã chủ động tắt), `genh auto-update status` nói thật, chọn bản cao nhất đã đủ 24 giờ; `genh export/import`, `genh offsite` (bản sao tuần ra USB/NAS), `genh remote` (Tailscale/Cloudflare/LAN/local),
+  lịch đêm ~03:00 **tự lành** (bật lại khi mất/tắt/không chạy, trừ khi Sếp đã chủ động tắt), **người gác nút Cập nhật ngay tự chữa** (v0.1.54: `.path` failed vì hết hạn mức inotify ⇒ reset-failed + restart, vẫn lỗi ⇒ timer dự phòng quét mỗi phút), `genh auto-update status` nói thật, chọn bản cao nhất đã đủ 24 giờ; `genh export/import`, `genh offsite` (bản sao tuần ra USB/NAS), `genh remote` (Tailscale/Cloudflare/LAN/local),
   trực canh 12 phút → Telegram, gói chẩn đoán. Cổng mặc định chỉ nghe 127.0.0.1 (máy cũ giữ 0.0.0.0 + một chuông nhắc).
 - **Phát hành & CI**: xem "Quy trình phát hành" dưới; ảnh ghim digest, `uv.lock --frozen`, action ghim SHA, quét bảo mật dạng báo cáo, `check_*` trong `.github/scripts`.
 - **Console**: 11 dịch vụ compose (`proxy web migrate api worker bridge browser browser-redis browser-egress db redis`); menu 6 mục + Nâng cao; trình thiết lập; Hướng dẫn thiết lập;
-  Việc Sếp cần làm (9 dòng, 6 bắt buộc, kết quả ở `ops.boss_checks`); chuông + dải "Cần Sếp xử lý"; Trợ giúp (gói chẩn đoán, cập nhật); phiên 7 ngày trượt, tối đa 30 ngày; PIN ở đường hạ rào.
+  Việc Sếp cần làm (9 dòng, 6 bắt buộc, kết quả ở `ops.boss_checks`); chuông + dải "Cần Sếp xử lý"; Trợ giúp (gói chẩn đoán, cập nhật, **Lộ trình học cùng Gen**); phiên 7 ngày trượt, tối đa 30 ngày; PIN ở đường hạ rào.
 - **Gen (chỉ Owner)**: khung chat nhớ hội thoại; Bản tin 07:30/17:30; dẫn đường trên UI; **8 loại đề xuất** có Xác nhận (draft_message, reminder, assign, social_reply, social_dm,
   **memory_note, kho_create, kho_update**); **Gen nhớ** (30 ghi chú, Cài đặt › Bộ não AI); đọc Kho + lịch/mail/việc/Drive qua Gen-hub (đã che) và Tài liệu/Deal/Vụ việc nội bộ;
-  **ghi Kho** (Phiên, Việc) chỉ qua đề xuất + mã PIN + permit; mỗi bản mới Gen đề xuất một Phiên (F-87).
+  **ghi Kho** (Phiên, Việc) chỉ qua đề xuất + mã PIN + permit; mỗi bản mới Gen đề xuất một Phiên (F-87);
+  **Gen hướng dẫn** (v0.1.54): thẻ Hôm nay của Sếp (≤ 3 việc cần làm ngay, mẹo, bài k/19), chấm đỏ, chuông `gen.coach` ≤ 1/ngày, dòng Bản tin x/N, tool `coach.status` — không gọi model, chỉ Owner, khuyên không ép.
 - **Model AI**: ModelRouter (khoá API Gemini/OpenRouter/OpenAI-compat), agy (chỉ cho Gen của Sếp), Claude Code CLI (Owner tự quyết rủi ro, QD-12); model và mức suy nghĩ tách riêng;
   việc nền mặc định chỉ khoá API; chi phí ₫/ngày + trần; Jev đóng băng (QD-10 bỏ Jules).
 - **Kênh**: Zalo/WhatsApp qua bridge (QR); Telegram một chiều tới Sếp; Facebook cá nhân đọc + Trả lời bình luận/Nhắn tin có Xác nhận + PIN + ảnh chụp (đăng bài = lát 2).
 - **Dữ liệu & bảo mật**: Postgres 16 (pgvector, pg_partman), RLS chỉ là phòng thủ phụ (mỗi bản cài 1 tổ chức), hạn lưu thật, bí mật mã hoá phong bì, DNS ghim cho MCP/Gen-hub, ngắt mạch Gen-hub 60 giây.
+
+## v0.1.54 — Gen hướng dẫn
+
+- **Vì sao**: việc vận hành chỉ Sếp làm được (9 dòng Việc Sếp cần làm, sao lưu, token Gen-hub, nháp…) và tính năng Sếp chưa biết thì nằm im tới khi thành sự cố; Gen chỉ trả lời khi được hỏi. Nay Gen nhắc nhẹ mỗi ngày, có đường lùi ở mọi nút (QD-12).
+- **Thay đổi**: migration `0033` (`agent.gen_coach_prefs`, `agent.gen_coach_items`); gói `gh/gen/coach/` (signals, lessons, engine, store, routes, cron) + `content/lessons.json` (10 bài N01–N10) và `tips.json` (6 mẹo); API `/gen/coach/{today,items,prefs,curriculum}` (chỉ Owner);
+  job `gen_coach` 09:05/11:05/14:05; thẻ Hôm nay của Sếp, Lộ trình học cùng Gen (19 bài = 10 + 9 từ Hướng dẫn thiết lập), Cài đặt › Bộ não AI › Gen hướng dẫn; 16 mục tiêu Gen mới; thẻ "Việc thiết lập tiếp" đổi "Ẩn" thành "Để sau 7 ngày" (lưu ở máy chủ).
+- **Kiểm tra** (gói nội dung, cây gộp tạm): pytest `test_coach_content_v0154` 27 xanh; cùng `test_gen_coach_v0154` + `test_worker_schedule_v0136` = 176 xanh. Bộ đủ (pytest, vitest, Playwright mock) chạy khi tích hợp `claude/v0154` — kết quả ở báo cáo tích hợp.
+- **Người gác yêu cầu tự chữa** (cùng bản, bài học máy Boss: `gen-harness-update-request.path` failed "Result: resources" vì hết hạn mức inotify 128): `genh auto-update enable|status` và lần cài/cập nhật chữa (chỉ `SubState=waiting` mới là khoẻ; `handle-requests` KHÔNG chữa — trong service `.path` "running" giả); còn lỗi ⇒ `gen-harness-update-request.timer` dự phòng + `watcher` trong `run/nightly-status.json` + dòng "Người gác cập nhật" ở thẻ Sức khoẻ; E2E thật có ca inotify (xem [v0.1.54.md](../releases/v0.1.54.md)).
+- **Boss cần làm**: xem "Boss phải làm — v0.1.54" dưới (không bắt buộc, ~3 phút). Chi tiết: [v0.1.54.md](../releases/v0.1.54.md).
+
+## v0.1.53 — Tự cập nhật đêm tự lành + trung thực
+
+- **Vì sao** (F-93…F-100): máy Boss kẹt v0.1.44 từ 03/10 đến 09/10; `genh auto-update status` in TẮT (đọc sai `is-enabled` thoát ≠ 0), Console chỉ nói "chưa nhận yêu cầu". Điều tra: **H-a tái hiện bằng mã** (bản cài phụ gỡ/ghi đè lịch dùng chung), **H-c tái hiện** (status in sai),
+  **H-b không tái hiện được** (bằng mã lẫn E2E systemd thật); chưa chỉ ra được nguyên nhân gốc đêm 03/10 ngoài H-a ⇒ bản này làm lịch **tự lành** cho mọi nguyên nhân.
+- **Thay đổi**: `genh update` tự bật lại lịch đêm (dấu `config/auto-update-disabled.json` = Sếp đã chủ động tắt thì không); `status` đủ 5 thông tin + cảnh báo log im > 36 giờ; kiểm linger sau `enable-linger`; lịch đêm chọn bản cao nhất đã đủ 24 giờ trong 10 bản gần nhất;
+  `ConsumeRequest` không nuốt lỗi xoá (**GH-E94C**, chờ khoá > 30 phút ⇒ GH-E94A); unit đêm có `--install-dir`/`--port`/`GEN_HARNESS_HOME`, `StartLimit`/`TriggerLimit`, bản cài phụ không đụng lịch bản chính; `run/nightly-status.json`;
+  API `stalled_reason` `linger_off`/`watcher_failed`, `nightly_candidates`, `nightly`, khối `nightly` + sự cố `host.nightly` (ngưỡng 36 giờ); Console nói nguyên nhân + dòng "Tự cập nhật đêm"; E2E `e2e-nightly-real` chạy thật timer/`.path` có linger, bắt buộc trước promote.
+- **Kiểm tra**: `go test ./...` xanh (ma trận 4 hệ điều hành gồm Windows); pytest 2054 + 2054 (gh_app); vitest 1000; Playwright mock 310; `e2e-nightly-real` xanh [lượt 38026722892](https://github.com/Genesis-ryan-84-0567536339/Gen-Harness/actions/runs/38026722892); **kiểm ngược** cài `--no-auto-update` ⇒ đỏ đúng bước timer [lượt 38026379683](https://github.com/Genesis-ryan-84-0567536339/Gen-Harness/actions/runs/38026379683). Sửa khi tích hợp: status không lấy mtime tệp stamp systemd làm lần chạy; đọc unit giữ `\` của đường dẫn Windows. Chi tiết: "Kiểm tra" ở [v0.1.53.md](../releases/v0.1.53.md). Vận hành: [05-installer.md](../handoff/05-installer.md) mục "Lịch tự cập nhật đêm tự lành và trung thực".
 
 ## v0.1.50 — Gen nhớ + Gen ghi Kho có xác nhận và mã PIN
 
@@ -73,6 +93,13 @@ v0.1.53 chứa toàn bộ v0.1.52 (gỡ digest cũ bằng `rmi -f`, [v0.1.52.md]
 
 ## Việc dở
 
+### Boss phải làm — v0.1.54 (không bắt buộc, ~3 phút, sau khi máy lên v0.1.54; chi tiết ở [v0.1.54.md](../releases/v0.1.54.md))
+
+1. Mở app → bấm nút **Gen** (có chấm đỏ) → xem thẻ **Hôm nay của Sếp** → bấm **Chỉ cho em** ở việc đầu tiên và làm theo.
+2. Việc nào Sếp không dùng (vd Facebook) thì bấm **Không dùng việc này** (đọc câu hậu quả, Xác nhận) để Gen thôi nhắc; bật lại ở Cài đặt › Bộ não AI › Gen hướng dẫn.
+3. Không bắt buộc: Cài đặt › Bộ não AI › **Gen hướng dẫn** để chỉnh giờ yên lặng hoặc số bài mỗi ngày. Ngoài ra không cần làm gì, bài học tự đến.
+4. **Chỉ khi** thẻ Sức khoẻ hiện "Người gác cập nhật — Đang chạy dự phòng (hết hạn mức inotify)": trên máy chủ chạy `sudo sysctl -w fs.inotify.max_user_instances=1024` rồi `genh auto-update enable`. Không thấy cảnh báo thì không cần làm gì.
+
 ### Boss phải làm — v0.1.53 (một lần, ~2 phút, sau khi máy lên v0.1.53; chi tiết ở [v0.1.53.md](../releases/v0.1.53.md))
 
 1. Trên máy chủ chạy `genh auto-update status`: dòng đầu phải là **BẬT**, "Lịch đang chạy (active): có", có "Lần kế tiếp", "Linger: có". Có dòng **CẢNH BÁO** ⇒ chép đúng lệnh nó in ra và chạy. Thấy **BẬT NHƯNG KHÔNG CHẠY** hoặc **TẮT** mà Sếp không tắt ⇒ `genh auto-update enable` (Linger KHÔNG ⇒ chạy trước `sudo loginctl enable-linger $USER`).
@@ -104,9 +131,10 @@ v0.1.53 chứa toàn bộ v0.1.52 (gỡ digest cũ bằng `rmi -f`, [v0.1.52.md]
 
 ### Claude / điều phối viên còn dở
 
-- **Phát hành v0.1.53** (gộp luôn v0.1.52, v0.1.51, v0.1.50 nếu các bản đó chưa promote): nhánh `claude/v0153` → PR vào main → CI xanh → merge → E2E cài thật + nâng cấp + `e2e-nightly-real` → promote → kiểm genh tải về (checksum/version) → báo Boss. Ghi URL lượt kiểm ngược vào "Kiểm tra" của [v0.1.53.md](../releases/v0.1.53.md).
+- **Phát hành v0.1.54** (gộp luôn v0.1.53 nếu chưa promote): `claude/v0154` đã nối main (fc80e15 = PR #63 v0.1.53) bằng merge thường và có người gác tự chữa; ca E2E inotify của `e2e-nightly-real` từng đỏ vì `.path` "sống giả" trong service (đã sửa gốc rễ, chờ CI xanh) → chạy pytest đủ bộ (cần Postgres) + vitest + e2e → PR vào main → CI xanh → merge → E2E cài thật + nâng cấp + `e2e-nightly-real` → kiểm genh tải về (checksum/version) → báo Boss.
+- **Phát hành v0.1.53** (gộp luôn v0.1.52, v0.1.51, v0.1.50 nếu các bản đó chưa promote): đã merge vào main (PR #63, fc80e15); còn E2E cài thật + nâng cấp + `e2e-nightly-real` → promote → kiểm genh tải về (checksum/version) → báo Boss. Ghi URL lượt kiểm ngược vào "Kiểm tra" của [v0.1.53.md](../releases/v0.1.53.md) (đã có).
 - **H-b còn mở**: timer đêm mất lịch khi `daemon-reload`/`enable` chạy từ bên trong service đêm — không tái hiện được bằng mã lẫn `e2e-nightly-real` (systemd thật: sau lần chạy timer vẫn có lần kế tiếp); tự lành bao ca này. Máy thật còn tái diễn thì ghi vào v0.1.53.md.
 - **PR Renovate** không tự merge nằm chờ tới khi Boss nhắn "xử lý PR phụ thuộc"; chưa có lịch tự động nào gọi Claude.
 - **Selector ghi Facebook** mới kiểm trên trang mẫu — chờ nghiệm thu thật (dòng 8). Chuông phiên hết có thể hiện hai lần (`social.paused` + `social.session_expired`), gộp ở bản sau nếu phiền.
 - **Giới hạn đã biết**: TOTP chưa làm; Redis lỗi ⇒ giới hạn đăng nhập tạm không áp; gói apt trong Dockerfile chưa ghim phiên bản; tag GHCR `:latest` cũ đứng yên (không dùng).
-- **Mục Nợ đầy đủ** (bộ câu hỏi chuẩn so model, F-70, TOTP, Facebook đăng bài lát 2, cosign/minisign, PHIEN bù, trường Kho "Công cụ"/"Người làm", lời hẹn trượt F-91/F-92…): [ROADMAP › Nợ](../ROADMAP.md).
+- **Mục Nợ đầy đủ** (bộ câu hỏi chuẩn so model, F-70, TOTP, Facebook đăng bài lát 2, cosign/minisign, PHIEN bù, trường Kho "Công cụ"/"Người làm", lời hẹn trượt F-91/F-92, Gen hướng dẫn: `release_todos`, danh mục tính năng, "Làm giúp" G8, bộ bài cho nhân viên, tắt chuông theo loại…): [ROADMAP › Nợ](../ROADMAP.md).

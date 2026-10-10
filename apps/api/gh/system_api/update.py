@@ -263,6 +263,34 @@ NIGHTLY_RESULTS = ("done", "failed", "deferred", "up_to_date", "blocked", "")
 WATCHER_VALUES = ("active", "failed", "inactive", "unknown")
 
 
+#: v0.1.54: người gác yêu cầu (`gen-harness-update-request.path`) tự chữa — `watcher` trong nightly-status.json.
+#: 'fallback' = .path lỗi (vd hết hạn mức inotify) nhưng timer dự phòng quét mỗi phút đang nhận yêu cầu thay;
+#: 'failed' = .path lỗi và chưa bật được dự phòng. Thiếu khối (genh cũ) = 'ok'. Lý do là mã; câu gợi ý do API tự
+#: ghép từ chuỗi cố định bên dưới — KHÔNG lấy chữ nào từ tệp (thư mục run/ không tin cậy).
+WATCHER_STATES = ("ok", "fallback", "failed")
+WATCHER_REASONS = ("inotify", "resources", "other")
+INOTIFY_FIX = "sudo sysctl -w fs.inotify.max_user_instances=1024"
+WATCHER_HINTS = {
+    "inotify": f"Hết hạn mức inotify: chạy `{INOTIFY_FIX}` rồi `genh auto-update enable`.",
+    "resources": ("Lỗi tài nguyên hệ thống (thường là hạn mức inotify): "
+                  f"thử `{INOTIFY_FIX}` rồi `genh auto-update enable`."),
+    "other": ("Xem `systemctl --user status gen-harness-update-request.path`, "
+              "sửa lỗi rồi chạy `genh auto-update enable`."),
+}
+
+
+def _watcher(value: Any) -> dict[str, Any]:
+    """Khối `watcher` đã LỌC: state ngoài tập (hoặc không phải object) ⇒ 'ok'; reason ngoài tập ⇒ None."""
+    if not isinstance(value, dict):
+        return {"state": "ok", "reason": None}
+    state, reason = value.get("state"), value.get("reason")
+    if not isinstance(state, str) or state not in WATCHER_STATES:
+        return {"state": "ok", "reason": None}
+    if state == "ok":
+        return {"state": "ok", "reason": None}
+    return {"state": state, "reason": reason if isinstance(reason, str) and reason in WATCHER_REASONS else "other"}
+
+
 def _pick(value: Any, allowed: tuple[str, ...]) -> str:
     return value if isinstance(value, str) and value in allowed else "unknown"
 
@@ -295,6 +323,7 @@ def read_nightly(d: Path) -> dict[str, Any] | None:
         "last_result": result if isinstance(result, str) and result in NIGHTLY_RESULTS else "unknown",
         "linger": _pick(raw.get("linger"), LINGER_VALUES),
         "request_watcher": _pick(raw.get("request_watcher"), WATCHER_VALUES),
+        "watcher": _watcher(raw.get("watcher")),
         "checked_at": _iso_or_none(raw.get("checked_at")),
     }
 

@@ -10,7 +10,7 @@ import { offsiteNextStep, type OffsiteViewer } from './offsiteModel';
 export type HealthTone = 'ok' | 'warn' | 'bad' | 'muted';
 
 export interface HealthRow {
-  key: 'worker' | 'browser' | 'dlq' | 'backup' | 'offsite' | 'update' | 'disk' | 'autostart' | 'nightly';
+  key: 'worker' | 'browser' | 'dlq' | 'backup' | 'offsite' | 'update' | 'disk' | 'autostart' | 'nightly' | 'watcher';
   label: string;
   value: string;
   tone: HealthTone;
@@ -160,8 +160,31 @@ export function healthRows(
               ? { key: 'nightly', label: 'Tự cập nhật đêm', value: 'Lịch đêm do bản cài khác trên máy này quản lý', tone: 'muted' }
               : { key: 'nightly', label: 'Tự cập nhật đêm', value: 'Chưa rõ', tone: 'muted' },
     );
+    // v0.1.54: người gác yêu cầu (.path) lỗi — chỉ có dòng này khi api báo `watcher` (không ok).
+    const w = n.watcher;
+    if (w) {
+      rows.push({ key: 'watcher', label: 'Người gác cập nhật', value: watcherRowValue(w), tone: w.state === 'failed' ? 'bad' : 'warn' });
+    }
   }
   return rows;
+}
+
+/** Lệnh sửa gốc khi người gác yêu cầu hết hạn mức inotify (cùng chuỗi genh/api — không lấy chữ nào từ tệp trên máy chủ). */
+export const INOTIFY_FIX_COMMAND = 'sudo sysctl -w fs.inotify.max_user_instances=1024';
+
+type HealthWatcher = NonNullable<NonNullable<SystemHealth['nightly']>['watcher']>;
+
+function watcherCause(w: HealthWatcher): string {
+  if (w.reason === 'inotify') return 'hết hạn mức inotify';
+  if (w.reason === 'resources') return 'lỗi tài nguyên — thường là hạn mức inotify';
+  return 'người gác bị lỗi';
+}
+
+/** Chữ dòng "Người gác cập nhật": đang chạy dự phòng (quét mỗi phút) hoặc lỗi chưa có dự phòng. */
+function watcherRowValue(w: HealthWatcher): string {
+  return w.state === 'failed'
+    ? `Đang lỗi — nút Cập nhật ngay chưa có người nhận (${watcherCause(w)})`
+    : `Đang chạy dự phòng (${watcherCause(w)})`;
 }
 
 /**
@@ -183,7 +206,7 @@ export interface HealthTipStep {
   cmd?: string;
 }
 export interface HealthTip {
-  key: 'disk' | 'worker' | 'autostart' | 'nightly';
+  key: 'disk' | 'worker' | 'autostart' | 'nightly' | 'watcher';
   title: string;
   steps: HealthTipStep[];
   /** Cảnh báo rủi ro (Sếp tự quyết, nhưng phải thấy rõ). */
@@ -273,6 +296,24 @@ export function healthTips(h: SystemHealth): HealthTip[] {
     }
     steps.push({ text: 'Sau đó bật lại lịch:', cmd: 'genh auto-update enable' });
     tips.push({ key: 'nightly', title: 'Cách bật lại lịch tự cập nhật đêm', steps });
+  }
+  // v0.1.54: người gác yêu cầu (.path) lỗi — lệnh cố định, chép được; không lấy chữ nào từ `watcher.hint`.
+  const w = n?.watcher;
+  if (w) {
+    const lead = w.state === 'failed'
+      ? `Người gác cập nhật đang lỗi, nút Cập nhật ngay chưa có người nhận (${watcherCause(w)}).`
+      : `Người gác cập nhật đang chạy dự phòng (${watcherCause(w)}).`;
+    const steps: HealthTipStep[] =
+      w.reason === 'other'
+        ? [
+            { text: `${lead} Trên máy chủ, xem lỗi:`, cmd: 'systemctl --user status gen-harness-update-request.path' },
+            { text: 'Sửa xong thì chạy:', cmd: 'genh auto-update enable' },
+          ]
+        : [
+            { text: `${lead} Chạy trên máy:`, cmd: INOTIFY_FIX_COMMAND },
+            { text: 'rồi:', cmd: 'genh auto-update enable' },
+          ];
+    tips.push({ key: 'watcher', title: w.state === 'failed' ? 'Người gác cập nhật đang lỗi' : 'Người gác cập nhật đang chạy dự phòng', steps });
   }
   return tips;
 }

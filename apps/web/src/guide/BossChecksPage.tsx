@@ -25,6 +25,7 @@ import {
   KHO_WRITE_STEPS,
   accountOf,
   bossErrorText,
+  bossRowTarget,
   fmtCheckedAt,
   hasPending,
   hubScopesHint,
@@ -162,7 +163,7 @@ function TransientNote({ check }: { check: BossCheck | undefined }) {
 
 function Row({ n, title, optional, done, todo, children, results }: { n: number; title: string; optional?: boolean; done: boolean; todo: string; children: ReactNode; results: ReactNode }) {
   return (
-    <li className="boss-row gh-card" data-done={done || undefined}>
+    <li className="boss-row gh-card" data-done={done || undefined} data-gen-target={bossRowTarget(n)}>
       <section aria-label={title}>
         <div className="boss-row__head">
           <span className="guide-card__num mono">{String(n).padStart(2, '0')}</span>

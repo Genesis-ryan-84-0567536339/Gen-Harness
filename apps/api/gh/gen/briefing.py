@@ -28,6 +28,9 @@ việc nền — gh.providers.router F-86), rồi ghi một hội thoại "Bản
   là chữ người ngoài viết — không để lọt qua tóm tắt, cũng không để ai gửi mail "cài" câu vào tóm tắt).
   Chạm trần `hub.BRIEFING_MAX_ITEMS` ⇒ `more: True` (hiện "10+"). `content.hub_at` = vị trí trong `steps` để web chèn
   thẻ Gen-hub (ngay sau "Sự cố cần Sếp", trước Facebook/Kho và các lời nhắc).
+- v0.1.54 (g1-api): chưa đạt hết việc bắt buộc của "Việc Sếp cần làm" (x < N) ⇒ chèn ĐÚNG MỘT bước `say` "Việc bắt buộc:
+  đã đạt x/N, xem Việc Sếp cần làm" NGAY SAU bước tóm tắt, trước các mục. Chỉ thêm bước hiển thị: `sections`, đầu vào
+  của `_summarize`, thân chuông (`body_text`) và tin Telegram (`telegram.briefing_text`) KHÔNG đổi.
 """
 
 import asyncio
@@ -44,6 +47,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from gh import notifications
+from gh.boss_checks import service as boss_service
 from gh.chassis import actionlog
 from gh.chassis.masking import mask_for_model
 from gh.gen import memory_notes, store
@@ -73,6 +77,7 @@ UNREAD_STATES = ("error", "breaker")
 #: Số đếm gửi model thay cho 0 của mục chưa đọc được (model không suy ra "Sếp không có lịch hôm nay").
 UNREAD_COUNT = "chưa đọc được"
 SUMMARY_FAILED = "Lần này Gen chưa tóm tắt được (nguồn AI lỗi) — các mục bên dưới vẫn đầy đủ."
+REQUIRED_LINE = "Việc bắt buộc: đã đạt {x}/{n}, xem Việc Sếp cần làm"
 MAX_LINES = 5
 MAX_LINE = 160
 HOT_HEAT = 80   # cùng ngưỡng 'high' ở gh/biz/relations/routes.py (list_people)
@@ -403,12 +408,16 @@ def body_text(sections: list[dict[str, Any]], needs_api_key: bool) -> str:
 
 
 def build_content(slot: Slot, sections: list[dict[str, Any]], *, summary: str | None, summary_source: str,
-                  needs_api_key: bool, summary_failed: bool, hub_hint: str | None = None) -> dict[str, Any]:
+                  needs_api_key: bool, summary_failed: bool, hub_hint: str | None = None,
+                  required: tuple[int, int] | None = None) -> dict[str, Any]:
     steps: list[dict[str, Any]] = [{"kind": "tool", "name": SOURCES_STEP}]
     if summary:
         steps.append({"kind": "say", "text": summary})
     elif summary_failed:
         steps.append({"kind": "say", "text": SUMMARY_FAILED})
+    if required is not None and required[0] < required[1]:
+        # v0.1.54: tiến độ việc bắt buộc x/N — ngay sau bước tóm tắt, trước các mục (không đổi `sections`).
+        steps.append({"kind": "say", "text": REQUIRED_LINE.format(x=required[0], n=required[1])})
     hub_at: int | None = None
     for s in sections:
         if s.get("external"):
@@ -486,6 +495,19 @@ WHERE ops.job_watermarks.last_at IS NULL OR ops.job_watermarks.last_at < EXCLUDE
 RETURNING org_id"""
 
 
+async def _required(db: AsyncSession, org: uuid.UUID) -> tuple[int, int] | None:
+    """v0.1.54: (đã đạt, tổng) việc bắt buộc của "Việc Sếp cần làm"; không đọc được ⇒ None (không có dòng x/N)."""
+    try:
+        async with db.begin_nested():
+            ov = await boss_service.overview(db, org)
+        return int(ov["required_done"]), int(ov["required_total"])
+    except asyncio.CancelledError:
+        raise
+    except Exception:  # noqa: BLE001 — dòng x/N chỉ là phần thêm, không được làm hỏng bản tin
+        log.warning("Bản tin Gen: không đọc được tiến độ việc bắt buộc (%s)", org, exc_info=True)
+        return None
+
+
 async def _one_org(sm: async_sessionmaker[AsyncSession], redis: Any, router: ModelRouter, org: uuid.UUID,
                    slot: Slot, now: datetime) -> str:
     async with sm() as db:
@@ -507,6 +529,7 @@ async def _one_org(sm: async_sessionmaker[AsyncSession], redis: Any, router: Mod
         has_source = await has_api_source(db, org) or any(src["used"] for src in await background_sources(db, org))
         # v0.1.50 (QD-18): ghi chú Gen nhớ — đọc trong cùng phiên này (trước rollback), chỉ khi có nguồn AI tóm tắt.
         notes = await memory_notes.texts(db, org) if has_source else []
+        required = await _required(db, org)
         await db.rollback()
     # v0.1.49 (QD-16): mục Gen-hub — ngoài phiên trên (hub tự mở phiên, tự commit). Chèn ngay sau "incidents".
     hub_secs, hub_hint = await _hub_sections(sm, redis, org, now) if hub_linked else ([], None)
@@ -518,7 +541,7 @@ async def _one_org(sm: async_sessionmaker[AsyncSession], redis: Any, router: Mod
     summary = None if needs_api_key else await _summarize(router, org, sections, **({"notes": notes} if notes else {}))
     content = build_content(slot, sections, summary=summary, summary_source="model" if summary else "none",
                             needs_api_key=needs_api_key, summary_failed=not needs_api_key and summary is None,
-                            hub_hint=hub_hint)
+                            hub_hint=hub_hint, required=required)
     counts = {s["key"]: s["count"] for s in sections}
     async with sm() as db:
         if (await db.execute(text(_GATE), {"o": org, "j": JOB, "slot": slot.at})).scalar_one_or_none() is None:

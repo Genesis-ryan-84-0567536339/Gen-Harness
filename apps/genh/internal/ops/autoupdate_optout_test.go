@@ -139,3 +139,41 @@ func TestRecordNightlyStatus_GhiRunNightlyStatusVaGiuKetQua(t *testing.T) {
 		t.Errorf("opted_out phải true: %+v", st)
 	}
 }
+
+// v0.1.54: khối watcher của run/nightly-status.json lấy từ tình trạng người gác (chỉ đọc).
+func TestWatcherInfoFrom_VaRecordNightlyStatus(t *testing.T) {
+	if w := WatcherInfoFrom(autoupdate.WatcherHealth{}); w != (hostlink.NightlyWatcher{State: "ok"}) {
+		t.Errorf("khoẻ: %+v", w)
+	}
+	w := WatcherInfoFrom(autoupdate.WatcherHealth{State: autoupdate.WatcherHealthFallback, Reason: autoupdate.WatcherReasonInotify})
+	if w.State != "fallback" || w.Reason != "inotify" || !strings.Contains(w.Hint, "inotify") || !strings.Contains(w.Hint, "sysctl") {
+		t.Errorf("dự phòng: %+v", w)
+	}
+
+	// .path failed + có timer dự phòng đang chạy ⇒ nightly-status.json ghi watcher.state=fallback.
+	dir := t.TempDir()
+	home := t.TempDir()
+	unitDir := filepath.Join(home, ".config", "systemd", "user")
+	if err := os.MkdirAll(unitDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(filepath.Join(unitDir, autoupdate.RequestTaskName+".path"), []byte("[Path]\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(unitDir, autoupdate.RequestFallbackTimer), []byte(autoupdate.RequestFallbackTimerUnit("inotify")), 0o644)
+	rr := recAutoRunner{out: map[string]string{
+		"show gen-harness-update.timer":              "LoadState=loaded\nUnitFileState=enabled\nActiveState=active\nLastTriggerUSec=@1760000000\nNextElapseUSecRealtime=@1760086400\n",
+		"loginctl show-user":                         "yes\n",
+		"is-active gen-harness-update-request.path":  "failed\n",
+		"is-active gen-harness-update-request.timer": "active\n",
+	}}
+	deps := autoupdate.Deps{Runner: rr, GOOS: "linux", HomeDir: home, UID: "1000"}
+	if err := RecordNightlyStatus(context.Background(), dir, deps); err != nil {
+		t.Fatal(err)
+	}
+	st, err := hostlink.ReadNightlyStatus(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Watcher.State != "fallback" || st.Watcher.Reason != "inotify" || st.RequestWatcher != "failed" {
+		t.Fatalf("watcher = %+v, request_watcher = %q", st.Watcher, st.RequestWatcher)
+	}
+}

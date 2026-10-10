@@ -558,3 +558,49 @@ test.describe('Lính gác bố cục — dính biên, tràn/cắt ngang, chữ b
     expectClean(all);
   });
 });
+
+/**
+ * v0.1.54 (Gen hướng dẫn) — thẻ "Hôm nay của Sếp" MỞ RỘNG (đủ 3 khối: việc cần làm ngay, Sếp biết chưa?, Bài học hôm nay,
+ * có cả việc khẩn P0 và việc có cảnh báo dài) và HỘP CẢNH BÁO "Không dùng việc này" ở 1440 và 390: khung Gen (gốc đo
+ * `.gen-panel`) và hộp thoại (gốc đo `.gh-dialog`) không có phát hiện, vùng cuộn của khung không cuộn ngang.
+ */
+test.describe('Gen hướng dẫn — thẻ mở rộng và hộp cảnh báo', () => {
+  for (const vp of [{ width: 1440, height: 900 }, { width: 390, height: 844 }] as const) {
+    test(`thẻ + hộp cảnh báo @${vp.width}px không có phát hiện`, async ({ page }) => {
+      test.setTimeout(90_000);
+      const prefix = `coach_${vp.width}_`;
+      clearShots(prefix);
+      await resetMock(page.request, 'finished');
+      await page.request.post('/api/v1/__mock/p3/genCoach/scenario', { data: { extras: ['health.channel.down', 'backup.unset'] } });
+      await loginAsOwner(page);
+      await page.setViewportSize(vp);
+      await page.goto('/overview');
+      await page.getByRole('button', { name: /Hỏi Gen/ }).click();
+      const card = page.getByRole('region', { name: 'Hôm nay của Sếp' });
+      await expect(card).toBeVisible();
+      await expect(card.getByRole('group', { name: 'Việc cần làm ngay' })).toBeVisible();
+      await expect(card.getByRole('group', { name: 'Sếp biết chưa?' })).toBeVisible();
+      await expect(card.getByRole('group', { name: 'Bài học hôm nay · 1/19' })).toBeVisible();
+      await expect(card.getByTestId('coach-todo')).toHaveCount(3);
+      await settled(page, '.gen-panel');
+      const all: Hit[] = [...(await scanHere(page, prefix, vp.width, '/overview (thẻ Hôm nay của Sếp)', '.gen-panel'))];
+      // Vùng cuộn của khung không được cuộn ngang (thẻ không tràn ở 390px).
+      const over = await page.evaluate(() => {
+        const list = document.querySelector('.gen-panel__list') as HTMLElement | null;
+        return list ? list.scrollWidth - list.clientWidth : 0;
+      });
+      expect(over, 'khung Gen không cuộn ngang').toBeLessThanOrEqual(1);
+
+      // Hộp cảnh báo của việc có cảnh báo (backup.unset).
+      await card.getByTestId('coach-todo').filter({ hasText: 'sao lưu' }).getByRole('button', { name: 'Không dùng việc này' }).click();
+      const dlg = page.getByRole('dialog', { name: /Không dùng việc này\?/ });
+      await expect(dlg).toBeVisible();
+      await expect(dlg.getByTestId('coach-dismiss-warning')).toBeVisible();
+      await page.waitForTimeout(150);
+      all.push(...(await scanHere(page, prefix, vp.width, '/overview (hộp cảnh báo)', '.gh-dialog')));
+      const dialogOver = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      expect(dialogOver, 'trang không cuộn ngang khi hộp mở').toBeLessThanOrEqual(0);
+      expectClean(all);
+    });
+  }
+});
