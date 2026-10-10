@@ -36,6 +36,7 @@ import { createMock as createP4Plugins } from './mock-p4-plugins';
 import { createMock as createP4System } from './mock-p4-system';
 import { createMock as createGen } from './mock-gen';
 import { createMock as createGenV0150, type KhoWriteReq } from './mock-gen-v0150';
+import { createMock as createGenCoach, type GenCoachOptions } from './mock-gen-coach';
 import { acceptWebSocket, type MockSocket } from './mock-ws';
 import { buildScreenTree, SCREEN_BY_KEY } from '../../../packages/contracts/src/screens';
 import type { NavDomain, NavItem, SetupState } from '../../../packages/contracts/src/schema';
@@ -466,6 +467,8 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
   const phase3 = {
     // v0.1.50: `/gen/memory*` TRƯỚC `gen` — mock-gen trả 404 cho mọi đường `/gen/*` lạ.
     genMemory: genV0150,
+    // v0.1.54: Gen hướng dẫn (/gen/coach/*) TRƯỚC `gen` — mock-gen trả 404 cho mọi đường `/gen/*` lạ. Trạng thái ở bộ nhớ module (mock-gen-coach.ts).
+    genCoach: createGenCoach({ boss: bossChecks.hooks.overview as NonNullable<GenCoachOptions['boss']>, genEnabled: gen.enabled, notifyOwners: (k, t, b, l) => { for (const u of users.filter((x) => x.role.code === 'owner')) notify(u.id, k, t, b, l); } }),
     gen: genMock,
     social,
     // v0.1.39 (F-74) — "Việc Sếp cần làm" (chỉ Owner; PIN cho hub/agy_switch). v0.1.44: dòng 6 Telegram.

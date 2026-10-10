@@ -11,6 +11,7 @@ import { JevCard } from './JevCard';
 import { TriageCard } from './TriageCard';
 import { BackgroundSourcesCard } from './BackgroundSourcesCard';
 import { GenMemoryCard } from './GenMemoryCard';
+import { GenCoachCard } from './GenCoachCard';
 import { AiBudgetCard } from './AiBudgetCard';
 import { useCan } from '../../lib/permissions';
 
@@ -44,6 +45,7 @@ export function BrainTabBody() {
   const hash = useLocation().hash;
   const jevHash = hash === '#jev';
   const memoryHash = hash === '#gen-memory';
+  const coachHash = hash === '#gen-coach';
   // v0.1.43: "Nhập khoá Jev" (Kiểm tra của Boss) dẫn tới #jev — thẻ ở lưới dưới, mở sẵn rồi cuộn tới (giống Kết nối).
   useEffect(() => {
     if (!jevHash) return;
@@ -56,6 +58,12 @@ export function BrainTabBody() {
     const t = window.setTimeout(() => document.getElementById('gen-memory')?.scrollIntoView?.({ block: 'start' }), 50);
     return () => window.clearTimeout(t);
   }, [memoryHash]);
+  // v0.1.54: liên kết tới thẻ "Gen hướng dẫn" (`#gen-coach`) — cuộn tới thẻ.
+  useEffect(() => {
+    if (!coachHash) return;
+    const t = window.setTimeout(() => document.getElementById('gen-coach')?.scrollIntoView?.({ block: 'start' }), 50);
+    return () => window.clearTimeout(t);
+  }, [coachHash]);
   // v0.1.39 (F-78): Jev không bắt buộc — kiểm tra lỗi thì thu thẻ vào "Nâng cao" thay vì để lỗi đỏ giữa tab.
   // Mutation giữ ở đây để kết quả "Kiểm tra 1 lần" còn nguyên khi thẻ chuyển chỗ.
   const jevTest = useTestProvider();
@@ -181,6 +189,9 @@ export function BrainTabBody() {
 
       {/* v0.1.50 (F-81, QD-18): Gen nhớ — chỉ Owner thấy (thẻ tự ẩn với vai trò khác, không gọi /gen/memory). */}
       <GenMemoryCard />
+
+      {/* v0.1.54: Gen hướng dẫn — công tắc, chuông nhắc, số bài mỗi ngày, giờ yên lặng, việc đã tắt (chỉ Owner thấy thẻ). */}
+      <GenCoachCard />
 
       <div className="sys-grid2">
         {/* v0.1.43 (F-30): Jev không bắt buộc — luôn nằm trong "Nâng cao"; tới bằng `#jev` (vd từ Kiểm tra của Boss) thì mở sẵn. */}

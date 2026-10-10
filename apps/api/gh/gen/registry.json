@@ -181,6 +181,15 @@
       "params": null
     },
     {
+      "id": "gen.coach.card",
+      "screen": "overview",
+      "label": "Thẻ \"Hôm nay của Sếp\"",
+      "description": "Đầu khung Gen: Việc cần làm ngay (tối đa 3), Sếp biết chưa? (một mẹo) và Bài học hôm nay (k/19) của Gen hướng dẫn",
+      "dynamic": null,
+      "params": null,
+      "permission": "system.manage"
+    },
+    {
       "id": "guide.progress",
       "screen": "guide",
       "label": "Thanh tiến độ",
@@ -202,6 +211,78 @@
       "label": "Nút \"Làm bước này\"",
       "description": "Mở form làm việc thiết lập n",
       "dynamic": "row",
+      "params": null
+    },
+    {
+      "id": "boss_checks.row.hub",
+      "screen": "boss_checks",
+      "label": "Dòng 1 \"Nối Gen-hub\"",
+      "description": "Dòng 1 của Việc Sếp cần làm: dán địa chỉ + token Gen-hub rồi bấm Kiểm tra (cần mã PIN)",
+      "dynamic": null,
+      "params": null
+    },
+    {
+      "id": "boss_checks.row.facebook",
+      "screen": "boss_checks",
+      "label": "Dòng 2 \"Kết nối Facebook\"",
+      "description": "Dòng 2 của Việc Sếp cần làm: chọn tài khoản Facebook đã đăng nhập rồi bấm Đọc ngay",
+      "dynamic": null,
+      "params": null
+    },
+    {
+      "id": "boss_checks.row.agy",
+      "screen": "boss_checks",
+      "label": "Dòng 3 \"Google (Antigravity)\"",
+      "description": "Dòng 3 của Việc Sếp cần làm: đăng nhập hai tài khoản Google, gọi thử và đổi qua lại",
+      "dynamic": null,
+      "params": null
+    },
+    {
+      "id": "boss_checks.row.claude",
+      "screen": "boss_checks",
+      "label": "Dòng 4 \"Claude Code CLI\"",
+      "description": "Dòng 4 của Việc Sếp cần làm: đăng nhập Claude Code rồi gọi thử",
+      "dynamic": null,
+      "params": null
+    },
+    {
+      "id": "boss_checks.row.jev",
+      "screen": "boss_checks",
+      "label": "Dòng 5 \"Jev\" (không bắt buộc)",
+      "description": "Dòng 5 của Việc Sếp cần làm: kiểm tra khoá Jev — không bắt buộc",
+      "dynamic": null,
+      "params": null
+    },
+    {
+      "id": "boss_checks.row.telegram",
+      "screen": "boss_checks",
+      "label": "Dòng 6 \"Telegram\"",
+      "description": "Dòng 6 của Việc Sếp cần làm: Gửi thử một tin Telegram báo động và bản tin",
+      "dynamic": null,
+      "params": null
+    },
+    {
+      "id": "boss_checks.row.remote",
+      "screen": "boss_checks",
+      "label": "Dòng 7 \"Truy cập từ xa\"",
+      "description": "Dòng 7 của Việc Sếp cần làm: mở Console từ điện thoại bằng địa chỉ truy cập từ xa rồi bấm Kiểm tra",
+      "dynamic": null,
+      "params": null
+    },
+    {
+      "id": "boss_checks.row.facebook_reply",
+      "screen": "boss_checks",
+      "label": "Dòng 8 \"Facebook trả lời\" (không bắt buộc)",
+      "description": "Dòng 8 của Việc Sếp cần làm: thử gửi một câu trả lời bình luận Facebook thật bằng Gen — không bắt buộc",
+      "dynamic": null,
+      "params": null
+    },
+    {
+      "id": "boss_checks.row.kho_write",
+      "screen": "boss_checks",
+      "label": "Dòng 9 \"Gen ghi Kho\" (không bắt buộc)",
+      "description": "Dòng 9 của Việc Sếp cần làm: duyệt đề xuất ghi Phiên đầu tiên của Gen vào Kho Ryan — không bắt buộc",
+      "dynamic": null,
       "params": null
     },
     {
@@ -244,6 +325,24 @@
       "dynamic": null,
       "params": null,
       "permission": "roles.manage"
+    },
+    {
+      "id": "system.channels.telegram",
+      "screen": "connections",
+      "label": "Thẻ Telegram",
+      "description": "Telegram nhận báo động sự cố và bản tin 07:30/17:30: token bot, chat_id, công tắc bản tin và nhắc việc (chỉ Owner)",
+      "dynamic": null,
+      "params": null,
+      "permission": "system.manage"
+    },
+    {
+      "id": "system.channels.telegram.test",
+      "screen": "connections",
+      "label": "Nút \"Gửi thử\" Telegram",
+      "description": "Gửi thử một tin Telegram để chắc tin tới được điện thoại",
+      "dynamic": null,
+      "params": null,
+      "permission": "system.manage"
     },
     {
       "id": "connections.brain",
@@ -295,6 +394,27 @@
       }
     },
     {
+      "id": "system.ai_cost",
+      "screen": "system",
+      "label": "Thẻ \"Chi phí & trần ngân sách\"",
+      "description": "Trần chi phí AI mỗi ngày (₫) và bảng giá theo model",
+      "dynamic": null,
+      "params": {
+        "tab": "brain"
+      }
+    },
+    {
+      "id": "system.brain.coach",
+      "screen": "system",
+      "label": "Thẻ \"Gen hướng dẫn\"",
+      "description": "Bật/tắt Gen hướng dẫn, chuông nhắc, số bài học mỗi ngày (0–2), giờ yên lặng và danh sách việc Sếp đã chọn không dùng (có nút Bật lại)",
+      "dynamic": null,
+      "params": {
+        "tab": "brain"
+      },
+      "permission": "system.manage"
+    },
+    {
       "id": "system.brain.jev",
       "screen": "system",
       "label": "Thẻ Jev (System One)",
@@ -339,6 +459,16 @@
       "screen": "system",
       "label": "Hạn lưu dữ liệu",
       "description": "Mỗi tập dữ liệu giữ bao lâu",
+      "dynamic": null,
+      "params": {
+        "tab": "storage"
+      }
+    },
+    {
+      "id": "system.remote_access",
+      "screen": "system",
+      "label": "Thẻ \"Truy cập từ xa\"",
+      "description": "Cách nhân viên và điện thoại mở Console: địa chỉ truy cập, chế độ (Tailscale / mạng nội bộ) và lệnh genh remote",
       "dynamic": null,
       "params": {
         "tab": "storage"
@@ -645,6 +775,15 @@
       "description": "Sang trang hướng dẫn các việc thiết lập để sau (Owner)",
       "dynamic": null,
       "params": null
+    },
+    {
+      "id": "help.curriculum",
+      "screen": "help",
+      "label": "Thẻ \"Lộ trình học cùng Gen\"",
+      "description": "19 bài học của Gen hướng dẫn kèm trạng thái: xem nội dung, Làm thử, Học lại (chỉ Owner)",
+      "dynamic": null,
+      "params": null,
+      "permission": "system.manage"
     },
     {
       "id": "help.genh",

@@ -56,6 +56,7 @@ export function TelegramCard() {
   return (
     <Panel
       title="Telegram"
+      genTarget="system.channels.telegram"
       label="Telegram — báo động & bản tin"
       kicker={telegramKicker(t)}
       aside={status ? <ConnectionStatusPill status={status} /> : undefined}
@@ -290,7 +291,7 @@ function ConfiguredView({ t, onEdit, onHostRequested }: { t: TelegramConfig; onE
         {` · ${t.enabled ? 'đang bật' : 'đang tắt'}${t.briefing ? ' · bản tin 07:30/17:30' : ''}${t.reminders ? ' · nhắc việc' : ''}`}
       </p>
       <div className="conn-card__actions">
-        <Button variant="primary" className="btn-27" icon="ph ph-paper-plane-tilt" loading={test.isPending} onClick={() => test.mutate()} data-main-action>
+        <Button variant="primary" className="btn-27" icon="ph ph-paper-plane-tilt" loading={test.isPending} onClick={() => test.mutate()} data-main-action data-gen-target="system.channels.telegram.test">
           Gửi thử
         </Button>
         <Button variant="secondary" className="btn-27" icon="ph ph-pencil-simple" onClick={onEdit}>

@@ -13,6 +13,8 @@ import { GUIDE } from '../../src/guide/guideContent';
 
 const SRC = resolve(__dirname, '../../src');
 const REGISTRY = resolve(__dirname, '../../../api/gh/gen/registry.json');
+/** Tệp duy nhất trong `src/gen/` được quét tìm chỗ gắn `data-gen-target` (xem chú thích trong `scan`). */
+const COACH_CARD_FILE = join(SRC, 'gen', 'CoachTodayCard.tsx');
 
 function files(dir: string): string[] {
   return readdirSync(dir).flatMap((f) => {
@@ -28,7 +30,10 @@ function scan(): Set<string> {
   const statik = /(?:data-gen-target|genTarget)\s*[=:]\s*["']([\w.-]+)["']/g;
   const dynamic = /data-gen-target=\{`([\w.-]+):\$\{/g;
   for (const f of files(SRC)) {
-    if (f.includes(`${SRC}/gen/`)) continue; // khung Gen tự nó không phải chỗ gắn
+    // Khung Gen tự nó không phải chỗ gắn — NGOẠI LỆ HẸP (v0.1.54): đúng MỘT tệp `src/gen/CoachTodayCard.tsx`, vì thẻ "Hôm nay của
+    // Sếp" (Gen hướng dẫn) nằm trong khung Gen nhưng là một mục tiêu `gen.coach.card` để Gen chỉ vào (nút "Chỉ cho em" của
+    // chính thẻ, hay câu hỏi của Sếp). Các tệp khác trong `src/gen/` vẫn bị bỏ qua.
+    if (f.includes(`${SRC}/gen/`) && f !== COACH_CARD_FILE) continue;
     const text = readFileSync(f, 'utf8');
     for (const m of text.matchAll(statik)) found.add(m[1]);
     for (const m of text.matchAll(dynamic)) found.add(m[1]);
@@ -97,6 +102,45 @@ describe('gen targets registry', () => {
     const users = GEN_TARGETS.filter((t) => t.id.startsWith('system.users.'));
     expect(users.length).toBe(3);
     for (const t of users) expect(t.permission, t.id).toBe('roles.manage');
+  });
+
+  it('v0.1.54: 16 mục tiêu của Gen hướng dẫn có trong registry VÀ có chỗ gắn trong mã nguồn', () => {
+    const rows = ['hub', 'facebook', 'agy', 'claude', 'jev', 'telegram', 'remote', 'facebook_reply', 'kho_write'];
+    const ids = [
+      ...rows.map((k) => `boss_checks.row.${k}`),
+      'system.channels.telegram',
+      'system.channels.telegram.test',
+      'system.remote_access',
+      'system.ai_cost',
+      'system.brain.coach',
+      'gen.coach.card',
+      'help.curriculum',
+    ];
+    expect(ids).toHaveLength(16);
+    const found = scan();
+    for (const id of ids) {
+      expect(resolveTarget(id), `${id} trong registry`).not.toBeNull();
+      expect(found.has(id), `${id} có chỗ gắn data-gen-target`).toBe(true);
+    }
+    // 9 dòng "Việc Sếp cần làm": màn boss_checks, mục tiêu tĩnh (không dòng động).
+    for (const k of rows) {
+      const t = resolveTarget(`boss_checks.row.${k}`);
+      expect(t?.screen).toBe('boss_checks');
+      expect(t?.dynamic).toBeUndefined();
+    }
+    expect(resolveTarget('system.channels.telegram')?.screen).toBe('connections');
+    expect(resolveTarget('system.channels.telegram.test')?.screen).toBe('connections');
+    expect(resolveTarget('system.remote_access')).toMatchObject({ screen: 'system', params: { tab: 'storage' } });
+    expect(resolveTarget('system.ai_cost')).toMatchObject({ screen: 'system', params: { tab: 'brain' } });
+    expect(resolveTarget('system.brain.coach')).toMatchObject({ screen: 'system', params: { tab: 'brain' } });
+    expect(resolveTarget('gen.coach.card')?.screen).toBe('overview');
+    expect(resolveTarget('help.curriculum')?.screen).toBe('help');
+  });
+
+  it('v0.1.54: ngoại lệ quét src/gen/ chỉ dành cho CoachTodayCard.tsx — tệp khác của khung Gen không được gắn mục tiêu', () => {
+    const attach = /(?:data-gen-target|genTarget)\s*[=:]\s*["']([\w.-]+)["']/;
+    const attachedInGen = files(join(SRC, 'gen')).filter((f) => attach.test(readFileSync(f, 'utf8')));
+    expect(attachedInGen.map((f) => f.slice(SRC.length + 1))).toEqual(['gen/CoachTodayCard.tsx']);
   });
 
   it('apps/api/gh/gen/registry.json matches the TS export', () => {

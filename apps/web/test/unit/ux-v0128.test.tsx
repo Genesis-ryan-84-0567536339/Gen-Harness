@@ -122,7 +122,8 @@ describe('N5 → v0.1.42 (F-63): bỏ hẳn phụ đề tiếng Anh', () => {
       expect(s.sidebarMode).toBe('rail');
       expect(s.navOpen).toEqual({ 'Hộp thư & Việc': true });
     }
-    expect(persist.getOptions().version).toBe(2);
+    // v0.1.54: version 3 (bỏ followUpHiddenByUser của nút "Ẩn" cũ) — migrate vẫn bỏ showEnglish của bản 0/1.
+    expect(persist.getOptions().version).toBe(3);
     expect(JSON.stringify(persist.getOptions().partialize!(useUiStore.getState()))).not.toContain('showEnglish');
     localStorage.removeItem('gh-ui');
     useUiStore.setState({ sidebarMode: 'full', navOpen: {} });

@@ -31,7 +31,7 @@ export function AiBudgetCard() {
   const q = useAiCost(canRead);
   if (!canRead) return null;
   return (
-    <Panel title="Chi phí & trần ngân sách" kicker="Giá theo model · trần chi phí mỗi ngày" label="Chi phí & trần ngân sách" bodyClass="ai-budget">
+    <Panel title="Chi phí & trần ngân sách" genTarget="system.ai_cost" kicker="Giá theo model · trần chi phí mỗi ngày" label="Chi phí & trần ngân sách" bodyClass="ai-budget">
       {q.isPending ? (
         <SkeletonLines rows={4} padding="0" />
       ) : q.isError ? (

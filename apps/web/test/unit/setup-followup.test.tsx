@@ -1,11 +1,11 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
-import { beforeEach, describe, expect, it } from 'vitest';
-import type { SetupFollowUpItem } from '@gen-harness/contracts';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { CoachPrefs, SetupFollowUpItem } from '@gen-harness/contracts';
+import { COACH_PREFS_KEY } from '../../src/gen/coachModel';
 import { SetupFollowUp } from '../../src/screens/queue/SetupFollowUp';
-import { useUiStore } from '../../src/lib/uiStore';
 
 const ME = (id: string, role: string) => ({
   id, email: `${id}@genesis.local`, display_name: id, role: { code: role, name: role },
@@ -17,10 +17,18 @@ function item(n: number, done: boolean): SetupFollowUpItem {
   return { n, key: `k${n}`, title: `Bước ${n}`, status: 'skipped', done };
 }
 
-function renderWith(items: SetupFollowUpItem[], me = ME('owner-1', 'owner')) {
+const PREFS = (over: Partial<CoachPrefs> = {}): CoachPrefs => ({
+  enabled: true, bell: true, lessons_per_day: 1, quiet_start: 21, quiet_end: 7, snooze_until: null, followup_snoozed_until: null, dismissed: [], ...over,
+});
+
+/** v0.1.54: "Để sau 7 ngày" gọi máy chủ (không còn lưu ở trình duyệt) — ghi lại mọi lời gọi POST. */
+const posts: Array<{ url: string; body: unknown }> = [];
+
+function renderWith(items: SetupFollowUpItem[], me = ME('owner-1', 'owner'), prefs: CoachPrefs = PREFS()) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   qc.setQueryData(['setup', 'follow-up'], items);
   qc.setQueryData(['auth', 'me'], me);
+  qc.setQueryData(COACH_PREFS_KEY, prefs);
   return render(
     <QueryClientProvider client={qc}>
       <MemoryRouter>
@@ -31,7 +39,22 @@ function renderWith(items: SetupFollowUpItem[], me = ME('owner-1', 'owner')) {
 }
 
 describe('Việc thiết lập tiếp (Tổng quan)', () => {
-  beforeEach(() => useUiStore.setState({ followUpHiddenByUser: {} }));
+  beforeEach(() => {
+    posts.length = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if ((init?.method ?? 'GET').toUpperCase() === 'POST') {
+          posts.push({ url: String(input), body: init?.body ? JSON.parse(String(init.body)) : null });
+          return new Response(null, { status: 204 });
+        }
+        // Tải lại cài đặt sau khi hoãn: máy chủ đã ghi hạn hoãn.
+        const until = new Date(Date.now() + 7 * 86_400_000).toISOString();
+        return new Response(JSON.stringify(PREFS({ followup_snoozed_until: until })), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }),
+    );
+  });
+  afterEach(() => vi.unstubAllGlobals());
 
   it('liệt kê bước chưa xong, mỗi bước mở thẳng form làm việc đó, đầu thẻ dẫn tới Hướng dẫn thiết lập', () => {
     renderWith([item(5, false), item(8, false), item(11, false)]);
@@ -67,20 +90,23 @@ describe('Việc thiết lập tiếp (Tổng quan)', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it('v0.1.30: "Ẩn" chỉ ẩn cho đúng người bấm; có bước dở MỚI thì hiện lại', async () => {
-    const { unmount } = renderWith([item(5, false), item(8, false)]);
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Ẩn' }));
-    expect(screen.queryByText('Việc thiết lập tiếp')).not.toBeInTheDocument();
-    unmount();
-    // Người khác (Owner khác) trên cùng trình duyệt vẫn thấy.
-    const other = renderWith([item(5, false), item(8, false)], ME('owner-2', 'owner'));
-    expect(screen.getByText('Việc thiết lập tiếp')).toBeInTheDocument();
-    other.unmount();
-    // Cùng người: bước đã ẩn làm xong bớt → vẫn ẩn; xuất hiện bước dở mới (10) → hiện lại.
-    const same = renderWith([item(8, false)]);
-    expect(screen.queryByText('Việc thiết lập tiếp')).not.toBeInTheDocument();
-    same.unmount();
-    renderWith([item(8, false), item(10, false)]);
+  it('v0.1.54: không còn nút "Ẩn" lưu ở trình duyệt; "Để sau 7 ngày" gọi máy chủ rồi ẩn thẻ', async () => {
+    renderWith([item(5, false), item(8, false)]);
+    expect(screen.queryByRole('button', { name: 'Ẩn' })).toBeNull();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Để sau 7 ngày' }));
+    await waitFor(() => expect(screen.queryByText('Việc thiết lập tiếp')).not.toBeInTheDocument());
+    expect(posts).toHaveLength(1);
+    expect(posts[0].url).toBe('/api/v1/gen/coach/items/card%3Asetup_followup');
+    expect(posts[0].body).toEqual({ action: 'snooze', days: 7 });
+  });
+
+  it('v0.1.54: prefs.followup_snoozed_until còn ở tương lai ⇒ ẩn thẻ trên mọi máy; hết hạn ⇒ hiện lại', () => {
+    const future = new Date(Date.now() + 3 * 86_400_000).toISOString();
+    const hidden = renderWith([item(5, false)], ME('owner-1', 'owner'), PREFS({ followup_snoozed_until: future }));
+    expect(hidden.container).toBeEmptyDOMElement();
+    hidden.unmount();
+    const past = new Date(Date.now() - 60_000).toISOString();
+    renderWith([item(5, false)], ME('owner-1', 'owner'), PREFS({ followup_snoozed_until: past }));
     expect(screen.getByText('Việc thiết lập tiếp')).toBeInTheDocument();
   });
 
