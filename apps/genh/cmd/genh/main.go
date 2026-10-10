@@ -1138,8 +1138,11 @@ func nightlyStatusText(st autoupdate.Status, logMod time.Time, logErr error, opt
 	// systemd: unit đã enable mà timer không active (failed/inactive) ≠ "BẬT".
 	broken := st.Mechanism == autoupdate.ScheduleSystemd && st.UnitPresent && st.UnitFileState == "enabled" && st.Active != "active"
 	logMissing := logErr != nil
-	// Log chưa có VÀ chưa từng có lần chạy nào (vừa bật xong) chưa phải dấu hiệu hỏng.
-	logStale := running && ((!logMissing && now.Sub(logMod) > nightlyStaleAfter) || (logMissing && !st.LastRun.IsZero()))
+	// Log chưa có VÀ chưa từng có lần chạy nào (vừa bật xong) chưa phải dấu hiệu hỏng. Log chưa có mà timer
+	// đã kích: chỉ cảnh báo khi lần kích đó cũ hơn 36 giờ — sau khi khởi động lại, systemd nạp mtime tệp stamp
+	// (tạo lúc bật lịch) vào LastTriggerUSec nên "đã kích" chưa chắc đã có lần chạy thật.
+	logStale := running && ((!logMissing && now.Sub(logMod) > nightlyStaleAfter) ||
+		(logMissing && !st.LastRun.IsZero() && now.Sub(st.LastRun) > nightlyStaleAfter))
 
 	var b strings.Builder
 	switch {

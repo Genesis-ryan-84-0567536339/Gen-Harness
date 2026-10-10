@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -426,12 +425,10 @@ func statusLinux(ctx context.Context, deps Deps) (Status, error) {
 		st.Active = p["ActiveState"]
 		st.LastRun = parseSystemdTime(p["LastTriggerUSec"], deps.location())
 		st.NextRun = parseSystemdTime(p["NextElapseUSecRealtime"], deps.location())
-		if st.LastRun.IsZero() && home != "" {
-			// Persistent=true: systemd ghi dấu lần kích gần nhất vào tệp này.
-			if fi, err := os.Stat(filepath.Join(home, ".local", "share", "systemd", "timers", "stamp-"+TaskName+".timer")); err == nil {
-				st.LastRun = fi.ModTime()
-			}
-		}
+		// KHÔNG lấy mtime của tệp stamp (~/.local/share/systemd/timers/stamp-*.timer) làm lần chạy:
+		// với Persistent=true systemd TẠO tệp này ngay khi timer khởi động lần đầu (chưa chạy lần nào), nên
+		// mtime = lúc bật lịch ⇒ máy vừa cài sẽ bị coi là "đã chạy mà log trống" (BẬT NHƯNG KHÔNG CHẠY).
+		// Lần kích thật đã nằm trong LastTriggerUSec (systemd tự nạp lại từ stamp sau khi khởi động lại).
 		st.Enabled = st.UnitFileState == "enabled" && st.Active == "active"
 		st.Detail = fmt.Sprintf("systemd --user timer %s.timer: UnitFileState=%s, ActiveState=%s", TaskName, orUnknown(st.UnitFileState), orUnknown(st.Active))
 		if home != "" {

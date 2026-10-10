@@ -484,6 +484,33 @@ func TestNightlyStatusText_DuNamTruongVaCanhBaoLog(t *testing.T) {
 	}
 }
 
+// Hồi quy (e2e-nightly-real, v0.1.53): vừa bật lịch (log chưa có) mà systemd đã có LastTriggerUSec gần đây
+// (sau khởi động lại nó nạp mtime tệp stamp tạo lúc bật lịch) ⇒ vẫn là BẬT, không cảnh báo; chỉ khi lần kích đó
+// cũ hơn 36 giờ mà log vẫn trống mới là BẬT NHƯNG KHÔNG CHẠY + CẢNH BÁO.
+func TestNightlyStatusText_LogChuaCo_LanKichGanDayKhongCanhBao(t *testing.T) {
+	now := time.Date(2026, 10, 10, 15, 0, 0, 0, time.UTC)
+	st := autoupdate.Status{
+		Enabled: true, Mechanism: autoupdate.ScheduleSystemd, UnitPresent: true, UnitFileState: "enabled", Active: "active",
+		LastRun: now.Add(-time.Hour), NextRun: time.Date(2026, 10, 11, 3, 21, 0, 0, time.UTC), Linger: "yes",
+	}
+	txt := nightlyStatusText(st, time.Time{}, os.ErrNotExist, false, now)
+	if !strings.Contains(txt, "Tự cập nhật hằng đêm: BẬT\n") || strings.Contains(txt, "NHƯNG KHÔNG CHẠY") || strings.Contains(txt, "CẢNH BÁO") {
+		t.Errorf("vừa bật, log chưa có, lần kích 1 giờ trước ⇒ BẬT không cảnh báo:\n%s", txt)
+	}
+	st.LastRun = time.Time{}
+	if txt := nightlyStatusText(st, time.Time{}, os.ErrNotExist, false, now); strings.Contains(txt, "CẢNH BÁO") ||
+		!strings.Contains(txt, "Lần chạy gần nhất: chưa chạy lần nào") {
+		t.Errorf("chưa kích lần nào ⇒ không cảnh báo:\n%s", txt)
+	}
+	st.LastRun = now.Add(-37 * time.Hour)
+	txt = nightlyStatusText(st, time.Time{}, os.ErrNotExist, false, now)
+	for _, want := range []string{"Tự cập nhật hằng đêm: BẬT NHƯNG KHÔNG CHẠY", "CẢNH BÁO: logs/auto-update.log không có dòng mới hơn 36 giờ (lần ghi cuối chưa có)"} {
+		if !strings.Contains(txt, want) {
+			t.Errorf("thiếu %q:\n%s", want, txt)
+		}
+	}
+}
+
 func TestNightlyStatusText_TatChuDongLingerVaHong(t *testing.T) {
 	now := time.Date(2026, 10, 10, 15, 0, 0, 0, time.UTC)
 	off := autoupdate.Status{Mechanism: autoupdate.ScheduleSystemd, UnitPresent: true, UnitFileState: "disabled", Active: "inactive", Linger: "no"}

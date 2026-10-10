@@ -327,7 +327,9 @@ func TestStatusLinux_MocGio_Unix_VaDangNgay(t *testing.T) {
 	}
 }
 
-func TestStatusLinux_LastRunDuPhongLaMtimeStamp(t *testing.T) {
+// Hồi quy (e2e-nightly-real, v0.1.53): systemd tạo tệp stamp ngay khi timer Persistent=true khởi động lần
+// đầu, nên mtime của nó KHÔNG phải lần chạy — lấy nó làm LastRun khiến máy vừa cài báo "BẬT NHƯNG KHÔNG CHẠY".
+func TestStatusLinux_KhongLayMtimeStampLamLanChay(t *testing.T) {
 	rr := &recRunner{}
 	rr.on("show gen-harness-update.timer", showOut("loaded", "enabled", "active", "", "@1760086400"), nil)
 	deps := nightlyDeps(t, rr)
@@ -343,8 +345,11 @@ func TestStatusLinux_LastRunDuPhongLaMtimeStamp(t *testing.T) {
 		t.Fatal(err)
 	}
 	st, _ := GetStatus(context.Background(), deps)
-	if !st.LastRun.Equal(mt) {
-		t.Fatalf("LastRun dự phòng = mtime stamp, được %v", st.LastRun)
+	if !st.LastRun.IsZero() {
+		t.Fatalf("LastTriggerUSec rỗng ⇒ LastRun phải zero (không lấy mtime stamp), được %v", st.LastRun)
+	}
+	if st.NextRun.IsZero() || !st.Enabled {
+		t.Fatalf("NextRun/Enabled vẫn phải đọc từ systemctl show: %+v", st)
 	}
 }
 
