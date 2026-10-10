@@ -71,7 +71,11 @@ TOOLS: dict[str, Tool] = {t.name: t for t in (
     Tool("audit.list", "Nhật ký hành động gần nhất; args.action (tiền tố, vd gen.)", ("audit.read",), "/audit",
          {"action": None}, default_query={"limit": "20"}),
     Tool("system.health", "Tình trạng CSDL, Redis, kho tệp, bridge kênh", ("system.read",), "/ready"),
-    Tool("guide.list", "Các việc thiết lập tuỳ chọn 5–11: vì sao cần, các bước, đã xong chưa", ("system.manage",)),
+    Tool("guide.list", "Các việc thiết lập tuỳ chọn 5–11, 13, 14: vì sao cần, các bước, đã xong chưa",
+         ("system.manage",)),
+    # v0.1.54 (g1-api): Gen hướng dẫn — gộp /gen/coach/today (không đánh dấu đã xem) + /gen/coach/curriculum. Chỉ Owner.
+    Tool("coach.status", "Việc vận hành Sếp cần làm ngay, tiến độ x/N, bài học hôm nay và danh sách bài",
+         ("system.manage",), owner_only=True),
     Tool("screens.list", "Các màn Sếp được xem (khoá + tên) — dùng khi cần mở màn", ()),
     Tool("task.list", "Việc & nhắc hẹn; args.status ∈ todo|doing|done|cancelled (id việc dùng cho đề xuất gán người)",
          ("queue.read",), "/tasks", {"status": ("todo", "doing", "done", "cancelled")}, default_query={"limit": "20"}),
@@ -259,6 +263,8 @@ class ToolRunner:
                 data: Any = registry.visible_screens(self.user.permissions)
             elif tool.name == "social.read":
                 data = await self._social_read(args)
+            elif tool.name == "coach.status":
+                data = await self._coach_status()
             elif tool.name == "guide.list":
                 status, follow = await self._get("/setup/follow-up", {})
                 done = {i.get("n"): i.get("done") for i in follow} if status == 200 and isinstance(follow, list) \
@@ -290,6 +296,31 @@ class ToolRunner:
             ids.update(KHO_CODE_RE.findall(raw))
         self.seen_ids |= ids
         return ToolResult(ok=True, data=small, text=raw, ids=ids)
+
+    async def _coach_status(self) -> Any:
+        """Gộp thẻ hôm nay (KHÔNG `mark_shown` — hỏi Gen không tính là Sếp đã xem thẻ) và lộ trình bài học thành một
+        kết quả gọn: việc cần làm, tiến độ, bài hôm nay, danh sách bài (id, tiêu đề, trạng thái). Chỉ khoá / tiêu đề
+        tĩnh / số đếm — endpoint gốc không bao giờ trả chi tiết sự cố, thông điệp, email hay token."""
+        status, today = await self._get("/gen/coach/today", {})
+        if status == 403:
+            raise ToolError("FORBIDDEN", "Vai trò của người hỏi không có quyền dữ liệu này")
+        if status != 200 or not isinstance(today, dict):
+            raise ToolError("ERROR", f"Lỗi {status}")
+        status, curr = await self._get("/gen/coach/curriculum", {})
+        lessons = curr.get("lessons") if status == 200 and isinstance(curr, dict) else []
+        todos = []
+        for t in today.get("todos") or []:
+            row = {k: t[k] for k in ("key", "level", "title", "why", "target", "link") if t.get(k)}
+            followup = str(t.get("target") or "").removeprefix("guide.item.do:")
+            if followup.isdigit():
+                row["n"] = int(followup)   # id dòng cho `guide.item.do:<n>` — validator chỉ cho làm sáng id đã thấy
+            todos.append(row)
+        lesson = today.get("lesson")
+        return {"enabled": bool(today.get("enabled")), "todos": todos, "progress": today.get("progress"),
+                "lesson": None if not isinstance(lesson, dict) else {
+                    k: lesson[k] for k in ("id", "k", "total", "title", "status") if k in lesson},
+                "lessons": [{"id": x.get("id"), "title": x.get("title"), "status": x.get("status")}
+                            for x in lessons or [] if isinstance(x, dict)]}
 
     async def _social_read(self, args: dict[str, Any]) -> Any:
         from gh.db import sessionmaker

@@ -18,13 +18,15 @@ DATA_TOOL_NAMES = ("overview.summary", "queue.list", "draft.list", "draft.get", 
                    "social.accounts", "social.read",
                    # v0.1.49 (QD-16): Tài liệu/Deal/Vụ việc nội bộ + lịch/việc/mail/Drive Google qua Gen-hub (chỉ Owner)
                    "document.list", "document.get", "deal.list", "deal.get", "case.list", "case.get", "hub.calendar",
-                   "hub.tasks", "hub.mail_search", "hub.mail_read", "hub.drive_search")
+                   "hub.tasks", "hub.mail_search", "hub.mail_read", "hub.drive_search",
+                   # v0.1.54 (g1-api): Gen hướng dẫn — việc vận hành Sếp cần làm, tiến độ x/N, bài học (chỉ Owner)
+                   "coach.status")
 DataToolName = Literal["overview.summary", "queue.list", "draft.list", "draft.get", "profile.search", "profile.get",
                        "opportunity.list", "people.care", "audit.list", "system.health", "guide.list", "screens.list",
                        "task.list", "staff.list", "refinery.summary", "hub.kho_summary", "hub.kho_search",
                        "hub.kho_get", "social.accounts", "social.read", "document.list", "document.get", "deal.list",
                        "deal.get", "case.list", "case.get", "hub.calendar", "hub.tasks", "hub.mail_search",
-                       "hub.mail_read", "hub.drive_search"]
+                       "hub.mail_read", "hub.drive_search", "coach.status"]
 
 
 class _M(BaseModel):
