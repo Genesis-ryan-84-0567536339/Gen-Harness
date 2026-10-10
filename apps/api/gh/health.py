@@ -11,8 +11,8 @@ cả chuông (core.notifications) lẫn dải "Cần Sếp xử lý" ở Tổng 
   nhật tốt.
 - `evaluate` + `watch_loop` (chạy trong api, `Settings.health_watch_seconds`): mỗi phút tính lại các sự cố theo dõi
   định kỳ (cập nhật lỗi trong 24 giờ, quá hạn sao lưu theo tần suất bước 11, bộ xử lý nền im, ổ đĩa sắp đầy, model
-  đang hết đăng nhập, bản sao ngoài máy cũ/lỗi — v0.1.40, chi phí AI hôm nay vượt trần — v0.1.41) và dọn dòng sự
-  kiện cũ.
+  đang hết đăng nhập, bản sao ngoài máy cũ/lỗi — v0.1.40, chi phí AI hôm nay vượt trần — v0.1.41, lịch tự cập nhật
+  đêm im quá 36 giờ — v0.1.53) và dọn dòng sự kiện cũ.
 
 Hợp đồng Redis với worker (gh/worker.py ghi): `gh:cron:last:<tên hàm>` = JSON {"at": ISO UTC 'Z', "ok": bool,
 "ms": int} + tên hàm trong tập `gh:cron:names`; `gh:worker:heartbeat` = ISO UTC. Hàng lỗi: tập `gh:dlq:streams`
@@ -72,6 +72,10 @@ OFFSITE_STALE_DAYS = 7
 #: là cũ (tránh chuông giả mỗi tuần). Dùng chung cho chuông (health) và GET /system/offsite (offsite.read_status).
 OFFSITE_STALE_AFTER = timedelta(days=OFFSITE_STALE_DAYS, hours=12)
 OFFSITE_BAD_DAYS = 30
+#: v0.1.53 (F-99): lịch tự cập nhật đêm (~03:00) im quá N giờ kể từ mốc = max(lần chạy cuối, lúc bật) ⇒ cảnh báo
+#: `host.nightly`. Một đêm trượt + ân hạn 12 giờ (timer trễ ngẫu nhiên, máy ngủ đến sáng); `genh auto-update status`
+#: cũng dùng 36 giờ.
+NIGHTLY_STALE_HOURS = 36
 
 #: Nhãn nút hành động theo kind (web hiện trên dải "Cần Sếp xử lý").
 ACTIONS = {
@@ -82,6 +86,8 @@ ACTIONS = {
     "worker.silent": "Xem sức khoẻ",
     "disk.low": "Xem cách giải phóng",
     "host.autostart": "Xem cách bật",
+    # v0.1.53 (F-99): lịch tự cập nhật đêm không chạy (tắt / linger tắt / trình nhận yêu cầu lỗi) — `_eval_nightly`.
+    "host.nightly": "Xem cách bật lại",
     "offsite.stale": "Chọn nơi lưu / sao lưu ngay",
     "offsite.failed": "Xem bản sao ngoài máy",
     # Do worker mở/đóng (key "job.timeout:<tên hàm>") — chỉ khai nhãn ở đây.
@@ -367,6 +373,56 @@ def _autostart_problems(linger: str, required: bool | None, docker: str, mode: s
     return problems
 
 
+#: v0.1.53 (F-99): thân sự cố `host.nightly` — chỉ ghép từ chuỗi cố định (run/ là 0777, không tin cậy; không lệnh/chữ
+#: lấy từ tệp). Mỗi câu kết thúc bằng lệnh: KHÔNG thêm dấu chấm sau lệnh (Sếp chép nguyên dòng).
+NIGHTLY_BODY = "Máy chủ không tự lên bản mới. Trên máy chủ chạy: genh auto-update status"
+NIGHTLY_LINGER = ("Tiến trình nền chỉ chạy khi có người đăng nhập — chạy một lần: "
+                  "sudo loginctl enable-linger $USER")
+NIGHTLY_ENABLE = "Rồi: genh auto-update enable"
+
+
+def _nightly_eval(now: datetime) -> tuple[dict[str, Any], bool | None]:
+    """(khối `nightly` của /system/health, `enabled`) từ `run/nightly-status.json` (genh ghi; đã lọc kiểu/tập giá trị
+    ở `update.read_nightly`). `state`: 'off' (Sếp đã chủ động tắt — opted_out), 'warn' (lịch đang tắt, hoặc đã quá
+    `NIGHTLY_STALE_HOURS` kể từ mốc = max(lần chạy cuối, lúc bật)), 'ok', 'unknown' (tệp thiếu/hỏng = genh cũ, hoặc
+    không đủ dữ liệu để kết luận). `days_since` = số ngày tròn kể từ mốc (36–48 giờ ⇒ 1). Linger: giá trị genh ghi
+    trong nightly-status.json; chưa rõ thì lấy từ autostart-status.json."""
+    from gh.system_api import update
+
+    d = _host_dir()
+    raw = update.read_nightly(d)
+    linger = "unknown"
+    if raw is not None and raw["linger"] != "unknown":
+        linger = raw["linger"]
+    else:
+        auto = update._read_json(d / "autostart-status.json")
+        if auto is not None:
+            linger = _pick(auto.get("linger"), AUTOSTART_YES_NO)
+    if raw is None:
+        return ({"state": "unknown", "last_run_at": None, "next_run_at": None, "days_since": None,
+                 "opted_out": None, "linger": linger, "checked_at": None}, None)
+    enabled, opted_out = raw["enabled"], raw["opted_out"]
+    times = [t for t in (_parse_ts(raw["last_run_at"]), _parse_ts(raw["since"])) if t is not None]
+    anchor = max(times) if times else None
+    days = max(0, int((now - anchor).total_seconds() // 86400)) if anchor is not None else None
+    if opted_out is True:
+        state, days = "off", None
+    elif enabled is False or (enabled is True and anchor is not None
+                              and now - anchor > timedelta(hours=NIGHTLY_STALE_HOURS)):
+        state = "warn"
+    elif enabled is True and anchor is not None:
+        state = "ok"
+    else:
+        state, days = "unknown", None
+    return ({"state": state, "last_run_at": raw["last_run_at"], "next_run_at": raw["next_run_at"],
+             "days_since": days, "opted_out": opted_out, "linger": linger, "checked_at": raw["checked_at"]}, enabled)
+
+
+def _nightly_status(now: datetime | None = None) -> dict[str, Any]:
+    """Khối `nightly` của /system/health — xem `_nightly_eval`."""
+    return _nightly_eval(now or datetime.now(UTC))[0]
+
+
 def _gb(n: Any) -> str:
     try:
         v = float(n) / (1 << 30)
@@ -486,6 +542,14 @@ async def collect(db: AsyncSession, redis: Any, org_id: uuid.UUID, *, now: datet
     except Exception:  # noqa: BLE001
         log.warning("Không đọc được trạng thái tự chạy lại khi bật máy", exc_info=True)
 
+    # v0.1.53 (F-99): lịch tự cập nhật đêm — CHỈ khi có hộp thư với genh (khuôn cũ giữ nguyên khi không có).
+    nightly: dict[str, Any] | None = None
+    try:
+        if _host_dir().is_dir():
+            nightly = _nightly_status(now)
+    except Exception:  # noqa: BLE001
+        log.warning("Không đọc được trạng thái lịch tự cập nhật đêm", exc_info=True)
+
     # v0.1.40 (F-12): bản sao ngoài máy — CHỈ khi có hộp thư với genh (khuôn cũ giữ nguyên khi không có).
     offsite: dict[str, Any] | None = None
     try:
@@ -528,6 +592,7 @@ async def collect(db: AsyncSession, redis: Any, org_id: uuid.UUID, *, now: datet
     warn = (any(i["severity"] == "warn" for i in issues) or browser["state"] == "silent" or update["failed"]
             or any(q["dlq"] > 0 for q in queues) or any(c["ok"] is False for c in crons)
             or (autostart is not None and autostart["state"] == "warn")
+            or (nightly is not None and nightly["state"] == "warn")
             or (offsite is not None and offsite["stale"]))
     out: dict[str, Any] = {
         "checked_at": _iso(now),
@@ -546,6 +611,8 @@ async def collect(db: AsyncSession, redis: Any, org_id: uuid.UUID, *, now: datet
         out["boss_checks"] = boss_checks
     if autostart is not None:
         out["autostart"] = autostart
+    if nightly is not None:
+        out["nightly"] = nightly
     if offsite is not None:
         out["offsite"] = offsite
     return out
@@ -666,6 +733,32 @@ async def _eval_autostart(db: AsyncSession, org_id: uuid.UUID, redis: Any) -> No
     linger_ok = st["linger"] in good or st["linger_required"] is False
     if st["docker_enabled"] in good and linger_ok:  # đã biết chắc không còn vấn đề; còn 'unknown' ⇒ để nguyên
         await clear(db, org_id, "host.autostart")
+
+
+async def _eval_nightly(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: datetime) -> None:
+    """F-99: lịch tự cập nhật đêm không chạy — đang tắt (không do Sếp chủ động tắt) hoặc im quá `NIGHTLY_STALE_HOURS`.
+    Máy chủ không tự lên bản mới mà Sếp không hay biết gì. Thân chỉ ghép từ chuỗi cố định; fingerprint = tình trạng
+    (disabled | linger | stale) ⇒ số ngày tăng dần không sinh chuông mới, đổi nguyên nhân mới có chuông mới. 'off' (Sếp
+    đã tắt) / 'ok' ⇒ đóng; 'unknown' (genh cũ chưa ghi tệp) ⇒ để nguyên. Chỉ khi có hộp thư."""
+    if not _host_dir().is_dir():
+        return
+    st, enabled = _nightly_eval(now)
+    if st["state"] == "warn":
+        days = st["days_since"] or 0
+        if enabled is False:
+            title, fingerprint = "Lịch tự cập nhật đêm đang tắt", "disabled"
+        else:
+            title = ("Lịch tự cập nhật đêm đã hơn 1 ngày chưa chạy" if days < 2
+                     else f"Lịch tự cập nhật đêm chưa chạy {days} ngày")
+            fingerprint = "linger" if st["linger"] == "no" else "stale"
+        parts = [NIGHTLY_BODY]
+        if st["linger"] == "no":
+            parts.append(NIGHTLY_LINGER)
+        parts.append(NIGHTLY_ENABLE)
+        await raise_once(db, org_id, key="host.nightly", kind="host.nightly", severity="warn", title=title,
+                         body=AUTOSTART_SEP.join(parts), link=HEALTH_LINK, fingerprint=fingerprint, redis=redis)
+    elif st["state"] in ("ok", "off"):
+        await clear(db, org_id, "host.nightly")
 
 
 ACCESS_LINK = "/system?tab=storage&focus=access"
@@ -878,6 +971,7 @@ async def evaluate(db: AsyncSession, redis: Any, org_id: uuid.UUID, *, now: date
         ("worker.silent", lambda: _eval_worker(db, org_id, redis, now, started_at)),
         ("disk.low", lambda: _eval_disk(db, org_id, redis)),
         ("host.autostart", lambda: _eval_autostart(db, org_id, redis)),
+        ("host.nightly", lambda: _eval_nightly(db, org_id, redis, now)),
         ("offsite", lambda: _eval_offsite(db, org_id, redis, now)),
         ("models", lambda: _eval_models(db, org_id, redis)),
         ("events", lambda: _eval_events(db, org_id)),

@@ -160,8 +160,8 @@ export function UpdateCard({ always = false, hideFailed = false }: { always?: bo
       ) : null}
       {view.kind !== 'hidden' && view.showCommand ? (
         <div className="upd-cmd">
-          <span>Chạy lệnh này một lần trên máy chủ (lần sau chỉ cần bấm nút ở đây):</span>
-          <code className="mono">{UPDATE_COMMAND}</code>
+          <span>{view.commandLabel ?? 'Chạy lệnh này một lần trên máy chủ (lần sau chỉ cần bấm nút ở đây):'}</span>
+          <code className="mono">{view.command ?? UPDATE_COMMAND}</code>
         </div>
       ) : null}
       {view.kind === 'available' && d?.release_notes ? (

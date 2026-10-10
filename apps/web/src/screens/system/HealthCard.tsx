@@ -10,8 +10,9 @@ import { useSystemHealth } from './queries';
 
 /**
  * v0.1.36 (F-6): thẻ "Sức khoẻ hệ thống" đầu Điều khiển hệ thống › Dữ liệu & lưu trữ — Bộ xử lý nền, Trình duyệt nền,
- * hàng lỗi (DLQ), sao lưu, cập nhật, ổ đĩa (`GET /system/health`); "Chi tiết kỹ thuật" liệt kê lịch chạy và từng hàng
- * lỗi. Chỉ vai trò có `system.read`.
+ * hàng lỗi (DLQ), sao lưu, cập nhật, ổ đĩa, tự cập nhật đêm (`GET /system/health`); "Chi tiết kỹ thuật" liệt kê lịch
+ * chạy và từng hàng lỗi. Chỉ vai trò có `system.read`. Hướng dẫn từng bước (`healthTips`, kể cả "Cách bật lại lịch tự
+ * cập nhật đêm" — đích của nút "Xem cách bật lại") hiện ngay dưới các dòng.
  */
 export function HealthCard() {
   const canRead = useCan('system.read');
@@ -45,6 +46,13 @@ export function HealthCard() {
   );
 }
 
+/**
+ * Lệnh trong hướng dẫn từng bước: khối nội dòng (không vỡ thành nhiều mảnh nền khi xuống dòng ở màn hẹp) có đệm 6px hai
+ * bên — lính gác bố cục (e2e/layout-guard.spec.ts) đo chữ cách mép khung ≥ 6px; `.health-card__tip-steps code` ở
+ * styles/system.css chỉ đệm 4px và là nội dòng nên chữ bị xuống dòng dính mép khung.
+ */
+const TIP_CMD_STYLE = { display: 'inline-block', maxWidth: '100%', padding: '0 6px', verticalAlign: 'bottom' } as const;
+
 function HealthBody({ data, now, tz }: { data: SystemHealth; now: number; tz: string }) {
   const canManage = useCan('system.manage');
   const isOwner = useMe().data?.role?.code === 'owner';
@@ -75,7 +83,9 @@ function HealthBody({ data, now, tz }: { data: SystemHealth; now: number; tz: st
                 {st.cmd ? (
                   <>
                     {' '}
-                    <code className="mono">{st.cmd}</code>
+                    <code className="mono" style={TIP_CMD_STYLE}>
+                      {st.cmd}
+                    </code>
                   </>
                 ) : null}
               </li>
