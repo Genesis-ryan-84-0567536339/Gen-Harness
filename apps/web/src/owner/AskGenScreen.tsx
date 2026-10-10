@@ -59,7 +59,7 @@ export function AskGenScreen() {
         <div className="owner-ask__prompts">
           {ASK_GEN_PROMPTS.map((q) => (
             <button key={q} type="button" className="gh-btn gh-btn--secondary" onClick={() => useGenStore.getState().setComposerDraft(q)}>
-              <Icon name="ph ph-chat-circle-text" size={14} /> {q}
+              <Icon name="ph ph-chat-text" size={14} /> {q}
             </button>
           ))}
         </div>

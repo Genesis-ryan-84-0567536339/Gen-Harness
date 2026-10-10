@@ -75,7 +75,7 @@ export function MoreScreen() {
       <Panel title="Cài đặt nâng cao" kicker="Bộ não AI, sao lưu, quyền, nhật ký… — toàn bộ Console" flush>
         <div className="owner-advanced">
           <Link to={safeLink(ADVANCED_SETTINGS_PATH)} className="gh-btn gh-btn--primary" data-testid="owner-advanced">
-            <Icon name="ph ph-gear-six" size={14} /> Cài đặt nâng cao
+            <Icon name="ph ph-gear" size={14} /> Cài đặt nâng cao
           </Link>
           <span className="owner-muted">Ở đó có nút “Về Mặt tiền” để quay lại.</span>
         </div>

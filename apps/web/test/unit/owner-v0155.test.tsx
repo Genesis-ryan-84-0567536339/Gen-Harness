@@ -3,13 +3,14 @@
  * khung (thanh trái 6 mục / thanh dưới 5 nút < 760px, vai khác Owner về "/", ?gen=), nút "← Về Mặt tiền", cụm route.
  * Không màn nào render object (`[object Object]`); Hôm nay/Quan hệ không có chữ model/token/API; mock-owner khớp hợp đồng.
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterProvider, createMemoryRouter, useLocation, type RouteObject } from 'react-router-dom';
+import { hasIcon } from '@gen-harness/ui';
 import { useGenStore } from '../../src/gen/genStore';
 import { BackToFront } from '../../src/owner/BackToFront';
 import { AskGenScreen } from '../../src/owner/AskGenScreen';
@@ -243,7 +244,7 @@ describe('ownerModel (thuần)', () => {
   it('4 số mở đúng danh sách; số đếm chạm trần hiện "999+"', () => {
     const cards = kpiCards({ hot: 3, cooling: 2, open_opps: 12, open_value_vnd: 2_400_000_000, overdue_promises: 1000 });
     expect(cards.map((c) => c.key)).toEqual(['hot', 'cooling', 'open_opps', 'overdue_promises']);
-    expect(cards.map((c) => c.to)).toEqual(['/owner/quan-he?list=hot', '/owner/quan-he?list=cooling', '/opportunity', '/tasks?overdue=true']);
+    expect(cards.map((c) => c.to)).toEqual(['/owner/quan-he?list=hot', '/owner/quan-he?list=cooling', '/opportunity', '/tasks?ptab=overdue']);
     expect(cards[2].sub).toBe('2,4 tỷ ₫');
     expect(cards[3].value).toBe('999+');
     expect(kpiCards({ hot: 0, cooling: 0, open_opps: 0, open_value_vnd: 0, overdue_promises: 0 }).every((c) => c.tone === 'neutral')).toBe(true);
@@ -632,6 +633,19 @@ describe('BackToFront ("← Về Mặt tiền")', () => {
     await waitFor(() => expect(server.calls.some((u) => u.includes('/auth/me'))).toBe(true));
     await new Promise((r) => setTimeout(r, 30));
     expect(screen.queryByTestId('back-to-front')).not.toBeInTheDocument();
+  });
+});
+
+describe('biểu tượng', () => {
+  it('mọi icon Mặt tiền dùng đều có trong bảng icon của @gen-harness/ui (tên lạ vẽ ra ô trống)', () => {
+    const dir = resolve(__dirname, '../../src/owner');
+    const names = new Set<string>();
+    for (const f of readdirSync(dir)) {
+      if (!/\.tsx?$/.test(f)) continue;
+      for (const m of readFileSync(resolve(dir, f), 'utf8').matchAll(/['"`](ph(?:-fill)? ph-[a-z0-9-]+)['"`]/g)) names.add(m[1]);
+    }
+    expect(names.size).toBeGreaterThan(15);
+    expect([...names].filter((n) => !hasIcon(n))).toEqual([]);
   });
 });
 

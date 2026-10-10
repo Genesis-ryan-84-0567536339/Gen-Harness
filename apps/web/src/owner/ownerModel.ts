@@ -67,12 +67,12 @@ export interface OwnerNavItem {
 
 /** Thanh trái máy tính: 6 mục. Thanh dưới điện thoại: 5 mục (bỏ mục "sắp có"). */
 export const OWNER_NAV: readonly OwnerNavItem[] = [
-  { key: 'today', label: 'Hôm nay', icon: 'ph ph-sun-horizon', to: OWNER_PATHS.today },
+  { key: 'today', label: 'Hôm nay', icon: 'ph ph-sun', to: OWNER_PATHS.today },
   { key: 'tasks', label: 'Việc', icon: 'ph ph-check-square', to: OWNER_PATHS.tasks },
   { key: 'relations', label: 'Quan hệ', icon: 'ph ph-users-three', to: OWNER_PATHS.relations },
   { key: 'gen', label: 'Hỏi Gen', icon: 'ph ph-sparkle', to: OWNER_PATHS.gen },
   { key: 'analytics', label: 'Phân tích', icon: 'ph ph-chart-line-up', to: '/owner/phan-tich', soon: true },
-  { key: 'more', label: 'Thêm', icon: 'ph ph-dots-three-outline', to: OWNER_PATHS.more },
+  { key: 'more', label: 'Thêm', icon: 'ph ph-dots-three', to: OWNER_PATHS.more },
 ];
 
 export const OWNER_TABBAR: readonly OwnerNavItem[] = OWNER_NAV.filter((i) => !i.soon);
@@ -143,7 +143,7 @@ export const REVIEW_LABEL: Record<OwnerReviewKind, string> = {
   overdue_task: 'Việc quá hạn',
 };
 export const REVIEW_ICON: Record<OwnerReviewKind, string> = {
-  draft: 'ph ph-envelope-simple',
+  draft: 'ph ph-envelope',
   proposal: 'ph ph-sparkle',
   overdue_task: 'ph ph-clock-countdown',
 };
@@ -176,7 +176,7 @@ export function kpiCards(k: OwnerKpis): KpiCard[] {
       tone: k.cooling > 0 ? 'warn' : 'neutral', icon: 'ph ph-snowflake' },
     { key: 'open_opps', label: 'Cơ hội đang mở', value: countText(k.open_opps), sub: k.open_opps > 0 ? moneyText(k.open_value_vnd) : null,
       to: '/opportunity', tone: 'neutral', icon: 'ph ph-handshake' },
-    { key: 'overdue_promises', label: 'Lời hứa quá hạn', value: countText(k.overdue_promises), sub: 'chưa giữ', to: '/tasks?overdue=true',
+    { key: 'overdue_promises', label: 'Lời hứa quá hạn', value: countText(k.overdue_promises), sub: 'chưa giữ', to: '/tasks?ptab=overdue',
       tone: k.overdue_promises > 0 ? 'bad' : 'neutral', icon: 'ph ph-warning-circle' },
   ];
 }
@@ -218,7 +218,7 @@ export function relationTab(list: OwnerRelationList): RelationTab {
 
 export const TASK_GROUP_ICON: Record<OwnerTaskGroupKey, string> = {
   inbox: 'ph ph-tray',
-  desk: 'ph ph-pencil-simple-line',
+  desk: 'ph ph-note-pencil',
   tasks: 'ph ph-check-square',
 };
 export const TASK_GROUP_EMPTY: Record<OwnerTaskGroupKey, string> = {

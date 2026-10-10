@@ -144,7 +144,7 @@ function BriefingCard({ b }: { b: OwnerBriefing }) {
       <div className="owner-brief" data-testid="owner-briefing">
         {summary ? <p className="owner-brief__text">{summary}</p> : <p className="owner-brief__text owner-muted">Bản tin chưa có lời tóm tắt.</p>}
         <Link to={safeLink(b.to)} className="gh-btn gh-btn--secondary btn-24">
-          <Icon name="ph ph-newspaper" size={13} /> Mở bản tin
+          <Icon name="ph ph-file-text" size={13} /> Mở bản tin
         </Link>
       </div>
     </Panel>
