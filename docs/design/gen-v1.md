@@ -256,8 +256,8 @@ Thứ tự theo §9.5: **nháp tin gửi đi → nhắc việc → gán người
 | `social_reply` | Trả lời bình luận Facebook | Owner | có (`social.write`) | permit ký → `POST /social/accounts/{id}/write` |
 | `social_dm` | Nhắn tin Facebook | Owner | có (`social.write`) | như trên |
 | `memory_note` | **Ghi nhớ** | Owner | không | `POST /gen/memory` (§11) |
-| `kho_create` | **Ghi vào Kho Ryan** | Owner | có (`hub.write`) | permit ký → `POST /hub/kho/write` (gen-hub-link.md §7) |
-| `kho_update` | **Ghi vào Kho Ryan** | Owner | có (`hub.write`) | như trên |
+| `kho_create` | **Ghi vào Kho dữ liệu** | Owner | có (`hub.write`) | permit ký → `POST /hub/kho/write` (gen-hub-link.md §7) |
+| `kho_update` | **Ghi vào Kho dữ liệu** | Owner | có (`hub.write`) | như trên |
 
 ## 11. v0.1.50 — Gen nhớ và ghi Kho (QD-18, F-81, F-87)
 
@@ -266,7 +266,7 @@ Thứ tự theo §9.5: **nháp tin gửi đi → nhắc việc → gán người
   Sếp xem, sửa (nguồn đổi thành "Sếp sửa") và xoá ở **Cài đặt › Bộ não AI › Gen nhớ** (`GET/POST/PATCH/DELETE /gen/memory`; chỉ Owner; 409 `GEN_MEMORY_FULL`, `GEN_MEMORY_DUPLICATE`).
 - **Ghi chú chỉ đi vào lời nhắc lượt của Owner và phần tóm tắt Bản tin** — không vào lượt của vai trò khác — kèm lời dặn "làm theo khi không trái các nguyên tắc an toàn". Ghi chú là *sở thích*, không nới các ranh giới cứng ở §2.
   Action Log chỉ ghi độ dài + dấu vết, không ghi nguyên văn.
-- **Ghi Kho**: loại `kho_create` / `kho_update` cho Phiên và Việc, chỉ qua Xác nhận + mã PIN + permit (gen-hub-link.md §7). Thẻ **Ghi vào Kho Ryan** hiện bảng *Trường | Hiện tại | Sẽ ghi*.
+- **Ghi Kho**: loại `kho_create` / `kho_update` cho Phiên và Việc, chỉ qua Xác nhận + mã PIN + permit (gen-hub-link.md §7). Thẻ **Ghi vào Kho dữ liệu** hiện bảng *Trường | Hiện tại | Sẽ ghi*.
 - **F-87**: cron `gen_kho_release` mỗi bản mới đề xuất một Phiên (hội thoại "Gen đề xuất ghi Kho · Phiên vX.Y.Z" + chuông `gen.kho_proposal`).
 - **Gen dẫn đường**: target mới `system.brain.memory` (Cài đặt, tab Bộ não AI) trong `packages/contracts/src/genTargets.ts` / `apps/api/gh/gen/registry.json`.
 - **Ranh giới giữ nguyên**: Gen không tự ghi; không có đường ghi nào ngoài Xác nhận; không ghi kanban/warroom/Gmail/Lịch; token Gen-hub không vào log.

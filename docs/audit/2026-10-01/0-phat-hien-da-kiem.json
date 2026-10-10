@@ -1113,7 +1113,7 @@
      "lens": "tai-hien",
      "refuted": false,
      "confidence": 0.85,
-     "reason": "Xác nhận. HubLinkCard.tsx:99 gợi ý https://hub.genos.top/mcp (Internet), còn công tắc publicNet lấy từ link.allow_public_network, mặc định False (service.py:176, db/sql/0001_baseline.sql:781). Khi Kiểm tra, mcp_client.py:136/157 báo lỗi \"Owner chưa bật 'Cho phép máy chủ MCP ngoài mạng nội bộ'\". Tên này không khớp nhãn công tắc \"Cho phép Gen-hub ở mạng công cộng\" (HubLinkCard.tsx:111). Hàm _classify (service.py:233) giữ nguyên câu này, friendlyError.ts cũng không có luật nào viết lại nó. Nút Kiểm tra bị tắt khi form còn thay đổi chưa lưu (`disabled={!link.configured || dirty}`, :123), trong khi bước 3 (:147) lại bảo \"dán token rồi bấm Kiểm tra\": hướng dẫn mâu thuẫn với nút. Ngoài ra thẻ nằm giữa MCP Hub (McpScreen.tsx:99)."
+     "reason": "Xác nhận. HubLinkCard.tsx:99 gợi ý https://<địa-chỉ-gen-hub-của-bạn>/mcp (Internet), còn công tắc publicNet lấy từ link.allow_public_network, mặc định False (service.py:176, db/sql/0001_baseline.sql:781). Khi Kiểm tra, mcp_client.py:136/157 báo lỗi \"Owner chưa bật 'Cho phép máy chủ MCP ngoài mạng nội bộ'\". Tên này không khớp nhãn công tắc \"Cho phép Gen-hub ở mạng công cộng\" (HubLinkCard.tsx:111). Hàm _classify (service.py:233) giữ nguyên câu này, friendlyError.ts cũng không có luật nào viết lại nó. Nút Kiểm tra bị tắt khi form còn thay đổi chưa lưu (`disabled={!link.configured || dirty}`, :123), trong khi bước 3 (:147) lại bảo \"dán token rồi bấm Kiểm tra\": hướng dẫn mâu thuẫn với nút. Ngoài ra thẻ nằm giữa MCP Hub (McpScreen.tsx:99)."
     },
     {
      "lens": "tac-dong",

@@ -7,6 +7,12 @@ Ngày = ngày Release trên GitHub theo giờ Việt Nam; tiêu đề trong `doc
 (v0.1.32–v0.1.34, v0.1.40, v0.1.46) hoặc vài ngày (v0.1.47, v0.1.48: làm 03/10, phát hành 09/10).
 Việc sửa nóng không đổi số bản (PR #46, #48, #53, #55, #58, #59) ghi ở [ROADMAP › Bản phản ứng](docs/ROADMAP.md).
 
+## v0.1.56 — Không lộ thông tin riêng của Sếp cho Owner khác (10/10/2026)
+- Bỏ địa chỉ Gen-hub của Sếp khỏi mọi thứ giao cho Owner khác (ô nhập, hướng dẫn bước 14, câu lỗi web + API): chỉ còn chỗ giữ chỗ `https://<địa-chỉ-gen-hub-của-bạn>/mcp`; tên Kho đổi thành **"Kho dữ liệu"** (`KHO_LABEL` một chỗ ở API + contracts; thẻ đề xuất, bài học/mẹo Gen, prompt, nhãn quyền PIN).
+- Migration **0035** (chạy lại an toàn) đổi ghi chú máy chủ Gen-hub cũ đã lưu trong DB Owner; dữ liệu mẫu `seed_demo.py` và mock/test dùng tên hư cấu (`example.test`, "Công ty Mẫu…").
+- CI mới **"Chống lộ thông tin riêng của Sếp"** (`check_no_personal_info.py`) chặn địa chỉ/tên riêng lọt lại vào mã giao đi; tài liệu hướng dẫn chung dùng chỗ giữ chỗ. Cần Boss quyết: repo private hay chuyển ghi chú riêng sang Brain.
+- Chi tiết: [docs/releases/v0.1.56.md](docs/releases/v0.1.56.md)
+
 ## v0.1.55 — Gọn cho Sếp: Mặt tiền Owner, mặc định tiêu chuẩn, thiết lập gọn, chọn model trong chat, Jev lọc trước (10/10/2026)
 - **Mặt tiền Owner** `/owner/*`: Owner mở trang chủ thấy Hôm nay (4 số + việc chờ duyệt + Bản tin + "Gen lọc giúp"), Việc, Quan hệ, Hỏi Gen; Console cũ ở Thêm › Cài đặt nâng cao. API chỉ đọc, chỉ Owner.
 - **Hồ sơ model tiêu chuẩn theo vai** + **Về mặc định** (từng mục / tất cả có mã PIN, không chạm khoá, nguồn AI, PIN, Gen-hub…): cài xong không phải gán model; migration 0034 (`agent.bindings.effort`).

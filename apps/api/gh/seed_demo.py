@@ -213,7 +213,8 @@ INTERNAL = [
         unit={"event_type": "SentDocument", "side": None, "confidence": 0.86,
               "conclusion": "Đã gửi bản hợp đồng sửa vào kho tài liệu.", "entities": {}, "rules": {},
               "signals": {}}),
-    Msg(14, "mau01", "ok a", group="van_hanh_q4", when=_ago(minutes=9)),   # bị loại bởi R-06 (max_words), không tốn model
+    # bị loại bởi R-06 (max_words), không tốn model
+    Msg(14, "mau01", "ok a", group="van_hanh_q4", when=_ago(minutes=9)),
     Msg(15, "mau10", "Em gửi lại file khảo sát qua đây cho nhanh nha anh", group="mo_rong", when=_ago(minutes=12),
         unit={"event_type": "SentDocument", "side": None, "confidence": 0.88,
               "conclusion": "Đã gửi lại file khảo sát qua kênh WhatsApp.", "entities": {}, "rules": {},

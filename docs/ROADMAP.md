@@ -1,4 +1,4 @@
-# Gen-Harness — Lộ trình tổng thể (cập nhật 10/10/2026, sau v0.1.55)
+# Gen-Harness — Lộ trình tổng thể (cập nhật 10/10/2026, sau v0.1.56)
 
 Nguồn chuẩn tiến độ. Mỗi đợt = 1 PR = 1 bản phát hành. CI xanh mới tạo bản thử (prerelease); E2E cài thật xanh mới tự
 nâng thành bản chính thức (latest); lịch tự cập nhật đêm đợi bản chính thức ra đủ 24 giờ. genh chỉ kiểm SHA-256 theo
@@ -32,10 +32,11 @@ Chi tiết từng bản ở [CHANGELOG.md](../CHANGELOG.md); tóm tắt theo ch�
 - **v0.1.54 (10/10)**: **Gen hướng dẫn** — Gen chủ động nhắc việc Sếp cần làm, giới thiệu tính năng chưa dùng, bài học mỗi ngày (thiết kế: [gen-coach.md](design/gen-coach.md)). Cùng bản: **người gác yêu cầu tự chữa** (`.path` failed vì hết hạn mức inotify ⇒ reset-failed + restart, vẫn lỗi ⇒ timer dự phòng quét mỗi phút + dòng cảnh báo ở thẻ Sức khoẻ; [v0.1.54.md](releases/v0.1.54.md)).
 
 - **v0.1.55 (10/10)**: **Gọn cho Sếp** — Mặt tiền Owner `/owner/*`, hồ sơ model tiêu chuẩn theo vai + Về mặc định, thiết lập ≤ 4 lần nhập và 1 dòng bắt buộc, thẻ Cập nhật nói lý do, chọn Nhanh/Kỹ hơn trong khung chat, Jev lọc trước tuỳ chọn ([v0.1.55.md](releases/v0.1.55.md)).
+- **v0.1.56 (10/10)**: **Không lộ thông tin riêng của Sếp cho Owner khác** — bỏ địa chỉ Gen-hub khỏi web/API/hướng dẫn (chỉ còn chỗ giữ chỗ chung), tên Kho chung "Kho dữ liệu" (`KHO_LABEL`), migration 0035 đổi ghi chú máy chủ Gen-hub cũ, dữ liệu mẫu/mock hư cấu, CI `check_no_personal_info.py` ([v0.1.56.md](releases/v0.1.56.md)).
 
-## Tiếp theo (sau v0.1.55)
+## Tiếp theo (sau v0.1.56)
 Kế hoạch tổng của đợt kiểm toán kết thúc ở v0.1.50; không còn đợt đánh số sẵn. Thứ tự đề xuất:
-0. **v0.1.56**: Boss gửi kết quả "Thử 12 câu mẫu" của Jev (HANDOFF › Boss phải làm — v0.1.55) ⇒ chốt ngưỡng lọc trước; Mặt tiền thêm chi phí AI hôm nay, thẻ "Chưa có model", mục Phân tích (Nợ #28–#29).
+0. **v0.1.57**: Boss gửi kết quả "Thử 12 câu mẫu" của Jev (HANDOFF › Boss phải làm — v0.1.55) ⇒ chốt ngưỡng lọc trước; Mặt tiền thêm chi phí AI hôm nay, thẻ "Chưa có model", mục Phân tích (Nợ #28–#29).
    **Dùng thử Gen hướng dẫn một tuần** (3 bước ở [HANDOFF](reports/HANDOFF-v0.1.1.md) › Boss phải làm — v0.1.54), rồi nói cho Claude biết thẻ có đúng việc, chuông có phiền không; các ý để sau nằm ở mục Nợ #20–#25.
 1. **Boss nghiệm thu thật** các tính năng chưa từng chạy với tài khoản thật (danh sách và cách làm ở [HANDOFF](reports/HANDOFF-v0.1.1.md) › Việc dở): Gen-hub quyền đọc + ghi Kho,
    Telegram, Truy cập từ xa (Tailscale), Facebook trả lời — từ v0.1.55 đều là tuỳ chọn (chỉ "nguồn AI" bắt buộc). Kết quả tự ghi ở Việc Sếp cần làm.
@@ -80,6 +81,8 @@ Việc đã hứa hoặc đã biết mà chưa làm. Mỗi dòng ghi điều ki�
 | 27 | **`genh auto-update disable` khi không có phiên systemd `--user`** (chạy qua `sudo`/`su`/ssh không có `XDG_RUNTIME_DIR`, hoặc tài khoản khác tài khoản đã bật lịch) (v0.1.53) | Chưa làm. Hiện genh hỏi lại trạng thái, báo "CHƯA tắt được" và thoát 1 (không nói dối) nhưng chưa tự dò `XDG_RUNTIME_DIR`/`loginctl` để tắt hộ; Sếp phải chạy lại đúng tài khoản trong phiên đăng nhập |
 | 28 | **Mặt tiền Owner còn thiếu** (v0.1.55): "Chi phí AI hôm nay" + thẻ "Chưa có model" (Console vẫn có), mục **Phân tích** đang khoá "sắp có"; chuông Gen (`gen.briefing`/`coach`/`kho_proposal`) còn dẫn vào Console `/overview?gen=…` | Hẹn v0.1.56 |
 | 29 | **Dọn còn lại của v0.1.55**: ẩn giới hạn agent + hạn lưu dữ liệu vào Nâng cao (màn agents/storage); xoá hội thoại ở Lịch sử Gen chưa xoá lựa chọn model đã nhớ (`forgetChoice`, tự giới hạn 50 hội thoại) | Chưa làm, nhỏ |
+| 30 | **Ô "Tên Kho" cho Owner tự đặt** (v0.1.56): hiện tên Kho cố định "Kho dữ liệu" (`KHO_LABEL`) cho mọi Owner | Chưa làm. Thêm 1 ô trong thẻ Gen-hub (1 cột, ≤ 40 ký tự) rồi nối `KHO_LABEL` với Cài đặt; cần Boss muốn |
+| 31 | **Ghi chú vận hành riêng còn công khai** (v0.1.56): `CLAUDE.md`, HANDOFF, runbook, ROADMAP, Product-Spec, `docs/github.md`, `handoff/CLAUDE_CODE_PROMPT.md` còn tên/ghi chú riêng của Sếp trong repo công khai | **Chờ Boss quyết**: repo private (lưu ý Owner khác tải bản phát hành từ Releases) hay chuyển ghi chú riêng sang repo Brain; CI mới `check_no_personal_info.py` chưa quét docs/test/mock |
 
 ## Bản phản ứng (hotfix)
 Các bản sửa nóng thật, không nằm trong kế hoạch đợt. Đối chiếu `git log origin/main` và nhánh `hotfix/*`:

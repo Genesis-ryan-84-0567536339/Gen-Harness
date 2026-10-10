@@ -5,7 +5,7 @@
 > **Nguồn hiện hành (10/2026).** Đây là kiến trúc gốc 23/09/2026. Phần đã thi công thêm hoặc đã đổi sau đó nằm ở: thiết kế Gen
 > [gen-v1.md](design/gen-v1.md), nối Gen-hub [gen-hub-link.md](design/gen-hub-link.md), mạng xã hội [gen-browser-agent.md](design/gen-browser-agent.md);
 > tiến độ + mục Nợ ở [ROADMAP.md](ROADMAP.md); lịch sử từng bản ở [CHANGELOG.md](../CHANGELOG.md); vận hành ở [runbook.md](runbook.md). Mâu thuẫn thì các tài liệu đó thắng.
-> Chưa có trong bản gốc (đã có trong mã): Gen (trợ lý, đề xuất có xác nhận, Gen nhớ), Gen-hub (Kho Ryan, lịch, mail), Facebook cá nhân qua trình duyệt riêng,
+> Chưa có trong bản gốc (đã có trong mã): Gen (trợ lý, đề xuất có xác nhận, Gen nhớ), Gen-hub (Kho dữ liệu, lịch, mail), Facebook cá nhân qua trình duyệt riêng,
 > nguồn model Jev và Claude Code CLI (§11 mới nhắc Antigravity CLI), Telegram, trực canh máy chủ, `genh remote`.
 
 ## 0. Nguồn sự thật và thứ tự ưu tiên
