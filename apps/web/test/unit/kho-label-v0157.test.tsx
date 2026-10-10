@@ -6,6 +6,10 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { KHO_LABEL, KHO_LABEL_MAX, relabelKho, type DefaultItem, type HubLink } from '@gen-harness/contracts';
 import { HubLinkCard } from '../../src/screens/mcp/HubLinkCard';
+import { GenPanel } from '../../src/gen/GenPanel';
+import { useGenStore } from '../../src/gen/genStore';
+import { proposalErrorView } from '../../src/gen/khoWriteModel';
+import { ApiError } from '../../src/lib/api';
 import { qk } from '../../src/lib/queries';
 
 /**
@@ -42,9 +46,9 @@ const me = {
   permissions: { 'system.read': 'all', 'system.manage': 'all' },
 };
 
-function renderCard(ui: ReactElement) {
+function renderCard(ui: ReactElement, user: object = me) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  qc.setQueryData(qk.me, me);
+  qc.setQueryData(qk.me, user);
   return render(
     <QueryClientProvider client={qc}>
       <MemoryRouter>{ui}</MemoryRouter>
@@ -129,5 +133,30 @@ describe('Tên Kho (tuỳ chọn) ở thẻ Gen-hub', () => {
     expect(relabelKho('Kho dữ liệu thô và Kho dữ liệu', NAME)).toBe(`Kho dữ liệu thô và ${NAME}`);
     expect(relabelKho(`Ghi vào ${KHO_LABEL}`, undefined)).toBe(`Ghi vào ${KHO_LABEL}`);
     expect(relabelKho(`Ghi vào ${KHO_LABEL}`, KHO_LABEL)).toBe(`Ghi vào ${KHO_LABEL}`);
+  });
+});
+
+describe('Tên Kho ở câu chạy thật của khung Gen (F-R2)', () => {
+  it('proposalErrorView: câu HUB_OWNER_ONLY dùng tên Kho đã đặt; thiếu tên / tên mặc định ⇒ "Kho dữ liệu"', () => {
+    const e = new ApiError(403, { code: 'HUB_OWNER_ONLY', title: 'x' });
+    expect(proposalErrorView(e, NAME)?.text).toBe(`Chỉ Sếp (Owner) được ghi vào ${NAME} — chưa ghi gì.`);
+    expect(proposalErrorView(e)?.text).toBe(`Chỉ Sếp (Owner) được ghi vào ${KHO_LABEL} — chưa ghi gì.`);
+    expect(proposalErrorView(e, KHO_LABEL)?.text).toBe(`Chỉ Sếp (Owner) được ghi vào ${KHO_LABEL} — chưa ghi gì.`);
+    expect(proposalErrorView(new ApiError(409, { code: 'HUB_WRITE_REJECTED', title: 'x', detail: 'Kho dữ liệu thô lỗi' }), NAME)?.text)
+      .toContain('Kho dữ liệu thô lỗi');                                     // "Kho dữ liệu thô" (tầng khác) không bị đổi
+  });
+
+  it('GenPanel: câu chào "ghi vào …" lấy Tên Kho từ GET /hub/link; chưa tải / lỗi ⇒ tên mặc định', async () => {
+    let link: HubLink = { ...OFF, kho_label: NAME, kho_label_custom: true };
+    mockFetch((c) => (c.url.includes('/hub/link') && c.method === 'GET' ? json(200, link) : json(404)));
+    useGenStore.setState({ openByUser: {}, conversationId: null, messages: [], busy: false, spotlight: null });
+    const first = renderCard(<GenPanel userId="u1" />, { ...me, features: { gen: true } });
+    expect(await screen.findByText(new RegExp(`ghi vào ${NAME} — em chỉ đề xuất`))).toBeInTheDocument();
+    expect(first.container.textContent).not.toContain('ghi vào Kho dữ liệu —');
+    first.unmount();
+
+    link = OFF;                                                              // mặc định: câu chào như cũ
+    renderCard(<GenPanel userId="u1" />, { ...me, features: { gen: true } });
+    expect(await screen.findByText(new RegExp(`ghi vào ${KHO_LABEL} — em chỉ đề xuất`))).toBeInTheDocument();
   });
 });

@@ -13,7 +13,6 @@ from typing import Any
 import httpx
 from sqlalchemy import text
 
-from gh.auth import service as auth_service
 from gh.db import admin_sessionmaker
 from gh.gen import engine, kho_release, proposals
 from gh.gen.coach import routes as coach_routes
@@ -124,8 +123,6 @@ async def test_runtime_prompts_tools_proposals_and_coach_use_label(owner_api: Ap
     # job đề xuất theo bản mới + nhãn quyền PIN
     assert NAME in relabel(kho_release.SAY.format(version="v1", addr="Sếp"), NAME)
     assert NAME in relabel(kho_release.BELL_BODY.format(version="v1"), NAME)
-    assert auth_service.pin_operation_label("hub.write", NAME) == f"Ghi {NAME} qua Gen-hub (Phiên, Việc)"
-    assert auth_service.pin_operation_label("hub.write") == auth_service.PIN_OPERATIONS["hub.write"]
     # coach: bài học / mẹo dựng theo tên Kho
     tips, curr = coach_routes.load_content(NAME)
     text_all = " ".join(str(x.get("title", "")) + str(x.get("body", "")) for x in [*tips, *curr])

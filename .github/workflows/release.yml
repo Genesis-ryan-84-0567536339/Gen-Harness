@@ -100,6 +100,8 @@ jobs:
     uses: ./.github/workflows/ci.yml
     with:
       from_release: true
+    # secrets: inherit ⇒ lượt CI của cổng phát hành cũng có GH_PERSONAL_PATTERNS (lớp quét mẫu riêng của check_no_personal_info).
+    secrets: inherit
     permissions:
       contents: read
 

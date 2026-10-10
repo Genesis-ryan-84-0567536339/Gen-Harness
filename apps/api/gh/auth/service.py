@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gh.chassis import actionlog
 from gh.config import get_settings
 from gh.crypto import hash_secret, new_token, token_digest, verify_secret
-from gh.hub_link import KHO_LABEL, relabel
+from gh.hub_link import KHO_LABEL
 
 SESSION_COOKIE = "gh_session"
 CSRF_COOKIE = "gh_csrf"
@@ -34,7 +34,8 @@ PIN_OPERATIONS: dict[str, str] = {
     "mcp.expose": "Mở tool MCP",
     "hub.link": "Nối Gen-hub (địa chỉ, token)",
     # v0.1.50 (F-81, QD-18): Gen đề xuất ghi Kho dữ liệu — Sếp Xác nhận + nhập PIN mới ghi (bảng Phiên, Việc).
-    "hub.write": f"Ghi {KHO_LABEL} qua Gen-hub (Phiên, Việc)",     # tên Kho tuỳ chỉnh: `pin_operation_label()`
+    # Nhãn chỉ để khai báo (UI không hiện) ⇒ không cần tên Kho tuỳ chỉnh.
+    "hub.write": f"Ghi {KHO_LABEL} qua Gen-hub (Phiên, Việc)",
     "social.manage": "Tài khoản mạng xã hội: thêm, đăng nhập, gỡ, bật lại sau Dừng tất cả",
     "policy.change": "Đổi mức tự trị, ngưỡng tiền, ranh giới",
     "data.export_delete": "Xuất / xoá dữ liệu",
@@ -59,12 +60,6 @@ PIN_OPERATIONS: dict[str, str] = {
     # PIN, mật khẩu, token Gen-hub/Telegram, tài khoản mạng xã hội, danh tính tổ chức, ranh giới cứng).
     "defaults.reset_all": "Về mặc định tất cả cài đặt",
 }
-
-
-def pin_operation_label(operation: str, kho: str = KHO_LABEL) -> str:
-    """Nhãn thao tác cần PIN theo tên Kho hiệu lực của tổ chức (v0.1.57, Nợ #30): `hub.write` nói "Ghi <tên Kho> qua
-    Gen-hub"; `kho` là kết quả `gh.hub_link.kho_label(settings)`. Thao tác lạ ⇒ KeyError như `require_pin`."""
-    return relabel(PIN_OPERATIONS[operation], kho)
 
 
 def now() -> datetime:

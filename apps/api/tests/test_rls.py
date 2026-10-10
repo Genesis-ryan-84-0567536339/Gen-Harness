@@ -6,12 +6,27 @@ bảng (`SET LOCAL ROLE`) để chứng minh policy thật sự lọc đúng, đ
 (việc trình cài/giai đoạn 6 cần thiết lập) sẽ trải nghiệm. Xem chú thích đầu db/sql/0012_p5_rls.sql.
 """
 
+import contextlib
 import uuid
+from collections.abc import AsyncIterator
 
+import psycopg
 import pytest
 from sqlalchemy import text
 
+from tests.conftest import PG, TEMPLATE_LOCK_KEY
 from tests.phase2 import org_id
+
+
+@contextlib.asynccontextmanager
+async def _cluster_lock() -> AsyncIterator[None]:
+    """Khoá tư vấn CẤP CỤM — cùng khoá `TEMPLATE_LOCK_KEY` mà `template_db` (conftest) giữ khi migrate (migration 0014
+    có `ALTER ROLE gh_app`). `CREATE ROLE gh_rls_test` / `GRANT … TO gh_app` cũng chạm vai trò dùng chung cả cụm; CI
+    v0.1.57 chạy hai lượt pytest song song nên phải xếp hàng. Khoá tư vấn Postgres tính THEO TỪNG CSDL ⇒ phải lấy trên
+    kết nối tới CSDL `postgres` (như conftest), không phải trên CSDL test; đóng kết nối thì khoá tự nhả."""
+    async with await psycopg.AsyncConnection.connect(f"{PG}/postgres", autocommit=True) as lock:
+        await lock.execute("SELECT pg_advisory_lock(%s)", (TEMPLATE_LOCK_KEY,))
+        yield
 
 
 async def _as_low_priv(db, table: str) -> None:  # type: ignore[no-untyped-def]
@@ -22,7 +37,7 @@ async def _as_low_priv(db, table: str) -> None:  # type: ignore[no-untyped-def]
     login bằng vai trò nào."""
     from gh.db import admin_sessionmaker
 
-    async with admin_sessionmaker()() as adm:
+    async with _cluster_lock(), admin_sessionmaker()() as adm:
         await adm.execute(text("""DO $$ BEGIN
             IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'gh_rls_test') THEN
               CREATE ROLE gh_rls_test;

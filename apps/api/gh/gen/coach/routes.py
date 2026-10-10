@@ -68,6 +68,15 @@ def _relabel_rows(rows: list[dict[str, Any]], kho: str) -> list[dict[str, Any]]:
     return out
 
 
+def _relabel_todos(todos: list[dict[str, Any]], kho: str) -> list[dict[str, Any]]:
+    """Như `_relabel_rows` nhưng cho các việc tĩnh trên thẻ Hôm nay (title, why, dismiss_warning — thẻ "Nối Gen-hub"
+    nhắc "Kho dữ liệu"): đổi sang tên Kho hiệu lực (v0.1.57, Nợ #30)."""
+    if kho == KHO_LABEL:
+        return todos
+    return [{**t, **{k: relabel(t[k], kho) for k in ("title", "why", "dismiss_warning") if isinstance(t.get(k), str)}}
+            for t in todos]
+
+
 def load_content(kho: str = KHO_LABEL) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """(mẹo, lộ trình). Nội dung hỏng / thiếu ⇒ ghi log lỗi rõ ràng rồi chạy tiếp KHÔNG có phần đó — thẻ việc cần làm
     không được chết vì tệp nội dung. `kho` = tên Kho hiệu lực của tổ chức: chữ "Kho dữ liệu" trong bài / mẹo dựng
@@ -95,8 +104,10 @@ async def today(request: Request, mark_shown: bool = Query(False), user: service
     sig = await sg.collect(db, request.app.state.redis, user.org_id)
     prefs = await store.get_prefs(db, user.id)
     items = await store.list_items(db, user.id)
-    tips, curr = load_content(await load_kho_label(db, user.org_id))
+    kho = await load_kho_label(db, user.org_id)
+    tips, curr = load_content(kho)
     plan = engine.plan_today(sig, prefs, items, now, tz, tips=tips, curr=curr)
+    plan.payload["todos"] = _relabel_todos(plan.payload["todos"], kho)     # v0.1.57: việc tĩnh theo tên Kho hiệu lực
     if plan.stable_since != prefs.stable_since:
         await store.set_stable(db, user.org_id, user.id, plan.stable_since)
     if mark_shown and prefs.enabled and plan.payload["snoozed_until"] is None:

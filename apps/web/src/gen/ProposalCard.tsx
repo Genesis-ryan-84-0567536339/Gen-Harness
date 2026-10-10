@@ -464,7 +464,7 @@ export function ProposalCard({ proposal: p }: { proposal: GenProposal }) {
       setEditing(false);
       patchProposal(next);
     } catch (e) {
-      setError(proposalErrorView(e)?.text ?? errorText(e));
+      setError(proposalErrorView(e, khoLabel)?.text ?? errorText(e));
       setErrorRaw(e);
     } finally {
       setBusy(null);
@@ -477,7 +477,7 @@ export function ProposalCard({ proposal: p }: { proposal: GenProposal }) {
     try {
       patchProposal(await api.gen.cancelProposal(p.id));
     } catch (e) {
-      setError(proposalErrorView(e)?.text ?? errorText(e));
+      setError(proposalErrorView(e, khoLabel)?.text ?? errorText(e));
       setErrorRaw(e);
     } finally {
       setBusy(null);
@@ -523,7 +523,7 @@ export function ProposalCard({ proposal: p }: { proposal: GenProposal }) {
   const code = p.result?.code ? ` · ${p.result.code}` : '';
   // v0.1.50: thẻ ghi nhớ / ghi Kho luôn vẽ lỗi theo khuôn "câu thân thiện + Chi tiết kỹ thuật" (như thẻ gửi Facebook).
   const richError = social || memory || kho;
-  const errView = proposalErrorView(errorRaw);
+  const errView = proposalErrorView(errorRaw, khoLabel);
   // Lỗi của lần bấm trước chỉ có nghĩa khi thẻ còn chờ: thẻ đã đóng / đã xác nhận (tải lại, máy chủ cập nhật) thì không hiện nữa.
   const shownError = p.status === 'pending' ? error : null;
   // F-87: thẻ ghi Phiên của bản mới bị đóng vì Owner khác đã ghi / huỷ / ghi chưa chắc — máy chủ nêu lý do ở `labels.closed`.

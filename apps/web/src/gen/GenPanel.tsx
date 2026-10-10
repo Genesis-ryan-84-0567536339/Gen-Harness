@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { GEN_SCREEN_BY_KEY, GEN_TARGET_BY_ID, splitTargetId, type GenStep, type UiAction } from '@gen-harness/contracts';
+import { useQuery } from '@tanstack/react-query';
+import { GEN_SCREEN_BY_KEY, GEN_TARGET_BY_ID, KHO_LABEL, splitTargetId, type GenStep, type UiAction } from '@gen-harness/contracts';
 import { Button, Icon, IconButton } from '@gen-harness/ui';
+import { api } from '../lib/api';
+import { useCan } from '../lib/permissions';
 import { useMe } from '../lib/queries';
+import { qkMcp } from '../screens/mcp/queries';
 import { BriefingHubSections } from './BriefingHubSections';
 import { hubCardsAt } from './briefingModel';
 import { COACH_URGENT_PROMPT, hasUrgent } from './coachModel';
@@ -142,6 +146,16 @@ export function GenPanel({ userId }: { userId: string }) {
   const setOpen = useGenStore((s) => s.setOpen);
   const reset = useGenStore((s) => s.reset);
   const addr = useAddressing();
+  // v0.1.57 (Nợ #30): câu chào nhắc "ghi vào Kho dữ liệu" dùng Tên Kho Owner tự đặt — lấy từ `GET /hub/link` (cùng cache
+  // với thẻ Gen-hub / thẻ đề xuất), chỉ hỏi khi khung còn trống (lúc có câu chào) và người xem đọc được cài đặt; lỗi ⇒ tên mặc định.
+  const canReadSystem = useCan('system.read');
+  const hubLink = useQuery({
+    queryKey: qkMcp.hubLink,
+    queryFn: ({ signal }) => api.hub.link.get(signal),
+    enabled: canReadSystem && messages.length === 0,
+    retry: false,
+  });
+  const khoName = hubLink.data?.kho_label?.trim() || KHO_LABEL;
   // v0.1.54 (Gen hướng dẫn): có việc khẩn (P0/P1) ⇒ thêm câu mẫu "Hôm nay em cần làm gì?" (dùng chung cache với thẻ).
   const coachAudience = useCoachAudience();
   const urgent = hasUrgent(useCoachToday(coachAudience).data);
@@ -232,7 +246,7 @@ export function GenPanel({ userId }: { userId: string }) {
           <div className="gen-empty">
             <p>
               Chào {addr}, em là Gen. {addr} hỏi về tình hình hôm nay, nhờ em chỉ chỗ bấm, hoặc nhờ em soạn nháp tin, đặt
-              nhắc việc, giao người, ghi nhớ một quy ước, ghi vào Kho dữ liệu — em chỉ đề xuất, {addr} xác nhận thì em mới làm.
+              nhắc việc, giao người, ghi nhớ một quy ước, ghi vào {khoName} — em chỉ đề xuất, {addr} xác nhận thì em mới làm.
             </p>
             <div className="gen-suggest">
               {examples.map((q) => (

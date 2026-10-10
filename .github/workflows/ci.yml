@@ -173,6 +173,8 @@ jobs:
       # `ALTER ROLE gh_app` của migration 0014 dùng chung cả cụm. Mỗi lượt ghi log riêng; lỗi ⇒ in danh sách ca hỏng +
       # phần đuôi log của lượt đó; log đầy đủ lên artifact. Chờ CẢ HAI lượt xong (không dừng sớm) để một lần chạy lộ hết lỗi.
       - name: Test song song (superuser + role gh_app; Postgres + Redis thật)
+        # Quá 65 phút ⇒ bước tự thất bại (failure) chứ không đợi job 75' bị huỷ ⇒ bước lưu log phía dưới vẫn chạy được.
+        timeout-minutes: 65
         working-directory: apps/api
         env:
           GH_TEST_PG: postgresql://postgres:postgres@localhost:5432
@@ -224,8 +226,9 @@ jobs:
             fi
           done
           exit "$fail"
+      # failure() || cancelled(): lượt treo tới biên timeout job (75') bị huỷ chứ không "failure" ⇒ vẫn phải lên artifact.
       - name: Lưu log pytest khi lỗi
-        if: failure()
+        if: failure() || cancelled()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: pytest-logs-${{ github.run_attempt }}

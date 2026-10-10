@@ -980,6 +980,23 @@ async def test_dismissing_the_gen_hub_hint_and_the_removed_p1_keys(
         assert r.status_code == 404 and r.json()["code"] == "COACH_ITEM_UNKNOWN", key
 
 
+async def test_static_todo_copy_uses_the_effective_kho_label(
+        owner_api: Api, sigbox: list[sg.Signals], clock: list[datetime]) -> None:
+    """v0.1.57 (Nợ #30, F-R2): thẻ "Nối Gen-hub" ở Hôm nay (lý do + câu hậu quả khi tắt) nhắc đúng Tên Kho Owner đã đặt;
+    chưa đặt ⇒ giữ nguyên "Kho dữ liệu" (mặc định không đổi chữ nào)."""
+    sigbox[0] = mk_sig(state={"boss.hub.done": False})
+    todo = (await today(owner_api))["todos"][0]
+    assert todo["key"] == "boss.hub" and "Kho dữ liệu" in todo["why"] and "Kho dữ liệu" in todo["dismiss_warning"]
+    name = "Sổ tay Công ty"
+    async with admin_sessionmaker()() as adm:
+        await adm.execute(text("UPDATE core.organizations SET settings = settings || CAST(:s AS jsonb) WHERE id = :o"),
+                          {"o": await org_id(adm), "s": json.dumps({"kho_label": name})})
+        await adm.commit()
+    todo = (await today(owner_api))["todos"][0]
+    assert todo["key"] == "boss.hub" and name in todo["why"] and name in todo["dismiss_warning"]
+    assert "Kho dữ liệu" not in todo["why"] + todo["dismiss_warning"] + todo["title"]
+
+
 async def test_p0_stays_visible_even_if_a_dismissed_row_exists_and_health_escalation(
         owner_api: Api, sigbox: list[sg.Signals], clock: list[datetime]) -> None:
     sigbox[0] = mk_sig(alerts=[alert("worker.silent", "warn", T0)])
