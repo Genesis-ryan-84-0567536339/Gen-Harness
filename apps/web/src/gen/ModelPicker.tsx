@@ -8,7 +8,7 @@ import { EFFORT_LABEL, TIER_LABEL, effortsOf, tierAvailable, unavailableReason, 
 /**
  * v0.1.55 (G3) — dưới ô nhập của khung Gen: "Tự động (chuẩn) · Nhanh · Kỹ hơn" (Cân bằng mặc định ẩn, chỉ hiện khi đang chọn) và
  * "Mức suy nghĩ: Thấp · Vừa · Cao" CHỈ khi tầng đang chọn hỗ trợ. Tầng không dùng được thì nút bị khoá kèm chữ giải thích
- * (tooltip). Lựa chọn nhớ theo hội thoại (genStore.modelChoice); hội thoại mới = Tự động. Không dùng chữ API/token.
+ * (tooltip). Lựa chọn nhớ theo hội thoại (genStore.modelChoice); hội thoại mới = Tự động. Không dùng chữ token.
  * Dùng lại các lớp `.gen-rate*` (nút tròn, tự xuống dòng ở màn hẹp 390px) nên không tràn ngang.
  */
 export function ModelPicker() {

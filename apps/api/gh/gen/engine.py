@@ -457,6 +457,8 @@ async def _jev_intent(dec: decmod.Decider, text: str) -> tuple[decmod.Decision |
     except Exception as e:  # noqa: BLE001 — bộ quyết định lỗi không được làm hỏng lượt: đi đường cũ
         log.warning("Bộ quyết định %s lỗi: %s", dec.name, type(e).__name__)
         return None, type(e).__name__
+    if d is not None and d.value not in decmod.INTENTS:
+        return None, "ý định lạ"  # không nằm trong danh sách hữu hạn ⇒ coi như không quyết định được
     return d, (None if d is not None else getattr(dec, "last_error", None))
 
 

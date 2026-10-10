@@ -434,6 +434,15 @@ async def test_jev_crash_falls_back_to_llm(owner_api: Api, app: Any, options: An
     assert rows[0].result == "failed" and rows[0].detail["error"] == "RuntimeError"
 
 
+async def test_unknown_intent_from_decider_is_ignored(owner_api: Api, app: Any, options: Any) -> None:
+    router = FakeRouter([TURN_DONE])
+    t = await turn(owner_api, app, router, "Chỉ tôi cách thêm khoá Gemini",
+                   decider_=FakeDecider("khong_co_trong_danh_sach"))
+    assert t["status"] == "done" and len(router.calls) == 1
+    rows = await decide_rows()
+    assert rows[0].result == "failed" and rows[0].detail["source"] == "llm" and rows[0].detail["route"] == "default"
+
+
 async def test_rule_runs_without_jev(owner_api: Api, app: Any, options: Any) -> None:
     """Không có nguồn Jev (LlmDecider mặc định): quy tắc tất định vẫn chặn câu ngoài phạm vi, không gọi model."""
     router = FakeRouter([TURN_DONE])
