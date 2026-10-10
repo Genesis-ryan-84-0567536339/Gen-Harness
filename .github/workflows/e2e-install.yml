@@ -2387,6 +2387,34 @@ jobs:
           cat "$RUNNER_TEMP/ready.json"
           echo
 
+      - name: Lịch đêm sau install — timer is-enabled + timer is-active + lần kế tiếp trong 24 giờ 31 phút
+        run: |
+          set -euo pipefail
+          t=gen-harness-update.timer
+          en="$(systemctl --user is-enabled "$t" 2>&1 || true)"
+          echo "timer is-enabled: $en"
+          [ "$en" = "enabled" ] || { echo "::error::$t is-enabled = '$en' (cần enabled) — genh install không bật lịch tự cập nhật đêm." >&2; systemctl --user list-timers --all --no-pager || true; exit 1; }
+          ac="$(systemctl --user is-active "$t" 2>&1 || true)"
+          echo "timer is-active: $ac"
+          [ "$ac" = "active" ] || { echo "::error::$t is-active = '$ac' (cần active) — lịch đêm đã cài nhưng không chạy." >&2; systemctl --user status "$t" --no-pager || true; exit 1; }
+          # `systemctl show` in mốc giờ dạng "Sun 2026-10-11 03:09:12 UTC" (cờ --timestamp=unix chỉ có tác dụng ở
+          # `status`/`list-timers`, không ở `show`) — đổi sang giây bằng date -d; chấp nhận cả dạng "@giây".
+          next_epoch() {
+            local v
+            v="$(systemctl --user show "$1" -p NextElapseUSecRealtime --value 2>/dev/null || true)"
+            echo "NextElapseUSecRealtime của $1: '${v:-<rỗng>}'" >&2
+            case "$v" in ''|n/a|0|@0) return 1 ;; @*) printf '%s' "${v#@}" ;; *) date -d "$v" +%s ;; esac
+          }
+          next="$(next_epoch "$t")" || { echo "::error::$t không có NextElapseUSecRealtime — timer active mà không có lần chạy kế tiếp." >&2; exit 1; }
+          now="$(date +%s)"
+          limit=$((now + 24 * 3600 + 31 * 60))
+          echo "lần kế tiếp: $(date -d "@$next" '+%F %T %Z') (còn $(( (next - now) / 60 )) phút)"
+          if [ "$next" -le 0 ] || [ "$next" -gt "$limit" ]; then
+            echo "::error::lần chạy kế tiếp ($next) không nằm trong 24 giờ 31 phút tới ($limit) — OnCalendar sai hoặc timer mất lịch." >&2
+            exit 1
+          fi
+          echo "OK: timer enabled + active, có lần chạy kế tiếp trong 24 giờ 31 phút."
+
       - name: Trình nhận yêu cầu cài bằng systemd (genh.json updater=systemd, tự cập nhật đêm BẬT)
         run: |
           set -euo pipefail
@@ -2403,29 +2431,6 @@ jobs:
           p="$(systemctl --user is-active gen-harness-update-request.path 2>&1 || true)"
           [ "$p" = "active" ] || { echo "::error::gen-harness-update-request.path is-active = '$p' (cần active) — nút Cập nhật ngay không có ai nhận." >&2; exit 1; }
           echo "OK: trình nhận yêu cầu (.path) active, genh.json updater=systemd."
-
-      - name: Lịch đêm sau install — timer is-enabled + timer is-active + lần kế tiếp trong 24 giờ 31 phút
-        run: |
-          set -euo pipefail
-          t=gen-harness-update.timer
-          en="$(systemctl --user is-enabled "$t" 2>&1 || true)"
-          echo "timer is-enabled: $en"
-          [ "$en" = "enabled" ] || { echo "::error::$t is-enabled = '$en' (cần enabled) — genh install không bật lịch tự cập nhật đêm." >&2; systemctl --user list-timers --all --no-pager || true; exit 1; }
-          ac="$(systemctl --user is-active "$t" 2>&1 || true)"
-          echo "timer is-active: $ac"
-          [ "$ac" = "active" ] || { echo "::error::$t is-active = '$ac' (cần active) — lịch đêm đã cài nhưng không chạy." >&2; systemctl --user status "$t" --no-pager || true; exit 1; }
-          line="$(systemctl --user show "$t" -p NextElapseUSecRealtime --timestamp=unix)"
-          echo "$line"
-          next="${line#*=}"; next="${next#@}"
-          case "$next" in ''|*[!0-9]*) echo "::error::$t không có NextElapseUSecRealtime ('$line') — timer active mà không có lần chạy kế tiếp." >&2; exit 1 ;; esac
-          now="$(date +%s)"
-          limit=$((now + 24 * 3600 + 31 * 60))
-          echo "lần kế tiếp: $(date -d "@$next" '+%F %T %Z') (còn $(( (next - now) / 60 )) phút)"
-          if [ "$next" -le 0 ] || [ "$next" -gt "$limit" ]; then
-            echo "::error::lần chạy kế tiếp ($next) không nằm trong 24 giờ 31 phút tới ($limit) — OnCalendar sai hoặc timer mất lịch." >&2
-            exit 1
-          fi
-          echo "OK: timer enabled + active, có lần chạy kế tiếp trong 24 giờ 31 phút."
 
       - name: Unit lịch đêm mang đủ --install-dir, Environment=GEN_HARNESS_HOME, (pr) --port 9443 và GENH_COMPOSE_FILE
         run: |
@@ -2493,12 +2498,11 @@ jobs:
           t=gen-harness-update.timer
           en="$(systemctl --user is-enabled "$t" 2>&1 || true)"
           ac="$(systemctl --user is-active "$t" 2>&1 || true)"
-          next="$(systemctl --user show "$t" -p NextElapseUSecRealtime --timestamp=unix)"
-          echo "SAU lần chạy — timer is-enabled: $en; is-active: $ac; $next"
+          nxt="$(systemctl --user show "$t" -p NextElapseUSecRealtime --value 2>/dev/null || true)"
+          echo "SAU lần chạy — timer is-enabled: $en; is-active: $ac; NextElapseUSecRealtime: '${nxt:-<rỗng>}'"
           [ "$en" = "enabled" ] || { echo "::error::sau khi service đêm chạy, $t is-enabled = '$en' (cần enabled) — lịch bị tắt từ bên trong lần chạy." >&2; exit 1; }
           [ "$ac" = "active" ] || { echo "::error::sau khi service đêm chạy, $t is-active = '$ac' (cần active)." >&2; exit 1; }
-          v="${next#*=}"; v="${v#@}"
-          case "$v" in ''|*[!0-9]*) echo "::error::sau khi service đêm chạy, $t mất NextElapseUSecRealtime ('$next') — lịch đêm biến mất sau lần chạy đầu." >&2; exit 1 ;; esac
+          case "$nxt" in ''|n/a|0|@0) echo "::error::sau khi service đêm chạy, $t mất NextElapseUSecRealtime — lịch đêm biến mất sau lần chạy đầu." >&2; exit 1 ;; esac
           python3 - "$GEN_HARNESS_HOME/run/nightly-status.json" "$t0" <<'PY'
           import datetime, json, sys
           d = json.load(open(sys.argv[1], encoding="utf-8"))
