@@ -16,7 +16,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { randomUUID } from 'node:crypto';
-import type { AccessInfo, AgentIdentity, BossCheck, HealthIssue, HubLink, SocialAccount, SystemHealth } from '@gen-harness/contracts';
+import type { AccessInfo, AgentIdentity, BossCheck, HealthIssue, HubLink, SocialAccount, SystemHealth, SystemUpdate } from '@gen-harness/contracts';
 import { createPhase2, maskText, seedRows, type P2Ctx } from './mock-phase2';
 import { createMock as createP3Core } from './mock-p3-core';
 import { createMock as createP3Queue } from './mock-p3-queue';
@@ -313,6 +313,9 @@ const HEALTH_KIND_DEFAULTS: Record<string, Omit<HealthIssue, 'raised_at' | 'body
   'job.timeout': { key: 'job.timeout:retention_sweep', kind: 'job.timeout', severity: 'warn', title: 'Việc nền "dọn dữ liệu theo hạn lưu" chạy quá giờ', body: 'Việc đã bị dừng và sẽ chạy lại ở lần sau. Lặp lại nhiều lần thì gửi kèm khi báo lỗi.', link: '/system?tab=storage', action: 'Xem sức khoẻ' },
   // v0.1.46 (F-21) — gh/health.py _eval_network: chép đúng OPEN_LAN_TITLE/OPEN_LAN_BODY/ACCESS_LINK; thẻ đích focus=access.
   'network.open_lan': { key: 'network.open_lan', kind: 'network.open_lan', severity: 'warn', title: 'Cổng đang mở cho cả mạng', body: 'Mọi máy cùng mạng (Wi-Fi văn phòng, khách…) đều thấy trang đăng nhập Gen-Harness. Bấm để xem lệnh chọn cách truy cập (chạy trên máy chủ): Tailscale (khuyên dùng), chỉ máy này, hoặc giữ mở cho mạng nội bộ.', link: '/system?tab=storage&focus=access', action: 'Chọn cách truy cập' },
+  // v0.1.53 (F-99) — gh/health.py _eval_nightly (NIGHTLY_BODY/NIGHTLY_LINGER/NIGHTLY_ENABLE, HEALTH_LINK, ACTIONS): thân ghép
+  // từ chuỗi cố định; số ngày / bước linger do healthView tính khi suy từ khối `nightly`.
+  'host.nightly': { key: 'host.nightly', kind: 'host.nightly', severity: 'warn', title: 'Lịch tự cập nhật đêm chưa chạy 3 ngày', body: 'Máy chủ không tự lên bản mới. Trên máy chủ chạy: genh auto-update status · Rồi: genh auto-update enable', link: '/system?tab=storage&focus=health', action: 'Xem cách bật lại' },
   'host.autostart': { key: 'host.autostart', kind: 'host.autostart', severity: 'warn', title: 'Máy chủ có thể không tự chạy lại Gen-Harness khi bật lại máy', body: 'Docker chưa bật tự chạy khi mở máy — chạy một lần trên máy chủ: sudo systemctl enable docker · Lịch tự cập nhật và nút Cập nhật ngay chỉ chạy khi có người đăng nhập — chạy một lần: sudo loginctl enable-linger $USER · Chạy xong thì chạy genh status để cảnh báo tự hết', link: '/system?tab=storage', action: 'Xem cách bật' },
 };
 
@@ -344,6 +347,20 @@ export interface MockHealthOverride {
   autostart?: SystemHealth['autostart'];
   /** v0.1.40 (F-12): ghi đè khối `offsite` (mặc định suy từ mock Bản sao ngoài máy); `null` = bỏ khối. */
   offsite?: SystemHealth['offsite'] | null;
+  /** v0.1.53 (F-99): khối `nightly` (thiếu/`null` ⇒ không có khối, như api không có hộp thư với genh); `warn` mở sự cố host.nightly. */
+  nightly?: SystemHealth['nightly'] | null;
+}
+
+/**
+ * v0.1.53 (F-99): `__mock/nightly` đặt lịch tự cập nhật đêm / linger cho cả hai nơi Console đọc:
+ *  - `update` trộn vào `GET /system/update` (vd `{ state: 'stalled', stalled_reason: 'linger_off' }`, `nightly`,
+ *    `nightly_candidates`, `auto_update_enabled`, `latest`, `published_at`…);
+ *  - `health` đặt khối `nightly` của `GET /system/health` (`null` = bỏ khối).
+ * `__mock/reset` khôi phục mặc định (không có khối nightly, không có ứng viên).
+ */
+export interface MockNightlyOverride {
+  update?: Partial<SystemUpdate>;
+  health?: SystemHealth['nightly'] | null;
 }
 
 /** gh/health.py WORKER_SILENT_MINUTES. */
@@ -365,6 +382,10 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     finished_at: null as string | null, requested_at: null as string | null,
     release_url: 'https://github.com/Genesis-ryan-84-0567536339/Gen-Harness/releases', release_notes: '- Nút Cập nhật ngay trong Console',
     checked_at: new Date().toISOString() as string | null,
+    // v0.1.53 (F-99, F-96): như api mới — chưa có nguyên nhân treo, chưa có ứng viên lịch đêm, genh chưa ghi nightly-status.json.
+    stalled_reason: null as SystemUpdate['stalled_reason'],
+    nightly_candidates: [] as NonNullable<SystemUpdate['nightly_candidates']>,
+    nightly: null as SystemUpdate['nightly'],
   };
   /** v0.1.36 (F-6): `__mock/health` ghi đè trạng thái `/system/health` (mặc định khoẻ; `__mock/reset` khôi phục). */
   let healthOverride: MockHealthOverride = {};
@@ -557,6 +578,20 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     } else if (update.failed) derived.push({ kind: 'update.failed', title: `Cập nhật lên ${sysUpdate.to ?? 'bản mới'} chưa thành công` });
     if (disk.state === 'low') derived.push({ kind: 'disk.low', body: `Còn ${gb(disk.free_bytes)} GB trống, cần tối thiểu ${gb(disk.min_bytes)} GB — cập nhật tự động đang tạm dừng.` });
     if (o.autostart?.state === 'warn') derived.push({ kind: 'host.autostart' });
+    // v0.1.53 (F-99): như gh/health._eval_nightly — tiêu đề theo số ngày; thân ghép từ chuỗi cố định (+ bước linger khi 'no').
+    const nightly = o.nightly ?? undefined;
+    if (nightly?.state === 'warn') {
+      const days = nightly.days_since;
+      derived.push({
+        kind: 'host.nightly',
+        title: days == null || days < 0 ? 'Lịch tự cập nhật đêm đang tắt' : days < 2 ? 'Lịch tự cập nhật đêm đã hơn 1 ngày chưa chạy' : `Lịch tự cập nhật đêm chưa chạy ${days} ngày`,
+        body: [
+          'Máy chủ không tự lên bản mới. Trên máy chủ chạy: genh auto-update status',
+          ...(nightly.linger === 'no' ? ['Tiến trình nền chỉ chạy khi có người đăng nhập — chạy một lần: sudo loginctl enable-linger $USER'] : []),
+          'Rồi: genh auto-update enable',
+        ].join(' · '),
+      });
+    }
     // v0.1.40 (F-12): như gh/health._eval_offsite — chỉ khi đã chọn nơi lưu; > 30 ngày ⇒ bad.
     const offsite = o.offsite === null ? undefined : (o.offsite ?? (phase3.system.offsiteHealth() as SystemHealth['offsite']));
     // Chưa chọn nơi lưu cũng mở offsite.stale (API thật: tổ chức tạo quá 7 ngày — mock "đã thiết lập" coi như đủ cũ).
@@ -601,6 +636,7 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
       ],
       backup, update, disk, issues,
       ...(o.autostart ? { autostart: o.autostart } : {}),
+      ...(nightly ? { nightly } : {}),
       ...(offsite ? { offsite } : {}),
     };
   };
@@ -1371,7 +1407,12 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
   const setAccess = (o: MockAccessOverride) => {
     accessOverride = { ...accessOverride, ...o };
   };
-  return { middleware, setup, users, sessions, phase2, phase3, sessionUser, notify, setHealth, setAccess };
+  /** v0.1.53 (F-99): `__mock/nightly` — xem `MockNightlyOverride`. */
+  const setNightly = (o: MockNightlyOverride) => {
+    if (o.update) Object.assign(sysUpdate, o.update);
+    if ('health' in o) healthOverride = { ...healthOverride, nightly: o.health ?? null };
+  };
+  return { middleware, setup, users, sessions, phase2, phase3, sessionUser, notify, setHealth, setAccess, setNightly };
 }
 
 /**
@@ -1387,7 +1428,10 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
  *   /api/v1/__mock/perm    {"role","permission","scope"} đặt một ô MATRIX (kể cả cột không sửa được ở Quyền hạn, vd system.manage)
  *   /api/v1/__mock/access  {"public_url"?,"mode"?,"bind_addr"?,"site_address"?} ghi đè `GET /system/access` (v0.1.46; reset khôi phục localhost/'local')
  *   /api/v1/__mock/health  {"issues"?,"worker"?,"backup"?,"disk"?,"update"?,"autostart"?,"offsite"?} ghi đè `GET /system/health` (v0.1.36;
- *                           `issues` chỉ cần `kind` — nhãn/nút/đường dẫn mặc định theo kind; reset khôi phục khoẻ)
+ *                           `issues` chỉ cần `kind` — nhãn/nút/đường dẫn mặc định theo kind; reset khôi phục khoẻ;
+ *                           v0.1.53: thêm `nightly` = khối lịch tự cập nhật đêm, `warn` mở sự cố host.nightly)
+ *   /api/v1/__mock/nightly {"update"?,"health"?} v0.1.53 (F-99): `update` trộn vào `GET /system/update` (state/stalled_reason/nightly/
+ *                           nightly_candidates/auto_update_enabled/latest/published_at…), `health` đặt khối nightly của `GET /system/health`
  *   /api/v1/__mock/p3/{cụm}/{hook}  body → `phase3[cụm].hooks[hook](body)`; trả JSON kết quả (404 nếu không có)
  */
 export function createMockApi(opts: MockOptions = {}) {
@@ -1472,6 +1516,10 @@ export function createMockApi(opts: MockOptions = {}) {
         }
         case 'health':
           current.setHealth(body as MockHealthOverride);
+          return done(res);
+        case 'nightly':
+          // v0.1.53 (F-99): {update?, health?} — đặt trạng thái lịch tự cập nhật đêm / linger cho thẻ cập nhật và thẻ Sức khoẻ.
+          current.setNightly(body as MockNightlyOverride);
           return done(res);
         case 'access':
           // v0.1.46 (F-21): {public_url?, mode?, bind_addr?, site_address?} — ghi đè GET /system/access; reset khôi phục.

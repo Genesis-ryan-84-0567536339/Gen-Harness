@@ -43,7 +43,9 @@ import { OWNER, SETUP_TOKEN, apiCall, loginAsOwner, mockHook, resetMock, results
  * (loại, selector, route) kèm các cỡ màn gặp lỗi.
  *
  * Kịch bản dữ liệu: mock "finished" + ép thẻ cập nhật "Máy chủ chưa nhận yêu cầu cập nhật" (GET /system/update
- * stalled/not_picked_up) và vài sự cố ở dải "Cần Sếp xử lý" — đúng các thẻ trong ảnh Boss.
+ * stalled/linger_off — v0.1.53, có thêm câu nguyên nhân + khối lệnh enable-linger) và vài sự cố ở dải "Cần Sếp xử lý"
+ * (kể cả "Lịch tự cập nhật đêm chưa chạy N ngày" kèm thân dài ba lệnh) — đúng các thẻ trong ảnh Boss. Một test riêng quét
+ * các biến thể còn lại của thẻ cập nhật (not_picked_up, watcher_failed, GH-E94C, gợi ý "Tự cài…" dài) ở Hôm nay và Cài đặt.
  */
 
 type Kind = 'dinh-bien' | 'tran-ngang' | 'bi-cat-khung' | 'chu-bi-cat' | 'chu-bi-ep' | 'cuon-an' | 'icon-rot-dong' | 'icon-lech';
@@ -106,7 +108,10 @@ const EXTRA_ROUTES = [
 /** Màn trong cây SCREENS (trừ Hồ sơ sống — cần ?id=, thêm riêng bên dưới). */
 const SCREEN_ROUTES = SCREENS.filter((s) => s.key !== 'profile').map((s) => `/${s.key}`);
 
-/** Trạng thái cập nhật "máy chủ chưa nhận yêu cầu" (như ảnh Boss) — hiện UpdateNotice ở Hôm nay và thẻ ở Cài đặt. */
+/**
+ * Trạng thái cập nhật "máy chủ chưa nhận yêu cầu" (như ảnh Boss) — hiện UpdateNotice ở Hôm nay và thẻ ở Cài đặt.
+ * v0.1.53 (F-99): nguyên nhân `linger_off` (linger tắt) — thẻ dài nhất: tiêu đề + câu nguyên nhân + lời dẫn + khối lệnh.
+ */
 const UPDATE_STALLED = {
   current: 'v0.1.48',
   latest: 'v0.1.49',
@@ -115,7 +120,7 @@ const UPDATE_STALLED = {
   linked: true,
   can_request: true,
   state: 'stalled',
-  stalled_reason: 'not_picked_up',
+  stalled_reason: 'linger_off',
   message: null,
   from: 'v0.1.48',
   to: 'v0.1.49',
@@ -127,6 +132,41 @@ const UPDATE_STALLED = {
   published_at: null,
   auto_update_enabled: true,
 };
+
+/** Khối `nightly` của /system/health: lịch đêm im 3 ngày, linger tắt (thẻ Sức khoẻ có dòng + hướng dẫn 3 lệnh, dải có sự cố). */
+const NIGHTLY_WARN = {
+  state: 'warn',
+  last_run_at: new Date(Date.now() - 3 * 24 * 3600_000).toISOString(),
+  next_run_at: new Date(Date.now() + 14 * 3600_000).toISOString(),
+  days_since: 3,
+  opted_out: false,
+  linger: 'no',
+  checked_at: new Date(Date.now() - 4 * 60_000).toISOString(),
+};
+
+/** Các biến thể còn lại của thẻ cập nhật (v0.1.53) — mỗi biến thể một bố cục khác (câu nguyên nhân, lệnh, chi tiết kỹ thuật, gợi ý dài). */
+const UPDATE_VARIANTS: Array<{ name: string; state: Record<string, unknown> }> = [
+  { name: 'not_picked_up', state: { ...UPDATE_STALLED, stalled_reason: 'not_picked_up' } },
+  { name: 'watcher_failed', state: { ...UPDATE_STALLED, stalled_reason: 'watcher_failed' } },
+  {
+    name: 'GH-E94C',
+    state: {
+      ...UPDATE_STALLED, state: 'failed', stalled_reason: null, finished_at: new Date(Date.now() - 5 * 60_000).toISOString(),
+      message: 'Không xoá được tệp yêu cầu trong run/request nên chưa làm gì — kiểm quyền thư mục run/request rồi thử lại (GH-E94C)',
+    },
+  },
+  {
+    name: 'tự cài (ứng viên 25 giờ)',
+    state: {
+      ...UPDATE_STALLED, state: 'idle', stalled_reason: null, requested_at: null, latest: 'v0.1.50', auto_update_enabled: true,
+      published_at: new Date(Date.now() - 3600_000).toISOString(),
+      nightly_candidates: [
+        { tag: 'v0.1.49', eligible_at: new Date(Date.now() - 3600_000).toISOString() },
+        { tag: 'v0.1.50', eligible_at: new Date(Date.now() + 23 * 3600_000).toISOString() },
+      ],
+    },
+  },
+];
 
 function branchName(): string {
   const env = process.env.GITHUB_HEAD_REF || process.env.GITHUB_REF_NAME;
@@ -439,7 +479,7 @@ test.describe('Lính gác bố cục — dính biên, tràn/cắt ngang, chữ b
       test.setTimeout(180_000);
       clearShots(`${vp.width}_`);
       await resetMock(page.request, 'finished');
-      await mockHook(page.request, 'health', { issues: [{ kind: 'backup.stale' }, { kind: 'channel.down' }] });
+      await mockHook(page.request, 'health', { issues: [{ kind: 'backup.stale' }, { kind: 'channel.down' }], nightly: NIGHTLY_WARN });
       await loginAsOwner(page);
       await page.route('**/api/v1/system/update', (route) =>
         route.request().method() === 'GET' ? route.fulfill({ json: UPDATE_STALLED }) : route.fallback(),
@@ -458,6 +498,31 @@ test.describe('Lính gác bố cục — dính biên, tràn/cắt ngang, chữ b
         const found = await scanHere(page, '', vp.width, route);
         all.push(...found);
         if (process.env.LAYOUT_GUARD_VERBOSE) console.log(`${vp.width} ${route} ${found.length} phát hiện ${Date.now() - t0}ms`);
+      }
+      expectClean(all);
+    });
+  }
+
+  for (const vp of VIEWPORTS) {
+    test(`thẻ cập nhật — biến thể nguyên nhân/lỗi/gợi ý @${vp.width}px không có phát hiện`, async ({ page }) => {
+      test.setTimeout(120_000);
+      clearShots(`cn${vp.width}_`);
+      await resetMock(page.request, 'finished');
+      await mockHook(page.request, 'health', { nightly: NIGHTLY_WARN });
+      await loginAsOwner(page);
+      let state: Record<string, unknown> = UPDATE_STALLED;
+      await page.route('**/api/v1/system/update', (route) =>
+        route.request().method() === 'GET' ? route.fulfill({ json: state }) : route.fallback(),
+      );
+      await page.setViewportSize(vp);
+      const all: Hit[] = [];
+      for (const variant of UPDATE_VARIANTS) {
+        state = variant.state;
+        for (const route of ['/overview', '/system?tab=storage']) {
+          await page.goto(route);
+          await settled(page);
+          all.push(...(await scanHere(page, `cn${vp.width}_${variant.name.replace(/\W+/g, '')}_`, vp.width, `${route} [${variant.name}]`)));
+        }
       }
       expectClean(all);
     });
