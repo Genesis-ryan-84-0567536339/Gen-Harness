@@ -25,7 +25,7 @@ test.describe('Tài khoản mạng xã hội (v0.1.29)', () => {
     await loginAsOwner(page);
     await page.goto('/overview');
     // Lối vào: menu tài khoản ở chân thanh bên.
-    await page.getByRole('button', { name: /Anh Cơ|Tài khoản/ }).last().click();
+    await page.getByRole('button', { name: /Anh Nguyễn Văn A|Tài khoản/ }).last().click();
     await page.getByRole('menuitem', { name: 'Tài khoản mạng xã hội' }).click();
     await expect(page).toHaveURL(/\/social$/);
     await expect(page.getByRole('heading', { level: 2, name: 'Tài khoản mạng xã hội' })).toBeVisible();

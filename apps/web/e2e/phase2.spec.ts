@@ -288,7 +288,7 @@ test.describe('Kết nối › kênh & đăng nhập', () => {
     await expect(pin).toBeVisible();
     await page.keyboard.type(OWNER.pin);
     await expect(pin).toBeHidden();
-    await expect(page.getByText(/Đã chuyển sang ops\.genesis@gmail\.com/)).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText(/Đã chuyển sang b@example\.test/)).toBeVisible({ timeout: 5000 });
     await expect(dlg).toBeHidden();
     await expect(cli.getByTestId('cli-current')).toContainText('b@example.test');
   });

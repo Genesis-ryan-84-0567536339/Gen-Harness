@@ -171,12 +171,21 @@ test.describe('v0.1.53 — lịch tự cập nhật đêm: nguyên nhân + cản
 
   test('gợi ý "Tự cài…": ứng viên 25 giờ cài đêm nay, bản mới nhất đợi đủ 24 giờ', async ({ page }) => {
     const now = Date.now();
+    // Lần ~03:00 giờ Việt Nam (UTC+7, không có giờ mùa hè; playwright.config đặt timezoneId) đầu tiên sau `now`. Mốc "đủ 24 giờ" của
+    // bản mới nhất đặt SAU lần chạy đó 1 giờ (chứ không phải now + 23 giờ) để test không phụ thuộc giờ chạy CI: now + 23 giờ rơi
+    // vào trước 03:00 khi CI chạy 03:00–04:00 giờ VN ⇒ bản mới nhất đã đủ hạn kịp đêm nay và gợi ý đổi thành "Tự cài đêm dd/mm".
+    const VN = 7 * 3600_000;
+    const day = 24 * 3600_000;
+    const local = now + VN; // đồng hồ treo tường giờ VN, tính như UTC
+    let run03 = Math.floor(local / day) * day + 3 * 3600_000;
+    if (run03 < local) run03 += day;
+    const firstRun = run03 - VN;
     await nightlyHook(page, {
       update: {
         current: 'v0.1.52', latest: 'v0.1.54', auto_update_enabled: true, published_at: new Date(now - 3600_000).toISOString(),
         nightly_candidates: [
           { tag: 'v0.1.53', eligible_at: new Date(now - 3600_000).toISOString() },
-          { tag: 'v0.1.54', eligible_at: new Date(now + 23 * 3600_000).toISOString() },
+          { tag: 'v0.1.54', eligible_at: new Date(firstRun + 3600_000).toISOString() },
         ],
       },
     });
