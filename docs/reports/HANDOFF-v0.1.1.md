@@ -55,11 +55,11 @@ v0.1.53 chứa toàn bộ v0.1.52 (gỡ digest cũ bằng `rmi -f`, [v0.1.52.md]
 ## v0.1.53 — Tự cập nhật đêm tự lành + trung thực
 
 - **Vì sao** (F-93…F-100): máy Boss kẹt v0.1.44 từ 03/10 đến 09/10; `genh auto-update status` in TẮT (đọc sai `is-enabled` thoát ≠ 0), Console chỉ nói "chưa nhận yêu cầu". Điều tra: **H-a tái hiện bằng mã** (bản cài phụ gỡ/ghi đè lịch dùng chung), **H-c tái hiện** (status in sai),
-  **H-b không tái hiện được bằng mã** (chờ E2E systemd thật); chưa chỉ ra được nguyên nhân gốc đêm 03/10 ngoài H-a ⇒ bản này làm lịch **tự lành** cho mọi nguyên nhân.
+  **H-b không tái hiện được** (bằng mã lẫn E2E systemd thật); chưa chỉ ra được nguyên nhân gốc đêm 03/10 ngoài H-a ⇒ bản này làm lịch **tự lành** cho mọi nguyên nhân.
 - **Thay đổi**: `genh update` tự bật lại lịch đêm (dấu `config/auto-update-disabled.json` = Sếp đã chủ động tắt thì không); `status` đủ 5 thông tin + cảnh báo log im > 36 giờ; kiểm linger sau `enable-linger`; lịch đêm chọn bản cao nhất đã đủ 24 giờ trong 10 bản gần nhất;
   `ConsumeRequest` không nuốt lỗi xoá (**GH-E94C**, chờ khoá > 30 phút ⇒ GH-E94A); unit đêm có `--install-dir`/`--port`/`GEN_HARNESS_HOME`, `StartLimit`/`TriggerLimit`, bản cài phụ không đụng lịch bản chính; `run/nightly-status.json`;
   API `stalled_reason` `linger_off`/`watcher_failed`, `nightly_candidates`, `nightly`, khối `nightly` + sự cố `host.nightly` (ngưỡng 36 giờ); Console nói nguyên nhân + dòng "Tự cập nhật đêm"; E2E `e2e-nightly-real` chạy thật timer/`.path` có linger, bắt buộc trước promote.
-- **Kiểm tra**: `go test ./...` (genh) xanh; pytest/vitest/Playwright của gói api-web và URL lượt E2E kiểm ngược: xem "Kiểm tra" ở [v0.1.53.md](../releases/v0.1.53.md). Vận hành: [05-installer.md](../handoff/05-installer.md) mục "Lịch tự cập nhật đêm tự lành và trung thực".
+- **Kiểm tra**: `go test ./...` xanh (ma trận 4 hệ điều hành gồm Windows); pytest 2054 + 2054 (gh_app); vitest 1000; Playwright mock 310; `e2e-nightly-real` xanh [lượt 38026722892](https://github.com/Genesis-ryan-84-0567536339/Gen-Harness/actions/runs/38026722892); **kiểm ngược** cài `--no-auto-update` ⇒ đỏ đúng bước timer [lượt 38026379683](https://github.com/Genesis-ryan-84-0567536339/Gen-Harness/actions/runs/38026379683). Sửa khi tích hợp: status không lấy mtime tệp stamp systemd làm lần chạy; đọc unit giữ `\` của đường dẫn Windows. Chi tiết: "Kiểm tra" ở [v0.1.53.md](../releases/v0.1.53.md). Vận hành: [05-installer.md](../handoff/05-installer.md) mục "Lịch tự cập nhật đêm tự lành và trung thực".
 
 ## Quy trình phát hành & cổng
 
@@ -104,7 +104,7 @@ v0.1.53 chứa toàn bộ v0.1.52 (gỡ digest cũ bằng `rmi -f`, [v0.1.52.md]
 ### Claude / điều phối viên còn dở
 
 - **Phát hành v0.1.53** (gộp luôn v0.1.52, v0.1.51, v0.1.50 nếu các bản đó chưa promote): nhánh `claude/v0153` → PR vào main → CI xanh → merge → E2E cài thật + nâng cấp + `e2e-nightly-real` → promote → kiểm genh tải về (checksum/version) → báo Boss. Ghi URL lượt kiểm ngược vào "Kiểm tra" của [v0.1.53.md](../releases/v0.1.53.md).
-- **H-b còn mở**: chưa tái hiện được bằng mã việc timer đêm mất lịch khi `daemon-reload`/`enable` chạy từ bên trong service đêm; nếu `e2e-nightly-real` bắt được thì ghi vào v0.1.53.md.
+- **H-b còn mở**: timer đêm mất lịch khi `daemon-reload`/`enable` chạy từ bên trong service đêm — không tái hiện được bằng mã lẫn `e2e-nightly-real` (systemd thật: sau lần chạy timer vẫn có lần kế tiếp); tự lành bao ca này. Máy thật còn tái diễn thì ghi vào v0.1.53.md.
 - **PR Renovate** không tự merge nằm chờ tới khi Boss nhắn "xử lý PR phụ thuộc"; chưa có lịch tự động nào gọi Claude.
 - **Selector ghi Facebook** mới kiểm trên trang mẫu — chờ nghiệm thu thật (dòng 8). Chuông phiên hết có thể hiện hai lần (`social.paused` + `social.session_expired`), gộp ở bản sau nếu phiền.
 - **Giới hạn đã biết**: TOTP chưa làm; Redis lỗi ⇒ giới hạn đăng nhập tạm không áp; gói apt trong Dockerfile chưa ghim phiên bản; tag GHCR `:latest` cũ đứng yên (không dùng).

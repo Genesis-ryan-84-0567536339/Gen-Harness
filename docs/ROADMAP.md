@@ -64,7 +64,7 @@ Việc đã hứa hoặc đã biết mà chưa làm. Mỗi dòng ghi điều ki�
 | 16 | F-84 phần còn lại (duyệt nháp, đề xuất Deal/Vụ việc, stream), F-68 mở Gen cho vai trò khác | Hoãn; chờ có nhân viên dùng thật |
 | 17 | Hạ tầng/CI | Gói apt trong Dockerfile chưa ghim phiên bản; PR Renovate chưa có lịch tự động; ô E2E Fedora thật (VM) chưa có; sinh type từ OpenAPI hoãn; `ops.action_log` hạn lưu (vướng chuỗi băm); F-38 phần còn lại |
 | 18 | Nghiệm thu thật chưa làm | Tailscale/điện thoại trên máy Fedora của Boss (v0.1.46); canary `--live` agy (v0.1.38/39); Facebook trả lời (v0.1.47) |
-| 19 | **H-b** (v0.1.53): timer `gen-harness-update.timer` mất lịch khi `daemon-reload`/`enable` chạy từ bên trong service đêm | **Chưa tái hiện được bằng mã** (H-a và H-c đã tái hiện và sửa). Chờ kết quả `e2e-nightly-real` (systemd thật có linger); tự lành đã bao cả hai ca. Chi tiết: [v0.1.53.md](releases/v0.1.53.md) |
+| 19 | **H-b** (v0.1.53): timer `gen-harness-update.timer` mất lịch khi `daemon-reload`/`enable` chạy từ bên trong service đêm | **Chưa tái hiện được** — bằng mã lẫn bằng `e2e-nightly-real` (systemd thật có linger: sau lần chạy service đêm timer vẫn enabled + active + có lần kế tiếp). H-a và H-c đã tái hiện và sửa; tự lành bao cả ca này nếu xảy ra trên máy thật. Chi tiết: [v0.1.53.md](releases/v0.1.53.md) |
 
 ## Bản phản ứng (hotfix)
 Các bản sửa nóng thật, không nằm trong kế hoạch đợt. Đối chiếu `git log origin/main` và nhánh `hotfix/*`:
