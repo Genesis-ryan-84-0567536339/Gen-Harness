@@ -467,6 +467,8 @@ async def build(db: AsyncSession, user: service.CurrentUser, prop: Any, seen_ids
         lab = await labels(db, user, ptype, fields, redis, app)
     except ValueError as e:
         return None, str(e)
+    if kho != KHO_LABEL:
+        lab["kho"] = kho           # v0.1.57: thẻ web dùng tên Kho Owner tự đặt (mặc định ⇒ không thêm nhãn, thẻ như cũ)
     pid = uuid.uuid4()
     return {"id": str(pid), "type": ptype, "fields": fields, "labels": lab, "target": target,
             "summary": summary(ptype, fields, lab, tz, kho), "requires_pin": requires_pin(target), "status": "pending",
@@ -598,6 +600,8 @@ def build_release(org_id: uuid.UUID, owner_id: uuid.UUID, version: str, *, turn_
     fields = normalize("kho_create", {"bang": "Phiên", "record": release_record(version, today, repo)}, tz)
     # `release` = phiên bản: thẻ nói rõ mỗi bản ghi MỘT lần cho cả tổ chức (Huỷ = huỷ cho mọi Owner).
     lab = {"bang": "Phiên", "target": "Tạo mới ở bảng Phiên", "write_scope": "ok", "release": version}
+    if kho != KHO_LABEL:
+        lab["kho"] = kho
     target = target_of("kho_create", fields)
     pid = uuid.uuid4()
     return {"id": str(pid), "type": "kho_create", "fields": fields, "labels": lab, "target": target,

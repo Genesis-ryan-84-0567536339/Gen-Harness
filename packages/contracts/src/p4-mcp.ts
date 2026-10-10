@@ -154,6 +154,17 @@ export interface HubLink {
    * đọc, nên tải lại trang vẫn nói đúng "Sếp đã tự đóng…" thay vì giục tick ở Gen-hub. `null` / vắng ⇒ chưa kiểm (máy chủ cũ).
    */
   write_hidden?: string[] | null;
+  /**
+   * v0.1.57 (Nợ #30): "Tên Kho" hiệu lực của tổ chức — tên Owner tự đặt (≤ `kho_label_max` ký tự) hoặc mặc định "Kho dữ liệu".
+   * Ai đọc được thẻ cũng nhận. Máy chủ cũ không gửi ⇒ vắng (web dùng mặc định).
+   */
+  kho_label?: string;
+  /** Owner đã đổi tên Kho (khác mặc định). */
+  kho_label_custom?: boolean;
+  /** Tên mặc định ("Kho dữ liệu"). */
+  kho_label_default?: string;
+  /** Độ dài tối đa của tên Kho (40). */
+  kho_label_max?: number;
 }
 
 /** `PATCH /hub/link` — Owner + PIN `hub.link`. `enabled` chỉ nhận `false` (bật = bấm Kiểm tra). */
@@ -163,6 +174,8 @@ export interface HubLinkPatchBody {
   token_expires_at?: string | null;
   allow_public_network?: boolean;
   enabled?: false;
+  /** v0.1.57: tên Kho (≤ 40 ký tự); chuỗi rỗng ⇒ về mặc định. Chỉ gửi mỗi trường này thì không đụng liên kết (kể cả khi chưa nối). */
+  kho_label?: string;
 }
 
 export interface HubLinkTestResult {

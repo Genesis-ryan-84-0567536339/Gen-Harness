@@ -15,6 +15,7 @@ import {
   KHO_REQUIRED,
   KHO_STATUS,
   khoMaxLen,
+  relabelKho,
   type AssignFields,
   type DraftMessageFields,
   type GenProposal,
@@ -429,6 +430,7 @@ export function ProposalCard({ proposal: p }: { proposal: GenProposal }) {
   const social = isSocialWrite(p);
   const memory = isMemoryNote(p);
   const kho = isKhoWrite(p);
+  const khoLabel = kho ? p.labels.kho : undefined;       // v0.1.57: tên Kho Owner tự đặt (máy chủ gắn vào nhãn; vắng = mặc định)
   // Cổng ghi: nhãn lúc đề xuất có thể đã cũ (Sếp vừa đồng ý ở trang cảnh báo) → hỏi lại cổng khi thẻ còn chờ và đang khoá.
   const labelLocked = social && p.labels.write_gate === 'locked';
   const gate = useQuery({
@@ -507,7 +509,7 @@ export function ProposalCard({ proposal: p }: { proposal: GenProposal }) {
     }
   };
 
-  const title = PROPOSAL_TITLE[p.type];
+  const title = relabelKho(PROPOSAL_TITLE[p.type], khoLabel);
   const resultScreen = p.result?.screen ? GEN_SCREEN_BY_KEY[p.result.screen] : undefined;
   // v0.1.43 (F-24): nháp tin chỉ được LƯU, chưa gửi — nói rõ và dẫn thẳng tới đúng nháp ở Bàn làm việc để duyệt/gửi.
   const isDraft = p.type === 'draft_message';
@@ -562,7 +564,7 @@ export function ProposalCard({ proposal: p }: { proposal: GenProposal }) {
       {kho && p.status === 'pending' ? (
         <>
           <p className="gen-prop__warn gen-prop__warn--send" role="note" data-testid="gen-kho-warning">
-            <Icon name="ph ph-warning" size={13} /> {KHO_WRITE_WARNING}
+            <Icon name="ph ph-warning" size={13} /> {relabelKho(KHO_WRITE_WARNING, khoLabel)}
           </p>
           {releaseVersion ? (
             <p className="gen-prop__note" role="note" data-testid="gen-kho-release-note">

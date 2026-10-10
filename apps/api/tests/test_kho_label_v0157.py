@@ -114,6 +114,12 @@ async def test_runtime_prompts_tools_proposals_and_coach_use_label(owner_api: Ap
     assert proposals.permission_error({"system.manage": "all"}, "kho_create", "x", "manager", NAME) \
         == f"chỉ Owner được ghi vào {NAME}"
     assert await proposals.kho_for(db, owner.org_id, "kho_create") == NAME
+    rel = proposals.build_release(owner.org_id, owner.id, "v1.2.3", turn_id=uuid.uuid4(), conversation_id=uuid.uuid4(),
+                                  tz=proposals.ZoneInfo("UTC"), repo="o/r", kho=NAME)
+    assert rel["labels"]["kho"] == NAME and f"của {NAME}:" in rel["summary"]       # web đọc tên Kho từ nhãn thẻ
+    rel0 = proposals.build_release(owner.org_id, owner.id, "v1.2.3", turn_id=uuid.uuid4(), conversation_id=uuid.uuid4(),
+                                   tz=proposals.ZoneInfo("UTC"), repo="o/r")
+    assert "kho" not in rel0["labels"] and f"của {KHO_LABEL}:" in rel0["summary"]   # mặc định: thẻ như cũ
     assert await proposals.kho_for(db, owner.org_id, "reminder") == KHO_LABEL
     # job đề xuất theo bản mới + nhãn quyền PIN
     assert NAME in relabel(kho_release.SAY.format(version="v1", addr="Sếp"), NAME)
