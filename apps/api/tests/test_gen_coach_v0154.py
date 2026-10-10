@@ -110,7 +110,7 @@ def fake_content(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Any:
 # ─── tín hiệu giả (thuần) ────────────────────────────────────────────────────────────────────────────────────
 
 def mk_sig(*, state: dict[str, bool] | None = None, alerts: list[dict[str, Any]] | None = None,
-           last_alert: datetime | None = None, required: tuple[int, int] = (6, 6), drafts: int = 0,
+           last_alert: datetime | None = None, required: tuple[int, int] = (1, 1), drafts: int = 0,
            hub_expiring: bool = False) -> sg.Signals:
     """Hệ thống 'ổn': mọi tín hiệu tốt → không có việc nào; ghi đè từng tín hiệu qua `state`."""
     st = dict.fromkeys(sg.STATE_SIGNALS, True)
@@ -143,10 +143,11 @@ def keys_of(plan: engine.Plan) -> list[str]:
 def test_state_signal_vocabulary_is_exact() -> None:
     expected = {"model.bound", "api_key.present", "ai_budget.set", "pin.set", "telegram.briefing_on",
                 "hub.kho_write_missing", "memory.empty", "backup.scheduled", "offsite.chosen", "drafts.any"}
-    expected |= {f"boss.{k}.done" for k in ("hub", "facebook", "agy", "claude", "jev", "telegram", "remote",
+    expected |= {"staff.active"}                                     # v0.1.55: đã mời nhân viên (điều kiện nhắc từ xa)
+    expected |= {f"boss.{k}.done" for k in ("ai", "hub", "facebook", "agy", "claude", "jev", "telegram", "remote",
                                              "facebook_reply", "kho_write")}
     expected |= {f"followup.{n}.done" for n in (5, 6, 7, 8, 9, 10, 11, 13, 14)}
-    assert expected == sg.STATE_SIGNALS and len(sg.STATE_SIGNALS) == 28
+    assert expected == sg.STATE_SIGNALS and len(sg.STATE_SIGNALS) == 30
     assert tuple(r["key"] for r in boss_service.ROWS) == sg.BOSS_KEYS
     assert sg.TOPICS == {"model", "hub", "facebook", "agy", "claude", "telegram", "remote", "backup", "offsite",
                          "drafts", "memory", "ai_cost", "setup", "health"}
@@ -155,22 +156,31 @@ def test_state_signal_vocabulary_is_exact() -> None:
 
 def test_each_required_boss_row_has_exactly_one_rule() -> None:
     required = [r for r in boss_service.ROWS if not r["optional"]]
-    assert len(required) == boss_service.REQUIRED_TOTAL == 6
+    assert len(required) == boss_service.REQUIRED_TOTAL == 1 and required[0]["key"] == "ai"
     for row in required:
         rules = [r for r in sg.TODO_RULES if r.key == f"boss.{row['key']}"]
         assert len(rules) == 1, row["key"]
-        assert rules[0].level == "P1" and rules[0].when == (f"!boss.{row['key']}.done",)
+        # boss.ai chỉ khi ĐÃ có model (dedupe với model.missing P0)
+        assert rules[0].level == "P1" and rules[0].when == ("model.bound", f"!boss.{row['key']}.done")
+    # v0.1.55: Gen-hub / Facebook / Telegram / Google / Claude / từ xa KHÔNG còn là P1; chỉ Gen-hub (gợi ý) và
+    # Truy cập từ xa (khi có nhân viên) còn quy tắc P3; các dòng tuỳ chọn khác không phải việc.
     for row in boss_service.ROWS:
-        if row["optional"]:                       # jev / facebook_reply / kho_write không phải việc
-            assert not [r for r in sg.TODO_RULES if r.key == f"boss.{row['key']}"]
+        if row["optional"]:
+            rules = [r for r in sg.TODO_RULES if r.key == f"boss.{row['key']}"]
+            assert all(r.level == "P3" for r in rules), row["key"]
+            assert bool(rules) == (row["key"] in ("hub", "remote")), row["key"]
+    p1 = [r.key for r in sg.TODO_RULES if r.level == "P1" and r.key.startswith("boss.")]
+    assert p1 == ["boss.ai"]
+    remote = next(r for r in sg.TODO_RULES if r.key == "boss.remote")
+    assert remote.when == ("staff.active", "!boss.remote.done")
+    assert next(r for r in sg.TODO_RULES if r.key == "boss.hub").when == ("!boss.hub.done",)
 
 
 def test_rule_table_order_and_levels() -> None:
     assert [(r.key, r.level) for r in sg.TODO_RULES] == [
-        ("health:bad", "P0"), ("model.missing", "P0"), ("boss.hub", "P1"), ("boss.facebook", "P1"),
-        ("boss.agy", "P1"), ("boss.claude", "P1"), ("boss.telegram", "P1"), ("boss.remote", "P1"),
-        ("health:warn", "P1"), ("backup.unset", "P1"), ("hub.token_expiring", "P1"), ("drafts.pending", "P2"),
-        *((f"followup.{n}", "P3") for n in (5, 6, 7, 8, 9, 10))]
+        ("health:bad", "P0"), ("model.missing", "P0"), ("boss.ai", "P1"), ("health:warn", "P1"),
+        ("backup.unset", "P1"), ("hub.token_expiring", "P1"), ("drafts.pending", "P2"), ("boss.hub", "P3"),
+        ("boss.remote", "P3"), *((f"followup.{n}", "P3") for n in (5, 6, 7, 8, 9, 10))]
     assert {r.key for r in sg.TODO_RULES if r.key.startswith("followup.")} == {f"followup.{n}" for n in range(5, 11)}
 
 
@@ -180,8 +190,10 @@ def test_every_target_resolves_in_registry() -> None:
     assert sg.ALL_TARGETS == frozenset(sg.TODO_TARGETS.values())
     assert sg.ALL_TARGETS >= {"api.bindings", "system.backup.schedule", "mcp.hub_link.token", "workbench.drafts",
                               "guide.item.do:5", "guide.item.do:10"}
+    # v0.1.55: chỉ Gen-hub (gợi ý) và Truy cập từ xa còn đích ở dòng "Việc Sếp cần làm"; boss.ai trỏ thẻ Bộ não AI.
     assert {t for t in sg.ALL_TARGETS if t.startswith("boss_checks.row.")} == {
-        f"boss_checks.row.{r['key']}" for r in boss_service.ROWS if not r["optional"]}
+        "boss_checks.row.hub", "boss_checks.row.remote"}
+    assert sg.TODO_TARGETS["boss.ai"] == "connections.brain"
     for target in sorted(sg.ALL_TARGETS):
         assert gen_registry.resolve_target(target) is not None, target
     assert set(sg.TODO_TARGETS) == {r.key for r in sg.TODO_RULES if r.kind != "health"}
@@ -196,7 +208,9 @@ def test_health_titles_cover_every_action_kind() -> None:
 
 
 def test_dismiss_warnings_cover_every_p1_p3_key() -> None:
-    assert sg.DISMISS_WARNINGS["boss.facebook"] == "Không nối Facebook thì Gen không đọc hay trả lời bình luận được."
+    assert sg.DISMISS_WARNINGS["boss.hub"] == ("Không nối Gen-hub thì Gen không đọc được lịch, mail và Kho dữ liệu "
+                                               "của Sếp.")
+    assert "Kho Ryan" not in " ".join(sg.DISMISS_WARNINGS.values())          # thẻ dùng tên chung "Kho dữ liệu"
     for rule in sg.TODO_RULES:
         if rule.level in ("P1", "P3"):
             key = "health" if rule.kind == "health" else rule.key
@@ -208,6 +222,7 @@ def test_dismiss_warnings_cover_every_p1_p3_key() -> None:
 def test_topic_of_and_eval_cond() -> None:
     assert sg.topic_of("health.channel.down") == "health" and sg.topic_of("model.missing") == "model"
     assert sg.topic_of("boss.hub") == "hub" and sg.topic_of("hub.token_expiring") == "hub"
+    assert sg.topic_of("boss.ai") == "model"
     assert sg.topic_of("followup.7") == "setup" and sg.topic_of("backup.unset") == "backup"
     assert sg.topic_of("drafts.pending") == "drafts" and sg.topic_of("la.hoac") is None
     st = {"a.x": True, "b.y": False}
@@ -232,35 +247,66 @@ def test_todo_key_known_and_levels() -> None:
 
 def test_rank_p0_p1_p2_p3_group_health_and_cut_three() -> None:
     sig = mk_sig(
-        state={"model.bound": False, "boss.hub.done": False, "backup.scheduled": False, "followup.5.done": False},
+        state={"boss.ai.done": False, "boss.hub.done": False, "backup.scheduled": False, "followup.5.done": False},
         drafts=3, hub_expiring=True,
         alerts=[alert("channel.down", "bad", at(0, 1), "/connections"), alert("channel.down", "warn", at(0, 2), "/moi"),
                 alert("offsite.stale", "warn", at(0, 1), "/system?tab=storage&focus=offsite")])
     todos = engine.candidate_todos(sig)
-    assert [t.key for t in todos] == ["health.channel.down", "model.missing", "boss.hub", "health.offsite.stale",
-                                      "backup.unset", "hub.token_expiring", "drafts.pending", "followup.5"]
-    assert [t.level for t in todos] == ["P0", "P0", "P1", "P1", "P1", "P1", "P2", "P3"]
+    assert [t.key for t in todos] == ["health.channel.down", "boss.ai", "health.offsite.stale", "backup.unset",
+                                      "hub.token_expiring", "drafts.pending", "boss.hub", "followup.5"]
+    assert [t.level for t in todos] == ["P0", "P1", "P1", "P1", "P1", "P2", "P3", "P3"]
     grouped = todos[0]                            # hai sự cố channel.down gộp một việc, liên kết của sự cố mới nhất
     assert grouped.link == "/moi" and grouped.title == sg.COACH_HEALTH_TITLES["channel.down"]
     assert next(t for t in todos if t.key == "drafts.pending").title == "Có 3 bản nháp chờ Sếp duyệt"
     plan = today_of(sig)
-    assert keys_of(plan) == ["health.channel.down", "model.missing", "boss.hub"]          # cắt 3
+    assert keys_of(plan) == ["health.channel.down", "boss.ai", "health.offsite.stale"]          # cắt 3
     rows = plan.payload["todos"]
-    assert [r["can_dismiss"] for r in rows] == [False, False, True]
-    assert "dismiss_warning" not in rows[0] and rows[2]["dismiss_warning"] == sg.DISMISS_WARNINGS["boss.hub"]
-    assert rows[1]["target"] == "api.bindings" and rows[0]["link"] == "/moi" and "target" not in rows[0]
-    assert plan.p01_keys == ["health.channel.down", "model.missing", "boss.hub"]
+    assert [r["can_dismiss"] for r in rows] == [False, True, True]
+    assert "dismiss_warning" not in rows[0] and rows[1]["dismiss_warning"] == sg.DISMISS_WARNINGS["boss.ai"]
+    assert rows[1]["target"] == "connections.brain" and rows[0]["link"] == "/moi" and "target" not in rows[0]
+    assert plan.p01_keys == ["health.channel.down", "boss.ai", "health.offsite.stale"]
+
+
+def test_boss_ai_is_deduped_with_model_missing_and_gen_hub_is_only_a_p3_hint() -> None:
+    # Chưa có model: chỉ model.missing (P0) — boss.ai không nhắc hai lần một chuyện.
+    no_model = mk_sig(state={"model.bound": False, "boss.ai.done": False})
+    assert [t.key for t in engine.candidate_todos(no_model)] == ["model.missing"]
+    # Có model mà nguồn AI chưa chạy thật/chưa Kiểm tra: boss.ai (P1, đích thẻ Bộ não AI).
+    has_model = mk_sig(state={"boss.ai.done": False})
+    todo = engine.candidate_todos(has_model)[0]
+    assert (todo.key, todo.level, todo.target) == ("boss.ai", "P1", "connections.brain")
+    assert todo.title == "Kiểm tra nguồn AI chạy được"
+    # Gen-hub / Facebook / Telegram / Google / Claude chưa nối: KHÔNG có P1; chỉ một gợi ý P3 (Gen-hub), không chuông.
+    optional_off = mk_sig(state={f"boss.{k}.done": False for k in ("hub", "facebook", "agy", "claude", "telegram")})
+    todos = engine.candidate_todos(optional_off)
+    assert [(t.key, t.level) for t in todos] == [("boss.hub", "P3")]
+    plan = today_of(optional_off)
+    assert plan.p01_keys == [] and keys_of(plan) == ["boss.hub"]
+    assert plan.payload["todos"][0]["title"] == "Nối Gen-hub nếu Sếp muốn"
+    assert "Kho Ryan" not in todos[0].why and "Kho dữ liệu" in todos[0].why
+
+
+def test_remote_access_is_only_nudged_after_staff_were_invited() -> None:
+    alone = mk_sig(state={"boss.remote.done": False, "staff.active": False})
+    assert engine.candidate_todos(alone) == []                               # chưa mời ai ⇒ không nhắc
+    team = mk_sig(state={"boss.remote.done": False, "staff.active": True})
+    todos = engine.candidate_todos(team)
+    assert [(t.key, t.level, t.target) for t in todos] == [("boss.remote", "P3", "boss_checks.row.remote")]
+    assert today_of(team).p01_keys == []                                      # P3: không chuông
+    done = mk_sig(state={"boss.remote.done": True, "staff.active": True})
+    assert engine.candidate_todos(done) == []
 
 
 def test_equal_level_follows_table_order_and_p2_p3_flags() -> None:
-    sig = mk_sig(state={"boss.facebook.done": False, "boss.remote.done": False, "backup.scheduled": False,
-                        "followup.6.done": False, "followup.7.done": False}, drafts=1)
+    sig = mk_sig(state={"boss.ai.done": False, "boss.hub.done": False, "boss.remote.done": False,
+                        "backup.scheduled": False, "followup.6.done": False, "followup.7.done": False}, drafts=1)
     todos = engine.candidate_todos(sig)
-    assert [t.key for t in todos] == ["boss.facebook", "boss.remote", "backup.unset", "drafts.pending",
+    assert [t.key for t in todos] == ["boss.ai", "backup.unset", "drafts.pending", "boss.hub", "boss.remote",
                                       "followup.6", "followup.7"]
     by = {t.key: t.payload() for t in todos}
     assert by["drafts.pending"]["can_dismiss"] is False                    # P2 không tắt được
     assert by["followup.6"]["can_dismiss"] is True and by["followup.6"]["target"] == "guide.item.do:6"
+    assert by["boss.hub"]["can_dismiss"] is True and by["boss.hub"]["target"] == "boss_checks.row.hub"
 
 
 def test_followup_11_13_14_are_never_todos() -> None:
@@ -278,15 +324,15 @@ def test_unknown_source_signals_never_create_todos() -> None:
 
 
 def test_snoozed_and_dismissed_are_dropped_but_p0_is_never_dismissed() -> None:
-    sig = mk_sig(state={"model.bound": False, "boss.hub.done": False, "boss.facebook.done": False,
-                        "boss.agy.done": False, "boss.claude.done": False})
-    items = {"todo:boss.hub": Item("todo:boss.hub", "snoozed", T0 + timedelta(hours=5), 1, T0, T0),
-             "todo:boss.facebook": Item("todo:boss.facebook", "dismissed", None, 1, T0, T0),
+    sig = mk_sig(state={"model.bound": False, "backup.scheduled": False}, hub_expiring=True,
+                 alerts=[alert("disk.low", "warn", T0)])
+    items = {"todo:backup.unset": Item("todo:backup.unset", "snoozed", T0 + timedelta(hours=5), 1, T0, T0),
+             "todo:hub.token_expiring": Item("todo:hub.token_expiring", "dismissed", None, 1, T0, T0),
              "todo:model.missing": Item("todo:model.missing", "dismissed", None, 1, T0, T0)}
     plan = today_of(sig, items=items)
-    assert keys_of(plan) == ["model.missing", "boss.agy", "boss.claude"]            # P0 dismissed vẫn hiện
+    assert keys_of(plan) == ["model.missing", "health.disk.low"]                    # P0 dismissed vẫn hiện
     later = today_of(sig, items=items, now=T0 + timedelta(hours=6))                  # hết hoãn ⇒ quay lại
-    assert keys_of(later) == ["model.missing", "boss.hub", "boss.agy"]
+    assert keys_of(later) == ["model.missing", "health.disk.low", "backup.unset"]
     tp = engine.plan_todos(sig, items, T0)
     assert tp.pending_p01 is True
 
@@ -382,9 +428,9 @@ def test_guide_lesson_dropped_when_followup_todo_shown_or_dismissed() -> None:
     old = T0 - timedelta(days=5)             # các bài N01..N05 đã hiểu từ lâu (không tính vào hạn mức của hôm nay)
     done = {f"lesson:{x}": Item(f"lesson:{x}", "understood", None, 1, old, old)
             for x in ("N01", "N02", "N03", "N04", "N05")}
-    crowded = mk_sig(state={**state, "boss.hub.done": False, "boss.facebook.done": False, "boss.agy.done": False})
+    crowded = mk_sig(state={**state, "boss.ai.done": False, "backup.scheduled": False}, hub_expiring=True)
     p = today_of(crowded, items=done)
-    assert keys_of(p) == ["boss.hub", "boss.facebook", "boss.agy"]        # 3 việc P1 chiếm hết ⇒ followup không hiện
+    assert keys_of(p) == ["boss.ai", "backup.unset", "hub.token_expiring"]  # 3 việc P1 chiếm hết ⇒ followup không hiện
     assert lesson_ids(p) == "G05"                                             # nên bài G05 vẫn còn
     p5 = today_of(mk_sig(state=state), items=done)
     assert keys_of(p5) == ["followup.5", "followup.6", "followup.7"]
@@ -756,24 +802,42 @@ async def test_fresh_machine_shows_first_three_by_table_then_done_row_vanishes(
         owner_api: Api, db: Any, redis: Any, clock: list[datetime]) -> None:
     org, _uid = await owner_of(db)
     d = await today(owner_api)
-    assert todo_keys(d) == ["model.missing", "boss.hub", "boss.facebook"]
-    assert [t["level"] for t in d["todos"]] == ["P0", "P1", "P1"]
-    assert d["todos"][0]["target"] == "api.bindings" and d["todos"][1]["target"] == "boss_checks.row.hub"
-    assert d["progress"]["required_done"] == 0 and d["progress"]["required_total"] == 6
+    # v0.1.55: máy mới chỉ có 1 việc bắt buộc (nguồn AI). Chưa có model ⇒ model.missing (P0) nói thay boss.ai;
+    # Gen-hub chỉ còn là gợi ý P3 (không chuông), Truy cập từ xa chưa nhắc vì chưa mời ai.
+    assert todo_keys(d) == ["model.missing", "backup.unset", "boss.hub"]
+    assert [t["level"] for t in d["todos"]] == ["P0", "P1", "P3"]
+    assert d["todos"][0]["target"] == "api.bindings" and d["todos"][2]["target"] == "boss_checks.row.hub"
+    assert d["progress"]["required_done"] == 0 and d["progress"]["required_total"] == 1
     assert d["progress"]["lessons_total"] == 19 and d["progress"]["stable"] is False
     assert d["date"] == "2026-10-12" and d["enabled"] is True and d["snoozed_until"] is None
     assert d["lesson"]["id"] == "N01" and d["lesson"]["k"] == 1 and d["lesson"]["total"] == 19
     assert d["unseen"] is True
-    # giả lập dòng Gen-hub đạt ⇒ lần tải sau (xoá cache tín hiệu) việc boss.hub biến mất, x/N tăng
+    # giả lập Gen-hub đạt + nguồn AI đạt ⇒ lần tải sau (xoá cache tín hiệu) gợi ý boss.hub biến mất, x/N tăng
     async with admin_sessionmaker()() as adm:
         await boss_service.record(adm, org, "hub", "pass")
+        await boss_service.record(adm, org, "ai_source", "pass")
         await adm.commit()
     assert 0 < await redis.ttl(sg.CACHE_KEY.format(org)) <= 60
-    assert todo_keys(await today(owner_api)) == ["model.missing", "boss.hub", "boss.facebook"]   # còn trong cache
+    assert todo_keys(await today(owner_api)) == ["model.missing", "backup.unset", "boss.hub"]   # còn trong cache
     await redis.delete(sg.CACHE_KEY.format(org))
     d2 = await today(owner_api)
-    assert todo_keys(d2) == ["model.missing", "boss.facebook", "boss.agy"]
-    assert d2["progress"]["required_done"] == 1
+    assert todo_keys(d2) == ["model.missing", "backup.unset", "followup.5"]
+    assert d2["progress"]["required_done"] == 1 and d2["progress"]["required_total"] == 1
+
+
+async def test_remote_access_nudge_appears_via_the_api_only_with_staff(
+        owner_api: Api, client: Any, db: Any, redis: Any, clock: list[datetime]) -> None:
+    org, _uid = await owner_of(db)
+    assert "boss.remote" not in todo_keys(await today(owner_api))
+    other = await login_as(client, db, "manager")                      # đã có người dùng khác Owner đang hoạt động
+    await other.c.aclose()
+    await redis.delete(sg.CACHE_KEY.format(org))
+    sig = await sg.collect(db, redis, org)
+    assert sig.state["staff.active"] is True
+    assert "boss.remote" in [t.key for t in engine.candidate_todos(sig)]
+    await redis.delete(sg.CACHE_KEY.format(org))
+    d = await today(owner_api)
+    assert all(t["level"] != "P1" or t["key"] in ("backup.unset",) for t in d["todos"])      # từ xa không bao giờ là P1
 
 
 async def test_followup_11_13_14_never_appear_through_the_api(owner_api: Api, sigbox: list[sg.Signals],
@@ -799,21 +863,28 @@ async def test_get_setup_follow_up_output_is_unchanged_and_helper_matches(owner_
 # (b) hành động trên mục
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
-BUSY = {"model.bound": False, "boss.hub.done": False, "boss.facebook.done": False, "boss.agy.done": False}
+BUSY = {"model.bound": False, "backup.scheduled": False}
+
+
+def busy(state: dict[str, bool] | None = None, **kw: Any) -> sg.Signals:
+    """P0 model.missing + 3 việc P1: sự cố mức warn, chưa đặt lịch sao lưu, token Gen-hub sắp hết hạn."""
+    return mk_sig(state={**BUSY, **(state or {})}, hub_expiring=True, alerts=[alert("worker.silent", "warn", T0)],
+                  **kw)
+
 
 
 @pytest.mark.parametrize("days", [1, 3, 7])
 async def test_snooze_hides_until_expiry(owner_api: Api, sigbox: list[sg.Signals], clock: list[datetime],
                                          days: int) -> None:
-    sigbox[0] = mk_sig(state=BUSY)
-    assert todo_keys(await today(owner_api)) == ["model.missing", "boss.hub", "boss.facebook"]
-    r = await post_item(owner_api, "todo:boss.hub", action="snooze", days=days)
+    sigbox[0] = busy()
+    assert todo_keys(await today(owner_api)) == ["model.missing", "health.worker.silent", "backup.unset"]
+    r = await post_item(owner_api, "todo:backup.unset", action="snooze", days=days)
     assert r.status_code == 204 and r.content == b""
-    assert todo_keys(await today(owner_api)) == ["model.missing", "boss.facebook", "boss.agy"]
+    assert todo_keys(await today(owner_api)) == ["model.missing", "health.worker.silent", "hub.token_expiring"]
     clock[0] = T0 + timedelta(days=days) - timedelta(minutes=1)
-    assert "boss.hub" not in todo_keys(await today(owner_api))
+    assert "backup.unset" not in todo_keys(await today(owner_api))
     clock[0] = T0 + timedelta(days=days)
-    assert todo_keys(await today(owner_api)) == ["model.missing", "boss.hub", "boss.facebook"]
+    assert todo_keys(await today(owner_api)) == ["model.missing", "health.worker.silent", "backup.unset"]
     assert await http_logs() == [] and await coach_log() == []      # hoãn là thao tác riêng tư, không ghi Nhật ký
 
 
@@ -839,11 +910,12 @@ async def test_unknown_item_keys_are_404(owner_api: Api, sigbox: list[sg.Signals
 
 async def test_dismiss_rules_confirm_log_restore_and_progress_unchanged(
         owner_api: Api, sigbox: list[sg.Signals], clock: list[datetime]) -> None:
-    sigbox[0] = mk_sig(state={**BUSY, "followup.6.done": False}, drafts=2, required=(2, 6),
-                       alerts=[alert("disk.low", "bad", T0, "/system?tab=storage&focus=health"),
-                               alert("offsite.stale", "warn", T0, "/system?tab=storage&focus=offsite")])
+    sig = mk_sig(state={**BUSY, "followup.6.done": False}, drafts=2, required=(0, 1),
+                 alerts=[alert("disk.low", "bad", T0, "/system?tab=storage&focus=health"),
+                         alert("offsite.stale", "warn", T0, "/system?tab=storage&focus=offsite")])
+    sigbox[0] = sig
     before = await today(owner_api)
-    assert todo_keys(before) == ["health.disk.low", "model.missing", "boss.hub"]
+    assert todo_keys(before) == ["health.disk.low", "model.missing", "health.offsite.stale"]
     # P0 (model.missing, sự cố bad) ⇒ 422 dù đã xác nhận
     for key in ("todo:model.missing", "todo:health.disk.low"):
         r = await post_item(owner_api, key, action="dismiss", confirm=True)
@@ -857,40 +929,54 @@ async def test_dismiss_rules_confirm_log_restore_and_progress_unchanged(
     assert r.status_code == 422 and r.json()["code"] == "COACH_ACTION_NOT_ALLOWED"
     # thiếu confirm ⇒ 422 COACH_CONFIRM_REQUIRED
     for body in ({"action": "dismiss"}, {"action": "dismiss", "confirm": False}):
-        r = await owner_api.send("POST", "/gen/coach/items/todo:boss.facebook", body)
+        r = await owner_api.send("POST", "/gen/coach/items/todo:backup.unset", body)
         assert r.status_code == 422 and r.json()["code"] == "COACH_CONFIRM_REQUIRED"
         assert r.json()["title"] == "Sếp xác nhận giúp em trước khi tắt việc này"
     assert await coach_log() == []
     # có confirm ⇒ 204 + đúng một hàng Nhật ký, chỉ có khoá
-    r = await post_item(owner_api, "todo:boss.facebook", action="dismiss", confirm=True)
+    r = await post_item(owner_api, "todo:backup.unset", action="dismiss", confirm=True)
     assert r.status_code == 204
     log = await coach_log()
-    assert len(log) == 1 and log[0].action == "gen.coach_item_dismissed" and log[0].target_id == "todo:boss.facebook"
+    assert len(log) == 1 and log[0].action == "gen.coach_item_dismissed" and log[0].target_id == "todo:backup.unset"
     assert log[0].actor_type == "user" and log[0].detail == {}
     after = await today(owner_api)
-    assert todo_keys(after) == ["health.disk.low", "model.missing", "boss.hub"]
-    assert "boss.facebook" not in todo_keys(after)
-    assert after["progress"]["required_done"] == before["progress"]["required_done"] == 2          # x/N không đổi (NT6)
-    assert after["progress"]["required_total"] == 6
-    sigbox[0] = mk_sig(state={**BUSY, "boss.hub.done": True}, required=(2, 6))
-    assert "boss.facebook" not in todo_keys(await today(owner_api))
+    assert todo_keys(after) == ["health.disk.low", "model.missing", "health.offsite.stale"]
+    assert "backup.unset" not in todo_keys(after)
+    assert after["progress"]["required_done"] == before["progress"]["required_done"] == 0          # x/N không đổi (NT6)
+    assert after["progress"]["required_total"] == 1
+    sigbox[0] = mk_sig(state={**BUSY, "followup.6.done": True}, required=(0, 1))
+    assert "backup.unset" not in todo_keys(await today(owner_api))
     prefs = (await owner_api.get("/gen/coach/prefs")).json()
-    assert prefs["dismissed"] == [{"key": "boss.facebook", "level": "P1", "title": "Nối Facebook rồi bấm Kiểm tra"}]
+    assert prefs["dismissed"] == [{"key": "backup.unset", "level": "P1", "title": "Đặt lịch sao lưu"}]
     # việc sức khoẻ mức warn (P1) tắt được; kind lạ chưa có trong bảng cũng có khoá hợp lệ nếu thuộc health.ACTIONS
+    sigbox[0] = sig
     r = await post_item(owner_api, "todo:health.offsite.stale", action="dismiss", confirm=True)
     assert r.status_code == 204
     # khôi phục ⇒ việc quay lại + Nhật ký restored
-    r = await post_item(owner_api, "todo:boss.facebook", action="restore")
+    r = await post_item(owner_api, "todo:backup.unset", action="restore")
     assert r.status_code == 204
-    sigbox[0] = mk_sig(state=BUSY, required=(2, 6))
-    assert "boss.facebook" in todo_keys(await today(owner_api))
+    assert "backup.unset" in todo_keys(await today(owner_api))
     names = [(x.action, x.target_id) for x in await coach_log()]
-    assert names == [("gen.coach_item_dismissed", "todo:boss.facebook"),
+    assert names == [("gen.coach_item_dismissed", "todo:backup.unset"),
                      ("gen.coach_item_dismissed", "todo:health.offsite.stale"),
-                     ("gen.coach_item_restored", "todo:boss.facebook")]
+                     ("gen.coach_item_restored", "todo:backup.unset")]
     assert all(x.detail == {} for x in await coach_log())
     assert await http_logs() == []          # đã ghi Nhật ký nghiệp vụ ⇒ không có dòng http.* chung
     assert (await owner_api.get("/gen/coach/prefs")).json()["dismissed"][0]["key"] == "health.offsite.stale"
+
+
+async def test_dismissing_the_gen_hub_hint_and_the_removed_p1_keys(
+        owner_api: Api, sigbox: list[sg.Signals], clock: list[datetime]) -> None:
+    """boss.hub là gợi ý P3 tắt được (kèm xác nhận); khoá P1 cũ của dòng không còn bắt buộc (facebook, agy, claude,
+    telegram) không còn là việc ⇒ 404."""
+    sigbox[0] = mk_sig(state={"boss.hub.done": False})
+    assert todo_keys(await today(owner_api)) == ["boss.hub"]
+    r = await post_item(owner_api, "todo:boss.hub", action="dismiss", confirm=True)
+    assert r.status_code == 204
+    assert todo_keys(await today(owner_api)) == []
+    for key in ("todo:boss.facebook", "todo:boss.agy", "todo:boss.claude", "todo:boss.telegram"):
+        r = await post_item(owner_api, key, action="snooze", days=1)
+        assert r.status_code == 404 and r.json()["code"] == "COACH_ITEM_UNKNOWN", key
 
 
 async def test_p0_stays_visible_even_if_a_dismissed_row_exists_and_health_escalation(
@@ -1108,11 +1194,11 @@ async def test_payloads_never_carry_detail_message_email_or_token(
     await db.commit()
     await redis.delete(sg.CACHE_KEY.format(org))
     d = await today(owner_api, mark=True)
-    await post_item(owner_api, "todo:boss.hub", action="dismiss", confirm=True)
+    await post_item(owner_api, "todo:backup.unset", action="dismiss", confirm=True)
     texts = [orjson.dumps(d).decode(),
              (await owner_api.get("/gen/coach/prefs")).text, (await owner_api.get("/gen/coach/curriculum")).text,
              (await owner_api.get("/gen/coach/today")).text]
-    assert "health.channel.down" in texts[0] and "boss.hub" in texts[0]
+    assert "health.channel.down" in texts[0] and "health.offsite.stale" in texts[0]
     for t in texts:
         assert _RE_EMAIL.search(t) is None and _RE_SECRET.search(t) is None
         for banned in ("secret-corp", "sk-live", "Pa55w0rd", "id_rsa", "owner@", '"detail"', '"message"', "mật khẩu",
@@ -1226,8 +1312,10 @@ async def test_real_sources_produce_expected_state_on_fresh_machine(owner_api: A
     assert st["ai_budget.set"] is False and st["telegram.briefing_on"] is False
     assert st["hub.kho_write_missing"] is False
     assert all(st[f"boss.{k}.done"] is False for k in sg.BOSS_KEYS)
+    assert st["staff.active"] is False                                       # mới có mình Owner
     assert all(st[f"followup.{n}.done"] is False for n in (5, 6, 7, 8, 9, 10, 11, 13, 14))
-    assert sig.required_total == 6 and sig.required_done == 0 and sig.hub_expiring is False
+    assert sig.required_total == boss_service.REQUIRED_TOTAL == 1 and sig.required_done == 0
+    assert sig.hub_expiring is False
     assert sig.alerts == [] and sig.drafts_pending == 0
 
 
@@ -1276,8 +1364,8 @@ async def test_no_model_calls_and_no_gen_messages_anywhere(
     await today(owner_api)
     await today(owner_api, mark=True)
     assert (await post_item(owner_api, "todo:boss.hub", action="snooze", days=1)).status_code == 204
-    assert (await post_item(owner_api, "todo:boss.facebook", action="dismiss", confirm=True)).status_code == 204
-    assert (await post_item(owner_api, "todo:boss.facebook", action="restore")).status_code == 204
+    assert (await post_item(owner_api, "todo:backup.unset", action="dismiss", confirm=True)).status_code == 204
+    assert (await post_item(owner_api, "todo:backup.unset", action="restore")).status_code == 204
     assert (await post_item(owner_api, "lesson:N01", action="understood")).status_code == 204
     assert (await post_item(owner_api, "tip:tip-memory", action="snooze", days=1)).status_code == 204
     assert (await owner_api.get("/gen/coach/prefs")).status_code == 200
@@ -1302,7 +1390,7 @@ def test_coach_modules_never_import_the_model_router_or_write_gen_messages() -> 
 # (g) cron chuông
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
-P1_HUB = {"boss.hub.done": False}
+P1_AI = {"boss.ai.done": False}      # P1 duy nhất từ dòng bắt buộc (có model, nguồn AI chưa đạt)
 
 
 async def run(redis: Any, now: datetime) -> dict[str, Any]:
@@ -1330,7 +1418,7 @@ def test_cron_is_registered_in_the_worker() -> None:
 
 async def test_three_slots_twice_on_one_day_ring_at_most_once(owner_api: Api, redis: Any,
                                                               sigbox: list[sg.Signals]) -> None:
-    sigbox[0] = mk_sig(state=P1_HUB)
+    sigbox[0] = mk_sig(state=P1_AI)
     outs = []
     for hh, mm in ((2, 5), (4, 5), (7, 5)):            # 09:05, 11:05, 14:05 giờ VN
         for _ in range(2):
@@ -1342,14 +1430,14 @@ async def test_three_slots_twice_on_one_day_ring_at_most_once(owner_api: Api, re
     assert b[0].title == "Hôm nay Sếp còn 1 việc cần làm" and b[0].body == cron.BELL_BODY
     assert b[0].link == "/overview?gen=coach"
     prefs = (await rows("SELECT last_bell_at, last_bell_keys, stable_since FROM agent.gen_coach_prefs"))[0]
-    assert prefs.last_bell_at == at(0, 2, 5) and list(prefs.last_bell_keys) == ["boss.hub"]
+    assert prefs.last_bell_at == at(0, 2, 5) and list(prefs.last_bell_keys) == ["boss.ai"]
     assert prefs.stable_since is None
     assert (await rows("SELECT count(*) FROM ops.telegram_outbox"))[0][0] == 0            # không đẩy Telegram
 
 
 async def test_same_set_rings_again_after_three_days_only(owner_api: Api, redis: Any,
                                                           sigbox: list[sg.Signals]) -> None:
-    sigbox[0] = mk_sig(state=P1_HUB)
+    sigbox[0] = mk_sig(state=P1_AI)
     assert (await run(redis, at(0, 2, 5)))["bells"] == 1
     assert (await run(redis, at(1, 2, 5)))["bells"] == 0
     assert (await run(redis, at(2, 2, 5)))["bells"] == 0
@@ -1358,15 +1446,15 @@ async def test_same_set_rings_again_after_three_days_only(owner_api: Api, redis:
 
 
 async def test_new_p1_key_rings_the_next_day(owner_api: Api, redis: Any, sigbox: list[sg.Signals]) -> None:
-    sigbox[0] = mk_sig(state=P1_HUB)
+    sigbox[0] = mk_sig(state=P1_AI)
     assert (await run(redis, at(0, 2, 5)))["bells"] == 1
-    sigbox[0] = mk_sig(state={**P1_HUB, "boss.facebook.done": False})
-    assert (await run(redis, at(1, 2, 5)))["bells"] == 1           # boss.facebook là khoá mới
+    sigbox[0] = mk_sig(state={**P1_AI, "backup.scheduled": False})
+    assert (await run(redis, at(1, 2, 5)))["bells"] == 1           # backup.unset là khoá mới
     b = await bell_rows()
     assert [x.title for x in b] == ["Hôm nay Sếp còn 1 việc cần làm", "Hôm nay Sếp còn 2 việc cần làm"]
     assert (await run(redis, at(2, 2, 5)))["bells"] == 0
     keys = list((await rows("SELECT last_bell_keys FROM agent.gen_coach_prefs"))[0].last_bell_keys)
-    assert keys == ["boss.hub", "boss.facebook"]
+    assert keys == ["boss.ai", "backup.unset"]
 
 
 async def test_health_and_hub_token_keys_never_count_as_new(owner_api: Api, redis: Any,
@@ -1374,18 +1462,30 @@ async def test_health_and_hub_token_keys_never_count_as_new(owner_api: Api, redi
     sigbox[0] = mk_sig(alerts=[alert("channel.down", "bad", at(0, 1))], hub_expiring=True)
     assert (await run(redis, at(0, 2, 5)))["bells"] == 0          # chỉ health.* / hub.token_expiring ⇒ không phải 'mới'
     assert (await run(redis, at(5, 2, 5)))["bells"] == 0
-    sigbox[0] = mk_sig(state=P1_HUB)
+    sigbox[0] = mk_sig(state=P1_AI)
     assert (await run(redis, at(6, 2, 5)))["bells"] == 1
-    sigbox[0] = mk_sig(state=P1_HUB, alerts=[alert("disk.low", "bad", at(6, 5))], hub_expiring=True)
+    sigbox[0] = mk_sig(state=P1_AI, alerts=[alert("disk.low", "bad", at(6, 5))], hub_expiring=True)
     assert (await run(redis, at(7, 2, 5)))["bells"] == 0          # thêm health.* + hub.token_expiring: vẫn không mới
     assert (await run(redis, at(9, 2, 5)))["bells"] == 1          # nhưng cùng tập đã ≥ 3 ngày ⇒ nhắc lại
     assert list((await rows("SELECT last_bell_keys FROM agent.gen_coach_prefs"))[0].last_bell_keys) == [
-        "health.disk.low", "boss.hub", "hub.token_expiring"]
+        "health.disk.low", "boss.ai", "hub.token_expiring"]
+
+
+async def test_p3_hints_never_ring_the_bell(owner_api: Api, redis: Any, sigbox: list[sg.Signals]) -> None:
+    """Gen-hub / Truy cập từ xa chưa nối chỉ là gợi ý P3 (không chuông); chỉ dòng bắt buộc (P1) mới rung."""
+    sigbox[0] = mk_sig(state={f"boss.{k}.done": False for k in ("hub", "facebook", "agy", "claude", "telegram",
+                                                                  "remote")})
+    assert todo_keys(await today(owner_api)) == ["boss.hub", "boss.remote"]
+    assert (await run(redis, at(0, 2, 5)))["bells"] == 0
+    assert (await run(redis, at(5, 2, 5)))["bells"] == 0
+    assert await bell_rows() == []
+    sigbox[0] = mk_sig(state={"boss.ai.done": False, "boss.hub.done": False})
+    assert (await run(redis, at(6, 2, 5)))["bells"] == 1
 
 
 async def test_quiet_hours_block_the_bell_and_wrap_midnight(owner_api: Api, redis: Any, sigbox: list[sg.Signals],
                                                             clock: list[datetime]) -> None:
-    sigbox[0] = mk_sig(state=P1_HUB)
+    sigbox[0] = mk_sig(state=P1_AI)
     r = await owner_api.send("PATCH", "/gen/coach/prefs", {"quiet_start": 8, "quiet_end": 16})
     assert r.status_code == 200
     assert (await run(redis, at(0, 2, 5)))["bells"] == 0           # 09:05 giờ VN nằm trong 08–16
@@ -1400,7 +1500,7 @@ async def test_quiet_hours_block_the_bell_and_wrap_midnight(owner_api: Api, redi
 async def test_disabled_bell_off_snoozed_and_stable_ring_nothing(owner_api: Api, redis: Any,
                                                                  sigbox: list[sg.Signals],
                                                                  clock: list[datetime]) -> None:
-    sigbox[0] = mk_sig(state=P1_HUB)
+    sigbox[0] = mk_sig(state=P1_AI)
     for field in ("enabled", "bell"):
         await owner_api.send("PATCH", "/gen/coach/prefs", {field: False})
         assert (await run(redis, at(0, 2, 5)))["bells"] == 0, field
@@ -1426,7 +1526,7 @@ async def test_stable_system_with_stale_p1_history_does_not_ring(owner_api: Api,
     sigbox[0] = mk_sig()                                      # không việc nào
     assert (await run(redis, at(0, 2, 5)))["bells"] == 0
     assert (await rows("SELECT stable_since FROM agent.gen_coach_prefs"))[0].stable_since == at(0, 2, 5)
-    sigbox[0] = mk_sig(state=P1_HUB)                         # P1 xuất hiện ⇒ mốc về NULL ⇒ chuông được (không ổn định)
+    sigbox[0] = mk_sig(state=P1_AI)                         # P1 xuất hiện ⇒ mốc về NULL ⇒ chuông được (không ổn định)
     assert (await run(redis, at(8, 2, 5)))["bells"] == 1
     assert (await rows("SELECT stable_since FROM agent.gen_coach_prefs"))[0].stable_since is None
 
@@ -1434,7 +1534,7 @@ async def test_stable_system_with_stale_p1_history_does_not_ring(owner_api: Api,
 async def test_card_seen_today_blocks_the_bell_but_not_tomorrow(owner_api: Api, redis: Any,
                                                                 sigbox: list[sg.Signals],
                                                                 clock: list[datetime]) -> None:
-    sigbox[0] = mk_sig(state=P1_HUB)
+    sigbox[0] = mk_sig(state=P1_AI)
     clock[0] = at(0, 1, 0)                                     # 08:00 giờ VN, Sếp mở thẻ
     await today(owner_api, mark=True)
     assert (await run(redis, at(0, 2, 5)))["bells"] == 0       # đã xem thẻ hôm nay
@@ -1443,7 +1543,7 @@ async def test_card_seen_today_blocks_the_bell_but_not_tomorrow(owner_api: Api, 
 
 
 async def test_bell_link_follows_gen_availability(owner_api: Api, redis: Any, sigbox: list[sg.Signals]) -> None:
-    sigbox[0] = mk_sig(state=P1_HUB)
+    sigbox[0] = mk_sig(state=P1_AI)
     await run(redis, at(0, 2, 5))
     assert (await bell_rows())[-1].link == "/overview?gen=coach"
     r = await owner_api.send("PATCH", "/gen/settings", {"enabled": False})
@@ -1473,7 +1573,7 @@ async def test_every_active_owner_gets_one_bell_and_others_none(owner_api: Api, 
         await adm.commit()
     other = await login_as(client, db, "manager")
     await other.c.aclose()
-    sigbox[0] = mk_sig(state=P1_HUB)
+    sigbox[0] = mk_sig(state=P1_AI)
     out = await run(redis, at(0, 2, 5))
     assert out["owners"] == 2 and out["bells"] == 2
     assert {b.user_id for b in await bell_rows()} == {first, second}
@@ -1534,20 +1634,20 @@ def _content(**kw: Any) -> dict[str, Any]:
 
 def test_build_content_adds_exactly_one_line_only_below_total() -> None:
     base = _content()
-    line = {"kind": "say", "text": REQ_LINE.format(x=3, n=6)}
-    with_ = _content(required=(3, 6))
+    line = {"kind": "say", "text": REQ_LINE.format(x=1, n=3)}
+    with_ = _content(required=(1, 3))
     assert with_["steps"] == base["steps"][:2] + [line] + base["steps"][2:]       # ngay sau bước tóm tắt, trước các mục
     assert with_["sections"] == base["sections"] and base["hub_at"] == 3 and with_["hub_at"] == 4
     assert with_["steps"][with_["hub_at"]] == base["steps"][base["hub_at"]]          # hub_at vẫn trỏ đúng chỗ
-    for same in (None, (6, 6), (7, 6)):
+    for same in (None, (3, 3), (4, 3)):
         assert _content(required=same)["steps"] == base["steps"], same
-    assert sum(1 for s in _content(required=(0, 6))["steps"] if str(s.get("text", "")).startswith("Việc bắt buộc")) == 1
-    no_sum = _content(summary=None, summary_source="none", needs_api_key=True, required=(0, 6))
+    assert sum(1 for s in _content(required=(0, 3))["steps"] if str(s.get("text", "")).startswith("Việc bắt buộc")) == 1
+    no_sum = _content(summary=None, summary_source="none", needs_api_key=True, required=(0, 3))
     assert no_sum["steps"][:2] == [{"kind": "tool", "name": "briefing.sources"},
-                                   {"kind": "say", "text": REQ_LINE.format(x=0, n=6)}]
-    failed = _content(summary=None, summary_source="none", summary_failed=True, required=(1, 6))
+                                   {"kind": "say", "text": REQ_LINE.format(x=0, n=3)}]
+    failed = _content(summary=None, summary_source="none", summary_failed=True, required=(1, 3))
     assert failed["steps"][1] == {"kind": "say", "text": briefing.SUMMARY_FAILED}
-    assert failed["steps"][2] == {"kind": "say", "text": REQ_LINE.format(x=1, n=6)}
+    assert failed["steps"][2] == {"kind": "say", "text": REQ_LINE.format(x=1, n=3)}
     # chuông + Telegram chỉ tính từ `sections` + tóm tắt ⇒ không đổi
     from gh.telegram import service as telegram
     assert briefing.body_text(with_["sections"], False) == briefing.body_text(base["sections"], False)
@@ -1573,8 +1673,8 @@ async def test_briefing_run_adds_the_required_line_without_changing_anything_els
 
     monkeypatch.setattr(briefing, "_summarize", fake_summary)
     monkeypatch.setattr(boss_service, "overview", fake_overview)
-    for req, when in ((None, briefing_today(7, 31)), ((2, 6), briefing_today(17, 31)),
-                      ((6, 6), briefing_today(7, 31) + timedelta(days=1))):
+    for req, when in ((None, briefing_today(7, 31)), ((0, 1), briefing_today(17, 31)),
+                      ((1, 1), briefing_today(7, 31) + timedelta(days=1))):
         box["required"] = req
         await briefing.run_briefing(sessionmaker(), redis, briefing_router(redis), now=when)
     msgs = await briefing_messages(db)
@@ -1585,7 +1685,7 @@ async def test_briefing_run_adds_the_required_line_without_changing_anything_els
 
     assert req_lines(msgs[0]) == [] and req_lines(msgs[2]) == []         # không đọc được / đã đạt đủ ⇒ không dòng
     assert req_lines(msgs[1]) == [2]                                     # steps: tool, tóm tắt, dòng x/N
-    assert msgs[1]["steps"][2] == {"kind": "say", "text": REQ_LINE.format(x=2, n=6)}
+    assert msgs[1]["steps"][2] == {"kind": "say", "text": REQ_LINE.format(x=0, n=1)}
     assert msgs[0]["steps"][:2] == [{"kind": "tool", "name": "briefing.sources"},
                                     {"kind": "say", "text": "Tóm tắt thử"}]
     assert msgs[0]["sections"] == msgs[1]["sections"] == msgs[2]["sections"]
@@ -1608,13 +1708,13 @@ async def test_briefing_survives_an_unreadable_boss_overview(owner_api: Api, db:
     assert len(msgs) == 1 and not any("Việc bắt buộc" in str(s.get("text", "")) for s in msgs[0]["steps"])
 
 
-async def test_briefing_on_a_fresh_machine_shows_zero_of_six(owner_api: Api, db: Any, redis: Any) -> None:
+async def test_briefing_on_a_fresh_machine_shows_zero_of_one(owner_api: Api, db: Any, redis: Any) -> None:
     await briefing.run_briefing(sessionmaker(), redis, briefing_router(redis), now=briefing_today(7, 31))
     msgs = await briefing_messages(db)
     says = [s["text"] for s in msgs[0]["steps"] if s["kind"] == "say"]
-    assert REQ_LINE.format(x=0, n=6) in says and says.count(REQ_LINE.format(x=0, n=6)) == 1
+    assert REQ_LINE.format(x=0, n=1) in says and says.count(REQ_LINE.format(x=0, n=1)) == 1
     # chưa có nguồn AI ⇒ không có bước tóm tắt ⇒ dòng x/N nằm ngay sau bước tool
-    assert msgs[0]["steps"][1] == {"kind": "say", "text": REQ_LINE.format(x=0, n=6)}
+    assert msgs[0]["steps"][1] == {"kind": "say", "text": REQ_LINE.format(x=0, n=1)}
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -1636,7 +1736,7 @@ def test_coach_status_is_registered_everywhere() -> None:
 
 async def test_coach_status_tool_result_is_small_static_and_does_not_mark_shown(
         owner_api: Api, app: Any, sigbox: list[sg.Signals], clock: list[datetime]) -> None:
-    sigbox[0] = mk_sig(state={"model.bound": False, "followup.5.done": False}, required=(4, 6))
+    sigbox[0] = mk_sig(state={"model.bound": False, "followup.5.done": False}, required=(0, 1))
     o, tok = await _user_of(owner_api)
     runner = ToolRunner(app, o, tok)
     res = await runner.run("coach.status", {})
@@ -1645,7 +1745,7 @@ async def test_coach_status_tool_result_is_small_static_and_does_not_mark_shown(
     assert set(data) == {"enabled", "todos", "progress", "lesson", "lessons"}
     assert [t["key"] for t in data["todos"]] == ["model.missing", "followup.5"]
     assert data["todos"][0]["target"] == "api.bindings" and data["todos"][1]["n"] == 5 and "5" in runner.seen_ids
-    assert data["progress"]["required_done"] == 4 and data["progress"]["required_total"] == 6
+    assert data["progress"]["required_done"] == 0 and data["progress"]["required_total"] == 1
     assert data["lesson"]["id"] == "N01" and set(data["lesson"]) == {"id", "k", "total", "title", "status"}
     assert len(data["lessons"]) == 19 and set(data["lessons"][0]) == {"id", "title", "status"}
     assert '"detail"' not in res.text and '"message"' not in res.text
@@ -1679,7 +1779,7 @@ async def test_gen_turn_with_coach_question_gets_the_block_and_runs_the_tool(
     system = router.calls[0][0].content
     assert system.count(engine.BLOCK_HEADER) == 1
     assert "model.missing · Gen chưa có model để trả lời · api.bindings" in system
-    assert "boss.hub · Nối Gen-hub rồi bấm Kiểm tra · boss_checks.row.hub" in system
+    assert "boss.hub · Nối Gen-hub nếu Sếp muốn · boss_checks.row.hub" in system
     block = system[system.index(engine.BLOCK_HEADER):].split("\n\n")[0]
     assert len(block) <= 500
     assert "Việc vận hành (tool coach.status" in system and "coach.status: Việc vận hành Sếp cần làm ngay" in system

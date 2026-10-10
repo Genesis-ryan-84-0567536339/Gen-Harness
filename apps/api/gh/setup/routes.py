@@ -67,6 +67,8 @@ HARD_BOUNDARIES = (
     "Điểm số và cảnh báo nhân sự phải có chứng cứ",
     "Ẩn dữ liệu nhạy cảm (số tài khoản, sức khoẻ, đời tư) khỏi vai trò dưới Owner",
 )
+# v0.1.55: xưng hô mặc định ở bước 3 (Sếp tự xưng / agent gọi Sếp) — điền sẵn, sửa được.
+DEFAULT_ADDRESSING = "Sếp"
 CONSOLE_STEPS = ("1", "2", "3")    # xong 3 bước này thì Console mở (các bước sau làm tiếp được)
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 CURRENCIES = ("VND", "USD", "EUR", "JPY", "SGD", "THB", "CNY", "KRW")
@@ -91,8 +93,9 @@ class Step3In(BaseModel):
     org_name: str = Field(max_length=160)
     timezone: str = Field(default="Asia/Ho_Chi_Minh", max_length=64)
     currency: str = Field(default="VND", max_length=3)
-    self_name: str = Field(max_length=40)
-    bot_calls_me: str = Field(max_length=60)
+    # v0.1.55 (G2): hai ô xưng hô mặc định "Sếp" — thiếu trường ⇒ điền mặc định (hình dạng payload giữ nguyên).
+    self_name: str = Field(default=DEFAULT_ADDRESSING, max_length=40)
+    bot_calls_me: str = Field(default=DEFAULT_ADDRESSING, max_length=60)
 
 
 async def _row(db: AsyncSession) -> Any:
@@ -283,6 +286,14 @@ DEFAULT_BACKUP: dict[str, Any] = {"frequency": "daily", "time_of_day": "02:00", 
                                   "destination": "local"}
 
 
+async def write_default_backup(db: AsyncSession, org_id: uuid.UUID) -> bool:
+    """Ghi lịch sao lưu mặc định (`DEFAULT_BACKUP`) khi tổ chức CHƯA có khoá `settings.backup`. Trả True nếu đã ghi."""
+    res = await db.execute(text("""UPDATE core.organizations SET settings = settings || CAST(:s AS jsonb)
+                                   WHERE id = :o AND NOT (settings ? 'backup')"""),
+                           {"s": json.dumps({"backup": DEFAULT_BACKUP}), "o": org_id})
+    return bool(res.rowcount)    # type: ignore[attr-defined]
+
+
 async def seed_default_rules(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID | None) -> int:
     """Nạp bộ quy tắc khởi đầu (`presets.PRESETS`, bật theo mặc định của từng quy tắc) khi tổ chức CHƯA có quy tắc
     nào — không đụng tới quy tắc Owner đã tạo/tắt. Trả số quy tắc đã thêm."""
@@ -318,13 +329,12 @@ async def skip(n: int, request: Request, db: AsyncSession = DB,
         if first_skip and n == 7:
             await seed_default_rules(db, row.org_id, owner.id)
         elif first_skip and n == 11:
-            await db.execute(text("""UPDATE core.organizations SET settings = settings || CAST(:s AS jsonb)
-                                     WHERE id = :o AND NOT (settings ? 'backup')"""),
-                             {"s": json.dumps({"backup": DEFAULT_BACKUP}), "o": row.org_id})
+            await write_default_backup(db, row.org_id)
         elif n == 4:
-            # "Để sau" bước 4 nhưng đã có nguồn gọi thử OK kèm model → vẫn gán model đó cho agent lõi còn trống
-            # (giữ tự gán của v0.1.28); không có thì thôi — Tổng quan hiện "Chưa có model".
-            await auto_assign_tested_model(db, row.org_id)
+            # "Để sau" bước 4 nhưng đã có nguồn gọi thử OK kèm model → vẫn chép model đã gọi thử vào `agent.models` cho
+            # nguồn còn trống (v0.1.55: KHÔNG ghi agent.bindings — hồ sơ tiêu chuẩn tự phủ); không có thì thôi — Tổng
+            # quan hiện "Chưa có model".
+            await ensure_tested_models(db, row.org_id)
     completed["steps"] = done
     await actionlog.record(db, org_id=row.org_id, actor_type="user", actor_id=owner.actor_id,
                            action="setup.step_skipped", target_type="setup_step", target_id=str(n),
@@ -347,11 +357,18 @@ class Step6In(BaseModel):
     groups: list[Step6Group] = Field(default_factory=list, max_length=500)
 
 
+#: v0.1.55 (G2): mặc định bước 7 — chu kỳ 900 giây, ngưỡng 500 tin, lô 250, tin cậy tối thiểu 0,6 (cùng giá trị cột mặc
+#: định của `refinery.schedule`). Thiếu trường ⇒ điền mặc định; `rule_codes` thiếu ⇒ bật bộ quy tắc khởi đầu.
+STEP7_DEFAULTS: dict[str, Any] = {"interval_seconds": 900, "count_threshold": 500, "batch_size": 250,
+                                  "min_confidence": 0.6}
+
+
 class Step7In(BaseModel):
-    interval_seconds: int = Field(ge=60, le=86400)
-    count_threshold: int = Field(ge=1, le=100000)
-    min_confidence: float = Field(ge=0, le=1)
-    rule_codes: list[str] = Field(default_factory=list, max_length=50)
+    interval_seconds: int = Field(default=STEP7_DEFAULTS["interval_seconds"], ge=60, le=86400)
+    count_threshold: int = Field(default=STEP7_DEFAULTS["count_threshold"], ge=1, le=100000)
+    min_confidence: float = Field(default=STEP7_DEFAULTS["min_confidence"], ge=0, le=1)
+    # None (thiếu) = bộ quy tắc khởi đầu bật theo mặc định của từng quy tắc; danh sách (kể cả rỗng) = đúng Owner chọn.
+    rule_codes: list[str] | None = Field(default=None, max_length=50)
     weights: list[dict[str, Any]] = Field(default_factory=list, max_length=20)
 
 
@@ -405,7 +422,8 @@ async def step4(body: Step4In, request: Request, db: AsyncSession = DB,
                 user: service.CurrentUser | None = Depends(optional_user)) -> dict[str, Any]:
     """Bộ não AI: thứ tự ưu tiên chuyển dự phòng. Cần ít nhất một nhà cung cấp đã gọi thử thành công.
 
-    v0.1.29: lưu được cả sau Hoàn tất (Owner "Để sau" bước 4 rồi chọn model từ `/guide/4`)."""
+    v0.1.29: lưu được cả sau Hoàn tất (Owner "Để sau" bước 4 rồi chọn model từ `/guide/4`).
+    v0.1.55 (G2): chỉ lưu thứ tự nguồn + bảo đảm có dòng model (`agent.models`); KHÔNG gán `agent.bindings`."""
     row, owner = await _owner_step(db, user, after_finish=True)
     ids = list(dict.fromkeys(body.provider_ids))
     found = (await db.execute(text("""
@@ -427,7 +445,6 @@ async def step4(body: Step4In, request: Request, db: AsyncSession = DB,
     # gọi thử (bỏ model embedding). Không nguồn nào có model → chưa cho qua bước (trước đây qua được nhưng không agent
     # nào gọi được model: sàng lọc không chạy, Gen báo "chưa có model").
     model_id = None
-    other_id = None    # F-22: model đầu tiên của nguồn KHÔNG phải Antigravity CLI — cho sàng lọc tin, trực việc…
     ready_ids = {p.id for p in ready}
     for p in (next(f for f in found if f.id == i) for i in ids):
         if p.id not in ready_ids:
@@ -441,8 +458,6 @@ async def step4(body: Step4In, request: Request, db: AsyncSession = DB,
                     ON CONFLICT (provider_id, model_name) DO UPDATE SET model_name = EXCLUDED.model_name
                     RETURNING id"""), {"p": p.id, "m": choice[0], "e": choice[1]})).scalar_one()
         model_id = model_id or mid
-        if p.kind != "antigravity_cli":
-            other_id = other_id or mid
     if model_id is None:
         raise incomplete("Chưa có model nào để dùng — bấm \"Kiểm tra\" ở một nguồn rồi chọn \"Dùng model này\"")
     # Thứ tự: nguồn Owner chọn (đã sẵn sàng) đứng đầu theo đúng thứ tự gửi lên; nguồn lỗi / chưa kiểm tra xuống cuối
@@ -454,7 +469,8 @@ async def step4(body: Step4In, request: Request, db: AsyncSession = DB,
         await db.execute(text("""UPDATE agent.providers SET failover_rank = :r,
                                  is_enabled = CASE WHEN id = ANY(:ids) THEN true ELSE is_enabled END WHERE id = :i"""),
                          {"r": rank, "i": pid, "ids": ids})
-    await _bind_core_agents(db, row.org_id, model_id, other_id)
+    # v0.1.55 (G2): KHÔNG ghi agent.bindings nữa — hồ sơ tiêu chuẩn (gh.defaults) tự phủ cho Gen, Sàng lọc, Trả lời…;
+    # Owner vẫn gán riêng từng agent ở màn API & Model khi muốn.
     return await _mark_done(db, request, row, owner, 4, {"provider_ids": [str(i) for i in ids],
                                                           "model_id": str(model_id)})
 
@@ -469,10 +485,13 @@ async def _is_agy_model(db: AsyncSession, model_id: uuid.UUID | None) -> bool:
 
 async def _bind_core_agents(db: AsyncSession, org_id: uuid.UUID, model_id: uuid.UUID,
                             other_id: uuid.UUID | None = None) -> None:
-    """Gán model cho các agent lõi còn trống (Sàng lọc, Gen…) — Owner đổi lại được ở màn API & Model.
+    """[CŨ — v0.1.55: trình thiết lập KHÔNG còn gọi; hồ sơ tiêu chuẩn (gh.defaults) tự phủ.] Gán model cho các agent
+    lõi còn trống (Sàng lọc, Gen…) — Owner đổi lại được ở màn API & Model.
 
     F-22 (luật cứng): model của Antigravity CLI CHỈ gán cho Gen (core.gen); khoá lõi khác nhận `other_id` (model đầu
-    tiên của nguồn không phải agy đã sẵn sàng), không có thì để trống."""
+    tiên của nguồn không phải agy đã sẵn sàng), không có thì để trống.
+    TODO(v0155-integ): Opus xoá hàm này cùng `auto_assign_tested_model` và các test cũ import chúng
+    (test_cli_effort_v0132, test_agy_owner_only_v0138) khi tích hợp."""
     agy = await _is_agy_model(db, model_id)
     if agy and await _is_agy_model(db, other_id):
         other_id = None
@@ -485,10 +504,8 @@ async def _bind_core_agents(db: AsyncSession, org_id: uuid.UUID, model_id: uuid.
                          {"o": org_id, "k": key, "m": mid, "ct": DEFAULT_CONTEXT_TOKENS})
 
 
-async def auto_assign_tested_model(db: AsyncSession, org_id: uuid.UUID) -> uuid.UUID | None:
-    """Model của nguồn đã gọi thử OK (đã chọn, hoặc model đầu tiên nhận được khi gọi thử) → gán cho agent lõi còn
-    trống. Không có nguồn nào như vậy → None, không đổi gì."""
-    rows = (await db.execute(text("""
+#: Nguồn đã gọi thử OK (hoặc CLI đã đăng nhập), theo thứ tự chuỗi — dùng cho `ensure_tested_models` và hàm cũ.
+_TESTED_SOURCES_SQL = """
         SELECT p.id, p.kind, CASE WHEN jsonb_typeof(p.last_test->'models') = 'array' THEN
                     ARRAY(SELECT jsonb_array_elements_text(p.last_test->'models')) END AS test_models,
                p.last_test->>'probe_model' AS probe_model, p.last_test->>'probe_effort' AS probe_effort
@@ -498,7 +515,30 @@ async def auto_assign_tested_model(db: AsyncSession, org_id: uuid.UUID) -> uuid.
                                                       WHERE c.provider_id = p.id AND c.is_active))
                OR (p.kind NOT IN ('antigravity_cli', 'claude_code_cli') AND p.auth_state = 'ok'
                    AND COALESCE((p.last_test->>'ok')::boolean, false)))
-        ORDER BY p.failover_rank NULLS LAST, p.created_at"""), {"o": org_id})).all()
+        ORDER BY p.failover_rank NULLS LAST, p.created_at"""
+
+
+async def ensure_tested_models(db: AsyncSession, org_id: uuid.UUID) -> int:
+    """v0.1.55 (G2): với mỗi nguồn đã gọi thử OK mà CHƯA có model nào, chép model đã gọi thử vào `agent.models` (giống
+    bước 4 khi Owner chưa bấm "Dùng model này"). KHÔNG ghi `agent.bindings`. Trả số model mới thêm. Chạy lại an toàn."""
+    added = 0
+    for p in (await db.execute(text(_TESTED_SOURCES_SQL), {"o": org_id})).all():
+        if await _first_model(db, p.id) is not None:
+            continue
+        choice = _tested_choice(p)
+        if choice is None:
+            continue
+        await db.execute(text("""
+            INSERT INTO agent.models (provider_id, model_name, effort) VALUES (:p, :m, :e)
+            ON CONFLICT (provider_id, model_name) DO NOTHING"""), {"p": p.id, "m": choice[0], "e": choice[1]})
+        added += 1
+    return added
+
+
+async def auto_assign_tested_model(db: AsyncSession, org_id: uuid.UUID) -> uuid.UUID | None:
+    """[CŨ — v0.1.55: trình thiết lập KHÔNG còn gọi; xem `_bind_core_agents`.] Model của nguồn đã gọi thử OK (đã chọn,
+    hoặc model đầu tiên nhận được khi gọi thử) → gán cho agent lõi còn trống. Không có nguồn nào như vậy → None."""
+    rows = (await db.execute(text(_TESTED_SOURCES_SQL), {"o": org_id})).all()
     first: uuid.UUID | None = None
     for p in rows:
         if first is not None and p.kind == "antigravity_cli":
@@ -602,10 +642,15 @@ async def rule_presets(db: AsyncSession = DB,
 @router.put("/steps/7")
 async def step7(body: Step7In, request: Request, db: AsyncSession = DB,
                 user: service.CurrentUser | None = Depends(optional_user)) -> dict[str, Any]:
-    """Sàng lọc: lịch chạy (chu kỳ HOẶC ngưỡng), bộ quy tắc khởi đầu, trọng số chấm điểm."""
+    """Sàng lọc: lịch chạy (chu kỳ HOẶC ngưỡng), bộ quy tắc khởi đầu, trọng số chấm điểm.
+
+    v0.1.55 (G2): mọi trường có mặc định (900 giây / 500 tin / lô 250 / tin cậy 0,6; quy tắc khởi đầu bật sẵn) — web
+    chỉ hỏi "ngành nào" (bộ quy tắc); gửi `{}` cũng được."""
     row, owner = await _owner_step(db, user, after_finish=True)
     known = {p["code"]: p for p in presets.PRESETS}
-    unknown = [c for c in body.rule_codes if c not in known]
+    rule_codes = [str(p["code"]) for p in presets.PRESETS if p["enabled"]] if body.rule_codes is None \
+        else body.rule_codes
+    unknown = [c for c in rule_codes if c not in known]
     if unknown:
         raise field_errors({"rule_codes": f"Không có quy tắc {', '.join(unknown)}"})
     current = await load_schedule(db, row.org_id)
@@ -617,7 +662,7 @@ async def step7(body: Step7In, request: Request, db: AsyncSession = DB,
     existing = {r.code: r.id for r in (await db.execute(text("SELECT code, id FROM refinery.rules WHERE org_id = :o"),
                                                             {"o": row.org_id})).all()}
     for code, p in known.items():
-        on = code in body.rule_codes
+        on = code in rule_codes
         if code in existing:
             await db.execute(text("UPDATE refinery.rules SET is_enabled = :e, updated_at = now() WHERE id = :i"),
                              {"e": on, "i": existing[code]})
@@ -627,18 +672,24 @@ async def step7(body: Step7In, request: Request, db: AsyncSession = DB,
             await create_rule(db, row.org_id, rin, owner.id, code=code, enabled=on)
     return await _mark_done(db, request, row, owner, 7,
                             {"interval_seconds": body.interval_seconds, "count_threshold": body.count_threshold,
-                             "min_confidence": body.min_confidence, "rule_codes": body.rule_codes})
+                             "min_confidence": body.min_confidence, "rule_codes": rule_codes})
 
 
 # ─── Bước 8–9 (giai đoạn 3) ─────────────────────────────────────────────────
 
+#: v0.1.55 (G2): bước 8 chỉ cần chọn mẫu — thiếu tên / vai trò thì điền mặc định; thiếu `try_message` thì KHÔNG thử trò
+#: chuyện (không gọi model, không tốn lượt).
+STEP8_DEFAULT_NAME = "Trợ lý"
+STEP8_DEFAULT_ROLE = "Theo dõi tin nhắn, báo việc quan trọng và soạn sẵn trả lời chờ Sếp duyệt."
+
+
 class Step8In(BaseModel):
-    name: str = Field(min_length=1, max_length=120)
-    role_desc: str = Field(min_length=1, max_length=500)
+    name: str = Field(default=STEP8_DEFAULT_NAME, min_length=1, max_length=120)
+    role_desc: str = Field(default=STEP8_DEFAULT_ROLE, min_length=1, max_length=500)
     voice: str = Field(default="Thân thiện, chuyên nghiệp, xưng hô lịch sự", max_length=200)
     speak_when: str = Field(default="Khi được hỏi trực tiếp hoặc có việc cần báo", max_length=500)
     template: str | None = Field(default=None, max_length=40)
-    try_message: str = Field(min_length=1, max_length=1000)
+    try_message: str | None = Field(default=None, max_length=1000)
 
 
 @router.put("/steps/8")
@@ -662,9 +713,11 @@ async def step8(body: Step8In, request: Request, db: AsyncSession = DB,
     try_error: str | None = None
     try_error_code: str | None = None
     try_reasons: list[str] = []
+    try_message = (body.try_message or "").strip()
     try:
-        try_reply = await try_chat(request.app.state, row.org_id, agent_id, name=name, role_desc=role_desc,
-                                   voice=voice, message=body.try_message)
+        if try_message:     # v0.1.55: không có câu thử ⇒ không gọi model
+            try_reply = await try_chat(request.app.state, row.org_id, agent_id, name=name, role_desc=role_desc,
+                                       voice=voice, message=try_message)
     except ApiError as e:
         # v0.1.30: `try_error` LUÔN là chuỗi (hợp đồng web `string | null`). Trước đây gán thẳng `e.detail`
         # (`{"reasons": […]}`) → web vẽ đối tượng làm React child → màn /guide/8 sập (React error #31).
@@ -682,7 +735,9 @@ async def step8(body: Step8In, request: Request, db: AsyncSession = DB,
 class Step9In(BaseModel):
     # None = giữ nguyên mức hiện tại (mở lại sau Hoàn tất chỉ để xác nhận ranh giới, hoặc agent đang ở mức khác 3/4).
     autonomy_level: Literal[3, 4] | None = policy.DEFAULT_AUTONOMY  # type: ignore[assignment]
-    ack_boundaries: bool = False
+    # v0.1.55 (G2): web thay ô tích bằng một dòng ghi chú ("tiếp tục = đã đọc ranh giới khoá cứng") nên thiếu trường ⇒
+    # đã xác nhận; gửi `false` rõ ràng vẫn bị từ chối (422).
+    ack_boundaries: bool = True
 
 
 async def _setup_agent(db: AsyncSession, row: Any) -> Any:
@@ -851,9 +906,12 @@ async def step11(body: Step11In, request: Request, db: AsyncSession = DB,
 # Bước tuỳ chọn → màn Console làm tiếp (khớp FOLLOW_UP ở web). "done" suy từ DỮ LIỆU THẬT, không chỉ từ trạng thái
 # trình thiết lập: Owner để sau bước 5 rồi quét QR ở màn Kênh thì mục tự biến mất khỏi "Việc thiết lập tiếp".
 FOLLOW_UP_SQL: dict[int, str] = {
-    # v0.1.29: bước 4 "Để sau" được → "Chưa có model" khi Gen lẫn Sàng lọc đều chưa được gán model nào.
-    4: """SELECT EXISTS (SELECT 1 FROM agent.bindings b JOIN agent.models m ON m.id = b.model_id
-                         WHERE b.org_id = :o AND b.agent_key IN ('core.gen', 'core.refinery'))""",
+    # v0.1.29: bước 4 "Để sau" được → "Chưa có model". v0.1.55 (G2): bước 4 không còn ghi agent.bindings (hồ sơ tiêu
+    # chuẩn tự phủ) nên "xong" = có ít nhất một nhà cung cấp BẬT (không tính embedding / Jev) có model bật (không
+    # phải embedding).
+    4: """SELECT EXISTS (SELECT 1 FROM agent.providers p JOIN agent.models m ON m.provider_id = p.id
+                         WHERE p.org_id = :o AND p.is_enabled AND p.kind NOT IN ('embedding', 'system_one')
+                           AND m.is_enabled AND m.model_name NOT ILIKE '%embed%')""",
     5: """SELECT EXISTS (SELECT 1 FROM core.channel_sessions s JOIN core.channels c ON c.id = s.channel_id
                          WHERE c.org_id = :o AND s.state = 'active' AND s.ended_at IS NULL)""",
     6: "SELECT EXISTS (SELECT 1 FROM core.groups WHERE org_id = :o AND listen_mode NOT IN ('off', 'paused'))",

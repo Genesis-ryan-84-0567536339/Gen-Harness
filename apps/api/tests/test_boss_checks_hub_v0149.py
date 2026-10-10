@@ -130,7 +130,7 @@ async def test_kho_write_row_is_optional_and_not_runnable(owner_api: Api, db: An
     ov = (await owner_api.get("/boss-checks")).json()
     row = next(x for x in ov["rows"] if x["key"] == "kho_write")
     assert row["row"] == 9 and row["optional"] is True and row["done"] is False
-    assert ov["required_total"] == 6
+    assert ov["required_total"] == boss.REQUIRED_TOTAL == sum(1 for x in ov["rows"] if not x["optional"]) == 1
     await boss.record(db, org, "kho_write", "pass")
     await db.commit()
     ov = (await owner_api.get("/boss-checks")).json()
