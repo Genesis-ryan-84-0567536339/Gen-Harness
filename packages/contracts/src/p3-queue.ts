@@ -124,6 +124,8 @@ export interface TriageSettings {
   /** Ngưỡng điểm 0–100: dưới ngưỡng = "điểm thấp", bị ẩn khi bật "Ẩn rác & trùng". */
   min_score: number;
   use_jev: boolean;
+  /** v0.1.55 (J2): lọc trước khi trích xuất — bỏ qua tin trùng hẳn / rác chắc chắn (mặc định bật; máy chủ cũ không có). */
+  prefilter?: boolean;
 }
 export interface TriageSummary {
   days: number;
@@ -142,6 +144,62 @@ export interface TriageSummary {
   pending: number;
   avg_quality: number | null;
   jev: { count: number; heuristic_count: number; avg_latency_ms: number | null; spam_agreement: number | null };
+}
+
+// ─── Jev (v0.1.55, G4 — `/jev/*` + `/refinery/triage/skipped`) ─────────────────
+/** Một câu trong bộ 12 câu mẫu: `expected`/`got` là NHÃN tiếng Việt (không phải khoá nội bộ). */
+export interface JevBenchmarkItem {
+  question: string;
+  expected: string;
+  got: string | null;
+  ok: boolean;
+  latency_ms: number;
+  /** Có khi Jev lỗi / chậm / độ tin thấp với câu này (chuỗi, đã che). */
+  error_text?: string;
+}
+export interface JevBenchmark {
+  total: number;
+  correct: number;
+  /** Trung bình các câu Jev trả lời được; null nếu không câu nào. */
+  avg_latency_ms: number | null;
+  items: JevBenchmarkItem[];
+}
+/** Số đo giá trị lọc (chỉ đếm số lần, KHÔNG quy ra tiền). */
+export interface ValueSummary {
+  filtered: number;
+  spam_blocked: number;
+  calls_saved: number;
+  jev_on: boolean;
+}
+/** `POST /jev/enable` — cần mã PIN (ai.route_change); chỉ Owner. Khoá không bao giờ quay về trình duyệt. */
+export interface JevEnableBody {
+  use_existing_openrouter: boolean;
+  key?: string;
+}
+export interface JevEnableResult {
+  provider_id: string;
+  created: boolean;
+  key_source: 'existing_openrouter' | 'pasted' | 'kept';
+  endpoint: string;
+  model: string;
+}
+export type SkippedReason = 'exact_dup' | 'spam_rule_jev' | 'spam_rule_nojev';
+/** "Tin đã bỏ qua" — tin lọc trước khi trích xuất, chỉ đọc (vai không phải Owner: số dài đã che). */
+export interface SkippedItem {
+  id: string;
+  code: string;
+  at: string;
+  kind: string;
+  reason: SkippedReason;
+  reason_text: string;
+  text: string;
+  group: string | null;
+  person: string | null;
+}
+export interface SkippedPage {
+  items: SkippedItem[];
+  total: number;
+  days: number;
 }
 export interface InboxDetail extends InboxItem {
   units: ExplainUnit[];
@@ -231,6 +289,14 @@ export function queueEndpoints(r: ApiClient['request']) {
         r<TriageSettings>('/refinery/triage/settings', { method: 'PATCH', body }),
       summary: (days = 7, signal?: AbortSignal) =>
         r<TriageSummary>('/refinery/triage/summary', { query: { days }, signal }),
+      skipped: (limit = 50, signal?: AbortSignal) =>
+        r<SkippedPage>('/refinery/triage/skipped', { query: { limit }, signal }),
+    },
+    jev: {
+      benchmark: () => r<JevBenchmark>('/jev/benchmark', { method: 'POST', body: {} }),
+      enable: (body: JevEnableBody) => r<JevEnableResult>('/jev/enable', { method: 'POST', body }),
+      valueSummary: (days = 7, signal?: AbortSignal) =>
+        r<ValueSummary>('/jev/value-summary', { query: { days }, signal }),
     },
     inbox: {
       list: (

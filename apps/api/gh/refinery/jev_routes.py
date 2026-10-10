@@ -39,10 +39,12 @@ JEV_NAME = "Jev (System One)"
 
 
 def key_missing() -> ApiError:
-    """409 JEV_KEY_MISSING — `title` là chuỗi thân thiện; `detail` là "Chi tiết kỹ thuật" cho web."""
-    return ApiError(409, "JEV_KEY_MISSING", "Chưa có khóa OpenRouter cho Jev",
-                    "Không có nguồn model kind=system_one đang bật kèm khóa (agent.providers / agent.provider_keys). "
-                    "Bật Jev bằng POST /api/v1/jev/enable (dùng khóa OpenRouter đang có hoặc dán khóa).")
+    """409 JEV_KEY_MISSING — `title` là chuỗi thân thiện (web hiện thẳng); lý do kỹ thuật nằm ở `reasons` (chuỗi) để web
+    đặt vào "Chi tiết kỹ thuật" (cùng khuôn MODEL_UNAVAILABLE), `detail` để trống."""
+    return ApiError(409, "JEV_KEY_MISSING", "Chưa có khóa OpenRouter cho Jev", None,
+                    reasons=["Không có nguồn model kind=system_one đang bật kèm khóa (agent.providers / "
+                             "agent.provider_keys). Bật Jev bằng POST /api/v1/jev/enable (dùng khóa OpenRouter đang "
+                             "có hoặc dán khóa)."])
 
 
 def _transport(request: Request) -> Any:

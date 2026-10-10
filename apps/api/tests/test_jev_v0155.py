@@ -501,7 +501,8 @@ async def test_benchmark_without_key_is_409_friendly(app: Any, db: Any, owner_ap
     assert r.status_code == 409, r.text
     body = r.json()
     assert body["code"] == "JEV_KEY_MISSING" and body["title"] == "Chưa có khóa OpenRouter cho Jev"
-    assert isinstance(body["detail"], str) and body["detail"]                      # Chi tiết kỹ thuật = chuỗi
+    assert body["detail"] is None                                                   # chuỗi thân thiện nằm ở title
+    assert isinstance(body["reasons"], list) and all(isinstance(r, str) and r for r in body["reasons"])  # kỹ thuật
     assert r.headers["content-type"].startswith("application/problem+json")
 
 
@@ -642,4 +643,4 @@ async def test_enable_with_pasted_key_and_reenable(app: Any, db: Any, owner_api:
 def test_key_missing_error_shape() -> None:
     e = jev_routes.key_missing()
     assert (e.status, e.code, e.title) == (409, "JEV_KEY_MISSING", "Chưa có khóa OpenRouter cho Jev")
-    assert isinstance(e.detail, str) and "system_one" in e.detail
+    assert e.detail is None and "system_one" in e.extra["reasons"][0]

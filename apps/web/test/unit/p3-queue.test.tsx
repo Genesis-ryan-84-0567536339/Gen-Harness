@@ -9,6 +9,7 @@ import { InboxScreen } from '../../src/screens/queue/InboxScreen';
 import { OverviewScreen } from '../../src/screens/queue/OverviewScreen';
 import { TasksScreen } from '../../src/screens/queue/TasksScreen';
 import { queryClient } from '../../src/lib/queryClient';
+import { api } from '../../src/lib/api';
 
 const json = (status: number, body?: unknown) =>
   new Response(body === undefined ? null : JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -169,5 +170,35 @@ describe('Việc & Nhắc hẹn', () => {
     const okRow = screen.getByText('Chuẩn bị nội dung giao ban').closest('.tk-row');
     expect(okRow).not.toHaveClass('tk-row--overdue');
     expect(container.querySelectorAll('.tk-row--overdue')).toHaveLength(1);
+  });
+});
+
+describe('Endpoint Jev + lọc trước (v0.1.55)', () => {
+  it('gọi đúng đường dẫn / method / thân; không bao giờ gửi khoá khi dùng khoá OpenRouter đang có', async () => {
+    const bodies: unknown[] = [];
+    const calls: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+        const u = new URL(String(url), 'http://x');
+        calls.push(`${init?.method ?? 'GET'} ${u.pathname.replace(/^\/api\/v1/, '')}${u.search}`);
+        bodies.push(typeof init?.body === 'string' ? JSON.parse(init.body) : null);
+        return json(200, { items: [], total: 0, days: 30 });
+      }),
+    );
+    await api.queue.triage.skipped(20);
+    await api.queue.jev.valueSummary(14);
+    await api.queue.jev.benchmark();
+    await api.queue.jev.enable({ use_existing_openrouter: true });
+    await api.queue.triage.setSettings({ prefilter: false });
+    expect(calls).toEqual([
+      'GET /refinery/triage/skipped?limit=20',
+      'GET /jev/value-summary?days=14',
+      'POST /jev/benchmark',
+      'POST /jev/enable',
+      'PATCH /refinery/triage/settings',
+    ]);
+    expect(bodies[3]).toEqual({ use_existing_openrouter: true });
+    expect(bodies[4]).toEqual({ prefilter: false });
   });
 });
