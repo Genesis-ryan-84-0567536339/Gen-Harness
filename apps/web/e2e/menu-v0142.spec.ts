@@ -15,10 +15,11 @@ test.describe('v0.1.42 · menu', () => {
     await resetMock(page.request, 'finished');
   });
 
-  test('1. Owner: "/" → /overview; đúng 7 mục cấp 1 (6 + Nâng cao)', async ({ page }) => {
+  test('1. Owner: "/" → /owner (Mặt tiền); Console /overview có đúng 7 mục cấp 1 (6 + Nâng cao)', async ({ page }) => {
     await loginAsOwner(page);
     await page.goto('/');
-    await expect(page).toHaveURL(/\/overview$/);
+    await expect(page).toHaveURL(/\/owner$/);
+    await page.goto('/overview');
     const items = nav(page).locator('[data-level1] .sb-item__name');
     await expect(items).toHaveText(LEVEL1);
     await expect(nav(page).getByText('Việc hằng ngày')).toBeVisible();
@@ -214,11 +215,13 @@ test.describe('v0.1.42 · nghiệm thu sau tích hợp', () => {
     await resetMock(page.request, 'finished');
   });
 
-  test('12. Owner "/": tiêu đề Hôm nay, dải "Cần Sếp xử lý" ở đầu; ≤ 7 mục cấp 1; Nâng cao mở/thu, /raw tự mở', async ({ page }) => {
+  test('12. Owner mở Console: tiêu đề Hôm nay, dải "Cần Sếp xử lý" ở đầu; ≤ 7 mục cấp 1; Nâng cao mở/thu, /raw tự mở', async ({ page }) => {
     await mockHook(page.request, 'health', { issues: [{ kind: 'channel.down', title: 'Kênh Zalo đã ngắt kết nối' }] });
     await loginAsOwner(page);
+    // v0.1.55: "/" của Owner là Mặt tiền (/owner); Console đầy đủ mở bằng /overview (đúng đường "Cài đặt nâng cao").
     await page.goto('/');
-    await expect(page).toHaveURL(/\/overview$/);
+    await expect(page).toHaveURL(/\/owner$/);
+    await page.goto('/overview');
     await expect(page.locator('.hd-title')).toHaveText('Hôm nay');
     const strip = page.getByRole('region', { name: 'Cần Sếp xử lý' });
     await expect(strip).toBeVisible();
@@ -364,8 +367,9 @@ test.describe('v0.1.42 · nghiệm thu sau tích hợp', () => {
     await page.goto(`/overview?gen=${seeded.conversation_id}`);
     await expect(panel(page)).toBeVisible();
     await expect(panel(page).locator('.gen-msg--briefing')).toContainText('Bản tin');
+    // v0.1.55: "/?gen=<mã>" của Owner ⇒ Mặt tiền, mở Bản tin ở màn Hỏi Gen (/owner/gen) và bỏ tham số khỏi địa chỉ.
     await page.goto(`/?gen=${seeded.conversation_id}`);
-    await expect(page).toHaveURL(/\/overview(\?|$)/);
+    await expect(page).toHaveURL(/\/owner\/gen$/);
     await expect(panel(page).locator('.gen-msg--briefing')).toContainText('Bản tin');
 
     for (const path of ['/social', '/mcp', '/profile?id=p-bao', '/plugins']) {
