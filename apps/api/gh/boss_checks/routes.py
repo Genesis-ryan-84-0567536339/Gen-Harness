@@ -246,7 +246,7 @@ async def _run_call(request: Request, db: AsyncSession, user: service.CurrentUse
     return out
 
 
-AI_NO_SOURCE_MSG = ("Chưa có nguồn AI nào — thêm khoá API hoặc đăng nhập Google / Claude Code ở Cài đặt › Bộ não AI "
+AI_NO_SOURCE_MSG = ("Chưa có nguồn AI nào — thêm khoá API hoặc đăng nhập Google / Claude Code ở Kết nối › Bộ não AI "
                     "rồi bấm Kiểm tra")
 AI_NO_KEY_MSG = "Nguồn AI đầu chuỗi chưa có khoá API — thêm khoá ở Cài đặt › Bộ não AI rồi bấm Kiểm tra"
 

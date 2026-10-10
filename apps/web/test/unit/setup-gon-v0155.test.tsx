@@ -246,13 +246,19 @@ describe('bước 9 — một dòng ghi chú thay ô tích', () => {
     );
     const note = await screen.findByTestId('step9-ack-note');
     expect(note).toHaveTextContent('Bấm Tiếp tục nghĩa là Sếp đã đọc các ranh giới trên');
-    expect(note).toHaveTextContent('Soạn sẵn chờ duyệt');
+    expect(note).toHaveTextContent('Agent sẽ ở mức Soạn sẵn chờ duyệt');
     expect(note).toHaveTextContent('50.000.000 ₫');
     expect(screen.queryByRole('checkbox')).toBeNull();
     expect(screen.queryByLabelText(/Tôi đã đọc/)).toBeNull();
     expect(await screen.findByText('Chỉ lắng nghe nhóm Owner đã bật')).toBeInTheDocument();
     const next = screen.getByRole('button', { name: /Tiếp tục/ });
     await waitFor(() => expect(next).toBeEnabled());
+    // Ghi chú nói đúng mức Sếp đang chọn (không cố định "Soạn sẵn chờ duyệt").
+    await user.click(screen.getByRole('radio', { name: 'Gợi ý' }));
+    expect(note).toHaveTextContent('Agent sẽ ở mức Gợi ý');
+    expect(note).not.toHaveTextContent('Soạn sẵn chờ duyệt');
+    await user.click(screen.getByRole('radio', { name: 'Soạn sẵn chờ duyệt' }));
+    expect(note).toHaveTextContent('Agent sẽ ở mức Soạn sẵn chờ duyệt');
     await user.click(next);
     await waitFor(() => expect(puts).toHaveLength(1));
     expect(puts[0]).toEqual({ autonomy_level: 4, ack_boundaries: true });

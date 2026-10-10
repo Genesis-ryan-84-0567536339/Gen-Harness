@@ -13,7 +13,7 @@ import { describeError, type StepProps } from './types';
 const LEVEL_OPTIONS = AUTONOMY_CHOICES.filter((c) => c.level === 3 || c.level === 4).map((c) => ({ value: String(c.level), label: c.label }));
 
 const PIN_TEXT = 'Sau Hoàn tất, đổi mức tự trị cần mã PIN';
-/** Ngưỡng tiền mặc định phải duyệt (chữ hiển thị; giữ nguyên mặc định của hệ thống). */
+/** Ngưỡng tiền mặc định phải duyệt (chữ hiển thị; chỉ nêu khi đang thiết lập lần đầu — sau Hoàn tất Owner có thể đã đổi ngưỡng). */
 const AMOUNT_APPROVAL_VND = '50.000.000 ₫';
 const levelLabel = (n: number) => autonomyChoice(n)?.label ?? `mức ${n}`;
 
@@ -37,6 +37,8 @@ export function Step9Autonomy({ meta, description, onBack, onSaved, formRef, onS
   const [formError, setFormError] = useState<string | null>(null);
   // v0.1.45 (F-20): mở lại từ trang Hướng dẫn SAU Hoàn tất → máy chủ đòi phiên PIN (hộp PIN tự mở khi gặp 423).
   const finished = useQuery({ queryKey: qk.setupState, queryFn: ({ signal }) => api.setup.state(signal) }).data?.finished === true;
+  // Mức sẽ áp khi bấm Tiếp tục: mức Sếp đang chọn (3/4), hoặc mức hiện tại của agent khi không chọn lại (giữ nguyên).
+  const shownLevel = level === '3' || level === '4' ? Number(level) : (agent?.autonomy_level ?? 4);
 
   const save = async () => {
     setBusy(true);
@@ -113,7 +115,8 @@ export function Step9Autonomy({ meta, description, onBack, onSaved, formRef, onS
           ))}
         </ul>
         <p className="muted-note" data-testid="step9-ack-note">
-          Bấm Tiếp tục nghĩa là Sếp đã đọc các ranh giới trên. Em giữ sẵn mức Soạn sẵn chờ duyệt; chi vượt {AMOUNT_APPROVAL_VND} luôn chờ Sếp duyệt.
+          Bấm Tiếp tục nghĩa là Sếp đã đọc các ranh giới trên. Agent sẽ ở mức {levelLabel(shownLevel)}
+          {finished ? '.' : `; chi vượt ${AMOUNT_APPROVAL_VND} luôn chờ Sếp duyệt.`}
         </p>
       </div>
     </StepFrame>

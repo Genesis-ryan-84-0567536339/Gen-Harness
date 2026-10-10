@@ -75,7 +75,7 @@ test.describe('v0.1.55 · Mặt tiền Owner (máy tính)', () => {
   test('Quan hệ: 4 danh sách; bấm dòng mở Hồ sơ sống, "← Về Mặt tiền" quay lại', async ({ page }) => {
     await loginAsOwner(page);
     await page.goto('/owner/quan-he');
-    await expect(page.getByRole('tab')).toHaveText(['Khách nóng', 'Nguội dần', 'Cầu nối', 'Cung ↔ Cầu']);
+    await expect(page.getByRole('tab')).toHaveText(['Khách nóng', 'Quan hệ nguội', 'Cầu nối', 'Cung ↔ Cầu']);
     const rows = page.getByTestId('owner-rel-row');
     await expect(rows).toHaveCount(3);
     await expect(rows.first()).toContainText('Trần Văn Hậu');
@@ -143,6 +143,7 @@ test.describe('v0.1.55 · Mặt tiền Owner (máy tính)', () => {
     const rows = page.getByTestId('owner-conn-row');
     await expect(rows.first()).toBeVisible();
     expect(await rows.count()).toBeGreaterThanOrEqual(3);
+    await expect(rows.first()).toContainText('nguồn AI');          // dòng bắt buộc duy nhất đứng đầu: Sếp thấy ngay AI đã chạy chưa
     await expect(rows.filter({ hasText: 'Facebook' }).first()).toHaveAttribute('href', '/social');
 
     const adv = page.getByRole('link', { name: 'Cài đặt nâng cao' });

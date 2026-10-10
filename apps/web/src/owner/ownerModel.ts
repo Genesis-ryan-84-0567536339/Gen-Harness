@@ -188,7 +188,7 @@ export interface RelationTab {
 export const RELATION_TABS: readonly RelationTab[] = [
   { list: 'hot', label: 'Khách nóng', hint: 'Những người đang quan tâm mạnh — nên hồi âm sớm.',
     emptyTitle: 'Chưa có khách nóng', emptyHint: 'Khi có người nhắn nhiều và nhắn thường xuyên, em sẽ xếp họ lên đây.' },
-  { list: 'cooling', label: 'Nguội dần', hint: 'Hai bên từng trao đổi nhiều nhưng đã hơn 30 ngày chưa liên lạc.',
+  { list: 'cooling', label: 'Quan hệ nguội', hint: 'Hai bên từng trao đổi nhiều nhưng đã hơn 30 ngày chưa liên lạc.',
     emptyTitle: 'Chưa có quan hệ nào nguội', emptyHint: 'Em sẽ báo khi một mối quan hệ đang tốt bỗng im quá lâu.' },
   { list: 'bridges', label: 'Cầu nối', hint: 'Người có mặt ở nhiều nhóm, nối các nhóm với nhau.',
     emptyTitle: 'Chưa thấy người cầu nối', emptyHint: 'Cần có người ở từ hai nhóm chat trở lên em mới nhận ra được.' },
@@ -234,7 +234,7 @@ export function avatarText(name: unknown): string {
 // ── trạng thái kết nối (màn Thêm) ──────────────────────────────────────────────────────────────────────────────
 
 /** Dòng "Việc Sếp cần làm" nào là một DỊCH VỤ kết nối (hiện ở màn Thêm). */
-export const CONNECTION_ROW_KEYS = ['hub', 'facebook', 'agy', 'claude', 'telegram', 'remote', 'jev'] as const;
+export const CONNECTION_ROW_KEYS = ['ai', 'hub', 'facebook', 'agy', 'claude', 'telegram', 'remote', 'jev'] as const;
 
 export interface ConnectionLine {
   key: string;
@@ -251,7 +251,10 @@ interface BossRowLike {
   done?: unknown;
 }
 
-/** Một dòng cho mỗi dịch vụ: "Đã kết nối" / "Chưa kết nối" (+ "tuỳ chọn" cho dịch vụ không bắt buộc). Facebook → /social. */
+/**
+ * Một dòng cho mỗi dịch vụ: "Đã kết nối" / "Chưa kết nối" (+ "tuỳ chọn" cho dịch vụ không bắt buộc). Facebook → /social.
+ * Dòng `ai` (nguồn AI chạy được — dòng bắt buộc duy nhất) đứng đầu và nói "Đã chạy được" / "Chưa có — cần làm".
+ */
 export function connectionLines(rows: readonly BossRowLike[] | undefined): ConnectionLine[] {
   const out: ConnectionLine[] = [];
   for (const key of CONNECTION_ROW_KEYS) {
@@ -263,7 +266,7 @@ export function connectionLines(rows: readonly BossRowLike[] | undefined): Conne
       key,
       title: asText(r.title) || key,
       state: done ? 'ok' : optional ? 'optional' : 'todo',
-      text: done ? 'Đã kết nối' : optional ? 'Chưa bật (tuỳ chọn)' : 'Chưa kết nối',
+      text: key === 'ai' ? (done ? 'Đã chạy được' : 'Chưa có — cần làm') : done ? 'Đã kết nối' : optional ? 'Chưa bật (tuỳ chọn)' : 'Chưa kết nối',
       to: key === 'facebook' ? FACEBOOK_PATH : '/guide/viec-sep',
     });
   }

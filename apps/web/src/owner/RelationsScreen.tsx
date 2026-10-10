@@ -1,5 +1,5 @@
 /**
- * v0.1.55 (G5) — `/owner/quan-he`: màn Quan hệ. Bốn danh sách (Khách nóng, Nguội dần, Cầu nối, Cung ↔ Cầu) lấy từ
+ * v0.1.55 (G5) — `/owner/quan-he`: màn Quan hệ. Bốn danh sách (Khách nóng, Quan hệ nguội, Cầu nối, Cung ↔ Cầu) lấy từ
  * `GET /owner/relations?list=…`; bấm một dòng mở Hồ sơ sống (`/profile?id=…`). Danh sách chọn bằng `?list=` trên địa chỉ nên
  * 4 số ở Hôm nay mở thẳng đúng danh sách. Chữ đời thường — không có thuật ngữ kỹ thuật.
  */

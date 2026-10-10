@@ -218,7 +218,7 @@ export function createMock(opts: Opts) {
         const cli = activeOf('claude_code_cli') ?? activeOf('antigravity_cli');
         if (api) return record('ai_source', 'pass', { detail: { latency_ms: 120, probe_model: api.models[0]?.model_name ?? null, models_count: api.models.length } });
         if (cli) return record('ai_source', 'pass', { detail: { latency_ms: 450, account_masked: mask(cli.email) } });
-        return fail('ai_source', 'AI_NO_SOURCE', 'Chưa có nguồn AI nào — thêm khoá API hoặc đăng nhập Google / Claude Code ở Cài đặt › Bộ não AI rồi bấm Kiểm tra');
+        return fail('ai_source', 'AI_NO_SOURCE', 'Chưa có nguồn AI nào — thêm khoá API hoặc đăng nhập Google / Claude Code ở Kết nối › Bộ não AI rồi bấm Kiểm tra');
       }
       case 'telegram':
         return recordTelegram(opts.telegramTest());

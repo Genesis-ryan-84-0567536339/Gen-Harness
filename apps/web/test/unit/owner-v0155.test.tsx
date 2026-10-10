@@ -253,6 +253,11 @@ describe('ownerModel (thuần)', () => {
   it('trạng thái kết nối: một dòng mỗi dịch vụ, Facebook → /social, bỏ dòng không phải dịch vụ', () => {
     const lines = connectionLines(BOSS.rows);
     expect(lines.map((l) => l.key)).toEqual(['hub', 'facebook', 'agy', 'jev']);
+    // Dòng nguồn AI (bắt buộc duy nhất) đứng ĐẦU danh sách Kết nối, chữ riêng "Đã chạy được" / "Chưa có — cần làm".
+    const withAi = connectionLines([{ key: 'ai', title: 'Có ít nhất 1 nguồn AI chạy được', optional: false, done: false }, ...BOSS.rows]);
+    expect(withAi.map((l) => l.key)).toEqual(['ai', 'hub', 'facebook', 'agy', 'jev']);
+    expect(withAi[0]).toMatchObject({ state: 'todo', text: 'Chưa có — cần làm', to: '/guide/viec-sep' });
+    expect(connectionLines([{ key: 'ai', title: 'Nguồn AI', optional: false, done: true }])[0]).toMatchObject({ state: 'ok', text: 'Đã chạy được' });
     expect(lines[0]).toMatchObject({ state: 'ok', text: 'Đã kết nối', to: '/guide/viec-sep' });
     expect(lines[1]).toMatchObject({ state: 'todo', text: 'Chưa kết nối', to: '/social' });
     expect(lines[3]).toMatchObject({ state: 'optional', text: 'Chưa bật (tuỳ chọn)' });
