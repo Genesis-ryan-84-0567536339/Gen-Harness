@@ -15,6 +15,10 @@ Mỗi mục:
 2. **Rác + điểm** — quy tắc tất định luôn chạy (đủ dùng khi chưa cấu hình model). Có Jev (`Decider.classify`, trần
    1,5 s) và `use_jev` bật → Jev chọn một nhãn trong 4 mức; điểm = 60% Jev + 40% quy tắc. Jev lỗi/chậm/độ tin thấp
    → giữ kết quả quy tắc (không gọi model lớn cho từng mục — chi phí). Cả hai kết quả được lưu để đo độ khớp.
+
+v0.1.55 (G4, QD-12): văn bản gửi Jev LUÔN là bản đã che (`gh.chassis.masking.mask_for_model` — SĐT, số tài khoản,
+email, khoá) — `_ask_jev` che trước khi cắt, và `JevClient.choose` che thêm một lớp (lớp thứ hai không có cờ tắt).
+`value_summary` = số đo giá trị lọc cho thẻ Jev / màn Hôm nay của Sếp (chỉ số lần, KHÔNG quy ra tiền).
 """
 
 import asyncio
@@ -31,6 +35,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from gh.biz.hooks import CronJob, Hook, HookCtx
+from gh.chassis.masking import mask_for_model
 from gh.gen import decider as decmod
 from gh.textnorm import strip_accents  # F-38: bỏ dấu dùng chung (NFKD — giữ text_hash đã lưu)
 
@@ -38,7 +43,8 @@ log = logging.getLogger("gh.refinery.triage")
 
 VERSION = 1
 ITEM_TYPE = "unit"
-DEFAULTS: dict[str, Any] = {"enabled": True, "min_score": 30, "use_jev": True}
+# `prefilter` (v0.1.55, J2): lọc trước khi trích xuất — bỏ qua tin trùng hẳn / rác chắc chắn, xem gh.refinery.prefilter.
+DEFAULTS: dict[str, Any] = {"enabled": True, "min_score": 30, "use_jev": True, "prefilter": True}
 MIN_SCORE_RANGE = (0, 100)
 CHUNK = 50
 MAX_ROUNDS = 20                 # ≤ 1000 mục / lượt job; phần còn lại lượt sau
@@ -54,6 +60,7 @@ NEAR_MIN_LEN = 24
 NORM_MAX = 600               # simhash không tin được trên chuỗi quá ngắn
 BROADCAST_MIN_LEN = 40
 JEV_TEXT_MAX = 800
+JEV_MASK_SRC = 4000             # che phần đầu này của tin RỒI mới cắt `JEV_TEXT_MAX` (không để nửa số ĐT lọt qua)
 JEV_PARALLEL = 4
 JEV_MAX_FAILS = 3               # lỗi liên tiếp → thôi gọi Jev cho phần còn lại của lượt
 
@@ -336,27 +343,44 @@ async def _candidates(db: AsyncSession, org_id: uuid.UUID, since: datetime, unti
                       r.duplicate_of, r.norm_text or "") for r in rows]
 
 
-async def _ask_jev(dec: decmod.Decider, items: list[_Item]) -> None:
+def jev_context(event_type: str) -> str:
+    return ("Đánh giá tin nhắn khách/đối tác gửi doanh nghiệp: rác hay giá trị kinh doanh "
+            f"(loại sự kiện: {event_type}).")
+
+
+async def ask_jev_batch(dec: decmod.Decider, jobs: list[tuple[str, str]]) -> list[decmod.Decision | None]:
+    """Hỏi Jev nhãn rác/giá trị cho từng (văn bản, loại sự kiện) — song song `JEV_PARALLEL`, trần 1,5 s mỗi câu (do
+    `JevDecider`), `JEV_MAX_FAILS` lỗi liên tiếp ngắt cả lượt (phần còn lại không hỏi nữa). Kết quả cùng thứ tự `jobs`;
+    `None` = Jev không quyết định được (lỗi/chậm/độ tin < 0,5/bị ngắt) → bên gọi dùng quy tắc.
+
+    Chỉ gửi văn bản ĐÃ CHE (v0.1.55, QD-12): che phần đầu `JEV_MASK_SRC` ký tự rồi mới cắt `JEV_TEXT_MAX`."""
     sem = asyncio.Semaphore(JEV_PARALLEL)
     fails = 0
+    out: list[decmod.Decision | None] = [None] * len(jobs)
 
-    async def one(it: _Item) -> None:
+    async def one(i: int, raw: str, event_type: str) -> None:
         nonlocal fails
         if fails >= JEV_MAX_FAILS:
             return
         async with sem:
             if fails >= JEV_MAX_FAILS:
                 return
-            d = await dec.classify(it.raw[:JEV_TEXT_MAX], JEV_OPTIONS,
-                                   "Đánh giá tin nhắn khách/đối tác gửi doanh nghiệp: rác hay giá trị kinh doanh "
-                                   f"(loại sự kiện: {it.event_type}).")
+            safe = str(mask_for_model(raw[:JEV_MASK_SRC]))[:JEV_TEXT_MAX]
+            d = await dec.classify(safe, JEV_OPTIONS, jev_context(event_type))
         if d is None:
             fails += 1
         else:
             fails = 0
-            it.jev = d
+            out[i] = d
 
-    await asyncio.gather(*(one(it) for it in items))
+    await asyncio.gather(*(one(i, raw, et) for i, (raw, et) in enumerate(jobs)))
+    return out
+
+
+async def _ask_jev(dec: decmod.Decider, items: list[_Item]) -> None:
+    for it, d in zip(items, await ask_jev_batch(dec, [(it.raw, it.event_type) for it in items]), strict=True):
+        if d is not None:
+            it.jev = d
 
 
 def _final(it: _Item) -> dict[str, Any]:
@@ -491,7 +515,7 @@ async def summary(db: AsyncSession, org_id: uuid.UUID, days: int = 7, *,
     return {
         "days": days, "scope": scope if scoped else "all",
         "enabled": bool(cfg["enabled"]), "min_score": int(cfg["min_score"]),
-        "use_jev": bool(cfg["use_jev"]),
+        "use_jev": bool(cfg["use_jev"]), "prefilter": bool(cfg["prefilter"]),
         "total": int(r.total or 0), "kept": int(r.kept or 0), "duplicates": int(r.duplicates or 0),
         "exact_duplicates": int(r.exact or 0), "near_duplicates": int(r.near or 0), "spam": int(r.spam or 0),
         "low_score": int(r.low_score or 0), "pending": int(pending or 0),
@@ -500,6 +524,42 @@ async def summary(db: AsyncSession, org_id: uuid.UUID, days: int = 7, *,
                 "avg_latency_ms": int(r.jev_ms) if r.jev_ms is not None else None,
                 "spam_agreement": round(int(r.jev_agree or 0) / jev, 3) if jev else None},
     }
+
+
+async def value_summary(db: AsyncSession, org_id: uuid.UUID, days: int = 7) -> dict[str, Any]:
+    """Số đo "Jev giúp được gì" `days` ngày qua — CHỈ ĐẾM SỐ LẦN, không quy ra tiền (ai_cost cấm bịa giá).
+
+    - `filtered`: tin rác/trùng đã được lọc ẩn (`refinery.item_marks`: `is_spam` hoặc có `duplicate_of`) + tin J2 đã bỏ
+      qua trước khi trích xuất (`refinery.event_state`: discarded, `detail.discarded_by = 'prefilter'`);
+    - `spam_blocked`: phần rác của `filtered` (cả hai nguồn);
+    - `calls_saved`: số lần trích xuất không phải gửi model (mỗi tin J2 bỏ qua là một lần) + số lượt hỏi Gen được trả
+      câu mẫu mà không gọi model (Action Log `gen.decide` với `value = 'out_of_scope'`, do G3 ghi);
+    - `jev_on`: có nguồn Jev (`system_one`) đang bật kèm khoá."""
+    days = max(1, int(days))
+    marks = (await db.execute(text("""
+        SELECT count(*) FILTER (WHERE is_spam OR duplicate_of IS NOT NULL) AS hidden,
+               count(*) FILTER (WHERE is_spam) AS spam
+        FROM refinery.item_marks
+        WHERE org_id = :o AND item_type = 'unit' AND observed_at > now() - make_interval(days => :d)"""),
+        {"o": org_id, "d": days})).one()
+    skipped = (await db.execute(text("""
+        SELECT count(*) AS n, count(*) FILTER (WHERE detail->>'reason' LIKE 'spam_rule%') AS spam
+        FROM refinery.event_state
+        WHERE org_id = :o AND state = 'discarded' AND detail->>'discarded_by' = 'prefilter'
+          AND updated_at > now() - make_interval(days => :d)"""), {"o": org_id, "d": days})).one()
+    out_of_scope = (await db.execute(text("""
+        SELECT count(*) FROM ops.action_log
+        WHERE org_id = :o AND action = 'gen.decide' AND detail->>'value' = 'out_of_scope'
+          AND at > now() - make_interval(days => :d)"""), {"o": org_id, "d": days})).scalar_one()
+    jev_on = (await db.execute(text("""
+        SELECT EXISTS (SELECT 1 FROM agent.providers p
+                       JOIN agent.provider_keys k ON k.provider_id = p.id AND k.is_enabled
+                       WHERE p.org_id = :o AND p.kind = 'system_one' AND p.is_enabled)"""),
+                              {"o": org_id})).scalar_one()
+    return {"filtered": int(marks.hidden or 0) + int(skipped.n or 0),
+            "spam_blocked": int(marks.spam or 0) + int(skipped.spam or 0),
+            "calls_saved": int(skipped.n or 0) + int(out_of_scope or 0),
+            "jev_on": bool(jev_on)}
 
 
 # ─── worker: hook sau sàng lọc + quét định kỳ ─────────────────────────────────

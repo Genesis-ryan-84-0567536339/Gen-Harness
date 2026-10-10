@@ -191,7 +191,7 @@ async def test_api_settings_owner_only_and_logged(app, db, client, redis, owner_
     assert r.status_code == 200 and r.json() == triage.DEFAULTS
     r = await owner_api.send("PATCH", "/refinery/triage/settings", {"min_score": 45, "use_jev": False})
     assert r.status_code == 200, r.text
-    assert r.json() == {"enabled": True, "min_score": 45, "use_jev": False}
+    assert r.json() == {"enabled": True, "min_score": 45, "use_jev": False, "prefilter": True}
     row = (await db.execute(text("""SELECT detail FROM ops.action_log
                                     WHERE action = 'refinery.triage_settings_changed'"""))).scalar_one()
     assert row["after"] == {"min_score": 45, "use_jev": False} and row["before"]["min_score"] == 30
