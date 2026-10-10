@@ -34,7 +34,7 @@ from gh.auth import rbac, service
 from gh.data.common import mask_text
 from gh.errors import ApiError
 from gh.gen import envelope, memory_notes, registry
-from gh.hub_link import KHO_LABEL, kho_write
+from gh.hub_link import KHO_LABEL, kho_write, load_kho_label, relabel
 from gh.hub_link import permit as hub_permit
 
 PROPOSAL_TTL_S = 24 * 3600
@@ -118,15 +118,20 @@ def _has(permissions: dict[str, str], perm: str | None) -> bool:
     return perm is None or permissions.get(perm, rbac.NONE) != rbac.NONE
 
 
+async def kho_for(db: AsyncSession, org_id: uuid.UUID, ptype: str) -> str:
+    """Tên Kho hiệu lực (v0.1.57, Nợ #30) cho đề xuất loại `ptype`: chỉ loại kho_* đọc tổ chức; loại khác ⇒ mặc định."""
+    return await load_kho_label(db, org_id) if ptype in KHO_TYPES else KHO_LABEL
+
+
 def permission_error(permissions: dict[str, str], ptype: str, target_id: str,
-                     role_code: str | None = None) -> str | None:
+                     role_code: str | None = None, kho: str = KHO_LABEL) -> str | None:
     """Quyền của CHÍNH người hỏi: quyền của loại đề xuất + màn + quyền riêng của mục tiêu registry. Loại social_*,
     memory_note, kho_* KHÔNG tra registry: chỉ Owner (vai trò tuỳ biến có system.manage vẫn bị chặn)."""
     spec = SPECS[ptype]
     if not _has(permissions, spec.permission):
         return f"người hỏi không có quyền '{spec.permission}'"
     if ptype in OWNER_ONLY_TYPES:
-        return None if role_code == rbac.OWNER else OWNER_ONLY_MSG[ptype]
+        return None if role_code == rbac.OWNER else relabel(OWNER_ONLY_MSG[ptype], kho)
     t = registry.resolve_target(target_id)
     if t is None:
         return f"mục tiêu '{target_id}' không có trong registry"
@@ -403,8 +408,9 @@ def _fmt_time(iso: str | None, tz: ZoneInfo) -> str:
     return datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone(tz).strftime("%H:%M %d/%m/%Y")
 
 
-def summary(ptype: str, fields: dict[str, Any], lab: dict[str, str], tz: ZoneInfo) -> str:
-    """Tóm tắt do HỆ THỐNG viết từ các trường đã kiểm — không dùng lời model (chống prompt injection)."""
+def summary(ptype: str, fields: dict[str, Any], lab: dict[str, str], tz: ZoneInfo, kho: str = KHO_LABEL) -> str:
+    """Tóm tắt do HỆ THỐNG viết từ các trường đã kiểm — không dùng lời model (chống prompt injection). `kho` = tên
+    Kho hiệu lực của tổ chức (v0.1.57)."""
     if ptype == "draft_message":
         to = f" cho {lab['subject']}" if lab.get("subject") else ""
         return (f"Soạn bản nháp tin “{fields['title']}”{to}. Bản nháp vào Bàn làm việc chờ duyệt — "
@@ -421,9 +427,9 @@ def summary(ptype: str, fields: dict[str, Any], lab: dict[str, str], tz: ZoneInf
     if ptype in KHO_TYPES:
         listing = "; ".join(f"{k} = “{_snippet(v, VALUE_SNIPPET)}”" for k, v in fields["record"].items())
         if ptype == "kho_create":
-            head = f"Tạo bản ghi mới ở bảng {fields['bang']} của {KHO_LABEL}: {listing}."
+            head = f"Tạo bản ghi mới ở bảng {fields['bang']} của {kho}: {listing}."
         else:
-            head = f"Cập nhật {fields['ma']} (bảng {lab.get('bang', '')}) ở {KHO_LABEL}: {listing}."
+            head = f"Cập nhật {fields['ma']} (bảng {lab.get('bang', '')}) ở {kho}: {listing}."
         return f"{head} Chỉ ghi khi Sếp bấm Xác nhận và nhập mã PIN (qua Gen-hub)."
     if ptype in SOCIAL_TYPES:
         verb = "Trả lời trên Facebook" if ptype == "social_reply" else "Nhắn tin trên Facebook"
@@ -450,7 +456,8 @@ async def build(db: AsyncSession, user: service.CurrentUser, prop: Any, seen_ids
     if ptype == "reminder" and not fields.get("assignee_user_id"):
         fields["assignee_user_id"] = str(user.id)  # mặc định nhắc chính người hỏi
     target = target_of(ptype, fields)
-    err = permission_error(user.permissions, ptype, target, user.role_code) \
+    kho = await kho_for(db, user.org_id, ptype)
+    err = permission_error(user.permissions, ptype, target, user.role_code, kho) \
         or id_errors(ptype, fields, seen_ids, str(user.id))
     if err is None and ptype == MEMORY_TYPE:
         err = await memory_error(db, user.org_id, fields)
@@ -462,7 +469,7 @@ async def build(db: AsyncSession, user: service.CurrentUser, prop: Any, seen_ids
         return None, str(e)
     pid = uuid.uuid4()
     return {"id": str(pid), "type": ptype, "fields": fields, "labels": lab, "target": target,
-            "summary": summary(ptype, fields, lab, tz), "requires_pin": requires_pin(target), "status": "pending",
+            "summary": summary(ptype, fields, lab, tz, kho), "requires_pin": requires_pin(target), "status": "pending",
             "user_id": str(user.id), "org_id": str(user.org_id), "turn_id": str(turn_id),
             "conversation_id": str(conversation_id)}, None
 
@@ -582,7 +589,8 @@ def release_record(version: str, today: str, repo: str) -> dict[str, str]:
 
 
 def build_release(org_id: uuid.UUID, owner_id: uuid.UUID, version: str, *, turn_id: uuid.UUID,
-                  conversation_id: uuid.UUID, tz: ZoneInfo, repo: str, now: datetime | None = None) -> dict[str, Any]:
+                  conversation_id: uuid.UUID, tz: ZoneInfo, repo: str, now: datetime | None = None,
+                  kho: str = KHO_LABEL) -> dict[str, Any]:
     """Đề xuất `kho_create` bảng Phiên cho Owner `owner_id` — tóm tắt / nhãn do HỆ THỐNG viết, cùng khuôn với đề xuất
     của model. `release_version` là khoá meta (không thuộc `fields`, không sửa được): `confirm_proposal` dựa vào đó để
     chỉ cho MỘT Owner ghi mỗi (tổ chức, phiên bản). Quyền ghi đã được job kiểm trước khi dựng (nhãn 'ok')."""
@@ -593,6 +601,6 @@ def build_release(org_id: uuid.UUID, owner_id: uuid.UUID, version: str, *, turn_
     target = target_of("kho_create", fields)
     pid = uuid.uuid4()
     return {"id": str(pid), "type": "kho_create", "fields": fields, "labels": lab, "target": target,
-            "summary": summary("kho_create", fields, lab, tz), "requires_pin": requires_pin(target),
+            "summary": summary("kho_create", fields, lab, tz, kho), "requires_pin": requires_pin(target),
             "status": "pending", "user_id": str(owner_id), "org_id": str(org_id), "turn_id": str(turn_id),
             "conversation_id": str(conversation_id), "release_version": version}

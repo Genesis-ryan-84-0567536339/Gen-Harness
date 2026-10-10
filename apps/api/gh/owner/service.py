@@ -27,6 +27,7 @@ from gh.boss_checks import service as boss_service
 from gh.data.common import iso
 from gh.defaults import registry as defaults_registry
 from gh.gen import proposals
+from gh.hub_link import load_kho_label, relabel
 from gh.refinery import triage
 
 log = logging.getLogger("gh.owner")
@@ -169,6 +170,7 @@ async def needs_review(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID) 
           AND m.role = 'assistant' AND m.created_at > now() - make_interval(hours => :h)
         ORDER BY m.created_at DESC LIMIT 40"""), {"o": org_id, "u": user_id, "h": PROPOSAL_WINDOW_H})).all()
     seen: set[str] = set()
+    kho = await load_kho_label(db, org_id)                     # v0.1.57: tên Kho Owner tự đặt (Nợ #30)
     for r in rows:
         content = r.content if isinstance(r.content, dict) else {}
         for st in content.get("steps") or []:
@@ -176,7 +178,7 @@ async def needs_review(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID) 
             if not isinstance(p, dict) or p.get("status") != "pending" or str(p.get("id")) in seen:
                 continue
             seen.add(str(p.get("id")))
-            label = proposals.TYPE_LABELS.get(str(p.get("type")), "Một thao tác")
+            label = relabel(proposals.TYPE_LABELS.get(str(p.get("type")), "Một thao tác"), kho)
             pin = " (cần mã PIN)" if p.get("requires_pin") else ""
             items.append({"kind": "proposal", "title": f"Gen đề xuất: {label}{pin}",
                           "to": f"/owner/gen?gen={r.cid}", "at": iso(r.created_at)})

@@ -51,7 +51,7 @@ from gh.chassis.masking import _RE_SECRET, MASK, mask_for_model
 from gh.chassis.mcp_client import McpClient, always_forbidden, forbidden_host
 from gh.data.common import iso
 from gh.errors import ApiError, conflict
-from gh.hub_link import KHO_LABEL, kho_write
+from gh.hub_link import KHO_LABEL, KHO_LABEL_MAX, kho_write, load_kho_label, relabel
 from gh.hub_link import permit as hub_permit
 from gh.mcp_api import invoke
 
@@ -61,6 +61,11 @@ AGENT_KEY = "core.gen"
 SERVER_NAME = "Gen-hub"
 # v0.1.56: ghi chú máy chủ lưu vào DB của Owner — tên Kho chung; ghi chú cũ (tên riêng) do migration 0035 cập nhật.
 SERVER_NOTE = f"Liên kết Gen-hub — Gen đọc {KHO_LABEL}, lịch, mail, việc, Drive (chỉ đọc). Quản lý ở thẻ Gen-hub."
+
+
+def server_note(label: str = KHO_LABEL) -> str:
+    """Ghi chú máy chủ theo tên Kho hiệu lực của tổ chức (v0.1.57); mặc định = `SERVER_NOTE`."""
+    return relabel(SERVER_NOTE, label)
 # Danh sách cho phép cố định trong code (không cấu hình được): chỉ tool ĐỌC — Kho + Google (QD-16, v0.1.49).
 KHO_READ_SUFFIXES = ("kho_tom_tat", "kho_search", "kho_get", "kho_find_by_id", "kho_list")
 GOOGLE_READ_SUFFIXES = ("calendar_list_events", "tasks_list", "gmail_search", "gmail_read_message", "drive_search")
@@ -140,11 +145,12 @@ def _summary(suffix: str, result: Any) -> str:
     return f"Đọc Gen-hub ({suffix}) — {len(orjson.dumps(result))} byte, nội dung không lưu"
 
 
-def source_of(suffix: str) -> str:
-    """Nhãn nguồn theo hậu tố: kho_* "Kho dữ liệu qua Gen-hub", calendar_* "Lịch Google qua Gen-hub", gmail_* …"""
+def source_of(suffix: str, kho: str = KHO_LABEL) -> str:
+    """Nhãn nguồn theo hậu tố: kho_* "Kho dữ liệu qua Gen-hub" (`kho` = tên Kho hiệu lực của tổ chức, v0.1.57),
+    calendar_* "Lịch Google qua Gen-hub", gmail_* …"""
     for prefix, label, _ in _SOURCES:
         if suffix.startswith(prefix):
-            return label
+            return relabel(label, kho)
     return "Gen-hub"
 
 
@@ -598,7 +604,7 @@ async def call_hub(db: AsyncSession, redis: Any, client: McpClient, *, user: ser
     mở/cấp → guard MCP Hub (`invoke_tool`) → che → đệm. Lỗi mạng/5xx/429 tính vào ngắt mạch; thành công đóng nó."""
     if suffix not in READ_SUFFIXES:
         raise conflict("HUB_TOOL_NOT_ALLOWED", "Tool này không nằm trong danh sách đọc Gen-hub được phép")
-    source = source_of(suffix)
+    source = source_of(suffix, await load_kho_label(db, user.org_id))
     noun = _noun_of(suffix)
     link = await load(db, user.org_id)
     if link is None or link.server_id is None or not link.enabled:
@@ -663,7 +669,7 @@ async def guard_server_admin(db: AsyncSession, *, user: service.CurrentUser, ser
     if not await is_hub_server(db, user.org_id, server_id):
         return False
     if user.role_code != rbac.OWNER:
-        msg = f"Bị chặn: máy chủ Gen-hub ({KHO_LABEL}) chỉ Owner được quản lý"
+        msg = f"Bị chặn: máy chủ Gen-hub ({await load_kho_label(db, user.org_id)}) chỉ Owner được quản lý"
         await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                                action="mcp.server_blocked", target_type="mcp_server", target_id=str(server_id),
                                target_label=SERVER_NAME, result="blocked",
@@ -700,7 +706,7 @@ async def generic_call(db: AsyncSession, redis: Any, transport: Any, *, user: se
     if link is None or link.server_id is None or link.server_id != tool.server_id:
         return None
     if user.role_code != rbac.OWNER:
-        msg = f"Bị chặn: máy chủ Gen-hub ({KHO_LABEL}) chỉ Owner được gọi"
+        msg = f"Bị chặn: máy chủ Gen-hub ({await load_kho_label(db, user.org_id)}) chỉ Owner được gọi"
         raise await _blocked_call(db, redis, user=user, tool=tool, agent_key=agent_key, args=args,
                                   code="HUB_OWNER_ONLY", msg=msg, detail=msg)
     suffix = suffix_of(tool.name)
@@ -843,7 +849,8 @@ async def write_kho(db: AsyncSession, redis: Any, client: McpClient, *, user: se
         raise await _write_blocked(db, user, 403, "HUB_TOOL_NOT_ALLOWED", WRITE_NOT_ALLOWED_MSG, tool=tool,
                                    proposal_id=pid)
     if user.role_code != rbac.OWNER:
-        raise await _write_blocked(db, user, 403, "HUB_OWNER_ONLY", f"Chỉ Owner được ghi vào {KHO_LABEL}", tool=tool,
+        label = await load_kho_label(db, user.org_id)
+        raise await _write_blocked(db, user, 403, "HUB_OWNER_ONLY", f"Chỉ Owner được ghi vào {label}", tool=tool,
                                    proposal_id=pid)
     err = await hub_permit.verify(permit, org_id=user.org_id, user_id=user.id, proposal_id=proposal_id, tool=tool,
                                   args=args, redis=redis)
@@ -941,7 +948,8 @@ async def upsert(db: AsyncSession, redis: Any, *, user: service.CurrentUser, end
             INSERT INTO agent.mcp_servers (org_id, name, transport, endpoint, auth_enc, allow_public_network, note)
             VALUES (:o, :n, 'streamable_http', :e, :a, :pub, :note) RETURNING id"""),
             {"o": user.org_id, "n": SERVER_NAME, "e": endpoint, "a": invoke.encrypt_token(token),
-             "pub": bool(allow_public_network), "note": SERVER_NOTE})).scalar_one()
+             "pub": bool(allow_public_network),
+             "note": server_note(await load_kho_label(db, user.org_id))})).scalar_one()
         changed += ["endpoint", "token"] + (["allow_public_network"] if allow_public_network else [])
     else:
         sets: list[str] = []
@@ -992,6 +1000,43 @@ async def upsert(db: AsyncSession, redis: Any, *, user: service.CurrentUser, end
                                target_type="hub_link", target_id=str(server_id), target_label=SERVER_NAME,
                                detail=detail, ip=user.ip)
     return await load(db, user.org_id)
+
+
+# ─── Tên Kho do Owner tự đặt (v0.1.57, Nợ #30) ───────────────────────────────
+
+async def kho_label_out(db: AsyncSession, org_id: uuid.UUID) -> dict[str, Any]:
+    """Phần `kho_label*` của `GET /hub/link`: tên hiệu lực + đã đổi chưa + tên mặc định (web hiện chip Đã đổi)."""
+    label = await load_kho_label(db, org_id)
+    return {"kho_label": label, "kho_label_custom": label != KHO_LABEL, "kho_label_default": KHO_LABEL,
+            "kho_label_max": KHO_LABEL_MAX}
+
+
+async def refresh_server_note(db: AsyncSession, org_id: uuid.UUID, old: str, new: str) -> None:
+    """Đổi tên Kho ⇒ ghi chú máy chủ Gen-hub do hệ thống tự đặt (đúng chuỗi cũ) đổi theo; ghi chú Owner sửa tay giữ."""
+    await db.execute(text("""UPDATE agent.mcp_servers SET note = :new
+                             WHERE org_id = :o AND name = :n AND note = :old"""),
+                     {"o": org_id, "n": SERVER_NAME, "old": server_note(old), "new": server_note(new)})
+
+
+async def set_kho_label(db: AsyncSession, *, user: service.CurrentUser, label: str) -> bool:
+    """Lưu tên Kho của tổ chức (`label` đã chuẩn hoá + kiểm độ dài); rỗng ⇒ xoá khoá, về mặc định. True khi có đổi."""
+    old = await load_kho_label(db, user.org_id)
+    new = label or KHO_LABEL
+    if new == old:
+        return False
+    if label:
+        await db.execute(text("""UPDATE core.organizations
+                                 SET settings = jsonb_set(COALESCE(settings, '{}'::jsonb), '{kho_label}',
+                                                          to_jsonb(CAST(:l AS text)), true) WHERE id = :o"""),
+                         {"o": user.org_id, "l": label})
+    else:
+        await db.execute(text("UPDATE core.organizations SET settings = settings - 'kho_label' WHERE id = :o"),
+                         {"o": user.org_id})
+    await refresh_server_note(db, user.org_id, old, new)
+    await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
+                           action="hub.kho_label_changed", target_type="hub_link", target_label=SERVER_NAME,
+                           detail={"from": old, "to": new}, ip=user.ip)
+    return True
 
 
 async def test_link(db: AsyncSession, redis: Any, client: McpClient, *, user: service.CurrentUser) -> dict[str, Any]:

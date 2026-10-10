@@ -27,7 +27,7 @@ from gh.data.ingest import sync_listen_sets, uptime_pct
 from gh.db import DB
 from gh.errors import ApiError, conflict, field_errors, forbidden, not_found, pin_required
 from gh.gen import jev
-from gh.hub_link import KHO_LABEL
+from gh.hub_link import KHO_LABEL, load_kho_label, relabel
 from gh.providers import catalog
 from gh.providers import cli as climod
 from gh.providers import router as mrouter
@@ -935,7 +935,8 @@ BOUNDARY_LABELS: dict[str, str] = {
 async def get_boundaries(user: service.CurrentUser = Depends(READ), db: AsyncSession = DB) -> list[dict[str, Any]]:
     rows = (await db.execute(text("""SELECT code, is_enabled, is_locked, params FROM ops.policy_boundaries
                                      WHERE org_id = :o ORDER BY code"""), {"o": user.org_id})).all()
-    return [{"code": r.code, "label": BOUNDARY_LABELS.get(r.code, r.code), "enabled": r.is_enabled,
+    kho = await load_kho_label(db, user.org_id)       # v0.1.57: tên Kho Owner tự đặt (Nợ #30)
+    return [{"code": r.code, "label": relabel(BOUNDARY_LABELS.get(r.code, r.code), kho), "enabled": r.is_enabled,
              "locked": r.is_locked, "params": r.params} for r in rows]
 
 
@@ -979,7 +980,8 @@ async def patch_boundary(code: str, body: BoundaryPatch, user: service.CurrentUs
                            target_label=BOUNDARY_LABELS.get(code, code),
                            detail={"from": {"enabled": row.is_enabled, "params": row.params},
                                    "to": {"enabled": new.is_enabled, "params": new.params}}, ip=user.ip)
-    return {"code": code, "label": BOUNDARY_LABELS.get(code, code), "enabled": new.is_enabled,
+    return {"code": code, "label": relabel(BOUNDARY_LABELS.get(code, code), await load_kho_label(db, user.org_id)),
+            "enabled": new.is_enabled,
             "locked": new.is_locked, "params": new.params}
 
 

@@ -534,7 +534,8 @@ async def confirm_proposal(pid: uuid.UUID, request: Request, body: ConfirmIn | N
     except ValueError as e:
         raise field_errors({"fields": str(e)}) from e
     target = proposals.target_of(ptype, fields)
-    err = proposals.permission_error(user.permissions, ptype, target, user.role_code)
+    err = proposals.permission_error(user.permissions, ptype, target, user.role_code,
+                                     await proposals.kho_for(db, user.org_id, ptype))
     if err:
         await _log_apart(user, "gen.proposal_confirmed", "blocked", p, reason=err)
         raise forbidden(err)
