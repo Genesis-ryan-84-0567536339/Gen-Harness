@@ -2528,17 +2528,17 @@ jobs:
         run: |
           set -euo pipefail
           run="$GEN_HARNESS_HOME/run"
-          started_count() {
+          starting_count() {
             local out
             out="$(journalctl --user -u gen-harness-update-request.service -o cat --no-pager 2>/dev/null || true)"
             if [ -z "$out" ]; then
               out="$(sudo -n journalctl --user-unit gen-harness-update-request.service -o cat --no-pager 2>/dev/null || true)"
             fi
-            printf '%s\n' "$out" | grep -c '^Started ' || true
+            printf '%s\n' "$out" | grep -c '^Starting ' || true
           }
           p="$(systemctl --user is-active gen-harness-update-request.path 2>&1 || true)"
           [ "$p" = "active" ] || { echo "::error::gen-harness-update-request.path is-active = '$p' trước khi bấm nút." >&2; exit 1; }
-          s0="$(started_count)"
+          s0="$(starting_count)"
           before="$(python3 -c "import json,sys;print(json.load(open(sys.argv[1])).get('started_at',''))" "$run/update-status.json" 2>/dev/null || true)"
           api="$(docker ps --format '{{.Names}}' | grep -E '^gen-harness-api-[0-9]+$' | head -1)"
           [ -n "$api" ] || { echo "::error::không thấy container api" >&2; docker ps -a; exit 1; }
@@ -2587,10 +2587,11 @@ jobs:
           echo "gen-harness-update-request.path is-failed: $pf"
           [ "$pf" != "failed" ] || { echo "::error::gen-harness-update-request.path ở trạng thái failed sau một yêu cầu bình thường." >&2; systemctl --user status gen-harness-update-request.path --no-pager || true; exit 1; }
           nr="$(systemctl --user show gen-harness-update-request.service -p NRestarts)"
-          s1="$(started_count)"
-          echo "$nr; số lần Started của gen-harness-update-request.service: $s0 → $s1"
+          s1="$(starting_count)"
+          echo "$nr; số lần gen-harness-update-request.service được khởi động (Starting): $s0 → $s1"
           [ "${nr#NRestarts=}" -le 2 ] || { echo "::error::$nr — service nhận yêu cầu khởi động lại quá nhiều." >&2; exit 1; }
-          [ $((s1 - s0)) -le 2 ] || { echo "::error::một yêu cầu bình thường mà service nhận yêu cầu Started $((s1 - s0)) lần (cần ≤ 2)." >&2; journalctl --user -u gen-harness-update-request.service --no-pager | tail -50 || true; exit 1; }
+          [ $((s1 - s0)) -ge 1 ] || { echo "::error::không thấy dòng 'Starting gen-harness-update-request.service' trong journal sau khi bấm nút — .path không kích service hoặc không đọc được journal." >&2; journalctl --user -u gen-harness-update-request.service --no-pager | tail -50 || true; exit 1; }
+          [ $((s1 - s0)) -le 2 ] || { echo "::error::một yêu cầu bình thường mà service nhận yêu cầu được khởi động $((s1 - s0)) lần (cần ≤ 2)." >&2; journalctl --user -u gen-harness-update-request.service --no-pager | tail -50 || true; exit 1; }
           echo "OK: nút Cập nhật ngay đi hết đường .path → genh → done, không kích lặp."
 
       - name: run/nightly-status.json đúng hợp đồng sau cập nhật (Console đọc tệp này)
@@ -2624,13 +2625,13 @@ jobs:
           req="$run/request"
           svc=gen-harness-update-request.service
           pth=gen-harness-update-request.path
-          started_count() {
+          starting_count() {
             local out
             out="$(journalctl --user -u "$svc" -o cat --no-pager 2>/dev/null || true)"
             if [ -z "$out" ]; then
               out="$(sudo -n journalctl --user-unit "$svc" -o cat --no-pager 2>/dev/null || true)"
             fi
-            printf '%s\n' "$out" | grep -c '^Started ' || true
+            printf '%s\n' "$out" | grep -c '^Starting ' || true
           }
           # Ghi lại quyền/nhóm TRƯỚC khi chmod để khôi phục đúng (và luôn khôi phục kể cả khi bước đỏ giữa chừng).
           mode0="$(stat -c %a "$req")"; grp0="$(stat -c %g "$req")"
@@ -2662,7 +2663,7 @@ jobs:
             echo "::error::run/request vẫn ghi được sau chmod 0555 (runner chạy bằng root?) — không dựng được ca tệp không xoá được." >&2
             exit 1
           fi
-          s0="$(started_count)"
+          s0="$(starting_count)"
           systemctl --user start "$pth"
           # Chờ tối đa 90 giây: update-status.json phải là failed kèm GH-E94C.
           deadline=$((SECONDS + 90))
@@ -2682,12 +2683,14 @@ jobs:
           echo "update-status: state=$state — $msg"
           # Cho .path đủ thời gian kích lặp (nếu có lỗi): rồi đếm số lần service được khởi động.
           sleep 20
-          s1="$(started_count)"
+          s1="$(starting_count)"
           sleep 15
-          s2="$(started_count)"
+          s2="$(starting_count)"
           journalctl --user -u "$svc" --no-pager 2>/dev/null | tail -30 || true
-          echo "Started của $svc: trước $s0, sau 20 giây $s1, sau 35 giây $s2 (tăng $((s2 - s0)))"
+          # Service oneshot kết thúc bằng "Finished", nên mỗi lần khởi động là một dòng "Starting …" trong journal.
+          echo "Số lần $svc được khởi động (Starting): trước $s0, sau 20 giây $s1, sau 35 giây $s2 (tăng $((s2 - s0)))"
           systemctl --user is-failed "$pth" "$svc" || true
+          [ $((s2 - s0)) -ge 1 ] || { echo "::error::không thấy dòng 'Starting $svc' nào sau khi bật lại .path với tệp yêu cầu đang nằm đó — .path không kích service hoặc không đọc được journal." >&2; exit 1; }
           [ $((s2 - s0)) -le 6 ] || { echo "::error::$svc được khởi động $((s2 - s0)) lần (cần ≤ 6 = StartLimitBurst 5 + 1) — .path kích lặp vô hạn trên tệp yêu cầu không xoá được." >&2; exit 1; }
           [ "$s2" = "$s1" ] || { echo "::error::$svc vẫn được khởi động thêm sau khi báo GH-E94C ($s1 → $s2) — .path còn đang kích lặp." >&2; exit 1; }
           [ -e "$req/update.json" ] || { echo "::error::tệp yêu cầu biến mất dù không xoá được — yêu cầu mất dấu." >&2; exit 1; }
