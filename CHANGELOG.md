@@ -7,6 +7,12 @@ Ngày = ngày Release trên GitHub theo giờ Việt Nam; tiêu đề trong `doc
 (v0.1.32–v0.1.34, v0.1.40, v0.1.46) hoặc vài ngày (v0.1.47, v0.1.48: làm 03/10, phát hành 09/10).
 Việc sửa nóng không đổi số bản (PR #46, #48, #53, #55, #58, #59) ghi ở [ROADMAP › Bản phản ứng](docs/ROADMAP.md).
 
+## v0.1.58 — Bản vá nóng: Antigravity CLI đòi mức suy nghĩ làm Gen im lặng, "Kiểm tra kết nối" đỏ và mọi vai "chưa có nguồn phù hợp" (11/10/2026)
+- **Gốc rễ**: agy của Sếp không đánh dấu model "current" nên lượt gọi thử không gửi `--effort`, agy từ chối kèm `available: low, medium, high`; `_cli_probe` không thử lại với một mức nên đỏ và báo sai `CLI không nhận model ""` (ô chọn model bị ẩn, Sếp kẹt). Nay thử lại cùng model với 'medium' (≤ 4 lượt), câu lỗi nêu đúng model + mức và không bao giờ in model rỗng; `_complete` cũng gọi lại một lần khi CLI đòi mức.
+- **Tự lành**: Kiểm tra kết nối xanh mà nguồn CLI chưa có dòng model ⇒ tự lưu (model, mức) vừa chạy được (không đặt mặc định, Action Log `provider.model_auto`); lượt Gen của Owner tự kiểm tra đúng một lần/10 phút khi agy mất dòng model; việc nền không bao giờ gọi agy.
+- **Hiển thị**: bảng gán model nói lý do thật thay "Chuẩn: chưa có nguồn phù hợp" (`standard_reason`: "cần khoá API (Antigravity chỉ dùng cho Gen)", "chưa có model — bấm Kiểm tra kết nối ở …"); nhãn "Sắp hết hạn" của agy không còn khi tệp phiên có khoá làm mới token (chỉ xét tên khoá). Không migration.
+- Chi tiết: [docs/releases/v0.1.58.md](docs/releases/v0.1.58.md)
+
 ## v0.1.57 — Khoá nạp dữ liệu mẫu, Owner tự đặt Tên Kho, CI api song song, bộ kiểm chống lộ không ghi danh tính (10/10/2026)
 - **Dữ liệu mẫu có khoá**: `gh.seed_demo seed` chỉ chạy khi có `--force` / `GH_ALLOW_SEED_DEMO=1` và cơ sở dữ liệu chưa có dữ liệu thật (người dùng, liên hệ, tin nhắn); không thì in câu tiếng Việt + "Chi tiết kỹ thuật", thoát mã 2. Makefile và E2E đã truyền cờ.
 - **Ô "Tên Kho (tuỳ chọn)"** ở thẻ Gen-hub (≤ 40 ký tự, chỉ Owner, trống = "Kho dữ liệu", có Về mặc định): `kho_label(settings)` thay mọi chữ tên Kho chạy thật (thẻ đề xuất, prompt Gen, chuông, bài học/mẹo…). Không migration; Nợ #30 xong.

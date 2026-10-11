@@ -1,4 +1,4 @@
-# Bàn giao Gen-Harness — hiện trạng + việc dở (cập nhật 10/10/2026, bản v0.1.57)
+# Bàn giao Gen-Harness — hiện trạng + việc dở (cập nhật 11/10/2026, bản v0.1.58)
 
 File này nay chỉ ghi **hiện trạng + việc dở** (tên cũ `HANDOFF-v0.1.1.md` giữ nguyên vì mã nguồn có chú thích trỏ tới).
 Lịch sử từng bản nằm ở [CHANGELOG.md](../../CHANGELOG.md) (3–5 dòng/bản) và `docs/releases/vX.Y.Z.md` (chi tiết, chuyển nguyên từ HANDOFF cũ):
@@ -21,9 +21,10 @@ Còn hiệu lực từ v0.1.1 (vai trò DB, volume, gói hồ sơ); chi tiết �
 - **Gói hồ sơ `.ghbundle`**: Python tạo/đọc (`python -m gh.bundle export|import`), Go chỉ chuyển bytes; mật khẩu qua `GH_BUNDLE_PASSWORD` (≥ 12 ký tự);
   mã thoát `0` ok · `2` sai mật khẩu/gói hỏng · `3` không tương thích · `1` lỗi khác; mã hoá lại mọi bí mật bằng khoá master máy đích.
 
-## Hiện trạng (v0.1.57)
+## Hiện trạng (v0.1.58)
 
-Bản mới nhất **v0.1.57** (10/10/2026, `VERSION` = v0.1.57): **khoá nạp dữ liệu mẫu** (cờ + DB chưa có dữ liệu thật), **Owner tự đặt Tên Kho** (Nợ #30), **CI `api` chạy hai lượt pytest song song**, bộ kiểm chống lộ chỉ giữ quy tắc chung (mẫu riêng ở secret `GH_PERSONAL_PATTERNS`), bản công khai đã gọt danh tính riêng ([v0.1.57.md](../releases/v0.1.57.md)); đang chờ PR vào main + cổng phát hành.
+Bản mới nhất **v0.1.58** (11/10/2026, `VERSION` = v0.1.58): **bản vá nóng** — agy của Sếp đòi mức suy nghĩ khiến Kiểm tra kết nối đỏ và Gen im lặng; Kiểm tra nay thử lại với mức, tự lưu model khi nguồn CLI mất dòng model, lượt Gen của Owner tự lành, bảng gán nói lý do thật ([v0.1.58.md](../releases/v0.1.58.md)); đang chờ PR vào main + cổng phát hành.
+Trước đó **v0.1.57** (10/10/2026): **khoá nạp dữ liệu mẫu** (cờ + DB chưa có dữ liệu thật), **Owner tự đặt Tên Kho** (Nợ #30), **CI `api` chạy hai lượt pytest song song**, bộ kiểm chống lộ chỉ giữ quy tắc chung (mẫu riêng ở secret `GH_PERSONAL_PATTERNS`), bản công khai đã gọt danh tính riêng ([v0.1.57.md](../releases/v0.1.57.md)); đã vào main.
 Trước đó **v0.1.56** (10/10/2026): **không lộ thông tin riêng của Sếp cho Owner khác** — bỏ địa chỉ Gen-hub khỏi mã giao đi, tên Kho chung "Kho dữ liệu", CI chống lộ ([v0.1.56.md](../releases/v0.1.56.md)).
 Trước đó **v0.1.55** (10/10/2026): **Gọn cho Sếp** — Mặt tiền Owner, hồ sơ model tiêu chuẩn + Về mặc định, thiết lập gọn, chọn model trong chat, Jev lọc trước ([v0.1.55.md](../releases/v0.1.55.md)).
 Trước đó **v0.1.54**: **Gen hướng dẫn** — Gen chủ động nhắc việc Sếp cần làm, giới thiệu tính năng, bài học mỗi ngày ([v0.1.54.md](../releases/v0.1.54.md), thiết kế [gen-coach.md](../design/gen-coach.md)).
@@ -45,6 +46,13 @@ v0.1.52 (gỡ digest cũ bằng `rmi -f`, [v0.1.52.md](../releases/v0.1.52.md)),
   việc nền mặc định chỉ khoá API; chi phí ₫/ngày + trần; Jev tuỳ chọn: lọc trước tin trùng/rác (che dữ liệu bắt buộc, v0.1.55; QD-10 bỏ Jules).
 - **Kênh**: Zalo/WhatsApp qua bridge (QR); Telegram một chiều tới Sếp; Facebook cá nhân đọc + Trả lời bình luận/Nhắn tin có Xác nhận + PIN + ảnh chụp (đăng bài = lát 2).
 - **Dữ liệu & bảo mật**: Postgres 16 (pgvector, pg_partman), RLS chỉ là phòng thủ phụ (mỗi bản cài 1 tổ chức), hạn lưu thật, bí mật mã hoá phong bì, DNS ghim cho MCP/Gen-hub, ngắt mạch Gen-hub 60 giây.
+
+## v0.1.58 — Bản vá nóng: Antigravity CLI đòi mức suy nghĩ (nhánh `claude/v0158`)
+
+- **Vì sao**: máy Sếp (v0.1.57) Gen không trả lời; agy không đánh dấu model "current" ⇒ lượt gọi thử không có `--effort`, agy từ chối `(available: low, medium, high)`, `_cli_probe` không thử lại với mức ⇒ đỏ + câu sai `CLI không nhận model ""`, ô chọn model bị ẩn nên Sếp kẹt; nguồn mất dòng model ⇒ mọi vai "Chuẩn: chưa có nguồn phù hợp".
+- **Thay đổi**: `router.py` (`_cli_probe` ≤ 4 lượt, `effort_from_rejection`, `_complete` gọi lại một lần, `_heal_agy` chỉ lượt Gen của Owner, khoá Redis 10 phút), `POST /providers/{id}/test` tự lưu (model, mức) khi nguồn CLI 0 dòng model (`provider.model_auto`, không đặt mặc định), `profiles.missing_reason` + `standard_reason`, `session_meta` khoá làm mới agy. Không migration.
+- **Chưa làm**: bước rẻ ở `e2e-install` (`agy --help | grep -- --effort`, `missing_reason` trong container) — ca hồi quy chính là pytest có DB trong CI; ô chọn model vẫn ẩn khi Kiểm tra đỏ (`offeredGroups`, kế hoạch không nêu); **Nợ #32**: vì sao mất dòng model trên máy Sếp chưa rõ — đọc Action Log (`provider.model_set`, `provider.deleted`) sau khi máy lên v0.1.58.
+- **Boss cần làm**: xem "Boss phải làm — v0.1.58" dưới. Chi tiết: [v0.1.58.md](../releases/v0.1.58.md).
 
 ## v0.1.56 — Không lộ thông tin riêng của Sếp cho Owner khác (3 gói A/B/C, nhánh `claude/v0156`)
 
@@ -102,6 +110,11 @@ v0.1.52 (gỡ digest cũ bằng `rmi -f`, [v0.1.52.md](../releases/v0.1.52.md)),
 5. Bật bảo vệ nhánh `main` + tag `v*` (cần quyền admin repo, ~2 phút): xem [v0.1.33.md](../releases/v0.1.33.md). Không thêm `paths-ignore: docs/**` cho `ci.yml`.
 
 ## Việc dở
+
+### Boss phải làm — v0.1.58 (một lần, ~1 phút; chi tiết ở [v0.1.58.md](../releases/v0.1.58.md))
+
+1. Chạy `genh update` rồi tải lại trang (F5); Gen tự chọn lại model, không phải thao tác tay. Muốn chắc: Kết nối › Antigravity CLI › **Kiểm tra kết nối**.
+2. Không cần làm gì khác (nhãn "Sắp hết hạn · 56 phút" là hạn 1 giờ của token Google, CLI tự gia hạn).
 
 ### Boss phải làm — v0.1.57 (không gấp; chi tiết ở [v0.1.57.md](../releases/v0.1.57.md))
 
@@ -164,7 +177,8 @@ v0.1.52 (gỡ digest cũ bằng `rmi -f`, [v0.1.52.md](../releases/v0.1.52.md)),
 - **Phát hành v0.1.57**: `claude/v0157` → PR vào main → CI xanh (job `api` hai lượt song song, lớp mẫu riêng cần secret `GH_PERSONAL_PATTERNS`; `release.yml` truyền `secrets: inherit`) → merge → bản thử → E2E cài thật + nâng cấp → promote → kiểm genh tải về → báo Boss.
 - **Phát hành v0.1.56**: `claude/v0156` → PR vào main → CI xanh (có bước "Chống lộ thông tin riêng của Sếp") → merge → bản thử → E2E cài thật + nâng cấp → promote → kiểm genh tải về → báo Boss.
 - **Phát hành v0.1.55**: `claude/v0155` (5 gói đã tích hợp, đã nối main) → PR vào main → CI xanh → merge → Release bản thử → E2E cài thật (có bước hồ sơ tiêu chuẩn) + nâng cấp + `e2e-nightly-real` → promote → kiểm genh tải về (checksum/version) → báo Boss.
-- **v0.1.58 (đã hẹn)**: nhận kết quả "Thử 12 câu mẫu" của Jev từ Boss rồi quyết ngưỡng lọc trước; Mặt tiền thêm "Chi phí AI hôm nay" + thẻ "Chưa có model", mục Phân tích; chuông Gen dẫn về Mặt tiền; xoá hội thoại Gen thì xoá luôn lựa chọn model đã nhớ.
+- **Phát hành v0.1.58**: `claude/v0158` → PR vào main → CI xanh → merge → bản thử → E2E cài thật + nâng cấp → promote → kiểm genh tải về khớp tag.
+- **v0.1.59 (đã hẹn)**: nhận kết quả "Thử 12 câu mẫu" của Jev từ Boss rồi quyết ngưỡng lọc trước; Mặt tiền thêm "Chi phí AI hôm nay" + thẻ "Chưa có model", mục Phân tích; chuông Gen dẫn về Mặt tiền; xoá hội thoại Gen thì xoá luôn lựa chọn model đã nhớ.
 - **H-b còn mở**: timer đêm mất lịch khi `daemon-reload`/`enable` chạy từ bên trong service đêm — không tái hiện được bằng mã lẫn `e2e-nightly-real` (systemd thật: sau lần chạy timer vẫn có lần kế tiếp); tự lành bao ca này. Máy thật còn tái diễn thì ghi vào v0.1.53.md.
 - **PR Renovate** không tự merge nằm chờ tới khi Boss nhắn "xử lý PR phụ thuộc"; chưa có lịch tự động nào gọi Claude.
 - **Selector ghi Facebook** mới kiểm trên trang mẫu — chờ nghiệm thu thật (dòng 8). Chuông phiên hết có thể hiện hai lần (`social.paused` + `social.session_expired`), gộp ở bản sau nếu phiền.
