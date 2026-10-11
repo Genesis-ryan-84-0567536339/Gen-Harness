@@ -20,7 +20,16 @@ import {
   useTaskDone,
   useTaskPostpone,
 } from '../../src/owner/actions/useOwnerActions';
-import { OWNER_KEYS } from '../../src/owner/queries';
+import {
+  INSIGHTS_REFRESH_MS,
+  OWNER_KEYS,
+  useOwnerBrief,
+  useOwnerFeed,
+  useOwnerFeedContext,
+  useOwnerInsights,
+  useOwnerProposals,
+  useOwnerRelations,
+} from '../../src/owner/queries';
 import { PinDialogHost } from '../../src/shell/PinDialogHost';
 import { qk } from '../../src/lib/queries';
 import { queryClient } from '../../src/lib/queryClient';
@@ -384,6 +393,58 @@ describe('hook ghi tại chỗ', () => {
     expect(expiresText('2026-10-11T11:00:00Z', at)).toBe('Đã hết hạn');
     expect(expiresText({ x: 1 }, at)).toBe('');
     expect(expiresText('không phải giờ', at)).toBe('');
+  });
+});
+
+// ── hook đọc ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+describe('hook đọc của Mặt tiền (queries.ts)', () => {
+  const feedPage = (offset: number | null, ids: string[]) => ({ items: ids.map((id) => ({ id })), next_offset: offset, counts: {}, filtered_7d: {}, channels_connected: 1 });
+
+  it('useOwnerFeed phân trang theo offset; useOwnerFeedContext chỉ gọi khi có id; useOwnerBrief/Insights/Relations/Proposals gọi đúng tham số', async () => {
+    queryClient.setQueryData(qk.me, ME);
+    const calls = mockFetch((c) => {
+      const u = new URL(c.url, 'http://x');
+      if (u.pathname.endsWith('/owner/feed') && u.searchParams.get('offset') === '0') return json(200, feedPage(2, ['a', 'b']));
+      if (u.pathname.endsWith('/owner/feed') && u.searchParams.get('offset') === '2') return json(200, feedPage(null, ['c']));
+      if (u.pathname.endsWith('/context')) return json(200, { center_event_id: null, messages: [] });
+      if (u.pathname.endsWith('/owner/brief') || u.pathname.endsWith('/owner/insights') || u.pathname.endsWith('/owner/proposals') || u.pathname.endsWith('/owner/relations')) return json(200, { items: [] });
+      return undefined;
+    });
+    const feed = renderHook(() => useOwnerFeed('all', 2), { wrapper });
+    await waitFor(() => expect(feed.result.current.data?.pages).toHaveLength(1));
+    expect(feed.result.current.hasNextPage).toBe(true);
+    await feed.result.current.fetchNextPage();
+    await waitFor(() => expect(feed.result.current.data?.pages).toHaveLength(2));
+    expect(feed.result.current.hasNextPage).toBe(false);
+    const feedCalls = calls.filter((c) => c.url.includes('/owner/feed'));
+    expect(feedCalls.map((c) => new URL(c.url, 'http://x').search)).toEqual(['?view=all&offset=0&limit=2', '?view=all&offset=2&limit=2']);
+
+    const none = renderHook(() => useOwnerFeedContext(null), { wrapper });
+    expect(none.result.current.fetchStatus).toBe('idle');
+    const ctx = renderHook(() => useOwnerFeedContext('fd 1'), { wrapper });
+    await waitFor(() => expect(ctx.result.current.isSuccess).toBe(true));
+    expect(calls.some((c) => c.url.endsWith('/owner/feed/fd%201/context'))).toBe(true);
+
+    renderHook(() => useOwnerBrief('brief-2'), { wrapper });
+    renderHook(() => useOwnerInsights('month', ['messages_in', 'unanswered']), { wrapper });
+    renderHook(() => useOwnerRelations('care', 5), { wrapper });
+    renderHook(() => useOwnerProposals(), { wrapper });
+    await waitFor(() => expect(calls.some((c) => c.url.includes('/owner/proposals'))).toBe(true));
+    await waitFor(() => expect(calls.some((c) => c.url.includes('/owner/relations'))).toBe(true));
+    const urls = calls.map((c) => c.url);
+    expect(urls).toContain('/api/v1/owner/brief?id=brief-2');
+    expect(urls).toContain('/api/v1/owner/insights?range=month&only=messages_in%2Cunanswered');
+    expect(urls).toContain('/api/v1/owner/relations?list=care&limit=5');
+    expect(INSIGHTS_REFRESH_MS).toBe(10 * 60_000);
+  });
+
+  it('vai trò khác Owner không gọi /owner/* (máy chủ sẽ trả 403)', async () => {
+    queryClient.setQueryData(qk.me, { ...ME, role: { code: 'operator', name: 'operator' } });
+    const calls = mockFetch(() => undefined);
+    const r = renderHook(() => useOwnerInsights('week', ['messages_in']), { wrapper });
+    expect(r.result.current.fetchStatus).toBe('idle');
+    expect(calls.some((c) => c.url.includes('/owner/'))).toBe(false);
   });
 });
 
