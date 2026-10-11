@@ -649,8 +649,9 @@ class ModelRouter:
 
     async def _heal_agy(self, org_id: uuid.UUID) -> bool:
         """v0.1.58 — tự lành, CHỈ gọi từ lượt Gen của Owner (`core.gen` + `allow_agy=True`; việc nền đã bị ép False ở
-        `generate` nên không bao giờ tới đây — F-22/F-86). Nguồn Antigravity CLI đang bật, có hồ sơ CLI đang dùng mà 0 dòng model
-        (nên chuỗi không có agy) ⇒ "Kiểm tra kết nối" đúng MỘT lần (khoá Redis 10 phút) rồi lưu model vừa chạy được.
+        `generate` nên không bao giờ tới đây — F-22/F-86). Nguồn Antigravity CLI đang bật, có hồ sơ CLI đang dùng mà
+        0 dòng model (nên chuỗi không có agy) ⇒ "Kiểm tra kết nối" đúng MỘT lần (khoá Redis 10 phút) rồi lưu model vừa
+        chạy được.
         Trả True khi đã thêm model (bên gọi dựng lại chuỗi). Lỗi chỉ ghi log — lượt Gen đi tiếp như cũ."""
         try:
             async with self.sm() as db:
