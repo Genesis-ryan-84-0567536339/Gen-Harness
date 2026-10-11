@@ -549,8 +549,8 @@ class ModelRouter:
         async with self.sm() as db:
             chain = await self._chain(db, org_id, agent_key, tier=tier)
             bg_cli = await background_cli_allowed(db, org_id) if background else set()
-        if allow_agy and not any(lk["provider"].kind == "antigravity_cli" for lk in chain) \
-                and await self._heal_agy(org_id):
+        if allow_agy and agent_key == profiles.ROLE_GEN \
+                and not any(lk["provider"].kind == "antigravity_cli" for lk in chain) and await self._heal_agy(org_id):
             async with self.sm() as db:
                 chain = await self._chain(db, org_id, agent_key, tier=tier)
         reasons: list[str] = []
@@ -648,8 +648,8 @@ class ModelRouter:
         raise ModelUnavailable(reasons, no_chain=not chain)
 
     async def _heal_agy(self, org_id: uuid.UUID) -> bool:
-        """v0.1.58 — tự lành, CHỈ gọi từ lượt Gen của Owner (`allow_agy=True`; việc nền đã bị ép False ở `generate`
-        nên không bao giờ tới đây — F-22/F-86). Nguồn Antigravity CLI đang bật, có hồ sơ CLI đang dùng mà 0 dòng model
+        """v0.1.58 — tự lành, CHỈ gọi từ lượt Gen của Owner (`core.gen` + `allow_agy=True`; việc nền đã bị ép False ở
+        `generate` nên không bao giờ tới đây — F-22/F-86). Nguồn Antigravity CLI đang bật, có hồ sơ CLI đang dùng mà 0 dòng model
         (nên chuỗi không có agy) ⇒ "Kiểm tra kết nối" đúng MỘT lần (khoá Redis 10 phút) rồi lưu model vừa chạy được.
         Trả True khi đã thêm model (bên gọi dựng lại chuỗi). Lỗi chỉ ghi log — lượt Gen đi tiếp như cũ."""
         try:

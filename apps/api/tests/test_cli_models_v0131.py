@@ -152,8 +152,10 @@ async def test_agy_models_grouped_probe_and_validated_choice(owner_api, clis) ->
     r = await api.send("POST", f"/providers/{p['id']}/models", {"model_name": "claude-opus-4.6-thinking"})
     assert r.status_code == 422, r.text
     assert "không nhận model" in r.text
+    # v0.1.58: "Kiểm tra kết nối" xanh khi nguồn chưa có model ⇒ tự lưu model vừa gọi thử được (không đặt mặc định);
+    # model Claude không nhận (422) thì KHÔNG được lưu thêm.
     names = [m["model_name"] for m in (await _provider(api, "antigravity_cli"))["models"]]
-    assert names == ["claude-sonnet-4-6-thinking"]
+    assert names == ["gemini-3.8-flash", "claude-sonnet-4-6-thinking"]
     # Sửa hạn mức của model ĐÃ có thì không gọi thử lại.
     r = await api.send("POST", f"/providers/{p['id']}/models",
                        {"model_name": "claude-sonnet-4-6-thinking", "daily_quota": 100})
