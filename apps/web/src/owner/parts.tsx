@@ -1,12 +1,17 @@
 /**
- * v0.1.55 (G5) — mảnh dùng chung của 5 màn Mặt tiền: trạng thái tải (Skeleton), rỗng (EmptyState chữ đời thường), lỗi
+ * v0.1.55 (G5) — mảnh dùng chung của các màn Mặt tiền: trạng thái tải (Skeleton), rỗng (EmptyState chữ đời thường), lỗi
  * (ErrorState: câu thân thiện + "Chi tiết kỹ thuật" — không bao giờ render object) và dòng danh sách bấm được.
+ *
+ * v0.1.59 (G2): thêm `FirstRunCard` — thẻ NGÀY ĐẦU dùng chung Tình báo, Thông tin, Quan hệ, Phân tích (khi channels_connected = 0).
+ * Các mảnh cũ (ListSkeleton, OwnerError, OwnerEmpty, RowLink, IconTile, Avatar) giữ nguyên để G3/G4/G5 dùng tiếp; dòng danh sách
+ * mới nên dùng `ListRow` của @gen-harness/ui (gộp RowLink + Avatar).
  */
-import type { ReactNode } from 'react';
+import { useId, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { EmptyState, Icon, Skeleton, cx } from '@gen-harness/ui';
+import { Card, EmptyState, Icon, Skeleton, cx } from '@gen-harness/ui';
 import { CardError } from '../screens/common';
-import { asText, avatarText, safeLink } from './ownerModel';
+import { openAskGen } from './AskGenScreen';
+import { OWNER_PATHS, asText, avatarText, safeLink } from './ownerModel';
 
 /** Khung chờ cùng hình với danh sách thật: `rows` dòng (ô tròn + hai dòng chữ). */
 export function ListSkeleton({ rows = 4, label = 'Đang tải' }: { rows?: number; label?: string }) {
@@ -88,5 +93,45 @@ export function Avatar({ name }: { name: unknown }) {
     <span className="owner-avatar" aria-hidden>
       {avatarText(name)}
     </span>
+  );
+}
+
+/** Đích nút "Nối Zalo": bước hướng dẫn nối kênh Zalo (GuideStepPage n=5). */
+const CONNECT_ZALO_PATH = '/guide/5';
+
+/**
+ * Thẻ ngày đầu — `channels_connected = 0`: thay TOÀN BỘ phần số/danh sách của Tình báo, Thông tin, Quan hệ, Phân tích bằng ĐÚNG MỘT
+ * thẻ này (không chồng EmptyState). Nút chính "Nối Zalo" → /guide/5; liên kết phụ "Xem Gen làm được gì" mở ngăn Hỏi Gen.
+ */
+export function FirstRunCard() {
+  const titleId = useId();
+  return (
+    <Card as="section" className="owner-firstrun" data-testid="first-run-card" aria-labelledby={titleId}>
+      <div className="owner-firstrun__body">
+        <span className="owner-firstrun__icon" aria-hidden>
+          <Icon name="ph ph-plugs-connected" size={24} />
+        </span>
+        <h2 className="owner-firstrun__title" id={titleId}>
+          Nối Zalo để Gen bắt đầu đọc tin
+        </h2>
+        <p className="owner-firstrun__text">Sau khi nối, ở đây Sếp sẽ thấy tin quan trọng, khách cần chăm và số liệu tuần</p>
+        <div className="owner-firstrun__actions">
+          <Link to={CONNECT_ZALO_PATH} className="kit-btn kit-btn--primary" data-testid="first-run-connect">
+            Nối Zalo
+          </Link>
+          <Link
+            to={OWNER_PATHS.gen}
+            className="kit-link"
+            data-testid="first-run-ask-gen"
+            onClick={(e) => {
+              e.preventDefault();
+              openAskGen();
+            }}
+          >
+            Xem Gen làm được gì
+          </Link>
+        </div>
+      </div>
+    </Card>
   );
 }

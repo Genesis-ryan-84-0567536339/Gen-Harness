@@ -147,6 +147,7 @@ export function TrendChart({
 }: TrendChartProps) {
   const [wrapRef, W] = useWidth(560);
   const [active, setActive] = useState<number | null>(null);
+  const lastPointer = useRef('mouse');
   const norm = normalize(series, prev);
   const cur = norm[0]?.values ?? [];
   const old = norm[1]?.values ?? [];
@@ -251,7 +252,11 @@ export function TrendChart({
               role="img"
               aria-label={`${lab(i)}: ${safeFmt(fmtV, num(v))}`}
               onPointerEnter={(e) => e.pointerType === 'mouse' && setActive(i)}
-              onClick={() => setActive((cur0) => (cur0 === i ? null : i))}
+              onPointerDown={(e) => {
+                lastPointer.current = e.pointerType;
+              }}
+              // Chuột: rê đã hiện, bấm giữ nguyên; chạm: bấm lần nữa vào cùng điểm thì tắt.
+              onClick={() => setActive((cur0) => (cur0 === i && lastPointer.current !== 'mouse' ? null : i))}
               onFocus={() => setActive(i)}
               onBlur={() => setActive(null)}
             />
