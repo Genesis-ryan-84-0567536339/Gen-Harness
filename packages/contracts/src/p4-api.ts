@@ -42,6 +42,11 @@ export interface AgentBindingSlot {
   source?: 'custom' | 'standard';
   /** v0.1.55 (G1): model hồ sơ đang phủ khi chưa có dòng gán; null = chưa có nguồn phù hợp. */
   standard?: StandardPick | null;
+  /**
+   * v0.1.58: vì sao `standard` null ("cần khoá API (Antigravity chỉ dùng cho Gen)", "chưa có model — bấm Kiểm tra kết nối ở
+   * …"…) — CHUỖI hoặc null, không bao giờ object. Máy chủ cũ không có trường này ⇒ web dùng câu cũ.
+   */
+  standard_reason?: string | null;
 }
 
 export interface BindableModel {

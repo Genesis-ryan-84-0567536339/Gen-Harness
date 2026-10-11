@@ -451,6 +451,22 @@ const STD = { model_name: 'sonnet', provider_name: 'Claude Code CLI', tier: 'bal
 const slot = (over: Partial<AgentBindingSlot> = {}): AgentBindingSlot => ({ agent_key: 'core.gen', label: 'Gen — trợ lý quản trị', binding: null, ...over });
 
 describe('apiModel (bảng gán model)', () => {
+  it('v0.1.58: chưa có model chuẩn ⇒ "Chuẩn: <lý do>" của máy chủ; thiếu trường / lý do rỗng / không phải chuỗi ⇒ câu cũ', () => {
+    const reason = 'cần khoá API (Antigravity chỉ dùng cho Gen)';
+    expect(bindingModelText(slot({ source: 'standard', standard: null, standard_reason: reason }))).toBe(`Chuẩn: ${reason}`);
+    expect(bindingModelText(slot({ source: 'standard', standard_reason: 'chưa có model — bấm Kiểm tra kết nối ở Antigravity CLI' }))).toBe(
+      'Chuẩn: chưa có model — bấm Kiểm tra kết nối ở Antigravity CLI',
+    );
+    // Có model chuẩn thì lý do (nếu có) bị bỏ qua; đã gán thì tên model.
+    expect(bindingModelText(slot({ source: 'standard', standard: STD, standard_reason: reason }))).toBe('Chuẩn: sonnet (tự chọn)');
+    // Máy chủ cũ (không có trường) / lý do rỗng / lý do không phải chuỗi ⇒ câu cũ, không bao giờ render object.
+    expect(bindingModelText(slot({ source: 'standard', standard: null }))).toBe('Chuẩn: chưa có nguồn phù hợp');
+    expect(bindingModelText(slot({ source: 'standard', standard: null, standard_reason: null }))).toBe('Chuẩn: chưa có nguồn phù hợp');
+    expect(bindingModelText(slot({ source: 'standard', standard: null, standard_reason: '  ' }))).toBe('Chuẩn: chưa có nguồn phù hợp');
+    expect(bindingModelText(slot({ source: 'standard', standard: null, standard_reason: { x: 1 } as unknown as string }))).toBe('Chuẩn: chưa có nguồn phù hợp');
+    expect(bindingModelText(slot({ standard_reason: reason }))).toBe(`Chuẩn: ${reason}`);
+  });
+
   it('chưa gán + có hồ sơ ⇒ "Chuẩn: <model> (tự chọn)"; máy chủ cũ ⇒ "chưa gán"; đã gán ⇒ tên model', () => {
     expect(bindingModelText(slot({ source: 'standard', standard: STD }))).toBe('Chuẩn: sonnet (tự chọn)');
     expect(bindingModelText(slot({ source: 'standard', standard: null }))).toBe('Chuẩn: chưa có nguồn phù hợp');
