@@ -7,20 +7,12 @@
  */
 import { useState } from 'react';
 import type { OwnerProposal } from '@gen-harness/contracts';
-import { ApiError } from '@gen-harness/contracts';
 import { Button } from '@gen-harness/ui';
 import { errorDetail, errorText } from '../../lib/errorText';
 import { InlineError } from '../../screens/common';
 import { asText } from '../ownerModel';
-import { expiresText, useProposalDecision } from './useOwnerActions';
+import { PROPOSAL_EXPIRED_TEXT, expiresText, isProposalExpired, useProposalDecision } from './useOwnerActions';
 import './actions.css';
-
-export const PROPOSAL_EXPIRED_TEXT = 'Đề xuất đã hết hạn — hỏi Gen lại';
-
-/** 404 (không còn ở Redis) hoặc 410 ⇒ đề xuất đã hết hạn. */
-export function isProposalExpired(e: unknown): boolean {
-  return e instanceof ApiError && (e.status === 404 || e.status === 410);
-}
 
 export type ProposalOutcome = 'confirmed' | 'cancelled' | 'expired';
 

@@ -15,19 +15,8 @@ import { errorDetail, errorText } from '../../lib/errorText';
 import { CardError, InlineError } from '../../screens/common';
 import { qk3 } from '../../screens/core/queries';
 import { asText } from '../ownerModel';
-import { useDraftDecision } from './useOwnerActions';
+import { draftTargetText, useDraftDecision } from './useOwnerActions';
 import './actions.css';
-
-const CHANNEL_LABEL: Record<string, string> = { zalo: 'Zalo', whatsapp: 'WhatsApp', telegram: 'Telegram', linkedin: 'LinkedIn' };
-
-/** "Zalo · Nhóm Gỗ Việt" / "Zalo · Chị Lan"; thiếu thông tin ⇒ rỗng. */
-export function draftTargetText(d: Pick<DraftDetail, 'target'>): string {
-  const t = d.target;
-  if (!t) return '';
-  const channel = asText(t.channel);
-  const who = asText(t.group?.name) || asText(t.person?.name);
-  return [CHANNEL_LABEL[channel] ?? channel, who].filter(Boolean).join(' · ');
-}
 
 export function DraftDecide({ draftId, onDone }: { draftId: string; onDone?: (draft: DraftDetail) => void }) {
   const q = useQuery({

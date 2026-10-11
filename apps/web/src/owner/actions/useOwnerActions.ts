@@ -12,7 +12,7 @@
  * `draft_id`) · `useAckItem(itemId?)` · `useSilenceItem(itemId?)` · `useIntroduceMatch()` · `useRejectMatch()`.
  */
 import { useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
-import { ApiError, type DraftDecide as DraftDecideBody, type Task, type TaskCreateBody } from '@gen-harness/contracts';
+import { ApiError, type DraftDecide as DraftDecideBody, type DraftDetail, type Task, type TaskCreateBody } from '@gen-harness/contracts';
 import { api } from '../../lib/api';
 
 /** Khoá phải tải lại sau khi ghi. `['owner']` là gốc của mọi truy vấn Mặt tiền (owner/queries.ts). */
@@ -53,6 +53,28 @@ export function expiresText(expiresAt: unknown, now: number = Date.now()): strin
   return `Hết hạn sau ${Math.round(minutes / 60)} giờ`;
 }
 
+// ── tiện ích hiển thị dùng chung của DraftDecide / ProposalDecide ──────────────────────────────────────────────────
+
+const CHANNEL_LABEL: Record<string, string> = { zalo: 'Zalo', whatsapp: 'WhatsApp', telegram: 'Telegram', linkedin: 'LinkedIn' };
+
+const text = (v: unknown): string => (typeof v === 'string' ? v : typeof v === 'number' || typeof v === 'boolean' ? String(v) : '');
+
+/** "Zalo · Nhóm Gỗ Việt" / "Zalo · Chị Lan"; thiếu thông tin ⇒ rỗng. Chuỗi lạ (object) bị bỏ — không bao giờ render object. */
+export function draftTargetText(d: Pick<DraftDetail, 'target'>): string {
+  const t = d.target;
+  if (!t) return '';
+  const channel = text(t.channel);
+  const who = text(t.group?.name) || text(t.person?.name);
+  return [CHANNEL_LABEL[channel] ?? channel, who].filter(Boolean).join(' · ');
+}
+
+export const PROPOSAL_EXPIRED_TEXT = 'Đề xuất đã hết hạn — hỏi Gen lại';
+
+/** 404 (không còn ở Redis) hoặc 410 ⇒ đề xuất đã hết hạn. */
+export function isProposalExpired(e: unknown): boolean {
+  return e instanceof ApiError && (e.status === 404 || e.status === 410);
+}
+
 const idOf = (bound: string | undefined, v: unknown): string => {
   const id = typeof v === 'string' ? v : bound;
   if (!id) throw new Error('Thiếu mã mục cần thao tác');
@@ -86,7 +108,7 @@ export function useProposalDecision() {
   const done = useAfterWrite();
   // Đề xuất đã hết hạn (404/410): tải lại danh sách để thẻ biến mất, dù thao tác không thành công.
   const expired = (e: unknown) => {
-    if (e instanceof ApiError && (e.status === 404 || e.status === 410)) done();
+    if (isProposalExpired(e)) done();
   };
   const confirm = useMutation({
     mutationFn: (id: string) => api.gen.confirmProposal(id),
