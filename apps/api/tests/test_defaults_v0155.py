@@ -574,6 +574,50 @@ def test_resolve_orders_by_failover_rank() -> None:
     assert [c["provider_kind"] for c in got] == [API, CLAUDE]
 
 
+def reason_of(names: tuple[str, ...], role: str, *, with_models: bool = True, bg_cli: set[str] | None = None,
+              no_key: bool = False) -> str:
+    """`missing_reason` (v0.1.58) trên dữ liệu mẫu; `with_models=False` ⇒ mọi nguồn 0 model."""
+    p, m = rows_of(*names)
+    if not with_models:
+        m = []
+    if no_key:
+        p = [{**x, "has_key": False} if x["kind"] == API else x for x in p]
+    return profiles.missing_reason(p, m, role, bg_cli or set())
+
+
+def test_missing_reason_only_agy_with_model_gives_gen_a_candidate_and_others_a_key_reason() -> None:
+    assert picks(("agy",), "core.gen", agy=True) == [(AGY, "gemini-3.8-flash", "medium")]      # Gen có ứng viên
+    for role in ("core.briefing", "core.refinery", "agent:7"):
+        assert picks(("agy",), role) == []
+        assert reason_of(("agy",), role) == "cần khoá API (Antigravity chỉ dùng cho Gen)"
+    assert reason_of(("agy",), "core.reply") == "cần khoá API hoặc Claude Code CLI"
+    for role in ("core.briefing", "core.refinery", "core.reply", "agent:7"):
+        assert "cần khoá API" in reason_of(("agy",), role)
+
+
+def test_missing_reason_agy_without_model_points_at_the_test_button() -> None:
+    assert reason_of(("agy",), "core.gen", with_models=False) == "chưa có model — bấm Kiểm tra kết nối ở Agy"
+    # Vai nền: agy không được dùng ⇒ lý do là khoá API, KHÔNG bảo bấm Kiểm tra ở agy.
+    assert reason_of(("agy",), "core.refinery", with_models=False) == "cần khoá API (Antigravity chỉ dùng cho Gen)"
+
+
+def test_missing_reason_source_allowed_but_empty_and_fallback() -> None:
+    # Có khoá API mà 0 model ⇒ nguồn được phép nhưng chưa có model.
+    assert reason_of(("api",), "core.refinery", with_models=False) == "chưa có model — bấm Kiểm tra kết nối ở Api"
+    # Claude CLI chưa được cho chạy việc nền ⇒ vẫn là chuyện khoá API; core.reply dùng được Claude CLI.
+    assert reason_of(("claude",), "core.briefing") == "cần khoá API (Antigravity chỉ dùng cho Gen)"
+    assert reason_of(("claude",), "core.reply", with_models=False) == "chưa có model — bấm Kiểm tra kết nối ở Claude"
+    # Nguồn khoá API không có khoá thì không "được phép".
+    assert reason_of(("api",), "core.reply", no_key=True) == "cần khoá API hoặc Claude Code CLI"
+    # Không nguồn nào / vai lạ ⇒ câu cũ.
+    assert reason_of((), "core.gen") == "chưa có nguồn phù hợp"
+    assert profiles.missing_reason([], [], "core.embedding", set()) == "chưa có nguồn phù hợp"
+    assert profiles.standard_text(None) == "Chuẩn: chưa có nguồn phù hợp"
+    why = "cần khoá API hoặc Claude Code CLI"
+    assert profiles.standard_text(None, why) == f"Chuẩn: {why}"
+    assert profiles.standard_text({"model_name": "gemini-3.8-flash"}, "bỏ qua") == "Chuẩn: gemini-3.8-flash (tự chọn)"
+
+
 def test_tier_of_and_effort_rules() -> None:
     assert [catalog.tier_of(CLAUDE, n) for n in ("haiku", "sonnet", "opus", "fable")] == [
         "fast", "balanced", "strong", "strong"]
@@ -875,6 +919,9 @@ async def test_bindings_api_effort_source_and_standard(dapi: Api, db: Any) -> No
     items = {i["agent_key"]: i for i in (await dapi.get("/agents/bindings")).json()["items"]}
     assert items["core.gen"]["source"] == "custom" and items["core.gen"]["standard"] is None
     assert items["core.briefing"]["binding"]["effort"] is None and items["core.refinery"]["source"] == "standard"
+    # v0.1.58: `standard_reason` luôn có mặt, null khi đã có model chuẩn hoặc đã có dòng gán.
+    assert all("standard_reason" in i for i in items.values())
+    assert items["core.gen"]["standard_reason"] is None and items["core.refinery"]["standard_reason"] is None
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════════════

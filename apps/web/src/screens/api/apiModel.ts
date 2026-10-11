@@ -173,12 +173,17 @@ export function supportedEfforts(p: Pick<Provider, 'kind' | 'last_test'> | undef
   return /haiku/i.test(modelName) ? [] : ['low', 'medium', 'high', 'xhigh', 'max'];
 }
 
-type SlotView = Pick<AgentBindingSlot, 'binding' | 'source' | 'standard'>;
+type SlotView = Pick<AgentBindingSlot, 'binding' | 'source' | 'standard'> & Partial<Pick<AgentBindingSlot, 'standard_reason'>>;
 
-/** Ô "Model" của bảng gán: model Sếp đã gán; chưa gán ⇒ "Chuẩn: <model> (tự chọn)" (hồ sơ tiêu chuẩn theo vai). */
+/**
+ * Ô "Model" của bảng gán: model Sếp đã gán; chưa gán ⇒ "Chuẩn: <model> (tự chọn)" (hồ sơ tiêu chuẩn theo vai); chưa có model
+ * chuẩn ⇒ "Chuẩn: <lý do>" (v0.1.58, máy chủ nêu `standard_reason`) — máy chủ cũ không có lý do ⇒ câu cũ.
+ */
 export function bindingModelText(slot: SlotView): string {
   if (slot.binding) return slot.binding.model_name;
   if (slot.standard && typeof slot.standard.model_name === 'string' && slot.standard.model_name) return `Chuẩn: ${slot.standard.model_name} (tự chọn)`;
+  const why = typeof slot.standard_reason === 'string' ? slot.standard_reason.trim() : '';
+  if (why) return `Chuẩn: ${why}`;
   return slot.source === 'standard' ? 'Chuẩn: chưa có nguồn phù hợp' : 'chưa gán';
 }
 

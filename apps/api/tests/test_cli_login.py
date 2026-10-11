@@ -79,3 +79,73 @@ async def test_without_terminal_replies_cli_never_shows_link(owner_api, app, tmp
         await asyncio.sleep(0.1)
     assert s.status == "failed" and s.url is None
     get_settings.cache_clear()
+
+
+# ─── v0.1.58 — nhãn "Sắp hết hạn" của agy: token truy cập sống 1 giờ, CLI tự gia hạn nếu có khoá làm mới ──────────
+
+SECRET = "ya29.TOKEN-BI-MAT-KHONG-DUOC-LOG-0123456789"
+REFRESH_SECRET = "1//REFRESH-BI-MAT-KHONG-DUOC-LOG-9876543210"
+
+
+def _agy_token(extra: dict[str, object]) -> bytes:
+    """Tệp phiên agy còn 56 phút (hạn epoch giây) + `extra`."""
+    import time
+
+    import orjson
+
+    return orjson.dumps({"access_token": SECRET, "expiry": int(time.time()) + 56 * 60, **extra})
+
+
+def test_agy_session_with_refresh_key_is_not_expiring(caplog) -> None:  # type: ignore[no-untyped-def]
+    import logging
+
+    caplog.set_level(logging.DEBUG)
+    cases = [
+        ({"refreshToken": REFRESH_SECRET}, True),                                  # khoá cấp đầu (camelCase)
+        ({"refresh_token": REFRESH_SECRET}, True),                                 # khoá cấp đầu (snake_case)
+        ({"token": {"refresh_token": REFRESH_SECRET}}, True),                      # lồng một cấp
+        ({"token": {"refreshToken": REFRESH_SECRET}}, True),
+        ({"token": {"deep": {"refresh_token": REFRESH_SECRET}}}, False),           # lồng hai cấp: không tính
+        ({}, False),                                                               # không có khoá làm mới
+        ({"note": "refresh_token"}, False),                                        # tên khoá chứ không phải giá trị
+    ]
+    states = []
+    for extra, want in cases:
+        meta = climod.session_meta(climod.AGY, _agy_token(extra))
+        assert meta["refreshable"] is want, extra
+        states.append(climod.profile_state(meta["expires_at"], refreshable=meta["refreshable"]))
+    # còn 56 phút: "Sắp hết hạn" chỉ khi KHÔNG làm mới được
+    assert states == ["ok", "ok", "ok", "ok", "expiring", "expiring", "expiring"]
+    assert SECRET not in caplog.text and REFRESH_SECRET not in caplog.text
+
+
+async def test_agy_profile_label_follows_refresh_key_and_no_token_in_output(owner_api, caplog) -> None:  # type: ignore[no-untyped-def]
+    """Qua API `/cli/profiles`: hồ sơ còn 56 phút — có khoá làm mới ⇒ 'ok', không có ⇒ 'expiring'; giá trị token không
+    xuất hiện trong phản hồi lẫn log."""
+    import logging
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import text
+
+    from gh import crypto
+    from gh.db import sessionmaker
+
+    caplog.set_level(logging.DEBUG)
+    async with sessionmaker()() as db:
+        org = (await db.execute(text("SELECT id FROM core.organizations LIMIT 1"))).scalar_one()
+        pid = await climod.cli_provider_id(db, org)
+        left = datetime.now(UTC) + timedelta(minutes=56)
+        for tag, extra in (("co-khoa", {"refreshToken": REFRESH_SECRET}), ("khong-khoa", {})):
+            enc = crypto.encrypt(_agy_token(extra), climod.CLI_AAD)
+            await db.execute(text("""INSERT INTO agent.cli_profiles (org_id, provider_id, email, token_enc,
+                                                                      expires_at, is_active)
+                                     VALUES (:o, :p, :e, :t, :x, false)"""),
+                             {"o": org, "p": pid, "e": f"{tag}@example.vn", "t": enc, "x": left})
+        await db.commit()
+    r = await owner_api.get("/cli/profiles")
+    assert r.status_code == 200, r.text
+    by = {p["email"]: p for p in r.json()}
+    assert by["co-khoa@example.vn"]["state"] == "ok" and by["co-khoa@example.vn"]["refreshable"] is True
+    assert by["khong-khoa@example.vn"]["state"] == "expiring" and by["khong-khoa@example.vn"]["refreshable"] is False
+    assert SECRET not in r.text and REFRESH_SECRET not in r.text
+    assert SECRET not in caplog.text and REFRESH_SECRET not in caplog.text

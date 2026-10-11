@@ -65,7 +65,11 @@ export const useTestProvider = () => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.providers.test(id),
-    onSuccess: () => invalidateProviders(qc),
+    // v0.1.58: kiểm tra xanh có thể vừa tự lưu model cho nguồn CLI ⇒ "Chuẩn: …" của bảng gán đổi theo.
+    onSuccess: () => {
+      invalidateProviders(qc);
+      void qc.invalidateQueries({ queryKey: qkApi.bindings });
+    },
   });
 };
 

@@ -203,6 +203,45 @@ def resolve(providers_rows: Sequence[Any], models_rows: Sequence[Any], agent_key
     return out
 
 
+REASON_NEED_API = "cần khoá API (Antigravity chỉ dùng cho Gen)"
+REASON_NEED_API_OR_CLAUDE = "cần khoá API hoặc Claude Code CLI"
+REASON_NO_SOURCE = "chưa có nguồn phù hợp"
+
+
+def missing_reason(providers_rows: Sequence[Any], models_rows: Sequence[Any], agent_key: str,
+                   bg_cli_allowed: set[str] | frozenset[str] = frozenset()) -> str:
+    """v0.1.58 — vì sao `resolve()` không ra ứng viên cho vai này (hàm thuần, KHÔNG đổi `resolve` / `pick_model`).
+
+    Gọi khi `resolve` rỗng; câu trả về nối sau "Chuẩn: " ở web. Thứ tự:
+    1. có nguồn ĐƯỢC PHÉP dùng cho vai này (đúng luật F-22/F-86) nhưng 0 model ⇒ "chưa có model — bấm Kiểm tra kết nối
+       ở <nguồn>" (đường tự sửa của Sếp);
+    2. vai nền chỉ còn Antigravity (không được dùng) / không có khoá API ⇒ "cần khoá API (Antigravity chỉ dùng cho
+       Gen)";
+    3. trả lời lại / soạn nháp (core.reply) ⇒ "cần khoá API hoặc Claude Code CLI";
+    4. còn lại ⇒ "chưa có nguồn phù hợp"."""
+    role = role_of(agent_key)
+    if role is None:
+        return REASON_NO_SOURCE
+    bg, agy = role_flags(agent_key)
+    has_model = {str(_g(m, "provider_id")) for m in models_rows if _model_ok(m)}
+    for p in sorted(providers_rows, key=_rank_key):
+        kind = str(_g(p, "kind", ""))
+        kc = kind_class(kind)
+        if kc is None or PROFILES[role].get(kc) is None or not _g(p, "is_enabled", True):
+            continue
+        if kc == KIND_API and _g(p, "has_key", True) is False:
+            continue
+        if not provider_allowed(kind, bg=bg, bg_cli_allowed=bg_cli_allowed, allow_agy=agy):
+            continue
+        if str(_g(p, "id")) not in has_model:
+            return f"chưa có model — bấm Kiểm tra kết nối ở {_g(p, 'name') or kind}"
+    if bg:
+        return REASON_NEED_API
+    if role == ROLE_REPLY:
+        return REASON_NEED_API_OR_CLAUDE
+    return REASON_NO_SOURCE
+
+
 def profile_effort(agent_key: str, kind: str, model_name: str) -> str | None:
     """Mức suy nghĩ của hồ sơ cho (vai, loại nguồn, model); None khi vai/nguồn không có hoặc model không hỗ trợ."""
     role = role_of(agent_key)
@@ -240,20 +279,29 @@ def role_flags(agent_key: str) -> tuple[bool, bool]:
     return role in BACKGROUND_ROLES, role == ROLE_GEN
 
 
-async def standard_for(db: AsyncSession, org_id: uuid.UUID,
-                       agent_keys: Sequence[str]) -> dict[str, dict[str, Any] | None]:
-    """Model hồ sơ tiêu chuẩn đang phủ từng khoá agent (ứng viên đầu tiên) — dùng cho "Chuẩn: <model> (tự chọn)" ở
-    Bộ não AI / API & Model và mục Về mặc định. Khoá không có nguồn phù hợp ⇒ None."""
+async def standard_with_reasons(
+        db: AsyncSession, org_id: uuid.UUID, agent_keys: Sequence[str],
+) -> tuple[dict[str, dict[str, Any] | None], dict[str, str | None]]:
+    """Như `standard_for` + (v0.1.58) LÝ DO khi một vai chưa có model chuẩn (`missing_reason`; vai đã có ⇒ None)."""
     from gh.providers.router import background_cli_allowed
 
     providers, models = await load_rows(db, org_id)
     bg_cli = await background_cli_allowed(db, org_id)
-    out: dict[str, dict[str, Any] | None] = {}
+    std: dict[str, dict[str, Any] | None] = {}
+    why: dict[str, str | None] = {}
     for key in agent_keys:
         bg, agy = role_flags(key)
         cands = resolve(providers, models, key, background=bg, bg_cli_allowed=bg_cli, allow_agy=agy)
-        out[key] = cands[0] if cands else None
-    return out
+        std[key] = cands[0] if cands else None
+        why[key] = None if cands else missing_reason(providers, models, key, bg_cli)
+    return std, why
+
+
+async def standard_for(db: AsyncSession, org_id: uuid.UUID,
+                       agent_keys: Sequence[str]) -> dict[str, dict[str, Any] | None]:
+    """Model hồ sơ tiêu chuẩn đang phủ từng khoá agent (ứng viên đầu tiên) — dùng cho "Chuẩn: <model> (tự chọn)" ở
+    Bộ não AI / API & Model và mục Về mặc định. Khoá không có nguồn phù hợp ⇒ None."""
+    return (await standard_with_reasons(db, org_id, agent_keys))[0]
 
 
 def standard_public(c: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -265,8 +313,9 @@ def standard_public(c: dict[str, Any] | None) -> dict[str, Any] | None:
             "context_tokens": int(c["context_tokens"])}
 
 
-def standard_text(c: dict[str, Any] | None) -> str:
-    return "Chuẩn: chưa có nguồn phù hợp" if c is None else f"Chuẩn: {c['model_name']} (tự chọn)"
+def standard_text(c: dict[str, Any] | None, reason: str | None = None) -> str:
+    """"Chuẩn: <model> (tự chọn)" hoặc "Chuẩn: <lý do>" (v0.1.58: lý do cụ thể từ `missing_reason`)."""
+    return f"Chuẩn: {reason or REASON_NO_SOURCE}" if c is None else f"Chuẩn: {c['model_name']} (tự chọn)"
 
 
 async def choice_options(db: AsyncSession, org_id: uuid.UUID, *, owner: bool, tainted: bool) -> dict[str, Any]:
