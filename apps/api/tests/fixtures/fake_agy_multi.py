@@ -11,6 +11,9 @@
   `--effort=x`, `-p=/model`, `--disable-slash-commands`; agy-calls.log ghi thêm `cwd`, `via_stdin`, `argv`; ghi log
   print mode `promptLength=N` vào $HOME/.gemini/antigravity-cli/log/cli-<pid>.log như agy thật; cờ lạ → "flag provided
   but not defined" (đúng câu của Go flag).
+- v0.1.58: FAKE_AGY_REQUIRE_EFFORT=1 mô phỏng agy trên máy Boss — `agy models` KHÔNG đánh dấu model "current", và gọi
+  model có nhiều mức suy nghĩ mà không `--effort` thì thoát 3 với `invalid model selection (--model "X" --effort ""):
+  Invalid model "X" (available: low, medium, high)`. Mặc định tắt (test cũ giữ nguyên hành vi).
 """
 
 import base64
@@ -47,6 +50,7 @@ VARIANTS = {"gemini-3.8-flash": ["low", "medium", "high"], "gemini-3.1-pro": ["l
             "claude-sonnet-4-6-thinking": []}
 LEGACY_OK = {"gemini-2.5-pro"}   # test cũ (đổi tài khoản) gọi model này
 CALLS = Path(os.environ["HOME"]) / "agy-calls.log"
+REQUIRE_EFFORT = os.environ.get("FAKE_AGY_REQUIRE_EFFORT") == "1"
 FLAGS = {"--model", "--effort", "--output-format", "-p", "--print", "--prompt", "--print-timeout"}  # có giá trị
 if sys.argv[1:2] == ["--version"]:
     print("1.2.9")
@@ -60,7 +64,7 @@ if sys.argv[1:2] == ["models"]:
     for base, effs in VARIANTS.items():
         for e in effs or [""]:
             slug = f"{base}-{e}" if e else base
-            mark = " (current)" if slug == "gemini-3.8-flash-high" else ""
+            mark = " (current)" if slug == "gemini-3.8-flash-high" and not REQUIRE_EFFORT else ""
             print(f"  {slug}{mark}")
     sys.exit(0)
 def parse_print(argv: list[str]) -> dict | None:  # type: ignore[type-arg]
@@ -126,6 +130,9 @@ if opts is not None:
     err = None
     if effort and effort not in ("low", "medium", "high"):
         err = f'invalid --effort "{effort}" (valid: low, medium, high)'
+    elif REQUIRE_EFFORT and not effort and VARIANTS.get(model):
+        err = (f'invalid model selection (--model "{model}" --effort ""): Invalid model "{model}" '
+               f'(available: {", ".join(VARIANTS[model])})')
     elif model and model not in VARIANTS and model not in LEGACY_OK:
         err = (f'invalid model selection (--model "{model}" --effort "{effort}"): Invalid model "{model}" '
                f'(available: {", ".join(VARIANTS)})')

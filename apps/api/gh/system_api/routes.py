@@ -665,6 +665,12 @@ async def test_provider(pid: uuid.UUID, request: Request, user: service.CurrentU
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id, action="provider.tested",
                            target_type="provider", target_id=str(pid), target_label=p.name,
                            result="ok" if result["ok"] else "failed", detail={"error": result["error"]}, ip=user.ip)
+    if p.kind in CLI_KINDS:
+        # v0.1.58: nguồn CLI gọi thử thật xanh mà chưa có dòng model nào (mất dòng model → Gen không trả lời, mọi vai
+        # "Chuẩn: chưa có nguồn phù hợp") ⇒ lưu cặp (model, mức) vừa chạy được, KHÔNG đặt mặc định; đã có model thì
+        # không đụng.
+        await mrouter.adopt_probed_model(db, user.org_id, pid, p.name, result, actor_type="user",
+                                         actor_id=user.actor_id, ip=user.ip)
     return result
 
 

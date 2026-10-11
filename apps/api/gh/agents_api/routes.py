@@ -181,7 +181,8 @@ def _binding_out(r: Any, agent_key: str) -> dict[str, Any]:
 async def list_bindings(user: service.CurrentUser = Depends(READ), db: AsyncSession = DB) -> dict[str, Any]:
     """Mỗi mục: `binding` (dòng Owner đã gán, kèm `effort`) hoặc null; `source` = 'custom' (có dòng gán — Owner đã đổi)
     | 'standard' (chưa có dòng — dùng hồ sơ tiêu chuẩn); `standard` = model hồ sơ đang phủ khi chưa có dòng (null nếu
-    chưa có nguồn phù hợp)."""
+    chưa có nguồn phù hợp); `standard_reason` (v0.1.58) = vì sao `standard` null ("cần khoá API…", "chưa có model —
+    bấm Kiểm tra kết nối ở …"; chuỗi hoặc null)."""
     agents = (await db.execute(text("SELECT id, name FROM agent.identities WHERE org_id = :o ORDER BY created_at"),
                                {"o": user.org_id})).all()
     keys = [*CORE_AGENT_KEYS.items(), *((f"agent:{a.id}", a.name) for a in agents)]
@@ -192,10 +193,11 @@ async def list_bindings(user: service.CurrentUser = Depends(READ), db: AsyncSess
         WHERE b.org_id = :o"""), {"o": user.org_id})).all()
     by_key = {r.agent_key: r for r in rows}
     unbound = [k for k, _ in keys if k not in by_key]
-    standard = await profiles.standard_for(db, user.org_id, unbound) if unbound else {}
+    standard, reasons = await profiles.standard_with_reasons(db, user.org_id, unbound) if unbound else ({}, {})
     items = [{"agent_key": k, "label": label, "binding": _binding_out(by_key[k], k) if k in by_key else None,
               "source": "custom" if k in by_key else "standard",
-              "standard": None if k in by_key else profiles.standard_public(standard.get(k))}
+              "standard": None if k in by_key else profiles.standard_public(standard.get(k)),
+              "standard_reason": None if k in by_key else reasons.get(k)}
              for k, label in keys]
     models = (await db.execute(text("""
         SELECT m.id, m.model_name, p.name AS provider_name, m.is_enabled FROM agent.models m

@@ -246,6 +246,18 @@ def session_email(kind: str, raw: bytes) -> str | None:
     return email if isinstance(email, str) else None
 
 
+REFRESH_KEYS = ("refresh_token", "refreshToken")
+
+
+def has_refresh_key(data: dict[str, Any]) -> bool:
+    """v0.1.58 — tệp phiên agy có KHOÁ làm mới token (`refresh_token` / `refreshToken`) ở cấp đầu hoặc lồng một cấp
+    trong dict, VÀ giá trị có (truthy) ⇒ CLI tự gia hạn hạn 1 giờ của token truy cập khi được dùng, nên KHÔNG phải
+    "Sắp hết hạn". Chỉ xét có/không — không đọc, không log giá trị token."""
+    if any(bool(data.get(k)) for k in REFRESH_KEYS):
+        return True
+    return any(isinstance(v, dict) and any(bool(v.get(k)) for k in REFRESH_KEYS) for v in data.values())
+
+
 def session_meta(kind: str, raw: bytes) -> dict[str, Any]:
     """{expires_at, refreshable, plan} đọc từ gói phiên (không gọi mạng)."""
     if kind == CLAUDE:
@@ -263,7 +275,7 @@ def session_meta(kind: str, raw: bytes) -> dict[str, Any]:
     elif isinstance(exp, str):
         with contextlib.suppress(ValueError):
             expires_at = datetime.fromisoformat(exp.replace("Z", "+00:00"))
-    return {"expires_at": expires_at, "refreshable": bool(data.get("refresh_token")), "plan": None}
+    return {"expires_at": expires_at, "refreshable": has_refresh_key(data), "plan": None}
 
 
 def _claims(id_token: str | None) -> dict[str, Any]:
