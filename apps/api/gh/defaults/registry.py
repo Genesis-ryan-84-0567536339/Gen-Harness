@@ -341,8 +341,8 @@ def _effort_label(effort: str | None) -> str:
     return f" · mức suy nghĩ {EFFORT_LABEL.get(effort or '', effort)}" if effort else ""
 
 
-def _binding_item(key: str, label: str, row: Any, std: dict[str, Any] | None) -> Item:
-    default_text = profiles.standard_text(std) + (
+def _binding_item(key: str, label: str, row: Any, std: dict[str, Any] | None, why: str | None = None) -> Item:
+    default_text = profiles.standard_text(std, why) + (
         "" if std is None or not std.get("effort") else _effort_label(str(std["effort"])))
     if row is None:
         current = default_text
@@ -374,8 +374,8 @@ async def _binding_items(db: AsyncSession, org: uuid.UUID) -> list[Item]:
     keys += [(f"agent:{a.id}", str(a.name)) for a in agents]
     # Dòng gán của agent đã bị xoá (không còn trong agent.identities) vẫn nằm trong sổ để "Về mặc định tất cả" dọn được.
     keys += [(k, "Agent đã xoá") for k in sorted(bound) if k.startswith("agent:") and k not in known]
-    std = await profiles.standard_for(db, org, [k for k, _ in keys])
-    return [_binding_item(k, label, bound.get(k), std.get(k)) for k, label in keys]
+    std, why = await profiles.standard_with_reasons(db, org, [k for k, _ in keys])
+    return [_binding_item(k, label, bound.get(k), std.get(k), why.get(k)) for k, label in keys]
 
 
 # ─── sổ ───────────────────────────────────────────────────────────────────────

@@ -25,6 +25,7 @@ import contextlib
 import logging
 import time
 import uuid
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -37,6 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from gh import crypto
 from gh.config import get_settings
 from gh.defaults import profiles
+from gh.providers import catalog
 from gh.providers.clients import (
     AgyClient,
     AuthFailed,
@@ -105,6 +107,12 @@ def agy_only(reasons: list[str]) -> bool:
     return bool(reasons) and all(r == AGY_OWNER_ONLY_REASON for r in reasons)
 
 PROBE_TIMEOUT_S = 90.0
+#: Số lượt gọi CLI tối đa của một lần "Kiểm tra kết nối" (kể cả lượt thử lại khi CLI đòi / không nhận mức suy nghĩ).
+PROBE_MAX_CALLS = 4
+#: Tự lành (v0.1.58): nguồn Antigravity CLI mất dòng model ⇒ lượt Gen của Owner tự kiểm tra kết nối — tối đa một lần
+#: / 10 phút / tổ chức. Việc nền KHÔNG BAO GIỜ kích hoạt (F-22/F-86).
+AGY_HEAL_KEY = "gh:agy_heal:{}"
+AGY_HEAL_TTL = 600
 
 # ─── v0.1.41 (F-86): việc nền dùng khoá API ──────────────────────────────────
 
@@ -201,16 +209,37 @@ def error_detail(e: BaseException | None) -> str | None:
     return redact(f"{type(e).__name__}: {raw}", 2000)
 
 
+def effort_from_rejection(kind: str, e: ModelRejected, *, tried: Collection[str | None] = ()) -> str | None:
+    """v0.1.58 — CLI từ chối vì CHƯA gửi mức suy nghĩ (agy: `--model "X" --effort ""` → `Invalid model "X"
+    (available: low, medium, high)`): danh sách CLI nêu toàn là mức suy nghĩ hợp lệ của nguồn ⇒ trả mức nên thử
+    ('medium' nếu có trong danh sách, không thì mức đầu tiên chưa thử). Không phải trường hợp này ⇒ None."""
+    valid = catalog.valid_efforts(kind)
+    avail = [a.lower() for a in e.available]
+    if not avail or not valid or not set(avail) <= set(valid):
+        return None
+    rest = [a for a in avail if a not in tried]
+    if not rest:
+        return None
+    return "medium" if "medium" in rest else rest[0]
+
+
 def friendly_probe_error(e: Exception, model: str, effort: str | None = None) -> str:
-    """Câu báo lỗi ngắn cho Console khi gọi thử một model (v0.1.31; v0.1.32: tách model / mức suy nghĩ)."""
+    """Câu báo lỗi ngắn cho Console khi gọi thử một model (v0.1.31; v0.1.32: tách model / mức suy nghĩ).
+
+    v0.1.58: không bao giờ in model rỗng (`“”`); CLI nêu danh sách toàn mức suy nghĩ ⇒ câu riêng "cần chọn mức"."""
     if isinstance(e, ModelRejected):
         from gh.providers.catalog import EFFORT_LABEL
 
+        name = f"model “{model}”" if model else "model đã chọn"
         if e.what == "effort" and effort:
-            return (f"CLI không nhận mức suy nghĩ “{EFFORT_LABEL.get(effort, effort)}” cho model “{model}” — "
+            return (f"CLI không nhận mức suy nghĩ “{EFFORT_LABEL.get(effort, effort)}” cho {name} — "
                     "chọn mức khác")
+        avail = [a.lower() for a in e.available]
+        if avail and all(a in EFFORT_LABEL for a in avail):
+            labels = ", ".join(EFFORT_LABEL[a] for a in avail[:8])
+            return f"CLI cần chọn mức suy nghĩ{f' cho model “{model}”' if model else ''} (nhận: {labels})"
         tail = f" (CLI nhận: {', '.join(e.available[:8])})" if e.available else ""
-        return f"CLI không nhận model “{model}” — chọn model khác trong danh sách{tail}"
+        return f"CLI không nhận {name} — chọn model khác trong danh sách{tail}"
     if isinstance(e, AuthFailed):
         return "Phiên đăng nhập đã hết hiệu lực — bấm “Đăng nhập lại” ở thẻ tài khoản"
     if isinstance(e, RateLimited | QuotaExhausted):
@@ -235,6 +264,36 @@ def probe_error_code(e: BaseException) -> str:
     if isinstance(e, JevError) or isinstance(e.__cause__, JevError):
         return "JEV_ERROR"
     return "PROVIDER_ERROR"
+
+
+async def adopt_probed_model(db: AsyncSession, org_id: uuid.UUID, provider_id: uuid.UUID, provider_name: str,
+                             result: dict[str, Any], *, actor_type: str = "system", actor_id: str = "system:router",
+                             ip: str | None = None) -> bool:
+    """v0.1.58 — nguồn CLI gọi thử THẬT thành công mà CHƯA có dòng model nào ⇒ lưu cặp (model, mức) vừa chạy được.
+
+    Chỉ khi `result.ok` + có `probe_model` + nguồn có 0 dòng `agent.models` (không đụng lựa chọn của Sếp). KHÔNG đặt
+    `is_default` (Sếp chưa chốt — hồ sơ tiêu chuẩn tự phủ). Ghi Action Log `provider.model_auto`. Trả True khi thêm."""
+    from gh.chassis import actionlog
+
+    model = str(result.get("probe_model") or "").strip()
+    if not (result.get("ok") and model):
+        return False
+    n = (await db.execute(text("SELECT count(*) FROM agent.models WHERE provider_id = :p"),
+                          {"p": provider_id})).scalar_one()
+    if n:
+        return False
+    effort = result.get("probe_effort")
+    effort = effort if isinstance(effort, str) and effort in catalog.EFFORT_LABEL else None
+    added = (await db.execute(text("""INSERT INTO agent.models (provider_id, model_name, effort)
+                                      VALUES (:p, :m, :e) ON CONFLICT (provider_id, model_name) DO NOTHING
+                                      RETURNING id"""),
+                              {"p": provider_id, "m": model, "e": effort})).first()
+    if added is None:
+        return False
+    await actionlog.record(db, org_id=org_id, actor_type=actor_type, actor_id=actor_id, action="provider.model_auto",
+                           target_type="provider", target_id=str(provider_id), target_label=provider_name,
+                           detail={"model_name": model, "effort": effort, "make_default": False}, ip=ip)
+    return True
 
 
 class ModelUnavailable(Exception):  # noqa: N818
@@ -490,6 +549,10 @@ class ModelRouter:
         async with self.sm() as db:
             chain = await self._chain(db, org_id, agent_key, tier=tier)
             bg_cli = await background_cli_allowed(db, org_id) if background else set()
+        if allow_agy and not any(lk["provider"].kind == "antigravity_cli" for lk in chain) \
+                and await self._heal_agy(org_id):
+            async with self.sm() as db:
+                chain = await self._chain(db, org_id, agent_key, tier=tier)
         reasons: list[str] = []
         # v0.1.55 (F-R3): nguồn đã lỗi Ở CẤP NGUỒN (mạng / 5xx / quá giờ, hoặc CLI hết phiên đăng nhập) trong lượt này
         # ⇒ bỏ mọi mắt xích sau của CÙNG nguồn (phần đuôi `_chain` có thể trỏ model khác của nguồn đó): gọi lại chỉ
@@ -584,6 +647,34 @@ class ModelRouter:
         await self._chain_exhausted(org_id, reasons, agent_key=agent_key, purpose=purpose)
         raise ModelUnavailable(reasons, no_chain=not chain)
 
+    async def _heal_agy(self, org_id: uuid.UUID) -> bool:
+        """v0.1.58 — tự lành, CHỈ gọi từ lượt Gen của Owner (`allow_agy=True`; việc nền đã bị ép False ở `generate`
+        nên không bao giờ tới đây — F-22/F-86). Nguồn Antigravity CLI đang bật, có hồ sơ CLI đang dùng mà 0 dòng model
+        (nên chuỗi không có agy) ⇒ "Kiểm tra kết nối" đúng MỘT lần (khoá Redis 10 phút) rồi lưu model vừa chạy được.
+        Trả True khi đã thêm model (bên gọi dựng lại chuỗi). Lỗi chỉ ghi log — lượt Gen đi tiếp như cũ."""
+        try:
+            async with self.sm() as db:
+                row = (await db.execute(text("""
+                    SELECT p.id, p.name FROM agent.providers p
+                    WHERE p.org_id = :o AND p.kind = 'antigravity_cli' AND p.is_enabled
+                      AND EXISTS (SELECT 1 FROM agent.cli_profiles c WHERE c.provider_id = p.id AND c.is_active)
+                      AND NOT EXISTS (SELECT 1 FROM agent.models m WHERE m.provider_id = p.id)
+                    ORDER BY p.failover_rank NULLS LAST, p.created_at LIMIT 1"""), {"o": org_id})).one_or_none()
+            if row is None or not await self.redis.set(AGY_HEAL_KEY.format(org_id), "1", nx=True, ex=AGY_HEAL_TTL):
+                return False
+            result = await self.test_provider(row.id)
+            if not result.get("ok"):
+                return False
+            async with self.sm() as db:
+                added = await adopt_probed_model(db, org_id, row.id, row.name, result)
+                await db.commit()
+            return added
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 — tự lành là phần thưởng thêm; lỗi không được làm hỏng lượt Gen
+            log.warning("Tự lành nguồn Antigravity CLI không xong (%s)", org_id, exc_info=True)
+            return False
+
     @staticmethod
     def _effort(agent_key: str, p: Any, m: Any, link: dict[str, Any], param: str | None) -> tuple[str | None, bool]:
         """(mức suy nghĩ gửi cho CLI, do hồ sơ tự thêm?). Ưu tiên: tham số → `bindings.effort` (chỉ khi model do dòng
@@ -608,7 +699,8 @@ class ModelRouter:
     async def _complete(self, p: Any, secret: str | None, m: Any, messages: list[Message], *, json_mode: bool,
                         temperature: float, effort: str | None, implicit: bool) -> Completion:
         """Một lượt gọi model. Mức suy nghĩ do HỒ SƠ tự thêm (`implicit`) mà CLI không nhận cho model này thì gọi lại
-        một lần KHÔNG gửi mức — hồ sơ tiêu chuẩn không bao giờ làm hỏng lượt gọi chỉ vì mức suy nghĩ."""
+        một lần KHÔNG gửi mức — hồ sơ tiêu chuẩn không bao giờ làm hỏng lượt gọi chỉ vì mức suy nghĩ. v0.1.58: ngược
+        lại, CHƯA gửi mức mà CLI đòi mức (agy: `available: low, medium, high`) thì gọi lại một lần với mức hợp lệ."""
         client = self._client(p, secret)
         extra = {"effort": effort} if effort else {}
         try:
@@ -616,10 +708,16 @@ class ModelRouter:
                                                   temperature=temperature, **extra)
             return c
         except ModelRejected as e:
-            if not (implicit and effort and e.what == "effort"):
+            if implicit and effort and e.what == "effort":
+                log.warning("CLI không nhận mức %s cho %s — gọi lại không gửi mức", effort, m.model_name)
+                c = await client.generate(m.model_name, messages, json_mode=json_mode, temperature=temperature)
+                return c
+            need = effort_from_rejection(p.kind, e) if not effort else None
+            if need is None:
                 raise
-            log.warning("CLI không nhận mức %s cho %s — gọi lại không gửi mức", effort, m.model_name)
-            c = await client.generate(m.model_name, messages, json_mode=json_mode, temperature=temperature)
+            log.warning("CLI đòi mức suy nghĩ cho %s — gọi lại với mức %s", m.model_name, need)
+            c = await client.generate(m.model_name, messages, json_mode=json_mode, temperature=temperature,
+                                      effort=need)
             return c
 
     async def _background_no_source(self, org_id: uuid.UUID) -> None:
@@ -743,18 +841,39 @@ class ModelRouter:
             raise ProviderError(f"Jev: {e}") from e
         return str(client.model)
 
-    async def _cli_probe(self, client: Any, candidates: list[tuple[str, str | None]]
-                         ) -> tuple[str, str | None, Completion]:
-        """Một lượt gọi thật rất ngắn; (model, mức suy nghĩ) bị CLI từ chối thì thử cặp kế (tối đa 3)."""
-        last: Exception | None = None
+    async def _cli_probe(self, client: Any, candidates: list[tuple[str, str | None]],
+                         kind: str = "antigravity_cli") -> tuple[str, str | None, Completion]:
+        """Một lượt gọi thật rất ngắn; (model, mức suy nghĩ) bị CLI từ chối thì thử cặp kế (tối đa 3 model).
+
+        v0.1.58 (hotfix): agy của Boss không đánh dấu model "current" nên lượt gọi đầu KHÔNG có `--effort`, agy từ
+        chối và nêu `available: low, medium, high` ⇒ thử lại CÙNG model với một mức trong danh sách đó ('medium' nếu có)
+        thay vì bỏ sang model kế (cũng trượt). Ngược lại CLI không nhận mức đã gửi (`what == 'effort'`) ⇒ thử lại không
+        gửi mức. Tổng số lượt gọi CLI tối đa `PROBE_MAX_CALLS`; ném lỗi thì gắn `e.model` / `e.effort` của lượt cuối để
+        câu báo lỗi nêu đúng thứ đã gửi."""
+        last: ModelRejected | None = None
+        calls = 0
         for model, effort in [c for c in dict.fromkeys(candidates) if c[0]][:3]:
-            try:
-                return model, effort, await asyncio.wait_for(
-                    client.generate(model, [Message("user", PROBE_PROMPT)], json_mode=False, temperature=0,
-                                    effort=effort), PROBE_TIMEOUT_S)
-            except ModelRejected as e:
-                last = e
-                continue
+            tried: set[str | None] = set()
+            cur = effort
+            while calls < PROBE_MAX_CALLS:
+                tried.add(cur)
+                calls += 1
+                try:
+                    return model, cur, await asyncio.wait_for(
+                        client.generate(model, [Message("user", PROBE_PROMPT)], json_mode=False, temperature=0,
+                                        effort=cur), PROBE_TIMEOUT_S)
+                except ModelRejected as e:
+                    e.model, e.effort = model, cur
+                    last = e
+                    if cur is None:
+                        nxt = effort_from_rejection(kind, e, tried=tried)
+                        if nxt is None:
+                            break
+                    elif e.what == "effort" and None not in tried:
+                        nxt = None
+                    else:
+                        break
+                    cur = nxt
         raise last or BadRequest("Chưa có model nào để gọi thử")
 
     async def probe_model(self, provider_id: uuid.UUID, model: str, effort: str | None = None) -> dict[str, Any]:
@@ -781,8 +900,6 @@ class ModelRouter:
     async def _test_cli(self, p: Any, result: dict[str, Any]) -> None:
         """Nguồn CLI: (1) liệt kê model (agy models / phiên Claude), (2) gọi thật một lượt ngắn. "Gọi thử OK" CHỈ khi
         lượt gọi thật thành công — trước đây chỉ liệt kê model nên phiên hết hạn vẫn báo OK (Boss 01/10)."""
-        from gh.providers import catalog
-
         client = self._client(p, None)
         async with self.sm() as db:
             saved = [(r.model_name, r.effort) for r in (await db.execute(text(
@@ -801,7 +918,7 @@ class ModelRouter:
             chosen.append((base, saved[0][1] or var_effort))
         current = [(d["id"], d.get("current_effort")) for d in discovered if isinstance(d, dict) and d.get("current")]
         offered = [(m["id"], m.get("default_effort")) for g in built["model_groups"] for m in g["models"]]
-        probe_model, probe_effort, _c = await self._cli_probe(client, [*chosen, *current, *offered])
+        probe_model, probe_effort, _c = await self._cli_probe(client, [*chosen, *current, *offered], p.kind)
         result["probe_model"], result["probe_effort"] = probe_model, probe_effort
         # CLI có thể vừa làm mới token → lưu lại vào hồ sơ đang dùng (hạn mới hiện đúng trên thẻ tài khoản).
         from gh.providers import cli as climod
@@ -835,21 +952,19 @@ class ModelRouter:
                     result["models"] = [await self._jev_ping(db_provider_id=p.id, endpoint=p.endpoint,
                                                              secret=secret or "")]
                 else:
-                    from gh.providers import catalog
-
                     names = (await self._client(p, secret).list_models())[:50]
                     result.update(catalog.build(p.kind, names))
                     result["models"] = names
             result["ok"] = True
         except Exception as e:  # noqa: BLE001 — trả lỗi cho Console, không ném
             auth_bad = isinstance(e, AuthFailed)
-            result["error"] = (friendly_probe_error(e, result.get("probe_model") or "")
+            # v0.1.58: nêu model / mức của lượt gọi thử CUỐI (gắn vào lỗi bởi `_cli_probe`), không dùng model "".
+            result["error"] = (friendly_probe_error(e, getattr(e, "model", None) or result.get("probe_model") or "",
+                                                    getattr(e, "effort", None))
                                if p.kind in CLI_KINDS else str(e)[:300])
             result["error_detail"] = error_detail(e)
             result["error_code"] = probe_error_code(e)
             if p.kind in CLI_KINDS and not result.get("model_groups"):
-                from gh.providers import catalog
-
                 # Vẫn cho Console thấy danh sách (dự phòng) để Owner biết sẽ chọn được gì sau khi đăng nhập lại.
                 result.update(catalog.build(p.kind, None))
         result.setdefault("error_code", None)
@@ -886,8 +1001,6 @@ class ModelRouter:
     async def diagnose(self, provider_id: uuid.UUID) -> dict[str, Any]:
         """Chẩn đoán nguồn CLI (v0.1.32, chỉ Owner): phiên bản, liệt kê model, một lượt gọi rất ngắn với đúng model +
         mức suy nghĩ đang dùng. Đầu ra thô đã che token/email để Boss chép gửi khi còn lỗi."""
-        from gh.providers import catalog
-
         async with self.sm() as db:
             p = (await db.execute(text("SELECT id, kind, name FROM agent.providers WHERE id = :i"),
                                   {"i": provider_id})).one()

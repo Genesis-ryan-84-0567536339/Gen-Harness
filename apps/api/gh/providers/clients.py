@@ -60,6 +60,10 @@ class ModelRejected(BadRequest):
     def __init__(self, msg: str, *, what: str = "model", available: list[str] | None = None, raw: str = ""):
         super().__init__(msg)
         self.what, self.available, self.raw = what, available or [], raw or msg
+        # v0.1.58: cặp (model, mức) của lượt gọi thử CUỐI bị từ chối — bộ định tuyến gắn vào để câu báo lỗi nêu đúng
+        # thứ đã gửi (trước đây dựng câu bằng model "" vì chưa có lượt nào thành công).
+        self.model: str | None = None
+        self.effort: str | None = None
 
 
 # Mẫu lỗi "không nhận model" — CHÍNH XÁC (v0.1.32). Nguồn: chuỗi trong agy 1.2.9 ("invalid model selection (--model %q
