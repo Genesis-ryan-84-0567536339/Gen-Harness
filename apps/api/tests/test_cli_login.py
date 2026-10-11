@@ -108,6 +108,7 @@ def test_agy_session_with_refresh_key_is_not_expiring(caplog) -> None:  # type: 
         ({"token": {"deep": {"refresh_token": REFRESH_SECRET}}}, False),           # lồng hai cấp: không tính
         ({}, False),                                                               # không có khoá làm mới
         ({"note": "refresh_token"}, False),                                        # tên khoá chứ không phải giá trị
+        ({"refresh_token": "", "refreshToken": None, "token": {"refresh_token": None}}, False),  # khoá rỗng / null
     ]
     states = []
     for extra, want in cases:
@@ -115,7 +116,7 @@ def test_agy_session_with_refresh_key_is_not_expiring(caplog) -> None:  # type: 
         assert meta["refreshable"] is want, extra
         states.append(climod.profile_state(meta["expires_at"], refreshable=meta["refreshable"]))
     # còn 56 phút: "Sắp hết hạn" chỉ khi KHÔNG làm mới được
-    assert states == ["ok", "ok", "ok", "ok", "expiring", "expiring", "expiring"]
+    assert states == ["ok", "ok", "ok", "ok", "expiring", "expiring", "expiring", "expiring"]
     assert SECRET not in caplog.text and REFRESH_SECRET not in caplog.text
 
 

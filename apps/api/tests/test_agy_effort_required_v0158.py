@@ -11,6 +11,7 @@ Phần 2 (DB + CLI giả `fake_agy_multi.py` ở chế độ FAKE_AGY_REQUIRE_EF
 khoá API".
 """
 
+import asyncio
 import base64
 import json
 import uuid
@@ -22,6 +23,7 @@ import pytest
 from sqlalchemy import text
 
 from gh.db import sessionmaker
+from gh.providers import router as router_mod
 from gh.providers.clients import AgyClient, Completion, Message, ModelRejected, rejection
 from gh.providers.router import (
     PROBE_MAX_CALLS,
@@ -139,6 +141,11 @@ def test_friendly_error_names_efforts_and_never_prints_empty_model() -> None:
         "CLI cần chọn mức suy nghĩ cho model “gemini-3.8-flash” (nhận: Thấp, Vừa, Cao)")
     empty = friendly_probe_error(e, "")
     assert empty == "CLI cần chọn mức suy nghĩ (nhận: Thấp, Vừa, Cao)"
+    # Đã gửi mức mà CLI vẫn nêu danh sách mức ⇒ KHÔNG bảo "cần chọn mức" (đã chọn rồi): nêu model + mức + danh sách.
+    assert friendly_probe_error(e, "gemini-3.8-flash", "medium") == (
+        "CLI không nhận model “gemini-3.8-flash” với mức “Vừa” (CLI nêu: Thấp, Vừa, Cao)")
+    assert friendly_probe_error(e, "", "medium") == (
+        "CLI không nhận model đã chọn với mức “Vừa” (CLI nêu: Thấp, Vừa, Cao)")
     # Lỗi model thật + model rỗng: không in “” (câu cũ: 'CLI không nhận model “”').
     other = rejection('Invalid model "x" (available: gemini-3.8-flash, gemini-3.1-pro)')
     assert other is not None
@@ -276,6 +283,57 @@ async def test_gen_turn_self_heals_when_test_button_never_pressed(owner_api, app
     with pytest.raises(ModelUnavailable):
         await _gen(app, org)
     assert len(_calls(needs_effort)) == n1 and await _models(pid) == []
+
+
+async def test_heal_skipped_when_chain_has_another_source(owner_api, app, needs_effort, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Review F-R1: chuỗi đã có nguồn khác ⇒ KHÔNG gọi thử agy (không tốn tới 60 giây của lượt Gen)."""
+    api = owner_api
+    org, pid = await _boss_state(api)
+    async with sessionmaker()() as db:
+        cid = (await db.execute(text("""INSERT INTO agent.providers (org_id, kind, name, failover_rank, auth_state)
+                                        VALUES (:o, 'claude_code_cli', 'Claude CLI', 5, 'ok') RETURNING id"""),
+                                {"o": org})).scalar_one()
+        await db.execute(text("INSERT INTO agent.models (provider_id, model_name) VALUES (:p, 'sonnet')"), {"p": cid})
+        await db.commit()
+    router = app.state.model_router
+    healed: list[uuid.UUID] = []
+
+    async def spy(o: uuid.UUID) -> bool:
+        healed.append(o)
+        return False
+
+    async def answer(*_a: Any, **_k: Any) -> Completion:
+        return Completion("claude-ok", 1, 1, {})
+
+    monkeypatch.setattr(router, "_heal_agy", spy)
+    monkeypatch.setattr(router, "_complete", answer)
+    n0 = len(_calls(needs_effort))
+    out = await _gen(app, org)
+    assert out.text == "claude-ok" and healed == []
+    assert len(_calls(needs_effort)) == n0 and await _models(pid) == []
+
+
+async def test_heal_that_hangs_is_cut_and_gen_turn_goes_on(owner_api, app, needs_effort, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Review F-R1: `test_provider` treo ⇒ cắt ở AGY_HEAL_TIMEOUT, lượt Gen đi tiếp đường cũ (hết chuỗi → báo gọn),
+    không treo; khoá Redis 10 phút giữ nguyên nên lượt sau không gọi thử lại."""
+    api = owner_api
+    org, pid = await _boss_state(api)
+    router = app.state.model_router
+    started: list[uuid.UUID] = []
+
+    async def hang(provider_id: uuid.UUID) -> dict[str, Any]:
+        started.append(provider_id)
+        await asyncio.sleep(3600)
+        return {"ok": True}
+
+    monkeypatch.setattr(router, "test_provider", hang)
+    monkeypatch.setattr(router_mod, "AGY_HEAL_TIMEOUT", 0.2)
+    with pytest.raises(ModelUnavailable):
+        await asyncio.wait_for(_gen(app, org), 10)
+    assert started == [pid] and await _models(pid) == []
+    with pytest.raises(ModelUnavailable):
+        await asyncio.wait_for(_gen(app, org), 10)
+    assert started == [pid]
 
 
 @pytest.mark.parametrize("agent_key,purpose", [("core.refinery", "refinery.extract"), ("core.briefing", "gen.briefing"),

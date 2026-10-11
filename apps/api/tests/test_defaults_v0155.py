@@ -603,7 +603,8 @@ def test_missing_reason_agy_without_model_points_at_the_test_button() -> None:
 
 def test_missing_reason_source_allowed_but_empty_and_fallback() -> None:
     # Có khoá API mà 0 model ⇒ nguồn được phép nhưng chưa có model.
-    assert reason_of(("api",), "core.refinery", with_models=False) == "chưa có model — bấm Kiểm tra kết nối ở Api"
+    # Nguồn khoá API 0 model: "Kiểm tra kết nối" chỉ tự thêm model cho CLI ⇒ bảo chọn model, không bảo bấm kiểm tra.
+    assert reason_of(("api",), "core.refinery", with_models=False) == "chưa chọn model ở Api"
     # Claude CLI chưa được cho chạy việc nền ⇒ vẫn là chuyện khoá API; core.reply dùng được Claude CLI.
     assert reason_of(("claude",), "core.briefing") == "cần khoá API (Antigravity chỉ dùng cho Gen)"
     assert reason_of(("claude",), "core.reply", with_models=False) == "chưa có model — bấm Kiểm tra kết nối ở Claude"

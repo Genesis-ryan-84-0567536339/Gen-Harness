@@ -234,6 +234,8 @@ def missing_reason(providers_rows: Sequence[Any], models_rows: Sequence[Any], ag
         if not provider_allowed(kind, bg=bg, bg_cli_allowed=bg_cli_allowed, allow_agy=agy):
             continue
         if str(_g(p, "id")) not in has_model:
+            if kc == KIND_API:   # adopt chỉ cho CLI ⇒ nguồn khoá API không có nút tự thêm model
+                return f"chưa chọn model ở {_g(p, 'name') or kind}"
             return f"chưa có model — bấm Kiểm tra kết nối ở {_g(p, 'name') or kind}"
     if bg:
         return REASON_NEED_API

@@ -251,11 +251,11 @@ REFRESH_KEYS = ("refresh_token", "refreshToken")
 
 def has_refresh_key(data: dict[str, Any]) -> bool:
     """v0.1.58 — tệp phiên agy có KHOÁ làm mới token (`refresh_token` / `refreshToken`) ở cấp đầu hoặc lồng một cấp
-    trong dict ⇒ CLI tự gia hạn hạn 1 giờ của token truy cập khi được dùng, nên KHÔNG phải "Sắp hết hạn". Chỉ xét
-    TÊN khoá — không đọc, không log giá trị token."""
-    if any(k in data for k in REFRESH_KEYS):
+    trong dict, VÀ giá trị có (truthy) ⇒ CLI tự gia hạn hạn 1 giờ của token truy cập khi được dùng, nên KHÔNG phải
+    "Sắp hết hạn". Chỉ xét có/không — không đọc, không log giá trị token."""
+    if any(bool(data.get(k)) for k in REFRESH_KEYS):
         return True
-    return any(isinstance(v, dict) and any(k in v for k in REFRESH_KEYS) for v in data.values())
+    return any(isinstance(v, dict) and any(bool(v.get(k)) for k in REFRESH_KEYS) for v in data.values())
 
 
 def session_meta(kind: str, raw: bytes) -> dict[str, Any]:

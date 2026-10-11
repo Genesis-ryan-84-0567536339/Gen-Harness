@@ -113,6 +113,8 @@ PROBE_MAX_CALLS = 4
 #: / 10 phút / tổ chức. Việc nền KHÔNG BAO GIỜ kích hoạt (F-22/F-86).
 AGY_HEAL_KEY = "gh:agy_heal:{}"
 AGY_HEAL_TTL = 600
+#: Trần thời gian của lần kiểm tra kết nối tự lành (giây): treo quá hạn ⇒ lượt Gen đi tiếp đường cũ.
+AGY_HEAL_TIMEOUT = 60.0
 
 # ─── v0.1.41 (F-86): việc nền dùng khoá API ──────────────────────────────────
 
@@ -237,6 +239,8 @@ def friendly_probe_error(e: Exception, model: str, effort: str | None = None) ->
         avail = [a.lower() for a in e.available]
         if avail and all(a in EFFORT_LABEL for a in avail):
             labels = ", ".join(EFFORT_LABEL[a] for a in avail[:8])
+            if effort:   # đã gửi mức mà CLI vẫn nêu danh sách mức ⇒ không phải "thiếu mức"
+                return f"CLI không nhận {name} với mức “{EFFORT_LABEL.get(effort, effort)}” (CLI nêu: {labels})"
             return f"CLI cần chọn mức suy nghĩ{f' cho model “{model}”' if model else ''} (nhận: {labels})"
         tail = f" (CLI nhận: {', '.join(e.available[:8])})" if e.available else ""
         return f"CLI không nhận {name} — chọn model khác trong danh sách{tail}"
@@ -549,8 +553,7 @@ class ModelRouter:
         async with self.sm() as db:
             chain = await self._chain(db, org_id, agent_key, tier=tier)
             bg_cli = await background_cli_allowed(db, org_id) if background else set()
-        if allow_agy and agent_key == profiles.ROLE_GEN \
-                and not any(lk["provider"].kind == "antigravity_cli" for lk in chain) and await self._heal_agy(org_id):
+        if allow_agy and agent_key == profiles.ROLE_GEN and not chain and await self._heal_agy(org_id):
             async with self.sm() as db:
                 chain = await self._chain(db, org_id, agent_key, tier=tier)
         reasons: list[str] = []
@@ -663,7 +666,7 @@ class ModelRouter:
                     ORDER BY p.failover_rank NULLS LAST, p.created_at LIMIT 1"""), {"o": org_id})).one_or_none()
             if row is None or not await self.redis.set(AGY_HEAL_KEY.format(org_id), "1", nx=True, ex=AGY_HEAL_TTL):
                 return False
-            result = await self.test_provider(row.id)
+            result = await asyncio.wait_for(self.test_provider(row.id), AGY_HEAL_TIMEOUT)
             if not result.get("ok"):
                 return False
             async with self.sm() as db:
