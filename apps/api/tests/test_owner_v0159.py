@@ -1,9 +1,11 @@
 """v0.1.59 (G1) — Mặt tiền Owner v2: `GET /owner/brief|today(nav)|proposals|relations?list=care` (+ nền dùng chung cho
 test_owner_feed_v0159 / test_insights_v0159).
 
-- 7 GET mới / mở rộng (brief, today, feed, feed/{id}/context, relations?list=care, insights, proposals): vai khác Owner ⇒ 403.
+- 7 GET mới / mở rộng (brief, today, feed, feed/{id}/context, relations?list=care, insights, proposals): vai khác
+  Owner ⇒ 403.
 - brief: `latest=null` khi chưa có bản tin; `live` không gọi model (router giả đếm 0 lượt, bảng model_calls không đổi);
-  `ai_ready=false` khi chưa nguồn AI; mục có `group` và `to` đổi về đường Mặt tiền; `id` chọn bản trong `history` (≤ 14).
+  `ai_ready=false` khi chưa nguồn AI; mục có `group` và `to` đổi về đường Mặt tiền; `id` chọn bản trong `history`
+  (≤ 14).
 - today.nav.urgent_open == feed.counts.urgent_open; nav.decide = nháp chờ duyệt + đề xuất Gen còn hợp lệ.
 - proposals: bỏ đề xuất đã hết TTL ở Redis dù tin nhắn vẫn ghi pending; bỏ đề xuất của người khác / đã huỷ.
 - care: đúng luật + thứ tự, gồm người `unknown`, loại staff/candidate/learner, loại người đã xoá/gộp.
@@ -97,7 +99,8 @@ async def unit(db: Any, org: uuid.UUID, observed_at: datetime, event_type: str, 
     for ev in raw:
         await db.execute(text("""INSERT INTO clean.evidence (meaning_unit_id, meaning_observed_at, raw_event_id,
                                                               raw_received_at)
-                                 VALUES (:u, :t, :e, :r)"""), {"u": uid, "t": observed_at, "e": ev.id, "r": ev.received_at})
+                                 VALUES (:u, :t, :e, :r)"""),
+                         {"u": uid, "t": observed_at, "e": ev.id, "r": ev.received_at})
     return uid  # type: ignore[no-any-return]
 
 
@@ -107,8 +110,8 @@ async def mark(db: Any, org: uuid.UUID, unit_id: uuid.UUID, observed_at: datetim
         INSERT INTO refinery.item_marks (org_id, item_type, item_id, observed_at, text_hash, simhash, text_len,
                                          duplicate_of, duplicate_kind, is_spam, quality, source, heuristic_quality,
                                          heuristic_spam)
-        VALUES (:o, 'unit', :i, :t, decode('00', 'hex'), 0, 5, :d, CASE WHEN CAST(:d AS uuid) IS NULL THEN NULL
-                                                                         ELSE 'exact' END, :s, :q, 'heuristic', :q, :s)"""),
+        VALUES (:o, 'unit', :i, :t, decode('00', 'hex'), 0, 5, :d,
+                CASE WHEN CAST(:d AS uuid) IS NULL THEN NULL ELSE 'exact' END, :s, :q, 'heuristic', :q, :s)"""),
                      {"o": org, "i": unit_id, "t": observed_at, "d": dup, "s": spam, "q": quality})
 
 
@@ -146,7 +149,8 @@ async def conversation(db: Any, org: uuid.UUID, uid: uuid.UUID, content: dict[st
     cid = (await db.execute(text("""INSERT INTO agent.gen_conversations (org_id, user_id, title, last_at)
                                     VALUES (:o, :u, :t, COALESCE(:at, now())) RETURNING id"""),
                             {"o": org, "u": uid, "t": title, "at": created_at})).scalar_one()
-    await db.execute(text("""INSERT INTO agent.gen_messages (org_id, conversation_id, turn_id, role, content, created_at)
+    await db.execute(text("""INSERT INTO agent.gen_messages (org_id, conversation_id, turn_id, role, content,
+                                                             created_at)
                              VALUES (:o, :c, :t, 'assistant', CAST(:x AS jsonb), COALESCE(:at, now()))"""),
                      {"o": org, "c": cid, "t": uuid.uuid4(), "x": orjson.dumps(content).decode(), "at": created_at})
     return cid  # type: ignore[no-any-return]
@@ -158,8 +162,9 @@ async def proposal(db: Any, redis: Any, org: uuid.UUID, uid: uuid.UUID, *, ptype
                    created_at: datetime | None = None, ttl: int = gen_proposals.PROPOSAL_TTL_S) -> dict[str, Any]:
     """Một hội thoại có bước `proposal` (ghi `pending` trong tin nhắn) + (tuỳ chọn) bản trong Redis."""
     pid = str(uuid.uuid4())
-    step = {"kind": "proposal", "proposal": {"id": pid, "type": ptype, "status": "pending", "requires_pin": requires_pin,
-                                              "summary": "KHÔNG ĐƯỢC LẤY TỪ TIN NHẮN"}}
+    step = {"kind": "proposal",
+            "proposal": {"id": pid, "type": ptype, "status": "pending", "requires_pin": requires_pin,
+                         "summary": "KHÔNG ĐƯỢC LẤY TỪ TIN NHẮN"}}
     cid = await conversation(db, org, uid, {"steps": [{"kind": "say", "text": "Em đề xuất."}, step]},
                              created_at=created_at)
     p = {"id": pid, "type": ptype, "status": status, "requires_pin": requires_pin, "summary": summary,
@@ -198,7 +203,8 @@ async def test_brief_empty_org(owner: Api) -> None:
     assert set(d) == {"latest", "live", "alerts", "history", "next_at", "ai_ready", "channels_connected"}
     assert d["latest"] is None and d["alerts"] == [] and d["history"] == []
     assert d["ai_ready"] is False and d["channels_connected"] == 0
-    assert d["next_at"].endswith("Z") and datetime.fromisoformat(d["next_at"].replace("Z", "+00:00")) > datetime.now(UTC)
+    nxt = datetime.fromisoformat(d["next_at"].replace("Z", "+00:00"))
+    assert d["next_at"].endswith("Z") and nxt > datetime.now(UTC)
     keys = [s["key"] for s in d["live"]["sections"]]
     assert keys == ["tasks_due", "hot_customers", "drafts_pending", "incidents"]     # Facebook/Kho chỉ khi có
     assert {s["key"]: s["group"] for s in d["live"]["sections"]} == {
@@ -248,7 +254,8 @@ def _brief_content(**over: Any) -> dict[str, Any]:
         {"key": "gtasks_open", "title": "Việc Google đang mở", "count": 0, "lines": [], "state": "empty",
          "external": True, "link": "/inbox?tab=alert"},
         {"key": "facebook", "title": "Facebook mới", "count": 5, "lines": ["Trang A: 5"], "link": "/social"},
-        {"key": "kho", "title": "Kho có gì mới", "count": 0, "lines": ["Chưa đọc Kho lần nào"], "link": "//evil.example"},
+        {"key": "kho", "title": "Kho có gì mới", "count": 0, "lines": ["Chưa đọc Kho lần nào"],
+         "link": "//evil.example"},
         {"key": "la", "title": "Mục lạ", "count": 1, "lines": ["x"], "link": "https://evil.example/x"},
     ]
     base = {"kind": "briefing", "slot_label": "sáng 10/10", "summary_source": "model", "needs_api_key": False,
@@ -275,7 +282,8 @@ async def test_brief_latest_sections_groups_and_front_links(owner: Api, db: Any)
     assert secs["gtasks_open"]["to"] == "/owner/thong-tin"            # /inbox → Thông tin
     assert secs["calendar_today"]["to"] == "/connections#genhub"      # đường lạ bắt đầu bằng '/' được giữ
     assert secs["facebook"]["to"] == "/social"
-    assert secs["kho"]["to"] == "/owner" and secs["la"]["to"] == "/owner"      # '//…' và 'https://…' không bao giờ lọt ra
+    # '//…' và 'https://…' không bao giờ lọt ra
+    assert secs["kho"]["to"] == "/owner" and secs["la"]["to"] == "/owner"
     assert secs["mail_reply"]["state"] == "error" and secs["gtasks_open"]["state"] == "empty"
     assert secs["calendar_today"]["more"] is True and "state" not in secs["calendar_today"]
     assert d["history"] == [{"id": str(cid), "slot": "sáng", "at": lt["at"], "title": "Bản tin Gen · sáng 10/10"}]
@@ -413,7 +421,8 @@ async def test_proposals_only_valid_redis_backed_own_pending(owner: Api, db: Any
     good = await proposal(db, redis, org, uid, ptype="reminder", created_at=ago(hours=2))
     pin = await proposal(db, redis, org, uid, ptype="kho_create", requires_pin=True, summary="Ghi vào Kho",
                          created_at=ago(hours=1), ttl=3600)
-    await proposal(db, redis, org, uid, in_redis=False)                           # tin vẫn ghi pending, Redis đã hết TTL
+    # tin vẫn ghi pending, Redis đã hết TTL
+    await proposal(db, redis, org, uid, in_redis=False)
     await proposal(db, redis, org, uid, status="cancelled")                       # đã huỷ ở Redis
     await proposal(db, redis, org, uid, status="confirmed")                       # đã xác nhận
     await proposal(db, redis, org, uid, owner=other)                              # Redis ghi của người khác
@@ -454,7 +463,8 @@ async def _care_person(db: Any, org: uuid.UUID, code: str, name: str, ptype: str
     if deleted:
         await db.execute(text("UPDATE core.persons SET deleted_at = now() WHERE id = :i"), {"i": pid})
     if merged_into:
-        await db.execute(text("UPDATE core.persons SET merged_into_id = :m WHERE id = :i"), {"m": merged_into, "i": pid})
+        await db.execute(text("UPDATE core.persons SET merged_into_id = :m WHERE id = :i"),
+                         {"m": merged_into, "i": pid})
     if msgs:
         ch = await channel(db, org)
         sid = await identity(db, pid, ch)
@@ -465,10 +475,14 @@ async def _care_person(db: Any, org: uuid.UUID, code: str, name: str, ptype: str
 
 async def test_care_rule_order_and_scope(owner: Api, db: Any) -> None:
     org = await _org(db)
-    a = await _care_person(db, org, "C-1", "Anh Unknown", "unknown", churn=75, msgs=1, quiet_days=3)     # churn, unknown
-    b = await _care_person(db, org, "C-2", "Chị Sắp Rời", "customer", churn=90, msgs=2, quiet_days=40)    # churn cao nhất
-    c = await _care_person(db, org, "C-3", "Ông Im Lặng", "partner", churn=20, msgs=4, quiet_days=30)     # silent 30 ngày
-    d = await _care_person(db, org, "C-4", "Bà Lâu Chưa Nhắn", "supplier", msgs=3, quiet_days=15)         # silent 15 ngày
+    # churn, unknown
+    a = await _care_person(db, org, "C-1", "Anh Unknown", "unknown", churn=75, msgs=1, quiet_days=3)
+    # churn cao nhất
+    b = await _care_person(db, org, "C-2", "Chị Sắp Rời", "customer", churn=90, msgs=2, quiet_days=40)
+    # silent 30 ngày
+    c = await _care_person(db, org, "C-3", "Ông Im Lặng", "partner", churn=20, msgs=4, quiet_days=30)
+    # silent 15 ngày
+    d = await _care_person(db, org, "C-4", "Bà Lâu Chưa Nhắn", "supplier", msgs=3, quiet_days=15)
     # không thuộc "cần chăm"
     await _care_person(db, org, "N-1", "Nhân viên rủi ro", "staff", churn=95, msgs=5, quiet_days=60)
     await _care_person(db, org, "N-2", "Ứng viên rủi ro", "candidate", churn=95)
