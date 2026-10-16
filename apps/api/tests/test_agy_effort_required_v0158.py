@@ -227,7 +227,7 @@ async def _models(pid: uuid.UUID) -> list[Any]:
 
 async def _gen(app: Any, org: uuid.UUID) -> Any:
     return await app.state.model_router.generate(org, agent_key="core.gen", purpose="gen.turn",
-                                                 messages=[Message("user", "hi")], json_mode=False, allow_agy=True)
+                                                 messages=[Message("user", "hi")], json_mode=False)
 
 
 async def test_test_button_green_saves_one_model_and_gen_answers(owner_api, app, needs_effort) -> None:  # type: ignore[no-untyped-def]
@@ -337,20 +337,22 @@ async def test_heal_that_hangs_is_cut_and_gen_turn_goes_on(owner_api, app, needs
 
 
 @pytest.mark.parametrize("agent_key,purpose", [("core.refinery", "refinery.extract"), ("core.briefing", "gen.briefing"),
-                                               ("core.gen", "gen.briefing"), ("core.reply", "draft_translate")])
-async def test_background_and_other_roles_never_trigger_agy(owner_api, app, needs_effort, agent_key, purpose) -> None:  # type: ignore[no-untyped-def]
+                                               ("core.gen", "gen.briefing"), ("core.reply", "draft_translate"),
+                                               ("agent:{id}", "duty_decide")])
+async def test_background_and_other_roles_also_self_heal_agy(owner_api, app, needs_effort, agent_key, purpose) -> None:  # type: ignore[no-untyped-def]
+    """v0.1.62: agy mở cho mọi vai ⇒ chuỗi rỗng ở việc nền / vai khác cũng tự lành (gọi thử một lần rồi lưu model) và
+    lượt gọi trả lời bằng agy — trước đây (F-22) các vai này không bao giờ tới agy."""
     api = owner_api
     org, pid = await _boss_state(api)
     n0 = len(_calls(needs_effort))
-    with pytest.raises(ModelUnavailable):
-        await app.state.model_router.generate(org, agent_key=agent_key, purpose=purpose,
-                                              messages=[Message("user", "nội dung của khách")], json_mode=False,
-                                              allow_agy=True)
-    assert len(_calls(needs_effort)) == n0           # agy-calls.log không tăng: F-22 / F-86 giữ nguyên
-    assert await _models(pid) == []                  # và không tự lưu model
+    out = await app.state.model_router.generate(org, agent_key=agent_key.format(id=uuid.uuid4()), purpose=purpose,
+                                                messages=[Message("user", "nội dung của khách")], json_mode=False)
+    assert out.text == "whoami:an@example.vn"
+    assert len(_calls(needs_effort)) > n0            # agy được gọi
+    assert [m.model_name for m in await _models(pid)] == ["gemini-3.8-flash"]    # và lưu đúng một model
 
 
-async def test_bindings_show_gen_model_and_reasons_for_other_roles(owner_api, needs_effort) -> None:  # type: ignore[no-untyped-def]
+async def test_bindings_show_agy_model_for_every_role(owner_api, needs_effort) -> None:  # type: ignore[no-untyped-def]
     api = owner_api
     _org, pid = await _boss_state(api)
 
@@ -367,17 +369,16 @@ async def test_bindings_show_gen_model_and_reasons_for_other_roles(owner_api, ne
     gen = after["core.gen"]
     assert gen["source"] == "standard" and gen["standard_reason"] is None
     assert (gen["standard"]["model_name"], gen["standard"]["effort"]) == ("gemini-3.8-flash", "medium")
-    for key in ("core.refinery", "core.briefing"):
-        assert after[key]["standard"] is None
-        assert after[key]["standard_reason"] == "cần khoá API (Antigravity chỉ dùng cho Gen)"
-    assert after["core.reply"]["standard"] is None
-    assert after["core.reply"]["standard_reason"] == "cần khoá API hoặc Claude Code CLI"
+    # v0.1.62: agy mở cho mọi vai ⇒ sàng lọc, Bản tin, soạn lại cũng "Chuẩn: <model agy>" (hết lý do "cần khoá API").
+    for key in ("core.refinery", "core.briefing", "core.reply"):
+        assert after[key]["standard"]["model_name"] == "gemini-3.8-flash", key
+        assert after[key]["standard_reason"] is None, key
     assert all(isinstance(i["standard_reason"], str | None) for i in after.values())
-    assert "chưa có nguồn phù hợp" not in json.dumps(after, ensure_ascii=False)
+    assert "cần khoá API" not in json.dumps(after, ensure_ascii=False)
     # Mục "Về mặc định" dùng cùng lý do (một sự thật cho cả hai màn).
     dflt = {i["key"]: i for i in (await api.get("/defaults")).json()["items"]}
     assert dflt["binding:core.gen"]["default_text"].startswith("Chuẩn: gemini-3.8-flash (tự chọn)")
-    assert dflt["binding:core.refinery"]["default_text"] == "Chuẩn: cần khoá API (Antigravity chỉ dùng cho Gen)"
+    assert dflt["binding:core.refinery"]["default_text"].startswith("Chuẩn: gemini-3.8-flash (tự chọn)")
 
 
 def _signed_in_home(clis: dict[str, Any]) -> Path:

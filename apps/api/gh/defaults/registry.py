@@ -438,8 +438,9 @@ async def suggestions(db: AsyncSession, org_id: uuid.UUID) -> list[dict[str, Any
     """`[{key, title, body, to}]` — Gen chỉ ĐỀ XUẤT, không tự làm.
 
     - 'apply_standard': từ 2 dòng gán lõi trở lên cùng MỘT model (bản cài cũ gán một model cho mọi việc).
-    - 'background_key_missing': không có nguồn khoá API bật cho việc nền và Owner chưa cho CLI chạy việc nền."""
-    from gh.providers.router import background_cli_allowed, has_api_source
+    - 'background_key_missing': không có nguồn khoá API bật, không có Antigravity CLI chạy được (v0.1.62: agy chạy được
+      việc nền) và Owner chưa cho Claude Code CLI chạy việc nền."""
+    from gh.providers.router import background_cli_allowed, has_agy_source, has_api_source
 
     out: list[dict[str, Any]] = []
     rows = (await db.execute(text("""
@@ -452,10 +453,11 @@ async def suggestions(db: AsyncSession, org_id: uuid.UUID) -> list[dict[str, Any
                     "body": ("Em thấy Gen, lọc tin và soạn nháp đang dùng chung một model. Áp chuẩn thì em tự chọn "
                              "model hợp từng việc (việc nhanh dùng model nhanh, rẻ). Sếp đổi lại được bất cứ lúc nào."),
                     "to": APPLY_STANDARD_TO})
-    if not await has_api_source(db, org_id) and not await background_cli_allowed(db, org_id):
+    if (not await has_api_source(db, org_id) and not await has_agy_source(db, org_id)
+            and not await background_cli_allowed(db, org_id)):
         out.append({"key": "background_key_missing",
                     "title": "Cần 1 khóa API để chạy lọc tin và bản tin",
-                    "body": ("Lọc tin, trực việc và Bản tin Gen chạy nền nên chỉ dùng khóa API. Sếp dán 1 khóa "
-                             "OpenRouter hoặc Gemini là đủ."),
+                    "body": ("Lọc tin, trực việc và Bản tin Gen chạy nền. Sếp dán 1 khóa OpenRouter hoặc Gemini, "
+                             "hoặc đăng nhập Antigravity CLI ở Bộ não AI là đủ."),
                     "to": BRAIN_TAB})
     return out

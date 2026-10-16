@@ -6,11 +6,15 @@ chọn model cho từng VAI theo bảng A1 dưới đây — dữ liệu theo (v
 / strong). Thiếu tầng thì lấy tầng gần nhất; KHÔNG tự thêm dòng model nào. Dòng `agent.bindings` Owner đã đổi luôn
 thắng hồ sơ.
 
-Luật cứng KHÔNG đổi (bảng A1 chỉ chọn trong phạm vi đã được phép):
-- việc nền (sàng lọc tin `core.refinery`, trực việc `agent:*`, Bản tin `core.briefing`) KHÔNG BAO GIỜ chạy
-  Antigravity CLI (F-22); Claude Code CLI chỉ khi Owner đã cho phép việc nền (F-86); thiếu nguồn khoá API thì giữ
-  hành vi cũ (hết chuỗi → cảnh báo), KHÔNG tự chuyển sang CLI;
-- Antigravity CLI chỉ cho `core.gen` của Owner (`allow_agy`).
+Luật cứng còn lại (bảng A1 chỉ chọn trong phạm vi đã được phép):
+- việc nền (sàng lọc tin `core.refinery`, trực việc `agent:*`, Bản tin `core.briefing`) chỉ chạy Claude Code CLI khi
+  Owner đã cho phép việc nền (F-86 / QD-12 — điều khoản gói Claude); thiếu nguồn thì giữ hành vi cũ (hết chuỗi →
+  cảnh báo), KHÔNG tự chuyển sang Claude Code CLI.
+
+v0.1.62 — Antigravity CLI mở cho MỌI vai, kể cả việc nền: Owner chọn ngày 16/10/2026 sau khi được báo rủi ro (luật
+F-22 "agy chỉ cho Gen của Owner" của v0.1.38 bị gỡ). Rủi ro còn lại: agy có công cụ đọc tệp / chạy lệnh và chạy cùng
+container với khoá hệ thống, nội dung bên ngoài có thể lừa nó đọc tệp trong container. Lớp cô lập mỗi lượt của
+`AgyClient` vẫn giữ nguyên; bước kế tiếp: tách agy ra container riêng không gắn khoá.
 
 `resolve()` THUẦN (không DB) để test ma trận; phần truy vấn DB nằm ở `load_rows` / `standard_for` / `choice_options`.
 """
@@ -39,7 +43,7 @@ CHOICE_EFFORTS = ("low", "medium", "high")   # chat chỉ cho chọn ba mức n�
 
 ROLE_GEN, ROLE_BRIEFING, ROLE_REFINERY, ROLE_REPLY, ROLE_AGENT = (
     "core.gen", "core.briefing", "core.refinery", "core.reply", "agent:*")
-#: Vai chạy nền (không có Sếp ngồi trước màn hình): luật F-22/F-86 áp bất kể `purpose` bên gọi truyền.
+#: Vai chạy nền (không có Sếp ngồi trước màn hình): luật F-86 (Claude Code CLI) áp bất kể `purpose` bên gọi truyền.
 BACKGROUND_ROLES = frozenset({ROLE_BRIEFING, ROLE_REFINERY, ROLE_AGENT})
 
 
@@ -57,18 +61,24 @@ PROFILES: dict[str, dict[str, Profile]] = {
     ROLE_GEN: {KIND_CLAUDE: Profile("balanced", "medium", 0.3, 6000),
                KIND_AGY: Profile("balanced", "medium", 0.3, 6000),
                KIND_API: Profile("balanced", None, 0.3, 6000)},
-    # Bản tin Gen: khoá API nhanh; CLI nhanh CHỈ khi Owner cho phép việc nền; agy KHÔNG.
+    # Bản tin Gen: khoá API nhanh; Claude CLI nhanh CHỈ khi Owner cho phép việc nền; agy nhanh/thấp (v0.1.62).
     ROLE_BRIEFING: {KIND_API: Profile("fast", None, 0.2, 6000),
-                    KIND_CLAUDE: Profile("fast", None, 0.2, 6000)},
-    # Sàng lọc: khoá API nhanh t=0,2 (JSON sai hai lần: runner hiện có tự lên balanced — ở đây chỉ cấp tầng); không agy.
+                    KIND_CLAUDE: Profile("fast", None, 0.2, 6000),
+                    KIND_AGY: Profile("fast", "low", 0.2, 6000)},
+    # Sàng lọc: khoá API nhanh t=0,2 (JSON sai hai lần: runner hiện có tự lên balanced — ở đây chỉ cấp tầng); agy
+    # nhanh/thấp (v0.1.62). agy không có model tầng "nhanh" ⇒ `pick_model` lấy tầng gần nhất (flash).
     ROLE_REFINERY: {KIND_API: Profile("fast", None, 0.2, 6000),
-                    KIND_CLAUDE: Profile("fast", None, 0.2, 6000)},
-    # Soạn lại / dịch nháp: CLI cân bằng/thấp; khoá API cân bằng; agy KHÔNG (F-22).
+                    KIND_CLAUDE: Profile("fast", None, 0.2, 6000),
+                    KIND_AGY: Profile("fast", "low", 0.2, 6000)},
+    # Soạn lại / dịch nháp: CLI cân bằng/thấp (agy cũng vậy, v0.1.62); khoá API cân bằng.
     ROLE_REPLY: {KIND_CLAUDE: Profile("balanced", "low", 0.3, 6000),
+                 KIND_AGY: Profile("balanced", "low", 0.3, 6000),
                  KIND_API: Profile("balanced", None, 0.3, 6000)},
-    # Agent trực việc: khoá API cân bằng t=0,3 ngữ cảnh 6000; CLI chỉ khi cho phép việc nền; agy KHÔNG.
+    # Agent trực việc: khoá API cân bằng t=0,3 ngữ cảnh 6000; Claude CLI chỉ khi cho phép việc nền; agy cân bằng/thấp
+    # (v0.1.62 — gửi mức rõ ràng để agy khỏi từ chối rồi thử lại).
     ROLE_AGENT: {KIND_API: Profile("balanced", None, 0.3, 6000),
-                 KIND_CLAUDE: Profile("balanced", None, 0.3, 6000)},
+                 KIND_CLAUDE: Profile("balanced", None, 0.3, 6000),
+                 KIND_AGY: Profile("balanced", "low", 0.3, 6000)},
 }
 
 
@@ -150,25 +160,26 @@ def _rank_key(p: Any) -> tuple[int, int]:
     return (1, 0) if r is None else (0, int(r))
 
 
-def provider_allowed(kind: str, *, bg: bool, bg_cli_allowed: set[str] | frozenset[str], allow_agy: bool) -> bool:
-    """Luật cứng F-22/F-86 cho MỘT loại nguồn (hồ sơ tiêu chuẩn chỉ chọn trong phạm vi này)."""
+def provider_allowed(kind: str, *, bg: bool, bg_cli_allowed: set[str] | frozenset[str]) -> bool:
+    """Luật cứng F-86 cho MỘT loại nguồn (hồ sơ tiêu chuẩn chỉ chọn trong phạm vi này). v0.1.62: Antigravity CLI dùng
+    được ở mọi vai kể cả việc nền (Owner chọn mở ngày 16/10/2026); Claude Code CLI vẫn chỉ khi Owner cho phép việc
+    nền."""
     if kind == KIND_AGY:
-        return allow_agy and not bg
+        return True
     if kind == KIND_CLAUDE:
         return (not bg) or kind in bg_cli_allowed
     return kind in API_KINDS
 
 
 def resolve(providers_rows: Sequence[Any], models_rows: Sequence[Any], agent_key: str, *, background: bool,
-            bg_cli_allowed: set[str] | frozenset[str], allow_agy: bool,
-            tier_override: str | None = None) -> list[dict[str, Any]]:
+            bg_cli_allowed: set[str] | frozenset[str], tier_override: str | None = None) -> list[dict[str, Any]]:
     """Hồ sơ tiêu chuẩn của MỘT vai → danh sách ứng viên (nguồn + model), THỨ TỰ theo hạng nguồn (failover_rank).
 
     - `providers_rows`: id, kind, name, is_enabled (mặc định True), failover_rank, has_key (chỉ nguồn khoá API; vắng =
       coi như có). `models_rows`: id, provider_id, model_name, is_enabled, effort… (thứ tự vào = ưu tiên trong tầng).
     - `background`: purpose của lượt gọi là việc nền; các VAI nền (sàng lọc, trực việc, bản tin) luôn bị coi là việc
       nền.
-    - `bg_cli_allowed`: CLI Owner đã cho chạy việc nền (chỉ `claude_code_cli`); `allow_agy`: lượt Gen của Owner.
+    - `bg_cli_allowed`: CLI Owner đã cho chạy việc nền (chỉ `claude_code_cli`; Antigravity CLI không cần cho phép).
     - `tier_override`: ép tầng (chat chọn Nhanh / Cân bằng / Kỹ hơn) — vẫn tôn trọng mọi luật trên.
     Hàm thuần: không DB, không Redis. Thiếu tầng ⇒ tầng gần nhất; KHÔNG tự thêm dòng model."""
     role = role_of(agent_key)
@@ -188,7 +199,7 @@ def resolve(providers_rows: Sequence[Any], models_rows: Sequence[Any], agent_key
             continue
         if kc == KIND_API and _g(p, "has_key", True) is False:
             continue
-        if not provider_allowed(kind, bg=bg, bg_cli_allowed=bg_cli_allowed, allow_agy=allow_agy):
+        if not provider_allowed(kind, bg=bg, bg_cli_allowed=bg_cli_allowed):
             continue
         wanted = forced or prof.tier
         picked = pick_model(kind, by_provider.get(str(_g(p, "id")), []), wanted)
@@ -203,8 +214,8 @@ def resolve(providers_rows: Sequence[Any], models_rows: Sequence[Any], agent_key
     return out
 
 
-REASON_NEED_API = "cần khoá API (Antigravity chỉ dùng cho Gen)"
-REASON_NEED_API_OR_CLAUDE = "cần khoá API hoặc Claude Code CLI"
+REASON_NEED_API = "cần khoá API hoặc đăng nhập Antigravity CLI"
+REASON_NEED_API_OR_CLAUDE = "cần khoá API, Antigravity CLI hoặc Claude Code CLI"
 REASON_NO_SOURCE = "chưa có nguồn phù hợp"
 
 
@@ -213,16 +224,16 @@ def missing_reason(providers_rows: Sequence[Any], models_rows: Sequence[Any], ag
     """v0.1.58 — vì sao `resolve()` không ra ứng viên cho vai này (hàm thuần, KHÔNG đổi `resolve` / `pick_model`).
 
     Gọi khi `resolve` rỗng; câu trả về nối sau "Chuẩn: " ở web. Thứ tự:
-    1. có nguồn ĐƯỢC PHÉP dùng cho vai này (đúng luật F-22/F-86) nhưng 0 model ⇒ "chưa có model — bấm Kiểm tra kết nối
+    1. có nguồn ĐƯỢC PHÉP dùng cho vai này (đúng luật F-86) nhưng 0 model ⇒ "chưa có model — bấm Kiểm tra kết nối
        ở <nguồn>" (đường tự sửa của Sếp);
-    2. vai nền chỉ còn Antigravity (không được dùng) / không có khoá API ⇒ "cần khoá API (Antigravity chỉ dùng cho
-       Gen)";
-    3. trả lời lại / soạn nháp (core.reply) ⇒ "cần khoá API hoặc Claude Code CLI";
+    2. vai nền không có nguồn dùng được ⇒ "cần khoá API hoặc đăng nhập Antigravity CLI" (v0.1.62: Antigravity CLI
+       chạy được việc nền; Claude Code CLI chỉ khi Owner cho phép nên không gợi ý ở đây);
+    3. trả lời lại / soạn nháp (core.reply) ⇒ "cần khoá API, Antigravity CLI hoặc Claude Code CLI";
     4. còn lại ⇒ "chưa có nguồn phù hợp"."""
     role = role_of(agent_key)
     if role is None:
         return REASON_NO_SOURCE
-    bg, agy = role_flags(agent_key)
+    bg = role_background(agent_key)
     has_model = {str(_g(m, "provider_id")) for m in models_rows if _model_ok(m)}
     for p in sorted(providers_rows, key=_rank_key):
         kind = str(_g(p, "kind", ""))
@@ -231,7 +242,7 @@ def missing_reason(providers_rows: Sequence[Any], models_rows: Sequence[Any], ag
             continue
         if kc == KIND_API and _g(p, "has_key", True) is False:
             continue
-        if not provider_allowed(kind, bg=bg, bg_cli_allowed=bg_cli_allowed, allow_agy=agy):
+        if not provider_allowed(kind, bg=bg, bg_cli_allowed=bg_cli_allowed):
             continue
         if str(_g(p, "id")) not in has_model:
             if kc == KIND_API:   # adopt chỉ cho CLI ⇒ nguồn khoá API không có nút tự thêm model
@@ -275,10 +286,10 @@ async def load_rows(db: AsyncSession, org_id: uuid.UUID) -> tuple[list[dict[str,
     return providers, models
 
 
-def role_flags(agent_key: str) -> tuple[bool, bool]:
-    """(background, allow_agy) mặc định của một vai khi hiển thị "Chuẩn: …" — việc nền cho vai nền; agy chỉ cho Gen."""
-    role = role_of(agent_key)
-    return role in BACKGROUND_ROLES, role == ROLE_GEN
+def role_background(agent_key: str) -> bool:
+    """Vai này chạy nền khi hiển thị "Chuẩn: …" (sàng lọc, trực việc, Bản tin) — chỉ ảnh hưởng Claude Code CLI
+    (F-86)."""
+    return role_of(agent_key) in BACKGROUND_ROLES
 
 
 async def standard_with_reasons(
@@ -292,8 +303,7 @@ async def standard_with_reasons(
     std: dict[str, dict[str, Any] | None] = {}
     why: dict[str, str | None] = {}
     for key in agent_keys:
-        bg, agy = role_flags(key)
-        cands = resolve(providers, models, key, background=bg, bg_cli_allowed=bg_cli, allow_agy=agy)
+        cands = resolve(providers, models, key, background=role_background(key), bg_cli_allowed=bg_cli)
         std[key] = cands[0] if cands else None
         why[key] = None if cands else missing_reason(providers, models, key, bg_cli)
     return std, why
@@ -320,16 +330,15 @@ def standard_text(c: dict[str, Any] | None, reason: str | None = None) -> str:
     return f"Chuẩn: {reason or REASON_NO_SOURCE}" if c is None else f"Chuẩn: {c['model_name']} (tự chọn)"
 
 
-async def choice_options(db: AsyncSession, org_id: uuid.UUID, *, owner: bool, tainted: bool) -> dict[str, Any]:
-    """Tầng + mức suy nghĩ mà khung chat (G3) được phép mời Owner chọn — hợp đồng G1 → G3.
+async def choice_options(db: AsyncSession, org_id: uuid.UUID) -> dict[str, Any]:
+    """Tầng + mức suy nghĩ mà khung chat (G3) được phép mời người hỏi chọn — hợp đồng G1 → G3.
 
     `{'tiers': [{'tier': 'auto'|'fast'|'balanced'|'deep', 'available': bool, 'efforts': [...]}]}`; 'deep' ↔ tầng
     'strong'. Một tầng `available` khi có nguồn DÙNG ĐƯỢC (đang bật; khoá API có khoá; CLI chưa hết hạn đăng nhập) có
-    model đã bật ở đúng tầng đó. Người không phải Owner hoặc lượt đang đọc nội dung bên ngoài (`tainted`) không được
-    dùng Antigravity CLI ⇒ tầng chỉ phục vụ được bằng agy ⇒ available=false. 'auto' (Tự động, chuẩn) khả dụng khi có
+    model đã bật ở đúng tầng đó. v0.1.62: Antigravity CLI dùng được cho mọi người hỏi (Owner lẫn nhân viên, kể cả lượt
+    đã đọc nội dung bên ngoài) nên không còn tham số `owner` / `tainted`. 'auto' (Tự động, chuẩn) khả dụng khi có
     bất kỳ nguồn nào. `efforts` ⊆ low/medium/high mà các model CLI của tầng ấy hỗ trợ (khoá API: rỗng)."""
     providers, models = await load_rows(db, org_id)
-    allow_agy = owner and not tainted
     by_provider: dict[str, list[dict[str, Any]]] = {}
     for m in models:
         by_provider.setdefault(str(m["provider_id"]), []).append(m)
@@ -338,8 +347,6 @@ async def choice_options(db: AsyncSession, org_id: uuid.UUID, *, owner: bool, ta
     any_source = False
     for p in providers:
         kind = str(p["kind"])
-        if kind == KIND_AGY and not allow_agy:
-            continue
         if kind in API_KINDS and not p["has_key"]:
             continue
         if kind in CLI_KINDS and p.get("auth_state") == "expired":

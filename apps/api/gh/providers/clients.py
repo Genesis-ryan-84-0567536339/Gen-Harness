@@ -332,8 +332,15 @@ class AgyClient:
     Cô lập mỗi lượt: cwd = thư mục mới rỗng 0700 (`gh-agy-*`, xoá sau lượt — kể cả hết giờ/huỷ), env sạch
     (`cli_env`: không biến GH_*, không khoá), `--model=<tên>` qua AGY_MODEL_RE. Changelog agy nói đọc tệp TRONG
     workspace được tự cho phép, ngoài workspace phải xin phép (bị từ chối trong print mode) — CHƯA kiểm được khi đã
-    đăng nhập → không dựa vào đó: LUẬT CỨNG ở gh.providers.router (AGY_OWNER_ONLY_REASON) — agy chỉ cho Gen của Sếp.
-    agy chạy cùng uid với api/worker nên các lớp cô lập ở đây chỉ là phòng thủ thêm."""
+    đăng nhập → không dựa vào đó.
+
+    Chính sách (v0.1.62): Owner chọn MỞ agy cho mọi vai — Gen của Sếp và nhân viên (kể cả lượt đã đọc nội dung bên
+    ngoài), sàng lọc & suy luận chính, soạn lại / dịch nháp, Bản tin Gen, agent tự tạo, việc nền — ngày 16/10/2026,
+    sau khi được báo rủi ro (luật v0.1.38 F-22 "agy chỉ cho Gen của Sếp" đã gỡ). RỦI RO CÒN LẠI: agy có công cụ đọc
+    tệp / chạy lệnh và chạy cùng uid, cùng container với api/worker (nơi có khoá hệ thống) nên nội dung bên ngoài
+    (tin khách…) có thể lừa agy đọc tệp trong container; các lớp cô lập ở đây (cwd rỗng 0700, env sạch, prompt qua
+    stdin, regex model, không `--dangerously-skip-permissions`) chỉ là phòng thủ thêm, KHÔNG phải rào chắn. Bước kế
+    tiếp (chưa làm): tách agy ra container riêng không gắn khoá."""
 
     kind = "antigravity_cli"
     MAX_PROMPT = 120_000   # giữ giới hạn cũ (prompt qua stdin từ v0.1.38, không còn vướng MAX_ARG_STRLEN)

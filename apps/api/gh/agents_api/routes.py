@@ -36,10 +36,9 @@ from gh.chassis.policy import DEFAULT_AUTONOMY
 from gh.data.common import iso
 from gh.db import DB
 from gh.defaults import profiles
-from gh.errors import conflict, field_errors, not_found, pin_required
+from gh.errors import field_errors, not_found, pin_required
 from gh.gen.coach import cache as coach_cache
 from gh.providers import catalog
-from gh.providers.router import AGY_OWNER_ONLY_REASON
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 READ = require("system.read", rbac.ALL)
@@ -165,17 +164,12 @@ async def _agent_key_label(db: AsyncSession, org_id: uuid.UUID, agent_key: str) 
     raise field_errors({"agent_key": "agent_key phải là mục dùng chung (core.*) hoặc agent:<id>"})
 
 
-GEN_KEY = "core.gen"    # gh.gen.engine.AGENT_KEY — khoá DUY NHẤT được gán Antigravity CLI (F-22)
-AGY_GEN_ONLY_MSG = AGY_OWNER_ONLY_REASON   # một câu duy nhất cho API, bộ định tuyến và Console (AGY_SCOPE_TEXT)
-
-
-def _binding_out(r: Any, agent_key: str) -> dict[str, Any]:
-    # F-22: bản cài cũ có thể đã gán agy cho khoá khác core.gen — bộ định tuyến từ chối, Console hiện lý do.
-    blocked = AGY_OWNER_ONLY_REASON if r.provider_kind == "antigravity_cli" and agent_key != GEN_KEY else None
+def _binding_out(r: Any) -> dict[str, Any]:
+    # v0.1.62: Antigravity CLI gán được cho MỌI khoá (luật F-22 owner-only đã gỡ, Owner chọn mở 16/10/2026) ⇒ không
+    # còn `blocked_reason` và không còn lỗi 409 AGY_OWNER_GEN_ONLY ở PUT /bindings.
     return {"model_id": str(r.model_id), "model_name": r.model_name, "provider_name": r.provider_name,
             "temperature": float(r.temperature), "context_tokens": r.context_tokens,
-            "rule_codes": list(r.rule_codes or []), "blocked_reason": blocked,
-            "effort": getattr(r, "effort", None)}
+            "rule_codes": list(r.rule_codes or []), "effort": getattr(r, "effort", None)}
 
 
 @router.get("/bindings")
@@ -195,7 +189,7 @@ async def list_bindings(user: service.CurrentUser = Depends(READ), db: AsyncSess
     by_key = {r.agent_key: r for r in rows}
     unbound = [k for k, _ in keys if k not in by_key]
     standard, reasons = await profiles.standard_with_reasons(db, user.org_id, unbound) if unbound else ({}, {})
-    items = [{"agent_key": k, "label": label, "binding": _binding_out(by_key[k], k) if k in by_key else None,
+    items = [{"agent_key": k, "label": label, "binding": _binding_out(by_key[k]) if k in by_key else None,
               "source": "custom" if k in by_key else "standard",
               "standard": None if k in by_key else profiles.standard_public(standard.get(k)),
               "standard_reason": None if k in by_key else reasons.get(k)}
@@ -241,8 +235,6 @@ async def set_binding(agent_key: str, body: BindingIn, request: Request,
                           {"m": body.model_id, "o": user.org_id})).one_or_none()
     if m is None:
         raise not_found("Model")
-    if m.kind == "antigravity_cli" and agent_key != GEN_KEY:
-        raise conflict("AGY_OWNER_GEN_ONLY", AGY_GEN_ONLY_MSG)
     _check_effort(m.kind, m.model_name, body.effort)
     await db.execute(text("""
         INSERT INTO agent.bindings (org_id, agent_key, model_id, temperature, context_tokens, rule_codes, effort)
@@ -260,7 +252,7 @@ async def set_binding(agent_key: str, body: BindingIn, request: Request,
         FROM agent.bindings b JOIN agent.models m ON m.id = b.model_id JOIN agent.providers p ON p.id = m.provider_id
         WHERE b.org_id = :o AND b.agent_key = :k"""), {"o": user.org_id, "k": agent_key})).one()
     await coach_cache.commit_and_invalidate(db, request.app.state.redis, user.org_id)   # v0.1.59: thẻ đọc lại ngay
-    return {"agent_key": agent_key, "label": label, "binding": _binding_out(r, agent_key), "source": "custom",
+    return {"agent_key": agent_key, "label": label, "binding": _binding_out(r), "source": "custom",
             "standard": None}
 
 
@@ -385,7 +377,7 @@ async def _binding_of(db: AsyncSession, org_id: uuid.UUID, agent_id: uuid.UUID) 
                b.context_tokens, b.rule_codes, b.effort
         FROM agent.bindings b JOIN agent.models m ON m.id = b.model_id JOIN agent.providers p ON p.id = m.provider_id
         WHERE b.org_id = :o AND b.agent_key = :k"""), {"o": org_id, "k": f"agent:{agent_id}"})).one_or_none()
-    return None if r is None else _binding_out(r, f"agent:{agent_id}")
+    return None if r is None else _binding_out(r)
 
 
 def _agent_out(r: Any) -> dict[str, Any]:
