@@ -135,7 +135,9 @@ async def test_backup_now_queues_worker_job_then_reports_done(owner_api: Api, en
     monkeypatch.setattr(backup, "run_backup", boom)
     await backup.backup_now({"redis": redis})
     job = (await owner_api.get("/system/backups")).json()["job"]
-    assert job["state"] == "failed" and "pg_dump" in job["message"]
+    # F106: câu thân thiện cố định cho Sếp; lỗi gốc nằm riêng ở `technical`.
+    assert job["state"] == "failed" and job["message"] == backup.BACKUP_FAILED_MESSAGE
+    assert "pg_dump" in job["technical"]
     assert not await redis.exists(backup.LOCK_KEY)
 
 

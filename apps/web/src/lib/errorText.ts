@@ -33,6 +33,20 @@ function titleOf(e: ApiError, fallback: string): string {
   return typeof t === 'string' && t.trim() ? t.trim() : fallback;
 }
 
+const FORBIDDEN_TEXT = 'Vai trò của bạn không có quyền làm thao tác này.';
+const CSRF_TEXT = 'Phiên đã cũ — tải lại trang rồi thử lại.';
+
+/**
+ * v0.1.62 (F110): 403 phân theo mã — CSRF_INVALID là phiên lệch (tải lại trang), không phải thiếu quyền; chỉ FORBIDDEN
+ * (hoặc 403 không mã) mới dùng câu về vai trò. Mã khác (GEN_DISABLED, PASSWORD_CHANGE_REQUIRED…) đã kèm câu tiếng Việt
+ * riêng của máy chủ ⇒ hiện câu đó; không có câu thì quay về câu quyền.
+ */
+function forbiddenText(e: ApiError): string {
+  if (e.code === 'CSRF_INVALID') return CSRF_TEXT;
+  if (e.code === 'FORBIDDEN') return FORBIDDEN_TEXT;
+  return detailToText(e.problem.detail).trim() || titleOf(e, FORBIDDEN_TEXT);
+}
+
 /**
  * User-facing message for an API error — luôn là chuỗi.
  * `tz`: múi giờ tổ chức (useOrgTimezone) để hiện giờ mở khoá PIN theo giờ địa phương.
@@ -40,8 +54,8 @@ function titleOf(e: ApiError, fallback: string): string {
 export function errorText(e: unknown, tz: string = DEFAULT_TZ): string {
   if (e instanceof PinCancelledError) return 'Đã huỷ — thao tác cần mã PIN.';
   if (e instanceof ApiError) {
-    if (e.status === 0) return 'Không kết nối được máy chủ. Kiểm tra dịch vụ api rồi thử lại.';
-    if (e.status === 403) return 'Vai trò của bạn không có quyền làm thao tác này.';
+    if (e.status === 0) return 'Không kết nối được máy chủ. Kiểm tra máy chủ rồi thử lại.';
+    if (e.status === 403) return forbiddenText(e);
     if (isAgyOnlyUnavailable(e)) return agyOnlyText(e);
     if (isModelUnavailable(e)) return MODEL_UNAVAILABLE_TEXT;
     // v0.1.35: 500 INTERNAL — câu dễ hiểu (title) KÈM mã lỗi; `detail` chỉ có mã nên không được thay chỗ title.

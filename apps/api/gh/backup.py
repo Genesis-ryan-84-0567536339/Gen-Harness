@@ -446,12 +446,26 @@ async def scheduled_backup_scan(ctx: dict[str, Any]) -> dict[str, Any]:
         await _notify_cancelled(redis, CANCELLED_SCHEDULED_MESSAGE)
         raise
     except Exception as exc:
-        await _notify_owners(redis, ok=False, message=f"Bản sao lưu theo lịch lỗi: {str(exc)[-260:]}")
+        # F106: chuông chỉ mang câu thân thiện; stderr của pg_dump chỉ vào nhật ký máy chủ (đã che mật khẩu).
+        log.error("Sao lưu theo lịch thất bại: %s", _technical(exc))
+        await _notify_owners(redis, ok=False, message=SCHEDULED_FAILED_MESSAGE)
         raise
     finally:
         if redis is not None:
             await redis.delete(LOCK_KEY)
     return {"ran": entry.key}
+
+
+# F106: Sếp chỉ thấy câu cố định này; lỗi gốc (stderr pg_dump/pg_restore) đi riêng sang `technical`
+# → "Chi tiết kỹ thuật".
+BACKUP_FAILED_MESSAGE = "Chưa sao lưu được — thử lại; nếu vẫn lỗi gửi gói chẩn đoán."
+SCHEDULED_FAILED_MESSAGE = ("Bản sao lưu theo lịch chưa thành công — bấm Sao lưu ngay để thử lại; "
+                            "nếu vẫn lỗi gửi gói chẩn đoán.")
+
+
+def _technical(exc: BaseException) -> str:
+    """Lỗi gốc cho "Chi tiết kỹ thuật": đã che mật khẩu (kể cả lỗi không đi qua `_run`), giữ 500 ký tự cuối."""
+    return redact_secrets(str(exc))[-500:]
 
 
 async def _set_job(redis: Any, **fields: Any) -> None:
@@ -499,23 +513,25 @@ async def backup_now(ctx: dict[str, Any], trigger: str = "manual") -> dict[str, 
     redis = ctx["redis"]
     if not await _acquire_lock(redis):
         await _set_job(redis, state="failed", finished_at=datetime.now(UTC).isoformat(),
-                       message="Đang có một bản sao lưu khác chạy — thử lại sau ít phút")
+                       message="Đang có một bản sao lưu khác chạy — thử lại sau ít phút", technical=None)
         return {"skipped": "locked"}
-    await _set_job(redis, state="running", started_at=datetime.now(UTC).isoformat(), message=None)
+    await _set_job(redis, state="running", started_at=datetime.now(UTC).isoformat(), message=None,
+                   technical=None)
     try:
         entry = await run_backup(trigger=trigger)
     except asyncio.CancelledError:
         with contextlib.suppress(Exception):
             await asyncio.wait_for(asyncio.shield(_set_job(redis, state="failed",
                                                            finished_at=datetime.now(UTC).isoformat(),
-                                                           message=CANCELLED_NOW_MESSAGE)), 10)
+                                                           message=CANCELLED_NOW_MESSAGE, technical=None)), 10)
         await _notify_cancelled(redis, f"{CANCELLED_NOW_MESSAGE} — bấm Sao lưu ngay để thử lại.")
         raise
     except Exception as exc:  # noqa: BLE001 — báo lỗi cho Console, không nuốt im lặng
         log.exception("Sao lưu ngay thất bại")
-        await _set_job(redis, state="failed", finished_at=datetime.now(UTC).isoformat(), message=str(exc)[-500:])
-        await _notify_owners(redis, ok=False, message=str(exc)[-300:])
-        return {"failed": str(exc)[-500:]}
+        await _set_job(redis, state="failed", finished_at=datetime.now(UTC).isoformat(),
+                       message=BACKUP_FAILED_MESSAGE, technical=_technical(exc))
+        await _notify_owners(redis, ok=False, message=BACKUP_FAILED_MESSAGE)
+        return {"failed": BACKUP_FAILED_MESSAGE}
     finally:
         await redis.delete(LOCK_KEY)
     await _set_job(redis, state="done", finished_at=datetime.now(UTC).isoformat(), key=entry.key)

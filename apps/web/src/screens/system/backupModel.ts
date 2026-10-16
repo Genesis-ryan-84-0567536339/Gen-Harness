@@ -46,20 +46,27 @@ export function downloadName(key: string): string {
   return `gen-harness-${key.split('/').pop() ?? 'backup.enc'}`;
 }
 
+/** F106: câu cố định khi máy chủ không kèm câu riêng — lỗi gốc (pg_dump…) chỉ nằm trong "Chi tiết kỹ thuật". */
+export const BACKUP_FAILED_TEXT = 'Chưa sao lưu được — thử lại; nếu vẫn lỗi gửi gói chẩn đoán.';
+const RESTORE_FAILED_TEXT = 'Dữ liệu đã quay về như trước khi khôi phục. Thử lại; nếu vẫn lỗi gửi gói chẩn đoán.';
+
 export type JobView =
   | { kind: 'none' }
   | { kind: 'working'; text: string }
-  | { kind: 'failed'; text: string }
+  | { kind: 'failed'; text: string; technical: string | null }
   | { kind: 'stalled'; text: string };
 
 export function jobView(job: BackupJob | null | undefined): JobView {
   if (!job) return { kind: 'none' };
-  if (job.state === 'queued') return { kind: 'working', text: 'Đang chờ worker nhận việc sao lưu…' };
+  if (job.state === 'queued') return { kind: 'working', text: 'Đang chờ Bộ xử lý nền nhận việc sao lưu…' };
   if (job.state === 'running') return { kind: 'working', text: 'Đang sao lưu dữ liệu — thường mất dưới một phút…' };
   if (job.state === 'stalled') {
-    return { kind: 'stalled', text: 'Việc sao lưu chưa chạy sau 30 phút — tiến trình worker có thể đang tắt. Bấm Sao lưu ngay để thử lại.' };
+    return { kind: 'stalled', text: 'Việc sao lưu chưa chạy sau 30 phút — Bộ xử lý nền có thể đang tắt. Bấm Sao lưu ngay để thử lại.' };
   }
-  if (job.state === 'failed') return { kind: 'failed', text: `Sao lưu chưa thành công: ${job.message || 'xem nhật ký worker'}` };
+  if (job.state === 'failed') {
+    const technical = typeof job.technical === 'string' && job.technical.trim() ? job.technical.trim() : null;
+    return { kind: 'failed', text: job.message?.trim() || BACKUP_FAILED_TEXT, technical };
+  }
   return { kind: 'none' };
 }
 
@@ -71,6 +78,8 @@ export type RestoreView =
       tone: 'accent' | 'ok' | 'warn' | 'bad';
       title: string;
       body?: string;
+      /** Thông điệp gốc của trình khôi phục — chỉ cho "Chi tiết kỹ thuật". */
+      technical?: string | null;
       command?: string;
       steps: Array<{ label: string; state: StepState }>;
     };
@@ -84,8 +93,8 @@ function recent(iso: string | null, now: number): boolean {
 }
 
 /**
- * Tiến trình khôi phục từ `restore` (GET /system/backups) + việc Sếp vừa bấm (waiting) + api đang tắt vì genh dừng
- * api/worker để khôi phục (offline). Hàm thuần để test đủ các nhánh — cùng khuôn `updateView`.
+ * Tiến trình khôi phục từ `restore` (GET /system/backups) + việc Sếp vừa bấm (waiting) + máy chủ đang tắt vì genh dừng
+ * máy chủ/Bộ xử lý nền để khôi phục (offline). Hàm thuần để test đủ các nhánh — cùng khuôn `updateView`.
  */
 export function restoreView(
   r: BackupRestoreStatus | undefined,
@@ -118,7 +127,7 @@ export function restoreView(
   if (r.state === 'failed' && recent(r.finished_at, now)) {
     return {
       kind: 'failed', tone: 'bad', title: 'Khôi phục chưa thành công',
-      body: r.message ?? 'Dữ liệu đã quay về như trước khi khôi phục. Xem logs/auto-update.log trên máy chủ.', steps: [],
+      body: RESTORE_FAILED_TEXT, technical: r.message?.trim() || null, steps: [],
     };
   }
   if (r.state === 'done' && opts.waiting) {
