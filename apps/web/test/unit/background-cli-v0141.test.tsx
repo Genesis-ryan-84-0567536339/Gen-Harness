@@ -34,11 +34,16 @@ function meAs(role: Role) {
   };
 }
 
+/** Antigravity CLI đã đăng nhập nhưng chưa có model ⇒ chưa chạy được việc nền. */
+const AGY_NO_MODEL = { provider_id: 'p-agy', name: 'Antigravity Brain', kind: 'antigravity_cli', used: false, reason: 'Chưa chọn model' };
+
 function bg(over: Partial<BackgroundSources> = {}): BackgroundSources {
   return {
     allow_cli: [], accepted_at: null, risk_text: RISK, purposes: ['refinery', 'duty_decide', 'gen.briefing'], has_api_source: true,
+    has_agy_source: true,
     sources: [
-      { provider_id: 'p-agy', name: 'Antigravity Brain', kind: 'antigravity_cli', used: false, reason: 'Antigravity CLI chỉ dùng khi Sếp hỏi Gen trực tiếp' },
+      // v0.1.62: Antigravity CLI chạy được việc nền, không cần Owner cho phép.
+      { provider_id: 'p-agy', name: 'Antigravity Brain', kind: 'antigravity_cli', used: true, reason: null },
       { provider_id: 'p-gem', name: 'Gemini API', kind: 'gemini', used: true, reason: null },
       { provider_id: 'p-cc', name: 'Claude Code CLI', kind: 'claude_code_cli', used: false, reason: 'Chưa cho phép' },
     ],
@@ -139,14 +144,16 @@ describe('<BackgroundSourcesCard> Nguồn AI cho việc nền', () => {
     expect(document.body).not.toHaveTextContent('[object Object]');
   });
 
-  it('liệt kê nguồn theo chuỗi với viên trạng thái + lý do; không có lựa chọn bật Antigravity CLI', async () => {
+  it('liệt kê nguồn theo chuỗi với viên trạng thái + lý do; Antigravity CLI dùng được việc nền, không có công tắc bật', async () => {
     mockFetch((c) => (c.url.endsWith('/providers/background') ? json(200, bg()) : c.url.includes('/system/ai-cost') ? json(200, cost()) : undefined));
     renderCards();
     const panel = await screen.findByRole('region', { name: 'Nguồn AI cho việc nền' });
     expect(panel).toHaveTextContent('Dùng cho sàng lọc tin, trực việc, Bản tin Gen');
     expect(await within(panel).findByTestId('bg-src-p-gem')).toHaveTextContent('Dùng cho việc nền');
-    expect(within(panel).getByTestId('bg-src-p-agy')).toHaveTextContent('Không dùng');
-    expect(within(panel).getByTestId('bg-src-p-agy')).toHaveTextContent('Antigravity CLI chỉ dùng khi Sếp hỏi Gen trực tiếp');
+    expect(within(panel).getByTestId('bg-src-p-agy')).toHaveTextContent('Dùng cho việc nền');
+    expect(within(panel).getByTestId('bg-src-p-agy')).not.toHaveTextContent('chỉ dùng khi Sếp hỏi Gen');
+    expect(within(panel).getByTestId('bg-src-p-cc')).toHaveTextContent('Không dùng');
+    expect(within(panel).getByTestId('bg-src-agy-note')).toHaveTextContent('Antigravity CLI chạy được cả việc nền, không cần Sếp cho phép');
     const switches = within(panel).getAllByRole('switch');
     expect(switches).toHaveLength(1);
     expect(switches[0]).toHaveAccessibleName('Cho Claude Code CLI chạy việc nền');
@@ -233,17 +240,31 @@ describe('<BackgroundSourcesCard> Nguồn AI cho việc nền', () => {
     await waitFor(() => expect(screen.getByRole('switch', { name: 'Cho Claude Code CLI chạy việc nền' })).toHaveAttribute('aria-checked', 'false'));
   });
 
-  it('has_api_source=false ⇒ khung nhắc dán khoá + nút Thêm nhà cung cấp (mở thẳng hộp Thêm, mẫu OpenRouter)', async () => {
+  it('có Antigravity CLI chạy được mà chưa có khoá API ⇒ KHÔNG hiện khung nhắc dán khoá', async () => {
     mockFetch((c) =>
       c.url.endsWith('/providers/background')
-        ? json(200, bg({ has_api_source: false, sources: [bg().sources[0]] }))
+        ? json(200, bg({ has_api_source: false, has_agy_source: true, sources: [bg().sources[0]] }))
+        : c.url.includes('/system/ai-cost')
+          ? json(200, cost())
+          : undefined,
+    );
+    renderCards();
+    const panel = await screen.findByRole('region', { name: 'Nguồn AI cho việc nền' });
+    expect(await within(panel).findByTestId('bg-src-p-agy')).toHaveTextContent('Dùng cho việc nền');
+    expect(within(panel).queryByTestId('bg-src-no-key')).toBeNull();
+  });
+
+  it('chưa có khoá API và Antigravity CLI chưa chạy được ⇒ khung nhắc dán khoá / đăng nhập Antigravity + nút Thêm nhà cung cấp (mở thẳng hộp Thêm, mẫu OpenRouter)', async () => {
+    mockFetch((c) =>
+      c.url.endsWith('/providers/background')
+        ? json(200, bg({ has_api_source: false, has_agy_source: false, sources: [AGY_NO_MODEL] }))
         : c.url.includes('/system/ai-cost')
           ? json(200, cost())
           : undefined,
     );
     renderCards();
     const box = await screen.findByTestId('bg-src-no-key');
-    expect(box).toHaveTextContent('Chưa có khoá API — dán khoá OpenRouter/Gemini để việc nền chạy');
+    expect(box).toHaveTextContent('Chưa có nguồn AI cho việc nền — dán khoá OpenRouter/Gemini hoặc đăng nhập Antigravity CLI');
     expect(within(box).getByRole('link', { name: /Thêm nhà cung cấp/ })).toHaveAttribute('href', '/api?add=openrouter');
     expect(screen.queryByRole('switch', { name: 'Cho Claude Code CLI chạy việc nền' })).toBeNull();
   });
@@ -251,7 +272,7 @@ describe('<BackgroundSourcesCard> Nguồn AI cho việc nền', () => {
   it('has_api_source=false + đã cho Claude Code CLI ⇒ KHÔNG nói "việc nền không chạy", chỉ khuyên thêm khoá API', async () => {
     mockFetch((c) =>
       c.url.endsWith('/providers/background')
-        ? json(200, bg({ has_api_source: false, allow_cli: ['claude_code_cli'], sources: [bg().sources[0], { ...bg().sources[2], used: true, reason: null }] }))
+        ? json(200, bg({ has_api_source: false, has_agy_source: false, allow_cli: ['claude_code_cli'], sources: [AGY_NO_MODEL, { ...bg().sources[2], used: true, reason: null }] }))
         : c.url.includes('/system/ai-cost')
           ? json(200, cost())
           : undefined,
@@ -269,7 +290,7 @@ describe('<BackgroundSourcesCard> Nguồn AI cho việc nền', () => {
     mockFetch(
       (c) =>
         c.url.endsWith('/providers/background')
-          ? json(200, bg({ has_api_source: false, sources: [bg().sources[0]] }))
+          ? json(200, bg({ has_api_source: false, has_agy_source: false, sources: [AGY_NO_MODEL] }))
           : c.url.includes('/system/ai-cost')
             ? json(200, cost())
             : undefined,

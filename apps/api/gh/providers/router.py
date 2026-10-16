@@ -13,11 +13,19 @@ vai (`gh.defaults.profiles.resolve`, chọn model theo TẦNG trong các nguồn
 (`failover_rank`, model mặc định) làm phần đuôi. `generate(tier=…)` ép tầng của hồ sơ (chat chọn Nhanh / Cân bằng / Kỹ
 hơn), `effort=…` ép mức suy nghĩ — vẫn tôn trọng luật F-22/F-86 bên dưới.
 
-v0.1.41 (F-86) — việc nền (`BACKGROUND_PURPOSES`: sàng lọc tin, trực việc, Bản tin Gen) mặc định CHỈ dùng khoá API:
-Claude Code CLI (gói Pro/Max cá nhân của Sếp) bị bỏ qua trừ khi Owner cho phép (cảnh báo + xác nhận + PIN, lưu ở
-`core.organizations.settings->'ai'->'background_cli'`). Antigravity CLI không bao giờ chạy việc nền (F-22). Việc nền
-hết chuỗi vì chỉ có CLI ⇒ sự cố sức khoẻ `ai.background_no_source` (một chuông), tự đóng khi việc nền chạy lại được.
-'Đọc theo lịch' mạng xã hội (gh.social) không gọi model — không thuộc diện này.
+v0.1.41 (F-86) — việc nền (`BACKGROUND_PURPOSES`: sàng lọc tin, trực việc, Bản tin Gen): Claude Code CLI (gói Pro/Max
+cá nhân của Sếp) bị bỏ qua trừ khi Owner cho phép (cảnh báo + xác nhận + PIN, lưu ở
+`core.organizations.settings->'ai'->'background_cli'`) — điều khoản gói Claude, QD-12, GIỮ NGUYÊN. Việc nền hết chuỗi
+vì chỉ còn Claude Code CLI chưa được phép ⇒ sự cố sức khoẻ `ai.background_no_source` (một chuông), tự đóng khi việc nền
+chạy lại được. 'Đọc theo lịch' mạng xã hội (gh.social) không gọi model — không thuộc diện này.
+
+v0.1.62 — Antigravity CLI (`agy`) dùng được ở MỌI lượt gọi: Gen của Owner và của nhân viên (kể cả lượt đã đọc nội dung
+bên ngoài), sàng lọc & suy luận chính, soạn lại / dịch nháp, Bản tin Gen, agent tự tạo và việc nền. Luật v0.1.38 (F-22)
+"agy chỉ cho Gen của Owner" đã GỠ theo quyết định của Owner ngày 16/10/2026: Owner được giải thích rủi ro (agy có công
+cụ đọc tệp / chạy lệnh, chạy cùng container với khoá hệ thống ⇒ nội dung bên ngoài có thể lừa agy đọc tệp trong
+container) và chọn "mở thẳng" thay vì "tách agy ra hộp riêng". Rủi ro CÒN LẠI nằm ở đó; lớp cô lập mỗi lượt của
+`AgyClient` (cwd rỗng 0700, env sạch, prompt qua stdin, regex tên model) vẫn giữ. Bước kế tiếp (chưa làm): tách agy ra
+container riêng không gắn khoá.
 """
 
 import asyncio
@@ -65,66 +73,28 @@ KEY_AAD = b"provider_key"
 CLI_AAD = b"cli_token"
 CLI_KINDS = ("antigravity_cli", "claude_code_cli")
 PROBE_PROMPT = "Trả lời đúng một chữ: OK"
-# v0.1.38 (F-22) — LUẬT CỨNG, không phải tuỳ chọn: agy 1.2.9 không có cờ tắt công cụ đọc tệp/chạy lệnh, chạy cùng uid
-# với api/worker → nội dung của khách (sàng lọc tin, trực việc…) có thể điều khiển agy đọc bí mật. Chỉ lượt Gen của
-# Owner (gh.gen.engine truyền allow_agy=True) mới được dùng; mọi nơi khác mặc định bị từ chối.
-AGY_OWNER_ONLY_REASON = ("Antigravity CLI chỉ dùng cho Gen — trợ lý quản trị (Gen của Sếp). Sàng lọc tin và trực việc "
-                         "phải dùng nguồn khác (khoá API hoặc Claude Code CLI) — luật an toàn, không tắt được.")
-AGY_ADD_SOURCE = "Thêm khoá API hoặc Claude Code CLI — Antigravity CLI chỉ dùng cho Gen của Sếp"
-
-
-# Lỗi 503 khi chuỗi chỉ có agy (thử trò chuyện bước 8, dịch/soạn lại nháp…) — gh.errors.model_unavailable.
-AGY_ONLY_TITLE = ("Agent cần nguồn AI khác Antigravity CLI (chỉ dành cho Gen của Sếp) — thêm khoá API hoặc Claude Code "
-                  "CLI")
-# Web nhận diện qua đầu câu (apps/web/src/lib/friendlyError.ts::AGY_ONLY_TITLE_PREFIX/AGY_ONLY_MARK) — đổi thì đổi cả
-# hai (test_agy_only_web_markers_match_server). Không trỏ "Hướng dẫn bước 4": ở đó agy hiện "sẵn sàng" ⇒ Owner đi vòng.
-AGY_ONLY_HINT = ("Antigravity CLI chỉ dùng cho Gen của Sếp. Vào Agent & Model thêm khoá API hoặc Claude Code CLI rồi "
-                 "gán model đó cho agent này.")
-
-
-# Review: tiêu đề cảnh báo `model_chain_agy_only` theo việc gặp lỗi (Sếp biết sửa ở đâu); khác ⇒ câu chung.
-_AGY_ALERT_BY_PURPOSE = {
-    "refinery": "Sàng lọc tin chưa có nguồn AI phù hợp",
-    "gen.turn": "Gen của nhân viên (hoặc khi đọc nội dung bên ngoài) chưa có nguồn AI phù hợp",
-    "draft_translate": "Dịch bản nháp chưa có nguồn AI phù hợp",
-    "draft_regenerate": "Tạo lại bản nháp chưa có nguồn AI phù hợp",
-    "setup_agent_try": "Trò chuyện thử agent chưa có nguồn AI phù hợp",
-}
-AGY_ALERT_TITLE = "Việc AI cần nguồn khác Antigravity CLI (chỉ dành cho Gen của Sếp)"
-
-
-def agy_only_alert_title(agent_key: str, purpose: str) -> str:
-    for key, title in _AGY_ALERT_BY_PURPOSE.items():
-        if purpose == key or purpose.startswith(key + "."):
-            return title
-    if agent_key.startswith("agent:"):
-        return "Agent trực việc chưa có nguồn AI phù hợp"
-    return AGY_ALERT_TITLE
-
-
-def agy_only(reasons: list[str]) -> bool:
-    """Mọi lý do đều là luật owner-only của agy (F-22) — chuỗi model chỉ có Antigravity CLI."""
-    return bool(reasons) and all(r == AGY_OWNER_ONLY_REASON for r in reasons)
-
+# Lịch sử: v0.1.38 (F-22) từng giới hạn agy chỉ cho lượt Gen của Owner (`allow_agy`, `AGY_OWNER_ONLY_REASON`,
+# `agy_only`…). Owner chọn mở thẳng ngày 16/10/2026 sau khi được báo rủi ro ⇒ v0.1.62 gỡ toàn bộ (xem docstring module).
 PROBE_TIMEOUT_S = 90.0
 #: Số lượt gọi CLI tối đa của một lần "Kiểm tra kết nối" (kể cả lượt thử lại khi CLI đòi / không nhận mức suy nghĩ).
 PROBE_MAX_CALLS = 4
-#: Tự lành (v0.1.58): nguồn Antigravity CLI mất dòng model ⇒ lượt Gen của Owner tự kiểm tra kết nối — tối đa một lần
-#: / 10 phút / tổ chức. Việc nền KHÔNG BAO GIỜ kích hoạt (F-22/F-86).
+#: Tự lành (v0.1.58): nguồn Antigravity CLI mất dòng model ⇒ lượt gọi tự kiểm tra kết nối — tối đa một lần / 10 phút /
+#: tổ chức. v0.1.62: mọi vai kể cả việc nền đều kích hoạt được khi chuỗi rỗng (agy mở cho mọi vai).
 AGY_HEAL_KEY = "gh:agy_heal:{}"
 AGY_HEAL_TTL = 600
 #: Trần thời gian của lần kiểm tra kết nối tự lành (giây): treo quá hạn ⇒ lượt Gen đi tiếp đường cũ.
 AGY_HEAL_TIMEOUT = 60.0
 
-# ─── v0.1.41 (F-86): việc nền dùng khoá API ──────────────────────────────────
+# ─── v0.1.41 (F-86): việc nền — Claude Code CLI chỉ khi Owner cho phép ─────────
 
 #: Việc tự động không có Sếp ngồi trước màn hình (khớp gh/refinery/runner.py purpose="refinery",
 #: gh/biz/duty/engine.py PURPOSE="duty_decide", gh/gen/briefing.py). So khớp bằng nhau hoặc tiền tố "<p>.".
 BACKGROUND_PURPOSES = ("refinery", "duty_decide", "gen.briefing")
-#: CLI Owner được phép cho chạy việc nền (QD-12). agy KHÔNG BAO GIỜ (luật cứng F-22) — không có trong danh sách.
+#: CLI Owner được phép cho chạy việc nền (QD-12 — điều khoản gói Claude). Antigravity CLI không cần cho phép (v0.1.62:
+#: luôn chạy được việc nền) nên không có trong danh sách; giá trị lạ trong cài đặt bị bỏ.
 BACKGROUND_CLI_KINDS_ALLOWED = ("claude_code_cli",)
 BACKGROUND_CLI_REASON = ("Claude Code CLI (gói Pro/Max của Sếp) mặc định chỉ dùng khi Sếp hỏi Gen trực tiếp — việc nền "
-                         "dùng khoá API")
+                         "dùng khoá API hoặc Antigravity CLI")
 #: Nguồn sự thật DUY NHẤT cho câu cảnh báo trên UI (GET /providers/background → risk_text).
 BACKGROUND_CLI_RISK = ("Claude Code CLI dùng gói Claude Pro/Max cá nhân của Sếp. Cho nó chạy việc nền tự động "
                        "(sàng lọc tin, trực việc, bản tin) có thể trái điều khoản gói và tài khoản có thể bị hạn chế "
@@ -146,9 +116,9 @@ def is_background(purpose: str) -> bool:
 
 
 def background_cli_only(reasons: list[str]) -> bool:
-    """Việc nền hết chuỗi chỉ vì luật CLI (F-86/F-22) — chuỗi chỉ có CLI, chưa có khoá API dùng được."""
-    return (BACKGROUND_CLI_REASON in reasons
-            and all(r in (BACKGROUND_CLI_REASON, AGY_OWNER_ONLY_REASON) for r in reasons))
+    """Việc nền hết chuỗi chỉ vì luật Claude Code CLI (F-86) — chuỗi chỉ còn CLI đó, chưa có khoá API / Antigravity
+    CLI dùng được."""
+    return BACKGROUND_CLI_REASON in reasons and all(r == BACKGROUND_CLI_REASON for r in reasons)
 
 
 async def background_cli_allowed(db: AsyncSession, org_id: uuid.UUID) -> set[str]:
@@ -172,6 +142,18 @@ async def has_api_source(db: AsyncSession, org_id: uuid.UUID) -> bool:
         {"o": org_id, "k": list(API_KINDS)})).scalar_one())
 
 
+async def has_agy_source(db: AsyncSession, org_id: uuid.UUID) -> bool:
+    """v0.1.62 — có nguồn Antigravity CLI đang bật, có model (không phải embedding) bật: chạy được MỌI vai kể cả việc
+    nền
+    (không cần Owner cho phép như Claude Code CLI)."""
+    return bool((await db.execute(text("""
+        SELECT EXISTS (
+          SELECT 1 FROM agent.providers p
+          WHERE p.org_id = :o AND p.is_enabled AND p.kind = 'antigravity_cli'
+            AND EXISTS (SELECT 1 FROM agent.models m WHERE m.provider_id = p.id AND m.is_enabled
+                        AND m.model_name NOT ILIKE '%embedding%'))"""), {"o": org_id})).scalar_one())
+
+
 async def background_sources(db: AsyncSession, org_id: uuid.UUID) -> list[dict[str, Any]]:
     """Các nguồn theo thứ tự chuỗi, kèm việc nền có dùng được không và vì sao (mọi giá trị là chuỗi/bool/null — web
     không render object). Jev (`system_one`) và nguồn embedding không sinh văn bản ⇒ bỏ khỏi danh sách."""
@@ -188,9 +170,7 @@ async def background_sources(db: AsyncSession, org_id: uuid.UUID) -> list[dict[s
         reason: str | None = None
         if not r.is_enabled:
             reason = "Nguồn đang tắt"
-        elif r.kind == "antigravity_cli":
-            reason = AGY_OWNER_ONLY_REASON
-        elif r.kind in CLI_KINDS and r.kind not in allowed:
+        elif r.kind == "claude_code_cli" and r.kind not in allowed:
             reason = BACKGROUND_CLI_REASON
         elif r.kind not in CLI_KINDS and not r.has_key:
             reason = "Chưa có khoá API"
@@ -381,7 +361,8 @@ class ModelRouter:
            khi lượt gọi ép tầng;
         3. phần đuôi như cũ: model mặc định theo hạng của các nguồn còn lại/chưa dùng (để lỗi tầng đã chọn vẫn còn đường
            lui).
-        Luật F-22/F-86 KHÔNG lọc ở đây: `generate` bỏ qua nguồn bị cấm và ghi LÝ DO vào `attempts`/hết chuỗi.
+        Luật F-86 KHÔNG lọc ở đây: `generate` bỏ qua Claude Code CLI khi việc nền chưa được phép và ghi LÝ DO vào
+        `reasons`/hết chuỗi.
 
         Mỗi phần tử: {"provider", "model", "keys", "source": binding|default|profile|rank, "binding_effort"}."""
         bound = (await db.execute(text("""SELECT b.model_id, b.effort FROM agent.bindings b
@@ -403,10 +384,10 @@ class ModelRouter:
         prov_by_id = {p.id: p for p in providers}
         model_by_id = {m.id: m for m in models}
         forced = profiles.normalize_tier(tier)
-        # Chọn model theo hồ sơ cho MỌI nguồn (luật F-22/F-86 do `generate` áp — nên cho hồ sơ xét cả CLI/agy ở đây).
+        # Chọn model theo hồ sơ cho MỌI nguồn (luật F-86 của Claude Code CLI do `generate` áp — nên cho hồ sơ xét cả CLI
+        # ở đây).
         picked = {c["provider_id"]: c for c in profiles.resolve(
-            providers, models, agent_key, background=False, bg_cli_allowed={"claude_code_cli"}, allow_agy=True,
-            tier_override=tier)}
+            providers, models, agent_key, background=False, bg_cli_allowed={"claude_code_cli"}, tier_override=tier)}
         keys_cache: dict[Any, list[Any]] = {}
 
         async def keys_of(pid: Any) -> list[Any]:
@@ -535,25 +516,24 @@ class ModelRouter:
     # ─── gọi ─────────────────────────────────────────────────────────────────
 
     async def generate(self, org_id: uuid.UUID, *, agent_key: str, purpose: str, messages: list[Message],
-                       json_mode: bool = True, temperature: float = 0.2, allow_agy: bool = False,
+                       json_mode: bool = True, temperature: float = 0.2,
                        tier: str | None = None, effort: str | None = None) -> Routed:
-        """`allow_agy` (F-22): mặc định TỪ CHỐI Antigravity CLI — chỉ lượt Gen của Owner truyền True.
+        """v0.1.62: Antigravity CLI dùng được ở MỌI lượt gọi (không còn tham số `allow_agy` — Owner mở thẳng ngày
+        16/10/2026, xem docstring module).
 
         v0.1.41 (F-86): việc nền (`is_background(purpose)`) bỏ qua Claude Code CLI trừ khi Owner đã cho phép
-        (`background_cli_allowed`); agy không bao giờ chạy việc nền dù bên gọi truyền gì.
+        (`background_cli_allowed`) — điều khoản gói Claude, GIỮ NGUYÊN.
 
         v0.1.55 (G1): `tier` ('fast' | 'balanced' | 'strong'; chat gọi 'deep' = 'strong') ép tầng model của hồ sơ
-        tiêu chuẩn cho lượt này — vẫn tôn trọng allow_agy / F-22 / F-86 (việc nền KHÔNG BAO GIỜ agy, CLI chỉ khi được
-        phép). `effort` ép mức suy nghĩ; ưu tiên: tham số → `bindings.effort` → hồ sơ → `models.effort`, chỉ gửi khi
-        model hỗ trợ mức đó. Thiếu nguồn cho việc nền ⇒ giữ hành vi cũ (hết chuỗi → ModelUnavailable / bản tin để
-        trống), KHÔNG tự chuyển sang CLI."""
+        tiêu chuẩn cho lượt này — vẫn tôn trọng F-86 (Claude Code CLI chỉ khi được phép ở việc nền). `effort` ép mức
+        suy nghĩ; ưu tiên: tham số → `bindings.effort` → hồ sơ → `models.effort`, chỉ gửi khi model hỗ trợ mức đó. Thiếu
+        nguồn cho việc nền ⇒ giữ hành vi cũ (hết chuỗi → ModelUnavailable / bản tin để trống), KHÔNG tự chuyển sang
+        Claude Code CLI."""
         background = is_background(purpose)
-        if background:
-            allow_agy = False
         async with self.sm() as db:
             chain = await self._chain(db, org_id, agent_key, tier=tier)
             bg_cli = await background_cli_allowed(db, org_id) if background else set()
-        if allow_agy and agent_key == profiles.ROLE_GEN and not chain and await self._heal_agy(org_id):
+        if not chain and await self._heal_agy(org_id):
             async with self.sm() as db:
                 chain = await self._chain(db, org_id, agent_key, tier=tier)
         reasons: list[str] = []
@@ -568,10 +548,6 @@ class ModelRouter:
                 reason = f"{p.name}: đã lỗi ở lượt này — không thử lại model khác của cùng nguồn"
                 if reason not in reasons:
                     reasons.append(reason)
-                continue
-            if p.kind == "antigravity_cli" and not allow_agy:
-                if AGY_OWNER_ONLY_REASON not in reasons:
-                    reasons.append(AGY_OWNER_ONLY_REASON)
                 continue
             if background and p.kind == "claude_code_cli" and p.kind not in bg_cli:
                 if BACKGROUND_CLI_REASON not in reasons:
@@ -647,15 +623,14 @@ class ModelRouter:
                 if background:
                     await self._background_ok(org_id)
                 return Routed(c.text, p.name, m.model_name, c.tokens_in, c.tokens_out, reasons)
-        await self._chain_exhausted(org_id, reasons, agent_key=agent_key, purpose=purpose)
+        await self._chain_exhausted(org_id, reasons, purpose=purpose)
         raise ModelUnavailable(reasons, no_chain=not chain)
 
     async def _heal_agy(self, org_id: uuid.UUID) -> bool:
-        """v0.1.58 — tự lành, CHỈ gọi từ lượt Gen của Owner (`core.gen` + `allow_agy=True`; việc nền đã bị ép False ở
-        `generate` nên không bao giờ tới đây — F-22/F-86). Nguồn Antigravity CLI đang bật, có hồ sơ CLI đang dùng mà
-        0 dòng model (nên chuỗi không có agy) ⇒ "Kiểm tra kết nối" đúng MỘT lần (khoá Redis 10 phút) rồi lưu model vừa
-        chạy được.
-        Trả True khi đã thêm model (bên gọi dựng lại chuỗi). Lỗi chỉ ghi log — lượt Gen đi tiếp như cũ."""
+        """v0.1.58 — tự lành khi chuỗi rỗng; v0.1.62: mọi vai kể cả việc nền (agy mở cho mọi vai). Nguồn Antigravity CLI
+        đang bật, có hồ sơ CLI đang dùng mà 0 dòng model (nên chuỗi không có agy) ⇒ "Kiểm tra kết nối" đúng MỘT lần
+        (khoá Redis 10 phút) rồi lưu model vừa chạy được.
+        Trả True khi đã thêm model (bên gọi dựng lại chuỗi). Lỗi chỉ ghi log — lượt gọi đi tiếp như cũ."""
         try:
             async with self.sm() as db:
                 row = (await db.execute(text("""
@@ -730,8 +705,9 @@ class ModelRouter:
             return c
 
     async def _background_no_source(self, org_id: uuid.UUID) -> None:
-        """v0.1.41 (F-86): việc nền chỉ còn nguồn CLI ⇒ sự cố `ai.background_no_source` + MỘT chuông (raise_once không
-        dội chuông lần hai khi sự cố đang mở). Savepoint riêng như `_set_auth_state`: lỗi chuông chỉ ghi log."""
+        """v0.1.41 (F-86): việc nền chỉ còn Claude Code CLI chưa được phép ⇒ sự cố `ai.background_no_source` + MỘT
+        chuông (raise_once không dội chuông lần hai khi sự cố đang mở). Savepoint riêng như `_set_auth_state`: lỗi
+        chuông chỉ ghi log."""
         from gh import health, notifications
 
         async with self.sm() as db:
@@ -740,9 +716,10 @@ class ModelRouter:
                 async with db.begin_nested():
                     await health.raise_once(
                         db, org_id, key=BG_NO_SOURCE_KEY, kind=BG_NO_SOURCE_KEY, severity="warn",
-                        title="Việc nền (sàng lọc, trực việc, bản tin) chưa có khoá API",
-                        body=("Dán khoá OpenRouter hoặc Gemini ở API & Model (Thêm nhà cung cấp), hoặc cho phép "
-                              "Claude Code CLI chạy việc nền ở Bộ não AI (có cảnh báo điều khoản)."),
+                        title="Việc nền (sàng lọc, trực việc, bản tin) chưa có nguồn AI",
+                        body=("Dán khoá OpenRouter hoặc Gemini ở API & Model (Thêm nhà cung cấp), đăng nhập "
+                              "Antigravity CLI, hoặc cho phép Claude Code CLI chạy việc nền ở Bộ não AI (có cảnh báo "
+                              "điều khoản)."),
                         link="/system?tab=brain", redis=self.redis)
             except asyncio.CancelledError:
                 raise
@@ -769,24 +746,12 @@ class ModelRouter:
         except Exception:  # noqa: BLE001 — kết quả model đã có; đóng sự cố lỗi thì lượt sau thử lại
             log.warning("Không đóng được sự cố việc nền thiếu khoá API (%s)", org_id, exc_info=True)
 
-    async def _chain_exhausted(self, org_id: uuid.UUID, reasons: list[str], *, agent_key: str = "",
-                               purpose: str = "") -> None:
+    async def _chain_exhausted(self, org_id: uuid.UUID, reasons: list[str], *, purpose: str = "") -> None:
         if is_background(purpose) and background_cli_only(reasons):
             # v0.1.41 (F-86): sự cố sức khoẻ (dải "Cần Sếp xử lý" + chuông), KHÔNG dùng biz.alerts. Có ngưỡng: lô
             # sàng lọc / trực việc kế tiếp trong 10 phút không mở phiên DB thêm lần nữa.
             if await self.redis.set(BG_NO_SOURCE_TRY.format(org_id), "1", nx=True, ex=BG_NO_SOURCE_TRY_TTL):
                 await self._background_no_source(org_id)
-            return
-        if agy_only(reasons):
-            # Review F-22: chỉ có agy mà việc không phải Gen của Sếp ⇒ đăng nhập lại không giúp gì; cảnh báo riêng,
-            # P2, tối đa một lần / ngày (không dội chuông mỗi giờ).
-            if not await self.redis.set(f"gh:alert:chain_agy:{org_id}", "1", nx=True, ex=86400):
-                return
-            async with self.sm() as db:
-                await raise_alert(db, org_id, alert_type="model_chain_agy_only", priority="P2",
-                                  title=agy_only_alert_title(agent_key, purpose),
-                                  summary=AGY_OWNER_ONLY_REASON, suggested=AGY_ADD_SOURCE)
-                await db.commit()
             return
         if not await self.redis.set(f"gh:alert:chain:{org_id}", "1", nx=True, ex=3600):
             return

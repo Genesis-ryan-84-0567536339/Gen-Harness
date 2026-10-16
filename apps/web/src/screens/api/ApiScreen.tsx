@@ -5,14 +5,12 @@ import { ApiError, SCREEN_BY_KEY } from '@gen-harness/contracts';
 import { Button, Dialog, EmptyState, Icon, SelectField, Switch, TextField } from '@gen-harness/ui';
 import { useProviders } from '../../lib/dataQueries';
 import { errorDetail, errorReasons, errorText } from '../../lib/errorText';
-import { detailToText } from '../../lib/friendlyError';
 import { useCan } from '../../lib/permissions';
 import { toast } from '../../lib/toast';
 import { CardError, FriendlyErrorText, InlineError, Panel, PinHint, PIN_ROUTE_CHANGE_TITLE, ScreenHead, SkeletonLines, StateChip } from '../common';
 import { DefaultBadge } from '../../defaults/DefaultBadge';
 import { ModelPicker } from './ModelPicker';
 import { CliDiagnose } from '../system/CliDiagnose';
-import { AGY_SCOPE_TEXT } from '../system/systemModel';
 import {
   EFFORT_HINT,
   PROVIDER_ICON,
@@ -305,18 +303,6 @@ function BindingsPanel({ canManage }: { canManage: boolean }) {
                       <DefaultBadge customized={slot.source === 'custom'} testId={`binding-badge-${slot.agent_key}`} />
                     </span>
                   ) : null}
-                  {blockedReason(slot) ? (
-                    // v0.1.38 (F-22): API báo agent này bỏ qua model đang gán (agy chỉ cho Gen của Sếp). Chữ hiện thẳng
-                    // dưới dòng (không chỉ tooltip — màn hình cảm ứng không xem được `title`), kèm việc cần làm.
-                    <>
-                      <span title={blockedReason(slot) ?? undefined} data-testid={`binding-blocked-${slot.agent_key}`} style={{ marginLeft: 6 }}>
-                        <StateChip color="var(--color-warn)">Chỉ cho Gen</StateChip>
-                      </span>
-                      <p className="muted-note" data-testid={`binding-blocked-hint-${slot.agent_key}`} style={{ margin: '4px 0 0' }}>
-                        {canManage ? BLOCKED_HINT : BLOCKED_HINT_READONLY}
-                      </p>
-                    </>
-                  ) : null}
                 </td>
                 <td className="mono" data-testid={`binding-effort-${slot.agent_key}`}>
                   {bindingEffortText(slot)}
@@ -336,34 +322,12 @@ function BindingsPanel({ canManage }: { canManage: boolean }) {
   );
 }
 
-/** Khoá agent Gen của Sếp — khoá duy nhất được dùng model của Antigravity CLI (v0.1.38, F-22). */
-const GEN_AGENT_KEY = 'core.gen';
-/** Câu hiện dưới dòng gán model bị bỏ qua (review F-22): agent vẫn chạy bằng nguồn khác trong chuỗi nếu có. */
-const BLOCKED_HINT = 'Model này chỉ cho Gen — agent này bỏ qua nó. Chọn model khác hoặc bỏ gán.';
-/** Vai trò chỉ xem (không có nút đổi/bỏ gán) — nói việc họ làm được. */
-const BLOCKED_HINT_READONLY = 'Model này chỉ cho Gen — agent này bỏ qua nó. Báo Sếp đổi model.';
-
 /**
- * `binding.blocked_reason` của slot dưới dạng chuỗi an toàn (máy chủ cũ không có trường này → null). Máy chủ đặt trường
- * này TRONG `binding` (gh/agents_api/routes.py::_binding_out) — đọc ở cấp slot thì nhãn không bao giờ hiện (F-22).
- */
-function blockedReason(slot: AgentBindingSlot): string | null {
-  const r: unknown = slot.binding?.blocked_reason;
-  if (r == null) return null;
-  const t = detailToText(r).trim();
-  return t || null;
-}
-
-/**
- * v0.1.38 (F-22): lỗi khi lưu gán model — câu thân thiện (title của ApiError) + phần mã/lý do để trong "Chi tiết kỹ
- * thuật". Luôn trả chuỗi (không bao giờ đưa đối tượng vào JSX).
+ * Lỗi khi lưu gán model — câu thân thiện (title của ApiError) + phần mã/lý do để trong "Chi tiết kỹ thuật". Luôn trả
+ * chuỗi (không bao giờ đưa đối tượng vào JSX). v0.1.62: model của Antigravity CLI gán được cho MỌI khoá (không còn
+ * lỗi 409 AGY_OWNER_GEN_ONLY).
  */
 function bindingErrorView(e: unknown): { message: string; detail: string | null } {
-  if (e instanceof ApiError && e.code === 'AGY_OWNER_GEN_ONLY') {
-    const title = typeof e.problem.title === 'string' && e.problem.title.trim() ? e.problem.title.trim() : `Model của Antigravity CLI ${AGY_SCOPE_TEXT.charAt(0).toLowerCase()}${AGY_SCOPE_TEXT.slice(1)}`;
-    const extra = [errorReasons(e), detailToText(e.problem.detail)].filter((x): x is string => !!x && x !== title);
-    return { message: title, detail: [`${e.status} ${e.code}`, ...extra].join(' · ') };
-  }
   const message = errorText(e);
   const reasons = errorReasons(e);
   const code = e instanceof ApiError ? `${e.status} ${e.code}` : null;
@@ -381,17 +345,11 @@ function RemoveBindingButton({ agentKey }: { agentKey: string }) {
 function BindingEditDialog({ slot, models, onClose }: { slot: AgentBindingSlot; models: BindableModel[]; onClose: () => void }) {
   const set = useSetBinding();
   const providers = useProviders();
-  // v0.1.38 (F-22): model thuộc nguồn Antigravity CLI — chỉ dùng cho Gen của Sếp. Ô chọn chỉ làm mờ + chú thích;
-  // API (409 AGY_OWNER_GEN_ONLY) mới là chốt chặn cuối.
-  const agyIds = new Set((providers.data ?? []).filter((p) => p.kind === 'antigravity_cli').flatMap((p) => p.models.map((m) => m.id)));
-  const agyOnly = (m: BindableModel) => slot.agent_key !== GEN_AGENT_KEY && agyIds.has(m.id);
-  // Review F-22: slot chưa gán (khác core.gen) mặc định chọn model đầu tiên KHÔNG phải agy — API xếp model theo tên nhà
-  // cung cấp nên "Antigravity CLI" thường đứng đầu, chọn sẵn nó thì bấm Lưu là gặp 409. Tính lại mỗi lần vẽ (danh sách
-  // nhà cung cấp có thể tới sau) cho tới khi Sếp tự chọn.
   // v0.1.55: slot chưa gán chọn sẵn đúng model hồ sơ chuẩn đang phủ (nếu có trong danh sách), rồi mới tới model đầu tiên.
+  // v0.1.62: model Antigravity CLI chọn được ở MỌI dòng (kể cả sàng lọc, Bản tin, agent tự tạo) — không lọc, không làm mờ.
   const std = slot.standard;
-  const standardId = std ? models.find((m) => m.model_name === std.model_name && m.provider_name === std.provider_name && !agyOnly(m))?.id : undefined;
-  const preferred = slot.binding?.model_id ?? standardId ?? (models.find((m) => !agyOnly(m)) ?? models[0])?.id ?? '';
+  const standardId = std ? models.find((m) => m.model_name === std.model_name && m.provider_name === std.provider_name)?.id : undefined;
+  const preferred = slot.binding?.model_id ?? standardId ?? models[0]?.id ?? '';
   const [picked, setPicked] = useState<string | null>(null);
   const modelId = picked ?? preferred;
   const setModelId = setPicked;
@@ -458,16 +416,11 @@ function BindingEditDialog({ slot, models, onClose }: { slot: AgentBindingSlot; 
             </label>
             <select id="apm-binding-model" className="gh-input" value={modelId} onChange={(e) => setModelId(e.target.value)}>
               {models.map((m) => (
-                <option key={m.id} value={m.id} style={agyOnly(m) ? { color: 'var(--color-neutral-500)' } : undefined}>
-                  {`${m.provider_name} · ${m.model_name}${m.enabled ? '' : ' (đã tắt)'}${agyOnly(m) ? ' — chỉ cho Gen' : ''}`}
+                <option key={m.id} value={m.id}>
+                  {`${m.provider_name} · ${m.model_name}${m.enabled ? '' : ' (đã tắt)'}`}
                 </option>
               ))}
             </select>
-            {models.some(agyOnly) ? (
-              <p className="muted-note" data-testid="binding-agy-note" style={models.some((m) => m.id === modelId && agyOnly(m)) ? { color: 'var(--color-warn)' } : undefined}>
-                Model Antigravity CLI (ghi “chỉ cho Gen”): {AGY_SCOPE_TEXT}
-              </p>
-            ) : null}
           </div>
         )}
         {efforts.length ? (

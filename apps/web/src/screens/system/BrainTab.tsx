@@ -218,7 +218,7 @@ export function BrainTabBody() {
         </div>
       </div>
 
-      {/* v0.1.41 (F-86, F-84): nguồn AI cho việc nền (khoá API mặc định; Claude Code CLI cần cảnh báo + PIN) và chi phí. */}
+      {/* v0.1.41 (F-86, F-84): nguồn AI cho việc nền (khoá API và Antigravity CLI; Claude Code CLI cần cảnh báo + PIN) và chi phí. */}
       <div className="sys-grid2">
         <BackgroundSourcesCard />
         <AiBudgetCard />

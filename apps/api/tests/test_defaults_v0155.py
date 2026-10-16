@@ -4,7 +4,8 @@
 (b) reset từng mục xoá đúng khoá/dòng + MỘT dòng Action Log 'defaults.reset' không chứa giá trị cài đặt;
 (c) reset-all cần PIN (423), có PIN thì KHÔNG đổi khoá API, mã PIN, Gen-hub, kênh báo động, tài khoản mạng xã hội;
 (d) apply-standard chỉ xoá các dòng gán lõi;
-(e) ma trận `profiles.resolve` (thuần): việc nền không agy, CLI chỉ khi được phép, đúng tầng, haiku không effort;
+(e) ma trận `profiles.resolve` (thuần): agy dùng được ở MỌI vai kể cả việc nền (v0.1.62), Claude CLI chỉ khi được
+    phép, đúng tầng, haiku không effort;
 (f) `_chain`: dòng gán thắng hồ sơ, hồ sơ thắng hạng; mức suy nghĩ theo thứ tự ưu tiên;
 (g) migration 0034 chạy hai lần không đổi dòng gán/settings cũ; bản cài cũ ⇒ 'Đã tuỳ chỉnh' + gợi ý apply_standard.
 """
@@ -475,10 +476,9 @@ def rows_of(*names: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
 
 
 def picks(names: tuple[str, ...], role: str, *, background: bool = False, bg_cli: set[str] | None = None,
-          agy: bool = False, tier: str | None = None) -> list[tuple[str, str, str | None]]:
+          tier: str | None = None) -> list[tuple[str, str, str | None]]:
     p, m = rows_of(*names)
-    got = profiles.resolve(p, m, role, background=background, bg_cli_allowed=bg_cli or set(), allow_agy=agy,
-                           tier_override=tier)
+    got = profiles.resolve(p, m, role, background=background, bg_cli_allowed=bg_cli or set(), tier_override=tier)
     return [(c["provider_kind"], c["model_name"], c["effort"]) for c in got]
 
 
@@ -490,19 +490,20 @@ SETS = [("claude",), ("agy",), ("api",), ("claude", "agy", "api"), ("agy", "api"
 @pytest.mark.parametrize("names", SETS)
 @pytest.mark.parametrize("bg_cli", [set(), {CLAUDE}])
 @pytest.mark.parametrize("background", [True, False])
-@pytest.mark.parametrize("allow_agy", [True, False])
-def test_background_roles_never_agy_and_cli_only_when_allowed(role: str, names: tuple[str, ...], bg_cli: set[str],
-                                                              background: bool, allow_agy: bool) -> None:
-    got = picks(names, role, background=background, bg_cli=bg_cli, agy=allow_agy)
+def test_background_roles_use_agy_and_claude_only_when_allowed(role: str, names: tuple[str, ...], bg_cli: set[str],
+                                                               background: bool) -> None:
+    got = picks(names, role, background=background, bg_cli=bg_cli)
     kinds = [k for k, _m, _e in got]
-    assert AGY not in kinds                                       # F-22: agy KHÔNG BAO GIỜ chạy việc nền
+    assert (AGY in kinds) == ("agy" in names)                     # v0.1.62: agy chạy được việc nền, không cần cho phép
     assert (CLAUDE in kinds) == ("claude" in names and CLAUDE in bg_cli)        # F-86: CLI chỉ khi Owner cho phép
-    assert (API in kinds) == ("api" in names)                     # thiếu nguồn khoá API ⇒ KHÔNG tự chuyển sang CLI
+    assert (API in kinds) == ("api" in names)                     # thiếu khoá API ⇒ KHÔNG tự chuyển sang Claude CLI
     if "api" in names:
         want = "g/flash-lite" if role != "agent:7" else "g/flash"
         assert (API, want, None) in got
+    if "agy" in names:      # agy không có model tầng "nhanh" ⇒ tầng gần nhất (flash), gửi mức rõ ràng "low"
+        assert (AGY, "gemini-3.8-flash", "low") in got
     if names == ("agy",):
-        assert got == []
+        assert got == [(AGY, "gemini-3.8-flash", "low")]
 
 
 def test_background_tiers_on_claude_cli_when_allowed() -> None:
@@ -514,17 +515,17 @@ def test_background_tiers_on_claude_cli_when_allowed() -> None:
 def test_gen_picks_the_right_tier_and_effort_per_source() -> None:
     assert picks(("claude",), "core.gen") == [(CLAUDE, "sonnet", "medium")]
     assert picks(("api",), "core.gen") == [(API, "g/flash", None)]                              # khoá API: không effort
-    assert picks(("agy",), "core.gen", agy=True) == [(AGY, "gemini-3.8-flash", "medium")]       # agy flash = balanced
-    assert picks(("agy",), "core.gen", agy=False) == []                                  # không phải Gen của Owner
-    assert picks(("claude", "agy", "api"), "core.gen", agy=True) == [
+    assert picks(("agy",), "core.gen") == [(AGY, "gemini-3.8-flash", "medium")]                 # agy flash = balanced
+    assert picks(("claude", "agy", "api"), "core.gen") == [
         (CLAUDE, "sonnet", "medium"), (AGY, "gemini-3.8-flash", "medium"), (API, "g/flash", None)]
-    # Việc nền hay không, Gen vẫn là Gen: cờ `background` của lượt gọi mới quyết định (vai core.gen không phải vai nền).
-    assert picks(("agy", "api"), "core.gen", background=True, agy=True) == [(API, "g/flash", None)]
+    # Cờ `background` của lượt gọi chỉ chặn Claude CLI chưa được phép; agy vẫn chạy (v0.1.62).
+    assert picks(("claude", "agy", "api"), "core.gen", background=True) == [
+        (AGY, "gemini-3.8-flash", "medium"), (API, "g/flash", None)]
 
 
-def test_reply_never_agy_and_low_effort_on_cli() -> None:
-    assert picks(("claude", "agy", "api"), "core.reply", agy=True) == [
-        (CLAUDE, "sonnet", "low"), (API, "g/flash", None)]
+def test_reply_uses_agy_with_low_effort_on_cli() -> None:
+    assert picks(("claude", "agy", "api"), "core.reply") == [
+        (CLAUDE, "sonnet", "low"), (AGY, "gemini-3.8-flash", "low"), (API, "g/flash", None)]
 
 
 def test_tier_override_forces_the_tier_but_keeps_the_rules() -> None:
@@ -532,8 +533,10 @@ def test_tier_override_forces_the_tier_but_keeps_the_rules() -> None:
     assert picks(("claude",), "core.gen", tier="fast") == [(CLAUDE, "haiku", None)]
     assert picks(("api",), "core.gen", tier="strong") == [(API, "g/pro", None)]
     # gemini-3.1-pro của agy chỉ nhận low/high ⇒ mức "medium" của hồ sơ bị bỏ.
-    assert picks(("agy",), "core.gen", agy=True, tier="strong") == [(AGY, "gemini-3.1-pro", None)]
-    assert picks(("agy", "api"), "core.refinery", bg_cli=set(), agy=True, tier="strong") == [(API, "g/pro", None)]
+    assert picks(("agy",), "core.gen", tier="strong") == [(AGY, "gemini-3.1-pro", None)]
+    # Sàng lọc (việc nền) ép tầng mạnh: agy chạy được (mức "low" của hồ sơ pro nhận), Claude CLI thì không.
+    assert picks(("claude", "agy", "api"), "core.refinery", bg_cli=set(), tier="strong") == [
+        (AGY, "gemini-3.1-pro", "low"), (API, "g/pro", None)]
     assert picks(("claude",), "core.refinery", tier="strong") == []                            # CLI chưa được phép nền
     assert picks(("api",), "core.gen", tier="auto") == [(API, "g/flash", None)]
 
@@ -542,8 +545,7 @@ def test_missing_tier_uses_nearest_and_never_invents_models() -> None:
     def api_only(models: list[str], role: str = "core.refinery") -> list[str]:
         p = [{"id": "x", "kind": API, "name": "X", "failover_rank": 1}]
         m = [{"id": f"m{i}", "provider_id": "x", "model_name": n, "is_enabled": True} for i, n in enumerate(models)]
-        return [c["model_name"] for c in profiles.resolve(p, m, role, background=True, bg_cli_allowed=set(),
-                                                           allow_agy=False)]
+        return [c["model_name"] for c in profiles.resolve(p, m, role, background=True, bg_cli_allowed=set())]
     assert api_only(["a/pro"]) == ["a/pro"]                       # thiếu nhanh ⇒ lấy tầng gần nhất (duy nhất)
     assert api_only(["a/pro", "a/flash"]) == ["a/flash"]          # nhanh thiếu ⇒ gần nhất là balanced
     assert api_only(["a/pro", "a/flash-lite"], "core.reply") == ["a/flash-lite"]   # hoà khoảng cách ⇒ tầng rẻ hơn
@@ -556,21 +558,21 @@ def test_disabled_embedding_nokey_and_unknown_roles_are_skipped() -> None:
     for row in m:
         row["is_enabled"] = row["model_name"] != "g/flash"
     m.append({"id": "e", "provider_id": "p-api", "model_name": "text-embedding-3", "is_enabled": True})
-    got = profiles.resolve(p, m, "core.gen", background=False, bg_cli_allowed=set(), allow_agy=False)
+    got = profiles.resolve(p, m, "core.gen", background=False, bg_cli_allowed=set())
     assert [c["model_name"] for c in got] == ["g/flash-lite"]     # flash tắt ⇒ gần nhất (tie ⇒ rẻ hơn); embedding bị bỏ
-    assert profiles.resolve([{**p[0], "has_key": False}], m, "core.gen", background=False, bg_cli_allowed=set(),
-                            allow_agy=False) == []
-    assert profiles.resolve([{**p[0], "is_enabled": False}], m, "core.gen", background=False, bg_cli_allowed=set(),
-                            allow_agy=False) == []
-    assert profiles.resolve(p, m, "core.embedding", background=False, bg_cli_allowed=set(), allow_agy=False) == []
+    assert profiles.resolve([{**p[0], "has_key": False}], m, "core.gen", background=False,
+                            bg_cli_allowed=set()) == []
+    assert profiles.resolve([{**p[0], "is_enabled": False}], m, "core.gen", background=False,
+                            bg_cli_allowed=set()) == []
+    assert profiles.resolve(p, m, "core.embedding", background=False, bg_cli_allowed=set()) == []
     assert profiles.resolve([{"id": "j", "kind": "system_one", "name": "Jev"}], m, "core.gen", background=False,
-                            bg_cli_allowed=set(), allow_agy=False) == []
+                            bg_cli_allowed=set()) == []
 
 
 def test_resolve_orders_by_failover_rank() -> None:
     p, m = rows_of("claude", "api")
     p[0]["failover_rank"], p[1]["failover_rank"] = 5, 1
-    got = profiles.resolve(p, m, "core.gen", background=False, bg_cli_allowed=set(), allow_agy=False)
+    got = profiles.resolve(p, m, "core.gen", background=False, bg_cli_allowed=set())
     assert [c["provider_kind"] for c in got] == [API, CLAUDE]
 
 
@@ -585,36 +587,33 @@ def reason_of(names: tuple[str, ...], role: str, *, with_models: bool = True, bg
     return profiles.missing_reason(p, m, role, bg_cli or set())
 
 
-def test_missing_reason_only_agy_with_model_gives_gen_a_candidate_and_others_a_key_reason() -> None:
-    assert picks(("agy",), "core.gen", agy=True) == [(AGY, "gemini-3.8-flash", "medium")]      # Gen có ứng viên
-    for role in ("core.briefing", "core.refinery", "agent:7"):
-        assert picks(("agy",), role) == []
-        assert reason_of(("agy",), role) == "cần khoá API (Antigravity chỉ dùng cho Gen)"
-    assert reason_of(("agy",), "core.reply") == "cần khoá API hoặc Claude Code CLI"
-    for role in ("core.briefing", "core.refinery", "core.reply", "agent:7"):
-        assert "cần khoá API" in reason_of(("agy",), role)
+def test_only_agy_with_model_gives_every_role_a_candidate() -> None:
+    """v0.1.62: chỉ có agy (có model) ⇒ MỌI vai có ứng viên, hết lý do "cần khoá API (Antigravity chỉ dùng cho Gen)"."""
+    for role in ("core.gen", "core.briefing", "core.refinery", "core.reply", "agent:7"):
+        assert picks(("agy",), role) == [(AGY, "gemini-3.8-flash", "medium" if role == "core.gen" else "low")], role
 
 
 def test_missing_reason_agy_without_model_points_at_the_test_button() -> None:
-    assert reason_of(("agy",), "core.gen", with_models=False) == "chưa có model — bấm Kiểm tra kết nối ở Agy"
-    # Vai nền: agy không được dùng ⇒ lý do là khoá API, KHÔNG bảo bấm Kiểm tra ở agy.
-    assert reason_of(("agy",), "core.refinery", with_models=False) == "cần khoá API (Antigravity chỉ dùng cho Gen)"
+    # Mọi vai (kể cả vai nền): agy được dùng nhưng 0 model ⇒ bảo bấm Kiểm tra kết nối ở nguồn đó (đường tự sửa của Sếp).
+    for role in ("core.gen", "core.refinery", "core.briefing", "core.reply", "agent:7"):
+        assert reason_of(("agy",), role, with_models=False) == "chưa có model — bấm Kiểm tra kết nối ở Agy", role
 
 
 def test_missing_reason_source_allowed_but_empty_and_fallback() -> None:
     # Có khoá API mà 0 model ⇒ nguồn được phép nhưng chưa có model.
     # Nguồn khoá API 0 model: "Kiểm tra kết nối" chỉ tự thêm model cho CLI ⇒ bảo chọn model, không bảo bấm kiểm tra.
     assert reason_of(("api",), "core.refinery", with_models=False) == "chưa chọn model ở Api"
-    # Claude CLI chưa được cho chạy việc nền ⇒ vẫn là chuyện khoá API; core.reply dùng được Claude CLI.
-    assert reason_of(("claude",), "core.briefing") == "cần khoá API (Antigravity chỉ dùng cho Gen)"
+    # Claude CLI chưa được cho chạy việc nền ⇒ cần khoá API hoặc Antigravity CLI; core.reply dùng được Claude CLI.
+    assert reason_of(("claude",), "core.briefing") == "cần khoá API hoặc đăng nhập Antigravity CLI"
+    assert profiles.REASON_NEED_API == "cần khoá API hoặc đăng nhập Antigravity CLI"
     assert reason_of(("claude",), "core.reply", with_models=False) == "chưa có model — bấm Kiểm tra kết nối ở Claude"
     # Nguồn khoá API không có khoá thì không "được phép".
-    assert reason_of(("api",), "core.reply", no_key=True) == "cần khoá API hoặc Claude Code CLI"
+    assert reason_of(("api",), "core.reply", no_key=True) == "cần khoá API, Antigravity CLI hoặc Claude Code CLI"
     # Không nguồn nào / vai lạ ⇒ câu cũ.
     assert reason_of((), "core.gen") == "chưa có nguồn phù hợp"
     assert profiles.missing_reason([], [], "core.embedding", set()) == "chưa có nguồn phù hợp"
     assert profiles.standard_text(None) == "Chuẩn: chưa có nguồn phù hợp"
-    why = "cần khoá API hoặc Claude Code CLI"
+    why = "cần khoá API, Antigravity CLI hoặc Claude Code CLI"
     assert profiles.standard_text(None, why) == f"Chuẩn: {why}"
     assert profiles.standard_text({"model_name": "gemini-3.8-flash"}, "bỏ qua") == "Chuẩn: gemini-3.8-flash (tự chọn)"
 
@@ -637,9 +636,9 @@ def test_tier_of_and_effort_rules() -> None:
 async def test_choice_options_contract(dapi: Api, db: Any) -> None:
     org = await org_id(db)
 
-    async def opts(owner: bool = True, tainted: bool = False) -> dict[str, dict[str, Any]]:
+    async def opts() -> dict[str, dict[str, Any]]:
         async with sessionmaker()() as s:
-            out = await profiles.choice_options(s, org, owner=owner, tainted=tainted)
+            out = await profiles.choice_options(s, org)
         assert [t["tier"] for t in out["tiers"]] == ["auto", "fast", "balanced", "deep"]
         return {t["tier"]: t for t in out["tiers"]}
 
@@ -650,11 +649,10 @@ async def test_choice_options_contract(dapi: Api, db: Any) -> None:
     assert mixed["auto"]["available"] and not mixed["fast"]["available"]
     assert mixed["balanced"] == {"tier": "balanced", "available": True, "efforts": ["low", "medium", "high"]}
     assert mixed["deep"] == {"tier": "deep", "available": True, "efforts": ["low", "high"]}
-    for owner, tainted in ((False, False), (True, True), (False, True)):   # tầng chỉ có agy ⇒ không phục vụ được
-        got = await opts(owner, tainted)
-        assert not any(t["available"] for t in got.values()), (owner, tainted)
+    # v0.1.62: tầng chỉ có agy phục vụ được cho MỌI người hỏi (hàm không còn nhận owner / tainted).
+    assert mixed["balanced"]["available"] and mixed["deep"]["available"]
     await add_source(db, org, CLAUDE, "Claude", 2, ["haiku", "sonnet", "opus"])
-    got = await opts(False, False)
+    got = await opts()
     assert got["fast"] == {"tier": "fast", "available": True, "efforts": []}                    # haiku không có effort
     assert got["balanced"]["efforts"] == ["low", "medium", "high"] and got["deep"]["available"]
     # Nguồn khoá API chưa có khoá ⇒ không dùng được; có khoá thì phục vụ được, không có mức suy nghĩ.
@@ -667,7 +665,7 @@ async def test_choice_options_contract(dapi: Api, db: Any) -> None:
                              VALUES (:p, 'K', :s, 'aaaa', 0)"""),
                      {"p": pid, "s": crypto.encrypt(b"sk-alpha-aaaa", KEY_AAD)})
     await db.commit()
-    api_only = await opts(False, True)
+    api_only = await opts()
     assert api_only["balanced"] == {"tier": "balanced", "available": True, "efforts": []}
     assert api_only["auto"]["available"] and not api_only["deep"]["available"]
 
@@ -871,17 +869,30 @@ async def test_profile_effort_rejected_by_cli_is_retried_without_it(app: Any, db
     assert cli2.calls == [("sonnet", "high")]
 
 
-async def test_background_without_api_source_keeps_old_behaviour(app: Any, db: Any, redis: Any) -> None:
+async def test_background_without_api_or_agy_source_keeps_old_behaviour(app: Any, db: Any, redis: Any) -> None:
     org = await org_id(db)
     await add_source(db, org, CLAUDE, "Claude CLI", 1, ["sonnet", "haiku"])
-    await add_source(db, org, AGY, "Agy", 2, ["gemini-3.8-flash"])
+    cli = EffortCli()
+    r = router_for(redis, claude=cli)
+    for key, purpose in (("core.briefing", "gen.briefing"), ("core.refinery", "refinery"), ("agent:1", "duty_decide")):
+        with pytest.raises(ModelUnavailable) as e:
+            await r.generate(org, agent_key=key, purpose=purpose, messages=MSGS, tier="fast")
+        assert e.value.reasons                                  # hết chuỗi như cũ, KHÔNG tự chuyển sang Claude CLI
+    assert cli.calls == []
+
+
+async def test_background_with_agy_runs_on_agy_with_profile_effort(app: Any, db: Any, redis: Any) -> None:
+    """v0.1.62: có Antigravity CLI ⇒ việc nền chạy bằng agy (hồ sơ: tầng gần "nhanh" nhất = flash, mức "low");
+    Claude CLI chưa được cho phép nên không bị gọi."""
+    org = await org_id(db)
+    await add_source(db, org, CLAUDE, "Claude CLI", 1, ["sonnet", "haiku"])
+    await add_source(db, org, AGY, "Agy", 2, ["gemini-3.8-flash", "gemini-3.1-pro"])
     cli, agy = EffortCli(), EffortCli()
     r = router_for(redis, claude=cli, agy=agy)
     for key, purpose in (("core.briefing", "gen.briefing"), ("core.refinery", "refinery"), ("agent:1", "duty_decide")):
-        with pytest.raises(ModelUnavailable) as e:
-            await r.generate(org, agent_key=key, purpose=purpose, messages=MSGS, tier="fast", allow_agy=True)
-        assert e.value.reasons                                  # hết chuỗi như cũ, KHÔNG tự chuyển sang CLI
-    assert cli.calls == [] and agy.calls == []
+        out = await r.generate(org, agent_key=key, purpose=purpose, messages=MSGS, tier="fast")
+        assert out.text == "cli-ok", key
+    assert cli.calls == [] and agy.calls == [("gemini-3.8-flash", "low")] * 3
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════════════

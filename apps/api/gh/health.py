@@ -950,14 +950,16 @@ async def _eval_budget(db: AsyncSession, org_id: uuid.UUID, redis: Any, now: dat
 
 
 async def _eval_background_source(db: AsyncSession, org_id: uuid.UUID, redis: Any) -> None:
-    """v0.1.41 (F-86): sự cố `ai.background_no_source` đang mở mà Sếp đã thêm khoá API (có model) hoặc đã cho Claude
-    Code CLI chạy việc nền ⇒ đóng ngay, không đợi một lượt việc nền chạy được (refinery rảnh / trực việc tắt thì có
-    thể tới bản tin kế tiếp mới có lượt). Chỉ truy vấn nguồn khi sự cố đang mở."""
+    """v0.1.41 (F-86): sự cố `ai.background_no_source` đang mở mà Sếp đã thêm khoá API (có model), đăng nhập Antigravity
+    CLI (có model; v0.1.62 — chạy được việc nền) hoặc đã cho Claude Code CLI chạy việc nền ⇒ đóng ngay, không đợi một
+    lượt việc nền chạy được (refinery rảnh / trực việc tắt thì có thể tới bản tin kế tiếp mới có lượt). Chỉ truy vấn
+    nguồn khi sự cố đang mở."""
     from gh.providers.router import (
         BG_NO_SOURCE_FLAG,
         BG_NO_SOURCE_KEY,
         BG_NO_SOURCE_TRY,
         background_cli_allowed,
+        has_agy_source,
         has_api_source,
     )
 
@@ -966,7 +968,8 @@ async def _eval_background_source(db: AsyncSession, org_id: uuid.UUID, redis: An
                               {"o": org_id, "k": BG_NO_SOURCE_KEY})).first()
     if open_ is None:
         return
-    if await has_api_source(db, org_id) or await background_cli_allowed(db, org_id):
+    if (await has_api_source(db, org_id) or await has_agy_source(db, org_id)
+            or await background_cli_allowed(db, org_id)):
         await clear(db, org_id, BG_NO_SOURCE_KEY)
         await redis.delete(BG_NO_SOURCE_FLAG.format(org_id), BG_NO_SOURCE_TRY.format(org_id))
 

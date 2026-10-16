@@ -438,12 +438,14 @@ async def _background_payload(db: AsyncSession, org_id: uuid.UUID) -> dict[str, 
     return {"allow_cli": allow, "accepted_at": str(accepted) if accepted else None,
             "risk_text": mrouter.BACKGROUND_CLI_RISK, "purposes": list(mrouter.BACKGROUND_PURPOSE_LABELS),
             "has_api_source": await mrouter.has_api_source(db, org_id),
+            "has_agy_source": await mrouter.has_agy_source(db, org_id),
             "sources": await mrouter.background_sources(db, org_id)}
 
 
 @router.get("/providers/background")
 async def get_background(user: service.CurrentUser = Depends(READ), db: AsyncSession = DB) -> dict[str, Any]:
-    """Nguồn AI cho việc nền (sàng lọc tin, trực việc, Bản tin Gen): mặc định chỉ khoá API."""
+    """Nguồn AI cho việc nền (sàng lọc tin, trực việc, Bản tin Gen): khoá API và Antigravity CLI; Claude Code CLI chỉ
+    khi Owner cho phép."""
     return await _background_payload(db, user.org_id)
 
 
@@ -455,13 +457,14 @@ class BackgroundIn(BaseModel):
 @router.put("/providers/background")
 async def put_background(body: BackgroundIn, user: service.CurrentUser = Depends(require_owner),
                          db: AsyncSession = DB) -> dict[str, Any]:
-    """Cho / thôi cho Claude Code CLI chạy việc nền — quyền và rủi ro của Owner (QD-12).
+    """Cho / thôi cho Claude Code CLI chạy việc nền — quyền và rủi ro của Owner (QD-12, điều khoản gói Claude).
 
-    Thứ tự kiểm: Owner (403) → agy không bao giờ (422 errors.allow_cli, luật cứng F-22) → THÊM CLI cần phiên PIN
-    `ai.background_cli` (423, kiểm trong hàm — bỏ CLI không cần PIN) rồi tích xác nhận (422 errors.accept_risk).
-    Thu hẹp (bỏ CLI) không cần PIN/xác nhận."""
+    Thứ tự kiểm: Owner (403) → agy không cần cho phép (422 errors.allow_cli — v0.1.62: Antigravity CLI luôn chạy được
+    việc nền, nên không có công tắc) → THÊM CLI cần phiên PIN `ai.background_cli` (423, kiểm trong hàm — bỏ CLI không
+    cần PIN) rồi tích xác nhận (422 errors.accept_risk). Thu hẹp (bỏ CLI) không cần PIN/xác nhận."""
     if "antigravity_cli" in body.allow_cli:
-        raise field_errors({"allow_cli": mrouter.AGY_OWNER_ONLY_REASON})
+        raise field_errors({"allow_cli": "Antigravity CLI luôn chạy được việc nền — không cần cho phép (chỉ Claude "
+                                         "Code CLI cần Sếp cho phép)"})
     new = sorted(set(body.allow_cli))
     current = await mrouter.background_cli_allowed(db, user.org_id)
     adding = set(new) - current

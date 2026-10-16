@@ -243,11 +243,11 @@ export function cliChip(active: CliProfile | undefined): { label: string; tone: 
 }
 
 /**
- * v0.1.38 (F-22): luật cứng — model của Antigravity CLI chỉ dùng cho Gen của Sếp (API từ chối gán cho khoá khác
- * `core.gen`, mã 409 AGY_OWNER_GEN_ONLY). Câu dùng chung cho thẻ CLI, bước thiết lập và ô chọn model.
+ * v0.1.62: Sếp chọn MỞ Antigravity CLI cho mọi việc (16/10/2026, sau khi được báo rủi ro) — luật v0.1.38 (F-22) "chỉ
+ * dùng cho Gen" đã gỡ. Câu dùng chung cho thẻ CLI và bước thiết lập: nói đúng phạm vi dùng và rủi ro còn lại.
  */
 export const AGY_SCOPE_TEXT =
-  'Chỉ dùng cho Gen — trợ lý quản trị (Gen của Sếp). Sàng lọc tin và trực việc phải dùng nguồn khác (khoá API hoặc Claude Code CLI) — luật an toàn, không tắt được.';
+  'Dùng được cho mọi việc: Gen, sàng lọc tin, Bản tin, soạn nháp, agent và việc nền. Lưu ý: Antigravity CLI chạy cùng máy chủ với khoá hệ thống — Sếp đã chọn mở thẳng; sau này sẽ tách ra hộp riêng.';
 
 /** v0.1.31: chữ theo loại CLI — Antigravity (tài khoản Google) hay Claude Code (gói Claude Pro/Max). */
 export const CLI_TEXT: Record<CliKind, { title: string; kicker: string; account: string; login: string; add: string; empty: string; openLink: string; hint: string; scope: string | null }> = {

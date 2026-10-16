@@ -1,8 +1,9 @@
 """Bản tin Gen 07:30 / 17:30 giờ VN — v0.1.41 (F-8b).
 
 Mỗi khung giờ, mỗi tổ chức bật Gen cho Owner: gom 6 mục (việc đến hạn, khách nóng, nháp chờ duyệt, sự cố, Facebook
-mới, Kho có gì mới), tóm tắt bằng model NẾU có nguồn cho việc nền (khoá API, hoặc Owner đã cho Claude Code CLI chạy
-việc nền — gh.providers.router F-86), rồi ghi một hội thoại "Bản tin Gen · sáng 02/10" cho TỪNG Owner + một chuông.
+mới, Kho có gì mới), tóm tắt bằng model NẾU có nguồn cho việc nền (khoá API, Antigravity CLI — v0.1.62, hoặc Owner đã
+cho Claude Code CLI chạy việc nền — gh.providers.router F-86), rồi ghi một hội thoại "Bản tin Gen · sáng 02/10" cho
+TỪNG Owner + một chuông.
 
 - Không có nguồn cho việc nền ⇒ KHÔNG gọi model (không model_calls, không CLI); bản tin vẫn gửi đủ các mục kèm lời
   nhắc "Dán khoá OpenRouter/Gemini để Gen tóm tắt".
@@ -11,7 +12,8 @@ việc nền — gh.providers.router F-86), rồi ghi một hội thoại "Bản
   không tốn lượt model khi đã gửi.
 - Máy tắt cả buổi (now − mốc > 3 giờ) ⇒ bỏ, không gửi bản tin cũ.
 - Bước đầu tiên của tin luôn là `{"kind": "tool", "name": "briefing.sources"}` — nội dung có chữ của khách/Kho, để
-  `gh.gen.engine._history_tainted` coi hội thoại này là có nội dung ngoài (agy không đọc, F-22).
+  hội thoại này được đánh dấu là có nội dung ngoài (nhãn `wrap_untrusted` khi đưa vào prompt). v0.1.62: Antigravity CLI
+  dùng được cho cả lượt hỏi tiếp trong hội thoại này (luật F-22 đã gỡ).
 - v0.1.50 (QD-18): ghi chú "Gen nhớ" của tổ chức (`gh.gen.memory_notes`, Sếp đã xác nhận) được thêm vào system
   message của lượt tóm tắt (`_summarize(..., notes=…)`) — chỉ khi có nguồn AI; không có nguồn thì không gửi gì ra ngoài.
 - v0.1.44 (F-8c): cùng lúc xếp MỘT tin vào hộp thư đi Telegram của tổ chức (gh.telegram.service.enqueue) — văn bản
@@ -64,7 +66,8 @@ SLOTS = ((7, 30, "sáng"), (17, 30, "chiều"))
 STALE_AFTER = timedelta(hours=3)
 JOB = "gen.briefing"
 # v0.1.55 (G1): Bản tin Gen là việc nền riêng — khoá `core.briefing` (hồ sơ tiêu chuẩn: khoá API, tầng nhanh), không còn
-# chạy dưới khoá `core.gen` của trợ lý. PURPOSE giữ `gen.briefing` (việc nền: không agy, CLI chỉ khi Owner cho phép).
+# chạy dưới khoá `core.gen` của trợ lý. PURPOSE giữ `gen.briefing` (việc nền: agy chạy được, Claude CLI chỉ khi
+# Owner cho phép).
 AGENT_KEY = "core.briefing"
 PURPOSE = "gen.briefing"
 MODEL_TIMEOUT_S = 60.0
@@ -465,7 +468,8 @@ def _for_summary(s: dict[str, Any]) -> dict[str, Any]:
 
 async def _summarize(router: ModelRouter, org: uuid.UUID, sections: list[dict[str, Any]],
                      notes: list[str] | None = None) -> str | None:
-    """None khi nguồn AI lỗi / quá 60 giây. KHÔNG truyền allow_agy (việc nền — F-22).
+    """None khi nguồn AI lỗi / quá 60 giây. Việc nền: Antigravity CLI dùng được (v0.1.62), Claude Code CLI chỉ khi Owner
+    cho phép (F-86).
 
     v0.1.50 (QD-18): `notes` = ghi chú Gen nhớ của tổ chức (Sếp đã xác nhận) — thêm vào system message để bản tóm tắt
     theo sở thích của Sếp. Chỉ có mặt khi có nguồn AI (hàm này chỉ chạy khi có nguồn)."""
@@ -526,8 +530,9 @@ async def _one_org(sm: async_sessionmaker[AsyncSession], redis: Any, router: Mod
         sections = await collect(db, org, slot, now)
         hub_linked = bool((await db.execute(text("SELECT EXISTS (SELECT 1 FROM agent.hub_links WHERE org_id = :o)"),
                                             {"o": org})).scalar_one())
-        # Có nguồn = khoá API dùng được, hoặc Claude Code CLI Owner đã cho chạy việc nền MÀ nguồn đó vẫn bật + có model
-        # (đã cho phép rồi tắt/xoá nguồn ⇒ vẫn nhắc dán khoá, không gọi model rồi báo "nguồn AI lỗi").
+        # Có nguồn = khoá API dùng được, Antigravity CLI đang bật + có model (v0.1.62), hoặc Claude Code CLI Owner đã
+        # cho chạy việc nền MÀ nguồn đó vẫn bật + có model (đã cho phép rồi tắt/xoá nguồn ⇒ vẫn nhắc dán khoá, không
+        # gọi model rồi báo "nguồn AI lỗi"). `background_sources` tính cả ba loại.
         has_source = await has_api_source(db, org) or any(src["used"] for src in await background_sources(db, org))
         # v0.1.50 (QD-18): ghi chú Gen nhớ — đọc trong cùng phiên này (trước rollback), chỉ khi có nguồn AI tóm tắt.
         notes = await memory_notes.texts(db, org) if has_source else []

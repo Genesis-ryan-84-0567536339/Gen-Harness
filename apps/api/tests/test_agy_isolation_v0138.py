@@ -223,7 +223,7 @@ async def test_hostile_agy_sees_no_canary(owner_api, app, clis, tmp_path, monkey
         await db.commit()
     caplog.set_level(logging.DEBUG)
     out = await router.generate(org, agent_key="core.gen", purpose="gen.turn", messages=[Message("user", "hi")],
-                                json_mode=False, allow_agy=True)
+                                json_mode=False)
     loot = json.loads(out.text)
     # CLI giả thật sự đã "tấn công": đọc HOME, env, cwd, tiến trình cha.
     assert loot["home_files"] and "environ" in loot and loot["parent_cmdline"] is not None
