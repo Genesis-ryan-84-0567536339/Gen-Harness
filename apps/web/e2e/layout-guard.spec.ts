@@ -103,9 +103,12 @@ const EXTRA_ROUTES = [
   '/account',
   '/social',
   '/social/ghi-facebook',
-  // v0.1.55 (G5): Mặt tiền Owner — 5 màn mobile-first (không thuộc screens.json nên liệt kê tay).
+  // v0.1.55 (G5): Mặt tiền Owner — mobile-first (không thuộc screens.json nên liệt kê tay).
+  // v0.1.59 (G2): 5 trụ cột (Tình báo, Thông tin, Quan hệ, Phân tích, Việc) + Hỏi Gen (link cũ) + Cài đặt. ALLOWLIST RỖNG cho mọi đường này.
   '/owner',
+  '/owner/thong-tin',
   '/owner/quan-he',
+  '/owner/phan-tich',
   '/owner/viec',
   '/owner/gen',
   '/owner/them',
@@ -534,8 +537,8 @@ test.describe('Lính gác bố cục — dính biên, tràn/cắt ngang, chữ b
     });
   }
 
-  test('trang ngoài (Đăng nhập, Thiết lập bước 4) × 1920/1440/1024/390 không có phát hiện', async ({ page }) => {
-    test.setTimeout(90_000);
+  test('trang ngoài (Đăng nhập, Thiết lập /setup và /setup?buoc=nguon-ai) × 1920/1440/1024/390 không có phát hiện', async ({ page }) => {
+    test.setTimeout(120_000);
     clearShots('ngoai_');
     const all: Hit[] = [];
     // Đăng nhập — chưa có phiên (gốc đo `.login`, trang không có <main>).
@@ -555,11 +558,20 @@ test.describe('Lính gác bố cục — dính biên, tràn/cắt ngang, chữ b
     });
     await apiCall(page, 'PUT', '/setup/steps/3', { org_name: 'Genesis Trading', timezone: 'Asia/Ho_Chi_Minh', currency: 'VND', self_name: 'Anh', bot_calls_me: 'Sếp' });
     await page.goto('/setup');
-    await expect(page.getByRole('heading', { name: 'Bộ não AI' })).toBeVisible();
+    // TODO(v0159-integ): sau khi G5 gộp (Thiết lập 1 màn) tiêu đề đổi — chấp nhận cả "Bộ não AI" cũ và "Nguồn AI" mới.
+    await expect(page.getByRole('heading', { name: /Bộ não AI|Nguồn AI/ }).first()).toBeVisible();
     for (const vp of VIEWPORTS) {
       await page.setViewportSize(vp);
       await settled(page);
       all.push(...(await scanHere(page, 'ngoai_', vp.width, '/setup (bước 4)')));
+    }
+    // v0.1.59 (G2): đích duy nhất của "Chọn model" là /setup?buoc=nguon-ai (G5 dựng màn; trước đó vẫn mở bước đang làm). Allowlist rỗng.
+    await page.goto('/setup?buoc=nguon-ai');
+    await expect(page.getByRole('heading', { name: /Bộ não AI|Nguồn AI/ }).first()).toBeVisible();
+    for (const vp of VIEWPORTS) {
+      await page.setViewportSize(vp);
+      await settled(page);
+      all.push(...(await scanHere(page, 'ngoai_', vp.width, '/setup?buoc=nguon-ai')));
     }
     expectClean(all);
   });

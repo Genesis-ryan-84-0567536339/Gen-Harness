@@ -8,6 +8,7 @@ import '@fontsource/inter/600.css';
 import '@fontsource/inter/700.css';
 import '@gen-harness/tokens/tokens.css';
 import '@gen-harness/ui/styles.css';
+import '@gen-harness/ui/owner-kit.css';
 import './styles/global.css';
 import './styles/shell.css';
 import './styles/setup.css';
