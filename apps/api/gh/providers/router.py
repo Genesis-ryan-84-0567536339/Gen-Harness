@@ -80,6 +80,12 @@ CLI_KINDS = ("antigravity_cli", "claude_code_cli")
 PROBE_PROMPT = "Trả lời đúng một chữ: OK"
 # Lịch sử: v0.1.38 (F-22) từng giới hạn agy chỉ cho lượt Gen của Owner (`allow_agy`, `AGY_OWNER_ONLY_REASON`,
 # `agy_only`…). Owner chọn mở thẳng ngày 16/10/2026 sau khi được báo rủi ro ⇒ v0.1.62 gỡ toàn bộ (xem docstring module).
+#: Gói G (P3): trần thời gian MỘT lượt agy của việc nền (giây). Việc nền chạy trong job worker (`gh.worker.JOB_TIMEOUT`
+#: = 300s) và gọi agy TUẦN TỰ (lô sàng lọc: mỗi phần lô một lượt, JSON sai thì gọi lại một lượt nữa) — AgyClient mặc
+#: định 300s bằng đúng JOB_TIMEOUT nên một lượt treo ăn trọn job và job bị arq giết giữa chừng (bản ghi kẹt "đang xử
+#: lý"). 90s × 3 lượt < 300s: lượt quá hạn ném ProviderError sớm, bộ định tuyến chuyển nguồn / trả ModelUnavailable,
+#: runner kịp nhả bản ghi và job kết thúc có kiểm soát. Lượt Gen của Sếp (không nền, chạy ở api) giữ 300s.
+AGY_BACKGROUND_TIMEOUT_S = 90.0
 PROBE_TIMEOUT_S = 90.0
 #: Số lượt gọi CLI tối đa của một lần "Kiểm tra kết nối" (kể cả lượt thử lại khi CLI đòi / không nhận mức suy nghĩ).
 PROBE_MAX_CALLS = 4
@@ -445,9 +451,13 @@ class ModelRouter:
                 chain.append(lk)
         return chain
 
-    def _client(self, p: Any, secret: str | None) -> Any:
+    def _client(self, p: Any, secret: str | None, *, background: bool = False) -> Any:
         if p.kind == "antigravity_cli":
-            return self.cli_factory()
+            client = self.cli_factory()
+            if background and hasattr(client, "timeout"):
+                # Gói G (P3): việc nền chạy trong job worker có JOB_TIMEOUT 300s — một lượt agy treo 300s ăn trọn job.
+                client.timeout = min(float(client.timeout), AGY_BACKGROUND_TIMEOUT_S)
+            return client
         if p.kind == "claude_code_cli":
             return self.claude_factory()
         if p.kind == "gemini":
@@ -601,7 +611,7 @@ class ModelRouter:
                 try:
                     eff, implicit = self._effort(agent_key, p, m, link, effort)
                     c = await self._complete(p, secret, m, messages, json_mode=json_mode, temperature=temperature,
-                                             effort=eff, implicit=implicit)
+                                             effort=eff, implicit=implicit, background=background)
                 except RateLimited as e:
                     await self._record(org_id, m.id, kid, agent_key, purpose, "rate_limited", started, None)
                     if key is not None:
@@ -705,11 +715,11 @@ class ModelRouter:
         return None, False
 
     async def _complete(self, p: Any, secret: str | None, m: Any, messages: list[Message], *, json_mode: bool,
-                        temperature: float, effort: str | None, implicit: bool) -> Completion:
+                        temperature: float, effort: str | None, implicit: bool, background: bool = False) -> Completion:
         """Một lượt gọi model. Mức suy nghĩ do HỒ SƠ tự thêm (`implicit`) mà CLI không nhận cho model này thì gọi lại
         một lần KHÔNG gửi mức — hồ sơ tiêu chuẩn không bao giờ làm hỏng lượt gọi chỉ vì mức suy nghĩ. v0.1.58: ngược
         lại, CHƯA gửi mức mà CLI đòi mức (agy: `available: low, medium, high`) thì gọi lại một lần với mức hợp lệ."""
-        client = self._client(p, secret)
+        client = self._client(p, secret, background=background)
         extra = {"effort": effort} if effort else {}
         try:
             c: Completion = await client.generate(m.model_name, messages, json_mode=json_mode,

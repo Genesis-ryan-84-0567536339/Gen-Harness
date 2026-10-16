@@ -50,6 +50,7 @@ from gh.providers.clients import (
     claude_env,
     cli_env,
     cli_home_dir,
+    token_flock,
 )
 
 CLI_MISSING = "Máy chủ chưa cài công cụ đăng nhập Google (Antigravity CLI) — dùng khoá API ở bên dưới thay thế"
@@ -135,20 +136,30 @@ def backup_path(kind: str = AGY) -> Path:
     return path.with_name(path.name + PARK_SUFFIX)
 
 
+def _guard(kind: str) -> contextlib.AbstractContextManager[bool]:
+    """Gói G (P3): đổi/ghi tệp token OAuth của agy (dùng chung api ↔ worker ↔ các lượt agy đang làm mới token) phải giữ
+    khoá flock độc quyền; Claude Code CLI có tệp riêng, không khoá."""
+    if kind == AGY:
+        return token_flock(get_settings().cli_home, exclusive=True)
+    return contextlib.nullcontext(True)
+
+
 def park_token(kind: str = AGY) -> None:
     """Gửi tạm tệp phiên đang dùng để CLI khởi động ở trạng thái CHƯA đăng nhập (mới hiện link đăng nhập)."""
     path = token_path(kind)
-    if path.exists():
-        path.replace(backup_path(kind))
+    with _guard(kind):
+        if path.exists():
+            path.replace(backup_path(kind))
 
 
 def unpark_token(kind: str = AGY) -> bool:
     """Trả tệp phiên đã gửi tạm về chỗ cũ (đăng nhập lỗi/huỷ, hoặc api chết giữa chừng). True nếu có trả."""
     bak = backup_path(kind)
-    if not bak.exists():
-        return False
-    bak.replace(token_path(kind))
-    return True
+    with _guard(kind):
+        if not bak.exists():
+            return False
+        bak.replace(token_path(kind))
+        return True
 
 
 def drop_parked_token(kind: str = AGY) -> None:
@@ -385,7 +396,8 @@ def _atomic_write(path: Path, raw: bytes) -> None:
 def write_token_file(raw: bytes) -> None:
     path = token_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    _atomic_write(path, raw)
+    with _guard(AGY):             # gói G (P3): không ghi đè giữa lúc một lượt agy đang làm mới token
+        _atomic_write(path, raw)
 
 
 async def save_current_back(db: AsyncSession, org_id: uuid.UUID, kind: str = AGY) -> None:
