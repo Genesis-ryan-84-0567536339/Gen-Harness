@@ -259,8 +259,7 @@ async def set_binding(agent_key: str, body: BindingIn, request: Request,
                b.context_tokens, b.rule_codes, b.effort
         FROM agent.bindings b JOIN agent.models m ON m.id = b.model_id JOIN agent.providers p ON p.id = m.provider_id
         WHERE b.org_id = :o AND b.agent_key = :k"""), {"o": user.org_id, "k": agent_key})).one()
-    await db.commit()
-    await coach_cache.invalidate(request.app.state.redis, user.org_id)       # v0.1.59: thẻ Hôm nay đọc lại ngay
+    await coach_cache.commit_and_invalidate(db, request.app.state.redis, user.org_id)   # v0.1.59: thẻ đọc lại ngay
     return {"agent_key": agent_key, "label": label, "binding": _binding_out(r, agent_key), "source": "custom",
             "standard": None}
 
@@ -278,8 +277,7 @@ async def delete_binding(agent_key: str, request: Request, user: service.Current
         raise not_found("Gán model")
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id, action="agent.unbound",
                            target_type="binding", target_id=agent_key, ip=user.ip)
-    await db.commit()
-    await coach_cache.invalidate(request.app.state.redis, user.org_id)       # v0.1.59: thẻ Hôm nay đọc lại ngay
+    await coach_cache.commit_and_invalidate(db, request.app.state.redis, user.org_id)   # v0.1.59: thẻ đọc lại ngay
     return Response(status_code=204)
 
 

@@ -10,6 +10,7 @@ Bản v0.1.59: lượt gọi thử CLI XANH ghi `ai_source` + `agy_call` (hoặc
 `coach_cache.invalidate` SAU khi đã commit. CLI giả: tests/fixtures/fake_agy_multi.py (fixture `clis`).
 """
 
+import asyncio
 import logging
 import uuid
 from typing import Any
@@ -17,11 +18,13 @@ from typing import Any
 import httpx
 from sqlalchemy import text
 
-from gh.db import sessionmaker
+from gh.db import admin_sessionmaker, sessionmaker
 from gh.gen.coach import cache as coach_cache
 from gh.gen.coach import signals as sg
 from tests.conftest import Api, verify_pin
+from tests.test_actionlog_db import _set_scope
 from tests.test_cli_models_v0131 import _login, _provider, clis  # noqa: F401 — fixture dùng chung
+from tests.test_rbac_api import login_as
 
 AGY = "antigravity_cli"
 CLAUDE = "claude_code_cli"
@@ -58,7 +61,7 @@ async def _cli_without_models(api: Api, kind: str, code: str) -> tuple[uuid.UUID
     return org, pid
 
 
-async def _api_source(api: Api) -> tuple[uuid.UUID, str, str]:
+async def _api_source(api: Api, name: str = "Nguồn khoá v0159") -> tuple[uuid.UUID, str, str]:
     """Nguồn khoá API (openai_compat, có một model) → (org, provider_id, model_id)."""
     await verify_pin(api)
     r = await api.send(
@@ -66,7 +69,7 @@ async def _api_source(api: Api) -> tuple[uuid.UUID, str, str]:
         "/providers",
         {
             "kind": "openai_compat",
-            "name": "Nguồn khoá v0159",
+            "name": name,
             "endpoint": "https://127.0.0.1:9/v1",
             "keys": ["sk-test-key-v0159-4321"],
             "models": ["m1"],
@@ -204,6 +207,9 @@ async def test_invalidate_none_redis_never_raises(caplog: Any) -> None:
 
 async def test_invalidate_broken_redis_only_warns_and_hides_error_text(caplog: Any) -> None:
     class Broken:
+        async def incr(self, *_a: Any) -> int:
+            raise ConnectionError("redis down")
+
         async def delete(self, *_a: Any) -> int:
             raise ConnectionError("redis down")
 
@@ -220,6 +226,11 @@ async def test_invalidate_deletes_only_this_orgs_key(redis: Any) -> None:
     await coach_cache.invalidate(redis, a)
     assert not await redis.exists(sg.CACHE_KEY.format(a))
     assert await redis.exists(sg.CACHE_KEY.format(b))
+    # bộ đếm phiên bản chỉ tăng ở tổ chức vừa làm mới, và có hạn dùng
+    assert int(await redis.get(sg.CACHE_VER_KEY.format(a))) == 1 and not await redis.exists(sg.CACHE_VER_KEY.format(b))
+    assert 0 < await redis.ttl(sg.CACHE_VER_KEY.format(a)) <= sg.CACHE_VER_TTL_S
+    await coach_cache.invalidate(redis, a)
+    assert int(await redis.get(sg.CACHE_VER_KEY.format(a))) == 2
 
 
 # ─── mọi nơi đổi thứ thẻ đọc đều làm mới cache ngay (sau commit) ──────────────────────────────────────────────────
@@ -267,3 +278,171 @@ async def test_heal_agy_clears_card_cache_after_adopting_model(owner_api: Api, a
             await db.execute(text("SELECT count(*) FROM agent.models WHERE provider_id = :p"), {"p": uuid.UUID(pid)})
         ).scalar_one()
     assert n == 1
+
+
+# ─── review v0.1.59: ai_source chỉ ghi cho nguồn đang BẬT; chỉ Owner tích hộ "Việc Sếp cần làm" ─────────────────────
+
+
+async def test_disabled_cli_green_test_does_not_write_ai_source(owner_api: Api, app: Any, clis: Any) -> None:
+    api = owner_api
+    org, pid = await _cli_without_models(api, AGY, "4/an")
+    async with sessionmaker()() as db:
+        await db.execute(text("UPDATE agent.providers SET is_enabled = false WHERE id = :i"), {"i": uuid.UUID(pid)})
+        await db.commit()
+    t = (await api.send("POST", f"/providers/{pid}/test")).json()
+    assert t["ok"] is True, t
+    # chuỗi của Gen không dùng nguồn đang tắt ⇒ lượt gọi thử này không được GHI bản 'pass' cho dòng bắt buộc "nguồn AI"…
+    assert await _rows("ai_source", org) == []
+    # …nhưng vẫn là bằng chứng thật cho dòng Kết nối của chính CLI đó. (Quy tắc có từ v0.1.55 `_derived_ai`: Google /
+    # Claude gọi thử đạt ⇒ dòng "ai" suy ra đạt — không đổi ở bản vá này.)
+    assert [r.status for r in await _rows("agy_call", org)] == ["pass"]
+
+
+async def test_enabled_cli_after_failed_ai_source_flips_to_pass(owner_api: Api, app: Any, clis: Any) -> None:
+    """Đối chứng của ca trên: nguồn BẬT xanh thì ai_source đạt, kể cả khi trước đó có bản 'fail'."""
+    api = owner_api
+    org, pid = await _cli_without_models(api, AGY, "4/an")
+    async with admin_sessionmaker()() as db:
+        await db.execute(
+            text("""INSERT INTO ops.boss_checks (org_id, check_key, status, error_code, message)
+                    VALUES (:o, 'ai_source', 'fail', 'AI_KEY_MISSING', 'x')"""),
+            {"o": org},
+        )
+        await db.commit()
+    assert (await api.send("POST", f"/providers/{pid}/test")).json()["ok"] is True
+    assert (await api.get("/boss-checks")).json()["results"]["ai_source"]["status"] == "pass"
+
+
+async def test_non_owner_with_system_manage_cannot_tick_boss_checks(
+    owner_api: Api, app: Any, clis: Any, db: Any
+) -> None:
+    org, pid = await _cli_without_models(owner_api, AGY, "4/an")
+    await _set_scope(db, "manager", "system.manage", "all")  # có system.manage vẫn không phải Owner
+    await db.commit()
+    mgr = await login_as(owner_api.c, db, "manager")
+    try:
+        r = await mgr.send("POST", f"/providers/{pid}/test")
+        assert r.status_code == 200 and r.json()["ok"] is True, r.text  # được gọi thử nguồn…
+    finally:
+        await mgr.c.aclose()
+    assert await _rows("ai_source", org) == [] and await _rows("agy_call", org) == []  # …nhưng không tích hộ Sếp
+    assert _row((await owner_api.get("/boss-checks")).json(), "ai")["done"] is False
+
+
+# ─── review v0.1.59: mọi nơi đổi nguồn / khoá / model / bật tắt đều làm mới thẻ ─────────────────────────────────────
+
+
+async def test_create_provider_clears_card_cache(owner_api: Api, app: Any) -> None:
+    org, _pid, _mid = await _api_source(owner_api)
+    await _warm(app, org)
+    org2, _pid2, _mid2 = await _api_source(owner_api, "Nguồn khoá thứ hai")
+    assert org2 == org and not await _cached(app, org)
+
+
+async def test_patch_provider_enabled_clears_card_cache(owner_api: Api, app: Any) -> None:
+    org, pid, _mid = await _api_source(owner_api)
+    await _warm(app, org)
+    r = await owner_api.send("PATCH", f"/providers/{pid}", {"enabled": False})
+    assert r.status_code == 200, r.text
+    assert not await _cached(app, org)
+
+
+async def test_add_and_delete_key_clear_card_cache(owner_api: Api, app: Any) -> None:
+    org, pid, _mid = await _api_source(owner_api)
+    await _warm(app, org)
+    r = await owner_api.send("POST", f"/providers/{pid}/keys", {"secret": "sk-test-key-v0159-9999"})
+    assert r.status_code == 201, r.text
+    assert not await _cached(app, org)
+    async with sessionmaker()() as db:
+        kid = (
+            await db.execute(
+                text("SELECT id FROM agent.provider_keys WHERE provider_id = :p ORDER BY created_at DESC LIMIT 1"),
+                {"p": uuid.UUID(pid)},
+            )
+        ).scalar_one()
+    await _warm(app, org)
+    r = await owner_api.send("DELETE", f"/providers/{pid}/keys/{kid}")
+    assert r.status_code == 204, r.text
+    assert not await _cached(app, org)
+
+
+async def test_delete_provider_clears_card_cache(owner_api: Api, app: Any) -> None:
+    org, pid, _mid = await _api_source(owner_api)
+    await _warm(app, org)
+    r = await owner_api.send("DELETE", f"/providers/{pid}")
+    assert r.status_code == 204, r.text
+    assert not await _cached(app, org)
+
+
+async def test_setup_step4_clears_card_cache(owner_api: Api, app: Any, clis: Any) -> None:
+    await _login(owner_api, AGY, "4/an")
+    p = await _provider(owner_api, AGY)
+    org = await _org_of(p["id"])
+    r = await owner_api.send("POST", f"/providers/{p['id']}/models", {"model_name": "gemini-3.1-pro"})
+    assert r.status_code == 201, r.text
+    await _warm(app, org)
+    r = await owner_api.send("PUT", "/setup/steps/4", {"provider_ids": [p["id"]]})
+    assert r.status_code == 200, r.text
+    assert not await _cached(app, org)
+
+
+# ─── thứ tự: commit TRƯỚC, làm mới cache SAU (đổi ngược vẫn qua được test "cache đã bị xoá", test này thì không) ─────
+
+
+async def test_invalidate_runs_only_after_commit(owner_api: Api, app: Any, monkeypatch: Any) -> None:
+    org, pid, _mid = await _api_source(owner_api)
+    await _warm(app, org)
+    seen: list[tuple[str, int]] = []
+
+    def spy(name: str, real: Any) -> Any:
+        async def wrapped(*args: Any, **kw: Any) -> Any:
+            # Tại đúng khoảnh khắc làm mới cache, một phiên KHÁC đã đọc được dòng model mới (= đã commit).
+            async with admin_sessionmaker()() as other:
+                n = (
+                    await other.execute(
+                        text("SELECT count(*) FROM agent.models WHERE provider_id = :p AND model_name = 'm-sau'"),
+                        {"p": uuid.UUID(pid)},
+                    )
+                ).scalar_one()
+            seen.append((name, int(n)))
+            return await real(*args, **kw)
+
+        return wrapped
+
+    redis = app.state.redis
+    monkeypatch.setattr(redis, "incr", spy("incr", redis.incr))
+    monkeypatch.setattr(redis, "delete", spy("delete", redis.delete))
+    r = await owner_api.send("POST", f"/providers/{pid}/models", {"model_name": "m-sau"})
+    assert r.status_code == 201, r.text
+    assert seen and all(n == 1 for _name, n in seen), seen
+    assert {name for name, _n in seen} == {"incr", "delete"}
+
+
+# ─── đua: lượt gom đang chạy không được ghi bản cũ vào cache sau khi cache vừa bị làm mới ───────────────────────────
+
+
+async def test_collect_in_flight_cannot_repopulate_stale_cache(owner_api: Api, app: Any, monkeypatch: Any) -> None:
+    org, _pid, _mid = await _api_source(owner_api)
+    await app.state.redis.delete(sg.CACHE_KEY.format(org), sg.CACHE_VER_KEY.format(org))
+    started, release = asyncio.Event(), asyncio.Event()
+    real = sg._src_memory
+    gate = {"on": True}
+
+    async def slow(db: Any, redis: Any, org_id: uuid.UUID) -> dict[str, Any]:
+        if gate["on"]:
+            started.set()
+            await release.wait()
+        return await real(db, redis, org_id)
+
+    monkeypatch.setattr(sg, "_src_memory", slow)
+    task = asyncio.create_task(owner_api.get(TODAY))
+    await asyncio.wait_for(started.wait(), 5)  # lượt gom đã bắt đầu đọc CSDL (dữ liệu "trước khi Sếp đổi")
+    await coach_cache.invalidate(app.state.redis, org)  # Sếp vừa đổi cấu hình + commit ⇒ làm mới cache
+    release.set()
+    assert (await task).status_code == 200
+    assert not await _cached(app, org)  # bản đọc trước đó KHÔNG được ghi trở lại
+    # đối chứng: lượt gom kế tiếp (không bị xen ngang) vẫn ghi cache bình thường, TTL ≤ 60 giây
+    gate["on"] = False
+    assert (await owner_api.get(TODAY)).status_code == 200
+    assert await _cached(app, org)
+    assert 0 < await app.state.redis.ttl(sg.CACHE_KEY.format(org)) <= 60

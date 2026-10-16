@@ -85,8 +85,7 @@ async def run_check(key: str, request: Request, body: BossRunIn | None = None,
         raise field_errors({"profile_id": "Chọn tài khoản Google cần đổi sang"})
     out = await _dispatch(key, request, body, user, db)
     # v0.1.59: kết quả kiểm vừa ghi quyết định dòng "Việc Sếp cần làm" ⇒ commit rồi làm mới thẻ Hôm nay của Sếp ngay.
-    await db.commit()
-    await coach_cache.invalidate(request.app.state.redis, user.org_id)
+    await coach_cache.commit_and_invalidate(db, request.app.state.redis, user.org_id)
     return out
 
 

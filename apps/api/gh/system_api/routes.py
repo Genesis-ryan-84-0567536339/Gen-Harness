@@ -421,7 +421,10 @@ async def create_provider(body: ProviderIn, request: Request, user: service.Curr
                            action="provider.created", target_type="provider", target_id=str(pid),
                            target_label=body.name, detail={"kind": body.kind, "keys": len(body.keys),
                                                            "models": body.models}, ip=user.ip)
-    return await _one_provider(db, request.app.state.redis, user.org_id, pid)
+    out = await _one_provider(db, request.app.state.redis, user.org_id, pid)
+    # v0.1.59: nguồn mới có thể kèm khoá + model ⇒ thẻ "Hôm nay của Sếp" (Gen chưa có model…) đọc lại ngay.
+    await coach_cache.commit_and_invalidate(db, request.app.state.redis, user.org_id)
+    return out
 
 
 # ─── v0.1.41 (F-86): Nguồn AI cho việc nền ───────────────────────────────────
@@ -529,11 +532,14 @@ async def patch_provider(pid: uuid.UUID, body: ProviderPatch, request: Request,
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                            action="provider.updated", target_type="provider", target_id=str(pid), target_label=p.name,
                            detail=body.model_dump(exclude_none=True), ip=user.ip)
-    return await _one_provider(db, request.app.state.redis, user.org_id, pid)
+    out = await _one_provider(db, request.app.state.redis, user.org_id, pid)
+    # v0.1.59: bật / tắt nguồn đổi "có nguồn AI chạy được không" ⇒ thẻ "Hôm nay của Sếp" đọc lại ngay.
+    await coach_cache.commit_and_invalidate(db, request.app.state.redis, user.org_id)
+    return out
 
 
 @router.delete("/providers/{pid}", status_code=204)
-async def delete_provider(pid: uuid.UUID, user: service.CurrentUser = Depends(MANAGE),
+async def delete_provider(pid: uuid.UUID, request: Request, user: service.CurrentUser = Depends(MANAGE),
                           db: AsyncSession = DB) -> Response:
     """v0.1.28 (UX N1): xoá một nguồn model nhập nhầm / gọi thử lỗi (bước 4 và màn API & Model). Gỡ luôn gán model của
     các agent đang trỏ vào model của nguồn này (agent đó quay về dùng chuỗi chung). Antigravity CLI dùng phiên đăng
@@ -551,6 +557,7 @@ async def delete_provider(pid: uuid.UUID, user: service.CurrentUser = Depends(MA
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                            action="provider.deleted", target_type="provider", target_id=str(pid),
                            target_label=p.name, detail={"kind": p.kind}, ip=user.ip)
+    await coach_cache.commit_and_invalidate(db, request.app.state.redis, user.org_id)   # v0.1.59: thẻ đọc lại ngay
     return Response(status_code=204)
 
 
@@ -568,11 +575,14 @@ async def add_key(pid: uuid.UUID, body: KeyIn, request: Request, user: service.C
                            action="provider.key_added",
                            target_type="provider", target_id=str(pid), target_label=p.name,
                            detail={"last4": body.secret.strip()[-4:]}, ip=user.ip)
-    return await _one_provider(db, request.app.state.redis, user.org_id, pid)
+    out = await _one_provider(db, request.app.state.redis, user.org_id, pid)
+    # v0.1.59: khoá API đầu tiên biến nguồn thành "chạy được" ⇒ thẻ "Hôm nay của Sếp" đọc lại ngay.
+    await coach_cache.commit_and_invalidate(db, request.app.state.redis, user.org_id)
+    return out
 
 
 @router.delete("/providers/{pid}/keys/{kid}", status_code=204)
-async def delete_key(pid: uuid.UUID, kid: uuid.UUID, user: service.CurrentUser = Depends(MANAGE),
+async def delete_key(pid: uuid.UUID, kid: uuid.UUID, request: Request, user: service.CurrentUser = Depends(MANAGE),
                      db: AsyncSession = DB) -> Response:
     p = await _provider(db, user.org_id, pid)
     row = (await db.execute(text("DELETE FROM agent.provider_keys WHERE id = :k AND provider_id = :p RETURNING label"),
@@ -582,6 +592,7 @@ async def delete_key(pid: uuid.UUID, kid: uuid.UUID, user: service.CurrentUser =
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                            action="provider.key_deleted", target_type="provider", target_id=str(pid),
                            target_label=p.name, detail={"key": row.label}, ip=user.ip)
+    await coach_cache.commit_and_invalidate(db, request.app.state.redis, user.org_id)   # v0.1.59: thẻ đọc lại ngay
     return Response(status_code=204)
 
 
@@ -655,8 +666,7 @@ async def add_model(pid: uuid.UUID, body: ModelIn, request: Request, user: servi
                            target_label=p.name, detail=body.model_dump(), ip=user.ip)
     out = await _one_provider(db, request.app.state.redis, user.org_id, pid)
     # v0.1.59: có model mới ⇒ thẻ "Hôm nay của Sếp" đọc lại ngay (không chờ cache 60 giây).
-    await db.commit()
-    await coach_cache.invalidate(request.app.state.redis, user.org_id)
+    await coach_cache.commit_and_invalidate(db, request.app.state.redis, user.org_id)
     return out
 
 
@@ -677,12 +687,13 @@ async def test_provider(pid: uuid.UUID, request: Request, user: service.CurrentU
         # không đụng.
         await mrouter.adopt_probed_model(db, user.org_id, pid, p.name, result, actor_type="user",
                                          actor_id=user.actor_id, ip=user.ip)
-        if result["ok"]:
-            await _record_cli_probe_evidence(db, user, p.kind, result)
+        if result["ok"] and user.role_code == rbac.OWNER:
+            # "Việc Sếp cần làm" là danh sách của Owner (chạy kiểm bằng POST /boss-checks/{key}/run đòi require_owner):
+            # người quản lý khác được quyền gọi thử nguồn nhưng không được tích hộ Sếp.
+            await _record_cli_probe_evidence(db, user, p, result)
     # v0.1.59: commit TRƯỚC khi xoá cache — thẻ "Hôm nay của Sếp" đọc lại ngay (kể cả lượt gọi thử đỏ / nguồn khoá API:
     # trạng thái nguồn đã đổi), không chờ cache 60 giây rồi dựng lại từ dữ liệu cũ.
-    await db.commit()
-    await coach_cache.invalidate(request.app.state.redis, user.org_id)
+    await coach_cache.commit_and_invalidate(db, request.app.state.redis, user.org_id)
     return result
 
 
@@ -690,19 +701,23 @@ async def test_provider(pid: uuid.UUID, request: Request, user: service.CurrentU
 CLI_CALL_CHECK = {climod.AGY: "agy_call", climod.CLAUDE: "claude_call"}
 
 
-async def _record_cli_probe_evidence(db: AsyncSession, user: service.CurrentUser, kind: str,
+async def _record_cli_probe_evidence(db: AsyncSession, user: service.CurrentUser, p: Any,
                                      result: dict[str, Any]) -> None:
-    """v0.1.59 — "Kiểm tra kết nối" của nguồn CLI XANH là một lượt gọi model THẬT (`ModelRouter._cli_probe` sinh văn
-    bản) ⇒ ghi đúng bằng chứng đó vào "Việc Sếp cần làm": `ai_source` (dòng bắt buộc "nguồn AI") và `agy_call` /
-    `claude_call` (dòng Kết nối tương ứng) — Sếp không phải bấm Kiểm tra lần nữa ở chỗ khác. Chỉ ghi khi XANH: lượt
-    gọi thử lỗi KHÔNG ghi 'fail' ở đây (bản 'fail' chỉ do Sếp bấm Kiểm tra ở Việc Sếp cần làm / Kết nối). Nguồn khoá
+    """v0.1.59 — "Kiểm tra kết nối" của nguồn CLI XANH là một lượt gọi model THẬT (`ModelRouter._cli_probe` sinh
+    văn bản) ⇒ ghi đúng bằng chứng đó vào "Việc Sếp cần làm": `agy_call` / `claude_call` (dòng Kết nối tương ứng)
+    và `ai_source` (dòng bắt buộc "nguồn AI") — Sếp không phải bấm Kiểm tra lần nữa ở chỗ khác.
+
+    `ai_source` chỉ ghi khi nguồn đang BẬT, đúng như `_run_ai_source` (chỉ xét nguồn `is_enabled`): nguồn đang tắt
+    chạy được nhưng chuỗi của Gen không dùng, ghi 'pass' sẽ che một lần 'fail' có thật. Chỉ ghi khi XANH: lượt gọi
+    thử lỗi KHÔNG ghi 'fail' ở đây (bản 'fail' chỉ do Sếp bấm Kiểm tra ở Việc Sếp cần làm / Kết nối). Nguồn khoá
     API KHÔNG gọi hàm này: test của chúng chỉ liệt kê model, không phải lượt sinh văn bản."""
     from gh.boss_checks import routes as boss_routes
 
     detail = boss_routes._call_detail(result)
-    await boss_service.record(db, user.org_id, "ai_source", "pass", detail=detail, user_id=user.id)
-    await boss_service.record(db, user.org_id, CLI_CALL_CHECK[kind], "pass", detail=detail, user_id=user.id)
-    if kind == climod.CLAUDE:
+    if p.is_enabled and p.kind not in ("embedding", "system_one"):
+        await boss_service.record(db, user.org_id, "ai_source", "pass", detail=detail, user_id=user.id)
+    await boss_service.record(db, user.org_id, CLI_CALL_CHECK[p.kind], "pass", detail=detail, user_id=user.id)
+    if p.kind == climod.CLAUDE:
         # Phiên Claude Code có sẵn từ trước (không qua luồng đăng nhập) — như bấm Kiểm tra ở Việc Sếp cần làm.
         await boss_routes._adopt_existing_claude_login(db, user, result)
 
