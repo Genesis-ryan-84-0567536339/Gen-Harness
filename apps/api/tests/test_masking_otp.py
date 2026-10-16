@@ -50,6 +50,15 @@ THU_CO_BI_MAT = [
     ("Wifi password: abc12345", "abc12345"),
     ("https://x.example.com/cb#access_token=abcDEF123456&state=1", "abcDEF123456"),
     ("https://x.example.com/cb#state=1&id_token=eyJabc123def456", "eyJabc123def456"),
+    # Review lần 2 v0.1.62: chữ toàn chiều (fullwidth) chuẩn hoá NFKC trước khi so; mã dính từ khoá; mã nằm dòng dưới
+    ("otp１２３４５６", "１２３４５６"),
+    ("OTP123456 dùng 5 phút", "123456"),
+    ("Mã OTP: １２３４５６", "１２３４５６"),
+    ("ＯＴＰ 123456", "123456"),
+    ("Mã xác minh của bạn là ４８２９１３", "４８２９１３"),
+    ("Mã OTP:\n482913", "482913"),
+    ("123456 is your code", "123456"),
+    ("4829 is your pin", "4829"),
 ]
 
 # Thư thường: KHÔNG được bị che oan (nội dung còn đọc được để Gen tóm tắt/soạn trả lời)
@@ -70,6 +79,12 @@ THU_THUONG = [
     "Nhập code 1505 để được giảm 10%.",
     "Mật khẩu của bạn đã được đổi lúc 14:30.",
     "https://example.com/bai-viet#phan-2024",
+    # Review lần 2 v0.1.62: "code"/"pin" đứng một mình đi SAU số ngắn không phải mã; từ khoá không "kéo" sang dòng khác
+    "1505 là code giảm giá",
+    "1505 is the code for discount",
+    "2024 là code của dự án",
+    "Mã xác thực\nSố đơn của bạn là 123456",
+    "Mật khẩu\n\nCảm ơn bạn, đơn của anh là 654321",
 ]
 
 

@@ -6,6 +6,7 @@ và sự kiện WS `mcp.call`, tham số tool ghi trong bản nháp chờ duyệ
 """
 
 import re
+import unicodedata
 from typing import Any
 
 from gh.data.common import mask_text
@@ -34,24 +35,33 @@ _OTP_WORDS = (r"(?:m[ãa] (?:x[áa]c (?:minh|th[ựu]c|nh[ậa]n)|b[ảa]o m[ậ
               r"k[íi]ch ho[ạa]t|truy c[ậa]p|otp|pin)"
               r"|otp|passcode|(?:verification|security|confirmation|login|sign-in|auth(?:entication)?|"
               r"one-time|access|activation|reset) (?:code|pin|passcode)|m[ậa]t kh[ẩa]u|password)")
-_OTP_WORDS_ANY = rf"(?:{_OTP_WORDS}|pin|code)"
 _FILLER = (r"(?:(?:c[ủu]a|b[ạa]n|anh/ch[ịi]|anh|ch[ịi]|em|qu[ýy] kh[áa]ch|l[àa]|is|are|your|the|n[àa]y|"
            r"t[ạa]m(?: th[ờo]i)?|m[ớo]i|sau|sau đ[âa]y|như sau|one-time|temporary|new|for|to|use|with)\b[\s,]*"
            r"|[:=\-–—]\s*)*")
 _CODE = r"(\d{4,8}|\d{3}[ -]\d{3})(?![\d@])"
-_RE_OTP_AFTER = re.compile(rf"(?i)(?<![\w-])({_OTP_WORDS})\b[\s]*{_FILLER}{_CODE}")
+# Sau từ khoá cho phép mã dính liền ("otp123456") — chỉ cần không đứng trước một chữ cái (không phải "otpx").
+_RE_OTP_AFTER = re.compile(rf"(?i)(?<![\w-])({_OTP_WORDS})(?![^\W\d_])[\s]*{_FILLER}{_CODE}")
 # Từ khoá + 0–5 từ chữ bất kỳ ("của Quý khách", "for login", "(OTP)") + "là/is/:" + mã. Từ đệm không chứa chữ số hay dấu
-# câu nên không nuốt sang câu khác.
+# câu nên không nuốt sang câu khác; khoảng trắng giữa chúng chỉ là dấu cách / tab, KHÔNG xuống dòng (review lần 2
+# v0.1.62: `\s+` từng kéo từ khoá ở cuối dòng sang câu ở dòng sau). Mã ngay dưới từ khoá ("Mã OTP:\n482913") do
+# _RE_OTP_AFTER lo.
 _RE_OTP_GAP = re.compile(
-    rf"(?i)(?<![\w-])({_OTP_WORDS})\b\s*(?:\([^)\d\n]{{1,20}}\)\s*)?(?:[^\W\d_][\w'’/-]*\s+){{0,5}}?"
-    rf"(?:(?:l[àa]|is|are)\b\s*[:=]?\s*|[:=]\s*){_CODE}")
+    rf"(?i)(?<![\w-])({_OTP_WORDS})\b[ \t]*(?:\([^)\d\n]{{1,20}}\)[ \t]*)?(?:[^\W\d_][\w'’/-]*[ \t]+){{0,5}}?"
+    rf"(?:(?:l[àa]|is|are)\b[ \t]*[:=]?[ \t]*|[:=][ \t]*){_CODE}")
 # `pin`/`code` đứng một mình: code cần ≥ 5 chữ số (bỏ năm/mã giảm giá 4 số); pin không đi kèm đơn vị pin (mAh).
 _RE_OTP_BARE = re.compile(
     rf"(?i)(?<![\w-])(pin\b[\s]*{_FILLER}(?:\d{{4,8}}|\d{{3}}[ -]\d{{3}})(?![\d@])(?!\s*m?ah\b)"
     rf"|code\b[\s]*{_FILLER}(?:\d{{5,8}}|\d{{3}}[ -]\d{{3}})(?![\d@])(?!\s*m?ah\b))")
-_RE_OTP_BEFORE = re.compile(
-    rf"(?i)(?<![\w])((?:[A-Z]{{1,3}}-)?)(\d{{4,8}})(?![\d@])"
-    rf"(?=\s+(?:l[àa]|is)\s+(?:(?:your|the|m[ãa]|\w+) ){{0,2}}{_OTP_WORDS_ANY}\b)")
+# Mã đứng TRƯỚC từ khoá ("482913 là mã xác minh", "G-482913 is your … code"): từ khoá mạnh (`_OTP_WORDS` + pin) với mã
+# 4–8 số; `code` đứng một mình chỉ khi mã ≥ 5 số như _RE_OTP_BARE — "1505 là code giảm giá" không phải mã (review lần 2
+# v0.1.62).
+def _otp_before(words: str, digits: str) -> re.Pattern[str]:
+    return re.compile(rf"(?i)(?<![\w])((?:[A-Z]{{1,3}}-)?)(\d{{{digits}}})(?![\d@])"
+                      rf"(?=\s+(?:l[àa]|is)\s+(?:(?:your|the|m[ãa]|\w+) ){{0,2}}{words}\b)")
+
+
+_RE_OTP_BEFORE = _otp_before(rf"(?:{_OTP_WORDS}|pin)", "4,8")
+_RE_OTP_BEFORE_CODE = _otp_before("code", "5,8")
 # Mật khẩu có chữ: giá trị đứng ngay sau dấu ':'/'=' (che mọi giá trị), hoặc sau "là/is" (chỉ khi có chữ số hoặc ký tự
 # đặc biệt — tránh che "mật khẩu của bạn là bắt buộc").
 _PW_WORDS = r"(?:m[ậa]t kh[ẩa]u|passcode|password|passwd)"
@@ -99,14 +109,16 @@ def _mask_context_secrets(s: str) -> str:
     s = _RE_OTP_AFTER.sub(lambda m: m.group(0)[: m.start(2) - m.start(0)] + MASK, s)
     s = _RE_OTP_GAP.sub(lambda m: m.group(0)[: m.start(2) - m.start(0)] + MASK, s)
     s = _RE_OTP_BARE.sub(_mask_bare, s)
-    return _RE_OTP_BEFORE.sub(lambda m: m.group(1) + MASK, s)
+    s = _RE_OTP_BEFORE.sub(lambda m: m.group(1) + MASK, s)
+    return _RE_OTP_BEFORE_CODE.sub(lambda m: m.group(1) + MASK, s)
 
 
 def _mask_str(s: str, extra: tuple[str, ...]) -> str:
     for secret in extra:
         if secret:
             s = s.replace(secret, MASK)
-    s = _mask_context_secrets(s)
+    # NFKC: chữ/số toàn chiều ("ＯＴＰ １２３４５６"), khoảng trắng lạ về dạng thường trước khi so (review lần 2).
+    s = _mask_context_secrets(unicodedata.normalize("NFKC", s))
     s = _RE_SECRET.sub(MASK, s)
     s = _RE_EMAIL.sub(lambda m: f"{m.group(1)}•••@{m.group(2)}", s)
 
