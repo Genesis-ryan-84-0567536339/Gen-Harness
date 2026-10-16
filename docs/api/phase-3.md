@@ -70,17 +70,19 @@ Bản nháp do agent trực kênh soạn, hoặc do người tạo (Giới thi�
 
 Loại (`kind`): `message` "Tin nhắn" · `quotation` "Báo giá" · `contract` "Hợp đồng" · `reminder` "Nhắc việc" · `report` "Báo cáo" · `mcp_write` "Ghi hệ thống ngoài". Trạng thái: `pending` (chờ duyệt) · `approved` (đã duyệt, đang gửi) · `edited` (đã sửa, đang gửi) · `sent` (đã gửi / đã thực hiện) · `failed` · `rejected`.
 
-- `GET /drafts?status=pending|decided|all&kind=&cursor&limit=50` (`action.draft` hoặc `action.approve`, theo phạm vi) →
+- `GET /drafts?status=pending|decided|failed|all&kind=&cursor&limit=50` (`action.draft` hoặc `action.approve`, theo phạm vi; `failed` = gửi lỗi CHƯA có bản gửi lại, `total` là số đó) →
   ```json
   {"items": [{"id", "code": "ACT-0231", "kind": "quotation", "kind_label": "Báo giá", "title": "…",
      "agent": AgentRef | null, "created_by": UserRef | null, "created_at": "…", "status": "pending",
-     "hold_reason": "vượt ngưỡng 50.000.000 ₫" | null, "subject": PersonRef | GroupRef | null}],
+     "hold_reason": "vượt ngưỡng 50.000.000 ₫" | null, "subject": PersonRef | GroupRef | null,
+     "resent_by": {"id", "code"} | null}],   // bản gửi lỗi đã được gửi lại bằng bản mới này
    "next_cursor": null, "total": 6}
   ```
 - `GET /drafts/{id}` → item trên, cộng:
   ```json
   {"paragraphs": ["…"], "text": "…toàn văn…", "lang": "vi",
-   "target": {"channel": "zalo", "thread_type": "group|user", "group": GroupRef | null, "person": PersonRef | null} | null,
+   "target": {"channel": "zalo", "thread_type": "group|user", "group": GroupRef | null, "person": PersonRef | null,
+              "identity_id": "…" | null, "account": {"label": "…"} | null} | null,   // tin 1-1: đúng tài khoản nhận
    "amount_vnd": 84000000 | null, "autonomy_level": 4,
    "flags": {"writes_external": true, "personnel_related": false, "over_threshold": true},
    "approve_label": "Duyệt và gửi qua Zalo",
@@ -100,7 +102,7 @@ Loại (`kind`): `message` "Tin nhắn" · `quotation` "Báo giá" · `contract`
 - Quyết định lại một bản nháp đã quyết → `409 DRAFT_DECIDED`. Mọi thao tác vào Action Log (`draft.approved|edited|rejected|sent|failed`, kèm mức tự trị).
 - WebSocket: `draft.new` (item danh sách) và `draft.updated` `{"id", "status", "send_result"}`.
 
-Tạo bản nháp từ mã khác: `gh.biz.core.drafts.create_draft(...)` (xem docstring). Người tạo bản nháp bằng tay dùng `POST /drafts` (`action.draft`) `{"kind", "title", "text", "target": {"channel", "thread_type", "group_id"|"person_id"}, "amount_vnd"?, "subject": {"type": "person|group", "id"}?, "sources"?: [...]}` → `201` bản nháp `pending`.
+Tạo bản nháp từ mã khác: `gh.biz.core.drafts.create_draft(...)` (xem docstring). Người tạo bản nháp bằng tay dùng `POST /drafts` (`action.draft`) `{"kind", "title", "text", "target": {"channel", "thread_type", "group_id"|"person_id", "identity_id"?}, "amount_vnd"?, "subject": {"type": "person|group", "id"}?, "sources"?: [...], "resend_of"?: "<id bản gửi lỗi>"}` → `201` bản nháp `pending`. `resend_of` ("Gửi lại") nối bản mới về bản lỗi cũ (`parent_draft_id`): bản cũ ra khỏi `status=failed`; bản lỗi đã gửi lại hoặc không phải `failed`/khác loại → `409 ALREADY_RESENT` / `NOT_RESENDABLE`; huỷ bản mới thì bản cũ về lại.
 
 ## Agent trực kênh
 

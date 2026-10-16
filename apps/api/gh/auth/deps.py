@@ -64,7 +64,8 @@ async def optional_user(request: Request, db: AsyncSession = DB) -> service.Curr
     token = request.cookies.get(service.SESSION_COOKIE)
     if not token:
         return None
-    user = await service.load_session(db, token)
+    # F115: chỉ lời gọi ghi (người bấm) mới gia hạn phiên PIN; GET tự làm mới của giao diện thì không.
+    user = await service.load_session(db, token, renew_pin=request.method not in SAFE_METHODS)
     if user is None:
         return None
     # Giai đoạn 5.5 (RLS, ARCHITECTURE §8.3): đặt biến phiên cho phần còn lại của transaction request này,

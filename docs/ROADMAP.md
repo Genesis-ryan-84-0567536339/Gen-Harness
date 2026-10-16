@@ -1,4 +1,4 @@
-# Gen-Harness — Lộ trình tổng thể (cập nhật 16/10/2026, sau v0.1.60)
+# Gen-Harness — Lộ trình tổng thể (cập nhật 16/10/2026, sau v0.1.61)
 
 Nguồn chuẩn tiến độ. Mỗi đợt = 1 PR = 1 bản phát hành. CI xanh mới tạo bản thử (prerelease); E2E cài thật xanh mới tự
 nâng thành bản chính thức (latest); lịch tự cập nhật đêm đợi bản chính thức ra đủ 24 giờ. genh chỉ kiểm SHA-256 theo
@@ -37,10 +37,11 @@ Chi tiết từng bản ở [CHANGELOG.md](../CHANGELOG.md); tóm tắt theo ch�
 - **v0.1.58 (11/10, bản vá nóng)**: Antigravity CLI đòi mức suy nghĩ — Kiểm tra kết nối thử lại với mức (≤ 4 lượt) và tự lưu model khi nguồn CLI mất dòng model, lượt Gen của Owner tự lành, bảng gán nói lý do thật thay "chưa có nguồn phù hợp", nhãn "Sắp hết hạn" của agy theo khoá làm mới token ([v0.1.58.md](releases/v0.1.58.md)).
 - **v0.1.59 (16/10, bản vá)**: sửa quét QR WhatsApp (chưa kiểm với máy chủ WhatsApp thật, Nợ #35) — mã WhatsApp vẽ lớn, xử lý `companion_reg_refresh`, socket lỗi thử lại có giãn cách thay vì mở lại vô hạn, phiên bản WA Web mới (yêu cầu tự nhận là bridge), Baileys ghim `7.0.0-rc14`, thẻ kênh nói lý do lỗi tiếng Việt; thẻ "Hôm nay của Sếp" đọc lại ngay sau Kiểm tra nguồn CLI xanh ([v0.1.59.md](releases/v0.1.59.md)).
 - **v0.1.60 (16/10)**: **Mặt tiền Owner v2** — 5 trụ cột có số thật (Tình báo, Thông tin, Quan hệ, Phân tích, Việc), API chỉ đọc `/owner/brief|feed|insights|proposals`, hệ hình ảnh mới + lính gác thiết kế; **Thiết lập một màn 3 bước**, mọi "Chọn model" về `/setup?buoc=nguon-ai`, Cài đặt 4 khối (Nợ #28 xong; [v0.1.60.md](releases/v0.1.60.md)).
+- **v0.1.61 (16/10)**: **Đợt A sửa lỗi sau kiểm kê** — mã PIN cho người được giao quyền (tự đặt lần đầu) + phiên PIN hết hạn thật, bảng quyền đổi cả cột + tên vai trò tiếng Việt + mẫu agent (migration 0036), gửi lỗi/mcp_write/tin 1-1 trung thực + nút Gửi lại, gộp người đủ bảng, thẻ Cập nhật, lưới chống tái phát (`check_terms.py` + Playwright duyệt mọi route); còn Nợ #38–#41 ([v0.1.61.md](releases/v0.1.61.md)).
 
-## Tiếp theo (sau v0.1.60)
+## Tiếp theo (sau v0.1.61)
 Kế hoạch tổng của đợt kiểm toán kết thúc ở v0.1.50; không còn đợt đánh số sẵn. Thứ tự đề xuất:
-0. **Bản kế tiếp**: Boss dùng thử Mặt tiền v2 (v0.1.60) rồi góp ý; Boss gửi kết quả "Thử 12 câu mẫu" của Jev (HANDOFF › Boss phải làm — v0.1.55) ⇒ chốt ngưỡng lọc trước; Owner quét thử WhatsApp QR (Nợ #35); dọn còn lại (Nợ #29, #36).
+0. **Bản kế tiếp**: Boss dùng thử Mặt tiền v2 (v0.1.60) và đợt A (v0.1.61: người được giao quyền tự đặt PIN, nút Gửi lại) rồi góp ý; đợt B theo Nợ #38–#41 khi Boss chọn; Boss gửi kết quả "Thử 12 câu mẫu" của Jev (HANDOFF › Boss phải làm — v0.1.55) ⇒ chốt ngưỡng lọc trước; Owner quét thử WhatsApp QR (Nợ #35); dọn còn lại (Nợ #29, #36).
    **Dùng thử Gen hướng dẫn một tuần** (3 bước ở [HANDOFF](reports/HANDOFF-v0.1.1.md) › Boss phải làm — v0.1.54), rồi nói cho Claude biết thẻ có đúng việc, chuông có phiền không; các ý để sau nằm ở mục Nợ #20–#25.
 1. **Boss nghiệm thu thật** các tính năng chưa từng chạy với tài khoản thật (danh sách và cách làm ở [HANDOFF](reports/HANDOFF-v0.1.1.md) › Việc dở): Gen-hub quyền đọc + ghi Kho,
    Telegram, Truy cập từ xa (Tailscale), Facebook trả lời — từ v0.1.55 đều là tuỳ chọn (chỉ "nguồn AI" bắt buộc). Kết quả tự ghi ở Việc Sếp cần làm.
@@ -90,6 +91,10 @@ Việc đã hứa hoặc đã biết mà chưa làm. Mỗi dòng ghi điều ki�
 | 35 | **Kiểm WhatsApp QR với máy chủ WhatsApp thật** (v0.1.59) | Chưa kiểm được: máy kiểm thử bị chặn mạng tới máy chủ WhatsApp. Điều kiện mở: Owner quét thử theo mục "Việc Boss phải làm" của v0.1.59 rồi báo kết quả (ghi vào `docs/releases/v0.1.59.md`) |
 | 36 | **Mã chết trình thiết lập cũ** (v0.1.60): `Step1Welcome`, `Step2Owner`, `Step3Org`, `ComingSoonStep`, `Step12Finish` (chỉ `test/unit/legacy-wizard.tsx` còn dùng) và ba bản đăng nhập CLI ở `BossChecksPage` chưa gộp về `CliLoginPanel` | Chưa làm, nhỏ — dọn khi sửa trình thiết lập lần tới |
 | 37 | **Bảng "Cần chăm" ở Quan hệ, máy tính 1024px** (v0.1.60): cột hồ sơ chiếm 4/12 nên bảng phải cuộn ngang mới thấy "Cơ hội mở" và nút "Nhờ Gen soạn tin" (ở 1440/1920 đủ chỗ; lính gác bố cục chấp nhận vì là vùng cuộn có chủ đích) | Chưa làm, nhỏ — ở 1024 đổi bảng sang danh sách xếp chồng hoặc đưa hồ sơ xuống dưới |
+| 38 | **Nháp công cụ ghi (mcp_write) chưa thực thi được** (v0.1.61, Q8-1): duyệt chỉ giữ yêu cầu ("Chưa hỗ trợ thực thi tool ghi"), không gọi công cụ; nhãn "Đã duyệt — chưa thực hiện" | Chưa làm. Cần QD mới về ghi ra Gen-hub ngoài Kho (cùng Nợ #11); luật cứng: Gen chỉ đề xuất, mọi ghi qua Xác nhận + mã PIN |
+| 39 | **Chữ cấm còn trong baseline `check_terms`** (v0.1.61): 51 chỗ ("khóa", "Kho tri thức", "nhập PIN", "Agent & Model" làm tên màn, tên vai tiếng Anh trong câu, "Nghe im lặng"…) ở `.github/scripts/terms.json` › `baseline` | Chưa làm, dọn dần: baseline chỉ được giảm (sửa xong thì hạ số trong `terms.json`). Gắn khi chạm tệp có chữ cấm |
+| 40 | **Lỗi hiện trạng của route-crawl** (v0.1.61): 44 mục trong `terms.json` › `crawl_baseline` (khoá `cỡ\|route\|luật`) — lỗi console/4xx/5xx/chữ cấm có sẵn lúc dựng lưới; "DƯ" (baseline cao hơn thực tế) chỉ cảnh báo, `CRAWL_STRICT_STALE=1` để bắt đỏ | Chưa làm. Sửa gốc từng mục rồi hạ baseline (`CRAWL_LOWER_BASELINE=1`); khi ổn định bật `CRAWL_STRICT_STALE=1` trong CI |
+| 41 | **Tên tệp còn hậu tố `v016x`** (v0.1.61): migration `0036_v016x_danh_muc`, `test_danh_muc_v016x`, `test_sua_review_dot_a_v016x`, `route-crawl-v016x.spec.ts` (đợt lên kế hoạch trước khi chốt số bản) | Không đổi: đổi tên migration đã phát hành làm lệch lịch sử alembic; test/spec đổi tên khi chạm lần tới |
 
 ## Bản phản ứng (hotfix)
 Các bản sửa nóng thật, không nằm trong kế hoạch đợt. Đối chiếu `git log origin/main` và nhánh `hotfix/*`:

@@ -106,11 +106,14 @@ async def test_pin_flow_and_lockout(owner_api, db) -> None:  # type: ignore[no-u
 
 
 async def test_pin_change(owner_api) -> None:  # type: ignore[no-untyped-def]
+    """v0.1.61 (F088): chỉ còn MỘT đường đổi PIN — POST /account/pin bằng mật khẩu (PUT /auth/pin đã gỡ)."""
     api: Api = owner_api
     await api.send("POST", "/auth/pin/verify", {"pin": OWNER["pin"]})
-    r = await api.send("PUT", "/auth/pin", {"current_pin": OWNER["pin"], "new_pin": "13579"})
+    r = await api.send("POST", "/account/pin", {"current_password": OWNER["password"], "new_pin": "13579",
+                                                "new_pin_confirm": "13579"})
     assert r.status_code == 422
-    r = await api.send("PUT", "/auth/pin", {"current_pin": OWNER["pin"], "new_pin": "135790"})
+    r = await api.send("POST", "/account/pin", {"current_password": OWNER["password"], "new_pin": "135790",
+                                                "new_pin_confirm": "135790"})
     assert r.status_code == 204
     r = await api.send("POST", "/auth/pin/verify", {"pin": "135790"})
     assert r.status_code == 200

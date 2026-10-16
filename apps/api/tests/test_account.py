@@ -112,14 +112,20 @@ async def test_change_pin(owner_api: Api) -> None:
     assert await _actions("account.pin_changed") == ["ok"]
 
 
-async def test_change_pin_without_pin_concept(owner_api: Api) -> None:
+async def test_set_first_pin_when_account_has_none(owner_api: Api) -> None:
+    """v0.1.61 (F071/F097): tài khoản chưa có PIN đặt PIN lần đầu bằng mật khẩu (không còn 409 NO_PIN).
+    Luồng người được mời thật nằm ở tests/test_pin_nguoi_duoc_moi.py."""
     async with admin_sessionmaker()() as db:
         await db.execute(text("UPDATE core.users SET pin_hash = NULL"))
         await db.commit()
+    assert (await owner_api.get("/account")).json()["has_pin"] is False
     r = await owner_api.send("POST", "/account/pin", {"current_password": OWNER["password"], "new_pin": "135790",
                                                       "new_pin_confirm": "135790"})
-    assert r.status_code == 409 and r.json()["code"] == "NO_PIN"
-    assert (await owner_api.get("/account")).json()["has_pin"] is False
+    assert r.status_code == 204, r.text
+    assert (await owner_api.get("/account")).json()["has_pin"] is True
+    assert (await owner_api.send("POST", "/auth/pin/verify", {"pin": "135790"})).status_code == 200
+    assert await _actions("account.pin_set") == ["ok"]
+    assert await _actions("account.pin_changed") == []
 
 
 async def test_revoke_sessions(owner_api: Api, app: object) -> None:

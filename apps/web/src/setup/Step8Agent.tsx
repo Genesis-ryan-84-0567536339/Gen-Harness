@@ -8,21 +8,22 @@ import { StepFrame } from './StepFrame';
 import { describeError, type StepProps } from './types';
 
 /**
- * Mẫu agent (docs/handoff/06 bước 8) — điền sẵn tên/vai trò, Sếp sửa lại tuỳ ý. v0.1.55 (Thiết lập gọn): chọn mẫu là xong;
+ * Mẫu agent (docs/handoff/06 bước 8) — khoá mẫu PHẢI trùng `TEMPLATES` của máy chủ (agents_api: commercial, key_account, admin, cs,
+ * recruiter, secretary); lệch khoá thì agent tạo ở bước 8 không sửa được (PATCH báo "Mẫu không tồn tại"). — điền sẵn tên/vai trò, Sếp sửa lại tuỳ ý. v0.1.55 (Thiết lập gọn): chọn mẫu là xong;
  * "Tạo trống" cũng có tên + vai trò mặc định (cùng chữ với `STEP8_DEFAULT_*` của api) nên luôn bấm Tiếp tục được.
  */
 const TEMPLATES: Array<{ value: string; label: string; name: string; role: string }> = [
   { value: '', label: 'Tạo trống', name: 'Trợ lý', role: 'Theo dõi tin nhắn, báo việc quan trọng và soạn sẵn trả lời chờ Sếp duyệt.' },
-  { value: 'sales', label: 'Trợ lý thương mại', name: 'Trợ lý Kinh doanh', role: 'Theo dõi nhu cầu mua bán trong nhóm, báo cơ hội và soạn sẵn báo giá chờ duyệt.' },
+  { value: 'commercial', label: 'Trợ lý thương mại', name: 'Trợ lý Kinh doanh', role: 'Theo dõi nhu cầu mua bán trong nhóm, báo cơ hội và soạn sẵn báo giá chờ duyệt.' },
   { value: 'key_account', label: 'Khách hàng lớn', name: 'Trợ lý Khách hàng lớn', role: 'Chăm sóc khách hàng quan trọng, nhắc lịch hẹn và theo dõi đơn đang mở.' },
-  { value: 'ops', label: 'Admin hậu cần', name: 'Trợ lý Hậu cần', role: 'Theo dõi giao nhận, tồn kho và việc đến hạn của đội vận hành.' },
+  { value: 'admin', label: 'Admin hậu cần', name: 'Trợ lý Hậu cần', role: 'Theo dõi giao nhận, tồn kho và việc đến hạn của đội vận hành.' },
   { value: 'cs', label: 'CSKH', name: 'Trợ lý CSKH', role: 'Trả lời câu hỏi thường gặp, ghi nhận khiếu nại và chuyển việc khó cho người phụ trách.' },
   { value: 'recruiter', label: 'Tuyển dụng', name: 'Trợ lý Tuyển dụng', role: 'Ghi nhận ứng viên, lịch phỏng vấn và nhắc việc tuyển dụng.' },
   { value: 'secretary', label: 'Thư ký cá nhân', name: 'Thư ký', role: 'Tóm tắt tin nhắn quan trọng, nhắc lịch và soạn sẵn trả lời cho Sếp duyệt.' },
 ];
 
 /** Mẫu chọn sẵn khi mở bước 8 (Trợ lý thương mại). */
-const DEFAULT_TEMPLATE = 'sales';
+const DEFAULT_TEMPLATE = 'commercial';
 
 /**
  * v0.1.30: thử trò chuyện lỗi. `try_error` là chuỗi từ v0.1.30; máy chủ cũ trả đối tượng `{reasons}` — trước đây vẽ

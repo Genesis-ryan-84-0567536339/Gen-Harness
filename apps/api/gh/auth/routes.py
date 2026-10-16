@@ -9,11 +9,11 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gh.auth import login_guard, service
-from gh.auth.deps import client_ip, current_user, require_pin
+from gh.auth.deps import client_ip, current_user
 from gh.chassis import actionlog
 from gh.config import get_settings
 from gh.db import DB
-from gh.errors import ApiError, field_errors
+from gh.errors import ApiError
 from gh.gen import store as gen_store
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -26,11 +26,6 @@ class LoginIn(BaseModel):
 
 class PinIn(BaseModel):
     pin: str = Field(max_length=16)
-
-
-class PinChangeIn(BaseModel):
-    current_pin: str = Field(max_length=16)
-    new_pin: str = Field(max_length=16)
 
 
 def set_session_cookies(response: Response, s: service.NewSession) -> None:
@@ -160,25 +155,8 @@ async def pin_verify(body: PinIn, user: service.CurrentUser = Depends(current_us
     if result.ok:
         return {"pin_verified_until": _iso(result.pin_verified_until)}
     await db.commit()  # số lần sai và dòng nhật ký phải được lưu dù trả lỗi
+    if result.no_pin:
+        raise ApiError(409, "PIN_NOT_SET", service.PIN_NOT_SET)
     if result.locked_until is not None:
         raise _pin_locked(result.locked_until)
     raise ApiError(401, "PIN_INVALID", "Mã PIN không đúng", attempts_left=result.attempts_left)
-
-
-@router.put("/pin", status_code=204)
-async def pin_change(body: PinChangeIn, response: Response,
-                     user: service.CurrentUser = Depends(require_pin("pin.change")),
-                     db: AsyncSession = DB) -> Response:
-    if not service.valid_pin(body.new_pin):
-        raise field_errors({"new_pin": "PIN gồm đúng 6 chữ số"})
-    check = await service.verify_pin(db, user, body.current_pin)
-    if not check.ok:
-        await db.commit()
-        if check.locked_until is not None:
-            raise _pin_locked(check.locked_until)
-        raise ApiError(401, "PIN_INVALID", "Mã PIN hiện tại không đúng", attempts_left=check.attempts_left)
-    await service.set_pin(db, user.id, body.new_pin)
-    await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
-                           action="auth.pin_changed", ip=user.ip)
-    response.status_code = 204
-    return response

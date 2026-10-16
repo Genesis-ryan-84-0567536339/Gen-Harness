@@ -1,10 +1,13 @@
 """Hợp nhất danh tính (spec G2, ARCHITECTURE §9): đề xuất có % + cơ sở, gộp/tách tay, lịch sử, đảo ngược.
 
-Hệ thống không tự gộp. Gộp: mọi tài khoản kênh, thành viên nhóm, đơn vị ý nghĩa và sổ tay của hồ sơ bị gộp chuyển sang
-hồ sơ giữ lại; hồ sơ bị gộp trỏ `merged_into_id` (không xoá). Nhật ký lưu đủ ID để đảo ngược chính xác.
+Hệ thống không tự gộp. Gộp: mọi tài khoản kênh, thành viên nhóm, đơn vị ý nghĩa, sổ tay VÀ mọi dòng nghiệp vụ trỏ về
+hồ sơ bị gộp (cơ hội, deal, việc, cảnh báo, lời hứa, điểm…; xem `PERSON_REFS`) chuyển sang hồ sơ giữ lại; hồ sơ bị gộp
+trỏ `merged_into_id` (không xoá). Nhật ký lưu đủ ID để đảo ngược chính xác. "Không phải" quyết theo cặp NGƯỜI.
 """
 
 import uuid
+from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 import orjson
@@ -13,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gh.data.common import CHANNEL_NAME
 from gh.errors import ApiError, conflict, not_found
+from gh.refinery import scoring
 
 HIGH, MID = 0.85, 0.65
 MAX_NEW = 200
@@ -78,6 +82,14 @@ WHERE pa.id <> pb.id
        OR similarity(lower(pa.display_name), lower(pb.display_name)) >= :th)
   AND NOT EXISTS (SELECT 1 FROM core.identity_merge_candidates m
                   WHERE LEAST(m.identity_a, m.identity_b) = x.a AND GREATEST(m.identity_a, m.identity_b) = x.b)
+  -- v0.1.61 (F059): Sếp đã trả lời "Không phải" cho cặp NGƯỜI này (qua bất kỳ cặp tài khoản nào) ⇒ không hỏi lại,
+  -- kể cả với tài khoản anh em mới. Tra theo khoá LEAST/GREATEST của chỉ mục duy nhất 0003.
+  AND NOT EXISTS (SELECT 1 FROM core.person_identities xa
+                  JOIN core.person_identities xb ON xb.person_id = pb.id
+                  JOIN core.identity_merge_candidates m ON m.status = 'rejected'
+                   AND LEAST(m.identity_a, m.identity_b) = LEAST(xa.id, xb.id)
+                   AND GREATEST(m.identity_a, m.identity_b) = GREATEST(xa.id, xb.id)
+                  WHERE xa.person_id = pa.id)
 ORDER BY 3 DESC, 4 DESC LIMIT :lim
 """
 
@@ -229,9 +241,105 @@ async def stats(db: AsyncSession, org_id: uuid.UUID) -> dict[str, int]:
 
 # ─── Gộp / tách / đảo ngược ────────────────────────────────────────────────
 
+@dataclass(frozen=True)
+class PersonRef:
+    """Một cột nghiệp vụ trỏ về hồ sơ người. `subject_type` ≠ None: cột là `subject_id` đa hình, chỉ dòng
+    `subject_type = <giá trị>` mới là người. `guard`: điều kiện thêm (bí danh bảng `t`) để dòng KHÔNG va chạm
+    ràng buộc duy nhất khi dời; dòng không đạt ở lại hồ sơ cũ."""
+    table: str
+    col: str
+    subject_type: str | None = None
+    guard: str | None = None
+
+
+#: Mọi bảng nghiệp vụ trỏ về người, dời theo `merged_into_id` khi gộp (v0.1.61, F054). Thêm bảng mới trỏ về người ⇒ thêm
+#: vào đây hoặc vào PERSON_REFS_EXCLUDED kèm lý do — `test_gop_nguoi_v016x` dò information_schema để không sót.
+PERSON_REFS: tuple[PersonRef, ...] = (
+    PersonRef("biz.opportunities", "person_id"),
+    PersonRef("biz.deals", "person_id"),
+    PersonRef("biz.market_signals", "person_id"),
+    # Chỉ mục duy nhất theo (tổ chức, người, kỳ) cho đánh giá hệ thống chưa bị ghi đè.
+    PersonRef("biz.people_reviews", "person_id", guard="""(t.overridden_by IS NOT NULL OR NOT EXISTS (
+        SELECT 1 FROM biz.people_reviews x WHERE x.org_id = t.org_id AND x.person_id = :d
+          AND x.period_start = t.period_start AND x.period_end = t.period_end AND x.overridden_by IS NULL))"""),
+    PersonRef("biz.promises", "promiser_person_id"),
+    PersonRef("biz.promises", "to_person_id"),
+    PersonRef("biz.documents", "owner_person_id"),
+    PersonRef("biz.tasks", "subject_id", "person"),
+    PersonRef("biz.alerts", "subject_id", "person"),
+    PersonRef("biz.cases", "subject_id", "person"),
+    PersonRef("biz.action_drafts", "subject_id", "person"),
+    PersonRef("core.assignments", "subject_id", "person"),
+)
+PERSON_REFS_COLUMNS: tuple[tuple[str, str], ...] = tuple((r.table, r.col) for r in PERSON_REFS)
+#: Cột trỏ về người KHÔNG dời bằng PERSON_REFS (kèm lý do).
+PERSON_REFS_EXCLUDED: dict[str, str] = {
+    "core.person_identities.person_id": "tài khoản kênh — `_move` dời riêng",
+    "clean.meaning_units.person_id": "đơn vị ý nghĩa — `_move` dời riêng",
+    "core.group_members.person_id": "thành viên nhóm — `_move` sao sang hồ sơ giữ",
+    "memory.notebooks.subject_id": "sổ tay — `_move` chuyển mục sang sổ hồ sơ giữ",
+    "clean.current_scores.subject_id": "điểm hiện tại — `_move` lưu rồi xoá, gộp xong tính lại cho hồ sơ giữ",
+    "clean.score_snapshots.subject_id": "lịch sử điểm bất biến (chỉ thêm, không sửa)",
+    "refinery.item_marks.subject_id": "dấu khử trùng/chất lượng của tin — dữ liệu máy, không hiển thị",
+    "core.users.person_id": "liên kết tài khoản nhân sự nội bộ — không phải khách để gộp",
+    "ops.data_requests.person_id": "yêu cầu xuất/xoá dữ liệu — bằng chứng pháp lý giữ nguyên hồ sơ gốc",
+    "core.identity_merge_log.from_person": "chính nhật ký gộp",
+    "core.identity_merge_log.to_person": "chính nhật ký gộp",
+}
+_REFS_BY_KEY = {f"{r.table}.{r.col}": r for r in PERSON_REFS}
+
+
+def _ref_where(r: PersonRef) -> str:
+    return f"t.{r.col} = :s" + (f" AND t.subject_type = '{r.subject_type}'" if r.subject_type else "")
+
+
+async def _move_refs(db: AsyncSession, src: uuid.UUID, dst: uuid.UUID) -> dict[str, list[str]]:
+    """Dời mọi dòng nghiệp vụ trỏ về `src` sang `dst`; trả {"bảng.cột": [id dòng đã dời]} để đảo ngược chính xác."""
+    out: dict[str, list[str]] = {}
+    for r in PERSON_REFS:
+        guard = f" AND {r.guard}" if r.guard else ""
+        ids = (await db.execute(text(f"""UPDATE {r.table} t SET {r.col} = :d WHERE {_ref_where(r)}{guard}
+                                         RETURNING t.id"""),  # noqa: S608
+                                {"s": src, "d": dst})).scalars().all()
+        if ids:
+            out[f"{r.table}.{r.col}"] = [str(i) for i in ids]
+    return out
+
+
+async def _pin_dm_targets(db: AsyncSession, *people: uuid.UUID) -> None:
+    """Bản nháp 1-1 đang chờ duyệt chỉ ghi `person_id` + kênh trong đích gửi. Sau gộp, hồ sơ giữ có thể có 2 tài
+    khoản cùng kênh nên "tài khoản cũ nhất" có thể không phải tài khoản người đó vốn dùng. Trước khi dời, ghi cố định
+    `identity_id` (tài khoản cũ nhất của đúng người đó trên kênh đó) vào đích; tài khoản đi theo người nên đích vẫn
+    đúng sau gộp VÀ sau đảo ngược.
+    Chạy lại an toàn: chỉ đụng nháp chưa có `identity_id`. Nháp đã duyệt/gửi không đụng (permit đã chốt thread)."""
+    await db.execute(text("""
+        UPDATE biz.action_drafts d SET body = jsonb_set(d.body, '{target,identity_id}', to_jsonb(pi.id::text))
+        FROM (SELECT DISTINCT ON (i.person_id, c.type) i.id, i.person_id, c.type AS channel
+              FROM core.person_identities i JOIN core.channels c ON c.id = i.channel_id
+              WHERE i.person_id = ANY(:ps) ORDER BY i.person_id, c.type, i.first_seen_at, i.id) pi
+        WHERE d.status = 'pending' AND d.body->'target'->>'thread_type' = 'user'
+          AND d.body->'target'->>'identity_id' IS NULL
+          AND d.body->'target'->>'person_id' = pi.person_id::text AND d.body->'target'->>'channel' = pi.channel"""),
+        {"ps": list(people)})
+
+
+async def _move_scores(db: AsyncSession, src: uuid.UUID) -> list[dict[str, Any]]:
+    """Điểm hiện tại của hồ sơ bị gộp: lưu vào snapshot rồi xoá (hồ sơ giữ được tính lại từ đơn vị ý nghĩa đã dời)."""
+    rows = (await db.execute(text("""DELETE FROM clean.current_scores WHERE subject_type = 'person' AND subject_id = :s
+                                     RETURNING dimension, value, trend, snapshot_id, updated_at"""),
+                             {"s": src})).all()
+    return [{"dimension": r.dimension, "value": str(r.value), "trend": r.trend, "snapshot_id": str(r.snapshot_id),
+             "updated_at": r.updated_at.isoformat()} for r in rows]
+
+
+async def _refresh_scores(db: AsyncSession, org_id: uuid.UUID, person_id: uuid.UUID) -> None:
+    await scoring.refresh_subject(db, org_id, "person", person_id, await scoring.weights(db, org_id))
+
+
 async def _move(db: AsyncSession, src: uuid.UUID, dst: uuid.UUID, identity_ids: list[uuid.UUID] | None,
                 unit_ids: list[uuid.UUID] | None = None) -> dict[str, Any]:
-    """Chuyển tài khoản kênh (tất cả hoặc danh sách), đơn vị ý nghĩa, thành viên nhóm, sổ tay từ src sang dst."""
+    """Chuyển tài khoản kênh (tất cả hoặc danh sách), đơn vị ý nghĩa, thành viên nhóm, sổ tay và mọi dòng nghiệp vụ
+    (`PERSON_REFS`) từ src sang dst; điểm của src được lưu rồi xoá."""
     if identity_ids is None:
         identity_ids = list((await db.execute(text("SELECT id FROM core.person_identities WHERE person_id = :p"),
                                               {"p": src})).scalars().all())
@@ -258,8 +366,11 @@ async def _move(db: AsyncSession, src: uuid.UUID, dst: uuid.UUID, identity_ids: 
                                                    RETURNING id"""), {"d": nb_dst.id, "s": nb_src.id})).scalars().all())
         await notebook.recount(db, nb_src.id)
         await notebook.recount(db, nb_dst.id)
+    refs = await _move_refs(db, src, dst)
+    scores = await _move_scores(db, src)
     return {"identities": [str(i) for i in identity_ids], "units": [str(u) for u in unit_ids],
-            "groups_added": [str(g) for g in groups], "entries": [str(e) for e in entry_ids]}
+            "groups_added": [str(g) for g in groups], "entries": [str(e) for e in entry_ids],
+            "refs": refs, "scores": scores}
 
 
 async def merge(db: AsyncSession, org_id: uuid.UUID, candidate_id: uuid.UUID, actor: uuid.UUID) -> dict[str, Any]:
@@ -272,7 +383,9 @@ async def merge(db: AsyncSession, org_id: uuid.UUID, candidate_id: uuid.UUID, ac
     if c.a_pid == c.b_pid:
         raise conflict("ALREADY_MERGED", "Hai tài khoản đã thuộc cùng một người")
     keep, drop = await _pick_keep(db, c.a_pid, c.b_pid)
+    await _pin_dm_targets(db, keep, drop)      # bản nháp 1-1 đang chờ giữ đúng tài khoản nhận qua gộp/đảo ngược
     moved = await _move(db, drop, keep, None)
+    await _refresh_scores(db, org_id, keep)
     await db.execute(text("""UPDATE core.persons SET merged_into_id = :k,
                              attrs = attrs || '{"auto": false}' WHERE id = :d"""), {"k": keep, "d": drop})
     await db.execute(text("""UPDATE core.persons SET attrs = attrs || '{"auto": false}' WHERE id = :k"""), {"k": keep})
@@ -285,6 +398,26 @@ async def merge(db: AsyncSession, org_id: uuid.UUID, candidate_id: uuid.UUID, ac
         {"o": org_id, "f": drop, "t": keep, "ids": [uuid.UUID(i) for i in moved["identities"]], "u": actor,
          "c": candidate_id, "s": orjson.dumps(moved).decode()})).scalar_one()
     return {"person": await person_ref(db, keep), "merged": await person_ref(db, drop), "log_id": str(log_id)}
+
+
+async def reject(db: AsyncSession, org_id: uuid.UUID, candidate_id: uuid.UUID, actor: uuid.UUID) -> int:
+    """"Không phải": quyết cho cả cặp NGƯỜI — mọi đề xuất đang chờ giữa hai hồ sơ này (các cặp tài khoản anh em) cùng bị
+    từ chối; lượt dò sau không đề xuất lại (DETECT_SQL). Trả số đề xuất đã từ chối."""
+    c = (await db.execute(text("""
+        SELECT ia.person_id AS a_pid, ib.person_id AS b_pid FROM core.identity_merge_candidates m
+        JOIN core.person_identities ia ON ia.id = m.identity_a JOIN core.person_identities ib ON ib.id = m.identity_b
+        WHERE m.id = :i AND m.org_id = :o AND m.status = 'pending' FOR UPDATE OF m"""),
+        {"i": candidate_id, "o": org_id})).one_or_none()
+    if c is None:
+        raise not_found("Cặp đề xuất đang chờ")
+    n = (await db.execute(text("""
+        UPDATE core.identity_merge_candidates m SET status = 'rejected', decided_by = :u, decided_at = now()
+        FROM core.person_identities ia, core.person_identities ib
+        WHERE ia.id = m.identity_a AND ib.id = m.identity_b AND m.org_id = :o AND m.status = 'pending'
+          AND LEAST(ia.person_id, ib.person_id) = LEAST(CAST(:pa AS uuid), CAST(:pb AS uuid))
+          AND GREATEST(ia.person_id, ib.person_id) = GREATEST(CAST(:pa AS uuid), CAST(:pb AS uuid))"""),
+        {"u": actor, "o": org_id, "pa": c.a_pid, "pb": c.b_pid})).rowcount  # type: ignore[attr-defined]
+    return int(n)
 
 
 async def _pick_keep(db: AsyncSession, a: uuid.UUID, b: uuid.UUID) -> tuple[uuid.UUID, uuid.UUID]:
@@ -366,6 +499,21 @@ async def revert(db: AsyncSession, org_id: uuid.UUID, log_id: uuid.UUID, actor: 
         if added:
             await db.execute(text("DELETE FROM core.group_members WHERE person_id = :t AND group_id = ANY(:g)"),
                              {"t": lg.to_person, "g": added})
+        # Dòng nghiệp vụ đã dời (v0.1.61): trả về hồ sơ cũ — chỉ dòng còn trỏ vào hồ sơ giữ. Khoá lạ bị bỏ qua.
+        for key, row_ids in (snap.get("refs") or {}).items():
+            r = _REFS_BY_KEY.get(key)
+            if r is not None and row_ids:
+                await db.execute(text(f"""UPDATE {r.table} t SET {r.col} = :f
+                                          WHERE t.id = ANY(:ids) AND t.{r.col} = :t"""),  # noqa: S608
+                                 {"f": lg.from_person, "t": lg.to_person, "ids": [uuid.UUID(i) for i in row_ids]})
+        for sc in snap.get("scores") or []:
+            await db.execute(text("""
+                INSERT INTO clean.current_scores (subject_type, subject_id, dimension, value, trend, snapshot_id,
+                                                  updated_at)
+                VALUES ('person', :f, :d, CAST(:v AS numeric), :tr, CAST(:sid AS uuid), :at)
+                ON CONFLICT (subject_type, subject_id, dimension) DO NOTHING"""),
+                {"f": lg.from_person, "d": sc["dimension"], "v": sc["value"], "tr": sc.get("trend"),
+                 "sid": sc["snapshot_id"], "at": datetime.fromisoformat(sc["updated_at"])})
         entries = [uuid.UUID(e) for e in snap.get("entries", [])]
         if entries:
             nb = (await db.execute(text("""SELECT id FROM memory.notebooks WHERE subject_type = 'person'
@@ -377,6 +525,7 @@ async def revert(db: AsyncSession, org_id: uuid.UUID, log_id: uuid.UUID, actor: 
             await db.execute(text("""UPDATE core.identity_merge_candidates SET status = 'pending', decided_by = NULL,
                                      decided_at = NULL WHERE id = :c"""), {"c": lg.candidate_id})
         restored = lg.from_person
+        await _refresh_scores(db, org_id, lg.to_person)  # hồ sơ giữ mất các đơn vị đã trả ⇒ tính lại điểm
     else:
         # Tách: trả tài khoản + đơn vị về hồ sơ gốc; hồ sơ tách ra trỏ về gốc.
         await db.execute(text("UPDATE core.person_identities SET person_id = :f WHERE id = ANY(:ids)"),

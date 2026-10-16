@@ -192,7 +192,7 @@ function DecisionsPanel() {
 function TemplatesPanel({ canManage, onUseTemplate }: { canManage: boolean; onUseTemplate: (t: AgentTemplate) => void }) {
   const templates = useAgentTemplates();
   return (
-    <Panel genTarget="agents.templates" title="Mẫu có sẵn" kicker="Template tùy chọn · không phải bản sắc hệ thống" bodyClass="ag-templates" label="Mẫu có sẵn">
+    <Panel genTarget="agents.templates" title="Mẫu có sẵn" kicker="Mẫu tuỳ chọn · không phải bản sắc hệ thống" bodyClass="ag-templates" label="Mẫu có sẵn">
       {templates.isPending ? (
         <SkeletonLines rows={4} padding="8px 16px" />
       ) : templates.isError ? (
@@ -235,6 +235,9 @@ function AgentFormDialog({ agent, template, onClose }: { agent: AgentIdentity | 
   const create = useCreateAgent();
   const update = useUpdateAgent();
   const channels = useChannels();
+  // F077: vai không có system.manage (vd. Kiểm soát) chỉ XEM danh tính agent — không có nút Lưu, các ô bị khoá.
+  const canManage = useCan('system.manage');
+  const readOnly = !!agent && !canManage;
   const [name, setName] = useState(agent?.name ?? template?.name ?? '');
   const [roleDesc, setRoleDesc] = useState(agent?.role_desc ?? template?.role_desc ?? '');
   const [voice, setVoice] = useState(agent?.voice ?? template?.voice ?? '');
@@ -247,7 +250,7 @@ function AgentFormDialog({ agent, template, onClose }: { agent: AgentIdentity | 
 
   const mutation = agent ? update : create;
   const submit = () => {
-    if (!name.trim() || !roleDesc.trim() || !voice.trim() || !speakWhen.trim()) return;
+    if (readOnly || !name.trim() || !roleDesc.trim() || !voice.trim() || !speakWhen.trim()) return;
     if (agent) {
       // v0.1.45 (F-20): chỉ gửi rào chắn (mức tự trị / điều cấm / phạm vi kênh) khi đổi — sửa tên không hỏi PIN.
       const patch = agentPatchBody(agent, { name, roleDesc, voice, speakWhen, forbidden, picked, scopeIds });
@@ -276,17 +279,29 @@ function AgentFormDialog({ agent, template, onClose }: { agent: AgentIdentity | 
       open
       onClose={onClose}
       width={480}
-      title={agent ? `Sửa ${agent.name}` : 'Tạo agent mới'}
-      kicker={template && !agent ? `Prefill từ mẫu ${template.name} — không mặc định bắt buộc, chỉnh tự do` : 'Danh tính do Sếp tự định nghĩa'}
+      title={readOnly ? `Xem ${agent.name}` : agent ? `Sửa ${agent.name}` : 'Tạo agent mới'}
+      kicker={
+        readOnly
+          ? 'Chỉ xem — chỉ Owner sửa được danh tính agent'
+          : template && !agent
+            ? `Điền sẵn từ mẫu ${template.name} — không bắt buộc, chỉnh tự do`
+            : 'Danh tính do Sếp tự định nghĩa'
+      }
       actions={
-        <>
+        readOnly ? (
           <Button variant="secondary" onClick={onClose}>
-            Huỷ
+            Đóng
           </Button>
-          <Button variant="primary" loading={mutation.isPending} disabled={!name.trim() || !roleDesc.trim() || !voice.trim() || !speakWhen.trim()} onClick={submit}>
-            {agent ? 'Lưu thay đổi' : 'Tạo agent'}
-          </Button>
-        </>
+        ) : (
+          <>
+            <Button variant="secondary" onClick={onClose}>
+              Huỷ
+            </Button>
+            <Button variant="primary" loading={mutation.isPending} disabled={!name.trim() || !roleDesc.trim() || !voice.trim() || !speakWhen.trim()} onClick={submit}>
+              {agent ? 'Lưu thay đổi' : 'Tạo agent'}
+            </Button>
+          </>
+        )
       }
     >
       <form
@@ -296,19 +311,23 @@ function AgentFormDialog({ agent, template, onClose }: { agent: AgentIdentity | 
           submit();
         }}
       >
-        <TextField label="Tên hiển thị" value={name} onChange={(e) => setName(e.target.value)} maxLength={120} />
-        <TextField label="Vai trò" value={roleDesc} onChange={(e) => setRoleDesc(e.target.value)} maxLength={500} />
-        <TextField label="Giọng / persona" value={voice} onChange={(e) => setVoice(e.target.value)} maxLength={200} />
-        <TextField label="Khi nào được nói" value={speakWhen} onChange={(e) => setSpeakWhen(e.target.value)} maxLength={500} />
+        <TextField label="Tên hiển thị" value={name} onChange={(e) => setName(e.target.value)} maxLength={120} disabled={readOnly} />
+        <TextField label="Vai trò" value={roleDesc} onChange={(e) => setRoleDesc(e.target.value)} maxLength={500} disabled={readOnly} />
+        <TextField label="Giọng điệu" value={voice} onChange={(e) => setVoice(e.target.value)} maxLength={200} disabled={readOnly} />
+        <TextField label="Khi nào được nói" value={speakWhen} onChange={(e) => setSpeakWhen(e.target.value)} maxLength={500} disabled={readOnly} />
         <div className="gh-field">
           <label className="gh-field__label" htmlFor="ag-forbidden">
             Cấm làm gì (mỗi dòng một điều)
           </label>
-          <textarea id="ag-forbidden" className="gh-input" rows={2} value={forbidden} onChange={(e) => setForbidden(e.target.value)} />
+          <textarea id="ag-forbidden" className="gh-input" rows={2} value={forbidden} onChange={(e) => setForbidden(e.target.value)} disabled={readOnly} />
         </div>
-        {agent ? <PinHint text={AGENT_PIN_TEXT} title={AGENT_PIN_TEXT} /> : <PinHint text={AGENT_CREATE_PIN_TEXT} title={AGENT_CREATE_PIN_TEXT} />}
+        {readOnly ? null : agent ? <PinHint text={AGENT_PIN_TEXT} title={AGENT_PIN_TEXT} /> : <PinHint text={AGENT_CREATE_PIN_TEXT} title={AGENT_CREATE_PIN_TEXT} />}
         {/* Tạo mới: current=null để bấm "Chỉ ghi nhận" ghi đúng mức 0 (không bị coi là "giữ" mức mặc định 2). */}
-        <AutonomySelect current={agent ? agent.autonomy_level : null} value={picked} onChange={setPicked} />
+        {readOnly ? (
+          <p className="muted-note">Mức tự trị: {autonomyChoice(agent.autonomy_level)?.label ?? `mức ${agent.autonomy_level}`}</p>
+        ) : (
+          <AutonomySelect current={agent ? agent.autonomy_level : null} value={picked} onChange={setPicked} />
+        )}
         <fieldset className="ag-scope-fields">
           <legend className="gh-field__label">Phạm vi kênh được xuất hiện</legend>
           {installed.length === 0 ? (
@@ -319,6 +338,7 @@ function AgentFormDialog({ agent, template, onClose }: { agent: AgentIdentity | 
                 <input
                   type="checkbox"
                   checked={scopeIds.has(c.id as string)}
+                  disabled={readOnly}
                   onChange={(e) => {
                     const next = new Set(scopeIds);
                     if (e.target.checked) next.add(c.id as string);

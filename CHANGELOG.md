@@ -7,6 +7,12 @@ Ngày = ngày Release trên GitHub theo giờ Việt Nam; tiêu đề trong `doc
 (v0.1.32–v0.1.34, v0.1.40, v0.1.46) hoặc vài ngày (v0.1.47, v0.1.48: làm 03/10, phát hành 09/10).
 Việc sửa nóng không đổi số bản (PR #46, #48, #53, #55, #58, #59) ghi ở [ROADMAP › Bản phản ứng](docs/ROADMAP.md).
 
+## v0.1.61 — Đợt A sửa lỗi sau kiểm kê: mã PIN cho người được giao quyền, bảng quyền, nháp & gửi tin trung thực, lưới chống tái phát (16/10/2026)
+- **Mã PIN & quyền**: người được giao quyền duyệt tự đặt mã PIN lần đầu ở Tài khoản của tôi (hộp PIN nói rõ "chưa có mã PIN"); phiên PIN hết hạn thật (xem/WebSocket không gia hạn); bảng quyền đổi cả cột, "Soạn nháp" tách khỏi "Duyệt & gửi"; tên vai trò tiếng Việt thống nhất; mẫu agent bước 8 trùng máy chủ (migration 0036, chạy lại an toàn).
+- **Nháp & gửi tin trung thực**: gửi lỗi có chuông + thẻ "Gửi lỗi" + nút Gửi lại; tin 1-1 đi đúng tài khoản; nháp công cụ ghi (mcp_write) không còn giả "đã làm"; gộp người dời đủ bảng (cơ hội, deal, việc, nháp, phân quyền…) và đảo ngược chính xác.
+- **Cập nhật & lưới**: người gác dự phòng không chặn "Cập nhật ngay", "Kiểm tra bản mới" có Nhật ký riêng; thêm `check_terms.py` (chữ cấm, baseline chỉ giảm) và Playwright duyệt mọi route 390/1440px (job `crawl` riêng).
+- Chi tiết: [docs/releases/v0.1.61.md](docs/releases/v0.1.61.md)
+
 ## v0.1.60 — Mặt tiền Owner v2: 5 trụ cột có số thật + Thiết lập một màn 3 bước (16/10/2026)
 - **Mặt tiền 5 trụ cột**: Tình báo (bản tin, Việc phải quyết có Duyệt + mã PIN, cảnh báo, 4 ô số), Thông tin (lọc Quan trọng · Tất cả · Cơ hội · Cảnh báo · Chờ duyệt, tin xếp Khẩn/Quan trọng/Thường, hội thoại 10 tin, Trả lời chỉ tạo nháp → "Duyệt và gửi"), Quan hệ (Cần chăm, Khách nóng, Cầu nối, Cung–cầu, hồ sơ sống), Phân tích (7/30 ngày, biểu đồ, phễu, chi phí, 9 chỉ số), Việc (tick Xong, Dời sang mai). Thanh trái ở máy tính, thanh dưới 5 nút ở điện thoại; Hỏi Gen là ngăn kéo.
 - **API chỉ đọc, chỉ Owner**: `GET /owner/brief|feed|feed/{id}/context|insights|proposals`, `relations?list=care`, `today.nav`; không gọi model, không migration.

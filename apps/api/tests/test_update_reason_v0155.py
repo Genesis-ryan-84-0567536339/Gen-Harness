@@ -6,17 +6,24 @@ watcher_stalled (trình nhận yêu cầu lỗi) → up_to_date (không có bả
 Mã là chuỗi cố định — không bao giờ mang chữ lấy từ run/ (thư mục 0777, dữ liệu không tin cậy)."""
 
 import json
+import shutil
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from gh.config import get_settings
 from gh.system_api import update as upd
 from tests.conftest import Api
 from tests.test_system_update import link  # noqa: F401 — fixture dùng chung (hộp thư genh giả + GitHub giả v0.1.17)
+
+#: Tệp genh ghi thật khi .path lỗi vì hết hạn mức inotify nhưng timer dự phòng đang nhận yêu cầu — đúng cặp
+#: {request_watcher: "failed", watcher.state: "fallback"} mà e2e-install.yml (bước "người gác tự chữa") khẳng định.
+FALLBACK_FIXTURE = Path(__file__).parent / "fixtures" / "nightly_status_fallback.json"
 
 VALID = {None, "not_owner", "in_progress", "genh_unlinked", "watcher_stalled", "up_to_date"}
 
@@ -147,9 +154,53 @@ async def test_watcher_stalled_also_when_an_old_request_was_blamed_on_the_watche
     assert body["request_block_reason"] == "watcher_stalled"
 
 
+def test_fixture_is_the_pair_genh_writes_when_the_fallback_timer_took_over() -> None:
+    raw = json.loads(FALLBACK_FIXTURE.read_text(encoding="utf-8"))
+    assert raw["request_watcher"] == "failed" and raw["watcher"]["state"] == "fallback"
+
+
+async def test_fallback_watcher_with_failed_path_unit_does_not_hide_the_button(
+        owner_api: Api, link: Path, redis: Any) -> None:  # noqa: F811
+    """F094: `request_watcher` là kết quả `systemctl is-active .path` ⇒ 'failed' ĐÚNG lúc genh bật dự phòng. Người gác
+    dự phòng đang nhận yêu cầu thì nút "Cập nhật ngay" phải hiện (thẻ Sức khoẻ cùng lúc nói "Đang chạy dự phòng")."""
+    shutil.copy(FALLBACK_FIXTURE, link / "nightly-status.json")
+    body = await _get(owner_api, redis)
+    assert body["can_request"] is True and body["update_available"] is True
+    assert body["request_block_reason"] is None
+
+
+async def test_fallback_watcher_is_not_blamed_for_an_old_request(owner_api: Api, link: Path,  # noqa: F811
+                                                                 redis: Any) -> None:
+    """Yêu cầu nằm quá 15 phút khi dự phòng đang chạy: không đổ cho "người gác lỗi" (dự phòng quét mỗi phút) — nút
+    vẫn bấm lại được và lý do dừng là 'not_picked_up'."""
+    _write(link / "request", "update.json", {"requested_at": _ago(hours=1)})
+    shutil.copy(FALLBACK_FIXTURE, link / "nightly-status.json")
+    body = await _get(owner_api, redis)
+    assert body["state"] == "stalled" and body["stalled_reason"] == "not_picked_up"
+    assert body["request_block_reason"] is None
+
+
+def test_stalled_cause_follows_the_watcher_block_when_genh_reports_it(link: Path) -> None:  # noqa: F811
+    """genh từ v0.1.54 luôn ghi khối `watcher`: nó quyết định. Genh cũ (không có khối) mới dựa vào `request_watcher`."""
+    _write(link / "request", "update.json", {"requested_at": _ago(hours=1)})
+    cases: list[tuple[dict[str, Any], str]] = [
+        ({"request_watcher": "failed", "watcher": {"state": "fallback", "reason": "inotify"}}, "not_picked_up"),
+        ({"request_watcher": "failed", "watcher": {"state": "failed", "reason": "inotify"}}, "watcher_failed"),
+        ({"request_watcher": "active", "watcher": {"state": "failed", "reason": "other"}}, "watcher_failed"),
+        ({"request_watcher": "failed", "watcher": {"state": "ok"}}, "not_picked_up"),
+        ({"request_watcher": "failed"}, "watcher_failed"),                                  # genh cũ: không có dự phòng
+    ]
+    for raw, want in cases:
+        _write(link, "nightly-status.json", raw)
+        assert upd._state()["stalled_reason"] == want, raw
+
+
 @pytest.mark.parametrize("raw", [
     {"watcher": {"state": "ok"}, "request_watcher": "active"},
+    {"watcher": {"state": "ok"}, "request_watcher": "failed"},           # genh đã xét: không áp dụng ⇒ không chặn
     {"watcher": {"state": "fallback", "reason": "inotify"}, "request_watcher": "active"},   # timer dự phòng vẫn nhận
+    {"watcher": {"state": "fallback", "reason": "inotify"}, "request_watcher": "failed"},   # cặp thật e2e ghi
+    {"watcher": {"state": "fallback", "reason": "resources"}, "request_watcher": "inactive"},
     {"request_watcher": "inactive"},
     {"request_watcher": "ĐỘC-HẠI"}, {"watcher": "x"}, {"watcher": {"state": 7}},           # giá trị lạ ⇒ không chặn
 ])
@@ -198,3 +249,33 @@ async def test_non_owner_roles_cannot_even_read_the_update_card(owner_api: Api, 
         assert (await other.get("/system/update")).status_code == 403       # Console im lặng; không lộ lý do
     finally:
         await other.c.aclose()
+
+
+# ─── ghi Action Log riêng cho "Kiểm tra bản mới" (F105) ────────────────────────────────────────────────────────────
+
+async def _checked_rows(db: AsyncSession) -> list[Any]:
+    return list((await db.execute(text(
+        "SELECT actor_type, action, target_type, target_id, target_label, detail FROM ops.action_log "
+        "WHERE action = 'system.update_checked' ORDER BY at"))).all())
+
+
+async def test_check_update_writes_its_own_action_log_row(owner_api: Api, link: Path, redis: Any,  # noqa: F811
+                                                          db: AsyncSession) -> None:
+    await redis.delete(upd.LATEST_CACHE_KEY, upd.CHECK_LOCK_KEY)
+    r = await owner_api.send("POST", "/system/update/check")
+    assert r.status_code == 200 and r.json()["throttled"] is False
+    rows = await _checked_rows(db)
+    assert len(rows) == 1
+    assert rows[0].actor_type == "user" and rows[0].target_type == "system" and rows[0].target_id == "update"
+    assert rows[0].target_label == "v0.1.16" and rows[0].detail == {"throttled": False, "latest": "v0.1.17"}
+    # Bấm dồn trong 30 giây: vẫn ghi (ai bấm lúc nào), đánh dấu throttled.
+    r = await owner_api.send("POST", "/system/update/check")
+    assert r.status_code == 200 and r.json()["throttled"] is True
+    rows = await _checked_rows(db)
+    assert [row.detail["throttled"] for row in rows] == [False, True]
+
+
+async def test_reading_the_update_card_does_not_write_the_check_row(owner_api: Api, link: Path,  # noqa: F811
+                                                                    redis: Any, db: AsyncSession) -> None:
+    await _get(owner_api, redis)                                             # GET chỉ đọc ⇒ không ghi
+    assert await _checked_rows(db) == []

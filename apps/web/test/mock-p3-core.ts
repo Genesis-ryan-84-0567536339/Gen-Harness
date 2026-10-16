@@ -194,6 +194,7 @@ const LIST_KEYS = [
   'status',
   'hold_reason',
   'subject',
+  'resent_by',
 ] as const;
 const listItem = (d: DraftDetail): DraftItem => Object.fromEntries(LIST_KEYS.map((k) => [k, d[k]])) as unknown as DraftItem;
 
@@ -224,8 +225,11 @@ export function createMock(opts: P3Options) {
       at: new Date().toISOString(),
       reason: body.reason ?? null,
     };
-    if (verdict === 'reject') d.status = 'rejected';
-    else if (d.target) {
+    if (verdict === 'reject') {
+      d.status = 'rejected';
+      // Huỷ bản gửi lại ⇒ bản lỗi cũ về lại thẻ "Gửi lỗi".
+      for (const x of drafts) if (x.resent_by?.id === d.id) x.resent_by = null;
+    } else if (d.target) {
       d.status = verdict === 'edit' ? 'edited' : 'approved';
       timers.push(
         setTimeout(() => {
@@ -324,7 +328,15 @@ export function createMock(opts: P3Options) {
         const status = url.searchParams.get('status') ?? 'pending';
         const kind = url.searchParams.get('kind');
         const rows = drafts
-          .filter((d) => (status === 'pending' ? d.status === 'pending' : status === 'decided' ? d.status !== 'pending' : true))
+          .filter((d) =>
+            status === 'pending'
+              ? d.status === 'pending'
+              : status === 'decided'
+                ? d.status !== 'pending'
+                : status === 'failed'
+                  ? d.status === 'failed' && !d.resent_by // thẻ "Gửi lỗi": bỏ bản đã có bản gửi lại
+                  : true,
+          )
           .filter((d) => !kind || d.kind === kind);
         return reply(200, {
           items: rows.map(listItem),
@@ -337,7 +349,13 @@ export function createMock(opts: P3Options) {
           kind: DraftItem['kind'];
           title: string;
           text: string;
+          resend_of?: string | null;
         };
+        const old = b.resend_of ? drafts.find((x) => x.id === b.resend_of) : undefined;
+        if (b.resend_of && !old) return problem(404, 'NOT_FOUND', 'Bản nháp không tồn tại hoặc ngoài phạm vi của bạn');
+        if (old && (old.status !== 'failed' || old.kind !== b.kind))
+          return problem(409, 'NOT_RESENDABLE', 'Chỉ gửi lại được bản nháp gửi lỗi, cùng loại với bản mới');
+        if (old?.resent_by) return problem(409, 'ALREADY_RESENT', `Bản này đã được gửi lại (${old.resent_by.code}) — mở bản mới để duyệt`);
         const d: DraftDetail = {
           ...seedDrafts()[1],
           id: `draft-new-${Date.now()}`,
@@ -351,6 +369,7 @@ export function createMock(opts: P3Options) {
           created_at: new Date().toISOString(),
         };
         drafts = [d, ...drafts];
+        if (old) old.resent_by = { id: d.id, code: d.code };
         opts.emit('draft.new', listItem(d));
         return reply(201, d);
       }

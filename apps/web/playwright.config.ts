@@ -12,6 +12,8 @@ const executablePath = process.env.PW_CHROMIUM || undefined;
 
 export default defineConfig({
   testDir: './e2e',
+  // CI chạy route-crawl (lưới L4, chậm) ở job riêng `crawl` nên job `web` đặt E2E_SKIP_CRAWL=1; chạy tay vẫn có đủ.
+  testIgnore: process.env.E2E_SKIP_CRAWL ? ['**/route-crawl-*.spec.ts'] : [],
   outputDir: './test-results/playwright',
   fullyParallel: false,
   workers: 1,

@@ -1,7 +1,8 @@
 """/account — "Tài khoản của tôi" (v0.1.19): hồ sơ, mật khẩu, PIN, phiên đăng nhập của CHÍNH người đang đăng nhập.
 
 Mọi vai trò đều dùng được (không cần quyền RBAC riêng) nhưng chỉ đụng tới tài khoản của mình. Mọi thay đổi ghi
-Action Log. Mật khẩu/PIN băm và kiểm bằng đúng hàm đăng nhập dùng (gh.crypto.hash_secret / verify_secret).
+Action Log. Mã PIN: người được mời (chưa có PIN) tự đặt lần đầu bằng mật khẩu đăng nhập; Owner đổi PIN cùng
+đường đó. Mật khẩu/PIN băm và kiểm bằng đúng hàm đăng nhập dùng (gh.crypto.hash_secret / verify_secret).
 Sai mật khẩu hiện tại → 422 lỗi theo ô (không phải 401, để Console không hiểu nhầm là mất phiên) và vẫn ghi
 một dòng nhật ký `result=failed` (commit trước khi trả lỗi).
 """
@@ -21,7 +22,7 @@ from gh.auth.deps import current_user
 from gh.chassis import actionlog
 from gh.crypto import hash_secret, verify_secret
 from gh.db import DB
-from gh.errors import ApiError, conflict, field_errors, not_found
+from gh.errors import ApiError, field_errors, not_found
 
 router = APIRouter(prefix="/account", tags=["account"])
 
@@ -164,10 +165,10 @@ async def change_password(body: PasswordIn, user: service.CurrentUser = Depends(
 @router.post("/pin", status_code=204)
 async def change_pin(body: PinIn, response: Response, user: service.CurrentUser = Depends(current_user),
                      db: AsyncSession = DB) -> Response:
-    has_pin = (await db.execute(text("SELECT pin_hash IS NOT NULL FROM core.users WHERE id = :u"),
-                                {"u": user.id})).scalar()
-    if not has_pin:
-        raise conflict("NO_PIN", "Tài khoản này không dùng mã PIN")
+    # v0.1.61 (F071/F097): người chưa có PIN (Quản lý được mời…) ĐẶT PIN LẦN ĐẦU ở đây, cũng bằng mật khẩu đăng nhập
+    # (như Owner đổi PIN). Trước đây trả 409 NO_PIN nên người được giao quyền duyệt không có đường nào đặt PIN.
+    had_pin = bool((await db.execute(text("SELECT pin_hash IS NOT NULL FROM core.users WHERE id = :u"),
+                                     {"u": user.id})).scalar())
     errors: dict[str, str] = {}
     if not service.valid_pin(body.new_pin):
         errors["new_pin"] = "PIN gồm đúng 6 chữ số"
@@ -177,7 +178,7 @@ async def change_pin(body: PinIn, response: Response, user: service.CurrentUser 
         raise field_errors(errors)
     await _check_password(db, user, body.current_password, purpose="pin.change")
     await service.set_pin(db, user.id, body.new_pin)
-    await _log(db, user, "account.pin_changed")
+    await _log(db, user, "account.pin_changed" if had_pin else "account.pin_set")  # không ghi PIN / mật khẩu
     response.status_code = 204
     return response
 

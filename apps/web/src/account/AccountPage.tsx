@@ -70,7 +70,7 @@ export function AccountPage() {
               }}
             />
           </Card>
-          {q.data.has_pin ? <PinCard /> : null}
+          <PinCard hasPin={q.data.has_pin} />
           <SessionsCard sessions={q.data.sessions} />
         </div>
       )}
@@ -165,9 +165,18 @@ function ProfileCard({ account }: { account: Account }) {
 
 const EMPTY_PIN: PinValues = { current_password: '', new_pin: '', new_pin_confirm: '' };
 
-function PinCard() {
+/**
+ * Mã PIN riêng của từng người. v0.1.61 (F071/F097): người chưa có PIN (Quản lý được mời…) ĐẶT PIN LẦN ĐẦU ở đây bằng mật
+ * khẩu đăng nhập — trước đây thẻ bị ẩn và máy chủ trả 409 nên không ai ngoài Owner duyệt được.
+ */
+function PinCard({ hasPin }: { hasPin: boolean }) {
   // v0.1.42 (F-61): "Lịch sử nhập PIN" chuyển về đây (trước ở thẻ PIN của Điều khiển hệ thống).
   const canAudit = useCan('audit.read');
+  // PIN chỉ cần cho thao tác ghi có PIN (duyệt bản nháp, đổi quyền/hệ thống). Vai chỉ xem (Kiểm soát) chưa cần — nói đúng thực tế.
+  const canApprove = useCan('action.approve');
+  const canManageSystem = useCan('system.manage');
+  const canManageRoles = useCan('roles.manage');
+  const needsPin = canApprove || canManageSystem || canManageRoles;
   const [historyOpen, setHistoryOpen] = useState(false);
   const [v, setV] = useState<PinValues>(EMPTY_PIN);
   const [busy, setBusy] = useState(false);
@@ -191,7 +200,8 @@ function PinCard() {
       await api.account.changePin(v);
       setV(EMPTY_PIN);
       f.setSubmitted(false);
-      toast('Đã đổi mã PIN.');
+      toast(hasPin ? 'Đã đổi mã PIN.' : 'Đã đặt mã PIN — dùng được ngay cho thao tác cần PIN.');
+      if (!hasPin) await refreshAccount();
     } catch (err) {
       const fields = serverFieldErrors(err);
       if (fields) f.setServer(fields as Partial<Record<K, string>>);
@@ -202,8 +212,18 @@ function PinCard() {
   };
 
   return (
-    <Card data-gen-target="account.pin" title="Đổi mã PIN" kicker="PIN 6 số dùng cho thao tác nhạy cảm">
-      <form className="acct-form" onSubmit={submit} noValidate aria-label="Đổi mã PIN">
+    <Card
+      data-gen-target="account.pin"
+      title={hasPin ? 'Đổi mã PIN' : 'Đặt mã PIN'}
+      kicker={
+        hasPin
+          ? 'PIN 6 số dùng cho thao tác nhạy cảm'
+          : needsPin
+            ? 'Bạn chưa có mã PIN — cần để duyệt bản nháp và thao tác nhạy cảm'
+            : 'Bạn chưa có mã PIN — vai trò hiện tại chưa có thao tác nào cần PIN, đặt sẵn để dùng khi được cấp thêm quyền'
+      }
+    >
+      <form className="acct-form" onSubmit={submit} noValidate aria-label={hasPin ? 'Đổi mã PIN' : 'Đặt mã PIN'}>
         <TextField
           label="Mật khẩu hiện tại"
           revealable
@@ -212,7 +232,7 @@ function PinCard() {
           onChange={(e) => set('current_password', e.target.value)}
           onBlur={() => f.blur('current_password')}
           error={f.errorOf('current_password')}
-          hint="Quên PIN cũ vẫn đổi được — chỉ cần mật khẩu đăng nhập."
+          hint={hasPin ? 'Quên PIN cũ vẫn đổi được — chỉ cần mật khẩu đăng nhập.' : 'Đặt lần đầu chỉ cần mật khẩu đăng nhập của bạn.'}
         />
         <PinField id="acct-pin" label="Mã PIN mới" value={v.new_pin} onChange={(x) => set('new_pin', x)}
           onBlur={() => f.blur('new_pin')} error={f.errorOf('new_pin')} />
@@ -224,7 +244,7 @@ function PinCard() {
         </div>
         <div className="acct-form__actions">
           <Button variant="primary" type="submit" loading={busy} icon="ph ph-password">
-            Đổi mã PIN
+            {hasPin ? 'Đổi mã PIN' : 'Đặt mã PIN'}
           </Button>
           {canAudit ? (
             <Button variant="secondary" icon="ph ph-clock-counter-clockwise" onClick={() => setHistoryOpen(true)}>

@@ -238,8 +238,11 @@ async def apply(db: AsyncSession, org_id: uuid.UUID, ctx: Context, parsed: Parse
     if why:
         return Result("suggest", SUGGESTED, why, proposal=proposal)
 
-    target = drafts.Target(c.channel_type, "group" if c.group_id else "user", group_id=c.group_id,
-                           person_id=None if c.group_id else c.person_id)
+    identity_id = None
+    if not c.group_id and c.person_id:       # tin 1-1: gửi đúng tài khoản đã nhắn (cùng đường với Hộp thư)
+        acct = await drafts.person_reply_account(db, org_id, c.person_id, c.unit_id)
+        identity_id = acct[1] if acct and acct[0] == c.channel_type else None
+    target = drafts.reply_target(c.channel_type, group_id=c.group_id, person_id=c.person_id, identity_id=identity_id)
     subject_id = c.person_id or c.group_id
     about = (("person" if c.person_id else "group"), subject_id) if subject_id else None
     title = f"Trả lời {ctx.person_name or ctx.group_name or 'tin nhắn'}" + (

@@ -598,7 +598,7 @@ test.describe('giai đoạn 4: Agent + API & Model', () => {
     const createDlg = page.getByRole('dialog', { name: 'Tạo agent mới' });
     await createDlg.getByLabel('Tên hiển thị').fill('Trợ lý kho vận');
     await createDlg.getByLabel('Vai trò').fill('Theo dõi tồn kho và điều phối giao nhận.');
-    await createDlg.getByLabel('Giọng / persona').fill('Gọn gàng, đúng việc');
+    await createDlg.getByLabel('Giọng điệu').fill('Gọn gàng, đúng việc');
     await createDlg.getByLabel('Khi nào được nói').fill('Khi có yêu cầu giao nhận mới');
     await createDlg.getByRole('button', { name: 'Tạo agent' }).click();
     await enterOwnerPin(page);
@@ -773,13 +773,13 @@ test.describe('giai đoạn 4.5/4.6: Điều khiển hệ thống', () => {
       await expect(auditorRow.getByLabel('Kiểm soát · Nhật ký')).toHaveCount(1);
 
       // Manager: sửa cột "Hành động" — cần mã PIN, ghi vào nhật ký, giữ nguyên sau khi tải lại trang.
-      const managerCell = page.getByLabel('Quản lý · Hành động');
+      const managerCell = page.getByLabel('Quản lý · Hành động · Soạn nháp');
       await expect(managerCell).toHaveValue('team');
       await managerCell.selectOption('none');
       await enterOwnerPin(page);
       await expect(managerCell).toHaveValue('none');
       await page.reload();
-      await expect(page.getByLabel('Quản lý · Hành động')).toHaveValue('none');
+      await expect(page.getByLabel('Quản lý · Hành động · Soạn nháp')).toHaveValue('none');
     });
 
     test('Ranh giới có trách nhiệm: khoá cứng không bật/tắt được; 2 khoá không có công tắc hiện tĩnh', async ({ page }) => {

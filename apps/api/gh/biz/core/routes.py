@@ -117,7 +117,7 @@ async def _visible(db: AsyncSession, user: service.CurrentUser, draft_id: uuid.U
 
 
 @router.get("/drafts")
-async def list_drafts(status: Literal["pending", "decided", "all"] = "pending", kind: str | None = None,
+async def list_drafts(status: Literal["pending", "decided", "failed", "all"] = "pending", kind: str | None = None,
                       hide_silenced: bool = Query(False, description="Bỏ nháp đã Tắt tiếng (Mặt tiền Owner)"),
                       cursor: str | None = None, limit: int = Query(50, ge=1, le=200),
                       user: service.CurrentUser = Depends(current_user), db: AsyncSession = DB) -> dict[str, Any]:
@@ -128,6 +128,9 @@ async def list_drafts(status: Literal["pending", "decided", "all"] = "pending", 
         conds.append("d.status = 'pending'")
     elif status == "decided":
         conds.append("d.status <> 'pending'")
+    elif status == "failed":
+        # Thẻ "Gửi lỗi — cần gửi lại": lọc ở máy chủ (không quét trang), bỏ bản đã có bản gửi lại còn hiệu lực.
+        conds.append(f"d.status = 'failed' AND NOT {drafts.RESENT_SQL}")
     if kind:
         conds.append("d.kind = :k")
     if hide_silenced:
@@ -192,10 +195,16 @@ async def get_draft(draft_id: uuid.UUID, user: service.CurrentUser = Depends(cur
             p = (await db.execute(text("""SELECT id, code, display_name AS name, person_type AS type,
                                                  organization_name AS org_name FROM core.persons WHERE id = :i"""),
                                   {"i": target["person_id"]})).one_or_none()
+        acc = None
+        if target.get("thread_type") == "user":
+            acc = await drafts.user_account(db, user.org_id, target)
         tgt = {"channel": target["channel"], "thread_type": target["thread_type"],
                "group": {"id": str(g.id), "code": g.code, "name": g.name, "channel": g.channel} if g else None,
                "person": {"id": str(p.id), "code": p.code, "name": p.name, "type": p.type, "org_name": p.org_name}
-               if p else None}
+               if p else None,
+               "identity_id": target.get("identity_id"),
+               # Tài khoản sẽ nhận tin 1-1 (Sếp thấy trước khi duyệt): tên hiển thị, không có thì mã tài khoản đã che.
+               "account": {"label": mask_text(acc.handle or acc.external_id, owner) or ""} if acc is not None else None}
     text_ = mask_text(body.get("text", ""), owner) or ""
     flags = r.flags or {}
     channel = (target or {}).get("channel")
@@ -226,6 +235,9 @@ class DraftIn(BaseModel):
     amount_vnd: int | None = Field(default=None, ge=0)
     subject: dict[str, Any] | None = None      # {"type": "person|group", "id"}
     sources: list[dict[str, Any]] = Field(default_factory=list)
+    #: "Gửi lại": id bản nháp GỬI LỖI mà bản này thay thế (nối thành `parent_draft_id`). Bản lỗi cũ ra khỏi thẻ
+    #: "Gửi lỗi", bấm lần hai không sinh thêm một nháp trùng.
+    resend_of: uuid.UUID | None = None
 
 
 def _target(t: dict[str, Any] | None) -> drafts.Target | None:
@@ -234,7 +246,8 @@ def _target(t: dict[str, Any] | None) -> drafts.Target | None:
     try:
         return drafts.Target(channel=str(t["channel"]), thread_type=str(t["thread_type"]),
                              group_id=uuid.UUID(t["group_id"]) if t.get("group_id") else None,
-                             person_id=uuid.UUID(t["person_id"]) if t.get("person_id") else None)
+                             person_id=uuid.UUID(t["person_id"]) if t.get("person_id") else None,
+                             identity_id=uuid.UUID(t["identity_id"]) if t.get("identity_id") else None)
     except (KeyError, ValueError) as e:
         raise ApiError(422, "VALIDATION", "Đích gửi không hợp lệ", errors={"target": "Đích gửi không hợp lệ"}) from e
 
@@ -258,9 +271,30 @@ async def create(body: DraftIn, request: Request, user: service.CurrentUser = De
         await ensure_person(db, sc, tgt.person_id)
     if tgt and tgt.group_id:
         await ensure_group(db, sc, tgt.group_id)
+    if tgt and tgt.identity_id and not (
+            tgt.person_id and await drafts.identity_of_person(db, user.org_id, tgt.identity_id, tgt.person_id)):
+        # Không tin `identity_id` do máy khách gửi: tài khoản nhận phải thuộc đúng người đã được kiểm quyền ở trên.
+        raise ApiError(422, "TARGET_IDENTITY_MISMATCH", "Tài khoản nhận không thuộc người được chọn làm đích gửi",
+                       errors={"target": "Tài khoản nhận không thuộc người được chọn làm đích gửi"})
+    if body.resend_of is not None:
+        await _visible(db, user, body.resend_of)      # không thấy được bản lỗi này ⇒ 404 như mọi nơi khác
+        # Khoá dòng bản lỗi: hai lần bấm "Gửi lại" cùng lúc chỉ một lần thành công.
+        old =(await db.execute(text("""SELECT d.id, d.kind, d.status, d.code FROM biz.action_drafts d
+                                        WHERE d.id = :i AND d.org_id = :o FOR UPDATE"""),
+                                {"i": body.resend_of, "o": user.org_id})).one_or_none()
+        if old is None:
+            raise not_found("Bản nháp")
+        if old.status != drafts.FAILED or old.kind != body.kind:
+            raise ApiError(409, "NOT_RESENDABLE", "Chỉ gửi lại được bản nháp gửi lỗi, cùng loại với bản mới")
+        done = (await db.execute(text("""SELECT rc.code FROM biz.action_drafts rc WHERE rc.parent_draft_id = :i
+                                         AND rc.kind = :k AND rc.status <> 'rejected' LIMIT 1"""),
+                                 {"i": old.id, "k": old.kind})).scalar_one_or_none()
+        if done is not None:
+            raise ApiError(409, "ALREADY_RESENT", f"Bản này đã được gửi lại ({done}) — mở bản mới để duyệt")
     res = await drafts.create_draft(db, org_id=user.org_id, kind=body.kind, title=body.title, body_text=body.text,
                                     target=tgt, created_by=user.id, subject=subject, sources=body.sources,
-                                    amount_vnd=body.amount_vnd, redis=request.app.state.redis)
+                                    amount_vnd=body.amount_vnd, parent_draft_id=body.resend_of,
+                                    redis=request.app.state.redis)
     return await get_draft(res["id"], user, db)
 
 

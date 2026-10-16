@@ -851,14 +851,10 @@ async def identity_merge(cid: uuid.UUID, user: service.CurrentUser = Depends(MAN
 @router.post("/identity/candidates/{cid}/reject")
 async def identity_reject(cid: uuid.UUID, user: service.CurrentUser = Depends(MANAGE),
                           db: AsyncSession = DB) -> dict[str, Any]:
-    n = (await db.execute(text("""UPDATE core.identity_merge_candidates SET status = 'rejected', decided_by = :u,
-                                  decided_at = now() WHERE id = :i AND org_id = :o AND status = 'pending'"""),
-                          {"u": user.id, "i": cid, "o": user.org_id})).rowcount  # type: ignore[attr-defined]
-    if not n:
-        raise not_found("Cặp đề xuất đang chờ")
+    n = await identity.reject(db, user.org_id, cid, user.id)
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id,
                            action="identity.rejected", target_type="identity_candidate", target_id=str(cid),
-                           ip=user.ip)
+                           detail={"pairs": n}, ip=user.ip)
     return {"id": str(cid), "status": "rejected"}
 
 

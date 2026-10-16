@@ -61,7 +61,8 @@ async def test_error_table_is_problem_json(owner_api: Api, client, db, app) -> N
                                                     "role": "operator"}), 423, "PIN_REQUIRED")
     # 422 field_errors (sau khi xác nhận PIN).
     assert (await owner_api.send("POST", "/auth/pin/verify", {"pin": OWNER["pin"]})).status_code == 200
-    body = _check(await owner_api.send("PUT", "/auth/pin", {"current_pin": OWNER["pin"], "new_pin": "12"}),
+    body = _check(await owner_api.send("POST", "/account/pin", {"current_password": OWNER["password"],
+                                                                "new_pin": "12", "new_pin_confirm": "12"}),
                   422, "VALIDATION")
     assert body["errors"] == {"new_pin": "PIN gồm đúng 6 chữ số"}
     # 503 MODEL_UNAVAILABLE (cùng cách test_hotfix_v0130).
@@ -89,8 +90,8 @@ async def test_error_table_is_problem_json(owner_api: Api, client, db, app) -> N
     assert isinstance(body["locked_until"], str) and body["locked_until"]
     # detail không chứa giờ ISO UTC thô (web hiện thẳng) — giờ mở khoá chỉ ở `locked_until`.
     assert body["detail"] == "Thử lại sau ít phút" and body["locked_until"] not in body["detail"]
-    # PUT /auth/pin khi đang khoá (vẫn trong phiên PIN? không — khoá thu hồi phiên PIN → 423 PIN_REQUIRED/LOCKED).
-    r = await owner_api.send("PUT", "/auth/pin", {"current_pin": OWNER["pin"], "new_pin": "135790"})
+    # Thao tác cần PIN khi đang khoá (khoá thu hồi phiên PIN → 423 PIN_REQUIRED/LOCKED). v0.1.61: PUT /auth/pin đã gỡ.
+    r = await owner_api.send("POST", "/users", {"display_name": "Bé Na", "email": "na@example.vn", "role": "operator"})
     _check(r, 423)
 
 

@@ -209,11 +209,26 @@ async def act_inbox_item(item_id: uuid.UUID, request: Request, body: ActIn | Non
         raise ApiError(422, "VALIDATION", "Cần nội dung để soạn trả lời", errors={"text": "Không được để trống"})
     subject = (r.subject_type, r.subject_id) if r.subject_type and r.subject_id else None
     tgt = None
+    no_target = ("Tin này không có thông tin người nhắn lẫn nhóm, nên chưa dựng được nơi gửi. "
+                 "Hãy trả lời trực tiếp trên ứng dụng chat.")
     if r.group_id:
         ch = (await db.execute(text("SELECT type FROM core.channels WHERE id = (SELECT channel_id FROM core.groups "
                                     "WHERE id = :g)"), {"g": r.group_id})).scalar_one_or_none()
         if ch:
-            tgt = drafts.Target(channel=ch, thread_type="group", group_id=r.group_id)
+            tgt = drafts.reply_target(ch, group_id=r.group_id)
+        else:
+            no_target = ("Tin này thuộc một nhóm nhưng nhóm chưa gắn với kênh chat nào (kênh có thể đã bị gỡ), "
+                         "nên chưa dựng được nơi gửi. Hãy trả lời trực tiếp trên ứng dụng chat.")
+    elif r.person_id:
+        # F049: tin 1-1 (không thuộc nhóm nào) trả riêng cho người đã nhắn, đúng tài khoản đã nhắn tin đó.
+        acct = await drafts.person_reply_account(db, user.org_id, r.person_id, item_id)
+        if acct:
+            tgt = drafts.reply_target(acct[0], person_id=r.person_id, identity_id=acct[1])
+        else:
+            no_target = ("Tin này không thuộc nhóm nào và người nhắn chưa có tài khoản trên kênh chat nào, "
+                         "nên chưa dựng được nơi gửi. Hãy trả lời trực tiếp trên ứng dụng chat.")
+    if tgt is None:
+        raise ApiError(409, "NO_TARGET", "Chưa biết nên trả lời qua kênh nào", detail=no_target)
     label = qsvc.EVENT_LABELS.get(r.title, r.title)
     made = await drafts.create_draft(
         db, org_id=user.org_id, kind="message", title=f"Trả lời {label}",
@@ -437,8 +452,11 @@ async def overview(user: service.CurrentUser = Depends(require("overview.read"))
         _kpi("time_to_contact", "Tín hiệu → tiếp cận (trung vị)",
              round(float(time_to_contact), 1) if time_to_contact is not None else None, unit="phút", row=1,
              screen="opportunity"),
+        # Cùng điều kiện với số đếm (đã gửi): bấm vào Bàn làm việc thấy đúng các báo giá `sent`, đối chiếu được với số
+        # trên thẻ.
+        # Số đếm chỉ lấy 30 ngày, danh sách mở không giới hạn ngày — Nợ: thêm bộ lọc ngày cho Bàn làm việc.
         _kpi("quotations_sent", "Báo giá đã gửi (30 ngày)", quotations_sent, row=1, screen="workbench",
-             filters={"kind": "quotation"}),
+             filters={"kind": "quotation", "status": "sent"}),
         _kpi("pending_ratio", "Tỉ lệ chờ duyệt", pending_ratio, unit="%", row=1, screen="workbench",
              filters={"status": "pending"}),
     ]
