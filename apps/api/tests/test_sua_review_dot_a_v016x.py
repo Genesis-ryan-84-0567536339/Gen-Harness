@@ -253,3 +253,82 @@ async def test_failure_bell_masks_long_numbers_for_non_owner_recipients(app, db,
         "SELECT user_id, title FROM core.notifications WHERE kind = 'draft.failed'"))).all()}
     assert "0901234567890" in rows[uid]                                  # Owner thấy nguyên văn
     assert "0901234567890" not in rows[other] and rows[other].startswith("Tin chưa gửi được: ")
+
+
+# ─── đích nháp: identity_id phải thuộc đúng người (review bảo mật) ────────────
+
+async def _identity_of(db: Any, person: uuid.UUID) -> uuid.UUID:
+    return (await db.execute(text("SELECT id FROM core.person_identities WHERE person_id = :p ORDER BY id LIMIT 1"),
+                             {"p": person})).scalar_one()  # type: ignore[no-any-return]
+
+
+def _dm_body(person: uuid.UUID, identity: uuid.UUID) -> dict[str, Any]:
+    return {"kind": "message", "title": "Trả lời khách", "text": "Dạ em báo giá ngay ạ",
+            "target": {"channel": "zalo", "thread_type": "user", "person_id": str(person),
+                       "identity_id": str(identity)},
+            "subject": {"type": "person", "id": str(person)}}
+
+
+async def test_draft_target_rejects_identity_of_another_person(app, db, redis, owner_api: Api) -> None:  # type: ignore[no-untyped-def]
+    org = await org_id(db)
+    pa, pb = await _two_people(db, org)
+    r = await owner_api.send("POST", "/drafts", _dm_body(pa, await _identity_of(db, pb)))
+    assert r.status_code == 422, r.text
+    assert r.json()["code"] == "TARGET_IDENTITY_MISMATCH"
+    assert "không thuộc người" in r.json()["errors"]["target"]
+    assert (await db.execute(text("SELECT count(*) FROM biz.action_drafts"))).scalar_one() == 0
+    # Có identity_id mà không có person_id thì cũng không nhận (không có người để đối chiếu).
+    body = _dm_body(pa, await _identity_of(db, pa))
+    del body["target"]["person_id"]
+    r = await owner_api.send("POST", "/drafts", body)
+    assert r.status_code == 422 and r.json()["code"] == "TARGET_IDENTITY_MISMATCH"
+
+
+async def test_draft_target_accepts_identity_of_the_same_person(app, db, redis, owner_api: Api) -> None:  # type: ignore[no-untyped-def]
+    org = await org_id(db)
+    pa, pb = await _two_people(db, org)
+    ident_a = await _identity_of(db, pa)
+    r = await owner_api.send("POST", "/drafts", _dm_body(pa, ident_a))
+    assert r.status_code == 201, r.text
+    stored = (await db.execute(text("SELECT body->'target'->>'identity_id' FROM biz.action_drafts WHERE id = :i"),
+                               {"i": r.json()["id"]})).scalar_one()
+    assert stored == str(ident_a)
+    # Người bị gộp: tài khoản đã đi theo hồ sơ sống, nháp soạn cho người bị gộp vẫn nhận đúng tài khoản đó.
+    await _session_zalo(db)
+    assert await _detect(org) == 1
+    out = await _merge_pending(db, org)
+    dropped = uuid.UUID(out["merged"]["id"])
+    kept = uuid.UUID(out["person"]["id"])
+    r = await owner_api.send("POST", "/drafts", _dm_body(dropped, await _identity_of(db, kept)))
+    assert r.status_code == 201, r.text
+
+
+async def test_staff_cannot_aim_draft_at_unassigned_persons_account(world, owner_api: Api, client, db) -> None:  # type: ignore[no-untyped-def]
+    from tests.test_p3_core import assign
+    from tests.test_rbac_api import login_as
+
+    org = world["org"]
+    pa = world["person"]
+    pb = (await db.execute(text("""INSERT INTO core.persons (org_id, code, display_name)
+                                   VALUES (:o, core.next_code('PER'), 'Người khác') RETURNING id"""),
+                           {"o": org})).scalar_one()
+    ch = (await db.execute(text("SELECT id FROM core.channels WHERE org_id = :o AND type = 'zalo'"),
+                           {"o": org})).scalar_one()
+    ident_b = (await db.execute(text("""INSERT INTO core.person_identities (person_id, channel_id, external_id)
+                                        VALUES (:p, :c, 'nguoi-khac') RETURNING id"""),
+                                {"c": ch, "p": pb})).scalar_one()
+    await db.commit()
+    staff = await login_as(client, db, "agent_staff")
+    await assign(db, "agent_staff@example.vn", "person", pa)
+    r = await staff.send("POST", "/drafts", _dm_body(pa, ident_b))
+    assert r.status_code == 422 and r.json()["code"] == "TARGET_IDENTITY_MISMATCH", r.text
+
+
+async def test_user_account_ignores_identity_not_owned_by_target_person(app, db, redis, owner_api: Api) -> None:  # type: ignore[no-untyped-def]
+    """Lớp phòng thủ thứ hai: nháp đã lưu `identity_id` của người khác không gửi sang tài khoản đó."""
+    org = await org_id(db)
+    pa, pb = await _two_people(db, org)
+    tgt = {"channel": "zalo", "thread_type": "user", "person_id": str(pa),
+           "identity_id": str(await _identity_of(db, pb))}
+    acc = await drafts.user_account(db, org, tgt)
+    assert acc is not None and acc.external_id == await _ext_of(db, pa)

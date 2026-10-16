@@ -271,6 +271,11 @@ async def create(body: DraftIn, request: Request, user: service.CurrentUser = De
         await ensure_person(db, sc, tgt.person_id)
     if tgt and tgt.group_id:
         await ensure_group(db, sc, tgt.group_id)
+    if tgt and tgt.identity_id and not (
+            tgt.person_id and await drafts.identity_of_person(db, user.org_id, tgt.identity_id, tgt.person_id)):
+        # Không tin `identity_id` do máy khách gửi: tài khoản nhận phải thuộc đúng người đã được kiểm quyền ở trên.
+        raise ApiError(422, "TARGET_IDENTITY_MISMATCH", "Tài khoản nhận không thuộc người được chọn làm đích gửi",
+                       errors={"target": "Tài khoản nhận không thuộc người được chọn làm đích gửi"})
     if body.resend_of is not None:
         await _visible(db, user, body.resend_of)      # không thấy được bản lỗi này ⇒ 404 như mọi nơi khác
         # Khoá dòng bản lỗi: hai lần bấm "Gửi lại" cùng lúc chỉ một lần thành công.

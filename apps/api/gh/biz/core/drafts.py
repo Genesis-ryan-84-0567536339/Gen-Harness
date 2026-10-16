@@ -325,13 +325,30 @@ def bridge_permit(claims: dict[str, Any]) -> str:
     return f"{head}.{_b64url(crypto.hmac_sign(head.encode()))}"
 
 
+async def identity_of_person(db: AsyncSession, org_id: uuid.UUID, identity_id: Any, person_id: Any) -> bool:
+    """Tài khoản kênh `identity_id` có thuộc `person_id` (cùng tổ chức) không? Đi theo chuỗi `merged_into_id` tới hồ sơ
+    còn sống: tài khoản đi theo người khi gộp, nên bản nháp soạn trước khi gộp (người bị gộp) vẫn khớp."""
+    row = (await db.execute(text("""
+        WITH RECURSIVE chain(id, merged_into_id, depth) AS (
+            SELECT id, merged_into_id, 0 FROM core.persons WHERE id = CAST(:p AS uuid) AND org_id = :o
+            UNION ALL
+            SELECT p.id, p.merged_into_id, c.depth + 1 FROM core.persons p JOIN chain c ON p.id = c.merged_into_id
+            WHERE c.depth < 10)
+        SELECT 1 FROM core.person_identities pi JOIN core.channels c ON c.id = pi.channel_id
+        WHERE pi.id = CAST(:i AS uuid) AND c.org_id = :o AND pi.person_id IN (SELECT id FROM chain)
+        LIMIT 1"""), {"i": identity_id, "p": person_id, "o": org_id})).first()
+    return row is not None
+
+
 async def user_account(db: AsyncSession, org_id: uuid.UUID, target: dict[str, Any]) -> Any:
     """Tài khoản nhận của đích 1-1 (dòng có `external_id`, `handle`), hoặc None.
 
     Ưu tiên `identity_id` trong đích (đúng tài khoản đã nhắn; tài khoản đi theo người khi gộp hồ sơ). Không có thì theo
     `person_id`, đi theo chuỗi `merged_into_id` tới hồ sơ còn sống: bản nháp soạn TRƯỚC khi gộp vẫn gửi được sau khi gộp
     (hồ sơ bị gộp không còn giữ tài khoản nào); đảo ngược gộp thì tự về lại hồ sơ cũ."""
-    if target.get("identity_id"):
+    ident, pid = target.get("identity_id"), target.get("person_id")
+    if ident and (not pid or await identity_of_person(db, org_id, ident, pid)):
+        # Đích có người thì tài khoản PHẢI thuộc người đó (hoặc hồ sơ sống sau gộp): không tin `identity_id` trần.
         r = (await db.execute(text("""
             SELECT pi.external_id, pi.handle FROM core.person_identities pi JOIN core.channels c ON c.id = pi.channel_id
             WHERE pi.id = CAST(:i AS uuid) AND c.type = :ch AND c.org_id = :o"""),
