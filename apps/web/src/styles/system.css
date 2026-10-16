@@ -117,6 +117,11 @@
 .health-card__value { flex: none; max-width: 60%; text-align: right; font-size: 11.5px; color: var(--color-text); overflow-wrap: anywhere; }
 .health-card__hint { flex: 1 0 100%; padding-left: 16px; font-size: 11px; line-height: 1.45; color: var(--color-neutral-500); }
 .health-card__tech { margin-top: 2px; }
+/* F064/F102: hàng lỗi theo loại + nút Phát lại / Đã xem, xoá — xuống dòng được ở màn hẹp (390). */
+.health-card__queues { display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--color-divider); border-left: 3px solid var(--color-warn); border-radius: 6px; padding: 8px 10px; }
+.health-card__queue { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; font-size: 12px; }
+.health-card__queue-label { min-width: 0; overflow-wrap: anywhere; }
+.health-card__queue-actions { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .health-card__tip { border: 1px solid var(--color-divider); border-left: 3px solid var(--color-bad); border-radius: 6px; padding: 8px 10px; font-size: 11.5px; line-height: 1.5; color: var(--color-text); }
 .health-card__tip-title { font-weight: 600; margin-bottom: 4px; }
 .health-card__tip-steps { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
