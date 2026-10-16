@@ -31,8 +31,9 @@ irm https://github.com/Genesis-ryan-84-0567536339/Gen-Harness/releases/latest/do
 Trình cài tự kiểm máy, tự lo phần Docker nếu thiếu, tự tạo khoá bí mật rồi mở trình duyệt vào **trang thiết lập**. Nhập mã thiết lập
 do trình cài in ra (mất mã thì chạy `genh reset-setup`). Trình duyệt có thể cảnh báo "Not secure" — chạy `genh trust-ca` một lần là hết.
 
-Trang thiết lập có 12 bước, nhưng **chỉ bước 1–4 là bắt buộc** (mã thiết lập, tài khoản Sếp + **mã PIN 6 số**, tên tổ chức, bộ não AI).
-Bước nào chưa sẵn sàng thì bấm **Để sau** — các việc dở hiện ở Tổng quan và ở **Hướng dẫn thiết lập** (thanh bên).
+Trang thiết lập là **một màn 3 bước** (Tài khoản → Nguồn AI → Xong). Bắt buộc chỉ có mã thiết lập, tài khoản Sếp + **mã PIN 6 số** và tên tổ chức;
+nguồn AI có thể bấm **Làm sau** (Gen chưa trả lời được cho tới khi có nguồn AI). Kênh, nhóm, sàng lọc, agent, đội ngũ, sao lưu làm dần sau — các việc dở hiện ở
+danh sách **Việc nên làm tiếp** (Mặt tiền › **Thêm**) và ở **Hướng dẫn thiết lập** trong Console.
 
 ### Cập nhật
 
@@ -42,12 +43,13 @@ bản cũ, dữ liệu không mất. Muốn cập nhật ngay: Console → **C�
 ### Việc Sếp cần làm
 
 Console → **Hướng dẫn thiết lập** → **Việc Sếp cần làm**. Một trang gom mọi việc *chỉ Sếp làm được* (đăng nhập tài khoản của chính Sếp, dán mã, tick quyền),
-mỗi dòng có hướng dẫn từng bước và nút **Kiểm tra**; dòng chuyển **Đạt** là xong. Hiện có 9 dòng, 6 dòng bắt buộc:
+mỗi dòng có hướng dẫn từng bước và nút **Kiểm tra**; dòng chuyển **Đạt** là xong. Hiện có 10 dòng, **chỉ 1 dòng bắt buộc** (dòng 0 — có ít nhất 1 nguồn AI chạy được); 9 dòng còn lại là tuỳ chọn:
 
-1. **Gen-hub** (bắt buộc) — nối Kho dữ liệu; tuỳ chọn thêm quyền đọc lịch/mail/việc/Drive và quyền ghi Kho.
-2. **Facebook** (bắt buộc) — đăng nhập tài khoản Facebook của Sếp trong cửa sổ trình duyệt từ xa.
-3. **Google / Antigravity** (bắt buộc) và 4. **Claude Code CLI** (bắt buộc) — các nguồn AI dùng gói của Sếp.
-5. **Jev** (tuỳ chọn). 6. **Telegram** (bắt buộc) — bot báo tin tới điện thoại Sếp. 7. **Truy cập từ xa** (bắt buộc) — vào Console từ điện thoại.
+0. **Nguồn AI** (bắt buộc) — Gen chạy được khi có ít nhất 1 nguồn AI: đăng nhập Google / Antigravity, Claude Code CLI hoặc dán khoá API; bấm **Kiểm tra** để gọi thử.
+1. **Gen-hub** (tuỳ chọn) — nối Kho dữ liệu; tuỳ chọn thêm quyền đọc lịch/mail/việc/Drive và quyền ghi Kho.
+2. **Facebook** (tuỳ chọn) — đăng nhập tài khoản Facebook của Sếp trong cửa sổ trình duyệt từ xa.
+3. **Google / Antigravity** (tuỳ chọn) và 4. **Claude Code CLI** (tuỳ chọn) — kiểm riêng từng nguồn AI dùng gói của Sếp.
+5. **Jev** (tuỳ chọn). 6. **Telegram** (tuỳ chọn) — bot báo tin tới điện thoại Sếp. 7. **Truy cập từ xa** (tuỳ chọn) — vào Console từ điện thoại; chỉ nên làm khi có người khác dùng Console.
 8. **Facebook trả lời** (tuỳ chọn) — thử một lần trả lời bình luận thật. 9. **Gen ghi Kho** (tuỳ chọn) — duyệt lần Gen ghi Kho đầu tiên.
 
 Việc mới của từng bản nằm ở mục "Boss phải làm" trong `docs/releases/vX.Y.Z.md`; tổng hợp việc đang treo: [HANDOFF](docs/reports/HANDOFF-v0.1.1.md).
@@ -73,12 +75,12 @@ Chuyển sang máy mới: `genh import <tệp>`. Quên mật khẩu đăng nhậ
 ### Truy cập từ điện thoại, mời nhân viên
 
 Cài mới chỉ mở cho **chính máy chủ** (an toàn mặc định). Để vào từ điện thoại hoặc mời nhân viên: chạy `genh remote tailscale` (khuyên dùng) rồi làm theo hướng dẫn; xem
-tình trạng bằng `genh remote`. Console có thẻ **Truy cập từ xa** (Cài đặt) và dòng 7 ở Việc Sếp cần làm.
+tình trạng bằng `genh remote`. Console có thẻ **Truy cập từ xa** (Cài đặt) và dòng 7 (tuỳ chọn) ở Việc Sếp cần làm.
 
 ### Khi có chuyện — nhờ giúp ở đâu
 
 - **Console → Trợ giúp**: phiên bản, **Cập nhật phần mềm**, **Tạo gói chẩn đoán** (nhập PIN, tải về, gửi tệp zip cho Claude — đã lọc mật khẩu/khoá/token).
-- **Chuông** và dải **Cần Sếp xử lý** ở Tổng quan; **Telegram** tự báo khi máy chủ hỏng hoặc có việc gấp (cần làm dòng 6 ở Việc Sếp cần làm).
+- **Chuông** và dải **Cần Sếp xử lý** ở màn **Hôm nay** của Console; **Telegram** tự báo khi máy chủ hỏng hoặc có việc gấp (tuỳ chọn: bật ở dòng 6 của Việc Sếp cần làm).
 - **Hỏi Gen**: "Chỉ tôi cách …" — Gen mở trang và làm sáng đúng nút.
 - **Sổ tay vận hành**: [docs/runbook.md](docs/runbook.md) — cập nhật kẹt, khôi phục, ngắt mạch Gen-hub, báo động.
 - Báo lỗi cho Claude: kèm mã lỗi (ERR-…, "Mã yêu cầu") và gói chẩn đoán.
@@ -158,27 +160,31 @@ make logs-token      # in mã thiết lập một lần (nếu GH_SETUP_TOKEN đ
 Khi `api` và `web` đã "healthy", mở **`https://localhost:8443/setup`** (trình duyệt sẽ cảnh báo chứng chỉ tự
 ký ở môi trường dev — chấp nhận tiếp tục) và nhập mã thiết lập từ `make logs-token`.
 
-### Trình thiết lập Owner (12 bước)
+### Trình thiết lập Owner (một màn, 3 bước)
 
-Trình thiết lập ở `/setup` dẫn người dùng qua đủ các bước để hệ thống dùng được ngay. **Chỉ bước 1–4 bắt buộc**; các bước còn lại có "Để sau" và tự dùng mặc định an toàn.
+Trình thiết lập ở `/setup` (`?buoc=tai-khoan|nguon-ai|xong`) đưa máy mới tới trạng thái dùng được trong vài lần nhập. Phía sau vẫn là 12 bước dữ liệu (`PUT /setup/steps/<n>`);
+**chỉ bước 1–3 và 12 bắt buộc**, bước 4–11 ghi "để sau" khi hoàn tất và làm lại được ở màn tương ứng của Console.
 
-1. **Chào mừng** — nhập mã thiết lập một lần.
-2. **Tài khoản Owner** — tên, email, mật khẩu, **PIN 6 số** (PIN xác nhận mọi thao tác nhạy cảm sau này).
-3. **Tổ chức & xưng hô** — tên tổ chức, múi giờ, đơn vị tiền tệ, cách agent xưng hô.
-4. **Bộ não AI** — chọn nhà cung cấp model (khoá API hoặc CLI Antigravity/Claude Code), chuỗi ưu tiên có failover; "Để sau" thì tự gán model của nguồn đã gọi thử OK.
-5. **Kết nối kênh** — đăng nhập Zalo/WhatsApp bằng **mã QR** (cảnh báo rủi ro bắt buộc ở mục "Rủi ro" phía trên).
-6. **Chọn nhóm lắng nghe** — mặc định MỌI nhóm mới ở chế độ "Không nghe"; Owner tự bật từng nhóm muốn theo dõi.
-7. **Sàng lọc dữ liệu** — chu kỳ thời gian hoặc ngưỡng số lượng tin để đẩy vào sàng lọc.
-8. **Agent đầu tiên** — tạo agent, thử trò chuyện ngay trong trình thiết lập.
-9. **Tự trị & ranh giới** — mức tự trị của agent (3 mức ở giao diện, 0–6 ở Nâng cao); xác nhận đã đọc các ranh giới cứng (không tắt được:
-   agent không tự ra quyết định nhân sự, tin gửi ra ngoài luôn chờ duyệt, v.v. — [Kiến trúc](docs/ARCHITECTURE.md) §1).
-10. **Mời đội ngũ** *(tuỳ chọn)* — tạo tài khoản + mật khẩu tạm cho nhân viên (mật khẩu tạm hiện ngay trên màn để Owner tự gửi; chưa có SMTP).
-11. **Sao lưu** *(tuỳ chọn)* — chọn lịch (hằng ngày/hằng tuần/hằng tháng) và giờ chạy sao lưu tự động; cơ chế backup thật đọc đúng cấu hình này.
-12. **Hoàn tất** — vào thẳng Console.
+1. **Tài khoản** — gộp bước 1–3: mã thiết lập một lần; tên, email, mật khẩu, **PIN 6 số** (PIN xác nhận mọi thao tác nhạy cảm sau này); tên tổ chức (múi giờ, tiền tệ,
+   cách agent xưng hô điền sẵn, sửa trong "Tuỳ chỉnh").
+2. **Nguồn AI** — đăng nhập Google / Antigravity rồi dán mã xác thực, hoặc dán khoá API (Gemini, DeepSeek, tương thích OpenAI) và bấm **Kiểm tra**; **Làm sau** thì Gen chưa trả lời được.
+   Đổi nguồn AI sau này: `/setup?buoc=nguon-ai`.
+3. **Xong** — tóm tắt rồi vào Mặt tiền; có nút "Nối Zalo ngay".
+
+Các việc còn lại làm dần ở Console, mỗi việc có mặc định an toàn:
+
+- **Kết nối kênh** — đăng nhập Zalo/WhatsApp bằng **mã QR** (cảnh báo rủi ro bắt buộc ở mục "Rủi ro" phía trên).
+- **Chọn nhóm lắng nghe** — mặc định MỌI nhóm mới ở chế độ "Không nghe"; Owner tự bật từng nhóm muốn theo dõi.
+- **Sàng lọc dữ liệu** — chọn ngành; chu kỳ và ngưỡng số lượng tin có sẵn mặc định.
+- **Agent đầu tiên** — chọn mẫu agent (không còn khung thử trò chuyện trong trình thiết lập).
+- **Tự trị & ranh giới** — mức tự trị của agent (3 mức ở giao diện, 0–6 ở Nâng cao); các ranh giới cứng không tắt được (agent không tự ra quyết định nhân sự,
+  tin gửi ra ngoài luôn chờ duyệt, v.v. — [Kiến trúc](docs/ARCHITECTURE.md) §1).
+- **Mời đội ngũ** *(tuỳ chọn)* — tạo tài khoản + mật khẩu tạm cho nhân viên (mật khẩu tạm hiện ngay trên màn để Owner tự gửi; chưa có SMTP).
+- **Sao lưu** *(tuỳ chọn)* — lịch tự bật 02:00 hằng ngày; đổi lịch/giờ ở Cài đặt › Sao lưu & cập nhật; cơ chế backup thật đọc đúng cấu hình này.
 
 ### Sao lưu / khôi phục (cơ chế)
 
-Hệ thống tự sao lưu định kỳ theo lịch cấu hình ở bước 11 (worker quét cấu hình mỗi 15 phút): `pg_dump` toàn bộ
+Hệ thống tự sao lưu định kỳ theo lịch cấu hình ở Cài đặt › Sao lưu & cập nhật (worker quét cấu hình mỗi 15 phút): `pg_dump` toàn bộ
 CSDL, **mã hoá** (khoá riêng `GH_BACKUP_KEY` nếu có, không thì khoá master), lưu vào kho đối tượng đĩa cục bộ (volume
 `gh_objects`). Vòng đời: giữ **7 bản hằng ngày + 4 bản hằng tuần + 12 bản hằng tháng gần nhất**, tự dọn bản thừa.
 
