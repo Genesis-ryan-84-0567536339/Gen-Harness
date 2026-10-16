@@ -85,7 +85,7 @@ from sqlalchemy import text
 
 from gh import crypto
 from gh import db as dbmod
-from gh.backup import database_name, libpq_conn, libpq_url, recreate_database, redact_secrets
+from gh.backup import database_name, libpq_conn, libpq_url, pg_child_env, recreate_database, redact_secrets
 from gh.chassis.objects import LocalObjectStore, ObjectStore, get_object_store
 from gh.config import get_settings
 from gh.social import protocol as social_protocol
@@ -580,7 +580,7 @@ async def _reencrypt_secrets(old_master_key: bytes) -> None:
 
 async def _run(cmd: list[str], *, env: dict[str, str] | None = None) -> None:
     """Mật khẩu (PGPASSWORD) đi qua `env`, không trên argv; thông báo lỗi đã che mật khẩu (v0.1.45, F-54)."""
-    full_env = {**os.environ, **env} if env else None
+    full_env = pg_child_env(env)           # môi trường tối thiểu, không thừa hưởng environ của api/worker
     proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                                                 env=full_env)
     _out, err = await proc.communicate()

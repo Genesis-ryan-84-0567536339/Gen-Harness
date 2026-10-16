@@ -230,6 +230,20 @@ describe('applyEvent', () => {
     expect(c).toMatchObject({ state: 'active', qr: null, account_label: 'iPhone của Sếp' });
   });
 
+  it('channel.status error làm mới truy vấn kênh (resumable do máy chủ tính, không đoán ở trình duyệt)', () => {
+    const zalo = { type: 'zalo', name: 'Zalo', state: 'active', resumable: false, qr: null } as unknown as Channel;
+    qc.setQueryData(qk2.channels, [zalo]);
+    const spy = vi.spyOn(qc, 'invalidateQueries');
+    applyEvent(qc, ev('channel.status', { type: 'zalo', state: 'error', account_label: 'Zalo Sếp', scanned: false, error: 'NETWORK_UNAVAILABLE' }));
+    const keys = spy.mock.calls.map((c) => JSON.stringify((c[0] as { queryKey: unknown }).queryKey));
+    expect(keys).toContain(JSON.stringify(qk2.channels));
+    expect(qc.getQueryData<Channel[]>(qk2.channels)![0]).toMatchObject({ state: 'error', error: 'NETWORK_UNAVAILABLE' });
+    // Trạng thái chờ quét không cần làm mới (đã có sự kiện channel.qr riêng).
+    spy.mockClear();
+    applyEvent(qc, ev('channel.status', { type: 'zalo', state: 'pending_qr', account_label: null, scanned: true }));
+    expect(spy).not.toHaveBeenCalled();
+  });
+
   it('cli.login is stored per login id', () => {
     const e: CliLoginEvent = { login_id: 'L1', status: 'waiting_code', url: 'https://accounts.google.com/x' };
     applyEvent(qc, ev('cli.login', e));

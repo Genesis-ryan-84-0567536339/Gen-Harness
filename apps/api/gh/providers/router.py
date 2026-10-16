@@ -541,7 +541,9 @@ class ModelRouter:
                        tier: str | None = None, effort: str | None = None, owner: bool = True) -> Routed:
         """Gói G: `owner` = người hỏi là Owner (mặc định True: việc nền / hệ thống không có người hỏi). Chỉ `core.gen`
         phân biệt — Gen của nhân viên (`owner=False`) không dùng Antigravity CLI. Khoá `core.reply` và agent ngoại
-        giao cũng không dùng agy (`agy_policy.decide`, kể cả khi có dòng gán agy cũ).
+        giao cũng không dùng agy (`agy_policy.decide`, kể cả khi có dòng gán agy cũ). `purpose` soạn lại / dịch nháp
+        (`draft_*`) và thử quy tắc (`rule_test`) không dùng agy bất kể khoá (review F2: nháp có agent_id dùng khoá
+        `agent:<id>`, agent hết "ngoại giao" sau khi nháp được tạo; `/rules/test` nhận văn bản tuỳ ý của vai chỉ đọc).
 
         v0.1.62: Antigravity CLI dùng được ở MỌI lượt gọi (không còn tham số `allow_agy` — Owner mở thẳng ngày
         16/10/2026, xem docstring module).
@@ -557,7 +559,7 @@ class ModelRouter:
         background = is_background(purpose)
         reasons: list[str] = []
         async with self.sm() as db:
-            verdict = await agy_policy.verdict_for(db, org_id, agent_key, owner=owner)
+            verdict = await agy_policy.verdict_for(db, org_id, agent_key, owner=owner, purpose=purpose)
             chain = await self._chain(db, org_id, agent_key, tier=tier, agy=verdict)
             bg_cli = await background_cli_allowed(db, org_id) if background else set()
             if not verdict.allowed and verdict.reason and await self._agy_enabled(db, org_id):

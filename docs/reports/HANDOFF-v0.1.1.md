@@ -73,10 +73,10 @@ Nhánh local đang làm (CHƯA push, ngoài `claude/v0162`): **H1** (dịch vụ
 
 ## Việc dở
 
-### Boss phải làm — v0.1.62 (không bắt buộc; chi tiết ở [v0.1.62.md](../releases/v0.1.62.md))
+### Boss phải làm — v0.1.62 (chỉ bắt buộc nếu chưa có khoá API; chi tiết ở [v0.1.62.md](../releases/v0.1.62.md))
 
-1. Sau khi bản chính thức ra: `genh update` (hoặc đợi lịch đêm). Không bắt buộc việc gì khác; không migration.
-2. Antigravity báo hết hạn ⇒ đăng nhập lại ở Kết nối. Agent giao tiếp với khách dùng khoá API cho tới v0.1.63. Thẻ Zalo/WhatsApp "Mất liên lạc" ⇒ **Nối lại bằng phiên đã lưu**.
+1. Sau khi bản chính thức ra: `genh update` (hoặc đợi lịch đêm). Không migration.
+2. **Nếu chưa có khoá API**: agent trực kênh và Soạn lại / Dịch nháp sẽ dừng (không dùng agy) — dán khoá API (hoặc bật Claude Code CLI cho việc nền) để chạy tiếp; v0.1.63 hộp riêng sẽ cho chạy bằng Antigravity. Antigravity báo hết hạn ⇒ đăng nhập lại ở Kết nối. Thẻ Zalo/WhatsApp "Mất liên lạc" ⇒ **Nối lại bằng phiên đã lưu**.
 3. Tuỳ chọn: đọc "Câu hỏi mở — mặc định đã chọn" ở [ROADMAP](../ROADMAP.md) và sửa nếu muốn khác.
 
 ### Boss phải làm — v0.1.61 (đã qua; `genh update` + người được giao quyền tự đặt mã PIN ở Tài khoản của tôi; [v0.1.61.md](../releases/v0.1.61.md))

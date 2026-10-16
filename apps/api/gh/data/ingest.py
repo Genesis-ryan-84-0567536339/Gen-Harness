@@ -353,6 +353,10 @@ async def handle_status(db: AsyncSession, redis: Redis, bus: EventBus, org_id: u
         out.append(("channel.status", {"type": s.type, "state": "pending_qr", "account_label": s.account_label,
                                        "session_id": str(s.id), "scanned": True, "error": None}))
     elif type == "session.active":
+        if s.state == "logged_out":
+            # Review lần 2 v0.1.62: Sếp đã đăng xuất phiên này ở Console — sự kiện `session.active` đến muộn của bridge
+            # không được làm phiên sống lại (cũng không được đóng phiên đang chạy khác của kênh).
+            return out
         account = p.get("account") or {}
         cred = _reencrypt(p.get("credential"), s)
         # Một kênh chỉ một phiên hoạt động: phiên cũ kết thúc
@@ -369,7 +373,7 @@ async def handle_status(db: AsyncSession, redis: Redis, bus: EventBus, org_id: u
                    ended_at = NULL,
                    credential_enc = COALESCE(:c, credential_enc),
                    external_account = :x, account_label = :l, last_heartbeat_at = now(),
-                   meta = meta || CAST(:m AS jsonb) WHERE id = :i"""),
+                   meta = meta || CAST(:m AS jsonb) WHERE id = :i AND state <> 'logged_out'"""),
             {"c": cred, "x": str(account.get("id") or "") or None, "l": label, "i": s.id,
              "m": orjson.dumps({"account_name": account.get("name")}).decode()})
         await redis.delete(f"gh:channel:qr:{s.id}")
