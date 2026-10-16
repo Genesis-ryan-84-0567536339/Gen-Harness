@@ -1408,12 +1408,7 @@ function createMockState(opts: MockOptions = {}, broadcast: (type: string, data:
     if (path === '/header' && method === 'GET') {
       return reply(200, { channels_live: 4, channels_connected: 4, groups_listening: 42, autonomy_level: 4, data_confidence: 0.78 });
     }
-    if (path === '/audit' && method === 'GET') {
-      if (permissionsOf(user.role.code)['audit.read'] === 'none') return problem(res, 403, 'FORBIDDEN', 'Vai trò không có quyền này');
-      const prefix = url.searchParams.get('action') ?? '';
-      const limit = Number(url.searchParams.get('limit') ?? 50);
-      return reply(200, { items: audit.filter((a) => a.action.startsWith(prefix)).slice(0, limit), next_cursor: null });
-    }
+    // GET /audit: `system.handle` (mock-p4-system.ts) — cùng bộ lọc/phân trang với máy chủ thật.
     if (path === '/audit/verify' && method === 'GET') return reply(200, { ok: true, checked: audit.length, broken_at: null });
 
     const ctx: P2Ctx = {

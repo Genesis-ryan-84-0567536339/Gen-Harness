@@ -97,6 +97,14 @@ export interface SystemAuditQuery {
   target_id?: string;
   since?: string;
   until?: string;
+  /** Ô tìm (người/agent, hành động, đối tượng) — máy chủ tìm trên TOÀN BỘ nhật ký. */
+  q?: string;
+  /** Mã hành động (cách nhau dấu phẩy) mà nhãn tiếng Việt khớp ô tìm — máy chủ chỉ lưu mã. */
+  q_actions?: string;
+  /** Mã tác nhân hệ thống/bộ nhận tin (cách nhau dấu phẩy) mà tên tiếng Việt khớp ô tìm. */
+  q_actors?: string;
+  /** Ẩn dòng chung `http.*` và lượt kiểm chuỗi băm bình thường (mặc định của màn Nhật ký). */
+  hide_noise?: boolean;
 }
 
 // ── Dữ liệu & lưu trữ (spec I) ───────────────────────────────────────────────
@@ -634,7 +642,11 @@ export function systemEndpoints(r: ApiClient['request']) {
       patch: (code: string, body: BoundaryPatchBody) => r<Boundary>(`/boundaries/${enc(code)}`, { method: 'PATCH', body }),
     },
     systemAuditLog: {
-      list: (q: SystemAuditQuery = {}, signal?: AbortSignal) => r<AuditPage>('/audit-log', { query: q as Record<string, string | number | undefined>, signal }),
+      /**
+       * Đọc qua `/audit` (cùng `query_log` với `/audit-log`) — chỉ `/audit` nhận ô tìm phía máy chủ `q`/`q_actions`/
+       * `q_actors` và `hide_noise` (A8, F099); `/audit-log` giữ nguyên cho bản cũ và xuất CSV.
+       */
+      list: (q: SystemAuditQuery = {}, signal?: AbortSignal) => r<AuditPage>('/audit', { query: { ...q }, signal }),
       /** CSV — `data.manage` + PIN (`data.export`), cùng khuôn `raw.exportCsv`. */
       exportCsv: (q: Omit<SystemAuditQuery, 'cursor' | 'limit'> = {}) =>
         r<string>('/audit-log/export', { query: q as Record<string, string | undefined>, responseType: 'text' }),
