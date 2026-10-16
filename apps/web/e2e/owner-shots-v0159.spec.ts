@@ -13,9 +13,8 @@ import { OWNER, SETUP_TOKEN, apiCall, loginAsOwner, p3Hook, resetMock, resultsDi
  * .gitignore). Mỗi ảnh chụp CẢ TRANG: viewport được kéo cao bằng chiều cao nội dung nên thanh dưới/thanh trái nằm đúng chỗ.
  * Trên đường đi vẫn kiểm vài điều rẻ mà ảnh hay giấu: không tràn ngang, đủ thanh điều hướng đúng cỡ, không "[object Object]".
  *
- * Chế độ dữ liệu: p3Hook(request, 'owner', 'data', { mode }) — mode = 'full' | 'nochannel' | 'empty' | 'collecting'.
- * TODO(v0159-integ): hook 'data' do G1 thêm vào mock-owner; ở đợt 1 chưa có (404) ⇒ bắt lỗi, VẪN chụp (khung "Đang hoàn thiện");
- * khi gộp, đổi `setDataMode` thành chặt (không nuốt lỗi) để ảnh trạng thái chắc chắn là trạng thái cần xem.
+ * Chế độ dữ liệu: p3Hook(request, 'owner', 'data', { mode }) — mode = 'full' | 'nochannel' | 'empty' | 'collecting' (mock-owner, G1).
+ * Hook lỗi ⇒ spec đỏ (không nuốt lỗi) để ảnh trạng thái chắc chắn là trạng thái cần xem.
  */
 
 const OUT = join(resultsDir, 'owner-v2');
@@ -33,15 +32,9 @@ const SCREENS = [
 const WIDTHS = [390, 1440] as const;
 const BASE_H: Record<number, number> = { 390: 844, 1440: 900 };
 
-/** Chuyển chế độ dữ liệu của mock Mặt tiền; chưa có hook (đợt 1) thì nuốt lỗi và báo ra log. */
-async function setDataMode(page: Page, mode: 'full' | 'nochannel' | 'empty' | 'collecting'): Promise<boolean> {
-  try {
-    await p3Hook(page.request, 'owner', 'data', { mode });
-    return true;
-  } catch (e) {
-    console.log(`[owner-shots] hook owner/data chưa có (${String(e)}) — TODO(v0159-integ); chụp theo dữ liệu mặc định.`);
-    return false;
-  }
+/** Chuyển chế độ dữ liệu của mock Mặt tiền (chặt: hook lỗi thì ném). */
+async function setDataMode(page: Page, mode: 'full' | 'nochannel' | 'empty' | 'collecting'): Promise<void> {
+  await p3Hook(page.request, 'owner', 'data', { mode });
 }
 
 async function setTheme(page: Page, scheme: 'light' | 'dark'): Promise<void> {

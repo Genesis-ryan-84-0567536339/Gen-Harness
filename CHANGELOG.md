@@ -7,6 +7,12 @@ Ngày = ngày Release trên GitHub theo giờ Việt Nam; tiêu đề trong `doc
 (v0.1.32–v0.1.34, v0.1.40, v0.1.46) hoặc vài ngày (v0.1.47, v0.1.48: làm 03/10, phát hành 09/10).
 Việc sửa nóng không đổi số bản (PR #46, #48, #53, #55, #58, #59) ghi ở [ROADMAP › Bản phản ứng](docs/ROADMAP.md).
 
+## v0.1.59 — Mặt tiền Owner v2: 5 trụ cột có số thật + Thiết lập một màn 3 bước (16/10/2026)
+- **Mặt tiền 5 trụ cột**: Tình báo (bản tin, Việc phải quyết có Duyệt + mã PIN, cảnh báo, 4 ô số), Thông tin (tin Khẩn/Quan trọng/Thường, hội thoại 10 tin, Trả lời chỉ tạo nháp → "Duyệt và gửi"), Quan hệ (Cần chăm, Khách nóng, Cầu nối, Cung–cầu, hồ sơ sống), Phân tích (7/30 ngày, biểu đồ, phễu, chi phí, 9 chỉ số), Việc (tick Xong, Dời sang mai). Thanh trái ở máy tính, thanh dưới 5 nút ở điện thoại; Hỏi Gen là ngăn kéo.
+- **API chỉ đọc, chỉ Owner**: `GET /owner/brief|feed|feed/{id}/context|insights|proposals`, `relations?list=care`, `today.nav`; không gọi model, không migration.
+- **Thiết lập một màn** Tài khoản → Nguồn AI → Xong; mọi nút "Chọn model" dẫn `/setup?buoc=nguon-ai`; Cài đặt `/owner/them` đúng 4 khối. Hệ hình ảnh mới (token sáng/tối, 8 thành phần kit) + lính gác thiết kế.
+- Chi tiết: [docs/releases/v0.1.59.md](docs/releases/v0.1.59.md)
+
 ## v0.1.58 — Bản vá nóng: Antigravity CLI đòi mức suy nghĩ làm Gen im lặng, "Kiểm tra kết nối" đỏ và mọi vai "chưa có nguồn phù hợp" (11/10/2026)
 - **Gốc rễ**: agy của Sếp không đánh dấu model "current" nên lượt gọi thử không gửi `--effort`, agy từ chối kèm `available: low, medium, high`; `_cli_probe` không thử lại với một mức nên đỏ và báo sai `CLI không nhận model ""` (ô chọn model bị ẩn, Sếp kẹt). Nay thử lại cùng model với 'medium' (≤ 4 lượt), câu lỗi nêu đúng model + mức và không bao giờ in model rỗng; `_complete` cũng gọi lại một lần khi CLI đòi mức.
 - **Tự lành**: Kiểm tra kết nối xanh mà nguồn CLI chưa có dòng model ⇒ tự lưu (model, mức) vừa chạy được (không đặt mặc định, Action Log `provider.model_auto`); lượt Gen của Owner tự kiểm tra đúng một lần/10 phút khi agy mất dòng model; việc nền không bao giờ gọi agy.

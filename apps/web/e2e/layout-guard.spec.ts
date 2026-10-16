@@ -253,6 +253,8 @@ function scanLayout(rootSel: string): Finding[] {
     if (!parent || skipped(parent)) continue;
     if (parent.closest('script,style,noscript,select,option,textarea,svg')) continue;
     if (!parent.checkVisibility({ visibilityProperty: true } as CheckVisibilityOptions)) continue;
+    // Chữ chỉ dành cho trình đọc màn hình (.kit-sr / .sr-only: hộp 1×1, clip) không hiện ra ⇒ không thể "dính biên".
+    if (parent.closest('.kit-sr, .sr-only, .visually-hidden')) continue;
     const range = document.createRange();
     range.selectNodeContents(n);
     const tr = range.getBoundingClientRect();

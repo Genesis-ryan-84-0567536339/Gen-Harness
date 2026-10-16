@@ -111,8 +111,8 @@ export interface NavCounts {
 }
 
 /**
- * Đọc PHÒNG THỦ `today.nav` (GET /owner/today, G1 thêm song song): thiếu `nav`, không phải số, âm, NaN ⇒ 0. Không bao giờ ném.
- * TODO(v0159-integ): đổi tham số sang kiểu OwnerToday khi gộp với G1 (contracts có `nav`).
+ * Đọc PHÒNG THỦ `today.nav` (GET /owner/today, kiểu `OwnerNav` ở contracts): thiếu `nav` (máy chủ cũ), không phải số, âm, NaN ⇒ 0.
+ * Không bao giờ ném. Tham số để `unknown` có chủ ý: máy chủ cũ/lạ có thể trả hình dạng khác hợp đồng.
  */
 export function navCounts(today: unknown): NavCounts {
   const nav = today && typeof today === 'object' ? (today as { nav?: unknown }).nav : undefined;

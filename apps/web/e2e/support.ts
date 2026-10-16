@@ -280,11 +280,11 @@ export async function finishSetupOne(page: Page, opts: { skipAi?: boolean } = {}
 }
 
 /**
- * Đang ở Mặt tiền (/owner$) và khung Mặt tiền hiện: thanh trái (`owner-nav-*`, máy tính) hoặc thanh dưới (`owner-tabbar`, điện
- * thoại) — đúng ở cả khung cũ lẫn khung mới.
- * TODO(v0159-integ): khi gộp G2, chuyển sang khẳng định `owner-nav-intel` (Tình báo) là trang đầu.
+ * Đang ở Mặt tiền (/owner$) và trang đầu là Tình báo: mục `owner-nav-intel` (thanh trái, máy tính) hoặc `owner-tabbar-intel`
+ * (thanh dưới, điện thoại) đang sáng (aria-current="page").
  */
 export async function expectOwnerFront(page: Page): Promise<void> {
   await expect(page).toHaveURL(/\/owner$/);
-  await expect(page.locator('[data-testid^="owner-nav-"]:visible, [data-testid="owner-tabbar"]:visible').first()).toBeVisible();
+  const intel = page.locator('[data-testid="owner-nav-intel"]:visible, [data-testid="owner-tabbar-intel"]:visible').first();
+  await expect(intel).toHaveAttribute('aria-current', 'page');
 }

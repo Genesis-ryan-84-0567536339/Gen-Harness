@@ -107,8 +107,7 @@ test.describe('Bước Nguồn AI "Làm sau" (v0.1.29, v0.1.59)', () => {
     await expect(page.getByRole('heading', { name: 'Xong rồi, thưa Sếp' })).toBeVisible();
     await expect(page.getByTestId('setup-done-ai')).toContainText('Làm sau — Gen sẽ chưa tóm tắt được bản tin');
     await page.getByRole('button', { name: /Vào Mặt tiền/ }).click();
-    // v0.1.55 (G5): Owner "/" ⇒ Mặt tiền /owner; thẻ "Chưa có model" nằm ở Tổng quan (Console).
-    // TODO(v0159-integ): khi gộp G2 (Tình báo là trang đầu) chuyển sang owner-nav-intel.
+    // Owner "/" ⇒ Mặt tiền /owner (Tình báo là trang đầu); thẻ "Chưa có model" nằm ở Tổng quan (Console).
     await expectOwnerFront(page);
     await page.goto('/overview');
     const banner = page.getByTestId('no-model');
