@@ -24,9 +24,48 @@ from gh.data.common import CHANNEL_NAME, CHANNEL_PREFIX, LISTENING_MODES, fetch_
 
 log = logging.getLogger("gh.ingest")
 
-QR_TTL_S = 70
+#: v0.1.62 (F063): TTL ảnh QR trong Redis lấy theo `expires_at` của sự kiện (Zalo sống 100 giây, WhatsApp 60/20 giây) cộng
+#: một đoạn đệm để Console còn thấy mã tới đúng lúc nó hết hạn; không đọc được `expires_at` thì dùng giá trị dự phòng.
+QR_TTL_FALLBACK_S = 110
+QR_TTL_MARGIN_S = 10
 #: v0.1.36 (F-6a): lý do phiên rớt → câu cho chuông "Kênh … đã ngắt kết nối" (không đưa lỗi thô/credential).
 CHANNEL_DOWN_REASONS = {"expired": "phiên đã hết hạn", "error": "gặp lỗi", "logged_out": "đã bị đăng xuất"}
+#: v0.1.62 (F046): nguyên nhân THẬT theo mã lỗi bridge — mất mạng không được gọi là "phiên hết hạn".
+CHANNEL_DOWN_BY_ERROR = {
+    "NETWORK_UNAVAILABLE": "mất kết nối mạng (Gen đang tự nối lại bằng phiên đã lưu)",
+    "RECONNECT_FAILED": "mất kết nối mạng",
+    "CONNECTION_REPLACED": "tài khoản vừa được mở ở một nơi khác nên phiên này bị ngắt",
+    "LOGGED_OUT_REMOTELY": "thiết bị đã bị gỡ khỏi tài khoản trên điện thoại",
+    "CREDENTIAL_REJECTED": "nền tảng không còn nhận phiên đã lưu (đã đăng xuất hoặc hết hạn)",
+}
+#: Mã lỗi mà phiên còn credential và nối lại được bằng nút "Nối lại bằng phiên đã lưu" (không cần quét QR).
+RESUMABLE_ERRORS = ("NETWORK_UNAVAILABLE", "RECONNECT_FAILED", "CONNECTION_REPLACED", "LOGIN_FAILED")
+
+
+def qr_ttl_s(expires_at: Any, now: datetime | None = None) -> int:
+    """Số giây giữ ảnh QR trong Redis: tới `expires_at` + đệm (tối thiểu 5 giây); sai định dạng → giá trị dự phòng."""
+    if not isinstance(expires_at, str) or not expires_at:
+        return QR_TTL_FALLBACK_S
+    try:
+        end = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+    except ValueError:
+        return QR_TTL_FALLBACK_S
+    if end.tzinfo is None:
+        end = end.replace(tzinfo=UTC)
+    left = (end - (now or datetime.now(UTC))).total_seconds()
+    return max(5, min(600, int(left) + QR_TTL_MARGIN_S))
+
+
+def channel_down_text(reason: str, error: str | None) -> tuple[str, str]:
+    """(nguyên nhân, việc Sếp cần làm) cho chuông "Kênh … đã ngắt kết nối" theo lý do + mã lỗi bridge."""
+    cause = CHANNEL_DOWN_BY_ERROR.get(error or "") or CHANNEL_DOWN_REASONS.get(reason, "gặp lỗi")
+    if error == "NETWORK_UNAVAILABLE":
+        return cause, "không cần quét lại QR; có mạng là tự nhận tin trở lại."
+    if reason == "error" and error in RESUMABLE_ERRORS:
+        return cause, 'bấm "Nối lại bằng phiên đã lưu" ở Kết nối (không cần quét QR).'
+    if reason == "error":
+        return cause, 'bấm "Nối lại bằng phiên đã lưu" ở Kết nối; còn lỗi thì quét lại QR.'
+    return cause, "đăng nhập lại (quét mã QR) để tiếp tục nhận tin."
 KINDS = ("text", "image", "file", "sticker", "reaction", "system", "other")
 
 
@@ -248,23 +287,42 @@ async def _status_ws(redis: Redis, org_id: Any, type: str, state: str, account_l
                                                      "error": error}, org_id=org_id)
 
 
+async def publish_resume(bus: EventBus, org_id: uuid.UUID, type: str, session_id: Any, credential_enc: Any,
+                         actor: str = "system:ingest") -> None:
+    """Ra lệnh bridge đăng nhập lại một phiên bằng credential đã lưu (giải mã ở lõi, mã hoá lại theo khoá vận chuyển)."""
+    wire = crypto.transport_encrypt(crypto.decrypt(bytes(credential_enc), b"channel_session"), f"{type}:{session_id}")
+    await bus.publish(BRIDGE_CONTROL, "session.login", {"channel": type, "session_id": str(session_id),
+                                                        "credential": wire}, actor=actor, org_id=org_id)
+
+
+async def close_sessions(bus: EventBus, org_id: uuid.UUID, type: str, session_ids: list[Any],
+                         actor: str = "system:ingest") -> None:
+    """v0.1.62 (F067): bảo bridge ĐÓNG kết nối trong RAM của các phiên cũ (không đăng xuất nền tảng — phiên mới có thể
+    cùng tài khoản) để không còn kết nối ma chạy ngầm cạnh phiên mới."""
+    for sid in session_ids:
+        await bus.publish(BRIDGE_CONTROL, "session.close", {"channel": type, "session_id": str(sid)}, actor=actor,
+                          org_id=org_id)
+
+
 async def handle_status(db: AsyncSession, redis: Redis, bus: EventBus, org_id: uuid.UUID, type: str,
                         p: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
     """Xử lý một sự kiện gh.bridge.status. Trả các sự kiện WebSocket cần phát sau commit."""
     out: list[tuple[str, dict[str, Any]]] = []
     if type == "bridge.hello":
         await sync_listen_sets(db, redis, org_id)
+        # v0.1.62 (F046): nối lại cả phiên 'error' còn credential (mất mạng / bị mở nơi khác), không chỉ 'active' — miễn là
+        # chưa có phiên nào MỚI hơn của kênh (không "sống lại" phiên cũ sau khi Sếp đã quét QR mới hoặc đăng xuất).
         rows = (await db.execute(text("""
             SELECT s.id, s.credential_enc, c.type
             FROM core.channel_sessions s JOIN core.channels c ON c.id = s.channel_id
-            WHERE c.org_id = :o AND s.state = 'active' AND s.ended_at IS NULL AND s.credential_enc IS NOT NULL"""),
+            WHERE c.org_id = :o AND s.credential_enc IS NOT NULL AND (
+                (s.state = 'active' AND s.ended_at IS NULL)
+                OR (s.state = 'error' AND NOT EXISTS (
+                    SELECT 1 FROM core.channel_sessions n WHERE n.channel_id = s.channel_id AND n.id <> s.id
+                      AND COALESCE(n.started_at, n.qr_issued_at) > COALESCE(s.started_at, s.qr_issued_at))))"""),
             {"o": org_id})).all()
         for r in rows:
-            wire = crypto.transport_encrypt(crypto.decrypt(bytes(r.credential_enc), b"channel_session"),
-                                            f"{r.type}:{r.id}")
-            await bus.publish(BRIDGE_CONTROL, "session.login", {"channel": r.type, "session_id": str(r.id),
-                                                                "credential": wire}, actor="system:ingest",
-                              org_id=org_id)
+            await publish_resume(bus, org_id, r.type, r.id, r.credential_enc)
         return out
     s = await _session(db, p.get("session_id"))
     if s is None or s.org_id != org_id:
@@ -272,7 +330,8 @@ async def handle_status(db: AsyncSession, redis: Redis, bus: EventBus, org_id: u
     if type == "session.qr":
         await redis.set(f"gh:channel:qr:{s.id}", orjson.dumps({"image": p.get("image"),
                                                                 "expires_at": p.get("expires_at"),
-                                                                "scanned": False}), ex=QR_TTL_S)
+                                                                "scanned": False}),
+                        ex=qr_ttl_s(p.get("expires_at")))
         await db.execute(text("""UPDATE core.channel_sessions SET state = 'pending_qr', qr_issued_at = now()
                                  WHERE id = :i AND ended_at IS NULL"""), {"i": s.id})
         out.append(("channel.qr", {"type": s.type, "session_id": str(s.id), "image": p.get("image"),
@@ -282,19 +341,22 @@ async def handle_status(db: AsyncSession, redis: Redis, bus: EventBus, org_id: u
         if raw:
             qr = orjson.loads(raw)
             qr["scanned"] = True
-            await redis.set(f"gh:channel:qr:{s.id}", orjson.dumps(qr), ex=QR_TTL_S)
+            await redis.set(f"gh:channel:qr:{s.id}", orjson.dumps(qr), ex=qr_ttl_s(qr.get("expires_at")))
         out.append(("channel.status", {"type": s.type, "state": "pending_qr", "account_label": s.account_label,
                                        "session_id": str(s.id), "scanned": True, "error": None}))
     elif type == "session.active":
         account = p.get("account") or {}
         cred = _reencrypt(p.get("credential"), s)
-        # Một kênh chỉ một phiên hoạt động: phiên cũ kết thúc.
-        await db.execute(text("""UPDATE core.channel_sessions SET state = 'logged_out', ended_at = now()
-                                 WHERE channel_id = :c AND id <> :i AND ended_at IS NULL"""),
-                         {"c": s.channel_id, "i": s.id})
+        # Một kênh chỉ một phiên hoạt động: phiên cũ kết thúc — và (v0.1.62, F067) bridge được bảo đóng kết nối của chúng.
+        old = (await db.execute(text("""UPDATE core.channel_sessions SET state = 'logged_out', ended_at = now()
+                                        WHERE channel_id = :c AND id <> :i AND ended_at IS NULL RETURNING id"""),
+                                {"c": s.channel_id, "i": s.id})).scalars().all()
+        await close_sessions(bus, org_id, s.type, list(old))
         label = s.account_label or account.get("name") or s.type
+        # v0.1.62 (F068): nối lại CÙNG phiên (bridge khởi động lại, mất mạng) giữ `started_at` gốc — "Phiên mở" không bị
+        # đặt lại; phiên vừa nối lại thì `ended_at` về NULL (phiên 'error' được nối lại bằng phiên đã lưu).
         await db.execute(text("""
-            UPDATE core.channel_sessions SET state = 'active', started_at = now(),
+            UPDATE core.channel_sessions SET state = 'active', started_at = COALESCE(started_at, now()), ended_at = NULL,
                    credential_enc = COALESCE(:c, credential_enc),
                    external_account = :x, account_label = :l, last_heartbeat_at = now(),
                    meta = meta || CAST(:m AS jsonb) WHERE id = :i"""),
@@ -309,6 +371,30 @@ async def handle_status(db: AsyncSession, redis: Redis, bus: EventBus, org_id: u
                                target_id=str(s.id), target_label=label)
         out.append(("channel.status", {"type": s.type, "state": "active", "account_label": label,
                                        "session_id": str(s.id), "scanned": True, "error": None}))
+    elif type == "session.reconnecting":
+        # v0.1.62 (F046): bridge mất mạng/máy chủ nền tảng, ĐANG tự thử nối lại (credential còn nguyên) — không phải hết hạn.
+        if s.state in ("active", "error"):
+            error = str(p.get("error") or "NETWORK_UNAVAILABLE")[:64]
+            was_live = s.state == "active" and s.ended_at is None
+            await db.execute(text("""
+                UPDATE core.channel_sessions SET state = 'error', ended_at = NULL,
+                       meta = meta || CAST(:m AS jsonb) WHERE id = :i"""),
+                {"i": s.id, "m": orjson.dumps({"error": error}).decode()})
+            if was_live:
+                from gh import health
+
+                name = CHANNEL_NAME.get(s.type, s.type)
+                cause, todo = channel_down_text("error", error)
+                await health.raise_once(
+                    db, org_id, key=f"channel.down:{s.type}", kind="channel.down", severity="bad",
+                    title=f"Kênh {name} đã ngắt kết nối", body=f"{s.account_label or name}: {cause} — {todo}",
+                    link="/connections", fingerprint=f"error:{error}", redis=redis)
+                await actionlog.record(db, org_id=org_id, actor_type="system", actor_id=f"bridge:{s.type}",
+                                       action="channel.session_reconnecting", target_type="channel_session",
+                                       target_id=str(s.id), target_label=s.account_label, result="failed",
+                                       detail={"error": error})
+            out.append(("channel.status", {"type": s.type, "state": "error", "account_label": s.account_label,
+                                           "session_id": str(s.id), "scanned": False, "error": error}))
     elif type == "session.credential":
         cred = _reencrypt(p.get("credential"), s)
         if cred is not None:
@@ -329,11 +415,11 @@ async def handle_status(db: AsyncSession, redis: Redis, bus: EventBus, org_id: u
             from gh import health
 
             name = CHANNEL_NAME.get(s.type, s.type)
+            cause, todo = channel_down_text(reason, p.get("error"))
             await health.raise_once(
                 db, org_id, key=f"channel.down:{s.type}", kind="channel.down", severity="bad",
-                title=f"Kênh {name} đã ngắt kết nối",
-                body=f"{s.account_label or name}: {CHANNEL_DOWN_REASONS[reason]} — đăng nhập lại để tiếp tục nhận tin.",
-                link="/connections", redis=redis)
+                title=f"Kênh {name} đã ngắt kết nối", body=f"{s.account_label or name}: {cause} — {todo}",
+                link="/connections", fingerprint=f"{reason}:{p.get('error')}", redis=redis)
         await actionlog.record(db, org_id=org_id, actor_type="system", actor_id=f"bridge:{s.type}",
                                action="channel.session_ended", target_type="channel_session", target_id=str(s.id),
                                target_label=s.account_label, result="ok" if reason == "logged_out" else "failed",

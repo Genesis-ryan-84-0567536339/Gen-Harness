@@ -24,7 +24,7 @@ from gh.chassis import actionlog
 from gh.chassis.bus import BRIDGE_CONTROL
 from gh.chassis.mcp_client import McpBlockedNetwork, McpError, pin_endpoint
 from gh.data.common import CHANNEL_NAME, LISTENING_MODES, iso, org_settings
-from gh.data.ingest import sync_listen_sets, uptime_pct
+from gh.data.ingest import close_sessions, publish_resume, sync_listen_sets, uptime_pct
 from gh.db import DB
 from gh.errors import ApiError, conflict, field_errors, forbidden, not_found, pin_required
 from gh.gen import jev
@@ -56,7 +56,8 @@ GROUP_KINDS = ("internal", "market", "partner", "customer", "private")
 
 async def _latest_session(db: AsyncSession, channel_id: uuid.UUID) -> Any:
     return (await db.execute(text("""
-        SELECT id, state, account_label, started_at, ended_at, last_heartbeat_at, meta, qr_issued_at
+        SELECT id, state, account_label, started_at, ended_at, last_heartbeat_at, meta, qr_issued_at,
+               (credential_enc IS NOT NULL) AS has_credential
         FROM core.channel_sessions WHERE channel_id = :c
         ORDER BY (ended_at IS NULL) DESC, COALESCE(started_at, qr_issued_at) DESC NULLS LAST, id DESC LIMIT 1"""),
         {"c": channel_id})).one_or_none()
@@ -68,6 +69,7 @@ async def channel_card(db: AsyncSession, redis: Any, org_id: uuid.UUID, type_: s
     base: dict[str, Any] = {"type": type_, "name": CHANNEL_NAME[type_], "installed": ch is not None,
                             "id": str(ch.id) if ch else None, "account_label": None, "started_at": None,
                             "groups_listening": 0, "outbound_queued": 0, "last_heartbeat_at": None, "qr": None,
+                            "resumable": False, "bridge_online": None,
                             "stats": {"msgs_24h": None, "tagged_24h": None, "latency_ms": None, "uptime_pct": None}}
     if ch is None:
         return {**base, "state": "not_installed"}
@@ -94,15 +96,24 @@ async def channel_card(db: AsyncSession, redis: Any, org_id: uuid.UUID, type_: s
             q = orjson.loads(raw)
             qr = {"session_id": str(s.id), "image": q.get("image"), "expires_at": q.get("expires_at"),
                   "scanned": bool(q.get("scanned"))}
+    # v0.1.62 (F068): "Thời gian trực" đo 24 giờ THỰC (chỉ cắt bớt khi kênh mới nối lần đầu trong vòng 24 giờ), không tính lại
+    # từ lần nối gần nhất — nối lại sau một đêm mất mạng không được hiện 100%.
+    first_up = None
+    if s is not None and state == "active":
+        first_up = (await db.execute(text("SELECT min(started_at) FROM core.channel_sessions WHERE channel_id = :c"),
+                                     {"c": ch.id})).scalar_one()
     return {**base, "state": state, "session_id": str(s.id) if s else None,
             "account_label": s.account_label if s else None, "started_at": iso(s.started_at) if s else None,
             "ended_at": iso(s.ended_at) if s else None, "groups_listening": listening,
             "outbound_queued": int(meta.get("queued") or 0),
             "last_heartbeat_at": iso(s.last_heartbeat_at) if s else None, "qr": qr, "error": meta.get("error"),
+            # v0.1.62 (F046): phiên 'error' còn credential ⇒ nối lại được bằng phiên đã lưu (không cần quét QR);
+            # `bridge_online` = bộ nhận tin còn nhịp tim (khoá TTL 45 giây) — false ⇒ thẻ hiện "Mất liên lạc".
+            "resumable": bool(s is not None and state == "error" and s.has_credential),
+            "bridge_online": bool(await redis.get("gh:bridge:heartbeat")) if type_ in QR_CHANNELS else None,
             "listen_direct": bool((await org_settings(db, org_id)).get("listen_direct", {}).get(type_, False)),
             "stats": {"msgs_24h": counts.msgs, "tagged_24h": counts.tagged, "latency_ms": meta.get("latency_ms"),
-                      "uptime_pct": await uptime_pct(redis, type_, s.started_at)
-                      if s is not None and state == "active" else None}}
+                      "uptime_pct": await uptime_pct(redis, type_, first_up) if first_up is not None else None}}
 
 
 @router.get("/channels")
@@ -135,10 +146,11 @@ async def channel_login(type_: str, body: LoginIn, request: Request, user: servi
         raise field_errors({"accept_risk": "Cần xác nhận đã đọc cảnh báo rủi ro tài khoản cá nhân"})
     redis = request.app.state.redis
     if not await redis.get("gh:bridge:heartbeat"):
-        raise ApiError(503, "BRIDGE_OFFLINE", "Bridge kênh chưa chạy — kiểm tra dịch vụ bridge rồi thử lại")
+        raise _bridge_offline()
     # Phiên đang chờ QR cũ bị huỷ; phiên đang hoạt động giữ tới khi phiên mới thành công.
-    await db.execute(text("""UPDATE core.channel_sessions SET state = 'expired', ended_at = now()
-                             WHERE channel_id = :c AND state = 'pending_qr' AND ended_at IS NULL"""), {"c": ch.id})
+    cancelled = (await db.execute(text("""UPDATE core.channel_sessions SET state = 'expired', ended_at = now()
+                                          WHERE channel_id = :c AND state = 'pending_qr' AND ended_at IS NULL
+                                          RETURNING id"""), {"c": ch.id})).scalars().all()
     sid = (await db.execute(text("""
         INSERT INTO core.channel_sessions (channel_id, org_id, account_label, state, qr_issued_at, risk_accepted_by)
         VALUES (:c, :o, :l, 'pending_qr', now(), :u) RETURNING id"""),
@@ -147,6 +159,8 @@ async def channel_login(type_: str, body: LoginIn, request: Request, user: servi
                            target_type="channel", target_id=type_, target_label=body.account_label,
                            detail={"session_id": str(sid), "accept_risk": True}, ip=user.ip)
     await db.commit()
+    # v0.1.62 (F067): phiên chờ QR cũ bị huỷ trong CSDL thì bridge cũng phải bỏ vòng xin QR của nó.
+    await close_sessions(request.app.state.bus, user.org_id, type_, list(cancelled), actor=user.actor_id)
     await request.app.state.bus.publish(BRIDGE_CONTROL, "session.login",
                                         {"channel": type_, "session_id": str(sid), "credential": None},
                                         actor=user.actor_id, org_id=user.org_id)
@@ -154,6 +168,36 @@ async def channel_login(type_: str, body: LoginIn, request: Request, user: servi
                                                      "account_label": body.account_label, "scanned": False,
                                                      "error": None}, org_id=user.org_id)
     return {"session_id": str(sid)}
+
+
+def _bridge_offline() -> ApiError:
+    """503 khi bộ nhận tin (bridge) không có nhịp tim: câu cho Sếp là tiếng Việt thường; mã BRIDGE_OFFLINE nằm ở
+    "Chi tiết kỹ thuật" của Console (v0.1.62, F069)."""
+    return ApiError(503, "BRIDGE_OFFLINE",
+                    "Bộ nhận tin Zalo/WhatsApp đang tắt — thử lại sau ít phút; nếu vẫn lỗi, gửi Gói chẩn đoán cho người hỗ trợ")
+
+
+@router.post("/channels/{type_}/resume", status_code=202)
+async def channel_resume(type_: str, request: Request, user: service.CurrentUser = Depends(MANAGE),
+                         db: AsyncSession = DB) -> dict[str, Any]:
+    """v0.1.62 (F046): nối lại bằng PHIÊN ĐÃ LƯU (không quét QR) khi phiên đang 'Lỗi kết nối' mà credential còn. Không đổi
+    quyền truy cập nào so với lần đăng nhập đã chấp nhận rủi ro trước đó, nên không đòi mã PIN lần nữa."""
+    ch = await _qr_channel(db, user.org_id, type_)
+    redis = request.app.state.redis
+    if not await redis.get("gh:bridge:heartbeat"):
+        raise _bridge_offline()
+    s = (await db.execute(text("""
+        SELECT id, credential_enc, account_label FROM core.channel_sessions
+        WHERE channel_id = :c AND state = 'error' AND credential_enc IS NOT NULL
+        ORDER BY COALESCE(started_at, qr_issued_at) DESC NULLS LAST, id DESC LIMIT 1"""), {"c": ch.id})).one_or_none()
+    if s is None:
+        raise conflict("NO_SAVED_SESSION", "Chưa có phiên đã lưu để nối lại — hãy tạo mã QR để đăng nhập lại")
+    await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id, action="channel.resume",
+                           target_type="channel", target_id=type_, target_label=s.account_label,
+                           detail={"session_id": str(s.id)}, ip=user.ip)
+    await db.commit()
+    await publish_resume(request.app.state.bus, user.org_id, type_, s.id, s.credential_enc, actor=user.actor_id)
+    return {"session_id": str(s.id)}
 
 
 @router.post("/channels/{type_}/logout", status_code=204)
