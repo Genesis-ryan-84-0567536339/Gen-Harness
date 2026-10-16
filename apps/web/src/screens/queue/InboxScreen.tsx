@@ -10,6 +10,7 @@ import { useUrlState } from '../../lib/uiStore';
 import { TRUNCATED_USERS_TEXT, useAssignees, useEmptyUsersText } from '../../lib/pickers';
 import { CardError, InlineError, ScreenHead, SkeletonLines } from '../common';
 import { itemTag, itemTagTone, priorityTone, triageBadges } from './queueModel';
+import { LoadMore } from './LoadMore';
 import { useInbox, useInboxAct, useInboxAssign, useInboxSilence } from './queries';
 
 const INTENT_OPTIONS = [
@@ -82,7 +83,7 @@ export function InboxScreen() {
             </Card>
           ))}
         </div>
-      ) : q.isError ? (
+      ) : q.isError && !q.isFetchNextPageError ? (
         <CardError error={q.error} onRetry={() => void q.refetch()} retrying={q.isFetching} />
       ) : q.data.items.length === 0 ? (
         <DataEmptyState
@@ -90,11 +91,23 @@ export function InboxScreen() {
           fallback={<EmptyState icon="ph ph-tray" title="Hộp thư đang trống" description="Không có tin, cảnh báo hay bản nháp nào khớp bộ lọc hiện tại." />}
         />
       ) : (
-        <div className="ib-list">
-          {q.data.items.map((item) => (
-            <InboxCard key={item.id} item={item} onAssign={() => setAssignFor(item)} onSilence={() => setSilenceFor(item)} />
-          ))}
-        </div>
+        <>
+          <div className="ib-list">
+            {q.data.items.map((item) => (
+              <InboxCard key={item.id} item={item} onAssign={() => setAssignFor(item)} onSilence={() => setSilenceFor(item)} />
+            ))}
+          </div>
+          <LoadMore
+            shown={q.data.items.length}
+            // Số trên tab đếm theo tab (và "Ẩn rác"), không theo ô Ý định ⇒ đang lọc ý định thì không biết tổng, chỉ ghi số đã xem.
+            total={intent ? null : (q.data.counts[tab] ?? null)}
+            hasMore={q.hasNextPage}
+            loading={q.isFetchingNextPage}
+            onMore={() => void q.fetchNextPage()}
+            error={q.isFetchNextPageError ? q.error : null}
+            testId="inbox-xem-them"
+          />
+        </>
       )}
 
       {assignFor ? <AssignDialog item={assignFor} onClose={() => setAssignFor(null)} /> : null}
