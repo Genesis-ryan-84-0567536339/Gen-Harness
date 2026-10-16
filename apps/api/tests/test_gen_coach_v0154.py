@@ -199,7 +199,7 @@ def test_every_target_resolves_in_registry() -> None:
     assert sg.TODO_TARGETS["boss.ai"] == "connections.brain"
     for target in sorted(sg.ALL_TARGETS):
         assert gen_registry.resolve_target(target) is not None, target
-    # mỗi việc tĩnh có ĐÚNG một cách chỉ đường: đích làm sáng (TODO_TARGETS) hoặc liên kết trang (TODO_LINKS), không cả hai.
+    # mỗi việc tĩnh có ĐÚNG một cách chỉ đường: đích làm sáng (TODO_TARGETS) hoặc liên kết trang (TODO_LINKS).
     assert set(sg.TODO_TARGETS) | set(sg.TODO_LINKS) == {r.key for r in sg.TODO_RULES if r.kind != "health"}
     assert not set(sg.TODO_TARGETS) & set(sg.TODO_LINKS)
 
@@ -1767,7 +1767,9 @@ async def test_coach_status_tool_result_is_small_static_and_does_not_mark_shown(
     data = res.data
     assert set(data) == {"enabled", "todos", "progress", "lesson", "lessons"}
     assert [t["key"] for t in data["todos"]] == ["model.missing", "followup.5"]
-    assert data["todos"][0]["target"] == "api.bindings" and data["todos"][1]["n"] == 5 and "5" in runner.seen_ids
+    # v0.1.59: model.missing chỉ đường bằng `link` (màn Thiết lập nguồn AI), không còn `target`.
+    assert data["todos"][0]["link"] == "/setup?buoc=nguon-ai" and "target" not in data["todos"][0]
+    assert data["todos"][1]["n"] == 5 and "5" in runner.seen_ids
     assert data["progress"]["required_done"] == 0 and data["progress"]["required_total"] == 1
     assert data["lesson"]["id"] == "N01" and set(data["lesson"]) == {"id", "k", "total", "title", "status"}
     assert len(data["lessons"]) == 19 and set(data["lessons"][0]) == {"id", "title", "status"}
@@ -1801,7 +1803,7 @@ async def test_gen_turn_with_coach_question_gets_the_block_and_runs_the_tool(
     assert t["status"] == "done"
     system = router.calls[0][0].content
     assert system.count(engine.BLOCK_HEADER) == 1
-    assert "model.missing · Gen chưa có model để trả lời · api.bindings" in system
+    assert "model.missing · Gen chưa có model để trả lời · /setup?buoc=nguon-ai" in system
     assert "boss.hub · Nối Gen-hub nếu Sếp muốn · boss_checks.row.hub" in system
     block = system[system.index(engine.BLOCK_HEADER):].split("\n\n")[0]
     assert len(block) <= 500

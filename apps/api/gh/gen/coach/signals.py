@@ -83,9 +83,9 @@ TODO_TARGETS: dict[str, str] = {
 }
 ALL_TARGETS: frozenset[str] = frozenset(TODO_TARGETS.values())
 
-#: v0.1.59 (g5-thiet-lap): việc tĩnh mà đích là MỘT TRANG (không phải phần tử cần làm sáng) → `link`. Web ưu tiên `target`
-#: hơn `link` (coachModel.showMe) nên khoá ở đây KHÔNG được có trong `TODO_TARGETS`. `model.missing` dẫn thẳng tới
-#: màn "Thiết lập nguồn AI" (/setup?buoc=nguon-ai) — cùng đích với mọi nút "Chọn model" khác.
+#: v0.1.59 (g5-thiet-lap): việc tĩnh mà đích là MỘT TRANG (không phải phần tử cần làm sáng) → `link`. Web ưu tiên
+#: `target` hơn `link` (coachModel.showMe) nên khoá ở đây KHÔNG được có trong `TODO_TARGETS`. `model.missing` dẫn
+#: thẳng tới màn "Thiết lập nguồn AI" (/setup?buoc=nguon-ai) — cùng đích với mọi nút "Chọn model" khác.
 TODO_LINKS: dict[str, str] = {
     "model.missing": "/setup?buoc=nguon-ai",
 }
