@@ -89,6 +89,7 @@ Việc đã hứa hoặc đã biết mà chưa làm. Mỗi dòng ghi điều ki�
 | 34 | **Tách agy ra container riêng không gắn khoá** (bước an toàn tiếp theo) | Chưa làm. Làm sau Nợ #33 |
 | 35 | **Kiểm WhatsApp QR với máy chủ WhatsApp thật** (v0.1.59) | Chưa kiểm được: máy kiểm thử bị chặn mạng tới máy chủ WhatsApp. Điều kiện mở: Owner quét thử theo mục "Việc Boss phải làm" của v0.1.59 rồi báo kết quả (ghi vào `docs/releases/v0.1.59.md`) |
 | 36 | **Mã chết trình thiết lập cũ** (v0.1.60): `Step1Welcome`, `Step2Owner`, `Step3Org`, `ComingSoonStep`, `Step12Finish` (chỉ `test/unit/legacy-wizard.tsx` còn dùng) và ba bản đăng nhập CLI ở `BossChecksPage` chưa gộp về `CliLoginPanel` | Chưa làm, nhỏ — dọn khi sửa trình thiết lập lần tới |
+| 37 | **Bảng "Cần chăm" ở Quan hệ, máy tính 1024px** (v0.1.60): cột hồ sơ chiếm 4/12 nên bảng phải cuộn ngang mới thấy "Cơ hội mở" và nút "Nhờ Gen soạn tin" (ở 1440/1920 đủ chỗ; lính gác bố cục chấp nhận vì là vùng cuộn có chủ đích) | Chưa làm, nhỏ — ở 1024 đổi bảng sang danh sách xếp chồng hoặc đưa hồ sơ xuống dưới |
 
 ## Bản phản ứng (hotfix)
 Các bản sửa nóng thật, không nằm trong kế hoạch đợt. Đối chiếu `git log origin/main` và nhánh `hotfix/*`:
