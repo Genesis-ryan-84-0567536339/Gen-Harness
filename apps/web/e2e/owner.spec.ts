@@ -26,6 +26,19 @@ const tabbar = (page: Page) => page.getByTestId('owner-tabbar');
 const back = (page: Page) => page.getByTestId('back-to-front');
 const askDialog = (page: Page) => page.getByRole('dialog', { name: 'Hỏi Gen' });
 
+/** Số đếm trên thanh điều hướng = `today.nav` của GET /owner/today: Thông tin = urgent_open (tin Khẩn chưa xử lý), Việc = decide. */
+async function expectNavCounts(page: Page, prefix: 'owner-nav' | 'owner-tabbar'): Promise<void> {
+  const r = await page.request.get('/api/v1/owner/today');
+  expect(r.ok()).toBe(true);
+  const nav = ((await r.json()) as { nav: { urgent_open: number; decide: number } }).nav;
+  expect(nav.urgent_open).toBeGreaterThan(0);
+  expect(nav.decide).toBeGreaterThan(0);
+  const badge = (key: string) => page.getByTestId(`${prefix}-${key}`).locator('.kit-badge');
+  await expect(badge('feed')).toHaveText(String(nav.urgent_open));
+  await expect(badge('work')).toHaveText(String(nav.decide));
+  for (const key of ['intel', 'relations', 'analytics']) await expect(badge(key)).toHaveCount(0);
+}
+
 async function noObjectText(page: Page): Promise<void> {
   expect(await page.locator('body').innerText()).not.toContain('[object Object]');
 }
@@ -46,7 +59,9 @@ test.describe('v0.1.59 · Mặt tiền 5 trụ cột (máy tính 1440)', () => {
     await page.goto('/');
     await expect(page).toHaveURL(/\/owner$/);
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Tình báo');
-    await expect(rail(page).getByRole('link')).toHaveText(['Tình báo', 'Thông tin', 'Quan hệ', 'Phân tích', 'Việc', 'Cài đặt']);
+    await expect(rail(page).getByRole('link')).toHaveCount(6);
+    await expect(rail(page).locator('.owner-nav__name')).toHaveText(['Tình báo', 'Thông tin', 'Quan hệ', 'Phân tích', 'Việc', 'Cài đặt']);
+    await expectNavCounts(page, 'owner-nav');
     for (const it of [...PILLARS, SETTINGS]) await expect(page.getByTestId(`owner-nav-${it.key}`)).toBeVisible();
     await expect(page.getByTestId('owner-nav-intel')).toHaveAttribute('aria-current', 'page');
     await expect(page.getByTestId('owner-nav-feed')).not.toHaveAttribute('aria-current', 'page');
@@ -292,7 +307,9 @@ test.describe('v0.1.59 · Mặt tiền 5 trụ cột (điện thoại 390px)', (
     await loginAsOwner(page);
     await page.goto('/');
     await expect(page).toHaveURL(/\/owner$/);
-    await expect(tabbar(page).getByRole('link')).toHaveText(['Tình báo', 'Thông tin', 'Quan hệ', 'Phân tích', 'Việc']);
+    await expect(tabbar(page).getByRole('link')).toHaveCount(5);
+    await expect(tabbar(page).locator('.owner-tabbar__name')).toHaveText(['Tình báo', 'Thông tin', 'Quan hệ', 'Phân tích', 'Việc']);
+    await expectNavCounts(page, 'owner-tabbar');
     for (const it of PILLARS) await expect(page.getByTestId(`owner-tabbar-${it.key}`)).toBeVisible();
     await expect(page.getByTestId('owner-tabbar-settings')).toHaveCount(0);
     await expect(rail(page)).toHaveCount(0);
