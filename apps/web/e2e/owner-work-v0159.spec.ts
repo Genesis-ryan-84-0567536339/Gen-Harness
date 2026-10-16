@@ -142,6 +142,16 @@ test.describe('v0.1.59 · Việc', () => {
     await expect(page.getByTestId('work-decide')).toBeVisible();
     await expect(page.getByTestId('work-today')).toHaveCount(0);
     await noHorizontalScroll(page);
+    // ba mục nằm trọn trong khung Segmented và trong màn (ảnh v0.1.60: "Gen đề xuất (4)" từng bị cắt ở mép phải)
+    const box = (await group.boundingBox())!;
+    expect(box.x + box.width).toBeLessThanOrEqual(390);
+    for (const opt of await group.getByRole('radio').all()) {
+      const r = (await opt.boundingBox())!;
+      expect(r.x).toBeGreaterThanOrEqual(box.x);
+      expect(r.x + r.width).toBeLessThanOrEqual(box.x + box.width + 0.5);
+      expect(r.height).toBeGreaterThanOrEqual(44);
+      expect(await opt.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    }
     await group.getByRole('radio', { name: /^Hôm nay/ }).click();
     await expect(page.getByTestId('work-today')).toBeVisible();
     await expect(page.getByTestId('work-decide')).toHaveCount(0);

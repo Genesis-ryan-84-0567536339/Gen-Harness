@@ -13,7 +13,12 @@
 
 /* ── Đầu thẻ: logo + thanh bước ── */
 .setup-one__head { display: flex; flex-direction: column; gap: 12px; }
-.setup-one__brand { display: block; }
+.setup-one__brand { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.setup-one__brand-tile {
+  flex: none; width: 32px; height: 32px; display: grid; place-items: center; border-radius: var(--radius-md);
+  border: 1px solid var(--color-accent); color: var(--color-accent);
+}
+.setup-one__brand-name { font-size: 14px; font-weight: 600; }
 .setup-one__steps {
   list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px;
 }
@@ -100,6 +105,8 @@
 .setup-one__actions { display: flex; flex-direction: column; gap: 8px; padding-top: 16px; border-top: 1px solid var(--color-divider); }
 .setup-one__actions .gh-btn { min-height: 44px; justify-content: center; }
 .setup-one__later { display: flex; flex-direction: column; gap: 0; }
+/* Mọi nút trong Thiết lập (Đăng nhập Google, Kiểm tra khoá…) có vùng chạm ≥ 44px như Mặt tiền — nút dùng lại từ Console mặc định thấp hơn. */
+.setup-one .gh-btn { min-height: 44px; }
 
 /* Khối dùng lại của màn cũ khi nằm trong thẻ gọn: không tràn ngang trên điện thoại. */
 .setup-one .setup-section { padding: 0; border-bottom: none; }

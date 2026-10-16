@@ -42,6 +42,9 @@ test.describe('Thiết lập một màn (v0.1.59)', () => {
     // Bước 1 — Tài khoản: một form, mã thiết lập có sẵn từ đường dẫn nên không hỏi lại; "Tuỳ chỉnh" thu gọn.
     await expect(page.getByRole('heading', { name: 'Tạo tài khoản Sếp' })).toBeVisible();
     await expect(page).toHaveURL(/buoc=tai-khoan/);
+    // logo cùng kiểu Mặt tiền: "Gen-Harness", không viết hoa toàn bộ (checklist "Owner 3 giây hiểu", v0.1.60)
+    await expect(page.getByTestId('setup-brand')).toHaveText('Gen-Harness');
+    expect(await page.getByTestId('setup-brand').evaluate((el) => getComputedStyle(el.lastElementChild!).textTransform)).toBe('none');
     await expect(stepBar(page).getByRole('listitem')).toHaveText(['1Bước 1: Tài khoản', '2Bước 2: Nguồn AI', '3Bước 3: Xong']);
     await expect(stepBar(page).getByRole('listitem').first()).toHaveAttribute('aria-current', 'step');
     await expect(page.getByLabel('Mã thiết lập')).toHaveCount(0);

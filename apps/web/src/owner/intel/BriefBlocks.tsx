@@ -180,7 +180,7 @@ export function BriefHero({
         </div>
         {history.length > 0 ? (
           <button type="button" className="kit-btn kit-btn--secondary intel-hero__prev" data-testid="intel-brief-history" onClick={() => setOpen(true)}>
-            Bản tin trước
+            Xem bản tin trước
           </button>
         ) : null}
       </div>

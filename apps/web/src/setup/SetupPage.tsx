@@ -9,7 +9,7 @@ import { qk } from '../lib/queries';
 import { queryClient } from '../lib/queryClient';
 import { useRealtime } from '../lib/realtime';
 import { toast } from '../lib/toast';
-import { Logo } from '../shell/Logo';
+import { PigMark } from '../shell/Logo';
 import { StepAccount } from './one/StepAccount';
 import { StepAiSource } from './one/StepAiSource';
 import { StepDone } from './one/StepDone';
@@ -173,9 +173,7 @@ export function SetupPage() {
     <div className="setup-one" data-view={view}>
       <main className="setup-one__card">
         <header className="setup-one__head">
-          <div className="setup-one__brand">
-            <Logo wide />
-          </div>
+          <SetupBrand />
           <ol className="setup-one__steps" aria-label="Các bước thiết lập">
             {SETUP_VIEWS.map((v) => {
               const at = SETUP_VIEWS.findIndex((x) => x.key === view);
@@ -209,14 +207,24 @@ export function SetupPage() {
   );
 }
 
+/** Logo của Thiết lập: cùng kiểu với Mặt tiền (ô hình heo + "Gen-Harness"), không viết hoa toàn bộ như logo Console. */
+function SetupBrand() {
+  return (
+    <div className="setup-one__brand" data-testid="setup-brand">
+      <span className="setup-one__brand-tile" aria-hidden>
+        <PigMark size={20} />
+      </span>
+      <span className="setup-one__brand-name">Gen-Harness</span>
+    </div>
+  );
+}
+
 function SetupSkeleton() {
   return (
     <div className="setup-one" aria-busy="true">
       <div className="setup-one__card">
         <header className="setup-one__head">
-          <div className="setup-one__brand">
-            <Logo wide />
-          </div>
+          <SetupBrand />
         </header>
         <div className="gh-card setup-one__panel">
           <Skeleton width={200} height={20} />

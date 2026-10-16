@@ -665,6 +665,8 @@ describe('Tình báo (/owner)', () => {
     mount(<IntelScreen />);
     await screen.findByText(/Sáng nay Sếp có nháp chờ duyệt/);
     const user = userEvent.setup();
+    // nút là động từ (checklist "Owner 3 giây hiểu"), ngăn mở ra mang tên danh từ
+    expect(screen.getByTestId('intel-brief-history')).toHaveTextContent(/^Xem bản tin trước$/);
     await user.click(screen.getByTestId('intel-brief-history'));
     const sheet = await screen.findByRole('dialog', { name: 'Bản tin trước' });
     await user.click(within(sheet).getByText('Bản tin Gen · chiều qua'));

@@ -76,6 +76,8 @@
 .work .gh-seg__opt {
   height: auto; min-height: var(--tap); padding: 0 var(--sp-2); border-radius: var(--r-8);
   font-size: var(--fs-14); line-height: var(--lh-14); color: var(--text-2);
+  /* Ba mục chia đều MỘT hàng; nhãn dài ("Gen đề xuất (4)") xuống hai dòng trong nút thay vì bị cắt mất ở mép phải (ảnh 390px). */
+  flex: 1 1 0; min-width: 0; white-space: normal; text-align: center; overflow-wrap: anywhere;
 }
 .work .gh-seg__opt:hover { color: var(--text); }
 .work .gh-seg__opt[aria-checked='true'] { background: var(--accent-soft); color: var(--accent-ink); font-weight: var(--fw-600); }
