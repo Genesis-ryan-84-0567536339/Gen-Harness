@@ -282,7 +282,7 @@ async def test_staff_gen_turn_does_not_call_agy_and_model_options_hide_it(owner_
 
 # ─── F2 (review lần 2): việc soạn lại / dịch nháp / thử quy tắc KHÔNG dùng agy, bất kể khoá agent ──────────────
 
-NO_AGY_PURPOSES = ("draft_translate", "draft_regenerate")
+NO_AGY_PURPOSES = ("draft_translate", "draft_regenerate", "rule_test")
 
 
 def test_decide_denies_by_purpose_whatever_the_key() -> None:
@@ -292,6 +292,9 @@ def test_decide_denies_by_purpose_whatever_the_key() -> None:
         for key in (inner, "core.reply", "core.gen", "core.refinery"):
             v = d(key, purpose=purpose)
             assert not v.allowed and v.code == "diplomatic" and v.reason == REASON, (key, purpose)
+    v = d("core.refinery", purpose="rule_test")
+    assert not v.allowed and v.code == "untrusted_text" and v.reason == agy_policy.REASON_UNTRUSTED_TEXT
+    assert "văn bản" in (v.reason or "") and "khoá API" in (v.reason or "")
     # Việc khác của cùng khoá vẫn như cũ.
     assert d("core.refinery", purpose="refinery").allowed and d(inner, purpose="duty_decide").allowed
     assert d("core.gen", purpose="gen.turn").allowed and d("core.gen", purpose=None).allowed
@@ -332,3 +335,12 @@ async def test_translate_regenerate_endpoints_never_run_agy_for_a_former_diploma
         assert r.status_code == 503, (path, r.status_code, r.text)
     assert len(_calls(clis)) == n
 
+
+
+async def test_rule_test_endpoint_never_runs_agy(owner_api, db, clis) -> None:  # type: ignore[no-untyped-def]
+    """Auditor (data.read) gọi /rules/test với văn bản tuỳ ý ⇒ core.refinery ⇒ agy (review lần 2): nay không."""
+    await _only_agy(owner_api)
+    n = len(_calls(clis))
+    r = await owner_api.send("POST", "/rules/test", {"text": "Khách hỏi giá sản phẩm A, cần báo giá gấp"})
+    assert r.status_code == 200, r.text
+    assert len(_calls(clis)) == n and r.json()["model"] is None

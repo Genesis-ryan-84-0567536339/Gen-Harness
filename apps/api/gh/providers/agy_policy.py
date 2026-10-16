@@ -39,14 +39,18 @@ AGENT_PREFIX = "agent:"
 
 CODE_DIPLOMATIC = "diplomatic"
 CODE_STAFF_GEN = "staff_gen"
+CODE_UNTRUSTED_TEXT = "untrusted_text"
 
 #: Câu hiển thị cho người dùng (tiếng Việt có dấu, trung thực) — nguồn duy nhất.
 REASON_DIPLOMATIC = "Antigravity chưa dùng cho việc trả lời người ngoài — chờ hộp riêng (bản sau)"
 REASON_STAFF_GEN = "Antigravity chưa dùng cho Gen của nhân viên — Gen của nhân viên dùng khoá API"
+REASON_UNTRUSTED_TEXT = "Antigravity chưa dùng để thử quy tắc trên văn bản tuỳ ý — việc này dùng khoá API"
 
 #: Việc soạn lại / dịch nháp tin gửi khách: LUÔN ngoại giao, bất kể khoá (`core.reply` hay `agent:<id>` của nháp — agent
 #: có thể hết "ngoại giao" sau khi nháp được tạo, và lời yêu cầu soạn lại là chữ Sếp gõ tự do).
 DIPLOMATIC_PURPOSES = frozenset({"draft_translate", "draft_regenerate"})
+#: Thử quy tắc (`/rules/test`): văn bản do người dùng (kể cả vai chỉ đọc như Auditor) gõ tuỳ ý ⇒ không đi qua agy.
+UNTRUSTED_TEXT_PURPOSES = frozenset({"rule_test"})
 
 
 @dataclass(frozen=True)
@@ -61,6 +65,7 @@ class AgyVerdict:
 ALLOWED = AgyVerdict()
 DENIED_DIPLOMATIC = AgyVerdict(False, CODE_DIPLOMATIC, REASON_DIPLOMATIC)
 DENIED_STAFF_GEN = AgyVerdict(False, CODE_STAFF_GEN, REASON_STAFF_GEN)
+DENIED_UNTRUSTED_TEXT = AgyVerdict(False, CODE_UNTRUSTED_TEXT, REASON_UNTRUSTED_TEXT)
 
 
 def decide(agent_key: str, *, owner: bool = True, diplomatic: bool = False, purpose: str | None = None) -> AgyVerdict:
@@ -68,11 +73,13 @@ def decide(agent_key: str, *, owner: bool = True, diplomatic: bool = False, purp
 
     - `owner`: người hỏi là Owner (chỉ ảnh hưởng `core.gen`; mặc định True cho mọi lượt không có người hỏi cụ thể);
     - `diplomatic`: với `agent:<id>` — agent đó là ngoại giao (`diplomatic_agent_ids`); khoá khác bỏ qua tham số này.
-    - `purpose`: việc đang làm (`ModelRouter.generate`). Soạn lại / dịch nháp (`DIPLOMATIC_PURPOSES`) không dùng agy
-      bất kể khoá.
+    - `purpose`: việc đang làm (`ModelRouter.generate`). Soạn lại / dịch nháp (`DIPLOMATIC_PURPOSES`) và thử quy tắc
+      (`UNTRUSTED_TEXT_PURPOSES`) không dùng agy bất kể khoá.
     Khoá lạ (core.embedding…) không bị chặn ở đây — chúng không dùng agy."""
     if purpose in DIPLOMATIC_PURPOSES:
         return DENIED_DIPLOMATIC
+    if purpose in UNTRUSTED_TEXT_PURPOSES:
+        return DENIED_UNTRUSTED_TEXT
     if agent_key == ROLE_REPLY:
         return DENIED_DIPLOMATIC
     if agent_key.startswith(AGENT_PREFIX) and diplomatic:
@@ -115,7 +122,7 @@ async def verdict_for(db: AsyncSession, org_id: uuid.UUID, agent_key: str, *, ow
     """`decide` cho MỘT khoá, tự tra DB khi là `agent:<id>` (các khoá khác, và việc đã bị cấm theo `purpose`, không tốn
     truy vấn)."""
     aid = agent_id_of(agent_key)
-    diplomatic = (aid is not None and purpose not in DIPLOMATIC_PURPOSES
+    diplomatic = (aid is not None and purpose not in DIPLOMATIC_PURPOSES | UNTRUSTED_TEXT_PURPOSES
                   and aid in await diplomatic_agent_ids(db, org_id, only=aid))
     return decide(agent_key, owner=owner, diplomatic=diplomatic, purpose=purpose)
 

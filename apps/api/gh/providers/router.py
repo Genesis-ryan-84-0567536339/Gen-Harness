@@ -542,8 +542,8 @@ class ModelRouter:
         """Gói G: `owner` = người hỏi là Owner (mặc định True: việc nền / hệ thống không có người hỏi). Chỉ `core.gen`
         phân biệt — Gen của nhân viên (`owner=False`) không dùng Antigravity CLI. Khoá `core.reply` và agent ngoại
         giao cũng không dùng agy (`agy_policy.decide`, kể cả khi có dòng gán agy cũ). `purpose` soạn lại / dịch nháp
-        (`draft_*`) không dùng agy bất kể khoá (review F2: nháp có agent_id dùng khoá
-        `agent:<id>`, agent hết "ngoại giao" sau khi nháp được tạo).
+        (`draft_*`) và thử quy tắc (`rule_test`) không dùng agy bất kể khoá (review F2: nháp có agent_id dùng khoá
+        `agent:<id>`, agent hết "ngoại giao" sau khi nháp được tạo; `/rules/test` nhận văn bản tuỳ ý của vai chỉ đọc).
 
         v0.1.62: Antigravity CLI dùng được ở MỌI lượt gọi (không còn tham số `allow_agy` — Owner mở thẳng ngày
         16/10/2026, xem docstring module).
