@@ -1,5 +1,5 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { InboxTab, TriageSettings, TaskCreateBody, TaskPatchBody, TaskPriority, TaskStatus } from '@gen-harness/contracts';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { InboxItem, InboxPage, InboxTab, Task, TaskPage, TriageSettings, TaskCreateBody, TaskPatchBody, TaskPriority, TaskStatus } from '@gen-harness/contracts';
 import { api } from '../../lib/api';
 import { onRealtimeEvent } from '../../lib/realtime';
 
@@ -9,6 +9,8 @@ export const qkQueue = {
   inbox: (tab: InboxTab, intent?: string, hideJunk = false) => ['queue', 'inbox', tab, intent ?? '', hideJunk] as const,
   inboxItem: (id: string) => ['queue', 'inbox', 'one', id] as const,
   tasks: (q: Record<string, string | boolean | undefined>) => ['queue', 'tasks', JSON.stringify(q)] as const,
+  /** Danh sách việc phân trang (màn Việc & Nhắc hẹn) — khoá riêng vì dữ liệu là nhiều trang, khác `tasks` (một trang). */
+  taskList: (q: Record<string, string | boolean | undefined>) => ['queue', 'tasks', 'list', JSON.stringify(q)] as const,
   task: (id: string) => ['queue', 'tasks', 'one', id] as const,
   promises: (status: string) => ['queue', 'promises', status] as const,
   triageSettings: ['queue', 'triage', 'settings'] as const,
@@ -21,11 +23,45 @@ export const useOverview = () =>
     queryFn: ({ signal }) => api.queue.overview(signal),
   });
 
+/** Số dòng mỗi lần tải ở Hộp thư và Việc; "Xem thêm" nối trang kế theo `next_cursor` của máy chủ. */
+export const QUEUE_PAGE = 50;
+
+/** Gộp các trang đã tải thành một danh sách (bỏ dòng trùng id nếu hai trang chạm nhau). */
+function mergePages<T extends { id: string }>(pages: { items: T[] }[]): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const p of pages) {
+    for (const it of p.items) {
+      if (seen.has(it.id)) continue;
+      seen.add(it.id);
+      out.push(it);
+    }
+  }
+  return out;
+}
+
+export interface InboxView {
+  /** Mọi dòng đã tải (các trang gộp lại, mới nhất trước). */
+  items: InboxItem[];
+  /** Số theo tab + trạng thái lọc đầu: lấy ở trang tải gần nhất. */
+  counts: InboxPage['counts'];
+  triage: InboxPage['triage'];
+}
+
 export const useInbox = (tab: InboxTab, intent?: string, hideJunk = false) =>
-  useQuery({
+  useInfiniteQuery({
     queryKey: qkQueue.inbox(tab, intent, hideJunk),
-    queryFn: ({ signal }) =>
-      api.queue.inbox.list({ tab, intent: intent || undefined, hide_junk: hideJunk || undefined }, signal),
+    queryFn: ({ pageParam, signal }) =>
+      api.queue.inbox.list(
+        { tab, intent: intent || undefined, hide_junk: hideJunk || undefined, limit: QUEUE_PAGE, cursor: pageParam ?? undefined },
+        signal,
+      ),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.next_cursor,
+    select: (d): InboxView => {
+      const last = d.pages[d.pages.length - 1];
+      return { items: mergePages(d.pages), counts: last.counts, triage: last.triage };
+    },
   });
 
 /** Lọc đầu Hộp thư (v0.1.25) — cấu hình đọc được cho mọi người; chỉ Owner sửa (server kiểm). */
@@ -101,6 +137,23 @@ export const useTasks = (filters: TaskFilters) =>
   useQuery({
     queryKey: qkQueue.tasks(filters as Record<string, string | boolean | undefined>),
     queryFn: ({ signal }) => api.queue.tasks.list(filters, signal),
+  });
+
+export interface TaskListView {
+  items: Task[];
+  /** Tổng số việc khớp bộ lọc ở máy chủ (không phải số đã tải). */
+  total: number;
+}
+
+/** Danh sách việc phân trang cho màn Việc & Nhắc hẹn. (`useTasks` giữ một trang cho "Việc hôm nay" của Mặt tiền.) */
+export const useTaskList = (filters: TaskFilters) =>
+  useInfiniteQuery({
+    queryKey: qkQueue.taskList(filters as Record<string, string | boolean | undefined>),
+    queryFn: ({ pageParam, signal }) =>
+      api.queue.tasks.list({ ...filters, limit: filters.limit ?? QUEUE_PAGE, cursor: pageParam ?? undefined }, signal),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last: TaskPage) => last.next_cursor,
+    select: (d): TaskListView => ({ items: mergePages(d.pages), total: d.pages[d.pages.length - 1].total }),
   });
 
 export const useTask = (id: string | null) =>
