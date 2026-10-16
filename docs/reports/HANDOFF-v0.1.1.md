@@ -21,9 +21,10 @@ Còn hiệu lực từ v0.1.1 (vai trò DB, volume, gói hồ sơ); chi tiết �
 - **Gói hồ sơ `.ghbundle`**: Python tạo/đọc (`python -m gh.bundle export|import`), Go chỉ chuyển bytes; mật khẩu qua `GH_BUNDLE_PASSWORD` (≥ 12 ký tự);
   mã thoát `0` ok · `2` sai mật khẩu/gói hỏng · `3` không tương thích · `1` lỗi khác; mã hoá lại mọi bí mật bằng khoá master máy đích.
 
-## Hiện trạng (v0.1.59)
+## Hiện trạng (v0.1.60)
 
-Bản mới nhất **v0.1.59** (16/10/2026, `VERSION` = v0.1.59): **bản vá** — sửa quét QR WhatsApp, chưa kiểm với máy chủ thật (mã vẽ lớn, xử lý `companion_reg_refresh`, thử lại có giãn cách trước khi ra mã, Baileys ghim 7.0.0-rc14, thẻ kênh nói lý do lỗi); thẻ "Hôm nay của Sếp" đọc lại ngay sau khi đổi nguồn AI hoặc Kiểm tra nguồn CLI xanh ([v0.1.59.md](../releases/v0.1.59.md)); đang chờ PR vào main + cổng phát hành. Chưa kiểm với máy chủ WhatsApp thật (Nợ #35).
+Bản mới nhất **v0.1.60** (16/10/2026, `VERSION` = v0.1.60): **Mặt tiền Owner v2** — 5 trụ cột Tình báo, Thông tin, Quan hệ, Phân tích, Việc có số thật + **Thiết lập một màn 3 bước** ([v0.1.60.md](../releases/v0.1.60.md)); đang chờ PR vào main + cổng phát hành.
+Trước đó **v0.1.59** (16/10/2026, bản vá): sửa quét QR WhatsApp (mã vẽ lớn, xử lý `companion_reg_refresh`, thử lại có giãn cách, Baileys ghim 7.0.0-rc14); thẻ "Hôm nay của Sếp" đọc lại ngay ([v0.1.59.md](../releases/v0.1.59.md)); đã vào main. Chưa kiểm với máy chủ WhatsApp thật (Nợ #35).
 Trước đó **v0.1.58** (11/10/2026, bản vá nóng): Antigravity CLI đòi mức suy nghĩ — Kiểm tra thử lại với mức, tự lưu model, Gen tự lành, bảng gán nói lý do thật ([v0.1.58.md](../releases/v0.1.58.md)).
 Trước đó **v0.1.57** (10/10/2026): **khoá nạp dữ liệu mẫu** (cờ + DB chưa có dữ liệu thật), **Owner tự đặt Tên Kho** (Nợ #30), **CI `api` chạy hai lượt pytest song song**, bộ kiểm chống lộ chỉ giữ quy tắc chung (mẫu riêng ở secret `GH_PERSONAL_PATTERNS`), bản công khai đã gọt danh tính riêng ([v0.1.57.md](../releases/v0.1.57.md)); đã vào main.
 Trước đó **v0.1.56** (10/10/2026): **không lộ thông tin riêng của Sếp cho Owner khác** — bỏ địa chỉ Gen-hub khỏi mã giao đi, tên Kho chung "Kho dữ liệu", CI chống lộ ([v0.1.56.md](../releases/v0.1.56.md)).
@@ -38,7 +39,7 @@ v0.1.52 (gỡ digest cũ bằng `rmi -f`, [v0.1.52.md](../releases/v0.1.52.md)),
   trực canh 12 phút → Telegram, gói chẩn đoán. Cổng mặc định chỉ nghe 127.0.0.1 (máy cũ giữ 0.0.0.0 + một chuông nhắc).
 - **Phát hành & CI**: xem "Quy trình phát hành" dưới; ảnh ghim digest, `uv.lock --frozen`, action ghim SHA, quét bảo mật dạng báo cáo, `check_*` trong `.github/scripts`.
 - **Console**: 11 dịch vụ compose (`proxy web migrate api worker bridge browser browser-redis browser-egress db redis`); menu 6 mục + Nâng cao; trình thiết lập; Hướng dẫn thiết lập;
-  **Mặt tiền Owner** `/owner/*` (v0.1.55: Owner mở `/` vào đây; Console ở Thêm › Cài đặt nâng cao); Việc Sếp cần làm (10 dòng, 1 bắt buộc = nguồn AI, kết quả ở `ops.boss_checks`); chuông + dải "Cần Sếp xử lý"; Trợ giúp (gói chẩn đoán, cập nhật, **Lộ trình học cùng Gen**); phiên 7 ngày trượt, tối đa 30 ngày; PIN ở đường hạ rào.
+  **Mặt tiền Owner** `/owner/*` (v0.1.60: 5 trụ cột Tình báo/Thông tin/Quan hệ/Phân tích/Việc + Cài đặt 4 khối; Owner mở `/` vào đây; Console ở Cài đặt › Cài đặt nâng cao); thiết lập một màn `/setup` (Tài khoản → Nguồn AI → Xong, mọi "Chọn model" về `/setup?buoc=nguon-ai`); Việc Sếp cần làm (10 dòng, 1 bắt buộc = nguồn AI, kết quả ở `ops.boss_checks`); chuông + dải "Cần Sếp xử lý"; Trợ giúp (gói chẩn đoán, cập nhật, **Lộ trình học cùng Gen**); phiên 7 ngày trượt, tối đa 30 ngày; PIN ở đường hạ rào.
 - **Gen (chỉ Owner)**: khung chat nhớ hội thoại; Bản tin 07:30/17:30; dẫn đường trên UI; **8 loại đề xuất** có Xác nhận (draft_message, reminder, assign, social_reply, social_dm,
   **memory_note, kho_create, kho_update**); **Gen nhớ** (30 ghi chú, Cài đặt › Bộ não AI); đọc Kho + lịch/mail/việc/Drive qua Gen-hub (đã che) và Tài liệu/Deal/Vụ việc nội bộ;
   **ghi Kho** (Phiên, Việc) chỉ qua đề xuất + mã PIN + permit; mỗi bản mới Gen đề xuất một Phiên (F-87);
@@ -47,6 +48,14 @@ v0.1.52 (gỡ digest cũ bằng `rmi -f`, [v0.1.52.md](../releases/v0.1.52.md)),
   việc nền mặc định chỉ khoá API; chi phí ₫/ngày + trần; Jev tuỳ chọn: lọc trước tin trùng/rác (che dữ liệu bắt buộc, v0.1.55; QD-10 bỏ Jules).
 - **Kênh**: Zalo/WhatsApp qua bridge (QR; WhatsApp v0.1.59: mã vẽ lớn, Baileys ghim 7.0.0-rc14, thử lại có giãn cách); Telegram một chiều tới Sếp; Facebook cá nhân đọc + Trả lời bình luận/Nhắn tin có Xác nhận + PIN + ảnh chụp (đăng bài = lát 2).
 - **Dữ liệu & bảo mật**: Postgres 16 (pgvector, pg_partman), RLS chỉ là phòng thủ phụ (mỗi bản cài 1 tổ chức), hạn lưu thật, bí mật mã hoá phong bì, DNS ghim cho MCP/Gen-hub, ngắt mạch Gen-hub 60 giây.
+
+## v0.1.60 — Mặt tiền Owner v2 + Thiết lập một màn (5 gói G1–G5, nhánh `claude/v0159`)
+
+- **Vì sao**: Boss 11/10 — Mặt tiền v0.1.55 mới là danh sách link, Sếp chưa thấy trong 3 giây việc phải quyết, tin khẩn, khách cần chăm; Phân tích khoá "sắp có"; thiết lập nhiều bước, "Chọn model" dẫn mỗi nơi một kiểu.
+- **Thay đổi**: G1 API chỉ đọc chỉ Owner `GET /owner/brief|feed|feed/{id}/context|insights|proposals`, `relations?list=care`, `today.nav` + hook + DraftDecide/ProposalDecide + mock (không migration); G2 token sáng/tối + 8 thành phần kit + khung 5 trụ cột, Hỏi Gen ngăn kéo, lính gác thiết kế;
+  G3 Tình báo, Việc, Phân tích; G4 Thông tin, Quan hệ; G5 `/setup` một màn 3 bước, đích "Chọn model" duy nhất `/setup?buoc=nguon-ai`, Cài đặt 4 khối. Đóng Nợ #28.
+- **Kiểm tra**: bộ đủ như CI chạy một lần ở bước tích hợp — số liệu ở mục "Kiểm" của [v0.1.60.md](../releases/v0.1.60.md); ảnh 6 màn × 390/1440 × sáng/tối + 5 ảnh trạng thái ngày đầu (`owner-shots-v0159`).
+- **Boss cần làm**: không cần làm gì (xem "Boss phải làm — v0.1.60" dưới).
 
 ## v0.1.59 — Bản vá: sửa quét QR WhatsApp (chưa kiểm với máy chủ thật), thẻ Hôm nay của Sếp đọc lại ngay (nhánh `claude/hotfix-v0159`)
 
@@ -79,28 +88,6 @@ v0.1.52 (gỡ digest cũ bằng `rmi -f`, [v0.1.52.md](../releases/v0.1.52.md)),
 - **Người gác yêu cầu tự chữa** (cùng bản, bài học từ một bản cài thật: `gen-harness-update-request.path` failed "Result: resources" vì hết hạn mức inotify 128): `genh auto-update enable|status` và lần cài/cập nhật chữa (chỉ `SubState=waiting` mới là khoẻ; `handle-requests` KHÔNG chữa — trong service `.path` "running" giả); còn lỗi ⇒ `gen-harness-update-request.timer` dự phòng + `watcher` trong `run/nightly-status.json` + dòng "Người gác cập nhật" ở thẻ Sức khoẻ; E2E thật có ca inotify (xem [v0.1.54.md](../releases/v0.1.54.md)).
 - **Boss cần làm**: xem "Boss phải làm — v0.1.54" dưới (không bắt buộc, ~3 phút). Chi tiết: [v0.1.54.md](../releases/v0.1.54.md).
 
-## v0.1.50 — Gen nhớ + Gen ghi Kho có xác nhận và mã PIN
-
-- **Vì sao** (QD-18, F-81, F-87): Gen mới chỉ đọc Kho nên mỗi bản phát hành, mỗi quy ước của Sếp vẫn nằm trong đầu người. Nay Gen **đề xuất** ghi, Sếp **Xác nhận + mã PIN** mới ghi.
-- **Thay đổi**: migration `0032` (`agent.gen_memory_notes`, `agent.hub_release_proposals`); Gen nhớ (≤ 30 ghi chú, ≤ 280 ký tự, chỉ Owner, vào lời nhắc Owner + Bản tin);
-  đề xuất `memory_note`/`kho_create`/`kho_update`; đường ghi duy nhất `POST /hub/kho/write` có permit ký dùng một lần (route MCP chung vẫn chặn, Gmail/Lịch/Drive chỉ đọc);
-  Kết nối › Gen-hub có "Quyền ghi Kho" (`write_scopes`, `write_missing`); job `gen_kho_release` đề xuất một Phiên mỗi bản; Việc Sếp cần làm dòng 9 "Gen ghi Kho";
-  Trợ giúp + Hướng dẫn bước 14 bỏ chữ "chỉ đọc" tuyệt đối; sửa sau review lượt 2 (thẻ ghi Kho mở khoá theo đúng tool, `HUB_WRITE_HIDDEN` + `write_hidden` ở `GET /hub/link`,
-  nhãn `uncertain` + câu Huỷ/Xác nhận lại, "Tải lại hội thoại" xoá lỗi cũ, job F-87 chỉ cần `kho_create`, đua `_release_claim` không đóng nhầm thẻ); gộp từ main PR #58 (chữ dính biên khung, lính gác `layout-guard.spec.ts`) và PR #59 (genh đọc tệp trạng thái thử lại); tài liệu tách CHANGELOG + `docs/releases/` (F-90, F-69, F-47, F-91, F-92, F-42, F-39).
-- **Kiểm tra** (khi gộp, nhánh `claude/v0150`): pytest 1970 xanh (superuser và role `gh_app`), 1 head alembic = `0032`; vitest 947; Playwright mock 292 (gồm `layout-guard` của PR #58); e2e thật rút gọn 7;
-  browser 43; `go test ./...` xanh; unittest `.github/scripts` 120 + `check_doc_links.py`, `check_release_gate.py`, `check_embedded_sync.py`, `check_workflow_hygiene.py`, `check_no_fake_ids.py` xanh.
-- **Boss cần làm**: xem "Boss phải làm — v0.1.50" dưới (tick `kho_create`, `kho_update` ở Gen-hub → Kiểm tra → duyệt Phiên đầu tiên → thử Gen nhớ). Chi tiết: [v0.1.50.md](../releases/v0.1.50.md).
-
-## v0.1.53 — Tự cập nhật đêm tự lành + trung thực
-
-- **Vì sao** (F-93…F-100): một bản cài kẹt v0.1.44 từ 03/10 đến 09/10; `genh auto-update status` in TẮT (đọc sai `is-enabled` thoát ≠ 0), Console chỉ nói "chưa nhận yêu cầu". Điều tra: **H-a tái hiện bằng mã** (bản cài phụ gỡ/ghi đè lịch dùng chung), **H-c tái hiện** (status in sai),
-  **H-b không tái hiện được** (bằng mã lẫn E2E systemd thật); chưa chỉ ra được nguyên nhân gốc đêm 03/10 ngoài H-a ⇒ bản này làm lịch **tự lành** cho mọi nguyên nhân.
-- **Thay đổi**: `genh update` tự bật lại lịch đêm (dấu `config/auto-update-disabled.json` = Sếp đã chủ động tắt thì không); `status` đủ 5 thông tin + cảnh báo log im > 36 giờ; kiểm linger sau `enable-linger`; lịch đêm chọn bản cao nhất đã đủ 24 giờ trong 10 bản gần nhất;
-  `ConsumeRequest` không nuốt lỗi xoá (**GH-E94C**, chờ khoá > 30 phút ⇒ GH-E94A); unit đêm có `--install-dir`/`--port`/`GEN_HARNESS_HOME`, `StartLimit`/`TriggerLimit`, bản cài phụ không đụng lịch bản chính; `run/nightly-status.json`;
-  API `stalled_reason` `linger_off`/`watcher_failed`, `nightly_candidates`, `nightly`, khối `nightly` + sự cố `host.nightly` (ngưỡng 36 giờ); Console nói nguyên nhân + dòng "Tự cập nhật đêm"; E2E `e2e-nightly-real` chạy thật timer/`.path` có linger, bắt buộc trước promote.
-- **Kiểm tra**: `go test ./...` xanh (ma trận 4 hệ điều hành gồm Windows); pytest 2054 + 2054 (gh_app); vitest 1000; Playwright mock 310; `e2e-nightly-real` xanh [lượt 38026722892](https://github.com/Genesis-ryan-84-0567536339/Gen-Harness/actions/runs/38026722892); **kiểm ngược** cài `--no-auto-update` ⇒ đỏ đúng bước timer [lượt 38026379683](https://github.com/Genesis-ryan-84-0567536339/Gen-Harness/actions/runs/38026379683). Sửa khi tích hợp: status không lấy mtime tệp stamp systemd làm lần chạy; đọc unit giữ `\` của đường dẫn Windows.
-  Sửa sau review: Console không nói "Tắt (Sếp đã tắt)" khi lịch vẫn bật (`opted_out_running`); bản cài phụ ⇒ `other` (không cảnh báo mãi); `linger_off`/bước linger chỉ khi lịch là systemd `--user`; `install --no-auto-update` tắt lịch đang có, `auto-update disable` hỏi lại; GH-E94C có câu riêng ở bản sao ngoài máy/gói chẩn đoán/Gửi thử; Task Scheduler có bảo vệ chủ lịch (F-98); `genh update --yes` gõ tay không tính là lần chạy đêm. Chi tiết: "Kiểm tra" ở [v0.1.53.md](../releases/v0.1.53.md). Vận hành: [05-installer.md](../handoff/05-installer.md) mục "Lịch tự cập nhật đêm tự lành và trung thực".
-
 ## Quy trình phát hành & cổng
 
 1. Nhánh làm việc → PR vào `main`; CI xanh thì tự merge squash (Boss đã cho phép), sau đó **nối lịch sử main vào nhánh bằng merge** (không reset/force-push).
@@ -111,6 +98,11 @@ v0.1.52 (gỡ digest cũ bằng `rmi -f`, [v0.1.52.md](../releases/v0.1.52.md)),
 5. Bật bảo vệ nhánh `main` + tag `v*` (cần quyền admin repo, ~2 phút): xem [v0.1.33.md](../releases/v0.1.33.md). Không thêm `paths-ignore: docs/**` cho `ci.yml`.
 
 ## Việc dở
+
+### Boss phải làm — v0.1.60 (không cần làm gì; chi tiết ở [v0.1.60.md](../releases/v0.1.60.md))
+
+1. Không cần làm gì. Bản cài đang chạy đã thiết lập xong nên không phải làm lại; muốn đổi nguồn AI thì vào **Cài đặt › Nguồn AI › Đổi nguồn AI**.
+2. Sau khi phát hành: mở `/owner` xem trang **Tình báo**; mở **Thông tin** và **Quan hệ** ở thanh trái (điện thoại: thanh dưới) để dùng.
 
 ### Boss phải làm — v0.1.59 (khoảng 5 phút; chi tiết ở [v0.1.59.md](../releases/v0.1.59.md))
 
@@ -175,11 +167,11 @@ v0.1.52 (gỡ digest cũ bằng `rmi -f`, [v0.1.52.md](../releases/v0.1.52.md)),
 
 ### Claude / điều phối viên còn dở
 
-- **Phát hành v0.1.59**: `claude/hotfix-v0159` → PR vào main → CI xanh → merge squash → nối main vào nhánh bằng merge (không reset) → Release bản thử → E2E cài thật + nâng cấp → promote → kiểm genh tải về khớp tag → báo Boss.
+- **Phát hành v0.1.60**: `claude/v0159` (5 gói đã tích hợp, đã chứa main v0.1.59) → PR vào main → CI xanh → merge squash → nối main vào nhánh bằng merge (không reset) → bản thử → E2E cài thật + nâng cấp → promote → kiểm genh tải về khớp tag → báo Boss.
 - **Chưa làm (mang từ v0.1.58)**: bước rẻ ở `e2e-install` (`agy --help | grep -- --effort`, `missing_reason` trong container); ô chọn model vẫn ẩn khi Kiểm tra đỏ (`offeredGroups`). **Nợ #33** mở Antigravity CLI cho mọi agent (Owner chọn "mở thẳng" 16/10, đang chờ mở quyền thi công) · **Nợ #34** tách agy ra container riêng · **Nợ #35** kiểm WhatsApp QR với máy chủ thật.
-- **Bản kế tiếp (đã hẹn)**: nhận kết quả "Thử 12 câu mẫu" của Jev từ Boss rồi quyết ngưỡng lọc trước; Mặt tiền thêm "Chi phí AI hôm nay" + thẻ "Chưa có model", mục Phân tích; chuông Gen dẫn về Mặt tiền; xoá hội thoại Gen thì xoá luôn lựa chọn model đã nhớ.
+- **Bản kế tiếp (đã hẹn)**: nhận kết quả "Thử 12 câu mẫu" của Jev từ Boss rồi quyết ngưỡng lọc trước; Boss dùng thử Mặt tiền v2 rồi góp ý; chuông Gen dẫn về Mặt tiền; xoá hội thoại Gen thì xoá luôn lựa chọn model đã nhớ (Nợ #29); dọn mã chết trình thiết lập cũ (Nợ #36).
 - **H-b còn mở**: timer đêm mất lịch khi `daemon-reload`/`enable` chạy từ bên trong service đêm — không tái hiện được bằng mã lẫn `e2e-nightly-real` (systemd thật: sau lần chạy timer vẫn có lần kế tiếp); tự lành bao ca này. Máy thật còn tái diễn thì ghi vào v0.1.53.md.
 - **PR Renovate** không tự merge nằm chờ tới khi Boss nhắn "xử lý PR phụ thuộc"; chưa có lịch tự động nào gọi Claude.
 - **Selector ghi Facebook** mới kiểm trên trang mẫu — chờ nghiệm thu thật (dòng 8). Chuông phiên hết có thể hiện hai lần (`social.paused` + `social.session_expired`), gộp ở bản sau nếu phiền.
 - **Giới hạn đã biết**: TOTP chưa làm; Redis lỗi ⇒ giới hạn đăng nhập tạm không áp; gói apt trong Dockerfile chưa ghim phiên bản; tag GHCR `:latest` cũ đứng yên (không dùng).
-- **Mục Nợ đầy đủ** (bộ câu hỏi chuẩn so model, F-70, TOTP, Facebook đăng bài lát 2, cosign/minisign, PHIEN bù, trường Kho "Công cụ"/"Người làm", lời hẹn trượt F-91/F-92, Gen hướng dẫn: `release_todos`, danh mục tính năng, "Làm giúp" G8, bộ bài cho nhân viên, tắt chuông theo loại…; Nợ #33–#35: Antigravity CLI cho mọi agent, tách agy, WhatsApp QR thật): [ROADMAP › Nợ](../ROADMAP.md).
+- **Mục Nợ đầy đủ** (bộ câu hỏi chuẩn so model, F-70, TOTP, Facebook đăng bài lát 2, cosign/minisign, PHIEN bù, trường Kho "Công cụ"/"Người làm", lời hẹn trượt F-91/F-92, Gen hướng dẫn: `release_todos`, danh mục tính năng, "Làm giúp" G8, bộ bài cho nhân viên, tắt chuông theo loại…; Nợ #33–#37: Antigravity CLI cho mọi agent, tách agy, WhatsApp QR thật, mã chết trình thiết lập cũ, bảng Quan hệ ở 1024px): [ROADMAP › Nợ](../ROADMAP.md).

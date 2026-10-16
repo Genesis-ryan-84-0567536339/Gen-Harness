@@ -56,9 +56,12 @@ def item_scope_sql(sc: Scope, alias: str = "i") -> tuple[str, dict[str, Any]]:
     return f"({sw} OR {q})", sp
 
 
-def not_silenced_sql(alias: str = "i") -> str:
-    return (f"NOT EXISTS (SELECT 1 FROM biz.queue_silences qs WHERE qs.item_type = {alias}.item_type "
-            f"AND qs.item_id = {alias}.item_id AND (qs.until IS NULL OR qs.until > now()))")
+def not_silenced_sql(alias: str = "i", *, item_type: str | None = None, id_col: str = "item_id") -> str:
+    """Điều kiện "chưa bị Tắt tiếng". Mặc định đọc `{alias}.item_type`/`{alias}.item_id` (view `biz.inbox_items`);
+    bảng gốc thì đặt `item_type` (hằng chữ của mình, ví dụ 'draft') và `id_col` (ví dụ 'id')."""
+    kind = f"'{item_type}'" if item_type else f"{alias}.item_type"
+    return (f"NOT EXISTS (SELECT 1 FROM biz.queue_silences qs WHERE qs.item_type = {kind} "
+            f"AND qs.item_id = {alias}.{id_col} AND (qs.until IS NULL OR qs.until > now()))")
 
 
 def tab_of(item_type: str, event_type: str | None, person_type: str | None) -> str:

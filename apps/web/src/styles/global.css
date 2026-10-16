@@ -29,9 +29,10 @@ a:hover { color: var(--color-accent-300); }
 .skip-link {
   position: absolute; left: 8px; top: -40px; z-index: 100;
   padding: 6px 10px; border-radius: var(--radius-md);
-  background: var(--color-surface); color: var(--color-text); box-shadow: var(--shadow-md);
+  background: var(--color-surface); color: var(--color-text);
 }
-.skip-link:focus-visible { top: 8px; }
+/* Bóng chỉ khi hiện (focus): lúc ẩn ở top -40px, bóng tràn xuống làm một vệt xám ở mép trên màn (ảnh Mặt tiền 390px, v0.1.60). */
+.skip-link:focus-visible { top: 8px; box-shadow: var(--shadow-md); }
 
 /* Full-page states (boot, setup/login loading) */
 .page-center { min-height: 100vh; display: grid; place-items: center; padding: 16px; }

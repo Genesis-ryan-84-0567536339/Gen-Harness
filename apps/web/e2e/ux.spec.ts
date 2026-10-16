@@ -15,7 +15,7 @@ async function enterOwnerPin(page: Page): Promise<void> {
  * v0.1.28 — hành trình đã đổi sau rà soát UX (mock, tất định):
  * - Bước 4: nguồn gọi thử lỗi báo câu dễ hiểu + chi tiết kỹ thuật thu gọn, xếp CUỐI chuỗi, xoá được; nguồn OK có
  *   "Dùng model này" còn nguyên sau khi tải lại; Tiếp tục chỉ bật khi có model.
- * - "Để sau" ở bước 7/11 dùng mặc định; bước 12 liệt kê việc còn thiếu thay vì "Mọi thứ đã sẵn sàng".
+ * - "Để sau" ở bước 7/11 dùng mặc định (v0.1.59: ghi khi Hoàn tất); bước Xong nói thật nguồn AI "Đã chạy" / "Làm sau".
  * - Vai trò Vận hành: Trợ giúp không có lệnh máy chủ/Gen, Hướng dẫn thiết lập giải thích thay vì báo lỗi.
  */
 test.describe('UX v0.1.28', () => {
@@ -29,7 +29,8 @@ test.describe('UX v0.1.28', () => {
     });
     await apiCall(page, 'PUT', '/setup/steps/3', { org_name: 'Genesis Trading', timezone: 'Asia/Ho_Chi_Minh', currency: 'VND', self_name: 'Anh', bot_calls_me: 'Sếp' });
 
-    await page.goto('/setup');
+    // v0.1.59: form Bộ não AI đầy đủ (xếp thứ tự, "Dùng model này", xoá nguồn) vẫn ở /guide/4; /setup chỉ còn màn Nguồn AI gọn.
+    await page.goto('/guide/4');
     await expect(page.getByRole('heading', { name: 'Bộ não AI' })).toBeVisible();
     const next = page.getByRole('button', { name: /Tiếp tục/ });
     await expect(next).toBeDisabled();
@@ -73,24 +74,19 @@ test.describe('UX v0.1.28', () => {
     await page.getByRole('button', { name: 'Xoá Model sai' }).click();
     await expect(page.locator('.prov-row', { hasText: 'Model sai' })).toHaveCount(0);
     await next.click();
+    // Lưu xong quay về Mặt tiền (bước 4 đã xong ở máy chủ).
+    await expect(page).toHaveURL(/\/owner$/);
 
-    // Bước 5 → 11: để sau hết.
-    const skip = page.getByRole('button', { name: 'Để sau', exact: true });
-    for (const title of ['Kết nối kênh', 'Chọn nhóm lắng nghe', 'Sàng lọc dữ liệu', 'Agent đầu tiên', 'Tự trị & ranh giới', 'Mời đội ngũ', 'Sao lưu']) {
-      await expect(page.getByRole('heading', { name: title })).toBeVisible();
-      await skip.click();
-    }
-
-    // Bước 12: nói thật việc còn thiếu (kênh, nhóm) — quy tắc và sao lưu đã có mặc định, model đã có.
-    await expect(page.getByRole('heading', { name: 'Hoàn tất' })).toBeVisible();
-    const gaps = page.getByTestId('setup-gaps');
-    await expect(gaps).toContainText('Đã lưu — còn 2 việc để hệ thống chạy đầy đủ');
-    await expect(gaps).toContainText('Chưa kết nối kênh chat nào');
-    await expect(gaps).not.toContainText('quy tắc sàng lọc');
-    await expect(gaps).not.toContainText('sao lưu');
-    await expect(gaps).not.toContainText('model AI');
+    // Thiết lập một màn: bước 4 xong ⇒ /setup tới thẳng bước Xong; "Vào Mặt tiền" ghi Hoàn tất, bước 5–11 chưa làm ⇒ "để sau" (mặc định).
+    await page.goto('/setup');
+    await expect(page.getByRole('heading', { name: 'Xong rồi, thưa Sếp' })).toBeVisible();
+    await expect(page.getByTestId('setup-done-ai')).toContainText('Đã chạy');
     await expect(page.getByText('Mọi thứ đã sẵn sàng')).toHaveCount(0);
-    await expect(page.locator('.summary')).toContainText('Gemini API (gemini-2.5-flash)');
+    await page.getByRole('button', { name: /Vào Mặt tiền/ }).click();
+    await expect(page).toHaveURL(/\/owner$/);
+    const state = (await apiCall(page, 'GET', '/setup/state')) as { finished: boolean; steps: Array<{ n: number; status: string }> };
+    expect(state.finished).toBe(true);
+    expect(state.steps.filter((x) => x.status === 'skipped').map((x) => x.n)).toEqual([5, 6, 7, 8, 9, 10, 11]);
   });
 
   test('Vận hành: Trợ giúp theo vai trò, Hướng dẫn thiết lập không báo lỗi', async ({ page }) => {

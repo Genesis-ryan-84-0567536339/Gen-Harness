@@ -36,53 +36,96 @@ export type {
 // ── đường dẫn + thanh điều hướng ───────────────────────────────────────────────────────────────────────────────
 
 export const OWNER_HOME = '/owner';
+/**
+ * v0.1.59 (G2): Mặt tiền 5 trụ cột — Tình báo (trang chủ), Thông tin, Quan hệ, Phân tích, Việc — cộng Hỏi Gen (ngăn kéo; đường
+ * `/owner/gen` giữ cho link cũ `?gen=<mã>`) và Cài đặt (`/owner/them`, giữ đường cũ).
+ * Bí danh `today` / `tasks` / `more` trỏ CÙNG đường với tên mới: TodayScreen, OwnerTasksScreen, MoreScreen và RelationsScreen cũ
+ * còn dùng tới hết đợt 2 (G3/G4 xoá).
+ */
 export const OWNER_PATHS = {
+  intel: '/owner',
+  feed: '/owner/thong-tin',
+  relations: '/owner/quan-he',
+  analytics: '/owner/phan-tich',
+  work: '/owner/viec',
+  gen: '/owner/gen',
+  settings: '/owner/them',
+  // bí danh cũ (v0.1.55)
   today: '/owner',
   tasks: '/owner/viec',
-  relations: '/owner/quan-he',
-  gen: '/owner/gen',
   more: '/owner/them',
 } as const;
 /** "Cài đặt nâng cao" mở màn Tổng quan của Console — KHÔNG link '/' vì '/' của Owner nay về Mặt tiền. */
 export const ADVANCED_SETTINGS_PATH = '/overview';
 export const FACEBOOK_PATH = '/social';
 export const BACK_TO_FRONT_LABEL = 'Về Mặt tiền';
-/** Phân tích chưa làm (v0.1.56) — mục thanh trái hiện mờ, không bấm được. */
-export const SOON_LABEL = 'sắp có';
 /** Máy chủ chặn số đếm ở 999 (đếm chạm trần ⇒ hiện "999+"). */
 export const COUNT_CAP = 999;
 
+/** Khoá của 5 trụ cột + Cài đặt — cũng là hậu tố data-testid: `owner-nav-<key>` (thanh trái), `owner-tabbar-<key>` (thanh dưới). */
+export type OwnerNavKey = 'intel' | 'feed' | 'relations' | 'analytics' | 'work' | 'settings';
+/** Mục "đang sáng" theo đường dẫn: 6 khoá trên, hoặc 'gen' (màn Hỏi Gen toàn trang — không mục nào sáng). */
+export type OwnerActiveKey = OwnerNavKey | 'gen';
+
 export interface OwnerNavItem {
-  key: 'today' | 'tasks' | 'relations' | 'gen' | 'analytics' | 'more';
+  key: OwnerNavKey;
   label: string;
   icon: string;
   to: string;
-  /** Chưa có (disabled, nhãn "sắp có"). */
-  soon?: boolean;
+  /** Có vạch ngăn ngay TRƯỚC mục này (thanh trái). */
+  separatorBefore?: boolean;
 }
 
-/** Thanh trái máy tính: 6 mục. Thanh dưới điện thoại: 5 mục (bỏ mục "sắp có"). */
+/** Thanh trái máy tính (≥ 760px): 5 trụ cột, vạch ngăn, Cài đặt. */
 export const OWNER_NAV: readonly OwnerNavItem[] = [
-  { key: 'today', label: 'Hôm nay', icon: 'ph ph-sun', to: OWNER_PATHS.today },
-  { key: 'tasks', label: 'Việc', icon: 'ph ph-check-square', to: OWNER_PATHS.tasks },
+  { key: 'intel', label: 'Tình báo', icon: 'ph ph-house', to: OWNER_PATHS.intel },
+  { key: 'feed', label: 'Thông tin', icon: 'ph ph-chat-text', to: OWNER_PATHS.feed },
   { key: 'relations', label: 'Quan hệ', icon: 'ph ph-users-three', to: OWNER_PATHS.relations },
-  { key: 'gen', label: 'Hỏi Gen', icon: 'ph ph-sparkle', to: OWNER_PATHS.gen },
-  { key: 'analytics', label: 'Phân tích', icon: 'ph ph-chart-line-up', to: '/owner/phan-tich', soon: true },
-  { key: 'more', label: 'Thêm', icon: 'ph ph-dots-three', to: OWNER_PATHS.more },
+  { key: 'analytics', label: 'Phân tích', icon: 'ph ph-chart-bar', to: OWNER_PATHS.analytics },
+  { key: 'work', label: 'Việc', icon: 'ph ph-check-square', to: OWNER_PATHS.work },
+  { key: 'settings', label: 'Cài đặt', icon: 'ph ph-sliders-horizontal', to: OWNER_PATHS.settings, separatorBefore: true },
 ];
 
-export const OWNER_TABBAR: readonly OwnerNavItem[] = OWNER_NAV.filter((i) => !i.soon);
+/** Thanh dưới điện thoại (< 760px): đúng 5 trụ cột (Cài đặt vào bằng menu ảnh đại diện). */
+export const OWNER_TABBAR: readonly OwnerNavItem[] = OWNER_NAV.filter((i) => i.key !== 'settings');
 
-/** Mục đang sáng theo đường dẫn (`/owner` chỉ khớp đúng chính nó). */
-export function activeNavKey(pathname: string): OwnerNavItem['key'] {
+/** Mục đang sáng theo đường dẫn (`/owner` chỉ khớp đúng chính nó; đường lạ → Tình báo). */
+export function activeNavKey(pathname: string): OwnerActiveKey {
   const p = pathname.replace(/\/+$/, '') || '/';
-  const hit = OWNER_NAV.find((i) => !i.soon && i.to !== OWNER_PATHS.today && (p === i.to || p.startsWith(`${i.to}/`)));
-  return hit?.key ?? 'today';
+  if (p === OWNER_PATHS.gen || p.startsWith(`${OWNER_PATHS.gen}/`)) return 'gen';
+  const hit = OWNER_NAV.find((i) => i.to !== OWNER_PATHS.intel && (p === i.to || p.startsWith(`${i.to}/`)));
+  return hit?.key ?? 'intel';
 }
 
+/** Tiêu đề màn (cỡ 18px ở đầu trang). */
 export function ownerTitle(pathname: string): string {
   const key = activeNavKey(pathname);
-  return OWNER_NAV.find((i) => i.key === key)?.label ?? 'Hôm nay';
+  if (key === 'gen') return 'Hỏi Gen';
+  return OWNER_NAV.find((i) => i.key === key)?.label ?? 'Tình báo';
+}
+
+/** Số đếm trên thanh điều hướng: Thông tin = tin Khẩn đang mở (`urgent_open`), Việc = số mục chờ Sếp quyết (`decide`). */
+export interface NavCounts {
+  urgent_open: number;
+  decide: number;
+}
+
+/**
+ * Đọc PHÒNG THỦ `today.nav` (GET /owner/today, kiểu `OwnerNav` ở contracts): thiếu `nav` (máy chủ cũ), không phải số, âm, NaN ⇒ 0.
+ * Không bao giờ ném. Tham số để `unknown` có chủ ý: máy chủ cũ/lạ có thể trả hình dạng khác hợp đồng.
+ */
+export function navCounts(today: unknown): NavCounts {
+  const nav = today && typeof today === 'object' ? (today as { nav?: unknown }).nav : undefined;
+  const get = (k: keyof NavCounts): number => {
+    const v = nav && typeof nav === 'object' ? (nav as Record<string, unknown>)[k] : undefined;
+    return typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.floor(v) : 0;
+  };
+  return { urgent_open: get('urgent_open'), decide: get('decide') };
+}
+
+/** Số đếm hiện trên mục thanh điều hướng: Thông tin ← urgent_open, Việc ← decide; mục khác không có. */
+export function navBadge(key: OwnerNavKey, counts: NavCounts): number {
+  return key === 'feed' ? counts.urgent_open : key === 'work' ? counts.decide : 0;
 }
 
 // ── an toàn chuỗi/link ─────────────────────────────────────────────────────────────────────────────────────────

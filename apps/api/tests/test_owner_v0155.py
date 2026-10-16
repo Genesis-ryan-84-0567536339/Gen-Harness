@@ -6,6 +6,8 @@
   nền.
 - Không có route ghi nào trong gh/owner/routes.py; GET không ghi Action Log; không lộ bí mật.
 
+v0.1.59 (G1): thêm `nav` vào /today, 8 route đọc (xem tests/test_owner_v0159.py).
+
 Chạy cả quyền superuser và `GH_TEST_APP_ROLE=1` (gh_app): `pytest -q tests/test_owner_v0155.py`.
 """
 
@@ -183,7 +185,9 @@ async def test_empty_org_returns_empty_arrays_not_500(owner: Api) -> None:
     today = (await owner.get("/owner/today"))
     assert today.status_code == 200, today.text
     d = today.json()
-    assert set(d) == {"needs_review", "kpis", "briefing_latest", "filter_value", "suggestions", "progress"}
+    # v0.1.59 (G1): thêm `nav` (số đếm trên thanh điều hướng Mặt tiền); các khoá cũ giữ nguyên.
+    assert set(d) == {"needs_review", "kpis", "briefing_latest", "filter_value", "suggestions", "progress", "nav"}
+    assert d["nav"] == {"urgent_open": 0, "decide": 0}
     assert d["needs_review"] == [] and d["briefing_latest"] is None
     # tổ chức trống chưa có khoá API cho việc nền ⇒ gợi ý thật duy nhất của registry (G1) là thiếu khoá nền
     assert [s["key"] for s in d["suggestions"]] == ["background_key_missing"]
@@ -255,7 +259,10 @@ async def test_relations_four_lists(owner: Api, db: Any) -> None:
     w = await seed_world(db)
     hot = (await owner.get("/owner/relations?list=hot")).json()
     assert hot["list"] == "hot" and [r["name"] for r in hot["items"]] == ["Chị Lan", "Ông Dũng", "Anh Bình"]
-    assert all(set(r) == ROW_KEYS for r in hot["items"])
+    # v0.1.59: dòng cũ giữ nguyên 5 khoá, thêm trường tuỳ chọn (person_id, heat, …)
+    assert all(ROW_KEYS <= set(r) <= ROW_KEYS | {"person_id", "heat", "churn_risk", "last_contact_days",
+                                                 "open_value_vnd"} for r in hot["items"])
+    assert hot["items"][0]["person_id"] == str(w["a"]) and hot["items"][0]["heat"] == 92
     assert hot["items"][0]["metric_text"] == "Độ nóng 92 · đang tăng"
     assert hot["items"][0]["subtitle"] == "Khách hàng · Gỗ Việt"
     assert hot["items"][0]["to"] == f"/profile?id={w['a']}"
@@ -401,8 +408,10 @@ def test_routes_file_has_no_write_methods() -> None:
     src = ROUTES_FILE.read_text(encoding="utf-8")
     assert not re.search(r"@router\.(post|put|patch|delete)\b", src)
     assert not re.search(r"\bmethods\s*=", src)
-    assert [r.methods for r in owner_routes.router.routes] == [{"GET"}] * 3
-    assert {r.path for r in owner_routes.router.routes} == {"/owner/today", "/owner/relations", "/owner/tasks"}
+    assert all(r.methods == {"GET"} for r in owner_routes.router.routes)
+    assert {r.path for r in owner_routes.router.routes} == {
+        "/owner/today", "/owner/relations", "/owner/tasks", "/owner/brief", "/owner/feed",
+        "/owner/feed/{item_id}/context", "/owner/insights", "/owner/proposals"}
 
 
 async def test_get_is_readonly_no_action_log_and_no_model_calls(owner: Api, db: Any) -> None:

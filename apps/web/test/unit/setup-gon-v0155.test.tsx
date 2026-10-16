@@ -7,6 +7,8 @@
  *  - bước 9: một dòng ghi chú thay ô tích (gửi ack_boundaries: true), mức 4 + ngưỡng 50.000.000 ₫;
  *  - bước 10: thẻ gợi ý có nút "Để sau" ("Mời ngay" mới hiện form mời);
  *  - bước 11: sao lưu tự bật hằng ngày 02:00, giữ 7 bản.
+ * v0.1.59 (g5-thiet-lap): màn Tài khoản gom bước 1–3 (xưng hô nằm trong "Tuỳ chỉnh"); các bước 5–12 chỉ còn ở /guide/n nên test bước
+ * 10 chạy trên khung thử `LegacyWizard`.
  */
 import { createRef } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -16,6 +18,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import type { SetupState } from '@gen-harness/contracts';
 import { SetupPage } from '../../src/setup/SetupPage';
+import { LegacyWizard } from './legacy-wizard';
 import { Step7Refinery } from '../../src/setup/Step7Refinery';
 import { Step8Agent } from '../../src/setup/Step8Agent';
 import { Step9Autonomy } from '../../src/setup/Step9Autonomy';
@@ -63,47 +66,53 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-describe('bước 3 — xưng hô điền sẵn "Sếp"', () => {
-  it('hai ô xưng hô có sẵn "Sếp"; chỉ cần gõ tên tổ chức là Tiếp tục được; PUT gửi đủ năm trường', async () => {
+describe('bước 3 (màn Tài khoản) — xưng hô điền sẵn "Sếp"', () => {
+  function renderAccount() {
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/setup']}>
+          <SetupPage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+  }
+
+  it('hai ô xưng hô có sẵn "Sếp" (trong "Tuỳ chỉnh"); chỉ cần gõ tên doanh nghiệp là Tiếp tục được; PUT 3 gửi đủ năm trường', async () => {
     const user = userEvent.setup();
     const calls = stub((c) => {
       if (c.url.endsWith('/setup/steps/3') && c.method === 'PUT') return json(200, stateAt(4, [1, 2, 3]));
       if (c.url.includes('/setup/')) return json(200, stateAt(3, [1, 2]));
       return undefined;
     });
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={['/setup']}>
-          <SetupPage />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
-    await screen.findByRole('heading', { name: 'Bước 3' });
+    renderAccount();
+    await screen.findByRole('heading', { name: 'Tạo tài khoản Sếp' });
     expect(DEFAULT_ADDRESSING).toBe('Sếp');
+    // Bước 1–2 đã xong ở máy chủ ⇒ chỉ còn tên doanh nghiệp + "Tuỳ chỉnh" (đóng sẵn).
+    expect(screen.getByTestId('setup-account-done')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Mật khẩu')).toBeNull();
+    expect(screen.getByText('Tuỳ chỉnh').closest('details')).not.toHaveAttribute('open');
     expect(screen.getByLabelText('Sếp tự xưng là')).toHaveValue('Sếp');
-    expect(screen.getByLabelText('Agent gọi Sếp là')).toHaveValue('Sếp');
+    expect(screen.getByLabelText('Gen gọi Sếp là')).toHaveValue('Sếp');
+    expect(screen.getByLabelText('Múi giờ')).toHaveValue('Asia/Ho_Chi_Minh');
+    expect(screen.getByLabelText('Tiền tệ')).toHaveValue('VND');
     const next = screen.getByRole('button', { name: /Tiếp tục/ });
-    expect(next).toBeDisabled(); // chưa có tên tổ chức
-    await user.type(screen.getByLabelText('Tên tổ chức'), 'Genesis Việt');
+    expect(next).toBeDisabled(); // chưa có tên doanh nghiệp
+    await user.type(screen.getByLabelText('Tên doanh nghiệp'), 'Genesis Việt');
     expect(next).toBeEnabled();
     await user.click(next);
     await waitFor(() => expect(calls.some((c) => c.url.endsWith('/setup/steps/3') && c.method === 'PUT')).toBe(true));
     const put = calls.find((c) => c.url.endsWith('/setup/steps/3') && c.method === 'PUT')!;
     expect(put.body).toEqual({ org_name: 'Genesis Việt', timezone: 'Asia/Ho_Chi_Minh', currency: 'VND', self_name: 'Sếp', bot_calls_me: 'Sếp' });
+    // Bước 1–2 đã xong: không gọi lại PUT 1/2 (tải lại giữa chừng vẫn đi tiếp).
+    expect(calls.some((c) => (c.url.endsWith('/setup/steps/1') || c.url.endsWith('/setup/steps/2')) && c.method === 'PUT')).toBe(false);
   });
 
   it('xoá trắng ô xưng hô vẫn bị chặn (rỗng ≠ mặc định)', async () => {
     const user = userEvent.setup();
     stub((c) => (c.url.includes('/setup/') ? json(200, stateAt(3, [1, 2])) : undefined));
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={['/setup']}>
-          <SetupPage />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
-    await screen.findByRole('heading', { name: 'Bước 3' });
-    await user.type(screen.getByLabelText('Tên tổ chức'), 'Genesis Việt');
+    renderAccount();
+    await screen.findByRole('heading', { name: 'Tạo tài khoản Sếp' });
+    await user.type(screen.getByLabelText('Tên doanh nghiệp'), 'Genesis Việt');
     await user.clear(screen.getByLabelText('Sếp tự xưng là'));
     expect(screen.getByRole('button', { name: /Tiếp tục/ })).toBeDisabled();
   });
@@ -275,8 +284,8 @@ describe('bước 10 — thẻ gợi ý có nút "Để sau"', () => {
     });
     render(
       <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={['/setup']}>
-          <SetupPage />
+        <MemoryRouter initialEntries={['/guide']}>
+          <LegacyWizard />
         </MemoryRouter>
       </QueryClientProvider>,
     );

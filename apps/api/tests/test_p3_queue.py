@@ -2,6 +2,7 @@
 hẹn (hạn quá đỏ, lời hứa), cảnh báo sớm (quét ngưỡng, chống trùng)."""
 
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import orjson
 import pytest
@@ -252,6 +253,29 @@ async def test_tasks_overdue_flag_and_lifecycle(world, owner_api: Api) -> None: 
     tid = created.json()["id"]
     done = await owner_api.send("PATCH", f"/tasks/{tid}", {"status": "done"})
     assert done.status_code == 200 and done.json()["status"] == "done" and done.json()["completed_at"]
+
+
+async def test_tasks_due_before_filters_by_deadline_on_the_server(world, owner_api: Api, db) -> None:  # type: ignore[no-untyped-def]
+    """F-60-R14 (sau /code-review): "Việc hôm nay" của Mặt tiền không được rơi việc quá hạn vì 50 việc mới nhất.
+    60 việc MỚI hơn (hạn xa / không hạn) không che việc quá hạn tạo sớm khi lọc `due_before`."""
+    await db.execute(text("""
+        INSERT INTO biz.tasks (org_id, code, title, priority, status, due_at, source, created_at)
+        SELECT :o, 'TSK-N' || g, 'Việc mới ' || g, 'P3', 'todo',
+               CASE WHEN g % 2 = 0 THEN now() + interval '10 days' END, 'manual', now() + make_interval(secs => g)
+        FROM generate_series(1, 60) g"""), {"o": world["org"]})
+    await db.commit()
+    plain = (await owner_api.get("/tasks?status=todo")).json()
+    assert str(world["overdue_task"]) not in [i["id"] for i in plain["items"]]          # lỗi cũ: rơi khỏi trang 50
+    cut = (datetime.now(UTC) + timedelta(hours=12)).isoformat().replace("+00:00", "Z")
+    r = await owner_api.get("/tasks", params={"status": "todo", "due_before": cut})
+    assert r.status_code == 200, r.text
+    assert [i["id"] for i in r.json()["items"]] == [str(world["overdue_task"])] and r.json()["total"] == 1
+    later = (datetime.now(UTC) + timedelta(days=2)).isoformat().replace("+00:00", "Z")   # gồm cả việc hạn +1 ngày
+    both = (await owner_api.get("/tasks", params={"status": "todo", "due_before": later})).json()
+    assert {i["id"] for i in both["items"]} == {str(world["overdue_task"]), str(world["soon_task"])}
+    naive = (await owner_api.get("/tasks", params={"due_before": "2999-01-01T00:00:00"})).json()   # không múi giờ ⇒ UTC
+    assert naive["total"] == 2 + 30                    # 2 việc cũ + 30 việc có hạn +10 ngày
+    assert (await owner_api.get("/tasks?due_before=khong-phai-gio")).status_code == 422
 
 
 async def test_tasks_scope_by_assignee_and_subject(world, owner_api: Api, client, db) -> None:  # type: ignore[no-untyped-def]

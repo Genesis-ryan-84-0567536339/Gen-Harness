@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
-import { AUDITOR, loginAs, loginAsOwner, MANAGER, OWNER, resetMock, resultsDir, SETUP_TOKEN } from './support';
+import { apiCall, AUDITOR, loginAs, loginAsOwner, MANAGER, OWNER, resetMock, resultsDir, SETUP_TOKEN } from './support';
 
 const shots = join(resultsDir, 'visual');
 
@@ -66,49 +66,45 @@ test.describe('auth', () => {
 test.describe('owner setup', () => {
   test.beforeEach(async ({ request }) => resetMock(request, 'fresh'));
 
-  test('428 → /setup; steps 1–3 against the API; progress survives a reload', async ({ page }) => {
+  // v0.1.59 (g5-thiet-lap): Thiết lập MỘT màn, 3 bước (1 Tài khoản · 2 Nguồn AI · 3 Xong) thay cho 12 bước; luồng đủ ở setup-one-v0159.spec.ts.
+  test('428 → /setup; Tài khoản (PUT 1–3) rồi Nguồn AI; tiến độ còn nguyên sau khi tải lại', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto('/overview');
-    await expect(page).toHaveURL(/\/setup$/);
+    await expect(page).toHaveURL(/\/setup(\?buoc=tai-khoan)?$/);
     await page.goto(`/setup?token=${SETUP_TOKEN}`);
-    await expect(page.getByRole('heading', { name: 'Chào mừng' })).toBeVisible();
-    await expect(page.getByLabel('Mã thiết lập')).toHaveValue(SETUP_TOKEN);
-    await page.screenshot({ path: join(shots, 'setup-step1-1440.png') });
-    await page.getByLabel('Mã thiết lập').press('Enter');
+    await expect(page.getByRole('heading', { name: 'Tạo tài khoản Sếp' })).toBeVisible();
+    await expect(page.getByLabel('Mã thiết lập')).toHaveCount(0); // mã đã có từ đường dẫn của trình cài
+    await page.screenshot({ path: join(shots, 'setup-account-1440.png') });
 
-    await expect(page.getByRole('heading', { name: 'Tài khoản Owner' })).toBeVisible();
     const next = page.getByRole('button', { name: /Tiếp tục/ });
     await expect(next).toBeDisabled();
-    await page.getByLabel('Tên hiển thị').fill('Anh Nguyễn Văn A (Chủ)');
+    await page.getByLabel('Tên Sếp').fill('Anh Nguyễn Văn A (Chủ)');
     await page.getByLabel('Email').fill('owner@example.test');
     await page.getByLabel('Mật khẩu', { exact: true }).fill('mot-cau-rat-dai-de-nho-2026');
     await page.getByLabel('Mã PIN (6 số) — chữ số 1/6').click();
     await page.keyboard.type('246810');
-    await page.getByLabel('Nhập lại PIN — chữ số 1/6').click();
+    await page.getByLabel('Nhập lại mã PIN — chữ số 1/6').click();
     await page.keyboard.type('246810');
+    await page.getByLabel('Tên doanh nghiệp').fill('Genesis Trading');
     await expect(next).toBeEnabled();
-    await page.screenshot({ path: join(shots, 'setup-step2-1440.png') });
-    await next.click();
 
-    await expect(page.getByRole('heading', { name: 'Tổ chức & xưng hô' })).toBeVisible();
-    await page.getByLabel('Tên tổ chức').fill('Genesis Trading');
-    await page.getByLabel('Sếp tự xưng là').fill('Anh');
-    await expect(page.locator('.setup-preview__line')).toContainText('Dạ Sếp');
-    await page.getByLabel('Agent gọi Sếp là').fill('anh A');
-    await expect(page.locator('.setup-preview__line')).toContainText('Dạ Anh A');
+    // "Tuỳ chỉnh" thu gọn: múi giờ / tiền tệ / xưng hô điền sẵn, xem trước câu trả lời mẫu cập nhật trực tiếp.
+    await page.getByText('Tuỳ chỉnh').click();
     await expect(page.getByLabel('Múi giờ')).toHaveValue('Asia/Ho_Chi_Minh');
     await expect(page.getByLabel('Tiền tệ')).toHaveValue('VND');
-    await page.screenshot({ path: join(shots, 'setup-step3-1440.png') });
-    await page.getByLabel('Tên tổ chức').press('Enter');
+    await page.getByLabel('Sếp tự xưng là').fill('Anh');
+    await page.getByLabel('Gen gọi Sếp là').fill('anh A');
+    await expect(page.getByText(/Dạ Anh A/)).toBeVisible();
+    await page.screenshot({ path: join(shots, 'setup-account-custom-1440.png') });
+    await next.click();
 
-    await expect(page.getByRole('heading', { name: 'Bộ não AI' })).toBeVisible();
-    // Phase 2: step 4 is a real form (CLI + API keys), no longer "Sắp có".
-    await expect(page.getByText('Tài khoản Google · Antigravity CLI')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Nối nguồn AI cho Gen' })).toBeVisible();
+    // Phase 2: Nguồn AI là form thật (Google/Antigravity + khoá API), không còn "Sắp có".
+    await expect(page.getByRole('heading', { name: 'Đăng nhập Google (Antigravity)' })).toBeVisible();
     await expect(page.getByText('Sắp có')).toHaveCount(0);
-    await expect(page.getByText('Bước 4/12')).toBeVisible();
     await page.reload();
-    await expect(page.getByRole('heading', { name: 'Bộ não AI' })).toBeVisible();
-    await page.screenshot({ path: join(shots, 'setup-step4-1440.png') });
+    await expect(page.getByRole('heading', { name: 'Nối nguồn AI cho Gen' })).toBeVisible();
+    await page.screenshot({ path: join(shots, 'setup-ai-source-1440.png') });
   });
 });
 
@@ -837,16 +833,16 @@ test.describe('giai đoạn 4.5/4.6: Điều khiển hệ thống', () => {
     });
   });
 
-  test('Trình thiết lập bước 10–11: mời đội ngũ (mật khẩu tạm) rồi cấu hình sao lưu, tới Hoàn tất', async ({ page }) => {
+  // v0.1.59: bước 10–11 không còn nằm trong trình thiết lập (3 bước) — mở ở Hướng dẫn thiết lập (/guide/10, /guide/11); lưu xong quay về /guide.
+  test('Hướng dẫn bước 10–11: mời đội ngũ (mật khẩu tạm) rồi cấu hình sao lưu', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await resetMock(page.request, 'fresh', { startAtStep: 10 });
     await loginAsOwner(page);
-    await page.goto('/setup');
+    await page.goto('/guide/10');
 
     await expect(page.getByRole('heading', { name: 'Mời đội ngũ' })).toBeVisible();
-    await expect(page.getByText('Bước 10/12')).toBeVisible();
-    // v0.1.55: bước 10 mở ra là thẻ gợi ý (nút chính "Để sau") — "Mời ngay" mới hiện form mời.
-    await page.getByRole('button', { name: 'Mời ngay' }).click();
+    // v0.1.55: trong trình thiết lập bước 10 là thẻ gợi ý (nút chính "Để sau"); mở từ Hướng dẫn (/guide/10) thì hiện thẳng form mời.
+    await expect(page.getByTestId('step10-suggestion')).toHaveCount(0);
     await page.getByRole('button', { name: 'Thêm người' }).click();
     await page.getByLabel('Tên hiển thị').fill('Chị Hồng Quản');
     await page.getByLabel('Email').fill('hong@genesis.vn');
@@ -856,14 +852,15 @@ test.describe('giai đoạn 4.5/4.6: Điều khiển hệ thống', () => {
     await expect(page.getByText('Đã tạo 1 tài khoản')).toBeVisible();
     await expect(page.getByText('hong@genesis.vn')).toBeVisible();
     await page.getByRole('button', { name: /Đã lưu, sang bước sau/ }).click();
+    await expect(page).toHaveURL(/\/guide$/);
 
+    await page.goto('/guide/11');
     await expect(page.getByRole('heading', { name: 'Sao lưu' })).toBeVisible();
     await expect(page.getByLabel('Giờ chạy (HH:MM)')).toHaveValue('02:00');
     await page.getByRole('button', { name: /Tiếp tục/ }).click();
+    await expect(page).toHaveURL(/\/guide$/);
 
-    await expect(page.getByRole('heading', { name: 'Hoàn tất' })).toBeVisible();
-    await page.getByRole('button', { name: /Vào Console/ }).click();
-    // v0.1.55 (G5): Owner "/" ⇒ Mặt tiền /owner
-    await expect(page).toHaveURL(/\/owner$/);
+    const state = (await apiCall(page, 'GET', '/setup/state')) as { steps: Array<{ n: number; status: string }> };
+    expect(state.steps.filter((s) => s.status === 'done').map((s) => s.n)).toEqual(expect.arrayContaining([10, 11]));
   });
 });

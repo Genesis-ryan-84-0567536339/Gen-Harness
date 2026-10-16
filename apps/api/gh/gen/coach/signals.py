@@ -88,7 +88,6 @@ BOSS_TARGET = "boss_checks.row.{key}"
 #: Khoá việc (không kể health.<kind>: đích của sự cố là liên kết `link` của chính sự cố) → đích làm sáng.
 #: v0.1.55: `boss.ai` trỏ thẻ "Bộ não AI" ở Kết nối — nơi Sếp thêm nguồn AI.
 TODO_TARGETS: dict[str, str] = {
-    "model.missing": "api.bindings",
     "boss.ai": "connections.brain",
     "boss.hub": BOSS_TARGET.format(key="hub"),
     "boss.remote": BOSS_TARGET.format(key="remote"),
@@ -98,6 +97,13 @@ TODO_TARGETS: dict[str, str] = {
     **{f"followup.{n}": f"guide.item.do:{n}" for n in FOLLOWUP_TODO_NS},
 }
 ALL_TARGETS: frozenset[str] = frozenset(TODO_TARGETS.values())
+
+#: v0.1.59 (g5-thiet-lap): việc tĩnh mà đích là MỘT TRANG (không phải phần tử cần làm sáng) → `link`. Web ưu tiên
+#: `target` hơn `link` (coachModel.showMe) nên khoá ở đây KHÔNG được có trong `TODO_TARGETS`. `model.missing` dẫn
+#: thẳng tới màn "Thiết lập nguồn AI" (/setup?buoc=nguon-ai) — cùng đích với mọi nút "Chọn model" khác.
+TODO_LINKS: dict[str, str] = {
+    "model.missing": "/setup?buoc=nguon-ai",
+}
 
 # ─── quy tắc việc ─────────────────────────────────────────────────────────────────────────────────────────────
 

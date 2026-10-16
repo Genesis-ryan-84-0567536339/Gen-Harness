@@ -215,6 +215,8 @@ export function coreEndpoints(r: ApiClient['request']) {
           /** `failed`: chỉ bản gửi lỗi CHƯA được gửi lại (lọc ở máy chủ). */
           status?: 'pending' | 'decided' | 'failed' | 'all';
           kind?: string;
+          /** Bỏ nháp đã "Tắt tiếng" (Mặt tiền Owner: số khớp `today.nav.decide`). */
+          hide_silenced?: boolean;
           cursor?: string;
           limit?: number;
         } = {},

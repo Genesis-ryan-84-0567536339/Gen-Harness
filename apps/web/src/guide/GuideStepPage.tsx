@@ -6,6 +6,7 @@ import { api } from '../lib/api';
 import { qk } from '../lib/queries';
 import { queryClient } from '../lib/queryClient';
 import { toast } from '../lib/toast';
+import { OWNER_HOME } from '../owner/ownerModel';
 import { CardError, SkeletonLines } from '../screens/common';
 import { Step4Brain } from '../setup/Step4Brain';
 import { Step5Channels } from '../setup/Step5Channels';
@@ -15,7 +16,7 @@ import { Step8Agent } from '../setup/Step8Agent';
 import { Step9Autonomy } from '../setup/Step9Autonomy';
 import { Step10Team } from '../setup/Step10Team';
 import { Step11Backup } from '../setup/Step11Backup';
-import { STEP_DESCRIPTIONS } from '../setup/steps';
+import { AI_SOURCE_PATH, STEP_DESCRIPTIONS } from '../setup/steps';
 import { mergeSteps } from '../setup/stepState';
 import type { StepProps } from '../setup/types';
 import { FOLLOW_UP_KEY, GUIDE_BY_N } from './guideContent';
@@ -51,8 +52,9 @@ export function GuideStepPage() {
   if (guide?.doTo) return <Navigate to={guide.doTo} replace />;
   if (!Step || !guide) return <Navigate to="/guide" replace />;
 
-  // Bước 4 (chọn model) mở từ dải "Chưa có model" ở Tổng quan — quay về đó.
-  const home = n === 4 ? { to: '/overview', label: 'Hôm nay' } : { to: '/guide', label: 'Hướng dẫn thiết lập' };
+  // Bước 4 (chọn model): v0.1.59 — nút "Chọn model" mới đi thẳng /setup?buoc=nguon-ai; trang này (form đầy đủ, cho người muốn
+  // chỉnh kỹ) quay về Mặt tiền, không còn về /overview.
+  const home = n === 4 ? { to: OWNER_HOME, label: 'Mặt tiền' } : { to: '/guide', label: 'Hướng dẫn thiết lập' };
   const back = () => navigate(home.to);
   const meta = mergeSteps(state.data).find((s) => s.n === n)!;
 
@@ -61,6 +63,11 @@ export function GuideStepPage() {
       <Link to={home.to} className="guide-back">
         <Icon name="ph ph-arrow-left" size={13} /> {home.label}
       </Link>
+      {n === 4 ? (
+        <p className="muted-note" data-testid="guide-quick-ai">
+          <Link to={AI_SOURCE_PATH}>Cách nhanh: Thiết lập nguồn AI 2 phút</Link>
+        </p>
+      ) : null}
       {state.isPending ? (
         <div className="gh-card">
           <SkeletonLines rows={6} />

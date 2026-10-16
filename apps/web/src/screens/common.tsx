@@ -1,8 +1,12 @@
 import type { CSSProperties, ReactNode } from 'react';
 import { Link } from 'react-router-dom';
+import type { Me } from '@gen-harness/contracts';
 import { ErrorState, Icon, Skeleton, cx } from '@gen-harness/ui';
 import { errorDetail, errorReasons, errorText, isAgyOnlyUnavailable, isModelUnavailable } from '../lib/errorText';
 import { AGY_ONLY_TEXT, MODEL_UNAVAILABLE_TEXT, agyOnlyReasons, friendlyError, isAgyOnlyText } from '../lib/friendlyError';
+import { queryClient } from '../lib/queryClient';
+import { qk } from '../lib/queries';
+import { AI_SOURCE_PATH } from '../setup/steps';
 
 /** Mô tả chung: thao tác nhà cung cấp AI nào cần phiên PIN `ai.route_change` (v0.1.35, F-20). */
 export const PIN_ROUTE_CHANGE_TITLE = 'cần mã PIN 6 số (bật/tắt, thêm/sửa nhà cung cấp AI, khoá API, chuỗi chuyển hướng)';
@@ -159,21 +163,33 @@ export function CardError({ error, onRetry, retrying }: { error: unknown; onRetr
 }
 
 /**
- * v0.1.30: "chưa có model AI hoạt động" — trạng thái tại chỗ có nút "Chọn model" (→ /guide/4, bước chọn model),
+ * v0.1.30: "chưa có model AI hoạt động" — trạng thái tại chỗ có nút "Chọn model" (v0.1.59: → /setup?buoc=nguon-ai, màn Thiết lập nguồn AI),
  * lý do kỹ thuật từng nhà cung cấp ẩn trong "Chi tiết kỹ thuật". Dùng thay cho việc vẽ lỗi thô.
  */
+/** Vai đã biết (từ bộ nhớ đệm của /auth/me) và KHÔNG phải Owner. Chưa biết vai ⇒ false (giữ nút như cũ). */
+function isKnownNonOwner(): boolean {
+  const me = queryClient.getQueryData<Me>(qk.me);
+  return !!me && me.role?.code !== 'owner';
+}
+
+export const ASK_OWNER_AI_TEXT = 'Báo Sếp chọn nguồn AI';
+
 export function ModelUnavailableNotice({
   reasons,
   message,
   className,
   agyOnly,
+  askOwner,
 }: {
   reasons?: string | string[] | null;
   message?: string;
   className?: string;
   /** v0.1.38 (F-22): chuỗi chỉ có Antigravity CLI — nút dẫn tới Agent & Model (/api), không về bước 4 (agy hiện "sẵn sàng"). */
   agyOnly?: boolean;
+  /** Chỉ Owner chọn được nguồn AI (màn Thiết lập đẩy vai khác về "/"): vai khác thấy chữ "Báo Sếp chọn nguồn AI" thay cho nút. */
+  askOwner?: boolean;
 }) {
+  const nonOwner = askOwner ?? isKnownNonOwner();
   const tech = Array.isArray(reasons) ? reasons.filter(Boolean).join('; ') : reasons;
   const agy = agyOnly ?? (isAgyOnlyText(message) || agyOnlyReasons(Array.isArray(reasons) ? reasons : reasons ? [reasons] : null));
   return (
@@ -188,12 +204,16 @@ export function ModelUnavailableNotice({
           </details>
         ) : null}
       </div>
-      {agy ? (
+      {nonOwner ? (
+        <span className="model-down__cta muted-note" data-testid="model-unavailable-ask-owner">
+          <Icon name="ph ph-user-circle" size={14} /> {ASK_OWNER_AI_TEXT}
+        </span>
+      ) : agy ? (
         <Link to="/api" className="gh-btn gh-btn--secondary gh-btn--sm model-down__cta">
           <Icon name="ph ph-plugs" size={14} /> Thêm nguồn AI
         </Link>
       ) : (
-        <Link to="/guide/4" className="gh-btn gh-btn--secondary gh-btn--sm model-down__cta">
+        <Link to={AI_SOURCE_PATH} className="gh-btn gh-btn--secondary gh-btn--sm model-down__cta">
           <Icon name="ph ph-plugs" size={14} /> Chọn model
         </Link>
       )}

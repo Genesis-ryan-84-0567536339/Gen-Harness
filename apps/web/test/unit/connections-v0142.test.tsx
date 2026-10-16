@@ -172,7 +172,7 @@ describe('Trang Kết nối', () => {
     const brain = await card('Bộ não AI');
     await expectOnePillOneAction(brain, 'running');
     expect(within(brain).getByRole('link', { name: /Mở Bộ não AI/ })).toHaveAttribute('href', '/system?tab=brain');
-    expect(within(brain).getByRole('link', { name: 'Hướng dẫn' })).toHaveAttribute('href', '/guide/4');
+    expect(within(brain).getByRole('link', { name: 'Hướng dẫn' })).toHaveAttribute('href', '/setup?buoc=nguon-ai');
 
     const zalo = await card('Kênh Zalo');
     await expectOnePillOneAction(zalo, 'needs_boss');

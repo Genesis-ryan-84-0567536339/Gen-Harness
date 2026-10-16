@@ -19,6 +19,10 @@ test.describe('v0.1.42 · menu', () => {
     await loginAsOwner(page);
     await page.goto('/');
     await expect(page).toHaveURL(/\/owner$/);
+    // v0.1.59: Mặt tiền 5 trụ cột — thanh trái có Tình báo (đang mở) … Việc và Cài đặt (testid owner-nav-*).
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Tình báo');
+    await expect(page.getByTestId('owner-nav-intel')).toHaveAttribute('aria-current', 'page');
+    await expect(page.locator('[data-testid^="owner-nav-"]')).toHaveCount(6);
     await page.goto('/overview');
     const items = nav(page).locator('[data-level1] .sb-item__name');
     await expect(items).toHaveText(LEVEL1);
@@ -221,6 +225,7 @@ test.describe('v0.1.42 · nghiệm thu sau tích hợp', () => {
     // v0.1.55: "/" của Owner là Mặt tiền (/owner); Console đầy đủ mở bằng /overview (đúng đường "Cài đặt nâng cao").
     await page.goto('/');
     await expect(page).toHaveURL(/\/owner$/);
+    await expect(page.getByTestId('owner-nav-intel')).toHaveAttribute('aria-current', 'page');
     await page.goto('/overview');
     await expect(page.locator('.hd-title')).toHaveText('Hôm nay');
     const strip = page.getByRole('region', { name: 'Cần Sếp xử lý' });
@@ -368,8 +373,11 @@ test.describe('v0.1.42 · nghiệm thu sau tích hợp', () => {
     await expect(panel(page)).toBeVisible();
     await expect(panel(page).locator('.gen-msg--briefing')).toContainText('Bản tin');
     // v0.1.55: "/?gen=<mã>" của Owner ⇒ Mặt tiền, mở Bản tin ở màn Hỏi Gen (/owner/gen) và bỏ tham số khỏi địa chỉ.
+    // v0.1.59: /owner/gen giữ cho link cũ — khung chat nằm ngay trên trang (không mở ngăn thứ hai), nút Hỏi Gen vẫn ở đầu trang.
     await page.goto(`/?gen=${seeded.conversation_id}`);
     await expect(page).toHaveURL(/\/owner\/gen$/);
+    await expect(page.getByTestId('owner-ask-gen')).toBeVisible();
+    await expect(page.getByTestId('owner-gen-panel')).toBeVisible();
     await expect(panel(page).locator('.gen-msg--briefing')).toContainText('Bản tin');
 
     for (const path of ['/social', '/mcp', '/profile?id=p-bao', '/plugins']) {
