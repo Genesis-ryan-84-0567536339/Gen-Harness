@@ -23,7 +23,10 @@ import {
   channelAction,
   channelErrorText,
   channelIcon,
+  channelLogoutAction,
   channelMeta,
+  channelResumeConfirmText,
+  channelResumeNeedsConfirm,
   channelSecondaryAction,
   channelStats,
   channelStatus,
@@ -53,8 +56,11 @@ export function ChannelCard({ channel, canManage, large }: { channel: Channel; c
   const meta = channelMeta(c, now, tz);
   const act = channelAction(c);
   const second = channelSecondaryAction(c);
+  const errLogout = channelLogoutAction(c);
   const [riskOpen, setRiskOpen] = useState(false);
   const [logoutOpen, setLogoutOpen] = useState(false);
+  /** Gói K: hỏi lại trước khi nối lại phiên bị mở nơi khác (nối sẽ ngắt nơi đó). */
+  const [resumeAsk, setResumeAsk] = useState(false);
   const [groupsOpen, setGroupsOpen] = useState(false);
   /** Set after the login request is accepted, until the first `channel.qr` arrives. */
   const [awaitingQr, setAwaitingQr] = useState(false);
@@ -124,10 +130,15 @@ export function ChannelCard({ channel, canManage, large }: { channel: Channel; c
         : act.action === 'configure'
           ? () => setGroupsOpen(true)
           : act.action === 'resume'
-            ? () => resume.mutate()
+            ? () => (channelResumeNeedsConfirm(c) ? setResumeAsk(true) : resume.mutate())
             : () => setRiskOpen(true);
     button = (
       <>
+        {errLogout ? (
+          <Button variant="secondary" className="ch-btn" icon={errLogout.icon} loading={logout.isPending} onClick={() => setLogoutOpen(true)}>
+            {errLogout.label}
+          </Button>
+        ) : null}
         {second ? (
           <Button variant="secondary" className="ch-btn" icon={second.icon} loading={login.isPending} onClick={() => setRiskOpen(true)}>
             {second.label}
@@ -284,6 +295,31 @@ export function ChannelCard({ channel, canManage, large }: { channel: Channel; c
           Gen ngừng nhận tin từ {fmtInt(c.groups_listening)} nhóm cho tới khi Sếp quét mã QR lại. Tin Sếp soạn gửi đi trong lúc chưa đăng
           nhập sẽ bị từ chối, không được giữ lại để tự gửi sau.
         </p>
+      </Dialog>
+      <Dialog
+        open={resumeAsk}
+        onClose={() => setResumeAsk(false)}
+        width={420}
+        title={`Nối lại ${c.name}?`}
+        actions={
+          <>
+            <Button variant="secondary" onClick={() => setResumeAsk(false)}>
+              Huỷ
+            </Button>
+            <Button
+              variant="primary"
+              icon="ph ph-plugs-connected"
+              onClick={() => {
+                setResumeAsk(false);
+                resume.mutate();
+              }}
+            >
+              Vẫn nối lại
+            </Button>
+          </>
+        }
+      >
+        <p className="risk-box__text">{channelResumeConfirmText(c)}</p>
       </Dialog>
       <GroupsDialog open={groupsOpen} onClose={() => setGroupsOpen(false)} channel={c} canManage={canManage} />
     </article>

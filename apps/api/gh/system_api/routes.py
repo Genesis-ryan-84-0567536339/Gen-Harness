@@ -208,10 +208,11 @@ async def channel_logout(type_: str, request: Request, user: service.CurrentUser
                          _pin: Any = Depends(require_pin("channel.logout")),
                          db: AsyncSession = DB) -> Response:
     ch = await _qr_channel(db, user.org_id, type_)
-    # Gói K (P1-1): phiên 'error' (vd. CONNECTION_REPLACED) đã có ended_at nhưng còn credential — đăng xuất phải xoá cả nó,
-    # nếu không bridge khởi động lại vẫn tự nối lại được.
+    # Gói K (P1-1): phiên 'error' (vd. CONNECTION_REPLACED) đã có ended_at nhưng còn credential — đăng xuất phải
+    # xoá cả nó, nếu không bridge khởi động lại vẫn tự nối lại được.
     rows = (await db.execute(text("""
-        UPDATE core.channel_sessions SET state = 'logged_out', ended_at = COALESCE(ended_at, now()), credential_enc = NULL
+        UPDATE core.channel_sessions SET state = 'logged_out', ended_at = COALESCE(ended_at, now()),
+                                         credential_enc = NULL
         WHERE channel_id = :c AND (ended_at IS NULL OR credential_enc IS NOT NULL)
         RETURNING id, account_label"""), {"c": ch.id})).all()
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id, action="channel.logout",

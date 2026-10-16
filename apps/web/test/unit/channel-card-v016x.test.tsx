@@ -8,7 +8,9 @@ import { ChannelCard } from '../../src/screens/system/ChannelCard';
 import {
   channelAction,
   channelErrorText,
+  channelLogoutAction,
   channelMeta,
+  channelResumeNeedsConfirm,
   channelSecondaryAction,
   channelStatus,
   qrHint,
@@ -252,5 +254,62 @@ describe('F069: không hứa tự gửi lại khi phiên nối lại', () => {
     const dlg = await screen.findByRole('dialog', { name: /Đăng xuất Zalo/ });
     expect(dlg).not.toHaveTextContent(/hàng đợi được giữ/);
     expect(dlg).not.toHaveTextContent(/Bridge/);
+  });
+});
+
+describe('Gói K (P1-1): phiên "Lỗi kết nối" đăng xuất được; bị mở nơi khác thì hỏi lại trước khi nối', () => {
+  const replaced = (over: Partial<View> = {}) =>
+    zalo({ state: 'error', error: 'CONNECTION_REPLACED', resumable: true, ended_at: new Date().toISOString(), ...over });
+
+  it('mô hình: trạng thái error có nút Đăng xuất; các trạng thái khác thì không thêm nút phụ này', () => {
+    expect(channelLogoutAction(zalo({ state: 'error' }))).toMatchObject({ label: 'Đăng xuất' });
+    expect(channelLogoutAction(zalo({ state: 'error', resumable: false }))).toMatchObject({ label: 'Đăng xuất' });
+    for (const state of ['active', 'expired', 'pending_qr', 'logged_out'] as const) {
+      expect(channelLogoutAction(zalo({ state }))).toBeNull();
+    }
+    expect(channelResumeNeedsConfirm(replaced())).toBe(true);
+    expect(channelResumeNeedsConfirm(zalo({ state: 'error', error: 'NETWORK_UNAVAILABLE', resumable: true }))).toBe(false);
+    expect(channelResumeNeedsConfirm(zalo({ state: 'active' }))).toBe(false);
+  });
+
+  it('thẻ error có nút Đăng xuất; bấm → hộp xác nhận → gọi POST /channels/zalo/logout (sau mã PIN)', async () => {
+    const user = userEvent.setup();
+    const calls = mockFetch((c) => (c.url.endsWith('/channels/zalo/logout') ? json(204) : json(200, [])));
+    queryClient.setQueryData(qk.me, {
+      id: 'u', email: 'o@x', display_name: 'A', role: { code: 'owner', name: 'Owner' },
+      org: { id: 'o', name: 'x', timezone: 'Asia/Ho_Chi_Minh', currency: 'VND' }, addressing: { self: 'Anh', bot_calls_me: 'Sếp' },
+      pin_verified_until: new Date(Date.now() + 600_000).toISOString(), permissions: {},
+    });
+    renderCard(replaced());
+    await user.click(screen.getByRole('button', { name: 'Đăng xuất' }));
+    const dlg = await screen.findByRole('dialog', { name: /Đăng xuất Zalo/ });
+    await user.click(within(dlg).getByRole('button', { name: 'Đăng xuất' }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.url.endsWith('/channels/zalo/logout'))).toBe(true));
+  });
+
+  it('CONNECTION_REPLACED: bấm Nối lại chưa gọi API mà hỏi "Sẽ ngắt … ở nơi khác?"; Huỷ thì không gọi, đồng ý mới gọi', async () => {
+    const user = userEvent.setup();
+    const calls = mockFetch((c) => (c.url.endsWith('/channels/zalo/resume') ? json(202, { session_id: 's1' }) : json(200, [])));
+    renderCard(replaced());
+    await user.click(screen.getByRole('button', { name: /Nối lại bằng phiên đã lưu/ }));
+    const dlg = await screen.findByRole('dialog', { name: /Nối lại Zalo\?/ });
+    expect(dlg).toHaveTextContent(/ngắt/);
+    expect(dlg).toHaveTextContent(/Zalo Web/);
+    expect(calls.some((c) => c.url.endsWith('/channels/zalo/resume'))).toBe(false);
+    await user.click(within(dlg).getByRole('button', { name: 'Huỷ' }));
+    expect(calls.some((c) => c.url.endsWith('/channels/zalo/resume'))).toBe(false);
+    await user.click(screen.getByRole('button', { name: /Nối lại bằng phiên đã lưu/ }));
+    const dlg2 = await screen.findByRole('dialog', { name: /Nối lại Zalo\?/ });
+    await user.click(within(dlg2).getByRole('button', { name: /Vẫn nối lại/ }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.url.endsWith('/channels/zalo/resume'))).toBe(true));
+  });
+
+  it('mất mạng (không phải bị mở nơi khác): Nối lại gọi thẳng, không hỏi', async () => {
+    const user = userEvent.setup();
+    const calls = mockFetch((c) => (c.url.endsWith('/channels/zalo/resume') ? json(202, { session_id: 's1' }) : json(200, [])));
+    renderCard(zalo({ state: 'error', error: 'NETWORK_UNAVAILABLE', resumable: true }));
+    await user.click(screen.getByRole('button', { name: /Nối lại bằng phiên đã lưu/ }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.url.endsWith('/channels/zalo/resume'))).toBe(true));
+    expect(screen.queryByRole('dialog', { name: /Nối lại Zalo\?/ })).not.toBeInTheDocument();
   });
 });
