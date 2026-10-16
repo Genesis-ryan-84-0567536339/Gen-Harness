@@ -1,14 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import type { DraftDetail, DraftItem } from '@gen-harness/contracts';
+import type { DraftCreate, DraftDetail, DraftItem, DraftStatus, GroupRef, PersonRef, SendResult } from '@gen-harness/contracts';
 import { Button, Card, EmptyState, Icon, Segmented, Skeleton, Switch, Tag, type Tone } from '@gen-harness/ui';
 import { api } from '../../lib/api';
 import { errorText } from '../../lib/errorText';
 import { fmtDMClock, fmtInt } from '../../lib/format';
-import { useUrlState } from '../../lib/uiStore';
+import { useCan } from '../../lib/permissions';
 import { ActionError, CardError, InlineError, Panel, SkeletonLines } from '../common';
 import { WhyButton } from '../core/Evidence';
-import { qk3, useDraft, useDrafts } from '../core/queries';
+import { qk3, useDraft, useDraftsPaged } from '../core/queries';
 import { DataEmptyState } from '../DataEmptyState';
 
 const KIND_TONE: Record<DraftItem['kind'], Tone> = {
@@ -20,6 +21,15 @@ const KIND_TONE: Record<DraftItem['kind'], Tone> = {
   mcp_write: 'warn',
 };
 
+const KIND_LABEL: Record<DraftItem['kind'], string> = {
+  message: 'Tin nhắn',
+  quotation: 'Báo giá',
+  contract: 'Hợp đồng',
+  reminder: 'Nhắc việc',
+  report: 'Báo cáo',
+  mcp_write: 'Ghi hệ thống ngoài',
+};
+
 const LANGS: Array<{ value: 'vi' | 'en' | 'zh' | 'ja' | 'ko'; label: string }> = [
   { value: 'vi', label: 'VI' },
   { value: 'en', label: 'EN' },
@@ -28,46 +38,200 @@ const LANGS: Array<{ value: 'vi' | 'en' | 'zh' | 'ja' | 'ko'; label: string }> =
   { value: 'ko', label: 'KO' },
 ];
 
+/** Nhãn trạng thái bản nháp bằng tiếng Việt (F086) — không bao giờ in thẳng mã `failed/approved/...`. */
+const STATUS_LABEL: Record<DraftStatus, string> = {
+  pending: 'Chờ duyệt',
+  approved: 'Đã duyệt',
+  edited: 'Đã sửa và gửi',
+  sent: 'Đã gửi',
+  failed: 'Gửi lỗi',
+  rejected: 'Đã huỷ',
+};
+const STATUS_TONE: Record<DraftStatus, Tone> = {
+  pending: 'neutral',
+  approved: 'warn',
+  edited: 'warn',
+  sent: 'ok',
+  failed: 'bad',
+  rejected: 'neutral',
+};
+/** Việc nội bộ (nhắc việc, báo cáo, ghi hệ thống ngoài) không "gửi" tin nên nói "Đã thực hiện". */
+const INTERNAL_KINDS: ReadonlyArray<DraftItem['kind']> = ['reminder', 'report', 'mcp_write'];
+const statusLabel = (status: DraftStatus, kind: DraftItem['kind']): string =>
+  status === 'sent' && INTERNAL_KINDS.includes(kind) ? 'Đã thực hiện' : STATUS_LABEL[status];
+
+/**
+ * Câu tiếng Việt cho mã lỗi gửi. Máy chủ đã gửi sẵn `send_result.message`; bảng này chỉ cho bản nháp lỗi cũ
+ * (trước v0.1.61) chưa có câu đó. Mã gốc luôn nằm ở "Chi tiết kỹ thuật".
+ */
+const SEND_ERROR_TEXT: Record<string, string> = {
+  NO_TARGET: 'Bản nháp chưa có nơi nhận (nhóm hoặc người nhận) nên chưa gửi được.',
+  TARGET_NOT_FOUND: 'Không tìm thấy nhóm hoặc tài khoản nhận trên nền tảng (có thể đã rời nhóm hoặc đổi tài khoản).',
+  SESSION_NOT_ACTIVE: 'Kênh chat đang ngắt kết nối nên tin chưa đi. Đăng nhập lại kênh rồi gửi lại.',
+  PERMIT_EXPIRED: 'Chưa nhận được xác nhận đã gửi từ kênh chat, tin có thể chưa tới người nhận. Kiểm tra trên ứng dụng chat rồi gửi lại.',
+  SEND_FAILED: 'Nền tảng chat từ chối hoặc không gửi được tin này.',
+};
+const SEND_ERROR_FALLBACK = 'Tin chưa gửi được vì lỗi từ kênh chat.';
+type SendResultView = SendResult & { message?: string | null };
+const sendErrorText = (r: SendResultView): string => r.message || SEND_ERROR_TEXT[r.error ?? ''] || SEND_ERROR_FALLBACK;
+
+/** Chữ khi tool ghi hệ thống ngoài chưa có bước thực thi sau duyệt (Q8-1) — khớp câu của máy chủ. */
+const MCP_WRITE_NOTICE =
+  'Chưa hỗ trợ thực thi tool ghi — đã giữ yêu cầu. Hệ thống ngoài chưa bị gọi; Sếp chỉ có thể xem hoặc huỷ bản nháp này.';
+
+type Tab = 'pending' | 'decided' | 'failed';
+const TAB_TITLE: Record<Tab, string> = { pending: 'Chờ Sếp duyệt', decided: 'Đã xử lý', failed: 'Gửi lỗi — cần gửi lại' };
+/** Trần số trang tự tải thêm khi tab lọc ở máy khách (Gửi lỗi / chỉ đã gửi) chưa có dòng nào. */
+const MAX_AUTO_PAGES = 10;
+
+/** Địa chỉ `?status=&kind=&id=`: KPI ở Tổng quan dẫn vào đây nên phải đọc được bộ lọc (F084). */
+function tabOf(status: string | null, kind: string | null): Tab {
+  if (status === 'failed') return 'failed';
+  if (status === 'decided' || status === 'sent') return 'decided';
+  if (status === 'pending') return 'pending';
+  return kind ? 'decided' : 'pending';
+}
+
 export function WorkbenchScreen() {
-  const [id, setId] = useUrlState<string>('id', '');
-  const list = useDrafts('pending');
+  const [params, setParams] = useSearchParams();
+  const id = params.get('id') ?? '';
+  const status = params.get('status');
+  const rawKind = params.get('kind');
+  const kind = rawKind && rawKind in KIND_LABEL ? (rawKind as DraftItem['kind']) : null;
+  const onlySent = status === 'sent';
+  const tab = tabOf(status, kind);
+
+  /** Một lần cập nhật địa chỉ (đổi tab xoá luôn mục đang chọn) — tránh hai lần `set` đè nhau. */
+  const patch = useCallback(
+    (changes: Record<string, string | null>) =>
+      setParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          for (const [k, v] of Object.entries(changes)) {
+            if (v === null || v === '') next.delete(k);
+            else next.set(k, v);
+          }
+          return next;
+        },
+        { replace: true },
+      ),
+    [setParams],
+  );
+
+  const pendingList = useDraftsPaged('pending', kind ?? undefined);
+  const decidedList = useDraftsPaged('decided', kind ?? undefined);
+  const list = tab === 'pending' ? pendingList : decidedList;
   const draft = useDraft(id || null);
 
+  const rows = useMemo(() => {
+    const all = list.data?.pages.flatMap((p) => p.items) ?? [];
+    if (tab === 'failed') return all.filter((d) => d.status === 'failed');
+    if (onlySent) return all.filter((d) => d.status === 'sent');
+    return all;
+  }, [list.data, tab, onlySent]);
+  const failedLoaded = useMemo(
+    () => (decidedList.data?.pages.flatMap((p) => p.items) ?? []).filter((d) => d.status === 'failed').length,
+    [decidedList.data],
+  );
+  const sentLoaded = useMemo(() => rows.filter((d) => d.status === 'sent').length, [rows]);
+
+  // Tab lọc ở máy khách: nếu các trang đã tải chưa có dòng nào mà còn trang sau thì tải tiếp (có trần).
+  const needMore = tab !== 'pending' && rows.length === 0 && !!list.hasNextPage && (list.data?.pages.length ?? 0) < MAX_AUTO_PAGES;
+  const { fetchNextPage, isFetchingNextPage } = list;
   useEffect(() => {
-    if (!id && list.data?.items.length) setId(list.data.items[0].id);
-  }, [id, list.data, setId]);
+    if (needMore && !isFetchingNextPage) void fetchNextPage();
+  }, [needMore, isFetchingNextPage, fetchNextPage]);
+
+  useEffect(() => {
+    if (!id && rows.length) patch({ id: rows[0].id });
+  }, [id, rows, patch]);
+
+  const tabOptions: Array<{ value: Tab; label: string }> = [
+    { value: 'pending', label: 'Chờ duyệt' },
+    { value: 'decided', label: 'Đã xử lý' },
+    { value: 'failed', label: failedLoaded > 0 ? `Gửi lỗi (${fmtInt(failedLoaded)}${decidedList.hasNextPage ? '+' : ''})` : 'Gửi lỗi' },
+  ];
+  const changeTab = (t: Tab) => patch({ status: t === 'pending' ? null : t, id: null });
+
+  const pendingTotal = pendingList.data?.pages[0]?.total;
+  const kicker =
+    tab === 'pending'
+      ? pendingTotal !== undefined
+        ? `${fmtInt(pendingTotal)} bản nháp`
+        : 'Đang tải…'
+      : list.data
+        ? `${fmtInt(rows.length)}${list.hasNextPage ? '+' : ''} bản nháp${tab === 'decided' && sentLoaded > 0 ? ` · ${fmtInt(sentLoaded)} đã gửi` : ''}`
+        : 'Đang tải…';
 
   return (
     <div className="screen">
       <div className="wb-grid">
-        <Panel
-          title="Chờ Sếp duyệt"
-          kicker={list.data ? `${fmtInt(list.data.total)} bản nháp` : 'Đang tải…'}
-          bodyClass="wb-list"
-          genTarget="workbench.drafts"
-        >
+        <Panel title={TAB_TITLE[tab]} kicker={kicker} bodyClass="wb-list" genTarget="workbench.drafts">
+          <div className="wb-tabs">
+            <Segmented options={tabOptions} value={tab} onChange={changeTab} label="Nhóm bản nháp" />
+          </div>
+          {kind || onlySent ? (
+            <div className="wb-filters">
+              {kind ? (
+                <button type="button" className="wb-filter" onClick={() => patch({ kind: null, id: null })} aria-label={`Bỏ lọc loại ${KIND_LABEL[kind]}`}>
+                  Loại: {KIND_LABEL[kind]} <Icon name="ph ph-x" size={11} />
+                </button>
+              ) : null}
+              {onlySent ? (
+                <button type="button" className="wb-filter" onClick={() => patch({ status: 'decided', id: null })} aria-label="Bỏ lọc chỉ bản đã gửi">
+                  Chỉ bản đã gửi <Icon name="ph ph-x" size={11} />
+                </button>
+              ) : null}
+            </div>
+          ) : null}
           {list.isPending ? (
             <SkeletonLines rows={5} padding="12px 16px" />
           ) : list.isError ? (
             <CardError error={list.error} onRetry={() => void list.refetch()} retrying={list.isFetching} />
-          ) : list.data.items.length === 0 ? (
-            <DataEmptyState fallback={<EmptyState icon="ph ph-tray" title="Không có bản nháp nào chờ duyệt" />} />
+          ) : rows.length === 0 ? (
+            list.isFetchingNextPage || needMore ? (
+              <SkeletonLines rows={3} padding="12px 16px" />
+            ) : tab === 'pending' && !kind ? (
+              <DataEmptyState fallback={<EmptyState icon="ph ph-tray" title="Không có bản nháp nào chờ duyệt" />} />
+            ) : (
+              <EmptyState
+                icon={tab === 'failed' ? 'ph ph-check-circle' : 'ph ph-tray'}
+                title={tab === 'failed' ? 'Không có tin nào gửi lỗi' : tab === 'decided' ? 'Chưa có bản nháp nào đã xử lý' : 'Không có bản nháp nào chờ duyệt'}
+                description={tab === 'failed' ? 'Tin gửi không đi được sẽ hiện ở đây, kèm lý do và nút gửi lại.' : undefined}
+              />
+            )
           ) : (
-            list.data.items.map((d) => (
-              <button key={d.id} type="button" className="wb-list__row" aria-pressed={d.id === id} onClick={() => setId(d.id)}>
-                <Tag tone={KIND_TONE[d.kind]}>{d.kind_label}</Tag>
-                <span className="wb-list__title">{d.title}</span>
-                <span className="wb-list__meta">
-                  {d.agent ? d.agent.name : (d.created_by?.name ?? '—')} · {fmtDMClock(d.created_at)}
-                </span>
-              </button>
-            ))
+            <>
+              {rows.map((d) => (
+                <button key={d.id} type="button" className="wb-list__row" aria-pressed={d.id === id} onClick={() => patch({ id: d.id })}>
+                  <span className="wb-list__tags">
+                    <Tag tone={KIND_TONE[d.kind]}>{d.kind_label}</Tag>
+                    {tab !== 'pending' ? <Tag tone={STATUS_TONE[d.status]}>{statusLabel(d.status, d.kind)}</Tag> : null}
+                  </span>
+                  <span className="wb-list__title">{d.title}</span>
+                  <span className="wb-list__meta">
+                    {d.agent ? d.agent.name : (d.created_by?.name ?? '—')} · {fmtDMClock(d.created_at)}
+                  </span>
+                </button>
+              ))}
+              {list.hasNextPage ? (
+                <div className="wb-more">
+                  <Button variant="secondary" className="btn-27" loading={list.isFetchingNextPage} onClick={() => void list.fetchNextPage()}>
+                    Tải thêm
+                  </Button>
+                </div>
+              ) : null}
+            </>
           )}
         </Panel>
 
         {!id ? (
           <Card className="wb-empty">
-            <EmptyState icon="ph ph-pen-nib" title="Chọn một bản nháp để xem" description="Danh sách bên trái liệt kê mọi bản nháp đang chờ Sếp duyệt." />
+            <EmptyState
+              icon="ph ph-pen-nib"
+              title="Chọn một bản nháp để xem"
+              description={tab === 'pending' ? 'Danh sách bên trái liệt kê mọi bản nháp đang chờ Sếp duyệt.' : 'Chọn một dòng ở danh sách bên trái.'}
+            />
           </Card>
         ) : draft.isPending ? (
           <Card>
@@ -78,15 +242,33 @@ export function WorkbenchScreen() {
             <CardError error={draft.error} onRetry={() => void draft.refetch()} retrying={draft.isFetching} />
           </Card>
         ) : (
-          <DraftDetailView d={draft.data} />
+          <DraftDetailView d={draft.data} onOpenDraft={(nid) => patch({ id: nid, status: null })} />
         )}
       </div>
     </div>
   );
 }
 
-function DraftDetailView({ d }: { d: DraftDetail }) {
+/** Nội dung gửi lại: bản nháp MỚI chờ duyệt (đi lại đủ cổng Duyệt + PIN), giữ nguyên nơi nhận và nguồn dữ liệu. */
+function resendBody(d: DraftDetail): DraftCreate | null {
+  if (!d.target || d.kind === 'mcp_write') return null;
+  const t = d.target;
+  const subject = d.subject ? ('channel' in d.subject ? ({ type: 'group', id: (d.subject as GroupRef).id } as const) : ({ type: 'person', id: (d.subject as PersonRef).id } as const)) : null;
+  return {
+    kind: d.kind,
+    title: d.title,
+    text: d.text,
+    target: { channel: t.channel, thread_type: t.thread_type, ...(t.group ? { group_id: t.group.id } : {}), ...(t.person ? { person_id: t.person.id } : {}) },
+    amount_vnd: d.amount_vnd,
+    subject,
+    sources: d.sources,
+  };
+}
+
+function DraftDetailView({ d, onOpenDraft }: { d: DraftDetail; onOpenDraft: (id: string) => void }) {
   const qc = useQueryClient();
+  const canApprove = useCan('action.approve');
+  const canDraft = useCan('action.draft');
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(d.text);
   const [sides, setSides] = useState<Record<string, boolean>>(() => Object.fromEntries(d.side_actions.map((s) => [s.key, s.on])));
@@ -127,9 +309,24 @@ function DraftDetailView({ d }: { d: DraftDetail }) {
     mutationFn: (lang: (typeof LANGS)[number]['value']) => api.drafts.translate(d.id, lang),
     onSuccess: (r) => setTranslated(r),
   });
+  const resend = useMutation({
+    mutationFn: () => {
+      const body = resendBody(d);
+      if (!body) throw new Error('Bản nháp này không có nơi nhận để gửi lại.');
+      return api.drafts.create(body);
+    },
+    onSuccess: (nd) => {
+      invalidate();
+      onOpenDraft(nd.id);
+    },
+  });
 
   const decided = d.status !== 'pending';
   const busy = approve.isPending || editSend.isPending || reject.isPending;
+  const isMcpWrite = d.kind === 'mcp_write';
+  const sendResult = d.send_result as SendResultView | null;
+  const failed = d.status === 'failed';
+  const canResend = failed && canDraft && !!resendBody(d);
 
   return (
     <Card className="wb-detail" padded={false}>
@@ -160,6 +357,21 @@ function DraftDetailView({ d }: { d: DraftDetail }) {
         <div className="wb-translate">
           <Segmented options={LANGS} value={(translated?.lang as (typeof LANGS)[number]['value']) ?? 'vi'} onChange={(v) => translate.mutate(v)} label="Ngôn ngữ dịch" />
           {translate.isPending ? <Skeleton width="80%" height={12} /> : translated ? <p className="wb-translate__text">{translated.text}</p> : null}
+          {translated && !decided && canApprove && !isMcpWrite ? (
+            <div>
+              <Button
+                variant="secondary"
+                className="btn-27"
+                icon="ph ph-arrow-line-down"
+                onClick={() => {
+                  setText(translated.text);
+                  setEditing(true);
+                }}
+              >
+                Dùng bản dịch này
+              </Button>
+            </div>
+          ) : null}
           {translate.isError ? <ActionError error={translate.error} /> : null}
         </div>
       ) : null}
@@ -175,6 +387,12 @@ function DraftDetailView({ d }: { d: DraftDetail }) {
           ))
         )}
       </div>
+
+      {failed && sendResult ? (
+        <div className="wb-fail">
+          <InlineError detail={sendResult.error ?? undefined}>{sendErrorText(sendResult)}</InlineError>
+        </div>
+      ) : null}
 
       {d.sources.length > 0 ? (
         <div className="wb-sources">
@@ -205,7 +423,7 @@ function DraftDetailView({ d }: { d: DraftDetail }) {
           {d.side_actions.map((s) => (
             <label key={s.key} className="wb-sides__row">
               <span>{s.label}</span>
-              <Switch checked={sides[s.key] ?? s.on} onChange={(v) => setSides((prev) => ({ ...prev, [s.key]: v }))} label={s.label} />
+              <Switch checked={sides[s.key] ?? s.on} disabled={decided || !canApprove} onChange={(v) => setSides((prev) => ({ ...prev, [s.key]: v }))} label={s.label} />
             </label>
           ))}
         </div>
@@ -214,14 +432,36 @@ function DraftDetailView({ d }: { d: DraftDetail }) {
       <div className="wb-footer">
         {decided ? (
           <div className="wb-footer__decided">
-            <Tag tone={d.status === 'rejected' || d.status === 'failed' ? 'bad' : 'ok'}>{d.status}</Tag>
+            <Tag tone={STATUS_TONE[d.status]}>{statusLabel(d.status, d.kind)}</Tag>
             {d.decision ? (
               <span>
                 bởi {d.decision.by.name} · {fmtDMClock(d.decision.at)}
                 {d.decision.reason ? ` · ${d.decision.reason}` : ''}
               </span>
             ) : null}
+            {d.status === 'approved' || d.status === 'edited' ? <span>Đang chờ kênh chat xác nhận đã gửi.</span> : null}
+            {canResend ? (
+              <Button variant="primary" icon="ph ph-paper-plane-tilt" loading={resend.isPending} onClick={() => resend.mutate()}>
+                Gửi lại
+              </Button>
+            ) : null}
+            {failed && !resendBody(d) && d.kind !== 'mcp_write' ? <span>Bản nháp này không có nơi nhận nên không gửi lại được — soạn lại từ Hộp thư.</span> : null}
           </div>
+        ) : !canApprove ? (
+          <div className="wb-footer__decided">
+            <Icon name="ph ph-hourglass" size={14} />
+            <span>Chờ Sếp/Quản lý duyệt — vai trò của bạn chỉ soạn nháp, không duyệt hay gửi.</span>
+            {d.hold_reason ? <span className="wb-footer__hold">{d.hold_reason}</span> : null}
+          </div>
+        ) : isMcpWrite ? (
+          <>
+            <p className="wb-notice" role="status">
+              <Icon name="ph ph-warning" size={14} /> {MCP_WRITE_NOTICE}
+            </p>
+            <Button variant="ghost" icon="ph ph-x" loading={reject.isPending} disabled={busy} onClick={() => reject.mutate(null)}>
+              Huỷ bản nháp
+            </Button>
+          </>
         ) : editing ? (
           <>
             <Button variant="primary" icon="ph ph-paper-plane-tilt" loading={editSend.isPending} disabled={!text.trim()} onClick={() => editSend.mutate()}>
@@ -250,6 +490,7 @@ function DraftDetailView({ d }: { d: DraftDetail }) {
       {approve.isError ? <InlineError>{errorText(approve.error)}</InlineError> : null}
       {editSend.isError ? <InlineError>{errorText(editSend.error)}</InlineError> : null}
       {reject.isError ? <InlineError>{errorText(reject.error)}</InlineError> : null}
+      {resend.isError ? <InlineError>{errorText(resend.error)}</InlineError> : null}
     </Card>
   );
 }

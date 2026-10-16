@@ -145,7 +145,7 @@ describe('Danh tính Agent', () => {
     expect(within(dialog).queryByText(/giới hạn/)).toBeNull();
     await user.type(within(dialog).getByLabelText('Tên hiển thị'), 'Recruiter mới');
     await user.type(within(dialog).getByLabelText('Vai trò'), 'Sàng lọc ứng viên');
-    await user.type(within(dialog).getByLabelText('Giọng / persona'), 'Chuyên nghiệp');
+    await user.type(within(dialog).getByLabelText('Giọng điệu'), 'Chuyên nghiệp');
     await user.type(within(dialog).getByLabelText('Khi nào được nói'), 'Khi có hồ sơ mới');
     await user.click(within(dialog).getByRole('button', { name: 'Tạo agent' }));
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.url.endsWith('/agents'))).toBe(true));

@@ -21,7 +21,7 @@ from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gh import crypto, realtime
+from gh import crypto, notifications, realtime
 from gh.chassis import actionlog, policy
 from gh.chassis.bus import BRIDGE_OUTBOUND, EventBus
 from gh.data.common import iso
@@ -35,6 +35,32 @@ CHANNEL_LABELS = {"zalo": "Zalo", "whatsapp": "WhatsApp", "telegram": "Telegram"
 SENDABLE = {"message", "quotation", "contract"}
 PENDING, APPROVED, EDITED, REJECTED, SENT, FAILED = "pending", "approved", "edited", "rejected", "sent", "failed"
 DECIDED = (APPROVED, EDITED, REJECTED, SENT, FAILED)
+
+# Gửi lỗi (v0.1.61, F048): Sếp phải được báo (chuông + sự kiện `draft.failed`) bằng câu tiếng Việt theo mã; mã gốc
+# chỉ nằm ở "Chi tiết kỹ thuật". Mã lạ (bridge thêm mã mới) rơi về câu chung — không bao giờ để trống.
+realtime.register_event("draft.failed", "action.approve")
+SEND_ERROR_TEXT = {
+    "NO_TARGET": "Bản nháp chưa có nơi nhận (nhóm hoặc người nhận) nên chưa gửi được.",
+    "TARGET_NOT_FOUND": "Không tìm thấy nhóm hoặc tài khoản nhận trên nền tảng "
+                        "(có thể đã rời nhóm hoặc đổi tài khoản).",
+    "SESSION_NOT_ACTIVE": "Kênh chat đang ngắt kết nối nên tin chưa đi. Đăng nhập lại kênh rồi gửi lại.",
+    "PERMIT_EXPIRED": "Chưa nhận được xác nhận đã gửi từ kênh chat (kênh có thể vừa rớt mạng), "
+                      "tin có thể chưa tới người nhận. Kiểm tra trên ứng dụng chat rồi gửi lại.",
+    "PERMIT_INVALID": "Lệnh gửi không còn hợp lệ nên kênh chat không gửi. Hãy gửi lại.",
+    "PERMIT_MISMATCH": "Lệnh gửi không khớp nội dung hoặc nơi nhận nên kênh chat không gửi. Hãy gửi lại.",
+    "PERMIT_REUSED": "Lệnh gửi này đã được dùng một lần, kênh chat không gửi lại lần nữa để tránh trùng tin.",
+    "NONCE_CHECK_FAILED": "Hệ thống chưa kiểm tra được lệnh gửi nên kênh chat không gửi. Hãy gửi lại.",
+    "SEND_FAILED": "Nền tảng chat từ chối hoặc không gửi được tin này.",
+}
+SEND_ERROR_FALLBACK = "Tin chưa gửi được vì lỗi từ kênh chat."
+# F074 (Q8-1): duyệt "Ghi hệ thống ngoài" (mcp_write) chưa có bước thực thi ⇒ KHÔNG duyệt, KHÔNG đặt `sent`.
+MCP_WRITE_UNSUPPORTED = ("Chưa hỗ trợ thực thi tool ghi — đã giữ yêu cầu ở Bàn làm việc, hệ thống ngoài chưa bị "
+                         "gọi. Sếp có thể huỷ bản nháp này.")
+
+
+def send_error_message(code: str | None) -> str:
+    """Câu tiếng Việt cho mã lỗi gửi tin (`send_result.error`)."""
+    return SEND_ERROR_TEXT.get(code or "", SEND_ERROR_FALLBACK)
 
 
 class DraftError(Exception):
@@ -56,6 +82,30 @@ class Target:
         return {"channel": self.channel, "thread_type": self.thread_type,
                 "group_id": str(self.group_id) if self.group_id else None,
                 "person_id": str(self.person_id) if self.person_id else None}
+
+
+def reply_target(channel: str, *, group_id: uuid.UUID | None = None,
+                 person_id: uuid.UUID | None = None) -> Target:
+    """Đích trả lời một tin: có nhóm → gửi vào nhóm; không thì tin 1-1 gửi riêng cho người (F049).
+
+    Dùng chung cho người gác kênh (`gh.biz.duty.engine`) và Hộp thư (`gh.biz.queue.routes.act_inbox_item`)."""
+    if group_id is not None:
+        return Target(channel, "group", group_id=group_id)
+    return Target(channel, "user", person_id=person_id)
+
+
+async def person_reply_channel(db: AsyncSession, org_id: uuid.UUID, person_id: uuid.UUID,
+                               unit_id: uuid.UUID | None = None) -> str | None:
+    """Kênh để nhắn riêng `person_id`: kênh của chính tin gốc (đơn vị `unit_id`) nếu người đó có tài khoản ở kênh ấy,
+    không thì kênh người đó xuất hiện gần nhất. None = chưa biết kênh nào (không dựng được đích)."""
+    r = (await db.execute(text("""
+        SELECT c.type FROM core.person_identities pi JOIN core.channels c ON c.id = pi.channel_id
+        WHERE pi.person_id = :p AND c.org_id = :o
+        ORDER BY (c.id IN (SELECT e.channel_id FROM clean.evidence ev
+                           JOIN raw.events e ON e.id = ev.raw_event_id AND e.received_at = ev.raw_received_at
+                           WHERE ev.meaning_unit_id = :u)) DESC, pi.first_seen_at DESC
+        LIMIT 1"""), {"p": person_id, "o": org_id, "u": unit_id})).scalar_one_or_none()
+    return str(r) if r else None
 
 
 # ─── mức tự trị hiệu lực ──────────────────────────────────────────────────────
@@ -296,6 +346,24 @@ async def _dispatch_send(db: AsyncSession, bus: EventBus | None, r: Any, body_te
     return None
 
 
+async def report_send_failure(db: AsyncSession, redis: Redis | None, *, org_id: uuid.UUID, draft_id: uuid.UUID,
+                              code: str | None, title: str, draft_code: str,
+                              decided_by: uuid.UUID | None = None, created_by: uuid.UUID | None = None) -> None:
+    """Gửi lỗi (F048): chuông cho người duyệt, người soạn và mọi Owner + sự kiện WS `draft.failed` có câu tiếng Việt;
+    mã gốc (`error`) đi kèm để màn hiện "Chi tiết kỹ thuật". Không mang nội dung tin hay tên khách ra ngoài."""
+    message = send_error_message(code)
+    who = [u for u in (decided_by, created_by) if u is not None] + await notifications.owner_ids(db, org_id)
+    await notifications.notify(
+        db, org_id, who, kind="draft.failed", title=f"Tin chưa gửi được: {title}"[:160],
+        body=f"{message} Mở Bàn làm việc, thẻ Gửi lỗi để gửi lại.", link=f"/workbench?status=failed&id={draft_id}",
+        redis=redis)
+    if redis is not None:
+        await realtime.publish(redis, "draft.failed",
+                               {"id": str(draft_id), "code": draft_code, "title": title,
+                                "error": str(code)[:80] if code else None,
+                                "message": message}, org_id=org_id)
+
+
 async def expire_stale_permits(db: AsyncSession, redis: Redis | None = None) -> list[uuid.UUID]:
     """Giai đoạn 5.4 (chịu lỗi, spec M7): bridge rớt giữa chừng khi đang gửi (mất kết nối trước khi gửi lại
     `send.result` cho `on_send_result`) từng khiến bản nháp kẹt ở `approved`/`edited` MÃI MÃI — không rõ đã gửi
@@ -307,9 +375,9 @@ async def expire_stale_permits(db: AsyncSession, redis: Redis | None = None) -> 
         UPDATE biz.action_drafts SET status = :failed, send_result = CAST(:r AS jsonb), updated_at = now()
         WHERE status IN (:approved, :edited) AND permit_used_at IS NULL
           AND permit_expires_at IS NOT NULL AND permit_expires_at < now()
-        RETURNING id, org_id, code, title, autonomy_level"""),
+        RETURNING id, org_id, code, title, autonomy_level, decided_by, created_by"""),
         {"failed": FAILED, "approved": APPROVED, "edited": EDITED,
-         "r": orjson.dumps({"ok": False, "error": "PERMIT_EXPIRED",
+         "r": orjson.dumps({"ok": False, "error": "PERMIT_EXPIRED", "message": send_error_message("PERMIT_EXPIRED"),
                             "at": datetime.now(UTC).isoformat()}).decode()})).all()
     for row in rows:
         await actionlog.record(db, org_id=row.org_id, actor_type="system", actor_id="system:drafts",
@@ -319,7 +387,12 @@ async def expire_stale_permits(db: AsyncSession, redis: Redis | None = None) -> 
         if redis is not None:
             await realtime.publish(redis, "draft.updated",
                                    {"id": str(row.id), "status": FAILED,
-                                    "send_result": {"ok": False, "error": "PERMIT_EXPIRED"}}, org_id=row.org_id)
+                                    "send_result": {"ok": False, "error": "PERMIT_EXPIRED",
+                                                    "message": send_error_message("PERMIT_EXPIRED")}},
+                                   org_id=row.org_id)
+        await report_send_failure(db, redis, org_id=row.org_id, draft_id=row.id, code="PERMIT_EXPIRED",
+                                  title=row.title, draft_code=row.code, decided_by=row.decided_by,
+                                  created_by=row.created_by)
     return [row.id for row in rows]
 
 
@@ -331,13 +404,15 @@ async def on_send_result(db: AsyncSession, org_id: uuid.UUID, payload: dict[str,
     except ValueError:
         return
     ok = bool(payload.get("ok"))
-    result = {"ok": ok, "error": payload.get("error"), "external_msg_id": payload.get("external_msg_id"),
-              "at": datetime.now(UTC).isoformat()}
+    result: dict[str, Any] = {"ok": ok, "error": payload.get("error"),
+                              "external_msg_id": payload.get("external_msg_id"), "at": datetime.now(UTC).isoformat()}
+    if not ok:
+        result["message"] = send_error_message(result["error"])    # câu cho Sếp; mã gốc ở `error` (Chi tiết kỹ thuật)
     row = (await db.execute(text("""
         UPDATE biz.action_drafts SET status = :s, send_result = CAST(:r AS jsonb), permit_used_at = now(),
                sent_at = CASE WHEN :ok THEN now() END, updated_at = now()
         WHERE id = :i AND org_id = :o AND status IN ('approved', 'edited') AND permit_used_at IS NULL
-        RETURNING id, code, title, autonomy_level"""),
+        RETURNING id, code, title, autonomy_level, decided_by, created_by"""),
         {"s": SENT if ok else FAILED, "r": orjson.dumps(result).decode(), "ok": ok, "i": draft_id,
          "o": org_id})).one_or_none()
     if row is None:
@@ -349,6 +424,9 @@ async def on_send_result(db: AsyncSession, org_id: uuid.UUID, payload: dict[str,
     if redis is not None:
         await realtime.publish(redis, "draft.updated", {"id": str(row.id), "status": SENT if ok else FAILED,
                                                         "send_result": result}, org_id=org_id)
+    if not ok:
+        await report_send_failure(db, redis, org_id=org_id, draft_id=row.id, code=result["error"], title=row.title,
+                                  draft_code=row.code, decided_by=row.decided_by, created_by=row.created_by)
 
 
 # ─── quyết định ───────────────────────────────────────────────────────────────
@@ -367,6 +445,9 @@ async def decide(db: AsyncSession, *, draft_id: uuid.UUID, org_id: uuid.UUID, us
         raise DraftError(404, "NOT_FOUND", "Bản nháp không tồn tại")
     if r.status != PENDING:
         raise DraftError(409, "DRAFT_DECIDED", "Bản nháp này đã được quyết định")
+    if verdict != "reject" and r.kind == "mcp_write":
+        # Giữ nguyên `pending` (chưa ghi gì): chưa nối bước gọi tool ghi sau duyệt thì không được báo "đã thực hiện".
+        raise DraftError(409, "MCP_WRITE_UNSUPPORTED", MCP_WRITE_UNSUPPORTED)
     body = dict(r.body or {})
     if verdict == "reject":
         status = REJECTED
@@ -411,13 +492,17 @@ async def decide(db: AsyncSession, *, draft_id: uuid.UUID, org_id: uuid.UUID, us
             if failed is not None:
                 await db.execute(text("""UPDATE biz.action_drafts SET status = 'failed',
                                          send_result = CAST(:r AS jsonb), updated_at = now() WHERE id = :i"""),
-                                 {"r": orjson.dumps({**failed, "at": datetime.now(UTC).isoformat()}).decode(),
+                                 {"r": orjson.dumps({**failed, "message": send_error_message(failed["error"]),
+                                                     "at": datetime.now(UTC).isoformat()}).decode(),
                                   "i": draft_id})
                 await actionlog.record(db, org_id=org_id, actor_type="system", actor_id="system:drafts",
                                        action="draft.failed", target_type="draft", target_id=str(draft_id),
                                        target_label=label, autonomy_level=r.autonomy_level, result="failed",
                                        detail=failed)
                 status = FAILED
+                await report_send_failure(db, redis, org_id=org_id, draft_id=draft_id, code=failed["error"],
+                                          title=r.title or KIND_LABELS.get(r.kind, r.kind), draft_code=r.code,
+                                          decided_by=user_id, created_by=r.created_by)
         else:
             await _execute_internal(db, org_id, draft_id, r.action_key or KIND_ACTION[r.kind],
                                     r.title or body.get("text", ""), subject, user_id)

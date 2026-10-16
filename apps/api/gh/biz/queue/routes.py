@@ -213,7 +213,16 @@ async def act_inbox_item(item_id: uuid.UUID, request: Request, body: ActIn | Non
         ch = (await db.execute(text("SELECT type FROM core.channels WHERE id = (SELECT channel_id FROM core.groups "
                                     "WHERE id = :g)"), {"g": r.group_id})).scalar_one_or_none()
         if ch:
-            tgt = drafts.Target(channel=ch, thread_type="group", group_id=r.group_id)
+            tgt = drafts.reply_target(ch, group_id=r.group_id)
+    elif r.person_id:
+        # F049: tin 1-1 (không thuộc nhóm nào) trả riêng cho người đã nhắn, qua kênh của chính tin đó.
+        ch = await drafts.person_reply_channel(db, user.org_id, r.person_id, item_id)
+        if ch:
+            tgt = drafts.reply_target(ch, person_id=r.person_id)
+    if tgt is None:
+        raise ApiError(409, "NO_TARGET", "Chưa biết nên trả lời qua kênh nào",
+                       detail="Tin này không thuộc nhóm nào và người nhắn chưa có tài khoản trên kênh chat nào, "
+                              "nên chưa dựng được nơi gửi. Hãy trả lời trực tiếp trên ứng dụng chat.")
     label = qsvc.EVENT_LABELS.get(r.title, r.title)
     made = await drafts.create_draft(
         db, org_id=user.org_id, kind="message", title=f"Trả lời {label}",

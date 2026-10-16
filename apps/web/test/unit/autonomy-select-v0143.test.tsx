@@ -246,7 +246,7 @@ describe('Danh tính Agent — tạo mới', () => {
   const openCreate = async (user: ReturnType<typeof userEvent.setup>) => {
     await user.click(await screen.findByRole('button', { name: 'Tạo agent mới' }));
     const dlg = await screen.findByRole('dialog', { name: 'Tạo agent mới' });
-    for (const [label, v] of [['Tên hiển thị', 'Ghi chép'], ['Vai trò', 'Ghi lại'], ['Giọng / persona', 'Ngắn'], ['Khi nào được nói', 'Không bao giờ']]) {
+    for (const [label, v] of [['Tên hiển thị', 'Ghi chép'], ['Vai trò', 'Ghi lại'], ['Giọng điệu', 'Ngắn'], ['Khi nào được nói', 'Không bao giờ']]) {
       await user.type(within(dlg).getByLabelText(label), v);
     }
     return dlg;
