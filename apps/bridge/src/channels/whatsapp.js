@@ -9,7 +9,10 @@ import { RecentIds, errorCode, toIso, toPlain } from '../util.js';
 
 export const WA_FIRST_QR_TTL_MS = 60000; // Baileys: QR đầu sống 60 giây, các QR sau 20 giây
 export const WA_NEXT_QR_TTL_MS = 20000;
+// Phiên CHƯA từng hoạt động (ghép cặp xong mà không mở được socket) vẫn có trần; phiên đã lưu / đã từng hoạt động mất mạng
+// thì thử lại KHÔNG giới hạn (lùi tối đa 60 giây) — chỉ 401 (loggedOut) mới là bị từ chối thật, mất mạng KHÔNG được xoá phiên.
 const MAX_RECONNECTS = 10;
+export const WA_RETRY_NOTICE_AFTER = 2; // báo lõi "đang nối lại" sau chừng này lần hụt liên tiếp
 // Socket đóng TRƯỚC khi ra được mã QR nào (mất mạng/DNS, máy chủ WhatsApp từ chối đăng ký thiết bị: 405/428…):
 // thử lại có giãn cách rồi báo lỗi thật, không quay vòng vô hạn (bản cũ mở >40 socket/giây và UI kẹt "Đang tạo mã QR…").
 // 403 (DR.forbidden) KHÔNG nằm trong nhóm này: kết thúc ngay với FORBIDDEN (xem #onClose).
@@ -206,6 +209,8 @@ export class WhatsAppAdapter extends EventEmitter {
     this.lastQr = null; // { raw, expiresAt } của mã đang hiện (để dựng lại khi máy chủ yêu cầu làm mới)
     this.lastRefreshNode = null;
     this.reconnects = 0;
+    this.retrying = false; // đã báo lõi "mất mạng, đang nối lại"
+    this.everActive = false;
     this.cancelled = false;
     this.groupNames = new Map();
     this.names = new Map(); // jid → pushName (chỉ trong RAM, dùng cho danh bạ nhóm)
@@ -337,6 +342,7 @@ export class WhatsAppAdapter extends EventEmitter {
     }
     if (connection === 'open') {
       this.reconnects = 0;
+      this.everActive = true;
       const user = this.sock.user || this.auth.state.creds?.me || {};
       this.own = { jid: bareJid(user.id), lid: bareJid(user.lid), name: user.name || user.verifiedName || '' };
       if (this.state !== 'active') {
@@ -344,8 +350,16 @@ export class WhatsAppAdapter extends EventEmitter {
         const account = { id: this.own.jid, name: this.own.name };
         const phone = phoneOf(this.own.jid);
         if (phone) account.phone = phone;
+        this.retrying = false;
         this.emit('active', { account, credential: this.getCredential() });
         this.#settle('active');
+      } else if (this.retrying) {
+        // Đã báo lõi mất mạng ⇒ báo lại "đã nối" để lõi đổi trạng thái về Đang kết nối.
+        this.retrying = false;
+        const account = { id: this.own.jid, name: this.own.name };
+        const phone = phoneOf(this.own.jid);
+        if (phone) account.phone = phone;
+        this.emit('active', { account, credential: this.getCredential() });
       }
       return;
     }
@@ -358,7 +372,7 @@ export class WhatsAppAdapter extends EventEmitter {
     this.log.info('whatsapp: kết nối đóng', { code: code ?? null, qr_in_socket: this.qrInSocket });
     if (code === DR.loggedOut) {
       // 401: phiên đã lưu bị từ chối / bị đăng xuất; còn khi đang ghép cặp bằng QR là máy chủ từ chối chính lần ghép này.
-      const why = this.state === 'active' ? 'LOGGED_OUT_REMOTELY' : this.resuming ? 'CREDENTIAL_REJECTED' : 'PAIRING_REJECTED';
+      const why = this.state === 'active' || this.everActive ? 'LOGGED_OUT_REMOTELY' : this.resuming ? 'CREDENTIAL_REJECTED' : 'PAIRING_REJECTED';
       this.#end('expired', why);
       return;
     }
@@ -380,10 +394,14 @@ export class WhatsAppAdapter extends EventEmitter {
       return this.#schedule(0, gen);
     }
     this.reconnects += 1;
-    if (this.reconnects > MAX_RECONNECTS) {
-      return this.#end(this.resuming && this.state !== 'active' ? 'expired' : 'error', 'RECONNECT_FAILED');
+    if (!this.resuming && !this.everActive && this.reconnects > MAX_RECONNECTS) {
+      return this.#end('error', 'RECONNECT_FAILED');
     }
-    return this.#schedule(Math.min(60000, this.reconnectBaseMs * 2 ** (this.reconnects - 1)), gen);
+    if (this.reconnects >= WA_RETRY_NOTICE_AFTER && !this.retrying) {
+      this.retrying = true;
+      this.emit('retrying', { error: 'NETWORK_UNAVAILABLE' });
+    }
+    return this.#schedule(Math.min(60000, this.reconnectBaseMs * 2 ** Math.min(this.reconnects - 1, 10)), gen);
   }
 
   #schedule(delayMs, gen) {

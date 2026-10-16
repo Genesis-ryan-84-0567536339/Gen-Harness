@@ -1160,7 +1160,7 @@ export function createPhase2(opts: Phase2Options) {
         if (!need('system.manage') || !pin('channel.login')) return true;
         if (body.accept_risk !== true) return problem(422, 'VALIDATION_ERROR', 'Dữ liệu chưa hợp lệ', { errors: { accept_risk: 'Phải xác nhận rủi ro tài khoản cá nhân' } });
         if (c.type !== 'zalo' && c.type !== 'whatsapp') return problem(404, 'NOT_FOUND', 'Không tìm thấy Kênh');
-        if (!bridgeOnline) return problem(503, 'BRIDGE_OFFLINE', 'Bridge kênh chưa chạy — kiểm tra dịch vụ bridge rồi thử lại');
+        if (!bridgeOnline) return problem(503, 'BRIDGE_OFFLINE', 'Bộ nhận tin Zalo/WhatsApp đang tắt — thử lại sau ít phút; nếu vẫn lỗi, gửi Gói chẩn đoán cho người hỗ trợ');
         if (typeof body.account_label === 'string' && body.account_label.trim()) c.account_label = body.account_label.trim();
         const sessionId = randomUUID();
         qrSessions.set(sessionId, { type: c.type, refreshes: 0 });

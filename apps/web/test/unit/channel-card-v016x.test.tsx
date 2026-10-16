@@ -1,0 +1,205 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter } from 'react-router-dom';
+import type { Channel } from '@gen-harness/contracts';
+import { ChannelCard } from '../../src/screens/system/ChannelCard';
+import {
+  channelAction,
+  channelErrorText,
+  channelMeta,
+  channelSecondaryAction,
+  channelStatus,
+  qrHint,
+  qrRemaining,
+  type ChannelExtras,
+} from '../../src/screens/system/systemModel';
+import { PinDialogHost } from '../../src/shell/PinDialogHost';
+import { ToastHost } from '../../src/shell/ToastHost';
+import { queryClient } from '../../src/lib/queryClient';
+import { qk2, useChannels } from '../../src/lib/dataQueries';
+
+// Gói B4 (v0.1.62): kênh bền — nối lại bằng phiên đã lưu, "Mất liên lạc", QR đếm ngược theo expires_at, bỏ lời hứa "tự gửi lại".
+
+const json = (status: number, body?: unknown) =>
+  new Response(body === undefined ? null : JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+
+interface Call {
+  url: string;
+  method: string;
+}
+
+function mockFetch(handler: (c: Call) => Response | Promise<Response>) {
+  const calls: Call[] = [];
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const c = { url: String(url), method: init?.method ?? 'GET' };
+      calls.push(c);
+      return handler(c);
+    }),
+  );
+  return calls;
+}
+
+type View = Channel & ChannelExtras;
+const zalo = (over: Partial<View> = {}): View => ({
+  type: 'zalo', name: 'Zalo', installed: true, id: 'c1', state: 'active', account_label: 'iPhone của Sếp',
+  started_at: new Date(Date.now() - 3600_000).toISOString(), groups_listening: 3, outbound_queued: 0,
+  last_heartbeat_at: new Date().toISOString(), stats: null, qr: null, ...over,
+});
+
+function Card() {
+  const channels = useChannels();
+  const c = channels.data?.[0];
+  return c ? <ChannelCard channel={c} canManage /> : null;
+}
+
+function renderCard(c: View) {
+  queryClient.setQueryData(qk2.channels, [c]);
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter>
+        <Card />
+        <PinDialogHost />
+        <ToastHost />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
+beforeEach(() => {
+  queryClient.clear();
+  queryClient.setDefaultOptions({ queries: { retry: false, staleTime: Infinity } });
+  vi.unstubAllGlobals();
+});
+
+describe('F046: mất mạng không bắt quét lại QR', () => {
+  const lostNet = (over: Partial<View> = {}) => zalo({ state: 'error', error: 'NETWORK_UNAVAILABLE', resumable: true, ended_at: null, ...over });
+
+  it('phiên "Lỗi kết nối" còn credential: nút chính là Nối lại bằng phiên đã lưu, quét lại QR chỉ là nút phụ', () => {
+    const c = lostNet();
+    expect(channelAction(c)).toMatchObject({ action: 'resume', label: 'Nối lại bằng phiên đã lưu' });
+    expect(channelSecondaryAction(c)).toMatchObject({ action: 'rescan', label: 'Quét lại QR' });
+    // Không còn credential (đã bị từ chối thật) ⇒ chỉ còn quét lại QR như trước.
+    expect(channelAction(zalo({ state: 'error', resumable: false }))).toMatchObject({ action: 'rescan', label: 'Quét lại QR' });
+    expect(channelSecondaryAction(zalo({ state: 'error', resumable: false }))).toBeNull();
+    expect(channelAction(zalo({ state: 'expired' }))).toMatchObject({ action: 'rescan' });
+    // Máy chủ cũ không gửi `resumable` ⇒ hành vi cũ.
+    expect(channelAction(zalo({ state: 'error' }))).toMatchObject({ action: 'rescan' });
+  });
+
+  it('thẻ nói đúng nguyên nhân: mất mạng, đang tự nối lại, không cần quét QR', () => {
+    renderCard(lostNet());
+    expect(screen.getByText('Mất mạng — đang nối lại')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Nối lại bằng phiên đã lưu/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Quét lại QR/ })).toBeInTheDocument();
+    const fail = document.querySelector('.ch-fail') as HTMLElement;
+    expect(fail).toHaveTextContent(/không cần quét lại QR/);
+    expect(within(fail).getByText('Chi tiết kỹ thuật')).toBeInTheDocument();
+    expect(fail).not.toHaveTextContent(/hết hạn/);
+  });
+
+  it('bấm Nối lại gọi POST /channels/{type}/resume (không mở hộp cảnh báo rủi ro / QR)', async () => {
+    const user = userEvent.setup();
+    const calls = mockFetch((c) => (c.url.endsWith('/channels/zalo/resume') ? json(202, { session_id: 's1' }) : json(200, [])));
+    renderCard(lostNet());
+    await user.click(screen.getByRole('button', { name: /Nối lại bằng phiên đã lưu/ }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.url.endsWith('/channels/zalo/resume'))).toBe(true));
+    expect(screen.queryByRole('dialog', { name: 'Trước khi hiện mã QR' })).not.toBeInTheDocument();
+    expect(await screen.findByText(/Đang nối lại Zalo bằng phiên đã lưu/)).toBeInTheDocument();
+  });
+
+  it('Nối lại khi bộ nhận tin đang tắt: câu tiếng Việt thường + Chi tiết kỹ thuật, không chữ "Bridge"', async () => {
+    const user = userEvent.setup();
+    mockFetch((c) =>
+      c.url.endsWith('/channels/zalo/resume')
+        ? json(503, { status: 503, code: 'BRIDGE_OFFLINE', title: 'Bộ nhận tin Zalo/WhatsApp đang tắt — thử lại sau ít phút' })
+        : json(200, []),
+    );
+    renderCard(lostNet());
+    await user.click(screen.getByRole('button', { name: /Nối lại bằng phiên đã lưu/ }));
+    await screen.findByText(/Bộ nhận tin Zalo\/WhatsApp đang tắt/);
+    const alert = document.querySelector('.ch-alert') as HTMLElement;
+    expect(alert).toHaveTextContent('Bộ nhận tin Zalo/WhatsApp đang tắt');
+    expect(alert.querySelector('.ch-alert__title')?.textContent).not.toMatch(/bridge/i);
+    expect(alert.querySelector('.ch-alert__text')?.textContent).not.toMatch(/bridge/i);
+    expect(within(alert).getByText('Chi tiết kỹ thuật')).toBeInTheDocument();
+    expect(alert).toHaveTextContent('BRIDGE_OFFLINE');
+  });
+
+  it('câu lỗi: mất mạng / bị mở nơi khác (nối lại được) / bị từ chối thật', () => {
+    expect(channelErrorText('NETWORK_UNAVAILABLE', 'Zalo', 'zalo')).toMatch(/không cần quét lại QR/);
+    expect(channelErrorText('CONNECTION_REPLACED', 'Zalo', 'zalo', true)).toMatch(/Nối lại bằng phiên đã lưu/);
+    expect(channelErrorText('CONNECTION_REPLACED', 'Zalo', 'zalo', false)).toMatch(/Quét lại QR/);
+    expect(channelErrorText('CREDENTIAL_REJECTED', 'Zalo', 'zalo')).toMatch(/không còn dùng được/);
+    for (const code of ['NETWORK_UNAVAILABLE', 'WA_NETWORK', 'CHANNEL_UNAVAILABLE', 'BRIDGE_KEY_MISSING', 'RECONNECT_FAILED']) {
+      expect(channelErrorText(code, 'WhatsApp', 'whatsapp')).not.toMatch(/bridge/i);
+    }
+  });
+});
+
+describe('F051 (phần thẻ): bộ nhận tin mất nhịp tim ⇒ "Mất liên lạc"', () => {
+  it('còn phiên "Đang kết nối" nhưng bridge_online=false ⇒ Mất liên lạc + cảnh báo, pill không còn báo Đang chạy', () => {
+    const c = zalo({ bridge_online: false });
+    expect(channelStatus(c).label).toBe('Mất liên lạc');
+    renderCard(c);
+    expect(screen.getByText('Mất liên lạc')).toBeInTheDocument();
+    expect(screen.queryByText('Đang kết nối')).not.toBeInTheDocument();
+    const alert = screen.getByTestId('lost-zalo');
+    expect(alert).toHaveTextContent('Mất liên lạc với bộ nhận tin Zalo/WhatsApp');
+    expect(alert).toHaveTextContent('Gói chẩn đoán');
+    expect(screen.queryByText('Đang chạy')).not.toBeInTheDocument();
+  });
+
+  it('bridge_online=true hoặc máy chủ cũ không gửi trường này ⇒ như trước', () => {
+    expect(channelStatus(zalo({ bridge_online: true })).label).toBe('Đang kết nối');
+    expect(channelStatus(zalo()).label).toBe('Đang kết nối');
+    expect(channelStatus(zalo({ state: 'logged_out', bridge_online: false })).label).toBe('Chưa đăng nhập');
+    renderCard(zalo({ bridge_online: true }));
+    expect(screen.queryByTestId('lost-zalo')).not.toBeInTheDocument();
+  });
+});
+
+describe('F063: mã QR đếm ngược theo expires_at', () => {
+  it('Zalo sống 100 giây: đếm ngược không bị cắt ở 60, thanh theo 100 giây, câu hướng dẫn không hứa "60 giây"', () => {
+    const now = Date.parse('2026-10-16T03:00:00Z');
+    const q = qrRemaining('2026-10-16T03:01:30Z', now, 100_000);
+    expect(q.label).toBe('90 giây');
+    expect(Math.round(q.pct)).toBe(90);
+    expect(qrHint({ type: 'zalo' })).not.toMatch(/60 giây/);
+    expect(qrHint({ type: 'zalo' })).toMatch(/thanh đếm ngược/);
+  });
+
+  it('thẻ Zalo đang chờ quét hiện đúng số giây còn lại (~95) chứ không phải tối đa 60', () => {
+    renderCard(
+      zalo({
+        state: 'pending_qr',
+        qr: { session_id: 's1', image: 'data:image/png;base64,AA', expires_at: new Date(Date.now() + 95_000).toISOString(), scanned: false },
+      }),
+    );
+    const block = screen.getByTestId('qr-zalo');
+    expect(block.querySelector('.qr-count__val')?.textContent).toMatch(/^9[45] giây$/);
+    expect(block).not.toHaveTextContent(/mỗi 60 giây/);
+  });
+});
+
+describe('F069: không hứa tự gửi lại khi phiên nối lại', () => {
+  it('thẻ lỗi không còn "tin trong hàng đợi gửi"; hướng dẫn QR không hứa tự gửi', () => {
+    const m = channelMeta(zalo({ state: 'error', outbound_queued: 4, resumable: true }));
+    expect(`${m.before}${m.groups}${m.after}`).not.toMatch(/hàng đợi/);
+    for (const type of ['zalo', 'whatsapp'] as const) {
+      expect(qrHint({ type, outbound_queued: 4 })).not.toMatch(/tự gửi|hàng đợi/);
+    }
+  });
+
+  it('hộp xác nhận Đăng xuất không còn nói tin gửi đi được giữ lại', async () => {
+    const user = userEvent.setup();
+    renderCard(zalo({ outbound_queued: 2 }));
+    await user.click(screen.getByRole('button', { name: /Đăng xuất/ }));
+    const dlg = await screen.findByRole('dialog', { name: /Đăng xuất Zalo/ });
+    expect(dlg).not.toHaveTextContent(/hàng đợi được giữ/);
+    expect(dlg).not.toHaveTextContent(/Bridge/);
+  });
+});

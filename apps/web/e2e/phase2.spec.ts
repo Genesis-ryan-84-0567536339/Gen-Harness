@@ -236,7 +236,7 @@ test.describe('Kết nối › kênh & đăng nhập', () => {
     const risk = page.getByRole('dialog', { name: 'Trước khi hiện mã QR' });
     await risk.getByRole('checkbox').check();
     await risk.getByRole('button', { name: /Tôi hiểu, hiện mã QR/ }).click();
-    await expect(wa.getByRole('alert')).toContainText('Bridge kênh đang tắt');
+    await expect(wa.getByRole('alert')).toContainText('Bộ nhận tin Zalo/WhatsApp đang tắt');
   });
 
   test('groups dialog edits listen mode; 1-1 listening is PIN-gated', async ({ page }) => {

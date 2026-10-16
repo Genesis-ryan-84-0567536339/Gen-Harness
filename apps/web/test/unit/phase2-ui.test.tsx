@@ -106,7 +106,7 @@ describe('channel login: risk warning before the QR', () => {
     const user = userEvent.setup();
     mockFetch((c) =>
       c.url.endsWith('/channels/zalo/login')
-        ? json(503, { status: 503, code: 'BRIDGE_OFFLINE', title: 'Bridge kênh chưa chạy — kiểm tra dịch vụ bridge rồi thử lại' })
+        ? json(503, { status: 503, code: 'BRIDGE_OFFLINE', title: 'Bộ nhận tin Zalo/WhatsApp đang tắt — thử lại sau ít phút; nếu vẫn lỗi, gửi Gói chẩn đoán cho người hỗ trợ' })
         : json(200, {}),
     );
     renderCard(zalo());
@@ -115,8 +115,9 @@ describe('channel login: risk warning before the QR', () => {
     await user.click(within(dialog).getByRole('checkbox'));
     await user.click(within(dialog).getByRole('button', { name: /Tôi hiểu, hiện mã QR/ }));
     const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent('Bridge kênh đang tắt — chưa tạo được mã QR');
-    expect(alert).toHaveTextContent('kiểm tra dịch vụ bridge');
+    expect(alert).toHaveTextContent('Bộ nhận tin Zalo/WhatsApp đang tắt — chưa tạo được mã QR');
+    expect(alert).toHaveTextContent('gửi Gói chẩn đoán');
+    expect(alert).toHaveTextContent('Chi tiết kỹ thuật');
     expect(within(alert).getByRole('button', { name: /Thử lại/ })).toBeInTheDocument();
     expect(screen.queryByTestId('qr-zalo')).not.toBeInTheDocument();
   });
