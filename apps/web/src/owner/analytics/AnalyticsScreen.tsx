@@ -392,7 +392,7 @@ const COLUMNS: readonly DataColumn<TableRow>[] = [
   { key: 'label', label: 'Chỉ số', priority: 1 },
   { key: 'cur', label: 'Kỳ này', align: 'right', priority: 1 },
   { key: 'prev', label: 'Kỳ trước', align: 'right', priority: 2 },
-  { key: 'delta', label: 'Thay đổi', align: 'right', priority: 1, render: (r) => r.delta },
+  { key: 'delta', label: 'Thay đổi', align: 'right', priority: 1, action: true, render: (r) => r.delta },
 ];
 
 // ── màn ─────────────────────────────────────────────────────────────────────────────────────────────────────────────

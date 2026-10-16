@@ -216,7 +216,7 @@ export function TodayTasks({ data, kicker, tz = DEFAULT_TZ, className }: { data:
                 </span>
                 <span className="work-task__actions">
                   {it.kind === 'task' ? (
-                    <button type="button" className="kit-btn kit-btn--ghost work-btn" disabled={pending} data-testid="work-task-postpone" onClick={() => postpone.mutate({ id: it.id })}>
+                    <button type="button" className="kit-link work-link" disabled={pending} data-testid="work-task-postpone" onClick={() => postpone.mutate({ id: it.id })}>
                       Dời sang mai
                     </button>
                   ) : null}

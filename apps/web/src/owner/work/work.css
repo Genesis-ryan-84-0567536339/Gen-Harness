@@ -24,7 +24,7 @@
 .work-draft__title { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); font-weight: var(--fw-600); overflow-wrap: anywhere; }
 .work-draft__meta { font-size: var(--fs-12); line-height: var(--lh-12); color: var(--text-3); overflow-wrap: anywhere; }
 .work-draft__quote {
-  margin: 0; padding: 0 0 0 var(--sp-3); border-left: 2px solid var(--border-strong); color: var(--text); white-space: pre-line;
+  margin: 0; padding: 0 var(--sp-2) 0 var(--sp-3); border-left: 2px solid var(--border-strong); color: var(--text); white-space: pre-line;
   overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
 }
 .work-draft__hold {
@@ -43,7 +43,7 @@
 .work-task__title { font-weight: var(--fw-600); overflow-wrap: anywhere; }
 .work-task__meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); font-size: var(--fs-12); line-height: var(--lh-12); color: var(--text-3); }
 .work-task__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-3); }
-.work-task__actions .kit-btn { padding: 0; }
+.work-task__actions .kit-link:disabled { opacity: 0.55; cursor: default; }
 
 /* Ô tick "Xong": vùng chạm 44px, ô vẽ 24px ở giữa. */
 .work-check {
@@ -67,3 +67,15 @@
 .work-suggest__row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); padding: var(--sp-3) var(--kit-pad); }
 .work-suggest__text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--sp-1); }
 .work-suggest__done { flex: none; font-size: var(--fs-14); line-height: var(--lh-14); font-weight: var(--fw-600); color: var(--ok-ink); }
+
+/* Tên đề xuất của Gen: cùng cỡ với tên nháp (14px) — khối ProposalDecide mặc định dùng 18px cho tiêu đề ngăn. */
+.work-proposal .owner-act__title { font-size: var(--fs-14); line-height: var(--lh-14); }
+
+/* Điện thoại: chọn mục bằng Segmented (Console) — số đo Mặt tiền, vùng chạm ≥ 44px, ba mục vừa một hàng. */
+.work .gh-seg { gap: var(--sp-1); padding: var(--sp-1); border-color: var(--border); border-radius: var(--r-8); background: var(--surface); }
+.work .gh-seg__opt {
+  height: auto; min-height: var(--tap); padding: 0 var(--sp-2); border-radius: var(--r-8);
+  font-size: var(--fs-14); line-height: var(--lh-14); color: var(--text-2);
+}
+.work .gh-seg__opt:hover { color: var(--text); }
+.work .gh-seg__opt[aria-checked='true'] { background: var(--accent-soft); color: var(--accent-ink); font-weight: var(--fw-600); }
