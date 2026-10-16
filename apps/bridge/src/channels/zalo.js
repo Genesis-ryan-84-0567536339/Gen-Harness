@@ -7,6 +7,7 @@ import { RecentIds, errorCode, toIso, toPlain } from '../util.js';
 
 export const ZALO_QR_TTL_MS = 100000; // zca-js tự hết hạn QR sau 100 giây
 export const ZALO_RETRY_MAX_MS = 60000; // lùi tối đa 60 giây giữa hai lần thử nối lại
+export const ZALO_UNKNOWN_RETRY_MAX = 5; // lỗi LẠ (không phải mạng, không phải bị từ chối) liên tiếp quá chừng này lần ⇒ dừng, báo lỗi
 export const ZALO_RETRY_NOTICE_AFTER = 2; // báo lõi "đang nối lại" sau chừng này lần hụt liên tiếp (một lần hụt lẻ không đáng báo)
 
 // Nền tảng TỪ CHỐI phiên đã lưu (hết hạn / đăng xuất / cookie sai) — khác lỗi mạng tạm. zca-js ném ZaloApiError
@@ -19,6 +20,19 @@ export function isCredentialRejected(err) {
   const status = Number(err?.status ?? err?.statusCode ?? err?.response?.status ?? err?.code);
   if (status === 401) return true;
   return REJECTED_RE.test(String(err?.message || ''));
+}
+
+// Lỗi mạng/máy chủ tạm thời đã biết ⇒ thử lại mãi (có lùi dần). Lỗi KHÔNG khớp (lỗi mã, dữ liệu lạ…) là "lạ": chỉ thử
+// vài lần rồi dừng với RECONNECT_FAILED để Sếp thấy thẻ 'Lỗi kết nối' thay vì bridge lặng lẽ thử mỗi 60 giây mãi.
+const NETWORK_RE = /ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ECONNABORTED|ETIMEDOUT|ENETUNREACH|EHOSTUNREACH|ENETDOWN|EPIPE|certificate|time(d)?[ -]?out|socket hang up|fetch failed|network|Service Unavailable|Bad Gateway|Gateway Time|Too Many Requests|WebSocket (was )?closed/i;
+
+/** 'rejected' = nền tảng từ chối phiên · 'network' = lỗi mạng/máy chủ tạm (thử mãi) · 'unknown' = không phân loại được (thử có giới hạn). */
+export function classifyLoginError(err) {
+  if (isCredentialRejected(err)) return 'rejected';
+  const status = Number(err?.status ?? err?.statusCode ?? err?.response?.status);
+  if (status === 429 || status >= 500) return 'network';
+  if (NETWORK_RE.test(`${err?.code || ''} ${err?.message || ''}`)) return 'network';
+  return 'unknown';
 }
 
 export async function loadZaloLib() {
@@ -52,7 +66,7 @@ export class ZaloAdapter extends EventEmitter {
 
   constructor({
     lib, sessionId, logger = silentLogger, qrMax = 5, now = Date.now, reconnectDelayMs = 5000,
-    retryMaxMs = ZALO_RETRY_MAX_MS, retryNoticeAfter = ZALO_RETRY_NOTICE_AFTER,
+    retryMaxMs = ZALO_RETRY_MAX_MS, retryNoticeAfter = ZALO_RETRY_NOTICE_AFTER, unknownRetryMax = ZALO_UNKNOWN_RETRY_MAX,
   } = {}) {
     super();
     this.lib = lib;
@@ -63,6 +77,7 @@ export class ZaloAdapter extends EventEmitter {
     this.reconnectDelayMs = reconnectDelayMs;
     this.retryMaxMs = retryMaxMs;
     this.retryNoticeAfter = retryNoticeAfter;
+    this.unknownRetryMax = unknownRetryMax;
     this.retrying = false; // đã báo lõi "mất mạng, đang nối lại"
     this.wake = null;
     this.account = null;
@@ -110,18 +125,27 @@ export class ZaloAdapter extends EventEmitter {
 
   /**
    * Nối lại bằng phiên đã lưu. CHỈ khi nền tảng từ chối thật (401 / đăng xuất) mới `expired` (lõi xoá phiên);
-   * mọi lỗi khác (mạng, DNS, timeout, máy chủ 5xx) → lùi dần (5s, 10s… tối đa 60s) và thử lại KHÔNG giới hạn,
-   * giữ nguyên phiên. Trả api khi xong, null khi đã kết thúc/bị huỷ.
+   * lỗi mạng (DNS, timeout, máy chủ 5xx) → lùi dần (5s, 10s… tối đa 60s) và thử lại KHÔNG giới hạn, giữ nguyên phiên.
+   * Lỗi LẠ (không khớp mạng/từ chối) liên tiếp quá `unknownRetryMax` lần → dừng, `session.ended` error RECONNECT_FAILED
+   * (giữ credential để Sếp bấm "Nối lại"). Trả api khi xong, null khi đã kết thúc/bị huỷ.
    */
   async #loginWithRetry(credential) {
+    let unknown = 0;
     for (let attempt = 1; ; attempt += 1) {
       try {
         return await this.zalo.login(credential);
       } catch (err) {
         if (this.cancelled) return null;
-        if (isCredentialRejected(err)) {
+        const kind = classifyLoginError(err);
+        if (kind === 'rejected') {
           this.log.warn('zalo: phiên đã lưu bị từ chối', { error: errorCode(err) });
           this.#end('expired', 'CREDENTIAL_REJECTED');
+          return null;
+        }
+        unknown = kind === 'unknown' ? unknown + 1 : 0;
+        if (unknown >= this.unknownRetryMax) {
+          this.log.warn('zalo: lỗi lạ lặp lại, dừng nối lại', { error: errorCode(err), attempt });
+          this.#end('error', 'RECONNECT_FAILED');
           return null;
         }
         this.log.warn('zalo: chưa nối lại được (mạng?), sẽ thử lại', { error: errorCode(err), attempt });

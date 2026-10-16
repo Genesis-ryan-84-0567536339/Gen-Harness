@@ -141,6 +141,25 @@ export function channelSecondaryAction(c: Pick<Channel, 'type' | 'state' | 'resu
   return c.state === 'error' && c.resumable ? { action: 'rescan', label: 'Quét lại QR', icon: 'ph ph-qr-code' } : null;
 }
 
+/**
+ * Gói K (P1-1): phiên "Lỗi kết nối" còn giữ phiên đã lưu — Sếp phải có đường ĐĂNG XUẤT (xoá phiên đã lưu, bridge khởi động
+ * lại không tự nối), không chỉ Nối lại/Quét lại. Hiện như nút phụ; trạng thái khác đã có nút chính hoặc không có phiên để xoá.
+ */
+export function channelLogoutAction(c: Pick<Channel, 'state'>): { label: string; icon: string } | null {
+  return c.state === 'error' ? { label: 'Đăng xuất', icon: 'ph ph-sign-out' } : null;
+}
+
+/** Phiên bị ngắt vì tài khoản mở ở nơi khác: nối lại sẽ đá nơi đó ra ⇒ phải hỏi lại Sếp trước khi gửi lệnh nối. */
+export function channelResumeNeedsConfirm(c: Pick<Channel, 'state' | 'error'>): boolean {
+  return c.state === 'error' && c.error === 'CONNECTION_REPLACED';
+}
+
+/** Câu hỏi xác nhận nối lại khi phiên bị mở nơi khác (Zalo Web / WhatsApp Web trên máy tính…). */
+export function channelResumeConfirmText(c: Pick<Channel, 'type' | 'name'>): string {
+  const web = c.type === 'whatsapp' ? 'WhatsApp Web' : c.type === 'zalo' ? 'Zalo Web' : `${c.name} ở nơi khác`;
+  return `${c.name} đang được mở ở một nơi khác (ví dụ ${web} trên máy tính). Nối lại bây giờ sẽ ngắt nơi đó — Sếp đang dùng thì sẽ bị đăng xuất ở đó. Sếp vẫn muốn nối lại?`;
+}
+
 export interface StatCell {
   label: string;
   value: string;

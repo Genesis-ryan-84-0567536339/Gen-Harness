@@ -317,12 +317,15 @@ async def handle_status(db: AsyncSession, redis: Redis, bus: EventBus, org_id: u
         # v0.1.62 (F046): nối lại cả phiên 'error' còn credential (mất mạng
         # / bị mở nơi khác), không chỉ 'active' — miễn là
         # chưa có phiên nào MỚI hơn của kênh (không "sống lại" phiên cũ sau khi Sếp đã quét QR mới hoặc đăng xuất).
+        # Gói K (P1-1): phiên bị ngắt vì tài khoản mở ở nơi khác (CONNECTION_REPLACED) KHÔNG tự nối lại khi bridge
+        # khởi động — đăng nhập lại sẽ đá Zalo Web/WhatsApp Web của Sếp; chỉ nối khi Sếp bấm "Nối lại".
         rows = (await db.execute(text("""
             SELECT s.id, s.credential_enc, c.type
             FROM core.channel_sessions s JOIN core.channels c ON c.id = s.channel_id
             WHERE c.org_id = :o AND s.credential_enc IS NOT NULL AND (
                 (s.state = 'active' AND s.ended_at IS NULL)
-                OR (s.state = 'error' AND NOT EXISTS (
+                OR (s.state = 'error' AND COALESCE(s.meta->>'error', '') <> 'CONNECTION_REPLACED'
+                    AND NOT EXISTS (
                     SELECT 1 FROM core.channel_sessions n WHERE n.channel_id = s.channel_id AND n.id <> s.id
                       AND COALESCE(n.started_at, n.qr_issued_at) > COALESCE(s.started_at, s.qr_issued_at))))"""),
             {"o": org_id})).all()
