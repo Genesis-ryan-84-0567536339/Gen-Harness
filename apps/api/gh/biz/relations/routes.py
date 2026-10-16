@@ -239,10 +239,11 @@ def _people_filter(f: PeopleFilter, *, owner: bool) -> tuple[str, dict[str, Any]
         conds.append("CAST(:chan AS text) = ANY(channels)")
         params["chan"] = f.channel
     if f.q and f.q.strip():
-        # Tên có dãy số dài bị che với vai dưới Owner (khoá cứng 8) ⇒ vai đó không được tìm theo tên bằng ≥ 4 chữ
-        # số, nếu không dò dần từng chữ số sẽ lộ số đã che. Tìm theo mã người vẫn dùng được.
-        digits = len(re.sub(r"\D", "", f.q))
-        by_name = "name ILIKE :q ESCAPE '\\'" if owner or digits < 4 else "FALSE"
+        # Tên có dãy số dài bị che với vai dưới Owner (khoá cứng 8) nhưng mask_text vẫn để lộ 3 số cuối ⇒ vai đó
+        # không được tìm theo tên khi q có BẤT KỲ chữ số nào (dò từng cửa sổ 1–3 số sẽ dựng lại được số đã che).
+        # Tìm theo mã người vẫn dùng được.
+        has_digit = any(c.isdigit() for c in f.q)
+        by_name = "name ILIKE :q ESCAPE '\\'" if owner or not has_digit else "FALSE"
         conds.append(f"({by_name} OR code ILIKE :q ESCAPE '\\')")
         params["q"] = _like_pattern(f.q)
     return " AND ".join(conds), params
