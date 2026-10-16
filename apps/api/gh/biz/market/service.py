@@ -91,7 +91,7 @@ def parse_needed_by(value: Any) -> date | None:
         return None
 
 
-def _num(value: Any) -> float | None:
+def num_or_none(value: Any) -> float | None:
     if value is None:
         return None
     try:
@@ -100,33 +100,68 @@ def _num(value: Any) -> float | None:
         return None
 
 
-def signal_from_entities(entities: dict[str, Any] | None, conclusion: str) -> dict[str, Any]:
+def signal_from_entities(entities: dict[str, Any] | None, conclusion: str) -> dict[str, Any] | None:
     """Suy `item/category/quantity/unit/value_vnd/location` từ `entities` của một đơn vị ý nghĩa cho
-    `biz.market_signals` — dùng ở cả hook ghi tín hiệu và khi build ngữ cảnh chấm điểm."""
+    `biz.market_signals` — dùng ở hook ghi tín hiệu.
+
+    Trả `None` khi thiếu cả `entities.product` lẫn `entities.category`: câu kết luận (`conclusion`) là cả một câu
+    ("Khách cần mua xi măng giao tại Hà Nội"), không phải tên hàng — đem so từ với một câu khác sẽ ghép bừa vì trùng
+    những từ chung ("cần", "giao", "tại"). Không có tên hàng thì không có căn cứ ghép Cung ↔ Cầu, nên không tạo
+    tín hiệu (`conclusion` chỉ còn dùng cho lời kể của cơ hội, không bao giờ làm `item`).
+    """
     e = entities or {}
-    item = (e.get("product") or "").strip() or (conclusion or "")[:200]
-    return {"item": item[:300], "category": (e.get("category") or None), "quantity": _num(e.get("qty")),
-            "unit": e.get("unit"), "value_vnd": _num(e.get("budget_vnd")), "location": e.get("place"),
+    product = str(e.get("product") or "").strip()
+    category = str(e.get("category") or "").strip()
+    item = product or category
+    if not item:
+        return None
+    return {"item": item[:300], "category": category or None, "quantity": num_or_none(e.get("qty")),
+            "unit": e.get("unit"), "value_vnd": num_or_none(e.get("budget_vnd")), "location": e.get("place"),
             "needed_by": parse_needed_by(e.get("deadline"))}
 
 
+# Từ không mang tên hàng: từ chức năng, động từ giao dịch, giới từ/địa danh chung, đơn vị/quy cách đóng gói.
+# So khớp "cùng mặt hàng" chỉ tính trên các từ còn lại (danh từ hàng hoá + quy cách như "PCB40").
+_STOPWORDS = frozenset("""
+và hoặc hay với cho của là có không còn đang đã sẽ được bị này đó kia các những một mấy nhiều ít cả mọi
+tôi em anh chị bạn mình ta họ khách bên nhà máy công ty cửa hàng shop
+cần muốn tìm kiếm mua bán chào nhận đặt lấy xin hỏi báo giá giao nhập xuất tồn hàng sản phẩm loại dạng kiểu
+tại ở từ đến tới về trong ngoài trên dưới theo như khi lúc để vì nên thì mà nhé ạ ơi nha nhỉ
+giá rẻ tốt mới cũ sẵn gấp ngay liên hệ inbox
+container cont xe tấn tan kg kgs cái chiếc thùng bao kiện lô pallet pcs m2 m3 mét
+""".split())
+_NUMERIC = re.compile(r"^[\d.,]+$")
+
+
 def _norm_words(text_: str | None) -> set[str]:
+    """Các từ mang tên hàng của một văn bản: chữ thường, bỏ từ ngắn (< 2 ký tự), số thuần, stopword."""
     if not text_:
         return set()
-    return {w for w in re.split(r"[^\w]+", text_.casefold(), flags=re.UNICODE) if len(w) >= 2}
+    return {w for w in re.split(r"[^\w]+", text_.casefold(), flags=re.UNICODE)
+            if len(w) >= 2 and not _NUMERIC.match(w) and w not in _STOPWORDS}
+
+
+def _same_item(a: set[str], b: set[str]) -> bool:
+    """Cùng mặt hàng khi tên này bao trọn tên kia ("thép cuộn" ⊂ "thép cuộn cao cấp") hoặc chung từ ≥ 2 từ mang tên
+    hàng ("xi măng PCB40" ~ "xi măng PCB30"). Chung đúng một từ (thường là danh từ chung "thép" của hai hàng khác
+    nhau như "thép cuộn" × "thép tấm") KHÔNG đủ."""
+    if not a or not b:
+        return False
+    common = a & b
+    return bool(common) and (common == a or common == b or len(common) >= 2)
 
 
 def score_match(demand: dict[str, Any], supply: dict[str, Any]) -> tuple[float, list[str]]:
     """Chấm điểm ghép một tín hiệu cầu với một tín hiệu cung, 0–100, kèm lý do có thể kiểm chứng lại bằng tay
     (mỗi lý do ghi rõ số điểm đã cộng). Hàm thuần (không đọc CSDL) nên test được trực tiếp.
 
-    Cổng bắt buộc: không cùng mặt hàng (theo từ khoá chung) và không cùng ngành hàng → điểm 0, không tạo gợi ý
-    (tránh ghép bừa — spec E3 "tránh tiếp cận bừa"). Sau đó cộng thêm theo số lượng, ngân sách, khu vực.
+    Cổng bắt buộc: không cùng mặt hàng (theo danh từ hàng hoá chung, đã bỏ từ chức năng/động từ giao dịch) và
+    không cùng ngành hàng → điểm 0, không tạo gợi ý (tránh ghép bừa — spec E3 "tránh tiếp cận bừa"). Sau đó cộng
+    thêm theo số lượng, ngân sách, khu vực.
     """
     reasons: list[str] = []
     score = 0.0
-    d_words, s_words = _norm_words(demand.get("item")), _norm_words(supply.get("item"))
-    item_match = bool(d_words & s_words)
+    item_match = _same_item(_norm_words(demand.get("item")), _norm_words(supply.get("item")))
     cat_match = bool(demand.get("category")) and demand.get("category") == supply.get("category")
     if item_match:
         score += 50
