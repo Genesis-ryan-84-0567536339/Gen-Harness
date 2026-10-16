@@ -22,7 +22,7 @@ import uuid
 from typing import Any, Literal
 
 import orjson
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,6 +37,7 @@ from gh.data.common import iso
 from gh.db import DB
 from gh.defaults import profiles
 from gh.errors import conflict, field_errors, not_found, pin_required
+from gh.gen.coach import cache as coach_cache
 from gh.providers import catalog
 from gh.providers.router import AGY_OWNER_ONLY_REASON
 
@@ -231,8 +232,8 @@ def _check_effort(kind: str, model_name: str, effort: str | None) -> None:
 
 
 @router.put("/bindings/{agent_key}")
-async def set_binding(agent_key: str, body: BindingIn, user: service.CurrentUser = Depends(MANAGE),
-                      db: AsyncSession = DB) -> dict[str, Any]:
+async def set_binding(agent_key: str, body: BindingIn, request: Request,
+                      user: service.CurrentUser = Depends(MANAGE), db: AsyncSession = DB) -> dict[str, Any]:
     label = await _agent_key_label(db, user.org_id, agent_key)
     m = (await db.execute(text("""SELECT m.id, m.model_name, p.kind FROM agent.models m
                                   JOIN agent.providers p ON p.id = m.provider_id
@@ -258,12 +259,13 @@ async def set_binding(agent_key: str, body: BindingIn, user: service.CurrentUser
                b.context_tokens, b.rule_codes, b.effort
         FROM agent.bindings b JOIN agent.models m ON m.id = b.model_id JOIN agent.providers p ON p.id = m.provider_id
         WHERE b.org_id = :o AND b.agent_key = :k"""), {"o": user.org_id, "k": agent_key})).one()
+    await coach_cache.commit_and_invalidate(db, request.app.state.redis, user.org_id)   # v0.1.59: thẻ đọc lại ngay
     return {"agent_key": agent_key, "label": label, "binding": _binding_out(r, agent_key), "source": "custom",
             "standard": None}
 
 
 @router.delete("/bindings/{agent_key}", status_code=204)
-async def delete_binding(agent_key: str, user: service.CurrentUser = Depends(MANAGE),
+async def delete_binding(agent_key: str, request: Request, user: service.CurrentUser = Depends(MANAGE),
                          db: AsyncSession = DB) -> Response:
     # F-25: khoá lõi đã bỏ (core.intent/scoring/indexing) → 422 như PUT; hàng cũ do migration 0028 dọn.
     # agent:<id> không tra agent.identities ở đây — gỡ được gán model của agent đã xoá.
@@ -275,6 +277,7 @@ async def delete_binding(agent_key: str, user: service.CurrentUser = Depends(MAN
         raise not_found("Gán model")
     await actionlog.record(db, org_id=user.org_id, actor_type="user", actor_id=user.actor_id, action="agent.unbound",
                            target_type="binding", target_id=agent_key, ip=user.ip)
+    await coach_cache.commit_and_invalidate(db, request.app.state.redis, user.org_id)   # v0.1.59: thẻ đọc lại ngay
     return Response(status_code=204)
 
 

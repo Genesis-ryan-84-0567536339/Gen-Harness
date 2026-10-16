@@ -32,6 +32,21 @@ log = logging.getLogger("gh.gen.coach")
 
 CACHE_KEY = "gh:gen:coach:sig:{}"
 CACHE_TTL_S = 60
+#: v0.1.59: bộ đếm phiên bản của cache, theo tổ chức. `cache.invalidate` tăng nó; `collect` ghi cache bằng một lệnh
+#: Lua CHỈ khi bộ đếm vẫn như lúc nó BẮT ĐẦU đọc CSDL ⇒ lượt gom đã đọc dữ liệu trước khi Sếp đổi cấu hình không còn
+#: ghi đè lại bản cũ sau khi cache vừa bị xoá (thẻ không kẹt dữ liệu cũ 60 giây). Hết hạn sau 1 giờ (dài hơn nhiều
+#: so với một lượt gom).
+CACHE_VER_KEY = "gh:gen:coach:ver:{}"
+CACHE_VER_TTL_S = 3600
+_SET_IF_VER = """
+local cur = redis.call('GET', KEYS[2])
+if not cur then cur = '' end
+if cur == ARGV[1] then
+  redis.call('SET', KEYS[1], ARGV[2], 'EX', tonumber(ARGV[3]))
+  return 1
+end
+return 0
+"""
 SOURCE_TIMEOUT_S = 2.0
 #: Token Gen-hub còn ≤ N ngày thì thành việc P1 (chuông riêng của hub_link nhắc sớm hơn, từ `EXPIRY_WARN_DAYS` = 14).
 HUB_TOKEN_WARN_DAYS = 7
@@ -502,11 +517,21 @@ async def _heal(db: AsyncSession, org_id: uuid.UUID) -> None:
         log.warning("Gen hướng dẫn: không phục hồi được phiên sau nguồn lỗi")
 
 
+def _as_text(v: Any) -> str:
+    """Giá trị Redis (bytes / str / None) → chuỗi; khoá chưa có ⇒ rỗng."""
+    if v is None:
+        return ""
+    return v.decode() if isinstance(v, bytes | bytearray) else str(v)
+
+
 async def collect(db: AsyncSession, redis: Any, org_id: uuid.UUID) -> Signals:
     """Tín hiệu của tổ chức (cache 60 giây). Không ghi gì vào CSDL; nguồn lỗi/quá 2 giây thì bỏ mục đó."""
     key = CACHE_KEY.format(org_id)
+    ver_key = CACHE_VER_KEY.format(org_id)
+    ver = ""        # phiên bản cache lúc bắt đầu — đọc TRƯỚC mọi lượt đọc CSDL bên dưới
     if redis is not None:
         try:
+            ver = _as_text(await redis.get(ver_key))
             raw = await redis.get(key)
             if raw:
                 return Signals.from_dict(orjson.loads(raw))
@@ -527,7 +552,8 @@ async def collect(db: AsyncSession, redis: Any, org_id: uuid.UUID) -> Signals:
         _merge(sig, part)
     if redis is not None:
         try:
-            await redis.set(key, orjson.dumps(sig.to_dict()), ex=CACHE_TTL_S)
+            # Ghi có điều kiện (Lua, nguyên tử): cache vừa bị `invalidate` trong lúc ta đọc CSDL ⇒ bỏ bản này.
+            await redis.eval(_SET_IF_VER, 2, key, ver_key, ver, orjson.dumps(sig.to_dict()), CACHE_TTL_S)
         except Exception:  # noqa: BLE001
             log.warning("Gen hướng dẫn: không ghi được cache tín hiệu", exc_info=False)
     return sig

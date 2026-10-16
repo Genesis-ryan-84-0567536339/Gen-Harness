@@ -1,4 +1,4 @@
-# Gen-Harness — Lộ trình tổng thể (cập nhật 10/10/2026, sau v0.1.56)
+# Gen-Harness — Lộ trình tổng thể (cập nhật 16/10/2026, sau v0.1.60)
 
 Nguồn chuẩn tiến độ. Mỗi đợt = 1 PR = 1 bản phát hành. CI xanh mới tạo bản thử (prerelease); E2E cài thật xanh mới tự
 nâng thành bản chính thức (latest); lịch tự cập nhật đêm đợi bản chính thức ra đủ 24 giờ. genh chỉ kiểm SHA-256 theo
@@ -35,11 +35,12 @@ Chi tiết từng bản ở [CHANGELOG.md](../CHANGELOG.md); tóm tắt theo ch�
 - **v0.1.56 (10/10)**: **Không lộ thông tin riêng của Sếp cho Owner khác** — bỏ địa chỉ Gen-hub khỏi web/API/hướng dẫn (chỉ còn chỗ giữ chỗ chung), tên Kho chung "Kho dữ liệu" (`KHO_LABEL`), migration 0035 đổi ghi chú máy chủ Gen-hub cũ, dữ liệu mẫu/mock hư cấu, CI `check_no_personal_info.py` ([v0.1.56.md](releases/v0.1.56.md)).
 - **v0.1.57 (10/10)**: khoá nạp dữ liệu mẫu (cờ + DB chưa có dữ liệu thật), **Owner tự đặt Tên Kho** (Nợ #30 xong), **CI `api` chạy hai lượt pytest song song** (Nợ tách lượt xong), bộ kiểm chống lộ chỉ giữ quy tắc chung + mẫu riêng từ secret `GH_PERSONAL_PATTERNS`, **bản công khai đã gọt danh tính riêng — ghi chú riêng của Sếp dời sang Brain (Nợ #31 xong)** ([v0.1.57.md](releases/v0.1.57.md)).
 - **v0.1.58 (11/10, bản vá nóng)**: Antigravity CLI đòi mức suy nghĩ — Kiểm tra kết nối thử lại với mức (≤ 4 lượt) và tự lưu model khi nguồn CLI mất dòng model, lượt Gen của Owner tự lành, bảng gán nói lý do thật thay "chưa có nguồn phù hợp", nhãn "Sắp hết hạn" của agy theo khoá làm mới token ([v0.1.58.md](releases/v0.1.58.md)).
-- **v0.1.59 (16/10)**: **Mặt tiền Owner v2** — 5 trụ cột có số thật (Tình báo, Thông tin, Quan hệ, Phân tích, Việc), API chỉ đọc `/owner/brief|feed|insights|proposals`, hệ hình ảnh mới + lính gác thiết kế; **Thiết lập một màn 3 bước**, mọi "Chọn model" về `/setup?buoc=nguon-ai`, Cài đặt 4 khối (Nợ #28 xong; [v0.1.59.md](releases/v0.1.59.md)).
+- **v0.1.59 (16/10, bản vá)**: sửa quét QR WhatsApp (chưa kiểm với máy chủ WhatsApp thật, Nợ #35) — mã WhatsApp vẽ lớn, xử lý `companion_reg_refresh`, socket lỗi thử lại có giãn cách thay vì mở lại vô hạn, phiên bản WA Web mới (yêu cầu tự nhận là bridge), Baileys ghim `7.0.0-rc14`, thẻ kênh nói lý do lỗi tiếng Việt; thẻ "Hôm nay của Sếp" đọc lại ngay sau Kiểm tra nguồn CLI xanh ([v0.1.59.md](releases/v0.1.59.md)).
+- **v0.1.60 (16/10)**: **Mặt tiền Owner v2** — 5 trụ cột có số thật (Tình báo, Thông tin, Quan hệ, Phân tích, Việc), API chỉ đọc `/owner/brief|feed|insights|proposals`, hệ hình ảnh mới + lính gác thiết kế; **Thiết lập một màn 3 bước**, mọi "Chọn model" về `/setup?buoc=nguon-ai`, Cài đặt 4 khối (Nợ #28 xong; [v0.1.60.md](releases/v0.1.60.md)).
 
-## Tiếp theo (sau v0.1.59)
+## Tiếp theo (sau v0.1.60)
 Kế hoạch tổng của đợt kiểm toán kết thúc ở v0.1.50; không còn đợt đánh số sẵn. Thứ tự đề xuất:
-0. **Bản kế**: Boss dùng thử Mặt tiền v2 (v0.1.59) rồi góp ý; Boss gửi kết quả "Thử 12 câu mẫu" của Jev (HANDOFF › Boss phải làm — v0.1.55) ⇒ chốt ngưỡng lọc trước; dọn còn lại (Nợ #29, #33).
+0. **Bản kế tiếp**: Boss dùng thử Mặt tiền v2 (v0.1.60) rồi góp ý; Boss gửi kết quả "Thử 12 câu mẫu" của Jev (HANDOFF › Boss phải làm — v0.1.55) ⇒ chốt ngưỡng lọc trước; Owner quét thử WhatsApp QR (Nợ #35); dọn còn lại (Nợ #29, #36).
    **Dùng thử Gen hướng dẫn một tuần** (3 bước ở [HANDOFF](reports/HANDOFF-v0.1.1.md) › Boss phải làm — v0.1.54), rồi nói cho Claude biết thẻ có đúng việc, chuông có phiền không; các ý để sau nằm ở mục Nợ #20–#25.
 1. **Boss nghiệm thu thật** các tính năng chưa từng chạy với tài khoản thật (danh sách và cách làm ở [HANDOFF](reports/HANDOFF-v0.1.1.md) › Việc dở): Gen-hub quyền đọc + ghi Kho,
    Telegram, Truy cập từ xa (Tailscale), Facebook trả lời — từ v0.1.55 đều là tuỳ chọn (chỉ "nguồn AI" bắt buộc). Kết quả tự ghi ở Việc Sếp cần làm.
@@ -84,7 +85,10 @@ Việc đã hứa hoặc đã biết mà chưa làm. Mỗi dòng ghi điều ki�
 | 27 | **`genh auto-update disable` khi không có phiên systemd `--user`** (chạy qua `sudo`/`su`/ssh không có `XDG_RUNTIME_DIR`, hoặc tài khoản khác tài khoản đã bật lịch) (v0.1.53) | Chưa làm. Hiện genh hỏi lại trạng thái, báo "CHƯA tắt được" và thoát 1 (không nói dối) nhưng chưa tự dò `XDG_RUNTIME_DIR`/`loginctl` để tắt hộ; Sếp phải chạy lại đúng tài khoản trong phiên đăng nhập |
 | 29 | **Dọn còn lại của v0.1.55**: ẩn giới hạn agent + hạn lưu dữ liệu vào Nâng cao (màn agents/storage); xoá hội thoại ở Lịch sử Gen chưa xoá lựa chọn model đã nhớ (`forgetChoice`, tự giới hạn 50 hội thoại) | Chưa làm, nhỏ |
 | 32 | **Vì sao nguồn Antigravity CLI của Sếp mất dòng model** (máy lên v0.1.57, v0.1.58 chỉ làm hệ thống tự lành) | **Chưa rõ.** Từ v0.1.54 đến v0.1.57 không có mã nào xoá model của nguồn CLI (chỉ `system_api/routes.py` chặn xoá nguồn CLI và `seed_demo.py` dọn nguồn mẫu). Sau khi máy lên v0.1.58 đọc Action Log (`provider.model_set`, `provider.deleted`, `provider.model_auto`) và hỏi `SELECT * FROM agent.models` để loại trừ một đường xoá dữ liệu chưa biết; có nguyên văn lỗi agy thật thì đối chiếu với `(available: …)` đã giả định |
-| 33 | **Mã chết trình thiết lập cũ** (v0.1.59): `Step1Welcome`, `Step2Owner`, `Step3Org`, `ComingSoonStep`, `Step12Finish` (chỉ `test/unit/legacy-wizard.tsx` còn dùng) và ba bản đăng nhập CLI ở `BossChecksPage` chưa gộp về `CliLoginPanel` | Chưa làm, nhỏ — dọn khi sửa trình thiết lập lần tới |
+| 33 | **Mở Antigravity CLI cho mọi agent** (Owner chọn "mở thẳng" 16/10) | Chưa có trong v0.1.59; sẽ ra ở bản kế tiếp. Đang chờ mở quyền thi công |
+| 34 | **Tách agy ra container riêng không gắn khoá** (bước an toàn tiếp theo) | Chưa làm. Làm sau Nợ #33 |
+| 35 | **Kiểm WhatsApp QR với máy chủ WhatsApp thật** (v0.1.59) | Chưa kiểm được: máy kiểm thử bị chặn mạng tới máy chủ WhatsApp. Điều kiện mở: Owner quét thử theo mục "Việc Boss phải làm" của v0.1.59 rồi báo kết quả (ghi vào `docs/releases/v0.1.59.md`) |
+| 36 | **Mã chết trình thiết lập cũ** (v0.1.60): `Step1Welcome`, `Step2Owner`, `Step3Org`, `ComingSoonStep`, `Step12Finish` (chỉ `test/unit/legacy-wizard.tsx` còn dùng) và ba bản đăng nhập CLI ở `BossChecksPage` chưa gộp về `CliLoginPanel` | Chưa làm, nhỏ — dọn khi sửa trình thiết lập lần tới |
 
 ## Bản phản ứng (hotfix)
 Các bản sửa nóng thật, không nằm trong kế hoạch đợt. Đối chiếu `git log origin/main` và nhánh `hotfix/*`:
@@ -101,6 +105,7 @@ Các bản sửa nóng thật, không nằm trong kế hoạch đợt. Đối ch
 | 10/10/2026 | **Bản phản ứng v0.1.51** (`claude/hotfix-prune-digest`) | Cổng phát hành v0.1.50 đỏ ở bước "chỉ còn ảnh của bản hiện tại và bản liền trước": `pruneOldImages` giữ theo IMAGE ID nên digest cũ của ảnh trùng nội dung (`gen-harness-db`, 3 digest cùng ID) không bao giờ bị gỡ. Sửa theo tham chiếu; thay v0.1.50 chưa promote. [Chi tiết](releases/v0.1.51.md) |
 | 10/10/2026 | **Bản phản ứng 2 — v0.1.52** (`claude/hotfix-prune-digest-2`) | Cổng phát hành v0.1.51 vẫn đỏ ở bước giữ 2 bản ảnh: genh đã gọi `rmi …@digest` nhưng Docker từ chối (`isSingleReference`: mọi digest cùng repo là MỘT tham chiếu, container db đang chạy). Nay `rmi -f` cho digest mà ảnh còn được tham chiếu giữ; thay v0.1.51 chưa promote. [Chi tiết](releases/v0.1.52.md) |
 | 10/10/2026 | **Bản phản ứng v0.1.53** (`claude/v0153`) | Một bản cài kẹt v0.1.44 từ 03/10 đến 09/10: lịch tự cập nhật đêm bị tắt mà `genh auto-update status` đọc sai và không ai biết, nút Cập nhật ngay trên Console chỉ nói "chưa nhận yêu cầu". Lịch đêm nay tự lành (trừ khi Sếp đã chủ động tắt), `status` nói thật, kiểm linger, chọn bản đủ 24 giờ từ danh sách, `ConsumeRequest` không nuốt lỗi xoá (GH-E94C), bản cài phụ không gỡ lịch của bản chính; Console nói rõ nguyên nhân; E2E chạy thật timer. [Chi tiết](releases/v0.1.53.md) |
+| 16/10/2026 | **Bản vá v0.1.59** (`claude/hotfix-v0159`) | Owner báo (v0.1.58) "WhatsApp quét QR chưa được": mã WhatsApp vẽ 88px quá nhỏ; bridge chưa xử lý `companion_reg_refresh`; socket lỗi trước khi ra mã mở lại vô hạn; thẻ Hôm nay đọc cache 60 giây sau Kiểm tra. [Chi tiết](releases/v0.1.59.md) |
 
 Hai bản **phản ứng theo yêu cầu của Boss** (tính năng, không phải sửa nóng): v0.1.31 (01/10 "không thấy model và nhóm model nào để chọn") và v0.1.32 (01/10 "high là mức suy nghĩ, không phải tên model").
 

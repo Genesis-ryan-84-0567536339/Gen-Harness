@@ -38,6 +38,7 @@ from gh.boss_checks import service as boss
 from gh.chassis import actionlog
 from gh.db import DB
 from gh.errors import ApiError, field_errors, not_found, pin_required
+from gh.gen.coach import cache as coach_cache
 from gh.hub_link import service as hub
 from gh.providers import cli as climod
 from gh.social import service as social_service
@@ -82,6 +83,14 @@ async def run_check(key: str, request: Request, body: BossRunIn | None = None,
     body = body or BossRunIn()
     if key == "agy_switch" and body.profile_id is None:
         raise field_errors({"profile_id": "Chọn tài khoản Google cần đổi sang"})
+    out = await _dispatch(key, request, body, user, db)
+    # v0.1.59: kết quả kiểm vừa ghi quyết định dòng "Việc Sếp cần làm" ⇒ commit rồi làm mới thẻ Hôm nay của Sếp ngay.
+    await coach_cache.commit_and_invalidate(db, request.app.state.redis, user.org_id)
+    return out
+
+
+async def _dispatch(key: str, request: Request, body: BossRunIn, user: service.CurrentUser,
+                    db: AsyncSession) -> dict[str, Any]:
     try:
         if key == "hub":
             return await _run_hub(request, db, user)

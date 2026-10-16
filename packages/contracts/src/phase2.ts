@@ -439,6 +439,8 @@ export interface ChannelStatusEvent {
   state: ChannelState;
   account_label: string | null;
   scanned: boolean;
+  /** Mã lỗi bridge khi phiên kết thúc `expired` | `error` (vd. `QR_EXPIRED`, `WA_NO_QR_405`); web đổi sang câu thân thiện. */
+  error?: string | null;
 }
 
 // ── AI brain ──────────────────────────────────────────────────────────────

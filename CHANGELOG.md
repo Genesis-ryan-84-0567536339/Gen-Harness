@@ -7,10 +7,16 @@ Ngày = ngày Release trên GitHub theo giờ Việt Nam; tiêu đề trong `doc
 (v0.1.32–v0.1.34, v0.1.40, v0.1.46) hoặc vài ngày (v0.1.47, v0.1.48: làm 03/10, phát hành 09/10).
 Việc sửa nóng không đổi số bản (PR #46, #48, #53, #55, #58, #59) ghi ở [ROADMAP › Bản phản ứng](docs/ROADMAP.md).
 
-## v0.1.59 — Mặt tiền Owner v2: 5 trụ cột có số thật + Thiết lập một màn 3 bước (16/10/2026)
+## v0.1.60 — Mặt tiền Owner v2: 5 trụ cột có số thật + Thiết lập một màn 3 bước (16/10/2026)
 - **Mặt tiền 5 trụ cột**: Tình báo (bản tin, Việc phải quyết có Duyệt + mã PIN, cảnh báo, 4 ô số), Thông tin (tin Khẩn/Quan trọng/Thường, hội thoại 10 tin, Trả lời chỉ tạo nháp → "Duyệt và gửi"), Quan hệ (Cần chăm, Khách nóng, Cầu nối, Cung–cầu, hồ sơ sống), Phân tích (7/30 ngày, biểu đồ, phễu, chi phí, 9 chỉ số), Việc (tick Xong, Dời sang mai). Thanh trái ở máy tính, thanh dưới 5 nút ở điện thoại; Hỏi Gen là ngăn kéo.
 - **API chỉ đọc, chỉ Owner**: `GET /owner/brief|feed|feed/{id}/context|insights|proposals`, `relations?list=care`, `today.nav`; không gọi model, không migration.
 - **Thiết lập một màn** Tài khoản → Nguồn AI → Xong; mọi nút "Chọn model" dẫn `/setup?buoc=nguon-ai`; Cài đặt `/owner/them` đúng 4 khối. Hệ hình ảnh mới (token sáng/tối, 8 thành phần kit) + lính gác thiết kế.
+- Chi tiết: [docs/releases/v0.1.60.md](docs/releases/v0.1.60.md)
+
+## v0.1.59 — Bản vá: sửa quét QR WhatsApp (chưa kiểm với máy chủ WhatsApp thật), thẻ "Hôm nay của Sếp" đọc lại ngay (16/10/2026)
+- **Sửa quét QR WhatsApp**: mã QR WhatsApp dày gấp đôi Zalo nay vẽ lớn ở màn Kết nối (trước 88px nên điện thoại không đọc); ghép cặp luôn đổi khoá khi máy chủ gửi `companion_reg_refresh` (kể cả trước mã đầu); socket lỗi trước khi ra mã thử lại 4 lần có giãn cách thay vì mở lại vô hạn; ghim Baileys `7.0.0-rc14`; yêu cầu lấy phiên bản WA Web tự nhận là bridge Gen-Harness (không giả trình duyệt); thẻ kênh nói lý do lỗi bằng tiếng Việt kèm "Chi tiết kỹ thuật".
+- **Hôm nay của Sếp**: "Kiểm tra kết nối" của nguồn CLI xanh do Owner bấm được tính là bằng chứng nguồn AI chạy được (dòng bắt buộc đạt ngay khi nguồn đang bật); thẻ cập nhật ngay khi đổi nguồn, khoá, model hay gán model, không trễ 60 giây.
+- Chưa thử được với máy chủ WhatsApp thật (máy kiểm thử bị chặn mạng); kiểm trên máy Owner là Nợ #35.
 - Chi tiết: [docs/releases/v0.1.59.md](docs/releases/v0.1.59.md)
 
 ## v0.1.58 — Bản vá nóng: Antigravity CLI đòi mức suy nghĩ làm Gen im lặng, "Kiểm tra kết nối" đỏ và mọi vai "chưa có nguồn phù hợp" (11/10/2026)
