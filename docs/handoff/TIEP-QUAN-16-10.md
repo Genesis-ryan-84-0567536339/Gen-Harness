@@ -5,8 +5,8 @@ Tệp này do phiên Claude Code trên đám mây soạn khi bàn giao cho Claud
 
 ## Trạng thái phiên đám mây
 
-**ĐANG CHẠY nốt các việc đã giao (xem bảng dưới); không nhận việc mới.** Khi xong, phiên đám mây sửa dòng này thành
-"ĐÃ DỪNG — <giờ>" và điền sha cuối vào bảng. Từ lúc đó Claude cục bộ là người lái DUY NHẤT (một người lái, tránh hai nơi cùng sửa một nhánh).
+**ĐÃ DỪNG — 15:09 UTC 16/10/2026.** Sếp chốt bàn giao: Claude Code cục bộ là người lái DUY NHẤT từ giờ. Phiên đám mây đã dừng mọi workflow/agent/lịch hẹn,
+đẩy mọi phần dở lên nhánh, và không sửa thêm nhánh nào của Gen-Harness.
 Trước khi đụng nhánh nào trong bảng: `git fetch origin` và đọc lại tệp này trên nhánh `claude/ban-giao-local`.
 
 ## Đã phát hành
@@ -19,8 +19,14 @@ Trước khi đụng nhánh nào trong bảng: `git fetch origin` và đọc l�
 
 | Nhánh | Nội dung | Trạng thái lúc bàn giao |
 |---|---|---|
-| `claude/wip/v0162/A4` `A5` `A8` `A9` `A10` `A11` `A12` | 7 gói đợt A còn lại (Hộp thư/Việc xem thêm; Khách & Nhóm phân trang + hàng loạt; Nhật ký tìm phía máy chủ; lỗi sao lưu/403 tiếng người; che OTP/mật khẩu trước khi gửi model + không in mã thiết lập; Cung↔Cầu; tài liệu khớp mã + `check_doc_facts.py`) | workflow đám mây đang thi công → tích hợp vào `claude/v0162` → review Opus → sửa |
-| `claude/v0162` | nhánh tích hợp v0.1.62 (gốc main a9513cb) | do workflow tạo; chưa có docs phát hành |
+| `claude/wip/v0162/A4` (0171d7a) | Hộp thư + Việc xem hết: `useInfiniteQuery` + `LoadMore.tsx` "Đang xem 50/130" (F052) | XONG, chưa review. vitest 1505, tsc/eslint sạch. Lưu ý: con trỏ `list_inbox`/`list_tasks` (`gh/biz/queue/routes.py`) dùng `created_at < cursor` ⇒ dòng trùng `created_at` ở ranh giới trang có thể rơi — nên đổi sang cặp (created_at, id) như A5 |
+| `claude/wip/v0162/A5` (7625325) | Khách & Nhóm: con trỏ (created_at, id), tìm/lọc kênh ở máy chủ, gán BOT hàng loạt theo bộ lọc (`POST /directory/people/bulk-bot`, `expected_total` lệch ⇒ 409), xuất JSON thật, "Ẩn danh hoá" có xác nhận (F053 F100 F101 F054) | XONG, chưa review. pytest 72 + lượt app 72, vitest 1513/1514 (`backups.test.tsx` chập chờn khi máy tải cao). Chạm thêm `ProfileScreen.tsx` (đổi ?id= sang hồ sơ gốc sau 307) |
+| `claude/wip/v0162/A8` (4cd044d) | Nhật ký: phân trang con trỏ, tìm/lọc ở máy chủ (`/audit` + q, q_actions, q_actors, hide_noise), `auditLabels.ts` dịch ~200 mã, ẩn `http.*` mặc định (F099 F105) — sửa luôn P3 "Nhật ký mã tiếng Anh" của kiểm hồi quy | XONG, chưa review. pytest 210 + lượt app 58, vitest 1510. Client đọc `/audit` thay `/audit-log` để không chạm `system_api/routes.py` |
+| `claude/wip/v0162/A9` (83a6cbd) | Lỗi sao lưu nói tiếng người (stderr pg_dump sang `technical`, hiện ở "Chi tiết kỹ thuật"), 403 phân theo mã (CSRF_INVALID ⇒ "Phiên đã cũ…") (F106 F110) | XONG, chưa review. pytest 48 + lượt app 48, vitest 1510. Job lỗi cũ trong Redis (TTL 7 ngày) còn có thể mang stderr thô |
+| `claude/wip/v0162/A10` (92134ea) | `mask_for_model` che OTP/mã xác minh/mật khẩu/token URL (không che oan 8 mẫu thư thường); mã thiết lập Owner không vào log, ghi `run/setup-code.json` 0600 (F123 F128) | XONG, chưa review — **cần `/security-review`**. pytest 500 + lượt app 163. genh chưa đọc `run/setup-code.json` (bản cài thật đã tự sinh setup_token nên chủ yếu cho cài tay/dev). Sửa luôn P3 "mã thiết lập bị che trong log" |
+| `claude/wip/v0162/A11` (ae7eedf) | Cung ↔ Cầu không ghép bừa: thiếu tên hàng ⇒ không tạo tín hiệu thị trường; khớp khi bao trọn hoặc chung ≥ 2 từ tên hàng; gỡ gợi ý cũ dưới ngưỡng (F061) | XONG, chưa review. pytest 175 + lượt app 65. Quyết định nhỏ cần Sếp biết: cầu thiếu tên hàng vẫn mở cơ hội `raw_signal` (để không mất khách) — muốn bỏ thì sửa một nhánh trong `jobs.py` |
+| `claude/wip/v0162/A12` (ddfeb2f) | Tài liệu khớp mã (README/gen-coach 10 dòng 1 bắt buộc, handoff/06 banner, runbook) + `.github/scripts/check_doc_facts.py` (ROADMAP "sau vX" == VERSION) (F118 F041 F112) | XONG, chưa review. unittest scripts 186, check_doc_links sạch. ⚠ Lên `VERSION` v0.1.62 thì phải sửa ROADMAP cùng lúc, nếu không `check_doc_facts` đỏ |
+| `claude/v0162` (9b24240) | Nhánh tích hợp: đã merge thường đủ 7 gói A4 A5 A8 A9 A10 A11 A12 + hạ baseline thuật ngữ (afe11cf) + commit "dở" sửa `e2e/flows.spec.ts` (nhãn Nhật ký mới) | **DỞ**: dừng giữa bước kiểm; CHƯA chạy bộ kiểm đầy đủ, CHƯA review Opus, CHƯA gộp agy/B4/B5, chưa có docs phát hành |
 | `claude/wip/v0162/agy-mo-thang` (926057c) | **Antigravity mở cho mọi vai** (quyết định Sếp 16/10, đã báo rủi ro): bỏ `allow_agy`/`AGY_OWNER_ONLY`, agy chạy cả việc nền, ô chọn model mọi agent có agy; giữ cô lập mỗi lượt của `AgyClient`; giữ luật Claude CLI việc nền (F-86) | test bị chạm xanh, ruff/mypy/tsc/eslint sạch, Playwright 36/36; **bộ pytest đầy đủ chưa có kết quả** (hai lượt bị dừng giữa chừng vì máy quá tải, 0 lỗi tới lúc dừng); 2 ca vitest `setup.test.tsx` trượt timeout khi máy tải cao (chạy riêng 22/22 qua) — chạy lại trên máy cục bộ; cần `/security-review` trước khi gộp |
 | `claude/wip/v0162/B4` (426e7ce) | Kênh bền: mất mạng không xoá phiên Zalo/WhatsApp (phân loại lỗi, chỉ 401/đăng xuất mới hết hạn, `POST /channels/{type}/resume` + nút "Nối lại bằng phiên đã lưu"), QR sống theo `expires_at`, phiên mới phát `session.close` đóng phiên cũ, uptime giữ mốc gốc, câu BRIDGE_OFFLINE trung thực | XONG: bridge 72/72, pytest 17 tệp liên quan + lượt app 36/36, vitest 1512, tsc/eslint sạch. Chưa: Playwright e2e `phase2.spec.ts`, pytest đầy đủ, thử zca-js/Baileys thật. Ghi chú: `resumable`/`bridge_online` khai tạm trong `systemModel.ts` — đưa vào `packages/contracts` + `endpoints.ts` khi tích hợp; resume chỉ cần `system.manage`, KHÔNG đòi PIN (hỏi Sếp nếu muốn thêm `require_pin('channel.login')`) |
 | `claude/wip/v0162/B5` (7ac5fb2) | Sức khoẻ: khối `bridge` + sự cố `bridge.silent`; sự cố `dlq.inbound`, `POST /system/queues/{stream}/replay` và `/clear` (PIN `queue.manage` + Action Log); sự cố model hết hạn tách khoá API ↔ CLI | XONG: pytest 381 + lượt app 174, vitest 1514, tsc/eslint sạch. Chưa: ảnh 390/1440 thẻ Sức khoẻ, pytest đầy đủ. Còn dở của F051 (thuộc vùng B4): thẻ kênh vẫn "Đang kết nối" khi bridge im — dùng `/system/health` `bridge.state==='silent'` khi tích hợp |
@@ -28,11 +34,12 @@ Trước khi đụng nhánh nào trong bảng: `git fetch origin` và đọc l�
 
 ### Việc tiếp theo cho v0.1.62 (Claude cục bộ làm, theo thứ tự)
 
-1. Gộp thường vào `claude/v0162`: `agy-mo-thang`, `B4`, `B5` (gói nào chưa xong thì để bản sau). Xung đột dự kiến nhỏ ở
+1. Nhánh `claude/v0162` đã có 7 gói đợt A (xem bảng). Gộp thường thêm: `agy-mo-thang`, `B4`, `B5` (gói nào chưa xong thì để bản sau). Xung đột dự kiến nhỏ ở
    `apps/api/gh/system_api/routes.py` (agy ↔ B4) và `apps/api/gh/health.py` (agy ↔ B5): giữ đủ hai bên.
 2. Chạy kiểm như `.github/workflows/ci.yml` MỘT lần đầy đủ (api ruff + mypy + pytest hai lượt thường và `GH_TEST_APP_ROLE=1`;
    web lint + typecheck + vitest + build + Playwright mock + route-crawl; `.github/scripts`). Đỏ ⇒ tìm gốc rễ, không skip.
-3. `/security-review` (chạm quyền model, agy, PIN) + `/code-review`. Sửa phát hiện thật.
+3. `/security-review` (agy, A10 che dữ liệu + mã thiết lập, B5 PIN `queue.manage`, B4 resume không PIN) + `/code-review` toàn nhánh (chưa gói nào của v0.1.62 được review). Sửa phát hiện thật.
+   Gộp luôn P2 "tiêu đề cảnh báo thô" của kiểm hồi quy nếu kịp (nhỏ, `gh/refinery/runner.py`).
 4. **Kiểm trên máy thật** (lợi thế của máy cục bộ): dựng bản dev riêng (mục "Môi trường dev" dưới), đăng nhập Antigravity thật,
    chạy thử Gen + Bản tin + một agent tự tạo + việc nền bằng agy; nếu Sếp sẵn sàng thì quét QR WhatsApp/Zalo thật trên bản dev (Nợ #35).
    Chụp ảnh 390/1440 các màn đổi, gửi Sếp xem trước.
@@ -71,6 +78,9 @@ tác động, gốc rễ, gợi ý sửa — bằng chứng ghi theo v0.1.59/v0.
 - Sau mỗi việc: dừng stack dev nếu không dùng, dọn ổ (máy thật còn chạy Gen-hub).
 
 ## Bài học vận hành (đừng lặp lại)
+
+- Máy dùng chung nhiều agent: KHÔNG `pkill -f` theo mẫu rộng (đã làm chết test/tiến trình của agent khác hai lần trong ngày 16/10); mỗi agent một cổng Redis + template DB riêng.
+- Chạy quá nhiều bộ pytest đầy đủ song song làm máy quá tải, test timeout giả — một bộ đầy đủ MỘT lần ở bước tích hợp là đủ.
 
 - Lượt CI bị huỷ vì có push mới hiện `ci-ok` đỏ trên sha cũ — không phải lỗi; xem lượt của sha mới.
 - Release xanh chưa phải promote: E2E + promote chạy ở `e2e-install.yml` (workflow_run). Chỉ báo "đã phát hành" sau khi `releases/latest` đúng tag
