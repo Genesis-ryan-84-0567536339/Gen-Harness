@@ -2,18 +2,17 @@
  * v0.1.58 (hotfix) — máy Boss: Owner chỉ có Antigravity CLI (không khoá API). "Kiểm tra kết nối" đỏ 'CLI không nhận model ""',
  * ô chọn model bị ẩn, mọi vai "Chuẩn: chưa có nguồn phù hợp".
  *
- * API giả (page.route đè lên mock dùng chung, đúng hợp đồng máy chủ v0.1.58):
+ * API giả (page.route đè lên mock dùng chung, đúng hợp đồng máy chủ v0.1.62):
  *  - GET /providers: MỘT nguồn antigravity_cli; models=[] cho tới khi POST /providers/{id}/test xanh (máy chủ tự lưu
  *    gemini-3.8-flash · Vừa, không đặt mặc định);
- *  - GET /agents/bindings: core.gen có `standard` sau khi kiểm tra; vai khác `standard: null` + `standard_reason`.
+ *  - GET /agents/bindings: TRƯỚC khi kiểm tra mọi vai `standard: null` + lý do "chưa có model — bấm Kiểm tra kết nối";
+ *    SAU khi kiểm tra MỌI vai có `standard` là model agy (v0.1.62: agy mở cho mọi vai — Gen mức Vừa, vai khác mức Thấp).
  * Chạy thật với agy giả đòi --effort là ca pytest (apps/api/tests/test_agy_effort_required_v0158.py).
  */
 import { expect, test, type Page } from '@playwright/test';
 import { loginAsOwner, resetMock } from './support';
 
 const PID = 'prov-agy-v0158';
-const NEED_API = 'cần khoá API (Antigravity chỉ dùng cho Gen)';
-const NEED_API_OR_CLAUDE = 'cần khoá API hoặc Claude Code CLI';
 const NO_MODEL = 'chưa có model — bấm Kiểm tra kết nối ở Antigravity CLI';
 const EFFORT_ERROR = 'CLI cần chọn mức suy nghĩ cho model “gemini-3.8-flash” (nhận: Thấp, Vừa, Cao)';
 
@@ -33,11 +32,13 @@ const GROUPS = [{ label: 'Gemini', models: [FLASH] }];
 
 const STD = { model_name: 'gemini-3.8-flash', provider_name: 'Antigravity CLI', tier: 'balanced', tier_label: 'Cân bằng', effort: 'medium', temperature: 0.3, context_tokens: 6000 };
 
-const ROLES: Array<[string, string, string]> = [
-  ['core.refinery', 'Sàng lọc & suy luận chính', NEED_API],
-  ['core.reply', 'Soạn lại / dịch nháp', NEED_API_OR_CLAUDE],
-  ['core.gen', 'Gen — trợ lý quản trị', ''],
-  ['core.briefing', 'Bản tin Gen', NEED_API],
+const STD_LOW = { ...STD, effort: 'low' };
+
+const ROLES: Array<[string, string]> = [
+  ['core.refinery', 'Sàng lọc & suy luận chính'],
+  ['core.reply', 'Soạn lại / dịch nháp'],
+  ['core.gen', 'Gen — trợ lý quản trị'],
+  ['core.briefing', 'Bản tin Gen'],
 ];
 
 type Mode = 'ok' | 'effort-error';
@@ -86,13 +87,13 @@ async function mockAgyOnly(page: Page, mode: Mode) {
     if (route.request().method() !== 'GET') return route.fallback();
     return route.fulfill({
       json: {
-        items: ROLES.map(([agent_key, label, why]) => ({
+        items: ROLES.map(([agent_key, label]) => ({
           agent_key,
           label,
           binding: null,
           source: 'standard',
-          standard: agent_key === 'core.gen' && state.tested && mode === 'ok' ? STD : null,
-          standard_reason: agent_key === 'core.gen' ? (state.tested && mode === 'ok' ? null : NO_MODEL) : why,
+          standard: state.tested && mode === 'ok' ? (agent_key === 'core.gen' ? STD : STD_LOW) : null,
+          standard_reason: state.tested && mode === 'ok' ? null : NO_MODEL,
         })),
         models: [],
       },
@@ -108,18 +109,16 @@ test.describe('v0.1.58 · Owner chỉ có Antigravity CLI', () => {
     await loginAsOwner(page);
   });
 
-  test('Kiểm tra kết nối xanh → MODEL, "Chuẩn" của Gen và lý do cho các vai còn lại', async ({ page }) => {
+  test('Kiểm tra kết nối xanh → MODEL và "Chuẩn: <model agy>" cho MỌI vai', async ({ page }) => {
     await mockAgyOnly(page, 'ok');
     await page.goto('/api');
     const card = page.getByRole('article', { name: 'Antigravity CLI' });
     const table = page.locator('.apm-table');
     const row = (label: string) => table.locator('tr', { hasText: label });
 
-    // Trước khi kiểm tra: nguồn chưa có model; mỗi vai nêu ĐÚNG lý do (không còn câu chung chung).
+    // Trước khi kiểm tra: nguồn chưa có model; MỌI vai nêu ĐÚNG lý do tự sửa được (không còn "cần khoá API").
     await expect(card).toContainText('chưa có model');
-    await expect(row('Gen — trợ lý quản trị')).toContainText(`Chuẩn: ${NO_MODEL}`);
-    await expect(row('Sàng lọc & suy luận chính')).toContainText(`Chuẩn: ${NEED_API}`);
-    await expect(row('Soạn lại / dịch nháp')).toContainText(`Chuẩn: ${NEED_API_OR_CLAUDE}`);
+    for (const [, label] of ROLES) await expect(row(label)).toContainText(`Chuẩn: ${NO_MODEL}`);
 
     await card.getByRole('button', { name: 'Kiểm tra kết nối' }).click();
     await expect(card.getByRole('status')).toContainText('Kết nối được');
@@ -127,12 +126,13 @@ test.describe('v0.1.58 · Owner chỉ có Antigravity CLI', () => {
     await expect(card.getByRole('combobox', { name: /Model cho Antigravity CLI/ })).toBeVisible();
     await expect(row('Gen — trợ lý quản trị')).toContainText('Chuẩn: gemini-3.8-flash (tự chọn)');
     await expect(row('Gen — trợ lý quản trị').getByTestId('binding-effort-core.gen')).toContainText('Vừa (chuẩn)');
-    for (const [, label, why] of ROLES.filter(([k]) => k !== 'core.gen')) {
-      await expect(row(label)).toContainText(`Chuẩn: ${why}`);
-      await expect(row(label)).toContainText('cần khoá API');
+    for (const [key, label] of ROLES.filter(([k]) => k !== 'core.gen')) {
+      await expect(row(label)).toContainText('Chuẩn: gemini-3.8-flash (tự chọn)');   // v0.1.62: agy cho mọi vai
+      await expect(row(label).getByTestId(`binding-effort-${key}`)).toContainText('Thấp (chuẩn)');
     }
     const body = page.locator('body');
     await expect(body).not.toContainText('chưa có nguồn phù hợp');
+    await expect(body).not.toContainText('cần khoá API');
     await expect(body).not.toContainText('“”');
     await expect(body).not.toContainText('[object Object]');
   });

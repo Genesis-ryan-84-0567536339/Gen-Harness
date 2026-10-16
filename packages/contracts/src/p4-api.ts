@@ -33,7 +33,6 @@ export interface StandardPick {
 export interface AgentBindingSlot {
   agent_key: string;
   label: string;
-  /** v0.1.38 (F-22): lý do không dùng được nằm trong `binding.blocked_reason` (xem AgentBinding). */
   binding: BindingWithEffort | null;
   /**
    * v0.1.55 (G1): `custom` = Owner đã gán (có dòng) · `standard` = chưa gán, dùng hồ sơ tiêu chuẩn. Máy chủ cũ không có
@@ -43,7 +42,7 @@ export interface AgentBindingSlot {
   /** v0.1.55 (G1): model hồ sơ đang phủ khi chưa có dòng gán; null = chưa có nguồn phù hợp. */
   standard?: StandardPick | null;
   /**
-   * v0.1.58: vì sao `standard` null ("cần khoá API (Antigravity chỉ dùng cho Gen)", "chưa có model — bấm Kiểm tra kết nối ở
+   * v0.1.58: vì sao `standard` null ("cần khoá API hoặc đăng nhập Antigravity CLI", "chưa có model — bấm Kiểm tra kết nối ở
    * …"…) — CHUỖI hoặc null, không bao giờ object. Máy chủ cũ không có trường này ⇒ web dùng câu cũ.
    */
   standard_reason?: string | null;
@@ -95,6 +94,8 @@ export interface BackgroundSources {
   risk_text: string;
   purposes: string[];
   has_api_source: boolean;
+  /** v0.1.62: có Antigravity CLI đang bật + có model — chạy được việc nền không cần Owner cho phép. Máy chủ cũ: thiếu. */
+  has_agy_source?: boolean;
   sources: BackgroundSource[];
 }
 export interface BackgroundSourcesBody {

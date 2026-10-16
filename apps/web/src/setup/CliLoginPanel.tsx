@@ -19,7 +19,7 @@ const N4 = 'var(--color-neutral-400)';
  * màn (`one/StepAiSource`). HÀNH VI GIỮ NGUYÊN — `/guide/4` vẫn vẽ Step4Brain đầy đủ. `bare`: bỏ khung + tiêu đề phần (nơi dùng
  * đã có tiêu đề riêng cho lựa chọn). Ba bản sao ở BossChecksPage chưa dọn (Nợ trong docs/ROADMAP.md).
  */
-export function CliLoginPanel({ kind, onlyAgyReady = false, bare = false }: { kind: CliKind; onlyAgyReady?: boolean; bare?: boolean }) {
+export function CliLoginPanel({ kind, bare = false }: { kind: CliKind; bare?: boolean }) {
   const profiles = useCliProfiles(kind);
   const login = useCliLogin(kind);
   const now = useNow(60_000);
@@ -74,14 +74,6 @@ export function CliLoginPanel({ kind, onlyAgyReady = false, bare = false }: { ki
           <Icon name="ph ph-shield-warning" size={16} color="var(--color-warn)" />
           <div className="risk-box__text">
             {txt.scope}
-            {onlyAgyReady ? (
-              <>
-                {' '}
-                <strong data-testid="setup-agy-only-hint">
-                  Gen dùng được ngay; muốn hệ thống tự sàng lọc tin, trực việc và trò chuyện thử agent ở bước 8, thêm một khoá API hoặc Claude Code CLI.
-                </strong>
-              </>
-            ) : null}
           </div>
         </div>
       ) : null}

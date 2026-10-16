@@ -802,6 +802,7 @@ jobs:
 
       # v0.1.38 (F-22): phiên Claude Code ở volume claude_state riêng (/var/lib/gh/claude/.claude), không còn trong HOME
       # của Antigravity CLI (/var/lib/gh/agy, agy_state); agy chạy cô lập (canary offline phải "khong_lo").
+      # v0.1.62: agy được mở cho mọi vai (Owner chọn 16/10/2026) nên phép thử cô lập này càng phải giữ — agy cùng container với khoá.
       - name: Cô lập agy — canary offline (F-22)
         run: |
           set -euo pipefail

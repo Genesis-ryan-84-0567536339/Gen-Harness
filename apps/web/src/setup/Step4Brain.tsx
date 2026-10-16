@@ -65,9 +65,6 @@ export function Step4Brain({ meta, description, onBack, onSaved, formRef, onSkip
   // v0.1.28 (UX C1): chỉ cho Tiếp tục khi có nguồn dùng được CÓ model (đã chọn, hoặc máy chủ tự lấy model đầu tiên).
   const withModel = ready.filter((p) => providerHasModel(p, tested));
   const canContinue = withModel.length > 0;
-  // v0.1.38 (F-22): Antigravity CLI chỉ dùng cho Gen của Sếp — nếu đó là nguồn sẵn sàng duy nhất, nhắc thêm nguồn khác
-  // để sàng lọc tin và trực việc chạy được.
-  const onlyAgyReady = ready.length > 0 && ready.every((p) => p.kind === 'antigravity_cli');
   const blockReason = canContinue
     ? null
     : ready.length
@@ -141,7 +138,7 @@ export function Step4Brain({ meta, description, onBack, onSaved, formRef, onSkip
           }}
         />
       ) : null}
-      <CliLoginPanel kind="antigravity_cli" onlyAgyReady={onlyAgyReady} />
+      <CliLoginPanel kind="antigravity_cli" />
       <CliLoginPanel kind="claude_code_cli" />
 
       <div className="setup-section">
