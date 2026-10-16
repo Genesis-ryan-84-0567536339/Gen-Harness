@@ -19,6 +19,7 @@ import type {
 } from '@gen-harness/contracts';
 import { ALL_ONLY_PERMS, ApiError, PinCancelledError } from '@gen-harness/contracts';
 import { DEFAULT_TZ, fmtDM, fmtHM, fmtInt, fmtLatency, fmtPct, fmtRemaining, fmtSessionAge } from '../../lib/format';
+import { AGY_LAYERS_TEXT } from '../../lib/agyLayers';
 import { ACC3, BAD, N3, N4, N5, N8, OK, TXT, WARN, channelIcon, channelTone } from '../data/dataModel';
 
 export const CHANNEL_STATE: Record<ChannelState, { label: string; tone: string }> = {
@@ -311,13 +312,6 @@ export function cliChip(active: CliProfile | undefined): { label: string; tone: 
   return { label: 'Đang hoạt động', tone: OK };
 }
 
-/**
- * v0.1.62: Sếp chọn MỞ Antigravity CLI cho mọi việc (16/10/2026, sau khi được báo rủi ro) — luật v0.1.38 (F-22) "chỉ
- * dùng cho Gen" đã gỡ. Câu dùng chung cho thẻ CLI và bước thiết lập: nói đúng phạm vi dùng và rủi ro còn lại.
- */
-export const AGY_SCOPE_TEXT =
-  'Dùng được cho mọi việc: Gen, sàng lọc tin, Bản tin, soạn nháp, agent và việc nền. Lưu ý: Antigravity CLI chạy cùng máy chủ với khoá hệ thống — Sếp đã chọn mở thẳng; sau này sẽ tách ra hộp riêng.';
-
 /** v0.1.31: chữ theo loại CLI — Antigravity (tài khoản Google) hay Claude Code (gói Claude Pro/Max). */
 export const CLI_TEXT: Record<CliKind, { title: string; kicker: string; account: string; login: string; add: string; empty: string; openLink: string; hint: string; scope: string | null }> = {
   antigravity_cli: {
@@ -329,7 +323,7 @@ export const CLI_TEXT: Record<CliKind, { title: string; kicker: string; account:
     empty: 'Đăng nhập Google để hệ thống dùng AI qua Antigravity CLI',
     openLink: 'Mở trang đăng nhập Google',
     hint: 'Đăng nhập đúng tài khoản Google muốn dùng; trang Google sẽ hiện một mã — chép mã đó dán vào ô bên dưới.',
-    scope: AGY_SCOPE_TEXT,
+    scope: AGY_LAYERS_TEXT, // gói G: phạm vi theo lớp (lib/agyLayers.ts), thay câu "mọi việc" cũ
   },
   claude_code_cli: {
     title: 'Tài khoản Claude Code CLI',

@@ -1,6 +1,5 @@
 import type { CliKind } from '@gen-harness/contracts';
 import { Button, Icon } from '@gen-harness/ui';
-import { AGY_LAYERS_TEXT } from '../lib/agyLayers';
 import { useCliProfiles } from '../lib/dataQueries';
 import { emailInitials } from '../lib/format';
 import { useNow } from '../lib/useNow';
@@ -74,7 +73,7 @@ export function CliLoginPanel({ kind, bare = false }: { kind: CliKind; bare?: bo
         <div className="risk-box" role="note" data-testid={`setup-cli-scope-${kind}`}>
           <Icon name="ph ph-shield-warning" size={16} color="var(--color-warn)" />
           <div className="risk-box__text">
-            {kind === 'antigravity_cli' ? AGY_LAYERS_TEXT : txt.scope}
+            {txt.scope}
           </div>
         </div>
       ) : null}
