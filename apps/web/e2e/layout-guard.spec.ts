@@ -534,8 +534,8 @@ test.describe('Lính gác bố cục — dính biên, tràn/cắt ngang, chữ b
     });
   }
 
-  test('trang ngoài (Đăng nhập, Thiết lập bước 4) × 1920/1440/1024/390 không có phát hiện', async ({ page }) => {
-    test.setTimeout(90_000);
+  test('trang ngoài (Đăng nhập, Thiết lập 3 bước) × 1920/1440/1024/390 không có phát hiện', async ({ page }) => {
+    test.setTimeout(120_000);
     clearShots('ngoai_');
     const all: Hit[] = [];
     // Đăng nhập — chưa có phiên (gốc đo `.login`, trang không có <main>).
@@ -547,19 +547,38 @@ test.describe('Lính gác bố cục — dính biên, tràn/cắt ngang, chữ b
       await settled(page, '.login');
       all.push(...(await scanHere(page, 'ngoai_', vp.width, '/login', '.login')));
     }
-    // Thiết lập bước 4 (Bộ não AI, thẻ Claude Code CLI / Antigravity chưa đăng nhập) — mock "fresh", bước 1–3 qua API.
+    // v0.1.59: Thiết lập MỘT màn, 3 bước — mock "fresh". Tài khoản (chưa gõ gì, "Tuỳ chỉnh" mở để đo cả phần ẩn).
     await resetMock(page.request, 'fresh');
+    await page.goto('/setup');
+    await expect(page.getByRole('heading', { name: 'Tạo tài khoản Sếp' })).toBeVisible();
+    await page.getByText('Tuỳ chỉnh').click();
+    for (const vp of VIEWPORTS) {
+      await page.setViewportSize(vp);
+      await settled(page);
+      all.push(...(await scanHere(page, 'ngoai_', vp.width, '/setup (tài khoản)')));
+    }
+    // Nguồn AI (thẻ Antigravity chưa đăng nhập, "Nâng cao" mở: Claude Code CLI + tương thích OpenAI) — bước 1–3 qua API.
     await apiCall(page, 'PUT', '/setup/steps/1', { token: SETUP_TOKEN, language: 'vi', mode: 'empty' });
     await apiCall(page, 'PUT', '/setup/steps/2', {
       token: SETUP_TOKEN, display_name: 'Anh Cơ', email: 'owner@example.test', password: 'mot-cau-rat-dai-de-nho-2026', pin: OWNER.pin, pin_confirm: OWNER.pin,
     });
     await apiCall(page, 'PUT', '/setup/steps/3', { org_name: 'Genesis Trading', timezone: 'Asia/Ho_Chi_Minh', currency: 'VND', self_name: 'Anh', bot_calls_me: 'Sếp' });
     await page.goto('/setup');
-    await expect(page.getByRole('heading', { name: 'Bộ não AI' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Nối nguồn AI cho Gen' })).toBeVisible();
+    await page.getByText('Nâng cao', { exact: true }).click();
     for (const vp of VIEWPORTS) {
       await page.setViewportSize(vp);
       await settled(page);
-      all.push(...(await scanHere(page, 'ngoai_', vp.width, '/setup (bước 4)')));
+      all.push(...(await scanHere(page, 'ngoai_', vp.width, '/setup (nguồn AI)')));
+    }
+    // Xong — bước 4 để sau (máy chủ ghi "skipped") ⇒ /setup tới thẳng bước Xong.
+    await apiCall(page, 'POST', '/setup/steps/4/skip');
+    await page.goto('/setup');
+    await expect(page.getByRole('heading', { name: 'Xong rồi, thưa Sếp' })).toBeVisible();
+    for (const vp of VIEWPORTS) {
+      await page.setViewportSize(vp);
+      await settled(page);
+      all.push(...(await scanHere(page, 'ngoai_', vp.width, '/setup (xong)')));
     }
     expectClean(all);
   });
