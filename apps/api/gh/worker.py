@@ -65,6 +65,7 @@ from gh.refinery.scheduler import Scheduler
 from gh.social import service as social
 from gh.social import session_watch
 from gh.telegram import service as telegram
+from gh.telegram.poller import JOBS as TELEGRAM_JOBS
 
 log = logging.getLogger("gh.worker")
 
@@ -101,6 +102,7 @@ JOB_LABELS = {
     "scheduled_backup_scan": "Sao lưu theo lịch",
     "gen_briefing": "Bản tin Gen",
     "telegram_flush": "Gửi tin Telegram",
+    "telegram_inbound": "Nhận tin Telegram của Sếp",
     "hub_breaker_watch": "Theo dõi Gen-hub",
     "gen_kho_release": "Đề xuất ghi Phiên vào Kho",
     "gen_coach": "Gen hướng dẫn",
@@ -404,7 +406,7 @@ async def telegram_flush(ctx: dict[str, Any]) -> dict[str, int]:
     return await telegram.flush_outbox(sessionmaker(), redis=ctx.get("redis_bus"))
 
 
-_BIZ_JOBS = [*biz.jobs(), *BACKUP_JOBS]  # PLAN §5.6 — gh.backup.scheduled_backup_scan cùng mẫu CronJob
+_BIZ_JOBS = [*biz.jobs(), *BACKUP_JOBS, *TELEGRAM_JOBS]  # PLAN §5.6 — cùng mẫu CronJob; v0.1.64: + telegram_inbound
 
 
 class WorkerSettings:

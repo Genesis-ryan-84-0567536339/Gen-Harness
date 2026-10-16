@@ -474,3 +474,14 @@ async def test_run_inbound_lock_prevents_double_poll(owner_api: Api, bot: FakeBo
         sessionmaker(), redis, None, transport=httpx.MockTransport(bot.handle), budget_s=1, long_poll_s=0
     )
     assert bot.polls() and time.monotonic() - t0 < 5 and await redis.get(poller.LOCK_KEY.format(org)) is None
+
+
+def test_worker_registers_inbound_poller_as_cron_job() -> None:
+    from gh.worker import JOB_LABELS, WorkerSettings
+
+    names = {getattr(f, "__name__", getattr(f, "name", "")) for f in WorkerSettings.functions}
+    assert "telegram_inbound" in names and "telegram_inbound" in JOB_LABELS
+    cron_names = {c.name for c in WorkerSettings.cron_jobs}
+    assert "cron:telegram_inbound" in cron_names
+    job = next(c for c in WorkerSettings.cron_jobs if c.name == "cron:telegram_inbound")
+    assert job.timeout_s == poller.JOB_TIMEOUT_S and poller.BUDGET_S + poller.LONG_POLL_S < poller.JOB_TIMEOUT_S
