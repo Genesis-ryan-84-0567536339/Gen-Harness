@@ -72,8 +72,10 @@ export interface OwnerProgress {
 export interface OwnerNav {
   /** Số tin Khẩn đang mở (bằng `feed.counts.urgent_open`; không theo dõi "đã xem"). */
   urgent_open: number;
-  /** Nháp chờ duyệt (mọi tuổi) + đề xuất Gen còn hiệu lực. */
+  /** Nháp chờ duyệt (mọi tuổi, trừ nháp đã tắt tiếng) + đề xuất Gen còn hiệu lực. */
   decide: number;
+  /** `true` khi Redis không đọc được đề xuất của Gen: `decide` chỉ đếm nháp (khoá vắng mặt khi bình thường). */
+  proposals_unavailable?: boolean;
 }
 
 export interface OwnerToday {
@@ -246,6 +248,8 @@ export interface OwnerRelationRow {
 export interface OwnerRelations {
   list: OwnerRelationList;
   items: OwnerRelationRow[];
+  /** `error` khi máy chủ không tính kịp (quá giờ / lỗi) — `items` rỗng KHÔNG có nghĩa "không có khách nào"; vắng mặt khi bình thường. */
+  state?: 'error';
 }
 
 export type OwnerTaskGroupKey = 'inbox' | 'desk' | 'tasks';
@@ -376,6 +380,8 @@ export interface OwnerProposal {
 
 export interface OwnerProposals {
   items: OwnerProposal[];
+  /** `unavailable` khi Redis không đọc được (khi đó `items` rỗng chứ KHÔNG phải "không có đề xuất"); vắng mặt khi bình thường. */
+  state?: 'unavailable';
 }
 
 /** `/owner/*` — gắn vào `endpoints.ts` (`owner: ownerEndpoints(r)`). Chỉ có GET. */

@@ -16,7 +16,8 @@ import { setNavigator } from '../../src/lib/navigation';
 import { qk } from '../../src/lib/queries';
 import { queryClient } from '../../src/lib/queryClient';
 import { MoreScreen } from '../../src/owner/MoreScreen';
-import { ModelUnavailableNotice } from '../../src/screens/common';
+import { ApiError } from '@gen-harness/contracts';
+import { ActionError, ModelUnavailableNotice } from '../../src/screens/common';
 import { NoModelBanner } from '../../src/screens/queue/NoModelBanner';
 import { SetupPage } from '../../src/setup/SetupPage';
 import {
@@ -664,6 +665,31 @@ describe('Đích "Chọn model" dồn về /setup?buoc=nguon-ai', () => {
     a.unmount();
     wrap(<ModelUnavailableNotice agyOnly />);
     expect(screen.getByRole('link', { name: /Thêm nguồn AI/ })).toHaveAttribute('href', '/api');
+  });
+
+  it('vai không phải Owner (Quản lý, Vận hành…): KHÔNG có nút "Chọn model"/"Thêm nguồn AI" dẫn tới màn họ không vào được — chữ "Báo Sếp chọn nguồn AI" + Chi tiết kỹ thuật', () => {
+    const wrap = (ui: JSX.Element) => render(<MemoryRouter>{ui}</MemoryRouter>);
+    queryClient.setQueryData(qk.me, ME('manager'));
+    const a = wrap(<ModelUnavailableNotice reasons="Không có nhà cung cấp: lỗi 401" />);
+    expect(screen.queryByRole('link', { name: /Chọn model/ })).toBeNull();
+    expect(screen.getByTestId('model-unavailable-ask-owner')).toHaveTextContent('Báo Sếp chọn nguồn AI');
+    expect(screen.getByText('Chi tiết kỹ thuật')).toBeInTheDocument();
+    a.unmount();
+    const b = wrap(<ModelUnavailableNotice agyOnly />);
+    expect(screen.queryByRole('link', { name: /Thêm nguồn AI/ })).toBeNull();
+    expect(screen.getByTestId('model-unavailable-ask-owner')).toBeInTheDocument();
+    b.unmount();
+    // Bàn làm việc (dịch / tạo lại nháp) dùng ActionError: Quản lý gặp MODEL_UNAVAILABLE cũng chỉ thấy chữ báo Sếp
+    const err = new ApiError(503, { code: 'MODEL_UNAVAILABLE', title: 'Chưa có model AI chạy được', detail: { reasons: ['Gemini: HTTP 401'] } } as never);
+    const c = wrap(<ActionError error={err} />);
+    expect(screen.queryByRole('link', { name: /Chọn model/ })).toBeNull();
+    expect(screen.getByTestId('model-unavailable-ask-owner')).toBeInTheDocument();
+    c.unmount();
+    // Owner vẫn thấy nút
+    queryClient.setQueryData(qk.me, ME('owner'));
+    wrap(<ModelUnavailableNotice reasons="x" />);
+    expect(screen.getByRole('link', { name: /Chọn model/ })).toHaveAttribute('href', '/setup?buoc=nguon-ai');
+    queryClient.removeQueries({ queryKey: qk.me });
   });
 
   it('NoModelBanner (NoModelNotice): "Chọn model" → /setup?buoc=nguon-ai', async () => {

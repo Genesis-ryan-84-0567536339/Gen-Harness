@@ -38,6 +38,7 @@ import {
   FIRST_BRIEF_TEXT,
   briefSections,
   buildAlertRows,
+  DecideBlock,
   buildDecideRows,
   dayHeading,
   heroSubline,
@@ -51,7 +52,7 @@ import { IntelScreen, careLink, channelsConnected, feedWho, todayVsYesterday } f
 import { DecideList, decideCounts, draftFlags, draftRank, firstLines, sortDrafts } from '../../src/owner/work/DecideList';
 import { buildSuggestions, buildTodayItems, dayKey, dueText, profileLink } from '../../src/owner/work/TodayTasks';
 import { WorkScreen } from '../../src/owner/work/WorkScreen';
-import { useOwnerProposals } from '../../src/owner/queries';
+import { useOwnerBrief, useOwnerProposals, useOwnerRelations, useOwnerToday } from '../../src/owner/queries';
 import { useDrafts } from '../../src/screens/core/queries';
 
 // ── dữ liệu mẫu (tên hư cấu, không có địa chỉ Gen-hub / Kho thật) ───────────────────────────────────────────────────────
@@ -690,6 +691,31 @@ describe('Tình báo (/owner)', () => {
     noRawObjects();
   });
 
+  it('"Khách cần chăm": máy chủ báo state=error (quá giờ) ⇒ khối LỖI có Thử lại + Chi tiết kỹ thuật, KHÔNG nói "Không khách nào cần chăm gấp."', async () => {
+    mockApi({ '/owner/relations': (c) => (c.search.includes('list=care') ? json(200, { list: 'care', items: [], state: 'error' }) : undefined) });
+    mount(<IntelScreen />);
+    const err = await screen.findByTestId('intel-care-error');
+    expect(within(err).getByRole('button', { name: 'Thử lại' })).toBeInTheDocument();
+    expect(within(err).getAllByText('Chi tiết kỹ thuật').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Không khách nào cần chăm gấp.')).toBeNull();
+    noRawObjects();
+  });
+
+  it('"Khách cần chăm" dùng MỘT khoá truy vấn cho mọi nơi (Tình báo 3 · Việc 5 · Quan hệ 20): một yêu cầu limit=20, cắt ở máy khách', async () => {
+    const calls = mockApi();
+    function Both() {
+      const three = useOwnerRelations('care', 3);
+      const five = useOwnerRelations('care', 5);
+      const twenty = useOwnerRelations('care', 20);
+      return <div data-testid="care-n">{[three, five, twenty].map((q) => q.data?.items.length ?? '-').join(',')}</div>;
+    }
+    mount(<Both />);
+    await waitFor(() => expect(screen.getByTestId('care-n')).toHaveTextContent('2,2,2')); // CARE mẫu có 2 dòng
+    const careCalls = calls.filter((c) => c.path === '/owner/relations' && c.search.includes('list=care'));
+    expect(careCalls).toHaveLength(1);
+    expect(careCalls[0].search).toContain('limit=20');
+  });
+
   it('khối rỗng: một câu + một nút; khối tải: khung chờ', async () => {
     mockApi({ '/owner/feed': FEED({ items: [] }), '/owner/relations': { list: 'care', items: [] } });
     mount(<IntelScreen />);
@@ -843,6 +869,92 @@ describe('Việc (/owner/viec)', () => {
   });
 });
 
+describe('"Cần Sếp quyết" không bao giờ nói "không có gì" khi một nguồn chưa tải được (F-60-R5)', () => {
+  const EMPTY_TEXT = 'Không có gì chờ Sếp duyệt.';
+
+  it('đề xuất rỗng + nháp LỖI ⇒ không có EmptyState, có OwnerError với Thử lại + Chi tiết kỹ thuật', async () => {
+    mockApi({ '/drafts': () => problem500(), '/owner/proposals': { items: [] } });
+    mount(<WorkListHarness />, '/owner/viec');
+    const err = await screen.findByTestId('work-decide-error');
+    expect(screen.queryByText(EMPTY_TEXT)).toBeNull();
+    expect(within(err).getByRole('button', { name: 'Thử lại' })).toBeInTheDocument();
+    expect(within(err).getAllByText('Chi tiết kỹ thuật').length).toBeGreaterThan(0);
+    noRawObjects();
+  });
+
+  it('nháp đang tải (đề xuất đã xong, rỗng) ⇒ khung chờ, chưa có EmptyState', async () => {
+    mockApi({ '/drafts': () => new Promise<Response>(() => {}) as unknown as Response, '/owner/proposals': { items: [] } });
+    mount(<WorkListHarness />, '/owner/viec');
+    expect(await screen.findByTestId('work-decide-loading')).toBeInTheDocument();
+    expect(screen.queryByText(EMPTY_TEXT)).toBeNull();
+  });
+
+  it('nháp rỗng + đề xuất lỗi hoặc máy chủ báo unavailable ⇒ không EmptyState, có Thử lại + Chi tiết kỹ thuật', async () => {
+    state.drafts = [];
+    mockApi({ '/owner/proposals': () => problem500() });
+    const first = mount(<WorkListHarness />, '/owner/viec');
+    const err = await screen.findByTestId('work-decide-error');
+    expect(screen.queryByText(EMPTY_TEXT)).toBeNull();
+    expect(within(err).getByRole('button', { name: 'Thử lại' })).toBeInTheDocument();
+    first.unmount();
+
+    queryClient.clear();
+    mockApi({ '/owner/proposals': { items: [], state: 'unavailable' } });
+    mount(<WorkListHarness />, '/owner/viec');
+    await screen.findByTestId('work-decide-error');
+    expect(screen.queryByText(EMPTY_TEXT)).toBeNull();
+  });
+
+  it('có nháp nhưng đề xuất lỗi ⇒ vẫn hiện nháp + ghi chú một phần có Thử lại và Chi tiết kỹ thuật', async () => {
+    state.drafts = [DRAFT_DETAIL('d1', 'Báo giá MDF')];
+    mockApi({ '/owner/proposals': () => problem500() });
+    mount(<WorkListHarness />, '/owner/viec');
+    const note = await screen.findByTestId('work-decide-partial');
+    expect(within(note).getByRole('button', { name: 'Thử lại' })).toBeInTheDocument();
+    expect(within(note).getAllByText('Chi tiết kỹ thuật').length).toBeGreaterThan(0);
+    expect(screen.queryByText(EMPTY_TEXT)).toBeNull();
+  });
+
+  it('cả hai xong và rỗng thật ⇒ mới nói "Không có gì chờ Sếp duyệt."', async () => {
+    state.drafts = [];
+    state.proposals = [];
+    mockApi();
+    mount(<WorkListHarness />, '/owner/viec');
+    expect(await screen.findByText(EMPTY_TEXT)).toBeInTheDocument();
+  });
+
+  it('DecideBlock (Tình báo): today.nav vắng + nháp lỗi + đề xuất rỗng ⇒ lỗi có Thử lại, không "Không có gì…"', async () => {
+    mockApi({
+      '/drafts': () => problem500(),
+      '/owner/proposals': { items: [] },
+      '/owner/today': TODAY({ nav: undefined as never }),
+      '/owner/brief': BRIEF({ live: { at: ago(0), sections: [] } }),
+    });
+    mount(<DecideBlockHarness />, '/owner');
+    const err = await screen.findByTestId('intel-decide-error');
+    expect(screen.queryByText(EMPTY_TEXT)).toBeNull();
+    expect(within(err).getByRole('button', { name: 'Thử lại' })).toBeInTheDocument();
+    expect(within(err).getAllByText('Chi tiết kỹ thuật').length).toBeGreaterThan(0);
+  });
+
+  it('DecideBlock: nav.proposals_unavailable ⇒ ghi chú một phần "Chưa đọc được đề xuất của Gen" có Thử lại', async () => {
+    state.drafts = [DRAFT_DETAIL('d1', 'Báo giá MDF')];
+    mockApi({ '/owner/today': TODAY({ nav: { urgent_open: 0, decide: 1, proposals_unavailable: true } }), '/owner/proposals': { items: [], state: 'unavailable' } });
+    mount(<DecideBlockHarness />, '/owner');
+    const note = await screen.findByTestId('intel-decide-partial');
+    expect(note).toHaveTextContent('Chưa đọc được đề xuất của Gen');
+    expect(within(note).getByRole('button', { name: 'Thử lại' })).toBeInTheDocument();
+  });
+});
+
+function DecideBlockHarness() {
+  const drafts = useDrafts('pending');
+  const proposals = useOwnerProposals();
+  const today = useOwnerToday();
+  const brief = useOwnerBrief();
+  return <DecideBlock drafts={drafts} proposals={proposals} today={today} brief={brief} />;
+}
+
 function WorkListHarness() {
   const drafts = useDrafts('pending');
   const proposals = useOwnerProposals();
@@ -946,6 +1058,17 @@ describe('Phân tích (/owner/phan-tich)', () => {
     mount(<AnalyticsScreen />, '/owner/phan-tich');
     expect(await screen.findByTestId('an-tile-cost')).toHaveTextContent('5.000 ₫');
     expect(screen.getAllByTestId('first-run-card')).toHaveLength(1);
+  });
+
+  it('state empty nhưng ĐÃ nối kênh (channels_connected > 0) ⇒ không có thẻ "Nối Zalo": một câu bật nhóm lắng nghe + nút → /guide/6', async () => {
+    const empty = INSIGHTS({ state: 'empty', channels_connected: 1, breakdown: { event_types: [], funnel: [] } }, INSIGHTS().metrics.map((m) => ({ ...m, total: 0, prev_total: 0, delta_pct: null })));
+    mockApi({ '/owner/insights': empty });
+    mount(<AnalyticsScreen />, '/owner/phan-tich');
+    const card = await screen.findByTestId('an-empty-listen');
+    expect(screen.queryByTestId('first-run-card')).toBeNull();
+    expect(card).toHaveTextContent('Chưa có tin nào — bật nhóm lắng nghe để Gen bắt đầu đọc');
+    expect(screen.getByTestId('an-empty-listen-cta')).toHaveAttribute('href', '/guide/6');
+    expect(screen.queryByTestId('an-table-card')).toBeNull();
   });
 
   it('bảng số liệu đủ 9 chỉ số (máy tính: <table>; điện thoại: danh sách xếp chồng) + 4 cột Chỉ số · Kỳ này · Kỳ trước · Thay đổi', async () => {

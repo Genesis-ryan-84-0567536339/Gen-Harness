@@ -19,7 +19,7 @@ import { ProposalDecide } from '../actions/ProposalDecide';
 import { draftTargetText } from '../actions/useOwnerActions';
 import { ASK_GEN_PROMPTS, asText, countText } from '../ownerModel';
 import { openAskGen } from '../AskGenScreen';
-import { OwnerError } from '../parts';
+import { OwnerError, PartialLoadNote } from '../parts';
 import './work.css';
 
 /** Số nháp đầu danh sách được tải chi tiết (cờ + 2 dòng đầu). */
@@ -160,17 +160,24 @@ export function DecideList({
   });
   const title = 'Cần Sếp quyết';
 
-  if (drafts.isPending && proposals.isPending) return <Card title={title} state="loading" className={className} data-testid="work-decide-loading" />;
-  if (drafts.isError && proposals.isError) {
+  const retryAll = () => void Promise.all([drafts.refetch(), proposals.refetch()]);
+  const retrying = drafts.isFetching || proposals.isFetching;
+  // Nháp là nguồn chính: chưa tải xong thì chưa được nói "không có gì". Đề xuất của Gen "không đọc được" (lỗi hoặc máy chủ báo
+  // unavailable) cũng KHÔNG phải "không có đề xuất".
+  const proposalsDown = proposals.isError || proposals.data?.state === 'unavailable';
+  if (drafts.isPending) return <Card title={title} state="loading" className={className} data-testid="work-decide-loading" />;
+  const props: OwnerProposal[] = Array.isArray(proposals.data?.items) ? proposals.data.items.filter((p) => asText(p?.id)) : [];
+  const counts = decideCounts(drafts, proposals);
+  const nothingToShow = counts.total === 0 && items.length === 0 && props.length === 0;
+  if (nothingToShow && (drafts.isError || proposalsDown)) {
     return (
       <Card title={title} state="error" className={className} data-testid="work-decide-error">
-        <OwnerError error={drafts.error} onRetry={() => void Promise.all([drafts.refetch(), proposals.refetch()])} retrying={drafts.isFetching || proposals.isFetching} />
+        <OwnerError error={drafts.isError ? drafts.error : proposals.error ?? new Error('Máy chủ chưa đọc được đề xuất của Gen')} onRetry={retryAll} retrying={retrying} />
       </Card>
     );
   }
-  const props: OwnerProposal[] = Array.isArray(proposals.data?.items) ? proposals.data.items.filter((p) => asText(p?.id)) : [];
-  const counts = decideCounts(drafts, proposals);
-  if (counts.total === 0 && items.length === 0 && props.length === 0) {
+  if (nothingToShow && proposals.isPending) return <Card title={title} state="loading" className={className} data-testid="work-decide-loading" />;
+  if (nothingToShow) {
     return (
       <Card title={title} className={className} data-testid="work-decide">
         <EmptyState
@@ -200,7 +207,17 @@ export function DecideList({
           <Icon name="ph ph-lock-key" size={14} />
           <span>{PIN_HINT}</span>
         </p>
-        {drafts.isError || proposals.isError ? <p className="owner-muted">Chưa tải được một phần danh sách — Sếp thử lại sau ít phút.</p> : null}
+        {drafts.isError || proposalsDown ? (
+          <PartialLoadNote
+            error={drafts.isError ? drafts.error : proposals.error}
+            detail={drafts.isError || proposals.isError ? undefined : 'Máy chủ báo chưa đọc được đề xuất của Gen (state=unavailable)'}
+            onRetry={retryAll}
+            retrying={retrying}
+            testId="work-decide-partial"
+          >
+            {drafts.isError ? 'Chưa tải được danh sách nháp chờ duyệt — danh sách dưới đây có thể thiếu.' : 'Chưa đọc được đề xuất của Gen — danh sách dưới đây có thể thiếu.'}
+          </PartialLoadNote>
+        ) : null}
       </div>
       <ul className="work-list" aria-label="Việc chờ Sếp quyết">
         {sorted.map((d) => (

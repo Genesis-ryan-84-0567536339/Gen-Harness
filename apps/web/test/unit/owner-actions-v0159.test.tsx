@@ -435,7 +435,7 @@ describe('hook đọc của Mặt tiền (queries.ts)', () => {
     const urls = calls.map((c) => c.url);
     expect(urls).toContain('/api/v1/owner/brief?id=brief-2');
     expect(urls).toContain('/api/v1/owner/insights?range=month&only=messages_in%2Cunanswered');
-    expect(urls).toContain('/api/v1/owner/relations?list=care&limit=5');
+    expect(urls).toContain('/api/v1/owner/relations?list=care&limit=20'); // care luôn tải MỘT khoá (20), nơi cần 5 cắt ở máy khách
     expect(INSIGHTS_REFRESH_MS).toBe(10 * 60_000);
   });
 

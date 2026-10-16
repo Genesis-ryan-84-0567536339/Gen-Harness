@@ -18,7 +18,7 @@ import { DEFAULT_TZ, fmtAgo, fmtDM, fmtHM } from '../../lib/format';
 import { DraftDecide } from '../actions/DraftDecide';
 import { ProposalDecide } from '../actions/ProposalDecide';
 import { OWNER_PATHS, asText, countText, safeLink } from '../ownerModel';
-import { OwnerError } from '../parts';
+import { OwnerError, PartialLoadNote } from '../parts';
 import './intel.css';
 
 /** Đích duy nhất của dải "chưa có nguồn AI" (G5 mở bước Nguồn AI ở đây). */
@@ -295,26 +295,35 @@ export function DecideBlock({
       Xem tất cả
     </Link>
   );
-  if (drafts.isPending && proposals.isPending) {
+  const retryAll = () => void Promise.all([drafts.refetch(), proposals.refetch()]);
+  const retrying = drafts.isFetching || proposals.isFetching;
+  // Đề xuất của Gen "không đọc được" (lỗi hoặc máy chủ báo unavailable) KHÔNG phải "không có đề xuất".
+  const proposalsDown = proposals.isError || proposals.data?.state === 'unavailable' || today.data?.nav?.proposals_unavailable === true;
+  // Nháp là nguồn chính: chưa tải xong thì chưa được nói "không có gì" (nav.decide hợp lệ thì tin con số máy chủ).
+  const navDecide = today.data?.nav?.decide;
+  const navKnown = typeof navDecide === 'number' && Number.isFinite(navDecide) && navDecide >= 0;
+  if (drafts.isPending && !navKnown) {
     return <Card title={title} state="loading" className={cx('intel-decide', cell)} data-testid="intel-decide-loading" />;
-  }
-  if (drafts.isError && proposals.isError) {
-    return (
-      <Card title={title} state="error" className={cx('intel-decide', cell)} data-testid="intel-decide-error">
-        <OwnerError error={drafts.error} onRetry={() => void Promise.all([drafts.refetch(), proposals.refetch()])} retrying={drafts.isFetching || proposals.isFetching} />
-      </Card>
-    );
   }
   const draftItems = drafts.data ? (Array.isArray(drafts.data.items) ? drafts.data.items : []) : null;
   const propItems = proposals.data ? (Array.isArray(proposals.data.items) ? proposals.data.items : []) : null;
   const nDrafts = drafts.data ? (typeof drafts.data.total === 'number' ? drafts.data.total : (draftItems?.length ?? 0)) : 0;
   const nProps = propItems?.length ?? 0;
-  const nav = today.data?.nav?.decide;
-  const count = typeof nav === 'number' && Number.isFinite(nav) && nav >= 0 ? nav : nDrafts + nProps;
+  const count = navKnown ? navDecide : nDrafts + nProps;
   const fallback = briefSections(brief.data).find((s) => s.key === 'drafts_pending') ?? null;
   const rows = buildDecideRows(draftItems, propItems, drafts.isError ? fallback : null);
 
   if (count === 0 && rows.length === 0) {
+    // Không biết chắc là rỗng: chưa tải đủ hoặc có nguồn lỗi ⇒ không được viết "Không có gì chờ Sếp duyệt."
+    const unsure = !navKnown && (drafts.isError || proposalsDown || proposals.isPending);
+    if (unsure && (drafts.isError || proposalsDown)) {
+      return (
+        <Card title={title} state="error" className={cx('intel-decide', cell)} data-testid="intel-decide-error">
+          <OwnerError error={drafts.isError ? drafts.error : proposals.error ?? new Error('Máy chủ chưa đọc được đề xuất của Gen')} onRetry={retryAll} retrying={retrying} />
+        </Card>
+      );
+    }
+    if (unsure) return <Card title={title} state="loading" className={cx('intel-decide', cell)} data-testid="intel-decide-loading" />;
     if (hideWhenEmpty) return null;
     return (
       <Card title={title} action={more} className={cx('intel-decide', cell)} data-testid="intel-decide">
@@ -341,7 +350,17 @@ export function DecideBlock({
           <span> việc chờ Sếp quyết</span>
         </p>
         {context ? <p className="owner-muted">{context}</p> : null}
-        {drafts.isError || proposals.isError ? <p className="owner-muted">Chưa tải được một phần danh sách — Sếp mở Việc để xem đủ.</p> : null}
+        {drafts.isError || proposalsDown ? (
+          <PartialLoadNote
+            error={drafts.isError ? drafts.error : proposals.error}
+            detail={drafts.isError || proposals.isError ? undefined : 'Máy chủ báo chưa đọc được đề xuất của Gen (state=unavailable)'}
+            onRetry={retryAll}
+            retrying={retrying}
+            testId="intel-decide-partial"
+          >
+            {drafts.isError ? 'Chưa tải được danh sách nháp — Sếp mở Việc để xem đủ.' : 'Chưa đọc được đề xuất của Gen — Sếp mở Việc để xem đủ.'}
+          </PartialLoadNote>
+        ) : null}
       </div>
       <ul className="kit-list" aria-label="Việc chờ Sếp quyết">
         {rows.map((r) => (

@@ -7,8 +7,10 @@
  * `useOwnerFeedContext(id | null)` · `useOwnerRelations(list)` · `useOwnerInsights(range, only?)` (làm tươi 10 phút) ·
  * `useOwnerProposals()` · `useOwnerTasks()` · `useIsOwnerRole()`.
  */
+import { useCallback } from 'react';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
-import type { FeedView, InsightKey, InsightRange } from '@gen-harness/contracts';
+import { ApiError } from '@gen-harness/contracts';
+import type { FeedView, InsightKey, InsightRange, OwnerRelations } from '@gen-harness/contracts';
 import { api } from '../lib/api';
 import { useMe } from '../lib/queries';
 import type { OwnerRelationList } from './ownerModel';
@@ -80,12 +82,31 @@ export const useOwnerFeedContext = (id: string | null) => {
   });
 };
 
+/** "Khách cần chăm" luôn tải MỘT lần ở cỡ này (một khoá truy vấn); nơi cần ít hơn (Tình báo 3, Việc 5) cắt ở máy khách. */
+export const CARE_FETCH_LIMIT = 20;
+
+/**
+ * 5 danh sách của Quan hệ. `care` dùng chung MỘT khoá cho mọi màn (Tình báo / Việc / Quan hệ) ⇒ một lần tính nặng ở máy chủ
+ * thay vì ba. Máy chủ báo `state: "error"` (quá giờ / lỗi) ⇒ coi là lỗi tải (câu thân thiện + Chi tiết kỹ thuật + Thử lại),
+ * KHÔNG hiện "không khách nào cần chăm".
+ */
 export const useOwnerRelations = (list: OwnerRelationList, limit = 20) => {
   const owner = useIsOwnerRole();
+  const fetchLimit = list === 'care' ? CARE_FETCH_LIMIT : limit;
+  const select = useCallback(
+    (d: OwnerRelations): OwnerRelations => {
+      if (d.state === 'error') {
+        throw new ApiError(503, { code: 'RELATIONS_UNAVAILABLE', title: 'Danh sách này chưa tính được lúc này. Sếp thử lại sau ít phút.' });
+      }
+      return list === 'care' && limit < fetchLimit && Array.isArray(d.items) ? { ...d, items: d.items.slice(0, limit) } : d;
+    },
+    [list, limit, fetchLimit],
+  );
   return useQuery({
-    queryKey: [...OWNER_KEYS.relations(list), limit] as const,
-    queryFn: ({ signal }) => ownerApi.relations(list, limit, signal),
+    queryKey: [...OWNER_KEYS.relations(list), fetchLimit] as const,
+    queryFn: ({ signal }) => ownerApi.relations(list, fetchLimit, signal),
     enabled: owner,
+    select,
   });
 };
 

@@ -4,7 +4,7 @@ import { loginAsOwner, p3Hook, resetMock } from './support';
 /**
  * v0.1.59 (G3) — màn PHÂN TÍCH (/owner/phan-tich) trên máy chủ giả (tất định):
  *  - chuyển 7 ↔ 30 ngày đổi số và câu so sánh;
- *  - mode `empty` → đúng một first-run-card; `collecting` → câu "Đang gom dữ liệu", không huy hiệu chênh lệch; `full` → bảng đủ 9 chỉ số;
+ *  - mode `nochannel` → đúng một first-run-card; `empty` (đã nối kênh, chưa có tin) → một câu bật nhóm lắng nghe; `collecting` → câu "Đang gom dữ liệu", không huy hiệu chênh lệch; `full` → bảng đủ 9 chỉ số;
  *  - chi phí: "N lượt chưa đặt giá" + link /api, KHÔNG "0 ₫"; điện thoại: tile 2×2 → biểu đồ cao 180 → bảng xếp chồng, không cuộn ngang.
  * Chế độ dữ liệu: p3Hook(request, 'owner', 'data', { mode }).
  */
@@ -72,13 +72,24 @@ test.describe('v0.1.59 · Phân tích', () => {
     await expect(tile).toContainText('so với 7 ngày trước');
   });
 
-  test('mode empty → đúng một first-run-card, không tile / biểu đồ / bảng', async ({ page }) => {
-    await p3Hook(page.request, 'owner', 'data', { mode: 'empty' });
+  test('mode nochannel → đúng một first-run-card, không tile / biểu đồ / bảng', async ({ page }) => {
+    await p3Hook(page.request, 'owner', 'data', { mode: 'nochannel' });
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto('/owner/phan-tich');
     await expect(page.locator('[data-testid=first-run-card]')).toHaveCount(1);
     for (const id of ['an-tile-messages_in', 'an-chart-messages', 'an-table-card', 'an-tile-cost']) await expect(page.getByTestId(id)).toHaveCount(0);
     await expect(page.locator('.gh-state--empty')).toHaveCount(0);
+    await noHorizontalScroll(page);
+  });
+
+  test('mode empty (đã nối Zalo, chưa có tin) → KHÔNG bảo nối Zalo lại: một câu "bật nhóm lắng nghe" + nút → /guide/6', async ({ page }) => {
+    await p3Hook(page.request, 'owner', 'data', { mode: 'empty' });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/owner/phan-tich');
+    await expect(page.getByTestId('first-run-card')).toHaveCount(0);
+    await expect(page.getByTestId('an-empty-listen')).toContainText('Chưa có tin nào — bật nhóm lắng nghe để Gen bắt đầu đọc');
+    await expect(page.getByTestId('an-empty-listen-cta')).toHaveAttribute('href', '/guide/6');
+    for (const id of ['an-tile-messages_in', 'an-chart-messages', 'an-table-card']) await expect(page.getByTestId(id)).toHaveCount(0);
     await noHorizontalScroll(page);
   });
 

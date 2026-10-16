@@ -447,7 +447,24 @@ export function AnalyticsScreen(): JSX.Element {
       body = (
         <div className="kit-grid" data-testid="an-empty">
           <div className="kit-c12">
-            <FirstRunCard />
+            {/* `empty` = chưa từng có tin, KHÔNG phải chưa nối kênh: thẻ "Nối Zalo" chỉ khi thật sự chưa nối kênh nào
+                (cùng luật với Tình báo, Thông tin, Quan hệ — channels_connected === 0). Đã nối mà chưa có tin ⇒ chỉ đường bật nhóm. */}
+            {d.channels_connected === 0 ? (
+              <FirstRunCard />
+            ) : (
+              <Card data-testid="an-empty-listen">
+                <EmptyState
+                  icon="ph ph-ear"
+                  title="Chưa có tin nào — bật nhóm lắng nghe để Gen bắt đầu đọc"
+                  description="Zalo đã nối nhưng mọi nhóm đang ở “Không nghe”. Bật nghe một nhóm là số liệu sẽ hiện ở đây."
+                  action={
+                    <Link to="/guide/6" className="kit-btn kit-btn--primary" data-testid="an-empty-listen-cta">
+                      Bật nhóm lắng nghe
+                    </Link>
+                  }
+                />
+              </Card>
+            )}
           </div>
           {showCost ? <CostTile m={cost} ai={d.ai_cost} /> : null}
         </div>

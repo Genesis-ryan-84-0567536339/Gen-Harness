@@ -9,7 +9,8 @@
 import { useId, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { Card, EmptyState, Icon, Skeleton, cx } from '@gen-harness/ui';
-import { CardError } from '../screens/common';
+import { errorDetail } from '../lib/errorText';
+import { CardError, InlineError } from '../screens/common';
 import { openAskGen } from './AskGenScreen';
 import { OWNER_PATHS, asText, avatarText, safeLink } from './ownerModel';
 
@@ -35,6 +36,38 @@ export function OwnerError({ error, onRetry, retrying }: { error: unknown; onRet
   return (
     <div className="owner-error" data-testid="owner-error">
       <CardError error={error} onRetry={onRetry} retrying={retrying} />
+    </div>
+  );
+}
+
+/**
+ * Một PHẦN dữ liệu không tải được trong khi phần còn lại vẫn hiện: câu thân thiện + "Chi tiết kỹ thuật" + nút Thử lại
+ * (luật cứng: lỗi hiển thị luôn có chi tiết kỹ thuật). `error` có thể là lỗi truy vấn hoặc `null` (khi máy chủ báo `unavailable`
+ * mà không có lỗi), lúc đó `detail` dùng chuỗi mô tả thay thế.
+ */
+export function PartialLoadNote({
+  children,
+  error,
+  detail,
+  onRetry,
+  retrying,
+  testId = 'owner-partial-error',
+}: {
+  children: ReactNode;
+  error?: unknown;
+  detail?: string | null;
+  onRetry?: () => void;
+  retrying?: boolean;
+  testId?: string;
+}) {
+  return (
+    <div className="owner-partial" data-testid={testId}>
+      <InlineError detail={detail ?? (error ? errorDetail(error) : null)}>{children}</InlineError>
+      {onRetry ? (
+        <button type="button" className="kit-btn kit-btn--secondary" onClick={onRetry} disabled={retrying} data-testid={`${testId}-retry`}>
+          Thử lại
+        </button>
+      ) : null}
     </div>
   );
 }
