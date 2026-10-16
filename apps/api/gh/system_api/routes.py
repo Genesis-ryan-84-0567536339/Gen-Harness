@@ -96,7 +96,8 @@ async def channel_card(db: AsyncSession, redis: Any, org_id: uuid.UUID, type_: s
             q = orjson.loads(raw)
             qr = {"session_id": str(s.id), "image": q.get("image"), "expires_at": q.get("expires_at"),
                   "scanned": bool(q.get("scanned"))}
-    # v0.1.62 (F068): "Thời gian trực" đo 24 giờ THỰC (chỉ cắt bớt khi kênh mới nối lần đầu trong vòng 24 giờ), không tính lại
+    # v0.1.62 (F068): "Thời gian trực" đo 24 giờ THỰC (chỉ cắt bớt
+    # khi kênh mới nối lần đầu trong vòng 24 giờ), không tính lại
     # từ lần nối gần nhất — nối lại sau một đêm mất mạng không được hiện 100%.
     first_up = None
     if s is not None and state == "active":
@@ -173,14 +174,14 @@ async def channel_login(type_: str, body: LoginIn, request: Request, user: servi
 def _bridge_offline() -> ApiError:
     """503 khi bộ nhận tin (bridge) không có nhịp tim: câu cho Sếp là tiếng Việt thường; mã BRIDGE_OFFLINE nằm ở
     "Chi tiết kỹ thuật" của Console (v0.1.62, F069)."""
-    return ApiError(503, "BRIDGE_OFFLINE",
-                    "Bộ nhận tin Zalo/WhatsApp đang tắt — thử lại sau ít phút; nếu vẫn lỗi, gửi Gói chẩn đoán cho người hỗ trợ")
+    return ApiError(503, "BRIDGE_OFFLINE", "Bộ nhận tin Zalo/WhatsApp đang tắt — thử lại sau ít phút; "
+                    "nếu vẫn lỗi, gửi Gói chẩn đoán cho người hỗ trợ")
 
 
 @router.post("/channels/{type_}/resume", status_code=202)
 async def channel_resume(type_: str, request: Request, user: service.CurrentUser = Depends(MANAGE),
                          db: AsyncSession = DB) -> dict[str, Any]:
-    """v0.1.62 (F046): nối lại bằng PHIÊN ĐÃ LƯU (không quét QR) khi phiên đang 'Lỗi kết nối' mà credential còn. Không đổi
+    """v0.1.62 (F046): nối lại bằng PHIÊN ĐÃ LƯU (không quét QR) khi phiên 'Lỗi kết nối' còn credential. Không đổi
     quyền truy cập nào so với lần đăng nhập đã chấp nhận rủi ro trước đó, nên không đòi mã PIN lần nữa."""
     ch = await _qr_channel(db, user.org_id, type_)
     redis = request.app.state.redis

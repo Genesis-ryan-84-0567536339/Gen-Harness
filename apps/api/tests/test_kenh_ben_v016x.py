@@ -1,6 +1,7 @@
 """Gói B4 (đợt sửa sau kiểm kê v0.1.60): KÊNH BỀN.
 
-- F046: mất mạng KHÔNG xoá phiên Zalo/WhatsApp đã lưu — phiên 'error' giữ credential, bridge.hello nối lại cả phiên 'error',
+- F046: mất mạng KHÔNG xoá phiên Zalo/WhatsApp đã lưu — phiên 'error' giữ credential, bridge.hello nối lại cả
+  phiên 'error',
   có nút "Nối lại bằng phiên đã lưu" (POST /channels/{type}/resume), chuông nói đúng nguyên nhân.
 - F063: ảnh QR trong Redis sống theo `expires_at` của sự kiện (Zalo 100 giây) chứ không cố định 70 giây.
 - F067: phiên mới `active` ⇒ lõi ra lệnh `session.close` cho phiên cũ cùng kênh (bridge không giữ kết nối ma).
@@ -24,6 +25,7 @@ from tests.phase2 import org_id
 from tests.test_rbac_api import login_as
 
 CRED = {"imei": "imei-1", "cookie": [{"key": "zpw", "value": "v"}], "userAgent": "UA"}
+SHOP = {"id": "9", "name": "Cửa hàng"}
 
 
 async def _channel(db, org, type_="zalo"):  # type: ignore[no-untyped-def]
@@ -77,7 +79,8 @@ async def _bells(db):  # type: ignore[no-untyped-def]
 def test_qr_ttl_theo_expires_at() -> None:
     now = datetime(2026, 10, 16, 3, 0, 0, tzinfo=UTC)
     assert qr_ttl_s((now + timedelta(seconds=100)).isoformat(), now) == 100 + ingest.QR_TTL_MARGIN_S   # Zalo
-    assert qr_ttl_s((now + timedelta(seconds=20)).isoformat().replace("+00:00", "Z"), now) == 20 + ingest.QR_TTL_MARGIN_S
+    soon = (now + timedelta(seconds=20)).isoformat().replace("+00:00", "Z")
+    assert qr_ttl_s(soon, now) == 20 + ingest.QR_TTL_MARGIN_S
     assert qr_ttl_s((now - timedelta(seconds=30)).isoformat(), now) == 5        # đã quá hạn: giữ rất ngắn
     for bad in (None, "", "không-phải-ngày", 123):
         assert qr_ttl_s(bad, now) == ingest.QR_TTL_FALLBACK_S >= 100
@@ -87,7 +90,8 @@ async def test_qr_zalo_khong_bien_mat_som(owner_api, db, redis, app) -> None:  #
     org = await org_id(db)
     sid = await _session(db, org, state="pending_qr", started_ago_h=None, cred=False)
     exp = (datetime.now(UTC) + timedelta(seconds=100)).isoformat()
-    await _status(app, redis, org, "session.qr", {"session_id": str(sid), "image": "data:image/png;base64,AAAA", "expires_at": exp})
+    await _status(app, redis, org, "session.qr",
+                  {"session_id": str(sid), "image": "data:image/png;base64,AAAA", "expires_at": exp})
     ttl = await redis.ttl(f"gh:channel:qr:{sid}")
     assert 100 <= ttl <= 110, f"QR Zalo phải sống tới hết 100 giây của bridge, không phải 70 giây (ttl={ttl})"
     await _status(app, redis, org, "session.scanned", {"session_id": str(sid)})
@@ -111,22 +115,25 @@ async def test_mat_mang_giu_phien_va_noi_lai_giu_started_at(owner_api, db, redis
     org = await org_id(db)
     sid = await _session(db, org, state="active", started_ago_h=30)
     before = await _row(db, sid)
-    out = await _status(app, redis, org, "session.reconnecting", {"session_id": str(sid), "error": "NETWORK_UNAVAILABLE"})
+    lost = {"session_id": str(sid), "error": "NETWORK_UNAVAILABLE"}
+    out = await _status(app, redis, org, "session.reconnecting", lost)
     row = await _row(db, sid)
     assert row.state == "error" and row.has_cred and row.ended_at is None
     assert row.meta["error"] == "NETWORK_UNAVAILABLE"
-    assert out[0][0] == "channel.status" and out[0][1]["state"] == "error" and out[0][1]["error"] == "NETWORK_UNAVAILABLE"
+    assert out[0][0] == "channel.status"
+    assert (out[0][1]["state"], out[0][1]["error"]) == ("error", "NETWORK_UNAVAILABLE")
     bells = await _bells(db)
     assert len(bells) == 1 and "mất kết nối mạng" in bells[0].body and "hết hạn" not in bells[0].body
     # Lặp lại báo cáo: không chuông thứ hai.
-    await _status(app, redis, org, "session.reconnecting", {"session_id": str(sid), "error": "NETWORK_UNAVAILABLE"})
+    await _status(app, redis, org, "session.reconnecting", lost)
     assert len(await _bells(db)) == 1
 
     # Nối lại được: về Đang kết nối, "Phiên mở" giữ mốc gốc (F068).
-    await _status(app, redis, org, "session.active", {"session_id": str(sid), "account": {"id": "9", "name": "Cửa hàng"}})
+    await _status(app, redis, org, "session.active", {"session_id": str(sid), "account": SHOP})
     after = await _row(db, sid)
     assert after.state == "active" and after.ended_at is None and after.has_cred
-    assert abs((after.started_at - before.started_at).total_seconds()) < 1, "nối lại cùng phiên không được đặt lại started_at"
+    moved = abs((after.started_at - before.started_at).total_seconds())
+    assert moved < 1, "nối lại cùng phiên không được đặt lại started_at"
 
 
 async def test_chi_bi_tu_choi_that_moi_xoa_phien(owner_api, db, redis, app) -> None:  # type: ignore[no-untyped-def]
@@ -159,8 +166,10 @@ async def test_hello_noi_lai_ca_phien_error_con_credential(owner_api, db, redis,
 
 async def test_hello_khong_song_lai_phien_cu_da_bi_thay(owner_api, db, redis, app) -> None:  # type: ignore[no-untyped-def]
     org = await org_id(db)
-    await _session(db, org, state="error", ended=True, started_ago_h=48, type_="zalo")          # phiên lỗi cũ còn credential
-    await _session(db, org, state="logged_out", ended=True, started_ago_h=2, cred=False, type_="zalo")  # Sếp đã đăng xuất sau đó
+    # Phiên lỗi cũ còn credential…
+    await _session(db, org, state="error", ended=True, started_ago_h=48, type_="zalo")
+    # …nhưng Sếp đã đăng xuất sau đó.
+    await _session(db, org, state="logged_out", ended=True, started_ago_h=2, cred=False, type_="zalo")
     await _status(app, redis, org, "bridge.hello", {"channels": ["zalo"]})
     assert await _control(redis) == []
 
@@ -213,7 +222,7 @@ async def test_phien_moi_active_dong_phien_cu_tren_bridge(owner_api, db, redis, 
     old = await _session(db, org, state="active", started_ago_h=10)
     stale = await _session(db, org, state="error", started_ago_h=5)          # đang thử nối lại (ended_at NULL)
     new = await _session(db, org, state="pending_qr", started_ago_h=None, cred=False, qr_ago_h=0.01)
-    await _status(app, redis, org, "session.active", {"session_id": str(new), "account": {"id": "9", "name": "Cửa hàng"}})
+    await _status(app, redis, org, "session.active", {"session_id": str(new), "account": SHOP})
     ctl = await _control(redis)
     closed = sorted(c["session_id"] for c in ctl if c["type"] == "session.close")
     assert closed == sorted([str(old), str(stale)])
@@ -231,7 +240,8 @@ async def test_quet_lai_qr_huy_vong_xin_qr_cu_tren_bridge(owner_api, db, redis) 
     r = await api.send("POST", "/channels/zalo/login", {"accept_risk": True})
     assert r.status_code == 202
     ctl = await _control(redis)
-    assert [(c["type"], c["session_id"]) for c in ctl if c["type"] == "session.close"] == [("session.close", str(pending))]
+    closes = [(c["type"], c["session_id"]) for c in ctl if c["type"] == "session.close"]
+    assert closes == [("session.close", str(pending))]
     assert [c["session_id"] for c in ctl if c["type"] == "session.login"] == [r.json()["session_id"]]
 
 
@@ -239,7 +249,8 @@ async def test_quet_lai_qr_huy_vong_xin_qr_cu_tren_bridge(owner_api, db, redis) 
 
 async def test_thoi_gian_truc_khong_bi_dat_lai_khi_noi_lai(owner_api, db, redis) -> None:  # type: ignore[no-untyped-def]
     org = await org_id(db)
-    # Phiên đầu nối từ 20 giờ trước rồi mất mạng; phiên hiện tại vừa nối lại 1 phút trước. Chỉ có nhịp tim trong 60 phút qua.
+    # Phiên đầu nối từ 20 giờ trước rồi mất mạng; phiên hiện tại
+    # vừa nối lại 1 phút trước. Chỉ có nhịp tim trong 60 phút qua.
     await _session(db, org, state="logged_out", ended=True, started_ago_h=20, cred=False)
     await _session(db, org, state="active", started_ago_h=1 / 60)
     now = datetime.now(UTC)

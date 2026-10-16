@@ -60,10 +60,10 @@ describe('WhatsApp quét QR (v0.1.59): mã dày phải vẽ đủ lớn', () => 
     expect(block).not.toHaveClass('qr-block--lg');
   });
 
-  it('gợi ý đúng thực tế: WhatsApp đổi mã 60 giây đầu rồi 20 giây; Zalo vẫn 60 giây', () => {
+  it('gợi ý đúng thực tế: WhatsApp đổi mã 60 giây đầu rồi 20 giây; Zalo không hứa số giây cố định', () => {
     expect(qrHint({ type: 'whatsapp', outbound_queued: 0 })).toMatch(/60 giây.*20 giây/);
     expect(qrHint({ type: 'whatsapp', outbound_queued: 0 })).toMatch(/chưa liên kết được/);
-    expect(qrHint({ type: 'zalo', outbound_queued: 0 })).toBe('Mã tự làm mới mỗi 60 giây.');
+    expect(qrHint({ type: 'zalo', outbound_queued: 0 })).not.toMatch(/60 giây/);
   });
 
   it('mã mới tới qua WebSocket thì thay ảnh ngay (mã làm mới sau khi máy chủ yêu cầu cũng vậy)', async () => {

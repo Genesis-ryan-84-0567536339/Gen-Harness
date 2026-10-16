@@ -18,7 +18,7 @@ import type {
   ViewScope,
 } from '@gen-harness/contracts';
 import { ALL_ONLY_PERMS, ApiError, PinCancelledError } from '@gen-harness/contracts';
-import { DEFAULT_TZ, countWord, fmtDM, fmtHM, fmtInt, fmtLatency, fmtPct, fmtRemaining, fmtSessionAge } from '../../lib/format';
+import { DEFAULT_TZ, fmtDM, fmtHM, fmtInt, fmtLatency, fmtPct, fmtRemaining, fmtSessionAge } from '../../lib/format';
 import { ACC3, BAD, N3, N4, N5, N8, OK, TXT, WARN, channelIcon, channelTone } from '../data/dataModel';
 
 export const CHANNEL_STATE: Record<ChannelState, { label: string; tone: string }> = {
@@ -34,6 +34,32 @@ export const CHANNEL_STATE: Record<ChannelState, { label: string; tone: string }
 export function channelState(s: ChannelState | string): { label: string; tone: string; border: string } {
   const v = CHANNEL_STATE[s as ChannelState] ?? { label: s, tone: N4 };
   return { ...v, border: v.tone === N4 ? N8 : v.tone };
+}
+
+/**
+ * v0.1.62 (F046/F051): hai trường lõi thêm cho thẻ kênh QR — `resumable` (phiên 'Lỗi kết nối' còn credential ⇒ nối lại
+ * được không cần quét QR) và `bridge_online` (bộ nhận tin còn nhịp tim; false ⇒ "Mất liên lạc"). Giữ ở đây vì kiểu
+ * `Channel` dùng chung của hợp đồng chưa khai báo; máy chủ cũ không gửi ⇒ undefined ⇒ cách hiện như trước.
+ */
+export interface ChannelExtras {
+  resumable?: boolean;
+  bridge_online?: boolean | null;
+}
+export type ChannelView = Channel & ChannelExtras;
+
+/** Mã lỗi bridge báo khi mất mạng nhưng đang tự nối lại (phiên còn nguyên). */
+export const NETWORK_UNAVAILABLE = 'NETWORK_UNAVAILABLE';
+
+/** Thẻ nói còn phiên chạy mà bộ nhận tin (bridge) đã ngừng báo nhịp tim ⇒ tin có thể đang không về. */
+export function isBridgeLost(c: Pick<Channel, 'type' | 'state'> & ChannelExtras): boolean {
+  return (c.type === 'zalo' || c.type === 'whatsapp') && c.bridge_online === false && (c.state === 'active' || c.state === 'error');
+}
+
+/** Nhãn + màu trạng thái của thẻ: thêm "Mất liên lạc" và "Mất mạng — đang nối lại" mà `channelState` (theo state thuần) không có. */
+export function channelStatus(c: Pick<Channel, 'type' | 'state' | 'error'> & ChannelExtras): { label: string; tone: string; border: string } {
+  if (isBridgeLost(c)) return { label: 'Mất liên lạc', tone: WARN, border: WARN };
+  if (c.state === 'error' && c.error === NETWORK_UNAVAILABLE) return { label: 'Mất mạng — đang nối lại', tone: WARN, border: WARN };
+  return channelState(c.state);
 }
 
 /** Icon tile colour: the design colours the tile by channel health, not brand. */
@@ -52,17 +78,21 @@ export const isQrChannel = (c: Pick<Channel, 'type' | 'state'>) =>
   c.state !== 'not_installed' && c.state !== 'identity_only' && (c.type === 'zalo' || c.type === 'whatsapp');
 
 /** Meta line under the channel name — segments so "N nhóm lắng nghe" can be a button. */
-export function channelMeta(c: Channel, now = Date.now(), tz?: string): { before: string; groups: string | null; after: string } {
+export function channelMeta(c: Channel & ChannelExtras, now = Date.now(), tz?: string): { before: string; groups: string | null; after: string } {
   const groups = `${fmtInt(c.groups_listening)} nhóm lắng nghe`;
   const device = c.account_label ? `thiết bị ${c.account_label}` : '';
   switch (c.state) {
     case 'active':
+      if (isBridgeLost(c)) {
+        const lost = c.last_heartbeat_at ? `Chưa nhận được tin từ ${fmtHM(c.last_heartbeat_at, tz)}` : 'Chưa nhận được tin';
+        return { before: `${lost} · `, groups, after: '' };
+      }
       return { before: `Phiên mở ${fmtSessionAge(c.started_at, now)} · `, groups, after: device ? ` · ${device}` : '' };
     case 'expired':
     case 'error': {
+      // Bỏ "N tin trong hàng đợi gửi": bridge không có hàng đợi bền (F069) — tin gửi khi phiên không chạy bị từ chối ngay.
       const since = c.last_heartbeat_at ? `Ngừng nhận tin từ ${fmtHM(c.last_heartbeat_at, tz)}` : 'Ngừng nhận tin';
-      const queue = c.outbound_queued > 0 ? ` · ${fmtInt(c.outbound_queued)} tin trong hàng đợi gửi` : '';
-      return { before: `${since}${queue} · `, groups, after: '' };
+      return { before: `${since} · `, groups, after: '' };
     }
     case 'pending_qr':
       return { before: 'Đang chờ quét mã trên điện thoại · ', groups, after: '' };
@@ -80,14 +110,17 @@ export function channelMeta(c: Channel, now = Date.now(), tz?: string): { before
   }
 }
 
-export type ChannelAction = 'logout' | 'rescan' | 'login' | 'unavailable' | 'configure' | null;
+export type ChannelAction = 'logout' | 'rescan' | 'login' | 'resume' | 'unavailable' | 'configure' | null;
 
-export function channelAction(c: Pick<Channel, 'type' | 'state'>): { action: ChannelAction; label: string; icon: string; accent: boolean } {
+export function channelAction(c: Pick<Channel, 'type' | 'state'> & ChannelExtras): { action: ChannelAction; label: string; icon: string; accent: boolean } {
   switch (c.state) {
     case 'active':
       return { action: 'logout', label: 'Đăng xuất', icon: 'ph ph-sign-out', accent: false };
-    case 'expired':
     case 'error':
+      // v0.1.62 (F046): phiên còn credential ⇒ nối lại bằng phiên đã lưu trước; "Quét lại QR" là đường phụ (channelSecondaryAction).
+      if (c.resumable) return { action: 'resume', label: 'Nối lại bằng phiên đã lưu', icon: 'ph ph-plugs-connected', accent: true };
+      return { action: 'rescan', label: 'Quét lại QR', icon: 'ph ph-qr-code', accent: true };
+    case 'expired':
     case 'pending_qr':
       return { action: 'rescan', label: 'Quét lại QR', icon: 'ph ph-qr-code', accent: true };
     case 'logged_out':
@@ -99,6 +132,11 @@ export function channelAction(c: Pick<Channel, 'type' | 'state'>): { action: Cha
     default:
       return { action: null, label: '', icon: '', accent: false };
   }
+}
+
+/** Nút phụ: phiên 'Lỗi kết nối' nối lại được thì vẫn cho quét lại QR khi nối lại không xong. */
+export function channelSecondaryAction(c: Pick<Channel, 'type' | 'state'> & ChannelExtras): { action: 'rescan'; label: string; icon: string } | null {
+  return c.state === 'error' && c.resumable ? { action: 'rescan', label: 'Quét lại QR', icon: 'ph ph-qr-code' } : null;
 }
 
 export interface StatCell {
@@ -130,42 +168,52 @@ export function channelStats(c: Channel): StatCell[] {
 }
 
 // ── QR ────────────────────────────────────────────────────────────────────
-export const QR_LIFETIME_MS = 60_000;
+/**
+ * Thời gian sống tối đa của mã (để vẽ thanh đếm ngược) theo kênh: Zalo 100 giây (bridge `ZALO_QR_TTL_MS`), WhatsApp mã đầu
+ * 60 giây. Con số ĐẾM NGƯỢC luôn tính từ `expires_at` của sự kiện, không từ hằng số nào (F063).
+ */
+export const QR_LIFETIME_MS = { zalo: 100_000, whatsapp: 60_000 } as const;
+export const qrLifetimeMs = (type: string): number => QR_LIFETIME_MS[type as keyof typeof QR_LIFETIME_MS] ?? QR_LIFETIME_MS.zalo;
 
-export function qrRemaining(expiresAt: string, now = Date.now()): { ms: number; pct: number; label: string } {
+export function qrRemaining(expiresAt: string, now = Date.now(), lifetimeMs: number = QR_LIFETIME_MS.zalo): { ms: number; pct: number; label: string } {
   const ms = Math.max(0, new Date(expiresAt).getTime() - now);
-  const s = Math.min(QR_LIFETIME_MS / 1000, Math.ceil(ms / 1000));
-  return { ms, pct: Math.min(100, (ms / QR_LIFETIME_MS) * 100), label: `${s} giây` };
+  const s = Math.ceil(ms / 1000);
+  return { ms, pct: Math.min(100, (ms / lifetimeMs) * 100), label: `${s} giây` };
 }
 
-export function qrHint(c: Pick<Channel, 'outbound_queued' | 'type'>): string {
-  const queued =
-    c.outbound_queued > 0
-      ? ` ${countWord(c.outbound_queued)} tin gửi đi đang được giữ trong hàng đợi, sẽ tự gửi khi phiên nối lại.`
-      : '';
+export function qrHint(c: Pick<Channel, 'type'> & Partial<Pick<Channel, 'outbound_queued'>>): string {
   // WhatsApp đổi mã sau 60 giây đầu rồi cứ 20 giây một lần; mã dày hơn Zalo nên cần đưa điện thoại gần, đủ sáng.
   if (c.type === 'whatsapp') {
-    return `Mã tự làm mới (mã đầu 60 giây, các mã sau 20 giây). Nếu điện thoại báo chưa liên kết được, đợi mã mới hiện rồi quét lại.${queued}`;
+    return 'Mã tự làm mới (mã đầu 60 giây, các mã sau 20 giây). Nếu điện thoại báo chưa liên kết được, đợi mã mới hiện rồi quét lại.';
   }
-  return `Mã tự làm mới mỗi 60 giây.${queued}`;
+  // Không hứa số giây cố định: thời gian còn lại hiện ở thanh đếm ngược (tính từ hạn thật của mã).
+  return 'Mã tự làm mới khi hết hạn — thời gian còn lại của mã này hiện ở thanh đếm ngược bên dưới.';
 }
 
 /** WhatsApp có mã QR dày (≈ 60 × 60 ô): ảnh phải đủ lớn mới quét được, khác Zalo (≈ 30 × 30 ô). */
 export const isDenseQr = (c: Pick<Channel, 'type'>) => c.type === 'whatsapp';
+
+/** Câu cho Sếp khi bộ nhận tin Zalo/WhatsApp đang tắt (503 BRIDGE_OFFLINE); mã lỗi nằm ở "Chi tiết kỹ thuật" (F069). */
+export const BRIDGE_OFFLINE_TITLE = 'Bộ nhận tin Zalo/WhatsApp đang tắt — chưa tạo được mã QR';
+export const BRIDGE_OFFLINE_TEXT = 'Thử lại sau ít phút; nếu vẫn lỗi, gửi Gói chẩn đoán cho người hỗ trợ.';
 
 // ── lỗi phiên (mã lỗi bridge → câu thân thiện; mã gốc nằm ở "Chi tiết kỹ thuật") ───────────────────────────────
 const RESCAN = 'Bấm "Quét lại QR" để thử lại.';
 const SAFE_WAIT = 'Đợi vài phút rồi bấm "Quét lại QR"; đừng bấm liên tục vì WhatsApp dễ tạm khoá ghép thiết bị.';
 
 /** Câu thân thiện cho mã lỗi phiên của bridge. `type` quyết định lời khuyên riêng của kênh (mẹo "không liên kết được thiết bị" chỉ có ở WhatsApp). */
-export function channelErrorText(code: string, name: string, type?: Channel['type']): string {
+export function channelErrorText(code: string, name: string, type?: Channel['type'], resumable = false): string {
+  // Phiên còn credential ⇒ chỉ đường nối lại KHÔNG cần quét QR trước (F046).
+  const redo = resumable ? 'Bấm "Nối lại bằng phiên đã lưu" (không cần quét QR); không được thì bấm "Quét lại QR".' : RESCAN;
   const no = /^WA_NO_QR_(\d+)$/.exec(code);
   if (no) {
     return `${name} từ chối mở phiên ghép thiết bị mới (mã ${no[1]}). Thường do địa chỉ mạng bị hạn chế hoặc thư viện WhatsApp trong bản này đã cũ. ${SAFE_WAIT}`;
   }
   switch (code) {
+    case NETWORK_UNAVAILABLE:
+      return `Mất kết nối mạng với ${name}. Gen đang tự thử nối lại bằng phiên đã lưu — không cần quét lại QR; có mạng là tự nhận tin trở lại.`;
     case 'WA_NETWORK':
-      return `Bridge không nối được tới máy chủ ${name}. Kiểm tra mạng của máy chạy Gen-Harness (DNS, tường lửa, Docker ra Internet tới web.whatsapp.com) rồi bấm "Quét lại QR".`;
+      return `Bộ nhận tin không nối được tới máy chủ ${name}. Kiểm tra mạng của máy chạy Gen-Harness (DNS, tường lửa, Docker ra Internet tới web.whatsapp.com) rồi bấm "Quét lại QR".`;
     case 'PAIRING_REJECTED':
       return `${name} từ chối lần ghép này (điện thoại có thể đã báo "không liên kết được thiết bị"). ${SAFE_WAIT}`;
     case 'QR_EXPIRED':
@@ -181,19 +229,19 @@ export function channelErrorText(code: string, name: string, type?: Channel['typ
     case 'CREDENTIAL_UNREADABLE':
       return `Phiên đã lưu không còn dùng được nữa. ${RESCAN}`;
     case 'CONNECTION_REPLACED':
-      return `${name} đang được mở ở một nơi khác nên phiên này bị ngắt. ${RESCAN}`;
+      return `${name} đang được mở ở một nơi khác nên phiên này bị ngắt. ${redo}`;
     case 'MULTIDEVICE_MISMATCH':
       return `Tài khoản ${name} chưa bật chế độ nhiều thiết bị. Cập nhật ${name} trên điện thoại rồi bấm "Quét lại QR".`;
     case 'RECONNECT_FAILED':
-      return `Mất kết nối với ${name} và nối lại nhiều lần không được. Kiểm tra mạng của máy chạy Gen-Harness rồi bấm "Quét lại QR".`;
+      return `Mất kết nối với ${name} và nối lại nhiều lần không được. Kiểm tra mạng của máy chạy Gen-Harness rồi ${resumable ? 'bấm "Nối lại bằng phiên đã lưu"' : 'bấm "Quét lại QR"'}.`;
     case 'CHANNEL_UNAVAILABLE':
-      return `Bridge chưa mở được kênh ${name} (thư viện ${name} trong bản này không khởi tạo được). Nhờ người quản trị kiểm tra bridge rồi bấm "Quét lại QR".`;
+      return `Bộ nhận tin chưa mở được kênh ${name} (thư viện ${name} trong bản này không khởi tạo được). Nhờ người quản trị kiểm tra bộ nhận tin rồi bấm "Quét lại QR".`;
     case 'NO_LOGIN_INFO':
       return `${name} báo quét xong nhưng không trả về thông tin đăng nhập. ${RESCAN}`;
     case 'BRIDGE_KEY_MISSING':
-      return 'Bridge chưa có khoá bảo mật nên chưa đăng nhập được. Nhờ người quản trị máy chủ kiểm tra khoá bridge.';
+      return 'Bộ nhận tin chưa có khoá bảo mật nên chưa đăng nhập được. Nhờ người quản trị máy chủ kiểm tra khoá bảo mật của bộ nhận tin.';
     default:
-      return `Phiên ${name} gặp lỗi khi ghép thiết bị. ${RESCAN} Còn lỗi thì gửi "Chi tiết kỹ thuật" cho người hỗ trợ.`;
+      return `Phiên ${name} gặp lỗi khi ghép thiết bị. ${redo} Còn lỗi thì gửi "Chi tiết kỹ thuật" cho người hỗ trợ.`;
   }
 }
 

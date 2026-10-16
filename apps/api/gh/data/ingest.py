@@ -24,7 +24,8 @@ from gh.data.common import CHANNEL_NAME, CHANNEL_PREFIX, LISTENING_MODES, fetch_
 
 log = logging.getLogger("gh.ingest")
 
-#: v0.1.62 (F063): TTL ảnh QR trong Redis lấy theo `expires_at` của sự kiện (Zalo sống 100 giây, WhatsApp 60/20 giây) cộng
+#: v0.1.62 (F063): TTL ảnh QR trong Redis lấy theo `expires_at`
+# của sự kiện (Zalo sống 100 giây, WhatsApp 60/20 giây) cộng
 #: một đoạn đệm để Console còn thấy mã tới đúng lúc nó hết hạn; không đọc được `expires_at` thì dùng giá trị dự phòng.
 QR_TTL_FALLBACK_S = 110
 QR_TTL_MARGIN_S = 10
@@ -289,7 +290,8 @@ async def _status_ws(redis: Redis, org_id: Any, type: str, state: str, account_l
 
 async def publish_resume(bus: EventBus, org_id: uuid.UUID, type: str, session_id: Any, credential_enc: Any,
                          actor: str = "system:ingest") -> None:
-    """Ra lệnh bridge đăng nhập lại một phiên bằng credential đã lưu (giải mã ở lõi, mã hoá lại theo khoá vận chuyển)."""
+    """Ra lệnh bridge đăng nhập lại một phiên bằng credential đã lưu (giải mã ở lõi, mã hoá lại theo khoá vận chuyển)
+    — dùng chung cho bridge.hello và nút "Nối lại bằng phiên đã lưu"."""
     wire = crypto.transport_encrypt(crypto.decrypt(bytes(credential_enc), b"channel_session"), f"{type}:{session_id}")
     await bus.publish(BRIDGE_CONTROL, "session.login", {"channel": type, "session_id": str(session_id),
                                                         "credential": wire}, actor=actor, org_id=org_id)
@@ -310,7 +312,8 @@ async def handle_status(db: AsyncSession, redis: Redis, bus: EventBus, org_id: u
     out: list[tuple[str, dict[str, Any]]] = []
     if type == "bridge.hello":
         await sync_listen_sets(db, redis, org_id)
-        # v0.1.62 (F046): nối lại cả phiên 'error' còn credential (mất mạng / bị mở nơi khác), không chỉ 'active' — miễn là
+        # v0.1.62 (F046): nối lại cả phiên 'error' còn credential (mất mạng
+        # / bị mở nơi khác), không chỉ 'active' — miễn là
         # chưa có phiên nào MỚI hơn của kênh (không "sống lại" phiên cũ sau khi Sếp đã quét QR mới hoặc đăng xuất).
         rows = (await db.execute(text("""
             SELECT s.id, s.credential_enc, c.type
@@ -347,7 +350,8 @@ async def handle_status(db: AsyncSession, redis: Redis, bus: EventBus, org_id: u
     elif type == "session.active":
         account = p.get("account") or {}
         cred = _reencrypt(p.get("credential"), s)
-        # Một kênh chỉ một phiên hoạt động: phiên cũ kết thúc — và (v0.1.62, F067) bridge được bảo đóng kết nối của chúng.
+        # Một kênh chỉ một phiên hoạt động: phiên cũ kết thúc
+        # — và (v0.1.62, F067) bridge được bảo đóng kết nối của chúng.
         old = (await db.execute(text("""UPDATE core.channel_sessions SET state = 'logged_out', ended_at = now()
                                         WHERE channel_id = :c AND id <> :i AND ended_at IS NULL RETURNING id"""),
                                 {"c": s.channel_id, "i": s.id})).scalars().all()
@@ -356,7 +360,8 @@ async def handle_status(db: AsyncSession, redis: Redis, bus: EventBus, org_id: u
         # v0.1.62 (F068): nối lại CÙNG phiên (bridge khởi động lại, mất mạng) giữ `started_at` gốc — "Phiên mở" không bị
         # đặt lại; phiên vừa nối lại thì `ended_at` về NULL (phiên 'error' được nối lại bằng phiên đã lưu).
         await db.execute(text("""
-            UPDATE core.channel_sessions SET state = 'active', started_at = COALESCE(started_at, now()), ended_at = NULL,
+            UPDATE core.channel_sessions SET state = 'active', started_at = COALESCE(started_at, now()),
+                   ended_at = NULL,
                    credential_enc = COALESCE(:c, credential_enc),
                    external_account = :x, account_label = :l, last_heartbeat_at = now(),
                    meta = meta || CAST(:m AS jsonb) WHERE id = :i"""),
@@ -372,7 +377,8 @@ async def handle_status(db: AsyncSession, redis: Redis, bus: EventBus, org_id: u
         out.append(("channel.status", {"type": s.type, "state": "active", "account_label": label,
                                        "session_id": str(s.id), "scanned": True, "error": None}))
     elif type == "session.reconnecting":
-        # v0.1.62 (F046): bridge mất mạng/máy chủ nền tảng, ĐANG tự thử nối lại (credential còn nguyên) — không phải hết hạn.
+        # v0.1.62 (F046): bridge mất mạng/máy chủ nền tảng, ĐANG tự
+        # thử nối lại (credential còn nguyên) — không phải hết hạn.
         if s.state in ("active", "error"):
             error = str(p.get("error") or "NETWORK_UNAVAILABLE")[:64]
             was_live = s.state == "active" and s.ended_at is None
