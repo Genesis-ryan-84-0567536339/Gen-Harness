@@ -43,14 +43,14 @@ test.describe('v0.1.62 · Antigravity CLI dùng được cho mọi vai', () => {
     await expect(refineryRow.getByTestId('binding-blocked-hint-core.refinery')).toHaveCount(0);
     await expect(table).not.toContainText('Chỉ cho Gen');
 
-    // Gói G: Soạn lại / dịch nháp là lớp ngoại giao ⇒ chưa dùng agy: dòng nói đúng lý do, model agy bị làm mờ kèm giải thích
+    // Soạn lại / dịch nháp là lớp ngoại giao ⇒ chạy agy qua hộp riêng; hộp chưa chạy nên chưa dùng agy: dòng nói đúng lý do, model agy bị làm mờ kèm giải thích
     // (câu của máy chủ), KHÔNG phải câu "chỉ cho Gen" của luật cũ.
     const replyRow = table.locator('tr', { hasText: 'Soạn lại / dịch nháp' });
-    await expect(replyRow).toContainText('Antigravity chưa dùng cho việc trả lời người ngoài');
+    await expect(replyRow).toContainText('Hộp riêng Antigravity chưa chạy');
     await replyRow.locator('.apm-model-pill').click();
     let dlg = page.getByRole('dialog', { name: /Soạn lại \/ dịch nháp/ });
     await expect(dlg.locator('option', { hasText: 'chỉ cho Gen' })).toHaveCount(0);
-    await expect(dlg.getByTestId('binding-agy-blocked-note')).toContainText('chờ hộp riêng (bản sau)');
+    await expect(dlg.getByTestId('binding-agy-blocked-note')).toContainText('Hộp riêng Antigravity chưa chạy');
     await expect(dlg.locator(`option[value="${agyModels[0].id}"]`)).toBeDisabled();
     await dlg.getByRole('button', { name: 'Huỷ' }).click();
     await expect(dlg).toBeHidden();

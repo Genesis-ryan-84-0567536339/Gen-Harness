@@ -71,21 +71,23 @@ def test_router_client_caps_timeout_only_for_background() -> None:
     cli = _Timed(300.0)
     router = ModelRouter(None, None, cli_factory=cli)       # type: ignore[arg-type]
     p = SimpleNamespace(kind="antigravity_cli")
-    assert router._client(p, None) is cli and cli.timeout == 300.0
-    router._client(p, None, background=True)
+    assert router._client(p, None, where="inproc") is cli and cli.timeout == 300.0
+    router._client(p, None, where="inproc", background=True)
     assert cli.timeout == AGY_BACKGROUND_TIMEOUT_S
     short = _Timed(30.0)                                    # timeout đã ngắn hơn trần thì giữ nguyên (không nới ra)
-    ModelRouter(None, None, cli_factory=short)._client(p, None, background=True)    # type: ignore[arg-type]
+    ModelRouter(None, None, cli_factory=short)._client(p, None, where="inproc", background=True)    # type: ignore[arg-type]
     assert short.timeout == 30.0
 
 
-async def test_generate_applies_the_cap_to_background_purposes_only(app, db, redis) -> None:  # type: ignore[no-untyped-def]
+async def test_generate_applies_the_cap_to_background_purposes_only(  # type: ignore[no-untyped-def]
+        app, db, redis, boxctl) -> None:
     org = await org_id(db)
     await cli_provider(db, org, "antigravity_cli", 1)
     for purpose, expect in (("refinery.extract", AGY_BACKGROUND_TIMEOUT_S), ("duty_decide", AGY_BACKGROUND_TIMEOUT_S),
                             ("gen.briefing", AGY_BACKGROUND_TIMEOUT_S), ("gen.turn", 300.0)):
         cli = _Timed(300.0)
-        router = ModelRouter(sessionmaker(), redis, cli_factory=cli)
+        # core.refinery chạy qua hộp riêng (H2), core.gen trong tiến trình: trần thời gian áp cho cả hai client.
+        router = ModelRouter(sessionmaker(), redis, cli_factory=cli, box_factory=cli)
         await router.generate(org, agent_key="core.gen" if purpose == "gen.turn" else "core.refinery",
                               purpose=purpose, messages=[Message("user", "x")], json_mode=False)
         assert cli.seen == [expect], (purpose, cli.seen)

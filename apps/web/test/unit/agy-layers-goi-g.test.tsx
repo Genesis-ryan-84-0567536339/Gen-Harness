@@ -14,7 +14,8 @@ import { qk } from '../../src/lib/queries';
  * dùng agy; máy chủ nêu lý do ở `agy_blocked_reason` và từ chối 422 khi vẫn gán. Web làm mờ model agy ở dòng đó + giải
  * thích; lớp core (Gen, sàng lọc, Bản tin, agent nội bộ) giữ nguyên.
  */
-const REASON = 'Antigravity chưa dùng cho việc trả lời người ngoài — chờ hộp riêng (bản sau)';
+const REASON =
+  'Hộp riêng Antigravity chưa chạy — việc có người ngoài (trả lời khách, sàng lọc tin, Gen của nhân viên) tạm dùng nguồn AI kế, không dùng Antigravity trong tiến trình';
 
 const json = (status: number, body?: unknown) =>
   new Response(body === undefined ? null : JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -109,7 +110,7 @@ describe('gói G — agy phân lớp trên màn API & Model', () => {
     expect(agyBlockedReason({ agy_blocked_reason: ` ${REASON} ` })).toBe(REASON);
     expect(agyBlockedReason({ agy_blocked_reason: null })).toBeNull();
     expect(agyBlockedReason({})).toBeNull();
-    expect(AGY_LAYERS_TEXT).toMatch(/chờ hộp riêng \(bản sau\)/);
+    expect(AGY_LAYERS_TEXT).toMatch(/qua hộp riêng/);
     expect(AGY_LAYERS_TEXT).not.toMatch(/chỉ dùng cho Gen|chỉ cho Gen/i);
   });
 
@@ -180,7 +181,7 @@ describe('gói G — agy phân lớp trên màn API & Model', () => {
     const dialog = await screen.findByRole('dialog');
     await user.click(within(dialog).getByRole('button', { name: 'Lưu' }));
     const alert = await within(dialog).findByRole('alert');
-    expect(alert).toHaveTextContent(/chờ hộp riêng \(bản sau\)|Dữ liệu chưa hợp lệ/);
+    expect(alert).toHaveTextContent(/Hộp riêng Antigravity chưa chạy|Dữ liệu chưa hợp lệ/);
     expect(document.body.textContent).not.toContain('[object Object]');
   });
 });

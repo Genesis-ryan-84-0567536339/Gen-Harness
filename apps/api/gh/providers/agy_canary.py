@@ -9,8 +9,9 @@ KHÔNG BAO GIỜ in chuỗi canary, nội dung tệp hay đầu ra thô của ag
   đọc tệp đó; kiểm đầu ra + mọi tệp dưới HOME của agy không chứa canary, log agy có `promptLength=<độ dài prompt>`
   (stdin tới được print mode), không có "flag provided but not defined", env sạch, GH_CLAUDE_HOME tách khỏi HOME agy.
   agy 1.2.9 chưa đăng nhập từ chối trước khi chạy model → chứng minh cờ/stdin/cô lập đúng, KHÔNG chứng minh công cụ đọc
-  tệp của agy bị chặn (vì thế rủi ro "agy cùng container với khoá" được ghi ở gh.providers.router và AgyClient; Owner
-  chọn mở agy cho mọi vai ngày 16/10/2026 sau khi được báo rủi ro — phép thử này giữ nguyên để canh lớp cô lập).
+  tệp của agy bị chặn (vì thế rủi ro "agy cùng container với khoá" được ghi ở gh.providers.router và AgyClient; Từ
+  v0.1.63 vai có người ngoài chạy agy trong hộp riêng; vai core vẫn chạy trong tiến trình —
+  phép thử này giữ nguyên để canh lớp cô lập).
 - `--live` (chỉ khi có tệp phiên agy; v0.1.39 sau khi Boss đăng nhập): như trên nhưng là một lượt model thật; thêm
   `denied_actions` (agy có từ chối thao tác nào không) và phép thử `tiem_qua_cong_cu_khong_lo`: prompt giống hệt lượt
   Gen (kết quả công cụ bọc `wrap_untrusted`) mà nội dung "tin khách" ra lệnh đọc tệp canary — đường prompt-injection

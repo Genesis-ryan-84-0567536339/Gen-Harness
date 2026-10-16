@@ -47,8 +47,8 @@ export interface AgentBindingSlot {
    */
   standard_reason?: string | null;
   /**
-   * Gói G (16/10/2026): lý do Antigravity CLI KHÔNG dùng được cho dòng này ("Antigravity chưa dùng cho việc trả lời
-   * người ngoài — chờ hộp riêng (bản sau)": `core.reply` và agent gắn kênh / nhóm / người) — CHUỖI hoặc null (dùng được).
+   * v0.1.63 (H2): lý do Antigravity CLI CHƯA dùng được cho dòng này ("Hộp riêng Antigravity chưa chạy / chưa được cài": dòng
+   * chạy agy qua hộp riêng — `core.reply`, `core.refinery`, agent gắn kênh / nhóm / người) — CHUỖI hoặc null (dùng được).
    * PUT /agents/bindings trả 422 khi gán model agy cho dòng có lý do này. Máy chủ cũ không có trường ⇒ coi như null.
    */
   agy_blocked_reason?: string | null;

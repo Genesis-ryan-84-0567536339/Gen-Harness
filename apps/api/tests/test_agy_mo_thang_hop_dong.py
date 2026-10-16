@@ -11,9 +11,11 @@ core.refinery, core.briefing và agent:<id> NỘI BỘ. Khi Sếp CHỈ có ngu�
   3. `router.generate` dùng agy cho việc nền (sàng lọc, trực việc, Bản tin) mà bên gọi không phải xin cờ đặc biệt;
   4. không còn câu "chỉ dùng cho Gen" ở bất kỳ chuỗi nào hiển thị cho người dùng (API, lượt Gen, cảnh báo, giao diện).
 
-NGOẠI LỆ CÓ CHỦ ĐÍCH (gói G, Sếp chốt 16/10/2026 — kiến trúc phân lớp): lớp ngoại giao `core.reply` và agent gắn
-kênh / nhóm / người CHƯA dùng agy (chờ hộp riêng, bản sau) — các ca đó nằm ở test_agy_phan_lop.py, ở đây chỉ khoá
-rằng ngoại lệ là đúng một câu trung thực, hiển thị được và KHÔNG làm sống lại câu "chỉ dùng cho Gen".
+PHÂN LỚP (gói G + H2, Sếp chốt 16/10/2026): vai có người ngoài (core.reply, core.refinery, agent gắn kênh / nhóm /
+người, Gen của nhân viên) chạy agy QUA HỘP RIÊNG — hợp đồng này chạy với hộp `ok` (fixture `box`) nên MỌI vai vẫn có
+model agy và gọi được (hồi quy B1). Khi hộp tắt thì các vai đó chỉ còn đúng một câu trung thực, hiển thị được, KHÔNG làm
+sống lại câu "chỉ dùng cho Gen" (test_diplomatic_exception_is_one_honest_sentence); ma trận chi tiết ở
+test_agy_phan_lop.py / test_agy_placement_v0163.py.
 
 Lớp cô lập mỗi lượt của AgyClient KHÔNG đổi (test_agy_isolation_v0138); Claude Code CLI vẫn không chạy việc nền khi Sếp
 chưa cho phép (F-86) — nằm ở test_agy_all_agents.py, không lặp lại ở đây.
@@ -52,10 +54,10 @@ ROLE_CASES = [
     ("agent:{id}", "duty_decide"),
     ("agent:{id}", "setup_agent_try"),
 ]
-#: Lớp core dùng được agy; `core.reply` (ngoại giao) là ngoại lệ có chủ đích (gói G).
+#: Lớp core chạy agy trong tiến trình; `core.refinery` và `core.reply` (có người ngoài) chạy qua hộp (gói H2).
 CORE_KEYS = ("core.gen", "core.refinery", "core.briefing")
 DIPLOMATIC_KEY = "core.reply"
-DIPLOMATIC_REASON = "Antigravity chưa dùng cho việc trả lời người ngoài — chờ hộp riêng (bản sau)"
+DIPLOMATIC_REASON = "Hộp riêng Antigravity chưa chạy"       # tiền tố câu của agy_policy.REASON_BOX_DOWN
 OLD_RULE = re.compile(r"chỉ (?:dùng )?cho Gen|AGY_OWNER_GEN_ONLY|Antigravity chỉ", re.IGNORECASE)
 REPO = Path(__file__).resolve().parents[3]
 
@@ -86,17 +88,14 @@ async def _only_agy(api: Api) -> tuple[uuid.UUID, uuid.UUID]:
 
 # ─── 1. tầng Chuẩn: mọi vai có model agy ────────────────────────────────
 
-async def test_standard_tier_has_an_agy_model_for_every_role(owner_api, db, clis) -> None:  # type: ignore[no-untyped-def]
+async def test_standard_tier_has_an_agy_model_for_every_role(owner_api, db, clis, box) -> None:  # type: ignore[no-untyped-def]
     org, _mid = await _only_agy(owner_api)
     aid = await _seed_agent(db, org)
     r = await owner_api.get("/agents/bindings")
     assert r.status_code == 200, r.text
     items = {i["agent_key"]: i for i in r.json()["items"]}
     assert set(items) == {*CORE_KEYS, DIPLOMATIC_KEY, f"agent:{aid}"}
-    reply = items.pop(DIPLOMATIC_KEY)        # ngoại lệ có chủ đích: lý do trung thực, không phải "cần khoá API"
-    assert reply["source"] == "standard" and reply["standard"] is None
-    assert reply["standard_reason"] == DIPLOMATIC_REASON
-    for key, it in items.items():
+    for key, it in items.items():       # hộp chạy ⇒ KỂ CẢ core.reply: mọi vai có model agy, không lý do từ chối
         assert it["source"] == "standard", (key, it)
         assert it["standard_reason"] is None, (key, it["standard_reason"])          # không còn "cần khoá API (…)"
         std = it["standard"]
@@ -104,17 +103,21 @@ async def test_standard_tier_has_an_agy_model_for_every_role(owner_api, db, clis
         assert std["model_name"] in {"gemini-3.1-pro", "gemini-3.8-flash"}, (key, std)
     # Mục "Về mặc định" dùng cùng một sự thật cho từng dòng vai.
     dflt = {i["key"]: i for i in (await owner_api.get("/defaults")).json()["items"]}
-    for key in CORE_KEYS:
+    for key in (*CORE_KEYS, DIPLOMATIC_KEY):
         assert dflt[f"binding:{key}"]["default_text"].startswith("Chuẩn: gemini-"), (key, dflt[f"binding:{key}"])
-    assert dflt[f"binding:{DIPLOMATIC_KEY}"]["default_text"] == f"Chuẩn: {DIPLOMATIC_REASON}"
+    # Hộp tắt: vai có người ngoài nói thật vì sao (một câu), vai core không đổi.
+    box.state = "down"
+    items = {i["agent_key"]: i for i in (await owner_api.get("/agents/bindings")).json()["items"]}
+    assert items[DIPLOMATIC_KEY]["standard"] is None and DIPLOMATIC_REASON in items[DIPLOMATIC_KEY]["standard_reason"]
+    assert items["core.gen"]["standard"]["provider_name"] == "Antigravity CLI"
 
 
 # ─── 2. set_binding: gán agy cho mọi khoá ⇒ 200 ─────────────────────────
 
-async def test_set_binding_agy_is_200_for_every_role_including_agent(owner_api, db, clis) -> None:  # type: ignore[no-untyped-def]
+async def test_set_binding_agy_is_200_for_every_role_including_agent(owner_api, db, clis, box) -> None:  # type: ignore[no-untyped-def]
     org, mid = await _only_agy(owner_api)
     aid = await _seed_agent(db, org)
-    for key in (*CORE_KEYS, f"agent:{aid}"):
+    for key in (*CORE_KEYS, DIPLOMATIC_KEY, f"agent:{aid}"):
         r = await owner_api.send("PUT", f"/agents/bindings/{key}", {"model_id": str(mid)})
         assert r.status_code == 200, (key, r.status_code, r.text)
         b = r.json()["binding"]
@@ -122,9 +125,6 @@ async def test_set_binding_agy_is_200_for_every_role_including_agent(owner_api, 
         assert "blocked_reason" not in b and "AGY_OWNER_GEN_ONLY" not in r.text, (key, b)
     listing = (await owner_api.get("/agents/bindings")).json()
     for it in listing["items"]:
-        if it["agent_key"] == DIPLOMATIC_KEY:
-            assert it["source"] == "standard" and it["binding"] is None, it
-            continue
         assert it["source"] == "custom" and "blocked_reason" not in (it["binding"] or {}), it
     detail = (await owner_api.get(f"/agents/{aid}")).json()
     assert detail["binding"]["model_id"] == str(mid)
@@ -133,7 +133,7 @@ async def test_set_binding_agy_is_200_for_every_role_including_agent(owner_api, 
 # ─── 3. router.generate: agy chạy mọi vai, kể cả việc nền ────────────────
 
 @pytest.mark.parametrize("agent_key,purpose", ROLE_CASES)
-async def test_router_generate_runs_agy_for_every_role(owner_api, app, db, clis, agent_key, purpose) -> None:  # type: ignore[no-untyped-def]
+async def test_router_generate_runs_agy_for_every_role(owner_api, app, db, clis, box, agent_key, purpose) -> None:  # type: ignore[no-untyped-def]
     org, _mid = await _only_agy(owner_api)
     aid = await _seed_agent(db, org)
     n = len(_calls(clis))
@@ -144,8 +144,9 @@ async def test_router_generate_runs_agy_for_every_role(owner_api, app, db, clis,
     assert len(_calls(clis)) == n + 1 and _calls(clis)[-1]["via_stdin"] is True
 
 
-async def test_diplomatic_exception_is_one_honest_sentence(owner_api, app, db, clis) -> None:  # type: ignore[no-untyped-def]
-    """core.reply: gán agy bị từ chối (422) và lượt gọi không chạy agy — đúng một câu ngoại lệ."""
+async def test_diplomatic_exception_is_one_honest_sentence(owner_api, app, db, clis, box) -> None:  # type: ignore[no-untyped-def]
+    """core.reply khi hộp tắt: gán agy bị từ chối (422) và lượt gọi không chạy agy — đúng một câu trung thực."""
+    box.state = "down"
     org, mid = await _only_agy(owner_api)
     r = await owner_api.send("PUT", f"/agents/bindings/{DIPLOMATIC_KEY}", {"model_id": str(mid)})
     assert r.status_code == 422 and DIPLOMATIC_REASON in r.text and not OLD_RULE.search(r.text), r.text
@@ -153,10 +154,10 @@ async def test_diplomatic_exception_is_one_honest_sentence(owner_api, app, db, c
     with pytest.raises(ModelUnavailable) as ei:
         await app.state.model_router.generate(org, agent_key=DIPLOMATIC_KEY, purpose="draft_translate",
                                               messages=MSGS, json_mode=False)
-    assert DIPLOMATIC_REASON in ei.value.reasons and len(_calls(clis)) == n
+    assert any(DIPLOMATIC_REASON in r for r in ei.value.reasons) and len(_calls(clis)) == n
 
 
-async def test_binding_to_agy_drives_the_background_call(owner_api, app, db, clis) -> None:  # type: ignore[no-untyped-def]
+async def test_binding_to_agy_drives_the_background_call(owner_api, app, db, clis, box) -> None:  # type: ignore[no-untyped-def]
     """Gán agy cho vai nền / agent rồi gọi thật: bộ định tuyến dùng đúng model đã gán (không từ chối vì vai)."""
     org, mid = await _only_agy(owner_api)
     aid = await _seed_agent(db, org)
@@ -169,7 +170,7 @@ async def test_binding_to_agy_drives_the_background_call(owner_api, app, db, cli
 
 # ─── 4. không còn câu "chỉ dùng cho Gen" ở chỗ người dùng nhìn thấy ──────
 
-async def test_no_gen_only_wording_in_any_displayed_text(owner_api, app, client, db, clis) -> None:  # type: ignore[no-untyped-def]
+async def test_no_gen_only_wording_in_any_displayed_text(owner_api, app, client, db, clis, box) -> None:  # type: ignore[no-untyped-def]
     org, _mid = await _only_agy(owner_api)
     aid = await _seed_agent(db, org)
     shown: dict[str, str] = {}

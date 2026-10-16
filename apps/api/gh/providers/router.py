@@ -19,18 +19,22 @@ cá nhân của Sếp) bị bỏ qua trừ khi Owner cho phép (cảnh báo + x�
 vì chỉ còn Claude Code CLI chưa được phép ⇒ sự cố sức khoẻ `ai.background_no_source` (một chuông), tự đóng khi việc nền
 chạy lại được. 'Đọc theo lịch' mạng xã hội (gh.social) không gọi model — không thuộc diện này.
 
-v0.1.62 — Antigravity CLI (`agy`) dùng được ở MỌI lượt gọi: Gen của Owner và của nhân viên (kể cả lượt đã đọc nội dung
-bên ngoài), sàng lọc & suy luận chính, soạn lại / dịch nháp, Bản tin Gen, agent tự tạo và việc nền. Luật v0.1.38 (F-22)
-"agy chỉ cho Gen của Owner" đã GỠ theo quyết định của Owner ngày 16/10/2026: Owner được giải thích rủi ro (agy có công
-cụ đọc tệp / chạy lệnh, chạy cùng container với khoá hệ thống ⇒ nội dung bên ngoài có thể lừa agy đọc tệp trong
-container) và chọn "mở thẳng" thay vì "tách agy ra hộp riêng". Rủi ro CÒN LẠI nằm ở đó; lớp cô lập mỗi lượt của
-`AgyClient` (cwd rỗng 0700, env sạch, prompt qua stdin, regex tên model) vẫn giữ. Bước kế tiếp (chưa làm): tách agy ra
-container riêng không gắn khoá.
+Antigravity CLI (`agy`) — Owner mở cho các vai ngày 16/10/2026 sau khi được báo rủi ro (agy có công cụ đọc tệp / chạy
+lệnh: nội dung bên ngoài có thể lừa nó đọc tệp trong container nó chạy). Luật v0.1.38 (F-22) "agy chỉ cho Gen của
+Owner" đã gỡ ở v0.1.62; lớp cô lập mỗi lượt của `AgyClient` (cwd rỗng 0700, env sạch, prompt qua stdin, regex tên model)
+vẫn giữ.
 
-Gói G (16/10/2026) — agy PHÂN LỚP (quyết định của Sếp): lớp core dùng agy; lớp ngoại giao (`core.reply`, agent gắn
-kênh / nhóm / người) và Gen của người dùng không phải Owner thì KHÔNG (tham số `owner` của `generate`). MỘT hàm quyết
-định: `gh.providers.agy_policy.decide` (tiêu chí "agent ngoại giao" nằm ở đó); bộ định tuyến gỡ Antigravity CLI khỏi
-chuỗi của khoá bị chặn — kể cả dòng gán agy cũ — và ghi lý do vào `reasons`.
+v0.1.63 (gói H2) — MỖI VAI MỘT CHỖ CHẠY agy (quyết định của Sếp 16/10/2026; luật ở `gh.providers.placement`, MỘT điểm
+quyết định `gh.providers.agy_policy.decide` gộp luật đó với trạng thái hộp):
+- core (core.gen của Owner, core.briefing, agent nội bộ không gắn kênh / nhóm / người) ⇒ agy TRONG TIẾN TRÌNH
+  (`cli_factory` → `AgyClient`);
+- lớp ngoại giao / người ngoài (core.reply, agent ngoại giao, core.refinery sàng lọc tin người lạ, Gen của nhân viên,
+  lượt thử agent) ⇒ agy QUA HỘP RIÊNG (`box_factory` → `AgyBoxClient`, container không có khoá / DB / Redis chính);
+- hộp chưa cài / tắt ⇒ các vai qua hộp KHÔNG rơi về agy trong tiến trình: Antigravity bị gỡ khỏi chuỗi của lượt đó,
+  nguồn AI kế đứng ra, `reasons` ghi câu tiếng Việt trung thực ("Hộp riêng Antigravity chưa chạy / chưa được cài").
+Lỗi của hộp (`BoxUnavailable`, `BoxUnauthorized`…) có ngắt mạch RIÊNG và không đánh dấu phiên đăng nhập agy hết hạn —
+agy trong tiến trình của Sếp không bị kéo theo. Chỗ duy nhất tạo client agy trong tiến trình cho một lượt gọi model là
+`_client(..., where=placement.INPROC)`; `where` bắt buộc truyền (test quét `test_agy_placement_v0163`).
 """
 
 import asyncio
@@ -49,9 +53,10 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from gh import crypto
+from gh.agybox.client import AgyBoxClient, BoxUnavailable
 from gh.config import get_settings
 from gh.defaults import profiles
-from gh.providers import agy_policy, catalog
+from gh.providers import agy_policy, catalog, placement
 from gh.providers.clients import (
     AgyClient,
     AuthFailed,
@@ -79,7 +84,7 @@ CLI_AAD = b"cli_token"
 CLI_KINDS = ("antigravity_cli", "claude_code_cli")
 PROBE_PROMPT = "Trả lời đúng một chữ: OK"
 # Lịch sử: v0.1.38 (F-22) từng giới hạn agy chỉ cho lượt Gen của Owner (`allow_agy`, `AGY_OWNER_ONLY_REASON`,
-# `agy_only`…). Owner chọn mở thẳng ngày 16/10/2026 sau khi được báo rủi ro ⇒ v0.1.62 gỡ toàn bộ (xem docstring module).
+# `agy_only`…). v0.1.62 gỡ toàn bộ; v0.1.63 (H2) thay bằng chỗ chạy theo vai (xem docstring module).
 #: Gói G (P3): trần thời gian MỘT lượt agy của việc nền (giây). Việc nền chạy trong job worker (`gh.worker.JOB_TIMEOUT`
 #: = 300s) và gọi agy TUẦN TỰ (lô sàng lọc: mỗi phần lô một lượt, JSON sai thì gọi lại một lượt nữa) — AgyClient mặc
 #: định 300s bằng đúng JOB_TIMEOUT nên một lượt treo ăn trọn job và job bị arq giết giữa chừng (bản ghi kẹt "đang xử
@@ -90,7 +95,7 @@ PROBE_TIMEOUT_S = 90.0
 #: Số lượt gọi CLI tối đa của một lần "Kiểm tra kết nối" (kể cả lượt thử lại khi CLI đòi / không nhận mức suy nghĩ).
 PROBE_MAX_CALLS = 4
 #: Tự lành (v0.1.58): nguồn Antigravity CLI mất dòng model ⇒ lượt gọi tự kiểm tra kết nối — tối đa một lần / 10 phút /
-#: tổ chức. v0.1.62: mọi vai kể cả việc nền đều kích hoạt được khi chuỗi rỗng (agy mở cho mọi vai).
+#: tổ chức. Chỉ vai chạy agy trong tiến trình (core.gen của Owner, Bản tin, agent nội bộ) kích hoạt được khi chuỗi rỗng.
 AGY_HEAL_KEY = "gh:agy_heal:{}"
 AGY_HEAL_TTL = 600
 #: Trần thời gian của lần kiểm tra kết nối tự lành (giây): treo quá hạn ⇒ lượt Gen đi tiếp đường cũ.
@@ -154,9 +159,8 @@ async def has_api_source(db: AsyncSession, org_id: uuid.UUID) -> bool:
 
 
 async def has_agy_source(db: AsyncSession, org_id: uuid.UUID) -> bool:
-    """v0.1.62 — có nguồn Antigravity CLI đang bật, có model (không phải embedding) bật: chạy được MỌI vai kể cả việc
-    nền
-    (không cần Owner cho phép như Claude Code CLI)."""
+    """Có nguồn Antigravity CLI đang bật, có model (không phải embedding) bật: dùng được cho việc nền mà không cần Owner
+    cho phép như Claude Code CLI (vai nào chạy trong tiến trình hay qua hộp: `gh.providers.placement`)."""
     return bool((await db.execute(text("""
         SELECT EXISTS (
           SELECT 1 FROM agent.providers p
@@ -322,8 +326,13 @@ def cooldown_key(key_id: Any) -> str:
     return f"gh:cooldown:key:{key_id}"
 
 
-def breaker_key(provider_id: Any) -> str:
-    return f"gh:breaker:provider:{provider_id}"
+def breaker_key(provider_id: Any, where: str = placement.INPROC) -> str:
+    """Ngắt mạch của nhà cung cấp; agy qua hộp (`box`) có khoá RIÊNG, hộp lỗi không ngắt agy chạy trong tiến trình."""
+    return f"gh:breaker:provider:{provider_id}" + (":box" if where == placement.BOX else "")
+
+
+def fail_key(provider_id: Any, where: str = placement.INPROC) -> str:
+    return f"gh:pfail:{provider_id}" + (":box" if where == placement.BOX else "")
 
 
 async def owner_user_id(db: AsyncSession, org_id: uuid.UUID) -> uuid.UUID | None:
@@ -352,17 +361,21 @@ async def raise_alert(db: AsyncSession, org_id: uuid.UUID, *, alert_type: str, p
 class ModelRouter:
     def __init__(self, sm: async_sessionmaker[AsyncSession], redis: Redis, *,
                  transport: httpx.AsyncBaseTransport | None = None, cli_factory: Any = None,
-                 claude_factory: Any = None):
+                 claude_factory: Any = None, box_factory: Any = None):
         self.sm, self.redis, self.transport = sm, redis, transport
         s = get_settings()
+        #: agy TRONG tiến trình — chỉ cho vai `placement.INPROC` và việc của Sếp (đăng nhập, gọi thử, chẩn đoán).
         self.cli_factory = cli_factory or (lambda: AgyClient(s.cli_binary, s.cli_home))
+        #: agy QUA HỘP RIÊNG (`AgyBoxClient`, v0.1.63 H1); trả None khi hộp chưa được cài.
+        self.box_factory = box_factory or (lambda: AgyBoxClient.from_env())
         self.claude_factory = claude_factory or (lambda: ClaudeCodeClient(get_settings().claude_binary,
                                                                           get_settings().claude_home))
 
     # ─── chuỗi ───────────────────────────────────────────────────────────────
 
     async def _chain(self, db: AsyncSession, org_id: uuid.UUID, agent_key: str, *,
-                     tier: str | None = None, agy: agy_policy.AgyVerdict | None = None) -> list[dict[str, Any]]:
+                     tier: str | None = None, agy: agy_policy.AgyVerdict | None = None,
+                     owner: bool = True, purpose: str | None = None) -> list[dict[str, Any]]:
         """Chuỗi nguồn + model cho `agent_key` (v0.1.55: binding → hồ sơ tiêu chuẩn → hạng nhà cung cấp):
 
         1. dòng `agent.bindings` Owner đã đổi — luôn đứng đầu (kèm `bindings.effort`); lượt gọi ép `tier` (chat chọn
@@ -372,8 +385,9 @@ class ModelRouter:
            khi lượt gọi ép tầng;
         3. phần đuôi như cũ: model mặc định theo hạng của các nguồn còn lại/chưa dùng (để lỗi tầng đã chọn vẫn còn đường
            lui).
-        Gói G: `agy` (quyết định `agy_policy.decide` của khoá này; bỏ trống ⇒ tự tra, người hỏi mặc định Owner) không
-        cho phép ⇒ nguồn Antigravity CLI bị gỡ KHỎI chuỗi (cả dòng gán agy cũ, cả phần đuôi).
+        `agy` (quyết định `agy_policy.decide` của khoá này; bỏ trống ⇒ tự tra theo `owner` / `purpose`) không cho phép
+        (vai phải qua hộp mà hộp chưa chạy / chưa cài) ⇒ nguồn Antigravity CLI bị gỡ KHỎI chuỗi (cả dòng gán agy cũ, cả
+        phần đuôi) — không bao giờ để agy chạy trong tiến trình thay cho hộp.
         Luật F-86 KHÔNG lọc ở đây: `generate` bỏ qua Claude Code CLI khi việc nền chưa được phép và ghi LÝ DO vào
         `reasons`/hết chuỗi.
 
@@ -385,7 +399,8 @@ class ModelRouter:
             SELECT id, kind, name, endpoint, auth_state, failover_rank FROM agent.providers
             WHERE org_id = :o AND is_enabled AND kind NOT IN ('embedding', 'system_one')
             ORDER BY failover_rank NULLS LAST, created_at"""), {"o": org_id})).all()
-        verdict = agy if agy is not None else await agy_policy.verdict_for(db, org_id, agent_key)
+        verdict = agy if agy is not None else await agy_policy.verdict_for(db, org_id, agent_key, owner=owner,
+                                                                           purpose=purpose)
         if not verdict.allowed:
             providers = [p for p in providers if p.kind != agy_policy.KIND_AGY]
         models = (await db.execute(text("""
@@ -451,9 +466,19 @@ class ModelRouter:
                 chain.append(lk)
         return chain
 
-    def _client(self, p: Any, secret: str | None, *, background: bool = False) -> Any:
+    def _client(self, p: Any, secret: str | None, *, where: str, background: bool = False) -> Any:
+        """Client cho một nguồn. `where` (BẮT BUỘC, `placement.INPROC` | `placement.BOX`) chỉ có nghĩa với Antigravity
+        CLI: BOX ⇒ `AgyBoxClient`, không bao giờ rơi về `AgyClient` trong tiến trình
+        (hộp chưa cài ⇒ `BoxUnavailable`)."""
         if p.kind == "antigravity_cli":
-            client = self.cli_factory()
+            if where == placement.BOX:
+                client = self.box_factory()
+                if client is None:
+                    raise BoxUnavailable("Hộp riêng Antigravity chưa được cài")
+            elif where == placement.INPROC:
+                client = self.cli_factory()
+            else:
+                raise ValueError(f"Chỗ chạy agy không hợp lệ: {where!r}")
             if background and hasattr(client, "timeout"):
                 # Gói G (P3): việc nền chạy trong job worker có JOB_TIMEOUT 300s — một lượt agy treo 300s ăn trọn job.
                 client.timeout = min(float(client.timeout), AGY_BACKGROUND_TIMEOUT_S)
@@ -499,12 +524,12 @@ class ModelRouter:
                                       subject_type="model", subject_id=m.id)
                     await db.commit()
 
-    async def _fail(self, p: Any) -> None:
-        k = f"gh:pfail:{p.id}"
+    async def _fail(self, p: Any, where: str = placement.INPROC) -> None:
+        k = fail_key(p.id, where)
         n = await self.redis.incr(k)
         await self.redis.expire(k, 300)
         if n >= BREAKER_FAILS:
-            await self.redis.set(breaker_key(p.id), "open", ex=BREAKER_OPEN_S)
+            await self.redis.set(breaker_key(p.id, where), "open", ex=BREAKER_OPEN_S)
             await self.redis.delete(k)
 
     async def _set_auth_state(self, p: Any, state: str) -> None:
@@ -539,12 +564,12 @@ class ModelRouter:
     async def generate(self, org_id: uuid.UUID, *, agent_key: str, purpose: str, messages: list[Message],
                        json_mode: bool = True, temperature: float = 0.2,
                        tier: str | None = None, effort: str | None = None, owner: bool = True) -> Routed:
-        """Gói G: `owner` = người hỏi là Owner (mặc định True: việc nền / hệ thống không có người hỏi). Chỉ `core.gen`
-        phân biệt — Gen của nhân viên (`owner=False`) không dùng Antigravity CLI. Khoá `core.reply` và agent ngoại
-        giao cũng không dùng agy (`agy_policy.decide`, kể cả khi có dòng gán agy cũ).
-
-        v0.1.62: Antigravity CLI dùng được ở MỌI lượt gọi (không còn tham số `allow_agy` — Owner mở thẳng ngày
-        16/10/2026, xem docstring module).
+        """`owner` = người hỏi là Owner (mặc định True: việc nền / hệ thống không có người hỏi). Chỉ `core.gen` phân
+        biệt. v0.1.63 (H2): chỗ chạy Antigravity CLI theo VAI — Gen của Owner, Bản tin, agent nội bộ chạy agy trong tiến
+        trình; Gen của nhân viên (`owner=False`), `core.reply`, `core.refinery`, agent ngoại giao và lượt thử agent
+        (`purpose="setup_agent_try"`) chạy agy QUA HỘP RIÊNG (`box_factory`). Hộp chưa cài / tắt ⇒ các lượt đó bỏ
+        Antigravity (kể cả dòng gán agy cũ), dùng nguồn AI kế và ghi lý do vào `reasons` — KHÔNG BAO GIỜ chạy agy trong
+        tiến trình thay cho hộp (`agy_policy.decide`, luật ở `gh.providers.placement`). Xem docstring module.
 
         v0.1.41 (F-86): việc nền (`is_background(purpose)`) bỏ qua Claude Code CLI trừ khi Owner đã cho phép
         (`background_cli_allowed`) — điều khoản gói Claude, GIỮ NGUYÊN.
@@ -557,12 +582,13 @@ class ModelRouter:
         background = is_background(purpose)
         reasons: list[str] = []
         async with self.sm() as db:
-            verdict = await agy_policy.verdict_for(db, org_id, agent_key, owner=owner)
+            verdict = await agy_policy.verdict_for(db, org_id, agent_key, owner=owner, purpose=purpose)
             chain = await self._chain(db, org_id, agent_key, tier=tier, agy=verdict)
             bg_cli = await background_cli_allowed(db, org_id) if background else set()
             if not verdict.allowed and verdict.reason and await self._agy_enabled(db, org_id):
-                reasons.append(verdict.reason)          # Antigravity có trong cấu hình nhưng khoá này không được dùng
-        if not chain and verdict.allowed and await self._heal_agy(org_id):
+                reasons.append(verdict.reason)          # Antigravity có trong cấu hình nhưng khoá này chưa dùng được
+        where = verdict.where                              # chỗ chạy agy của lượt này: "inproc" | "box"
+        if not chain and verdict.allowed and where == placement.INPROC and await self._heal_agy(org_id):
             async with self.sm() as db:
                 chain = await self._chain(db, org_id, agent_key, tier=tier, agy=verdict)
         # v0.1.55 (F-R3): nguồn đã lỗi Ở CẤP NGUỒN (mạng / 5xx / quá giờ, hoặc CLI hết phiên đăng nhập) trong lượt này
@@ -572,7 +598,9 @@ class ModelRouter:
         provider_down: set[Any] = set()
         for link in chain:
             p, m = link["provider"], link["model"]
-            if p.id in provider_down:
+            via = where if p.kind == agy_policy.KIND_AGY else placement.INPROC   # chỗ chạy áp cho nguồn này
+            down_id = (p.id, via)
+            if down_id in provider_down:
                 reason = f"{p.name}: đã lỗi ở lượt này — không thử lại model khác của cùng nguồn"
                 if reason not in reasons:
                     reasons.append(reason)
@@ -581,7 +609,7 @@ class ModelRouter:
                 if BACKGROUND_CLI_REASON not in reasons:
                     reasons.append(BACKGROUND_CLI_REASON)
                 continue
-            if await self.redis.exists(breaker_key(p.id)):
+            if await self.redis.exists(breaker_key(p.id, via)):
                 reasons.append(f"{p.name}: đang ngắt mạch")
                 continue
             if not await self._quota_ok(org_id, m):
@@ -611,7 +639,7 @@ class ModelRouter:
                 try:
                     eff, implicit = self._effort(agent_key, p, m, link, effort)
                     c = await self._complete(p, secret, m, messages, json_mode=json_mode, temperature=temperature,
-                                             effort=eff, implicit=implicit, background=background)
+                                             effort=eff, implicit=implicit, background=background, where=via)
                 except RateLimited as e:
                     await self._record(org_id, m.id, kid, agent_key, purpose, "rate_limited", started, None)
                     if key is not None:
@@ -628,8 +656,10 @@ class ModelRouter:
                     if key is not None:
                         await self.redis.set(cooldown_key(key.id), "auth", ex=AUTH_COOLDOWN_S)
                     else:
-                        await self._set_auth_state(p, "expired")
-                        provider_down.add(p.id)           # CLI hết phiên: model khác của cùng CLI cũng hỏng
+                        # phiên đăng nhập agy trong HỘP là chuyện của hộp, không đổi nhãn nguồn
+                        if via == placement.INPROC:
+                            await self._set_auth_state(p, "expired")
+                        provider_down.add(down_id)        # CLI hết phiên: model khác của cùng CLI cũng hỏng
                     reasons.append(f"{p.name}: xác thực lỗi ({str(e)[:80]})")
                     continue
                 except BadRequest as e:
@@ -638,13 +668,13 @@ class ModelRouter:
                     break
                 except (ProviderError, TimeoutError) as e:
                     await self._record(org_id, m.id, kid, agent_key, purpose, "error", started, None)
-                    await self._fail(p)
-                    provider_down.add(p.id)
+                    await self._fail(p, via)
+                    provider_down.add(down_id)
                     reasons.append(f"{p.name}: {str(e)[:120]}")
                     break
                 await self._record(org_id, m.id, kid, agent_key, purpose, "ok", started, c)
-                await self.redis.delete(f"gh:pfail:{p.id}")
-                if key is None and p.auth_state != "ok":
+                await self.redis.delete(fail_key(p.id, via))
+                if key is None and p.auth_state != "ok" and via == placement.INPROC:
                     # CLI vừa gọi được thật (token đã tự làm mới) → bỏ nhãn "Hết hạn" cũ (một sự thật, v0.1.31).
                     await self._set_auth_state(p, "ok")
                 await self._count_use(org_id, p, m)
@@ -661,7 +691,8 @@ class ModelRouter:
                                       {"o": org_id})).scalar_one())
 
     async def _heal_agy(self, org_id: uuid.UUID) -> bool:
-        """v0.1.58 — tự lành khi chuỗi rỗng; v0.1.62: mọi vai kể cả việc nền (agy mở cho mọi vai). Nguồn Antigravity CLI
+        """v0.1.58 — tự lành khi chuỗi rỗng; chỉ cho vai chạy agy TRONG TIẾN TRÌNH (v0.1.63: vai qua hộp không kích hoạt
+        gọi thử trong tiến trình). Nguồn Antigravity CLI
         đang bật, có hồ sơ CLI đang dùng mà 0 dòng model (nên chuỗi không có agy) ⇒ "Kiểm tra kết nối" đúng MỘT lần
         (khoá Redis 10 phút) rồi lưu model vừa chạy được.
         Trả True khi đã thêm model (bên gọi dựng lại chuỗi). Lỗi chỉ ghi log — lượt gọi đi tiếp như cũ."""
@@ -715,11 +746,12 @@ class ModelRouter:
         return None, False
 
     async def _complete(self, p: Any, secret: str | None, m: Any, messages: list[Message], *, json_mode: bool,
-                        temperature: float, effort: str | None, implicit: bool, background: bool = False) -> Completion:
+                        temperature: float, effort: str | None, implicit: bool, where: str,
+                        background: bool = False) -> Completion:
         """Một lượt gọi model. Mức suy nghĩ do HỒ SƠ tự thêm (`implicit`) mà CLI không nhận cho model này thì gọi lại
         một lần KHÔNG gửi mức — hồ sơ tiêu chuẩn không bao giờ làm hỏng lượt gọi chỉ vì mức suy nghĩ. v0.1.58: ngược
         lại, CHƯA gửi mức mà CLI đòi mức (agy: `available: low, medium, high`) thì gọi lại một lần với mức hợp lệ."""
-        client = self._client(p, secret, background=background)
+        client = self._client(p, secret, where=where, background=background)
         extra = {"effort": effort} if effort else {}
         try:
             c: Completion = await client.generate(m.model_name, messages, json_mode=json_mode,
@@ -891,7 +923,7 @@ class ModelRouter:
                                        "WHERE id = :i"), {"i": provider_id})).one()
         started = time.monotonic()
         try:
-            await asyncio.wait_for(self._client(p, None).generate(
+            await asyncio.wait_for(self._client(p, None, where=placement.INPROC).generate(
                 model, [Message("user", PROBE_PROMPT)], json_mode=False, temperature=0, effort=effort),
                 PROBE_TIMEOUT_S)
         except Exception as e:  # noqa: BLE001 — trả lỗi cho Console
@@ -908,7 +940,7 @@ class ModelRouter:
     async def _test_cli(self, p: Any, result: dict[str, Any]) -> None:
         """Nguồn CLI: (1) liệt kê model (agy models / phiên Claude), (2) gọi thật một lượt ngắn. "Gọi thử OK" CHỈ khi
         lượt gọi thật thành công — trước đây chỉ liệt kê model nên phiên hết hạn vẫn báo OK (Boss 01/10)."""
-        client = self._client(p, None)
+        client = self._client(p, None, where=placement.INPROC)
         async with self.sm() as db:
             saved = [(r.model_name, r.effort) for r in (await db.execute(text(
                 """SELECT model_name, effort FROM agent.models WHERE provider_id = :p AND is_enabled
@@ -960,7 +992,7 @@ class ModelRouter:
                     result["models"] = [await self._jev_ping(db_provider_id=p.id, endpoint=p.endpoint,
                                                              secret=secret or "")]
                 else:
-                    names = (await self._client(p, secret).list_models())[:50]
+                    names = (await self._client(p, secret, where=placement.INPROC).list_models())[:50]
                     result.update(catalog.build(p.kind, names))
                     result["models"] = names
             result["ok"] = True
@@ -1020,6 +1052,6 @@ class ModelRouter:
         if model is None:
             first = catalog.fallback(p.kind)[:1]
             model = first[0]["id"] if first else None
-        steps = await self._client(p, None).diagnose(model, effort, PROBE_PROMPT)
+        steps = await self._client(p, None, where=placement.INPROC).diagnose(model, effort, PROBE_PROMPT)
         return {"provider": p.name, "kind": p.kind, "model": model, "effort": effort, "steps": steps,
                 "at": datetime.now(UTC).isoformat()}

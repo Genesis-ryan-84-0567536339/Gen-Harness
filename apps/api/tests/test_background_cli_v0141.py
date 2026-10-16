@@ -67,9 +67,12 @@ async def set_background_cli(db, org: uuid.UUID, kinds: list[str]) -> None:  # t
     await db.commit()
 
 
-def make_router(redis, claude: FakeCli, agy: FakeCli | None = None):  # type: ignore[no-untyped-def]
+def make_router(redis, claude: FakeCli, agy: FakeCli | None = None,  # type: ignore[no-untyped-def]
+                box: FakeCli | None = None):
+    """`agy` = agy trong tiến trình; `box` = hộp riêng Antigravity (core.refinery… — H2; None = chưa cài)."""
     return ModelRouter(sessionmaker(), redis, transport=transport(lambda host, key: (200, OK)),
-                       claude_factory=claude, cli_factory=agy or FakeCli("agy"))
+                       claude_factory=claude, cli_factory=agy or FakeCli("agy"),
+                       box_factory=box or (lambda: None))
 
 
 def test_is_background() -> None:
@@ -203,13 +206,15 @@ async def test_incident_closes_on_health_evaluate_without_background_call(owner_
     assert not await redis.exists(BG_NO_SOURCE_TRY.format(org))
 
 
-async def test_background_uses_agy_without_opt_in_but_claude_needs_it(app, db, redis) -> None:  # type: ignore[no-untyped-def]
-    """v0.1.62: agy chạy việc nền không cần cho phép; Claude Code CLI vẫn bị bỏ qua tới khi Owner cho phép (F-86)."""
+async def test_background_uses_agy_without_opt_in_but_claude_needs_it(  # type: ignore[no-untyped-def]
+        app, db, redis, boxctl) -> None:
+    """agy chạy việc nền không cần cho phép (sàng lọc qua hộp, agent nội bộ / Bản tin trong tiến trình); Claude Code
+    CLI vẫn bị bỏ qua tới khi Owner cho phép (F-86)."""
     org = await org_id(db)
     await cli_provider(db, org, "claude_code_cli", 1)
     await cli_provider(db, org, "antigravity_cli", 2)
     claude, agy = FakeCli("claude"), FakeCli("agy")
-    r = make_router(redis, claude, agy)
+    r = make_router(redis, claude, agy, box=agy)
     for key, purpose in (("core.refinery", "refinery"), ("agent:x", "duty_decide"), ("core.briefing", "gen.briefing")):
         out = await r.generate(org, agent_key=key, purpose=purpose, messages=MSGS)
         assert out.text == "agy-ok" and BACKGROUND_CLI_REASON in out.attempts, key

@@ -21,8 +21,9 @@ tính năng → screens.list / guide.list / coach.status, không bịa.
 v0.1.55 (G3): (1) Sếp chọn Tự động (chuẩn) · Nhanh · Cân bằng · Kỹ hơn + Mức suy nghĩ Thấp/Vừa/Cao ngay trong khung
 chat (`TurnInput.model_choice`): `resolve_model_choice` (THUẦN) đối chiếu với `model_options` (G1) — tầng không dùng
 được (chưa có nguồn AI nào phục vụ tầng đó) thì HẠ về Tự động kèm một bước `notice` (chuỗi). v0.1.62: luật "agy chỉ cho
-Owner, hội thoại `tainted` không agy" (F-22) đã gỡ — Owner chọn mở cho mọi vai ngày 16/10/2026 — nên tầng không còn
-phụ thuộc người hỏi là ai hay hội thoại đã đọc nội dung bên ngoài chưa.
+Owner, hội thoại `tainted` không agy" (F-22) đã gỡ nên tầng không còn phụ thuộc hội thoại đã đọc nội dung bên ngoài
+chưa. v0.1.63 (H2): Gen của nhân viên chạy agy qua HỘP RIÊNG (hộp không chạy thì tầng chỉ tính
+nguồn khác — `choice_options`).
 (2) J3: định tuyến theo ý định — `out_of_scope` (Jev hoặc quy tắc tất định `decider.rule_intent`) trả câu mẫu, KHÔNG
 gọi model; `data` đơn giản ở chế độ Tự động chạy tầng Nhanh; Jev lỗi / chậm / độ tin thấp ⇒ quy tắc tất định, rồi
 đường LLM như cũ. Action Log `gen.decide` thêm `route` ∈ {canned, fast, default} và `source` ∈ {jev, rule, llm}.
@@ -74,10 +75,11 @@ MODEL_DOWN = ("Gen chưa gọi được model lúc này (nguồn AI đang lỗi 
               "hoặc xem trạng thái nguồn ở màn API & Model nhé.")
 # Phân loại công cụ theo nguồn nội dung: công cụ chỉ trả số liệu/cấu hình nội bộ — mọi công cụ khác (queue.*, draft.*,
 # profile.*, social.*, hub.kho_*, task.list…) trả nội dung do người ngoài viết (tin khách, mạng xã hội, Kho).
-# v0.1.38 (F-22) từng dùng phân loại này để KHÔNG gửi lượt đã đọc nội dung ngoài cho Antigravity CLI; v0.1.62: Owner
-# chọn mở agy cho mọi vai (16/10/2026, sau khi được báo rủi ro: nội dung ngoài có thể lừa agy đọc tệp trong container)
-# nên phân loại không còn chặn lượt nào — nội dung ngoài vẫn được bọc `wrap_untrusted`. Giữ lại cho bước kế tiếp (tách
-# agy ra container riêng không gắn khoá) và cho các test phân loại.
+# v0.1.38 (F-22) từng dùng phân loại này để KHÔNG gửi lượt đã đọc nội dung ngoài cho Antigravity CLI; v0.1.62 gỡ luật
+# đó; v0.1.63 (H2) tách chỗ chạy agy theo VAI (Gen của Owner trong tiến trình, Gen của nhân
+# viên qua hộp riêng không khoá —
+# `gh.providers.placement`) nên phân loại không chặn lượt nào — nội dung ngoài vẫn được bọc `wrap_untrusted`. Giữ lại
+# cho các test phân loại.
 # v0.1.54: coach.status cũng chỉ trả khoá / tiêu đề tĩnh / số đếm của hệ thống (không nội dung ngoài).
 AGY_SAFE_TOOLS = frozenset({"screens.list", "guide.list", "system.health", "refinery.summary", "coach.status"})
 
@@ -580,8 +582,9 @@ async def _run(turn: Turn, *, app: Any, router: ModelRouter, session_token: str,
     messages = [Message("system", system_prompt(user, inp, intent.hints, now_text, notes, coach_block, kho)),
                 *_history_text(prior),
                 Message("user", inp.text[:4000])]
-    # v0.1.62: Antigravity CLI dùng được cho mọi người hỏi (Owner lẫn nhân viên) và cả lượt đã đọc nội dung bên ngoài
-    # (luật F-22 đã gỡ). v0.1.55 (G3): tầng / mức suy nghĩ đã chọn (hoặc J3 chọn Nhanh).
+    # Antigravity CLI dùng được cho mọi người hỏi và cả lượt đã đọc nội dung bên ngoài (luật F-22 đã gỡ); chỗ chạy theo
+    # người hỏi (v0.1.63): Owner trong tiến trình, nhân viên qua hộp riêng. v0.1.55 (G3): tầng
+    # / mức suy nghĩ đã chọn (hoặc J3 chọn Nhanh).
     route_kw: dict[str, Any] = _tier_kw(router, tier, effort, owner=is_owner)
     retried = False
     for _ in range(MAX_ROUNDS):

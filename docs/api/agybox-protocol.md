@@ -29,6 +29,21 @@ st = await box_status()          # cache 10 giây; không tham số = đọc GH_
   `ProviderError` thường (lỗi agy, quá giờ — "CLI quá Ns").
 - Hộp tắt ⇒ vai ngoại giao KHÔNG rơi về `AgyClient` trong tiến trình (quyết định của H2). Prompt phải qua `mask_for_model` trước khi gọi.
 
+### Vai nào qua hộp (gói H2 — `gh/providers/placement.py` + `gh/providers/agy_policy.py`)
+
+| Vai | Nơi chạy agy |
+|---|---|
+| `core.gen` của Owner, `core.briefing`, `agent:<id>` nội bộ (không gắn kênh / nhóm / người) | trong tiến trình (`AgyClient`) |
+| `core.reply`, `core.refinery`, `agent:<id>` ngoại giao (có `channel_scopes` / BOT nhóm / BOT người), `core.gen` của nhân viên, lượt thử agent (`purpose="setup_agent_try"`), khoá lạ | qua hộp (`AgyBoxClient`) |
+
+- Một điểm quyết định: `agy_policy.decide(role, owner=, diplomatic=, box=, purpose=)` = `placement.placement(...)` ⊕ `box_status()["state"]`;
+  bên gọi có DB dùng `verdict_for` / `verdicts_for`. `AgyVerdict{allowed, where, code, reason}`.
+- Hộp `down` / `not_installed` ⇒ lượt thuộc vai qua hộp bỏ Antigravity khỏi chuỗi, dùng nguồn AI kế, lý do tiếng Việt vào `reasons`
+  (`REASON_BOX_DOWN`, `REASON_BOX_NOT_INSTALLED`); không bao giờ tạo `AgyClient` trong tiến trình thay cho hộp. Lỗi hộp có ngắt mạch RIÊNG
+  (`breaker_key(id, "box")`) và không đổi `auth_state` của nguồn agy.
+- Cho gói B2 (readiness `box_down`): `placement.box_required(role, agent=None, *, owner=True, purpose=None) -> bool`
+  (`agent`: `AgentRef(diplomatic=…)` hoặc `bool`); vai có `box_required` mà `box_status()["state"] != "ok"` ⇒ `box_down`.
+
 ## Giao thức HTTP (`http://agy-box:8090`)
 
 | Đường | Ký | Yêu cầu | Trả lời 200 |

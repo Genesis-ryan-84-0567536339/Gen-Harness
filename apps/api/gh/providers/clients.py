@@ -451,13 +451,19 @@ class AgyClient:
     workspace được tự cho phép, ngoài workspace phải xin phép (bị từ chối trong print mode) — CHƯA kiểm được khi đã
     đăng nhập → không dựa vào đó.
 
-    Chính sách (v0.1.62): Owner chọn MỞ agy cho mọi vai — Gen của Sếp và nhân viên (kể cả lượt đã đọc nội dung bên
-    ngoài), sàng lọc & suy luận chính, soạn lại / dịch nháp, Bản tin Gen, agent tự tạo, việc nền — ngày 16/10/2026,
-    sau khi được báo rủi ro (luật v0.1.38 F-22 "agy chỉ cho Gen của Sếp" đã gỡ). RỦI RO CÒN LẠI: agy có công cụ đọc
-    tệp / chạy lệnh và chạy cùng uid, cùng container với api/worker (nơi có khoá hệ thống) nên nội dung bên ngoài
-    (tin khách…) có thể lừa agy đọc tệp trong container; các lớp cô lập ở đây (cwd rỗng 0700, env sạch, prompt qua
-    stdin, regex model, không `--dangerously-skip-permissions`) chỉ là phòng thủ thêm, KHÔNG phải rào chắn. Bước kế
-    tiếp (chưa làm): tách agy ra container riêng không gắn khoá."""
+    Chính sách (Sếp chốt 16/10/2026, gói G v0.1.62 + H2 v0.1.63): agy mở cho các vai nhưng MỖI VAI MỘT CHỖ CHẠY
+    (`gh.providers.placement`, quyết định ở `gh.providers.agy_policy.decide`). Lớp CORE — Gen
+    của Sếp, Bản tin Gen, agent
+    nội bộ không gắn kênh / nhóm / người — chạy `AgyClient` này TRONG TIẾN TRÌNH. Lớp ngoại giao / người ngoài —
+    `core.reply`, agent ngoại giao, sàng lọc tin người lạ `core.refinery`, Gen của nhân viên, lượt thử agent — chạy qua
+    HỘP RIÊNG (`gh.agybox.client.AgyBoxClient`; chính hộp dùng lại `AgyClient` này bên trong container không khoá);
+    hộp chưa cài / tắt thì các vai đó dùng nguồn AI kế, không bao giờ rơi về `AgyClient` trong tiến trình.
+    RỦI RO CÒN LẠI của lớp core trong tiến trình: agy có công cụ đọc tệp / chạy lệnh và chạy
+    cùng uid, cùng container với
+    api/worker (nơi có khoá hệ thống); lớp core chỉ nhận lời của Sếp và dữ liệu hệ thống,
+    nhưng các lớp cô lập ở đây (cwd
+    rỗng 0700, env sạch, prompt qua stdin, regex model, không `--dangerously-skip-permissions`) vẫn chỉ là phòng thủ
+    thêm, KHÔNG phải rào chắn."""
 
     kind = "antigravity_cli"
     MAX_PROMPT = 120_000   # giữ giới hạn cũ (prompt qua stdin từ v0.1.38, không còn vướng MAX_ARG_STRLEN)
