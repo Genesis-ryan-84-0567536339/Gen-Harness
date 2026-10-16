@@ -8,7 +8,8 @@ Mục này không thay README: cài đặt lần đầu và dựng từ mã ngu�
 ## 1. Kiểm nhanh khi nghi có chuyện
 
 1. `genh status` — bảng dịch vụ (`proxy web api worker bridge browser browser-redis browser-egress db redis`), "healthy", phiên bản, dung lượng. Dịch vụ `migrate` chạy một lần rồi thoát — không phải lỗi.
-2. Console → **Tổng quan**: dải **Cần Sếp xử lý** và thẻ **Sức khoẻ hệ thống** (cập nhật, sao lưu, ổ đĩa, bộ xử lý nền, kênh, Gen-hub…) — mỗi sự cố có nút việc cần làm.
+2. Mở Console, vào **Cài đặt** (Mặt tiền › **Thêm** › Cài đặt nâng cao › **Mở Console đầy đủ** › **Cài đặt** › **Sao lưu & cập nhật**): thẻ **Sức khoẻ hệ thống** ở đầu trang (cập nhật, sao lưu, ổ đĩa, bộ xử lý nền, kênh, Gen-hub…) — mỗi sự cố có nút việc cần làm.
+   Sự cố đang mở cũng hiện ở màn **Hôm nay** (dải **Cần Sếp xử lý**) và ở danh sách **Việc nên làm tiếp** của Mặt tiền › Thêm.
 3. `genh logs api -f` (hoặc `worker`, `bridge`, `browser`…; bỏ tên để xem mọi dịch vụ, 200 dòng cuối; `-f` để theo dõi). Log là JSON có `ts`, `error_id`, `request_id`.
 4. Dịch vụ dừng: `genh start`. Mở Console: `genh open`.
 5. Vẫn chưa rõ → làm **gói chẩn đoán** (mục 6) và gửi cho Claude.
@@ -19,7 +20,7 @@ Mục này không thay README: cài đặt lần đầu và dựng từ mã ngu�
   Từ v0.1.53 lịch **tự lành**: `genh update` bật lại lịch đêm nếu unit mất/tắt/không chạy, trừ khi Sếp đã chủ động tắt bằng `genh auto-update disable` (genh nhớ dấu `config/auto-update-disabled.json`).
 - **Kiểm lịch đêm**: chạy `genh auto-update status` — phải thấy dòng đầu **BẬT**, "Linger: có" (linger = tiến trình nền chạy cả khi không ai đăng nhập) và một "Lần kế tiếp" (~03:00). Thấy **BẬT NHƯNG KHÔNG CHẠY** hoặc **TẮT** (mà Sếp không tắt): `genh auto-update enable`; Linger KHÔNG thì chạy trước: `sudo loginctl enable-linger $USER` (máy hỏi mật khẩu đăng nhập máy).
   Xem timer bằng tay: `systemctl --user list-timers --all | grep gen-harness` (tên unit là `gen-harness-update.timer`; `grep genh` không khớp). Thẻ Sức khoẻ hệ thống ở **Cài đặt › Sao lưu & cập nhật** (`/system?tab=storage&focus=health`) có dòng **Tự cập nhật đêm**; lịch tắt hoặc im quá 36 giờ thì có chuông **"Lịch tự cập nhật đêm chưa chạy N ngày"** (nút Xem cách bật lại).
-- **Ngay lập tức**: Console → **Cập nhật ngay** (Trợ giúp, hoặc Cài đặt › Sao lưu & cập nhật), hoặc `genh update` (không kèm `--yes` thì bỏ qua thời gian chín).
+- **Ngay lập tức**: Console → **Cài đặt › Sao lưu & cập nhật** → **Cập nhật ngay** (Trợ giúp › Cập nhật phần mềm chỉ là liên kết tới đúng trang này), hoặc `genh update` (không kèm `--yes` thì bỏ qua thời gian chín).
 - Thứ tự an toàn của `genh update`: tự thay binary `genh` (kiểm SHA-256, chạy lại bằng bản mới) → kiểm đĩa → tải ảnh bản mới *trước* → sao lưu (`pre-update`) → migrate → khởi động lại → kiểm sẵn sàng.
   Lỗi ở bất kỳ bước nào → tự quay về bản cũ. Dịch vụ đã khớp bản này thì **bỏ qua** (không sao lưu, không tải).
 - Tuỳ chọn: `--yes --quiet` (cách lịch đêm gọi), `--no-self-update` (chỉ nâng dịch vụ, không đụng binary `genh`).

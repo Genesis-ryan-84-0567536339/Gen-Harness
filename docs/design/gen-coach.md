@@ -1,12 +1,12 @@
 # Gen hướng dẫn — Gen chủ động nhắc việc, giới thiệu tính năng, dạy mỗi ngày một bài (thiết kế + hiện trạng)
 
-> Trạng thái (10/2026): **đã thi công ở v0.1.54** (Boss duyệt 10/10/2026). Bản tóm tắt ở [CHANGELOG.md](../../CHANGELOG.md), chi tiết phát hành ở [v0.1.54.md](../releases/v0.1.54.md),
+> Trạng thái (10/2026): **đã thi công ở v0.1.54** (Boss duyệt 10/10/2026). **v0.1.55 đổi số dòng bắt buộc**: "Việc Sếp cần làm" có 10 dòng nhưng chỉ dòng `ai` (có ít nhất 1 nguồn AI chạy được) bắt buộc — nguồn sự thật là `ROWS` trong `apps/api/gh/boss_checks/service.py`; `.github/scripts/check_doc_facts.py` giữ tài liệu này khớp mã. Bản tóm tắt ở [CHANGELOG.md](../../CHANGELOG.md), chi tiết phát hành ở [v0.1.54.md](../releases/v0.1.54.md),
 > nợ còn lại ở mục 18 dưới đây và [ROADMAP](../ROADMAP.md). Gen nói chung: [gen-v1.md](gen-v1.md). Tài liệu này đã cập nhật theo mã thật sau khi gộp ba gói
 > (g1-api, g2-web, g3-noi-dung): tên mô-đun, payload, mã lỗi, từ vựng tín hiệu, 16 mục tiêu làm sáng đều là của mã đang chạy.
 
 ## 1. Vì sao
 
-Console có rất nhiều việc vận hành mà chỉ Sếp tự tay làm được: 9 dòng "Việc Sếp cần làm" (6 dòng bắt buộc), 9 việc thiết lập tuỳ chọn, lịch sao lưu, bản sao ngoài máy, token Gen-hub sắp hết hạn,
+Console có rất nhiều việc vận hành mà chỉ Sếp tự tay làm được: 10 dòng "Việc Sếp cần làm" (từ v0.1.55 chỉ 1 dòng bắt buộc: có ít nhất 1 nguồn AI chạy được), 9 việc thiết lập tuỳ chọn, lịch sao lưu, bản sao ngoài máy, token Gen-hub sắp hết hạn,
 bản nháp chờ duyệt, sự cố sức khoẻ… Trước v0.1.54 Gen chỉ trả lời khi được hỏi, nên việc nào Sếp quên thì nằm im cho tới khi thành sự cố. Sếp cũng không có cách biết Console còn tính năng nào chưa dùng.
 
 v0.1.54 cho Gen **chủ động nhưng nhẹ nhàng**: một thẻ "Hôm nay của Sếp" ở đầu khung Gen với tối đa 3 việc cần làm ngay, một mẹo "Sếp biết chưa?", một "Bài học hôm nay · k/19";
@@ -91,7 +91,7 @@ tín hiệu chưa biết làm cả biểu thức điều kiện sai (không kh�
 | `backup.scheduled` | Đã có lịch sao lưu |
 | `offsite.chosen` | Đã chọn nơi lưu bản sao ngoài máy |
 | `drafts.any` | Có bản nháp chờ duyệt |
-| `boss.<key>.done` | Dòng "Việc Sếp cần làm" đã Đạt — 9 khoá `hub`, `facebook`, `agy`, `claude`, `jev`, `telegram`, `remote`, `facebook_reply`, `kho_write` |
+| `boss.<key>.done` | Dòng "Việc Sếp cần làm" đã Đạt — 10 khoá `ai`, `hub`, `facebook`, `agy`, `claude`, `jev`, `telegram`, `remote`, `facebook_reply`, `kho_write` (chỉ `ai` bắt buộc) |
 | `followup.<n>.done` | Việc thiết lập tuỳ chọn n xong — n ∈ {5, 6, 7, 8, 9, 10, 11, 13, 14} |
 
 Ngoài tín hiệu boolean, `Signals` giữ vài giá trị hẹp: sự cố đang mở (chỉ `kind`, `severity`, `link`, `raised_at`), `required_done/required_total`, số nháp chờ, số ngày còn lại của token Gen-hub.
@@ -106,10 +106,12 @@ Mỗi việc có **khoá**, **mức**, **đích làm sáng** (hoặc `link` củ
 |---|---|---|---|
 | `health.<kind>` | P0 nếu sự cố `bad`, P1 nếu `warn` | có sự cố sức khoẻ đang mở (gộp theo `kind`) | `link` của sự cố |
 | `model.missing` | P0 | `!model.bound` | `api.bindings` |
-| `boss.<key>` (6 dòng bắt buộc: `hub`, `facebook`, `agy`, `claude`, `telegram`, `remote`) | P1 | `!boss.<key>.done` | `boss_checks.row.<key>` |
+| `boss.ai` (1 dòng bắt buộc duy nhất — sinh từ `boss_checks.service.ROWS`; từ v0.1.55 Gen-hub, Facebook, Google, Claude, Telegram, Truy cập từ xa là tuỳ chọn) | P1 | `model.bound` và `!boss.ai.done` (chưa có model thì `model.missing` P0 đã nói) | `connections.brain` |
 | `backup.unset` | P1 | `!backup.scheduled` | `system.backup.schedule` |
 | `hub.token_expiring` | P1 | token Gen-hub còn ≤ 7 ngày | `mcp.hub_link.token` |
 | `drafts.pending` | P2 | `drafts.any` (tiêu đề có số bản nháp) | `workbench.drafts` |
+| `boss.hub` | P3 | `!boss.hub.done` (gợi ý nhẹ, không chuông) | `boss_checks.row.hub` |
+| `boss.remote` | P3 | `staff.active` và `!boss.remote.done` (chỉ nhắc khi đã có người dùng khác Owner) | `boss_checks.row.remote` |
 | `followup.<n>`, n = 5..10 | P3 | `!followup.<n>.done` | `guide.item.do:<n>` |
 
 Các việc thiết lập 11, 13, 14 không thành việc riêng vì trùng `backup.unset`, `boss.facebook`, `boss.hub`. Dòng "Việc Sếp cần làm" mới thêm sau này (chưa có câu riêng) vẫn có câu chung — thẻ không hỏng.
@@ -199,12 +201,12 @@ Một nguồn sinh việc P0/P1 đọc lỗi ⇒ giữ nguyên mốc và **khôn
 ```json
 {
   "date": "2026-10-12", "enabled": true, "snoozed_until": null,
-  "todos": [{"key": "boss.telegram", "level": "P1", "title": "Nối Telegram để nhận báo động và bản tin",
-             "why": "Có Telegram thì sự cố và bản tin sáng chiều tới thẳng điện thoại của Sếp.",
-             "target": "boss_checks.row.telegram", "can_dismiss": true, "dismiss_warning": "Không nối Telegram thì báo động và bản tin không tới điện thoại của Sếp."}],
+  "todos": [{"key": "boss.ai", "level": "P1", "title": "Kiểm tra nguồn AI chạy được",
+             "why": "Em đã có nguồn AI nhưng chưa gọi thật được lần nào — Sếp bấm Kiểm tra để em chắc là trả lời và lọc tin được.",
+             "target": "connections.brain", "can_dismiss": true, "dismiss_warning": "Không kiểm tra thì em chưa biết nguồn AI có chạy được không — tới lúc cần trả lời mới biết lỗi."}],
   "tip": {"key": "memory_empty", "title": "Dặn Gen nhớ sở thích của Sếp", "body": "…", "try": {"label": "Thử ngay", "target": "system.brain.memory"}},
   "lesson": {"id": "N01", "k": 1, "total": 19, "title": "Hỏi Gen mọi lúc", "body": "…", "try": {"label": "Làm thử", "target": "help.ask_gen"}, "status": "shown"},
-  "progress": {"required_done": 4, "required_total": 6, "lessons_done": 2, "lessons_total": 19, "stable": false, "stable_since": null},
+  "progress": {"required_done": 0, "required_total": 1, "lessons_done": 2, "lessons_total": 19, "stable": false, "stable_since": null},
   "unseen": true
 }
 ```
@@ -262,7 +264,7 @@ Một nguồn sinh việc P0/P1 đọc lỗi ⇒ giữ nguyên mốc và **khôn
 
 Nguồn sự thật `packages/contracts/src/genTargets.ts`; `apps/api/gh/gen/registry.json` là bản xuất. 16 mục mới của v0.1.54:
 
-- 9 dòng "Việc Sếp cần làm": `boss_checks.row.hub` · `facebook` · `agy` · `claude` · `jev` · `telegram` · `remote` · `facebook_reply` · `kho_write` (màn `boss_checks`, mục tiêu tĩnh — không dòng động).
+- 10 dòng "Việc Sếp cần làm": `boss_checks.row.ai` · `hub` · `facebook` · `agy` · `claude` · `jev` · `telegram` · `remote` · `facebook_reply` · `kho_write` (màn `boss_checks`, mục tiêu tĩnh — không dòng động).
 - 2 ở Kết nối: `system.channels.telegram`, `system.channels.telegram.test`.
 - 3 ở Cài đặt: `system.remote_access` (tab Sao lưu & cập nhật), `system.ai_cost`, `system.brain.coach` (tab Bộ não AI).
 - `gen.coach.card` (màn Hôm nay) và `help.curriculum` (Trợ giúp).
