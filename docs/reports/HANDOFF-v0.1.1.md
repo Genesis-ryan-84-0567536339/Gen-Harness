@@ -1,4 +1,4 @@
-# Bàn giao Gen-Harness — hiện trạng + việc dở (cập nhật 16/10/2026, bản v0.1.59)
+# Bàn giao Gen-Harness — hiện trạng + việc dở (cập nhật 16/10/2026, bản v0.1.61)
 
 File này nay chỉ ghi **hiện trạng + việc dở** (tên cũ `HANDOFF-v0.1.1.md` giữ nguyên vì mã nguồn có chú thích trỏ tới).
 Lịch sử từng bản nằm ở [CHANGELOG.md](../../CHANGELOG.md) (3–5 dòng/bản) và `docs/releases/vX.Y.Z.md` (chi tiết, chuyển nguyên từ HANDOFF cũ):
@@ -21,9 +21,10 @@ Còn hiệu lực từ v0.1.1 (vai trò DB, volume, gói hồ sơ); chi tiết �
 - **Gói hồ sơ `.ghbundle`**: Python tạo/đọc (`python -m gh.bundle export|import`), Go chỉ chuyển bytes; mật khẩu qua `GH_BUNDLE_PASSWORD` (≥ 12 ký tự);
   mã thoát `0` ok · `2` sai mật khẩu/gói hỏng · `3` không tương thích · `1` lỗi khác; mã hoá lại mọi bí mật bằng khoá master máy đích.
 
-## Hiện trạng (v0.1.60)
+## Hiện trạng (v0.1.61)
 
-Bản mới nhất **v0.1.60** (16/10/2026, `VERSION` = v0.1.60): **Mặt tiền Owner v2** — 5 trụ cột Tình báo, Thông tin, Quan hệ, Phân tích, Việc có số thật + **Thiết lập một màn 3 bước** ([v0.1.60.md](../releases/v0.1.60.md)); đang chờ PR vào main + cổng phát hành.
+Bản mới nhất **v0.1.61** (16/10/2026, `VERSION` = v0.1.61): **đợt A sửa lỗi sau kiểm kê** — mã PIN cho người được giao quyền + phiên PIN hết hạn thật, bảng quyền/tên vai trò/mẫu agent (migration 0036), nháp & gửi tin trung thực (nút Gửi lại), gộp người đủ bảng, thẻ Cập nhật, lưới chống tái phát `check_terms.py` + route-crawl ([v0.1.61.md](../releases/v0.1.61.md)); đang chờ PR vào main + cổng phát hành.
+Trước đó **v0.1.60** (16/10/2026): **Mặt tiền Owner v2** — 5 trụ cột Tình báo, Thông tin, Quan hệ, Phân tích, Việc có số thật + **Thiết lập một màn 3 bước** ([v0.1.60.md](../releases/v0.1.60.md)); đã vào main.
 Trước đó **v0.1.59** (16/10/2026, bản vá): sửa quét QR WhatsApp (mã vẽ lớn, xử lý `companion_reg_refresh`, thử lại có giãn cách, Baileys ghim 7.0.0-rc14); thẻ "Hôm nay của Sếp" đọc lại ngay ([v0.1.59.md](../releases/v0.1.59.md)); đã vào main. Chưa kiểm với máy chủ WhatsApp thật (Nợ #35).
 Trước đó **v0.1.58** (11/10/2026, bản vá nóng): Antigravity CLI đòi mức suy nghĩ — Kiểm tra thử lại với mức, tự lưu model, Gen tự lành, bảng gán nói lý do thật ([v0.1.58.md](../releases/v0.1.58.md)).
 Trước đó **v0.1.57** (10/10/2026): **khoá nạp dữ liệu mẫu** (cờ + DB chưa có dữ liệu thật), **Owner tự đặt Tên Kho** (Nợ #30), **CI `api` chạy hai lượt pytest song song**, bộ kiểm chống lộ chỉ giữ quy tắc chung (mẫu riêng ở secret `GH_PERSONAL_PATTERNS`), bản công khai đã gọt danh tính riêng ([v0.1.57.md](../releases/v0.1.57.md)); đã vào main.
@@ -48,6 +49,13 @@ v0.1.52 (gỡ digest cũ bằng `rmi -f`, [v0.1.52.md](../releases/v0.1.52.md)),
   việc nền mặc định chỉ khoá API; chi phí ₫/ngày + trần; Jev tuỳ chọn: lọc trước tin trùng/rác (che dữ liệu bắt buộc, v0.1.55; QD-10 bỏ Jules).
 - **Kênh**: Zalo/WhatsApp qua bridge (QR; WhatsApp v0.1.59: mã vẽ lớn, Baileys ghim 7.0.0-rc14, thử lại có giãn cách); Telegram một chiều tới Sếp; Facebook cá nhân đọc + Trả lời bình luận/Nhắn tin có Xác nhận + PIN + ảnh chụp (đăng bài = lát 2).
 - **Dữ liệu & bảo mật**: Postgres 16 (pgvector, pg_partman), RLS chỉ là phòng thủ phụ (mỗi bản cài 1 tổ chức), hạn lưu thật, bí mật mã hoá phong bì, DNS ghim cho MCP/Gen-hub, ngắt mạch Gen-hub 60 giây.
+
+## v0.1.61 — Đợt A sửa lỗi sau kiểm kê (6 gói A1, A2, A3, A6, A7, A13, nhánh `claude/v0161`)
+
+- **Vì sao**: kiểm kê sau v0.1.60 thấy UI nói một đằng, máy chủ làm một nẻo — người được giao quyền duyệt không có PIN, phiên PIN không hết hạn, bảng quyền đổi một ô không đổi cột, nháp gửi lỗi im lặng, mcp_write giả "đã làm", gộp người chỉ dời một phần.
+- **Thay đổi**: A1 `POST /account/pin` đặt lần đầu + phiên PIN chỉ gia hạn khi ghi; A2 bảng quyền đổi cột + tên vai trò + khoá mẫu agent (migration `0036_v016x_danh_muc`); A3 chuông/thẻ Gửi lỗi, Gửi lại (`resend_of`, `GET /drafts?status=failed`), tin 1-1 đúng tài khoản; A6 gộp người đủ bảng; A7 người gác dự phòng; A13 `check_terms.py` + `route-crawl-v016x.spec.ts` (job `crawl`).
+- **Chưa làm**: Nợ #38 (mcp_write chưa thực thi), #39 (51 chữ cấm trong baseline), #40 (44 mục `crawl_baseline`), #41 (hậu tố `v016x`).
+- **Boss cần làm**: xem "Boss phải làm — v0.1.61" dưới. Chi tiết: [v0.1.61.md](../releases/v0.1.61.md).
 
 ## v0.1.60 — Mặt tiền Owner v2 + Thiết lập một màn (5 gói G1–G5, nhánh `claude/v0159`)
 
@@ -98,6 +106,11 @@ v0.1.52 (gỡ digest cũ bằng `rmi -f`, [v0.1.52.md](../releases/v0.1.52.md)),
 5. Bật bảo vệ nhánh `main` + tag `v*` (cần quyền admin repo, ~2 phút): xem [v0.1.33.md](../releases/v0.1.33.md). Không thêm `paths-ignore: docs/**` cho `ci.yml`.
 
 ## Việc dở
+
+### Boss phải làm — v0.1.61 (`genh update`; chi tiết ở [v0.1.61.md](../releases/v0.1.61.md))
+
+1. Sau khi bản chính thức ra: `genh update` (hoặc đợi lịch đêm). Migration 0036 đổi tên vai trò, chạy lại an toàn.
+2. Người được giao quyền duyệt (không phải Owner) vào **Tài khoản của tôi** tự đặt mã PIN lần đầu. Có nháp "Gửi lỗi" cũ thì bấm **Gửi lại** ở Bàn làm việc.
 
 ### Boss phải làm — v0.1.60 (không cần làm gì; chi tiết ở [v0.1.60.md](../releases/v0.1.60.md))
 
@@ -167,7 +180,7 @@ v0.1.52 (gỡ digest cũ bằng `rmi -f`, [v0.1.52.md](../releases/v0.1.52.md)),
 
 ### Claude / điều phối viên còn dở
 
-- **Phát hành v0.1.60**: `claude/v0159` (5 gói đã tích hợp, đã chứa main v0.1.59) → PR vào main → CI xanh → merge squash → nối main vào nhánh bằng merge (không reset) → bản thử → E2E cài thật + nâng cấp → promote → kiểm genh tải về khớp tag → báo Boss.
+- **Phát hành v0.1.61**: `claude/v0161` (đợt A đã tích hợp, đã chứa main v0.1.60 bằng merge thường) → PR vào main → CI xanh (gồm job `crawl`) → merge squash → nối main vào nhánh (`-s ours` chỉ khi cây trùng hệt) → bản thử → E2E → promote → kiểm genh tải về khớp tag → báo Boss.
 - **Chưa làm (mang từ v0.1.58)**: bước rẻ ở `e2e-install` (`agy --help | grep -- --effort`, `missing_reason` trong container); ô chọn model vẫn ẩn khi Kiểm tra đỏ (`offeredGroups`). **Nợ #33** mở Antigravity CLI cho mọi agent (Owner chọn "mở thẳng" 16/10, đang chờ mở quyền thi công) · **Nợ #34** tách agy ra container riêng · **Nợ #35** kiểm WhatsApp QR với máy chủ thật.
 - **Bản kế tiếp (đã hẹn)**: nhận kết quả "Thử 12 câu mẫu" của Jev từ Boss rồi quyết ngưỡng lọc trước; Boss dùng thử Mặt tiền v2 rồi góp ý; chuông Gen dẫn về Mặt tiền; xoá hội thoại Gen thì xoá luôn lựa chọn model đã nhớ (Nợ #29); dọn mã chết trình thiết lập cũ (Nợ #36).
 - **H-b còn mở**: timer đêm mất lịch khi `daemon-reload`/`enable` chạy từ bên trong service đêm — không tái hiện được bằng mã lẫn `e2e-nightly-real` (systemd thật: sau lần chạy timer vẫn có lần kế tiếp); tự lành bao ca này. Máy thật còn tái diễn thì ghi vào v0.1.53.md.
