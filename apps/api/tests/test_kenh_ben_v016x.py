@@ -342,3 +342,20 @@ async def test_resume_bo_qua_phien_error_da_co_phien_moi_hon(owner_api, db, redi
     r = await owner_api.send("POST", "/channels/zalo/resume")
     assert r.status_code == 409 and r.json()["code"] == "NO_SAVED_SESSION", "không được sống lại phiên cũ đã bị thay"
     assert await _control(redis) == []
+
+
+# ─── Review lần 2 v0.1.62: phiên đã đăng xuất không sống lại vì sự kiện muộn của bridge ─────────────────────────────
+
+async def test_session_active_tre_khong_hoi_sinh_phien_da_dang_xuat(owner_api, db, redis, app) -> None:  # type: ignore[no-untyped-def]
+    org = await org_id(db)
+    dead = await _session(db, org, state="logged_out", ended=True, started_ago_h=3, cred=False)
+    live = await _session(db, org, state="active", started_ago_h=1)
+    out = await _status(app, redis, org, "session.active", {"session_id": str(dead), "account": SHOP})
+    assert out == []                                                          # không phát channel.status "active"
+    assert (await _row(db, dead)).state == "logged_out" and (await _row(db, dead)).ended_at is not None
+    assert (await _row(db, live)).state == "active"                          # phiên đang chạy không bị đóng nhầm
+    assert not [c for c in await _control(redis) if c["type"] == "session.close"]
+    # Phiên 'error' (mất mạng, đang nối lại) vẫn nối lại được như cũ.
+    err = await _session(db, org, state="error", started_ago_h=2)
+    await _status(app, redis, org, "session.active", {"session_id": str(err), "account": SHOP})
+    assert (await _row(db, err)).state == "active"
