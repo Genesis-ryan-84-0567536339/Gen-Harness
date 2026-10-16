@@ -10,7 +10,11 @@ function mockApi(): Plugin {
     name: 'gh-mock-api',
     async configureServer(server) {
       const { createMockApi } = await import('./test/mock-api');
-      const mock = createMockApi({ setup: process.env.MOCK_SETUP === 'fresh' ? 'fresh' : 'finished', updateAvailable: process.env.MOCK_UPDATE === '1', mustChangePassword: process.env.MOCK_MUST_CHANGE === '1' });
+      // v0.1.59: MOCK_OWNER_DATA=empty|collecting|nochannel chọn chế độ dữ liệu của Mặt tiền (/owner/*); thiếu/lạ ⇒ đủ dữ liệu.
+      const ownerData = ['empty', 'collecting', 'nochannel'].includes(process.env.MOCK_OWNER_DATA ?? '')
+        ? (process.env.MOCK_OWNER_DATA as 'empty' | 'collecting' | 'nochannel')
+        : undefined;
+      const mock = createMockApi({ setup: process.env.MOCK_SETUP === 'fresh' ? 'fresh' : 'finished', updateAvailable: process.env.MOCK_UPDATE === '1', mustChangePassword: process.env.MOCK_MUST_CHANGE === '1', ownerData });
       server.middlewares.use(mock.middleware);
       // Realtime: answer `/api/v1/ws` upgrades; Vite's own HMR socket is left alone.
       server.httpServer?.on('upgrade', (req, socket) => {
