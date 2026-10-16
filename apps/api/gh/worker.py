@@ -225,7 +225,7 @@ async def startup(ctx: dict[str, Any]) -> None:
     set_not_dumpable()
     configure_logging()
     async with sessionmaker()() as db:
-        await bootstrap(db)
+        await bootstrap(db, mint_setup_code=False)   # P2-2: chỉ api sinh / giao mã thiết lập, worker không sinh lại
         await db.commit()
     s = get_settings()
     ctx["redis_bus"] = Redis.from_url(s.redis_url)
