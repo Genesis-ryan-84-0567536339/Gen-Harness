@@ -10,6 +10,7 @@ import { queryClient } from '../../lib/queryClient';
 import { toast } from '../../lib/toast';
 import { useNow } from '../../lib/useNow';
 import { errorText } from '../../lib/errorText';
+import { ErrorWithDetail } from '../../social/WriteProofDialog';
 import { Bar, CardError, InlineError, SkeletonLines } from '../common';
 import { ConnectionStatusPill } from '../connections/ConnectionStatusPill';
 import { channelConnStatus } from '../connections/connectionsModel';
@@ -17,12 +18,14 @@ import {
   LISTEN_MODES,
   VIEW_SCOPES,
   channelAction,
+  channelErrorText,
   channelIcon,
   channelMeta,
   channelState,
   channelStats,
   channelTileTone,
   groupKindLabel,
+  isDenseQr,
   isQrChannel,
   qrHint,
   qrRemaining,
@@ -167,6 +170,10 @@ export function ChannelCard({ channel: c, canManage, large }: { channel: Channel
 
       {showQr ? <QrBlock channel={c} large={large} /> : null}
 
+      {!showQr && (c.state === 'expired' || c.state === 'error') && c.error ? (
+        <ErrorWithDetail className="write-error ch-fail" text={channelErrorText(c.error, c.name)} detail={c.error} />
+      ) : null}
+
       <div className="ch-stats">
         {channelStats(c).map((s) => (
           <div className="ch-stat" key={s.label}>
@@ -221,14 +228,21 @@ export function ChannelCard({ channel: c, canManage, large }: { channel: Channel
   );
 }
 
-/** QR block (88px on the Console, 240px in setup) with the 60 s countdown. */
+/**
+ * QR block with the countdown. Zalo's code is sparse (~30 modules): 88px on the Console, 240px in setup. WhatsApp's is
+ * dense (~60 modules) and unreadable below ~4px/module, so it is always drawn large (`qr-block--dense`, up to 320px).
+ */
 export function QrBlock({ channel: c, large }: { channel: Channel; large?: boolean }) {
   const now = useNow(1000, !!c.qr);
   const qr = c.qr;
   const left = qr ? qrRemaining(qr.expires_at, now) : null;
   const expired = !!left && left.ms <= 0;
+  const dense = isDenseQr(c);
   return (
-    <div className={large ? 'qr-block qr-block--lg' : 'qr-block'} data-testid={`qr-${c.type}`}>
+    <div
+      className={['qr-block', large || dense ? 'qr-block--lg' : '', dense ? 'qr-block--dense' : ''].filter(Boolean).join(' ')}
+      data-testid={`qr-${c.type}`}
+    >
       <div className="qr-img">
         {qr && !expired ? (
           <img src={qr.image} alt={`Mã QR đăng nhập ${c.name}. Mở ${c.name} trên điện thoại, vào Cài đặt › Thiết bị đã liên kết rồi quét mã này.`} />
@@ -236,7 +250,7 @@ export function QrBlock({ channel: c, large }: { channel: Channel; large?: boole
           <Icon name={qr ? 'ph ph-arrows-clockwise' : 'ph ph-qr-code'} size={large ? 64 : 42} />
         )}
       </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
+      <div style={{ flex: dense ? '1 1 200px' : 1, minWidth: 0 }}>
         <div className="qr-title">
           {qr?.scanned ? 'Đã quét — đang đồng bộ danh sách nhóm…' : qr ? `Quét mã bằng ${c.name} trên điện thoại của Sếp` : 'Đang tạo mã QR…'}
         </div>
@@ -245,7 +259,7 @@ export function QrBlock({ channel: c, large }: { channel: Channel; large?: boole
             ? qrHint(c)
             : 'Bridge đang mở phiên đăng nhập mới. Mã sẽ hiện ở đây sau vài giây.'}
         </div>
-        {large ? (
+        {large || dense ? (
           <ol className="qr-steps">
             <li data-done={qr ? '' : undefined} data-on={!qr ? '' : undefined}>Tạo mã QR</li>
             <li data-done={qr?.scanned ? '' : undefined} data-on={qr && !qr.scanned ? '' : undefined}>

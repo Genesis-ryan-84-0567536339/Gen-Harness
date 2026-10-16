@@ -38,7 +38,7 @@ export const GUIDE: GuideItem[] = [
       'Ở thẻ Zalo (hoặc WhatsApp), bấm "Tạo mã QR".',
       'Đọc cảnh báo, tích "Tôi hiểu rủi ro…" rồi bấm "Tôi hiểu, hiện mã QR".',
       'Trên điện thoại: Zalo → biểu tượng quét QR (góc trên) · WhatsApp → Cài đặt → Thiết bị đã liên kết → Liên kết thiết bị. Quét mã trên màn hình.',
-      'Chờ thẻ chuyển sang "Đang kết nối" và đồng bộ xong danh sách nhóm (mã QR tự làm mới mỗi 60 giây nếu chưa kịp quét).',
+      'Chờ thẻ chuyển sang "Đang kết nối" và đồng bộ xong danh sách nhóm. Mã QR tự làm mới nếu chưa kịp quét (Zalo 60 giây; WhatsApp 20–60 giây). Mã WhatsApp dày: để điện thoại cách màn hình khoảng 20–30 cm, giữ yên cho tới khi quét xong; nếu điện thoại báo chưa liên kết được, đợi mã mới hiện rồi quét lại.',
       'Bấm "Tiếp tục" để lưu.',
     ],
     doneWhen: 'Có ít nhất một kênh ở trạng thái Đang kết nối.',

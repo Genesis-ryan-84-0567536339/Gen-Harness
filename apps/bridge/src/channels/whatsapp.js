@@ -1,6 +1,7 @@
 // Adapter WhatsApp (Baileys). Một instance = một phiên. Trạng thái xác thực chỉ nằm trong RAM
 // (initAuthCreds + BufferJSON) và được tuần tự hoá thành credential. Thư viện tiêm qua `lib`.
 // Sự kiện phát ra: qr · scanned · active · credential · ended · inbound.
+import { randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { silentLogger } from '../log.js';
 import { RecentIds, errorCode, toIso, toPlain } from '../util.js';
@@ -8,6 +9,44 @@ import { RecentIds, errorCode, toIso, toPlain } from '../util.js';
 export const WA_FIRST_QR_TTL_MS = 60000; // Baileys: QR đầu sống 60 giây, các QR sau 20 giây
 export const WA_NEXT_QR_TTL_MS = 20000;
 const MAX_RECONNECTS = 10;
+// Socket đóng TRƯỚC khi ra được mã QR nào (mất mạng/DNS, máy chủ WhatsApp từ chối đăng ký thiết bị: 405/428/403…):
+// thử lại có giãn cách rồi báo lỗi thật, không quay vòng vô hạn (bản cũ mở >40 socket/giây và UI kẹt "Đang tạo mã QR…").
+const MAX_NO_QR_ATTEMPTS = 4;
+const VERSION_FETCH_TIMEOUT_MS = 5000;
+const VERSION_CACHE_MS = 30 * 60 * 1000;
+// Máy chủ WhatsApp (2026-07 trở đi) gửi <notification type="companion_reg_refresh"> tới thiết bị chưa ghép cặp: khoá ADV
+// trong mã QR đã cũ → điện thoại báo "không liên kết được thiết bị". Baileys 7.0.0-rc14 bỏ qua thông báo này
+// (WhiskeySockets/Baileys#2737, bản vá #2765 chưa phát hành) nên adapter tự xử lý như WhatsApp Web.
+const REFRESH_TAGS = new Set(['companion_reg_refresh', 'pair-device-rotate-qr']);
+const NETWORK_RE = /ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENETUNREACH|EHOSTUNREACH|certificate|timed out|socket hang up/i;
+
+const isWaVersion = (v) => Array.isArray(v) && v.length === 3 && v.every((n) => Number.isInteger(n) && n > 0);
+const olderThan = (a, b) => {
+  for (let i = 0; i < 3; i += 1) if (a[i] !== b[i]) return a[i] < b[i];
+  return false;
+};
+
+/** Kết quả fetchLatestWaWebVersion → phiên bản dùng được, hoặc undefined (để thư viện dùng bản đóng gói). */
+export function pickWaVersion(fetched, bundled) {
+  if (!fetched?.isLatest || !isWaVersion(fetched.version)) return undefined;
+  // Không bao giờ báo phiên bản cũ hơn bản đã biết tốt (WhiskeySockets/Baileys#2777: cũ hơn ⇒ máy chủ trả 408/428).
+  if (isWaVersion(bundled) && olderThan(fetched.version, bundled)) return undefined;
+  return fetched.version;
+}
+
+/** notification companion_reg_refresh (theo thuộc tính type hoặc nút con). */
+export function isCompanionRefresh(node) {
+  if (!node || node.tag !== 'notification') return false;
+  if (node.attrs?.type === 'companion_reg_refresh') return true;
+  const kids = Array.isArray(node.content) ? node.content : [];
+  return kids.some((k) => REFRESH_TAGS.has(k?.tag));
+}
+
+/** Lý do (mã) khi socket đóng trước khi ra mã QR: lỗi mạng hay máy chủ WhatsApp từ chối. */
+export function noQrErrorCode(statusCode, message) {
+  if (NETWORK_RE.test(String(message || ''))) return 'WA_NETWORK';
+  return `WA_NO_QR_${Number.isInteger(statusCode) ? statusCode : 0}`;
+}
 
 export async function loadWhatsAppLib() {
   const [b, qrcode, pino] = await Promise.all([
@@ -15,23 +54,39 @@ export async function loadWhatsAppLib() {
   ]);
   const toDataURL = qrcode.toDataURL || qrcode.default?.toDataURL;
   const pinoFn = pino.default || pino;
-  let version;
-  try {
-    // Phiên bản WA Web mới nhất (một lần khi khởi động); lỗi → dùng bản đóng gói trong Baileys.
-    const r = await Promise.race([
-      b.fetchLatestBaileysVersion(),
-      new Promise((_, rej) => { setTimeout(() => rej(new Error('timeout')), 5000).unref?.(); }),
-    ]);
-    version = r?.version;
-  } catch { version = undefined; }
+  const bundled = b.DEFAULT_CONNECTION_CONFIG?.version;
+  let cache = { at: 0, version: undefined };
+  let inflight = null;
+  // Phiên bản WA Web hiện hành lấy từ sw.js của chính web.whatsapp.com (cùng máy chủ với websocket, không cần thêm đường ra).
+  // Bản cũ đọc dòng 7 của master Baileys = đúng bản đóng gói ⇒ không bao giờ mới hơn và hỏng khi chặn raw.githubusercontent.com.
+  // Lấy lại mỗi 30 phút theo từng lần đăng nhập (không chốt một lần lúc khởi động); lỗi ⇒ dùng bản lần trước/đóng gói.
+  const getVersion = async () => {
+    if (cache.version && Date.now() - cache.at < VERSION_CACHE_MS) return cache.version;
+    inflight ||= (async () => {
+      try {
+        const fetched = await Promise.race([
+          b.fetchLatestWaWebVersion({ signal: AbortSignal.timeout(VERSION_FETCH_TIMEOUT_MS) }),
+          new Promise((_, rej) => { setTimeout(() => rej(new Error('timeout')), VERSION_FETCH_TIMEOUT_MS + 500).unref?.(); }),
+        ]);
+        const v = pickWaVersion(fetched, bundled);
+        if (v) cache = { at: Date.now(), version: v };
+        return v || cache.version;
+      } catch { return cache.version; }
+    })().finally(() => { inflight = null; });
+    return inflight;
+  };
   return {
     makeWASocket: b.makeWASocket || b.default,
     DisconnectReason: b.DisconnectReason,
     initAuthCreds: b.initAuthCreds,
     BufferJSON: b.BufferJSON,
     proto: b.proto,
-    version,
-    toDataURL: (text) => toDataURL(text, { margin: 2, width: 400 }),
+    version: undefined,
+    bundledVersion: bundled,
+    getVersion,
+    // Mã dày (URL wa.me + 4 khoá ≈ 270 ký tự ⇒ 57 module ở mức sửa lỗi L, 65 ở M): mức L + vùng trắng chuẩn 4 module + ảnh lớn
+    // để thu nhỏ vẫn đọc được; web hiển thị ≥ 240px cho WhatsApp.
+    toDataURL: (text) => toDataURL(text, { errorCorrectionLevel: 'L', margin: 4, width: 640 }),
     logger: pinoFn({ level: 'silent' }),
   };
 }
@@ -136,6 +191,10 @@ export class WhatsAppAdapter extends EventEmitter {
     this.sock = null;
     this.gen = 0;
     this.qrCount = 0;
+    this.qrInSocket = 0;
+    this.noQrFails = 0; // số socket liên tiếp đóng trước khi ra mã QR đầu tiên
+    this.lastQr = null; // { raw, expiresAt } của mã đang hiện (để dựng lại khi máy chủ yêu cầu làm mới)
+    this.lastRefreshNode = null;
     this.reconnects = 0;
     this.cancelled = false;
     this.groupNames = new Map();
@@ -154,6 +213,10 @@ export class WhatsAppAdapter extends EventEmitter {
     }
     this.resuming = Boolean(credential);
     if (credential && !this.auth.state.creds?.me?.id) return this.#end('expired', 'CREDENTIAL_INVALID');
+    // Phiên bản WA Web hiện hành, lấy lại theo từng lần đăng nhập (lỗi/hết giờ ⇒ để thư viện dùng bản đóng gói).
+    this.version = (await Promise.resolve(this.lib.getVersion?.()).catch(() => undefined)) || this.lib.version;
+    if (this.cancelled) return 'closed';
+    this.log.info('whatsapp: phiên bản WA Web', { version: this.version ? this.version.join('.') : 'đóng gói trong Baileys' });
     this.state = credential ? 'connecting' : 'qr';
     return new Promise((resolve) => {
       this.settle = resolve;
@@ -165,8 +228,9 @@ export class WhatsAppAdapter extends EventEmitter {
     if (this.cancelled || this.state === 'ended') return;
     const gen = ++this.gen;
     this.qrInSocket = 0;
+    this.lastQr = null; // ref của socket cũ không còn dùng được
     const sock = this.lib.makeWASocket({
-      ...(this.lib.version ? { version: this.lib.version } : {}),
+      ...(this.version ? { version: this.version } : {}),
       auth: this.auth.state,
       printQRInTerminal: false,
       logger: this.lib.logger,
@@ -187,6 +251,45 @@ export class WhatsAppAdapter extends EventEmitter {
       if (gen !== this.gen || ev?.type !== 'notify') return;
       for (const m of ev.messages || []) this.#onLibMessage(m);
     });
+    // Baileys chưa xử lý companion_reg_refresh: tự nghe thông báo thô trên websocket của socket này.
+    if (typeof sock.ws?.on === 'function') {
+      const onRefresh = (node) => {
+        this.#onCompanionRefresh(node, gen).catch((err) => this.log.error('whatsapp: làm mới mã QR lỗi', { error: errorCode(err) }));
+      };
+      sock.ws.on('CB:notification,type:companion_reg_refresh', onRefresh);
+      sock.ws.on('CB:notification,,companion_reg_refresh', onRefresh);
+      sock.ws.on('CB:notification,,pair-device-rotate-qr', onRefresh);
+    }
+  }
+
+  /** Mã QR dùng khoá ADV hiện hành của creds (đổi sau companion_reg_refresh; Baileys chốt khoá cũ trong closure). */
+  #currentQr(raw) {
+    const adv = this.auth?.state?.creds?.advSecretKey;
+    const hash = raw.indexOf('#');
+    if (!adv || hash < 0) return raw;
+    const parts = raw.slice(hash + 1).split(',');
+    if (parts.length < 4 || parts[3] === adv) return raw;
+    parts[3] = adv; // [ref, noiseKey, identityKey, advSecretKey, platform]
+    return `${raw.slice(0, hash + 1)}${parts.join(',')}`;
+  }
+
+  /**
+   * Máy chủ báo companion_reg_refresh cho thiết bị CHƯA ghép cặp: đổi khoá ADV (32 byte ngẫu nhiên, như WhatsApp Web) rồi
+   * dựng lại đúng mã QR đang hiện bằng khoá mới — không tốn thêm mã (qrCount) và không đổi hạn của mã.
+   */
+  async #onCompanionRefresh(node, gen) {
+    if (gen !== this.gen || this.cancelled || this.state === 'ended') return;
+    if (!isCompanionRefresh(node) || node === this.lastRefreshNode) return;
+    this.lastRefreshNode = node;
+    const creds = this.auth?.state?.creds;
+    if (!creds || creds.me?.id || !this.lastQr) return; // đã ghép cặp, hoặc chưa có mã nào để dựng lại
+    const { raw, expiresAt } = this.lastQr;
+    creds.advSecretKey = randomBytes(32).toString('base64');
+    try { this.sock?.ev?.emit?.('creds.update', { advSecretKey: creds.advSecretKey }); } catch { /* chỉ để thư viện đồng bộ */ }
+    this.log.info('whatsapp: máy chủ yêu cầu làm mới mã QR (companion_reg_refresh) — đã đổi khoá ghép cặp, dựng lại mã');
+    const image = await this.lib.toDataURL(this.#currentQr(raw));
+    if (gen !== this.gen || this.cancelled || this.state === 'ended') return;
+    this.emit('qr', { image, expiresAt });
   }
 
   async #onConnection(u, gen) {
@@ -205,10 +308,13 @@ export class WhatsAppAdapter extends EventEmitter {
       }
       this.qrCount += 1;
       this.qrInSocket += 1;
+      this.noQrFails = 0;
       const ttl = this.qrInSocket === 1 ? WA_FIRST_QR_TTL_MS : WA_NEXT_QR_TTL_MS;
-      const image = await this.lib.toDataURL(qr);
+      const expiresAt = new Date(this.now() + ttl).toISOString();
+      this.lastQr = { raw: qr, expiresAt };
+      const image = await this.lib.toDataURL(this.#currentQr(qr));
       if (gen !== this.gen || this.cancelled || this.state === 'ended') return;
-      this.emit('qr', { image, expiresAt: new Date(this.now() + ttl).toISOString() });
+      this.emit('qr', { image, expiresAt });
     }
     if (isNewLogin) {
       this.emit('scanned', { displayName: this.auth.state.creds?.me?.name || null });
@@ -227,15 +333,17 @@ export class WhatsAppAdapter extends EventEmitter {
       }
       return;
     }
-    if (connection === 'close') this.#onClose(lastDisconnect?.error?.output?.statusCode, gen);
+    if (connection === 'close') this.#onClose(lastDisconnect?.error?.output?.statusCode, gen, lastDisconnect?.error?.message);
   }
 
-  #onClose(code, gen) {
+  #onClose(code, gen, message) {
     const DR = this.lib.DisconnectReason;
     this.sock = null;
-    this.log.info('whatsapp: kết nối đóng', { code: code ?? null });
+    this.log.info('whatsapp: kết nối đóng', { code: code ?? null, qr_in_socket: this.qrInSocket });
     if (code === DR.loggedOut) {
-      this.#end('expired', this.state === 'active' ? 'LOGGED_OUT_REMOTELY' : 'CREDENTIAL_REJECTED');
+      // 401: phiên đã lưu bị từ chối / bị đăng xuất; còn khi đang ghép cặp bằng QR là máy chủ từ chối chính lần ghép này.
+      const why = this.state === 'active' ? 'LOGGED_OUT_REMOTELY' : this.resuming ? 'CREDENTIAL_REJECTED' : 'PAIRING_REJECTED';
+      this.#end('expired', why);
       return;
     }
     if (code === DR.connectionReplaced) return this.#end('error', 'CONNECTION_REPLACED');
@@ -244,6 +352,13 @@ export class WhatsAppAdapter extends EventEmitter {
     if (code === DR.restartRequired) return this.#schedule(0, gen); // sau khi ghép cặp QR
     const pairing = this.state === 'qr' && !this.auth.state.creds?.me?.id;
     if (pairing) {
+      if (this.qrInSocket === 0) {
+        // Socket đóng khi CHƯA ra mã QR nào: mất mạng/DNS hoặc máy chủ từ chối đăng ký thiết bị (405/428…).
+        // Thử lại có giãn cách (2s, 4s, 8s…) rồi báo lỗi thật; không mở socket liên tục.
+        this.noQrFails += 1;
+        if (this.noQrFails >= MAX_NO_QR_ATTEMPTS) return this.#end('error', noQrErrorCode(code, message));
+        return this.#schedule(Math.min(30000, this.reconnectBaseMs * 2 ** (this.noQrFails - 1)), gen);
+      }
       // Hết lượt QR của socket này → mở socket mới để xin QR tiếp, trong giới hạn qrMax.
       if (this.qrCount >= this.qrMax) return this.#end('expired', 'QR_EXPIRED');
       return this.#schedule(0, gen);

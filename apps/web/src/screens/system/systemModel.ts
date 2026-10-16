@@ -138,12 +138,56 @@ export function qrRemaining(expiresAt: string, now = Date.now()): { ms: number; 
   return { ms, pct: Math.min(100, (ms / QR_LIFETIME_MS) * 100), label: `${s} giây` };
 }
 
-export function qrHint(c: Pick<Channel, 'outbound_queued'>): string {
+export function qrHint(c: Pick<Channel, 'outbound_queued' | 'type'>): string {
   const queued =
     c.outbound_queued > 0
       ? ` ${countWord(c.outbound_queued)} tin gửi đi đang được giữ trong hàng đợi, sẽ tự gửi khi phiên nối lại.`
       : '';
+  // WhatsApp đổi mã sau 60 giây đầu rồi cứ 20 giây một lần; mã dày hơn Zalo nên cần đưa điện thoại gần, đủ sáng.
+  if (c.type === 'whatsapp') {
+    return `Mã tự làm mới (mã đầu 60 giây, các mã sau 20 giây). Nếu điện thoại báo chưa liên kết được, đợi mã mới hiện rồi quét lại.${queued}`;
+  }
   return `Mã tự làm mới mỗi 60 giây.${queued}`;
+}
+
+/** WhatsApp có mã QR dày (≈ 60 × 60 ô): ảnh phải đủ lớn mới quét được, khác Zalo (≈ 30 × 30 ô). */
+export const isDenseQr = (c: Pick<Channel, 'type'>) => c.type === 'whatsapp';
+
+// ── lỗi phiên (mã lỗi bridge → câu thân thiện; mã gốc nằm ở "Chi tiết kỹ thuật") ───────────────────────────────
+const RESCAN = 'Bấm "Quét lại QR" để thử lại.';
+const SAFE_WAIT = 'Đợi vài phút rồi bấm "Quét lại QR"; đừng bấm liên tục vì WhatsApp dễ tạm khoá ghép thiết bị.';
+
+export function channelErrorText(code: string, name: string): string {
+  const no = /^WA_NO_QR_(\d+)$/.exec(code);
+  if (no) {
+    return `${name} từ chối mở phiên ghép thiết bị mới (mã ${no[1]}). Thường do địa chỉ mạng bị hạn chế hoặc thư viện WhatsApp trong bản này đã cũ. ${SAFE_WAIT}`;
+  }
+  switch (code) {
+    case 'WA_NETWORK':
+      return `Bridge không nối được tới máy chủ ${name}. Kiểm tra mạng của máy chạy Gen-Harness (DNS, tường lửa, Docker ra Internet tới web.whatsapp.com) rồi bấm "Quét lại QR".`;
+    case 'PAIRING_REJECTED':
+      return `${name} từ chối lần ghép này (điện thoại có thể đã báo "không liên kết được thiết bị"). ${SAFE_WAIT}`;
+    case 'QR_EXPIRED':
+      return `Mã QR đã hết hạn mà chưa ghép được. ${RESCAN} Nếu điện thoại báo "không liên kết được thiết bị", đợi mã mới hiện rồi quét lại ngay; vẫn không được thì thử lại sau ít phút.`;
+    case 'FORBIDDEN':
+      return `${name} từ chối kết nối từ địa chỉ mạng này (403). Thử lại sau, hoặc đổi mạng cho máy chạy Gen-Harness.`;
+    case 'LOGGED_OUT_REMOTELY':
+      return `Thiết bị đã bị gỡ khỏi ${name} trên điện thoại. ${RESCAN}`;
+    case 'CREDENTIAL_REJECTED':
+    case 'CREDENTIAL_INVALID':
+    case 'CREDENTIAL_UNREADABLE':
+      return `Phiên đã lưu không còn dùng được nữa. ${RESCAN}`;
+    case 'CONNECTION_REPLACED':
+      return `${name} đang được mở ở một nơi khác nên phiên này bị ngắt. ${RESCAN}`;
+    case 'MULTIDEVICE_MISMATCH':
+      return `Tài khoản ${name} chưa bật chế độ nhiều thiết bị. Cập nhật ${name} trên điện thoại rồi bấm "Quét lại QR".`;
+    case 'RECONNECT_FAILED':
+      return `Mất kết nối với ${name} và nối lại nhiều lần không được. Kiểm tra mạng của máy chạy Gen-Harness rồi bấm "Quét lại QR".`;
+    case 'BRIDGE_KEY_MISSING':
+      return 'Bridge chưa có khoá bảo mật nên chưa đăng nhập được. Nhờ người quản trị máy chủ kiểm tra khoá bridge.';
+    default:
+      return `Phiên ${name} gặp lỗi khi ghép thiết bị. ${RESCAN} Còn lỗi thì gửi "Chi tiết kỹ thuật" cho người hỗ trợ.`;
+  }
 }
 
 // ── groups ────────────────────────────────────────────────────────────────
