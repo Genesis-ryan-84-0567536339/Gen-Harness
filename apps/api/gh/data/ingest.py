@@ -69,10 +69,20 @@ async def upsert_group(db: AsyncSession, org_id: uuid.UUID, channel: Any, extern
     return row
 
 
+def _looks_raw(display_name: str, external_id: str, phone_e164: str | None) -> bool:
+    """Tên hiển thị còn là mã tài khoản thô (rỗng, mã kênh, SĐT, dãy số, địa chỉ kiểu `...@s.whatsapp.net`)."""
+    n = (display_name or "").strip()
+    return (not n or n == external_id or n == phone_e164 or n.lstrip("+").replace(" ", "").isdigit()
+            or ("@" in n and " " not in n))
+
+
 async def upsert_identity(db: AsyncSession, org_id: uuid.UUID, channel: Any, external_id: str, name: str | None,
                           phone: str | None = None) -> Any:
-    row = (await db.execute(text("""SELECT id, person_id, phone_e164 FROM core.person_identities
-                                    WHERE channel_id = :c AND external_id = :x"""),
+    name = (name or "").strip()[:200] or None
+    row = (await db.execute(text("""SELECT pi.id, pi.person_id, pi.phone_e164, p.display_name,
+                                           p.attrs->>'name_source' AS name_source
+                                    FROM core.person_identities pi JOIN core.persons p ON p.id = pi.person_id
+                                    WHERE pi.channel_id = :c AND pi.external_id = :x"""),
                             {"c": channel.id, "x": external_id})).one_or_none()
     if row is not None:
         if name or phone:
@@ -85,12 +95,18 @@ async def upsert_identity(db: AsyncSession, org_id: uuid.UUID, channel: Any, ext
                 # của định danh cũ phải làm hồ sơ "mới" để cặp trùng SĐT được dò (trigger touch đặt updated_at).
                 await db.execute(text("UPDATE core.persons SET updated_at = now() WHERE id = :p"),
                                  {"p": row.person_id})
+        if (name and name != external_id and row.name_source != "owner"
+                and _looks_raw(row.display_name, external_id, row.phone_e164)):
+            await _upgrade_name(db, row.person_id, name)
         return row
     code = (await db.execute(text("SELECT core.next_code('PER')"))).scalar_one()
+    use_name = name if name and name != external_id else None
     person_id = (await db.execute(text("""
         INSERT INTO core.persons (org_id, code, display_name, relation_to_owner, attrs)
-        VALUES (:o, :code, :n, 'stranger', '{"auto": true}') RETURNING id"""),
-        {"o": org_id, "code": code, "n": (name or external_id)[:200]})).scalar_one()
+        VALUES (:o, :code, :n, 'stranger', CAST(:a AS jsonb)) RETURNING id"""),
+        {"o": org_id, "code": code, "n": (use_name or external_id)[:200],
+         "a": orjson.dumps({"auto": True}).decode()}
+    )).scalar_one()
     return (await db.execute(text("""
         INSERT INTO core.person_identities (person_id, channel_id, external_id, handle, phone_e164)
         VALUES (:p, :c, :x, :h, :ph)
@@ -98,6 +114,22 @@ async def upsert_identity(db: AsyncSession, org_id: uuid.UUID, channel: Any, ext
           DO UPDATE SET handle = COALESCE(EXCLUDED.handle, core.person_identities.handle)
         RETURNING id, person_id"""),
         {"p": person_id, "c": channel.id, "x": external_id, "h": name, "ph": _e164(phone)})).one()
+
+
+async def _upgrade_name(db: AsyncSession, person_id: uuid.UUID, name: str) -> None:
+    """v0.1.61 (F047): tên hiển thị còn là mã thô → nâng lên tên thật vừa gặp (tên kênh/pushName). KHÔNG đè tên Sếp đã
+    sửa (`attrs.name_source = 'owner'`) hay tên khác mã thô (chỉ nâng khi tên hiện tại rỗng hoặc là mã/SĐT/dãy số/địa
+    chỉ kiểu `...@...` — điều kiện kiểm lại trong SQL, an toàn khi hai tin cùng lúc). Chạm `updated_at` ⇒ lượt dò
+    trùng danh tính xét lại hồ sơ vì tên đổi."""
+    await db.execute(text("""
+        UPDATE core.persons p SET display_name = :n, updated_at = now(),
+               attrs = p.attrs || '{"name_source": "channel"}'::jsonb
+        WHERE p.id = :p AND COALESCE(p.attrs->>'name_source', '') <> 'owner'
+          AND (btrim(p.display_name) = '' OR p.display_name ~ '^[+0-9 ]+$'
+               OR (p.display_name LIKE '%@%' AND p.display_name !~ ' ')
+               OR EXISTS (SELECT 1 FROM core.person_identities i WHERE i.person_id = p.id
+                          AND (i.external_id = p.display_name OR i.phone_e164 = p.display_name)))"""),
+                     {"n": name, "p": person_id})
 
 
 def _e164(phone: str | None) -> str | None:
