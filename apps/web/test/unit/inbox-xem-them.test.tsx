@@ -97,7 +97,8 @@ describe('Hộp thư — Xem thêm (F052)', () => {
     // Đã xem hết: không còn nút và không còn dòng đếm.
     expect(screen.queryByRole('button', { name: /Xem thêm/ })).not.toBeInTheDocument();
     expect(screen.queryByTestId('inbox-xem-them')).not.toBeInTheDocument();
-  });
+    // Ca đầu bấm 2 lần + dựng 130 dòng: sát ngưỡng 5 giây mặc định khi máy tải ⇒ nâng timeout riêng cho ca này.
+  }, 20_000);
 
   it('đang lọc theo Ý định thì không bịa tổng (số tab không tính theo ý định): chỉ ghi số đã xem', async () => {
     inboxServer();
