@@ -349,6 +349,7 @@ export function applyEvent(qc: QueryClient, e: RealtimeEvent): void {
                 ...c,
                 state: d.state,
                 account_label: d.account_label ?? c.account_label,
+                error: d.state === 'expired' || d.state === 'error' ? (d.error ?? null) : null,
                 qr: d.state === 'pending_qr' && c.qr ? { ...c.qr, scanned: d.scanned } : d.state === 'pending_qr' ? c.qr : null,
               }
             : c,

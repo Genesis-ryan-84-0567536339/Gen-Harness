@@ -155,12 +155,16 @@ export const BufferJSON = {
   },
 };
 
+/** Khoá ADV giả (base64 của 32 byte 0x01) trong initAuthCreds của thư viện giả. */
+export const ADV0 = Buffer.alloc(32, 1).toString('base64');
+
 export function makeBaileysLib() {
-  const ctrl = { sockets: [] };
+  const ctrl = { sockets: [], qrTexts: [] };
   const makeWASocket = (config) => {
     const sock = {
       config,
       ev: new EventEmitter(),
+      ws: new EventEmitter(), // websocket thô của Baileys (CB:notification,…)
       user: undefined,
       sent: [],
       ended: 0,
@@ -183,8 +187,8 @@ export function makeBaileysLib() {
         config.auth.creds.me = { id: user.id, lid: user.lid, name: user.name };
         sock.ev.emit('connection.update', { connection: 'open' });
       },
-      close(statusCode) {
-        sock.ev.emit('connection.update', { connection: 'close', lastDisconnect: { error: { output: { statusCode } } } });
+      close(statusCode, message) {
+        sock.ev.emit('connection.update', { connection: 'close', lastDisconnect: { error: { message, output: { statusCode } } } });
       },
     };
     ctrl.sockets.push(sock);
@@ -195,9 +199,9 @@ export function makeBaileysLib() {
     makeWASocket,
     DisconnectReason,
     BufferJSON,
-    initAuthCreds: () => ({ noiseKey: { public: Buffer.from([1, 2, 3]), private: Buffer.from([4, 5, 6]) }, registered: false }),
+    initAuthCreds: () => ({ noiseKey: { public: Buffer.from([1, 2, 3]), private: Buffer.from([4, 5, 6]) }, advSecretKey: ADV0, registered: false }),
     proto: undefined,
-    toDataURL: async (text) => { qrN += 1; return `data:image/png;base64,${Buffer.from(`qr${qrN}:${text.length}`).toString('base64')}`; },
+    toDataURL: async (text) => { qrN += 1; ctrl.qrTexts.push(text); return `data:image/png;base64,${Buffer.from(`qr${qrN}:${text.length}`).toString('base64')}`; },
     logger: { level: 'silent' },
   };
   ctrl.last = () => ctrl.sockets[ctrl.sockets.length - 1];

@@ -26,6 +26,7 @@ from gh.crypto import temp_password as new_temp_password
 from gh.data_api.routes import RuleIn, ScheduleIn, create_rule, save_schedule, save_weights
 from gh.db import DB
 from gh.errors import ApiError, conflict, field_errors, forbidden, pin_required, unauthenticated
+from gh.gen.coach import cache as coach_cache
 from gh.refinery import presets
 from gh.refinery.runner import load_schedule
 from gh.system_api.routes import GroupPatch, update_group
@@ -469,8 +470,11 @@ async def step4(body: Step4In, request: Request, db: AsyncSession = DB,
                          {"r": rank, "i": pid, "ids": ids})
     # v0.1.55 (G2): KHÔNG ghi agent.bindings nữa — hồ sơ tiêu chuẩn (gh.defaults) tự phủ cho Gen, Sàng lọc, Trả lời…;
     # Owner vẫn gán riêng từng agent ở màn API & Model khi muốn.
-    return await _mark_done(db, request, row, owner, 4, {"provider_ids": [str(i) for i in ids],
-                                                          "model_id": str(model_id)})
+    out = await _mark_done(db, request, row, owner, 4, {"provider_ids": [str(i) for i in ids],
+                                                         "model_id": str(model_id)})
+    # v0.1.59: nguồn được bật + có dòng model ⇒ thẻ "Hôm nay của Sếp" (Gen chưa có model…) đọc lại ngay.
+    await coach_cache.commit_and_invalidate(db, request.app.state.redis, row.org_id)
+    return out
 
 
 #: Nguồn đã gọi thử OK (hoặc CLI đã đăng nhập), theo thứ tự chuỗi — dùng cho `ensure_tested_models`.

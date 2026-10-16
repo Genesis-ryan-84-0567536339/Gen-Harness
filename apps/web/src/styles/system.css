@@ -50,6 +50,12 @@
 .qr-img img { width: 100%; height: 100%; object-fit: contain; display: block; background: #fff; }
 .qr-block--lg { align-items: flex-start; }
 .qr-block--lg .qr-img { width: 240px; height: 240px; }
+/* WhatsApp: mã dày (~60 ô) — ảnh vẽ tới 320px và co theo bề rộng thẻ (thẻ hẹp ⇒ ảnh nhỏ hơn); chữ xuống dòng dưới ảnh khi thẻ hẹp. */
+.qr-block--dense { flex-wrap: wrap; }
+.qr-block--dense .qr-img { width: min(100%, 320px); height: auto; aspect-ratio: 1; }
+.qr-block--dense .qr-img img { image-rendering: pixelated; }
+.ch-fail { padding: 10px 12px; border: 1px solid var(--color-bad); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--color-bad) 7%, transparent); }
+.ch-fail .write-error__text { line-height: 1.45; }
 .qr-title { font-size: 12px; font-weight: 500; color: var(--color-text); }
 .qr-text { font-size: 11px; color: var(--color-neutral-400); margin-top: 5px; line-height: 1.5; text-wrap: pretty; }
 .qr-count { display: flex; align-items: center; gap: 10px; margin-top: 9px; }
