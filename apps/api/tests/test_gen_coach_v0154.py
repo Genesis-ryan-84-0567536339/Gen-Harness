@@ -189,7 +189,9 @@ def test_every_target_resolves_in_registry() -> None:
     """Đích làm sáng của mọi việc phải có trong registry (registry.json do gói web-coach sinh; id
     `boss_checks.row.<key>` chỉ có sau khi gộp web-coach → api-coach)."""
     assert sg.ALL_TARGETS == frozenset(sg.TODO_TARGETS.values())
-    assert sg.ALL_TARGETS >= {"api.bindings", "system.backup.schedule", "mcp.hub_link.token", "workbench.drafts",
+    # v0.1.59: `model.missing` chuyển từ đích làm sáng `api.bindings` sang `link` /setup?buoc=nguon-ai (TODO_LINKS).
+    assert "api.bindings" not in sg.ALL_TARGETS
+    assert sg.ALL_TARGETS >= {"system.backup.schedule", "mcp.hub_link.token", "workbench.drafts",
                               "guide.item.do:5", "guide.item.do:10"}
     # v0.1.55: chỉ Gen-hub (gợi ý) và Truy cập từ xa còn đích ở dòng "Việc Sếp cần làm"; boss.ai trỏ thẻ Bộ não AI.
     assert {t for t in sg.ALL_TARGETS if t.startswith("boss_checks.row.")} == {
@@ -197,7 +199,9 @@ def test_every_target_resolves_in_registry() -> None:
     assert sg.TODO_TARGETS["boss.ai"] == "connections.brain"
     for target in sorted(sg.ALL_TARGETS):
         assert gen_registry.resolve_target(target) is not None, target
-    assert set(sg.TODO_TARGETS) == {r.key for r in sg.TODO_RULES if r.kind != "health"}
+    # mỗi việc tĩnh có ĐÚNG một cách chỉ đường: đích làm sáng (TODO_TARGETS) hoặc liên kết trang (TODO_LINKS), không cả hai.
+    assert set(sg.TODO_TARGETS) | set(sg.TODO_LINKS) == {r.key for r in sg.TODO_RULES if r.kind != "health"}
+    assert not set(sg.TODO_TARGETS) & set(sg.TODO_LINKS)
 
 
 def test_health_titles_cover_every_action_kind() -> None:
@@ -807,7 +811,8 @@ async def test_fresh_machine_shows_first_three_by_table_then_done_row_vanishes(
     # Gen-hub chỉ còn là gợi ý P3 (không chuông), Truy cập từ xa chưa nhắc vì chưa mời ai.
     assert todo_keys(d) == ["model.missing", "backup.unset", "boss.hub"]
     assert [t["level"] for t in d["todos"]] == ["P0", "P1", "P3"]
-    assert d["todos"][0]["target"] == "api.bindings" and d["todos"][2]["target"] == "boss_checks.row.hub"
+    assert d["todos"][0]["link"] == "/setup?buoc=nguon-ai" and "target" not in d["todos"][0]
+    assert d["todos"][2]["target"] == "boss_checks.row.hub"
     assert d["progress"]["required_done"] == 0 and d["progress"]["required_total"] == 1
     assert d["progress"]["lessons_total"] == 19 and d["progress"]["stable"] is False
     assert d["date"] == "2026-10-12" and d["enabled"] is True and d["snoozed_until"] is None

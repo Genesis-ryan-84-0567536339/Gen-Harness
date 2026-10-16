@@ -150,7 +150,7 @@ def candidate_todos(sig: sg.Signals) -> list[Todo]:
         if rule.key == "drafts.pending" and sig.drafts_pending > 0:
             title = sg.drafts_title(sig.drafts_pending)
         out.append(Todo(key=rule.key, level=rule.level, title=title, why=why,
-                        target=sg.TODO_TARGETS.get(rule.key), order=idx))
+                        target=sg.TODO_TARGETS.get(rule.key), link=sg.TODO_LINKS.get(rule.key), order=idx))
     return sorted(out, key=lambda t: (sg.LEVELS.index(t.level), t.order))
 
 
