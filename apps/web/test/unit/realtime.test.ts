@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { QueryClient, type InfiniteData } from '@tanstack/react-query';
 import type { Channel, CliLoginEvent, CursorPage, Pipeline, RawItem, RealtimeEvent, RefineryRun } from '@gen-harness/contracts';
-import { RealtimeClient, WS_CLOSE_FORBIDDEN, applyEvent, backoffDelay, parseFrame, rawMatches, wsUrl, type SocketLike } from '../../src/lib/realtime';
+import { RealtimeClient, WS_CLOSE_FORBIDDEN, applyEvent, backoffDelay, onSocketStatus, parseFrame, rawMatches, wsUrl, type SocketLike } from '../../src/lib/realtime';
 import { qk2 } from '../../src/lib/dataQueries';
+import { qk } from '../../src/lib/queries';
 
 class FakeSocket implements SocketLike {
   readyState = 0;
@@ -247,5 +248,18 @@ describe('applyEvent', () => {
     const p = { run_id: 'b', processed: 125, total: 250, clean: 80, lowconf: 5, noise: 40, errors: 0, status: 'running' as const };
     applyEvent(qc, ev('refinery.progress', p));
     expect(qc.getQueryData(qk2.latestProgress)).toEqual(p);
+  });
+});
+
+describe('onSocketStatus', () => {
+  it('ổ cắm mở (lần đầu / nối lại) ⇒ chuông thông báo bị đánh dấu cũ để tải lại; trạng thái khác thì không', () => {
+    const qc = new QueryClient();
+    qc.setQueryData(qk.notifications, { items: [], unread: 0 });
+    for (const st of ['connecting', 'reconnecting', 'stopped', 'idle'] as const) {
+      onSocketStatus(qc, st);
+      expect(qc.getQueryState(qk.notifications)?.isInvalidated).toBe(false);
+    }
+    onSocketStatus(qc, 'open');
+    expect(qc.getQueryState(qk.notifications)?.isInvalidated).toBe(true);
   });
 });
